@@ -1,8 +1,15 @@
 // 通用「传成片」入口 — 平铺看板里那些不走做片流水线的内容（边走边录口播等），
-// 人自己录完/剪完，从这里把成片挂上去，卡片就从「备料」走到「出片」。
+// 人自己录完，从这里把原始录像交上去。
 //
 // 为什么单独开一条路由：`source_video_url` 原先只有单讲工作台（lecture/route.ts）能写，
 // 非讲课式的内容录完在后台无处可传，流程断在备料和出片之间（PM 2026-08-17 撞到）。
+//
+// 🔴 2026-08-19 改版：不再是「传了就直接当成片」。PM 反馈传完是纯素材(没剪没字幕)，
+//    非常confuse——因为上一版就是设计成「零处理」的，边走边录路线当时讲的是「不修饰」。
+//    现在改成：粘的链接先存进 raw_recording_url，排一条 reel-render.ts 的自动剪辑任务
+//    (掐头去尾+听写字幕+数字关键词高亮，复用讲课式引擎同款技术)。卡片留在「备料」，
+//    做片跑完才会真的挂上 source_video_url、卡片才进「出片」——跟讲课式、AI生成两条
+//    管线的语义一致(source_video_url 只在成片真的做完时才有值)。
 //
 // 讲课式**不走这里** —— 它的成片是系统做出来的，手动挂片会盖掉做片结果。
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
@@ -10,6 +17,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { looksLikeVideoResponse, normalizeRecordingLink } from '@/lib/factory/recording-link'
 import { safeProbeRemoteFile } from '@/lib/factory/safe-remote-fetch'
+import { enqueueRenderJob } from '@/lib/factory/render-queue'
 
 export const dynamic = 'force-dynamic'
 
@@ -57,21 +65,62 @@ async function hasActiveRenderJob(postId: string): Promise<boolean> {
 }
 
 /**
- * 挂片到这条内容上。
+ * 收下一条原始录像：存进 raw_recording_url 暂存，排一条自动剪辑任务。
+ * 不直接碰 source_video_url —— 那个字段只在 reel-render.ts 真的做完成片时才有值，
+ * 跟讲课式/AI生成两条管线的语义一致(卡片靠 hasVideo=Boolean(source_video_url) 判断
+ * 在不在「出片」列，半路挂个没剪的原始录像上去，看板会显示假的「已出片」)。
  *
- * 三重限定：client_id（防越权改别客户）+ id + **status='approved'**。
- * status 作为原子条件写进 update，而不是先读后判 —— 否则旧标签页里的「换一条」、
- * 或直接调 API，能清掉已经 scheduled / published 的片，毁掉待发素材和历史记录。
+ * 三重限定：client_id（防越权改别客户）+ id + **status='approved'**——跟原来 attachVideo
+ * 同一条防线，理由不变：不是先读后判，是原子条件，防旧标签页把已排期/已发布的内容改坏。
  * 返回 false = 没命中，状态已经变了。
  */
-async function attachVideo(
+async function stageRawRecording(
   clientId: string,
   postId: string,
-  url: string | null,
-): Promise<boolean> {
+  rawUrl: string,
+): Promise<{ ok: boolean; jobId?: string | null }> {
+  const { data: existing, error: readErr } = await supabaseAdmin
+    .from('content_posts')
+    .select('generation_context_snapshot')
+    .eq('client_id', clientId)
+    .eq('id', postId)
+    .eq('status', 'approved')
+    .maybeSingle<{ generation_context_snapshot: Record<string, unknown> | null }>()
+  if (readErr) throw readErr
+  if (!existing) return { ok: false }
+
+  const nextSnap = { ...(existing.generation_context_snapshot ?? {}), raw_recording_url: rawUrl }
   const { data, error } = await supabaseAdmin
     .from('content_posts')
-    .update({ source_video_url: url })
+    .update({ generation_context_snapshot: nextSnap })
+    .eq('client_id', clientId)
+    .eq('id', postId)
+    .eq('status', 'approved')
+    .select('id')
+  if (error) throw error
+  if (!data?.length) return { ok: false }
+
+  const { jobId } = await enqueueRenderJob({ clientId, contentPostId: postId })
+  return { ok: true, jobId }
+}
+
+/**
+ * 撤掉：清成片 + 清暂存的原始录像，两个都清干净(状态是原子条件，同 stageRawRecording)。
+ * 返回 false = 没命中，状态已经变了。
+ */
+async function clearVideo(clientId: string, postId: string): Promise<boolean> {
+  const { data: existing } = await supabaseAdmin
+    .from('content_posts')
+    .select('generation_context_snapshot')
+    .eq('client_id', clientId)
+    .eq('id', postId)
+    .maybeSingle<{ generation_context_snapshot: Record<string, unknown> | null }>()
+  const nextSnap = { ...(existing?.generation_context_snapshot ?? {}) }
+  delete nextSnap.raw_recording_url
+
+  const { data, error } = await supabaseAdmin
+    .from('content_posts')
+    .update({ source_video_url: null, generation_context_snapshot: nextSnap })
     .eq('client_id', clientId)
     .eq('id', postId)
     .eq('status', 'approved')
@@ -134,9 +183,9 @@ export async function POST(req: NextRequest, { params }: Params) {
 
 /**
  * PATCH — action: 'uploaded' | 'link' | 'clear'
- *   uploaded: { path }  直传完成后回调，把公开地址挂上去
- *   link:     { link }  粘一个外链（Dropbox 等），当场探活再挂
- *   clear:    传错了撤掉
+ *   uploaded: { path }  直传完成后回调，交上去排队自动剪辑(不是直接挂成片)
+ *   link:     { link }  粘一个外链（Dropbox 等），当场探活后交上去排队自动剪辑
+ *   clear:    传错了撤掉(连同还没跑完的原始录像暂存一起清)
  */
 export async function PATCH(req: NextRequest, { params }: Params) {
   const access = await requireDashboardClientAccess(params.id)
@@ -175,8 +224,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
           )
         }
         const { data: pub } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(body.path)
-        if (!(await attachVideo(params.id, params.postId, pub.publicUrl))) return staleResponse()
-        return NextResponse.json({ ok: true, videoUrl: pub.publicUrl })
+        const staged = await stageRawRecording(params.id, params.postId, pub.publicUrl)
+        if (!staged.ok) return staleResponse()
+        return NextResponse.json({ ok: true, queued: true })
       }
 
       case 'link': {
@@ -197,12 +247,13 @@ export async function PATCH(req: NextRequest, { params }: Params) {
           )
         }
         // 存规范化后的原始链接（不存 finalUrl —— 跳转目标常带一次性签名，会过期）
-        if (!(await attachVideo(params.id, params.postId, norm.url))) return staleResponse()
-        return NextResponse.json({ ok: true, videoUrl: norm.url })
+        const staged = await stageRawRecording(params.id, params.postId, norm.url)
+        if (!staged.ok) return staleResponse()
+        return NextResponse.json({ ok: true, queued: true })
       }
 
       case 'clear': {
-        if (!(await attachVideo(params.id, params.postId, null))) return staleResponse()
+        if (!(await clearVideo(params.id, params.postId))) return staleResponse()
         return NextResponse.json({ ok: true, videoUrl: null })
       }
 

@@ -6,6 +6,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { runRenderGeneration } from '@/lib/factory/render-pipeline'
 import { assembleRenderJob } from '@/lib/factory/render-assemble'
 import { runLectureRender } from '@/lib/factory/lecture-render'
+import { runReelEditRender } from '@/lib/factory/reel-render'
 
 const POLL_MS = Number(process.env.RENDER_WORKER_POLL_MS || '20000')
 const STALE_MIN = Number(process.env.RENDER_WORKER_STALE_MIN || '45')
@@ -46,26 +47,41 @@ async function claimNext(): Promise<string | null> {
   return claimed && claimed.length ? id : null
 }
 
-/** 讲课式内容走单独管线(上下分屏)，其余走原 b-roll 蒙太奇管线。 */
-async function isLectureJob(jobId: string): Promise<boolean> {
+/**
+ * 三条管线分流：
+ * - 讲课式(format='讲课式') → 上课件下真人
+ * - 有暂存的原始录像(generation_context_snapshot.raw_recording_url) → 边走边录自动剪辑
+ * - 其余 → 原 AI 生成画面 + b-roll 蒙太奇管线
+ */
+async function jobKind(jobId: string): Promise<'lecture' | 'reel_edit' | 'ai_generated'> {
   const { data: job } = await supabaseAdmin
     .from('content_factory_render_jobs')
     .select('content_post_id')
     .eq('id', jobId)
     .single()
-  if (!job) return false
+  if (!job) return 'ai_generated'
   const { data: post } = await supabaseAdmin
     .from('content_posts')
-    .select('format')
+    .select('format, generation_context_snapshot')
     .eq('id', job.content_post_id)
     .single()
-  return post?.format === '讲课式'
+  if (post?.format === '讲课式') return 'lecture'
+  const snap = (post?.generation_context_snapshot as Record<string, unknown> | null) ?? {}
+  if (snap.raw_recording_url) return 'reel_edit'
+  return 'ai_generated'
 }
 
 async function processOne(jobId: string): Promise<void> {
-  if (await isLectureJob(jobId)) {
+  const kind = await jobKind(jobId)
+  if (kind === 'lecture') {
     log('领到任务', jobId, '→ 讲课式(上课件下真人)')
     await runLectureRender(jobId)      // 全程到 ready_for_review
+    log(jobId, '✅ 成片，待审')
+    return
+  }
+  if (kind === 'reel_edit') {
+    log('领到任务', jobId, '→ 边走边录自动剪辑(掐头去尾+字幕高亮)')
+    await runReelEditRender(jobId)     // 全程到 ready_for_review
     log(jobId, '✅ 成片，待审')
     return
   }

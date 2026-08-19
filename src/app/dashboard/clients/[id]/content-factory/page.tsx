@@ -180,7 +180,7 @@ export default function ContentFactoryBoardPage() {
       setSelected(null)
       setVideoLink('')
       setError(null)
-      setNotice(payload.action === 'clear' ? '已撤掉这条片' : '成片已挂上 ✅ 卡片进「出片」列，审完就能去发布')
+      setNotice(payload.action === 'clear' ? '已撤掉这条片' : '已收到 ✅ 正在自动剪辑(掐头去尾+字幕+关键词高亮)，做完会自动进「出片」列')
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -238,7 +238,7 @@ export default function ContentFactoryBoardPage() {
       const json = await done.json().catch(() => ({}))
       if (!done.ok) throw new Error(json.error || `HTTP ${done.status}`)
       setSelected(null)
-      setNotice('成片已挂上 ✅ 卡片进「出片」列，审完就能去发布')
+      setNotice('已收到 ✅ 正在自动剪辑(掐头去尾+字幕+关键词高亮)，做完会自动进「出片」列')
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
