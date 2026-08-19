@@ -210,6 +210,13 @@ export default function ContentFactoryBoardPage() {
       })
       const data = (await r.json().catch(() => ({}))) as { error?: string }
       if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`)
+      // 🔴 必须关抽屉，不能只清 dirty 状态(Codex 复审)：重排一次做片以后，这条内容
+      // 会退回「备料」重新渲染，但抽屉里的 selected 还是旧的「出片」快照——不关掉的话，
+      // 「满意·去发布」按钮还留在屏幕上，点下去会在做片没做完时就把内容标成 scheduled，
+      // 等 reel-render.ts 做完想覆盖成片时状态已经不是 approved，改好的字幕反而进不去，
+      // 发布出去的还是没改之前那版。跟其它动作(confirm/reject/attachVideo)同一个模式：
+      // 只要状态可能变了就关抽屉，逼着重新点开看最新的，不留着旧快照让人对着点。
+      setSelected(null)
       setCapDirty(false)
       setNotice('字幕已保存 ✅ 正在用改好的字幕重新出片，几分钟后自动更新')
       await load()

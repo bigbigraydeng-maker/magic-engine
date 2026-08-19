@@ -17,15 +17,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { looksLikeVideoResponse, normalizeRecordingLink } from '@/lib/factory/recording-link'
 import { safeProbeRemoteFile } from '@/lib/factory/safe-remote-fetch'
-import { enqueueRenderJob } from '@/lib/factory/render-queue'
+import { enqueueRenderJob, hasActiveRenderJob } from '@/lib/factory/render-queue'
 import { saveReelCaptions } from '@/lib/factory/reel-post'
 
 export const dynamic = 'force-dynamic'
 
 const BUCKET = 'content-factory'
 const VIDEO_EXT = /\.(mp4|mov|m4v|webm)$/
-/** 做片流水线还没结束的状态 —— 这些状态下不许手动挂片 */
-const ACTIVE_JOB_STATUSES = ['queued', 'planning', 'rendering', 'assembling']
 
 type Params = { params: { id: string; postId: string } }
 
@@ -47,23 +45,12 @@ async function loadPost(clientId: string, postId: string) {
   return data
 }
 
-/**
- * 这条内容是不是正在被流水线做片。
- *
- * 🔴 非讲课式内容在「确认选题」时也会 enqueueRenderJob，做片期间同样停在「备料」。
- *    此时手动挂片，卡片会先进「出片」，等做片跑完 `render-assemble.ts` 又会
- *    无条件覆盖 `source_video_url` —— 人传的片被静默换掉，一句提示都没有。
- *    所以有活跃任务时一律拒绝挂片。
- */
-async function hasActiveRenderJob(postId: string): Promise<boolean> {
-  const { data } = await supabaseAdmin
-    .from('content_factory_render_jobs')
-    .select('id')
-    .eq('content_post_id', postId)
-    .in('status', ACTIVE_JOB_STATUSES)
-    .limit(1)
-  return Boolean(data?.length)
-}
+// 🔴 非讲课式内容在「确认选题」时也会 enqueueRenderJob，做片期间同样停在「备料」。
+//    此时手动挂片，卡片会先进「出片」，等做片跑完 `render-assemble.ts` 又会
+//    无条件覆盖 `source_video_url` —— 人传的片被静默换掉，一句提示都没有。
+//    所以有活跃任务时一律拒绝挂片。判断逻辑跟 [postId]/route.ts 的「满意去发布」
+//    共用 render-queue.ts 的 hasActiveRenderJob，原来两处各写一份，容易漏改一处
+//    (Codex 复审抓出「满意去发布」那边压根没查这个，见那条 route.ts 的注释)。
 
 /**
  * 收下一条原始录像：存进 raw_recording_url 暂存，排一条自动剪辑任务。

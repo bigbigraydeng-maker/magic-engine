@@ -51,9 +51,13 @@ vi.mock('@/lib/factory/safe-remote-fetch', () => ({
 }))
 
 // 排队逻辑有自己的测试(render-queue 是纯粹的 insert-if-not-exists)，这里只关心路由有没有调它
-vi.mock('@/lib/factory/render-queue', () => ({
-  enqueueRenderJob: mocks.enqueueRenderJob,
-}))
+// 只 mock enqueueRenderJob；hasActiveRenderJob 让它跑真实现——那是纯查询，
+// 走的是下面同一份 mocks.from(content_factory_render_jobs)，跟原来行为一致，
+// 不用为了这个改动另开一条 mock 分支。
+vi.mock('@/lib/factory/render-queue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/factory/render-queue')>()
+  return { ...actual, enqueueRenderJob: mocks.enqueueRenderJob }
+})
 
 // 字幕保存+学习有自己的测试(reel-post.test.ts)，这里只关心路由怎么用它
 vi.mock('@/lib/factory/reel-post', () => ({

@@ -36,3 +36,20 @@ export async function enqueueRenderJob(params: {
   if (error) throw error
   return { jobId: data.id as string, created: true }
 }
+
+/** 做片流水线还没结束的状态 —— 这些状态下不该被"满意去发布"之类的动作抢跑。 */
+export const ACTIVE_JOB_STATUSES = ['queued', 'planning', 'rendering', 'assembling'] as const
+
+/**
+ * 这条内容是不是正在被流水线做片(排队中/进行中，还没到 ready_for_review/failed)。
+ * video/route.ts 和 [postId]/route.ts 共用同一份判断 —— 原来各写一份，容易漏改一处。
+ */
+export async function hasActiveRenderJob(postId: string): Promise<boolean> {
+  const { data } = await supabaseAdmin
+    .from('content_factory_render_jobs')
+    .select('id')
+    .eq('content_post_id', postId)
+    .in('status', ACTIVE_JOB_STATUSES)
+    .limit(1)
+  return Boolean(data?.length)
+}

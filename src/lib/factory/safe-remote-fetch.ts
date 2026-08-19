@@ -17,6 +17,26 @@ import net from 'net'
 
 const MAX_HOPS = 5
 
+/**
+ * 把一个合法 IPv6 地址串展开成 8 组十六进制(处理 `::` 压缩)。展开不了(格式怪)返回 null。
+ * 只用来识别 IPv4-mapped(::ffff:0:0/96)的压缩十六进制写法——点分尾巴(::ffff:10.0.0.1)
+ * 走另一条正则，这个函数不处理带点的字符串。
+ */
+function expandIPv6Groups(addr: string): string[] | null {
+  if (addr.includes('.')) return null
+  const parts = addr.split('::')
+  if (parts.length > 2) return null
+  if (parts.length === 1) {
+    const groups = addr.split(':')
+    return groups.length === 8 ? groups : null
+  }
+  const head = parts[0].length ? parts[0].split(':') : []
+  const tail = parts[1].length ? parts[1].split(':') : []
+  const missing = 8 - head.length - tail.length
+  if (missing < 0) return null
+  return [...head, ...Array(missing).fill('0'), ...tail]
+}
+
 /** 私网 / 环回 / 链路本地 / 保留段 —— 一律不许连。 */
 export function isBlockedAddress(ip: string): boolean {
   if (net.isIPv4(ip)) {
@@ -34,9 +54,24 @@ export function isBlockedAddress(ip: string): boolean {
   if (net.isIPv6(ip)) {
     const v = ip.toLowerCase()
     if (v === '::1' || v === '::') return true
-    // IPv4-mapped（::ffff:10.0.0.1）要按其 v4 段判，否则是个绕过口子
-    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(v)
-    if (mapped) return isBlockedAddress(mapped[1])
+    // IPv4-mapped 要按其 v4 段判，否则是个绕过口子(Codex 复审两轮抓出同一处的两种写法)：
+    // ① 点分尾巴 ::ffff:10.0.0.1
+    const mappedDotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(v)
+    if (mappedDotted) return isBlockedAddress(mappedDotted[1])
+    // ② 压缩十六进制尾巴 ::ffff:a9fe:a9fe(= 169.254.169.254)——DNS 完全可以直接
+    //    返回这种写法，攻击者控制的 AAAA 记录不用赢 DNS 竞态，第一版只认①会放行。
+    const groups = expandIPv6Groups(v)
+    if (groups) {
+      const prefixIsZero = groups.slice(0, 5).every((g) => g === '' || /^0+$/.test(g))
+      if (prefixIsZero && groups[5] === 'ffff') {
+        const hi = parseInt(groups[6], 16)
+        const lo = parseInt(groups[7], 16)
+        if (!Number.isNaN(hi) && !Number.isNaN(lo)) {
+          const mappedV4 = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`
+          return isBlockedAddress(mappedV4)
+        }
+      }
+    }
     if (v.startsWith('fe80')) return true // 链路本地
     const head = parseInt(v.slice(0, 2), 16)
     if ((head & 0xfe) === 0xfc) return true // fc00::/7 唯一本地地址

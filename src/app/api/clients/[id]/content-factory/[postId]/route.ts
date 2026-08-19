@@ -1,7 +1,7 @@
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { enqueueRenderJob } from '@/lib/factory/render-queue'
+import { enqueueRenderJob, hasActiveRenderJob } from '@/lib/factory/render-queue'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,6 +29,18 @@ export async function PATCH(
       : null
     if (!status) {
       return NextResponse.json({ error: "action 必须是 'confirm' / 'reject' / 'schedule'" }, { status: 400 })
+    }
+
+    // 🔴 「满意去发布」不许在做片流水线还在跑的时候抢跑(Codex 复审)：校对字幕后会
+    // 重排一次自动剪辑，卡片抽屉这时理应已经关掉(page.tsx 那边一起改了)，但接口本身
+    // 也必须兜底——不能只靠前端不显示按钮。真发生的话：这里如果不查直接把状态改成
+    // scheduled，reel-render.ts 最后回写成片时的原子条件是 status='approved'，命不中
+    // 会拒绝覆盖，改好的字幕就进不去，发布出去的还是没改之前那版，没有任何报错。
+    if (body.action === 'schedule' && (await hasActiveRenderJob(params.postId))) {
+      return NextResponse.json(
+        { error: '这条正在自动做片(比如字幕校对后的重排)，等它做完再发布' },
+        { status: 409 },
+      )
     }
 
     const { data, error } = await supabaseAdmin

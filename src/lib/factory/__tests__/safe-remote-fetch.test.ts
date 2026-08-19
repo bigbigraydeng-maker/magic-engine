@@ -58,8 +58,12 @@ describe('isBlockedAddress —— 私网/保留段一律拦', () => {
     ['IPv6 链路本地', 'fe80::1'],
     ['IPv6 唯一本地 fc', 'fc00::1'],
     ['IPv6 唯一本地 fd', 'fd12:3456::1'],
-    ['🔴 IPv4-mapped 绕过尝试', '::ffff:169.254.169.254'],
-    ['🔴 IPv4-mapped 内网', '::ffff:10.0.0.1'],
+    ['🔴 IPv4-mapped 绕过尝试(点分)', '::ffff:169.254.169.254'],
+    ['🔴 IPv4-mapped 内网(点分)', '::ffff:10.0.0.1'],
+    ['🔴 IPv4-mapped 元数据(压缩十六进制，Codex 七审抓出的绕过写法)', '::ffff:a9fe:a9fe'],
+    ['🔴 IPv4-mapped 环回(压缩十六进制)', '::ffff:7f00:1'],
+    ['🔴 IPv4-mapped 内网(压缩十六进制)', '::ffff:a00:1'], // ::ffff:10.0.0.1 的另一种写法
+    ['🔴 IPv4-mapped 元数据(完全展开、不带::压缩)', '0:0:0:0:0:ffff:a9fe:a9fe'],
     ['解析不出来的垃圾', 'not-an-ip'],
   ] as const
   for (const [name, ip] of blocked) {
@@ -72,6 +76,7 @@ describe('isBlockedAddress —— 私网/保留段一律拦', () => {
     ['公网 v4 边界2', '172.32.0.1'],
     ['公网 v4 类 192', '192.167.1.1'],
     ['公网 v6', '2606:4700:4700::1111'],
+    ['公网 IPv4-mapped(压缩十六进制，不能误伤这种正常写法)', '::ffff:808:808'], // = 8.8.8.8
   ] as const
   for (const [name, ip] of allowed) {
     it(`放行：${name} (${ip})`, () => expect(isBlockedAddress(ip)).toBe(false))
