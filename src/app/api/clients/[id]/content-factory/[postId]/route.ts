@@ -1,7 +1,7 @@
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { enqueueRenderJob, hasActiveRenderJob } from '@/lib/factory/render-queue'
+import { enqueueRenderJob, scheduleContentPostAtomic } from '@/lib/factory/render-queue'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,25 +22,34 @@ export async function PATCH(
 
   try {
     const body = (await req.json().catch(() => ({}))) as { action?: string }
-    const status =
-      body.action === 'confirm' ? 'approved'    // 选题：确认做 → 建做片任务
-      : body.action === 'reject' ? 'rejected'    // 打回
-      : body.action === 'schedule' ? 'scheduled' // 出片：满意 → 去发布
-      : null
-    if (!status) {
-      return NextResponse.json({ error: "action 必须是 'confirm' / 'reject' / 'schedule'" }, { status: 400 })
-    }
 
     // 🔴 「满意去发布」不许在做片流水线还在跑的时候抢跑(Codex 复审)：校对字幕后会
     // 重排一次自动剪辑，卡片抽屉这时理应已经关掉(page.tsx 那边一起改了)，但接口本身
-    // 也必须兜底——不能只靠前端不显示按钮。真发生的话：这里如果不查直接把状态改成
-    // scheduled，reel-render.ts 最后回写成片时的原子条件是 status='approved'，命不中
-    // 会拒绝覆盖，改好的字幕就进不去，发布出去的还是没改之前那版，没有任何报错。
-    if (body.action === 'schedule' && (await hasActiveRenderJob(params.postId))) {
-      return NextResponse.json(
-        { error: '这条正在自动做片(比如字幕校对后的重排)，等它做完再发布' },
-        { status: 409 },
-      )
+    // 也必须兜底——不能只靠前端不显示按钮。检查活跃任务 + 写 scheduled 状态必须焊在
+    // 同一条原子 SQL 里(factory_schedule_content_post RPC)，不能是"查一次再写"——
+    // 两步分开就有窗口，另一个标签页在窗口期建一次重排任务会被漏过：reel-render.ts
+    // 最后回写成片时的原子条件是 status='approved'，命不中会拒绝覆盖，改好的字幕就
+    // 进不去，发布出去的还是没改之前那版，没有任何报错(2026-08-19 Codex 第8轮复审)。
+    if (body.action === 'schedule') {
+      const result = await scheduleContentPostAtomic({ clientId: params.id, postId: params.postId })
+      if (!result.ok) {
+        if (result.blockedReason === 'not_found') {
+          return NextResponse.json({ error: '未找到该内容' }, { status: 404 })
+        }
+        return NextResponse.json(
+          { error: '这条正在自动做片(比如字幕校对后的重排)，等它做完再发布' },
+          { status: 409 },
+        )
+      }
+      return NextResponse.json({ post: result.post })
+    }
+
+    const status =
+      body.action === 'confirm' ? 'approved'  // 选题：确认做 → 建做片任务
+      : body.action === 'reject' ? 'rejected' // 打回
+      : null
+    if (!status) {
+      return NextResponse.json({ error: "action 必须是 'confirm' / 'reject' / 'schedule'" }, { status: 400 })
     }
 
     const { data, error } = await supabaseAdmin

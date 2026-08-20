@@ -57,3 +57,37 @@ export async function hasActiveRenderJob(postId: string): Promise<boolean> {
   if (error) throw error
   return Boolean(data?.length)
 }
+
+export type ScheduleBlockedReason = 'not_found' | 'active_render_job'
+
+export interface ScheduleResult {
+  ok: boolean
+  post?: { id: string; status: string; format: string | null }
+  blockedReason?: ScheduleBlockedReason
+}
+
+/**
+ * 「满意·去发布」的原子写。跟 hasActiveRenderJob+直接 update 的旧路径不同——那是
+ * 「查一次再写」，两步之间有窗口，另一个标签页在窗口期建一次做片任务就会被漏过。
+ * 这里改叫 factory_schedule_content_post RPC，检查活跃任务 + 写 scheduled 状态
+ * 焊在同一条 Postgres UPDATE 语句里，物理上不存在中间窗口。见对应 migration。
+ */
+export async function scheduleContentPostAtomic(params: {
+  clientId: string
+  postId: string
+}): Promise<ScheduleResult> {
+  const { clientId, postId } = params
+  const { data, error } = await supabaseAdmin.rpc('factory_schedule_content_post', {
+    p_client_id: clientId,
+    p_post_id: postId,
+  })
+  if (error) throw error
+
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row) throw new Error('factory_schedule_content_post 没有返回任何行')
+
+  if (row.ok) {
+    return { ok: true, post: { id: row.post_id, status: row.status, format: row.format } }
+  }
+  return { ok: false, blockedReason: row.blocked_reason as ScheduleBlockedReason }
+}
