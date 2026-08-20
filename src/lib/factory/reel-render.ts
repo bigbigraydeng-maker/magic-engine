@@ -223,10 +223,15 @@ export async function runReelEditRender(jobId: string): Promise<{ outputUrl: str
     const cached = captionState?.transcript
     let segments: TranscriptSegment[]
     let words: { start: number; end: number; word: string }[]
+    let language: string
     if (cached && cached.recordingUrl === rawUrl && cached.segments.length > 0) {
       step(jobId, `复用已存的听写结果(${cached.segments.length} 段)`)
       segments = cached.segments
       words = cached.words ?? []
+      // 🔴 2026-08-19 前存的留档没有 language 字段(那时候字幕高亮只认中文，没必要留档
+      // 语种)。这条线当时唯一真实客户是大瑞、脚本全是中文，缺字段按 'zh' 兜底不算瞎猜；
+      // 之后所有新留档都会显式带上 Whisper 实际检测到的语种，走不到这条兜底。
+      language = cached.language ?? 'zh'
     } else {
       step(jobId, '抽音轨')
       const audioFile = await extractAudio(videoFile, dir)
@@ -234,7 +239,8 @@ export async function runReelEditRender(jobId: string): Promise<{ outputUrl: str
       const t = await whisperTranscribe(audioFile)
       segments = t.segments
       words = t.words
-      step(jobId, `听写完成(${segments.length} 段)`)
+      language = t.language
+      step(jobId, `听写完成(${segments.length} 段，语种: ${language || '未识别'})`)
     }
     await heartbeat(jobId, 'rendering')
     await patchJob(jobId, { status: 'rendering' })
@@ -273,14 +279,15 @@ export async function runReelEditRender(jobId: string): Promise<{ outputUrl: str
     await saveReelTranscriptAndCaptions({
       clientId: job.client_id,
       postId: job.content_post_id,
-      transcript: { recordingUrl: rawUrl, segments, words, savedAt: new Date().toISOString() },
+      transcript: { recordingUrl: rawUrl, segments, words, language, savedAt: new Date().toISOString() },
       captions: captionChunks.map((c) => ({ start: c.start, end: c.end, text: c.text })),
     }).catch(() => { /* 留档失败不该让整单白干 */ })
 
     await patchJob(jobId, { status: 'assembling' })
 
-    step(jobId, `画字幕(${captionChunks.length} 条，含数字关键词高亮)`)
-    const spanLists = captionChunks.map((c) => highlightSpans(c.text))
+    step(jobId, `画字幕(${captionChunks.length} 条，含数字关键词高亮，语种: ${language || '未识别'})`)
+    // 按听写检测到的语种选数字规则(caption-highlight.ts)——不再写死中文，见该文件头注释。
+    const spanLists = captionChunks.map((c) => highlightSpans(c.text, language))
     const captionFiles = await renderHighlightedCaptions(spanLists, dir)
 
     step(jobId, '裁剪全屏人像轨')

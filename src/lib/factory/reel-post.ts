@@ -22,6 +22,9 @@ export interface ReelTranscript {
   segments: { start: number; end: number; text: string }[]
   words: { start: number; end: number; word: string }[]
   savedAt: string
+  // 可选：这条录像刚上线时(2026-08-19)还没存这个字段，旧快照里没有——按语言选字幕高亮
+  // 规则(caption-highlight.ts)时缺了就传空字符串，走语言无关的兜底规则，不当中文处理。
+  language?: string
 }
 
 interface ReelSnapshot {

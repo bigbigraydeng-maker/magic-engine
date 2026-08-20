@@ -52,14 +52,33 @@ export async function extractAudio(videoFile: string, dir: string): Promise<stri
 export interface Transcript {
   segments: TranscriptSegment[]
   words: { start: number; end: number; word: string }[]
+  /** ISO-639-1 代码('zh'/'en')。Whisper 检测不出/给了没映射过的语种时，原样透出小写全称。 */
+  language: string
+}
+
+// Whisper verbose_json 的 language 字段是小写全称("english"/"chinese")，不是 ISO 代码——
+// 跟仓库其它地方(language_code: 'en' 之类)的约定不一样，只在这个适配层做一次转换，往下游
+// (caption-highlight.ts 的 NUMBER_POLICIES、以后可能有的别的语言相关规则)都用统一的 ISO 代码，
+// 不用到处认 Whisper 自己的命名。没在表里的语种直接透出全称，不强行归一，调用方按语言选规则时
+// 查不到就是安全的兜底(不报错、不误判成中文/英语)，见 caption-highlight.ts resolvePolicy。
+const WHISPER_LANGUAGE_TO_ISO: Record<string, string> = {
+  english: 'en',
+  chinese: 'zh',
+}
+
+function normalizeWhisperLanguage(raw: string | undefined): string {
+  const key = (raw ?? '').trim().toLowerCase()
+  return WHISPER_LANGUAGE_TO_ISO[key] ?? key
 }
 
 /**
  * OpenAI Whisper 听写，返回带时间戳的分段(段级 + 字级都要，见函数内注释)。
  *
- * 🔴 language 不写死——这是讲课式(目前只服务中文客户)和边走边录(通用入口，
+ * 🔴 language 参数不写死——这是讲课式(目前只服务中文客户)和边走边录(通用入口，
  * ME 目标市场 AU/NZ，客户不保证都讲中文)共用的底层函数。不传就不带这个参数，
  * 让 Whisper 自己识别语种；讲课式那边显式传 'zh' 保持它现在的行为不变。
+ * 返回值里的 Transcript.language 是 Whisper 实际检测到的语种(不是这个入参)——
+ * 边走边录用它给字幕高亮选数字规则(caption-highlight.ts)，跟这里传不传参无关。
  */
 export async function whisperTranscribe(audioFile: string, language?: string): Promise<Transcript> {
   const apiKey = process.env.OPENAI_API_KEY
@@ -94,6 +113,7 @@ export async function whisperTranscribe(audioFile: string, language?: string): P
   if (!res) throw new Error(`听写请求发不出去(重试 3 次): ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`)
   if (!res.ok) throw new Error(`Whisper 听写失败 ${res.status}: ${await res.text()}`)
   const json = (await res.json()) as {
+    language?: string
     segments?: { start: number; end: number; text: string }[]
     words?: { start: number; end: number; word: string }[]
   }
@@ -102,5 +122,5 @@ export async function whisperTranscribe(audioFile: string, language?: string): P
     .filter((s) => s.text)
   if (segments.length === 0) throw new Error('听写结果为空(录像里没有可识别的语音?)')
   const words = (json.words ?? []).filter((w) => w.word?.trim())
-  return { segments, words }
+  return { segments, words, language: normalizeWhisperLanguage(json.language) }
 }
