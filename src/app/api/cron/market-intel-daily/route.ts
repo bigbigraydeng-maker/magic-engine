@@ -23,7 +23,6 @@ export async function GET(req: NextRequest) {
         items_selected: result.itemsSelected,
         items_flagged_for_review: result.itemsFlaggedForReview,
         source_failures: result.sourceFailures,
-        category_alerts: result.categoryAlerts,
       },
     })
 

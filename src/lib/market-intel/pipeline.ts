@@ -14,11 +14,6 @@ const MAX_PER_CATEGORY = 2
 const DEDUPE_WINDOW_DAYS = 7
 // §7.6：区分"请求本身失败"和"0 条新条目"——只有前者连续失败才报警。
 const SOURCE_FAIL_ALERT_THRESHOLD = 3
-const CATEGORY_ZERO_STREAK_ALERT_DAYS = 5
-
-const ALL_CATEGORIES: MarketIntelCategory[] = [
-  'ai_startup', 'marketing', 'meta_ads', 'google_ads', 'tiktok_ads', 'llm_pricing',
-]
 
 interface SourceRow {
   id: string
@@ -39,7 +34,6 @@ export interface PipelineResult {
   itemsSentInEmail: number
   itemsFlaggedForReview: number
   sourceFailures: string[]
-  categoryAlerts: string[]
 }
 
 // ---------------------------------------------------------------------------
@@ -237,43 +231,7 @@ async function persistDailyNote(digestDate: string, noteZh: string) {
 }
 
 // ---------------------------------------------------------------------------
-// 6. 分类级健康度：某个分类连续 N 天候选池零命中——覆盖"信源各自都还活着，
-//    但整体覆盖不住这个分类"的盲区（单信源计数器抓不到这种交替失效模式）。
-// ---------------------------------------------------------------------------
-async function checkCategoryHealth(digestDate: string): Promise<string[]> {
-  const windowStart = new Date(
-    Date.parse(`${digestDate}T00:00:00Z`) - (CATEGORY_ZERO_STREAK_ALERT_DAYS - 1) * 24 * 60 * 60 * 1000,
-  ).toISOString()
-
-  // pipeline 自己都还没活满 N 天时，窗口内任何零命中都只是"还没攒够数据"，
-  // 不是真的连续 N 天零命中——用信源表最早的 created_at（首次 upsert 时写入）
-  // 当 pipeline 出生时间的锚点，不满窗口就先不报警，避免上线头几天全是假警报。
-  const { data: earliestRows, error: earliestError } = await supabaseAdmin
-    .from('market_intel_sources')
-    .select('created_at')
-    .order('created_at', { ascending: true })
-    .limit(1)
-  if (earliestError) throw new Error(`checkCategoryHealth earliest lookup failed: ${earliestError.message}`)
-  const earliestCreatedAt = earliestRows?.[0]?.created_at
-  if (earliestCreatedAt && Date.parse(earliestCreatedAt) > Date.parse(windowStart)) {
-    return []
-  }
-
-  const { data, error } = await supabaseAdmin
-    .from('market_intel_items')
-    .select('matched_category')
-    .gte('fetched_at', windowStart)
-  if (error) throw new Error(`checkCategoryHealth failed: ${error.message}`)
-
-  const withHits = new Set((data ?? []).map((r: { matched_category: string }) => r.matched_category))
-
-  return ALL_CATEGORIES.filter((cat) => !withHits.has(cat)).map(
-    (cat) => `分类「${cat}」连续 ${CATEGORY_ZERO_STREAK_ALERT_DAYS} 天候选池零命中，检查覆盖它的信源是否还活着`,
-  )
-}
-
-// ---------------------------------------------------------------------------
-// 7. 发信
+// 6. 发信
 // ---------------------------------------------------------------------------
 async function sendDigestEmail(nzDateLabel: string, note: string | null, items: SummarizedItem[]) {
   const apiKey = process.env.RESEND_API_KEY
@@ -289,9 +247,8 @@ async function sendDigestEmail(nzDateLabel: string, note: string | null, items: 
   if (error) throw new Error(`sendDigestEmail failed: ${String(error)}`)
 }
 
-async function maybeSendHealthAlert(sourceFailures: string[], categoryAlerts: string[]) {
-  const lines = [...sourceFailures, ...categoryAlerts]
-  if (lines.length === 0) return
+async function maybeSendHealthAlert(sourceFailures: string[]) {
+  if (sourceFailures.length === 0) return
 
   const apiKey = process.env.RESEND_API_KEY
   if (!apiKey) return // 邮件都发不出去了，cron 日志里的 summary 仍然能看到这些
@@ -301,13 +258,13 @@ async function maybeSendHealthAlert(sourceFailures: string[], categoryAlerts: st
     <div style="font-family:sans-serif;max-width:640px;margin:0 auto;padding:24px">
       <h2 style="margin:0 0 12px;font-size:17px;color:#b45309">⚠ Magic Insight 信源健康度提醒</h2>
       <ul style="font-size:14px;color:#334155;line-height:1.8">
-        ${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}
+        ${sourceFailures.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}
       </ul>
     </div>`
   await resend.emails.send({
     from: meMailFrom('Magic Insight 健康度'),
     to: [ME_MAIL_TO_ADDRESS],
-    subject: `⚠ Magic Insight：${lines.length} 项需要检查`,
+    subject: `⚠ Magic Insight：${sourceFailures.length} 项需要检查`,
     html,
   })
 }
@@ -333,8 +290,6 @@ export async function runMarketIntelDaily(now: Date = new Date()): Promise<Pipel
   const note = passed.length > 0 ? await generateDailyNote(passed) : null
   if (note) await persistDailyNote(digestDate, note)
 
-  const categoryAlerts = await checkCategoryHealth(digestDate)
-
   let sent = false
   if (passed.length > 0) {
     await sendDigestEmail(digestDate, note, passed)
@@ -342,7 +297,7 @@ export async function runMarketIntelDaily(now: Date = new Date()): Promise<Pipel
     sent = true
   }
 
-  await maybeSendHealthAlert(sourceFailures, categoryAlerts)
+  await maybeSendHealthAlert(sourceFailures)
 
   return {
     sent,
@@ -352,6 +307,5 @@ export async function runMarketIntelDaily(now: Date = new Date()): Promise<Pipel
     itemsSentInEmail: passed.length,
     itemsFlaggedForReview: flagged.length,
     sourceFailures,
-    categoryAlerts,
   }
 }
