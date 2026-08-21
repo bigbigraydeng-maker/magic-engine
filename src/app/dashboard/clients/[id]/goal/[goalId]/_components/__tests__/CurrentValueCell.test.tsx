@@ -1,17 +1,18 @@
 /**
  * A2.1 — CurrentValueCell tests
  *
- * Covers the 3 visual paths:
+ * Covers the 4 visual paths:
  *   1. measurement='auto'   → fetches + shows value with source label
  *   2. measurement='self_report' → shows "—" + "客户自报" hint (no fetch)
- *   3. fetch returns ok:false → shows "—" with retry link
+ *   3. measurement='verification' → waits for governed settlement (no fetch)
+ *   4. fetch returns ok:false → shows "—" with retry link
  */
 
 import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor, cleanup } from '@testing-library/react'
 import { CurrentValueCell } from '../CurrentValueCell'
-import type { GoalRow } from '@/types/strategy'
+import { GEO_QUALIFIED_MENTION_GOAL_METRIC_KEY, type GoalRow } from '@/types/strategy'
 
 // Silence unused-import warning while keeping React in scope for JSX
 void React
@@ -85,6 +86,18 @@ describe('CurrentValueCell', () => {
 
     expect(screen.getByText('—')).toBeInTheDocument()
     expect(screen.getByText(/客户自报/)).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('waits for governed Verification instead of auto-fetching the GEO metric', () => {
+    const fetchMock = vi.spyOn(global, 'fetch')
+
+    render(<CurrentValueCell goal={makeGoal({
+      primary_metric_key: GEO_QUALIFIED_MENTION_GOAL_METRIC_KEY,
+    })} />)
+
+    expect(screen.getByText('—')).toBeInTheDocument()
+    expect(screen.getByText(/受治理的 Verification/)).toBeInTheDocument()
     expect(fetchMock).not.toHaveBeenCalled()
   })
 

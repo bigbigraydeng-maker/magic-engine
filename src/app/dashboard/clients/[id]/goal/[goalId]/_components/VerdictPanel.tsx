@@ -42,6 +42,19 @@ export function VerdictPanel({ goal, onJudged }: Props) {
     return <VerdictResult goal={goal} />
   }
 
+  const metricDef = PRIMARY_METRIC_CATALOG.find(metric => metric.key === goal.primary_metric_key)
+  if (metricDef?.measurement === 'verification') {
+    return (
+      <div className="rounded-xl border border-status-sched/30 bg-status-sched/10 p-6 shadow-sm">
+        <h3 className="font-display text-base font-bold text-me-charcoal">Governed Verification required</h3>
+        <p className="mt-1 text-sm font-semibold text-me-charcoal/55">
+          This Goal cannot be judged manually or early. Final settlement must come from its pinned
+          Verification contract; incomparable or incomplete evidence remains UNKNOWN.
+        </p>
+      </div>
+    )
+  }
+
   // Active or expired → show "Submit Verdict" CTA
   const dueDate = new Date(goal.period_end)
   const daysOverdue = Math.floor((Date.now() - dueDate.getTime()) / 86_400_000)

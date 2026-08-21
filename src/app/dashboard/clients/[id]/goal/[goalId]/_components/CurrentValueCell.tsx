@@ -84,8 +84,10 @@ export function CurrentValueCell({ goal }: Props) {
   // gets fetched; FDE manually tops up). Only pure self_report + unknown
   // (catalog miss) land here.
   if (!isAuto) {
-    const hint = metricDef?.measurement === 'self_report'
-      ? '客户自报 · 用「Submit Verdict」录入'
+    const hint = metricDef?.measurement === 'verification'
+      ? '由受治理的 Verification 结算'
+      : metricDef?.measurement === 'self_report'
+        ? '客户自报 · 用「Submit Verdict」录入'
       : metricDef
         ? '手动填写'
         : '未识别指标 · 请检查 metric_catalog'  // catalog miss (custom key) — visible signal not silent

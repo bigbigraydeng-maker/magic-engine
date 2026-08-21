@@ -277,7 +277,7 @@ export interface MetricCandidate {
   label_en: string
   label_zh: string
   unit: string
-  measurement: 'auto' | 'self_report' | 'hybrid'
+  measurement: 'auto' | 'self_report' | 'hybrid' | 'verification'
   recommended_for: GoalIntent[]
   /** Phase 32: optional filter by sub-type (if absent, applies to all sub-types). */
   recommended_for_sub_types?: GoalSubType[]
@@ -285,6 +285,10 @@ export interface MetricCandidate {
   default_direction?: TargetDirection
   note?: string
 }
+
+/** Existing GEO Verification metric exposed to the Goal lifecycle unchanged. */
+export const GEO_QUALIFIED_MENTION_GOAL_METRIC_KEY =
+  'geo-module/m1/v1:qualified_mention_coverage' as const
 
 export const PRIMARY_METRIC_CATALOG: MetricCandidate[] = [
   // ── Acquisition: ongoing ─────────────────────────────────────────────────
@@ -384,6 +388,13 @@ export const PRIMARY_METRIC_CATALOG: MetricCandidate[] = [
     unit: 'score 0-100', measurement: 'auto',
     recommended_for: ['awareness'],
     default_direction: 'increase' },
+  { key: GEO_QUALIFIED_MENTION_GOAL_METRIC_KEY,
+    label_en: 'Qualified AI mention coverage', label_zh: 'AI 合格提及覆盖',
+    unit: 'qualified queries / pinned cohort', measurement: 'verification',
+    recommended_for: ['awareness'],
+    recommended_for_sub_types: ['new_market', 'event_campaign', 'geographic_expansion', 'reputation_recovery'],
+    default_direction: 'increase',
+    note: '按固定 query cohort 和同一解释规则结算；不可比或证据不足时必须记为 UNKNOWN。' },
   { key: 'social_followers_growth', label_en: 'Social followers growth', label_zh: '社媒粉丝增量',
     unit: 'count/mo', measurement: 'auto',
     recommended_for: ['awareness'],

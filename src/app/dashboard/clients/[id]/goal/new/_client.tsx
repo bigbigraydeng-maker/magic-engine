@@ -21,6 +21,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import {
+  GEO_QUALIFIED_MENTION_GOAL_METRIC_KEY,
   GOAL_SUBTYPES_BY_INTENT,
   getRecommendedMetrics,
   type GoalIntent,
@@ -61,6 +62,9 @@ const METRIC_PLACEHOLDERS: Record<string, MetricPlaceholder> = {
   brand_search_volume: { baseline: 'e.g. 500',   target: 'e.g. 2000' },
   media_mentions:      { baseline: 'e.g. 5',     target: 'e.g. 30' },
   ai_visibility_score: { baseline: 'e.g. 20',    target: 'e.g. 60' },
+  [GEO_QUALIFIED_MENTION_GOAL_METRIC_KEY]: {
+    baseline: 'current qualified count', target: 'target qualified count',
+  },
   social_followers_growth: { baseline: 'e.g. 0', target: 'e.g. 1000' },
   organic_traffic:     { baseline: 'e.g. 1000',  target: 'e.g. 5000' },
 }
@@ -429,11 +433,17 @@ export function NewGoalClient() {
                       <div className="mt-0.5 text-xs font-semibold text-me-charcoal/55">{m.label_en} · {m.unit}</div>
                     </div>
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                      m.measurement === 'auto'        ? 'bg-status-track/15 text-status-track'
+                      m.measurement === 'auto'          ? 'bg-status-track/15 text-status-track'
                       : m.measurement === 'self_report' ? 'bg-me-ochre/15 text-me-ochre'
                       :                                   'bg-status-sched/15 text-status-sched'
                     }`}>
-                      {m.measurement === 'auto' ? '系统自动测' : m.measurement === 'self_report' ? '客户自报' : 'auto+自报'}
+                      {m.measurement === 'auto'
+                        ? '系统自动测'
+                        : m.measurement === 'self_report'
+                          ? '客户自报'
+                          : m.measurement === 'verification'
+                            ? '治理验证'
+                            : 'auto+自报'}
                     </span>
                   </div>
                   {m.note && <div className="mt-1 text-[11px] font-semibold text-me-charcoal/45">注：{m.note}</div>}

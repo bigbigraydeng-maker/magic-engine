@@ -47,6 +47,12 @@ export async function GET(
       reason: `"${metricDef.label_en}" is self-reported — enter the value manually`,
     })
   }
+  if (metricDef.measurement === 'verification') {
+    return NextResponse.json({
+      ok: false,
+      reason: `"${metricDef.label_en}" is settled by its governed Verification contract`,
+    })
+  }
 
   const result = await autoFetchMetricValue(supabaseAdmin, clientId, goal.primary_metric_key)
 
