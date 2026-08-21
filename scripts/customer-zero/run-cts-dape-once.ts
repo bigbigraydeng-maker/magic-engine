@@ -10,10 +10,19 @@ import { createDefaultDeps } from '@/lib/action-submission'
 import { triggerCtsGithubMetadataReferenceLoop } from '@/lib/cts-github-reference-loop-trigger'
 import { getValidToken } from '@/lib/platform-oauth/token-manager'
 import { CTS_CLIENT_ID } from '@/lib/seo-meta/cts-meta-source'
-import { approveAndRun, createKernel } from '@/lib/kernel'
+import {
+  approveAndRun,
+  createKernel,
+  KernelError,
+  runAction,
+  type ActionRun,
+  type SubmitActionInput,
+} from '@/lib/kernel'
 import { supabaseAdmin } from '@/lib/supabase'
 
 const PAGE_ID = '75df9241-5633-4a1d-95e6-a30d55079baf'
+const GOAL_ID = 'c5816200-6a3b-45f7-8989-3f3f2aee46f7'
+const CORRELATION_ID = 'c7500000-0000-4000-8000-000000002026'
 const APPROVER = process.env.CTS_CUSTOMER_ZERO_APPROVED_BY?.trim() ?? ''
 
 function triggerFailureCode(
@@ -49,12 +58,86 @@ function preflight(): void {
   if (!APPROVER) throw new Error('approved_by_missing')
 }
 
+function safeKernelError(error: unknown): Error {
+  if (error instanceof KernelError) return new Error(`kernel_${error.code.toLowerCase()}`)
+  const message = error instanceof Error ? error.message : ''
+  if (message.startsWith('[kernel/store] 领取运行所有权')) {
+    return new Error('kernel_claim_failed')
+  }
+  return new Error('kernel_resume_failed')
+}
+
+async function findExistingRun(): Promise<ActionRun | null> {
+  const { data, error } = await supabaseAdmin
+    .from('action_runs')
+    .select('*')
+    .eq('client_id', CTS_CLIENT_ID)
+    .eq('action_key', 'page.apply_cts_github_metadata_request')
+    .eq('correlation_id', CORRELATION_ID)
+    .limit(2)
+  if (error) throw new Error('kernel_resume_lookup_failed')
+  if ((data ?? []).length > 1) throw new Error('kernel_resume_ambiguous')
+  return ((data ?? [])[0] as ActionRun | undefined) ?? null
+}
+
+function replayInput(run: ActionRun): SubmitActionInput {
+  return {
+    clientId: run.client_id,
+    actionKey: run.action_key,
+    purpose: run.purpose,
+    goalId: run.goal_id,
+    executionItemId: run.execution_item_id,
+    triggeredBy: run.triggered_by,
+    triggeredByRef: run.triggered_by_ref,
+    input: run.input,
+    rationale: run.rationale,
+    evidence: run.evidence,
+    correlationId: run.correlation_id,
+  }
+}
+
 async function main(): Promise<void> {
   preflight()
   const kernel = createKernel(supabaseAdmin, {
     workerId: 'render-cts-customer-zero-once',
     ownerId: 'render-cts-customer-zero-once',
   })
+  const existing = await findExistingRun()
+  let pendingRunId: string | null = null
+  if (existing) {
+    if (!['queued', 'authorizing', 'authorized', 'pending_approval'].includes(existing.status)) {
+      throw new Error('kernel_resume_status_invalid')
+    }
+    if (existing.status === 'pending_approval') {
+      pendingRunId = existing.id
+    } else {
+      try {
+        const resumed = await runAction(kernel, replayInput(existing))
+        if (resumed.kind !== 'pending_approval') {
+          throw new Error(`kernel_resume_${resumed.kind}`)
+        }
+        pendingRunId = resumed.run.id
+      } catch (error) {
+        if (error instanceof Error && /^kernel_resume_[a-z_]+$/.test(error.message)) throw error
+        throw safeKernelError(error)
+      }
+    }
+  }
+
+  if (pendingRunId) {
+    const completed = await approveAndRun(kernel, pendingRunId, APPROVER)
+    const receipt = {
+      outcome: completed.kind,
+      runId: completed.run.id,
+      decisionId: completed.decision?.id ?? null,
+      runStatus: completed.run.status,
+      output: completed.run.output ?? null,
+    }
+    process.stdout.write(`${JSON.stringify(receipt)}\n`)
+    if (completed.kind !== 'succeeded') process.exitCode = 1
+    return
+  }
+
   let accessToken: string
   try {
     accessToken = await getValidToken(CTS_CLIENT_ID, 'google_gsc')
@@ -84,7 +167,7 @@ async function main(): Promise<void> {
           h1Rationale: 'Give the generic hub a collection-focused heading.',
         },
         growth: {
-          goalId: 'c5816200-6a3b-45f7-8989-3f3f2aee46f7',
+          goalId: GOAL_ID,
           orderingRationale: 'Test the smallest three-field intent distinction before considering body edits.',
           verification: {
             windowDays: 28,
@@ -98,7 +181,7 @@ async function main(): Promise<void> {
           triggeredBy: 'human',
           triggeredByRef: 'codex-customer-zero-2026-08-21',
           rationale: 'PM authorized one CTS Customer Zero Kernel approval and Draft PR on 2026-08-21.',
-          correlationId: 'c7500000-0000-4000-8000-000000002026',
+          correlationId: CORRELATION_ID,
         },
       },
     )
