@@ -222,6 +222,27 @@ describe('CTS controlled GSC → Kernel trigger', () => {
     expect(f.tables.action_runs).toEqual([])
   })
 
+  it('rejects a missing growth goal before any tenant or provider read', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const f = fixture()
+    const input = triggerInput()
+    await expect(triggerCtsGithubMetadataReferenceLoop(
+      { caller: createDefaultDeps(f.kernel) },
+      {
+        ...input,
+        growth: { ...input.growth, goalId: null },
+      } as unknown as CtsGithubReferenceLoopTriggerInput,
+    )).resolves.toEqual({
+      ok: false,
+      reason: 'cts_trigger_not_ready',
+      detail: 'goal_not_ready',
+    })
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(sourceMocks.loadRedlines).not.toHaveBeenCalled()
+    expect(sourceMocks.loadPage).not.toHaveBeenCalled()
+    expect(f.tables.action_runs).toEqual([])
+  })
+
   it('treats URL variants of the target page as the same page', async () => {
     const variant = 'http://ctstours.co.nz/china-tours/?source=gsc#top'
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(gscResponse([{

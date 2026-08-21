@@ -84,7 +84,7 @@ async function main(): Promise<void> {
           h1Rationale: 'Give the generic hub a collection-focused heading.',
         },
         growth: {
-          goalId: null,
+          goalId: 'c5816200-6a3b-45f7-8989-3f3f2aee46f7',
           orderingRationale: 'Test the smallest three-field intent distinction before considering body edits.',
           verification: {
             windowDays: 28,

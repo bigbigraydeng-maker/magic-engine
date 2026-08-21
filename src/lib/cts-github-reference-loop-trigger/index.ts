@@ -29,6 +29,7 @@ export type {
 
 const CTS_GSC_PROPERTY = 'sc-domain:ctstours.co.nz'
 const CTS_GSC_COUNTRY = 'nzl'
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function canonicalCtsPage(pageUrl: string): string | null {
   try {
@@ -93,7 +94,7 @@ function interpret(outcome: ActionRunOutcome): SubmitCtsGithubReferenceLoopResul
 async function submitPreparedCtsAction(
   deps: CtsGithubReferenceLoopTriggerDeps,
   preparation: CtsGithubReferenceLoopPreparation,
-  kernelMeta: CtsGithubReferenceLoopTriggerInput['kernel'] & { readonly goalId?: string | null },
+  kernelMeta: CtsGithubReferenceLoopTriggerInput['kernel'] & { readonly goalId: string },
 ): Promise<SubmitCtsGithubReferenceLoopResult> {
   if (preparation.clientId !== CTS_CLIENT_ID) return submissionNotReady('client_id_mismatch')
   if (process.env.CTS_GITHUB_METADATA_ACTION_ENABLED !== 'true') {
@@ -167,7 +168,7 @@ async function submitPreparedCtsAction(
     clientId: CTS_CLIENT_ID,
     actionKey: mapping.actionKey,
     purpose: 'growth',
-    goalId: kernelMeta.goalId ?? null,
+    goalId: kernelMeta.goalId,
     executionItemId: null,
     triggeredBy: kernelMeta.triggeredBy,
     triggeredByRef: kernelMeta.triggeredByRef ?? null,
@@ -192,6 +193,7 @@ export async function triggerCtsGithubMetadataReferenceLoop(
   if (process.env.CTS_GITHUB_METADATA_ACTION_ENABLED !== 'true') {
     return notReady('rollout_disabled')
   }
+  if (!UUID.test(input.growth.goalId)) return notReady('goal_not_ready')
 
   const evidencePageIdentity = canonicalCtsPage(input.gsc.evidencePageUrl)
   if (!evidencePageIdentity) {
@@ -269,9 +271,7 @@ export async function triggerCtsGithubMetadataReferenceLoop(
     sourceReceipt: receipt,
     finding,
     prescription: {
-      goalId: input.growth.goalId
-        ? { known: true, value: input.growth.goalId }
-        : { known: false, reason: 'not_recorded_by_source' },
+      goalId: { known: true, value: input.growth.goalId },
       covers: [finding],
       notDoing: [{
         statement: 'Do not change page body content.',
@@ -313,6 +313,6 @@ export async function triggerCtsGithubMetadataReferenceLoop(
 
   return submitPreparedCtsAction(deps, prepared.preparation, {
     ...input.kernel,
-    goalId: input.growth.goalId ?? null,
+    goalId: input.growth.goalId,
   })
 }

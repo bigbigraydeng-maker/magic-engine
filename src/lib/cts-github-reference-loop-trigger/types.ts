@@ -22,7 +22,7 @@ export interface CtsGithubReferenceLoopTriggerInput {
     readonly h1Rationale: string
   }
   readonly growth: {
-    readonly goalId?: string | null
+    readonly goalId: string
     readonly orderingRationale: string
     readonly verification: {
       readonly windowDays: number
@@ -64,6 +64,7 @@ export type CtsGithubReferenceLoopTriggerResult =
       readonly detail:
         | 'rollout_disabled'
         | 'gsc_scope_invalid'
+        | 'goal_not_ready'
         | 'gsc_read_failed'
         | 'gsc_row_not_found'
         | 'gsc_row_ambiguous'
