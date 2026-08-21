@@ -97,6 +97,12 @@ export async function submitPageOptimizationRequest(
       bridgeReason: mapping.reason,
     }
   }
+  if (
+    mapping.submissionBoundary !== undefined &&
+    mapping.submissionBoundary !== 'generic_page_optimization'
+  ) {
+    return { ok: false, reason: 'submission_boundary_mismatch' }
+  }
 
   // ④ 构造 SubmitActionInput —— input 字段严格按 spec §7。
   //    intents / do_not_touch 保持 request 里的引用；WP01 已经保证 JSON-safe。

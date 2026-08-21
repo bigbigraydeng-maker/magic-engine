@@ -17,6 +17,7 @@ import type { ActionRun } from '@/lib/kernel/types'
 import type { KernelDeps } from '@/lib/kernel/deps'
 import type { PageOptimizationRequest } from '@/lib/page-optimization'
 import type { CandidateMappingResult } from '@/lib/action-bridge'
+import { mapCandidateIdentity } from '@/lib/action-bridge'
 
 const CLIENT_A = 'c11e0000-0000-4000-8000-00000000000a'
 const CLIENT_B = 'c11e0000-0000-4000-8000-00000000000b'
@@ -163,7 +164,7 @@ describe('caller: fail-closed 前置检查', () => {
     const { deps, mapCandidate, runAction } = makeDeps()
     const input = makeInput({
       request: makeRequest({
-        basedOnVersion: { known: false, reason: 'snapshot missing' },
+        basedOnVersion: { known: false, reason: 'not_recorded_by_source' },
       }),
     })
 
@@ -171,6 +172,51 @@ describe('caller: fail-closed 前置检查', () => {
 
     expect(result).toEqual({ ok: false, reason: 'basedOnVersion_unknown' })
     expect(mapCandidate).not.toHaveBeenCalled()
+    expect(runAction).not.toHaveBeenCalled()
+  })
+
+  it('WordPress 专用 identity 不能绕过 Reference Loop gate', async () => {
+    const { deps, runAction } = makeDeps({
+      mapping: {
+        outcome: 'mapped',
+        actionKey: 'page.apply_wordpress_optimization_request',
+        actionVersion: 1,
+        submissionBoundary: 'wordpress_reference_loop',
+      },
+    })
+    const result = await submitPageOptimizationRequest(deps, makeInput({
+      candidateIdentity: { domain: 'seo', intent: 'apply_wordpress_page_metadata' },
+    }))
+
+    expect(result).toEqual({ ok: false, reason: 'submission_boundary_mismatch' })
+    expect(runAction).not.toHaveBeenCalled()
+  })
+
+  it('真实生产映射也不能从通用 caller 提交 WordPress action', async () => {
+    const runAction = vi.fn()
+    const result = await submitPageOptimizationRequest({
+      kernelDeps: dummyKernelDeps,
+      mapCandidate: mapCandidateIdentity,
+      runAction,
+    }, makeInput({
+      candidateIdentity: { domain: 'seo', intent: 'apply_wordpress_page_metadata' },
+    }))
+
+    expect(result).toEqual({ ok: false, reason: 'submission_boundary_mismatch' })
+    expect(runAction).not.toHaveBeenCalled()
+  })
+
+  it('真实生产映射也不能从通用 caller 提交 CTS GitHub action', async () => {
+    const runAction = vi.fn()
+    const result = await submitPageOptimizationRequest({
+      kernelDeps: dummyKernelDeps,
+      mapCandidate: mapCandidateIdentity,
+      runAction,
+    }, makeInput({
+      candidateIdentity: { domain: 'seo', intent: 'clarify_page_query_url_ownership' },
+    }))
+
+    expect(result).toEqual({ ok: false, reason: 'submission_boundary_mismatch' })
     expect(runAction).not.toHaveBeenCalled()
   })
 })

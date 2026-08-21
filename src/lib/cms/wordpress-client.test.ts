@@ -517,6 +517,24 @@ describe('updateExistingWordpressPost', () => {
     })
   })
 
+  it('never retries an ambiguous 5xx POST update', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse('upstream failed', { status: 503 }))
+    const { updateExistingWordpressPost } = await import('./wordpress-client')
+
+    await expect(updateExistingWordpressPost(CONFIG, { postId: 123, seoTitle: 'New' }))
+      .rejects.toMatchObject({ name: 'WordpressFetchError' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('never retries an ambiguous network failure during POST update', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('fetch failed ECONNRESET'))
+    const { updateExistingWordpressPost } = await import('./wordpress-client')
+
+    await expect(updateExistingWordpressPost(CONFIG, { postId: 123, seoTitle: 'New' }))
+      .rejects.toMatchObject({ name: 'WordpressFetchError', code: 'NETWORK_ERROR' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('maps Yoast meta keys correctly: seoTitle/seoDescription/focusKeyphrase', async () => {
     fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
       id: 123, link: 'x', modified: 'y',
@@ -644,6 +662,131 @@ describe('updateExistingWordpressPost', () => {
     expect(body).toEqual({ content: '<p>Brand new body.</p>' })
     expect(body).not.toHaveProperty('title')
     expect(body).not.toHaveProperty('meta')
+  })
+})
+
+describe('Magic Engine atomic WordPress page apply', () => {
+  const realFetch = globalThis.fetch
+  let fetchMock: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    fetchMock = vi.fn()
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+  })
+  afterEach(() => {
+    globalThis.fetch = realFetch
+    vi.restoreAllMocks()
+  })
+
+  it('probes the governed plugin capability without using core REST', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
+      atomic_compare_and_set: true,
+      version: 1,
+    }), { status: 200 }))
+    const { probeWordpressAtomicPageApply } = await import('./wordpress-client')
+
+    await expect(probeWordpressAtomicPageApply(CONFIG)).resolves.toBe(true)
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://oztop.com.au/wp-json/magic-engine/v1/page-apply/capabilities',
+    )
+  })
+
+  it('fails the capability probe closed on an unsupported response', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
+      atomic_compare_and_set: false,
+      version: 1,
+    }), { status: 200 }))
+    const { probeWordpressAtomicPageApply } = await import('./wordpress-client')
+
+    await expect(probeWordpressAtomicPageApply(CONFIG)).resolves.toBe(false)
+  })
+
+  it('sends expected_modified and only the approved partial update', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
+      applied: true,
+      previous_modified: '2026-08-20T01:00:00.000Z',
+      post_id: 42,
+      post_type: 'page',
+      link: 'https://oztop.com.au/',
+      modified: '2026-08-20T02:00:00.000Z',
+    }), { status: 200 }))
+    const { updateExistingWordpressPostIfUnmodified } = await import('./wordpress-client')
+
+    const result = await updateExistingWordpressPostIfUnmodified(CONFIG, {
+      postId: 42,
+      postType: 'page',
+      seoTitle: 'Approved title',
+    }, '2026-08-20T01:00:00.000Z', { seoTitle: 'Original title' })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://oztop.com.au/wp-json/magic-engine/v1/page-apply/page/42',
+    )
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
+    expect(body).toEqual({
+      expected_modified: '2026-08-20T01:00:00.000Z',
+      expected_meta: { _yoast_wpseo_title: 'Original title' },
+      update: { meta: { _yoast_wpseo_title: 'Approved title' } },
+    })
+    expect(result).toEqual({
+      postId: 42,
+      postType: 'page',
+      link: 'https://oztop.com.au/',
+      previousModified: '2026-08-20T01:00:00.000Z',
+      modified: '2026-08-20T02:00:00.000Z',
+      updatedFields: ['seoTitle'],
+    })
+  })
+
+  it('rejects an acknowledgement for a different expected version', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
+      applied: true,
+      previous_modified: 'different-version',
+      post_id: 42,
+      post_type: 'page',
+      link: 'https://oztop.com.au/',
+      modified: '2026-08-20T02:00:00.000Z',
+    }), { status: 200 }))
+    const { updateExistingWordpressPostIfUnmodified } = await import('./wordpress-client')
+
+    await expect(updateExistingWordpressPostIfUnmodified(CONFIG, {
+      postId: 42,
+      postType: 'page',
+      seoTitle: 'Approved title',
+    }, '2026-08-20T01:00:00.000Z', { seoTitle: 'Original title' })).rejects.toMatchObject({
+      name: 'WordpressFetchError',
+      code: 'HTTP_ERROR',
+    })
+  })
+
+  it('rejects missing before-values and non-meta fields before any request', async () => {
+    const { updateExistingWordpressPostIfUnmodified } = await import('./wordpress-client')
+    await expect(updateExistingWordpressPostIfUnmodified(CONFIG, {
+      postId: 42,
+      postType: 'page',
+      seoTitle: 'Approved title',
+    }, '2026-08-20T01:00:00.000Z', {})).rejects.toMatchObject({ code: 'HTTP_ERROR' })
+    await expect(updateExistingWordpressPostIfUnmodified(CONFIG, {
+      postId: 42,
+      postType: 'page',
+      content: '<p>not allowed</p>',
+    }, '2026-08-20T01:00:00.000Z', {})).rejects.toMatchObject({ code: 'HTTP_ERROR' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['5xx', () => Promise.resolve(makeResponse('upstream failed', { status: 503 }))],
+    ['network error', () => Promise.reject(new Error('fetch failed ECONNRESET'))],
+  ])('never retries an ambiguous CAS POST after a %s', async (_name, outcome) => {
+    fetchMock.mockImplementationOnce(outcome)
+    const { updateExistingWordpressPostIfUnmodified } = await import('./wordpress-client')
+
+    await expect(updateExistingWordpressPostIfUnmodified(CONFIG, {
+      postId: 42,
+      postType: 'page',
+      seoTitle: 'Approved title',
+    }, '2026-08-20T01:00:00.000Z', { seoTitle: 'Original title' })).rejects.toBeInstanceOf(Error)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })
 

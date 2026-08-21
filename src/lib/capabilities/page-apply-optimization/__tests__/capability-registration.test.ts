@@ -8,6 +8,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { createCapabilities } from '@/lib/capabilities'
 
 const KEY = 'page.apply_optimization_request'
+const CTS_GITHUB_KEY = 'page.apply_cts_github_metadata_request'
+const WORDPRESS_KEY = 'page.apply_wordpress_optimization_request'
 
 describe(`createCapabilities · ${KEY} 已注册`, () => {
   const fakeSb = {} as SupabaseClient
@@ -23,5 +25,19 @@ describe(`createCapabilities · ${KEY} 已注册`, () => {
 
   it('四个 step handler 都存在', () => {
     expect(Object.keys(caps[KEY].steps).sort()).toEqual(['commit', 'open_pr', 'prepare', 'record'])
+  })
+
+  it('WordPress v2 独立注册，且只有 prepare/apply/verify', () => {
+    expect(caps[WORDPRESS_KEY].actionKey).toBe(WORDPRESS_KEY)
+    expect(Object.keys(caps[WORDPRESS_KEY].steps)).toEqual(['prepare', 'apply', 'verify'])
+    expect(caps[WORDPRESS_KEY].rollback).toBeTypeOf('function')
+  })
+
+  it('CTS GitHub metadata action 独立注册为 Draft PR 四步能力', () => {
+    expect(caps[CTS_GITHUB_KEY].actionKey).toBe(CTS_GITHUB_KEY)
+    expect(Object.keys(caps[CTS_GITHUB_KEY].steps)).toEqual([
+      'prepare', 'commit', 'open_pr', 'record',
+    ])
+    expect(caps[CTS_GITHUB_KEY].rollback).toBeTypeOf('function')
   })
 })

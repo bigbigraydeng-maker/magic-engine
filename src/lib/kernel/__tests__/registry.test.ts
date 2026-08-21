@@ -40,8 +40,80 @@ describe('注册表是封闭的', () => {
   it('keys() 给得出完整清单（将来要反向注入 agent prompt 收口生成端）', () => {
     expect(ACTION_KEYS).toContain('seo.build_publish_package')
     expect(ACTION_KEYS).toContain('page.apply_optimization_request')
+    expect(ACTION_KEYS).toContain('page.apply_cts_github_metadata_request')
+    expect(ACTION_KEYS).toContain('page.apply_wordpress_optimization_request')
     // 唯一性 = 名字不重复；不硬编数字，防止每加一条动作都要改一次
     expect(new Set(ACTION_KEYS).size).toBe(ACTION_KEYS.length)
+  })
+
+  it('CTS GitHub intent action 只允许人工审批后的单次 Draft PR 路径', () => {
+    const action = ACTION_REGISTRY.get('page.apply_cts_github_metadata_request')
+    expect(action).toMatchObject({
+      actionKey: 'page.apply_cts_github_metadata_request',
+      version: 2,
+      capability: 'page.apply_cts_github_metadata_request',
+      sideEffect: 'outward',
+      reversible: true,
+      providerIdempotency: 'unsupported',
+      retryPolicy: { maxAttempts: 1 },
+      steps: ['prepare', 'commit', 'open_pr', 'record'],
+      outwardAuthorization: {
+        declaredIn: 'docs/specs/2026-08-21-me2-cts-github-meta-reference-loop-local.md',
+        requiresHumanApproval: true,
+        rollback: 'provider_native',
+      },
+    })
+    expect(action?.inputSchema.required).toEqual(expect.arrayContaining([
+      'github_repo_owner',
+      'github_repo_name',
+      'github_content_path',
+      'github_entry_slug',
+      'headline',
+      'authorization_context',
+    ]))
+    expect(action?.idempotency.keyFields).toContain('authorization_context')
+  })
+
+  it('WordPress Page Apply v2 保持独立、人工审批、单次 provider 尝试', () => {
+    const action = ACTION_REGISTRY.get('page.apply_wordpress_optimization_request')
+    expect(action).toMatchObject({
+      actionKey: 'page.apply_wordpress_optimization_request',
+      version: 1,
+      capability: 'page.apply_wordpress_optimization_request',
+      sideEffect: 'outward',
+      reversible: true,
+      providerIdempotency: 'unsupported',
+      retryPolicy: { maxAttempts: 1 },
+      steps: ['prepare', 'apply', 'verify'],
+      outwardAuthorization: {
+        declaredIn: 'docs/specs/2026-08-21-me2-wordpress-page-apply-v2-local.md',
+        requiresHumanApproval: true,
+        rollback: 'provider_native',
+      },
+    })
+    expect(action?.inputSchema.required).toEqual(expect.arrayContaining([
+      'wordpress_post_id',
+      'wordpress_post_type',
+      'authorization_context',
+    ]))
+    expect(action?.idempotency.keyFields).toContain('authorization_context')
+  })
+
+  it('WordPress 审批证据变化会产生新的幂等身份', () => {
+    const action = ACTION_REGISTRY.get('page.apply_wordpress_optimization_request')!
+    const base = {
+      page_url: 'https://example.test/',
+      page_version_token: 'v1',
+      validated_diff_hash: 'diff-1',
+      wordpress_post_id: 42,
+      authorization_context: { source_receipt: { evidence_source_id: 'row-a' } },
+    }
+    const a = computeIdempotencyKey(action, 'client-a', base)
+    const b = computeIdempotencyKey(action, 'client-a', {
+      ...base,
+      authorization_context: { source_receipt: { evidence_source_id: 'row-b' } },
+    })
+    expect(a).not.toBe(b)
   })
 })
 

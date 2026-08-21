@@ -27,6 +27,7 @@ import type {
 } from '@/lib/action-bridge'
 import type { PageOptimizationRequest } from '@/lib/page-optimization'
 
+
 // Re-export the identity type so consumers of this module don't need to reach
 // into action-bridge directly for a plain shape type.
 export type { CandidateIdentity }
@@ -109,6 +110,7 @@ export type SubmitPageOptimizationRequestResult =
       readonly kernelMetaClientId: string
     }
   | { readonly ok: false; readonly reason: 'basedOnVersion_unknown' }
+  | { readonly ok: false; readonly reason: 'submission_boundary_mismatch' }
   | {
       readonly ok: false
       readonly reason: 'bridge_rejected'

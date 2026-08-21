@@ -64,9 +64,9 @@ async function assertClientOwnsTarget(
   if (!data) throw new Error(`客户 ${clientId} 不存在，不交出发布凭据`)
 
   const own = (data as { domain: string | null }).domain
-  if (judgeDomainOwnership(siteUrl, own) === 'foreign') {
+  if (judgeDomainOwnership(siteUrl, own) !== 'owned') {
     throw new CrossClientTargetError(
-      `🔴 客户配置串台：这条发布通道指向 ${siteUrl}，但该客户自己的网站是 ${own}。` +
+      `🔴 无法确认客户拥有发布目标：通道指向 ${siteUrl}，客户登记域名是 ${own ?? '未填写'}。` +
         `在纠正之前，系统不会用它发布任何东西。`,
     )
   }

@@ -112,8 +112,8 @@ describe('getWordpressConnection —— 凭据发放这一层的隔离闸', () =
     await expect(getWordpressConnection('nobody')).resolves.toBeNull()
   })
 
-  it('🔴 客户没填域名时不拦 —— 但这件事由每日排查报出来，不在这里静默', async () => {
+  it('🔴 客户没填域名时也不交出凭据（unknown 必须 fail closed）', async () => {
     setup('https://anything.com', null)
-    await expect(getWordpressConnection('roman')).resolves.toBeTruthy()
+    await expect(getWordpressConnection('roman')).rejects.toThrow(CrossClientTargetError)
   })
 })

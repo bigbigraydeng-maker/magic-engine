@@ -56,6 +56,11 @@ export type CandidateMappingResult =
        *    映射表里存版本号 = 契约升版之后两边悄悄对不上。
        */
       readonly actionVersion: number
+      /** Omitted means the legacy generic page-optimization boundary. */
+      readonly submissionBoundary?:
+        | 'generic_page_optimization'
+        | 'wordpress_reference_loop'
+        | 'cts_github_reference_loop'
     }
   | {
       readonly outcome: 'rejected'

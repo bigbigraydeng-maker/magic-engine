@@ -204,9 +204,168 @@ const PAGE_APPLY_OPTIMIZATION_REQUEST: ActionDefinition<'page.apply_optimization
   allowedPurposes: ['growth'],
 }
 
+/**
+ * WordPress existing-page apply v2.
+ *
+ * Kept as a distinct ActionKey from the GitHub Draft-PR action: WordPress
+ * mutates a published asset in place and therefore has a different target,
+ * rollback and provider-idempotency contract.
+ */
+const PAGE_APPLY_WORDPRESS_OPTIMIZATION_REQUEST: ActionDefinition<'page.apply_wordpress_optimization_request'> = {
+  actionKey: 'page.apply_wordpress_optimization_request',
+  version: 1,
+  title: '把已授权的页面优化请求安全写回 WordPress 现有页面',
+  inputSchema: {
+    type: 'object',
+    required: [
+      'page_url',
+      'page_version_token',
+      'validated_diff_hash',
+      'intents',
+      'do_not_touch',
+      'wordpress_post_id',
+      'wordpress_post_type',
+      'authorization_context',
+    ],
+    properties: {
+      page_url:             { type: 'string' },
+      page_version_token:   { type: 'string' },
+      validated_diff_hash:  { type: 'string' },
+      intents:              { type: 'array' },
+      do_not_touch:         { type: 'array' },
+      wordpress_post_id:    { type: 'number' },
+      wordpress_post_type:  { type: 'string' },
+      authorization_context:{ type: 'object' },
+    },
+    additionalProperties: false,
+  },
+  outputSchema: {
+    type: 'object',
+    required: ['provider', 'run_reference'],
+    properties: {
+      provider:      { type: 'string' },
+      run_reference: { type: 'string' },
+    },
+    additionalProperties: true,
+  },
+  capability: 'page.apply_wordpress_optimization_request',
+  risk: 'medium',
+  sideEffect: 'outward',
+  reversible: true,
+  outwardAuthorization: {
+    declaredIn: 'docs/specs/2026-08-21-me2-wordpress-page-apply-v2-local.md',
+    requiresHumanApproval: true,
+    rollback: 'provider_native',
+  },
+  idempotency: {
+    keyFields: [
+      'page_url',
+      'page_version_token',
+      'validated_diff_hash',
+      'wordpress_post_id',
+      'authorization_context',
+    ],
+    scope: 'client',
+  },
+  costModel: {
+    kind: 'fixed',
+    estimate: () => 0,
+    stepCeilingUsd: { prepare: 0, apply: 0, verify: 0 },
+  },
+  // The plugin CAS endpoint prevents stale writes but does not expose an idempotency key.
+  providerIdempotency: 'unsupported',
+  retryPolicy: { maxAttempts: 1, backoff: 'fixed', baseMs: 0 },
+  verification: { method: 'page_apply_integrity', delayMs: 0 },
+  requiredCapabilityTier: 'paid_client',
+  steps: ['prepare', 'apply', 'verify'],
+  allowedPurposes: ['growth'],
+}
+
+/** CTS Next.js TypeScript title/description/H1 → GitHub Draft PR. Local-only v2. */
+const PAGE_APPLY_CTS_GITHUB_METADATA_REQUEST: ActionDefinition<'page.apply_cts_github_metadata_request'> = {
+  actionKey: 'page.apply_cts_github_metadata_request',
+  version: 2,
+  title: '把已授权的 CTS 页面搜索意图区分提交为 GitHub Draft PR',
+  inputSchema: {
+    type: 'object',
+    required: [
+      'page_url',
+      'page_version_token',
+      'validated_diff_hash',
+      'intents',
+      'headline',
+      'do_not_touch',
+      'github_repo_owner',
+      'github_repo_name',
+      'github_default_branch',
+      'github_content_path',
+      'github_entry_slug',
+      'authorization_context',
+    ],
+    properties: {
+      page_url:             { type: 'string' },
+      page_version_token:   { type: 'string' },
+      validated_diff_hash:  { type: 'string' },
+      intents:              { type: 'array' },
+      headline:             { type: 'object' },
+      do_not_touch:         { type: 'array' },
+      github_repo_owner:    { type: 'string' },
+      github_repo_name:     { type: 'string' },
+      github_default_branch:{ type: 'string' },
+      github_content_path:  { type: 'string' },
+      github_entry_slug:    { type: 'string' },
+      authorization_context:{ type: 'object' },
+    },
+    additionalProperties: false,
+  },
+  outputSchema: {
+    type: 'object',
+    required: ['provider', 'run_reference'],
+    properties: {
+      provider:      { type: 'string' },
+      run_reference: { type: 'string' },
+    },
+    additionalProperties: true,
+  },
+  capability: 'page.apply_cts_github_metadata_request',
+  risk: 'medium',
+  sideEffect: 'outward',
+  reversible: true,
+  outwardAuthorization: {
+    declaredIn: 'docs/specs/2026-08-21-me2-cts-github-meta-reference-loop-local.md',
+    requiresHumanApproval: true,
+    rollback: 'provider_native',
+  },
+  idempotency: {
+    keyFields: [
+      'page_url',
+      'page_version_token',
+      'validated_diff_hash',
+      'github_repo_owner',
+      'github_repo_name',
+      'github_content_path',
+      'authorization_context',
+    ],
+    scope: 'client',
+  },
+  costModel: {
+    kind: 'fixed',
+    estimate: () => 0,
+    stepCeilingUsd: { prepare: 0, commit: 0, open_pr: 0, record: 0 },
+  },
+  providerIdempotency: 'unsupported',
+  retryPolicy: { maxAttempts: 1, backoff: 'fixed', baseMs: 0 },
+  verification: { method: 'page_apply_integrity', delayMs: 0 },
+  requiredCapabilityTier: 'paid_client',
+  steps: ['prepare', 'commit', 'open_pr', 'record'],
+  allowedPurposes: ['growth'],
+}
+
 const DEFINITIONS: Readonly<Record<ActionKey, ActionDefinition>> = {
   'seo.build_publish_package': SEO_BUILD_PUBLISH_PACKAGE,
   'page.apply_optimization_request': PAGE_APPLY_OPTIMIZATION_REQUEST,
+  'page.apply_wordpress_optimization_request': PAGE_APPLY_WORDPRESS_OPTIMIZATION_REQUEST,
+  'page.apply_cts_github_metadata_request': PAGE_APPLY_CTS_GITHUB_METADATA_REQUEST,
 }
 
 export interface ActionRegistry {

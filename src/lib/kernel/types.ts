@@ -26,6 +26,8 @@ import type { AccessTier } from '@/lib/auth/access-types'
 export type ActionKey =
   | 'seo.build_publish_package'
   | 'page.apply_optimization_request'
+  | 'page.apply_wordpress_optimization_request'
+  | 'page.apply_cts_github_metadata_request'
 
 /** 一个 run 为了什么而跑。决定它需不需要挂 Goal。 */
 export type ActionPurpose =

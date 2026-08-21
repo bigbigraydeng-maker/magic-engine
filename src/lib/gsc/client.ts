@@ -14,7 +14,7 @@
  *   Omit clientId or leave google_oauth_tokens empty for that client.
  */
 
-import { createSign } from 'crypto'
+import { createHash, createSign } from 'crypto'
 import { getValidAccessToken } from '@/lib/google-oauth/client'
 import { getValidToken, PlatformConnectionNotFoundError } from '@/lib/platform-oauth/token-manager'
 import type { GscSearchData, GscQueryRow } from '@/lib/zhangqian/types'
@@ -28,6 +28,7 @@ const SEARCH_ANALYTICS_BASE  = 'https://searchconsole.googleapis.com/webmasters/
 const DEFAULT_DATE_RANGE_DAYS = 28
 const MAX_ROWS                = 25
 const SNAPSHOT_ROWS           = 50   // per dimension for snapshots
+const PAGE_QUERY_REPORT_ROWS  = 250
 const FETCH_TIMEOUT_MS        = 20_000
 
 // ─── Error class ──────────────────────────────────────────────────────────────
@@ -352,6 +353,226 @@ async function querySearchAnalytics(
   } finally {
     clearTimeout(timer)
   }
+}
+
+// ─── Page × query evidence report (read-only) ───────────────────────────────
+
+export interface GscPageQueryRow {
+  page:        string
+  query:       string
+  clicks:      number
+  impressions: number
+  ctr:         number
+  position:    number
+}
+
+export interface GscPageQueryEvidenceReceipt {
+  readonly evidence_source_id: string
+  readonly provider: 'gsc'
+  readonly property: string
+  readonly start_date: string
+  readonly end_date: string
+  readonly country: string
+  readonly search_type: 'web'
+  readonly device: 'all'
+  readonly collected_at: string
+  readonly page: string
+  readonly query: string
+  readonly clicks: number
+  readonly impressions: number
+  readonly ctr: number
+  readonly position: number
+}
+
+const trustedPageQueryRows = new WeakSet<object>()
+const pageQueryRowScopes = new WeakMap<object, Readonly<{
+  siteUrl: string
+  startDate: string
+  endDate: string
+  country: string
+}>>()
+const trustedPageQueryReceipts = new WeakSet<object>()
+
+export interface GscPageQueryReportParams {
+  accessToken: string
+  siteUrl:     string
+  startDate:   string
+  endDate:     string
+  country:     string
+  rowLimit?:   number
+}
+
+interface RawPageQueryRow {
+  keys?:       unknown
+  clicks?:     unknown
+  impressions?: unknown
+  ctr?:        unknown
+  position?:   unknown
+}
+
+function validatePageQueryParams(params: GscPageQueryReportParams): number {
+  const required = [params.accessToken, params.siteUrl, params.startDate, params.endDate, params.country]
+  const requestedRows = params.rowLimit ?? PAGE_QUERY_REPORT_ROWS
+  if (required.some(value => !value.trim())) throw invalidReportInput('Missing required input')
+  if (!isCalendarDate(params.startDate) || !isCalendarDate(params.endDate)) {
+    throw invalidReportInput('Dates must use YYYY-MM-DD')
+  }
+  if (params.startDate > params.endDate) throw invalidReportInput('startDate must not exceed endDate')
+  if (!/^[a-z]{3}$/i.test(params.country)) throw invalidReportInput('country must be ISO alpha-3')
+  if (!Number.isInteger(requestedRows) || requestedRows < 1) throw invalidReportInput('rowLimit must be a positive integer')
+  return Math.min(requestedRows, PAGE_QUERY_REPORT_ROWS)
+}
+
+function isCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const parsed = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+}
+
+function invalidReportInput(message: string): GscApiError {
+  return new GscApiError(0, 'INVALID_ARGUMENT', 'invalidArgument', message)
+}
+
+function mapPageQueryRow(value: unknown): GscPageQueryRow {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new GscApiError(0, 'INVALID_RESPONSE', 'invalidResponse', 'Malformed page × query row')
+  }
+  const row = value as RawPageQueryRow
+  const keys = Array.isArray(row.keys) ? row.keys : []
+  const metrics = [row.clicks, row.impressions, row.ctr, row.position]
+  if (keys.length !== 2 || keys.some(key => typeof key !== 'string' || !key.trim()) ||
+      metrics.some(value => typeof value !== 'number' || !Number.isFinite(value))) {
+    throw new GscApiError(0, 'INVALID_RESPONSE', 'invalidResponse', 'Malformed page × query row')
+  }
+  if ((row.clicks as number) < 0 || (row.impressions as number) < 0 ||
+      (row.ctr as number) < 0 || (row.ctr as number) > 1 || (row.position as number) < 0) {
+    throw new GscApiError(0, 'INVALID_RESPONSE', 'invalidResponse', 'Out-of-range page × query metrics')
+  }
+  const mapped: GscPageQueryRow = Object.freeze({
+    page: keys[0] as string,
+    query: keys[1] as string,
+    clicks: row.clicks as number,
+    impressions: row.impressions as number,
+    ctr: row.ctr as number,
+    position: row.position as number,
+  })
+  trustedPageQueryRows.add(mapped)
+  return mapped
+}
+
+function parsePageQueryRows(
+  data: unknown,
+  scope: Readonly<{ siteUrl: string; startDate: string; endDate: string; country: string }>,
+): GscPageQueryRow[] {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new GscApiError(0, 'INVALID_RESPONSE', 'invalidResponse', 'Malformed GSC response')
+  }
+  const rows = (data as Record<string, unknown>).rows
+  if (rows === undefined) return []
+  if (!Array.isArray(rows)) {
+    throw new GscApiError(0, 'INVALID_RESPONSE', 'invalidResponse', 'Malformed GSC rows')
+  }
+  return rows.map((row) => {
+    const mapped = mapPageQueryRow(row)
+    pageQueryRowScopes.set(mapped, scope)
+    return mapped
+  })
+}
+
+/** Fetch page × query rows for one country without resolving or persisting tokens. */
+export async function fetchGscPageQueryReport(
+  params: GscPageQueryReportParams,
+): Promise<GscPageQueryRow[]> {
+  const rowLimit = validatePageQueryParams(params)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  try {
+    const res = await fetch(`${SEARCH_ANALYTICS_BASE}/${encodeURIComponent(params.siteUrl)}/searchAnalytics/query`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${params.accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        startDate: params.startDate,
+        endDate: params.endDate,
+        dimensions: ['page', 'query'],
+        type: 'web',
+        dimensionFilterGroups: [{ groupType: 'and', filters: [
+          { dimension: 'country', operator: 'equals', expression: params.country.toLowerCase() },
+        ] }],
+        rowLimit,
+      }),
+      signal: controller.signal,
+    })
+    if (!res.ok) throwGscResponseError(res, await res.text())
+    return parsePageQueryRows(await res.json(), Object.freeze({
+      siteUrl: params.siteUrl,
+      startDate: params.startDate,
+      endDate: params.endDate,
+      country: params.country.toLowerCase(),
+    }))
+  } catch (err) {
+    if (err instanceof GscApiError) throw err
+    const message = err instanceof Error ? err.message : String(err)
+    throw new GscApiError(0, 'NETWORK_ERROR', 'networkError', message)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** Build an immutable receipt only from a row returned by this live client instance. */
+export function createGscPageQueryEvidenceReceipt(
+  params: Omit<GscPageQueryReportParams, 'accessToken' | 'rowLimit'>,
+  row: GscPageQueryRow,
+): GscPageQueryEvidenceReceipt {
+  const scope = pageQueryRowScopes.get(row)
+  if (!trustedPageQueryRows.has(row) || !scope) {
+    throw invalidReportInput('Evidence row was not returned by fetchGscPageQueryReport')
+  }
+  validatePageQueryParams({ ...params, accessToken: 'receipt-builder', rowLimit: 1 })
+  if (
+    scope.siteUrl !== params.siteUrl ||
+    scope.startDate !== params.startDate ||
+    scope.endDate !== params.endDate ||
+    scope.country !== params.country.toLowerCase()
+  ) {
+    throw invalidReportInput('Evidence row does not belong to the requested GSC scope')
+  }
+  const identity = JSON.stringify({
+    property: params.siteUrl,
+    startDate: params.startDate,
+    endDate: params.endDate,
+    country: params.country.toLowerCase(),
+    row,
+  })
+  const receipt: GscPageQueryEvidenceReceipt = Object.freeze({
+    evidence_source_id: `gsc-page-query:${createHash('sha256').update(identity).digest('hex')}`,
+    provider: 'gsc',
+    property: params.siteUrl,
+    start_date: params.startDate,
+    end_date: params.endDate,
+    country: params.country.toLowerCase(),
+    search_type: 'web',
+    device: 'all',
+    collected_at: new Date().toISOString(),
+    page: row.page,
+    query: row.query,
+    clicks: row.clicks,
+    impressions: row.impressions,
+    ctr: row.ctr,
+    position: row.position,
+  })
+  trustedPageQueryReceipts.add(receipt)
+  return receipt
+}
+
+export function isGscPageQueryEvidenceReceipt(
+  value: unknown,
+): value is GscPageQueryEvidenceReceipt {
+  return value !== null && typeof value === 'object' && trustedPageQueryReceipts.has(value)
+}
+
+function throwGscResponseError(res: Response, rawBody: string): never {
+  const { googleStatus, googleReason, message } = parseGoogleError(rawBody)
+  throw new GscApiError(res.status, googleStatus, googleReason, message, rawBody.slice(0, 500))
 }
 
 // ─── Token resolution ─────────────────────────────────────────────────────────

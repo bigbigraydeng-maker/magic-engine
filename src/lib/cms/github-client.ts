@@ -134,12 +134,34 @@ export class GithubClient {
     message:     string,
     blobSha?:    string,  // omit to create a new file
   ): Promise<void> {
-    await this.request('PUT', `/repos/${owner}/${repo}/contents/${encodeFilePath(path)}`, {
+    await this.commitFileWithReceipt(owner, repo, path, branch, content, message, blobSha)
+  }
+
+  /** Same single PUT as commitFile, but returns the immutable provider receipt. */
+  async commitFileWithReceipt(
+    owner: string,
+    repo: string,
+    path: string,
+    branch: string,
+    content: string,
+    message: string,
+    blobSha?: string,
+  ): Promise<{ commitSha: string; contentSha: string }> {
+    const result = await this.request<{
+      commit?: { sha?: string }
+      content?: { sha?: string }
+    }>('PUT', `/repos/${owner}/${repo}/contents/${encodeFilePath(path)}`, {
       message,
       content: Buffer.from(content, 'utf8').toString('base64'),
       ...(blobSha !== undefined ? { sha: blobSha } : {}),
       branch,
     })
+    const commitSha = result.commit?.sha?.trim() ?? ''
+    const contentSha = result.content?.sha?.trim() ?? ''
+    if (!commitSha || !contentSha) {
+      throw new Error('GitHub commit response missing commit/content SHA')
+    }
+    return { commitSha, contentSha }
   }
 
   // ── Pull request ────────────────────────────────────────────────────────────
@@ -266,6 +288,24 @@ export class GithubClient {
       body: pr.body ?? '',
       htmlUrl: pr.html_url,
     }
+  }
+
+  /** Read the complete changed-file list used by governed Draft PR verification. */
+  async getPullRequestFiles(
+    owner: string,
+    repo: string,
+    prNumber: number,
+  ): Promise<Array<{ filename: string; status: string }>> {
+    const rows = await this.request<Array<{ filename?: string; status?: string }>>(
+      'GET',
+      `/repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=100`,
+    )
+    if (!Array.isArray(rows) || rows.some((row) =>
+      typeof row.filename !== 'string' || !row.filename.trim() ||
+      typeof row.status !== 'string' || !row.status.trim())) {
+      throw new Error('GitHub pull request files response invalid')
+    }
+    return rows.map((row) => ({ filename: row.filename!, status: row.status! }))
   }
 
   /**

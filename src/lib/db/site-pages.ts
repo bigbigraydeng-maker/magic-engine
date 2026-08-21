@@ -8,6 +8,29 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 
+export interface TenantSitePageRow {
+  readonly id: string
+  readonly client_id: string
+  readonly url: string
+}
+
+/** Read one exact page ledger row with the tenant filter in the database query. */
+export async function getSitePageForClient(
+  clientId: string,
+  pageId: string,
+): Promise<TenantSitePageRow | null> {
+  if (!clientId.trim() || !pageId.trim()) return null
+  const { data, error } = await supabaseAdmin
+    .from('client_site_pages')
+    .select('id, client_id, url')
+    .eq('id', pageId)
+    .eq('client_id', clientId)
+    .maybeSingle()
+  if (error) throw new Error(`client_site_pages tenant-bound select failed: ${error.message}`)
+  if (!data) return null
+  return data as TenantSitePageRow
+}
+
 /**
  * Returns the total number of crawled pages for the given client.
  * Throws if the DB query fails (use for metrics where accuracy matters).

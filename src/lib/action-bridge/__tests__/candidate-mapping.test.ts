@@ -300,6 +300,22 @@ describe('🔴 配对表自身坏了就 fail closed', () => {
     }
   })
 
+  it('非法 submissionBoundary 两个 API 都拒', () => {
+    const mapper = createCandidateMapper({
+      registry: registryWith([REAL_KEY]),
+      table: table([{
+        domain: 'geo',
+        intent: 'optimize',
+        actionKey: REAL_KEY,
+        submissionBoundary: 'untrusted_boundary',
+      } as unknown as CandidateMappingEntry]),
+    })
+    expect(mapper.map({ domain: 'geo', intent: 'optimize' })).toMatchObject({
+      code: 'registry_drift',
+    })
+    expect(() => mapper.listVocabulary()).toThrow(GovernedVocabularyConfigurationError)
+  })
+
   it('两条不同的配对不算重复', () => {
     const mapper = createCandidateMapper({
       registry: registryWith([REAL_KEY]),
@@ -341,7 +357,7 @@ describe('受治理的词汇表', () => {
 })
 
 describe('生产实例：当前状态', () => {
-  it('生产配对表只放"有真实调用方"的动作 —— 目前是 GEO → page.apply_optimization_request 一条', () => {
+  it('生产配对表只放有受治理调用边界的动作', () => {
     // 每条 mapping 都指向注册表里真实存在的 ActionKey（防"半成品映射"）。
     expect(MAPPING_TABLE.length).toBeGreaterThan(0)
     for (const entry of MAPPING_TABLE) {
@@ -357,6 +373,30 @@ describe('生产实例：当前状态', () => {
   it('GEO candidate 命中已治理映射', () => {
     const result = mapCandidateIdentity({ domain: 'geo', intent: 'optimize_page_answerability' })
     expect(result.outcome).toBe('mapped')
+  })
+
+  it('WordPress 页面元数据 candidate 命中独立 WordPress 动作，不冒充 GEO', () => {
+    expect(mapCandidateIdentity({
+      domain: 'seo',
+      intent: 'apply_wordpress_page_metadata',
+    })).toEqual({
+      outcome: 'mapped',
+      actionKey: 'page.apply_wordpress_optimization_request',
+      actionVersion: 1,
+      submissionBoundary: 'wordpress_reference_loop',
+    })
+  })
+
+  it('CTS 页面查询归属 identity 命中独立 CTS GitHub metadata action', () => {
+    expect(mapCandidateIdentity({
+      domain: 'seo',
+      intent: 'clarify_page_query_url_ownership',
+    })).toEqual({
+      outcome: 'mapped',
+      actionKey: 'page.apply_cts_github_metadata_request',
+      actionVersion: 2,
+      submissionBoundary: 'cts_github_reference_loop',
+    })
   })
 
   it('陌生 candidate 仍返回 unmapped_identity', () => {

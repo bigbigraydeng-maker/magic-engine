@@ -231,6 +231,10 @@ export interface WpFetchOptions {
   timeoutMs?: number
   /** Internal flag — set true on the retry pass so we don't loop. */
   _isRetry?:  boolean
+  /** Outward writes with no provider idempotency must set false. */
+  retry?: boolean
+  /** WordPress REST namespace; defaults to the core wp/v2 API. */
+  namespace?: string
 }
 
 async function wpFetch(
@@ -241,7 +245,8 @@ async function wpFetch(
 ): Promise<Response> {
   await assertPublicHost(config.siteUrl)
 
-  const url        = `${config.siteUrl}/wp-json/wp/v2${path}`
+  const namespace  = opts.namespace ?? 'wp/v2'
+  const url        = `${config.siteUrl}/wp-json/${namespace}${path}`
   const timeoutMs  = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const controller = new AbortController()
   const timer      = setTimeout(() => controller.abort(), timeoutMs)
@@ -260,7 +265,7 @@ async function wpFetch(
 
     // Retry once on 5xx (Render cold start, transient WP issues).
     // Don't retry 4xx (auth / not found) or captcha responses — they won't change.
-    if (!opts._isRetry && res.status >= 500 && res.status < 600) {
+    if (opts.retry !== false && !opts._isRetry && res.status >= 500 && res.status < 600) {
       // Drain the body so the underlying socket can be released to the pool
       // before we open the retry connection. Ignore drain errors.
       await res.text().catch(() => undefined)
@@ -278,7 +283,7 @@ async function wpFetch(
       )
     }
     // Network-level error → retry once (don't loop).
-    if (!opts._isRetry && isLikelyNetworkError(err)) {
+    if (opts.retry !== false && !opts._isRetry && isLikelyNetworkError(err)) {
       clearTimeout(timer)
       await sleep(RETRY_BACKOFF_MS)
       return wpFetch(config, path, options, { ...opts, _isRetry: true })
@@ -750,6 +755,16 @@ export interface UpdateExistingWordpressPostResult {
   updatedFields: string[]
 }
 
+export interface AtomicUpdateExistingWordpressPostResult extends UpdateExistingWordpressPostResult {
+  /** The version atomically compared by the provider before applying. */
+  previousModified: string
+}
+
+export interface AtomicExpectedWordpressMeta {
+  readonly seoTitle?: string
+  readonly seoDescription?: string
+}
+
 /**
  * PATCH an existing WP post / page.
  *
@@ -802,7 +817,7 @@ export async function updateExistingWordpressPost(
   const res  = await wpFetch(config, path, {
     method: 'POST',
     body:   JSON.stringify(body),
-  })
+  }, { retry: false })
   const data = await expectJson(res, `update${postType === 'page' ? 'Page' : 'Post'}`)
 
   return {
@@ -810,6 +825,98 @@ export async function updateExistingWordpressPost(
     postType,
     link:          typeof data.link     === 'string' ? data.link     : '',
     modified:      typeof data.modified === 'string' ? data.modified : '',
+    updatedFields,
+  }
+}
+
+/**
+ * Probe the Magic Engine CAS endpoint required for safe in-place page apply.
+ * Core WordPress REST has no compare-and-set primitive; v2 must not fall back.
+ */
+export async function probeWordpressAtomicPageApply(
+  config: WordpressClientConfig,
+): Promise<boolean> {
+  try {
+    const res = await wpFetch(config, '/page-apply/capabilities', {}, {
+      namespace: 'magic-engine/v1',
+    })
+    const data = await expectJson(res, 'probeAtomicPageApply')
+    return data.atomic_compare_and_set === true && data.version === 1
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Update through the ME WordPress CAS endpoint. The plugin must compare
+ * `expected_modified` and commit the update in one provider-side critical
+ * section. Ambiguous POST failures are never retried.
+ */
+export async function updateExistingWordpressPostIfUnmodified(
+  config: WordpressClientConfig,
+  input: UpdateExistingWordpressPostInput,
+  expectedModified: string,
+  expectedMeta: AtomicExpectedWordpressMeta,
+): Promise<AtomicUpdateExistingWordpressPostResult> {
+  if (!Number.isInteger(input.postId) || input.postId <= 0 || !expectedModified.trim()) {
+    throw new WordpressFetchError(
+      'atomic page apply requires a positive postId and non-empty expectedModified',
+      'HTTP_ERROR',
+    )
+  }
+  if (!expectedMeta || typeof expectedMeta !== 'object' || Array.isArray(expectedMeta)) {
+    throw new WordpressFetchError('atomic page apply requires expected metadata', 'HTTP_ERROR')
+  }
+  const postType: WordpressPostType = input.postType ?? 'post'
+  if (
+    input.title !== undefined || input.excerpt !== undefined || input.content !== undefined ||
+    input.slug !== undefined || input.focusKeyphrase !== undefined
+  ) {
+    throw new WordpressFetchError('atomic page apply v2 accepts only Yoast title/description', 'HTTP_ERROR')
+  }
+  const update: Record<string, unknown> = {}
+  const updatedFields: string[] = []
+  const meta: Record<string, string> = {}
+  const expected: Record<string, string> = {}
+  if (input.seoTitle !== undefined) {
+    if (expectedMeta.seoTitle === undefined) {
+      throw new WordpressFetchError('atomic page apply requires expected seoTitle', 'HTTP_ERROR')
+    }
+    meta[YOAST_TITLE_KEY] = input.seoTitle
+    expected[YOAST_TITLE_KEY] = expectedMeta.seoTitle
+    updatedFields.push('seoTitle')
+  }
+  if (input.seoDescription !== undefined) {
+    if (expectedMeta.seoDescription === undefined) {
+      throw new WordpressFetchError('atomic page apply requires expected seoDescription', 'HTTP_ERROR')
+    }
+    meta[YOAST_METADESC_KEY] = input.seoDescription
+    expected[YOAST_METADESC_KEY] = expectedMeta.seoDescription
+    updatedFields.push('seoDescription')
+  }
+  if (Object.keys(meta).length > 0) update.meta = meta
+  if (updatedFields.length === 0) {
+    throw new WordpressFetchError('atomic page apply has no fields to update', 'HTTP_ERROR')
+  }
+
+  const res = await wpFetch(config, `/page-apply/${postType}/${input.postId}`, {
+    method: 'POST',
+    body: JSON.stringify({ expected_modified: expectedModified, expected_meta: expected, update }),
+  }, { namespace: 'magic-engine/v1', retry: false })
+  const data = await expectJson(res, 'atomicPageApply')
+  if (
+    data.applied !== true || data.previous_modified !== expectedModified ||
+    data.post_id !== input.postId || data.post_type !== postType ||
+    typeof data.link !== 'string' || typeof data.modified !== 'string' || !data.modified
+  ) {
+    throw new WordpressFetchError('atomic page apply returned an invalid receipt', 'HTTP_ERROR')
+  }
+  return {
+    postId: input.postId,
+    postType,
+    link: data.link,
+    previousModified: expectedModified,
+    modified: data.modified,
     updatedFields,
   }
 }

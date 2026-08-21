@@ -5,7 +5,14 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { replaceMetaForSlug, buildSlugIndex, pickCandidates } from '../cts-meta-pr'
+import { pickCandidates } from '../cts-meta-pr'
+import {
+  buildSlugIndex,
+  inspectCtsIntentForSlug,
+  inspectCtsMetaForSlug,
+  replaceIntentForSlug,
+  replaceMetaForSlug,
+} from '../cts-meta-source'
 
 const HUB_SOURCE = `// SEO Pages Data
 export const chinaToursMeta: SeoPageMeta = {
@@ -46,6 +53,57 @@ export const longtailBatch1Posts: BlogPost[] = [
 `
 
 describe('replaceMetaForSlug — narrow lane', () => {
+  it('reads and replaces the exact title, description and H1 intent fields', () => {
+    expect(inspectCtsIntentForSlug(HUB_SOURCE, 'china-tours')).toMatchObject({
+      h1: 'China Tours from New Zealand',
+    })
+    const result = replaceIntentForSlug(
+      HUB_SOURCE,
+      'china-tours',
+      'China Tours & Holiday Packages | CTS',
+      'Explore the complete CTS China tours collection.',
+      'Explore All China Tours',
+    )
+    expect(result).not.toBeNull()
+    expect(result!.updated).toContain("title: 'China Tours & Holiday Packages | CTS'")
+    expect(result!.updated).toContain("'Explore the complete CTS China tours collection.'")
+    expect(result!.updated).toContain("h1: 'Explore All China Tours'")
+    expect(result!.oldH1).toBe('China Tours from New Zealand')
+  })
+
+  it('fails closed when the target H1 is missing or ambiguous', () => {
+    const missing = HUB_SOURCE.replace("  h1: 'China Tours from New Zealand',\n", '')
+    const duplicate = HUB_SOURCE.replace(
+      "  h1: 'China Tours from New Zealand',",
+      "  h1: 'One',\n  h1: 'Two',",
+    )
+    expect(replaceIntentForSlug(missing, 'china-tours', 'Title', 'Description', 'H1')).toBeNull()
+    expect(replaceIntentForSlug(duplicate, 'china-tours', 'Title', 'Description', 'H1')).toBeNull()
+  })
+
+  it('edits the target H1, never an earlier nested lookalike', () => {
+    const nested = `export const page = {\n  slug: 'safe',\n  nested: {\n    title: 'Nested title',\n    description: 'Nested description',\n    h1: 'Nested H1',\n  },\n  title: 'Target title',\n  description: 'Target description',\n  h1: 'Target H1',\n};\n`
+    const result = replaceIntentForSlug(
+      nested,
+      'safe',
+      'New target',
+      'New target description',
+      'New target H1',
+    )
+    expect(result).not.toBeNull()
+    expect(result!.updated).toContain("    h1: 'Nested H1'")
+    expect(result!.updated).toContain("  h1: 'New target H1'")
+  })
+
+  it('inspects the exact entry without loading the legacy executor', () => {
+    expect(inspectCtsMetaForSlug(HUB_SOURCE, 'beijing-tours')).toEqual({
+      slug: 'beijing-tours',
+      title: 'Beijing Tours | CTS',
+      description: 'Old beijing description.',
+      descriptionField: 'description',
+    })
+  })
+
   it('replaces only the target entry, neighbours untouched (hub file)', () => {
     const result = replaceMetaForSlug(HUB_SOURCE, 'beijing-tours', 'New Beijing Title | CTS', 'New beijing desc.')
     expect(result).not.toBeNull()
@@ -96,6 +154,58 @@ describe('replaceMetaForSlug — narrow lane', () => {
 `
     expect(replaceMetaForSlug(missingExcerpt, 'no-excerpt-post', 'a', 'b')).toBeNull()
   })
+
+  it('rejects a slug that appears in more than one real entry in the same source', () => {
+    const duplicate = `${HUB_SOURCE}\nexport const duplicate = {\n  slug: 'beijing-tours',\n  title: 'Duplicate',\n  description: 'Duplicate.',\n};\n`
+    expect(inspectCtsMetaForSlug(duplicate, 'beijing-tours')).toBeNull()
+    expect(replaceMetaForSlug(duplicate, 'beijing-tours', 'x', 'y')).toBeNull()
+  })
+
+  it('ignores comment text that merely looks like a slug field', () => {
+    const commented = `// slug: 'beijing-tours'\n${HUB_SOURCE}`
+    expect(inspectCtsMetaForSlug(commented, 'beijing-tours')?.title).toBe('Beijing Tours | CTS')
+  })
+
+  it('ignores block-comment and template-literal pseudo entries', () => {
+    const pseudo = `/*\n  slug: 'ghost',\n  title: 'Comment title',\n  description: 'Comment description',\n+*/\nconst fixture = \`\n  slug: 'template-ghost',\n  title: 'Template title',\n  description: 'Template description',\n\`;\n${HUB_SOURCE}`
+    expect(inspectCtsMetaForSlug(pseudo, 'ghost')).toBeNull()
+    expect(inspectCtsMetaForSlug(pseudo, 'template-ghost')).toBeNull()
+    expect(buildSlugIndex([{ path: 'source.ts', source: pseudo }]).has('ghost')).toBe(false)
+    expect(buildSlugIndex([{ path: 'source.ts', source: pseudo }]).has('template-ghost')).toBe(false)
+    expect(inspectCtsMetaForSlug(pseudo, 'beijing-tours')?.title).toBe('Beijing Tours | CTS')
+  })
+
+  it('rejects ambiguous target fields and nested lookalikes', () => {
+    const bothDescriptions = `export const page = {\n  slug: 'ambiguous',\n  title: 'Top',\n  description: 'One',\n  excerpt: 'Two',\n};\n`
+    const duplicateTitle = `export const page = {\n  slug: 'ambiguous',\n  title: 'One',\n  title: 'Two',\n  description: 'Description',\n};\n`
+    const nestedOnly = `export const page = {\n  slug: 'ambiguous',\n  nested: {\n    title: 'Nested',\n    description: 'Nested',\n  },\n};\n`
+    expect(inspectCtsMetaForSlug(bothDescriptions, 'ambiguous')).toBeNull()
+    expect(inspectCtsMetaForSlug(duplicateTitle, 'ambiguous')).toBeNull()
+    expect(inspectCtsMetaForSlug(nestedOnly, 'ambiguous')).toBeNull()
+  })
+
+  it('edits the target-level fields, never an earlier nested lookalike', () => {
+    const nestedBefore = `export const page = {\n  slug: 'safe',\n  nested: {\n    title: 'Nested title',\n    description: 'Nested description',\n  },\n  title: 'Target title',\n  description: 'Target description',\n};\n`
+    const result = replaceMetaForSlug(nestedBefore, 'safe', 'New target', 'New target description')
+    expect(result).not.toBeNull()
+    expect(result!.updated).toContain("    title: 'Nested title'")
+    expect(result!.updated).toContain("    description: 'Nested description'")
+    expect(result!.updated).toContain("  title: 'New target'")
+    expect(result!.updated).toContain("  description: 'New target description'")
+  })
+
+  it('treats replacement tokens literally and escapes line separators', () => {
+    const result = replaceMetaForSlug(
+      HUB_SOURCE,
+      'beijing-tours',
+      "Price $& $$ $1 $` $'\nNext",
+      'Line one\r\nLine two\u2028Line three\u2029End',
+    )
+    expect(result).not.toBeNull()
+    expect(result!.updated).toContain("title: 'Price $& $$ $1 $` $\\'\\nNext'")
+    expect(result!.updated).toContain("description: 'Line one\\r\\nLine two\\u2028Line three\\u2029End'")
+    expect(result!.updated).not.toContain("title: 'Price title:")
+  })
 })
 
 describe('buildSlugIndex', () => {
@@ -111,10 +221,18 @@ describe('buildSlugIndex', () => {
     expect(index.get('nope')).toBeUndefined()
   })
 
-  it('first file wins on duplicate slugs (deterministic)', () => {
+  it('removes duplicate slugs instead of selecting an arbitrary file', () => {
     const a = { path: 'a.ts', source: "slug: 'dup'" }
     const b = { path: 'b.ts', source: "slug: 'dup'" }
-    expect(buildSlugIndex([a, b]).get('dup')).toBe('a.ts')
+    expect(buildSlugIndex([a, b]).get('dup')).toBeUndefined()
+  })
+
+  it('removes a slug duplicated inside one file', () => {
+    const duplicate = {
+      path: 'one.ts',
+      source: "  slug: 'dup',\n  slug: 'dup',\n",
+    }
+    expect(buildSlugIndex([duplicate]).get('dup')).toBeUndefined()
   })
 })
 

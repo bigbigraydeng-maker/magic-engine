@@ -26,104 +26,15 @@ import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getConnection } from '@/lib/cms/connection-store'
 import { GithubClient } from '@/lib/cms/github-client'
+import { buildSlugIndex, CTS_CLIENT_ID, replaceMetaForSlug } from './cts-meta-source'
 
-export const CTS_CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
+export { buildSlugIndex, CTS_CLIENT_ID, replaceMetaForSlug } from './cts-meta-source'
 const DATA_DIR = 'src/lib/data'
 const MAX_PAGES_PER_RUN = 3
 const COOLDOWN_DAYS = 30
 const MIN_POSITION = 4
 const MAX_POSITION = 20
 const MIN_IMPRESSIONS = 10
-
-// ── Pure: narrow-lane source editing ────────────────────────────────────────────
-
-function escapeSingle(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
-}
-
-const STRING_LITERAL = /'(?:[^'\\]|\\.)*'/
-
-export interface MetaReplacement {
-  updated: string
-  oldTitle: string
-  oldDesc: string
-}
-
-/**
- * Replace the title + description/excerpt literals of the entry whose
- * `slug: '<slug>'` appears in the source. Returns null when the slug isn't
- * in this file, or when the entry lacks either field (caller skips — the
- * executor never guesses).
- *
- * The edit window ends at whichever comes first: the NEXT entry's `slug:`
- * or the next `export const`. Batch files hold many posts inside ONE export,
- * so an export-only boundary would let an entry missing its own excerpt
- * silently overwrite the next post's (魏征-style neighbour corruption).
- */
-export function replaceMetaForSlug(
-  source: string,
-  slug: string,
-  newTitle: string,
-  newDesc: string,
-): MetaReplacement | null {
-  const slugIdx = source.indexOf(`slug: '${slug}'`)
-  if (slugIdx === -1) return null
-
-  const bounds = [
-    source.indexOf("slug: '", slugIdx + 1),
-    source.indexOf('\nexport const', slugIdx),
-  ].filter((i) => i !== -1)
-  const windowEnd = bounds.length > 0 ? Math.min(...bounds) : source.length
-  const window = source.slice(slugIdx, windowEnd)
-
-  const titleRe = new RegExp(`(title:\\s*)${STRING_LITERAL.source}`)
-  // Hub pages use `description`, blog posts use `excerpt` — both are the
-  // rendered meta description in this repo. Detect, don't configure.
-  const descField = /(\bdescription:\s*)'/.test(window) ? 'description' : 'excerpt'
-  const descRe = new RegExp(`(${descField}:\\s*)${STRING_LITERAL.source}`)
-
-  const titleMatch = window.match(titleRe)
-  const descMatch = window.match(descRe)
-  if (!titleMatch || !descMatch) return null
-
-  const unquote = (m: string): string =>
-    m.replace(/^[^']*'/, '').replace(/'$/, '').replace(/\\'/g, "'").replace(/\\\\/g, '\\')
-
-  const oldTitle = unquote(titleMatch[0].slice(titleMatch[1].length))
-  const oldDesc = unquote(descMatch[0].slice(descMatch[1].length))
-
-  let newWindow = window.replace(titleRe, `$1'${escapeSingle(newTitle)}'`)
-  newWindow = newWindow.replace(descRe, `$1'${escapeSingle(newDesc)}'`)
-
-  return {
-    updated: source.slice(0, slugIdx) + newWindow + source.slice(windowEnd),
-    oldTitle,
-    oldDesc,
-  }
-}
-
-/**
- * slug → file path, built by scanning the data files' CONTENT.
- *
- * Filenames do not track URL slugs in this repo: /blog/liziba-station-
- * chongqing-guide lives in blogs-liziba-monorail-guide.ts, and four of CTS's
- * top-opportunity posts sit inside shared batch files (blogs-longtail-batch1
- * .ts etc). Guessing `blogs-<slug>.ts` found 2 of 6 — the first two runs
- * produced no PR for exactly this reason.
- */
-export function buildSlugIndex(
-  files: Array<{ path: string; source: string }>,
-): Map<string, string> {
-  const index = new Map<string, string>()
-  const slugRe = /slug:\s*'([^']+)'/g
-  for (const file of files) {
-    let m: RegExpExecArray | null
-    while ((m = slugRe.exec(file.source)) !== null) {
-      if (!index.has(m[1])) index.set(m[1], file.path)
-    }
-  }
-  return index
-}
 
 // ── Pure: GSC candidate picking ─────────────────────────────────────────────────
 

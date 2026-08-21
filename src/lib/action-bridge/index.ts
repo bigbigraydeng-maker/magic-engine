@@ -117,6 +117,14 @@ function mappingTableProblem(table: readonly CandidateMappingEntry[]): string | 
     if (!isMeaningfulString(entry?.actionKey)) {
       return `配对表里「${entry.domain}」/「${entry.intent}」这条没有有效的 actionKey`
     }
+    if (
+      entry.submissionBoundary !== undefined &&
+      entry.submissionBoundary !== 'generic_page_optimization' &&
+      entry.submissionBoundary !== 'wordpress_reference_loop' &&
+      entry.submissionBoundary !== 'cts_github_reference_loop'
+    ) {
+      return `配对表里「${entry.domain}」/「${entry.intent}」这条有非法 submissionBoundary`
+    }
     // 逐项比对，跟 map() 用同一个判据 —— 不拼字符串，所以不会有分隔符碰撞
     if (seen.some(([d, i]) => d === entry.domain && i === entry.intent)) {
       return `配对表里「${entry.domain}」/「${entry.intent}」出现了不止一次 —— 歧义配对，不靠数组顺序决定`
@@ -193,6 +201,9 @@ export function createCandidateMapper(deps: CandidateMapperDeps): CandidateMappe
         outcome: 'mapped',
         actionKey: entry.actionKey,
         actionVersion: definition.version,
+        ...(entry.submissionBoundary
+          ? { submissionBoundary: entry.submissionBoundary }
+          : {}),
       }
     },
 
