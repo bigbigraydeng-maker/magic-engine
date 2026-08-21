@@ -1189,7 +1189,7 @@ BEGIN
          lease_expires_at    = now() + make_interval(secs => p_lease_seconds),
          claim_generation    = v_next_gen,
          previous_claimed_by = CASE WHEN v_reclaimed THEN v_prev_owner ELSE previous_claimed_by END,
-         reclaim_count       = reclaim_count + CASE WHEN v_reclaimed THEN 1 ELSE 0 END,
+         reclaim_count       = v_run.reclaim_count + CASE WHEN v_reclaimed THEN 1 ELSE 0 END,
          last_reclaimed_at   = CASE WHEN v_reclaimed THEN now() ELSE last_reclaimed_at END,
          -- 接管一个 running 的 run 意味着上一次执行没跑完，得让人看得见
          needs_human         = CASE WHEN v_was_running THEN needs_human ELSE needs_human END,

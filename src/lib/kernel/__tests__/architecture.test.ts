@@ -2003,6 +2003,8 @@ describe('lineage 视图的权限（C1）', () => {
 
 describe('两处清单不许分家（S1 / S2）', () => {
   const MIGRATION_SQL = 'supabase/migrations/20260808000003_me2_execution_kernel_v1.sql'
+  const CLAIM_RECLAIM_COUNT_FIX_MIGRATION_SQL =
+    'supabase/migrations/20260821033000_fix_kernel_claim_reclaim_count_ambiguity.sql'
   // 🔴 已合并进 main 的历史迁移不可变（Codex P2，PR #898）：白名单的最新真相在
   //    这条前向迁移里的 CREATE OR REPLACE FUNCTION —— 不管目标环境有没有 apply
   //    过历史迁移，这条语句都会把函数换成最新版本。跟 runner.ts 比对必须用这份
@@ -2097,6 +2099,21 @@ describe('两处清单不许分家（S1 / S2）', () => {
     // 接管审计
     expect(fn).toContain('previous_claimed_by')
     expect(fn).toContain('reclaim_count')
+    // RETURNS TABLE 也有一个名为 reclaim_count 的输出变量。UPDATE 右侧若写成
+    // 裸 `reclaim_count`，生产 PostgreSQL 会报 column reference is ambiguous，
+    // 让每一条 queued run 永远领不到 owner。
+    expect(fn).toContain('reclaim_count       = v_run.reclaim_count +')
+    expect(fn).not.toMatch(/reclaim_count\s*=\s*reclaim_count\s*\+/)
+  })
+
+  it('🔴 生产前向迁移也必须消除 reclaim_count 输出变量歧义（T1）', () => {
+    const sql = read(CLAIM_RECLAIM_COUNT_FIX_MIGRATION_SQL)
+    expect(sql).toContain('CREATE OR REPLACE FUNCTION public.kernel_claim_or_takeover_run')
+    expect(sql).toContain('reclaim_count       = v_run.reclaim_count +')
+    expect(sql).not.toMatch(/reclaim_count\s*=\s*reclaim_count\s*\+/)
+    expect(sql).toContain(
+      'GRANT  EXECUTE ON FUNCTION public.kernel_claim_or_takeover_run(uuid, text, integer, bigint)',
+    )
   })
 
   it('🔴 交接（批准 / 拒绝 / 恢复）都必须清空租约，否则会留下僵尸 owner（T1）', () => {
