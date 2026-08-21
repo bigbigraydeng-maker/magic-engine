@@ -98,7 +98,7 @@ async function main(): Promise<void> {
           triggeredBy: 'human',
           triggeredByRef: 'codex-customer-zero-2026-08-21',
           rationale: 'PM authorized one CTS Customer Zero Kernel approval and Draft PR on 2026-08-21.',
-          correlationId: 'cts-customer-zero-gsc-2026-08-21',
+          correlationId: 'c7500000-0000-4000-8000-000000002026',
         },
       },
     )
