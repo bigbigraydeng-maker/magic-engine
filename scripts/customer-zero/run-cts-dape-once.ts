@@ -16,6 +16,29 @@ import { supabaseAdmin } from '@/lib/supabase'
 const PAGE_ID = '75df9241-5633-4a1d-95e6-a30d55079baf'
 const APPROVER = process.env.CTS_CUSTOMER_ZERO_APPROVED_BY?.trim() ?? ''
 
+function triggerFailureCode(
+  result: Awaited<ReturnType<typeof triggerCtsGithubMetadataReferenceLoop>>,
+): string {
+  if (result.ok) return 'kernel_submission_not_pending'
+  if (result.reason === 'cts_trigger_not_ready') {
+    const safeUpstreamReasons = new Set([
+      'connection_not_ready',
+      'invalid_identity',
+      'ledger_page_not_found',
+      'provider_read_failed',
+      'source_entry_invalid',
+      'target_scope_invalid',
+      'target_slug_invalid',
+      'target_source_not_found',
+    ])
+    const upstream = result.upstreamReason && safeUpstreamReasons.has(result.upstreamReason)
+      ? `_${result.upstreamReason}`
+      : ''
+    return `trigger_${result.detail}${upstream}`
+  }
+  return `trigger_${result.reason}`
+}
+
 function preflight(): void {
   if (process.env.CTS_GITHUB_METADATA_ACTION_ENABLED !== 'true') {
     throw new Error('rollout_disabled')
@@ -32,47 +55,58 @@ async function main(): Promise<void> {
     workerId: 'render-cts-customer-zero-once',
     ownerId: 'render-cts-customer-zero-once',
   })
-  const accessToken = await getValidToken(CTS_CLIENT_ID, 'google_gsc')
-  const submitted = await triggerCtsGithubMetadataReferenceLoop(
-    { caller: createDefaultDeps(kernel) },
-    {
-      pageId: PAGE_ID,
-      gsc: {
-        accessToken,
-        startDate: '2026-07-23',
-        endDate: '2026-08-20',
-        evidencePageUrl: 'https://www.ctstours.co.nz/',
-        query: 'china tours',
-      },
-      proposal: {
-        title: 'China Tours & Holiday Packages | CTS Tours',
-        description: 'Explore the complete CTS collection of escorted, private and special-interest China tours.',
-        h1: 'Explore All China Tours',
-        titleRationale: 'Differentiate the generic collection from the NZ-specific landing page.',
-        descriptionRationale: 'Describe the range of tour formats without changing body copy.',
-        h1Rationale: 'Give the generic hub a collection-focused heading.',
-      },
-      growth: {
-        goalId: null,
-        orderingRationale: 'Test the smallest three-field intent distinction before considering body edits.',
-        verification: {
-          windowDays: 28,
-          baseline: 'CTS NZ exact page×query window ending 2026-08-20',
-          success: '/china-tours becomes the selected URL for “china tours”',
-          failure: 'the homepage remains the selected URL for “china tours”',
-          indeterminate: 'privacy filtering or insufficient page×query rows',
+  let accessToken: string
+  try {
+    accessToken = await getValidToken(CTS_CLIENT_ID, 'google_gsc')
+  } catch {
+    throw new Error('gsc_token_unavailable')
+  }
+
+  let submitted: Awaited<ReturnType<typeof triggerCtsGithubMetadataReferenceLoop>>
+  try {
+    submitted = await triggerCtsGithubMetadataReferenceLoop(
+      { caller: createDefaultDeps(kernel) },
+      {
+        pageId: PAGE_ID,
+        gsc: {
+          accessToken,
+          startDate: '2026-07-23',
+          endDate: '2026-08-20',
+          evidencePageUrl: 'https://www.ctstours.co.nz/',
+          query: 'china tours',
+        },
+        proposal: {
+          title: 'China Tours & Holiday Packages | CTS Tours',
+          description: 'Explore the complete CTS collection of escorted, private and special-interest China tours.',
+          h1: 'Explore All China Tours',
+          titleRationale: 'Differentiate the generic collection from the NZ-specific landing page.',
+          descriptionRationale: 'Describe the range of tour formats without changing body copy.',
+          h1Rationale: 'Give the generic hub a collection-focused heading.',
+        },
+        growth: {
+          goalId: null,
+          orderingRationale: 'Test the smallest three-field intent distinction before considering body edits.',
+          verification: {
+            windowDays: 28,
+            baseline: 'CTS NZ exact page×query window ending 2026-08-20',
+            success: '/china-tours becomes the selected URL for “china tours”',
+            failure: 'the homepage remains the selected URL for “china tours”',
+            indeterminate: 'privacy filtering or insufficient page×query rows',
+          },
+        },
+        kernel: {
+          triggeredBy: 'human',
+          triggeredByRef: 'codex-customer-zero-2026-08-21',
+          rationale: 'PM authorized one CTS Customer Zero Kernel approval and Draft PR on 2026-08-21.',
+          correlationId: 'cts-customer-zero-gsc-2026-08-21',
         },
       },
-      kernel: {
-        triggeredBy: 'human',
-        triggeredByRef: 'codex-customer-zero-2026-08-21',
-        rationale: 'PM authorized one CTS Customer Zero Kernel approval and Draft PR on 2026-08-21.',
-        correlationId: 'cts-customer-zero-gsc-2026-08-21',
-      },
-    },
-  )
+    )
+  } catch {
+    throw new Error('trigger_threw')
+  }
   if (!submitted.ok || submitted.outcome !== 'pending_approval') {
-    throw new Error('kernel_submission_not_pending')
+    throw new Error(triggerFailureCode(submitted))
   }
 
   const completed = await approveAndRun(kernel, submitted.runId, APPROVER)
