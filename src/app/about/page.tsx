@@ -139,9 +139,9 @@ export default function AboutPage() {
           <div className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
             <address className="not-italic text-sm leading-8 text-slate-700">
               <p>
-                <strong>Magic Lab</strong> — operator of Magic Engine
+                <strong>Magic Engine AI Technology Limited</strong> — operator of Magic Engine
               </p>
-              <p>98 Beatrice Terrace, Ascot, Brisbane, Queensland, Australia</p>
+              <p>New Zealand</p>
               <p>
                 Website:{' '}
                 <a
@@ -167,7 +167,7 @@ export default function AboutPage() {
 
       <footer className="mt-16 border-t border-slate-200 bg-white px-5 py-8 sm:px-8">
         <div className="mx-auto flex max-w-4xl flex-col items-center justify-between gap-4 text-sm text-slate-500 sm:flex-row">
-          <p>© {new Date().getFullYear()} Magic Lab. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} Magic Engine AI Technology Limited. All rights reserved.</p>
           <nav className="flex gap-6">
             <Link href="/about" className="hover:text-slate-950">
               About

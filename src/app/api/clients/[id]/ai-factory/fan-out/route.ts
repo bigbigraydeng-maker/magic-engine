@@ -78,7 +78,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   if (!budget.allowed) {
     return NextResponse.json({
       success: false,
-      error:   `本月 AI Factory 预算已达上限（已用 ${budget.spent}/${budget.cap} MTC）。请下月继续或联系 Magic Lab 提升配额。`,
+      error:   `本月 AI Factory 预算已达上限（已用 ${budget.spent}/${budget.cap} MTC）。请下月继续或联系 Magic Engine 提升配额。`,
       budget:  { spent: budget.spent, cap: budget.cap, remaining: budget.remaining },
     }, { status: 429 })
   }

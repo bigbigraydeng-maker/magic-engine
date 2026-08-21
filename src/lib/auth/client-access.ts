@@ -142,7 +142,7 @@ export async function requirePaidClientAccess(
     return {
       ok: false,
       status: 403,
-      error: 'This feature requires a paid plan. Contact Magic Lab to unlock.',
+      error: 'This feature requires a paid plan. Contact Magic Engine to unlock.',
       reason: 'paid_only',
     }
   }

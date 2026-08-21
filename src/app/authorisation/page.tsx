@@ -199,7 +199,7 @@ function SiteFooter() {
   return (
     <footer className="mt-16 border-t border-slate-200 bg-white px-5 py-8 sm:px-8">
       <div className="mx-auto flex max-w-4xl flex-col items-center justify-between gap-4 text-sm text-slate-500 sm:flex-row">
-        <p>© {new Date().getFullYear()} Magic Lab. All rights reserved.</p>
+        <p>© {new Date().getFullYear()} Magic Engine AI Technology Limited. All rights reserved.</p>
         <nav className="flex gap-6">
           <Link href="/about" className="hover:text-slate-950">
             About
@@ -655,7 +655,7 @@ function ContactSection() {
         Email {CONTACT_EMAIL}
       </a>
       <p className="mt-6 text-xs leading-6 text-slate-500">
-        Magic Engine is built and operated by <strong>Magic Lab</strong>, which is the
+        Magic Engine is built and operated by <strong>Magic Engine AI Technology Limited</strong>, which is the
         name you will see on invoices and in the footer of this page. We contact you from{' '}
         <strong>magicengine.cloud</strong> and <strong>magicengine.com.au</strong>. If
         anyone asks for account access from a different domain, or asks for your

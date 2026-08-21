@@ -27,3 +27,11 @@
 ## Markets and languages
 
 Magic Engine is designed for Australia and New Zealand. Delivery supports English and Chinese-speaking teams.
+
+## Legal entity
+
+Magic Engine is operated by Magic Engine AI Technology Limited in New Zealand.
+Magic Engine serves customers across Australia and New Zealand.
+Founder: Ray Deng.
+
+Canonical description: Magic Engine helps English- and Chinese-speaking teams across Australia and New Zealand improve SEO, GEO, training, and launch-ready execution in one place—turning diagnosis into visible work.

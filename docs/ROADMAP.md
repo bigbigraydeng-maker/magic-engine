@@ -4,6 +4,8 @@
 > 已上线的功能见 [history/CHANGELOG.md](./history/CHANGELOG.md)。
 > 系统当前跑着什么见 [STATE.md](./STATE.md)。架构决策见 [DECISIONS.md](./DECISIONS.md)。
 > 完整历史底稿（含 344 条已完成 + 全部 Phase 背景）：[archive/ROADMAP-full-2026-07-25.md](./archive/ROADMAP-full-2026-07-25.md)
+>
+> 🔴 **Entity clarification (2026-08-18, per #1049)**：本文件中出现的 **Magic Lab Academy / Magic Lab Class** 是 internal working name（不是 registered parent entity）（机器可读标记：`proposed_future_holding_brand, unregistered, not current legal parent`）。Magic Engine 的运营法人是 **Magic Engine AI Technology Limited (New Zealand)**。任何对外内容/客户交付物不得声称 Magic Lab 为 legal parent / holding company。详见 [PRODUCT.md](./PRODUCT.md) 顶部 Entity clarification callout 与 [CLAUDE.md](../CLAUDE.md) §项目定位。
 
 **新增任务的规则**：先登记到本文件，再写代码。完成后从本文件删除、追加到 `history/CHANGELOG.md`。commit 带 Phase ID，如 `feat(ads): xxx [P18.B.1]`。
 

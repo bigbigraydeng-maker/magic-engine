@@ -450,7 +450,7 @@ export default async function HomePage() {
               <span style={{ fontFamily: DISPLAY, fontWeight: 600, fontSize: 14 }}>
                 Magic Engine
               </span>
-              <span className="ml-2">© {new Date().getFullYear()} Magic Lab. All rights reserved.</span>
+              <span className="ml-2">© {new Date().getFullYear()} Magic Engine AI Technology Limited. All rights reserved.</span>
             </div>
             <nav className="flex flex-wrap justify-center gap-5 text-sm">
               <Link href="/about" className="hover:text-[#1A1A1A] transition-colors">About</Link>

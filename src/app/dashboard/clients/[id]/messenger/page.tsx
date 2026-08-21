@@ -123,7 +123,7 @@ export default function MessengerPage() {
         <div className="rounded-xl border border-black/10 bg-white p-8 text-center">
           <p className="text-sm text-me-charcoal/60">还没有同步到任何 Facebook 私信。</p>
           <p className="mt-2 text-xs leading-relaxed text-me-charcoal/40">
-            系统每小时自动拉一次。如果这里一直是空的，说明主页还没接上 —— 找 Magic Lab 团队看一眼。
+            系统每小时自动拉一次。如果这里一直是空的，说明主页还没接上 —— 找 Magic Engine 团队看一眼。
           </p>
         </div>
       )}

@@ -88,7 +88,7 @@ function failBudget(spent: number, cap: number, remaining: number): ChargeFailur
     status: 429,
     body: {
       success: false,
-      error: `本月预算已达上限（已用 ${spent}/${cap} MTC）。请下月继续或联系 Magic Lab 提升配额。`,
+      error: `本月预算已达上限（已用 ${spent}/${cap} MTC）。请下月继续或联系 Magic Engine 提升配额。`,
       reason: 'monthly_cap_reached',
       budget: { spent, cap, remaining },
     },

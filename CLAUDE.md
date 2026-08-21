@@ -10,7 +10,7 @@
 
 ## 项目定位
 
-Magic Engine 是 Magic Lab 2026 旗舰产品 —— **以 Goal 为中心的生意指挥平台**（营销只是其中一条战线）。
+Magic Engine 是**以 Goal 为中心的生意指挥平台**（营销只是其中一条战线），由 **Magic Engine AI Technology Limited（New Zealand）** 运营。Magic Lab 是提案中的未来 holding-company 品牌 —— `proposed_future_holding_brand, unregistered, not current legal parent`，当前不是 Magic Engine 的法律母公司/所有者，任何对外声称一律禁止。
 护城河不是数据（数据可以买），是**执行自动化**：诊断发现问题 → 平台自动生成并执行修复动作 → 结果回流归因 → 飞轮。
 目标市场 **AU / NZ**：AU/NZ 英语拼写、时区 NZST/AEST、SERP 带 `gl=au`/`gl=nz`、AI 问句带地域标签。
 

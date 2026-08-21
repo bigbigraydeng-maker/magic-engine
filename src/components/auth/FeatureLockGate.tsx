@@ -131,7 +131,7 @@ export function FeatureLockModal({
                 Talk to us — FDE chaperone
               </span>
               <span className="mt-1 block text-xs leading-5 text-indigo-900/80">
-                A Magic Lab field engineer configures, runs and reviews this with you.
+                A Magic Engine field engineer configures, runs and reviews this with you.
               </span>
             </span>
           </a>

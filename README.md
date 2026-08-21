@@ -1,6 +1,9 @@
 # Magic Engine
 
-> Magic Lab 2026 旗舰产品 — **以 Goal 为中心的生意指挥平台**，SEO × AI 搜索双战场执行自动化。
+> **以 Goal 为中心的生意指挥平台**，SEO × AI 搜索双战场执行自动化。
+>
+> 运营法人：**Magic Engine AI Technology Limited（New Zealand）**。
+> **Magic Lab** = `proposed_future_holding_brand, unregistered, not current legal parent` —— 仅内部工作代号，任何对外内容/JSON-LD/客户交付物不得声称它为 Magic Engine 的 legal parent / holding company。
 
 护城河不是数据（数据可以买），是**执行自动化**：诊断发现问题 → 平台自动生成并执行修复动作 → 结果回流归因 → 飞轮。
 

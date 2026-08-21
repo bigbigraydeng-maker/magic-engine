@@ -38,7 +38,7 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json(
       {
         success: false,
-        error: '素材确认必须由 Magic Lab 的人来做 —— 自己给自己的素材背书，这个确认就没有意义了',
+        error: '素材确认必须由 Magic Engine 的人来做 —— 自己给自己的素材背书，这个确认就没有意义了',
       },
       { status: 403 },
     )

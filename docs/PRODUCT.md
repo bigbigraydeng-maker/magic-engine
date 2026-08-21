@@ -5,6 +5,8 @@
 > ⚠️ **产品视角文档，写于 2026-05-23。系统当前状态请看 [STATE.md](./STATE.md)，未完成任务看 [ROADMAP.md](./ROADMAP.md)。**
 >
 > 已知过时点：§七「当前阶段」停在 2026-04；定位一节的「三大核心能力」已被 DAPE 四段 + 6 支柱取代（见 [DECISIONS.md](./DECISIONS.md) 2026-06-08）；MLT 代币体系已被 MTC 取代。
+>
+> 🔴 **Entity clarification (2026-08-18, per #1049 Entity Definition v1)**：Magic Engine 是 digital marketing product，由 **Magic Engine AI Technology Limited（New Zealand）** 运营。**Magic Lab 是提案中的未来 holding-company 品牌，尚未注册，当前不是 Magic Engine 的法律母公司/所有者/parent entity**（机器可读标记：`proposed_future_holding_brand, unregistered, not current legal parent`）。本文正文里所有「Magic Lab 旗下 / Magic Lab 在 2026 年的旗舰产品 / Magic Lab 团队」等叙述属于历史草稿口径，**agent 在生成对外内容/JSON-LD/客户交付物时不得复用，一律按此 Entity clarification 为准**。Magic Lab Academy / Magic Lab Class 是内部工作代号（internal working name; not a registered parent entity），暂用不改。
 
 ---
 

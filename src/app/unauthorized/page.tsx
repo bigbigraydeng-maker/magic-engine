@@ -6,7 +6,7 @@ export default function UnauthorizedPage() {
         <h1 className="text-2xl font-bold text-white mb-2">Access Denied</h1>
         <p className="text-gray-400 text-sm mb-6">
           Your email is not on the admin whitelist.
-          <br />Contact your Magic Lab administrator.
+          <br />Contact your Magic Engine administrator.
         </p>
         <a
           href="/login"

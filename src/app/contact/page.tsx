@@ -62,7 +62,7 @@ export default function ContactPage() {
               raydeng@magicengine.com.au
             </a>
             <p className="mt-1 text-xs text-slate-500">
-              98 Beatrice Terrace, Ascot, Brisbane, QLD, Australia
+              New Zealand
             </p>
           </div>
         </div>
@@ -70,7 +70,7 @@ export default function ContactPage() {
 
       <footer className="mt-8 border-t border-slate-200 bg-white px-5 py-8 sm:px-8">
         <div className="mx-auto flex max-w-2xl flex-col items-center justify-between gap-4 text-sm text-slate-500 sm:flex-row">
-          <p>© {new Date().getFullYear()} Magic Lab. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} Magic Engine AI Technology Limited. All rights reserved.</p>
           <nav className="flex gap-6">
             <Link href="/about" className="hover:text-slate-950">About</Link>
             <Link href="/privacy" className="hover:text-slate-950">Privacy Policy</Link>

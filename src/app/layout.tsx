@@ -28,9 +28,9 @@ export const metadata: Metadata = {
   },
   description: siteDescription,
   applicationName: 'Magic Engine',
-  authors: [{ name: 'Magic Lab' }],
-  creator: 'Magic Lab',
-  publisher: 'Magic Lab',
+  authors: [{ name: 'Magic Engine AI Technology Limited' }],
+  creator: 'Magic Engine AI Technology Limited',
+  publisher: 'Magic Engine AI Technology Limited',
   openGraph: {
     type: 'website',
     locale: 'en_AU',

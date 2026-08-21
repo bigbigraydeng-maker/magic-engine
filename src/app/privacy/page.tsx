@@ -1,3 +1,7 @@
+/* LEGAL REVIEW REQUIRED BEFORE MERGE — see docs/marketing/me-entity-alignment-2026-08-18.md §5 + §9.5.
+ * Operating entity was updated to Magic Engine AI Technology Limited (New Zealand). This source
+ * comment is stripped by the build and never appears in served HTML; the full risk list lives in
+ * the audit doc, the PR body, and the PR review checklist. Do not merge without legal counsel. */
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
@@ -19,7 +23,7 @@ export default function PrivacyPage() {
         <p className="mb-8 text-gray-700">
           Magic Engine (&ldquo;we&rdquo;, &ldquo;us&rdquo;, or &ldquo;our&rdquo;) is an
           AI-powered SEO, social-media, advertising, and GEO execution platform operated by Magic
-          Lab. This Privacy Policy explains what information we collect, how we use it, and your
+          Engine AI Technology Limited. This Privacy Policy explains what information we collect, how we use it, and your
           choices regarding your data when you use our platform at{' '}
           <a href={SITE_URL} className="text-indigo-600 underline">
             {SITE_URL}
@@ -270,9 +274,9 @@ export default function PrivacyPage() {
             at:
           </p>
           <address className="mt-4 not-italic text-gray-700">
-            <strong>Magic Lab</strong>
+            <strong>Magic Engine AI Technology Limited</strong>
             <br />
-            98 Beatrice Terrace, Ascot, Brisbane, Queensland, Australia
+            New Zealand
             <br />
             Email:{' '}
             <a href={`mailto:${CONTACT_EMAIL}`} className="text-indigo-600 underline">

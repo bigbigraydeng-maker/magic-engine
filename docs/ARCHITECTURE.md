@@ -25,7 +25,9 @@
 
 ## 0. 战略定位（2026）
 
-Magic Engine 是 **Magic Lab 2026 旗舰产品**，承担两大角色：
+> 🔴 **Entity clarification (2026-08-18, per #1049)**：Magic Engine 由 **Magic Engine AI Technology Limited (New Zealand)** 运营。**Magic Lab 是提案中的未来 holding-company 品牌，尚未注册，当前不是 Magic Engine 的法律母公司**（机器可读标记：`proposed_future_holding_brand, unregistered, not current legal parent`）。下方历史叙述里的「Magic Lab 2026 旗舰产品 / Magic Lab Academy」属于内部工作代号（`internal working name; not a registered parent entity`），对外一律不作 legal-parent 声称。
+
+Magic Engine 是 **Magic Lab 2026 旗舰产品**（内部代号），承担两大角色：
 1. **直接收入**：以年度陪跑服务（5–15 万/客户/年）形式交付
 2. **Magic Lab Academy 实战载体**：所有 SOP 和案例从 Magic Engine 沉淀
 

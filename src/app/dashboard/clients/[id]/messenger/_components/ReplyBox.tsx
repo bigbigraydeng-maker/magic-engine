@@ -34,7 +34,7 @@ function humanError(status: number, reason?: string): string {
     return 'Facebook 已经不让回这条了 —— 请改用电话或邮件联系客户。'
   }
   if (reason === 'no_token' || status === 424) {
-    return 'Facebook 授权掉线了，发不出去。请找 Magic Lab 团队重新连一次。'
+    return 'Facebook 授权掉线了，发不出去。请找 Magic Engine 团队重新连一次。'
   }
   if (reason === 'graph_failed' || status === 502) {
     return 'Facebook 没有收下这条消息。稍等一分钟再试一次；连着失败请找团队。'

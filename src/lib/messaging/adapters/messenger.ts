@@ -102,7 +102,7 @@ export const messengerAdapter: ChannelAdapter = {
       return { ok: false, code: 'window_closed', reason: 'Facebook 已经不让回这条了，请改用电话或邮件' }
     }
     if (res.reason === 'no_token') {
-      return { ok: false, code: 'not_connected', reason: 'Facebook 授权掉线了，请找 Magic Lab 团队重连' }
+      return { ok: false, code: 'not_connected', reason: 'Facebook 授权掉线了，请找 Magic Engine 团队重连' }
     }
     return { ok: false, code: 'failed', reason: res.error }
   },
