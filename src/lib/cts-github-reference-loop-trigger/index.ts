@@ -198,7 +198,12 @@ export async function triggerCtsGithubMetadataReferenceLoop(
     return notReady('gsc_scope_invalid')
   }
 
-  const redlines = await loadTrustedClientRedlines(CTS_CLIENT_ID)
+  let redlines: Awaited<ReturnType<typeof loadTrustedClientRedlines>>
+  try {
+    redlines = await loadTrustedClientRedlines(CTS_CLIENT_ID)
+  } catch {
+    return notReady('redline_not_ready', 'read_failed')
+  }
   if (!redlines.redline.available) return notReady('redline_not_ready')
 
   const reportParams = {
@@ -209,7 +214,12 @@ export async function triggerCtsGithubMetadataReferenceLoop(
     country: CTS_GSC_COUNTRY,
     rowLimit: 250,
   }
-  const rows = await fetchGscPageQueryReport(reportParams)
+  let rows: Awaited<ReturnType<typeof fetchGscPageQueryReport>>
+  try {
+    rows = await fetchGscPageQueryReport(reportParams)
+  } catch {
+    return notReady('gsc_read_failed')
+  }
   const matches = rows.filter((row) =>
     row.page === input.gsc.evidencePageUrl && row.query === input.gsc.query)
   if (matches.length === 0) return notReady('gsc_row_not_found')

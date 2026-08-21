@@ -304,6 +304,38 @@ describe('CTS controlled GSC → Kernel trigger', () => {
     expect(f.tables.action_runs).toEqual([])
   })
 
+  it('fails closed with a safe stage when the redline read throws', async () => {
+    sourceMocks.loadRedlines.mockRejectedValue(new Error('sensitive database detail'))
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const f = fixture()
+    await expect(triggerCtsGithubMetadataReferenceLoop(
+      { caller: createDefaultDeps(f.kernel) },
+      triggerInput(),
+    )).resolves.toEqual({
+      ok: false,
+      reason: 'cts_trigger_not_ready',
+      detail: 'redline_not_ready',
+      upstreamReason: 'read_failed',
+    })
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(f.tables.action_runs).toEqual([])
+  })
+
+  it('fails closed with a safe stage when the GSC read throws', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('sensitive provider detail'))
+    const f = fixture()
+    await expect(triggerCtsGithubMetadataReferenceLoop(
+      { caller: createDefaultDeps(f.kernel) },
+      triggerInput(),
+    )).resolves.toEqual({
+      ok: false,
+      reason: 'cts_trigger_not_ready',
+      detail: 'gsc_read_failed',
+    })
+    expect(sourceMocks.loadPage).not.toHaveBeenCalled()
+    expect(f.tables.action_runs).toEqual([])
+  })
+
   it('fails closed on duplicate exact rows instead of selecting one', async () => {
     const row = {
       keys: [EVIDENCE_PAGE, 'china tours'],

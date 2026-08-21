@@ -64,6 +64,7 @@ export type CtsGithubReferenceLoopTriggerResult =
       readonly detail:
         | 'rollout_disabled'
         | 'gsc_scope_invalid'
+        | 'gsc_read_failed'
         | 'gsc_row_not_found'
         | 'gsc_row_ambiguous'
         | 'redline_not_ready'
