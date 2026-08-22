@@ -32,4 +32,9 @@ export const MAPPING_TABLE: readonly CandidateMappingEntry[] = [
     intent: 'optimize_page_answerability',
     actionKey: 'page.apply_optimization_request',
   },
+  {
+    domain: 'social',
+    intent: 'publish_approved_post',
+    actionKey: 'social.schedule_approved_post',
+  },
 ]

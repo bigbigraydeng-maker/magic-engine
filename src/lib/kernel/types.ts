@@ -26,6 +26,7 @@ import type { AccessTier } from '@/lib/auth/access-types'
 export type ActionKey =
   | 'seo.build_publish_package'
   | 'page.apply_optimization_request'
+  | 'social.schedule_approved_post'
 
 /** 一个 run 为了什么而跑。决定它需不需要挂 Goal。 */
 export type ActionPurpose =
@@ -136,6 +137,7 @@ export type VerificationMethod =
    *    Growth 层的 matched remeasurement 走下游 Measurement/Verification 链，跟这个 method 无关。
    */
   | 'page_apply_integrity'
+  | 'social_schedule_integrity'
 
 export interface VerificationSpec {
   readonly method: VerificationMethod

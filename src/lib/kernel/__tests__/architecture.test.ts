@@ -2223,13 +2223,19 @@ describe('两处清单不许分家（S1 / S2）', () => {
 
 describe('注册表的封闭性', () => {
   it('capability 的实现集合跟注册表的动作集合完全对齐', async () => {
-    const { ACTION_KEYS } = await import('../registry')
+    const { ACTION_KEYS, LOCAL_ONLY_ACTION_KEYS } = await import('../registry')
     const { createCapabilities } = await import('@/lib/capabilities')
     const impls = Object.keys(createCapabilities({} as never))
+    const productionKeys = ACTION_KEYS.filter(
+      (key) => !LOCAL_ONLY_ACTION_KEYS.includes(
+        key as (typeof LOCAL_ONLY_ACTION_KEYS)[number],
+      ),
+    )
     expect(
       impls.sort(),
-      '注册表里有、实现里没有 = 提交了会死信；实现里有、注册表里没有 = 一条永远调不到的路。',
-    ).toEqual([...ACTION_KEYS].sort())
+      '生产能力必须与非 local-only 动作对齐；local-only 动作不得被默认装配。',
+    ).toEqual([...productionKeys].sort())
+    expect(impls).not.toContain('social.schedule_approved_post')
   })
 
   it('每个动作定义都把幂等 / 重试 / 副作用 / 风险说清楚了', async () => {

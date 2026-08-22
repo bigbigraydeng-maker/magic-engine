@@ -204,9 +204,98 @@ const PAGE_APPLY_OPTIMIZATION_REQUEST: ActionDefinition<'page.apply_optimization
   allowedPurposes: ['growth'],
 }
 
+/**
+ * Local contract proof only. The production capability composition deliberately
+ * does not contain this action, so registration cannot enable provider traffic.
+ */
+const SOCIAL_SCHEDULE_APPROVED_POST: ActionDefinition<'social.schedule_approved_post'> = {
+  actionKey: 'social.schedule_approved_post',
+  version: 1,
+  title: '把一条已批准的纯文字社媒内容排入指定账号',
+  inputSchema: {
+    type: 'object',
+    required: [
+      'content_post_id',
+      'account_ref',
+      'platform',
+      'text',
+      'approved_content_sha256',
+      'scheduled_at',
+    ],
+    properties: {
+      content_post_id: { type: 'string' },
+      account_ref: { type: 'string' },
+      platform: { type: 'string' },
+      text: { type: 'string' },
+      approved_content_sha256: { type: 'string' },
+      scheduled_at: { type: 'string' },
+    },
+    additionalProperties: false,
+  },
+  outputSchema: {
+    type: 'object',
+    required: [
+      'provider_id',
+      'provider_job_id',
+      'provider_post_id',
+      'content_post_id',
+      'account_ref',
+      'platform',
+      'content_sha256',
+      'scheduled_at',
+      'publication_status',
+      'observed_at',
+    ],
+    properties: {
+      provider_id: { type: 'string' },
+      provider_job_id: { type: 'string' },
+      provider_post_id: { type: 'string' },
+      content_post_id: { type: 'string' },
+      account_ref: { type: 'string' },
+      platform: { type: 'string' },
+      content_sha256: { type: 'string' },
+      scheduled_at: { type: 'string' },
+      publication_status: { type: 'string' },
+      observed_at: { type: 'string' },
+    },
+    additionalProperties: false,
+  },
+  capability: 'social.schedule_approved_post',
+  risk: 'medium',
+  sideEffect: 'outward',
+  reversible: true,
+  outwardAuthorization: {
+    declaredIn: 'docs/specs/2026-08-22-social-governed-contract-proof.md',
+    requiresHumanApproval: true,
+    rollback: 'provider_native',
+  },
+  idempotency: {
+    keyFields: [
+      'content_post_id',
+      'account_ref',
+      'platform',
+      'approved_content_sha256',
+      'scheduled_at',
+    ],
+    scope: 'client',
+  },
+  costModel: {
+    kind: 'fixed',
+    estimate: () => 0,
+    stepCeilingUsd: { preflight: 0, schedule: 0, verify: 0 },
+  },
+  providerIdempotency: 'unsupported',
+  retryPolicy: { maxAttempts: 1, backoff: 'fixed', baseMs: 0 },
+  verification: { method: 'social_schedule_integrity', delayMs: 0 },
+  requiredCapabilityTier: 'paid_client',
+  steps: ['preflight', 'schedule', 'verify'],
+  allowedPurposes: ['growth'],
+}
+
 const DEFINITIONS: Readonly<Record<ActionKey, ActionDefinition>> = {
   'seo.build_publish_package': SEO_BUILD_PUBLISH_PACKAGE,
   'page.apply_optimization_request': PAGE_APPLY_OPTIMIZATION_REQUEST,
+  'social.schedule_approved_post': SOCIAL_SCHEDULE_APPROVED_POST,
 }
 
 export interface ActionRegistry {
@@ -231,6 +320,11 @@ export const ACTION_REGISTRY: ActionRegistry = {
 }
 
 export const ACTION_KEYS = Object.keys(DEFINITIONS) as readonly ActionKey[]
+
+/** Registered for local governance proof, never assembled by createCapabilities. */
+export const LOCAL_ONLY_ACTION_KEYS = Object.freeze([
+  'social.schedule_approved_post',
+] as const satisfies readonly ActionKey[])
 
 /**
  * 输入是否符合定义的 input_schema。
