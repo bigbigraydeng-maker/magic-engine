@@ -19,6 +19,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { getConnection } from '@/lib/cms/connection-store'
 import { GithubClient, GitHubApiError } from '@/lib/cms/github-client'
 import { findSharedIdentifiers } from '@/lib/clients/cross-client-audit'
+import { safeFetchText, ResponseTooLargeError } from '@/lib/net/safe-fetch'
 import { CMS_ACTION_TYPE } from '@/lib/cms/vocabulary'
 import {
   insertOrReplaceTourObject,
@@ -65,9 +66,14 @@ interface GroupTourRow {
 
 class PublishStepError extends Error {
   code: PublishErrorCode
-  constructor(message: string, code: PublishErrorCode) {
+  /** 只在 GitHub 侧 PR 可能已经创建（外部副作用已发生）时才带上 —— 调用方靠它
+   *  判断能不能把发布锁直接还回去，还是要保留 pr_open 等 pr-sync cron 对账，
+   *  防止重试生成新分支/新 PR，同一个团挂出多个冲突的 Draft PR。 */
+  prInfo?: { prNumber: number; prUrl: string }
+  constructor(message: string, code: PublishErrorCode, prInfo?: { prNumber: number; prUrl: string }) {
     super(message)
     this.code = code
+    this.prInfo = prInfo
   }
 }
 
@@ -87,8 +93,20 @@ export async function publishGroupTour(params: { clientId: string; tourId: strin
     await recordPublishSuccess(tourId, clientId, result)
     return { ok: true, prUrl: result.prUrl, prNumber: result.prNumber, branchName: result.branchName, mode: result.mode }
   } catch (err) {
-    // 发布失败：把锁还回去，让 FDE 能重试，不要让团永久卡在 pr_open
-    await supabaseAdmin.from('group_tours').update({ status: 'ready' }).eq('id', tourId).eq('status', 'pr_open')
+    const prInfo = err instanceof PublishStepError ? err.prInfo : undefined
+    if (prInfo) {
+      // PR 大概率已经在 GitHub 上开出来了——不能把锁还回去，否则用户重试会生成
+      // 新分支/新 PR，同一个团挂出多个冲突的 Draft PR。留着 pr_open，尽量把
+      // pr_number/pr_url 补写回去，让 syncTourPrOpenPosts 这个 cron 能追上后续状态。
+      await supabaseAdmin
+        .from('group_tours')
+        .update({ pr_url: prInfo.prUrl, pr_number: prInfo.prNumber })
+        .eq('id', tourId)
+        .eq('status', 'pr_open')
+    } else {
+      // 还没产生外部副作用（PR 未创建）：把锁还回去，让 FDE 能重试
+      await supabaseAdmin.from('group_tours').update({ status: 'ready' }).eq('id', tourId).eq('status', 'pr_open')
+    }
 
     if (err instanceof PublishStepError) return { ok: false, reason: err.message, code: err.code }
     const msg = err instanceof Error ? err.message : String(err)
@@ -148,7 +166,20 @@ async function acquirePublishLease(tourId: string): Promise<{ ok: true } | { ok:
 }
 
 async function recordPublishSuccess(tourId: string, clientId: string, result: DoPublishResult): Promise<void> {
-  await supabaseAdmin.from('group_tours').update({ pr_url: result.prUrl, pr_number: result.prNumber }).eq('id', tourId)
+  const { error: recordErr } = await supabaseAdmin
+    .from('group_tours')
+    .update({ pr_url: result.prUrl, pr_number: result.prNumber })
+    .eq('id', tourId)
+  if (recordErr) {
+    // PR 已经在 GitHub 上真实存在，但记录没写进去——绝不能当成功报给用户，
+    // 否则数据库停在 pr_open 却没有 pr_number/pr_url，pr-sync cron 永远跳过它，
+    // 今日待办也因为缺 URL 不展示，链路直接烂尾（魏征 finding 4）。
+    throw new PublishStepError(
+      `PR 已成功创建（${result.prUrl}），但保存记录失败：${recordErr.message}。请勿重新点发布，先联系工程核对该团状态。`,
+      'GITHUB_PR_ERROR',
+      { prNumber: result.prNumber, prUrl: result.prUrl },
+    )
+  }
 
   const { error } = await supabaseAdmin.from('flywheel_actions').insert({
     client_id: clientId,
@@ -175,14 +206,18 @@ function requiredFieldGaps(payload: GroupTourPayload): string[] {
 
 // ─── 图片链接可达性检查 ───────────────────────────────────────────────────────
 
+// 图片探测走 safeFetchText（DNS 校验 + 逐跳重定向校验，见 src/lib/net/safe-fetch.ts）——
+// 直接对客户填的任意 URL 发 HEAD/GET 原生 fetch 会跟随重定向，等于给了一个盲 SSRF
+// 入口（有工作台权限的用户可以让服务器去探内网/云元数据地址）。v1 只支持 GET，
+// 所以这里限制响应体大小而不是用 HEAD；超限说明连接本身是通的，仍算可达。
+const IMAGE_PROBE_MAX_BYTES = 20 * 1024 * 1024
+
 async function urlReachable(url: string): Promise<boolean> {
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 3000)
-    const res = await fetch(url, { method: 'HEAD', signal: controller.signal })
-    clearTimeout(timeout)
+    const res = await safeFetchText(url, { timeoutMs: 5000, maxResponseBytes: IMAGE_PROBE_MAX_BYTES })
     return res.ok
-  } catch {
+  } catch (err) {
+    if (err instanceof ResponseTooLargeError) return true
     return false
   }
 }
@@ -390,7 +425,13 @@ async function openOwnedPullRequest(
   try {
     detail = await github.getPullRequestDetail(repoOwner, repoName, prNumber)
   } catch (e) {
-    throw new PublishStepError(`PR 已开出但回读校验失败：${buildGithubErr(e)}`, 'GITHUB_PR_ERROR')
+    // PR 已经确定开出来了（有 prNumber/prUrl），只是回读这一步失败——带上 prInfo，
+    // 让调用方不要把发布锁还回去，否则重试会对同一个团再开一个 PR。
+    throw new PublishStepError(
+      `PR 已开出（${prUrl}）但回读校验失败：${buildGithubErr(e)}`,
+      'GITHUB_PR_ERROR',
+      { prNumber, prUrl },
+    )
   }
   const receiptOk =
     detail.draft === true && detail.state === 'open' && detail.merged === false &&

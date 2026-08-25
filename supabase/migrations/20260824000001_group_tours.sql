@@ -48,14 +48,19 @@ create table group_tours (
   published_at                timestamptz,
 
   created_at                  timestamptz not null default now(),
-  updated_at                  timestamptz not null default now(),
-
-  constraint group_tours_slug_per_client unique (client_id, slug)
+  updated_at                  timestamptz not null default now()
 );
 
 -- ----------------------------------------------------------------------------
 -- 索引
 -- ----------------------------------------------------------------------------
+
+-- 只约束已分配的（非空）slug 唯一——建团接口每次都以 slug='' 起手，一个客户
+-- 名下允许同时存在多条未命名草稿，不然只要有一条空草稿卡在那儿，下一次点
+-- "新增团" 就会撞唯一约束返回 500（魏征 finding 5）。
+create unique index group_tours_slug_per_client
+  on group_tours (client_id, slug)
+  where slug <> '';
 
 create index idx_group_tours_client_status_updated
   on group_tours (client_id, status, updated_at desc);
@@ -88,12 +93,16 @@ create trigger group_tours_updated_at
 -- ----------------------------------------------------------------------------
 -- RLS
 -- ----------------------------------------------------------------------------
--- 与 tailor_made_itineraries 一致：只经服务端访问，service_role 自动绕过 RLS。
--- 启用 RLS 且不建 policy = 匿名 / authenticated 一律拒绝。
+-- 只经服务端访问；显式建 service_role policy，不依赖"不建 policy = 隐式绕过"
+-- 这种隐式行为（CLAUDE.md 规则7：新表 migration 的 RLS 一律 service-role 模板）。
 --
 -- ⚠️ 租户隔离由 API 层的 requireDashboardClientAccess(clientId) 保证，
 --    不是靠 RLS。所有 store 查询都必须带 .eq('client_id', clientId)。
 alter table group_tours enable row level security;
+
+create policy "service_role_full"
+  on group_tours for all to service_role
+  using (true) with check (true);
 
 -- ----------------------------------------------------------------------------
 -- 注释

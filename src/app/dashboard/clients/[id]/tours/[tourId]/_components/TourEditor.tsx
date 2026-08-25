@@ -28,8 +28,10 @@ export default function TourEditor({ clientId, initialTour }: { clientId: string
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveOk, setSaveOk] = useState(false)
 
-  const set = <K extends keyof GroupTourPayload>(key: K, value: GroupTourPayload[K]) =>
+  const set = <K extends keyof GroupTourPayload>(key: K, value: GroupTourPayload[K]) => {
     setPayload((p) => ({ ...p, [key]: value }))
+    setConfirmed(false)
+  }
 
   const save = async (opts?: { confirm?: boolean }) => {
     setSaving(true)
@@ -90,10 +92,24 @@ export default function TourEditor({ clientId, initialTour }: { clientId: string
         <h2 className="mb-4 font-black text-me-charcoal">基本信息</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="团名（标题）">
-            <input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} />
+            <input
+              className={inputCls}
+              value={title}
+              onChange={(e) => {
+                setTitle(e.target.value)
+                setConfirmed(false)
+              }}
+            />
           </Field>
           <Field label="Slug（发布用网址片段）">
-            <input className={inputCls} value={slug} onChange={(e) => setSlug(e.target.value)} />
+            <input
+              className={inputCls}
+              value={slug}
+              onChange={(e) => {
+                setSlug(e.target.value)
+                setConfirmed(false)
+              }}
+            />
           </Field>
           <Field label="目的地">
             <select
