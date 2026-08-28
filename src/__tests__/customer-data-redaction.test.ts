@@ -53,17 +53,18 @@ const FORBIDDEN_LITERALS: ReadonlyArray<{ literal: string; label: string }> = [
  * cleanup" scope creep Build Control explicitly ruled out.
  *
  * 🔴 Only shrink this list (fix-and-remove), never grow it to cover a NEW
- *    hard-coded customer fact. `src/app/api/diagnostic/*` in particular
- *    looks like the same class of unauthenticated debug route as
- *    `/api/diagnose` (owned by #1233) — flagged to PM as a follow-up, not
- *    fixed here to avoid file-overlap with that PR.
+ *    hard-coded customer fact. `src/app/api/diagnostic/*` and `/api/diagnose`
+ *    are all the same class of unauthenticated debug route, and all owned
+ *    by #1233 — flagged to PM as a follow-up, not fixed here to avoid
+ *    file-overlap with that PR.
  *
- * 🔴 Owner/dependency for the six `src/app/api/diagnostic/*` entries below:
- *    **#1233**. That PR is expected to delete or rework those routes; this
- *    list intentionally does NOT assert its own paths still exist (see the
- *    scan below), so #1233 merging first never breaks this test. Once #1233
- *    lands and this branch rebases onto it, remove exactly those six lines
- *    here (not the whole list) as part of that rebase — do not do it in
+ * 🔴 Owner/dependency for the seven entries below (`src/app/api/diagnose/route.ts`
+ *    plus the six `src/app/api/diagnostic/*` routes): **#1233**. That PR is
+ *    expected to delete or rework those routes; this list intentionally does
+ *    NOT assert its own paths still exist (see the scan below), so #1233
+ *    merging first never breaks this test. Once #1233 lands and this branch
+ *    rebases onto it, remove exactly those seven lines here (not the whole
+ *    list) as part of that rebase, before #1237 can merge — do not do it in
  *    this PR and do not open a separate issue for it.
  */
 const PRE_EXISTING_OUT_OF_SCOPE = [
@@ -71,6 +72,7 @@ const PRE_EXISTING_OUT_OF_SCOPE = [
   'src/lib/strategy/industry-mapping.ts', // comments only, not a live constant
   'src/lib/todo-reconciliation/fixtures/audited-280.ts', // named/structured as a fixture, not runtime
   'src/app/api/cron/messenger-sync-hourly/route.ts', // comment only, not a live constant
+  'src/app/api/diagnose/route.ts', // unauthenticated debug route, owned by #1233
   'src/app/api/diagnostic/verify-brands/route.ts', // unauthenticated debug route, owned by #1233
   'src/app/api/diagnostic/response/route.ts',
   'src/app/api/diagnostic/results/route.ts',
