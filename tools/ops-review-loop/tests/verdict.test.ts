@@ -112,6 +112,59 @@ describe('buildVerdictComment', () => {
     expect(decision.blockers.some((b) => b.includes('1 条 Codex'))).toBe(true)
   })
 
+  /**
+   * Codex finding on PR #1211 (P1): a failed auto-fix blast-radius guard
+   * used to cost only the 5-point `scope-guard-green` signal. It is now a
+   * hard gate, so a PR that would otherwise score at (or above) threshold
+   * still comes out BLOCKED.
+   */
+  it('blocks on a failed auto-fix blast-radius guard, not just a lower score', async () => {
+    listPullRequestFiles.mockResolvedValue([{ filename: 'docs/x.md', status: 'modified' }])
+
+    const { decision } = await buildVerdictComment({
+      token: 'tok',
+      owner: 'o',
+      repo: 'r',
+      prNumber: 1,
+      prBody: '',
+      base: BASE,
+      sha: SHA,
+      risk: 'C',
+      shaMatches: true,
+      checkRuns: [
+        { name: 'ai-orchestrator-tests', status: 'completed', conclusion: 'success' },
+        { name: 'ops-fix-scope-guard', status: 'completed', conclusion: 'failure' },
+      ],
+      requiredCiPassed: true,
+      openBlockerCount: 0,
+    })
+
+    expect(decision.decision).toBe('BLOCKED')
+    expect(decision.blockers.some((b) => b.includes('爆炸半径闸门'))).toBe(true)
+  })
+
+  it('blocks when the auto-fix blast-radius guard check run is missing entirely', async () => {
+    listPullRequestFiles.mockResolvedValue([{ filename: 'docs/x.md', status: 'modified' }])
+
+    const { decision } = await buildVerdictComment({
+      token: 'tok',
+      owner: 'o',
+      repo: 'r',
+      prNumber: 1,
+      prBody: '',
+      base: BASE,
+      sha: SHA,
+      risk: 'C',
+      shaMatches: true,
+      checkRuns: [{ name: 'ai-orchestrator-tests', status: 'completed', conclusion: 'success' }],
+      requiredCiPassed: true,
+      openBlockerCount: 0,
+    })
+
+    expect(decision.decision).toBe('BLOCKED')
+    expect(decision.blockers.some((b) => b.includes('爆炸半径闸门'))).toBe(true)
+  })
+
   it('treats a failed file fetch as unreadable evidence, not a pass', async () => {
     listPullRequestFiles.mockRejectedValue(new Error('boom'))
 

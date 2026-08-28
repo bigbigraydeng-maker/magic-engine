@@ -38,6 +38,12 @@ const REQUIRED_CHECK_NAME_PATTERN = /ai-orchestrator/i
 // github-actions[bot], not the human behind OPS_REVIEW_PAT.
 const readToken = process.env.GITHUB_TOKEN
 const postToken = process.env.REVIEW_REQUEST_TOKEN
+// Codex finding (PR #1211, P1): `github-actions[bot]` alone does not prove a
+// marker came from THIS control plane — see trust.mjs / gate-marker.mjs for
+// the full reasoning. Unset until the pending OPS_GATE_MARKER_SECRET
+// workflow wiring is applied, which reproduces this script's pre-existing
+// author-only behaviour exactly; set, it is enforced end to end.
+const gateSecret = process.env.OPS_GATE_MARKER_SECRET || null
 const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/')
 const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'))
 const pr = event.pull_request.number
@@ -67,6 +73,7 @@ async function isCurrentHead() {
 const trustedGates = selectTrustedGateMarkers({
   sources: comments.map((c) => ({ author: c.user?.login ?? null, body: c.body })),
   trustedAuthors: TRUSTED_GATE_AUTHORS,
+  secret: gateSecret,
 })
 const currentGate = findGateFor({ markers: trustedGates, base, head: sha })
 
@@ -104,6 +111,7 @@ if (currentGate) {
     reasons: rated.reasons,
     base,
     head: sha,
+    secret: gateSecret,
   })
   if (!(await isCurrentHead())) {
     stale = true
@@ -186,6 +194,7 @@ if (stale) {
           checkRuns,
           requiredCiPassed,
           openBlockerCount: 0,
+          secret: gateSecret,
         })
         await createIssueComment(readToken, owner, repo, pr, comment)
         console.log(

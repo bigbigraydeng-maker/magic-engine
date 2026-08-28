@@ -32,6 +32,7 @@ import { scoreDelivery, decideReadiness } from './quality.mjs'
  *   shaMatches: boolean,
  *   evidenceReadable: boolean,
  *   requiredCiPassed: boolean|null,
+ *   scopeGuardPassed: boolean|null,
  *   openBlockerCount: number|null,
  * }} input
  * @returns {{score: {total: number, dimensions: unknown[]}, decision: ReturnType<typeof decideReadiness>}}
@@ -43,10 +44,11 @@ export function evaluateReadiness({
   shaMatches,
   evidenceReadable,
   requiredCiPassed,
+  scopeGuardPassed,
   openBlockerCount,
 }) {
   const score = scoreDelivery({ signals: observedSignals })
-  const gates = { evidenceReadable, shaMatches, requiredCiPassed, openBlockerCount, specialized }
+  const gates = { evidenceReadable, shaMatches, requiredCiPassed, scopeGuardPassed, openBlockerCount, specialized }
   const decision = decideReadiness({ risk, score, gates, observedSignals })
   return { score, decision }
 }

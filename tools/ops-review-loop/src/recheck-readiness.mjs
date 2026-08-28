@@ -76,6 +76,9 @@ const REQUIRED_WORKFLOW_NAMES = ['ai-orchestrator CI', 'OPS — Auto-fix blast r
 const REQUIRED_CHECK_NAME_PATTERN = /ai-orchestrator/i
 
 const token = process.env.GITHUB_TOKEN
+// Codex finding (PR #1211, P1): see request-review.mjs's identical constant
+// for why a marker's author login alone is not sufficient provenance.
+const gateSecret = process.env.OPS_GATE_MARKER_SECRET || null
 const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/')
 const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'))
 const workflowRun = event.workflow_run
@@ -100,6 +103,7 @@ async function currentTrustedGate(prNumber, base, sha) {
   const trustedGates = selectTrustedGateMarkers({
     sources: comments.map((c) => ({ author: c.user?.login ?? null, body: c.body })),
     trustedAuthors: TRUSTED_GATE_AUTHORS,
+    secret: gateSecret,
   })
   return findGateFor({ markers: trustedGates, base, head: sha })
 }
@@ -179,6 +183,7 @@ async function evaluateOne(prNumber) {
     // No Codex review was owed for this sha (checked above) — zero
     // outstanding findings by construction, not an assumption.
     openBlockerCount: 0,
+    secret: gateSecret,
   })
   await createIssueComment(token, owner, repo, prNumber, comment)
   console.log(

@@ -29,8 +29,27 @@ import { buildReadinessComment } from './report.mjs'
  */
 export const SCOPE_GUARD_CHECK_NAME_PATTERN = /ops-fix-scope-guard/i
 
-function checkSucceeded(run) {
-  return run?.status === 'completed' && run?.conclusion === 'success'
+/**
+ * Tri-state hard-gate value for the auto-fix blast-radius guard — `true`
+ * only on a completed+success run, `false` on a completed run that did NOT
+ * succeed (failure/cancelled/timed_out), `null` when it is missing or not
+ * yet terminal (unreadable, not "assume it will pass").
+ *
+ * 🔴 Codex finding on PR #1211 (P1): this used to collapse straight to the
+ * boolean `checkSucceeded` and feed only the 5-point `scope-guard-green`
+ * scoring signal — a real failure of this guard (the actual security
+ * boundary on the auto-fix loop) cost 5 points, not the verdict. Callers
+ * already wait for this check to reach `completed` before calling
+ * `buildVerdictComment` (see recheck-readiness.mjs / request-review.mjs's
+ * own scope-guard-terminal checks) — `null` here is the fail-closed backstop
+ * for a caller that could not, not a normal path.
+ *
+ * @param {{status?: string, conclusion?: string|null}|undefined} run
+ * @returns {boolean|null}
+ */
+function scopeGuardGateValue(run) {
+  if (!run || run.status !== 'completed') return null
+  return run.conclusion === 'success'
 }
 
 /**
@@ -45,6 +64,7 @@ function checkSucceeded(run) {
  *   shaMatches: boolean,
  *   checkRuns: Array<{name: string, status: string, conclusion: string|null}>,
  *   requiredCiPassed: boolean, openBlockerCount?: number,
+ *   secret?: string,
  * }} input `risk` may be `null`/`undefined` when the caller found no current
  *   trusted gate marker; `shaMatches` must then be `false` — the caller
  *   decides that, since only it knows whether it actually found one (see
@@ -65,6 +85,7 @@ export async function buildVerdictComment({
   checkRuns,
   requiredCiPassed,
   openBlockerCount = 0,
+  secret,
 }) {
   let files = null
   let filesReadable = true
@@ -80,11 +101,12 @@ export async function buildVerdictComment({
   const observedSpecialized = observedSpecializedEvidence(prBody, required)
   const specialized = evaluateSpecializedEvidence({ categories: rated.categories, observed: observedSpecialized })
   const scopeGuardRun = checkRuns.find((r) => SCOPE_GUARD_CHECK_NAME_PATTERN.test(r.name))
+  const scopeGuardPassed = scopeGuardGateValue(scopeGuardRun)
   const observedSignals = collectObservedSignals({
     prBody,
     files,
     requiredCiPassed,
-    scopeGuardPassed: checkSucceeded(scopeGuardRun),
+    scopeGuardPassed: scopeGuardPassed === true,
     riskRated: shaMatches,
     specializedEvidenceComplete: specialized.complete === true,
   })
@@ -97,6 +119,7 @@ export async function buildVerdictComment({
     shaMatches,
     evidenceReadable,
     requiredCiPassed,
+    scopeGuardPassed,
     openBlockerCount,
   })
 
@@ -110,6 +133,7 @@ export async function buildVerdictComment({
       blockers: decision.blockers,
       base,
       head: sha,
+      secret,
     }),
   }
 }

@@ -30,11 +30,47 @@ describe('evaluateReadiness', () => {
       shaMatches: true,
       evidenceReadable: true,
       requiredCiPassed: true,
+      scopeGuardPassed: true,
       openBlockerCount: 0,
     })
     expect(score.total).toBe(100)
     expect(decision.decision).toBe('READY_FOR_PRODUCT_OWNER')
     expect(decision.blockers).toEqual([])
+  })
+
+  /**
+   * Codex finding on PR #1211 (P1): the auto-fix blast-radius guard used to
+   * be a 5-point scoring signal only — a failure could still leave a
+   * C-level PR above threshold. It is now wired through as a hard gate the
+   * same way `requiredCiPassed` already was.
+   */
+  it('blocks on a failed auto-fix blast-radius guard even at a perfect score', () => {
+    const { decision } = evaluateReadiness({
+      risk: 'C',
+      observedSignals: ALL_SIGNALS,
+      specialized: COMPLETE_SPECIALIZED,
+      shaMatches: true,
+      evidenceReadable: true,
+      requiredCiPassed: true,
+      scopeGuardPassed: false,
+      openBlockerCount: 0,
+    })
+    expect(decision.decision).toBe('BLOCKED')
+    expect(decision.blockers.some((b) => b.includes('爆炸半径闸门'))).toBe(true)
+  })
+
+  it('blocks when the auto-fix blast-radius guard is unreadable or not yet terminal', () => {
+    const { decision } = evaluateReadiness({
+      risk: 'C',
+      observedSignals: ALL_SIGNALS,
+      specialized: COMPLETE_SPECIALIZED,
+      shaMatches: true,
+      evidenceReadable: true,
+      requiredCiPassed: true,
+      scopeGuardPassed: null,
+      openBlockerCount: 0,
+    })
+    expect(decision.decision).toBe('BLOCKED')
   })
 
   it('blocks on a low score even with clean hard gates', () => {

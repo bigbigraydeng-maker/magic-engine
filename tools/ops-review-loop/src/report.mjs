@@ -14,11 +14,11 @@ import { buildGateMarker } from './gate-marker.mjs'
 /**
  * The PR's automatic risk rating.
  *
- * @param {{risk: string, computedRisk: string, declaredRisk: string|null, readable: boolean, reasons: string[], base: string, head: string}} input
+ * @param {{risk: string, computedRisk: string, declaredRisk: string|null, readable: boolean, reasons: string[], base: string, head: string, secret?: string|null}} input
  * @returns {string}
  */
-export function buildRatingComment({ risk, computedRisk, declaredRisk, readable, reasons, base, head }) {
-  const marker = buildGateMarker({ base, head, risk, reasons })
+export function buildRatingComment({ risk, computedRisk, declaredRisk, readable, reasons, base, head, secret }) {
+  const marker = buildGateMarker({ base, head, risk, reasons, secret })
   const lines = [
     `### 🚦 PR 风险自动定级：${risk}`,
     '',
@@ -55,11 +55,22 @@ const DECISION_TITLE = {
  *   base: string,
  *   head: string,
  *   gateReasons?: string[],
+ *   secret?: string|null,
  * }} input
  * @returns {string}
  */
-export function buildReadinessComment({ decision, risk, score, threshold, blockers, base, head, gateReasons = [] }) {
-  const marker = buildGateMarker({ base, head, risk, reasons: gateReasons, score, decision })
+export function buildReadinessComment({
+  decision,
+  risk,
+  score,
+  threshold,
+  blockers,
+  base,
+  head,
+  gateReasons = [],
+  secret,
+}) {
+  const marker = buildGateMarker({ base, head, risk, reasons: gateReasons, score, decision, secret })
   const title = DECISION_TITLE[decision] ?? `### ${decision}`
   const lines = [
     title,

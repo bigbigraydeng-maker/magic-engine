@@ -59,6 +59,9 @@ const POLL_ATTEMPTS = Number(process.env.OPS_POLL_ATTEMPTS ?? 12)
 const POLL_INTERVAL_MS = Number(process.env.OPS_POLL_INTERVAL_MS ?? 20000)
 
 const token = process.env.GITHUB_TOKEN
+// Codex finding (PR #1211, P1): see request-review.mjs's identical constant
+// for why a marker's author login alone is not sufficient provenance.
+const gateSecret = process.env.OPS_GATE_MARKER_SECRET || null
 const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/')
 const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'))
 const pr = event.pull_request.number
@@ -91,6 +94,7 @@ async function handleFreshReview(sha) {
 const trustedGates = selectTrustedGateMarkers({
   sources: issueComments.map((c) => ({ author: c.user?.login ?? null, body: c.body })),
   trustedAuthors: TRUSTED_GATE_AUTHORS,
+  secret: gateSecret,
 })
 const currentGate = findGateFor({ markers: trustedGates, base, head: sha })
 const risk = currentGate?.risk
@@ -271,6 +275,7 @@ switch (plan.action) {
       checkRuns: latestCheckRuns,
       requiredCiPassed: ciSuccess,
       openBlockerCount: actionableFindings.length,
+      secret: gateSecret,
     })
     // Terminal for this sha either way (READY or BLOCKED): a future push
     // creates a new sha and this whole evaluation runs fresh. Reusing the

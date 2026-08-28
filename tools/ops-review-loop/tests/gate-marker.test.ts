@@ -258,6 +258,83 @@ describe('a marker only counts if a trusted identity wrote it', () => {
   })
 })
 
+/**
+ * Codex finding on PR #1211 (P1): `github-actions[bot]` is shared by every
+ * Actions workflow in the repo, so the author check above is necessary but
+ * not sufficient — any other same-repo workflow with `pull-requests: write`
+ * can post a comment authored as that same login and forge a rating/verdict.
+ * `secret` layers an HMAC signature on top; omitting it must reproduce the
+ * pre-existing author-only behaviour exactly (every describe block above
+ * this one calls these functions with no `secret` and must keep passing
+ * unmodified).
+ */
+describe('secret-gated provenance on top of the author check', () => {
+  const TRUSTED = 'github-actions[bot]'
+  const SECRET = 'test-secret-value'
+  const OTHER_SECRET = 'a-different-secret'
+  const signedGate = (risk: string, secret: string | null = SECRET) =>
+    buildGateMarker({ base: BASE, head: HEAD, risk, secret })
+
+  it('omitting secret reproduces the author-only behaviour — a trusted, unsigned marker still counts', () => {
+    const found = selectTrustedGateMarkers({
+      sources: [{ author: TRUSTED, body: buildGateMarker({ base: BASE, head: HEAD, risk: 'A' }) }],
+      trustedAuthors: [TRUSTED],
+    })
+    expect(found.map((m: { risk: string }) => m.risk)).toEqual(['A'])
+  })
+
+  it('accepts a trusted marker whose signature verifies against the same secret', () => {
+    const found = selectTrustedGateMarkers({
+      sources: [{ author: TRUSTED, body: signedGate('A') }],
+      trustedAuthors: [TRUSTED],
+      secret: SECRET,
+    })
+    expect(found.map((m: { risk: string }) => m.risk)).toEqual(['A'])
+  })
+
+  it('drops a trusted-author marker with no signature at all once a secret is configured', () => {
+    // The exact gap Codex flagged: some other same-repo workflow's ambient
+    // GITHUB_TOKEN can author as github-actions[bot] too, but it does not
+    // have OPS_GATE_MARKER_SECRET unless someone deliberately wired it in.
+    const found = selectTrustedGateMarkers({
+      sources: [{ author: TRUSTED, body: buildGateMarker({ base: BASE, head: HEAD, risk: 'A' }) }],
+      trustedAuthors: [TRUSTED],
+      secret: SECRET,
+    })
+    expect(found).toEqual([])
+  })
+
+  it('drops a trusted-author marker signed with a different secret', () => {
+    const found = selectTrustedGateMarkers({
+      sources: [{ author: TRUSTED, body: signedGate('A', OTHER_SECRET) }],
+      trustedAuthors: [TRUSTED],
+      secret: SECRET,
+    })
+    expect(found).toEqual([])
+  })
+
+  it('the author check still applies — a signed marker from an untrusted author is still dropped', () => {
+    const found = selectTrustedGateMarkers({
+      sources: [{ author: 'bigbigraydeng-maker', body: signedGate('C') }],
+      trustedAuthors: [TRUSTED],
+      secret: SECRET,
+    })
+    expect(found).toEqual([])
+  })
+
+  it('a forged downgrade cannot ride alongside a genuinely signed rating once a secret is configured', () => {
+    const found = selectTrustedGateMarkers({
+      sources: [
+        { author: TRUSTED, body: signedGate('A') },
+        { author: TRUSTED, body: buildGateMarker({ base: BASE, head: HEAD, risk: 'C' }) },
+      ],
+      trustedAuthors: [TRUSTED],
+      secret: SECRET,
+    })
+    expect(findGateFor({ markers: found, base: BASE, head: HEAD })?.risk).toBe('A')
+  })
+})
+
 describe('malformed input is skipped, not thrown on', () => {
   it.each([
     ['not JSON', '<!-- me-dev-gate:{nope} -->'],
