@@ -45,7 +45,6 @@ import { getConnection } from '@/lib/cms/connection-store'
 import * as githubClientModule from '@/lib/cms/github-client'
 import * as anthropicModule from '@anthropic-ai/sdk'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockGh = (githubClientModule as any).__mockClient as {
   listDirectory: ReturnType<typeof vi.fn>
   getFileContent: ReturnType<typeof vi.fn>
@@ -54,7 +53,6 @@ const mockGh = (githubClientModule as any).__mockClient as {
   commitFile: ReturnType<typeof vi.fn>
   createPullRequest: ReturnType<typeof vi.fn>
 }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockAiCreate = (anthropicModule as any).__mockCreate as ReturnType<typeof vi.fn>
 
 const FAKE_CLIENT_ID = 'e1111111-1111-1111-1111-111111111111'

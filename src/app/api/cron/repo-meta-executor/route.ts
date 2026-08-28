@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
     if (rosterErr) throw new Error(`Failed to load clients: ${rosterErr.message}`)
 
     const results: Array<{ client_id: string; name: string } & RepoMetaExecutorResult> = []
-    for (const client of clients.values()) {
+    for (const client of Array.from(clients.values())) {
       const result = await runRepoMetaExecutor(supabaseAdmin, client.id)
       results.push({ client_id: client.id, name: client.name, ...result })
     }
