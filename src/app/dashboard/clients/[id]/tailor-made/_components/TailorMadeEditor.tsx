@@ -41,26 +41,53 @@ const PREVIEW_DEBOUNCE_MS = 700;
 const POLL_DELAYS_MS = [300, 600, 1000, 1500, 2000, 3000];
 const POLL_MAX_MS = 10 * 60 * 1000; // 跟 Anthropic 客户端默认超时对齐，兜底用
 
+/**
+ * 一次 DB 抖动或 Render 重新部署时的一次性 502，不该让整条轮询链直接判死——
+ * 后台任务其实还在跑，几秒后就出结果，顾问却已经看到「失败」，重新提交
+ * 又要再烧一次 AI 调用。5xx / 网络错误按瞬时故障处理，连续 3 次才判死；
+ * 4xx（404 任务不存在、401/403）不会自愈，照旧立即终止。
+ */
+const MAX_CONSECUTIVE_TRANSIENT_FAILURES = 3;
+
 /** 轮到「已卸载」就返回 { cancelled: true }，调用方据此跳过后续 setState —— 页面已经不在了，改 state 只会挨 React 的警告，请求也没必要再打。 */
-async function pollTailorMadeJob(
+export async function pollTailorMadeJob(
   clientId: string,
   jobId: string,
   isCancelled: () => boolean
 ): Promise<{ result?: Record<string, unknown>; error?: string; cancelled?: true }> {
   const startedAt = Date.now();
   let attempt = 0;
+  let consecutiveTransientFailures = 0;
+
   for (;;) {
     if (isCancelled()) return { cancelled: true };
 
-    const res = await fetch(`/api/clients/${clientId}/tailor-made/jobs/${jobId}`, {
-      credentials: 'include',
-    });
+    let res: Response | null = null;
+    try {
+      res = await fetch(`/api/clients/${clientId}/tailor-made/jobs/${jobId}`, {
+        credentials: 'include',
+      });
+    } catch {
+      // 网络错误当瞬时故障处理，走下面的重试计数，不立即判死
+    }
     if (isCancelled()) return { cancelled: true };
 
-    const data = await res.json();
-    if (!res.ok) return { error: data.error || '查询任务失败' };
-    if (data.status === 'completed') return { result: data.result };
-    if (data.status === 'failed') return { error: data.error || '生成失败' };
+    if (res && res.ok) {
+      consecutiveTransientFailures = 0;
+      const data = await res.json();
+      if (data.status === 'completed') return { result: data.result };
+      if (data.status === 'failed') return { error: data.error || '生成失败' };
+    } else if (res && res.status < 500) {
+      // 4xx 不会自愈（任务不存在 / 无权限），立即终止
+      const data = await res.json().catch(() => ({}));
+      return { error: data.error || '查询任务失败' };
+    } else {
+      consecutiveTransientFailures += 1;
+      if (consecutiveTransientFailures >= MAX_CONSECUTIVE_TRANSIENT_FAILURES) {
+        const data = res ? await res.json().catch(() => ({})) : {};
+        return { error: data.error || '查询任务失败，请重试或联系技术支持' };
+      }
+    }
 
     if (Date.now() - startedAt > POLL_MAX_MS) {
       return { error: '等待太久了，任务可能卡住了，请重试或联系技术支持' };
