@@ -722,7 +722,7 @@ export default function ScanReportPage() {
 
       <footer className="px-5 py-4 text-center">
         <p className="text-[10px]" style={{ color: 'rgba(70,115,185,0.25)', letterSpacing: '2px' }}>
-          MAGIC LAB © 2026
+          Magic Engine AI Technology Limited © 2026
         </p>
       </footer>
     </div>
