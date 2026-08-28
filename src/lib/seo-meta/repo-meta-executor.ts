@@ -33,6 +33,28 @@ const COOLDOWN_DAYS = 30
 const MIN_POSITION = 4
 const MAX_POSITION = 20
 const MIN_IMPRESSIONS = 10
+const MAX_BRAND_SUFFIX_LEN = 80
+const MAX_VOICE_HINT_LEN = 1000
+
+/** Raw control characters (incl. DEL) — never legitimate in a repo path. */
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/
+
+/**
+ * `dataDir` is handed straight to `GithubClient.listDirectory` as a repo path
+ * — it must stay a plain relative path INSIDE the repo, never something that
+ * could resolve outside it or carry bytes the GitHub API/git tooling could
+ * mis-parse. Rejects: absolute paths (`/…`, `\…`, Windows drive letters),
+ * backslashes, `.`/`..` path segments, and control characters.
+ */
+function isSafeRepoRelativeDir(value: string): boolean {
+  if (value === '') return false
+  if (value.startsWith('/') || value.startsWith('\\')) return false
+  if (/^[a-zA-Z]:/.test(value)) return false
+  if (value.includes('\\')) return false
+  if (CONTROL_CHAR_RE.test(value)) return false
+  return value.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..')
+}
 
 // ── Client configuration (seo_config.repo_meta_executor) ───────────────────────
 
@@ -46,17 +68,27 @@ export interface RepoMetaExecutorConfig {
   voiceHint: string
 }
 
-/** Fail-closed: any missing/mistyped field means "not configured", never a guessed default. */
+/**
+ * Fail-closed: any missing/mistyped/unsafe field means "not configured",
+ * never a guessed default. This is the ONLY gate before `runRepoMetaExecutor`
+ * touches the provider (Anthropic) or GitHub — an unsafe `dataDir` or an
+ * unbounded `brandSuffix`/`voiceHint` must never reach either call.
+ */
 export function loadRepoMetaExecutorConfig(seoConfig: unknown): RepoMetaExecutorConfig | null {
   if (!seoConfig || typeof seoConfig !== 'object') return null
   const raw = (seoConfig as Record<string, unknown>)['repo_meta_executor']
   if (!raw || typeof raw !== 'object') return null
   const cfg = raw as Record<string, unknown>
   if (cfg.enabled !== true) return null
-  if (typeof cfg.dataDir !== 'string' || cfg.dataDir.trim() === '') return null
-  if (typeof cfg.brandSuffix !== 'string') return null
-  if (typeof cfg.voiceHint !== 'string' || cfg.voiceHint.trim() === '') return null
-  return { enabled: true, dataDir: cfg.dataDir, brandSuffix: cfg.brandSuffix, voiceHint: cfg.voiceHint }
+  if (typeof cfg.dataDir !== 'string') return null
+  const dataDir = cfg.dataDir.trim()
+  if (!isSafeRepoRelativeDir(dataDir)) return null
+  if (typeof cfg.brandSuffix !== 'string' || CONTROL_CHAR_RE.test(cfg.brandSuffix)) return null
+  if (typeof cfg.voiceHint !== 'string' || CONTROL_CHAR_RE.test(cfg.voiceHint)) return null
+  const brandSuffix = cfg.brandSuffix.trim().slice(0, MAX_BRAND_SUFFIX_LEN)
+  const voiceHint = cfg.voiceHint.trim().slice(0, MAX_VOICE_HINT_LEN)
+  if (voiceHint === '') return null
+  return { enabled: true, dataDir, brandSuffix, voiceHint }
 }
 
 // ── Pure: narrow-lane source editing ────────────────────────────────────────────

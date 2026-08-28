@@ -91,6 +91,18 @@ export async function PATCH(
       { status: 400 },
     )
   }
+
+  // repo_meta_executor grants a cron write access to the client's own GitHub
+  // repo (branch + commit + PR) — a materially bigger blast radius than the
+  // weekly_blog toggle, so paid_client/self_serve stay read-only on it here
+  // even though they can flip weekly_blog themselves.
+  if (hasRepoMetaExecutor && access.tier !== 'admin') {
+    return NextResponse.json(
+      { error: 'repo_meta_executor can only be configured by Magic Lab admins' },
+      { status: 403 },
+    )
+  }
+
   if (hasWeeklyBlog && typeof body.weekly_blog !== 'boolean') {
     return NextResponse.json(
       { error: 'weekly_blog must be a boolean' },

@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { replaceMetaForSlug, buildSlugIndex, pickCandidates } from '../repo-meta-executor'
+import { replaceMetaForSlug, buildSlugIndex, pickCandidates, loadRepoMetaExecutorConfig } from '../repo-meta-executor'
 
 const HUB_SOURCE = `// SEO Pages Data
 export const chinaToursMeta: SeoPageMeta = {
@@ -115,6 +115,65 @@ describe('buildSlugIndex', () => {
     const a = { path: 'a.ts', source: "slug: 'dup'" }
     const b = { path: 'b.ts', source: "slug: 'dup'" }
     expect(buildSlugIndex([a, b]).get('dup')).toBe('a.ts')
+  })
+})
+
+/**
+ * `dataDir` is handed straight to GithubClient.listDirectory as a repo path,
+ * and `brandSuffix`/`voiceHint` go straight into the AI prompt — this is the
+ * ONLY gate before either happens, so it must fail closed on anything that
+ * isn't a plain, bounded, in-repo relative path/string (Codex review on #1121).
+ */
+describe('loadRepoMetaExecutorConfig — safe config gate', () => {
+  const base = {
+    enabled: true,
+    dataDir: 'src/lib/data',
+    brandSuffix: '| Example',
+    voiceHint: 'Boutique travel brand.',
+  }
+
+  it('accepts a plain repo-relative dataDir', () => {
+    expect(loadRepoMetaExecutorConfig({ repo_meta_executor: base })).toEqual(base)
+  })
+
+  it.each([
+    ['/etc/passwd', 'leading slash (absolute)'],
+    ['\\windows\\system32', 'leading backslash (absolute)'],
+    ['C:\\repo\\data', 'Windows drive-letter absolute path'],
+    ['src/lib/../../etc', 'dotdot traversal segment'],
+    ['./src/lib/data', 'dot segment'],
+    ['src\\lib\\data', 'embedded backslash'],
+    ['src/lib/data\x00', 'embedded control character'],
+    ['', 'empty string'],
+    ['   ', 'whitespace-only'],
+  ])('rejects unsafe dataDir %j (%s)', (dataDir) => {
+    expect(loadRepoMetaExecutorConfig({ repo_meta_executor: { ...base, dataDir } })).toBeNull()
+  })
+
+  it('trims a dataDir with surrounding whitespace', () => {
+    const cfg = loadRepoMetaExecutorConfig({ repo_meta_executor: { ...base, dataDir: '  src/lib/data  ' } })
+    expect(cfg?.dataDir).toBe('src/lib/data')
+  })
+
+  it('trims and caps an overlong brandSuffix/voiceHint before they reach the AI prompt', () => {
+    const cfg = loadRepoMetaExecutorConfig({
+      repo_meta_executor: {
+        ...base,
+        brandSuffix: `  ${'x'.repeat(200)}  `,
+        voiceHint: `  ${'y'.repeat(5000)}  `,
+      },
+    })
+    expect(cfg?.brandSuffix).toHaveLength(80)
+    expect(cfg?.voiceHint).toHaveLength(1000)
+  })
+
+  it('a voiceHint that is only whitespace still fails closed after trimming', () => {
+    expect(loadRepoMetaExecutorConfig({ repo_meta_executor: { ...base, voiceHint: '   ' } })).toBeNull()
+  })
+
+  it('rejects a control character in brandSuffix or voiceHint', () => {
+    expect(loadRepoMetaExecutorConfig({ repo_meta_executor: { ...base, brandSuffix: 'a\x01b' } })).toBeNull()
+    expect(loadRepoMetaExecutorConfig({ repo_meta_executor: { ...base, voiceHint: 'a\x01b' } })).toBeNull()
   })
 })
 

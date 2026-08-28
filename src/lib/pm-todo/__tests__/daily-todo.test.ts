@@ -217,8 +217,18 @@ describe('getPmFocusClientIds · fail-closed（客户数据红线 #1121）', () 
   })
 
   it('解析逗号分隔的 UUID，去空白、丢空项', () => {
-    process.env.PM_DAILY_FOCUS_CLIENT_IDS = ' aaa-1 , bbb-2 ,,ccc-3'
-    expect(getPmFocusClientIds()).toEqual(['aaa-1', 'bbb-2', 'ccc-3'])
+    process.env.PM_DAILY_FOCUS_CLIENT_IDS =
+      ' 11111111-1111-1111-1111-111111111111 , 22222222-2222-2222-2222-222222222222 ,,33333333-3333-3333-3333-333333333333'
+    expect(getPmFocusClientIds()).toEqual([
+      '11111111-1111-1111-1111-111111111111',
+      '22222222-2222-2222-2222-222222222222',
+      '33333333-3333-3333-3333-333333333333',
+    ])
+  })
+
+  it('任一非空 token 不是合法 UUID → 整体判失败，空数组（打错一个不该悄悄退化成"不过滤"）', () => {
+    process.env.PM_DAILY_FOCUS_CLIENT_IDS = '11111111-1111-1111-1111-111111111111,not-a-real-uuid'
+    expect(getPmFocusClientIds()).toEqual([])
   })
 })
 

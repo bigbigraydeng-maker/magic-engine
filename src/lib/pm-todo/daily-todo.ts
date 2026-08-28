@@ -16,6 +16,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { isUuid } from '@/lib/validation-utils'
 import {
   loadManualItems,
   dropBrokenLinks,
@@ -37,7 +38,11 @@ const INFORMATIONAL_KINDS: ManualItemKind[] = ['prescription_updated']
  */
 export function getPmFocusClientIds(): string[] {
   const raw = process.env.PM_DAILY_FOCUS_CLIENT_IDS ?? ''
-  return raw.split(',').map((id) => id.trim()).filter(Boolean)
+  const ids = raw.split(',').map((id) => id.trim()).filter(Boolean)
+  // Fail-closed on a malformed token too: a typo'd UUID must not silently
+  // become "no filter" downstream — see the .in() empty-array guard below,
+  // which only kicks in for [], not for a garbage string reaching Postgres.
+  return ids.every(isUuid) ? ids : []
 }
 
 /** Pending kanban cards older than this many days are backlog, not to-do. */

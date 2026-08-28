@@ -24,6 +24,7 @@ vi.mock('@/lib/supabase', () => ({
 
 import { GET, PATCH } from '../route'
 import { supabaseAdmin } from '@/lib/supabase'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 const CLIENT_ID = 'client-abc'
 
@@ -156,4 +157,66 @@ describe('PATCH · repo_meta_executor', () => {
     const res = await PATCH(makeRequest('PATCH', {}), makeContext())
     expect(res.status).toBe(400)
   })
+})
+
+/**
+ * repo_meta_executor grants a cron write path into the client's own GitHub
+ * repo — a materially bigger blast radius than weekly_blog, so it is
+ * admin-only even though paid_client/self_serve can reach this route at all
+ * for weekly_blog (Codex review on #1121).
+ */
+describe('PATCH · repo_meta_executor is admin-only', () => {
+  const nonAdminAccess = (tier: 'paid_client' | 'self_serve') => ({
+    ok: true as const,
+    user: { id: 'test-user', email: 'client@example.com' },
+    role: 'client-viewer' as const,
+    tier,
+    allowedClientId: CLIENT_ID,
+  })
+
+  it.each(['paid_client', 'self_serve'] as const)(
+    '%s tier → 403, nothing read or written',
+    async (tier) => {
+      vi.mocked(requireDashboardClientAccess).mockResolvedValueOnce(nonAdminAccess(tier) as never)
+      const fromSpy = vi.mocked(supabaseAdmin.from)
+
+      const res = await PATCH(makeRequest('PATCH', { repo_meta_executor: FULL_CONFIG }), makeContext())
+
+      expect(res.status).toBe(403)
+      expect(fromSpy).not.toHaveBeenCalled()
+    },
+  )
+
+  it('admin tier → still allowed to configure repo_meta_executor', async () => {
+    vi.mocked(requireDashboardClientAccess).mockResolvedValueOnce({
+      ok: true,
+      user: { id: 'admin-user', email: 'admin@magiclab.com' },
+      role: 'admin',
+      tier: 'admin',
+      allowedClientId: null,
+    } as never)
+    const readChain = mockReadChain({})
+    const writeChain = mockWriteChain()
+    vi.mocked(supabaseAdmin.from)
+      .mockReturnValueOnce(readChain as unknown as ReturnType<typeof supabaseAdmin.from>)
+      .mockReturnValueOnce(writeChain as unknown as ReturnType<typeof supabaseAdmin.from>)
+
+    const res = await PATCH(makeRequest('PATCH', { repo_meta_executor: FULL_CONFIG }), makeContext())
+    expect(res.status).toBe(200)
+  })
+
+  it.each(['paid_client', 'self_serve'] as const)(
+    '%s tier → weekly_blog alone still works (existing behaviour preserved)',
+    async (tier) => {
+      vi.mocked(requireDashboardClientAccess).mockResolvedValueOnce(nonAdminAccess(tier) as never)
+      const readChain = mockReadChain({})
+      const writeChain = mockWriteChain()
+      vi.mocked(supabaseAdmin.from)
+        .mockReturnValueOnce(readChain as unknown as ReturnType<typeof supabaseAdmin.from>)
+        .mockReturnValueOnce(writeChain as unknown as ReturnType<typeof supabaseAdmin.from>)
+
+      const res = await PATCH(makeRequest('PATCH', { weekly_blog: true }), makeContext())
+      expect(res.status).toBe(200)
+    },
+  )
 })

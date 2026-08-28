@@ -147,6 +147,25 @@ describe('runRepoMetaExecutor · fail-closed config gate', () => {
     expect(result).toEqual({ outcome: 'not_configured' })
   })
 
+  it('enabled but unsafe dataDir (path traversal) → not_configured, no GitHub/AI call', async () => {
+    const { from } = makeSupabase({
+      seoConfig: {
+        repo_meta_executor: {
+          enabled: true,
+          dataDir: '../../etc',
+          brandSuffix: '',
+          voiceHint: 'x',
+        },
+      },
+    })
+    const result = await runRepoMetaExecutor({ from } as never, FAKE_CLIENT_ID)
+
+    expect(result).toEqual({ outcome: 'not_configured' })
+    expect(getConnection).not.toHaveBeenCalled()
+    expect(mockGh.listDirectory).not.toHaveBeenCalled()
+    expect(mockAiCreate).not.toHaveBeenCalled()
+  })
+
   it('clients read error → error outcome, no AI/GitHub call', async () => {
     const from = vi.fn((table: string) => {
       if (table === 'clients') {
