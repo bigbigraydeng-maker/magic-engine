@@ -7,9 +7,10 @@
  * recent pending kanban cards, cron failures. Sections with zero items are
  * omitted; a quiet day sends a one-line all-clear so the rhythm stays daily.
  *
- * Deliberately narrow: counts only cover the FDE focus clients (CTS/Oztop)
- * and only recent items — the kanban holds 400+ historical pending cards
- * that would drown the signal (backlog cleanup is its own task).
+ * Deliberately narrow: counts only cover the FDE focus roster (PM_DAILY_
+ * FOCUS_CLIENT_IDS — see getPmFocusClientIds below) and only recent items —
+ * the kanban holds 400+ historical pending cards that would drown the
+ * signal (backlog cleanup is its own task).
  *
  * PM-facing copy is plain Chinese, zero jargon (CLAUDE.md § 跟 PM 说话的格式).
  */
@@ -28,11 +29,16 @@ import {
  */
 const INFORMATIONAL_KINDS: ManualItemKind[] = ['prescription_updated']
 
-/** FDE focus clients: CTS + Oztop. */
-export const FOCUS_CLIENT_IDS = [
-  'c0000000-0000-0000-0000-000000000000',
-  'd5c98811-1c1d-4ded-bdf0-4cefec6afb84',
-] as const
+/**
+ * FDE focus clients — fail-closed (whitelist.ts pattern): missing/empty env
+ * means an empty roster, never "fall back to all active clients". A client
+ * name/UUID belongs in Render config, not in shared runtime source (客户数据
+ * 红线 #1121) — set PM_DAILY_FOCUS_CLIENT_IDS to a comma-separated UUID list.
+ */
+export function getPmFocusClientIds(): string[] {
+  const raw = process.env.PM_DAILY_FOCUS_CLIENT_IDS ?? ''
+  return raw.split(',').map((id) => id.trim()).filter(Boolean)
+}
 
 /** Pending kanban cards older than this many days are backlog, not to-do. */
 const RECENT_CARD_DAYS = 7
@@ -168,6 +174,10 @@ export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCoun
   const activeIds = ((activeRows ?? []) as Array<{ id: string }>).map((c) => c.id)
   // 一个在服务的客户都没有时用一个不存在的 id，避免 .in([]) 变成"不过滤"
   const activeFilter = activeIds.length > 0 ? activeIds : ['00000000-0000-0000-0000-000000000000']
+  // 同理：PM_DAILY_FOCUS_CLIENT_IDS 未配置时也必须落到一个不存在的 id，
+  // 不能让空数组被 .in() 解成"不过滤"（那会把全部 active 客户的看板卡都算进来）。
+  const focusClientIds = getPmFocusClientIds()
+  const focusFilter = focusClientIds.length > 0 ? focusClientIds : ['00000000-0000-0000-0000-000000000000']
 
   const [drafts, findings, cards, reels, failures, setupTasks] = await Promise.all([
     supabase
@@ -183,7 +193,7 @@ export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCoun
       .from('execution_items')
       .select('client_id, clients(name)')
       .eq('status', 'pending')
-      .in('client_id', [...FOCUS_CLIENT_IDS])
+      .in('client_id', focusFilter)
       .gte('created_at', cardCutoff.toISOString()),
     supabase
       .from('reels_drafts')

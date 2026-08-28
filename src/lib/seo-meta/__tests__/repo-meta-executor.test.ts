@@ -1,11 +1,11 @@
 /**
- * Unit tests for the pure parts of the CTS meta executor (22.E.S17):
+ * Unit tests for the pure parts of the repo meta executor (22.E.S17):
  * the narrow-lane source editor, the content-built slug index, and the
  * GSC candidate picker.
  */
 
 import { describe, it, expect } from 'vitest'
-import { replaceMetaForSlug, buildSlugIndex, pickCandidates } from '../cts-meta-pr'
+import { replaceMetaForSlug, buildSlugIndex, pickCandidates } from '../repo-meta-executor'
 
 const HUB_SOURCE = `// SEO Pages Data
 export const chinaToursMeta: SeoPageMeta = {
@@ -24,7 +24,7 @@ export const beijingToursMeta: CityHubMeta = {
 };
 `
 
-/** Real shape of blogs-longtail-batch1.ts: many posts inside ONE export. */
+/** Real shape of a batch data file: many posts inside ONE export. */
 const BATCH_SOURCE = `import type { BlogPost } from '@/lib/types/blog-post';
 
 export const longtailBatch1Posts: BlogPost[] = [
@@ -120,10 +120,10 @@ describe('buildSlugIndex', () => {
 
 describe('pickCandidates', () => {
   const pages = [
-    { page: 'https://www.ctstours.co.nz/beijing-tours', impressions: 500, position: 6 },
-    { page: 'https://www.ctstours.co.nz/china-tours/', impressions: 900, position: 12 },
-    { page: 'https://www.ctstours.co.nz/', impressions: 2000, position: 2 }, // pos<4 → out
-    { page: 'https://www.ctstours.co.nz/silk-road', impressions: 5, position: 8 }, // impressions<10 → out
+    { page: 'https://www.example-travel.co.nz/beijing-tours', impressions: 500, position: 6 },
+    { page: 'https://www.example-travel.co.nz/china-tours/', impressions: 900, position: 12 },
+    { page: 'https://www.example-travel.co.nz/', impressions: 2000, position: 2 }, // pos<4 → out
+    { page: 'https://www.example-travel.co.nz/silk-road', impressions: 5, position: 8 }, // impressions<10 → out
   ]
   const queries = [
     { query: 'beijing tours from nz', impressions: 300 },
@@ -148,8 +148,8 @@ describe('pickCandidates', () => {
 
   it('homepage URL never yields the hostname as a garbage slug (首跑事故回归)', () => {
     const withHome = [
-      { page: 'https://www.ctstours.co.nz/', impressions: 3593, position: 7.9 },
-      { page: 'https://www.ctstours.co.nz/beijing-tours', impressions: 500, position: 6 },
+      { page: 'https://www.example-travel.co.nz/', impressions: 3593, position: 7.9 },
+      { page: 'https://www.example-travel.co.nz/beijing-tours', impressions: 500, position: 6 },
     ]
     const out = pickCandidates(withHome, queries, new Set())
     expect(out.map((c) => c.slug)).toEqual(['beijing-tours'])

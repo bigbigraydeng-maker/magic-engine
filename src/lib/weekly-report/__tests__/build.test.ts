@@ -3,8 +3,8 @@
  * freshness stamping, SEO week computation, and the 断流 rendering rule.
  */
 
-import { describe, it, expect } from 'vitest'
-import { freshness, computeSeoWeek, renderWeeklyReport, type ClientWeekly } from '../build'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { freshness, computeSeoWeek, renderWeeklyReport, gatherWeeklyReport, type ClientWeekly } from '../build'
 
 const NOW = new Date('2026-08-03T18:30:00Z')
 
@@ -42,6 +42,29 @@ describe('computeSeoWeek', () => {
     const result = computeSeoWeek([kw('new', 5)], [])
     expect(result.movers_up).toEqual([])
     expect(result.movers_down).toEqual([])
+  })
+})
+
+/**
+ * 客户数据红线 #1121：这个批量消费者以前直接 import 硬编码的 FOCUS_CLIENT_IDS
+ * 常量，现在改读 daily-todo.ts 的 getPmFocusClientIds()（fail-closed env）。
+ * 这里只验证"没配置 = 一个客户都不查"，不重复 daily-todo.test.ts 里已经测过的
+ * env 解析细节。
+ */
+describe('gatherWeeklyReport · fail-closed focus roster（客户数据红线 #1121）', () => {
+  const ORIGINAL = process.env.PM_DAILY_FOCUS_CLIENT_IDS
+
+  afterEach(() => {
+    if (ORIGINAL === undefined) delete process.env.PM_DAILY_FOCUS_CLIENT_IDS
+    else process.env.PM_DAILY_FOCUS_CLIENT_IDS = ORIGINAL
+  })
+
+  it('PM_DAILY_FOCUS_CLIENT_IDS 未配置 → 一个客户都不查，Supabase 一次都不调用', async () => {
+    delete process.env.PM_DAILY_FOCUS_CLIENT_IDS
+    const supabase = { from: vi.fn(() => { throw new Error('不该被调用') }) }
+    const result = await gatherWeeklyReport(supabase as never, new Date('2026-08-03T00:00:00Z'))
+    expect(result).toEqual([])
+    expect(supabase.from).not.toHaveBeenCalled()
   })
 })
 

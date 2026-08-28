@@ -19,7 +19,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { FOCUS_CLIENT_IDS } from '@/lib/pm-todo/daily-todo'
+import { getPmFocusClientIds } from '@/lib/pm-todo/daily-todo'
 
 const STALE_AFTER_DAYS = 3
 /** Keyword snapshots are WEEKLY by design — 8 days tolerance, not 3, or
@@ -294,7 +294,7 @@ export async function gatherWeeklyReport(
   now: Date = new Date(),
 ): Promise<ClientWeekly[]> {
   const out: ClientWeekly[] = []
-  for (const clientId of FOCUS_CLIENT_IDS) {
+  for (const clientId of getPmFocusClientIds()) {
     const weekly = await gatherClient(supabase, clientId, now)
     if (weekly) out.push(weekly)
   }

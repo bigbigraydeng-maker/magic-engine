@@ -3,8 +3,8 @@
  * (loadTodoCounts is a thin Supabase read verified at integration time.)
  */
 
-import { describe, it, expect, vi } from 'vitest'
-import { buildTodoEmail, loadGbpSetupTasks, nzWeekday, type TodoCounts } from '../daily-todo'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { buildTodoEmail, loadGbpSetupTasks, nzWeekday, getPmFocusClientIds, type TodoCounts } from '../daily-todo'
 
 const EMPTY: TodoCounts = {
   setupTasks: [],
@@ -190,6 +190,35 @@ describe('buildTodoEmail', () => {
     expect(buildTodoEmail(1, EMPTY, 'x').html).toContain('周报日')
     expect(buildTodoEmail(2, EMPTY, 'x').html).toContain('Blog 审稿日')
     expect(buildTodoEmail(5, EMPTY, 'x').html).toContain('收尾日')
+  })
+})
+
+/**
+ * 客户数据红线 #1121：FOCUS_CLIENT_IDS 从硬编码常量改成读
+ * PM_DAILY_FOCUS_CLIENT_IDS env（whitelist.ts 同款 fail-closed 写法）——
+ * 未配置 / 配成空字符串必须落到空数组，绝不能悄悄退化成"全部 active 客户"。
+ */
+describe('getPmFocusClientIds · fail-closed（客户数据红线 #1121）', () => {
+  const ORIGINAL = process.env.PM_DAILY_FOCUS_CLIENT_IDS
+
+  afterEach(() => {
+    if (ORIGINAL === undefined) delete process.env.PM_DAILY_FOCUS_CLIENT_IDS
+    else process.env.PM_DAILY_FOCUS_CLIENT_IDS = ORIGINAL
+  })
+
+  it('env 未设置 → 空数组，不回退到全部 active 客户', () => {
+    delete process.env.PM_DAILY_FOCUS_CLIENT_IDS
+    expect(getPmFocusClientIds()).toEqual([])
+  })
+
+  it('env 是空字符串 → 空数组', () => {
+    process.env.PM_DAILY_FOCUS_CLIENT_IDS = ''
+    expect(getPmFocusClientIds()).toEqual([])
+  })
+
+  it('解析逗号分隔的 UUID，去空白、丢空项', () => {
+    process.env.PM_DAILY_FOCUS_CLIENT_IDS = ' aaa-1 , bbb-2 ,,ccc-3'
+    expect(getPmFocusClientIds()).toEqual(['aaa-1', 'bbb-2', 'ccc-3'])
   })
 })
 

@@ -73,7 +73,7 @@ export const PROVIDER_WRITE_GRANDFATHERED = [
   'src/lib/cms/page-upgrade-pr-sync.ts',
   'src/lib/flywheel/social-post-publish.ts',
   'src/lib/luban/tools.ts',
-  'src/lib/seo-meta/cts-meta-pr.ts',
+  'src/lib/seo-meta/repo-meta-executor.ts',
 ] as const
 
 /**
