@@ -130,23 +130,28 @@ interface FakeChainCalls {
   eq: [string, string][]
   gte: [string, string][]
   lt: [string, string][]
+  range: [number, number][]
 }
 
 interface FakeChain {
   eq: (col: string, val: string) => FakeChain
   gte: (col: string, val: string) => FakeChain
   lt: (col: string, val: string) => FakeChain
-  order: (
-    col: string,
-    opts?: { ascending?: boolean },
+  order: (col: string, opts?: { ascending?: boolean }) => FakeChain
+  range: (
+    from: number,
+    to: number,
   ) => Promise<{ data: WorkLogRow[] | null; error: { message: string } | null }>
 }
 
-function makeFakeSupabase(
-  rows: WorkLogRow[] | null,
+/** Drives the fake chain from a per-page callback so tests can simulate
+ *  PostgREST's row cap without materializing huge fixtures by hand. */
+function makeFakeSupabasePaged(
+  pageProvider: (pageIndex: number) => WorkLogRow[],
   error: { message: string } | null = null,
 ): { sb: SupabaseClient; calls: FakeChainCalls } {
-  const calls: FakeChainCalls = { select: [], eq: [], gte: [], lt: [] }
+  const calls: FakeChainCalls = { select: [], eq: [], gte: [], lt: [], range: [] }
+  let pageIndex = 0
   const chain: FakeChain = {
     eq: (col: string, val: string) => {
       calls.eq.push([col, val])
@@ -160,7 +165,14 @@ function makeFakeSupabase(
       calls.lt.push([col, val])
       return chain
     },
-    order: () => Promise.resolve({ data: rows, error }),
+    order: () => chain,
+    range: (from: number, to: number) => {
+      calls.range.push([from, to])
+      if (error) return Promise.resolve({ data: null, error })
+      const data = pageProvider(pageIndex)
+      pageIndex++
+      return Promise.resolve({ data, error: null })
+    },
   }
   const from = (table: string) => {
     expect(table).toBe('fde_work_logs')
@@ -172,6 +184,26 @@ function makeFakeSupabase(
     }
   }
   return { sb: { from } as unknown as SupabaseClient, calls }
+}
+
+/** Single-page fake: every page request returns the same fixed row set,
+ *  matching prior test behaviour for fixtures well under the page size. */
+function makeFakeSupabase(
+  rows: WorkLogRow[] | null,
+  error: { message: string } | null = null,
+): { sb: SupabaseClient; calls: FakeChainCalls } {
+  return makeFakeSupabasePaged(() => rows ?? [], error)
+}
+
+function makeRow(id: string): WorkLogRow {
+  return {
+    id,
+    client_id: 'client-a',
+    log_date: '2026-08-28',
+    summary: '',
+    author_email: 'fde@magicengine.cloud',
+    created_at: '2026-08-28T00:00:00.000Z',
+  }
 }
 
 describe('fetchWorkLogsForPreview', () => {
@@ -201,6 +233,32 @@ describe('fetchWorkLogsForPreview', () => {
     const result = await fetchWorkLogsForPreview(sb, 'client-a', window)
     expect(result.error).toBe('boom')
     expect(result.rows).toEqual([])
+  })
+
+  it('pages past PostgREST’s row cap instead of truncating to the first page', async () => {
+    const fullPage = Array.from({ length: 1000 }, (_, i) => makeRow(`page0-${i}`))
+    const lastPage = [makeRow('page1-0'), makeRow('page1-1')]
+    const { sb, calls } = makeFakeSupabasePaged((pageIndex) => (pageIndex === 0 ? fullPage : lastPage))
+
+    const result = await fetchWorkLogsForPreview(sb, 'client-a', window)
+
+    expect(result.rows).toHaveLength(1002)
+    expect(result.truncated).toBeUndefined()
+    expect(calls.range).toEqual([
+      [0, 999],
+      [1000, 1999],
+    ])
+  })
+
+  it('marks the result truncated instead of silently dropping rows past the safety cap', async () => {
+    const fullPage = Array.from({ length: 1000 }, (_, i) => makeRow(`row-${i}`))
+    const { sb, calls } = makeFakeSupabasePaged(() => fullPage)
+
+    const result = await fetchWorkLogsForPreview(sb, 'client-a', window)
+
+    expect(result.truncated).toBe(true)
+    expect(result.rows).toHaveLength(50 * 1000)
+    expect(calls.range).toHaveLength(50)
   })
 })
 

@@ -47,6 +47,10 @@ export interface DigestReceipt {
   eventCount: number
   events: DigestEvent[]
   status: 'ok' | 'NO_SOURCE_EVIDENCE'
+  /** True when the work-log read hit the pagination safety cap and may not
+   *  cover the full window — the receipt must never claim full coverage
+   *  while this is true. */
+  truncated: boolean
 }
 
 export interface PreviewResult {
@@ -141,26 +145,52 @@ export function computeWindow(now: Date, hours = 24): DigestWindow {
 export interface FetchWorkLogsResult {
   rows: WorkLogRow[]
   error?: string
+  /** True when the read hit MAX_PAGES without exhausting the window — the
+   *  caller must not treat `rows` as the full window in that case. */
+  truncated?: boolean
 }
+
+/** PostgREST's own response row cap (Supabase's project default). One page
+ *  is never trusted to be the whole window — see fetchWorkLogsForPreview. */
+const PAGE_SIZE = 1000
+
+/** Hard safety valve so a single preview run can never loop unbounded. At
+ *  PAGE_SIZE=1000 this is 50,000 rows, far beyond any real window. */
+const MAX_PAGES = 50
 
 /** Read `fde_work_logs` scoped to exactly one client and one time window.
  *  The `.eq('client_id', ...)` here is what keeps this cross-client-safe —
- *  every row returned belongs to the requested client, nothing else. */
+ *  every row returned belongs to the requested client, nothing else.
+ *  Pages through `.range()` so a window with more rows than PostgREST's
+ *  response cap doesn't get silently truncated to the oldest rows. */
 export async function fetchWorkLogsForPreview(
   sb: SupabaseClient,
   clientId: string,
   window: DigestWindow,
 ): Promise<FetchWorkLogsResult> {
-  const { data, error } = await sb
-    .from('fde_work_logs')
-    .select('id, client_id, log_date, summary, author_email, created_at')
-    .eq('client_id', clientId)
-    .gte('created_at', window.start)
-    .lt('created_at', window.end)
-    .order('created_at', { ascending: true })
+  const rows: WorkLogRow[] = []
 
-  if (error) return { rows: [], error: error.message }
-  return { rows: (data ?? []) as WorkLogRow[] }
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const from = page * PAGE_SIZE
+    const to = from + PAGE_SIZE - 1
+    const { data, error } = await sb
+      .from('fde_work_logs')
+      .select('id, client_id, log_date, summary, author_email, created_at')
+      .eq('client_id', clientId)
+      .gte('created_at', window.start)
+      .lt('created_at', window.end)
+      .order('created_at', { ascending: true })
+      .range(from, to)
+
+    if (error) return { rows: [], error: error.message }
+
+    const batch = (data ?? []) as WorkLogRow[]
+    rows.push(...batch)
+
+    if (batch.length < PAGE_SIZE) return { rows }
+  }
+
+  return { rows, truncated: true }
 }
 
 function escapeHtml(s: string): string {
@@ -185,12 +215,25 @@ function groupByTag(events: DigestEvent[]): { tag: string | null; items: DigestE
   return order.map((tag) => ({ tag, items: groups.get(tag)! }))
 }
 
-function renderShell(clientId: string, window: DigestWindow, senderDisplay: string, body: string): string {
+function renderShell(
+  clientId: string,
+  window: DigestWindow,
+  senderDisplay: string,
+  body: string,
+  truncated: boolean,
+): string {
   return `<!doctype html><html><head><meta charset="utf-8"><title>Magic Engine 客户摘要预览（未发送）</title></head>
 <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#2a2a2a;line-height:1.6;max-width:640px;margin:0 auto;padding:24px">
 <div style="background:#fff3cd;border:1px solid #ffe69c;border-radius:8px;padding:12px 16px;margin-bottom:20px;font-weight:600">
 ⚠️ PREVIEW ONLY — 本页从未发送，也不会自动发送。Sender（仅展示）：${escapeHtml(senderDisplay)}
 </div>
+${
+  truncated
+    ? `<div style="background:#f8d7da;border:1px solid #f1aeb5;border-radius:8px;padding:12px 16px;margin-bottom:20px;font-weight:600">
+⚠️ TRUNCATED — 本窗口内的工作日志数量超出单次读取上限，以下内容可能不完整，请缩小时间窗口后重试。
+</div>`
+    : ''
+}
 <p style="color:#666;font-size:13px">客户：${escapeHtml(clientId)} · 窗口：${escapeHtml(window.start)} → ${escapeHtml(window.end)}（${window.hours}h）</p>
 <div style="background:#eef2ff;border-radius:8px;padding:12px 16px;margin:16px 0;font-size:13px;color:#333">
 以下条目全部来自 <code>fde_work_logs</code> 的执行记录（work done）。<strong>Outcome 状态：UNKNOWN</strong> ——
@@ -207,6 +250,7 @@ export function renderPreview(
   window: DigestWindow,
   events: DigestEvent[],
   senderDisplay: string,
+  truncated = false,
 ): PreviewResult {
   const status: DigestReceipt['status'] = events.length === 0 ? 'NO_SOURCE_EVIDENCE' : 'ok'
   const receipt: DigestReceipt = {
@@ -216,11 +260,12 @@ export function renderPreview(
     eventCount: events.length,
     events,
     status,
+    truncated,
   }
 
   if (status === 'NO_SOURCE_EVIDENCE') {
     const body = `<p><strong>NO_SOURCE_EVIDENCE</strong> — 过去 ${window.hours} 小时内没有 fde_work_logs 记录，预览为空，不补写内容。</p>`
-    return { html: renderShell(clientId, window, senderDisplay, body), receipt }
+    return { html: renderShell(clientId, window, senderDisplay, body, truncated), receipt }
   }
 
   const body = groupByTag(events)
@@ -241,5 +286,5 @@ ${items
     )
     .join('\n')
 
-  return { html: renderShell(clientId, window, senderDisplay, body), receipt }
+  return { html: renderShell(clientId, window, senderDisplay, body, truncated), receipt }
 }

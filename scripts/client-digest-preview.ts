@@ -75,15 +75,18 @@ async function main(): Promise<void> {
   const sb = makeClient()
   const window = computeWindow(new Date(), hours)
 
-  const { rows, error } = await fetchWorkLogsForPreview(sb, clientId, window)
+  const { rows, error, truncated } = await fetchWorkLogsForPreview(sb, clientId, window)
   if (error) throw new Error(`读取 fde_work_logs 失败：${error}`)
 
   const events = buildDigestEvents(rows)
   const senderDisplay = meMailFrom('Magic Engine 客户摘要（预览）')
-  const { html, receipt } = renderPreview(clientId, window, events, senderDisplay)
+  const { html, receipt } = renderPreview(clientId, window, events, senderDisplay, truncated ?? false)
 
   writeFileSync(join(process.cwd(), out), html, 'utf8')
   process.stdout.write(`✅ 预览已写入 ${out}（本次运行没有发送任何邮件、没有写入任何表）\n`)
+  if (receipt.truncated) {
+    process.stdout.write(`⚠️  窗口内工作日志超出单次读取上限，内容可能不完整，请缩小 --hours 后重试\n`)
+  }
   process.stdout.write(`来源回执：\n${JSON.stringify(receipt, null, 2)}\n`)
 }
 
