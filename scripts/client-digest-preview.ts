@@ -7,11 +7,14 @@
  * contract on #1113 for the frozen scope.
  *
  * Usage:
- *   npx tsx scripts/client-digest-preview.ts <client_id> [--hours=24] [--out=client-digest-preview.html]
+ *   npx tsx scripts/client-digest-preview.ts <client_id> [--hours=24] [--out=.tmp/client-digest-preview.html]
+ *
+ * Default output goes to `.tmp/` (gitignored) so real client work-log content
+ * never lands in the repo root where a routine `git add .` would stage it.
  */
 
-import { readFileSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { dirname, join } from 'path'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { meMailFrom } from '@/lib/email/sender'
 import {
@@ -58,10 +61,10 @@ interface Args {
 function parseArgs(argv: string[]): Args {
   const [clientId, ...rest] = argv
   if (!clientId) {
-    throw new Error('用法: npx tsx scripts/client-digest-preview.ts <client_id> [--hours=24] [--out=client-digest-preview.html]')
+    throw new Error('用法: npx tsx scripts/client-digest-preview.ts <client_id> [--hours=24] [--out=.tmp/client-digest-preview.html]')
   }
   let hours = 24
-  let out = 'client-digest-preview.html'
+  let out = '.tmp/client-digest-preview.html'
   for (const a of rest) {
     if (a.startsWith('--hours=')) hours = Number(a.slice('--hours='.length))
     if (a.startsWith('--out=')) out = a.slice('--out='.length)
@@ -82,7 +85,9 @@ async function main(): Promise<void> {
   const senderDisplay = meMailFrom('Magic Engine 客户摘要（预览）')
   const { html, receipt } = renderPreview(clientId, window, events, senderDisplay, truncated ?? false)
 
-  writeFileSync(join(process.cwd(), out), html, 'utf8')
+  const outPath = join(process.cwd(), out)
+  mkdirSync(dirname(outPath), { recursive: true })
+  writeFileSync(outPath, html, 'utf8')
   process.stdout.write(`✅ 预览已写入 ${out}（本次运行没有发送任何邮件、没有写入任何表）\n`)
   if (receipt.truncated) {
     process.stdout.write(`⚠️  窗口内工作日志超出单次读取上限，内容可能不完整，请缩小 --hours 后重试\n`)
