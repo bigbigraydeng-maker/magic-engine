@@ -24,6 +24,17 @@ function makeResponse(status: number, body: unknown): Response {
   } as unknown as Response
 }
 
+/** 2xx 响应头已收到，但读取响应体时连接中断——`fetch()` 已 resolve，`res.json()` 才拒绝。 */
+function makeBodyReadFailureResponse(): Response {
+  return {
+    status: 200,
+    ok: true,
+    json: async () => {
+      throw new TypeError('network error while reading body')
+    },
+  } as unknown as Response
+}
+
 beforeEach(() => {
   global.fetch = vi.fn()
 })
@@ -50,6 +61,17 @@ describe('pollTailorMadeJob()', () => {
   it('tolerates network errors the same way as 5xx responses', async () => {
     ;(global.fetch as ReturnType<typeof vi.fn>)
       .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce(makeResponse(200, { status: 'completed', result: { ok: true } }))
+
+    const outcome = await pollTailorMadeJob('client-1', 'job-1', notCancelled)
+
+    expect(outcome).toEqual({ result: { ok: true } })
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('treats a network error while reading a 2xx response body as a transient failure and stays on the same poll chain', async () => {
+    ;(global.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(makeBodyReadFailureResponse())
       .mockResolvedValueOnce(makeResponse(200, { status: 'completed', result: { ok: true } }))
 
     const outcome = await pollTailorMadeJob('client-1', 'job-1', notCancelled)

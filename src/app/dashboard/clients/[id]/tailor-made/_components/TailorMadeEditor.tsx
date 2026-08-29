@@ -72,20 +72,33 @@ export async function pollTailorMadeJob(
     }
     if (isCancelled()) return { cancelled: true };
 
+    let data;
     if (res && res.ok) {
+      try {
+        data = await res.json();
+      } catch (err) {
+        if (err instanceof SyntaxError) {
+          // 响应体不是合法 JSON——服务端返回内容有问题，重试也不会自愈，立即终止
+          return { error: '查询任务失败：响应格式错误' };
+        }
+        // 2xx 响应头已收到，但读取响应体时连接中断，按瞬时故障处理，走下面共用的重试计数
+      }
+    }
+
+    if (data) {
       consecutiveTransientFailures = 0;
-      const data = await res.json();
       if (data.status === 'completed') return { result: data.result };
       if (data.status === 'failed') return { error: data.error || '生成失败' };
-    } else if (res && res.status < 500) {
+    } else if (res && !res.ok && res.status < 500) {
       // 4xx 不会自愈（任务不存在 / 无权限），立即终止
-      const data = await res.json().catch(() => ({}));
-      return { error: data.error || '查询任务失败' };
+      const errBody = await res.json().catch(() => ({}));
+      return { error: errBody.error || '查询任务失败' };
     } else {
+      // 覆盖：fetch 本身抛错、5xx，以及 2xx 但 body 读取失败
       consecutiveTransientFailures += 1;
       if (consecutiveTransientFailures >= MAX_CONSECUTIVE_TRANSIENT_FAILURES) {
-        const data = res ? await res.json().catch(() => ({})) : {};
-        return { error: data.error || '查询任务失败，请重试或联系技术支持' };
+        const errBody = res ? await res.json().catch(() => ({})) : {};
+        return { error: errBody.error || '查询任务失败，请重试或联系技术支持' };
       }
     }
 
