@@ -34,4 +34,8 @@ export const PLATFORM_CANDIDATE_REVIEWS: PlatformCandidateReview[] = [
     name: 'Current-Sponsored Competitor Discovery（当前活跃广告主实时发现 + diff 竞品清单）',
     reviewDate: '2026-09-28',
   },
+  {
+    name: 'Paid Search Ads Discipline Playbook（6 子规则：Brand/Non-brand 分账 · Broad match 谨慎 · 主题化 ad group + Smart Bidding 学习期数学门槛 · Conv value 真实客单价 · Heritage 词并列本地经营年数 · Change History 是 audit 第一步）',
+    reviewDate: '2026-10-29',
+  },
 ]
