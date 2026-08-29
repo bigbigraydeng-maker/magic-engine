@@ -162,7 +162,10 @@ const MAX_PAGES = 50
  *  The `.eq('client_id', ...)` here is what keeps this cross-client-safe —
  *  every row returned belongs to the requested client, nothing else.
  *  Pages through `.range()` so a window with more rows than PostgREST's
- *  response cap doesn't get silently truncated to the oldest rows. */
+ *  response cap doesn't get silently truncated to the oldest rows.
+ *  Orders by `(created_at, id)` — `id` breaks ties between rows sharing a
+ *  timestamp (e.g. a batch write) so the order is a total order and no page
+ *  boundary can duplicate or drop a row. */
 export async function fetchWorkLogsForPreview(
   sb: SupabaseClient,
   clientId: string,
@@ -180,6 +183,7 @@ export async function fetchWorkLogsForPreview(
       .gte('created_at', window.start)
       .lt('created_at', window.end)
       .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
       .range(from, to)
 
     if (error) return { rows: [], error: error.message }
