@@ -49,6 +49,50 @@ const POLL_MAX_MS = 10 * 60 * 1000; // 跟 Anthropic 客户端默认超时对齐
  */
 const MAX_CONSECUTIVE_TRANSIENT_FAILURES = 3;
 
+/** 单次轮询请求的分类结果：pending/transient 会继续重试，completed/fatal 立即结束轮询。 */
+type PollAttemptOutcome =
+  | { kind: 'completed'; result?: Record<string, unknown> }
+  | { kind: 'pending' }
+  | { kind: 'fatal'; error: string }
+  | { kind: 'transient'; errorMessage?: string };
+
+/** 发一次任务查询请求，把网络错误 / HTTP 状态 / 响应体分类成 {@link PollAttemptOutcome}，不含任何重试或退避逻辑。 */
+async function fetchTailorMadeJobOnce(clientId: string, jobId: string): Promise<PollAttemptOutcome> {
+  let res: Response | null = null;
+  try {
+    res = await fetch(`/api/clients/${clientId}/tailor-made/jobs/${jobId}`, {
+      credentials: 'include',
+    });
+  } catch {
+    // 网络错误当瞬时故障处理，走调用方的重试计数，不立即判死
+    return { kind: 'transient' };
+  }
+
+  if (res.ok) {
+    let data;
+    try {
+      data = await res.json();
+    } catch (err) {
+      if (err instanceof SyntaxError) {
+        // 响应体不是合法 JSON——服务端返回内容有问题，重试也不会自愈，立即终止
+        return { kind: 'fatal', error: '查询任务失败：响应格式错误' };
+      }
+      // 2xx 响应头已收到，但读取响应体时连接中断，按瞬时故障处理
+      return { kind: 'transient' };
+    }
+    if (data.status === 'completed') return { kind: 'completed', result: data.result };
+    if (data.status === 'failed') return { kind: 'fatal', error: data.error || '生成失败' };
+    return { kind: 'pending' };
+  }
+
+  const errBody = await res.json().catch(() => ({}));
+  if (res.status < 500) {
+    // 4xx 不会自愈（任务不存在 / 无权限），立即终止
+    return { kind: 'fatal', error: errBody.error || '查询任务失败' };
+  }
+  return { kind: 'transient', errorMessage: errBody.error };
+}
+
 /** 轮到「已卸载」就返回 { cancelled: true }，调用方据此跳过后续 setState —— 页面已经不在了，改 state 只会挨 React 的警告，请求也没必要再打。 */
 export async function pollTailorMadeJob(
   clientId: string,
@@ -62,43 +106,18 @@ export async function pollTailorMadeJob(
   for (;;) {
     if (isCancelled()) return { cancelled: true };
 
-    let res: Response | null = null;
-    try {
-      res = await fetch(`/api/clients/${clientId}/tailor-made/jobs/${jobId}`, {
-        credentials: 'include',
-      });
-    } catch {
-      // 网络错误当瞬时故障处理，走下面的重试计数，不立即判死
-    }
+    const outcome = await fetchTailorMadeJobOnce(clientId, jobId);
     if (isCancelled()) return { cancelled: true };
 
-    let data;
-    if (res && res.ok) {
-      try {
-        data = await res.json();
-      } catch (err) {
-        if (err instanceof SyntaxError) {
-          // 响应体不是合法 JSON——服务端返回内容有问题，重试也不会自愈，立即终止
-          return { error: '查询任务失败：响应格式错误' };
-        }
-        // 2xx 响应头已收到，但读取响应体时连接中断，按瞬时故障处理，走下面共用的重试计数
-      }
-    }
+    if (outcome.kind === 'completed') return { result: outcome.result };
+    if (outcome.kind === 'fatal') return { error: outcome.error };
 
-    if (data) {
+    if (outcome.kind === 'pending') {
       consecutiveTransientFailures = 0;
-      if (data.status === 'completed') return { result: data.result };
-      if (data.status === 'failed') return { error: data.error || '生成失败' };
-    } else if (res && !res.ok && res.status < 500) {
-      // 4xx 不会自愈（任务不存在 / 无权限），立即终止
-      const errBody = await res.json().catch(() => ({}));
-      return { error: errBody.error || '查询任务失败' };
     } else {
-      // 覆盖：fetch 本身抛错、5xx，以及 2xx 但 body 读取失败
       consecutiveTransientFailures += 1;
       if (consecutiveTransientFailures >= MAX_CONSECUTIVE_TRANSIENT_FAILURES) {
-        const errBody = res ? await res.json().catch(() => ({})) : {};
-        return { error: errBody.error || '查询任务失败，请重试或联系技术支持' };
+        return { error: outcome.errorMessage || '查询任务失败，请重试或联系技术支持' };
       }
     }
 
