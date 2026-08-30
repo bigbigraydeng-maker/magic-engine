@@ -1,6 +1,6 @@
 // 只引纯逻辑那一半：本文件会被客户端的画册编辑器 import，
 // 引 ./hero 会把 node:fs 拖进浏览器包，构建直接失败。
-import { matchAllHeroNames, matchHeroName, pickHeroName } from './hero-rules';
+import { matchHeroName, pickHeroName } from './hero-rules';
 import {
   blankBrochureCity,
   HERO_PREFIX,
@@ -80,60 +80,12 @@ function assignDaysToCities(days: TailorMadeDay[], route: string[]): Map<string,
  */
 function cardImage(day: TailorMadeDay, cityImage: string, otherCityImages: Set<string>): string {
   const matched = matchHeroName(day.body ?? '');
-  if (!matched) return '';
+  if (!matched) return cityImage;
 
   const image = `${HERO_PREFIX}${matched}`;
-  // 匹配到的是别的城市的图 —— 当没匹配到处理，交给兜底
-  if (image !== cityImage && otherCityImages.has(image)) return '';
+  // 匹配到的是别的城市的图 —— 宁可用本城的通用照
+  if (image !== cityImage && otherCityImages.has(image)) return cityImage;
   return image;
-}
-
-/**
- * 给一个城市的卡片分配图片。
- *
- * 分两轮，而不是一张一张独立决定：先把「这天确实写到了」的地标图各就各位，
- * 剩下没图的（中转日、自由活动日）再从本城还没用过的图里补。
- *
- * 逐张独立决定会让兜底反复挑中同一张城景 —— 实测上海一页里出现三张一样的
- * 照片，PM 2026-08-30 反馈「图片不能有重叠的」。
- *
- * 图库是有限的，补到没得补时允许重复：一张重复的照片仍然好过一个空灰块，
- * 顾问换图也只是改一个字段。
- */
-function assignCardImages(
-  days: TailorMadeDay[],
-  /** 本城全部的天（含升为大图的那天）—— 备选池从这里收集，不然大图那天
-   *  正文里提到的第二个地标就白白浪费了 */
-  allDays: TailorMadeDay[],
-  heroImage: string,
-  cityImage: string,
-  others: Set<string>,
-): string[] {
-  const specific = days.map((d) => cardImage(d, cityImage, others));
-
-  const used = new Set<string>([heroImage, ...specific].filter(Boolean));
-
-  // 备选池：这几天正文里提到过、但还没被用上的图。
-  // 一天写到好几个地方时只有第一个成了卡片图，其余正好拿来补中转日和自由活动日。
-  const spare: string[] = [];
-  for (const day of allDays) {
-    for (const name of matchAllHeroNames(day.body ?? '')) {
-      const img = `${HERO_PREFIX}${name}`;
-      if (used.has(img) || spare.includes(img) || others.has(img)) continue;
-      spare.push(img);
-    }
-  }
-  if (cityImage && !used.has(cityImage) && !spare.includes(cityImage)) spare.push(cityImage);
-
-  return specific.map((img) => {
-    if (img) return img;
-    const next = spare.shift();
-    if (next) {
-      used.add(next);
-      return next;
-    }
-    return cityImage; // 补无可补，宁可重复也不留空
-  });
 }
 
 function dayCard(day: TailorMadeDay, image: string): BrochureCard {
@@ -197,13 +149,12 @@ export function createBrochureFromItinerary(itinerary: TailorMadeItinerary): Tai
 
       // 大图跟卡片走同一套规则：这天写的是长城就配长城，比一张泛泛的北京城景准。
       // 整版大图是这一页最先被看到的东西，不该退回通用照。
-      // cardImage 匹配不到会返回空 —— 大图必须兜底回城市通用照，不能空着
-      city.hero.image = cardImage(lead, cityImage, others) || cityImage;
+      city.hero.image = cardImage(lead, city.hero.image, others);
     }
 
-    const cardDays = cityDays.filter((d) => d !== lead && (d.body ?? '').trim().length > 0);
-    const images = assignCardImages(cardDays, cityDays, city.hero.image, cityImage, others);
-    city.blocks = cardDays.map((d, i) => dayCard(d, images[i]));
+    city.blocks = cityDays
+      .filter((d) => d !== lead && (d.body ?? '').trim().length > 0)
+      .map((d) => dayCard(d, cardImage(d, cityImage, others)));
 
     return city;
   });
