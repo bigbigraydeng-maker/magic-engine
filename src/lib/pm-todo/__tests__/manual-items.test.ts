@@ -10,6 +10,7 @@ import {
   loadManualItems,
   pushPlatformCandidateReviewItems,
   pushDataForSeoCreditsItem,
+  pushDiscoveryFunnelCloudflareItem,
   type ManualItem,
 } from '../manual-items'
 import { buildTodoEmail, type TodoCounts } from '../daily-todo'
@@ -66,6 +67,33 @@ describe('pushDataForSeoCreditsItem', () => {
     const items: ManualItem[] = []
     const query = fakeDiscoveryQuery([])
     await pushDataForSeoCreditsItem(query.supabase, items, new Date('2026-09-01T00:00:00Z'))
+
+    expect(items).toEqual([])
+  })
+})
+
+describe('pushDiscoveryFunnelCloudflareItem', () => {
+  function fakeLeadsQuery(rows: unknown[]) {
+    const chain = {
+      select: () => chain,
+      limit: async () => ({ data: rows, error: null }),
+    }
+    return { from: () => chain } as never
+  }
+
+  it('flags the Cloudflare env gap while discovery_leads is still empty', async () => {
+    const items: ManualItem[] = []
+    await pushDiscoveryFunnelCloudflareItem(fakeLeadsQuery([]), items)
+
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ kind: 'discovery_funnel_cloudflare_env_missing', client_id: 'infra' })
+    expect(items[0].what).toContain('SUPABASE_URL')
+    expect(items[0].how).toContain('Cloudflare')
+  })
+
+  it('self-clears once a real lead has landed in discovery_leads', async () => {
+    const items: ManualItem[] = []
+    await pushDiscoveryFunnelCloudflareItem(fakeLeadsQuery([{ id: 'lead-1' }]), items)
 
     expect(items).toEqual([])
   })

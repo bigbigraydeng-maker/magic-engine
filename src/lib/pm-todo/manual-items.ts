@@ -70,6 +70,8 @@ export type ManualItemKind =
   | 'dm_maybe_stop'
   /** 平台候选（docs/registry/platform-candidates.md）到了复查日期 —— 见 me-platform-tier-gate skill */
   | 'platform_candidate_review_due'
+  /** 官网免费体检漏斗断流：Cloudflare Pages 生产环境缺 Supabase 凭证，见 pushDiscoveryFunnelCloudflareItem */
+  | 'discovery_funnel_cloudflare_env_missing'
   | CommentScopeTodoKind
   /** 执行内核停手 / 等审批 / 被规则挡下 —— 必须有人看见，不许死在日志里 */
   | 'kernel_needs_human'
@@ -215,6 +217,10 @@ export async function loadManualItems(
   await pushCronHealthItems(supabase, items, now)
   // 平台候选到了复查日期 —— 不落库、不查表，纯本地日期判断
   pushPlatformCandidateReviewItems(items, now)
+  // 官网免费体检漏斗断流 —— Cloudflare 侧缺 Supabase 凭证，第一条真实 lead 落库前持续下发
+  await pushDiscoveryFunnelCloudflareItem(supabase, items).catch((e) =>
+    console.warn('[manual-items] 免费体检漏斗断流检查失败（不阻塞其他待办）:', e),
+  )
   // 目标数字口径对不上 —— 错的方向感比没数字更危险(2026-08-03 差点据此给出反向建议)
   await pushBaselineItems(supabase, items)
   // 出片工单排队但没人干活 —— 装配跑在一台 Mac 上，不开机就没人做，而队列里看不出来
@@ -528,6 +534,46 @@ export async function pushDataForSeoCreditsItem(
     what: 'Keyword Intelligence 余额用完了 —— 新的客户发现、SEO 竞品分析和内容选题会缺少关键词量数据',
     how: '打开后台 → Billing → Add Funds 充值；充完回我一句，我把最近受影响的发现任务重跑',
     href: DATAFORSEO_DASHBOARD_URL,
+  })
+}
+
+/** Cloudflare 独立账号后台，本仓无权限深链到具体 Pages 项目，只能给稳定登录入口。 */
+const CLOUDFLARE_DASHBOARD_URL = 'https://dash.cloudflare.com/'
+
+/**
+ * 官网 magicengine.com.au 免费体检漏斗断流（2026-09-02 发现，docs/ROADMAP.md 同日登记）。
+ *
+ * 根因：Cloudflare Pages 独立账号（本仓无法访问）的生产环境没配
+ * `SUPABASE_URL` / `SUPABASE_SERVICE_KEY`，`storeLead()` 从未真正连过库，
+ * 一律回退成假 `demo-` id，报告邮件也因此从未真正发出过。
+ *
+ * 这条只能人工去 Cloudflare 后台补——但自愈判据可以自动查：只要 Cloudflare
+ * 侧接上了真 Supabase 凭证，第一次真实体检就会在 `discovery_leads` 落一行
+ * 真实 uuid（`demo-` 的假 id 从不落库）。所以判据就是这张表还有没有任何一行，
+ * 一旦有了就自动停止下发，不用等人回来手动关掉这条待办。
+ */
+export async function pushDiscoveryFunnelCloudflareItem(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+): Promise<void> {
+  const { data, error } = await supabase.from('discovery_leads').select('id').limit(1)
+  if (error) throw new Error(`discovery_leads existence check failed: ${error.message}`)
+  if (data?.length) return
+
+  items.push({
+    kind: 'discovery_funnel_cloudflare_env_missing',
+    client_id: 'infra',
+    client_name: 'Magic Engine 后台',
+    what:
+      '官网 magicengine.com.au 的免费体检从上线起一直断流：Cloudflare Pages 生产环境缺 ' +
+      'SUPABASE_URL / SUPABASE_SERVICE_KEY 两个环境变量，每次体检都存假 demo- ID，从没真正发出过一封报告邮件',
+    how:
+      '登录 Cloudflare（独立账号，非本仓库账号）→ 找到 magicengine.com.au 对应的 Pages 项目 → ' +
+      'Settings → Environment variables → Production，新增 SUPABASE_URL=https://glbdnayojixmexgofbsd.supabase.co、' +
+      'SUPABASE_SERVICE_KEY（从 Render magic-engine 服务的 SUPABASE_SERVICE_ROLE_KEY 复制同一个值）→ ' +
+      '保存后触发一次重新部署；顺手确认 RESEND_API_KEY 也配了，否则报告邮件仍会静默不发。' +
+      '补完后这条待办会在第一条真实体检记录落库后自动消失，不用回来手动关',
+    href: CLOUDFLARE_DASHBOARD_URL,
   })
 }
 
