@@ -69,7 +69,15 @@ describe('buildCommentScopeTodo', () => {
 
 // ---------------------------------------------------------------------------
 
-function fakeSupabase(run: unknown) {
+/**
+ * 只对 cron_run_logs 建模 —— 碰别的表就炸，暴露越界读取。
+ *
+ * 收一个数组（最新一行在前，模拟 order by started_at desc）或单行；limit(n) 返回
+ * 前 n 行。多行是关键：待办层要能越过「最新一行还在跑 / 失败没 summary」拿到上一
+ * 条有结果的完成轮，单行的假库根本测不出这条链。
+ */
+function fakeSupabase(runs: unknown) {
+  const rows = runs === null ? [] : Array.isArray(runs) ? runs : [runs]
   return {
     from(table: string) {
       if (table !== 'cron_run_logs') throw new Error(`fake supabase: table '${table}' is not modelled`)
@@ -77,7 +85,7 @@ function fakeSupabase(run: unknown) {
       chain.select = () => chain
       chain.eq = () => chain
       chain.order = () => chain
-      chain.limit = () => Promise.resolve({ data: run === null ? [] : [run], error: null })
+      chain.limit = (n: number) => Promise.resolve({ data: rows.slice(0, n), error: null })
       return chain
     },
   } as never
@@ -105,6 +113,32 @@ describe('fetchCommentScopeTodos', () => {
 
   it('跑到一半没写完 finished_at 的不用', async () => {
     expect(await fetchCommentScopeTodos(fakeSupabase({ finished_at: null, summary }), NOW)).toEqual([])
+  })
+
+  it('最新一行还在跑（summary 空）时，跳过它回落到上一条有结果的完成轮 —— 不静默清空', async () => {
+    const todos = await fetchCommentScopeTodos(
+      fakeSupabase([
+        { finished_at: null, summary: null }, // 这一轮还在跑
+        { finished_at: '2026-08-15T11:31:00Z', summary }, // 上一轮：某客户评论读不到，仍在 2 天窗口内
+      ]),
+      NOW,
+    )
+    expect(todos).toHaveLength(1)
+    expect(todos[0].kind).toBe('comment_scope_missing')
+  })
+
+  it('🔴 最新一行失败没写 summary 时，绝不抹掉上一条已知的令牌被拒待办', async () => {
+    const tokenSummary = { results: [result({ token_invalid: 'Error validating access token' })] }
+    const todos = await fetchCommentScopeTodos(
+      fakeSupabase([
+        { finished_at: '2026-08-15T11:58:00Z', summary: null }, // 这一轮失败没带 summary
+        { finished_at: '2026-08-15T11:31:00Z', summary: tokenSummary }, // 上一轮：令牌被拒
+      ]),
+      NOW,
+    )
+    expect(todos).toHaveLength(1)
+    expect(todos[0].kind).toBe('comment_token_invalid')
+    expect(todos[0].client_id).toBe('cts')
   })
 
   it('从没跑过 / 没有 summary 都不出待办，也不炸', async () => {
