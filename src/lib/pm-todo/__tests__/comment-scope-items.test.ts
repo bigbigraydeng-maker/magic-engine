@@ -72,13 +72,18 @@ describe('buildCommentScopeTodo', () => {
 /**
  * 只对 cron_run_logs 建模 —— 碰别的表就炸，暴露越界读取。
  *
- * 收一个数组（最新一行在前，模拟 order by started_at desc）或单行。`.not('summary',
- * 'is', null)` 模拟真实 Supabase 的行为，在 limit 前过滤掉没有 summary 的行 ——
- * 待办层要能越过「最新一行还在跑 / 失败没 summary」拿到上一条有结果的完成轮，
- * 这条过滤就是那条链本身，不是靠假库遍历多行找出来的。
+ * 收一个数组（最新一行在前，模拟 order by started_at desc）或单行。`.not(col,'is',
+ * null)` 模拟真实 Supabase 的行为，在 limit 前过滤掉该列为空的行 —— 待办层要能越过
+ * 「最新一行还在跑 / 失败没 summary / 被 kill 没 results」拿到上一条真出了结果的完成
+ * 轮，这条过滤就是那条链本身，不是靠假库遍历多行找出来的。支持 top-level 列和
+ * `summary->>results` 这种 JSON 路径两种写法（真实 Supabase 都支持）。
  */
 function fakeSupabase(runs: unknown) {
   const allRows = (runs === null ? [] : Array.isArray(runs) ? runs : [runs]) as Array<Record<string, unknown>>
+  const valueAt = (r: Record<string, unknown>, column: string): unknown => {
+    if (/^summary->>?results$/.test(column)) return (r.summary as { results?: unknown } | null)?.results
+    return r[column]
+  }
   return {
     from(table: string) {
       if (table !== 'cron_run_logs') throw new Error(`fake supabase: table '${table}' is not modelled`)
@@ -87,7 +92,7 @@ function fakeSupabase(runs: unknown) {
       chain.select = () => chain
       chain.eq = () => chain
       chain.not = (column: string, _op: string, value: unknown) => {
-        if (value === null) rows = rows.filter((r) => r[column] != null)
+        if (value === null) rows = rows.filter((r) => valueAt(r, column) != null)
         return chain
       }
       chain.order = () => chain
@@ -146,6 +151,18 @@ describe('fetchCommentScopeTodos', () => {
     expect(todos).toHaveLength(1)
     expect(todos[0].kind).toBe('comment_token_invalid')
     expect(todos[0].client_id).toBe('cts')
+  })
+
+  it('🔴 kill 开关那轮 summary 非空但没有 results 时也要跳过 —— 只判「summary 非空」会被它遮住真告警', async () => {
+    const todos = await fetchCommentScopeTodos(
+      fakeSupabase([
+        { finished_at: '2026-08-15T11:58:00Z', summary: { killed: true } }, // kill 开关：summary 非空但没有 results
+        { finished_at: '2026-08-15T11:31:00Z', summary }, // 上一轮：评论读不到，仍在 2 天窗口内
+      ]),
+      NOW,
+    )
+    expect(todos).toHaveLength(1)
+    expect(todos[0].kind).toBe('comment_scope_missing')
   })
 
   it('🔴 连续超过 5 轮没写 summary 也不能漏 —— 回落不能受限于回看行数', async () => {

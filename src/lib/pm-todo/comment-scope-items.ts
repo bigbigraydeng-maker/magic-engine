@@ -134,13 +134,21 @@ export async function fetchCommentScopeTodos(
   // 5 行只盖 2.5 小时：连续 5 轮超时/失败不带 summary（约 2.5 小时内就可能发生）
   // 会把查询窗口外、仍在 RUN_STALE_DAYS 两天有效期内的上一条好结果也漏掉，待办
   // 照样静默消失 —— 跟只看最新一行是同一种 fail-open，只是需要更久触发。所以改
-  // 在查询端直接过滤掉没有 summary 的行，取真正的最近一条，不受回看行数限制
+  // 在查询端直接过滤，取真正的最近一条，不受回看行数限制
   // （mailbox-run.ts 文件头 + meta-auth-health-items.ts 记着同一个坑）。
+  //
+  // 过滤条件是 summary->>results 非空，而不是只看 summary 非空：finish() 写 summary
+  // 也不保证带 results —— kill 开关那轮写 `{ killed: true }`（route.ts），非空却没有
+  // results。只判「summary 非空」会取到它、loop 空 results 出 0 条待办，kill 开关一
+  // 开着（可长时间）就把仍有效的上一条「评论读不到 / 令牌被拒」静默盖掉，又是同一
+  // 种 fail-open。按 results 是否存在过滤，running/失败(summary=null)、kill(无 results)
+  // 全排除；无配置成功轮写 `{ results: [] }`（route.ts），results 存在故保留，正确识别
+  // 为「已确认无问题」而不回落到更早的旧报错。
   const { data } = await supabase
     .from('cron_run_logs')
     .select('finished_at, summary')
     .eq('job_name', 'social-comment-autoreply')
-    .not('summary', 'is', null)
+    .not('summary->>results', 'is', null)
     .order('started_at', { ascending: false })
     .limit(1)
 
