@@ -72,18 +72,24 @@ describe('buildCommentScopeTodo', () => {
 /**
  * 只对 cron_run_logs 建模 —— 碰别的表就炸，暴露越界读取。
  *
- * 收一个数组（最新一行在前，模拟 order by started_at desc）或单行；limit(n) 返回
- * 前 n 行。多行是关键：待办层要能越过「最新一行还在跑 / 失败没 summary」拿到上一
- * 条有结果的完成轮，单行的假库根本测不出这条链。
+ * 收一个数组（最新一行在前，模拟 order by started_at desc）或单行。`.not('summary',
+ * 'is', null)` 模拟真实 Supabase 的行为，在 limit 前过滤掉没有 summary 的行 ——
+ * 待办层要能越过「最新一行还在跑 / 失败没 summary」拿到上一条有结果的完成轮，
+ * 这条过滤就是那条链本身，不是靠假库遍历多行找出来的。
  */
 function fakeSupabase(runs: unknown) {
-  const rows = runs === null ? [] : Array.isArray(runs) ? runs : [runs]
+  const allRows = (runs === null ? [] : Array.isArray(runs) ? runs : [runs]) as Array<Record<string, unknown>>
   return {
     from(table: string) {
       if (table !== 'cron_run_logs') throw new Error(`fake supabase: table '${table}' is not modelled`)
+      let rows = allRows
       const chain: Record<string, unknown> = {}
       chain.select = () => chain
       chain.eq = () => chain
+      chain.not = (column: string, _op: string, value: unknown) => {
+        if (value === null) rows = rows.filter((r) => r[column] != null)
+        return chain
+      }
       chain.order = () => chain
       chain.limit = (n: number) => Promise.resolve({ data: rows.slice(0, n), error: null })
       return chain
@@ -139,6 +145,19 @@ describe('fetchCommentScopeTodos', () => {
     expect(todos).toHaveLength(1)
     expect(todos[0].kind).toBe('comment_token_invalid')
     expect(todos[0].client_id).toBe('cts')
+  })
+
+  it('🔴 连续超过 5 轮没写 summary 也不能漏 —— 回落不能受限于回看行数', async () => {
+    const stale = { finished_at: null, summary: null }
+    const todos = await fetchCommentScopeTodos(
+      fakeSupabase([
+        stale, stale, stale, stale, stale, stale, stale, stale, // 连续 8 轮卡死/失败，超过旧版 5 行回看
+        { finished_at: '2026-08-15T11:31:00Z', summary }, // 更早一轮：仍在 2 天窗口内的好结果
+      ]),
+      NOW,
+    )
+    expect(todos).toHaveLength(1)
+    expect(todos[0].kind).toBe('comment_scope_missing')
   })
 
   it('从没跑过 / 没有 summary 都不出待办，也不炸', async () => {
