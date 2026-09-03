@@ -99,6 +99,7 @@ function fakeSupabase(runs: unknown) {
 
 describe('fetchCommentScopeTodos', () => {
   const summary = { results: [result({ permission_denied_count: 12 })] }
+  const tokenResultSummary = { results: [result({ token_invalid: 'Error validating access token' })] }
 
   it('读最近一轮的结果', async () => {
     const todos = await fetchCommentScopeTodos(
@@ -158,6 +159,17 @@ describe('fetchCommentScopeTodos', () => {
     )
     expect(todos).toHaveLength(1)
     expect(todos[0].kind).toBe('comment_scope_missing')
+  })
+
+  it('🔴 全部客户禁用评论自动回复后的「无配置」成功轮要能清掉旧待办 —— 它必须带一个非 null 的空 summary，而不是被当成没结果回落到更早的报错', async () => {
+    const todos = await fetchCommentScopeTodos(
+      fakeSupabase([
+        { finished_at: '2026-08-15T11:58:00Z', summary: { results: [] } }, // 无配置成功轮
+        { finished_at: '2026-08-15T11:31:00Z', summary: tokenResultSummary }, // 更早：令牌被拒（已停用，不该再报）
+      ]),
+      NOW,
+    )
+    expect(todos).toEqual([])
   })
 
   it('从没跑过 / 没有 summary 都不出待办，也不炸', async () => {

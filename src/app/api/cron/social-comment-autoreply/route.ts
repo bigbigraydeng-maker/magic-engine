@@ -53,7 +53,12 @@ export async function GET(req: NextRequest) {
 
   const configs = (data ?? []) as CommentConfig[]
   if (configs.length === 0) {
-    await cronRun.finish({ processed: 0 })
+    // summary 必须落一个非 null 的空结果（而不是留 null）——
+    // comment-scope-items.ts 的查询专挑「写了 summary 的那一轮」来判断有没有
+    // 权限/令牌问题；这里若留 null，这一轮会被当成没结果直接跳过，退回到更早
+    // 一条可能带着旧报错的 summary，导致客户已经全部停用评论自动回复后，
+    // 待办还照样挂着不消失。
+    await cronRun.finish({ processed: 0, summary: { results: [] } })
     return NextResponse.json({ success: true, clients_processed: 0, message: 'No clients enabled', results: [] })
   }
 
