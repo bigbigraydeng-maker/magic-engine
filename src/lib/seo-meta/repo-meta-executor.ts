@@ -1,39 +1,95 @@
 /**
- * CTS meta executor (22.E.S17 · CTS 标题执行手).
+ * Repository meta executor (22.E.S17 · 客户数据红线 #1121 通用化).
  *
- * Gives CTS the same "auto-apply small title fixes" treatment Oztop already
- * enjoys — but through the code-repo channel, since CTS has no WordPress:
+ * Gives a client with no WordPress the same "auto-apply small title fixes"
+ * treatment as clients that do — but through their code-repo channel:
  *
  *   1. GSC top_pages: positions 4-20 with impressions ≥ 10 (real CTR upside)
  *   2. Best matching query from top_queries → AI (Haiku) writes a sharper
- *      title + description (NZ China-travel voice, "| CTS" suffix)
+ *      title + description, voiced per the client's own config
  *   3. THE NARROW LANE: edits ONLY title/description string literals inside
- *      src/lib/data/*.ts entries, located via a content-built slug index
- *      (filenames don't track URL slugs, and batch files hold many posts).
- *      Slugs found in no data file are skipped — no TSX logic is ever touched
+ *      the client's configured data directory, located via a content-built
+ *      slug index (filenames don't always track URL slugs, and batch files
+ *      can hold many posts). Slugs found in no data file are skipped — no
+ *      TSX logic is ever touched
  *   4. One PR per week (≤ MAX_PAGES_PER_RUN pages), CI must pass, the PM
- *      merges — same human gate as blog publishing (魏征 M2: PR + 人合).
+ *      merges — same human gate as blog publishing (魏征 M2: PR + 人合)
  *   5. seo_meta_log rows drive the 30-day per-slug cooldown and the weekly
- *      report's 自动改动 column.
+ *      report's 自动改动 column
  *
- * CTS-specific constants live here on purpose: the repo path and meta-file
- * layout are properties of the chinatravel codebase, not FDE-editable
- * config (the FDE-visible switch stays seo_config.weekly_blog).
+ * Per-client facts (repo data dir, brand suffix, voice) live in
+ * `clients.seo_config.repo_meta_executor` — never in this shared module
+ * (客户数据红线 #2: 客户事实不进 shared runtime). Missing/disabled/incomplete
+ * config is a fail-closed `not_configured` skip, before any AI or GitHub call.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import Anthropic from '@anthropic-ai/sdk'
-import { supabaseAdmin } from '@/lib/supabase'
 import { getConnection } from '@/lib/cms/connection-store'
 import { GithubClient } from '@/lib/cms/github-client'
 
-export const CTS_CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
-const DATA_DIR = 'src/lib/data'
 const MAX_PAGES_PER_RUN = 3
 const COOLDOWN_DAYS = 30
 const MIN_POSITION = 4
 const MAX_POSITION = 20
 const MIN_IMPRESSIONS = 10
+const MAX_BRAND_SUFFIX_LEN = 80
+const MAX_VOICE_HINT_LEN = 1000
+
+/** Raw control characters (incl. DEL) — never legitimate in a repo path. */
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/
+
+/**
+ * `dataDir` is handed straight to `GithubClient.listDirectory` as a repo path
+ * — it must stay a plain relative path INSIDE the repo, never something that
+ * could resolve outside it or carry bytes the GitHub API/git tooling could
+ * mis-parse. Rejects: absolute paths (`/…`, `\…`, Windows drive letters),
+ * backslashes, `.`/`..` path segments, and control characters.
+ */
+function isSafeRepoRelativeDir(value: string): boolean {
+  if (value === '') return false
+  if (value.startsWith('/') || value.startsWith('\\')) return false
+  if (/^[a-zA-Z]:/.test(value)) return false
+  if (value.includes('\\')) return false
+  if (CONTROL_CHAR_RE.test(value)) return false
+  return value.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..')
+}
+
+// ── Client configuration (seo_config.repo_meta_executor) ───────────────────────
+
+export interface RepoMetaExecutorConfig {
+  enabled: boolean
+  /** Repo-relative path to scan for title/description literals, e.g. 'src/lib/data'. */
+  dataDir: string
+  /** Appended to generated titles where space allows; empty string = no suffix. */
+  brandSuffix: string
+  /** One-sentence brief the AI writer is given for tone/market/audience. */
+  voiceHint: string
+}
+
+/**
+ * Fail-closed: any missing/mistyped/unsafe field means "not configured",
+ * never a guessed default. This is the ONLY gate before `runRepoMetaExecutor`
+ * touches the provider (Anthropic) or GitHub — an unsafe `dataDir` or an
+ * unbounded `brandSuffix`/`voiceHint` must never reach either call.
+ */
+export function loadRepoMetaExecutorConfig(seoConfig: unknown): RepoMetaExecutorConfig | null {
+  if (!seoConfig || typeof seoConfig !== 'object') return null
+  const raw = (seoConfig as Record<string, unknown>)['repo_meta_executor']
+  if (!raw || typeof raw !== 'object') return null
+  const cfg = raw as Record<string, unknown>
+  if (cfg.enabled !== true) return null
+  if (typeof cfg.dataDir !== 'string') return null
+  const dataDir = cfg.dataDir.trim()
+  if (!isSafeRepoRelativeDir(dataDir)) return null
+  if (typeof cfg.brandSuffix !== 'string' || CONTROL_CHAR_RE.test(cfg.brandSuffix)) return null
+  if (typeof cfg.voiceHint !== 'string' || CONTROL_CHAR_RE.test(cfg.voiceHint)) return null
+  const brandSuffix = cfg.brandSuffix.trim().slice(0, MAX_BRAND_SUFFIX_LEN)
+  const voiceHint = cfg.voiceHint.trim().slice(0, MAX_VOICE_HINT_LEN)
+  if (voiceHint === '') return null
+  return { enabled: true, dataDir, brandSuffix, voiceHint }
+}
 
 // ── Pure: narrow-lane source editing ────────────────────────────────────────────
 
@@ -105,11 +161,10 @@ export function replaceMetaForSlug(
 /**
  * slug → file path, built by scanning the data files' CONTENT.
  *
- * Filenames do not track URL slugs in this repo: /blog/liziba-station-
- * chongqing-guide lives in blogs-liziba-monorail-guide.ts, and four of CTS's
- * top-opportunity posts sit inside shared batch files (blogs-longtail-batch1
- * .ts etc). Guessing `blogs-<slug>.ts` found 2 of 6 — the first two runs
- * produced no PR for exactly this reason.
+ * Filenames do not always track URL slugs (a page can live in a batch file
+ * named after a different topic), and a single batch file can hold several
+ * posts. Guessing `<dir>/<slug>.ts` misses those — the executor reads
+ * content instead of guessing filenames.
  */
 export function buildSlugIndex(
   files: Array<{ path: string; source: string }>,
@@ -201,26 +256,31 @@ export function pickCandidates(
 
 // ── AI meta generation ──────────────────────────────────────────────────────────
 
-async function generateCtsMeta(
+async function generateRepoMeta(
   keyword: string,
   pageUrl: string,
+  brandSuffix: string,
+  voiceHint: string,
 ): Promise<{ title: string; desc: string }> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  const suffixRule = brandSuffix
+    ? `Title: max 60 chars, keyword near the start, end "${brandSuffix}" if space allows`
+    : 'Title: max 60 chars, keyword near the start'
   const msg = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 200,
     messages: [
       {
         role: 'user',
-        content: `You are an SEO specialist for a New Zealand-based China travel agency (Auckland, serving Kiwi travellers).
+        content: `You are an SEO specialist. ${voiceHint}
 
 Target keyword: "${keyword}"
 Page URL: ${pageUrl}
 
 Rules:
-- Title: max 60 chars, keyword near the start, mention New Zealand/NZ where natural, end "| CTS" if space allows
-- Description: max 155 chars, include the keyword + a clear call to action, NZ English
-- Factual tone — do NOT invent prices, dates or itinerary details
+- ${suffixRule}
+- Description: max 155 chars, include the keyword + a clear call to action
+- Factual tone — do NOT invent prices, dates or details not implied by the keyword
 - No quotes inside the text
 
 Respond ONLY with valid JSON: {"title":"...","desc":"..."}`,
@@ -241,8 +301,14 @@ Respond ONLY with valid JSON: {"title":"...","desc":"..."}`,
 
 // ── Runner ──────────────────────────────────────────────────────────────────────
 
-export interface CtsMetaPrResult {
-  outcome: 'pr_opened' | 'no_candidates' | 'no_connection' | 'nothing_editable' | 'error'
+export interface RepoMetaExecutorResult {
+  outcome:
+    | 'pr_opened'
+    | 'no_candidates'
+    | 'no_connection'
+    | 'nothing_editable'
+    | 'not_configured'
+    | 'error'
   pr_url?: string
   pages?: Array<{ slug: string; keyword: string }>
   /** Per-candidate audit trail (slug → which step it stopped at). */
@@ -250,22 +316,40 @@ export interface CtsMetaPrResult {
   error?: string
 }
 
-export async function runCtsMetaPr(
-  supabase: SupabaseClient = supabaseAdmin,
-): Promise<CtsMetaPrResult> {
+/**
+ * `clientId` is required with no default — the executor never silently
+ * picks a client. Missing/disabled/incomplete `seo_config.repo_meta_executor`
+ * short-circuits to `not_configured` before any AI or GitHub call.
+ */
+export async function runRepoMetaExecutor(
+  supabase: SupabaseClient,
+  clientId: string,
+): Promise<RepoMetaExecutorResult> {
   try {
+    const { data: clientRow, error: clientErr } = await supabase
+      .from('clients')
+      .select('seo_config')
+      .eq('id', clientId)
+      .maybeSingle()
+    if (clientErr) return { outcome: 'error', error: clientErr.message }
+
+    const config = loadRepoMetaExecutorConfig(
+      (clientRow as { seo_config: unknown } | null)?.seo_config,
+    )
+    if (!config) return { outcome: 'not_configured' }
+
     // 1. Cooldown + GSC signals
     const cutoff = new Date(Date.now() - COOLDOWN_DAYS * 86_400_000).toISOString()
     const [{ data: recent }, { data: gsc }] = await Promise.all([
       supabase
         .from('seo_meta_log')
         .select('page_slug')
-        .eq('client_id', CTS_CLIENT_ID)
+        .eq('client_id', clientId)
         .gte('optimised_at', cutoff),
       supabase
         .from('gsc_performance_snapshots')
         .select('top_pages, top_queries')
-        .eq('client_id', CTS_CLIENT_ID)
+        .eq('client_id', clientId)
         .order('period_end', { ascending: false })
         .limit(1)
         .maybeSingle(),
@@ -285,7 +369,7 @@ export async function runCtsMetaPr(
     if (candidates.length === 0) return { outcome: 'no_candidates' }
 
     // 2. Repo connection + meta source file
-    const conn = await getConnection(CTS_CLIENT_ID)
+    const conn = await getConnection(clientId)
     if (!conn || !('repoOwner' in conn)) return { outcome: 'no_connection' }
     const { repoOwner, repoName, branch, plainToken } = conn as unknown as {
       repoOwner: string
@@ -300,7 +384,7 @@ export async function runCtsMetaPr(
     //    guessing filenames (filenames don't track URL slugs here, and batch
     //    files hold many posts each — see buildSlugIndex).
     const dir = await github
-      .listDirectory(repoOwner, repoName, DATA_DIR, defaultBranch)
+      .listDirectory(repoOwner, repoName, config.dataDir, defaultBranch)
       .catch(() => [])
     const dataFiles = dir.filter(
       (e) => e.type === 'file' && /^(seo-pages|blogs).*\.ts$/.test(e.name),
@@ -338,7 +422,7 @@ export async function runCtsMetaPr(
         continue
       }
 
-      const meta = await generateCtsMeta(candidate.keyword, candidate.pageUrl)
+      const meta = await generateRepoMeta(candidate.keyword, candidate.pageUrl, config.brandSuffix, config.voiceHint)
       if (!meta.desc) {
         attempts.push({ slug: candidate.slug, step: 'ai_generation_failed' })
         continue
@@ -401,7 +485,7 @@ export async function runCtsMetaPr(
 
     // 5. Audit log (drives cooldown + weekly report 自动改动 column)
     const rows = applied.map((a) => ({
-      client_id: CTS_CLIENT_ID,
+      client_id: clientId,
       content_type: 'meta',
       page_slug: a.candidate.slug,
       page_url: a.candidate.pageUrl,
@@ -414,7 +498,7 @@ export async function runCtsMetaPr(
       optimised_at: new Date().toISOString(),
     }))
     const { error: logErr } = await supabase.from('seo_meta_log').insert(rows)
-    if (logErr) console.error('[cts-meta-pr] log insert failed:', logErr.message)
+    if (logErr) console.error('[repo-meta-executor] log insert failed:', logErr.message)
 
     return {
       outcome: 'pr_opened',

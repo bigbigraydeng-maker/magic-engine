@@ -130,7 +130,7 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 | zhuge-weekly-recalculate | `0 3 * * 1` | `/api/cron/zhuge-recalculate` |
 | reputation-snapshots-weekly | `30 3 * * 1` | `/api/cron/reputation-snapshots-weekly` |
 | oztop-seo-optimizer | `0 5 * * 1` | `/api/cron/oztop-seo-optimizer?max=8` |
-| cts-seo-optimizer | `30 5 * * 1` | `/api/cron/cts-seo-optimizer` |
+| repo-meta-executor | `30 5 * * 1` | `/api/cron/repo-meta-executor` |
 | agent-learning-rollup | `0 7 * * 1` | `/api/cron/agent-learning-rollup` |
 | factory-stock-refill | `0 19 * * 1` | `/api/cron/factory-stock-refill` |
 | blog-weekly | `0 3 * * 2` | `/api/cron/blog-weekly` |

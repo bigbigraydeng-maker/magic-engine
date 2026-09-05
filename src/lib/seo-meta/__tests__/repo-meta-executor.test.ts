@@ -1,11 +1,11 @@
 /**
- * Unit tests for the pure parts of the CTS meta executor (22.E.S17):
+ * Unit tests for the pure parts of the repo meta executor (22.E.S17):
  * the narrow-lane source editor, the content-built slug index, and the
  * GSC candidate picker.
  */
 
 import { describe, it, expect } from 'vitest'
-import { replaceMetaForSlug, buildSlugIndex, pickCandidates } from '../cts-meta-pr'
+import { replaceMetaForSlug, buildSlugIndex, pickCandidates, loadRepoMetaExecutorConfig } from '../repo-meta-executor'
 
 const HUB_SOURCE = `// SEO Pages Data
 export const chinaToursMeta: SeoPageMeta = {
@@ -24,7 +24,7 @@ export const beijingToursMeta: CityHubMeta = {
 };
 `
 
-/** Real shape of blogs-longtail-batch1.ts: many posts inside ONE export. */
+/** Real shape of a batch data file: many posts inside ONE export. */
 const BATCH_SOURCE = `import type { BlogPost } from '@/lib/types/blog-post';
 
 export const longtailBatch1Posts: BlogPost[] = [
@@ -118,12 +118,71 @@ describe('buildSlugIndex', () => {
   })
 })
 
+/**
+ * `dataDir` is handed straight to GithubClient.listDirectory as a repo path,
+ * and `brandSuffix`/`voiceHint` go straight into the AI prompt — this is the
+ * ONLY gate before either happens, so it must fail closed on anything that
+ * isn't a plain, bounded, in-repo relative path/string (Codex review on #1121).
+ */
+describe('loadRepoMetaExecutorConfig — safe config gate', () => {
+  const base = {
+    enabled: true,
+    dataDir: 'src/lib/data',
+    brandSuffix: '| Example',
+    voiceHint: 'Boutique travel brand.',
+  }
+
+  it('accepts a plain repo-relative dataDir', () => {
+    expect(loadRepoMetaExecutorConfig({ repo_meta_executor: base })).toEqual(base)
+  })
+
+  it.each([
+    ['/etc/passwd', 'leading slash (absolute)'],
+    ['\\windows\\system32', 'leading backslash (absolute)'],
+    ['C:\\repo\\data', 'Windows drive-letter absolute path'],
+    ['src/lib/../../etc', 'dotdot traversal segment'],
+    ['./src/lib/data', 'dot segment'],
+    ['src\\lib\\data', 'embedded backslash'],
+    ['src/lib/data\x00', 'embedded control character'],
+    ['', 'empty string'],
+    ['   ', 'whitespace-only'],
+  ])('rejects unsafe dataDir %j (%s)', (dataDir) => {
+    expect(loadRepoMetaExecutorConfig({ repo_meta_executor: { ...base, dataDir } })).toBeNull()
+  })
+
+  it('trims a dataDir with surrounding whitespace', () => {
+    const cfg = loadRepoMetaExecutorConfig({ repo_meta_executor: { ...base, dataDir: '  src/lib/data  ' } })
+    expect(cfg?.dataDir).toBe('src/lib/data')
+  })
+
+  it('trims and caps an overlong brandSuffix/voiceHint before they reach the AI prompt', () => {
+    const cfg = loadRepoMetaExecutorConfig({
+      repo_meta_executor: {
+        ...base,
+        brandSuffix: `  ${'x'.repeat(200)}  `,
+        voiceHint: `  ${'y'.repeat(5000)}  `,
+      },
+    })
+    expect(cfg?.brandSuffix).toHaveLength(80)
+    expect(cfg?.voiceHint).toHaveLength(1000)
+  })
+
+  it('a voiceHint that is only whitespace still fails closed after trimming', () => {
+    expect(loadRepoMetaExecutorConfig({ repo_meta_executor: { ...base, voiceHint: '   ' } })).toBeNull()
+  })
+
+  it('rejects a control character in brandSuffix or voiceHint', () => {
+    expect(loadRepoMetaExecutorConfig({ repo_meta_executor: { ...base, brandSuffix: 'a\x01b' } })).toBeNull()
+    expect(loadRepoMetaExecutorConfig({ repo_meta_executor: { ...base, voiceHint: 'a\x01b' } })).toBeNull()
+  })
+})
+
 describe('pickCandidates', () => {
   const pages = [
-    { page: 'https://www.ctstours.co.nz/beijing-tours', impressions: 500, position: 6 },
-    { page: 'https://www.ctstours.co.nz/china-tours/', impressions: 900, position: 12 },
-    { page: 'https://www.ctstours.co.nz/', impressions: 2000, position: 2 }, // pos<4 → out
-    { page: 'https://www.ctstours.co.nz/silk-road', impressions: 5, position: 8 }, // impressions<10 → out
+    { page: 'https://www.example-travel.co.nz/beijing-tours', impressions: 500, position: 6 },
+    { page: 'https://www.example-travel.co.nz/china-tours/', impressions: 900, position: 12 },
+    { page: 'https://www.example-travel.co.nz/', impressions: 2000, position: 2 }, // pos<4 → out
+    { page: 'https://www.example-travel.co.nz/silk-road', impressions: 5, position: 8 }, // impressions<10 → out
   ]
   const queries = [
     { query: 'beijing tours from nz', impressions: 300 },
@@ -148,8 +207,8 @@ describe('pickCandidates', () => {
 
   it('homepage URL never yields the hostname as a garbage slug (首跑事故回归)', () => {
     const withHome = [
-      { page: 'https://www.ctstours.co.nz/', impressions: 3593, position: 7.9 },
-      { page: 'https://www.ctstours.co.nz/beijing-tours', impressions: 500, position: 6 },
+      { page: 'https://www.example-travel.co.nz/', impressions: 3593, position: 7.9 },
+      { page: 'https://www.example-travel.co.nz/beijing-tours', impressions: 500, position: 6 },
     ]
     const out = pickCandidates(withHome, queries, new Set())
     expect(out.map((c) => c.slug)).toEqual(['beijing-tours'])
