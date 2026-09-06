@@ -112,7 +112,9 @@
 |---|---|---|---|
 | `PUBLER_API_KEY` / `PUBLER_WORKSPACE_ID` | 多平台排期发布 | Render-web | ✅ |
 | `CMS_TOKEN_ENCRYPTION_KEY` | 客户 WordPress / CMS token 加密 | Render-web | ✅ |
-| `CLOUDFLARE_MGMT_TOKEN` | 客户站点 DNS / Pages 管理 | Render-web | ✅ |
+| `CLOUDFLARE_MGMT_TOKEN` | 客户站点 DNS / Pages 管理；CTS Site Cache Refresh Inngest 函数会用它 purge_cache | Render-web | ✅ |
+| `CTS_CLOUDFLARE_ZONE_ID` | ctstours.co.nz 的 Cloudflare zone id（CF dashboard → Overview → Zone ID） | Render-web | ⏳ 待配 |
+| `CTS_REVALIDATE_SECRET` | chinatravel 仓 `/api/revalidate` 的 Bearer token；与 chinatravel Render env `REVALIDATE_SECRET` 同值 | Render-web | ⏳ 待配 |
 | `GITHUB_TOKEN` / `GITHUB_WEBHOOK_SECRET` | GitHub CMS 执行闭环（P12.H） | Render-web | ✅ |
 | `AIRTABLE_API_KEY` | Airtable —— **正在退役**，代码仅剩 3 处引用 | Render-web | ❌ |
 | `FACTORY_OPS_BASE_ID` / `FACTORY_REVIEW_TABLE_ID` / `WINNER_INTAKE_TABLE_ID` | Airtable 表 ID（Factory 审核，同上退役中） | Render-web | ❌ |
