@@ -1083,6 +1083,36 @@ services:
     envVars:
       - fromGroup: me-shared-cron-secret
 
+  # Meta（Facebook 主页）授权每日体检 —— 谁的授权掉了，第二天早上进「今日待办」。
+  #
+  # 🔴 为什么必须有：Meta 授权会自己坏掉，而且坏得没有声音。
+  #    `platform-oauth/token-manager.ts` 的刷新逻辑对 meta 直接抛
+  #    「not yet implemented」，所以失效连库里都不留一行痕迹；手工配的那种令牌
+  #    还是 60 天硬到期。结果只能靠人撞上：2026-08-21 起 4 个客户线索断供 9 天
+  #    （CTS 一家漏 45 条、NZ$736 白花），2026-09-03 发帖失败查了两小时。
+  #    判据 src/lib/meta/auth-health.ts，下发 src/lib/pm-todo/meta-auth-health-items.ts。
+  #
+  # 时区换算：NZ 冬令时 NZST = UTC+12，所以 **UTC 19:00 = 次日 NZ 07:00**；
+  # 夏令时 NZDT = UTC+13（9 月底～4 月初）时落在 NZ 08:00。两季都赶在「今日待办」
+  # 那封信之前，所以清单读到的是当天的体检结果而不是昨天的。
+  #
+  # 全程只读：不刷新令牌、不改授权记录、不发布任何东西。唯一的写是记自己这一趟。
+  #
+  # 密钥直接走 fromGroup，不留「记得手动 link」这一步 —— daily-cron-digest 就是
+  # 靠人记住这件事，51 天没人发现地哑了。
+  - type: cron
+    name: meta-auth-health
+    env: node
+    schedule: "0 19 * * *"
+    buildCommand: ""
+    # --max-time 比路由自己的 maxDuration(300s) 宽一点：curl 先断开的话 Render 记成
+    # 失败，可路由其实跑完了。这条任务重跑无副作用（纯只读），所以不另设幂等闸。
+    startCommand: |
+      curl -fsS --max-time 360 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/meta-auth-health
+    envVars:
+      - fromGroup: me-shared-cron-secret
+
   # 客人来信没人回 —— 每天早上给销售发一封汇总信（测试期发到 ME 自己的信箱）。
   #
   # 判据 src/lib/crm/email-reply-due.ts（超时 24 小时，PM 2026-09-03 拍板），

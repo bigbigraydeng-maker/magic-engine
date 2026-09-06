@@ -26,6 +26,7 @@ import { isHtmlPageUrl } from '@/lib/seo/url-kind'
 import { classifyNotIndexed, THIN_WORD_COUNT_THRESHOLD } from '@/lib/seo/index-status'
 import { findMessengerStopSignals } from '@/lib/crm/messenger-stop-signal'
 import { pushEmailReplyItems, type EmailReplyItemKind } from './email-reply-items'
+import { fetchMetaAuthTodos, type MetaAuthTodoKind } from './meta-auth-health-items'
 import { AUTO_LANDED_AGENT } from '@/lib/diagnostic/auto-prescribe'
 import { isHandAddedItem } from '@/lib/diagnostic/prescription-landing'
 import { LINKEDIN_PROGRESS_CLIENT_ID, LINKEDIN_PROGRESS_SOURCE } from '@/lib/linkedin-progress/constants'
@@ -90,6 +91,8 @@ export type ManualItemKind =
   | 'linkedin_progress_needs_setup'
   | 'linkedin_progress_failed'
   | EmailReplyItemKind
+  /** Meta 授权失效 / 掉权限 / 问不出状态 —— 只有人能去重新授权 */
+  | MetaAuthTodoKind
 
 export interface ManualItem {
   kind: ManualItemKind
@@ -379,6 +382,10 @@ export async function loadManualItems(
   )
 
   // 评论读不到（缺权限 / 令牌被拒）—— 只有人能补，日志里那行 console.error 没人会看
+  // Meta 授权坏了 —— 发帖 / 私信 / 评论 / 客资会一起哑掉，而且是静默的
+  await pushMetaAuthItems(supabase, items, now, nameOf).catch((e) =>
+    console.warn('[manual-items] Meta 授权体检结果读取失败（不阻塞其他待办）:', e),
+  )
   await pushCommentScopeItems(supabase, items, now, nameOf).catch((e) =>
     console.warn('[manual-items] 评论权限待办生成失败（不阻塞其他待办）:', e),
   )
@@ -1540,6 +1547,25 @@ async function pushAutoRunItems(
  * 判定与文案都在 `comment-scope-items.ts`：那边直接读 cron 自己写的运行记录，
  * 所以这里说的话跟机器真遇到的失败永远一致。
  */
+async function pushMetaAuthItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+  nameOf: (id: string) => string,
+): Promise<void> {
+  const todos = await fetchMetaAuthTodos(supabase, now)
+  for (const t of todos) {
+    items.push({
+      kind: t.kind,
+      client_id: t.client_id,
+      client_name: nameOf(t.client_id),
+      what: t.what,
+      how: t.how,
+      href: t.href,
+    })
+  }
+}
+
 async function pushCommentScopeItems(
   supabase: SupabaseClient,
   items: ManualItem[],
