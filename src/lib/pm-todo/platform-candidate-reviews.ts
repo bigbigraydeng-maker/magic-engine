@@ -108,4 +108,9 @@ export const PLATFORM_CANDIDATE_REVIEWS: PlatformCandidateReview[] = [
     name: '三层漏斗广告打法剧本（认知→线索→再营销→回传闭环 · 骨架通用 + 分行业配方）',
     reviewDate: '2026-10-06',
   },
+  {
+    // 与 docs/registry/platform-candidates.md 候选名逐字一致
+    name: 'B2B 潜在客户线索发现引擎（ICP 定义 → 源人群抓取 → 多层漏斗筛选：规模/真活跃度/契合信号 → 证据分级 → 可溯源候选名单）',
+    reviewDate: '2026-10-06',
+  },
 ]
