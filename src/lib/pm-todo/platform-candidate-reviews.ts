@@ -98,4 +98,9 @@ export const PLATFORM_CANDIDATE_REVIEWS: PlatformCandidateReview[] = [
     name: '行业市场研究报告出品能力（署名 "Magic Insight 数据研究院"，面向高级会员定期出品行业级市场研究）',
     reviewDate: '2026-10-03',
   },
+  {
+    // 与 docs/registry/platform-candidates.md 候选名逐字一致
+    name: '开放第三方 developer 入驻，共建 ME 新功能/能力（类似插件市场/开发者生态）',
+    reviewDate: '2026-10-02',
+  },
 ]
