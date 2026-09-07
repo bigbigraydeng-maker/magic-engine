@@ -154,6 +154,9 @@ CREATE TABLE tour_departures (
     FOREIGN KEY (client_id, tour_product_id)
     REFERENCES tour_products (client_id, id) ON DELETE RESTRICT
 );
+ALTER TABLE tour_departures ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "service_role_full" ON tour_departures
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- ③ 逐日行程（"具体玩什么"，可调整）
 CREATE TABLE tour_itinerary_days (
@@ -175,6 +178,9 @@ CREATE TABLE tour_itinerary_days (
     FOREIGN KEY (client_id, tour_product_id)
     REFERENCES tour_products (client_id, id) ON DELETE CASCADE
 );
+ALTER TABLE tour_itinerary_days ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "service_role_full" ON tour_itinerary_days
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 ```
 
 **为什么行程挂在「团」上而不是「每次出发」上**：同一个团不同批次玩的一样。**同团不同出发城市行程真的不同时**（例如南岛出发少去一个城市），实践中官网就是把它做成两个独立的团——已实测确认（`china-icons-collection` 与 `china-icons-collection-christchurch` 是两个不同产品）。所以不为这个情况增加一层结构。
@@ -188,10 +194,13 @@ ME 里已经跑着一整套，是做地产房源时建的：
 | 已有的东西 | 在哪 | 怎么用到团上 |
 |---|---|---|
 | 素材库表 `client_assets` | `20260612000001` | 加一列 `tour_product_id`（照 `listing_id` 的既有做法，含"绑定后不可更改"触发器） |
-| **免登陆上传链接**（加密令牌，不带明文客户 UUID，fail-closed） | `src/lib/uploads/client-upload-token.ts` | 令牌里加 `tour_product_id`，跟现有的 `listing_id` 完全同构 —— **一个团一条链接** |
+| **免登陆上传链接**（加密令牌，不带明文客户 UUID，fail-closed） | `src/lib/uploads/client-upload-token.ts` | 令牌里加 `tour_product_id` —— **一个团一条链接**（见下方"不能与 `listing_id` 同构"的说明） |
 | 上传路由（图 + 视频，200MB，一次 20 个） | `src/app/api/upload/[token]/route.ts` | 不改逻辑，只多认一个归属字段 |
 | AI 看图打标（每 2 分钟一轮，出 `vision_metadata` + hook/middle/cta 评分） | `src/lib/assets/vision-analyzer.ts` | 直接受益：传进来的团图自动打标、自动评分「适合做开头/中段/结尾」 |
 | 素材来源与归属标记（客户自传 / 官网 / 图库 + 是否核实） | `20260803090000` | **铁律 8 靠它守**：客户真实产品画面只能用客户自己提供的素材 |
+
+**不能与 `listing_id` 完全同构**（Codex round-3 发现）：`UploadTokenPayload` 现在解密出「第二个 UUID」时**固定**当作 `listingId` 返回（`parsePayload` 只看有没有第二段，不看它是什么类型）。团链接和房源链接的载荷形状完全一样（都是 `clientId:第二个UUID`），如果只是简单地把 `tour_product_id` 塞进同一个位置，解密端无法区分这条链接绑的是房源还是团——旧代码会把它当成 `listingId` 返回，写库时要么归错资源、要么因为 `listing_id` 在库里查不到而失败。
+必须在载荷里加一段**类型标记**，例如把编码从 `clientId[:listingId]` 改成 `clientId[:kind:resourceId]`（`kind` 取 `'listing' | 'tour'`），`UploadTokenPayload` 相应拆成 `{ clientId, listingId? }` / `{ clientId, tourProductId? }` 两种可辨识形状（或加一个显式 `kind` 字段）。老的纯 `clientId` 与 `clientId:listingId`（无类型标记，视为 `listing`，向后兼容）两种格式必须继续解得出来，`roundTripOk` 与现有单测要覆盖三种载荷（客户级 / 房源级 / 团级）以及"团 UUID 不能被误判成房源 UUID"这条反例。
 
 **这解决的正是 PM 说的那个问题**——「每次都要在一个杂乱无章的仓库里现去找素材」。以后是：**CTS 员工点一条链接把这个团的图传上来 → AI 自动打标 → 做手册/广告/reel 时按团直接调。**
 
@@ -259,7 +268,7 @@ ALTER TABLE tour_products ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "service_role_full" ON tour_products
   FOR ALL TO service_role USING (true) WITH CHECK (true);
 ```
-**必须带 `TO service_role`**（铁律 7）。
+**必须带 `TO service_role`**（铁律 7）。**同一模板对本方案新建的每一张表都必须单独套一遍，不是只对 `tour_products` 做一次就够**（Codex round-3 发现：v3 曾只给 `tour_products` 挂 RLS，`tour_departures` / `tour_itinerary_days` / `tour_orders` 漏挂，会让这些含出发日期、名额与联系人事实的表绕过隔离）。`tour_departures`、`tour_itinerary_days` 的 `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` + `CREATE POLICY` 已内联在 §2.2 各自的 `CREATE TABLE` 语句后；`tour_orders` 与 `travel_agents` 的 RLS 内联在 §5.2。四张表缺一不可，§7 验证表的「RLS：新表用 anon key 实测读写被拒」必须四张表逐一测。
 
 > v2 曾报「现有 CRM 表漏 `TO service_role`」——**已实测生产库（`glbdnayojixmexgofbsd`）确认是误报**，`20260803020000` 早已批量收口，`db-invariants.sql` 不变量 1 在 CI 里守着。不要报给 PM。
 
@@ -307,51 +316,7 @@ CREATE POLICY "service_role_full" ON tour_products
 
 ### 5.2 表结构（草案）
 
-```sql
-CREATE TABLE tour_orders (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  client_id       UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-  contact_id      UUID NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-  departure_id    UUID NOT NULL REFERENCES tour_departures(id) ON DELETE RESTRICT,
-
-  pax             INTEGER NOT NULL CHECK (pax > 0),
-  pax_source      TEXT NOT NULL DEFAULT 'manual' CHECK (pax_source IN ('manual', 'ai')),
-  pax_evidence    JSONB,                    -- AI 判断的依据（邮件 id / 原文片段），可追溯
-
-  source_channel  TEXT NOT NULL CHECK (source_channel IN ('direct', 'agent')),
-  -- 不用单列 REFERENCES：那样客户 A 的订单能引用客户 B 的代理，
-  -- B 的代理门户就能查到 A 的订单与联系人。必须走下方复合外键。
-  agent_id        UUID,
-
-  -- 🔴 名额的开关。收到定金 = 占名额。ME 不经手收付，这只是"客户说收到了"的事实记录。
-  deposit_received_at TIMESTAMPTZ,
-  deposit_recorded_by TEXT,
-
-  status          TEXT NOT NULL DEFAULT 'open'
-                    CHECK (status IN ('open', 'cancelled')),
-  cancelled_at    TIMESTAMPTZ,
-  cancel_reason   TEXT,
-
-  note            TEXT,
-  created_by      TEXT,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-  CONSTRAINT tour_orders_agent_requires_id
-    CHECK (source_channel <> 'agent' OR agent_id IS NOT NULL),
-
-  -- 复合外键：订单的代理必须与订单同一个 client_id。
-  -- agent_id 为空时（直客单）按 Postgres 默认 MATCH SIMPLE 不校验，符合预期。
-  CONSTRAINT tour_orders_agent_client_fk
-    FOREIGN KEY (client_id, agent_id)
-    REFERENCES travel_agents (client_id, id) ON DELETE RESTRICT
-);
-
-CREATE UNIQUE INDEX tour_orders_one_live_per_contact
-  ON tour_orders (departure_id, contact_id) WHERE status <> 'cancelled';
-```
-
-**`travel_agents` 必须跟 `tour_orders` 同一批建**（Codex 复审发现的顺序问题）：`tour_orders.agent_id` 引用它，如果把它留到「门户」那一期，建 `tour_orders` 会直接报 `relation "travel_agents" does not exist`。
+**建表顺序：先 `travel_agents`，再 `tour_orders`**（Codex round-3 复审再次确认的顺序问题）：`tour_orders.agent_id` 引用 `travel_agents`，PostgreSQL 解析外键时目标 relation 必须已存在——`travel_agents` 的 `CREATE TABLE` 必须排在 `tour_orders` 之前，不能只是「同一批 migration」，顺序本身也要对。
 
 拆法：**「代理是谁」的身份台账跟订单一起建；「代理怎么登录」留到门户期**。员工录代理订单时从这张表选或新建一条，不涉及登录。
 
@@ -375,6 +340,66 @@ CREATE POLICY "service_role_full" ON travel_agents
 ```
 门户期只需给它加一列登录关联（如 `portal_user_id`），不改已有语义，也不用重建。
 
+```sql
+CREATE TABLE tour_orders (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id       UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  contact_id      UUID NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+  departure_id    UUID NOT NULL REFERENCES tour_departures(id) ON DELETE RESTRICT,
+
+  pax             INTEGER NOT NULL CHECK (pax > 0),
+  pax_source      TEXT NOT NULL DEFAULT 'manual' CHECK (pax_source IN ('manual', 'ai')),
+  pax_evidence    JSONB,                    -- AI 判断的依据（邮件 id / 原文片段），可追溯
+
+  source_channel  TEXT NOT NULL CHECK (source_channel IN ('direct', 'agent')),
+  -- 不用单列 REFERENCES：那样客户 A 的订单能引用客户 B 的代理，
+  -- B 的代理门户就能查到 A 的订单与联系人。必须走下方复合外键。
+  agent_id        UUID,
+
+  -- 🔴 名额的开关。收到定金 = 占名额。ME 不经手收付，这只是"客户说收到了"的事实记录。
+  deposit_received_at TIMESTAMPTZ,
+  deposit_recorded_by TEXT,
+  -- 收款事实本身（金额/币种）必须落在这张表里，不能只落到下游的 me_sale_outcomes——
+  -- 联系人没有邮箱/电话时 buildIntakeRow 会拒收（见 §5.4），如果这两列不在这里兜底，
+  -- 那笔钱的数字事实就彻底丢了，只剩一个时间戳。见 §5.4「无联系方式收款」的落点设计。
+  deposit_amount_minor BIGINT CHECK (deposit_amount_minor IS NULL OR deposit_amount_minor > 0),
+  deposit_currency     TEXT CHECK (deposit_currency IS NULL OR
+                         (deposit_currency = upper(deposit_currency) AND length(deposit_currency) = 3)),
+
+  status          TEXT NOT NULL DEFAULT 'open'
+                    CHECK (status IN ('open', 'cancelled')),
+  cancelled_at    TIMESTAMPTZ,
+  cancel_reason   TEXT,
+
+  note            TEXT,
+  created_by      TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  -- direct 必须 agent_id 为空、agent 必须 agent_id 非空——只挡"agent 缺 id"这一半
+  -- 不够：还得挡"direct 单挂着任意 agent_id"，否则代理门户按 agent_id 收窄查询时，
+  -- 一条被塞了别人 agent_id 的直客单会被那个代理读到，泄露订单与联系人。
+  CONSTRAINT tour_orders_agent_channel_consistency
+    CHECK (
+      (source_channel = 'agent'  AND agent_id IS NOT NULL) OR
+      (source_channel = 'direct' AND agent_id IS NULL)
+    ),
+
+  -- 复合外键：订单的代理必须与订单同一个 client_id。
+  -- agent_id 为空时（直客单）按 Postgres 默认 MATCH SIMPLE 不校验，符合预期。
+  CONSTRAINT tour_orders_agent_client_fk
+    FOREIGN KEY (client_id, agent_id)
+    REFERENCES travel_agents (client_id, id) ON DELETE RESTRICT
+);
+
+CREATE UNIQUE INDEX tour_orders_one_live_per_contact
+  ON tour_orders (departure_id, contact_id) WHERE status <> 'cancelled';
+
+ALTER TABLE tour_orders ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "service_role_full" ON tour_orders
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
+```
+
 **占用公式（单一定义，不许在别处再写一份）**：
 ```
 occupied(departure) = Σ tour_orders.pax
@@ -384,6 +409,105 @@ remaining = seats_total - occupied           -- seats_total 为 NULL 时 remaini
 - **不存 `seats_taken` 计数器**。计数器一次漏改就让「还剩几个」开始骗人，而那是这功能存在的唯一目的。
 - **占用是三态**：`number | null（名额未设） | 'unknown'（查询失败）`。**绝不把查询失败算成 0**——那会显示成一个看起来完全正常的满仓数字，比空列表更骗人。
 - 跨表 `client_id` 一致性必须有触发器保证（否则代理传别的客户的 `departure_id` 就能跨客户写数据）。
+
+#### 5.2.1 并发安全：记定金 / 改人数必须与余位校验同一把锁（Codex round-3 发现）
+
+线下收款不保证串行——两个员工可能同时给同一出发团标定金，管理员也可能在已有定金后调大 `pax`。§5.1 说的「定金由客户线下收，天然串行」只覆盖了「不需要占位超时释放」，**不等于两次并发写入天然互斥**。如果 API 层只是「先 SELECT 算 occupied，再 UPDATE 写定金」，两个并发请求会读到同一个旧 occupied、都判断"没超"、都写成功，`remaining` 就会变成负数——超卖要等前台刷新才会被发现。
+
+**校验和写入必须在同一个数据库事务里，且必须先锁住 `tour_departures` 那一行**，不能只在应用层加锁（多实例部署时应用层锁不跨进程）。落地为两个 `SECURITY DEFINER` 函数，API 层只准调它们，**不许再对 `tour_orders.deposit_received_at` / `pax` 发裸 `UPDATE`**：
+
+```sql
+CREATE OR REPLACE FUNCTION record_tour_deposit(
+  p_order_id UUID,
+  p_recorded_by TEXT,
+  p_amount_minor BIGINT,
+  p_currency TEXT
+) RETURNS tour_orders
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_order      tour_orders%ROWTYPE;
+  v_seats      INTEGER;
+  v_occupied   INTEGER;
+BEGIN
+  SELECT * INTO v_order FROM tour_orders WHERE id = p_order_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'tour_order_not_found';
+  END IF;
+  IF v_order.deposit_received_at IS NOT NULL THEN
+    RAISE EXCEPTION 'tour_order_deposit_already_recorded';
+  END IF;
+
+  -- 锁住出发团这一行：同一出发团的并发定金写入在这里天然排队，
+  -- 后到的事务必须等前一个提交/回滚后才能读到最新 occupied。
+  SELECT seats_total INTO v_seats
+    FROM tour_departures WHERE id = v_order.departure_id FOR UPDATE;
+
+  SELECT COALESCE(SUM(pax), 0) INTO v_occupied
+    FROM tour_orders
+    WHERE departure_id = v_order.departure_id
+      AND status = 'open' AND deposit_received_at IS NOT NULL;
+
+  IF v_seats IS NOT NULL AND v_occupied + v_order.pax > v_seats THEN
+    RAISE EXCEPTION 'tour_departure_oversold' USING ERRCODE = 'P0001';
+  END IF;
+
+  UPDATE tour_orders
+    SET deposit_received_at = NOW(), deposit_recorded_by = p_recorded_by,
+        deposit_amount_minor = p_amount_minor, deposit_currency = p_currency,
+        updated_at = NOW()
+    WHERE id = p_order_id
+    RETURNING * INTO v_order;
+
+  RETURN v_order;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION update_tour_order_pax(
+  p_order_id UUID,
+  p_new_pax INTEGER,
+  p_updated_by TEXT
+) RETURNS tour_orders
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_order      tour_orders%ROWTYPE;
+  v_seats      INTEGER;
+  v_occupied   INTEGER;      -- 不含本订单自身
+BEGIN
+  SELECT * INTO v_order FROM tour_orders WHERE id = p_order_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'tour_order_not_found';
+  END IF;
+
+  SELECT seats_total INTO v_seats
+    FROM tour_departures WHERE id = v_order.departure_id FOR UPDATE;
+
+  IF v_order.deposit_received_at IS NOT NULL AND v_seats IS NOT NULL THEN
+    SELECT COALESCE(SUM(pax), 0) INTO v_occupied
+      FROM tour_orders
+      WHERE departure_id = v_order.departure_id
+        AND status = 'open' AND deposit_received_at IS NOT NULL
+        AND id <> p_order_id;
+
+    IF v_occupied + p_new_pax > v_seats THEN
+      RAISE EXCEPTION 'tour_departure_oversold' USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
+
+  UPDATE tour_orders
+    SET pax = p_new_pax, updated_at = NOW()
+    WHERE id = p_order_id
+    RETURNING * INTO v_order;
+
+  RETURN v_order;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION record_tour_deposit, update_tour_order_pax FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION record_tour_deposit, update_tour_order_pax TO service_role;
+```
+- `FOR UPDATE` 锁的是 `tour_departures` 那一行，不是整表——不同出发团互不阻塞。
+- 未设名额（`seats_total IS NULL`）时不做超卖校验，保持 §2.4「NULL = 未设」的语义，允许无限记录（如实反映"没管起来"，不是我们伪造一个假上限）。
+- 两个函数都是 `SECURITY DEFINER`，只 `GRANT` 给 `service_role`，API 路由用它们代替裸 `UPDATE`，行为与 RLS 的 service-role-only 模型一致。
 
 ### 5.3 下单系统的前置条件（不满足不开工）
 
@@ -404,9 +528,10 @@ remaining = seats_total - occupied           -- seats_total 为 NULL 时 remaini
   3. **映射表（含回退档位）落 `clients.leads_config`，不写死在代码**（红线 2）。`contacts.stage` 本身没有外键约束，写一个客户配置里不存在的档位名不会报错，只会留下孤儿键——所以第 2 条的检查必须在写入前做，不能指望数据库拦。
 - **广告**：收到定金 = 成交，走**已上线**的 `me_sale_outcomes` + `me_conversion_writebacks`（`20260905000002`）。**不再建第二本钱的账**——同一笔定金记两次会发给 Meta 两次，而 CAPI 没有删除端点、撤不回。
   - **「已收定金 / 已收尾款」不能是一次点击就写库的按钮**：订单表本身不存金额（钱不在这张表），点击这个动作**没有可落库的输入**——`pax` 和 `departure` 推不出「收了多少、什么时候到账」。必须弹一个小表单收两件事：**实收金额**（默认带出出发团价格但可改，定金往往不等于全款）、**到账日期**（默认今天可改；语义是钱到账日，不是出发日）。
-  - 表单提交**复用既有入账路径** `src/lib/conversions/intake.ts` 的 `buildIntakeRow(input, ctx)`，不手写 insert。`outcomeKind` 传 `'purchase'`（定金）/ `'balance'`（尾款）；邮箱电话从订单关联的联系人读；`sourceKind='api'`、`sourceRef='tour_order:<id>:deposit'`（尾款 `:balance`）——幂等靠已有的唯一索引，连点两次不会双发。
-  - 联系人没有邮箱也没有电话时（`buildIntakeRow` 强制至少要有一个），**在表单上提示「此单收款已留档，但发不出去 Meta」而不是拦掉整个流程**——收款事实要留档，能不能发是下游的事。
-  - `buildIntakeRow` 校验失败（金额非法、日期超期等）直接在表单报错，**不许绕过校验直插库**。
+  - 表单提交先把**实收金额 + 到账日期**写进 `tour_orders.deposit_amount_minor` / `deposit_currency`（通过 §5.2.1 的 `record_tour_deposit` 函数），这一步**不依赖联系人有没有邮箱电话**——`tour_orders` 是这笔钱的第一落点，金额事实无论如何都不会丢。
+  - 联系人**有**邮箱或电话时，在同一次提交里**再**调用 `src/lib/conversions/intake.ts` 的 `buildIntakeRow(input, ctx)` 写一条 `me_sale_outcomes`，驱动广告回写。`outcomeKind` 传 `'purchase'`（定金）/ `'balance'`（尾款）；邮箱电话从订单关联的联系人读；`sourceKind='api'`、`sourceRef='tour_order:<id>:deposit'`（尾款 `:balance`）——幂等靠已有的唯一索引，连点两次不会双发。
+  - 联系人**没有**邮箱也没有电话时（`buildIntakeRow` 强制至少要有一个 match key，`me_sale_outcomes_needs_match_key` 也会拒绝插入）：**跳过 `buildIntakeRow` 调用**，不勉强插一条注定失败或伪造 match key 的行。`tour_orders` 上的 `deposit_amount_minor` / `deposit_currency` / `deposit_received_at` 已经完整落档，表单提示改成「此单收款已留档，因联系人缺邮箱/电话未同步到广告数据」——**不能提示成笼统的「已留档」，那会让人以为已经发了 Meta**。后续联系人补齐邮箱/电话后，允许对同一订单补发一次 `buildIntakeRow`（`sourceRef` 不变，靠既有唯一索引防重）。
+  - `buildIntakeRow` 校验失败（金额非法、日期超期等）直接在表单报错，**不许绕过校验直插库**；但这只挡广告回写这一步，不影响 `tour_orders` 上金额事实的落档顺序（先落档，再尝试同步广告）。
 - **不自造事件名**：冻结契约 `me/crm.deal.closed` 写着「不能改」，若要 emit 必须沿用它，并在契约文档补一句「上游可能是 ME 自己」。
 
 ---
@@ -462,6 +587,7 @@ remaining = seats_total - occupied           -- seats_total 为 NULL 时 remaini
 | 魏征（挑刺）· 对 v2 | FAIL · 10 blocker | 全部吸收：单一状态机 / 名额可空 / 取消回退阶段 / 「最靠前」定义死 / 读失败三态 / matcher 不覆盖 API / 函数 REVOKE / 日期时区 / 城市无源 |
 | Codex round-1（自动化） | 5 条 | 复合外键防跨客户拼接 / `retired` 状态 / `travel_agents` 提前建 / 阶段派生看 `changed_by` / 取消回退档位读客户配置且 fail closed —— 全部并入 |
 | Codex round-2（自动化） | 4 条 P1 | **①与 `ME_PRODUCT_DEFINITION.md` §3.2/§3.3 产品边界冲突 → 见 §0 PM 拍板项①，PM 书面表态前「名额+订单」不许进 migration**；②代理跨客户串号 → 复合外键；③收款按钮无可落库输入 → 改成收「实收金额+到账日期」并复用 `buildIntakeRow`；④系统 actor 不能只认字面量 `'system'` → 改枚举常量集合 —— 全部并入 |
+| Codex round-3（自动化） | 6 条 P1 | ①`travel_agents` 建表语句仍排在 `tour_orders` 之后 → 移到前面（§5.2）；②`tour_departures`/`tour_itinerary_days`/`tour_orders` 漏挂 RLS → 四张表逐一内联 `ENABLE ROW LEVEL SECURITY` + service-role policy（§2.2/§5.2/§2.8）；③上传令牌 `listingId`/`tour_product_id` 形状相同会被误判 → 载荷加类型标记，形状不再同构（§2.3）；④并发定金写入/改 `pax` 可能超卖 → `record_tour_deposit` / `update_tour_order_pax` 两个 `SECURITY DEFINER` 函数在同一事务内锁 `tour_departures` 行再校验（§5.2.1）；⑤无联系方式收款金额会丢 → `tour_orders` 新增 `deposit_amount_minor`/`deposit_currency` 作为第一落点，`buildIntakeRow` 只在有邮箱/电话时补发（§5.2/§5.4）；⑥直客单仍可挂 `agent_id` → CHECK 改成 direct⇔NULL、agent⇔NOT NULL 双向约束（§5.2）—— 全部并入 |
 | 事实更正 | 7 处 | §2.6 表格 · 圣诞团理由更正 · §2.8 删掉 RLS 误报 |
 
 **v3 因产品定义变化引入的新面（团管理模块 + 素材管道复用 + 下游统一读取口）尚未过审，需再走一轮子牙 + 魏征。**
