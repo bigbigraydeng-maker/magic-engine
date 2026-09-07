@@ -156,7 +156,12 @@ ME 工厂现有 stock 链（`stock-pipeline.ts` `ingestHarvestedImages` → `sto
 6. 附带：`video_clips` RLS `FOR ALL USING(true)` 缺 `TO service_role`（铁律 7），另开小 PR 修。
 
 **方向调整（PM 2026-09-07：两条线并行、分场景）**：
-- **真实感片 → 蒙太奇线（make_promo）**：真图加运镜、图不变、人工带署名。这批 102 张授权图归此线（本就读 Dropbox）。自动化 = 把蒙太奇线搬云端（见 `2026-09-02` 云端退役调查：Path A 需把 make_promo + MagicLab_Studio 素材上云 + 定成本模式）。
-- **AI 动感片 → 工厂 i2v 线**：如要用授权 stock 喂 i2v，**只用 CC0/公有领域**（避开 CC-BY 衍生署名死结）；CC-BY/CC-BY-SA 一律不进工厂。需 Muapi 额度 + 本 spec 的"署名闸"仅在确有 CC-BY 进 i2v 时才需要（若锁死只用 CC0/PD，可不建署名闸，大幅简化）。
+- **真实感片 → 蒙太奇线（make_promo）**：真图加运镜、图不变。这批 102 张需署名授权图（CC-BY/CC-BY-SA）归此线（本就读 Dropbox）。自动化 = 把蒙太奇线搬云端（见 `2026-09-02` 云端退役调查：Path A 需把 make_promo + MagicLab_Studio 素材上云 + 定成本模式）。
+  - 🔴 **"人工带署名"不能作为唯一保障**：全仓检索 `make_promo` / `MagicLab_Studio` 均无可强制署名或保存发布回执的实现——没有代码路径能保证操作人员没漏填/少填作者、协议链接、修改说明。§4.4 的**发布前署名闸必须覆盖蒙太奇线**，而不是只默认给未来的工厂 i2v 线建：
+    1. **provenance 注入**：蒙太奇线取用这 102 张图（或后续任何 `requires_attribution=true` 的 licensed_stock 行）时，必须从 `source_meta` 带出 author/license/license_url/note，写入该次发布工单（不能靠人凭记忆手填 caption）；
+    2. **发布前 fail-closed 校验**：蒙太奇成片发布前必须过与 §4.4 相同的署名闸逻辑（caption/endcard 文本含摄影者+协议名+协议链接，缺任一项即拦发），无论发布是走云端 Inngest 流程还是现状的本地 make_promo 脚本；
+    3. **机器可读回执**：每次蒙太奇线发布必须落一条回执（request id、用了哪些 source 图、署名校验结果、发布时间），不能只靠人工口头确认或本地日志，比照铁律 3「Inngest 工作流硬约束」的最小回执要求。
+    在这三件补齐之前，102 张需署名图**不得**经蒙太奇线对外发布。
+- **AI 动感片 → 工厂 i2v 线**：如要用授权 stock 喂 i2v，**只用 CC0/公有领域**（避开 CC-BY 衍生署名死结）；CC-BY/CC-BY-SA 一律不进工厂。§4.3 的 `license_family` 白名单查询条件（见上）就是这条线的强制闸，工厂线**不需要**额外的发布前署名闸——但这只覆盖工厂 i2v 线，不能反过来当作"整个 spec 可以不建署名闸"的理由：署名闸对蒙太奇线仍是必建项（见上）。
 
-**本 spec 后续**：不按原 §4 建。若走"工厂只喂 CC0/PD"，本 spec 缩水成"licensed_stock 入库 + origin 隔离 + CC0/PD-only 进池过滤 + quarantine/审核 UI"，砍掉署名闸与 landmark 池改造两大块。待 PM 定两线优先级后重写。
+**本 spec 后续**：不按原 §4 全量建。工厂 i2v 线缩水为"licensed_stock 入库 + origin 隔离 + CC0/PD-only 进池过滤 + quarantine/审核 UI"，可砍掉 landmark 池改造；但**发布前署名闸不能砍**——它的落点从"工厂 i2v 发布前"改为"蒙太奇线（make_promo）发布前"，因为实际需要署名的 102 张图现在归属蒙太奇线。待 PM 定两线优先级后重写 §4，署名闸章节按上述"覆盖蒙太奇线"的口径改写，不得删除。
