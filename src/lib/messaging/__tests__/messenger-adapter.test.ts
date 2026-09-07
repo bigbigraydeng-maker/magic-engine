@@ -161,6 +161,19 @@ describe('发送', () => {
     expect(r.ok === false && r.reason).toContain('授权')
   })
 
+  it('拒联复核未完成 → 作为受治理拒绝返回，不伪装成窗口关闭', async () => {
+    mockDb({ conversationId: 'cv1', lastInboundAt: hoursAgo(1) })
+    ;(sendReply as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      status: 409,
+      reason: 'dnc_review_required',
+      error: '客户可能要求停止联系，请先核对',
+    })
+    const r = await messengerAdapter.send({ clientId: 'c1', contactId: 'p1', body: 'hi', sentByEmail: 'a@b.c' })
+    expect(r).toMatchObject({ ok: false, code: 'rejected' })
+    expect(r.ok === false && r.reason).toContain('先核对')
+  })
+
   /** 审计要答得出「这句话是谁说的」—— 发送人必须原样传下去。 */
   it('把按发送的人传给底层审计', async () => {
     mockDb({ conversationId: 'cv1', lastInboundAt: hoursAgo(1) })

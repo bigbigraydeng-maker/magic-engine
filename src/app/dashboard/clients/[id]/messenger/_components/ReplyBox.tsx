@@ -30,7 +30,16 @@ interface Props {
 
 /** Server failures, said the way a salesperson can act on. */
 function humanError(status: number, reason?: string): string {
-  if (reason === 'window_closed' || status === 409) {
+  if (reason === 'do_not_contact') {
+    return '客户说过不要再联系。若这是误判，请先到客户卡片点「放回名单」。'
+  }
+  if (reason === 'dnc_review_required') {
+    return '客户的私信可能是在要求停止联系。请先到客户卡片核对原话并记录处理结果。'
+  }
+  if (reason === 'dnc_unknown') {
+    return '暂时查不到客户是否允许联系。为避免误发，请稍后再试。'
+  }
+  if (reason === 'window_closed') {
     return 'Facebook 已经不让回这条了 —— 请改用电话或邮件联系客户。'
   }
   if (reason === 'no_token' || status === 424) {

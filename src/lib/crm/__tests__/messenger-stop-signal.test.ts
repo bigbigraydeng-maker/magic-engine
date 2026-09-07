@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 import {
   MAX_PER_CLIENT,
   pickStopSignals,
+  looksLikeStopSignal,
   type InboundDm,
   type StopSignalInput,
 } from '../messenger-stop-signal'
@@ -70,6 +71,38 @@ describe('挑得出来', () => {
     const q = run({ messages: [dm({ body: long })] }).signals[0].quote
     expect(q.length).toBeLessThanOrEqual(121)
     expect(q.endsWith('…')).toBe(true)
+  })
+})
+
+describe('中文拒联候选只进入人工复核', () => {
+  const positives = [
+    '请不要再联系我',
+    '不要再联系我',
+    '客户说不要再联系了',
+    '以后都不要联系了',
+    '请把我从你们名单里删掉',
+    '把我的资料删掉',
+    '不要再发邮件给我',
+    '请勿再来电',
+    '不要再骚扰我',
+    '拒绝任何联系',
+    '不想再收到你们的信息',
+    '客户明确要求退订',
+  ]
+
+  it.each(positives)('%s → 需要复核', (body) => {
+    expect(looksLikeStopSignal(body)).toBe(true)
+    expect(run({ messages: [dm({ body })] }).signals).toHaveLength(1)
+  })
+
+  it.each([
+    '别再联系那家酒店，已经换了',
+    '不需要联系保险，客户自己买了',
+    '别再打给她老公了，打她本人',
+  ])('%s → 不是自动 DNC，只能保持人工复核', (body) => {
+    const { signals } = run({ messages: [dm({ body })] })
+    // 旧判据可能高召回命中，但这条只产生 review signal，从不写永久 DNC。
+    expect(signals).toHaveLength(1)
   })
 })
 

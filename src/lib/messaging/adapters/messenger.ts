@@ -104,6 +104,13 @@ export const messengerAdapter: ChannelAdapter = {
     if (res.reason === 'no_token') {
       return { ok: false, code: 'not_connected', reason: 'Facebook 授权掉线了，请找 Magic Lab 团队重连' }
     }
+    if (
+      res.reason === 'do_not_contact' ||
+      res.reason === 'dnc_review_required' ||
+      res.reason === 'dnc_unknown'
+    ) {
+      return { ok: false, code: 'rejected', reason: res.error }
+    }
     return { ok: false, code: 'failed', reason: res.error }
   },
 }

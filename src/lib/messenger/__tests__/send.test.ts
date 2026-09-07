@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 vi.mock('@/lib/meta/token-manager', () => ({ getMetaTokenForClient: vi.fn() }))
 vi.mock('@/lib/meta/page-posts', () => ({ getPageAccessToken: vi.fn() }))
+vi.mock('@/lib/crm/messenger-send-gate', () => ({ loadMessengerSendGate: vi.fn() }))
 
 import {
   messagingWindow,
@@ -23,10 +24,12 @@ import {
 import { supabaseAdmin } from '@/lib/supabase'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { getPageAccessToken } from '@/lib/meta/page-posts'
+import { loadMessengerSendGate } from '@/lib/crm/messenger-send-gate'
 
 const mockFrom = vi.mocked(supabaseAdmin.from)
 const mockUserToken = vi.mocked(getMetaTokenForClient)
 const mockPageToken = vi.mocked(getPageAccessToken)
+const mockSendGate = vi.mocked(loadMessengerSendGate)
 
 const CTS = 'c0000000-0000-0000-0000-000000000000'
 const OZTOP = 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84'
@@ -145,6 +148,7 @@ beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => {})
   mockUserToken.mockResolvedValue('user-tok')
   mockPageToken.mockResolvedValue('page-tok')
+  mockSendGate.mockResolvedValue({ kind: 'allow' })
 })
 
 afterEach(() => {
@@ -242,6 +246,47 @@ describe('sendReply — window', () => {
     expect(body.messaging_type).toBe('RESPONSE')
     expect(body.tag).toBeUndefined()
     expect(body.recipient.id).toBe('psid_9')
+  })
+})
+
+describe('sendReply — DNC safety gate', () => {
+  it('blocks a contact with an existing DNC verdict before any Meta call', async () => {
+    stubSupabase({ lastInboundAt: NOW.toISOString() })
+    mockSendGate.mockResolvedValue({ kind: 'do_not_contact' })
+
+    const res = await sendReply(input())
+
+    expect(res).toMatchObject({ ok: false, status: 409, reason: 'do_not_contact' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('blocks an unresolved inbound stop signal for manual review', async () => {
+    stubSupabase({ lastInboundAt: NOW.toISOString() })
+    mockSendGate.mockResolvedValue({ kind: 'review_required', quote: '不要再联系我' })
+
+    const res = await sendReply(input())
+
+    expect(res).toMatchObject({ ok: false, status: 409, reason: 'dnc_review_required' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when the DNC truth source cannot be read', async () => {
+    stubSupabase({ lastInboundAt: NOW.toISOString() })
+    mockSendGate.mockResolvedValue({ kind: 'unknown' })
+
+    const res = await sendReply(input())
+
+    expect(res).toMatchObject({ ok: false, status: 409, reason: 'dnc_unknown' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('does not query a contact gate for an unclaimed conversation', async () => {
+    stubSupabase({ lastInboundAt: NOW.toISOString(), contactId: null })
+
+    const res = await sendReply(input())
+
+    expect(res.ok).toBe(true)
+    expect(mockSendGate).not.toHaveBeenCalled()
   })
 })
 

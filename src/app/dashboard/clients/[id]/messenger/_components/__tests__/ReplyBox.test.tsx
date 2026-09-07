@@ -172,4 +172,21 @@ describe('ReplyBox — refusals', () => {
     expect(await screen.findByText(/稍等一分钟再试一次/)).toBeInTheDocument()
     expect(screen.getByRole('textbox')).toHaveValue(DRAFT)
   })
+
+  it('explains that an inbound stop signal needs review instead of calling it a closed window', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: async () => ({ error: 'review first', reason: 'dnc_review_required' }),
+      }),
+    )
+    renderBox()
+
+    await userEvent.click(screen.getByRole('button', { name: '发送给客户' }))
+
+    expect(await screen.findByText(/核对原话并记录处理结果/)).toBeInTheDocument()
+    expect(screen.queryByText(/Facebook 已经不让回/)).not.toBeInTheDocument()
+  })
 })

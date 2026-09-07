@@ -122,6 +122,30 @@ function quoteOf(body: string): string {
 }
 
 /**
+ * 中文拒联候选的高召回层。
+ *
+ * 这里只决定“是否需要人看一眼”，绝不写永久 DNC。这样可以接住 #1026 的常见
+ * 中文表达，同时把“别再联系那家酒店”这类目标不明确的话留在 review 状态，
+ * 不冒充已经确认的客户判决。
+ */
+const CHINESE_STOP_REVIEW_PATTERNS: RegExp[] = [
+  /(?:请|客户说|客户明确说)?不要再(?:联系|发(?:邮件|信息|消息)|来电|骚扰)/,
+  /以后都不要联系/,
+  /请勿再(?:联系|来电|发(?:邮件|信息|消息))/,
+  /(?:请)?把我从你们?(?:的)?(?:名单|列表)里(?:删|移)/,
+  /(?:请)?把我的(?:资料|信息|联系方式)(?:删|移)/,
+  /拒绝任何联系/,
+  /不想再收到你们?(?:的)?(?:信息|消息|邮件)/,
+  /(?:客户)?明确要求退订/,
+]
+
+export function looksLikeStopSignal(body: string): boolean {
+  const text = body.trim()
+  if (!text) return false
+  return classifyNote(text).do_not_contact || CHINESE_STOP_REVIEW_PATTERNS.some((p) => p.test(text))
+}
+
+/**
  * 纯判据：哪些私信像是「别再联系」，且这个人还值得提醒一次。
  *
  * 拆成纯函数是为了能把每一条规矩单独钉住 —— IO 那半边（`findMessengerStopSignals`）
@@ -137,8 +161,8 @@ export function pickStopSignals(input: StopSignalInput): StopSignalResult {
   for (const m of messages) {
     if (!m.body || !m.body.trim()) continue
 
-    // 判据只有一份 —— 跟销售手打备注走的是同一个 `classifyNote`。
-    if (!classifyNote(m.body).do_not_contact) continue
+    // 已确认 DNC 仍复用 `classifyNote`；中文新增只进入 review，不冒充永久判决。
+    if (!looksLikeStopSignal(m.body)) continue
 
     // 已经算拒联了 → 没什么可提示的。查不到这个人的材料就按「没被标过」办。
     const d = dnc.get(m.contactId)

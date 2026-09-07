@@ -15,6 +15,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { loadMessengerSendGate } from '@/lib/crm/messenger-send-gate'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { getPageAccessToken } from '@/lib/meta/page-posts'
 
@@ -71,6 +72,9 @@ export type SendReplyResult =
         | 'wrong_channel'
         | 'empty_body'
         | 'window_closed'
+        | 'do_not_contact'
+        | 'dnc_review_required'
+        | 'dnc_unknown'
         | 'no_token'
         | 'graph_failed'
     }
@@ -171,6 +175,38 @@ export async function sendReply(input: SendReplyInput): Promise<SendReplyResult>
 
   if (!convo.participant_psid) {
     return { ok: false, status: 409, error: '这条对话没有可回复的收件人', reason: 'window_closed' }
+  }
+
+  if (convo.contact_id) {
+    const gate = await loadMessengerSendGate(supabaseAdmin, {
+      clientId: convo.client_id,
+      contactId: convo.contact_id,
+      conversationId: convo.id,
+    })
+    if (gate.kind === 'do_not_contact') {
+      return {
+        ok: false,
+        status: 409,
+        error: '他说过别再联系。判错了的话，先在客人卡片上点「放回名单」',
+        reason: 'do_not_contact',
+      }
+    }
+    if (gate.kind === 'review_required') {
+      return {
+        ok: false,
+        status: 409,
+        error: `客人可能要求停止联系，请先人工确认原话：${gate.quote}`,
+        reason: 'dnc_review_required',
+      }
+    }
+    if (gate.kind === 'unknown') {
+      return {
+        ok: false,
+        status: 409,
+        error: '暂时查不到他能不能联系，请稍后再试',
+        reason: 'dnc_unknown',
+      }
+    }
   }
 
   const window = messagingWindow(await lastInboundAt(input.conversationId))
