@@ -73,10 +73,10 @@
     "url": "https://app.magicengine.com.au/dashboard/clients/{CTS}/crm/all?contact={CONTACT_ID}",
     "http_status": 200,
     "h1": "全部客人",
-    "hasContactName_Moira": true,
+    "hasContactNameMatch": true,
     "hasDncWarning": false,
-    "controls_sample": ["← 返回客户", "今天要联系", "全部客人", "决策清单（只读）", "✉️ moira.mclean@aut.ac.nz", "看更早的 3 条 ↓", "记一笔", "跟进到哪步：还没标"],
-    "notes": "?contact= 生效，页面自动展开到 Moira 联系人；「记一笔」是核心操作按钮。但代码注释里说的「判错了？点这里放回名单」黄条只在 do_not_contact=true 时显示，Moira 现在没这个状态所以不显示——功能设计对的"
+    "controls_sample": ["← 返回客户", "今天要联系", "全部客人", "决策清单（只读）", "✉️ [REDACTED_EMAIL]", "看更早的 3 条 ↓", "记一笔", "跟进到哪步：还没标"],
+    "notes": "?contact= 生效，页面自动展开到对应联系人（真实姓名/邮箱已脱敏）；「记一笔」是核心操作按钮。但代码注释里说的「判错了？点这里放回名单」黄条只在 do_not_contact=true 时显示，该联系人现在没这个状态所以不显示——功能设计对的"
   },
   {
     "key": "crm_all",
@@ -168,7 +168,7 @@
   {
     "key": "meta_ads_manager",
     "url": "https://adsmanager.facebook.com/adsmanager/manage/adsets?act={adAccountId}&selected_adset_ids={adSetId}",
-    "notes": "🟡 未用 fake id 实测（无意义）。按域和类别归类：外部但正确目的地 ✅（等同 graph_explorer / render 等模式）"
+    "notes": "🟡 未实测——没有用真实广告账户 ID 和 adset ID 验证过 `act=` / `selected_adset_ids=` 是否真的把 PM 带到目标广告组，只核对了域名是 adsmanager.facebook.com。账户权限（PM 是否有该 ad account 访问权）和 `selected_adset_ids` 参数是否被 Meta 正确解析，是 PM 能否直达操作目标的关键，尚未验证，不能归为 ✅，等同 GBP OAuth 那条 `ad_readback_blocker` 未实测项"
   },
   {
     "key": "graph_explorer",
