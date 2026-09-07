@@ -11,25 +11,25 @@
 
 | verdict | 条数 | 说明 |
 |---|---|---|
-| ✅ 落地页真能干活 | 14 | 内部落地页 UI 或外部页面就是正确目的地 |
-| ⚠️ 部分能干，但落地或路径别扭 | 5 | 得多绕一步、需要额外知识、SPA 首次载入慢 |
-| ❌ 落地跟能力完全错位 / 直接失效 | 5 | 404、query param 被忽略、相对路径被链接闸丢掉 |
-| 🟡 未实测（有理由） | 2 | OAuth flow 不能真跑；Ads Manager 深链没有用真实账户/广告组 ID 验证过 |
+| ✅ 落地页真能干活 | 12 | 内部落地页 UI 或外部页面就是正确目的地 |
+| ⚠️ 部分能干，但落地或路径别扭 | 7 | 得多绕一步、需要额外知识、SPA 首次载入慢 |
+| ❌ 落地跟能力完全错位 / 直接失效 | 4 | 404、只读页被要求做只有后台才能做的事、相对路径被链接闸丢掉 |
+| 🟡 未实测（有理由） | 3 | OAuth flow 不能真跑；Ads Manager 深链没有用真实账户/广告组 ID 验证过；DNC 纠错按钮的样本联系人当时不在 DNC 状态 |
 
 ---
 
 ## 二、逐条判定表
 
-### ✅ 落地页真能干活（14）
+### ✅ 落地页真能干活（12）
 
 | kind | 落地页 | 一句话 |
 |---|---|---|
 | `not_indexed` | [/site-audit/pages?filter=not-indexed](../../src/lib/pm-todo/manual-items.ts#L293) | h1「页面清单」，「未收录(4)」筛选生效 |
 | `meta_stuck` / `mailchimp_export_broken` / GBP setup | [/settings](../../src/lib/pm-todo/manual-items.ts#L520) | h1「客户配置中心」，5 个 tab 可切换 + 保存按钮 |
 | `price_claim_unbacked` | [/assets](../../src/lib/pm-todo/manual-items.ts#L1044) | h1「素材库」，48 全部/47 已分析等筛选（改单张素材「来源」要多一步点开，仍算可干） |
-| `goal_baseline_mismatch` / `leads_metric_untrusted` | [/goal/{goalId}](../../src/lib/pm-todo/manual-items.ts#L1100) | h1 = 目标标题 + BETA + EXPIRED；有「Submit Verdict」按钮 |
+| `leads_metric_untrusted` | [/goal/{goalId}](../../src/lib/pm-todo/manual-items.ts#L1100) | h1 = 目标标题 + BETA + EXPIRED；how 让 PM 去客户网站统计后台改，页面只是用来核对是哪个目标，不依赖页面上的按钮（`goal_baseline_mismatch` 不算在内，见下方 ❌） |
 | `linkedin_progress_needs_review` | [/content-factory](../../src/lib/pm-todo/manual-items.ts#L1105) | h1「内容工厂」，draft 列表可批准 |
-| `dnc_maybe_wrong` / `dm_maybe_stop` / `email_reply_due` (focused) | [/crm/all?contact={id}](../../src/lib/pm-todo/manual-items.ts#L1453) | `?contact=` 生效自动展开到人；「记一笔」按钮在 |
+| `dm_maybe_stop` / `email_reply_due` (focused) | [/crm/all?contact={id}](../../src/lib/pm-todo/manual-items.ts#L1453) | `?contact=` 生效自动展开到人；「记一笔」按钮在（`dnc_maybe_wrong` 不算在内，见下方 🟡 未实测） |
 | `email_reply_due` (client-level) | [/crm/all](../../src/lib/pm-todo/email-reply-items.ts#L64) | 全部客人 tab 视图 |
 | `cross_client_leak` | [/dashboard/clients](../../src/lib/pm-todo/manual-items.ts#L1545) | 33 客户列表，可点进设置纠正归属 |
 | 7 个 kind → `/execution` | [/execution](../../src/lib/pm-todo/manual-items.ts#L1821) | 执行看板：AI 推荐 3 件 + Key Signals + 5 Campaign 上下文 + 44/3/56 分栏 |
@@ -43,7 +43,7 @@
 | `cron_not_running` (render/external) / `cron_stuck` / `cron_blind` / `attribution_audit_failed` / `client_list_unreadable` | dashboard.render.com | 直达 Render Overview |
 | `cron_not_running` (inngest) | app.inngest.com | 直达 Inngest Dashboard |
 
-### ⚠️ 部分能干，但落地或路径别扭（5）
+### ⚠️ 部分能干，但落地或路径别扭（7）
 
 | kind | 落地页 | 具体问题 | 建议 |
 |---|---|---|---|
@@ -52,26 +52,28 @@
 | `factory_worker_idle` | `/dashboard/factory` | 驾驶舱能看队列，但 how 明确说「去 Mac 上跑 CLI 命令」，落地页 UI 里没「启动 worker」按钮 | 落地页加一个「远程启动本地 worker」按钮（或至少显示「这台机器上 worker 状态」） |
 | `linkedin_content_factory` 首次载入 | `/content-factory` | SPA 首次载入需要 5-7 秒，前 3 秒页面近乎空白（跟其他重 SPA 页面一致，不是 unique） | 加 loading 骨架屏 |
 | 所有 `/execution` 家族 (7 kind) 首次载入 | `/execution` | SPA 首次载入 5-7 秒空白（PM 3 秒内以为坏了会回退） | 加 loading 骨架屏，同上 |
+| `conversion_needs_review` | [/conversions?client={id}&focus={outcomeId}](../../src/lib/pm-todo/conversion-review-items.ts#L104) | `client=` 已经生效——`page.tsx:96-99` 在 mount 时读 `?client=` 写入 state，`load()` 的 `useEffect` 跟着自动触发查询，**不是完全被忽略**（上一版审计判错了）；真正没接住的只有 `focus=`：页面不会定位/高亮到那条具体 outcome，同一客户有多条待核对时 PM 要自己在列表里找 | 落地页读 `focus=` 自动定位/高亮到那条 outcome；`client=` 不用动 |
+| `conversion_send_in_doubt` | [/conversions?client={id}&status=in_doubt](../../src/lib/pm-todo/conversion-review-items.ts#L133) | 同上，`client=` 生效、页面不是跟 bare `/dashboard/conversions` 完全一致；真正没接住的是 `status=in_doubt` —— 页面不会自动切到「待核对」筛选，PM 落地后要自己找 | 落地页读 `status=in_doubt` 自动切到对应筛选/定位 |
 
-### ❌ 落地跟能力完全错位 / 直接失效（5）
+### ❌ 落地跟能力完全错位 / 直接失效（4）
 
 | kind | 落地页 | 严重程度 | 具体证据 | 修法 |
 |---|---|---|---|---|
 | `crawl_stale` | [/site-audit](../../src/lib/pm-todo/manual-items.ts#L540) | 🔴 P1 | HTTP 200 body 是 **404 页面**（Next.js 404） | 要么改 href 到 `/site-audit/pages`，要么在这个路径真做一个 site-audit 首页 |
-| `conversion_needs_review` | [/conversions?client={id}&focus={outcomeId}](../../src/lib/pm-todo/conversion-review-items.ts#L104) | 🔴 P1 | `client=` 和 `focus=` query param **完全被忽略**；页面 bodyLen 只 557 字符 = 空白 + 1 个「客户 ID」输入框 + 2 个按钮。PM 从邮件点进来看到空白，要自己复制 UUID 到框里 | 落地页读 `client=` 自动填入、`focus=` 自动定位到那条 outcome |
-| `conversion_send_in_doubt` | [/conversions?client={id}&status=in_doubt](../../src/lib/pm-todo/conversion-review-items.ts#L133) | 🔴 P1 | 同上，`status=in_doubt` 也被忽略 | 同上 |
+| `goal_baseline_mismatch` | [/goal/{goalId}](../../src/lib/pm-todo/manual-items.ts#L1100) | 🔴 P1 | how 明确要求「把它改成 {recomputedBaseline}」，但目标页只读展示 `baseline_value`（`_client.tsx:208-216`），页面上的「Submit Verdict」只提交当前值和结论，仓库里没有任何能修改目标 baseline 的入口——PM 照 how 做不完这件事 | 要么在目标页/settings 加一个改 baseline 的表单 + API，要么把 how 改成「回我一句附上正确起点，我去后台改」，在那之前不要让这条指向一个做不完动作的页面 |
 | `blog_draft_waiting` (有 2 个 href 变体) | 相对路径 `/dashboard/clients/{id}/blog` 或 `/settings` | 🔴 P0 静默丢失 | [action-link.ts:69-83](../../src/lib/pm-todo/action-link.ts#L69) 的 `verifyActionLink` 对相对路径走 `new URL('/xxx')` throws → 落到 `fetch` throws → 返回 `{kind:'broken'}` → [dropBrokenLinks](../../src/lib/pm-todo/manual-items.ts#L202) 判 broken 就 drop（`blog_draft_waiting` 不在 `NEVER_DROP_KINDS` 里，只有 `cross_client_leak` 是）→ **整条待办被 console.warn 丢掉，PM 邮件里根本看不到** | href 改绝对路径 `https://app.magicengine.com.au/dashboard/clients/{id}/blog` |
 
 **⚠️ 关键：`blog_draft_waiting` 这条同一个 bug 早在 [manual-items.ts:1540-1544](../../src/lib/pm-todo/manual-items.ts#L1540) 的 `cross_client_leak` 注释里被明确记录过**（狄仁杰 2026-08-05 kept=0 事故），当时的修法是「加进 NEVER_DROP_KINDS」和「改绝对路径」——`blog_draft_waiting` 两条路径都没做，漏网了。
 
-**⚠️ conversions 两条同样是 blog_draft_waiting 家族的 bug**：href 也是相对路径 `/dashboard/conversions?...`，也会被 dropBrokenLinks 静默丢掉。**除了 query param 不生效之外，这两条根本进不了待办邮件**。
+**⚠️ conversions 两条同样是相对路径会被 dropBrokenLinks 静默丢掉的 bug**：href 是相对路径 `/dashboard/conversions?...`，跟 `blog_draft_waiting` 是同一类问题（详见上方 ⚠️ 表格，这两条本身落地不算完全错位，只是 `focus=` / `status=` 两个参数没接住，且 href 相对路径这点仍需要修）。
 
-### 🟡 未实测（2）
+### 🟡 未实测（3）
 
 | kind | 落地页 | 理由 |
 |---|---|---|
 | GBP setup: needs-connect | `/api/auth/google/connect?client_id={id}` | 会真启动 Google OAuth flow，禁跑。功能上：点了就开始授权，无 UI 可 audit |
 | `ad_readback_blocker` | `https://adsmanager.facebook.com/adsmanager/manage/adsets?act={adAccountId}&selected_adset_ids={adSetId}` | 只核对了域名是 adsmanager.facebook.com，没有用真实广告账户 ID 和 adset ID 验证过账户权限、`selected_adset_ids` 参数是否真的把 PM 带到目标广告组——这正是判据要求的「直接触发解决 kind 的动作」，仅查域名不满足，之前误标 ✅ 已改判为未实测 |
+| `dnc_maybe_wrong` | [/crm/all?contact={id}](../../src/lib/pm-todo/manual-items.ts#L1453) | 这个 kind 只会在联系人仍处于 DNC 状态时生成，所需动作是点黄条「判错了？点这里放回名单」（[DncBanner.tsx:91](../../src/app/dashboard/clients/[id]/crm/_components/DncBanner.tsx#L91)）；但本次测试样本 metadata 明确记录 `hasDncWarning: false`（见 [href-page-metadata.json](./2026-09-07-href-page-metadata.json) `crm_contact_focused`），联系人当时不在 DNC 状态，黄条没有出现，只验证了 `?contact=` 定位和通用「记一笔」按钮——没有覆盖这个 kind 实际触发时的关键按钮，之前误标 ✅ 已改判为未实测 |
 
 ---
 
@@ -86,7 +88,7 @@
 - `src/lib/pm-todo/blog-drafts.ts:96-99` — `blog_draft_waiting` 两条路径都改绝对
 - `src/lib/pm-todo/conversion-review-items.ts:104` — `conversion_needs_review` 改绝对
 - `src/lib/pm-todo/conversion-review-items.ts:133` — `conversion_send_in_doubt` 改绝对
-- 顺手加一条 lint / test：`ManualItem.href` 必须以 `https://` 开头（防止再犯）
+- 顺手加一条 lint / test：非空的 `ManualItem.href` 不能是相对路径，必须以 `https://` 开头（防止再犯）。**空 href 要放过**——`src/lib/kernel/handoff.ts:74-112` 会故意生成空 `href`（那件事的处理入口还没上线，如实不给假链接），[dropBrokenLinks](../../src/lib/pm-todo/manual-items.ts#L188-L196) 已经把空 href 当成 `unverifiable` 保留下来，不当 broken 丢掉；测试只拒绝「非空但不是 `https://` 开头」的值
 
 预计：1 人时。零风险，纯字符串补 `https://app.magicengine.com.au` 前缀。C 级。
 
@@ -100,14 +102,21 @@
 
 推荐 (a) 先解 bug。
 
-**PR-3 · 修 `/conversions` 读 query param**（中 · 消 conversion_needs_review + conversion_send_in_doubt 深链）
+**PR-2b · 目标页加「改 baseline」入口（或改 how 文案）**（小/中 · 消 goal_baseline_mismatch）
 
-`src/app/dashboard/conversions/page.tsx` 需要：
-- 读 `?client=` 自动填入并触发查询
+`goal_baseline_mismatch` 的 how 明确要求 PM 把 baseline 改成重算值，但 `/goal/{goalId}` 页（[_client.tsx:208-216](../../src/app/dashboard/clients/[id]/goal/[goalId]/_client.tsx#L208)）只读展示 `baseline_value`，「Submit Verdict」不碰这个字段，仓库里没有对应的改 baseline API/UI。两条路：
+- (a) 目标页/settings 加一个改 `baseline_value` 的表单 + API（对齐 PM 的实际动作，推荐）
+- (b) 先把 how 改成「回我一句附上正确起点，我去后台改」，别让待办指向一个做不完动作的页面（快，不解决根本问题）
+
+预计：(a) 2-3 人时，B 级（涉及 goal 数据修正，建议留审计轨迹）；(b) 0.5 人时，C 级。
+
+**PR-3 · 修 `/conversions` 读 `focus=` / `status=`**（中 · 消 conversion_needs_review + conversion_send_in_doubt 深链剩余部分）
+
+`src/app/dashboard/conversions/page.tsx` 已经会读 `?client=` 自动触发查询（`page.tsx:96-99`），还需要：
 - 读 `?focus=` 自动定位/高亮到那条 outcome
 - 读 `?status=in_doubt` 自动切到「待核对」筛选
 
-预计：3-4 人时。B 级（涉及 URL state ↔ query state 同步逻辑）。
+预计：2-3 人时。B 级（涉及 URL state ↔ query state 同步逻辑）。
 
 ### 🟡 P2：路径别扭
 
@@ -128,6 +137,14 @@
 本次审计只核对了 `adsmanager.facebook.com` 域名，没有用真实 `act=` / `selected_adset_ids=` 走一遍确认 PM 账户权限够、参数真的定位到目标广告组。下一轮审计需要拿一条真实 CTS 广告账户/adset id 实测，再改判 ✅ 或列入修复清单。
 
 预计：0.5 人时（需要一条真实广告账户访问权限）。C 级。
+
+### 🟡 待验证：DNC 纠错黄条
+
+**用一个真实处于 DNC 状态的联系人补测 `dnc_maybe_wrong`**（小）
+
+本次审计的测试联系人 metadata 记录 `hasDncWarning: false`，没有触发黄条「判错了？点这里放回名单」（[DncBanner.tsx:91](../../src/app/dashboard/clients/[id]/crm/_components/DncBanner.tsx#L91)），只验证了 `?contact=` 定位和通用「记一笔」按钮。下一轮审计需要挑一个 `do_not_contact=true` 的联系人实测黄条是否出现、点击后是否真的解除 DNC，再改判 ✅ 或列入修复清单。
+
+预计：0.5 人时（需要一条真实处于 DNC 状态的联系人）。C 级。
 
 ### 🟢 P3：体验小事
 
