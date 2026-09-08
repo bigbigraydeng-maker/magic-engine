@@ -9,7 +9,7 @@
 
 **问题**：`src/lib/cron/run-logger.ts` 写 `cron_run_logs` 时只解构了 `data`、没解构 `error`。写库一失败 `runId` 就是 `null`，收尾函数里 `if (!runId) return` 直接什么都不做 —— 任务照常跑完、照常返回 HTTP 200，但库里一行记录都没有。危险的地方在于方向是反的：`src/lib/cron/health.ts` 完全建立在 `cron_run_logs` 上，"没有行"被解释成"从来没跑过 / 逾期没跑"，于是**监控主动报假警**。
 
-**生产证据**（2026-09-07 查生产库 glbdnayojixmexgofbsd）：`goals-expiry-check` 由 GitHub Actions 每天调度，8/18–8/30 这 13 次全部 `conclusion=success`、响应体都是 `{"success":true}`（工作流里明确断言非 200 即失败），但 `cron_run_logs` 里只有 8/27 那一天有记录，另外 12 天一行都没有。路由鉴权之后立刻就是 `startCronRun`，没有任何提前返回分支。对照组：同样走 GitHub Actions、同一个公网域名的 `winner-reel-sync-daily`，8/15–9/06 每天都有行 —— 排除调度路径和部署问题，范围收敛到写入函数本身。
+**关于「8/18–8/30 只有 8/27 一天有记录」这条线索（2026-09-07 查生产库 glbdnayojixmexgofbsd）**：`goals-expiry-check` 由 GitHub Actions 每天调度，这 13 次全部 `conclusion=success`、响应体都是 `{"success":true}`（工作流里明确断言非 200 即失败），但 `cron_run_logs` 只留了 8/27 一行。**这条线索不能当成写入失败的证据**——`20260907000001_cron_run_logs_retention_daily_job.sql` 的保留策略会把 7 天以上、`status=completed` 且 `summary/error_message/processed/completed_count/failed_count` 全空的行当噪音删掉（每个 job_name 只保底留最新一条）；`goals-expiry-check` 没有目标到期时恰好写出这种全空的 completed 行，截至 9/7，8/18–8/30 这批全部超过 7 天，被当噪音清掉正是保留策略的预期行为，与写入是否成功无关。对照组 `winner-reel-sync-daily` 每次都写非空 `summary`，天然不会被这条规则命中，两者不具可比性。也就是说**没有直接证据（例如写入报错日志）证明写库当时真的失败过**——`run-logger.ts` 吞掉 insert 的 `error` 并早退这个代码缺陷本身是真实的、值得修，但本次改动定性为**防御性加固**，而非对已发生生产事故的修复。
 
 **修复**：
 - `startCronRunId` / 收尾函数每一次写库都取出 `error` 并 `console.error`（带 job_name 与 message/code/details/hint，进 Render 日志）
