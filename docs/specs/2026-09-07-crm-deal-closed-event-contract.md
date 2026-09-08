@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-09-09 更新:GoHighLevel 场景下"谁来哈希"
+
+CTS 的 CRM 已定为 GoHighLevel（见 `docs/DECISIONS.md` 2026-09-09 决策），而 GoHighLevel **不支持自己预哈希再发 webhook**——它发给 ME 的是明文 PII。下面 §③ "CRM 侧先 hash"这条硬红线本身不变(明文永远不能进 Inngest event 仓)，但**"CRM 侧"这个词的边界要按 CRM 系统能力区分**:
+
+- 如果 CRM 系统自己能预哈希(按 §③ 规则)再 emit,就按原文走,`em_sha256` 等字段由 CRM 团队负责生成。
+- 如果 CRM 系统做不到(GoHighLevel 属于这一类):哈希这一步下沉到 **ME 自己新建的 webhook 接收 handler**——GoHighLevel 的明文 webhook 先到这个 handler,handler 在同一次调用栈里立刻用 `src/lib/pii/hasher.ts` 完成哈希,明文用完即弃(不落库、不写日志、不进 Inngest),再拼出下面 §② 形状的事件发进 Inngest。**"明文不出 CRM 边界"这条红线在 GoHighLevel 场景下,实际执行者是 ME 的接收 handler,而不是 GoHighLevel 自己。**
+
+**下游消费注意**:`me/crm.deal.closed` 事件里的 `*_sha256` 字段到了 CAPI 消费者这一步,要原样塞进 Meta `user_data`,**不能**再调 `src/lib/meta/capi/writer.ts` 现有的 `MetaCapiWriter.build()`——那个方法是给 Issue #1397 的 ME 内部明文 Outcome 管道用的,收到什么都会自己再哈希一次,对已经是哈希值的字段会造成二次哈希(`sha256(sha256(...))`),Meta 侧完全匹配不上且不会报错。GoHighLevel 消费者需要单独一段"哈希值直通"的构造逻辑。
+
+---
+
 ## 一句话背景
 
 ME 广告端要建一个「CAPI 回传」通道,让 Facebook 拿到「谁真成交了」,广告才能变聪明。这个通道**消费 CRM 系统 emit 的成交事件**——所以 CRM 侧要按下面这份格式发事件,ME 侧才接得上。
