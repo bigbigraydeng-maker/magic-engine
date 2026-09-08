@@ -40,6 +40,14 @@ hash 规范化规则(**权威由本设计定,写进给 CRM 的合约文档**):
 
 **2026-09-09 修订(加一条分支,不推翻本节)**: CTS 首个真实 CRM 定为 GoHighLevel(见 `docs/DECISIONS.md` 2026-09-09 决策),GoHighLevel **不支持自己预哈希**。本节「CRM 侧先 hash」对**能自己哈希的 CRM**继续原样成立;对做不到的 CRM,哈希这一步下沉到 **ME 自己新建的接收 handler**——在收到明文 webhook 的同一次调用栈内立刻按上面的规则完成哈希、不落库、不写日志,再转成本节字段形状 emit 进 Inngest。**「明文永不进 Inngest 事件仓」这条红线不变**,变的只是明文短暂存在的那一刻由谁负责哈希:从「CRM 团队自己的系统」变成「ME 这个新 handler 的一次函数调用」。这个 handler 是公网 webhook 入口,**必须做 fail-closed 来源认证(签名/共享密钥)+ 重放校验 + 服务端 `location_id → client_id` 映射(不信任 payload 自报的 `client_id`)**,否则等于把 §4 步骤 3 依赖的 `client_id` 信任边界向公网敞开。完整认证要求见 `docs/specs/2026-09-07-crm-deal-closed-event-contract.md` 文首「2026-09-09 更新」。
 
+**2026-09-09 修订二(魏征/Codex 复审后收紧「CRM 直接 emit」分支 · 推翻上面"继续原样成立"这半句)**: 上面这条分支原文默认"能自己哈希的 CRM"可以绕开 ME 的入口、直接拿 Inngest 项目的事件 key emit,信任边界只是"进得了 Inngest 项目"(旧版 §4 步骤 3 原话)。这一条不成立——`event.data` 是调用方自己拼的,**Inngest 项目级密钥只证明"这是某个持有该密钥的后端",不证明"这条事件里的 `client_id` 是真的"**,和仓库里 `src/lib/inngest/functions/factory-reel-measurement-adapter.ts:70-73` 已经写明的前提一致(`event.data` 来自 Inngest、可被伪造,必须靠独立回读可信记录做第二道身份闸)。一个配置错误或被入侵的 CRM 后端,可以把 `deal_id` 配上任意别的 `client_id` 发一条合法 schema 的事件,把伪造 Purchase 写进别人的广告账号——这跟 GoHighLevel 明文 webhook 那条路径的风险是同一件事,不能因为"这个 CRM 自己会哈希"就默认可以少一道认证。
+
+**修正**: 取消"能自己哈希的 CRM 可以直接 emit 进共享 Inngest 项目"这条旁路。**所有外部 CRM,不论是否具备自哈希能力,都必须经过 ME 同一个按来源认证的接收入口**(见 §3 新增的 `crm-deal-closed` webhook handler,与 GoHighLevel 分支复用同一个 handler、同一张来源绑定映射表,只是内部分支不同):
+- **能自哈希的 CRM**: 把已经哈希好的 payload(`*_sha256` 字段)POST 到这个 handler,handler 做来源认证 + 重放校验 + 用**服务端 `source_binding → client_id` 映射表**推导 `client_id`(不采纳 payload 自报值),校验通过后原样转发 emit 进 Inngest。
+- **不能自哈希的 CRM(GoHighLevel)**: 走 §2A 原文描述的明文 webhook 分支,handler 多做一步就地哈希。
+
+两条分支收敛到同一条硬规则: **`client_id` 永远由 ME 接收入口从服务端映射表推导,不接受任何路径的 payload 自报值;"能进入 Inngest 项目"本身不构成 `client_id` 授权**。因此本设计里不再存在"CRM 后端直接拿项目 key emit 到 Inngest"的路径——所有外部输入都先落这一个认证入口。§4 步骤 3、§7、§8 已同步更新。
+
 ### 2B. Payload schema(v1)
 
 ```
@@ -74,9 +82,16 @@ hash_scheme_version: number   # 让消费者能识别 hash 规范升级
 
 ---
 
-## 3. 最小实现(1 新文件 + 4 改)
+## 3. 最小实现(2026-09-09 修订二后:2 新文件 + 4 改,不再是"1 新文件")
 
-**新增** `src/lib/inngest/functions/crm-deal-capi-uplink.ts`(cloud 消费者)
+**新增**:
+- `src/lib/inngest/functions/crm-deal-capi-uplink.ts`(cloud 消费者)
+- `src/app/api/webhooks/crm-deal-closed/route.ts`(**新增 · 修订二硬前置**:所有外部 CRM 的统一公网接收入口,不只是 GoHighLevel 专用):
+  1. **来源认证**: 校验请求签名/共享密钥(按 CRM 来源各配一个,服务端保存,不进客户可见配置);验证失败 → 直接 401,不 emit、不落 `pushCapiItems`(伪造请求不算"失败任务")
+  2. **重放校验**: 时间戳窗口 + 签名验证通过后才进入下游幂等判断
+  3. **`source_binding → client_id` 服务端映射**: 查新表 `crm_source_bindings`,推导出 `client_id`;payload/请求方自报的 `client_id` 一律丢弃不采纳
+  4. 按 CRM 能力分支:能自哈希的 CRM → payload 已是 `*_sha256` 形状,原样透传;GoHighLevel 等不能自哈希的 → 用 `src/lib/pii/hasher.ts` 就地哈希(不落库、不写日志)
+  5. 组装成 §2B schema 形状(`client_id` 用步骤 3 的映射结果覆盖,不用请求方的值),emit `me/crm.deal.closed` 到 Inngest
 
 **改**:
 - `src/lib/inngest/functions/index.ts` — 加进 `cloudFunctions`(id `cloud-crm-deal-capi-uplink`,子牙 B5)
@@ -87,6 +102,10 @@ hash_scheme_version: number   # 让消费者能识别 hash 规范升级
 **同 PR 迁移(A 级 · service_role RLS)**:
 - 建 `me_capi_uploads` 已发账本表(魏征 BLOCK-6):`(client_id, deal_id, event_name, uploaded_at, payload_hash, hash_scheme_version)`,`UNIQUE(client_id, deal_id, event_name)`
 - `clients.meta_pixel_id text` 列(子牙 B2 · 二选一里选 A:走列而非 env,列不存在的运行时分支删除)
+- **新增(修订二硬前置)** `crm_source_bindings` 映射表:`(source_binding_id text primary key, client_id uuid, crm_provider text, secret_ref text, created_at timestamptz)`,service_role RLS(`FOR ALL TO service_role USING (true)`);`source_binding_id` 对 GoHighLevel 是 `location_id`,对其他能自哈希直连的 CRM 是各自签发的来源标识,两者共用同一张表、同一条"服务端映射优先于 payload 自报"规则
+
+**同 PR 验收测试(2026-09-09 修订二硬前置,不放到"待命期"再补)**:
+- `src/app/api/webhooks/crm-deal-closed/__tests__/route.test.ts`: 签名缺失/错误 → 401 且不 emit、不落 `pushCapiItems`;时间戳超窗口 → 拒绝;`source_binding_id` 查不到映射 → 拒绝;映射存在但请求 body 里带了不同的 `client_id` → 以映射结果为准、不采纳请求值(断言 emit 出去的事件 `client_id` 是映射结果);GoHighLevel 明文分支的哈希正确性锁 `crm-deal-closed-event-contract.md` 的 NZ 示例(见该文档 §③ 修订)
 
 ---
 
@@ -100,7 +119,7 @@ hash_scheme_version: number   # 让消费者能识别 hash 规范升级
    - `pixel_id` = `clients.meta_pixel_id`(子牙 B2 · 唯一路径)
    - `access_token` = `getMetaTokenForClient(clientId)`(带 ads_management,吸取 me_ad_launch)
    - 任一 null → `{ok:false, reason:'no_config'}` + `pushCapiItems` (kind `capi_no_config`)
-   - **`client_id` 信任边界(2026-09-09 补)**:本消费者对 `event.data.client_id` 不做二次校验,直接信任它已经过来源验证——「CRM 直接 emit」路径的信任边界是 Inngest 项目本身(只有 ME/CRM 后端服务账号能 emit);「GoHighLevel → ME 接收 handler」路径的信任边界前移到该 handler 的来源认证 + `location_id → client_id` 服务端映射(见 `crm-deal-closed-event-contract.md` 2026-09-09 更新)。上游任何一条路径漏做认证,都会在这一步直接读到错误客户的 pixel/token——这是硬前置,不是可以先跳过、上线后再补的待办。
+   - **`client_id` 信任边界(2026-09-09 修订二后)**:本消费者对 `event.data.client_id` 不做二次校验,直接信任它——但信任的前提变了:不再是"进得了 Inngest 项目就算数",而是**所有外部 CRM(能自哈希的 + GoHighLevel 这类不能自哈希的)都先经过 §3 新增的 `src/app/api/webhooks/crm-deal-closed/route.ts` 统一入口**,由该 handler 的来源认证 + `crm_source_bindings` 服务端映射推导出 `client_id` 后才 emit 进 Inngest;消费者信任的是"这条事件已经过 handler 校验",不是"这条事件能出现在 Inngest 里"。这个 handler 一旦漏做认证或映射,都会在这一步直接读到错误客户的 pixel/token——这是硬前置,不是可以先跳过、上线后再补的待办。
 4. **7 天窗口前置检查**(魏征 BLOCK-7):
    - `if (nowMs - Date.parse(closed_at) > 7d)` → 落 `flywheel_actions.metadata.dropped_reason='beyond_capi_window'` + 计数,**不 POST 不进 manual-items**
 5. **已发账本第二层幂等**(魏征 BLOCK-6):
@@ -154,11 +173,11 @@ hash_scheme_version: number   # 让消费者能识别 hash 规范升级
 
 ---
 
-## 7. 治理 / 边界(2026-09-09 加一条 GoHighLevel 分支,其余不变)
+## 7. 治理 / 边界(2026-09-09 修订二后:GoHighLevel 分支收编进统一入口,其余不变)
 
 - 不需要人工审批(不占花钱/对外/难撤三占,与 me_ad_launch 审批闸判据一致)
-- 但 PII 高敏 → hash 在 CRM 侧完成(CRM 做不到时下沉到 ME 接收 handler,同调用栈内完成、见 §2A 2026-09-09 修订)+ metadata 白名单 + 明文禁进任何 ME 存储/日志
-- 失败一律进 `manual-items.ts`「🙋 需要你动手」,带 what/why/href(GoHighLevel 接收 handler 的来源认证失败**不算**这类失败,直接拒绝,不落 manual-items,见 `crm-deal-closed-event-contract.md`)
+- 但 PII 高敏 → hash 在 CRM 侧完成(CRM 做不到时下沉到 §3 新增的 `crm-deal-closed` 统一接收 handler,同调用栈内完成、见 §2A 2026-09-09 修订)+ metadata 白名单 + 明文禁进任何 ME 存储/日志
+- 失败一律进 `manual-items.ts`「🙋 需要你动手」,带 what/why/href(接收 handler 的来源认证失败**不算**这类失败,直接拒绝,不落 manual-items,见 `crm-deal-closed-event-contract.md`)——**这条现在对所有外部 CRM 都成立**,不再只限 GoHighLevel:能自哈希的 CRM 如果签名/映射失败,同样直接拒绝,不进人工待办
 - **同因合并 / 熔断**(魏征 BLOCK-12):`pushCapiItems` 同 client_id + kind 一天合成一条,同 client 连续 5 次同因触发消费者层熔断(30 分钟不再进 manual-items,只计数)
 
 ---
@@ -168,9 +187,10 @@ hash_scheme_version: number   # 让消费者能识别 hash 规范升级
 **复用**: `getMetaTokenForClient`(token-manager.ts:69) · flywheel_actions 直插(daily-plan-publish 模式) · manual-items 失败落点 · cloud Inngest 骨架 · CTS pixel/token 今日修地基填的 env。**不另起**任何 Graph 客户端 / 审批体系。
 
 **分层**:
-- **L1 shared**: 消费者、幂等账本、metadata 白名单、CAPI POST、事件名↔Meta event_name 映射表(硬编码 1:1)
-- **L4 config**: 客户 pixel_id / token / (未来)自定义业务事件↔Meta event_name 的扩展
-- 红线 2: 客户 PII 明文永不进 shared runtime;deal 语义 fact 不进 shared——**2026-09-09 唯一受限例外**:GoHighLevel 明文 webhook 落地的接收 handler,明文只存活在单次函数调用栈内(不落库、不写日志、哈希后立刻丢弃),且该 handler 必须先过 fail-closed 来源认证 + 服务端 `location_id → client_id` 映射才处理请求(见 `crm-deal-closed-event-contract.md` 2026-09-09 更新)。这不是放宽本条红线,是把「谁在明文短暂存在的瞬间负责哈希」从 CRM 系统换成 ME 自己的一段代码——除此之外任何组件仍不得持有或转发明文 PII。
+- **L1 shared**: 消费者、`crm-deal-closed` 统一接收 handler、`crm_source_bindings` 映射表结构、幂等账本、metadata 白名单、CAPI POST、事件名↔Meta event_name 映射表(硬编码 1:1)
+- **L4 config**: 客户 pixel_id / token / `crm_source_bindings` 里每条来源到 client_id 的具体映射行 / (未来)自定义业务事件↔Meta event_name 的扩展
+- 红线 2: 客户 PII 明文永不进 shared runtime;deal 语义 fact 不进 shared——**2026-09-09 唯一受限例外**:GoHighLevel 明文 webhook 落地的接收 handler,明文只存活在单次函数调用栈内(不落库、不写日志、哈希后立刻丢弃),且该 handler 必须先过 fail-closed 来源认证 + 服务端映射才处理请求(见 `crm-deal-closed-event-contract.md` 2026-09-09 更新)。这不是放宽本条红线,是把「谁在明文短暂存在的瞬间负责哈希」从 CRM 系统换成 ME 自己的一段代码——除此之外任何组件仍不得持有或转发明文 PII。
+- 红线 3(2026-09-09 修订二新增): `client_id` 的授权来源只能是 `crm_source_bindings` 服务端映射,不能是"能否 emit 进 Inngest 项目"或 payload 自报值——这条对所有外部 CRM 一视同仁,不因为某个 CRM"自己能哈希"就单独放行少一道校验。
 
 **注意**: hash_scheme_version 是 shared 层字段(所有客户一样),用于消费者识别 CRM 侧 hash 规则升级,便于兼容迭代。
 
