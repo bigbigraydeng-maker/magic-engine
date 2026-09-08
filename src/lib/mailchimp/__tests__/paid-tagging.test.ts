@@ -303,6 +303,56 @@ describe('runPaidTagging · 🔴 needs_review 处理确认闸（2026-09-08 每�
     )
     expect(r.needsReview).toHaveLength(1)
   })
+
+  it('🔴 Codex round 3：同一批里这个邮箱已经被本轮确认打过标签 → needs_review 排除它，也不再反查', async () => {
+    let lookups = 0
+    const { cfg } = fakeMailchimp({ 'enrkay@gmail.com': ['fb_lead'] })
+    const baseFetch = cfg.fetchImpl
+    const impl = async (url: string, init?: RequestInit) => {
+      if (!url.includes('/tags')) lookups += 1
+      return baseFetch(url, init)
+    }
+    const r = await runPaidTagging(
+      [
+        // 一封我们自己确认收款的信，先把这个邮箱打上 paid_customer。
+        mail({ id: 'confirmed', preview: 'Your payment has been received in full' }),
+        // 同一批里客人自己也甩了张回单，命中 needs_review。
+        mail({
+          id: 'review',
+          direction: 'inbound',
+          subject: 'Payment confirmation',
+          preview: 'Get Outlook for Android',
+        }),
+      ],
+      { ...cfg, fetchImpl: impl },
+      POLICY,
+    )
+    expect(r.tagged).toHaveLength(1)
+    // 已经在本轮确认打过标签的邮箱不该再冒出来要人复核。
+    expect(r.needsReview).toHaveLength(0)
+    // 且不该为它多发一次反查请求——它已经在 alreadyTagged 里，查了也是白查。
+    expect(lookups).toBe(1) // 只有 applyMemberTags 内部那一次 findMemberByEmail
+  })
+
+  it('🔴 Codex round 3：共享的 reviewCheckDeadline 已过期 → 不再发起新反查，仍按"还没处理"报出来', async () => {
+    let lookups = 0
+    const impl = async (url: string): Promise<Response> => {
+      if (url.includes('/tags')) return new Response(null, { status: 204 })
+      lookups += 1
+      return new Response(
+        JSON.stringify({ email_address: 'enrkay@gmail.com', status: 'subscribed', tags: [] }),
+        { status: 200 },
+      )
+    }
+    const r = await runPaidTagging(
+      [mail({ direction: 'inbound', subject: 'Payment confirmation', preview: 'Get Outlook for Android' })],
+      { ...CFG_BASE, fetchImpl: impl },
+      POLICY,
+      { reviewCheckDeadline: Date.now() - 1 },
+    )
+    expect(r.needsReview).toHaveLength(1)
+    expect(lookups).toBe(0)
+  })
 })
 
 describe('runPaidTagging · 出错时如实报数', () => {

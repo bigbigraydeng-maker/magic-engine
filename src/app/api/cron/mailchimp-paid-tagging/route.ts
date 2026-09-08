@@ -49,6 +49,7 @@ import { CONNECTION_STATUS } from '@/lib/platform-oauth/vocabulary'
 import {
   runPaidTagging,
   readPaidTag,
+  REVIEW_CHECK_BUDGET_MS,
   type CandidateMail,
   type PaidTaggingPolicy,
 } from '@/lib/mailchimp/paid-tagging'
@@ -244,6 +245,13 @@ async function run(lookbackDays: number, dryRun: boolean): Promise<NextResponse>
   const results: Array<Record<string, unknown>> = []
   const needsReview: Array<Record<string, unknown>> = []
 
+  // 🔴 needs_review 反查 Mailchimp 的预算必须是整次运行共享一份，不能每个连接
+  // 各领一份：下面按连接串行调用 `runPaidTagging`，连接一多，各自的 15 秒预算
+  // 会累加到超过下面的 `maxDuration 600` / `render.yaml` 的 `curl --max-time
+  // 620`（Codex P2 复审 PR #1484 round 3）。所以在循环外算一次共享截止时间，
+  // 每次调用都传同一个值。
+  const reviewCheckDeadline = Date.now() + REVIEW_CHECK_BUDGET_MS
+
   for (const conn of connections) {
     const client = byClient.get(conn.client_id)
     // 连接指向一个查不到的客户（删过客户但连接还在）—— 跳过，不为它报错。
@@ -269,7 +277,10 @@ async function run(lookbackDays: number, dryRun: boolean): Promise<NextResponse>
       readOwnEmailDomains(client.leads_config),
     )
     const policy = readPolicy(client.leads_config, own)
-    const r = await runPaidTagging(read.mails, { apiKey, audienceId }, policy, { dryRun })
+    const r = await runPaidTagging(read.mails, { apiKey, audienceId }, policy, {
+      dryRun,
+      reviewCheckDeadline,
+    })
 
     for (const item of r.needsReview) {
       needsReview.push({ ...item, clientId: client.id, clientName: client.name, mailbox: conn.account_id })

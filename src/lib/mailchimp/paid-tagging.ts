@@ -117,23 +117,30 @@ function emptyResult(): PaidTaggingResult {
  *
  * 预算到点后不再发起新查询，没来得及查的候选人一律保留在 needsReview 里
  * （fail-open —— 宁可多提醒一次，不能让一条真待处理的确认静默消失）。
+ *
+ * 🔴 这个预算必须是**整次 cron 运行共享一份**，不是每个邮箱各领 15 秒
+ * （Codex P2 复审 PR #1484 round 3）：路由按连接串行调用 `runPaidTagging`
+ * （见 `route.ts`），如果每次调用都重新起 15 秒读秒，命中待复核候选的邮箱
+ * 一多，总耗时会累加到超过路由 `maxDuration 600` / `render.yaml` 的
+ * `curl --max-time 620`。所以截止时间由调用方算好、通过 `RunOptions.
+ * reviewCheckDeadline` 传进来，这里只在没传时（比如单测）兜底给一个默认值。
  */
-const REVIEW_CHECK_CONCURRENCY = 5
-const REVIEW_CHECK_TIMEOUT_MS = 5_000
-const REVIEW_CHECK_BUDGET_MS = 15_000
+export const REVIEW_CHECK_CONCURRENCY = 5
+export const REVIEW_CHECK_TIMEOUT_MS = 5_000
+export const REVIEW_CHECK_BUDGET_MS = 15_000
 
 /** 有界并发反查一批邮箱，返回其中已经打过 paidTag 的那些。 */
 async function findAlreadyPaidEmails(
   cfg: MailchimpTagsConfig,
   paidTag: string,
   emails: readonly string[],
+  deadline: number,
 ): Promise<Set<string>> {
   const confirmed = new Set<string>()
   if (emails.length === 0) return confirmed
 
   const lookupCfg = { ...cfg, timeoutMs: cfg.timeoutMs ?? REVIEW_CHECK_TIMEOUT_MS }
   const concurrency = Math.max(1, Math.min(REVIEW_CHECK_CONCURRENCY, emails.length))
-  const deadline = Date.now() + REVIEW_CHECK_BUDGET_MS
   let nextIndex = 0
 
   async function worker(): Promise<void> {
@@ -175,6 +182,14 @@ export interface RunOptions {
    * 标签是不是已经对了，预演出来的数字会比真跑虚高一大截，等于没预演。
    */
   dryRun?: boolean
+  /**
+   * needs_review 反查 Mailchimp 的共享截止时间（`Date.now()` 同一时钟的毫秒
+   * 时间戳）。一次 cron 运行要按连接串行调用多次 `runPaidTagging`，这个值
+   * 必须由调用方在循环开始前算一次、每次调用都传同一个，否则预算会按连接数
+   * 成倍累加（Codex P2 复审 PR #1484 round 3）。不传就按单次调用兜底给
+   * `REVIEW_CHECK_BUDGET_MS`——仅供单测/单次调用场景使用。
+   */
+  reviewCheckDeadline?: number
 }
 
 export async function runPaidTagging(
@@ -254,14 +269,22 @@ export async function runPaidTagging(
     }
   }
 
+  // 本轮循环里已经打过（或本来就已带）paidTag 的邮箱，不该再进反查——查了也是
+  // 白查，还占共享预算（Codex P2 复审 PR #1484 round 3）。dry 跑下
+  // `applyMemberTags` 不会真的写，但 `alreadyTagged` 记的是「这个人本来就该被
+  // 认定为已付费」这件事本身，跟有没有真的落盘无关，所以预演一样要排除。
+  const stillPending = pendingReview.filter((r) => !alreadyTagged.has(r.email))
+
   // 查不到 / 查出错 / 预算用完没来得及查的一律按"还没处理"算——宁可多提醒
   // 一次，不能因为查询失败就让一条真待处理的信静默消失（fail-open）。
+  const deadline = opts.reviewCheckDeadline ?? Date.now() + REVIEW_CHECK_BUDGET_MS
   const confirmedPaid = await findAlreadyPaidEmails(
     cfg,
     policy.paidTag,
-    Array.from(new Set(pendingReview.map((r) => r.email))),
+    Array.from(new Set(stillPending.map((r) => r.email))),
+    deadline,
   )
-  for (const review of pendingReview) {
+  for (const review of stillPending) {
     if (!confirmedPaid.has(review.email)) out.needsReview.push(review)
   }
 
