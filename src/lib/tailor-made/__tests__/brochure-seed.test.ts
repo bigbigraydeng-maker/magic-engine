@@ -102,10 +102,9 @@ describe('createBrochureFromItinerary', () => {
     const beijing = brochure.cities[0]
     // 长城那天正文最长，升为整版大图 —— 大图也按内容配，不退回泛泛的北京城景
     expect(beijing.hero.image).toBe(`${HERO_PREFIX}great-wall`)
-    // 一句话里同时有天安门和故宫 —— 先匹配到的当卡片图（RULES 里天安门在前）
-    expect(img(beijing.blocks[1])).toBe(`${HERO_PREFIX}tiananmen-square`)
-    // 抵达日没写地标，从备选池拿到没被用上的故宫 —— 比再来一张城景强
-    expect(img(beijing.blocks[0])).toBe(`${HERO_PREFIX}forbidden-city`)
+    // 抵达日没写到具体地标，落回本城通用照；故宫那天配故宫
+    expect(img(beijing.blocks[0])).toBe(`${HERO_PREFIX}beijing`)
+    expect(img(beijing.blocks[1])).toBe(`${HERO_PREFIX}forbidden-city`)
   })
 
   /**
@@ -142,22 +141,12 @@ describe('createBrochureFromItinerary', () => {
     expect(img(city.blocks[0])).toBe(`${HERO_PREFIX}chongqing`)
   })
 
-  it('宜昌 / 长江三峡有图了 —— 补图前这一城整页是空的', () => {
+  it('城市本身就不在图库里时才真的留空，不拿别的城市的照片凑', () => {
+    // 宜昌（长江三峡）图库里没有 —— 配一张别处的照片，客人一眼看出是套模板
     const brochure = createBrochureFromItinerary(
       build(['Yichang'], [
-        { day: 1, route: 'Yichang', body: 'Board your Yangtze River cruise this afternoon and sail into the Three Gorges.' },
+        { day: 1, route: 'Yichang', body: 'Board your Yangtze River cruise this afternoon.' },
         { day: 2, route: 'Yichang', body: 'A day on the river.' },
-      ])
-    )
-    expect(brochure.cities[0].hero.image).toBe(`${HERO_PREFIX}yangtze-gorges`)
-  })
-
-  it('城市本身就不在图库里时才真的留空，不拿别的城市的照片凑', () => {
-    // 哈尔滨图库里没有 —— 配一张别处的照片，客人一眼看出是套模板
-    const brochure = createBrochureFromItinerary(
-      build(['Harbin'], [
-        { day: 1, route: 'Harbin', body: 'Arrive and settle in for the evening.' },
-        { day: 2, route: 'Harbin', body: 'A day at leisure.' },
       ])
     )
     expect(brochure.cities[0].hero.image).toBe('')

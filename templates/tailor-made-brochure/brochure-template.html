@@ -466,48 +466,7 @@ function render(){
   });
 }
 
-/**
- * 没有布局就不要排版。
- *
- * 这份 HTML 会在后台的标签页里加载，而顾问可能还停在「行程单」那一页 ——
- * 容器是隐藏的，getBoundingClientRect() 和 clientHeight 全是 0。
- * 分页拿到 0 当页高，就会把每一块各排一页：真实数据实测 11 页变成 17 页，
- * 中间夹着大量只有一个标题的空白页。而这一切没有任何报错。
- *
- * 所以先探一下有没有真实高度；没有就等到有了再排（切到这个标签页、
- * 窗口尺寸变化、或者下一帧）。
- */
-function hasLayout(){
-  const doc = document.getElementById('doc');
-  const probe = newSheet(CTS_BROCHURE);
-  doc.appendChild(probe);
-  const h = probe.querySelector('.sheet__body').clientHeight;
-  doc.removeChild(probe);
-  return h > 0;
-}
-
-let laidOut = false;
-function renderWhenVisible(){
-  if (laidOut || !hasLayout()) return false;
-  render();
-  laidOut = true;
-  return true;
-}
-
-if (!renderWhenVisible()){
-  const retry = () => { if (renderWhenVisible()) stop(); };
-  const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(retry) : null;
-  const stop = () => {
-    if (ro) ro.disconnect();
-    window.removeEventListener('resize', retry);
-    document.removeEventListener('visibilitychange', retry);
-  };
-  if (ro) ro.observe(document.documentElement);
-  window.addEventListener('resize', retry);
-  document.addEventListener('visibilitychange', retry);
-  // 打印前兜底：真到了导出那一刻还没排过，宁可现排也不能交一份空白的出去
-  window.addEventListener('beforeprint', () => { if (!laidOut) render(); });
-}
+render();
 </script>
 </body>
 </html>
