@@ -212,6 +212,45 @@ describe('runPaidTagging · 转发信降级', () => {
 })
 
 describe('runPaidTagging · 🔴 needs_review 处理确认闸（2026-09-08 每日待办自动闭环审计）', () => {
+  const reviewMails = (count: number) => Array.from({ length: count }, (_, i) => mail({
+    id: `review-${i}`, direction: 'inbound', subject: 'Payment confirmation', preview: 'Get Outlook for Android',
+    counterparty: { address: `person${i}@example.com`, name: null },
+  }))
+
+  it('bounds writing-side checks to five concurrent requests and retains all timed-out candidates', async () => {
+    let active = 0
+    let peak = 0
+    const fetchImpl = async (_url: string, init?: RequestInit): Promise<Response> => {
+      active += 1
+      peak = Math.max(peak, active)
+      try {
+        return await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('timeout', 'TimeoutError')), { once: true })
+        })
+      } finally { active -= 1 }
+    }
+    const result = await runPaidTagging(reviewMails(30), { ...CFG_BASE, fetchImpl, timeoutMs: 5 }, POLICY)
+    expect(result.needsReview).toHaveLength(30)
+    expect(result.tagged).toEqual([])
+    expect(peak).toBe(5)
+    expect(active).toBe(0)
+  })
+
+  it('stops writing-side checks when their budget expires and persists unqueried candidates', async () => {
+    let clock = 0
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => clock)
+    const fetchImpl = vi.fn(async () => {
+      clock = 15_000
+      return new Response(JSON.stringify({ tags: [{ name: DEFAULT_PAID_TAG }] }))
+    })
+    try {
+      const result = await runPaidTagging(reviewMails(30), { ...CFG_BASE, fetchImpl }, POLICY)
+      expect(result.needsReview).toHaveLength(29)
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+      expect(result.needsReview[0].email).toBe('person1@example.com')
+    } finally { now.mockRestore() }
+  })
+
   it('PM 已经在 Mailchimp 打过 paidTag → 不再重复报 needs_review', async () => {
     const { cfg, writes } = fakeMailchimp({ 'enrkay@gmail.com': ['paid_customer'] })
     const r = await runPaidTagging(
