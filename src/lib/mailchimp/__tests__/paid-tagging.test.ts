@@ -304,7 +304,7 @@ describe('runPaidTagging · 🔴 needs_review 处理确认闸（2026-09-08 每�
     expect(r.needsReview).toHaveLength(1)
   })
 
-  it('🔴 Codex round 3：同一批里这个邮箱已经被本轮确认打过标签 → needs_review 排除它，也不再反查', async () => {
+  it.each([false, true])('excludes a same-batch confirmed email without another lookup (dryRun=%s)', async (dryRun) => {
     let lookups = 0
     const { cfg } = fakeMailchimp({ 'enrkay@gmail.com': ['fb_lead'] })
     const baseFetch = cfg.fetchImpl
@@ -326,6 +326,7 @@ describe('runPaidTagging · 🔴 needs_review 处理确认闸（2026-09-08 每�
       ],
       { ...cfg, fetchImpl: impl },
       POLICY,
+      { dryRun },
     )
     expect(r.tagged).toHaveLength(1)
     // 已经在本轮确认打过标签的邮箱不该再冒出来要人复核。
