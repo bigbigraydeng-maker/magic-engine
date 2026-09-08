@@ -66,3 +66,7 @@ scripts/factory-worker/node_modules/
 # Python 编译产物（scripts/video-pipeline）
 __pycache__/
 *.py[cod]
+
+# Local scratch output (e.g. scripts/client-digest-preview.ts default --out target)
+/.tmp/
+/client-digest-preview.html
