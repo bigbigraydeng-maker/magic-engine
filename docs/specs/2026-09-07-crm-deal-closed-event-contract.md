@@ -13,6 +13,14 @@ CTS 的 CRM 已定为 GoHighLevel（见 `docs/DECISIONS.md` 2026-09-09 决策）
 
 **下游消费注意**:`me/crm.deal.closed` 事件里的 `*_sha256` 字段到了 CAPI 消费者这一步,要原样塞进 Meta `user_data`,**不能**再调 `src/lib/meta/capi/writer.ts` 现有的 `MetaCapiWriter.build()`——那个方法是给 Issue #1397 的 ME 内部明文 Outcome 管道用的,收到什么都会自己再哈希一次,对已经是哈希值的字段会造成二次哈希(`sha256(sha256(...))`),Meta 侧完全匹配不上且不会报错。GoHighLevel 消费者需要单独一段"哈希值直通"的构造逻辑。
 
+**接收 handler 的来源认证与租户绑定(强制,不是可选项,不是后续待办)**:上面这个新 handler 是一个**公网可达的 webhook 入口**。如果不做来源认证,payload 里的 `client_id` 就完全由调用方自己填——任何人都能提交一条 schema 合法的 `deal.closed` 事件,让下游消费者拿这个 `client_id` 去读对应客户的 Meta pixel/token,把伪造的 Purchase 写进任意客户的广告账号。`me_capi_uploads` 持久化幂等账本只挡**重放**(同一 `deal_id` 重发),挡不住这种**伪造**(新 `deal_id`)。handler 必须 fail-closed 满足以下三条,三条缺一不可:
+
+1. **来源认证**:GoHighLevel webhook 必须带可验证的签名或共享密钥(建议按 GoHighLevel location/sub-account 各配一个,服务端保存,不进任何客户可见配置)。验证失败 → 直接拒绝该请求(不 emit 事件、不进 Inngest、也不落 `pushCapiItems`——伪造请求不该被当成一个"失败任务"外泄进人工待办看板)。
+2. **重放校验**:结合请求时间戳拒绝超出合理窗口的请求,并在签名验证通过后才进入 `deal_id` 幂等账本判断,避免重放请求被当作新事件反复触发下游写入。
+3. **租户绑定不信任 payload**:`client_id` **不允许**由请求方在 payload 里自报来决定路由。handler 必须依据请求本身携带的 GoHighLevel location/sub-account 标识,查一张 **ME 服务端维护的 `location_id → client_id` 映射表**来服务端推导 `client_id`,再拼进 emit 给 Inngest 的事件——即便请求 body 里也带了 `client_id` 字段,也以服务端映射结果为准覆盖,绝不采纳请求方提供的值。
+
+这三条只约束「GoHighLevel → ME 接收 handler」这条新路径;「CRM 自己能预哈希、直接 emit 到 Inngest」的原始路径,信任边界仍是 Inngest 项目本身(见下面 §① 的分支说明)。
+
 ---
 
 ## 一句话背景
@@ -27,7 +35,9 @@ ME 广告端要建一个「CAPI 回传」通道,让 Facebook 拿到「谁真成�
 
 - **事件名(不能改)**: `me/crm.deal.closed`
 - **emit 时机**: 每笔成交在 CRM 里被标记为「已成交/已确认/已收款」的**瞬间**,emit 一条事件
-- **发到哪**: Inngest(ME 和 CRM 共用同一个 Inngest 项目)
+- **发到哪**(按 CRM 系统能力二选一,不是都一样):
+  - CRM 系统自己能按 §③ 规则预哈希 → **直接 emit 到 Inngest**(ME 和 CRM 共用同一个 Inngest 项目)。
+  - CRM 系统做不到自己预哈希(如 GoHighLevel,见文首「2026-09-09 更新」)→ **先发明文 webhook 到 ME 自建的接收 handler**,由 handler 完成来源认证 + 租户绑定 + 哈希后代为 emit 到 Inngest;这类 CRM 团队不直接碰 Inngest,也不需要自己实现 hash。
 
 ### ② Payload 格式(严格按下面,一字不差)
 
@@ -57,7 +67,7 @@ ME 广告端要建一个「CAPI 回传」通道,让 Facebook 拿到「谁真成�
 
 ### ③ PII hashing 规则(严格照 Meta CAPI 规范,不然匹配失败)
 
-**为什么 CRM 侧 hash**: Inngest 事件仓保留 30-90 天,明文进事件 = PII 泄露给第三方 SaaS,红线。所以明文只允许在 CRM 内部处理完就地 hash,payload 只带 hash。
+**为什么 CRM 侧 hash**: Inngest 事件仓保留 30-90 天,明文进事件 = PII 泄露给第三方 SaaS,红线。所以明文只允许在 CRM 内部处理完就地 hash,payload 只带 hash。(这条规则默认给「CRM 自己能哈希」的路径用;GoHighLevel 这类做不到的 CRM 走文首「2026-09-09 更新」描述的 ME 接收 handler 路径,哈希规范本身不变,只是"就地 hash"的执行者从 CRM 团队变成 ME 的接收 handler。)
 
 **规则**:
 - **email**: 小写 + 去首尾空格 → SHA-256 → hex 小写
@@ -82,7 +92,7 @@ ME 广告端要建一个「CAPI 回传」通道,让 Facebook 拿到「谁真成�
 
 1. □ 事件名 `me/crm.deal.closed` 能实现,不改名
 2. □ Payload schema 照 §② 一字不差
-3. □ PII hashing 照 §③ 规范(尤其**明文不出 CRM 边界**这一条)
+3. □ PII hashing 照 §③ 规范(尤其**明文不出 CRM 边界**这一条)——**仅适用于「CRM 系统自己能预哈希」这条路径**。如果这套 CRM 走的是文首「2026-09-09 更新」描述的 ME 接收 handler 路径(明文 webhook → handler 内哈希),这一条改成"明文不出 handler 调用栈",由 ME 侧保证并对 handler 做来源认证 + 租户绑定,不需要 CRM 团队签这条
 4. □ 每笔成交 emit 一次;deal 修改后重 emit 用同一 `deal_id`(触发 ME 侧的「payload 变了」检查)
 5. □ `closed_at` 保证是**过去 7 天内**(超期的 Meta 会拒;历史存量老单**另议**,不走这个事件)
 6. □ CRM 上线日期:______(填)
