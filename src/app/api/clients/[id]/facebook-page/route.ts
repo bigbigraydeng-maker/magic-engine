@@ -128,6 +128,11 @@ export async function GET(
   return NextResponse.json({
     page_id,
     publish_target_page_id,
+    // The "add our app to your Business portfolio" instructions need the app id
+    // that is actually live in this environment — hardcoding it in the UI copy
+    // sends operators to add the wrong app whenever FACEBOOK_APP_ID differs
+    // (staging, a migrated app, etc), and the grant still fails afterward.
+    meta_app_id: process.env.FACEBOOK_APP_ID ?? null,
     pages,
     pages_error,
     reachable: computeReachable(page_id, pages),

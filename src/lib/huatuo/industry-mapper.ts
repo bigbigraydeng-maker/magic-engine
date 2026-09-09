@@ -54,6 +54,20 @@ export const INDUSTRY_DICTIONARY: IndustryMapEntry[] = [
     category: 'ecommerce_d2c',
     keywords: ['电商', 'd2c', '在线零售', '直销品牌', 'ecommerce', 'e-commerce', 'online store', 'd2c', 'shopify'],
   },
+  // ⚠️ 必须排在 ecommerce_d2c **后面**：两者共享 fulfilment / warehousing 语义，
+  // 单独一句 "ecommerce fulfilment" 双方各命中 1 个词。`mapIndustryToCategory`
+  // 用 `hits > bestHits`（严格大于）比较，平手时先出现的那个赢 —— 这正是
+  // industry-mapper.test.ts 里「ties on a single ambiguous phrase」锁住的行为。
+  // 把这一条挪到前面会静默改掉那个判定，测试会红。
+  {
+    category: 'logistics_3pl',
+    keywords: [
+      '物流', '仓储', '货运', '货代', '报关', '清关', '供应链', '海运', '空运',
+      '3pl', 'logistics', 'freight', 'forwarding', 'freight forwarding',
+      'warehousing', 'warehouse', 'fulfilment', 'fulfillment',
+      'supply chain', 'customs clearance', 'customs broker',
+    ],
+  },
 ]
 
 /**
@@ -95,6 +109,7 @@ export function categoryToChineseName(category: string | null): string {
     trades_plumbing_electrical:   '水电/技工服务',
     fitness_studio:               '健身工作室',
     ecommerce_d2c:                'D2C 电商',
+    logistics_3pl:                '物流/第三方仓配（3PL）',
   }
   if (!category) return '通用 SMB（未匹配到具体行业）'
   return map[category] ?? category
