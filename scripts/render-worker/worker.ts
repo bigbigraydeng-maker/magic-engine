@@ -1,3 +1,6 @@
+// 🔴 已退役(2026-09-02，render.yaml 同一条注释)：这个 Render 容器服务已经停机、
+// 不再部署，本文件留仓库不删,不要复活或当活代码维护——出片现在走 Creatomate 链。
+//
 // 做片后台 worker — 常驻轮询 content_factory_render_jobs，领排队任务→编排→拼接。
 // 跑在 Render 独立容器(node + python-PIL + ffmpeg)。用 tsx 运行以复用 src/lib 的 TS 模块。
 // 起：tsx scripts/render-worker/worker.ts

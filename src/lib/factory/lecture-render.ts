@@ -1,3 +1,7 @@
+// 🔴 已退役(2026-09-02，render.yaml 同一条注释)：跟 render-assemble.ts 同批停机的
+// 旧 ffmpeg 拼片管线，讲课式内容当前无客户在用(PM 口径)。留仓库不删，不要当活代码
+// 维护。
+//
 // 讲课式做片 — 「上课件 slide + 下真人」上下分屏成片。只在 worker 容器里跑(需 ffmpeg + python-PIL)。
 //
 // 自己录(self_record)：下载 PM 录的整段视频 → 抽音轨给 Whisper 听写 → 按脚本对轴(lecture-align)

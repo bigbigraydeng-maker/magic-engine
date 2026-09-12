@@ -56,4 +56,18 @@ describe('selectAssetUrls', () => {
   it('全部不合格时返回空数组（调用方走降级，不是崩）', () => {
     expect(selectAssetUrls([row(null), row('v', 9, 'video')])).toEqual([])
   })
+
+  it('requireVerified=true 时只保留 client_verified/fde_shot 来源', () => {
+    const verified: AssetRow = { storage_url: 'v', vision_metadata: { quality_score: 8 }, source: 'client_verified' }
+    const fdeShot: AssetRow = { storage_url: 'f', vision_metadata: { quality_score: 8 }, source: 'fde_shot' }
+    const uploaded: AssetRow = { storage_url: 'u', vision_metadata: { quality_score: 9 }, source: 'client_provided' }
+    const ai: AssetRow = { storage_url: 'a', vision_metadata: { quality_score: 9 }, source: 'ai_generated' }
+    const out = selectAssetUrls([verified, fdeShot, uploaded, ai], 40, { requireVerified: true })
+    expect(out.sort()).toEqual(['f', 'v'])
+  })
+
+  it('requireVerified 默认 false，保持原有口径不筛来源（evaluate.ts 现有调用方不受影响）', () => {
+    const uploaded: AssetRow = { storage_url: 'u', vision_metadata: { quality_score: 9 }, source: 'client_provided' }
+    expect(selectAssetUrls([uploaded])).toEqual(['u'])
+  })
 })

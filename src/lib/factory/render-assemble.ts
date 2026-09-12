@@ -1,3 +1,8 @@
+// 🔴 已退役(2026-09-02，render.yaml 同一条注释)：content-factory-render-worker 这条
+// 旧 Render 云端拼片管线已停机、调用它的服务和入口已摘掉，`content_factory_render_jobs`
+// 最后一条记录停在 2026-08-19。代码本次先留仓库不删(删除类 Bash 操作被 session 权限拦
+// 下)，不是还活着、不要复活或当活代码维护——出片现在走 Creatomate 链(scene-assets.ts)。
+//
 // 拼接 — 把一条任务的画面+配音+字幕用 ffmpeg 拼成竖屏成片。只在 worker 容器里跑(需 ffmpeg+python-PIL)。
 // 配方(本地 ffmpeg 8.1.2 实测)：字幕走 PIL 画透明 PNG + ffmpeg overlay(绕过精简版缺的 drawtext)。
 // 每段：scale=1080:1920+crop 裁竖屏 → overlay 字幕 → 叠配音 → 时长=配音；再 concat。字幕在安全区 y≈980。
