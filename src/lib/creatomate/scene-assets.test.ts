@@ -70,11 +70,12 @@ describe('prepareSceneAssets — 真实照片优先', () => {
     expect(generateImage).not.toHaveBeenCalled()
     expect(imageToClip).not.toHaveBeenCalled()
     // requireVerified 必须开 —— 出片自动选图不能选到未核实来源
+    // requireRelevanceMatch 必须开 —— 自动出片不能把"素材池只有这一张"当成"这张就是对的"
     expect(rankAssetsByPrompt).toHaveBeenCalledWith(
       'great wall at sunrise',
       expect.anything(),
       1,
-      { requireVerified: true },
+      { requireVerified: true, requireRelevanceMatch: true },
     )
   })
 

@@ -62,20 +62,30 @@ function toPick(a: RankableAsset, reason: string): AssetPick {
  * 上传链接传进来的网图/AI 图会被自动当"客户真实照片"塞进无人审核的成片
  * (设计复审 ❌ 指出的红线风险)。人工选图界面(FDE 自己挑)不受此限,人能看见
  * 也能选未核实的图,所以那条调用路径保持 `requireVerified` 默认 false。
+ *
+ * `requireRelevanceMatch: true` 时"素材池只剩这几张"不再等价于"这几张跟镜头
+ * 相关"——自动出片管线必须开这个:素材池里只有客户其他镜头的照片(如库里全是
+ * 悉尼图、镜头要西藏)时,不能因为"反正只有这一张"就直接把它当真照片喂出去,
+ * 得让下面的 LLM/关键词判断走一遍真实关联性,不相关就返回空数组,好让调用方
+ * (scene-assets.ts::pickRealPhoto)落回 AI 现画兜底(Codex review 2026-09-12
+ * 指出的红线:pool.length <= topN 分支原来直接跳过关联性检查)。人工选图界面
+ * 不受此限,人自己看得出"这是最接近但不完全对的图",默认关掉。
  */
 export async function rankAssetsByPrompt(
   prompt: string,
   assets: RankableAsset[],
   topN: number,
-  opts: { requireVerified?: boolean } = {},
+  opts: { requireVerified?: boolean; requireRelevanceMatch?: boolean } = {},
 ): Promise<AssetPick[]> {
   const pool = opts.requireVerified
     ? assets.filter((a) => canBackRealPrice(a.source as string | null | undefined))
     : assets
   if (pool.length === 0) return []
 
-  // 素材少的时候不必烧一次 LLM 调用,全给,按质量分排。
-  if (pool.length <= topN) {
+  // 素材少的时候不必烧一次 LLM 调用,全给,按质量分排——但这条近路只对人工选图
+  // 界面成立(人自己会看一眼合不合适)。自动出片管线传了 requireRelevanceMatch
+  // 就必须照样过下面的关联性判断,哪怕池子只有一张。
+  if (pool.length <= topN && !opts.requireRelevanceMatch) {
     return pool
       .slice()
       .sort((a, b) => scoreOf(b) - scoreOf(a))
@@ -83,15 +93,20 @@ export async function rankAssetsByPrompt(
   }
 
   try {
-    return await rankWithLlm(prompt, pool, topN)
+    return await rankWithLlm(prompt, pool, topN, opts.requireRelevanceMatch)
   } catch (err: unknown) {
     console.error('[rank-assets-by-prompt] LLM ranking failed, using fallback:', err)
-    return keywordFallback(prompt, pool, topN)
+    return keywordFallback(prompt, pool, topN, opts.requireRelevanceMatch)
   }
 }
 
 // 让 GPT-4o-mini 挑最匹配的几张。模型不可用/返回不可用结果时降级关键词重叠打分。
-async function rankWithLlm(prompt: string, assets: RankableAsset[], topN: number): Promise<AssetPick[]> {
+async function rankWithLlm(
+  prompt: string,
+  assets: RankableAsset[],
+  topN: number,
+  requireRelevanceMatch = false,
+): Promise<AssetPick[]> {
   const client = getOpenAIClient()
   const candidates = assets.map((a) => ({
     id: a.id,
@@ -104,6 +119,14 @@ async function rankWithLlm(prompt: string, assets: RankableAsset[], topN: number
     brand_elements: visionOf(a).brand_elements ?? [],
   }))
 
+  // requireRelevanceMatch 时明确允许模型交空卷——不然模型会习惯性地"矮子里拔
+  // 将军",把库里最接近但根本是另一个地方/主体的照片也当"最匹配"报回来。
+  const relevanceInstruction = requireRelevanceMatch
+    ? 'Only include a photo if it genuinely depicts the same subject/location/scene as the prompt — ' +
+      'not merely a stylistically similar or "closest available" photo of something else. ' +
+      'If none of the candidates actually match, reply {"picks":[]}. '
+    : ''
+
   const response = await client.chat.completions.create({
     model: 'gpt-4o-mini',
     max_tokens: 500,
@@ -114,6 +137,7 @@ async function rankWithLlm(prompt: string, assets: RankableAsset[], topN: number
         content:
           'Given an image generation prompt and a library of analyzed photos with structured metadata, ' +
           `return the top ${topN} most relevant photos for the prompt. ` +
+          relevanceInstruction +
           'Reply JSON only in the shape {"picks":[{"id":string,"reason":string}]}. ' +
           'Order picks best-first. reason is one short sentence on why the photo fits the prompt.',
       },
@@ -135,11 +159,21 @@ async function rankWithLlm(prompt: string, assets: RankableAsset[], topN: number
     .slice(0, topN)
 
   if (picks.length > 0) return picks
+  // requireRelevanceMatch 下,模型交回的空卷是"确实不相关"的明确信号,不能再
+  // 落回关键词兜底去凑一张"最接近"的图——那正是这条门要挡住的行为。
+  if (requireRelevanceMatch) return []
   return keywordFallback(prompt, assets, topN)
 }
 
 // 确定性兜底：按 prompt 与素材 objects 的名词重叠数排序，重叠数打平再按质量分。
-function keywordFallback(prompt: string, assets: RankableAsset[], topN: number): AssetPick[] {
+// requireRelevanceMatch 时过滤掉零重叠的素材——没有一个词对得上就不算"匹配",
+// 只算"库里质量最高的图",两者对自动出片管线不是一回事。
+function keywordFallback(
+  prompt: string,
+  assets: RankableAsset[],
+  topN: number,
+  requireRelevanceMatch = false,
+): AssetPick[] {
   const promptWords = new Set(
     prompt
       .toLowerCase()
@@ -147,7 +181,7 @@ function keywordFallback(prompt: string, assets: RankableAsset[], topN: number):
       .filter((w) => w.length >= 3),
   )
 
-  return assets
+  const ranked = assets
     .map((a) => {
       const objects = visionOf(a).objects ?? []
       const overlap = objects.reduce((n, obj) => {
@@ -157,6 +191,10 @@ function keywordFallback(prompt: string, assets: RankableAsset[], topN: number):
       return { asset: a, overlap }
     })
     .sort((x, y) => y.overlap - x.overlap || scoreOf(y.asset) - scoreOf(x.asset))
+
+  const filtered = requireRelevanceMatch ? ranked.filter((r) => r.overlap > 0) : ranked
+
+  return filtered
     .slice(0, topN)
     .map(({ asset, overlap }) =>
       toPick(asset, overlap > 0 ? `Matches ${overlap} subject(s) in the prompt` : 'Best available library photo'),

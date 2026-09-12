@@ -53,7 +53,10 @@ async function pickRealPhoto(
   pool: RealPhotoPool,
 ): Promise<{ url: string; costUsd: number } | null> {
   if (pool.length === 0) return null
-  const [pick] = await rankAssetsByPrompt(scene.imagePrompt, pool, 1, { requireVerified: true })
+  const [pick] = await rankAssetsByPrompt(scene.imagePrompt, pool, 1, {
+    requireVerified: true,
+    requireRelevanceMatch: true,
+  })
   if (!pick || !pick.storageUrl) return null
   return { url: pick.storageUrl, costUsd: 0 }
 }
