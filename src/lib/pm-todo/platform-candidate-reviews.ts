@@ -133,4 +133,9 @@ export const PLATFORM_CANDIDATE_REVIEWS: PlatformCandidateReview[] = [
     name: 'ME 「基于产品事实的 Meta 广告方案生成」能力(拉官网真行程/价 + 现有受众池水位 + 客户历史广告成本基线 → 出三层漏斗 A/B/C 三版文案 + 受众种子选择 + 预算分配 + 激活闲置类似人群 · 全程官网 grounding 不编造)',
     reviewDate: '2026-10-07',
   },
+  {
+    // 与 docs/registry/platform-candidates.md 候选名逐字一致
+    name: '跨渠道营销统筹(Google 广告 / 视频生产 / Newsletter / Facebook 前台内容+广告 多条并行工作流的联合排产 + 联合执行)',
+    reviewDate: '2026-10-09',
+  },
 ]
