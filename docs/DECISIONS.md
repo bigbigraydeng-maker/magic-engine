@@ -7,6 +7,32 @@
 
 ---
 
+## 2026-09-09 · CTS CRM 选型：GoHighLevel（推翻 Freshsales 试点）
+
+**决策**：CTS 的 CRM 方向从"评估 Freshsales 试点"正式作废，改为采用第三方 CRM **GoHighLevel**。PM 2026-09-09 拍板批准。
+
+**为什么**：GoHighLevel 全渠道能力（邮件双向同步、WhatsApp、Facebook Messenger、Instagram DM、VoIP 电话、SMS）全部原生内置，不需要像 Freshsales 那样为社媒渠道外挂第三方工具，直接匹配 CTS 的核心痛点（客户联系记录分散在多个渠道）。白牌能力比 Freshworks 彻底（最高档可完全隐藏第三方品牌，换成 ME 自己的域名/UI），Partner 分佣阶梯 40%/45%/50% 持续性，优于 Freshworks 的分佣结构。
+
+**已知硬风险（必须配套解决，非单独批准）**：GoHighLevel 自带原生"Facebook Conversion API"自动化动作，客户账号只要有 Integrations 权限，几分钟内就能自己把成交数据直接发给 Meta，完全绕开 ME 的转化真相回流管道（`me/crm.deal.closed` 事件契约见 `docs/specs/2026-09-07-crm-deal-closed-event-contract.md`）。**"只显示已批准的应用"这个 agency 开关锁不住这个风险**——它只管第三方插件市场，管不了 GoHighLevel 自己原生的 Facebook/Instagram 集成功能，这是一个已验证的认知陷阱，不要以为开了那个开关就安全。
+
+**批准的强制配套措施**（PM 2026-09-09 一并批准，不是可选项）：
+1. 给 CTS 类客户开 GoHighLevel 账号一律用"普通用户"角色，去掉 Integrations 权限——账号层面就看不到"连接 Facebook"的入口
+2. 书面告知 CTS：Meta 广告账号与 CRM 的连接配置只能 ME 操作，客户不要自己点
+3. **自动巡检任务**（[Issue #1492](https://github.com/bigbigraydeng-maker/magic-engine/issues/1492)）：每周检查一次 CTS 的 GoHighLevel 账号 Facebook 集成绑定对象有没有被改动，一旦变化立刻报警进 ME 待办看板——这条不能只靠人工偶尔查看
+
+**跟现有 CAPI 设计的关系**：`docs/specs/2026-09-07-me-conversion-truth-uplink-spec.md` 里"CRM 团队"这个提法目前没有对应的实际团队/任务在跑（此前有跨窗口转发消息误传"CRM 团队开发 1-2 周"，已核实无此 issue/PR，属于文档里的预估时间表被误当成真实进度转述）。GoHighLevel 即扮演该文档里"CRM"这个角色的具体落地，但它发给 ME 的 webhook 是**明文 PII**（GoHighLevel 不做预哈希），这跟 `crm-deal-closed-event-contract.md` 里"CRM 侧先 hash，永远不发明文"这条硬红线字面上**不匹配**——GoHighLevel 做不到"自己哈希再发"。
+
+**本次决策把哈希边界钉死为以下顺序，`crm-deal-closed-event-contract.md` 同步更新（见该文件顶部的更新说明），不再要求 GoHighLevel 自己预哈希**：
+
+1. GoHighLevel webhook（HTTPS，明文 PII）先落到 ME 自己新建的接收 handler（不是 Inngest function，是更前面一层的 HTTP endpoint）；
+2. **handler 必须 fail-closed 做来源认证 + 租户绑定，这是硬前置，不是后续待办**：① 校验 GoHighLevel webhook 的签名/共享密钥（按 location 各配一个，服务端保存），验证失败直接拒绝，不 emit、不进 Inngest、也不落人工待办；② 做重放校验（时间戳窗口 + `deal_id` 幂等账本）；③ `client_id` 不采纳 payload 自报的值，改由服务端维护的 `location_id → client_id` 映射表推导——否则任何人都能提交一条合法 shape 的事件，让下游把伪造 Purchase 写进任意客户的 Meta 账号。完整认证要求见 `crm-deal-closed-event-contract.md` 文首更新说明；
+3. handler 内**同一次调用栈里**立刻用 `src/lib/pii/hasher.ts`（PR #1407）的 `hashEmail`/`hashPhone`/`hashName` 把明文转成 `em_sha256`/`ph_sha256`/`fn_sha256`/`ln_sha256`，明文变量出这个函数就应该被丢弃——**不落库、不写日志、不进 Inngest event**；
+4. handler 拿哈希后的字段 + 服务端推导出的 `client_id` 拼出 `me/crm.deal.closed` 事件（payload 形状仍照 `crm-deal-closed-event-contract.md` §②，只是"谁来哈希"从"CRM 团队"改成"ME 的接收 handler"），emit 进 Inngest；
+5. **`MetaCapiWriter.build()`（`src/lib/meta/capi/writer.ts`）不能被这条新管道直接复用**——它假设收到的 `outcome.customerEmail` 等字段是明文，会再调一次 `hashEmail` 自己哈希。GoHighLevel 消费者拿到的已经是哈希值，若原样传给 `build()` 会被二次哈希（`sha256(sha256(email))`），Meta 侧完全匹配不上，而且不报错、是静默失败。GoHighLevel 消费者组件需要新写一段"哈希值直通"的构造逻辑，把 `em_sha256` 等字段原样塞进 CAPI `user_data`，跳过 `hashEmail`/`hashPhone`/`hashName` 这一步；`writer.ts` 现有的 `build()` 继续只服务 Issue #1397 那条"ME 内部 Outcome 明文→哈希"的管道，两条管道不共用同一个 `build()` 入口。
+6. 该消费者组件（含 handler 的来源认证 + 租户映射）目前尚未实现，需要新建，工作量不大但不是"已经写了一半"。
+
+**影响**：2026-09-08 已为 CTS 建立的 Freshsales 演示环境与账号邀请作废，不再推进；Lisa（CTS 老板）的 Freshworks 账号先 hold 不停用（PM 2026-09-09）。实现本决策涉及新增对外集成 + 影响已上线的广告归因逻辑，按 CLAUDE.md 大任务门槛，动手前需过子牙（架构）+ 魏征（挑刺）复审。
+
 ## 2026-08-22 · 产品定位与 IMPACT v1.0 冻结：Digital Marketing Growth Intelligence System
 
 **决策**：Magic Engine 的正式产品类别冻结为 **Digital Marketing Growth Intelligence System（数字营销增长智能系统）**。唯一端到端产品闭环冻结为 **IMPACT = Inspect → Measure → Prescribe → Act → Check → Tune**。DAPE 保留为内部工作方法，主要服务 IMPACT 前四段，不能与 IMPACT 互换，也不能用执行完成代替 Check、Outcome 与 Tune。
