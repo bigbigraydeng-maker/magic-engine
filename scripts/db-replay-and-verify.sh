@@ -43,6 +43,12 @@ do $$ begin create role service_role;  exception when duplicate_object then null
 do $$ begin create role anon;          exception when duplicate_object then null; end $$;
 do $$ begin create role authenticated; exception when duplicate_object then null; end $$;
 
+-- 生产 service_role 带 BYPASSRLS，RLS policy 对它根本不生效
+-- （supabase/migrations/20260905000002_conversion_writeback_v1.sql:243）。
+-- 桩角色不带这个属性会导致 SET ROLE service_role 验证出的结果跟生产反着来：
+-- 无 policy 的表本地会失败但生产能访问，限制性 policy 本地看似生效但生产实际绕过。
+alter role service_role bypassrls;
+
 create extension if not exists pgcrypto;
 
 create schema if not exists storage;
@@ -61,8 +67,7 @@ create or replace function auth.uid()  returns uuid  language sql stable as $$ s
 create or replace function auth.jwt()  returns jsonb language sql stable as $$ select '{}'::jsonb $$;
 create or replace function auth.role() returns text  language sql stable as $$ select null::text $$;
 
--- 忠实还原 Supabase 的默认授权（service_role 也一样拿默认表授权，
--- 它靠的是「授权 + RLS policy TO service_role USING(true)」而不是 bypassrls）
+-- 忠实还原 Supabase 的默认授权
 grant usage on schema public to anon, authenticated, service_role;
 alter default privileges in schema public grant all     on tables    to anon, authenticated, service_role;
 alter default privileges in schema public grant all     on sequences to anon, authenticated, service_role;
