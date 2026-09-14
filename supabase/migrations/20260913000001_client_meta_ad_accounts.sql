@@ -69,7 +69,8 @@ ON CONFLICT (client_id, ad_account_id) DO NOTHING;
 -- act_2202695063810470，CTStours 官方账户，跑 ThruPlay 顶层认知广告。
 -- 非主账户：不影响任何读 clients.meta_ad_account_id 的单账户调用点。
 INSERT INTO public.client_meta_ad_accounts (client_id, ad_account_id, label, is_primary)
-VALUES ('c0000000-0000-0000-0000-000000000000', 'act_2202695063810470', 'CTStours 官方账户（ThruPlay）', false)
+SELECT 'c0000000-0000-0000-0000-000000000000', 'act_2202695063810470', 'CTStours 官方账户（ThruPlay）', false
+WHERE EXISTS (SELECT 1 FROM public.clients WHERE id = 'c0000000-0000-0000-0000-000000000000')
 ON CONFLICT (client_id, ad_account_id) DO NOTHING;
 
 NOTIFY pgrst, 'reload schema';

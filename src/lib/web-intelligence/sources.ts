@@ -60,6 +60,7 @@ export function buildExternalObservation(input: {
   client_id: string; source_id: string; source_url: string; title?: string; excerpt: string
   competitor_domain?: string | null; published_at?: string | null; observed_at: string; valid_until?: string | null
   authorization_confirmed?: boolean
+  analysis?: ExternalObservation['analysis']
 }): ExternalObservation {
   const source = sourceDefinition(input.source_id)
   if (!source) throw new Error('unknown_external_source')
@@ -73,6 +74,6 @@ export function buildExternalObservation(input: {
     competitor_domain: input.competitor_domain ?? null, published_at: normalisePublishedAt(input.published_at),
     observed_at: new Date(input.observed_at).toISOString(),
     valid_until: input.valid_until === undefined ? sourceDefaultValidUntil(input.source_id, input.observed_at) : normalisePublishedAt(input.valid_until),
-    content_hash: observationContentHash(title, excerpt), status: 'observed',
+    content_hash: observationContentHash(title, excerpt), status: 'observed', ...(input.analysis ? { analysis: input.analysis } : {}),
   }
 }

@@ -73,7 +73,7 @@ export async function collectApifyExternalObservations(input: {
   for (const item of result.data) {
     const sourceUrl = text(item, ['url', 'sourceUrl', 'source_url', 'link', 'articleUrl', 'jobUrl', 'postUrl', 'post_url', 'permalink'])
     const title = text(item, ['title', 'name', 'headline'])
-    const excerpt = text(item, ['excerpt', 'description', 'descriptionText', 'teaser', 'text', 'content', 'summary', 'snippet'])
+    const excerpt = input.sourceId === 'seek-nz' ? jobExcerpt(item) : text(item, ['excerpt', 'description', 'descriptionText', 'teaser', 'text', 'content', 'summary', 'snippet'])
       || (input.sourceId === 'seek-nz' ? jobExcerpt(item) : '')
     if (!validUrl(sourceUrl) || !excerpt) {
       rejected += 1

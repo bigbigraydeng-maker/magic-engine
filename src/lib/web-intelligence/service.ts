@@ -25,7 +25,7 @@ export async function readView(clientId: string, canEdit: boolean) {
     db.from('master_briefs').select('products,primary_audience,buying_trigger,keyword_seeds,competitor_domains,status,is_active,version').eq('client_id', clientId).or('status.eq.active,is_active.eq.true').order('version', { ascending: false }).limit(1).maybeSingle(),
     db.from('goals').select('title,status,primary_metric_label,target_value,period_start,period_end,updated_at').eq('client_id', clientId).order('updated_at', { ascending: false }).limit(20),
     db.from('web_intelligence_external_observations').select('source_url,competitor_domain,observed_at,valid_until,excerpt').eq('client_id', clientId).eq('source_type', 'website').eq('source_name', '竞品网站流量方向（Apify）').order('observed_at', { ascending: false }).limit(100),
-    db.from('web_intelligence_external_observations').select('source_type,source_name,source_url,title,excerpt,observed_at,valid_until').eq('client_id', clientId).in('source_type', ['industry_news', 'industry_media', 'jobs']).order('observed_at', { ascending: false }).limit(60),
+    db.from('web_intelligence_external_observations').select('source_type,source_name,source_url,title,excerpt,observed_at,valid_until,analysis').eq('client_id', clientId).in('source_type', ['industry_news', 'industry_media', 'jobs']).order('observed_at', { ascending: false }).limit(60),
   ])
   if (client.error || settings.error || signals.error || runs.error || budget.error || masterBrief.error || goals.error) throw new Error('web_intelligence_read_failed')
   const ids = (signals.data as Signal[]).flatMap(s => [s.before_evidence_id, s.after_evidence_id])

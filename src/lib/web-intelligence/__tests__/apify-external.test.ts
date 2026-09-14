@@ -36,6 +36,16 @@ describe('Apify external observation adapter', () => {
     expect(result).toMatchObject({ runId: 'run-2', rejected: 2, observations: [] })
   })
 
+  it('keeps SEEK company, location and job description in the evidence excerpt', async () => {
+    runActorAndGetResults.mockResolvedValue({ success: true, runId: 'seek-detail-1', data: [{
+      url: 'https://www.seek.co.nz/job/1', title: 'China Travel Consultant', company: 'Example Tours', location: 'Auckland',
+      description: 'Manage China itineraries and support travellers booking China holidays.', listingDate: '2026-09-13',
+    }] })
+    const result = await collectApifyExternalObservations({ actorId: 'seek-actor', actorInput: { includeDescriptions: true }, sourceId: 'seek-nz', clientId, observedAt: '2026-09-13T01:00:00Z' })
+    expect(result.observations[0].excerpt).toContain('公司：Example Tours')
+    expect(result.observations[0].excerpt).toContain('简介：Manage China itineraries')
+  })
+
   it('fails closed for unauthorized Facebook rows', async () => {
     runActorAndGetResults.mockResolvedValue({ success: true, runId: 'run-3', data: [{
       url: 'https://facebook.com/groups/example/posts/1', text: 'Discussion',

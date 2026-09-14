@@ -46,6 +46,11 @@ export const externalObservationSchema = z.object({
   observed_at: z.string().datetime({ offset: true }),
   valid_until: z.string().datetime({ offset: true }).nullable(),
   content_hash: z.string().regex(/^[a-f0-9]{64}$/), status: externalObservationStatusSchema,
+  analysis: z.object({
+    company_summary: z.string().trim().max(500), job_summary: z.string().trim().max(800),
+    china_relevance: z.enum(['explicit', 'related', 'not_mentioned', 'unclear']),
+    relevance_reason: z.string().trim().max(1000), confidence: z.number().finite().min(0).max(1),
+  }).strict().nullable().optional(),
 }).strict()
 export type ExternalObservation = z.infer<typeof externalObservationSchema>
 export const externalEventSchema = z.object({

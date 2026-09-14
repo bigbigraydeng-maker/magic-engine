@@ -7,6 +7,7 @@ import { getClientKeywords } from '@/lib/keywords/resolver'
 import { normalizeOperatingProducts } from '@/lib/web-intelligence/operating-brief'
 import { deriveTravelScope, travelMarketTerms } from '@/lib/web-intelligence/profiles/travel'
 import { supabaseAdmin as db } from '@/lib/supabase'
+import { analyzeJobSignals } from '@/lib/web-intelligence/job-analysis'
 
 export const maxDuration = 300
 
@@ -71,7 +72,8 @@ export async function POST(req: Request, { params }: Context) {
         ? await collectAndRecordExternalObservations({
           sourceId, clientId: id, observedAt,
           actorId: 'vewdUX0xT82kKEPPd',
-          actorInput: { searchQueries: queryList(body.queries), siteKey: 'NZ-Main', where: text(body.location) ?? 'All New Zealand', maxItems: maxResults, includeDescriptions: false },
+          actorInput: { searchQueries: queryList(body.queries), siteKey: 'NZ-Main', where: text(body.location) ?? 'All New Zealand', maxItems: maxResults, includeDescriptions: true },
+          enrich: analyzeJobSignals,
         })
         : null
 
