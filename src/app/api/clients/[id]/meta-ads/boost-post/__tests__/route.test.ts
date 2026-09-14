@@ -39,6 +39,10 @@ vi.mock('@/lib/ads/creative-link', () => ({
   linkAdToCreative: (...a: unknown[]) => linkAdToCreative(...a),
 }))
 
+vi.mock('@/lib/meta/token-manager', () => ({
+  getMetaTokenForClient: async () => 'token',
+}))
+
 import { POST } from '../route'
 
 const req = (body: Record<string, unknown>) =>

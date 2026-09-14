@@ -18,7 +18,8 @@
  *   campaign_name_suffix?: string — Override suffix for the campaign name
  *
  * Auth: requireDashboardClientAccess
- * Requires: META_SYSTEM_USER_TOKEN env + client.meta_ad_account_id configured
+ * Requires: META_SYSTEM_USER_TOKEN_<DOMAIN_KEY> (per-client) or META_SYSTEM_USER_TOKEN
+ *           (legacy fallback), plus client.meta_ad_account_id configured
  */
 
 import { type NextRequest, NextResponse } from 'next/server'
@@ -26,6 +27,7 @@ import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { boostPagePost } from '@/lib/meta/client'
 import { linkAdToCreative } from '@/lib/ads/creative-link'
+import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 
 interface RouteContext {
   params: { id: string }
@@ -89,10 +91,10 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     )
   }
 
-  const accessToken = process.env.META_SYSTEM_USER_TOKEN
+  const accessToken = await getMetaTokenForClient(clientId)
   if (!accessToken) {
     return NextResponse.json(
-      { error: 'META_SYSTEM_USER_TOKEN not configured. Set it in Render environment variables.' },
+      { error: 'No Meta token configured for this client (META_SYSTEM_USER_TOKEN_<DOMAIN_KEY> or META_SYSTEM_USER_TOKEN). Set it in Render environment variables.' },
       { status: 503 },
     )
   }

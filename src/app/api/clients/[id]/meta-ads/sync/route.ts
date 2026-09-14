@@ -4,7 +4,8 @@
  * P12.B.2: Fetch Meta Ads account-level insights for the client and write
  * a new row to meta_ads_snapshots. Called manually or by the weekly cron.
  *
- * Required env:  META_SYSTEM_USER_TOKEN
+ * Required env:  META_SYSTEM_USER_TOKEN_<DOMAIN_KEY> (per-client, see getMetaTokenForClient)
+ *                 or META_SYSTEM_USER_TOKEN (legacy single-tenant fallback)
  * Required DB:   clients.meta_ad_account_id must be set for the client
  *
  * Body (JSON, all optional):
@@ -21,6 +22,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getAdAccountInsights, getAdCampaignInsights } from '@/lib/meta/client'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 
 interface RouteParams {
   params: { id: string }
@@ -69,11 +71,11 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     )
   }
 
-  // ── 3. Check for system user token ────────────────────────────────────────
-  const accessToken = process.env.META_SYSTEM_USER_TOKEN
+  // ── 3. Check for system user token (per-client first, then legacy fallback) ─
+  const accessToken = await getMetaTokenForClient(clientId)
   if (!accessToken) {
     return NextResponse.json(
-      { error: 'META_SYSTEM_USER_TOKEN is not configured.' },
+      { error: 'No Meta token configured for this client (META_SYSTEM_USER_TOKEN_<DOMAIN> or META_SYSTEM_USER_TOKEN).' },
       { status: 424 },
     )
   }
