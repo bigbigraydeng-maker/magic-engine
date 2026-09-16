@@ -171,6 +171,87 @@ export async function fetchPageReels(
   })
 }
 
+export type PageObjectIdEdge = 'published_posts' | 'video_reels'
+
+export type PageObjectIdList =
+  | { ok: true; ids: string[] }
+  | { ok: false; ids: string[]; error: string; /** Graph error.code, null for network / non-Graph failures. */ code: number | null }
+
+/** Graph error code 1 = "Please reduce the amount of data you're asking for". */
+const GRAPH_REDUCE_DATA_CODE = 1
+const ID_LIST_PAGE_SIZE = 25
+const ID_LIST_MIN_PAGE_SIZE = 5
+/** Hard stop so a cursor that never ends cannot spin a 30-minute cron forever. */
+const ID_LIST_MAX_REQUESTS = 40
+
+interface RawIdPage {
+  data?: Array<{ id?: unknown }>
+  paging?: { cursors?: { after?: string }; next?: string }
+  error?: { code?: number; message?: string }
+}
+
+/**
+ * List the ids of a Page's posts or Reels — ids only, paginated.
+ *
+ * WHY NOT fetchPagePosts: asking /published_posts for 100 rows with
+ * attachments + reactions/comments summaries in one request makes Graph
+ * answer HTTP 500 code 1 "reduce the amount of data" on busy Pages (CTS,
+ * every 30-minute run, 2026-09-14). Meta's guidance for code 1 is to ask for
+ * fewer fields and fewer rows per request, so this asks for `id` only, pages
+ * with the `after` cursor, and halves the page size when code 1 still comes
+ * back.
+ *
+ * Never throws. On failure it returns the ids collected so far plus an error,
+ * so the caller can still work on what it got while reporting the scan as
+ * incomplete.
+ */
+export async function listPageObjectIds(input: {
+  pageId: string
+  pageAccessToken: string
+  edge: PageObjectIdEdge
+  maxItems: number
+  pageSize?: number
+  fetcher?: typeof fetch
+}): Promise<PageObjectIdList> {
+  const doFetch = input.fetcher ?? fetch
+  const ids: string[] = []
+  let pageSize = input.pageSize ?? ID_LIST_PAGE_SIZE
+  let after: string | undefined
+  const fail = (detail: string, code: number | null = null): PageObjectIdList =>
+    ({ ok: false, ids, error: `${input.edge} ${input.pageId}: ${detail}`, code })
+
+  for (let request = 0; request < ID_LIST_MAX_REQUESTS && ids.length < input.maxItems; request++) {
+    const limit = Math.min(pageSize, input.maxItems - ids.length)
+    const cursor = after ? `&after=${encodeURIComponent(after)}` : ''
+    const url = `${GRAPH_BASE}/${input.pageId}/${input.edge}?fields=id&limit=${limit}${cursor}&access_token=${encodeURIComponent(input.pageAccessToken)}`
+
+    let res: Response
+    try {
+      res = await doFetch(url)
+    } catch (err) {
+      return fail(`network error ${err instanceof Error ? err.message : 'unknown'}`)
+    }
+    const body = (await res.json().catch(() => null)) as RawIdPage | null
+
+    if (body?.error) {
+      if (body.error.code === GRAPH_REDUCE_DATA_CODE && pageSize > ID_LIST_MIN_PAGE_SIZE) {
+        pageSize = Math.max(ID_LIST_MIN_PAGE_SIZE, Math.floor(pageSize / 2))
+        continue // same cursor, smaller page
+      }
+      const code = typeof body.error.code === 'number' ? body.error.code : null
+      return fail(`${res.status} code=${code ?? '?'} ${(body.error.message ?? '').slice(0, 200)}`, code)
+    }
+    if (!res.ok || !body) return fail(`HTTP ${res.status}`)
+
+    const rows = body.data ?? []
+    for (const row of rows) if (typeof row.id === 'string') ids.push(row.id)
+    after = body.paging?.next ? body.paging.cursors?.after : undefined
+    if (!after || rows.length === 0) return { ok: true, ids }
+  }
+  // Reached maxItems (normal) or the request cap (report it, don't pretend).
+  return ids.length >= input.maxItems ? { ok: true, ids } : fail(`stopped after ${ID_LIST_MAX_REQUESTS} requests`)
+}
+
 export interface ManagedPage {
   id: string
   name: string

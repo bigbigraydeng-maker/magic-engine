@@ -72,6 +72,9 @@ interface RunResult {
   needs_human?: number
   failed?: number
   error?: string
+  /** Token lacks pages_manage_engagement — public replies / hiding were held back. */
+  engagement_scope_missing?: boolean
+  replies_blocked?: number
 }
 
 const DEFAULT_DRAFT: Config = {
@@ -303,6 +306,13 @@ export function CommentAutoReplyPanel({ clientId }: Props) {
               · 隐藏 {runResult.hidden ?? 0} · 需人工 {runResult.needs_human ?? 0}
               {(runResult.failed ?? 0) > 0 && ` · 失败 ${runResult.failed}`}
               <span className="ml-1 text-emerald-600">（详情看下面「最近自动回复」）</span>
+              {runResult.engagement_scope_missing && (
+                <span className="mt-1 block text-amber-700">
+                  ⚠ 公开回复和隐藏已暂停：令牌缺「回帖 / 隐藏」权限（pages_manage_engagement）。
+                  {(runResult.replies_blocked ?? 0) > 0 && ` 这轮 ${runResult.replies_blocked} 条已标成需人工回。`}
+                  补权限的步骤见今日待办。
+                </span>
+              )}
             </span>
           ) : (
             <span>⚠ 运行失败：{runResult.error}</span>

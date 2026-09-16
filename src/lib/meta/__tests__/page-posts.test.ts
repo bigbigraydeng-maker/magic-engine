@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
-import { publishPagePhotoPost, deletePagePost, readPageStoryId } from '../page-posts'
+import { publishPagePhotoPost, deletePagePost, readPageStoryId, listPageObjectIds } from '../page-posts'
 
 const PAGE = '1616575215312482'
 const TOKEN = 'page-access-token'
@@ -230,5 +230,117 @@ describe('readPageStoryId — read-back after the photo is public', () => {
     }))
     const r = await readPageStoryId({ photoId: PHOTO, pageId: PAGE, pageAccessToken: TOKEN, fetcher, timeoutMs: 20 })
     expect(r).toEqual({ ok: false, reason: 'timeout' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// listPageObjectIds — the comment scan's post / Reel list.
+// ---------------------------------------------------------------------------
+
+/** Verbatim body Graph returned for CTS on every 30-minute run (2026-09-14). */
+const REDUCE_DATA_BODY = {
+  error: { code: 1, message: "Please reduce the amount of data you're asking for, then retry your request" },
+}
+
+/** A Graph list page: ids + the cursor block Graph sends when there is more. */
+function idPage(ids: string[], after?: string) {
+  return {
+    data: ids.map((id) => ({ id })),
+    paging: {
+      cursors: { before: 'QVFIUbefore', after: after ?? 'QVFIUlast' },
+      ...(after ? { next: `https://graph.facebook.com/v20.0/${PAGE}/published_posts?fields=id&limit=25&after=${after}` } : {}),
+    },
+  }
+}
+
+function sequencedFetch(responses: Array<{ status: number; body: unknown } | Error>) {
+  const urls: string[] = []
+  const fn = vi.fn(async (url: string) => {
+    urls.push(url)
+    const next = responses.shift()
+    if (!next) throw new Error('fake fetch: no response queued')
+    if (next instanceof Error) throw next
+    return new Response(JSON.stringify(next.body), { status: next.status })
+  })
+  return { fetcher: fn as unknown as typeof fetch, urls }
+}
+
+const limitOf = (url: string) => new URL(url).searchParams.get('limit')
+const afterOf = (url: string) => new URL(url).searchParams.get('after')
+
+describe('listPageObjectIds', () => {
+  const base = { pageId: PAGE, pageAccessToken: TOKEN, edge: 'published_posts' as const, maxItems: 100 }
+
+  it('🔴 asks for ids only, in small pages, and follows the after cursor to the end', async () => {
+    const { fetcher, urls } = sequencedFetch([
+      { status: 200, body: idPage([`${PAGE}_1`, `${PAGE}_2`], 'CUR1') },
+      { status: 200, body: idPage([`${PAGE}_3`]) },
+    ])
+    const r = await listPageObjectIds({ ...base, fetcher })
+
+    expect(r).toEqual({ ok: true, ids: [`${PAGE}_1`, `${PAGE}_2`, `${PAGE}_3`] })
+    expect(new URL(urls[0]).searchParams.get('fields')).toBe('id')
+    expect(limitOf(urls[0])).toBe('25')
+    expect(afterOf(urls[0])).toBeNull()
+    expect(afterOf(urls[1])).toBe('CUR1')
+  })
+
+  it('🔴 Graph code 1 → halves the page size and retries the same cursor', async () => {
+    const { fetcher, urls } = sequencedFetch([
+      { status: 200, body: idPage([`${PAGE}_1`], 'CUR1') },
+      { status: 500, body: REDUCE_DATA_BODY },
+      { status: 200, body: idPage([`${PAGE}_2`]) },
+    ])
+    const r = await listPageObjectIds({ ...base, fetcher })
+
+    expect(r).toEqual({ ok: true, ids: [`${PAGE}_1`, `${PAGE}_2`] })
+    expect(limitOf(urls[1])).toBe('25')
+    expect(limitOf(urls[2])).toBe('12')
+    expect(afterOf(urls[2])).toBe('CUR1')
+  })
+
+  it('🔴 code 1 that persists at the smallest page → reports failure, keeps ids already read', async () => {
+    const { fetcher, urls } = sequencedFetch([
+      { status: 200, body: idPage([`${PAGE}_1`], 'CUR1') },
+      { status: 500, body: REDUCE_DATA_BODY }, // 25 → 12
+      { status: 500, body: REDUCE_DATA_BODY }, // 12 → 6
+      { status: 500, body: REDUCE_DATA_BODY }, // 6 → 5
+      { status: 500, body: REDUCE_DATA_BODY }, // 5 = floor → give up
+    ])
+    const r = await listPageObjectIds({ ...base, fetcher })
+
+    expect(r.ok).toBe(false)
+    expect(r.ids).toEqual([`${PAGE}_1`])
+    if (!r.ok) expect(r.error).toContain('500 code=1')
+    expect(urls.map(limitOf)).toEqual(['25', '25', '12', '6', '5'])
+  })
+
+  it('other Graph errors are not retried (a permission error will not change by asking again)', async () => {
+    const { fetcher, urls } = sequencedFetch([
+      { status: 400, body: { error: { code: 10, message: '(#10) Application does not have permission for this action' } } },
+    ])
+    const r = await listPageObjectIds({ ...base, edge: 'video_reels', fetcher })
+
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('video_reels')
+    expect(urls).toHaveLength(1)
+  })
+
+  it('stops at maxItems and never asks for more than it still needs', async () => {
+    const { fetcher, urls } = sequencedFetch([
+      { status: 200, body: idPage(['a', 'b', 'c'], 'CUR1') },
+      { status: 200, body: idPage(['d', 'e'], 'CUR2') },
+    ])
+    const r = await listPageObjectIds({ ...base, maxItems: 5, pageSize: 3, fetcher })
+
+    expect(r).toEqual({ ok: true, ids: ['a', 'b', 'c', 'd', 'e'] })
+    expect(urls.map(limitOf)).toEqual(['3', '2'])
+  })
+
+  it('a network error is a failure, not an empty Page', async () => {
+    const { fetcher } = sequencedFetch([new Error('fetch failed')])
+    const r = await listPageObjectIds({ ...base, fetcher })
+    expect(r.ok).toBe(false)
+    expect(r.ids).toEqual([])
   })
 })

@@ -18,6 +18,7 @@ import { startCronRun } from '@/lib/cron/run-logger'
 import {
   processClientComments,
   isKilled,
+  describeFailedClients,
   CommentConfig,
   ClientRunResult,
 } from '@/lib/social/comment-autoreply-engine'
@@ -72,6 +73,10 @@ export async function GET(req: NextRequest) {
     completed: results.length - failed,
     failed,
     summary: { public_replies: publicReplies, private_replies: privateReplies, hidden, results },
+    // 🔴 cron health only treats status='failed' as failing, and run-logger only
+    //    writes 'failed' when `error` is set. Without this, a client whose scan
+    //    fails every 30 minutes (CTS, 2026-09-14) sits in a run marked completed.
+    error: describeFailedClients(results),
   })
 
   return NextResponse.json({
