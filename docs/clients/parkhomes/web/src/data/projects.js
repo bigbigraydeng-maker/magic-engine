@@ -41,6 +41,8 @@ export const projects = [
       { src: '/img/riverside/rv-aerial-finished-2.webp', alt: 'Riverside — completed homes, aerial view' },
       { src: '/img/riverside/rv-aerial-finished-3.webp', alt: 'Riverside — completed homes, aerial view' },
     ],
+    // Supplied by the client (Jason, 2026-09-15) via email — YouTube walkthrough of 115 Park Estate Road.
+    video: { youtubeId: 'VqKlqhGUJEQ', title: 'Riverside — 115 Park Estate Road' },
     // Riverside is a masterplanned community — individual lots list under their
     // own internal street names (Aratuhia Lane, Longview Oak Lane), not "Park
     // Estate Road" itself, and suburb tagging is inconsistent between listings
