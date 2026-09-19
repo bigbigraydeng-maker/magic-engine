@@ -12,7 +12,7 @@
 
 import { KnowledgeReadError } from './errors'
 import { isGlobalAdminEmail } from '@/lib/auth/whitelist'
-import { tierForAccessType } from '@/lib/auth/access-types'
+import { ACCESS_TYPES_CUSTOMER_ONLY } from '@/lib/auth/access-types'
 
 interface ConfirmerRow {
   confirmer_email: string
@@ -187,15 +187,15 @@ const POSTGRES_UNIQUE_VIOLATION = '23505'
  * 一张管"这个真实联系人有没有被明确授权确认知识库条目"（本表）。
  *
  * 🔴 2026-09-20 修复：这里原来写的是 `.eq('access_type', 'client')`，只认
- * 字面值 'client'。但 `access-types.ts` 的 migration 注释早已明确
- * "{dashboard, fde, both, client} → tier='paid_client'"——这四个是同一档
- * 付费客户权限的历史遗留别名，不是四种不同的人。旧写法会把所有还没被
- * 手工改写成 'client' 的老客户联系人（CTS 的两个联系人都是 'both'）挡在
- * 门外，跟"确认人必须是客户名下的人"这条业务规则本身没关系，纯粹是没接
- * 上 `access-types.ts` 早就统一好的 tier 概念——该文件顶部原话是"Never
- * inline a literal `.in([...])` over access_type elsewhere. Import from
- * here."，这里正是没遵守这条规范的漏网之鱼。改成用 `tierForAccessType`
- * 判断是否属于 'paid_client' 档，不再关心具体是哪个历史写法。
+ * 字面值 'client'，把 CTS 的两个真实联系人（access_type='both'）挡在门
+ * 外。改成 `ACCESS_TYPES_CUSTOMER_ONLY`（`access-types.ts`）——注意不是
+ * `tierForAccessType()==='paid_client'` / `ACCESS_TYPES_PAID`：那两个把
+ * 'fde' 也算进付费客户档，但 'fde' 账号原本是"Magic Engine 内部 FDE 代客
+ * 户操作"（见 `20260602000001_client_portal_users_add_fde.sql`），
+ * `require-admin.ts` 也明确说它不能当身份证明用。这里要的是"确认人必须
+ * 是客户公司自己的人，不能是 ME 任何人"，用 paid_client 档会让 'fde' 账
+ * 号冒充客户签字，破坏双签分离——第一版修复曾经犯过这个错，子牙+魏征联
+ * 合复审（2026-09-20）实测发现后改成这个更窄的白名单。
  *
  * 🔴 并发登记（子牙+魏征联合复审 2026-09-14）：两个并发请求都可能在"查
  * 当前有效登记"这一步都看到"还没有"，都往下 insert——数据库的局部唯一
@@ -226,7 +226,9 @@ export async function registerConfirmer(
     throw new KnowledgeConfirmerWriteError('核实客户账号（client_portal_users）', accountCheck.error)
   }
   const hasAccount = asRows<AccountRow>(accountCheck.data).some(
-    (row) => sameEmail(row.email, confirmerEmail) && tierForAccessType(row.access_type) === 'paid_client',
+    (row) =>
+      sameEmail(row.email, confirmerEmail) &&
+      (ACCESS_TYPES_CUSTOMER_ONLY as readonly string[]).includes(row.access_type),
   )
   if (!hasAccount) {
     throw new Error(

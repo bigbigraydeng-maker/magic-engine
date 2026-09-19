@@ -171,13 +171,27 @@ describe('registerConfirmer', () => {
     expect(fixture.confirmers).toHaveLength(1)
   })
 
-  // 🔴 self_serve / portal 不属于 paid_client 档，不该被接受——确认修复没
+  // 🔴 self_serve / portal 不属于付费客户档，不该被接受——确认修复没
   // 把检查放宽到"任何在这张表里的人"，只是补齐了付费客户的历史别名。
-  it('still rejects an account whose access_type is self_serve or portal (not paid_client tier)', async () => {
+  it('still rejects an account whose access_type is self_serve or portal (not a customer-only tier)', async () => {
     fixture.portalUsers = [{ id: 'user-free', client_id: CLIENT_A, email: 'free@example.com', access_type: 'self_serve' }]
     const sb = makeFakeClient()
     await expect(
       registerConfirmer(sb, { clientId: CLIENT_A, confirmerEmail: 'free@example.com', actorEmail: GLOBAL_ADMIN }),
+    ).rejects.toThrow(/付费客户账号/)
+    expect(fixture.confirmers).toHaveLength(0)
+  })
+
+  // 🔴 子牙+魏征联合复审（2026-09-20）实测发现的真漏洞回归锁：'fde' 虽然
+  // 跟 'client'/'dashboard'/'both' 同属 paid_client 档（能登录 /dashboard），
+  // 但它原本代表"Magic Engine 内部 FDE 代客户操作"，不是客户公司自己的
+  // 人。如果这里接受 'fde'，等于让 ME 一方的账号冒充客户签字，双签分离
+  // （ME 签字人 ≠ 客户签字人）名存实亡。必须拒绝。
+  it('rejects an account whose access_type is "fde" even though it is paid_client tier (ME-side account, not a real customer)', async () => {
+    fixture.portalUsers = [{ id: 'user-fde', client_id: CLIENT_A, email: 'fde-assigned@ctstours.co.nz', access_type: 'fde' }]
+    const sb = makeFakeClient()
+    await expect(
+      registerConfirmer(sb, { clientId: CLIENT_A, confirmerEmail: 'fde-assigned@ctstours.co.nz', actorEmail: GLOBAL_ADMIN }),
     ).rejects.toThrow(/付费客户账号/)
     expect(fixture.confirmers).toHaveLength(0)
   })
