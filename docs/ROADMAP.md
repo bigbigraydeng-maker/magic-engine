@@ -371,6 +371,24 @@ Agent 的事实层，替代 offerings.yaml 路线"）矛盾。PM 拍板"一步�
           既有的 best-effort 设计，是三渠道通用缺口，不只是邮件专属，需要单独立项补
     - [ ] 邮件渠道的 kill switch（`messenger_agent_enabled_email`）仍然只有 API、没有
           Settings UI 开关——跟 messenger/whatsapp 两个既有开关同状态，可以一起补
+    - [ ] **NAL（New Asian Logistics，client_id `4ae76381-cd45-43bd-85cd-98cfd7604007`）
+          真实数据实测发现的缺口**（2026-09-20，PM 授权测试）：迁移已 apply 到生产库
+          （`glbdnayojixmexgofbsd`，即 Supabase 面板里显示名为"CrazyContent"的那个
+          项目——名字对不上是历史遗留，不是接错库，已用真实数据核实过）；NAL 的邮件
+          渠道本身接得好好的（`sales@nalexpress.com`，Microsoft 邮箱，每小时正常同步，
+          库里已有真实客户询价邮件）。但 NAL **没有配置 `verifier policy`**（AI 起草后
+          自己核对内容对不对的规则本，目前只有 CTS 一家有，见
+          `src/lib/messenger-agent/verifier/policies/index.ts` 的 `VERIFIER_POLICIES`
+          查表）——`resolveVerifierPolicy` 查不到时 fail-closed 返回 `null`，F2 会把
+          任何草稿直接判 `blocked`，永远进不了"待批准"列表。这意味着：**在没给 NAL
+          写一套 verifier policy 之前，就算打开 `messenger_agent_enabled_email`，
+          真实客户来信也只会白花一次 Claude 调用的钱、测不出任何有用结果，不会误发**
+          （fail-closed 方向本身是安全的）。PM 拍板**先把 NAL 的开关关回 `false`**，
+          等谁给 NAL 设计一套 verifier policy（参考 `verifier/policies/cts.ts` 那七道
+          闸的写法，但物流询价这个行业需要重新设计判据，不是抄一份改客户名就行）之后
+          再重新打开、正式测试。这次全程只做到"核实开关/迁移/邮箱接入状态"，**没有
+          发送任何测试邮件、没有跑真实起草、没有花任何 Claude token**——发现问题就停，
+          没有为了"测出个结果"硬冲。
 - [ ] Meta 企业验证仍未通过（issue [#1299](https://github.com/bigbigraydeng-maker/magic-engine/issues/1299)，需要 PM 本人上传公司文件）——不卡继续开发，但卡 Messenger/WhatsApp webhook 真正上线那天
 
 ## 客户知识库（Client Knowledge Base）—— L1 平台能力，6 步已全部完成（2026-09-15）
