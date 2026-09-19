@@ -65,6 +65,14 @@ export interface ClientWeekly {
   auto_changes: {
     titles_applied_week: number
     freshness: FreshnessStamp
+    /** PM 2026-09-20 item 8: SEO Meta-Cycle's T+14 Check outcomes classified this week — which pages, before/after CTR, sample size, verdict. */
+    outcomes_checked_week: Array<{
+      page_slug: string
+      baseline_ctr: number | null
+      observed_ctr: number | null
+      observed_impressions: number | null
+      outcome: string | null
+    }>
   }
   blog: {
     generated_week: number
@@ -176,7 +184,7 @@ async function gatherClient(
     return (data ?? []) as KwRow[]
   }
 
-  const [curKw, priKw, gsc, findings, titles, blogGen, blogPub, blogWait, socialMetrics, adRows, reels] =
+  const [curKw, priKw, gsc, findings, titles, outcomesChecked, blogGen, blogPub, blogWait, socialMetrics, adRows, reels] =
     await Promise.all([
       fetchKw(current),
       fetchKw(prior),
@@ -192,12 +200,26 @@ async function gatherClient(
         .select('id', { count: 'exact', head: true })
         .eq('client_id', clientId)
         .gte('created_at', weekAgoIso),
+      // wp_updated=true only counts the WordPress-plugin channel (Oztop).
+      // A repo-PR client (applied_channel='pr', e.g. CTS) never flips
+      // wp_updated — cts-meta-pr.ts / seo-meta-cycle write the row once the
+      // PR is opened/merged in the same run, so presence of the row in the
+      // window is the applied-channel equivalent of wp_updated=true.
       supabase
         .from('seo_meta_log')
         .select('created_at')
         .eq('client_id', clientId)
-        .eq('wp_updated', true)
+        .or('wp_updated.eq.true,applied_channel.eq.pr')
         .gte('created_at', weekAgoIso),
+      // PM 2026-09-20 item 8: SEO Meta-Cycle's T+14 Check outcomes classified
+      // this week — surfaced in the report, not just written to the DB.
+      supabase
+        .from('seo_meta_log')
+        .select('page_slug, baseline_ctr, observed_ctr, observed_impressions, outcome')
+        .eq('client_id', clientId)
+        .not('checked_at', 'is', null)
+        .gte('checked_at', weekAgoIso)
+        .order('checked_at', { ascending: false }),
       supabase
         .from('blog_posts')
         .select('id', { count: 'exact', head: true })
@@ -267,6 +289,7 @@ async function gatherClient(
     auto_changes: {
       titles_applied_week: (titles.data ?? []).length,
       freshness: freshness((titles.data as Array<{ created_at: string }> | null)?.[0]?.created_at ?? null, now),
+      outcomes_checked_week: (outcomesChecked.data ?? []) as ClientWeekly['auto_changes']['outcomes_checked_week'],
     },
     blog: {
       generated_week: blogGen.count ?? 0,
@@ -336,9 +359,25 @@ export function renderWeeklyReport(clients: ClientWeekly[], nzDateLabel: string)
       line(`巡逻员本周抓到 ${c.seo.findings_week} 个新发现`),
     ].filter(Boolean).join('')
 
-    const autoLines = c.auto_changes.titles_applied_week > 0
+    const OUTCOME_LABEL: Record<string, string> = {
+      improved: '✅ 改好了',
+      flat: '➖ 没变化',
+      regressed: '⚠️ 变差了（已下发人工任务，去点 PR 的 Revert 按钮改回去）',
+      insufficient_data: '❔ 数据还不够，先不判',
+    }
+    const outcomeLines = c.auto_changes.outcomes_checked_week
+      .map((o) => {
+        const before = o.baseline_ctr !== null ? `${(o.baseline_ctr * 100).toFixed(2)}%` : '—'
+        const after = o.observed_ctr !== null ? `${(o.observed_ctr * 100).toFixed(2)}%` : '—'
+        const label = o.outcome ? OUTCOME_LABEL[o.outcome] ?? o.outcome : '—'
+        return line(`&nbsp;&nbsp;/${o.page_slug}：点击率 ${before} → ${after}（曝光 ${o.observed_impressions ?? '—'} 次）· ${label}`)
+      })
+      .join('')
+
+    const autoLines = (c.auto_changes.titles_applied_week > 0
       ? line(`系统本周自动改了 <b>${c.auto_changes.titles_applied_week}</b> 个页面标题/描述（网站上已生效）`)
-      : line('本周没有自动改动')
+      : line('本周没有自动改动'))
+      + outcomeLines
 
     const blogLines = [
       line(`本周生成 ${c.blog.generated_week} 篇、发布 ${c.blog.published_week} 篇`),

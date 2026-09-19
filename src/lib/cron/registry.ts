@@ -83,7 +83,9 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 每天 400~600 次插入就跑 400~600 次全表 DELETE，并发时会死锁 —— 而死锁让插入失败，
   // 也就是让这套监控自己瞎掉。2026-09-07 改成每天一次的独立任务。
   { service: 'cron-run-logs-cleanup', jobName: 'cron-run-logs-cleanup', schedule: '50 16 * * *', logsRuns: true, addedAt: '2026-09-07' },
-  { service: 'cts-seo-optimizer', jobName: 'cts-seo-optimizer', schedule: '30 5 * * 1', logsRuns: true },
+  // cts-seo-optimizer 于 2026-09-20 退役（PM 拍板）：render.yaml 里那条定时任务
+  // 在同一个 PR 里删掉了，换成 Inngest 原生的 cloud-seo-meta-cycle-fanout。
+  // 这里同步摘掉登记：留着会天天误报「没跑」，理由同 email-reply-digest。
   { service: 'daily-cron-digest', jobName: 'daily-cron-digest', schedule: '0 6 * * *', logsRuns: true },
   { service: 'diagnostic-weekly', jobName: 'diagnostic-weekly', schedule: '0 8 * * 1', logsRuns: true, addedAt: '2026-08-03' },
   // 客人来信没人回 → 每天早上给销售发一封汇总信。UTC 20:00 = 次日 NZ 08:00（NZST=UTC+12）。
@@ -250,4 +252,9 @@ export const UNSCHEDULED_CRON_ROUTES: Readonly<Record<string, string>> = {
   // docs/specs/2026-09-09-creatomate-connector-spec-v1.md §4.4），job_name 恒为
   // 'creatomate-render'，具体是哪条渲染由 summary.source_record_id 区分，不是按周期对账。
   'creatomate-render': '按需事件触发（内容确认时），非周期任务，不适用 CRON_REGISTRY 的排班对账',
+
+  // cts-seo-optimizer 于 2026-09-20 退役（PM 拍板）：render.yaml 那条定时任务已删，
+  // 换成 Inngest 原生的 cloud-seo-meta-cycle-fanout（同目录 seo-meta-cycle 的对账测试
+  // 管它）。路由文件和 startCronRun 调用留着只为回滚，本条不该再被排班。
+  'cts-seo-optimizer': '2026-09-20 退役，换成 Inngest cloud-seo-meta-cycle-fanout，路由留着只为回滚',
 }

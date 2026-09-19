@@ -61,12 +61,17 @@ export interface MetaReplacement {
  * so an export-only boundary would let an entry missing its own excerpt
  * silently overwrite the next post's (魏征-style neighbour corruption).
  */
-export function replaceMetaForSlug(
-  source: string,
-  slug: string,
-  newTitle: string,
-  newDesc: string,
-): MetaReplacement | null {
+interface MetaWindow {
+  slugIdx: number
+  windowEnd: number
+  window: string
+  titleRe: RegExp
+  descRe: RegExp
+  title: string
+  desc: string
+}
+
+function findMetaWindow(source: string, slug: string): MetaWindow | null {
   const slugIdx = source.indexOf(`slug: '${slug}'`)
   if (slugIdx === -1) return null
 
@@ -90,8 +95,38 @@ export function replaceMetaForSlug(
   const unquote = (m: string): string =>
     m.replace(/^[^']*'/, '').replace(/'$/, '').replace(/\\'/g, "'").replace(/\\\\/g, '\\')
 
-  const oldTitle = unquote(titleMatch[0].slice(titleMatch[1].length))
-  const oldDesc = unquote(descMatch[0].slice(descMatch[1].length))
+  return {
+    slugIdx,
+    windowEnd,
+    window,
+    titleRe,
+    descRe,
+    title: unquote(titleMatch[0].slice(titleMatch[1].length)),
+    desc: unquote(descMatch[0].slice(descMatch[1].length)),
+  }
+}
+
+/**
+ * Read-only lookup of the title/description currently in the source for
+ * `slug`, without writing anything. Used by the meta-cycle's true-revert
+ * step (魏征 finding #7) to detect whether a human has hand-edited the slug
+ * in GitHub since Magic Engine's last write, before deciding it's safe to
+ * revert.
+ */
+export function readMetaForSlug(source: string, slug: string): { title: string; desc: string } | null {
+  const found = findMetaWindow(source, slug)
+  return found ? { title: found.title, desc: found.desc } : null
+}
+
+export function replaceMetaForSlug(
+  source: string,
+  slug: string,
+  newTitle: string,
+  newDesc: string,
+): MetaReplacement | null {
+  const found = findMetaWindow(source, slug)
+  if (!found) return null
+  const { slugIdx, windowEnd, window, titleRe, descRe, title: oldTitle, desc: oldDesc } = found
 
   let newWindow = window.replace(titleRe, `$1'${escapeSingle(newTitle)}'`)
   newWindow = newWindow.replace(descRe, `$1'${escapeSingle(newDesc)}'`)
@@ -423,6 +458,7 @@ export async function runCtsMetaPr(
       new_title: a.newTitle,
       new_desc: a.newDesc,
       wp_updated: false,
+      applied_channel: 'pr',
       optimised_at: new Date().toISOString(),
     }))
     const { error: logErr } = await supabase.from('seo_meta_log').insert(rows)

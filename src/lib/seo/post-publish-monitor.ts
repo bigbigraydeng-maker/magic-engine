@@ -132,7 +132,7 @@ export function receiptRunId(due: Pick<PostPublishCheckDue, 'client_id' | 'launc
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`
 }
 
-function stableHash(parts: readonly (string | number)[]): string {
+export function stableHash(parts: readonly (string | number)[]): string {
   return createHash('sha256').update(parts.join('\u0000')).digest('hex').slice(0, 32)
 }
 
