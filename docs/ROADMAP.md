@@ -354,6 +354,23 @@ Agent 的事实层，替代 offerings.yaml 路线"）矛盾。PM 拍板"一步�
         做**。当时没做是因为依赖 F2 发出的 `conversation/reply.timeout` 事件，F2 那时还没
         写；**现在 F2 已经合并，事件已经有了，需要回来给 F4 补这一类检查**（代码里已有
         注释标记位置：`src/lib/messenger-agent/health-heartbeat.ts` 文件头）
+  - [x] 邮件渠道接入（issue #1745，PR #1808，已合并 main 2026-09-20 · merge commit
+        `1c0d983f`）——见下方"范围问题已拍板"一节记录的**唯一例外**：PM 2026-09-15 当场
+        拍板，只豁免邮件这一条渠道，不代表 Messenger-only 范围冻结整体松动。F2（AI 起草
+        →人审→发送）已接受邮件，复用同一套渠道无关的只读工具/verifier/prompt/classify/
+        optout 层（issue #1745 调研已确认）；F1（秒回安抚话术）刻意不接邮件——邮件靠每
+        小时同步、秒回没有对应产品价值，这是业务判断，留给 PM/华佗决定要不要做邮件版，
+        不在这次范围内替他们拍板。顺带补上 `mail-ingest.ts`（邮件每小时同步）此前完全不
+        emit `conversation/message.received` 的缺口（不补这个，channel-dispatch 认识
+        邮件也没用，F1-F4 永远不会被邮件触发）；把"紧急停用全渠道" kill switch
+        （`src/lib/knowledge/kill-switch.ts`）从两列扩到三列（不扩的话，加邮件之后这个
+        按钮会变成"紧急停用两个渠道"却还叫"全渠道"）。子牙+魏征两轮独立复审均无 blocker，
+        子牙顺手抓到一处文案没跟上（门户面板还写"Messenger+WhatsApp"）已在同一 PR 修复。
+    - [ ] 后续跟进（子牙复审记录，不阻塞已合并代码）：F4 健康心跳对"某渠道消息已入库但
+          从未生成过草稿"这类局部故障暂无检测能力——继承自 Messenger/WhatsApp webhook
+          既有的 best-effort 设计，是三渠道通用缺口，不只是邮件专属，需要单独立项补
+    - [ ] 邮件渠道的 kill switch（`messenger_agent_enabled_email`）仍然只有 API、没有
+          Settings UI 开关——跟 messenger/whatsapp 两个既有开关同状态，可以一起补
 - [ ] Meta 企业验证仍未通过（issue [#1299](https://github.com/bigbigraydeng-maker/magic-engine/issues/1299)，需要 PM 本人上传公司文件）——不卡继续开发，但卡 Messenger/WhatsApp webhook 真正上线那天
 
 ## 客户知识库（Client Knowledge Base）—— L1 平台能力，6 步已全部完成（2026-09-15）

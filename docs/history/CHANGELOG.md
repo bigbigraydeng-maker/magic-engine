@@ -5,6 +5,20 @@
 
 ---
 
+### 2026-09-20（CRM+AI 客服：邮件渠道接入 Governed Reply Agent 治理链路）
+
+PR [#1808](https://github.com/bigbigraydeng-maker/magic-engine/pull/1808) 已合并（merge commit `1c0d983f`）。延续 issue [#1745](https://github.com/bigbigraydeng-maker/magic-engine/issues/1745) 的调研结论，把邮件接进已上线的 CTS Governed Reply Agent（AI 起草 → 人审 → 发送，覆盖 Messenger/WhatsApp 的同一套系统）——这是 CRM+AI 客服接入这条线"Messenger-only"范围冻结（[docs/roadmap/2026-09-15-crm-ai-agent-build-control.md](../roadmap/2026-09-15-crm-ai-agent-build-control.md)）里 PM 2026-09-15 当场拍板的**唯一例外**，只豁免邮件一个渠道。
+
+- `channel-dispatch.ts` 扩到三渠道；F2（AI 起草→发送主链路）接受邮件，F1（秒回安抚话术）刻意不接——邮件靠每小时同步、秒回没有对应产品价值，这是业务判断，留白给 PM/华佗决定，不在这次范围内替他们拍板。
+- 补上 `mail-ingest.ts`（邮件每小时同步）此前完全不 emit `conversation/message.received` 的缺口——不补这个，channel-dispatch 认识邮件也没用，F1-F4 永远不会被邮件真正触发。
+- 顺手修了一个会被这次改动放大的既有缺口：门户"紧急停用全渠道"（`kill-switch.ts`）此前只翻 messenger/whatsapp 两列，这次加邮件时如果不改，"全渠道停"会变成一句谎言——现在三列一起翻，配套面板文案也同步改了（子牙复审抓到文案没跟上）。
+- 新增数据库列 `clients.messenger_agent_enabled_email`（布尔，默认 false，新客户/新渠道默认关闭）。
+- 子牙（架构）+ 魏征（挑刺）两轮独立复审均无 blocker；195+886 条相关测试全过；`npm run build` 通过。
+
+**Reuse Statement**：复用已确认渠道无关的只读工具/verifier/prompt/classify/optout 层（issue #1745 调研结论），未新建平台能力；新增的渠道分发映射、邮件窗口判定、事件 emit 逻辑都是渠道级通用扩展，没有把任何客户名/客户 ID/客户私有事实写进 shared runtime。
+
+---
+
 ### 2026-09-20（Park Homes 官网：首页去掉最后的网图占位，换成真实照片）
 
 PR [#1804](https://github.com/bigbigraydeng-maker/magic-engine/pull/1804) 已合并并部署。PM 要求把 Park Homes 官网整体检查一遍还有什么可以升级——查出首页（全站访问量最高的页面）大图和"品牌理念"板块的配图，还是最早搭站时用的网图占位，大图上甚至挂着一行"Example image · indicative only"（示例图片·仅供参考）的小字标签，而 5 个项目详情页早在几周前就已经全部换成客户提供的真实效果图/实景照。换成了已经在 Riverside、Howick 项目页上线过的真实照片，删掉了占位标签，并清掉了 8 张确认没人再引用的旧网图文件。
