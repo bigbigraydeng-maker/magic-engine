@@ -190,6 +190,31 @@ export class GithubClient {
   }
 
   /**
+   * List open PRs whose head branch starts with `branchPrefix`. GitHub's PR
+   * list endpoint doesn't support prefix filtering server-side, so this
+   * fetches `state=open` unfiltered (bounded to `perPage`, default covers any
+   * realistic number of concurrently-open automation branches on one repo)
+   * and filters client-side by `head.ref`.
+   *
+   * Used by the SEO meta-cycle's orphaned-PR guard (魏征 finding #8): before
+   * opening a new PR for a candidate, check whether a still-open PR from a
+   * previous cycle already touches the same branch family, so stale PRs get
+   * reused or explicitly closed instead of piling up unbounded.
+   */
+  async listPullRequestsByBranchPrefix(
+    owner: string,
+    repo: string,
+    branchPrefix: string,
+    perPage = 50,
+  ): Promise<Array<GitHubPullRequest & { head: { ref: string } }>> {
+    const prs = await this.request<Array<GitHubPullRequest & { head: { ref: string } }>>(
+      'GET',
+      `/repos/${owner}/${repo}/pulls?state=open&per_page=${perPage}`,
+    )
+    return prs.filter((pr) => pr.head.ref.startsWith(branchPrefix))
+  }
+
+  /**
    * Read a PR's lifecycle state. Used by blog pr-sync (2026-08-01): posts in
    * status 'pr_open' poll this to learn whether the human merged or closed
    * the PR, so the post's status (and the site-content registry) stays true.

@@ -568,7 +568,7 @@ export async function loadManualItems(
     }),
     supabase
       .from('seo_meta_log')
-      .select('client_id, page_slug, created_at')
+      .select('client_id, page_slug, created_at, applied_channel')
       .eq('wp_updated', false)
       .in('client_id', ids),
     supabase
@@ -604,8 +604,23 @@ export async function loadManualItems(
 
   // 3. Meta changes queued but not applied — the Oztop WP plugin polls this
   //    queue; a long backlog means the plugin stopped.
+  //
+  //    CTS (and any other repo-PR client — applied_channel='pr') is EXCLUDED
+  //    here: its cts-meta-pr.ts / seo-meta-cycle flow always writes
+  //    wp_updated=false even after the PR has been opened/merged (there is
+  //    no client-side plugin polling this queue for it), so before this
+  //    filter every CTS row eventually surfaced a false "Magic Engine 插件
+  //    is stopped" alert — a client that has no such plugin. Detecting a
+  //    genuinely stuck repo-PR (opened but never merged) needs a separate
+  //    GitHub PR-state check, not this queue-age heuristic; that's tracked
+  //    as follow-up work, not solved here.
   const metaByClient = new Map<string, { count: number; oldest: string }>()
-  for (const row of (metaPending.data ?? []) as Array<{ client_id: string; created_at: string }>) {
+  for (const row of (metaPending.data ?? []) as Array<{
+    client_id: string
+    created_at: string
+    applied_channel?: string | null
+  }>) {
+    if (row.applied_channel === 'pr') continue
     const cur = metaByClient.get(row.client_id)
     if (!cur || row.created_at < cur.oldest) {
       metaByClient.set(row.client_id, { count: (cur?.count ?? 0) + 1, oldest: row.created_at })

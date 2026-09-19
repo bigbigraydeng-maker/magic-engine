@@ -15,6 +15,7 @@ import { conversionDailyPipeline } from './conversion-daily-pipeline'
 import { conversationInboundDraft } from './conversation-inbound-draft'
 import { conversationHealthHeartbeat } from './conversation-health-heartbeat'
 import { postPublishFanOut, postPublishCheck } from './seo-post-publish-monitor'
+import { seoMetaCycleFanOut, seoMetaCycleRunOne } from './seo-meta-cycle'
 
 export const cloudFunctions = [
   webIntelligenceCapture,
@@ -37,6 +38,8 @@ export const cloudFunctions = [
   conversationHealthHeartbeat,
   postPublishFanOut,
   postPublishCheck,
+  seoMetaCycleFanOut,
+  seoMetaCycleRunOne,
 ]
 
 /** 命名空间自检：所有注册函数 id 必须以 cloud- 开头（契约测试 + 运行期双保险）。 */

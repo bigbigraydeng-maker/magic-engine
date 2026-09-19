@@ -192,11 +192,16 @@ async function gatherClient(
         .select('id', { count: 'exact', head: true })
         .eq('client_id', clientId)
         .gte('created_at', weekAgoIso),
+      // wp_updated=true only counts the WordPress-plugin channel (Oztop).
+      // A repo-PR client (applied_channel='pr', e.g. CTS) never flips
+      // wp_updated — cts-meta-pr.ts / seo-meta-cycle write the row once the
+      // PR is opened/merged in the same run, so presence of the row in the
+      // window is the applied-channel equivalent of wp_updated=true.
       supabase
         .from('seo_meta_log')
         .select('created_at')
         .eq('client_id', clientId)
-        .eq('wp_updated', true)
+        .or('wp_updated.eq.true,applied_channel.eq.pr')
         .gte('created_at', weekAgoIso),
       supabase
         .from('blog_posts')
