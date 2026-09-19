@@ -12,6 +12,7 @@
 
 import { KnowledgeReadError } from './errors'
 import { isGlobalAdminEmail } from '@/lib/auth/whitelist'
+import { tierForAccessType } from '@/lib/auth/access-types'
 
 interface ConfirmerRow {
   confirmer_email: string
@@ -157,6 +158,7 @@ function asRows<T>(data: unknown): T[] {
 interface AccountRow {
   id: string
   email: string
+  access_type: string
 }
 interface ConfirmerIdRow {
   id: string
@@ -179,10 +181,21 @@ const POSTGRES_UNIQUE_VIOLATION = '23505'
  * 登记人不能把自己登记成确认人（防止全局管理员既当裁判又当运动员的最
  * 明显情形）。
  *
- * 🔴 issue #1646 "确认人必须是该客户名下 access_type='client' 账号"：查
+ * 🔴 issue #1646 "确认人必须是该客户名下的付费客户账号"：查
  * `client_portal_users`（不是 `client_knowledge_confirmers` 自己）核实这
  * 一点——两张表故意分开：一张管"谁是这个客户的真实联系人"（既有账号表），
  * 一张管"这个真实联系人有没有被明确授权确认知识库条目"（本表）。
+ *
+ * 🔴 2026-09-20 修复：这里原来写的是 `.eq('access_type', 'client')`，只认
+ * 字面值 'client'。但 `access-types.ts` 的 migration 注释早已明确
+ * "{dashboard, fde, both, client} → tier='paid_client'"——这四个是同一档
+ * 付费客户权限的历史遗留别名，不是四种不同的人。旧写法会把所有还没被
+ * 手工改写成 'client' 的老客户联系人（CTS 的两个联系人都是 'both'）挡在
+ * 门外，跟"确认人必须是客户名下的人"这条业务规则本身没关系，纯粹是没接
+ * 上 `access-types.ts` 早就统一好的 tier 概念——该文件顶部原话是"Never
+ * inline a literal `.in([...])` over access_type elsewhere. Import from
+ * here."，这里正是没遵守这条规范的漏网之鱼。改成用 `tierForAccessType`
+ * 判断是否属于 'paid_client' 档，不再关心具体是哪个历史写法。
  *
  * 🔴 并发登记（子牙+魏征联合复审 2026-09-14）：两个并发请求都可能在"查
  * 当前有效登记"这一步都看到"还没有"，都往下 insert——数据库的局部唯一
@@ -208,14 +221,16 @@ export async function registerConfirmer(
     throw new Error('[knowledge] 全局管理员账号不能被登记为客户确认人（不能代客户确认）')
   }
 
-  const accountCheck = await sb.from('client_portal_users').select('id, email').eq('client_id', clientId).eq('access_type', 'client')
+  const accountCheck = await sb.from('client_portal_users').select('id, email, access_type').eq('client_id', clientId)
   if (accountCheck.error) {
     throw new KnowledgeConfirmerWriteError('核实客户账号（client_portal_users）', accountCheck.error)
   }
-  const hasAccount = asRows<AccountRow>(accountCheck.data).some((row) => sameEmail(row.email, confirmerEmail))
+  const hasAccount = asRows<AccountRow>(accountCheck.data).some(
+    (row) => sameEmail(row.email, confirmerEmail) && tierForAccessType(row.access_type) === 'paid_client',
+  )
   if (!hasAccount) {
     throw new Error(
-      `[knowledge] ${confirmerEmail} 不是客户 ${clientId} 名下的 access_type='client' 账号，不能登记为确认人`,
+      `[knowledge] ${confirmerEmail} 不是客户 ${clientId} 名下的付费客户账号，不能登记为确认人`,
     )
   }
 
