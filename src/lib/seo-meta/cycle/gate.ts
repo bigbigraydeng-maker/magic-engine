@@ -42,10 +42,17 @@
  *      keywords (snapshotRankedKeywordsForClient), so a page-scoped GSC
  *      query this gate just derived is very often not in that set yet.
  *      Fixed: checkKeywordSnapshot() now falls back to ONE live DataForSEO
- *      search-volume call per candidate when the snapshot is missing/stale.
- *      That endpoint doesn't return difficulty, so keywordDifficulty stays
- *      null in that case — never coerced to 0 (that would be the exact
- *      "?? 0" bug from root cause #2 above, just moved to a new call site).
+ *      call per candidate when the snapshot is missing/stale — labs.ts's
+ *      bulkKeywordVolume (keyword_overview/live, fixed 2026-08-26, see that
+ *      function's header — NOT search-volume.ts's getSearchVolume, which
+ *      doesn't return difficulty at all). PM's hard rule (2026-09-20, third
+ *      pass): search volume AND difficulty must BOTH be present, from
+ *      either source — a partial live result (e.g. volume but no
+ *      difficulty) is exactly as unusable as no result, and must be
+ *      skipped with reason keyword_data_unavailable, never let through with
+ *      a null/assumed difficulty. A thrown lookup error (including
+ *      DataForSeoTaskError) is caught and turned into the same skip — never
+ *      swallowed into a silent "continue as if it passed".
  *   5. The forbidden-city-travel-guide candidate burned a full gate run
  *      (GSC + DataForSEO + SERP) before failing in apply-adapter.ts with
  *      skipReason:'slug_not_in_any_data_file' — a check that was always
@@ -63,7 +70,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchGscQueriesForPage } from '@/lib/gsc/client'
 import { getSerpPage } from '@/lib/dataforseo/serp'
-import { getSearchVolume } from '@/lib/dataforseo/search-volume'
+import { bulkKeywordVolume } from '@/lib/dataforseo/labs'
 import { locationCodeForDb } from '@/lib/seo-intelligence/keyword-snapshots'
 import type { MetaCycleCandidate, MetaCycleClientConfig, MetaCycleGateEvidence, MetaCycleGateFailure } from './types'
 
@@ -157,29 +164,32 @@ export async function deriveTopicMatchedKeyword(
  * (snapshotRankedKeywordsForClient → getRankedKeywords) — a page-scoped GSC
  * query the gate just derived is very often NOT in that set yet (7 of 9 W38
  * dry-run candidates hit exactly this). Previously that meant an automatic
- * skip. Now: fall back to ONE live DataForSEO search-volume call for this
- * single keyword (getSearchVolume — the same wrapper the weekly snapshot
- * pipeline itself is built on top of via labs.ts, reused here directly per
- * PM instruction). This call happens at most once per candidate the gate
- * actually reaches (bounded by the step-3 wide pool, config.maxPagesPerRun*3
- * — e.g. ≤9 for CTS's maxPagesPerRun=3), since each candidate resolves to
- * exactly one target keyword before this function is ever called.
+ * skip. Now: fall back to ONE live DataForSEO call for this single keyword —
+ * labs.ts's bulkKeywordVolume (keyword_overview/live, fixed 2026-08-26 — see
+ * its header comment), which returns BOTH search_volume and
+ * keyword_properties.keyword_difficulty in one call, unlike
+ * search-volume.ts's getSearchVolume (volume only, no difficulty at all —
+ * do not use it here). This call happens at most once per candidate the
+ * gate actually reaches (bounded by the step-3 wide pool,
+ * config.maxPagesPerRun*3 — e.g. ≤9 for CTS's maxPagesPerRun=3), since each
+ * candidate resolves to exactly one target keyword before this function is
+ * ever called.
  *
- * 🔴 getSearchVolume does NOT return keyword_difficulty (see that file's
- *    header comment — no working DataForSEO bulk-difficulty endpoint is
- *    wired up). The live-fallback path therefore returns
- *    keywordDifficulty: null, NOT 0 — root cause #2 of the original
- *    incident was exactly `?? 0` treating "we don't know" as "definitely
- *    safe". A null difficulty is carried through honestly into the PR body
- *    and skips ONLY the difficulty-ceiling check (runGateForCandidate),
- *    never assumed to pass or fail it.
+ * 🔴 PM's hard rule (2026-09-20, third pass): search volume AND difficulty
+ *    must BOTH be present — a live result with volume but no difficulty is
+ *    exactly as unusable as no result at all, and is skipped with
+ *    keyword_data_unavailable, same as a total miss. This is deliberately
+ *    NOT the same shape as root cause #2 of the original incident (`?? 0`
+ *    silently treating "unknown" as "definitely safe") — here "unknown"
+ *    always means "skip", never "assume safe" and never "assume unsafe
+ *    enough to allow through with a gap".
  */
 export async function checkKeywordSnapshot(
   supabase: SupabaseClient,
   clientId: string,
   keyword: string,
   locationCode: number,
-): Promise<{ searchVolume: number; keywordDifficulty: number | null; snapshotDate: string } | { failure: string }> {
+): Promise<{ searchVolume: number; keywordDifficulty: number; snapshotDate: string } | { failure: string }> {
   const { data, error } = await supabase
     .from('keyword_snapshots')
     .select('search_volume, keyword_difficulty, snapshot_date')
@@ -200,13 +210,19 @@ export async function checkKeywordSnapshot(
     }
   }
 
-  const live = await getSearchVolume([keyword], locationCode).catch(() => null)
-  const liveResult = live?.[0]
-  if (!liveResult || liveResult.searchVolume === null) {
-    return { failure: `no fresh keyword_snapshots row for "${keyword}", and a live DataForSEO search-volume lookup also returned no data` }
+  let live: Awaited<ReturnType<typeof bulkKeywordVolume>>
+  try {
+    live = await bulkKeywordVolume([keyword], locationCode)
+  } catch (err) {
+    return { failure: `no fresh keyword_snapshots row for "${keyword}", and the live DataForSEO lookup threw: ${err instanceof Error ? err.message : String(err)}` }
   }
 
-  return { searchVolume: liveResult.searchVolume, keywordDifficulty: null, snapshotDate: new Date().toISOString().slice(0, 10) }
+  const liveResult = live[0]
+  if (!liveResult || liveResult.search_volume === null || liveResult.keyword_difficulty === null) {
+    return { failure: `no fresh keyword_snapshots row for "${keyword}", and the live DataForSEO lookup is missing search_volume and/or keyword_difficulty` }
+  }
+
+  return { searchVolume: liveResult.search_volume, keywordDifficulty: liveResult.keyword_difficulty, snapshotDate: new Date().toISOString().slice(0, 10) }
 }
 
 /** Step 3: the SAME keyword must not have been assigned to a DIFFERENT page in the last 90 days (excludes reverted rows — those were never a real, standing assignment). */
@@ -310,11 +326,7 @@ export async function runGateForCandidate(
   const snapshotResult = await checkKeywordSnapshot(supabase, config.clientId, keyword, locationCode)
   if ('failure' in snapshotResult) return { candidate, reason: GATE_REASON.KEYWORD_DATA_UNAVAILABLE, detail: snapshotResult.failure }
 
-  // Only enforced when difficulty is actually known — the live-fallback path
-  // legitimately returns null (getSearchVolume doesn't return difficulty),
-  // and PM was explicit: unknown difficulty must never be treated as 0 (the
-  // original incident's root cause #2), so it can't fail this check either.
-  if (snapshotResult.keywordDifficulty !== null && snapshotResult.keywordDifficulty > SKIP_DIFFICULTY_FLOOR) {
+  if (snapshotResult.keywordDifficulty > SKIP_DIFFICULTY_FLOOR) {
     return { candidate, reason: GATE_REASON.DIFFICULTY_TOO_HIGH, detail: `difficulty ${snapshotResult.keywordDifficulty} > ${SKIP_DIFFICULTY_FLOOR} for "${keyword}"` }
   }
 
@@ -330,9 +342,6 @@ export async function runGateForCandidate(
   }
   if ('failure' in serpResult) return { candidate, reason: GATE_REASON.SERP_SELF_CANNIBALIZATION, detail: serpResult.failure }
 
-  const dataSourceNote = snapshotResult.keywordDifficulty === null
-    ? ' — search volume from a live DataForSEO lookup (no fresh weekly keyword_snapshots row for this keyword yet)'
-    : ''
   const evidence: MetaCycleGateEvidence = {
     keyword,
     searchVolume: snapshotResult.searchVolume,
@@ -340,7 +349,7 @@ export async function runGateForCandidate(
     snapshotDate: snapshotResult.snapshotDate,
     competitorTitles: serpResult.top3Titles,
     ctsRankingUrl: serpResult.ctsRankingUrl,
-    chosenReason: `page's own GSC queries include "${keyword}" (${topicResult.impressions} impressions), which contains this page's core topic word${dataSourceNote}`,
+    chosenReason: `page's own GSC queries include "${keyword}" (${topicResult.impressions} impressions), which contains this page's core topic word`,
   }
 
   return { evidence, candidate: { ...candidate, keyword } }

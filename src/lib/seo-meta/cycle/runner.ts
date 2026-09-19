@@ -258,7 +258,7 @@ export interface MetaCycleProposal {
   pageUrl: string
   keyword: string
   searchVolume: number
-  keywordDifficulty: number | null
+  keywordDifficulty: number
   snapshotDate: string
   competitorTitles: string[]
   ctsRankingUrl: string | null

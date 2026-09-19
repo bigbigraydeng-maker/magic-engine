@@ -9,8 +9,10 @@ import type { ApplyAdapter, MetaCycleCandidate, MetaCycleClientConfig } from '..
  * query the gate derives), the forbidden-city page burned a full gate run
  * before failing on slug_not_in_any_data_file, and the leshan page's
  * highest-impression on-topic query was the French "leshan au départ de
- * chengdu". One real-shaped test per fix, per PM's instruction not to
- * over-test this.
+ * chengdu". One real-shaped test per fix (two for the live-fallback path,
+ * per PM's explicit ask: one where difficulty comes back null and the
+ * candidate must be skipped, one where both fields come back and the gate
+ * continues), per PM's instruction not to over-test this.
  */
 
 const mockFetchGscQueriesForPage = vi.fn()
@@ -23,9 +25,9 @@ vi.mock('@/lib/dataforseo/serp', () => ({
   getSerpPage: (...args: unknown[]) => mockGetSerpPage(...args),
 }))
 
-const mockGetSearchVolume = vi.fn()
-vi.mock('@/lib/dataforseo/search-volume', () => ({
-  getSearchVolume: (...args: unknown[]) => mockGetSearchVolume(...args),
+const mockBulkKeywordVolume = vi.fn()
+vi.mock('@/lib/dataforseo/labs', () => ({
+  bulkKeywordVolume: (...args: unknown[]) => mockBulkKeywordVolume(...args),
 }))
 
 const CONFIG: MetaCycleClientConfig = {
@@ -78,19 +80,29 @@ function fakeSupabase(opts: { snapshotRow?: unknown; reuseRows?: unknown[] }) {
   return { from: () => chain } as any
 }
 
-describe('checkKeywordSnapshot — live DataForSEO fallback (PM 2026-09-20 W38 dry-run follow-up)', () => {
-  it('falls back to a live search-volume lookup when there is no fresh keyword_snapshots row, and returns keywordDifficulty:null (never coerced to 0 — that was the original incident root cause)', async () => {
+describe('checkKeywordSnapshot — live DataForSEO fallback (PM 2026-09-20, third pass)', () => {
+  it('skips when the live fallback returns a search volume but no difficulty — a partial result is treated the same as no result, never let through with a gap', async () => {
     const { checkKeywordSnapshot } = await import('../gate')
-    mockGetSearchVolume.mockResolvedValue([{ keyword: 'leshan giant buddha day trip', searchVolume: 90, cpcUsd: null, competition: null, monthlySearches: [] }])
+    mockBulkKeywordVolume.mockResolvedValue([{ keyword: 'leshan giant buddha day trip', search_volume: 90, keyword_difficulty: null, cpc: null, competition: null, intent: 'informational', position: null }])
     const supabase = fakeSupabase({ snapshotRow: null })
 
     const result = await checkKeywordSnapshot(supabase, CONFIG.clientId, 'leshan giant buddha day trip', 2554)
 
-    expect(mockGetSearchVolume).toHaveBeenCalledWith(['leshan giant buddha day trip'], 2554)
+    expect(mockBulkKeywordVolume).toHaveBeenCalledWith(['leshan giant buddha day trip'], 2554)
+    expect('failure' in result).toBe(true)
+  })
+
+  it('continues into the gate when the live fallback returns BOTH search volume and difficulty', async () => {
+    const { checkKeywordSnapshot } = await import('../gate')
+    mockBulkKeywordVolume.mockResolvedValue([{ keyword: 'leshan giant buddha day trip', search_volume: 90, keyword_difficulty: 34, cpc: null, competition: null, intent: 'informational', position: null }])
+    const supabase = fakeSupabase({ snapshotRow: null })
+
+    const result = await checkKeywordSnapshot(supabase, CONFIG.clientId, 'leshan giant buddha day trip', 2554)
+
     expect('failure' in result).toBe(false)
     if ('failure' in result) return
     expect(result.searchVolume).toBe(90)
-    expect(result.keywordDifficulty).toBeNull()
+    expect(result.keywordDifficulty).toBe(34)
   })
 })
 

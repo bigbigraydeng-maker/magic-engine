@@ -65,9 +65,9 @@ export type MetaCycleActionType = 'title_rewrite' | 'skip'
  */
 export interface MetaCycleGateEvidence {
   keyword: string
+  /** Search volume AND difficulty are both hard requirements — gate.ts's checkKeywordSnapshot only returns success when neither is null (PM 2026-09-20, third pass: a partial result is treated the same as no result, never coerced or let through with a gap). */
   searchVolume: number
-  /** null when the only data available was a live DataForSEO search-volume lookup — that endpoint doesn't return difficulty. Never a coerced 0 (PM 2026-09-20 incident root cause #2 was exactly `?? 0` making "no data" look like "definitely safe"). */
-  keywordDifficulty: number | null
+  keywordDifficulty: number
   snapshotDate: string
   /** Top-3 competitor page titles from the live SERP check. */
   competitorTitles: string[]
