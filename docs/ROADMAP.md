@@ -906,6 +906,16 @@ Gate B 定的 `minSampleSize=3`，页面目前只会显示「数据还不够说�
       `parseStringMap`。未来 receipt status 定义变更（例如加 `'timeout'`）三处都要改，属「假件与 SQL 同步」
       同类事故模式，建议下沉到 `src/lib/flywheel/tune/` 下的共享 helper。
 
+**Daily Plan 发布回执保护的后续**（PR [#1687](https://github.com/bigbigraydeng-maker/magic-engine/pull/1687) 已合并，2026-09-15；子牙 + 魏征复审留下）：
+
+- [ ] **审核接口在带排队/发布回执时仍能改审核结论**（A 级，另一窗口已在修）—— `campaign-daily-plan/post-review/route.ts`
+      不看 `publish_queue_meta` / `publish_meta`。排队后改结论会让发布报「排队回执过期」、重新排队又冲突，流程卡死；
+      发布进行中改结论会让回执写不回库，帖子在线但只剩 HTTP 响应里的记录。
+- [ ] **只读核查生产上是否已有「回执被藏起来」的旧行** —— #1687 之前查计划出错会新插一行。查同一 client + campaign 下
+      `campaign_daily_v1` 行数 > 1、且较旧行带 `publish_meta` 的情况；有的话要人工判断怎么恢复，不许直接改数据。
+- [ ] **计划版本链（产品限制的长期解）** —— 现在一个活动发过/排过一轮后，下一轮内容或改文案只能新建活动。
+      长期应让读取方按 `plan_id` 取计划、而不是只取最新一行，或在回执已作废（例如全失败、零条上线）时允许覆盖。
+
 ## Phase 24 — Execution Loop Closure（执行闭环修复）📋 已登记，2026-06-06 启动
 
 - [ ] P24.A.1 migration: `20260606000001_execution_items_zhuge_source.sql`

@@ -190,6 +190,18 @@ PR [#1716](https://github.com/bigbigraydeng-maker/magic-engine/pull/1716)（原 
 
 ---
 
+### 2026-09-15（Daily Plan：新指令不再抹掉已发布帖子的回执）
+
+PR [#1687](https://github.com/bigbigraydeng-maker/magic-engine/pull/1687) 已合并（A 级）。给同一个推广活动再下一次 7 天内容指令时，`POST /api/clients/[id]/campaign-daily-plan` 原来会整份覆盖最新计划，连带清空 `publish_meta`（已发到客户 Facebook 主页的帖子唯一记录，撤回和防重复发布都靠它）和 `publish_queue_meta`。真实风险：CTS 计划 `f166a5c0-…` 已发 7 条，再下一次指令就撤不回来。
+
+现在：计划带发布回执（任何状态，含全部已撤回）→ 409 `PLAN_ALREADY_PUBLISHED`；带排队回执 → 409 `PLAN_PUBLISH_QUEUED`；写入时再核对两份回执都不在，读完后回执刚落进来 → 409 `PLAN_CHANGED_DURING_SAVE`；查计划出错 → 500（原来会误插第二行把回执藏起来）。只有审核结论的计划照旧覆盖。拒绝时提示「新建活动并归档旧活动」。选择拒绝而不是另插新行，是因为 GET / 发布 / 撤回都只读最新一行。
+
+验证：相关测试 122 条通过（新增 8 条，逐个删掉 6 处关键检查都能被测试抓到），CI 类型检查与编译通过，子牙 + 魏征两轮复审。未在生产上实测（唯一试法是真写客户计划）。后续见 ROADMAP「Daily Plan 发布回执保护的后续」。
+
+**Reuse Statement**：复用发布 / 排队接口已有的「写入前核对 `plan_data->…` 为空」做法和现有回执 schema；规则对所有客户、所有行业通用，无客户或行业专属逻辑，无新表、无数据库改动。
+
+---
+
 ### 2026-09-15（NAL 私信 → Meta CAPI 有效咨询同步，dry_run）
 
 PR [#1675](https://github.com/bigbigraydeng-maker/magic-engine/pull/1675)、[#1684](https://github.com/bigbigraydeng-maker/magic-engine/pull/1684)、[#1689](https://github.com/bigbigraydeng-maker/magic-engine/pull/1689) 已合并并部署生产，migration 已 apply。New Asian Logistics（NAL，跨境集运物流代理）的 Facebook Messenger 私信对话现在能被自动判定为"有效咨询"并写入 `me_sale_outcomes`，复用 CTS 那条线已上线的 Meta 广告转化 API（CAPI）回写通道。判据用 21 个真实对话人工标注 + 模拟跑规则验证过（0 假阳性，约 69% 召回）；生产库真实跑通：186 段对话，判出 20 条有效咨询全部正确写入 `pending_review`，重跑确认幂等键生效。
