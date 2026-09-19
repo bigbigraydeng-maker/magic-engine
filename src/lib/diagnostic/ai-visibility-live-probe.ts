@@ -127,11 +127,13 @@ async function loadClientIdentity(
   supabase: SupabaseClient,
   clientId: string,
 ): Promise<{ domain: string | null; brand_aliases: string[] | null }> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('clients')
     .select('domain, brand_aliases')
     .eq('id', clientId)
     .maybeSingle<{ domain: string | null; brand_aliases: string[] | null }>()
+  // Failing closed is safe: without domain/aliases matching only gets stricter.
+  if (error) console.warn('[ai-visibility-live-probe] client identity load failed:', error.message)
   return { domain: data?.domain ?? null, brand_aliases: data?.brand_aliases ?? null }
 }
 

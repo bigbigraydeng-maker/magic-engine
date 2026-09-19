@@ -21,6 +21,7 @@ import { runClaude } from './runners/claude'
 import { runPerplexity } from './runners/perplexity'
 import { runGemini } from './runners/gemini'
 import { parseRanking } from './parser'
+import { buildClientIdentifiers, isClientBrand, type ClientBrandIdentity } from './client-brand-match'
 import { supabaseAdmin } from '../supabase'
 import { writeTrackerFlywheelMetrics } from '../flywheel/metrics/writeTrackerMetrics'
 import type {
@@ -127,7 +128,11 @@ export async function runTracker(
   // 4. Aggregate weekly snapshot (only if we got at least one successful run)
   console.log('[runTracker] Aggregating snapshot...')
   if (result.runs_succeeded > 0) {
-    const agg = await aggregateSnapshot(client.id, brandName)
+    const agg = await aggregateSnapshot(client.id, {
+      brandName,
+      domain: client.domain,
+      aliases: client.brand_aliases,
+    })
     result.snapshot_id = agg?.snapshotId ?? null
 
     // 5. Write GEO flywheel metrics so attribution job can compute outcomes
@@ -377,7 +382,10 @@ interface AggregateResult {
  * Uses Monday of the current week as the snapshot key.
  * Returns metric data alongside the snapshot id for flywheel writes.
  */
-async function aggregateSnapshot(clientId: string, brandName: string): Promise<AggregateResult | null> {
+async function aggregateSnapshot(
+  clientId: string,
+  identity: ClientBrandIdentity
+): Promise<AggregateResult | null> {
   const weekOf = mondayOfThisWeek().toISOString().slice(0, 10) // YYYY-MM-DD
 
   // Pull all runs for this client this week
@@ -414,7 +422,7 @@ async function aggregateSnapshot(clientId: string, brandName: string): Promise<A
       ai_engine: string
       brands_mentioned: BrandMention[]
     }>,
-    brandName
+    identity
   )
 
   // Upsert by (client_id, week_of)
@@ -442,7 +450,7 @@ async function aggregateSnapshot(clientId: string, brandName: string): Promise<A
 /** Aggregate brand mentions across all runs into a flat ranking table. */
 function buildRankingTable(
   runs: Array<{ ai_engine: string; brands_mentioned: BrandMention[] }>,
-  clientBrandName?: string
+  identity?: ClientBrandIdentity
 ): Record<string, unknown> {
   const byBrand = new Map<
     string,
@@ -473,8 +481,8 @@ function buildRankingTable(
 
   // Merge brand name variants for the client (e.g. "CTS Tours" and
   // "CTS Tours - China Travel Service (NZ) Limited" → one canonical entry)
-  if (clientBrandName) {
-    mergeClientBrandVariants(byBrand, clientBrandName)
+  if (identity) {
+    mergeClientBrandVariants(byBrand, identity)
   }
 
   const brands = Array.from(byBrand.entries())
@@ -495,30 +503,23 @@ function buildRankingTable(
 
 /**
  * Merge all brand-name variants of the client into a single canonical entry.
- * Variants are detected by substring inclusion (case-insensitive):
- *   "CTS Tours - China Travel Service (NZ) Limited" includes "CTS Tours"
- *   → both collapse into the canonical client brand name.
+ * Uses the same client-identity rules as the parser (brand name, aliases,
+ * domain), so every entry that set client_brand_rank lands in one row.
  */
 function mergeClientBrandVariants(
   byBrand: Map<string, { mentions: number; rankSum: number; byEngine: Record<string, number[]> }>,
-  clientBrandName: string
+  identity: ClientBrandIdentity
 ): void {
-  const canon = clientBrandName.trim()
-  const canonLower = canon.toLowerCase()
+  const canon = identity.brandName.trim()
+  const ids = buildClientIdentifiers(identity)
 
   let canonicalKey = ''
   const variantKeys: string[] = []
 
   for (const key of Array.from(byBrand.keys())) {
-    const keyLower = key.toLowerCase().trim()
-    if (keyLower === canonLower) {
+    if (key.trim().toLowerCase() === canon.toLowerCase()) {
       canonicalKey = key
-    } else if (keyLower.includes(canonLower)) {
-      // Only merge when the RAW CANDIDATE contains the canonical brand name
-      // (e.g. "CTS Tours - China Travel Service NZ" contains "CTS Tours").
-      // Deliberately NOT merging the reverse direction — that would absorb
-      // short competitor names into a longer client name (e.g. "Magic" into
-      // "Magic Engine"), corrupting competitor rankings in the snapshot.
+    } else if (isClientBrand(key, ids)) {
       variantKeys.push(key)
     }
   }

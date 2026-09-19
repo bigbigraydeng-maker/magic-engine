@@ -16,6 +16,26 @@ describe('buildClientIdentifiers', () => {
     ).toEqual(['cts tours', 'china travel service', 'ctstours co nz', 'ctstours'])
   })
 
+  it('adds the leading segment of a "Person — Office" composite name', () => {
+    expect(buildClientIdentifiers({ brandName: 'Roman Hu — Ray White Mission Bay' })).toEqual([
+      'roman hu ray white mission bay',
+      'roman hu',
+    ])
+  })
+
+  it('uses the registrable label, not a subdomain', () => {
+    expect(buildClientIdentifiers({ brandName: 'Acme', domain: 'https://shop.acme.co.nz' })).toEqual([
+      'acme',
+      'shop acme co nz',
+    ])
+  })
+
+  it('ignores a domain with a path (a page on someone else\'s site)', () => {
+    expect(
+      buildClientIdentifiers({ brandName: 'Jane Doe', domain: 'raywhite.co.nz/agents/jane-doe' })
+    ).toEqual(['jane doe'])
+  })
+
   it('returns nothing for an empty brand with no domain', () => {
     expect(buildClientIdentifiers({ brandName: '' })).toEqual([])
   })
@@ -42,9 +62,20 @@ describe('isClientBrand', () => {
   it('accepts real variants', () => {
     expect(isClientBrand('Roman Hu', roman)).toBe(true)
     expect(isClientBrand('Roman Hu (Ray White Mission Bay)', roman)).toBe(true)
-    expect(isClientBrand('CTS Tours', cts)).toBe(true)
+    expect(isClientBrand('CTS Tours NZ Ltd', cts)).toBe(true)
     expect(isClientBrand('ctstours.co.nz', cts)).toBe(true)
     expect(isClientBrand('Dixon Homes Ltd', dixon)).toBe(true)
+  })
+
+  it('a national brand does not claim a branch-named client', () => {
+    const branch = buildClientIdentifiers({ brandName: 'Ray White Mission Bay' })
+    expect(isClientBrand('Ray White', branch)).toBe(false)
+  })
+
+  it('a short single-token alias must equal the brand exactly', () => {
+    const ids = buildClientIdentifiers({ brandName: 'CTS Tours NZ', aliases: ['CTS'] })
+    expect(isClientBrand('CTS', ids)).toBe(true)
+    expect(isClientBrand('CTS Logistics', ids)).toBe(false)
   })
 
   it('does not match a domain root embedded in a longer word', () => {
@@ -62,16 +93,59 @@ describe('resolveClientBrandRank', () => {
     expect(out.client_brand_rank).toBe(1)
   })
 
-  it('a leading-words variant written in the text counts as evidence', () => {
+  it('a shorter name only counts once it is configured as an alias', () => {
+    const brands = [
+      { brand: 'JR Academy', rank: 1, snippet: 'x' },
+      { brand: 'Magic Lab', rank: 2, snippet: 'x' },
+    ]
+    const raw = 'Compare JR Academy and Magic Lab for small-business owners learning AI.'
+    expect(resolveClientBrandRank(brands, raw, { brandName: 'Magic Lab Class' }).client_brand_rank).toBeNull()
+    expect(
+      resolveClientBrandRank(brands, raw, { brandName: 'Magic Lab Class', aliases: ['Magic Lab'] })
+        .client_brand_rank
+    ).toBe(2)
+  })
+
+  it('a 2-char CJK alias is not textual evidence (no word boundaries in CJK)', () => {
+    const out = resolveClientBrandRank([], '我推荐中旅游公司的行程，性价比很高。', {
+      brandName: 'CTS Tours',
+      aliases: ['中旅'],
+    })
+    expect(out.client_brand_rank).toBeNull()
+  })
+
+  it('composite name: client written as "Person" only is still found', () => {
+    const out = resolveClientBrandRank(
+      [{ brand: 'Ray White', rank: 1, snippet: 'Agent Roman Hu at Ray White is great.' }],
+      'Agent Roman Hu at Ray White is great.',
+      { brandName: 'Roman Hu — Ray White Mission Bay', domain: 'romanhu.com' }
+    )
+    expect(out.client_brand_rank).toBe(1)
+    expect(out.brands.map(b => [b.brand, b.rank])).toEqual([
+      ['Roman Hu — Ray White Mission Bay', 1],
+      ['Ray White', 2],
+    ])
+  })
+
+  it('"&" and "and" are treated alike when ordering an inserted client', () => {
     const out = resolveClientBrandRank(
       [
-        { brand: 'JR Academy', rank: 1, snippet: 'x' },
-        { brand: 'Magic Lab', rank: 2, snippet: 'x' },
+        { brand: 'Barfoot & Thompson', rank: 1, snippet: 'x' },
+        { brand: 'Bayleys', rank: 2, snippet: 'x' },
       ],
-      'Compare JR Academy and Magic Lab for small-business owners learning AI.',
-      { brandName: 'Magic Lab Class' }
+      'Barfoot and Thompson, Bayleys, then Acme Realty.',
+      { brandName: 'Acme Realty' }
     )
-    expect(out.client_brand_rank).toBe(2)
+    expect(out.client_brand_rank).toBe(3)
+  })
+
+  it('domain-only identity never inserts an empty brand name', () => {
+    const out = resolveClientBrandRank([], 'See acmetours.co.nz for itineraries.', {
+      brandName: '',
+      domain: 'acmetours.co.nz',
+    })
+    expect(out.client_brand_rank).toBe(1)
+    expect(out.brands[0].brand).toBe('acmetours.co.nz')
   })
 
   it('drops multiple hallucinated client entries and closes rank gaps', () => {
