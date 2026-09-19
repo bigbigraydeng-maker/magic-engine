@@ -1,9 +1,10 @@
 # SEO Meta-Cycle v1 — 周循环 IMPACT 闭环设计
 
-**Status**: Draft — 待子牙（架构）+ 魏征（挑刺）复审
-**Date**: 2026-09-20
+**Status**: Draft v2（精简版）— 待子牙（架构）+ 魏征（挑刺）复审
+**Date**: 2026-09-20（v1 设计）→ 2026-09-20 当天 PM 精简拍板（v2，见 §11）
 **Owner**: CTS 总项目经理窗口（claude/cts-project-manager-build-control-e4c4b1）
 **PM 决策来源**: 2026-09-20 对话 — 全部新流程硬性要求接 Inngest；不满足于「盲改标题」，要求接入 DataForSEO + 竞争对手数据
+**PM 精简拍板（同日）**：第一轮实现 + 子牙/魏征两轮复审后，PM 认定原设计对「每周最多改 3 个页面、只服务 CTS 一个客户」的实际用量过度开发——两轮复审抓到的严重 bug 都出在「自动检查 + 自动改回去」这套机器本身，不是外围保险不够，而是核心机制太复杂。**§4/§7 已改为精简版，原版见文末 §11 存档对比。**
 
 ## 1. 问题
 
@@ -38,46 +39,51 @@
 - `seo_meta_log` 表加列（改前 CTR/排名/曝光，供 14 天后对比）
 - Inngest 函数文件 `src/lib/inngest/functions/seo-meta-cycle.ts`
 
-## 4. 六步 Inngest 链路
+## 4. 六步 Inngest 链路（v2 精简版，PM 2026-09-20 拍板 · 原版见 §11）
 
 ```
 cron (Monday 05:30 UTC)
   │
   ▼
 [1] seo/meta-cycle.check_due
-    回查上周改动：读 seo_meta_log 里 7/14 天前的改动 → 重新查 GSC CTR/position
-    → 判定 improved / flat / regressed
-    → regressed 的页面记入本轮"改回去"候选
+    回查上周改动：读 seo_meta_log 里 14 天前的改动 → 重新查 GSC CTR/position
+    → 判定 improved / flat / regressed / insufficient_data
+    → 写回 outcome + observed_ctr/observed_impressions
+    → regressed 的页面：下发 1 条人工看板任务，链接指向当初那条已合并的 PR
+      （人点 GitHub 上的 Revert 按钮、再合并 revert PR 即可改回去——零新代码）
   │
   ▼
 [2] seo/meta-cycle.candidates_ready
-    合并三路候选（patrol 发现 + GSC 4-20 名 + gap 高搜索量未覆盖词）
-    去重、排除 30 天冷却、排除上一步已回查过的
-    每个候选调 DataForSEO：搜索量 + 难度 + SERP 前 3 竞品标题
+    合并两路候选（patrol 发现 + GSC 4-20 名），字段级去重合并（同一页面多来源
+    命中时，identity 取高优先级来源，但 impressions/ctr/搜索量/难度按字段各自
+    补全，不因为撞上高优先级来源就整体丢弃）
+    排除冷却期内的 slug
+    搜索量/难度直接读 keyword_snapshots（每周快照已付过钱，零新增 DataForSEO 调用）
   │
   ▼
-[3] seo/meta-cycle.prescribed
-    按 seo-agent 现有分级逻辑判定动作类型：
-      title_rewrite（标题/摘要）→ 自动执行
-      index_request（仅缺收录）→ 自动执行
-      content_refresh / new_page / internal_link → 进执行看板，人工任务三件套
-      skip（难度>70 且对手前3是大站）→ 记录原因，不占改动名额
+[3] seo/meta-cycle.prescribed（纯函数，无 I/O）
+    难度 > 70 → skip，记录原因，不占改动名额
+    其余 → title_rewrite，按 impressions/搜索量排序取前 ≤ maxPagesPerRun 个
+    （超出上限的候选本轮直接不选，下周再评估——不占用人工看板名额）
   │
   ▼
 [4] seo/meta-cycle.applied
-    自动动作：AI 生成 meta（含对手标题+搜索量+客户历史学习作为 prompt 输入）
+    对最终选中的 ≤ maxPagesPerRun 个候选，各调一次 DataForSEO SERP 取前 3
+    竞品标题（花费结构上就封顶，不需要跨客户熔断）
+    AI 生成 meta（关键词+搜索量+难度+当前排名/CTR+对手前3标题作为 prompt 输入）
     → 改仓库文件 → PR → 自动合并（复用现有 mergePullRequest）
-    人工动作：写入 pm-todo 执行看板
+    → 合并成功：写 seo_meta_log（含改前基线 + PR 链接）
+    → 合并失败：下发人工看板任务，链接指向这条未合并的 PR
+    → AI 生成失败：下发人工看板任务
   │
   ▼
 [5] seo/meta-cycle.logged
-    seo_meta_log 写入本次改动 + 改前基线指标（为下次回查用）
+    step 4 写入 seo_meta_log 的汇总回执（实际写入动作已在 step 4 内完成，
+    因为需要 apply 调用返回的确切标题/描述）
   │
   ▼
 [6] seo/meta-cycle.completed
-    汇总回执 写 cron_run_logs + 触发 memory 写入（若本轮有回查结果）：
-      improved → saveProvenPattern
-      regressed → saveFailedExperiment
+    汇总回执写 cron_run_logs
 ```
 
 事件命名沿用仓库现有斜杠风格（如 `seo/page-watch.check_due`）。
@@ -91,8 +97,12 @@ ALTER TABLE seo_meta_log
   ADD COLUMN IF NOT EXISTS baseline_position NUMERIC,
   ADD COLUMN IF NOT EXISTS baseline_impressions INTEGER,
   ADD COLUMN IF NOT EXISTS checked_at TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS outcome TEXT CHECK (outcome IN ('improved','flat','regressed','insufficient_data'));
+  ADD COLUMN IF NOT EXISTS outcome TEXT CHECK (outcome IN ('improved','flat','regressed','insufficient_data')),
+  ADD COLUMN IF NOT EXISTS observed_ctr NUMERIC,
+  ADD COLUMN IF NOT EXISTS observed_impressions INTEGER,
+  ADD COLUMN IF NOT EXISTS pr_url TEXT;
 ```
+（v2 新增 `observed_ctr`/`observed_impressions`——供周报展示改前改后对比；`pr_url`——regressed 人工任务的直达链接。v1 设计里的 `revert_count` 列不再需要，见 §11。）
 
 ## 6. 客户配置 vs 共享代码（层级门判定，见 §8）
 
@@ -104,16 +114,14 @@ ALTER TABLE seo_meta_log
 
 Oztop 现有的独立实现（`oztop-seo-optimizer/route.ts` 内联逻辑）在本次不合并，**记为后续候选**：先让 CTS 这条新链路跑穣，验证一个月后再把 Oztop 切过来复用同一条 Inngest 链路（避免同时动两个客户的生产链路）。
 
-## 7. 自动 vs 人工边界
+## 7. 自动 vs 人工边界（v2 精简版）
 
 | 动作类型 | 自动执行 | 理由 |
 |---|---|---|
-| 改标题/摘要 | ✅ | 可逆、范围小、14 天有回查兜底 |
-| 申请索引 | ✅ | 无副作用、幂等 |
-| 回归后改回去 | ✅ | 同"改标题"风险等级 |
-| 内容重写 | ❌ 进看板 | 触碰客户数据红线 §8：对外内容须先 grounding 官网，需人过目 |
-| 新建页面 | ❌ 进看板 | 同上，且涉及信息架构决策 |
-| 加内链 | ❌ 进看板 | 触碰其他页面，影响范围超出单页 |
+| 改标题/摘要（title_rewrite） | ✅ | 可逆、范围小、14 天有回查兜底 |
+| 难度过高（skip） | 不算动作 | 记录原因，不占改动名额 |
+| 回归后改回去 | ❌ 进看板，**不是自动** | v1 设计里这一步是自动的；PM 2026-09-20 拍板改为人工——链接直达当初那条已合并的 PR，人点 GitHub 自带的 Revert 按钮、合并 revert PR 即可，零新代码。理由见 §11：两轮复审抓到的严重 bug 都出在这台"自动改回去"机器本身 |
+| 索引申请 / 内容重写 / 新建页面 / 加内链 | 不在本设计范围 | v1 设计里这些是 title_rewrite 之外的独立分支；v2 全部砍掉——索引由合并后的 webhook 负责（issue #1794），其余三类 seo-patrol 本就会送进诸葛亮看板，这条链路再送一遍是重复待办，见 §11 |
 
 ## 8. Platform Tier 判定（me-platform-tier-gate · Full）
 
@@ -157,4 +165,33 @@ Oztop 现有的独立实现（`oztop-seo-optimizer/route.ts` 内联逻辑）在�
 - **哪些是 industry-specific**：无新增 L2（本次未新建行业剧本）。
 - **哪些是 client-specific**：repo 路径、品牌语气句、页面上限/冷却天数、Oztop 的 WordPress 落地适配器（未来接入时新增）。
 - **有没有把客户名/客户 ID/行业判断写进 shared runtime**：现状代码有（`CTS_CLIENT_ID` 硬编码），本设计要求实现时挪走，§6 已列清单，作为实现验收项。
-- **哪些学习仍只在 client-private memory，哪些有证据升级到 industry/global memory**：本设计的学习写入（`saveProvenPattern`/`saveFailedExperiment`）全部走 client-private 层；全局/行业层的升级遵循 memory 模块既有的 `checkShareable`/`assertShareable` 门槛，本设计不新增旁路。
+- **哪些学习仍只在 client-private memory，哪些有证据升级到 industry/global memory**：v2 不再写 memory（见 §11，推迟）。
+
+## 11. PM 2026-09-20 精简拍板（v1 → v2）
+
+**为什么**：v1 设计实现完 + 走完两轮子牙/魏征复审后，PM 复盘发现——实际用量是每周最多改 3 个页面、只有 CTS 一个客户在用（Oztop 走 WordPress，现在接不上这条链路）。而 v1 的 2900 行代码里有一大块是为"多客户、大量改动"场景预先准备的保险（跨客户花费熔断、连续回归的振荡保护、孤儿 PR 清理），**两轮复审揪出的两个严重 bug 全部出在"自动检查效果 + 自动改回去"这套机器本身**，不是外围保险不够严密，而是核心机制的复杂度本身就是 bug 的温床。PM 判断：先把核心机制做简单、做对，比给一个复杂机制不断加保险更划算。
+
+**保留的（v1 → v2 不变）**：
+- Inngest 两函数结构（fan-out + per-client worker）+ 每一步写回执——PM 硬性要求，未动
+- `seo_meta_log` 记录改前基线 + `applied_channel` 字段（连带历史数据回填）——这是修一个真实存在的误报 bug，保留
+- 14 天后回查效果、判定结果写回 `outcome`，且出现在每周报告里
+- PR 自动合并；合并失败 → 进人工看板，附 PR 链接（不是新代码，是把已实现的 `pr_opened_but_not_merged` 路径保留下来）
+- 客户配置来自 `seo_config`，不写死客户身份进共享代码（平台化规则，硬约束）
+
+**砍掉/推迟的（v1 → v2 变化，连带原因）**：
+| 项目 | v1 怎么做 | v2 怎么做 | 为什么 |
+|---|---|---|---|
+| 回归后改回去 | 自动重新提交改回原文的 PR，带"人已手改就跳过"的比对逻辑 | 判定 regressed → 1 条人工看板任务，链接指向已合并的原 PR，人点 GitHub 自带 Revert 按钮 | 两轮复审的两个严重 bug（`baseline_ctr` 从未写入导致回查永远判不出结果、PR 未合并却被当成已生效）都发生在这条自动回滚链路上或紧邻它。GitHub 原生 Revert 按钮零新代码、零新 bug 面 |
+| 振荡保护（`oscillation.ts`） | 连续回归 2 次强制转人工 | 删除整个文件 | 没有自动改回去，就不存在"改了又回归又改"的振荡 |
+| 跨客户花费熔断（`budget-guard.ts`） | 每周全局 DataForSEO 调用上限 + 各客户抢配额 | 删除整个文件，改成结构性封顶：搜索量/难度不再调 DataForSEO（读 `keyword_snapshots` 现成快照），SERP 只对最终选中的 ≤ 3 个页面各查一次 | 原设计的熔断是为了防"候选池很大 × 很多客户"时失控超支；把候选池收窄到"只对最终会真正执行的页面才花钱"之后，单客户单周花费天然是个位数常数，熔断变得没有对象可管 |
+| 孤儿 PR 分页清理 | 列出 repo 里所有开着的 PR，找出上周遗留的同名分支，关掉 | 删除，只留"同一 (周, slug) 已有 PR 就复用"这一层幂等闸 | 每周 ≤3 个 PR，不会真的堆积；这段代码此前也没有真实 bug 压力支撑，纯粹是为假设中的高频场景预写的 |
+| 动作类型 | 6 种（title_rewrite/index_request/content_refresh/new_page/internal_link/skip） | 2 种（title_rewrite/skip） | 4 种被砍的动作类型里，3 种（content_refresh/new_page/internal_link）本来就会被 seo-patrol 发现、送进诸葛亮看板——这条链路再送一遍是重复待办；index_request 由合并后的 webhook 负责（issue #1794），不需要这里再做一次 |
+| memory 学习写入/读取 | `saveProvenPattern`/`saveFailedExperiment` 写、`loadMemoryForClient` 读进 AI prompt | 推迟，不写不读 | 每周 3 个页面的样本量，几周内学不出统计意义上站得住的模式，写进去的更可能是噪音而不是信号 |
+
+**什么条件下再加回来**：
+- 第二个客户接入这条链路（Oztop 或其他），且该客户单周候选量明显超过个位数 → 重新评估跨客户熔断
+- 单客户单周实际改动量稳定超过 ~10 页 → 重新评估振荡保护 + 孤儿 PR 清理的必要性
+- 人工看板里"regressed 改回去"这类任务出现"人没空处理、连续攒了几周"的真实积压 → 重新评估要不要把改回去自动化
+- 运行满 2-3 个月、`outcome` 判定积累到有统计意义的样本量 → 重新评估要不要接 memory 学习
+
+**行数对比**：精简前 `src/lib/seo-meta/cycle/` + `src/lib/inngest/functions/seo-meta-cycle.ts` 共约 2900 行新增；精简后约 2000 行（含新增的测试）。删除的文件：`oscillation.ts`、`budget-guard.ts`。`src/lib/cms/github-client.ts` 的 `listPullRequestsByBranchPrefix`（孤儿 PR 分页清理专用）一并撤回。

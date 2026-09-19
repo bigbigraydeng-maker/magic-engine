@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  fromGapKeywords,
   fromGscPages,
   fromPatrolFindings,
   mergeCandidates,
@@ -30,49 +29,41 @@ describe('normaliseCandidateUrl', () => {
 })
 
 describe('mergeCandidates — dedup across sources (魏征 finding #9)', () => {
-  it('collapses the same page discovered by both patrol and GSC into one candidate, preferring patrol', () => {
+  it('collapses the same page discovered by both patrol and GSC into one candidate, preferring patrol identity but keeping GSC-only fields', () => {
     const patrol = fromPatrolFindings([
-      { url: 'https://example.com/blog/foo', keyword: 'foo keyword', position: 8, ctr: 5, searchVolume: 500, keywordDifficulty: 30 },
+      { url: 'https://example.com/blog/foo', keyword: 'foo keyword', position: 8, ctr: null, searchVolume: 500, keywordDifficulty: 30 },
     ])
     const gsc = fromGscPages(
-      [{ page: 'https://example.com/blog/foo/', impressions: 100, position: 9 }],
+      [{ page: 'https://example.com/blog/foo/', impressions: 100, position: 9, ctr: 0.04 }],
       [{ query: 'foo keyword', impressions: 100 }],
     )
-    const merged = mergeCandidates({ patrol, gsc, gap: [] }, new Set(), new Set(), 10)
+    const merged = mergeCandidates({ patrol, gsc }, new Set(), 10)
     expect(merged).toHaveLength(1)
     expect(merged[0].source).toBe('patrol')
+    // Field-level merge (子牙+魏征 finding): patrol has no impressions/ctr of
+    // its own — those must be filled in from the GSC candidate, not dropped.
+    expect(merged[0].impressions).toBe(100)
+    expect(merged[0].ctr).toBe(0.04)
+    expect(merged[0].searchVolume).toBe(500)
   })
 
   it('does NOT collapse a trailing-slash-only duplicate into two candidates (the case the dedup bug would multiply spend on)', () => {
     const gsc1 = fromGscPages([{ page: 'https://example.com/blog/foo', impressions: 100, position: 9 }], [])
     const gsc2 = fromGscPages([{ page: 'https://example.com/blog/foo/', impressions: 100, position: 9 }], [])
-    const merged = mergeCandidates({ patrol: [], gsc: [...gsc1, ...gsc2], gap: [] }, new Set(), new Set(), 10)
+    const merged = mergeCandidates({ patrol: [], gsc: [...gsc1, ...gsc2] }, new Set(), 10)
     expect(merged).toHaveLength(1)
   })
 
   it('does NOT collapse a case-only duplicate host into two candidates', () => {
     const gsc1 = fromGscPages([{ page: 'https://example.com/blog/foo', impressions: 100, position: 9 }], [])
     const gsc2 = fromGscPages([{ page: 'https://EXAMPLE.com/blog/foo', impressions: 100, position: 9 }], [])
-    const merged = mergeCandidates({ patrol: [], gsc: [...gsc1, ...gsc2], gap: [] }, new Set(), new Set(), 10)
+    const merged = mergeCandidates({ patrol: [], gsc: [...gsc1, ...gsc2] }, new Set(), 10)
     expect(merged).toHaveLength(1)
-  })
-
-  it('keeps gap keywords (no page) separate from page-scoped candidates', () => {
-    const gsc = fromGscPages([{ page: 'https://example.com/blog/foo', impressions: 100, position: 9 }], [])
-    const gap = fromGapKeywords([{ keyword: 'unrelated gap term', search_volume: 800, keyword_difficulty: 40 }])
-    const merged = mergeCandidates({ patrol: [], gsc, gap }, new Set(), new Set(), 10)
-    expect(merged).toHaveLength(2)
   })
 
   it('excludes cooldown slugs', () => {
     const gsc = fromGscPages([{ page: 'https://example.com/blog/foo', impressions: 100, position: 9 }], [])
-    const merged = mergeCandidates({ patrol: [], gsc, gap: [] }, new Set(['foo']), new Set(), 10)
-    expect(merged).toHaveLength(0)
-  })
-
-  it('excludes slugs already checked this cycle (revert candidates from step 1)', () => {
-    const gsc = fromGscPages([{ page: 'https://example.com/blog/foo', impressions: 100, position: 9 }], [])
-    const merged = mergeCandidates({ patrol: [], gsc, gap: [] }, new Set(), new Set(['foo']), 10)
+    const merged = mergeCandidates({ patrol: [], gsc }, new Set(['foo']), 10)
     expect(merged).toHaveLength(0)
   })
 
@@ -85,7 +76,7 @@ describe('mergeCandidates — dedup across sources (魏征 finding #9)', () => {
       ],
       [],
     )
-    const merged = mergeCandidates({ patrol: [], gsc, gap: [] }, new Set(), new Set(), 2)
+    const merged = mergeCandidates({ patrol: [], gsc }, new Set(), 2)
     expect(merged).toHaveLength(2)
     expect(merged.map((c) => c.pageUrl)).toEqual(['https://example.com/b', 'https://example.com/c'])
   })
@@ -98,7 +89,7 @@ describe('mergeCandidates — dedup across sources (魏征 finding #9)', () => {
       ],
       [],
     )
-    const merged = mergeCandidates({ patrol: [], gsc, gap: [] }, new Set(), new Set(), 10)
+    const merged = mergeCandidates({ patrol: [], gsc }, new Set(), 10)
     expect(merged).toHaveLength(2)
   })
 })
@@ -124,5 +115,10 @@ describe('fromGscPages filtering', () => {
   it('drops the homepage (no usable slug) instead of yielding the hostname as a slug', () => {
     const merged = fromGscPages([{ page: 'https://example.com/', impressions: 100, position: 10 }], [])
     expect(merged).toHaveLength(0)
+  })
+
+  it('carries the real GSC ctr field through as a 0-1 decimal fraction', () => {
+    const [candidate] = fromGscPages([{ page: 'https://example.com/a', impressions: 100, position: 10, ctr: 0.032 }], [])
+    expect(candidate.ctr).toBe(0.032)
   })
 })

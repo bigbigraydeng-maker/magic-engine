@@ -46,8 +46,8 @@ function candidatesFor(domain: string): MetaCycleCandidate[] {
 
 describe('SEO Meta-Cycle orchestration is client-agnostic (魏征 finding #12 evidence)', () => {
   it('mergeCandidates dedupes identically for a .co.nz (CTS-shaped) and a .com.au (Oztop-shaped) domain', () => {
-    const ctsMerged = mergeCandidates({ patrol: [], gsc: candidatesFor(CTS_SHAPED_DOMAIN), gap: [] }, new Set(), new Set(), 10)
-    const oztopMerged = mergeCandidates({ patrol: [], gsc: candidatesFor(OZTOP_SHAPED_DOMAIN), gap: [] }, new Set(), new Set(), 10)
+    const ctsMerged = mergeCandidates({ patrol: [], gsc: candidatesFor(CTS_SHAPED_DOMAIN) }, new Set(), 10)
+    const oztopMerged = mergeCandidates({ patrol: [], gsc: candidatesFor(OZTOP_SHAPED_DOMAIN) }, new Set(), 10)
 
     expect(ctsMerged).toHaveLength(2)
     expect(oztopMerged).toHaveLength(2)
@@ -59,17 +59,16 @@ describe('SEO Meta-Cycle orchestration is client-agnostic (魏征 finding #12 ev
     const ctsCandidate = candidatesFor(CTS_SHAPED_DOMAIN)[0]
     const oztopCandidate = candidatesFor(OZTOP_SHAPED_DOMAIN)[0]
 
-    const ctsResult = deriveMetaCycleAction({ candidate: ctsCandidate, top3CompetitorDomains: [], top3CompetitorTitles: [] })
-    const oztopResult = deriveMetaCycleAction({ candidate: oztopCandidate, top3CompetitorDomains: [], top3CompetitorTitles: [] })
+    const ctsResult = deriveMetaCycleAction(ctsCandidate)
+    const oztopResult = deriveMetaCycleAction(oztopCandidate)
 
     expect(ctsResult.actionType).toBe(oztopResult.actionType)
     expect(ctsResult.auto).toBe(oztopResult.auto)
   })
 
   it('runStep3Prescribe caps auto-actions the same way for both clients using only config.maxPagesPerRun, not a client identity check', () => {
-    const enriched = candidatesFor(OZTOP_SHAPED_DOMAIN).map((candidate) => ({ candidate, top3CompetitorDomains: [], top3CompetitorTitles: [] }))
-    const result = runStep3Prescribe(enriched, 1)
-    expect(result.autoCount).toBeLessThanOrEqual(1)
+    const result = runStep3Prescribe(candidatesFor(OZTOP_SHAPED_DOMAIN), 1)
+    expect(result.titleRewrites.length).toBeLessThanOrEqual(1)
   })
 
   it('the cycle library does not hardcode CTS_CLIENT_ID or a literal "CTS" client check anywhere in runtime code (comments/spec references excluded by scanning for the UUID + a code-shaped check only)', () => {

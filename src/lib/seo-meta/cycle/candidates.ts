@@ -1,8 +1,15 @@
 /**
  * SEO Meta-Cycle v1 — candidate discovery + merge (step 2 of the six-step
- * chain). New code (spec §3 "无法复用" list): patrol findings, GSC pages,
- * and DataForSEO gap keywords come from three different shapes and none of
- * the existing modules merge/dedupe them.
+ * chain). New code (spec §3 "无法复用" list): patrol findings and GSC pages
+ * come from two different shapes and neither existing module merges/dedupes
+ * them.
+ *
+ * PM 2026-09-20 精简拍板: dropped the third source (DataForSEO gap
+ * keywords) entirely — gap candidates have no existing page, and the only
+ * action they could map to (new_page) was cut (seo-patrol already routes
+ * "build a new page" work to 诸葛亮's kanban). Keeping gap sourcing here
+ * would just mean paying for DataForSEO calls whose only possible outcome
+ * was always going to be discarded.
  *
  * 魏征 finding #9: a dedup bug here can multiply DataForSEO spend across
  * every enabled client, so URL normalisation (trailing slash, casing) is
@@ -43,13 +50,16 @@ function dedupeKey(c: MetaCycleCandidate): string {
   return `kw:${c.keyword.trim().toLowerCase()}`
 }
 
-/** Priority when the same page/keyword shows up from more than one source —
- *  patrol already ran real rule evaluation, so it wins; gap candidates (no
- *  existing page) never collide with a page-scoped source. */
+/** Priority when the same page shows up from both sources — patrol already
+ *  ran real rule evaluation, so its IDENTITY fields (keyword match, position
+ *  source) win. Numeric fields are merged field-by-field regardless (see
+ *  mergeCandidates) rather than an all-or-nothing pick, so a low-priority
+ *  source's data isn't thrown away just because a higher-priority source
+ *  also found the page (子牙+魏征 both flagged this as a real dropped-field
+ *  bug in the original all-or-nothing merge). */
 const SOURCE_PRIORITY: Record<MetaCycleCandidateSource, number> = {
-  patrol: 3,
-  gsc: 2,
-  gap: 1,
+  patrol: 2,
+  gsc: 1,
 }
 
 export interface RawPatrolFinding {
@@ -70,12 +80,6 @@ export interface RawGscPage {
 export interface RawGscQuery {
   query?: string
   impressions?: number
-}
-
-export interface RawGapKeyword {
-  keyword: string
-  search_volume: number | null
-  keyword_difficulty: number | null
 }
 
 const MIN_POSITION = 4
@@ -121,7 +125,6 @@ export function fromGscPages(
       ctr: page.ctr ?? null,
       searchVolume: null,
       keywordDifficulty: null,
-      discoveredNotIndexed: false,
     })
   }
   return out
@@ -140,50 +143,50 @@ export function fromPatrolFindings(findings: RawPatrolFinding[]): MetaCycleCandi
       ctr: f.ctr,
       searchVolume: f.searchVolume,
       keywordDifficulty: f.keywordDifficulty,
-      discoveredNotIndexed: false,
     }))
 }
 
-export function fromGapKeywords(keywords: RawGapKeyword[]): MetaCycleCandidate[] {
-  return keywords.map((k) => ({
-    pageUrl: null,
-    slug: null,
-    keyword: k.keyword,
-    source: 'gap' as const,
-    position: null,
-    impressions: null,
-    ctr: null,
-    searchVolume: k.search_volume,
-    keywordDifficulty: k.keyword_difficulty,
-    discoveredNotIndexed: false,
-  }))
+/** Field-level merge of two candidates that dedupe to the same key: identity
+ *  and position come from the higher-priority one, but any numeric field
+ *  the higher-priority candidate is missing gets filled from the
+ *  lower-priority one instead of being silently dropped. */
+function mergeFields(winner: MetaCycleCandidate, loser: MetaCycleCandidate): MetaCycleCandidate {
+  return {
+    ...winner,
+    impressions: winner.impressions ?? loser.impressions,
+    ctr: winner.ctr ?? loser.ctr,
+    searchVolume: winner.searchVolume ?? loser.searchVolume,
+    keywordDifficulty: winner.keywordDifficulty ?? loser.keywordDifficulty,
+  }
 }
 
 /**
- * Merge the three candidate sources, dedupe by normalised URL/slug/keyword,
- * exclude the 30-day (or client-overridden) cooldown set and this cycle's
- * already-checked slugs, and cap to `max`.
+ * Merge the two candidate sources, dedupe by normalised URL/slug/keyword
+ * (field-level merge on collision — see mergeFields), exclude the cooldown
+ * set, and cap to `max`.
  *
  * Pure — no DB/network access — so the dedup logic is directly unit-testable
  * per 魏征 finding #9.
  */
 export function mergeCandidates(
-  sources: { patrol: MetaCycleCandidate[]; gsc: MetaCycleCandidate[]; gap: MetaCycleCandidate[] },
+  sources: { patrol: MetaCycleCandidate[]; gsc: MetaCycleCandidate[] },
   cooldownSlugs: ReadonlySet<string>,
-  excludeSlugs: ReadonlySet<string>,
   max: number,
 ): MetaCycleCandidate[] {
   const byKey = new Map<string, MetaCycleCandidate>()
 
-  for (const source of [sources.patrol, sources.gsc, sources.gap]) {
+  for (const source of [sources.patrol, sources.gsc]) {
     for (const candidate of source) {
-      if (candidate.slug && (cooldownSlugs.has(candidate.slug) || excludeSlugs.has(candidate.slug))) {
-        continue
-      }
+      if (candidate.slug && cooldownSlugs.has(candidate.slug)) continue
+
       const key = dedupeKey(candidate)
       const existing = byKey.get(key)
-      if (!existing || SOURCE_PRIORITY[candidate.source] > SOURCE_PRIORITY[existing.source]) {
+      if (!existing) {
         byKey.set(key, candidate)
+      } else if (SOURCE_PRIORITY[candidate.source] > SOURCE_PRIORITY[existing.source]) {
+        byKey.set(key, mergeFields(candidate, existing))
+      } else {
+        byKey.set(key, mergeFields(existing, candidate))
       }
     }
   }

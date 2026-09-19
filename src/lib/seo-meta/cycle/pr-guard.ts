@@ -1,6 +1,5 @@
 /**
- * SEO Meta-Cycle v1 — PR idempotency + orphaned-PR handling for the apply
- * step (step 4).
+ * SEO Meta-Cycle v1 — PR idempotency for the apply step (step 4).
  *
  * 子牙 finding #2: event replay must not open a second PR for the same
  * candidate. Branch names are DETERMINISTIC (weekKey + slug), so idempotency
@@ -8,17 +7,16 @@
  * `recentlySnapshotted` "check before you spend" pattern, applied to PRs
  * instead of provider calls.
  *
- * 魏征 finding #8: before opening a new PR for a candidate, check the repo
- * for any still-open PR from a PREVIOUS cycle touching the same slug and
- * decide to close it rather than letting automation branches pile up
- * unbounded.
+ * PM 2026-09-20 精简拍板: orphaned-PR cleanup (closing stale PRs from
+ * earlier weeks) was cut — at ≤3 pages/week for one client, open PRs don't
+ * meaningfully accumulate, and it was unexercised code with no real bug
+ * pressure behind it. If usage ever grows past that, this is the file to
+ * bring it back into.
  */
 
 import type { GithubClient } from '@/lib/cms/github-client'
 
 export const META_CYCLE_BRANCH_PREFIX = 'feat/me-seo-meta-cycle-'
-
-const BRANCH_RE = /^feat\/me-seo-meta-cycle-(\d{4}-W\d{2})-(.+)$/
 
 function sanitizeSlugForBranch(slug: string): string {
   return slug.replace(/[^a-z0-9-]/gi, '-').toLowerCase().slice(0, 60)
@@ -29,34 +27,19 @@ export function metaCycleBranchName(weekKey: string, slug: string): string {
   return `${META_CYCLE_BRANCH_PREFIX}${weekKey}-${sanitizeSlugForBranch(slug)}`
 }
 
-export function parseMetaCycleBranch(ref: string): { weekKey: string; slug: string } | null {
-  const m = BRANCH_RE.exec(ref)
-  if (!m) return null
-  return { weekKey: m[1], slug: m[2] }
-}
-
 export interface PrGuardDecision {
   readonly branch: string
-  /**
-   * · `reuse_existing`       — a PR (open or merged) already exists for this
-   *                            exact (weekKey, slug) — do not open another.
-   * · `close_orphans_then_open` — no PR for this week's branch yet, but ≥1
-   *                            open PR from an earlier week touches this slug
-   *                            — close those first, then open a fresh PR.
-   * · `open_new`             — no exact match, no orphans, proceed normally.
-   */
-  readonly action: 'reuse_existing' | 'close_orphans_then_open' | 'open_new'
+  readonly action: 'reuse_existing' | 'open_new'
   readonly existingPr: { number: number; html_url: string } | null
-  readonly orphans: ReadonlyArray<{ number: number; branch: string; weekKey: string }>
 }
 
 /**
- * Read-only decision function — callers apply the decision (close PRs / skip
- * opening) as their own explicit step.run so the side effect stays visible
- * to Inngest's replay model.
+ * Read-only decision function — the caller applies it (opens the PR or not)
+ * as its own explicit step.run so the side effect stays visible to
+ * Inngest's replay model.
  */
 export async function resolvePrGuard(
-  github: Pick<GithubClient, 'listPullRequestsByHead' | 'listPullRequestsByBranchPrefix'>,
+  github: Pick<GithubClient, 'listPullRequestsByHead'>,
   owner: string,
   repo: string,
   weekKey: string,
@@ -64,30 +47,13 @@ export async function resolvePrGuard(
 ): Promise<PrGuardDecision> {
   const branch = metaCycleBranchName(weekKey, slug)
 
+  // state='all' — an already-merged PR for this exact branch still counts
+  // (idempotent against event replay after a successful run, not just
+  // against replay before the PR was ever created).
   const exact = await github.listPullRequestsByHead(owner, repo, branch, 'all')
   if (exact.length > 0) {
-    return {
-      branch,
-      action: 'reuse_existing',
-      existingPr: { number: exact[0].number, html_url: exact[0].html_url },
-      orphans: [],
-    }
+    return { branch, action: 'reuse_existing', existingPr: { number: exact[0].number, html_url: exact[0].html_url } }
   }
 
-  const openUnderPrefix = await github.listPullRequestsByBranchPrefix(owner, repo, META_CYCLE_BRANCH_PREFIX)
-  const orphans = openUnderPrefix
-    .map((pr) => {
-      const parsed = parseMetaCycleBranch(pr.head.ref)
-      return parsed && parsed.slug === sanitizeSlugForBranch(slug) && parsed.weekKey !== weekKey
-        ? { number: pr.number, branch: pr.head.ref, weekKey: parsed.weekKey }
-        : null
-    })
-    .filter((v): v is { number: number; branch: string; weekKey: string } => v !== null)
-
-  return {
-    branch,
-    action: orphans.length > 0 ? 'close_orphans_then_open' : 'open_new',
-    existingPr: null,
-    orphans,
-  }
+  return { branch, action: 'open_new', existingPr: null }
 }

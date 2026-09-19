@@ -29,6 +29,7 @@ import { inngest, CLOUD_FN_PREFIX } from '../client'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getConnection } from '@/lib/cms/connection-store'
 import { GithubClient } from '@/lib/cms/github-client'
+import { locationCodeForDb } from '@/lib/seo-intelligence/keyword-snapshots'
 import { createCtsRepoApplyAdapter } from '@/lib/seo-meta/cycle/apply-adapter'
 import { generateMetaCycleTitle } from '@/lib/seo-meta/cycle/ai-meta'
 import {
@@ -148,28 +149,27 @@ async function runSixSteps(
   }))
 
   // Step 2: candidates_ready
-  const step2 = await step.run('candidates-ready', async () =>
-    runStep2CandidatesReady(supabaseAdmin, config, weekKey, new Set(step1.revertedSlugs)),
-  )
+  const step2 = await step.run('candidates-ready', async () => runStep2CandidatesReady(supabaseAdmin, config))
   await step.run('log-step2-receipt', async () => writeStepReceipt(supabaseAdmin, {
     jobName: STEP2_JOB_NAME, clientId, weekKey, status: 'completed',
     processed: step2.candidates.length, completed: step2.candidates.length, failed: 0,
-    summary: { candidate_count: step2.candidates.length, dataforseo_calls: step2.dataforseoCallsMade, budget_overrun: step2.budgetOverrun },
+    summary: { candidate_count: step2.candidates.length },
   }))
 
   // Step 3: prescribed (pure — no I/O, still its own step for replay clarity + its own receipt)
   const step3 = await step.run('prescribed', async () => runStep3Prescribe(step2.candidates, config.maxPagesPerRun))
   await step.run('log-step3-receipt', async () => writeStepReceipt(supabaseAdmin, {
     jobName: STEP3_JOB_NAME, clientId, weekKey, status: 'completed',
-    processed: step3.prescriptions.length, completed: step3.autoCount, failed: 0,
-    summary: { auto: step3.autoCount, manual: step3.manualCount, skip: step3.skipCount },
+    processed: step3.titleRewrites.length + step3.skipCount, completed: step3.titleRewrites.length, failed: 0,
+    summary: { auto: step3.titleRewrites.length, skip: step3.skipCount, deferred: step3.deferredCount },
   }))
 
   // Step 4: applied (also writes seo_meta_log rows — step 5 "logged" is
   // the receipt below, the actual log rows are written inside step 4
   // because they need the exact applied title/desc from the same call).
+  const locationCode = locationCodeForDb(config.semrushDb)
   const step4 = await step.run('applied', async () =>
-    runStep4Applied(supabaseAdmin, adapter, config, weekKey, step3.prescriptions, generateMetaCycleTitle, false),
+    runStep4Applied(supabaseAdmin, adapter, config, weekKey, step3.titleRewrites, generateMetaCycleTitle, locationCode, false),
   )
   await step.run('log-step4-receipt', async () => writeStepReceipt(supabaseAdmin, {
     jobName: STEP4_JOB_NAME, clientId, weekKey, status: 'completed',
@@ -186,9 +186,8 @@ async function runSixSteps(
   // Step 6: completed — final rollup receipt (also the recentlyCycled dedup marker).
   const summary = {
     checked: step1.checked, improved: step1.improved, regressed: step1.regressed,
-    reverted: step1.reverted, candidates: step2.candidates.length,
-    auto_applied: step4.applied.length, manual_routed: step3.manualCount + step1.routedToManual,
-    index_requests_sent: step4.indexRequestsSent,
+    candidates: step2.candidates.length,
+    auto_applied: step4.applied.length, manual_routed: step4.routedManual + step1.routedToManual,
   }
   await step.run('log-step6-receipt', async () => writeStepReceipt(supabaseAdmin, {
     jobName: STEP6_JOB_NAME, clientId, weekKey, status: 'completed',
