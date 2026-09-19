@@ -3,8 +3,13 @@
 /**
  * MessengerEmergencyStopPanel —— 门户「紧急全渠道停」按钮（issue #1589）。
  *
- * 双向开关：停用 + 重新打开。一次点击就把这个客户的 Messenger + WhatsApp
+ * 双向开关：停用 + 重新打开。一次点击就把这个客户的 Messenger + WhatsApp + 邮件
  * AI 客服自动回复全部关掉/重新打开，写审计记录（谁点的、什么时候点的）。
+ *
+ * 🔴 文案必须跟 `kill-switch.ts` 实际翻的列数同步（issue #1745 子牙复审
+ *    发现的连带影响：加了邮件渠道之后，这里如果还照抄"两个渠道"的老文案，
+ *    FDE 会看着"全渠道停"的按钮却以为邮件不受影响）——三处提示文案
+ *    （`PROMPT_TEXT`/`doneMessage`/下方说明段落）改列表个数时要一起改。
  * 跟 `dashboard/admin/mcp-keys` 页的 kill switch 同一个二次确认模式
  * （`window.prompt` 输入固定短语）——这是一个后果重大的操作，普通的
  * `window.confirm` 太容易被手滑点过去。
@@ -33,8 +38,8 @@ const CONFIRM_PHRASE: Record<Action, string> = {
 }
 
 const PROMPT_TEXT: Record<Action, string> = {
-  stop: '🚨 这会立刻停掉这个客户的 Messenger + WhatsApp AI 客服自动回复。',
-  resume: '✅ 这会立刻重新打开这个客户的 Messenger + WhatsApp AI 客服自动回复。',
+  stop: '🚨 这会立刻停掉这个客户的 Messenger + WhatsApp + 邮件 AI 客服自动回复。',
+  resume: '✅ 这会立刻重新打开这个客户的 Messenger + WhatsApp + 邮件 AI 客服自动回复。',
 }
 
 export function MessengerEmergencyStopPanel({ clientId }: Props) {
@@ -64,8 +69,8 @@ export function MessengerEmergencyStopPanel({ clientId }: Props) {
       }
       const doneMessage =
         action === 'stop'
-          ? '已经停了 —— Messenger 和 WhatsApp 的 AI 客服自动回复现在都是关的。'
-          : '已经重新打开 —— Messenger 和 WhatsApp 的 AI 客服自动回复现在都是开的。'
+          ? '已经停了 —— Messenger、WhatsApp、邮件的 AI 客服自动回复现在都是关的。'
+          : '已经重新打开 —— Messenger、WhatsApp、邮件的 AI 客服自动回复现在都是开的。'
       setResult({
         ok: true,
         message: body.auditWarning ? `${doneMessage}（但这次操作没能记进审计日志：${body.auditWarning}）` : doneMessage,
@@ -80,8 +85,8 @@ export function MessengerEmergencyStopPanel({ clientId }: Props) {
   return (
     <div className="rounded-xl border border-red-200 bg-red-50 p-4">
       <p className="mb-3 text-sm text-slate-700">
-        出事时按左边这个：立刻把这个客户的 Messenger + WhatsApp AI 客服自动回复<strong>全部关掉</strong>，
-        不用分别去关两个渠道。关掉后客户的私信会等人工回复，不会再由 AI 自动回。
+        出事时按左边这个：立刻把这个客户的 Messenger + WhatsApp + 邮件 AI 客服自动回复<strong>全部关掉</strong>，
+        不用分别去关每个渠道。关掉后客户的私信/邮件会等人工回复，不会再由 AI 自动回。
         误触发或者情况处理完了，按右边那个重新打开。
       </p>
       <div className="flex flex-wrap gap-2">

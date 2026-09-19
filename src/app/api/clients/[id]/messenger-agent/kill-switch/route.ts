@@ -1,10 +1,10 @@
 /**
  * POST /api/clients/[id]/messenger-agent/kill-switch
  *
- * 门户「紧急全渠道停」面板的后端（issue #1589）。ME 内部员工（PM/FDE）用的
- * 双向开关——`action: 'stop'` 一次调用把这个客户的 Messenger + WhatsApp AI
- * 客服自动回复都关掉；`action: 'resume'` 重新打开。两个方向都把「谁点的、
- * 什么时候点的」写进审计记录。
+ * 门户「紧急全渠道停」面板的后端（issue #1589，issue #1745 扩到邮件渠道）。
+ * ME 内部员工（PM/FDE）用的双向开关——`action: 'stop'` 一次调用把这个客户的
+ * Messenger + WhatsApp + 邮件 AI 客服自动回复都关掉；`action: 'resume'`
+ * 重新打开。两个方向都把「谁点的、什么时候点的」写进审计记录。
  *
  * 🔴 双向都要：面板最初只做了 `stop`，文案却承诺"重新打开回这里手动开"——
  *    Codex 复审 2026-09-15 抓到代码库里根本没有任何地方能把开关写回
@@ -15,8 +15,8 @@
  *    `resumeAiRepliesForClient()`（`src/lib/knowledge/kill-switch.ts`）。
  *    stop 那一半已经在客户自助确认页
  *    （`src/app/knowledge-confirm/[requestId]/route.ts`）上线跑着，翻的
- *    是同一对 `clients.messenger_agent_enabled_messenger` / `_whatsapp`
- *    列，写的是同一张 `client_knowledge_events` 审计表。这条路由只是给
+ *    是同一组 `clients.messenger_agent_enabled_messenger` / `_whatsapp` /
+ *    `_email` 三列，写的是同一张 `client_knowledge_events` 审计表。这条路由只是给
  *    「ME 员工从门户按」这个身份多开一个入口，不会出现「客户看到是关的、
  *    员工看到是开的」这种双开关互相打架的情况。
  *
