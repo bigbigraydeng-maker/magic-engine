@@ -18,9 +18,15 @@ vi.mock('@/lib/platform-oauth/token-manager', () => ({
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { getValidTokenForConnection } from '@/lib/platform-oauth/token-manager'
-import { sendMailReply } from '../mail-send'
+import { sendMailReply, mailReplyWindow } from '../mail-send'
 
-const INPUT = { clientId: 'c1', conversationId: 'cv1', body: '好的，帮您留位', sentByEmail: 'amy@nal.co.nz' }
+const INPUT = {
+  clientId: 'c1',
+  conversationId: 'cv1',
+  body: '好的，帮您留位',
+  sentByEmail: 'amy@nal.co.nz',
+  usedAiDraft: false,
+}
 
 interface DbOpts {
   conversation?: { id: string; client_id: string; channel: string; contact_id: string | null; page_id: string | null } | null
@@ -353,5 +359,23 @@ describe('发送审计（跟私信同一张表、同一个原则）', () => {
     const r = await sendMailReply(INPUT)
     expect(r).toMatchObject({ ok: false, status: 502, reason: 'audit_failed' })
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('usedAiDraft 如实落进审计表，不再硬编码 false（F2 AI 起草发送靠这个字段区分人工/AI）', async () => {
+    mockDb({ conversation: CONNECTED, lastInboundMessageId: 'm-in', connection: CONNECTION })
+    mockGraph({ createReply: [{ ok: true, id: 'g8' }] })
+    await sendMailReply({ ...INPUT, usedAiDraft: true })
+    expect(auditInserted[0]).toMatchObject({ used_ai_draft: true })
+  })
+})
+
+describe('mailReplyWindow（跟 channel-dispatch 的 CHANNEL_WINDOW 查表形状对齐，邮件没有真实窗口）', () => {
+  it('客人没来过信 → closed', () => {
+    expect(mailReplyWindow(null)).toEqual({ kind: 'closed', msRemaining: 0 })
+  })
+
+  it('客人来过信，不管多久之前 → open，msRemaining 是 Infinity（邮件不存在"窗口快关了"）', () => {
+    expect(mailReplyWindow('2020-01-01T00:00:00Z')).toEqual({ kind: 'open', msRemaining: Number.POSITIVE_INFINITY })
+    expect(mailReplyWindow(new Date().toISOString())).toEqual({ kind: 'open', msRemaining: Number.POSITIVE_INFINITY })
   })
 })

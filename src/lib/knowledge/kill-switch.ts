@@ -9,12 +9,16 @@
  * to be right there, not behind a support email.
  *
  * 🔴 It flips the EXISTING Governed Reply Agent kill switches
- * (`clients.messenger_agent_enabled_messenger` / `_whatsapp`, added by
- * `20260913095601_conversation_reply_drafts.sql` and read by
+ * (`clients.messenger_agent_enabled_messenger` / `_whatsapp` / `_email`,
+ * added by `20260913095601_conversation_reply_drafts.sql` and
+ * `20260920100000_messenger_agent_email_kill_switch.sql`, read by
  * `src/lib/messenger-agent/channel-dispatch.ts`) rather than inventing a
  * second, parallel "is the AI on" flag. Two switches for one question is how
  * you end up with an AI that is off according to one screen and on according
- * to the code that actually sends.
+ * to the code that actually sends. This function's own doc/name says "every
+ * channel" — the email column must be added here in the same PR that adds it
+ * to `channel-dispatch.ts`, or the portal's "emergency stop all channels"
+ * button would silently stop lying about what it stopped (issue #1745).
  *
  * 🔴 Order of operations: flip the switch FIRST, then write the audit event.
  * If the audit write fails afterwards, the AI is still off — the safe
@@ -65,6 +69,7 @@ export async function stopAiRepliesForClient(
     .update({
       messenger_agent_enabled_messenger: false,
       messenger_agent_enabled_whatsapp: false,
+      messenger_agent_enabled_email: false,
     })
     .eq('id', params.clientId)
     .select('id')
@@ -119,6 +124,7 @@ export async function resumeAiRepliesForClient(
     .update({
       messenger_agent_enabled_messenger: true,
       messenger_agent_enabled_whatsapp: true,
+      messenger_agent_enabled_email: true,
     })
     .eq('id', params.clientId)
     .select('id')

@@ -108,7 +108,9 @@ import {
   CHANNEL_WINDOW,
   isWindowClosed,
   type MessengerAgentChannel,
+  type ChannelSendResult,
 } from '@/lib/messenger-agent/channel-dispatch'
+import { isKnownAutoAckChannel } from './conversation-inbound-autoack'
 import {
   classifyConversation,
   resolvePostSaleClassificationPolicy,
@@ -122,8 +124,6 @@ import { MessengerAgentOutputSchema, type MessengerAgentOutput } from '@/lib/mes
 import { resolveVerifierPolicy } from '@/lib/messenger-agent/verifier/policies'
 import type { VerifierResult } from '@/lib/messenger-agent/verifier/framework'
 import type { KnowledgeReadResult, KnowledgeEntry } from '@/lib/knowledge'
-import type { SendReplyResult } from '@/lib/messenger/send'
-import type { SendWhatsAppResult } from '@/lib/whatsapp/send'
 import {
   loadDraftContext,
   persistDraft,
@@ -189,8 +189,15 @@ export function parseMessageReceived(raw: unknown): ParsedMessageReceived {
   return { ok: true, value: parsed.data }
 }
 
+/**
+ * F2 认 messenger/whatsapp/email 三个渠道——跟 F1 的 `isKnownAutoAckChannel`
+ * 不是同一份白名单：F2 是"AI 起草→人审→发送"主链路，邮件的产品价值在这条链路上
+ * 成立（起草+审核不要求秒级响应）；F1 那种"秒回安抚话术"才是邮件不适用的部分
+ * （见 `isKnownAutoAckChannel` 头注释）。`voice` 仍不认——事件契约的 channel
+ * 枚举比 F2 支持的范围更宽，`voice` 按"payload 认不出"处理。
+ */
 function isKnownDraftChannel(channel: string): channel is MessengerAgentChannel {
-  return channel === 'messenger' || channel === 'whatsapp'
+  return channel === 'messenger' || channel === 'whatsapp' || channel === 'email'
 }
 
 // ---------------------------------------------------------------------------
@@ -341,7 +348,7 @@ type ChannelSendFn = (input: {
   body: string
   sentByEmail: string
   usedAiDraft: boolean
-}) => Promise<SendReplyResult | SendWhatsAppResult>
+}) => Promise<ChannelSendResult>
 
 export interface ConversationInboundDraftDeps {
   isOptedOut: (conversationId: string) => Promise<boolean>
@@ -428,11 +435,19 @@ export function createConversationInboundDraftFunction(deps: ConversationInbound
       // Step "wait-autoack" —— 纯 UX 排序（确保安抚话术先送达），不是 gate：
       // 超时（F1 因为瞬时故障没能按时 emit）也继续往下走起草，不因为排序没保证
       // 就放弃这整段本该继续的自动回复流程。
-      await step.waitForEvent('wait-autoack', {
-        event: CONVERSATION_AUTOACK_SENT_EVENT,
-        timeout: '5m',
-        if: `async.data.conversation_id == "${conversation_id}"`,
-      })
+      //
+      // 邮件（以及其它 F1 不覆盖的渠道，见 `isKnownAutoAckChannel`）永远不会
+      // 收到 F1 的 `conversation/autoack.sent`——F1 从来不会为这个渠道 emit
+      // 它。如果照样等，每一封邮件的起草都会被这个已知永远不会来的事件白白
+      // 拖慢 5 分钟。直接跳过这一步，不是"缩短超时"，是这个 wait 对这个渠道
+      // 根本不该存在。
+      if (isKnownAutoAckChannel(channel)) {
+        await step.waitForEvent('wait-autoack', {
+          event: CONVERSATION_AUTOACK_SENT_EVENT,
+          timeout: '5m',
+          if: `async.data.conversation_id == "${conversation_id}"`,
+        })
+      }
 
       const context = await step.run('load-context', () => deps.loadContext(client_id, conversation_id))
 

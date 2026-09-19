@@ -55,11 +55,29 @@ import { CONNECTION_STATUS } from '@/lib/platform-oauth/vocabulary'
 
 const GRAPH = 'https://graph.microsoft.com/v1.0'
 
+/**
+ * 邮件没有 Meta 那种 24 小时/7 天窗口概念——`sendMailReply` 本身的设计就是
+ * "只要客人来过信就能回"（回复对象靠 `lastInboundMessageId` 精确定位，不靠时间
+ * 窗口）。这个纯函数存在只是为了跟 `channel-dispatch.ts` 的 `CHANNEL_WINDOW`
+ * 查表形状对齐（跟 `messengerWindow`/`whatsappWindow` 同一个入参/返回形状），
+ * 不是邮件真的需要一套窗口判断。`msRemaining` 在 `open` 态给 `Infinity`，
+ * 保证 F2 那条"窗口剩 <30 分钟就升级"的检查（`WINDOW_CLOSING_SOON_MS`）对邮件
+ * 永远不成立——邮件不存在"窗口快关了"这件事。
+ */
+export type MailReplyWindow = { kind: 'open'; msRemaining: number } | { kind: 'closed'; msRemaining: 0 }
+
+export function mailReplyWindow(lastInboundAt: string | null): MailReplyWindow {
+  if (!lastInboundAt) return { kind: 'closed', msRemaining: 0 }
+  return { kind: 'open', msRemaining: Number.POSITIVE_INFINITY }
+}
+
 export interface SendMailReplyInput {
   clientId: string
   conversationId: string
   body: string
   sentByEmail: string
+  /** 这条回复是不是 AI 起草、人工批准发出的——落进审计表的 `used_ai_draft`，跟私信同一张表同一个字段。 */
+  usedAiDraft: boolean
 }
 
 export type SendMailReplyResult =
@@ -266,7 +284,7 @@ export async function sendMailReply(input: SendMailReplyInput): Promise<SendMail
       client_id: convo.client_id,
       sent_by_email: input.sentByEmail,
       body,
-      used_ai_draft: false,
+      used_ai_draft: input.usedAiDraft,
       messaging_type: 'email',
       status: 'pending',
     })

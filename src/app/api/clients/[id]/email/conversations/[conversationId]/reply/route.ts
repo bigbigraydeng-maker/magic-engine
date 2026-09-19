@@ -54,6 +54,8 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     conversationId: params.conversationId,
     body: payload.body,
     sentByEmail: email,
+    // 人在 CRM 里手打并点发送的——不是 AI 起草的草稿。
+    usedAiDraft: false,
   })
 
   if (!result.ok) {

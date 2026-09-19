@@ -13,7 +13,13 @@ const STAFF = 'ray@magicengine.com.au'
 function tables(clientRows?: Row[]) {
   return {
     clients: clientRows ?? [
-      { id: CLIENT_A, name: 'CTS', messenger_agent_enabled_messenger: true, messenger_agent_enabled_whatsapp: true },
+      {
+        id: CLIENT_A,
+        name: 'CTS',
+        messenger_agent_enabled_messenger: true,
+        messenger_agent_enabled_whatsapp: true,
+        messenger_agent_enabled_email: true,
+      },
     ],
     client_knowledge_events: [] as Row[],
   }
@@ -22,14 +28,20 @@ function tables(clientRows?: Row[]) {
 function stoppedTables(clientRows?: Row[]) {
   return {
     clients: clientRows ?? [
-      { id: CLIENT_A, name: 'CTS', messenger_agent_enabled_messenger: false, messenger_agent_enabled_whatsapp: false },
+      {
+        id: CLIENT_A,
+        name: 'CTS',
+        messenger_agent_enabled_messenger: false,
+        messenger_agent_enabled_whatsapp: false,
+        messenger_agent_enabled_email: false,
+      },
     ],
     client_knowledge_events: [] as Row[],
   }
 }
 
 describe('stopAiRepliesForClient', () => {
-  it('🔴 把 Governed Reply Agent 已有的两个开关都关掉（不另造一个平行开关）', async () => {
+  it('🔴 把 Governed Reply Agent 已有的三个开关（含邮件）都关掉（不另造一个平行开关）', async () => {
     const db = tables()
     const sb = createFakeWriteSupabase(db)
     const result = await stopAiRepliesForClient(sb, {
@@ -40,6 +52,7 @@ describe('stopAiRepliesForClient', () => {
     expect(result.stopped).toBe(true)
     expect(db.clients[0].messenger_agent_enabled_messenger).toBe(false)
     expect(db.clients[0].messenger_agent_enabled_whatsapp).toBe(false)
+    expect(db.clients[0].messenger_agent_enabled_email).toBe(false)
   })
 
   it('留下一条只增不改的审计事件，记得清楚是谁按的', async () => {
@@ -92,7 +105,7 @@ describe('stopAiRepliesForClient', () => {
 })
 
 describe('resumeAiRepliesForClient', () => {
-  it('🔴 把两个开关都重新打开——停用的对称操作，不是另一套机制', async () => {
+  it('🔴 把三个开关（含邮件）都重新打开——停用的对称操作，不是另一套机制', async () => {
     const db = stoppedTables()
     const sb = createFakeWriteSupabase(db)
     const result = await resumeAiRepliesForClient(sb, {
@@ -103,6 +116,7 @@ describe('resumeAiRepliesForClient', () => {
     expect(result.resumed).toBe(true)
     expect(db.clients[0].messenger_agent_enabled_messenger).toBe(true)
     expect(db.clients[0].messenger_agent_enabled_whatsapp).toBe(true)
+    expect(db.clients[0].messenger_agent_enabled_email).toBe(true)
   })
 
   it('留下一条 value=on 的审计事件', async () => {

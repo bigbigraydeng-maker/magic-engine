@@ -14,6 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { isChannelEnabled, getSentMessageId, isWindowClosed } from '../channel-dispatch'
 import type { SendReplyResult } from '../../messenger/send'
 import type { SendWhatsAppResult } from '../../whatsapp/send'
+import type { SendMailReplyResult } from '../../microsoft/mail-send'
 
 // ---------------------------------------------------------------------------
 // 假 supabase 数据源 —— 跟 `optout.test.ts` 同一个写法：按表名建模，`.eq()`
@@ -85,14 +86,30 @@ describe('isChannelEnabled', () => {
     await expect(isChannelEnabled(CLIENT_A, 'whatsapp', supabase)).resolves.toBe(false)
   })
 
-  it('两列都是 false（迁移默认值）→ 两个渠道都是 false', async () => {
+  it('三列都是 false（迁移默认值）→ 三个渠道都是 false', async () => {
     const supabase = makeFakeSupabase([
       {
         id: CLIENT_A,
         messenger_agent_enabled_messenger: false,
         messenger_agent_enabled_whatsapp: false,
+        messenger_agent_enabled_email: false,
       },
     ])
+    await expect(isChannelEnabled(CLIENT_A, 'messenger', supabase)).resolves.toBe(false)
+    await expect(isChannelEnabled(CLIENT_A, 'whatsapp', supabase)).resolves.toBe(false)
+    await expect(isChannelEnabled(CLIENT_A, 'email', supabase)).resolves.toBe(false)
+  })
+
+  it('email 列 true，messenger/whatsapp 仍是 false → 三列互不影响（issue #1745）', async () => {
+    const supabase = makeFakeSupabase([
+      {
+        id: CLIENT_A,
+        messenger_agent_enabled_messenger: false,
+        messenger_agent_enabled_whatsapp: false,
+        messenger_agent_enabled_email: true,
+      },
+    ])
+    await expect(isChannelEnabled(CLIENT_A, 'email', supabase)).resolves.toBe(true)
     await expect(isChannelEnabled(CLIENT_A, 'messenger', supabase)).resolves.toBe(false)
     await expect(isChannelEnabled(CLIENT_A, 'whatsapp', supabase)).resolves.toBe(false)
   })
@@ -155,6 +172,21 @@ describe('getSentMessageId', () => {
     }
     expect(getSentMessageId('whatsapp', result)).toBeNull()
   })
+
+  it('email 成功结果 → 取 messageId（issue #1745，字段名跟另外两个渠道都不同）', () => {
+    const result: SendMailReplyResult = { ok: true, messageId: 'graph-msg-1' }
+    expect(getSentMessageId('email', result)).toBe('graph-msg-1')
+  })
+
+  it('email 发送失败结果 → null', () => {
+    const result: SendMailReplyResult = {
+      ok: false,
+      status: 424,
+      error: '邮箱授权掉线了，请找 Magic Lab 团队重连',
+      reason: 'no_token',
+    }
+    expect(getSentMessageId('email', result)).toBeNull()
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -184,5 +216,13 @@ describe('isWindowClosed', () => {
 
   it("跨渠道取值不能互相误判：whatsapp 传 'closed' → false（那是 messenger 的关闭态，不是 whatsapp 的）", () => {
     expect(isWindowClosed('whatsapp', 'closed')).toBe(false)
+  })
+
+  it("email：'closed' → true（客人没来过信）", () => {
+    expect(isWindowClosed('email', 'closed')).toBe(true)
+  })
+
+  it("email：'open' → false", () => {
+    expect(isWindowClosed('email', 'open')).toBe(false)
   })
 })
