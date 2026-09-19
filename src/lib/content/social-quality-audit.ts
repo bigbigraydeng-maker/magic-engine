@@ -86,9 +86,12 @@ export async function auditSocialPost(
   }
 
   const routeDimensions: RouteDimension[] = contentType === 'social_b' ? [VIRAL_STRUCTURE_DIM] : []
+  // A rubric failure must not drop the guard receipt — degrade to a skipped rubric instead.
+  let rubricError: string | null = null
   const [rubric, contentGuard] = await Promise.all([
     hasRubricLLM
       ? evaluate(content, ctx, { llmClient: getOpenAIClient(), routeDimensions })
+          .catch((err: unknown) => { rubricError = err instanceof Error ? err.message : String(err); return SKIPPED_RUBRIC })
       : Promise.resolve(SKIPPED_RUBRIC),
     runContentGuard(content, { targetLanguage: metadata.target_language ?? null }),
   ])
@@ -108,10 +111,11 @@ export async function auditSocialPost(
       pass:         rubricResult.pass,
       dimensions:   rubricResult.dimensions,
     },
-    rubric_skipped: !hasRubricLLM,
+    rubric_skipped: !hasRubricLLM || rubricError !== null,
+    rubric_error:   rubricError,
     content_guard: contentGuardSnapshot(contentGuard),
     auditedAt: new Date().toISOString(),
   }
 
-  return { rubricResult, contextSnapshot, contentGuard, retryable: hasRetryableFailure(rubricResult, contentGuard) }
+  return { rubricResult, contextSnapshot, contentGuard, retryable: hasRetryableFailure(rubric, contentGuard) }
 }

@@ -133,7 +133,7 @@ describe('mergeGuardIntoRubric / hasRetryableFailure', () => {
     expect(merged.pass).toBe(false)
     expect(merged.overallScore).toBe(8.5)
     expect(merged.dimensions.map(d => d.dimension)).toEqual(['brand-fit', LANGUAGE_DIMENSION, CLICHE_DIMENSION])
-    expect(hasRetryableFailure(merged, guard)).toBe(true)
+    expect(hasRetryableFailure(PASSING_RUBRIC, guard)).toBe(true)
   })
 
   it('judge-unavailable only ⇒ not retryable (regenerating cannot fix a provider outage)', async () => {
@@ -141,14 +141,25 @@ describe('mergeGuardIntoRubric / hasRetryableFailure', () => {
     const guard = await runContentGuard(CLEAN_EN, { config: CFG })
     const merged = mergeGuardIntoRubric(PASSING_RUBRIC, guard)
     expect(merged.pass).toBe(false)
-    expect(hasRetryableFailure(merged, guard)).toBe(false)
+    expect(hasRetryableFailure(PASSING_RUBRIC, guard)).toBe(false)
   })
 
-  it('skipped rubric: score comes from scored guard dimensions only', async () => {
+  it('judge-unavailable + only an advisory rubric dimension failing ⇒ still not retryable', async () => {
+    mockJudge.mockRejectedValueOnce(new Error('down'))
+    const guard = await runContentGuard(CLEAN_EN, { config: CFG })
+    const withAdvisoryFail: RubricResult = {
+      ...PASSING_RUBRIC,
+      dimensions: [...PASSING_RUBRIC.dimensions,
+        { dimension: 'viral-structure-preservation', score: 3, pass: true, reason: 'advisory', method: 'llm' }],
+    }
+    expect(hasRetryableFailure(withAdvisoryFail, guard)).toBe(false)
+  })
+
+  it('skipped rubric: score is not invented from guard dimensions', async () => {
     mockJudge.mockRejectedValueOnce(new Error('down'))
     const guard = await runContentGuard(CLEAN_EN, { config: CFG })
     const merged = mergeGuardIntoRubric(SKIPPED_RUBRIC, guard)
-    expect(merged.overallScore).toBe(9)
+    expect(merged.overallScore).toBe(0)
     expect(merged.pass).toBe(false)
   })
 })

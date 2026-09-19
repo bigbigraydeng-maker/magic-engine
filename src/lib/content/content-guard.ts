@@ -41,7 +41,8 @@ const JUDGE_SNIPPET_CHARS = 1500
 
 const CLICHE_INSTRUCTIONS =
   'The post opens with or leans on generic marketing clichés (e.g. "Unlock the power of", ' +
-  '"Elevate your", "Discover the magic", "Your gateway to success") instead of saying something concrete.'
+  '"Elevate your", "Discover the magic", "Your gateway to success", "开启…新篇章", "赋能", "一站式解决方案") ' +
+  'instead of saying something concrete.'
 
 // ─── Language consistency (deterministic) ────────────────────────────────────
 
@@ -185,26 +186,25 @@ export const SKIPPED_RUBRIC: RubricResult = { overallScore: 0, pass: true, dimen
 
 /**
  * Append guard dimensions to a rubric result. The guard is a gate, not a score:
- * overallScore stays the rubric's (guard-only average when the rubric was skipped),
- * while any guard failure — including an unavailable judge — forces pass = false.
+ * overallScore always stays the rubric's (0 when the rubric was skipped — see
+ * snapshot.rubric_skipped), while any guard failure — including an unavailable
+ * judge — forces pass = false.
  */
 export function mergeGuardIntoRubric(rubric: RubricResult, guard: ContentGuardResult): RubricResult {
-  const scoredGuardDims = guard.dimensions.filter(
-    d => !(d.dimension === CLICHE_DIMENSION && guard.clicheProbability === null))
-  const overallScore = rubric.dimensions.length > 0 || scoredGuardDims.length === 0
-    ? rubric.overallScore
-    : Math.round(scoredGuardDims.reduce((s, d) => s + d.score, 0) / scoredGuardDims.length * 10) / 10
   return {
-    overallScore,
+    overallScore: rubric.overallScore,
     pass: rubric.pass && !guard.needsHumanReview,
     dimensions: [...rubric.dimensions, ...guard.dimensions],
   }
 }
 
-/** True when regenerating could fix a failure (an unavailable judge cannot be fixed by rewriting). */
+/**
+ * True when regenerating could fix a failure. Takes the PRE-merge rubric so an
+ * unavailable judge (not fixable by rewriting) never triggers a retry, and
+ * advisory rubric dimensions keep their non-blocking meaning.
+ */
 export function hasRetryableFailure(rubric: RubricResult, guard: ContentGuardResult): boolean {
-  return rubric.dimensions.some(d =>
-    !d.pass && !(d.dimension === CLICHE_DIMENSION && guard.clicheProbability === null))
+  return !rubric.pass || guard.status === 'fail'
 }
 
 /** Machine-readable receipt persisted into generation_context_snapshot.content_guard. */

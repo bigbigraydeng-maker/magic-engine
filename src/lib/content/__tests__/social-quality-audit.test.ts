@@ -272,5 +272,13 @@ describe('auditSocialPost', () => {
       expect(result.contentGuard.status).toBe('unavailable')
       expect(result.retryable).toBe(false)
     })
+
+    it('keeps the guard receipt when the rubric LLM call throws', async () => {
+      mockEvaluate.mockRejectedValueOnce(new Error('OpenAI 500'))
+      const result = await auditSocialPost('Unlock the Power of 一件代发物流支持 with NAL Express!', ['facebook'], 'social_c', SAMPLE_METADATA)
+      expect(result.contextSnapshot.rubric_error).toBe('OpenAI 500')
+      expect((result.contextSnapshot.content_guard as Record<string, unknown>).needs_human_review).toBe(true)
+      expect(result.rubricResult.pass).toBe(false)
+    })
   })
 })
