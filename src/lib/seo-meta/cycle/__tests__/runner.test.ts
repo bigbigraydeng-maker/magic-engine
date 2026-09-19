@@ -13,6 +13,7 @@ const CONFIG: MetaCycleClientConfig = {
   maxPagesPerRun: 3,
   cooldownDays: 30,
   brandVoice: 'factual AU/NZ English',
+  keywordFallbackLocations: [],
 }
 
 function candidate(overrides: Partial<MetaCycleCandidate> = {}): MetaCycleCandidate {
@@ -35,6 +36,9 @@ const EVIDENCE: MetaCycleGateEvidence = {
   searchVolume: 500,
   keywordDifficulty: 30,
   snapshotDate: '2026-09-10',
+  keywordDataSource: 'dataforseo_primary',
+  keywordDataLocation: 2554,
+  keywordDataNote: '搜索量/难度来自 NZ 市场的 DataForSEO 数据',
   competitorTitles: ['Competitor A'],
   ctsRankingUrl: 'https://example.com/foo',
   chosenReason: 'test evidence',
