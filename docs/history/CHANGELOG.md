@@ -5,6 +5,14 @@
 
 ---
 
+### 2026-09-20（Park Homes 官网：首页去掉最后的网图占位，换成真实照片）
+
+PR [#1804](https://github.com/bigbigraydeng-maker/magic-engine/pull/1804) 已合并并部署。PM 要求把 Park Homes 官网整体检查一遍还有什么可以升级——查出首页（全站访问量最高的页面）大图和"品牌理念"板块的配图，还是最早搭站时用的网图占位，大图上甚至挂着一行"Example image · indicative only"（示例图片·仅供参考）的小字标签，而 5 个项目详情页早在几周前就已经全部换成客户提供的真实效果图/实景照。换成了已经在 Riverside、Howick 项目页上线过的真实照片，删掉了占位标签，并清掉了 8 张确认没人再引用的旧网图文件。
+
+**Reuse Statement**：客户专属内容改动，复用已经审过、已在其他页面上线的真实客户照片，没有新拍/新生成任何素材，未新增共享平台代码。
+
+---
+
 ### 2026-09-20（Park Homes 官网：Riverside 项目补上客户提供的走访视频）
 
 PR [#1801](https://github.com/bigbigraydeng-maker/magic-engine/pull/1801) 已合并并部署。客户 Jason 2026-09-15 邮件发来 115 Park Estate Road（即 Riverside 项目）的 YouTube 走访视频，要求加到网站里；代码当时已经写好（2026-09-17），但被顺手提交到了一个内容完全不相关的改动请求里（记录谷歌广告接口权限流程的纯文档 PR #1770），导致一直没合并、官网上一直看不到。本次把这个视频改动单独拆出来重开一个改动请求，走完自动检查后合并上线，并在 https://www.parkhomes.nz/riverside/ 页面核实视频确实可见。Jason 同一封邮件之前那次请求（129 Forrest Hill 效果图）此前已上线，本次一并核对确认无误。
