@@ -2,8 +2,6 @@ import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { describe, expect, it } from 'vitest'
 import { fromGscPages, mergeCandidates } from '../candidates'
-import { deriveMetaCycleAction } from '../action-mapping'
-import { runStep3Prescribe } from '../runner'
 import type { MetaCycleCandidate } from '../types'
 
 /**
@@ -11,40 +9,39 @@ import type { MetaCycleCandidate } from '../types'
  * client" conclusion in spec §8, run a second client (Oztop) through the
  * chain in read-only/dry-run mode as evidence.
  *
- * What this file actually proves: the SHARED orchestration logic (candidate
- * merge/dedup, action-type prescription, auto-budget capping) produces
- * identical, correctly-parameterised behaviour for a CTS-shaped input and an
- * Oztop-shaped input, using the exact same code path with no client
- * branching — by running BOTH through the real runner/candidates/
- * action-mapping functions in the same test.
+ * What this file actually proves: the SHARED discovery logic (candidate
+ * merge/dedup) produces identical, correctly-parameterised behaviour for a
+ * CTS-shaped input and an Oztop-shaped input, using the exact same code
+ * path with no client branching. PM 2026-09-20（incident follow-up）moved
+ * the decision-making (topic match, difficulty, SERP ownership) into
+ * gate.ts, which needs live GSC/DataForSEO calls per candidate and so isn't
+ * exercised here at the unit level — its client-agnosticism is structural
+ * (it takes `config: MetaCycleClientConfig` + `siteUrl`, resolved fresh
+ * per client, never a literal client id) rather than something a pure unit
+ * test can demonstrate without mocking every external call.
  *
  * What this file does NOT prove: it is not a live trial against real Oztop
  * production data (no DataForSEO/GSC/DB credentials are available from this
- * environment, and this is a code-level test, not a production dry run).
- * seo-meta-cycle.ts's `buildAdapterForClient` already means Oztop is
- * structurally excluded from real runs today — `getConnection` only returns
- * a result for clients with a GitHub repo connection configured, and Oztop's
- * flow is WordPress, not a repo, so `roster.entries` including Oztop would
- * still resolve to `status: 'no_adapter'` and touch nothing. A genuine live
- * read-only trial (real GSC/DataForSEO reads, zero writes) is a required
- * follow-up before Oztop's `meta_cycle_enabled` flag is ever turned on —
- * not run from this session, called out explicitly rather than assumed.
+ * environment). seo-meta-cycle.ts's `buildAdapterForClient` already means
+ * Oztop is structurally excluded from real runs today — `getConnection`
+ * only returns a result for clients with a GitHub repo connection
+ * configured, and Oztop's flow is WordPress, not a repo. A genuine live
+ * read-only trial (real GSC/DataForSEO reads, zero writes, via the
+ * dry_run:true manual trigger) is a required follow-up before Oztop's
+ * `meta_cycle_enabled` flag is ever turned on — not run from this session.
  */
 
 const CTS_SHAPED_DOMAIN = 'www.ctstours.co.nz'
 const OZTOP_SHAPED_DOMAIN = 'oztopbuildingsupplies.com.au'
 
 function candidatesFor(domain: string): MetaCycleCandidate[] {
-  return fromGscPages(
-    [
-      { page: `https://${domain}/blog/some-page`, impressions: 200, position: 8 },
-      { page: `https://${domain}/blog/other-page`, impressions: 150, position: 12 },
-    ],
-    [{ query: 'some page keyword', impressions: 200 }],
-  )
+  return fromGscPages([
+    { page: `https://${domain}/blog/some-page`, impressions: 200, position: 8 },
+    { page: `https://${domain}/blog/other-page`, impressions: 150, position: 12 },
+  ])
 }
 
-describe('SEO Meta-Cycle orchestration is client-agnostic (魏征 finding #12 evidence)', () => {
+describe('SEO Meta-Cycle discovery is client-agnostic (魏征 finding #12 evidence)', () => {
   it('mergeCandidates dedupes identically for a .co.nz (CTS-shaped) and a .com.au (Oztop-shaped) domain', () => {
     const ctsMerged = mergeCandidates(candidatesFor(CTS_SHAPED_DOMAIN), new Set(), 10)
     const oztopMerged = mergeCandidates(candidatesFor(OZTOP_SHAPED_DOMAIN), new Set(), 10)
@@ -53,22 +50,6 @@ describe('SEO Meta-Cycle orchestration is client-agnostic (魏征 finding #12 ev
     expect(oztopMerged).toHaveLength(2)
     // Same shape, same ordering rule (impressions desc) — no domain-conditional branch.
     expect(ctsMerged.map((c) => c.slug)).toEqual(oztopMerged.map((c) => c.slug))
-  })
-
-  it('deriveMetaCycleAction prescribes the same action type for the same candidate shape regardless of which domain it came from', () => {
-    const ctsCandidate = candidatesFor(CTS_SHAPED_DOMAIN)[0]
-    const oztopCandidate = candidatesFor(OZTOP_SHAPED_DOMAIN)[0]
-
-    const ctsResult = deriveMetaCycleAction(ctsCandidate)
-    const oztopResult = deriveMetaCycleAction(oztopCandidate)
-
-    expect(ctsResult.actionType).toBe(oztopResult.actionType)
-    expect(ctsResult.auto).toBe(oztopResult.auto)
-  })
-
-  it('runStep3Prescribe caps auto-actions the same way for both clients using only config.maxPagesPerRun, not a client identity check', () => {
-    const result = runStep3Prescribe(candidatesFor(OZTOP_SHAPED_DOMAIN), 1)
-    expect(result.titleRewrites.length).toBeLessThanOrEqual(1)
   })
 
   it('the cycle library does not hardcode CTS_CLIENT_ID or a literal "CTS" client check anywhere in runtime code (comments/spec references excluded by scanning for the UUID + a code-shaped check only)', () => {

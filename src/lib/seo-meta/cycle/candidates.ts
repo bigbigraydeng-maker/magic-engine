@@ -17,6 +17,13 @@
  *
  * GSC-only means impressions and CTR are always a matched pair from the
  * SAME page-level GSC row — no cross-source unit mismatch is possible.
+ *
+ * 事故 2026-09-20（W38 首次上线）根因: this file used to also guess a target
+ * keyword by token-overlap against the client's SITE-WIDE top_queries list.
+ * That guess is GONE — `keyword` below is now only ever a slug-derived
+ * placeholder. The real keyword comes exclusively from gate.ts's
+ * deriveTopicMatchedKeyword(), which asks GSC what THIS page's own queries
+ * are, never a site-wide list a different page's query could leak in from.
  */
 
 import type { MetaCycleCandidate } from './types'
@@ -52,10 +59,6 @@ export interface RawGscPage {
   position?: number
   ctr?: number
 }
-export interface RawGscQuery {
-  query?: string
-  impressions?: number
-}
 
 const MIN_POSITION = 4
 const MAX_POSITION = 20
@@ -64,11 +67,12 @@ const MIN_IMPRESSIONS = 10
 /** Generalised, client-agnostic version of cts-meta-pr.ts's pickCandidates
  *  (that one stays CTS-narrow-lane specific — see its docstring, and it has
  *  no ctr field, which this cycle needs for baseline_ctr). Same GSC 4-20/
- *  impressions≥10 window, but no CTS branding, reusable per client. */
-export function fromGscPages(
-  topPages: RawGscPage[],
-  topQueries: RawGscQuery[],
-): MetaCycleCandidate[] {
+ *  impressions≥10 window, but no CTS branding, reusable per client.
+ *
+ *  No `topQueries` parameter anymore — see file header. `keyword` is a
+ *  slug-derived placeholder only; gate.ts overwrites it with a real,
+ *  page-verified one before anything gets written. */
+export function fromGscPages(topPages: RawGscPage[]): MetaCycleCandidate[] {
   const out: MetaCycleCandidate[] = []
   for (const page of topPages) {
     if (
@@ -82,19 +86,10 @@ export function fromGscPages(
     const slug = slugFromUrl(page.page)
     if (!slug) continue
 
-    const tokens = slug.split('-').filter((t) => t.length > 3)
-    const match = topQueries
-      .map((q) => ({
-        q,
-        score: q.query ? tokens.filter((t) => q.query!.toLowerCase().includes(t)).length : 0,
-      }))
-      .filter((s) => s.score > 0)
-      .sort((a, b) => b.score - a.score || (b.q.impressions ?? 0) - (a.q.impressions ?? 0))[0]?.q
-
     out.push({
       pageUrl: page.page,
       slug,
-      keyword: match?.query ?? slug.replace(/-/g, ' '),
+      keyword: slug.replace(/-/g, ' '),
       source: 'gsc',
       position: page.position ?? null,
       impressions: page.impressions ?? null,

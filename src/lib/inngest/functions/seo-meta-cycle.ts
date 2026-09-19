@@ -29,7 +29,6 @@ import { inngest, CLOUD_FN_PREFIX } from '../client'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getConnection } from '@/lib/cms/connection-store'
 import { GithubClient } from '@/lib/cms/github-client'
-import { locationCodeForDb } from '@/lib/seo-intelligence/keyword-snapshots'
 import { createCtsRepoApplyAdapter } from '@/lib/seo-meta/cycle/apply-adapter'
 import { generateMetaCycleTitle } from '@/lib/seo-meta/cycle/ai-meta'
 import {
@@ -46,7 +45,7 @@ import {
 import {
   runStep1CheckDue,
   runStep2CandidatesReady,
-  runStep3Prescribe,
+  runStep3Gate,
   runStep4Applied,
 } from '@/lib/seo-meta/cycle/runner'
 import {
@@ -105,8 +104,15 @@ export function createSeoMetaCycleFanOutFunction(deps: {
   )
 }
 
-/** Client-agnostic on the fan-out side; the adapter (L3) is resolved per-client here. */
-async function buildAdapterForClient(clientId: string): Promise<{ adapter: ApplyAdapter } | null> {
+/**
+ * Client-agnostic on the fan-out side; the adapter (L3) is resolved
+ * per-client here. Exported so the manual dry-run trigger route
+ * (/api/cron/seo-meta-cycle-trigger) can build the same adapter without
+ * going through Inngest — a dry run needs to return its results
+ * synchronously in the HTTP response, which Inngest's fire-and-forget event
+ * model can't do.
+ */
+export async function buildAdapterForClient(clientId: string): Promise<{ adapter: ApplyAdapter } | null> {
   // getConnection only ever queries provider=GITHUB (connection-store.ts), so
   // a non-null result is always repo-shaped — CmsConnectionStatus already
   // types repoOwner/repoName/branch directly, no cast needed.
@@ -156,24 +162,27 @@ async function runSixSteps(
     summary: { candidate_count: step2.candidates.length },
   }))
 
-  // Step 3: prescribed (pure — no I/O, still its own step for replay clarity + its own receipt)
-  const step3 = await step.run('prescribed', async () => runStep3Prescribe(step2.candidates, config.maxPagesPerRun))
+  // Step 3: gated (information-completeness gate, PM 2026-09-20 incident
+  // follow-up — real I/O now: live GSC page-query calls, keyword_snapshots
+  // reads, live SERP checks. No longer pure.)
+  const step3 = await step.run('gated', async () => runStep3Gate(supabaseAdmin, config, step2.candidates))
   await step.run('log-step3-receipt', async () => writeStepReceipt(supabaseAdmin, {
     jobName: STEP3_JOB_NAME, clientId, weekKey, status: 'completed',
-    processed: step3.titleRewrites.length + step3.skipCount, completed: step3.titleRewrites.length, failed: 0,
-    summary: { auto: step3.titleRewrites.length, skip: step3.skipCount, deferred: step3.deferredCount },
+    processed: step3.passed.length + step3.failures.length, completed: step3.passed.length, failed: step3.failures.length,
+    summary: { passed: step3.passed.length, failures: step3.failures.map((f: typeof step3.failures[number]) => ({ slug: f.candidate.slug, reason: f.reason, detail: f.detail })) },
   }))
 
   // Step 4: applied (also writes seo_meta_log rows — step 5 "logged" is
   // the receipt below, the actual log rows are written inside step 4
   // because they need the exact applied title/desc from the same call).
-  const locationCode = locationCodeForDb(config.semrushDb)
   const step4 = await step.run('applied', async () =>
-    runStep4Applied(supabaseAdmin, adapter, config, weekKey, step3.titleRewrites, generateMetaCycleTitle, locationCode, false),
+    runStep4Applied(supabaseAdmin, adapter, config, weekKey, step3.passed, generateMetaCycleTitle, false),
   )
   await step.run('log-step4-receipt', async () => writeStepReceipt(supabaseAdmin, {
     jobName: STEP4_JOB_NAME, clientId, weekKey, status: 'completed',
-    processed: step4.applied.length, completed: step4.applied.length, failed: 0, summary: step4,
+    processed: step4.proposals.length, completed: step4.applied.length,
+    failed: step4.proposals.filter((p: typeof step4.proposals[number]) => !p.applied).length,
+    summary: step4,
   }))
 
   // Step 5: logged (rollup receipt over step 4's writes)
