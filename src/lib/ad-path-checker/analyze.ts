@@ -5,7 +5,37 @@ export interface SourceDocument { text: string; source: string; kind: 'page' | '
 
 /** Static structure only: do not expose input values, source text or contact identities. */
 export function cleanMarkup(html: string): string {
-  return html.replace(/<!--[\s\S]*?-->/g, '').replace(/<(script|style|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+  // A missing closer consumes the remaining input instead of retrying each
+  // nested opener. [^<>] also prevents malformed open tags from rescanning.
+  return html.replace(/<!--[\s\S]*?(?:-->|$)/g, '').replace(/<(script|style|template)\b[^<>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi, '')
+}
+
+function trackingHints(text: string) {
+  const signals = detectTrackingSignals('')
+  let inspected = 0
+  // Reuse the detector on at most 64 short contexts, never the full hostile
+  // document: its unrelated email extractor can backtrack on long tokens.
+  for (const match of text.matchAll(/gtag|GTM-|connect\.facebook\.net|fbq|facebook\.com\/tr/g)) {
+    const hint = detectTrackingSignals(text.slice(Math.max(0, match.index! - 2), match.index! + 298))
+    signals.ga4 ||= hint.ga4
+    signals.gtm ||= hint.gtm
+    signals.meta_pixel ||= hint.meta_pixel
+    if (++inspected >= 64) break
+  }
+  return signals
+}
+
+function* formMarkup(html: string): Generator<string> {
+  const opening = /<form\b[^<>]*>/gi
+  const closing = /<\/form\s*>/gi
+  let match: RegExpExecArray | null
+  while ((match = opening.exec(html))) {
+    closing.lastIndex = opening.lastIndex
+    const end = closing.exec(html)
+    if (!end) return // An unclosed form is unknown, never retry all openers.
+    yield html.slice(match.index, closing.lastIndex)
+    opening.lastIndex = closing.lastIndex
+  }
 }
 
 export function attribute(tag: string, name: string): string | undefined {
@@ -14,8 +44,8 @@ export function attribute(tag: string, name: string): string | undefined {
 
 export function linkedResources(html: string, base: URL): { scripts: string[]; contact?: string } {
   const scripts: string[] = []
-  const source = html.replace(/<!--[\s\S]*?-->/g, '')
-  for (const tag of source.match(/<script\b[^>]*>/gi) ?? []) {
+  const source = html.replace(/<!--[\s\S]*?(?:-->|$)/g, '')
+  for (const tag of source.match(/<script\b[^<>]*>/gi) ?? []) {
     try {
       const src = attribute(tag, 'src')
       if (!src) continue
@@ -27,7 +57,7 @@ export function linkedResources(html: string, base: URL): { scripts: string[]; c
   const priority = (url: string) => /(?:layout|tracking|analytics)/i.test(url) ? 0 : /(?:app|main)/i.test(url) ? 1 : 2
   const selected = [...new Set(scripts)].sort((a, b) => priority(a) - priority(b)).slice(0, 3)
   let contact: string | undefined
-  for (const tag of cleanMarkup(source).match(/<a\b[^>]*>/gi) ?? []) {
+  for (const tag of cleanMarkup(source).match(/<a\b[^<>]*>/gi) ?? []) {
     try {
       const href = attribute(tag, 'href')
       if (!href) continue
@@ -42,7 +72,12 @@ export function linkedResources(html: string, base: URL): { scripts: string[]; c
 }
 
 function uniqueMatches(text: string, regex: RegExp): string[] {
-  return [...new Set([...text.matchAll(regex)].map(match => match[1]))].slice(0, 8)
+  const values = new Set<string>()
+  for (const match of text.matchAll(regex)) {
+    values.add(match[1])
+    if (values.size === 8) break
+  }
+  return [...values]
 }
 
 export function analyzeDocuments(input: {
@@ -62,12 +97,12 @@ export function analyzeDocuments(input: {
   add('page', '页面能否打开', 'detected', '已读取公开网页。浏览器里的加载速度和交互体验仍需实际查看。', [`网页返回 HTTP ${input.status}。`])
   add('https', '连接是否加密', input.https ? 'detected' : 'not_detected', input.https ? '最终页面使用 HTTPS。' : '最终页面使用 HTTP，建议网站维护人员开启 HTTPS。', [input.https ? '最终 URL 使用 https 协议。' : '最终 URL 使用 http 协议。'])
 
-  const tracking = documents.map(doc => ({ doc, signals: detectTrackingSignals(doc.text) }))
+  const tracking = documents.map(doc => ({ doc, signals: trackingHints(doc.text) }))
   const tagChecks: { id: string; title: string; regex: RegExp; match: (text: string, signals: ReturnType<typeof detectTrackingSignals>) => boolean }[] = [
-    { id: 'ga4', title: '网站访问统计（GA4）', regex: /\b(G-[A-Z0-9]{6,})\b/g, match: (text, signals) => signals.ga4 || /\bG-[A-Z0-9]{6,}\b/.test(text) },
-    { id: 'gtm', title: '追踪管理工具（GTM）', regex: /\b(GTM-[A-Z0-9]{4,})\b/g, match: (_text, signals) => signals.gtm },
+    { id: 'ga4', title: '网站访问统计（GA4）', regex: /\b(G-[A-Z0-9]{6,20})\b/g, match: (text, signals) => signals.ga4 || /\bG-[A-Z0-9]{6,20}\b/.test(text) },
+    { id: 'gtm', title: '追踪管理工具（GTM）', regex: /\b(GTM-[A-Z0-9]{4,20})\b/g, match: (_text, signals) => signals.gtm },
     { id: 'pixel', title: 'Facebook 广告追踪（Meta Pixel）', regex: /(?:fbq\(\s*["']init["']\s*,\s*["']|facebook\.com\/tr\?id=)(\d{8,20})/g, match: (text, signals) => signals.meta_pixel || /facebook\.com\/tr\?id=\d{8,20}/.test(text) },
-    { id: 'google_ads', title: 'Google 广告追踪', regex: /\b(AW-\d{6,})\b/g, match: text => /\bAW-\d{6,}\b/.test(text) },
+    { id: 'google_ads', title: 'Google 广告追踪', regex: /\b(AW-\d{6,20})\b/g, match: text => /\bAW-\d{6,20}\b/.test(text) },
   ]
   for (const tag of tagChecks) {
     const hits = tracking.filter(({ doc, signals }) => tag.match(doc.text, signals))
@@ -86,7 +121,7 @@ export function analyzeDocuments(input: {
   let consent = false
   for (const doc of pages) {
     const markup = cleanMarkup(doc.text)
-    for (const tag of markup.match(/<a\b[^>]*>/gi) ?? []) {
+    for (const tag of markup.match(/<a\b[^<>]*>/gi) ?? []) {
       const href = attribute(tag, 'href')?.trim()
       if (!href) continue
       let kind: string | undefined
@@ -102,12 +137,14 @@ export function analyzeDocuments(input: {
       }
       if (kind) { contactKinds.add(kind); contactSources.add(doc.source) }
     }
-    for (const form of markup.match(/<form\b[^>]*>[\s\S]*?<\/form\s*>/gi) ?? []) {
-      if (!detectTrackingSignals(form).contact_form) continue
+    for (const form of formMarkup(markup)) {
+      const fieldTags = form.match(/<(?:input|select|textarea)\b[^<>]*>/gi) ?? []
+      const opening = form.slice(0, form.indexOf('>') + 1)
+      if (!/contact|enquir|inquir|quote/i.test(opening) && !fieldTags.some(tag => /^(?:email|tel)$/i.test(attribute(tag, 'type') ?? ''))) continue
       forms++
       contactSources.add(doc.source)
       // Inspect field names/labels, never values or textarea content.
-      const fields = (form.match(/<(?:input|select|textarea)\b[^>]*>/gi) ?? []).map(tag => `${attribute(tag, 'name') ?? ''} ${attribute(tag, 'id') ?? ''} ${attribute(tag, 'placeholder') ?? ''}`).join(' ')
+      const fields = fieldTags.map(tag => `${attribute(tag, 'name') ?? ''} ${attribute(tag, 'id') ?? ''} ${attribute(tag, 'placeholder') ?? ''}`).join(' ')
       if (/product|interest|country|quantity|budget|timeline|purchase|产品|国家|数量|预算|采购/i.test(fields)) qualification = true
     }
     consent ||= /(?:cookie|consent)[-_ ]?(?:banner|notice|dialog)|(?:accept|reject|manage)[\s\S]{0,30}cookies|cookie[\s\S]{0,30}(?:accept|preferences)|同意[\s\S]{0,12}(?:cookie|隐私)/i.test(markup)

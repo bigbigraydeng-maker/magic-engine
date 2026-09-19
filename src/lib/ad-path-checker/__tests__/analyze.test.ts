@@ -50,4 +50,20 @@ describe('evidence-based Chinese report', () => {
     expect(report.checks.find(c => c.id === 'alignment')?.state).toBe('unknown')
     expect(report.path[0].confirmed).toBe(false)
   })
+
+  it.each([
+    '<script>'.repeat(90_000),
+    '<form>'.repeat(120_000),
+    'a'.repeat(720_000),
+    '<!--'.repeat(150_000),
+    '<a href="'.repeat(60_000),
+    'connect.facebook.net/'.repeat(30_000),
+  ])('keeps malformed markup and long tokens within the parser CPU budget (%#)', text => {
+    const html = `<html><body>${text}</body></html>`
+    const start = performance.now()
+    linkedResources(html, new URL(base.sourceUrl))
+    const report = analyzeDocuments({ ...base, documents: [{ text: html, source: base.sourceUrl, kind: 'page' }] })
+    expect(performance.now() - start).toBeLessThan(1000)
+    expect(report.checks.find(c => c.id === 'contact')?.state).toBe('not_detected')
+  })
 })

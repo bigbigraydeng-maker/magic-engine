@@ -8,7 +8,7 @@ export class ScanReadError extends Error {}
 const USER_AGENT = 'MagicEnginePublicChecker/1.0 (public HTML inspection; no forms submitted)'
 
 function isHtml(response: SafeFetchTextResponse): boolean {
-  const challenge = /<title[^>]*>\s*(?:just a moment|attention required|access denied|verify you are human|security check)/i.test(response.text)
+  const challenge = /<title[^<>]*>\s*(?:just a moment|attention required|access denied|verify you are human|security check)/i.test(response.text)
   return !challenge && response.ok && /(?:text\/html|application\/xhtml\+xml)/i.test(response.headers.get('content-type') ?? '') && /<(?:html|body|head|!doctype)\b/i.test(response.text)
 }
 
