@@ -66,7 +66,8 @@ export type MetaCycleActionType = 'title_rewrite' | 'skip'
 export interface MetaCycleGateEvidence {
   keyword: string
   searchVolume: number
-  keywordDifficulty: number
+  /** null when the only data available was a live DataForSEO search-volume lookup — that endpoint doesn't return difficulty. Never a coerced 0 (PM 2026-09-20 incident root cause #2 was exactly `?? 0` making "no data" look like "definitely safe"). */
+  keywordDifficulty: number | null
   snapshotDate: string
   /** Top-3 competitor page titles from the live SERP check. */
   competitorTitles: string[]
@@ -125,6 +126,17 @@ export interface ApplyAdapterResult {
 
 export interface ApplyAdapter {
   readonly channel: 'pr' | 'wp_plugin'
+  /**
+   * Cheap pre-check: is this slug backed by an editable data file at all?
+   * PM 2026-09-20 (data-completeness follow-up): this used to only be
+   * discovered in step 4's apply() call, AFTER the gate had already spent a
+   * live GSC query, a keyword_snapshots/DataForSEO lookup, and a live SERP
+   * call on the candidate. Calling this FIRST (step 3, before the gate)
+   * means an unreachable page (e.g. forbidden-city-travel-guide, which has
+   * no matching src/lib/data file in the CTS repo) is skipped for free.
+   * No network/DB writes; safe to call before dryRun is even decided.
+   */
+  canEditSlug(slug: string | null): Promise<boolean>
   /**
    * Apply a new title/desc for one candidate. Must be a no-op (no
    * network/DB writes) when dryRun is true. `applied: true` means the
