@@ -7,6 +7,17 @@
 
 ---
 
+## 2026-09-20 · SEO 标题周循环 v1：新自动化一律上 Inngest、按真实用量定规模、自动改文案必过信息完整闸门
+
+**决策（PM 2026-09-20 拍板，三条）**：
+1. **往后所有新的跨步骤自动化流程，一律跑在 Inngest 上，每一步留机器可读回执。** 旧的 `cts-seo-optimizer`（Render 定时盲改标题）已退役，换成 Inngest 两段式 `cloud-seo-meta-cycle-fanout` + `cloud-seo-meta-cycle-run-one`，六步各写一条 `cron_run_logs`。
+2. **按真实用量定设计规模。** 实际用量是一个客户每周 ≤3 个页面，所以自动撤回、来回改封顶、学习记忆写入、跨客户预算熔断这套机器全部砍掉——复审两轮找到的 bug 全出在自动撤回这块。改坏了（14 天回查判定变差）只下发一条人工看板待办，指向那条已合并 PR 自带的 GitHub Revert 按钮，不写任何新的撤回代码。
+3. **SEO 文案只在信息完整时才改。** 必须同时有 DataForSEO 搜索量 + 难度、实时搜索结果前 3、且关键词确实属于这个页面（这个页面自己的 GSC 搜索词），才许改；缺任何一样 = 跳过并记原因，**绝不默认填值**。给客户打开开关前，先跑一次演练（`dry_run`）给 PM 看。
+
+**为什么**：第一次真跑（W38）自动合并了 2 条错误改动（见 [PITFALLS D10](./PITFALLS.md)），六步回执全绿却改错了字——缺数据时默认填 0、关键词跨页借用，是直接原因。
+
+**影响**：信息完整闸门见 `src/lib/seo-meta/cycle/gate.ts`（PR #1816）；CTS 开关 `clients.seo_config.meta_cycle_enabled` 目前关闭，等 PM 看过下一次演练再开。设计文档 [`docs/specs/2026-09-20-seo-meta-cycle-v1-spec.md`](./specs/2026-09-20-seo-meta-cycle-v1-spec.md)，跟进清单见 Issue [#1807](https://github.com/bigbigraydeng-maker/magic-engine/issues/1807)。
+
 ## 2026-09-13 · 客户知识库作为 Governed Lead-Reply Agent 的事实层，替代 offerings.yaml 路线
 
 **决策**：AI 对终端客人说出口的业务事实（价格、时效、承诺、退改政策、在售/停售产品等），统一存放在**逐条治理的客户知识表**里，而不是按客户放 `config/clients/<client>/offerings.yaml` 文件。该知识表是已登记 L1 候选「Governed Lead-Reply Agent」（`docs/registry/platform-candidates.md`）的**事实层子能力**，不另立 L1。原方案"3 个客户后再抽 `client_offerings` 表"作废。

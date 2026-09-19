@@ -5,6 +5,25 @@
 
 ---
 
+### 2026-09-20（SEO 标题周循环 v1 上线，首跑改错 2 页已撤回、已补信息完整闸门）
+
+CTS 每周自动改网站标题/描述的功能重做成 6 步版本，跑在 Inngest 上；首跑改错 2 页，约 5 分钟内撤回，CTS 开关已关，等 PM 看过演练再开。
+
+- PR [#1802](https://github.com/bigbigraydeng-maker/magic-engine/pull/1802)：旧版每周开的标题修改 PR 改成自动合并，不用 PM 手点。
+- PR [#1805](https://github.com/bigbigraydeng-maker/magic-engine/pull/1805)：旧版定时任务跳过 9/21 那次（临时改成只跑 9/28 一次，后被 #1812 整条删掉）。
+- PR [#1810](https://github.com/bigbigraydeng-maker/magic-engine/pull/1810)：`seo_meta_log` 表的访问权限收紧到只有后台服务能读写（数据库改动文件已合并）。
+- PR [#1812](https://github.com/bigbigraydeng-maker/magic-engine/pull/1812)：新版 6 步流程上线（回查上次改动效果 → 选页面 → 定动作 → 改文案开 PR → 记改前数据 → 汇总），每客户一个开关、默认关；旧定时任务从 render.yaml 删掉。
+- PR [#1814](https://github.com/bigbigraydeng-maker/magic-engine/pull/1814)：加手动触发入口，不用等周一就能跑一次。
+- chinatravel [#199](https://github.com/bigbigraydeng-maker/chinatravel/pull/199) / [#200](https://github.com/bigbigraydeng-maker/chinatravel/pull/200)：首跑自动合并的 2 条错误改动（Liziba 页配错关键词；免签页描述被改成像要办签证）。
+- chinatravel [#201](https://github.com/bigbigraydeng-maker/chinatravel/pull/201) / [#202](https://github.com/bigbigraydeng-maker/chinatravel/pull/202)：PM 用 GitHub Revert 撤回上面两条，官网标题已恢复原样。
+- PR [#1816](https://github.com/bigbigraydeng-maker/magic-engine/pull/1816)：根因修复——关键词只认这个页面自己的搜索词、缺数据一律跳过、PR 描述写全数据依据、每个候选都留记录、新文案先做事实核对；手动入口支持 `dry_run` 演练（不写任何东西）；把撤回的 2 条记录标记为已撤回。
+
+事故经过与教训见 [PITFALLS D10](../PITFALLS.md)，PM 决策见 [DECISIONS 2026-09-20](../DECISIONS.md)。
+
+**Reuse Statement**：复用已有 GSC、DataForSEO、竞对解析、人工看板（`zhuge/action-persister`）、Inngest 两段式派单范式、`cts-meta-pr.ts` 的窄道改文件逻辑；新增的 `src/lib/seo-meta/cycle/` 是不带客户身份的共享流程（有测试断言不含 CTS ID）；客户差异只在 `clients.seo_config.meta_cycle_*` 配置和 CTS 仓库的写入适配器里。
+
+---
+
 ### 2026-09-20（CRM+AI 客服：邮件渠道接入 Governed Reply Agent 治理链路）
 
 PR [#1808](https://github.com/bigbigraydeng-maker/magic-engine/pull/1808) 已合并（merge commit `1c0d983f`）。延续 issue [#1745](https://github.com/bigbigraydeng-maker/magic-engine/issues/1745) 的调研结论，把邮件接进已上线的 CTS Governed Reply Agent（AI 起草 → 人审 → 发送，覆盖 Messenger/WhatsApp 的同一套系统）——这是 CRM+AI 客服接入这条线"Messenger-only"范围冻结（[docs/roadmap/2026-09-15-crm-ai-agent-build-control.md](../roadmap/2026-09-15-crm-ai-agent-build-control.md)）里 PM 2026-09-15 当场拍板的**唯一例外**，只豁免邮件一个渠道。
