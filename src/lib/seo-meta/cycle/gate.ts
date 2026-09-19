@@ -65,14 +65,46 @@
  *      on-topic queries to ASCII-only (isEnglishQuery) before ranking by
  *      impressions, so it naturally falls through to the page's own
  *      next-best English query instead of borrowing a non-English one.
+ *
+ * PM 2026-09-20, fourth pass (still zero wrong writes — DataForSEO simply
+ * doesn't index many small-market long-tail queries at all, primary market
+ * or not, so keyword_data_unavailable was blocking candidates that had
+ * perfectly real demand, just not DataForSEO-visible demand): resolving
+ * search volume/difficulty is now a 3-tier waterfall (resolveKeywordData),
+ * available to every client (not CTS-specific), each tier requiring BOTH
+ * fields non-null before it counts as a pass:
+ *   1. dataforseo_primary  — the client's own market (keyword_snapshots row,
+ *      or a live bulkKeywordVolume call at that location).
+ *   2. dataforseo_fallback — client-configured location_codes (PM: CTS
+ *      configures [2036]/AU because "AU↔NZ 数据互补" doesn't hold for every
+ *      industry/client, so this is per-client config —
+ *      MetaCycleClientConfig.keywordFallbackLocations — never a shared
+ *      default).
+ *   3. gsc_serp            — neither DataForSEO location had data at all.
+ *      searchVolume becomes this page's own GSC impressions for the keyword
+ *      (already fetched by deriveTopicMatchedKeyword — reused, not
+ *      re-queried), gated at the SAME ≥30 floor outcome-classifier.ts uses
+ *      for "is this even a real sample". keywordDifficulty becomes the
+ *      average DataForSEO domain-authority score (getDomainMetrics,
+ *      backlink-rank-derived, 0–100) of the SERP's top-3 competitor domains
+ *      — reusing the SAME live SERP call checkSerpOwnership already makes
+ *      for the self-cannibalization check, not a second one. No hardcoded
+ *      "big site" domain list anywhere — authority comes from DataForSEO's
+ *      own backlink data per domain, generically, for any client/industry.
+ * Every tier's failure reason is recorded; if all three fail, the failure
+ * detail lists what each one tried and why it didn't work. Every result
+ * carries keywordDataSource + keywordDataLocation + a human-readable
+ * keywordDataNote (PM: "都用人话标来源") into the PR body, dry-run JSON, and
+ * the step-4 receipt.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchGscQueriesForPage } from '@/lib/gsc/client'
 import { getSerpPage } from '@/lib/dataforseo/serp'
-import { bulkKeywordVolume } from '@/lib/dataforseo/labs'
+import { bulkKeywordVolume, getDomainMetrics } from '@/lib/dataforseo/labs'
 import { locationCodeForDb } from '@/lib/seo-intelligence/keyword-snapshots'
-import type { MetaCycleCandidate, MetaCycleClientConfig, MetaCycleGateEvidence, MetaCycleGateFailure } from './types'
+import { MIN_IMPRESSIONS_FOR_CLASSIFICATION } from './outcome-classifier'
+import type { MetaCycleCandidate, MetaCycleClientConfig, MetaCycleGateEvidence, MetaCycleGateFailure, MetaCycleKeywordDataSource } from './types'
 
 export const GATE_REASON = {
   NO_PAGE_SCOPED_KEYWORD: 'no_page_scoped_keyword_match',
@@ -157,72 +189,144 @@ export async function deriveTopicMatchedKeyword(
   return { keyword: onTopic.query, impressions: onTopic.impressions }
 }
 
-/**
- * Step 2: search volume + difficulty, preferring a fresh (≤14 day)
- * keyword_snapshots row. PM 2026-09-20 (W38 dry-run follow-up): the weekly
- * snapshot job only tracks each client's ~200 currently-RANKED keywords
- * (snapshotRankedKeywordsForClient → getRankedKeywords) — a page-scoped GSC
- * query the gate just derived is very often NOT in that set yet (7 of 9 W38
- * dry-run candidates hit exactly this). Previously that meant an automatic
- * skip. Now: fall back to ONE live DataForSEO call for this single keyword —
- * labs.ts's bulkKeywordVolume (keyword_overview/live, fixed 2026-08-26 — see
- * its header comment), which returns BOTH search_volume and
- * keyword_properties.keyword_difficulty in one call, unlike
- * search-volume.ts's getSearchVolume (volume only, no difficulty at all —
- * do not use it here). This call happens at most once per candidate the
- * gate actually reaches (bounded by the step-3 wide pool,
- * config.maxPagesPerRun*3 — e.g. ≤9 for CTS's maxPagesPerRun=3), since each
- * candidate resolves to exactly one target keyword before this function is
- * ever called.
- *
- * 🔴 PM's hard rule (2026-09-20, third pass): search volume AND difficulty
- *    must BOTH be present — a live result with volume but no difficulty is
- *    exactly as unusable as no result at all, and is skipped with
- *    keyword_data_unavailable, same as a total miss. This is deliberately
- *    NOT the same shape as root cause #2 of the original incident (`?? 0`
- *    silently treating "unknown" as "definitely safe") — here "unknown"
- *    always means "skip", never "assume safe" and never "assume unsafe
- *    enough to allow through with a gap".
- */
-export async function checkKeywordSnapshot(
+const GSC_SERP_MIN_IMPRESSIONS = MIN_IMPRESSIONS_FOR_CLASSIFICATION
+
+/** Numeric DataForSEO location_code → the label PM's human-readable notes use. Generic (any AU/NZ client), not CTS-specific. */
+function locationLabel(code: number): string {
+  if (code === 2036) return 'AU'
+  if (code === 2554) return 'NZ'
+  return `location ${code}`
+}
+
+type TierData = { searchVolume: number; keywordDifficulty: number; snapshotDate: string }
+
+/** Reads a fresh (≤14 day) keyword_snapshots row for this EXACT client+keyword+location — location-scoped so a fallback-location attempt can never accidentally reuse the primary market's row. */
+async function lookupSnapshotRow(
   supabase: SupabaseClient,
   clientId: string,
   keyword: string,
   locationCode: number,
-): Promise<{ searchVolume: number; keywordDifficulty: number; snapshotDate: string } | { failure: string }> {
-  const { data, error } = await supabase
+): Promise<TierData | null> {
+  const { data } = await supabase
     .from('keyword_snapshots')
     .select('search_volume, keyword_difficulty, snapshot_date')
     .eq('client_id', clientId)
+    .eq('location_code', locationCode)
     .ilike('keyword', keyword)
     .order('snapshot_date', { ascending: false })
     .limit(1)
     .maybeSingle()
 
-  if (error) return { failure: `keyword_snapshots lookup failed: ${error.message}` }
   const row = data as { search_volume: number | null; keyword_difficulty: number | null; snapshot_date: string } | null
+  if (!row) return null
+  const ageDays = (Date.now() - new Date(row.snapshot_date).getTime()) / 86_400_000
+  if (ageDays > KEYWORD_SNAPSHOT_MAX_AGE_DAYS || row.search_volume === null || row.keyword_difficulty === null) return null
+  return { searchVolume: row.search_volume, keywordDifficulty: row.keyword_difficulty, snapshotDate: row.snapshot_date }
+}
 
-  if (row) {
-    const ageDays = (Date.now() - new Date(row.snapshot_date).getTime()) / 86_400_000
-    const fresh = ageDays <= KEYWORD_SNAPSHOT_MAX_AGE_DAYS
-    if (fresh && row.search_volume !== null && row.keyword_difficulty !== null) {
-      return { searchVolume: row.search_volume, keywordDifficulty: row.keyword_difficulty, snapshotDate: row.snapshot_date }
-    }
-  }
-
-  let live: Awaited<ReturnType<typeof bulkKeywordVolume>>
+/** One live bulkKeywordVolume call at one location — both fields required, a thrown error is caught and reported, never swallowed into a false pass. */
+async function lookupLiveVolume(keyword: string, locationCode: number): Promise<TierData | { error: string }> {
   try {
-    live = await bulkKeywordVolume([keyword], locationCode)
+    const live = await bulkKeywordVolume([keyword], locationCode)
+    const r = live[0]
+    if (r && r.search_volume !== null && r.keyword_difficulty !== null) {
+      return { searchVolume: r.search_volume, keywordDifficulty: r.keyword_difficulty, snapshotDate: new Date().toISOString().slice(0, 10) }
+    }
+    return { error: 'missing search_volume and/or keyword_difficulty' }
   } catch (err) {
-    return { failure: `no fresh keyword_snapshots row for "${keyword}", and the live DataForSEO lookup threw: ${err instanceof Error ? err.message : String(err)}` }
+    return { error: `lookup threw: ${err instanceof Error ? err.message : String(err)}` }
+  }
+}
+
+/**
+ * Tier 3: neither DataForSEO location had data. searchVolume becomes this
+ * page's own GSC impressions for the keyword (already fetched by
+ * deriveTopicMatchedKeyword — passed in, not re-queried), gated at the same
+ * ≥30 floor outcome-classifier.ts uses. keywordDifficulty becomes the
+ * average DataForSEO domain-authority score of the SERP's top-3 competitor
+ * domains (reusing the SAME live SERP call checkSerpOwnership already made
+ * — not a second SERP call). A domain whose authority lookup fails is
+ * simply excluded from the average (never scored as 0); if EVERY domain
+ * fails, tier 3 fails too — "拿不到域名强度 → 跳过，不许当 0".
+ */
+async function lookupGscSerpEstimate(
+  gscImpressions: number,
+  serpTop3Domains: string[],
+  primaryLocationCode: number,
+): Promise<TierData | { error: string }> {
+  if (gscImpressions < GSC_SERP_MIN_IMPRESSIONS) {
+    return { error: `this page's own GSC impressions for the keyword (${gscImpressions}) are below the ${GSC_SERP_MIN_IMPRESSIONS} floor` }
+  }
+  const uniqueDomains = [...new Set(serpTop3Domains)]
+  if (uniqueDomains.length === 0) {
+    return { error: 'no SERP competitor domains available to estimate difficulty from' }
   }
 
-  const liveResult = live[0]
-  if (!liveResult || liveResult.search_volume === null || liveResult.keyword_difficulty === null) {
-    return { failure: `no fresh keyword_snapshots row for "${keyword}", and the live DataForSEO lookup is missing search_volume and/or keyword_difficulty` }
+  const results = await Promise.allSettled(uniqueDomains.map((d) => getDomainMetrics(d, primaryLocationCode)))
+  const scores = results.flatMap((r) => (r.status === 'fulfilled' ? [r.value.authority_score] : []))
+  if (scores.length === 0) {
+    return { error: `domain-authority lookup failed for all ${uniqueDomains.length} SERP competitor domain(s)` }
   }
 
-  return { searchVolume: liveResult.search_volume, keywordDifficulty: liveResult.keyword_difficulty, snapshotDate: new Date().toISOString().slice(0, 10) }
+  return {
+    searchVolume: gscImpressions,
+    keywordDifficulty: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length),
+    snapshotDate: new Date().toISOString().slice(0, 10),
+  }
+}
+
+function buildKeywordDataNote(source: MetaCycleKeywordDataSource, location: number | null, primaryLocationCode: number, searchVolume: number, keywordDifficulty: number): string {
+  if (source === 'dataforseo_primary') return `搜索量/难度来自 ${locationLabel(location ?? primaryLocationCode)} 市场的 DataForSEO 数据`
+  if (source === 'dataforseo_fallback') return `搜索量/难度来自 ${locationLabel(location ?? primaryLocationCode)} 数据（${locationLabel(primaryLocationCode)} 没有数据）`
+  return `需求来自谷歌后台真实曝光 ${searchVolume} 次；难度按谷歌前三名网站强度估算为 ${keywordDifficulty}（非 DataForSEO 难度分）`
+}
+
+/**
+ * Step 2: search volume + difficulty via a 3-tier waterfall (PM 2026-09-20,
+ * fourth pass — see this file's header comment for the full rationale).
+ * Tries the client's primary market, then any configured fallback
+ * location_codes, then a GSC-impressions + SERP-domain-authority estimate.
+ * Every tier requires BOTH fields non-null to count as a pass; every
+ * attempted tier's failure reason is recorded so a total miss explains
+ * exactly what was tried.
+ */
+export async function resolveKeywordData(
+  supabase: SupabaseClient,
+  clientId: string,
+  keyword: string,
+  primaryLocationCode: number,
+  fallbackLocationCodes: number[],
+  gscImpressions: number,
+  serpTop3Domains: string[],
+): Promise<(TierData & { keywordDataSource: MetaCycleKeywordDataSource; keywordDataLocation: number | null; keywordDataNote: string }) | { failure: string }> {
+  const attempts: string[] = []
+  const succeed = (data: TierData, source: MetaCycleKeywordDataSource, location: number | null) => ({
+    ...data,
+    keywordDataSource: source,
+    keywordDataLocation: location,
+    keywordDataNote: buildKeywordDataNote(source, location, primaryLocationCode, data.searchVolume, data.keywordDifficulty),
+  })
+
+  // Tier 1: primary market
+  const snapshotRow = await lookupSnapshotRow(supabase, clientId, keyword, primaryLocationCode)
+  if (snapshotRow) return succeed(snapshotRow, 'dataforseo_primary', primaryLocationCode)
+  const primaryLive = await lookupLiveVolume(keyword, primaryLocationCode)
+  if (!('error' in primaryLive)) return succeed(primaryLive, 'dataforseo_primary', primaryLocationCode)
+  attempts.push(`dataforseo_primary(${locationLabel(primaryLocationCode)}): no fresh snapshot row, and ${primaryLive.error}`)
+
+  // Tier 2: client-configured fallback markets (live only — the weekly snapshot job never writes a non-primary-location row for this client)
+  for (const locationCode of fallbackLocationCodes) {
+    const fallbackLive = await lookupLiveVolume(keyword, locationCode)
+    if (!('error' in fallbackLive)) return succeed(fallbackLive, 'dataforseo_fallback', locationCode)
+    attempts.push(`dataforseo_fallback(${locationLabel(locationCode)}): ${fallbackLive.error}`)
+  }
+
+  // Tier 3: GSC impressions + SERP domain-authority estimate
+  const gscSerp = await lookupGscSerpEstimate(gscImpressions, serpTop3Domains, primaryLocationCode)
+  if (!('error' in gscSerp)) return succeed(gscSerp, 'gsc_serp', null)
+  attempts.push(`gsc_serp: ${gscSerp.error}`)
+
+  return { failure: `no keyword data available for "${keyword}" from any tier — ${attempts.join('; ')}` }
 }
 
 /** Step 3: the SAME keyword must not have been assigned to a DIFFERENT page in the last 90 days (excludes reverted rows — those were never a real, standing assignment). */
@@ -255,13 +359,18 @@ export async function checkNoRecentReuse(
  * different one of the client's own pages ranking instead is exactly the
  * self-cannibalization shape the incident hit (assigning a query to a page
  * that isn't actually the one competing for it).
+ *
+ * Also returns top3Domains (hostnames, deduped-capable) alongside
+ * top3Titles — PM 2026-09-20 (fourth pass): resolveKeywordData's gsc_serp
+ * tier reuses THIS SAME SERP call for its domain-authority difficulty
+ * estimate, rather than making a second live SERP request per candidate.
  */
 export async function checkSerpOwnership(
   keyword: string,
   countryCode: 'au' | 'nz',
   candidate: MetaCycleCandidate,
   domain: string,
-): Promise<{ top3Titles: string[]; ctsRankingUrl: string | null } | { failure: string }> {
+): Promise<{ top3Titles: string[]; top3Domains: string[]; ctsRankingUrl: string | null } | { failure: string }> {
   const serp = await getSerpPage(keyword, countryCode).catch((err: unknown) => {
     throw new Error(`SERP fetch failed for "${keyword}": ${err instanceof Error ? err.message : String(err)}`)
   })
@@ -281,8 +390,16 @@ export async function checkSerpOwnership(
     }
   }
 
+  const top3 = serp.organic_results.slice(0, 3)
   return {
-    top3Titles: serp.organic_results.slice(0, 3).map((r) => r.title).filter((t): t is string => Boolean(t)),
+    top3Titles: top3.map((r) => r.title).filter((t): t is string => Boolean(t)),
+    top3Domains: top3.flatMap((r) => {
+      try {
+        return [new URL(r.url).hostname.replace(/^www\./, '').toLowerCase()]
+      } catch {
+        return []
+      }
+    }),
     ctsRankingUrl: ownResult?.url ?? null,
   }
 }
@@ -309,8 +426,14 @@ export async function resolveGscSiteUrl(supabase: SupabaseClient, clientId: stri
 /**
  * Runs the full gate for one candidate. Returns either a complete
  * MetaCycleGateEvidence (every check passed) or the FIRST failure
- * encountered (checks run in the order PM specified: topic → snapshot →
- * reuse → SERP → difficulty).
+ * encountered. Order: topic → SERP (self-cannibalization) → keyword data
+ * (3-tier waterfall, reusing the SERP call's top-3 domains for its gsc_serp
+ * tier) → difficulty ceiling → reuse.
+ *
+ * PM 2026-09-20, fourth pass: SERP moved BEFORE data resolution (it used to
+ * run last) because resolveKeywordData's gsc_serp tier needs that same
+ * SERP call's top-3 competitor domains — running SERP twice per candidate
+ * to preserve the old ordering would double live SERP spend for no reason.
  */
 export async function runGateForCandidate(
   supabase: SupabaseClient,
@@ -322,17 +445,6 @@ export async function runGateForCandidate(
   if ('failure' in topicResult) return topicResult.failure
   const { keyword } = topicResult
 
-  const locationCode = locationCodeForDb(config.semrushDb)
-  const snapshotResult = await checkKeywordSnapshot(supabase, config.clientId, keyword, locationCode)
-  if ('failure' in snapshotResult) return { candidate, reason: GATE_REASON.KEYWORD_DATA_UNAVAILABLE, detail: snapshotResult.failure }
-
-  if (snapshotResult.keywordDifficulty > SKIP_DIFFICULTY_FLOOR) {
-    return { candidate, reason: GATE_REASON.DIFFICULTY_TOO_HIGH, detail: `difficulty ${snapshotResult.keywordDifficulty} > ${SKIP_DIFFICULTY_FLOOR} for "${keyword}"` }
-  }
-
-  const reuseResult = await checkNoRecentReuse(supabase, config.clientId, keyword, candidate.slug ?? '')
-  if ('failure' in reuseResult) return { candidate, reason: GATE_REASON.KEYWORD_REUSED, detail: reuseResult.failure }
-
   const countryCode = config.semrushDb === 'nz' ? 'nz' : 'au'
   let serpResult: Awaited<ReturnType<typeof checkSerpOwnership>>
   try {
@@ -342,11 +454,28 @@ export async function runGateForCandidate(
   }
   if ('failure' in serpResult) return { candidate, reason: GATE_REASON.SERP_SELF_CANNIBALIZATION, detail: serpResult.failure }
 
+  const primaryLocationCode = locationCodeForDb(config.semrushDb)
+  const dataResult = await resolveKeywordData(
+    supabase, config.clientId, keyword, primaryLocationCode, config.keywordFallbackLocations,
+    topicResult.impressions, serpResult.top3Domains,
+  )
+  if ('failure' in dataResult) return { candidate, reason: GATE_REASON.KEYWORD_DATA_UNAVAILABLE, detail: dataResult.failure }
+
+  if (dataResult.keywordDifficulty > SKIP_DIFFICULTY_FLOOR) {
+    return { candidate, reason: GATE_REASON.DIFFICULTY_TOO_HIGH, detail: `difficulty ${dataResult.keywordDifficulty} > ${SKIP_DIFFICULTY_FLOOR} for "${keyword}" (source: ${dataResult.keywordDataSource})` }
+  }
+
+  const reuseResult = await checkNoRecentReuse(supabase, config.clientId, keyword, candidate.slug ?? '')
+  if ('failure' in reuseResult) return { candidate, reason: GATE_REASON.KEYWORD_REUSED, detail: reuseResult.failure }
+
   const evidence: MetaCycleGateEvidence = {
     keyword,
-    searchVolume: snapshotResult.searchVolume,
-    keywordDifficulty: snapshotResult.keywordDifficulty,
-    snapshotDate: snapshotResult.snapshotDate,
+    searchVolume: dataResult.searchVolume,
+    keywordDifficulty: dataResult.keywordDifficulty,
+    snapshotDate: dataResult.snapshotDate,
+    keywordDataSource: dataResult.keywordDataSource,
+    keywordDataLocation: dataResult.keywordDataLocation,
+    keywordDataNote: dataResult.keywordDataNote,
     competitorTitles: serpResult.top3Titles,
     ctsRankingUrl: serpResult.ctsRankingUrl,
     chosenReason: `page's own GSC queries include "${keyword}" (${topicResult.impressions} impressions), which contains this page's core topic word`,

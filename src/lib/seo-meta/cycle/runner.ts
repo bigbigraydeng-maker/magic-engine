@@ -260,6 +260,9 @@ export interface MetaCycleProposal {
   searchVolume: number
   keywordDifficulty: number
   snapshotDate: string
+  keywordDataSource: MetaCycleGateEvidence['keywordDataSource']
+  keywordDataLocation: number | null
+  keywordDataNote: string
   competitorTitles: string[]
   ctsRankingUrl: string | null
   chosenReason: string
@@ -331,7 +334,7 @@ async function applyOnePrescription(
   if (preview.skipReason && preview.skipReason !== 'dry_run') {
     // slug not found in the repo's data files etc — record it, don't silently drop (PM finding #6).
     return {
-      proposal: { slug: candidate.slug, pageUrl: candidate.pageUrl, keyword: evidence.keyword, searchVolume: evidence.searchVolume, keywordDifficulty: evidence.keywordDifficulty, snapshotDate: evidence.snapshotDate, competitorTitles: evidence.competitorTitles, ctsRankingUrl: evidence.ctsRankingUrl, chosenReason: evidence.chosenReason, oldTitle: '', oldDesc: '', newTitle, newDesc, factCheckConsistent: false, factCheckReason: 'not checked — preview failed first', applied: false, skipReason: preview.skipReason },
+      proposal: { slug: candidate.slug, pageUrl: candidate.pageUrl, keyword: evidence.keyword, searchVolume: evidence.searchVolume, keywordDifficulty: evidence.keywordDifficulty, snapshotDate: evidence.snapshotDate, keywordDataSource: evidence.keywordDataSource, keywordDataLocation: evidence.keywordDataLocation, keywordDataNote: evidence.keywordDataNote, competitorTitles: evidence.competitorTitles, ctsRankingUrl: evidence.ctsRankingUrl, chosenReason: evidence.chosenReason, oldTitle: '', oldDesc: '', newTitle, newDesc, factCheckConsistent: false, factCheckReason: 'not checked — preview failed first', applied: false, skipReason: preview.skipReason },
       manualAction: null,
     }
   }
@@ -340,6 +343,7 @@ async function applyOnePrescription(
   const base: MetaCycleProposal = {
     slug: candidate.slug, pageUrl: candidate.pageUrl, keyword: evidence.keyword,
     searchVolume: evidence.searchVolume, keywordDifficulty: evidence.keywordDifficulty, snapshotDate: evidence.snapshotDate,
+    keywordDataSource: evidence.keywordDataSource, keywordDataLocation: evidence.keywordDataLocation, keywordDataNote: evidence.keywordDataNote,
     competitorTitles: evidence.competitorTitles, ctsRankingUrl: evidence.ctsRankingUrl, chosenReason: evidence.chosenReason,
     oldTitle: preview.oldTitle, oldDesc: preview.oldDesc, newTitle, newDesc,
     factCheckConsistent: factCheck.consistent, factCheckReason: factCheck.reason, applied: false,
