@@ -133,6 +133,15 @@ function firstIdentifierIndex(norm: string, ids: readonly string[]): number {
   return best
 }
 
+/**
+ * A short single-token identifier ("cts", "act") is too ambiguous to stand
+ * on its own: it must equal a full brand name exactly, or be disambiguated
+ * against other brands in the text, before it counts as client evidence.
+ */
+function isShortSingleTokenId(id: string): boolean {
+  return id.split(' ').length < 2 && id.length < MIN_CONTAINED_TOKEN_LEN
+}
+
 /** Does an extracted brand name refer to the client? */
 export function isClientBrand(brand: string, ids: readonly string[]): boolean {
   const b = normalizeForMatch(brand)
@@ -142,8 +151,7 @@ export function isClientBrand(brand: string, ids: readonly string[]): boolean {
     // "Acme Tours - Acme Travel Service Ltd" contains "acme tours". A short
     // single-token alias ("act") must equal the brand, otherwise any
     // "ACT Logistics" would claim the client.
-    const idTokens = id.split(' ').length
-    if (idTokens < 2 && id.length < MIN_CONTAINED_TOKEN_LEN) return false
+    if (isShortSingleTokenId(id)) return false
     return indexOfIdentifier(b, id) >= 0
   })
 }
@@ -173,10 +181,20 @@ export function resolveClientBrandRank(
 
   const norm = normalizeForMatch(rawResponse)
   const clientBrands = brands.filter(b => isClientBrand(b.brand, ids))
+  // A short single-token alias ("CTS") cannot prove client presence on its
+  // own when that same word also names a different extracted brand ("CTS
+  // Logistics") — that occurrence in the text belongs to the other company,
+  // not the client, so it must not be used as evidence.
+  const otherBrandWords = new Set(
+    brands
+      .filter(b => !clientBrands.includes(b))
+      .flatMap(b => normalizeForMatch(b.brand).split(' '))
+  )
+  const evidenceIds = ids.filter(id => !isShortSingleTokenId(id) || !otherBrandWords.has(id))
   // Evidence = a configured identifier, or the name of a client-matching
   // brand ("Acme Tours Ltd" for client "Acme Tours"), written in the text.
   const clientPos = firstIdentifierIndex(norm, [
-    ...ids,
+    ...evidenceIds,
     ...clientBrands.map(b => normalizeForMatch(b.brand)),
   ])
 

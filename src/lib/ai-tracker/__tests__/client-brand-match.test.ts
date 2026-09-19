@@ -148,6 +148,25 @@ describe('resolveClientBrandRank', () => {
     expect(out.brands[0].brand).toBe('acmetours.co.nz')
   })
 
+  it('a short alias mentioned only as part of a different brand is not evidence', () => {
+    const out = resolveClientBrandRank(
+      [{ brand: 'CTS Logistics', rank: 1, snippet: 'x' }],
+      'For freight, try CTS Logistics — they cover the whole North Island.',
+      { brandName: 'CTS Tours NZ', aliases: ['CTS'] }
+    )
+    expect(out.client_brand_rank).toBeNull()
+    expect(out.brands.map(b => [b.brand, b.rank])).toEqual([['CTS Logistics', 1]])
+  })
+
+  it('a bare short alias with no competing brand is still evidence', () => {
+    const out = resolveClientBrandRank(
+      [],
+      'For your trip, I recommend CTS — they know the region well.',
+      { brandName: 'CTS Tours NZ', aliases: ['CTS'] }
+    )
+    expect(out.client_brand_rank).toBe(1)
+  })
+
   it('drops multiple hallucinated client entries and closes rank gaps', () => {
     const out = resolveClientBrandRank(
       [
