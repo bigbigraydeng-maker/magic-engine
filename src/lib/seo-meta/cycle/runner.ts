@@ -25,11 +25,9 @@ import type { PriorityAction, ZhugeOutput } from '@/lib/zhuge/types'
 import { deriveMetaCycleAction } from './action-mapping'
 import {
   fromGscPages,
-  fromPatrolFindings,
   mergeCandidates,
   type RawGscPage,
   type RawGscQuery,
-  type RawPatrolFinding,
 } from './candidates'
 import { enrichWithSnapshots, fetchCompetitorTitles } from './enrichment'
 import { classifyMetaChangeOutcome } from './outcome-classifier'
@@ -183,34 +181,22 @@ export interface Step2Result {
   candidates: MetaCycleCandidate[]
 }
 
-interface PatrolFindingRow {
-  keyword: string | null
-  url: string | null
-  position: number | null
-  ctr: number | null
-  search_volume: number | null
-  keyword_difficulty: number | null
-}
-
 export async function runStep2CandidatesReady(
   supabase: SupabaseClient,
   config: MetaCycleClientConfig,
 ): Promise<Step2Result> {
   const cooldownCutoff = new Date(Date.now() - config.cooldownDays * 86_400_000).toISOString()
 
-  const [{ data: recentRows }, { data: patrolRows }, { data: gscRow }] = await Promise.all([
+  const [{ data: recentRows }, { data: gscRow }] = await Promise.all([
     supabase.from('seo_meta_log').select('page_slug').eq('client_id', config.clientId).gte('optimised_at', cooldownCutoff),
-    supabase.from('seo_patrol_findings').select('keyword, url, position, ctr, search_volume, keyword_difficulty').eq('client_id', config.clientId).eq('status', 'fresh'),
     supabase.from('gsc_performance_snapshots').select('top_pages, top_queries').eq('client_id', config.clientId).order('period_end', { ascending: false }).limit(1).maybeSingle(),
   ])
 
   const cooldownSlugs = new Set(((recentRows ?? []) as Array<{ page_slug: string }>).map((r) => r.page_slug))
-  const patrolFindings = ((patrolRows ?? []) as PatrolFindingRow[])
-    .map((f): RawPatrolFinding => ({ keyword: f.keyword, url: f.url, position: f.position, ctr: f.ctr, searchVolume: f.search_volume, keywordDifficulty: f.keyword_difficulty }))
   const gscSnapshot = gscRow as { top_pages?: RawGscPage[]; top_queries?: RawGscQuery[] } | null
 
   const merged = mergeCandidates(
-    { patrol: fromPatrolFindings(patrolFindings), gsc: fromGscPages(gscSnapshot?.top_pages ?? [], gscSnapshot?.top_queries ?? []) },
+    fromGscPages(gscSnapshot?.top_pages ?? [], gscSnapshot?.top_queries ?? []),
     cooldownSlugs,
     config.maxPagesPerRun * 3, // wide pool before the difficulty skip filter — same rationale as cts-meta-pr.ts's pickCandidates(..., 12)
   )

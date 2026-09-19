@@ -25,7 +25,8 @@ export interface MetaCycleClientConfig {
   brandVoice: string
 }
 
-export type MetaCycleCandidateSource = 'patrol' | 'gsc'
+/** GSC only — patrol was dropped (复审 2026-09-20: unit mismatch + wrong-page risk, see candidates.ts). */
+export type MetaCycleCandidateSource = 'gsc'
 
 /** One page/keyword pair the cycle is considering acting on, pre-enrichment. */
 export interface MetaCycleCandidate {

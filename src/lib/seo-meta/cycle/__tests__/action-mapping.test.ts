@@ -24,8 +24,8 @@ describe('deriveMetaCycleAction (PM 2026-09-20 精简: title_rewrite / skip only
     expect(result.auto).toBe(true)
   })
 
-  it('prescribes title_rewrite for a patrol-discovered candidate with no GSC position', () => {
-    const result = deriveMetaCycleAction(candidate({ source: 'patrol', position: null }))
+  it('prescribes title_rewrite even when position is null (defensive — fromGscPages always sets it, but the decision function should not crash on missing data)', () => {
+    const result = deriveMetaCycleAction(candidate({ position: null }))
     expect(result.actionType).toBe('title_rewrite')
     expect(result.auto).toBe(true)
   })

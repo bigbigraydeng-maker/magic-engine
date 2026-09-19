@@ -46,8 +46,8 @@ function candidatesFor(domain: string): MetaCycleCandidate[] {
 
 describe('SEO Meta-Cycle orchestration is client-agnostic (魏征 finding #12 evidence)', () => {
   it('mergeCandidates dedupes identically for a .co.nz (CTS-shaped) and a .com.au (Oztop-shaped) domain', () => {
-    const ctsMerged = mergeCandidates({ patrol: [], gsc: candidatesFor(CTS_SHAPED_DOMAIN) }, new Set(), 10)
-    const oztopMerged = mergeCandidates({ patrol: [], gsc: candidatesFor(OZTOP_SHAPED_DOMAIN) }, new Set(), 10)
+    const ctsMerged = mergeCandidates(candidatesFor(CTS_SHAPED_DOMAIN), new Set(), 10)
+    const oztopMerged = mergeCandidates(candidatesFor(OZTOP_SHAPED_DOMAIN), new Set(), 10)
 
     expect(ctsMerged).toHaveLength(2)
     expect(oztopMerged).toHaveLength(2)

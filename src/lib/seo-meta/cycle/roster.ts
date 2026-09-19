@@ -23,14 +23,9 @@ export const META_CYCLE_JOB = 'seo-meta-cycle'
  * oztop-seo-optimizer") — no TZ math, chosen for wall-clock parity with what
  * operators already expect.
  *
- * 🔴 This PR does NOT retire render.yaml's `cts-seo-optimizer` cron entry —
- *    that stays scheduled (one-off 2026-09-28 per PR #1805) until a human
- *    explicitly removes it. Both cron paths write to the same repo/table,
- *    so flipping `meta_cycle_enabled=true` for a client BEFORE that render.yaml
- *    entry is retired risks two independent flows opening PRs against the
- *    same data files in the same run. Retiring render.yaml is a required,
- *    separate follow-up — see this PR's description, not something this file
- *    (or any other code in this PR) enforces automatically.
+ * render.yaml's old `cts-seo-optimizer` cron entry is retired in this same
+ * PR (removed, not just disabled) — both flows writing to the same repo/table
+ * at once was the risk, so they were never allowed to coexist past this PR.
  */
 export const META_CYCLE_CRON = '30 5 * * 1'
 
@@ -54,6 +49,11 @@ export type RosterResult =
   | { ok: false; reason: string }
 
 const DEFAULT_MAX_PAGES_PER_RUN = 3
+/** 复审 2026-09-20（第三轮）item 2: a client config mistake (e.g. someone types
+ *  30 instead of 3 into meta_cycle_max_pages) must not translate into 10x
+ *  the intended weekly PR/AI/SERP spend — hard-capped regardless of what
+ *  seo_config says. */
+const HARD_MAX_PAGES_PER_RUN = 3
 const DEFAULT_COOLDOWN_DAYS = 30
 const DEFAULT_BRAND_VOICE = 'Professional, factual AU/NZ English. No invented prices, dates, or itinerary details.'
 
@@ -81,7 +81,10 @@ export async function loadMetaCycleRoster(supabase: SupabaseClient): Promise<Ros
       clientId: r.id,
       domain: r.domain.trim(),
       semrushDb: typeof r.semrush_db === 'string' ? r.semrush_db : null,
-      maxPagesPerRun: typeof cfg.meta_cycle_max_pages === 'number' && cfg.meta_cycle_max_pages > 0 ? cfg.meta_cycle_max_pages : DEFAULT_MAX_PAGES_PER_RUN,
+      maxPagesPerRun: Math.min(
+        typeof cfg.meta_cycle_max_pages === 'number' && cfg.meta_cycle_max_pages > 0 ? cfg.meta_cycle_max_pages : DEFAULT_MAX_PAGES_PER_RUN,
+        HARD_MAX_PAGES_PER_RUN,
+      ),
       cooldownDays: typeof cfg.meta_cycle_cooldown_days === 'number' && cfg.meta_cycle_cooldown_days > 0 ? cfg.meta_cycle_cooldown_days : DEFAULT_COOLDOWN_DAYS,
       brandVoice: typeof cfg.meta_cycle_brand_voice === 'string' && cfg.meta_cycle_brand_voice.trim().length > 0 ? cfg.meta_cycle_brand_voice : DEFAULT_BRAND_VOICE,
     }]

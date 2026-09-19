@@ -750,25 +750,13 @@ services:
       - key: ANTHROPIC_API_KEY
         sync: false
 
-  # CTS title executor — Monday 05:30 UTC, right after oztop-seo-optimizer.
-  # GSC pos-4-20 pages → AI title/desc → narrow-lane edit of the site repo's
-  # meta data file → ONE weekly PR (human merges, client repo CI gates).
-  # ⚠️ sync:false does NOT auto-fill: after first deploy, link the
-  #    me-shared-cron-secret env group to this service in the Render dashboard.
-  - type: cron
-    name: cts-seo-optimizer
-    env: node
-    # One-off (PM 2026-09-20): skip the 21 Sep run — the optimiser was hand-run on
-    # 20 Sep. Fires once on Mon 28 Sep 05:30 UTC. Restore "30 5 * * 1" if the
-    # Inngest seo/meta-cycle replacement is not live before 5 Oct.
-    schedule: "30 5 28 9 *"
-    buildCommand: ""
-    startCommand: |
-      curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/cts-seo-optimizer
-    envVars:
-      - key: CRON_SECRET
-        sync: false
+  # CTS title executor RETIRED (PM 2026-09-20): replaced by the Inngest
+  # native cron `cloud-seo-meta-cycle-fanout` (src/lib/seo-meta/cycle/roster.ts's
+  # META_CYCLE_CRON, same wall-clock time — Monday 05:30 UTC). Removed here in
+  # the same PR that ships the replacement so the two flows can never both be
+  # scheduled against the same repo/table at once. src/lib/seo-meta/cts-meta-pr.ts
+  # and its route (src/app/api/cron/cts-seo-optimizer) are left in the codebase
+  # (harmless, unscheduled) in case of rollback.
 
   # Weekly blog draft — Tuesday 3am UTC (after Monday keyword snapshots +
   # Monday AI tracker runs, so both topic-selection legs are fresh).
