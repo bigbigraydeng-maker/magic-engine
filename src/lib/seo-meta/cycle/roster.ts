@@ -42,6 +42,8 @@ export interface MetaCycleRosterEntry {
   maxPagesPerRun: number
   cooldownDays: number
   brandVoice: string
+  /** See MetaCycleClientConfig.keywordFallbackLocations — validated here so a malformed config value can never reach the gate as garbage location_codes. */
+  keywordFallbackLocations: number[]
 }
 
 export type RosterResult =
@@ -56,6 +58,15 @@ const DEFAULT_MAX_PAGES_PER_RUN = 3
 const HARD_MAX_PAGES_PER_RUN = 3
 const DEFAULT_COOLDOWN_DAYS = 30
 const DEFAULT_BRAND_VOICE = 'Professional, factual AU/NZ English. No invented prices, dates, or itinerary details.'
+/** PM 2026-09-20 (fourth pass): at most 2 fallback locations — this is a small, deliberate escape hatch (CTS configures [2036]/AU today), not a general multi-market crawl. */
+const MAX_KEYWORD_FALLBACK_LOCATIONS = 2
+
+function parseKeywordFallbackLocations(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter((v): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0)
+    .slice(0, MAX_KEYWORD_FALLBACK_LOCATIONS)
+}
 
 /**
  * Who's due: active + domain set + seo_config.meta_cycle_enabled=true.
@@ -94,6 +105,7 @@ function rowToEntry(row: { id?: unknown; domain?: unknown; semrush_db?: unknown;
     ),
     cooldownDays: typeof cfg.meta_cycle_cooldown_days === 'number' && cfg.meta_cycle_cooldown_days > 0 ? cfg.meta_cycle_cooldown_days : DEFAULT_COOLDOWN_DAYS,
     brandVoice: typeof cfg.meta_cycle_brand_voice === 'string' && cfg.meta_cycle_brand_voice.trim().length > 0 ? cfg.meta_cycle_brand_voice : DEFAULT_BRAND_VOICE,
+    keywordFallbackLocations: parseKeywordFallbackLocations(cfg.meta_cycle_keyword_fallback_locations),
   }
 }
 
@@ -123,6 +135,7 @@ export function toClientConfig(entry: MetaCycleRosterEntry): MetaCycleClientConf
     maxPagesPerRun: entry.maxPagesPerRun,
     cooldownDays: entry.cooldownDays,
     brandVoice: entry.brandVoice,
+    keywordFallbackLocations: entry.keywordFallbackLocations,
   }
 }
 
