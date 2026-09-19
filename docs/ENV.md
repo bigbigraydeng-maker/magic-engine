@@ -55,6 +55,11 @@
 | `PERPLEXITY_API_KEY` | AI 可见度追踪引擎之一 | Render-web | ✅ |
 | `GEMINI_API_KEY` | Google Gemini（AI 可见度追踪第 4 引擎） | Render-web | ❌ |
 | `AI_TRACKER_ENABLE_CLAUDE` | 开关：AI Tracker 是否跑 Claude 引擎 | Render-web | ❌ |
+| `TYPESAFE_API_KEY` | Copy Judge（发布前内容守卫的套话判断，对外封装名 Copy Judge）；**缺了 = 每条新内容都标「需人工审核」（fail-closed）** | Render-web（待加） | ✅ (仅 example) |
+| `CONTENT_GUARD_CLICHE_THRESHOLD` | 套话概率阈值（0–1，默认 0.8），≥ 即拦 | 可选 | ✅ (仅 example) |
+| `CONTENT_GUARD_MAX_EMBEDDED_LATIN_WORDS` | 中文句子里允许夹的连续英文词数（默认 3，品牌名用） | 可选 | ✅ (仅 example) |
+| `CONTENT_GUARD_MAX_EMBEDDED_CJK_CHARS` | 英文句子里允许夹的汉字数（默认 0） | 可选 | ✅ (仅 example) |
+| `CONTENT_GUARD_JUDGE_TIMEOUT_MS` | Copy Judge 超时（默认 8000） | 可选 | ✅ (仅 example) |
 
 ## 3. 视觉 / 视频 / 素材
 

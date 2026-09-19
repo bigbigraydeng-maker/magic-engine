@@ -3,6 +3,14 @@
 
 import { getOpenAIClient } from '@/lib/ai/openai-client'
 import { evaluate } from '@/lib/content/quality-rubric'
+import {
+  runContentGuard,
+  mergeGuardIntoRubric,
+  SKIPPED_RUBRIC,
+  hasRetryableFailure,
+  contentGuardSnapshot,
+} from '@/lib/content/content-guard'
+import type { ContentGuardResult, GuardLanguage } from '@/lib/content/content-guard'
 import type { RubricContext, RubricResult, RouteDimension } from '@/lib/content/quality-rubric'
 
 // Advisory dimension injected for Route B (viral video rewrite).
@@ -15,6 +23,8 @@ const VIRAL_STRUCTURE_DIM: RouteDimension = {
 }
 
 export interface SocialAuditMetadata {
+  /** Language the post must be written in; inferred from the copy when absent. */
+  target_language?: GuardLanguage | null
   brand_name?: string | null
   tone?: string | null
   avoid_words?: string[] | null
@@ -32,12 +42,17 @@ export interface SocialAuditMetadata {
 export interface SocialAuditResult {
   rubricResult: RubricResult
   contextSnapshot: Record<string, unknown>
+  /** Pre-publish guard (mixed language / cliché). needsHumanReview ⇒ keep out of auto-publish. */
+  contentGuard: ContentGuardResult
+  /** False when the only failure is an unavailable guard judge — regenerating cannot fix it. */
+  retryable: boolean
 }
 
 /**
  * Evaluate social post quality using the standard rubric.
  * Route B (social_b) automatically receives the viral-structure-preservation advisory dimension.
- * Returns null when OPENAI_API_KEY is unavailable (non-blocking).
+ * Without OPENAI_API_KEY the rubric is skipped but the content guard still runs
+ * (fail-closed: mixed-language / cliché copy must never skip review).
  *
  * @param content        - Concatenated script + caption + hashtags text
  * @param platforms      - Target platforms; first entry used for platform-fit rule
@@ -51,13 +66,9 @@ export async function auditSocialPost(
   contentType: 'social_a' | 'social_b' | 'social_c',
   metadata: SocialAuditMetadata,
   primaryKeyword?: string | null,
-): Promise<SocialAuditResult | null> {
-  if (!process.env.OPENAI_API_KEY) {
-    console.warn('[social quality] Audit skipped: OPENAI_API_KEY not available')
-    return null
-  }
-
-  const llmClient = getOpenAIClient()
+): Promise<SocialAuditResult> {
+  const hasRubricLLM = Boolean(process.env.OPENAI_API_KEY)
+  if (!hasRubricLLM) console.warn('[social quality] Rubric skipped: OPENAI_API_KEY not available — content guard still runs')
   const platform = platforms[0] ?? 'facebook'
 
   const ctx: RubricContext = {
@@ -75,7 +86,13 @@ export async function auditSocialPost(
   }
 
   const routeDimensions: RouteDimension[] = contentType === 'social_b' ? [VIRAL_STRUCTURE_DIM] : []
-  const rubricResult = await evaluate(content, ctx, { llmClient, routeDimensions })
+  const [rubric, contentGuard] = await Promise.all([
+    hasRubricLLM
+      ? evaluate(content, ctx, { llmClient: getOpenAIClient(), routeDimensions })
+      : Promise.resolve(SKIPPED_RUBRIC),
+    runContentGuard(content, { targetLanguage: metadata.target_language ?? null }),
+  ])
+  const rubricResult = mergeGuardIntoRubric(rubric, contentGuard)
 
   const contextSnapshot: Record<string, unknown> = {
     platform,
@@ -91,8 +108,10 @@ export async function auditSocialPost(
       pass:         rubricResult.pass,
       dimensions:   rubricResult.dimensions,
     },
+    rubric_skipped: !hasRubricLLM,
+    content_guard: contentGuardSnapshot(contentGuard),
     auditedAt: new Date().toISOString(),
   }
 
-  return { rubricResult, contextSnapshot }
+  return { rubricResult, contextSnapshot, contentGuard, retryable: hasRetryableFailure(rubricResult, contentGuard) }
 }

@@ -59,12 +59,11 @@ export async function generateWithQualityRetry(
       const content = lastResult.html_body + '\n' + (lastResult.geo_html_snapshot ?? '')
       const audit = await auditBlogPost(content, mode, metadata)
 
-      if (!audit) break
-
       qualityScore = audit.rubricResult.overallScore
       contextSnapshot = { ...audit.contextSnapshot, attempts: attempt }
 
-      if (audit.rubricResult.pass || attempt === MAX_ATTEMPTS) {
+      // retryable=false: only the content-guard judge was unavailable — a rewrite cannot fix that.
+      if (audit.rubricResult.pass || attempt === MAX_ATTEMPTS || !audit.retryable) {
         if (!audit.rubricResult.pass) {
           console.warn(
             `[blog quality] Post failed quality threshold after ${attempt} attempt(s)` +
