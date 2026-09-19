@@ -29,12 +29,19 @@ export async function checkOscillationCap(
   supabase: SupabaseClient,
   clientId: string,
   slug: string,
+  /** Same channel filter runStep1CheckDue's own read uses — without it, a row
+   *  written by a DIFFERENT apply channel (e.g. the legacy wp-cron flow still
+   *  scheduled through 2026-09-28 alongside this rollout) could look "newer"
+   *  than this channel's real history and reset revert_count to 0, weakening
+   *  the cap it exists to enforce. */
+  channel: 'pr' | 'wp_plugin',
 ): Promise<OscillationCheck> {
   const { data, error } = await supabase
     .from('seo_meta_log')
     .select('revert_count')
     .eq('client_id', clientId)
     .eq('page_slug', slug)
+    .eq('applied_channel', channel)
     .order('optimised_at', { ascending: false })
     .limit(1)
     .maybeSingle()

@@ -33,6 +33,8 @@ export interface PrescriptionInput {
   candidate: MetaCycleCandidate
   /** Top-3 SERP result domains for this candidate's keyword (step 2 enrichment). */
   top3CompetitorDomains: string[]
+  /** Top-3 SERP result page titles — carried through into the prescription so step 4 can actually use them in the AI prompt. */
+  top3CompetitorTitles: string[]
 }
 
 /**
@@ -40,73 +42,49 @@ export interface PrescriptionInput {
  * discipline as the deriveActionType it replaces.
  */
 export function deriveMetaCycleAction(input: PrescriptionInput): MetaCyclePrescription {
-  const { candidate, top3CompetitorDomains } = input
+  const { candidate, top3CompetitorDomains, top3CompetitorTitles } = input
+  const build = (actionType: MetaCyclePrescription['actionType'], auto: boolean, reason: string): MetaCyclePrescription =>
+    ({ candidate, actionType, auto, reason, top3CompetitorTitles })
 
   const hasBigSiteInTop3 = top3CompetitorDomains.some((domain) =>
     BIG_SITE_MARKERS.some((marker) => domain.toLowerCase().includes(marker)),
   )
   if ((candidate.keywordDifficulty ?? 0) > SKIP_DIFFICULTY_FLOOR && hasBigSiteInTop3) {
-    return {
-      candidate,
-      actionType: 'skip',
-      auto: false,
-      reason: `difficulty ${candidate.keywordDifficulty} > ${SKIP_DIFFICULTY_FLOOR} and top-3 SERP includes an established site (${top3CompetitorDomains.join(', ')}) — not worth this cycle's slot`,
-    }
+    return build('skip', false, `difficulty ${candidate.keywordDifficulty} > ${SKIP_DIFFICULTY_FLOOR} and top-3 SERP includes an established site (${top3CompetitorDomains.join(', ')}) — not worth this cycle's slot`)
   }
 
   // No existing page → nothing to rewrite. Content work, always manual
   // (客户数据红线: 对外内容须先 grounding 官网，需人过目).
   if (!candidate.pageUrl || !candidate.slug) {
-    return {
-      candidate,
-      actionType: 'new_page',
-      auto: false,
-      reason: 'gap keyword with no existing page — needs a net-new page brief, routed to the manual board',
-    }
+    return build('new_page', false, 'gap keyword with no existing page — needs a net-new page brief, routed to the manual board')
   }
 
   // Page exists but Google hasn't indexed it — cheap, idempotent, no
   // content risk, safe to automate.
   if (candidate.discoveredNotIndexed) {
-    return {
-      candidate,
-      actionType: 'index_request',
-      auto: true,
-      reason: 'page exists but is not indexed — requesting indexing has no content risk',
-    }
+    return build('index_request', true, 'page exists but is not indexed — requesting indexing has no content risk')
   }
 
   // The bread-and-butter case: existing page ranking 4-20, title/desc has
   // click-through upside. Small, reversible, 14-day check-back covers it.
   if (candidate.position !== null && candidate.position >= 4 && candidate.position <= 20) {
-    return {
-      candidate,
-      actionType: 'title_rewrite',
-      auto: true,
-      reason: `ranking #${candidate.position} with real impressions — title/description rewrite is reversible and has a Check-step safety net`,
-    }
+    return build('title_rewrite', true, `ranking #${candidate.position} with real impressions — title/description rewrite is reversible and has a Check-step safety net`)
   }
 
   // Ranking but outside the reversible-rewrite sweet spot (e.g. position 1-3
   // where a rewrite risks losing an already-strong ranking, or >20 where the
   // page needs substance, not just a title tweak) — that's content work.
   if (candidate.position !== null && candidate.position > 20) {
-    return {
-      candidate,
-      actionType: 'content_refresh',
-      auto: false,
-      reason: `ranking #${candidate.position} is beyond title-tweak range — needs substantive content work, routed to the manual board`,
-    }
+    return build('content_refresh', false, `ranking #${candidate.position} is beyond title-tweak range — needs substantive content work, routed to the manual board`)
   }
 
   // Position 1-3 or unknown, has a page: safest default is an internal-link
   // play (protects the existing ranking) rather than touching the title.
-  return {
-    candidate,
-    actionType: 'internal_link',
-    auto: false,
-    reason: candidate.position !== null
+  return build(
+    'internal_link',
+    false,
+    candidate.position !== null
       ? `already ranking #${candidate.position} — touching the title risks the existing ranking; an internal-link boost is lower-risk and needs a human to pick the linking page`
       : 'no position data — defaulting to the lowest-risk manual action rather than guessing',
-  }
+  )
 }

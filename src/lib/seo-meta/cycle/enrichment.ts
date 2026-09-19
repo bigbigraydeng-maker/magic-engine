@@ -20,6 +20,8 @@ import type { MetaCycleCandidate } from './types'
 export interface EnrichedCandidate {
   candidate: MetaCycleCandidate
   top3CompetitorDomains: string[]
+  /** Same top-3 SERP results' page titles — carried through to step 4's AI title generation so the competitive context this call already paid for actually gets used, not just the skip-check in step 3. */
+  top3CompetitorTitles: string[]
 }
 
 export interface EnrichmentResult {
@@ -63,18 +65,21 @@ export async function enrichCandidates(
     const searchVolume = candidate.searchVolume ?? volumeByKeyword.get(candidate.keyword.toLowerCase()) ?? null
 
     let top3CompetitorDomains: string[] = []
+    let top3CompetitorTitles: string[] = []
     if (serpCallsRemaining > 0) {
       try {
         const serp = await getSerpPage(candidate.keyword, locationCode === 2554 ? 'nz' : 'au')
         callsMade += 1
         serpCallsRemaining -= 1
-        top3CompetitorDomains = serp.organic_results.slice(0, 3).map((r) => {
+        const top3 = serp.organic_results.slice(0, 3)
+        top3CompetitorDomains = top3.map((r) => {
           try {
             return new URL(r.url).hostname
           } catch {
             return r.url
           }
         })
+        top3CompetitorTitles = top3.map((r) => r.title).filter((t): t is string => Boolean(t))
       } catch (err) {
         console.warn(`[seo-meta-cycle] SERP enrichment failed for "${candidate.keyword}":`, err instanceof Error ? err.message : String(err))
       }
@@ -83,6 +88,7 @@ export async function enrichCandidates(
     enriched.push({
       candidate: { ...candidate, searchVolume },
       top3CompetitorDomains,
+      top3CompetitorTitles,
     })
   }
 

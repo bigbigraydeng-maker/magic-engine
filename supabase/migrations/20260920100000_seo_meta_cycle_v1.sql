@@ -1,7 +1,6 @@
 -- SEO Meta-Cycle v1 (2026-09-20) — adds the columns the IMPACT-loop redesign
 -- needs to Check (T+7/T+14 outcome vs baseline) and Tune (oscillation cap,
--- channel-aware readers). All ADD COLUMN IF NOT EXISTS — additive only, no
--- backfill required, existing rows (wp_updated=false/true) stay valid.
+-- channel-aware readers). All ADD COLUMN IF NOT EXISTS — additive only.
 --
 -- See docs/specs/2026-09-20-seo-meta-cycle-v1-spec.md §5 and the
 -- 魏征/子牙 review findings recorded in that spec's implementation PR.
@@ -19,9 +18,10 @@ ALTER TABLE seo_meta_log
   -- even after the PR merges, which already silently breaks both readers today
   -- (false "plugin stuck" alerts for a client with no WordPress plugin).
   -- applied_channel distinguishes the two write paths so readers can branch
-  -- instead of overloading wp_updated. Default 'wp_plugin' keeps every existing
-  -- row (all written by the Oztop WP flow before this migration) semantically
-  -- correct; the repo-PR flow sets 'pr' explicitly going forward.
+  -- instead of overloading wp_updated. Default 'wp_plugin' is a starting
+  -- point, backfilled below — it is NOT correct for every pre-migration row:
+  -- cts-meta-pr.ts (repo-PR flow) has been writing rows since before this
+  -- migration too.
   ADD COLUMN IF NOT EXISTS applied_channel TEXT NOT NULL DEFAULT 'wp_plugin'
     CHECK (applied_channel IN ('wp_plugin', 'pr')),
   -- Finding #3 (子牙): oscillation cap. Counts how many times THIS row's slug
@@ -38,3 +38,17 @@ COMMENT ON COLUMN seo_meta_log.checked_at IS 'When the Check step last classifie
 COMMENT ON COLUMN seo_meta_log.outcome IS 'improved/flat/regressed/insufficient_data. insufficient_data means the sample-size floor was not met — never auto-revert on insufficient_data.';
 COMMENT ON COLUMN seo_meta_log.applied_channel IS 'wp_plugin = client-side WordPress plugin polls wp_updated and applies it (Oztop). pr = Magic Engine opened+merged a PR directly in the client''s repo (CTS). Readers of wp_updated must branch on this column instead of assuming WordPress.';
 COMMENT ON COLUMN seo_meta_log.revert_count IS 'How many consecutive auto-reverts this slug has had. oscillation.ts routes to the manual board once this hits the cap instead of reverting again.';
+
+-- Backfill: every pre-migration row written by cts-meta-pr.ts's repo-PR flow
+-- is mislabelled 'wp_plugin' by the column default above. content_type='meta'
+-- is a reliable discriminator — the Oztop WP flow only ever inserts
+-- content_type IN ('pages','posts'); 'meta' is written exclusively by
+-- cts-meta-pr.ts (src/lib/seo-meta/cts-meta-pr.ts:416-427, unchanged by this
+-- migration). Without this backfill, pm-todo/manual-items.ts's new
+-- applied_channel='pr' exclusion (meant to stop a false "WordPress plugin
+-- stopped" alert for CTS) would not apply to any row written before today,
+-- and weekly-report/build.ts's applied-changes count would keep undercounting
+-- CTS's historical auto-applied changes.
+UPDATE seo_meta_log
+  SET applied_channel = 'pr'
+  WHERE content_type = 'meta' AND applied_channel = 'wp_plugin';

@@ -9,6 +9,23 @@
  * (replaceMetaForSlug / readMetaForSlug / buildSlugIndex) — those stay
  * CTS-repo-format-specific on purpose (see that file's docstring), so this
  * adapter is the only place that knows about them.
+ *
+ * 🔴 `applied: true` means MERGED, not just "PR opened". A PR that opened
+ *    but failed to merge (CI blocked, branch protection, etc.) must NOT be
+ *    treated as a live change — the caller (runner.ts) uses `applied` to
+ *    decide whether to write a seo_meta_log baseline row and count the
+ *    candidate as done. Logging an unmerged PR as applied would: (a) make
+ *    weekly-report/build.ts claim the change is "已生效" (already live)
+ *    when the live site is unchanged — a customer-data-red-line violation
+ *    (CLAUDE.md §8: reported numbers must be verifiable fact); (b) capture
+ *    a baseline_ctr/position for a title that was never actually written,
+ *    so the T+14 Check step would compare live GSC data (still reflecting
+ *    the OLD title) against a baseline for a change that never happened;
+ *    (c) on the next cycle, a bogus "human_edited_since_last_write" skip
+ *    could fire on revert, since the live content would never match what
+ *    apply() thought it wrote. An unmerged PR is surfaced instead via
+ *    `skipReason: 'pr_opened_but_not_merged'` (with prUrl/prNumber kept so
+ *    the caller can route it to the manual board — see runner.ts).
  */
 
 import type { GithubClient } from '@/lib/cms/github-client'
@@ -26,7 +43,6 @@ export interface CtsRepoConnection {
 interface FileCacheEntry {
   source: string
   sha: string
-  dirty: boolean
 }
 
 /**
@@ -48,15 +64,22 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
       const f = await github
         .getFileContent(conn.repoOwner, conn.repoName, entry.path, conn.defaultBranch)
         .catch(() => null)
-      if (f) fileCache.set(entry.path, { source: f.decodedContent, sha: f.sha, dirty: false })
+      if (f) fileCache.set(entry.path, { source: f.decodedContent, sha: f.sha })
     }
     slugIndex = buildSlugIndex(Array.from(fileCache.entries()).map(([path, v]) => ({ path, source: v.source })))
     return slugIndex
   }
 
+  async function resolveEntry(slug: string): Promise<{ path: string; entry: FileCacheEntry } | null> {
+    const index = await ensureIndex()
+    const path = index.get(slug)
+    const entry = path ? fileCache.get(path) : undefined
+    return path && entry ? { path, entry } : null
+  }
+
   type CommitAndOpenPrResult =
     | { ok: false; result: ApplyAdapterResult }
-    | { ok: true; branchOpened: string; prUrl: string; prNumber: number }
+    | { ok: true; branch: string; prUrl: string; prNumber: number }
 
   async function commitAndOpenPr(
     slug: string,
@@ -109,7 +132,46 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
       head: guard.branch,
       base: conn.defaultBranch,
     })
-    return { ok: true, branchOpened: guard.branch, prUrl: pr.html_url ?? '', prNumber: pr.number }
+    return { ok: true, branch: guard.branch, prUrl: pr.html_url ?? '', prNumber: pr.number }
+  }
+
+  /**
+   * Shared by apply() and revert(): write the new title/desc into the cached
+   * file, open the PR, and merge it. Returns `applied: true` only when the
+   * merge actually succeeds — see the file-header comment.
+   */
+  async function landEdit(
+    slug: string,
+    path: string,
+    entry: FileCacheEntry,
+    newTitle: string,
+    newDesc: string,
+    weekKey: string,
+    buildPr: (oldTitle: string, oldDesc: string) => { title: string; body: string },
+  ): Promise<ApplyAdapterResult> {
+    const replaced = replaceMetaForSlug(entry.source, slug, newTitle, newDesc)
+    if (!replaced) {
+      return { applied: false, newTitle, newDesc, oldTitle: '', oldDesc: '', skipReason: 'slug_not_in_file' }
+    }
+    entry.source = replaced.updated
+
+    const pr = buildPr(replaced.oldTitle, replaced.oldDesc)
+    const commit = await commitAndOpenPr(slug, path, entry, weekKey, pr.title, pr.body)
+    if (!commit.ok) return commit.result
+
+    const merged = await github.mergePullRequest(conn.repoOwner, conn.repoName, commit.prNumber).catch(() => false)
+    const base = {
+      prUrl: commit.prUrl,
+      prNumber: commit.prNumber,
+      branch: commit.branch,
+      newTitle,
+      newDesc,
+      oldTitle: replaced.oldTitle,
+      oldDesc: replaced.oldDesc,
+    }
+    return merged
+      ? { ...base, applied: true }
+      : { ...base, applied: false, skipReason: 'pr_opened_but_not_merged' }
   }
 
   return {
@@ -119,63 +181,29 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
       if (!candidate.slug) {
         return { applied: false, newTitle, newDesc, oldTitle: '', oldDesc: '', skipReason: 'no_slug' }
       }
-      const index = await ensureIndex()
-      const path = index.get(candidate.slug)
-      const entry = path ? fileCache.get(path) : undefined
-      if (!path || !entry) {
+      const resolved = await resolveEntry(candidate.slug)
+      if (!resolved) {
         return { applied: false, newTitle, newDesc, oldTitle: '', oldDesc: '', skipReason: 'slug_not_in_any_data_file' }
       }
-
-      const replaced = replaceMetaForSlug(entry.source, candidate.slug, newTitle, newDesc)
-      if (!replaced) {
-        return { applied: false, newTitle, newDesc, oldTitle: '', oldDesc: '', skipReason: 'slug_not_in_file' }
-      }
+      const { path, entry } = resolved
 
       if (dryRun) {
-        return {
-          applied: false,
-          newTitle,
-          newDesc,
-          oldTitle: replaced.oldTitle,
-          oldDesc: replaced.oldDesc,
-          skipReason: 'dry_run',
-        }
+        const preview = readMetaForSlug(entry.source, candidate.slug)
+        return { applied: false, newTitle, newDesc, oldTitle: preview?.title ?? '', oldDesc: preview?.desc ?? '', skipReason: 'dry_run' }
       }
 
-      entry.source = replaced.updated
-      entry.dirty = true
-
-      const result = await commitAndOpenPr(
-        candidate.slug,
-        path,
-        entry,
-        weekKey,
-        `[Magic Engine] SEO meta-cycle: ${candidate.slug}`,
-        `### /${candidate.slug}\n目标词:「${candidate.keyword}」\n- 标题: ${replaced.oldTitle}\n- → **${newTitle}**\n- 描述: ${replaced.oldDesc.slice(0, 80)}…\n- → **${newDesc}**\n\n> SEO Meta-Cycle v1 自动改动（title_rewrite）。14 天后回查 CTR/排名，回归会自动改回去（连续 2 次回归改进人工看板）。`,
-      )
-      if (!result.ok) return result.result
-
-      const merged = await github.mergePullRequest(conn.repoOwner, conn.repoName, result.prNumber).catch(() => false)
-      return {
-        applied: true,
-        prUrl: result.prUrl,
-        prNumber: result.prNumber,
-        branch: result.branchOpened,
-        newTitle,
-        newDesc,
-        oldTitle: replaced.oldTitle,
-        oldDesc: replaced.oldDesc,
-        skipReason: merged ? undefined : 'pr_opened_but_not_merged',
-      }
+      return landEdit(candidate.slug, path, entry, newTitle, newDesc, weekKey, (oldTitle, oldDesc) => ({
+        title: `[Magic Engine] SEO meta-cycle: ${candidate.slug}`,
+        body: `### /${candidate.slug}\n目标词:「${candidate.keyword}」\n- 标题: ${oldTitle}\n- → **${newTitle}**\n- 描述: ${oldDesc.slice(0, 80)}…\n- → **${newDesc}**\n\n> SEO Meta-Cycle v1 自动改动（title_rewrite）。14 天后回查 CTR/排名，回归会自动改回去（连续 2 次回归改进人工看板）。`,
+      }))
     },
 
     async revert({ slug, lastWrittenTitle, lastWrittenDesc, revertToTitle, revertToDesc, weekKey, dryRun }) {
-      const index = await ensureIndex()
-      const path = index.get(slug)
-      const entry = path ? fileCache.get(path) : undefined
-      if (!path || !entry) {
+      const resolved = await resolveEntry(slug)
+      if (!resolved) {
         return { applied: false, newTitle: revertToTitle, newDesc: revertToDesc, oldTitle: '', oldDesc: '', skipReason: 'slug_not_in_any_data_file' }
       }
+      const { path, entry } = resolved
 
       // 魏征 finding #7: TRUE revert only. Confirm the live content still
       // matches what we last wrote — if a human hand-edited the slug in
@@ -196,35 +224,10 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
         return { applied: false, newTitle: revertToTitle, newDesc: revertToDesc, oldTitle: current.title, oldDesc: current.desc, skipReason: 'dry_run' }
       }
 
-      const replaced = replaceMetaForSlug(entry.source, slug, revertToTitle, revertToDesc)
-      if (!replaced) {
-        return { applied: false, newTitle: revertToTitle, newDesc: revertToDesc, oldTitle: current.title, oldDesc: current.desc, skipReason: 'slug_not_in_file' }
-      }
-      entry.source = replaced.updated
-      entry.dirty = true
-
-      const result = await commitAndOpenPr(
-        slug,
-        path,
-        entry,
-        weekKey,
-        `[Magic Engine] SEO meta-cycle revert: ${slug}`,
-        `### /${slug} — 回归后自动改回去\n- 当前（回归中）: ${replaced.oldTitle}\n- → 改回原文: **${revertToTitle}**\n\n> 上次改动 14 天后 CTR 回归，改回改动前的原文（不是重新生成）。`,
-      )
-      if (!result.ok) return result.result
-
-      const merged = await github.mergePullRequest(conn.repoOwner, conn.repoName, result.prNumber).catch(() => false)
-      return {
-        applied: true,
-        prUrl: result.prUrl,
-        prNumber: result.prNumber,
-        branch: result.branchOpened,
-        newTitle: revertToTitle,
-        newDesc: revertToDesc,
-        oldTitle: replaced.oldTitle,
-        oldDesc: replaced.oldDesc,
-        skipReason: merged ? undefined : 'pr_opened_but_not_merged',
-      }
+      return landEdit(slug, path, entry, revertToTitle, revertToDesc, weekKey, (oldTitle) => ({
+        title: `[Magic Engine] SEO meta-cycle revert: ${slug}`,
+        body: `### /${slug} — 回归后自动改回去\n- 当前（回归中）: ${oldTitle}\n- → 改回原文: **${revertToTitle}**\n\n> 上次改动 14 天后 CTR 回归，改回改动前的原文（不是重新生成）。`,
+      }))
     },
   }
 }

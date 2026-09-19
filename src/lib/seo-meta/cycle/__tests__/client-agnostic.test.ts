@@ -59,15 +59,15 @@ describe('SEO Meta-Cycle orchestration is client-agnostic (魏征 finding #12 ev
     const ctsCandidate = candidatesFor(CTS_SHAPED_DOMAIN)[0]
     const oztopCandidate = candidatesFor(OZTOP_SHAPED_DOMAIN)[0]
 
-    const ctsResult = deriveMetaCycleAction({ candidate: ctsCandidate, top3CompetitorDomains: [] })
-    const oztopResult = deriveMetaCycleAction({ candidate: oztopCandidate, top3CompetitorDomains: [] })
+    const ctsResult = deriveMetaCycleAction({ candidate: ctsCandidate, top3CompetitorDomains: [], top3CompetitorTitles: [] })
+    const oztopResult = deriveMetaCycleAction({ candidate: oztopCandidate, top3CompetitorDomains: [], top3CompetitorTitles: [] })
 
     expect(ctsResult.actionType).toBe(oztopResult.actionType)
     expect(ctsResult.auto).toBe(oztopResult.auto)
   })
 
   it('runStep3Prescribe caps auto-actions the same way for both clients using only config.maxPagesPerRun, not a client identity check', () => {
-    const enriched = candidatesFor(OZTOP_SHAPED_DOMAIN).map((candidate) => ({ candidate, top3CompetitorDomains: [] }))
+    const enriched = candidatesFor(OZTOP_SHAPED_DOMAIN).map((candidate) => ({ candidate, top3CompetitorDomains: [], top3CompetitorTitles: [] }))
     const result = runStep3Prescribe(enriched, 1)
     expect(result.autoCount).toBeLessThanOrEqual(1)
   })

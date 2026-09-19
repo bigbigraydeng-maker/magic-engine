@@ -55,7 +55,12 @@ export function classifyMetaChangeOutcome(
     }
   }
 
-  const baselineCtr = baseline.ctr ?? ctrOf(baseline.impressions, null)
+  // baseline never carries clicks (seo_meta_log has no baseline_clicks column,
+  // only baseline_ctr captured directly from the GSC snapshot at apply time —
+  // see types.ts's MetaCycleCandidate.ctr) — there is no derivation to fall
+  // back to, so a missing baseline.ctr is a real "we don't know" case, not
+  // something to paper over with a call that would always return null anyway.
+  const baselineCtr = baseline.ctr
   const observedCtr = observed.ctr ?? ctrOf(observed.impressions, observed.clicks)
 
   if (baselineCtr === null || observedCtr === null) {

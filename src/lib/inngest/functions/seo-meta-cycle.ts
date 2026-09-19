@@ -13,6 +13,16 @@
  *     thing in this SDK), and each step writes its own cron_run_logs
  *     receipt so a failure at any step is visible on its own, not only in a
  *     final rollup (子牙 finding #10).
+ *
+ * 🔴 `buildAdapterForClient` is called exactly ONCE per invocation and is
+ *    deliberately NOT wrapped in its own `step.run`: the `ApplyAdapter` it
+ *    returns is a stateful closure (a GithubClient + an in-memory file
+ *    cache) that cannot cross Inngest's step-memoization boundary (only
+ *    JSON survives that boundary) — so memoizing just the ok/not-ok check
+ *    bought nothing and only meant the real object still had to be rebuilt
+ *    right after, i.e. `getConnection` (a real Supabase read + token
+ *    decrypt) ran twice for no benefit. Calling it once, plainly, is both
+ *    simpler and cheaper.
  */
 
 import { inngest, CLOUD_FN_PREFIX } from '../client'
@@ -30,6 +40,7 @@ import {
   metaCycleEventId,
   recentlyCycled,
   toClientConfig,
+  type MetaCycleRosterEntry,
 } from '@/lib/seo-meta/cycle/roster'
 import {
   runStep1CheckDue,
@@ -110,6 +121,83 @@ async function buildAdapterForClient(clientId: string): Promise<{ adapter: Apply
   return { adapter }
 }
 
+/** Every early exit still leaves a step6 receipt — a client stuck at
+ *  'no_adapter' every week should be distinguishable in cron_run_logs from
+ *  one that simply never got dispatched, not invisible until someone reads
+ *  Inngest's own run history. */
+async function earlyExit(clientId: string, weekKey: string, status: string, reason: string) {
+  await writeStepReceipt(supabaseAdmin, {
+    jobName: STEP6_JOB_NAME, clientId, weekKey, status: 'completed',
+    processed: 0, completed: 0, failed: 0, summary: { early_exit: status, reason },
+  })
+  return { status, client_id: clientId, week_key: weekKey, reason }
+}
+
+async function runSixSteps(
+  step: Parameters<Parameters<typeof inngest.createFunction>[2]>[0]['step'],
+  adapter: ApplyAdapter,
+  config: ReturnType<typeof toClientConfig>,
+  clientId: string,
+  weekKey: string,
+) {
+  // Step 1: check_due
+  const step1 = await step.run('check-due', async () => runStep1CheckDue(supabaseAdmin, adapter, config, weekKey, false))
+  await step.run('log-step1-receipt', async () => writeStepReceipt(supabaseAdmin, {
+    jobName: STEP1_JOB_NAME, clientId, weekKey, status: 'completed',
+    processed: step1.checked, completed: step1.checked, failed: 0, summary: step1,
+  }))
+
+  // Step 2: candidates_ready
+  const step2 = await step.run('candidates-ready', async () =>
+    runStep2CandidatesReady(supabaseAdmin, config, weekKey, new Set(step1.revertedSlugs)),
+  )
+  await step.run('log-step2-receipt', async () => writeStepReceipt(supabaseAdmin, {
+    jobName: STEP2_JOB_NAME, clientId, weekKey, status: 'completed',
+    processed: step2.candidates.length, completed: step2.candidates.length, failed: 0,
+    summary: { candidate_count: step2.candidates.length, dataforseo_calls: step2.dataforseoCallsMade, budget_overrun: step2.budgetOverrun },
+  }))
+
+  // Step 3: prescribed (pure — no I/O, still its own step for replay clarity + its own receipt)
+  const step3 = await step.run('prescribed', async () => runStep3Prescribe(step2.candidates, config.maxPagesPerRun))
+  await step.run('log-step3-receipt', async () => writeStepReceipt(supabaseAdmin, {
+    jobName: STEP3_JOB_NAME, clientId, weekKey, status: 'completed',
+    processed: step3.prescriptions.length, completed: step3.autoCount, failed: 0,
+    summary: { auto: step3.autoCount, manual: step3.manualCount, skip: step3.skipCount },
+  }))
+
+  // Step 4: applied (also writes seo_meta_log rows — step 5 "logged" is
+  // the receipt below, the actual log rows are written inside step 4
+  // because they need the exact applied title/desc from the same call).
+  const step4 = await step.run('applied', async () =>
+    runStep4Applied(supabaseAdmin, adapter, config, weekKey, step3.prescriptions, generateMetaCycleTitle, false),
+  )
+  await step.run('log-step4-receipt', async () => writeStepReceipt(supabaseAdmin, {
+    jobName: STEP4_JOB_NAME, clientId, weekKey, status: 'completed',
+    processed: step4.applied.length, completed: step4.applied.length, failed: 0, summary: step4,
+  }))
+
+  // Step 5: logged (rollup receipt over step 4's writes)
+  await step.run('log-step5-receipt', async () => writeStepReceipt(supabaseAdmin, {
+    jobName: STEP5_JOB_NAME, clientId, weekKey, status: 'completed',
+    processed: step4.applied.length, completed: step4.applied.length, failed: 0,
+    summary: { logged_rows: step4.applied.length },
+  }))
+
+  // Step 6: completed — final rollup receipt (also the recentlyCycled dedup marker).
+  const summary = {
+    checked: step1.checked, improved: step1.improved, regressed: step1.regressed,
+    reverted: step1.reverted, candidates: step2.candidates.length,
+    auto_applied: step4.applied.length, manual_routed: step3.manualCount + step1.routedToManual,
+    index_requests_sent: step4.indexRequestsSent,
+  }
+  await step.run('log-step6-receipt', async () => writeStepReceipt(supabaseAdmin, {
+    jobName: STEP6_JOB_NAME, clientId, weekKey, status: 'completed',
+    processed: 1, completed: 1, failed: 0, summary,
+  }))
+
+  return { status: 'completed' as const, client_id: clientId, week_key: weekKey, ...summary }
+}
+
 export function createSeoMetaCycleRunOneFunction() {
   return inngest.createFunction(
     {
@@ -136,93 +224,25 @@ export function createSeoMetaCycleRunOneFunction() {
       const weekKey = event.data.week_key as string
 
       const gate = await step.run('check-recently-cycled', async () => recentlyCycled(supabaseAdmin, clientId))
-      if (gate.skip) {
-        return { status: 'skipped', client_id: clientId, week_key: weekKey, reason: gate.reason }
-      }
+      if (gate.skip) return earlyExit(clientId, weekKey, 'skipped', gate.reason ?? 'recently_cycled')
 
-      const adapterSetup = await step.run('resolve-adapter', async () => {
-        const built = await buildAdapterForClient(clientId)
-        return built ? { ok: true as const } : { ok: false as const }
-      })
-      if (!adapterSetup.ok) {
-        // No repo connection configured for this client yet — matches spec §6:
-        // Oztop's WordPress adapter is future work, not this PR. Not an error,
-        // just nothing to do for this client this week.
-        return { status: 'no_adapter', client_id: clientId, week_key: weekKey }
-      }
-      // step.run results are memoized as plain JSON — the adapter itself
-      // (closures over a GithubClient) can't cross that boundary, so it's
-      // rebuilt here in the function body (cheap: no network call yet).
       const resolved = await buildAdapterForClient(clientId)
-      if (!resolved) return { status: 'no_adapter', client_id: clientId, week_key: weekKey }
-      const { adapter } = resolved
+      if (!resolved) {
+        // No repo connection configured for this client yet — matches spec §6:
+        // Oztop's WordPress adapter is future work, not this PR.
+        return earlyExit(clientId, weekKey, 'no_adapter', 'no repo connection configured for this client')
+      }
 
-      const roster = await step.run('load-client-config', async () => {
+      const rosterEntry = await step.run('load-client-config', async () => {
         const r = await loadMetaCycleRoster(supabaseAdmin)
         if (!r.ok) return null
         return r.entries.find((e) => e.clientId === clientId) ?? null
       })
-      if (!roster) {
-        return { status: 'not_in_roster', client_id: clientId, week_key: weekKey }
+      if (!rosterEntry) {
+        return earlyExit(clientId, weekKey, 'not_in_roster', 'client dropped out of the meta_cycle_enabled roster between dispatch and run')
       }
-      const config = toClientConfig(roster)
 
-      // Step 1: check_due
-      const step1 = await step.run('check-due', async () => runStep1CheckDue(supabaseAdmin, adapter, config, weekKey, false))
-      await step.run('log-step1-receipt', async () => writeStepReceipt(supabaseAdmin, {
-        jobName: STEP1_JOB_NAME, clientId, weekKey, status: 'completed',
-        processed: step1.checked, completed: step1.checked, failed: 0, summary: step1,
-      }))
-
-      // Step 2: candidates_ready
-      const step2 = await step.run('candidates-ready', async () =>
-        runStep2CandidatesReady(supabaseAdmin, config, weekKey, new Set(step1.revertedSlugs)),
-      )
-      await step.run('log-step2-receipt', async () => writeStepReceipt(supabaseAdmin, {
-        jobName: STEP2_JOB_NAME, clientId, weekKey, status: 'completed',
-        processed: step2.candidates.length, completed: step2.candidates.length, failed: 0,
-        summary: { candidate_count: step2.candidates.length, dataforseo_calls: step2.dataforseoCallsMade, budget_overrun: step2.budgetOverrun },
-      }))
-
-      // Step 3: prescribed (pure — no I/O, still its own step for replay clarity + its own receipt)
-      const step3 = await step.run('prescribed', async () => runStep3Prescribe(step2.candidates, config.maxPagesPerRun))
-      await step.run('log-step3-receipt', async () => writeStepReceipt(supabaseAdmin, {
-        jobName: STEP3_JOB_NAME, clientId, weekKey, status: 'completed',
-        processed: step3.prescriptions.length, completed: step3.autoCount, failed: 0,
-        summary: { auto: step3.autoCount, manual: step3.manualCount, skip: step3.skipCount },
-      }))
-
-      // Step 4: applied (also writes seo_meta_log rows — step 5 "logged" is
-      // the receipt below, the actual log rows are written inside step 4
-      // because they need the exact applied title/desc from the same call).
-      const step4 = await step.run('applied', async () =>
-        runStep4Applied(supabaseAdmin, adapter, config, weekKey, step3.prescriptions, generateMetaCycleTitle, false),
-      )
-      await step.run('log-step4-receipt', async () => writeStepReceipt(supabaseAdmin, {
-        jobName: STEP4_JOB_NAME, clientId, weekKey, status: 'completed',
-        processed: step4.applied.length, completed: step4.applied.length, failed: 0, summary: step4,
-      }))
-
-      // Step 5: logged (rollup receipt over step 4's writes)
-      await step.run('log-step5-receipt', async () => writeStepReceipt(supabaseAdmin, {
-        jobName: STEP5_JOB_NAME, clientId, weekKey, status: 'completed',
-        processed: step4.applied.length, completed: step4.applied.length, failed: 0,
-        summary: { logged_rows: step4.applied.length },
-      }))
-
-      // Step 6: completed — final rollup receipt (also the recentlyCycled dedup marker).
-      const summary = {
-        checked: step1.checked, improved: step1.improved, regressed: step1.regressed,
-        reverted: step1.reverted, candidates: step2.candidates.length,
-        auto_applied: step4.applied.length, manual_routed: step3.manualCount + step1.routedToManual,
-        index_requests_sent: step4.indexRequestsSent,
-      }
-      await step.run('log-step6-receipt', async () => writeStepReceipt(supabaseAdmin, {
-        jobName: STEP6_JOB_NAME, clientId, weekKey, status: 'completed',
-        processed: 1, completed: 1, failed: 0, summary,
-      }))
-
-      return { status: 'completed', client_id: clientId, week_key: weekKey, ...summary }
+      return runSixSteps(step, resolved.adapter, toClientConfig(rosterEntry as MetaCycleRosterEntry), clientId, weekKey)
     },
   )
 }

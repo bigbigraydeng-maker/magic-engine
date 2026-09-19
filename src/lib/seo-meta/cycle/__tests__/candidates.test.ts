@@ -32,7 +32,7 @@ describe('normaliseCandidateUrl', () => {
 describe('mergeCandidates — dedup across sources (魏征 finding #9)', () => {
   it('collapses the same page discovered by both patrol and GSC into one candidate, preferring patrol', () => {
     const patrol = fromPatrolFindings([
-      { url: 'https://example.com/blog/foo', keyword: 'foo keyword', position: 8, searchVolume: 500, keywordDifficulty: 30 },
+      { url: 'https://example.com/blog/foo', keyword: 'foo keyword', position: 8, ctr: 5, searchVolume: 500, keywordDifficulty: 30 },
     ])
     const gsc = fromGscPages(
       [{ page: 'https://example.com/blog/foo/', impressions: 100, position: 9 }],

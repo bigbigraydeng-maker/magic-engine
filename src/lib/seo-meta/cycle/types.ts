@@ -29,6 +29,8 @@ export interface MetaCycleCandidate {
   source: MetaCycleCandidateSource
   position: number | null
   impressions: number | null
+  /** GSC CTR at discovery time (0-100 scale, matches gsc_performance_snapshots.top_pages.ctr). Carried through to seo_meta_log.baseline_ctr at apply time — without this, the Check step's outcome classifier can never compute a baseline and permanently returns insufficient_data. */
+  ctr: number | null
   searchVolume: number | null
   keywordDifficulty: number | null
   discoveredNotIndexed: boolean
@@ -47,6 +49,8 @@ export interface MetaCyclePrescription {
   actionType: MetaCycleActionType
   auto: boolean
   reason: string
+  /** Top-3 SERP competitor page titles from step 2's enrichment — carried through so step 4's AI title generation can actually use them (previously computed and discarded after the skip check). */
+  top3CompetitorTitles: string[]
 }
 
 export type MetaCycleOutcome = 'improved' | 'flat' | 'regressed' | 'insufficient_data'

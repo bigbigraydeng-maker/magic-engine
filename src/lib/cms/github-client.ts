@@ -205,13 +205,22 @@ export class GithubClient {
     owner: string,
     repo: string,
     branchPrefix: string,
-    perPage = 50,
+    maxPages = 5,
   ): Promise<Array<GitHubPullRequest & { head: { ref: string } }>> {
-    const prs = await this.request<Array<GitHubPullRequest & { head: { ref: string } }>>(
-      'GET',
-      `/repos/${owner}/${repo}/pulls?state=open&per_page=${perPage}`,
-    )
-    return prs.filter((pr) => pr.head.ref.startsWith(branchPrefix))
+    // Paginated (GitHub sorts open PRs newest-first by default): an
+    // unpaginated single page would silently miss OLDER orphaned PRs once a
+    // repo accumulates more open PRs than one page — exactly the ones the
+    // orphan-cleanup guard (pr-guard.ts) most needs to find.
+    const all: Array<GitHubPullRequest & { head: { ref: string } }> = []
+    for (let page = 1; page <= maxPages; page++) {
+      const batch = await this.request<Array<GitHubPullRequest & { head: { ref: string } }>>(
+        'GET',
+        `/repos/${owner}/${repo}/pulls?state=open&per_page=100&page=${page}`,
+      )
+      all.push(...batch)
+      if (batch.length < 100) break
+    }
+    return all.filter((pr) => pr.head.ref.startsWith(branchPrefix))
   }
 
   /**

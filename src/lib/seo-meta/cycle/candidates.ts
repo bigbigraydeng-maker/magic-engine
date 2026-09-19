@@ -56,6 +56,7 @@ export interface RawPatrolFinding {
   keyword: string | null
   url: string | null
   position: number | null
+  ctr: number | null
   searchVolume: number | null
   keywordDifficulty: number | null
 }
@@ -64,6 +65,7 @@ export interface RawGscPage {
   page?: string
   impressions?: number
   position?: number
+  ctr?: number
 }
 export interface RawGscQuery {
   query?: string
@@ -116,6 +118,7 @@ export function fromGscPages(
       source: 'gsc',
       position: page.position ?? null,
       impressions: page.impressions ?? null,
+      ctr: page.ctr ?? null,
       searchVolume: null,
       keywordDifficulty: null,
       discoveredNotIndexed: false,
@@ -134,6 +137,7 @@ export function fromPatrolFindings(findings: RawPatrolFinding[]): MetaCycleCandi
       source: 'patrol' as const,
       position: f.position,
       impressions: null,
+      ctr: f.ctr,
       searchVolume: f.searchVolume,
       keywordDifficulty: f.keywordDifficulty,
       discoveredNotIndexed: false,
@@ -148,6 +152,7 @@ export function fromGapKeywords(keywords: RawGapKeyword[]): MetaCycleCandidate[]
     source: 'gap' as const,
     position: null,
     impressions: null,
+    ctr: null,
     searchVolume: k.search_volume,
     keywordDifficulty: k.keyword_difficulty,
     discoveredNotIndexed: false,

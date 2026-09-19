@@ -32,12 +32,12 @@ import {
   type RawGscQuery,
   type RawPatrolFinding,
 } from './candidates'
-import { enrichCandidates } from './enrichment'
+import { enrichCandidates, type EnrichedCandidate } from './enrichment'
 import { classifyMetaChangeOutcome } from './outcome-classifier'
 import { checkOscillationCap } from './oscillation'
 import type {
   ApplyAdapter,
-  MetaCycleCandidate,
+  ApplyAdapterResult,
   MetaCycleClientConfig,
   MetaCyclePrescription,
 } from './types'
@@ -77,6 +77,143 @@ export interface Step1Result {
   revertedSlugs: string[]
 }
 
+function buildManualAction(evidenceKey: string, meta: { page_slug: string; page_url: string; keyword: string }, whyNow: string): PriorityAction {
+  return {
+    rank: 1,
+    dimension: 'seo',
+    action_type: 'meta_cycle_manual_review',
+    why_now: whyNow,
+    evidence_refs: [evidenceKey],
+    expected_impact: 'medium',
+    effort: 'low',
+    execution_mode: 'in_house',
+    executable_by: null,
+    metadata: meta,
+  }
+}
+
+/** One row's worth of step-1 work — pulled out of runStep1CheckDue to keep that function under the CLAUDE.md 50-line-per-function budget. */
+async function processCheckDueRow(
+  supabase: SupabaseClient,
+  adapter: ApplyAdapter,
+  config: MetaCycleClientConfig,
+  row: SeoMetaLogRow,
+  weekKey: string,
+  dryRun: boolean,
+  now: Date,
+): Promise<{ outcome: 'improved' | 'flat' | 'insufficient_data' | 'regressed'; reverted: boolean; revertedSlug: string | null; manualAction: PriorityAction | null }> {
+  const observed = await readPageMetrics(supabase, config.clientId, row.page_url).catch(() => null)
+  const classification = classifyMetaChangeOutcome(
+    { ctr: row.baseline_ctr, position: row.baseline_position, impressions: row.baseline_impressions },
+    {
+      ctr: observed?.gsc.ctr ?? null,
+      position: observed?.gsc.position ?? null,
+      impressions: observed?.gsc.impressions ?? null,
+      clicks: observed?.gsc.clicks ?? null,
+    },
+  )
+
+  if (!dryRun) {
+    await supabase.from('seo_meta_log').update({ checked_at: now.toISOString(), outcome: classification.outcome }).eq('id', row.id)
+  }
+
+  if (classification.outcome === 'improved') {
+    if (!dryRun) {
+      await saveProvenPattern(supabase, {
+        client_id: config.clientId,
+        pattern_type: 'headline',
+        pattern_content: `Rewriting "${row.old_title}" → "${row.new_title}" for /${row.page_slug} improved CTR (${classification.reason})`,
+        flywheel: 'seo',
+        source_table: 'seo_meta_log',
+        source_id: row.id,
+      })
+    }
+    return { outcome: 'improved', reverted: false, revertedSlug: null, manualAction: null }
+  }
+  // Finding #11: insufficient_data (and flat) must never trigger a revert.
+  if (classification.outcome === 'flat' || classification.outcome === 'insufficient_data') {
+    return { outcome: classification.outcome, reverted: false, revertedSlug: null, manualAction: null }
+  }
+
+  // regressed — the only outcome that can trigger a revert.
+  if (!dryRun) {
+    await saveFailedExperiment(supabase, {
+      client_id: config.clientId,
+      experiment_description: `Rewrote "${row.old_title}" → "${row.new_title}" for /${row.page_slug}`,
+      failure_reason: classification.reason,
+      dimension: 'seo',
+      source_table: 'seo_meta_log',
+      source_id: row.id,
+    })
+  }
+
+  const meta = { page_slug: row.page_slug, page_url: row.page_url, keyword: row.keyword }
+  const oscillation = await checkOscillationCap(supabase, config.clientId, row.page_slug, adapter.channel)
+  if (oscillation.forceManual) {
+    return {
+      outcome: 'regressed',
+      reverted: false,
+      revertedSlug: null,
+      manualAction: buildManualAction(`seo_meta_log:${row.id}`, meta, `连续回归 ${oscillation.revertCount} 次，改为人工看板：${oscillation.reason}`),
+    }
+  }
+
+  let revertResult: ApplyAdapterResult
+  try {
+    revertResult = await adapter.revert({
+      slug: row.page_slug,
+      lastWrittenTitle: row.new_title ?? '',
+      lastWrittenDesc: row.new_desc ?? '',
+      revertToTitle: row.old_title ?? '',
+      revertToDesc: row.old_desc ?? '',
+      weekKey,
+      dryRun,
+    })
+  } catch (err) {
+    // One candidate's GitHub error (e.g. a stale blob SHA because an earlier
+    // candidate in this same run touched the same underlying data file) must
+    // not abort every other row's check — isolate it as a manual item.
+    return {
+      outcome: 'regressed',
+      reverted: false,
+      revertedSlug: null,
+      manualAction: buildManualAction(`seo_meta_log:${row.id}`, meta, `自动改回原文失败（${err instanceof Error ? err.message : String(err)}），需要人工处理`),
+    }
+  }
+
+  if (revertResult.applied) {
+    if (!dryRun) {
+      await supabase.from('seo_meta_log').insert({
+        client_id: config.clientId,
+        content_type: 'meta',
+        page_slug: row.page_slug,
+        page_url: row.page_url,
+        keyword: row.keyword,
+        old_title: revertResult.oldTitle,
+        old_desc: revertResult.oldDesc,
+        new_title: revertResult.newTitle,
+        new_desc: revertResult.newDesc,
+        wp_updated: false,
+        applied_channel: adapter.channel,
+        optimised_at: now.toISOString(),
+        revert_count: (row.revert_count ?? 0) + 1,
+      })
+    }
+    return { outcome: 'regressed', reverted: true, revertedSlug: row.page_slug, manualAction: null }
+  }
+
+  if (revertResult.skipReason === 'human_edited_since_last_write') {
+    return { outcome: 'regressed', reverted: false, revertedSlug: null, manualAction: buildManualAction(`seo_meta_log:${row.id}`, meta, '人已经在 GitHub 手改过这个标题，机器不再碰，改人工确认') }
+  }
+  if (revertResult.skipReason === 'pr_opened_but_not_merged') {
+    const prNote = revertResult.prUrl ? `：${revertResult.prUrl}` : ''
+    return { outcome: 'regressed', reverted: false, revertedSlug: null, manualAction: buildManualAction(`seo_meta_log:${row.id}`, meta, `已经开了改回原文的 PR 但没合并成功，需要人工去合并${prNote}`) }
+  }
+  // other skipReasons (slug_not_in_file etc.) — nothing to route, the page
+  // no longer has an editable meta lane; not this step's problem to solve.
+  return { outcome: 'regressed', reverted: false, revertedSlug: null, manualAction: null }
+}
+
 export async function runStep1CheckDue(
   supabase: SupabaseClient,
   adapter: ApplyAdapter,
@@ -102,106 +239,24 @@ export async function runStep1CheckDue(
     .limit(20)
 
   if (error || !data) return result
-  const rows = data as SeoMetaLogRow[]
   const manualActions: PriorityAction[] = []
 
-  for (const row of rows) {
+  for (const row of data as SeoMetaLogRow[]) {
     result.checked += 1
-    const observed = await readPageMetrics(supabase, config.clientId, row.page_url).catch(() => null)
-    const classification = classifyMetaChangeOutcome(
-      { ctr: row.baseline_ctr, position: row.baseline_position, impressions: row.baseline_impressions },
-      {
-        ctr: observed?.gsc.ctr ?? null,
-        position: observed?.gsc.position ?? null,
-        impressions: observed?.gsc.impressions ?? null,
-        clicks: observed?.gsc.clicks ?? null,
-      },
-    )
+    const outcome = await processCheckDueRow(supabase, adapter, config, row, weekKey, dryRun, now)
+    if (outcome.outcome === 'improved') result.improved += 1
+    else if (outcome.outcome === 'flat') result.flat += 1
+    else if (outcome.outcome === 'insufficient_data') result.insufficientData += 1
+    else result.regressed += 1
 
-    if (!dryRun) {
-      await supabase
-        .from('seo_meta_log')
-        .update({ checked_at: now.toISOString(), outcome: classification.outcome })
-        .eq('id', row.id)
-    }
-
-    if (classification.outcome === 'improved') {
-      result.improved += 1
-      if (!dryRun) {
-        await saveProvenPattern(supabase, {
-          client_id: config.clientId,
-          pattern_type: 'headline',
-          pattern_content: `Rewriting "${row.old_title}" → "${row.new_title}" for /${row.page_slug} improved CTR (${classification.reason})`,
-          flywheel: 'seo',
-          source_table: 'seo_meta_log',
-          source_id: row.id,
-        })
-      }
-      continue
-    }
-    if (classification.outcome === 'flat' || classification.outcome === 'insufficient_data') {
-      if (classification.outcome === 'flat') result.flat += 1
-      else result.insufficientData += 1
-      // Finding #11: insufficient_data (and flat) must never trigger a revert.
-      continue
-    }
-
-    // regressed — the only outcome that can trigger a revert.
-    result.regressed += 1
-    if (!dryRun) {
-      await saveFailedExperiment(supabase, {
-        client_id: config.clientId,
-        experiment_description: `Rewrote "${row.old_title}" → "${row.new_title}" for /${row.page_slug}`,
-        failure_reason: classification.reason,
-        dimension: 'seo',
-        source_table: 'seo_meta_log',
-        source_id: row.id,
-      })
-    }
-
-    const oscillation = await checkOscillationCap(supabase, config.clientId, row.page_slug)
-    if (oscillation.forceManual) {
-      result.routedToManual += 1
-      manualActions.push(buildManualAction(row, `连续回归 ${oscillation.revertCount} 次，改为人工看板：${oscillation.reason}`))
-      continue
-    }
-
-    const revertResult = await adapter.revert({
-      slug: row.page_slug,
-      lastWrittenTitle: row.new_title ?? '',
-      lastWrittenDesc: row.new_desc ?? '',
-      revertToTitle: row.old_title ?? '',
-      revertToDesc: row.old_desc ?? '',
-      weekKey,
-      dryRun,
-    })
-
-    if (revertResult.applied) {
+    if (outcome.reverted && outcome.revertedSlug) {
       result.reverted += 1
-      result.revertedSlugs.push(row.page_slug)
-      if (!dryRun) {
-        await supabase.from('seo_meta_log').insert({
-          client_id: config.clientId,
-          content_type: 'meta',
-          page_slug: row.page_slug,
-          page_url: row.page_url,
-          keyword: row.keyword,
-          old_title: revertResult.oldTitle,
-          old_desc: revertResult.oldDesc,
-          new_title: revertResult.newTitle,
-          new_desc: revertResult.newDesc,
-          wp_updated: false,
-          applied_channel: adapter.channel,
-          optimised_at: now.toISOString(),
-          revert_count: (row.revert_count ?? 0) + 1,
-        })
-      }
-    } else if (revertResult.skipReason === 'human_edited_since_last_write') {
-      result.routedToManual += 1
-      manualActions.push(buildManualAction(row, '人已经在 GitHub 手改过这个标题，机器不再碰，改人工确认'))
+      result.revertedSlugs.push(outcome.revertedSlug)
     }
-    // other skipReasons (slug_not_in_file etc.) — nothing to route, the page
-    // no longer has an editable meta lane; not this step's problem to solve.
+    if (outcome.manualAction) {
+      result.routedToManual += 1
+      manualActions.push(outcome.manualAction)
+    }
   }
 
   if (!dryRun && manualActions.length > 0) {
@@ -216,27 +271,41 @@ export async function runStep1CheckDue(
   return result
 }
 
-function buildManualAction(row: SeoMetaLogRow, whyNow: string): PriorityAction {
-  return {
-    rank: 1,
-    dimension: 'seo',
-    action_type: 'meta_cycle_manual_review',
-    why_now: whyNow,
-    evidence_refs: [`seo_meta_log:${row.id}`],
-    expected_impact: 'medium',
-    effort: 'low',
-    execution_mode: 'in_house',
-    executable_by: null,
-    metadata: { page_slug: row.page_slug, page_url: row.page_url, keyword: row.keyword },
-  }
-}
-
 // ── Step 2: candidates_ready (discover + merge + enrich) ──────────────────────
 
 export interface Step2Result {
-  candidates: Array<{ candidate: MetaCycleCandidate; top3CompetitorDomains: string[] }>
+  candidates: EnrichedCandidate[]
   dataforseoCallsMade: number
   budgetOverrun: boolean
+}
+
+interface PatrolFindingRow {
+  keyword: string | null
+  url: string | null
+  position: number | null
+  ctr: number | null
+  search_volume: number | null
+  keyword_difficulty: number | null
+}
+
+async function loadGapKeywords(
+  config: MetaCycleClientConfig,
+  budgetOverBudget: boolean,
+): Promise<{ gapKeywords: RawGapKeyword[]; gapCallsMade: number }> {
+  if (budgetOverBudget) return { gapKeywords: [], gapCallsMade: 0 }
+  try {
+    const competitorDomains = await getClientCompetitorDomains(config.clientId)
+    if (competitorDomains.length === 0) return { gapKeywords: [], gapCallsMade: 0 }
+    const locationCode = locationCodeForDb(config.semrushDb)
+    const gap = await getKeywordsGap(config.domain, competitorDomains.slice(0, 3), locationCode, 40)
+    return {
+      gapKeywords: gap.map((k) => ({ keyword: k.keyword, search_volume: k.search_volume, keyword_difficulty: k.keyword_difficulty })),
+      gapCallsMade: 1,
+    }
+  } catch (err) {
+    console.warn(`[seo-meta-cycle] gap keyword fetch failed for ${config.clientId}:`, err instanceof Error ? err.message : String(err))
+    return { gapKeywords: [], gapCallsMade: 0 }
+  }
 }
 
 export async function runStep2CandidatesReady(
@@ -247,35 +316,19 @@ export async function runStep2CandidatesReady(
 ): Promise<Step2Result> {
   const cooldownCutoff = new Date(Date.now() - config.cooldownDays * 86_400_000).toISOString()
 
-  const [{ data: recentRows }, { data: patrolRows }, { data: gscRow }] = await Promise.all([
+  const [{ data: recentRows }, { data: patrolRows }, { data: gscRow }, budget] = await Promise.all([
     supabase.from('seo_meta_log').select('page_slug').eq('client_id', config.clientId).gte('optimised_at', cooldownCutoff),
-    supabase.from('seo_patrol_findings').select('keyword, url, position, search_volume, keyword_difficulty').eq('client_id', config.clientId).eq('status', 'fresh'),
+    supabase.from('seo_patrol_findings').select('keyword, url, position, ctr, search_volume, keyword_difficulty').eq('client_id', config.clientId).eq('status', 'fresh'),
     supabase.from('gsc_performance_snapshots').select('top_pages, top_queries').eq('client_id', config.clientId).order('period_end', { ascending: false }).limit(1).maybeSingle(),
+    checkGlobalDataForSeoBudget(supabase, weekKey),
   ])
 
   const cooldownSlugs = new Set(((recentRows ?? []) as Array<{ page_slug: string }>).map((r) => r.page_slug))
-  const patrolFindings = ((patrolRows ?? []) as Array<{ keyword: string | null; url: string | null; position: number | null; search_volume: number | null; keyword_difficulty: number | null }>)
-    .map((f): RawPatrolFinding => ({ keyword: f.keyword, url: f.url, position: f.position, searchVolume: f.search_volume, keywordDifficulty: f.keyword_difficulty }))
-
+  const patrolFindings = ((patrolRows ?? []) as PatrolFindingRow[])
+    .map((f): RawPatrolFinding => ({ keyword: f.keyword, url: f.url, position: f.position, ctr: f.ctr, searchVolume: f.search_volume, keywordDifficulty: f.keyword_difficulty }))
   const gscSnapshot = gscRow as { top_pages?: RawGscPage[]; top_queries?: RawGscQuery[] } | null
 
-  const budget = await checkGlobalDataForSeoBudget(supabase, weekKey)
-
-  let gapKeywords: RawGapKeyword[] = []
-  let gapCallsMade = 0
-  if (!budget.overBudget) {
-    try {
-      const competitorDomains = await getClientCompetitorDomains(config.clientId)
-      if (competitorDomains.length > 0) {
-        const locationCode = locationCodeForDb(config.semrushDb)
-        const gap = await getKeywordsGap(config.domain, competitorDomains.slice(0, 3), locationCode, 40)
-        gapCallsMade = 1
-        gapKeywords = gap.map((k) => ({ keyword: k.keyword, search_volume: k.search_volume, keyword_difficulty: k.keyword_difficulty }))
-      }
-    } catch (err) {
-      console.warn(`[seo-meta-cycle] gap keyword fetch failed for ${config.clientId}:`, err instanceof Error ? err.message : String(err))
-    }
-  }
+  const { gapKeywords, gapCallsMade } = await loadGapKeywords(config, budget.overBudget)
 
   const merged = mergeCandidates(
     {
@@ -307,12 +360,9 @@ export interface Step3Result {
   skipCount: number
 }
 
-export function runStep3Prescribe(
-  candidates: Array<{ candidate: MetaCycleCandidate; top3CompetitorDomains: string[] }>,
-  maxAutoActions: number,
-): Step3Result {
-  const prescriptions = candidates.map(({ candidate, top3CompetitorDomains }) =>
-    deriveMetaCycleAction({ candidate, top3CompetitorDomains }),
+export function runStep3Prescribe(candidates: EnrichedCandidate[], maxAutoActions: number): Step3Result {
+  const prescriptions = candidates.map(({ candidate, top3CompetitorDomains, top3CompetitorTitles }) =>
+    deriveMetaCycleAction({ candidate, top3CompetitorDomains, top3CompetitorTitles }),
   )
 
   // Cap auto actions to maxPagesPerRun (L4 config) — everything past the cap
@@ -349,13 +399,90 @@ export interface Step4Result {
 const AI_META_MAX_TITLE = 60
 const AI_META_MAX_DESC = 155
 
+type GenerateMetaFn = (keyword: string, pageUrl: string, brandVoice: string, competitorTitles: string[]) => Promise<{ title: string; desc: string }>
+
+function manualActionFor(p: MetaCyclePrescription, whyNow: string): PriorityAction {
+  return {
+    rank: 1,
+    dimension: 'seo',
+    action_type: p.actionType,
+    why_now: whyNow,
+    evidence_refs: p.candidate.pageUrl ? [`gsc:${p.candidate.pageUrl}`] : [`keyword:${p.candidate.keyword}`],
+    expected_impact: 'medium',
+    effort: p.actionType === 'new_page' ? 'high' : 'medium',
+    execution_mode: 'in_house',
+    executable_by: null,
+    metadata: { keyword: p.candidate.keyword, page_url: p.candidate.pageUrl, action_type: p.actionType },
+  }
+}
+
+/** One prescription's worth of step-4 work — pulled out to keep runStep4Applied under the 50-line budget. */
+async function applyOnePrescription(
+  supabase: SupabaseClient,
+  adapter: ApplyAdapter,
+  config: MetaCycleClientConfig,
+  weekKey: string,
+  p: MetaCyclePrescription,
+  generateMeta: GenerateMetaFn,
+  dryRun: boolean,
+): Promise<{ applied: { slug: string; actionType: string; prUrl?: string } | null; manualAction: PriorityAction | null }> {
+  if (!p.candidate.pageUrl) return { applied: null, manualAction: null }
+
+  const meta = await generateMeta(p.candidate.keyword, p.candidate.pageUrl, config.brandVoice, p.top3CompetitorTitles)
+  const title = meta.title.slice(0, AI_META_MAX_TITLE)
+  const desc = meta.desc.slice(0, AI_META_MAX_DESC)
+  if (!desc) {
+    // AI generation failed (e.g. truncated/malformed JSON — cts-meta-pr.ts's
+    // history, #1792, shows this really happens). Do NOT silently drop a
+    // candidate step 3 already judged auto-eligible — route it to the
+    // manual board instead ("发现不许死在日志里").
+    return { applied: null, manualAction: manualActionFor(p, `AI 生成标题/描述失败，需要人工补一个（关键词：${p.candidate.keyword}）`) }
+  }
+
+  let applyResult: ApplyAdapterResult
+  try {
+    applyResult = await adapter.apply({ candidate: p.candidate, newTitle: title, newDesc: desc, weekKey, dryRun })
+  } catch (err) {
+    return { applied: null, manualAction: manualActionFor(p, `自动改标题失败（${err instanceof Error ? err.message : String(err)}），需要人工处理`) }
+  }
+
+  if (applyResult.applied) {
+    if (!dryRun) {
+      await supabase.from('seo_meta_log').insert({
+        client_id: config.clientId,
+        content_type: 'meta',
+        page_slug: p.candidate.slug,
+        page_url: p.candidate.pageUrl,
+        keyword: p.candidate.keyword,
+        old_title: applyResult.oldTitle,
+        old_desc: applyResult.oldDesc,
+        new_title: applyResult.newTitle,
+        new_desc: applyResult.newDesc,
+        wp_updated: false,
+        applied_channel: adapter.channel,
+        optimised_at: new Date().toISOString(),
+        baseline_ctr: p.candidate.ctr,
+        baseline_position: p.candidate.position,
+        baseline_impressions: p.candidate.impressions,
+      })
+    }
+    return { applied: { slug: p.candidate.slug ?? '', actionType: 'title_rewrite', prUrl: applyResult.prUrl }, manualAction: null }
+  }
+
+  if (applyResult.skipReason === 'pr_opened_but_not_merged') {
+    const prNote = applyResult.prUrl ? `：${applyResult.prUrl}` : ''
+    return { applied: null, manualAction: manualActionFor(p, `已经开了标题改动的 PR 但没合并成功，需要人工去合并${prNote}`) }
+  }
+  return { applied: null, manualAction: null }
+}
+
 export async function runStep4Applied(
   supabase: SupabaseClient,
   adapter: ApplyAdapter,
   config: MetaCycleClientConfig,
   weekKey: string,
   prescriptions: MetaCyclePrescription[],
-  generateMeta: (keyword: string, pageUrl: string, brandVoice: string) => Promise<{ title: string; desc: string }>,
+  generateMeta: GenerateMetaFn,
   dryRun: boolean,
 ): Promise<Step4Result> {
   const result: Step4Result = { applied: [], indexRequestsSent: 0, routedManual: 0 }
@@ -367,18 +494,7 @@ export async function runStep4Applied(
 
     if (!p.auto) {
       result.routedManual += 1
-      manualActions.push({
-        rank: 1,
-        dimension: 'seo',
-        action_type: p.actionType,
-        why_now: p.reason,
-        evidence_refs: p.candidate.pageUrl ? [`gsc:${p.candidate.pageUrl}`] : [`keyword:${p.candidate.keyword}`],
-        expected_impact: 'medium',
-        effort: p.actionType === 'new_page' ? 'high' : 'medium',
-        execution_mode: 'in_house',
-        executable_by: null,
-        metadata: { keyword: p.candidate.keyword, page_url: p.candidate.pageUrl, action_type: p.actionType },
-      })
+      manualActions.push(manualActionFor(p, p.reason))
       continue
     }
 
@@ -387,34 +503,12 @@ export async function runStep4Applied(
       continue
     }
 
-    if (p.actionType === 'title_rewrite' && p.candidate.pageUrl) {
-      const meta = await generateMeta(p.candidate.keyword, p.candidate.pageUrl, config.brandVoice)
-      const title = meta.title.slice(0, AI_META_MAX_TITLE)
-      const desc = meta.desc.slice(0, AI_META_MAX_DESC)
-      if (!desc) continue
-
-      const applyResult = await adapter.apply({ candidate: p.candidate, newTitle: title, newDesc: desc, weekKey, dryRun })
-      if (!applyResult.applied) continue
-
-      result.applied.push({ slug: p.candidate.slug ?? '', actionType: 'title_rewrite', prUrl: applyResult.prUrl })
-
-      if (!dryRun) {
-        await supabase.from('seo_meta_log').insert({
-          client_id: config.clientId,
-          content_type: 'meta',
-          page_slug: p.candidate.slug,
-          page_url: p.candidate.pageUrl,
-          keyword: p.candidate.keyword,
-          old_title: applyResult.oldTitle,
-          old_desc: applyResult.oldDesc,
-          new_title: applyResult.newTitle,
-          new_desc: applyResult.newDesc,
-          wp_updated: false,
-          applied_channel: adapter.channel,
-          optimised_at: new Date().toISOString(),
-          baseline_position: p.candidate.position,
-          baseline_impressions: p.candidate.impressions,
-        })
+    if (p.actionType === 'title_rewrite') {
+      const outcome = await applyOnePrescription(supabase, adapter, config, weekKey, p, generateMeta, dryRun)
+      if (outcome.applied) result.applied.push(outcome.applied)
+      if (outcome.manualAction) {
+        result.routedManual += 1
+        manualActions.push(outcome.manualAction)
       }
     }
   }

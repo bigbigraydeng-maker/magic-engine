@@ -18,7 +18,20 @@ export { isoWeekKey }
 export const META_CYCLE_DUE_EVENT = 'seo/meta-cycle.due'
 export const META_CYCLE_JOB = 'seo-meta-cycle'
 
-/** Same UTC time the CTS weekly cron used ("Monday 05:30 UTC, right after oztop-seo-optimizer") — no TZ math, this PR retires that render.yaml cron entry in favour of this native Inngest trigger at the identical wall-clock time operators already expect. */
+/**
+ * Same UTC time the CTS weekly cron used ("Monday 05:30 UTC, right after
+ * oztop-seo-optimizer") — no TZ math, chosen for wall-clock parity with what
+ * operators already expect.
+ *
+ * 🔴 This PR does NOT retire render.yaml's `cts-seo-optimizer` cron entry —
+ *    that stays scheduled (one-off 2026-09-28 per PR #1805) until a human
+ *    explicitly removes it. Both cron paths write to the same repo/table,
+ *    so flipping `meta_cycle_enabled=true` for a client BEFORE that render.yaml
+ *    entry is retired risks two independent flows opening PRs against the
+ *    same data files in the same run. Retiring render.yaml is a required,
+ *    separate follow-up — see this PR's description, not something this file
+ *    (or any other code in this PR) enforces automatically.
+ */
 export const META_CYCLE_CRON = '30 5 * * 1'
 
 /** Same rationale as flywheel-seo-weekly's MIN_HOURS_BETWEEN_SNAPSHOTS: Inngest's
