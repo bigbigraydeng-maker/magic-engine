@@ -118,6 +118,10 @@ const fakeSend: ConversationInboundDraftDeps['send'] = {
     fakeSentLog.push({ channel: 'whatsapp', clientId: input.clientId, conversationId: input.conversationId, body: input.body })
     return { ok: true, providerMessageId: 'dryrun-fake-message-id' } as any
   },
+  email: async (input) => {
+    fakeSentLog.push({ channel: 'email', clientId: input.clientId, conversationId: input.conversationId, body: input.body })
+    return { ok: true, messageId: 'dryrun-fake-message-id' } as any
+  },
 }
 
 // ---------------------------------------------------------------------------

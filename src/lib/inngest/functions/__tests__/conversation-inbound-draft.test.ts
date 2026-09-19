@@ -56,6 +56,7 @@ import type { MessengerAgentOutput } from '@/lib/messenger-agent/agent-output-sc
 import type { VerifierResult } from '@/lib/messenger-agent/verifier/framework'
 import type { SendReplyResult } from '@/lib/messenger/send'
 import type { SendWhatsAppResult } from '@/lib/whatsapp/send'
+import type { SendMailReplyResult } from '@/lib/microsoft/mail-send'
 
 const mockFrom = vi.mocked(supabaseAdmin.from)
 
@@ -141,6 +142,9 @@ function messengerSendOk(): SendReplyResult {
 function whatsappSendOk(): SendWhatsAppResult {
   return { ok: true, whatsappMessageId: 'wamid.1', window: 'open' }
 }
+function mailSendOk(): SendMailReplyResult {
+  return { ok: true, messageId: 'graph-msg-1' }
+}
 
 function makeDeps(overrides: Partial<ConversationInboundDraftDeps> = {}): ConversationInboundDraftDeps {
   return {
@@ -156,7 +160,11 @@ function makeDeps(overrides: Partial<ConversationInboundDraftDeps> = {}): Conver
     markTimedOutIfPending: vi.fn(async () => true),
     loadApprovedDraft: vi.fn(async () => ({ draft_body: '您好，这个团现在有位。', verifier_status: 'approved' })),
     loadLastInboundAt: vi.fn(async () => SENT_AT),
-    send: { messenger: vi.fn(async () => messengerSendOk()), whatsapp: vi.fn(async () => whatsappSendOk()) },
+    send: {
+      messenger: vi.fn(async () => messengerSendOk()),
+      whatsapp: vi.fn(async () => whatsappSendOk()),
+      email: vi.fn(async () => mailSendOk()),
+    },
     ...overrides,
   }
 }
@@ -518,6 +526,7 @@ describe('Step send', () => {
       send: {
         messenger: vi.fn(async (): Promise<SendReplyResult> => ({ ok: false, status: 409, error: '窗口关了', reason: 'window_closed' })),
         whatsapp: vi.fn(async (): Promise<SendWhatsAppResult> => whatsappSendOk()),
+        email: vi.fn(async (): Promise<SendMailReplyResult> => mailSendOk()),
       },
     })
     const fn = createConversationInboundDraftFunction(deps)
@@ -532,6 +541,7 @@ describe('Step send', () => {
       send: {
         messenger: vi.fn(async (): Promise<SendReplyResult> => ({ ok: false, status: 502, error: 'Meta 拒绝', reason: 'graph_failed' })),
         whatsapp: vi.fn(async (): Promise<SendWhatsAppResult> => whatsappSendOk()),
+        email: vi.fn(async (): Promise<SendMailReplyResult> => mailSendOk()),
       },
     })
     const fn = createConversationInboundDraftFunction(deps)
@@ -553,6 +563,25 @@ describe('Step send', () => {
     expect(result).toMatchObject({ outcome: 'sent' })
     expect(deps.send.whatsapp).toHaveBeenCalledTimes(1)
     expect(deps.send.messenger).not.toHaveBeenCalled()
+  })
+
+  it('email 渠道（issue #1745）→ F2 接受这个渠道，走 send.email 与邮件窗口判定', async () => {
+    const deps = makeDeps()
+    const fn = createConversationInboundDraftFunction(deps)
+    // 邮件没有 F1，不会等 wait-autoack——只需要 1 个 waitForEvent 结果（await-approval）。
+    const result = await invoke(fn, fakeStep([{ ok: true }]), { channel: 'email' })
+    expect(result).toMatchObject({ outcome: 'sent' })
+    expect(deps.send.email).toHaveBeenCalledTimes(1)
+    expect(deps.send.messenger).not.toHaveBeenCalled()
+    expect(deps.send.whatsapp).not.toHaveBeenCalled()
+  })
+
+  it('voice 渠道仍然不认——事件契约的 channel 枚举比 F2 支持的范围更宽', async () => {
+    const deps = makeDeps()
+    const fn = createConversationInboundDraftFunction(deps)
+    const result = await invoke(fn, fakeStep(), { channel: 'voice' })
+    expect(result).toMatchObject({ outcome: 'skipped_invalid_payload' })
+    expect(deps.isOptedOut).not.toHaveBeenCalled()
   })
 })
 
@@ -585,6 +614,24 @@ describe(
         const step = fakeStep()
         await invoke(fn, step)
         expect(step.waitForEvent).toHaveBeenNthCalledWith(2, 'await-approval', {
+          event: CONVERSATION_REPLY_APPROVED_EVENT,
+          timeout: '4h',
+          if: `async.data.draft_id == "${DRAFT_ID}"`,
+        })
+      },
+    )
+
+    it(
+      '邮件渠道跳过 wait-autoack（issue #1745）：F1 从不为邮件 emit autoack.sent，等一个' +
+        '永远不会来的事件只会白白拖慢每一封邮件的起草 5 分钟——await-approval 因此是唯一' +
+        '一次 waitForEvent 调用，不是第二次',
+      async () => {
+        const deps = makeDeps()
+        const fn = createConversationInboundDraftFunction(deps)
+        const step = fakeStep([{ ok: true }])
+        await invoke(fn, step, { channel: 'email' })
+        expect(step.waitForEvent).toHaveBeenCalledTimes(1)
+        expect(step.waitForEvent).toHaveBeenNthCalledWith(1, 'await-approval', {
           event: CONVERSATION_REPLY_APPROVED_EVENT,
           timeout: '4h',
           if: `async.data.draft_id == "${DRAFT_ID}"`,

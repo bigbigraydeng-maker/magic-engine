@@ -63,6 +63,7 @@ import {
   CHANNEL_SEND,
   getSentMessageId,
   type MessengerAgentChannel,
+  type ChannelSendResult,
 } from '@/lib/messenger-agent/channel-dispatch'
 import {
   classifyConversation,
@@ -71,8 +72,6 @@ import {
   type PostSaleClassificationPolicy,
 } from '@/lib/messenger-agent/classify'
 import { hasIndustryFeature } from '@/lib/clients/industry-features'
-import type { SendReplyResult } from '@/lib/messenger/send'
-import type { SendWhatsAppResult } from '@/lib/whatsapp/send'
 
 export const CONVERSATION_AUTOACK_SENT_EVENT = 'conversation/autoack.sent'
 
@@ -129,7 +128,18 @@ export function parseMessageReceived(raw: unknown): ParsedMessageReceived {
   return { ok: true, value: parsed.data }
 }
 
-function isKnownAutoAckChannel(channel: string): channel is MessengerAgentChannel {
+/**
+ * F1 只认 messenger/whatsapp——邮件（issue #1745）故意不接进来：F1 是"客户消息
+ * 进来几秒内自动发一句安抚话术"，价值建立在 webhook 实时触达上；邮件靠每小时
+ * 同步，秒回的安抚话术对邮件没有对应的产品价值，这是业务判断，不是本次改动能
+ * 替 PM 拍板的事（留给 PM/华佗从业务角度决定要不要做邮件版安抚）。`voice` 同样
+ * 不认——事件契约的 channel 枚举比 F1 支持的渠道范围更宽，F1 只处理其中一部分，
+ * 其余渠道按"payload 认不出"处理，不猜、不硬转。
+ *
+ * F2（`conversation-inbound-draft.ts`）复用这个函数判断"这个渠道要不要等 F1
+ * 先送达"，两处判断必须是同一份真相——不是各自维护一份渠道白名单。
+ */
+export function isKnownAutoAckChannel(channel: string): channel is MessengerAgentChannel {
   return channel === 'messenger' || channel === 'whatsapp'
 }
 
@@ -178,13 +188,20 @@ async function loadClientIndustry(clientId: string): Promise<string | null> {
   return (data as { industry: string | null } | null)?.industry ?? null
 }
 
+/**
+ * 返回类型用三渠道合并的 `ChannelSendResult`（不是只有 messenger/whatsapp 的
+ * 两渠道联合类型），因为 `deps.send` 的类型是 `Record<MessengerAgentChannel,
+ * ChannelSendFn>`——`MessengerAgentChannel` 三个成员都要有一个类型兼容的值，
+ * 哪怕 F1 运行时从不会真的调 `send.email`（`isKnownAutoAckChannel` 在那之前
+ * 就已经 return 了，见文件头/该函数注释）。
+ */
 type ChannelSendFn = (input: {
   clientId: string
   conversationId: string
   body: string
   sentByEmail: string
   usedAiDraft: boolean
-}) => Promise<SendReplyResult | SendWhatsAppResult>
+}) => Promise<ChannelSendResult>
 
 export interface ConversationInboundAutoAckDeps {
   isOptedOut: (conversationId: string) => Promise<boolean>

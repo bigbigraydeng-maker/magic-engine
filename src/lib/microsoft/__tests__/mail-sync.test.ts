@@ -21,10 +21,12 @@ vi.mock('@/lib/platform-oauth/token-manager', () => ({
 }))
 vi.mock('@/lib/microsoft/mail-graph', () => ({ fetchMailSince: vi.fn() }))
 vi.mock('@/lib/crm/identity', () => ({ resolveContact: vi.fn() }))
+vi.mock('@/lib/workflows/inngest-event', () => ({ sendInngestEvent: vi.fn(async () => ({ event_ids: ['evt-1'] })) }))
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchMailSince } from '@/lib/microsoft/mail-graph'
 import { resolveContact } from '@/lib/crm/identity'
+import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { syncMailbox } from '../mail-ingest'
 import type { MailMessage } from '../mail-graph'
 
@@ -90,7 +92,13 @@ function mockDb() {
     }
     if (table === 'conversation_messages') {
       return {
-        upsert: () => ({ select: async () => ({ data: [{ id: 'm1' }] }) }),
+        // 回声式假实现：真实 upsert(ignoreDuplicates) 只回传真正插进去的行，
+        // 这里没有已存数据可去重，所以每一行都当"新插入"回声回去——带上
+        // `message_id`，`storeThread`/`emitNewInboundMessageEvents` 都要用它
+        // 判断该给哪条消息 emit 事件。
+        upsert: (rows: { message_id: string }[]) => ({
+          select: async () => ({ data: rows.map((r) => ({ id: `row-${r.message_id}`, message_id: r.message_id })) }),
+        }),
         // 同一个 `.select().eq()` 形状服务两处调用：算总条数的 `{count:'exact',
         // head:true}` 查询（取 `count`），和去重预检的「这条线程已经存了哪些信」
         // 查询（取 `data`，见 mail-ingest.ts 的 `messageSignature` 那段）——两边
@@ -321,6 +329,60 @@ describe('换 id 格式的兜底去重——只在切换那一刻之前收到的
     inbox([inboundFrom('a@gmail.com', '2026-09-16T01:00:00.000Z', 'cv-x')])
     await syncMailbox(TARGET)
     expect(upsertedRows).toHaveLength(1)
+  })
+})
+
+describe('emit conversation/message.received（issue #1745——下游 F1-F4 靠这个事件驱动）', () => {
+  it('新入站邮件 → emit 一次，channel=email，带上 contact_id', async () => {
+    inbox([inboundFrom('a@gmail.com', '2026-08-01T01:00:00.000Z', 'cv-a')])
+    await syncMailbox(TARGET)
+
+    expect(sendInngestEvent).toHaveBeenCalledTimes(1)
+    expect(sendInngestEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'conversation/message.received',
+        data: expect.objectContaining({
+          channel: 'email',
+          client_id: 'client-1',
+          contact_id: 'contact-1',
+          direction: 'inbound',
+          message_id: 'msg-cv-a',
+        }),
+      }),
+    )
+  })
+
+  it('纯出站线程（我们主动发的）→ 不 emit，客人没说过话不该触发下游自动回复', async () => {
+    inbox([])
+    ;(fetchMailSince as ReturnType<typeof vi.fn>).mockImplementation(async (_t: string, folder: string) => ({
+      ok: true,
+      messages:
+        folder === 'sentitems'
+          ? [
+              {
+                id: 'out-1',
+                conversationId: 'cv-out',
+                subject: '报价',
+                preview: '附上报价',
+                hasAttachment: false,
+                receivedAt: '2026-08-01T01:00:00.000Z',
+                counterparty: { address: 'vendor@example.com', name: null },
+                direction: 'outbound' as const,
+              },
+            ]
+          : [],
+      truncated: false,
+    }))
+    await syncMailbox(TARGET)
+    expect(sendInngestEvent).not.toHaveBeenCalled()
+  })
+
+  it('emit 失败 → 只打日志，不影响这次同步的落库结果（best-effort，跟 Messenger/WhatsApp webhook 同一个态度）', async () => {
+    ;(sendInngestEvent as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('INNGEST_EVENT_KEY_MISSING'))
+    inbox([inboundFrom('a@gmail.com', '2026-08-01T01:00:00.000Z', 'cv-a')])
+    const res = await syncMailbox(TARGET)
+    expect(res.stoppedEarly).toBeUndefined()
+    expect(res.threads).toBe(1)
   })
 })
 

@@ -26,6 +26,7 @@ import { TOURISM_POST_SALE_POLICY, type ConversationClass } from '@/lib/messenge
 import { CLOUD_FN_PREFIX, WORKER_OWNED_EVENTS } from '../../client'
 import type { SendReplyResult } from '@/lib/messenger/send'
 import type { SendWhatsAppResult } from '@/lib/whatsapp/send'
+import type { SendMailReplyResult } from '@/lib/microsoft/mail-send'
 
 // 跟 `knowledge-mining.test.ts`/`factory-creatomate-render.test.ts` 同一份读法：
 // `.opts`/`.fn` 不是 Inngest SDK 对外暴露的公开类型，但实测在当前 inngest
@@ -83,6 +84,9 @@ function messengerSendOk(): SendReplyResult {
 function whatsappSendOk(): SendWhatsAppResult {
   return { ok: true, whatsappMessageId: 'wamid.1', window: 'open' }
 }
+function mailSendOk(): SendMailReplyResult {
+  return { ok: true, messageId: 'graph-msg-1' }
+}
 
 function makeDeps(overrides: Partial<ConversationInboundAutoAckDeps> = {}): ConversationInboundAutoAckDeps {
   return {
@@ -90,7 +94,14 @@ function makeDeps(overrides: Partial<ConversationInboundAutoAckDeps> = {}): Conv
     isEnabled: vi.fn(async () => true),
     classify: vi.fn(async (): Promise<ConversationClass> => 'lead_intake'),
     loadIndustry: vi.fn(async () => null),
-    send: { messenger: vi.fn(async () => messengerSendOk()), whatsapp: vi.fn(async () => whatsappSendOk()) },
+    // email 也要建模（哪怕 F1 从不会真的调它，见下方"不支持的渠道"用例）——
+    // `ConversationInboundAutoAckDeps.send` 的类型是三渠道的 Record，少一个键
+    // 类型检不过。
+    send: {
+      messenger: vi.fn(async () => messengerSendOk()),
+      whatsapp: vi.fn(async () => whatsappSendOk()),
+      email: vi.fn(async () => mailSendOk()),
+    },
     ...overrides,
   }
 }
@@ -299,6 +310,7 @@ describe('关键路径', () => {
           }),
         ),
         whatsapp: vi.fn(async (): Promise<SendWhatsAppResult> => whatsappSendOk()),
+        email: vi.fn(async (): Promise<SendMailReplyResult> => mailSendOk()),
       },
     })
     const fn = createConversationInboundAutoAckFunction(deps)
@@ -340,6 +352,7 @@ describe('关键路径', () => {
           }),
         ),
         whatsapp: vi.fn(async (): Promise<SendWhatsAppResult> => whatsappSendOk()),
+        email: vi.fn(async (): Promise<SendMailReplyResult> => mailSendOk()),
       },
     })
     const fn = createConversationInboundAutoAckFunction(deps)

@@ -37,6 +37,8 @@ import { getValidTokenForConnection } from '@/lib/platform-oauth/token-manager'
 import { fetchMailSince, type MailFolder, type MailMessage } from '@/lib/microsoft/mail-graph'
 import { classifySender } from '@/lib/microsoft/mail-sender'
 import { resolveContact } from '@/lib/crm/identity'
+import { sendInngestEvent } from '@/lib/workflows/inngest-event'
+import { CONVERSATION_MESSAGE_RECEIVED_EVENT } from '@/lib/conversations/events'
 
 // ─── 计划（纯函数，不碰数据库） ──────────────────────────────────────────────
 
@@ -349,6 +351,13 @@ interface StoredThread {
   conversationId: string
   contactId: string | null
   newMessages: number
+  /**
+   * Graph 消息 id，这一轮真正新插进 `conversation_messages` 的那些（不含被
+   * `ignoreDuplicates` 挡掉的重复行）。`syncMailbox` 用它决定该给哪几条消息
+   * emit `conversation/message.received`——只有"这一轮真的新存了"才该触发
+   * 下游 F1-F4，重放/重复同步不能对着同一封信再触发一遍。
+   */
+  insertedMessageIds: string[]
 }
 
 /**
@@ -440,7 +449,7 @@ async function storeThread(
     return !existingSignatures.has(messageSignature(m.direction, m.receivedAt))
   })
 
-  let inserted: { id: string }[] | null = []
+  let inserted: { id: string; message_id: string }[] | null = []
   if (toStore.length > 0) {
     const { data, error: msgErr } = await supabaseAdmin
       .from('conversation_messages')
@@ -455,7 +464,11 @@ async function storeThread(
         })),
         { onConflict: 'conversation_id,message_id', ignoreDuplicates: true },
       )
-      .select('id')
+      // `ignoreDuplicates: true` 生成 `ON CONFLICT DO NOTHING`——PostgREST 的
+      // `.select()` 只回传真正插进去的行，被去重挡掉的重复行不会出现在这里。
+      // `insertedMessageIds` 因此天然就是"这一轮真的新存了"的集合，不用另外
+      // 再比对一次 existingIds。
+      .select('id, message_id')
 
     if (msgErr) {
       // 信没存下是可惜，但线程行已经在了、人还能接上 —— 不为此放弃整条线程。
@@ -483,6 +496,53 @@ async function storeThread(
     conversationId: row.id as string,
     contactId: (row.contact_id as string | null) ?? null,
     newMessages: inserted?.length ?? 0,
+    insertedMessageIds: (inserted ?? []).map((r) => r.message_id),
+  }
+}
+
+/**
+ * 这一轮真正新存的入站信，逐条 emit `conversation/message.received`——issue
+ * #1745 调研结论指出的缺口：Messenger/WhatsApp webhook 早就在 emit 这个事件，
+ * 邮件同步却从来没有，导致就算 `channel-dispatch.ts` 认识了 `'email'`，F1-F4
+ * 也永远不会被邮件触发。
+ *
+ * Best-effort，跟 Messenger/WhatsApp webhook 同一个态度（见
+ * `webhooks/whatsapp/route.ts` emit 前的注释）：消息已经落库是这次同步真正要
+ * 保证的事，emit 失败只打日志，不能让一次 Inngest 网络抖动导致整个邮箱同步
+ * 提前失败、更晚的线程也读不到。
+ *
+ * 只处理入站（`direction === 'inbound'`）——我们自己发出去的信（比如
+ * `sendMailReply` 立刻写进时间线那条）不该触发一次"客户消息进来了"。
+ */
+async function emitNewInboundMessageEvents(
+  clientId: string,
+  conversationId: string,
+  contactId: string | null,
+  thread: PlannedThread,
+  insertedMessageIds: readonly string[],
+): Promise<void> {
+  if (insertedMessageIds.length === 0) return
+  const insertedIds = new Set(insertedMessageIds)
+  const newInbound = thread.messages.filter((m) => m.direction === 'inbound' && insertedIds.has(m.id))
+
+  for (const m of newInbound) {
+    try {
+      await sendInngestEvent({
+        id: `mail:${conversationId}:${m.id}`,
+        name: CONVERSATION_MESSAGE_RECEIVED_EVENT,
+        data: {
+          channel: 'email',
+          client_id: clientId,
+          conversation_id: conversationId,
+          contact_id: contactId,
+          message_id: m.id,
+          direction: 'inbound',
+          sent_at: m.receivedAt,
+        },
+      })
+    } catch (err) {
+      console.error(`[mail-ingest] emit ${CONVERSATION_MESSAGE_RECEIVED_EVENT} 失败（消息已入库）:`, err)
+    }
   }
 }
 
@@ -650,6 +710,17 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
             .is('contact_id', null)
         }
       }
+
+      // 下游 F1-F4 靠这个事件驱动（issue #1745）——contact_id 允许 null（客人
+      // 第一次来信、这条对话还没认到人），下游据此决定要不要跳过需要联系方式
+      // 的步骤，跟 Messenger/WhatsApp webhook 是同一个约定。
+      await emitNewInboundMessageEvents(
+        target.clientId,
+        stored.conversationId,
+        contactId,
+        thread,
+        stored.insertedMessageIds,
+      )
 
       if (contactId) {
         touchpoints += await writeTouchpoints(target.clientId, contactId, thread)
