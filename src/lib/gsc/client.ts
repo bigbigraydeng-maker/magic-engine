@@ -141,6 +141,84 @@ export async function fetchGscSearchPerformance(
   }
 }
 
+/**
+ * Fetch the queries GSC actually attributes to ONE specific page (not the
+ * site-wide top-N list) — live call, `dimensionFilterGroups` filtered to
+ * `page`.
+ *
+ * 事故复盘 2026-09-20（CTS W38 第一次上线）根因之一：候选发现只有一份
+ * 站点级 `top_queries`（不区分页面），靠 slug 分词跟这份列表做字符串重叠
+ * 匹配来猜"这页该用哪个词"——liziba-station-chongqing-guide 页面没有
+ * 自己的高曝光词进入 top_queries，算法退而求其次，抓到了共享 "chongqing"
+ * 这一个 token 的、其实属于另一个页面（how-many-days-in-chongqing）的词，
+ * 就把这个词当成了 liziba 页面的目标词——标题因此变成一个跟 Liziba
+ * 站完全无关的问题句。此函数是修法：直接问谷歌"这一页自己的词是什么"，
+ * 不再靠站点级列表做猜测式匹配。
+ *
+ * @param siteUrl   GSC property URL, e.g. "https://example.com.au/"
+ * @param pageUrl   The exact page URL to filter to (GSC matches by exact string).
+ * @param clientId  Resolves per-client OAuth token (falls back to service account).
+ * @param periodDays How many days back to cover (default 28, same as the site snapshot).
+ */
+export async function fetchGscQueriesForPage(
+  siteUrl: string,
+  pageUrl: string,
+  clientId: string,
+  periodDays: number = DEFAULT_DATE_RANGE_DAYS,
+): Promise<GscSnapshotRow[] | null> {
+  const token = await resolveAccessToken(clientId)
+  if (!token) return null
+
+  const endDate = toIsoDate(new Date())
+  const startDate = toIsoDate(daysAgo(periodDays))
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+
+  try {
+    const res = await fetch(
+      `${SEARCH_ANALYTICS_BASE}/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          startDate,
+          endDate,
+          dimensions: ['query'],
+          dimensionFilterGroups: [
+            { filters: [{ dimension: 'page', operator: 'equals', expression: pageUrl }] },
+          ],
+          rowLimit: SNAPSHOT_ROWS,
+          orderBy: [{ fieldName: 'impressions', sortOrder: 'DESCENDING' }],
+        }),
+        signal: controller.signal,
+      },
+    )
+
+    if (!res.ok) {
+      const rawBody = await res.text()
+      console.warn(`[gsc/client] page-scoped query fetch returned ${res.status} for ${pageUrl}: ${rawBody.slice(0, 200)}`)
+      return null
+    }
+
+    const data = await res.json() as {
+      rows?: Array<{ keys: string[]; impressions: number; clicks: number; ctr: number; position: number }>
+    }
+    return (data.rows ?? []).map((r) => ({
+      query: r.keys[0] ?? '',
+      clicks: r.clicks,
+      impressions: r.impressions,
+      ctr: r.ctr,
+      position: r.position,
+    }))
+  } catch (err) {
+    console.warn('[gsc/client] page-scoped query fetch failed:', err instanceof Error ? err.message : err)
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 // ─── Snapshot types (P17.A.1) ─────────────────────────────────────────────────
 
 export interface GscSnapshotRow {

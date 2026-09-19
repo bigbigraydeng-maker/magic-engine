@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
+import { buildAdapterForClient } from '@/lib/inngest/functions/seo-meta-cycle'
+import { generateMetaCycleTitle } from '@/lib/seo-meta/cycle/ai-meta'
+import { runDryRunCycle } from '@/lib/seo-meta/cycle/runner'
 import {
   META_CYCLE_DUE_EVENT,
   isoWeekKey,
+  loadMetaCycleClientConfigForDryRun,
   loadMetaCycleRoster,
   metaCycleEventId,
+  toClientConfig,
 } from '@/lib/seo-meta/cycle/roster'
 
 /**
@@ -27,17 +32,43 @@ import {
  *
  * 🔴 **本路由不写 cron_run_logs**：跟 flywheel-seo-weekly 手动补触发路由同一个
  *    理由——运行记录是"定时器有没有按时跑"的证据，手动点一下不该伪装成那个证据。
+ *    dry_run 模式更是如此——完全不写任何一条 cron_run_logs、不写 seo_meta_log、
+ *    不下发人工看板任务，纯只读演练。
  *
- * Body（可选）：{ "client_id": "<uuid>" } —— 只发这一个客户；不传则发全部
- * seo_config.meta_cycle_enabled=true 的客户。
+ * PM 2026-09-20（incident follow-up）：`dry_run: true` 直接在这个 HTTP 请求里
+ * 同步跑完整个 1-4 步（含闸门+事实核对），不经过 Inngest——Inngest 是
+ * fire-and-forget，没法把结果同步带回响应体，而 PM 要的是"点一下就能看到这一轮
+ * 会出什么方案"。真实（非 dry_run）触发继续走 Inngest 事件派单，行为不变。
+ *
+ * Body（可选）：
+ *   { "client_id": "<uuid>" }              —— 只发这一个客户；不传则发全部已开启的客户
+ *   { "client_id": "<uuid>", "dry_run": true } —— 只读演练该客户，dry_run 时 client_id 必填
  *
  * Auth: Bearer ${CRON_SECRET}
  */
 
-export const maxDuration = 60
+export const maxDuration = 120
 
 interface TriggerBody {
   client_id?: unknown
+  dry_run?: unknown
+}
+
+async function handleDryRun(clientId: string, weekKey: string) {
+  const entry = await loadMetaCycleClientConfigForDryRun(supabaseAdmin, clientId)
+  if (!entry) {
+    return NextResponse.json({ error: `client ${clientId} not found, inactive, or missing a domain` }, { status: 404 })
+  }
+  const resolved = await buildAdapterForClient(clientId)
+  if (!resolved) {
+    return NextResponse.json({ error: `client ${clientId} has no repo connection configured — nothing to dry-run against` }, { status: 400 })
+  }
+
+  const result = await runDryRunCycle(supabaseAdmin, resolved.adapter, toClientConfig(entry), weekKey, generateMetaCycleTitle)
+  return NextResponse.json({
+    job: 'seo-meta-cycle-trigger', week_key: weekKey, client_id: clientId,
+    dry_run: true, no_writes: true, ...result,
+  })
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -57,9 +88,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
   const requestedClientId = typeof body.client_id === 'string' && body.client_id.trim().length > 0 ? body.client_id.trim() : null
+  const dryRun = body.dry_run === true
 
   const now = new Date()
   const weekKey = isoWeekKey(now)
+
+  if (dryRun) {
+    if (!requestedClientId) {
+      return NextResponse.json({ error: 'dry_run requires client_id' }, { status: 400 })
+    }
+    return handleDryRun(requestedClientId, weekKey)
+  }
+
   const base = {
     job: 'seo-meta-cycle-trigger',
     week_key: weekKey,

@@ -72,25 +72,47 @@ export async function loadMetaCycleRoster(supabase: SupabaseClient): Promise<Ros
 
   if (error) return { ok: false, reason: error.message }
 
-  const entries = (data ?? []).flatMap((row): MetaCycleRosterEntry[] => {
-    const r = row as { id?: unknown; domain?: unknown; semrush_db?: unknown; seo_config?: unknown }
-    if (typeof r.id !== 'string' || r.id.length === 0) return []
-    if (typeof r.domain !== 'string' || r.domain.trim().length === 0) return []
-    const cfg = (r.seo_config ?? {}) as Record<string, unknown>
-    return [{
-      clientId: r.id,
-      domain: r.domain.trim(),
-      semrushDb: typeof r.semrush_db === 'string' ? r.semrush_db : null,
-      maxPagesPerRun: Math.min(
-        typeof cfg.meta_cycle_max_pages === 'number' && cfg.meta_cycle_max_pages > 0 ? cfg.meta_cycle_max_pages : DEFAULT_MAX_PAGES_PER_RUN,
-        HARD_MAX_PAGES_PER_RUN,
-      ),
-      cooldownDays: typeof cfg.meta_cycle_cooldown_days === 'number' && cfg.meta_cycle_cooldown_days > 0 ? cfg.meta_cycle_cooldown_days : DEFAULT_COOLDOWN_DAYS,
-      brandVoice: typeof cfg.meta_cycle_brand_voice === 'string' && cfg.meta_cycle_brand_voice.trim().length > 0 ? cfg.meta_cycle_brand_voice : DEFAULT_BRAND_VOICE,
-    }]
+  const entries = (data ?? []).flatMap((row) => {
+    const entry = rowToEntry(row as { id?: unknown; domain?: unknown; semrush_db?: unknown; seo_config?: unknown })
+    return entry ? [entry] : []
   })
 
   return { ok: true, entries }
+}
+
+function rowToEntry(row: { id?: unknown; domain?: unknown; semrush_db?: unknown; seo_config?: unknown }): MetaCycleRosterEntry | null {
+  if (typeof row.id !== 'string' || row.id.length === 0) return null
+  if (typeof row.domain !== 'string' || row.domain.trim().length === 0) return null
+  const cfg = (row.seo_config ?? {}) as Record<string, unknown>
+  return {
+    clientId: row.id,
+    domain: row.domain.trim(),
+    semrushDb: typeof row.semrush_db === 'string' ? row.semrush_db : null,
+    maxPagesPerRun: Math.min(
+      typeof cfg.meta_cycle_max_pages === 'number' && cfg.meta_cycle_max_pages > 0 ? cfg.meta_cycle_max_pages : DEFAULT_MAX_PAGES_PER_RUN,
+      HARD_MAX_PAGES_PER_RUN,
+    ),
+    cooldownDays: typeof cfg.meta_cycle_cooldown_days === 'number' && cfg.meta_cycle_cooldown_days > 0 ? cfg.meta_cycle_cooldown_days : DEFAULT_COOLDOWN_DAYS,
+    brandVoice: typeof cfg.meta_cycle_brand_voice === 'string' && cfg.meta_cycle_brand_voice.trim().length > 0 ? cfg.meta_cycle_brand_voice : DEFAULT_BRAND_VOICE,
+  }
+}
+
+/**
+ * PM 2026-09-20（incident follow-up）: dry-run needs to test a client's
+ * config BEFORE `meta_cycle_enabled` is ever flipped on — that's the whole
+ * point of "PM 点头才重新打开开关". Deliberately does NOT filter by the
+ * enabled flag (unlike loadMetaCycleRoster), so only ever call this from
+ * the dry-run path, never from anything that might actually write.
+ */
+export async function loadMetaCycleClientConfigForDryRun(supabase: SupabaseClient, clientId: string): Promise<MetaCycleRosterEntry | null> {
+  const { data } = await supabase
+    .from('clients')
+    .select('id, domain, semrush_db, seo_config')
+    .eq('id', clientId)
+    .eq('client_status', 'active')
+    .not('domain', 'is', null)
+    .maybeSingle()
+  return data ? rowToEntry(data as { id?: unknown; domain?: unknown; semrush_db?: unknown; seo_config?: unknown }) : null
 }
 
 export function toClientConfig(entry: MetaCycleRosterEntry): MetaCycleClientConfig {

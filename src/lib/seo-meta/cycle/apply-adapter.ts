@@ -14,6 +14,15 @@
  * anymore. A regressed change becomes a manual kanban item pointing at this
  * PR's own GitHub "Revert" button (runner.ts), not new code here.
  *
+ * PM 2026-09-20（incident follow-up）: the PR body now ALWAYS includes the
+ * full MetaCycleGateEvidence — search volume, difficulty, snapshot date,
+ * top-3 competitor titles, this client's own SERP ranking URL, and why this
+ * page/keyword was chosen. Root cause: the data was already being fetched
+ * (gate.ts) but the PR body template here simply never included it — a
+ * template omission, not a failed DataForSEO call. "PM 要能一眼核对" (PM
+ * must be able to verify at a glance) is now a hard requirement of this
+ * template, not an afterthought.
+ *
  * 🔴 `applied: true` means MERGED, not just "PR opened". A PR that opened
  *    but failed to merge (CI blocked, branch protection, etc.) must NOT be
  *    treated as a live change — the caller (runner.ts) uses `applied` to
@@ -30,7 +39,7 @@
 import type { GithubClient } from '@/lib/cms/github-client'
 import { buildSlugIndex, replaceMetaForSlug } from '@/lib/seo-meta/cts-meta-pr'
 import { resolvePrGuard } from './pr-guard'
-import type { ApplyAdapter, ApplyAdapterResult } from './types'
+import type { ApplyAdapter, ApplyAdapterResult, MetaCycleGateEvidence } from './types'
 
 export interface CtsRepoConnection {
   repoOwner: string
@@ -42,6 +51,28 @@ export interface CtsRepoConnection {
 interface FileCacheEntry {
   source: string
   sha: string
+}
+
+function buildPrBody(slug: string, keyword: string, oldTitle: string, newTitle: string, oldDesc: string, newDesc: string, evidence: MetaCycleGateEvidence): string {
+  const competitors = evidence.competitorTitles.length > 0
+    ? evidence.competitorTitles.map((t, i) => `  ${i + 1}. ${t}`).join('\n')
+    : '  （SERP 前 3 名没有可用标题）'
+  return [
+    `### /${slug}`,
+    `目标词:「${keyword}」`,
+    `- 搜索量: ${evidence.searchVolume}/月 · 难度: ${evidence.keywordDifficulty}/100（keyword_snapshots 快照日期 ${evidence.snapshotDate}）`,
+    `- 本页在 SERP 里的排名 URL: ${evidence.ctsRankingUrl ?? '（这次 SERP 结果里没查到本站排这个词）'}`,
+    `- 对手前 3 名标题:`,
+    competitors,
+    `- 为什么选这页/这个词: ${evidence.chosenReason}`,
+    '',
+    `- 标题: ${oldTitle}`,
+    `- → **${newTitle}**`,
+    `- 描述: ${oldDesc.slice(0, 80)}…`,
+    `- → **${newDesc}**`,
+    '',
+    '> SEO Meta-Cycle v1 自动改动（title_rewrite）。14 天后回查效果，回归了会下发人工看板任务——点这条 PR 的 Revert 按钮再合并即可改回去。',
+  ].join('\n')
 }
 
 /**
@@ -123,7 +154,7 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
   return {
     channel: 'pr',
 
-    async apply({ candidate, newTitle, newDesc, weekKey, dryRun }) {
+    async apply({ candidate, newTitle, newDesc, weekKey, dryRun, evidence }) {
       if (!candidate.slug) {
         return { applied: false, newTitle, newDesc, oldTitle: '', oldDesc: '', skipReason: 'no_slug' }
       }
@@ -151,7 +182,7 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
         entry,
         weekKey,
         `[Magic Engine] SEO meta-cycle: ${candidate.slug}`,
-        `### /${candidate.slug}\n目标词:「${candidate.keyword}」\n- 标题: ${replaced.oldTitle}\n- → **${newTitle}**\n- 描述: ${replaced.oldDesc.slice(0, 80)}…\n- → **${newDesc}**\n\n> SEO Meta-Cycle v1 自动改动（title_rewrite）。14 天后回查效果，回归了会下发人工看板任务——点这条 PR 的 Revert 按钮再合并即可改回去。`,
+        buildPrBody(candidate.slug, evidence.keyword, replaced.oldTitle, newTitle, replaced.oldDesc, newDesc, evidence),
       )
       if (!commit.ok) return commit.result
 

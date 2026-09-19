@@ -16,20 +16,22 @@
  * found lived in the auto-revert machinery. A regressed page now becomes
  * ONE manual kanban item pointing at the merged PR's own GitHub Revert
  * button — zero new revert code.
+ *
+ * PM 2026-09-20（incident follow-up, after W38's first real run auto-merged
+ * two factually wrong changes）: step 3 is no longer a pure scoring function
+ * — it runs the full information-completeness gate (gate.ts) per candidate,
+ * which needs live GSC/DataForSEO calls. Every candidate that makes it to
+ * step 4 gets an entry in Step4Result.proposals regardless of outcome — no
+ * silent drops (that was root cause #4 of the incident).
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { readPageMetrics } from '@/lib/seo/post-publish-monitor-store'
 import { persistZhugeActions } from '@/lib/zhuge/action-persister'
 import type { PriorityAction, ZhugeOutput } from '@/lib/zhuge/types'
-import { deriveMetaCycleAction } from './action-mapping'
-import {
-  fromGscPages,
-  mergeCandidates,
-  type RawGscPage,
-  type RawGscQuery,
-} from './candidates'
-import { enrichWithSnapshots, fetchCompetitorTitles } from './enrichment'
+import { checkFactPreservation } from './fact-check'
+import { GATE_REASON, resolveGscSiteUrl, runGateForCandidate } from './gate'
+import { fromGscPages, mergeCandidates, type RawGscPage } from './candidates'
 import { classifyMetaChangeOutcome } from './outcome-classifier'
 import type { MetaGenerationInput } from './ai-meta'
 import type {
@@ -37,7 +39,8 @@ import type {
   ApplyAdapterResult,
   MetaCycleCandidate,
   MetaCycleClientConfig,
-  MetaCyclePrescription,
+  MetaCycleGateEvidence,
+  MetaCycleGateFailure,
 } from './types'
 
 // ── Step 1: check_due (re-classify last cycle's changes) ──────────────────────
@@ -142,6 +145,7 @@ export async function runStep1CheckDue(
     .eq('client_id', config.clientId)
     .eq('applied_channel', adapter.channel)
     .is('checked_at', null)
+    .is('reverted_at', null)
     .lte('optimised_at', cutoff)
     .order('optimised_at', { ascending: true })
     .limit(20)
@@ -175,7 +179,7 @@ export async function runStep1CheckDue(
   return result
 }
 
-// ── Step 2: candidates_ready (discover + merge + snapshot-enrich) ─────────────
+// ── Step 2: candidates_ready (discover) ────────────────────────────────────────
 
 export interface Step2Result {
   candidates: MetaCycleCandidate[]
@@ -188,46 +192,78 @@ export async function runStep2CandidatesReady(
   const cooldownCutoff = new Date(Date.now() - config.cooldownDays * 86_400_000).toISOString()
 
   const [{ data: recentRows }, { data: gscRow }] = await Promise.all([
-    supabase.from('seo_meta_log').select('page_slug').eq('client_id', config.clientId).gte('optimised_at', cooldownCutoff),
-    supabase.from('gsc_performance_snapshots').select('top_pages, top_queries').eq('client_id', config.clientId).order('period_end', { ascending: false }).limit(1).maybeSingle(),
+    supabase.from('seo_meta_log').select('page_slug').eq('client_id', config.clientId).is('reverted_at', null).gte('optimised_at', cooldownCutoff),
+    supabase.from('gsc_performance_snapshots').select('top_pages').eq('client_id', config.clientId).order('period_end', { ascending: false }).limit(1).maybeSingle(),
   ])
 
   const cooldownSlugs = new Set(((recentRows ?? []) as Array<{ page_slug: string }>).map((r) => r.page_slug))
-  const gscSnapshot = gscRow as { top_pages?: RawGscPage[]; top_queries?: RawGscQuery[] } | null
+  const gscSnapshot = gscRow as { top_pages?: RawGscPage[] } | null
 
   const merged = mergeCandidates(
-    fromGscPages(gscSnapshot?.top_pages ?? [], gscSnapshot?.top_queries ?? []),
+    fromGscPages(gscSnapshot?.top_pages ?? []),
     cooldownSlugs,
-    config.maxPagesPerRun * 3, // wide pool before the difficulty skip filter — same rationale as cts-meta-pr.ts's pickCandidates(..., 12)
+    config.maxPagesPerRun * 3, // wide pool the gate (step 3) works through — same rationale as cts-meta-pr.ts's pickCandidates(..., 12)
   )
 
-  const enriched = await enrichWithSnapshots(merged, { id: config.clientId, domain: config.domain, semrush_db: config.semrushDb })
-  return { candidates: enriched }
+  return { candidates: merged }
 }
 
-// ── Step 3: prescribed (score → title_rewrite vs skip, pure) ──────────────────
+// ── Step 3: gated (information-completeness gate, PM 2026-09-20 incident follow-up) ──
 
 export interface Step3Result {
-  titleRewrites: MetaCyclePrescription[]
-  skipCount: number
-  deferredCount: number
+  passed: Array<{ candidate: MetaCycleCandidate; evidence: MetaCycleGateEvidence }>
+  failures: MetaCycleGateFailure[]
 }
 
-export function runStep3Prescribe(candidates: MetaCycleCandidate[], maxAutoActions: number): Step3Result {
-  const prescriptions = candidates.map((c) => deriveMetaCycleAction(c))
-  const skipped = prescriptions.filter((p) => p.actionType === 'skip')
-  const eligible = prescriptions.filter((p) => p.actionType === 'title_rewrite')
-
-  return {
-    titleRewrites: eligible.slice(0, maxAutoActions),
-    skipCount: skipped.length,
-    deferredCount: Math.max(0, eligible.length - maxAutoActions),
+export async function runStep3Gate(
+  supabase: SupabaseClient,
+  config: MetaCycleClientConfig,
+  candidates: MetaCycleCandidate[],
+): Promise<Step3Result> {
+  const siteUrl = await resolveGscSiteUrl(supabase, config.clientId)
+  if (!siteUrl) {
+    return {
+      passed: [],
+      failures: candidates.map((candidate) => ({ candidate, reason: 'no_gsc_connector', detail: 'client has no GSC connector configured (client_connectors anchor=gsc) — cannot verify page-scoped queries' })),
+    }
   }
+
+  const passed: Step3Result['passed'] = []
+  const failures: MetaCycleGateFailure[] = []
+  for (const candidate of candidates) {
+    if (passed.length >= config.maxPagesPerRun) break // enough good candidates found — stop spending on SERP/GSC calls for the rest of the wide pool
+    const result = await runGateForCandidate(supabase, config, candidate, siteUrl)
+    if ('evidence' in result) passed.push({ candidate: result.candidate, evidence: result.evidence })
+    else failures.push(result)
+  }
+  return { passed, failures }
 }
 
-// ── Step 4: applied (SERP-enrich the final set, generate, apply) ──────────────
+// ── Step 4: applied (generate, fact-check, apply — every attempt gets a proposal record) ──
+
+export interface MetaCycleProposal {
+  slug: string
+  pageUrl: string
+  keyword: string
+  searchVolume: number
+  keywordDifficulty: number
+  snapshotDate: string
+  competitorTitles: string[]
+  ctsRankingUrl: string | null
+  chosenReason: string
+  oldTitle: string
+  oldDesc: string
+  newTitle: string
+  newDesc: string
+  factCheckConsistent: boolean
+  factCheckReason: string
+  applied: boolean
+  prUrl?: string
+  skipReason?: string
+}
 
 export interface Step4Result {
+  proposals: MetaCycleProposal[]
   applied: Array<{ slug: string; prUrl?: string }>
   routedManual: number
 }
@@ -237,84 +273,100 @@ const AI_META_MAX_DESC = 155
 
 export type GenerateMetaFn = (input: MetaGenerationInput) => Promise<{ title: string; desc: string }>
 
-/** One prescription's worth of step-4 work — kept separate from runStep4Applied for the 50-line budget. */
+/** One candidate's worth of step-4 work — kept separate from runStep4Applied for the 50-line budget. */
 async function applyOnePrescription(
   supabase: SupabaseClient,
   adapter: ApplyAdapter,
   config: MetaCycleClientConfig,
   weekKey: string,
-  p: MetaCyclePrescription,
-  competitorTitles: string[],
+  candidate: MetaCycleCandidate,
+  evidence: MetaCycleGateEvidence,
   generateMeta: GenerateMetaFn,
   dryRun: boolean,
-): Promise<{ applied: { slug: string; prUrl?: string } | null; manualAction: PriorityAction | null }> {
-  if (!p.candidate.pageUrl || !p.candidate.slug) return { applied: null, manualAction: null }
+): Promise<{ proposal: MetaCycleProposal | null; manualAction: PriorityAction | null }> {
+  if (!candidate.pageUrl || !candidate.slug) return { proposal: null, manualAction: null }
 
   const meta = await generateMeta({
-    keyword: p.candidate.keyword,
-    pageUrl: p.candidate.pageUrl,
-    searchVolume: p.candidate.searchVolume,
-    keywordDifficulty: p.candidate.keywordDifficulty,
-    position: p.candidate.position,
-    ctr: p.candidate.ctr,
+    keyword: evidence.keyword,
+    pageUrl: candidate.pageUrl,
+    searchVolume: evidence.searchVolume,
+    keywordDifficulty: evidence.keywordDifficulty,
+    position: candidate.position,
+    ctr: candidate.ctr,
     brandVoice: config.brandVoice,
-    competitorTitles,
+    competitorTitles: evidence.competitorTitles,
   })
-  const title = meta.title.slice(0, AI_META_MAX_TITLE)
-  const desc = meta.desc.slice(0, AI_META_MAX_DESC)
-  const evidence = { page_slug: p.candidate.slug, page_url: p.candidate.pageUrl, keyword: p.candidate.keyword }
-  if (!desc) {
-    // AI generation failed (e.g. truncated/malformed JSON — cts-meta-pr.ts's
-    // history, #1792, shows this really happens). Route to the manual board
-    // instead of silently dropping a candidate step 3 already selected.
+  const newTitle = meta.title.slice(0, AI_META_MAX_TITLE)
+  const newDesc = meta.desc.slice(0, AI_META_MAX_DESC)
+  const evidenceMeta = { page_slug: candidate.slug, page_url: candidate.pageUrl, keyword: evidence.keyword }
+
+  if (!newDesc) {
     return {
-      applied: null,
-      manualAction: buildManualAction(`meta_cycle:${weekKey}:${p.candidate.slug}`, evidence, `AI 生成 /${p.candidate.slug} 的新标题/描述失败。`, '需要人工补一个（关键词：' + p.candidate.keyword + '）', undefined),
+      proposal: null,
+      manualAction: buildManualAction(`meta_cycle:${weekKey}:${candidate.slug}`, evidenceMeta, `AI 生成 /${candidate.slug} 的新标题/描述失败。`, `需要人工补一个（关键词：${evidence.keyword}）`, undefined),
     }
   }
+
+  // Preview (dryRun:true) first — need old content BEFORE deciding whether
+  // the fact-check even allows writing anything (PM: "写之前...生成后再做
+  // 一次核对...矛盾→跳过", never write first and check after).
+  let preview: ApplyAdapterResult
+  try {
+    preview = await adapter.apply({ candidate, newTitle, newDesc, weekKey, dryRun: true, evidence })
+  } catch (err) {
+    return { proposal: null, manualAction: buildManualAction(`meta_cycle:${weekKey}:${candidate.slug}`, evidenceMeta, `预览 /${candidate.slug} 的改动失败（${err instanceof Error ? err.message : String(err)}）。`, '需要人工处理', undefined) }
+  }
+  if (preview.skipReason && preview.skipReason !== 'dry_run') {
+    // slug not found in the repo's data files etc — record it, don't silently drop (PM finding #6).
+    return {
+      proposal: { slug: candidate.slug, pageUrl: candidate.pageUrl, keyword: evidence.keyword, searchVolume: evidence.searchVolume, keywordDifficulty: evidence.keywordDifficulty, snapshotDate: evidence.snapshotDate, competitorTitles: evidence.competitorTitles, ctsRankingUrl: evidence.ctsRankingUrl, chosenReason: evidence.chosenReason, oldTitle: '', oldDesc: '', newTitle, newDesc, factCheckConsistent: false, factCheckReason: 'not checked — preview failed first', applied: false, skipReason: preview.skipReason },
+      manualAction: null,
+    }
+  }
+
+  const factCheck = await checkFactPreservation(preview.oldTitle, preview.oldDesc, newTitle, newDesc)
+  const base: MetaCycleProposal = {
+    slug: candidate.slug, pageUrl: candidate.pageUrl, keyword: evidence.keyword,
+    searchVolume: evidence.searchVolume, keywordDifficulty: evidence.keywordDifficulty, snapshotDate: evidence.snapshotDate,
+    competitorTitles: evidence.competitorTitles, ctsRankingUrl: evidence.ctsRankingUrl, chosenReason: evidence.chosenReason,
+    oldTitle: preview.oldTitle, oldDesc: preview.oldDesc, newTitle, newDesc,
+    factCheckConsistent: factCheck.consistent, factCheckReason: factCheck.reason, applied: false,
+  }
+
+  if (!factCheck.consistent) {
+    return {
+      proposal: { ...base, skipReason: 'fact_contradiction_detected' },
+      manualAction: buildManualAction(`meta_cycle:${weekKey}:${candidate.slug}`, evidenceMeta, `AI 判官认为 /${candidate.slug} 的新文案跟原文事实矛盾：${factCheck.reason}`, '需要人工重写', undefined),
+    }
+  }
+
+  if (dryRun) return { proposal: base, manualAction: null }
 
   let applyResult: ApplyAdapterResult
   try {
-    applyResult = await adapter.apply({ candidate: p.candidate, newTitle: title, newDesc: desc, weekKey, dryRun })
+    applyResult = await adapter.apply({ candidate, newTitle, newDesc, weekKey, dryRun: false, evidence })
   } catch (err) {
-    return {
-      applied: null,
-      manualAction: buildManualAction(`meta_cycle:${weekKey}:${p.candidate.slug}`, evidence, `自动改 /${p.candidate.slug} 的标题失败（${err instanceof Error ? err.message : String(err)}）。`, '需要人工处理', undefined),
-    }
+    return { proposal: { ...base, skipReason: 'apply_threw' }, manualAction: buildManualAction(`meta_cycle:${weekKey}:${candidate.slug}`, evidenceMeta, `自动改 /${candidate.slug} 的标题失败（${err instanceof Error ? err.message : String(err)}）。`, '需要人工处理', undefined) }
   }
 
   if (applyResult.applied) {
-    if (!dryRun) {
-      await supabase.from('seo_meta_log').insert({
-        client_id: config.clientId,
-        content_type: 'meta',
-        page_slug: p.candidate.slug,
-        page_url: p.candidate.pageUrl,
-        keyword: p.candidate.keyword,
-        old_title: applyResult.oldTitle,
-        old_desc: applyResult.oldDesc,
-        new_title: applyResult.newTitle,
-        new_desc: applyResult.newDesc,
-        wp_updated: false,
-        applied_channel: adapter.channel,
-        optimised_at: new Date().toISOString(),
-        baseline_ctr: p.candidate.ctr,
-        baseline_position: p.candidate.position,
-        baseline_impressions: p.candidate.impressions,
-        pr_url: applyResult.prUrl ?? null,
-      })
-    }
-    return { applied: { slug: p.candidate.slug, prUrl: applyResult.prUrl }, manualAction: null }
+    await supabase.from('seo_meta_log').insert({
+      client_id: config.clientId, content_type: 'meta', page_slug: candidate.slug, page_url: candidate.pageUrl,
+      keyword: evidence.keyword, old_title: applyResult.oldTitle, old_desc: applyResult.oldDesc,
+      new_title: applyResult.newTitle, new_desc: applyResult.newDesc, wp_updated: false, applied_channel: adapter.channel,
+      optimised_at: new Date().toISOString(), baseline_ctr: candidate.ctr, baseline_position: candidate.position,
+      baseline_impressions: candidate.impressions, pr_url: applyResult.prUrl ?? null,
+    })
+    return { proposal: { ...base, applied: true, prUrl: applyResult.prUrl }, manualAction: null }
   }
 
   if (applyResult.skipReason === 'pr_opened_but_not_merged') {
     return {
-      applied: null,
-      manualAction: buildManualAction(`meta_cycle:${weekKey}:${p.candidate.slug}`, evidence, `/${p.candidate.slug} 的标题改动 PR 已经开了但没合并成功。`, '需要人工去合并', applyResult.prUrl),
+      proposal: { ...base, skipReason: 'pr_opened_but_not_merged', prUrl: applyResult.prUrl },
+      manualAction: buildManualAction(`meta_cycle:${weekKey}:${candidate.slug}`, evidenceMeta, `/${candidate.slug} 的标题改动 PR 已经开了但没合并成功。`, '需要人工去合并', applyResult.prUrl),
     }
   }
-  // other skip reasons (slug_not_in_file, no_slug, pr_already_exists) — nothing to route.
-  return { applied: null, manualAction: null }
+  return { proposal: { ...base, skipReason: applyResult.skipReason ?? 'unknown' }, manualAction: null }
 }
 
 export async function runStep4Applied(
@@ -322,21 +374,19 @@ export async function runStep4Applied(
   adapter: ApplyAdapter,
   config: MetaCycleClientConfig,
   weekKey: string,
-  titleRewrites: MetaCyclePrescription[],
+  passed: Step3Result['passed'],
   generateMeta: GenerateMetaFn,
-  locationCode: number,
   dryRun: boolean,
 ): Promise<Step4Result> {
-  const result: Step4Result = { applied: [], routedManual: 0 }
+  const result: Step4Result = { proposals: [], applied: [], routedManual: 0 }
   const manualActions: PriorityAction[] = []
 
-  // SERP-enrich ONLY the final selected set — spend is exactly bounded by
-  // titleRewrites.length (≤ config.maxPagesPerRun), no cross-client breaker needed.
-  const competitorTitles = await fetchCompetitorTitles(titleRewrites.map((p) => p.candidate), locationCode)
-
-  for (const p of titleRewrites) {
-    const outcome = await applyOnePrescription(supabase, adapter, config, weekKey, p, competitorTitles.get(p.candidate.keyword) ?? [], generateMeta, dryRun)
-    if (outcome.applied) result.applied.push(outcome.applied)
+  for (const { candidate, evidence } of passed) {
+    const outcome = await applyOnePrescription(supabase, adapter, config, weekKey, candidate, evidence, generateMeta, dryRun)
+    if (outcome.proposal) {
+      result.proposals.push(outcome.proposal)
+      if (outcome.proposal.applied) result.applied.push({ slug: outcome.proposal.slug, prUrl: outcome.proposal.prUrl })
+    }
     if (outcome.manualAction) {
       result.routedManual += 1
       manualActions.push(outcome.manualAction)
@@ -354,3 +404,38 @@ export async function runStep4Applied(
 
   return result
 }
+
+// ── Dry run (PM 2026-09-20, incident follow-up): full pipeline, zero writes ──
+
+export interface DryRunResult {
+  checkDue: Step1Result
+  candidateCount: number
+  gateFailures: MetaCycleGateFailure[]
+  proposals: MetaCycleProposal[]
+}
+
+/**
+ * Runs steps 1–4 exactly like a real cycle (including the full gate and
+ * fact-check) but with dryRun:true throughout — no seo_meta_log writes, no
+ * PR opened/merged, no manual-board items persisted. Called directly by
+ * the manual trigger route (POST /api/cron/seo-meta-cycle-trigger with
+ * { dry_run: true }), NOT through Inngest — Inngest's event model is
+ * fire-and-forget, so a dry run that needs to hand its results back in the
+ * same HTTP response has to run inline instead.
+ */
+export async function runDryRunCycle(
+  supabase: SupabaseClient,
+  adapter: ApplyAdapter,
+  config: MetaCycleClientConfig,
+  weekKey: string,
+  generateMeta: GenerateMetaFn,
+): Promise<DryRunResult> {
+  const checkDue = await runStep1CheckDue(supabase, adapter, config, weekKey, true)
+  const { candidates } = await runStep2CandidatesReady(supabase, config)
+  const { passed, failures } = await runStep3Gate(supabase, config, candidates)
+  const step4 = await runStep4Applied(supabase, adapter, config, weekKey, passed, generateMeta, true)
+
+  return { checkDue, candidateCount: candidates.length, gateFailures: failures, proposals: step4.proposals }
+}
+
+export { GATE_REASON }

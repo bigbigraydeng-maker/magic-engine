@@ -34,7 +34,6 @@ describe('classifyMetaChangeOutcome — real GSC decimal CTR scale (PM 2026-09-2
   function baselineFromRealGscRow(ctr: number, impressions: number): MetaCycleBaseline {
     const [candidate] = fromGscPages(
       [{ page: 'https://example.com/blog/rotorua-tours', position: 8, impressions, ctr }],
-      [{ query: 'rotorua tours', impressions }],
     )
     return { ctr: candidate.ctr, position: candidate.position, impressions: candidate.impressions }
   }
