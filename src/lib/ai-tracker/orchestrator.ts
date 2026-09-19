@@ -59,6 +59,7 @@ interface ClientRow {
   id: string
   name: string
   domain: string | null
+  brand_aliases: string[] | null
 }
 
 interface BriefRow {
@@ -116,6 +117,8 @@ export async function runTracker(
       queries,
       clientId: client.id,
       brandName,
+      clientDomain: client.domain,
+      clientAliases: client.brand_aliases,
       result,
     })
     console.log(`[runTracker] Engine ${engine} completed: succeeded=${result.runs_succeeded}, failed=${result.runs_failed}`)
@@ -151,7 +154,7 @@ async function loadClientContext(
 ): Promise<{ client: ClientRow; brandName: string }> {
   const { data: client, error } = await supabaseAdmin
     .from('clients')
-    .select('id, name, domain')
+    .select('id, name, domain, brand_aliases')
     .eq('id', clientId)
     .single<ClientRow>()
 
@@ -198,6 +201,8 @@ interface EngineLaneInput {
   queries: AiVisibilityQuery[]
   clientId: string
   brandName: string
+  clientDomain: string | null
+  clientAliases: string[] | null
   result: RunTrackerResult
 }
 
@@ -206,7 +211,7 @@ interface EngineLaneInput {
  * Add delay between batches to prevent rate limiting on both runner and parser calls.
  */
 async function runEngineLane(input: EngineLaneInput): Promise<void> {
-  const { engine, queries, clientId, brandName, result } = input
+  const { engine, queries, clientId, brandName, clientDomain, clientAliases, result } = input
 
   console.log(`[runEngineLane] ${engine}: starting with ${queries.length} queries, batch size = ${PER_ENGINE_BATCH_SIZE}`)
 
@@ -218,7 +223,9 @@ async function runEngineLane(input: EngineLaneInput): Promise<void> {
     await Promise.all(
       batch.map(q => {
         console.log(`[runEngineLane] ${engine}: processing query ${q.id}`)
-        return processOne({ engine, query: q, clientId, brandName, result })
+        return processOne({
+          engine, query: q, clientId, brandName, clientDomain, clientAliases, result,
+        })
       })
     )
     const batchElapsed = Date.now() - startBatch
@@ -241,6 +248,8 @@ interface ProcessOneInput {
   query: AiVisibilityQuery
   clientId: string
   brandName: string
+  clientDomain: string | null
+  clientAliases: string[] | null
   result: RunTrackerResult
 }
 
@@ -249,7 +258,7 @@ interface ProcessOneInput {
  * Catches all errors so one failure doesn't kill the whole pass.
  */
 async function processOne(input: ProcessOneInput): Promise<void> {
-  const { engine, query, clientId, brandName, result } = input
+  const { engine, query, clientId, brandName, clientDomain, clientAliases, result } = input
   const market: MarketTag = (query.market_tag ?? 'au-nz') as MarketTag
 
   try {
@@ -311,6 +320,8 @@ async function processOne(input: ProcessOneInput): Promise<void> {
       const parsed = await parseRanking({
         rawResponse: runnerOut.raw_response,
         clientBrandName: brandName,
+        clientDomain,
+        clientAliases,
       })
       brands = parsed.brands
       clientBrandRank = parsed.client_brand_rank
