@@ -32,22 +32,58 @@
  *      template never included it — a template omission, not a failed call.
  *      Fixed by threading MetaCycleGateEvidence through to the PR body (see
  *      apply-adapter.ts).
+ *
+ * PM 2026-09-20, second follow-up (after the fixed gate's first real dry run
+ * against W38's 9 candidates surfaced 3 more gaps, none of them wrong writes
+ * — the gate correctly blocked everything, but blocked too eagerly or too
+ * late):
+ *   4. 7 of 9 candidates hit keyword_snapshot_missing_or_stale — the weekly
+ *      snapshot job only tracks each client's ~200 currently-RANKED
+ *      keywords (snapshotRankedKeywordsForClient), so a page-scoped GSC
+ *      query this gate just derived is very often not in that set yet.
+ *      Fixed: checkKeywordSnapshot() now falls back to ONE live DataForSEO
+ *      call per candidate when the snapshot is missing/stale — labs.ts's
+ *      bulkKeywordVolume (keyword_overview/live, fixed 2026-08-26, see that
+ *      function's header — NOT search-volume.ts's getSearchVolume, which
+ *      doesn't return difficulty at all). PM's hard rule (2026-09-20, third
+ *      pass): search volume AND difficulty must BOTH be present, from
+ *      either source — a partial live result (e.g. volume but no
+ *      difficulty) is exactly as unusable as no result, and must be
+ *      skipped with reason keyword_data_unavailable, never let through with
+ *      a null/assumed difficulty. A thrown lookup error (including
+ *      DataForSeoTaskError) is caught and turned into the same skip — never
+ *      swallowed into a silent "continue as if it passed".
+ *   5. The forbidden-city-travel-guide candidate burned a full gate run
+ *      (GSC + DataForSEO + SERP) before failing in apply-adapter.ts with
+ *      skipReason:'slug_not_in_any_data_file' — a check that was always
+ *      going to fail regardless of what the gate found. Fixed: ApplyAdapter
+ *      now exposes canEditSlug(), checked FIRST in runStep3Gate (runner.ts)
+ *      before any live call.
+ *   6. The leshan-giant-buddha page's highest-impression on-topic query was
+ *      the French "leshan au départ de chengdu" — CTS's audience is NZ
+ *      English readers. Fixed: deriveTopicMatchedKeyword() now filters
+ *      on-topic queries to ASCII-only (isEnglishQuery) before ranking by
+ *      impressions, so it naturally falls through to the page's own
+ *      next-best English query instead of borrowing a non-English one.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchGscQueriesForPage } from '@/lib/gsc/client'
 import { getSerpPage } from '@/lib/dataforseo/serp'
+import { bulkKeywordVolume } from '@/lib/dataforseo/labs'
+import { locationCodeForDb } from '@/lib/seo-intelligence/keyword-snapshots'
 import type { MetaCycleCandidate, MetaCycleClientConfig, MetaCycleGateEvidence, MetaCycleGateFailure } from './types'
 
 export const GATE_REASON = {
   NO_PAGE_SCOPED_KEYWORD: 'no_page_scoped_keyword_match',
-  SNAPSHOT_MISSING_OR_STALE: 'keyword_snapshot_missing_or_stale',
+  KEYWORD_DATA_UNAVAILABLE: 'keyword_data_unavailable',
   KEYWORD_REUSED: 'keyword_reused_by_another_page_90d',
   SERP_SELF_CANNIBALIZATION: 'serp_shows_different_own_page_ranking',
   DIFFICULTY_TOO_HIGH: 'difficulty_above_floor',
+  SLUG_NOT_EDITABLE: 'slug_not_in_any_data_file',
 } as const
 
-/** Same floor action-mapping.ts used pre-gate — kept as part of the gate now that difficulty is a hard-required field, not a best-effort one. */
+/** Difficulty floor — only enforced when a difficulty number is actually known (see checkKeywordSnapshot's live-fallback path, which can legitimately return keywordDifficulty: null). */
 export const SKIP_DIFFICULTY_FLOOR = 70
 
 const KEYWORD_SNAPSHOT_MAX_AGE_DAYS = 14
@@ -65,6 +101,21 @@ function coreTopicToken(slug: string): string | null {
   const tokens = slug.split('-').filter((t) => t.length > 3)
   if (tokens.length === 0) return null
   return tokens.reduce((longest, t) => (t.length > longest.length ? t : longest), tokens[0])
+}
+
+/**
+ * PM 2026-09-20 (data-completeness follow-up): CTS's audience is NZ English
+ * readers (see reference-cts-target-customer-mainstream-nz memory) — a GSC
+ * query in another language must never become the target keyword, even if
+ * it's this page's highest-impression on-topic query. e.g. leshan-... page's
+ * top query was the French "leshan au départ de chengdu". ASCII-only is a
+ * blunt but sufficient filter: it catches accented Latin (French/Spanish/
+ * German/Vietnamese) and any non-Latin script, at the cost of rejecting the
+ * rare genuinely-English query that happens to contain a loanword written
+ * with a diacritic — an acceptable false-skip, never a false-accept.
+ */
+function isEnglishQuery(query: string): boolean {
+  return !/[^\x00-\x7F]/.test(query)
 }
 
 /**
@@ -91,11 +142,15 @@ export async function deriveTopicMatchedKeyword(
     return fail(`GSC returned no page-scoped queries for ${candidate.pageUrl} — cannot verify topic match`)
   }
 
-  const onTopic = rows
-    .filter((r) => typeof r.query === 'string' && r.query.toLowerCase().includes(coreToken))
+  const onTopicRows = rows.filter((r): r is typeof r & { query: string } => typeof r.query === 'string' && r.query.toLowerCase().includes(coreToken))
+  const onTopic = onTopicRows
+    .filter((r) => isEnglishQuery(r.query))
     .sort((a, b) => b.impressions - a.impressions)[0]
 
   if (!onTopic || typeof onTopic.query !== 'string') {
+    if (onTopicRows.length > 0) {
+      return fail(`this page's on-topic GSC queries are all non-English (highest-impression example: "${onTopicRows[0].query}") — NZ audience requires an English target keyword, refusing to use it`)
+    }
     return fail(`none of this page's own GSC queries contain its core topic word "${coreToken}" — refusing to borrow a query from another page`)
   }
 
@@ -103,13 +158,37 @@ export async function deriveTopicMatchedKeyword(
 }
 
 /**
- * Step 2: search volume + difficulty MUST come from a fresh (≤14 day)
- * keyword_snapshots row — a hard requirement, not a best-effort fill.
+ * Step 2: search volume + difficulty, preferring a fresh (≤14 day)
+ * keyword_snapshots row. PM 2026-09-20 (W38 dry-run follow-up): the weekly
+ * snapshot job only tracks each client's ~200 currently-RANKED keywords
+ * (snapshotRankedKeywordsForClient → getRankedKeywords) — a page-scoped GSC
+ * query the gate just derived is very often NOT in that set yet (7 of 9 W38
+ * dry-run candidates hit exactly this). Previously that meant an automatic
+ * skip. Now: fall back to ONE live DataForSEO call for this single keyword —
+ * labs.ts's bulkKeywordVolume (keyword_overview/live, fixed 2026-08-26 — see
+ * its header comment), which returns BOTH search_volume and
+ * keyword_properties.keyword_difficulty in one call, unlike
+ * search-volume.ts's getSearchVolume (volume only, no difficulty at all —
+ * do not use it here). This call happens at most once per candidate the
+ * gate actually reaches (bounded by the step-3 wide pool,
+ * config.maxPagesPerRun*3 — e.g. ≤9 for CTS's maxPagesPerRun=3), since each
+ * candidate resolves to exactly one target keyword before this function is
+ * ever called.
+ *
+ * 🔴 PM's hard rule (2026-09-20, third pass): search volume AND difficulty
+ *    must BOTH be present — a live result with volume but no difficulty is
+ *    exactly as unusable as no result at all, and is skipped with
+ *    keyword_data_unavailable, same as a total miss. This is deliberately
+ *    NOT the same shape as root cause #2 of the original incident (`?? 0`
+ *    silently treating "unknown" as "definitely safe") — here "unknown"
+ *    always means "skip", never "assume safe" and never "assume unsafe
+ *    enough to allow through with a gap".
  */
 export async function checkKeywordSnapshot(
   supabase: SupabaseClient,
   clientId: string,
   keyword: string,
+  locationCode: number,
 ): Promise<{ searchVolume: number; keywordDifficulty: number; snapshotDate: string } | { failure: string }> {
   const { data, error } = await supabase
     .from('keyword_snapshots')
@@ -122,17 +201,28 @@ export async function checkKeywordSnapshot(
 
   if (error) return { failure: `keyword_snapshots lookup failed: ${error.message}` }
   const row = data as { search_volume: number | null; keyword_difficulty: number | null; snapshot_date: string } | null
-  if (!row) return { failure: `no keyword_snapshots row for "${keyword}"` }
 
-  const ageDays = (Date.now() - new Date(row.snapshot_date).getTime()) / 86_400_000
-  if (ageDays > KEYWORD_SNAPSHOT_MAX_AGE_DAYS) {
-    return { failure: `keyword_snapshots row for "${keyword}" is ${Math.round(ageDays)} days old (floor ${KEYWORD_SNAPSHOT_MAX_AGE_DAYS})` }
-  }
-  if (row.search_volume === null || row.keyword_difficulty === null) {
-    return { failure: `keyword_snapshots row for "${keyword}" is missing search_volume or keyword_difficulty` }
+  if (row) {
+    const ageDays = (Date.now() - new Date(row.snapshot_date).getTime()) / 86_400_000
+    const fresh = ageDays <= KEYWORD_SNAPSHOT_MAX_AGE_DAYS
+    if (fresh && row.search_volume !== null && row.keyword_difficulty !== null) {
+      return { searchVolume: row.search_volume, keywordDifficulty: row.keyword_difficulty, snapshotDate: row.snapshot_date }
+    }
   }
 
-  return { searchVolume: row.search_volume, keywordDifficulty: row.keyword_difficulty, snapshotDate: row.snapshot_date }
+  let live: Awaited<ReturnType<typeof bulkKeywordVolume>>
+  try {
+    live = await bulkKeywordVolume([keyword], locationCode)
+  } catch (err) {
+    return { failure: `no fresh keyword_snapshots row for "${keyword}", and the live DataForSEO lookup threw: ${err instanceof Error ? err.message : String(err)}` }
+  }
+
+  const liveResult = live[0]
+  if (!liveResult || liveResult.search_volume === null || liveResult.keyword_difficulty === null) {
+    return { failure: `no fresh keyword_snapshots row for "${keyword}", and the live DataForSEO lookup is missing search_volume and/or keyword_difficulty` }
+  }
+
+  return { searchVolume: liveResult.search_volume, keywordDifficulty: liveResult.keyword_difficulty, snapshotDate: new Date().toISOString().slice(0, 10) }
 }
 
 /** Step 3: the SAME keyword must not have been assigned to a DIFFERENT page in the last 90 days (excludes reverted rows — those were never a real, standing assignment). */
@@ -232,8 +322,9 @@ export async function runGateForCandidate(
   if ('failure' in topicResult) return topicResult.failure
   const { keyword } = topicResult
 
-  const snapshotResult = await checkKeywordSnapshot(supabase, config.clientId, keyword)
-  if ('failure' in snapshotResult) return { candidate, reason: GATE_REASON.SNAPSHOT_MISSING_OR_STALE, detail: snapshotResult.failure }
+  const locationCode = locationCodeForDb(config.semrushDb)
+  const snapshotResult = await checkKeywordSnapshot(supabase, config.clientId, keyword, locationCode)
+  if ('failure' in snapshotResult) return { candidate, reason: GATE_REASON.KEYWORD_DATA_UNAVAILABLE, detail: snapshotResult.failure }
 
   if (snapshotResult.keywordDifficulty > SKIP_DIFFICULTY_FLOOR) {
     return { candidate, reason: GATE_REASON.DIFFICULTY_TOO_HIGH, detail: `difficulty ${snapshotResult.keywordDifficulty} > ${SKIP_DIFFICULTY_FLOOR} for "${keyword}"` }

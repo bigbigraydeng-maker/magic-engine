@@ -61,6 +61,7 @@ function fakeSupabase(insertSpy: (row: InsertedRow) => void) {
 function fakeAdapter(realApplyResult: { applied: boolean; skipReason?: string }): ApplyAdapter {
   return {
     channel: 'pr',
+    canEditSlug: async () => true,
     apply: async ({ dryRun, newTitle, newDesc }): Promise<ApplyAdapterResult> => {
       if (dryRun) {
         return { applied: false, newTitle, newDesc, oldTitle: 'Old Title', oldDesc: 'Old desc', skipReason: 'dry_run' }
@@ -135,7 +136,7 @@ describe('runStep4Applied — baseline_ctr reaches the seo_meta_log insert (fixe
     const applySpy = vi.fn(async ({ dryRun, newTitle, newDesc }: { dryRun: boolean; newTitle: string; newDesc: string }) => ({
       applied: false, newTitle, newDesc, oldTitle: 'Old Title', oldDesc: 'Old desc', skipReason: 'dry_run',
     }))
-    const adapter: ApplyAdapter = { channel: 'pr', apply: applySpy }
+    const adapter: ApplyAdapter = { channel: 'pr', canEditSlug: async () => true, apply: applySpy }
     const generateMeta = vi.fn().mockResolvedValue({ title: 'New Title', desc: 'New desc' })
 
     const result = await runStep4Applied(supabase, adapter, CONFIG, '2026-W38', [{ candidate: candidate(), evidence: EVIDENCE }], generateMeta, true)

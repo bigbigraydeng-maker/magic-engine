@@ -60,7 +60,7 @@ function buildPrBody(slug: string, keyword: string, oldTitle: string, newTitle: 
   return [
     `### /${slug}`,
     `目标词:「${keyword}」`,
-    `- 搜索量: ${evidence.searchVolume}/月 · 难度: ${evidence.keywordDifficulty}/100（keyword_snapshots 快照日期 ${evidence.snapshotDate}）`,
+    `- 搜索量: ${evidence.searchVolume}/月 · 难度: ${evidence.keywordDifficulty}/100（数据日期 ${evidence.snapshotDate}）`,
     `- 本页在 SERP 里的排名 URL: ${evidence.ctsRankingUrl ?? '（这次 SERP 结果里没查到本站排这个词）'}`,
     `- 对手前 3 名标题:`,
     competitors,
@@ -153,6 +153,12 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
 
   return {
     channel: 'pr',
+
+    async canEditSlug(slug) {
+      if (!slug) return false
+      const index = await ensureIndex()
+      return index.has(slug)
+    },
 
     async apply({ candidate, newTitle, newDesc, weekKey, dryRun, evidence }) {
       if (!candidate.slug) {

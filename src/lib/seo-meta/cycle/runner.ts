@@ -217,6 +217,7 @@ export interface Step3Result {
 
 export async function runStep3Gate(
   supabase: SupabaseClient,
+  adapter: ApplyAdapter,
   config: MetaCycleClientConfig,
   candidates: MetaCycleCandidate[],
 ): Promise<Step3Result> {
@@ -232,6 +233,17 @@ export async function runStep3Gate(
   const failures: MetaCycleGateFailure[] = []
   for (const candidate of candidates) {
     if (passed.length >= config.maxPagesPerRun) break // enough good candidates found — stop spending on SERP/GSC calls for the rest of the wide pool
+
+    // PM 2026-09-20 (data-completeness follow-up): check this FIRST, before
+    // any GSC/DataForSEO/SERP spend — a page with no matching editable data
+    // file (e.g. forbidden-city-travel-guide) used to only be discovered in
+    // step 4's apply() call, after the entire gate had already run on it.
+    const editable = await adapter.canEditSlug(candidate.slug)
+    if (!editable) {
+      failures.push({ candidate, reason: GATE_REASON.SLUG_NOT_EDITABLE, detail: `slug "${candidate.slug}" not found in any editable data file — skipped before any DataForSEO/GSC spend` })
+      continue
+    }
+
     const result = await runGateForCandidate(supabase, config, candidate, siteUrl)
     if ('evidence' in result) passed.push({ candidate: result.candidate, evidence: result.evidence })
     else failures.push(result)
@@ -432,7 +444,7 @@ export async function runDryRunCycle(
 ): Promise<DryRunResult> {
   const checkDue = await runStep1CheckDue(supabase, adapter, config, weekKey, true)
   const { candidates } = await runStep2CandidatesReady(supabase, config)
-  const { passed, failures } = await runStep3Gate(supabase, config, candidates)
+  const { passed, failures } = await runStep3Gate(supabase, adapter, config, candidates)
   const step4 = await runStep4Applied(supabase, adapter, config, weekKey, passed, generateMeta, true)
 
   return { checkDue, candidateCount: candidates.length, gateFailures: failures, proposals: step4.proposals }

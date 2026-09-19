@@ -65,6 +65,7 @@ export type MetaCycleActionType = 'title_rewrite' | 'skip'
  */
 export interface MetaCycleGateEvidence {
   keyword: string
+  /** Search volume AND difficulty are both hard requirements — gate.ts's checkKeywordSnapshot only returns success when neither is null (PM 2026-09-20, third pass: a partial result is treated the same as no result, never coerced or let through with a gap). */
   searchVolume: number
   keywordDifficulty: number
   snapshotDate: string
@@ -125,6 +126,17 @@ export interface ApplyAdapterResult {
 
 export interface ApplyAdapter {
   readonly channel: 'pr' | 'wp_plugin'
+  /**
+   * Cheap pre-check: is this slug backed by an editable data file at all?
+   * PM 2026-09-20 (data-completeness follow-up): this used to only be
+   * discovered in step 4's apply() call, AFTER the gate had already spent a
+   * live GSC query, a keyword_snapshots/DataForSEO lookup, and a live SERP
+   * call on the candidate. Calling this FIRST (step 3, before the gate)
+   * means an unreachable page (e.g. forbidden-city-travel-guide, which has
+   * no matching src/lib/data file in the CTS repo) is skipped for free.
+   * No network/DB writes; safe to call before dryRun is even decided.
+   */
+  canEditSlug(slug: string | null): Promise<boolean>
   /**
    * Apply a new title/desc for one candidate. Must be a no-op (no
    * network/DB writes) when dryRun is true. `applied: true` means the
