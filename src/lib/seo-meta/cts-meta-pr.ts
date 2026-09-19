@@ -250,7 +250,7 @@ Respond ONLY with valid JSON: {"title":"...","desc":"..."}`,
 // ── Runner ──────────────────────────────────────────────────────────────────────
 
 export interface CtsMetaPrResult {
-  outcome: 'pr_opened' | 'no_candidates' | 'no_connection' | 'nothing_editable' | 'error'
+  outcome: 'pr_merged' | 'pr_opened' | 'no_candidates' | 'no_connection' | 'nothing_editable' | 'error'
   pr_url?: string
   pages?: Array<{ slug: string; keyword: string }>
   /** Per-candidate audit trail (slug → which step it stopped at). */
@@ -402,10 +402,14 @@ export async function runCtsMetaPr(
 
     const pr = await github.createPullRequest(repoOwner, repoName, {
       title: `[Magic Engine] SEO 标题优化 ×${applied.length}`,
-      body: `${body}\n\n> 巡逻发现这些页面排名在 4-20 名但标题点击力不足。只改了 meta 数据文件里的标题/摘要字符串（blog 的标题和摘要同时是页面可见文案，正是点击力要改的东西）。构建检查通过后合并即生效。`,
+      body: `${body}\n\n> 巡逻发现这些页面排名在 4-20 名但标题点击力不足。只改了 meta 数据文件里的标题/摘要字符串（blog 的标题和摘要同时是页面可见文案，正是点击力要改的东西）。`,
       head: prBranch,
       base: defaultBranch,
     })
+
+    // Auto-merge immediately — only changes meta title/desc, no review needed.
+    // If blocked by pending CI the PR stays open; next week's run is independent.
+    const merged = await github.mergePullRequest(repoOwner, repoName, pr.number)
 
     // 5. Audit log (drives cooldown + weekly report 自动改动 column)
     const rows = applied.map((a) => ({
@@ -425,7 +429,7 @@ export async function runCtsMetaPr(
     if (logErr) console.error('[cts-meta-pr] log insert failed:', logErr.message)
 
     return {
-      outcome: 'pr_opened',
+      outcome: merged ? 'pr_merged' : 'pr_opened',
       pr_url: pr.html_url ?? undefined,
       pages: applied.map((a) => ({ slug: a.candidate.slug, keyword: a.candidate.keyword })),
       attempts,
