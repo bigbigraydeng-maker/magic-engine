@@ -46,7 +46,7 @@ import { detectSensitivity, type Sensitivity } from './sensitivity'
  * update，每个调用点传入的列清单都跟对应表的真实列逐一核对一致（见本 PR 描述的
  * 探针记录）。
  */
-function asRows<T>(data: unknown): T[] {
+export function asRows<T>(data: unknown): T[] {
   return (data ?? []) as unknown as T[]
 }
 
@@ -457,7 +457,7 @@ export interface ExtractedCandidate {
 // from callClaudeChat's real usage).
 const SONNET_PRICE_INPUT_PER_M_USD = 3.0
 const SONNET_PRICE_OUTPUT_PER_M_USD = 15.0
-const EXTRACTION_MAX_OUTPUT_TOKENS = 800
+export const EXTRACTION_MAX_OUTPUT_TOKENS = 800
 
 /**
  * Conservative worst-case cost of ONE extraction call, computed from the
@@ -612,7 +612,7 @@ async function fetchExistingCandidateFacts(clientId: string): Promise<ExistingCa
  * request_id would always fail, so the only way to actually retry is to
  * reuse the existing row's id.
  */
-async function upsertRunRow(reclaimId: string | null, fields: Record<string, unknown>): Promise<string | null> {
+export async function upsertRunRow(reclaimId: string | null, fields: Record<string, unknown>): Promise<string | null> {
   if (reclaimId) {
     const { error } = await supabaseAdmin.from('client_knowledge_mining_runs').update(fields).eq('id', reclaimId)
     if (error) throw new Error(`upsertRunRow: reclaim update failed for run ${reclaimId}: ${error.message}`)
@@ -635,7 +635,7 @@ async function fetchWatermark(clientId: string): Promise<string | null> {
   return asRows<PriorRunRow>(data)[0]?.high_watermark_at ?? null
 }
 
-async function fetchConversationIds(clientId: string): Promise<string[]> {
+export async function fetchConversationIds(clientId: string): Promise<string[]> {
   const ids: string[] = []
   const pageSize = 1000
   for (let offset = 0; ; offset += pageSize) {
@@ -652,8 +652,28 @@ async function fetchConversationIds(clientId: string): Promise<string[]> {
   return ids
 }
 
-/** Reads up to `maxMessages` messages (both directions, for pairing) since `sinceIso`, paginated past PostgREST's default row cap. */
-async function fetchMessagesSince(
+// 🔴 2026-09-15，issue #1760 首次真拿 CTS 真实数据（722 段对话）跑
+// `runStylePatternMining` 时实测撞到的真问题：`.in('conversation_id', ...)`
+// 把全部 conversationId 一次性塞进一个请求，722 个 UUID 拼出的 querystring
+// 超过了 PostgREST/反代的请求体积上限，直接 400 Bad Request——不是这次新写的
+// `style-mining.ts` 的 bug，是 `fetchMessagesSince` 这个 `mining.ts` 原有的
+// 共享读取函数从来没在这个规模的真实客户上跑过；`runKnowledgeMining`（issue
+// #1645 的事实萃取，已上线）用的是同一个函数，同样会在 CTS 这个规模上炸。
+// 按 conversationId 分批查询修复，两个调用方都受益，不是本次顺手夹带的额外
+// 范围。
+//
+// 200 是经验安全值（UUID 36 字符 + 逗号分隔，200 个约 7.4KB），不是从
+// PostgREST/反代实际请求体积上限精确算出来的——留了余量，不是精确边界。
+const CONVERSATION_ID_CHUNK_SIZE = 200
+
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = []
+  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size))
+  return chunks
+}
+
+/** Reads up to `maxMessages` messages (both directions, for pairing) since `sinceIso`, paginated past PostgREST's default row cap AND chunked past its request-size cap on the `.in()` filter. */
+export async function fetchMessagesSince(
   conversationIds: string[],
   sinceIso: string | null,
   maxMessages: number,
@@ -661,28 +681,52 @@ async function fetchMessagesSince(
   if (conversationIds.length === 0) return []
   const collected: RawMessage[] = []
   const pageSize = 1000
-  for (let offset = 0; collected.length < maxMessages; offset += pageSize) {
-    let query = supabaseAdmin
-      .from('conversation_messages')
-      .select('conversation_id, direction, body, sent_at')
-      .in('conversation_id', conversationIds)
-      .order('sent_at', { ascending: true })
-      .range(offset, offset + pageSize - 1)
-    if (sinceIso) query = query.gt('sent_at', sinceIso)
-    const { data, error } = await query
-    if (error) throw new Error(`fetchMessagesSince: read failed: ${error.message}`)
-    const rows = asRows<MessageRow>(data)
-    for (const row of rows) {
-      if (!row.body) continue
-      collected.push({
-        body: row.body,
-        sentAt: row.sent_at,
-        direction: row.direction,
-        conversationId: row.conversation_id,
-      })
+  for (const idChunk of chunkArray(conversationIds, CONVERSATION_ID_CHUNK_SIZE)) {
+    // 🔴 子牙复审 BLOCKER（2026-09-15）：分块之前，外层 `for` 循环本身就是
+    // "collected.length < maxMessages 才继续翻页"——一读够就整体停手。分块
+    // 拆开之后如果把这道提前止损也一起丢了，变成"每个分块都无条件读到底"，
+    // 一个历史消息量远超 maxMessages 的大客户（这次 CTS 722 段/3600 条还看
+    // 不出来，但这个函数是已上线的 runKnowledgeMining 共用的核心读取路径，
+    // 客户体量会持续涨）会被打成读全量——不是等价重构，是真实的性能/成本
+    // 倒退。每个分块各自也遵守同一个 maxMessages 上限，把止损条件下推进
+    // 分块内层循环，而不是彻底删掉。
+    //
+    // 这不是精确的"全局最早 N 条"——分块之间按 conversationId 分组，彼此没有
+    // 时间序关系，最坏情况下总读取量是 `分块数 × maxMessages`，不是精确的
+    // `maxMessages`。跟"读全部历史"比仍然是数量级的改善，跟真正的跨分块
+    // 归并排序比是复杂度换正确性精度的权衡——对 CTS 这次 4 个分块的规模，
+    // 最坏也只是读 4 倍上限，可接受；如果客户体量涨到分块数很多的地步，这个
+    // 权衡需要重新评估（做成真正的多路归并），不是这次的范围。
+    let chunkCollected = 0
+    for (let offset = 0; chunkCollected < maxMessages; offset += pageSize) {
+      let query = supabaseAdmin
+        .from('conversation_messages')
+        .select('conversation_id, direction, body, sent_at')
+        .in('conversation_id', idChunk)
+        .order('sent_at', { ascending: true })
+        .range(offset, offset + pageSize - 1)
+      if (sinceIso) query = query.gt('sent_at', sinceIso)
+      const { data, error } = await query
+      if (error) throw new Error(`fetchMessagesSince: read failed: ${error.message}`)
+      const rows = asRows<MessageRow>(data)
+      for (const row of rows) {
+        if (!row.body) continue
+        collected.push({
+          body: row.body,
+          sentAt: row.sent_at,
+          direction: row.direction,
+          conversationId: row.conversation_id,
+        })
+        chunkCollected += 1
+      }
+      if (rows.length < pageSize) break
     }
-    if (rows.length < pageSize) break
   }
+  // 分批查询丢掉了"单次查询天然按 sent_at 全局有序"这件事——`runKnowledgeMining`
+  // 拿 `messages[messages.length-1].sentAt` 当下一轮增量水位，必须是真正全局
+  // 最新的一条，不能只是"恰好最后处理的那个分片里最新的一条"，所以这里在
+  // 截断到 `maxMessages` 之前先补一次全局排序。
+  collected.sort((a, b) => (a.sentAt < b.sentAt ? -1 : a.sentAt > b.sentAt ? 1 : 0))
   return collected.slice(0, maxMessages)
 }
 
@@ -691,9 +735,9 @@ async function fetchMessagesSince(
 // valid_until — only this write path's own convention), but every mined
 // candidate gets one regardless of sensitivity, matching the design intent
 // that nothing sits un-reviewed indefinitely.
-const DEFAULT_CANDIDATE_VALID_DAYS = 90
+export const DEFAULT_CANDIDATE_VALID_DAYS = 90
 
-interface NewFactRow {
+export interface NewFactRow {
   client_id: string
   fact_key: string
   scope: Record<string, unknown>
@@ -703,7 +747,10 @@ interface NewFactRow {
   visibility: 'internal_only'
   sensitivity: Sensitivity
   valid_until: string
-  source_kind: 'conversation_mining'
+  // `client_knowledge_facts.source_kind` has no CHECK enum on purpose (see
+  // its column comment) — `'conversation_mining_style'` (issue #1760) is a
+  // second, real value it accepts, not a typo of `'conversation_mining'`.
+  source_kind: 'conversation_mining' | 'conversation_mining_style'
   evidence: Record<string, unknown>
   conflict_group_id: string | null
   value_fingerprint: string

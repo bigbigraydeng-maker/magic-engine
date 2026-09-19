@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { guardGlobalAdmin } from '@/lib/auth/require-admin'
 import { loadAdStrategyConfig } from '@/lib/ads-strategy/config'
 
 export const dynamic = 'force-dynamic'
@@ -34,6 +35,14 @@ export async function PATCH(
   const { id: clientId } = params
   const access = await requirePaidClientAccess(clientId)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
+
+  // 改这两项只许内部员工（全局 admin）。2026-09-14 子牙复审 PR #1662 查出：
+  // enabled=false 会让每日广告体检、摘要、广告快照 cron 全部跳过这个客户；
+  // digest_recipients 决定内部摘要发给谁。客户成员能改 = 自己关掉自己的预警、
+  // 把内部摘要改发到任意邮箱。与 #1649 / #1658 同一个坑；客户成员仍可 GET 查看。
+  // 虽然只动单个客户，但属于内部控制项，所以用全局守卫（受限演示管理员也拒）。
+  const staffGuard = await guardGlobalAdmin()
+  if (staffGuard) return staffGuard
 
   let body: { enabled?: unknown; digest_recipients?: unknown }
   try {

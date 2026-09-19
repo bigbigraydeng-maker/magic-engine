@@ -20,6 +20,108 @@ import { CrmTabs } from '../_components/CrmTabs'
 import { ComposeNote, type StageOption } from '../_components/ComposeNote'
 import { DncBanner } from '../_components/DncBanner'
 
+/**
+ * New Asian Logistics——同一个字面量在 `nal-messenger-lead-sync-run.ts`/
+ * `nal-mark-won/route.ts` 各自声明一份是既有惯例（跟 CTS_CLIENT_ID 一样）。
+ * 只有这一个客户在工作台里把联系人标"已成交"会顺带触发回传 Meta 广告转化 API——
+ * 见 `nal-crm-won-to-capi-design-v1.md`：CTS 的成交回传走的是另一条独立通道
+ * （Google 表格同步），不能让这里的改动波及它。
+ */
+const NAL_CLIENT_ID = '4ae76381-cd45-43bd-85cd-98cfd7604007'
+
+/**
+ * NAL 专属：标已成交时弹出的金额/到账日期录入。
+ *
+ * 幂等键在挂载时生成一次、整个提交生命周期复用（照抄 `ComposeNote` 同一个理由：
+ * 双击/网络重试要复用同一个键，在点击那一刻才生成的话每次点击都是新键，
+ * 重复提交就挡不住了）。
+ */
+function MarkWonPanel({
+  contactId,
+  onDone,
+  onCancel,
+}: {
+  contactId: string
+  /** 第二个参数 = 要不要顺手重拉列表；失败时传 false。 */
+  onDone: (msg: string, reload?: boolean) => void
+  onCancel: () => void
+}) {
+  const [amount, setAmount] = useState('')
+  const [occurredAt, setOccurredAt] = useState(() => new Date().toISOString().slice(0, 10))
+  const [busy, setBusy] = useState(false)
+  const [idempotencyKey] = useState(() => crypto.randomUUID())
+
+  const submit = async () => {
+    const amountMajor = Number(amount)
+    if (!amountMajor || amountMajor <= 0) {
+      onDone('请填一个大于 0 的金额', false)
+      return
+    }
+    setBusy(true)
+    try {
+      const res = await fetch('/api/admin/conversions/nal-mark-won', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contactId,
+          amountMajor,
+          occurredAt: new Date(occurredAt).toISOString(),
+          idempotencyKey,
+        }),
+      })
+      const body = (await res.json()) as { message?: string; error?: string }
+      if (!res.ok) {
+        onDone(`没记上：${body.error ?? '出错了'}`, false)
+        return
+      }
+      onDone(body.message ?? '记好了', true)
+    } catch {
+      onDone('没记上，再试一次', false)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-me-ochre/25 bg-me-gold/10 p-3" onClick={(e) => e.stopPropagation()}>
+      <div className="text-xs font-bold text-me-charcoal">这笔生意多少钱？（到账后再回传给广告平台）</div>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-me-charcoal/50">NZD $</span>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="金额"
+            className="w-28 rounded-lg border border-me-stone bg-white px-2 py-1.5 text-sm text-me-charcoal focus:border-me-ochre focus:outline-none"
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-me-charcoal/50">到账日期</span>
+          <input
+            type="date"
+            value={occurredAt}
+            onChange={(e) => setOccurredAt(e.target.value)}
+            className="rounded-lg border border-me-stone bg-white px-2 py-1.5 text-sm text-me-charcoal focus:border-me-ochre focus:outline-none"
+          />
+        </div>
+        <button
+          disabled={busy}
+          onClick={() => void submit()}
+          className="rounded-lg bg-me-charcoal px-3 py-1.5 text-xs font-black text-white disabled:opacity-50"
+        >
+          {busy ? '记录中…' : '确认已成交'}
+        </button>
+        <button onClick={onCancel} className="rounded-lg border border-me-stone px-3 py-1.5 text-xs font-semibold text-me-charcoal">
+          取消
+        </button>
+      </div>
+    </div>
+  )
+}
+
 interface ContactRow {
   contactId: string
   name: string
@@ -218,6 +320,7 @@ function ContactDetail({
   const [composing, setComposing] = useState(false)
   const [changingStage, setChangingStage] = useState(false)
   const [showAll, setShowAll] = useState(false)
+  const [markingWon, setMarkingWon] = useState(false)
 
   const changeStage = async (toStage: string, label: string) => {
     if (!window.confirm(`现在：${row.stageLabel ?? '还没标到哪一步'} → 改成「${label}」？`)) return
@@ -332,13 +435,35 @@ function ContactDetail({
             .map((s) => (
               <button
                 key={s.stageKey}
-                onClick={() => void changeStage(s.stageKey, s.label)}
+                onClick={() => {
+                  // NAL + "已成交"档：不是简单改个状态字，还要录金额、顺带回传
+                  // 广告平台——弹金额面板，不走普通的"改到哪步"确认框。
+                  // 见 nal-crm-won-to-capi-design-v1.md：只对 NAL 生效，CTS 走
+                  // 另一条独立的成交回传通道（Google 表格同步），不能碰这里。
+                  if (clientId === NAL_CLIENT_ID && s.marketingAction === 'won') {
+                    setChangingStage(false)
+                    setMarkingWon(true)
+                    return
+                  }
+                  void changeStage(s.stageKey, s.label)
+                }}
                 className="rounded-full bg-me-ivory px-3 py-1.5 text-xs font-bold text-me-charcoal"
               >
                 {s.label}
               </button>
             ))}
         </div>
+      )}
+
+      {markingWon && (
+        <MarkWonPanel
+          contactId={row.contactId}
+          onCancel={() => setMarkingWon(false)}
+          onDone={(msg, reload) => {
+            setMarkingWon(false)
+            onWrote(msg, reload)
+          }}
+        />
       )}
 
       {composing && (
@@ -402,7 +527,11 @@ export default function CrmAllContactsPage() {
       setTotal(json.totalContacts ?? 0)
       if (stageRes.ok) {
         const s = (await stageRes.json()) as { stages?: StageOption[] }
-        setStages((s.stages ?? []).map((x) => ({ stageKey: x.stageKey, label: x.label })))
+        // marketingAction 之前被这里的映射漏掉了——NAL"标已成交"要靠它判断该弹
+        // 金额面板还是走普通改状态，没有它这条判断永远是 false（2026-09-15 修）。
+        setStages(
+          (s.stages ?? []).map((x) => ({ stageKey: x.stageKey, label: x.label, marketingAction: x.marketingAction })),
+        )
       }
     } catch {
       setError('加载失败，检查网络后再试。')

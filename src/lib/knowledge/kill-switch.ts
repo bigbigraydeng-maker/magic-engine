@@ -38,6 +38,13 @@ export interface StopAiRepliesResult {
   auditWarning: string | null
 }
 
+export interface ResumeAiRepliesResult {
+  /** true = the switch is now on. Audit-write failures are reported separately, never by pretending the switch didn't move. */
+  resumed: boolean
+  /** Non-null when the switch flipped but the append-only audit event could not be written. */
+  auditWarning: string | null
+}
+
 /**
  * Turn every channel of this client's automatic AI replying off, and record
  * who did it in the append-only `client_knowledge_events` stream.
@@ -86,6 +93,58 @@ export async function stopAiRepliesForClient(
     stopped: true,
     auditWarning: event.error
       ? `AI 回复已经停了，但这次操作没能记进日志：${event.error.message ?? '未知错误'}`
+      : null,
+  }
+}
+
+/**
+ * `stopAiRepliesForClient` 的对称操作——把同一对开关重新打开。
+ *
+ * 🔴 为什么这个函数存在：门户「紧急全渠道停」面板（issue #1589）原来只有
+ * 停用按钮，文案却写着「重新打开需要回到这里手动开」——但代码库里翻遍也
+ * 没有任何地方把这两列写回 `true`（Codex 复审 2026-09-15 抓到）。一个只能
+ * 往一个方向拨的「开关」不是真的开关：真出现误触发或者情况已经处理完，
+ * 团队除了直接改数据库别无办法。这里照抄 `stopAiRepliesForClient` 的顺序
+ * 和审计写法，只把值换成 `true`/`'on'`，不引入新的状态机。
+ */
+export async function resumeAiRepliesForClient(
+  sb: KnowledgeWriteClient,
+  params: { clientId: string; actorEmail: string; reason?: string; source?: string },
+): Promise<ResumeAiRepliesResult> {
+  const actorEmail = params.actorEmail.trim()
+  if (!actorEmail) throw new KnowledgeKillSwitchError('缺少操作人身份，拒绝改动 AI 回复开关')
+
+  const flip = await sb
+    .from('clients')
+    .update({
+      messenger_agent_enabled_messenger: true,
+      messenger_agent_enabled_whatsapp: true,
+    })
+    .eq('id', params.clientId)
+    .select('id')
+  if (flip.error) {
+    throw new KnowledgeKillSwitchError(`重新打开 AI 回复失败：${flip.error.message ?? '未知错误'}`)
+  }
+  if (asRows<{ id: string }>(flip.data).length === 0) {
+    throw new KnowledgeKillSwitchError('没有找到这个客户，AI 回复开关没有被改动。')
+  }
+
+  const event = await sb
+    .from('client_knowledge_events')
+    .insert({
+      client_id: params.clientId,
+      dimension: 'kill_switch',
+      value: 'on',
+      reason: params.reason?.trim() || null,
+      actor_email: actorEmail,
+      payload: { source: params.source ?? 'unknown' },
+    })
+    .select('id')
+
+  return {
+    resumed: true,
+    auditWarning: event.error
+      ? `AI 回复已经重新打开，但这次操作没能记进日志：${event.error.message ?? '未知错误'}`
       : null,
   }
 }

@@ -58,6 +58,7 @@ import { LeadNotifyEmailsPanel } from './_components/LeadNotifyEmailsPanel'
 import { DomainRulesPanel } from './_components/DomainRulesPanel'
 import { PipelineStagesPanel } from './_components/PipelineStagesPanel'
 import { CommentAuditList } from './_components/CommentAuditList'
+import { MessengerEmergencyStopPanel } from './_components/MessengerEmergencyStopPanel'
 import {
   SettingsSection,
   SettingsTabBar,
@@ -77,7 +78,25 @@ const ERROR_MESSAGES: Record<string, string> = {
  * **必须是一个函数、按 tab 分支返回**，不能把五组都渲染出来再用 CSS 藏 ——
  * 藏起来的板块照样会挂载、照样会发请求，那就白改了。
  */
-function TabBody({ tab, clientId }: { tab: SettingsTab; clientId: string }) {
+/**
+ * 授权/连接回跳时，本来就是来看「成没成」的那一块——默认展开，
+ * 不用先点开才看得到结果（其余板块照旧默认收起，见 SettingsSection）。
+ */
+interface ConnectCallbacks {
+  mail: boolean
+  gbp: boolean
+  oauth: boolean
+}
+
+function TabBody({
+  tab,
+  clientId,
+  callbacks,
+}: {
+  tab: SettingsTab
+  clientId: string
+  callbacks: ConnectCallbacks
+}) {
   switch (tab) {
     case 'connect':
       return (
@@ -85,25 +104,25 @@ function TabBody({ tab, clientId }: { tab: SettingsTab; clientId: string }) {
           <SettingsSection first icon="🚦" title="真客户 / 调研档案">
             <ClientStatusPanel clientId={clientId} />
           </SettingsSection>
-          <SettingsSection icon="✉️" title="公司邮箱（客人发来的信）">
+          <SettingsSection icon="✉️" title="公司邮箱（客人发来的信）" defaultOpen={callbacks.mail}>
             <MailboxPanel clientId={clientId} />
           </SettingsSection>
-          <SettingsSection icon="📍" title="Google Business Profile">
+          <SettingsSection icon="📍" title="Google Business Profile" defaultOpen={callbacks.gbp}>
             <GbpPanel clientId={clientId} />
           </SettingsSection>
-          <SettingsSection icon="🏪" title="发到哪一家门店">
+          <SettingsSection icon="🏪" title="发到哪一家门店" defaultOpen={callbacks.gbp}>
             <GbpLocationPanel clientId={clientId} />
           </SettingsSection>
-          <SettingsSection icon="🔎" title="Google Search Console">
+          <SettingsSection icon="🔎" title="Google Search Console" defaultOpen={callbacks.oauth}>
             <GscPanel clientId={clientId} />
             <div className="mt-3"><GscPropertyPanel clientId={clientId} /></div>
             <div className="mt-3"><DataSnapshotPanel anchor="gsc" clientId={clientId} /></div>
           </SettingsSection>
-          <SettingsSection icon="📈" title="Google Analytics 4">
+          <SettingsSection icon="📈" title="Google Analytics 4" defaultOpen={callbacks.oauth}>
             <Ga4Panel clientId={clientId} />
             <div className="mt-3"><DataSnapshotPanel anchor="ga4" clientId={clientId} /></div>
           </SettingsSection>
-          <SettingsSection icon="📊" title="同步哪一个 GA4 Property">
+          <SettingsSection icon="📊" title="同步哪一个 GA4 Property" defaultOpen={callbacks.oauth}>
             <Ga4PropertyPanel clientId={clientId} />
           </SettingsSection>
           <SettingsSection icon="📢" title="Google Ads">
@@ -199,9 +218,14 @@ function TabBody({ tab, clientId }: { tab: SettingsTab; clientId: string }) {
 
     case 'advanced':
       return (
-        <SettingsSection first icon="🔌" title="MCP API 访问">
-          <ApiKeysPanel clientId={clientId} />
-        </SettingsSection>
+        <>
+          <SettingsSection first icon="🔌" title="MCP API 访问">
+            <ApiKeysPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🚨" title="AI 客服自动回复 · 紧急全渠道停">
+            <MessengerEmergencyStopPanel clientId={clientId} />
+          </SettingsSection>
+        </>
       )
   }
 }
@@ -217,6 +241,9 @@ export default function ClientSettingsPage() {
   // GSC/GA4 合并授权（/api/auth/google/callback）回跳带的是 ?oauth=，不是
   // ?gbp=——PR5 复审发现这条错误提示之前直接消失了，补上一个通用版本。
   const oauthStatus = searchParams.get('oauth')
+  // 邮箱授权回跳（见 MailboxPanel）——用它来判断该默认展开哪一块，不用来
+  // 渲染横幅（那条横幅在 MailboxPanel 自己里面）。
+  const mailStatus = searchParams.get('mail')
 
   const errorMessage =
     gbpStatus === 'error' ? (ERROR_MESSAGES[gbpReason] ?? '连接过程中发生未知错误，请重试。') : null
@@ -306,7 +333,11 @@ export default function ClientSettingsPage() {
         <SettingsTabBar active={tab} onPick={pickTab} />
 
         <div className="mt-6">
-          <TabBody tab={tab} clientId={clientId} />
+          <TabBody
+            tab={tab}
+            clientId={clientId}
+            callbacks={{ mail: mailStatus !== null, gbp: gbpStatus !== null, oauth: oauthStatus !== null }}
+          />
         </div>
       </div>
     </div>

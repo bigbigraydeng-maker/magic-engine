@@ -36,6 +36,12 @@ export type SourceKind =
    * 区别只在于一个读结构化表格、一个读非结构化对话。
    */
   | 'messenger_conversation'
+  /**
+   * 员工在 ME 客户管理工作台里把联系人手动推进到"已成交"档位时录入（NAL，
+   * 2026-09-15）。跟 `messenger_conversation` 区分开：那个是规则自动判断的咨询，
+   * 这个是人已经确认过金额的成交，可信度更高，以后要按来源筛问题记录时不能混在一起。
+   */
+  | 'crm_stage_manual'
 
 export const OUTCOME_KINDS: readonly OutcomeKind[] = ['purchase', 'balance', 'lead']
 export const SOURCE_KINDS: readonly SourceKind[] = [
@@ -47,6 +53,7 @@ export const SOURCE_KINDS: readonly SourceKind[] = [
   'crm_hubspot',
   'crm_sheet_sync',
   'messenger_conversation',
+  'crm_stage_manual',
 ]
 
 /**
@@ -57,8 +64,10 @@ export const SOURCE_KINDS: readonly SourceKind[] = [
  */
 export type ActionSource = 'email' | 'business_messaging'
 
+const MESSENGER_SOURCED: ReadonlySet<SourceKind> = new Set(['messenger_conversation', 'crm_stage_manual'])
+
 export function actionSourceForSourceKind(sourceKind: SourceKind): ActionSource {
-  return sourceKind === 'messenger_conversation' ? 'business_messaging' : 'email'
+  return MESSENGER_SOURCED.has(sourceKind) ? 'business_messaging' : 'email'
 }
 
 export type IntakeInput = {

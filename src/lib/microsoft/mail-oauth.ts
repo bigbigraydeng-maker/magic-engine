@@ -18,18 +18,28 @@
  * 登录一下」。第一条要解释什么是租户管理员、什么是应用权限 —— 按铁律 3，
  * 一个需要解释的人工步骤等于没做好。
  *
- * ## 权限只要四个
- *  · Mail.Read      —— 读进来的信（这次要做的）
- *  · Mail.Send      —— 以后从 CRM 里回信（现在不用，但一起要掉，省得让客户
- *                      再点第二次同意；Microsoft 只给「本次要过」的权限）
+ * ## 权限要五个
+ *  · Mail.Read      —— 读进来的信
+ *  · Mail.ReadWrite —— **2026-09-15 补**：从 CRM 回信要先建一份回复草稿
+ *                      （`createReply`），这个动作在 Graph 眼里是「新建一个
+ *                      邮件对象」，跟「读信」是两件事——只给 `Mail.Send` 不够，
+ *                      真邮箱一测会在建草稿这一步直接收到 403（第三方复审
+ *                      机器人在 PR #1714 抓到，写代码时漏查了 Graph 权限表）。
+ *                      `Mail.Send` 管的只是「把已经建好的草稿发出去」那一步。
+ *  · Mail.Send      —— 把草稿发出去
  *  · User.Read      —— 只为问一句「刚才登录的是哪个邮箱」。Graph 的 `/me`
  *                      认的是这个权限，`Mail.Read` 不管用 —— 少了它换令牌会
  *                      成功、读地址却 403，连接卡在「连上了但读不到邮箱地址」
  *                      （2026-08-02 CTS 实测踩到）
  *  · offline_access —— 换取刷新令牌。漏掉它，一小时后就断，且断得很安静
  *
- * 不要 Mail.ReadWrite：读信不需要改客户的邮箱，多要的每一分权限都是以后
- * 出事时说不清楚的地方。
+ * ⚠️ 这份清单一改，**已经连过的邮箱（目前只有 CTS）不会自动拿到新权限**——
+ * 刷新令牌走的是同一个 `scope` 列表（见 token-manager.ts 的
+ * `refreshMicrosoftToken`），但刷新本身换不来一个从没同意过的新权限，
+ * 必须重新走一次登录同意。这次改动上线前跟 PM 报备过：CTS 的邮件**读取**
+ * 不受影响（`Mail.Read` 没变），只是「回信」这个新功能在 CTS 重新连接之前
+ * 用不了；这个功能第一个真实客户是 NAL，NAL 还没连过，第一次连就是新权限，
+ * 不受影响。
  *
  * ## 有些公司的 Microsoft 365 不让员工自己同意
  *
@@ -50,6 +60,7 @@ export const MICROSOFT_MAIL_SCOPES = [
   'offline_access',
   'https://graph.microsoft.com/User.Read',
   'https://graph.microsoft.com/Mail.Read',
+  'https://graph.microsoft.com/Mail.ReadWrite',
   'https://graph.microsoft.com/Mail.Send',
 ] as const
 

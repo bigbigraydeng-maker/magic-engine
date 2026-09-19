@@ -215,6 +215,35 @@ PM 反馈「太平静」「一堆照片的串联」「这不是爆款短视频�
 
 ---
 
+### D8 · 只靠 fact_key 命名约定传递"这条事实是什么类型"，写入侧没有任何强制，等于没有契约
+
+**背景（issue #1579/#1580，CTS Verifier v3 改接客户知识库，子牙+魏征复审 2026-09-15 共同指出）**：`client_knowledge_facts.visibility='forbidden'` 的事实，`getClientKnowledge()` 在任何用途下都不返回正文（`statement`/`structured_value`），只把 `fact_key` 报给调用方——这是刻意设计（防止连 Verifier 的调试日志/人工复核界面都意外泄露"这个下架产品叫什么、为什么下架"）。`src/lib/messenger-agent/verifier/policies/cts.ts` 因此把"能不能识别这个 fact_key 对应哪个产品"的全部信息编码进 `fact_key` 命名约定本身（`tour.active.<code>` / `tour.retired.<code>[.alias.<slug>]`）。
+
+**问题**：这套命名约定**只存在于 `cts.ts` 的注释里**，负责写入知识库的两条路径都不知道、也不检查它——萃取工作流（issue #1645）的抽取 prompt 是刻意行业中立的通用 prompt（不该、也不会知道"CTS 团要叫 `tour.retired.xxx`"这种客户专属规则）；FDE 审核页（issue #1646）只是"批准/改后批准/驳回"已经产出的候选，UI 上没有任何地方提示格式要求。这意味着如果录入时 `fact_key` 拼错前缀（比如打成 `tours.retired.xxx` 或 `tour.retire.xxx`），这条记录会在 Verifier 的所有闸门里**静默隐形**——不报错、不告警，只是从此在 gate 2/3/5/7 里都"不存在"，跟这个功能要解决的原始事故（下架团被当成在售报给客户）是同一种失败模式，只是换了个失效点。
+
+**怎么防（当下已做的最小止血 + 真正要做的）**：
+1. 已做：`parseActiveProductFact`/`extractForbiddenProductSlugs` 对"看起来想写 `tour.*` 但拼错前缀"的情况打 `console.warn`（只能覆盖"还是 `tour.` 开头但后半段拼错"这类典型笔误，不是穷尽校验）。
+2. **未做、已开 issue 跟进**（[#1726](https://github.com/bigbigraydeng-maker/magic-engine/issues/1726)，P3）：任何"某个模块靠 `fact_key`/字符串命名约定传递业务语义"的设计，如果写入这张表的路径不止一个、且其中至少一个路径是通用/跨客户的（本例是行业中立的 LLM 抽取 prompt），就不能只在读取侧的注释里定契约——要么在 FDE 审核页加格式校验/提示，要么在心跳监控里加"有多少条记录的 fact_key 不匹配任何已知命名约定"这类可观测统计，把"静默不生效"变成"看得见的数据质量问题"。
+3. 上线前的 T-14d dry-run（design doc `~/.claude/plans/cts-tours-messenger-dynamic-pearl.md` 的验证计划）必须包含至少一条走完整"萃取 → 审核批准 → Verifier 核验"链路的真实数据用例，而不是只用手写的、已经跟约定对齐好的测试 fixture 自证闭环。
+
+---
+
+### D9 · Meta 视频广告"投放位置"留默认自动 + 优化目标是"看完成本最低"，预算会被系统自动导向 Audience Network 奖励视频，数据看起来很好但都是假信号 🔴
+
+**背景（2026-09-16，CTS 两个账户 7 天数据深挖发现）**：CTS 两条以"看完视频"为目标（`optimization_goal=THRUPLAY`）的广告——个人账户 `ThruPlay - NZ - Reels`（广告组 `120248221094190307`）、官方账户 `GC 顶层 · ThruPlay · 4 条各 $10`（广告组 `52549857906273`）——建的时候"投放位置"都没有手动设置（`targeting.publisher_platforms` 为空 = 留给系统"自动版位"）。实测两条广告过去 7 天分别有 **95%（$77.45/$81.38）和 97%（$308.99/$317.01）的花费与曝光，全部落在 `audience_network/rewarded_video`（Audience Network 奖励视频——用户在第三方手游里为换游戏内奖励被迫看完广告的场景，不是 Facebook/Instagram 版位）**，完播率高达 97%–99%，但这是"被迫看完换奖励"造成的假信号，不代表真实兴趣。
+
+**根因**：`optimization_goal=THRUPLAY`（"用最低成本换看完次数"）+ 投放位置留自动 = 系统会自动找全网最便宜的"看完"来源，Audience Network 奖励视频正是这类库存里最便宜、完播率必然接近 100% 的一种（用户是被游戏奖励机制"绑住"看完的，不是被内容打动）。这两个因素任一单独存在都不必然出问题（比如只做留资/私信优化目标的广告组，同账户里几乎不受影响——参照组数据显示留资类广告 97%+ 花费落在真实 FB/IG 版位），必须两者叠加才会触发。
+
+**连带影响**：从这两条被污染广告的视频建立的自定义受众（再营销/相似受众的种子池）同样被污染——CTS 官方账户的"GC 北京+上海视频看完95%"受众（`52551117275273`，用于 9/13 上线的收割 A/B 测试）**规则里的两条视频 100% 来自被污染的官方账户广告**；更大范围的"看过任意 CTS 视频 50%"受众（16 条视频的规则）里也有至少 5 条视频来自被污染的个人账户 ThruPlay 系列。这些受众建成后曾被当作"证明内容爆款"的证据引用过（已知的"13,000+ 人看完 95%"表述曾被指出是重复观看而非独立触达人数，这次发现的是另一层、更深的问题：即便只看独立触达人数，其中相当一部分本身就不是真实感兴趣的人）。
+
+**怎么防**：
+1. 任何 `optimization_goal` 是纯播放/完播类（THRUPLAY、`video_view` 等，不落地到留资/私信/购买这类真实商业结果）的广告组，建的时候必须显式设置 `targeting.publisher_platforms`，手动排除 `audience_network`（或至少排除 `rewarded_video` 这个具体版位），不能留给"自动版位"。
+2. 建广告组后必须按版位（`breakdowns=publisher_platform,platform_position`）回读一次花费/完播分布，确认没有异常集中在某一个版位——不能只看汇总层面的完播率数字，汇总数字会把一个占 95%+ 花费的坏版位和一堆占比很小的好版位平均成一个"看起来还不错"的数。
+3. 用视频观看数据建自定义受众（再营销/相似受众种子）前，先确认视频来源的广告本身版位健康——被污染广告的观看事件不应该被当作"真实兴趣信号"用来建种子受众。
+4. 已排期的动作：广告引擎（`~/.claude/plans/ads-impact-loop-capability.md`）阶段 1 的诊断表 `ad_entity_snapshots` 已经存了 `targeting_summary`（含版位设置），后续诊断应该加一条"纯播放类优化目标 + 未排除 Audience Network"的规则检测，把这类配置错误自动检出，不必每次靠人工深挖 7 天数据才发现。
+
+---
+
 ## E. 匹配 / 算法逻辑
 
 ### E1 · token equality 漏掉 80% 的多词品牌
@@ -233,6 +262,14 @@ SOP：`docs/sops/brand-aliases-setup-for-gsc.md`。
 
 **怎么防**：`isBusinessRelevantKeyword` 加 `excludedTopics`，**排除检查必须在 business-relevance 之前跑**。
 数据源是 `master_briefs.excluded_topics`，配套 `ExcludedTopicsPanel` UI（符合 D4）。
+
+### E3 · 把整段文本压成一整条 slug 再做子串匹配，句子边界和产品名前缀关系都会制造假阳性
+
+**事故（子牙+魏征复审 2026-09-15 各自独立用真实数据复现，CTS Verifier gate 2 上线前拦下）**：`src/lib/messenger-agent/verifier/policies/cts.ts` 的"下架产品提及"闸门最初把整段回复文本一次性 `slugify` 成一条 kebab-case 字符串，再用 `.includes(禁止slug)` 判断。两个独立复审各自手算出一个会误伤合法回复的真实案例：
+1. **跨句拼接**：句号/换行被当成普通分隔符压扁——"…a full day in Shanghai. Surroundings like Zhouzhuang…" 会拼成 `…shanghai-surroundings-like…`，精确命中一个真实存在的下架团 slug `shanghai-surroundings`，但这两个词分属两句话、语义完全无关。
+2. **产品名前缀关系**：CTS 真实产品线里 `china-icons-collection` 恰好是 `china-icons-collection-christchurch` 的 slug 前缀——如果前者下架、后者仍在售，任何合法提到 Christchurch 那个团的回复都会被子串匹配误判成提到了下架团。
+
+**怎么防**：不要把"一大段自由文本"整体压成一条字符串再做子串匹配——① 先按句子边界切分，只在同一句话内部匹配，避免相邻句子的词被拼在一起；② 用词序列（token 数组）比较而不是字符子串比较，命中后额外检查这次匹配是否其实是某个更长的、合法存在的同类实体（这里是仍在售的产品）名字的前缀延伸，如果是就不算命中。这两条对任何"把一批禁止关键词/黑名单跟一段自由文本做匹配"的场景都适用，不只是这一个 gate。
 
 ---
 

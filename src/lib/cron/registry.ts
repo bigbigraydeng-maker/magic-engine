@@ -117,6 +117,7 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 里跑。留在清单里会天天误报「没跑」——正是这套告警最怕的东西。
   { service: 'mailchimp-activity-daily', jobName: 'mailchimp-activity-sync', schedule: '40 4 * * *', logsRuns: true },
   { service: 'mailchimp-paid-tagging-daily', jobName: 'mailchimp-paid-tagging', schedule: '10 5 * * *', logsRuns: true, addedAt: '2026-09-02' },
+  { service: 'mailchimp-suppression-sync-daily', jobName: 'mailchimp-suppression-sync', schedule: '20 5 * * *', logsRuns: true, addedAt: '2026-09-09' },
   // 补登记（2026-09-05 对账测试抓出）：Magic Insight 每日资讯管道，2026-08-20 就进了 render.yaml，
   // 清单里一直没有。老任务不补 addedAt（理由同上面 ad-readback-sweep-daily 那条）。
   { service: 'market-intel-daily', jobName: 'market-intel-daily', schedule: '0 18 * * *', logsRuns: true },
@@ -208,6 +209,10 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   //    FLYWHEEL_SEO_WEEKLY_CRON，同目录的测试会断言两边一致。抄错的后果是健康检查
   //    按错的周期算逾期 —— 算错的告警和没有告警一样没用。
   { service: 'inngest:cloud-flywheel-seo-weekly-fanout', jobName: 'flywheel-seo-weekly', schedule: '15 5 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-07' },
+  // 🔴 schedule 这一列不许手抄：唯一定义在
+  //    src/lib/inngest/functions/conversion-daily-pipeline.ts 的
+  //    CONVERSION_DAILY_PIPELINE_CRON，抄错的后果同上一条 flywheel 注释。
+  { service: 'inngest:cloud-conversion-daily-pipeline', jobName: 'conversion-daily-pipeline', schedule: '0 6 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-15' },
 ] as const
 
 /**

@@ -9,13 +9,19 @@
  *
  * A Meta outage must never block reading or clearing the binding, so the
  * pick-list degrades to null instead of failing the request.
+ *
+ * AD-SEC-4: writing is internal-staff only and goes through page-binding-service
+ * (its checks are tested in lib/meta/__tests__/page-binding-service.test.ts); the
+ * pick-list and the reason a sync is paused are staff-only on GET.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
 vi.mock('@/lib/auth/client-access', () => ({ requireDashboardClientAccess: vi.fn() }))
-vi.mock('@/lib/auth/require-admin', () => ({ guardGlobalAdmin: vi.fn() }))
+vi.mock('@/lib/auth/require-admin', () => ({ requireGlobalAdmin: vi.fn() }))
+vi.mock('@/lib/meta/page-binding-service', () => ({ bindPage: vi.fn(), clearPage: vi.fn() }))
+vi.mock('@/lib/meta/page-sync-authorization', () => ({ assessPageBinding: vi.fn() }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 vi.mock('@/lib/meta/token-manager', () => ({
   getMetaTokenForClient: vi.fn(),
@@ -26,14 +32,18 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 
 import { GET, PATCH } from '../route'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
-import { guardGlobalAdmin } from '@/lib/auth/require-admin'
-import { NextResponse } from 'next/server'
+import { requireGlobalAdmin } from '@/lib/auth/require-admin'
+import { bindPage, clearPage } from '@/lib/meta/page-binding-service'
+import { assessPageBinding } from '@/lib/meta/page-sync-authorization'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-manager'
 import { listManagedPages } from '@/lib/meta/page-posts'
 
 const mockAccess = vi.mocked(requireDashboardClientAccess)
-const mockStaffGuard = vi.mocked(guardGlobalAdmin)
+const mockStaff = vi.mocked(requireGlobalAdmin)
+const mockBind = vi.mocked(bindPage)
+const mockClear = vi.mocked(clearPage)
+const mockAssess = vi.mocked(assessPageBinding)
 const mockFrom = vi.mocked(supabaseAdmin.from)
 const mockToken = vi.mocked(getMetaTokenForClient)
 const mockStoredToken = vi.mocked(getStoredPageToken)
@@ -59,9 +69,25 @@ function getRequest(): NextRequest {
   return new NextRequest(`http://localhost:3001/api/clients/${CTS}/facebook-page`)
 }
 
+/** Internal staff: global admin (no client restriction). */
 function allow() {
-  // 写操作要内部员工：默认放行，专门的用例再把它改成 403。
-  mockStaffGuard.mockResolvedValue(null)
+  mockStaff.mockResolvedValue({ ok: true, user: { email: 'FDE@magiclab.example ' } } as never)
+  mockAccess.mockResolvedValue({
+    ok: true,
+    user: { email: 'fde@magiclab.example' } as never,
+    role: 'admin',
+    tier: 'admin',
+    allowedClientId: null,
+  } as never)
+  mockBind.mockImplementation(async (_c, _a, pageId) => ({ status: 200, body: { success: true, page_id: pageId } }))
+  mockClear.mockResolvedValue({ status: 200, body: { success: true, page_id: null } })
+  mockAssess.mockResolvedValue({ verified: true, via: 'staff_verified' })
+}
+
+/** A member of the client (paid client staff) — not internal staff. */
+function allowClientMember() {
+  allow()
+  mockStaff.mockResolvedValue({ ok: false, status: 403, error: 'Forbidden' } as never)
   mockAccess.mockResolvedValue({
     ok: true,
     user: { email: 'bdm@ctstours.co.nz' } as never,
@@ -252,28 +278,106 @@ describe('facebook-page — authorisation', () => {
   })
 
   // 🔴 2026-09-14 PR #1658 复审阻断项：客户成员能把主页改成别家的，boost-post / draft /
-  // winner-reel-sync 的主页归属核对就全部失效。
-  it('客户成员（非内部员工）改主页绑定 → 403，一个字都不写', async () => {
-    allow()
-    mockStaffGuard.mockResolvedValue(NextResponse.json({ error: 'Forbidden' }, { status: 403 }))
+  // winner-reel-sync 的主页归属核对就全部失效；AD-SEC-4 又查出它决定私信/线索同步读谁的主页。
+  it('客户成员（非内部员工）改主页绑定 → 403，不进绑定流程、不写审计', async () => {
+    allowClientMember()
     const { update } = stubClients(null)
 
     const res = await PATCH(patchRequest({ page_id: CTS_PAGE }), params(OZTOP))
 
     expect(res.status).toBe(403)
+    expect(mockBind).not.toHaveBeenCalled()
+    expect(mockClear).not.toHaveBeenCalled()
     expect(update).not.toHaveBeenCalled()
   })
 
-  it('客户成员仍然可以查看绑定（GET 不要求内部员工）', async () => {
+  it('客户成员也不能清空绑定', async () => {
+    allowClientMember()
+    const res = await PATCH(patchRequest({ page_id: null }), params())
+    expect(res.status).toBe(403)
+    expect(mockClear).not.toHaveBeenCalled()
+  })
+
+  it('受限管理员（DEMO_ADMINS / scoped）过了客户访问检查，但不是内部员工 → 403', async () => {
     allow()
-    mockStaffGuard.mockResolvedValue(NextResponse.json({ error: 'Forbidden' }, { status: 403 }))
-    stubClients(CTS_PAGE)
+    mockAccess.mockResolvedValue({ ok: true, user: { email: 'demo@x' }, role: 'admin', tier: 'admin', allowedClientId: CTS } as never)
+    mockStaff.mockResolvedValue({ ok: false, status: 403, error: 'Forbidden — scoped admin' } as never)
+
+    const res = await PATCH(patchRequest({ page_id: CTS_PAGE }), params())
+
+    expect(res.status).toBe(403)
+    expect(mockBind).not.toHaveBeenCalled()
+  })
+
+  it('内部员工保存 → 走核实流程，审计人是规范化后的员工邮箱', async () => {
+    allow()
+    stubClients(null)
     mockToken.mockResolvedValue(null)
 
-    const res = await GET(getRequest(), params())
+    const res = await PATCH(patchRequest({ page_id: CTS_PAGE }), params())
 
     expect(res.status).toBe(200)
-    expect(mockStaffGuard).not.toHaveBeenCalled()
+    expect(mockBind).toHaveBeenCalledWith(CTS, 'fde@magiclab.example', CTS_PAGE)
+  })
+
+  it('核实流程拒绝（比如主页绑在别的客户名下）→ 原样返回拒绝，不当成保存成功', async () => {
+    allow()
+    stubClients(null)
+    mockBind.mockResolvedValue({ status: 409, body: { error: '这个主页已经绑在别的客户名下', reason: 'page_bound_to_other_client' } })
+
+    const res = await PATCH(patchRequest({ page_id: CTS_PAGE }), params())
+
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({ reason: 'page_bound_to_other_client' })
+    expect(mockPages).not.toHaveBeenCalled()
+  })
+
+  it('客户成员仍然可以查看绑定（GET 不要求内部员工），但看不到主页列表和暂停原因', async () => {
+    allowClientMember()
+    stubClients(CTS_PAGE)
+    mockToken.mockResolvedValue('shared-token')
+    // Through the shared token this list holds OTHER clients' Pages.
+    mockPages.mockResolvedValue([{ id: CTS_PAGE, name: 'CTS Tours' }, { id: '777777777777', name: 'Another client' }])
+    mockAssess.mockResolvedValue({ verified: false, reason: 'bound_to_other_client', detail: OZTOP })
+
+    const res = await GET(getRequest(), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(mockStaff).not.toHaveBeenCalled()
+    expect(json).toMatchObject({ page_id: CTS_PAGE, pages: null, pages_error: null, can_edit: false, verification: { verified: false } })
+    expect(json.verification).not.toHaveProperty('reason')
+    expect(JSON.stringify(json)).not.toContain('Another client')
+    expect(JSON.stringify(json)).not.toContain(OZTOP)
+  })
+
+  it('员工请求体里不带 page_id → 400，不当成「清空绑定」', async () => {
+    allow()
+    const res = await PATCH(patchRequest({}), params())
+    expect(res.status).toBe(400)
+    expect(mockClear).not.toHaveBeenCalled()
+    expect(mockBind).not.toHaveBeenCalled()
+  })
+
+  it('没有任何 Meta 令牌不算「绑定没核实」—— verification 为 null，界面不标红', async () => {
+    allow()
+    stubClients(CTS_PAGE)
+    mockToken.mockResolvedValue(null)
+    mockAssess.mockResolvedValue({ verified: false, reason: 'no_meta_token' })
+    const json = await (await GET(getRequest(), params())).json()
+    expect(json.verification).toBeNull()
+  })
+
+  it('内部员工 GET 能看到主页列表和暂停原因', async () => {
+    allow()
+    stubClients(CTS_PAGE)
+    mockToken.mockResolvedValue('shared-token')
+    mockPages.mockResolvedValue([{ id: CTS_PAGE, name: 'CTS Tours' }])
+    mockAssess.mockResolvedValue({ verified: false, reason: 'unverified_shared_token' })
+
+    const json = await (await GET(getRequest(), params())).json()
+
+    expect(json).toMatchObject({ can_edit: true, pages: [{ id: CTS_PAGE }], verification: { verified: false, reason: 'unverified_shared_token' } })
   })
 })
 
@@ -286,6 +390,7 @@ describe('facebook-page — what may be stored', () => {
 
     expect(res.status).toBe(400)
     expect(update).not.toHaveBeenCalled()
+    expect(mockBind).not.toHaveBeenCalled()
     expect((await res.json()).error).toContain('数字')
   })
 
@@ -318,7 +423,8 @@ describe('facebook-page — what may be stored', () => {
     const res = await PATCH(patchRequest({ page_id: `  ${CTS_PAGE} ` }), params())
 
     expect(res.status).toBe(200)
-    expect(update).toHaveBeenCalledWith({ facebook_page_id: CTS_PAGE })
+    expect(mockBind).toHaveBeenCalledWith(CTS, expect.any(String), CTS_PAGE)
+    expect(update).not.toHaveBeenCalled() // the route never writes the column itself
   })
 
   it('treats an empty string as "stop syncing this client"', async () => {
@@ -329,7 +435,9 @@ describe('facebook-page — what may be stored', () => {
     const res = await PATCH(patchRequest({ page_id: '' }), params())
 
     expect(res.status).toBe(200)
-    expect(update).toHaveBeenCalledWith({ facebook_page_id: null })
+    expect(mockClear).toHaveBeenCalledWith(CTS, expect.any(String))
+    expect(mockBind).not.toHaveBeenCalled()
+    expect(update).not.toHaveBeenCalled()
     expect(await res.json()).toMatchObject({ page_id: null, reachable: null })
   })
 })
@@ -357,7 +465,8 @@ describe('facebook-page — telling the truth about whether it is live', () => {
 
     const res = await PATCH(patchRequest({ page_id: CTS_PAGE }), params())
 
-    // Saving still succeeds — the binding is legitimate, it just is not live yet.
+    // (With the AD-SEC-4 flow Meta must list the Page for a save to succeed; this
+    // covers the reachable read-back when the save itself was accepted.)
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ success: true, reachable: false })
   })

@@ -33,14 +33,20 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { buildIdentities, resolveContact } from '@/lib/crm/identity'
 import { isOptOutKeyword, recordOptOutKeywordTouch } from '@/lib/messenger-agent/optout'
+import { recordOptOutWriteFailure } from '@/lib/messenger-agent/optout-failures'
 import { inngest } from '@/lib/inngest/client'
-
-/**
- * 渠道无关的会话消息事件（v3 修订，见 issue #1582）—— Messenger 和 WhatsApp 两个
- * webhook 都 emit 这同一个事件名，靠 payload 里的 `channel` 字段区分，不是靠事件名。
- * 事件名字符串必须跟 Messenger webhook（issue #1581）那边完全一致，改这里务必同步改那边。
- */
-const CONVERSATION_MESSAGE_RECEIVED_EVENT = 'conversation/message.received' as const
+// 🔴 魏征复审（2026-09-15）实测发现：这里原来自己重新声明一份同名字符串常量，
+// 而不是 import 共享契约模块 `@/lib/conversations/events.ts` 的
+// `CONVERSATION_MESSAGE_RECEIVED_EVENT` —— 那份契约模块自己的文件头就警告过
+// "改这个字符串前必须先跟 WhatsApp 那条线的实现对齐"，而这条实现的 payload
+// 形状（`body`/`occurred_at`）跟契约模块要求的 `ConversationMessageReceivedSchema`
+// （要求 `sent_at`，没有 `body`）实际上早就对不上——这条不一致因为事件名字符串
+// 本身没变而完全没被发现，直到 F1（issue #1584）第一次真的去解析这个事件才
+// 实测出来：每一条 WhatsApp 消息都会被判定成 payload 不合法，静默丢弹。
+// 改成直接 import 契约模块本身，让 TypeScript 在编译期就能看到两边共用同一个
+// 字符串常量；payload 形状也改成跟 `ConversationMessageReceivedSchema` 完全
+// 一致（见下面 emit 调用处）。
+import { CONVERSATION_MESSAGE_RECEIVED_EVENT } from '@/lib/conversations/events'
 
 export const dynamic = 'force-dynamic'
 
@@ -425,10 +431,33 @@ async function storeMessage(
             `[webhooks/whatsapp] 写 conversations.optout_unlinked 失败（会话 ${conversationId}）:`,
             unlinkedErr.message,
           )
+          // 心跳检查（issue #1587）要能看到这次失败——否则会被误判成
+          // 「没人退订、一切正常」。
+          await recordOptOutWriteFailure(
+            {
+              clientId,
+              channel: 'whatsapp',
+              conversationId,
+              contactId: null,
+              errorMessage: unlinkedErr.message,
+            },
+            supabaseAdmin,
+          )
         }
       }
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
       console.error(`[webhooks/whatsapp] 退订触点写入失败（消息已入库）:`, err)
+      await recordOptOutWriteFailure(
+        {
+          clientId,
+          channel: 'whatsapp',
+          conversationId,
+          contactId: contactId ?? null,
+          errorMessage: message,
+        },
+        supabaseAdmin,
+      )
     }
   }
 
@@ -446,8 +475,7 @@ async function storeMessage(
         contact_id: contactId,
         message_id: msg.id,
         direction: 'inbound',
-        body: messageBody(msg),
-        occurred_at: sentAt,
+        sent_at: sentAt,
       },
     })
   } catch (err) {

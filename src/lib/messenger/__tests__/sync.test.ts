@@ -13,23 +13,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
-vi.mock('@/lib/meta/token-manager', () => ({
-  getMetaTokenForClient: vi.fn(),
-  getStoredPageToken: vi.fn(),
-}))
-vi.mock('@/lib/meta/page-posts', () => ({ getPageAccessToken: vi.fn() }))
+// Which Page token (and whether the Page is this client's at all) is decided by
+// the sync gate — its rules are tested in lib/meta/__tests__/page-sync-authorization.test.ts,
+// and the real gate wired into this sync in sync-page-gate.test.ts.
+vi.mock('@/lib/meta/page-sync-authorization', () => ({ authorizePageSync: vi.fn() }))
 vi.mock('@/lib/meta/conversations', () => ({ fetchPageConversations: vi.fn() }))
 
 import { syncClientMessenger } from '../sync'
 import { supabaseAdmin } from '@/lib/supabase'
-import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-manager'
-import { getPageAccessToken } from '@/lib/meta/page-posts'
+import { authorizePageSync } from '@/lib/meta/page-sync-authorization'
 import { fetchPageConversations } from '@/lib/meta/conversations'
 
 const mockFrom = vi.mocked(supabaseAdmin.from)
-const mockUserToken = vi.mocked(getMetaTokenForClient)
-const mockStoredToken = vi.mocked(getStoredPageToken)
-const mockPageToken = vi.mocked(getPageAccessToken)
+const mockAuth = vi.mocked(authorizePageSync)
 const mockFetch = vi.mocked(fetchPageConversations)
 
 const CLIENT = { id: 'c0000000-0000-0000-0000-000000000000', name: 'CTS Tours NZ', facebook_page_id: '1616575215312482' }
@@ -148,11 +144,8 @@ function convo(lastDirection: 'inbound' | 'outbound') {
 
 beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => {})
-  // Default: no stored connection, so existing cases keep exercising the
-  // env-var path they were written for.
-  mockStoredToken.mockResolvedValue(null)
-  mockUserToken.mockResolvedValue('user-tok')
-  mockPageToken.mockResolvedValue('page-tok')
+  // Default: the gate lets this Page through with a derived Page token.
+  mockAuth.mockResolvedValue({ ok: true, pageToken: 'page-tok', via: 'legacy_client_token' })
   mockFetch.mockResolvedValue([])
 })
 
@@ -166,25 +159,39 @@ describe('syncClientMessenger — opt-in gating', () => {
     const res = await syncClientMessenger({ ...CLIENT, facebook_page_id: null })
 
     expect(res.skipped).toBe('no_page_id')
-    expect(mockUserToken).not.toHaveBeenCalled()
+    expect(mockAuth).not.toHaveBeenCalled()
     expect(mockFetch).not.toHaveBeenCalled()
   })
 
   it('skips when the client has no Meta token', async () => {
-    mockUserToken.mockResolvedValue(null)
+    mockAuth.mockResolvedValue({ ok: false, skipped: 'no_meta_token' })
 
     const res = await syncClientMessenger(CLIENT)
 
     expect(res.skipped).toBe('no_meta_token')
+    expect(res.error).toBeUndefined()
     expect(mockFetch).not.toHaveBeenCalled()
   })
 
   it('skips when the token does not manage that Page', async () => {
-    mockPageToken.mockResolvedValue(null)
+    mockAuth.mockResolvedValue({ ok: false, skipped: 'no_page_token' })
 
     const res = await syncClientMessenger(CLIENT)
 
     expect(res.skipped).toBe('no_page_token')
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it('AD-SEC-4: a Page not verified as this client\'s is never read, and the run reports it as an error', async () => {
+    mockAuth.mockResolvedValue({ ok: false, skipped: 'page_not_verified', reason: 'unverified_shared_token' })
+
+    const res = await syncClientMessenger(CLIENT)
+
+    expect(mockAuth).toHaveBeenCalledWith(expect.anything(), CLIENT.id, CLIENT.facebook_page_id, expect.anything())
+    expect(res.skipped).toBe('page_not_verified')
+    // error, not just skipped: the hourly run counts errors as failed, so a paused
+    // inbox cannot look like a quiet hour.
+    expect(res.error).toBe('page_not_verified: unverified_shared_token')
     expect(mockFetch).not.toHaveBeenCalled()
   })
 })
@@ -338,39 +345,13 @@ describe('syncClientMessenger — resilience', () => {
   })
 })
 
-/**
- * The whole point of the "连接 Meta" button: a stored Page token must be used
- * in preference to deriving one from an env-var user token, and the old path
- * must keep working for clients configured that way (CTS).
- */
-describe('syncClientMessenger — where the Page token comes from', () => {
-  it('uses the stored connection and never touches the env-var path', async () => {
+describe('syncClientMessenger — uses the Page token the gate hands back', () => {
+  it('reads the inbox with exactly that token', async () => {
     stubSupabase({ watermarkRow: null })
-    mockStoredToken.mockResolvedValue('stored-page-tok')
+    mockAuth.mockResolvedValue({ ok: true, pageToken: 'stored-page-tok', via: 'client_oauth' })
 
     await syncClientMessenger(CLIENT)
 
-    expect(mockUserToken).not.toHaveBeenCalled()
-    expect(mockPageToken).not.toHaveBeenCalled()
     expect(mockFetch).toHaveBeenCalledWith(CLIENT.facebook_page_id, 'stored-page-tok', undefined)
-  })
-
-  it('falls back to the env-var path when nothing is stored', async () => {
-    stubSupabase({ watermarkRow: null })
-    mockStoredToken.mockResolvedValue(null)
-
-    await syncClientMessenger(CLIENT)
-
-    expect(mockPageToken).toHaveBeenCalled()
-    expect(mockFetch).toHaveBeenCalledWith(CLIENT.facebook_page_id, 'page-tok', undefined)
-  })
-
-  it('still reports no_page_token when neither source yields one', async () => {
-    mockStoredToken.mockResolvedValue(null)
-    mockPageToken.mockResolvedValue(null)
-
-    const res = await syncClientMessenger(CLIENT)
-
-    expect(res.skipped).toBe('no_page_token')
   })
 })

@@ -141,7 +141,7 @@ services:
   - type: cron
     name: prospecting-sweep
     env: node
-    schedule: "*/30 * * * *"
+    schedule: "0 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
@@ -223,10 +223,11 @@ services:
   # plenty. Avoids Cloudflare 524 timeout that killed previous sync runs.
   # Reference: ROADMAP.md P7.4.13
   # healthchecks.io: ai-tracker-weekly (c4f101fe-c2cf-47f9-807f-08ea09d43934)
+  # Schedule moved from Mon 01:00 UTC to Sun 18:00 UTC = Mon 06:00 NZST (PM decision 2026-09-16: NZ morning window).
   - type: cron
     name: ai-tracker-weekly
     env: node
-    schedule: "0 1 * * 1"
+    schedule: "0 18 * * 0"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 30 -H "Authorization: Bearer $CRON_SECRET" \
@@ -236,17 +237,18 @@ services:
       - key: CRON_SECRET
         sync: false
 
-  # Daily Industry AI Visibility Archive — every day at 2:30am UTC (~2:30pm NZST)
+  # Daily Industry AI Visibility Archive — every day at 16:30 UTC (~4:30am NZST)
   # Runs all 10+ industry questions × 3 platforms (ChatGPT / Google AI Overview /
   # Google SERP), upserts one snapshot per (question, platform, collected_date).
   # PM decision 2026-06-04: daily (not weekly) — only daily granularity captures
   # brand churn within the week. Cost ~$0.06/day for 10 seed questions.
   # Migration 20260622000003 enabled daily UNIQUE constraint.
+  # Schedule moved from 02:30 UTC to 16:30 UTC (PM decision 2026-09-16: run in NZ morning window so data is ready on wake-up).
   # healthchecks.io: industry-ai-visibility-daily (1400fe83-cc62-4634-9f7e-a2345553beee)
   - type: cron
     name: industry-ai-visibility-daily
     env: node
-    schedule: "30 2 * * *"
+    schedule: "30 16 * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 600 -H "Authorization: Bearer $CRON_SECRET" \
@@ -257,14 +259,15 @@ services:
         sync: false
 
   # Phase 31 A2.1-γ — Goal current_value refresh
-  # Daily 03:00 UTC (~15:00 NZST), runs AFTER industry-ai-visibility-daily (02:30 UTC)
+  # Daily 17:30 UTC (~5:30am NZST), runs AFTER industry-ai-visibility-daily (16:30 UTC)
   # so ai_visibility_score Goals read today's snapshots (not yesterday's).
   # Spec: docs/superpowers/specs/2026-06-04-a21-stepc-design-v3.md (v3.1)
+  # Schedule moved from 03:00 UTC to 17:30 UTC (PM decision 2026-09-16: NZ morning window).
   # healthchecks.io: goal-current-value-refresh (300bb7f9-8a16-4a72-b9eb-a924dc76efa8)
   - type: cron
     name: goal-current-value-refresh
     env: node
-    schedule: "0 3 * * *"
+    schedule: "30 17 * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
@@ -349,11 +352,12 @@ services:
   # Daily Google data pullback — every day at 3am UTC (~3pm NZST)
   # Syncs GSC + GA4 snapshots for all clients with connected Google connectors.
   # Reference: ROADMAP.md P17.A.4
+  # Schedule moved from 03:00 UTC to 17:00 UTC (PM decision 2026-09-16: NZ morning window; runs 30 min after industry-ai-visibility-daily).
   # healthchecks.io: google-data-pullback-daily (12f3c5c4-4524-48b8-92c5-72fd2b775d01)
   - type: cron
     name: google-data-pullback-daily
     env: node
-    schedule: "0 3 * * *"
+    schedule: "0 17 * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
@@ -806,7 +810,7 @@ services:
   - type: cron
     name: social-comment-autoreply
     env: node
-    schedule: "*/30 * * * *"
+    schedule: "0 * * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
@@ -972,7 +976,7 @@ services:
   - type: cron
     name: meta-leads-hourly
     env: node
-    schedule: "25 * * * *"
+    schedule: "25 */2 * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
@@ -1013,7 +1017,7 @@ services:
   - type: cron
     name: ad-entity-snapshot
     env: node
-    schedule: "30 */3 * * *"
+    schedule: "30 */6 * * *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
@@ -1079,6 +1083,30 @@ services:
     startCommand: |
       curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/mailchimp-paid-tagging
+    envVars:
+      - fromGroup: me-shared-cron-secret
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # CRM「不感兴趣/别再联系」→ Mailchimp `suppressed_do_not_email` 标签。
+  #
+  # 跟上面 paid-tagging 同一个思路的另一档：CRM 早就知道这件事（lib/crm/dnc.ts
+  # 的 isDoNotContact + segments.ts 的 DEAD_OUTCOMES），但从没同步进 Mailchimp。
+  # 2026-09-08 CTS newsletter 排期会话实测：26 个 CRM 判过的联系人里，6 个当时
+  # 在 Mailchimp 仍是订阅状态、没打抑制标签——下一封群发邮件本来会发给他们。
+  #
+  # 只加标签，不摘——解除抑制必须是人工确认后的动作，不属于这条 cron。
+  #
+  # 排在 paid-tagging（5:10）之后错开，避免同一分钟撞 Mailchimp API 限流。
+  #
+  # ⚠️ 密钥用 fromGroup 自动挂，**不要**改回 `sync: false`。
+  - type: cron
+    name: mailchimp-suppression-sync-daily
+    env: node
+    schedule: "20 5 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/mailchimp-suppression-sync
     envVars:
       - fromGroup: me-shared-cron-secret
 

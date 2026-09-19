@@ -18,7 +18,7 @@ import {
   type MetaObjectiveCosts,
 } from './objective-metrics'
 
-const GRAPH_BASE = 'https://graph.facebook.com/v19.0'
+export const GRAPH_BASE = 'https://graph.facebook.com/v19.0'
 
 export interface MetaAdsInsights extends MetaObjectiveCosts {
   spend: number

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
-import { guardAdmin } from '@/lib/auth/require-admin'
+import { guardGlobalAdmin } from '@/lib/auth/require-admin'
 
 // industry 供前端决定行业专属入口显不显示(「房子」「楼盘」只给地产、「行程单」只给旅游)
 const SELECT_FIELDS = 'id, name, domain, created_at, semrush_db, plan_tier, monthly_mtc_cap, country, city, industry'
@@ -34,7 +34,10 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const guard = await guardAdmin()
+  // Global staff only (AD-SEC-4): guardAdmin also lets DEMO_ADMINS through with no
+  // check that params.id is their client — they could rename, re-domain (which
+  // re-points Meta tokens) or delete any client.
+  const guard = await guardGlobalAdmin()
   if (guard) return guard
 
   try {
@@ -55,7 +58,10 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const guard = await guardAdmin()
+  // Global staff only (AD-SEC-4): guardAdmin also lets DEMO_ADMINS through with no
+  // check that params.id is their client — they could rename, re-domain (which
+  // re-points Meta tokens) or delete any client.
+  const guard = await guardGlobalAdmin()
   if (guard) return guard
 
   try {

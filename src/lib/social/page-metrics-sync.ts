@@ -24,8 +24,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
-import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-manager'
-import { getPageAccessToken, fetchPagePosts, type PagePost } from '@/lib/meta/page-posts'
+import { fetchPagePosts, type PagePost } from '@/lib/meta/page-posts'
+import { authorizeConfiguredPage } from '@/lib/meta/page-sync-authorization'
 
 const POSTS_TO_FETCH = 50
 
@@ -144,20 +144,19 @@ export async function syncPageMetrics(
 
   for (const { client_id, page_id } of mappings) {
     try {
-      // Prefer the Page token captured by the client's Meta OAuth connection.
-      // The legacy env-var path remains the fallback for clients that have not
-      // migrated to stored connections yet.
-      const storedPageToken = await getStoredPageToken(client_id, page_id)
-      const userToken = storedPageToken ? null : await getMetaTokenForClient(client_id)
-      if (!storedPageToken && !userToken) {
-        results.push({ client_id, page_id, outcome: 'no_token' })
+      // AD-SEC-4: both mapping sources are client-editable, so only read a Page
+      // verified as this client's (bound + gate, or its own OAuth connection).
+      // Token order is unchanged: stored OAuth Page token, else env-derived.
+      const auth = await authorizeConfiguredPage(supabase, client_id, page_id, process.env)
+      if (!auth.ok) {
+        results.push(
+          auth.skipped === 'page_not_verified'
+            ? { client_id, page_id, outcome: 'error', error: `page_not_verified: ${auth.reason}` }
+            : { client_id, page_id, outcome: 'no_token' },
+        )
         continue
       }
-      const pageToken = storedPageToken ?? await getPageAccessToken(userToken!, page_id)
-      if (!pageToken) {
-        results.push({ client_id, page_id, outcome: 'no_token' })
-        continue
-      }
+      const pageToken = auth.pageToken
 
       const posts = await fetchPagePosts(page_id, pageToken, POSTS_TO_FETCH)
       const rollup = computeSocialRollup(posts)

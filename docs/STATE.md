@@ -106,7 +106,7 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 | social-comment-autoreply | `*/30 * * * *` | `/api/cron/social-comment-autoreply` |
 | messenger-hourly | `10 * * * *` | `/api/cron/messenger-sync-hourly` |
 | meta-leads-hourly | `25 * * * *` | `/api/cron/meta-leads-sync` |
-| ~~mailbox-sync-hourly~~ | — | **已从 `render.yaml` 移除**，路由 `/api/cron/mailbox-sync` 保留只为手动触发（见 `render.yaml` 注释）。邮箱同步现在不自动跑 |
+| ~~mailbox-sync-hourly~~ | 跟 `messenger-hourly` 一起，`10 * * * *` | **不再是独立服务**，2026-08-03 并入 `messenger-hourly`：每小时第 10 分钟跑完私信同步后，同一次请求里接着把已连的公司邮箱也同步一遍（见 `/api/cron/messenger-sync-hourly` 路由文件头注释、`render.yaml` 同位置注释）。邮箱同步是活的，不是没人跑；独立路由 `/api/cron/mailbox-sync` 保留只作手动补触发用。目前接了这条邮箱管道的只有 CTS Tours NZ 一个客户（`platform_oauth_connections` 表 `provider='microsoft_mail'`，2026-08-02 上线） |
 | viral-discovery-weekly | `0 0 * * *` | `/api/cron/viral-discovery-weekly` |
 | site-audit-cron | `0 2 * * *` | `/api/cron/site-audit-jobs` |
 | industry-ai-visibility-daily | `30 2 * * *` | `/api/cron/ai-visibility-weekly` |

@@ -18,12 +18,27 @@ import {
   ROLLOUT_SAMPLE_CHECK_FLOOR,
 } from '../rollout'
 import { KnowledgeReadError } from '../errors'
-import { createFakeWriteSupabase, type Row } from './fake-write-supabase'
+import {
+  createFakeWriteSupabase as createFakeWriteSupabaseRaw,
+  type FakeWriteOptions,
+  type Row,
+} from './fake-write-supabase'
 
 const CLIENT_A = 'aaaaaaaa-0000-0000-0000-000000000001'
 const ME_ACTOR = 'ray@magicengine.cloud'
 const CUSTOMER_SIGNER = 'owner@ctstours.co.nz'
 const NOW = new Date('2026-09-15T00:00:00.000Z')
+
+/**
+ * All the module functions under test are called with `now: () => NOW` (a frozen
+ * clock), so the fake DB's own row-stamping clock must be frozen to the same value —
+ * otherwise an expiry-style CHECK constraint compares a frozen `expires_at` against a
+ * `created_at` stamped from the real wall clock, which drifts out of sync as real time
+ * moves past `NOW`.
+ */
+function createFakeWriteSupabase(tables: Record<string, Row[]>, options: FakeWriteOptions = {}) {
+  return createFakeWriteSupabaseRaw(tables, { now: () => NOW, ...options })
+}
 
 const REGISTERED_CONFIRMER: Row = {
   client_id: CLIENT_A,

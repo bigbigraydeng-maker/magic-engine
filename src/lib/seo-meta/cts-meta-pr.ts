@@ -24,6 +24,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from '@/lib/supabase'
+import { parseJsonResponse } from '@/lib/anthropic/client'
 import { getConnection } from '@/lib/cms/connection-store'
 import { GithubClient } from '@/lib/cms/github-client'
 
@@ -208,7 +209,10 @@ async function generateCtsMeta(
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
   const msg = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 200,
+    // 300 gives headroom for title (≤60 chars) + desc (≤155 chars) + JSON
+    // wrapper tokens. 200 was occasionally truncating the response mid-JSON,
+    // causing JSON.parse to throw and silently returning desc:''.
+    max_tokens: 300,
     messages: [
       {
         role: 'user',
@@ -229,7 +233,11 @@ Respond ONLY with valid JSON: {"title":"...","desc":"..."}`,
   })
   const text = msg.content[0].type === 'text' ? msg.content[0].text.trim() : '{}'
   try {
-    const p = JSON.parse(text) as { title?: string; desc?: string }
+    // parseJsonResponse handles markdown code-fence wrapping (```json...```)
+    // and LLM quirks (trailing commas, unescaped quotes) via jsonrepair —
+    // plain JSON.parse was the root cause of consistent ai_generation_failed
+    // when the model wrapped its output in code fences (#1792).
+    const p = parseJsonResponse<{ title?: string; desc?: string }>(text)
     return {
       title: (p.title ?? keyword).slice(0, 60),
       desc: (p.desc ?? '').slice(0, 155),

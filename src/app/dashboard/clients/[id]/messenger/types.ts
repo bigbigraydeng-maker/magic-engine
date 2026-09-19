@@ -74,3 +74,21 @@ export interface ThreadResponse {
   replyWindow: ReplyWindow
   error?: string
 }
+
+/** One AI-drafted reply still waiting on a human decision (Issue #1588). */
+export interface PendingDraft {
+  id: string
+  draftBody: string
+  agentConfidence: number | null
+  quotedOfferingNames: string[]
+  verifierOutputJson: { ok?: boolean; blocked_reasons?: string[] } | null
+  /** Verifier gate ids this draft cleared to reach 'pending'. Empty for a
+   *  client whose Verifier policy this endpoint does not (yet) know. */
+  passedGateIds: string[]
+  createdAt: string
+}
+
+export interface DraftsResponse {
+  drafts: PendingDraft[]
+  error?: string
+}

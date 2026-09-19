@@ -91,7 +91,11 @@ function mockDb() {
     if (table === 'conversation_messages') {
       return {
         upsert: () => ({ select: async () => ({ data: [{ id: 'm1' }] }) }),
-        select: () => ({ eq: async () => ({ count: 7 }) }),
+        // 同一个 `.select().eq()` 形状服务两处调用：算总条数的 `{count:'exact',
+        // head:true}` 查询（取 `count`），和去重预检的「这条线程已经存了哪些信」
+        // 查询（取 `data`，见 mail-ingest.ts 的 `messageSignature` 那段）——两边
+        // 都不关心对方要的字段，所以两个字段都给，都不解构到 undefined。
+        select: () => ({ eq: async () => ({ data: [], count: 7 }) }),
       }
     }
     if (table === 'contact_identities') {
@@ -99,7 +103,14 @@ function mockDb() {
       return { select: () => chain }
     }
     if (table === 'contact_touchpoints') {
-      return { upsert: () => ({ select: async () => ({ data: [{ id: 't1' }] }) }) }
+      // `select()` 服务去重预检（「这个人身上已经有哪些同渠道触点」，见
+      // mail-ingest.ts 的 `writeTouchpoints`，三个 `.eq()` 分别过滤 client_id /
+      // contact_id / channel）——这批测试不关心去重本身，让它查回「什么都
+      // 没有」，行为等同于改动前（每条都当新的写）。
+      return {
+        upsert: () => ({ select: async () => ({ data: [{ id: 't1' }] }) }),
+        select: () => ({ eq: () => ({ eq: () => ({ eq: async () => ({ data: [] }) }) }) }),
+      }
     }
     throw new Error(`unexpected table ${table}`)
   })
@@ -230,6 +241,86 @@ describe('按邮箱隔离', () => {
 
     await syncMailbox(TARGET)
     expect(upserted[0]).toMatchObject({ channel: 'email', page_id: 'info@ctstours.co.nz' })
+  })
+})
+
+describe('换 id 格式的兜底去重——只在切换那一刻之前收到的信上生效', () => {
+  /**
+   * 子牙架构复审 PR #1714 抓到的问题：这份按「方向 + 发送时间（秒）」认重复
+   * 的兜底，如果永久生效，同一条线程里同一秒来两封方向相同的不同邮件（客户
+   * 连发两条、或历史批量回填的巧合）会被误判成重复，第二封永久静默丢失。
+   * 这两个测试钉住修完之后的边界：切换时刻之前的信仍然兜底去重（这是这段
+   * 代码存在的理由——库里已经躺着一批旧 id 格式的信）；切换时刻之后收到的信
+   * 永远不套用这份兜底，同一秒两封不同的信都会被存下来。
+   */
+  let upsertedRows: unknown[]
+
+  function mockExistingMessage(direction: 'inbound' | 'outbound', sentAt: string) {
+    upsertedRows = []
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === 'conversations') {
+        return {
+          upsert: () => ({
+            select: () => ({
+              single: async () => ({ data: { id: 'cv-x', contact_id: null } }),
+            }),
+          }),
+          update: () => ({ eq: () => ({ is: async () => ({}) }) }),
+          select: () => {
+            const chain = {
+              eq: () => chain,
+              not: () => chain,
+              order: () => chain,
+              limit: () => chain,
+              maybeSingle: async () => ({ data: null }),
+            }
+            return chain
+          },
+        }
+      }
+      if (table === 'conversation_messages') {
+        return {
+          upsert: (rows: unknown[]) => {
+            upsertedRows = rows
+            return { select: async () => ({ data: rows.map(() => ({ id: 'm-new' })) }) }
+          },
+          select: () => ({
+            eq: async () => ({
+              data: [{ message_id: 'old-rest-id', direction, sent_at: sentAt }],
+              count: 1,
+            }),
+          }),
+        }
+      }
+      if (table === 'contact_identities') {
+        const chain = { eq: () => chain, maybeSingle: async () => ({ data: null }) }
+        return { select: () => chain }
+      }
+      if (table === 'contact_touchpoints') {
+        return {
+          upsert: () => ({ select: async () => ({ data: [] }) }),
+          select: () => ({ eq: () => ({ eq: () => ({ eq: async () => ({ data: [] }) }) }) }),
+        }
+      }
+      throw new Error(`unexpected table ${table}`)
+    })
+  }
+
+  it('切换之前收到的信 —— 换了 id 格式的同一封信不会被当成新信重复插入', async () => {
+    mockExistingMessage('inbound', '2026-08-01T01:00:00.000Z')
+    inbox([inboundFrom('a@gmail.com', '2026-08-01T01:00:00.000Z', 'cv-x')])
+    await syncMailbox(TARGET)
+    expect(upsertedRows).toHaveLength(0)
+  })
+
+  it('切换之后收到的信 —— 同一秒、同方向的不同邮件也要存下来，不套用指纹兜底', async () => {
+    // 库里那封「已存」的信时间点在切换之后（正常情况下它本来就是用新 id 格式
+    // 存的，id 对得上号根本不会走到指纹这条兜底）——这里故意让新来的这封 id
+    // 不同但同一秒、同方向，专门验证「切换之后」不会被指纹误判成重复而丢掉。
+    mockExistingMessage('inbound', '2026-09-16T01:00:00.000Z')
+    inbox([inboundFrom('a@gmail.com', '2026-09-16T01:00:00.000Z', 'cv-x')])
+    await syncMailbox(TARGET)
+    expect(upsertedRows).toHaveLength(1)
   })
 })
 
