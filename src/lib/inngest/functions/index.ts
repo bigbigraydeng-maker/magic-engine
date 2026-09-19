@@ -14,6 +14,7 @@ import { conversationInboundAutoAck } from './conversation-inbound-autoack'
 import { conversionDailyPipeline } from './conversion-daily-pipeline'
 import { conversationInboundDraft } from './conversation-inbound-draft'
 import { conversationHealthHeartbeat } from './conversation-health-heartbeat'
+import { postPublishFanOut, postPublishCheck } from './seo-post-publish-monitor'
 
 export const cloudFunctions = [
   webIntelligenceCapture,
@@ -34,6 +35,8 @@ export const cloudFunctions = [
   conversionDailyPipeline,
   conversationInboundDraft,
   conversationHealthHeartbeat,
+  postPublishFanOut,
+  postPublishCheck,
 ]
 
 /** 命名空间自检：所有注册函数 id 必须以 cloud- 开头（契约测试 + 运行期双保险）。 */

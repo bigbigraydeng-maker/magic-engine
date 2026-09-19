@@ -11,11 +11,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
-vi.mock('@/lib/meta/token-manager', () => ({
-  getStoredPageToken: vi.fn(),
-  getMetaTokenForClient: vi.fn(),
-}))
-vi.mock('@/lib/meta/page-posts', () => ({ getPageAccessToken: vi.fn() }))
+// 主页是不是这个客户的、用哪把令牌 —— 由同步闸判定（规则测试在 page-sync-authorization.test.ts）。
+vi.mock('@/lib/meta/page-sync-authorization', () => ({ authorizePageSync: vi.fn() }))
 vi.mock('@/lib/meta/lead-forms', () => ({
   fetchPageLeadForms: vi.fn(),
   fetchFormLeads: vi.fn(),
@@ -23,7 +20,7 @@ vi.mock('@/lib/meta/lead-forms', () => ({
 vi.mock('@/lib/crm/meta-lead', () => ({ ingestMetaLead: vi.fn() }))
 
 import { supabaseAdmin } from '@/lib/supabase'
-import { getStoredPageToken } from '@/lib/meta/token-manager'
+import { authorizePageSync } from '@/lib/meta/page-sync-authorization'
 import { fetchFormLeads, fetchPageLeadForms, type MetaLead } from '@/lib/meta/lead-forms'
 import { ingestMetaLead } from '@/lib/crm/meta-lead'
 import { getLeadWatermark, resolveDefaultCountry, syncClientMetaLeads } from '../leads-sync'
@@ -72,7 +69,7 @@ const lead = (id: string): MetaLead => ({
 beforeEach(() => {
   vi.clearAllMocks()
   mockWatermark('2026-07-25T11:48:46.000Z')
-  mock(getStoredPageToken).mockResolvedValue('page-token')
+  mock(authorizePageSync).mockResolvedValue({ ok: true, pageToken: 'page-token', via: 'client_oauth' })
   mock(ingestMetaLead).mockResolvedValue({
     contactId: 'c1',
     createdContact: true,
@@ -114,6 +111,26 @@ describe('getLeadWatermark', () => {
 })
 
 describe('syncClientMetaLeads', () => {
+  it('AD-SEC-4：主页没核实是这个客户的 → 一个表单都不读，并记成 error 让定时任务算失败', async () => {
+    mock(authorizePageSync).mockResolvedValue({ ok: false, skipped: 'page_not_verified', reason: 'bound_to_other_client' })
+
+    const res = await syncClientMetaLeads(CLIENT)
+
+    expect(mock(authorizePageSync)).toHaveBeenCalledWith(expect.anything(), CLIENT.id, CLIENT.facebook_page_id, expect.anything())
+    expect(res.skipped).toBe('page_not_verified')
+    expect(res.error).toContain('bound_to_other_client')
+    expect(mock(fetchPageLeadForms)).not.toHaveBeenCalled()
+    expect(mock(fetchFormLeads)).not.toHaveBeenCalled()
+  })
+
+  it('用同步闸交回来的那把主页令牌读表单', async () => {
+    mock(fetchPageLeadForms).mockResolvedValue({ rows: [], error: null })
+
+    await syncClientMetaLeads(CLIENT)
+
+    expect(mock(fetchPageLeadForms)).toHaveBeenCalledWith(CLIENT.facebook_page_id, 'page-token')
+  })
+
   it('正常路径：拉到的 lead 逐条接进 CRM 并计数', async () => {
     mock(fetchPageLeadForms).mockResolvedValue({
       rows: [{ formId: 'f1', name: '表单一', status: 'ACTIVE' }],

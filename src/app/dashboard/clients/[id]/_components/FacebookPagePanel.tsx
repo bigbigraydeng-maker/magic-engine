@@ -13,6 +13,10 @@
  * the fallback, not the main road.
  *
  * Mirrors MetaAdAccountPanel.tsx, which sits next to it in the same drawer.
+ *
+ * AD-SEC-4: only internal staff can change the binding (`can_edit`), and the
+ * syncs only run on a Page verified as this client's — `verification` says so,
+ * and a paused sync is shown in red rather than looking healthy.
  */
 
 import React, { useCallback, useEffect, useState } from 'react'
@@ -37,6 +41,28 @@ interface Payload {
   pages_error: PagesError | null
   /** Live答案：ME 现在读不读得到这个主页。false = 绑了但拉不到东西。 */
   reachable: boolean | null
+  /** 同步闸的判定；null = 没绑主页。reason / via 只给内部员工。 */
+  verification: Verification | null
+  /** 只有内部员工能改绑定。 */
+  can_edit: boolean
+}
+
+interface Verification {
+  verified: boolean
+  via?: 'client_oauth' | 'staff_verified' | 'legacy_client_token'
+  reason?: string
+}
+
+/** Bound, but not on the audited path yet — re-saving the same Page runs the checks. */
+function needsReverify(v: Verification | null): boolean {
+  return v !== null && v.via !== 'staff_verified' && v.via !== 'client_oauth'
+}
+
+const REFUSAL_TEXT: Record<string, string> = {
+  bound_to_other_client: '同一个主页还绑在别的客户名下',
+  audit_mismatch: '现在绑的主页跟最后一次核实保存的对不上（或上次保存没写完）',
+  unverified_shared_token: '这个绑定是早先手动设的、没有核实记录，只能用公用令牌读',
+  check_failed: '核实时读数据库失败',
 }
 
 type PanelState =
@@ -95,6 +121,8 @@ export function FacebookPagePanel({ clientId }: Props) {
         reachable?: boolean | null
         pages?: ManagedPage[] | null
         pages_error?: PagesError | null
+        verification?: Verification | null
+        page?: { id: string; name: string | null }
       }
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
 
@@ -108,10 +136,17 @@ export function FacebookPagePanel({ clientId }: Props) {
           pages: json.pages ?? null,
           pages_error: json.pages_error ?? null,
           reachable: json.reachable ?? null,
+          verification: json.verification ?? null,
+          can_edit: true,
         },
       })
       setDraft(json.page_id ?? '')
-      setResult(describeSave(json.page_id ?? null, json.reachable ?? null))
+      const saved = describeSave(json.page_id ?? null, json.reachable ?? null)
+      setResult(
+        json.page?.name
+          ? { ...saved, text: `${saved.text} Meta 返回的主页名：「${json.page.name}」—— 请确认是这个客户自己的主页。` }
+          : saved,
+      )
     } catch (err) {
       setErrMsg(err instanceof Error ? err.message : String(err))
     } finally {
@@ -142,83 +177,99 @@ export function FacebookPagePanel({ clientId }: Props) {
     )
   }
 
-  const { page_id, publish_target_page_id, pages, pages_error, reachable } = state.data
+  const { page_id, publish_target_page_id, pages, pages_error, reachable, verification, can_edit } = state.data
   const dirty = draft.trim() !== (page_id ?? '').trim()
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <LiveStatus pageId={page_id} reachable={reachable} />
+      <LiveStatus pageId={page_id} reachable={reachable} verification={verification} />
 
       <p className="mb-3 text-sm text-slate-600">
         选中客户的 Facebook 主页后，系统每小时自动把主页私信拉进来，AI 写成需求卡，
         显示在<span className="font-bold">「客户消息」</span>页。不选就完全不动这个客户的私信。
       </p>
 
-      {pages_error && (
-        <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
-          {PAGES_ERROR_TEXT[pages_error]}
+      {can_edit ? (
+        <>
+          {pages_error && (
+            <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              {PAGES_ERROR_TEXT[pages_error]}
+            </p>
+          )}
+
+          {pages && pages.length > 0 && !manual && (
+            <select
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-100"
+            >
+              <option value="">— 不接私信 —</option>
+              {pages.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}（{p.id}）
+                </option>
+              ))}
+            </select>
+          )}
+
+          {(manual || !pages?.length) && (
+            <input
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="1616575215312482"
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-100"
+            />
+          )}
+
+          {pages && pages.length > 0 && (
+            <button
+              onClick={() => setManual((v) => !v)}
+              className="mt-2 text-xs text-slate-500 hover:text-slate-700"
+            >
+              {manual ? '← 回到主页列表' : '列表里没有？手动填 ID'}
+            </button>
+          )}
+
+          {errMsg && <p className="mt-2 text-xs leading-relaxed text-red-600">⚠ {errMsg}</p>}
+          {result && (
+            <p className={`mt-2 text-xs leading-relaxed ${result.ok ? 'text-emerald-600' : 'text-amber-700'}`}>
+              {result.text}
+            </p>
+          )}
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => void save(draft.trim() || null)}
+              disabled={!dirty || saving}
+              className="rounded-lg bg-cyan-600 px-4 py-1.5 text-sm font-bold text-white hover:bg-cyan-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              {saving ? '保存中…' : '保存'}
+            </button>
+            {dirty && !saving && (
+              <button
+                onClick={() => setDraft(page_id ?? '')}
+                className="text-xs text-slate-500 hover:text-slate-700"
+              >
+                撤销修改
+              </button>
+            )}
+            {!dirty && page_id === null && <span className="text-xs text-slate-400">未接私信</span>}
+            {!dirty && !saving && page_id !== null && needsReverify(verification) && (
+              <button
+                onClick={() => void save(page_id)}
+                className="rounded-lg border border-cyan-300 bg-white px-3 py-1.5 text-xs font-bold text-cyan-700 hover:bg-cyan-50"
+              >
+                重新核实
+              </button>
+            )}
+          </div>
+        </>
+      ) : (
+        <p className="mb-2 text-xs text-slate-500">
+          {page_id ? `当前主页 ID：${page_id}。` : ''}改绑主页需要 Magic Lab 团队核实，请联系团队。
         </p>
       )}
-
-      {pages && pages.length > 0 && !manual && (
-        <select
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-100"
-        >
-          <option value="">— 不接私信 —</option>
-          {pages.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}（{p.id}）
-            </option>
-          ))}
-        </select>
-      )}
-
-      {(manual || !pages?.length) && (
-        <input
-          type="text"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="1616575215312482"
-          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-100"
-        />
-      )}
-
-      {pages && pages.length > 0 && (
-        <button
-          onClick={() => setManual((v) => !v)}
-          className="mt-2 text-xs text-slate-500 hover:text-slate-700"
-        >
-          {manual ? '← 回到主页列表' : '列表里没有？手动填 ID'}
-        </button>
-      )}
-
-      {errMsg && <p className="mt-2 text-xs leading-relaxed text-red-600">⚠ {errMsg}</p>}
-      {result && (
-        <p className={`mt-2 text-xs leading-relaxed ${result.ok ? 'text-emerald-600' : 'text-amber-700'}`}>
-          {result.text}
-        </p>
-      )}
-
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => void save(draft.trim() || null)}
-          disabled={!dirty || saving}
-          className="rounded-lg bg-cyan-600 px-4 py-1.5 text-sm font-bold text-white hover:bg-cyan-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-        >
-          {saving ? '保存中…' : '保存'}
-        </button>
-        {dirty && !saving && (
-          <button
-            onClick={() => setDraft(page_id ?? '')}
-            className="text-xs text-slate-500 hover:text-slate-700"
-          >
-            撤销修改
-          </button>
-        )}
-        {!dirty && page_id === null && <span className="text-xs text-slate-400">未接私信</span>}
-      </div>
 
       <ConnectMeta clientId={clientId} pageId={page_id} publishTargetPageId={publish_target_page_id} />
 
@@ -366,8 +417,36 @@ function ConnectMeta({
  * did say it once, but it disappeared on the next load — so this repeats it for
  * as long as it is true, and names the fix rather than just the symptom.
  */
-function LiveStatus({ pageId, reachable }: { pageId: string | null; reachable: boolean | null }) {
+function LiveStatus({
+  pageId,
+  reachable,
+  verification,
+}: {
+  pageId: string | null
+  reachable: boolean | null
+  verification: Verification | null
+}) {
   if (pageId === null) return null
+
+  if (verification && !verification.verified) {
+    return (
+      <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-700">
+        <p>
+          <span className="font-bold">⚠ 私信、表单线索和评论自动回复已暂停：这个主页绑定没通过核实。</span>
+          {verification.reason ? `（${REFUSAL_TEXT[verification.reason] ?? verification.reason}）` : ''}
+        </p>
+        <p className="mt-1.5">由 Magic Lab 团队在这里重新保存一次主页核实，或用主页管理员账号点「连接 Meta」授权。</p>
+      </div>
+    )
+  }
+
+  if (verification?.via === 'legacy_client_token') {
+    return (
+      <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+        私信在同步，但这个绑定是早先手动设的，没有核实记录 —— 团队重新保存一次即可补上。
+      </p>
+    )
+  }
 
   if (reachable === true) {
     return (

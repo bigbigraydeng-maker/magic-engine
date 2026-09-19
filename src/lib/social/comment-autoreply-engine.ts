@@ -19,7 +19,8 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
-import { getPageAccessToken, fetchPagePosts, fetchPageReels } from '@/lib/meta/page-posts'
+import { fetchPagePosts, fetchPageReels } from '@/lib/meta/page-posts'
+import { authorizeConfiguredPage } from '@/lib/meta/page-sync-authorization'
 import { fetchAdStoryIds } from '@/lib/meta/ads-posts'
 import { fetchPostCommentsResult, replyToComment, sendPrivateReply, hideComment, PageComment } from '@/lib/meta/comments'
 import {
@@ -86,17 +87,31 @@ export function isKilled(): boolean {
   return process.env.SOCIAL_COMMENT_AUTOREPLY_KILL === '1'
 }
 
+async function pageGate(
+  clientId: string,
+  configuredPageId: string,
+): Promise<{ ok: true; pageToken: string } | { ok: false; error: string }> {
+  const auth = await authorizeConfiguredPage(supabaseAdmin, clientId, configuredPageId, process.env)
+  if (auth.ok) return { ok: true, pageToken: auth.pageToken }
+  if (auth.skipped === 'page_not_verified') return { ok: false, error: `page_not_verified: ${auth.reason}` }
+  if (auth.skipped === 'no_meta_token') return { ok: false, error: 'no Meta token configured' }
+  return { ok: false, error: 'could not resolve Page access token' }
+}
+
 /** Process one client's recent comments end-to-end. Never throws — returns a result. */
 export async function processClientComments(config: CommentConfig): Promise<ClientRunResult> {
   const clientId = config.client_id
   try {
     if (isKilled()) return { client_id: clientId, ok: true, error: 'killed' }
 
-    const userToken = await getMetaTokenForClient(clientId)
-    if (!userToken) return { client_id: clientId, ok: false, error: 'no Meta token configured' }
-
-    const pageToken = await getPageAccessToken(userToken, config.fb_page_id)
-    if (!pageToken) return { client_id: clientId, ok: false, error: 'could not resolve Page access token' }
+    // AD-SEC-4: this run reads, replies to, hides and DMs on the configured Page,
+    // and the config is editable by client members. Only act on a Page that is the
+    // client's verified bound Page (or one it consented to via OAuth) — otherwise a
+    // client could point it at another client's Page and act there with a token
+    // that can see both.
+    const gate = await pageGate(clientId, config.fb_page_id)
+    if (!gate.ok) return { client_id: clientId, ok: false, error: gate.error }
+    const pageToken = gate.pageToken
 
     const ctxBase = await loadClientContext(clientId)
 
@@ -120,7 +135,10 @@ export async function processClientComments(config: CommentConfig): Promise<Clie
     for (const pid of config.pinned_post_ids ?? []) if (pid) postIds.add(pid)
     // Boosted posts/Reels carry paid-delivery comments on the ad's story object,
     // which the organic endpoints undercount. Pull those story ids via the Ads API.
-    if (ctxBase.adAccountId) {
+    // The ads API needs the user token, not the Page token; without one (a
+    // client connected only through OAuth) boosted-post comments are skipped.
+    const userToken = ctxBase.adAccountId ? await getMetaTokenForClient(clientId) : null
+    if (ctxBase.adAccountId && userToken) {
       const storyIds = await fetchAdStoryIds(ctxBase.adAccountId, userToken).catch(() => [])
       // 广告账户里会混进**别人主页**的素材（老广告、合作方主页）。用本主页的
       // token 去读它们，Meta 一律回 #10 —— 那不是我们缺权限，是根本不该问。

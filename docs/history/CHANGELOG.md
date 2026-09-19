@@ -5,6 +5,27 @@
 
 ---
 
+### 2026-09-20（Park Homes 官网：Riverside 项目补上客户提供的走访视频）
+
+PR [#1801](https://github.com/bigbigraydeng-maker/magic-engine/pull/1801) 已合并并部署。客户 Jason 2026-09-15 邮件发来 115 Park Estate Road（即 Riverside 项目）的 YouTube 走访视频，要求加到网站里；代码当时已经写好（2026-09-17），但被顺手提交到了一个内容完全不相关的改动请求里（记录谷歌广告接口权限流程的纯文档 PR #1770），导致一直没合并、官网上一直看不到。本次把这个视频改动单独拆出来重开一个改动请求，走完自动检查后合并上线，并在 https://www.parkhomes.nz/riverside/ 页面核实视频确实可见。Jason 同一封邮件之前那次请求（129 Forrest Hill 效果图）此前已上线，本次一并核对确认无误。
+
+**Reuse Statement**：客户专属内容改动，复用 Astro 项目已有的 Gallery 区块布局与 `[slug].astro` 单模板出图机制，未新增共享平台代码。
+
+---
+
+### 2026-09-20（官网：已确认的 ME 视觉首页上线）
+
+PR [#1798](https://github.com/bigbigraydeng-maker/magic-engine/pull/1798) 已合并；发布提交 `8e90270b5baed9e63ef357a3aa2bae6e0d1bba6f`。2026-09-19 12:22 UTC（NZ 次日）公网首页已返回新版标题、样式及交互脚本。保留 ME 金色/奶油色 VI、Founder 与历史来源，加入 Google/ChatGPT/Facebook/Instagram/Google Ads 渠道标识，三个示意案例分别使用网站、Instagram 轮播、Google Ads 界面。Harbour Travel 明确为虚构示例，无真实效果数据。
+
+- 首页假表单改为既有 `/waitlist/#apply` 正式申请入口；首页与申请页隐藏 Client portal 导航。独立入口 `/login`（`/login.html` 自动规范跳转）已验证 HTTP 200，沿用已有 portal 登录，不改变认证。
+- Bing `/BingSiteAuth.xml` 公网 HTTP 200、`application/xml`；保留 SEO、Facebook 域名验证、既有 Google/Meta Cookie 同意机制。
+- 验证：静态发布检查、JS 语法、diff 检查通过；桌面/390px 手机实测轮播、广告选择、网站 Before/After、候补跳转及登录布局，未见图片丢失或横向溢出。PR exact-head CI 的 Application build、Type-check、CRM focused tests、ai-orchestrator-tests 均通过。
+- 报名接口仅检查无效提交被 400 拒绝，没有创建测试线索或声明生产邮件送达。
+
+**Reuse Statement**：复用官网静态托管、品牌/研究图片、正式候补与登录流程和统计同意机制；新增仅展示文件及渠道图标。行业/客户差异只在虚构示例，未进入共享运行逻辑，无私有数据或记忆晋升；与层级门的展示层判断一致。
+
+---
+
 ### 2026-09-15（tailor-made 行程单/画册补齐目的地图片：平遥、长江三峡）
 
 PR [#1758](https://github.com/bigbigraydeng-maker/magic-engine/pull/1758) 已合并并部署。CTS-2026-0030（China Grand Discovery）画册里"平遥"那天错配成了北京颐和园的图（`hero-rules.ts` 关键词清单没收"平遥"，退而用了当天正文提到的另一个地名顶替）；长江三峡三天则因图库只有一张三峡照片，三天全用同一张。补了 Pingyao 一张图，Yangtze 三峡再补一张（供正文点名 Qutang/Wu/Xiling 具体某段峡谷时用），并把原本偏低清的三峡老照片换成更清楚的一张，均为 Unsplash License 免费商用图，来源记在 `templates/tailor-made-itinerary/heroes/CREDITS.json`。
@@ -174,6 +195,18 @@ PR [#1716](https://github.com/bigbigraydeng-maker/magic-engine/pull/1716)（原 
 **待办（不卡这次上线，但影响能不能真用）**：`Mail.ReadWrite` 是新申请的权限，CTS 现有邮箱连接刷新令牌时换不来一个从没同意过的权限，需要重新走一次登录同意才能用上这个新功能（读信本身不受影响，且 CTS 从没用过回信这个功能，不算回退）；本轮选定的首个真实测试客户 NAL 尚未连接邮箱（`platform_oauth_connections` 里还没有它的 `microsoft_mail` 记录），这个功能目前只有 145 个自动化测试验证过，还没有真实邮箱跑通过一次。
 
 **Reuse Statement**：完全复用既有平台能力——`conversations`/`conversation_messages`/`contact_touchpoints` 三张表、`platform_oauth_connections` + `token-manager` 的令牌管理、Messenger 回复路由已经验证过的隔离/错误映射形状。新增的发送半边（`mail-send.ts` + 路由）是平台通用能力，不含任何客户专属逻辑，NAL/CTS 用的是同一份代码。唯一的平台层改动是 `MICROSOFT_MAIL_SCOPES` 扩展一个权限，影响所有走这条授权的客户（目前只有 CTS），已在 PR 里说明其对现有连接的影响面。
+
+---
+
+### 2026-09-15（Daily Plan：新指令不再抹掉已发布帖子的回执）
+
+PR [#1687](https://github.com/bigbigraydeng-maker/magic-engine/pull/1687) 已合并（A 级）。给同一个推广活动再下一次 7 天内容指令时，`POST /api/clients/[id]/campaign-daily-plan` 原来会整份覆盖最新计划，连带清空 `publish_meta`（已发到客户 Facebook 主页的帖子唯一记录，撤回和防重复发布都靠它）和 `publish_queue_meta`。真实风险：CTS 计划 `f166a5c0-…` 已发 7 条，再下一次指令就撤不回来。
+
+现在：计划带发布回执（任何状态，含全部已撤回）→ 409 `PLAN_ALREADY_PUBLISHED`；带排队回执 → 409 `PLAN_PUBLISH_QUEUED`；写入时再核对两份回执都不在，读完后回执刚落进来 → 409 `PLAN_CHANGED_DURING_SAVE`；查计划出错 → 500（原来会误插第二行把回执藏起来）。只有审核结论的计划照旧覆盖。拒绝时提示「新建活动并归档旧活动」。选择拒绝而不是另插新行，是因为 GET / 发布 / 撤回都只读最新一行。
+
+验证：相关测试 122 条通过（新增 8 条，逐个删掉 6 处关键检查都能被测试抓到），CI 类型检查与编译通过，子牙 + 魏征两轮复审。未在生产上实测（唯一试法是真写客户计划）。后续见 ROADMAP「Daily Plan 发布回执保护的后续」。
+
+**Reuse Statement**：复用发布 / 排队接口已有的「写入前核对 `plan_data->…` 为空」做法和现有回执 schema；规则对所有客户、所有行业通用，无客户或行业专属逻辑，无新表、无数据库改动。
 
 ---
 

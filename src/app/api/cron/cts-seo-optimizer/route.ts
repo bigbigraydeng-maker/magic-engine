@@ -15,6 +15,7 @@ import { runCtsMetaPr } from '@/lib/seo-meta/cts-meta-pr'
  */
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 300
 
 export async function POST(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET

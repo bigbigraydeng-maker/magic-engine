@@ -16,7 +16,7 @@ import type { ManualItem } from './manual-items'
 export type BindingRequestItemKind = 'ad_account_binding_requested'
 
 /** 后台入口（登录后可见）。🔴 必须绝对网址，相对路径会被链接闸整条丢掉。 */
-const APP_BASE = 'https://app.magicengine.com.au'
+export const APP_BASE = 'https://app.magicengine.com.au'
 
 function settingsHref(clientId: string): string {
   return `${APP_BASE}/dashboard/clients/${encodeURIComponent(clientId)}/settings`

@@ -758,7 +758,10 @@ services:
   - type: cron
     name: cts-seo-optimizer
     env: node
-    schedule: "30 5 * * 1"
+    # One-off (PM 2026-09-20): skip the 21 Sep run — the optimiser was hand-run on
+    # 20 Sep. Fires once on Mon 28 Sep 05:30 UTC. Restore "30 5 * * 1" if the
+    # Inngest seo/meta-cycle replacement is not live before 5 Oct.
+    schedule: "30 5 28 9 *"
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
@@ -1083,6 +1086,30 @@ services:
     startCommand: |
       curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/mailchimp-paid-tagging
+    envVars:
+      - fromGroup: me-shared-cron-secret
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # CRM「不感兴趣/别再联系」→ Mailchimp `suppressed_do_not_email` 标签。
+  #
+  # 跟上面 paid-tagging 同一个思路的另一档：CRM 早就知道这件事（lib/crm/dnc.ts
+  # 的 isDoNotContact + segments.ts 的 DEAD_OUTCOMES），但从没同步进 Mailchimp。
+  # 2026-09-08 CTS newsletter 排期会话实测：26 个 CRM 判过的联系人里，6 个当时
+  # 在 Mailchimp 仍是订阅状态、没打抑制标签——下一封群发邮件本来会发给他们。
+  #
+  # 只加标签，不摘——解除抑制必须是人工确认后的动作，不属于这条 cron。
+  #
+  # 排在 paid-tagging（5:10）之后错开，避免同一分钟撞 Mailchimp API 限流。
+  #
+  # ⚠️ 密钥用 fromGroup 自动挂，**不要**改回 `sync: false`。
+  - type: cron
+    name: mailchimp-suppression-sync-daily
+    env: node
+    schedule: "20 5 * * *"
+    buildCommand: ""
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/mailchimp-suppression-sync
     envVars:
       - fromGroup: me-shared-cron-secret
 

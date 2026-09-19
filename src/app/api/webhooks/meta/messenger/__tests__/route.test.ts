@@ -34,15 +34,21 @@ vi.mock('@/lib/messenger-agent/optout', async (orig) => {
 // 实现表结构；那张表的真实建模在 health-heartbeat.test.ts。
 vi.mock('@/lib/messenger-agent/optout-failures', () => ({ recordOptOutWriteFailure: vi.fn() }))
 
+// AD-SEC-4 绑定核实闸：规则本身在 lib/meta/__tests__/page-sync-authorization.test.ts
+// 对着按表建模的假库测；这里只断言 webhook 真的按它的结论决定存不存。默认放行。
+vi.mock('@/lib/meta/page-sync-authorization', () => ({ assessPageBinding: vi.fn() }))
+
 import { GET, POST } from '../route'
 import { supabaseAdmin } from '@/lib/supabase'
 import { CONVERSATION_MESSAGE_RECEIVED_EVENT } from '@/lib/conversations/events'
 import { recordOptOutKeywordTouch } from '@/lib/messenger-agent/optout'
 import { recordOptOutWriteFailure } from '@/lib/messenger-agent/optout-failures'
+import { assessPageBinding } from '@/lib/meta/page-sync-authorization'
 
 const mockFrom = vi.mocked(supabaseAdmin.from)
 const mockRecordOptOutKeywordTouch = vi.mocked(recordOptOutKeywordTouch)
 const mockRecordOptOutWriteFailure = vi.mocked(recordOptOutWriteFailure)
+const mockAssess = vi.mocked(assessPageBinding)
 
 const SECRET = 'test-app-secret'
 const VERIFY_TOKEN = 'test-verify-token'
@@ -186,6 +192,7 @@ beforeEach(() => {
   process.env.META_VERIFY_TOKEN = VERIFY_TOKEN
   sendInngestEvent.mockResolvedValue({ event_ids: ['evt_1'] })
   mockRecordOptOutKeywordTouch.mockResolvedValue({ touchpointId: 'tp-1' })
+  mockAssess.mockResolvedValue({ verified: true, via: 'staff_verified' })
 })
 
 describe('GET — 订阅握手', () => {
@@ -261,6 +268,34 @@ describe('POST — 「没映射」与「查不到」必须分开', () => {
     const captured = stubDb()
     await POST(makePost(webhookPayload([messagingEvent()])))
     expect(captured.filters.clients).toMatchObject({ facebook_page_id: PAGE_ID })
+  })
+})
+
+describe('POST — AD-SEC-4 只存进「主页绑定核实过」的客户名下', () => {
+  it('绑定没核实（比如历史上被客户改成了别家的主页）→ 回 200 不重投，但一条都不存、不发事件', async () => {
+    const captured = stubDb()
+    mockAssess.mockResolvedValue({ verified: false, reason: 'bound_to_other_client' })
+    const res = await POST(makePost(webhookPayload([messagingEvent()])))
+    expect(res.status).toBe(200)
+    expect(mockAssess).toHaveBeenCalledWith(expect.anything(), CLIENT_ID, PAGE_ID, expect.anything())
+    expect(captured.convoUpserts).toHaveLength(0)
+    expect(captured.msgUpserts).toHaveLength(0)
+    expect(sendInngestEvent).not.toHaveBeenCalled()
+  })
+
+  it('没令牌也不算核实（webhook 不需要令牌，但也就没有任何归属证据）', async () => {
+    const captured = stubDb()
+    mockAssess.mockResolvedValue({ verified: false, reason: 'no_meta_token' })
+    await POST(makePost(webhookPayload([messagingEvent()])))
+    expect(captured.convoUpserts).toHaveLength(0)
+  })
+
+  it('核实时读库失败 → 503 让 Meta 重投，不当成「不属于这个客户」丢掉', async () => {
+    const captured = stubDb()
+    mockAssess.mockResolvedValue({ verified: false, reason: 'check_failed', detail: 'boom' })
+    const res = await POST(makePost(webhookPayload([messagingEvent()])))
+    expect(res.status).toBe(503)
+    expect(captured.convoUpserts).toHaveLength(0)
   })
 })
 

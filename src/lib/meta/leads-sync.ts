@@ -17,8 +17,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
-import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-manager'
-import { getPageAccessToken } from '@/lib/meta/page-posts'
+import { authorizePageSync } from '@/lib/meta/page-sync-authorization'
 import { fetchFormLeads, fetchPageLeadForms } from '@/lib/meta/lead-forms'
 import { ingestMetaLead } from '@/lib/crm/meta-lead'
 import type { SubscribeMemberResult } from '@/lib/mailchimp/client'
@@ -64,7 +63,7 @@ export interface MetaLeadsSyncResult {
    * 没有任何 lead 进到出口时是 `{}`，不是缺字段。
    */
   mailchimp: Record<string, number>
-  skipped?: 'no_page_id' | 'no_meta_token' | 'no_page_token'
+  skipped?: 'no_page_id' | 'no_meta_token' | 'no_page_token' | 'page_not_verified'
   error?: string
 }
 
@@ -149,15 +148,15 @@ export async function syncClientMetaLeads(
   const pageId = client.facebook_page_id
   if (!pageId) return { ...base, skipped: 'no_page_id' }
 
-  // 跟私信同步同一条取 token 的路：先用「连接 Meta」按钮存下来的 Page token，
-  // 没有再从 env 里的 user token 换一个。
-  let pageToken = await getStoredPageToken(client.id, pageId)
-  if (!pageToken) {
-    const userToken = await getMetaTokenForClient(client.id)
-    if (!userToken) return { ...base, skipped: 'no_meta_token' }
-    pageToken = await getPageAccessToken(userToken, pageId)
+  // 跟私信同步同一道闸（AD-SEC-4）：主页核实过属于这个客户才取令牌。
+  // 取令牌顺序不变：先用「连接 Meta」存下的 Page token，没有再从 env 里的 user token 换。
+  const auth = await authorizePageSync(supabaseAdmin, client.id, pageId, process.env)
+  if (!auth.ok) {
+    if (auth.skipped !== 'page_not_verified') return { ...base, skipped: auth.skipped }
+    // 记成 error：定时任务按 error 计失败、日报会点名，暂停不能看起来像「今天没人填表」。
+    return { ...base, skipped: auth.skipped, error: `主页绑定没核实，线索同步已暂停（${auth.reason}）` }
   }
-  if (!pageToken) return { ...base, skipped: 'no_page_token' }
+  const pageToken = auth.pageToken
 
   const defaultCountry = resolveDefaultCountry(client)
   const errors: string[] = []

@@ -176,6 +176,9 @@ export interface ManagedPage {
   name: string
 }
 
+/** 10 × 100 Pages — far above any identity we hold; bounds a runaway cursor. */
+const MAX_MANAGED_PAGE_REQUESTS = 10
+
 /**
  * The Pages this token can act for, so ME can offer a pick-list instead of
  * asking someone to hunt down a numeric Page ID. The vanity URL a client gives
@@ -186,19 +189,29 @@ export interface ManagedPage {
  * rather than an empty list, which would read as "you manage no Pages".
  */
 export async function listManagedPages(userToken: string): Promise<ManagedPage[] | null> {
-  const url = `${GRAPH_BASE}/me/accounts?fields=id,name&limit=100&access_token=${encodeURIComponent(userToken)}`
-  let res: Response
-  try {
-    res = await fetch(url)
-  } catch {
-    return null
-  }
-  if (!res.ok) return null
+  // Follow paging.next: an identity managing more than one page of results would
+  // otherwise make binding verification reject a Page that is really there.
+  let url: string | null = `${GRAPH_BASE}/me/accounts?fields=id,name&limit=100&access_token=${encodeURIComponent(userToken)}`
+  const out: ManagedPage[] = []
+  for (let page = 0; url && page < MAX_MANAGED_PAGE_REQUESTS; page++) {
+    let res: Response
+    try {
+      res = await fetch(url)
+    } catch {
+      return null
+    }
+    if (!res.ok) return null
 
-  const body = (await res.json()) as { data?: Array<{ id?: string; name?: string }> }
-  return (body.data ?? [])
-    .filter((p): p is { id: string; name?: string } => typeof p.id === 'string')
-    .map((p) => ({ id: p.id, name: p.name ?? p.id }))
+    const body = (await res.json()) as {
+      data?: Array<{ id?: string; name?: string }>
+      paging?: { next?: string }
+    }
+    for (const p of body.data ?? []) {
+      if (typeof p.id === 'string') out.push({ id: p.id, name: p.name ?? p.id })
+    }
+    url = typeof body.paging?.next === 'string' ? body.paging.next : null
+  }
+  return out
 }
 
 /**

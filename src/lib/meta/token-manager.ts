@@ -18,7 +18,10 @@
  *   4. null                                         (caller returns graceful 424)
  *
  * CLIENT_KEY derives from clients.domain (uppercased, non-alphanumeric → '_').
- * The `clients` table has no `slug` column, `domain` is stable + unique per client.
+ * The `clients` table has no `slug` column. `domain` is NOT unique (public
+ * self-serve signup writes it), so steps 1–2 only serve the client that owns the
+ * key — earliest-created for a domain, sole holder for a Page (AD-SEC-4,
+ * rules in token-selection.ts).
  *
  * WHY THE PAGE-KEYED LOOKUP (added 2026-07-29)
  * --------------------------------------------
@@ -38,29 +41,18 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
-import { decryptToken } from '@/lib/platform-oauth/vocabulary'
+import {
+  domainToEnvKey, pageIdToEnvVar, resolveMetaToken, loadStoredPageToken, type MetaTokenSource,
+} from './token-selection'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
 )
 
-/**
- * Convert a client domain into an env-safe key.
- *   "ctstours.co.nz"       → "CTSTOURS_CO_NZ"
- *   "oztopbuildingsupplies.com.au" → "OZTOPBUILDINGSUPPLIES_COM_AU"
- */
-export function domainToEnvKey(domain: string): string {
-  return domain.toUpperCase().replace(/[^A-Z0-9]/g, '_')
-}
-
-/**
- * Env var name for a Page-scoped token.
- *   "227633594573276" → "META_SYSTEM_USER_TOKEN_PAGE_227633594573276"
- */
-export function pageIdToEnvVar(pageId: string): string {
-  return `META_SYSTEM_USER_TOKEN_PAGE_${pageId.replace(/[^A-Za-z0-9]/g, '_')}`
-}
+// Lookup rules live in token-selection.ts (no client at import time, so the daily
+// todo can reuse them); re-exported here for existing callers.
+export { domainToEnvKey, pageIdToEnvVar, type MetaTokenSource }
 
 /**
  * Resolve the Meta access token to use for a given client.
@@ -70,42 +62,11 @@ export async function getMetaTokenForClient(clientId: string): Promise<string | 
   return (await resolveMetaTokenForClient(clientId))?.token ?? null
 }
 
-/**
- * Which lookup step produced the token. `shared_fallback` can see several
- * clients' ad accounts, so "this token can read account X" proves nothing about
- * X belonging to the client — callers that audit a binding record this.
- */
-export type MetaTokenSource = 'client_domain' | 'client_page' | 'shared_fallback'
-
 /** Same lookup as getMetaTokenForClient, plus where the token came from. */
 export async function resolveMetaTokenForClient(
   clientId: string,
 ): Promise<{ token: string; source: MetaTokenSource } | null> {
-  const { data, error } = await supabaseAdmin
-    .from('clients')
-    .select('domain, facebook_page_id')
-    .eq('id', clientId)
-    .maybeSingle()
-
-  const fallbackToken = process.env.META_SYSTEM_USER_TOKEN
-  const fallback = fallbackToken ? { token: fallbackToken, source: 'shared_fallback' as const } : null
-  if (error || !data) return fallback
-
-  // 1. Per-client by domain — the original, most specific key.
-  if (data.domain) {
-    const scoped = process.env[`META_SYSTEM_USER_TOKEN_${domainToEnvKey(data.domain)}`]
-    if (scoped) return { token: scoped, source: 'client_domain' }
-  }
-
-  // 2. Per-client by Page — for clients with no domain, or whose Page needs a
-  //    token with different scopes than the domain-level one.
-  if (data.facebook_page_id) {
-    const byPage = process.env[pageIdToEnvVar(data.facebook_page_id)]
-    if (byPage) return { token: byPage, source: 'client_page' }
-  }
-
-  // 3. Shared fallback.
-  return fallback
+  return resolveMetaToken(supabaseAdmin, clientId, process.env)
 }
 
 /**
@@ -130,28 +91,5 @@ export async function getStoredPageToken(
   clientId: string,
   pageId: string,
 ): Promise<string | null> {
-  const { data, error } = await supabaseAdmin
-    .from('platform_oauth_connections')
-    .select('access_token_enc')
-    .eq('client_id', clientId)
-    .eq('provider', 'meta')
-    .eq('account_id', pageId)
-    .eq('status', 'active')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  if (error || !data) return null
-
-  const enc = (data as { access_token_enc?: unknown }).access_token_enc
-  if (typeof enc !== 'string' || enc.length === 0) return null
-
-  // A connection row that cannot be decrypted is worse than none: returning
-  // junk would make Meta reject every call with an opaque error. Fall through
-  // to the env-var path instead.
-  try {
-    return decryptToken(enc)
-  } catch {
-    return null
-  }
+  return loadStoredPageToken(supabaseAdmin, clientId, pageId)
 }

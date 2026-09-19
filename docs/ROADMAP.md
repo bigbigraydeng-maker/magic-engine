@@ -118,7 +118,9 @@ ads-act-executor（Inngest function）
 - [ ] `pickRealPhoto`/`loadRankableClientAssets` 补一道质量分门槛（`client-asset-pool.ts` 的 `MIN_QUALITY=5` 口径目前真实照片路径没用上）
 - [ ] `PreparedScene.visualSource` 接入人工分镜自检表 UI，让 FDE 逐镜看时能分清"这镜是真图"
 - [ ] `pickRealPhoto` 内部调用 `rankAssetsByPrompt` 的 `gpt-4o-mini` 排序成本（分钱级）没有计入 `content_factory_render_jobs.cost_usd`
-- [x] CTS 真实素材库缺 Hutong（Still-5 专属）、西安城墙（Still-6 专属，不是兵马俑）的真实照片——2026-09-13 发现公司自己的 Dropbox 素材库（`CTS/footage/photos/`）里其实早就有 2 张胡同 + 1 张西安城墙真实照片，只是从未录入 `client_assets`，不需要去 Unsplash 找。已上传+PM 过目确认+标记 `client_verified`。**注意**：这两个landmark 目前仍不在 `factory_config.render.creatomate.scene_field_map`（该客户脚本目前只生成 4 个镜头，对应 Still-3/4/7/8），要真的让这两张照片出现在成片里，还需要把内容生成扩到 6 个镜头并给 Still-5/Still-6 各加一条 `scene_field_map` 条目——这是下一步待决定的事，不是"现在已经在用"
+- [x] CTS 真实素材库缺 Hutong（Still-5 专属）、西安城墙（Still-6 专属，不是兵马俑）的真实照片——2026-09-13 发现公司自己的 Dropbox 素材库（`CTS/footage/photos/`）里其实早就有 2 张胡同 + 1 张西安城墙真实照片，只是从未录入 `client_assets`，不需要去 Unsplash 找。已上传+PM 过目确认+标记 `client_verified`。2026-09-15 已真正接进成片生成：`scene_field_map` 从 4 条扩到 6 条（新增 Still-5/Still-6），原标注太笼统（西安城墙那张标注甚至没有"wall"这个词）已按真实图核对改准。胡同照片现在能稳定被选中；西安城墙照片因素材库里还有 4 张别的"墙"容易混淆，选不准时会正确回退 AI 现画，不算 bug，是已知限制。详见 memory `project-cts-video-factory-decision-ledger`。
+- [ ] Still-5/Still-6 的 `caption`（大字标题）Creatomate 元素名还没核实——本地 `.env.local` 没有 `CREATOMATE_API_KEY`，Chrome 里登录的 Creatomate 账号也找不到生产用的那个模板，需要能进生产 Creatomate 账号的人去模板 Code 视图查真实元素名再回填，否则这两镜头的大字标题会停在模板默认占位文字（画面本身的真实照片不受影响）
+- [ ] PR [#1655](https://github.com/bigbigraydeng-maker/magic-engine/pull/1655) 待 PM 拍板合并：`rankAssetsByPrompt` 加"没把握就别选"的置信度门（`requireConfidentMatch`），修复"素材库有对的照片，排序器却选了完全文不对题的图，还写了个听着很确定的理由"这个问题（2026-09-14 用真实脚本诊断发现）。已过 6 轮 Codex 复审，测试/类型检查/构建全过
 - [x] 那个已确认"退役但没真的关掉、还在偷偷抢渲染任务"的老 Render 服务（`content-factory-render-worker`）——PM 2026-09-13 拍板彻底删除，已在 Render 后台执行删除，服务已不存在
 - [ ] PM 拍板"AI 配音统一用 ElevenLabs"，账号免费版无法通过 API 调用任何声音——PM 2026-09-13 拍板暂不升级付费，先维持现状；CTS 出片全程仍未真正测过配音这一步
 - [ ] "多开发不同模板"：PM 不想招人代画，已验证 Creatomate 模板编辑页的 Code 视图（`{}` 图标）能直接读出完整模板 JSON 源码，理论上也能反向粘贴编辑保存，但只验证了"读"，没验证"改并保存"这一步
@@ -904,6 +906,16 @@ Gate B 定的 `minSampleSize=3`，页面目前只会显示「数据还不够说�
       `parseStringMap`。未来 receipt status 定义变更（例如加 `'timeout'`）三处都要改，属「假件与 SQL 同步」
       同类事故模式，建议下沉到 `src/lib/flywheel/tune/` 下的共享 helper。
 
+**Daily Plan 发布回执保护的后续**（PR [#1687](https://github.com/bigbigraydeng-maker/magic-engine/pull/1687) 已合并，2026-09-15；子牙 + 魏征复审留下）：
+
+- [ ] **审核接口在带排队/发布回执时仍能改审核结论**（A 级，另一窗口已在修）—— `campaign-daily-plan/post-review/route.ts`
+      不看 `publish_queue_meta` / `publish_meta`。排队后改结论会让发布报「排队回执过期」、重新排队又冲突，流程卡死；
+      发布进行中改结论会让回执写不回库，帖子在线但只剩 HTTP 响应里的记录。
+- [ ] **只读核查生产上是否已有「回执被藏起来」的旧行** —— #1687 之前查计划出错会新插一行。查同一 client + campaign 下
+      `campaign_daily_v1` 行数 > 1、且较旧行带 `publish_meta` 的情况；有的话要人工判断怎么恢复，不许直接改数据。
+- [ ] **计划版本链（产品限制的长期解）** —— 现在一个活动发过/排过一轮后，下一轮内容或改文案只能新建活动。
+      长期应让读取方按 `plan_id` 取计划、而不是只取最新一行，或在回执已作废（例如全失败、零条上线）时允许覆盖。
+
 ## Phase 24 — Execution Loop Closure（执行闭环修复）📋 已登记，2026-06-06 启动
 
 - [ ] P24.A.1 migration: `20260606000001_execution_items_zhuge_source.sql`
@@ -1078,6 +1090,31 @@ Gate B 定的 `minSampleSize=3`，页面目前只会显示「数据还不够说�
 
 > ✅ 原第五条「第一条入站消息没有『主语是我』这层保护」**已修**（2026-08-17）——
 > 没有问候语时的门槛由两条标准字段提到**三条全齐**，见 CHANGELOG 同日条目。
+
+## Marketing Plan 接入 Newsletter 邮件渠道（2026-09-08 登记，🔄 阶段 1 PR 待复审合并）
+
+> CTS 过去两月 newsletter 回顾时发现一封邮件正文没放链接、点击率必然为 0（内容问题非技术
+> 故障）。PM 提出要有"策划下一封发什么/何时发"的能力，经 me-platform-tier-gate（张良）判定：
+> 不是新 L1，是补齐已有策略层骨架（`marketing_plans`/`execution_items`）欠的邮件渠道，
+> 候选登记见 [platform-candidates.md](./registry/platform-candidates.md)（PR #1480）。
+> 设计已过子牙（架构）+ 魏征（挑刺）复审。**跟 Phase 24.M 里"newsletter 优先级靠后"
+> 那条 PM 拍板不冲突** —— 那条说的是 CRM 多渠道实时沟通总线的渠道排期，这条是
+> Marketing Plan 策略层的内容规划能力，是两回事。
+
+- [x] 阶段 1：策划——`MarketingPlanData` 新增可选 `email` 维度，AI 读 Mailchimp 历史表现
+      （复用 `listSentCampaigns`，未新增 API 封装）自动建议下一封主题 + 发送时间；
+      `requires_link` 强制校验环节写进 prompt + UI（"中国免签"事故教训编码进流程，
+      不再只指望人记得）；没有邮件渠道的客户（Roman/Oztop）该字段天然是空壳。
+      PR [#1482](https://github.com/bigbigraydeng-maker/magic-engine/pull/1482)，**待复审合并**
+- [ ] 阶段 1 验收：合并后需实际对 CTS 跑一次 `/api/clients/[id]/marketing-plan/generate`，
+      人工核对 AI 生成的邮件主题/时间建议是否合理，`requires_link` 判断是否准确
+- [ ] 阶段 2（明确排除在阶段 1 之外，需要独立立项）：Mailchimp"建 campaign + 真发送"的
+      API 写路径——现在只有只读封装 + `subscribeMember` 一条写路径。这是新的、不可逆的
+      对外发布能力（邮件一发出去收不回），需要类似 Governed Reply Agent 的 fail-closed
+      授权机制 + Inngest 异步接力设计，不能顺手跟阶段 1 一起做
+- [ ] 自动欢迎序列碰撞检测目前是粗粒度的（只统计过去 7 天触达人数，不是精确逐联系人
+      排期）——现有系统没有"某联系人当前处于欢迎序列第几步"的读取路径，如实标注
+      口径不精确，需要更精确的方案时再补
 
 ## Phase 25 — Self-Serve Portal ⚠️ 已并入 Phase 20.0
 

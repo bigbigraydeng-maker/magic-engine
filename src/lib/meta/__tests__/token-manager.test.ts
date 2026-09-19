@@ -7,15 +7,19 @@
  *      (this is the 30 Kiteroa case: no website, Page inbox that needs syncing)
  *   3. never throw — a missing client or a DB error falls back, it does not crash
  *      a cron that is syncing several clients in one run
+ *   4. AD-SEC-4 — a scoped token only serves the client that OWNS its key
+ *      (full ownership rules: token-selection.test.ts)
+ *
+ * The Supabase client is the table-modelled fake, so the ownership read really
+ * filters rows instead of replaying canned answers.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { makeBindingFakeDb, type FakeDb, type FakeFailures } from './binding-fake-db'
 
-const maybeSingle = vi.fn()
+const state: { db: FakeDb; failures: FakeFailures } = { db: {}, failures: {} }
 vi.mock('@supabase/supabase-js', () => ({
-  createClient: () => ({
-    from: () => ({ select: () => ({ eq: () => ({ maybeSingle }) }) }),
-  }),
+  createClient: () => ({ from: (t: string) => makeBindingFakeDb(state.db, state.failures).from(t) }),
 }))
 
 import { getMetaTokenForClient, domainToEnvKey, pageIdToEnvVar } from '../token-manager'
@@ -30,7 +34,8 @@ let saved: Record<string, string | undefined>
 beforeEach(() => {
   saved = Object.fromEntries(TOUCHED.map((k) => [k, process.env[k]]))
   for (const k of TOUCHED) delete process.env[k]
-  maybeSingle.mockReset()
+  state.db = {}
+  state.failures = {}
 })
 
 afterEach(() => {
@@ -40,8 +45,10 @@ afterEach(() => {
   }
 })
 
-function client(row: { domain?: string | null; facebook_page_id?: string | null } | null) {
-  maybeSingle.mockResolvedValue({ data: row, error: null })
+function client(row: { domain?: string | null; facebook_page_id?: string | null } | null, id = 'any') {
+  state.db.clients = row
+    ? [{ id, domain: null, facebook_page_id: null, created_at: '2026-01-01T00:00:00Z', source: 'fde', ...row }]
+    : []
 }
 
 describe('key derivation', () => {
@@ -100,6 +107,55 @@ describe('client with no domain (the 30 Kiteroa case)', () => {
   })
 })
 
+describe('AD-SEC-4 — a copied domain does not hand over the owner\'s token', () => {
+  it('a self-serve signup carrying an existing client\'s domain gets the shared token, the owner keeps its own', async () => {
+    state.db.clients = [
+      { id: 'cts', domain: 'ctstours.co.nz', facebook_page_id: null, created_at: '2026-01-01T00:00:00Z', source: 'fde' },
+      { id: 'squatter', domain: 'ctstours.co.nz', facebook_page_id: null, created_at: '2026-09-16T00:00:00Z', source: 'self_serve' },
+    ]
+    process.env[DOMAIN_VAR] = 'by-domain'
+    process.env.META_SYSTEM_USER_TOKEN = 'shared'
+
+    expect(await getMetaTokenForClient('squatter')).toBe('shared')
+    expect(await getMetaTokenForClient('cts')).toBe('by-domain')
+  })
+
+  it('the older owner sits past the first 1000 rows → still found (ownership scan reads every page)', async () => {
+    const filler = Array.from({ length: 1200 }, (_, i) => ({
+      id: `a${String(i).padStart(5, '0')}`, domain: `filler${i}.example.com`, facebook_page_id: null,
+      created_at: '2026-05-01T00:00:00Z', source: 'fde',
+    }))
+    state.db.clients = [
+      ...filler,
+      { id: 'b-copy', domain: 'ctstours.co.nz', facebook_page_id: null, created_at: '2026-09-01T00:00:00Z', source: 'fde' },
+      { id: 'z-owner', domain: 'ctstours.co.nz', facebook_page_id: null, created_at: '2025-01-01T00:00:00Z', source: 'fde' },
+    ]
+    process.env[DOMAIN_VAR] = 'by-domain'
+    process.env.META_SYSTEM_USER_TOKEN = 'shared'
+
+    expect(await getMetaTokenForClient('b-copy')).toBe('shared')
+    expect(await getMetaTokenForClient('z-owner')).toBe('by-domain')
+  })
+
+  it('cannot tell who owns the key (ownership read fails) → no token at all, never the wider shared one', async () => {
+    const { resolveMetaTokenForClient } = await import('../token-manager')
+    client({ domain: 'ctstours.co.nz' })
+    process.env[DOMAIN_VAR] = 'by-domain'
+    process.env.META_SYSTEM_USER_TOKEN = 'shared'
+    // single-row read succeeds, the full ownership scan (range) fails
+    const real = state.db
+    let calls = 0
+    state.db = new Proxy(real, {
+      get(target, prop) {
+        if (prop === 'clients' && ++calls > 1) throw new Error('scan failed')
+        return Reflect.get(target, prop)
+      },
+    })
+
+    expect(await resolveMetaTokenForClient('any')).toBeNull()
+  })
+})
+
 describe('never throws', () => {
   it('returns the shared token when the client row is missing', async () => {
     client(null)
@@ -109,7 +165,8 @@ describe('never throws', () => {
   })
 
   it('returns the shared token on a DB error', async () => {
-    maybeSingle.mockResolvedValue({ data: null, error: { message: 'boom' } })
+    client({ domain: 'ctstours.co.nz' })
+    state.failures = { select: new Set(['clients']) }
     process.env.META_SYSTEM_USER_TOKEN = 'shared'
 
     expect(await getMetaTokenForClient('any')).toBe('shared')

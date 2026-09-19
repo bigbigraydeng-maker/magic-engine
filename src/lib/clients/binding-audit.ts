@@ -7,13 +7,16 @@
  *   2. 客户在自助向导里提交、等 FDE 核实的值（`requested_by_client`）——
  *      每日「需要你动手」待办从这里读（pm-todo/binding-request-items.ts）。
  *
- * 通用于各种 binding_kind；目前只有 'meta_ad_account'。
+ * 通用于各种 binding_kind：'meta_ad_account'（AD-SEC-3）、'facebook_page'（AD-SEC-4）。
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
 import type { MetaTokenSource } from '@/lib/meta/token-manager'
 
-export type BindingKind = 'meta_ad_account'
+export type BindingKind = 'meta_ad_account' | 'facebook_page'
+
+/** 核实用的令牌来源；client_oauth = 客户「连接 Meta」授权后存下的主页令牌。 */
+export type BindingTokenSource = MetaTokenSource | 'client_oauth'
 
 export type BindingAuditOutcome =
   | 'authorized'
@@ -33,7 +36,7 @@ export interface BindingAuditInsert {
   outcome: BindingAuditOutcome
   previous_value?: string | null
   requested_value?: string | null
-  token_source?: MetaTokenSource | null
+  token_source?: BindingTokenSource | null
   graph_account?: Record<string, unknown> | null
   shared_with_client_ids?: string[] | null
   override_reason?: string | null

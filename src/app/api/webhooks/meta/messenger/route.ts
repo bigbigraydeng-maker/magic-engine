@@ -58,6 +58,7 @@ import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { CONVERSATION_MESSAGE_RECEIVED_EVENT } from '@/lib/conversations/events'
 import { isOptOutKeyword, recordOptOutKeywordTouch } from '@/lib/messenger-agent/optout'
 import { recordOptOutWriteFailure } from '@/lib/messenger-agent/optout-failures'
+import { assessPageBinding } from '@/lib/meta/page-sync-authorization'
 
 export const dynamic = 'force-dynamic'
 
@@ -411,6 +412,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         console.error(
           `[webhooks/meta/messenger] no client mapped to page_id=${pageId} ` +
             `— ${events.length} event(s) dropped. Set clients.facebook_page_id.`,
+        )
+      }
+      continue
+    }
+
+    // AD-SEC-4: the Page → client mapping comes from clients.facebook_page_id,
+    // which client staff could edit until 2026-09-14. Only store under a client
+    // whose binding is verified (same gate as the hourly sync) — otherwise a
+    // stale binding of someone else's Page would file their customers' messages
+    // under the wrong client. A read failure is retryable (503); a refusal is not
+    // — the daily todo (pm-todo/page-binding-items.ts) names the client to fix.
+    const verdict = await assessPageBinding(supabaseAdmin, lookup.clientId, pageId, process.env)
+    if (!verdict.verified) {
+      if (verdict.reason === 'check_failed') {
+        console.error(`[webhooks/meta/messenger] binding check FAILED for page_id=${pageId}: ${verdict.detail ?? ''}`)
+        failures.push(`binding_check_failed:${pageId}`)
+      } else {
+        console.error(
+          `[webhooks/meta/messenger] page_id=${pageId} binding not verified for client ${lookup.clientId} ` +
+            `(${verdict.reason}) — ${events.length} event(s) not stored`,
         )
       }
       continue
