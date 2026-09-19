@@ -44,4 +44,11 @@ describe('askCopyJudge', () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ answers: { cliche: { noul: 'high' } } }))
     await expect(askCopyJudge({}, Q, { fetchImpl })).rejects.toThrow('no valid answer')
   })
+
+  it('hard deadline fires even if fetch ignores the abort signal', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => new Promise(() => {}))
+    const t0 = Date.now()
+    await expect(askCopyJudge({}, Q, { fetchImpl, timeoutMs: 500 })).rejects.toThrow('timed out')
+    expect(Date.now() - t0).toBeLessThan(2000)
+  })
 })

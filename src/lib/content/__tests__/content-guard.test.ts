@@ -71,6 +71,26 @@ describe('checkLanguageConsistency (deterministic)', () => {
     expect(checkLanguageConsistency(html, CFG).findings).toEqual([])
   })
 
+  it('accented Latin words count as Latin (no false Chinese target / flag)', () => {
+    const { target, findings } = checkLanguageConsistency('Our café serves croissants and crème brûlée every morning.', CFG)
+    expect(target).toBe('en')
+    expect(findings).toEqual([])
+  })
+
+  it('ignores Chinese inside HTML attributes even when the attribute contains ">"', () => {
+    const html = '<p>Visit the wall.</p><img alt="a > 长城" src="x.jpg"><p>Book today.</p>'
+    expect(checkLanguageConsistency(html, CFG).findings).toEqual([])
+  })
+
+  it('stays fast on adversarial input (repeated @ / long unspaced CJK)', () => {
+    const t0 = Date.now()
+    checkLanguageConsistency('a@'.repeat(4000), CFG)
+    checkLanguageConsistency('a@b'.repeat(2666), CFG)
+    checkLanguageConsistency('中'.repeat(50000), CFG)
+    checkLanguageConsistency('<' + 'x'.repeat(50000), CFG)
+    expect(Date.now() - t0).toBeLessThan(1500)
+  })
+
   it('thresholds are configuration: allowing more embedded Latin words passes the NAL title in zh mode', () => {
     const { findings } = checkLanguageConsistency(NAL_TITLE_1, { ...CFG, maxEmbeddedLatinWords: 4 }, 'zh')
     expect(findings).toEqual([])
@@ -114,6 +134,12 @@ describe('runContentGuard', () => {
     expect(g.status).toBe('unavailable')
     expect(g.needsHumanReview).toBe(true)
     expect(g.judgeError).toContain('503')
+  })
+
+  it('never throws on bad input — resolves to needs human review', async () => {
+    const g = await runContentGuard(null as unknown as string, { config: CFG })
+    expect(g.status).toBe('unavailable')
+    expect(g.needsHumanReview).toBe(true)
   })
 
   it('judge error + language failure reports fail (a rewrite can still fix the language)', async () => {
@@ -173,5 +199,12 @@ describe('resolveContentGuardConfig', () => {
     expect(cfg.clicheThreshold).toBe(0.7)
     expect(cfg.maxEmbeddedLatinWords).toBe(DEFAULT_CONTENT_GUARD_CONFIG.maxEmbeddedLatinWords)
     expect(resolveContentGuardConfig({ CONTENT_GUARD_CLICHE_THRESHOLD: '1.5' }).clicheThreshold).toBe(0.8)
+    expect(resolveContentGuardConfig({ CONTENT_GUARD_CLICHE_THRESHOLD: '0' }).clicheThreshold).toBe(0.8)
+    expect(resolveContentGuardConfig({ CONTENT_GUARD_JUDGE_TIMEOUT_MS: '0x10' }).judgeTimeoutMs).toBe(8000)
+  })
+
+  it('code overrides are validated too (NaN cannot disable the cliché check)', () => {
+    expect(resolveContentGuardConfig({}, { clicheThreshold: NaN }).clicheThreshold).toBe(0.8)
+    expect(resolveContentGuardConfig({}, { clicheThreshold: 0.9 }).clicheThreshold).toBe(0.9)
   })
 })

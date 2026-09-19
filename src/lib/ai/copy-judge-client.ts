@@ -51,28 +51,36 @@ export async function askCopyJudge(
   if (!apiKey) throw new CopyJudgeError('Copy Judge not configured (TYPESAFE_API_KEY missing)')
 
   const fetchImpl = options.fetchImpl ?? fetch
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
 
   const providerQuestions = Object.fromEntries(
     Object.entries(questions).map(([id, q]) => [id, { type: 'noul', instructions: q.instructions }]),
   )
 
+  let deadline: ReturnType<typeof setTimeout> | undefined
+  // Hard deadline even if a fetch implementation ignores the abort signal.
+  const hardDeadline = new Promise<never>((_, reject) => {
+    deadline = setTimeout(() => reject(new CopyJudgeError(`Copy Judge timed out after ${timeoutMs}ms`)), timeoutMs + 250)
+  })
+
   let body: unknown
   try {
-    const res = await fetchImpl(COPY_JUDGE_URL, {
+    const res = await Promise.race([hardDeadline, fetchImpl(COPY_JUDGE_URL, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ state, model: COPY_JUDGE_MODEL, questions: providerQuestions }),
       signal: controller.signal,
-    })
+    })])
     if (!res.ok) throw new CopyJudgeError(`Copy Judge HTTP ${res.status}`)
-    body = await res.json()
+    body = await Promise.race([hardDeadline, res.json()])
   } catch (err) {
     if (err instanceof CopyJudgeError) throw err
     throw new CopyJudgeError(`Copy Judge request failed: ${err instanceof Error ? err.message : String(err)}`)
   } finally {
     clearTimeout(timer)
+    clearTimeout(deadline)
   }
 
   const answers = (body as { answers?: ProviderAnswers } | null)?.answers

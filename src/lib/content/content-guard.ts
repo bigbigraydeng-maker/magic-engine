@@ -35,9 +35,11 @@ export interface ContentGuardResult {
 }
 
 const CJK_RUN_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+/gu
-const LATIN_WORD_RE = /[A-Za-z][A-Za-z'’-]*/g
+const LATIN_WORD_RE = /\p{Script=Latin}[\p{Script=Latin}\p{M}'’-]*/gu
 const MAX_REPORTED_FINDINGS = 5
 const JUDGE_SNIPPET_CHARS = 1500
+/** Bound the work per call (long blogs): regex cost must stay linear-ish and small. */
+const MAX_GUARD_INPUT_CHARS = 20000
 
 const CLICHE_INSTRUCTIONS =
   'The post opens with or leans on generic marketing clichés (e.g. "Unlock the power of", ' +
@@ -49,11 +51,13 @@ const CLICHE_INSTRUCTIONS =
 /** Strip markup and tokens that legitimately carry another script (URLs, tags, mentions). */
 export function normaliseForLanguageCheck(text: string): string {
   return text
-    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;|&amp;|&[a-z]+;/gi, ' ')
+    .slice(0, MAX_GUARD_INPUT_CHARS)
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<(?:"[^"]*"|'[^']*'|[^'">])*>/g, ' ')
+    .replace(/&[a-z]+;|&#\d+;/gi, ' ')
     .replace(/https?:\/\/\S+|www\.\S+/gi, ' ')
-    .replace(/\S+@\S+\.\S+/g, ' ')
+    // Anchored at token start so long unspaced text stays linear (no ReDoS).
+    .replace(/(?<!\S)[^\s@]+@[^\s@]+\.[^\s@]+/g, ' ')
     .replace(/[#@][^\s#@]+/g, ' ')
 }
 
@@ -90,7 +94,14 @@ export function checkLanguageConsistency(
   config: ContentGuardConfig,
   targetLanguage?: GuardLanguage | null,
 ): { target: GuardLanguage; findings: LanguageFinding[] } {
-  const text = normaliseForLanguageCheck(content)
+  return checkNormalised(normaliseForLanguageCheck(content), config, targetLanguage)
+}
+
+function checkNormalised(
+  text: string,
+  config: ContentGuardConfig,
+  targetLanguage?: GuardLanguage | null,
+): { target: GuardLanguage; findings: LanguageFinding[] } {
   const target = targetLanguage ?? inferTargetLanguage(text)
   const findings: LanguageFinding[] = []
 
@@ -162,22 +173,37 @@ export async function runContentGuard(
   options: { targetLanguage?: GuardLanguage | null; config?: ContentGuardConfig } = {},
 ): Promise<ContentGuardResult> {
   const config = options.config ?? resolveContentGuardConfig()
-  const { target, findings } = checkLanguageConsistency(content, config, options.targetLanguage)
-  const { probability, error } = await judgeCliche(normaliseForLanguageCheck(content), config)
+  try {
+    const text = normaliseForLanguageCheck(content)
+    const { target, findings } = checkNormalised(text, config, options.targetLanguage)
+    const { probability, error } = await judgeCliche(text, config)
 
-  const dimensions = [languageDimension(target, findings), clicheDimension(probability, error, config)]
-  const checksFailed = findings.length > 0 || (probability !== null && probability >= config.clicheThreshold)
-  const status = checksFailed ? 'fail' : error ? 'unavailable' : 'pass'
+    const dimensions = [languageDimension(target, findings), clicheDimension(probability, error, config)]
+    const checksFailed = findings.length > 0 || (probability !== null && probability >= config.clicheThreshold)
+    const status = checksFailed ? 'fail' : error ? 'unavailable' : 'pass'
 
-  return {
-    status,
-    needsHumanReview: status !== 'pass',
-    targetLanguage: target,
-    languageFindings: findings.slice(0, MAX_REPORTED_FINDINGS),
-    clicheProbability: probability,
-    judgeError: error,
-    dimensions,
-    config,
+    return {
+      status,
+      needsHumanReview: status !== 'pass',
+      targetLanguage: target,
+      languageFindings: findings.slice(0, MAX_REPORTED_FINDINGS),
+      clicheProbability: probability,
+      judgeError: error,
+      dimensions,
+      config,
+    }
+  } catch (err) {
+    const message = `content guard crashed: ${err instanceof Error ? err.message : String(err)}`
+    return {
+      status: 'unavailable',
+      needsHumanReview: true,
+      targetLanguage: options.targetLanguage ?? 'en',
+      languageFindings: [],
+      clicheProbability: null,
+      judgeError: message,
+      dimensions: [clicheDimension(null, message, config)],
+      config,
+    }
   }
 }
 
