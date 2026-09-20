@@ -89,29 +89,23 @@ apply 时炸在 policy 步骤。影响 19 个客户的关键词排名 cron 全�
 
 **怎么防**：每次改 `type X = 'a' | 'b' | 'c'` 必须 grep 全仓 `Record` / `switch` / `STATUS_META` 的 key。
 
-### B5 · 反过来也会漂：线上库被手工改过，仓库里的 migration 根本不知道 🔴
+### B5 · 判断「schema 漂移」前必须 grep 该列全部历史 migration，不能只看引入它的那一条 🔴
 
-**事故**（2026-09-21）：`clients.brand_aliases` 在仓库 migration
-（`20260624010000_client_brand_aliases.sql`）里写的是可以为空（nullable，无默认值），
-线上库（`glbdnayojixmexgofbsd`）实际是 `NOT NULL DEFAULT '{}'`。没有任何 migration 记录这次改动。
-后果：品牌别名设置面板**能加不能清空**——代码在清空时写 NULL，数据库拒绝（23502），接口 500。
-这个 bug 从 6 月潜伏到 9 月才被顺手发现。
-
-**跟 B3 是镜像关系**：B3 是「仓库里有 migration，线上没跑」；B5 是「线上改了，仓库不知道」。
-两个方向都要查，只查一边等于没查。
+**事故**（2026-09-21）：排查品牌别名设置面板**能加不能清空**的问题时，看到仓库里引入
+`clients.brand_aliases` 的那条 migration（`20260624010000_client_brand_aliases.sql`）把它声明为
+可以为空（nullable，无默认值），而线上库（`glbdnayojixmexgofbsd`）实际是 `NOT NULL DEFAULT '{}'`，
+于是先入为主判断成「线上被手工改过、仓库没记录」，并打算新增一条对齐 migration 补记录。
+实际上后续 `20260625000001_a21_goal_current_value.sql:35-41` 早就把这一列回填 NULL、
+`SET DEFAULT '{}'`、`SET NOT NULL` 做齐了——按仓库全部 migration 重建的环境本就等于线上，
+根本没有漂移，只是排查时漏看了同一列后续还被加固过。真正的 bug 只在接口代码：PATCH 清空别名时
+仍写 NULL，数据库拒绝（23502），接口 500。这个 bug 从 6 月潜伏到 9 月才被顺手发现，但「schema 漂移」
+是误判，不是事故本体。
 
 **怎么防**：
-1. 写「空就存 NULL」这种代码前，先确认那一列真的允许 NULL。不看仓库 migration，看线上：
-   ```bash
-   # PostgREST 的 schema spec 会把 NOT NULL 列列进 required，只读、不碰数据
-   curl -s "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/" \
-     -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
-     -H "Accept: application/openapi+json" \
-     | jq '.definitions.clients.required'
-   ```
-2. 发现漂移，当场补一条**幂等的对齐 migration**（先把存量 NULL 刷成默认值，再 `SET DEFAULT` /
-   `SET NOT NULL`），让线上是 no-op、其它环境能追平。范例：
-   `20260921010000_clients_brand_aliases_not_null_align.sql`。
+1. 怀疑某一列「仓库和线上不一致」之前，先 `grep -rn <column_name> supabase/migrations/` 看该列
+   有没有被后续 migration 再动过，不能只读引入它的那一条。
+2. 只有 grep 完整历史后仍对不上，才是真漂移，这时才需要新增对齐 migration；此前的空判会让文档
+   记错事故性质，也会多一条实际上什么都不做的 migration 去扫描/锁表。
 3. 除非真有读取方靠 NULL 和 `[]` 区分行为，数组列一律存 `[]`，别存 NULL —— 少一个没有含义、
    却能把写操作打挂的状态。`clients.primary_keywords` / `clients.competitor_domains` /
    `master_briefs.products` / `master_briefs.excluded_topics` 四个兄弟接口今天还在写
