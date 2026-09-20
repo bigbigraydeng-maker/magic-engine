@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { encryptToken, decryptToken } from '@/lib/platform-oauth/vocabulary'
 import { MetaReadError, metaGraphGet, metaReadVersion, graphRows, graphAfter } from '../graph-read'
 import { type MetaToolName, schemas } from './contract'
-import { activeConnection, readGrant, reserveRead, requireMetaScope, type MetaPrincipal } from './store'
+import { activeConnection, readGrant, reserveRead, requireMetaScope,requireReleaseAuthorization,type MetaPrincipal } from './store'
 import { normaliseInsight, resolveWindow, previousWindow, compareMetrics, type Window } from './metrics'
 import { startReadAudit,finishReadAudit } from './audit'
 import { outputSchema } from './contract'
@@ -28,7 +28,7 @@ export async function invokeMetaTool(principal: MetaPrincipal, tool: MetaToolNam
   try {
     const result=await executeRead(principal,tool,args,requestId)
     await finishReadAudit(requestId,null,result.meta.account_id)
-    await requirePilotActive(principal.clientId)
+    await requireReleaseAuthorization(principal,result.meta.account_id)
     return outputSchema.parse(result)
   } catch(error) {
     await finishReadAudit(requestId,error instanceof MetaReadError ? error.code : 'request_failed')

@@ -2,9 +2,10 @@
 ALTER TABLE public.platform_oauth_connections ADD COLUMN purpose text NOT NULL DEFAULT 'legacy'
   CHECK (purpose IN ('legacy', 'meta_ads_read'));
 ALTER TABLE public.platform_oauth_connections ADD COLUMN authorizing_principal_id uuid;
+ALTER TABLE public.platform_oauth_connections ADD COLUMN entitlement_revision uuid;
 ALTER TABLE public.platform_oauth_connections ADD CONSTRAINT meta_ads_connection_identity
   CHECK (purpose <> 'meta_ads_read' OR (provider = 'meta' AND account_id ~ '^ads_user:[0-9]+$'
-    AND authorizing_principal_id IS NOT NULL));
+    AND authorizing_principal_id IS NOT NULL AND entitlement_revision IS NOT NULL));
 ALTER TABLE public.platform_oauth_connections ADD CONSTRAINT platform_connection_tenant_unique UNIQUE(id, client_id);
 ALTER TABLE public.client_api_keys ADD COLUMN expires_at timestamptz;
 CREATE TABLE public.meta_ads_ai_pilot_entitlements (
@@ -12,10 +13,12 @@ CREATE TABLE public.meta_ads_ai_pilot_entitlements (
   status text NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'paused', 'revoked')),
   starts_at timestamptz NOT NULL DEFAULT now(),
   expires_at timestamptz,
+  revision uuid NOT NULL DEFAULT gen_random_uuid(),
   approved_by_email text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  CHECK(expires_at IS NULL OR expires_at > starts_at)
+  CHECK(expires_at IS NULL OR expires_at > starts_at),
+  UNIQUE(client_id,revision)
 );
 CREATE TABLE public.meta_ads_read_grants (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -23,6 +26,7 @@ CREATE TABLE public.meta_ads_read_grants (
   connection_id uuid NOT NULL,
   ad_account_id text NOT NULL CHECK(ad_account_id ~ '^act_[1-9][0-9]{9,24}$'),
   principal_id uuid NOT NULL,
+  entitlement_revision uuid NOT NULL,
   revision uuid NOT NULL DEFAULT gen_random_uuid(),
   revoked_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -36,6 +40,7 @@ CREATE TABLE public.meta_ads_oauth_states (
   state_hash text PRIMARY KEY,
   client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
   principal_id uuid NOT NULL,
+  entitlement_revision uuid NOT NULL,
   browser_hash text NOT NULL,
   expires_at timestamptz NOT NULL
 );
@@ -66,6 +71,25 @@ COMMENT ON TABLE public.meta_ads_ai_pilot_entitlements IS
 COMMENT ON COLUMN public.platform_oauth_connections.authorizing_principal_id IS
   'ME user who completed provider OAuth. Required for meta_ads_read so other tenant members cannot inherit broad account discovery.';
 
+CREATE FUNCTION public.meta_ads_entitlement_revision_guard() RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
+BEGIN
+  IF OLD.status='revoked' OR NEW.status='revoked'
+     OR (OLD.expires_at IS NOT NULL AND OLD.expires_at<=now() AND (NEW.expires_at IS NULL OR NEW.expires_at>now())) THEN
+    NEW.revision:=gen_random_uuid();
+  ELSE
+    NEW.revision:=OLD.revision;
+  END IF;
+  RETURN NEW;
+END; $$;
+CREATE TRIGGER meta_ads_entitlement_revision BEFORE UPDATE ON public.meta_ads_ai_pilot_entitlements
+  FOR EACH ROW EXECUTE FUNCTION public.meta_ads_entitlement_revision_guard();
+
+CREATE FUNCTION public.meta_ads_active_entitlement(tenant uuid,rev uuid) RETURNS boolean
+LANGUAGE sql STABLE SET search_path = '' AS $$
+ SELECT EXISTS(SELECT 1 FROM public.meta_ads_ai_pilot_entitlements e WHERE e.client_id=tenant AND e.revision=rev
+   AND e.status='active' AND e.starts_at<=now() AND (e.expires_at IS NULL OR e.expires_at>now()));
+$$;
+
 CREATE FUNCTION public.meta_ads_registered_match(stored text, account text) RETURNS boolean
 LANGUAGE sql IMMUTABLE SET search_path = '' AS $$
   SELECT EXISTS(SELECT 1 FROM regexp_split_to_table(
@@ -78,6 +102,35 @@ LANGUAGE sql STABLE SET search_path = '' AS $$
  OR EXISTS(SELECT 1 FROM public.clients WHERE id <> tenant AND public.meta_ads_registered_match(meta_ad_account_id, account))
  OR EXISTS(SELECT 1 FROM public.meta_ads_read_grants WHERE client_id <> tenant AND ad_account_id=account AND revoked_at IS NULL);
 $$;
+CREATE FUNCTION public.meta_ads_authorization_current(tenant uuid,key_id uuid,account text) RETURNS boolean
+LANGUAGE sql STABLE SET search_path = '' AS $$
+ SELECT EXISTS(
+   SELECT 1 FROM public.client_api_keys k
+   JOIN public.meta_ads_read_grants g ON g.id=(k.metadata->>'meta_ads_grant_id')::uuid AND g.client_id=k.client_id
+   JOIN public.platform_oauth_connections c ON c.id=g.connection_id AND c.client_id=g.client_id
+   JOIN public.meta_ads_ai_pilot_entitlements e ON e.client_id=g.client_id
+   WHERE k.id=key_id AND k.client_id=tenant AND k.revoked_at IS NULL AND k.expires_at>now()
+     AND 'meta:ads:read'=ANY(k.scopes) AND g.ad_account_id=account AND g.revoked_at IS NULL
+     AND (k.metadata->>'meta_ads_grant_revision')::uuid=g.revision
+     AND (k.metadata->>'meta_ads_entitlement_revision')::uuid=g.entitlement_revision
+     AND (k.metadata->>'meta_ads_principal_id')::uuid=g.principal_id
+     AND c.purpose='meta_ads_read' AND c.provider='meta' AND c.status='active' AND c.token_expiry>now()
+     AND 'ads_read'=ANY(c.scopes) AND c.authorizing_principal_id=g.principal_id
+     AND c.entitlement_revision=g.entitlement_revision AND e.revision=g.entitlement_revision
+     AND e.status='active' AND e.starts_at<=now() AND (e.expires_at IS NULL OR e.expires_at>now())
+     AND NOT public.meta_ads_account_conflict(tenant,account)
+ );
+$$;
+CREATE FUNCTION public.meta_ads_discovery_current(tenant uuid,conn_id uuid,principal uuid,expected_version timestamptz) RETURNS boolean
+LANGUAGE sql STABLE SET search_path = '' AS $$
+ SELECT EXISTS(
+   SELECT 1 FROM public.platform_oauth_connections c
+   JOIN public.meta_ads_ai_pilot_entitlements e ON e.client_id=c.client_id AND e.revision=c.entitlement_revision
+   WHERE c.id=conn_id AND c.client_id=tenant AND c.authorizing_principal_id=principal AND c.updated_at=expected_version
+     AND c.purpose='meta_ads_read' AND c.provider='meta' AND c.status='active' AND c.token_expiry>now()
+     AND 'ads_read'=ANY(c.scopes) AND e.status='active' AND e.starts_at<=now() AND (e.expires_at IS NULL OR e.expires_at>now())
+ );
+$$;
 CREATE FUNCTION public.meta_ads_binding_guard() RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
 DECLARE tenant uuid; account text;
 BEGIN
@@ -89,8 +142,12 @@ BEGIN
    END IF;
    NEW.revision := gen_random_uuid();
    IF NEW.revoked_at IS NOT NULL THEN RETURN NEW; END IF;
+   IF NOT public.meta_ads_active_entitlement(NEW.client_id,NEW.entitlement_revision) THEN
+     RAISE EXCEPTION 'inactive pilot entitlement' USING ERRCODE='23514';
+   END IF;
    IF NOT EXISTS(SELECT 1 FROM public.platform_oauth_connections c WHERE c.id=NEW.connection_id AND c.client_id=NEW.client_id
-      AND c.purpose='meta_ads_read' AND c.provider='meta' AND c.status='active' AND c.token_expiry>now() AND 'ads_read'=ANY(c.scopes)) THEN
+      AND c.purpose='meta_ads_read' AND c.provider='meta' AND c.status='active' AND c.token_expiry>now() AND 'ads_read'=ANY(c.scopes)
+      AND c.entitlement_revision=NEW.entitlement_revision AND c.authorizing_principal_id=NEW.principal_id) THEN
      RAISE EXCEPTION 'invalid read connection' USING ERRCODE='23514';
    END IF;
    IF public.meta_ads_account_conflict(NEW.client_id, NEW.ad_account_id) THEN
@@ -109,6 +166,20 @@ END; $$;
 CREATE TRIGGER meta_ads_grant_guard BEFORE INSERT OR UPDATE ON public.meta_ads_read_grants FOR EACH ROW EXECUTE FUNCTION public.meta_ads_binding_guard();
 CREATE TRIGGER meta_ads_registry_guard BEFORE INSERT OR UPDATE OF client_id,ad_account_id ON public.client_meta_ad_accounts FOR EACH ROW EXECUTE FUNCTION public.meta_ads_binding_guard();
 CREATE TRIGGER meta_ads_legacy_guard BEFORE INSERT OR UPDATE OF meta_ad_account_id ON public.clients FOR EACH ROW EXECUTE FUNCTION public.meta_ads_binding_guard();
+CREATE FUNCTION public.meta_ads_connection_entitlement_guard() RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
+BEGIN
+ IF NEW.purpose='meta_ads_read' THEN
+   IF TG_OP='UPDATE' AND NEW.authorizing_principal_id IS DISTINCT FROM OLD.authorizing_principal_id THEN
+     RAISE EXCEPTION 'connection owner is immutable' USING ERRCODE='23514';
+   END IF;
+   IF NEW.status='active' AND NOT public.meta_ads_active_entitlement(NEW.client_id,NEW.entitlement_revision) THEN
+     RAISE EXCEPTION 'inactive pilot entitlement' USING ERRCODE='23514';
+   END IF;
+ END IF;
+ RETURN NEW;
+END; $$;
+CREATE TRIGGER meta_ads_connection_entitlement BEFORE INSERT OR UPDATE ON public.platform_oauth_connections
+  FOR EACH ROW EXECUTE FUNCTION public.meta_ads_connection_entitlement_guard();
 CREATE FUNCTION public.meta_ads_reserve_read(tenant uuid) RETURNS boolean LANGUAGE plpgsql SET search_path = '' AS $$
 DECLARE allowed boolean;
 BEGIN
@@ -119,18 +190,19 @@ BEGIN
  RETURNING calls<=30 INTO allowed;
  RETURN allowed;
 END; $$;
-REVOKE ALL ON FUNCTION public.meta_ads_registered_match(text,text), public.meta_ads_account_conflict(uuid,text), public.meta_ads_binding_guard(), public.meta_ads_reserve_read(uuid) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.meta_ads_registered_match(text,text), public.meta_ads_account_conflict(uuid,text), public.meta_ads_binding_guard(), public.meta_ads_reserve_read(uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.meta_ads_registered_match(text,text), public.meta_ads_account_conflict(uuid,text), public.meta_ads_authorization_current(uuid,uuid,text), public.meta_ads_discovery_current(uuid,uuid,uuid,timestamptz), public.meta_ads_binding_guard(), public.meta_ads_reserve_read(uuid), public.meta_ads_entitlement_revision_guard(), public.meta_ads_active_entitlement(uuid,uuid), public.meta_ads_connection_entitlement_guard() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.meta_ads_registered_match(text,text), public.meta_ads_account_conflict(uuid,text), public.meta_ads_authorization_current(uuid,uuid,text), public.meta_ads_discovery_current(uuid,uuid,uuid,timestamptz), public.meta_ads_binding_guard(), public.meta_ads_reserve_read(uuid), public.meta_ads_entitlement_revision_guard(), public.meta_ads_active_entitlement(uuid,uuid), public.meta_ads_connection_entitlement_guard() TO service_role;
 -- Reconsent never resurrects keys/grants issued before disconnect or token replacement.
 CREATE FUNCTION public.meta_ads_connection_changed() RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
 BEGIN
- IF OLD.purpose='meta_ads_read' AND (OLD.access_token_enc IS DISTINCT FROM NEW.access_token_enc OR OLD.status IS DISTINCT FROM NEW.status) THEN
+ IF OLD.purpose='meta_ads_read' AND (OLD.access_token_enc IS DISTINCT FROM NEW.access_token_enc OR OLD.status IS DISTINCT FROM NEW.status
+    OR OLD.entitlement_revision IS DISTINCT FROM NEW.entitlement_revision) THEN
    UPDATE public.meta_ads_binding_lock SET revision=revision+1 WHERE id=true;
    UPDATE public.meta_ads_read_grants SET revoked_at=now() WHERE connection_id=OLD.id AND revoked_at IS NULL;
  END IF;
  RETURN NEW;
 END; $$;
-CREATE TRIGGER meta_ads_connection_invalidate AFTER UPDATE OF access_token_enc,status ON public.platform_oauth_connections FOR EACH ROW EXECUTE FUNCTION public.meta_ads_connection_changed();
+CREATE TRIGGER meta_ads_connection_invalidate AFTER UPDATE OF access_token_enc,status,entitlement_revision ON public.platform_oauth_connections FOR EACH ROW EXECUTE FUNCTION public.meta_ads_connection_changed();
 REVOKE ALL ON FUNCTION public.meta_ads_connection_changed() FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.meta_ads_connection_changed() TO service_role;
 -- Reuse the platform control-plane and tool audit stores; no parallel audit infrastructure.

@@ -14,6 +14,7 @@ const messages: Record<string,string>={ account_unavailable:'该广告账户已�
   provider_unavailable:'暂时无法连接 Meta，请稍后重试。',request_failed:'操作失败，请重试。',
   service_paused:'测试服务目前已暂停。你仍可查看状态、断开连接和撤销密钥。',pilot_required:'该客户尚未获得邀请测试资格。',
   invitation_required:'该客户尚未获得邀请测试资格。',invitation_inactive:'邀请测试资格目前未启用。',invitation_expired:'邀请测试资格已到期。',
+  invitation_changed:'本次邀请已经结束。重新受邀后，请重新连接 Facebook 并创建新的 AI 密钥。',
   connection_owner_required:'请使用最初完成 Facebook 授权的 Magic Engine 账号操作。',disconnect_not_found:'该连接不存在、已被撤销，或不属于当前账号。' }
 const pilotMessages: Record<Pilot['reason'],string>={ ready:'',service_paused:'测试服务目前已暂停。你仍可查看状态、断开连接和撤销密钥。',
   invitation_required:'该客户尚未获得邀请测试资格。',invitation_inactive:'邀请测试资格目前未启用。',invitation_expired:'邀请测试资格已到期。' }

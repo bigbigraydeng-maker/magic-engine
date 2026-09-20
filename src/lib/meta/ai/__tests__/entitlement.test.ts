@@ -20,20 +20,20 @@ beforeEach(()=>{
 
 describe('邀请测试资格',()=>{
   it('只有生效且未过期的邀请允许创建连接和读取',async()=>{
-    mocks.from.mockReturnValue(query({ data:{ status:'active',starts_at:'2026-09-01T00:00:00Z',expires_at:'2099-01-01T00:00:00Z' },error:null }))
+    mocks.from.mockReturnValue(query({ data:{ status:'active',starts_at:'2026-09-01T00:00:00Z',expires_at:'2099-01-01T00:00:00Z',revision:'ent-1' },error:null }))
     await expect(requirePilotActive('client')).resolves.toMatchObject({ reason:'ready',new_actions_allowed:true })
   })
 
   it('总开关关闭时阻止新连接和读取',async()=>{
     process.env.META_ADS_AI_ENABLED='false'
-    mocks.from.mockReturnValue(query({ data:{ status:'active',starts_at:'2026-09-01T00:00:00Z',expires_at:'2099-01-01T00:00:00Z' },error:null }))
+    mocks.from.mockReturnValue(query({ data:{ status:'active',starts_at:'2026-09-01T00:00:00Z',expires_at:'2099-01-01T00:00:00Z',revision:'ent-1' },error:null }))
     await expect(requirePilotActive('client')).rejects.toThrow('service_paused')
   })
 
   it('暂停后仍允许已有客户进入页面撤销连接',async()=>{
     process.env.META_ADS_AI_ENABLED='false'
     mocks.from.mockImplementation((table:string)=>table==='meta_ads_ai_pilot_entitlements'
-      ? query({ data:{ status:'paused',starts_at:'2026-09-01T00:00:00Z',expires_at:null },error:null })
+      ? query({ data:{ status:'paused',starts_at:'2026-09-01T00:00:00Z',expires_at:null,revision:'ent-1' },error:null })
       : query({ data:[],error:null }))
     await expect(requirePilotLifecycleAccess('client')).resolves.toMatchObject({ new_actions_allowed:false })
   })

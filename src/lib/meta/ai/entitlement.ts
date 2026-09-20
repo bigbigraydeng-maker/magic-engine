@@ -8,18 +8,20 @@ interface PilotRow {
   status: PilotStatus
   starts_at: string
   expires_at: string | null
+  revision: string
 }
 
 export interface PilotState {
   invited: boolean
   new_actions_allowed: boolean
   reason: 'ready' | 'service_paused' | 'invitation_required' | 'invitation_inactive' | 'invitation_expired'
+  revision: string | null
 }
 
 async function entitlement(clientId: string): Promise<PilotRow | null> {
   const { data, error } = await supabaseAdmin
     .from('meta_ads_ai_pilot_entitlements')
-    .select('status,starts_at,expires_at')
+    .select('status,starts_at,expires_at,revision')
     .eq('client_id', clientId)
     .maybeSingle()
   if (error) throw new MetaReadError('authorization_unavailable', 503)
@@ -27,15 +29,15 @@ async function entitlement(clientId: string): Promise<PilotRow | null> {
 }
 
 function rowState(row: PilotRow | null, now = Date.now()): PilotState {
-  if (!row) return { invited: false, new_actions_allowed: false, reason: 'invitation_required' }
+  if (!row) return { invited: false, new_actions_allowed: false, reason: 'invitation_required', revision:null }
   if (row.status !== 'active' || Date.parse(row.starts_at) > now) {
-    return { invited: true, new_actions_allowed: false, reason: 'invitation_inactive' }
+    return { invited: true, new_actions_allowed: false, reason: 'invitation_inactive',revision:row.revision }
   }
   if (row.expires_at && Date.parse(row.expires_at) <= now) {
-    return { invited: true, new_actions_allowed: false, reason: 'invitation_expired' }
+    return { invited: true, new_actions_allowed: false, reason: 'invitation_expired',revision:row.revision }
   }
-  if (!enabled()) return { invited: true, new_actions_allowed: false, reason: 'service_paused' }
-  return { invited: true, new_actions_allowed: true, reason: 'ready' }
+  if (!enabled()) return { invited: true, new_actions_allowed: false, reason: 'service_paused',revision:row.revision }
+  return { invited: true, new_actions_allowed: true, reason: 'ready',revision:row.revision }
 }
 
 export async function pilotState(clientId: string): Promise<PilotState> {
@@ -64,6 +66,12 @@ export async function requirePilotActive(clientId: string): Promise<PilotState> 
   if (state.new_actions_allowed) return state
   const status = state.reason === 'service_paused' ? 404 : 403
   throw new MetaReadError(state.reason, status)
+}
+
+export async function requirePilotRevision(clientId:string,revision:string):Promise<PilotState> {
+  const state=await requirePilotActive(clientId)
+  if(state.revision!==revision) throw new MetaReadError('invitation_changed',403)
+  return state
 }
 
 export async function pilotEntryVisible(clientId: string): Promise<boolean> {

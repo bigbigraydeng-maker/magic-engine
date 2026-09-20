@@ -57,6 +57,7 @@ export interface PlatformOAuthConnectionRow {
   client_id:         string
   provider:          PlatformProvider
   authorizing_principal_id: string | null
+  entitlement_revision: string | null
   access_token_enc:  string   // AES-256-GCM encrypted
   refresh_token_enc: string   // AES-256-GCM encrypted
   token_expiry:      string   // ISO 8601 timestamp
@@ -134,5 +135,8 @@ export interface UpsertConnectionInput {
   /** ME user who completed provider consent. Required by the Meta Ads read pilot
    *  so another member of the same tenant cannot inherit account discovery. */
   authorizingPrincipalId?: string
+  /** Pilot lifecycle revision. Required with purpose=meta_ads_read so a terminal
+   *  withdrawal and later re-invite cannot reactivate an old connection. */
+  entitlementRevision?: string
   lastSyncedAt?: Date
 }

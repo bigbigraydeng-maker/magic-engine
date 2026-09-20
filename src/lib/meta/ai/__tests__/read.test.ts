@@ -1,5 +1,5 @@
 import { beforeEach,describe,it,expect,vi } from 'vitest'
-const mocks=vi.hoisted(()=>({ readGrant:vi.fn(),activeConnection:vi.fn(),reserveRead:vi.fn(),requireMetaScope:vi.fn(),requirePilotActive:vi.fn() }))
+const mocks=vi.hoisted(()=>({ readGrant:vi.fn(),activeConnection:vi.fn(),reserveRead:vi.fn(),requireMetaScope:vi.fn(),requirePilotActive:vi.fn(),requireReleaseAuthorization:vi.fn() }))
 vi.mock('../store',()=>mocks)
 vi.mock('../entitlement',()=>({ requirePilotActive:mocks.requirePilotActive }))
 vi.mock('../audit',()=>({ startReadAudit:vi.fn().mockResolvedValue('12345678-1234-4234-9234-123456789012'),finishReadAudit:vi.fn() }))
@@ -16,6 +16,7 @@ beforeEach(()=>{
   process.env.META_ADS_AI_GRAPH_VERSION='v21.0';process.env.CMS_TOKEN_ENCRYPTION_KEY='11'.repeat(32)
   mocks.reserveRead.mockResolvedValue(undefined);mocks.readGrant.mockReset().mockResolvedValue(grant);mocks.activeConnection.mockResolvedValue({ token:'private-token',version:'v1' })
   mocks.requirePilotActive.mockResolvedValue({ new_actions_allowed:true })
+  mocks.requireReleaseAuthorization.mockResolvedValue(undefined)
   mockFetch.mockReset().mockImplementation(async()=>reply(account))
 })
 describe('public read boundary',()=>{
@@ -54,11 +55,18 @@ describe('public read boundary',()=>{
     expect(finishReadAudit).toHaveBeenCalledWith(expect.any(String),'service_paused')
   })
   it('discards results if the pilot is paused while the success receipt is being saved',async()=>{
-    mocks.requirePilotActive.mockResolvedValueOnce({ new_actions_allowed:true }).mockResolvedValueOnce({ new_actions_allowed:true })
-      .mockRejectedValueOnce(new MetaReadError('service_paused',404))
-    await expect(invokeMetaTool(principal,'meta_list_accounts',{})).rejects.toThrow('service_paused')
+    mocks.requireReleaseAuthorization.mockRejectedValueOnce(new MetaReadError('authorization_changed',403))
+    await expect(invokeMetaTool(principal,'meta_list_accounts',{})).rejects.toThrow('authorization_changed')
     expect(finishReadAudit).toHaveBeenNthCalledWith(1,expect.any(String),null,grant.ad_account_id)
-    expect(finishReadAudit).toHaveBeenNthCalledWith(2,expect.any(String),'service_paused')
+    expect(finishReadAudit).toHaveBeenNthCalledWith(2,expect.any(String),'authorization_changed')
+  })
+  it.each([
+    ['key is revoked'],['grant is revoked'],['connection is disconnected'],
+  ])('discards results after the success receipt when %s',async()=>{
+    mocks.requireReleaseAuthorization.mockRejectedValueOnce(new MetaReadError('authorization_changed',403))
+    await expect(invokeMetaTool(principal,'meta_list_accounts',{})).rejects.toThrow()
+    expect(finishReadAudit).toHaveBeenNthCalledWith(1,expect.any(String),null,grant.ad_account_id)
+    expect(finishReadAudit).toHaveBeenNthCalledWith(2,expect.any(String),expect.any(String))
   })
   it('discards results if token or grant changes',async()=>{
     mocks.activeConnection.mockResolvedValueOnce({ token:'private-token',version:'v1' }).mockResolvedValueOnce({ token:'new',version:'v2' })

@@ -4,19 +4,22 @@ import { browserCookie,consumeAdsState,finishAdsConsent } from '@/lib/meta-oauth
 import { activeDashboardAccess,failure } from '@/lib/meta/ai/http'
 import { auditedControl } from '@/lib/meta/ai/audit'
 import { MetaReadError } from '@/lib/meta/graph-read'
+import { requirePilotRevision } from '@/lib/meta/ai/entitlement'
 export async function GET(request: NextRequest) {
   let clientId: string | null = null
   try {
     const session = await requireSession()
     if (!session.ok) throw new MetaReadError('sign_in_required',401)
-    const consumedClientId = await consumeAdsState(request.nextUrl.searchParams.get('state') ?? '',request.cookies.get(browserCookie)?.value ?? '',session.user.id)
+    const consumed = await consumeAdsState(request.nextUrl.searchParams.get('state') ?? '',request.cookies.get(browserCookie)?.value ?? '',session.user.id)
+    const consumedClientId=consumed.clientId
     clientId = consumedClientId
     await activeDashboardAccess(consumedClientId)
+    await requirePilotRevision(consumedClientId,consumed.entitlementRevision)
     let outcome = 'authorised'
     try {
       const code = request.nextUrl.searchParams.get('code')
       if (request.nextUrl.searchParams.has('error') || !code) throw new MetaReadError('consent_cancelled')
-      await auditedControl(consumedClientId,session.user.email ?? '', 'oauth_complete',null,()=>finishAdsConsent(code,consumedClientId,session.user.id))
+      await auditedControl(consumedClientId,session.user.email ?? '', 'oauth_complete',null,()=>finishAdsConsent(code,consumedClientId,session.user.id,consumed.entitlementRevision))
     } catch { outcome='reconnect_required' }
     const target = new URL(`/meta-ads-ai/${consumedClientId}`,process.env.NEXT_PUBLIC_APP_URL)
     target.searchParams.set('outcome',outcome)

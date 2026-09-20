@@ -15,8 +15,9 @@ let started=false,checks=0
 async function connect(){ const c=new pg.Client({ host:root,port:5432,user:process.env.USER,database:'postgres' });await c.connect();clients.push(c);return c }
 async function denied(c,sql,params=[]){ await assert.rejects(()=>c.query(sql,params));checks++ }
 const a='10000000-0000-0000-0000-000000000001',b='10000000-0000-0000-0000-000000000002'
-const ca='20000000-0000-0000-0000-000000000001',cb='20000000-0000-0000-0000-000000000002'
-const grantSql=`INSERT INTO meta_ads_read_grants(client_id,connection_id,ad_account_id,principal_id) VALUES($1,$2,$3,$1) RETURNING *`
+const ca='20000000-0000-0000-0000-000000000001',cb='20000000-0000-0000-0000-000000000002',ca2='20000000-0000-0000-0000-000000000003'
+const grantSql=`INSERT INTO meta_ads_read_grants(client_id,connection_id,ad_account_id,principal_id,entitlement_revision)
+ VALUES($1,$2,$3,$1,(SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$1)) RETURNING *`
 try {
  run('initdb',['-D',data,'-A','trust','--encoding=UTF8','--locale=C'])
  run('pg_ctl',['-D',data,'-l',join(root,'postgres.log'),'-o',`-k ${root} -c listen_addresses=''`,'-w','start']);started=true
@@ -29,27 +30,66 @@ try {
  await db.query(await readFile('supabase/migrations/20260913120000_client_binding_audit.sql','utf8'))
  await db.query(await readFile('supabase/migrations/20260920064556_meta_ads_ai_read_grants.sql','utf8'))
  await db.query('INSERT INTO clients(id) VALUES($1),($2)',[a,b])
- await db.query(`INSERT INTO platform_oauth_connections(id,client_id,provider,access_token_enc,refresh_token_enc,token_expiry,account_id,display_name,scopes,purpose,authorizing_principal_id)
- VALUES($1,$2,'meta','cipher','',now()+interval '1 day','ads_user:1','test',ARRAY['ads_read'],'meta_ads_read',$2),($3,$4,'meta','cipher','',now()+interval '1 day','ads_user:2','test',ARRAY['ads_read'],'meta_ads_read',$4)`,[ca,a,cb,b])
- await db.query(`INSERT INTO meta_ads_ai_pilot_entitlements(client_id,status,approved_by_email) VALUES($1,'active','approver@example.test')`,[a]);checks++
- await denied(db,`INSERT INTO meta_ads_ai_pilot_entitlements(client_id,status,starts_at,expires_at,approved_by_email) VALUES($1,'active',now(),now()-interval '1 day','approver@example.test')`,[b])
+ await db.query(`INSERT INTO meta_ads_ai_pilot_entitlements(client_id,status,approved_by_email) VALUES($1,'active','approver@example.test'),($2,'active','approver@example.test')`,[a,b]);checks++
+ const pauseRevision=(await db.query('SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$1',[a])).rows[0].revision
+ await db.query("UPDATE meta_ads_ai_pilot_entitlements SET status='paused' WHERE client_id=$1",[a])
+ await db.query("UPDATE meta_ads_ai_pilot_entitlements SET status='active' WHERE client_id=$1",[a])
+ assert.equal((await db.query('SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$1',[a])).rows[0].revision,pauseRevision);checks++
+ await denied(db,`UPDATE meta_ads_ai_pilot_entitlements SET starts_at=now(),expires_at=now()-interval '1 day' WHERE client_id=$1`,[b])
+ await db.query(`INSERT INTO platform_oauth_connections(id,client_id,provider,access_token_enc,refresh_token_enc,token_expiry,account_id,display_name,scopes,purpose,authorizing_principal_id,entitlement_revision)
+ VALUES($1,$2,'meta','cipher','',now()+interval '1 day','ads_user:1','test',ARRAY['ads_read'],'meta_ads_read',$2,(SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$2)),
+ ($3,$4,'meta','cipher','',now()+interval '1 day','ads_user:2','test',ARRAY['ads_read'],'meta_ads_read',$4,(SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$4))`,[ca,a,cb,b])
+ await db.query(`INSERT INTO platform_oauth_connections(id,client_id,provider,access_token_enc,refresh_token_enc,token_expiry,account_id,display_name,scopes,purpose,authorizing_principal_id,entitlement_revision)
+ VALUES($1,$2,'meta','cipher','',now()+interval '1 day','ads_user:3','test',ARRAY['ads_read'],'meta_ads_read',$3,
+ (SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$2))`,[ca2,a,b])
+ const discoveryVersion=(await db.query('SELECT updated_at::text AS updated_at FROM platform_oauth_connections WHERE id=$1',[ca])).rows[0].updated_at
+ assert.equal((await db.query('SELECT meta_ads_discovery_current($1,$2,$3,$4) AS allowed',[a,ca,a,discoveryVersion])).rows[0].allowed,true);checks++
+ assert.equal((await db.query('SELECT meta_ads_discovery_current($1,$2,$3,$4) AS allowed',[a,ca,b,discoveryVersion])).rows[0].allowed,false);checks++
  await denied(db,grantSql,[a,cb,'act_1234567890'])
  const grant=(await db.query(grantSql,[a,ca,'act_1234567890'])).rows[0];checks++
- await denied(db,'UPDATE meta_ads_read_grants SET principal_id=$2 WHERE id=$1',[grant.id,b])
- await denied(db,`INSERT INTO meta_ads_read_grants(client_id,connection_id,ad_account_id,principal_id) VALUES($1,$2,$3,$4)
-   ON CONFLICT(client_id,ad_account_id) DO UPDATE SET principal_id=EXCLUDED.principal_id`,[a,ca,'act_1234567890',b])
+ const oldKey=(await db.query(`INSERT INTO client_api_keys(client_id,key_hash,key_prefix,name,scopes,expires_at,metadata)
+  VALUES($1::uuid,'old-hash','me_live_old','Meta Ads read-only',ARRAY['meta:ads:read'],now()+interval '1 day',
+  jsonb_build_object('meta_ads_grant_id',$2::text,'meta_ads_grant_revision',$3::text,'meta_ads_principal_id',$1::uuid::text,'meta_ads_entitlement_revision',$4::text)) RETURNING id`,
+  [a,grant.id,grant.revision,grant.entitlement_revision])).rows[0].id
+ assert.equal((await db.query('SELECT meta_ads_authorization_current($1,$2,$3) AS allowed',[a,oldKey,'act_1234567890'])).rows[0].allowed,true);checks++
+ await denied(db,'UPDATE meta_ads_read_grants SET connection_id=$2,principal_id=$3 WHERE id=$1',[grant.id,ca2,b])
+ await denied(db,`INSERT INTO meta_ads_read_grants(client_id,connection_id,ad_account_id,principal_id,entitlement_revision)
+   VALUES($1,$2,$3,$4,(SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$1))
+   ON CONFLICT(client_id,ad_account_id) DO UPDATE SET connection_id=EXCLUDED.connection_id,principal_id=EXCLUDED.principal_id`,[a,ca2,'act_1234567890',b])
  await denied(db,grantSql,[b,cb,'act_1234567890'])
+ const oldEntitlement=(await db.query('SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$1',[a])).rows[0].revision
+ await db.query("UPDATE meta_ads_ai_pilot_entitlements SET status='revoked' WHERE client_id=$1",[a])
+ await db.query("UPDATE meta_ads_ai_pilot_entitlements SET status='active',expires_at=now()+interval '30 days' WHERE client_id=$1",[a])
+ const renewedEntitlement=(await db.query('SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$1',[a])).rows[0].revision
+ assert.notEqual(renewedEntitlement,oldEntitlement);checks++
+ await denied(db,'UPDATE meta_ads_read_grants SET entitlement_revision=$2,revoked_at=NULL WHERE id=$1',[grant.id,renewedEntitlement])
+ await db.query(`UPDATE platform_oauth_connections SET entitlement_revision=$2,access_token_enc='new-cipher' WHERE id=$1`,[ca,renewedEntitlement])
+ const rebound=(await db.query('UPDATE meta_ads_read_grants SET connection_id=$2,entitlement_revision=$3,revoked_at=NULL WHERE id=$1 RETURNING *',[grant.id,ca,renewedEntitlement])).rows[0]
+ assert.equal(rebound.entitlement_revision,renewedEntitlement);checks++
+ assert.equal((await db.query('SELECT meta_ads_authorization_current($1,$2,$3) AS allowed',[a,oldKey,'act_1234567890'])).rows[0].allowed,false);checks++
+ const newKey=(await db.query(`INSERT INTO client_api_keys(client_id,key_hash,key_prefix,name,scopes,expires_at,metadata)
+  VALUES($1::uuid,'new-hash','me_live_new','Meta Ads read-only',ARRAY['meta:ads:read'],now()+interval '1 day',
+  jsonb_build_object('meta_ads_grant_id',$2::text,'meta_ads_grant_revision',$3::text,'meta_ads_principal_id',$1::uuid::text,'meta_ads_entitlement_revision',$4::text)) RETURNING id`,
+ [a,rebound.id,rebound.revision,rebound.entitlement_revision])).rows[0].id
+ assert.equal((await db.query('SELECT meta_ads_authorization_current($1,$2,$3) AS allowed',[a,newKey,'act_1234567890'])).rows[0].allowed,true);checks++
+ await db.query('ALTER TABLE platform_oauth_connections DISABLE TRIGGER meta_ads_connection_invalidate')
+ await db.query("UPDATE platform_oauth_connections SET status='revoked' WHERE id=$1",[ca])
+ assert.equal((await db.query('SELECT meta_ads_authorization_current($1,$2,$3) AS allowed',[a,newKey,'act_1234567890'])).rows[0].allowed,false);checks++
+ assert.equal((await db.query('SELECT meta_ads_discovery_current($1,$2,$3,$4) AS allowed',[a,ca,a,discoveryVersion])).rows[0].allowed,false);checks++
+ await db.query("UPDATE platform_oauth_connections SET status='active' WHERE id=$1",[ca])
+ await db.query('ALTER TABLE platform_oauth_connections ENABLE TRIGGER meta_ads_connection_invalidate')
  for(const dirty of ['act_1234567890',' ACT_01234567890 ','１２３４５６７８９０','act-1234567890','12345\u200b67890','9876543210,1234567890']) {
    await denied(db,'INSERT INTO client_meta_ad_accounts(client_id,ad_account_id) VALUES($1,$2)',[b,dirty])
    await denied(db,'UPDATE clients SET meta_ad_account_id=$2 WHERE id=$1',[b,dirty])
  }
  await db.query(`UPDATE platform_oauth_connections SET status='revoked' WHERE id=$1`,[ca])
- const revoked=(await db.query('SELECT * FROM meta_ads_read_grants WHERE id=$1',[grant.id])).rows[0]
- assert.ok(revoked.revoked_at);assert.notEqual(revoked.revision,grant.revision);checks++
+ const revoked=(await db.query('SELECT * FROM meta_ads_read_grants WHERE id=$1',[rebound.id])).rows[0]
+ assert.ok(revoked.revoked_at);assert.notEqual(revoked.revision,rebound.revision);checks++
+ assert.equal((await db.query('SELECT meta_ads_authorization_current($1,$2,$3) AS allowed',[a,newKey,'act_1234567890'])).rows[0].allowed,false);checks++
  await db.query(`UPDATE platform_oauth_connections SET status='active' WHERE id=$1`,[ca])
- assert.ok((await db.query('SELECT revoked_at FROM meta_ads_read_grants WHERE id=$1',[grant.id])).rows[0].revoked_at);checks++
+ assert.ok((await db.query('SELECT revoked_at FROM meta_ads_read_grants WHERE id=$1',[rebound.id])).rows[0].revoked_at);checks++
  await db.query('INSERT INTO client_meta_ad_accounts(client_id,ad_account_id) VALUES($1,$2)',[b,'ACT_0001234567890'])
- await denied(db,'UPDATE meta_ads_read_grants SET revoked_at=NULL WHERE id=$1',[grant.id])
+ await denied(db,'UPDATE meta_ads_read_grants SET revoked_at=NULL WHERE id=$1',[rebound.id])
  // Legacy write first, public write blocked until commit, then denied with fresh state.
  const c1=await connect(),c2=await connect()
  await c1.query('BEGIN');await c1.query('UPDATE clients SET meta_ad_account_id=$2 WHERE id=$1',[b,'act_2234567890'])
@@ -64,6 +104,10 @@ try {
  await c1.query('BEGIN');await c1.query(grantSql,[a,ca,'act_4234567890'])
  const third=c2.query(grantSql,[b,cb,'act_4234567890']).then(()=>true,()=>false)
  await new Promise(r=>setTimeout(r,100));await c1.query('COMMIT');assert.equal(await third,false);checks++
+ await db.query("UPDATE meta_ads_ai_pilot_entitlements SET starts_at=now()-interval '2 days',expires_at=now()-interval '1 day' WHERE client_id=$1",[b])
+ const expiredRevision=(await db.query('SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$1',[b])).rows[0].revision
+ await db.query("UPDATE meta_ads_ai_pilot_entitlements SET expires_at=now()+interval '30 days' WHERE client_id=$1",[b])
+ assert.notEqual((await db.query('SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$1',[b])).rows[0].revision,expiredRevision);checks++
  const workers=await Promise.all(Array.from({ length:5 },()=>connect()))
  const reservations=(await Promise.all(workers.map(async c=>{ const rows=[];for(let i=0;i<7;i++) rows.push(await c.query('SELECT meta_ads_reserve_read($1) AS allowed',[a]));return rows }))).flat()
  assert.equal(reservations.filter(r=>r.rows[0].allowed).length,30);checks++
@@ -71,6 +115,8 @@ try {
    await db.query(`SET ROLE ${role}`)
    for(const table of ['meta_ads_read_grants','meta_ads_ai_pilot_entitlements','meta_ads_oauth_states','meta_ads_read_limits','meta_ads_binding_lock']) await denied(db,`SELECT * FROM ${table}`)
    await denied(db,'SELECT meta_ads_reserve_read($1)',[a]);await denied(db,'SELECT meta_ads_account_conflict($1,$2)',[a,'act_1234567890'])
+   await denied(db,'SELECT meta_ads_authorization_current($1,$2,$3)',[a,newKey,'act_1234567890'])
+   await denied(db,'SELECT meta_ads_discovery_current($1,$2,$3,$4)',[a,ca,a,discoveryVersion])
    await db.query('RESET ROLE')
  }
  // RLS itself still protects rows even if future ACLs accidentally grant table access.
@@ -90,7 +136,8 @@ try {
  await db.query("UPDATE platform_oauth_connections SET status='active' WHERE id=$1",[ca])
  assert.ok((await db.query('SELECT revoked_at FROM meta_ads_read_grants WHERE id=$1',[pendingGrant.id])).rows[0].revoked_at);checks++
  // State consumption uses DELETE RETURNING, not a check followed by delete.
- await db.query(`INSERT INTO meta_ads_oauth_states VALUES('hash',$1,$1,'browser',now()+interval '10 minutes')`,[a])
+ await db.query(`INSERT INTO meta_ads_oauth_states(state_hash,client_id,principal_id,entitlement_revision,browser_hash,expires_at)
+  VALUES('hash',$1,$1,(SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$1),'browser',now()+interval '10 minutes')`,[a])
  const consumed=await Promise.all([c1,c2].map(c=>c.query(`DELETE FROM meta_ads_oauth_states WHERE state_hash='hash' AND principal_id=$1 AND browser_hash='browser' AND expires_at>now() RETURNING *`,[a])))
  assert.equal(consumed.reduce((n,r)=>n+r.rowCount,0),1);checks++
  console.log(`PASS ${checks} isolated PostgreSQL boundary checks (grant/legacy races, RLS, RPC ACL, revoke, nonce, rate limit).`)
