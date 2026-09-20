@@ -1,4 +1,6 @@
 import React from 'react'
+import Link from 'next/link'
+import { enabled } from '@/lib/meta/ai/contract'
 import { ZhugeGlobalFab } from './_components/ZhugeGlobalFab'
 import { readUserTier } from '@/components/auth/ServerFeatureLock'
 
@@ -18,6 +20,7 @@ export default function ClientLayout({
 
   return (
     <>
+      {enabled() && <div className="border-b px-6 py-2 text-sm"><Link href={`/meta-ads-ai/${params.id}`} className="underline">Connect Meta Ads to your AI · Read-only pilot</Link></div>}
       {children}
       {showFab && <ZhugeGlobalFab clientId={params.id} />}
     </>

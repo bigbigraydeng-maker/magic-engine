@@ -13,7 +13,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import type { MetaTokenSource } from '@/lib/meta/token-manager'
 
-export type BindingKind = 'meta_ad_account' | 'facebook_page'
+export type BindingKind = 'meta_ad_account' | 'facebook_page' | 'meta_ads_read'
 
 /** 核实用的令牌来源；client_oauth = 客户「连接 Meta」授权后存下的主页令牌。 */
 export type BindingTokenSource = MetaTokenSource | 'client_oauth'
