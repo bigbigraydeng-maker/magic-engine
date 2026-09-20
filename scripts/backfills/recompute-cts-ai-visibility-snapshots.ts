@@ -30,7 +30,15 @@
  *
  * 撤回：计划文件里每一行都存了 `before`（改之前的整行快照），`--out` 必须指定
  * 一个非临时目录的持久路径 —— 那份文件是唯一的撤回底稿，写进 /tmp 等于「回填失败或
- * 事后要撤回时，底稿可能已经被系统清掉」。`--revert <计划文件>` 会按 `before` 原样写回。
+ * 事后要撤回时，底稿可能已经被系统清掉」。`--revert <计划文件>` 会按 `before` 原样写回，
+ * 但写回前先核对现值仍等于计划里记的 `after`：如果 `ai-tracker-weekly` 在回填之后
+ * 又把新回答聚合进了同一条快照行，现值就不再等于 `after`，这时候直接覆盖会连新回答
+ * 一起抹掉，脚本会中止并报出第一个对不上的周，交人工核对。
+ *
+ * 重试保护：`--apply` 时如果 `--out` 指向的路径已经有文件，脚本会直接拒绝并报错 ——
+ * 同一路径上重新生成的计划只含「还没改成功」的周，会把第一次已经改成功那些周的
+ * `before` 底稿冲掉，之后 `--revert` 就再也撤不回那些周了。要重试就换新路径，或者
+ * 先用 `--revert` 撤回旧计划再删掉旧文件重跑。
  *
  * 运行：
  *   npx tsx scripts/backfills/recompute-cts-ai-visibility-snapshots.ts                # 只读，出计划
@@ -152,6 +160,23 @@ function roundTo2(v: number | null): number | null {
   return v === null || v === undefined ? null : Math.round(v * 100) / 100
 }
 
+/**
+ * 撤回前的乐观并发检查：库里的现值是不是还等于「本次回填写下的值」。
+ * 如果不等，多半是 `ai-tracker-weekly` 在回填之后又把这周的新回答聚合进了同一条
+ * 快照行（同一条 UPDATE，覆盖同一批列）——这种情况下直接按 `before` 覆盖，
+ * 会连这些合法的新聚合结果也一起抹掉，且抹完之后跟 `ai_visibility_runs` 的实际
+ * 明细对不上。必须先核对现值仍是本次回填写下的 `after`，才能安全覆盖。
+ */
+function matchesAfter(current: SnapshotRow, after: ReturnType<typeof computeSnapshotMetrics>): boolean {
+  return (
+    current.mentions_count === after.mentionsCount &&
+    roundTo2(current.avg_rank) === roundTo2(after.avgRank) &&
+    current.total_runs === after.totalRuns &&
+    JSON.stringify(current.models_covered ?? []) === JSON.stringify(after.modelsCovered) &&
+    JSON.stringify(current.ranking_table ?? null) === JSON.stringify(after.ranking_table ?? null)
+  )
+}
+
 /** 与线上一致：周一 00:00 UTC 作为周的键。 */
 export function mondayOf(d: Date): string {
   const day = d.getUTCDay() // 0 = Sunday
@@ -183,12 +208,31 @@ function isTempPath(p: string): boolean {
 
 async function revert(sb: SupabaseClient, planPath: string): Promise<void> {
   const saved = JSON.parse(readFileSync(planPath, 'utf8')) as {
-    planned: Array<{ week_of: string; before: SnapshotRow }>
+    planned: Array<{ week_of: string; before: SnapshotRow; after: ReturnType<typeof computeSnapshotMetrics> }>
   }
   console.log(`按 ${planPath} 撤回 ${saved.planned.length} 周到旧值…`)
   let done = 0
   for (const p of saved.planned) {
     const b = p.before
+    const { data: current, error: readErr } = await sb
+      .from('ai_visibility_snapshots')
+      .select('id, week_of, avg_rank, mentions_count, total_runs, models_covered, ranking_table')
+      .eq('id', b.id)
+      .eq('client_id', CTS_CLIENT_ID)
+      .single<SnapshotRow>()
+    if (readErr || !current) {
+      throw new Error(`撤回前读 ${p.week_of} 现值失败（已处理 ${done} 条）: ${readErr?.message}`)
+    }
+    // 乐观并发检查：现值必须还等于本次回填写下的 after，否则这一周在回填之后
+    // 被别的写入（例如 ai-tracker-weekly 又聚合了新回答）动过，不能再无条件覆盖。
+    if (!matchesAfter(current, p.after)) {
+      throw new Error(
+        `撤回中止：${p.week_of}（id=${b.id}）现值跟本次回填写下的值对不上，` +
+          `很可能是回填之后又有新回答被聚合进了这条快照。` +
+          `已处理 ${done} 条，此周及之后未处理 —— 直接按旧值覆盖会连新回答一起抹掉，` +
+          `请人工核对这一周（对比现值与计划文件里的 after）再决定怎么处理。`
+      )
+    }
     const { error } = await sb
       .from('ai_visibility_snapshots')
       .update({
@@ -237,6 +281,19 @@ async function main(): Promise<void> {
         `--out ${outArg} 解析后落在临时目录下 —— 那份文件是唯一的撤回底稿，进程或主机重启就可能丢失，换一个非临时目录的持久路径`
       )
     }
+  }
+
+  // 重试保护：--apply 时如果这条路径已经有计划文件，说明上一次 apply 在这条路径上
+  // 跑过（很可能是逐周写入中途失败）。这时候绝不能重新生成计划覆盖它 ——
+  // 已经改成功的那些周，现在算出来的「现值 vs 目标值」已经没有差异，不会再进新计划，
+  // 它们的 before 底稿会被覆盖丢失，之后 --revert 就再也撤不回那些周了。
+  // 换一个新 --out 路径重跑，或者先用 --revert <旧计划> 撤回旧计划再重试。
+  if (apply && existsSync(outPath)) {
+    throw new Error(
+      `${outPath} 已存在，像是同一路径上跑过一次 --apply（可能是重试）。` +
+        `为了不覆盖第一次的撤回底稿，换一个新的 --out 路径重跑；` +
+        `如果要重来，先用 --revert ${outPath} 把旧计划撤回，再删掉这份文件重跑。`
+    )
   }
 
   const identity = await loadIdentity(sb)
