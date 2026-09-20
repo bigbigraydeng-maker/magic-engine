@@ -5,6 +5,18 @@
 
 ---
 
+### 2026-09-20（SEO 周循环：撤销的标题改动不再当天被重新选中）
+
+PR [#1829](https://github.com/bigbigraydeng-maker/magic-engine/pull/1829) 已合并。PM 2026-09-20（CTS 项目经理窗口）验证发现：2026-09-19 事故撤销的 3 个页面（`liziba-station-chongqing-guide`、`beijing-to-xian-high-speed-train`、`how-many-days-in-chongqing`）在同一天的试跑里又被当成新候选选中了一遍——不是网站风险（事实核对闸和关键词匹配闸已经把它们全拦下来），但每周都会白占一个改动名额、白跑一次查关键词数据的调用。
+
+- 原因：`runStep2CandidatesReady`（`src/lib/seo-meta/cycle/runner.ts`）的冷却期查询把"已撤销"的记录整条排除在外，导致撤销之后立刻又能被选中，跟"30 天冷却期"的本意（避免同一页面被反复折腾）正好相反。
+- 改法：撤销记录不再计入完整的 30 天冷却期（撤销的改动本来就没真正生效过），但改成单独给 7 天的短冷却期（跟每周自动任务的节奏对上）——既不会撤销当天又被选中，也不会因为撤销过就被永久拉黑。
+- 用 PM 验证到的这 3 个真实页面直接当测试用例，加了 4 条回归测试。
+
+**Reuse Statement**：只改了已有能力（SEO 周循环）内部一处判断逻辑，不新增能力/支柱/共享代码路径，没有任何客户名/客户 ID 写进 shared runtime。
+
+---
+
 ### 2026-09-20（内容工厂：发布前品控接入 Jev 判断模型，抓竞品品牌/占位字幕/人称口吻）
 
 PR [#1832](https://github.com/bigbigraydeng-maker/magic-engine/pull/1832) 已合并（前身 #1825 因改动量超过 `claude/*` 分支自动闸门的 800 行上限，换成 `feat/*` 分支重开）。2026-09-20 只读评估 `content_work_orders` 真实工单（状态 `review_rejected`）发现，现有品牌红线闸（静态短语黑名单）抓不出三类要靠人工肉眼才能挑出的缺陷：角度/hook 把第三方竞品品牌当自己卖点（真实 Oztop 工单角度写成 "mapei brisbane"）、上屏字幕是内部内容分类标签冒充真文案且跨段完全重复（真实 Oztop/CTS 工单字幕逐段就是 "Customer Stories & Community" 这类内部标签，某单重复 7 次）、文案人称口吻跟简报要求的第一人称叙述者不符（真实 CTS 工单 brief 要求 Baker Gu 第一人称，AI 写成 "Our own offices. Our own guides." 公司口吻）。
