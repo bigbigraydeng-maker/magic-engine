@@ -133,6 +133,15 @@ function firstIdentifierIndex(norm: string, ids: readonly string[]): number {
   return best
 }
 
+/**
+ * Identifiers strong enough to prove the client on their own. A short
+ * single-token alias ("cts") is excluded: "CTS Logistics" in the text would
+ * otherwise prove a client called "CTS Tours".
+ */
+function selfSufficientIdentifiers(ids: readonly string[]): string[] {
+  return ids.filter(id => id.split(' ').length >= 2 || id.length >= MIN_CONTAINED_TOKEN_LEN)
+}
+
 /** Does an extracted brand name refer to the client? */
 export function isClientBrand(brand: string, ids: readonly string[]): boolean {
   const b = normalizeForMatch(brand)
@@ -173,10 +182,11 @@ export function resolveClientBrandRank(
 
   const norm = normalizeForMatch(rawResponse)
   const clientBrands = brands.filter(b => isClientBrand(b.brand, ids))
-  // Evidence = a configured identifier, or the name of a client-matching
-  // brand ("Acme Tours Ltd" for client "Acme Tours"), written in the text.
+  // Evidence = a self-sufficient identifier, or the name of a brand the
+  // parser extracted that is the client ("Acme Tours Ltd" for "Acme Tours"),
+  // written in the text.
   const clientPos = firstIdentifierIndex(norm, [
-    ...ids,
+    ...selfSufficientIdentifiers(ids),
     ...clientBrands.map(b => normalizeForMatch(b.brand)),
   ])
 

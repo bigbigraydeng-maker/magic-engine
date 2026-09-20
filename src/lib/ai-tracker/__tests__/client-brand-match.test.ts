@@ -106,6 +106,26 @@ describe('resolveClientBrandRank', () => {
     ).toBe(2)
   })
 
+  it('a short alias inside another company name is not evidence on its own', () => {
+    const identity = { brandName: 'CTS Tours NZ', domain: 'ctstours.co.nz', aliases: ['CTS'] }
+    const raw = 'For freight from China, Kiwi Tours and CTS Logistics are the usual names.'
+    const brands = [
+      { brand: 'Kiwi Tours', rank: 1, snippet: 'x' },
+      { brand: 'CTS Logistics', rank: 2, snippet: 'x' },
+    ]
+    const out = resolveClientBrandRank(brands, raw, identity)
+    expect(out.client_brand_rank).toBeNull()
+    expect(out.brands).toHaveLength(2)
+
+    // …but the alias written on its own, and extracted as a brand, still counts.
+    const solo = resolveClientBrandRank(
+      [{ brand: 'CTS', rank: 1, snippet: 'x' }],
+      'CTS runs small-group tours out of Auckland every week.',
+      identity
+    )
+    expect(solo.client_brand_rank).toBe(1)
+  })
+
   it('a 2-char CJK alias is not textual evidence (no word boundaries in CJK)', () => {
     const out = resolveClientBrandRank([], '我推荐中旅游公司的行程，性价比很高。', {
       brandName: 'CTS Tours',
