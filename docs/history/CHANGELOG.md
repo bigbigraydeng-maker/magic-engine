@@ -5,6 +5,22 @@
 
 ---
 
+### 2026-09-20（SEO 标题周循环 v1 上线，首跑改错 2 页已撤回、已补信息完整闸门）
+
+CTS 每周自动改网站标题/描述的功能重做成 6 步版本，跑在 Inngest 上；首跑改错 2 页，约 5 分钟内撤回，CTS 开关已关，等 PM 看过演练再开。
+
+- PR [#1802](https://github.com/bigbigraydeng-maker/magic-engine/pull/1802)：旧版每周开的标题修改 PR 改成自动合并，不用 PM 手点。
+- PR [#1805](https://github.com/bigbigraydeng-maker/magic-engine/pull/1805)：旧版定时任务跳过 9/21 那次（临时改成只跑 9/28 一次，后被 #1812 整条删掉）。
+- PR [#1810](https://github.com/bigbigraydeng-maker/magic-engine/pull/1810)：`seo_meta_log` 表的访问权限收紧到只有后台服务能读写（数据库改动文件已合并）。
+- PR [#1812](https://github.com/bigbigraydeng-maker/magic-engine/pull/1812)：新版 6 步流程上线（回查上次改动效果 → 选页面 → 定动作 → 改文案开 PR → 记改前数据 → 汇总），每客户一个开关、默认关；旧定时任务从 render.yaml 删掉。
+- PR [#1814](https://github.com/bigbigraydeng-maker/magic-engine/pull/1814)：加手动触发入口，不用等周一就能跑一次。
+- chinatravel [#199](https://github.com/bigbigraydeng-maker/chinatravel/pull/199) / [#200](https://github.com/bigbigraydeng-maker/chinatravel/pull/200)：首跑自动合并的 2 条错误改动（Liziba 页配错关键词；免签页描述被改成像要办签证）。
+- chinatravel [#201](https://github.com/bigbigraydeng-maker/chinatravel/pull/201) / [#202](https://github.com/bigbigraydeng-maker/chinatravel/pull/202)：PM 用 GitHub Revert 撤回上面两条，官网标题已恢复原样。
+- PR [#1816](https://github.com/bigbigraydeng-maker/magic-engine/pull/1816)：根因修复——关键词只认这个页面自己的搜索词、缺数据一律跳过、PR 描述写全数据依据、每个候选都留记录、新文案先做事实核对；手动入口支持 `dry_run` 演练（不写任何东西）；把撤回的 2 条记录标记为已撤回。
+
+事故经过与教训见 [PITFALLS D10](../PITFALLS.md)，PM 决策见 [DECISIONS 2026-09-20](../DECISIONS.md)。
+
+**Reuse Statement**：复用已有 GSC、DataForSEO、竞对解析、人工看板（`zhuge/action-persister`）、Inngest 两段式派单范式、`cts-meta-pr.ts` 的窄道改文件逻辑；新增的 `src/lib/seo-meta/cycle/` 是不带客户身份的共享流程（有测试断言不含 CTS ID）；客户差异只在 `clients.seo_config.meta_cycle_*` 配置和 CTS 仓库的写入适配器里。
 ### 2026-09-20（Park Homes 官网：Riverside 页面按客户 V2 素材包重做为"整个 104 户社区"展示）
 
 PR [#1834](https://github.com/bigbigraydeng-maker/magic-engine/pull/1834) 已合并并部署，PM 本地预览后批准。客户 Jason 2026-09-16 邮件发来 Riverside V2 素材包（9 张图 + 英文实施说明），要求把 Riverside 页从"几套在售房"改成展示整个 104 户开发项目；当时只回了"收到"，之后四天没人做。本次按他要求的顺序重做：全社区航拍 + 介绍 → 104 户概况 → 整体愿景效果图（明确标注"示意，非批准规划"，不推断分期/地块/完工）→ 场地周边 → 工程进度 → 精选内外景（主图 + 两张 + 可展开细节）→ 视频 → 在售房源 → 未来批次登记。新建 `ProjectStory.astro` 布局组件，只在项目数据带 `story` 时启用，其余四个项目页不变。在售房源（`listings`）和未来批次（`releases`）做成 `projects.js` 里可独立增改的数组：为空时显示"咨询当前房源"按钮 + 已核实的 Ray White 链接，不编造房源卡片。页面概况按客户规则去掉了房源级数字（2–5 房 / $650k 起 / 2026–28 完工）；首页卡片"From $650k"保留，邮件里请客户确认。首页大图和 Riverside 卡片同步换成全社区航拍。验证：构建 20 页、生成页各段顺序与图注核对、本地灯箱/表单/中介信息脚本核查、375px 手机版无横向溢出、上线后线上 9 张图与文案核实。
