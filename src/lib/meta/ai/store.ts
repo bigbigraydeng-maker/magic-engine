@@ -1,12 +1,11 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { decryptToken } from '@/lib/platform-oauth/vocabulary'
 import { MetaReadError } from '../graph-read'
-import { enabled, META_ADS_SCOPE } from './contract'
+import { META_ADS_SCOPE } from './contract'
 import type { ApiKeyAuth } from '@/lib/auth/api-key-access'
 export type MetaPrincipal = Extract<ApiKeyAuth, { kind: 'client' }>
 export interface ReadGrant { id: string; client_id: string; connection_id: string; ad_account_id: string; revision: string; principal_id: string }
 export function requireMetaScope(principal: MetaPrincipal) {
-  if (!enabled()) throw new MetaReadError('not_available', 404)
   if (!principal.scopes.includes(META_ADS_SCOPE)) throw new MetaReadError('scope_required', 403)
 }
 export async function reserveRead(clientId: string) {
@@ -14,14 +13,22 @@ export async function reserveRead(clientId: string) {
   if (error) throw new MetaReadError('authorization_unavailable', 503)
   if (data !== true) throw new MetaReadError('rate_limited', 429)
 }
-export async function activeConnection(clientId: string, connectionId: string) {
-  const { data, error } = await supabaseAdmin.from('platform_oauth_connections')
+async function loadActiveConnection(clientId: string, connectionId: string, principalId?: string) {
+  let query = supabaseAdmin.from('platform_oauth_connections')
     .select('id,access_token_enc,token_expiry,updated_at').eq('client_id', clientId).eq('id', connectionId)
     .eq('provider','meta').eq('purpose','meta_ads_read').eq('status','active').contains('scopes',['ads_read'])
-    .gt('token_expiry', new Date(Date.now()+60_000).toISOString()).maybeSingle()
+    .gt('token_expiry', new Date(Date.now()+60_000).toISOString())
+  if (principalId) query = query.eq('authorizing_principal_id', principalId)
+  const { data, error } = await query.maybeSingle()
   if (error) throw new MetaReadError('authorization_unavailable',503)
   if (!data) throw new MetaReadError('reconnect_required',403)
   return { id: data.id as string, token: decryptToken(data.access_token_enc), version: data.updated_at as string }
+}
+export async function activeConnection(clientId: string, connectionId: string) {
+  return loadActiveConnection(clientId, connectionId)
+}
+export async function activeConnectionForPrincipal(clientId: string, connectionId: string, principalId: string) {
+  return loadActiveConnection(clientId, connectionId, principalId)
 }
 export async function readGrant(principal: MetaPrincipal): Promise<ReadGrant> {
   requireMetaScope(principal)

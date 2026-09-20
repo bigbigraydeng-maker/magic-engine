@@ -27,9 +27,10 @@ import {
 } from '@/lib/auth/api-key-access'
 import { registerReadOnlyTools } from '@/lib/mcp/tools'
 import { registerMetaAdsTools } from '@/lib/meta/ai/mcp'
-import { META_ADS_SCOPE, enabled } from '@/lib/meta/ai/contract'
+import { META_ADS_SCOPE } from '@/lib/meta/ai/contract'
 import { boundedBody, failure } from '@/lib/meta/ai/http'
 import { readGrant, activeConnection, reserveRead } from '@/lib/meta/ai/store'
+import { requirePilotActive } from '@/lib/meta/ai/entitlement'
 
 const baseHandler = createMcpHandler(
   (server) => {
@@ -93,8 +94,8 @@ async function handler(request: Request): Promise<Response> {
   if (!result.ok || result.auth.kind !== 'client') return new Response('Unauthorised',{ status:401 })
   const principal = result.auth
   if (!principal.scopes.includes(META_ADS_SCOPE)) return legacyHandler(request)
-  if (!enabled()) return new Response('Not available',{ status:404 })
   try {
+    await requirePilotActive(principal.clientId)
     if(request.method==='POST') {
       const body=await boundedBody(request)
       request=new Request(request.url,{ method:'POST',headers:request.headers,body:JSON.stringify(body) })

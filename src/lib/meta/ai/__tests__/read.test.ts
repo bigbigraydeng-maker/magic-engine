@@ -1,6 +1,7 @@
 import { beforeEach,describe,it,expect,vi } from 'vitest'
-const mocks=vi.hoisted(()=>({ readGrant:vi.fn(),activeConnection:vi.fn(),reserveRead:vi.fn(),requireMetaScope:vi.fn() }))
+const mocks=vi.hoisted(()=>({ readGrant:vi.fn(),activeConnection:vi.fn(),reserveRead:vi.fn(),requireMetaScope:vi.fn(),requirePilotActive:vi.fn() }))
 vi.mock('../store',()=>mocks)
+vi.mock('../entitlement',()=>({ requirePilotActive:mocks.requirePilotActive }))
 vi.mock('../audit',()=>({ startReadAudit:vi.fn().mockResolvedValue('12345678-1234-4234-9234-123456789012'),finishReadAudit:vi.fn() }))
 import { startReadAudit,finishReadAudit } from '../audit'
 import { invokeMetaTool } from '../read'
@@ -14,6 +15,7 @@ beforeEach(()=>{
   vi.clearAllMocks();vi.stubGlobal('fetch',mockFetch)
   process.env.META_ADS_AI_GRAPH_VERSION='v21.0';process.env.CMS_TOKEN_ENCRYPTION_KEY='11'.repeat(32)
   mocks.reserveRead.mockResolvedValue(undefined);mocks.readGrant.mockReset().mockResolvedValue(grant);mocks.activeConnection.mockResolvedValue({ token:'private-token',version:'v1' })
+  mocks.requirePilotActive.mockResolvedValue({ new_actions_allowed:true })
   mockFetch.mockReset().mockImplementation(async()=>reply(account))
 })
 describe('public read boundary',()=>{
@@ -21,6 +23,11 @@ describe('public read boundary',()=>{
     vi.mocked(startReadAudit).mockRejectedValueOnce(new MetaReadError('audit_unavailable',503))
     await expect(invokeMetaTool(principal,'meta_list_accounts',{})).rejects.toThrow('audit_unavailable')
     expect(mockFetch).not.toHaveBeenCalled()
+  })
+  it('fails closed before audit and Graph when the pilot is paused',async()=>{
+    mocks.requirePilotActive.mockRejectedValueOnce(new MetaReadError('service_paused',404))
+    await expect(invokeMetaTool(principal,'meta_list_accounts',{})).rejects.toThrow('service_paused')
+    expect(startReadAudit).not.toHaveBeenCalled();expect(mockFetch).not.toHaveBeenCalled()
   })
   it('never calls Graph for an unauthorised account',async()=>{
     await expect(invokeMetaTool(principal,'meta_get_ads',{ account_id:'act_9876543210' })).rejects.toThrow('account_not_authorised')
@@ -33,13 +40,25 @@ describe('public read boundary',()=>{
   })
   it('exposes names as data without silently scrubbing or interpreting them',async()=>{
     const result=await invokeMetaTool(principal,'meta_list_accounts',{})
-    expect(result.data).toEqual([account]);expect(result.meta.currency).toBe('NZD');expect(finishReadAudit).toHaveBeenCalledWith(result.meta.request_id,null)
+    expect(result.data).toEqual([account]);expect(result.meta.currency).toBe('NZD');expect(finishReadAudit).toHaveBeenCalledWith(result.meta.request_id,null,grant.ad_account_id)
     const [url,options]=mockFetch.mock.calls[0]
     expect(String(url)).not.toContain('private-token');expect(options).toMatchObject({ method:'GET',redirect:'error',cache:'no-store',headers:{ Authorization:'Bearer private-token' } })
   })
   it('discards results if revoked during provider call',async()=>{
     mocks.readGrant.mockResolvedValueOnce(grant).mockRejectedValueOnce(new MetaReadError('grant_revoked'))
     await expect(invokeMetaTool(principal,'meta_list_accounts',{})).rejects.toThrow('grant_revoked')
+  })
+  it('discards results if the pilot is paused during the provider call',async()=>{
+    mocks.requirePilotActive.mockResolvedValueOnce({ new_actions_allowed:true }).mockRejectedValueOnce(new MetaReadError('service_paused',404))
+    await expect(invokeMetaTool(principal,'meta_list_accounts',{})).rejects.toThrow('service_paused')
+    expect(finishReadAudit).toHaveBeenCalledWith(expect.any(String),'service_paused')
+  })
+  it('discards results if the pilot is paused while the success receipt is being saved',async()=>{
+    mocks.requirePilotActive.mockResolvedValueOnce({ new_actions_allowed:true }).mockResolvedValueOnce({ new_actions_allowed:true })
+      .mockRejectedValueOnce(new MetaReadError('service_paused',404))
+    await expect(invokeMetaTool(principal,'meta_list_accounts',{})).rejects.toThrow('service_paused')
+    expect(finishReadAudit).toHaveBeenNthCalledWith(1,expect.any(String),null,grant.ad_account_id)
+    expect(finishReadAudit).toHaveBeenNthCalledWith(2,expect.any(String),'service_paused')
   })
   it('discards results if token or grant changes',async()=>{
     mocks.activeConnection.mockResolvedValueOnce({ token:'private-token',version:'v1' }).mockResolvedValueOnce({ token:'new',version:'v2' })

@@ -7,6 +7,7 @@ import { normaliseInsight, resolveWindow, previousWindow, compareMetrics, type W
 import { startReadAudit,finishReadAudit } from './audit'
 import { outputSchema } from './contract'
 import { AI_ENTITY_FIELDS } from '../entity-settings'
+import { requirePilotActive } from './entitlement'
 const BASE_FIELDS = 'account_id,campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,date_start,date_stop,spend,impressions,reach,frequency,clicks,actions'
 const VIDEO_FIELDS = 'video_play_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p95_watched_actions,video_p100_watched_actions,video_thruplay_watched_actions'
 interface ReadArgs { account_id?: string; limit?: number; cursor?: string; date_range?: Window; level?: string; time_increment?: string; conversion_action?: string; breakdown?: string }
@@ -22,10 +23,12 @@ export async function invokeMetaTool(principal: MetaPrincipal, tool: MetaToolNam
   if (!parsed.success) throw new MetaReadError('invalid_arguments')
   const args: ReadArgs = parsed.data
   requireMetaScope(principal)
+  await requirePilotActive(principal.clientId)
   const requestId=await startReadAudit(principal,tool,args.account_id)
   try {
     const result=await executeRead(principal,tool,args,requestId)
-    await finishReadAudit(requestId,null)
+    await finishReadAudit(requestId,null,result.meta.account_id)
+    await requirePilotActive(principal.clientId)
     return outputSchema.parse(result)
   } catch(error) {
     await finishReadAudit(requestId,error instanceof MetaReadError ? error.code : 'request_failed')
@@ -48,6 +51,7 @@ async function executeRead(principal:MetaPrincipal,tool:MetaToolName,args:ReadAr
   const finalGrant = await readGrant(principal)
   const finalConnection = await activeConnection(principal.clientId,grant.connection_id)
   if (finalGrant.revision !== grant.revision || finalConnection.version !== connection.version) throw new MetaReadError('authorization_changed',403)
+  await requirePilotActive(principal.clientId)
   return { version: '0.1', data: result.data, meta: { request_id: requestId, account_id: grant.ad_account_id,
     currency: account.currency, timezone: account.timezone_name, date_range: window, fetched_at: new Date().toISOString(),
     api_version: metaReadVersion(), complete: result.next === null, next_cursor: result.next,

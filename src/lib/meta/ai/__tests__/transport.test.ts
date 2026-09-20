@@ -1,9 +1,10 @@
 // @vitest-environment node
 import { beforeEach,describe,it,expect,vi } from 'vitest'
-const mocks=vi.hoisted(()=>({ verifyApiKey:vi.fn(),readGrant:vi.fn(),activeConnection:vi.fn(),reserveRead:vi.fn(),invokeMetaTool:vi.fn() }))
+const mocks=vi.hoisted(()=>({ verifyApiKey:vi.fn(),readGrant:vi.fn(),activeConnection:vi.fn(),reserveRead:vi.fn(),invokeMetaTool:vi.fn(),requirePilotActive:vi.fn() }))
 vi.mock('@/lib/auth/api-key-access',async original=>({ ...await original<typeof import('@/lib/auth/api-key-access')>(),verifyApiKey:mocks.verifyApiKey }))
 vi.mock('../store',()=>({ ...mocks,requireMetaScope:vi.fn() }))
 vi.mock('../read',()=>({ invokeMetaTool:mocks.invokeMetaTool }))
+vi.mock('../entitlement',()=>({ requirePilotActive:mocks.requirePilotActive }))
 import { POST as mcp } from '@/app/api/mcp/[transport]/route'
 import { POST as invoke } from '@/app/api/ai-tools/meta/invoke/route'
 import { toolNames } from '../contract'
@@ -17,6 +18,7 @@ async function rpcBody(response:Response) {
 beforeEach(()=>{
   vi.clearAllMocks();process.env.META_ADS_AI_ENABLED='true'
   mocks.verifyApiKey.mockResolvedValue({ ok:true,auth:principal });mocks.readGrant.mockResolvedValue({ connection_id:'connection' });mocks.activeConnection.mockResolvedValue({ token:'secret' })
+  mocks.requirePilotActive.mockResolvedValue({ new_actions_allowed:true })
 })
 describe('real MCP adapter catalogue and HTTP boundaries',()=>{
   it('public key lists only the eight Meta tools',async()=>{
@@ -49,9 +51,9 @@ describe('real MCP adapter catalogue and HTTP boundaries',()=>{
     expect(result.status).toBe(413);expect(mocks.invokeMetaTool).not.toHaveBeenCalled()
   })
   it('both adapters reject disabled features and invalid auth',async()=>{
-    process.env.META_ADS_AI_ENABLED='false'
+    mocks.requirePilotActive.mockRejectedValue(new MetaReadError('service_paused',404))
     expect((await mcp(req({}))).status).toBe(404);expect((await invoke(req({}))).status).toBe(404)
-    process.env.META_ADS_AI_ENABLED='true';mocks.verifyApiKey.mockResolvedValue({ ok:false })
+    mocks.requirePilotActive.mockResolvedValue({ new_actions_allowed:true });mocks.verifyApiKey.mockResolvedValue({ ok:false })
     expect((await mcp(req({}))).status).toBe(401);expect((await invoke(req({}))).status).toBe(401)
   })
   it('HTTP maps rate limits without leaking exception details',async()=>{

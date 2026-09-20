@@ -36,7 +36,7 @@ async function exchange(params: Record<string,string>): Promise<{ token:string; 
   if(!result) throw new MetaReadError('oauth_exchange_failed',502)
   return result
 }
-export async function finishAdsConsent(code: string, clientId: string) {
+export async function finishAdsConsent(code: string, clientId: string, principalId: string) {
   const short = await exchange({ code,redirect_uri:adsRedirectUri() })
   const long = await exchange({ grant_type:'fb_exchange_token',fb_exchange_token:short.token })
   if (!long.seconds) throw new MetaReadError('oauth_expiry_unknown',502)
@@ -47,5 +47,6 @@ export async function finishAdsConsent(code: string, clientId: string) {
   const user = await metaGraphGet('me',long.token,{ fields:'id' })
   if (typeof user.id !== 'string' || !/^\d+$/.test(user.id)) throw new MetaReadError('oauth_identity_unverified',502)
   await upsertConnection({ clientId,provider:'meta',purpose:'meta_ads_read',accountId:`ads_user:${user.id}`,accessToken:long.token,
-    refreshToken:'',tokenExpiry:new Date(Date.now()+long.seconds*1000),displayName:'Meta Ads read-only',scopes,lastSyncedAt:new Date() })
+    refreshToken:'',tokenExpiry:new Date(Date.now()+long.seconds*1000),displayName:'Meta Ads read-only',scopes,
+    authorizingPrincipalId:principalId,lastSyncedAt:new Date() })
 }

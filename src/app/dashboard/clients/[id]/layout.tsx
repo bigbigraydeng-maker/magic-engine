@@ -1,10 +1,10 @@
 import React from 'react'
 import Link from 'next/link'
-import { enabled } from '@/lib/meta/ai/contract'
+import { pilotEntryVisible } from '@/lib/meta/ai/entitlement'
 import { ZhugeGlobalFab } from './_components/ZhugeGlobalFab'
 import { readUserTier } from '@/components/auth/ServerFeatureLock'
 
-export default function ClientLayout({
+export default async function ClientLayout({
   children,
   params,
 }: {
@@ -17,10 +17,11 @@ export default function ClientLayout({
   // 悬浮球，容易怀疑自己上错网站。self_serve 访客不该看到它。
   const tier = readUserTier()
   const showFab = tier !== 'self_serve'
+  const showMetaAdsAi = await pilotEntryVisible(params.id)
 
   return (
     <>
-      {enabled() && <div className="border-b px-6 py-2 text-sm"><Link href={`/meta-ads-ai/${params.id}`} className="underline">Connect Meta Ads to your AI · Read-only pilot</Link></div>}
+      {showMetaAdsAi && <div className="border-b px-6 py-2 text-sm"><Link href={`/meta-ads-ai/${params.id}`} className="underline">Meta 广告 AI 分析（只读测试）</Link></div>}
       {children}
       {showFab && <ZhugeGlobalFab clientId={params.id} />}
     </>

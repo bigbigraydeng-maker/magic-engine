@@ -29,10 +29,15 @@ try {
  await db.query(await readFile('supabase/migrations/20260913120000_client_binding_audit.sql','utf8'))
  await db.query(await readFile('supabase/migrations/20260920064556_meta_ads_ai_read_grants.sql','utf8'))
  await db.query('INSERT INTO clients(id) VALUES($1),($2)',[a,b])
- await db.query(`INSERT INTO platform_oauth_connections(id,client_id,provider,access_token_enc,refresh_token_enc,token_expiry,account_id,display_name,scopes,purpose)
- VALUES($1,$2,'meta','cipher','',now()+interval '1 day','ads_user:1','test',ARRAY['ads_read'],'meta_ads_read'),($3,$4,'meta','cipher','',now()+interval '1 day','ads_user:2','test',ARRAY['ads_read'],'meta_ads_read')`,[ca,a,cb,b])
+ await db.query(`INSERT INTO platform_oauth_connections(id,client_id,provider,access_token_enc,refresh_token_enc,token_expiry,account_id,display_name,scopes,purpose,authorizing_principal_id)
+ VALUES($1,$2,'meta','cipher','',now()+interval '1 day','ads_user:1','test',ARRAY['ads_read'],'meta_ads_read',$2),($3,$4,'meta','cipher','',now()+interval '1 day','ads_user:2','test',ARRAY['ads_read'],'meta_ads_read',$4)`,[ca,a,cb,b])
+ await db.query(`INSERT INTO meta_ads_ai_pilot_entitlements(client_id,status,approved_by_email) VALUES($1,'active','approver@example.test')`,[a]);checks++
+ await denied(db,`INSERT INTO meta_ads_ai_pilot_entitlements(client_id,status,starts_at,expires_at,approved_by_email) VALUES($1,'active',now(),now()-interval '1 day','approver@example.test')`,[b])
  await denied(db,grantSql,[a,cb,'act_1234567890'])
  const grant=(await db.query(grantSql,[a,ca,'act_1234567890'])).rows[0];checks++
+ await denied(db,'UPDATE meta_ads_read_grants SET principal_id=$2 WHERE id=$1',[grant.id,b])
+ await denied(db,`INSERT INTO meta_ads_read_grants(client_id,connection_id,ad_account_id,principal_id) VALUES($1,$2,$3,$4)
+   ON CONFLICT(client_id,ad_account_id) DO UPDATE SET principal_id=EXCLUDED.principal_id`,[a,ca,'act_1234567890',b])
  await denied(db,grantSql,[b,cb,'act_1234567890'])
  for(const dirty of ['act_1234567890',' ACT_01234567890 ','１２３４５６７８９０','act-1234567890','12345\u200b67890','9876543210,1234567890']) {
    await denied(db,'INSERT INTO client_meta_ad_accounts(client_id,ad_account_id) VALUES($1,$2)',[b,dirty])
@@ -64,7 +69,7 @@ try {
  assert.equal(reservations.filter(r=>r.rows[0].allowed).length,30);checks++
  for(const role of ['anon','authenticated']) {
    await db.query(`SET ROLE ${role}`)
-   for(const table of ['meta_ads_read_grants','meta_ads_oauth_states','meta_ads_read_limits','meta_ads_binding_lock']) await denied(db,`SELECT * FROM ${table}`)
+   for(const table of ['meta_ads_read_grants','meta_ads_ai_pilot_entitlements','meta_ads_oauth_states','meta_ads_read_limits','meta_ads_binding_lock']) await denied(db,`SELECT * FROM ${table}`)
    await denied(db,'SELECT meta_ads_reserve_read($1)',[a]);await denied(db,'SELECT meta_ads_account_conflict($1,$2)',[a,'act_1234567890'])
    await db.query('RESET ROLE')
  }

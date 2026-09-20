@@ -25,7 +25,9 @@ export async function startReadAudit(principal:MetaPrincipal,tool:string,account
   if(error) throw new MetaReadError('audit_unavailable',503)
   return id
 }
-export async function finishReadAudit(id:string,errorCode:string|null) {
-  const { error }=await supabaseAdmin.from('mcp_access_log').update({ ok:errorCode===null,error_code:errorCode }).eq('id',id)
+export async function finishReadAudit(id:string,errorCode:string|null,accountId?:string) {
+  const update: { ok:boolean;error_code:string|null;resource_id?:string }={ ok:errorCode===null,error_code:errorCode }
+  if(accountId) update.resource_id=accountId
+  const { error }=await supabaseAdmin.from('mcp_access_log').update(update).eq('id',id)
   if(error) throw new MetaReadError('audit_unavailable',503)
 }

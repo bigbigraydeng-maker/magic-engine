@@ -15,6 +15,7 @@ function makeRow(overrides?: Partial<PlatformOAuthConnectionRow>): PlatformOAuth
     id:                'row-uuid-1',
     client_id:         'client-uuid-1',
     provider:          'google_gbp',
+    authorizing_principal_id: null,
     access_token_enc:  'iv.tag.cipher',
     refresh_token_enc: 'iv.tag.cipher2',
     token_expiry:      new Date(Date.now() + 3600_000).toISOString(),

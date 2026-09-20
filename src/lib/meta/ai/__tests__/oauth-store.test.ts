@@ -3,7 +3,7 @@ const mocks=vi.hoisted(()=>({ from:vi.fn(),rpc:vi.fn(),insertAudit:vi.fn(),finis
 vi.mock('@/lib/supabase',()=>({ supabaseAdmin:{ from:mocks.from,rpc:mocks.rpc } }))
 vi.mock('@/lib/clients/binding-audit',()=>({ insertBindingAudit:mocks.insertAudit,finishBindingAudit:mocks.finishAudit }))
 vi.mock('@/lib/platform-oauth/vocabulary',()=>({ decryptToken:vi.fn(()=> 'private') }))
-import { readGrant,activeConnection,requireMetaScope } from '../store'
+import { readGrant,activeConnection,activeConnectionForPrincipal,requireMetaScope } from '../store'
 import { auditedControl } from '../audit'
 import { consumeAdsState,startAdsConsent } from '@/lib/meta-oauth/ads-read'
 const p={ kind:'client' as const,keyId:'key',clientId:'tenant',scopes:['meta:ads:read'] }
@@ -31,6 +31,11 @@ describe('grant, token and control audit guards',()=>{
     expect(await activeConnection('tenant','connection')).toMatchObject({ token:'private' })
     for(const pair of [['client_id','tenant'],['id','connection'],['provider','meta'],['purpose','meta_ads_read'],['status','active']]) expect(q.eq).toHaveBeenCalledWith(...pair)
     expect(q.contains).toHaveBeenCalledWith('scopes',['ads_read']);expect(q.gt).toHaveBeenCalledWith('token_expiry',expect.any(String))
+  })
+  it('scopes dashboard discovery to the user who completed OAuth',async()=>{
+    const q=chain({ id:'connection',access_token_enc:'cipher',updated_at:'v1' });mocks.from.mockReturnValue(q)
+    await activeConnectionForPrincipal('tenant','connection','principal-a')
+    expect(q.eq).toHaveBeenCalledWith('authorizing_principal_id','principal-a')
   })
   it('does not mutate when audit is unavailable',async()=>{
     const write=vi.fn();mocks.insertAudit.mockResolvedValueOnce({ error:'unavailable' })

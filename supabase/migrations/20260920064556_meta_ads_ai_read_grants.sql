@@ -1,10 +1,22 @@
 -- #1839. Additive, service-role-only. Apply only after explicit release approval.
 ALTER TABLE public.platform_oauth_connections ADD COLUMN purpose text NOT NULL DEFAULT 'legacy'
   CHECK (purpose IN ('legacy', 'meta_ads_read'));
+ALTER TABLE public.platform_oauth_connections ADD COLUMN authorizing_principal_id uuid;
 ALTER TABLE public.platform_oauth_connections ADD CONSTRAINT meta_ads_connection_identity
-  CHECK (purpose <> 'meta_ads_read' OR (provider = 'meta' AND account_id ~ '^ads_user:[0-9]+$'));
+  CHECK (purpose <> 'meta_ads_read' OR (provider = 'meta' AND account_id ~ '^ads_user:[0-9]+$'
+    AND authorizing_principal_id IS NOT NULL));
 ALTER TABLE public.platform_oauth_connections ADD CONSTRAINT platform_connection_tenant_unique UNIQUE(id, client_id);
 ALTER TABLE public.client_api_keys ADD COLUMN expires_at timestamptz;
+CREATE TABLE public.meta_ads_ai_pilot_entitlements (
+  client_id uuid PRIMARY KEY REFERENCES public.clients(id) ON DELETE CASCADE,
+  status text NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'paused', 'revoked')),
+  starts_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz,
+  approved_by_email text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK(expires_at IS NULL OR expires_at > starts_at)
+);
 CREATE TABLE public.meta_ads_read_grants (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
@@ -18,6 +30,8 @@ CREATE TABLE public.meta_ads_read_grants (
   UNIQUE(client_id, ad_account_id)
 );
 CREATE UNIQUE INDEX meta_ads_exclusive_active_account ON public.meta_ads_read_grants(ad_account_id) WHERE revoked_at IS NULL;
+CREATE INDEX meta_ads_read_grants_client_idx ON public.meta_ads_read_grants(client_id);
+CREATE INDEX meta_ads_read_grants_connection_idx ON public.meta_ads_read_grants(connection_id);
 CREATE TABLE public.meta_ads_oauth_states (
   state_hash text PRIMARY KEY,
   client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
@@ -25,6 +39,7 @@ CREATE TABLE public.meta_ads_oauth_states (
   browser_hash text NOT NULL,
   expires_at timestamptz NOT NULL
 );
+CREATE INDEX meta_ads_oauth_states_client_expiry_idx ON public.meta_ads_oauth_states(client_id,expires_at);
 CREATE TABLE public.meta_ads_read_limits (
   client_id uuid PRIMARY KEY REFERENCES public.clients(id) ON DELETE CASCADE,
   window_start timestamptz NOT NULL DEFAULT now(),
@@ -34,15 +49,22 @@ CREATE TABLE public.meta_ads_read_limits (
 CREATE TABLE public.meta_ads_binding_lock (id boolean PRIMARY KEY DEFAULT true CHECK(id), revision bigint NOT NULL DEFAULT 0);
 INSERT INTO public.meta_ads_binding_lock(id) VALUES(true);
 ALTER TABLE public.meta_ads_read_grants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.meta_ads_ai_pilot_entitlements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.meta_ads_oauth_states ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.meta_ads_read_limits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.meta_ads_binding_lock ENABLE ROW LEVEL SECURITY;
 CREATE POLICY service_role_full ON public.meta_ads_read_grants FOR ALL TO service_role USING(true) WITH CHECK(true);
+CREATE POLICY service_role_full ON public.meta_ads_ai_pilot_entitlements FOR ALL TO service_role USING(true) WITH CHECK(true);
 CREATE POLICY service_role_full ON public.meta_ads_oauth_states FOR ALL TO service_role USING(true) WITH CHECK(true);
 CREATE POLICY service_role_full ON public.meta_ads_read_limits FOR ALL TO service_role USING(true) WITH CHECK(true);
 CREATE POLICY service_role_full ON public.meta_ads_binding_lock FOR ALL TO service_role USING(true) WITH CHECK(true);
-REVOKE ALL ON public.meta_ads_read_grants, public.meta_ads_oauth_states, public.meta_ads_read_limits, public.meta_ads_binding_lock FROM PUBLIC, anon, authenticated;
-GRANT ALL ON public.meta_ads_read_grants, public.meta_ads_oauth_states, public.meta_ads_read_limits, public.meta_ads_binding_lock TO service_role;
+REVOKE ALL ON public.meta_ads_read_grants, public.meta_ads_ai_pilot_entitlements, public.meta_ads_oauth_states, public.meta_ads_read_limits, public.meta_ads_binding_lock FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.meta_ads_read_grants, public.meta_ads_ai_pilot_entitlements, public.meta_ads_oauth_states, public.meta_ads_read_limits, public.meta_ads_binding_lock TO service_role;
+
+COMMENT ON TABLE public.meta_ads_ai_pilot_entitlements IS
+  'Server-side invitation gate for the read-only Meta Ads AI pilot. A retained inactive row preserves exit and data-request access.';
+COMMENT ON COLUMN public.platform_oauth_connections.authorizing_principal_id IS
+  'ME user who completed provider OAuth. Required for meta_ads_read so other tenant members cannot inherit broad account discovery.';
 
 CREATE FUNCTION public.meta_ads_registered_match(stored text, account text) RETURNS boolean
 LANGUAGE sql IMMUTABLE SET search_path = '' AS $$
@@ -61,6 +83,10 @@ DECLARE tenant uuid; account text;
 BEGIN
  UPDATE public.meta_ads_binding_lock SET revision=revision+1 WHERE id=true;
  IF TG_TABLE_NAME='meta_ads_read_grants' THEN
+   IF TG_OP='UPDATE' AND (NEW.client_id IS DISTINCT FROM OLD.client_id OR NEW.ad_account_id IS DISTINCT FROM OLD.ad_account_id
+      OR NEW.principal_id IS DISTINCT FROM OLD.principal_id) THEN
+     RAISE EXCEPTION 'grant ownership is immutable' USING ERRCODE='23514';
+   END IF;
    NEW.revision := gen_random_uuid();
    IF NEW.revoked_at IS NOT NULL THEN RETURN NEW; END IF;
    IF NOT EXISTS(SELECT 1 FROM public.platform_oauth_connections c WHERE c.id=NEW.connection_id AND c.client_id=NEW.client_id

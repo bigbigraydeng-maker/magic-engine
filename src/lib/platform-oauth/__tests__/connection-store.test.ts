@@ -46,6 +46,7 @@ const DB_ROW: PlatformOAuthConnectionRow = {
   id:                'conn-1',
   client_id:         'client-xyz',
   provider:          PLATFORM_PROVIDERS.GOOGLE_GBP,
+  authorizing_principal_id: null,
   access_token_enc:  'enc:plain-access',
   refresh_token_enc: 'enc:plain-refresh',
   token_expiry:      EXPIRES_AT.toISOString(),

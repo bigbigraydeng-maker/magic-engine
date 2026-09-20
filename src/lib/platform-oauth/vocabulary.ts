@@ -56,6 +56,7 @@ export interface PlatformOAuthConnectionRow {
   id:                string
   client_id:         string
   provider:          PlatformProvider
+  authorizing_principal_id: string | null
   access_token_enc:  string   // AES-256-GCM encrypted
   refresh_token_enc: string   // AES-256-GCM encrypted
   token_expiry:      string   // ISO 8601 timestamp
@@ -130,5 +131,8 @@ export interface UpsertConnectionInput {
   /** When set, records that the connection's grant was just re-verified against
    *  the provider. Omit to leave any existing last_synced_at untouched. */
   purpose?: 'legacy' | 'meta_ads_read'
+  /** ME user who completed provider consent. Required by the Meta Ads read pilot
+   *  so another member of the same tenant cannot inherit account discovery. */
+  authorizingPrincipalId?: string
   lastSyncedAt?: Date
 }
