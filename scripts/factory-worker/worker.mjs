@@ -775,7 +775,13 @@ export async function runRecipeSequence({ wo, recipe, tmp, deps }) {
     'text/plain',
   )
 
-  const caption = [hookText, ctaText].filter(Boolean).join(' · ')
+  // caption 送品控扫描,必须从已校验的 receipt.segments[].caption 收集(而非 hookText 单独拼),
+  // 否则 multicut 的 middle 字幕(hook 之外的段)会被漏扫 —— 见 recipe.ts 的 caption 校验口径。
+  const caption = receipt.segments
+    .map((s) => s.caption)
+    .concat(ctaText ? [ctaText] : [])
+    .filter(Boolean)
+    .join(' · ')
   // blocker 1:recipe 单必须把 executed receipt 明文附在 complete body,server 会用共享
   // assertRecipeReceipt 再校一遍并强制 new_clips 计数 / recipe id-version / source metadata 一致。
   // 老 worker 不带 recipe_receipt → server 一律拒(recipe brief 单不许进 in_review)。

@@ -34,9 +34,13 @@ export interface JevResult {
   answers: Record<string, JevAnswer>
 }
 
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+// `onTimeout` aborts the underlying fetch's AbortController so a slow provider doesn't keep
+// running (and billing) in the background after we've already moved on to a retry — without
+// it only the wrapper promise rejects, the original request stays in flight unconsumed
+// (2026-09-20 codex review round 2).
+function withTimeout<T>(p: Promise<T>, ms: number, onTimeout: () => void): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`jev call timed out after ${ms}ms`)), ms)
+    const t = setTimeout(() => { onTimeout(); reject(new Error(`jev call timed out after ${ms}ms`)) }, ms)
     p.then(
       (v) => { clearTimeout(t); resolve(v) },
       (e) => { clearTimeout(t); reject(e) },
@@ -66,6 +70,7 @@ export async function callJev(
   let lastErr: unknown
   for (let attempt = 0; attempt < JEV_MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) await sleep(JEV_RETRY_BACKOFF_MS * attempt)
+    const controller = new AbortController()
     try {
       const res = await withTimeout(
         fetch(JEV_API_URL, {
@@ -75,8 +80,10 @@ export async function callJev(
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ state, model: JEV_MODEL, questions }),
+          signal: controller.signal,
         }),
         JEV_TIMEOUT_MS,
+        () => controller.abort(),
       )
       if (res.status === 429) {
         lastErr = new Error('jev rate limited (429)')

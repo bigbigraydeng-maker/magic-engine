@@ -435,6 +435,30 @@ describe('completeWorkOrder — 成片文案品控(2026-09-20 Jev 评估)', () =
     expect(flags.some((f) => f.category === 'competitor_brand')).toBe(true)
   })
 
+  it('🔴 legacy 单的逐段字幕存在 brief.copy.segments,不是 brief.segments[].text_overlay —— 必须收进去才能测出跨段重复(2026-09-20 codex review round 2)', async () => {
+    const { db } = mockSupabase(happyQueue())
+    const r = await completeWorkOrder(db, {
+      ...PARAMS,
+      wo: {
+        ...WO,
+        brief: {
+          segments: [{ role: 'hook' }, { role: 'middle' }], // text_overlay 字段从未被写入过(真实数据形状)
+          copy: {
+            segments: [
+              { role: 'hook', title_sub: 'Customer Stories & Community' },
+              { role: 'middle', title_sub: 'Customer Stories & Community' },
+            ],
+          },
+        },
+      },
+      // worker.mjs 实际提交的就是这种拼接过的单条聚合串,内部重复不会被逐段检测器看到
+      caption: 'Customer Stories & Community · Customer Stories & Community',
+    })
+
+    expect(r.ok).toBe(true)
+    expect(r.ok && r.qualityFlags.some((f) => f.category === 'placeholder_caption')).toBe(true)
+  })
+
   it('brand_name / brand_voice.persona 从 master_briefs 正确传给品控(供 A/C 检测用)', async () => {
     const { db } = mockSupabase([
       okClient(),

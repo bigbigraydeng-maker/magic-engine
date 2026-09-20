@@ -55,7 +55,7 @@
 | `PERPLEXITY_API_KEY` | AI 可见度追踪引擎之一 | Render-web | ✅ |
 | `GEMINI_API_KEY` | Google Gemini（AI 可见度追踪第 4 引擎） | Render-web | ❌ |
 | `AI_TRACKER_ENABLE_CLAUDE` | 开关：AI Tracker 是否跑 Claude 引擎 | Render-web | ❌ |
-| `TYPESAFE_API_KEY` | TypeSafe Jev 判断模型（对外封装名 **Compliance Engine**）——内容工厂成片文案品控用它判断竞品品牌/占位字幕/人称口吻，见 `src/lib/jev/client.ts` | Render-web | ❌ 落地 PR 需补 |
+| `TYPESAFE_API_KEY` | TypeSafe Jev 判断模型（对外封装名 **Compliance Engine**）——内容工厂成片文案品控用它判断竞品品牌/占位字幕/人称口吻，见 `src/lib/jev/client.ts` | Render-web | 🔴 落地阻断：合并前必须在 `crazycontent` web 服务（Render-web）配上真实值并跑一次真调用验证。`callJev` 缺这个变量会直接抛错，`scanContentQualityFlags` 随即把每个带文案的工单都标成 `quality_check_unavailable`——三类新语义检测（竞品角度/占位字幕/人称口吻）在生产完全不会运行，审核队列看到的只是一条统一的“不可用”提示，不是真的查过没问题 |
 
 ## 3. 视觉 / 视频 / 素材
 
