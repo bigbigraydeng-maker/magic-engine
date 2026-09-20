@@ -18,3 +18,20 @@ document.querySelector('.approval-card h3').textContent='Harbour Travel’s next
 document.querySelector('.approval-card .post').textContent='“Your first trip to China doesn’t have to be a race through the sights. Explore Beijing, Xi’an and Shanghai at your own pace. Message CHINA for the itinerary.”';
 document.querySelector('.approval-card-head').insertAdjacentHTML('afterend',`<div class="platform-pills approval-platforms"><span>${logo('facebook')} Facebook</span><span>${logo('instagram')} Instagram</span></div>`);
 render();
+
+// Keep desktop content open and remember each disclosure's mobile state.
+const mobileLayout = matchMedia('(max-width: 760px)');
+const mobileDetails = [...document.querySelectorAll('.mobile-details')];
+const mobileOpen = new Map(mobileDetails.map(detail => [detail, false]));
+function syncMobileDetails() {
+  mobileDetails.forEach(detail => {
+    detail.open = !mobileLayout.matches || mobileOpen.get(detail) || detail.contains(document.activeElement);
+  });
+}
+mobileDetails.forEach(detail => {
+  detail.addEventListener('toggle', () => {
+    if (mobileLayout.matches) mobileOpen.set(detail, detail.open);
+  });
+});
+mobileLayout.addEventListener('change', syncMobileDetails);
+syncMobileDetails();

@@ -36,7 +36,9 @@ function node(id) {
   });
   return nodes.get(id);
 }
-const context = vm.createContext({ document: {
+const context = vm.createContext({
+  matchMedia: () => ({ matches: false, addEventListener() {} }),
+  document: {
   querySelectorAll: () => [], querySelector: node, getElementById: node,
 } });
 vm.runInContext(script, context);

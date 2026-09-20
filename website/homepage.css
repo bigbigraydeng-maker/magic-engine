@@ -10,3 +10,85 @@
 .ig-icon-group{display:flex;gap:12px;align-items:center}.ig-icon-group svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round}.ads-header .googleads{filter:invert(40%) sepia(94%) saturate(1258%) hue-rotate(191deg)}
 
 .waitlist-invitation{background:#fff;border:1px solid var(--line);border-radius:10px;padding:34px;display:grid;gap:22px;align-content:center}.waitlist-invitation .form-note a{text-decoration:underline}
+
+/* Progressive disclosure keeps supporting detail available without crowding mobile. */
+.mobile-details { min-width: 0; }
+.mobile-details > summary { display: none; }
+.evidence-description { font-size: 11px; margin: -15px 0 24px 17px; }
+.founder-details .details-content > p { font-size: 13px; margin-top: 23px; line-height: 1.85; }
+.founder-details .details-content > .founder-context { font-size: 9px; margin-top: 15px; }
+
+@media (max-width: 760px) {
+  html { scroll-padding-top: 84px; }
+  .shell { width: calc(100% - 40px); }
+  nav { height: 64px; }
+  nav > .button { display: none; }
+  .hero { padding-block: 36px 40px; gap: 28px; }
+  .hero-copy > .eyebrow { display: none; }
+  .hero h1 { font-size: clamp(36px, 9.6vw, 52px); line-height: 1.08; }
+  .hero-copy > p { margin-top: 20px; font-size: 15px; line-height: 1.7; }
+  .hero-copy .actions { gap: 8px 18px; margin-top: 24px; }
+  .hero-copy .actions > .button { width: 100%; justify-content: space-between; }
+  .hero-copy .micro { margin-top: 12px; font-size: 11px; }
+  .desk { width: 100%; max-width: none; margin: 0; transform: none; box-shadow: none; }
+  .desk-top { padding: 14px 18px; flex-wrap: wrap; gap: 6px 12px; }
+  .desk-body { padding: 20px 18px 0; }
+  .desk .greeting { display: none; }
+  .desk h2 { font-size: 28px; }
+  .evidence { margin: 18px 0; }
+  .evidence strong { font-size: 13px; }
+  .evidence-description { margin: 0 0 16px; font-size: 13px; }
+  .desk-details .details-content { padding-block: 16px 20px; }
+  .draft { padding: 14px; }
+  .draft p, .review-row > span { font-size: 12px; }
+  .review-row { flex-wrap: wrap; }
+  .review-row > .button { width: 100%; min-height: 44px; }
+  .desk-bottom { padding: 14px 18px; border-radius: 0; font-size: 12px; }
+  .desk .note {
+    position: static; width: auto; margin: 0; padding: 18px;
+    transform: none; box-shadow: none; border: 0; border-top: 1px solid var(--line);
+    border-radius: 0 0 12px 12px; background: var(--warm);
+  }
+  .note > span { font-size: 10px; }
+  .note strong { font-size: 14px; }
+  .note p { font-size: 12px; line-height: 1.65; }
+  .mobile-details > summary {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    min-height: 48px; padding-block: 14px; border-top: 1px solid var(--line);
+    list-style: none; cursor: pointer; font-size: 13px; font-weight: 600; line-height: 1.5;
+  }
+  .mobile-details > summary::-webkit-details-marker { display: none; }
+  .mobile-details > summary > span { font-size: 22px; font-weight: 400; line-height: 1; }
+  .mobile-details[open] > summary > span { transform: rotate(45deg); }
+  .principles { display: none; }
+  .section, .approval-section, .insights-section, .waitlist-section { padding-block: 48px; }
+  .section-heading { margin-bottom: 24px; }
+  .section-heading .eyebrow, .approval-grid > div > .eyebrow, .founder-copy > .eyebrow { display: none; }
+  .section-heading h2, .approval-grid h2, .founder-copy h2 { font-size: 32px; }
+  #work .section-heading > p { display: none; }
+  .scenario-tabs button { min-height: 48px; }
+  .visual-scenario .scenario-copy { padding: 22px; }
+  .visual-scenario .scenario-copy h3 { font-size: 28px; }
+  .design-toggle button { min-height: 44px; font-size: 12px; }
+  .approval-grid { gap: 24px; }
+  .approval-details > summary { color: #f2dfb6; border-color: #5c5549; }
+  .approval-card { margin-top: 12px; transform: none; padding: 20px; }
+  .connection-grid article { padding-block: 20px; }
+  .channel-logos { margin-bottom: 14px; }
+  .channel-logos > span { flex-direction: row; align-items: center; font-size: 11px; }
+  .channel-logos .platform-logo { width: 22px; height: 22px; }
+  .connection-note { font-size: 11px; line-height: 1.7; }
+  .founder-photo > img { aspect-ratio: 3 / 2; }
+  .founder-details { margin-top: 20px; }
+  .founder-details .details-content > .founder-context { font-size: 11px; }
+  .founder-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .founder-stats span { font-size: 11px; }
+  .founder-copy .text-link { font-size: 12px; }
+  .research { grid-template-columns: 85px minmax(0, 1fr); }
+  .research > div { padding: 20px 16px; }
+  .research h3 { font-size: 21px; }
+  .waitlist-grid { gap: 24px; }
+  .waitlist-grid h2 { font-size: 34px; }
+  .waitlist-invitation { padding: 24px; gap: 16px; }
+  .waitlist-invitation p { margin-top: 0; }
+}
