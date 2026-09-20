@@ -81,6 +81,7 @@ export function createDefaultLiveProbe(supabase: SupabaseClient): LiveProbe {
             clientBrandName: brandName,
             clientDomain: identity.domain,
             clientAliases: identity.brand_aliases,
+            clientGeoAnchors: identity.brand_geo_anchors,
           })
           questions.push({ question: q.question, client_brand_rank: parsed.client_brand_rank })
           if (parsed.client_brand_rank !== null) {
@@ -123,18 +124,28 @@ function emptyResult(start: number, reason: string): LiveProbeResult {
   }
 }
 
+interface ClientIdentityRow {
+  domain: string | null
+  brand_aliases: string[] | null
+  brand_geo_anchors: string[] | null
+}
+
 async function loadClientIdentity(
   supabase: SupabaseClient,
   clientId: string,
-): Promise<{ domain: string | null; brand_aliases: string[] | null }> {
+): Promise<ClientIdentityRow> {
   const { data, error } = await supabase
     .from('clients')
-    .select('domain, brand_aliases')
+    .select('domain, brand_aliases, brand_geo_anchors')
     .eq('id', clientId)
-    .maybeSingle<{ domain: string | null; brand_aliases: string[] | null }>()
+    .maybeSingle<ClientIdentityRow>()
   // Failing closed is safe: without domain/aliases matching only gets stricter.
   if (error) console.warn('[ai-visibility-live-probe] client identity load failed:', error.message)
-  return { domain: data?.domain ?? null, brand_aliases: data?.brand_aliases ?? null }
+  return {
+    domain: data?.domain ?? null,
+    brand_aliases: data?.brand_aliases ?? null,
+    brand_geo_anchors: data?.brand_geo_anchors ?? null,
+  }
 }
 
 async function loadPriorityQueries(

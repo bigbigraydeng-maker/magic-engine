@@ -24,6 +24,15 @@ export interface ClientBrandIdentity {
   brandName: string
   domain?: string | null
   aliases?: readonly string[] | null
+  /**
+   * clients.brand_geo_anchors — words that prove an answer is talking about
+   * the client's OWN market ("new zealand", "nz", "auckland"). Opt-in per
+   * client: empty / absent leaves matching exactly as it was.
+   *
+   * No geography lives in this module. The words are client configuration;
+   * the rule that consumes them is the only platform-shared part.
+   */
+  geoAnchors?: readonly string[] | null
 }
 
 export interface ClientRankResolution {
@@ -144,9 +153,61 @@ function buildIdentifierList(identity: ClientBrandIdentity): ClientIdentifier[] 
   return Array.from(seen.values())
 }
 
+/**
+ * Is at least one configured geo anchor written in the answer?
+ *
+ * Word-bounded on the normalised text, so a short anchor ("nz") cannot be
+ * satisfied by "bonza". Anchors are normalised the same way as the text, so
+ * "New Zealand" typed by an FDE matches "New Zealand," in the answer.
+ */
+function hasGeoAnchor(norm: string, anchors: readonly string[]): boolean {
+  return anchors.some(a => indexOfIdentifier(norm, a) >= 0)
+}
+
+/** Configured anchors, normalised; empty when the client has none. */
+function buildGeoAnchors(identity: ClientBrandIdentity): string[] {
+  const out: string[] = []
+  for (const a of identity.geoAnchors ?? []) {
+    const norm = normalizeForMatch(a ?? '')
+    if (norm.length > 0) out.push(norm)
+  }
+  return out
+}
+
 /** Normalised identifiers that prove the client is present (≥ 2 chars). */
 export function buildClientIdentifiers(identity: ClientBrandIdentity): string[] {
   return buildIdentifierList(identity).map(i => i.value)
+}
+
+/**
+ * The identifiers that may be used as evidence inside `evidenceText`.
+ *
+ * An alias is an FDE-entered nickname, and a nickname can be the group name
+ * a foreign sibling trades under too ("China Travel Service" names both the
+ * Australian and the NZ company). So once a client configures geo anchors,
+ * aliases only count in text that also carries one of those anchors. The
+ * official brand name and the client's own domain are self-identifying and
+ * are never gated — otherwise every answer naming the client without naming
+ * its country would lose a real mention. No anchors configured → the list is
+ * exactly what it was before.
+ *
+ * `evidenceText` is whatever the identifier would be read out of: the whole
+ * answer when ranking a run, or a single extracted brand name when merging
+ * variants in the weekly table.
+ *
+ * Short single-token aliases are NOT filtered here — `isClientBrand` already
+ * requires them to equal the brand exactly. They are dropped separately from
+ * the pool of *textual* evidence inside `resolveClientBrandRank`.
+ */
+export function admissibleClientIdentifiers(
+  identity: ClientBrandIdentity,
+  evidenceText: string
+): string[] {
+  const idList = buildIdentifierList(identity)
+  const anchors = buildGeoAnchors(identity)
+  if (anchors.length === 0) return idList.map(i => i.value)
+  const aliasAllowed = hasGeoAnchor(normalizeForMatch(evidenceText), anchors)
+  return idList.filter(i => aliasAllowed || !i.fromAlias).map(i => i.value)
 }
 
 /** Char index of `id` in normalised text `norm` (word-bounded), or -1. */
@@ -298,7 +359,15 @@ export function resolveClientBrandRank(
   if (ids.length === 0) return { brands, client_brand_rank: null }
 
   const { norm, map } = normalizeWithSourceMap(rawResponse)
-  const clientBrands = brands.filter(b => isClientBrand(b.brand, ids))
+
+  // Geo gate (see `admissibleClientIdentifiers`). A brand the parser
+  // extracted is the client only if it matches an admissible identifier;
+  // under a failed gate the same-named sibling abroad stays in `brands` as
+  // an ordinary competitor — it is a real company in the answer, so dropping
+  // it would delete competitor data.
+  const admissibleIds = admissibleClientIdentifiers(identity, rawResponse)
+  const admissible = new Set(admissibleIds)
+  const clientBrands = brands.filter(b => isClientBrand(b.brand, admissibleIds))
   // Evidence = an identifier written in the text, or the name of a brand the
   // parser extracted that is the client ("Acme Tours Ltd" for "Acme Tours").
   // Two occurrences don't count: a short alias anywhere, and any identifier
@@ -311,7 +380,10 @@ export function resolveClientBrandRank(
   const clientPos = firstIdentifierIndex(
     norm,
     [
-      ...idList.filter(i => !(i.fromAlias && isShortSingleTokenId(i.value))).map(i => i.value),
+      ...idList
+        .filter(i => admissible.has(i.value))
+        .filter(i => !(i.fromAlias && isShortSingleTokenId(i.value)))
+        .map(i => i.value),
       ...clientBrands.map(b => normalizeForMatch(b.brand)),
     ],
     otherSpans

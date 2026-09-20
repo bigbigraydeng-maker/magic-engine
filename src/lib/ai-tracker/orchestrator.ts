@@ -21,7 +21,7 @@ import { runClaude } from './runners/claude'
 import { runPerplexity } from './runners/perplexity'
 import { runGemini } from './runners/gemini'
 import { parseRanking } from './parser'
-import { buildClientIdentifiers, isClientBrand, type ClientBrandIdentity } from './client-brand-match'
+import { admissibleClientIdentifiers, isClientBrand, type ClientBrandIdentity } from './client-brand-match'
 import { supabaseAdmin } from '../supabase'
 import { writeTrackerFlywheelMetrics } from '../flywheel/metrics/writeTrackerMetrics'
 import type {
@@ -61,6 +61,7 @@ interface ClientRow {
   name: string
   domain: string | null
   brand_aliases: string[] | null
+  brand_geo_anchors: string[] | null
 }
 
 interface BriefRow {
@@ -120,6 +121,7 @@ export async function runTracker(
       brandName,
       clientDomain: client.domain,
       clientAliases: client.brand_aliases,
+      clientGeoAnchors: client.brand_geo_anchors,
       result,
     })
     console.log(`[runTracker] Engine ${engine} completed: succeeded=${result.runs_succeeded}, failed=${result.runs_failed}`)
@@ -132,6 +134,7 @@ export async function runTracker(
       brandName,
       domain: client.domain,
       aliases: client.brand_aliases,
+      geoAnchors: client.brand_geo_anchors,
     })
     result.snapshot_id = agg?.snapshotId ?? null
 
@@ -159,7 +162,7 @@ async function loadClientContext(
 ): Promise<{ client: ClientRow; brandName: string }> {
   const { data: client, error } = await supabaseAdmin
     .from('clients')
-    .select('id, name, domain, brand_aliases')
+    .select('id, name, domain, brand_aliases, brand_geo_anchors')
     .eq('id', clientId)
     .single<ClientRow>()
 
@@ -208,6 +211,7 @@ interface EngineLaneInput {
   brandName: string
   clientDomain: string | null
   clientAliases: string[] | null
+  clientGeoAnchors: string[] | null
   result: RunTrackerResult
 }
 
@@ -216,7 +220,7 @@ interface EngineLaneInput {
  * Add delay between batches to prevent rate limiting on both runner and parser calls.
  */
 async function runEngineLane(input: EngineLaneInput): Promise<void> {
-  const { engine, queries, clientId, brandName, clientDomain, clientAliases, result } = input
+  const { engine, queries, clientId, brandName, clientDomain, clientAliases, clientGeoAnchors, result } = input
 
   console.log(`[runEngineLane] ${engine}: starting with ${queries.length} queries, batch size = ${PER_ENGINE_BATCH_SIZE}`)
 
@@ -229,7 +233,7 @@ async function runEngineLane(input: EngineLaneInput): Promise<void> {
       batch.map(q => {
         console.log(`[runEngineLane] ${engine}: processing query ${q.id}`)
         return processOne({
-          engine, query: q, clientId, brandName, clientDomain, clientAliases, result,
+          engine, query: q, clientId, brandName, clientDomain, clientAliases, clientGeoAnchors, result,
         })
       })
     )
@@ -255,6 +259,7 @@ interface ProcessOneInput {
   brandName: string
   clientDomain: string | null
   clientAliases: string[] | null
+  clientGeoAnchors: string[] | null
   result: RunTrackerResult
 }
 
@@ -263,7 +268,7 @@ interface ProcessOneInput {
  * Catches all errors so one failure doesn't kill the whole pass.
  */
 async function processOne(input: ProcessOneInput): Promise<void> {
-  const { engine, query, clientId, brandName, clientDomain, clientAliases, result } = input
+  const { engine, query, clientId, brandName, clientDomain, clientAliases, clientGeoAnchors, result } = input
   const market: MarketTag = (query.market_tag ?? 'au-nz') as MarketTag
 
   try {
@@ -327,6 +332,7 @@ async function processOne(input: ProcessOneInput): Promise<void> {
         clientBrandName: brandName,
         clientDomain,
         clientAliases,
+        clientGeoAnchors,
       })
       brands = parsed.brands
       clientBrandRank = parsed.client_brand_rank
@@ -505,13 +511,18 @@ function buildRankingTable(
  * Merge all brand-name variants of the client into a single canonical entry.
  * Uses the same client-identity rules as the parser (brand name, aliases,
  * domain), so every entry that set client_brand_rank lands in one row.
+ *
+ * The geo gate applies here too, judged against the extracted brand name
+ * itself: "China Travel Service (NZ) Ltd" carries the anchor and merges into
+ * the client; "China Travel Service (Australia) Pty Ltd" does not and stays
+ * its own row, so the client-visible ranking table does not credit the
+ * client with a sibling's mentions.
  */
 function mergeClientBrandVariants(
   byBrand: Map<string, { mentions: number; rankSum: number; byEngine: Record<string, number[]> }>,
   identity: ClientBrandIdentity
 ): void {
   const canon = identity.brandName.trim()
-  const ids = buildClientIdentifiers(identity)
 
   let canonicalKey = ''
   const variantKeys: string[] = []
@@ -519,7 +530,7 @@ function mergeClientBrandVariants(
   for (const key of Array.from(byBrand.keys())) {
     if (key.trim().toLowerCase() === canon.toLowerCase()) {
       canonicalKey = key
-    } else if (isClientBrand(key, ids)) {
+    } else if (isClientBrand(key, admissibleClientIdentifiers(identity, key))) {
       variantKeys.push(key)
     }
   }

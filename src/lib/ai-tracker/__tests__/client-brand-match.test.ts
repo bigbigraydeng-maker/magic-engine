@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  admissibleClientIdentifiers,
   buildClientIdentifiers,
   isClientBrand,
   resolveClientBrandRank,
@@ -320,5 +321,123 @@ describe('resolveClientBrandRank', () => {
       ['GJ Gardner', 1],
       ['Signature Homes', 2],
     ])
+  })
+})
+
+/**
+ * Geo anchors (2026-09-20 CTS audit).
+ *
+ * `china travel service` is the group name the whole CTS group trades under.
+ * Fifteen of 1,768 ranked CTS answers were about the Australian sibling
+ * ("China Travel Service (Australia) Pty Ltd, established in Sydney in 1985")
+ * and carried no NZ signal at all. Dropping the alias instead would cost the
+ * 40 answers that spell the client "China Travel Service (NZ) Ltd", so the
+ * gate is on the EVIDENCE, not on the alias list.
+ *
+ * Texts below are shortened from real answer bodies in `ai_visibility_runs`.
+ */
+describe('resolveClientBrandRank — geo anchors', () => {
+  const CTS = {
+    brandName: 'CTS Tours',
+    domain: 'ctstours.co.nz',
+    aliases: ['cts', 'cts tours nz', 'china travel service', '中国旅行社'],
+  }
+  const ANCHORED = { ...CTS, geoAnchors: ['new zealand', 'nz', 'aotearoa', 'auckland'] }
+
+  const AU_TEXT =
+    'Here are the major Chinese tour operators in Australia. China Travel Service ' +
+    '(CTS), established in 1985, is a premier Australian travel agency with over ' +
+    '35 years of experience, specialising in visa applications.'
+
+  it('rejects the same-named sibling abroad: alias present, no anchor in the text', () => {
+    const out = resolveClientBrandRank([], AU_TEXT, ANCHORED)
+    expect(out.client_brand_rank).toBeNull()
+  })
+
+  it('without anchors configured, the very same answer still counts (rule is opt-in)', () => {
+    expect(resolveClientBrandRank([], AU_TEXT, CTS).client_brand_rank).toBe(1)
+  })
+
+  it('keeps the sibling in brands_mentioned instead of deleting a real competitor', () => {
+    const brands = [
+      { brand: 'China Travel Service (Australia) Pty Ltd', rank: 1, snippet: 'x' },
+      { brand: 'Equity Travel', rank: 2, snippet: 'x' },
+    ]
+    const out = resolveClientBrandRank(brands, AU_TEXT, ANCHORED)
+    expect(out.client_brand_rank).toBeNull()
+    expect(out.brands.map(b => b.brand)).toEqual([
+      'China Travel Service (Australia) Pty Ltd',
+      'Equity Travel',
+    ])
+  })
+
+  it('accepts alias evidence once the answer carries an anchor', () => {
+    const raw =
+      'Certified inbound operators for New Zealand include A China Travel Company Ltd, ' +
+      'China Travel Service (N.Z.) Ltd and Excel Travel Ltd.'
+    const brands = [
+      { brand: 'A China Travel Company Ltd', rank: 1, snippet: 'x' },
+      { brand: 'Excel Travel Ltd', rank: 2, snippet: 'x' },
+    ]
+    expect(resolveClientBrandRank(brands, raw, ANCHORED).client_brand_rank).toBe(2)
+  })
+
+  it('never gates the official brand name, even with no anchor anywhere', () => {
+    const raw = 'For small-group departures, CTS Tours runs weekly China itineraries.'
+    expect(resolveClientBrandRank([], raw, ANCHORED).client_brand_rank).toBe(1)
+  })
+
+  it("never gates the client's own domain", () => {
+    const raw = 'Compare Wendy Wu Tours and then check ctstours.co.nz for prices.'
+    const brands = [{ brand: 'Wendy Wu Tours', rank: 1, snippet: 'x' }]
+    expect(resolveClientBrandRank(brands, raw, ANCHORED).client_brand_rank).toBe(2)
+  })
+
+  it('matches a short anchor word-bounded only ("nz" is not inside "bonza")', () => {
+    const bonza =
+      'Bonza Travel and China Travel Service both sell Yangtze cruises out of Sydney.'
+    expect(resolveClientBrandRank([], bonza, ANCHORED).client_brand_rank).toBeNull()
+    const nz = 'China Travel Service sells Yangtze cruises to travellers from NZ.'
+    expect(resolveClientBrandRank([], nz, ANCHORED).client_brand_rank).toBe(1)
+  })
+
+  it('matches a CJK anchor with no word boundaries around it', () => {
+    const cjk = { ...CTS, geoAnchors: ['新西兰'] }
+    const brands = [{ brand: '中国旅行社', rank: 1, snippet: 'x' }]
+    expect(
+      resolveClientBrandRank(brands, '在澳洲，中国旅行社提供签证服务。', cjk).client_brand_rank
+    ).toBeNull()
+    expect(
+      resolveClientBrandRank(brands, '在新西兰，中国旅行社提供签证服务。', cjk).client_brand_rank
+    ).toBe(1)
+  })
+
+  it('an all-blank anchor list behaves like no anchors at all', () => {
+    expect(
+      resolveClientBrandRank([], AU_TEXT, { ...CTS, geoAnchors: ['  ', ''] }).client_brand_rank
+    ).toBe(1)
+  })
+})
+
+describe('admissibleClientIdentifiers', () => {
+  const CTS = {
+    brandName: 'CTS Tours',
+    domain: 'ctstours.co.nz',
+    aliases: ['china travel service'],
+    geoAnchors: ['new zealand', 'nz'],
+  }
+
+  it('drops alias identifiers when the evidence text carries no anchor', () => {
+    expect(admissibleClientIdentifiers(CTS, 'China Travel Service (Australia) Pty Ltd')).toEqual([
+      'cts tours',
+      'ctstours co nz',
+      'ctstours',
+    ])
+  })
+
+  it('keeps them when it does — this is what merges the weekly ranking table', () => {
+    expect(admissibleClientIdentifiers(CTS, 'China Travel Service (NZ) Ltd')).toContain(
+      'china travel service'
+    )
   })
 })
