@@ -754,33 +754,53 @@ async function numberClaimSemanticCheck(ctx: CtsVerifierContext): Promise<Semant
 }
 
 /**
- * `verifyCtsReply`'s return type, widened with a per-call record of which gate ids
- * actually produced a real judgment (魏征/子牙复审 2026-09-20). The seven regex gate
- * ids are always present (`runVerifierGates` never skips a declared gate); the two
- * semantic ids are present only when Jev genuinely evaluated that dimension for THIS
- * reply — never a static "CTS always has these 9" constant. `drafts/route.ts` reads
- * this per-draft instead of assuming every CTS draft ran the same checks.
+ * `verifyCtsReply`'s return type, widened with two per-call records (Codex review
+ * 2026-09-20 on PR #1838, P1):
+ *
+ * - `checked_gate_ids`: which gate ids actually produced a real judgment. The seven
+ *   regex gate ids are always present (`runVerifierGates` never skips a declared
+ *   gate); the two semantic ids are present only when Jev genuinely evaluated that
+ *   dimension for THIS reply — never a static "CTS always has these 9" constant.
+ * - `semantic_flags`: Jev's advisory findings. **A hit here never changes `ok` /
+ *   `blocked_reasons` / `require_human_confirm`** — those three fields always come
+ *   from `verifyCtsReply`'s seven regex gates alone, untouched by the semantic layer.
+ *
+ * Why the second point matters (this is the actual bug Codex caught, not a style
+ * choice): an earlier version of this function folded a semantic hit into
+ * `blocked_reasons` and flipped `ok` to `false`. `conversation-inbound-draft.ts`
+ * persists `verifier_status: verifierResult.ok ? 'pending' : 'blocked'` and RETURNS
+ * before the human-approval step whenever `ok` is `false` — but `drafts/route.ts`
+ * (the approval-queue endpoint) only ever queries `verifier_status = 'pending'`, and
+ * `src/lib/pm-todo/messenger-draft-items.ts`'s `TRACKED_STATUSES` list does not
+ * include `'blocked'` either. So a semantic-only hit that flipped `ok` to `false`
+ * was reaching **no human review surface at all** — not the approval panel, not the
+ * PM daily todo — despite every comment in this file claiming the intent was "flag
+ * for extra human attention," the exact opposite of "silently disappear." Keeping
+ * `ok` tied only to the regex gates lets a semantic-flagged reply still reach
+ * `pending` and the normal approval queue, where `semantic_flags` is the payload
+ * that actually lets a human see the concern (see `DraftApprovalPanel.tsx`).
  */
 export interface CtsVerifierResult extends VerifierResult {
   checked_gate_ids: string[]
+  semantic_flags: string[]
 }
 
 const CTS_REGEX_GATE_IDS: readonly string[] = ctsVerifierGates.map((g) => g.id)
 
 /**
  * 回复发送管道真正调用的入口(取代 `verifyCtsReply` 成为 F2 pipeline 的 verify
- * 步骤)。先跑七道确定性闸(不变、零成本),客户 ID 核对通过且语义补充开关开着
- * 时,再并行跑两道 Jev 语义补充判断,命中任一都并入同一份 `blocked_reasons`——
- * 草稿本来就 100% 转人工(`require_human_confirm` 恒为 true),这里命中不是
- * "自动挡回",是"给人工审核多标一条重点"。
+ * 步骤)。先跑七道确定性闸(不变、零成本、决定 ok/blocked_reasons),客户 ID 核对
+ * 通过且语义补充开关开着时,再并行跑两道 Jev 语义补充判断——命中只写进
+ * `semantic_flags`,绝不改动 `ok`/`blocked_reasons`(见 `CtsVerifierResult` 注释:
+ * 这正是 Codex 复审 2026-09-20 抓到的真问题,不是风格选择)。
  */
 export async function verifyCtsReplyWithSemanticChecks(context: CtsVerifierContext): Promise<CtsVerifierResult> {
   const baseResult = verifyCtsReply(context)
   if (context.clientId !== CTS_CLIENT_ID) {
-    return { ...baseResult, checked_gate_ids: [] }
+    return { ...baseResult, checked_gate_ids: [], semantic_flags: [] }
   }
   if (!messengerVerifierSemanticEnabled()) {
-    return { ...baseResult, checked_gate_ids: [...CTS_REGEX_GATE_IDS] }
+    return { ...baseResult, checked_gate_ids: [...CTS_REGEX_GATE_IDS], semantic_flags: [] }
   }
 
   let brand: SemanticCheckOutcome
@@ -800,7 +820,7 @@ export async function verifyCtsReplyWithSemanticChecks(context: CtsVerifierConte
     console.warn(
       `[messenger-agent/verifier/cts] semantic supplement layer threw unexpectedly (${e instanceof Error ? e.message : String(e)}) — falling back to the regex-only gate result`,
     )
-    return { ...baseResult, checked_gate_ids: [...CTS_REGEX_GATE_IDS] }
+    return { ...baseResult, checked_gate_ids: [...CTS_REGEX_GATE_IDS], semantic_flags: [] }
   }
 
   const checked_gate_ids = [
@@ -809,17 +829,9 @@ export async function verifyCtsReplyWithSemanticChecks(context: CtsVerifierConte
     ...(number.evaluated ? ['number_claim_semantic'] : []),
   ]
 
-  const semanticReasons: string[] = []
-  if (brand.reason) semanticReasons.push(`brand_redline_semantic: ${brand.reason}`)
-  if (number.reason) semanticReasons.push(`number_claim_semantic: ${number.reason}`)
-  if (semanticReasons.length === 0) {
-    return { ...baseResult, checked_gate_ids }
-  }
+  const semantic_flags: string[] = []
+  if (brand.reason) semantic_flags.push(`brand_redline_semantic: ${brand.reason}`)
+  if (number.reason) semantic_flags.push(`number_claim_semantic: ${number.reason}`)
 
-  return {
-    ok: false,
-    blocked_reasons: [...baseResult.blocked_reasons, ...semanticReasons],
-    require_human_confirm: true,
-    checked_gate_ids,
-  }
+  return { ...baseResult, checked_gate_ids, semantic_flags }
 }

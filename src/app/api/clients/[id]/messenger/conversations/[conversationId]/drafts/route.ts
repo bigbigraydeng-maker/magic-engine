@@ -34,6 +34,14 @@ interface DraftVerifierOutputJson {
   blocked_reasons?: string[]
   /** Per-draft record of which gate ids actually ran — see `CtsVerifierResult` in cts.ts. */
   checked_gate_ids?: string[]
+  /**
+   * Jev semantic-layer advisory findings — never affects `ok`/`blocked_reasons`
+   * (see `CtsVerifierResult` in cts.ts). A `pending` draft can carry these; the
+   * portal must surface them so a human reviewing it actually sees the concern
+   * (Codex review 2026-09-20 on PR #1838: this is the payload that makes the
+   * semantic layer's "flag for human attention" intent real instead of silent).
+   */
+  semantic_flags?: string[]
 }
 
 /**
@@ -107,6 +115,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       quotedOfferingNames: d.quoted_offering_names ?? [],
       verifierOutputJson: d.verifier_output_json,
       passedGateIds: passedGateIdsFor(params.id, d.verifier_output_json),
+      semanticFlags: d.verifier_output_json?.semantic_flags ?? [],
       createdAt: d.created_at,
     })),
   })

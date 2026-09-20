@@ -161,6 +161,7 @@ describe('GET drafts — only the approval queue', () => {
         quotedOfferingNames: ['Golden China 12-Day'],
         verifierOutputJson: { ok: true, blocked_reasons: [] },
         passedGateIds: expect.arrayContaining(['brand_redline', 'length', 'url_allowlist']),
+        semanticFlags: [],
         createdAt: '2026-09-15T01:00:00Z',
       },
     ])
@@ -202,6 +203,64 @@ describe('GET drafts — only the approval queue', () => {
       'url_allowlist',
       'brand_redline_semantic',
     ])
+  })
+
+  it(
+    '🔴 regression guard (Codex review 2026-09-20 on PR #1838): surfaces semantic_flags ' +
+      "on an otherwise-'pending' (ok:true) row — a semantic hit never blocks the draft, so " +
+      'the portal must read the advisory flag from the row itself to show it at all',
+    async () => {
+      allow()
+      stubTables({
+        owned: true,
+        drafts: [
+          {
+            id: 'draft-3',
+            draft_body: 'text',
+            agent_confidence: 0.7,
+            quoted_offering_names: [],
+            verifier_output_json: {
+              ok: true,
+              blocked_reasons: [],
+              checked_gate_ids: ['brand_redline', 'brand_redline_semantic'],
+              semantic_flags: ['brand_redline_semantic: reply may restate a brand-redline claim (Jev score 0.79)'],
+            },
+            created_at: '2026-09-20T01:00:00Z',
+          },
+        ],
+      })
+
+      const json = (await (await GET(request(), params())).json()) as {
+        drafts: Array<{ semanticFlags: string[] }>
+      }
+
+      expect(json.drafts[0].semanticFlags).toEqual([
+        'brand_redline_semantic: reply may restate a brand-redline claim (Jev score 0.79)',
+      ])
+    },
+  )
+
+  it('defaults semanticFlags to an empty array when the row has no verifier_output_json at all', async () => {
+    allow()
+    stubTables({
+      owned: true,
+      drafts: [
+        {
+          id: 'draft-4',
+          draft_body: 'text',
+          agent_confidence: null,
+          quoted_offering_names: null,
+          verifier_output_json: null,
+          created_at: '2026-09-15T01:00:00Z',
+        },
+      ],
+    })
+
+    const json = (await (await GET(request(), params())).json()) as {
+      drafts: Array<{ semanticFlags: string[] }>
+    }
+
+    expect(json.drafts[0].semanticFlags).toEqual([])
   })
 
   it('attaches no gate list for a client whose Verifier policy is not CTS (no platform-wide truth invented)', async () => {

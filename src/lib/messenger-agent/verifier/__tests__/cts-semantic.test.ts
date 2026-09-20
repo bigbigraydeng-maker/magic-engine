@@ -9,6 +9,14 @@
  * "regex misses it" assertion below first proves the regex-only gate
  * (`verifyCtsReply`) actually passes the same input — otherwise the test would
  * not be demonstrating any real value added by the semantic layer.
+ *
+ * A Jev hit is advisory-only: it lands in `semantic_flags`, never in `ok` /
+ * `blocked_reasons` (Codex review 2026-09-20 on PR #1838, P1 — an earlier version
+ * of this code flipped `ok` to `false` on a semantic hit, which routed the draft to
+ * `verifier_status='blocked'`; `drafts/route.ts` only queries `pending` and
+ * `messenger-draft-items.ts`'s `TRACKED_STATUSES` excludes `blocked`, so that
+ * "needs human review" flag was reaching no human review surface at all). Every
+ * assertion below checks `semantic_flags`, not `blocked_reasons`, for a Jev hit.
  */
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -106,14 +114,16 @@ describe('brand_redline_semantic — catches a paraphrase the literal-phrase reg
     expect(result.blocked_reasons.some((r) => r.startsWith('brand_redline:'))).toBe(false)
   })
 
-  it('the semantic layer catches it when Jev scores the paraphrase high', async () => {
+  it('the semantic layer flags it (advisory, not a block) when Jev scores the paraphrase high', async () => {
     callJev.mockResolvedValueOnce({ answers: { brand_redline_semantic: { noul: 0.87 } } })
     callJev.mockResolvedValueOnce({ answers: { number_claim_semantic: { noul: 0.02 } } })
     const result = await verifyCtsReplyWithSemanticChecks(
       baseContext({ agentOutput: { reply_text: PARAPHRASED_REDLINE, confidence: 0.9, offerings: [] } }),
     )
-    expect(result.ok).toBe(false)
-    expect(result.blocked_reasons.some((r) => r.startsWith('brand_redline_semantic:'))).toBe(true)
+    // Advisory only: still ok:true, still reaches 'pending' so a human actually sees it.
+    expect(result.ok).toBe(true)
+    expect(result.blocked_reasons).toEqual([])
+    expect(result.semantic_flags.some((r) => r.startsWith('brand_redline_semantic:'))).toBe(true)
     expect(result.require_human_confirm).toBe(true)
     // The call actually carried the real redline list and reply text, not a stub.
     expect(callJev).toHaveBeenCalledWith(
@@ -122,11 +132,11 @@ describe('brand_redline_semantic — catches a paraphrase the literal-phrase reg
     )
   })
 
-  it('does not block a clean reply that Jev scores low', async () => {
+  it('does not flag a clean reply that Jev scores low', async () => {
     callJev.mockResolvedValueOnce({ answers: { brand_redline_semantic: { noul: 0.05 } } })
     callJev.mockResolvedValueOnce({ answers: { number_claim_semantic: { noul: 0.02 } } })
     const result = await verifyCtsReplyWithSemanticChecks(baseContext())
-    expect(result.blocked_reasons.some((r) => r.startsWith('brand_redline_semantic:'))).toBe(false)
+    expect(result.semantic_flags.some((r) => r.startsWith('brand_redline_semantic:'))).toBe(false)
     expect(result.ok).toBe(true)
   })
 
@@ -156,7 +166,7 @@ describe('number_claim_semantic — catches a spelled-out price/date the digit r
     expect(result.blocked_reasons.some((r) => r.startsWith('number_claim:'))).toBe(false)
   })
 
-  it('the semantic layer catches it when Jev scores the spelled-out mismatch high', async () => {
+  it('the semantic layer flags it (advisory, not a block) when Jev scores the spelled-out mismatch high', async () => {
     // Both checks fire in parallel (brandRedlinePhrases is non-empty in baseContext) —
     // queue a low brand score first (call order matches Promise.all's array order: each
     // async check runs synchronously up to its own `await callJev(...)`, so brand's call
@@ -168,15 +178,17 @@ describe('number_claim_semantic — catches a spelled-out price/date the digit r
         agentOutput: { reply_text: SPELLED_OUT_WRONG_PRICE_AND_DATE, confidence: 0.9, offerings: [] },
       }),
     )
-    expect(result.ok).toBe(false)
-    expect(result.blocked_reasons.some((r) => r.startsWith('number_claim_semantic:'))).toBe(true)
+    // Advisory only: still ok:true, still reaches 'pending' so a human actually sees it.
+    expect(result.ok).toBe(true)
+    expect(result.blocked_reasons).toEqual([])
+    expect(result.semantic_flags.some((r) => r.startsWith('number_claim_semantic:'))).toBe(true)
     expect(callJev).toHaveBeenCalledWith(
       expect.objectContaining({ valid_prices_nzd: [4999], valid_departure_dates: ['2026-11-16'] }),
       expect.any(Object),
     )
   })
 
-  it('does not block a spelled-out price/date that Jev scores low (e.g. it actually matches)', async () => {
+  it('does not flag a spelled-out price/date that Jev scores low (e.g. it actually matches)', async () => {
     callJev.mockResolvedValueOnce({ answers: { brand_redline_semantic: { noul: 0.03 } } })
     callJev.mockResolvedValueOnce({ answers: { number_claim_semantic: { noul: 0.1 } } })
     const result = await verifyCtsReplyWithSemanticChecks(
@@ -188,7 +200,7 @@ describe('number_claim_semantic — catches a spelled-out price/date the digit r
         },
       }),
     )
-    expect(result.blocked_reasons.some((r) => r.startsWith('number_claim_semantic:'))).toBe(false)
+    expect(result.semantic_flags.some((r) => r.startsWith('number_claim_semantic:'))).toBe(false)
     expect(result.ok).toBe(true)
   })
 })
@@ -215,6 +227,7 @@ describe('fail-open — Jev outage never blocks a reply that the regex gates alr
       'length',
       'url_allowlist',
     ])
+    expect(withSemantic.semantic_flags).toEqual([])
   })
 
   it('one check throwing and the other scoring low both fail open — no crash, no false block, only the working check is claimed', async () => {
@@ -223,6 +236,7 @@ describe('fail-open — Jev outage never blocks a reply that the regex gates alr
     const result = await verifyCtsReplyWithSemanticChecks(baseContext())
     expect(result.ok).toBe(true)
     expect(result.blocked_reasons).toEqual([])
+    expect(result.semantic_flags).toEqual([])
     expect(result.checked_gate_ids).not.toContain('brand_redline_semantic')
     expect(result.checked_gate_ids).toContain('number_claim_semantic')
   })
@@ -251,6 +265,7 @@ describe('fail-open — Jev outage never blocks a reply that the regex gates alr
     expect(callJev).not.toHaveBeenCalled()
     expect(result.ok).toBe(baseOnMalformed.ok)
     expect(result.blocked_reasons).toEqual(baseOnMalformed.blocked_reasons)
+    expect(result.semantic_flags).toEqual([])
     expect(result.checked_gate_ids).toEqual([
       'brand_redline',
       'retired_tour_mention',
@@ -269,6 +284,7 @@ describe('fail-open — Jev outage never blocks a reply that the regex gates alr
     const base = verifyCtsReply(baseContext())
     expect(result.ok).toBe(base.ok)
     expect(result.blocked_reasons).toEqual(base.blocked_reasons)
+    expect(result.semantic_flags).toEqual([])
     expect(result.checked_gate_ids).not.toContain('brand_redline_semantic')
     expect(result.checked_gate_ids).not.toContain('number_claim_semantic')
   })
@@ -280,6 +296,7 @@ describe('fail-open — Jev outage never blocks a reply that the regex gates alr
     expect(callJev).not.toHaveBeenCalled()
     expect(result.ok).toBe(false)
     expect(result.blocked_reasons[0]).toContain('client_id_mismatch')
+    expect(result.semantic_flags).toEqual([])
     expect(result.checked_gate_ids).toEqual([])
   })
 })
@@ -314,23 +331,31 @@ describe('checked_gate_ids — what the human-review portal trusts', () => {
   })
 })
 
-// ─── Combined with regex blocks ──────────────────────────────────────────────
+// ─── A hard regex block and an advisory semantic flag are independent ───────
 
-describe('semantic reasons combine with regex reasons rather than replacing them', () => {
-  it('a reply that fails both a regex gate and a semantic check reports both', async () => {
-    callJev.mockResolvedValueOnce({ answers: { brand_redline_semantic: { noul: 0.9 } } })
-    callJev.mockResolvedValueOnce({ answers: { number_claim_semantic: { noul: 0.05 } } })
-    const result = await verifyCtsReplyWithSemanticChecks(
-      baseContext({
-        agentOutput: {
-          reply_text: "We've served Auckland since the late 1920s! Also: $999999 total scam price.",
-          confidence: 0.9,
-          offerings: [],
-        },
-      }),
-    )
-    expect(result.ok).toBe(false)
-    const firedGates = result.blocked_reasons.map((r) => r.split(':')[0])
-    expect(firedGates).toEqual(expect.arrayContaining(['number_claim', 'brand_redline_semantic']))
-  })
+describe('a regex block and a semantic flag never get conflated', () => {
+  it(
+    'a reply that fails a regex gate AND scores high on a semantic check reports the regex ' +
+      "failure in blocked_reasons (ok:false, this IS a hard block) and the semantic hit " +
+      "separately in semantic_flags (advisory) — never merged into one list",
+    async () => {
+      callJev.mockResolvedValueOnce({ answers: { brand_redline_semantic: { noul: 0.9 } } })
+      callJev.mockResolvedValueOnce({ answers: { number_claim_semantic: { noul: 0.05 } } })
+      const result = await verifyCtsReplyWithSemanticChecks(
+        baseContext({
+          agentOutput: {
+            reply_text: "We've served Auckland since the late 1920s! Also: $999999 total scam price.",
+            confidence: 0.9,
+            offerings: [],
+          },
+        }),
+      )
+      // number_claim (regex) is a real hard block — $999999 matches no confirmed product.
+      expect(result.ok).toBe(false)
+      expect(result.blocked_reasons.some((r) => r.startsWith('number_claim:'))).toBe(true)
+      expect(result.blocked_reasons.some((r) => r.startsWith('brand_redline_semantic:'))).toBe(false)
+      // brand_redline_semantic (Jev) is advisory only — lives in semantic_flags, not blocked_reasons.
+      expect(result.semantic_flags.some((r) => r.startsWith('brand_redline_semantic:'))).toBe(true)
+    },
+  )
 })

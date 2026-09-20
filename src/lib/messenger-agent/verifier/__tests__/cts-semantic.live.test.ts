@@ -80,8 +80,11 @@ describe.skipIf(!process.env.TYPESAFE_API_KEY)('CTS semantic verifier gates — 
         }),
       )
       expect(result.checked_gate_ids).toContain('brand_redline_semantic')
-      expect(result.ok).toBe(false)
-      expect(result.blocked_reasons.some((r) => r.startsWith('brand_redline_semantic:'))).toBe(true)
+      // Advisory only — ok stays true, the flag rides along in semantic_flags (Codex
+      // review 2026-09-20 on PR #1838: flipping ok would silently drop this from every
+      // human review surface, see CtsVerifierResult's header comment in cts.ts).
+      expect(result.ok).toBe(true)
+      expect(result.semantic_flags.some((r) => r.startsWith('brand_redline_semantic:'))).toBe(true)
     },
     15000,
   )
@@ -91,7 +94,7 @@ describe.skipIf(!process.env.TYPESAFE_API_KEY)('CTS semantic verifier gates — 
     async () => {
       const result = await verifyCtsReplyWithSemanticChecks(baseContext())
       expect(result.checked_gate_ids).toContain('brand_redline_semantic')
-      expect(result.blocked_reasons.some((r) => r.startsWith('brand_redline_semantic:'))).toBe(false)
+      expect(result.semantic_flags.some((r) => r.startsWith('brand_redline_semantic:'))).toBe(false)
     },
     15000,
   )
@@ -111,8 +114,8 @@ describe.skipIf(!process.env.TYPESAFE_API_KEY)('CTS semantic verifier gates — 
         }),
       )
       expect(result.checked_gate_ids).toContain('number_claim_semantic')
-      expect(result.ok).toBe(false)
-      expect(result.blocked_reasons.some((r) => r.startsWith('number_claim_semantic:'))).toBe(true)
+      expect(result.ok).toBe(true)
+      expect(result.semantic_flags.some((r) => r.startsWith('number_claim_semantic:'))).toBe(true)
     },
     15000,
   )
@@ -130,7 +133,7 @@ describe.skipIf(!process.env.TYPESAFE_API_KEY)('CTS semantic verifier gates — 
         }),
       )
       expect(result.checked_gate_ids).toContain('number_claim_semantic')
-      expect(result.blocked_reasons.some((r) => r.startsWith('number_claim_semantic:'))).toBe(false)
+      expect(result.semantic_flags.some((r) => r.startsWith('number_claim_semantic:'))).toBe(false)
     },
     15000,
   )

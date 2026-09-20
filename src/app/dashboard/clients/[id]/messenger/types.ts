@@ -85,6 +85,9 @@ export interface PendingDraft {
   /** Verifier gate ids this draft cleared to reach 'pending'. Empty for a
    *  client whose Verifier policy this endpoint does not (yet) know. */
   passedGateIds: string[]
+  /** Jev semantic-layer advisory findings on an otherwise-'pending' draft — never
+   *  the reason it blocked. See `CtsVerifierResult` (cts.ts) and drafts/route.ts. */
+  semanticFlags: string[]
   createdAt: string
 }
 
