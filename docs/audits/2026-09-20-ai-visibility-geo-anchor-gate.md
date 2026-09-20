@@ -111,8 +111,7 @@ CTS 锚点按 `{new zealand, nz, aotearoa, auckland}` 试算：
 ### 跑过的验证
 
 ```
-npx vitest run src/lib/ai-tracker src/lib/diagnostic src/lib/industry-ai-visibility
-                                                       → 35 files / 558 tests 全过
+npx vitest run src/lib/ai-tracker src/lib/diagnostic   → 31 files / 538 tests 全过（含 Codex 复审后新增的用例）
 npx vitest run src/app/api                             → 31 红，与 origin/main 基线**同样 31 红**（同一个文件 attribution cron，与本次无关，已逐条对照）
 npx tsc --noEmit                                       → 11 处报错，与改动前基线**逐字节相同**（diff 为空；全在 messenger 测试和 tools/，与本次无关）
 npm run build                                          → ✓ Compiled successfully，新接口 /api/clients/[id]/brand-geo-anchors 已产出
@@ -267,7 +266,21 @@ P1 第五条**部分采纳**：拒收 `com / co / net / org / www / ltd / pty / 
 另外**不采纳**它对 `affb40be` 的判断：它认为抠链接这条路能救那一条、所以我的取舍站不住 ——
 实查那篇回答的 "New Zealand" 出现在**正文散文**里而不是链接里，抠完仍判 rank=3，已实测确认。
 
-**两路的必改项都已改完并重新验证。**
+**Codex（PR 自动复审）· 第一轮：两条都属实，已合并它推上来的修复并自己复验。**
+① 我为了让 `(N.Z.)` 能匹配上，把锚点的「去空格再匹配」下限放宽到 2 个字符 ——
+结果连**真正的空格**也一起跨了：`new zeal and enthusiasm` 会满足 `new zealand`，`a U-turn` 会满足 `au`。
+修法是把「标点隔开」和「空格隔开」分成两种归一化：只跨标点，不跨空格。
+② 保存接口按「转小写 + 去首尾空格」校验，而匹配时用的是会**连标点一起去掉**的那套 ——
+所以填 `travel.` 能绕过「不是地名」的拒收表，到了匹配时又被还原成 `travel`，拒收表等于形同虚设。
+改成两边用同一套归一化。
+我自己另跑了 10 条对抗用例复验（全过）：`new zeal and` / `a U-turn` / `in Zurich` / `bonza` 全部不再满足锚点，
+而 `(N.Z.)` / `(N.Z)` / `A.U.` / 正常散文照常认得。CTS 全量重算数字**没有变**（仍是 15 条 / 7-7）。
+顺手把它那段正则里裸写的组合音标字符改成了转义写法（`\u0300-\u036f`），行为一样，但肉眼看得见。
+
+**另外自己抓到一处**：我给周报排行写的测试辅助函数类型推断得太窄，`npx vitest` 能过但 `npx tsc` 报错
+（esbuild 不做类型检查）。已修，现在 `tsc` 输出与基线逐字节相同。
+
+**三路的必改项都已改完并重新验证。**
 
 ---
 

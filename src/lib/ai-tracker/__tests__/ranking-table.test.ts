@@ -10,6 +10,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { buildRankingTable } from '../orchestrator'
+import type { ClientBrandIdentity } from '../client-brand-match'
 import type { BrandMention } from '@/types/magic-engine'
 
 const CTS = {
@@ -25,7 +26,7 @@ interface Row {
   client_brand_rank: number | null
 }
 
-function table(runs: Row[], identity = CTS) {
+function table(runs: Row[], identity: ClientBrandIdentity = CTS) {
   const out = buildRankingTable(runs, identity) as {
     brands: Array<{ name: string; mentions: number; avg_rank: number | null }>
   }
