@@ -21,6 +21,7 @@ import { runClaude } from './runners/claude'
 import { runPerplexity } from './runners/perplexity'
 import { runGemini } from './runners/gemini'
 import { parseRanking } from './parser'
+import { buildClientIdentifiers, isClientBrand, type ClientBrandIdentity } from './client-brand-match'
 import { supabaseAdmin } from '../supabase'
 import { writeTrackerFlywheelMetrics } from '../flywheel/metrics/writeTrackerMetrics'
 import type {
@@ -59,6 +60,7 @@ interface ClientRow {
   id: string
   name: string
   domain: string | null
+  brand_aliases: string[] | null
 }
 
 interface BriefRow {
@@ -116,6 +118,8 @@ export async function runTracker(
       queries,
       clientId: client.id,
       brandName,
+      clientDomain: client.domain,
+      clientAliases: client.brand_aliases,
       result,
     })
     console.log(`[runTracker] Engine ${engine} completed: succeeded=${result.runs_succeeded}, failed=${result.runs_failed}`)
@@ -124,7 +128,11 @@ export async function runTracker(
   // 4. Aggregate weekly snapshot (only if we got at least one successful run)
   console.log('[runTracker] Aggregating snapshot...')
   if (result.runs_succeeded > 0) {
-    const agg = await aggregateSnapshot(client.id, brandName)
+    const agg = await aggregateSnapshot(client.id, {
+      brandName,
+      domain: client.domain,
+      aliases: client.brand_aliases,
+    })
     result.snapshot_id = agg?.snapshotId ?? null
 
     // 5. Write GEO flywheel metrics so attribution job can compute outcomes
@@ -151,7 +159,7 @@ async function loadClientContext(
 ): Promise<{ client: ClientRow; brandName: string }> {
   const { data: client, error } = await supabaseAdmin
     .from('clients')
-    .select('id, name, domain')
+    .select('id, name, domain, brand_aliases')
     .eq('id', clientId)
     .single<ClientRow>()
 
@@ -198,6 +206,8 @@ interface EngineLaneInput {
   queries: AiVisibilityQuery[]
   clientId: string
   brandName: string
+  clientDomain: string | null
+  clientAliases: string[] | null
   result: RunTrackerResult
 }
 
@@ -206,7 +216,7 @@ interface EngineLaneInput {
  * Add delay between batches to prevent rate limiting on both runner and parser calls.
  */
 async function runEngineLane(input: EngineLaneInput): Promise<void> {
-  const { engine, queries, clientId, brandName, result } = input
+  const { engine, queries, clientId, brandName, clientDomain, clientAliases, result } = input
 
   console.log(`[runEngineLane] ${engine}: starting with ${queries.length} queries, batch size = ${PER_ENGINE_BATCH_SIZE}`)
 
@@ -218,7 +228,9 @@ async function runEngineLane(input: EngineLaneInput): Promise<void> {
     await Promise.all(
       batch.map(q => {
         console.log(`[runEngineLane] ${engine}: processing query ${q.id}`)
-        return processOne({ engine, query: q, clientId, brandName, result })
+        return processOne({
+          engine, query: q, clientId, brandName, clientDomain, clientAliases, result,
+        })
       })
     )
     const batchElapsed = Date.now() - startBatch
@@ -241,6 +253,8 @@ interface ProcessOneInput {
   query: AiVisibilityQuery
   clientId: string
   brandName: string
+  clientDomain: string | null
+  clientAliases: string[] | null
   result: RunTrackerResult
 }
 
@@ -249,7 +263,7 @@ interface ProcessOneInput {
  * Catches all errors so one failure doesn't kill the whole pass.
  */
 async function processOne(input: ProcessOneInput): Promise<void> {
-  const { engine, query, clientId, brandName, result } = input
+  const { engine, query, clientId, brandName, clientDomain, clientAliases, result } = input
   const market: MarketTag = (query.market_tag ?? 'au-nz') as MarketTag
 
   try {
@@ -311,6 +325,8 @@ async function processOne(input: ProcessOneInput): Promise<void> {
       const parsed = await parseRanking({
         rawResponse: runnerOut.raw_response,
         clientBrandName: brandName,
+        clientDomain,
+        clientAliases,
       })
       brands = parsed.brands
       clientBrandRank = parsed.client_brand_rank
@@ -366,7 +382,10 @@ interface AggregateResult {
  * Uses Monday of the current week as the snapshot key.
  * Returns metric data alongside the snapshot id for flywheel writes.
  */
-async function aggregateSnapshot(clientId: string, brandName: string): Promise<AggregateResult | null> {
+async function aggregateSnapshot(
+  clientId: string,
+  identity: ClientBrandIdentity
+): Promise<AggregateResult | null> {
   const weekOf = mondayOfThisWeek().toISOString().slice(0, 10) // YYYY-MM-DD
 
   // Pull all runs for this client this week
@@ -403,7 +422,7 @@ async function aggregateSnapshot(clientId: string, brandName: string): Promise<A
       ai_engine: string
       brands_mentioned: BrandMention[]
     }>,
-    brandName
+    identity
   )
 
   // Upsert by (client_id, week_of)
@@ -431,7 +450,7 @@ async function aggregateSnapshot(clientId: string, brandName: string): Promise<A
 /** Aggregate brand mentions across all runs into a flat ranking table. */
 function buildRankingTable(
   runs: Array<{ ai_engine: string; brands_mentioned: BrandMention[] }>,
-  clientBrandName?: string
+  identity?: ClientBrandIdentity
 ): Record<string, unknown> {
   const byBrand = new Map<
     string,
@@ -462,8 +481,8 @@ function buildRankingTable(
 
   // Merge brand name variants for the client (e.g. "CTS Tours" and
   // "CTS Tours - China Travel Service (NZ) Limited" → one canonical entry)
-  if (clientBrandName) {
-    mergeClientBrandVariants(byBrand, clientBrandName)
+  if (identity) {
+    mergeClientBrandVariants(byBrand, identity)
   }
 
   const brands = Array.from(byBrand.entries())
@@ -484,30 +503,23 @@ function buildRankingTable(
 
 /**
  * Merge all brand-name variants of the client into a single canonical entry.
- * Variants are detected by substring inclusion (case-insensitive):
- *   "CTS Tours - China Travel Service (NZ) Limited" includes "CTS Tours"
- *   → both collapse into the canonical client brand name.
+ * Uses the same client-identity rules as the parser (brand name, aliases,
+ * domain), so every entry that set client_brand_rank lands in one row.
  */
 function mergeClientBrandVariants(
   byBrand: Map<string, { mentions: number; rankSum: number; byEngine: Record<string, number[]> }>,
-  clientBrandName: string
+  identity: ClientBrandIdentity
 ): void {
-  const canon = clientBrandName.trim()
-  const canonLower = canon.toLowerCase()
+  const canon = identity.brandName.trim()
+  const ids = buildClientIdentifiers(identity)
 
   let canonicalKey = ''
   const variantKeys: string[] = []
 
   for (const key of Array.from(byBrand.keys())) {
-    const keyLower = key.toLowerCase().trim()
-    if (keyLower === canonLower) {
+    if (key.trim().toLowerCase() === canon.toLowerCase()) {
       canonicalKey = key
-    } else if (keyLower.includes(canonLower)) {
-      // Only merge when the RAW CANDIDATE contains the canonical brand name
-      // (e.g. "CTS Tours - China Travel Service NZ" contains "CTS Tours").
-      // Deliberately NOT merging the reverse direction — that would absorb
-      // short competitor names into a longer client name (e.g. "Magic" into
-      // "Magic Engine"), corrupting competitor rankings in the snapshot.
+    } else if (isClientBrand(key, ids)) {
       variantKeys.push(key)
     }
   }

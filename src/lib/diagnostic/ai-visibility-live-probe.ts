@@ -63,6 +63,7 @@ export function createDefaultLiveProbe(supabase: SupabaseClient): LiveProbe {
         return emptyResult(start, 'no enabled queries configured')
       }
 
+      const identity = await loadClientIdentity(supabase, clientId)
       const questions: LiveProbeQuestionResult[] = []
       let mentions = 0
       const ranks: number[] = []
@@ -78,6 +79,8 @@ export function createDefaultLiveProbe(supabase: SupabaseClient): LiveProbe {
           const parsed = await parseRanking({
             rawResponse: out.raw_response,
             clientBrandName: brandName,
+            clientDomain: identity.domain,
+            clientAliases: identity.brand_aliases,
           })
           questions.push({ question: q.question, client_brand_rank: parsed.client_brand_rank })
           if (parsed.client_brand_rank !== null) {
@@ -118,6 +121,20 @@ function emptyResult(start: number, reason: string): LiveProbeResult {
     skipped: true,
     skip_reason: reason,
   }
+}
+
+async function loadClientIdentity(
+  supabase: SupabaseClient,
+  clientId: string,
+): Promise<{ domain: string | null; brand_aliases: string[] | null }> {
+  const { data, error } = await supabase
+    .from('clients')
+    .select('domain, brand_aliases')
+    .eq('id', clientId)
+    .maybeSingle<{ domain: string | null; brand_aliases: string[] | null }>()
+  // Failing closed is safe: without domain/aliases matching only gets stricter.
+  if (error) console.warn('[ai-visibility-live-probe] client identity load failed:', error.message)
+  return { domain: data?.domain ?? null, brand_aliases: data?.brand_aliases ?? null }
 }
 
 async function loadPriorityQueries(
