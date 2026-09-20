@@ -101,7 +101,7 @@
 |---|---|---|---|
 | `META_SYSTEM_USER_TOKEN` | Meta 长效 System User Token（广告执行必需） | Render-web | ✅ (仅 example) |
 | `FACEBOOK_APP_ID` / `FACEBOOK_APP_SECRET` | Meta OAuth 应用 | Render-web | ✅ |
-| `GOOGLE_ADS_DEVELOPER_TOKEN` | Google Ads API（等审核，见 ROADMAP P18.B.0） | Render-web | ✅ |
+| `GOOGLE_ADS_DEVELOPER_TOKEN` | Google Ads API（2026-06-11 提交的旧申请流程已作废；2026-09-15 走新流程拿到 Explorer 级权限——可管正式客户账户，2880 次操作/天，但不能建账户/管用户权限/关键词规划；Basic 级待品牌审核，见 ROADMAP AD-GADS-1） | Render-web | ✅ |
 | `GOOGLE_ADS_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` / `_MANAGER_ID` | Google Ads OAuth + MCC | Render-web | ✅ |
 | `TIKTOK_ADS_ACCESS_TOKEN` / `TIKTOK_ADS_ADVERTISER_ID` | TikTok Ads | Render-web | ✅ |
 | `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` | TikTok 自动发布（Content Posting API，跟 Ads 是两个应用）| Render-web | ⬜ 待建应用 |
