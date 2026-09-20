@@ -412,6 +412,27 @@ describe('resolveClientBrandRank — geo anchors', () => {
     ).toBe(1)
   })
 
+  // 魏征's adversarial review, 2026-09-20: the anchor must come from prose.
+  it('a cited link is not geo evidence — not even the answer\u2019s own', () => {
+    const thirdParty =
+      'China Travel Service (Australia) Pty Ltd, Sydney, is a premier Australian ' +
+      'agency. See https://tourism-review.co.nz/a/1 for reviews.'
+    expect(resolveClientBrandRank([], thirdParty, ANCHORED).client_brand_rank).toBeNull()
+    const ownLink = 'China Travel Service sells tours. https://explorechinaholidays.com.au/x'
+    expect(resolveClientBrandRank([], ownLink, ANCHORED).client_brand_rank).toBeNull()
+    // …but prose plus a foreign link is still prose.
+    const prose = 'New Zealand travellers use China Travel Service. https://x.com.au/y'
+    expect(resolveClientBrandRank([], prose, ANCHORED).client_brand_rank).toBe(1)
+  })
+
+  it('finds a short anchor spelled out with separators ("N.Z.")', () => {
+    const raw = 'China Travel Service (N.Z.) Limited is the licensed operator.'
+    expect(resolveClientBrandRank([], raw, ANCHORED).client_brand_rank).toBe(1)
+    // The word-boundary check still holds: "in Zurich" must not satisfy "nz".
+    const zurich = 'China Travel Service runs departures in Zurich and Milan.'
+    expect(resolveClientBrandRank([], zurich, ANCHORED).client_brand_rank).toBeNull()
+  })
+
   it('an all-blank anchor list behaves like no anchors at all', () => {
     expect(
       resolveClientBrandRank([], AU_TEXT, { ...CTS, geoAnchors: ['  ', ''] }).client_brand_rank

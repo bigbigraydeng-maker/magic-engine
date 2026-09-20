@@ -30,6 +30,22 @@ const MIN_ANCHOR_LEN = 2
 const MIN_CJK_ANCHOR_LEN = 3
 const CJK_RE = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/
 
+/**
+ * Words that are not places. Each of these appears in ordinary prose or in
+ * company suffixes often enough that using one as an anchor would leave the
+ * gate permanently open while looking configured.
+ *
+ * Country codes like "nz" / "au" are deliberately NOT here: they are the
+ * whole point of the feature. The reason they used to be unsafe — every
+ * ".com.au" link handing over an "au" — is fixed in the matcher, which strips
+ * links and hostnames before looking for an anchor.
+ */
+const NON_PLACE_ANCHORS = new Set([
+  'com', 'co', 'net', 'org', 'edu', 'gov', 'govt', 'ac', 'io', 'info', 'biz',
+  'www', 'http', 'https', 'ltd', 'limited', 'pty', 'inc', 'llc', 'group',
+  'the', 'and', 'tours', 'travel',
+])
+
 interface PatchBody {
   anchors?: unknown
 }
@@ -107,6 +123,16 @@ export async function PATCH(
         { status: 400 },
       )
     }
+    if (NON_PLACE_ANCHORS.has(norm)) {
+      return NextResponse.json(
+        {
+          error:
+            `「${norm}」不是地名，不能当地域锚点：它在普通句子和公司后缀里到处都是，` +
+            '填了等于这道闸门看着开着、其实永远放行。请填客户真正所在的国家 / 地区 / 城市。',
+        },
+        { status: 400 },
+      )
+    }
     if (seen.has(norm)) continue
     if (cleaned.length >= MAX_ANCHORS) break
     seen.add(norm)
@@ -134,8 +160,43 @@ export async function PATCH(
   }
 
   return NextResponse.json({
-    success: true,
-    anchors: cleaned,
-    count:   cleaned.length,
+    success:  true,
+    anchors:  cleaned,
+    count:    cleaned.length,
+    warnings: await buildWarnings(clientId, cleaned),
   })
+}
+
+/**
+ * Non-blocking advice, shown next to the save confirmation.
+ *
+ * The gate is applied to the answer as written. A client whose aliases are in
+ * Chinese will be recognised in Chinese answers — and a Chinese answer often
+ * writes the country in Chinese too, so an anchor list that is English-only
+ * would reject those answers with nothing to show for it. Today that costs
+ * CTS almost nothing, but only because most of its Chinese answers happen to
+ * also say "New Zealand" in English. That is luck, not design.
+ */
+async function buildWarnings(clientId: string, anchors: string[]): Promise<string[]> {
+  if (anchors.length === 0) return []
+  const { data } = await supabaseAdmin
+    .from('clients')
+    .select('brand_aliases')
+    .eq('id', clientId)
+    .single()
+
+  const aliases = (data as { brand_aliases: unknown } | null)?.brand_aliases
+  if (!Array.isArray(aliases)) return []
+
+  const warnings: string[] = []
+  const aliasHasCjk = aliases.some(a => typeof a === 'string' && CJK_RE.test(a))
+  const anchorHasCjk = anchors.some(a => CJK_RE.test(a))
+  if (aliasHasCjk && !anchorHasCjk) {
+    warnings.push(
+      '这个客户配了中文别名，但地域锚点全是英文。' +
+        '中文回答里如果只写「新西兰」不写 “New Zealand”，靠中文别名认出来的提及会被判成「没提到」。' +
+        '建议把中文地名也加进来。',
+    )
+  }
+  return warnings
 }

@@ -34,6 +34,7 @@ export function BrandGeoAnchorsPanel({ clientId }: Props) {
   const [saving,  setSaving]  = useState(false)
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [errMsg,  setErrMsg]  = useState<string | null>(null)
+  const [warnings, setWarnings] = useState<string[]>([])
 
   const load = useCallback(async () => {
     setState({ phase: 'loading' })
@@ -57,6 +58,7 @@ export function BrandGeoAnchorsPanel({ clientId }: Props) {
   const handleSave = async () => {
     setSaving(true)
     setErrMsg(null)
+    setWarnings([])
     try {
       const anchors = draft
         .split(/\r?\n/)
@@ -74,10 +76,14 @@ export function BrandGeoAnchorsPanel({ clientId }: Props) {
         throw new Error(error ?? `HTTP ${res.status}`)
       }
 
-      const { anchors: saved } = (await res.json()) as { anchors: string[] }
+      const { anchors: saved, warnings: warn } = (await res.json()) as {
+        anchors: string[]
+        warnings?: string[]
+      }
       setState({ phase: 'ready', anchors: saved })
       setDraft(saved.join('\n'))
       setSavedAt(new Date().toLocaleTimeString())
+      setWarnings(warn ?? [])
     } catch (err) {
       setErrMsg(err instanceof Error ? err.message : String(err))
     } finally {
@@ -123,6 +129,12 @@ export function BrandGeoAnchorsPanel({ clientId }: Props) {
         <p className="mt-1">
           留空 = 这条规则不生效，判定跟以前完全一样。
         </p>
+        <p className="mt-2 border-t border-amber-200 pt-2">
+          <strong>这个功能救不了哪种情况：</strong>如果客户的<strong>正式品牌名本身</strong>就是那个通名
+          （比如客户就叫「China Travel Service」），或者<strong>官网域名主体</strong>就是通名
+          （比如 chinatravelservice.co.nz），这道闸门管不着它们 —— 因为正式名和域名按设计永远放行。
+          那种情况要改的是客户的正式名称，不是这一栏。
+        </p>
       </div>
 
       <div className="mb-3 flex items-baseline justify-between">
@@ -146,6 +158,10 @@ export function BrandGeoAnchorsPanel({ clientId }: Props) {
       {errMsg && (
         <p className="mt-2 text-xs text-red-600">⚠ {errMsg}</p>
       )}
+
+      {warnings.map(w => (
+        <p key={w} className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800">💡 {w}</p>
+      ))}
 
       <div className="mt-3 flex items-center gap-2">
         <button

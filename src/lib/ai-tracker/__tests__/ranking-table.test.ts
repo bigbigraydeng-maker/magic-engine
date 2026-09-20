@@ -123,6 +123,53 @@ describe('buildRankingTable', () => {
     expect(t.get('CTS Tours')?.mentions).toBe(1)
   })
 
+  // 魏征's adversarial review, 2026-09-20: client_brand_rank is the MINIMUM of
+  // the client's entries, so keying the merge on it split 333 CTS runs / 686
+  // entries out of the client's own row — into competitor rows the client
+  // reads in its monthly report.
+  it('merges EVERY client entry in an accepted run, not just the one at client_brand_rank', () => {
+    const runs: Row[] = [
+      {
+        ai_engine: 'openai',
+        client_brand_rank: 2,
+        brands_mentioned: [
+          { brand: 'Wendy Wu Tours', rank: 1, snippet: 'x' },
+          { brand: 'CTS Tours', rank: 2, snippet: 'x' },
+          { brand: 'China Travel Service (CTS) Auckland', rank: 4, snippet: 'x' },
+          { brand: 'CTS', rank: 6, snippet: 'x' },
+        ],
+      },
+    ]
+    const t = table(runs)
+    expect(t.get('CTS Tours')?.mentions).toBe(3)
+    expect(t.has('China Travel Service (CTS) Auckland')).toBe(false)
+    expect(t.has('CTS')).toBe(false)
+    expect(t.get('Wendy Wu Tours')?.mentions).toBe(1)
+  })
+
+  it('a client with no anchors keeps the old table exactly, legacy rows included', () => {
+    // A row that names the client while client_brand_rank is null is legacy
+    // data. Re-adjudicating it is a separate job; an un-gated client must not
+    // see its table change because of this feature.
+    const ungated = { brandName: 'CTS Tours', domain: 'ctstours.co.nz', aliases: ['cts'] }
+    const runs: Row[] = [
+      {
+        ai_engine: 'openai',
+        client_brand_rank: null,
+        brands_mentioned: [{ brand: 'CTS', rank: 1, snippet: 'x' }],
+      },
+      {
+        ai_engine: 'openai',
+        client_brand_rank: 1,
+        brands_mentioned: [{ brand: 'CTS Tours', rank: 1, snippet: 'x' }],
+      },
+    ]
+    expect(table(runs, ungated).get('CTS Tours')?.mentions).toBe(2)
+    // The same rows WITH the gate on defer to each run's decision.
+    expect(table(runs).get('CTS Tours')?.mentions).toBe(1)
+    expect(table(runs).get('CTS')?.mentions).toBe(1)
+  })
+
   it('averages ranks and keeps per-engine detail after merging', () => {
     const runs: Row[] = [
       {

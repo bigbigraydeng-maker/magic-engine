@@ -154,14 +154,46 @@ function buildIdentifierList(identity: ClientBrandIdentity): ClientIdentifier[] 
 }
 
 /**
+ * Links and bare hostnames, removed before anchor matching.
+ *
+ * Normalisation turns "." into a space, so "explorechinaholidays.com.au"
+ * becomes "explorechinaholidays com au" and would hand an "au" anchor to any
+ * answer that cites an Australian link — including a THIRD PARTY's link in an
+ * answer about a different country. Measured on CTS: 43 of 3,096 answers had
+ * the anchor only inside a URL. A cited hostname is not a statement about the
+ * market the answer is discussing, so it is not geo evidence.
+ *
+ * Deliberately narrow: a scheme, a `www.`, or a dotted host ending in a label
+ * of 2+ letters. "(N.Z.)" is NOT matched — its last label is one character —
+ * so the `nz` anchor still finds it.
+ */
+const URL_LIKE_RE = /(?:https?:\/\/|www\.)\S+|[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}(?:\.[a-z]{2,})?(?:\/\S*)?/gi
+
+/** Minimum length for a geo anchor spelled out with separators ("N.Z."). */
+const MIN_ANCHOR_COMPACT_LEN = 2
+
+/**
  * Is at least one configured geo anchor written in the answer?
  *
- * Word-bounded on the normalised text, so a short anchor ("nz") cannot be
- * satisfied by "bonza". Anchors are normalised the same way as the text, so
- * "New Zealand" typed by an FDE matches "New Zealand," in the answer.
+ * Word-bounded, so a short anchor ("nz") cannot be satisfied by "bonza", and
+ * space-insensitive, so it still matches "(N.Z.)". Anchors are normalised the
+ * same way as the text, so "New Zealand" typed by an FDE matches
+ * "New Zealand," in the answer.
  */
 function hasGeoAnchor(norm: string, anchors: readonly string[]): boolean {
-  return anchors.some(a => indexOfIdentifier(norm, a) >= 0)
+  return anchors.some(
+    a => indexOfIdentifier(norm, a) >= 0 || indexOfCompact(norm, a, MIN_ANCHOR_COMPACT_LEN) >= 0
+  )
+}
+
+/** Does this client have the geo gate turned on at all? */
+export function hasGeoGate(identity: ClientBrandIdentity): boolean {
+  return buildGeoAnchors(identity).length > 0
+}
+
+/** The part of an answer that may carry geo evidence: everything but links. */
+function geoEvidenceText(answerText: string): string {
+  return normalizeForMatch(answerText.replace(URL_LIKE_RE, ' '))
 }
 
 /**
@@ -233,7 +265,7 @@ export function admissibleIdentifiersForAnswer(
   const idList = buildIdentifierList(identity)
   const anchors = buildGeoAnchors(identity)
   if (anchors.length === 0) return idList.map(i => i.value)
-  const aliasAllowed = hasGeoAnchor(normalizeForMatch(answerText), anchors)
+  const aliasAllowed = hasGeoAnchor(geoEvidenceText(answerText), anchors)
   return idList.filter(i => aliasAllowed || !i.fromAlias).map(i => i.value)
 }
 
@@ -243,10 +275,18 @@ function indexOfIdentifier(norm: string, id: string): number {
   const padded = ` ${norm} `
   const phraseIdx = padded.indexOf(` ${id} `)
   if (phraseIdx >= 0) return phraseIdx
+  return indexOfCompact(norm, id, MIN_COMPACT_LEN)
+}
+
+/**
+ * Index of `id` ignoring the spaces inside it ("janedoe" vs "Jane Doe"), but
+ * only where the match starts and ends on word boundaries of `norm` — so
+ * "nz" finds "(N.Z.)" (normalised to "n z") without finding "in Zurich".
+ * `minLength` guards how short a needle may be spelled out this way.
+ */
+function indexOfCompact(norm: string, id: string, minLength: number): number {
   const compactId = id.replace(/ /g, '')
-  if (compactId.length < MIN_COMPACT_LEN) return -1
-  // Tolerate spacing differences ("janedoe" vs "Jane Doe"), but only when
-  // the match starts and ends on word boundaries of the original text.
+  if (compactId.length < minLength) return -1
   const positions: number[] = []
   let compact = ''
   for (let i = 0; i < norm.length; i++) {

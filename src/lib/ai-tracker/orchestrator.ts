@@ -21,7 +21,12 @@ import { runClaude } from './runners/claude'
 import { runPerplexity } from './runners/perplexity'
 import { runGemini } from './runners/gemini'
 import { parseRanking } from './parser'
-import { buildClientIdentifiers, isClientBrand, type ClientBrandIdentity } from './client-brand-match'
+import {
+  buildClientIdentifiers,
+  hasGeoGate,
+  isClientBrand,
+  type ClientBrandIdentity,
+} from './client-brand-match'
 import { supabaseAdmin } from '../supabase'
 import { writeTrackerFlywheelMetrics } from '../flywheel/metrics/writeTrackerMetrics'
 import type {
@@ -487,6 +492,11 @@ export function buildRankingTable(
 
   const ids = identity ? buildClientIdentifiers(identity) : []
   const canonicalKey = identity?.brandName.trim() ?? ''
+  // Only a client with the gate on defers to the per-run decision. Without
+  // anchors this table stays exactly what it was, including for legacy rows
+  // that name the client in brands_mentioned while client_brand_rank is null
+  // — re-adjudicating those is a separate job, not this change's to do.
+  const gated = identity ? hasGeoGate(identity) : false
 
   for (const run of runs) {
     const mentions = Array.isArray(run.brands_mentioned)
@@ -494,11 +504,15 @@ export function buildRankingTable(
       : []
     for (const m of mentions) {
       if (!m.brand) continue
+      // Every client-matching entry in an accepted run belongs to the client,
+      // not only the one sitting at client_brand_rank — that rank is the
+      // MINIMUM of the client's entries, so keying on it would throw the
+      // client's other spellings out into their own competitor rows. (Measured
+      // on CTS: 333 runs, 686 entries.)
       const isClient =
         canonicalKey !== '' &&
-        run.client_brand_rank !== null &&
-        m.rank === run.client_brand_rank &&
-        isClientBrand(m.brand, ids)
+        isClientBrand(m.brand, ids) &&
+        (!gated || run.client_brand_rank !== null)
       const key = isClient ? canonicalKey : m.brand.trim()
       if (!key) continue
       const entry = byBrand.get(key) ?? {
