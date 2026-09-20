@@ -21,7 +21,8 @@ import { runClaude } from './runners/claude'
 import { runPerplexity } from './runners/perplexity'
 import { runGemini } from './runners/gemini'
 import { parseRanking } from './parser'
-import { buildClientIdentifiers, isClientBrand, type ClientBrandIdentity } from './client-brand-match'
+import { type ClientBrandIdentity } from './client-brand-match'
+import { computeSnapshotMetrics, type SnapshotRun } from './snapshot-aggregate'
 import { supabaseAdmin } from '../supabase'
 import { writeTrackerFlywheelMetrics } from '../flywheel/metrics/writeTrackerMetrics'
 import type {
@@ -398,32 +399,14 @@ async function aggregateSnapshot(
 
   if (error || !runs) return null
 
-  const totalRuns = runs.length
-  const ranks = runs
-    .map(r => (r as { client_brand_rank: number | null }).client_brand_rank)
-    .filter((r): r is number => r !== null)
-  const mentionsCount = ranks.length
-  const avgRank =
-    mentionsCount > 0 ? ranks.reduce((a, b) => a + b, 0) / mentionsCount : null
-  const modelsCovered = Array.from(
-    new Set(runs.map(r => (r as { ai_model: string }).ai_model))
-  )
-  // Distinct engines where brand appeared at least once
-  const engineCoverage = new Set(
-    runs
-      .filter(r => (r as { client_brand_rank: number | null }).client_brand_rank !== null)
-      .map(r => (r as { ai_engine: string }).ai_engine)
-  ).size
-
-  // Build a compact ranking_table for reporting:
-  //   { brands: [{ name, mentions, avg_rank, by_engine }] }
-  const ranking_table = buildRankingTable(
-    runs as Array<{
-      ai_engine: string
-      brands_mentioned: BrandMention[]
-    }>,
-    identity
-  )
+  const {
+    totalRuns,
+    mentionsCount,
+    avgRank,
+    modelsCovered,
+    engineCoverage,
+    ranking_table,
+  } = computeSnapshotMetrics(runs as SnapshotRun[], identity)
 
   // Upsert by (client_id, week_of)
   const { data: snapshot, error: upsertErr } = await supabaseAdmin
@@ -445,106 +428,6 @@ async function aggregateSnapshot(
 
   if (upsertErr || !snapshot) return null
   return { snapshotId: snapshot.id, mentionsCount, totalRuns, avgRank, engineCoverage }
-}
-
-/** Aggregate brand mentions across all runs into a flat ranking table. */
-function buildRankingTable(
-  runs: Array<{ ai_engine: string; brands_mentioned: BrandMention[] }>,
-  identity?: ClientBrandIdentity
-): Record<string, unknown> {
-  const byBrand = new Map<
-    string,
-    { mentions: number; rankSum: number; byEngine: Record<string, number[]> }
-  >()
-
-  for (const run of runs) {
-    const mentions = Array.isArray(run.brands_mentioned)
-      ? run.brands_mentioned
-      : []
-    for (const m of mentions) {
-      if (!m.brand) continue
-      const key = m.brand.trim()
-      if (!key) continue
-      const entry = byBrand.get(key) ?? {
-        mentions: 0,
-        rankSum: 0,
-        byEngine: {},
-      }
-      entry.mentions++
-      entry.rankSum += m.rank
-      const ranksForEngine = entry.byEngine[run.ai_engine] ?? []
-      ranksForEngine.push(m.rank)
-      entry.byEngine[run.ai_engine] = ranksForEngine
-      byBrand.set(key, entry)
-    }
-  }
-
-  // Merge brand name variants for the client (e.g. "CTS Tours" and
-  // "CTS Tours - China Travel Service (NZ) Limited" → one canonical entry)
-  if (identity) {
-    mergeClientBrandVariants(byBrand, identity)
-  }
-
-  const brands = Array.from(byBrand.entries())
-    .map(([name, e]) => ({
-      name,
-      mentions: e.mentions,
-      avg_rank: e.mentions > 0 ? e.rankSum / e.mentions : null,
-      by_engine: e.byEngine,
-    }))
-    .sort((a, b) => {
-      // Higher mention count first, then lower avg_rank
-      if (b.mentions !== a.mentions) return b.mentions - a.mentions
-      return (a.avg_rank ?? 999) - (b.avg_rank ?? 999)
-    })
-
-  return { brands }
-}
-
-/**
- * Merge all brand-name variants of the client into a single canonical entry.
- * Uses the same client-identity rules as the parser (brand name, aliases,
- * domain), so every entry that set client_brand_rank lands in one row.
- */
-function mergeClientBrandVariants(
-  byBrand: Map<string, { mentions: number; rankSum: number; byEngine: Record<string, number[]> }>,
-  identity: ClientBrandIdentity
-): void {
-  const canon = identity.brandName.trim()
-  const ids = buildClientIdentifiers(identity)
-
-  let canonicalKey = ''
-  const variantKeys: string[] = []
-
-  for (const key of Array.from(byBrand.keys())) {
-    if (key.trim().toLowerCase() === canon.toLowerCase()) {
-      canonicalKey = key
-    } else if (isClientBrand(key, ids)) {
-      variantKeys.push(key)
-    }
-  }
-
-  if (variantKeys.length === 0) return
-
-  const canonEntry = (canonicalKey ? byBrand.get(canonicalKey) : undefined) ?? {
-    mentions: 0,
-    rankSum: 0,
-    byEngine: {} as Record<string, number[]>,
-  }
-
-  for (const variantKey of variantKeys) {
-    const variant = byBrand.get(variantKey)
-    if (!variant) continue
-    canonEntry.mentions += variant.mentions
-    canonEntry.rankSum += variant.rankSum
-    for (const [engine, ranks] of Object.entries(variant.byEngine)) {
-      canonEntry.byEngine[engine] = [...(canonEntry.byEngine[engine] ?? []), ...ranks]
-    }
-    byBrand.delete(variantKey)
-  }
-
-  if (canonicalKey && canonicalKey !== canon) byBrand.delete(canonicalKey)
-  byBrand.set(canon, canonEntry)
 }
 
 /** Returns this week's Monday at 00:00 UTC. */
