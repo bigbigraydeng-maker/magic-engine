@@ -105,9 +105,12 @@ const QUESTION_PLACEHOLDER: JevQuestion = {
 const QUESTION_VOICE: JevQuestion = {
   type: 'noul',
   instructions:
-    'Given the intended narrator voice described in "intended_voice", the actual captions are ' +
-    'written in the WRONG voice (e.g. brief calls for one person speaking about their own ' +
-    'experience, but captions use plural corporate "we/our" language instead).',
+    'Given the intended narrator voice described in "intended_voice", the actual captions drop ' +
+    'that specific first-person individual and instead read like an anonymous third-party brand ' +
+    'voice (e.g. "customers can now...", "the company offers...", a generic company name self-' +
+    'reference). Note: the named narrator legitimately saying "we/our" (e.g. "we took the trip", ' +
+    '"our guide") while still speaking as themselves is NOT a mismatch — only flag when the ' +
+    'captions clearly stop sounding like that one named person.',
 }
 
 /**

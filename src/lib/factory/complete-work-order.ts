@@ -164,7 +164,16 @@ export async function completeWorkOrder(
   const segmentsArr = Array.isArray((wo.brief as Record<string, unknown>)?.['segments'])
     ? ((wo.brief as Record<string, unknown>)['segments'] as Array<Record<string, unknown>>)
     : []
-  const overlays = segmentsArr.map((s) => (typeof s['text_overlay'] === 'string' ? (s['text_overlay'] as string) : null))
+  const overlaysFromBrief = segmentsArr.map((s) => (typeof s['text_overlay'] === 'string' ? (s['text_overlay'] as string) : null))
+  // recipe(multicut)单不把字幕写进 brief.segments.text_overlay —— 实际渲染的字幕(含 hook 之外的
+  // middle 段)只存在于已经过 assertRecipeReceipt 校验的 recipeReceipt.segments[].caption 里,
+  // 漏收会导致品控完全扫不到这些段(2026-09-20 codex review)。
+  const receiptSegments =
+    recipeReceipt != null && typeof recipeReceipt === 'object' && Array.isArray((recipeReceipt as { segments?: unknown }).segments)
+      ? ((recipeReceipt as { segments: Array<Record<string, unknown>> }).segments)
+      : []
+  const overlaysFromReceipt = receiptSegments.map((s) => (typeof s['caption'] === 'string' ? (s['caption'] as string) : null))
+  const overlays = [...overlaysFromBrief, ...overlaysFromReceipt]
   const redlineHits = scanRedlineHits(
     [caption, ...overlays],
     (client.brand_redline_phrases as string[] | null) ?? [],
@@ -176,8 +185,10 @@ export async function completeWorkOrder(
   // 标记随 redline_hits 一起进 output,ReviewInbox 标红转人工(同一套口径)。
   // scanContentQualityFlags 内部已吞掉所有异常(Jev 网络/超时不允许拖垮这条主链路)。
   const hookSegment = segmentsArr.find((s) => s['role'] === 'hook')
+  const receiptHookSegment = receiptSegments.find((s) => s['role'] === 'hook')
   const onScreenHook =
     (typeof hookSegment?.['text_overlay'] === 'string' ? (hookSegment['text_overlay'] as string) : null) ??
+    (typeof receiptHookSegment?.['caption'] === 'string' ? (receiptHookSegment['caption'] as string) : null) ??
     overlays.find((o): o is string => !!o) ??
     null
   const persona = (brief?.brand_voice as { persona?: { name?: string; role?: string } } | null)?.persona
