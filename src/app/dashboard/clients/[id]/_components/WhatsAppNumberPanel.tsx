@@ -42,34 +42,31 @@ type PanelState =
 /** 一句话说清现在这条线到底通没通 —— 「绑了」和「能用」是两件事。 */
 function LiveStatus({ phone_number_id, configured_number_id, matches_configured }: Payload) {
   if (!phone_number_id) {
-    return (
-      <p className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
-        还没绑号码 —— 这个客户的 WhatsApp 消息不会进来。
-      </p>
-    )
+    return null
   }
   if (matches_configured === true) {
     return (
-      <p className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-        ✓ 已绑定，收发都能用。
-      </p>
+      <div className="mb-4 flex items-center gap-2 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+        <span className="text-base">✓</span>
+        <span className="font-semibold">已绑定，收发都能用</span>
+      </div>
     )
   }
   if (configured_number_id === null) {
     return (
-      <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
-        已绑定，但服务器上还没配 WhatsApp 凭据 ——
-        <span className="font-bold">客人的消息进得来，我们回不出去</span>。
-        凭据配好之前，回复请先用电话或邮件。
-      </p>
+      <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <p className="font-semibold">已绑定，但发不出去</p>
+        <p className="mt-1 text-xs text-amber-700">服务器还没配 WhatsApp 凭据，消息进得来，回不出去。凭据配好前请先用电话或邮件回复。</p>
+      </div>
     )
   }
   return (
-    <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
-      ⚠ 绑的号码（{phone_number_id}）跟服务器上配的号码（{configured_number_id}）对不上。
-      <span className="font-bold">为避免用别的客户号码发消息给客人，系统已经挡住所有发送。</span>
-      两边改成一致才能恢复。
-    </p>
+    <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+      <p className="font-semibold">号码对不上，发送已暂停</p>
+      <p className="mt-1 text-xs text-red-700">
+        绑定号码（{phone_number_id}）和服务器配置（{configured_number_id}）不一致，为避免用错号码发消息已挡住所有发送。改成一致才能恢复。
+      </p>
+    </div>
   )
 }
 
@@ -84,6 +81,13 @@ export function WhatsAppNumberPanel({ clientId }: Props) {
     setState({ phase: 'loading' })
     try {
       const res = await fetch(`/api/clients/${clientId}/whatsapp-number`)
+      // 404 = this client has no WhatsApp endpoint configured — treat as empty, not an error
+      if (res.status === 404) {
+        const empty: Payload = { phone_number_id: null, configured_number_id: null, matches_configured: null }
+        setState({ phase: 'ready', data: empty })
+        setDraft('')
+        return
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = (await res.json()) as Payload
       setState({ phase: 'ready', data })
@@ -161,14 +165,8 @@ export function WhatsAppNumberPanel({ clientId }: Props) {
     <div className="rounded-xl border border-slate-200 bg-white p-4">
       <LiveStatus {...state.data} />
 
-      <p className="mb-3 text-sm text-slate-600">
-        绑定客户的 WhatsApp 号码后，客人在 WhatsApp 上说的话会自动进来，
-        出现在<span className="font-bold">「今天该联系谁」</span>里。不绑就完全不动这个客户的 WhatsApp。
-      </p>
-
-      <p className="mb-2 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
-        填的是<span className="font-bold">「电话号码 ID」</span>，不是客人拨打的那个手机号。
-        在 Meta 商务管理平台 → WhatsApp 账户 → 电话号码里，每个号码下面标着的那串数字才是。
+      <p className="mb-4 text-sm text-slate-500">
+        客人 WhatsApp 消息自动进来，显示在「今天该联系谁」。
       </p>
 
       <input
@@ -176,7 +174,7 @@ export function WhatsAppNumberPanel({ clientId }: Props) {
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         placeholder="109876543210987"
-        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-100"
+        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-200"
       />
 
       {errMsg && <p className="mt-2 text-xs leading-relaxed text-red-600">⚠ {errMsg}</p>}
@@ -190,7 +188,7 @@ export function WhatsAppNumberPanel({ clientId }: Props) {
         <button
           onClick={() => void save(draft.trim() || null)}
           disabled={saving || !dirty}
-          className="rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-cyan-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
         >
           {saving ? '保存中...' : '保存'}
         </button>
@@ -198,12 +196,21 @@ export function WhatsAppNumberPanel({ clientId }: Props) {
           <button
             onClick={() => void save(null)}
             disabled={saving}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed"
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed"
           >
             解绑
           </button>
         )}
       </div>
+
+      <details className="mt-4 border-t border-slate-100 pt-3">
+        <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-600">
+          怎么找电话号码 ID？
+        </summary>
+        <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+          不是客人拨打的手机号。在 Meta 商务管理平台 → WhatsApp 账户 → 电话号码里，每个号码下方标着的那串数字才是。
+        </p>
+      </details>
     </div>
   )
 }
