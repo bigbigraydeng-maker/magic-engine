@@ -7,6 +7,37 @@
 
 ---
 
+## 2026-09-21 · 数组列一律存空数组不存 NULL；订正 `clients.brand_aliases`「schema 漂移」误判
+
+**决策（技术决策，两条）**：
+1. **接口清空别名时写 `[]`，不再写 NULL。** `clients.brand_aliases` 自 `20260625000001_a21_goal_current_value.sql`
+   起就是 `NOT NULL DEFAULT '{}'`（该 migration 已回填存量 NULL 并 `SET DEFAULT` / `SET NOT NULL`），仓库和线上
+   本就一致，**没有漂移，不需要新增对齐 migration**——最初排查时只看了引入该列的 `20260624010000`，漏看了同一列
+   后续还被 `20260625000001` 加固过，误判成「线上手工改动、仓库未记录」。
+2. **往后数组列一律存 `[]`，除非确有读取方靠 NULL 和 `[]` 区分行为。** NULL 在这里没有任何含义，
+   只多出一个能把写操作打挂的状态。这条判断本身不受上面订正影响。
+
+**为什么**：真正的 bug 只在接口代码——`clients.brand_aliases` 早就是 NOT NULL，但 PATCH 清空时仍写 NULL，
+数据库拒绝（23502），接口 500，品牌别名设置面板能加不能清空。2026-09-21 在本机 Postgres 沙盘复现确认。
+现有全部读取方（`isBrandedKeywordWithAliases`、`auto-fetch`、`rankings`、`crm/touchpoints`、`serp-capture`）
+本来就把 NULL 和 `[]` 当同一件事，所以存 `[]` 是零行为变化的那一侧。
+
+**影响**：[PITFALLS B5](./PITFALLS.md) 记录的教训改为「判断 schema 漂移前必须 grep 该列全部历史 migration，
+不能只看引入它的那一条」，而不是「线上被手工改过仓库不知道」。兄弟接口 `primary-keywords` / `competitor-domains` /
+`products` / `excluded-topics` 仍在写 `? null :`，2026-09-21 实测这四列线上确实是可空所以没炸，已记入 B5 待清理，
+本次不动以保持改动范围最小。
+
+## 2026-09-20 · SEO 标题周循环 v1：新自动化一律上 Inngest、按真实用量定规模、自动改文案必过信息完整闸门
+
+**决策（PM 2026-09-20 拍板，三条）**：
+1. **往后所有新的跨步骤自动化流程，一律跑在 Inngest 上，每一步留机器可读回执。** 旧的 `cts-seo-optimizer`（Render 定时盲改标题）已退役，换成 Inngest 两段式 `cloud-seo-meta-cycle-fanout` + `cloud-seo-meta-cycle-run-one`，六步各写一条 `cron_run_logs`。
+2. **按真实用量定设计规模。** 实际用量是一个客户每周 ≤3 个页面，所以自动撤回、来回改封顶、学习记忆写入、跨客户预算熔断这套机器全部砍掉——复审两轮找到的 bug 全出在自动撤回这块。改坏了（14 天回查判定变差）只下发一条人工看板待办，指向那条已合并 PR 自带的 GitHub Revert 按钮，不写任何新的撤回代码。
+3. **SEO 文案只在信息完整时才改。** 必须同时有 DataForSEO 搜索量 + 难度、实时搜索结果前 3、且关键词确实属于这个页面（这个页面自己的 GSC 搜索词），才许改；缺任何一样 = 跳过并记原因，**绝不默认填值**。给客户打开开关前，先跑一次演练（`dry_run`）给 PM 看。
+
+**为什么**：第一次真跑（W38）自动合并了 2 条错误改动（见 [PITFALLS D10](./PITFALLS.md)），六步回执全绿却改错了字——缺数据时默认填 0、关键词跨页借用，是直接原因。
+
+**影响**：信息完整闸门见 `src/lib/seo-meta/cycle/gate.ts`（PR #1816）；CTS 开关 `clients.seo_config.meta_cycle_enabled` 目前关闭，等 PM 看过下一次演练再开。设计文档 [`docs/specs/2026-09-20-seo-meta-cycle-v1-spec.md`](./specs/2026-09-20-seo-meta-cycle-v1-spec.md)，跟进清单见 Issue [#1807](https://github.com/bigbigraydeng-maker/magic-engine/issues/1807)。
+
 ## 2026-09-13 · 客户知识库作为 Governed Lead-Reply Agent 的事实层，替代 offerings.yaml 路线
 
 **决策**：AI 对终端客人说出口的业务事实（价格、时效、承诺、退改政策、在售/停售产品等），统一存放在**逐条治理的客户知识表**里，而不是按客户放 `config/clients/<client>/offerings.yaml` 文件。该知识表是已登记 L1 候选「Governed Lead-Reply Agent」（`docs/registry/platform-candidates.md`）的**事实层子能力**，不另立 L1。原方案"3 个客户后再抽 `client_offerings` 表"作废。

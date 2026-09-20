@@ -215,6 +215,13 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   //    src/lib/inngest/functions/conversion-daily-pipeline.ts 的
   //    CONVERSION_DAILY_PIPELINE_CRON，抄错的后果同上一条 flywheel 注释。
   { service: 'inngest:cloud-conversion-daily-pipeline', jobName: 'conversion-daily-pipeline', schedule: '0 6 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-15' },
+  // 每周竞品快照。competitor_snapshots 这张表 2026-05-18 就建好了，唯一的写入方是一个纯
+  // 手动 POST 接口，从来没有 cron；那个接口 2026-08-05 死管道清理时被当陪葬删掉，表一直是空的。
+  // 2026-09-20 审计发现并重写，PM 拍板开，先只给 CTS（seo_config.competitor_watch_enabled）。
+  //
+  // 🔴 schedule 这一列不许手抄：唯一定义在 src/lib/competitors/watch.ts 的
+  //    COMPETITOR_WATCH_CRON，同目录的测试会断言两边一致。
+  { service: 'inngest:cloud-competitor-watch-weekly-fanout', jobName: 'competitor-watch-weekly', schedule: '45 5 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-20' },
 ] as const
 
 /**

@@ -89,6 +89,29 @@ apply 时炸在 policy 步骤。影响 19 个客户的关键词排名 cron 全�
 
 **怎么防**：每次改 `type X = 'a' | 'b' | 'c'` 必须 grep 全仓 `Record` / `switch` / `STATUS_META` 的 key。
 
+### B5 · 判断「schema 漂移」前必须 grep 该列全部历史 migration，不能只看引入它的那一条 🔴
+
+**事故**（2026-09-21）：排查品牌别名设置面板**能加不能清空**的问题时，看到仓库里引入
+`clients.brand_aliases` 的那条 migration（`20260624010000_client_brand_aliases.sql`）把它声明为
+可以为空（nullable，无默认值），而线上库（`glbdnayojixmexgofbsd`）实际是 `NOT NULL DEFAULT '{}'`，
+于是先入为主判断成「线上被手工改过、仓库没记录」，并打算新增一条对齐 migration 补记录。
+实际上后续 `20260625000001_a21_goal_current_value.sql:35-41` 早就把这一列回填 NULL、
+`SET DEFAULT '{}'`、`SET NOT NULL` 做齐了——按仓库全部 migration 重建的环境本就等于线上，
+根本没有漂移，只是排查时漏看了同一列后续还被加固过。真正的 bug 只在接口代码：PATCH 清空别名时
+仍写 NULL，数据库拒绝（23502），接口 500。这个 bug 从 6 月潜伏到 9 月才被顺手发现，但「schema 漂移」
+是误判，不是事故本体。
+
+**怎么防**：
+1. 怀疑某一列「仓库和线上不一致」之前，先 `grep -rn <column_name> supabase/migrations/` 看该列
+   有没有被后续 migration 再动过，不能只读引入它的那一条。
+2. 只有 grep 完整历史后仍对不上，才是真漂移，这时才需要新增对齐 migration；此前的空判会让文档
+   记错事故性质，也会多一条实际上什么都不做的 migration 去扫描/锁表。
+3. 除非真有读取方靠 NULL 和 `[]` 区分行为，数组列一律存 `[]`，别存 NULL —— 少一个没有含义、
+   却能把写操作打挂的状态。`clients.primary_keywords` / `clients.competitor_domains` /
+   `master_briefs.products` / `master_briefs.excluded_topics` 四个兄弟接口今天还在写
+   `cleaned.length === 0 ? null : cleaned`；2026-09-21 实测这四列线上仍是 nullable，所以暂时没炸，
+   但任何一列被加上 NOT NULL，同样的 500 就会复现。
+
 ---
 
 ## C. Git / 分支
@@ -243,6 +266,24 @@ PM 反馈「太平静」「一堆照片的串联」「这不是爆款短视频�
 4. 已排期的动作：广告引擎（`~/.claude/plans/ads-impact-loop-capability.md`）阶段 1 的诊断表 `ad_entity_snapshots` 已经存了 `targeting_summary`（含版位设置），后续诊断应该加一条"纯播放类优化目标 + 未排除 Audience Network"的规则检测，把这类配置错误自动检出，不必每次靠人工深挖 7 天数据才发现。
 
 ---
+
+### D10 · 六步回执全绿，改出来的文案却是错的：自动改客户网站文案，要验「改成了什么字」，不是验「流程跑没跑通」🔴
+
+**事故（2026-09-20 NZ 凌晨，SEO 标题周循环 v1 第一次真跑）**：自动开 PR 并自动合并了 2 条 CTS 官网改动，都是错的——
+Liziba 轻轨站页面被换成了别的页面的关键词「how many days in chongqing」（chinatravel #199）；
+「新西兰人免签去中国」页面的描述被改成暗示要办签证、有申请步骤（#200，跟页面事实正好相反）。
+PM 发现后约 5 分钟用 GitHub 的 Revert 按钮撤回（#201/#202），随即关掉 CTS 的开关（`seo_config.meta_cycle_enabled=false`）。
+
+**四个根因（PR #1816 代码级核实）**：
+1. 关键词是拿「全站所有搜索词」按共有单词去配页面的，不是用这个页面自己在 GSC 里的搜索词——于是一个页面配到了另一个页面的词；
+2. DataForSEO 的搜索量 / 难度没查到时，代码默认填 0 = 「难度 0，放行」——缺数据被当成最安全；
+3. 搜索量、难度、对手标题这些数据算出来了，却从没写进 PR 描述——人看 PR 看不到任何依据，没法事前拦；
+4. 被选中的候选中途失败时直接消失，不留任何记录。
+
+**教训**：
+- **六步的运行回执全是绿的，改出来的字是错的。** 回执只证明管子通了，不证明货对了。验收要看最终改出来的那句标题 / 描述本身。
+- 自动改对外文案必须先过「信息完整闸门」：搜索量 + 难度 + 实时搜索结果前 3 都在、关键词确实属于这个页面，才许改；**缺一样就跳过并留原因，绝不默认填值**。
+- 给某个客户打开自动改文案的开关之前，先跑一次演练（`dry_run`，不写任何东西）给 PM 看这一轮会改成什么，PM 点头再开。
 
 ## E. 匹配 / 算法逻辑
 
