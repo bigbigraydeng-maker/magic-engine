@@ -39,6 +39,24 @@ function LogoMark({ size = 28 }: { size?: number }) {
 export default function LoginPage({ searchParams }: Props) {
   const next = searchParams.next ?? '/dashboard'
   const hasError = searchParams.error === 'auth_failed'
+  const isMetaAdsAi = next.startsWith('/meta-ads-ai/')
+  const loops = isMetaAdsAi ? [
+    {
+      icon: '🔒',
+      label: '只读授权',
+      body: '只能读取广告表现数据，不能修改预算、暂停、发布或删除广告。',
+    },
+    {
+      icon: '🏢',
+      label: '客户隔离',
+      body: '每家公司、广告账户和 AI 密钥都独立绑定，避免数据串用。',
+    },
+    {
+      icon: '🤖',
+      label: '模型自由',
+      body: '连接支持 MCP 或 HTTPS 工具的 AI，不绑定某一家模型。',
+    },
+  ] : portalLoops
 
   return (
     <main className="flex min-h-screen">
@@ -63,20 +81,22 @@ export default function LoginPage({ searchParams }: Props) {
             className="text-xs font-bold uppercase tracking-[0.16em] mb-5"
             style={{ color: '#BE8A2E' }}
           >
-            Client portal
+            {isMetaAdsAi ? 'Meta 广告 AI 连接器' : 'Client portal'}
           </div>
           <h1
             className="text-[2.6rem] font-black leading-[1.08] text-white"
             style={{ fontFamily: "'Fraunces', Georgia, serif", letterSpacing: '-.02em' }}
           >
-            Your visibility<br />dashboard.
+            {isMetaAdsAi ? <>把广告数据<br />连接到你的 AI。</> : <>Your visibility<br />dashboard.</>}
           </h1>
           <p className="mt-4 text-sm leading-[1.75]" style={{ color: 'rgba(255,255,255,.60)' }}>
-            See your discovery report, track improvements, and approve every action — all in one place.
+            {isMetaAdsAi
+              ? '一次 Facebook 授权，让 AI 安全读取并分析你的 Facebook 和 Instagram 广告数据。'
+              : 'See your discovery report, track improvements, and approve every action — all in one place.'}
           </p>
 
           <div className="mt-8 flex flex-col gap-3">
-            {portalLoops.map(item => (
+            {loops.map(item => (
               <div
                 key={item.label}
                 className="rounded-xl p-4"
@@ -102,7 +122,7 @@ export default function LoginPage({ searchParams }: Props) {
           className="text-xs no-underline transition-colors hover:opacity-70"
           style={{ color: 'rgba(255,255,255,.35)' }}
         >
-          ← Back to magicengine.com.au
+          {isMetaAdsAi ? '← 返回 Magic Engine 官网' : '← Back to magicengine.com.au'}
         </Link>
       </div>
 
@@ -128,24 +148,26 @@ export default function LoginPage({ searchParams }: Props) {
                 letterSpacing: '-.02em',
               }}
             >
-              Welcome back.
+              {isMetaAdsAi ? '欢迎回来' : 'Welcome back.'}
             </h2>
             <p className="mt-2 text-sm leading-6" style={{ color: 'rgba(22,24,29,.60)' }}>
-              Sign in to your Magic Engine portal.
+              {isMetaAdsAi ? '登录后继续连接 Meta 广告账户。' : 'Sign in to your Magic Engine portal.'}
             </p>
           </div>
 
-          <LoginForm next={next} authFailed={hasError} />
+          <LoginForm next={next} authFailed={hasError} locale={isMetaAdsAi ? 'zh-CN' : 'en'} />
 
           <p className="mt-7 text-center text-xs" style={{ color: 'rgba(22,24,29,.45)' }}>
-            No account?{' '}
-            <Link
-              href="https://magicengine.com.au/discover"
-              className="font-semibold no-underline"
-              style={{ color: '#9A6F1E' }}
-            >
-              Start with a free discovery →
-            </Link>
+            {isMetaAdsAi ? '尚未获得邀请？请联系 Magic Engine。' : <>
+              No account?{' '}
+              <Link
+                href="https://magicengine.com.au/discover"
+                className="font-semibold no-underline"
+                style={{ color: '#9A6F1E' }}
+              >
+                Start with a free discovery →
+              </Link>
+            </>}
           </p>
         </div>
       </div>
