@@ -30,6 +30,7 @@ function draft(overrides: Partial<PendingDraft> = {}): PendingDraft {
     quotedOfferingNames: ['Golden China 12-Day'],
     verifierOutputJson: { ok: true, blocked_reasons: [] },
     passedGateIds: ['brand_redline', 'length'],
+    semanticFlags: [],
     createdAt: '2026-09-15T01:00:00Z',
     ...overrides,
   }
@@ -95,6 +96,50 @@ describe('DraftApprovalPanel — one screen to review', () => {
 
     expect(screen.getByText(/已过 2 项自动核验/)).toBeInTheDocument()
     expect(screen.getByText(/品牌红线用词/)).toBeInTheDocument()
+  })
+
+  it('shows a human-readable label for the two Jev semantic gate ids, not the raw id', () => {
+    mockFetchOk()
+    renderPanel({
+      drafts: [
+        draft({ passedGateIds: ['brand_redline', 'brand_redline_semantic', 'number_claim_semantic'] }),
+      ],
+    })
+
+    expect(screen.queryByText(/brand_redline_semantic/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/number_claim_semantic/)).not.toBeInTheDocument()
+    expect(screen.getByText(/AI 语义核对·品牌红线换措辞/)).toBeInTheDocument()
+    expect(screen.getByText(/AI 语义核对·数字文字拼写/)).toBeInTheDocument()
+  })
+
+  it(
+    '🔴 regression guard (Codex review 2026-09-20 on PR #1838): a semantic flag on an ' +
+      'otherwise-pending draft is shown to the FDE, not silently dropped — this is the ' +
+      "payload that makes the semantic layer's advisory-only design real",
+    () => {
+      mockFetchOk()
+      renderPanel({
+        drafts: [
+          draft({
+            semanticFlags: [
+              'brand_redline_semantic: reply may restate a brand-redline claim in different wording (Jev score 0.79) — needs human review',
+            ],
+          }),
+        ],
+      })
+
+      expect(screen.getByText(/⚠️ AI 语义提醒/)).toBeInTheDocument()
+      expect(screen.getByText(/可能换了个说法讲了品牌红线内容/)).toBeInTheDocument()
+      // Raw English/technical string must never reach the FDE-facing text.
+      expect(screen.queryByText(/Jev score/)).not.toBeInTheDocument()
+    },
+  )
+
+  it('shows no semantic-reminder banner when semanticFlags is empty', () => {
+    mockFetchOk()
+    renderPanel()
+
+    expect(screen.queryByText(/AI 语义提醒/)).not.toBeInTheDocument()
   })
 
   it('shows an empty state when there is nothing to approve', () => {

@@ -2,6 +2,8 @@
 // 交付闸(审核流/素材库注入面的正门):
 //   ①三件套路径前缀强校验 + new_clips 路径/track 一致性(魏征 F9)—— 任意外部 URL 一律拒
 //   ②成片级红线复扫 caption + text_overlay(板桥 #7)—— 命中不打回,写 output.redline_hits 标红
+//   ②b 语义品控(2026-09-20 Jev 评估):竞品品牌当角度 / 内部标签冒充字幕 / 人称不符 ——
+//      命中同样不打回,写 output.quality_flags 标红
 //   ③new_clips 按 idempotency_key 幂等入 video_clips(重试不重插)
 //   ④actual_cost_usd 落 factory_balance_ledger spend(台账 = 护栏 10 事实源)
 // 通过 → in_review(直接进 /dashboard/factory 审片队列;2026-07-23 起不再中转 rendered,详见 lib 头注)。
@@ -87,7 +89,7 @@ export async function POST(
 
   const { data: wo, error: loadErr } = await supabaseAdmin
     .from('content_work_orders')
-    .select('id, client_id, master_brief_id, status, brief, budget_cap_usd, actual_cost_usd, output, claimed_by')
+    .select('id, client_id, master_brief_id, status, brief, angle, budget_cap_usd, actual_cost_usd, output, claimed_by')
     .eq('id', id)
     .maybeSingle()
   if (loadErr) {
@@ -161,6 +163,7 @@ export async function POST(
     ok: true,
     status: result.status,
     redline_hits: result.redlineHits,
+    quality_flags: result.qualityFlags,
     new_clip_ids: result.newClipIds,
   })
 }

@@ -27,6 +27,25 @@ const GATE_LABELS: Record<string, string> = {
   provenance: '产品名称对编码',
   length: '长度限制',
   url_allowlist: '链接白名单',
+  // 2026-09-20 新增：Jev 语义补充判断，评上了才会出现在 passedGateIds 里
+  // （见 cts.ts `checked_gate_ids`），不是「过了」而是「AI 真的核对过这一项」。
+  brand_redline_semantic: 'AI 语义核对·品牌红线换措辞',
+  number_claim_semantic: 'AI 语义核对·数字文字拼写',
+}
+
+/**
+ * `draft.semanticFlags` 每条是英文技术字符串（给日志/复审用，见 cts.ts），
+ * 展示给 FDE 时换成人话——只按 gate id 前缀翻译成固定提示语，不试图解析
+ * Jev 打分细节（那是给排查用的，不是给 FDE 决策用的）。
+ */
+const SEMANTIC_FLAG_LABELS: Record<string, string> = {
+  brand_redline_semantic: 'AI 提示：这条回复可能换了个说法讲了品牌红线内容，发送前请重点核对文字',
+  number_claim_semantic: 'AI 提示：这条回复里的价格或日期可能是用文字拼出来的、且跟已确认的团对不上，发送前请重点核对数字',
+}
+
+function semanticFlagLabel(flag: string): string {
+  const gateId = flag.split(':')[0]
+  return SEMANTIC_FLAG_LABELS[gateId] ?? flag
 }
 
 type Action = 'approve' | 'edit_and_approve' | 'reject'
@@ -144,6 +163,19 @@ function DraftCard({
           <p className="mt-1 text-xs leading-relaxed text-me-charcoal/70">
             {draft.passedGateIds.map((id) => GATE_LABELS[id] ?? id).join(' · ')}
           </p>
+        </div>
+      )}
+
+      {draft.semanticFlags.length > 0 && (
+        <div className="mt-2.5 rounded-lg bg-[#C77D2E]/10 px-3 py-2">
+          <p className="text-[11px] font-black uppercase tracking-[0.1em] text-[#C77D2E]">
+            ⚠️ AI 语义提醒 · 批准前请重点核对
+          </p>
+          <ul className="mt-1 space-y-0.5 text-xs leading-relaxed text-me-charcoal/70">
+            {draft.semanticFlags.map((flag) => (
+              <li key={flag}>{semanticFlagLabel(flag)}</li>
+            ))}
+          </ul>
         </div>
       )}
 

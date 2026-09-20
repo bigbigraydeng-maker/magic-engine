@@ -161,11 +161,106 @@ describe('GET drafts — only the approval queue', () => {
         quotedOfferingNames: ['Golden China 12-Day'],
         verifierOutputJson: { ok: true, blocked_reasons: [] },
         passedGateIds: expect.arrayContaining(['brand_redline', 'length', 'url_allowlist']),
+        semanticFlags: [],
         createdAt: '2026-09-15T01:00:00Z',
       },
     ])
-    // CTS 是 c0000000-…（params() 默认值）——真的挂上了 cts.ts 的完整闸门列表，不是空壳。
+    // CTS 是 c0000000-…（params() 默认值）——这条历史行的 verifier_output_json 里没有
+    // `checked_gate_ids`（2026-09-20 语义闸上线前写入的行），回退到只声称七道正则闸
+    // 过了，不假装 Jev 语义闸也跑过（子牙+魏征复审：不能用静态清单冒充实际执行记录）。
     expect(json.drafts[0].passedGateIds.length).toBe(7)
+  })
+
+  it('reads the real per-draft checked_gate_ids when the row records it (Jev semantic layer actually ran)', async () => {
+    allow()
+    stubTables({
+      owned: true,
+      drafts: [
+        {
+          id: 'draft-2',
+          draft_body: 'Kia ora — here is the itinerary.',
+          agent_confidence: 0.82,
+          quoted_offering_names: [],
+          verifier_output_json: {
+            ok: true,
+            blocked_reasons: [],
+            checked_gate_ids: ['brand_redline', 'length', 'url_allowlist', 'brand_redline_semantic'],
+          },
+          created_at: '2026-09-20T01:00:00Z',
+        },
+      ],
+    })
+
+    const json = (await (await GET(request(), params())).json()) as {
+      drafts: Array<{ passedGateIds: string[] }>
+    }
+
+    // number_claim_semantic is deliberately absent from the stub — proves this route
+    // trusts the row's own record instead of re-deriving a fixed 9-item list.
+    expect(json.drafts[0].passedGateIds).toEqual([
+      'brand_redline',
+      'length',
+      'url_allowlist',
+      'brand_redline_semantic',
+    ])
+  })
+
+  it(
+    '🔴 regression guard (Codex review 2026-09-20 on PR #1838): surfaces semantic_flags ' +
+      "on an otherwise-'pending' (ok:true) row — a semantic hit never blocks the draft, so " +
+      'the portal must read the advisory flag from the row itself to show it at all',
+    async () => {
+      allow()
+      stubTables({
+        owned: true,
+        drafts: [
+          {
+            id: 'draft-3',
+            draft_body: 'text',
+            agent_confidence: 0.7,
+            quoted_offering_names: [],
+            verifier_output_json: {
+              ok: true,
+              blocked_reasons: [],
+              checked_gate_ids: ['brand_redline', 'brand_redline_semantic'],
+              semantic_flags: ['brand_redline_semantic: reply may restate a brand-redline claim (Jev score 0.79)'],
+            },
+            created_at: '2026-09-20T01:00:00Z',
+          },
+        ],
+      })
+
+      const json = (await (await GET(request(), params())).json()) as {
+        drafts: Array<{ semanticFlags: string[] }>
+      }
+
+      expect(json.drafts[0].semanticFlags).toEqual([
+        'brand_redline_semantic: reply may restate a brand-redline claim (Jev score 0.79)',
+      ])
+    },
+  )
+
+  it('defaults semanticFlags to an empty array when the row has no verifier_output_json at all', async () => {
+    allow()
+    stubTables({
+      owned: true,
+      drafts: [
+        {
+          id: 'draft-4',
+          draft_body: 'text',
+          agent_confidence: null,
+          quoted_offering_names: null,
+          verifier_output_json: null,
+          created_at: '2026-09-15T01:00:00Z',
+        },
+      ],
+    })
+
+    const json = (await (await GET(request(), params())).json()) as {
+      drafts: Array<{ semanticFlags: string[] }>
+    }
+
+    expect(json.drafts[0].semanticFlags).toEqual([])
   })
 
   it('attaches no gate list for a client whose Verifier policy is not CTS (no platform-wide truth invented)', async () => {

@@ -165,7 +165,7 @@ async function runSixSteps(
   // Step 3: gated (information-completeness gate, PM 2026-09-20 incident
   // follow-up — real I/O now: live GSC page-query calls, keyword_snapshots
   // reads, live SERP checks. No longer pure.)
-  const step3 = await step.run('gated', async () => runStep3Gate(supabaseAdmin, config, step2.candidates))
+  const step3 = await step.run('gated', async () => runStep3Gate(supabaseAdmin, adapter, config, step2.candidates))
   await step.run('log-step3-receipt', async () => writeStepReceipt(supabaseAdmin, {
     jobName: STEP3_JOB_NAME, clientId, weekKey, status: 'completed',
     processed: step3.passed.length + step3.failures.length, completed: step3.passed.length, failed: step3.failures.length,

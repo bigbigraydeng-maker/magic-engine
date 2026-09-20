@@ -21,6 +21,62 @@ CTS 每周自动改网站标题/描述的功能重做成 6 步版本，跑在 In
 事故经过与教训见 [PITFALLS D10](../PITFALLS.md)，PM 决策见 [DECISIONS 2026-09-20](../DECISIONS.md)。
 
 **Reuse Statement**：复用已有 GSC、DataForSEO、竞对解析、人工看板（`zhuge/action-persister`）、Inngest 两段式派单范式、`cts-meta-pr.ts` 的窄道改文件逻辑；新增的 `src/lib/seo-meta/cycle/` 是不带客户身份的共享流程（有测试断言不含 CTS ID）；客户差异只在 `clients.seo_config.meta_cycle_*` 配置和 CTS 仓库的写入适配器里。
+### 2026-09-20（Park Homes 官网：Riverside 页面按客户 V2 素材包重做为"整个 104 户社区"展示）
+
+PR [#1834](https://github.com/bigbigraydeng-maker/magic-engine/pull/1834) 已合并并部署，PM 本地预览后批准。客户 Jason 2026-09-16 邮件发来 Riverside V2 素材包（9 张图 + 英文实施说明），要求把 Riverside 页从"几套在售房"改成展示整个 104 户开发项目；当时只回了"收到"，之后四天没人做。本次按他要求的顺序重做：全社区航拍 + 介绍 → 104 户概况 → 整体愿景效果图（明确标注"示意，非批准规划"，不推断分期/地块/完工）→ 场地周边 → 工程进度 → 精选内外景（主图 + 两张 + 可展开细节）→ 视频 → 在售房源 → 未来批次登记。新建 `ProjectStory.astro` 布局组件，只在项目数据带 `story` 时启用，其余四个项目页不变。在售房源（`listings`）和未来批次（`releases`）做成 `projects.js` 里可独立增改的数组：为空时显示"咨询当前房源"按钮 + 已核实的 Ray White 链接，不编造房源卡片。页面概况按客户规则去掉了房源级数字（2–5 房 / $650k 起 / 2026–28 完工）；首页卡片"From $650k"保留，邮件里请客户确认。首页大图和 Riverside 卡片同步换成全社区航拍。验证：构建 20 页、生成页各段顺序与图注核对、本地灯箱/表单/中介信息脚本核查、375px 手机版无横向溢出、上线后线上 9 张图与文案核实。
+
+**Reuse Statement**：客户专属站点改动。复用既有 Base 布局、`.facts`/`.cards`/`.jcard`/`.lightbox` 样式、登记表单与客资接口、中介信息；新增仅一个页面布局组件和约 20 行样式，全部在客户站点目录内，未进入共享运行时。
+
+---
+
+### 2026-09-20（CTS Messenger AI 客服：verifier 加两道 Jev 语义补充检查，抓换措辞的品牌红线/文字拼数字）
+
+PR [#1841](https://github.com/bigbigraydeng-maker/magic-engine/pull/1841) 已合并（前身 #1838 因改动量超过 `claude/*` 分支自动闸门的 800 行上限，换成 `feat/*` 分支重开——跟 #1832/#1825 同一类情况）。CTS Messenger AI 客服回复要过七道确定性闸（`src/lib/messenger-agent/verifier/policies/cts.ts`）才进人工审核队列，这七道闸全是正则/字符串/数字比对，查不出"换个说法讲同一句品牌红线""用文字拼价格或日期绕开数字正则"这两类真实存在的漏判。
+
+- 复用已合并生产验证过的 Jev（TypeSafe）判断客户端（`src/lib/jev/client.ts`），给 `brand_redline`/`number_claim` 各加一层语义补充判断——七道正则闸原样保留、零成本、永远先跑；新层只补充不替代，命中只写进新增的 `semantic_flags` 字段，**绝不改动 `ok`/`blocked_reasons`**。
+- fail-open 三重覆盖：Jev 调用失败/超时、`MESSENGER_VERIFIER_SEMANTIC_DISABLED=true` 总闸关闭、语义层自身意外异常（外层 try/catch 兜底），全部退回七道正则闸原结果，绝不阻塞发送、绝不让这条新外部依赖变成起草管道的新故障点。
+- 人审门户（`DraftApprovalPanel.tsx`）新增提醒区块把语义命中显示给 FDE；"已过关"清单（`drafts/route.ts`）不再用跟 clientId 绑死的静态列表，改成读每条草稿自己记录的 `checked_gate_ids`（Jev 没跑成的检查不会被冒充成"已过关"）。
+- 子牙（架构）+ 魏征（挑刺）两轮独立复审后，Codex 自动复审又抓出一个真实 P1：早期版本命中语义闸后把 `ok` 改成 `false`，导致草稿被存成 `verifier_status='blocked'` 并提前 return——但草稿接口只查 `pending`、PM 待办的 `TRACKED_STATUSES` 也不含 `blocked`，等于"标了需要人工重点看"的草稿实际上不会出现在任何人能看到的地方；改成语义命中永远走 `pending`、advisory-only 后修复。另有 P2（门户直接显示英文内部 ID `brand_redline_semantic`）一并修完。
+- 用真实 CTS 数据对真实 Jev API 跑过两轮验证（含 advisory-only 改动后复测）：换措辞品牌红线命中（打分 0.79）、干净回复不命中、文字拼错数字命中（打分 0.96）、文字拼对数字不命中，4 个场景 × 2 轮全部符合预期；新增 `cts-semantic.live.test.ts` 沉淀为可复用回归（无 key 自动跳过，不影响 CI）。PM 已明确批准将客户对话内容发给 Jev 处理（2026-09-20）。
+
+**Reuse Statement**：复用已有 L3 Connector（`src/lib/jev/client.ts`）和既有 verifier 框架（`framework.ts` 未改动，保持 client-agnostic）；新增的 `brand_redline_semantic`/`number_claim_semantic` 检测逻辑落在 CTS 专属的 L4 policy 文件（`cts.ts`），不是新建平台能力线；品牌红线词表/已确认价格团期都是运行时从 `context` 传入，没有客户事实写进 shared runtime；换客户/换行业测试通过（机制本身跟具体客户的红线词表/产品数据无关）。
+
+---
+
+### 2026-09-20（AI 可见度：修复品牌命中子串误判，以后新算出来的"是否被提及"数字会变准）
+
+PR [#1823](https://github.com/bigbigraydeng-maker/magic-engine/pull/1823) 已合并（merge commit `00466090`）。老判断逻辑用"品牌名字符串互相包含"判定客户有没有被 AI 提到，会把"Ray White"误判成命中"Roman Hu — Ray White Mission Bay"这类不相关品牌，也会漏掉答案只写域名或标点不同写法的真实提及。对全部 6,596 条历史记录跑了一遍**只读**重算摸底（没有改任何生产数据），误判数字跟 PM 手工核对结果完全对上：CTS 38 条假阳性、NAL 17 条、Roman 79 条、Dixon 3 条。后续 PR [#1837](https://github.com/bigbigraydeng-maker/magic-engine/pull/1837) 又收紧了短别名判定（例如中文别名「中国旅行社」在「知名的中国旅行社」这种泛指里也被当成客户、答案里的「CTS Bus」被当成 CTS Tours），最终口径为：全库 169 条假阳性（CTS 39 条）、340 条真实提及被漏判、71 条名次会变——**这批数字目前仍原样挂在客户看到的历史记录/月报/诊断分上，还没被改过来**；本次合并只让下一次自动采集用上新规则，历史行要不要回填、要不要重算旧快照，是 [`docs/audits/2026-09-20-ai-visibility-client-rank-grounding.md`](../audits/2026-09-20-ai-visibility-client-rank-grounding.md)「建议的后续」里列的 5 步，**全部等 PM 点头，这次一步没做**。
+
+- 新增纯函数模块 `src/lib/ai-tracker/client-brand-match.ts` 负责判定，prompt 里不再把客户名喂给模型（避免模型顺着提示词把客户名编进答案），短别名（如 "CTS"）嵌在另一个已解析的竞品品牌名里时不能单独证明命中（例："CTS Logistics" 不会被当成 "CTS" 命中），裸出现且没有竞争品牌时仍可命中，精确匹配替换掉原来的双向子串包含。
+- 子牙（架构）+ 魏征（挑刺）两轮复审的必改项都在第二个 commit 修完，各自配了测试；Codex 复审另挑出一处"短别名单独证明命中"的边界情况，PR 里已有专门测试覆盖（`CTS Logistics` 不会被误判成 `CTS Tours`），验证通过后标记解决。
+- **这不是切换判断系统**：仓库里另有一套 2026-08-19 PM 已拍板"未来要切、旧系统要退役"的新判断系统（`geo-module`+`geo-baseline`，内部代号 M1），但那次退役从未执行完。CTS 是否已有 M1 生产数据待核实（有一个手工跑过的批次 `77124a10-d22b-4722-94c2-aeae69f73d76`，但结果从未落盘确认，详见 [ROADMAP.md P31.X.4a](../ROADMAP.md)），可以确定的是每周自动采集还是未接通的骨架。本次是先把 CTS 现在实际在用的旧系统里的真实 bug 修掉，让**以后**每周新跑出来的数字变准——**但 CYHB Fashion 和 Magic Lab Class 这两个客户例外**：审计发现它们的品牌别名配置本身就缺项（CYHB 缺"CYHB"这个简写、Magic Lab Class 缺"Magic Lab"这个简写），这两处不是这次代码修的范围，得先去客户设置里补别名（PM 点头后再补），补之前这两个客户新采集的数字也还是不准；"切到 M1"作为独立、规模跟当初退役决定一样大的后续工作登记进 [ROADMAP.md P31.X.4a](../ROADMAP.md)，需要单独走 PO 逐步拍板，不在本次范围。
+
+**Reuse Statement**：纯 bug 修复，不新增能力线；新模块是客户配置驱动的纯函数（客户身份来自 `master_briefs.brand_name`（有活跃 brief 时优先）或回退到 `clients.name`，再加上 `clients.domain` / `clients.brand_aliases`，没有客户名硬编码进 shared runtime）；换客户/换行业测试都通过。
+
+---
+
+### 2026-09-20（SEO 周循环：撤销的标题改动不再当天被重新选中）
+
+PR [#1829](https://github.com/bigbigraydeng-maker/magic-engine/pull/1829) 已合并。PM 2026-09-20（CTS 项目经理窗口）验证发现：2026-09-19 事故撤销的 3 个页面（`liziba-station-chongqing-guide`、`beijing-to-xian-high-speed-train`、`how-many-days-in-chongqing`）在同一天的试跑里又被当成新候选选中了一遍——不是网站风险（事实核对闸和关键词匹配闸已经把它们全拦下来），但每周都会白占一个改动名额、白跑一次查关键词数据的调用。
+
+- 原因：`runStep2CandidatesReady`（`src/lib/seo-meta/cycle/runner.ts`）的冷却期查询把"已撤销"的记录整条排除在外，导致撤销之后立刻又能被选中，跟"30 天冷却期"的本意（避免同一页面被反复折腾）正好相反。
+- 改法：撤销记录不再计入完整的 30 天冷却期（撤销的改动本来就没真正生效过），但改成单独给 7 天的短冷却期（跟每周自动任务的节奏对上）——既不会撤销当天又被选中，也不会因为撤销过就被永久拉黑。
+- 用 PM 验证到的这 3 个真实页面直接当测试用例，加了 4 条回归测试。
+
+**Reuse Statement**：只改了已有能力（SEO 周循环）内部一处判断逻辑，不新增能力/支柱/共享代码路径，没有任何客户名/客户 ID 写进 shared runtime。
+
+---
+
+### 2026-09-20（内容工厂：发布前品控接入 Jev 判断模型，抓竞品品牌/占位字幕/人称口吻）
+
+PR [#1832](https://github.com/bigbigraydeng-maker/magic-engine/pull/1832) 已合并（前身 #1825 因改动量超过 `claude/*` 分支自动闸门的 800 行上限，换成 `feat/*` 分支重开）。2026-09-20 只读评估 `content_work_orders` 真实工单（状态 `review_rejected`）发现，现有品牌红线闸（静态短语黑名单）抓不出三类要靠人工肉眼才能挑出的缺陷：角度/hook 把第三方竞品品牌当自己卖点（真实 Oztop 工单角度写成 "mapei brisbane"）、上屏字幕是内部内容分类标签冒充真文案且跨段完全重复（真实 Oztop/CTS 工单字幕逐段就是 "Customer Stories & Community" 这类内部标签，某单重复 7 次）、文案人称口吻跟简报要求的第一人称叙述者不符（真实 CTS 工单 brief 要求 Baker Gu 第一人称，AI 写成 "Our own offices. Our own guides." 公司口吻）。
+
+- 新增 `src/lib/jev/client.ts`（L3 Connector，TypeSafe Jev 判断模型，对外封装名 Compliance Engine）+ `src/lib/factory/content-quality-guard.ts`（编排三类检测：B 的机械重复子情形零成本确定性检测，其余靠一次 Jev 调用；命中不打回，写 `output.quality_flags` 标红转人工，跟现有 `redline_hits` 同一套口径）。
+- 接入 `completeWorkOrder`（成片交付时机，跟现有红线复扫同一入口），`ReviewInbox.tsx` 加一段展示。
+- 设计动手前召了子牙（架构）+ 魏征（挑刺）两个独立复审；上线过程中 Codex 自动复审又抓出 7 处真实问题（recipe/legacy 两条渲染路径的逐段字幕来源不一致、字段取值优先级跟 worker.mjs 不一致、Jev 超时只包住响应头没包响应体读取、人称检测误判合法的第一人称"我们"），全部修复并补了回归测试。
+- **待办**：生产环境 Render 尚未配置 `TYPESAFE_API_KEY`，配之前三类新检测不会真的运行（fail-closed，不会报错，但也不会真的查出问题）——已登记 [ROADMAP.md](../ROADMAP.md)。
+
+**Reuse Statement**：新增的是一个新的 L3 Connector（Jev API adapter）+ 通用语义判断逻辑,不新增能力线/支柱;复用现有"成片级复扫→标红→人工审"的整套口径,没有新建状态机、新路由、新 UI 页面。检测逻辑与客户/行业语义无关(换客户/换行业测试都通过),没有任何客户名/客户 ID 写进 shared runtime。
 
 ---
 

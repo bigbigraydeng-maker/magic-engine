@@ -23,6 +23,17 @@ export interface MetaCycleClientConfig {
   maxPagesPerRun: number
   cooldownDays: number
   brandVoice: string
+  /**
+   * PM 2026-09-20 (fourth pass): DataForSEO location_codes to try (in order)
+   * when the client's own primary market has no data — e.g. CTS configures
+   * [2036] (AU) because DataForSEO doesn't index many NZ long-tail queries.
+   * Per-client config, not a shared default: PM was explicit that AU/NZ
+   * substitution is NOT valid for every industry/client, so this must default
+   * to [] (no fallback) unless a client's own clients.seo_config sets
+   * meta_cycle_keyword_fallback_locations (roster.ts validates: positive
+   * integers only, max 2).
+   */
+  keywordFallbackLocations: number[]
 }
 
 /** GSC only — patrol was dropped (复审 2026-09-20: unit mismatch + wrong-page risk, see candidates.ts). */
@@ -58,6 +69,26 @@ export interface MetaCycleCandidate {
 export type MetaCycleActionType = 'title_rewrite' | 'skip'
 
 /**
+ * PM 2026-09-20 (fourth pass): where keywordData (searchVolume +
+ * keywordDifficulty) actually came from — DataForSEO's own coverage gaps in
+ * small markets (NZ long-tail queries especially) mean not every candidate
+ * resolves the same way, and PM wants the source visible everywhere the
+ * numbers are, not just implied by which location_code shows up.
+ *   'dataforseo_primary'  — client's own market (keyword_snapshots or a live
+ *                           bulkKeywordVolume call at that location).
+ *   'dataforseo_fallback' — a client-configured fallback location_code
+ *                           (MetaCycleClientConfig.keywordFallbackLocations).
+ *   'gsc_serp'            — neither DataForSEO location had data: searchVolume
+ *                           is this page's own GSC impressions for the
+ *                           keyword (≥30, the same floor outcome-classifier.ts
+ *                           uses), keywordDifficulty is an average SERP-
+ *                           competitor domain-authority estimate (NOT a real
+ *                           DataForSEO difficulty score — always labelled as
+ *                           such in chosenReason/PR body/receipts).
+ */
+export type MetaCycleKeywordDataSource = 'dataforseo_primary' | 'dataforseo_fallback' | 'gsc_serp'
+
+/**
  * The evidence trail the information-completeness gate collected for a
  * candidate that passed every check (gate.ts). PM 2026-09-20 (incident
  * follow-up) requires this be visible in both the PR description and
@@ -65,9 +96,15 @@ export type MetaCycleActionType = 'title_rewrite' | 'skip'
  */
 export interface MetaCycleGateEvidence {
   keyword: string
+  /** Search volume AND difficulty are both hard requirements — gate.ts's resolveKeywordData only returns success when neither is null, from whichever tier supplied them (PM 2026-09-20, third/fourth pass: a partial result is treated the same as no result, never coerced or let through with a gap). */
   searchVolume: number
   keywordDifficulty: number
   snapshotDate: string
+  keywordDataSource: MetaCycleKeywordDataSource
+  /** The DataForSEO location_code actually used (tiers 1–2). null for gsc_serp (tier 3) — there's no single "location" for a GSC-impressions + SERP-domain-authority estimate. */
+  keywordDataLocation: number | null
+  /** Human-readable "where did this number come from" — e.g. "需求来自谷歌后台真实曝光 214 次；难度按谷歌前三名网站强度估算为 38（非 DataForSEO 难度分）". Rendered directly into the PR body, dry-run JSON, and receipts (PM: "都用人话标来源"). */
+  keywordDataNote: string
   /** Top-3 competitor page titles from the live SERP check. */
   competitorTitles: string[]
   /** This client's own ranking URL for `keyword` in that same SERP call, if any. */
@@ -125,6 +162,17 @@ export interface ApplyAdapterResult {
 
 export interface ApplyAdapter {
   readonly channel: 'pr' | 'wp_plugin'
+  /**
+   * Cheap pre-check: is this slug backed by an editable data file at all?
+   * PM 2026-09-20 (data-completeness follow-up): this used to only be
+   * discovered in step 4's apply() call, AFTER the gate had already spent a
+   * live GSC query, a keyword_snapshots/DataForSEO lookup, and a live SERP
+   * call on the candidate. Calling this FIRST (step 3, before the gate)
+   * means an unreachable page (e.g. forbidden-city-travel-guide, which has
+   * no matching src/lib/data file in the CTS repo) is skipped for free.
+   * No network/DB writes; safe to call before dryRun is even decided.
+   */
+  canEditSlug(slug: string | null): Promise<boolean>
   /**
    * Apply a new title/desc for one candidate. Must be a no-op (no
    * network/DB writes) when dryRun is true. `applied: true` means the

@@ -57,10 +57,13 @@ function buildPrBody(slug: string, keyword: string, oldTitle: string, newTitle: 
   const competitors = evidence.competitorTitles.length > 0
     ? evidence.competitorTitles.map((t, i) => `  ${i + 1}. ${t}`).join('\n')
     : '  （SERP 前 3 名没有可用标题）'
+  // gsc_serp 的"搜索量"其实是页面自己近 28 天的 GSC 曝光次数，不是市场月搜索量——单位标注必须跟着来源变，否则「214/月」会被误读成真实市场搜索量。
+  const volumeUnit = evidence.keywordDataSource === 'gsc_serp' ? '（近 28 天 GSC 曝光次数，不是市场月搜索量）' : '/月'
   return [
     `### /${slug}`,
     `目标词:「${keyword}」`,
-    `- 搜索量: ${evidence.searchVolume}/月 · 难度: ${evidence.keywordDifficulty}/100（keyword_snapshots 快照日期 ${evidence.snapshotDate}）`,
+    `- 搜索量: ${evidence.searchVolume}${volumeUnit} · 难度: ${evidence.keywordDifficulty}/100（数据日期 ${evidence.snapshotDate}）`,
+    `- 数据来源: ${evidence.keywordDataNote}`,
     `- 本页在 SERP 里的排名 URL: ${evidence.ctsRankingUrl ?? '（这次 SERP 结果里没查到本站排这个词）'}`,
     `- 对手前 3 名标题:`,
     competitors,
@@ -153,6 +156,12 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
 
   return {
     channel: 'pr',
+
+    async canEditSlug(slug) {
+      if (!slug) return false
+      const index = await ensureIndex()
+      return index.has(slug)
+    },
 
     async apply({ candidate, newTitle, newDesc, weekKey, dryRun, evidence }) {
       if (!candidate.slug) {

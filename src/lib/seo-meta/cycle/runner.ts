@@ -185,18 +185,53 @@ export interface Step2Result {
   candidates: MetaCycleCandidate[]
 }
 
+/**
+ * PM 2026-09-20 (post-revert reselect-loop follow-up, CTS total-project-manager
+ * window): a reverted row must NOT count toward the full `cooldownDays` window
+ * (it never stood — that's the whole point of `reverted_at`, see the
+ * `seo_meta_cycle_reverted_marker` migration), but excluding it forever meant
+ * the exact same already-known-bad slug got re-picked as a candidate the SAME
+ * day it was reverted, burning a `maxPagesPerRun` slot and a DataForSEO lookup
+ * on a page the live gates were just going to reject again anyway. A short
+ * cooldown after the revert breaks that loop without reinstating the full
+ * 30-day lockout. 7 days == one weekly cron cycle (roster.ts's
+ * MIN_HOURS_BETWEEN_CYCLES ≈ 6.5 days), so a reverted slug skips exactly the
+ * next run, not the one after.
+ */
+export const POST_REVERT_COOLDOWN_DAYS = 7
+
+interface CooldownLogRow {
+  page_slug: string
+  reverted_at: string | null
+  optimised_at: string
+}
+
 export async function runStep2CandidatesReady(
   supabase: SupabaseClient,
   config: MetaCycleClientConfig,
 ): Promise<Step2Result> {
-  const cooldownCutoff = new Date(Date.now() - config.cooldownDays * 86_400_000).toISOString()
+  const now = Date.now()
+  const cooldownCutoff = new Date(now - config.cooldownDays * 86_400_000).toISOString()
+  const revertCooldownCutoff = new Date(now - POST_REVERT_COOLDOWN_DAYS * 86_400_000).toISOString()
 
   const [{ data: recentRows }, { data: gscRow }] = await Promise.all([
-    supabase.from('seo_meta_log').select('page_slug').eq('client_id', config.clientId).is('reverted_at', null).gte('optimised_at', cooldownCutoff),
+    supabase
+      .from('seo_meta_log')
+      .select('page_slug, reverted_at, optimised_at')
+      .eq('client_id', config.clientId)
+      .or(`optimised_at.gte.${cooldownCutoff},reverted_at.gte.${revertCooldownCutoff}`),
     supabase.from('gsc_performance_snapshots').select('top_pages').eq('client_id', config.clientId).order('period_end', { ascending: false }).limit(1).maybeSingle(),
   ])
 
-  const cooldownSlugs = new Set(((recentRows ?? []) as Array<{ page_slug: string }>).map((r) => r.page_slug))
+  // A reverted row is judged ONLY by the short post-revert cooldown, never
+  // the standing one, even if its original optimised_at is still within
+  // cooldownDays — that's the "don't count it as a standing change" half of
+  // the fix. A never-reverted row keeps the full cooldownDays behaviour.
+  const cooldownSlugs = new Set(
+    ((recentRows ?? []) as CooldownLogRow[])
+      .filter((r) => (r.reverted_at ? r.reverted_at >= revertCooldownCutoff : r.optimised_at >= cooldownCutoff))
+      .map((r) => r.page_slug),
+  )
   const gscSnapshot = gscRow as { top_pages?: RawGscPage[] } | null
 
   const merged = mergeCandidates(
@@ -217,6 +252,7 @@ export interface Step3Result {
 
 export async function runStep3Gate(
   supabase: SupabaseClient,
+  adapter: ApplyAdapter,
   config: MetaCycleClientConfig,
   candidates: MetaCycleCandidate[],
 ): Promise<Step3Result> {
@@ -232,6 +268,17 @@ export async function runStep3Gate(
   const failures: MetaCycleGateFailure[] = []
   for (const candidate of candidates) {
     if (passed.length >= config.maxPagesPerRun) break // enough good candidates found — stop spending on SERP/GSC calls for the rest of the wide pool
+
+    // PM 2026-09-20 (data-completeness follow-up): check this FIRST, before
+    // any GSC/DataForSEO/SERP spend — a page with no matching editable data
+    // file (e.g. forbidden-city-travel-guide) used to only be discovered in
+    // step 4's apply() call, after the entire gate had already run on it.
+    const editable = await adapter.canEditSlug(candidate.slug)
+    if (!editable) {
+      failures.push({ candidate, reason: GATE_REASON.SLUG_NOT_EDITABLE, detail: `slug "${candidate.slug}" not found in any editable data file — skipped before any DataForSEO/GSC spend` })
+      continue
+    }
+
     const result = await runGateForCandidate(supabase, config, candidate, siteUrl)
     if ('evidence' in result) passed.push({ candidate: result.candidate, evidence: result.evidence })
     else failures.push(result)
@@ -248,6 +295,9 @@ export interface MetaCycleProposal {
   searchVolume: number
   keywordDifficulty: number
   snapshotDate: string
+  keywordDataSource: MetaCycleGateEvidence['keywordDataSource']
+  keywordDataLocation: number | null
+  keywordDataNote: string
   competitorTitles: string[]
   ctsRankingUrl: string | null
   chosenReason: string
@@ -319,7 +369,7 @@ async function applyOnePrescription(
   if (preview.skipReason && preview.skipReason !== 'dry_run') {
     // slug not found in the repo's data files etc — record it, don't silently drop (PM finding #6).
     return {
-      proposal: { slug: candidate.slug, pageUrl: candidate.pageUrl, keyword: evidence.keyword, searchVolume: evidence.searchVolume, keywordDifficulty: evidence.keywordDifficulty, snapshotDate: evidence.snapshotDate, competitorTitles: evidence.competitorTitles, ctsRankingUrl: evidence.ctsRankingUrl, chosenReason: evidence.chosenReason, oldTitle: '', oldDesc: '', newTitle, newDesc, factCheckConsistent: false, factCheckReason: 'not checked — preview failed first', applied: false, skipReason: preview.skipReason },
+      proposal: { slug: candidate.slug, pageUrl: candidate.pageUrl, keyword: evidence.keyword, searchVolume: evidence.searchVolume, keywordDifficulty: evidence.keywordDifficulty, snapshotDate: evidence.snapshotDate, keywordDataSource: evidence.keywordDataSource, keywordDataLocation: evidence.keywordDataLocation, keywordDataNote: evidence.keywordDataNote, competitorTitles: evidence.competitorTitles, ctsRankingUrl: evidence.ctsRankingUrl, chosenReason: evidence.chosenReason, oldTitle: '', oldDesc: '', newTitle, newDesc, factCheckConsistent: false, factCheckReason: 'not checked — preview failed first', applied: false, skipReason: preview.skipReason },
       manualAction: null,
     }
   }
@@ -328,6 +378,7 @@ async function applyOnePrescription(
   const base: MetaCycleProposal = {
     slug: candidate.slug, pageUrl: candidate.pageUrl, keyword: evidence.keyword,
     searchVolume: evidence.searchVolume, keywordDifficulty: evidence.keywordDifficulty, snapshotDate: evidence.snapshotDate,
+    keywordDataSource: evidence.keywordDataSource, keywordDataLocation: evidence.keywordDataLocation, keywordDataNote: evidence.keywordDataNote,
     competitorTitles: evidence.competitorTitles, ctsRankingUrl: evidence.ctsRankingUrl, chosenReason: evidence.chosenReason,
     oldTitle: preview.oldTitle, oldDesc: preview.oldDesc, newTitle, newDesc,
     factCheckConsistent: factCheck.consistent, factCheckReason: factCheck.reason, applied: false,
@@ -432,7 +483,7 @@ export async function runDryRunCycle(
 ): Promise<DryRunResult> {
   const checkDue = await runStep1CheckDue(supabase, adapter, config, weekKey, true)
   const { candidates } = await runStep2CandidatesReady(supabase, config)
-  const { passed, failures } = await runStep3Gate(supabase, config, candidates)
+  const { passed, failures } = await runStep3Gate(supabase, adapter, config, candidates)
   const step4 = await runStep4Applied(supabase, adapter, config, weekKey, passed, generateMeta, true)
 
   return { checkDue, candidateCount: candidates.length, gateFailures: failures, proposals: step4.proposals }
