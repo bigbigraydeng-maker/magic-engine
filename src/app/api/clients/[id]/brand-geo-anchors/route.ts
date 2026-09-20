@@ -21,6 +21,14 @@ import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 const MAX_ANCHORS   = 20
 const MIN_ANCHOR_LEN = 2
+/**
+ * CJK anchors need 3+ characters. The matcher has no word boundaries to pin a
+ * CJK string to (MIN_CJK_EVIDENCE_LEN in client-brand-match.ts), so a shorter
+ * one would store fine, display fine, and then match nothing — silently
+ * closing the gate on every answer for that client. Reject it at the door.
+ */
+const MIN_CJK_ANCHOR_LEN = 3
+const CJK_RE = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/
 
 interface PatchBody {
   anchors?: unknown
@@ -89,6 +97,16 @@ export async function PATCH(
     if (typeof raw !== 'string') continue
     const norm = normaliseAnchor(raw)
     if (norm.length < MIN_ANCHOR_LEN) continue
+    if (CJK_RE.test(norm) && norm.length < MIN_CJK_ANCHOR_LEN) {
+      return NextResponse.json(
+        {
+          error:
+            `地域锚点「${norm}」太短：中日韩地名至少要 ${MIN_CJK_ANCHOR_LEN} 个字，` +
+            '否则永远匹配不到文本，会把这个客户所有靠别名认出来的提及全部砍掉。',
+        },
+        { status: 400 },
+      )
+    }
     if (seen.has(norm)) continue
     if (cleaned.length >= MAX_ANCHORS) break
     seen.add(norm)

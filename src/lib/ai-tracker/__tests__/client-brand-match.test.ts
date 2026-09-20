@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  admissibleClientIdentifiers,
+  admissibleIdentifiersForAnswer,
   buildClientIdentifiers,
   isClientBrand,
   resolveClientBrandRank,
@@ -419,7 +419,7 @@ describe('resolveClientBrandRank — geo anchors', () => {
   })
 })
 
-describe('admissibleClientIdentifiers', () => {
+describe('admissibleIdentifiersForAnswer', () => {
   const CTS = {
     brandName: 'CTS Tours',
     domain: 'ctstours.co.nz',
@@ -427,17 +427,22 @@ describe('admissibleClientIdentifiers', () => {
     geoAnchors: ['new zealand', 'nz'],
   }
 
-  it('drops alias identifiers when the evidence text carries no anchor', () => {
-    expect(admissibleClientIdentifiers(CTS, 'China Travel Service (Australia) Pty Ltd')).toEqual([
-      'cts tours',
-      'ctstours co nz',
-      'ctstours',
-    ])
+  it('drops alias identifiers when the answer carries no anchor', () => {
+    expect(
+      admissibleIdentifiersForAnswer(CTS, 'Chinese tour operators in Australia include CTS.')
+    ).toEqual(['cts tours', 'ctstours co nz', 'ctstours'])
   })
 
-  it('keeps them when it does — this is what merges the weekly ranking table', () => {
-    expect(admissibleClientIdentifiers(CTS, 'China Travel Service (NZ) Ltd')).toContain(
-      'china travel service'
-    )
+  it('keeps them when the answer does carry one', () => {
+    expect(
+      admissibleIdentifiersForAnswer(CTS, 'Inbound operators for New Zealand include CTS.')
+    ).toContain('china travel service')
+  })
+
+  it('ignores a CJK anchor too short to ever match, instead of closing the gate', () => {
+    const twoChar = { ...CTS, geoAnchors: ['澳洲'] }
+    // '澳洲' can never match (CJK needs 3+ chars), so the gate must stay OFF
+    // rather than silently rejecting every alias-grounded mention.
+    expect(admissibleIdentifiersForAnswer(twoChar, '任何文本')).toContain('china travel service')
   })
 })

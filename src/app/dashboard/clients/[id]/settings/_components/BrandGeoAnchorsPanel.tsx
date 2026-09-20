@@ -127,7 +127,8 @@ export function BrandGeoAnchorsPanel({ clientId }: Props) {
 
       <div className="mb-3 flex items-baseline justify-between">
         <p className="text-sm text-slate-600">
-          每行一个地名（客户自己的市场），最多 {MAX_ANCHORS} 个。保存后统一小写、合并多余空白、去重，至少 2 字符。
+          每行一个地名（客户自己的市场），最多 {MAX_ANCHORS} 个。保存后统一小写、合并多余空白、去重。
+          英文至少 2 个字母，<strong>中文 / 日文 / 韩文地名至少 3 个字</strong>（「澳洲」这种两字词匹配不到，会被拒绝保存）。
         </p>
         <span className={`text-xs font-bold ${currentCount > MAX_ANCHORS ? 'text-red-600' : 'text-slate-500'}`}>
           {currentCount} / {MAX_ANCHORS}

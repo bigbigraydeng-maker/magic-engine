@@ -164,12 +164,35 @@ function hasGeoAnchor(norm: string, anchors: readonly string[]): boolean {
   return anchors.some(a => indexOfIdentifier(norm, a) >= 0)
 }
 
-/** Configured anchors, normalised; empty when the client has none. */
+/**
+ * Configured anchors, normalised; empty when the client has none.
+ *
+ * A CJK anchor shorter than `MIN_CJK_EVIDENCE_LEN` can never match (there
+ * are no word boundaries to pin it to), so it would silently close the gate
+ * on every answer. The write API rejects those, but a row edited directly in
+ * the database can still carry one — drop it here and say so, rather than
+ * letting the client lose every alias-grounded mention without a trace.
+ */
 function buildGeoAnchors(identity: ClientBrandIdentity): string[] {
+  const configured = identity.geoAnchors ?? []
   const out: string[] = []
-  for (const a of identity.geoAnchors ?? []) {
+  for (const a of configured) {
     const norm = normalizeForMatch(a ?? '')
-    if (norm.length > 0) out.push(norm)
+    if (norm.length === 0) continue
+    if (CJK_RE.test(norm) && norm.length < MIN_CJK_EVIDENCE_LEN) {
+      console.warn(
+        `[client-brand-match] ignoring un-matchable CJK geo anchor "${norm}" ` +
+          `(needs ${MIN_CJK_EVIDENCE_LEN}+ characters)`
+      )
+      continue
+    }
+    out.push(norm)
+  }
+  if (configured.length > 0 && out.length === 0) {
+    console.warn(
+      '[client-brand-match] every configured geo anchor was unusable; ' +
+        'the geo gate is OFF for this client'
+    )
   }
   return out
 }
@@ -180,33 +203,37 @@ export function buildClientIdentifiers(identity: ClientBrandIdentity): string[] 
 }
 
 /**
- * The identifiers that may be used as evidence inside `evidenceText`.
+ * The identifiers admissible as evidence in one AI ANSWER.
  *
  * An alias is an FDE-entered nickname, and a nickname can be the group name
  * a foreign sibling trades under too ("China Travel Service" names both the
  * Australian and the NZ company). So once a client configures geo anchors,
- * aliases only count in text that also carries one of those anchors. The
- * official brand name and the client's own domain are self-identifying and
- * are never gated — otherwise every answer naming the client without naming
- * its country would lose a real mention. No anchors configured → the list is
- * exactly what it was before.
+ * aliases only count in an answer that also carries one of those anchors.
+ * The official brand name and the client's own domain are self-identifying
+ * and are never gated — otherwise every answer naming the client without
+ * naming its country would lose a real mention. No anchors configured → the
+ * list is exactly what it was before.
  *
- * `evidenceText` is whatever the identifier would be read out of: the whole
- * answer when ranking a run, or a single extracted brand name when merging
- * variants in the weekly table.
+ * 🔴 `answerText` must be a whole answer, never a bare brand name. A missing
+ *    anchor is only evidence of the wrong market across a few hundred words;
+ *    in a three-word company name it means nothing, because most company
+ *    names do not spell out their country. Judging a name in isolation would
+ *    un-merge every client variant that omits the country. Whoever needs a
+ *    per-name decision should reuse the rank this function helped resolve
+ *    (see `buildRankingTable`), not call this with a name.
  *
  * Short single-token aliases are NOT filtered here — `isClientBrand` already
  * requires them to equal the brand exactly. They are dropped separately from
  * the pool of *textual* evidence inside `resolveClientBrandRank`.
  */
-export function admissibleClientIdentifiers(
+export function admissibleIdentifiersForAnswer(
   identity: ClientBrandIdentity,
-  evidenceText: string
+  answerText: string
 ): string[] {
   const idList = buildIdentifierList(identity)
   const anchors = buildGeoAnchors(identity)
   if (anchors.length === 0) return idList.map(i => i.value)
-  const aliasAllowed = hasGeoAnchor(normalizeForMatch(evidenceText), anchors)
+  const aliasAllowed = hasGeoAnchor(normalizeForMatch(answerText), anchors)
   return idList.filter(i => aliasAllowed || !i.fromAlias).map(i => i.value)
 }
 
@@ -360,12 +387,12 @@ export function resolveClientBrandRank(
 
   const { norm, map } = normalizeWithSourceMap(rawResponse)
 
-  // Geo gate (see `admissibleClientIdentifiers`). A brand the parser
+  // Geo gate (see `admissibleIdentifiersForAnswer`). A brand the parser
   // extracted is the client only if it matches an admissible identifier;
   // under a failed gate the same-named sibling abroad stays in `brands` as
   // an ordinary competitor — it is a real company in the answer, so dropping
   // it would delete competitor data.
-  const admissibleIds = admissibleClientIdentifiers(identity, rawResponse)
+  const admissibleIds = admissibleIdentifiersForAnswer(identity, rawResponse)
   const admissible = new Set(admissibleIds)
   const clientBrands = brands.filter(b => isClientBrand(b.brand, admissibleIds))
   // Evidence = an identifier written in the text, or the name of a brand the

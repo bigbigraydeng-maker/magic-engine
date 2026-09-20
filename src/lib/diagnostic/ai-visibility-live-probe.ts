@@ -139,8 +139,15 @@ async function loadClientIdentity(
     .select('domain, brand_aliases, brand_geo_anchors')
     .eq('id', clientId)
     .maybeSingle<ClientIdentityRow>()
-  // Failing closed is safe: without domain/aliases matching only gets stricter.
-  if (error) console.warn('[ai-visibility-live-probe] client identity load failed:', error.message)
+  // A missing ROW is fine — matching just falls back to the brand name. A
+  // failed QUERY is not: it would drop domain, aliases and anchors together,
+  // for every client at once, and the diagnostic score would quietly sag with
+  // nothing in the run to explain it. Fail loudly instead.
+  if (error) {
+    throw new Error(
+      `[ai-visibility-live-probe] client identity load failed (${clientId}): ${error.message}`
+    )
+  }
   return {
     domain: data?.domain ?? null,
     brand_aliases: data?.brand_aliases ?? null,

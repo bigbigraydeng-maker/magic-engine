@@ -21,7 +21,7 @@ import { runClaude } from './runners/claude'
 import { runPerplexity } from './runners/perplexity'
 import { runGemini } from './runners/gemini'
 import { parseRanking } from './parser'
-import { admissibleClientIdentifiers, isClientBrand, type ClientBrandIdentity } from './client-brand-match'
+import { buildClientIdentifiers, isClientBrand, type ClientBrandIdentity } from './client-brand-match'
 import { supabaseAdmin } from '../supabase'
 import { writeTrackerFlywheelMetrics } from '../flywheel/metrics/writeTrackerMetrics'
 import type {
@@ -167,7 +167,13 @@ async function loadClientContext(
     .single<ClientRow>()
 
   if (error || !client) {
-    throw new Error(`Client not found: ${clientId}`)
+    // Carry the driver message: the most likely cause of a sudden failure
+    // here is a column in the select above missing from the database (a
+    // migration that never ran), and "client not found" would send whoever
+    // is on call looking for the wrong thing.
+    throw new Error(
+      `Client context load failed (${clientId}): ${error?.message ?? 'no row returned'}`
+    )
   }
 
   // Try active master_brief first; fall back to client.name
@@ -427,6 +433,7 @@ async function aggregateSnapshot(
     runs as Array<{
       ai_engine: string
       brands_mentioned: BrandMention[]
+      client_brand_rank: number | null
     }>,
     identity
   )
@@ -453,9 +460,24 @@ async function aggregateSnapshot(
   return { snapshotId: snapshot.id, mentionsCount, totalRuns, avgRank, engineCoverage }
 }
 
-/** Aggregate brand mentions across all runs into a flat ranking table. */
-function buildRankingTable(
-  runs: Array<{ ai_engine: string; brands_mentioned: BrandMention[] }>,
+/**
+ * Aggregate brand mentions across all runs into a flat ranking table.
+ *
+ * The client's name variants ("CTS Tours", "CTS Tours - China Travel Service
+ * (NZ) Limited") collapse into one canonical row. Which entry IS the client
+ * is decided per run, by the rank `resolveClientBrandRank` already resolved
+ * against that run's answer text — not by matching the brand name on its own.
+ * A brand name carries no market signal of its own, so judging it in
+ * isolation would un-merge every variant that happens not to spell out the
+ * country, and would re-credit the client with a same-named sibling's
+ * mentions in answers the run layer had already rejected.
+ */
+export function buildRankingTable(
+  runs: Array<{
+    ai_engine: string
+    brands_mentioned: BrandMention[]
+    client_brand_rank: number | null
+  }>,
   identity?: ClientBrandIdentity
 ): Record<string, unknown> {
   const byBrand = new Map<
@@ -463,13 +485,21 @@ function buildRankingTable(
     { mentions: number; rankSum: number; byEngine: Record<string, number[]> }
   >()
 
+  const ids = identity ? buildClientIdentifiers(identity) : []
+  const canonicalKey = identity?.brandName.trim() ?? ''
+
   for (const run of runs) {
     const mentions = Array.isArray(run.brands_mentioned)
       ? run.brands_mentioned
       : []
     for (const m of mentions) {
       if (!m.brand) continue
-      const key = m.brand.trim()
+      const isClient =
+        canonicalKey !== '' &&
+        run.client_brand_rank !== null &&
+        m.rank === run.client_brand_rank &&
+        isClientBrand(m.brand, ids)
+      const key = isClient ? canonicalKey : m.brand.trim()
       if (!key) continue
       const entry = byBrand.get(key) ?? {
         mentions: 0,
@@ -483,12 +513,6 @@ function buildRankingTable(
       entry.byEngine[run.ai_engine] = ranksForEngine
       byBrand.set(key, entry)
     }
-  }
-
-  // Merge brand name variants for the client (e.g. "CTS Tours" and
-  // "CTS Tours - China Travel Service (NZ) Limited" → one canonical entry)
-  if (identity) {
-    mergeClientBrandVariants(byBrand, identity)
   }
 
   const brands = Array.from(byBrand.entries())
@@ -505,57 +529,6 @@ function buildRankingTable(
     })
 
   return { brands }
-}
-
-/**
- * Merge all brand-name variants of the client into a single canonical entry.
- * Uses the same client-identity rules as the parser (brand name, aliases,
- * domain), so every entry that set client_brand_rank lands in one row.
- *
- * The geo gate applies here too, judged against the extracted brand name
- * itself: "China Travel Service (NZ) Ltd" carries the anchor and merges into
- * the client; "China Travel Service (Australia) Pty Ltd" does not and stays
- * its own row, so the client-visible ranking table does not credit the
- * client with a sibling's mentions.
- */
-function mergeClientBrandVariants(
-  byBrand: Map<string, { mentions: number; rankSum: number; byEngine: Record<string, number[]> }>,
-  identity: ClientBrandIdentity
-): void {
-  const canon = identity.brandName.trim()
-
-  let canonicalKey = ''
-  const variantKeys: string[] = []
-
-  for (const key of Array.from(byBrand.keys())) {
-    if (key.trim().toLowerCase() === canon.toLowerCase()) {
-      canonicalKey = key
-    } else if (isClientBrand(key, admissibleClientIdentifiers(identity, key))) {
-      variantKeys.push(key)
-    }
-  }
-
-  if (variantKeys.length === 0) return
-
-  const canonEntry = (canonicalKey ? byBrand.get(canonicalKey) : undefined) ?? {
-    mentions: 0,
-    rankSum: 0,
-    byEngine: {} as Record<string, number[]>,
-  }
-
-  for (const variantKey of variantKeys) {
-    const variant = byBrand.get(variantKey)
-    if (!variant) continue
-    canonEntry.mentions += variant.mentions
-    canonEntry.rankSum += variant.rankSum
-    for (const [engine, ranks] of Object.entries(variant.byEngine)) {
-      canonEntry.byEngine[engine] = [...(canonEntry.byEngine[engine] ?? []), ...ranks]
-    }
-    byBrand.delete(variantKey)
-  }
-
-  if (canonicalKey && canonicalKey !== canon) byBrand.delete(canonicalKey)
-  byBrand.set(canon, canonEntry)
 }
 
 /** Returns this week's Monday at 00:00 UTC. */
