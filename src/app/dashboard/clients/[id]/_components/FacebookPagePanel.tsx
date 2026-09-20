@@ -184,13 +184,17 @@ export function FacebookPagePanel({ clientId }: Props) {
     <div className="rounded-xl border border-slate-200 bg-white p-4">
       <LiveStatus pageId={page_id} reachable={reachable} verification={verification} />
 
-      <p className="mb-4 text-sm text-slate-500">
-        每小时自动拉取主页私信，AI 整理成需求卡显示在「客户消息」页。
-      </p>
+      {/* Only show description when nothing is bound yet — once syncing, the banner says it all */}
+      {!page_id && (
+        <p className="mb-4 text-sm text-slate-500">
+          选一个主页，系统每小时拉取私信，AI 整理成需求卡显示在「客户消息」页。
+        </p>
+      )}
 
       {can_edit ? (
         <>
-          {pages_error && (
+          {/* pages_error only matters when we don't already have a working binding */}
+          {pages_error && (!page_id || !verification?.verified || reachable === false) && (
             <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
               {PAGES_ERROR_TEXT[pages_error]}
             </p>
@@ -270,7 +274,13 @@ export function FacebookPagePanel({ clientId }: Props) {
         </p>
       )}
 
-      <ConnectMeta clientId={clientId} pageId={page_id} publishTargetPageId={publish_target_page_id} />
+      <ConnectMeta
+        clientId={clientId}
+        pageId={page_id}
+        publishTargetPageId={publish_target_page_id}
+        reachable={reachable}
+        verification={verification}
+      />
 
       <details className="mt-4 border-t border-slate-100 pt-3">
         <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-600">
@@ -334,15 +344,16 @@ function ConnectMeta({
   clientId,
   pageId,
   publishTargetPageId,
+  reachable,
+  verification,
 }: {
   clientId: string
   pageId: string | null
   publishTargetPageId: string | null
+  reachable: boolean | null
+  verification: Verification | null
 }) {
   const [outcome, setOutcome] = useState<string | null>(null)
-  // Publishing reauth targets factory_config.publish_target, so it is available
-  // whenever a valid Facebook publish target is configured — independent of the
-  // inbox binding (which may be unset or a different Page).
   const canReauthPublish = Boolean(publishTargetPageId)
 
   // The callback hands its verdict back through the URL; read it once, then
@@ -358,6 +369,18 @@ function ConnectMeta({
 
   const result = outcome ? META_RESULT[outcome] : null
 
+  // Only show the OAuth buttons when something actually needs fixing:
+  // - no page bound yet
+  // - verification failed
+  // - reachable === false (ME can't read the page's inbox)
+  // When everything is working (verified + reachable), hiding these avoids confusion.
+  const syncingOk = reachable === true && verification?.verified !== false && verification?.via !== 'legacy_client_token'
+  const showInboxButton = !syncingOk
+  const showPublishButton = canReauthPublish
+
+  // If there's nothing to show (no result, no relevant buttons), render nothing
+  if (!result && !showInboxButton && !showPublishButton) return null
+
   return (
     <div className="mt-3 border-t border-slate-100 pt-3">
       {result && (
@@ -372,33 +395,34 @@ function ConnectMeta({
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <a
-          href={`/api/auth/facebook/connect?client_id=${clientId}`}
-          className={`inline-block rounded-lg border px-3 py-1.5 text-xs font-semibold ${
-            pageId
-              ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-              : 'pointer-events-none border-slate-200 bg-slate-50 text-slate-300'
-          }`}
-          aria-disabled={!pageId}
-        >
-          连接 Meta
-        </a>
+      {(showInboxButton || showPublishButton) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {showInboxButton && (
+            <a
+              href={`/api/auth/facebook/connect?client_id=${clientId}`}
+              className={`inline-block rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                pageId
+                  ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                  : 'pointer-events-none border-slate-200 bg-slate-50 text-slate-300'
+              }`}
+              aria-disabled={!pageId}
+            >
+              连接 Meta
+            </a>
+          )}
 
-        {/* Same OAuth flow, but carries intent=publishing so the callback fails
-            closed with a publishing-specific message if 管理主页帖子 isn't granted. */}
-        <a
-          href={`/api/auth/facebook/connect?client_id=${clientId}&intent=publishing`}
-          className={`inline-block rounded-lg border px-3 py-1.5 text-xs font-semibold ${
-            canReauthPublish
-              ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-              : 'pointer-events-none border-slate-200 bg-slate-50 text-slate-300'
-          }`}
-          aria-disabled={!canReauthPublish}
-        >
-          重新授权 Meta 发布权限
-        </a>
-      </div>
+          {/* Same OAuth flow, but carries intent=publishing so the callback fails
+              closed with a publishing-specific message if 管理主页帖子 isn't granted. */}
+          {showPublishButton && (
+            <a
+              href={`/api/auth/facebook/connect?client_id=${clientId}&intent=publishing`}
+              className="inline-block rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              重新授权 Meta 发布权限
+            </a>
+          )}
+        </div>
+      )}
     </div>
   )
 }
