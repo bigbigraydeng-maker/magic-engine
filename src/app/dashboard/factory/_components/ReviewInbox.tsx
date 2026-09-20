@@ -19,11 +19,29 @@ interface WorkOrder {
   // 设计是「命中不打回,标红让人审有的放矢」——但此前唯一的「标红」实现在 Airtable 审核卡里,
   // 随 Airtable 退役一起没了。成片直连 in_review 后这条护栏必须在这里补上,否则命中红线的片子
   // 和干净片子长得一模一样,人审拿不到任何信息 = 护栏静默失效。
-  output: { video_path?: string; redline_hits?: string[] } | null
+  // quality_flags:同一交付点新增的语义品控(2026-09-20 Jev 评估)—— 静态红线短语查不出的
+  // 竞品品牌当角度 / 内部标签冒充字幕 / 人称不符,同样是「命中不打回,标红转人工」。
+  output: {
+    video_path?: string
+    redline_hits?: string[]
+    quality_flags?: Array<{ category: string; detail: string }>
+  } | null
 }
 
 const redlineHitsOf = (o: WorkOrder): string[] =>
   Array.isArray(o.output?.redline_hits) ? o.output.redline_hits.filter((h) => typeof h === 'string' && h) : []
+
+const qualityFlagsOf = (o: WorkOrder): Array<{ category: string; detail: string }> =>
+  Array.isArray(o.output?.quality_flags)
+    ? o.output.quality_flags.filter((f) => f && typeof f.detail === 'string' && f.detail)
+    : []
+
+const QUALITY_FLAG_LABEL: Record<string, string> = {
+  competitor_brand: '⚠️ 疑似把竞品品牌当自己卖点',
+  placeholder_caption: '⚠️ 字幕疑似内部标签冒充文案',
+  narrator_voice_mismatch: '⚠️ 人称口吻疑似不符简报要求',
+  quality_check_unavailable: '⚠️ 品控检测暂不可用,请重点人工复核',
+}
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
 const publicUrl = (path?: string) =>
@@ -128,6 +146,17 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
                 </div>
               )}
 
+              {qualityFlagsOf(o).length > 0 && (
+                <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">
+                  {qualityFlagsOf(o).map((f, i) => (
+                    <p key={i} className="text-sm text-amber-800">
+                      <span className="font-medium">{QUALITY_FLAG_LABEL[f.category] ?? '⚠️ 品控提示'}</span>
+                      <span className="block text-xs text-amber-700 mt-0.5">{f.detail}</span>
+                    </p>
+                  ))}
+                </div>
+              )}
+
               <button
                 onClick={() => setConfirming(o)}
                 disabled={busy === o.id}
@@ -156,6 +185,17 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
                     <span key={h} className="text-xs bg-red-100 text-red-800 rounded px-1.5 py-0.5 font-mono">{h}</span>
                   ))}
                 </p>
+              </div>
+            )}
+
+            {qualityFlagsOf(confirming).length > 0 && (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">
+                {qualityFlagsOf(confirming).map((f, i) => (
+                  <p key={i} className="text-sm text-amber-800">
+                    <span className="font-medium">{QUALITY_FLAG_LABEL[f.category] ?? '⚠️ 品控提示'}</span>
+                    <span className="block text-xs text-amber-700 mt-0.5">{f.detail}</span>
+                  </p>
+                ))}
               </div>
             )}
 

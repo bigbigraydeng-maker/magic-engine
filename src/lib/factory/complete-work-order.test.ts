@@ -11,10 +11,24 @@
 // 同时记录 update/insert 的 payload 与 eq/in 过滤条件 —— 不记过滤条件的话,把
 // `.eq('claimed_by')` / `.in('status', ACTIVE_STATUSES)` 这两道防抢占条件删掉,测试不会报警。
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { completeWorkOrder } from './complete-work-order'
 import { resolveRecipe } from './recipe'
+
+// 品控(content-quality-guard.ts)自己的逻辑在 content-quality-guard.test.ts 里已经覆盖;
+// 这里只关心 completeWorkOrder 的落库编排(有没有把 brand_name/brand_voice 正确传下去、
+// 有没有把结果写进 output.quality_flags),所以把 Jev 网络调用整个 mock 掉——
+// 不然测试环境没有 TYPESAFE_API_KEY,每条测试都会静默产生一次"调用失败"的副作用。
+const callJev = vi.fn()
+vi.mock('@/lib/jev/client', () => ({
+  callJev: (...a: unknown[]) => callJev(...a),
+}))
+
+beforeEach(() => {
+  callJev.mockReset()
+  callJev.mockResolvedValue({ answers: {} }) // 默认全不命中
+})
 
 type Resp = { table: string; data: unknown; error: unknown }
 type Filter = { table: string; method: string; args: unknown[] }
@@ -400,6 +414,62 @@ describe('completeWorkOrder — 台账幂等(护栏 10 事实源)', () => {
     ])
     await completeWorkOrder(db, { ...PARAMS, wo: { ...WO, actual_cost_usd: 9 }, actualCost: 1 })
     expect(updates[0].payload.actual_cost_usd).toBe(9)
+  })
+})
+
+describe('completeWorkOrder — 成片文案品控(2026-09-20 Jev 评估)', () => {
+  it('🔴 Jev 命中竞品品牌 → 写进 output.quality_flags,不阻断交付', async () => {
+    callJev.mockResolvedValue({ answers: { competitor_angle: { noul: 0.9 }, placeholder_leak: { noul: 0.05 } } })
+    const { db, updates } = mockSupabase(happyQueue())
+    const r = await completeWorkOrder(db, {
+      ...PARAMS,
+      wo: { ...WO, angle: 'mapei brisbane' },
+      caption: '$35.50/m²',
+    })
+
+    expect(r.ok).toBe(true)
+    expect(r.ok && r.status).toBe('in_review') // 命中不打回
+    expect(r.ok && r.qualityFlags.some((f) => f.category === 'competitor_brand')).toBe(true)
+    const wo = updates.find((u) => u.table === 'content_work_orders')!
+    const flags = (wo.payload.output as Record<string, unknown>).quality_flags as Array<{ category: string }>
+    expect(flags.some((f) => f.category === 'competitor_brand')).toBe(true)
+  })
+
+  it('brand_name / brand_voice.persona 从 master_briefs 正确传给品控(供 A/C 检测用)', async () => {
+    const { db } = mockSupabase([
+      okClient(),
+      { table: 'master_briefs', data: { excluded_topics: [], brand_name: 'CTS Tours', brand_voice: { persona: { name: 'Baker Gu', role: 'tour guide' } } }, error: null },
+      okUpdate,
+    ])
+    await completeWorkOrder(db, {
+      ...PARAMS,
+      wo: { ...WO, angle: 'discover china' },
+      caption: 'Our own offices. Our own guides.',
+    })
+
+    const [state, questions] = callJev.mock.calls[0]
+    expect(state.brand).toBe('CTS Tours')
+    expect(state.intended_voice).toContain('Baker Gu')
+    expect(questions.wrong_voice).toBeDefined() // 有 persona.name → 应该发起人称检测
+  })
+
+  it('brief 没配 persona → 不发起人称检测(不误报品牌口吻文案)', async () => {
+    const { db } = mockSupabase(happyQueue())
+    await completeWorkOrder(db, PARAMS)
+
+    const [, questions] = callJev.mock.calls[0]
+    expect(questions.wrong_voice).toBeUndefined()
+  })
+
+  it('Jev 调用失败 → quality_check_unavailable 进 output,交付仍然成功(fail-closed 转人工,不阻断)', async () => {
+    callJev.mockRejectedValue(new Error('network down'))
+    const { db, updates } = mockSupabase(happyQueue())
+    const r = await completeWorkOrder(db, PARAMS)
+
+    expect(r.ok).toBe(true)
+    const wo = updates.find((u) => u.table === 'content_work_orders')!
+    const flags = (wo.payload.output as Record<string, unknown>).quality_flags as Array<{ category: string }>
+    expect(flags.some((f) => f.category === 'quality_check_unavailable')).toBe(true)
   })
 })
 

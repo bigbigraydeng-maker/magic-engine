@@ -203,6 +203,7 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 | SEMrush | **已被 DataForSEO 取代** — 代码 0 引用（`SEMRUSH_DB` 除外） | **Keyword Intelligence** | **已废弃，一律改用 DataForSEO** |
 | Zapier | **已完全移除** | — | 已移除 |
 | **AI 可见度 / LLM 问答**（Perplexity · ChatGPT · Claude · Gemini） | 问 AI 看它怎么回答、引用谁 | — | **`src/lib/geo-baseline/`** · **`src/lib/industry-ai-visibility/`** · 契约在 `src/lib/geo-measurement/` |
+| TypeSafe Jev | 内容工厂成片文案品控判断（竞品品牌/占位字幕/人称口吻,2026-09-20 接入） | **Compliance Engine** | `src/lib/jev/client.ts`（fetch 封装,无 SDK） |
 
 > 🔴 **第 4 列是防重复造轮子用的**：任何要调外部 API 的动作（含调研脚本、一次性探针）之前先查这一列。2026-08-30 有过一次实例——做市场调研时手写脚本直调 DataForSEO 与 AI 可见度接口，而两者的封装早已存在，错误认知进而污染了后续两轮架构判断。
 

@@ -9,6 +9,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { FACTORY_B_TRACK_SCENE_TAGS, FACTORY_CLIENT_DERIVED_SCENE_TAG } from './constants'
+import { scanContentQualityFlags, type QualityFlag } from './content-quality-guard'
 import { scanRedlineHits, validateClipPath } from './worker-guard'
 import { assertRecipeReceipt, winnerRecipeFromBrief, type WinnerRecipe } from './recipe'
 
@@ -110,7 +111,7 @@ function assertRecipeCompletion(
 }
 
 export type CompleteResult =
-  | { ok: true; status: 'in_review'; redlineHits: string[]; newClipIds: string[] }
+  | { ok: true; status: 'in_review'; redlineHits: string[]; qualityFlags: QualityFlag[]; newClipIds: string[] }
   | { ok: false; status: number; error: string }
 
 export async function completeWorkOrder(
@@ -151,22 +152,48 @@ export async function completeWorkOrder(
     }
   }
 
+  // brand_name/brand_voice 供下面的成片文案品控用(竞品角度检测要 brand_name,
+  // 人称检测要 brand_voice.persona)——同一条查询多选两列,不增加往返。
   const { data: brief, error: bErr } = await supabase
     .from('master_briefs')
-    .select('excluded_topics')
+    .select('excluded_topics, brand_name, brand_voice')
     .eq('id', wo.master_brief_id as string)
     .maybeSingle()
   if (bErr) return { ok: false, status: 500, error: 'brief lookup failed' }
 
-  const overlays = (Array.isArray((wo.brief as Record<string, unknown>)?.['segments'])
+  const segmentsArr = Array.isArray((wo.brief as Record<string, unknown>)?.['segments'])
     ? ((wo.brief as Record<string, unknown>)['segments'] as Array<Record<string, unknown>>)
     : []
-  ).map((s) => (typeof s['text_overlay'] === 'string' ? (s['text_overlay'] as string) : null))
+  const overlays = segmentsArr.map((s) => (typeof s['text_overlay'] === 'string' ? (s['text_overlay'] as string) : null))
   const redlineHits = scanRedlineHits(
     [caption, ...overlays],
     (client.brand_redline_phrases as string[] | null) ?? [],
     (brief?.excluded_topics as string[] | null) ?? [],
   )
+
+  // 成片文案品控(2026-09-20 Jev 评估):静态红线短语查不出的语义类缺陷 ——
+  // 竞品品牌当角度 / 内部分类标签冒充字幕 / 人称口吻不符简报。命中不打回,
+  // 标记随 redline_hits 一起进 output,ReviewInbox 标红转人工(同一套口径)。
+  // scanContentQualityFlags 内部已吞掉所有异常(Jev 网络/超时不允许拖垮这条主链路)。
+  const hookSegment = segmentsArr.find((s) => s['role'] === 'hook')
+  const onScreenHook =
+    (typeof hookSegment?.['text_overlay'] === 'string' ? (hookSegment['text_overlay'] as string) : null) ??
+    overlays.find((o): o is string => !!o) ??
+    null
+  const persona = (brief?.brand_voice as { persona?: { name?: string; role?: string } } | null)?.persona
+  const personaName = typeof persona?.name === 'string' ? persona.name.trim() : ''
+  const brandNameForGuard = (brief?.brand_name as string | undefined) ?? ''
+  const intendedNarrator = personaName
+    ? `a single first-person narrator (a real ${brandNameForGuard || 'brand'} representative named ` +
+      `${personaName}${persona?.role ? `, ${persona.role}` : ''}, speaking about their own experience)`
+    : null
+  const qualityFlags = await scanContentQualityFlags({
+    brandName: brandNameForGuard,
+    angleLabel: typeof wo.angle === 'string' ? (wo.angle as string) : null,
+    onScreenHook,
+    captions: [caption, ...overlays].filter((t): t is string => !!t),
+    intendedNarrator,
+  })
 
   // ③ new_clips 幂等入库:idempotency_key 命中已有行 → 复用不重插
   const insertedClipIds: string[] = []
@@ -229,6 +256,7 @@ export async function completeWorkOrder(
     srt_path: srtPath,
     caption,
     redline_hits: redlineHits,
+    quality_flags: qualityFlags,
     new_clip_ids: insertedClipIds,
   }
 
@@ -252,5 +280,5 @@ export async function completeWorkOrder(
     return { ok: false, status: 409, error: 'work order reclaimed mid-flight' }
   }
 
-  return { ok: true, status: 'in_review', redlineHits, newClipIds: insertedClipIds }
+  return { ok: true, status: 'in_review', redlineHits, qualityFlags, newClipIds: insertedClipIds }
 }
