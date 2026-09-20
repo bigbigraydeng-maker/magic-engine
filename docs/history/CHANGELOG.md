@@ -5,6 +5,18 @@
 
 ---
 
+### 2026-09-20（AI 可见度：修复品牌命中子串误判，CTS/NAL/Roman 的"是否被提及"数字变准）
+
+PR [#1823](https://github.com/bigbigraydeng-maker/magic-engine/pull/1823) 已合并（merge commit `00466090`）。老判断逻辑用"品牌名字符串互相包含"判定客户有没有被 AI 提到，会把"Ray White"误判成命中"Roman Hu — Ray White Mission Bay"这类不相关品牌，也会漏掉答案只写域名或标点不同写法的真实提及。对全部 6,596 条历史记录只读重跑，误判数字跟 PM 手工核对结果完全对上：CTS 38 条假阳性、NAL 17 条、Roman 79 条、Dixon 3 条,另有 342 条真实提及被漏判、71 条名次会变。
+
+- 新增纯函数模块 `src/lib/ai-tracker/client-brand-match.ts` 负责判定，prompt 里不再把客户名喂给模型（避免模型顺着提示词把客户名编进答案），短别名（如 "CTS"）不能单独证明命中，精确匹配替换掉原来的双向子串包含。
+- 子牙（架构）+ 魏征（挑刺）两轮复审的必改项都在第二个 commit 修完，各自配了测试；Codex 复审另挑出一处"短别名单独证明命中"的边界情况，PR 里已有专门测试覆盖（`CTS Logistics` 不会被误判成 `CTS Tours`），验证通过后标记解决。
+- **这不是切换判断系统**：仓库里另有一套 2026-08-19 PM 已拍板"未来要切、旧系统要退役"的新判断系统（`geo-module`+`geo-baseline`，内部代号 M1），但那次退役从未执行完，且 M1 目前对 CTS 完全没有生产数据、没有客户专属配置、每周自动采集还是未接通的骨架。本次是先把 CTS 现在实际在用、直接影响客户看到数字的旧系统里的真实 bug 修掉；"切到 M1"作为独立、规模跟当初退役决定一样大的后续工作登记进 [ROADMAP.md P31.X.4a](../ROADMAP.md)，需要单独走 PO 逐步拍板，不在本次范围。
+
+**Reuse Statement**：纯 bug 修复，不新增能力线；新模块是客户配置驱动的纯函数（客户身份完全来自 `clients.brand_aliases` / `clients.domain`，没有客户名硬编码进 shared runtime）；换客户/换行业测试都通过。
+
+---
+
 ### 2026-09-20（内容工厂：发布前品控接入 Jev 判断模型，抓竞品品牌/占位字幕/人称口吻）
 
 PR [#1832](https://github.com/bigbigraydeng-maker/magic-engine/pull/1832) 已合并（前身 #1825 因改动量超过 `claude/*` 分支自动闸门的 800 行上限，换成 `feat/*` 分支重开）。2026-09-20 只读评估 `content_work_orders` 真实工单（状态 `review_rejected`）发现，现有品牌红线闸（静态短语黑名单）抓不出三类要靠人工肉眼才能挑出的缺陷：角度/hook 把第三方竞品品牌当自己卖点（真实 Oztop 工单角度写成 "mapei brisbane"）、上屏字幕是内部内容分类标签冒充真文案且跨段完全重复（真实 Oztop/CTS 工单字幕逐段就是 "Customer Stories & Community" 这类内部标签，某单重复 7 次）、文案人称口吻跟简报要求的第一人称叙述者不符（真实 CTS 工单 brief 要求 Baker Gu 第一人称，AI 写成 "Our own offices. Our own guides." 公司口吻）。

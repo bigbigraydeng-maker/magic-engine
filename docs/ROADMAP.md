@@ -846,6 +846,7 @@ chunked 绕过 OOM 闸 · 闸门没接在花钱那条线上 · 归档入口（�
 - [ ] **P31.X.2** 主指标 measurement='auto' 时自动拉取 current_value（GA4 / SerpAPI / Apify）
 - [ ] **P31.X.3** AI 参谋升级：基于历史 outcome 推荐 Initiative 组合（依赖数据沉淀）
 - [ ] **P31.X.4** 评分公式重做（reputation / SEO / ai_visibility 维度独立大工程）
+- [ ] **P31.X.4a** CTS 的 AI 可见度判断从 ai-tracker（系统 B）迁到 M1（系统 A = `geo-module`+`geo-baseline`）——**2026-09-20 投资调查结论**：PO 2026-08-19 已拍板「M1 唯一真相源、ai-tracker 整套退役」（见 [DECISIONS.md](./DECISIONS.md) 2026-08-19 条目 + [拆除清单](./specs/2026-08-19-ai-tracker-decommission-v1.md)），但退役从未执行，CTS 的每周可见度数字目前 100% 来自即将退役的 ai-tracker。M1 现在**接不了 CTS**，前置缺口：① M1 生产数据只有 Roman（`geo_observations`/`geo_evidence` 表里 CTS 是空的）；② CTS 专属 `entityProfile`（消歧锚点等）只在手工诊断脚本 `scripts/diagnose-cts-geo.ts` 里有一份草稿，从没进过任何客户配置或被排期任务读取过；③ M1 的每周自动采集调度（`geo-remeasure`）自己代码注释承认还是「slice 3a 骨架，不调 provider、不花钱、无 cron」，slice 3b 未落地；④ 子牙在拆除清单 §7/§9.2 里点名「M1 缺 living query set 能力（边发现边追加跟踪问题），删 ai-tracker 前必须先补」，至今未补。**本次先让 [#1823](https://github.com/bigbigraydeng-maker/magic-engine/pull/1823)（`00466090`）落地为 ai-tracker 侧 bug 修复上线**（修的是子串误判，跟 M1 判断精度看齐，客户看到的数字已经变准）；M1 迁移单独按这条 P31.X.4a 排期，规模跟 A 级任务一样大，需要逐步 PO `go`，不在这次任务里做。
 - [ ] **P31.X.5** Retention / Reactivation intent（需先接通 CRM/EDM）
 - [ ] **P31.X.6** Initiative 类型扩展：Operations / Market Intelligence / Product / Partnerships
 - [ ] **P33.11** Goal 详情页 Initiative 卡片展开显示：关联 Campaign 数量 + action 完成率
