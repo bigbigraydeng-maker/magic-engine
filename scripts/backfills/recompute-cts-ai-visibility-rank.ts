@@ -49,7 +49,8 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { tmpdir } from 'os'
+import { join, resolve } from 'path'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import {
   resolveClientBrandRank,
@@ -314,6 +315,17 @@ function argValue(flag: string): string | undefined {
   return v && !v.startsWith('--') ? v : undefined
 }
 
+/**
+ * 判断解析后的绝对路径是否落在某个临时目录下——不能只查 `--out` 有没有出现，
+ * 还要查它真正指向哪：传 `/tmp/plan.json` 一样会在进程/主机重启后连同底稿一起丢，
+ * 唯一的撤回依据就没了。
+ */
+function isTempPath(p: string): boolean {
+  const resolved = resolve(p)
+  const tmpCandidates = [resolve(tmpdir()), '/tmp', '/var/tmp']
+  return tmpCandidates.some(t => resolved === t || resolved.startsWith(t + '/'))
+}
+
 async function main(): Promise<void> {
   const sb = makeClient()
 
@@ -332,8 +344,16 @@ async function main(): Promise<void> {
   if (apply && !confirmed) {
     throw new Error('要真写生产库，必须同时给 --confirm（A 级不可逆操作，二次确认）')
   }
-  if (apply && !argValue('--out')) {
-    throw new Error('要真写生产库，必须用 --out <持久路径> 指定计划文件 —— 那份文件是唯一的撤回底稿，不能留在 /tmp')
+  if (apply) {
+    const outArg = argValue('--out')
+    if (!outArg) {
+      throw new Error('要真写生产库，必须用 --out <持久路径> 指定计划文件 —— 那份文件是唯一的撤回底稿，不能留在 /tmp')
+    }
+    if (isTempPath(outArg)) {
+      throw new Error(
+        `--out ${outArg} 解析后落在临时目录下 —— 那份文件是唯一的撤回底稿，进程或主机重启就可能丢失，换一个非临时目录的持久路径`
+      )
+    }
   }
 
   const baselinePath = outPath.replace(/\.json$/, '') + '.baseline.json'

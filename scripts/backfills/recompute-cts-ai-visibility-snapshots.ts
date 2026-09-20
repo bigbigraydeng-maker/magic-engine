@@ -3,7 +3,7 @@
  * （每周一行：提及次数 / 平均名次 / 覆盖到的模型 / 品牌排行表）。
  *
  * ═══════════════════════════════════════════════════════════════════════════
- * 默认 DRY-RUN（只读）。只有显式加 `--apply` 才写生产库。
+ * 默认 DRY-RUN（只读）。要写生产库必须同时给 `--apply --confirm --out <持久路径>`。
  * 必须在 `recompute-cts-ai-visibility-rank.ts --apply` 跑完之后再跑。
  * ═══════════════════════════════════════════════════════════════════════════
  *
@@ -28,15 +28,22 @@
  *   3. 只更新 avg_rank / mentions_count / total_runs / models_covered / ranking_table，
  *      按主键 id 定位，不插行、不删行、不动 week_of 和 client_id。
  *
+ * 撤回：计划文件里每一行都存了 `before`（改之前的整行快照），`--out` 必须指定
+ * 一个非临时目录的持久路径 —— 那份文件是唯一的撤回底稿，写进 /tmp 等于「回填失败或
+ * 事后要撤回时，底稿可能已经被系统清掉」。`--revert <计划文件>` 会按 `before` 原样写回。
+ *
  * 运行：
- *   npx tsx scripts/backfills/recompute-cts-ai-visibility-snapshots.ts          # 只读，出计划
- *   npx tsx scripts/backfills/recompute-cts-ai-visibility-snapshots.ts --apply  # 真写（需 PM 点头）
+ *   npx tsx scripts/backfills/recompute-cts-ai-visibility-snapshots.ts                # 只读，出计划
+ *   npx tsx scripts/backfills/recompute-cts-ai-visibility-snapshots.ts --out plan.json \
+ *     --apply --confirm                                                               # 真写（需 PM 点头）
+ *   npx tsx scripts/backfills/recompute-cts-ai-visibility-snapshots.ts --revert plan.json  # 按旧值撤回
  *
  * 需要 .env.local 里的 NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY。
  */
 
-import { readFileSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { existsSync, readFileSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join, resolve } from 'path'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import {
   computeSnapshotMetrics,
@@ -154,11 +161,84 @@ export function mondayOf(d: Date): string {
     .slice(0, 10)
 }
 
+function argValue(flag: string): string | undefined {
+  const i = process.argv.indexOf(flag)
+  if (i < 0) return undefined
+  const v = process.argv[i + 1]
+  return v && !v.startsWith('--') ? v : undefined
+}
+
+/**
+ * 判断解析后的绝对路径是否落在某个临时目录下——不能只查 `--out` 有没有出现，
+ * 还要查它真正指向哪：传 `/tmp/plan.json` 一样会在进程/主机重启后连同底稿一起丢，
+ * 唯一的撤回依据就没了。
+ */
+function isTempPath(p: string): boolean {
+  const resolved = resolve(p)
+  const tmpCandidates = [resolve(tmpdir()), '/tmp', '/var/tmp']
+  return tmpCandidates.some(t => resolved === t || resolved.startsWith(t + '/'))
+}
+
+// ── 撤回 ─────────────────────────────────────────────────────────────────────
+
+async function revert(sb: SupabaseClient, planPath: string): Promise<void> {
+  const saved = JSON.parse(readFileSync(planPath, 'utf8')) as {
+    planned: Array<{ week_of: string; before: SnapshotRow }>
+  }
+  console.log(`按 ${planPath} 撤回 ${saved.planned.length} 周到旧值…`)
+  let done = 0
+  for (const p of saved.planned) {
+    const b = p.before
+    const { error } = await sb
+      .from('ai_visibility_snapshots')
+      .update({
+        avg_rank: b.avg_rank,
+        mentions_count: b.mentions_count,
+        total_runs: b.total_runs,
+        models_covered: b.models_covered,
+        ranking_table: b.ranking_table,
+      })
+      .eq('id', b.id)
+      .eq('client_id', CTS_CLIENT_ID) // 双保险：绝不越过 CTS
+    if (error) throw new Error(`撤回 ${p.week_of} 失败（已处理 ${done} 条）: ${error.message}`)
+    done++
+    console.log(`  ✅ ${p.week_of} 已撤回`)
+  }
+  console.log(`\n✅ 共撤回 ${done} 周。`)
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const apply = process.argv.includes('--apply')
   const sb = makeClient()
+
+  const revertPath = argValue('--revert')
+  if (revertPath) {
+    if (!existsSync(revertPath)) throw new Error(`找不到计划文件: ${revertPath}`)
+    await revert(sb, revertPath)
+    return
+  }
+
+  const apply = process.argv.includes('--apply')
+  const confirmed = process.argv.includes('--confirm')
+  const outPath = argValue('--out') ?? '/tmp/cts-ai-snapshot-plan.json'
+
+  // A 级不可逆操作：不许只隔一个 flag，也不许把唯一的旧值底稿写进临时目录。
+  if (apply && !confirmed) {
+    throw new Error('要真写生产库，必须同时给 --confirm（A 级不可逆操作，二次确认）')
+  }
+  if (apply) {
+    const outArg = argValue('--out')
+    if (!outArg) {
+      throw new Error('要真写生产库，必须用 --out <持久路径> 指定计划文件 —— 那份文件是唯一的撤回底稿，不能留在 /tmp')
+    }
+    if (isTempPath(outArg)) {
+      throw new Error(
+        `--out ${outArg} 解析后落在临时目录下 —— 那份文件是唯一的撤回底稿，进程或主机重启就可能丢失，换一个非临时目录的持久路径`
+      )
+    }
+  }
+
   const identity = await loadIdentity(sb)
   console.log(apply ? '🔴 模式：--apply（真写生产库）\n' : '🟢 模式：DRY-RUN（只读，不写任何东西）\n')
 
@@ -228,7 +308,7 @@ async function main(): Promise<void> {
   }
 
   writeFileSync(
-    '/tmp/cts-ai-snapshot-plan.json',
+    outPath,
     JSON.stringify(
       {
         planned: planned.map(p => ({ week_of: p.snap.week_of, before: p.snap, after: p.next })),
@@ -239,10 +319,10 @@ async function main(): Promise<void> {
       2
     )
   )
-  console.log('\n完整计划已写到 /tmp/cts-ai-snapshot-plan.json')
+  console.log(`\n完整计划已写到 ${outPath}`)
 
   if (!apply) {
-    console.log('\n没有写任何数据。要真写，重跑时加 --apply。')
+    console.log('\n没有写任何数据。要真写：--out <持久路径> --apply --confirm')
     return
   }
 
@@ -262,6 +342,7 @@ async function main(): Promise<void> {
     console.log(`  ✅ ${p.snap.week_of} 已更新`)
   }
   console.log(`\n✅ 共更新 ${planned.length} 周。`)
+  console.log(`   撤回命令：npx tsx ${process.argv[1]} --revert ${outPath}`)
 }
 
 if (require.main === module) {
