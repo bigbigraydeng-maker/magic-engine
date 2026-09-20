@@ -45,6 +45,8 @@ function useConnector({ clientId,outcome }: { clientId:string;outcome?:string })
 }
 export default function MetaAdsScreen(props: { clientId:string;outcome?:string }) {
   const { state,busy,error,setError,accounts,setAccounts,connection,setConnection,selected,setSelected,key,setKey,partial,setPartial,discovered,setDiscovered,run,post,connect,live,activeGrants }=useConnector(props)
+  const [origin,setOrigin]=useState('')
+  useEffect(()=>setOrigin(window.location.origin),[])
   const button='rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-40'
   return <main className="mx-auto max-w-3xl space-y-8 p-6">
     <header><p className="text-sm text-slate-500">Magic Engine · Free connector pilot</p><h1 className="text-3xl font-semibold">Meta Ads → AI</h1>
@@ -76,7 +78,7 @@ export default function MetaAdsScreen(props: { clientId:string;outcome?:string }
         <input aria-label="AI access key" type="password" readOnly value={key} className="w-full rounded border p-2" />
         <button className="underline" onClick={()=>void navigator.clipboard.writeText(key).catch(()=>setError('Copy failed. Select the key field and copy it manually.'))}>Copy key</button>
         <button className="ml-4 underline" onClick={()=>setKey('')}>Hide key</button></div>}
-      <p>MCP server: <code className="break-all">{typeof window!=='undefined' ? window.location.origin : ''}/api/mcp/mcp</code></p>
+      <p>MCP server: <code className="break-all">{origin ? `${origin}/api/mcp/mcp` : '/api/mcp/mcp'}</code></p>
       <p>HTTPS manifest: <code>/api/ai-tools/meta/manifest</code> · Invocation: <code>/api/ai-tools/meta/invoke</code></p>
       {state.keys.map(k=><div key={k.id} className="rounded border p-3"><p>{k.key_prefix}… · {k.account_id ?? 'Account access removed'} · {Date.parse(k.expires_at)>Date.now() ? 'Key created' : 'Key expired'} · {!k.access_active ? 'Account access is no longer active. Reconnect Facebook, select the account and create a new key.' : k.last_used_at ? 'Authentication received; this does not confirm analysis succeeded.' : 'Waiting for your AI app to connect.'}</p>
         <button disabled={busy} className="underline" onClick={()=>void run(async()=>{ await post({ action:'revoke',type:'key',id:k.id });setKey('') })}>Revoke AI key</button></div>)}
