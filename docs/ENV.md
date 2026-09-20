@@ -55,7 +55,7 @@
 | `PERPLEXITY_API_KEY` | AI 可见度追踪引擎之一 | Render-web | ✅ |
 | `GEMINI_API_KEY` | Google Gemini（AI 可见度追踪第 4 引擎） | Render-web | ❌ |
 | `AI_TRACKER_ENABLE_CLAUDE` | 开关：AI Tracker 是否跑 Claude 引擎 | Render-web | ❌ |
-| `TYPESAFE_API_KEY` | TypeSafe Jev 判断模型（对外封装名 **Compliance Engine**）——内容工厂成片文案品控用它判断竞品品牌/占位字幕/人称口吻，见 `src/lib/jev/client.ts` | Render-web | 🔴 落地阻断：合并前必须在 `crazycontent` web 服务（Render-web）配上真实值并跑一次真调用验证。`callJev` 缺这个变量会直接抛错，`scanContentQualityFlags` 随即把每个带文案的工单都标成 `quality_check_unavailable`——三类新语义检测（竞品角度/占位字幕/人称口吻）在生产完全不会运行，审核队列看到的只是一条统一的“不可用”提示，不是真的查过没问题 |
+| `TYPESAFE_API_KEY` | TypeSafe Jev 判断模型（`src/lib/jev/client.ts`，对外封装名「Compliance Engine」）。两个判断点在用：① SEO 事实核对（`fact-check.ts`，PR #1826）；② 内容工厂成片文案品控——判断竞品品牌/占位字幕/人称口吻（`content-quality-guard.ts` / `scanContentQualityFlags`，PR #1825/#1832）。`callJev` 缺这个变量会直接抛错：①处 `checkFactPreservation` fail-closed 恒定返回「有矛盾」；②处 `scanContentQualityFlags` 把每个带文案的工单标成 `quality_check_unavailable`，三类检测完全不运行。**2026-09-20 晚间已在 `crazycontent`（Render-web）配上真实值，并现场拿 CTS 真实候选页验证过——拿到真实 `consistent:true`（score 0.08–0.10）而不是报错兜底，①处已确认生效。②处内容工厂那条尚未单独验证，合并/复用前建议再跑一次确认。** | Render-web | ✅ |
 
 ## 3. 视觉 / 视频 / 素材
 
