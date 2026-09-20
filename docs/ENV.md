@@ -55,6 +55,7 @@
 | `PERPLEXITY_API_KEY` | AI 可见度追踪引擎之一 | Render-web | ✅ |
 | `GEMINI_API_KEY` | Google Gemini（AI 可见度追踪第 4 引擎） | Render-web | ❌ |
 | `AI_TRACKER_ENABLE_CLAUDE` | 开关：AI Tracker 是否跑 Claude 引擎 | Render-web | ❌ |
+| `TYPESAFE_API_KEY` | TypeSafe Jev 判断模型（对外封装名 **Compliance Engine**）——内容工厂成片文案品控用它判断竞品品牌/占位字幕/人称口吻，见 `src/lib/jev/client.ts` | Render-web | 🔴 落地阻断：合并前必须在 `crazycontent` web 服务（Render-web）配上真实值并跑一次真调用验证。`callJev` 缺这个变量会直接抛错，`scanContentQualityFlags` 随即把每个带文案的工单都标成 `quality_check_unavailable`——三类新语义检测（竞品角度/占位字幕/人称口吻）在生产完全不会运行，审核队列看到的只是一条统一的“不可用”提示，不是真的查过没问题 |
 
 ## 3. 视觉 / 视频 / 素材
 
@@ -185,6 +186,7 @@
 | `LINKEDIN_PROGRESS_POST_ENABLED` | 🔴 ME 产品动态自动发 LinkedIn 总闸，默认关（未配 = 禁用，不用配才是安全态）。开关在 `/api/cron/linkedin-progress-post-{mon,thu}` 路由里读——那是 web 进程，两条 cron 只负责 `curl`；配到 cron job 自己的环境变量上不会生效。上线前提：PM 已在 Publer 连好个人 LinkedIn 账号，并在 Magic Lab Class 客户的 connectors 设置页把账号 ID 填进 Publer 绑定 | Render-web |
 | `SWEEP_CITIES` / `SWEEP_INDUSTRIES` | 线索扫描城市 / 行业范围。`src/lib/prospecting/sweep.ts` 里读（走 `envList('SWEEP_CITIES', …)`，变量名是字符串传进去的），调用方是 web 路由 `/api/cron/prospecting-sweep` | Render-web |
 | `ENABLE_REAL_GENERATION` | `.env.example` 有，代码 0 引用 | ⚠️ 待清理 |
+| `FACTORY_QUALITY_GUARD_DISABLED` | 内容工厂成片文案品控（竞品品牌/占位字幕/人称口吻）总闸，设 `true` 临时全局关停 Jev 调用（确定性的字幕重复检测不受影响，照常跑）。默认开 | Render-web |
 
 ## 12. 只在脚本 / 测试里用 — **不需要配到任何平台**
 

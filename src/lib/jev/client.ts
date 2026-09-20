@@ -34,9 +34,13 @@ export interface JevResult {
   answers: Record<string, JevAnswer>
 }
 
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+// `onTimeout` aborts the underlying fetch's AbortController so a slow provider doesn't keep
+// running (and billing) in the background after we've already moved on to a retry — without
+// it only the wrapper promise rejects, the original request stays in flight unconsumed
+// (2026-09-20 codex review round 2).
+function withTimeout<T>(p: Promise<T>, ms: number, onTimeout: () => void): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`jev call timed out after ${ms}ms`)), ms)
+    const t = setTimeout(() => { onTimeout(); reject(new Error(`jev call timed out after ${ms}ms`)) }, ms)
     p.then(
       (v) => { clearTimeout(t); resolve(v) },
       (e) => { clearTimeout(t); reject(e) },
@@ -66,25 +70,38 @@ export async function callJev(
   let lastErr: unknown
   for (let attempt = 0; attempt < JEV_MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) await sleep(JEV_RETRY_BACKOFF_MS * attempt)
+    const controller = new AbortController()
     try {
-      const res = await withTimeout(
-        fetch(JEV_API_URL, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ state, model: JEV_MODEL, questions }),
-        }),
+      // Header arrival and body read/parse must share ONE deadline + ONE AbortController.
+      // A provider that returns headers promptly but stalls mid-body-transfer would
+      // otherwise hang past the timeout — `withTimeout` only cleared its timer once the
+      // outer promise settled, and previously that promise was just `fetch(...)`, which
+      // resolves as soon as headers land, not once the body is fully read (2026-09-20
+      // codex review round 3). Wrapping the whole header+body lifecycle in one async IIFE
+      // keeps both under the same timer and the same abort signal.
+      const { status, body } = await withTimeout(
+        (async () => {
+          const res = await fetch(JEV_API_URL, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ state, model: JEV_MODEL, questions }),
+            signal: controller.signal,
+          })
+          const parsed = await res.json()
+          return { status: res.status, body: parsed }
+        })(),
         JEV_TIMEOUT_MS,
+        () => controller.abort(),
       )
-      if (res.status === 429) {
+      if (status === 429) {
         lastErr = new Error('jev rate limited (429)')
         continue
       }
-      const body = await res.json()
-      if (!res.ok) {
-        throw new Error(`jev call failed (${res.status}): ${JSON.stringify(body).slice(0, 300)}`)
+      if (status < 200 || status >= 300) {
+        throw new Error(`jev call failed (${status}): ${JSON.stringify(body).slice(0, 300)}`)
       }
       return body as JevResult
     } catch (e) {
