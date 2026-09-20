@@ -134,12 +134,13 @@ function firstIdentifierIndex(norm: string, ids: readonly string[]): number {
 }
 
 /**
- * Identifiers strong enough to prove the client on their own. A short
- * single-token alias ("cts") is excluded: "CTS Logistics" in the text would
- * otherwise prove a client called "CTS Tours".
+ * A short single-token identifier ("cts", "act") is too ambiguous to stand
+ * on its own as evidence: the same word inside another company's name
+ * ("CTS Logistics", "CTS Bus") would prove a client called "CTS Tours".
+ * It only counts through a brand the parser extracted that is the client.
  */
-function selfSufficientIdentifiers(ids: readonly string[]): string[] {
-  return ids.filter(id => id.split(' ').length >= 2 || id.length >= MIN_CONTAINED_TOKEN_LEN)
+function isShortSingleTokenId(id: string): boolean {
+  return id.split(' ').length < 2 && id.length < MIN_CONTAINED_TOKEN_LEN
 }
 
 /** Does an extracted brand name refer to the client? */
@@ -151,8 +152,7 @@ export function isClientBrand(brand: string, ids: readonly string[]): boolean {
     // "Acme Tours - Acme Travel Service Ltd" contains "acme tours". A short
     // single-token alias ("act") must equal the brand, otherwise any
     // "ACT Logistics" would claim the client.
-    const idTokens = id.split(' ').length
-    if (idTokens < 2 && id.length < MIN_CONTAINED_TOKEN_LEN) return false
+    if (isShortSingleTokenId(id)) return false
     return indexOfIdentifier(b, id) >= 0
   })
 }
@@ -182,11 +182,11 @@ export function resolveClientBrandRank(
 
   const norm = normalizeForMatch(rawResponse)
   const clientBrands = brands.filter(b => isClientBrand(b.brand, ids))
-  // Evidence = a self-sufficient identifier, or the name of a brand the
-  // parser extracted that is the client ("Acme Tours Ltd" for "Acme Tours"),
-  // written in the text.
+  // Evidence = an identifier that stands on its own, or the name of a brand
+  // the parser extracted that is the client ("Acme Tours Ltd" for client
+  // "Acme Tours"), written in the text.
   const clientPos = firstIdentifierIndex(norm, [
-    ...selfSufficientIdentifiers(ids),
+    ...ids.filter(id => !isShortSingleTokenId(id)),
     ...clientBrands.map(b => normalizeForMatch(b.brand)),
   ])
 

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GscSnapshotRow } from '@/lib/gsc/client'
 import type { ApplyAdapter, MetaCycleCandidate, MetaCycleClientConfig } from '../types'
 
@@ -9,10 +9,13 @@ import type { ApplyAdapter, MetaCycleCandidate, MetaCycleClientConfig } from '..
  * query the gate derives), the forbidden-city page burned a full gate run
  * before failing on slug_not_in_any_data_file, and the leshan page's
  * highest-impression on-topic query was the French "leshan au départ de
- * chengdu". One real-shaped test per fix (two for the live-fallback path,
- * per PM's explicit ask: one where difficulty comes back null and the
- * candidate must be skipped, one where both fields come back and the gate
- * continues), per PM's instruction not to over-test this.
+ * chengdu". PM 2026-09-20 fourth pass: DataForSEO simply has no data for
+ * many small-market long-tail queries, primary market or not, so
+ * resolveKeywordData is now a 3-tier waterfall (dataforseo_primary →
+ * dataforseo_fallback → gsc_serp). Per PM's explicit test list: one pass
+ * case per tier, plus tier 3's two failure modes (GSC impressions below the
+ * 30-sample floor, SERP domain-authority lookups all failing) — nothing
+ * else, per PM's repeated instruction not to over-test this.
  */
 
 const mockFetchGscQueriesForPage = vi.fn()
@@ -26,8 +29,10 @@ vi.mock('@/lib/dataforseo/serp', () => ({
 }))
 
 const mockBulkKeywordVolume = vi.fn()
+const mockGetDomainMetrics = vi.fn()
 vi.mock('@/lib/dataforseo/labs', () => ({
   bulkKeywordVolume: (...args: unknown[]) => mockBulkKeywordVolume(...args),
+  getDomainMetrics: (...args: unknown[]) => mockGetDomainMetrics(...args),
 }))
 
 const CONFIG: MetaCycleClientConfig = {
@@ -37,7 +42,12 @@ const CONFIG: MetaCycleClientConfig = {
   maxPagesPerRun: 3,
   cooldownDays: 30,
   brandVoice: 'factual AU/NZ English',
+  keywordFallbackLocations: [],
 }
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
 
 function candidate(overrides: Partial<MetaCycleCandidate> = {}): MetaCycleCandidate {
   return {
@@ -56,7 +66,7 @@ function candidate(overrides: Partial<MetaCycleCandidate> = {}): MetaCycleCandid
 
 /**
  * Chainable fake covering exactly the query-builder surface gate.ts calls.
- * `limit()` is used two ways by gate.ts: checkKeywordSnapshot chains
+ * `limit()` is used two ways by gate.ts: lookupSnapshotRow chains
  * `.limit(1).maybeSingle()`, checkNoRecentReuse awaits `.limit(1)` directly
  * — so its return value needs both a `.maybeSingle()` method AND `.then`
  * (thenable) to satisfy `await` without it.
@@ -80,29 +90,77 @@ function fakeSupabase(opts: { snapshotRow?: unknown; reuseRows?: unknown[] }) {
   return { from: () => chain } as any
 }
 
-describe('checkKeywordSnapshot — live DataForSEO fallback (PM 2026-09-20, third pass)', () => {
-  it('skips when the live fallback returns a search volume but no difficulty — a partial result is treated the same as no result, never let through with a gap', async () => {
-    const { checkKeywordSnapshot } = await import('../gate')
-    mockBulkKeywordVolume.mockResolvedValue([{ keyword: 'leshan giant buddha day trip', search_volume: 90, keyword_difficulty: null, cpc: null, competition: null, intent: 'informational', position: null }])
-    const supabase = fakeSupabase({ snapshotRow: null })
+describe('resolveKeywordData — 3-tier waterfall (PM 2026-09-20, fourth pass)', () => {
+  const NULL_LIVE_RESULT = [{ keyword: 'x', search_volume: null, keyword_difficulty: null, cpc: null, competition: null, intent: 'informational', position: null }]
 
-    const result = await checkKeywordSnapshot(supabase, CONFIG.clientId, 'leshan giant buddha day trip', 2554)
+  it('tier 1 (dataforseo_primary): a fresh keyword_snapshots row at the primary location is used directly, no live call needed', async () => {
+    const { resolveKeywordData } = await import('../gate')
+    const supabase = fakeSupabase({ snapshotRow: { search_volume: 320, keyword_difficulty: 45, snapshot_date: new Date().toISOString().slice(0, 10) } })
 
-    expect(mockBulkKeywordVolume).toHaveBeenCalledWith(['leshan giant buddha day trip'], 2554)
-    expect('failure' in result).toBe(true)
-  })
-
-  it('continues into the gate when the live fallback returns BOTH search volume and difficulty', async () => {
-    const { checkKeywordSnapshot } = await import('../gate')
-    mockBulkKeywordVolume.mockResolvedValue([{ keyword: 'leshan giant buddha day trip', search_volume: 90, keyword_difficulty: 34, cpc: null, competition: null, intent: 'informational', position: null }])
-    const supabase = fakeSupabase({ snapshotRow: null })
-
-    const result = await checkKeywordSnapshot(supabase, CONFIG.clientId, 'leshan giant buddha day trip', 2554)
+    const result = await resolveKeywordData(supabase, CONFIG.clientId, 'leshan giant buddha day trip', 2554, [], 200, ['tripadvisor.com'])
 
     expect('failure' in result).toBe(false)
     if ('failure' in result) return
-    expect(result.searchVolume).toBe(90)
-    expect(result.keywordDifficulty).toBe(34)
+    expect(result.keywordDataSource).toBe('dataforseo_primary')
+    expect(result.keywordDataLocation).toBe(2554)
+    expect(result.searchVolume).toBe(320)
+    expect(result.keywordDifficulty).toBe(45)
+  })
+
+  it('tier 2 (dataforseo_fallback): primary location has no data, a client-configured fallback location does', async () => {
+    const { resolveKeywordData } = await import('../gate')
+    const supabase = fakeSupabase({ snapshotRow: null })
+    mockBulkKeywordVolume.mockImplementation(async (_keywords: string[], locationCode: number) =>
+      locationCode === 2036 ? [{ keyword: 'x', search_volume: 40, keyword_difficulty: 22, cpc: null, competition: null, intent: 'informational', position: null }] : NULL_LIVE_RESULT,
+    )
+
+    const result = await resolveKeywordData(supabase, CONFIG.clientId, 'leshan giant buddha day trip', 2554, [2036], 200, ['tripadvisor.com'])
+
+    expect('failure' in result).toBe(false)
+    if ('failure' in result) return
+    expect(result.keywordDataSource).toBe('dataforseo_fallback')
+    expect(result.keywordDataLocation).toBe(2036)
+    expect(result.keywordDataNote).toContain('AU')
+  })
+
+  it('tier 3 (gsc_serp): neither DataForSEO location has data — falls back to this page\'s GSC impressions + average SERP-competitor domain authority', async () => {
+    const { resolveKeywordData } = await import('../gate')
+    const supabase = fakeSupabase({ snapshotRow: null })
+    mockBulkKeywordVolume.mockResolvedValue(NULL_LIVE_RESULT)
+    mockGetDomainMetrics.mockImplementation(async (domain: string) => ({ organic_keywords: 100, organic_traffic: 500, authority_score: domain === 'a.com' ? 40 : 60 }))
+
+    const result = await resolveKeywordData(supabase, CONFIG.clientId, 'leshan giant buddha day trip', 2554, [], 214, ['a.com', 'b.com'])
+
+    expect('failure' in result).toBe(false)
+    if ('failure' in result) return
+    expect(result.keywordDataSource).toBe('gsc_serp')
+    expect(result.keywordDataLocation).toBeNull()
+    expect(result.searchVolume).toBe(214)
+    expect(result.keywordDifficulty).toBe(50)
+    expect(result.keywordDataNote).toContain('214')
+    expect(result.keywordDataNote).toContain('非 DataForSEO 难度分')
+  })
+
+  it('tier 3 skips when this page\'s own GSC impressions for the keyword are below the 30-sample floor', async () => {
+    const { resolveKeywordData } = await import('../gate')
+    const supabase = fakeSupabase({ snapshotRow: null })
+    mockBulkKeywordVolume.mockResolvedValue(NULL_LIVE_RESULT)
+
+    const result = await resolveKeywordData(supabase, CONFIG.clientId, 'leshan giant buddha day trip', 2554, [], 12, ['a.com'])
+
+    expect('failure' in result).toBe(true)
+    expect(mockGetDomainMetrics).not.toHaveBeenCalled()
+  })
+
+  it('tier 3 skips when domain-authority lookups fail for every SERP competitor domain — never coerced into a made-up difficulty', async () => {
+    const { resolveKeywordData } = await import('../gate')
+    const supabase = fakeSupabase({ snapshotRow: null })
+    mockBulkKeywordVolume.mockResolvedValue(NULL_LIVE_RESULT)
+    mockGetDomainMetrics.mockRejectedValue(new Error('DataForSEO domain overview unavailable'))
+
+    const result = await resolveKeywordData(supabase, CONFIG.clientId, 'leshan giant buddha day trip', 2554, [], 214, ['a.com', 'b.com'])
+
+    expect('failure' in result).toBe(true)
   })
 })
 

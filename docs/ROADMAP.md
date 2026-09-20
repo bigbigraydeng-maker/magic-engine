@@ -21,6 +21,15 @@
 
 ---
 
+## 内容工厂发布前品控:生产环境未配 `TYPESAFE_API_KEY`（2026-09-20 #1832 已合并，功能代码就绪但未生效）
+
+`src/lib/jev/client.ts` + `src/lib/factory/content-quality-guard.ts` 已上线：成片交付时检测竞品品牌当角度 / 内部分类标签冒充字幕 / 人称口吻不符简报,命中标红转人工审核（详见 PR #1832）。是 fail-closed 设计——缺这个变量不会报错崩溃，但 `callJev` 会直接抛错，每个有文案的工单都只会写入 `quality_check_unavailable`，三类新语义检测在生产完全不会运行，跟没上线效果一样。
+
+- [ ] **需要人工操作**：在 Render `crazycontent` web 服务配置 `TYPESAFE_API_KEY`（TypeSafe Jev 判断模型密钥，对外封装名 Compliance Engine），配完跑一次真实工单交付验证 `output.quality_flags` 确实产出竞品品牌/占位字幕/人称口吻判断，而不是清一色 `quality_check_unavailable`。
+- 按 §11：频率高（内容工厂天天跑，不配就天天漏检）/ IMPACT 中（发布前把关环节）/ 收入高（原始动机——竞品品牌广告或占位字幕上线会真实损客户关系）→ 两个高 → P0，但这一步是纯配置操作，不占开发排期，谁能登录 Render 谁就能几分钟做完。
+
+---
+
 ## Park Homes 官网升级候选（2026-09-20 全站审计，按 §11 打分均为 P3，未开工）
 
 PM 要求把 parkhomes.nz 整体检查一遍还有什么可以升级。首页网图占位（最高优先级项）已在同次会话修复上线，见 CHANGELOG。以下两项按 [ENGINEERING_QUALITY_GATES.md §11](./ENGINEERING_QUALITY_GATES.md#11-资源优先级判断pm-2026-09-07-拍板) 打分：频率、收入关联度均判低 → 两个低 → 一律 P3，先登记不占用当前排期。

@@ -168,6 +168,38 @@ describe('resolveClientBrandRank', () => {
     expect(out.brands[0].brand).toBe('acmetours.co.nz')
   })
 
+  it('a short alias mentioned only as part of a different brand is not evidence', () => {
+    const out = resolveClientBrandRank(
+      [{ brand: 'CTS Logistics', rank: 1, snippet: 'x' }],
+      'For freight, try CTS Logistics — they cover the whole North Island.',
+      { brandName: 'CTS Tours NZ', aliases: ['CTS'] }
+    )
+    expect(out.client_brand_rank).toBeNull()
+    expect(out.brands.map(b => [b.brand, b.rank])).toEqual([['CTS Logistics', 1]])
+  })
+
+  it('8ce9055d: a short alias inside an unlisted company name is not evidence', () => {
+    // Real row: an itinerary that "utilizes CTS Bus for intercity travel" in
+    // China. The parser never extracted that operator, so the alias occurrence
+    // has no competing brand to be disambiguated against — it still is not the
+    // NZ client. A short alias only counts through an extracted client brand.
+    const identity = { brandName: 'CTS Tours', domain: 'ctstours.co.nz', aliases: ['cts'] }
+    const out = resolveClientBrandRank(
+      [{ brand: 'Silk Road Echo', rank: 1, snippet: 'x' }],
+      'Silk Road Echo: 12-day route. Utilizes CTS Bus for intercity travel.',
+      identity
+    )
+    expect(out.client_brand_rank).toBeNull()
+
+    // The same alias extracted as a brand of its own still counts.
+    const solo = resolveClientBrandRank(
+      [{ brand: 'CTS', rank: 1, snippet: 'x' }],
+      'CTS runs small-group tours out of Auckland every week.',
+      identity
+    )
+    expect(solo.client_brand_rank).toBe(1)
+  })
+
   it('drops multiple hallucinated client entries and closes rank gaps', () => {
     const out = resolveClientBrandRank(
       [
