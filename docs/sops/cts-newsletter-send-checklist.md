@@ -78,10 +78,15 @@ Mailchimp 里已存的 `Safe to Market` 筛选条件**只排除了前两类里�
 
 **每次要推某个具体团**，发信前必须走人工任务管道，而不是自己记着去问：在
 `src/lib/pm-todo/client-doc-manual-tasks.ts` 里给 `CLIENT_DOC_MANUAL_TASKS` 加一条（写法照抄文件里 CTS
-那条现成的例子），让它当天就显示在 PM 待办/执行看板上，三件套缺一不可：
+那条现成的例子，**但 `expiresAt` 不能照抄**——那条例子的 `expiresAt` 是过去的时间点，照抄会导致任务一加进去就已经
+过期，`pushClientDocManualTaskItems` 直接跳过不下发；必须把 `expiresAt` 改成**这次计划发送时间之后**的一个时间点），
+三件套缺一不可：
 - **what**：这次要发哪个团的推广信、发给多少人，缺「已报名」名单排除，不排除会怎样（已报名客人收到同团促销）
 - **how**：具体找谁核对（CTS 团期负责人）+ 要问的原话（"这个团目前已报名的客人名单，帮我核对一下 send list 里有没有重复"）
-- **href**：直达联系方式（WhatsApp 链接 / mailto:），不用自己去翻聊天记录找人
+- **href**：直达联系方式，**必须是 `https://` 开头的绝对网址**（比如 WhatsApp 网页版链接
+  `https://wa.me/<号码>`，或一个可访问的联系页）——**不能用 `mailto:`**：`assertAbsoluteHref` 只认
+  `http(s)://`，`mailto:` 会被判成坏链接，而 `client_doc_manual_task` 不在 `NEVER_DROP_KINDS` 里，
+  整条任务会被 `dropBrokenLinks` 静默丢掉，看板和日报上都看不到
 
 拿到 CTS 回复的名单前不许发；拿到后把重复的人从 Mailchimp 目标标签里手工剔除，再进第 1 条硬闸检查。
 
