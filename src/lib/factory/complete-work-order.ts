@@ -161,10 +161,22 @@ export async function completeWorkOrder(
     .maybeSingle()
   if (bErr) return { ok: false, status: 500, error: 'brief lookup failed' }
 
-  const segmentsArr = Array.isArray((wo.brief as Record<string, unknown>)?.['segments'])
-    ? ((wo.brief as Record<string, unknown>)['segments'] as Array<Record<string, unknown>>)
+  const briefRecord = (wo.brief as Record<string, unknown>) ?? {}
+  const segmentsArr = Array.isArray(briefRecord['segments'])
+    ? (briefRecord['segments'] as Array<Record<string, unknown>>)
     : []
   const overlaysFromBrief = segmentsArr.map((s) => (typeof s['text_overlay'] === 'string' ? (s['text_overlay'] as string) : null))
+  // legacy(非 recipe)单的逐段字幕实际写在 brief.copy.segments[].{title_sub,caption,title_main}
+  // (worker.mjs resolveCopy/buildSrt 同一取法)——brief.segments[].text_overlay 从未被任何调用方
+  // 写入过。漏收 copy.segments 会导致 findRepeatedCaption 只拿到 worker 拼好的单条聚合 caption
+  // 字符串,永远测不出真实的跨段字幕重复(2026-09-20 codex review round 2)。
+  const copySegmentsArr = Array.isArray((briefRecord['copy'] as Record<string, unknown> | undefined)?.['segments'])
+    ? (((briefRecord['copy'] as Record<string, unknown>)['segments']) as Array<Record<string, unknown>>)
+    : []
+  const overlaysFromCopy = copySegmentsArr.map((s) => {
+    const text = s['title_sub'] ?? s['caption'] ?? s['title_main']
+    return typeof text === 'string' && text.trim().length > 0 ? text : null
+  })
   // recipe(multicut)单不把字幕写进 brief.segments.text_overlay —— 实际渲染的字幕(含 hook 之外的
   // middle 段)只存在于已经过 assertRecipeReceipt 校验的 recipeReceipt.segments[].caption 里,
   // 漏收会导致品控完全扫不到这些段(2026-09-20 codex review)。
@@ -173,7 +185,11 @@ export async function completeWorkOrder(
       ? ((recipeReceipt as { segments: Array<Record<string, unknown>> }).segments)
       : []
   const overlaysFromReceipt = receiptSegments.map((s) => (typeof s['caption'] === 'string' ? (s['caption'] as string) : null))
-  const overlays = [...overlaysFromBrief, ...overlaysFromReceipt]
+  // 三路结构化逐段来源合流:brief.segments.text_overlay(历史保留,当前无写入方)/
+  // brief.copy.segments(legacy worker 真正落的地方)/ recipe receipt segments。
+  // `caption` 单独作为 worker 拼好的聚合串继续保留在下面的 [caption, ...overlays] 里,
+  // 不并入 overlays 本身——否则聚合串会跟其中某一段重复计数,污染逐段重复检测。
+  const overlays = [...overlaysFromBrief, ...overlaysFromCopy, ...overlaysFromReceipt]
   const redlineHits = scanRedlineHits(
     [caption, ...overlays],
     (client.brand_redline_phrases as string[] | null) ?? [],
