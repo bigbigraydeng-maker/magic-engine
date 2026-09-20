@@ -63,6 +63,16 @@ const KNOWLEDGE: KnowledgeReadResult = { entries: [activeProductFact()], forbidd
 // overstatement the brand-redline list exists to catch.
 const BRAND_REDLINES = ['Auckland since 1928']
 
+/** Deliberately bypasses `reply_text: string` to hand in a runtime value the type system
+ *  would reject — used only to test the fail-open safety net against a caller bug, not a
+ *  claim about what a well-typed caller would ever produce. */
+function withRawReplyText(rawReplyText: unknown, overrides: Partial<CtsVerifierContext> = {}): CtsVerifierContext {
+  return baseContext({
+    agentOutput: { reply_text: rawReplyText as string, confidence: 0.9, offerings: [] },
+    ...overrides,
+  })
+}
+
 function baseContext(overrides: Partial<CtsVerifierContext> = {}): CtsVerifierContext {
   return {
     clientId: CTS_CLIENT_ID,
@@ -190,32 +200,117 @@ describe('fail-open — Jev outage never blocks a reply that the regex gates alr
     callJev.mockRejectedValue(new Error('jev call timed out after 6000ms'))
     const withoutSemantic = verifyCtsReply(baseContext())
     const withSemantic = await verifyCtsReplyWithSemanticChecks(baseContext())
-    expect(withSemantic).toEqual(withoutSemantic)
+    expect(withSemantic.ok).toBe(withoutSemantic.ok)
+    expect(withSemantic.blocked_reasons).toEqual(withoutSemantic.blocked_reasons)
+    expect(withSemantic.require_human_confirm).toBe(withoutSemantic.require_human_confirm)
     expect(withSemantic.ok).toBe(true)
+    // Neither semantic id is claimed — a Jev outage must not be reported as "checked" to
+    // the human reviewer, only the seven regex gates that actually ran (子牙/魏征复审).
+    expect(withSemantic.checked_gate_ids).toEqual([
+      'brand_redline',
+      'retired_tour_mention',
+      'number_claim',
+      'reply_forbidden_topic',
+      'provenance',
+      'length',
+      'url_allowlist',
+    ])
   })
 
-  it('one check throwing and the other scoring low both fail open — no crash, no false block', async () => {
+  it('one check throwing and the other scoring low both fail open — no crash, no false block, only the working check is claimed', async () => {
     callJev.mockRejectedValueOnce(new Error('network error')) // brand_redline_semantic
     callJev.mockResolvedValueOnce({ answers: { number_claim_semantic: { noul: 0.1 } } })
     const result = await verifyCtsReplyWithSemanticChecks(baseContext())
     expect(result.ok).toBe(true)
     expect(result.blocked_reasons).toEqual([])
+    expect(result.checked_gate_ids).not.toContain('brand_redline_semantic')
+    expect(result.checked_gate_ids).toContain('number_claim_semantic')
   })
 
-  it('the kill switch MESSENGER_VERIFIER_SEMANTIC_DISABLED=true skips Jev entirely', async () => {
+  it('an unexpected error before either check reaches its own Jev try/catch still fails open via an outer safety net', async () => {
+    // withRawReplyText(null) hands in a reply_text the type system would reject — simulating
+    // a caller bug, not a wrong fixture. `.trim()` on it throws synchronously before either
+    // check's own internal try/catch (which only wraps the Jev call itself), so this
+    // exercises verifyCtsReplyWithSemanticChecks's own outer try/catch. Ran this suite with
+    // that outer try/catch temporarily removed: the same input then produced an unhandled
+    // promise rejection instead of the fail-open result asserted below, confirming this test
+    // exercises that safety net for real (魏征复审 2026-09-20 blocker: a bug in the semantic
+    // layer must never propagate into step.run('verify', ...) and become an Inngest-retried
+    // pipeline failure).
+    //
+    // Note this malformed reply_text also makes several of the seven REGEX gates crash on
+    // their own `.length`/`.matchAll` calls — framework.ts's `runVerifierGates` already
+    // fail-closes those internally (treats a gate throwing as that gate blocking, by design),
+    // so `result.ok` here is expected to be false for that reason, same as calling
+    // `verifyCtsReply` directly on this input. What this test actually proves is narrower and
+    // still real: the semantic layer's own crash didn't ADD to that, escape as an unhandled
+    // rejection, or stop `checked_gate_ids` from correctly reporting "regex ran, semantic did
+    // not" — not that this specific input is a clean draft.
+    const baseOnMalformed = verifyCtsReply(withRawReplyText(null))
+    const result = await verifyCtsReplyWithSemanticChecks(withRawReplyText(null))
+    expect(callJev).not.toHaveBeenCalled()
+    expect(result.ok).toBe(baseOnMalformed.ok)
+    expect(result.blocked_reasons).toEqual(baseOnMalformed.blocked_reasons)
+    expect(result.checked_gate_ids).toEqual([
+      'brand_redline',
+      'retired_tour_mention',
+      'number_claim',
+      'reply_forbidden_topic',
+      'provenance',
+      'length',
+      'url_allowlist',
+    ])
+  })
+
+  it('the kill switch MESSENGER_VERIFIER_SEMANTIC_DISABLED=true skips Jev entirely and only claims the seven regex gates', async () => {
     process.env.MESSENGER_VERIFIER_SEMANTIC_DISABLED = 'true'
     const result = await verifyCtsReplyWithSemanticChecks(baseContext())
     expect(callJev).not.toHaveBeenCalled()
-    expect(result).toEqual(verifyCtsReply(baseContext()))
+    const base = verifyCtsReply(baseContext())
+    expect(result.ok).toBe(base.ok)
+    expect(result.blocked_reasons).toEqual(base.blocked_reasons)
+    expect(result.checked_gate_ids).not.toContain('brand_redline_semantic')
+    expect(result.checked_gate_ids).not.toContain('number_claim_semantic')
   })
 
-  it('a client-id mismatch never calls Jev — the identity guard still short-circuits everything', async () => {
+  it('a client-id mismatch never calls Jev and claims zero checked gates — the identity guard short-circuits everything', async () => {
     const result = await verifyCtsReplyWithSemanticChecks(
       baseContext({ clientId: 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84' }),
     )
     expect(callJev).not.toHaveBeenCalled()
     expect(result.ok).toBe(false)
     expect(result.blocked_reasons[0]).toContain('client_id_mismatch')
+    expect(result.checked_gate_ids).toEqual([])
+  })
+})
+
+// ─── checked_gate_ids — the honest per-draft record drafts/route.ts reads ────
+
+describe('checked_gate_ids — what the human-review portal trusts', () => {
+  it('a fully successful run claims all nine gate ids, not a static constant', async () => {
+    callJev.mockResolvedValueOnce({ answers: { brand_redline_semantic: { noul: 0.01 } } })
+    callJev.mockResolvedValueOnce({ answers: { number_claim_semantic: { noul: 0.01 } } })
+    const result = await verifyCtsReplyWithSemanticChecks(baseContext())
+    expect(result.checked_gate_ids).toEqual([
+      'brand_redline',
+      'retired_tour_mention',
+      'number_claim',
+      'reply_forbidden_topic',
+      'provenance',
+      'length',
+      'url_allowlist',
+      'brand_redline_semantic',
+      'number_claim_semantic',
+    ])
+  })
+
+  it('brand_redline_semantic is still claimed as evaluated when there are no redline phrases to check (nothing to catch, not a failure)', async () => {
+    callJev.mockResolvedValueOnce({ answers: { number_claim_semantic: { noul: 0.01 } } })
+    const result = await verifyCtsReplyWithSemanticChecks(baseContext({ brandRedlinePhrases: [] }))
+    expect(result.checked_gate_ids).toContain('brand_redline_semantic')
+    // Only one Jev call happened — for number_claim_semantic — confirming brand_redline_semantic
+    // was a structural skip (nothing to check), not a real Jev evaluation.
+    expect(callJev).toHaveBeenCalledTimes(1)
   })
 })
 

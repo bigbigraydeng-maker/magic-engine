@@ -164,12 +164,44 @@ describe('GET drafts — only the approval queue', () => {
         createdAt: '2026-09-15T01:00:00Z',
       },
     ])
-    // CTS 是 c0000000-…（params() 默认值）——真的挂上了 cts.ts 的完整闸门列表，不是空壳。
-    // 七道正则闸 + 两道 Jev 语义补充闸（brand_redline_semantic/number_claim_semantic，2026-09-20）。
-    expect(json.drafts[0].passedGateIds.length).toBe(9)
-    expect(json.drafts[0].passedGateIds).toEqual(
-      expect.arrayContaining(['brand_redline_semantic', 'number_claim_semantic']),
-    )
+    // CTS 是 c0000000-…（params() 默认值）——这条历史行的 verifier_output_json 里没有
+    // `checked_gate_ids`（2026-09-20 语义闸上线前写入的行），回退到只声称七道正则闸
+    // 过了，不假装 Jev 语义闸也跑过（子牙+魏征复审：不能用静态清单冒充实际执行记录）。
+    expect(json.drafts[0].passedGateIds.length).toBe(7)
+  })
+
+  it('reads the real per-draft checked_gate_ids when the row records it (Jev semantic layer actually ran)', async () => {
+    allow()
+    stubTables({
+      owned: true,
+      drafts: [
+        {
+          id: 'draft-2',
+          draft_body: 'Kia ora — here is the itinerary.',
+          agent_confidence: 0.82,
+          quoted_offering_names: [],
+          verifier_output_json: {
+            ok: true,
+            blocked_reasons: [],
+            checked_gate_ids: ['brand_redline', 'length', 'url_allowlist', 'brand_redline_semantic'],
+          },
+          created_at: '2026-09-20T01:00:00Z',
+        },
+      ],
+    })
+
+    const json = (await (await GET(request(), params())).json()) as {
+      drafts: Array<{ passedGateIds: string[] }>
+    }
+
+    // number_claim_semantic is deliberately absent from the stub — proves this route
+    // trusts the row's own record instead of re-deriving a fixed 9-item list.
+    expect(json.drafts[0].passedGateIds).toEqual([
+      'brand_redline',
+      'length',
+      'url_allowlist',
+      'brand_redline_semantic',
+    ])
   })
 
   it('attaches no gate list for a client whose Verifier policy is not CTS (no platform-wide truth invented)', async () => {

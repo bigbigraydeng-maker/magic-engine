@@ -684,9 +684,24 @@ const QUESTION_NUMBER_CLAIM_SEMANTIC: JevQuestion = {
     'mentions no specific price/date claim at all.',
 }
 
-async function brandRedlineSemanticCheck(ctx: CtsVerifierContext): Promise<string | null> {
-  if (ctx.brandRedlinePhrases.length === 0) return null
-  if (!ctx.agentOutput.reply_text.trim()) return null
+/**
+ * `evaluated: true` only when this check actually produced a real judgment — either a
+ * Jev call that returned successfully, or a structural determination that there was
+ * nothing to check (e.g. no brand-redline phrases configured for this client at all).
+ * `evaluated: false` means Jev was unreachable/erroring, so this reply's risk on this
+ * one dimension is genuinely unknown — callers must NOT report this dimension as
+ * "checked" to a human reviewer (子牙+魏征复审 2026-09-20: a static per-client gate-id
+ * list would misrepresent a silent fail-open as a real pass — see `CtsVerifierResult`
+ * below).
+ */
+interface SemanticCheckOutcome {
+  evaluated: boolean
+  reason: string | null
+}
+
+async function brandRedlineSemanticCheck(ctx: CtsVerifierContext): Promise<SemanticCheckOutcome> {
+  if (ctx.brandRedlinePhrases.length === 0) return { evaluated: true, reason: null }
+  if (!ctx.agentOutput.reply_text.trim()) return { evaluated: true, reason: null }
   try {
     const result = await callJev(
       { reply_text: ctx.agentOutput.reply_text, forbidden_claims: ctx.brandRedlinePhrases },
@@ -694,23 +709,26 @@ async function brandRedlineSemanticCheck(ctx: CtsVerifierContext): Promise<strin
     )
     const score = result.answers.brand_redline_semantic?.noul ?? 0
     if (score >= SEMANTIC_JEV_THRESHOLD) {
-      return `reply may restate a brand-redline claim in different wording (Jev score ${score.toFixed(2)}) — needs human review`
+      return {
+        evaluated: true,
+        reason: `reply may restate a brand-redline claim in different wording (Jev score ${score.toFixed(2)}) — needs human review`,
+      }
     }
-    return null
+    return { evaluated: true, reason: null }
   } catch (e) {
     console.warn(
       `[messenger-agent/verifier/cts] brand_redline_semantic check unavailable (${e instanceof Error ? e.message : String(e)}) — falling back to the regex-only brand_redline gate result`,
     )
-    return null
+    return { evaluated: false, reason: null }
   }
 }
 
-async function numberClaimSemanticCheck(ctx: CtsVerifierContext): Promise<string | null> {
-  if (!ctx.agentOutput.reply_text.trim()) return null
-  const activeProducts = parseActiveProductFacts(ctx.knowledge.entries)
-  const validPrices = activeProducts.map((p) => p.price_nzd)
-  const validDates = activeProducts.flatMap((p) => p.departure_dates.map((d) => d.slice(0, 10)))
+async function numberClaimSemanticCheck(ctx: CtsVerifierContext): Promise<SemanticCheckOutcome> {
+  if (!ctx.agentOutput.reply_text.trim()) return { evaluated: true, reason: null }
   try {
+    const activeProducts = parseActiveProductFacts(ctx.knowledge.entries)
+    const validPrices = activeProducts.map((p) => p.price_nzd)
+    const validDates = activeProducts.flatMap((p) => p.departure_dates.map((d) => d.slice(0, 10)))
     const result = await callJev(
       {
         reply_text: ctx.agentOutput.reply_text,
@@ -721,19 +739,33 @@ async function numberClaimSemanticCheck(ctx: CtsVerifierContext): Promise<string
     )
     const score = result.answers.number_claim_semantic?.noul ?? 0
     if (score >= SEMANTIC_JEV_THRESHOLD) {
-      return `reply may spell out a price or date in words that does not match any confirmed active product (Jev score ${score.toFixed(2)}) — needs human review`
+      return {
+        evaluated: true,
+        reason: `reply may spell out a price or date in words that does not match any confirmed active product (Jev score ${score.toFixed(2)}) — needs human review`,
+      }
     }
-    return null
+    return { evaluated: true, reason: null }
   } catch (e) {
     console.warn(
       `[messenger-agent/verifier/cts] number_claim_semantic check unavailable (${e instanceof Error ? e.message : String(e)}) — falling back to the regex-only number_claim gate result`,
     )
-    return null
+    return { evaluated: false, reason: null }
   }
 }
 
-/** 展示给人审门户用的"这条草稿实际过了哪些闸"完整列表——见 drafts route.ts。 */
-export const CTS_SEMANTIC_GATE_IDS = ['brand_redline_semantic', 'number_claim_semantic'] as const
+/**
+ * `verifyCtsReply`'s return type, widened with a per-call record of which gate ids
+ * actually produced a real judgment (魏征/子牙复审 2026-09-20). The seven regex gate
+ * ids are always present (`runVerifierGates` never skips a declared gate); the two
+ * semantic ids are present only when Jev genuinely evaluated that dimension for THIS
+ * reply — never a static "CTS always has these 9" constant. `drafts/route.ts` reads
+ * this per-draft instead of assuming every CTS draft ran the same checks.
+ */
+export interface CtsVerifierResult extends VerifierResult {
+  checked_gate_ids: string[]
+}
+
+const CTS_REGEX_GATE_IDS: readonly string[] = ctsVerifierGates.map((g) => g.id)
 
 /**
  * 回复发送管道真正调用的入口(取代 `verifyCtsReply` 成为 F2 pipeline 的 verify
@@ -742,25 +774,52 @@ export const CTS_SEMANTIC_GATE_IDS = ['brand_redline_semantic', 'number_claim_se
  * 草稿本来就 100% 转人工(`require_human_confirm` 恒为 true),这里命中不是
  * "自动挡回",是"给人工审核多标一条重点"。
  */
-export async function verifyCtsReplyWithSemanticChecks(context: CtsVerifierContext): Promise<VerifierResult> {
+export async function verifyCtsReplyWithSemanticChecks(context: CtsVerifierContext): Promise<CtsVerifierResult> {
   const baseResult = verifyCtsReply(context)
-  if (context.clientId !== CTS_CLIENT_ID || !messengerVerifierSemanticEnabled()) {
-    return baseResult
+  if (context.clientId !== CTS_CLIENT_ID) {
+    return { ...baseResult, checked_gate_ids: [] }
+  }
+  if (!messengerVerifierSemanticEnabled()) {
+    return { ...baseResult, checked_gate_ids: [...CTS_REGEX_GATE_IDS] }
   }
 
-  const [brandReason, numberReason] = await Promise.all([
-    brandRedlineSemanticCheck(context),
-    numberClaimSemanticCheck(context),
-  ])
+  let brand: SemanticCheckOutcome
+  let number: SemanticCheckOutcome
+  try {
+    ;[brand, number] = await Promise.all([
+      brandRedlineSemanticCheck(context),
+      numberClaimSemanticCheck(context),
+    ])
+  } catch (e) {
+    // Outer safety net (魏征复审 2026-09-20): the two check functions above already
+    // catch their own Jev network/timeout errors internally, but this catches
+    // anything else unexpected (e.g. a future bug in their own pre-processing code)
+    // so a defect in the semantic layer can never propagate up into
+    // `step.run('verify', ...)` and turn into an Inngest-retried pipeline failure —
+    // it must always fail open to the regex-only result, exactly like a Jev outage.
+    console.warn(
+      `[messenger-agent/verifier/cts] semantic supplement layer threw unexpectedly (${e instanceof Error ? e.message : String(e)}) — falling back to the regex-only gate result`,
+    )
+    return { ...baseResult, checked_gate_ids: [...CTS_REGEX_GATE_IDS] }
+  }
+
+  const checked_gate_ids = [
+    ...CTS_REGEX_GATE_IDS,
+    ...(brand.evaluated ? ['brand_redline_semantic'] : []),
+    ...(number.evaluated ? ['number_claim_semantic'] : []),
+  ]
 
   const semanticReasons: string[] = []
-  if (brandReason) semanticReasons.push(`brand_redline_semantic: ${brandReason}`)
-  if (numberReason) semanticReasons.push(`number_claim_semantic: ${numberReason}`)
-  if (semanticReasons.length === 0) return baseResult
+  if (brand.reason) semanticReasons.push(`brand_redline_semantic: ${brand.reason}`)
+  if (number.reason) semanticReasons.push(`number_claim_semantic: ${number.reason}`)
+  if (semanticReasons.length === 0) {
+    return { ...baseResult, checked_gate_ids }
+  }
 
   return {
     ok: false,
     blocked_reasons: [...baseResult.blocked_reasons, ...semanticReasons],
     require_human_confirm: true,
+    checked_gate_ids,
   }
 }
