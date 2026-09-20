@@ -7,6 +7,26 @@
 
 ---
 
+## 2026-09-21 · 数组列一律存空数组不存 NULL；订正 `clients.brand_aliases`「schema 漂移」误判
+
+**决策（技术决策，两条）**：
+1. **接口清空别名时写 `[]`，不再写 NULL。** `clients.brand_aliases` 自 `20260625000001_a21_goal_current_value.sql`
+   起就是 `NOT NULL DEFAULT '{}'`（该 migration 已回填存量 NULL 并 `SET DEFAULT` / `SET NOT NULL`），仓库和线上
+   本就一致，**没有漂移，不需要新增对齐 migration**——最初排查时只看了引入该列的 `20260624010000`，漏看了同一列
+   后续还被 `20260625000001` 加固过，误判成「线上手工改动、仓库未记录」。
+2. **往后数组列一律存 `[]`，除非确有读取方靠 NULL 和 `[]` 区分行为。** NULL 在这里没有任何含义，
+   只多出一个能把写操作打挂的状态。这条判断本身不受上面订正影响。
+
+**为什么**：真正的 bug 只在接口代码——`clients.brand_aliases` 早就是 NOT NULL，但 PATCH 清空时仍写 NULL，
+数据库拒绝（23502），接口 500，品牌别名设置面板能加不能清空。2026-09-21 在本机 Postgres 沙盘复现确认。
+现有全部读取方（`isBrandedKeywordWithAliases`、`auto-fetch`、`rankings`、`crm/touchpoints`、`serp-capture`）
+本来就把 NULL 和 `[]` 当同一件事，所以存 `[]` 是零行为变化的那一侧。
+
+**影响**：[PITFALLS B5](./PITFALLS.md) 记录的教训改为「判断 schema 漂移前必须 grep 该列全部历史 migration，
+不能只看引入它的那一条」，而不是「线上被手工改过仓库不知道」。兄弟接口 `primary-keywords` / `competitor-domains` /
+`products` / `excluded-topics` 仍在写 `? null :`，2026-09-21 实测这四列线上确实是可空所以没炸，已记入 B5 待清理，
+本次不动以保持改动范围最小。
+
 ## 2026-09-20 · SEO 标题周循环 v1：新自动化一律上 Inngest、按真实用量定规模、自动改文案必过信息完整闸门
 
 **决策（PM 2026-09-20 拍板，三条）**：
