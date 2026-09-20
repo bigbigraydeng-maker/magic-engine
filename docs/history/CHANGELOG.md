@@ -5,6 +5,20 @@
 
 ---
 
+### 2026-09-20（CTS Messenger AI 客服：verifier 加两道 Jev 语义补充检查，抓换措辞的品牌红线/文字拼数字）
+
+PR [#1841](https://github.com/bigbigraydeng-maker/magic-engine/pull/1841) 已合并（前身 #1838 因改动量超过 `claude/*` 分支自动闸门的 800 行上限，换成 `feat/*` 分支重开——跟 #1832/#1825 同一类情况）。CTS Messenger AI 客服回复要过七道确定性闸（`src/lib/messenger-agent/verifier/policies/cts.ts`）才进人工审核队列，这七道闸全是正则/字符串/数字比对，查不出"换个说法讲同一句品牌红线""用文字拼价格或日期绕开数字正则"这两类真实存在的漏判。
+
+- 复用已合并生产验证过的 Jev（TypeSafe）判断客户端（`src/lib/jev/client.ts`），给 `brand_redline`/`number_claim` 各加一层语义补充判断——七道正则闸原样保留、零成本、永远先跑；新层只补充不替代，命中只写进新增的 `semantic_flags` 字段，**绝不改动 `ok`/`blocked_reasons`**。
+- fail-open 三重覆盖：Jev 调用失败/超时、`MESSENGER_VERIFIER_SEMANTIC_DISABLED=true` 总闸关闭、语义层自身意外异常（外层 try/catch 兜底），全部退回七道正则闸原结果，绝不阻塞发送、绝不让这条新外部依赖变成起草管道的新故障点。
+- 人审门户（`DraftApprovalPanel.tsx`）新增提醒区块把语义命中显示给 FDE；"已过关"清单（`drafts/route.ts`）不再用跟 clientId 绑死的静态列表，改成读每条草稿自己记录的 `checked_gate_ids`（Jev 没跑成的检查不会被冒充成"已过关"）。
+- 子牙（架构）+ 魏征（挑刺）两轮独立复审后，Codex 自动复审又抓出一个真实 P1：早期版本命中语义闸后把 `ok` 改成 `false`，导致草稿被存成 `verifier_status='blocked'` 并提前 return——但草稿接口只查 `pending`、PM 待办的 `TRACKED_STATUSES` 也不含 `blocked`，等于"标了需要人工重点看"的草稿实际上不会出现在任何人能看到的地方；改成语义命中永远走 `pending`、advisory-only 后修复。另有 P2（门户直接显示英文内部 ID `brand_redline_semantic`）一并修完。
+- 用真实 CTS 数据对真实 Jev API 跑过两轮验证（含 advisory-only 改动后复测）：换措辞品牌红线命中（打分 0.79）、干净回复不命中、文字拼错数字命中（打分 0.96）、文字拼对数字不命中，4 个场景 × 2 轮全部符合预期；新增 `cts-semantic.live.test.ts` 沉淀为可复用回归（无 key 自动跳过，不影响 CI）。PM 已明确批准将客户对话内容发给 Jev 处理（2026-09-20）。
+
+**Reuse Statement**：复用已有 L3 Connector（`src/lib/jev/client.ts`）和既有 verifier 框架（`framework.ts` 未改动，保持 client-agnostic）；新增的 `brand_redline_semantic`/`number_claim_semantic` 检测逻辑落在 CTS 专属的 L4 policy 文件（`cts.ts`），不是新建平台能力线；品牌红线词表/已确认价格团期都是运行时从 `context` 传入，没有客户事实写进 shared runtime；换客户/换行业测试通过（机制本身跟具体客户的红线词表/产品数据无关）。
+
+---
+
 ### 2026-09-20（AI 可见度：修复品牌命中子串误判，以后新算出来的"是否被提及"数字会变准）
 
 PR [#1823](https://github.com/bigbigraydeng-maker/magic-engine/pull/1823) 已合并（merge commit `00466090`）。老判断逻辑用"品牌名字符串互相包含"判定客户有没有被 AI 提到，会把"Ray White"误判成命中"Roman Hu — Ray White Mission Bay"这类不相关品牌，也会漏掉答案只写域名或标点不同写法的真实提及。对全部 6,596 条历史记录跑了一遍**只读**重算摸底（没有改任何生产数据），误判数字跟 PM 手工核对结果完全对上：CTS 38 条假阳性、NAL 17 条、Roman 79 条、Dixon 3 条，另有 342 条真实提及被漏判、71 条名次会变——**这批数字目前仍原样挂在客户看到的历史记录/月报/诊断分上，还没被改过来**；本次合并只让下一次自动采集用上新规则，历史行要不要回填、要不要重算旧快照，是 [`docs/audits/2026-09-20-ai-visibility-client-rank-grounding.md`](../audits/2026-09-20-ai-visibility-client-rank-grounding.md)「建议的后续」里列的 5 步，**全部等 PM 点头，这次一步没做**。

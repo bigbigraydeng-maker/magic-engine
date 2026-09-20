@@ -321,12 +321,12 @@ async function runDraftAgent(
  * MVP 只有 CTS 一个客户接了这条治理系统,其余客户理论上不会走到这个函数（F1/F2
  * 的 kill switch 默认 false），这里只是不假设调用方一定会先做这层保护。
  */
-function verifyDraft(
+async function verifyDraft(
   clientId: string,
   agentOutput: MessengerAgentOutput,
   brandRedlinePhrases: string[],
   knowledge: KnowledgeReadResult,
-): VerifierResult {
+): Promise<VerifierResult> {
   const verify = resolveVerifierPolicy(clientId)
   if (!verify) {
     return {
@@ -362,7 +362,7 @@ export interface ConversationInboundDraftDeps {
     agentOutput: MessengerAgentOutput,
     brandRedlinePhrases: string[],
     knowledge: KnowledgeReadResult,
-  ) => VerifierResult
+  ) => Promise<VerifierResult>
   persistDraft: (input: PersistDraftInput) => Promise<{ id: string }>
   updateDraftStatus: (draftId: string, patch: Record<string, unknown>) => Promise<void>
   markTimedOutIfPending: (draftId: string) => Promise<boolean>
