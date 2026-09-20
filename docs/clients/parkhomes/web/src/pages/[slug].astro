@@ -1,6 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
 import Gallery from '../components/Gallery.astro';
+import ProjectStory from '../components/ProjectStory.astro';
 import AgentLine from '../components/AgentLine.astro';
 import { projects } from '../data/projects.js';
 
@@ -28,109 +29,116 @@ const serviceSchema = {
 <Base title={`${p.name} — Park Homes`} desc={p.metaDescription || p.tagline} active="projects">
   <script type="application/ld+json" set:html={JSON.stringify(serviceSchema)} />
 
-  <section class="hero" style={heroStyle}>
-    <span class="tag">{p.hero ? "Artist's impression" : 'Project imagery — to be supplied'}</span>
-    <div class="wrap">
-      <p class="eyebrow">{p.eyebrow}</p>
-      <h1>{p.name}</h1>
-      <p class="sub">{p.tagline}</p>
-      <span class="btn" style={`margin-top:22px;background:${p.pill === 'pill-sell' ? 'var(--accent)' : p.pill === 'pill-reg' ? '#8a5a44' : '#5a6675'};color:#fff;font-family:var(--mono);font-size:11px;letter-spacing:.06em`}>{p.status}</span>
-    </div>
-  </section>
-
-  <section>
-    <div class="wrap twocol">
-      <div><p class="eyebrow sec-eyebrow">The site</p><h2 class="sec-h">{p.heading}</h2></div>
-      <div>{p.intro.map((t) => <p>{t}</p>)}</div>
-    </div>
-    <div class="wrap">
-      <div class="facts">
-        {p.facts.map(([k, v]) => (
-          <div><div class="k">{k}</div><div class="v">{v}</div></div>
-        ))}
-      </div>
-    </div>
-  </section>
-
-  <section class="tint">
-    <div class="wrap">
-      <p class="eyebrow sec-eyebrow">Gallery</p>
-      <h2 class="sec-h" style="margin-bottom:30px">A closer look</h2>
-      <Gallery images={p.images} note={p.imageNote} />
-    </div>
-  </section>
-
-  {p.video && (
-    <section>
-      <div class="wrap">
-        <p class="eyebrow sec-eyebrow">Video</p>
-        <h2 class="sec-h" style="margin-bottom:30px">{p.video.title}</h2>
-        <div style="position:relative;width:100%;aspect-ratio:16/9;border-radius:4px;overflow:hidden;background:#000">
-          <iframe
-            src={`https://www.youtube-nocookie.com/embed/${p.video.youtubeId}`}
-            title={p.video.title}
-            loading="lazy"
-            style="position:absolute;inset:0;width:100%;height:100%;border:0"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowfullscreen
-          ></iframe>
+  {p.story ? (
+    <ProjectStory p={p} />
+  ) : (
+    <>
+      <section class="hero" style={heroStyle}>
+        <span class="tag">{p.hero ? "Artist's impression" : 'Project imagery — to be supplied'}</span>
+        <div class="wrap">
+          <p class="eyebrow">{p.eyebrow}</p>
+          <h1>{p.name}</h1>
+          <p class="sub">{p.tagline}</p>
+          <span class="btn" style={`margin-top:22px;background:${p.pill === 'pill-sell' ? 'var(--accent)' : p.pill === 'pill-reg' ? '#8a5a44' : '#5a6675'};color:#fff;font-family:var(--mono);font-size:11px;letter-spacing:.06em`}>{p.status}</span>
         </div>
-      </div>
-    </section>
-  )}
+      </section>
 
-  {p.floorPlans && p.floorPlans.length > 0 && (
-    <section>
-      <div class="wrap">
-        <p class="eyebrow sec-eyebrow">Floor plans</p>
-        <h2 class="sec-h" style="margin-bottom:8px">Every lot, to scale</h2>
-        <p style="color:var(--mute);margin-bottom:30px">Supplied by our appointed agent. For visual purposes only — buyers should verify all measurements.</p>
-        <div style="display:grid;gap:36px">
-          {p.floorPlans.map((fp) => (
-            <div style="border:1px solid var(--line-d);border-radius:4px;padding:20px;background:var(--paper-2)">
-              <img src={fp.src} alt={`Floor plan — ${fp.lot}, ${p.name}`} loading="lazy" style="width:100%;height:auto;border-radius:2px;display:block" />
-              <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;margin-top:14px">
-                <strong style="font-size:16px">{fp.lot}</strong>
-                <span style="color:var(--mute);font-size:14px">{fp.beds} bed · {fp.baths} bath · {fp.floorArea} floor · {fp.landArea} land</span>
-                {fp.listingUrl
-                  ? <a href={fp.listingUrl} target="_blank" rel="noopener" class="link-p" style="margin-left:auto">View live listing →</a>
-                  : <span style="margin-left:auto;color:var(--mute);font-size:13px">Not currently listed</span>}
-              </div>
+      <section>
+        <div class="wrap twocol">
+          <div><p class="eyebrow sec-eyebrow">The site</p><h2 class="sec-h">{p.heading}</h2></div>
+          <div>{p.intro.map((t) => <p>{t}</p>)}</div>
+        </div>
+        <div class="wrap">
+          <div class="facts">
+            {p.facts.map(([k, v]) => (
+              <div><div class="k">{k}</div><div class="v">{v}</div></div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section class="tint">
+        <div class="wrap">
+          <p class="eyebrow sec-eyebrow">Gallery</p>
+          <h2 class="sec-h" style="margin-bottom:30px">A closer look</h2>
+          <Gallery images={p.images} note={p.imageNote} />
+        </div>
+      </section>
+
+      {p.video && (
+        <section>
+          <div class="wrap">
+            <p class="eyebrow sec-eyebrow">Video</p>
+            <h2 class="sec-h" style="margin-bottom:30px">{p.video.title}</h2>
+            <div style="position:relative;width:100%;aspect-ratio:16/9;border-radius:4px;overflow:hidden;background:#000">
+              <iframe
+                src={`https://www.youtube-nocookie.com/embed/${p.video.youtubeId}`}
+                title={p.video.title}
+                loading="lazy"
+                style="position:absolute;inset:0;width:100%;height:100%;border:0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowfullscreen
+              ></iframe>
             </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  )}
+          </div>
+        </section>
+      )}
 
-  {p.listingsSearchUrl && (
-    <section>
-      <div class="wrap">
-        <p>
-          <a class="btn btn-ghost" href={p.listingsSearchUrl} target="_blank" rel="noopener">{p.listingsLabel || 'See all current listings on Ray White →'}</a>
-        </p>
-      </div>
-    </section>
-  )}
+      {p.floorPlans && p.floorPlans.length > 0 && (
+        <section>
+          <div class="wrap">
+            <p class="eyebrow sec-eyebrow">Floor plans</p>
+            <h2 class="sec-h" style="margin-bottom:8px">Every lot, to scale</h2>
+            <p style="color:var(--mute);margin-bottom:30px">Supplied by our appointed agent. For visual purposes only — buyers should verify all measurements.</p>
+            <div style="display:grid;gap:36px">
+              {p.floorPlans.map((fp) => (
+                <div style="border:1px solid var(--line-d);border-radius:4px;padding:20px;background:var(--paper-2)">
+                  <img src={fp.src} alt={`Floor plan — ${fp.lot}, ${p.name}`} loading="lazy" style="width:100%;height:auto;border-radius:2px;display:block" />
+                  <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;margin-top:14px">
+                    <strong style="font-size:16px">{fp.lot}</strong>
+                    <span style="color:var(--mute);font-size:14px">{fp.beds} bed · {fp.baths} bath · {fp.floorArea} floor · {fp.landArea} land</span>
+                    {fp.listingUrl
+                      ? <a href={fp.listingUrl} target="_blank" rel="noopener" class="link-p" style="margin-left:auto">View live listing →</a>
+                      : <span style="margin-left:auto;color:var(--mute);font-size:13px">Not currently listed</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
-  {p.relatedArticles && p.relatedArticles.length > 0 && (
-    <section class="tint">
-      <div class="wrap">
-        <p class="eyebrow sec-eyebrow">Journal</p>
-        <h2 class="sec-h" style="margin-bottom:24px">Learn more about the area</h2>
-        <div style="display:grid;gap:14px;max-width:640px">
-          {p.relatedArticles.map((a) => (
-            <a href={a.href} class="link-p" style="display:block;padding:16px 20px;border:1px solid var(--line);border-radius:3px;background:var(--paper)">{a.title} →</a>
-          ))}
-        </div>
-      </div>
-    </section>
+      {p.listingsSearchUrl && (
+        <section>
+          <div class="wrap">
+            <p>
+              <a class="btn btn-ghost" href={p.listingsSearchUrl} target="_blank" rel="noopener">{p.listingsLabel || 'See all current listings on Ray White →'}</a>
+            </p>
+          </div>
+        </section>
+      )}
+
+      {p.relatedArticles && p.relatedArticles.length > 0 && (
+        <section class="tint">
+          <div class="wrap">
+            <p class="eyebrow sec-eyebrow">Journal</p>
+            <h2 class="sec-h" style="margin-bottom:24px">Learn more about the area</h2>
+            <div style="display:grid;gap:14px;max-width:640px">
+              {p.relatedArticles.map((a) => (
+                <a href={a.href} class="link-p" style="display:block;padding:16px 20px;border:1px solid var(--line);border-radius:3px;background:var(--paper)">{a.title} →</a>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+    </>
   )}
 
   <section id="register" class="dark">
     <div class="wrap" style="max-width:760px">
-      <p class="eyebrow sec-eyebrow">Register your interest</p>
-      <h2 style="color:#fff;font-size:clamp(26px,4vw,40px);margin-bottom:22px">Enquire on {p.name}</h2>
+      <p class="eyebrow sec-eyebrow">{p.story ? 'Future releases' : 'Register your interest'}</p>
+      <h2 style="color:#fff;font-size:clamp(26px,4vw,40px);margin-bottom:22px">{p.story ? p.story.releases.heading : `Enquire on ${p.name}`}</h2>
+      {p.story && <p style="color:#B9C2CD;margin:-6px 0 26px;max-width:56ch">{p.story.releases.copy}</p>}
       <form class="reg" id="reg-form" novalidate>
         <div><label for="reg-name">Name</label><input type="text" id="reg-name" name="name" placeholder="Your name" required /></div>
         <div><label for="reg-phone">Phone</label><input type="text" id="reg-phone" name="phone" placeholder="Your phone" required /></div>
@@ -148,6 +156,20 @@ const serviceSchema = {
       <AgentLine align="left" />
     </div>
   </section>
+
+  {p.story && p.relatedArticles && p.relatedArticles.length > 0 && (
+    <section class="tint">
+      <div class="wrap">
+        <p class="eyebrow sec-eyebrow">Journal</p>
+        <h2 class="sec-h" style="margin-bottom:24px">Learn more about the area</h2>
+        <div style="display:grid;gap:14px;max-width:640px">
+          {p.relatedArticles.map((a) => (
+            <a href={a.href} class="link-p" style="display:block;padding:16px 20px;border:1px solid var(--line);border-radius:3px;background:var(--paper)">{a.title} →</a>
+          ))}
+        </div>
+      </div>
+    </section>
+  )}
 
   <p style="text-align:center;font-size:12px;color:var(--mute);padding:26px 20px 0">{p.footerAddress}</p>
 

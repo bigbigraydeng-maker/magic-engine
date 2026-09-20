@@ -14,18 +14,22 @@
  * `resolveVerifierPolicy` 的调用方应该怎么处理 `null`（当作 block，不是 skip）。
  */
 
-import { verifyCtsReply, CTS_CLIENT_ID, type CtsVerifierContext } from './cts'
+import { verifyCtsReplyWithSemanticChecks, CTS_CLIENT_ID, type CtsVerifierContext } from './cts'
 import type { VerifierResult } from '../framework'
 
 export type VerifierPolicyContext = CtsVerifierContext
 
-const VERIFIER_POLICIES: Record<string, (ctx: VerifierPolicyContext) => VerifierResult> = {
-  [CTS_CLIENT_ID]: verifyCtsReply,
+/**
+ * 每个客户的 policy 现在是 async——`verifyCtsReplyWithSemanticChecks` 在七道
+ * 确定性闸（同步、不变）之外补跑 Jev 语义检查（2026-09-20）。
+ */
+const VERIFIER_POLICIES: Record<string, (ctx: VerifierPolicyContext) => Promise<VerifierResult>> = {
+  [CTS_CLIENT_ID]: verifyCtsReplyWithSemanticChecks,
 }
 
 /** 查不到这个客户的 policy 时返回 `null`（不是抛错）——调用方决定"没有闸门"该怎么处理。 */
 export function resolveVerifierPolicy(
   clientId: string,
-): ((ctx: VerifierPolicyContext) => VerifierResult) | null {
+): ((ctx: VerifierPolicyContext) => Promise<VerifierResult>) | null {
   return VERIFIER_POLICIES[clientId] ?? null
 }
