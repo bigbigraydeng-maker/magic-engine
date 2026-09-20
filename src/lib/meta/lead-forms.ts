@@ -56,12 +56,34 @@ export interface MetaLead {
 }
 
 /**
+ * Graph 报错体里**机器可读**的那一半。
+ *
+ * 为什么要把它单独带出来：「这次取不到线索，是人不动手就永远好不了的授权缺口
+ * （令牌被拒 / 缺主页权限），还是下一轮重试就能好的临时故障」——这两件事在
+ * `error` 那句人话里长得一模一样，而定时任务该不该整体判失败、该不该给这个
+ * 客户下发人工待办，全看这个区分。拿 `code` 分辨是唯一稳的办法：Meta 随时会
+ * 改 message 的措辞，正则匹配文案会在它改文案那天**静默**失效——而失效的方向
+ * 恰好是「授权缺口被当成临时故障」，也就是又变回天天红。
+ *
+ * body 不是 Graph JSON（网络错误 / 返回 HTML）时为 null。
+ */
+export interface GraphErrorDetail {
+  /** Graph `error.code`；拿不到时 null。 */
+  code: number | null
+  /** Graph `error.message` 原话，没有时退回报错体前 200 字符。 */
+  message: string
+}
+
+/**
  * 取数结果。`error` 非空时 `rows` 可能是**部分**数据（翻到一半断了），
  * 调用方要按「没跑完」处理，别把半截当全量。
+ *
+ * `detail` 只在 `error` 非空、且报错体是 Graph JSON 时有值。
  */
 export interface GraphRead<T> {
   rows: T[]
   error: string | null
+  detail?: GraphErrorDetail | null
 }
 
 interface GraphList<T> {
@@ -69,23 +91,47 @@ interface GraphList<T> {
   paging?: { next?: string }
 }
 
-type GraphGet<T> = { json: T; error: null } | { json: null; error: string }
+type GraphGet<T> =
+  | { json: T; error: null; detail: null }
+  | { json: null; error: string; detail: GraphErrorDetail | null }
+
+/**
+ * Graph 的报错体 → `GraphErrorDetail`。认不出来返回 null —— 宁可让调用方按
+ * 「临时故障、下轮重试」处理，也不要瞎猜一个 code 把真故障说成授权缺口。
+ */
+export function parseGraphErrorDetail(rawBody: string): GraphErrorDetail | null {
+  let parsed: { error?: { message?: unknown; code?: unknown } } | null = null
+  try {
+    parsed = JSON.parse(rawBody) as { error?: { message?: unknown; code?: unknown } }
+  } catch {
+    return null
+  }
+  const err = parsed?.error
+  if (!err || typeof err !== 'object') return null
+  const code = typeof err.code === 'number' ? err.code : null
+  const message = typeof err.message === 'string' ? err.message : rawBody.slice(0, 200)
+  return { code, message }
+}
 
 async function graphGet<T>(url: string, label: string): Promise<GraphGet<T>> {
   let res: Response
   try {
     res = await fetch(url)
   } catch (err) {
-    return { json: null, error: `${label} 网络错误: ${String(err)}` }
+    return { json: null, error: `${label} 网络错误: ${String(err)}`, detail: null }
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '')
-    return { json: null, error: `${label} HTTP ${res.status}: ${body.slice(0, 400)}` }
+    return {
+      json: null,
+      error: `${label} HTTP ${res.status}: ${body.slice(0, 400)}`,
+      detail: parseGraphErrorDetail(body),
+    }
   }
   try {
-    return { json: (await res.json()) as T, error: null }
+    return { json: (await res.json()) as T, error: null, detail: null }
   } catch (err) {
-    return { json: null, error: `${label} 返回不是 JSON: ${String(err)}` }
+    return { json: null, error: `${label} 返回不是 JSON: ${String(err)}`, detail: null }
   }
 }
 
@@ -127,7 +173,7 @@ export async function fetchPageLeadForms(
     // 显式标类型：url 在循环里被 got 的结果重新赋值，不标就绕成循环推断（TS7022）。
     const got: GraphGet<GraphList<RawForm>> = await graphGet(url, 'leadgen_forms')
     // 必须 `!== null`：空串也是合法 string，真值判断收窄不掉出错那一支。
-    if (got.error !== null) return { rows, error: got.error }
+    if (got.error !== null) return { rows, error: got.error, detail: got.detail }
 
     for (const raw of got.json.data ?? []) {
       if (!raw.id) continue
@@ -213,7 +259,7 @@ async function walkLeads(firstUrl: string): Promise<LeadWalk> {
 
   for (let page = 0; page < MAX_PAGES && url; page++) {
     const got: GraphGet<GraphList<RawLead>> = await graphGet(url, 'leads')
-    if (got.error !== null) return { rows, error: got.error, truncated: false }
+    if (got.error !== null) return { rows, error: got.error, detail: got.detail, truncated: false }
 
     for (const raw of got.json.data ?? []) {
       const lead = parseLead(raw)
@@ -224,10 +270,15 @@ async function walkLeads(firstUrl: string): Promise<LeadWalk> {
 
   // 还攥着 cursor 就退出 = 被上限截断了。静默截断跟「跑完了」长得一模一样。
   if (url) {
-    return { rows, error: `leads 翻页到第 ${MAX_PAGES} 页仍未结束，结果被截断`, truncated: true }
+    return {
+      rows,
+      error: `leads 翻页到第 ${MAX_PAGES} 页仍未结束，结果被截断`,
+      detail: null,
+      truncated: true,
+    }
   }
 
-  return { rows, error: null, truncated: false }
+  return { rows, error: null, detail: null, truncated: false }
 }
 
 /**
@@ -245,13 +296,19 @@ export async function fetchFormLeads(
 
   const full = await walkLeads(leadsUrl(formId, pageAccessToken, sinceUnix, LEAD_FIELDS_FULL))
   // 翻页截断换字段也救不了（结果太多，不是请求写错），原样回报即可。
-  if (!full.error || full.truncated) return { rows: full.rows, error: full.error }
+  if (!full.error || full.truncated) return { rows: full.rows, error: full.error, detail: full.detail }
 
   console.warn(`[meta/lead-forms] 表单 ${formId} 完整字段失败，退回最小字段集：${full.error}`)
 
   const minimal = await walkLeads(leadsUrl(formId, pageAccessToken, sinceUnix, LEAD_FIELDS_MINIMAL))
   if (minimal.error) {
-    return { rows: minimal.rows, error: `${full.error} / 兜底也失败: ${minimal.error}` }
+    // 兜底那次的 detail 才是「最小字段集也被拒」的原因，是授权缺口的真凭据；
+    // 完整字段那次很可能只是字段名不认识（换字段就能好），拿它判会误判成缺权限。
+    return {
+      rows: minimal.rows,
+      error: `${full.error} / 兜底也失败: ${minimal.error}`,
+      detail: minimal.detail,
+    }
   }
   return minimal
 }

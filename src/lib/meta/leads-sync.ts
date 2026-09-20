@@ -18,7 +18,8 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { authorizePageSync } from '@/lib/meta/page-sync-authorization'
-import { fetchFormLeads, fetchPageLeadForms } from '@/lib/meta/lead-forms'
+import { fetchFormLeads, fetchPageLeadForms, type GraphErrorDetail } from '@/lib/meta/lead-forms'
+import { firstLeadsSyncBlocker, type LeadsSyncBlocker } from '@/lib/meta/leads-sync-blocker'
 import { ingestMetaLead } from '@/lib/crm/meta-lead'
 import type { SubscribeMemberResult } from '@/lib/mailchimp/client'
 import type { TagRepair } from '@/lib/mailchimp/tags'
@@ -65,6 +66,16 @@ export interface MetaLeadsSyncResult {
   mailchimp: Record<string, number>
   skipped?: 'no_page_id' | 'no_meta_token' | 'no_page_token' | 'page_not_verified'
   error?: string
+  /**
+   * 有值 = 这次取不到线索是**授权缺口**，人不动手就永远不会好（令牌被拒 /
+   * 缺主页权限 / 绑定没核实）。判据见 `meta/leads-sync-blocker.ts`。
+   *
+   * 定时任务据此把这个客户挪出 `failed_count`、也不用它染红整轮
+   * （见 `api/cron/meta-leads-sync/route.ts` 的 status 语义），改为每日待办
+   * 给这个客户单独下发一条（`pm-todo/leads-sync-blocked-items.ts`）。
+   * `error` 仍然照常带上原话 —— 少一个字都会让追查回到猜。
+   */
+  blocked?: LeadsSyncBlocker
 }
 
 /**
@@ -153,20 +164,32 @@ export async function syncClientMetaLeads(
   const auth = await authorizePageSync(supabaseAdmin, client.id, pageId, process.env)
   if (!auth.ok) {
     if (auth.skipped !== 'page_not_verified') return { ...base, skipped: auth.skipped }
-    // 记成 error：定时任务按 error 计失败、日报会点名，暂停不能看起来像「今天没人填表」。
-    return { ...base, skipped: auth.skipped, error: `主页绑定没核实，线索同步已暂停（${auth.reason}）` }
+    // 记成 error：暂停不能看起来像「今天没人填表」。但它是**授权缺口**不是故障 ——
+    // 标 blocked，让整轮 status 不被它染红，改由每日待办点名（下发在
+    // pm-todo/page-binding-items.ts，这条卡点那边已经在管）。
+    return {
+      ...base,
+      skipped: auth.skipped,
+      blocked: 'page_binding_unverified',
+      error: `主页绑定没核实，线索同步已暂停（${auth.reason}）`,
+    }
   }
   const pageToken = auth.pageToken
 
   const defaultCountry = resolveDefaultCountry(client)
   const errors: string[] = []
+  // Graph 报错里机器可读的那半边，专门用来分辨「重跑会好」还是「只有人能修」。
+  const details: (GraphErrorDetail | null | undefined)[] = []
 
   const formsRead = await fetchPageLeadForms(pageId, pageToken)
-  if (formsRead.error) errors.push(formsRead.error)
+  if (formsRead.error) {
+    errors.push(formsRead.error)
+    details.push(formsRead.detail)
+  }
   // 表单一个都没列出来 + 有报错 = 取数就没通（多半是 token 缺 leads_retrieval）。
   // 直接如实回报，别让它看起来像「今天没人填表」。
   if (formsRead.rows.length === 0) {
-    return { ...base, ...(errors.length ? { error: errors.join(' | ') } : {}) }
+    return { ...base, ...problem(errors, details) }
   }
 
   const since = await getLeadWatermark(client.id)
@@ -183,7 +206,10 @@ export async function syncClientMetaLeads(
     forms++
     try {
       const leadsRead = await fetchFormLeads(form.formId, pageToken, since)
-      if (leadsRead.error) errors.push(`表单 ${form.formId}: ${leadsRead.error}`)
+      if (leadsRead.error) {
+        errors.push(`表单 ${form.formId}: ${leadsRead.error}`)
+        details.push(leadsRead.detail)
+      }
       leadsFetched += leadsRead.rows.length
 
       for (const lead of leadsRead.rows) {
@@ -218,6 +244,21 @@ export async function syncClientMetaLeads(
     skippedNoIdentity,
     failed,
     mailchimp,
-    ...(errors.length ? { error: errors.join(' | ') } : {}),
+    ...problem(errors, details),
   }
+}
+
+/**
+ * 攒下来的报错 → 结果里的 `error` / `blocked` 两个字段。
+ *
+ * 一条报错都没有时返回空对象 —— 不能写成 `error: undefined`，那会让
+ * `'error' in result` 为真，而这条结果本来是干净的。
+ */
+function problem(
+  errors: readonly string[],
+  details: readonly (GraphErrorDetail | null | undefined)[],
+): { error?: string; blocked?: LeadsSyncBlocker } {
+  if (errors.length === 0) return {}
+  const blocked = firstLeadsSyncBlocker(details)
+  return { error: errors.join(' | '), ...(blocked ? { blocked } : {}) }
 }

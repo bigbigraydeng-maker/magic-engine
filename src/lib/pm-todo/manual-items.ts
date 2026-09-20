@@ -32,6 +32,7 @@ import { findMessengerStopSignals } from '@/lib/crm/messenger-stop-signal'
 import { pushEmailReplyItems, type EmailReplyItemKind } from './email-reply-items'
 import { pushBindingRequestItems, type BindingRequestItemKind } from './binding-request-items'
 import { pushPageBindingItems, type PageBindingItemKind } from './page-binding-items'
+import { fetchLeadsSyncBlockedTodos, type LeadsSyncBlockedItemKind } from './leads-sync-blocked-items'
 import { AUTO_LANDED_AGENT } from '@/lib/diagnostic/auto-prescribe'
 import { isHandAddedItem } from '@/lib/diagnostic/prescription-landing'
 import { LINKEDIN_PROGRESS_CLIENT_ID, LINKEDIN_PROGRESS_SOURCE } from '@/lib/linkedin-progress/constants'
@@ -47,7 +48,14 @@ import { LINKEDIN_PROGRESS_CLIENT_ID, LINKEDIN_PROGRESS_SOURCE } from '@/lib/lin
  * kept=0，整套排查产出为零。
  */
 // facebook_page_binding_unverified：同步被暂停时客人私信/留资不进 CRM，链接坏了也得有人看见（AD-SEC-4）。
-const NEVER_DROP_KINDS = new Set<ManualItemKind>(['cross_client_leak', 'facebook_page_binding_unverified'])
+// leads_sync_authorization_blocked：同上，而且 2026-09-20 起定时任务**不再**为这类卡点
+//   整体判失败（route.ts）—— 这条待办成了它唯一的出口，被链接闸丢掉就等于又变回
+//   「发现死在日志里」，而这次连那行红记录都没有了。
+const NEVER_DROP_KINDS = new Set<ManualItemKind>([
+  'cross_client_leak',
+  'facebook_page_binding_unverified',
+  'leads_sync_authorization_blocked',
+])
 
 /** Meta queued this long without being applied = the applier is stuck. */
 const META_PENDING_STALE_DAYS = 3
@@ -119,6 +127,8 @@ export type ManualItemKind =
   | BindingRequestItemKind
   /** Facebook 主页绑定没核实：私信/线索/评论回复已暂停，或还在跑但没核实记录（AD-SEC-4）*/
   | PageBindingItemKind
+  /** Facebook 留资表单同步卡在授权上（令牌被 Meta 拒 / 缺读表单的权限）—— 只有人能重新授权 */
+  | LeadsSyncBlockedItemKind
   /** 排期发的 Facebook 帖子发出去了，但一直拿不到帖子编号 —— 成绩收不回来 */
   | DailyPlanMeasurementItemKind
   /** 私信客服健康心跳查出问题（issue #1587）：消息量骤降 / 验证器拦截率或出错率过高 / 退订登记写入失败 */
@@ -511,6 +521,12 @@ export async function loadManualItems(
 
   // 主页绑定没核实 → 私信/线索同步被暂停（AD-SEC-4）。读失败时自己生成一条待办，不靠 catch。
   await pushPageBindingItems(supabase, items, process.env)
+
+  // 留资表单同步卡在授权上（令牌被 Meta 拒 / 缺读表单的权限）—— 这类卡点重跑不会好，
+  // 而定时任务已经不再为它染红整轮（route.ts），所以这条通道是它唯一的出口。
+  await pushLeadsSyncBlockedItems(supabase, items, now, nameOf).catch((e) =>
+    console.warn('[manual-items] 留资同步授权待办生成失败（不阻塞其他待办）:', e),
+  )
 
   // 归因侧两条通道（黑洞 / 孤儿数据），理由见 attribution-items.ts
   await pushAttributionItems(supabase, items, ids, nameOf, now)
@@ -1961,6 +1977,32 @@ async function pushCommentScopeItems(
       kind: t.kind,
       client_id: t.client_id,
       client_name: nameOf(t.client_id),
+      what: t.what,
+      how: t.how,
+      href: t.href,
+    })
+  }
+}
+
+/**
+ * 留资表单同步卡在授权上的客户 → 下发。判据和话术见 leads-sync-blocked-items.ts。
+ *
+ * 客户名优先用活跃名单里的（`nameOf`），拿不到才退回运行记录里存的那个 ——
+ * 运行记录是快照，客户改过名之后它会一直说旧名字。
+ */
+async function pushLeadsSyncBlockedItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+  nameOf: (id: string) => string,
+): Promise<void> {
+  const todos = await fetchLeadsSyncBlockedTodos(supabase, now)
+  for (const t of todos) {
+    const known = nameOf(t.client_id)
+    items.push({
+      kind: t.kind,
+      client_id: t.client_id,
+      client_name: known === '未知客户' ? t.client_name : known,
       what: t.what,
       how: t.how,
       href: t.href,

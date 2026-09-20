@@ -111,7 +111,7 @@ describe('getLeadWatermark', () => {
 })
 
 describe('syncClientMetaLeads', () => {
-  it('AD-SEC-4：主页没核实是这个客户的 → 一个表单都不读，并记成 error 让定时任务算失败', async () => {
+  it('AD-SEC-4：主页没核实是这个客户的 → 一个表单都不读，记成 error 且标成「等人处理」', async () => {
     mock(authorizePageSync).mockResolvedValue({ ok: false, skipped: 'page_not_verified', reason: 'bound_to_other_client' })
 
     const res = await syncClientMetaLeads(CLIENT)
@@ -119,6 +119,9 @@ describe('syncClientMetaLeads', () => {
     expect(mock(authorizePageSync)).toHaveBeenCalledWith(expect.anything(), CLIENT.id, CLIENT.facebook_page_id, expect.anything())
     expect(res.skipped).toBe('page_not_verified')
     expect(res.error).toContain('bound_to_other_client')
+    // 2026-09-20：绑定没核实是只有人能修的卡点，标 blocked 让整轮 status 不被它染红
+    // （定时任务侧的断言在 app/api/cron/meta-leads-sync/__tests__/route.test.ts）。
+    expect(res.blocked).toBe('page_binding_unverified')
     expect(mock(fetchPageLeadForms)).not.toHaveBeenCalled()
     expect(mock(fetchFormLeads)).not.toHaveBeenCalled()
   })
@@ -295,5 +298,77 @@ describe('Mailchimp 出口结果记账（防第二层静默）', () => {
     const res = await syncClientMetaLeads(CLIENT)
 
     expect(res.mailchimp).toEqual({})
+  })
+})
+
+/**
+ * 「重跑会好」还是「只有人能修」—— 这个分岔决定整轮 status 红不红，以及这个客户
+ * 会不会被下发成今日待办。判据本身在 leads-sync-blocker.test.ts，这里钉的是
+ * 编排层有没有真把它接上去（2026-09-20 之前整条链路根本不存在）。
+ */
+describe('syncClientMetaLeads · 授权缺口 vs 故障', () => {
+  /** 2026-09-20 生产上 Magic Lab Class / New Asian Logistics 的报错原文。 */
+  const REAL_190 = {
+    error: 'leadgen_forms HTTP 400: {"error":{"code":190}}',
+    detail: { code: 190, message: "permission(s) must be granted before impersonating a user's page." },
+  }
+
+  it('列表单时被 Meta 拒（#190）→ 标成 token_rejected，报错原话照样带上', async () => {
+    mock(fetchPageLeadForms).mockResolvedValue({ rows: [], ...REAL_190 })
+
+    const res = await syncClientMetaLeads(CLIENT)
+    expect(res.blocked).toBe('token_rejected')
+    expect(res.error).toContain('190')
+  })
+
+  it('读某个表单的 lead 时被拒（#200 缺权限）→ 一样标成等人处理', async () => {
+    mock(fetchPageLeadForms).mockResolvedValue({
+      rows: [{ formId: 'f1', name: '表单一', status: 'ACTIVE' }],
+      error: null,
+    })
+    mock(fetchFormLeads).mockResolvedValue({
+      rows: [],
+      error: '(#200) Requires pages_manage_ads permission',
+      detail: { code: 200, message: '(#200) Requires pages_manage_ads permission' },
+    })
+
+    const res = await syncClientMetaLeads(CLIENT)
+    expect(res.blocked).toBe('missing_permission')
+  })
+
+  it('🔴 限流 / 5xx 不许被说成授权缺口 —— 那样真故障就藏进「等人处理」里了', async () => {
+    mock(fetchPageLeadForms).mockResolvedValue({
+      rows: [],
+      error: 'leadgen_forms HTTP 500: {"error":{"code":1}}',
+      detail: { code: 1, message: 'Please reduce the amount of data' },
+    })
+
+    const res = await syncClientMetaLeads(CLIENT)
+    expect(res.error).toBeTruthy()
+    expect(res.blocked).toBeUndefined()
+  })
+
+  it('Graph 没给 detail（网络断 / 返回 HTML）→ 按故障处理', async () => {
+    mock(fetchPageLeadForms).mockResolvedValue({
+      rows: [],
+      error: 'leadgen_forms 网络错误: fetch failed',
+      detail: null,
+    })
+
+    const res = await syncClientMetaLeads(CLIENT)
+    expect(res.error).toContain('网络错误')
+    expect(res.blocked).toBeUndefined()
+  })
+
+  it('一条报错都没有时不写 blocked，也不写 error', async () => {
+    mock(fetchPageLeadForms).mockResolvedValue({
+      rows: [{ formId: 'f1', name: '表单一', status: 'ACTIVE' }],
+      error: null,
+    })
+    mock(fetchFormLeads).mockResolvedValue({ rows: [lead('l1')], error: null })
+
+    const res = await syncClientMetaLeads(CLIENT)
+    expect('blocked' in res).toBe(false)
+    expect('error' in res).toBe(false)
   })
 })

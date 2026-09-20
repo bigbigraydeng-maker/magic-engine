@@ -19,6 +19,15 @@
  *   1. 取不到线索 —— 人根本没进来（`summariseFailures`）
  *   2. 线索进来了，但没进邮件名单 —— 人进了 CRM，Mailchimp 出口把他丢了
  *      （`summariseOutletGaps`）
+ * 还有**第 3 类**故意不报进 `error_message`：授权缺口（`blocked`）—— 令牌被
+ * Meta 拒了、缺主页权限、主页绑定没核实。它们跟前两类的区别不是轻重，是
+ * **「重跑会不会好」**：这三种重跑一万次也一样，只有人动手才会好。
+ * 2026-09-18~09-20 实测：3 家挂在授权缺口上，于是这个每 2 小时一跑的任务
+ * 26 小时里 13 次全红，而正常的 2 家（含 CTS Tours NZ）真出事时，日检和任何
+ * 按 status 报警的东西都分不出来 —— 红色里再多一个红色。所以授权缺口改走
+ * 每日待办（`pm-todo/leads-sync-blocked-items.ts`），不再染红整轮。
+ * 例外见 `isSystemicOutage`：一家正常的都不剩时，那就是系统性故障，照样红。
+ *
  * 第 2 类是 2026-08~09 的第二次静默事故：`clients.mailchimp_audience_id`
  * 那一列没 apply 到生产，出口每小时静默 skip，`leadsIngested` 照常涨，
  * 看起来一切正常，一整个月没人看得见。它**不是**「取不到线索」，说成那样
@@ -27,11 +36,20 @@
  */
 
 import { isOutletGap, outletGapLabel } from '@/lib/mailchimp/outlet-tally'
+import type { LeadsSyncBlocker } from '@/lib/meta/leads-sync-blocker'
 
 /** 只取这个摘要用得上的几个字段，故意不绑死 MetaLeadsSyncResult 全貌。 */
 export interface LeadsSyncOutcome {
   clientName: string | null
   error?: string
+  /**
+   * 有值 = 这家取不到线索是**授权缺口**（令牌被拒 / 缺权限 / 绑定没核实），
+   * 人不动手永远不会好。判据见 `meta/leads-sync-blocker.ts`。
+   * 这类**不进** `error_message`，改由每日待办点名 —— 理由见本文件头。
+   */
+  blocked?: LeadsSyncBlocker
+  /** 这一轮这家被同步闸或配置挡住、压根没去 Meta 取数（`page_not_verified` 等）。 */
+  skipped?: string
   /**
    * Mailchimp 出口这一轮的结果分布，key = `subscribed` / `already_member` /
    * `skipped:<reason>` / `failed:<reason>`，value = 条数。由
@@ -51,7 +69,9 @@ const MAX_REASON_CHARS = 160
  * 不去重会把邮件仅有的 200 字符用同一句话刷满，真正不同的病因反而被挤掉。
  */
 export function summariseFailures(results: readonly LeadsSyncOutcome[]): string | undefined {
-  const failures = results.filter((r) => r.error)
+  // `blocked` 的那几家不在这里报：它们是等人处理的授权缺口，不是这一轮的故障。
+  // 混进来就等于把这条任务钉死在红色上（见文件头 2026-09 的实测）。
+  const failures = results.filter((r) => r.error && !r.blocked)
   if (failures.length === 0) return undefined
 
   const byReason = groupByReason(failures.map((f) => ({ name: f.clientName, reason: f.error ?? '' })))
@@ -84,6 +104,39 @@ export function summariseOutletGaps(results: readonly LeadsSyncOutcome[]): strin
 }
 
 /**
+ * 授权缺口那一行 —— **不进** `error_message`，只进 `summary.blocked`，
+ * 给追查的人一眼看清「这一轮有哪几家卡在等人处理上」。没有时 undefined。
+ *
+ * 跟另外两类一样按原因分组：一把公用令牌失效会同时打中好几家。
+ */
+export function summariseBlocked(results: readonly LeadsSyncOutcome[]): string | undefined {
+  const blocked = results.filter((r) => r.blocked)
+  if (blocked.length === 0) return undefined
+
+  const byReason = groupByReason(
+    blocked.map((b) => ({ name: b.clientName, reason: `${b.blocked} — ${b.error ?? ''}` })),
+  )
+  return `${blocked.length}/${results.length} 个客户卡在授权上，等人处理 — ${byReason.join(' ‖ ')}`
+}
+
+/**
+ * 这一轮是不是**系统性**故障 —— 也就是整轮 status 该不该判 failed。
+ *
+ * 判据只有一条：**一家跑通的都不剩**。
+ * 只要还有客户正常取到数，这一轮的管道本身就是通的，个别客户的授权缺口是那家
+ * 自己的事，由待办点名，不该染红整条任务（否则 CTS 真断供时看不出区别）。
+ * 反过来，全军覆没时哪怕每家的报错各不相同，也当系统性故障处理 —— 那多半是
+ * 我们这头的应用权限、公用令牌或 Graph 版本整个出了事，必须有人当天看见。
+ *
+ * 只有一个客户配了主页时，这条判据等价于「它挂了就红」—— 分不出来，红是安全的
+ * 那一侧：这时候确实一条线索都进不来。
+ */
+export function isSystemicOutage(results: readonly LeadsSyncOutcome[]): boolean {
+  if (results.length === 0) return false
+  return results.every((r) => Boolean(r.error) || Boolean(r.skipped))
+}
+
+/**
  * 喂给 `cronRun.finish({ error })` 的那一行。两类病都没有时 undefined
  * （这次跑仍标 completed，不制造新噪音）。
  *
@@ -92,7 +145,11 @@ export function summariseOutletGaps(results: readonly LeadsSyncOutcome[]): strin
  * `cron_run_logs.error_message` 里，追查时不会丢。
  */
 export function summariseSyncProblems(results: readonly LeadsSyncOutcome[]): string | undefined {
-  const parts = [summariseFailures(results), summariseOutletGaps(results)].filter(
+  // 全军覆没时把授权缺口也说出来：这一轮要判 failed，而 `error_message` 是日报
+  // 唯一会显示的那句话 —— 不带上它，红了却说不出是什么事，又回到 2026-08 那次
+  // 「24 行一模一样的破折号」。
+  const blocked = isSystemicOutage(results) ? summariseBlocked(results) : undefined
+  const parts = [summariseFailures(results), blocked, summariseOutletGaps(results)].filter(
     (p): p is string => Boolean(p),
   )
   return parts.length > 0 ? parts.join('；') : undefined

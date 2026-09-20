@@ -10,6 +10,11 @@
  *
  * 开关：`clients.facebook_page_id` 有值的客户才同步（跟私信同步同一个开关）。
  *
+ * 整轮 status 的语义（2026-09-20 改）：**只反映这一轮有没有系统性故障**。
+ * 个别客户的授权缺口（令牌被拒 / 缺主页权限 / 绑定没核实）不再染红整条任务 ——
+ * 它们重跑不会好，只有人动手才会好，所以改走每日待办一家一条地点名。
+ * 判据和实测背景见 `lib/meta/leads-sync-blocker.ts` 与 `leads-sync-alert.ts`。
+ *
  * Auth:
  *   GET : Authorization: Bearer ${CRON_SECRET}   （Render 定时触发）
  *   POST: x-cron-secret: ${CRON_SECRET}          （人手补跑）
@@ -21,9 +26,13 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { syncClientMetaLeads, type MetaLeadsSyncClient } from '@/lib/meta/leads-sync'
+import {
+  syncClientMetaLeads,
+  type MetaLeadsSyncClient,
+  type MetaLeadsSyncResult,
+} from '@/lib/meta/leads-sync'
 import { startCronRun } from '@/lib/cron/run-logger'
-import { summariseSyncProblems } from '@/lib/meta/leads-sync-alert'
+import { summariseBlocked, summariseSyncProblems } from '@/lib/meta/leads-sync-alert'
 
 // 一个客户可能有多个表单，每个表单还要翻页；给足时间。
 export const maxDuration = 600
@@ -41,7 +50,9 @@ async function run(): Promise<NextResponse> {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  const results = []
+  // 显式标类型：兜底那支 push 的对象没有 blocked / skipped，不标就被推成一个
+  // 缺字段的联合类型，下面按 blocked 分流会编不过。
+  const results: MetaLeadsSyncResult[] = []
   for (const client of (clients ?? []) as MetaLeadsSyncClient[]) {
     // syncClientMetaLeads 自己吞异常，这层 try 给它之外的意外兜底：
     // 一个客户炸掉不能让其它客户今天都不同步。
@@ -65,10 +76,17 @@ async function run(): Promise<NextResponse> {
 
   const newContacts = results.reduce((n, r) => n + r.newContacts, 0)
   const leadsIngested = results.reduce((n, r) => n + r.leadsIngested, 0)
-  // 语义固定：**取不到线索的客户数**。Mailchimp 出口把人丢了不算在内 —— 那些人
-  // 已经进了 CRM，把整个客户标成 failed 是过度告警。出口的问题走 error_message
-  // 单独成句（`summariseSyncProblems`），日报里两类病分得开。
-  const failed = results.filter((r) => r.error).length
+  // 语义固定：**这一轮取不到线索、而且重跑有可能好的客户数**。两类刻意不算在内：
+  //   · Mailchimp 出口把人丢了 —— 那些人已经进了 CRM，标 failed 是过度告警。
+  //     出口的问题走 error_message 单独成句（`summariseSyncProblems`），日报里
+  //     两类病分得开。
+  //   · 授权缺口（`blocked`：令牌被拒 / 缺主页权限 / 绑定没核实）—— 重跑一万次
+  //     也一样，只有人动手才会好。算进来就等于把这条任务钉死在红色上：
+  //     2026-09-18~09-20 实测 3 家卡在授权上，26 小时 13 次跑全红，于是正常的
+  //     2 家（含 CTS Tours NZ）真断供时，日检和按 status 的报警分不出区别。
+  //     这几家改由每日待办逐个点名（`pm-todo/leads-sync-blocked-items.ts`）。
+  const failed = results.filter((r) => r.error && !r.blocked).length
+  const blocked = results.filter((r) => r.blocked)
 
   // Mailchimp 出口的全局分布。摊平成一层是为了在 summary 顶层一眼看见
   // 「这一轮有多少条压根没进邮件名单、卡在哪个 reason 上」—— 逐客户的明细
@@ -80,9 +98,18 @@ async function run(): Promise<NextResponse> {
 
   await cronRun.finish({
     processed: results.length,
-    completed: results.length - failed,
+    completed: results.length - failed - blocked.length,
     failed,
-    summary: { newContacts, leadsIngested, mailchimp, results },
+    // `blocked` / `blockedSummary` 是**给人追查用的**，不参与告警条件 ——
+    // 告警那一路走每日待办，一家一条、带着「点哪里」和直达链接。
+    summary: {
+      newContacts,
+      leadsIngested,
+      mailchimp,
+      blocked: blocked.length,
+      blockedSummary: summariseBlocked(results) ?? null,
+      results,
+    },
     // 有客户取不到数就必须把原话带进 error_message —— 日报邮件的「错误原因」列
     // 读的就是这个字段。2026-08-21~08-30 这里一直是 null,于是日报每天照发
     // 「meta-leads-sync 4 failed —」,一屏破折号没有一个字说明是什么事,
@@ -93,6 +120,10 @@ async function run(): Promise<NextResponse> {
     // status = 'failed'` 的跑,而 finish() 见到 error 才会把 status 标成
     // failed —— 只有出口坏掉(failed_count = 0)时,这一句就是这次跑能不能被
     // 日报看见的唯一开关。
+    //
+    // 🔴 反过来也要守住：授权缺口**不从这里出**（见 summariseSyncProblems），
+    // 否则这一句每轮都非空、status 每轮都 failed，这条任务就永远是红的。
+    // 唯一的例外是一家跑通的都不剩 —— 那是系统性故障，必须当天红。
     error: summariseSyncProblems(results),
   })
 
@@ -101,6 +132,7 @@ async function run(): Promise<NextResponse> {
     clients: results.length,
     newContacts,
     leadsIngested,
+    blocked: blocked.length,
     mailchimp,
     results,
   })
