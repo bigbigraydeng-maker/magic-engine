@@ -55,6 +55,7 @@
 | `PERPLEXITY_API_KEY` | AI 可见度追踪引擎之一 | Render-web | ✅ |
 | `GEMINI_API_KEY` | Google Gemini（AI 可见度追踪第 4 引擎） | Render-web | ❌ |
 | `AI_TRACKER_ENABLE_CLAUDE` | 开关：AI Tracker 是否跑 Claude 引擎 | Render-web | ❌ |
+| `TYPESAFE_API_KEY` | Jev 判断模型（`src/lib/jev/client.ts`，对外封装名「Compliance Engine」）—SEO 事实核对（`fact-check.ts`，PR #1826，2026-09-20 合并）等判断点用。**已知问题**：截至 2026-09-20，crazycontent/Render-web 从未配过这个变量——调用必抛错，`checkFactPreservation` fail-closed 恒定返回「有矛盾」，等于这道闸从合并起就没真的判断过一次。CTS 的 `meta_cycle_enabled` 目前是关的，暂不影响线上功能，但下次开关前必须先配好并跑一次真调用验证（要看到一次 `consistent:true` 和一次 `consistent:false`） | Render-web | 🔴 |
 
 ## 3. 视觉 / 视频 / 素材
 
