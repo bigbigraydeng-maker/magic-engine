@@ -74,12 +74,18 @@ describe('注册与命名空间', () => {
 })
 
 describe('buildWatchEvents', () => {
-  it('每个名单条目变成一个事件，事件名和 client_id 对得上', () => {
+  it('每个名单条目变成一个事件，事件名、client_id、semrush_db 都对得上', () => {
     const entries: WatchRosterEntry[] = [{ clientId: CTS, semrushDb: 'nz' }]
     const events = buildWatchEvents(entries, '2026-W38')
     expect(events).toEqual([
-      { id: `competitor-watch-2026-W38-${CTS}`, name: COMPETITOR_WATCH_DUE_EVENT, data: { client_id: CTS, week_key: '2026-W38' } },
+      { id: `competitor-watch-2026-W38-${CTS}`, name: COMPETITOR_WATCH_DUE_EVENT, data: { client_id: CTS, week_key: '2026-W38', semrush_db: 'nz' } },
     ])
+  })
+
+  it('🔴 roster 里 semrushDb 是 null 时，事件里也是 null——不许在派单这一步悄悄补成 au', () => {
+    const entries: WatchRosterEntry[] = [{ clientId: CTS, semrushDb: null }]
+    const events = buildWatchEvents(entries, '2026-W38')
+    expect(events[0].data.semrush_db).toBeNull()
   })
 })
 
@@ -138,10 +144,29 @@ describe('干活函数行为（依赖注入版）', () => {
       shouldSkip: async () => ({ skip: false, reason: null }),
     })
     const harness = fakeStep()
+    // 同上方 optsOf() 注释说明的已跑通做法：直接读 Inngest createFunction 返回值的私有 .fn 字段。
     const result = await (fn as unknown as { fn: (a: { event: { data: unknown }; step: unknown }) => Promise<unknown> }).fn({
-      event: { data: { client_id: CTS, week_key: '2026-W38' } },
+      event: { data: { client_id: CTS, week_key: '2026-W38', semrush_db: 'nz' } },
       step: harness.step,
     })
     expect(result).toMatchObject({ status: 'completed', domains_scanned: 19, keywords_written: 42 })
+  })
+
+  it('🔴 事件负载里的 semrush_db 原样传给 takeSnapshot——不许在这一层又丢掉', async () => {
+    const seen: Array<string | null> = []
+    const fn = createCompetitorWatchRunOneFunction({
+      takeSnapshot: async (_clientId, semrushDb) => {
+        seen.push(semrushDb)
+        return { domainsScanned: 1, keywordsWritten: 1 }
+      },
+      shouldSkip: async () => ({ skip: false, reason: null }),
+    })
+    const harness = fakeStep()
+    // 同上方 optsOf() 注释说明的已跑通做法：直接读 Inngest createFunction 返回值的私有 .fn 字段。
+    await (fn as unknown as { fn: (a: { event: { data: unknown }; step: unknown }) => Promise<unknown> }).fn({
+      event: { data: { client_id: CTS, week_key: '2026-W38', semrush_db: 'nz' } },
+      step: harness.step,
+    })
+    expect(seen).toEqual(['nz'])
   })
 })

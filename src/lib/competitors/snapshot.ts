@@ -8,7 +8,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
-import { getKeywordsForSite } from '@/lib/dataforseo/labs'
+import { getKeywordsForSite, type LabsKeyword } from '@/lib/dataforseo/labs'
 import { locationCodeFor } from '@/lib/dataforseo/client'
 import { getClientCompetitorDomains } from '@/lib/competitors/resolver'
 import { MAX_COMPETITOR_DOMAINS } from '@/lib/competitors/watch'
@@ -28,6 +28,47 @@ interface ScoredKeyword {
 }
 
 /**
+ * 逐域名打 DataForSEO —— 用 allSettled 不用 all：19 个域名里 1 个超时/报错不该把另外
+ * 18 个已经成功、已经花了钱的结果一起扔掉。复审揪出来的坑：原来用 Promise.all，
+ * 一个域名失败整份快照就抛异常、整周颗粒无收，还没有重试（重试等于重复扣费，见
+ * watch.ts 的注释），下周一之前这个客户完全没有竞品数据。
+ */
+async function fetchAllDomains(domains: readonly string[], locationCode: number): Promise<LabsKeyword[][]> {
+  const settled = await Promise.allSettled(
+    domains.map((domain) => getKeywordsForSite(domain, locationCode, KEYWORDS_PER_DOMAIN_LIMIT)),
+  )
+  const ok: LabsKeyword[][] = []
+  settled.forEach((result, i) => {
+    if (result.status === 'fulfilled') {
+      ok.push(result.value)
+    } else {
+      console.error(`[competitor-watch] ${domains[i]} 拉取失败，跳过（不影响其它域名）: ${String(result.reason)}`)
+    }
+  })
+  return ok
+}
+
+/** 按 min_volume 过滤、按搜索量排出前 N 条摘要——抽出来只是为了把主函数压回 50 行以内。 */
+function aggregateKeywords(perDomain: readonly LabsKeyword[][]): { keywordsCount: number; totalFetched: number; topKeywords: ScoredKeyword[] } {
+  let keywordsCount = 0
+  let totalFetched = 0
+  const scored: ScoredKeyword[] = []
+
+  perDomain.forEach((rawItems) => {
+    totalFetched += rawItems.length
+    rawItems
+      .filter((item) => (item.search_volume ?? 0) >= MIN_VOLUME)
+      .forEach((item) => {
+        keywordsCount += 1
+        scored.push({ keyword: item.keyword, volume: item.search_volume ?? 0, kd: item.keyword_difficulty ?? 0 })
+      })
+  })
+
+  const topKeywords = scored.sort((a, b) => b.volume - a.volume).slice(0, TOP_KEYWORDS_LIMIT)
+  return { keywordsCount, totalFetched, topKeywords }
+}
+
+/**
  * 给一个客户拍一次快照：解出竞品域名 → 逐个打 DataForSEO → 汇总写一行 `competitor_snapshots`。
  *
  * 🔴 域名清单为空（客户没配竞品）不算失败 —— 返回 domainsScanned=0，调用方
@@ -40,35 +81,8 @@ export async function takeCompetitorSnapshot(clientId: string, semrushDb: string
   }
 
   const db = semrushDb || 'au'
-  const locationCode = locationCodeFor(db)
-
-  const perDomain = await Promise.all(
-    domains.map((domain) => getKeywordsForSite(domain, locationCode, KEYWORDS_PER_DOMAIN_LIMIT)),
-  )
-
-  let keywordsCount = 0
-  let totalFetched = 0
-  const scored: ScoredKeyword[] = []
-
-  perDomain.forEach((rawItems) => {
-    totalFetched += rawItems.length
-    rawItems
-      .filter((item) => (item.search_volume ?? 0) >= MIN_VOLUME)
-      .forEach((item) => {
-        keywordsCount += 1
-        scored.push({
-          keyword: item.keyword,
-          volume: item.search_volume ?? 0,
-          kd: item.keyword_difficulty ?? 0,
-        })
-      })
-  })
-
-  const topKeywords = scored
-    .sort((a, b) => b.volume - a.volume)
-    .slice(0, TOP_KEYWORDS_LIMIT)
-
-  const unitsConsumed = totalFetched * 10
+  const perDomain = await fetchAllDomains(domains, locationCodeFor(db))
+  const { keywordsCount, totalFetched, topKeywords } = aggregateKeywords(perDomain)
 
   const { error } = await supabaseAdmin.from('competitor_snapshots').insert({
     client_id: clientId,
@@ -77,7 +91,7 @@ export async function takeCompetitorSnapshot(clientId: string, semrushDb: string
     semrush_db: db,
     min_volume: MIN_VOLUME,
     keywords_count: keywordsCount,
-    units_consumed: unitsConsumed,
+    units_consumed: totalFetched * 10,
     top_keywords: topKeywords,
   })
 

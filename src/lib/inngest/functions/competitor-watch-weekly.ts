@@ -48,12 +48,22 @@ export function buildWatchEvents(
   entries: readonly WatchRosterEntry[],
   weekKey: string,
   attempt?: string,
-): Array<{ id: string; name: string; data: { client_id: string; week_key: string } }> {
+): Array<{ id: string; name: string; data: { client_id: string; week_key: string; semrush_db: string | null } }> {
   return entries.map((e) => ({
     id: watchEventId(e.clientId, weekKey, attempt),
     name: COMPETITOR_WATCH_DUE_EVENT,
-    data: { client_id: e.clientId, week_key: weekKey },
+    data: { client_id: e.clientId, week_key: weekKey, semrush_db: e.semrushDb },
   }))
+}
+
+/** 派单开跑那一刻的记录 —— 抽成独立函数只是为了把 fan-out 闭包压回 50 行以内。 */
+async function startWatchFanOutRun(): Promise<{ runId: string; startedAt: number; weekKey: string; createdAt: string }> {
+  return {
+    runId: await startCronRunId(COMPETITOR_WATCH_JOB),
+    startedAt: Date.now(),
+    weekKey: isoWeekKey(new Date()),
+    createdAt: new Date().toISOString(),
+  }
 }
 
 /** 依赖注入版，便于集成测试注入假名单 / 假发送。 */
@@ -74,12 +84,7 @@ export function createCompetitorWatchFanOutFunction(deps: {
     async ({ step }): Promise<WatchFanOutReceipt> => {
       // 🔴 每一处副作用都必须在 step 里，理由同 flywheel-seo-weekly.ts：Inngest 在每个
       //    step 边界之后会把函数体从头重放一遍，step 外的代码每遍都真跑。
-      const started = await step.run('log-start', async () => ({
-        runId: await startCronRunId(COMPETITOR_WATCH_JOB),
-        startedAt: Date.now(),
-        weekKey: isoWeekKey(new Date()),
-        createdAt: new Date().toISOString(),
-      }))
+      const started = await step.run('log-start', startWatchFanOutRun)
       const run = cronRunHandle(COMPETITOR_WATCH_JOB, started.runId, started.startedAt)
       const base = {
         job: COMPETITOR_WATCH_JOB,
@@ -129,7 +134,7 @@ export function createCompetitorWatchFanOutFunction(deps: {
 
 /** 依赖注入版：便于直接注入假的 takeSnapshot / 假的闸，不碰真 provider。 */
 export function createCompetitorWatchRunOneFunction(deps: {
-  takeSnapshot: (clientId: string) => ReturnType<typeof takeCompetitorSnapshot>
+  takeSnapshot: (clientId: string, semrushDb: string | null) => ReturnType<typeof takeCompetitorSnapshot>
   shouldSkip: (clientId: string) => Promise<{ skip: boolean; reason: string | null }>
 }) {
   return inngest.createFunction(
@@ -184,11 +189,9 @@ export const competitorWatchWeeklyFanOut = createCompetitorWatchFanOutFunction({
 })
 
 export const competitorWatchRunOne = createCompetitorWatchRunOneFunction({
-  takeSnapshot: (clientId) =>
-    // semrush_db 应该跟着客户走，但事件负载里没带（roster 里有，per-client worker 里没保留）——
-    // 见下方注释：为了让事件负载保持最简（只要 client_id/week_key 就能重放/手动补触发），
-    // takeCompetitorSnapshot 内部会用 resolver 拿到的域名去打 provider，market 默认走 'au'，
-    // 除非调用方显式传。CTS 是 au 市场，先满足这一个客户；换成别的客户前必须把 db 接回事件负载。
-    takeCompetitorSnapshot(clientId, null),
+  // semrush_db 跟着事件负载走（派单时从 clients.semrush_db 查出，见 buildWatchEvents）——
+  // 复审揪出来的坑：第一版这里硬编码传 null，任何非 AU 市场的客户开了这个开关都会被
+  // 静默当成 AU 去打 DataForSEO，数据看起来正常、其实查错了市场。现在直接透传派单时查到的值。
+  takeSnapshot: (clientId, semrushDb) => takeCompetitorSnapshot(clientId, semrushDb),
   shouldSkip: (clientId) => recentlyWatched(supabaseAdmin, clientId),
 })

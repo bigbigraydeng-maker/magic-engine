@@ -107,4 +107,19 @@ describe('takeCompetitorSnapshot', () => {
 
     await expect(takeCompetitorSnapshot(CTS, 'nz')).rejects.toThrow('db down')
   })
+
+  it('🔴 一个域名打 DataForSEO 失败，不该把另外已经成功的域名一起扔掉——复审揪出来的坑', async () => {
+    mockGetClientCompetitorDomains.mockResolvedValue(['rival-a.co.nz', 'rival-b.co.nz', 'rival-c.co.nz'])
+    mockGetKeywordsForSite.mockImplementation(async (domain: string) => {
+      if (domain === 'rival-b.co.nz') throw new Error('dataforseo 500')
+      return [{ keyword: `kw-${domain}`, search_volume: 200, keyword_difficulty: 10, cpc: 1, competition: 0.4, intent: 'commercial', position: null }]
+    })
+
+    const outcome = await takeCompetitorSnapshot(CTS, 'nz')
+
+    // 三个域名里一个失败，另外两个成功的关键词必须还在——不是抛异常、不是整份数据清零。
+    expect(outcome).toEqual({ domainsScanned: 3, keywordsWritten: 2 })
+    expect(mockInsert).toHaveBeenCalledTimes(1)
+    expect(mockInsert.mock.calls[0][0]).toMatchObject({ keywords_count: 2 })
+  })
 })

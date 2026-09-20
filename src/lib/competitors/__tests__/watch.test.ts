@@ -130,9 +130,14 @@ describe('recentlyWatched — 防重复扣费闸', () => {
 })
 
 describe('parseWatchDue', () => {
-  it('合法条子解析成功', () => {
+  it('合法条子解析成功，semrush_db 原样带出', () => {
+    const r = parseWatchDue({ client_id: CTS, week_key: '2026-W38', semrush_db: 'nz' })
+    expect(r).toEqual({ ok: true, value: { client_id: CTS, week_key: '2026-W38', semrush_db: 'nz' } })
+  })
+
+  it('🔴 没带 semrush_db 不拒绝——派回 null，干活那边再按 au 兜底，不是唯一合法值', () => {
     const r = parseWatchDue({ client_id: CTS, week_key: '2026-W38' })
-    expect(r).toEqual({ ok: true, value: { client_id: CTS, week_key: '2026-W38' } })
+    expect(r).toEqual({ ok: true, value: { client_id: CTS, week_key: '2026-W38', semrush_db: null } })
   })
 
   it.each([
@@ -140,6 +145,7 @@ describe('parseWatchDue', () => {
     [{ client_id: 'not-a-uuid', week_key: '2026-W38' }],
     [{ client_id: CTS, week_key: 'not-a-week' }],
     [{ client_id: CTS }],
+    [{ client_id: CTS, week_key: '2026-W38', semrush_db: 42 }],
   ])('缺字段/格式不对一律拒绝: %o', (raw) => {
     expect(parseWatchDue(raw).ok).toBe(false)
   })
@@ -152,7 +158,20 @@ describe('watchEventId', () => {
 })
 
 describe('runOneClientWatch', () => {
-  const due = { client_id: CTS, week_key: '2026-W38' }
+  const due = { client_id: CTS, week_key: '2026-W38', semrush_db: 'nz' }
+
+  it('🔴 把派单里查到的 semrush_db 原样传给 takeSnapshot——不能在这一步又丢回默认值', async () => {
+    const seen: Array<string | null> = []
+    await runOneClientWatch(
+      due,
+      async (_clientId, semrushDb) => {
+        seen.push(semrushDb)
+        return { domainsScanned: 1, keywordsWritten: 1 }
+      },
+      async () => ({ skip: false, reason: null }),
+    )
+    expect(seen).toEqual(['nz'])
+  })
 
   it('被防重复扣费闸拦下 → skipped，不调用 takeSnapshot', async () => {
     let called = false

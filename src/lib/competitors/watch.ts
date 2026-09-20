@@ -117,6 +117,13 @@ export function watchEventId(clientId: string, weekKey: string, attempt?: string
 export interface WatchDueData {
   readonly client_id: string
   readonly week_key: string
+  /**
+   * 派单时点查到的客户市场（clients.semrush_db）—— 复审揪出来的坑：roster 查出了这个
+   * 字段，第一版却没放进事件负载，干活那边永远拿不到，会静默按 'au' 打 DataForSEO。
+   * 换一个 NZ 客户开这个开关，数据会悄悄查错市场、不报错、看起来完全正常。
+   * 这里显式带上，缺省当 null（干活那边再按 'au' 兜底，语义不变，但不再是唯一路径）。
+   */
+  readonly semrush_db: string | null
 }
 
 export type ParsedWatchDue =
@@ -136,7 +143,11 @@ export function parseWatchDue(raw: unknown): ParsedWatchDue {
   if (typeof d.week_key !== 'string' || !WEEK_KEY_RE.test(d.week_key)) {
     return { ok: false, reason: 'invalid_week_key' }
   }
-  return { ok: true, value: { client_id: d.client_id, week_key: d.week_key } }
+  if (d.semrush_db !== null && d.semrush_db !== undefined && typeof d.semrush_db !== 'string') {
+    return { ok: false, reason: 'invalid_semrush_db' }
+  }
+  const semrushDb = typeof d.semrush_db === 'string' ? d.semrush_db : null
+  return { ok: true, value: { client_id: d.client_id, week_key: d.week_key, semrush_db: semrushDb } }
 }
 
 /** 一次快照写入的结果 —— 由注入的 takeSnapshot 返回，干活函数据此判定回执状态。 */
@@ -177,7 +188,7 @@ export interface WatchReceipt {
  */
 export async function runOneClientWatch(
   due: WatchDueData,
-  takeSnapshot: (clientId: string) => Promise<SnapshotOutcome>,
+  takeSnapshot: (clientId: string, semrushDb: string | null) => Promise<SnapshotOutcome>,
   shouldSkip: (clientId: string) => Promise<{ skip: boolean; reason: string | null }>,
   now: Date = new Date(),
 ): Promise<WatchReceipt> {
@@ -194,7 +205,7 @@ export async function runOneClientWatch(
   }
 
   try {
-    const outcome = await takeSnapshot(due.client_id)
+    const outcome = await takeSnapshot(due.client_id, due.semrush_db)
     return {
       ...base,
       status: outcome.keywordsWritten > 0 ? 'completed' : 'no_data',
