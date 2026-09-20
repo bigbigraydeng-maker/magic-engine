@@ -28,6 +28,6 @@ export async function startReadAudit(principal:MetaPrincipal,tool:string,account
 export async function finishReadAudit(id:string,errorCode:string|null,accountId?:string) {
   const update: { ok:boolean;error_code:string|null;resource_id?:string }={ ok:errorCode===null,error_code:errorCode }
   if(accountId) update.resource_id=accountId
-  const { error }=await supabaseAdmin.from('mcp_access_log').update(update).eq('id',id)
-  if(error) throw new MetaReadError('audit_unavailable',503)
+  const { data,error }=await supabaseAdmin.from('mcp_access_log').update(update).eq('id',id).select('id')
+  if(error || !Array.isArray(data) || data.length!==1 || data[0]?.id!==id) throw new MetaReadError('audit_unavailable',503)
 }

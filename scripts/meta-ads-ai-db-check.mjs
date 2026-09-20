@@ -140,6 +140,10 @@ try {
   VALUES('hash',$1,$1,(SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$1),'browser',now()+interval '10 minutes')`,[a])
  const consumed=await Promise.all([c1,c2].map(c=>c.query(`DELETE FROM meta_ads_oauth_states WHERE state_hash='hash' AND principal_id=$1 AND browser_hash='browser' AND expires_at>now() RETURNING *`,[a])))
  assert.equal(consumed.reduce((n,r)=>n+r.rowCount,0),1);checks++
+ // PostgREST .update().eq().select() receives [] for a missing row; callers must treat
+ // that cardinality as failure instead of accepting error=null as a completed audit.
+ assert.equal((await db.query("UPDATE client_binding_audit SET outcome='applied' WHERE id=gen_random_uuid() RETURNING id")).rowCount,0);checks++
+ assert.equal((await db.query("UPDATE mcp_access_log SET ok=true,error_code=NULL WHERE id=gen_random_uuid() RETURNING id")).rowCount,0);checks++
  console.log(`PASS ${checks} isolated PostgreSQL boundary checks (grant/legacy races, RLS, RPC ACL, revoke, nonce, rate limit).`)
 } finally {
  for(const c of clients) await c.end().catch(()=>{})

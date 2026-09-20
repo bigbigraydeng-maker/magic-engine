@@ -74,12 +74,16 @@ export async function finishBindingAudit(
   outcome: 'applied' | 'write_failed',
   detail?: string,
 ): Promise<boolean> {
-  const { error } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('client_binding_audit')
     .update({ outcome, detail: clip(detail, 500), updated_at: new Date().toISOString() })
     .eq('id', id)
-  if (error) console.error('[binding-audit] failed to finish audit row', id, error.message)
-  return !error
+    .select('id')
+  const updated = Array.isArray(data) && data.length === 1 && data[0]?.id === id
+  if (error || !updated) {
+    console.error('[binding-audit] failed to finish exactly one audit row', id, error?.message ?? `updated=${Array.isArray(data) ? data.length : 'unknown'}`)
+  }
+  return !error && updated
 }
 
 /** 拒绝类结果：尽力记一笔，写失败不改变拒绝结论。 */

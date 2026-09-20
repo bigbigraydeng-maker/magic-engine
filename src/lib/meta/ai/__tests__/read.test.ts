@@ -25,6 +25,11 @@ describe('public read boundary',()=>{
     await expect(invokeMetaTool(principal,'meta_list_accounts',{})).rejects.toThrow('audit_unavailable')
     expect(mockFetch).not.toHaveBeenCalled()
   })
+  it('does not release provider data when the success audit row was not updated',async()=>{
+    vi.mocked(finishReadAudit).mockRejectedValueOnce(new MetaReadError('audit_unavailable',503))
+    await expect(invokeMetaTool(principal,'meta_list_accounts',{})).rejects.toThrow('audit_unavailable')
+    expect(mocks.requireReleaseAuthorization).not.toHaveBeenCalled()
+  })
   it('fails closed before audit and Graph when the pilot is paused',async()=>{
     mocks.requirePilotActive.mockRejectedValueOnce(new MetaReadError('service_paused',404))
     await expect(invokeMetaTool(principal,'meta_list_accounts',{})).rejects.toThrow('service_paused')
