@@ -12,6 +12,7 @@
 
 import { getOpenAIClient } from '@/lib/ai/openai-client'
 import type { BrandMention } from '@/types/magic-engine'
+import { resolveClientBrandRank } from './client-brand-match'
 
 // gpt-4o-mini pricing per million tokens
 const PRICE_INPUT_PER_M = 0.15
@@ -39,6 +40,8 @@ RULES:
    the brand was mentioned.
 5. "url" is included ONLY if the response explicitly cites a URL for that
    brand. Otherwise omit the field.
+6. Only extract names that are literally written in the response. Never add
+   a brand that the response does not mention.
 
 OUTPUT JSON SCHEMA (follow exactly):
 {
@@ -62,21 +65,25 @@ export interface ParseResult {
 
 export async function parseRanking(input: {
   rawResponse: string
+  /** Empty string = no client (industry-level parsing); rank is then null. */
   clientBrandName: string
+  /** clients.domain — a cited domain counts as a client mention. */
+  clientDomain?: string | null
+  /** clients.brand_aliases — extra names that count as the client. */
+  clientAliases?: readonly string[] | null
 }): Promise<ParseResult> {
-  const { rawResponse, clientBrandName } = input
+  const { rawResponse, clientBrandName, clientDomain, clientAliases } = input
 
   // Empty / very short responses can't yield meaningful rankings
   if (!rawResponse || rawResponse.trim().length < 30) {
     return { brands: [], client_brand_rank: null, parse_cost_usd: 0 }
   }
 
+  // The client name is deliberately NOT sent to the model: naming it biased
+  // the model into inserting the client into answers that never mention it.
   const userMessage = [
     `## AI assistant's response`,
     rawResponse,
-    '',
-    `## Client brand to look for`,
-    clientBrandName,
     '',
     `Extract all brands/companies/providers mentioned in the response, in the order`,
     `they appear. Return JSON in the format defined in the system prompt.`,
@@ -110,23 +117,15 @@ export async function parseRanking(input: {
     )
   }
 
-  const brands = (parsed.brands ?? []).filter(isValidBrand)
-
-  // Find client's own brand rank using fuzzy match (case-insensitive substring)
-  // Only allow reverse match for brands ≥ 3 chars to avoid false positives
-  // (e.g., "Air" matching "Air New Zealand" and "Air China")
-  const clientLower = clientBrandName.toLowerCase().trim()
-  const clientMention = brands.find(b => {
-    const bLower = b.brand.toLowerCase()
-    return (
-      b.brand.toLowerCase().includes(clientLower) ||
-      (clientLower.length >= 3 && bLower.length >= 3 && clientLower.includes(bLower))
-    )
-  })
+  const resolved = resolveClientBrandRank(
+    (parsed.brands ?? []).filter(isValidBrand),
+    rawResponse,
+    { brandName: clientBrandName, domain: clientDomain, aliases: clientAliases }
+  )
 
   return {
-    brands,
-    client_brand_rank: clientMention?.rank ?? null,
+    brands: resolved.brands,
+    client_brand_rank: resolved.client_brand_rank,
     parse_cost_usd: parseCostUsd,
   }
 }
