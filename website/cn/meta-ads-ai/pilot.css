@@ -112,13 +112,29 @@
 .pilot-footer p { margin: 0; color: rgba(255,255,255,.4); font-size: .76rem; }
 .pilot-footer nav { display: flex; gap: 18px; }
 .pilot-footer nav a { color: rgba(255,255,255,.6); font-size: .74rem; text-decoration: none; }
+.pilot-notice { padding: 84px 0 110px; background: var(--pilot-cream); }
+.pilot-notice-layout { display: grid; grid-template-columns: minmax(280px,.72fr) minmax(0,1.28fr); gap: 84px; align-items: start; }
+.pilot-notice-aside { position: sticky; top: 112px; }
+.pilot-notice-aside .pilot-kicker { color: var(--nm-gold-dark); }
+.pilot-notice-aside h1 { margin-bottom: 24px; font-size: clamp(3rem,5vw,5rem); }
+.pilot-notice-aside > p { margin-bottom: 28px; font-size: 1.02rem; }
+.pilot-notice-content { overflow: hidden; border: 1px solid var(--nm-line); border-radius: 28px; background: #fff; box-shadow: var(--nm-shadow); }
+.pilot-notice-content section { padding: 34px 40px; border-bottom: 1px solid var(--nm-line); }
+.pilot-notice-content section:last-child { border-bottom: 0; }
+.pilot-notice-content h2 { margin-bottom: 18px; font-size: 1.55rem; }
+.pilot-notice-content p,.pilot-notice-content li { color: var(--nm-ink-soft); line-height: 1.85; }
+.pilot-notice-content ul { margin: 0 0 18px; padding-left: 22px; }
+.pilot-notice-content a { color: var(--nm-gold-dark); text-underline-offset: 3px; overflow-wrap: anywhere; }
+.pilot-notice-callout { margin: 24px 0 4px; padding: 20px; border-left: 3px solid var(--nm-gold); background: var(--nm-warm); }
+.pilot-notice-callout p { margin: 7px 0 0; }
 
 @media (max-width: 1040px) {
-  .pilot-hero-grid,.pilot-fit-grid,.pilot-cover-grid { grid-template-columns: 1fr; }
+  .pilot-hero-grid,.pilot-fit-grid,.pilot-cover-grid,.pilot-notice-layout { grid-template-columns: 1fr; }
   .pilot-hero-copy { max-width: 760px; }
   .pilot-signal-card { max-width: 680px; }
   .pilot-cover-grid { gap: 54px; }
   .pilot-cover { width: min(78vw,420px); }
+  .pilot-notice-aside { position: static; }
 }
 @media (max-width: 780px) {
   .pilot-nav-label { display: none; }
@@ -160,4 +176,8 @@
   .pilot-boundary { padding: 28px 22px; }
   .pilot-cover { width: 100%; }
   .pilot-receipt { padding: 36px 24px; }
+  .pilot-notice { padding: 56px 0 76px; }
+  .pilot-notice-layout { gap: 42px; }
+  .pilot-notice-aside h1 { font-size: 2.75rem; }
+  .pilot-notice-content section { padding: 28px 22px; }
 }
