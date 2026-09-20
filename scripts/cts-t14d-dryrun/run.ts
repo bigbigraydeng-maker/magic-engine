@@ -165,12 +165,12 @@ async function runDraftAgent(
   return MessengerAgentOutputSchema.parse(rawJson)
 }
 
-function verifyDraft(
+async function verifyDraft(
   clientId: string,
   agentOutput: MessengerAgentOutput,
   brandRedlinePhrases: string[],
   knowledge: LoadedDraftContext['knowledge'],
-): VerifierResult {
+): Promise<VerifierResult> {
   const verify = resolveVerifierPolicy(clientId)
   if (!verify) {
     return { ok: false, blocked_reasons: [`no_verifier_policy_for_client: ${clientId}`], require_human_confirm: true }

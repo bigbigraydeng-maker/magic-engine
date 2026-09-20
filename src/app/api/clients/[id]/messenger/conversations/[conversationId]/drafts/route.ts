@@ -23,7 +23,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
-import { CTS_CLIENT_ID, ctsVerifierGates } from '@/lib/messenger-agent/verifier/policies/cts'
+import { CTS_CLIENT_ID, ctsVerifierGates, CTS_SEMANTIC_GATE_IDS } from '@/lib/messenger-agent/verifier/policies/cts'
 
 interface RouteParams {
   params: { id: string; conversationId: string }
@@ -37,9 +37,15 @@ interface RouteParams {
  * this only attaches a real list for CTS; another client's drafts (none
  * exist yet — F2/#1585 hasn't shipped for any client) get an empty list
  * rather than this route silently presenting CTS's gates as platform truth.
+ *
+ * 2026-09-20 起还要跑 `CTS_SEMANTIC_GATE_IDS`（brand_redline/number_claim 的
+ * Jev 语义补充判断）——`verifyCtsReplyWithSemanticChecks` 决定了 pending 与否,
+ * 只列七道正则闸会让人审看到的"已过关记录"跟实际判断依据不一致。
  */
 function passedGateIdsFor(clientId: string): string[] {
-  return clientId === CTS_CLIENT_ID ? ctsVerifierGates.map((g) => g.id) : []
+  return clientId === CTS_CLIENT_ID
+    ? [...ctsVerifierGates.map((g) => g.id), ...CTS_SEMANTIC_GATE_IDS]
+    : []
 }
 
 interface DraftRow {

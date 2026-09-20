@@ -165,7 +165,11 @@ describe('GET drafts — only the approval queue', () => {
       },
     ])
     // CTS 是 c0000000-…（params() 默认值）——真的挂上了 cts.ts 的完整闸门列表，不是空壳。
-    expect(json.drafts[0].passedGateIds.length).toBe(7)
+    // 七道正则闸 + 两道 Jev 语义补充闸（brand_redline_semantic/number_claim_semantic，2026-09-20）。
+    expect(json.drafts[0].passedGateIds.length).toBe(9)
+    expect(json.drafts[0].passedGateIds).toEqual(
+      expect.arrayContaining(['brand_redline_semantic', 'number_claim_semantic']),
+    )
   })
 
   it('attaches no gate list for a client whose Verifier policy is not CTS (no platform-wide truth invented)', async () => {

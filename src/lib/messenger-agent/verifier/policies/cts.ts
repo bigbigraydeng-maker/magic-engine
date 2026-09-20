@@ -55,6 +55,7 @@ import { containsPhrase, normalizeAngle } from '@/lib/factory/strategist'
 import type { KnowledgeEntry, KnowledgeReadResult } from '@/lib/knowledge'
 import type { Gate, VerifierResult } from '../framework'
 import { runVerifierGates } from '../framework'
+import { callJev, type JevQuestion } from '@/lib/jev/client'
 
 // ─── Identity guard ─────────────────────────────────────────────────────────
 
@@ -640,4 +641,126 @@ export function verifyCtsReply(context: CtsVerifierContext): VerifierResult {
     }
   }
   return runVerifierGates(ctsVerifierGates, context)
+}
+
+// ─── Layer 2 · Jev 语义补充判断(2026-09-20,PM 确认可发客户对话给 Jev)──────
+//
+// 上面七道闸全是确定性检查(正则/字符串/数字比对)——只能查"回复里出现了这个
+// 禁用词/这个数字",查不出"回复换了个说法表达同一件被禁止的事"。这里给
+// brand_redline(品牌红线换措辞)、number_claim(价格/日期用文字拼、绕开数字
+// 正则)各加一层 Jev(`src/lib/jev/client.ts`,已合并生产验证的 L3 判断能力)
+// 语义补充判断——补充,不是替代:七道规则闸原样保留、零成本、永远先跑。
+//
+// fail-open 到"只信规则闸结果"的三种情况,任一发生都不新增拦截也不放宽拦截:
+// Jev 调用异常(超时/网络/额度)、`MESSENGER_VERIFIER_SEMANTIC_DISABLED=true`、
+// 或者这次回复根本没有可供语义核对的东西(没有品牌红线词表 / 没有已确认在售
+// 产品价格与团期)。
+
+const SEMANTIC_JEV_THRESHOLD = 0.5
+
+/** 总开关(env `MESSENGER_VERIFIER_SEMANTIC_DISABLED=true` 可临时全局关停 Jev 调用,
+ *  不需要重新部署代码;七道规则闸不受影响,照常跑)。默认开。 */
+function messengerVerifierSemanticEnabled(): boolean {
+  return process.env.MESSENGER_VERIFIER_SEMANTIC_DISABLED !== 'true'
+}
+
+const QUESTION_BRAND_REDLINE_SEMANTIC: JevQuestion = {
+  type: 'noul',
+  instructions:
+    'The "reply_text" restates the substance of one or more of the forbidden claims listed in ' +
+    '"forbidden_claims" — using different wording, a paraphrase, or a translation — even though ' +
+    "it does not contain any of those phrases verbatim. Do NOT flag a reply that avoids the " +
+    "forbidden claims' substance entirely, even if it happens to share an unrelated word with one of them.",
+}
+
+const QUESTION_NUMBER_CLAIM_SEMANTIC: JevQuestion = {
+  type: 'noul',
+  instructions:
+    'The "reply_text" states a specific tour price or departure date — spelled out in words, or ' +
+    'written in any format other than a plain "$1234"/"NZ$1234" number or a plain "YYYY-MM-DD" ' +
+    'date — and that price or date does not match any entry in "valid_prices_nzd" / ' +
+    '"valid_departure_dates". Do NOT flag a reply that only restates a price/date already given ' +
+    'in one of those two standard formats (that case is already caught separately), or that ' +
+    'mentions no specific price/date claim at all.',
+}
+
+async function brandRedlineSemanticCheck(ctx: CtsVerifierContext): Promise<string | null> {
+  if (ctx.brandRedlinePhrases.length === 0) return null
+  if (!ctx.agentOutput.reply_text.trim()) return null
+  try {
+    const result = await callJev(
+      { reply_text: ctx.agentOutput.reply_text, forbidden_claims: ctx.brandRedlinePhrases },
+      { brand_redline_semantic: QUESTION_BRAND_REDLINE_SEMANTIC },
+    )
+    const score = result.answers.brand_redline_semantic?.noul ?? 0
+    if (score >= SEMANTIC_JEV_THRESHOLD) {
+      return `reply may restate a brand-redline claim in different wording (Jev score ${score.toFixed(2)}) — needs human review`
+    }
+    return null
+  } catch (e) {
+    console.warn(
+      `[messenger-agent/verifier/cts] brand_redline_semantic check unavailable (${e instanceof Error ? e.message : String(e)}) — falling back to the regex-only brand_redline gate result`,
+    )
+    return null
+  }
+}
+
+async function numberClaimSemanticCheck(ctx: CtsVerifierContext): Promise<string | null> {
+  if (!ctx.agentOutput.reply_text.trim()) return null
+  const activeProducts = parseActiveProductFacts(ctx.knowledge.entries)
+  const validPrices = activeProducts.map((p) => p.price_nzd)
+  const validDates = activeProducts.flatMap((p) => p.departure_dates.map((d) => d.slice(0, 10)))
+  try {
+    const result = await callJev(
+      {
+        reply_text: ctx.agentOutput.reply_text,
+        valid_prices_nzd: validPrices,
+        valid_departure_dates: validDates,
+      },
+      { number_claim_semantic: QUESTION_NUMBER_CLAIM_SEMANTIC },
+    )
+    const score = result.answers.number_claim_semantic?.noul ?? 0
+    if (score >= SEMANTIC_JEV_THRESHOLD) {
+      return `reply may spell out a price or date in words that does not match any confirmed active product (Jev score ${score.toFixed(2)}) — needs human review`
+    }
+    return null
+  } catch (e) {
+    console.warn(
+      `[messenger-agent/verifier/cts] number_claim_semantic check unavailable (${e instanceof Error ? e.message : String(e)}) — falling back to the regex-only number_claim gate result`,
+    )
+    return null
+  }
+}
+
+/** 展示给人审门户用的"这条草稿实际过了哪些闸"完整列表——见 drafts route.ts。 */
+export const CTS_SEMANTIC_GATE_IDS = ['brand_redline_semantic', 'number_claim_semantic'] as const
+
+/**
+ * 回复发送管道真正调用的入口(取代 `verifyCtsReply` 成为 F2 pipeline 的 verify
+ * 步骤)。先跑七道确定性闸(不变、零成本),客户 ID 核对通过且语义补充开关开着
+ * 时,再并行跑两道 Jev 语义补充判断,命中任一都并入同一份 `blocked_reasons`——
+ * 草稿本来就 100% 转人工(`require_human_confirm` 恒为 true),这里命中不是
+ * "自动挡回",是"给人工审核多标一条重点"。
+ */
+export async function verifyCtsReplyWithSemanticChecks(context: CtsVerifierContext): Promise<VerifierResult> {
+  const baseResult = verifyCtsReply(context)
+  if (context.clientId !== CTS_CLIENT_ID || !messengerVerifierSemanticEnabled()) {
+    return baseResult
+  }
+
+  const [brandReason, numberReason] = await Promise.all([
+    brandRedlineSemanticCheck(context),
+    numberClaimSemanticCheck(context),
+  ])
+
+  const semanticReasons: string[] = []
+  if (brandReason) semanticReasons.push(`brand_redline_semantic: ${brandReason}`)
+  if (numberReason) semanticReasons.push(`number_claim_semantic: ${numberReason}`)
+  if (semanticReasons.length === 0) return baseResult
+
+  return {
+    ok: false,
+    blocked_reasons: [...baseResult.blocked_reasons, ...semanticReasons],
+    require_human_confirm: true,
+  }
 }
