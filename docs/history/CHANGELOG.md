@@ -5,6 +5,18 @@
 
 ---
 
+### 2026-09-20（AI 可见度：修复品牌命中子串误判，以后新算出来的"是否被提及"数字会变准）
+
+PR [#1823](https://github.com/bigbigraydeng-maker/magic-engine/pull/1823) 已合并（merge commit `00466090`）。老判断逻辑用"品牌名字符串互相包含"判定客户有没有被 AI 提到，会把"Ray White"误判成命中"Roman Hu — Ray White Mission Bay"这类不相关品牌，也会漏掉答案只写域名或标点不同写法的真实提及。对全部 6,596 条历史记录跑了一遍**只读**重算摸底（没有改任何生产数据），误判数字跟 PM 手工核对结果完全对上：CTS 38 条假阳性、NAL 17 条、Roman 79 条、Dixon 3 条，另有 342 条真实提及被漏判、71 条名次会变——**这批数字目前仍原样挂在客户看到的历史记录/月报/诊断分上，还没被改过来**；本次合并只让下一次自动采集用上新规则，历史行要不要回填、要不要重算旧快照，是 [`docs/audits/2026-09-20-ai-visibility-client-rank-grounding.md`](../audits/2026-09-20-ai-visibility-client-rank-grounding.md)「建议的后续」里列的 5 步，**全部等 PM 点头，这次一步没做**。
+
+- 新增纯函数模块 `src/lib/ai-tracker/client-brand-match.ts` 负责判定，prompt 里不再把客户名喂给模型（避免模型顺着提示词把客户名编进答案），短别名（如 "CTS"）嵌在另一个已解析的竞品品牌名里时不能单独证明命中（例："CTS Logistics" 不会被当成 "CTS" 命中），裸出现且没有竞争品牌时仍可命中，精确匹配替换掉原来的双向子串包含。
+- 子牙（架构）+ 魏征（挑刺）两轮复审的必改项都在第二个 commit 修完，各自配了测试；Codex 复审另挑出一处"短别名单独证明命中"的边界情况，PR 里已有专门测试覆盖（`CTS Logistics` 不会被误判成 `CTS Tours`），验证通过后标记解决。
+- **这不是切换判断系统**：仓库里另有一套 2026-08-19 PM 已拍板"未来要切、旧系统要退役"的新判断系统（`geo-module`+`geo-baseline`，内部代号 M1），但那次退役从未执行完。CTS 是否已有 M1 生产数据待核实（有一个手工跑过的批次 `77124a10-d22b-4722-94c2-aeae69f73d76`，但结果从未落盘确认，详见 [ROADMAP.md P31.X.4a](../ROADMAP.md)），可以确定的是每周自动采集还是未接通的骨架。本次是先把 CTS 现在实际在用的旧系统里的真实 bug 修掉，让**以后**每周新跑出来的数字变准——**但 CYHB Fashion 和 Magic Lab Class 这两个客户例外**：审计发现它们的品牌别名配置本身就缺项（CYHB 缺"CYHB"这个简写、Magic Lab Class 缺"Magic Lab"这个简写），这两处不是这次代码修的范围，得先去客户设置里补别名（PM 点头后再补），补之前这两个客户新采集的数字也还是不准；"切到 M1"作为独立、规模跟当初退役决定一样大的后续工作登记进 [ROADMAP.md P31.X.4a](../ROADMAP.md)，需要单独走 PO 逐步拍板，不在本次范围。
+
+**Reuse Statement**：纯 bug 修复，不新增能力线；新模块是客户配置驱动的纯函数（客户身份来自 `master_briefs.brand_name`（有活跃 brief 时优先）或回退到 `clients.name`，再加上 `clients.domain` / `clients.brand_aliases`，没有客户名硬编码进 shared runtime）；换客户/换行业测试都通过。
+
+---
+
 ### 2026-09-20（SEO 周循环：撤销的标题改动不再当天被重新选中）
 
 PR [#1829](https://github.com/bigbigraydeng-maker/magic-engine/pull/1829) 已合并。PM 2026-09-20（CTS 项目经理窗口）验证发现：2026-09-19 事故撤销的 3 个页面（`liziba-station-chongqing-guide`、`beijing-to-xian-high-speed-train`、`how-many-days-in-chongqing`）在同一天的试跑里又被当成新候选选中了一遍——不是网站风险（事实核对闸和关键词匹配闸已经把它们全拦下来），但每周都会白占一个改动名额、白跑一次查关键词数据的调用。
