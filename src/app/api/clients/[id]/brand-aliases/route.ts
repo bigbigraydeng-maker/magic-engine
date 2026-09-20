@@ -101,8 +101,9 @@ export async function PATCH(
   }
 
   // Persist the empty array (never NULL) when the FDE clears the list.
-  // Production has clients.brand_aliases NOT NULL DEFAULT '{}' — writing NULL
-  // raised 23502 and the panel could never be cleared once populated.
+  // clients.brand_aliases is NOT NULL DEFAULT '{}' since
+  // 20260625000001_a21_goal_current_value.sql — writing NULL raised 23502 and
+  // the panel could never be cleared once populated.
   // `[]` is equivalent for every reader: isBrandedKeywordWithAliases skips an
   // empty alias loop and falls through to the domain-root token match, and
   // auto-fetch / rankings / touchpoints all normalise `length === 0` to

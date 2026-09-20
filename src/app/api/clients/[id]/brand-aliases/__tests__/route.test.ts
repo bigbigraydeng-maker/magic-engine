@@ -1,10 +1,12 @@
 /**
  * Regression — clearing the Brand Aliases panel must not write NULL.
  *
- * Production has clients.brand_aliases NOT NULL DEFAULT '{}' (schema drift vs
- * the repo migration, found 2026-09-21). The handler used to persist NULL when
- * the FDE removed the last alias, so Postgres raised 23502 and the panel
- * returned 500 — aliases could be added but never cleared.
+ * clients.brand_aliases has been NOT NULL DEFAULT '{}' since
+ * 20260625000001_a21_goal_current_value.sql hardened it (that migration
+ * back-fills NULLs, then SET DEFAULT + SET NOT NULL). Repo and production
+ * agree — this was never schema drift. The bug was only in the handler: it
+ * persisted NULL when the FDE removed the last alias, so Postgres raised
+ * 23502 and the panel returned 500. Aliases could be added but never cleared.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
