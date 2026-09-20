@@ -438,6 +438,27 @@ describe('resolveClientBrandRank — geo anchors', () => {
       resolveClientBrandRank([], AU_TEXT, { ...CTS, geoAnchors: ['  ', ''] }).client_brand_rank
     ).toBe(1)
   })
+
+  // Codex review, 2026-09-20: a short anchor must not be satisfied by two
+  // real, independently-typed words that merely happen to spell it out end
+  // to end once every space is stripped.
+  it('a short anchor is not satisfied by unrelated words that spell it out across a real space', () => {
+    const raw = 'For a scenic detour, book a U-turn loop before China Travel Service picks you up.'
+    expect(
+      resolveClientBrandRank([], raw, { ...CTS, geoAnchors: ['au'] }).client_brand_rank
+    ).toBeNull()
+    // …but the same short anchor still finds a genuine punctuation-spelled form.
+    const withParens = 'China Travel Service (AU) is the local operator.'
+    expect(
+      resolveClientBrandRank([], withParens, { ...CTS, geoAnchors: ['au'] }).client_brand_rank
+    ).toBe(1)
+  })
+
+  it('a multi-word anchor is not satisfied by unrelated words that spell it out across real spaces', () => {
+    const raw =
+      'China Travel Service brings new zeal and enthusiasm to every Sydney city tour.'
+    expect(resolveClientBrandRank([], raw, ANCHORED).client_brand_rank).toBeNull()
+  })
 })
 
 describe('admissibleIdentifiersForAnswer', () => {

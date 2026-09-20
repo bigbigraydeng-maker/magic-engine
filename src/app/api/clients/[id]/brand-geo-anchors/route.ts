@@ -18,6 +18,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { normalizeForMatch } from '@/lib/ai-tracker/client-brand-match'
 
 const MAX_ANCHORS   = 20
 const MIN_ANCHOR_LEN = 2
@@ -50,9 +51,17 @@ interface PatchBody {
   anchors?: unknown
 }
 
-/** lowercase + collapse internal whitespace + trim. Inner spaces kept. */
+/**
+ * Same normalisation the matcher applies at match time
+ * (`client-brand-match.ts > normalizeForMatch`) — strips punctuation, not
+ * just whitespace. Validating a looser form here (e.g. lowercase-only) would
+ * let a value like "travel." or "the," through the `NON_PLACE_ANCHORS`
+ * check, only for the matcher to later strip the trailing punctuation and
+ * silently turn it back into a rejected word ("travel", "the") — the reject
+ * list would look enforced while doing nothing.
+ */
 function normaliseAnchor(raw: string): string {
-  return raw.toLowerCase().replace(/\s+/g, ' ').trim()
+  return normalizeForMatch(raw)
 }
 
 export async function GET(
