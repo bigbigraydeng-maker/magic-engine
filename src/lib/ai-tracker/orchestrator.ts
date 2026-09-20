@@ -354,13 +354,24 @@ async function processOne(input: ProcessOneInput): Promise<void> {
       updatePayload.parse_error_message = parseError
     }
 
-    await supabaseAdmin
+    const { error: updateErr } = await supabaseAdmin
       .from('ai_visibility_runs')
       .update(updatePayload)
       .eq('id', runRow.id)
 
-    result.runs_succeeded++
     result.total_cost_usd += (runnerOut.cost_usd ?? 0) + parseCost
+
+    if (updateErr) {
+      result.runs_failed++
+      result.errors.push({
+        query_id: query.id,
+        engine,
+        message: `DB update failed: ${updateErr.message}`,
+      })
+      return
+    }
+
+    result.runs_succeeded++
     if (clientBrandRank !== null) result.client_brand_mentions++
   } catch (err: unknown) {
     result.runs_failed++
