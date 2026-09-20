@@ -271,6 +271,27 @@ section{padding:clamp(56px,8vw,110px) 0}
 /* card image wrapper must be block, or aspect-ratio collapses inside inline <a> */
 .card > a{display:block}
 
+/* ---------- project story (whole-development layout) ---------- */
+.story-band .wrap{padding-top:clamp(50px,7vw,90px);padding-bottom:clamp(40px,6vw,70px)}
+.story-h1{color:#fff;font-size:clamp(46px,9vw,116px);font-weight:800;letter-spacing:-.035em;line-height:.98;margin:18px 0 0}
+.story-sub{font-size:clamp(20px,2.8vw,30px);color:var(--ice);font-weight:600;letter-spacing:-.01em;line-height:1.2;margin:18px 0 12px;max-width:30ch}
+.story-body{font-size:clamp(16px,2vw,19px);color:#B9C2CD;max-width:60ch;margin:0}
+.story-ctas{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}
+.story-hero{padding-top:clamp(28px,4vw,48px)}
+.story-fig{margin:0}
+.story-fig img{width:100%;height:auto;border-radius:4px;display:block;cursor:zoom-in;background:var(--paper-3)}
+.story-fig figcaption{font-size:13px;color:var(--mute);margin-top:12px}
+.story-pair{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:24px}
+@media(max-width:700px){.story-pair{grid-template-columns:1fr}}
+.story-more{margin-top:24px}
+.story-more summary{cursor:pointer;font-size:12px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--accent-2);padding:16px 0;border-top:1px solid var(--line);list-style:none}
+.story-more summary::-webkit-details-marker{display:none}
+.story-more summary::after{content:" +";}
+.story-more[open] summary::after{content:" –";}
+.story .lead{margin-top:14px}
+.facts-3{grid-template-columns:repeat(3,1fr)}
+@media(max-width:680px){.facts-3{grid-template-columns:1fr 1fr}}
+
 /* ---------- where we build (regions) ---------- */
 .areas{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
 @media(max-width:900px){.areas{grid-template-columns:repeat(2,1fr)}}
