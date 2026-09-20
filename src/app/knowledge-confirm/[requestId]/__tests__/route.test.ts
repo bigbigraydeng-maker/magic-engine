@@ -80,11 +80,11 @@ function getReq(): NextRequest {
   return new NextRequest(`${ORIGIN}/knowledge-confirm/${REQUEST_ID}?token=${RAW_TOKEN}`, { method: 'GET' })
 }
 
-function postReq(fields: Record<string, string>): NextRequest {
+function postReq(fields: Record<string, string>, headers: Record<string, string> = { origin: ORIGIN }): NextRequest {
   const body = new URLSearchParams(fields)
   return new NextRequest(`${ORIGIN}/knowledge-confirm/${REQUEST_ID}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded', origin: ORIGIN },
+    headers: { 'content-type': 'application/x-www-form-urlencoded', ...headers },
     body: body.toString(),
   })
 }
@@ -95,6 +95,13 @@ function readNonceCookie(res: Response): string | undefined {
 }
 
 describe('GET /knowledge-confirm/[requestId]', () => {
+  it('issue #1822 回归：不能再发 referrer-policy: no-referrer——Fetch 规范下真实浏览器对同页表单自己发出的 POST 会因此把 Origin 置成 "null"，导致 POST 那道同源 CSRF 闸对真人点击必然判定失败（knowledge-rollout-confirm 复现过，两条路由共享同一段 htmlResponse 写法）', async () => {
+    mocks.loadConfirmationRequest.mockResolvedValue({ ok: false, problem: 'expired' })
+    const res = await GET(getReq(), { params: { requestId: REQUEST_ID } })
+    expect(res.headers.get('referrer-policy')).toBe('same-origin')
+    expect(res.headers.get('referrer-policy')).not.toBe('no-referrer')
+  })
+
   it('🔴 板桥 1：链接已经用过时，页面仍然带着「停止 AI 回复」的表单和 nonce cookie', async () => {
     mocks.loadConfirmationRequest.mockResolvedValue({ ok: false, problem: 'already_used' })
 
@@ -209,6 +216,15 @@ describe('POST /knowledge-confirm/[requestId]', () => {
       ...overrides,
     }
   }
+
+  it('issue #1822：POST 的 Origin 是字面字符串 "null" 时必须仍然拒绝（403）——这正是 no-referrer 页面上真实浏览器点击会发出的值，同源闸不能只挡"没有 Origin 头"这一种情况', async () => {
+    const res = await POST(
+      postReq({ token: RAW_TOKEN, nonce: 'n1' }, { origin: 'null' }),
+      { params: { requestId: REQUEST_ID } },
+    )
+    expect(res.status).toBe(403)
+    expect(mocks.consumeConfirmationRequest).not.toHaveBeenCalled()
+  })
 
   it('🔴 板桥 4：一条都没确认时不说"你确认了 0 条"', async () => {
     mocks.consumeConfirmationRequest.mockResolvedValue(

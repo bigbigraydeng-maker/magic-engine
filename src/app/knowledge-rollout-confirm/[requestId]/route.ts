@@ -52,8 +52,15 @@ function htmlResponse(body: string, status = 200): NextResponse {
       'content-type': 'text/html; charset=utf-8',
       // 页面 URL 里带着一次性令牌，任何一层缓存留副本都是泄露。
       'cache-control': 'no-store, no-cache, must-revalidate',
-      // URL 本身就是密钥，绝不能跟着 Referer 头发给任何第三方。
-      'referrer-policy': 'no-referrer',
+      // URL 本身就是密钥，绝不能跟着 Referer 头发给任何第三方——但不能用
+      // 'no-referrer'（issue #1822）：Fetch 规范规定 referrer policy 是
+      // no-referrer 时，浏览器对同页表单自己发出的 POST 也会把 Origin 头
+      // 置成字符串 "null"，不区分是不是同源提交。这正是下面 POST 处理里
+      // 那道「同源」CSRF 闸在真实浏览器点击下必然判定失败的原因——不是
+      // Cloudflare 丢头，是这页自己的安全头把浏览器自己的安全头顶掉了。
+      // 'same-origin' 两头都要：跨域请求（唯一可能泄露给第三方的路径）
+      // Referer 仍然整段不发；真正同源提交时 Origin 不会被置空，闸能正常判。
+      'referrer-policy': 'same-origin',
     },
   })
 }
