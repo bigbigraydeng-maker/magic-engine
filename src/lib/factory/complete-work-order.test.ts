@@ -459,6 +459,30 @@ describe('completeWorkOrder — 成片文案品控(2026-09-20 Jev 评估)', () =
     expect(r.ok && r.qualityFlags.some((f) => f.category === 'placeholder_caption')).toBe(true)
   })
 
+  it('🔴 title_sub 是空字符串时按 worker.mjs 同样的优先级跳到 caption,不能停在空串上(2026-09-20 codex review round 3)', async () => {
+    const { db } = mockSupabase(happyQueue())
+    const r = await completeWorkOrder(db, {
+      ...PARAMS,
+      wo: {
+        ...WO,
+        brief: {
+          segments: [{ role: 'hook' }, { role: 'middle' }],
+          copy: {
+            segments: [
+              { role: 'hook', title_sub: '', caption: 'Customer Stories & Community' },
+              { role: 'middle', title_sub: '', caption: 'Customer Stories & Community' },
+            ],
+          },
+        },
+      },
+      caption: 'Customer Stories & Community · Customer Stories & Community',
+    })
+
+    expect(r.ok).toBe(true)
+    // 用 `??` 会把空的 title_sub 当作"有值",读不到 caption,这条重复就会被漏掉
+    expect(r.ok && r.qualityFlags.some((f) => f.category === 'placeholder_caption')).toBe(true)
+  })
+
   it('brand_name / brand_voice.persona 从 master_briefs 正确传给品控(供 A/C 检测用)', async () => {
     const { db } = mockSupabase([
       okClient(),

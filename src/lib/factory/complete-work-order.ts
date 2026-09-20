@@ -173,9 +173,13 @@ export async function completeWorkOrder(
   const copySegmentsArr = Array.isArray((briefRecord['copy'] as Record<string, unknown> | undefined)?.['segments'])
     ? (((briefRecord['copy'] as Record<string, unknown>)['segments']) as Array<Record<string, unknown>>)
     : []
+  // worker.mjs 用的是 `title_sub || caption || title_main`(buildSrt / caption 拼接同一取法)——
+  // 空字符串跟 null/undefined 一样要跳到下一个字段。用 `??` 会在 title_sub==='' 时停在那里,
+  // 把这一段错记成 null,漏掉 worker 实际渲染并提交的 caption 内容(2026-09-20 codex review round 3)。
   const overlaysFromCopy = copySegmentsArr.map((s) => {
-    const text = s['title_sub'] ?? s['caption'] ?? s['title_main']
-    return typeof text === 'string' && text.trim().length > 0 ? text : null
+    const candidates = [s['title_sub'], s['caption'], s['title_main']]
+    const text = candidates.find((v) => typeof v === 'string' && v.trim().length > 0)
+    return typeof text === 'string' ? text : null
   })
   // recipe(multicut)单不把字幕写进 brief.segments.text_overlay —— 实际渲染的字幕(含 hook 之外的
   // middle 段)只存在于已经过 assertRecipeReceipt 校验的 recipeReceipt.segments[].caption 里,
