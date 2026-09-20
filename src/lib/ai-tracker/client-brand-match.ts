@@ -79,22 +79,42 @@ function registrableLabel(host: string): string {
   return labels[labels.length - 1] ?? ''
 }
 
-/** Normalised identifiers that prove the client is present (≥ 2 chars). */
-export function buildClientIdentifiers(identity: ClientBrandIdentity): string[] {
-  const raw = [identity.brandName, ...(identity.aliases ?? [])]
+interface TaggedIdentifier {
+  id: string
+  /** True only for identifiers sourced from `identity.aliases` — informal
+   *  shorthand that is too ambiguous to stand alone when short. The formal
+   *  brand name, its composite lead, and the domain are never aliases, even
+   *  when they happen to be short (e.g. brand name "Oztop"). */
+  isAlias: boolean
+}
+
+/** Normalised identifiers, tagged by whether they came from `aliases`. */
+function buildTaggedIdentifiers(identity: ClientBrandIdentity): TaggedIdentifier[] {
+  const raw: TaggedIdentifier[] = [{ id: identity.brandName, isAlias: false }]
+  for (const alias of identity.aliases ?? []) raw.push({ id: alias, isAlias: true })
   // "Person — Office" composite names: the leading segment names the client.
   const lead = identity.brandName.split(COMPOSITE_SEPARATOR_RE)[0]
-  if (lead !== identity.brandName) raw.push(lead)
+  if (lead !== identity.brandName) raw.push({ id: lead, isAlias: false })
   const host = identity.domain ? ownDomainHost(identity.domain) : null
   if (host) {
-    raw.push(host)
+    raw.push({ id: host, isAlias: false })
     const root = registrableLabel(host)
-    if (root.length >= MIN_DOMAIN_ROOT_LEN) raw.push(root)
+    if (root.length >= MIN_DOMAIN_ROOT_LEN) raw.push({ id: root, isAlias: false })
   }
-  const ids = raw
-    .map(s => normalizeForMatch(s ?? ''))
-    .filter(s => s.replace(/ /g, '').length >= 2)
-  return Array.from(new Set(ids))
+  const seen = new Set<string>()
+  const out: TaggedIdentifier[] = []
+  for (const { id, isAlias } of raw) {
+    const norm = normalizeForMatch(id ?? '')
+    if (norm.replace(/ /g, '').length < 2 || seen.has(norm)) continue
+    seen.add(norm)
+    out.push({ id: norm, isAlias })
+  }
+  return out
+}
+
+/** Normalised identifiers that prove the client is present (≥ 2 chars). */
+export function buildClientIdentifiers(identity: ClientBrandIdentity): string[] {
+  return buildTaggedIdentifiers(identity).map(t => t.id)
 }
 
 /** Char index of `id` in normalised text `norm` (word-bounded), or -1. */
@@ -176,7 +196,8 @@ export function resolveClientBrandRank(
   rawResponse: string,
   identity: ClientBrandIdentity
 ): ClientRankResolution {
-  const ids = buildClientIdentifiers(identity)
+  const tagged = buildTaggedIdentifiers(identity)
+  const ids = tagged.map(t => t.id)
   const brands = parsedBrands.map(b => ({ ...b }))
   if (ids.length === 0) return { brands, client_brand_rank: null }
 
@@ -184,9 +205,13 @@ export function resolveClientBrandRank(
   const clientBrands = brands.filter(b => isClientBrand(b.brand, ids))
   // Evidence = an identifier that stands on its own, or the name of a brand
   // the parser extracted that is the client ("Acme Tours Ltd" for client
-  // "Acme Tours"), written in the text.
+  // "Acme Tours"), written in the text. A short single-token *alias* cannot
+  // stand alone (too ambiguous), but the formal brand name / domain root can
+  // — even when it is itself short (e.g. brand name "Oztop") — otherwise a
+  // client whose real name is short and missed by the parser would never be
+  // grounded even though the text names them plainly.
   const clientPos = firstIdentifierIndex(norm, [
-    ...ids.filter(id => !isShortSingleTokenId(id)),
+    ...tagged.filter(t => !t.isAlias || !isShortSingleTokenId(t.id)).map(t => t.id),
     ...clientBrands.map(b => normalizeForMatch(b.brand)),
   ])
 
