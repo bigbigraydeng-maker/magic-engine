@@ -173,17 +173,51 @@ const URL_LIKE_RE = /(?:https?:\/\/|www\.)\S+|[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}(?:\
 const MIN_ANCHOR_COMPACT_LEN = 2
 
 /**
+ * Like `normalizeForMatch`, but punctuation is DROPPED instead of turned
+ * into a space, and only real whitespace still separates tokens. So
+ * "(N.Z.)" collapses to the single token "nz" (nothing but punctuation sat
+ * between the letters), while "a U-turn" stays two tokens, "a" and "uturn"
+ * (a real space still separates them) — it never reads as "au". Plain
+ * `normalizeForMatch` cannot tell these apart: it turns punctuation AND real
+ * whitespace into the very same single space, so a short anchor matched
+ * against it can bridge two unrelated, independently-typed words that merely
+ * happen to spell it out end to end ("new zeal and enthusiasm" → "nz eal
+ * and" → "newzealand").
+ */
+function normalizeKeepingWhitespaceOnly(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^\p{L}\p{N}\s]+/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
  * Is at least one configured geo anchor written in the answer?
  *
- * Word-bounded, so a short anchor ("nz") cannot be satisfied by "bonza", and
- * space-insensitive, so it still matches "(N.Z.)". Anchors are normalised the
- * same way as the text, so "New Zealand" typed by an FDE matches
- * "New Zealand," in the answer.
+ * Two ways to be evidence:
+ *  - An exact, word-bounded phrase match on `norm` — "New Zealand," in the
+ *    answer matches the anchor "new zealand" typed by an FDE. This never
+ *    bridges words the FDE didn't already put a space between.
+ *  - A word-bounded match of the anchor's compact form against `punctOnly`
+ *    (see `normalizeKeepingWhitespaceOnly`) — so a short anchor ("nz") still
+ *    finds a punctuation-spelled form ("(N.Z.)"), but real whitespace
+ *    between two independently-written words is never bridged: "a U-turn"
+ *    must not satisfy "au", and "bonza" must not satisfy "nz".
+ *  - CJK anchors have no word boundaries to pin to at all (`indexOfIdentifier`
+ *    handles that case on its own, length-gated).
  */
-function hasGeoAnchor(norm: string, anchors: readonly string[]): boolean {
-  return anchors.some(
-    a => indexOfIdentifier(norm, a) >= 0 || indexOfCompact(norm, a, MIN_ANCHOR_COMPACT_LEN) >= 0
-  )
+function hasGeoAnchor(norm: string, punctOnly: string, anchors: readonly string[]): boolean {
+  return anchors.some(a => {
+    if (CJK_RE.test(a)) return indexOfIdentifier(norm, a) >= 0
+    if (` ${norm} `.includes(` ${a} `)) return true
+    const compactId = a.replace(/ /g, '')
+    if (compactId.length < MIN_ANCHOR_COMPACT_LEN) return false
+    return ` ${punctOnly} `.includes(` ${compactId} `)
+  })
 }
 
 /** Does this client have the geo gate turned on at all? */
@@ -192,8 +226,9 @@ export function hasGeoGate(identity: ClientBrandIdentity): boolean {
 }
 
 /** The part of an answer that may carry geo evidence: everything but links. */
-function geoEvidenceText(answerText: string): string {
-  return normalizeForMatch(answerText.replace(URL_LIKE_RE, ' '))
+function geoEvidenceText(answerText: string): { norm: string; punctOnly: string } {
+  const stripped = answerText.replace(URL_LIKE_RE, ' ')
+  return { norm: normalizeForMatch(stripped), punctOnly: normalizeKeepingWhitespaceOnly(stripped) }
 }
 
 /**
@@ -265,7 +300,8 @@ export function admissibleIdentifiersForAnswer(
   const idList = buildIdentifierList(identity)
   const anchors = buildGeoAnchors(identity)
   if (anchors.length === 0) return idList.map(i => i.value)
-  const aliasAllowed = hasGeoAnchor(geoEvidenceText(answerText), anchors)
+  const { norm, punctOnly } = geoEvidenceText(answerText)
+  const aliasAllowed = hasGeoAnchor(norm, punctOnly, anchors)
   return idList.filter(i => aliasAllowed || !i.fromAlias).map(i => i.value)
 }
 
