@@ -5,6 +5,16 @@
 
 ---
 
+### 2026-09-20（广告支柱 IMPACT 闭环阶段 0+1 全部合并上线；Roman HU / 30 Kiteroa 共用账户解绑停投）
+
+PR #1656/#1658/#1659/#1660/#1662/#1664/#1665 全部合并；2026-09-20 实查生产确认两张核心表已在线（`ad_entity_snapshots` 1,602 行，`ad_strategy_configs` 结果阶梯列已存在）。同一天 PM 确认 Roman HU 与 30 Kiteroa 两个客户都已停投，已把此前两客户共用的 Meta 广告账户 `act_1260456876069575` 从两客户的 `client_meta_ad_accounts` 登记中解绑、关闭广告引擎，`client_binding_audit` 留下 `clear`/`applied` 各一条记录（撤回所需原值在 detail 字段里）。此前该账户没有给 ME 读权限，此前一直把 `ad-entity-snapshot`（7 天 31/31 次）和 `google-data-pullback-daily`（每天）整体标成"失败"。
+
+解绑后 `act_1260456876069575` 不再是生产里的共用账户案例——`findSharedAdAccounts` 只查询当前 `client_meta_ad_accounts` 登记，之后拿这个账户号去验证阶段 2 的 fail-closed 共用账户守卫会得到假阴性；`docs/ROADMAP.md` 广告执行层章节已同步改成历史案例描述，并改为用可重复的单测 fixture（两个不同 `client_id` 登记同一 `ad_account_id`）或另找生产里真实存在的共用账户来验证该守卫。
+
+**Reuse Statement**：纯上线状态记录 + 一次生产账户解绑操作，未新增代码能力；`findSharedAdAccounts`（`src/lib/meta/client-ad-accounts.ts`）等既有平台能力未改动，仍按 `client_meta_ad_accounts` 表实时判定共用账户，客户差异只体现在该表的行数据里，未写入 shared runtime。
+
+---
+
 ### 2026-09-20（Park Homes 官网：Riverside 页面按客户 V2 素材包重做为"整个 104 户社区"展示）
 
 PR [#1834](https://github.com/bigbigraydeng-maker/magic-engine/pull/1834) 已合并并部署，PM 本地预览后批准。客户 Jason 2026-09-16 邮件发来 Riverside V2 素材包（9 张图 + 英文实施说明），要求把 Riverside 页从"几套在售房"改成展示整个 104 户开发项目；当时只回了"收到"，之后四天没人做。本次按他要求的顺序重做：全社区航拍 + 介绍 → 104 户概况 → 整体愿景效果图（明确标注"示意，非批准规划"，不推断分期/地块/完工）→ 场地周边 → 工程进度 → 精选内外景（主图 + 两张 + 可展开细节）→ 视频 → 在售房源 → 未来批次登记。新建 `ProjectStory.astro` 布局组件，只在项目数据带 `story` 时启用，其余四个项目页不变。在售房源（`listings`）和未来批次（`releases`）做成 `projects.js` 里可独立增改的数组：为空时显示"咨询当前房源"按钮 + 已核实的 Ray White 链接，不编造房源卡片。页面概况按客户规则去掉了房源级数字（2–5 房 / $650k 起 / 2026–28 完工）；首页卡片"From $650k"保留，邮件里请客户确认。首页大图和 Riverside 卡片同步换成全社区航拍。验证：构建 20 页、生成页各段顺序与图注核对、本地灯箱/表单/中介信息脚本核查、375px 手机版无横向溢出、上线后线上 9 张图与文案核实。
