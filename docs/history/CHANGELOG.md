@@ -5,6 +5,19 @@
 
 ---
 
+### 2026-09-20（内容工厂：发布前品控接入 Jev 判断模型，抓竞品品牌/占位字幕/人称口吻）
+
+PR [#1832](https://github.com/bigbigraydeng-maker/magic-engine/pull/1832) 已合并（前身 #1825 因改动量超过 `claude/*` 分支自动闸门的 800 行上限，换成 `feat/*` 分支重开）。2026-09-20 只读评估 `content_work_orders` 真实工单（状态 `review_rejected`）发现，现有品牌红线闸（静态短语黑名单）抓不出三类要靠人工肉眼才能挑出的缺陷：角度/hook 把第三方竞品品牌当自己卖点（真实 Oztop 工单角度写成 "mapei brisbane"）、上屏字幕是内部内容分类标签冒充真文案且跨段完全重复（真实 Oztop/CTS 工单字幕逐段就是 "Customer Stories & Community" 这类内部标签，某单重复 7 次）、文案人称口吻跟简报要求的第一人称叙述者不符（真实 CTS 工单 brief 要求 Baker Gu 第一人称，AI 写成 "Our own offices. Our own guides." 公司口吻）。
+
+- 新增 `src/lib/jev/client.ts`（L3 Connector，TypeSafe Jev 判断模型，对外封装名 Compliance Engine）+ `src/lib/factory/content-quality-guard.ts`（编排三类检测：B 的机械重复子情形零成本确定性检测，其余靠一次 Jev 调用；命中不打回，写 `output.quality_flags` 标红转人工，跟现有 `redline_hits` 同一套口径）。
+- 接入 `completeWorkOrder`（成片交付时机，跟现有红线复扫同一入口），`ReviewInbox.tsx` 加一段展示。
+- 设计动手前召了子牙（架构）+ 魏征（挑刺）两个独立复审；上线过程中 Codex 自动复审又抓出 7 处真实问题（recipe/legacy 两条渲染路径的逐段字幕来源不一致、字段取值优先级跟 worker.mjs 不一致、Jev 超时只包住响应头没包响应体读取、人称检测误判合法的第一人称"我们"），全部修复并补了回归测试。
+- **待办**：生产环境 Render 尚未配置 `TYPESAFE_API_KEY`，配之前三类新检测不会真的运行（fail-closed，不会报错，但也不会真的查出问题）——已登记 [ROADMAP.md](../ROADMAP.md)。
+
+**Reuse Statement**：新增的是一个新的 L3 Connector（Jev API adapter）+ 通用语义判断逻辑,不新增能力线/支柱;复用现有"成片级复扫→标红→人工审"的整套口径,没有新建状态机、新路由、新 UI 页面。检测逻辑与客户/行业语义无关(换客户/换行业测试都通过),没有任何客户名/客户 ID 写进 shared runtime。
+
+---
+
 ### 2026-09-20（CRM+AI 客服：邮件渠道接入 Governed Reply Agent 治理链路）
 
 PR [#1808](https://github.com/bigbigraydeng-maker/magic-engine/pull/1808) 已合并（merge commit `1c0d983f`）。延续 issue [#1745](https://github.com/bigbigraydeng-maker/magic-engine/issues/1745) 的调研结论，把邮件接进已上线的 CTS Governed Reply Agent（AI 起草 → 人审 → 发送，覆盖 Messenger/WhatsApp 的同一套系统）——这是 CRM+AI 客服接入这条线"Messenger-only"范围冻结（[docs/roadmap/2026-09-15-crm-ai-agent-build-control.md](../roadmap/2026-09-15-crm-ai-agent-build-control.md)）里 PM 2026-09-15 当场拍板的**唯一例外**，只豁免邮件一个渠道。
