@@ -201,12 +201,16 @@ describe('resolveClientBrandRank', () => {
   })
 
   it('the client is still found at a later standalone occurrence', () => {
+    const raw = 'Oztop Supplies is unrelated. For flooring itself, ask Oztop directly.'
     const out = resolveClientBrandRank(
       [{ brand: 'Oztop Supplies', rank: 1, snippet: 'x' }],
-      'Oztop Supplies is unrelated. For flooring itself, ask Oztop directly.',
+      raw,
       { brandName: 'Oztop' }
     )
     expect(out.client_brand_rank).toBe(2)
+    // The snippet must quote the occurrence that grounded the rank.
+    const inserted = out.brands.find(b => b.brand === 'Oztop')
+    expect(inserted?.snippet).toContain('ask Oztop directly')
   })
 
   it('an alias that is also the domain root keeps the stronger source', () => {

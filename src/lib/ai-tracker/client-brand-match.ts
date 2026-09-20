@@ -213,14 +213,23 @@ export function isClientBrand(brand: string, ids: readonly string[]): boolean {
   })
 }
 
-function excerptAround(rawResponse: string, identity: ClientBrandIdentity): string {
-  const words = rawResponse.split(/\s+/).filter(Boolean)
-  const ids = buildClientIdentifiers(identity)
-  const at = words.findIndex((_, i) =>
-    firstIdentifierIndex(normalizeForMatch(words.slice(i, i + 4).join(' ')), ids) >= 0
-  )
-  const start = Math.max(0, (at < 0 ? 0 : at) - 10)
-  return words.slice(start, start + SNIPPET_WORDS).join(' ')
+/**
+ * A short quote of the raw text around `normPos` — the position in the
+ * NORMALISED text that actually grounded the client, so the snippet quotes
+ * that occurrence and not an earlier one inside a competitor's name.
+ * Both strings count runs of letters/digits, so the counts line up.
+ */
+function excerptAt(rawResponse: string, norm: string, normPos: number): string {
+  const tokenIndex = norm.slice(0, normPos).split(' ').filter(Boolean).length
+  const rawTokens = Array.from(rawResponse.matchAll(/[\p{L}\p{N}]+/gu))
+  const at = rawTokens[Math.min(tokenIndex, rawTokens.length - 1)]?.index ?? 0
+  const before = rawResponse.slice(0, at).split(/\s+/).filter(Boolean).slice(-10)
+  const after = rawResponse
+    .slice(at)
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, SNIPPET_WORDS - before.length)
+  return [...before, ...after].join(' ')
 }
 
 /**
@@ -284,7 +293,7 @@ export function resolveClientBrandRank(
   brands.push({
     brand: identity.brandName.trim() || (identity.domain ?? '').trim(),
     rank,
-    snippet: excerptAround(rawResponse, identity),
+    snippet: excerptAt(rawResponse, norm, clientPos),
   })
   brands.sort((a, b) => a.rank - b.rank)
   return { brands, client_brand_rank: rank }
