@@ -123,6 +123,7 @@ async function loadRuns(sb: SupabaseClient): Promise<RunRow[]> {
       .select('id, ran_at, ai_engine, ai_model, client_brand_rank, brands_mentioned')
       .eq('client_id', CTS_CLIENT_ID)
       .order('ran_at', { ascending: true })
+      .order('id', { ascending: true }) // ran_at 不是唯一键，并列时补 id 做 tiebreaker，翻页不漏不重
       .range(from, from + PAGE - 1)
     if (error) throw new Error(`读 ai_visibility_runs 失败: ${error.message}`)
     if (!data || data.length === 0) break

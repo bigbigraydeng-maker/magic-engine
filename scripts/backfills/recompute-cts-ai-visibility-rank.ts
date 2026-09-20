@@ -336,6 +336,20 @@ async function main(): Promise<void> {
     throw new Error('要真写生产库，必须用 --out <持久路径> 指定计划文件 —— 那份文件是唯一的撤回底稿，不能留在 /tmp')
   }
 
+  const baselinePath = outPath.replace(/\.json$/, '') + '.baseline.json'
+  // 重试保护：--apply 时如果这条路径已经有计划文件或底稿，说明上一次 apply 在这条路径上
+  // 跑过（很可能是逐行写入中途失败）。这时候绝不能重新生成计划覆盖它 ——
+  // 新计划只含「还没改成功」的行，会把第一次已写成功的那些行的旧值底稿冲掉，
+  // 之后 --revert 就再也撤不回那些行了。换一个新 --out 路径重跑，
+  // 或者先用 --revert <旧计划> 撤回旧计划再重试。
+  if (apply && (existsSync(outPath) || existsSync(baselinePath))) {
+    throw new Error(
+      `${outPath} 或 ${baselinePath} 已存在，像是同一路径上跑过一次 --apply（可能是重试）。` +
+        `为了不覆盖第一次的撤回底稿，换一个新的 --out 路径重跑；` +
+        `如果要重来，先用 --revert ${outPath} 把旧计划撤回，再删掉这两个文件重跑。`
+    )
+  }
+
   const identity = await loadIdentity(sb)
   console.log('客户:', identity.name)
   console.log('  品牌名:', identity.brandName)
@@ -387,7 +401,6 @@ async function main(): Promise<void> {
   // 写之前先把 CTS 全部 3827 行的这两列整表存一份底稿。
   // `ai_visibility_runs` 没有 updated_at，改完在库里查不出哪些行被动过 ——
   // 只有改动清单不够，整表底稿才是真正能无条件还原的那份。
-  const baselinePath = outPath.replace(/\.json$/, '') + '.baseline.json'
   writeFileSync(
     baselinePath,
     JSON.stringify(
