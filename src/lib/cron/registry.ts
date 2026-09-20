@@ -222,6 +222,14 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 🔴 schedule 这一列不许手抄：唯一定义在 src/lib/competitors/watch.ts 的
   //    COMPETITOR_WATCH_CRON，同目录的测试会断言两边一致。
   { service: 'inngest:cloud-competitor-watch-weekly-fanout', jobName: 'competitor-watch-weekly', schedule: '45 5 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-20' },
+  // 每周 AI 可见度追踪（GEO）灰度迁移。旧 Render cron `ai-tracker-weekly`（上面那条老登记）
+  // 原样保留、对没开灰度开关的客户继续跑；这条新登记只覆盖开了
+  // `seo_config.ai_visibility_inngest_enabled` 的客户，故意用不同的 jobName——两条链路
+  // 覆盖范围不同，混进同一份健康检查会看不出「这周是哪条链路给这个客户出的数据」。
+  //
+  // 🔴 schedule 这一列不许手抄：唯一定义在 src/lib/ai-tracker/weekly-fanout.ts 的
+  //    AI_VISIBILITY_WEEKLY_CRON，同目录的测试会断言两边一致。
+  { service: 'inngest:cloud-ai-visibility-weekly-fanout', jobName: 'ai-visibility-tracker-weekly', schedule: '0 6 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-21' },
 ] as const
 
 /**

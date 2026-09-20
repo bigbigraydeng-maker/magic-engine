@@ -24,6 +24,15 @@
  * since each opted-in client spends DataForSEO calls (one per configured
  * competitor domain) every week.
  *
+ * ai_visibility_inngest_enabled is the gate for the Inngest-based rewrite of
+ * the weekly AI-visibility (GEO) tracker
+ * (src/lib/inngest/functions/ai-visibility-weekly.ts) — off by default for
+ * every client. While off, that client keeps running through the old
+ * Render-cron path (`ai-tracker-weekly`) unchanged. Only flip it on for a
+ * client after a dry-run/parallel-run comparison confirms the Inngest path
+ * produces the same judgment output as the old path, and PM has approved —
+ * same rollout discipline as competitor_watch_enabled.
+ *
  * Mirrors src/app/api/clients/[id]/brand-aliases/route.ts.
  */
 
@@ -39,6 +48,7 @@ interface SeoConfig {
   meta_cycle_cooldown_days: number | null
   meta_cycle_brand_voice: string | null
   competitor_watch_enabled: boolean
+  ai_visibility_inngest_enabled: boolean
 }
 
 interface PatchBody {
@@ -48,6 +58,7 @@ interface PatchBody {
   meta_cycle_cooldown_days?: unknown
   meta_cycle_brand_voice?: unknown
   competitor_watch_enabled?: unknown
+  ai_visibility_inngest_enabled?: unknown
 }
 
 function parseConfig(raw: unknown): SeoConfig {
@@ -59,6 +70,7 @@ function parseConfig(raw: unknown): SeoConfig {
     meta_cycle_cooldown_days: typeof cfg['meta_cycle_cooldown_days'] === 'number' ? cfg['meta_cycle_cooldown_days'] : null,
     meta_cycle_brand_voice: typeof cfg['meta_cycle_brand_voice'] === 'string' ? cfg['meta_cycle_brand_voice'] : null,
     competitor_watch_enabled: cfg['competitor_watch_enabled'] === true,
+    ai_visibility_inngest_enabled: cfg['ai_visibility_inngest_enabled'] === true,
   }
 }
 
@@ -120,13 +132,17 @@ export async function PATCH(
   if (body.competitor_watch_enabled !== undefined && typeof body.competitor_watch_enabled !== 'boolean') {
     return NextResponse.json({ error: 'competitor_watch_enabled must be a boolean' }, { status: 400 })
   }
+  if (body.ai_visibility_inngest_enabled !== undefined && typeof body.ai_visibility_inngest_enabled !== 'boolean') {
+    return NextResponse.json({ error: 'ai_visibility_inngest_enabled must be a boolean' }, { status: 400 })
+  }
   if (
     body.weekly_blog === undefined &&
     body.meta_cycle_enabled === undefined &&
     body.meta_cycle_max_pages === undefined &&
     body.meta_cycle_cooldown_days === undefined &&
     body.meta_cycle_brand_voice === undefined &&
-    body.competitor_watch_enabled === undefined
+    body.competitor_watch_enabled === undefined &&
+    body.ai_visibility_inngest_enabled === undefined
   ) {
     return NextResponse.json({ error: 'no known seo_config keys in body' }, { status: 400 })
   }
@@ -150,6 +166,7 @@ export async function PATCH(
     ...(body.meta_cycle_cooldown_days !== undefined ? { meta_cycle_cooldown_days: body.meta_cycle_cooldown_days } : {}),
     ...(body.meta_cycle_brand_voice !== undefined ? { meta_cycle_brand_voice: body.meta_cycle_brand_voice } : {}),
     ...(body.competitor_watch_enabled !== undefined ? { competitor_watch_enabled: body.competitor_watch_enabled } : {}),
+    ...(body.ai_visibility_inngest_enabled !== undefined ? { ai_visibility_inngest_enabled: body.ai_visibility_inngest_enabled } : {}),
   }
 
   const { error: writeErr } = await supabaseAdmin
