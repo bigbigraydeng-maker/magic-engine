@@ -101,15 +101,26 @@ function buildTaggedIdentifiers(identity: ClientBrandIdentity): TaggedIdentifier
     const root = registrableLabel(host)
     if (root.length >= MIN_DOMAIN_ROOT_LEN) raw.push({ id: root, isAlias: false })
   }
-  const seen = new Set<string>()
-  const out: TaggedIdentifier[] = []
+  // A non-alias source always overrides an alias tag on the same identifier
+  // — e.g. brand "Acme Tours" + alias "Acme" + domain "acme.co.nz" all
+  // normalise to "acme". If the alias happens to be listed first, dedup
+  // must not freeze that identifier as an alias: the domain root proves it
+  // on its own, and tagging it `isAlias: true` would make the short-alias
+  // disambiguation below drop it whenever a colliding brand appears in the
+  // same answer, even though the client's own domain grounds it.
+  const order: string[] = []
+  const isAliasById = new Map<string, boolean>()
   for (const { id, isAlias } of raw) {
     const norm = normalizeForMatch(id ?? '')
-    if (norm.replace(/ /g, '').length < 2 || seen.has(norm)) continue
-    seen.add(norm)
-    out.push({ id: norm, isAlias })
+    if (norm.replace(/ /g, '').length < 2) continue
+    if (!isAliasById.has(norm)) {
+      order.push(norm)
+      isAliasById.set(norm, isAlias)
+    } else if (!isAlias) {
+      isAliasById.set(norm, false)
+    }
   }
-  return out
+  return order.map(id => ({ id, isAlias: isAliasById.get(id)! }))
 }
 
 /** Normalised identifiers that prove the client is present (≥ 2 chars). */

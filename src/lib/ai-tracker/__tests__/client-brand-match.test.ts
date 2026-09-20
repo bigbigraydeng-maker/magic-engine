@@ -216,6 +216,19 @@ describe('resolveClientBrandRank', () => {
     ])
   })
 
+  it('a short alias that also matches the domain root is still evidence against a colliding competitor', () => {
+    // "Acme" is both the configured alias and the registrable domain-root
+    // label of acme.co.nz. A competitor "Acme Logistics" must not make the
+    // short-alias disambiguation drop this identifier: the domain root is
+    // non-alias evidence and stands on its own.
+    const out = resolveClientBrandRank(
+      [{ brand: 'Acme Logistics', rank: 1, snippet: 'x' }],
+      'For your trip, Acme is a great choice. For freight, try Acme Logistics.',
+      { brandName: 'Acme Tours', aliases: ['Acme'], domain: 'acme.co.nz' }
+    )
+    expect(out.client_brand_rank).not.toBeNull()
+  })
+
   it('drops multiple hallucinated client entries and closes rank gaps', () => {
     const out = resolveClientBrandRank(
       [
