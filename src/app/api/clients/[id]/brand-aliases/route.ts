@@ -100,11 +100,16 @@ export async function PATCH(
     cleaned.push(norm)
   }
 
-  // Persist NULL when empty so isBrandQueryMatch treats it as "no aliases"
-  // (consistent with the migration comment: NULL falls back to domain-root match).
+  // Persist the empty array (never NULL) when the FDE clears the list.
+  // Production has clients.brand_aliases NOT NULL DEFAULT '{}' — writing NULL
+  // raised 23502 and the panel could never be cleared once populated.
+  // `[]` is equivalent for every reader: isBrandedKeywordWithAliases skips an
+  // empty alias loop and falls through to the domain-root token match, and
+  // auto-fetch / rankings / touchpoints all normalise `length === 0` to
+  // "no aliases" before use.
   const { error: updateErr } = await supabaseAdmin
     .from('clients')
-    .update({ brand_aliases: cleaned.length === 0 ? null : cleaned })
+    .update({ brand_aliases: cleaned })
     .eq('id', clientId)
 
   if (updateErr) {

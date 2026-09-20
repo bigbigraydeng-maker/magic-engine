@@ -89,6 +89,35 @@ apply 时炸在 policy 步骤。影响 19 个客户的关键词排名 cron 全�
 
 **怎么防**：每次改 `type X = 'a' | 'b' | 'c'` 必须 grep 全仓 `Record` / `switch` / `STATUS_META` 的 key。
 
+### B5 · 反过来也会漂：线上库被手工改过，仓库里的 migration 根本不知道 🔴
+
+**事故**（2026-09-21）：`clients.brand_aliases` 在仓库 migration
+（`20260624010000_client_brand_aliases.sql`）里写的是可以为空（nullable，无默认值），
+线上库（`glbdnayojixmexgofbsd`）实际是 `NOT NULL DEFAULT '{}'`。没有任何 migration 记录这次改动。
+后果：品牌别名设置面板**能加不能清空**——代码在清空时写 NULL，数据库拒绝（23502），接口 500。
+这个 bug 从 6 月潜伏到 9 月才被顺手发现。
+
+**跟 B3 是镜像关系**：B3 是「仓库里有 migration，线上没跑」；B5 是「线上改了，仓库不知道」。
+两个方向都要查，只查一边等于没查。
+
+**怎么防**：
+1. 写「空就存 NULL」这种代码前，先确认那一列真的允许 NULL。不看仓库 migration，看线上：
+   ```bash
+   # PostgREST 的 schema spec 会把 NOT NULL 列列进 required，只读、不碰数据
+   curl -s "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/" \
+     -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+     -H "Accept: application/openapi+json" \
+     | jq '.definitions.clients.required'
+   ```
+2. 发现漂移，当场补一条**幂等的对齐 migration**（先把存量 NULL 刷成默认值，再 `SET DEFAULT` /
+   `SET NOT NULL`），让线上是 no-op、其它环境能追平。范例：
+   `20260921010000_clients_brand_aliases_not_null_align.sql`。
+3. 除非真有读取方靠 NULL 和 `[]` 区分行为，数组列一律存 `[]`，别存 NULL —— 少一个没有含义、
+   却能把写操作打挂的状态。`clients.primary_keywords` / `clients.competitor_domains` /
+   `master_briefs.products` / `master_briefs.excluded_topics` 四个兄弟接口今天还在写
+   `cleaned.length === 0 ? null : cleaned`；2026-09-21 实测这四列线上仍是 nullable，所以暂时没炸，
+   但任何一列被加上 NOT NULL，同样的 500 就会复现。
+
 ---
 
 ## C. Git / 分支
