@@ -213,6 +213,17 @@ describe('resolveClientBrandRank', () => {
     expect(inserted?.snippet).toContain('ask Oztop directly')
   })
 
+  it('a shortened parser result does not hide the full name in the text', () => {
+    // The parser returned "Acme" (too short to be accepted as the client),
+    // but the text plainly writes "Acme Tours".
+    const out = resolveClientBrandRank(
+      [{ brand: 'Acme', rank: 1, snippet: 'x' }],
+      'Acme Tours runs the small-group departures out of Auckland.',
+      { brandName: 'Acme Tours' }
+    )
+    expect(out.client_brand_rank).toBe(1)
+  })
+
   it('an alias that is also the domain root keeps the stronger source', () => {
     const out = resolveClientBrandRank(
       [{ brand: 'Kiwi Tours', rank: 1, snippet: 'x' }],

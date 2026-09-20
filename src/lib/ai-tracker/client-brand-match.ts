@@ -168,7 +168,10 @@ function firstIdentifierIndex(
   let best = -1
   for (const id of ids) {
     for (const idx of indexesOfIdentifier(norm, id)) {
-      const covered = excluded.some(([start, end]) => idx >= start && idx < end)
+      // Only a span that swallows the identifier WHOLE belongs to the other
+      // brand. A parser that shortened the client ("Acme" for "Acme Tours")
+      // must not hide the full name written in the text.
+      const covered = excluded.some(([start, end]) => idx >= start && idx + id.length <= end)
       if (covered) continue
       if (best < 0 || idx < best) best = idx
       break
