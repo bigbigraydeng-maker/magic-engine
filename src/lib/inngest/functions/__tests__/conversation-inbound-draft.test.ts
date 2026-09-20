@@ -154,7 +154,7 @@ function makeDeps(overrides: Partial<ConversationInboundDraftDeps> = {}): Conver
     loadIndustry: vi.fn(async () => null),
     loadContext: vi.fn(async () => fakeContext()),
     runAgent: vi.fn(async () => fakeAgentOutput()),
-    verify: vi.fn(() => okVerifier()),
+    verify: vi.fn(async () => okVerifier()),
     persistDraft: vi.fn(async () => ({ id: DRAFT_ID })),
     updateDraftStatus: vi.fn(async () => {}),
     markTimedOutIfPending: vi.fn(async () => true),
@@ -331,7 +331,7 @@ describe('起草/验证/等批准', () => {
   )
 
   it('verifier 拦截 → 存草稿 verifier_status=blocked，emit reply.blocked，返回 blocked', async () => {
-    const deps = makeDeps({ verify: vi.fn(() => blockedVerifier(['brand_redline: x'])) })
+    const deps = makeDeps({ verify: vi.fn(async () => blockedVerifier(['brand_redline: x'])) })
     const fn = createConversationInboundDraftFunction(deps)
     const step = fakeStep()
     const result = await invoke(fn, step)
