@@ -101,6 +101,13 @@ describe('GET /knowledge-rollout-confirm/[requestId]', () => {
     expect(mocks.consumeRolloutAdvanceRequest).not.toHaveBeenCalled()
   })
 
+  it('issue #1822 regression: never sends referrer-policy: no-referrer — that value makes a real browser null out Origin on the page\'s own POST, which the CSRF gate below then always rejects', async () => {
+    mocks.loadRolloutAdvanceRequest.mockResolvedValue(VIEW)
+    const res = await GET(getReq(), { params: { requestId: REQUEST_ID } })
+    expect(res.headers.get('referrer-policy')).toBe('same-origin')
+    expect(res.headers.get('referrer-policy')).not.toBe('no-referrer')
+  })
+
   it('shows the sample-check result when advancing out of stage 1', async () => {
     mocks.loadRolloutAdvanceRequest.mockResolvedValue({
       ...VIEW,
@@ -154,6 +161,15 @@ describe('POST /knowledge-rollout-confirm/[requestId] — CSRF discipline', () =
 
   it('refuses a submit with no Origin header at all', async () => {
     const res = await POST(postReq({ token: RAW_TOKEN, nonce: 'n1' }, {}), { params: { requestId: REQUEST_ID } })
+    expect(res.status).toBe(403)
+    expect(mocks.consumeRolloutAdvanceRequest).not.toHaveBeenCalled()
+  })
+
+  it('issue #1822: refuses the literal string "null" as Origin — this is what a no-referrer-policy page\'s own POST sends per the Fetch spec, so the gate must reject it exactly like any other mismatched origin, not just a missing header', async () => {
+    const res = await POST(
+      postReq({ token: RAW_TOKEN, nonce: 'n1' }, { origin: 'null' }),
+      { params: { requestId: REQUEST_ID } },
+    )
     expect(res.status).toBe(403)
     expect(mocks.consumeRolloutAdvanceRequest).not.toHaveBeenCalled()
   })
