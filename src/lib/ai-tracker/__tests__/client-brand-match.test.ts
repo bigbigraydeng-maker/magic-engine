@@ -13,7 +13,9 @@ describe('buildClientIdentifiers', () => {
         domain: 'https://www.ctstours.co.nz/',
         aliases: ['China Travel Service'],
       })
-    ).toEqual(['cts tours', 'china travel service', 'ctstours co nz', 'ctstours'])
+      // Brand name and domain come before aliases: a name that is both keeps
+      // the stronger (non-alias) source when duplicates collapse.
+    ).toEqual(['cts tours', 'ctstours co nz', 'ctstours', 'china travel service'])
   })
 
   it('adds the leading segment of a "Person — Office" composite name', () => {
@@ -176,6 +178,44 @@ describe('resolveClientBrandRank', () => {
     )
     expect(out.client_brand_rank).toBeNull()
     expect(out.brands.map(b => [b.brand, b.rank])).toEqual([['CTS Logistics', 1]])
+  })
+
+  it('a short OFFICIAL brand name still recovers a missed client', () => {
+    // Only aliases are too weak to stand alone; a short official name is not.
+    const out = resolveClientBrandRank(
+      [{ brand: 'Bunnings', rank: 1, snippet: 'x' }],
+      'For flooring, Bunnings is the obvious start, though Oztop is cheaper.',
+      { brandName: 'Oztop' }
+    )
+    expect(out.client_brand_rank).toBe(2)
+  })
+
+  it('an identifier only found inside another brand name is not evidence', () => {
+    const out = resolveClientBrandRank(
+      [{ brand: 'Oztop Supplies', rank: 1, snippet: 'x' }],
+      'Oztop Supplies delivers nationwide.',
+      { brandName: 'Oztop' }
+    )
+    expect(out.client_brand_rank).toBeNull()
+    expect(out.brands.map(b => b.brand)).toEqual(['Oztop Supplies'])
+  })
+
+  it('the client is still found at a later standalone occurrence', () => {
+    const out = resolveClientBrandRank(
+      [{ brand: 'Oztop Supplies', rank: 1, snippet: 'x' }],
+      'Oztop Supplies is unrelated. For flooring itself, ask Oztop directly.',
+      { brandName: 'Oztop' }
+    )
+    expect(out.client_brand_rank).toBe(2)
+  })
+
+  it('an alias that is also the domain root keeps the stronger source', () => {
+    const out = resolveClientBrandRank(
+      [{ brand: 'Kiwi Tours', rank: 1, snippet: 'x' }],
+      'Kiwi Tours is popular, but Acme runs the small-group departures.',
+      { brandName: 'Acme Tours', aliases: ['Acme'], domain: 'acme.co.nz' }
+    )
+    expect(out.client_brand_rank).toBe(2)
   })
 
   it('8ce9055d: a short alias inside an unlisted company name is not evidence', () => {

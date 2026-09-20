@@ -79,22 +79,45 @@ function registrableLabel(host: string): string {
   return labels[labels.length - 1] ?? ''
 }
 
-/** Normalised identifiers that prove the client is present (≥ 2 chars). */
-export function buildClientIdentifiers(identity: ClientBrandIdentity): string[] {
-  const raw = [identity.brandName, ...(identity.aliases ?? [])]
+/** One way of naming the client, and where it came from. */
+interface ClientIdentifier {
+  value: string
+  /** Aliases are FDE-entered nicknames; the brand name and domain are not. */
+  fromAlias: boolean
+}
+
+/**
+ * Every way of naming the client (≥ 2 chars). The brand name, its leading
+ * segment and the domain come first, so a name that is BOTH an alias and a
+ * stronger source keeps the stronger source when duplicates collapse.
+ */
+function buildIdentifierList(identity: ClientBrandIdentity): ClientIdentifier[] {
+  const raw: ClientIdentifier[] = [{ value: identity.brandName, fromAlias: false }]
   // "Person — Office" composite names: the leading segment names the client.
   const lead = identity.brandName.split(COMPOSITE_SEPARATOR_RE)[0]
-  if (lead !== identity.brandName) raw.push(lead)
+  if (lead !== identity.brandName) raw.push({ value: lead, fromAlias: false })
   const host = identity.domain ? ownDomainHost(identity.domain) : null
   if (host) {
-    raw.push(host)
+    raw.push({ value: host, fromAlias: false })
     const root = registrableLabel(host)
-    if (root.length >= MIN_DOMAIN_ROOT_LEN) raw.push(root)
+    if (root.length >= MIN_DOMAIN_ROOT_LEN) raw.push({ value: root, fromAlias: false })
   }
-  const ids = raw
-    .map(s => normalizeForMatch(s ?? ''))
-    .filter(s => s.replace(/ /g, '').length >= 2)
-  return Array.from(new Set(ids))
+  for (const alias of identity.aliases ?? []) raw.push({ value: alias, fromAlias: true })
+
+  const seen = new Map<string, ClientIdentifier>()
+  for (const item of raw) {
+    const value = normalizeForMatch(item.value ?? '')
+    if (value.replace(/ /g, '').length < 2) continue
+    const existing = seen.get(value)
+    if (!existing) seen.set(value, { value, fromAlias: item.fromAlias })
+    else if (existing.fromAlias && !item.fromAlias) existing.fromAlias = false
+  }
+  return Array.from(seen.values())
+}
+
+/** Normalised identifiers that prove the client is present (≥ 2 chars). */
+export function buildClientIdentifiers(identity: ClientBrandIdentity): string[] {
+  return buildIdentifierList(identity).map(i => i.value)
 }
 
 /** Char index of `id` in normalised text `norm` (word-bounded), or -1. */
@@ -124,20 +147,53 @@ function indexOfIdentifier(norm: string, id: string): number {
   return -1
 }
 
-function firstIdentifierIndex(norm: string, ids: readonly string[]): number {
+/** Every word-bounded occurrence of `id` in `norm`, in order. */
+function indexesOfIdentifier(norm: string, id: string): number[] {
+  const found: number[] = []
+  let from = 0
+  while (from <= norm.length) {
+    const idx = indexOfIdentifier(norm.slice(from), id)
+    if (idx < 0) break
+    found.push(from + idx)
+    from += idx + 1
+  }
+  return found
+}
+
+function firstIdentifierIndex(
+  norm: string,
+  ids: readonly string[],
+  excluded: ReadonlyArray<[number, number]> = []
+): number {
   let best = -1
   for (const id of ids) {
-    const idx = indexOfIdentifier(norm, id)
-    if (idx >= 0 && (best < 0 || idx < best)) best = idx
+    for (const idx of indexesOfIdentifier(norm, id)) {
+      const covered = excluded.some(([start, end]) => idx >= start && idx < end)
+      if (covered) continue
+      if (best < 0 || idx < best) best = idx
+      break
+    }
   }
   return best
 }
 
+/** Spans in `norm` occupied by brands that are NOT the client. */
+function spansOfOtherBrands(norm: string, others: readonly BrandMention[]): Array<[number, number]> {
+  const spans: Array<[number, number]> = []
+  for (const b of others) {
+    const name = normalizeForMatch(b.brand)
+    if (!name) continue
+    for (const idx of indexesOfIdentifier(norm, name)) spans.push([idx, idx + name.length])
+  }
+  return spans
+}
+
 /**
  * A short single-token identifier ("cts", "act") is too ambiguous to stand
- * on its own as evidence: the same word inside another company's name
- * ("CTS Logistics", "CTS Bus") would prove a client called "CTS Tours".
- * It only counts through a brand the parser extracted that is the client.
+ * on its own as evidence when it is only an ALIAS: the same word inside
+ * another company's name ("CTS Logistics", "CTS Bus") would prove a client
+ * called "CTS Tours". A short official brand name ("oztop") still counts —
+ * occurrences inside another extracted brand are excluded separately.
  */
 function isShortSingleTokenId(id: string): boolean {
   return id.split(' ').length < 2 && id.length < MIN_CONTAINED_TOKEN_LEN
@@ -176,19 +232,30 @@ export function resolveClientBrandRank(
   rawResponse: string,
   identity: ClientBrandIdentity
 ): ClientRankResolution {
-  const ids = buildClientIdentifiers(identity)
+  const idList = buildIdentifierList(identity)
+  const ids = idList.map(i => i.value)
   const brands = parsedBrands.map(b => ({ ...b }))
   if (ids.length === 0) return { brands, client_brand_rank: null }
 
   const norm = normalizeForMatch(rawResponse)
   const clientBrands = brands.filter(b => isClientBrand(b.brand, ids))
-  // Evidence = an identifier that stands on its own, or the name of a brand
-  // the parser extracted that is the client ("Acme Tours Ltd" for client
-  // "Acme Tours"), written in the text.
-  const clientPos = firstIdentifierIndex(norm, [
-    ...ids.filter(id => !isShortSingleTokenId(id)),
-    ...clientBrands.map(b => normalizeForMatch(b.brand)),
-  ])
+  // Evidence = an identifier written in the text, or the name of a brand the
+  // parser extracted that is the client ("Acme Tours Ltd" for "Acme Tours").
+  // Two occurrences don't count: a short alias anywhere, and any identifier
+  // sitting inside another extracted brand's name ("oztop" in "Oztop
+  // Supplies") — that occurrence belongs to the other company.
+  const otherSpans = spansOfOtherBrands(
+    norm,
+    brands.filter(b => !clientBrands.includes(b))
+  )
+  const clientPos = firstIdentifierIndex(
+    norm,
+    [
+      ...idList.filter(i => !(i.fromAlias && isShortSingleTokenId(i.value))).map(i => i.value),
+      ...clientBrands.map(b => normalizeForMatch(b.brand)),
+    ],
+    otherSpans
+  )
 
   if (clientPos < 0) {
     // Ungrounded: drop hallucinated client entries and close the rank gaps.
