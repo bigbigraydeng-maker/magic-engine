@@ -224,6 +224,26 @@ describe('resolveClientBrandRank', () => {
     expect(out.client_brand_rank).toBe(1)
   })
 
+  it('a competitor span measured from the text covers a spelled-out match', () => {
+    // Parser wrote "SunHaven"; the text spells it "Sun Haven". The client
+    // name "Haven" sits inside that match and must not be counted.
+    const out = resolveClientBrandRank(
+      [{ brand: 'SunHaven', rank: 1, snippet: 'x' }],
+      'Sun Haven Retreat takes bookings all year.',
+      { brandName: 'Haven' }
+    )
+    expect(out.client_brand_rank).toBeNull()
+  })
+
+  it('the snippet stays on the client even after many "&" in the text', () => {
+    const raw =
+      'Barfoot & Thompson, Bayleys & Co, Ray & White, Harcourts & Sons, ' +
+      'Tall & Co, Smith & Sons all operate here. Acme Realty covers the eastern bays.'
+    const out = resolveClientBrandRank([], raw, { brandName: 'Acme Realty' })
+    expect(out.client_brand_rank).toBe(1)
+    expect(out.brands[0].snippet).toContain('Acme Realty')
+  })
+
   it('an alias that is also the domain root keeps the stronger source', () => {
     const out = resolveClientBrandRank(
       [{ brand: 'Kiwi Tours', rank: 1, snippet: 'x' }],

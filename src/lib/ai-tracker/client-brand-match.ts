@@ -47,6 +47,35 @@ const SNIPPET_WORDS = 30
 
 const CJK_RE = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/
 
+/**
+ * Same normalisation as `normalizeForMatch`, but also records, for every
+ * character of the result, the index it came from in the input — so a
+ * position found in normalised text can be quoted from the raw text even
+ * when normalisation changed the length ("&" becomes " and ").
+ */
+function normalizeWithSourceMap(input: string): { norm: string; map: number[] } {
+  let out = ''
+  const map: number[] = []
+  let pendingSpace = false
+  for (let i = 0; i < input.length; i++) {
+    const piece = normalizeForMatch(input[i])
+    if (!piece) {
+      pendingSpace = out.length > 0
+      continue
+    }
+    if (pendingSpace) {
+      out += ' '
+      map.push(i)
+      pendingSpace = false
+    }
+    for (const ch of piece) {
+      out += ch
+      map.push(i)
+    }
+  }
+  return { norm: out, map }
+}
+
 /** Lowercase, strip accents, collapse every non-letter/digit run to one space. */
 export function normalizeForMatch(s: string): string {
   return s
@@ -147,17 +176,37 @@ function indexOfIdentifier(norm: string, id: string): number {
   return -1
 }
 
-/** Every word-bounded occurrence of `id` in `norm`, in order. */
-function indexesOfIdentifier(norm: string, id: string): number[] {
-  const found: number[] = []
+/**
+ * Every word-bounded occurrence of `id` in `norm`, as [start, end) spans of
+ * the TEXT matched. A compact match ("kiwitours" against "kiwi tours") spans
+ * more characters than the identifier itself, so the end is measured here,
+ * not derived from `id.length`.
+ */
+function spansOfIdentifier(norm: string, id: string): Array<[number, number]> {
+  const found: Array<[number, number]> = []
   let from = 0
   while (from <= norm.length) {
     const idx = indexOfIdentifier(norm.slice(from), id)
     if (idx < 0) break
-    found.push(from + idx)
-    from += idx + 1
+    const start = from + idx
+    found.push([start, endOfMatch(norm, start, id)])
+    from = start + 1
   }
   return found
+}
+
+/** End (exclusive) of the identifier match that starts at `start`. */
+function endOfMatch(norm: string, start: number, id: string): number {
+  if (norm.startsWith(id, start)) return start + id.length
+  // Compact match: consume the words that spell out the identifier.
+  const compactLength = id.replace(/ /g, '').length
+  let seen = 0
+  let i = start
+  while (i < norm.length && seen < compactLength) {
+    if (norm[i] !== ' ') seen++
+    i++
+  }
+  return i
 }
 
 function firstIdentifierIndex(
@@ -167,11 +216,11 @@ function firstIdentifierIndex(
 ): number {
   let best = -1
   for (const id of ids) {
-    for (const idx of indexesOfIdentifier(norm, id)) {
+    for (const [idx, idEnd] of spansOfIdentifier(norm, id)) {
       // Only a span that swallows the identifier WHOLE belongs to the other
       // brand. A parser that shortened the client ("Acme" for "Acme Tours")
       // must not hide the full name written in the text.
-      const covered = excluded.some(([start, end]) => idx >= start && idx + id.length <= end)
+      const covered = excluded.some(([start, end]) => idx >= start && idEnd <= end)
       if (covered) continue
       if (best < 0 || idx < best) best = idx
       break
@@ -186,7 +235,7 @@ function spansOfOtherBrands(norm: string, others: readonly BrandMention[]): Arra
   for (const b of others) {
     const name = normalizeForMatch(b.brand)
     if (!name) continue
-    for (const idx of indexesOfIdentifier(norm, name)) spans.push([idx, idx + name.length])
+    spans.push(...spansOfIdentifier(norm, name))
   }
   return spans
 }
@@ -220,12 +269,11 @@ export function isClientBrand(brand: string, ids: readonly string[]): boolean {
  * A short quote of the raw text around `normPos` — the position in the
  * NORMALISED text that actually grounded the client, so the snippet quotes
  * that occurrence and not an earlier one inside a competitor's name.
- * Both strings count runs of letters/digits, so the counts line up.
+ * The position is mapped back through `normalizeWithSourceMap`, so it is
+ * exact even where normalisation changed the length.
  */
-function excerptAt(rawResponse: string, norm: string, normPos: number): string {
-  const tokenIndex = norm.slice(0, normPos).split(' ').filter(Boolean).length
-  const rawTokens = Array.from(rawResponse.matchAll(/[\p{L}\p{N}]+/gu))
-  const at = rawTokens[Math.min(tokenIndex, rawTokens.length - 1)]?.index ?? 0
+function excerptAt(rawResponse: string, map: readonly number[], normPos: number): string {
+  const at = map[Math.min(normPos, map.length - 1)] ?? 0
   const before = rawResponse.slice(0, at).split(/\s+/).filter(Boolean).slice(-10)
   const after = rawResponse
     .slice(at)
@@ -249,7 +297,7 @@ export function resolveClientBrandRank(
   const brands = parsedBrands.map(b => ({ ...b }))
   if (ids.length === 0) return { brands, client_brand_rank: null }
 
-  const norm = normalizeForMatch(rawResponse)
+  const { norm, map } = normalizeWithSourceMap(rawResponse)
   const clientBrands = brands.filter(b => isClientBrand(b.brand, ids))
   // Evidence = an identifier written in the text, or the name of a brand the
   // parser extracted that is the client ("Acme Tours Ltd" for "Acme Tours").
@@ -296,7 +344,7 @@ export function resolveClientBrandRank(
   brands.push({
     brand: identity.brandName.trim() || (identity.domain ?? '').trim(),
     rank,
-    snippet: excerptAt(rawResponse, norm, clientPos),
+    snippet: excerptAt(rawResponse, map, clientPos),
   })
   brands.sort((a, b) => a.rank - b.rank)
   return { brands, client_brand_rank: rank }
