@@ -63,6 +63,7 @@ describe('OAuth state principal and browser binding',()=>{
     const q=chain(null);mocks.from.mockReturnValue(q)
     const result=await startAdsConsent('tenant','principal')
     expect(new URL(result.url).searchParams.get('scope')).toBe('ads_read')
+    expect(new URL(result.url).searchParams.get('locale')).toBe('zh_CN')
     const stored=vi.mocked(q.insert as ReturnType<typeof vi.fn>).mock.calls[0][0]
     expect(stored.state_hash).not.toBe(new URL(result.url).searchParams.get('state'));expect(stored.browser_hash).not.toBe(result.browser)
   })

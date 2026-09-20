@@ -21,7 +21,7 @@ export async function startAdsConsent(clientId: string, principalId: string) {
     principal_id:principalId,browser_hash:hash(browser),expires_at:new Date(Date.now()+600_000).toISOString() })
   if (error) throw new MetaReadError('authorization_unavailable',503)
   const url = new URL(`https://www.facebook.com/${metaReadVersion()}/dialog/oauth`)
-  url.search = new URLSearchParams({ client_id:config().id,redirect_uri:adsRedirectUri(),response_type:'code',scope:'ads_read',state,auth_type:'rerequest' }).toString()
+  url.search = new URLSearchParams({ client_id:config().id,redirect_uri:adsRedirectUri(),response_type:'code',scope:'ads_read',state,auth_type:'rerequest',locale:'zh_CN' }).toString()
   return { url:url.toString(),browser }
 }
 export async function consumeAdsState(state: string, browser: string, principalId: string): Promise<string> {
