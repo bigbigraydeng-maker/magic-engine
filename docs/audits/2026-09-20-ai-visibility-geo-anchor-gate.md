@@ -158,7 +158,26 @@ npm run build                                          → ✓ Compiled successf
    规则本身已经能正确处理它们，不需要再手工排除；
 4. 新清单给 PM 过目，PM 点头后才 `--apply --confirm` 写库。
 
-**上线顺序硬要求**：`clients.brand_geo_anchors` 这一列必须**先在生产库建好，再合并代码**。
+**上线顺序硬要求 —— ✅ 已完成（2026-09-21，PM 授权）**：
+`clients.brand_geo_anchors` 已在生产库建好（Supabase 项目 `glbdnayojixmexgofbsd`，
+即 [docs/STATE.md](../STATE.md) 第 22 行登记的那一个；建之前先对了一次项目号，确认没建错库）。
+
+实查确认（不是看文件名，是查对象本身）：
+
+| 查什么 | 结果 |
+|---|---|
+| `information_schema` 里这一列存在吗 | ✅ `brand_geo_anchors` · `ARRAY` · 可空 · 无默认值 |
+| `orchestrator.loadClientContext` 那条查询（列不存在就会让每周任务整个挂掉的那条）| ✅ 正常返回 |
+| 诊断实时探针那条查询 | ✅ 正常返回 |
+| 33 个客户是否都还读得出来 | ✅ 33 行全部正常 |
+| 现在有几个客户配了锚点 | **0** —— 规则对所有客户都还是关的，要等 FDE 在后台填了才生效 |
+
+**顺带发现的、不属于本次范围的问题**：生产库的 `brand_aliases` 是
+`NOT NULL DEFAULT '{}'`，而仓库里的 migration 写的是可空无默认 —— 生产 schema 跟仓库对不上。
+而 `brand-aliases` 那个保存接口在清空列表时会写 `null`，按这个约束应该会报错。
+已另开一张单，不在本 PR 处理。
+
+下面这条原始要求保留作记录：`clients.brand_geo_anchors` 必须**先在生产库建好，再合并代码**。
 `orchestrator.loadClientContext` 会显式 select 这一列，列不存在则每周的 AI 可见度任务整个失败。
 本仓库有过「migration 文件在仓库里但从没在生产跑过」的实际事故
 （`20260430000003_add_parse_error_message.sql`，见 #1846 计划文档），所以**判定这一列有没有建好只认对象存在性**，不认文件名。
