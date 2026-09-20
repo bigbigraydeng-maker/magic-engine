@@ -451,7 +451,7 @@ function LiveStatus({
   if (verification && !verification.verified) {
     return (
       <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-800">
-        <p className="font-semibold">私信同步已暂停</p>
+        <p className="font-semibold">私信同步 / 表单线索同步 / 评论自动回复已全部暂停</p>
         <p className="mt-1 text-xs text-red-700">
           {verification.reason ? (REFUSAL_TEXT[verification.reason] ?? verification.reason) : '主页绑定未通过核实。'}
           {' '}重新保存一次主页，或用主页管理员账号点「连接 Meta」即可恢复。

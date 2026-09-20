@@ -81,13 +81,6 @@ export function WhatsAppNumberPanel({ clientId }: Props) {
     setState({ phase: 'loading' })
     try {
       const res = await fetch(`/api/clients/${clientId}/whatsapp-number`)
-      // 404 = this client has no WhatsApp endpoint configured — treat as empty, not an error
-      if (res.status === 404) {
-        const empty: Payload = { phone_number_id: null, configured_number_id: null, matches_configured: null }
-        setState({ phase: 'ready', data: empty })
-        setDraft('')
-        return
-      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = (await res.json()) as Payload
       setState({ phase: 'ready', data })
