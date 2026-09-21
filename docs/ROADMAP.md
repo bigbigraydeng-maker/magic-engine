@@ -26,7 +26,7 @@
 - [ ] chinatravel 仓库草稿 PR [#204](https://github.com/bigbigraydeng-maker/chinatravel/pull/204)（分支 `feat/natural-china-tour-page`，`isActive: false`，未上线）：客户微信提供的"Natural China"团行程已转成 `src/lib/data/tours.ts` 的 `natural-china` 团页条目，格式跟着 `golden-china` 走
 - [x] 天数出入已确认：PM 2026-09-21 拍板这条团就是 14 天，客户文档标题写"15-Day"是文档本身写错了，页面按 14 天保留
 - [ ] **缺价格、缺确切发团日期** —— 两项客户文档都没给，页面上先写"待确认"，PM/客户补齐后才能把 `isActive` 改成 true 并合并上线
-- [ ] 长江三峡邮轮本身、重庆（李子坝/洪崖洞/磁器口）目前配不到跟地名对得上的真实图，先没放，避免拿不相关的"中国风"图充数
+- [ ] **配图不是"全网无图"，是没导回 chinatravel** —— magic-engine 仓库 `templates/tailor-made-itinerary/heroes/` 已有对得上地名的真实图：`yangtze-gorges.jpg`（三峡，Unsplash License）、`ciqikou.jpg`（磁器口，CC BY-SA 3.0，出处见同目录 `CREDITS.json`）、`liziba.jpg`（李子坝穿楼）、`chongqing.jpg`（洪崖洞夜景）；后两张是 2026-08-30 `4ba2b8b3` 那次从 chinatravel 搬到 magic-engine 的「CTS 自有」素材，没进 `CREDITS.json` 是因为不是 Wikimedia/Unsplash 图、不需要外部授权记录。下一步是把这 4 张图导回 chinatravel 仓库的图床（PR #204 目前用 Supabase `tour-images` bucket），而不是继续当缺图处理、更不能拿不相关的"中国风"图充数
 
 Reuse Statement：复用了 `chinatravel` 仓库既有的团页数据结构（`Tour` 接口）、路由（`/tours/china/discovery/<slug>`）与已核实过的图片池（豫园夜景/熊猫/天门山玻璃栈道），没有新建组件或新表；这条团本身是客户特供内容（client-specific），不涉及平台共享层改动。
 
