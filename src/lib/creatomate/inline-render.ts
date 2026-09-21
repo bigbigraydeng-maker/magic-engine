@@ -17,6 +17,7 @@ export interface ReelTemplate {
   tagline: string
   cta: string
   endingScreen?: ReelEndingScreen
+  musicUrl?: string  // optional background music; must be a public URL (mp3/m4a)
 }
 
 export interface ReelSpec {
@@ -59,6 +60,7 @@ const ENDING_DURATION_S = 3
 const HOOK_S = 4             // scene 1: 0–4 s
 const MIDDLE_S = 5           // scene 2: 4–9 s
 const CTA_CLIP_S = 3         // scene 3: 9–12 s (HOOK_S + MIDDLE_S + CTA_CLIP_S = 12)
+const FADE_S = 0.4           // cross-scene video fade duration
 
 export function buildReelSource(
   reel: ReelSpec,
@@ -76,7 +78,7 @@ export function buildReelSource(
   // 安全区：1080×1920 Reel 关键内容必须在 y=14%~65%（y=270~1248px）
   // Three scenes from the same source using trim_start offsets for hook/middle/CTA structure
   const mainElements: Record<string, unknown>[] = [
-    // Scene 1 — Hook (0–4 s): abrupt cut, service name large
+    // Scene 1 — Hook (0–4 s): service name large; fade out at end
     {
       type: 'video',
       track: 1,
@@ -87,8 +89,11 @@ export function buildReelSource(
       trim_duration: HOOK_S,
       fit: 'cover',
       brightness: 0.3,
+      animations: [
+        { time: HOOK_S - FADE_S, duration: FADE_S, type: 'fade', fade: false, easing: 'quadratic-in' },
+      ],
     },
-    // Scene 2 — Middle (4–9 s): treatment in action
+    // Scene 2 — Middle (4–9 s): fade in + fade out
     {
       type: 'video',
       track: 2,
@@ -99,9 +104,12 @@ export function buildReelSource(
       trim_duration: MIDDLE_S,
       fit: 'cover',
       brightness: 0.2,
+      animations: [
+        { time: MIDDLE_START, duration: FADE_S, type: 'fade', easing: 'quadratic-out' },
+        { time: MIDDLE_START + MIDDLE_S - FADE_S, duration: FADE_S, type: 'fade', fade: false, easing: 'quadratic-in' },
+      ],
     },
-    // Scene 3 — CTA (9–12 s): call to action
-    // audio_fade_out fades audio; animations[fade:false] fades video visually
+    // Scene 3 — CTA (9–12 s): fade in; audio+visual fade out to ending screen
     {
       type: 'video',
       track: 3,
@@ -114,13 +122,8 @@ export function buildReelSource(
       brightness: 0.3,
       audio_fade_out: 1.5,
       animations: [
-        {
-          time: CTA_START + CTA_CLIP_S - 1.5,
-          duration: 1.5,
-          type: 'fade',
-          fade: false,
-          easing: 'quadratic-in',
-        },
+        { time: CTA_START, duration: FADE_S, type: 'fade', easing: 'quadratic-out' },
+        { time: CTA_START + CTA_CLIP_S - 1.5, duration: 1.5, type: 'fade', fade: false, easing: 'quadratic-in' },
       ],
     },
     // Brand name — persistent across all scenes
@@ -136,8 +139,10 @@ export function buildReelSource(
       font_size: '3.5 vmin',
       font_weight: '300',
       fill_color: 'rgba(255,220,168,0.85)',
+      shadow_color: 'rgba(0,0,0,0.5)',
+      shadow_blur: 6,
     },
-    // Hook text (0–4 s): service name large
+    // Hook text (0–4 s): service name large; slide up entrance
     {
       type: 'text',
       track: 5,
@@ -151,8 +156,13 @@ export function buildReelSource(
       font_size: '11 vmin',
       font_weight: '300',
       fill_color: '#FFFFFF',
+      shadow_color: 'rgba(0,0,0,0.7)',
+      shadow_blur: 8,
+      animations: [
+        { time: 0, duration: 0.5, type: 'slide', direction: 'up', easing: 'cubic-out' },
+      ],
     },
-    // Middle text (4–9 s): tagline / location
+    // Middle text (4–9 s): tagline; fade in entrance
     {
       type: 'text',
       track: 6,
@@ -166,8 +176,13 @@ export function buildReelSource(
       font_size: '4.5 vmin',
       font_weight: '300',
       fill_color: 'rgba(255,255,255,0.9)',
+      shadow_color: 'rgba(0,0,0,0.6)',
+      shadow_blur: 6,
+      animations: [
+        { time: MIDDLE_START, duration: 0.5, type: 'fade', easing: 'quadratic-out' },
+      ],
     },
-    // CTA text (9–12 s): call to action centred
+    // CTA text (9–12 s): call to action centred; slide up entrance
     {
       type: 'text',
       track: 7,
@@ -182,8 +197,28 @@ export function buildReelSource(
       font_weight: '300',
       fill_color: '#FFFFFF',
       text_align: 'center',
+      shadow_color: 'rgba(0,0,0,0.7)',
+      shadow_blur: 8,
+      animations: [
+        { time: CTA_START, duration: 0.5, type: 'slide', direction: 'up', easing: 'cubic-out' },
+      ],
     },
   ]
+
+  // Optional background music — loops for full clip duration, fades in/out
+  if (template.musicUrl) {
+    mainElements.push({
+      type: 'audio',
+      track: 20,
+      time: 0,
+      duration: totalDuration,
+      source: template.musicUrl,
+      volume: '30%',
+      loop: true,
+      audio_fade_in: 1,
+      audio_fade_out: 1.5,
+    })
+  }
 
   if (!hasEnding || !ending) {
     return { output_format: 'mp4', duration: totalDuration, elements: mainElements }
