@@ -249,7 +249,11 @@ $62/天但真正带咨询的 Messenger 广告组「物流潜在客户广告组�
 $10/天、$20/天。已执行：恢复 Messenger 广告组、暂停两个视频系列、主系列预算从 $62/天加到
 $92/天（把视频系列省下的 $30 并入）。四个改动都用 Graph API 直接确认回读生效，审计记录已
 写入 `flywheel_actions`，工作日志已写入 `fde_work_logs`。**待办**：观察 1-2 天，确认咨询量
-回到暂停前的每周 30-50 条水平；若没回升需要进一步排查。
+回到暂停前的每周 30-50 条水平；若没回升需要进一步排查。**2026-09-21 Codex 复审第 2 轮抓到**：
+这个复查此前只写在本文档里，没有任何执行管道会主动提醒，违反铁律 3 下半「管道不许断头」——
+已改成同时下发一条截止 2026-09-23 的今日待办（`src/lib/pm-todo/client-doc-manual-tasks.ts`），
+不再只靠人回头翻文档。做不到用已同步的广告数据自动判定回升与否（咨询量算不算「回升」目前
+要读对话内容判断，不是能可靠自动跑的规则），先用带截止时间的人工待办兜底。
 
 **第三件事·30天咨询量增长方案（PM 目标：每天稳定咨询 10 个以上）**：
 
@@ -283,7 +287,7 @@ PM 澄清目标口径：稳定在10个以上是"咨询"（客人开聊，哪怕�
 `src/app/api/webhooks/whatsapp/route.ts` 是一条完整的 WhatsApp Cloud API webhook（签名校验、
 建会话、写 CRM 触点、退订检测、事件广播全都有），`src/lib/whatsapp/send.ts` 管发送，跟
 Messenger 走的是同一套 `conversations`/`contact_touchpoints` 表、`channel='whatsapp'`。
-**真正卡住的是三件事**，跟"要不要写代码"无关：
+**真正卡住的是下面这几件事**，跟"要不要写代码"无关：
 
 1. **数据库那张表的新字段其实没加上**——`supabase/migrations/20260902000002_whatsapp_phone_number_id.sql`
    这个改动文件半个月前就合并进主分支了，但从来没有真的对生产数据库执行过（`clients` 表里
@@ -301,21 +305,32 @@ Messenger 走的是同一套 `conversations`/`contact_touchpoints` 表、`channe
    上面第2条要加的 `whatsapp_business_management` 权限就申请不下来——跟 NAL 自己有没有验证
    过完全是两件事，NAL 验证过也没用，因为要验证的是我们。这一步不卡继续做前两步，但卡
    "这条 WhatsApp 线真正在 Meta 那边生效、开始收到消息"这一天。
+4. **生产环境还缺两个必配变量，前三步全做完照样收不到消息**——查了 `docs/ENV.md` §10，
+   `META_VERIFY_TOKEN`（订阅握手用）和 `META_APP_SECRET`（签名验证用）在 Render 上都标
+   "⬜ 待配"。实测 `src/app/api/webhooks/whatsapp/route.ts:66-68` 缺 `META_VERIFY_TOKEN`
+   时订阅握手直接返回 500，`:487-489` 缺 `META_APP_SECRET` 时收消息也直接返回 500——不是
+   "配置不完美"，是**这条线现在物理上收不到消息**。如果还要让 ME 回复客户（不只是收），
+   `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` 同样待配（`lib/whatsapp/send.ts`
+   的关键路径依赖）。这四个变量的配置与验证必须跟前三步一起算作启用前置项，不能等前三步
+   做完才发现还缺这一环。
 
-**下一步（三选一都要 PM 拍板，不是技术选择）**：
+**下一步（PM 拍板，不是技术选择；前两条已按铁律 3 下半下发到「今日待办 / 🙋 需要你动手」，
+不只是留在这份文档里）**：
 - [ ] PM 决定：要不要把 `20260902000002_whatsapp_phone_number_id.sql` 这个已合并到主分支、
       纯新增字段的改动，对生产数据库真正执行一次
-- [ ] PM/FDE 决定：谁去 Meta Business 后台给系统用户加 `whatsapp_business_management` 权限
-      （加完后可以用现成脚本自动查出 NAL 的号码编号，不需要再人工翻）
-- [ ] 上面两步都做完之后，还要在 Meta App 后台确认这个号码的 webhook 订阅是否已经打开
+- [ ] （已下发今日待办）PM/FDE 去 Meta Business 后台给系统用户加 `whatsapp_business_management`
+      权限（加完后可以用现成脚本自动查出 NAL 的号码编号，不需要再人工翻）
+- [ ] （已下发今日待办）PM/FDE 去 Meta App 后台确认这个号码的 webhook 订阅是否已经打开
       （这一步也需要能登录 Meta 后台的人核实，无法从这台开发机验证）
+- [ ] PM/FDE 在 Render 后台把 `META_VERIFY_TOKEN` / `META_APP_SECRET`（收消息必配）以及
+      `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID`（要回消息才需要）四个变量配上
 - [ ] #1299 企业验证走完，再确认线上真的开始收到 WhatsApp 消息
       （命中一句话：企业验证走完后来查一下WhatsApp消息有没有开始进系统——建议这一步由 PM
       在 #1299 验证通过当天，去 Supabase 查一次 `conversations` 表 `channel='whatsapp'` 的
       条数是不是从 0 变化）
 
 不需要新写 webhook 代码、不需要子牙+魏征架构复审——因为没有新架构，是把已经审过、已经合并
-的现成能力接通。真正要做的三步全是配置/审批动作，不是技术选型，所以直接列出来等 PM 拍板，
+的现成能力接通。真正要做的几步全是配置/审批动作，不是技术选型，所以直接列出来等 PM 拍板，
 没有抛回"走 A 还是走 B"这类技术问题。
 
 ## NAL 客户管理工作台"标已成交" → 自动写一条 Meta CAPI 成交记录（PR #1715，dry_run，已合并，2026-09-15）
