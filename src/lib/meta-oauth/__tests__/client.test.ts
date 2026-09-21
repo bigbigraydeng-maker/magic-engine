@@ -217,4 +217,33 @@ describe('exchangeMetaTokenFields — expires_in parsing', () => {
       seconds: 5184000,
     })
   })
+
+  it('logs the response shape (never the token/secret) when expires_in is unusable — the only way to see what Meta actually sent back on the next production failure', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ access_token: 'super-secret-token-xyz' })),
+    )
+    await exchangeMetaTokenFields({ code: 'c', redirect_uri: 'https://me.test/cb' })
+    expect(warn).toHaveBeenCalledWith(
+      '[meta-oauth] token exchange expires_in unusable',
+      expect.objectContaining({ hasExpiresInKey: false, responseKeys: ['access_token'] }),
+    )
+    const loggedArgs = warn.mock.calls[0]?.[1]
+    expect(JSON.stringify(loggedArgs)).not.toContain('super-secret-token-xyz')
+  })
+
+  it('returns null and logs (without the query/secret) on a non-OK response', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response('nope', { status: 400 }))
+    expect(await exchangeMetaTokenFields({ code: 'c', redirect_uri: 'https://me.test/cb' })).toBeNull()
+    expect(warn).toHaveBeenCalledWith('[meta-oauth] token exchange non-OK response', expect.objectContaining({ status: 400 }))
+    expect(JSON.stringify(warn.mock.calls[0])).not.toContain('app-secret-456')
+  })
+
+  it('returns null and logs when access_token is missing from an OK response', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify({ error: 'nope' })))
+    expect(await exchangeMetaTokenFields({ code: 'c', redirect_uri: 'https://me.test/cb' })).toBeNull()
+    expect(warn).toHaveBeenCalledWith('[meta-oauth] token exchange missing access_token', expect.objectContaining({ responseKeys: ['error'] }))
+  })
 })
