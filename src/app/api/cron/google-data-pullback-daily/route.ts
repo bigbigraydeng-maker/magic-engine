@@ -267,11 +267,11 @@ export async function GET(req: NextRequest) {
     }
 
     if (client.meta_ad_account_id) {
-      // Token resolution (AD-SEC-4 follow-up, 2026-09-21), three schemes in
+      // Token resolution (AD-SEC-4 follow-up, 2026-09-21), four schemes in
       // priority order — unchanged from before this fix, only the ownership
       // checks are new:
-      //   1. Ownership-checked domain/Page-scoped token (resolveMetaTokenForClient,
-      //      source !== 'shared_fallback') — same lookup every other Meta call in
+      //   1. Ownership-checked domain-scoped token (resolveMetaTokenForClient,
+      //      source === 'client_domain') — same lookup every other Meta call in
       //      the app uses (token-selection.ts). Fixes the bug this route had
       //      (domain token never consulted, 2026-07-24 CTS pull failure) AND the
       //      hole it was written with: `client.domain` was read straight into the
@@ -281,16 +281,24 @@ export async function GET(req: NextRequest) {
       //      reliance found in docs/ENV.md or elsewhere in the repo, but Render
       //      env vars aren't fully inventoried) — same problem as #1 applies to
       //      `clients.name` (self-serve-writable, not unique), so it only fires
-      //      for this name's earliest non-self-serve owner.
-      //   3. resolveMetaTokenForClient's own shared global fallback. Checked LAST,
-      //      after #2: a client whose ad account only the per-name token can see
+      //      for this name's earliest non-self-serve owner. Checked BEFORE the
+      //      Page-scoped token (step 3): this route's original order — before
+      //      resolveMetaTokenForClient's Page-scoped lookup existed here at all —
+      //      was domain → legacy → global, and a client relying on the legacy
+      //      token must not lose it just because a Page token happens to be
+      //      configured too (Page-token identity isn't guaranteed to have
+      //      ads_management on this client's ad account — Codex review, 2026-09-21).
+      //   3. Ownership-checked Page-scoped token (resolveMetaTokenForClient,
+      //      source === 'client_page') — only consulted once #1 and #2 both miss.
+      //   4. resolveMetaTokenForClient's own shared global fallback. Checked LAST:
+      //      a client whose ad account only the per-name token can see
       //      (the exact 2026-07-24 failure mode — the global token lacks access to
       //      that specific account) must not lose it just because a global
-      //      fallback happens to be configured too. Step 1 already excludes this
-      //      source, so `resolved` is reused here rather than re-fetched.
+      //      fallback happens to be configured too. Steps 1 and 3 already exclude
+      //      this source, so `resolved` is reused here rather than re-fetched.
       const slug = (client.client_name ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '_')
       const resolved = await resolveMetaTokenForClient(client.client_id)
-      let metaToken = resolved && resolved.source !== 'shared_fallback' ? resolved.token : undefined
+      let metaToken = resolved && resolved.source === 'client_domain' ? resolved.token : undefined
       const legacyToken = slug ? process.env[`${slug}_META_SYSTEM_USER_TOKEN`] : undefined
       if (!metaToken && legacyToken) {
         const peers = await getTokenOwnerPeers()
@@ -307,6 +315,7 @@ export async function GET(req: NextRequest) {
           metaToken = legacyToken
         }
       }
+      if (!metaToken && resolved && resolved.source === 'client_page') metaToken = resolved.token
       if (!metaToken) metaToken = resolved?.token
       if (!metaToken) {
         // A Meta ad account IS configured for this client, but every lookup step
