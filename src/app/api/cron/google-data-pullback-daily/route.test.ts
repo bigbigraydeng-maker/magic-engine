@@ -137,23 +137,26 @@ vi.mock('@/lib/meta/client-ad-accounts', () => ({
 }))
 
 // ── Mock Meta token resolution (AD-SEC-4 follow-up, 2026-09-21) ─────────────
-// Real resolveMetaTokenForClient opens its own Supabase client (module-level,
-// not the mocked supabaseAdmin above) — mocking it here keeps the suite from
-// making a live network call. Defaults to the pre-existing behavior every test
-// above this line relies on: no domain/Page scoped token configured, so the
-// route falls to the shared META_SYSTEM_USER_TOKEN, exactly like resolveMetaToken
-// itself would with an empty `clients` row.
-const mockResolveMetaTokenForClient = vi.fn()
-vi.mock('@/lib/meta/token-manager', () => ({
-  resolveMetaTokenForClient: (...args: unknown[]) => mockResolveMetaTokenForClient(...args),
-}))
-// loadTokenOwnerPeers is the one I/O call in token-selection.ts — mock only
-// that (keep ownsKey's real ownership logic) so the legacy-name-token tests
-// below exercise the actual gate, not a stand-in for it.
+// resolveMetaTokenDetailed is called with THIS route's own (mocked) supabaseAdmin,
+// but its query shape (`.select().eq().maybeSingle()`) differs from the
+// `metaResult` query's (`.select().not()`) on the same 'clients' table above —
+// mocking the function directly is simpler than teaching one fake `clients`
+// handler to serve both shapes. Defaults to the pre-existing behavior every
+// test above this line relies on: no domain/Page scoped token configured, so
+// the route falls to the shared META_SYSTEM_USER_TOKEN, exactly like
+// resolveMetaTokenDetailed itself would with an empty `clients` row.
+// ownsKey's real ownership logic is kept (only loadTokenOwnerPeers, the one
+// I/O call, is mocked) so the legacy-name-token tests below exercise the
+// actual gate, not a stand-in for it.
+const mockResolveMetaTokenDetailed = vi.fn()
 const mockLoadTokenOwnerPeers = vi.fn().mockResolvedValue(null)
 vi.mock('@/lib/meta/token-selection', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/meta/token-selection')>()
-  return { ...actual, loadTokenOwnerPeers: (...args: unknown[]) => mockLoadTokenOwnerPeers(...args) }
+  return {
+    ...actual,
+    resolveMetaTokenDetailed: (...args: unknown[]) => mockResolveMetaTokenDetailed(...args),
+    loadTokenOwnerPeers: (...args: unknown[]) => mockLoadTokenOwnerPeers(...args),
+  }
 })
 
 // ── Mock MetaAdsAdapter (P22.A.5) ────────────────────────────────────────────
@@ -212,7 +215,7 @@ describe('GET /api/cron/google-data-pullback-daily — P22.A.5 MetaAds flywheel�
 
     // Default: no scoped (domain/Page) token configured — mirrors a `clients` row
     // with no domain, which is what mockMetaClientsResult returns by default.
-    mockResolveMetaTokenForClient.mockImplementation(async () =>
+    mockResolveMetaTokenDetailed.mockImplementation(async () =>
       process.env.META_SYSTEM_USER_TOKEN
         ? { token: process.env.META_SYSTEM_USER_TOKEN, source: 'shared_fallback' as const }
         : null,
@@ -317,7 +320,7 @@ describe('legacy per-name Meta token — ownership gate', () => {
     mockGetAdCampaignInsights.mockResolvedValue([])
     mockSnapshotSingle.mockResolvedValue({ data: { id: 'snap-001' }, error: null })
 
-    mockResolveMetaTokenForClient.mockResolvedValue(null)
+    mockResolveMetaTokenDetailed.mockResolvedValue(null)
     mockLoadTokenOwnerPeers.mockResolvedValue(null)
   })
 
@@ -326,7 +329,7 @@ describe('legacy per-name Meta token — ownership gate', () => {
   })
 
   it('never used when resolveMetaTokenForClient already found a token — legacy path is not even queried', async () => {
-    mockResolveMetaTokenForClient.mockResolvedValue({ token: 'domain-token', source: 'client_domain' })
+    mockResolveMetaTokenDetailed.mockResolvedValue({ token: 'domain-token', source: 'client_domain' })
 
     const { GET } = await import('./route')
     const res = await GET(makeRequest(CRON_SECRET))
@@ -387,7 +390,7 @@ describe('legacy per-name Meta token — ownership gate', () => {
   // mode (global token can't see a specific ad account) for whichever client
   // still relies on its per-name token, the moment any global token exists.
   it('prefers the owned legacy per-name token over resolveMetaTokenForClient’s shared global fallback', async () => {
-    mockResolveMetaTokenForClient.mockResolvedValue({ token: 'global-fallback-token', source: 'shared_fallback' })
+    mockResolveMetaTokenDetailed.mockResolvedValue({ token: 'global-fallback-token', source: 'shared_fallback' })
     mockLoadTokenOwnerPeers.mockResolvedValue([
       { id: CLIENT_ID, name: NAME, domain: null, facebook_page_id: null, created_at: '2026-01-01T00:00:00Z', source: 'fde' },
     ])
@@ -401,7 +404,7 @@ describe('legacy per-name Meta token — ownership gate', () => {
   })
 
   it('falls back to the shared global token when this client does not own the name', async () => {
-    mockResolveMetaTokenForClient.mockResolvedValue({ token: 'global-fallback-token', source: 'shared_fallback' })
+    mockResolveMetaTokenDetailed.mockResolvedValue({ token: 'global-fallback-token', source: 'shared_fallback' })
     mockLoadTokenOwnerPeers.mockResolvedValue([
       { id: CLIENT_ID, name: NAME, domain: null, facebook_page_id: null, created_at: '2026-09-01T00:00:00Z', source: 'fde' },
       { id: 'other-client', name: NAME, domain: null, facebook_page_id: null, created_at: '2026-01-01T00:00:00Z', source: 'fde' },
@@ -447,6 +450,69 @@ describe('legacy per-name Meta token — ownership gate', () => {
   })
 })
 
+// ── Observability (chatgpt-codex-connector review on this PR, 2026-09-21) ────
+// Every reason this client ends up with no usable Meta token must be a
+// COUNTED failure (`failed` incremented, message in `errors`) — not a client
+// that silently vanishes from the run's snapshot/ad_daily/health/digest chain
+// while the cron itself still reports success. This matters most for
+// ownership_unknown: that state means "we couldn't verify who owns the key",
+// a transient DB read blip, not "nobody configured a token" — exactly the
+// scenario that would otherwise go completely unnoticed.
+describe('no Meta token → counted failure, not a silent skip', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    process.env.CRON_SECRET = CRON_SECRET
+    delete process.env.META_SYSTEM_USER_TOKEN
+    mockConnectorsResult.mockResolvedValue({ data: [], error: null })
+    mockMetaClientsResult.mockResolvedValue({
+      data: [{ id: CLIENT_ID, name: 'Kiteroa', meta_ad_account_id: AD_ACCOUNT }],
+      error: null,
+    })
+    mockLoadTokenOwnerPeers.mockResolvedValue(null)
+  })
+
+  it('ownership_unknown (peer read failed) is a counted failure with a specific message', async () => {
+    mockResolveMetaTokenDetailed.mockResolvedValue('ownership_unknown')
+
+    const { GET } = await import('./route')
+    const json = await (await GET(makeRequest(CRON_SECRET))).json()
+
+    expect(mockPullMetrics).not.toHaveBeenCalled()
+    expect(json.failed).toBe(1)
+    expect(json.results[0].meta).toMatchObject({ success: false })
+    expect(json.results[0].meta.error).toMatch(/ownership/i)
+  })
+
+  it('no token configured anywhere is a counted failure with a specific message', async () => {
+    mockResolveMetaTokenDetailed.mockResolvedValue(null)
+
+    const { GET } = await import('./route')
+    const json = await (await GET(makeRequest(CRON_SECRET))).json()
+
+    expect(mockPullMetrics).not.toHaveBeenCalled()
+    expect(json.failed).toBe(1)
+    expect(json.results[0].meta).toMatchObject({ success: false })
+    expect(json.results[0].meta.error).toMatch(/no meta token configured/i)
+  })
+
+  it('legacy token present but ownership denied is a counted failure with a specific message', async () => {
+    process.env.KITEROA_META_SYSTEM_USER_TOKEN = 'legacy-name-token'
+    mockResolveMetaTokenDetailed.mockResolvedValue(null)
+    mockLoadTokenOwnerPeers.mockResolvedValue([
+      { id: CLIENT_ID, name: 'Kiteroa', domain: null, facebook_page_id: null, created_at: '2026-09-01T00:00:00Z', source: 'fde' },
+      { id: 'real-owner', name: 'Kiteroa', domain: null, facebook_page_id: null, created_at: '2026-01-01T00:00:00Z', source: 'fde' },
+    ])
+
+    const { GET } = await import('./route')
+    const json = await (await GET(makeRequest(CRON_SECRET))).json()
+    delete process.env.KITEROA_META_SYSTEM_USER_TOKEN
+
+    expect(mockPullMetrics).not.toHaveBeenCalled()
+    expect(json.failed).toBe(1)
+    expect(json.results[0].meta.error).toMatch(/does not own/i)
+  })
+})
+
 // ── 2026-09-13: multi-account ad_daily_insights sync ─────────────────────────
 // A client can have more than one registered Meta ad account
 // (client_meta_ad_accounts) — CTS is the real case: `meta_ad_account_id`
@@ -483,7 +549,7 @@ describe('GET /api/cron/google-data-pullback-daily — 多账户 ad_daily_insigh
     // vi.clearAllMocks() above does not clear a prior mockResolvedValue/mockImplementation —
     // this describe must set its own default rather than inherit whatever the
     // "legacy per-name" describe above left behind.
-    mockResolveMetaTokenForClient.mockImplementation(async () =>
+    mockResolveMetaTokenDetailed.mockImplementation(async () =>
       process.env.META_SYSTEM_USER_TOKEN
         ? { token: process.env.META_SYSTEM_USER_TOKEN, source: 'shared_fallback' as const }
         : null,

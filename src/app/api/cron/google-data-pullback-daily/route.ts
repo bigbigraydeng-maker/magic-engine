@@ -56,8 +56,7 @@ import { SEO_METRIC_KEY, GA4_METRIC_KEY, ADS_METRIC_KEY } from '@/lib/flywheel/v
 import { adsMetricKeysWrittenBy } from '@/lib/flywheel/metric-registry'
 import { MetaAdsAdapter } from '@/lib/flywheel/adapters/MetaAdsAdapter'
 import { startCronRun } from '@/lib/cron/run-logger'
-import { resolveMetaTokenForClient } from '@/lib/meta/token-manager'
-import { ownsKey, loadTokenOwnerPeers, type TokenOwnerRow } from '@/lib/meta/token-selection'
+import { resolveMetaTokenDetailed, ownsKey, loadTokenOwnerPeers, type TokenOwnerRow } from '@/lib/meta/token-selection'
 import { findSharedAdAccounts, getClientAdAccountIds } from '@/lib/meta/client-ad-accounts'
 import { hasVideoColumns, syncAdDailyInsights, syncAdsetDailyInsights, syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
@@ -270,28 +269,38 @@ export async function GET(req: NextRequest) {
       // Token resolution (AD-SEC-4 follow-up, 2026-09-21), three schemes in
       // priority order — unchanged from before this fix, only the ownership
       // checks are new:
-      //   1. Ownership-checked domain/Page-scoped token (resolveMetaTokenForClient,
+      //   1. Ownership-checked domain/Page-scoped token (resolveMetaTokenDetailed,
       //      source !== 'shared_fallback') — same lookup every other Meta call in
-      //      the app uses (token-selection.ts). Fixes the bug this route had
-      //      (domain token never consulted, 2026-07-24 CTS pull failure) AND the
-      //      hole it was written with: `client.domain` was read straight into the
-      //      env-var name with no check on who owns that key, so a self-serve
-      //      signup copying a real client's domain could pull that client's token.
+      //      the app uses (token-selection.ts), called with this route's own
+      //      supabaseAdmin rather than token-manager's separate client. Fixes the
+      //      bug this route had (domain token never consulted, 2026-07-24 CTS
+      //      pull failure) AND the hole it was written with: `client.domain` was
+      //      read straight into the env-var name with no check on who owns that
+      //      key, so a self-serve signup copying a real client's domain could
+      //      pull that client's token.
       //   2. legacy {NAME_SLUG}_META_SYSTEM_USER_TOKEN, kept for back-compat (no
       //      reliance found in docs/ENV.md or elsewhere in the repo, but Render
       //      env vars aren't fully inventoried) — same problem as #1 applies to
       //      `clients.name` (self-serve-writable, not unique), so it only fires
       //      for this name's earliest non-self-serve owner.
-      //   3. resolveMetaTokenForClient's own shared global fallback. Checked LAST,
+      //   3. resolveMetaTokenDetailed's own shared global fallback. Checked LAST,
       //      after #2: a client whose ad account only the per-name token can see
       //      (the exact 2026-07-24 failure mode — the global token lacks access to
       //      that specific account) must not lose it just because a global
       //      fallback happens to be configured too. Step 1 already excludes this
       //      source, so `resolved` is reused here rather than re-fetched.
+      //
+      // ownership_unknown (a transient failure reading who owns a scoped key,
+      // NOT "nobody configured a token") deliberately withholds even the shared
+      // fallback — see resolveMetaTokenDetailed's own doc comment — so it must
+      // still surface as a failure below rather than silently skip the client
+      // (chatgpt-codex-connector review on this PR, 2026-09-21).
       const slug = (client.client_name ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '_')
-      const resolved = await resolveMetaTokenForClient(client.client_id)
-      let metaToken = resolved && resolved.source !== 'shared_fallback' ? resolved.token : undefined
+      const resolved = await resolveMetaTokenDetailed(supabaseAdmin, client.client_id, process.env)
+      const scoped = resolved !== 'ownership_unknown' && resolved && resolved.source !== 'shared_fallback' ? resolved : null
+      let metaToken = scoped?.token
       const legacyToken = slug ? process.env[`${slug}_META_SYSTEM_USER_TOKEN`] : undefined
+      let legacyOwnershipDenied = false
       if (!metaToken && legacyToken) {
         const peers = await getTokenOwnerPeers()
         const self = peers?.find((p) => p.id === client.client_id)
@@ -305,9 +314,11 @@ export async function GET(req: NextRequest) {
         // make this check pass for a key the client was never actually granted).
         if (self && peers && ownsKey({ ...self, name: client.client_name }, peers, (r) => (r.name ? r.name.toUpperCase().replace(/[^A-Z0-9]/g, '_') : null))) {
           metaToken = legacyToken
+        } else {
+          legacyOwnershipDenied = true
         }
       }
-      if (!metaToken) metaToken = resolved?.token
+      if (!metaToken && resolved !== 'ownership_unknown') metaToken = resolved?.token
       if (metaToken) {
         result.meta = await syncMeta(client.client_id, client.meta_ad_account_id, metaToken, slug)
 
@@ -436,6 +447,23 @@ export async function GET(req: NextRequest) {
               result.ad_digest = { sent: digest.sent, decision: `fallback:${digest.decision}`, error: digest.error }
             }
           }
+        }
+      } else {
+        // Client has a Meta ad account but no usable token — surface it as a
+        // failure (counted in `failed`, visible in `errors`) rather than
+        // silently skipping the snapshot/ad_daily/health/digest chain for the
+        // day. Distinguish the three ways this happens so an FDE reading
+        // cron_run_logs doesn't have to guess: a genuine Render config gap
+        // reads differently from "someone else owns this env key" or from a
+        // transient DB read failure that will very likely clear on its own.
+        result.meta = {
+          success: false,
+          error:
+            resolved === 'ownership_unknown'
+              ? 'meta token ownership check failed (transient peer-read error) — token withheld rather than risk using an unverified one'
+              : legacyOwnershipDenied
+                ? 'legacy per-name Meta token is configured but this client does not own that name key'
+                : 'no Meta token configured for this client (no owned domain/Page token, no legacy per-name token, no shared fallback)',
         }
       }
     }

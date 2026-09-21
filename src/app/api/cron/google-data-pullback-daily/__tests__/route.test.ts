@@ -59,13 +59,19 @@ vi.mock('@/lib/flywheel/adapters/MetaAdsAdapter', () => ({
 
 // No test in this file gives `setupConnectorLoader` a non-empty `meta` array,
 // so the route's Meta token-resolution branch never runs today — but
-// resolveMetaTokenForClient opens its OWN Supabase client (not the mocked
-// supabaseAdmin above), so if a future test adds a Meta client fixture without
-// noticing this, it would make a live network call instead of exercising the
-// AD-SEC-4 ownership gate. Mocked here defensively so that stays impossible.
-vi.mock('@/lib/meta/token-manager', () => ({
-  resolveMetaTokenForClient: vi.fn().mockResolvedValue(null),
-}))
+// resolveMetaTokenDetailed is called with a `.select().eq().maybeSingle()`
+// shape this file's `clients` mock (built for `.select().not()`) doesn't
+// support, so if a future test adds a Meta client fixture without noticing
+// this, it would throw instead of exercising the AD-SEC-4 ownership gate.
+// Mocked here defensively so that stays impossible.
+vi.mock('@/lib/meta/token-selection', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/meta/token-selection')>()
+  return {
+    ...actual,
+    resolveMetaTokenDetailed: vi.fn().mockResolvedValue(null),
+    loadTokenOwnerPeers: vi.fn().mockResolvedValue(null),
+  }
+})
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchGa4Snapshot } from '@/lib/ga4/client'
