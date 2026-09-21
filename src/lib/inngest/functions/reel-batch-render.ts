@@ -104,7 +104,7 @@ async function uploadAndInsertAsset(
       mime_type: 'video/mp4',
       file_size_bytes: buf.length,
       status: 'analyzed',
-      source: 'creatomate-batch',
+      source: 'ai_generated',
       ownership: 'client_exclusive',
       hook_score: 0,
       middle_score: 0,
@@ -112,6 +112,7 @@ async function uploadAndInsertAsset(
       vision_metadata: {
         asset_type: 'reel',
         service: item.serviceName,
+        source_channel: 'creatomate-batch',
         batch_tag: item.tag,
         creatomate_render_id: item.renderId,
         // CTA 不再烧进画面（Meta Reel 安全区限制），交发帖 caption 步骤使用
