@@ -100,7 +100,8 @@ export function buildReelSource(
       fit: 'cover',
       brightness: 0.2,
     },
-    // Scene 3 — CTA (9–12 s): call to action; fade out audio+video before brand screen
+    // Scene 3 — CTA (9–12 s): call to action
+    // Audio fades via volume keyframes (element-relative time 0–3 s); visual via black overlay below
     {
       type: 'video',
       track: 3,
@@ -111,7 +112,24 @@ export function buildReelSource(
       trim_duration: CTA_CLIP_S,
       fit: 'cover',
       brightness: 0.3,
-      fade_out: 1.5,
+      volume: [
+        { time: 0, value: 1 },
+        { time: CTA_CLIP_S - 1.5, value: 1 },
+        { time: CTA_CLIP_S, value: 0 },
+      ],
+    },
+    // Visual fade-to-black overlay: ramps from transparent → opaque in last 1.5 s before brand screen
+    {
+      type: 'shape',
+      shape: 'rectangle',
+      track: 19,
+      time: CTA_START + CTA_CLIP_S - 1.5,
+      duration: 1.5,
+      x: '50%', y: '50%',
+      x_anchor: '50%', y_anchor: '50%',
+      width: '100%', height: '100%',
+      fill_color: '#000000',
+      fade_in: 1.5,
     },
     // Brand name — persistent across all scenes
     {
@@ -192,7 +210,6 @@ export function buildReelSource(
       x_anchor: '50%', y_anchor: '50%',
       width: '100%', height: '100%',
       fill_color: '#1A1614',
-      fade_in: 0.5,
     },
     ...(ending.logoUrl
       ? [{
