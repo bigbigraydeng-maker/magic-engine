@@ -35,6 +35,7 @@
 
     const data = new FormData(form);
     const payload = {
+      formType: 'meta_ads_ai_pilot',
       name: value(data, 'name'),
       email: value(data, 'email'),
       company: value(data, 'company'),
