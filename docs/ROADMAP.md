@@ -271,21 +271,32 @@ Messenger 走的是同一套 `conversations`/`contact_touchpoints` 表、`channe
 3. **Meta 企业身份验证还没过**（[#1299](https://github.com/bigbigraydeng-maker/magic-engine/issues/1299)，
    需要 PM 本人上传公司证件）——这个不卡继续把上面两步做完，但卡"这条 WhatsApp 线真正在
    Meta 那边生效、开始收到消息"这一天。
+4. **生产环境还缺两个必配变量，前三步全做完照样收不到消息**——查了 `docs/ENV.md` §10，
+   `META_VERIFY_TOKEN`（订阅握手用）和 `META_APP_SECRET`（签名验证用）在 Render 上都标
+   "⬜ 待配"。实测 `src/app/api/webhooks/whatsapp/route.ts:66-68` 缺 `META_VERIFY_TOKEN`
+   时订阅握手直接返回 500，`:487-489` 缺 `META_APP_SECRET` 时收消息也直接返回 500——不是
+   "配置不完美"，是**这条线现在物理上收不到消息**。如果还要让 ME 回复客户（不只是收），
+   `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` 同样待配（`lib/whatsapp/send.ts`
+   的关键路径依赖）。这四个变量的配置与验证必须跟前三步一起算作启用前置项，不能等前三步
+   做完才发现还缺这一环。
 
-**下一步（三选一都要 PM 拍板，不是技术选择）**：
+**下一步（PM 拍板，不是技术选择；前两条已按铁律 3 下半下发到「今日待办 / 🙋 需要你动手」，
+不只是留在这份文档里）**：
 - [ ] PM 决定：要不要把 `20260902000002_whatsapp_phone_number_id.sql` 这个已合并到主分支、
       纯新增字段的改动，对生产数据库真正执行一次
-- [ ] PM/FDE 决定：谁去 Meta Business 后台给系统用户加 `whatsapp_business_management` 权限
-      （加完后可以用现成脚本自动查出 NAL 的号码编号，不需要再人工翻）
-- [ ] 上面两步都做完之后，还要在 Meta App 后台确认这个号码的 webhook 订阅是否已经打开
+- [ ] （已下发今日待办）PM/FDE 去 Meta Business 后台给系统用户加 `whatsapp_business_management`
+      权限（加完后可以用现成脚本自动查出 NAL 的号码编号，不需要再人工翻）
+- [ ] （已下发今日待办）PM/FDE 去 Meta App 后台确认这个号码的 webhook 订阅是否已经打开
       （这一步也需要能登录 Meta 后台的人核实，无法从这台开发机验证）
+- [ ] PM/FDE 在 Render 后台把 `META_VERIFY_TOKEN` / `META_APP_SECRET`（收消息必配）以及
+      `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID`（要回消息才需要）四个变量配上
 - [ ] #1299 企业验证走完，再确认线上真的开始收到 WhatsApp 消息
       （命中一句话：企业验证走完后来查一下WhatsApp消息有没有开始进系统——建议这一步由 PM
       在 #1299 验证通过当天，去 Supabase 查一次 `conversations` 表 `channel='whatsapp'` 的
       条数是不是从 0 变化）
 
 不需要新写 webhook 代码、不需要子牙+魏征架构复审——因为没有新架构，是把已经审过、已经合并
-的现成能力接通。真正要做的三步全是配置/审批动作，不是技术选型，所以直接列出来等 PM 拍板，
+的现成能力接通。真正要做的几步全是配置/审批动作，不是技术选型，所以直接列出来等 PM 拍板，
 没有抛回"走 A 还是走 B"这类技术问题。
 
 ## NAL 客户管理工作台"标已成交" → 自动写一条 Meta CAPI 成交记录（PR #1715，dry_run，已合并，2026-09-15）
