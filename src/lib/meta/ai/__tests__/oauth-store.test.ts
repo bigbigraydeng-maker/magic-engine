@@ -6,7 +6,7 @@ vi.mock('@/lib/platform-oauth/vocabulary',()=>({ decryptToken:vi.fn(()=> 'privat
 vi.mock('../entitlement',()=>({ requirePilotActive:mocks.requirePilotActive,requirePilotRevision:mocks.requirePilotRevision }))
 import { readGrant,activeConnection,activeConnectionForPrincipal,requireMetaScope,requireReleaseAuthorization,requireDiscoveryAuthorization } from '../store'
 import { auditedControl } from '../audit'
-import { consumeAdsState,startAdsConsent } from '@/lib/meta-oauth/ads-read'
+import { conservativeTokenSeconds,consumeAdsState,startAdsConsent } from '@/lib/meta-oauth/ads-read'
 const p={ kind:'client' as const,keyId:'key',clientId:'tenant',scopes:['meta:ads:read'] }
 const grant={ id:'grant',client_id:'tenant',ad_account_id:'act_1234567890',revision:'r1',entitlement_revision:'ent-1' }
 function chain(data:unknown,error:unknown=null){ const result={ data,error };const c:Record<string,unknown>={ then:(resolve:(v:unknown)=>unknown)=>Promise.resolve(result).then(resolve) };for(const method of ['select','insert','delete','eq','is','gt','lt','contains','maybeSingle']) c[method]=vi.fn(()=>c);return c }
@@ -73,6 +73,11 @@ describe('grant, token and control audit guards',()=>{
   })
 })
 describe('OAuth state principal and browser binding',()=>{
+  it('uses the long-lived expiry when present and conservatively falls back to the short-lived expiry',()=>{
+    expect(conservativeTokenSeconds(3600,5184000)).toBe(5184000)
+    expect(conservativeTokenSeconds(3600,null)).toBe(3600)
+    expect(()=>conservativeTokenSeconds(null,null)).toThrow('oauth_expiry_unknown')
+  })
   it('atomically consumes with all identity constraints and TTL',async()=>{
     const q=chain({ client_id:'tenant',entitlement_revision:'ent-1' });mocks.from.mockReturnValue(q)
     await expect(consumeAdsState('s'.repeat(43),'b'.repeat(43),'principal')).resolves.toEqual({ clientId:'tenant',entitlementRevision:'ent-1' })

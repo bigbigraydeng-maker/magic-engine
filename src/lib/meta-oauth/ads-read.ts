@@ -39,10 +39,15 @@ async function exchange(params: Record<string,string>): Promise<{ token:string; 
   if(!result) throw new MetaReadError('oauth_exchange_failed',502)
   return result
 }
+export function conservativeTokenSeconds(shortSeconds:number|null,longSeconds:number|null) {
+  const seconds=longSeconds ?? shortSeconds
+  if (!seconds) throw new MetaReadError('oauth_expiry_unknown',502)
+  return seconds
+}
 export async function finishAdsConsent(code: string, clientId: string, principalId: string,entitlementRevision:string) {
   const short = await exchange({ code,redirect_uri:adsRedirectUri() })
   const long = await exchange({ grant_type:'fb_exchange_token',fb_exchange_token:short.token })
-  if (!long.seconds) throw new MetaReadError('oauth_expiry_unknown',502)
+  const tokenSeconds=conservativeTokenSeconds(short.seconds,long.seconds)
   const permissions = await metaGraphGet('me/permissions',long.token,{ limit:'100' })
   if (graphAfter(permissions)) throw new MetaReadError('permission_verification_incomplete',502)
   const scopes = graphRows(permissions).filter(p => p.status === 'granted').map(p => String(p.permission))
@@ -51,6 +56,6 @@ export async function finishAdsConsent(code: string, clientId: string, principal
   if (typeof user.id !== 'string' || !/^\d+$/.test(user.id)) throw new MetaReadError('oauth_identity_unverified',502)
   await requirePilotRevision(clientId,entitlementRevision)
   await upsertConnection({ clientId,provider:'meta',purpose:'meta_ads_read',accountId:`ads_user:${user.id}`,accessToken:long.token,
-    refreshToken:'',tokenExpiry:new Date(Date.now()+long.seconds*1000),displayName:'Meta Ads read-only',scopes,
+    refreshToken:'',tokenExpiry:new Date(Date.now()+tokenSeconds*1000),displayName:'Meta Ads read-only',scopes,
     authorizingPrincipalId:principalId,entitlementRevision,lastSyncedAt:new Date() })
 }
