@@ -33,7 +33,8 @@
 | 3 | **广告日报有没有真的送达** | 用 `ListAgents` / `list_task_runs` 查名字类似"【每天】CTS 广告花费/留资日报"的会话，是不是在过去约 24 小时内跑过 | 跑过，且报告里的数字不是"查不到" | 没跑 = P0 发现。这个任务目前从 `/Users/raydeng/Projects/magic-engine/.claude/worktrees/nervous-aryabhata-3a910b/.env.local` 读取 `RENDER_API_KEY`——这个 worktree 目录随时可能被 Claude 的会话管理机制回收删除，见本文第 4 节"已知运维风险"。发现凭据路径失效，不要只报症状，发卡片要求换成稳定存放位置 |
 | 4 | **跨窗口状态** | `ListAgents` | 没有 CTS 相关会话卡在 `busy` 超过 12 小时，也没有 `idle` 但手上挂着未合并、等拍板的 PR | 有 → 一行说清"卡在等什么" |
 | 5 | **目标进度一句话** | `goals` 表，CTS 当前 active 目标的 `current_value` vs `target` | 有数据就给一句进度；没有 active 目标就静默跳过，不用提醒"没有目标"这种空话 | — |
-| 6 | **给 PM 的决策清单** | 汇总以上最多 3 条，每条一句话能回、给"回 `X` 就行" | — | — |
+| 6 | **纯播放广告有没有在偷偷烧钱进假用户（PITFALLS D9）** | 对当前每一个 `status=ACTIVE` 且 `optimization_goal` 是 `THRUPLAY`/`video_view` 这类纯播放目标的广告组，直接拉最近几天的 `insights`（`breakdowns=publisher_platform`），算 `audience_network` 花费占比 | `audience_network` 占比 <5%（正常波动）；如果广告组建的时候就手动设了 `targeting.publisher_platforms` 排除 `audience_network`，占比应该接近 0% | **占比 ≥20% = P0 发现，当天必须报**：这是 2026-09-16 就记录过的坑（钱流进 Audience Network"奖励视频"版位，用户是游戏里为换奖励被迫看完，不是真实感兴趣的人，完播率虚高但都是假信号）。2026-09-21 CTS 新建的圣诞团 ThruPlay 广告组就是因为建的时候没设这个排除，第二天实测 95%+ 花费又进了这个坑——**任何新建的纯播放广告组都要当天查一次这一项，不要等到有人主动问才查**。查的方法不是只看 `targeting.publisher_platforms` 这个设置本身（设了不代表真的挡住了，还没有拿真实花费验证过），必须拉真实 `insights` 数据核实 |
+| 7 | **给 PM 的决策清单** | 汇总以上最多 3 条，每条一句话能回、给"回 `X` 就行" | — | — |
 
 **"真实产出核验"具体怎么做（挑 1-2 个即可，不用每条都查）**：
 
@@ -90,6 +91,8 @@
 具体位置：`SKILL.md` 第一步写死了路径 `/Users/raydeng/Projects/magic-engine/.claude/worktrees/nervous-aryabhata-3a910b/.env.local`，从里面取 `RENDER_API_KEY`，再用这个 key 去 Render 的环境变量接口取真正操作 Meta 广告用的令牌。`.claude/worktrees/` 下的目录是 Claude Code 会话按需创建、按需清理的临时工作区，不是稳定存储——那个 worktree 所属的会话一旦被清理或归档，这个路径就可能读不到文件，广告日报会在没有任何代码 bug 的情况下突然报"查不到"。
 
 日检第 3 项已经把"这个任务今天有没有跑成"纳入日常检查，但**检查本身不能替代修复**：一旦发现失败，正确做法是发卡片（`mcp__ccd_session__spawn_task`）要求把凭据读取路径换成稳定位置（例如直接把 `RENDER_API_KEY` 或已经换算好的 Meta 令牌存进本仓某个不依赖具体 worktree 的配置位置，或改成每次都直接从 Render 后台按服务 ID 取，不经过任何本地文件中转），而不是每次日检发现失败就只记录一遍症状。
+
+**广告投放位置自动巡检本该走的正式路径，至今没通电**：`docs/PITFALLS.md` D9 早就写明"以后应该给 `ad_entity_snapshots` 加一条'纯播放目标未排除 Audience Network'的规则检测"，配套的快照表 migration（`20260914000001_ad_entity_snapshots_and_video_metrics.sql`）和抓取代码（`src/lib/ads-strategy/portfolio/snapshot-sync.ts`）、每 3 小时跑一次的 cron（`ad-entity-snapshot`）**都已经写好、排期好了**，但表本身从写完那天起就卡在"需要 PM 明确批准才能 apply migration"这一步，一直没人跟进要这个批准——`ad-entity-snapshot` 这个 cron 三个礼拜以来每次第一句话都是"表不存在，跳过"，一次没真正运转过。日检第 6 项（上面新增的）是**不依赖这张表**的临时替代做法（直接拉真实 insights 现查，不是从快照表里读），先把最直接的伤口堵上；等 migration 真的被批准、`ad_entity_snapshots` 建起来之后，应该把这条检测规则迁回自动化的快照诊断里，日检第 6 项到时候可以退休。
 
 ---
 
