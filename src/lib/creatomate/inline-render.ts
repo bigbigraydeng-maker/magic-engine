@@ -114,7 +114,7 @@ export function buildReelSource(
   ]
 
   if (!hasEnding || !ending) {
-    return { duration: totalDuration, elements: mainElements }
+    return { output_format: 'mp4', duration: totalDuration, elements: mainElements }
   }
 
   // Ending screen: dark background + brand name + contact info
@@ -210,6 +210,7 @@ export function buildReelSource(
   ]
 
   return {
+    output_format: 'mp4',
     duration: totalDuration,
     elements: [...mainElements, ...endingElements],
   }
