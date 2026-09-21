@@ -5,6 +5,12 @@
 
 ---
 
+### 2026-09-22（广告支柱 IMPACT 闭环升级阶段 0/1：PM go 与 migration 核实为已完成，补记录并从 ROADMAP 移除过期条目）
+
+ROADMAP 里一直挂着「待 PM go：按依赖顺序合并（#1659 → #1662 → #1664 → #1665），并单独授权 apply migration」这条未完成事项。核实后确认这条已经完成——4 个 PR 早已合并，两张表（`ad_entity_snapshots`/`ad_strategy_configs`）已建好并在生产库里跑着真实数据（`ad_entity_snapshots` 2052 行，最新快照 9/21；快照 cron `ad-entity-snapshot`（[render.yaml](../../render.yaml)）按 `30 */6 * * *` 每 6 小时运行一次，非此前误记的 3 小时）。之前一直没人去数据库和 `render.yaml` 里核实，只看代码注释和这份清单，就以为还卡着——教训见会话记忆 `reference-cts-domain-token-dead-20260921` 的更正记录。已从 ROADMAP 对应清单删除这条，标题同步改为「PM go 已完成，验证与收尾进行中」。
+
+---
+
 ### 2026-09-22（CTS 圣诞团 ThruPlay 上线 + Meta 授权修复 + Reborn 留资表单 v4 A/B 测试 + 新增 D9 自动检测：纯播放广告漏排除 Audience Network）
 
 PM 拍板打开的圣诞团专属 ThruPlay 广告（官方账户 `act_2202695063810470`）三层从 PAUSED 改 ACTIVE，
