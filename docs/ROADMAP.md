@@ -26,7 +26,8 @@
 - [ ] chinatravel 仓库草稿 PR [#204](https://github.com/bigbigraydeng-maker/chinatravel/pull/204)（分支 `feat/natural-china-tour-page`，`isActive: false`，未上线）：客户微信提供的"Natural China"团行程已转成 `src/lib/data/tours.ts` 的 `natural-china` 团页条目，格式跟着 `golden-china` 走
 - [x] 天数出入已确认：PM 2026-09-21 拍板这条团就是 14 天，客户文档标题写"15-Day"是文档本身写错了，页面按 14 天保留
 - [ ] **缺价格、缺确切发团日期** —— 两项客户文档都没给，页面上先写"待确认"，PM/客户补齐后才能把 `isActive` 改成 true 并合并上线
-- [ ] **配图不是"全网无图"，是没导回 chinatravel** —— magic-engine 仓库 `templates/tailor-made-itinerary/heroes/` 已有对得上地名的真实图：`yangtze-gorges.jpg`（三峡，Unsplash License）、`ciqikou.jpg`（磁器口，CC BY-SA 3.0，出处见同目录 `CREDITS.json`）、`liziba.jpg`（李子坝穿楼）、`chongqing.jpg`（洪崖洞夜景）；后两张是 2026-08-30 `4ba2b8b3` 那次从 chinatravel 搬到 magic-engine 的「CTS 自有」素材，没进 `CREDITS.json` 是因为不是 Wikimedia/Unsplash 图、不需要外部授权记录。下一步是把这 4 张图导回 chinatravel 仓库的图床（PR #204 目前用 Supabase `tour-images` bucket），而不是继续当缺图处理、更不能拿不相关的"中国风"图充数
+- [ ] **配图不是"全网无图"，是没导回 chinatravel** —— magic-engine 仓库 `templates/tailor-made-itinerary/heroes/` 已有对得上地名的真实图：`yangtze-gorges.jpg`（三峡，Unsplash License）、`ciqikou.jpg`（磁器口，CC BY-SA 3.0，出处见同目录 `CREDITS.json`）、`liziba.jpg`（李子坝穿楼）——这 3 张来源可核实，可以直接导回 chinatravel 仓库的图床（PR #204 目前用 Supabase `tour-images` bucket）。`liziba.jpg` 是 2026-08-30 `4ba2b8b3` 那次从 chinatravel 搬来的「CTS 自有」素材之一（该提交说明明确写"12 张 Wikimedia CC 授权 + 4 张 CTS 自有"，`liziba` 属于后者），没进 `CREDITS.json` 是因为不需要外部授权记录
+- [ ] **`chongqing.jpg` 出处未核实，先别公开导回** —— 这张图不是 `4ba2b8b3` 那次加的（那次只新增了 `liziba.jpg`），它早在 2026-08-03 `5e664f70` 就已入库，提交说明称取自 `public/blog/chongqing-night-skyline-hongyadong.jpg`（洪崖洞夜景），但该路径在 magic-engine 和已知关联仓库里都查不到任何提交记录，`CREDITS.json` 里也没有它的条目——目前没有证据支持它是「CTS 自有、无需外部授权」。导回 chinatravel 公开发布前必须先找到这张图的真实来源和使用权凭证（联系当时经手人或客户确认，或补一条 Wikimedia/Unsplash 出处到 `CREDITS.json`）；核实不了就从这批"可直接导回"的清单里去掉，改用已核实来源的图顶替，不能带着未核实出处直接发布到客户公开网站
 
 Reuse Statement：复用了 `chinatravel` 仓库既有的团页数据结构（`Tour` 接口）、路由（`/tours/china/discovery/<slug>`）与已核实过的图片池（豫园夜景/熊猫/天门山玻璃栈道），没有新建组件或新表；这条团本身是客户特供内容（client-specific），不涉及平台共享层改动。
 
