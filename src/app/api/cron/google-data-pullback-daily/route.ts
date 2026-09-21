@@ -320,7 +320,15 @@ export async function GET(req: NextRequest) {
       // relies on the legacy token (chatgpt-codex-connector review, 2026-09-21)
       // — treat it exactly like resolveMetaTokenDetailed's own 'ownership_unknown'.
       let legacyOwnershipUnknown = false
-      if (!metaToken && legacyToken) {
+      // resolved === 'ownership_unknown' means THIS CLIENT'S OWN ROW couldn't be
+      // read — a completely different query from the peers snapshot the legacy
+      // check below verifies against, so it can't actually invalidate that
+      // verification. Still refused: once we know we don't have the full,
+      // trustworthy picture of this client, using ANY alternative credential for
+      // it this run is exactly the guess this whole fail-closed design exists to
+      // refuse, not just the domain/Page one (chatgpt-codex-connector review,
+      // 2026-09-21).
+      if (!metaToken && legacyToken && resolved !== 'ownership_unknown') {
         if (peers === null) {
           legacyOwnershipUnknown = true
         } else {

@@ -436,6 +436,26 @@ describe('legacy per-name Meta token — ownership gate', () => {
     expect(json.results[0].meta.error).toMatch(/peer-scan/i)
   })
 
+  // chatgpt-codex-connector review (2026-09-21): resolved === 'ownership_unknown'
+  // means THIS CLIENT'S OWN ROW couldn't be read — a failure the legacy check
+  // (which only reads the separate peers snapshot) can't see. Even though the
+  // peer scan here succeeds and would legitimately confirm this client owns the
+  // name, the row failure alone must still refuse EVERY alternative credential
+  // this run, not just the domain/Page one.
+  it('refused when the client-row read fails, even though the legacy token would otherwise be legitimately owned', async () => {
+    mockResolveMetaTokenDetailed.mockResolvedValue('ownership_unknown')
+    mockLoadTokenOwnerPeers.mockResolvedValue([
+      { id: CLIENT_ID, name: NAME, domain: null, facebook_page_id: null, created_at: '2026-01-01T00:00:00Z', source: 'fde' },
+    ])
+
+    const { GET } = await import('./route')
+    const json = await (await GET(makeRequest(CRON_SECRET))).json()
+
+    expect(mockPullMetrics).not.toHaveBeenCalled()
+    expect(json.failed).toBe(1)
+    expect(json.results[0].meta.error).toMatch(/client-row read error/i)
+  })
+
   it('used when this client is the earliest non-self-serve owner of the name', async () => {
     mockLoadTokenOwnerPeers.mockResolvedValue([
       { id: CLIENT_ID, name: NAME, domain: null, facebook_page_id: null, created_at: '2026-01-01T00:00:00Z', source: 'fde' },
