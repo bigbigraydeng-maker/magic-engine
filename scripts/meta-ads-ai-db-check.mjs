@@ -30,6 +30,7 @@ try {
  await db.query(await readFile('supabase/migrations/20260913120000_client_binding_audit.sql','utf8'))
  await db.query(await readFile('supabase/migrations/20260920064556_meta_ads_ai_read_grants.sql','utf8'))
  await db.query(await readFile('supabase/migrations/20260920235723_meta_ads_ai_schema_forward_fix.sql','utf8'))
+ await db.query(await readFile('supabase/migrations/20260921060122_meta_ads_ai_hosted_analysis.sql','utf8'))
  await db.query('INSERT INTO clients(id) VALUES($1),($2)',[a,b])
  await db.query(`INSERT INTO meta_ads_ai_pilot_entitlements(client_id,status,approved_by_email) VALUES($1,'active','approver@example.test'),($2,'active','approver@example.test')`,[a,b]);checks++
  const pauseRevision=(await db.query('SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$1',[a])).rows[0].revision
@@ -56,6 +57,55 @@ try {
   entitlement_revision=(SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$2) WHERE id=$1`,[quarantined,a]);checks++
  await denied(db,`UPDATE platform_oauth_connections SET access_token_enc='attacker-cipher',authorizing_principal_id=$2 WHERE id=$1`,[quarantined,b])
  const grant=(await db.query(grantSql,[a,ca,'act_1234567890'])).rows[0];checks++
+ const requestKey='a'.repeat(64),secondKey='b'.repeat(64),thirdKey='c'.repeat(64)
+ let reservation=(await db.query('SELECT meta_ads_reserve_sponsored_analysis($1,$2,$3,$4,$5,$6) AS result',
+   [a,a,grant.id,requestKey,'2026-09-13','2026-09-19'])).rows[0].result
+ assert.equal(reservation.reason,'sponsored_analysis_unavailable');checks++
+ await db.query(`UPDATE meta_ads_ai_pilot_entitlements SET sponsored_analysis_enabled=true,
+   sponsored_monthly_cap_usd=0.24,sponsored_analysis_reserve_usd=0.12 WHERE client_id=$1`,[a])
+ reservation=(await db.query('SELECT meta_ads_reserve_sponsored_analysis($1,$2,$3,$4,$5,$6) AS result',
+   [a,a,grant.id,requestKey,'2026-09-13','2026-09-19'])).rows[0].result
+ assert.equal(reservation.reserved,true);assert.equal(reservation.idempotent,false);checks++
+ const firstJob=reservation.job_id
+ const duplicate=(await db.query('SELECT meta_ads_reserve_sponsored_analysis($1,$2,$3,$4,$5,$6) AS result',
+   [a,a,grant.id,requestKey,'2026-09-13','2026-09-19'])).rows[0].result
+ assert.equal(duplicate.idempotent,true);assert.equal(duplicate.job_id,firstJob);checks++
+ const secondReservation=(await db.query('SELECT meta_ads_reserve_sponsored_analysis($1,$2,$3,$4,$5,$6) AS result',
+   [a,a,grant.id,secondKey,'2026-09-13','2026-09-19'])).rows[0].result
+ assert.equal(secondReservation.reserved,true);checks++
+	 const exhausted=(await db.query('SELECT meta_ads_reserve_sponsored_analysis($1,$2,$3,$4,$5,$6) AS result',
+	   [a,a,grant.id,thirdKey,'2026-09-13','2026-09-19'])).rows[0].result
+	 assert.equal(exhausted.reason,'sponsored_budget_exhausted');checks++
+	 assert.equal((await db.query('SELECT meta_ads_authorize_sponsored_analysis($1,$2,$3) AS allowed',
+	   [a,a,firstJob])).rows[0].allowed,true);checks++
+	 const finished=(await db.query(`SELECT meta_ads_finish_sponsored_analysis($1,$2,$3,'completed',0.01,'{}'::jsonb,'报告','model',10,5,NULL) AS ok`,
+   [a,a,firstJob])).rows[0].ok
+ assert.equal(finished,true);checks++
+ await db.query(`SELECT meta_ads_finish_sponsored_analysis($1,$2,$3,'no_data',0,NULL,NULL,NULL,NULL,NULL,NULL)`,[a,a,secondReservation.job_id])
+ reservation=(await db.query('SELECT meta_ads_reserve_sponsored_analysis($1,$2,$3,$4,$5,$6) AS result',
+   [a,a,grant.id,thirdKey,'2026-09-13','2026-09-19'])).rows[0].result
+ assert.equal(reservation.reserved,true);checks++
+ const failedJob=reservation.job_id
+ await db.query(`SELECT meta_ads_finish_sponsored_analysis($1,$2,$3,'failed',0,NULL,NULL,NULL,NULL,NULL,'provider_unavailable')`,[a,a,failedJob])
+ const retried=(await db.query('SELECT meta_ads_reserve_sponsored_analysis($1,$2,$3,$4,$5,$6) AS result',
+   [a,a,grant.id,thirdKey,'2026-09-13','2026-09-19'])).rows[0].result
+ assert.equal(retried.reserved,true);assert.notEqual(retried.job_id,failedJob);checks++
+ assert.equal((await db.query(`SELECT meta_ads_finish_sponsored_analysis($1,$2,$3,'completed',0.13,'{}'::jsonb,'bad','model',1,1,NULL) AS ok`,
+   [a,a,retried.job_id])).rows[0].ok,false);checks++
+ await db.query(`SELECT meta_ads_finish_sponsored_analysis($1,$2,$3,'completed',0.12,'{}'::jsonb,'报告','model',1,1,NULL)`,[a,a,retried.job_id])
+ await db.query('UPDATE meta_ads_ai_pilot_entitlements SET sponsored_monthly_cap_usd=0.36 WHERE client_id=$1',[a])
+	 const revokeRace=(await db.query('SELECT meta_ads_reserve_sponsored_analysis($1,$2,$3,$4,$5,$6) AS result',
+	   [a,a,grant.id,'f'.repeat(64),'2026-09-13','2026-09-19'])).rows[0].result
+	 await db.query("UPDATE platform_oauth_connections SET token_expiry=now()-interval '1 minute' WHERE id=$1",[ca])
+	 assert.equal((await db.query('SELECT meta_ads_authorize_sponsored_analysis($1,$2,$3) AS allowed',
+	   [a,a,revokeRace.job_id])).rows[0].allowed,false);checks++
+ await db.query(`SELECT meta_ads_finish_sponsored_analysis($1,$2,$3,'completed',0.01,'{}'::jsonb,'不得保存','model',1,1,NULL)`,[a,a,revokeRace.job_id])
+ const rejectedReport=(await db.query('SELECT status,report_markdown,error_code FROM meta_ads_ai_analysis_jobs WHERE id=$1',[revokeRace.job_id])).rows[0]
+ assert.deepEqual(rejectedReport,{ status:'failed',report_markdown:null,error_code:'authorization_changed' });checks++
+ await db.query("UPDATE platform_oauth_connections SET token_expiry=now()+interval '1 day' WHERE id=$1",[ca])
+ const wrongPrincipal=(await db.query('SELECT meta_ads_reserve_sponsored_analysis($1,$2,$3,$4,$5,$6) AS result',
+   [a,b,grant.id,'d'.repeat(64),'2026-09-13','2026-09-19'])).rows[0].result
+ assert.equal(wrongPrincipal.reason,'authorization_changed');checks++
  const oldKey=(await db.query(`INSERT INTO client_api_keys(client_id,key_hash,key_prefix,name,scopes,expires_at,metadata)
   VALUES($1::uuid,'old-hash','me_live_old','Meta Ads read-only',ARRAY['meta:ads:read'],now()+interval '1 day',
   jsonb_build_object('meta_ads_grant_id',$2::text,'meta_ads_grant_revision',$3::text,'meta_ads_principal_id',$1::uuid::text,'meta_ads_entitlement_revision',$4::text)) RETURNING id`,
@@ -122,10 +172,12 @@ try {
  assert.equal(reservations.filter(r=>r.rows[0].allowed).length,30);checks++
  for(const role of ['anon','authenticated']) {
    await db.query(`SET ROLE ${role}`)
-   for(const table of ['meta_ads_read_grants','meta_ads_ai_pilot_entitlements','meta_ads_oauth_states','meta_ads_read_limits','meta_ads_binding_lock']) await denied(db,`SELECT * FROM ${table}`)
+   for(const table of ['meta_ads_read_grants','meta_ads_ai_pilot_entitlements','meta_ads_oauth_states','meta_ads_read_limits','meta_ads_binding_lock','meta_ads_ai_sponsored_budgets','meta_ads_ai_analysis_jobs']) await denied(db,`SELECT * FROM ${table}`)
    await denied(db,'SELECT meta_ads_reserve_read($1)',[a]);await denied(db,'SELECT meta_ads_account_conflict($1,$2)',[a,'act_1234567890'])
    await denied(db,'SELECT meta_ads_authorization_current($1,$2,$3)',[a,newKey,'act_1234567890'])
-   await denied(db,'SELECT meta_ads_discovery_current($1,$2,$3,$4)',[a,ca,a,discoveryVersion])
+	   await denied(db,'SELECT meta_ads_discovery_current($1,$2,$3,$4)',[a,ca,a,discoveryVersion])
+	   await denied(db,'SELECT meta_ads_reserve_sponsored_analysis($1,$2,$3,$4,$5,$6)',[a,a,grant.id,'e'.repeat(64),'2026-09-13','2026-09-19'])
+	   await denied(db,'SELECT meta_ads_authorize_sponsored_analysis($1,$2,$3)',[a,a,firstJob])
    await db.query('RESET ROLE')
  }
  // RLS itself still protects rows even if future ACLs accidentally grant table access.

@@ -6,6 +6,7 @@ vi.mock('@/lib/auth/api-key-access',()=>({ generateApiKey:vi.fn() }))
 vi.mock('../entitlement',()=>({ pilotState:mocks.pilotState,requirePilotActive:mocks.requirePilotActive }))
 vi.mock('../store',()=>({ activeConnectionForPrincipal:mocks.activeConnectionForPrincipal,reserveRead:mocks.reserveRead,
   requireDiscoveryAuthorization:mocks.requireDiscoveryAuthorization,requireReleaseAuthorization:mocks.requireReleaseAuthorization }))
+vi.mock('../analysis',()=>({ listAnalyses:vi.fn(async()=>[]) }))
 
 import { bind,discover,issueKey,revoke,status } from '../manage'
 import { MetaReadError } from '../../graph-read'

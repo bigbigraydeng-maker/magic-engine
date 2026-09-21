@@ -32,6 +32,12 @@ Tier Classification：既有 Ads 支柱下 L3 Meta Connector + 共享身份/工�
 
 八个工具：meta_list_accounts、meta_get_campaigns、meta_get_adsets、meta_get_ads、meta_get_insights、meta_get_video_insights、meta_get_breakdowns、meta_compare_periods。
 
+### 邀请测试普通用户路径（托管分析）
+
+普通用户页面固定为“连接 Facebook → 选择广告账户 → 生成近 7 天中文报告”，不生成或展示 Bearer key，也不要求配置 MCP。后端复用同一 Meta 只读 transport、指标标准化、tenant/principal/grant/entitlement 边界与统一 `callClaudeChat(singleAttempt=true)`；固定 Strategy Engine 模型和提示词，模型只接收服务端计算后的有限汇总证据。原 MCP/HTTPS 工具与旧 key 验证契约保持不变；页面只为已有旧连接保留不含密钥内容的撤销入口。
+
+本轮不接 Inngest：这是一次同步只读分析，没有发布或跨步骤后台接力；替代恢复机制是 `meta_ads_ai_analysis_jobs` receipt、同窗口幂等键、15 分钟失联任务保守按预留额结算后允许重试。预算由数据库原子预留/结算，每个邀请客户默认关闭；测试值为每月 USD 1、每次最少预留 USD 0.12。没有数据或模型调用前失败会释放预留且不调用 Strategy Engine；模型调用结果、费用、授权快照和失败原因进入同一任务 receipt。报告提交会锁定并复核原始 grant revision、connection version 和当前 entitlement，撤销与完成按数据库顺序串行，失效授权不得保存或返回报告。
+
 ## 指标和边界
 
 - 默认广告账户时区最近 7 个完整日；显式日期最多 90 日，不含当天。period comparison 是账户级等长前期比较；比较 campaign/ad 趋势可分别调用相同窗口的 insights。

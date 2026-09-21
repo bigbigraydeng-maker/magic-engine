@@ -5,6 +5,7 @@ import { MetaReadError,metaGraphGet,graphRows,graphAfter } from '../graph-read'
 import { AI_ENTITY_FIELDS } from '../entity-settings'
 import { META_ADS_SCOPE,toolNames } from './contract'
 import { pilotState,requirePilotActive } from './entitlement'
+import { listAnalyses } from './analysis'
 
 type LastRead={ tool:string;account_id:string|null;at:string }
 async function lastSuccessfulRead(clientId: string,keyId:string):Promise<LastRead|null> {
@@ -16,13 +17,14 @@ async function lastSuccessfulRead(clientId: string,keyId:string):Promise<LastRea
 }
 
 export async function status(clientId: string, principalId: string) {
-  const [connections,grants,keys,pilot] = await Promise.all([
+  const [connections,grants,keys,pilot,analyses] = await Promise.all([
     supabaseAdmin.from('platform_oauth_connections').select('id,status,token_expiry,authorizing_principal_id,entitlement_revision')
       .eq('client_id',clientId).eq('purpose','meta_ads_read'),
     supabaseAdmin.from('meta_ads_read_grants').select('id,ad_account_id,connection_id,revision,principal_id,revoked_at,entitlement_revision')
       .eq('client_id',clientId),
     supabaseAdmin.from('client_api_keys').select('id,key_prefix,expires_at,last_used_at,metadata').eq('client_id',clientId).contains('scopes',[META_ADS_SCOPE]).is('revoked_at',null),
     pilotState(clientId),
+    listAnalyses(clientId,principalId),
   ])
   if (connections.error || grants.error || keys.error) throw new MetaReadError('authorization_unavailable',503)
   const ownedConnections=connections.data.filter(connection=>connection.authorizing_principal_id===principalId)
@@ -45,7 +47,7 @@ export async function status(clientId: string, principalId: string) {
         && connection?.status==='active' && Date.parse(connection.token_expiry)>Date.now()) }]
   })
   const safeKeys=await Promise.all(visibleKeys.map(async key=>({ ...key,last_successful_read:await lastSuccessfulRead(clientId,key.id) })))
-  return { pilot,connections:safeConnections,grants:safeGrants,keys:safeKeys }
+  return { pilot,connections:safeConnections,grants:safeGrants,keys:safeKeys,analyses }
 }
 export async function discover(clientId: string,principalId: string,connectionId: string) {
   await reserveRead(clientId)
