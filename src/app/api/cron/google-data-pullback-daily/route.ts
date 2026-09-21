@@ -308,6 +308,22 @@ export async function GET(req: NextRequest) {
         }
       }
       if (!metaToken) metaToken = resolved?.token
+      if (!metaToken) {
+        // A Meta ad account IS configured for this client, but every lookup step
+        // came back empty — including the fail-closed cases where an ownership
+        // peer-query error blocked both the scoped token (resolveMetaTokenForClient
+        // returning null for 'ownership_unknown') and the legacy per-name token.
+        // Skipping this whole branch used to leave `result.meta` unset, which
+        // `failed`/`errors` below both read as "not attempted" rather than
+        // "failed" — the cron then reports success while this client's snapshot,
+        // daily insights, health verdict and digest all silently stop (Codex
+        // review, 2026-09-21). Recording an explicit failure here is what makes
+        // that data gap show up as a cron alert instead of going unnoticed.
+        result.meta = {
+          success: false,
+          error: 'no Meta token resolved for this client — ownership check failed or no token configured (resolveMetaTokenForClient/AD-SEC-4)',
+        }
+      }
       if (metaToken) {
         result.meta = await syncMeta(client.client_id, client.meta_ad_account_id, metaToken, slug)
 
