@@ -56,7 +56,8 @@ import { SEO_METRIC_KEY, GA4_METRIC_KEY, ADS_METRIC_KEY } from '@/lib/flywheel/v
 import { adsMetricKeysWrittenBy } from '@/lib/flywheel/metric-registry'
 import { MetaAdsAdapter } from '@/lib/flywheel/adapters/MetaAdsAdapter'
 import { startCronRun } from '@/lib/cron/run-logger'
-import { domainToEnvKey } from '@/lib/meta/token-manager'
+import { resolveMetaTokenForClient } from '@/lib/meta/token-manager'
+import { ownsKey, loadTokenOwnerPeers, type TokenOwnerRow } from '@/lib/meta/token-selection'
 import { findSharedAdAccounts, getClientAdAccountIds } from '@/lib/meta/client-ad-accounts'
 import { hasVideoColumns, syncAdDailyInsights, syncAdsetDailyInsights, syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
@@ -79,7 +80,6 @@ interface ConnectorRow {
 interface ClientWork {
   client_id:               string
   client_name?:            string
-  client_domain?:          string
   site_url?:               string
   property_id?:            string
   meta_ad_account_id?:     string
@@ -210,7 +210,6 @@ export async function GET(req: NextRequest) {
   for (const c of metaClients) {
     const entry = workMap.get(c.id) ?? { client_id: c.id }
     entry.client_name = c.name
-    entry.client_domain = c.domain ?? undefined
     entry.meta_ad_account_id = c.meta_ad_account_id
     workMap.set(c.id, entry)
   }
@@ -248,6 +247,14 @@ export async function GET(req: NextRequest) {
   // ── 3. Process each client ─────────────────────────────────────────────────
   const results: ClientResult[] = []
 
+  // Loaded at most once per run, only if some client actually falls through to
+  // the legacy per-name token below (AD-SEC-4 follow-up) — most runs never need it.
+  let tokenOwnerPeers: TokenOwnerRow[] | null | undefined
+  async function getTokenOwnerPeers(): Promise<TokenOwnerRow[] | null> {
+    if (tokenOwnerPeers === undefined) tokenOwnerPeers = await loadTokenOwnerPeers(supabaseAdmin)
+    return tokenOwnerPeers
+  }
+
   for (const client of work) {
     const result: ClientResult = { client_id: client.client_id }
 
@@ -260,20 +267,47 @@ export async function GET(req: NextRequest) {
     }
 
     if (client.meta_ad_account_id) {
-      // Token resolution, three schemes in priority order:
-      //   1. META_SYSTEM_USER_TOKEN_<DOMAIN> via getMetaTokenForClient — the
-      //      scheme winner-sync runs on in production (proven working for CTS)
-      //   2. legacy {NAME_SLUG}_META_SYSTEM_USER_TOKEN (kept for back-compat)
-      //   3. global META_SYSTEM_USER_TOKEN (getMetaTokenForClient's own fallback)
-      // The old slug-first order made CTS pull fail on 2026-07-24: the global
-      // token has no access to act_2775766642787274, while the domain-scheme
-      // token does — but was never consulted here.
+      // Token resolution (AD-SEC-4 follow-up, 2026-09-21), three schemes in
+      // priority order — unchanged from before this fix, only the ownership
+      // checks are new:
+      //   1. Ownership-checked domain/Page-scoped token (resolveMetaTokenForClient,
+      //      source !== 'shared_fallback') — same lookup every other Meta call in
+      //      the app uses (token-selection.ts). Fixes the bug this route had
+      //      (domain token never consulted, 2026-07-24 CTS pull failure) AND the
+      //      hole it was written with: `client.domain` was read straight into the
+      //      env-var name with no check on who owns that key, so a self-serve
+      //      signup copying a real client's domain could pull that client's token.
+      //   2. legacy {NAME_SLUG}_META_SYSTEM_USER_TOKEN, kept for back-compat (no
+      //      reliance found in docs/ENV.md or elsewhere in the repo, but Render
+      //      env vars aren't fully inventoried) — same problem as #1 applies to
+      //      `clients.name` (self-serve-writable, not unique), so it only fires
+      //      for this name's earliest non-self-serve owner.
+      //   3. resolveMetaTokenForClient's own shared global fallback. Checked LAST,
+      //      after #2: a client whose ad account only the per-name token can see
+      //      (the exact 2026-07-24 failure mode — the global token lacks access to
+      //      that specific account) must not lose it just because a global
+      //      fallback happens to be configured too. Step 1 already excludes this
+      //      source, so `resolved` is reused here rather than re-fetched.
       const slug = (client.client_name ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '_')
-      const domainKey = client.client_domain ? domainToEnvKey(client.client_domain) : null
-      const metaToken =
-        (domainKey ? process.env[`META_SYSTEM_USER_TOKEN_${domainKey}`] : undefined)
-        || (slug ? process.env[`${slug}_META_SYSTEM_USER_TOKEN`] : undefined)
-        || process.env.META_SYSTEM_USER_TOKEN
+      const resolved = await resolveMetaTokenForClient(client.client_id)
+      let metaToken = resolved && resolved.source !== 'shared_fallback' ? resolved.token : undefined
+      const legacyToken = slug ? process.env[`${slug}_META_SYSTEM_USER_TOKEN`] : undefined
+      if (!metaToken && legacyToken) {
+        const peers = await getTokenOwnerPeers()
+        const self = peers?.find((p) => p.id === client.client_id)
+        // `self.name` comes from a separate, lazily-loaded peer read (getTokenOwnerPeers,
+        // memoized once for the whole run) that can land minutes after — and thus
+        // disagree with — the `metaResult` row `slug` was built from. Overriding
+        // `.name` with `client.client_name` here guarantees ownsKey verifies
+        // ownership of the SAME key `legacyToken` was just looked up with, not
+        // whatever name this client happens to carry by the time peers loaded
+        // (魏征 review, 2026-09-21: an ordinary rename mid-run could otherwise
+        // make this check pass for a key the client was never actually granted).
+        if (self && peers && ownsKey({ ...self, name: client.client_name }, peers, (r) => (r.name ? r.name.toUpperCase().replace(/[^A-Z0-9]/g, '_') : null))) {
+          metaToken = legacyToken
+        }
+      }
+      if (!metaToken) metaToken = resolved?.token
       if (metaToken) {
         result.meta = await syncMeta(client.client_id, client.meta_ad_account_id, metaToken, slug)
 

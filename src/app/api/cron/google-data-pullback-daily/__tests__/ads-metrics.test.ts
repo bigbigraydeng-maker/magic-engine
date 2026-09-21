@@ -58,6 +58,24 @@ vi.mock('@/lib/ads-strategy/config', () => ({
   resolveDigestRecipients: vi.fn().mockReturnValue([]),
 }))
 
+// resolveMetaTokenForClient opens its own Supabase client (module-level, not the
+// mocked supabaseAdmin above) — mock it so the suite never makes a live network
+// call. Every fixture here has no domain, so this mirrors real behavior: no
+// scoped token configured → fall to the shared META_SYSTEM_USER_TOKEN.
+const mockResolveMetaTokenForClient = vi.fn()
+vi.mock('@/lib/meta/token-manager', () => ({
+  resolveMetaTokenForClient: (...args: unknown[]) => mockResolveMetaTokenForClient(...args),
+}))
+// No test here deletes META_SYSTEM_USER_TOKEN, so the route's legacy per-name
+// fallback (which calls loadTokenOwnerPeers) never fires today — mocked
+// defensively so a future test that does clear it can't fall through to a
+// real Supabase query against this file's own `clients` mock (shaped for a
+// different query) or worse, a live network call.
+vi.mock('@/lib/meta/token-selection', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/meta/token-selection')>()
+  return { ...actual, loadTokenOwnerPeers: vi.fn().mockResolvedValue(null) }
+})
+
 import { supabaseAdmin } from '@/lib/supabase'
 import { getAdAccountInsights } from '@/lib/meta/client'
 import { fetchGa4Snapshot, fetchGa4PaidSearchMetrics } from '@/lib/ga4/client'
@@ -178,6 +196,11 @@ beforeEach(() => {
   process.env.CRON_SECRET = 'test-secret'
   process.env.META_SYSTEM_USER_TOKEN = 'meta-token'
   mockMetaPullMetrics.mockResolvedValue([])
+  mockResolveMetaTokenForClient.mockImplementation(async () =>
+    process.env.META_SYSTEM_USER_TOKEN
+      ? { token: process.env.META_SYSTEM_USER_TOKEN, source: 'shared_fallback' as const }
+      : null,
+  )
 })
 
 // ── The fix ───────────────────────────────────────────────────────────────────

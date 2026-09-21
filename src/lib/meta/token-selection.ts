@@ -45,6 +45,8 @@ export interface TokenOwnerRow {
   created_at: string | null
   /** clients.source — 'fde' (staff-created) | 'self_serve' (public signup). */
   source: string | null
+  /** clients.name — only populated/used for the cron route's legacy per-name key. */
+  name?: string | null
 }
 
 /**
@@ -81,15 +83,31 @@ function isOlder(a: TokenOwnerRow, b: TokenOwnerRow): boolean {
   return a.id < b.id
 }
 
-/** Is `client` the owner of its domain key among `peers` (which may include itself)? */
-export function ownsDomainKey(client: TokenOwnerRow, peers: TokenOwnerRow[]): boolean {
-  const domain = present(client.domain)
-  if (!domain || client.source === 'self_serve') return false
-  const key = domainToEnvKey(domain)
+/**
+ * Generic ownership rule: earliest-created, non-self_serve row wins whatever key
+ * `keyOf` extracts. `ownsDomainKey` below is `keyOf = domain`; the cron route's
+ * legacy per-name Meta token reuses this for `keyOf = name` — `clients.name` is
+ * exactly as self-serve-writable and non-unique as `domain`, so it needs the
+ * same rule rather than a hand-rolled copy.
+ */
+export function ownsKey(
+  client: TokenOwnerRow,
+  peers: TokenOwnerRow[],
+  keyOf: (row: TokenOwnerRow) => string | null,
+): boolean {
+  const key = keyOf(client)
+  if (!key || client.source === 'self_serve') return false
   return !peers.some((p) => {
     if (p.id === client.id || p.source === 'self_serve') return false
-    const other = present(p.domain)
-    return other !== null && domainToEnvKey(other) === key && isOlder(p, client)
+    return keyOf(p) === key && isOlder(p, client)
+  })
+}
+
+/** Is `client` the owner of its domain key among `peers` (which may include itself)? */
+export function ownsDomainKey(client: TokenOwnerRow, peers: TokenOwnerRow[]): boolean {
+  return ownsKey(client, peers, (r) => {
+    const d = present(r.domain)
+    return d ? domainToEnvKey(d) : null
   })
 }
 
@@ -146,7 +164,7 @@ export async function loadTokenOwnerPeers(supabase: SupabaseClient): Promise<Tok
     return await fetchAll<TokenOwnerRow>((from, to) =>
       supabase
         .from('clients')
-        .select('id, domain, facebook_page_id, created_at, source')
+        .select('id, name, domain, facebook_page_id, created_at, source')
         .order('id', { ascending: true })
         .range(from, to),
     )
