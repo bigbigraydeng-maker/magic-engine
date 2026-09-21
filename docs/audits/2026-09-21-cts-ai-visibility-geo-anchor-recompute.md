@@ -4,8 +4,11 @@
 - 客户：CTS Tours NZ（`c0000000-0000-0000-0000-000000000000`）**只做这一个**
 - 风险级：A（改生产数据库）
 - 授权：PM 在本窗口亲口回「开始」（非转达）
-- 前置：[2026-09-20 地域锚点闸门](./2026-09-20-ai-visibility-geo-anchor-gate.md)（代码已合并，merge commit 见 PR #1857）、
-  [2026-09-20 历史名次回填](https://github.com/bigbigraydeng-maker/magic-engine/pull/1846)（137 条已于 2026-09-20 10:15–10:17 UTC 执行，PR 本身未合并，但生产数据已写）
+- **Repository Fact Gate**：`git fetch origin` 于 2026-09-21 15:03:44 +12:00（NZST）拉取，
+  main 精确 SHA `0ee4b2fdd34429e4ecc3ce45f1ebb170899d1216`。下文所有复算（`resolveClientBrandRank` 重扫、
+  差异报告）和两处生产库写入，用的都是这一个 commit 的代码，全程没有再拉取或切换过——
+  本文档最初落盘时漏写了这一条，2026-09-21 由 Codex 复审（PR #1861）指出后补上，SHA 和时间是事后据
+  `git reflog show origin/main` 查实的，不是当场记录，如实注明。
 
 ---
 
