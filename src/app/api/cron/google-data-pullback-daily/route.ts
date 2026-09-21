@@ -266,11 +266,11 @@ export async function GET(req: NextRequest) {
     }
 
     if (client.meta_ad_account_id) {
-      // Token resolution (AD-SEC-4 follow-up, 2026-09-21), three schemes in
+      // Token resolution (AD-SEC-4 follow-up, 2026-09-21), four schemes in
       // priority order — unchanged from before this fix, only the ownership
       // checks are new:
-      //   1. Ownership-checked domain/Page-scoped token (resolveMetaTokenDetailed,
-      //      source !== 'shared_fallback') — same lookup every other Meta call in
+      //   1. Ownership-checked domain-scoped token (resolveMetaTokenDetailed,
+      //      source === 'client_domain') — same lookup every other Meta call in
       //      the app uses (token-selection.ts), called with this route's own
       //      supabaseAdmin rather than token-manager's separate client. Fixes the
       //      bug this route had (domain token never consulted, 2026-07-24 CTS
@@ -282,12 +282,20 @@ export async function GET(req: NextRequest) {
       //      reliance found in docs/ENV.md or elsewhere in the repo, but Render
       //      env vars aren't fully inventoried) — same problem as #1 applies to
       //      `clients.name` (self-serve-writable, not unique), so it only fires
-      //      for this name's earliest non-self-serve owner.
-      //   3. resolveMetaTokenDetailed's own shared global fallback. Checked LAST,
-      //      after #2: a client whose ad account only the per-name token can see
-      //      (the exact 2026-07-24 failure mode — the global token lacks access to
-      //      that specific account) must not lose it just because a global
-      //      fallback happens to be configured too. Step 1 already excludes this
+      //      for this name's earliest non-self-serve owner. Checked BEFORE the
+      //      Page-scoped token (step 3): this route's original order — before
+      //      resolveMetaTokenDetailed's Page-scoped lookup existed here at all —
+      //      was domain → legacy → global, and a client relying on the legacy
+      //      token must not lose it just because a Page token happens to be
+      //      configured too (a Page token's identity isn't guaranteed to have
+      //      ads_management on this client's ad account — Codex review, 2026-09-21).
+      //   3. Ownership-checked Page-scoped token (source === 'client_page') —
+      //      only consulted once #1 and #2 both miss.
+      //   4. resolveMetaTokenDetailed's own shared global fallback. Checked LAST:
+      //      a client whose ad account only the per-name token can see (the exact
+      //      2026-07-24 failure mode — the global token lacks access to that
+      //      specific account) must not lose it just because a global fallback
+      //      happens to be configured too. Steps 1 and 3 already exclude this
       //      source, so `resolved` is reused here rather than re-fetched.
       //
       // ownership_unknown (a transient failure reading who owns a scoped key,
@@ -297,8 +305,7 @@ export async function GET(req: NextRequest) {
       // (chatgpt-codex-connector review on this PR, 2026-09-21).
       const slug = (client.client_name ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '_')
       const resolved = await resolveMetaTokenDetailed(supabaseAdmin, client.client_id, process.env)
-      const scoped = resolved !== 'ownership_unknown' && resolved && resolved.source !== 'shared_fallback' ? resolved : null
-      let metaToken = scoped?.token
+      let metaToken = resolved !== 'ownership_unknown' && resolved && resolved.source === 'client_domain' ? resolved.token : undefined
       const legacyToken = slug ? process.env[`${slug}_META_SYSTEM_USER_TOKEN`] : undefined
       let legacyOwnershipDenied = false
       if (!metaToken && legacyToken) {
@@ -318,6 +325,7 @@ export async function GET(req: NextRequest) {
           legacyOwnershipDenied = true
         }
       }
+      if (!metaToken && resolved !== 'ownership_unknown' && resolved && resolved.source === 'client_page') metaToken = resolved.token
       if (!metaToken && resolved !== 'ownership_unknown') metaToken = resolved?.token
       if (metaToken) {
         result.meta = await syncMeta(client.client_id, client.meta_ad_account_id, metaToken, slug)
