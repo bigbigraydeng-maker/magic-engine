@@ -263,7 +263,7 @@ PM 反馈「太平静」「一堆照片的串联」「这不是爆款短视频�
 1. 任何 `optimization_goal` 是纯播放/完播类（THRUPLAY、`video_view` 等，不落地到留资/私信/购买这类真实商业结果）的广告组，建的时候必须显式设置 `targeting.publisher_platforms`，手动排除 `audience_network`（或至少排除 `rewarded_video` 这个具体版位），不能留给"自动版位"。
 2. 建广告组后必须按版位（`breakdowns=publisher_platform,platform_position`）回读一次花费/完播分布，确认没有异常集中在某一个版位——不能只看汇总层面的完播率数字，汇总数字会把一个占 95%+ 花费的坏版位和一堆占比很小的好版位平均成一个"看起来还不错"的数。
 3. 用视频观看数据建自定义受众（再营销/相似受众种子）前，先确认视频来源的广告本身版位健康——被污染广告的观看事件不应该被当作"真实兴趣信号"用来建种子受众。
-4. 已排期的动作：广告引擎（`~/.claude/plans/ads-impact-loop-capability.md`）阶段 1 的诊断表 `ad_entity_snapshots` 已经存了 `targeting_summary`（含版位设置），后续诊断应该加一条"纯播放类优化目标 + 未排除 Audience Network"的规则检测，把这类配置错误自动检出，不必每次靠人工深挖 7 天数据才发现。
+4. ✅ **2026-09-22 已实现**：这条检测规则（D9）已经写进 `src/lib/ads-strategy/portfolio/diagnostics/d9-placement-leak.ts`，接进每日内部诊断日报，不用再靠人工深挖 7 天数据。**已知限制**：目前打不到共用账户（CTS 跟 Oztop/30 Kiteroa 共用的个人账户 `act_2775766642787274`）——快照采集对共用账户整层跳过广告组设置抓取，覆盖共用账户需要先解决"设置抓了归哪个客户"的架构问题，暂未排期。
 
 ---
 
