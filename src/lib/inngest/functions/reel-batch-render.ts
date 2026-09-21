@@ -113,6 +113,7 @@ async function uploadAndInsertAsset(
         kind: 'video',
         asset_type: 'reel',
         service: item.serviceName,
+        source_channel: 'creatomate-batch',
         batch_tag: item.tag,
         creatomate_render_id: item.renderId,
         // CTA 不再烧进画面（Meta Reel 安全区限制），交发帖 caption 步骤使用
