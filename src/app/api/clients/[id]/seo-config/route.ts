@@ -28,10 +28,14 @@
  * the weekly AI-visibility (GEO) tracker
  * (src/lib/inngest/functions/ai-visibility-weekly.ts) — off by default for
  * every client. While off, that client keeps running through the old
- * Render-cron path (`ai-tracker-weekly`) unchanged. Only flip it on for a
- * client after a dry-run/parallel-run comparison confirms the Inngest path
- * produces the same judgment output as the old path, and PM has approved —
- * same rollout discipline as competitor_watch_enabled.
+ * Render-cron path (`ai-tracker-weekly`). The two paths are mutually
+ * exclusive by construction — `ai-tracker-weekly/route.ts` explicitly
+ * excludes any client with this flag set from its own candidate query, so
+ * flipping it on moves a client from one path to the other, never both.
+ * Only flip it on for a client after a dry-run/parallel-run comparison
+ * confirms the Inngest path produces the same judgment output as the old
+ * path, and PM has approved — same rollout discipline as
+ * competitor_watch_enabled.
  *
  * Mirrors src/app/api/clients/[id]/brand-aliases/route.ts.
  */
