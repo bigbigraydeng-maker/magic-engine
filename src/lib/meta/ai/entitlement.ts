@@ -9,6 +9,7 @@ interface PilotRow {
   starts_at: string
   expires_at: string | null
   revision: string
+  sponsored_analysis_enabled: boolean
 }
 
 export interface PilotState {
@@ -16,12 +17,13 @@ export interface PilotState {
   new_actions_allowed: boolean
   reason: 'ready' | 'service_paused' | 'invitation_required' | 'invitation_inactive' | 'invitation_expired'
   revision: string | null
+  sponsored_analysis_enabled: boolean
 }
 
 async function entitlement(clientId: string): Promise<PilotRow | null> {
   const { data, error } = await supabaseAdmin
     .from('meta_ads_ai_pilot_entitlements')
-    .select('status,starts_at,expires_at,revision')
+    .select('status,starts_at,expires_at,revision,sponsored_analysis_enabled')
     .eq('client_id', clientId)
     .maybeSingle()
   if (error) throw new MetaReadError('authorization_unavailable', 503)
@@ -29,15 +31,16 @@ async function entitlement(clientId: string): Promise<PilotRow | null> {
 }
 
 function rowState(row: PilotRow | null, now = Date.now()): PilotState {
-  if (!row) return { invited: false, new_actions_allowed: false, reason: 'invitation_required', revision:null }
+  if (!row) return { invited: false, new_actions_allowed: false, reason: 'invitation_required', revision:null, sponsored_analysis_enabled:false }
+  const sponsoredAnalysisEnabled=Boolean(row.sponsored_analysis_enabled)
   if (row.status !== 'active' || Date.parse(row.starts_at) > now) {
-    return { invited: true, new_actions_allowed: false, reason: 'invitation_inactive',revision:row.revision }
+    return { invited: true, new_actions_allowed: false, reason: 'invitation_inactive',revision:row.revision,sponsored_analysis_enabled:sponsoredAnalysisEnabled }
   }
   if (row.expires_at && Date.parse(row.expires_at) <= now) {
-    return { invited: true, new_actions_allowed: false, reason: 'invitation_expired',revision:row.revision }
+    return { invited: true, new_actions_allowed: false, reason: 'invitation_expired',revision:row.revision,sponsored_analysis_enabled:sponsoredAnalysisEnabled }
   }
-  if (!enabled()) return { invited: true, new_actions_allowed: false, reason: 'service_paused',revision:row.revision }
-  return { invited: true, new_actions_allowed: true, reason: 'ready',revision:row.revision }
+  if (!enabled()) return { invited: true, new_actions_allowed: false, reason: 'service_paused',revision:row.revision,sponsored_analysis_enabled:sponsoredAnalysisEnabled }
+  return { invited: true, new_actions_allowed: true, reason: 'ready',revision:row.revision,sponsored_analysis_enabled:sponsoredAnalysisEnabled }
 }
 
 export async function pilotState(clientId: string): Promise<PilotState> {

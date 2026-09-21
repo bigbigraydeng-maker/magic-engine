@@ -20,8 +20,8 @@ beforeEach(()=>{
 
 describe('邀请测试资格',()=>{
   it('只有生效且未过期的邀请允许创建连接和读取',async()=>{
-    mocks.from.mockReturnValue(query({ data:{ status:'active',starts_at:'2026-09-01T00:00:00Z',expires_at:'2099-01-01T00:00:00Z',revision:'ent-1' },error:null }))
-    await expect(requirePilotActive('client')).resolves.toMatchObject({ reason:'ready',new_actions_allowed:true })
+    mocks.from.mockReturnValue(query({ data:{ status:'active',starts_at:'2026-09-01T00:00:00Z',expires_at:'2099-01-01T00:00:00Z',revision:'ent-1',sponsored_analysis_enabled:true },error:null }))
+    await expect(requirePilotActive('client')).resolves.toMatchObject({ reason:'ready',new_actions_allowed:true,sponsored_analysis_enabled:true })
   })
 
   it('总开关关闭时阻止新连接和读取',async()=>{
