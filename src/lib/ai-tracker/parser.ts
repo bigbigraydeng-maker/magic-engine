@@ -71,8 +71,14 @@ export async function parseRanking(input: {
   clientDomain?: string | null
   /** clients.brand_aliases — extra names that count as the client. */
   clientAliases?: readonly string[] | null
+  /**
+   * clients.brand_geo_anchors — words proving an answer is about the
+   * client's own market. Gates alias-only evidence so a same-named sibling
+   * abroad cannot claim the client. Empty/absent = matching unchanged.
+   */
+  clientGeoAnchors?: readonly string[] | null
 }): Promise<ParseResult> {
-  const { rawResponse, clientBrandName, clientDomain, clientAliases } = input
+  const { rawResponse, clientBrandName, clientDomain, clientAliases, clientGeoAnchors } = input
 
   // Empty / very short responses can't yield meaningful rankings
   if (!rawResponse || rawResponse.trim().length < 30) {
@@ -120,7 +126,12 @@ export async function parseRanking(input: {
   const resolved = resolveClientBrandRank(
     (parsed.brands ?? []).filter(isValidBrand),
     rawResponse,
-    { brandName: clientBrandName, domain: clientDomain, aliases: clientAliases }
+    {
+      brandName: clientBrandName,
+      domain: clientDomain,
+      aliases: clientAliases,
+      geoAnchors: clientGeoAnchors,
+    }
   )
 
   return {
