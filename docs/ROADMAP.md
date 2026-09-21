@@ -253,7 +253,12 @@ $92/天（把视频系列省下的 $30 并入）。四个改动都用 Graph API 
 这个复查此前只写在本文档里，没有任何执行管道会主动提醒，违反铁律 3 下半「管道不许断头」——
 已改成同时下发一条截止 2026-09-23 的今日待办（`src/lib/pm-todo/client-doc-manual-tasks.ts`），
 不再只靠人回头翻文档。做不到用已同步的广告数据自动判定回升与否（咨询量算不算「回升」目前
-要读对话内容判断，不是能可靠自动跑的规则），先用带截止时间的人工待办兜底。
+要读对话内容判断，不是能可靠自动跑的规则），先用带截止时间的人工待办兜底。**2026-09-21
+Codex 复审第 3 轮抓到**：这条待办原本让操作者去 ME 的「广告健康」页面核对，但实测那个页面
+只按整个系列汇总近 7 天，没有广告组维度也没有逐日数字，指定的广告组在那页查不到；ME 系统内
+也没有其他页面能按天看某个广告组的咨询数（这个能力还没建）。已改成直接指向 Meta Ads Manager
+本尊查该广告组自己的原生逐日「Messaging conversations started」指标做粗判，不再指向一个查
+不到目标数据的链接。
 
 **第二件事·WhatsApp 对话接入排查结论——不是要新建，是要把已经写好但没启用的东西接通**：
 
@@ -288,16 +293,20 @@ Messenger 走的是同一套 `conversations`/`contact_touchpoints` 表、`channe
    的关键路径依赖）。这四个变量的配置与验证必须跟前三步一起算作启用前置项，不能等前三步
    做完才发现还缺这一环。
 
-**下一步（PM 拍板，不是技术选择；前两条已按铁律 3 下半下发到「今日待办 / 🙋 需要你动手」，
-不只是留在这份文档里）**：
-- [ ] PM 决定：要不要把 `20260902000002_whatsapp_phone_number_id.sql` 这个已合并到主分支、
-      纯新增字段的改动，对生产数据库真正执行一次
+**下一步（PM 拍板，不是技术选择；前三条已按铁律 3 下半下发到「今日待办 / 🙋 需要你动手」
+[`src/lib/pm-todo/client-doc-manual-tasks.ts`]，不只是留在这份文档里；2026-09-21 Codex 复审
+第 3 轮抓到 migration 决策和 `META_APP_SECRET` 此前都只留在本文档没进管道，已补下发）**：
+- [ ] （已下发今日待办，回 `go apply` / `暂不`）PM 决定：要不要把
+      `20260902000002_whatsapp_phone_number_id.sql` 这个已合并到主分支、纯新增字段的改动，
+      对生产数据库真正执行一次
 - [ ] （已下发今日待办）PM/FDE 去 Meta Business 后台给系统用户加 `whatsapp_business_management`
       权限（加完后可以用现成脚本自动查出 NAL 的号码编号，不需要再人工翻）
-- [ ] （已下发今日待办）PM/FDE 去 Meta App 后台确认这个号码的 webhook 订阅是否已经打开
-      （这一步也需要能登录 Meta 后台的人核实，无法从这台开发机验证）
-- [ ] PM/FDE 在 Render 后台把 `META_VERIFY_TOKEN` / `META_APP_SECRET`（收消息必配）以及
-      `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID`（要回消息才需要）四个变量配上
+- [ ] （已下发今日待办，同一条里已把 `META_VERIFY_TOKEN` / `META_APP_SECRET` 配置一起带上）
+      PM/FDE 去 Meta App 后台确认这个号码的 webhook 订阅是否已经打开，并在 Render 后台把
+      收消息必配的 `META_VERIFY_TOKEN` / `META_APP_SECRET` 两个变量配上
+      （这一步也需要能登录 Meta 后台+Render 后台的人核实，无法从这台开发机验证）
+- [ ] PM/FDE 在 Render 后台把 `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID`
+      （要回消息才需要，不影响收消息）两个变量配上——优先级低于上面三条，暂未下发今日待办
 - [ ] #1299 企业验证走完，再确认线上真的开始收到 WhatsApp 消息
       （命中一句话：企业验证走完后来查一下WhatsApp消息有没有开始进系统——建议这一步由 PM
       在 #1299 验证通过当天，去 Supabase 查一次 `conversations` 表 `channel='whatsapp'` 的

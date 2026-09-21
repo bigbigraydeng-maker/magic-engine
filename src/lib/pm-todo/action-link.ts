@@ -41,6 +41,11 @@ const LOGIN_REQUIRED_HOSTS = [
   // 对 Render 的出口 IP 返 403，整条「待确认付款」人工车道会被 dropBrokenLinks
   // 静默丢掉，只剩一行 console.warn。那正是铁律 3 下半禁止的断头。
   'mailchimp.com',
+  // 本仓库是私有仓库（2026-09-21 实测 `gh repo view --json visibility`）——未登录
+  // 直接 curl 任意 blob 深链一律 404（跟登录墙同一个信号，不是链接本身有问题）。
+  // 不加这条，`client-doc-manual-tasks.ts` 里指向本仓库文件的 GitHub 深链会被
+  // `dropBrokenLinks` 当成「打不开」静默丢掉——待办本身消失，人根本看不到。
+  'github.com',
 ]
 
 export function isLoginRequiredHost(href: string): boolean {
