@@ -110,6 +110,10 @@ async function uploadAndInsertAsset(
       middle_score: 0,
       cta_score: 0,
       vision_metadata: {
+        // 必须标 kind: 'video'——client-asset-pool.ts 的素材池过滤器靠这个键排除视频，
+        // 漏写会导致这条 MP4 被当成静态底图轮换进 sourceImagePool，喂给图生视频流程。
+        kind: 'video',
+        analyzed: false,
         asset_type: 'reel',
         service: item.serviceName,
         source_channel: 'creatomate-batch',
