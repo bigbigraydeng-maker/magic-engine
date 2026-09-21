@@ -1,10 +1,11 @@
 'use client'
 import { useEffect,useState,useCallback } from 'react'
+import ReportView, { type ReportAnalysis } from './ReportView'
 type Connection={ id:string;status:string;token_expiry:string }
 type Grant={ id:string;ad_account_id:string;connection_id:string }
 type LegacyConnection={ id:string;account_id?:string;expires_at?:string }
 type Account={ id:string;name?:string;currency?:string }
-type Analysis={ id:string;status:'running'|'completed'|'no_data'|'failed';ad_account_id:string;window_since:string;window_until:string;report_markdown:string|null;error_code:string|null;created_at:string;completed_at:string|null }
+type Analysis=ReportAnalysis
 type Pilot={ invited:boolean;new_actions_allowed:boolean;sponsored_analysis_enabled:boolean;reason:'ready'|'service_paused'|'invitation_required'|'invitation_inactive'|'invitation_expired' }
 type Status={ pilot:Pilot;connections:Connection[];grants:Grant[];keys:LegacyConnection[];analyses:Analysis[] }
 const initial: Status={ pilot:{ invited:false,new_actions_allowed:false,sponsored_analysis_enabled:false,reason:'invitation_required' },connections:[],grants:[],keys:[],analyses:[] }
@@ -104,13 +105,7 @@ export default function MetaAdsScreen(props: { clientId:string;outcome?:string }
         await post({ action:'generate_analysis',grant_id:g.id })
       },'正在读取最近 7 天广告数据并生成中文报告，请不要关闭页面…')}>生成近 7 天广告分析</button>)}
       {activeGrants.length===0 && <p className="rounded bg-slate-50 p-3 text-slate-700">请先完成上面的 Facebook 连接和广告账户选择。</p>}
-      {latestAnalyses.map(a=><article key={a.id} className="space-y-3 rounded border p-4">
-        <div><p className="font-medium">广告账户：{a.ad_account_id}</p><p className="text-sm text-slate-600">分析期间：{a.window_since} 至 {a.window_until}</p></div>
-        {a.status==='completed' && <div className="whitespace-pre-wrap leading-7">{a.report_markdown}</div>}
-        {a.status==='no_data' && <p role="status">这个期间没有可分析的广告数据，因此没有产生 AI 分析费用。</p>}
-        {a.status==='running' && <p role="status">报告正在生成，请稍后刷新页面。</p>}
-        {a.status==='failed' && <p role="alert" className="text-red-700">本次分析没有完成。请稍后重试；如持续失败，请联系 Magic Engine 支持。</p>}
-      </article>)}
+      {latestAnalyses.map(a=><ReportView key={a.id} analysis={a} />)}
       <button disabled={busy} className="underline" onClick={()=>void run(load)}>刷新报告状态</button>
     </section>
     <section className="space-y-3 border-t pt-6"><h2 className="text-xl font-semibold">退出测试与数据处理</h2>
