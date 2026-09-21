@@ -11,6 +11,7 @@ import {
   buildState,
   verifyState,
   buildAuthUrl,
+  exchangeMetaTokenFields,
   listGrantedScopes,
   META_PAGE_SCOPES,
   META_PUBLISH_SCOPE,
@@ -181,5 +182,39 @@ describe('listGrantedScopes — the provider-authoritative record of what was ac
     const calledUrl = String(spy.mock.calls[0]?.[0])
     expect(calledUrl).toContain('/me/permissions')
     expect(calledUrl).toContain(encodeURIComponent('secret-user-token'))
+  })
+})
+
+describe('exchangeMetaTokenFields — expires_in parsing', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('passes an explicit expires_in:0 through as 0, not null — Meta uses 0 to mean "does not expire" (2026-09-21 production: real long-lived exchange came back 0, which the old ">0" check collapsed into "unknown" and failed the whole connect)', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ access_token: 'tok', expires_in: 0 })),
+    )
+    expect(await exchangeMetaTokenFields({ code: 'c', redirect_uri: 'https://me.test/cb' })).toEqual({
+      token: 'tok',
+      seconds: 0,
+    })
+  })
+
+  it('still returns null when expires_in is genuinely missing', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify({ access_token: 'tok' })))
+    expect(await exchangeMetaTokenFields({ code: 'c', redirect_uri: 'https://me.test/cb' })).toEqual({
+      token: 'tok',
+      seconds: null,
+    })
+  })
+
+  it('returns a positive expires_in unchanged', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ access_token: 'tok', expires_in: 5184000 })),
+    )
+    expect(await exchangeMetaTokenFields({ code: 'c', redirect_uri: 'https://me.test/cb' })).toEqual({
+      token: 'tok',
+      seconds: 5184000,
+    })
   })
 })

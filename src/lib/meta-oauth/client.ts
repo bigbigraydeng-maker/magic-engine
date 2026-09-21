@@ -262,6 +262,9 @@ export async function exchangeMetaTokenFields(params: Record<string,string>, ver
     const body=await res.json() as { access_token?:unknown; expires_in?:unknown }
     if(typeof body.access_token!=='string') return null
     const seconds=Number(body.expires_in)
-    return { token:body.access_token,seconds:Number.isFinite(seconds) && seconds>0 ? seconds : null }
+    // Meta returns expires_in:0 to mean "this token does not expire" (documented for some
+    // long-lived exchanges) — that is a real signal, not a missing value, so 0 must pass through
+    // rather than collapse to null alongside genuinely absent/invalid values.
+    return { token:body.access_token,seconds:Number.isFinite(seconds) && seconds>=0 ? seconds : null }
   } catch { return null }
 }
