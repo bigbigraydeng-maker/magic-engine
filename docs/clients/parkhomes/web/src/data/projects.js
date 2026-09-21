@@ -311,6 +311,21 @@ export const projects = [
       { src: '/img/greenview/gv-render-1.webp', alt: 'Greenview — artist’s impression', wide: true },
       { src: '/img/greenview/gv-render-2.webp', alt: 'Greenview — artist’s impression' },
     ],
+    // PROGRESS LOG — newest first. One entry per batch of site photography the
+    // client sends; `date` is when the photos were received (never a guessed
+    // capture or stage date). Adding an update = adding an entry here.
+    progress: [
+      {
+        date: 'September 2026',
+        title: 'Earthworks under way',
+        body: 'Site photography received in September 2026 shows earthworks and retaining across the Reynolds Road site, with the established neighbourhood around it. The two artist’s impressions above show the homes this work is preparing for.',
+        images: [
+          { src: '/img/greenview/progress/gv-progress-context.webp', width: 2000, height: 1125, alt: 'Aerial view of the Greenview site within its surrounding neighbourhood', caption: 'Site photography — the site and surrounding streets' },
+          { src: '/img/greenview/progress/gv-progress-site.webp',    width: 2000, height: 1125, alt: 'Aerial view of the Greenview site with earthworks and machinery', caption: 'Site photography — earthworks across the site' },
+          { src: '/img/greenview/progress/gv-progress-earthworks.webp', width: 2000, height: 1125, alt: 'Close aerial view of excavation and retaining at Greenview', caption: 'Site photography — excavation and retaining' },
+        ],
+      },
+    ],
   },
 ];
 
