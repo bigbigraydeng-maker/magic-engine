@@ -257,7 +257,7 @@ $92/天（把视频系列省下的 $30 并入）。四个改动都用 Graph API 
 `src/app/api/webhooks/whatsapp/route.ts` 是一条完整的 WhatsApp Cloud API webhook（签名校验、
 建会话、写 CRM 触点、退订检测、事件广播全都有），`src/lib/whatsapp/send.ts` 管发送，跟
 Messenger 走的是同一套 `conversations`/`contact_touchpoints` 表、`channel='whatsapp'`。
-**真正卡住的是三件事**，跟"要不要写代码"无关：
+**真正卡住的是下面这几件事**，跟"要不要写代码"无关：
 
 1. **数据库那张表的新字段其实没加上**——`supabase/migrations/20260902000002_whatsapp_phone_number_id.sql`
    这个改动文件半个月前就合并进主分支了，但从来没有真的对生产数据库执行过（`clients` 表里
@@ -268,9 +268,13 @@ Messenger 走的是同一套 `conversations`/`contact_touchpoints` 表、`channe
    `whatsapp_business_management` 的权限。这个权限只能在 Meta Business 后台里手动加，不是代码
    能绕过的。**需要 PM/FDE 进 Meta Business 后台，给现在这个系统用户授权加上
    `whatsapp_business_management`**，加完之后就能自动查到号码编号，不用再人工找。
-3. **Meta 企业身份验证还没过**（[#1299](https://github.com/bigbigraydeng-maker/magic-engine/issues/1299)，
-   需要 PM 本人上传公司证件）——这个不卡继续把上面两步做完，但卡"这条 WhatsApp 线真正在
-   Meta 那边生效、开始收到消息"这一天。
+3. **卡的不是 NAL 自己的企业身份，是"魔法引擎"自己这个技术服务方的身份**（2026-09-21 PM
+   纠正：NAL 自己的企业身份验证是通过的）——[#1299](https://github.com/bigbigraydeng-maker/magic-engine/issues/1299)
+   说的是 Magic Engine 自己在 Meta 开发者后台注册的那个应用（`1752513682785923`）还没通过
+   Meta 对"技术服务提供方"这一层的身份核实，需要 PM 本人上传我们公司的证件。这一层过不了，
+   上面第2条要加的 `whatsapp_business_management` 权限就申请不下来——跟 NAL 自己有没有验证
+   过完全是两件事，NAL 验证过也没用，因为要验证的是我们。这一步不卡继续做前两步，但卡
+   "这条 WhatsApp 线真正在 Meta 那边生效、开始收到消息"这一天。
 4. **生产环境还缺两个必配变量，前三步全做完照样收不到消息**——查了 `docs/ENV.md` §10，
    `META_VERIFY_TOKEN`（订阅握手用）和 `META_APP_SECRET`（签名验证用）在 Render 上都标
    "⬜ 待配"。实测 `src/app/api/webhooks/whatsapp/route.ts:66-68` 缺 `META_VERIFY_TOKEN`
