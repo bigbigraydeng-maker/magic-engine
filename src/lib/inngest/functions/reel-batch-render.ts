@@ -63,6 +63,7 @@ interface RenderedItem {
   renderId: string
   outputUrl: string
   serviceName: string
+  cta: string
 }
 
 const PREVIEW_W = 270
@@ -106,6 +107,8 @@ async function uploadAndInsertAsset(
         source: 'creatomate-batch',
         batch_tag: item.tag,
         creatomate_render_id: item.renderId,
+        // CTA 不再烧进画面（Meta Reel 安全区限制），交发帖 caption 步骤使用
+        cta: item.cta,
       },
     })
     .select('id')
@@ -198,23 +201,23 @@ export function createReelBatchRender() {
 
       // ── 第五步：等全尺寸完成 ────────────────────────────────────
       const fullRenders = await step.run('poll-full-renders', async () => {
-        const results: Array<{ tag: string; renderId: string; outputUrl: string; serviceName: string }> = []
+        const results: Array<{ tag: string; renderId: string; outputUrl: string; serviceName: string; cta: string }> = []
         for (const { tag, renderId, serviceName } of fullIds) {
           const render = await pollUntilDone(renderId, { maxAttempts: 30, intervalMs: 20_000 })
           if (render.status !== 'succeeded' || !render.url) {
             throw new Error(`全尺寸渲染失败 ${tag}: ${render.status} ${render.errorMessage ?? ''}`)
           }
-          results.push({ tag, renderId, outputUrl: render.url, serviceName })
+          results.push({ tag, renderId, outputUrl: render.url, serviceName, cta: template.cta })
         }
         return results
       })
 
       // ── 第六步：下载 + 上传 Supabase + 写 client_assets ────────
       const assetRecords = await step.run('store-assets', async () => {
-        const results: Array<{ tag: string; assetId: string; storageUrl: string }> = []
+        const results: Array<{ tag: string; assetId: string; storageUrl: string; cta: string }> = []
         for (const item of fullRenders) {
           const { assetId, storageUrl } = await uploadAndInsertAsset(clientId, item as RenderedItem)
-          results.push({ tag: item.tag, assetId, storageUrl })
+          results.push({ tag: item.tag, assetId, storageUrl, cta: item.cta })
         }
         return results
       })
@@ -232,6 +235,8 @@ export function createReelBatchRender() {
             status: 'completed',
             asset_ids: assetRecords.map((r) => r.assetId),
             storage_urls: Object.fromEntries(assetRecords.map((r) => [r.tag, r.storageUrl])),
+            // CTA 未烧进画面，随回执带出，供发帖 caption 步骤读取
+            cta_by_tag: Object.fromEntries(assetRecords.map((r) => [r.tag, r.cta])),
             no_publish: true,
           },
         }),

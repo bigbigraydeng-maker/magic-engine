@@ -45,6 +45,8 @@ export interface TokenOwnerRow {
   created_at: string | null
   /** clients.source — 'fde' (staff-created) | 'self_serve' (public signup). */
   source: string | null
+  /** clients.name — only populated/used for the cron route's legacy per-name key. */
+  name?: string | null
 }
 
 /**
@@ -81,15 +83,31 @@ function isOlder(a: TokenOwnerRow, b: TokenOwnerRow): boolean {
   return a.id < b.id
 }
 
-/** Is `client` the owner of its domain key among `peers` (which may include itself)? */
-export function ownsDomainKey(client: TokenOwnerRow, peers: TokenOwnerRow[]): boolean {
-  const domain = present(client.domain)
-  if (!domain || client.source === 'self_serve') return false
-  const key = domainToEnvKey(domain)
+/**
+ * Generic ownership rule: earliest-created, non-self_serve row wins whatever key
+ * `keyOf` extracts. `ownsDomainKey` below is `keyOf = domain`; the cron route's
+ * legacy per-name Meta token reuses this for `keyOf = name` — `clients.name` is
+ * exactly as self-serve-writable and non-unique as `domain`, so it needs the
+ * same rule rather than a hand-rolled copy.
+ */
+export function ownsKey(
+  client: TokenOwnerRow,
+  peers: TokenOwnerRow[],
+  keyOf: (row: TokenOwnerRow) => string | null,
+): boolean {
+  const key = keyOf(client)
+  if (!key || client.source === 'self_serve') return false
   return !peers.some((p) => {
     if (p.id === client.id || p.source === 'self_serve') return false
-    const other = present(p.domain)
-    return other !== null && domainToEnvKey(other) === key && isOlder(p, client)
+    return keyOf(p) === key && isOlder(p, client)
+  })
+}
+
+/** Is `client` the owner of its domain key among `peers` (which may include itself)? */
+export function ownsDomainKey(client: TokenOwnerRow, peers: TokenOwnerRow[]): boolean {
+  return ownsKey(client, peers, (r) => {
+    const d = present(r.domain)
+    return d ? domainToEnvKey(d) : null
   })
 }
 
@@ -146,7 +164,7 @@ export async function loadTokenOwnerPeers(supabase: SupabaseClient): Promise<Tok
     return await fetchAll<TokenOwnerRow>((from, to) =>
       supabase
         .from('clients')
-        .select('id, domain, facebook_page_id, created_at, source')
+        .select('id, name, domain, facebook_page_id, created_at, source')
         .order('id', { ascending: true })
         .range(from, to),
     )
@@ -164,8 +182,9 @@ export async function resolveMetaToken(
   supabase: SupabaseClient,
   clientId: string,
   env: Record<string, string | undefined>,
+  preloadedPeers?: TokenOwnerRow[] | null,
 ): Promise<{ token: string; source: MetaTokenSource } | null> {
-  const res = await resolveMetaTokenDetailed(supabase, clientId, env)
+  const res = await resolveMetaTokenDetailed(supabase, clientId, env, preloadedPeers)
   return res === 'ownership_unknown' ? null : res
 }
 
@@ -173,11 +192,19 @@ export async function resolveMetaToken(
  * Same as resolveMetaToken, but says when there is no token because the key's
  * ownership could not be read — gates treat that as a failed check, not as
  * "this client has no token".
+ *
+ * `preloadedPeers`: pass an already-loaded `loadTokenOwnerPeers` result (or its
+ * `null` failure) to skip this call's own peer scan — a caller resolving many
+ * clients in one run (e.g. a cron) should load the ownership snapshot ONCE and
+ * reuse it, rather than have every scoped-token client repeat a full paginated
+ * `clients` scan (chatgpt-codex-connector review, 2026-09-21). Omit it (the
+ * default) to keep the old self-contained behavior.
  */
 export async function resolveMetaTokenDetailed(
   supabase: SupabaseClient,
   clientId: string,
   env: Record<string, string | undefined>,
+  preloadedPeers?: TokenOwnerRow[] | null,
 ): Promise<{ token: string; source: MetaTokenSource } | null | 'ownership_unknown'> {
   const { data, error } = await supabase
     .from('clients')
@@ -187,12 +214,19 @@ export async function resolveMetaTokenDetailed(
 
   const fallbackToken = env.META_SYSTEM_USER_TOKEN
   const fallback = fallbackToken ? { token: fallbackToken, source: 'shared_fallback' as const } : null
-  if (error || !data) return fallback
+  // A read ERROR is not the same as "this client doesn't exist" (`!data`, no
+  // error): the row might carry a domain/Page key this client owns, we just
+  // couldn't check. Falling back to the shared token here would swap that
+  // client onto a token that sees MORE clients than intended — the exact
+  // failure mode the peers-read-error branch below already fails closed on
+  // (chatgpt-codex-connector review, 2026-09-21).
+  if (error) return 'ownership_unknown'
+  if (!data) return fallback
 
   // The ownership read is skipped when no scoped env var exists for this client's keys anyway.
   const row = data as TokenOwnerRow
   if (hasScopedEnvToken(row, env)) {
-    const peers = await loadTokenOwnerPeers(supabase)
+    const peers = preloadedPeers !== undefined ? preloadedPeers : await loadTokenOwnerPeers(supabase)
     // Cannot tell who owns the key → no token at all. Falling back to the shared
     // token here would silently swap a client onto a token that sees MORE clients.
     if (peers === null) return 'ownership_unknown'
