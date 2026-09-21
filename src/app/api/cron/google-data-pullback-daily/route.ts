@@ -56,7 +56,7 @@ import { SEO_METRIC_KEY, GA4_METRIC_KEY, ADS_METRIC_KEY } from '@/lib/flywheel/v
 import { adsMetricKeysWrittenBy } from '@/lib/flywheel/metric-registry'
 import { MetaAdsAdapter } from '@/lib/flywheel/adapters/MetaAdsAdapter'
 import { startCronRun } from '@/lib/cron/run-logger'
-import { domainToEnvKey } from '@/lib/meta/token-manager'
+import { resolveMetaTokenDetailed, ownsKey, loadTokenOwnerPeers, type TokenOwnerRow } from '@/lib/meta/token-selection'
 import { findSharedAdAccounts, getClientAdAccountIds } from '@/lib/meta/client-ad-accounts'
 import { hasVideoColumns, syncAdDailyInsights, syncAdsetDailyInsights, syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
@@ -79,7 +79,6 @@ interface ConnectorRow {
 interface ClientWork {
   client_id:               string
   client_name?:            string
-  client_domain?:          string
   site_url?:               string
   property_id?:            string
   meta_ad_account_id?:     string
@@ -210,7 +209,6 @@ export async function GET(req: NextRequest) {
   for (const c of metaClients) {
     const entry = workMap.get(c.id) ?? { client_id: c.id }
     entry.client_name = c.name
-    entry.client_domain = c.domain ?? undefined
     entry.meta_ad_account_id = c.meta_ad_account_id
     workMap.set(c.id, entry)
   }
@@ -248,6 +246,18 @@ export async function GET(req: NextRequest) {
   // ── 3. Process each client ─────────────────────────────────────────────────
   const results: ClientResult[] = []
 
+  // Loaded at most once per run (memoized) — the ownership snapshot every
+  // scoped-token client's domain/Page check AND every legacy-name check both
+  // need. resolveMetaTokenDetailed used to reload this with its own full
+  // `clients` scan for EACH client carrying a scoped env var; sharing one
+  // snapshot for the whole run avoids that per-client cost (chatgpt-codex-
+  // connector review, 2026-09-21).
+  let tokenOwnerPeers: TokenOwnerRow[] | null | undefined
+  async function getTokenOwnerPeers(): Promise<TokenOwnerRow[] | null> {
+    if (tokenOwnerPeers === undefined) tokenOwnerPeers = await loadTokenOwnerPeers(supabaseAdmin)
+    return tokenOwnerPeers
+  }
+
   for (const client of work) {
     const result: ClientResult = { client_id: client.client_id }
 
@@ -260,20 +270,87 @@ export async function GET(req: NextRequest) {
     }
 
     if (client.meta_ad_account_id) {
-      // Token resolution, three schemes in priority order:
-      //   1. META_SYSTEM_USER_TOKEN_<DOMAIN> via getMetaTokenForClient — the
-      //      scheme winner-sync runs on in production (proven working for CTS)
-      //   2. legacy {NAME_SLUG}_META_SYSTEM_USER_TOKEN (kept for back-compat)
-      //   3. global META_SYSTEM_USER_TOKEN (getMetaTokenForClient's own fallback)
-      // The old slug-first order made CTS pull fail on 2026-07-24: the global
-      // token has no access to act_2775766642787274, while the domain-scheme
-      // token does — but was never consulted here.
+      // Token resolution (AD-SEC-4 follow-up, 2026-09-21), four schemes in
+      // priority order — unchanged from before this fix, only the ownership
+      // checks are new:
+      //   1. Ownership-checked domain-scoped token (resolveMetaTokenDetailed,
+      //      source === 'client_domain') — same lookup every other Meta call in
+      //      the app uses (token-selection.ts), called with this route's own
+      //      supabaseAdmin rather than token-manager's separate client. Fixes the
+      //      bug this route had (domain token never consulted, 2026-07-24 CTS
+      //      pull failure) AND the hole it was written with: `client.domain` was
+      //      read straight into the env-var name with no check on who owns that
+      //      key, so a self-serve signup copying a real client's domain could
+      //      pull that client's token.
+      //   2. legacy {NAME_SLUG}_META_SYSTEM_USER_TOKEN, kept for back-compat (no
+      //      reliance found in docs/ENV.md or elsewhere in the repo, but Render
+      //      env vars aren't fully inventoried) — same problem as #1 applies to
+      //      `clients.name` (self-serve-writable, not unique), so it only fires
+      //      for this name's earliest non-self-serve owner. Checked BEFORE the
+      //      Page-scoped token (step 3): this route's original order — before
+      //      resolveMetaTokenDetailed's Page-scoped lookup existed here at all —
+      //      was domain → legacy → global, and a client relying on the legacy
+      //      token must not lose it just because a Page token happens to be
+      //      configured too (a Page token's identity isn't guaranteed to have
+      //      ads_management on this client's ad account — Codex review, 2026-09-21).
+      //   3. Ownership-checked Page-scoped token (source === 'client_page') —
+      //      only consulted once #1 and #2 both miss.
+      //   4. resolveMetaTokenDetailed's own shared global fallback. Checked LAST:
+      //      a client whose ad account only the per-name token can see (the exact
+      //      2026-07-24 failure mode — the global token lacks access to that
+      //      specific account) must not lose it just because a global fallback
+      //      happens to be configured too. Steps 1 and 3 already exclude this
+      //      source, so `resolved` is reused here rather than re-fetched.
+      //
+      // ownership_unknown (a transient failure reading who owns a scoped key,
+      // NOT "nobody configured a token") deliberately withholds even the shared
+      // fallback — see resolveMetaTokenDetailed's own doc comment — so it must
+      // still surface as a failure below rather than silently skip the client
+      // (chatgpt-codex-connector review on this PR, 2026-09-21).
       const slug = (client.client_name ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '_')
-      const domainKey = client.client_domain ? domainToEnvKey(client.client_domain) : null
-      const metaToken =
-        (domainKey ? process.env[`META_SYSTEM_USER_TOKEN_${domainKey}`] : undefined)
-        || (slug ? process.env[`${slug}_META_SYSTEM_USER_TOKEN`] : undefined)
-        || process.env.META_SYSTEM_USER_TOKEN
+      const peers = await getTokenOwnerPeers()
+      const resolved = await resolveMetaTokenDetailed(supabaseAdmin, client.client_id, process.env, peers)
+      let metaToken = resolved !== 'ownership_unknown' && resolved && resolved.source === 'client_domain' ? resolved.token : undefined
+      const legacyToken = slug ? process.env[`${slug}_META_SYSTEM_USER_TOKEN`] : undefined
+      let legacyOwnershipDenied = false
+      // Distinct from "denied": the ownership snapshot itself failed to load, so
+      // we cannot tell whether this client owns the legacy key or not. Falling
+      // through to Page/global below would silently swap it onto a token
+      // "known" not to work for it whenever this happens to be the client that
+      // relies on the legacy token (chatgpt-codex-connector review, 2026-09-21)
+      // — treat it exactly like resolveMetaTokenDetailed's own 'ownership_unknown'.
+      let legacyOwnershipUnknown = false
+      // resolved === 'ownership_unknown' means THIS CLIENT'S OWN ROW couldn't be
+      // read — a completely different query from the peers snapshot the legacy
+      // check below verifies against, so it can't actually invalidate that
+      // verification. Still refused: once we know we don't have the full,
+      // trustworthy picture of this client, using ANY alternative credential for
+      // it this run is exactly the guess this whole fail-closed design exists to
+      // refuse, not just the domain/Page one (chatgpt-codex-connector review,
+      // 2026-09-21).
+      if (!metaToken && legacyToken && resolved !== 'ownership_unknown') {
+        if (peers === null) {
+          legacyOwnershipUnknown = true
+        } else {
+          const self = peers.find((p) => p.id === client.client_id)
+          // `self.name` comes from the same shared peer snapshot as `peers` — but
+          // the SNAPSHOT can still have loaded after the `metaResult` row `slug`
+          // was built from (both read at the top of a run that can take minutes).
+          // Overriding `.name` with `client.client_name` here guarantees ownsKey
+          // verifies ownership of the SAME key `legacyToken` was just looked up
+          // with, not whatever name this client happens to carry in the snapshot
+          // (魏征 review, 2026-09-21: an ordinary rename mid-run could otherwise
+          // make this check pass for a key the client was never actually granted).
+          if (self && ownsKey({ ...self, name: client.client_name }, peers, (r) => (r.name ? r.name.toUpperCase().replace(/[^A-Z0-9]/g, '_') : null))) {
+            metaToken = legacyToken
+          } else {
+            legacyOwnershipDenied = true
+          }
+        }
+      }
+      const ownershipUnknown = resolved === 'ownership_unknown' || legacyOwnershipUnknown
+      if (!metaToken && !ownershipUnknown && resolved && resolved.source === 'client_page') metaToken = resolved.token
+      if (!metaToken && !ownershipUnknown) metaToken = resolved?.token
       if (metaToken) {
         result.meta = await syncMeta(client.client_id, client.meta_ad_account_id, metaToken, slug)
 
@@ -402,6 +479,25 @@ export async function GET(req: NextRequest) {
               result.ad_digest = { sent: digest.sent, decision: `fallback:${digest.decision}`, error: digest.error }
             }
           }
+        }
+      } else {
+        // Client has a Meta ad account but no usable token — surface it as a
+        // failure (counted in `failed`, visible in `errors`) rather than
+        // silently skipping the snapshot/ad_daily/health/digest chain for the
+        // day. Distinguish the four ways this happens so an FDE reading
+        // cron_run_logs doesn't have to guess: a genuine Render config gap
+        // reads differently from "someone else owns this env key" or from a
+        // transient DB read failure that will very likely clear on its own.
+        result.meta = {
+          success: false,
+          error:
+            resolved === 'ownership_unknown'
+              ? 'meta token ownership check failed (transient client-row read error) — token withheld rather than risk using an unverified one'
+              : legacyOwnershipUnknown
+                ? 'legacy per-name Meta token ownership check failed (transient peer-scan error) — token withheld rather than risk using an unverified one'
+                : legacyOwnershipDenied
+                  ? 'legacy per-name Meta token is configured but this client does not own that name key'
+                  : 'no Meta token configured for this client (no owned domain/Page token, no legacy per-name token, no shared fallback)',
         }
       }
     }
