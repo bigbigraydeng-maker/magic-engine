@@ -6,7 +6,7 @@ vi.mock('@/lib/platform-oauth/vocabulary',()=>({ decryptToken:vi.fn(()=> 'privat
 vi.mock('../entitlement',()=>({ requirePilotActive:mocks.requirePilotActive,requirePilotRevision:mocks.requirePilotRevision }))
 import { readGrant,activeConnection,activeConnectionForPrincipal,requireMetaScope,requireReleaseAuthorization,requireDiscoveryAuthorization } from '../store'
 import { auditedControl } from '../audit'
-import { conservativeTokenSeconds,consumeAdsState,startAdsConsent } from '@/lib/meta-oauth/ads-read'
+import { NON_EXPIRING_TOKEN_SECONDS,conservativeTokenSeconds,consumeAdsState,startAdsConsent } from '@/lib/meta-oauth/ads-read'
 const p={ kind:'client' as const,keyId:'key',clientId:'tenant',scopes:['meta:ads:read'] }
 const grant={ id:'grant',client_id:'tenant',ad_account_id:'act_1234567890',revision:'r1',entitlement_revision:'ent-1' }
 function chain(data:unknown,error:unknown=null){ const result={ data,error };const c:Record<string,unknown>={ then:(resolve:(v:unknown)=>unknown)=>Promise.resolve(result).then(resolve) };for(const method of ['select','insert','delete','eq','is','gt','lt','contains','maybeSingle']) c[method]=vi.fn(()=>c);return c }
@@ -77,6 +77,12 @@ describe('OAuth state principal and browser binding',()=>{
     expect(conservativeTokenSeconds(3600,5184000)).toBe(5184000)
     expect(conservativeTokenSeconds(3600,null)).toBe(3600)
     expect(()=>conservativeTokenSeconds(null,null)).toThrow('oauth_expiry_unknown')
+  })
+  it('treats an explicit long-lived expires_in:0 as non-expiring rather than unknown',()=>{
+    expect(conservativeTokenSeconds(3600,0)).toBe(NON_EXPIRING_TOKEN_SECONDS)
+  })
+  it('does not extend the non-expiring treatment to a short-lived-only 0 — that is not a known Meta convention',()=>{
+    expect(()=>conservativeTokenSeconds(0,null)).toThrow('oauth_expiry_unknown')
   })
   it('atomically consumes with all identity constraints and TTL',async()=>{
     const q=chain({ client_id:'tenant',entitlement_revision:'ent-1' });mocks.from.mockReturnValue(q)
