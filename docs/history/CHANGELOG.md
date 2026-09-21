@@ -5,6 +5,21 @@
 
 ---
 
+### 2026-09-21（CTS AI 可见度：地域锚点补配生效，9-20 回填按新规则复算完毕）
+
+2026-09-20 合并的「地域锚点」判定闸门（PR #1857）上线后 CTS 一直没配上锚点词，闸门形同虚设。
+本次给 CTS 配上 `new zealand / nz / aotearoa / auckland` 四个地域词，并用新规则复算 9-20 回填的
+137 条 + 当时排除的 7 条：137 条零变化，7 条里 6 条本来就没错、1 条（`21dc3d0c`）历史误记的「排第 6」
+改成正确的「未提及」。PM 在窗口内本人回「开始」后执行，写前存了旧值底稿，可撤回。
+
+- 审计与执行记录：[2026-09-21-cts-ai-visibility-geo-anchor-recompute.md](../audits/2026-09-21-cts-ai-visibility-geo-anchor-recompute.md)
+
+**Reuse Statement**：复用 `src/lib/ai-tracker/client-brand-match.ts` 已合并的判定函数与
+`PATCH /api/clients/[id]/brand-geo-anchors` 同一套归一化校验，未新增代码；本次只是配置写入
+（CTS 一个客户）+ 1 行历史数据修正，client-specific 内容全部落在 `clients` 表 CTS 那一行。
+
+---
+
 ### 2026-09-20（SEO 标题周循环 v1 上线，首跑改错 2 页已撤回、已补信息完整闸门）
 
 CTS 每周自动改网站标题/描述的功能重做成 6 步版本，跑在 Inngest 上；首跑改错 2 页，约 5 分钟内撤回，CTS 开关已关，等 PM 看过演练再开。
