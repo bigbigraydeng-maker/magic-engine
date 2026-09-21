@@ -21,6 +21,17 @@
 
 ---
 
+## CTS 网站新团「Natural China」草稿页 · 待 PM/客户确认后合并（2026-09-21）
+
+- [ ] chinatravel 仓库草稿 PR [#204](https://github.com/bigbigraydeng-maker/chinatravel/pull/204)（分支 `feat/natural-china-tour-page`，`isActive: false`，未上线）：客户微信提供的"Natural China"团行程已转成 `src/lib/data/tours.ts` 的 `natural-china` 团页条目，格式跟着 `golden-china` 走
+- [ ] **需 PM 核实天数出入**：客户文档标题写"15-Day"，正文行程只编号到 Day 14——已按 Day 14 原样建页，未替客户补第 15 天
+- [ ] **缺价格、缺确切发团日期** —— 两项客户文档都没给，页面上先写"待确认"，PM/客户补齐后才能把 `isActive` 改成 true 并合并上线
+- [ ] 长江三峡邮轮本身、重庆（李子坝/洪崖洞/磁器口）目前配不到跟地名对得上的真实图，先没放，避免拿不相关的"中国风"图充数
+
+Reuse Statement：复用了 `chinatravel` 仓库既有的团页数据结构（`Tour` 接口）、路由（`/tours/china/discovery/<slug>`）与已核实过的图片池（豫园夜景/熊猫/天门山玻璃栈道），没有新建组件或新表；这条团本身是客户特供内容（client-specific），不涉及平台共享层改动。
+
+---
+
 ## SEO 标题周循环 v1 · 上线后跟进（2026-09-20 上线，CTS 开关已关；清单来源 Issue [#1807](https://github.com/bigbigraydeng-maker/magic-engine/issues/1807) 评论）
 
 - [ ] **重新打开 CTS 的开关**：先用 `POST /api/cron/seo-meta-cycle-trigger` 带 `{"dry_run": true, "client_id": "<CTS>"}` 跑一次演练，把「这一轮会改哪些页、改成什么字、依据的搜索量/难度/前 3 标题」给 PM 看；PM 批准后才把 `clients.seo_config.meta_cycle_enabled` 改回 true（见 PITFALLS D10）
