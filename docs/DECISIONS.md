@@ -7,6 +7,36 @@
 
 ---
 
+## 2026-09-21 · Campaign 作为所有增长类营销活动的唯一组织单元
+
+**决策**：ME 所有面向增长的营销执行，统一以 **Campaign** 为组织单元，不再允许"散单内容"并行运转。原 `content_posts` 直写路线、`social_plans` 独立写入路线，全部归并到 Campaign 之下。
+
+**PM 拍板（2026-09-21）**：
+
+1. **Campaign 是增长执行的入口**：Campaign 对应一个有明确目的的销售/推广周期（例如：Signature Escape 十月推广、圣诞团预售、品牌暖场），而不是"今天发一条"这种松散模式。Campaign 下可包含：社媒内容（FB/IG Post、Reel、Story）、广告计划、Newsletter。
+
+2. **Campaign 创建走对话，不走表单**：用户（客户或 FDE）用自然语言多轮对话完成 Campaign 设置——说清楚"推什么、给谁看、在哪段时间、目标是什么"，系统自动建 Campaign、拉 Master Brief、生成内容框架。传统表单 / 多级菜单 UI 退为应急兜底，不是主路径。
+
+3. **内容工厂保留，但定位收窄为"下载用内容"**：小红书推文、用于人工转发的素材、非发布用的生成内容继续走内容工厂；不与 Campaign 发布管道混用。
+
+4. **`content_posts` 降级为 Campaign 写入的存储层**：用户不直接接触 `content_posts` 这个概念；Campaign Bundle 批准后写入 `content_posts` 再流向发布，是内部实现细节。
+
+**为什么**：
+
+- ME 的核心命题是增长智能（Digital Marketing Growth Intelligence）。增长不是"每天发内容"，而是"围绕一个目标，设计一段时间窗口里的动作序列"——这就是 Campaign 的语义。散单内容无法追踪 Outcome，Campaign 有完整的 Check/Tune 闭环。
+- 当前后台存在 `content_posts`（直写）、`social_plans`（Campaign Daily Plan）、视频工厂等多套并行路径，FDE 和客户不知道从哪里进、从哪里发，发出去的内容也无法归因到某个增长目标。
+- 对话式创建是 ME 区别于传统营销 SaaS 的核心差异点：客户不需要学软件，只需要说清楚"我想做什么"。
+
+**影响**：
+
+- 新客户（含 NM Medspa）的社媒内容，后续统一先建 Campaign，再从 Campaign 出内容，不再直写 `content_posts`。
+- 现有无 Campaign 归属的 `content_posts` 记录（历史散单内容），在 UI 上标"散单 / 待归入"，不迁移但也不继续新增。
+- Campaign 创建界面：v1 实现多轮对话补全（`campaign_id`、时间窗、目标受众、核心诉求、关联 Master Brief），表单填写降为备用。
+- Newsletter 纳入 Campaign 作为一路输出，与社媒内容共享 Campaign 目的和受众定义，单独管理发送时间和内容格式。
+- 发布管道：Campaign Bundle 批准 → 写 `content_posts`（`status=approved`）→ 发布 → 回写 `content_posts.publer_post_id` / `published_at`。
+
+---
+
 ## 2026-09-13 · 客户知识库作为 Governed Lead-Reply Agent 的事实层，替代 offerings.yaml 路线
 
 **决策**：AI 对终端客人说出口的业务事实（价格、时效、承诺、退改政策、在售/停售产品等），统一存放在**逐条治理的客户知识表**里，而不是按客户放 `config/clients/<client>/offerings.yaml` 文件。该知识表是已登记 L1 候选「Governed Lead-Reply Agent」（`docs/registry/platform-candidates.md`）的**事实层子能力**，不另立 L1。原方案"3 个客户后再抽 `client_offerings` 表"作废。
