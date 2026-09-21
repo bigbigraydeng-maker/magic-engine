@@ -21,7 +21,6 @@ import { startCronRunId, cronRunHandle } from '@/lib/cron/run-logger'
 import {
   submitInlineRender,
   buildReelSource,
-  pollUntilDone,
   type ReelSpec,
   type ReelTemplate,
 } from '@/lib/creatomate/inline-render'
@@ -159,18 +158,28 @@ export function createReelBatchRender() {
         return results
       })
 
-      // ── 第二步：等所有小样完成 ────────────────────────────────────
-      const previews = await step.run('poll-previews', async () => {
-        const results: Array<{ tag: string; renderId: string; url: string }> = []
-        for (const { tag, renderId } of previewIds) {
-          const render = await pollUntilDone(renderId, { maxAttempts: 20, intervalMs: 15_000 })
-          if (render.status !== 'succeeded' || !render.url) {
+      // ── 第二步：等所有小样完成（step.run + step.sleep，避免 HTTP 超时）────
+      // 与全尺寸渲染轮询保持一致：每次只在 step.run 内做一次 getRender，
+      // 中间停顿用 step.sleep 而非 setTimeout，否则单个 step.run 会撑爆 Render 的 HTTP 超时。
+      type PreviewResult = { tag: string; renderId: string; url: string }
+      const previews: PreviewResult[] = []
+
+      for (const { tag, renderId } of previewIds) {
+        let previewUrl: string | null = null
+        for (let attempt = 0; attempt < 20 && previewUrl === null; attempt++) {
+          const render = await step.run(`check-preview-${tag}-${attempt}`, () => getRender(renderId))
+          if (render.status === 'succeeded' && render.url) {
+            previewUrl = render.url
+          } else if (render.status === 'failed' || render.status === 'cancelled') {
             throw new Error(`小样渲染失败 ${tag}: ${render.status} ${render.errorMessage ?? ''}`)
+          } else if (attempt < 19) {
+            await step.sleep(`sleep-preview-${tag}-${attempt}`, '15s')
+          } else {
+            throw new Error(`小样渲染超时 ${tag}（已等5分钟）`)
           }
-          results.push({ tag, renderId, url: render.url })
         }
-        return results
-      })
+        if (previewUrl) previews.push({ tag, renderId, url: previewUrl })
+      }
 
       // 记录小样 URL——Claude Code 会把这些发给 PM 看
       await step.run('log-preview-urls', () =>
