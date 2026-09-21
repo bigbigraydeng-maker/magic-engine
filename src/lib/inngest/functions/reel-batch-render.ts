@@ -35,10 +35,18 @@ const ReelSpecSchema = z.object({
   durationS: z.number().positive(),
 })
 
+const ReelEndingScreenSchema = z.object({
+  address: z.string().min(1),
+  hours: z.string().min(1),
+  phone: z.string().min(1),
+  logoUrl: z.string().url().optional(),
+})
+
 const ReelTemplateSchema = z.object({
   brandName: z.string().min(1),
   tagline: z.string().min(1),
   cta: z.string().min(1),
+  endingScreen: ReelEndingScreenSchema.optional(),
 })
 
 export const ReelBatchStartedSchema = z.object({
