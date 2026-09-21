@@ -76,9 +76,23 @@ export function buildReelSource(
   const CTA_START = HOOK_S + MIDDLE_S    // 9
 
   // 安全区：1080×1920 Reel 关键内容必须在 y=14%~65%（y=270~1248px）
-  // Three scenes from the same source using trim_start offsets for hook/middle/CTA structure
+  // Animation time values are RELATIVE to each element's own start (not absolute timeline).
+  // e.g. CTA video starts at time:9 — its fade-out uses time:1.5 (= 1.5s after element start),
+  //      NOT time:10.5 (absolute), which would never fire within the 3s clip duration.
   const mainElements: Record<string, unknown>[] = [
-    // Scene 1 — Hook (0–4 s): service name large; fade out at end
+    // Black base layer — full duration, so fade-outs reveal black not white
+    {
+      type: 'shape',
+      shape: 'rectangle',
+      track: 0,
+      time: 0,
+      duration: totalDuration,
+      x: '50%', y: '50%',
+      x_anchor: '50%', y_anchor: '50%',
+      width: '100%', height: '100%',
+      fill_color: '#000000',
+    },
+    // Scene 1 — Hook (0–4 s): fade out last 0.4s (relative: 3.6)
     {
       type: 'video',
       track: 1,
@@ -93,7 +107,7 @@ export function buildReelSource(
         { time: HOOK_S - FADE_S, duration: FADE_S, type: 'fade', fade: false, easing: 'quadratic-in' },
       ],
     },
-    // Scene 2 — Middle (4–9 s): fade in + fade out
+    // Scene 2 — Middle (4–9 s): fade in first 0.4s (relative: 0), fade out last 0.4s (relative: 4.6)
     {
       type: 'video',
       track: 2,
@@ -105,11 +119,11 @@ export function buildReelSource(
       fit: 'cover',
       brightness: 0.2,
       animations: [
-        { time: MIDDLE_START, duration: FADE_S, type: 'fade', easing: 'quadratic-out' },
-        { time: MIDDLE_START + MIDDLE_S - FADE_S, duration: FADE_S, type: 'fade', fade: false, easing: 'quadratic-in' },
+        { time: 0, duration: FADE_S, type: 'fade', easing: 'quadratic-out' },
+        { time: MIDDLE_S - FADE_S, duration: FADE_S, type: 'fade', fade: false, easing: 'quadratic-in' },
       ],
     },
-    // Scene 3 — CTA (9–12 s): fade in; audio+visual fade out to ending screen
+    // Scene 3 — CTA (9–12 s): fade in (relative: 0), audio+visual fade out last 1.5s (relative: 1.5)
     {
       type: 'video',
       track: 3,
@@ -122,8 +136,8 @@ export function buildReelSource(
       brightness: 0.3,
       audio_fade_out: 1.5,
       animations: [
-        { time: CTA_START, duration: FADE_S, type: 'fade', easing: 'quadratic-out' },
-        { time: CTA_START + CTA_CLIP_S - 1.5, duration: 1.5, type: 'fade', fade: false, easing: 'quadratic-in' },
+        { time: 0, duration: FADE_S, type: 'fade', easing: 'quadratic-out' },
+        { time: CTA_CLIP_S - 1.5, duration: 1.5, type: 'fade', fade: false, easing: 'quadratic-in' },
       ],
     },
     // Brand name — persistent across all scenes
@@ -142,7 +156,7 @@ export function buildReelSource(
       shadow_color: 'rgba(0,0,0,0.5)',
       shadow_blur: 6,
     },
-    // Hook text (0–4 s): service name large; slide up entrance
+    // Hook text (0–4 s): slide up from element start (relative: 0)
     {
       type: 'text',
       track: 5,
@@ -162,7 +176,7 @@ export function buildReelSource(
         { time: 0, duration: 0.5, type: 'slide', direction: 'up', easing: 'cubic-out' },
       ],
     },
-    // Middle text (4–9 s): tagline; fade in entrance
+    // Middle text (4–9 s): fade in from element start (relative: 0)
     {
       type: 'text',
       track: 6,
@@ -179,10 +193,10 @@ export function buildReelSource(
       shadow_color: 'rgba(0,0,0,0.6)',
       shadow_blur: 6,
       animations: [
-        { time: MIDDLE_START, duration: 0.5, type: 'fade', easing: 'quadratic-out' },
+        { time: 0, duration: 0.5, type: 'fade', easing: 'quadratic-out' },
       ],
     },
-    // CTA text (9–12 s): call to action centred; slide up entrance
+    // CTA text (9–12 s): slide up from element start (relative: 0)
     {
       type: 'text',
       track: 7,
@@ -200,7 +214,7 @@ export function buildReelSource(
       shadow_color: 'rgba(0,0,0,0.7)',
       shadow_blur: 8,
       animations: [
-        { time: CTA_START, duration: 0.5, type: 'slide', direction: 'up', easing: 'cubic-out' },
+        { time: 0, duration: 0.5, type: 'slide', direction: 'up', easing: 'cubic-out' },
       ],
     },
   ]
@@ -226,6 +240,7 @@ export function buildReelSource(
 
   // Ending screen: dark background + brand name + contact info
   // All elements confined to y=14%~65% safe zone, starting at clipDuration
+  // animations use relative time (0 = element start = clipDuration on the timeline)
   const endingElements: Record<string, unknown>[] = [
     {
       type: 'shape',
@@ -237,6 +252,9 @@ export function buildReelSource(
       x_anchor: '50%', y_anchor: '50%',
       width: '100%', height: '100%',
       fill_color: '#1A1614',
+      animations: [
+        { time: 0, duration: 0.8, type: 'fade', easing: 'quadratic-out' },
+      ],
     },
     ...(ending.logoUrl
       ? [{
