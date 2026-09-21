@@ -29,6 +29,7 @@ try {
  await db.query(await readFile('supabase/migrations/20260627000001_p34_mcp_api_keys.sql','utf8'))
  await db.query(await readFile('supabase/migrations/20260913120000_client_binding_audit.sql','utf8'))
  await db.query(await readFile('supabase/migrations/20260920064556_meta_ads_ai_read_grants.sql','utf8'))
+ await db.query(await readFile('supabase/migrations/20260920235723_meta_ads_ai_schema_forward_fix.sql','utf8'))
  await db.query('INSERT INTO clients(id) VALUES($1),($2)',[a,b])
  await db.query(`INSERT INTO meta_ads_ai_pilot_entitlements(client_id,status,approved_by_email) VALUES($1,'active','approver@example.test'),($2,'active','approver@example.test')`,[a,b]);checks++
  const pauseRevision=(await db.query('SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$1',[a])).rows[0].revision
@@ -46,6 +47,14 @@ try {
  assert.equal((await db.query('SELECT meta_ads_discovery_current($1,$2,$3,$4) AS allowed',[a,ca,a,discoveryVersion])).rows[0].allowed,true);checks++
  assert.equal((await db.query('SELECT meta_ads_discovery_current($1,$2,$3,$4) AS allowed',[a,ca,b,discoveryVersion])).rows[0].allowed,false);checks++
  await denied(db,grantSql,[a,cb,'act_1234567890'])
+ const quarantined='20000000-0000-0000-0000-000000000004'
+ await db.query(`INSERT INTO platform_oauth_connections(id,client_id,provider,access_token_enc,refresh_token_enc,token_expiry,account_id,display_name,scopes,status,purpose)
+  VALUES($1,$2,'meta','legacy-cipher','',now()+interval '1 day','ads_user:4','legacy',ARRAY['ads_read'],'revoked','meta_ads_read')`,[quarantined,a])
+ await denied(db,`UPDATE platform_oauth_connections SET status='active',authorizing_principal_id=$2,
+  entitlement_revision=(SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$2) WHERE id=$1`,[quarantined,a])
+ await db.query(`UPDATE platform_oauth_connections SET status='active',access_token_enc='fresh-cipher',authorizing_principal_id=$2,
+  entitlement_revision=(SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$2) WHERE id=$1`,[quarantined,a]);checks++
+ await denied(db,`UPDATE platform_oauth_connections SET access_token_enc='attacker-cipher',authorizing_principal_id=$2 WHERE id=$1`,[quarantined,b])
  const grant=(await db.query(grantSql,[a,ca,'act_1234567890'])).rows[0];checks++
  const oldKey=(await db.query(`INSERT INTO client_api_keys(client_id,key_hash,key_prefix,name,scopes,expires_at,metadata)
   VALUES($1::uuid,'old-hash','me_live_old','Meta Ads read-only',ARRAY['meta:ads:read'],now()+interval '1 day',
