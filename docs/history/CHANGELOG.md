@@ -5,6 +5,38 @@
 
 ---
 
+### 2026-09-22（广告支柱 IMPACT 闭环升级阶段 0/1：PM go 与 migration 核实为已完成，补记录并从 ROADMAP 移除过期条目）
+
+ROADMAP 里一直挂着「待 PM go：按依赖顺序合并（#1659 → #1662 → #1664 → #1665），并单独授权 apply migration」这条未完成事项。核实后确认这条已经完成——4 个 PR 早已合并，两张表（`ad_entity_snapshots`/`ad_strategy_configs`）已建好并在生产库里跑着真实数据（`ad_entity_snapshots` 2052 行，最新快照 9/21；快照 cron `ad-entity-snapshot`（[render.yaml](../../render.yaml)）按 `30 */6 * * *` 每 6 小时运行一次，非此前误记的 3 小时）。之前一直没人去数据库和 `render.yaml` 里核实，只看代码注释和这份清单，就以为还卡着——教训见会话记忆 `reference-cts-domain-token-dead-20260921` 的更正记录。已从 ROADMAP 对应清单删除这条，标题同步改为「PM go 已完成，验证与收尾进行中」。
+
+---
+
+### 2026-09-22（CTS 圣诞团 ThruPlay 上线 + Meta 授权修复 + Reborn 留资表单 v4 A/B 测试 + 新增 D9 自动检测：纯播放广告漏排除 Audience Network）
+
+PM 拍板打开的圣诞团专属 ThruPlay 广告（官方账户 `act_2202695063810470`）三层从 PAUSED 改 ACTIVE，
+核实后确认 CTS 两个 Meta 广告账户当前合计每天花费 $130 纽币（$150 上限内）。核实过程中发现 CTS 域名专属
+Meta 令牌已失效（Facebook 判定会话失效），PM 重新走授权流程生成新口令，已换成长期有效版并验证两个账户
+均可读。Reborn 留资广告组新增一版留资表单（v4，多问"出行时间"+"每人预算"两题）+ 一条新广告 A/B 测试，
+共用现有预算，不加新花费。
+
+核查 ThruPlay 完播率时发现命中 `docs/PITFALLS.md` D9 那个已知坑——新广告因建时未排除 Audience Network
+版位，次日 95%+ 花费落入假用户；追查到同一模式在更早的 ThruPlay 系列广告上已持续存在（$454 纽币基本
+打水漂）。已修复圣诞团 ThruPlay 的投放位置（只投 Facebook/Instagram），并把这条检测规则写成新的只读
+诊断 D9（PR [#1874](https://github.com/bigbigraydeng-maker/magic-engine/pull/1874) 已合并），接进已在跑
+的每日内部诊断日报；CTS 日检手册（PR [#1873](https://github.com/bigbigraydeng-maker/magic-engine/pull/1873)
+已合并）同步补了一条不依赖数据库快照表的临时排查步骤。
+
+D9 已知限制：目前打不到共用账户（CTS 跟 Oztop/30 Kiteroa 共用的个人账户 `act_2775766642787274`
+整层跳过广告组设置抓取），已记入 ROADMAP。
+
+- 审计/操作留痕：`~/Documents/ME-backfill-backups/cts-thruplay-activate-20260921/`
+
+**Reuse Statement**：D9 复用既有诊断框架（`context.ts`/`types.ts`/`run.ts` 的编排模式，跟 D1/D7/D8
+同一套 `Diagnosis` 契约），新增的只有这一条规则文件 + `targeting_summary` 补一个字段（平台共享，无客户
+语义）；ThruPlay 开关、令牌刷新、表单 A/B 测试全部是 CTS 一个客户的配置/内容操作，未写入共享代码。
+
+---
+
 ### 2026-09-21（Meta 广告数据每日同步：补上两个"能蹭到别人授权令牌"的漏洞入口，AD-SEC-4 续）
 
 PR [#1864](https://github.com/bigbigraydeng-maker/magic-engine/pull/1864) 已合并。之前修过一次的漏洞（AD-SEC-4，见 9 月更早的记录）：客户如果自助注册时把公司名或网址填得跟正牌客户一样，理论上能蹭到那个正牌客户在 Meta（Facebook/Instagram 广告）那边的授权令牌，看到不该看的广告账户数据。上次修的是大部分入口，唯独"每天自动拉取 Meta 广告数据"这条定时任务当时漏掉了，自己抄了一遍老的查找逻辑，没走新的验证关卡。
