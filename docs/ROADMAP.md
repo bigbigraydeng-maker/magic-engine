@@ -24,7 +24,7 @@
 ## CTS 网站新团「Natural China」草稿页 · 待 PM/客户确认后合并（2026-09-21）
 
 - [ ] chinatravel 仓库草稿 PR [#204](https://github.com/bigbigraydeng-maker/chinatravel/pull/204)（分支 `feat/natural-china-tour-page`，`isActive: false`，未上线）：客户微信提供的"Natural China"团行程已转成 `src/lib/data/tours.ts` 的 `natural-china` 团页条目，格式跟着 `golden-china` 走
-- [ ] **需 PM 核实天数出入**：客户文档标题写"15-Day"，正文行程只编号到 Day 14——已按 Day 14 原样建页，未替客户补第 15 天
+- [x] 天数出入已确认：PM 2026-09-21 拍板这条团就是 14 天，客户文档标题写"15-Day"是文档本身写错了，页面按 14 天保留
 - [ ] **缺价格、缺确切发团日期** —— 两项客户文档都没给，页面上先写"待确认"，PM/客户补齐后才能把 `isActive` 改成 true 并合并上线
 - [ ] 长江三峡邮轮本身、重庆（李子坝/洪崖洞/磁器口）目前配不到跟地名对得上的真实图，先没放，避免拿不相关的"中国风"图充数
 
