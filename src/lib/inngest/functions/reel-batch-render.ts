@@ -6,12 +6,13 @@
  *   2. 轮询等所有小样完成
  *   3. 等 PM 人工审批（waitForEvent `reel/batch.preview.approved`，超时 48h）
  *   4. 提交所有 Reel 的全尺寸渲染（1080×1920）
- *   5. 轮询等全尺寸完成
+ *   5. 轮询等全尺寸完成（用 step.sleep，避免服务器函数超时）
  *   6. 下载 + 上传 Supabase Storage + 写 client_assets
  *
  * 🔴 retries: 0——提交渲染是付费步骤，Inngest 默认重试会把同一条 Reel 渲两次。
- * 🔴 callout：轮询是在 step.run 内部循环，不是用 step.sleep + 多个 step——
- *    这条 Reel 批次通常 < 5 条，轮询不会撑爆 step 上限。
+ * 🔴 全尺寸轮询用 step.run + step.sleep，不用 setTimeout——
+ *    setTimeout 在 step.run 内跑分钟级循环会撑爆 Render 的 HTTP 超时，
+ *    step.sleep 会暂停函数并重新唤起，不占用服务器时间。
  */
 import { z } from 'zod'
 import { inngest, CLOUD_FN_PREFIX } from '../client'
@@ -24,6 +25,7 @@ import {
   type ReelSpec,
   type ReelTemplate,
 } from '@/lib/creatomate/inline-render'
+import { getRender } from '@/lib/creatomate/render'
 
 export const REEL_BATCH_RENDER_STARTED_EVENT = 'reel/batch.render.started' as const
 export const REEL_BATCH_PREVIEW_APPROVED_EVENT = 'reel/batch.preview.approved' as const
@@ -199,18 +201,30 @@ export function createReelBatchRender() {
         return results
       })
 
-      // ── 第五步：等全尺寸完成 ────────────────────────────────────
-      const fullRenders = await step.run('poll-full-renders', async () => {
-        const results: Array<{ tag: string; renderId: string; outputUrl: string; serviceName: string; cta: string }> = []
-        for (const { tag, renderId, serviceName } of fullIds) {
-          const render = await pollUntilDone(renderId, { maxAttempts: 30, intervalMs: 20_000 })
-          if (render.status !== 'succeeded' || !render.url) {
+      // ── 第五步：等全尺寸完成（step.sleep 版，避免 HTTP 超时）────
+      // 每条 Reel 最多查 20 次，每次间隔 30s = 10 分钟上限
+      // step.sleep 会暂停函数并由 Inngest 重新唤起，不占用服务器超时配额
+      type FullRenderResult = { tag: string; renderId: string; outputUrl: string; serviceName: string; cta: string }
+      const fullRenders: FullRenderResult[] = []
+
+      for (const { tag, renderId, serviceName } of fullIds) {
+        let outputUrl: string | null = null
+        for (let attempt = 0; attempt < 20 && outputUrl === null; attempt++) {
+          const render = await step.run(`check-full-${tag}-${attempt}`, () => getRender(renderId))
+          if (render.status === 'succeeded' && render.url) {
+            outputUrl = render.url
+          } else if (render.status === 'failed' || render.status === 'cancelled') {
             throw new Error(`全尺寸渲染失败 ${tag}: ${render.status} ${render.errorMessage ?? ''}`)
+          } else if (attempt < 19) {
+            await step.sleep(`sleep-full-${tag}-${attempt}`, '30s')
+          } else {
+            throw new Error(`全尺寸渲染超时 ${tag}（已等 10 分钟）`)
           }
-          results.push({ tag, renderId, outputUrl: render.url, serviceName, cta: template.cta })
         }
-        return results
-      })
+        if (outputUrl) {
+          fullRenders.push({ tag, renderId, outputUrl, serviceName, cta: template.cta })
+        }
+      }
 
       // ── 第六步：下载 + 上传 Supabase + 写 client_assets ────────
       const assetRecords = await step.run('store-assets', async () => {
