@@ -328,7 +328,7 @@ describe('legacy per-name Meta token — ownership gate', () => {
     delete process.env[SLUG_ENV]
   })
 
-  it('never used when resolveMetaTokenForClient already found a token — legacy path is not even queried', async () => {
+  it('never used when a domain-scoped token already resolved', async () => {
     mockResolveMetaTokenDetailed.mockResolvedValue({ token: 'domain-token', source: 'client_domain' })
 
     const { GET } = await import('./route')
@@ -336,7 +336,22 @@ describe('legacy per-name Meta token — ownership gate', () => {
 
     expect(res.status).toBe(200)
     expect(mockPullMetrics).toHaveBeenCalledOnce()
-    expect(mockLoadTokenOwnerPeers).not.toHaveBeenCalled()
+    expect(mockGetAdAccountInsights).toHaveBeenCalledWith(AD_ACCOUNT, 'domain-token', expect.any(String), expect.any(String))
+  })
+
+  // Peers are now loaded once up front for every client with a Meta ad account
+  // (2026-09-21 perf fix, chatgpt-codex-connector review) — reused by BOTH the
+  // domain/Page ownership check inside resolveMetaTokenDetailed and the legacy
+  // check below, rather than each scoped-token client re-scanning `clients`.
+  it('loads the ownership snapshot once per run and passes it into resolveMetaTokenDetailed', async () => {
+    mockResolveMetaTokenDetailed.mockResolvedValue({ token: 'domain-token', source: 'client_domain' })
+    mockLoadTokenOwnerPeers.mockResolvedValue([])
+
+    const { GET } = await import('./route')
+    await GET(makeRequest(CRON_SECRET))
+
+    expect(mockLoadTokenOwnerPeers).toHaveBeenCalledOnce()
+    expect(mockResolveMetaTokenDetailed).toHaveBeenCalledWith(expect.anything(), CLIENT_ID, expect.anything(), [])
   })
 
   // claude[bot] auto-fix review (2026-09-21): a Page-scoped token's identity
@@ -402,6 +417,23 @@ describe('legacy per-name Meta token — ownership gate', () => {
     await GET(makeRequest(CRON_SECRET))
 
     expect(mockPullMetrics).not.toHaveBeenCalled()
+  })
+
+  // chatgpt-codex-connector review (2026-09-21): a failed peer read must not
+  // fall through to a shared-fallback token that is "known" not to have access
+  // to this client's ad account — same fail-closed rule as
+  // resolveMetaTokenDetailed's own ownership_unknown, applied to the SEPARATE
+  // peer scan the legacy-name check does.
+  it('refused (not the shared fallback) when the peer read fails, even though a shared token is configured', async () => {
+    mockResolveMetaTokenDetailed.mockResolvedValue({ token: 'global-fallback-token', source: 'shared_fallback' })
+    mockLoadTokenOwnerPeers.mockResolvedValue(null)
+
+    const { GET } = await import('./route')
+    const json = await (await GET(makeRequest(CRON_SECRET))).json()
+
+    expect(mockPullMetrics).not.toHaveBeenCalled()
+    expect(json.failed).toBe(1)
+    expect(json.results[0].meta.error).toMatch(/peer-scan/i)
   })
 
   it('used when this client is the earliest non-self-serve owner of the name', async () => {
