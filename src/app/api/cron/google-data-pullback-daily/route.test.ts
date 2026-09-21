@@ -339,6 +339,39 @@ describe('legacy per-name Meta token — ownership gate', () => {
     expect(mockLoadTokenOwnerPeers).not.toHaveBeenCalled()
   })
 
+  // claude[bot] auto-fix review (2026-09-21): a Page-scoped token's identity
+  // isn't guaranteed to have ads_management on this client's ad account, so it
+  // must not preempt an owned legacy per-name token — only the domain-scoped
+  // token (the most specific, most likely to work) short-circuits before it.
+  it('a Page-scoped token does not preempt an owned legacy per-name token', async () => {
+    mockResolveMetaTokenDetailed.mockResolvedValue({ token: 'page-token', source: 'client_page' })
+    mockLoadTokenOwnerPeers.mockResolvedValue([
+      { id: CLIENT_ID, name: NAME, domain: null, facebook_page_id: null, created_at: '2026-01-01T00:00:00Z', source: 'fde' },
+    ])
+
+    const { GET } = await import('./route')
+    const res = await GET(makeRequest(CRON_SECRET))
+
+    expect(res.status).toBe(200)
+    expect(mockPullMetrics).toHaveBeenCalledOnce()
+    expect(mockGetAdAccountInsights).toHaveBeenCalledWith(AD_ACCOUNT, LEGACY_TOKEN, expect.any(String), expect.any(String))
+  })
+
+  it('falls back to the Page-scoped token when this client does not own the legacy name', async () => {
+    mockResolveMetaTokenDetailed.mockResolvedValue({ token: 'page-token', source: 'client_page' })
+    mockLoadTokenOwnerPeers.mockResolvedValue([
+      { id: CLIENT_ID, name: NAME, domain: null, facebook_page_id: null, created_at: '2026-09-01T00:00:00Z', source: 'fde' },
+      { id: 'other-client', name: NAME, domain: null, facebook_page_id: null, created_at: '2026-01-01T00:00:00Z', source: 'fde' },
+    ])
+
+    const { GET } = await import('./route')
+    const res = await GET(makeRequest(CRON_SECRET))
+
+    expect(res.status).toBe(200)
+    expect(mockPullMetrics).toHaveBeenCalledOnce()
+    expect(mockGetAdAccountInsights).toHaveBeenCalledWith(AD_ACCOUNT, 'page-token', expect.any(String), expect.any(String))
+  })
+
   it('refused when the client itself is self-serve, even as the only holder of the name', async () => {
     mockLoadTokenOwnerPeers.mockResolvedValue([
       { id: CLIENT_ID, name: NAME, domain: null, facebook_page_id: null, created_at: '2020-01-01T00:00:00Z', source: 'self_serve' },
