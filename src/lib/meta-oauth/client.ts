@@ -172,21 +172,7 @@ export interface MetaPageToken {
  * readable message instead of showing a stack trace to whoever clicked.
  */
 export async function exchangeCode(code: string, redirectUri: string): Promise<string | null> {
-  const params = new URLSearchParams({
-    client_id: appId(),
-    client_secret: appSecret(),
-    redirect_uri: redirectUri,
-    code,
-  })
-
-  try {
-    const res = await fetch(`${GRAPH_BASE}/oauth/access_token?${params.toString()}`)
-    if (!res.ok) return null
-    const body = (await res.json()) as { access_token?: string }
-    return body.access_token ?? null
-  } catch {
-    return null
-  }
+  return (await exchangeMetaTokenFields({ redirect_uri:redirectUri,code }))?.token ?? null
 }
 
 /**
@@ -197,21 +183,7 @@ export async function exchangeCode(code: string, redirectUri: string): Promise<s
  * without anyone touching it again.
  */
 export async function exchangeForLongLivedToken(shortToken: string): Promise<string | null> {
-  const params = new URLSearchParams({
-    grant_type: 'fb_exchange_token',
-    client_id: appId(),
-    client_secret: appSecret(),
-    fb_exchange_token: shortToken,
-  })
-
-  try {
-    const res = await fetch(`${GRAPH_BASE}/oauth/access_token?${params.toString()}`)
-    if (!res.ok) return null
-    const body = (await res.json()) as { access_token?: string }
-    return body.access_token ?? null
-  } catch {
-    return null
-  }
+  return (await exchangeMetaTokenFields({ grant_type:'fb_exchange_token',fb_exchange_token:shortToken }))?.token ?? null
 }
 
 /**
@@ -276,4 +248,20 @@ export async function listGrantedScopes(userToken: string): Promise<string[] | n
   } catch {
     return null
   }
+}
+
+/** Metadata-preserving exchange for new consent purposes. Existing Page callers keep their contract. */
+export async function exchangeMetaTokenFields(params: Record<string,string>, version=GRAPH_VERSION): Promise<{ token:string; seconds:number|null } | null> {
+  if (!/^v\d+\.0$/.test(version)) return null
+  const query=new URLSearchParams({ client_id:appId(),client_secret:appSecret(),...params })
+  try {
+    const res=await fetch(`https://graph.facebook.com/${version}/oauth/access_token?${query}`,{
+      method:'GET',redirect:'error',cache:'no-store',signal:AbortSignal.timeout(12_000),
+    })
+    if (!res.ok) return null
+    const body=await res.json() as { access_token?:unknown; expires_in?:unknown }
+    if(typeof body.access_token!=='string') return null
+    const seconds=Number(body.expires_in)
+    return { token:body.access_token,seconds:Number.isFinite(seconds) && seconds>0 ? seconds : null }
+  } catch { return null }
 }

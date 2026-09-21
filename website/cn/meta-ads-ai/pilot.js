@@ -19,7 +19,6 @@
       `授权条件：${value(data, 'accessReadiness')}`,
       `当前分析方式：${value(data, 'currentAnalysis')}`,
       `最想弄清的问题：${value(data, 'question')}`,
-      `常用 AI 客户端：${value(data, 'aiClient') || '未填写'}`,
       `参与方式：${value(data, 'participation')}`,
       `微信：${value(data, 'wechat') || '未填写'}`,
       `方便联系时间：${value(data, 'contactTime') || '未填写'}`,
@@ -36,6 +35,7 @@
 
     const data = new FormData(form);
     const payload = {
+      formType: 'meta_ads_ai_pilot',
       name: value(data, 'name'),
       email: value(data, 'email'),
       company: value(data, 'company'),
