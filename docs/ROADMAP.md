@@ -241,6 +241,53 @@ ads-act-executor（Inngest function）
 - [ ] 对话没有关联联系人的情况目前生产库实测 0 个，代码已加 `skippedNoContact` 计数防呆，
       后续若这个数字非零需要去查联系人建档流程是不是有延迟/漏建档
 
+## NAL 广告预算止血 + WhatsApp 对话接入排查（2026-09-21）
+
+**第一件事·广告预算已处理完**：主系列「新亚8月广告系列-物流」（`52589907084125`）预算
+$62/天但真正带咨询的 Messenger 广告组「物流潜在客户广告组」（`52589967398925`）当时是暂停
+状态，只剩再营销组在跑，当天只花掉 $9.76；同时两个零咨询零留资的播放量视频系列各花
+$10/天、$20/天。已执行：恢复 Messenger 广告组、暂停两个视频系列、主系列预算从 $62/天加到
+$92/天（把视频系列省下的 $30 并入）。四个改动都用 Graph API 直接确认回读生效，审计记录已
+写入 `flywheel_actions`，工作日志已写入 `fde_work_logs`。**待办**：观察 1-2 天，确认咨询量
+回到暂停前的每周 30-50 条水平；若没回升需要进一步排查。
+
+**第二件事·WhatsApp 对话接入排查结论——不是要新建，是要把已经写好但没启用的东西接通**：
+
+原以为要新建一条 Messenger 那样的 webhook 接入线，实测发现**代码早就写好了**：
+`src/app/api/webhooks/whatsapp/route.ts` 是一条完整的 WhatsApp Cloud API webhook（签名校验、
+建会话、写 CRM 触点、退订检测、事件广播全都有），`src/lib/whatsapp/send.ts` 管发送，跟
+Messenger 走的是同一套 `conversations`/`contact_touchpoints` 表、`channel='whatsapp'`。
+**真正卡住的是三件事**，跟"要不要写代码"无关：
+
+1. **数据库那张表的新字段其实没加上**——`supabase/migrations/20260902000002_whatsapp_phone_number_id.sql`
+   这个改动文件半个月前就合并进主分支了，但从来没有真的对生产数据库执行过（`clients` 表里
+   实测没有 `whatsapp_phone_number_id` 这一列，查询直接报错"字段不存在"）。这是纯新增字段，
+   风险很低，但按铁律"改生产数据库需要 PM 明确拍板"，这次没有擅自执行，**等 PM 一句话**。
+2. **NAL 那个 WhatsApp 号码的技术编号（phone_number_id）现在拿不到**——想用现有的广告授权
+   直接从 Meta 后台查这个号码的编号，被 Meta 拒绝（403，权限不够），当前用的授权缺一个叫
+   `whatsapp_business_management` 的权限。这个权限只能在 Meta Business 后台里手动加，不是代码
+   能绕过的。**需要 PM/FDE 进 Meta Business 后台，给现在这个系统用户授权加上
+   `whatsapp_business_management`**，加完之后就能自动查到号码编号，不用再人工找。
+3. **Meta 企业身份验证还没过**（[#1299](https://github.com/bigbigraydeng-maker/magic-engine/issues/1299)，
+   需要 PM 本人上传公司证件）——这个不卡继续把上面两步做完，但卡"这条 WhatsApp 线真正在
+   Meta 那边生效、开始收到消息"这一天。
+
+**下一步（三选一都要 PM 拍板，不是技术选择）**：
+- [ ] PM 决定：要不要把 `20260902000002_whatsapp_phone_number_id.sql` 这个已合并到主分支、
+      纯新增字段的改动，对生产数据库真正执行一次
+- [ ] PM/FDE 决定：谁去 Meta Business 后台给系统用户加 `whatsapp_business_management` 权限
+      （加完后可以用现成脚本自动查出 NAL 的号码编号，不需要再人工翻）
+- [ ] 上面两步都做完之后，还要在 Meta App 后台确认这个号码的 webhook 订阅是否已经打开
+      （这一步也需要能登录 Meta 后台的人核实，无法从这台开发机验证）
+- [ ] #1299 企业验证走完，再确认线上真的开始收到 WhatsApp 消息
+      （命中一句话：企业验证走完后来查一下WhatsApp消息有没有开始进系统——建议这一步由 PM
+      在 #1299 验证通过当天，去 Supabase 查一次 `conversations` 表 `channel='whatsapp'` 的
+      条数是不是从 0 变化）
+
+不需要新写 webhook 代码、不需要子牙+魏征架构复审——因为没有新架构，是把已经审过、已经合并
+的现成能力接通。真正要做的三步全是配置/审批动作，不是技术选型，所以直接列出来等 PM 拍板，
+没有抛回"走 A 还是走 B"这类技术问题。
+
 ## NAL 客户管理工作台"标已成交" → 自动写一条 Meta CAPI 成交记录（PR #1715，dry_run，已合并，2026-09-15）
 
 > 背景：上一节留的缺口——NAL 员工在临时 CRM 工作台里把联系人标"已成交"时没有金额来源，
