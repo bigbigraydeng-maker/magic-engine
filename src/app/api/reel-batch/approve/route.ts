@@ -10,7 +10,8 @@ const BodySchema = z.object({
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const secret = req.headers.get('x-internal-secret')
-  if (!secret || secret !== process.env.INTERNAL_API_SECRET) {
+  const expectedSecret = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!expectedSecret || !secret || secret !== expectedSecret) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
