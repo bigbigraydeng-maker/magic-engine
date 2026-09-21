@@ -72,4 +72,15 @@ describe('nontechnical connection feedback',()=>{
     expect(await screen.findByText(/过去 7 天花费 NZD 100/)).toBeInTheDocument()
     expect(screen.queryByText(/AI 访问密钥/)).not.toBeInTheDocument()
   })
+
+  it('shows only the latest result for each advertising account',async()=>{
+    const base={ ad_account_id:'act_1234567890',window_since:'2026-09-13',window_until:'2026-09-19',error_code:null,completed_at:'2026-09-20' }
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ...status,connections:[],grants:[],analyses:[
+      { ...base,id:'latest',status:'completed',report_markdown:'最新中文报告',created_at:'2026-09-20T02:00:00Z' },
+      { ...base,id:'older',status:'failed',report_markdown:null,created_at:'2026-09-20T01:00:00Z' },
+    ] })))
+    render(<MetaAdsScreen clientId="tenant" />)
+    expect(await screen.findByText('最新中文报告')).toBeInTheDocument()
+    expect(screen.queryByText(/本次分析没有完成/)).not.toBeInTheDocument()
+  })
 })
