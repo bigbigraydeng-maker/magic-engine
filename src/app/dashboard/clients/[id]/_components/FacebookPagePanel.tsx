@@ -184,14 +184,17 @@ export function FacebookPagePanel({ clientId }: Props) {
     <div className="rounded-xl border border-slate-200 bg-white p-4">
       <LiveStatus pageId={page_id} reachable={reachable} verification={verification} />
 
-      <p className="mb-3 text-sm text-slate-600">
-        选中客户的 Facebook 主页后，系统每小时自动把主页私信拉进来，AI 写成需求卡，
-        显示在<span className="font-bold">「客户消息」</span>页。不选就完全不动这个客户的私信。
-      </p>
+      {/* Only show description when nothing is bound yet — once syncing, the banner says it all */}
+      {!page_id && (
+        <p className="mb-4 text-sm text-slate-500">
+          选一个主页，系统每小时拉取私信，AI 整理成需求卡显示在「客户消息」页。
+        </p>
+      )}
 
       {can_edit ? (
         <>
-          {pages_error && (
+          {/* pages_error only matters when we don't already have a working binding */}
+          {pages_error && (!page_id || !verification?.verified || reachable === false) && (
             <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
               {PAGES_ERROR_TEXT[pages_error]}
             </p>
@@ -201,7 +204,7 @@ export function FacebookPagePanel({ clientId }: Props) {
             <select
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-100"
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-200"
             >
               <option value="">— 不接私信 —</option>
               {pages.map((p) => (
@@ -218,7 +221,7 @@ export function FacebookPagePanel({ clientId }: Props) {
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               placeholder="1616575215312482"
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-100"
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-200"
             />
           )}
 
@@ -242,7 +245,7 @@ export function FacebookPagePanel({ clientId }: Props) {
             <button
               onClick={() => void save(draft.trim() || null)}
               disabled={!dirty || saving}
-              className="rounded-lg bg-cyan-600 px-4 py-1.5 text-sm font-bold text-white hover:bg-cyan-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+              className="rounded-lg bg-slate-900 px-4 py-1.5 text-sm font-bold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
             >
               {saving ? '保存中…' : '保存'}
             </button>
@@ -258,7 +261,7 @@ export function FacebookPagePanel({ clientId }: Props) {
             {!dirty && !saving && page_id !== null && needsReverify(verification) && (
               <button
                 onClick={() => void save(page_id)}
-                className="rounded-lg border border-cyan-300 bg-white px-3 py-1.5 text-xs font-bold text-cyan-700 hover:bg-cyan-50"
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
               >
                 重新核实
               </button>
@@ -271,13 +274,23 @@ export function FacebookPagePanel({ clientId }: Props) {
         </p>
       )}
 
-      <ConnectMeta clientId={clientId} pageId={page_id} publishTargetPageId={publish_target_page_id} />
+      <ConnectMeta
+        clientId={clientId}
+        pageId={page_id}
+        publishTargetPageId={publish_target_page_id}
+        reachable={reachable}
+        verification={verification}
+      />
 
-      <p className="mt-4 border-t border-slate-100 pt-3 text-xs leading-relaxed text-slate-400">
-        主页网址里的名字（facebook.com/<span className="font-mono">CTSTOURS</span>）不是 ID。
-        实在要手填，去主页「关于 → 页面透明度」里找「主页编号」。
-        保存后最快等一小时出现第一批对话。
-      </p>
+      <details className="mt-4 border-t border-slate-100 pt-3">
+        <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-600">
+          怎么找主页 ID？
+        </summary>
+        <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+          主页网址里的名字（facebook.com/<span className="font-mono">CTSTOURS</span>）不是 ID。
+          去主页「关于 → 页面透明度」里找「主页编号」。保存后最快等一小时出现第一批对话。
+        </p>
+      </details>
     </div>
   )
 }
@@ -331,15 +344,16 @@ function ConnectMeta({
   clientId,
   pageId,
   publishTargetPageId,
+  reachable,
+  verification,
 }: {
   clientId: string
   pageId: string | null
   publishTargetPageId: string | null
+  reachable: boolean | null
+  verification: Verification | null
 }) {
   const [outcome, setOutcome] = useState<string | null>(null)
-  // Publishing reauth targets factory_config.publish_target, so it is available
-  // whenever a valid Facebook publish target is configured — independent of the
-  // inbox binding (which may be unset or a different Page).
   const canReauthPublish = Boolean(publishTargetPageId)
 
   // The callback hands its verdict back through the URL; read it once, then
@@ -355,54 +369,60 @@ function ConnectMeta({
 
   const result = outcome ? META_RESULT[outcome] : null
 
+  // Only show the OAuth buttons when something actually needs fixing:
+  // - no page bound yet
+  // - verification failed
+  // - reachable === false (ME can't read the page's inbox)
+  // When everything is working (verified + reachable), hiding these avoids confusion.
+  const syncingOk = reachable === true && verification?.verified !== false && verification?.via !== 'legacy_client_token'
+  const showInboxButton = !syncingOk
+  const showPublishButton = canReauthPublish
+
+  // If there's nothing to show (no result, no relevant buttons), render nothing
+  if (!result && !showInboxButton && !showPublishButton) return null
+
   return (
     <div className="mt-3 border-t border-slate-100 pt-3">
       {result && (
-        <p
-          className={`mb-2 text-xs leading-relaxed ${result.ok ? 'text-cyan-700' : 'text-amber-700'}`}
+        <div
+          className={`mb-3 rounded-lg px-3 py-2.5 text-xs leading-relaxed ${
+            result.ok
+              ? 'bg-emerald-50 text-emerald-800'
+              : 'border border-amber-200 bg-amber-50 text-amber-800'
+          }`}
         >
           {result.text}
-        </p>
+        </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <a
-          href={`/api/auth/facebook/connect?client_id=${clientId}`}
-          className={`inline-block rounded-lg border px-3 py-1.5 text-xs font-bold ${
-            pageId
-              ? 'border-cyan-300 bg-white text-cyan-700 hover:bg-cyan-50'
-              : 'pointer-events-none border-slate-200 bg-slate-50 text-slate-300'
-          }`}
-          aria-disabled={!pageId}
-        >
-          连接 Meta
-        </a>
+      {(showInboxButton || showPublishButton) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {showInboxButton && (
+            <a
+              href={`/api/auth/facebook/connect?client_id=${clientId}`}
+              className={`inline-block rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                pageId
+                  ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                  : 'pointer-events-none border-slate-200 bg-slate-50 text-slate-300'
+              }`}
+              aria-disabled={!pageId}
+            >
+              连接 Meta
+            </a>
+          )}
 
-        {/* Same OAuth flow, but carries intent=publishing so the callback fails
-            closed with a publishing-specific message if 管理主页帖子 isn't granted.
-            Needed for clients (e.g. inbox-only connects made before publishing
-            scope existed) whose stored grant lacks pages_manage_posts. */}
-        <a
-          href={`/api/auth/facebook/connect?client_id=${clientId}&intent=publishing`}
-          className={`inline-block rounded-lg border px-3 py-1.5 text-xs font-bold ${
-            canReauthPublish
-              ? 'border-cyan-300 bg-white text-cyan-700 hover:bg-cyan-50'
-              : 'pointer-events-none border-slate-200 bg-slate-50 text-slate-300'
-          }`}
-          aria-disabled={!canReauthPublish}
-        >
-          重新授权 Meta 发布权限
-        </a>
-      </div>
-
-      <p className="mt-2 text-xs leading-relaxed text-slate-400">
-        {pageId
-          ? '用一个能在 Business Suite 里看到这个主页消息的账号授权一次，之后不用再管。'
-          : '先选好主页并保存，才能连接私信。'}
-        {canReauthPublish
-          ? '「重新授权 Meta 发布权限」针对的是视频工厂配置里那个发布主页，授权时记得勾上发帖权限。'
-          : '要让系统能发内容，得先在「视频工厂配置」里配好发布主页，这个按钮才能点。'}
-      </p>
+          {/* Same OAuth flow, but carries intent=publishing so the callback fails
+              closed with a publishing-specific message if 管理主页帖子 isn't granted. */}
+          {showPublishButton && (
+            <a
+              href={`/api/auth/facebook/connect?client_id=${clientId}&intent=publishing`}
+              className="inline-block rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              重新授权 Meta 发布权限
+            </a>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -430,51 +450,50 @@ function LiveStatus({
 
   if (verification && !verification.verified) {
     return (
-      <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-700">
-        <p>
-          <span className="font-bold">⚠ 私信、表单线索和评论自动回复已暂停：这个主页绑定没通过核实。</span>
-          {verification.reason ? `（${REFUSAL_TEXT[verification.reason] ?? verification.reason}）` : ''}
+      <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-800">
+        <p className="font-semibold">私信同步 / 表单线索同步 / 评论自动回复已全部暂停</p>
+        <p className="mt-1 text-xs text-red-700">
+          {verification.reason ? (REFUSAL_TEXT[verification.reason] ?? verification.reason) : '主页绑定未通过核实。'}
+          {' '}重新保存一次主页，或用主页管理员账号点「连接 Meta」即可恢复。
         </p>
-        <p className="mt-1.5">由 Magic Lab 团队在这里重新保存一次主页核实，或用主页管理员账号点「连接 Meta」授权。</p>
       </div>
     )
   }
 
   if (verification?.via === 'legacy_client_token') {
     return (
-      <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
-        私信在同步，但这个绑定是早先手动设的，没有核实记录 —— 团队重新保存一次即可补上。
-      </p>
+      <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <p className="font-semibold">私信在同步，但缺少核实记录</p>
+        <p className="mt-1 text-xs text-amber-700">团队重新保存一次主页即可补上。</p>
+      </div>
     )
   }
 
   if (reachable === true) {
     return (
-      <p className="mb-3 rounded-lg bg-cyan-50 px-3 py-2 text-xs font-bold text-cyan-800">
-        ✓ 私信正在同步 —— ME 读得到这个主页。
-      </p>
+      <div className="mb-4 flex items-center gap-2 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+        <span className="text-base">✓</span>
+        <span className="font-semibold">私信正在同步</span>
+      </div>
     )
   }
 
   if (reachable === false) {
     return (
-      <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-700">
-        <p>
-          <span className="font-bold">⚠ 绑了主页，但线索进不来。</span>
-          <br />
-          ME 读不到这个主页，所以私信一条都同步不进来 —— 广告照跑照花钱，客人发来的消息只留在对方主页的收件箱里。
-        </p>
-        <p className="mt-1.5">
-          点下面的「连接 Meta」，用一个能看到这个主页消息的账号授权一次就好。
+      <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+        <p className="font-semibold">绑了主页，但线索进不来</p>
+        <p className="mt-1 text-xs text-red-700">
+          ME 读不到这个主页。用能看到这个主页消息的账号点下方「连接 Meta」授权一次即可。
         </p>
       </div>
     )
   }
 
   return (
-    <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
-      绑了主页，但现在连不上 Meta，没法确认同步是否正常。
-    </p>
+    <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+      <p className="font-semibold">无法确认同步状态</p>
+      <p className="mt-1 text-xs text-amber-700">暂时连不上 Meta，稍后刷新再看。</p>
+    </div>
   )
 }
 

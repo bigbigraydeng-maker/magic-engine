@@ -16,6 +16,8 @@ import { conversationInboundDraft } from './conversation-inbound-draft'
 import { conversationHealthHeartbeat } from './conversation-health-heartbeat'
 import { postPublishFanOut, postPublishCheck } from './seo-post-publish-monitor'
 import { seoMetaCycleFanOut, seoMetaCycleRunOne } from './seo-meta-cycle'
+import { competitorWatchWeeklyFanOut, competitorWatchRunOne } from './competitor-watch-weekly'
+import { aiVisibilityWeeklyFanOut, aiVisibilityTrackerRunOne } from './ai-visibility-weekly'
 
 export const cloudFunctions = [
   webIntelligenceCapture,
@@ -40,6 +42,10 @@ export const cloudFunctions = [
   postPublishCheck,
   seoMetaCycleFanOut,
   seoMetaCycleRunOne,
+  competitorWatchWeeklyFanOut,
+  competitorWatchRunOne,
+  aiVisibilityWeeklyFanOut,
+  aiVisibilityTrackerRunOne,
 ]
 
 /** 命名空间自检：所有注册函数 id 必须以 cloud- 开头（契约测试 + 运行期双保险）。 */

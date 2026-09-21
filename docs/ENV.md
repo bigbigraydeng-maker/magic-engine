@@ -208,6 +208,26 @@
 | `GOALS_EXPIRY_CRON_URL` | 可选覆盖，`.github/workflows/goals-expiry-check.yml` |
 | `WINNER_REEL_SYNC_URL` | 可选覆盖，`.github/workflows/winner-reel-sync-daily.yml` |
 
+## 14. 2026-09-21 补登记（对照 `src/` 全量扫描，main `41d47685`）
+
+此前代码在读、但本表没有的变量。搬服务器的给法见 [sops/server-migration-secrets-handover.md](./sops/server-migration-secrets-handover.md)。
+
+| 变量 | 用途 | 配在哪 |
+|---|---|---|
+| `JINA_API_KEY` | Site Analyzer 抓取客户官网（`src/lib/brief/jina.ts`） | Render-web |
+| `MAILCHIMP_API_KEY` | 营销计划生成读 Mailchimp + `/api/cron/mailchimp-suppression-sync` 同步退订名单 | Render-web |
+| `DEMO_ADMINS` | 演示管理员白名单，格式 `邮箱:客户ID`，限定只能看指定客户（`src/lib/auth/whitelist.ts`） | Render-web |
+| `NEXT_PUBLIC_GA_MEASUREMENT_ID` / `NEXT_PUBLIC_META_PIXEL_ID` | ME 自家营销页的 GA4 / Meta 像素 | Render-web |
+| `META_CAPI_VERSION` | Meta 转化回传用的 Graph 版本，默认 `v19.0` | Render-web（可不配） |
+| `META_SYSTEM_USER_TOKEN_<域名>` | 🔴 **每客户一把的 Meta 广告令牌，名字运行时拼出来**（`domainToEnvKey`，`src/lib/meta/token-selection.ts`），静态扫描扫不到，完整清单只在 Render 面板上 | Render-web |
+| `META_PIXEL_ID_<域名>` | 每客户像素 ID，同样是运行时拼名（`src/lib/meta/capi/config.ts`） | Render-web |
+| `CRM_NOTE_MODEL` / `CRM_STAGE_INFER_MODEL` / `MESSENGER_BRIEF_MODEL` / `MARKET_INTEL_MODEL` | 各功能的模型名覆盖，默认都是 `gpt-4o-mini` | Render-web（可不配） |
+| `WEB_INTELLIGENCE_ALLOWED_CLIENT_IDS` | Web Intelligence 客户白名单，未配 = 谁都不跑 | Render-web |
+| `WEB_INTELLIGENCE_TRAFFIC_ENABLED` | Web Intelligence 流量检查总闸，默认 **关** | Render-web |
+| `WEB_INTELLIGENCE_FIRST_PARTY_TOUR_SOURCES` | 第一方行程数据源配置（JSON） | Render-web |
+| `FACTORY_STOCK_REFILL_ENABLED` | 内容工厂素材库自动补货总闸，默认 **关** | Render-web |
+| `BASELINE_CRON_ENABLED` | 设 `false` 可临时停掉每月域名基线任务，默认开 | Render-web |
+
 ---
 
 ## 自检

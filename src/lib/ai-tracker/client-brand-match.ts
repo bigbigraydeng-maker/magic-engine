@@ -24,6 +24,15 @@ export interface ClientBrandIdentity {
   brandName: string
   domain?: string | null
   aliases?: readonly string[] | null
+  /**
+   * clients.brand_geo_anchors — words that prove an answer is talking about
+   * the client's OWN market ("new zealand", "nz", "auckland"). Opt-in per
+   * client: empty / absent leaves matching exactly as it was.
+   *
+   * No geography lives in this module. The words are client configuration;
+   * the rule that consumes them is the only platform-shared part.
+   */
+  geoAnchors?: readonly string[] | null
 }
 
 export interface ClientRankResolution {
@@ -144,9 +153,156 @@ function buildIdentifierList(identity: ClientBrandIdentity): ClientIdentifier[] 
   return Array.from(seen.values())
 }
 
+/**
+ * Links and bare hostnames, removed before anchor matching.
+ *
+ * Normalisation turns "." into a space, so "explorechinaholidays.com.au"
+ * becomes "explorechinaholidays com au" and would hand an "au" anchor to any
+ * answer that cites an Australian link — including a THIRD PARTY's link in an
+ * answer about a different country. Measured on CTS: 43 of 3,096 answers had
+ * the anchor only inside a URL. A cited hostname is not a statement about the
+ * market the answer is discussing, so it is not geo evidence.
+ *
+ * Deliberately narrow: a scheme, a `www.`, or a dotted host ending in a label
+ * of 2+ letters. "(N.Z.)" is NOT matched — its last label is one character —
+ * so the `nz` anchor still finds it.
+ */
+const URL_LIKE_RE = /(?:https?:\/\/|www\.)\S+|[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}(?:\.[a-z]{2,})?(?:\/\S*)?/gi
+
+/** Minimum length for a geo anchor spelled out with separators ("N.Z."). */
+const MIN_ANCHOR_COMPACT_LEN = 2
+
+/**
+ * Like `normalizeForMatch`, but punctuation is DROPPED instead of turned
+ * into a space, and only real whitespace still separates tokens. So
+ * "(N.Z.)" collapses to the single token "nz" (nothing but punctuation sat
+ * between the letters), while "a U-turn" stays two tokens, "a" and "uturn"
+ * (a real space still separates them) — it never reads as "au". Plain
+ * `normalizeForMatch` cannot tell these apart: it turns punctuation AND real
+ * whitespace into the very same single space, so a short anchor matched
+ * against it can bridge two unrelated, independently-typed words that merely
+ * happen to spell it out end to end ("new zeal and enthusiasm" → "nz eal
+ * and" → "newzealand").
+ */
+function normalizeKeepingWhitespaceOnly(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\p{L}\p{N}\s]+/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Is at least one configured geo anchor written in the answer?
+ *
+ * Two ways to be evidence:
+ *  - An exact, word-bounded phrase match on `norm` — "New Zealand," in the
+ *    answer matches the anchor "new zealand" typed by an FDE. This never
+ *    bridges words the FDE didn't already put a space between.
+ *  - A word-bounded match of the anchor's compact form against `punctOnly`
+ *    (see `normalizeKeepingWhitespaceOnly`) — so a short anchor ("nz") still
+ *    finds a punctuation-spelled form ("(N.Z.)"), but real whitespace
+ *    between two independently-written words is never bridged: "a U-turn"
+ *    must not satisfy "au", and "bonza" must not satisfy "nz".
+ *  - CJK anchors have no word boundaries to pin to at all (`indexOfIdentifier`
+ *    handles that case on its own, length-gated).
+ */
+function hasGeoAnchor(norm: string, punctOnly: string, anchors: readonly string[]): boolean {
+  return anchors.some(a => {
+    if (CJK_RE.test(a)) return indexOfIdentifier(norm, a) >= 0
+    if (` ${norm} `.includes(` ${a} `)) return true
+    const compactId = a.replace(/ /g, '')
+    if (compactId.length < MIN_ANCHOR_COMPACT_LEN) return false
+    return ` ${punctOnly} `.includes(` ${compactId} `)
+  })
+}
+
+/** Does this client have the geo gate turned on at all? */
+export function hasGeoGate(identity: ClientBrandIdentity): boolean {
+  return buildGeoAnchors(identity).length > 0
+}
+
+/** The part of an answer that may carry geo evidence: everything but links. */
+function geoEvidenceText(answerText: string): { norm: string; punctOnly: string } {
+  const stripped = answerText.replace(URL_LIKE_RE, ' ')
+  return { norm: normalizeForMatch(stripped), punctOnly: normalizeKeepingWhitespaceOnly(stripped) }
+}
+
+/**
+ * Configured anchors, normalised; empty when the client has none.
+ *
+ * A CJK anchor shorter than `MIN_CJK_EVIDENCE_LEN` can never match (there
+ * are no word boundaries to pin it to), so it would silently close the gate
+ * on every answer. The write API rejects those, but a row edited directly in
+ * the database can still carry one — drop it here and say so, rather than
+ * letting the client lose every alias-grounded mention without a trace.
+ */
+function buildGeoAnchors(identity: ClientBrandIdentity): string[] {
+  const configured = identity.geoAnchors ?? []
+  const out: string[] = []
+  for (const a of configured) {
+    const norm = normalizeForMatch(a ?? '')
+    if (norm.length === 0) continue
+    if (CJK_RE.test(norm) && norm.length < MIN_CJK_EVIDENCE_LEN) {
+      console.warn(
+        `[client-brand-match] ignoring un-matchable CJK geo anchor "${norm}" ` +
+          `(needs ${MIN_CJK_EVIDENCE_LEN}+ characters)`
+      )
+      continue
+    }
+    out.push(norm)
+  }
+  if (configured.length > 0 && out.length === 0) {
+    console.warn(
+      '[client-brand-match] every configured geo anchor was unusable; ' +
+        'the geo gate is OFF for this client'
+    )
+  }
+  return out
+}
+
 /** Normalised identifiers that prove the client is present (≥ 2 chars). */
 export function buildClientIdentifiers(identity: ClientBrandIdentity): string[] {
   return buildIdentifierList(identity).map(i => i.value)
+}
+
+/**
+ * The identifiers admissible as evidence in one AI ANSWER.
+ *
+ * An alias is an FDE-entered nickname, and a nickname can be the group name
+ * a foreign sibling trades under too ("China Travel Service" names both the
+ * Australian and the NZ company). So once a client configures geo anchors,
+ * aliases only count in an answer that also carries one of those anchors.
+ * The official brand name and the client's own domain are self-identifying
+ * and are never gated — otherwise every answer naming the client without
+ * naming its country would lose a real mention. No anchors configured → the
+ * list is exactly what it was before.
+ *
+ * 🔴 `answerText` must be a whole answer, never a bare brand name. A missing
+ *    anchor is only evidence of the wrong market across a few hundred words;
+ *    in a three-word company name it means nothing, because most company
+ *    names do not spell out their country. Judging a name in isolation would
+ *    un-merge every client variant that omits the country. Whoever needs a
+ *    per-name decision should reuse the rank this function helped resolve
+ *    (see `buildRankingTable`), not call this with a name.
+ *
+ * Short single-token aliases are NOT filtered here — `isClientBrand` already
+ * requires them to equal the brand exactly. They are dropped separately from
+ * the pool of *textual* evidence inside `resolveClientBrandRank`.
+ */
+export function admissibleIdentifiersForAnswer(
+  identity: ClientBrandIdentity,
+  answerText: string
+): string[] {
+  const idList = buildIdentifierList(identity)
+  const anchors = buildGeoAnchors(identity)
+  if (anchors.length === 0) return idList.map(i => i.value)
+  const { norm, punctOnly } = geoEvidenceText(answerText)
+  const aliasAllowed = hasGeoAnchor(norm, punctOnly, anchors)
+  return idList.filter(i => aliasAllowed || !i.fromAlias).map(i => i.value)
 }
 
 /** Char index of `id` in normalised text `norm` (word-bounded), or -1. */
@@ -155,10 +311,18 @@ function indexOfIdentifier(norm: string, id: string): number {
   const padded = ` ${norm} `
   const phraseIdx = padded.indexOf(` ${id} `)
   if (phraseIdx >= 0) return phraseIdx
+  return indexOfCompact(norm, id, MIN_COMPACT_LEN)
+}
+
+/**
+ * Index of `id` ignoring the spaces inside it ("janedoe" vs "Jane Doe"), but
+ * only where the match starts and ends on word boundaries of `norm` — so
+ * "nz" finds "(N.Z.)" (normalised to "n z") without finding "in Zurich".
+ * `minLength` guards how short a needle may be spelled out this way.
+ */
+function indexOfCompact(norm: string, id: string, minLength: number): number {
   const compactId = id.replace(/ /g, '')
-  if (compactId.length < MIN_COMPACT_LEN) return -1
-  // Tolerate spacing differences ("janedoe" vs "Jane Doe"), but only when
-  // the match starts and ends on word boundaries of the original text.
+  if (compactId.length < minLength) return -1
   const positions: number[] = []
   let compact = ''
   for (let i = 0; i < norm.length; i++) {
@@ -298,7 +462,15 @@ export function resolveClientBrandRank(
   if (ids.length === 0) return { brands, client_brand_rank: null }
 
   const { norm, map } = normalizeWithSourceMap(rawResponse)
-  const clientBrands = brands.filter(b => isClientBrand(b.brand, ids))
+
+  // Geo gate (see `admissibleIdentifiersForAnswer`). A brand the parser
+  // extracted is the client only if it matches an admissible identifier;
+  // under a failed gate the same-named sibling abroad stays in `brands` as
+  // an ordinary competitor — it is a real company in the answer, so dropping
+  // it would delete competitor data.
+  const admissibleIds = admissibleIdentifiersForAnswer(identity, rawResponse)
+  const admissible = new Set(admissibleIds)
+  const clientBrands = brands.filter(b => isClientBrand(b.brand, admissibleIds))
   // Evidence = an identifier written in the text, or the name of a brand the
   // parser extracted that is the client ("Acme Tours Ltd" for "Acme Tours").
   // Two occurrences don't count: a short alias anywhere, and any identifier
@@ -311,7 +483,10 @@ export function resolveClientBrandRank(
   const clientPos = firstIdentifierIndex(
     norm,
     [
-      ...idList.filter(i => !(i.fromAlias && isShortSingleTokenId(i.value))).map(i => i.value),
+      ...idList
+        .filter(i => admissible.has(i.value))
+        .filter(i => !(i.fromAlias && isShortSingleTokenId(i.value)))
+        .map(i => i.value),
       ...clientBrands.map(b => normalizeForMatch(b.brand)),
     ],
     otherSpans
