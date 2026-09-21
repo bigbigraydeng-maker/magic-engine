@@ -6,6 +6,7 @@ import { CRON_REGISTRY, UNSCHEDULED_CRON_ROUTES } from './registry'
 import { expectedIntervalHours } from './schedule'
 import { FLYWHEEL_SEO_WEEKLY_CRON, FLYWHEEL_SEO_WEEKLY_JOB } from '../flywheel/seo-weekly'
 import { COMPETITOR_WATCH_CRON, COMPETITOR_WATCH_JOB } from '../competitors/watch'
+import { AI_VISIBILITY_WEEKLY_CRON, AI_VISIBILITY_WEEKLY_JOB } from '../ai-tracker/weekly-fanout'
 
 const ROOT = path.resolve(__dirname, '../../..')
 const CRON_ROUTES_DIR = path.join(ROOT, 'src/app/api/cron')
@@ -400,6 +401,16 @@ describe('每个写运行记录的地方，都必须有人认领', () => {
       entry!.schedule,
       '清单里的周期跟 src/lib/competitors/watch.ts 的 COMPETITOR_WATCH_CRON 不一致',
     ).toBe(COMPETITOR_WATCH_CRON)
+  })
+
+  it('🔴 AI 可见度追踪(灰度)那条的周期不许手抄 —— 清单必须等于代码里唯一那份定义', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === AI_VISIBILITY_WEEKLY_JOB)
+    expect(entry, `清单里找不到 ${AI_VISIBILITY_WEEKLY_JOB}`).toBeDefined()
+    expect(entry!.scheduler).toBe('inngest')
+    expect(
+      entry!.schedule,
+      '清单里的周期跟 src/lib/ai-tracker/weekly-fanout.ts 的 AI_VISIBILITY_WEEKLY_CRON 不一致',
+    ).toBe(AI_VISIBILITY_WEEKLY_CRON)
   })
 
   it('🔴 白名单不许过期：排上班了就该从白名单删掉', () => {
