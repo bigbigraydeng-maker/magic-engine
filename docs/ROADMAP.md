@@ -268,9 +268,13 @@ Messenger 走的是同一套 `conversations`/`contact_touchpoints` 表、`channe
    `whatsapp_business_management` 的权限。这个权限只能在 Meta Business 后台里手动加，不是代码
    能绕过的。**需要 PM/FDE 进 Meta Business 后台，给现在这个系统用户授权加上
    `whatsapp_business_management`**，加完之后就能自动查到号码编号，不用再人工找。
-3. **Meta 企业身份验证还没过**（[#1299](https://github.com/bigbigraydeng-maker/magic-engine/issues/1299)，
-   需要 PM 本人上传公司证件）——这个不卡继续把上面两步做完，但卡"这条 WhatsApp 线真正在
-   Meta 那边生效、开始收到消息"这一天。
+3. **卡的不是 NAL 自己的企业身份，是"魔法引擎"自己这个技术服务方的身份**（2026-09-21 PM
+   纠正：NAL 自己的企业身份验证是通过的）——[#1299](https://github.com/bigbigraydeng-maker/magic-engine/issues/1299)
+   说的是 Magic Engine 自己在 Meta 开发者后台注册的那个应用（`1752513682785923`）还没通过
+   Meta 对"技术服务提供方"这一层的身份核实，需要 PM 本人上传我们公司的证件。这一层过不了，
+   上面第2条要加的 `whatsapp_business_management` 权限就申请不下来——跟 NAL 自己有没有验证
+   过完全是两件事，NAL 验证过也没用，因为要验证的是我们。这一步不卡继续做前两步，但卡
+   "这条 WhatsApp 线真正在 Meta 那边生效、开始收到消息"这一天。
 
 **下一步（三选一都要 PM 拍板，不是技术选择）**：
 - [ ] PM 决定：要不要把 `20260902000002_whatsapp_phone_number_id.sql` 这个已合并到主分支、
