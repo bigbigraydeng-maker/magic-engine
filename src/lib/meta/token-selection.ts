@@ -205,7 +205,14 @@ export async function resolveMetaTokenDetailed(
 
   const fallbackToken = env.META_SYSTEM_USER_TOKEN
   const fallback = fallbackToken ? { token: fallbackToken, source: 'shared_fallback' as const } : null
-  if (error || !data) return fallback
+  // A read ERROR is not the same as "this client doesn't exist" (`!data`, no
+  // error): the row might carry a domain/Page key this client owns, we just
+  // couldn't check. Falling back to the shared token here would swap that
+  // client onto a token that sees MORE clients than intended — the exact
+  // failure mode the peers-read-error branch below already fails closed on
+  // (chatgpt-codex-connector review, 2026-09-21).
+  if (error) return 'ownership_unknown'
+  if (!data) return fallback
 
   // The ownership read is skipped when no scoped env var exists for this client's keys anyway.
   const row = data as TokenOwnerRow
