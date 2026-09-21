@@ -73,7 +73,7 @@ describe('托管 Meta 广告分析',()=>{
     mocks.callClaudeChat.mockResolvedValue({ text:'中文报告',input_tokens:500,output_tokens:200,cost_usd:0.0045,stop_reason:'end_turn' })
     const result=await generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id)
     expect(result.status).toBe('completed')
-    expect(mocks.callClaudeChat).toHaveBeenCalledWith(expect.objectContaining({ model:'claude-sonnet-test',singleAttempt:true,maxOutputTokens:1200 }))
+    expect(mocks.callClaudeChat).toHaveBeenCalledWith(expect.objectContaining({ model:'claude-sonnet-test',singleAttempt:true,maxOutputTokens:2800 }))
     expect(mocks.activeConnection).toHaveBeenCalledTimes(4)
     expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_authorize_sponsored_analysis',{
       tenant:'a1000000-0000-4000-8000-000000000001',principal:'50000000-0000-4000-8000-000000000001',job:'job-1',

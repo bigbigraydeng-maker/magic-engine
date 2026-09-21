@@ -65,6 +65,7 @@ export default function MetaAdsScreen(props: { clientId:string;outcome?:string }
   const { state,busy,busyMessage,error,accounts,setAccounts,connection,setConnection,selected,setSelected,partial,setPartial,discovered,setDiscovered,run,post,connect,load,live,activeGrants }=useConnector(props)
   const button='rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-40'
   const canStart=state.pilot.new_actions_allowed
+  const latestAnalyses=state.analyses.filter((analysis,index,all)=>all.findIndex(candidate=>candidate.ad_account_id===analysis.ad_account_id)===index)
   return <main className="mx-auto max-w-3xl space-y-8 p-6">
     <header><p className="text-sm text-slate-500">Magic Engine · 免费广告分析邀请测试</p><h1 className="text-3xl font-semibold">Meta 广告 → AI</h1>
       <p className="mt-3">连接 Facebook 和 Instagram 广告账户后，点击按钮即可生成中文分析报告。系统只能读取数据，不能修改、暂停、发布或删除任何广告。</p></header>
@@ -96,7 +97,7 @@ export default function MetaAdsScreen(props: { clientId:string;outcome?:string }
         await post({ action:'generate_analysis',grant_id:g.id })
       },'正在读取最近 7 天广告数据并生成中文报告，请不要关闭页面…')}>生成 {g.ad_account_id} 的近 7 天分析</button>)}
       {activeGrants.length===0 && <p className="rounded bg-slate-50 p-3 text-slate-700">请先完成上面的 Facebook 连接和广告账户选择。</p>}
-      {state.analyses.map(a=><article key={a.id} className="space-y-3 rounded border p-4">
+      {latestAnalyses.map(a=><article key={a.id} className="space-y-3 rounded border p-4">
         <div><p className="font-medium">广告账户：{a.ad_account_id}</p><p className="text-sm text-slate-600">分析期间：{a.window_since} 至 {a.window_until}</p></div>
         {a.status==='completed' && <div className="whitespace-pre-wrap leading-7">{a.report_markdown}</div>}
         {a.status==='no_data' && <p role="status">这个期间没有可分析的广告数据，因此没有产生 AI 分析费用。</p>}
