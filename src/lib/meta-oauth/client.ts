@@ -258,13 +258,27 @@ export async function exchangeMetaTokenFields(params: Record<string,string>, ver
     const res=await fetch(`https://graph.facebook.com/${version}/oauth/access_token?${query}`,{
       method:'GET',redirect:'error',cache:'no-store',signal:AbortSignal.timeout(12_000),
     })
-    if (!res.ok) return null
+    if (!res.ok) {
+      // Never log the query (carries client_secret) or the body (may echo request params) — only
+      // the status, so a 2026-09-21 production mystery (both exchanges succeeded with a token but
+      // neither had a usable expires_in) doesn't repeat as another unexplained failure.
+      console.warn('[meta-oauth] token exchange non-OK response',{ version,grantType:params.grant_type ?? 'authorization_code',status:res.status })
+      return null
+    }
     const body=await res.json() as { access_token?:unknown; expires_in?:unknown }
-    if(typeof body.access_token!=='string') return null
+    if(typeof body.access_token!=='string') {
+      console.warn('[meta-oauth] token exchange missing access_token',{ version,grantType:params.grant_type ?? 'authorization_code',responseKeys:Object.keys(body) })
+      return null
+    }
     const seconds=Number(body.expires_in)
     // Meta returns expires_in:0 to mean "this token does not expire" (documented for some
     // long-lived exchanges) — that is a real signal, not a missing value, so 0 must pass through
     // rather than collapse to null alongside genuinely absent/invalid values.
-    return { token:body.access_token,seconds:Number.isFinite(seconds) && seconds>=0 ? seconds : null }
+    const usable=Number.isFinite(seconds) && seconds>=0
+    if(!usable) {
+      console.warn('[meta-oauth] token exchange expires_in unusable',{ version,grantType:params.grant_type ?? 'authorization_code',
+        responseKeys:Object.keys(body),hasExpiresInKey:'expires_in' in body,expiresInType:typeof body.expires_in,expiresInRaw:body.expires_in })
+    }
+    return { token:body.access_token,seconds:usable ? seconds : null }
   } catch { return null }
 }
