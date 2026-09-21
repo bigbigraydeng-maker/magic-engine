@@ -5,6 +5,32 @@
 
 ---
 
+### 2026-09-22（CTS 圣诞团 ThruPlay 上线 + Meta 授权修复 + Reborn 留资表单 v4 A/B 测试 + 新增 D9 自动检测：纯播放广告漏排除 Audience Network）
+
+PM 拍板打开的圣诞团专属 ThruPlay 广告（官方账户 `act_2202695063810470`）三层从 PAUSED 改 ACTIVE，
+核实后确认 CTS 两个 Meta 广告账户当前合计每天花费 $130 纽币（$150 上限内）。核实过程中发现 CTS 域名专属
+Meta 令牌已失效（Facebook 判定会话失效），PM 重新走授权流程生成新口令，已换成长期有效版并验证两个账户
+均可读。Reborn 留资广告组新增一版留资表单（v4，多问"出行时间"+"每人预算"两题）+ 一条新广告 A/B 测试，
+共用现有预算，不加新花费。
+
+核查 ThruPlay 完播率时发现命中 `docs/PITFALLS.md` D9 那个已知坑——新广告因建时未排除 Audience Network
+版位，次日 95%+ 花费落入假用户；追查到同一模式在更早的 ThruPlay 系列广告上已持续存在（$454 纽币基本
+打水漂）。已修复圣诞团 ThruPlay 的投放位置（只投 Facebook/Instagram），并把这条检测规则写成新的只读
+诊断 D9（PR [#1874](https://github.com/bigbigraydeng-maker/magic-engine/pull/1874) 已合并），接进已在跑
+的每日内部诊断日报；CTS 日检手册（PR [#1873](https://github.com/bigbigraydeng-maker/magic-engine/pull/1873)
+已合并）同步补了一条不依赖数据库快照表的临时排查步骤。
+
+D9 已知限制：目前打不到共用账户（CTS 跟 Oztop/30 Kiteroa 共用的个人账户 `act_2775766642787274`
+整层跳过广告组设置抓取），已记入 ROADMAP。
+
+- 审计/操作留痕：`~/Documents/ME-backfill-backups/cts-thruplay-activate-20260921/`
+
+**Reuse Statement**：D9 复用既有诊断框架（`context.ts`/`types.ts`/`run.ts` 的编排模式，跟 D1/D7/D8
+同一套 `Diagnosis` 契约），新增的只有这一条规则文件 + `targeting_summary` 补一个字段（平台共享，无客户
+语义）；ThruPlay 开关、令牌刷新、表单 A/B 测试全部是 CTS 一个客户的配置/内容操作，未写入共享代码。
+
+---
+
 ### 2026-09-21（CTS AI 可见度：地域锚点补配生效，9-20 回填按新规则复算完毕）
 
 2026-09-20 合并的「地域锚点」判定闸门（PR #1857）上线后 CTS 一直没配上锚点词，闸门形同虚设。
