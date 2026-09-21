@@ -100,7 +100,7 @@ export function buildReelSource(
       fit: 'cover',
       brightness: 0.2,
     },
-    // Scene 3 — CTA (9–12 s): call to action
+    // Scene 3 — CTA (9–12 s): call to action; fade out audio+video before brand screen
     {
       type: 'video',
       track: 3,
@@ -111,6 +111,7 @@ export function buildReelSource(
       trim_duration: CTA_CLIP_S,
       fit: 'cover',
       brightness: 0.3,
+      fade_out: 1.5,
     },
     // Brand name — persistent across all scenes
     {
@@ -191,6 +192,7 @@ export function buildReelSource(
       x_anchor: '50%', y_anchor: '50%',
       width: '100%', height: '100%',
       fill_color: '#1A1614',
+      fade_in: 0.5,
     },
     ...(ending.logoUrl
       ? [{
