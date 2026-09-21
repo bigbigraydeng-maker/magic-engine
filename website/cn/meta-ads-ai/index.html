@@ -109,16 +109,16 @@
     <section class="nm-section pilot-flow-section" id="how-it-works" aria-labelledby="flow-title">
       <div class="nm-shell">
         <div class="pilot-heading pilot-heading-light">
-          <span class="nm-eyebrow">与你看到的视频封面是同一套结构</span>
-          <h2 id="flow-title">授权数据 → AI 分析 → 行动建议</h2>
-          <p>获邀后才连接真实账户。你先完成 Meta 官方只读授权并选择账户，再把本轮已验证的分析工具连接到 AI 客户端。</p>
+          <span class="nm-eyebrow">获邀后的使用方法</span>
+          <h2 id="flow-title">连接 Facebook → 选择广告账户 → 生成中文报告</h2>
+          <p>获邀后打开企业专属页面，按三个中文步骤操作即可。无需安装软件，也无需准备自己的 AI 账号。</p>
         </div>
         <div class="pilot-flow">
-          <article><span>01</span><h3>授权数据</h3><p>在 Meta 官方页面完成只读授权，选择本企业的广告账户。</p></article>
+          <article><span>01</span><h3>连接 Facebook</h3><p>在 Meta 官方页面完成只读授权，不提供 Facebook 密码给 Magic Engine。</p></article>
           <i aria-hidden="true"></i>
-          <article class="pilot-flow-core"><span>02</span><h3>AI 分析</h3><p>用中文提问，先确认账户、日期、币种、时区和统计口径。</p></article>
+          <article class="pilot-flow-core"><span>02</span><h3>选择广告账户</h3><p>只选择本次允许 Magic Engine 读取的一个广告账户。</p></article>
           <i aria-hidden="true"></i>
-          <article><span>03</span><h3>行动建议</h3><p>看到先做什么、为什么，以及怎样判断这一步有没有用。</p></article>
+          <article><span>03</span><h3>生成近 7 天分析</h3><p>点击一次按钮，直接在页面查看中文报告和核查重点。</p></article>
         </div>
         <div class="pilot-loop" aria-label="测试反馈闭环">
           <span>提出真实问题</span><b>→</b><span>核对关键数字</span><b>→</b><span>记录行动</span><b>→</b><span>反馈结果</span>
@@ -148,7 +148,7 @@
             <li>不代投，不承诺询盘增长或成交归因</li>
             <li>分析结果用于核查，不替代专业投放判断</li>
           </ul>
-          <p>断开本工具后会停止后续读取；Meta 平台上的应用授权和 AI 服务里的历史内容需要分别管理。</p>
+          <p>断开本工具后会停止后续读取；Meta 平台上的应用授权需要在 Meta 中另行管理。已经生成的报告可联系 Magic Engine 查询或删除。</p>
         </aside>
       </div>
     </section>
@@ -195,7 +195,7 @@
           <span class="nm-eyebrow">申请免费内测</span>
           <h2 id="apply-title">告诉我们，你最想看懂什么。</h2>
           <p>填写本轮筛选和联系所需信息即可。报名不代表立即开通，也不需要提供 Meta 密码或广告报表。</p>
-          <p class="nm-note">本轮连接服务免费，所选 AI 服务的订阅或调用费用另计。当前已完成 Codex 真实链路验证，其他 AI 客户端按实际兼容结果安排。具体名额和测试起止日期以正式邀请为准。</p>
+          <p class="nm-note">本轮邀请额度内的连接和中文报告由 Magic Engine 承担费用，不需要你另行购买 AI 订阅。具体名额、可生成次数和测试起止日期以正式邀请为准。</p>
         </div>
 
         <div>
@@ -214,7 +214,6 @@
               <div class="nm-field"><label for="pilot-access">账户读取授权条件 <span class="nm-required">*</span></label><select id="pilot-access" name="accessReadiness" required><option value="">请选择</option><option>我可以授权</option><option>管理员可配合</option><option>尚不确定</option><option>还没有账户</option></select></div>
               <div class="nm-field"><label for="pilot-analysis">目前怎样理解广告表现 <span class="nm-required">*</span></label><select id="pilot-analysis" name="currentAnalysis" required><option value="">请选择</option><option>自己看，但难理解</option><option>看代理报告，但希望看懂依据</option><option>没有固定方法</option><option>已有成熟分析支持</option></select></div>
               <div class="nm-field nm-field-wide"><label for="pilot-question">最想弄清的一个问题 <span class="nm-required">*</span></label><textarea id="pilot-question" name="question" required maxlength="200" placeholder="例如：上周花费上升，主要增加在哪些广告？"></textarea></div>
-              <div class="nm-field"><label for="pilot-ai">常用的 AI 客户端 <span class="nm-note">可选</span></label><input id="pilot-ai" name="aiClient" type="text" placeholder="没有也可以申请" maxlength="80"></div>
               <div class="nm-field"><label for="pilot-contact-time">方便联系的时间 <span class="nm-note">可选 · 北京时间</span></label><select id="pilot-contact-time" name="contactTime"><option value="">请选择</option><option>工作日白天</option><option>工作日晚间</option><option>另约</option></select></div>
               <div class="nm-field nm-field-wide"><label for="pilot-participation">愿意怎样参与 <span class="nm-required">*</span></label><select id="pilot-participation" name="participation" required><option value="">请选择</option><option>有数据，可做两次使用及反馈</option><option>暂无数据，可先参加访谈</option><option>暂时只能候补</option></select></div>
               <div class="nm-honeypot" aria-hidden="true"><label for="pilot-company-website">请留空</label><input id="pilot-company-website" name="companyWebsite" type="text" tabindex="-1" autocomplete="off"></div>
@@ -228,7 +227,7 @@
             <span class="pilot-receipt-mark" aria-hidden="true">✓</span>
             <span class="nm-eyebrow">申请已收到</span>
             <h3 id="receipt-title"><span data-receipt-name>你好</span>，我们会分批审核。</h3>
-            <p>报名不会自动开通广告数据读取权限。符合本轮方向的企业会先进入候选名单；正式邀请会说明测试时间、可用 AI 客户端和专属连接方式。</p>
+            <p>报名不会自动开通广告数据读取权限。符合本轮方向的企业会先进入候选名单；正式邀请会说明测试时间、可生成次数和企业专属连接方式。</p>
             <p class="pilot-note">准备投放、暂时没有数据的企业，会优先安排需求访谈，不要求为了测试额外增加广告花费。</p>
           </section>
         </div>
@@ -241,10 +240,10 @@
         <div class="nm-faq">
           <details><summary>这是代投广告服务吗？</summary><p>不是。工具只读取你选定账户的广告数据，不创建广告、不修改预算、不暂停或发布广告。投放调整仍由你和获授权的专业人员决定。</p></details>
           <details><summary>能告诉我广告带来了多少成交吗？</summary><p>本轮不能承诺。Meta 记录的平台线索或购买事件不等于销售核实的有效询盘和实际成交；本轮不读取 CRM，也不做跨渠道成交归因。</p></details>
-          <details><summary>一定要用 Codex 吗？</summary><p>不限定某一家 AI。当前已完成 Codex 真实链路验证；其他支持外部工具连接的 AI 客户端正在逐个确认。邀请时会说明本轮实际可用的方式。</p></details>
+          <details><summary>需要自己准备 AI 账号吗？</summary><p>不需要。本轮中文报告直接在 Magic Engine 的企业专属页面生成和查看，所有操作都在页面内完成。</p></details>
           <details><summary>还没开始投广告，可以报名吗？</summary><p>可以。有外贸产品和海外市场、正在准备投放的企业可先参加需求访谈。没有历史数据时不会生成真实效果分析，也不要求为参加测试新增投放。</p></details>
-          <details><summary>本轮免费包含什么？</summary><p>广告数据连接服务和首次连接引导免费，建议测试两周。所选 AI 服务自己的订阅或调用费用另计；测试到期默认停止读取，不自动转收费。</p></details>
-          <details><summary>断开连接后会发生什么？</summary><p>本工具会停止后续读取，广告不会被修改。Meta 平台上的应用授权以及已经进入 AI 服务的历史内容不会在此自动删除，需要分别前往对应服务管理。</p></details>
+          <details><summary>本轮免费包含什么？</summary><p>邀请额度内包含广告数据连接、首次连接引导和近 7 天中文报告，相关 AI 分析费用由 Magic Engine 承担。测试到期默认停止读取，不自动转收费。</p></details>
+          <details><summary>断开连接后会发生什么？</summary><p>本工具会停止后续读取，广告不会被修改。Meta 平台上的应用授权需要在 Meta 中另行撤销；已经生成的报告可联系 Magic Engine 查询或删除。</p></details>
         </div>
       </div>
     </section>
