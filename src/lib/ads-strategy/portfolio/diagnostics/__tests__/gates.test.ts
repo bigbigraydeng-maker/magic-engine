@@ -132,7 +132,9 @@ describe('D7 授权/数据体检（只读，只下发人工任务）', () => {
     const acc = accountInput({ fixture: CTS, snapshots: snaps, daily: ctsDaily, hourly: ctsHourly, lastInsightDate: '2026-09-08' })
     const ext = run(acc, '2026-09-08', '2026-09-08T23:00:00Z', { digestRecipients: ['team@magicengine.com.au', 'boss@client-example.co.nz'] })
     expect(ext.diagnoses.find(d => d.code === 'D7')?.evidence.external_recipients).toBe(1)
-    expect(run(acc, '2026-09-08', '2026-09-08T23:00:00Z').diagnoses).toEqual([])
+    // 全内部收件人时没有 D7 命中——但 GC 顶层 ThruPlay 广告组本身就没排除 Audience Network（真实存在，
+    // D9 2026-09-22 补规则后才抓出来），跟收件人这条测的事无关，不能再断言零诊断。
+    expect(run(acc, '2026-09-08', '2026-09-08T23:00:00Z').diagnoses.filter(d => d.code === 'D7')).toEqual([])
   })
 
   it('结果阶梯没配 → 命中（D3/D5 会一直判不了）', () => {
