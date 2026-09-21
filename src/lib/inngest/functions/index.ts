@@ -18,6 +18,7 @@ import { postPublishFanOut, postPublishCheck } from './seo-post-publish-monitor'
 import { seoMetaCycleFanOut, seoMetaCycleRunOne } from './seo-meta-cycle'
 import { competitorWatchWeeklyFanOut, competitorWatchRunOne } from './competitor-watch-weekly'
 import { aiVisibilityWeeklyFanOut, aiVisibilityTrackerRunOne } from './ai-visibility-weekly'
+import { reelBatchRender } from './reel-batch-render'
 
 export const cloudFunctions = [
   webIntelligenceCapture,
@@ -46,6 +47,7 @@ export const cloudFunctions = [
   competitorWatchRunOne,
   aiVisibilityWeeklyFanOut,
   aiVisibilityTrackerRunOne,
+  reelBatchRender,
 ]
 
 /** 命名空间自检：所有注册函数 id 必须以 cloud- 开头（契约测试 + 运行期双保险）。 */
