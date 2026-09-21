@@ -94,23 +94,29 @@ async function uploadAndInsertAsset(
 
   const { data: { publicUrl } } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(storagePath)
 
-  // 写 client_assets
+  // 写 client_assets（表里没有 asset_type/tags/metadata 列；扩展信息放 vision_metadata）
   const { data: asset, error: dbErr } = await supabaseAdmin
     .from('client_assets')
     .insert({
       client_id: clientId,
-      asset_type: 'reel',
       storage_url: publicUrl,
+      original_filename: `reel-${item.tag}-branded.mp4`,
       mime_type: 'video/mp4',
       file_size_bytes: buf.length,
-      tags: ['reel', 'branded', item.serviceName.toLowerCase().replace(/\s+/g, '-')],
-      metadata: {
+      status: 'analyzed',
+      source: 'creatomate-batch',
+      ownership: 'client_exclusive',
+      hook_score: 0,
+      middle_score: 0,
+      cta_score: 0,
+      vision_metadata: {
+        asset_type: 'reel',
         service: item.serviceName,
-        source: 'creatomate-batch',
         batch_tag: item.tag,
         creatomate_render_id: item.renderId,
         // CTA 不再烧进画面（Meta Reel 安全区限制），交发帖 caption 步骤使用
         cta: item.cta,
+        ai_notes: `Branded Reel for service: ${item.serviceName}`,
       },
     })
     .select('id')
