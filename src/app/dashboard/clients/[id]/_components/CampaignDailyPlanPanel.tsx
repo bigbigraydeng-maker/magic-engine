@@ -418,10 +418,10 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
                       <img
                         src={selectedBundle.post_image.preview_url}
                         alt={selectedBundle.post_image.filename ?? 'Post image'}
-                        className="w-full h-32 object-cover rounded mb-2"
+                        className="w-full aspect-[4/5] object-cover rounded mb-2"
                       />
                     ) : (
-                      <div className="w-full h-32 rounded mb-2 bg-me-ivory flex items-center justify-center">
+                      <div className="w-full aspect-[4/5] rounded mb-2 bg-me-ivory flex items-center justify-center">
                         <span className="text-[10px] text-me-charcoal/40 italic">未绑定 Post 图片</span>
                       </div>
                     )}
