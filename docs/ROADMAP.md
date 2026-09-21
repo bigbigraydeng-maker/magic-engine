@@ -23,10 +23,10 @@
 
 ## CTS 网站新团「Natural China」草稿页 · 待 PM/客户确认后合并（2026-09-21）
 
-- [ ] chinatravel 仓库草稿 PR [#204](https://github.com/bigbigraydeng-maker/chinatravel/pull/204)（分支 `feat/natural-china-tour-page`，`isActive: false`，未上线）：客户微信提供的"Natural China"团行程已转成 `src/lib/data/tours.ts` 的 `natural-china` 团页条目，格式跟着 `golden-china` 走
-- [x] 天数出入已确认：PM 2026-09-21 拍板这条团就是 14 天，客户文档标题写"15-Day"是文档本身写错了，页面按 14 天保留
+- [ ] chinatravel 仓库草稿 PR [#204](https://github.com/bigbigraydeng-maker/chinatravel/pull/204)（分支 `feat/natural-china-tour-page`，`isActive: false`，未上线）：客户微信提供的"Natural China"团行程已转成 `src/lib/data/tours.ts` 的 `natural-china` 团页条目，格式跟着 `golden-china` 走。天数出入已定案（背景，非待办）：PM 2026-09-21 拍板这条团就是 14 天，客户文档标题写"15-Day"是文档本身写错了，页面按 14 天保留，不用再替客户补第 15 天
 - [ ] **缺价格、缺确切发团日期** —— 两项客户文档都没给，页面上先写"待确认"，PM/客户补齐后才能把 `isActive` 改成 true 并合并上线
-- [x] 配图缺口已补：PM 2026-09-21 拍板去网上免费图库找，已加长江三峡（宜昌江段）、李子坝穿楼轻轨（楼上有"李子坝站"字样）、洪崖洞夜景（楼上有"洪崖洞"霓虹招牌）三张真实照片，逐张肉眼核对过跟地名对得上才收进来
+- [x] 配图缺口已补：长江三峡、李子坝穿楼轻轨已改成直接复用 magic-engine 仓库 `templates/tailor-made-itinerary/heroes/` 里早就核实过的 `yangtze-gorges-detail.jpg`（Dong Zhang，Unsplash License）与 `liziba.jpg`（2026-08-30 `4ba2b8b3` 那次的「CTS 自有」素材），没有另外重复找图；洪崖洞夜景该目录里现成的 `chongqing.jpg` 出处未核实（见下一条），改用新找的一张来源明确的 Unsplash 照片（楼上"洪崖洞 HONGYA CAVE"霓虹招牌清晰可见），三张图都已进 chinatravel PR #204
+- [ ] **`chongqing.jpg`（magic-engine `templates/tailor-made-itinerary/heroes/`）出处仍未核实，先别公开导回、也别在别的地方复用**——它早在 2026-08-03 `5e664f70` 就已入库，提交说明称取自 `public/blog/chongqing-night-skyline-hongyadong.jpg`，但该路径在 magic-engine 和已知关联仓库里都查不到任何提交记录，`CREDITS.json` 里也没有它的条目，且画面里洪崖洞本身只是远景小角落，就算出处补上也不是「洪崖洞」这个地名的好配图。Natural China 团页已经用另一张来源明确的替代图绕开了这个坑，但 `hero-rules.ts` 里 `chongqing` 这个键指向的还是这张问题图，后面谁用到这个键都会踩同一个坑——建议直接拿 chinatravel PR #204 里这张新图（含来源）去补 `CREDITS.json` 并替换掉 `chongqing.jpg`，而不是留着这张图等下一次踩坑才发现
 
 Reuse Statement：复用了 `chinatravel` 仓库既有的团页数据结构（`Tour` 接口）、路由（`/tours/china/discovery/<slug>`）与已核实过的图片池（豫园夜景/熊猫/天门山玻璃栈道），没有新建组件或新表；这条团本身是客户特供内容（client-specific），不涉及平台共享层改动。
 
