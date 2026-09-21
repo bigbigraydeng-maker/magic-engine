@@ -57,7 +57,7 @@ Tier Classification：既有 Ads 支柱下 L3 Meta Connector + 共享身份/工�
 
 默认 `META_ADS_AI_ENABLED` 未设 = OFF。`META_ADS_AI_GRAPH_VERSION` 必须由发布验证显式固定受支持版本（例如测试 fixture 用 v21.0；这不是承诺该版本适用于生产）。复用 FACEBOOK_APP_ID、FACEBOOK_APP_SECRET、CMS_TOKEN_ENCRYPTION_KEY、NEXT_PUBLIC_APP_URL（HTTPS）。没有新增依赖。
 
-独立审批后才可执行的顺序：审核 SQL → **先在 staging 应用 schema** → 写入明确到期时间的测试客户 entitlement → staging 部署代码且保持全局开关关闭 → 配置确切 redirect URI → 开启 staging 全局开关 → 真实外部账户验证 → 非 Codex 客户端验证/普通用户配置演练 → 再决定是否扩大邀请。由于代码会读取 `purpose`、`authorizing_principal_id`、`expires_at` 和 entitlement 表，**schema 必须先于代码部署，即使 feature 关闭**。本次仅生成 SQL，没有应用到远程库。
+发布顺序：审核 SQL → **先在 staging 应用 schema** → 写入明确到期时间的测试客户 entitlement → staging 部署代码且保持全局开关关闭 → 配置确切 redirect URI → 开启 staging 全局开关 → 真实外部账户验证 → 普通客户三步流程演练 → 再决定是否扩大邀请。由于代码会读取 `purpose`、`authorizing_principal_id`、`expires_at` 和 entitlement 表，**schema 必须先于代码部署，即使 feature 关闭**。Preview schema 已应用并完成真实只读验证；生产仍未应用。
 
 邀请由受控运维 SQL 写入，不提供客户自助开启接口：
 
@@ -75,18 +75,19 @@ on conflict (client_id) do update set
 
 1. 核实 Meta Business Verification、Marketing API Advanced Access / ads_read App Review、Live mode、privacy/deletion/deauthorisation URLs 与 Data Use Checkup；不能由代码测试推断已获批准。
 2. Meta 外部非 app-role 用户 OAuth → account → eight tools → revoke 的实测（含 token 过期/权限撤销和真实归因口径）。
-3. 至少一个非 Codex 客户端完成实际连接/读数，补具体客户端配置指引及成功读数反馈；当前 key/manual settings 只能称技术 pilot。不能承诺任意 AI/中国大陆任意网络均即连即用。
+3. 在稳定 HTTPS 测试域名上，由真实受邀客户完成“连接 Facebook → 选择广告账户 → 生成近 7 天中文报告”或当前关闭模型时的明确暂停状态、断开和重新连接。普通客户不依赖 Codex 或外部 AI 客户端；开发者 MCP/HTTPS 兼容性另行验证，不作为邀请客户步骤。不能承诺中国大陆任意网络均可直接访问 Meta。
 4. 现有 repository 全量 type/lint 基线失败需由主线治理处理；本 PR 的受影响文件检查独立报告。
 
-回退：关闭 `META_ADS_AI_ENABLED` 会立即阻止新 OAuth、账户发现/绑定、密钥创建，以及 MCP/HTTPS 读取；已有受邀/历史客户仍能打开中文状态页并撤销 connection、grant 和 key。保留新增表及 legacy 默认，不破坏旧连接，也不回滚 schema。**关闭 flag 不是数据库 schema 回滚，也不能把应用直接回滚到不识别 purpose / entitlement revision 的旧版本；应用回滚必须使用兼容这些列和隔离规则的版本。**撤销 ME connection/key 会阻止 Magic Engine 后续读取，但不会自动撤销 Facebook“业务集成”中的应用授权，也不会删除第三方 AI 已保存的聊天记录；页面提供明确说明和数据请求邮箱。
+回退：先关闭客户的 `sponsored_analysis_enabled`，立即阻止新的托管模型调用；再关闭 `META_ADS_AI_ENABLED`，阻止新 OAuth、账户发现/绑定、密钥创建以及 MCP/HTTPS 读取。已有受邀/历史客户仍能打开中文状态页并撤销 connection、grant 和 key。保留新增表及 receipt，不做破坏性 schema 回滚。**关闭 flag 不是数据库 schema 回滚，也不能把应用直接回滚到不识别 purpose / entitlement revision 的旧版本；应用回滚必须使用兼容这些列和隔离规则的版本。**撤销 ME connection/key 会阻止 Magic Engine 后续读取，但不会自动撤销 Facebook“业务集成”中的应用授权，也不会自动删除 Magic Engine 已生成的报告；页面提供明确说明和数据请求邮箱。
 
 ## 验证记录
 
-- 最终受影响回归：100 tests / 11 files，通过；包括 entitlement revision、OAuth owner scope、management provider-return recheck、原子 read/discovery release authorization、per-key receipt、MCP/HTTPS 和中文入口。
-- 临时独立 PostgreSQL：63 checks，通过；覆盖 terminal invitation→re-invite 旧 key 拒绝/新 key 有效、原子 read/discovery 的 key/grant/connection/principal/entitlement 决策、grant owner 的直接 UPDATE / ON CONFLICT 接管拒绝、双向新旧 writer 竞争、两个 public tenant、repeatable-read、disconnect/reconsent、nonce、真实 RLS/ACL 及并发限流。脚本自行创建/销毁本地 cluster，不接受数据库 URL。
-- 266 个 migration 在空库按序重放成功，全部数据库安全不变量通过。
+- 当前 Meta Ads AI 受影响回归：93 tests / 12 files，通过；包括 entitlement revision、OAuth owner scope、management provider-return recheck、原子 read/discovery release authorization、MCP/HTTPS、托管分析、中文客户页、登录页和招募/隐私文案。
+- 临时独立 PostgreSQL：89 checks，通过；覆盖 terminal invitation→re-invite 旧 key 拒绝/新 key 有效、原子 read/discovery 的 key/grant/connection/principal/entitlement 决策、grant owner 的直接 UPDATE / ON CONFLICT 接管拒绝、双向新旧 writer 竞争、两个 public tenant、repeatable-read、disconnect/reconsent、nonce、真实 RLS/ACL、并发限流和托管分析预算边界。脚本自行创建/销毁本地 cluster，不接受数据库 URL。
+- 270 个 migration 在空库按序重放成功，全部数据库安全不变量通过。
 - 架构、安全、非技术体验独立审查完成；发现的读取尾部撤权、历史 key 管理、per-key 回执、刷新与中文错误恢复问题已修复并加断言。独立攻击验证另补记录。
 - Jev + CUA 合成组件 smoke：发现账户→选择→连接→生成虚构key→隐藏/撤销，通过；原生 select 接管一次。只验证真实组件+虚构fetch，不是 Meta OAuth 或部署 E2E。Jev本地观察记录已保存。
+- 2026-09-21 Preview GET-only smoke 再次通过：真实 CTS grant/connection active、token 未过期、provider 账户身份匹配、NZD、Pacific/Auckland；赞助分析关闭且模型调用为零。邀请登录页经 Jev 刷新和 CUA 独立状态复核，三步中文文案通过；因本地 session 过期，没有输入凭据重复登录。
 - 修改范围 ESLint：23 个 TS/TSX 文件通过；新增 policy TO 子句检查、git diff --check 通过。
 - Type-check：仅原有 7 项（Messenger test usedAiDraft ×4，workflow-guards WorkflowStep.env ×3）；无新增类型错误。
 - `npm run build`：成功（使用明确虚构 Supabase 配置，未提供生产环境文件）；Next 配置本来跳过 type/lint，故分别运行并独立报告。

@@ -43,18 +43,18 @@ export default function LoginPage({ searchParams }: Props) {
   const loops = isMetaAdsAi ? [
     {
       icon: '🔒',
-      label: '只读授权',
-      body: '只能读取广告表现数据，不能修改预算、暂停、发布或删除广告。',
+      label: '1. 连接 Facebook',
+      body: '完成 Meta 官方只读授权。Magic Engine 不能修改预算、暂停、发布或删除广告。',
     },
     {
       icon: '🏢',
-      label: '客户隔离',
-      body: '每家公司、广告账户和 AI 密钥都独立绑定，避免数据串用。',
+      label: '2. 选择广告账户',
+      body: '只选择这次允许 Magic Engine 读取的一个广告账户。',
     },
     {
-      icon: '🤖',
-      label: '模型自由',
-      body: '连接支持 MCP 或 HTTPS 工具的 AI，不绑定某一家模型。',
+      icon: '📊',
+      label: '3. 生成中文报告',
+      body: '点击一次按钮，直接查看最近 7 天的广告分析和核查重点。',
     },
   ] : portalLoops
 
@@ -81,17 +81,17 @@ export default function LoginPage({ searchParams }: Props) {
             className="text-xs font-bold uppercase tracking-[0.16em] mb-5"
             style={{ color: '#BE8A2E' }}
           >
-            {isMetaAdsAi ? 'Meta 广告 AI 连接器' : 'Client portal'}
+            {isMetaAdsAi ? 'Meta 广告 AI 分析' : 'Client portal'}
           </div>
           <h1
             className="text-[2.6rem] font-black leading-[1.08] text-white"
             style={{ fontFamily: "'Fraunces', Georgia, serif", letterSpacing: '-.02em' }}
           >
-            {isMetaAdsAi ? <>把广告数据<br />连接到你的 AI。</> : <>Your visibility<br />dashboard.</>}
+            {isMetaAdsAi ? <>三步看懂<br />最近 7 天广告。</> : <>Your visibility<br />dashboard.</>}
           </h1>
           <p className="mt-4 text-sm leading-[1.75]" style={{ color: 'rgba(255,255,255,.60)' }}>
             {isMetaAdsAi
-              ? '一次 Facebook 授权，让 AI 安全读取并分析你的 Facebook 和 Instagram 广告数据。'
+              ? '登录后按中文提示完成连接、选择账户和生成报告。所有操作都在页面内完成。'
               : 'See your discovery report, track improvements, and approve every action — all in one place.'}
           </p>
 
