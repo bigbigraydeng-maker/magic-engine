@@ -17,8 +17,11 @@ describe('Meta Ads AI public Chinese copy',()=>{
 
   it('discloses hosted analysis data handling before customers connect',()=>{
     const privacy=websiteFile('privacy/index.html')
+    expect(privacy).toContain('公开报名，以及获邀后的托管分析流程')
     expect(privacy).toContain('最小广告汇总数据发送给托管 AI 模型')
     expect(privacy).toContain('不会收到你的 Facebook 密码、登录凭据或 Meta access token')
+    expect(privacy).toContain('模型费用由 Magic Engine 承担')
     expect(privacy).toContain('此前生成的报告')
+    expect(privacy).not.toContain('只适用于 Magic Engine“Meta 广告 AI 分析”邀请测试的公开报名表')
   })
 })
