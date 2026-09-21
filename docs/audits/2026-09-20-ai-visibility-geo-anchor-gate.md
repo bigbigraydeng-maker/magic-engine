@@ -169,7 +169,7 @@ npm run build                                          → ✓ Compiled successf
 | `orchestrator.loadClientContext` 那条查询（列不存在就会让每周任务整个挂掉的那条）| ✅ 正常返回 |
 | 诊断实时探针那条查询 | ✅ 正常返回 |
 | 33 个客户是否都还读得出来 | ✅ 33 行全部正常 |
-| 现在有几个客户配了锚点 | **0** —— 规则对所有客户都还是关的，要等 FDE 在后台填了才生效 |
+| 现在有几个客户配了锚点 | ~~0~~ **1（CTS，2026-09-21）** —— 见 [2026-09-21 复算记录](./2026-09-21-cts-ai-visibility-geo-anchor-recompute.md)，其余 32 个客户仍是关的 |
 
 **顺带发现的、不属于本次范围的问题**：生产库的 `brand_aliases` 是
 `NOT NULL DEFAULT '{}'`，而仓库里的 migration 写的是可空无默认 —— 生产 schema 跟仓库对不上。

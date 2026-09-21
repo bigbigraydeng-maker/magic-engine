@@ -15,6 +15,21 @@ PR [#1864](https://github.com/bigbigraydeng-maker/magic-engine/pull/1864) 已合
 
 ---
 
+### 2026-09-21（CTS AI 可见度：地域锚点补配生效，9-20 回填按新规则复算完毕）
+
+2026-09-20 合并的「地域锚点」判定闸门（PR #1857）上线后 CTS 一直没配上锚点词，闸门形同虚设。
+本次给 CTS 配上 `new zealand / nz / aotearoa / auckland` 四个地域词，并用新规则复算 9-20 回填的
+137 条 + 当时排除的 7 条：137 条零变化，7 条里 6 条本来就没错、1 条（`21dc3d0c`）历史误记的「排第 6」
+改成正确的「未提及」。PM 在窗口内本人回「开始」后执行，写前存了旧值底稿，可撤回。
+
+- 审计与执行记录：[2026-09-21-cts-ai-visibility-geo-anchor-recompute.md](../audits/2026-09-21-cts-ai-visibility-geo-anchor-recompute.md)
+
+**Reuse Statement**：复用 `src/lib/ai-tracker/client-brand-match.ts` 已合并的判定函数与
+`PATCH /api/clients/[id]/brand-geo-anchors` 同一套归一化校验，未新增代码；本次只是配置写入
+（CTS 一个客户）+ 1 行历史数据修正，client-specific 内容全部落在 `clients` 表 CTS 那一行。
+
+---
+
 ### 2026-09-21（Park Homes 官网：Greenview 加"工程日志"时间线 + "关于我们"页换上创始人真实肖像）
 
 PR [#1858](https://github.com/bigbigraydeng-maker/magic-engine/pull/1858) 已合并并部署，线上已核实。客户 Jason 2026-09-21 回信补了两样素材：4 张 Greenview 工地航拍 + 他本人的肖像照。逐张核对后发现 4 张全是施工现场（没有新效果图）；此前网站口径是"不放施工中照片"，但客户上周自己在 Riverside V2 里要求了"工程进度"板块，PM 拍板放，并提出把 Greenview 页做成"持续记录项目进展"的样子。实现：项目页新增 **Progress log**——按时间倒序的竖向时间线，由 `projects.js` 里的 `progress` 数组驱动，每条 = 收到的一批工地照（日期写"收到时间"，不推断拍摄/分期日期）+ 一段说明 + 最多 3 张 16:9 照片，末尾挂一条虚线的"More to come · 登记接收下次更新"。以后加一次更新只改数据。共用灯箱改为页面加载完再收集图片，并按每张图自己的图注显示（原来写死"Artist's impression"）。"关于我们"页创始人占位框换成客户提供的肖像（4:5，1000×1250）。验证：构建 20 页、灯箱对效果图和进度照各测一次、305px 窄屏无横向溢出（顺手修了图片 `height` 属性压过 `aspect-ratio` 导致照片被拉成竖条的问题）、上线后线上 4 张新图均 200。
