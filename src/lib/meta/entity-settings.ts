@@ -78,6 +78,8 @@ export interface GraphTargeting {
   geo_locations?: unknown
   age_min?: number
   age_max?: number
+  /** 未设置 = 留给 Meta「自动版位」，纯播放类优化目标下会把钱导去 audience_network 奖励视频（PITFALLS D9）。 */
+  publisher_platforms?: string[]
 }
 
 export interface GraphAdsetSettings {
