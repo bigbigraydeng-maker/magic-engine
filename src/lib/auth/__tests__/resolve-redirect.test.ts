@@ -131,6 +131,28 @@ describe('resolveRedirectForSession', () => {
     expect(redirect).toBe('/dashboard/clients/client-a/execution')
   })
 
+  it('preserves a Meta Ads AI deep link even when the email has an old scan job', async () => {
+    mocks.from
+      .mockReturnValueOnce(accessRows([]))
+      .mockReturnValueOnce(scanJobRow('scan-1'))
+
+    const safePath = '/meta-ads-ai/a1000000-0000-4000-8000-000000000001'
+    const redirect = await resolveRedirectForSession(authClient('lead@biz.com'), safePath)
+
+    expect(redirect).toBe(safePath)
+    expect(mocks.from).toHaveBeenCalledTimes(1)
+    expect(mocks.grantSignupBonus).not.toHaveBeenCalled()
+  })
+
+  it('keeps an explicit /prospect next target for a prospect user', async () => {
+    mocks.from.mockReturnValueOnce(accessRows([]))
+
+    const redirect = await resolveRedirectForSession(authClient('lead@biz.com'), '/prospect')
+
+    expect(redirect).toBe('/prospect')
+    expect(mocks.from).toHaveBeenCalledTimes(1)
+  })
+
   it('routes a prospect (scan job, no access) to /prospect', async () => {
     mocks.from
       .mockReturnValueOnce(accessRows([]))
