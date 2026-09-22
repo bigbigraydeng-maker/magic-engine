@@ -76,7 +76,12 @@ export async function bind(clientId: string,principalId: string,connectionId: st
   if(finalConnection.version!==connection.version || pilot.revision!==connection.entitlementRevision) throw new MetaReadError('authorization_changed',403)
   const { data,error } = await supabaseAdmin.from('meta_ads_read_grants').upsert({ client_id:clientId,connection_id:connectionId,
     ad_account_id:accountId,principal_id:principalId,entitlement_revision:pilot.revision,revoked_at:null },{ onConflict:'client_id,ad_account_id' }).select('id,ad_account_id').single()
-  if (error || !data) throw new MetaReadError('account_unavailable',409)
+  if (error || !data) {
+    // No client/token data here — client_id and the write outcome only — so this is safe to log
+    // while a real account_unavailable cause (2026-09-22, CTS/act_953025114498626) is unconfirmed.
+    console.warn('[meta-ads-ai] grant upsert failed',{ clientId,code:error?.code,message:error?.message,details:error?.details,hint:error?.hint })
+    throw new MetaReadError('account_unavailable',409)
+  }
   return data
 }
 export async function issueKey(clientId: string,principalId: string,grantId: string,email: string) {
