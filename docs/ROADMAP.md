@@ -27,8 +27,9 @@
 
 - **现象**：CTS Tours NZ 用 `hello@magicengine.cloud` 登录连好 Facebook 后，`bigbigraydeng@gmail.com` 用同一个 Facebook 账号（同一个 `ads_user:<fb_id>`）再连一次，UI 报"Facebook 授权已取消、已过期或未完成"，实际生产日志真实原因是 `connection owner is immutable`（`supabase/migrations/20260920235723_meta_ads_ai_schema_forward_fix.sql:315-326` 的触发器）——不允许把一条 `meta_ads_read` 连接的 `authorizing_principal_id` 改绑给另一个 Magic Engine 平台账号。这本身是有意的安全设计，不是 bug。
 - **真正的 bug**：`src/lib/meta/ai/manage.ts` 的 `revoke()`（type='connection' 分支）只把 `status` 改成 `revoked`，从不把 `authorizing_principal_id` 清空为 `null`。而上面那条触发器允许换人接手的唯一合法路径，恰恰要求 `OLD.authorizing_principal_id IS NULL`——现在的断开连接功能永远做不到这一步，导致"断开重连换人"这条路径在数据库层面根本走不通，连原来的 owner 自己断开重连也一样卡死。
-- **当前绕过办法**：换回最初完成 Facebook 授权的那个 Magic Engine 账号（本例是 `hello@magicengine.cloud`）操作，不要跨账号重连同一条连接。
-- **将来要修的话**：`revoke()` 的 connection 分支里，把 update payload 加上 `authorizing_principal_id: null`（可能还要看是否要一并清 `entitlement_revision`），再确认触发器允许这条 null 过渡本身不会被同一条规则拦下来（需要单独验证，这条 update 本身也会改变 `authorizing_principal_id`，要跟触发器逻辑对齐，不能想当然）。
+- **当前绕过办法（2026-09-22 当天实测：这条走不通）**：本以为换回最初完成 Facebook 授权的账号（`hello@magicengine.cloud`）操作就行，但客户当天全程用的是 `bigbigraydeng@gmail.com` 登录，一直没能真正切到 `hello@magicengine.cloud`（可能是拿不到那个登录邮箱的收信权限）。最终是 PM 授权后**直接 `DELETE` 掉那一条卡住的 `platform_oauth_connections` 记录**（`id=972589ac-d997-49ad-9b91-618db8ed0409`，`meta_ads_read_grants` 当时对应记录为空，级联删除无副作用）才解开，删完后不管哪个账号登录去连都是全新 `INSERT`，不会撞到这条触发器。
+- **原计划的修法已验证行不通**：以为 `revoke()` 只要在 update payload 里加 `authorizing_principal_id: null` 就行，但实测这条触发器的豁免条件要求 `OLD.status IN ('revoked','expired','error')`——而"清空归属人"这个动作，不管是紧跟着断开一起做、还是断开之后再单独做一次 update，那一刻的 `OLD.status` 要么还是 `active`、要么虽然是 `revoked` 但 `OLD.authorizing_principal_id` 依然不是 `null`，两种情况都会被同一条触发器拦下来报同样的 `connection owner is immutable`。**这条触发器目前没有任何合法的 `UPDATE` 路径能把归属人清空**——只有 `DELETE`（触发器只挂在 `UPDATE` 上）能跳出这个死循环。
+- **将来要修的话**：`revoke()` 的 connection 分支改成"断开时如果没有存量依赖就直接 `DELETE` 这一行"，而不是把 `status` 改成 `revoked`；如果业务上必须保留断开记录做审计，就要改这条触发器本身（放宽豁免条件，或者单独开一个"清空归属人"的专用 RPC，用 `SECURITY DEFINER` + 显式业务校验绕开这条 immutable 检查，而不是让业务代码去猜怎么绕）。
 
 ---
 
