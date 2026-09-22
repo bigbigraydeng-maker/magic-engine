@@ -152,10 +152,20 @@ export function createReelBatchRender() {
       // ── 第一步：提交小样渲染 ───────────────────────────────────────
       const previewIds = await step.run('submit-previews', async () => {
         const results: Array<{ tag: string; renderId: string }> = []
-        for (const reel of reels) {
-          const source = buildReelSource(reel as ReelSpec, template as ReelTemplate)
-          const { renderId } = await submitInlineRender({ source, width: PREVIEW_W, height: PREVIEW_H })
-          results.push({ tag: reel.tag, renderId })
+        try {
+          for (const reel of reels) {
+            const source = buildReelSource(reel as ReelSpec, template as ReelTemplate)
+            const { renderId } = await submitInlineRender({ source, width: PREVIEW_W, height: PREVIEW_H })
+            results.push({ tag: reel.tag, renderId })
+          }
+        } catch (err) {
+          // 把 Creatomate 报错写进 cron_run_logs，方便排查（不影响 Inngest 的失败语义）
+          const errMsg = err instanceof Error ? err.message : String(err)
+          console.error(`[reel-batch-render] submit-previews 失败: ${errMsg}`)
+          await cronRunHandle('reel-batch-render', runId, startedAt).finish({
+            error: `submit-previews: ${errMsg}`,
+          })
+          throw err
         }
         return results
       })
