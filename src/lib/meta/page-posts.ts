@@ -12,11 +12,12 @@ export interface PagePost {
   fullId: string       // "<page_id>_<post_id>"
   createdAt: string    // ISO
   message: string
-  mediaType: string    // 'video' | 'photo' | 'album' | 'link' | ...
+  mediaType: string    // 'video' | 'photo' | 'album' | 'link' | 'reel' | ...
   reactions: number
   comments: number
   shares: number
   score: number        // engagement score, see scorePost()
+  videoViews?: number  // lifetime video views; present for reels when insights are available
 }
 
 interface RawAttachment {
@@ -124,12 +125,35 @@ export function rankVideoWinners(
  *
  * Graceful: returns [] on any error (the edge/permission may vary per account).
  */
+interface RawReelInsightValue {
+  value: number
+}
+
+interface RawReelInsightItem {
+  name: string
+  values?: RawReelInsightValue[]
+}
+
+interface RawReel {
+  id: string
+  created_time?: string
+  description?: string
+  comments?: { summary?: { total_count?: number } }
+  insights?: { data?: RawReelInsightItem[] }
+}
+
 export async function fetchPageReels(
   pageId: string,
   pageAccessToken: string,
   limit = 50,
 ): Promise<PagePost[]> {
-  const fields = ['id', 'created_time', 'description', 'comments.filter(stream).summary(true).limit(0)'].join(',')
+  const fields = [
+    'id',
+    'created_time',
+    'description',
+    'comments.filter(stream).summary(true).limit(0)',
+    'insights.metric(post_video_views){values}',
+  ].join(',')
   const url = `${GRAPH_BASE}/${pageId}/video_reels?fields=${fields}&limit=${limit}&access_token=${encodeURIComponent(pageAccessToken)}`
 
   let res: Response
@@ -146,7 +170,7 @@ export async function fetchPageReels(
   }
 
   const body = (await res.json()) as {
-    data?: Array<{ id: string; created_time?: string; description?: string; comments?: { summary?: { total_count?: number } } }>
+    data?: RawReel[]
     error?: { message: string }
   }
   if (body.error) {
@@ -157,6 +181,8 @@ export async function fetchPageReels(
   return (body.data ?? []).map((r) => {
     const createdAt = r.created_time ?? new Date().toISOString()
     const cm = r.comments?.summary?.total_count ?? 0
+    const viewsItem = r.insights?.data?.find((d) => d.name === 'post_video_views')
+    const videoViews = viewsItem?.values?.[0]?.value
     return {
       postId: r.id,
       fullId: r.id,
@@ -166,7 +192,8 @@ export async function fetchPageReels(
       reactions: 0,
       comments: cm,
       shares: 0,
-      score: 0,
+      score: videoViews ?? 0,
+      ...(videoViews !== undefined && { videoViews }),
     }
   })
 }

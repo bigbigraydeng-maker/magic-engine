@@ -24,7 +24,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
-import { fetchPagePosts, type PagePost } from '@/lib/meta/page-posts'
+import { fetchPagePosts, fetchPageReels, type PagePost } from '@/lib/meta/page-posts'
 import { authorizeConfiguredPage } from '@/lib/meta/page-sync-authorization'
 
 const POSTS_TO_FETCH = 50
@@ -182,6 +182,30 @@ export async function syncPageMetrics(
 
       const { error: insertErr } = await supabase.from('flywheel_metrics').insert(rows)
       if (insertErr) throw new Error(insertErr.message)
+
+      // Per-reel video views — graceful: skipped if the edge is unavailable or returns no views
+      try {
+        const reels = await fetchPageReels(page_id, pageToken, 50)
+        const reelRows = reels
+          .filter((r) => r.videoViews !== undefined)
+          .map((r) => ({
+            client_id,
+            flywheel: 'social' as const,
+            source: 'meta_page',
+            source_ref: { fb_page_id: page_id, reel_id: r.postId },
+            measured_at: measuredAt,
+            metric_key: 'social.fb.reel.video_views',
+            metric_value: r.videoViews!,
+          }))
+        if (reelRows.length > 0) {
+          const { error: reelInsertErr } = await supabase.from('flywheel_metrics').insert(reelRows)
+          if (reelInsertErr) {
+            console.error(`[page-metrics-sync] reel video_views insert failed for ${client_id}:`, reelInsertErr.message)
+          }
+        }
+      } catch (reelErr) {
+        console.error(`[page-metrics-sync] fetchPageReels failed for ${client_id}:`, reelErr)
+      }
 
       results.push({ client_id, page_id, outcome: 'synced', posts_seen: posts.length })
     } catch (err) {
