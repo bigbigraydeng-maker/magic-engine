@@ -86,6 +86,8 @@ BEGIN
 END;
 $$;
 
+-- 🔴 SECURITY DEFINER 函数默认把 EXECUTE 授予 anon/authenticated，而 anon key
+--    在浏览器 bundle 里 —— 不收口 = 任何人可经 PostgREST 认领执行步骤。
 REVOKE EXECUTE ON FUNCTION public.kernel_claim_run_step(text, uuid[]) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.kernel_claim_run_step(text, uuid[]) TO service_role;
 
