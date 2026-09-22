@@ -6,6 +6,7 @@ vi.mock('@/lib/platform-oauth/vocabulary',()=>({ decryptToken:vi.fn(()=> 'privat
 vi.mock('../entitlement',()=>({ requirePilotActive:mocks.requirePilotActive,requirePilotRevision:mocks.requirePilotRevision }))
 import { readGrant,activeConnection,activeConnectionForPrincipal,requireMetaScope,requireReleaseAuthorization,requireDiscoveryAuthorization } from '../store'
 import { auditedControl } from '../audit'
+import { MetaReadError } from '../../graph-read'
 import { NON_EXPIRING_TOKEN_SECONDS,conservativeTokenSeconds,consumeAdsState,startAdsConsent } from '@/lib/meta-oauth/ads-read'
 const p={ kind:'client' as const,keyId:'key',clientId:'tenant',scopes:['meta:ads:read'] }
 const grant={ id:'grant',client_id:'tenant',ad_account_id:'act_1234567890',revision:'r1',entitlement_revision:'ent-1' }
@@ -70,6 +71,17 @@ describe('grant, token and control audit guards',()=>{
     await expect(auditedControl('tenant','person@example.test','bind',null,async()=>({ ok:true }))).rejects.toThrow('audit_completion_failed')
     expect(mocks.finishAudit).toHaveBeenCalledTimes(1)
     expect(mocks.finishAudit).toHaveBeenCalledWith('audit','applied','bind')
+  })
+  it('logs the real message behind a non-MetaReadError so "request_failed" is no longer a dead end — 2026-09-22: a plain upsertConnection() Error hid its real Postgres message this same way during a real CTS Tours NZ retry',async()=>{
+    const warn=vi.spyOn(console,'warn').mockImplementation(()=>{})
+    await expect(auditedControl('tenant','person@example.test','bind',null,async()=>{ throw new Error('Failed to upsert connection: some real postgres detail') })).rejects.toThrow()
+    expect(warn).toHaveBeenCalledWith('[audit] non-MetaReadError caught, mapped to request_failed',
+      expect.objectContaining({ clientId:'tenant',event:'bind',message:'Failed to upsert connection: some real postgres detail' }))
+  })
+  it('does not log for an expected MetaReadError — only genuinely unexpected failures need the extra trace',async()=>{
+    const warn=vi.spyOn(console,'warn').mockImplementation(()=>{})
+    await expect(auditedControl('tenant','person@example.test','bind',null,async()=>{ throw new MetaReadError('permission_required',403) })).rejects.toThrow('permission_required')
+    expect(warn).not.toHaveBeenCalled()
   })
 })
 describe('OAuth state principal and browser binding',()=>{
