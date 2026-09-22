@@ -269,6 +269,29 @@ export class GithubClient {
   }
 
   /**
+   * Merge a pull request immediately via squash. Returns true if merged,
+   * false if merge was blocked (pending CI, branch protection, etc.).
+   * Callers should treat false as "PR stays open" rather than an error.
+   */
+  async mergePullRequest(
+    owner: string,
+    repo: string,
+    prNumber: number,
+    mergeMethod: 'squash' | 'merge' | 'rebase' = 'squash',
+  ): Promise<boolean> {
+    try {
+      await this.request<{ merged: boolean }>(
+        'PUT',
+        `/repos/${owner}/${repo}/pulls/${prNumber}/merge`,
+        { merge_method: mergeMethod },
+      )
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /**
    * Read a commit's message — used by page.apply rollback and stepCommit 422
    * ownership check to look for the `[kernel run <runId>]` marker embedded in
    * the commit convention. Minimal shape — only what ownership check needs.

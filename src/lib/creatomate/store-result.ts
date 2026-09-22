@@ -5,7 +5,15 @@
 import { safeProbeRemoteFile } from '@/lib/factory/safe-remote-fetch'
 import { uploadFromUrl } from '@/lib/visual/storage'
 
-const CREATOMATE_ALLOWED_HOSTS = ['api.creatomate.com', 'cdn.creatomate.com'] as const
+// 2026-09-13 实测更正：v1 猜测产物从 cdn.creatomate.com 出，实际 Creatomate 把渲染产物
+// 存在 Backblaze B2（真实生产渲染返回 f002.backblazeb2.com，首次真实渲染验证时发现）。
+// B2 按存储桶分配到不同编号的节点（f000/f001/f002…），先按已观测到的加，不是猜的全集——
+// 后续换节点报同一个"域名不在白名单"错误时，把新出现的 fXXX.backblazeb2.com 加进来。
+const CREATOMATE_ALLOWED_HOSTS = [
+  'api.creatomate.com',
+  'cdn.creatomate.com',
+  'f002.backblazeb2.com',
+] as const
 
 export async function storeCreatomateResult(params: {
   resultUrl: string

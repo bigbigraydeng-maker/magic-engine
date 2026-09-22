@@ -116,26 +116,62 @@ export function SettingsTabBar({
   )
 }
 
-/** 一个板块的外壳。标题 + 内容，样式集中在这里，不在页面里抄 23 遍。 */
+/**
+ * 一个板块的外壳。标题 + 内容，样式集中在这里，不在页面里抄 23 遍。
+ *
+ * ## 2026-09-15 加上「默认收起」—— PM 走完整个页面反馈「信息量太大」
+ *
+ * 分页签（见文件头）解决的是「23 个板块堆一列」——分完之后，最重的一组
+ * （「接通」）自己还剩 11 个板块，一样是一列从头展开到底，只是列短了一点。
+ * 这一层解决的是同一个病的下一层：**不是每个板块都值得默认摊开**，
+ * 大多数板块只有「这次刚好要办这件事」才用得上，其余时候只需要看一眼标题
+ * 确认「这块归我管」。
+ *
+ * 做成**收起时不挂载内容**，不是 CSS 藏起来——跟文件头那条原则同一个理由：
+ * 藏起来的板块照样会挂载、照样会发它自己的 fetch，那就白改了。第一次点开
+ * 之后内容留着（用 `everOpened` 记住），再收起/展开不会重新拉一次数据。
+ *
+ * `defaultOpen` 留给两种「这次就是要看它」的情形：`first`（一组里第一块，
+ * 打开这一组本来就是为了看点什么）、和授权回跳精确指向的那一块
+ * （见 page.tsx 怎么算这个值）——其余一律从收起开始。
+ */
 export function SettingsSection({
   icon,
   title,
   children,
   first,
+  defaultOpen,
 }: {
   icon: string
   title: string
   children: ReactNode
   /** 一组里的第一个不加上边距。 */
   first?: boolean
+  /** 默认展开——给「这次授权/连接回跳正对着它」这类板块用，其余默认收起。 */
+  defaultOpen?: boolean
 }) {
+  const startOpen = Boolean(first || defaultOpen)
+  const [open, setOpen] = useState(startOpen)
+  const [everOpened, setEverOpened] = useState(startOpen)
+
   return (
-    <section className={first ? '' : 'mt-6'}>
-      <div className="mb-3 flex items-center gap-2">
-        <span className="text-base">{icon}</span>
-        <h2 className="font-black text-slate-800">{title}</h2>
-      </div>
-      {children}
+    <section className={first ? '' : 'mt-3'}>
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((v) => !v)
+          setEverOpened(true)
+        }}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-2 rounded-lg py-1.5 text-left hover:bg-black/[0.02]"
+      >
+        <span className="flex items-center gap-2">
+          <span className="text-base">{icon}</span>
+          <h2 className="font-black text-slate-800">{title}</h2>
+        </span>
+        <span className="shrink-0 text-xs font-semibold text-slate-400">{open ? '收起 ▲' : '展开 ▼'}</span>
+      </button>
+      {everOpened && <div className={open ? 'mt-3' : 'hidden'}>{children}</div>}
     </section>
   )
 }

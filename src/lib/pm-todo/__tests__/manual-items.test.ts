@@ -15,6 +15,7 @@ import {
   pushDataForSeoCreditsItem,
   pushMailchimpExportItems,
   pushLinkedinProgressItems,
+  pushPriceGateItems,
   buildNotIndexedItems,
   assertAbsoluteHref,
   dropBrokenLinks,
@@ -632,6 +633,99 @@ describe('pushPlatformCandidateReviewItems — 平台候选复查不靠日历记
       pushPlatformCandidateReviewItems(items, now, [{ name: '坏日期', reviewDate: 'not-a-date' }]),
     ).not.toThrow()
     expect(items).toHaveLength(0)
+  })
+})
+
+describe('pushPriceGateItems — href 必须指到「真的能改」的地方，不是随便一个素材库首页', () => {
+  const post = { id: 'post-1', client_id: 'c1', title: 'CTS 圣诞团', caption: '圣诞团限时特惠，仅需 NZ$588！' }
+
+  // 同一种 `from(table) => { if (table === ...) return chain }` fixture 写法本文件
+  // 537 行已经在用。pushPriceGateItems 只用得到 `.select().eq().order().limit()` /
+  // `.maybeSingle()` 这几个方法，`as unknown as SupabaseClient` 只是跳过没用到的其余
+  // 接口，不是形状瞎凑——下面两个 it() 已用 vitest 实测跑通，断言的是真实产出的 href/how。
+  //
+  // client_assets 和 visual_assets 各按 select 的列区分返回哪份罐头数据——
+  // 跟真实 supabase 一样，两处调用同一张表，只是查的列不同。
+  function fakePriceGateSupabase(opts: {
+    postImageUrl: string
+    libraryRow: { id: string; source: string } | null
+    // 只有素材库没查到时才会走到这一步（provider 判 AI/来源不明）
+    visualAssetProvider?: string | null
+  }): SupabaseClient {
+    const contentPosts = {
+      select: () => contentPosts,
+      eq: async () => ({ data: [post], error: null }),
+    }
+    const visualAssets: Record<string, unknown> = {}
+    visualAssets.select = (cols: string) => {
+      ;(visualAssets as { _cols?: string })._cols = cols
+      return visualAssets
+    }
+    visualAssets.eq = () => visualAssets
+    visualAssets.order = () => visualAssets
+    visualAssets.limit = () => {
+      const cols = (visualAssets as { _cols?: string })._cols
+      if (cols === 'storage_url') {
+        return Promise.resolve({ data: [{ storage_url: opts.postImageUrl }], error: null })
+      }
+      // provider 回查（resolveOutgoingImageSource 的第二步）
+      const p = Promise.resolve({
+        data: opts.visualAssetProvider ? { provider: opts.visualAssetProvider } : null,
+        error: null,
+      }) as Promise<unknown> & { maybeSingle?: () => Promise<unknown> }
+      p.maybeSingle = async () => ({
+        data: opts.visualAssetProvider ? { provider: opts.visualAssetProvider } : null,
+        error: null,
+      })
+      return p
+    }
+    const clientAssets: Record<string, unknown> = {}
+    clientAssets.select = () => clientAssets
+    clientAssets.eq = () => clientAssets
+    clientAssets.limit = () => {
+      const p = Promise.resolve({ data: opts.libraryRow, error: null }) as Promise<unknown> & {
+        maybeSingle?: () => Promise<unknown>
+      }
+      p.maybeSingle = async () => ({ data: opts.libraryRow, error: null })
+      return p
+    }
+    return {
+      from: (table: string) => {
+        if (table === 'content_posts') return contentPosts
+        if (table === 'visual_assets') return visualAssets
+        if (table === 'client_assets') return clientAssets
+        throw new Error(`unexpected table in test: ${table}`)
+      },
+    } as unknown as SupabaseClient
+  }
+
+  it('图在素材库里但没确认 → 链接直接跳到那张图，不是素材库首页', async () => {
+    const items: ManualItem[] = []
+    const supabase = fakePriceGateSupabase({
+      postImageUrl: 'https://img/cts-1.jpg',
+      libraryRow: { id: 'asset-99', source: 'client_provided' }, // 上传了但没被确认成真拍
+    })
+    await pushPriceGateItems(supabase, items, () => 'CTS Tours NZ')
+
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('price_claim_unbacked')
+    expect(items[0].href).toBe('https://app.magicengine.com.au/dashboard/clients/c1/assets?highlight=asset-99')
+    expect(items[0].how).toContain('直接跳到那张图')
+  })
+
+  it('图根本不在素材库里（纯 AI 生成）→ 不指向素材库，只剩「去掉价格」这条真能做的路', async () => {
+    const items: ManualItem[] = []
+    const supabase = fakePriceGateSupabase({
+      postImageUrl: 'https://img/ai-generated.jpg',
+      libraryRow: null,
+      visualAssetProvider: 'wavespeed',
+    })
+    await pushPriceGateItems(supabase, items, () => 'CTS Tours NZ')
+
+    expect(items).toHaveLength(1)
+    expect(items[0].href).toBe('https://app.magicengine.com.au/dashboard/clients/c1/execution')
+    expect(items[0].how).toContain('不在素材库里')
+    expect(items[0].how).not.toContain('点这个链接会直接跳到那张图')
   })
 })
 

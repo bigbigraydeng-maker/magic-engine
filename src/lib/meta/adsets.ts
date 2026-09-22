@@ -20,6 +20,8 @@ export interface AdSetSummary {
   status: 'ACTIVE' | 'PAUSED' | 'DELETED' | 'ARCHIVED'
   /** Minor units (cents) as a string, exactly as Meta returns it. Absent on CBO. */
   daily_budget?: string
+  /** 裸数字(无 "act_" 前缀)——归属校验用,见 winner-reel-sync/engine.ts。 */
+  account_id?: string
 }
 
 /**
@@ -95,7 +97,7 @@ export async function getAdSetStatus(
   accessToken: string,
 ): Promise<AdSetSummary | null> {
   const params = new URLSearchParams({
-    fields: 'id,name,status,daily_budget',
+    fields: 'id,name,status,daily_budget,account_id',
     access_token: accessToken,
   })
 

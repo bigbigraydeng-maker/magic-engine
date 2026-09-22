@@ -65,8 +65,12 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
   const now = new Date().toISOString()
 
-  // 🔴 真的把四列清空，不是只写个时间戳。
+  // 🔴 真的把五列清空，不是只写个时间戳。
   //    只写时间戳而数据还在，就是骗客人 —— 数据库那条约束也会拦下来。
+  //    page_scoped_user_id（Facebook 私信身份）2026-09-15 补：Meta 文档要求这个
+  //    字段不哈希发送，等于是能反查到具体真人的标识符，跟邮箱/电话一样必须
+  //    在这里一起清空，否则"已删除"对纯私信来源的记录形同虚设（子牙+魏征评审
+  //    双双抓到的漏洞）。
   const { error: redactErr } = await supabaseAdmin
     .from('me_sale_outcomes')
     .update({
@@ -74,6 +78,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
       customer_phone: null,
       customer_first: null,
       customer_last: null,
+      page_scoped_user_id: null,
       redacted_at: now,
       redaction_reason: reason || '客人要求删除',
       updated_at: now,
@@ -101,7 +106,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   return NextResponse.json({
     redacted_at: now,
     message:
-      '已删除我们这边保存的姓名、邮箱和电话。' +
+      '已删除我们这边保存的姓名、邮箱、电话，以及 Facebook 私信身份。' +
       '注意：如果这条之前已经发给过广告平台，那边的匿名数据无法撤回 —— 平台没有提供删除接口。',
   })
 }

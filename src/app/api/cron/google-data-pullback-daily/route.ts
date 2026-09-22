@@ -13,10 +13,36 @@
  *   - GSC:        anchor='gsc',  status='connected', config.site_url
  *   - GA4:        anchor='ga4',  status='connected', config.property_id
  *   - Meta Ads:   clients.meta_ad_account_id + META_SYSTEM_USER_TOKEN env
+ *                 (30-day snapshot + MetaAdsAdapter feed — primary account only,
+ *                 see 2026-09-13 note below)
+ *   - Ad Strategy Engine daily series (ad_daily_insights, health, digest):
+ *                 ALL of the client's registered accounts —
+ *                 `client_meta_ad_accounts` (2026-09-13, see note below)
  *   - Google Ads: platform_oauth_connections (provider='google_ads', status='active')
  *                 + GOOGLE_ADS_DEVELOPER_TOKEN / CLIENT_ID / CLIENT_SECRET /
  *                 REFRESH_TOKEN env
  *
+ * 2026-09-13 multi-account fix: CTS runs a second Meta ad account
+ * (act_2202695063810470, "CTStours 官方账户") that `meta_ad_account_id` never
+ * captured — its ThruPlay spend was invisible to ad_daily_insights, the health
+ * engine, and the daily digest. The 30-day `meta_ads_snapshots` pull above
+ * (`syncMeta`) still only covers the primary account — extending that table
+ * to multi-account is a separate, larger change not needed to close this gap;
+ * `ad_daily_insights` is what the health/digest/readback-sweep pipeline
+ * actually reads, so that's the loop that now covers every registered account.
+ * See src/lib/meta/client-ad-accounts.ts.
+ *
+ * Known scope boundary (2026-09-13 review): the client candidate list above
+ * (`metaClients`/`work`) still keys off `clients.meta_ad_account_id` alone —
+ * a client with ONLY a secondary account registered (e.g. its primary was
+ * cleared via the settings route) won't enter this loop at all, so it gets no
+ * ad_daily_insights/health/digest until the primary is restored. The daily
+ * SAFETY sweep (readback-sweep.ts) does not have this gap — it checks both
+ * the old column and the new table. This one is lower priority (loses
+ * analytics, not the safety gate) and is tracked in ROADMAP rather than fixed
+ * here, to avoid rushing a change into this route's per-client loop.
+ *
+
  * Reference: ROADMAP.md P17.A.4, P17.B.3, P18.B.1
  */
 
@@ -30,10 +56,13 @@ import { SEO_METRIC_KEY, GA4_METRIC_KEY, ADS_METRIC_KEY } from '@/lib/flywheel/v
 import { adsMetricKeysWrittenBy } from '@/lib/flywheel/metric-registry'
 import { MetaAdsAdapter } from '@/lib/flywheel/adapters/MetaAdsAdapter'
 import { startCronRun } from '@/lib/cron/run-logger'
-import { domainToEnvKey } from '@/lib/meta/token-manager'
-import { syncAdDailyInsights, syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
+import { resolveMetaTokenDetailed, ownsKey, loadTokenOwnerPeers, type TokenOwnerRow } from '@/lib/meta/token-selection'
+import { findSharedAdAccounts, getClientAdAccountIds } from '@/lib/meta/client-ad-accounts'
+import { hasVideoColumns, syncAdDailyInsights, syncAdsetDailyInsights, syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
 import { sendAdHealthDigest } from '@/lib/ads-strategy/digest'
+import { runPortfolioDiagnostics } from '@/lib/ads-strategy/portfolio/run-daily'
+import { snapshotTablesExist } from '@/lib/ads-strategy/portfolio/snapshot-sync'
 import { loadAdStrategyConfigWithSource, resolveDigestRecipients } from '@/lib/ads-strategy/config'
 
 export const dynamic = 'force-dynamic'
@@ -50,7 +79,6 @@ interface ConnectorRow {
 interface ClientWork {
   client_id:               string
   client_name?:            string
-  client_domain?:          string
   site_url?:               string
   property_id?:            string
   meta_ad_account_id?:     string
@@ -74,6 +102,21 @@ interface ClientResult {
   ad_health?: { success: boolean; overall_verdict?: string; campaigns_evaluated?: number; error?: string }
   /** P21.K.4 daily email digest decision + send outcome. */
   ad_digest?: { sent: boolean; decision: string; error?: string }
+  /** ads IMPACT 阶段 1：只读诊断 + 内部版日报 */
+  ad_diagnostics?: { success: boolean; hits: number; not_comparable: number; excluded: number; digest_decision?: string; digest_sent?: boolean; recipients_dropped?: number; error?: string }
+  /**
+   * 2026-09-13: `ad_daily`/`ad_level` above stay the PRIMARY account's result
+   * (unchanged shape, unchanged tallying). Any additional registered accounts
+   * (client_meta_ad_accounts) land here instead — purely additive, so nothing
+   * that reads `ad_daily`/`ad_level` needs to change.
+   */
+  ad_daily_secondary?: Array<{
+    ad_account_id: string
+    ad_daily?: { success: boolean; rows_written?: number; error?: string }
+    ad_level?:  { success: boolean; rows_written?: number; error?: string }
+    adset_level?: { success: boolean; rows_written?: number; error?: string }
+  }>
+  adset_level?: { success: boolean; rows_written?: number; error?: string }
 }
 
 // ─── Route ───────────────────────────────────────────────────────────────────
@@ -92,6 +135,12 @@ export async function GET(req: NextRequest) {
   }
 
   const cronRun = await startCronRun('google-data-pullback-daily')
+
+  // ads IMPACT 阶段 1：视频完播 + actions 9 列（migration 20260914000001）在不在库里。
+  // 不在就照旧只写老列——不能为了新列把现有每日数据同步整条弄挂。结果进 summary。
+  const withVideo = await hasVideoColumns()
+  // 快照表在不在（migration 20260914000001）：在 → 跑只读诊断发内部版日报；不在 → 照旧发原日报
+  const snapshotsReady = await snapshotTablesExist()
 
   // ── 1. Load connected Google connectors + Meta + Google Ads accounts in parallel
   const [connResult, metaResult, googleAdsResult] = await Promise.all([
@@ -160,7 +209,6 @@ export async function GET(req: NextRequest) {
   for (const c of metaClients) {
     const entry = workMap.get(c.id) ?? { client_id: c.id }
     entry.client_name = c.name
-    entry.client_domain = c.domain ?? undefined
     entry.meta_ad_account_id = c.meta_ad_account_id
     workMap.set(c.id, entry)
   }
@@ -198,6 +246,18 @@ export async function GET(req: NextRequest) {
   // ── 3. Process each client ─────────────────────────────────────────────────
   const results: ClientResult[] = []
 
+  // Loaded at most once per run (memoized) — the ownership snapshot every
+  // scoped-token client's domain/Page check AND every legacy-name check both
+  // need. resolveMetaTokenDetailed used to reload this with its own full
+  // `clients` scan for EACH client carrying a scoped env var; sharing one
+  // snapshot for the whole run avoids that per-client cost (chatgpt-codex-
+  // connector review, 2026-09-21).
+  let tokenOwnerPeers: TokenOwnerRow[] | null | undefined
+  async function getTokenOwnerPeers(): Promise<TokenOwnerRow[] | null> {
+    if (tokenOwnerPeers === undefined) tokenOwnerPeers = await loadTokenOwnerPeers(supabaseAdmin)
+    return tokenOwnerPeers
+  }
+
   for (const client of work) {
     const result: ClientResult = { client_id: client.client_id }
 
@@ -210,20 +270,87 @@ export async function GET(req: NextRequest) {
     }
 
     if (client.meta_ad_account_id) {
-      // Token resolution, three schemes in priority order:
-      //   1. META_SYSTEM_USER_TOKEN_<DOMAIN> via getMetaTokenForClient — the
-      //      scheme winner-sync runs on in production (proven working for CTS)
-      //   2. legacy {NAME_SLUG}_META_SYSTEM_USER_TOKEN (kept for back-compat)
-      //   3. global META_SYSTEM_USER_TOKEN (getMetaTokenForClient's own fallback)
-      // The old slug-first order made CTS pull fail on 2026-07-24: the global
-      // token has no access to act_2775766642787274, while the domain-scheme
-      // token does — but was never consulted here.
+      // Token resolution (AD-SEC-4 follow-up, 2026-09-21), four schemes in
+      // priority order — unchanged from before this fix, only the ownership
+      // checks are new:
+      //   1. Ownership-checked domain-scoped token (resolveMetaTokenDetailed,
+      //      source === 'client_domain') — same lookup every other Meta call in
+      //      the app uses (token-selection.ts), called with this route's own
+      //      supabaseAdmin rather than token-manager's separate client. Fixes the
+      //      bug this route had (domain token never consulted, 2026-07-24 CTS
+      //      pull failure) AND the hole it was written with: `client.domain` was
+      //      read straight into the env-var name with no check on who owns that
+      //      key, so a self-serve signup copying a real client's domain could
+      //      pull that client's token.
+      //   2. legacy {NAME_SLUG}_META_SYSTEM_USER_TOKEN, kept for back-compat (no
+      //      reliance found in docs/ENV.md or elsewhere in the repo, but Render
+      //      env vars aren't fully inventoried) — same problem as #1 applies to
+      //      `clients.name` (self-serve-writable, not unique), so it only fires
+      //      for this name's earliest non-self-serve owner. Checked BEFORE the
+      //      Page-scoped token (step 3): this route's original order — before
+      //      resolveMetaTokenDetailed's Page-scoped lookup existed here at all —
+      //      was domain → legacy → global, and a client relying on the legacy
+      //      token must not lose it just because a Page token happens to be
+      //      configured too (a Page token's identity isn't guaranteed to have
+      //      ads_management on this client's ad account — Codex review, 2026-09-21).
+      //   3. Ownership-checked Page-scoped token (source === 'client_page') —
+      //      only consulted once #1 and #2 both miss.
+      //   4. resolveMetaTokenDetailed's own shared global fallback. Checked LAST:
+      //      a client whose ad account only the per-name token can see (the exact
+      //      2026-07-24 failure mode — the global token lacks access to that
+      //      specific account) must not lose it just because a global fallback
+      //      happens to be configured too. Steps 1 and 3 already exclude this
+      //      source, so `resolved` is reused here rather than re-fetched.
+      //
+      // ownership_unknown (a transient failure reading who owns a scoped key,
+      // NOT "nobody configured a token") deliberately withholds even the shared
+      // fallback — see resolveMetaTokenDetailed's own doc comment — so it must
+      // still surface as a failure below rather than silently skip the client
+      // (chatgpt-codex-connector review on this PR, 2026-09-21).
       const slug = (client.client_name ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '_')
-      const domainKey = client.client_domain ? domainToEnvKey(client.client_domain) : null
-      const metaToken =
-        (domainKey ? process.env[`META_SYSTEM_USER_TOKEN_${domainKey}`] : undefined)
-        || (slug ? process.env[`${slug}_META_SYSTEM_USER_TOKEN`] : undefined)
-        || process.env.META_SYSTEM_USER_TOKEN
+      const peers = await getTokenOwnerPeers()
+      const resolved = await resolveMetaTokenDetailed(supabaseAdmin, client.client_id, process.env, peers)
+      let metaToken = resolved !== 'ownership_unknown' && resolved && resolved.source === 'client_domain' ? resolved.token : undefined
+      const legacyToken = slug ? process.env[`${slug}_META_SYSTEM_USER_TOKEN`] : undefined
+      let legacyOwnershipDenied = false
+      // Distinct from "denied": the ownership snapshot itself failed to load, so
+      // we cannot tell whether this client owns the legacy key or not. Falling
+      // through to Page/global below would silently swap it onto a token
+      // "known" not to work for it whenever this happens to be the client that
+      // relies on the legacy token (chatgpt-codex-connector review, 2026-09-21)
+      // — treat it exactly like resolveMetaTokenDetailed's own 'ownership_unknown'.
+      let legacyOwnershipUnknown = false
+      // resolved === 'ownership_unknown' means THIS CLIENT'S OWN ROW couldn't be
+      // read — a completely different query from the peers snapshot the legacy
+      // check below verifies against, so it can't actually invalidate that
+      // verification. Still refused: once we know we don't have the full,
+      // trustworthy picture of this client, using ANY alternative credential for
+      // it this run is exactly the guess this whole fail-closed design exists to
+      // refuse, not just the domain/Page one (chatgpt-codex-connector review,
+      // 2026-09-21).
+      if (!metaToken && legacyToken && resolved !== 'ownership_unknown') {
+        if (peers === null) {
+          legacyOwnershipUnknown = true
+        } else {
+          const self = peers.find((p) => p.id === client.client_id)
+          // `self.name` comes from the same shared peer snapshot as `peers` — but
+          // the SNAPSHOT can still have loaded after the `metaResult` row `slug`
+          // was built from (both read at the top of a run that can take minutes).
+          // Overriding `.name` with `client.client_name` here guarantees ownsKey
+          // verifies ownership of the SAME key `legacyToken` was just looked up
+          // with, not whatever name this client happens to carry in the snapshot
+          // (魏征 review, 2026-09-21: an ordinary rename mid-run could otherwise
+          // make this check pass for a key the client was never actually granted).
+          if (self && ownsKey({ ...self, name: client.client_name }, peers, (r) => (r.name ? r.name.toUpperCase().replace(/[^A-Z0-9]/g, '_') : null))) {
+            metaToken = legacyToken
+          } else {
+            legacyOwnershipDenied = true
+          }
+        }
+      }
+      const ownershipUnknown = resolved === 'ownership_unknown' || legacyOwnershipUnknown
+      if (!metaToken && !ownershipUnknown && resolved && resolved.source === 'client_page') metaToken = resolved.token
+      if (!metaToken && !ownershipUnknown) metaToken = resolved?.token
       if (metaToken) {
         result.meta = await syncMeta(client.client_id, client.meta_ad_account_id, metaToken, slug)
 
@@ -245,10 +372,53 @@ export async function GET(req: NextRequest) {
             client.client_id,
             client.meta_ad_account_id,
             metaToken,
+            { withVideo },
           )
 
+          // 2026-09-13: any OTHER accounts this client has registered
+          // (client_meta_ad_accounts) get the same two syncs, so their
+          // campaigns/ads land in ad_daily_insights too — that table has no
+          // account filter downstream (evaluateClientAdHealth, the digest,
+          // readback-sweep all just query by client_id), so this is the one
+          // change needed for those to start seeing every account.
+          // Non-fatal per account: one account's failure must not skip the rest.
+          const allAccountIds = await getClientAdAccountIds(client.client_id)
+          const secondaryAccountIds = allAccountIds.filter(id => id !== client.meta_ad_account_id)
+          // ads IMPACT §14 M9：新增的广告组级同步对共用账户（同账户登记给多个客户）跳过，
+          // 不把同一批广告组写进两家名下。系列级/广告级的老同步维持原状（既有问题，诊断读侧另做隔离）。
+          // 查询出错 fail closed：全部当共用，跳过广告组级。
+          const { shared: sharedAccountIds } = await findSharedAdAccounts(client.client_id, allAccountIds)
+          const isShared = (id: string) => sharedAccountIds.has(id.startsWith('act_') ? id.slice(4) : id)
+          const skippedShared = { success: true, rows_written: 0, error: 'skipped: shared ad account (M9)' }
+          if (secondaryAccountIds.length > 0) {
+            result.ad_daily_secondary = []
+            for (const secondaryAccountId of secondaryAccountIds) {
+              const secondaryResult: NonNullable<ClientResult['ad_daily_secondary']>[number] = {
+                ad_account_id: secondaryAccountId,
+              }
+              secondaryResult.ad_daily = await syncCampaignDailyInsights(
+                client.client_id,
+                secondaryAccountId,
+                metaToken,
+                { withVideo },
+              )
+              secondaryResult.ad_level = await syncAdDailyInsights(
+                client.client_id,
+                secondaryAccountId,
+                metaToken,
+                { withVideo },
+              )
+              secondaryResult.adset_level = isShared(secondaryAccountId)
+                ? skippedShared
+                : await syncAdsetDailyInsights(client.client_id, secondaryAccountId, metaToken, { withVideo })
+              result.ad_daily_secondary.push(secondaryResult)
+            }
+          }
+
           // P21.K.2: judge each campaign against its own baseline and store the
-          // day's account-health narrative. Reads the series just written above.
+          // day's account-health narrative. Reads the series just written above
+          // PLUS any secondary accounts synced just above — evaluateClientAdHealth
+          // queries ad_daily_insights by client_id only, no account filter.
           // Non-fatal — a judging failure must not affect data collection.
           if (result.ad_daily?.success) {
             const insightDate = new Date()
@@ -262,7 +432,9 @@ export async function GET(req: NextRequest) {
             // Skip sending when the config was a read-error fallback: enabled is
             // then a guess, and re-opening a paused client to email is the one
             // irreversible mistake we don't fail-open on (魏征).
-            if (adConfigSource !== 'fallback' && result.ad_health?.success && result.ad_health.overall_verdict) {
+            // ads IMPACT 阶段 1 第 7 步：快照表已建时改由下方（广告组级同步之后）的只读诊断发**内部版**日报；
+            // 表还没建（migration 未 apply）→ 照旧在这里发原日报，行为不变。
+            if (!snapshotsReady && adConfigSource !== 'fallback' && result.ad_health?.success && result.ad_health.overall_verdict) {
               const digest = await sendAdHealthDigest(
                 client.client_id,
                 client.client_name ?? 'Client',
@@ -282,7 +454,50 @@ export async function GET(req: NextRequest) {
             client.client_id,
             client.meta_ad_account_id,
             metaToken,
+            { withVideo },
           )
+
+          // ads IMPACT 阶段 1 §2.2：广告组级日数据（漏斗角色、ABO 预算都挂在广告组上）。
+          // 同 ad_level 一样是 best-effort：不进 `failed`，失败进 errors。
+          result.adset_level = isShared(client.meta_ad_account_id)
+            ? skippedShared
+            : await syncAdsetDailyInsights(client.client_id, client.meta_ad_account_id, metaToken, { withVideo })
+
+          // ads IMPACT 阶段 1：只读诊断 + 内部版日报。放在广告组级同步之后（诊断要广告组级数据），
+          // 且**不依赖**当天拉数/体检成功——授权断了导致拉数失败时，D7「授权/数据体检」正是要报这件事（子牙复审）。
+          // 诊断出错：计入 errors；当天原体检成功的话退回发原日报，保证 PM 当天仍收得到信（魏征复审）。
+          if (snapshotsReady && adConfigSource !== 'fallback') {
+            const diagDate = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
+            result.ad_diagnostics = await runPortfolioDiagnostics(
+              client.client_id,
+              client.client_name ?? 'Client',
+              diagDate,
+              adStrategyConfig.digest_recipients,
+            )
+            if (!result.ad_diagnostics.success && result.ad_health?.success && result.ad_health.overall_verdict) {
+              const digest = await sendAdHealthDigest(client.client_id, client.client_name ?? 'Client', diagDate, resolveDigestRecipients(adStrategyConfig))
+              result.ad_digest = { sent: digest.sent, decision: `fallback:${digest.decision}`, error: digest.error }
+            }
+          }
+        }
+      } else {
+        // Client has a Meta ad account but no usable token — surface it as a
+        // failure (counted in `failed`, visible in `errors`) rather than
+        // silently skipping the snapshot/ad_daily/health/digest chain for the
+        // day. Distinguish the four ways this happens so an FDE reading
+        // cron_run_logs doesn't have to guess: a genuine Render config gap
+        // reads differently from "someone else owns this env key" or from a
+        // transient DB read failure that will very likely clear on its own.
+        result.meta = {
+          success: false,
+          error:
+            resolved === 'ownership_unknown'
+              ? 'meta token ownership check failed (transient client-row read error) — token withheld rather than risk using an unverified one'
+              : legacyOwnershipUnknown
+                ? 'legacy per-name Meta token ownership check failed (transient peer-scan error) — token withheld rather than risk using an unverified one'
+                : legacyOwnershipDenied
+                  ? 'legacy per-name Meta token is configured but this client does not own that name key'
+                  : 'no Meta token configured for this client (no owned domain/Page token, no legacy per-name token, no shared fallback)',
         }
       }
     }
@@ -323,23 +538,43 @@ export async function GET(req: NextRequest) {
   // Collect per-client errors so postmortem is possible without Render logs.
   // Diagnostic only — no behavior change.
   const errors = results.flatMap(r => {
-    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'ad_health'|'ad_digest'; error: string }> = []
+    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ad_daily_secondary'; error: string }> = []
     if (r.gsc?.success === false && r.gsc.error)               out.push({ client_id: r.client_id, source: 'gsc',        error: r.gsc.error })
     if (r.ga4?.success === false && r.ga4.error)               out.push({ client_id: r.client_id, source: 'ga4',        error: r.ga4.error })
     if (r.meta?.success === false && r.meta.error)             out.push({ client_id: r.client_id, source: 'meta',       error: r.meta.error })
     if (r.google_ads?.success === false && r.google_ads.error) out.push({ client_id: r.client_id, source: 'google_ads', error: r.google_ads.error })
     if (r.ad_daily?.success === false && r.ad_daily.error)     out.push({ client_id: r.client_id, source: 'ad_daily',   error: r.ad_daily.error })
     if (r.ad_level?.success === false && r.ad_level.error)     out.push({ client_id: r.client_id, source: 'ad_level',   error: r.ad_level.error })
+    if (r.adset_level?.success === false && r.adset_level.error) out.push({ client_id: r.client_id, source: 'adset_level', error: r.adset_level.error })
     if (r.ad_health?.success === false && r.ad_health.error)   out.push({ client_id: r.client_id, source: 'ad_health', error: r.ad_health.error })
     if (r.ad_digest && !r.ad_digest.sent && r.ad_digest.error)  out.push({ client_id: r.client_id, source: 'ad_digest', error: r.ad_digest.error })
+    if (r.ad_diagnostics?.error) out.push({ client_id: r.client_id, source: 'ad_diagnostics', error: r.ad_diagnostics.error })
+    // 2026-09-13 (魏征 review): a secondary account's sync failure used to be
+    // completely invisible — not in `failed`, not here, not console.error'd —
+    // the exact "looks fine, actually never worked" shape this whole PR is
+    // trying to close, just one level down. Not counted in `failed`/the email
+    // headline (best-effort like ad_level), but must show up in a manual read
+    // of cron_run_logs instead of vanishing without a trace.
+    for (const secondary of r.ad_daily_secondary ?? []) {
+      if (secondary.ad_daily?.success === false && secondary.ad_daily.error) {
+        out.push({ client_id: r.client_id, source: 'ad_daily_secondary', error: `[${secondary.ad_account_id}] ${secondary.ad_daily.error}` })
+      }
+      if (secondary.ad_level?.success === false && secondary.ad_level.error) {
+        out.push({ client_id: r.client_id, source: 'ad_daily_secondary', error: `[${secondary.ad_account_id}] ${secondary.ad_level.error}` })
+      }
+      if (secondary.adset_level?.success === false && secondary.adset_level.error) {
+        out.push({ client_id: r.client_id, source: 'ad_daily_secondary', error: `[${secondary.ad_account_id}] adset: ${secondary.adset_level.error}` })
+      }
+    }
     return out
   })
 
   // The failure email renders `error_message`, not the summary JSONB, so
   // without this the PM's alert reads "2 failed · —" and says nothing. Only the
-  // errors that actually count as failures belong here — ad_level is excluded
-  // above and must not become the headline of an email it never triggered.
-  const headlineError = errors.find(e => e.source !== 'ad_level')
+  // errors that actually count as failures belong here — ad_level and
+  // ad_daily_secondary are excluded (both best-effort, neither triggers `failed`)
+  // and must not become the headline of an email they never triggered.
+  const headlineError = errors.find(e => e.source !== 'ad_level' && e.source !== 'adset_level' && e.source !== 'ad_daily_secondary')
   const errorMessage = failed > 0 && headlineError
     ? `${headlineError.source}: ${headlineError.error}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ''}`
     : undefined
@@ -349,7 +584,7 @@ export async function GET(req: NextRequest) {
     completed: results.length - failed,
     error: errorMessage,
     failed,
-    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, errors },
+    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors },
   })
   return NextResponse.json({
     success:           true,

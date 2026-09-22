@@ -22,6 +22,12 @@ import type { AccessTier } from '@/lib/auth/access-types'
  *    只要生成端是开放词汇表，消费端的注册表就永远对不上 ——
  *    注册表建好之后必须把它反向注入 prompt，否则只会从「36 种自由文本」
  *    变成「36 种自由文本 + 一张对不上的表」。
+ *
+ * 🔴 生产里还有一个**故意不注册**的历史键 `page.apply_cts_github_metadata_request`
+ *    （2026-09-14 实查 `action_runs` run `a8ffeed8`，2026-08-21 手动试跑 1 次）。
+ *    它来自未合并分支 `codex/cts-gsc-page-query-capability`（PR #1133 已关闭），
+ *    不是本表某个键的旧名。别把它补进来——补进来等于重新放行一个没过审的动作。
+ *    注册表查不到时返回空（registry.ts）、审批服务拒绝批准，这行只是遗留记录。
  */
 export type ActionKey =
   | 'seo.build_publish_package'

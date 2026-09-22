@@ -66,6 +66,8 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   //    补登记的全部意义就是把这件事查出来，宽限期会直接抵消掉它。
   //    按本字段自己的约定：老任务不补 addedAt。（Codex thread：registry.ts L41）
   { service: 'ad-readback-sweep-daily', jobName: 'ad-readback-sweep', schedule: '40 20 * * *', logsRuns: true },
+  // ads IMPACT 阶段 1：广告设置快照，只在设置变化时记一行、另每天一次（只读 Meta）。
+  { service: 'ad-entity-snapshot', jobName: 'ad-entity-snapshot', schedule: '30 */3 * * *', logsRuns: true, addedAt: '2026-09-14' },
   { service: 'agent-learning-rollup', jobName: 'agent-learning-rollup', schedule: '0 7 * * 1', logsRuns: true },
   // IMPACT 的 Tune 段。路由早就写好了，但从 Phase 23.C 起**一直没登记调度** ——
   // cron_run_logs 里零条运行记录，而 Check 段 2026-08~09 产出了 285 条结论。
@@ -81,7 +83,9 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 每天 400~600 次插入就跑 400~600 次全表 DELETE，并发时会死锁 —— 而死锁让插入失败，
   // 也就是让这套监控自己瞎掉。2026-09-07 改成每天一次的独立任务。
   { service: 'cron-run-logs-cleanup', jobName: 'cron-run-logs-cleanup', schedule: '50 16 * * *', logsRuns: true, addedAt: '2026-09-07' },
-  { service: 'cts-seo-optimizer', jobName: 'cts-seo-optimizer', schedule: '30 5 * * 1', logsRuns: true },
+  // cts-seo-optimizer 于 2026-09-20 退役（PM 拍板）：render.yaml 里那条定时任务
+  // 在同一个 PR 里删掉了，换成 Inngest 原生的 cloud-seo-meta-cycle-fanout。
+  // 这里同步摘掉登记：留着会天天误报「没跑」，理由同 email-reply-digest。
   { service: 'daily-cron-digest', jobName: 'daily-cron-digest', schedule: '0 6 * * *', logsRuns: true },
   { service: 'diagnostic-weekly', jobName: 'diagnostic-weekly', schedule: '0 8 * * 1', logsRuns: true, addedAt: '2026-08-03' },
   // 客人来信没人回 → 每天早上给销售发一封汇总信。UTC 20:00 = 次日 NZ 08:00（NZST=UTC+12）。
@@ -115,9 +119,16 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 里跑。留在清单里会天天误报「没跑」——正是这套告警最怕的东西。
   { service: 'mailchimp-activity-daily', jobName: 'mailchimp-activity-sync', schedule: '40 4 * * *', logsRuns: true },
   { service: 'mailchimp-paid-tagging-daily', jobName: 'mailchimp-paid-tagging', schedule: '10 5 * * *', logsRuns: true, addedAt: '2026-09-02' },
+  { service: 'mailchimp-suppression-sync-daily', jobName: 'mailchimp-suppression-sync', schedule: '20 5 * * *', logsRuns: true, addedAt: '2026-09-09' },
   // 补登记（2026-09-05 对账测试抓出）：Magic Insight 每日资讯管道，2026-08-20 就进了 render.yaml，
   // 清单里一直没有。老任务不补 addedAt（理由同上面 ad-readback-sweep-daily 那条）。
   { service: 'market-intel-daily', jobName: 'market-intel-daily', schedule: '0 18 * * *', logsRuns: true },
+  // ⏸️ 降频到每 2 小时的计划（issue #1581，H14）已从这版代码抽出、暂不落地——
+  //    Meta 生产企业验证（issue #1299）截至提交时仍未过，`/api/webhooks/meta/messenger`
+  //    webhook 订阅打不开，这条 cron 仍是唯一在收真实私信的路径，现在降频只会让消息
+  //    进系统变慢，没有任何东西补上腾出来的窗口。保持 `10 * * * *` 不变，等 webhook
+  //    真正收到生产流量、验证过延迟确实缩短之后，再单独一个 PR 改这条 schedule
+  //    （同时改 render.yaml 和下面 messenger-brief-hourly 那条，两处要一起动）。
   { service: 'messenger-hourly', jobName: 'messenger-sync-hourly', schedule: '10 * * * *', logsRuns: true },
   // 🔴 同一条 Render 服务里的**第二个**任务：startCommand 是 `curl 私信同步 && curl 私信简报`，
   //    两条 curl 各写各的运行记录。清单原来一条服务只登记一个 jobName，第二条就此隐形 ——
@@ -136,8 +147,8 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   //    都没执行过，销售的客户需求卡停更 14 天。现在改成同步跑完发一张条子、
   //    `cloud-messenger-brief-after-sync` 收到就写。
   //
-  //    schedule 仍写 `10 * * * *`：它由每小时第 10 分的私信同步触发，实际节奏就是每小时
-  //    一次 —— 健康检查按这个间隔判「过期没跑」，跟改造之前一致。
+  //    schedule 跟着 messenger-hourly 那条私信同步走，因为它由同步跑完发的条子触发——
+  //    上面那条私信同步这次没有降频（见其注释），这里也保持 `10 * * * *` 不变。
   //
   //    🔴 **故意不填 `addedAt`。** 它不是新任务，是一条停了 14 天的老任务改了触发方式。
   //       填今天的日期会给它约 62 小时宽限期，而这段时间正好会盖住「Inngest 那边忘了
@@ -200,6 +211,25 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   //    FLYWHEEL_SEO_WEEKLY_CRON，同目录的测试会断言两边一致。抄错的后果是健康检查
   //    按错的周期算逾期 —— 算错的告警和没有告警一样没用。
   { service: 'inngest:cloud-flywheel-seo-weekly-fanout', jobName: 'flywheel-seo-weekly', schedule: '15 5 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-07' },
+  // 🔴 schedule 这一列不许手抄：唯一定义在
+  //    src/lib/inngest/functions/conversion-daily-pipeline.ts 的
+  //    CONVERSION_DAILY_PIPELINE_CRON，抄错的后果同上一条 flywheel 注释。
+  { service: 'inngest:cloud-conversion-daily-pipeline', jobName: 'conversion-daily-pipeline', schedule: '0 6 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-15' },
+  // 每周竞品快照。competitor_snapshots 这张表 2026-05-18 就建好了，唯一的写入方是一个纯
+  // 手动 POST 接口，从来没有 cron；那个接口 2026-08-05 死管道清理时被当陪葬删掉，表一直是空的。
+  // 2026-09-20 审计发现并重写，PM 拍板开，先只给 CTS（seo_config.competitor_watch_enabled）。
+  //
+  // 🔴 schedule 这一列不许手抄：唯一定义在 src/lib/competitors/watch.ts 的
+  //    COMPETITOR_WATCH_CRON，同目录的测试会断言两边一致。
+  { service: 'inngest:cloud-competitor-watch-weekly-fanout', jobName: 'competitor-watch-weekly', schedule: '45 5 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-20' },
+  // 每周 AI 可见度追踪（GEO）灰度迁移。旧 Render cron `ai-tracker-weekly`（上面那条老登记）
+  // 原样保留、对没开灰度开关的客户继续跑；这条新登记只覆盖开了
+  // `seo_config.ai_visibility_inngest_enabled` 的客户，故意用不同的 jobName——两条链路
+  // 覆盖范围不同，混进同一份健康检查会看不出「这周是哪条链路给这个客户出的数据」。
+  //
+  // 🔴 schedule 这一列不许手抄：唯一定义在 src/lib/ai-tracker/weekly-fanout.ts 的
+  //    AI_VISIBILITY_WEEKLY_CRON，同目录的测试会断言两边一致。
+  { service: 'inngest:cloud-ai-visibility-weekly-fanout', jobName: 'ai-visibility-tracker-weekly', schedule: '0 6 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-21' },
 ] as const
 
 /**
@@ -237,4 +267,9 @@ export const UNSCHEDULED_CRON_ROUTES: Readonly<Record<string, string>> = {
   // docs/specs/2026-09-09-creatomate-connector-spec-v1.md §4.4），job_name 恒为
   // 'creatomate-render'，具体是哪条渲染由 summary.source_record_id 区分，不是按周期对账。
   'creatomate-render': '按需事件触发（内容确认时），非周期任务，不适用 CRON_REGISTRY 的排班对账',
+
+  // cts-seo-optimizer 于 2026-09-20 退役（PM 拍板）：render.yaml 那条定时任务已删，
+  // 换成 Inngest 原生的 cloud-seo-meta-cycle-fanout（同目录 seo-meta-cycle 的对账测试
+  // 管它）。路由文件和 startCronRun 调用留着只为回滚，本条不该再被排班。
+  'cts-seo-optimizer': '2026-09-20 退役，换成 Inngest cloud-seo-meta-cycle-fanout，路由留着只为回滚',
 }

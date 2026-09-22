@@ -1,0 +1,22 @@
+{
+  "client_id": "c0000000-0000-0000-0000-000000000000",
+  "origin_url": "https://www.ctstours.co.nz/",
+  "launched_at": "2026-09-17T00:00:00+12:00",
+  "no_publish": true,
+  "pages": [
+    { "url": "https://www.ctstours.co.nz/", "role": "homepage" },
+    { "url": "https://www.ctstours.co.nz/campaigns/spotlight", "role": "campaign" },
+    { "url": "https://www.ctstours.co.nz/christmas-new-year-china", "role": "campaign" },
+    { "url": "https://www.ctstours.co.nz/tours/china/discovery/china-icons-collection", "role": "tour" },
+    { "url": "https://www.ctstours.co.nz/tours/china/discovery/china-icons-collection-christchurch", "role": "tour" },
+    { "url": "https://www.ctstours.co.nz/tailor-made", "role": "conversion" },
+    { "url": "https://www.ctstours.co.nz/guide", "role": "guide_hub" },
+    { "url": "https://www.ctstours.co.nz/zhangjiajie-travel-guide", "role": "guide" },
+    { "url": "https://www.ctstours.co.nz/big-wild-goose-pagoda-travel-guide", "role": "guide" },
+    { "url": "https://www.ctstours.co.nz/temple-of-heaven-travel-guide", "role": "guide" },
+    { "url": "https://www.ctstours.co.nz/the-bund-travel-guide", "role": "guide" },
+    { "url": "https://www.ctstours.co.nz/west-lake-travel-guide", "role": "guide" },
+    { "url": "https://www.ctstours.co.nz/xian-city-wall-travel-guide", "role": "guide" },
+    { "url": "https://www.ctstours.co.nz/yu-garden-travel-guide", "role": "guide" }
+  ]
+}

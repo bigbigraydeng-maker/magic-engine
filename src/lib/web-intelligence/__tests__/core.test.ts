@@ -2,12 +2,12 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 vi.mock('@/lib/competitors/resolver', () => ({ normaliseDomain: (s: string) => s.trim().toLowerCase().replace(/^https?:\/\//, '').split(/[/?#]/)[0], getClientCompetitors: vi.fn() }))
-vi.mock('@/lib/anthropic/client', () => ({ MODEL_SONNET: 'test-model', callClaudeChat: vi.fn(), parseJsonResponse: JSON.parse }))
+vi.mock('@/lib/anthropic/client', () => ({ MODEL_SONNET: 'test-model', MODEL_HAIKU: 'test-haiku', callClaudeChat: vi.fn(), parseJsonResponse: JSON.parse }))
 import { canonicalDomain, approvedUrl } from '../targets'
 import { allowedClient, requestSchema, settingsSchema, metadataSchema, periodKey, type Signal, type Evidence } from '../contracts'
 import { interpretationPrompt, validateInterpretation, changedWindow } from '../interpret'
 import { classifyBusinessPage, projectBusinessContent } from '../content-projection'
-import { TRAVEL_BUSINESS_PROFILE, profileForTags } from '../profiles/travel'
+import { deriveTravelScope, extractTourLinks, extractTourRecords, matchChangedToursScope, matchTravelScope, projectTravelContent, TRAVEL_BUSINESS_PROFILE, TRAVEL_INTERPRETATION_GUIDANCE, profileForTags, travelMarketsIn } from '../profiles/travel'
 const a = '00000000-0000-4000-8000-000000000001'
 const b = '00000000-0000-4000-8000-000000000002'
 const c = '00000000-0000-4000-8000-000000000003'
@@ -85,6 +85,101 @@ describe('Website scope, budget and evidence contracts', () => {
     expect(classifyBusinessPage('https://example.com/china/tours/', TRAVEL_BUSINESS_PROFILE)).toBe('product_listing')
     expect(classifyBusinessPage('https://example.com/china/tours/classic-china.htm', TRAVEL_BUSINESS_PROFILE)).toBe('product_detail')
     expect(classifyBusinessPage('https://example.com/new-tours/', TRAVEL_BUSINESS_PROFILE)).toBe('product_listing')
+  })
+  it('associates each travel offer with the named tour before sorting records', () => {
+    const raw = `
+      * EARLY BIRD SALE
+      Display Map
+      Japan Explorer
+      16 days from $14,980pp
+      Includes international airfares
+      Osaka (3N) - Tokyo (3N)
+      View Tour
+      *
+      Display Map
+      India Explored
+      15 days from $6,440pp
+      2 Reviews
+      Includes international airfares
+      Delhi (2N) - Goa (5N)
+      View Tour
+    `
+    expect(extractTourRecords(raw)).toEqual([
+      expect.objectContaining({ name: 'India Explored', price: '$6,440pp', promotion: 'none', reviews: '2 Reviews' }),
+      expect.objectContaining({ name: 'Japan Explorer', price: '$14,980pp', promotion: 'EARLY BIRD SALE' }),
+    ])
+  })
+  it('produces the same listing projection when tour display order changes', () => {
+    const a = '* EARLY BIRD SALE\nDisplay Map\nTour A\n10 days from $5,000pp\nIncludes flights\nA - B\nView Tour'
+    const b = '*\nDisplay Map\nTour B\n12 days from $6,000pp\nIncludes flights\nC - D\nView Tour'
+    expect(projectTravelContent(`${a}\n${b}`, 'product_listing')).toBe(projectTravelContent(`${b}\n${a}`, 'product_listing'))
+  })
+  it('makes a named tour field change explicit in the evidence projection', () => {
+    const before = 'Display Map\nTour A\n10 days from $5,000pp\nIncludes flights\nA - B\nView Tour'
+    const after = 'Display Map\nTour A\n10 days from $5,500pp\nIncludes flights\nA - B\nView Tour'
+    expect(projectTravelContent(before, 'product_listing')).toContain('Tour: Tour A | Duration: 10 days | Price: $5,000pp')
+    expect(projectTravelContent(after, 'product_listing')).toContain('Tour: Tour A | Duration: 10 days | Price: $5,500pp')
+  })
+  it('projects itinerary headings from a Tour detail page', () => {
+    const detail = `Classic China\n22 days from $10,580pp\nDay 1: Arrive in Beijing\nDay 2: Great Wall and city tour\nDay 3: Beijing to Xian\nIncludes international airfares`
+    expect(projectTravelContent(detail, 'product_detail')).toContain('Itinerary: Day 1: Arrive in Beijing || Day 2: Great Wall and city tour || Day 3: Beijing to Xian')
+  })
+  it('discovers only same-origin Tour detail links', () => {
+    const raw = '[Classic China](https://wendywutours.co.nz/tours/classic-china)\n[Japan](https://wendywutours.co.nz/tours/japan)\n[Blog](https://other.example/tours/blog)\n[Contact](/contact)'
+    expect(extractTourLinks(raw, 'https://wendywutours.co.nz/china/tours/')).toEqual([
+      { name: 'Classic China', url: 'https://wendywutours.co.nz/tours/classic-china' },
+      { name: 'Japan', url: 'https://wendywutours.co.nz/tours/japan' },
+    ])
+  })
+  it('places Tour comparison rules in the industry guidance, not the shared prompt', () => {
+    const prompt = interpretationPrompt(signal, evidence, '', TRAVEL_INTERPRETATION_GUIDANCE)
+    expect(prompt).toContain('exact Tour name plus before and after values')
+    expect(prompt).toContain('departure dates')
+  })
+  it('derives a travel market from configured products before marketing keywords', () => {
+    expect(deriveTravelScope([{ name: 'Wonders of China' }], ['japan tours'])).toMatchObject({ status: 'configured', market_ids: ['china'], source: '主力产品' })
+    expect(deriveTravelScope([], ['cts china travel service'])).toMatchObject({ status: 'inferred', market_ids: ['china'], source: '主关键词' })
+    expect(deriveTravelScope([{ name: 'Signature Journey', usp: 'China specialist' }], ['japan tours'])).toMatchObject({ status: 'configured', market_ids: ['china'] })
+    expect(deriveTravelScope([{ name: 'China' }, { name: 'Japan' }, { name: 'Vietnam' }, { name: 'India' }], [])).toMatchObject({ market_ids: ['china', 'vietnam', 'japan', 'india'] })
+    expect(deriveTravelScope([], ['china travel service', 'cts auckland'])).toMatchObject({ market_ids: ['china'], basis: ['china travel service'] })
+    expect(deriveTravelScope([], ['china tours', 'travel agency auckland'])).toMatchObject({ market_ids: ['china'], basis: ['china tours'] })
+    expect(deriveTravelScope([], ['china tours', 'auckland travel agency'])).toMatchObject({ market_ids: ['china'], basis: ['china tours'] })
+    expect(deriveTravelScope([], ['china travel service auckland'])).toMatchObject({ market_ids: ['china'] })
+    expect(deriveTravelScope([], ['china tours', 'japan holidays'])).toMatchObject({ market_ids: ['china', 'japan'] })
+  })
+  it('matches a China tour, excludes foreign tours and holds mixed destinations for confirmation', () => {
+    const scope = deriveTravelScope([], ['china tours from nz'])
+    expect(scope.market_ids).toEqual(['china'])
+    expect(matchTravelScope('Tour: Wonders of China | Route: Shanghai - Xian', 'https://example.com/new-tours/', scope).status).toBe('matched')
+    expect(matchTravelScope('Tour: Angkor to Bali | Route: Siem Reap - Bali', 'https://example.com/china/tours/', scope).status).toBe('outside')
+    expect(matchTravelScope('Tour: China & Mongolia Heartlands | Route: Beijing - Gobi', 'https://example.com/china/tours/', scope).status).toBe('unknown')
+    expect(matchTravelScope('Tour: France Highlights', 'https://example.com/china/tours/', scope).status).toBe('unknown')
+    expect(deriveTravelScope([], ['China tours from Auckland']).market_ids).toEqual(['china'])
+    expect(deriveTravelScope([], ['China tours from Singapore']).market_ids).toEqual(['china'])
+  })
+  it('uses every changed Tour record for the product-scope gate', () => {
+    const scope = deriveTravelScope([], ['china tours'])
+    const before = ['Tour: Wonders of China | Price: $1', 'Tour: China Explorer | Price: $2', 'Tour: Beijing Break | Price: $3', 'Tour: Japan Explorer | Price: $4'].join('\n')
+    const after = ['Tour: Wonders of China | Price: $11', 'Tour: China Explorer | Price: $22', 'Tour: Beijing Break | Price: $33', 'Tour: Japan Explorer | Price: $44'].join('\n')
+    expect(matchChangedToursScope(before, after, 'https://example.com/china/tours/', scope).status).toBe('unknown')
+  })
+  it('matches a changed China Tour in full captured page evidence', () => {
+    const scope = deriveTravelScope([], ['china tours'])
+    const before = ['Classic Group Tour', 'Classic China', '22 days from $10,080pp', '44 Reviews', 'Includes international airfares', 'Beijing - Xian - Shanghai'].join('\n')
+    const after = ['Classic Group Tour', 'Classic China', '22 days from $10,580pp', '44 Reviews', 'Includes international airfares', 'Beijing - Xian - Shanghai'].join('\n')
+    expect(matchChangedToursScope(before, after, 'https://example.com/china/tours/', scope)).toMatchObject({ status: 'matched', matched: ['china'], outside: [] })
+  })
+  it('normalises each side when stored Tour evidence formats differ', () => {
+    const scope = deriveTravelScope([], ['china tours'])
+    const before = ['Classic Group Tour', 'Japan Explorer', '10 days from $5,000pp', 'Tokyo - Kyoto'].join('\n')
+    const after = 'Tour: Classic China | Duration: 22 days | Price: $10,580pp | Route: Beijing - Xian - Shanghai'
+    expect(matchChangedToursScope(before, after, 'https://example.com/china/tours/', scope).status).toBe('unknown')
+  })
+  it('uses market aliases with word boundaries and leaves ambiguous text unknown', () => {
+    expect(travelMarketsIn('Tour: Japan Explorer | Route: Tokyo - Kyoto')).toEqual(['japan'])
+    expect(travelMarketsIn('Tour: Japanese Explorer')).toEqual(['japan'])
+    expect(travelMarketsIn('Tour: Chinatown Food Walk')).toEqual([])
+    expect(matchTravelScope('Tour: Classic Discovery', 'https://example.com/new-tours/', deriveTravelScope([], ['china tours'])).status).toBe('unknown')
   })
   it('round-trips settings read from database without metadata columns', () => {
     const read = settingsSchema.strip().parse({ ...settings, client_id: a, updated_at: '2026-09-09' })

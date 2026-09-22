@@ -1,0 +1,7608 @@
+[
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589907084325",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "3PL新潜在客户广告组",
+  "spend": "0.28",
+  "impressions": "20",
+  "reach": "19",
+  "clicks": "0",
+  "frequency": "1.052632",
+  "cpm": "14",
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "20"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1"
+   }
+  ],
+  "date_start": "2026-08-17",
+  "date_stop": "2026-08-17"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "5.82",
+  "impressions": "264",
+  "reach": "223",
+  "clicks": "14",
+  "frequency": "1.183857",
+  "cpm": "22.045455",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "5"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "4"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "50"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "3"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "50"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "4"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "4"
+   },
+   {
+    "action_type": "video_view",
+    "value": "42"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "251"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "18"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "7"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-08-17",
+  "date_stop": "2026-08-17"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589907084325",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "3PL新潜在客户广告组",
+  "spend": "11.71",
+  "impressions": "515",
+  "reach": "387",
+  "clicks": "8",
+  "frequency": "1.330749",
+  "cpm": "22.737864",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "98"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "98"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "96"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "484"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "32"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "50"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "33"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "13"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "11"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-18",
+  "date_stop": "2026-08-18"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "8.18",
+  "impressions": "401",
+  "reach": "285",
+  "clicks": "14",
+  "frequency": "1.407018",
+  "cpm": "20.399002",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "10"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "7"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "75"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "76"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "7"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "6"
+   },
+   {
+    "action_type": "post",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "7"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "64"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "371"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "24"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "17"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "11"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "7"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-08-18",
+  "date_stop": "2026-08-18"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589907084325",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "3PL新潜在客户广告组",
+  "spend": "11",
+  "impressions": "369",
+  "reach": "309",
+  "clicks": "8",
+  "frequency": "1.194175",
+  "cpm": "29.810298",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "3"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "79"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "79"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "76"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "348"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "26"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "40"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "29"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "12"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "12"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-19",
+  "date_stop": "2026-08-19"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "3.25",
+  "impressions": "154",
+  "reach": "122",
+  "clicks": "5",
+  "frequency": "1.262295",
+  "cpm": "21.103896",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "24"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "25"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "21"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "134"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-19",
+  "date_stop": "2026-08-19"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589907084325",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "3PL新潜在客户广告组",
+  "spend": "26.33",
+  "impressions": "761",
+  "reach": "600",
+  "clicks": "14",
+  "frequency": "1.268333",
+  "cpm": "34.599212",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_unlike",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "184"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "3"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "184"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "180"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "709"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "63"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "99"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "69"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "26"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "20"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-20",
+  "date_stop": "2026-08-20"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "12.96",
+  "impressions": "670",
+  "reach": "538",
+  "clicks": "20",
+  "frequency": "1.245353",
+  "cpm": "19.343284",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "11"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "5"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "127"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "127"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "7"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "114"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "625"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "35"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "31"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "10"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-08-20",
+  "date_stop": "2026-08-20"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589907084325",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "3PL新潜在客户广告组",
+  "spend": "28.58",
+  "impressions": "896",
+  "reach": "709",
+  "clicks": "17",
+  "frequency": "1.263752",
+  "cpm": "31.897321",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "8"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "193"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "193"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "184"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "846"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "65"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "98"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "70"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "38"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "33"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "34"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-21",
+  "date_stop": "2026-08-21"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "11.26",
+  "impressions": "535",
+  "reach": "434",
+  "clicks": "15",
+  "frequency": "1.232719",
+  "cpm": "21.046729",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "6"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "5"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "106"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "106"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "9"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "3"
+   },
+   {
+    "action_type": "post",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "99"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "496"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "29"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "24"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "13"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "7"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-08-21",
+  "date_stop": "2026-08-21"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589907084325",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "3PL新潜在客户广告组",
+  "spend": "27.61",
+  "impressions": "820",
+  "reach": "682",
+  "clicks": "14",
+  "frequency": "1.202346",
+  "cpm": "33.670732",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "5"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "193"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "194"
+   },
+   {
+    "action_type": "video_view",
+    "value": "188"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "776"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "44"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "79"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "57"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "27"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "21"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "20"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-22",
+  "date_stop": "2026-08-22"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "10.81",
+  "impressions": "590",
+  "reach": "464",
+  "clicks": "19",
+  "frequency": "1.271552",
+  "cpm": "18.322034",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "12"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_block",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "11"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "159"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "4"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "159"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "9"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "6"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "8"
+   },
+   {
+    "action_type": "video_view",
+    "value": "143"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "559"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "52"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "46"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "19"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "date_start": "2026-08-22",
+  "date_stop": "2026-08-22"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589907084325",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "3PL新潜在客户广告组",
+  "spend": "23.97",
+  "impressions": "554",
+  "reach": "476",
+  "clicks": "13",
+  "frequency": "1.163866",
+  "cpm": "43.267148",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "6"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_unlike",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "123"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "3"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "123"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "114"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "527"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "35"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "48"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "35"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "23"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "19"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "18"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-23",
+  "date_stop": "2026-08-23"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "16.88",
+  "impressions": "685",
+  "reach": "547",
+  "clicks": "20",
+  "frequency": "1.252285",
+  "cpm": "24.642336",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "11"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "6"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_block",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "5"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "131"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "132"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "5"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "3"
+   },
+   {
+    "action_type": "post",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "3"
+   },
+   {
+    "action_type": "video_view",
+    "value": "118"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "619"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "41"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "32"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "22"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-08-23",
+  "date_stop": "2026-08-23"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589907084325",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "3PL新潜在客户广告组",
+  "spend": "19.42",
+  "impressions": "560",
+  "reach": "450",
+  "clicks": "3",
+  "frequency": "1.244444",
+  "cpm": "34.678571",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "118"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "118"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "117"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "509"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "24"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "48"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "26"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "13"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "11"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "12"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-24",
+  "date_stop": "2026-08-24"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "12.27",
+  "impressions": "480",
+  "reach": "411",
+  "clicks": "12",
+  "frequency": "1.167883",
+  "cpm": "25.5625",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "link_click",
+    "value": "6"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "5"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "103"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "4"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "103"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "7"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "2"
+   },
+   {
+    "action_type": "post",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "93"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "452"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "35"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "33"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "21"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "13"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "7"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "7"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "date_start": "2026-08-24",
+  "date_stop": "2026-08-24"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589907084325",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "3PL新潜在客户广告组",
+  "spend": "10.13",
+  "impressions": "281",
+  "reach": "251",
+  "clicks": "7",
+  "frequency": "1.119522",
+  "cpm": "36.049822",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "68"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "68"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "66"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "260"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "25"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "37"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "26"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "15"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "23"
+   }
+  ],
+  "date_start": "2026-08-25",
+  "date_stop": "2026-08-25"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "18.48",
+  "impressions": "972",
+  "reach": "779",
+  "clicks": "18",
+  "frequency": "1.247754",
+  "cpm": "19.012346",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "4"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "5"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "209"
+   },
+   {
+    "action_type": "like",
+    "value": "2"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "211"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "5"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "2"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "203"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "883"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "73"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "64"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "35"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "21"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "date_start": "2026-08-25",
+  "date_stop": "2026-08-25"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "22.54",
+  "impressions": "1096",
+  "reach": "863",
+  "clicks": "28",
+  "frequency": "1.269988",
+  "cpm": "20.565693",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_purchase",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "11"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_app_purchase",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.post_unlike",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "230"
+   },
+   {
+    "action_type": "like",
+    "value": "3"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_web_app_purchase",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "233"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "7"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "5"
+   },
+   {
+    "action_type": "post",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.purchase",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "0"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_web_purchase",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "215"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "989"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "84"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "68"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "27"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "17"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "8"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "date_start": "2026-08-26",
+  "date_stop": "2026-08-26"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "15.04",
+  "impressions": "552",
+  "reach": "435",
+  "clicks": "20",
+  "frequency": "1.268966",
+  "cpm": "27.246377",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "7"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "5"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "127"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "6"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "128"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "6"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "6"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "3"
+   },
+   {
+    "action_type": "video_view",
+    "value": "114"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "500"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "45"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "39"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "22"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "13"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "8"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "7"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "date_start": "2026-08-27",
+  "date_stop": "2026-08-27"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589907084325",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "3PL新潜在客户广告组",
+  "spend": "1.73",
+  "impressions": "65",
+  "reach": "58",
+  "clicks": "0",
+  "frequency": "1.12069",
+  "cpm": "26.615385",
+  "actions": [
+   {
+    "action_type": "post_engagement",
+    "value": "11"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "11"
+   },
+   {
+    "action_type": "video_view",
+    "value": "11"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "53"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-08-28",
+  "date_stop": "2026-08-28"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "24.22",
+  "impressions": "967",
+  "reach": "744",
+  "clicks": "26",
+  "frequency": "1.299731",
+  "cpm": "25.046536",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "14"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "10"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "175"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "3"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "176"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "11"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "8"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "8"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "158"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "880"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "55"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "42"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "27"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "15"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "7"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "7"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-08-28",
+  "date_stop": "2026-08-28"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589907084325",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "3PL新潜在客户广告组",
+  "spend": "8.31",
+  "impressions": "231",
+  "reach": "201",
+  "clicks": "2",
+  "frequency": "1.149254",
+  "cpm": "35.974026",
+  "actions": [
+   {
+    "action_type": "post_engagement",
+    "value": "40"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "40"
+   },
+   {
+    "action_type": "video_view",
+    "value": "40"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "186"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "7"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-08-29",
+  "date_stop": "2026-08-29"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "27.75",
+  "impressions": "1407",
+  "reach": "1095",
+  "clicks": "33",
+  "frequency": "1.284932",
+  "cpm": "19.722815",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "12"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "6"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "7"
+   },
+   {
+    "action_type": "onsite_conversion.post_unlike",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "252"
+   },
+   {
+    "action_type": "like",
+    "value": "2"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "8"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "254"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "11"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "9"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "7"
+   },
+   {
+    "action_type": "post",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "5"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "7"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "232"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1278"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "87"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "75"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "43"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "23"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "18"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "date_start": "2026-08-29",
+  "date_stop": "2026-08-29"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589907084325",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "3PL新潜在客户广告组",
+  "spend": "9",
+  "impressions": "245",
+  "reach": "214",
+  "clicks": "5",
+  "frequency": "1.14486",
+  "cpm": "36.734694",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "2"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "32"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "3"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "32"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "3"
+   },
+   {
+    "action_type": "post",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "27"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "192"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-30",
+  "date_stop": "2026-08-30"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "34.83",
+  "impressions": "1523",
+  "reach": "1187",
+  "clicks": "30",
+  "frequency": "1.283067",
+  "cpm": "22.869337",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "13"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "7"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "309"
+   },
+   {
+    "action_type": "like",
+    "value": "2"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "7"
+   },
+   {
+    "action_type": "comment",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "311"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "10"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "7"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "7"
+   },
+   {
+    "action_type": "post",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_comment",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "7"
+   },
+   {
+    "action_type": "video_view",
+    "value": "289"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1400"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "98"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "91"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "59"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "29"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "17"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "15"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "date_start": "2026-08-30",
+  "date_stop": "2026-08-30"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589907084325",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "3PL新潜在客户广告组",
+  "spend": "4.45",
+  "impressions": "141",
+  "reach": "116",
+  "clicks": "1",
+  "frequency": "1.215517",
+  "cpm": "31.560284",
+  "actions": [
+   {
+    "action_type": "post_engagement",
+    "value": "16"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "16"
+   },
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "114"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "7"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "8"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "7"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-31",
+  "date_stop": "2026-08-31"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "13.53",
+  "impressions": "405",
+  "reach": "327",
+  "clicks": "11",
+  "frequency": "1.238532",
+  "cpm": "33.407407",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "3"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "link_click",
+    "value": "7"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "4"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "78"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "3"
+   },
+   {
+    "action_type": "comment",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "78"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "4"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_comment",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "7"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "3"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "3"
+   },
+   {
+    "action_type": "video_view",
+    "value": "68"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "352"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "31"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "32"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "19"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "date_start": "2026-08-31",
+  "date_stop": "2026-08-31"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "18.17",
+  "impressions": "655",
+  "reach": "511",
+  "clicks": "16",
+  "frequency": "1.2818",
+  "cpm": "27.740458",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "10"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "7"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "10"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "130"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "131"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "10"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "6"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "6"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "6"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "5"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "7"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "120"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "587"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "41"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "36"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "17"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "11"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-09-01",
+  "date_stop": "2026-09-01"
+ },
+ {
+  "campaign_id": "52593506024125",
+  "adset_id": "52593506023925",
+  "campaign_name": "新潜在客户广告系列-3PL",
+  "adset_name": "新潜在客户广告组-9月1日",
+  "spend": "14.19",
+  "impressions": "689",
+  "reach": "567",
+  "clicks": "10",
+  "frequency": "1.215168",
+  "cpm": "20.595065",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "7"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "117"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "117"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "109"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "519"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "21"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "38"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "25"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "12"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "12"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-09-01",
+  "date_stop": "2026-09-01"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "26.22",
+  "impressions": "978",
+  "reach": "687",
+  "clicks": "25",
+  "frequency": "1.423581",
+  "cpm": "26.809816",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "link_click",
+    "value": "16"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "7"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "10"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "191"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_call_placed",
+    "value": "1"
+   },
+   {
+    "action_type": "like",
+    "value": "2"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "5"
+   },
+   {
+    "action_type": "comment",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "193"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "10"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "7"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_comment",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "6"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "3"
+   },
+   {
+    "action_type": "lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "7"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "170"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "906"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "60"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "50"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "26"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "15"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "8"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-09-02",
+  "date_stop": "2026-09-02"
+ },
+ {
+  "campaign_id": "52593506024125",
+  "adset_id": "52593506023925",
+  "campaign_name": "新潜在客户广告系列-3PL",
+  "adset_name": "新潜在客户广告组-9月1日",
+  "spend": "20.91",
+  "impressions": "913",
+  "reach": "726",
+  "clicks": "14",
+  "frequency": "1.257576",
+  "cpm": "22.902519",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "10"
+   },
+   {
+    "action_type": "offsite_conversion.fb_pixel_custom",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "135"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "135"
+   },
+   {
+    "action_type": "video_view",
+    "value": "125"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "477"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "39"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "69"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "41"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "21"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "18"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-09-02",
+  "date_stop": "2026-09-02"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "22.91",
+  "impressions": "758",
+  "reach": "584",
+  "clicks": "20",
+  "frequency": "1.297945",
+  "cpm": "30.224274",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "6"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "4"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "130"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_call_placed",
+    "value": "1"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "3"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "131"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "6"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "121"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_20s_call_connect",
+    "value": "1"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "664"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "43"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "31"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "18"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "15"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "7"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-09-03",
+  "date_stop": "2026-09-03"
+ },
+ {
+  "campaign_id": "52593506024125",
+  "adset_id": "52593506023925",
+  "campaign_name": "新潜在客户广告系列-3PL",
+  "adset_name": "新潜在客户广告组-9月1日",
+  "spend": "14.17",
+  "impressions": "225",
+  "reach": "190",
+  "clicks": "5",
+  "frequency": "1.184211",
+  "cpm": "62.977778",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "3"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "59"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "59"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "55"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "174"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "22"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "17"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "8"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-09-03",
+  "date_stop": "2026-09-03"
+ },
+ {
+  "campaign_id": "52594661605725",
+  "adset_id": "52594661606125",
+  "campaign_name": "物流广告组-WhatsApp",
+  "adset_name": "新潜在客户广告组-WhatsApp",
+  "spend": "5.12",
+  "impressions": "266",
+  "reach": "214",
+  "clicks": "6",
+  "frequency": "1.242991",
+  "cpm": "19.24812",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "4"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "35"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "35"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "4"
+   },
+   {
+    "action_type": "video_view",
+    "value": "30"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "217"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "10"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-09-03",
+  "date_stop": "2026-09-03"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "20.9",
+  "impressions": "805",
+  "reach": "613",
+  "clicks": "36",
+  "frequency": "1.313214",
+  "cpm": "25.962733",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "7"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "7"
+   },
+   {
+    "action_type": "omni_purchase",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "15"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "7"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "8"
+   },
+   {
+    "action_type": "onsite_app_purchase",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "7"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "8"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "188"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "7"
+   },
+   {
+    "action_type": "onsite_web_app_purchase",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "188"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "12"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "7"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "6"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "6"
+   },
+   {
+    "action_type": "post",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "6"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.purchase",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "2"
+   },
+   {
+    "action_type": "lead",
+    "value": "7"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "7"
+   },
+   {
+    "action_type": "onsite_web_purchase",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "8"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "7"
+   },
+   {
+    "action_type": "video_view",
+    "value": "166"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "713"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "59"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "57"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "35"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "24"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "date_start": "2026-09-04",
+  "date_stop": "2026-09-04"
+ },
+ {
+  "campaign_id": "52594661605725",
+  "adset_id": "52594661606125",
+  "campaign_name": "物流广告组-WhatsApp",
+  "adset_name": "新潜在客户广告组-WhatsApp",
+  "spend": "10.04",
+  "impressions": "523",
+  "reach": "357",
+  "clicks": "9",
+  "frequency": "1.464986",
+  "cpm": "19.196941",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "55"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "55"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "51"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "354"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "19"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "17"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-09-04",
+  "date_stop": "2026-09-04"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "17.71",
+  "impressions": "757",
+  "reach": "599",
+  "clicks": "21",
+  "frequency": "1.263773",
+  "cpm": "23.39498",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "6"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "6"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "137"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "3"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "137"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "9"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "4"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "128"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "646"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "52"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "49"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "27"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "12"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "11"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "date_start": "2026-09-05",
+  "date_stop": "2026-09-05"
+ },
+ {
+  "campaign_id": "52594661605725",
+  "adset_id": "52594661606125",
+  "campaign_name": "物流广告组-WhatsApp",
+  "adset_name": "新潜在客户广告组-WhatsApp",
+  "spend": "7.8",
+  "impressions": "514",
+  "reach": "392",
+  "clicks": "20",
+  "frequency": "1.311224",
+  "cpm": "15.175097",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "11"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "4"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "41"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "3"
+   },
+   {
+    "action_type": "comment",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "41"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_comment",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "27"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "116"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-09-05",
+  "date_stop": "2026-09-05"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "18.63",
+  "impressions": "838",
+  "reach": "686",
+  "clicks": "29",
+  "frequency": "1.221574",
+  "cpm": "22.231504",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "11"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "7"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "172"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "4"
+   },
+   {
+    "action_type": "comment",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "173"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "9"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "6"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "6"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_comment",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "6"
+   },
+   {
+    "action_type": "video_view",
+    "value": "157"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "714"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "57"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "50"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "34"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "17"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "11"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "date_start": "2026-09-06",
+  "date_stop": "2026-09-06"
+ },
+ {
+  "campaign_id": "52594661605725",
+  "adset_id": "52594661606125",
+  "campaign_name": "物流广告组-WhatsApp",
+  "adset_name": "新潜在客户广告组-WhatsApp",
+  "spend": "12.54",
+  "impressions": "691",
+  "reach": "502",
+  "clicks": "9",
+  "frequency": "1.376494",
+  "cpm": "18.147612",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "7"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "5"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "70"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "70"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "4"
+   },
+   {
+    "action_type": "video_view",
+    "value": "61"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "410"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "12"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-09-06",
+  "date_stop": "2026-09-06"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "16.22",
+  "impressions": "597",
+  "reach": "468",
+  "clicks": "17",
+  "frequency": "1.275641",
+  "cpm": "27.169179",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "7"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "5"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "113"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "113"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "4"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "104"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "568"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "29"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "24"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-09-07",
+  "date_stop": "2026-09-07"
+ },
+ {
+  "campaign_id": "52594661605725",
+  "adset_id": "52594661606125",
+  "campaign_name": "物流广告组-WhatsApp",
+  "adset_name": "新潜在客户广告组-WhatsApp",
+  "spend": "13.06",
+  "impressions": "712",
+  "reach": "543",
+  "clicks": "19",
+  "frequency": "1.311234",
+  "cpm": "18.342697",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "6"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "6"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "92"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "92"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "7"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "5"
+   },
+   {
+    "action_type": "video_view",
+    "value": "85"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "532"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "35"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "31"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "13"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-09-07",
+  "date_stop": "2026-09-07"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "23.28",
+  "impressions": "824",
+  "reach": "612",
+  "clicks": "12",
+  "frequency": "1.346405",
+  "cpm": "28.252427",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "4"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "153"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "153"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "3"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "147"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "795"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "51"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "38"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "17"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "13"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "8"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-09-08",
+  "date_stop": "2026-09-08"
+ },
+ {
+  "campaign_id": "52594661605725",
+  "adset_id": "52594661606125",
+  "campaign_name": "物流广告组-WhatsApp",
+  "adset_name": "新潜在客户广告组-WhatsApp",
+  "spend": "10.78",
+  "impressions": "623",
+  "reach": "457",
+  "clicks": "16",
+  "frequency": "1.363239",
+  "cpm": "17.303371",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "8"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "5"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "76"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "76"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "7"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "4"
+   },
+   {
+    "action_type": "video_view",
+    "value": "68"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "353"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "23"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-09-08",
+  "date_stop": "2026-09-08"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "26.1",
+  "impressions": "876",
+  "reach": "687",
+  "clicks": "25",
+  "frequency": "1.275109",
+  "cpm": "29.794521",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "13"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "8"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "178"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "3"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "179"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "11"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "6"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "7"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "162"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "784"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "50"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "44"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "19"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "11"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-09-09",
+  "date_stop": "2026-09-09"
+ },
+ {
+  "campaign_id": "52594661605725",
+  "adset_id": "52594661606125",
+  "campaign_name": "物流广告组-WhatsApp",
+  "adset_name": "新潜在客户广告组-WhatsApp",
+  "spend": "9.22",
+  "impressions": "397",
+  "reach": "323",
+  "clicks": "8",
+  "frequency": "1.229102",
+  "cpm": "23.224181",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "3"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "40"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "40"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "38"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "230"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-09-09",
+  "date_stop": "2026-09-09"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "19.61",
+  "impressions": "664",
+  "reach": "508",
+  "clicks": "16",
+  "frequency": "1.307087",
+  "cpm": "29.533133",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "9"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "4"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "122"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "123"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "3"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "4"
+   },
+   {
+    "action_type": "video_view",
+    "value": "112"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "585"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "34"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "29"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "12"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-09-10",
+  "date_stop": "2026-09-10"
+ },
+ {
+  "campaign_id": "52594661605725",
+  "adset_id": "52594661606125",
+  "campaign_name": "物流广告组-WhatsApp",
+  "adset_name": "新潜在客户广告组-WhatsApp",
+  "spend": "9.07",
+  "impressions": "495",
+  "reach": "419",
+  "clicks": "7",
+  "frequency": "1.181384",
+  "cpm": "18.323232",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "57"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "58"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "54"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "392"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "7"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-09-10",
+  "date_stop": "2026-09-10"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "18.49",
+  "impressions": "801",
+  "reach": "617",
+  "clicks": "26",
+  "frequency": "1.298217",
+  "cpm": "23.083645",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "link_click",
+    "value": "15"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "8"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "9"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "147"
+   },
+   {
+    "action_type": "like",
+    "value": "2"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "149"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "10"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "6"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "130"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "715"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "47"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "38"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "23"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "7"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "date_start": "2026-09-11",
+  "date_stop": "2026-09-11"
+ },
+ {
+  "campaign_id": "52594661605725",
+  "adset_id": "52594661606125",
+  "campaign_name": "物流广告组-WhatsApp",
+  "adset_name": "新潜在客户广告组-WhatsApp",
+  "spend": "7.91",
+  "impressions": "394",
+  "reach": "309",
+  "clicks": "9",
+  "frequency": "1.275081",
+  "cpm": "20.076142",
+  "actions": [
+   {
+    "action_type": "omni_purchase",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_app_purchase",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "6"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "62"
+   },
+   {
+    "action_type": "onsite_web_app_purchase",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "62"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.purchase",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_web_purchase",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "5"
+   },
+   {
+    "action_type": "video_view",
+    "value": "57"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "310"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "17"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "11"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "8"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-09-11",
+  "date_stop": "2026-09-11"
+ },
+ {
+  "campaign_id": "52596931528325",
+  "adset_id": "52596931528525",
+  "campaign_name": "Thruplay-物流-2KG",
+  "adset_name": "新互动广告组",
+  "spend": "4.02",
+  "impressions": "773",
+  "reach": "738",
+  "clicks": "3",
+  "frequency": "1.047425",
+  "cpm": "5.200517",
+  "actions": [
+   {
+    "action_type": "post_engagement",
+    "value": "433"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "433"
+   },
+   {
+    "action_type": "video_view",
+    "value": "433"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "748"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "203"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "133"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "74"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "42"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "27"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "26"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "13"
+   }
+  ],
+  "date_start": "2026-09-11",
+  "date_stop": "2026-09-11"
+ },
+ {
+  "campaign_id": "52596939123525",
+  "adset_id": "52596939123725",
+  "campaign_name": "Thruplay-物流-200/cbm",
+  "adset_name": "ThruPlay_物流_200/cbm",
+  "spend": "4.57",
+  "impressions": "447",
+  "reach": "334",
+  "clicks": "3",
+  "frequency": "1.338323",
+  "cpm": "10.223714",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "317"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "317"
+   },
+   {
+    "action_type": "video_view",
+    "value": "316"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "439"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "219"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "223"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "193"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "101"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "59"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "56"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "19"
+   }
+  ],
+  "date_start": "2026-09-11",
+  "date_stop": "2026-09-11"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "16.94",
+  "impressions": "796",
+  "reach": "672",
+  "clicks": "15",
+  "frequency": "1.184524",
+  "cpm": "21.281407",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "6"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "4"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "138"
+   },
+   {
+    "action_type": "like",
+    "value": "2"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "140"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "5"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "3"
+   },
+   {
+    "action_type": "video_view",
+    "value": "131"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "706"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "42"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "34"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "15"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "12"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-09-12",
+  "date_stop": "2026-09-12"
+ },
+ {
+  "campaign_id": "52594661605725",
+  "adset_id": "52594661606125",
+  "campaign_name": "物流广告组-WhatsApp",
+  "adset_name": "新潜在客户广告组-WhatsApp",
+  "spend": "7.26",
+  "impressions": "425",
+  "reach": "346",
+  "clicks": "8",
+  "frequency": "1.228324",
+  "cpm": "17.082353",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "5"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "62"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "62"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "5"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "56"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "309"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "10"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "7"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-09-12",
+  "date_stop": "2026-09-12"
+ },
+ {
+  "campaign_id": "52596931528325",
+  "adset_id": "52596931528525",
+  "campaign_name": "Thruplay-物流-2KG",
+  "adset_name": "新互动广告组",
+  "spend": "9.29",
+  "impressions": "1769",
+  "reach": "1612",
+  "clicks": "21",
+  "frequency": "1.097395",
+  "cpm": "5.251555",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "3"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "7"
+   },
+   {
+    "action_type": "onsite_conversion.post_unlike",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "928"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "7"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "928"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "9"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "5"
+   },
+   {
+    "action_type": "video_view",
+    "value": "918"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1731"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "462"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "391"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "244"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "196"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "166"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "158"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "17"
+   }
+  ],
+  "date_start": "2026-09-12",
+  "date_stop": "2026-09-12"
+ },
+ {
+  "campaign_id": "52596939123525",
+  "adset_id": "52596939123725",
+  "campaign_name": "Thruplay-物流-200/cbm",
+  "adset_name": "ThruPlay_物流_200/cbm",
+  "spend": "8.35",
+  "impressions": "567",
+  "reach": "280",
+  "clicks": "1",
+  "frequency": "2.025",
+  "cpm": "14.726631",
+  "actions": [
+   {
+    "action_type": "post_engagement",
+    "value": "519"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "519"
+   },
+   {
+    "action_type": "video_view",
+    "value": "519"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "560"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "476"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "478"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "471"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "177"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "91"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "86"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "31"
+   }
+  ],
+  "date_start": "2026-09-12",
+  "date_stop": "2026-09-12"
+ },
+ {
+  "campaign_id": "52589907084125",
+  "adset_id": "52589967398925",
+  "campaign_name": "新亚8月广告系列-物流",
+  "adset_name": "物流潜在客户广告组",
+  "spend": "20.82",
+  "impressions": "947",
+  "reach": "772",
+  "clicks": "25",
+  "frequency": "1.226684",
+  "cpm": "21.985216",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "11"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "171"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "5"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "171"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "5"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "155"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "855"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "45"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "36"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "22"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "12"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "10"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "8"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-09-13",
+  "date_stop": "2026-09-13"
+ },
+ {
+  "campaign_id": "52594661605725",
+  "adset_id": "52594661606125",
+  "campaign_name": "物流广告组-WhatsApp",
+  "adset_name": "新潜在客户广告组-WhatsApp",
+  "spend": "9.04",
+  "impressions": "561",
+  "reach": "466",
+  "clicks": "13",
+  "frequency": "1.203863",
+  "cpm": "16.114082",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "7"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "4"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "67"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "67"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "4"
+   },
+   {
+    "action_type": "video_view",
+    "value": "59"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "413"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "26"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "19"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-09-13",
+  "date_stop": "2026-09-13"
+ },
+ {
+  "campaign_id": "52596931528325",
+  "adset_id": "52596931528525",
+  "campaign_name": "Thruplay-物流-2KG",
+  "adset_name": "新互动广告组",
+  "spend": "11.11",
+  "impressions": "2294",
+  "reach": "2125",
+  "clicks": "27",
+  "frequency": "1.079529",
+  "cpm": "4.843069",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "7"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "3"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "1167"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "4"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1167"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_welcome_message_view",
+    "value": "2"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "4"
+   },
+   {
+    "action_type": "post",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "3"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1156"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2224"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "544"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "468"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "274"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "207"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "169"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "166"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "15"
+   }
+  ],
+  "date_start": "2026-09-13",
+  "date_stop": "2026-09-13"
+ },
+ {
+  "campaign_id": "52596939123525",
+  "adset_id": "52596939123725",
+  "campaign_name": "Thruplay-物流-200/cbm",
+  "adset_name": "ThruPlay_物流_200/cbm",
+  "spend": "13.85",
+  "impressions": "778",
+  "reach": "237",
+  "clicks": "0",
+  "frequency": "3.2827",
+  "cpm": "17.802057",
+  "actions": [
+   {
+    "action_type": "post_engagement",
+    "value": "745"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "745"
+   },
+   {
+    "action_type": "video_view",
+    "value": "745"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "774"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "723"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "725"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "714"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "260"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "128"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "122"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "34"
+   }
+  ],
+  "date_start": "2026-09-13",
+  "date_stop": "2026-09-13"
+ }
+]

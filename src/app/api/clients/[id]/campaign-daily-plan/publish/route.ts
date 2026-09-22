@@ -22,6 +22,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
+import type { z } from 'zod'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
@@ -38,7 +39,11 @@ import {
   CampaignDailyPublishCommandSchema,
   CampaignDailyPublishMetaSchema,
   DAILY_PLAN_POST_PUBLISHED_EVENT,
+  DAILY_PLAN_POST_STORY_RESOLVE_EVENT,
+  DailyPlanPostPublishedEventSchema,
+  StoryResolveDueSchema,
   measurementSchedule,
+  storyResolveEventId,
   partitionByIdempotency,
   publishIdempotencyKey,
   resolvePublishSchedule,
@@ -48,7 +53,10 @@ import {
   type CampaignDailyPublishMeta,
   type CampaignDailyPublishPlannedPost,
   type CampaignDailyPublishedPost,
+  type DailyPlanPostPublishedEvent,
+  type StoryResolveDue,
 } from '@/lib/campaign/daily-plan-publish'
+import { writeMeasurementRecord } from '@/lib/campaign/daily-plan-measurement-record'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -326,37 +334,126 @@ async function publishPending(
       permalink: result.permalink,
       provider_response: result.raw,
     }
-    published.push(record)
 
-    // The Post is already live; an event failure must not discard the receipt.
-    try {
-      const sent = await sendInngestEvent({
-        id: candidate.idempotency_key,
-        name: DAILY_PLAN_POST_PUBLISHED_EVENT,
-        data: {
-          client_id: context.clientId,
-          campaign_id: context.command.campaign_id,
-          plan_id: context.row.id,
-          plan_revision: context.row.planRevision,
-          review_revision: context.row.reviewRevision,
-          date: candidate.date,
-          idempotency_key: candidate.idempotency_key,
-          post_id: record.post_id,
-          page_id: record.page_id,
-          published_at: publishedAt,
-          ...(record.scheduled_publish_time ? { scheduled_publish_time: record.scheduled_publish_time } : {}),
-          permalink: record.permalink,
-          // A scheduled receipt confirms submission, not public visibility.
-          measure_at: measurementSchedule(record.scheduled_publish_time ?? record.published_at),
-        },
-      })
-      eventIds.push(...sent.event_ids)
-    } catch (error: unknown) {
-      console.error('[daily-plan publish] measurement event failed', candidate.date, errorMessage(error))
-    }
+    published.push(record)
+    const sentIds = await startMeasurement(record, context)
+    eventIds.push(...sentIds)
   }
 
   return { published, failed, eventIds }
+}
+
+type MeasurementSkipCode = 'event_contract_invalid' | 'event_send_failed'
+
+/**
+ * Hand the published Post to measurement. Never throws and never marks the
+ * Post failed: it is already accepted by Facebook, and `failed[]` would invite
+ * a duplicate re-post. If the handoff cannot happen, the receipt entry gets a
+ * fixed reason code and a failed record lands where the daily to-do list reads.
+ */
+async function startMeasurement(
+  record: CampaignDailyPublishedPost,
+  context: { clientId: string; row: PlanRow; command: CampaignDailyPublishCommand },
+): Promise<string[]> {
+  const event = buildMeasurementEvent(record, context)
+  if (!event.ok) {
+    console.error('[daily-plan publish] measurement event not emitted', record.date, event.reason)
+    await recordMeasurementSkipped(record, context, 'event_contract_invalid')
+    return []
+  }
+  try {
+    const sent = await sendInngestEvent({ id: event.id, name: event.name, data: event.data })
+    return sent.event_ids
+  } catch (error: unknown) {
+    console.error('[daily-plan publish] measurement event failed', record.date, errorMessage(error))
+    await recordMeasurementSkipped(record, context, 'event_send_failed')
+    return []
+  }
+}
+
+async function recordMeasurementSkipped(
+  record: CampaignDailyPublishedPost,
+  context: { clientId: string; row: PlanRow; command: CampaignDailyPublishCommand },
+  code: MeasurementSkipCode,
+): Promise<void> {
+  record.measurement_skipped_reason = code
+  try {
+    await writeMeasurementRecord(supabaseAdmin, {
+      status: 'failed',
+      outcome: code,
+      reason: code,
+      attempts: 0,
+      post: {
+        client_id: context.clientId,
+        campaign_id: context.command.campaign_id,
+        plan_id: context.row.id,
+        date: record.date,
+        idempotency_key: record.idempotency_key,
+        page_id: record.page_id,
+        ...(record.post_id_source === 'id' ? { photo_id: record.post_id } : { post_id: record.post_id }),
+        ...(record.scheduled_publish_time ? { scheduled_publish_time: record.scheduled_publish_time } : {}),
+      },
+    })
+  } catch (error: unknown) {
+    // Observability only: a failed write must not block saving the receipt.
+    console.error('[daily-plan publish] measurement failure record not written', record.date, errorMessage(error))
+  }
+}
+
+type MeasurementEvent =
+  | { ok: true; id: string; name: string; data: DailyPlanPostPublishedEvent | StoryResolveDue }
+  | { ok: false; reason: string }
+
+function contractViolation(error: z.ZodError): { ok: false; reason: string } {
+  const issues = error.issues.slice(0, 3).map(issue => `${issue.path.join('.')}: ${issue.message}`)
+  return { ok: false, reason: `event payload violates contract: ${issues.join('; ')}` }
+}
+
+/**
+ * Pick and validate the event that starts measurement for this Post.
+ *
+ * - Graph returned a feed `post_id` (immediate publish): the standard
+ *   `daily_plan.post.published`, event id = idempotency key.
+ * - Graph returned only a photo `id` (scheduled photo): Meta only exposes
+ *   `page_story_id` once the photo is public, so emit a story-resolve event
+ *   (id `<key>:resolve:<photo_id>`); the cloud workflow emits the standard event, with the
+ *   same idempotency-key id, after it reads the story id back.
+ *
+ * Both are checked against the consumer's own schema *before* sending.
+ */
+function buildMeasurementEvent(
+  record: CampaignDailyPublishedPost,
+  context: { clientId: string; row: PlanRow; command: CampaignDailyPublishCommand },
+): MeasurementEvent {
+  const identity = {
+    client_id: context.clientId,
+    campaign_id: context.command.campaign_id,
+    plan_id: context.row.id,
+    plan_revision: context.row.planRevision,
+    review_revision: context.row.reviewRevision,
+    date: record.date,
+    idempotency_key: record.idempotency_key,
+    page_id: record.page_id,
+    published_at: record.published_at,
+    ...(record.scheduled_publish_time ? { scheduled_publish_time: record.scheduled_publish_time } : {}),
+    // A scheduled receipt confirms submission, not public visibility.
+    measure_at: measurementSchedule(record.scheduled_publish_time ?? record.published_at),
+  }
+
+  if (record.post_id_source === 'id') {
+    const parsed = StoryResolveDueSchema.safeParse({ ...identity, photo_id: record.post_id })
+    if (!parsed.success) return contractViolation(parsed.error)
+    return {
+      ok: true,
+      id: storyResolveEventId(record.idempotency_key, parsed.data.photo_id),
+      name: DAILY_PLAN_POST_STORY_RESOLVE_EVENT,
+      data: parsed.data,
+    }
+  }
+
+  const parsed = DailyPlanPostPublishedEventSchema.safeParse({ ...identity, post_id: record.post_id, permalink: record.permalink })
+  if (!parsed.success) return contractViolation(parsed.error)
+  return { ok: true, id: record.idempotency_key, name: DAILY_PLAN_POST_PUBLISHED_EVENT, data: parsed.data }
 }
 
 /** Compare-and-set write of the receipt onto the exact snapshot we validated. */
@@ -509,6 +606,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       status: receipt.status,
       receipt,
       skipped_as_duplicate: skipped.map(post => ({ date: post.date, idempotency_key: post.idempotency_key })),
+      // Posts that are on Facebook but will not be measured — surfaced here so
+      // the caller sees it without digging through the receipt or server logs.
+      measurement_skipped: outcome.published
+        .filter(post => post.measurement_skipped_reason)
+        .map(post => ({ date: post.date, post_id: post.post_id, reason: post.measurement_skipped_reason })),
     })
   } catch (error: unknown) {
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 500 })

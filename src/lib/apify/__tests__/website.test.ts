@@ -9,7 +9,7 @@ beforeEach(() => { vi.resetAllMocks(); vi.mocked(getRun).mockResolvedValue(run);
 describe('bounded Website capture', () => {
   it('starts exactly one approved URL with pinned build and provider cap', async () => {
     await startWebsiteCapture({ url: 'https://example.com/', build: '1.2.3', maxChargeUsd: 0.05 })
-    expect(runActor).toHaveBeenCalledWith(WEBSITE_ACTOR, expect.objectContaining({ startUrls: [{ url: 'https://example.com/' }], proxyConfiguration: { useApifyProxy: true }, maxCrawlDepth: 0, maxCrawlPages: 1, saveFiles: false, saveContentTypes: '', summarize: false, expandIframes: false }), { build: '1.2.3', maxTotalChargeUsd: 0.05, timeout: 120, memory: 1024 })
+    expect(runActor).toHaveBeenCalledWith(WEBSITE_ACTOR, expect.objectContaining({ startUrls: [{ url: 'https://example.com/' }], proxyConfiguration: { useApifyProxy: true }, maxCrawlDepth: 0, maxCrawlPages: 1, saveFiles: false, saveContentTypes: '', summarize: false, expandIframes: false, htmlTransformer: 'none', maxScrollHeightPixels: 20_000 }), { build: '1.2.3', maxTotalChargeUsd: 0.05, timeout: 120, memory: 1024 })
   })
   it.each(['latest', '', '1.2'])('rejects unpinned build %s', async build => {
     await expect(startWebsiteCapture({ url: 'https://example.com', build, maxChargeUsd: 0.05 })).rejects.toThrow('pinned')

@@ -28,6 +28,12 @@ vi.mock('@/lib/meta/token-manager', () => ({
   getMetaTokenForClient: async () => 'user-token',
 }))
 
+// AD-SEC-1 归属校验(target_adset_id 那一半)要实拉 ad set——account_id 跟
+// CONFIG_ROW.ad_account_id 一致，代表"配置的 ad set 确实是这个账户下的"。
+vi.mock('@/lib/meta/adsets', () => ({
+  getAdSetStatus: async () => ({ id: 'adset1', name: 'x', status: 'ACTIVE', account_id: 'act_1' }),
+}))
+
 vi.mock('@/lib/ads/creative-link', () => ({
   linkAdToCreative: (...a: unknown[]) => linkAdToCreative(...a),
 }))
@@ -48,6 +54,9 @@ const CONFIG_ROW = {
 
 let syncLogInserts: Record<string, unknown>[] = []
 
+// AD-SEC-1 归属校验用到的 clients 行——账户/主页跟 CONFIG_ROW 一致。
+const CLIENT_ROW = { meta_ad_account_id: 'act_1', facebook_page_id: '748077268383005' }
+
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
     from: (table: string) => {
@@ -57,7 +66,9 @@ vi.mock('@supabase/supabase-js', () => ({
         maybeSingle: async () =>
           table === 'winner_reel_sync_config'
             ? { data: CONFIG_ROW, error: null }
-            : { data: null, error: null },
+            : table === 'clients'
+              ? { data: CLIENT_ROW, error: null }
+              : { data: null, error: null },
         insert: async (row: Record<string, unknown>) => {
           if (table === 'winner_reel_sync_log') syncLogInserts.push(row)
           return { error: null }

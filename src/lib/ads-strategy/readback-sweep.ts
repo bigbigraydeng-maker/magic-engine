@@ -15,9 +15,24 @@
  *
  * 判在 `launch-readback.ts`（纯规则、可单测），取在 `lib/meta/readback.ts`，
  * 这里只负责串起来 + 按客户聚合。
+ *
+ * ── 2026-09-13 多账户 ────────────────────────────────────────────────────
+ * 一个客户可能登记了不止一个 Meta 广告账户（`client_meta_ad_accounts`）——
+ * CTS 就是：`meta_ad_account_id` 登记的账户之外，还有一个只在新表里的
+ * "CTStours 官方账户"跑着 ThruPlay 广告，老逻辑只查 `meta_ad_account_id`，
+ * 那个账户上的广告组从来没被这道每日闸门扫过。`sweepAllClients` 现在对每个
+ * 客户都取完整账户列表，每个账户各产出一条 `ClientSweepResult`（`sweepClient`
+ * 本身不用改，它一直就是"扫一个账户"）。
+ *
+ * 候选客户名单也从只看 `meta_ad_account_id` 改成
+ * `getActiveClientsWithMetaAccounts`（同时看老列 + 新表）—— 否则如果哪天
+ * 有人把某客户的主账户从设置页清空、但这个客户在新表里还登记着别的账户，
+ * 这道安全巡检会把这个客户整个漏掉，等于绕了个圈又把这次要修的坑挖回来
+ * （2026-09-13 子牙复审发现）。
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { getClientAdAccountIds, getActiveClientsWithMetaAccounts } from '@/lib/meta/client-ad-accounts'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import {
   listActiveAdSets,
@@ -55,6 +70,8 @@ export interface SweepClient {
   meta_ad_account_id: string | null
   /** 客户所在地区，用来对照投放地区。没有就跳过那条检查。 */
   expected_geo?: string | null
+  /** 客户行业（`clients.industry`），闸门文案从广告剧本取叫法。没有就用中性词。 */
+  industry?: string | null
 }
 
 /** 一个组最多回读多少条广告的文案 —— 上游 `fetchAdCreativesReadback` 已限 50。 */
@@ -114,9 +131,10 @@ export async function sweepClient(client: SweepClient): Promise<ClientSweepResul
       continue
     }
 
-    const report = checkLaunch(
-      adaptMetaAdSet(raw, creatives, { expectedGeo: client.expected_geo ?? null }),
-    )
+    const report = checkLaunch({
+      ...adaptMetaAdSet(raw, creatives, { expectedGeo: client.expected_geo ?? null }),
+      industry: client.industry ?? null,
+    })
     swept.push({
       adSetId: raw.id,
       adSetName: name,
@@ -153,30 +171,30 @@ export async function sweepClient(client: SweepClient): Promise<ClientSweepResul
 export async function sweepAllClients(
   supabase: SupabaseClient,
 ): Promise<ClientSweepResult[]> {
-  const { data, error } = await supabase
-    .from('clients')
-    .select('id, name, meta_ad_account_id')
-    .eq('client_status', 'active')
-    .not('meta_ad_account_id', 'is', null)
-
-  if (error) throw new Error(`读客户列表失败：${error.message}`)
+  // 候选客户集合：老列有值，或者在 client_meta_ad_accounts 里登记过账户，
+  // 两边任一为真都要进来扫——只看老列会漏掉"主账户被清空但还有其他登记账户"
+  // 的客户。真正的账户列表（可能不止一个）再逐客户去 client_meta_ad_accounts 查一遍。
+  const clients = await getActiveClientsWithMetaAccounts(supabase)
 
   const results: ClientSweepResult[] = []
-  for (const c of (data ?? []) as SweepClient[]) {
-    try {
-      results.push(await sweepClient(c))
-    } catch (err) {
-      // 一个客户炸了不能让后面的客户今天都不扫。
-      results.push({
-        clientId: c.id,
-        clientName: c.name,
-        adAccountId: c.meta_ad_account_id ?? '',
-        adSetsChecked: 0,
-        blockers: 0,
-        warns: 0,
-        adSets: [],
-        error: err instanceof Error ? err.message : String(err),
-      })
+  for (const c of clients) {
+    const accountIds = await getClientAdAccountIds(c.id)
+    for (const accountId of accountIds) {
+      try {
+        results.push(await sweepClient({ ...c, meta_ad_account_id: accountId }))
+      } catch (err) {
+        // 一个客户 / 一个账户炸了不能让其余的今天都不扫。
+        results.push({
+          clientId: c.id,
+          clientName: c.name,
+          adAccountId: accountId,
+          adSetsChecked: 0,
+          blockers: 0,
+          warns: 0,
+          adSets: [],
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
     }
   }
   return results

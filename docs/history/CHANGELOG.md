@@ -5,6 +5,507 @@
 
 ---
 
+### 2026-09-22（广告支柱 IMPACT 闭环升级阶段 0/1：PM go 与 migration 核实为已完成，补记录并从 ROADMAP 移除过期条目）
+
+ROADMAP 里一直挂着「待 PM go：按依赖顺序合并（#1659 → #1662 → #1664 → #1665），并单独授权 apply migration」这条未完成事项。核实后确认这条已经完成——4 个 PR 早已合并，两张表（`ad_entity_snapshots`/`ad_strategy_configs`）已建好并在生产库里跑着真实数据（`ad_entity_snapshots` 2052 行，最新快照 9/21；快照 cron `ad-entity-snapshot`（[render.yaml](../../render.yaml)）按 `30 */6 * * *` 每 6 小时运行一次，非此前误记的 3 小时）。之前一直没人去数据库和 `render.yaml` 里核实，只看代码注释和这份清单，就以为还卡着——教训见会话记忆 `reference-cts-domain-token-dead-20260921` 的更正记录。已从 ROADMAP 对应清单删除这条，标题同步改为「PM go 已完成，验证与收尾进行中」。
+
+---
+
+### 2026-09-22（CTS 圣诞团 ThruPlay 上线 + Meta 授权修复 + Reborn 留资表单 v4 A/B 测试 + 新增 D9 自动检测：纯播放广告漏排除 Audience Network）
+
+PM 拍板打开的圣诞团专属 ThruPlay 广告（官方账户 `act_2202695063810470`）三层从 PAUSED 改 ACTIVE，
+核实后确认 CTS 两个 Meta 广告账户当前合计每天花费 $130 纽币（$150 上限内）。核实过程中发现 CTS 域名专属
+Meta 令牌已失效（Facebook 判定会话失效），PM 重新走授权流程生成新口令，已换成长期有效版并验证两个账户
+均可读。Reborn 留资广告组新增一版留资表单（v4，多问"出行时间"+"每人预算"两题）+ 一条新广告 A/B 测试，
+共用现有预算，不加新花费。
+
+核查 ThruPlay 完播率时发现命中 `docs/PITFALLS.md` D9 那个已知坑——新广告因建时未排除 Audience Network
+版位，次日 95%+ 花费落入假用户；追查到同一模式在更早的 ThruPlay 系列广告上已持续存在（$454 纽币基本
+打水漂）。已修复圣诞团 ThruPlay 的投放位置（只投 Facebook/Instagram），并把这条检测规则写成新的只读
+诊断 D9（PR [#1874](https://github.com/bigbigraydeng-maker/magic-engine/pull/1874) 已合并），接进已在跑
+的每日内部诊断日报；CTS 日检手册（PR [#1873](https://github.com/bigbigraydeng-maker/magic-engine/pull/1873)
+已合并）同步补了一条不依赖数据库快照表的临时排查步骤。
+
+D9 已知限制：目前打不到共用账户（CTS 跟 Oztop/30 Kiteroa 共用的个人账户 `act_2775766642787274`
+整层跳过广告组设置抓取），已记入 ROADMAP。
+
+- 审计/操作留痕：`~/Documents/ME-backfill-backups/cts-thruplay-activate-20260921/`
+
+**Reuse Statement**：D9 复用既有诊断框架（`context.ts`/`types.ts`/`run.ts` 的编排模式，跟 D1/D7/D8
+同一套 `Diagnosis` 契约），新增的只有这一条规则文件 + `targeting_summary` 补一个字段（平台共享，无客户
+语义）；ThruPlay 开关、令牌刷新、表单 A/B 测试全部是 CTS 一个客户的配置/内容操作，未写入共享代码。
+
+---
+
+### 2026-09-21（Meta 广告数据每日同步：补上两个"能蹭到别人授权令牌"的漏洞入口，AD-SEC-4 续）
+
+PR [#1864](https://github.com/bigbigraydeng-maker/magic-engine/pull/1864) 已合并。之前修过一次的漏洞（AD-SEC-4，见 9 月更早的记录）：客户如果自助注册时把公司名或网址填得跟正牌客户一样，理论上能蹭到那个正牌客户在 Meta（Facebook/Instagram 广告）那边的授权令牌，看到不该看的广告账户数据。上次修的是大部分入口，唯独"每天自动拉取 Meta 广告数据"这条定时任务当时漏掉了，自己抄了一遍老的查找逻辑，没走新的验证关卡。
+
+这次补上：这条定时任务现在跟系统里所有其他调用 Meta 的地方一样，统一走"先验证归属再给令牌"的关卡。过程中经自动审查机器人（Codex）连续 6 轮挑错，额外发现并堵上了几个"数据库偶尔读取失败时该不该硬撑用一把可能不对的令牌"的边角问题——统一原则是：查不清楚就今天先不跑这个客户，绝不猜。全部改动配了对应测试，且逐条做过"故意去掉防护看测试是否报红"的验证。
+
+**Reuse Statement**：全部复用已有的 AD-SEC-4 令牌归属校验能力（`src/lib/meta/token-selection.ts`），未新增支柱或独立能力；把域名归属判定的算法泛化成通用版本供"按客户名字找令牌"这条遗留兜底路径复用，避免另起一套判断逻辑。属于平台共享的安全底座代码，无客户专属内容。
+
+---
+
+### 2026-09-21（CTS AI 可见度：地域锚点补配生效，9-20 回填按新规则复算完毕）
+
+2026-09-20 合并的「地域锚点」判定闸门（PR #1857）上线后 CTS 一直没配上锚点词，闸门形同虚设。
+本次给 CTS 配上 `new zealand / nz / aotearoa / auckland` 四个地域词，并用新规则复算 9-20 回填的
+137 条 + 当时排除的 7 条：137 条零变化，7 条里 6 条本来就没错、1 条（`21dc3d0c`）历史误记的「排第 6」
+改成正确的「未提及」。PM 在窗口内本人回「开始」后执行，写前存了旧值底稿，可撤回。
+
+- 审计与执行记录：[2026-09-21-cts-ai-visibility-geo-anchor-recompute.md](../audits/2026-09-21-cts-ai-visibility-geo-anchor-recompute.md)
+
+**Reuse Statement**：复用 `src/lib/ai-tracker/client-brand-match.ts` 已合并的判定函数与
+`PATCH /api/clients/[id]/brand-geo-anchors` 同一套归一化校验，未新增代码；本次只是配置写入
+（CTS 一个客户）+ 1 行历史数据修正，client-specific 内容全部落在 `clients` 表 CTS 那一行。
+
+---
+
+### 2026-09-21（Park Homes 官网：Greenview 加"工程日志"时间线 + "关于我们"页换上创始人真实肖像）
+
+PR [#1858](https://github.com/bigbigraydeng-maker/magic-engine/pull/1858) 已合并并部署，线上已核实。客户 Jason 2026-09-21 回信补了两样素材：4 张 Greenview 工地航拍 + 他本人的肖像照。逐张核对后发现 4 张全是施工现场（没有新效果图）；此前网站口径是"不放施工中照片"，但客户上周自己在 Riverside V2 里要求了"工程进度"板块，PM 拍板放，并提出把 Greenview 页做成"持续记录项目进展"的样子。实现：项目页新增 **Progress log**——按时间倒序的竖向时间线，由 `projects.js` 里的 `progress` 数组驱动，每条 = 收到的一批工地照（日期写"收到时间"，不推断拍摄/分期日期）+ 一段说明 + 最多 3 张 16:9 照片，末尾挂一条虚线的"More to come · 登记接收下次更新"。以后加一次更新只改数据。共用灯箱改为页面加载完再收集图片，并按每张图自己的图注显示（原来写死"Artist's impression"）。"关于我们"页创始人占位框换成客户提供的肖像（4:5，1000×1250）。验证：构建 20 页、灯箱对效果图和进度照各测一次、305px 窄屏无横向溢出（顺手修了图片 `height` 属性压过 `aspect-ratio` 导致照片被拉成竖条的问题）、上线后线上 4 张新图均 200。
+
+**Reuse Statement**：客户专属站点改动。复用既有 `.milestones` 时间线样式、共用灯箱、登记表单；新增约 12 行样式和页面模板里一个数据驱动板块，全部在客户站点目录内。"在建项目进度日志 + 配套文章"这个套路记为地产行业打法候选（见 ROADMAP），未做成共享代码。
+
+---
+
+### 2026-09-20（SEO 标题周循环 v1 上线，首跑改错 2 页已撤回、已补信息完整闸门）
+
+CTS 每周自动改网站标题/描述的功能重做成 6 步版本，跑在 Inngest 上；首跑改错 2 页，约 5 分钟内撤回，CTS 开关已关，等 PM 看过演练再开。
+
+- PR [#1802](https://github.com/bigbigraydeng-maker/magic-engine/pull/1802)：旧版每周开的标题修改 PR 改成自动合并，不用 PM 手点。
+- PR [#1805](https://github.com/bigbigraydeng-maker/magic-engine/pull/1805)：旧版定时任务跳过 9/21 那次（临时改成只跑 9/28 一次，后被 #1812 整条删掉）。
+- PR [#1810](https://github.com/bigbigraydeng-maker/magic-engine/pull/1810)：`seo_meta_log` 表的访问权限收紧到只有后台服务能读写（数据库改动文件已合并）。
+- PR [#1812](https://github.com/bigbigraydeng-maker/magic-engine/pull/1812)：新版 6 步流程上线（回查上次改动效果 → 选页面 → 定动作 → 改文案开 PR → 记改前数据 → 汇总），每客户一个开关、默认关；旧定时任务从 render.yaml 删掉。
+- PR [#1814](https://github.com/bigbigraydeng-maker/magic-engine/pull/1814)：加手动触发入口，不用等周一就能跑一次。
+- chinatravel [#199](https://github.com/bigbigraydeng-maker/chinatravel/pull/199) / [#200](https://github.com/bigbigraydeng-maker/chinatravel/pull/200)：首跑自动合并的 2 条错误改动（Liziba 页配错关键词；免签页描述被改成像要办签证）。
+- chinatravel [#201](https://github.com/bigbigraydeng-maker/chinatravel/pull/201) / [#202](https://github.com/bigbigraydeng-maker/chinatravel/pull/202)：PM 用 GitHub Revert 撤回上面两条，官网标题已恢复原样。
+- PR [#1816](https://github.com/bigbigraydeng-maker/magic-engine/pull/1816)：根因修复——关键词只认这个页面自己的搜索词、缺数据一律跳过、PR 描述写全数据依据、每个候选都留记录、新文案先做事实核对；手动入口支持 `dry_run` 演练（不写任何东西）；把撤回的 2 条记录标记为已撤回。
+
+事故经过与教训见 [PITFALLS D10](../PITFALLS.md)，PM 决策见 [DECISIONS 2026-09-20](../DECISIONS.md)。
+
+**Reuse Statement**：复用已有 GSC、DataForSEO、竞对解析、人工看板（`zhuge/action-persister`）、Inngest 两段式派单范式、`cts-meta-pr.ts` 的窄道改文件逻辑；新增的 `src/lib/seo-meta/cycle/` 是不带客户身份的共享流程（有测试断言不含 CTS ID）；客户差异只在 `clients.seo_config.meta_cycle_*` 配置和 CTS 仓库的写入适配器里。
+### 2026-09-20（Park Homes 官网：Riverside 页面按客户 V2 素材包重做为"整个 104 户社区"展示）
+
+PR [#1834](https://github.com/bigbigraydeng-maker/magic-engine/pull/1834) 已合并并部署，PM 本地预览后批准。客户 Jason 2026-09-16 邮件发来 Riverside V2 素材包（9 张图 + 英文实施说明），要求把 Riverside 页从"几套在售房"改成展示整个 104 户开发项目；当时只回了"收到"，之后四天没人做。本次按他要求的顺序重做：全社区航拍 + 介绍 → 104 户概况 → 整体愿景效果图（明确标注"示意，非批准规划"，不推断分期/地块/完工）→ 场地周边 → 工程进度 → 精选内外景（主图 + 两张 + 可展开细节）→ 视频 → 在售房源 → 未来批次登记。新建 `ProjectStory.astro` 布局组件，只在项目数据带 `story` 时启用，其余四个项目页不变。在售房源（`listings`）和未来批次（`releases`）做成 `projects.js` 里可独立增改的数组：为空时显示"咨询当前房源"按钮 + 已核实的 Ray White 链接，不编造房源卡片。页面概况按客户规则去掉了房源级数字（2–5 房 / $650k 起 / 2026–28 完工）；首页卡片"From $650k"保留，邮件里请客户确认。首页大图和 Riverside 卡片同步换成全社区航拍。验证：构建 20 页、生成页各段顺序与图注核对、本地灯箱/表单/中介信息脚本核查、375px 手机版无横向溢出、上线后线上 9 张图与文案核实。
+
+**Reuse Statement**：客户专属站点改动。复用既有 Base 布局、`.facts`/`.cards`/`.jcard`/`.lightbox` 样式、登记表单与客资接口、中介信息；新增仅一个页面布局组件和约 20 行样式，全部在客户站点目录内，未进入共享运行时。
+
+---
+
+### 2026-09-20（CTS Messenger AI 客服：verifier 加两道 Jev 语义补充检查，抓换措辞的品牌红线/文字拼数字）
+
+PR [#1841](https://github.com/bigbigraydeng-maker/magic-engine/pull/1841) 已合并（前身 #1838 因改动量超过 `claude/*` 分支自动闸门的 800 行上限，换成 `feat/*` 分支重开——跟 #1832/#1825 同一类情况）。CTS Messenger AI 客服回复要过七道确定性闸（`src/lib/messenger-agent/verifier/policies/cts.ts`）才进人工审核队列，这七道闸全是正则/字符串/数字比对，查不出"换个说法讲同一句品牌红线""用文字拼价格或日期绕开数字正则"这两类真实存在的漏判。
+
+- 复用已合并生产验证过的 Jev（TypeSafe）判断客户端（`src/lib/jev/client.ts`），给 `brand_redline`/`number_claim` 各加一层语义补充判断——七道正则闸原样保留、零成本、永远先跑；新层只补充不替代，命中只写进新增的 `semantic_flags` 字段，**绝不改动 `ok`/`blocked_reasons`**。
+- fail-open 三重覆盖：Jev 调用失败/超时、`MESSENGER_VERIFIER_SEMANTIC_DISABLED=true` 总闸关闭、语义层自身意外异常（外层 try/catch 兜底），全部退回七道正则闸原结果，绝不阻塞发送、绝不让这条新外部依赖变成起草管道的新故障点。
+- 人审门户（`DraftApprovalPanel.tsx`）新增提醒区块把语义命中显示给 FDE；"已过关"清单（`drafts/route.ts`）不再用跟 clientId 绑死的静态列表，改成读每条草稿自己记录的 `checked_gate_ids`（Jev 没跑成的检查不会被冒充成"已过关"）。
+- 子牙（架构）+ 魏征（挑刺）两轮独立复审后，Codex 自动复审又抓出一个真实 P1：早期版本命中语义闸后把 `ok` 改成 `false`，导致草稿被存成 `verifier_status='blocked'` 并提前 return——但草稿接口只查 `pending`、PM 待办的 `TRACKED_STATUSES` 也不含 `blocked`，等于"标了需要人工重点看"的草稿实际上不会出现在任何人能看到的地方；改成语义命中永远走 `pending`、advisory-only 后修复。另有 P2（门户直接显示英文内部 ID `brand_redline_semantic`）一并修完。
+- 用真实 CTS 数据对真实 Jev API 跑过两轮验证（含 advisory-only 改动后复测）：换措辞品牌红线命中（打分 0.79）、干净回复不命中、文字拼错数字命中（打分 0.96）、文字拼对数字不命中，4 个场景 × 2 轮全部符合预期；新增 `cts-semantic.live.test.ts` 沉淀为可复用回归（无 key 自动跳过，不影响 CI）。PM 已明确批准将客户对话内容发给 Jev 处理（2026-09-20）。
+
+**Reuse Statement**：复用已有 L3 Connector（`src/lib/jev/client.ts`）和既有 verifier 框架（`framework.ts` 未改动，保持 client-agnostic）；新增的 `brand_redline_semantic`/`number_claim_semantic` 检测逻辑落在 CTS 专属的 L4 policy 文件（`cts.ts`），不是新建平台能力线；品牌红线词表/已确认价格团期都是运行时从 `context` 传入，没有客户事实写进 shared runtime；换客户/换行业测试通过（机制本身跟具体客户的红线词表/产品数据无关）。
+
+---
+
+### 2026-09-20（AI 可见度：修复品牌命中子串误判，以后新算出来的"是否被提及"数字会变准）
+
+PR [#1823](https://github.com/bigbigraydeng-maker/magic-engine/pull/1823) 已合并（merge commit `00466090`）。老判断逻辑用"品牌名字符串互相包含"判定客户有没有被 AI 提到，会把"Ray White"误判成命中"Roman Hu — Ray White Mission Bay"这类不相关品牌，也会漏掉答案只写域名或标点不同写法的真实提及。对全部 6,596 条历史记录跑了一遍**只读**重算摸底（没有改任何生产数据），误判数字跟 PM 手工核对结果完全对上：CTS 38 条假阳性、NAL 17 条、Roman 79 条、Dixon 3 条。后续 PR [#1837](https://github.com/bigbigraydeng-maker/magic-engine/pull/1837) 又收紧了短别名判定（例如中文别名「中国旅行社」在「知名的中国旅行社」这种泛指里也被当成客户、答案里的「CTS Bus」被当成 CTS Tours），最终口径为：全库 169 条假阳性（CTS 39 条）、340 条真实提及被漏判、71 条名次会变——**这批数字目前仍原样挂在客户看到的历史记录/月报/诊断分上，还没被改过来**；本次合并只让下一次自动采集用上新规则，历史行要不要回填、要不要重算旧快照，是 [`docs/audits/2026-09-20-ai-visibility-client-rank-grounding.md`](../audits/2026-09-20-ai-visibility-client-rank-grounding.md)「建议的后续」里列的 5 步，**全部等 PM 点头，这次一步没做**。
+
+- 新增纯函数模块 `src/lib/ai-tracker/client-brand-match.ts` 负责判定，prompt 里不再把客户名喂给模型（避免模型顺着提示词把客户名编进答案），短别名（如 "CTS"）嵌在另一个已解析的竞品品牌名里时不能单独证明命中（例："CTS Logistics" 不会被当成 "CTS" 命中），裸出现且没有竞争品牌时仍可命中，精确匹配替换掉原来的双向子串包含。
+- 子牙（架构）+ 魏征（挑刺）两轮复审的必改项都在第二个 commit 修完，各自配了测试；Codex 复审另挑出一处"短别名单独证明命中"的边界情况，PR 里已有专门测试覆盖（`CTS Logistics` 不会被误判成 `CTS Tours`），验证通过后标记解决。
+- **这不是切换判断系统**：仓库里另有一套 2026-08-19 PM 已拍板"未来要切、旧系统要退役"的新判断系统（`geo-module`+`geo-baseline`，内部代号 M1），但那次退役从未执行完。CTS 是否已有 M1 生产数据待核实（有一个手工跑过的批次 `77124a10-d22b-4722-94c2-aeae69f73d76`，但结果从未落盘确认，详见 [ROADMAP.md P31.X.4a](../ROADMAP.md)），可以确定的是每周自动采集还是未接通的骨架。本次是先把 CTS 现在实际在用的旧系统里的真实 bug 修掉，让**以后**每周新跑出来的数字变准——**但 CYHB Fashion 和 Magic Lab Class 这两个客户例外**：审计发现它们的品牌别名配置本身就缺项（CYHB 缺"CYHB"这个简写、Magic Lab Class 缺"Magic Lab"这个简写），这两处不是这次代码修的范围，得先去客户设置里补别名（PM 点头后再补），补之前这两个客户新采集的数字也还是不准；"切到 M1"作为独立、规模跟当初退役决定一样大的后续工作登记进 [ROADMAP.md P31.X.4a](../ROADMAP.md)，需要单独走 PO 逐步拍板，不在本次范围。
+
+**Reuse Statement**：纯 bug 修复，不新增能力线；新模块是客户配置驱动的纯函数（客户身份来自 `master_briefs.brand_name`（有活跃 brief 时优先）或回退到 `clients.name`，再加上 `clients.domain` / `clients.brand_aliases`，没有客户名硬编码进 shared runtime）；换客户/换行业测试都通过。
+
+---
+
+### 2026-09-20（SEO 周循环：撤销的标题改动不再当天被重新选中）
+
+PR [#1829](https://github.com/bigbigraydeng-maker/magic-engine/pull/1829) 已合并。PM 2026-09-20（CTS 项目经理窗口）验证发现：2026-09-19 事故撤销的 3 个页面（`liziba-station-chongqing-guide`、`beijing-to-xian-high-speed-train`、`how-many-days-in-chongqing`）在同一天的试跑里又被当成新候选选中了一遍——不是网站风险（事实核对闸和关键词匹配闸已经把它们全拦下来），但每周都会白占一个改动名额、白跑一次查关键词数据的调用。
+
+- 原因：`runStep2CandidatesReady`（`src/lib/seo-meta/cycle/runner.ts`）的冷却期查询把"已撤销"的记录整条排除在外，导致撤销之后立刻又能被选中，跟"30 天冷却期"的本意（避免同一页面被反复折腾）正好相反。
+- 改法：撤销记录不再计入完整的 30 天冷却期（撤销的改动本来就没真正生效过），但改成单独给 7 天的短冷却期（跟每周自动任务的节奏对上）——既不会撤销当天又被选中，也不会因为撤销过就被永久拉黑。
+- 用 PM 验证到的这 3 个真实页面直接当测试用例，加了 4 条回归测试。
+
+**Reuse Statement**：只改了已有能力（SEO 周循环）内部一处判断逻辑，不新增能力/支柱/共享代码路径，没有任何客户名/客户 ID 写进 shared runtime。
+
+---
+
+### 2026-09-20（内容工厂：发布前品控接入 Jev 判断模型，抓竞品品牌/占位字幕/人称口吻）
+
+PR [#1832](https://github.com/bigbigraydeng-maker/magic-engine/pull/1832) 已合并（前身 #1825 因改动量超过 `claude/*` 分支自动闸门的 800 行上限，换成 `feat/*` 分支重开）。2026-09-20 只读评估 `content_work_orders` 真实工单（状态 `review_rejected`）发现，现有品牌红线闸（静态短语黑名单）抓不出三类要靠人工肉眼才能挑出的缺陷：角度/hook 把第三方竞品品牌当自己卖点（真实 Oztop 工单角度写成 "mapei brisbane"）、上屏字幕是内部内容分类标签冒充真文案且跨段完全重复（真实 Oztop/CTS 工单字幕逐段就是 "Customer Stories & Community" 这类内部标签，某单重复 7 次）、文案人称口吻跟简报要求的第一人称叙述者不符（真实 CTS 工单 brief 要求 Baker Gu 第一人称，AI 写成 "Our own offices. Our own guides." 公司口吻）。
+
+- 新增 `src/lib/jev/client.ts`（L3 Connector，TypeSafe Jev 判断模型，对外封装名 Compliance Engine）+ `src/lib/factory/content-quality-guard.ts`（编排三类检测：B 的机械重复子情形零成本确定性检测，其余靠一次 Jev 调用；命中不打回，写 `output.quality_flags` 标红转人工，跟现有 `redline_hits` 同一套口径）。
+- 接入 `completeWorkOrder`（成片交付时机，跟现有红线复扫同一入口），`ReviewInbox.tsx` 加一段展示。
+- 设计动手前召了子牙（架构）+ 魏征（挑刺）两个独立复审；上线过程中 Codex 自动复审又抓出 7 处真实问题（recipe/legacy 两条渲染路径的逐段字幕来源不一致、字段取值优先级跟 worker.mjs 不一致、Jev 超时只包住响应头没包响应体读取、人称检测误判合法的第一人称"我们"），全部修复并补了回归测试。
+- **待办**：生产环境 Render 尚未配置 `TYPESAFE_API_KEY`，配之前三类新检测不会真的运行（fail-closed，不会报错，但也不会真的查出问题）——已登记 [ROADMAP.md](../ROADMAP.md)。
+
+**Reuse Statement**：新增的是一个新的 L3 Connector（Jev API adapter）+ 通用语义判断逻辑,不新增能力线/支柱;复用现有"成片级复扫→标红→人工审"的整套口径,没有新建状态机、新路由、新 UI 页面。检测逻辑与客户/行业语义无关(换客户/换行业测试都通过),没有任何客户名/客户 ID 写进 shared runtime。
+
+---
+
+### 2026-09-20（CRM+AI 客服：邮件渠道接入 Governed Reply Agent 治理链路）
+
+PR [#1808](https://github.com/bigbigraydeng-maker/magic-engine/pull/1808) 已合并（merge commit `1c0d983f`）。延续 issue [#1745](https://github.com/bigbigraydeng-maker/magic-engine/issues/1745) 的调研结论，把邮件接进已上线的 CTS Governed Reply Agent（AI 起草 → 人审 → 发送，覆盖 Messenger/WhatsApp 的同一套系统）——这是 CRM+AI 客服接入这条线"Messenger-only"范围冻结（[docs/roadmap/2026-09-15-crm-ai-agent-build-control.md](../roadmap/2026-09-15-crm-ai-agent-build-control.md)）里 PM 2026-09-15 当场拍板的**唯一例外**，只豁免邮件一个渠道。
+
+- `channel-dispatch.ts` 扩到三渠道；F2（AI 起草→发送主链路）接受邮件，F1（秒回安抚话术）刻意不接——邮件靠每小时同步、秒回没有对应产品价值，这是业务判断，留白给 PM/华佗决定，不在这次范围内替他们拍板。
+- 补上 `mail-ingest.ts`（邮件每小时同步）此前完全不 emit `conversation/message.received` 的缺口——不补这个，channel-dispatch 认识邮件也没用，F1-F4 永远不会被邮件真正触发。
+- 顺手修了一个会被这次改动放大的既有缺口：门户"紧急停用全渠道"（`kill-switch.ts`）此前只翻 messenger/whatsapp 两列，这次加邮件时如果不改，"全渠道停"会变成一句谎言——现在三列一起翻，配套面板文案也同步改了（子牙复审抓到文案没跟上）。
+- 新增数据库列 `clients.messenger_agent_enabled_email`（布尔，默认 false，新客户/新渠道默认关闭）。
+- 子牙（架构）+ 魏征（挑刺）两轮独立复审均无 blocker；195+886 条相关测试全过；`npm run build` 通过。
+
+**Reuse Statement**：复用已确认渠道无关的只读工具/verifier/prompt/classify/optout 层（issue #1745 调研结论），未新建平台能力；新增的渠道分发映射、邮件窗口判定、事件 emit 逻辑都是渠道级通用扩展，没有把任何客户名/客户 ID/客户私有事实写进 shared runtime。
+
+---
+
+### 2026-09-20（Park Homes 官网：首页去掉最后的网图占位，换成真实照片）
+
+PR [#1804](https://github.com/bigbigraydeng-maker/magic-engine/pull/1804) 已合并并部署。PM 要求把 Park Homes 官网整体检查一遍还有什么可以升级——查出首页（全站访问量最高的页面）大图和"品牌理念"板块的配图，还是最早搭站时用的网图占位，大图上甚至挂着一行"Example image · indicative only"（示例图片·仅供参考）的小字标签，而 5 个项目详情页早在几周前就已经全部换成客户提供的真实效果图/实景照。换成了已经在 Riverside、Howick 项目页上线过的真实照片，删掉了占位标签，并清掉了 8 张确认没人再引用的旧网图文件。
+
+**Reuse Statement**：客户专属内容改动，复用已经审过、已在其他页面上线的真实客户照片，没有新拍/新生成任何素材，未新增共享平台代码。
+
+---
+
+### 2026-09-20（Park Homes 官网：Riverside 项目补上客户提供的走访视频）
+
+PR [#1801](https://github.com/bigbigraydeng-maker/magic-engine/pull/1801) 已合并并部署。客户 Jason 2026-09-15 邮件发来 115 Park Estate Road（即 Riverside 项目）的 YouTube 走访视频，要求加到网站里；代码当时已经写好（2026-09-17），但被顺手提交到了一个内容完全不相关的改动请求里（记录谷歌广告接口权限流程的纯文档 PR #1770），导致一直没合并、官网上一直看不到。本次把这个视频改动单独拆出来重开一个改动请求，走完自动检查后合并上线，并在 https://www.parkhomes.nz/riverside/ 页面核实视频确实可见。Jason 同一封邮件之前那次请求（129 Forrest Hill 效果图）此前已上线，本次一并核对确认无误。
+
+**Reuse Statement**：客户专属内容改动，复用 Astro 项目已有的 Gallery 区块布局与 `[slug].astro` 单模板出图机制，未新增共享平台代码。
+
+---
+
+### 2026-09-20（官网：已确认的 ME 视觉首页上线）
+
+PR [#1798](https://github.com/bigbigraydeng-maker/magic-engine/pull/1798) 已合并；发布提交 `8e90270b5baed9e63ef357a3aa2bae6e0d1bba6f`。2026-09-19 12:22 UTC（NZ 次日）公网首页已返回新版标题、样式及交互脚本。保留 ME 金色/奶油色 VI、Founder 与历史来源，加入 Google/ChatGPT/Facebook/Instagram/Google Ads 渠道标识，三个示意案例分别使用网站、Instagram 轮播、Google Ads 界面。Harbour Travel 明确为虚构示例，无真实效果数据。
+
+- 首页假表单改为既有 `/waitlist/#apply` 正式申请入口；首页与申请页隐藏 Client portal 导航。独立入口 `/login`（`/login.html` 自动规范跳转）已验证 HTTP 200，沿用已有 portal 登录，不改变认证。
+- Bing `/BingSiteAuth.xml` 公网 HTTP 200、`application/xml`；保留 SEO、Facebook 域名验证、既有 Google/Meta Cookie 同意机制。
+- 验证：静态发布检查、JS 语法、diff 检查通过；桌面/390px 手机实测轮播、广告选择、网站 Before/After、候补跳转及登录布局，未见图片丢失或横向溢出。PR exact-head CI 的 Application build、Type-check、CRM focused tests、ai-orchestrator-tests 均通过。
+- 报名接口仅检查无效提交被 400 拒绝，没有创建测试线索或声明生产邮件送达。
+
+**Reuse Statement**：复用官网静态托管、品牌/研究图片、正式候补与登录流程和统计同意机制；新增仅展示文件及渠道图标。行业/客户差异只在虚构示例，未进入共享运行逻辑，无私有数据或记忆晋升；与层级门的展示层判断一致。
+
+---
+
+### 2026-09-15（tailor-made 行程单/画册补齐目的地图片：平遥、长江三峡）
+
+PR [#1758](https://github.com/bigbigraydeng-maker/magic-engine/pull/1758) 已合并并部署。CTS-2026-0030（China Grand Discovery）画册里"平遥"那天错配成了北京颐和园的图（`hero-rules.ts` 关键词清单没收"平遥"，退而用了当天正文提到的另一个地名顶替）；长江三峡三天则因图库只有一张三峡照片，三天全用同一张。补了 Pingyao 一张图，Yangtze 三峡再补一张（供正文点名 Qutang/Wu/Xiling 具体某段峡谷时用），并把原本偏低清的三峡老照片换成更清楚的一张，均为 Unsplash License 免费商用图，来源记在 `templates/tailor-made-itinerary/heroes/CREDITS.json`。
+
+顺带修了同一份文件上的一处货币错误：`pricing.optional` 里"维多利亚游轮强制小费"一行的币种存成了 USD，PM 确认应为 NZD，直接在生产库改了这一条记录（该草稿当时未发送，属未上线内容的数据订正，非事后改已发送文件）。
+
+**同一会话内还处理了 PM 提出的一条标准规则**（PR [#1762](https://github.com/bigbigraydeng-maker/magic-engine/pull/1762)，另计）：画册同一城市板块内不许出现重复图片，做成软提醒（不挡"标记已发送"）——见该 PR 说明；以及评估并暂缓了一项"AI 自动识图打标签"提案，评估结论登记进 [`docs/registry/platform-candidates.md`](../registry/platform-candidates.md)。
+
+**Reuse Statement**：延用既有的 `hero-rules.ts` 关键词→图片名机制（`hero.ts` 注释里写明的"加新城市：把图放进 heroes/<name>.jpg，在 RULES 里加一条即可"），未新建选图机制；三张新图属通用旅游地标图，不是 CTS 专属内容，符合"ME 旅游版"共享图库定位，未把客户事实写进共享代码。
+
+---
+
+### 2026-09-15（F2 主链路合并：AI 起草客服回复→7 道核对→存草稿→等人工批准→发送）
+
+PR [#1757](https://github.com/bigbigraydeng-maker/magic-engine/pull/1757) 已合并（原先在 `claude/*` 分支的 [#1756](https://github.com/bigbigraydeng-maker/magic-engine/pull/1756) 撞到仓库"自动修爆炸半径"闸门 800 行上限，同一批 commit 换到 `feat/*` 分支重开）。实现 issue #1585——CTS 私信 Governed Reply Agent 的核心编排：客户消息进来 → AI 起草回复 → 过 7 道 Verifier 核对关卡 → 存草稿 → 等人工在门户批准（最多 4 小时）→ 批准后才真正发送。跟已合并的 F1（#1584 安抚话术）/F3（#1586 人工审批回传）/F4（#1587 系统健康巡检）拼成完整的 4 函数编排链路。
+
+子牙（架构）+ 魏征（挑刺）两轮独立复审共发现 9 个真实问题，均已修复并各补了回归测试：忘记把新函数注册进 `cloudFunctions` 数组导致部署后不会跑；对话历史查询升序+limit 拿到的是最老 5 条而不是最近 5 条（客户刚发的触发消息反而进不了 agent 看到的历史，已用变异探针验证修复确实生效）；起草失败的 try/catch 包在 `step.run` 外面，会被 Inngest 函数级 retries 抢在 catch 生效前重试，最多让 Claude 被多调用 2 次；F2 超时判定跟 F3 人工批准之间的竞态，先前会无条件覆盖状态、静默吞掉刚做出的人工决定；发送前二次复查漏了客户中途拒联这一项。第二轮复审又指出一个非阻塞跟进项——超时竞态里如果人工恰好是"批准"而不是"拒绝"，先前会静默卡死没人发也没人知道，本次已修复为转成 `send_failed` 让草稿重新进人工待办可见范围。
+
+**已知未处理、写进代码头注释的残留风险**（需要 PM 政策决策，非本次范围）：人工"改后发送"会跳过 6/7 条内容校验关卡，只有产品名字/价格出处这一条仍生效；Messenger 的 `human_agent` 时间窗（24小时-7天）下发出的 AI 草稿可能带 `HUMAN_AGENT` 标签，届时约定的 30 分钟人工升级机制实际不会触发。**代码合并不等于已上线**——门户审批界面、拿真实会话跑一遍全链路、正式对 CTS 开放的灰度开关，都还没做，详见 ROADMAP。
+
+**Reuse Statement**：事件常量/售后分类判据下沉到已合并的共享文件（`conversations/events.ts`、`messenger-agent/classify.ts`），未在本地重复声明；Verifier 客户分发表新增独立文件 `verifier/policies/index.ts`（查表 fail-closed，查不到当作没有闸门），加下一个客户只改这一个文件，编排层保持客户无关；CTS 专属的 7 道校验规则本身（`verifier/policies/cts.ts`）未改动。文件按 CLAUDE.md 800 行上限拆成编排（`conversation-inbound-draft.ts`）和存储（`conversation-inbound-draft-store.ts`）两个文件。
+
+---
+
+### 2026-09-15（门户新增"AI 草稿·待批准"页签，CTS 私信客服人工审核界面）
+
+PR [#1751](https://github.com/bigbigraydeng-maker/magic-engine/pull/1751) 已合并并部署。CTS 私信 Governed Reply Agent（AI 自动起草客服回复，人工审核后再发）的门户端落地——每条对话卡片新增第三个页签「AI 草稿·待批准」：客户原话在最上面，AI 写好的回复草稿、AI 的把握程度、核对过的产品名字、过了哪几道安全检查，都摆在同一屏里；下面三个按钮——批准直接发、改一下再发、或者拒绝改成人工手动回。PM 拍板：客户收到的回复不带任何"这是 AI 写的"标记，这个标签只在门户内部（FDE/PM 看的这一侧）显示。
+
+对接的批准接口（issue #1586）当时还没合并（PR #1741 开着），已核实过它的接口形状（三条决定路径 + 并发保护 + 失败回滚）已经过两轮独立复审锁定，直接照着它的契约开发，没有等它先合并才动手。另外补了一个原本没有的读接口（拿到"现在有哪些草稿在等审批"），因为原设计只给了写接口。
+
+这是 B 级纯 UI 改动（触发的批准动作走的是已有的 A 级发送通道，通道本身这次没动）：新增 25 条单测（读接口 9 条 + 审批面板 16 条），跟已有私信客服测试合起来 66 条全绿，类型检查、生产构建都过；没有走子牙/魏征双人复审（按风险分级不要求）。鉴权页面本身因为登录只认正式站，没法在开发环境截图走查，留到合并后用真实账号复核。
+
+**Reuse Statement**：复用现有发送接口（三个按钮都挂在它已有的"草稿决定"分支上，没有新建发送通道）、现有发送框的"发前必须确认+失败原因人话化"写法、对话卡片已有的"点开才拉数据"懒加载模式；过关检查项清单复用了 CTS 审核策略里已经定义好的那份清单，没有重新抄一份，并且只对 CTS 生效——以后换一个别的客户，这份清单不会被误当成通用规则套用过去。
+
+---
+
+### 2026-09-15（私信客服系统健康巡检，每6小时自动查是否静默停摆）
+
+PR [#1754](https://github.com/bigbigraydeng-maker/magic-engine/pull/1754) 已合并。实现 issue #1587（CTS Governed Reply v3 · F4）：每6小时按 (客户, 渠道) 检查一遍私信客服系统是不是安静地坏掉了——收到的客户消息量骤降（对比过去30天平均，新接入渠道有14天观察期不算）、AI 写的回复被系统自己拦下的比例过高、AI 起草这一步反复报错、客户说了"别再联系我"但系统记这件事时写库失败。查出问题写进一张自愈告警表（问题消失就自动清行，不会越堆越多），经 PM 每日待办的高优先级栏下发。
+
+顺带补上一个此前存在的真实盲区：Messenger/WhatsApp 两个私信入口的退订登记如果写库失败，此前只在服务器日志里 `console.error` 一句就吞掉了，健康巡检根本读不到，等于会被误判成"没人退订、一切正常"——现在新建了一张失败记录表，两个入口都接了进去。
+
+issue 原文还要求的"客户批准超时4小时算事故"这一类检查，因为依赖另一个还没写完的功能（issue #1585）发出的信号，本次没做，已记入 ROADMAP 待那个功能上线后补上，代码里没有为它预留任何占位。
+
+子牙（架构）+ 魏征（对抗性复审）双审，魏征实测抓到并修复两个真问题：①"新客户观察期"的判断被查询用的30天时间窗污染了——一个老客户如果历史上断档超过30天、最近才恢复联系，会被错误当成"刚接入的新客户"，导致接下来14天真出故障也测不出来；②一个渠道如果彻底断联超过30天（这恰好是本功能最该抓住的场景），旧的告警记录会因为查不到任何数据而永远留在表里，变成挂在待办上永远不会自己消失的旧问题，跟"自愈"设计的初衷矛盾。两处都补了实测回归测试，全量测试跟改动前基线（42个已知失败）完全一致，没有新增。
+
+**Reuse Statement**：复用 `pm-todo/manual-items.ts` 的 what-how-href 三件套模式、`supabase-paginate` 分页工具、Inngest cron 函数已有的部署惯例；新增的两张表和检查逻辑全部按 (client_id, channel) 参数化，无客户专属判断写进共享代码。
+
+---
+
+### 2026-09-15（PM 每日待办新增 AI 客服 4 栏提醒 + 门户「紧急全渠道停/重新打开」开关）
+
+PR [#1747](https://github.com/bigbigraydeng-maker/magic-engine/pull/1747) 已合并（原先在 `claude/*` 分支的 [#1740](https://github.com/bigbigraydeng-maker/magic-engine/pull/1740) 撞到仓库的"自动修爆炸半径"闸门 800 行上限，同一批 commit 换到 `feat/*` 分支重开）。实现 issue #1589：PM 每日待办新增 4 栏（AI 客服待批准草稿 / 已批但发送失败 / 超时未批升级 / 客户资料库信息快到期），以及门户客户设置页新增「紧急全渠道停」双向开关——一次点击把某个客户的 Messenger + WhatsApp AI 客服自动回复全部关掉/重新打开，谁点的、什么时候点的都写进审计记录。
+
+紧急停开关不重新发明逻辑，直接复用已上线的 `stopAiRepliesForClient()`（客户自助确认页在用的同一套开关+审计表），新增对称的 `resumeAiRepliesForClient()` 补上"重新打开"——最初的设计只做了停用，Codex 复审指出面板文案承诺"回这里手动开"但代码里没有任何路径能把开关写回去，误触发之后只能改数据库，属于半成品，随即补齐。另外两处待办生成器的 href 最初分别指向"客户消息"页和"客户知识库"页，但那两个页面实际上分别读的是另一张更早的表、以及只处理候选/未确认事实——FDE 点进去根本看不到待办里说的内容，同样是 Codex 复审抓到后改成了如实说明"AI 那份还看不到，先直接手动回复"/"找 Ray 在数据库里改"，不承诺一个不存在的按钮。
+
+**Reuse Statement**：复用 `stopAiRepliesForClient()`/`requireDashboardClientAccess()`/`fetchAll()` 分页工具/`pm-todo/manual-items.ts` 的 what-how-href 模式；新增均为 client-agnostic 共享代码，无客户专属逻辑。跟 #1588（待批准草稿 UI）同批门户改动但功能独立，本次未包含逐条审核草稿的界面。
+
+---
+
+### 2026-09-15（管理员批准链接加"复制发给别人"，不用只能自己点）
+
+PR [#1742](https://github.com/bigbigraydeng-maker/magic-engine/pull/1742) 已合并。跟进 #1723 邮箱连接界面重设计——PM 实测带 NAL 走一遍这个流程时发现："管理员批准"这个链接之前只能自己点，但这一步按设计本来就经常是别人（公司的 IT/微软365 管理员）要做的，之前唯一的转发方式是右键复制链接地址，对非技术背景的人不直观。
+
+加了一个只读输入框（显示完整带域名的网址）+ "复制链接，发给X"按钮 + "我自己点"备选，两处用到管理员链接的地方（"卡住了"折叠框、已连接状态下的提示）都接上了。用的是完整绝对地址而不是相对路径——相对路径复制到微信里粘贴打开会指向错的域名或者打不开。
+
+子牙、魏征两轮独立复审均为不阻塞结论。**子牙顺带查出一个产品设计缺口**（不是这次改动引入的，是这次"复制发给别人"这个功能把它暴露出来）：管理员批准这条链接背后的接口仍然要求点链接的人已经有 ME 系统的登录账号，如果对方从没登录过，点开链接会撞 401/403，进不去微软授权那一步——"复制链接发给IT同事"这个功能要真正好用，隐含了"对方得先有ME账号"这个前提，目前没有处理，已记录待 PM 判断是否需要处理。魏征另记了一条测试代码卫生问题（剪贴板 mock 没有清理干净）供后续跟进。
+
+**Reuse Statement**：纯前端展示层改动，两处调用点共用同一个新组件，无接口变化、无客户专属逻辑。全仓库这是第三处"只读输入框+复制按钮"的重复实现（`UploadLinkPanel.tsx`/`ApiKeysPanel.tsx` 已有类似写法），子牙记录为可以后续抽共享组件的技术债，不阻塞这次上线。
+
+---
+
+### 2026-09-15（客户配置中心板块默认收起，减少信息量）
+
+PR [#1728](https://github.com/bigbigraydeng-maker/magic-engine/pull/1728) 已合并。PM 用完 #1723 那次邮箱界面重设计后反馈，整个客户配置中心还是"信息量太大"——2026-08-03 那次把 23 个板块从一根竖列改成按用途分 5 个页签，但最重的那个页签（"接通"）自己还剩 11 个板块从头展开到底。
+
+这次把共享的板块外壳（`SettingsSection`，全部约 31 个板块共用同一份）改成默认收起、点了才展开——除了每组第一块，以及跟当前授权回跳直接相关的板块（比如刚连完邮箱会自动展开"公司邮箱"那块看结果，不用再点一次找）。收起时**不挂载子组件**，跟 2026-08-03 那次定的规矩一样——不是 CSS 藏起来，收起的板块不会偷偷发它自己的请求；第一次点开之后内容留着，再收起/展开不会重新拉数据。
+
+子牙、魏征两轮独立复审均给 APPROVE/✅通过（不阻塞）。子牙抽查了全部 31 个板块，确认没有板块的既有逻辑因为"默认收起"这个新行为出现功能倒退；魏征核对了新增的"授权回跳该展开哪块"这套判断逻辑跟各面板自己内部的状态判断不会打架。两边各记了一条不影响这次上线的观察项（GBP 回跳会同时展开两个相关板块、不精确到具体哪个；切换页签会重置各板块的收起/展开状态）。
+
+**Reuse Statement**：纯前端展示层改动，共享组件改一处、全部 31 个板块受益，无接口变化、无客户专属逻辑。
+
+---
+
+### 2026-09-15（成交审核换成 AI 全自动判断+自动发送 Meta CAPI，带异常刹车，CTS/NAL）
+
+PR [#1721](https://github.com/bigbigraydeng-maker/magic-engine/pull/1721) 已合并并部署生产，配套的数据库改动（`clients.ai_auto_review_enabled`/`ai_auto_review_paused_reason`、`me_sale_outcomes.ai_review_attempts`/`ai_last_reviewed_at`）已 apply。PM 拍板：把成交/咨询记录审核页面上"人工点确认才发给广告平台"这一步，换成 AI 直接判断该不该发、判断完直接发送，不需要人再点一下；PM 明确接受这个风险（"这是趋势"），唯一让步是要有一个"异常刹车"——不是逐条审核，而是发送量/金额/批准占比突然异常时自动暂停整个客户的自动处理并通知，不是继续发。
+
+两轮设计复审（子牙架构+魏征挑刺）+ 实现完成后又过两轮实际代码复审，过程中查出并堵上几个真问题：①这个功能故意不接入平台的执行内核（`src/lib/kernel/`）——内核有一条写死的红线，"对外发送类动作永远不允许全自动，必须有人点头"，这次 PM 的决定等于是针对这一条业务线单独开了个例外，代码里留了清楚的注释说明这是刻意决定、不是遗漏或者绕过内核的技术投机；②客户在 Facebook 私信里填的姓名是可以被客户自己操纵的文本，喂给 AI 判断之前做了白名单清洗+安全声明，防止有人把名字改成一段"指挥 AI"的话；③加了一个独立于异常刹车的开关，PM 随时能自己按停，不用等系统自己发现异常才停；④"AI 拿不准"的记录设了重判上限，不会被无限重复判断、无限烧 AI 调用成本；⑤最后一轮代码复审还查出一个真实的权限漏洞——手动触发这轮判断的后台入口最初用的权限检查太松，理论上一个只该管自己客户的账号能碰到别的客户甚至一次性触发所有客户的自动发送，已经改成跟其它同类接口一样的权限收紧写法。
+
+这次先只有手动触发入口，没有接自动定时——比现有"只写待审核记录、人还要再点一次"的两个先例（NAL 私信同步、CTS 表格同步）风险更高，要先观察几天判断质量和熔断阈值再决定要不要接定时。数据库那两个新开关默认是关的，现在合并上线**不代表**已经对 CTS/NAL 生效——要不要真的打开、什么时候打开，还要等 PM 另外拍板。
+
+**Reuse Statement**：完全复用今天已上线的 `buildIntakeRow`/`me_sale_outcomes`/CAPI 回写这整条平台通道（L1）和共享的 PM 待办拉取管道（新增一条待办类型，未另起通道），未新建任何独立发送逻辑；客户级开关同构复用 `messenger_agent_enabled_*` 已有的"一个字段管一件事"模式，不是新开一套语义。不接入执行内核是这次唯一的、显式记录在代码里的平台化例外，范围严格限定在这一条业务线，不代表内核红线本身被改动或放宽。
+
+---
+
+### 2026-09-15（连邮箱这块界面重新设计，主操作 + 收起的备用路径）
+
+PR [#1723](https://github.com/bigbigraydeng-maker/magic-engine/pull/1723) 已合并。PM 实测用 #1716/#1719 那套功能把 NAL 的真实邮箱连进来时，反馈"连接客户邮箱"这一块界面完全看不懂——旧版把"让公司放行"（管理员批准）和"连上邮箱"做成并排的两个同样大小的编号步骤，看着像所有人都要先做完 1 才能做 2，但实际上多数公司根本不需要管理员那一步，只有小部分公司锁了权限的才会撞上那面墙。光是讲清楚"该点哪个"就花了好几轮来回。
+
+重新设计成一个显眼的主操作（直接填邮箱地址连接），管理员那条路收进一个默认收起的"卡住了？"折叠框，只有真撞见"需要管理员批准"提示的人才需要点开；从管理员批准流程跳回来时这个折叠框会自动展开，不用再找一次入口。两条路径都标好"这一步该找谁做"（收邮件本人 vs 公司IT）。顺手删掉了一条跟折叠框内容重复、措辞还不一致的顶部横幅。
+
+新增这个组件的第一份测试（9条），覆盖折叠默认状态、自动展开、连接按钮的禁用/启用判断；用"故意让折叠框强制常开"的方式做过变异验证，确认测试真的钉住了"默认收起"这条行为。子牙、魏征两轮独立复审均为不阻塞结论（子牙：纯展示层重排未损伤业务逻辑；魏征：`useState(adminApproved)` 这个初始值在真实场景下因为授权走的是整页跳转而非客户端路由不会失效，但记录为可以更稳健的技术债跟进）。
+
+**Reuse Statement**：纯 UI 重排，无新增依赖、无接口变化、无客户专属逻辑，所有客户共用同一份代码。
+
+---
+
+### 2026-09-15（CRM 抽屉里能直接回邮件了，Leads 营销中心 M4 部分完成）
+
+PR [#1719](https://github.com/bigbigraydeng-maker/magic-engine/pull/1719) 已合并。同一天早些时候合并的 #1716 加了"从系统里回一封邮件"这个后端能力，但当时没有任何界面调用它——CRM 抽屉里唯一的回复框（`MessengerReply.tsx`）硬编码只认私信，就算客人邮箱连上了、邮件读进来了，销售在系统里也没地方回。
+
+排查过程中确认 ROADMAP 原来那条"私信页面靠 `channel='messenger'` 把邮件挡在外面"的说法已经过期——联系人时间线/往来记录那部分早在 PR #1038 就修成不挑渠道了，真正缺的只是回复这一个入口。把共享发送框 `ReplyBox.tsx` 从只认私信改成认 `channel: 'messenger' | 'email'` 参数（默认值仍是 `'messenger'`，不影响任何现有调用方，逐字节比对过改动前后的私信路径一致），照 `MessengerReply.tsx` 的样板加了 `EmailReply.tsx` + 对应的邮件线查询接口，两个回复框现在在抽屉里并排显示。
+
+子牙 + 魏征两轮独立复审，结论均为可合并（子牙：COMMENT，魏征：⚠️警告可跟进），留了三条不阻塞的后续优化：邮件回复框目前要点了发送才会因为"这个人没来过信"被服务端拒绝，不像私信那样能提前判断禁用；两个回复框组件之间约九成状态管理代码重复，值得抽成共享逻辑；`humanError()` 的邮件分支理论上可能把 `wrong_channel` 误报成"没有邮件往来"，但当前抽屉这条路径拿到的会话已经过渠道过滤，不会真的触发。
+
+**范围内明确没做**：没有逐一审计其他列表/看板页面还有没有类似的隐藏 messenger 硬编码，这次只补了 PR #1716 实际用得上的那一个入口。
+
+**Reuse Statement**：完全复用已验证过的发送框组件和隔离/错误映射形状，新增的是渠道参数化，不是第二套实现；`GET .../email` 路由是 `.../messenger` 路由的渠道镜像，两者结构对称，复审已确认隔离查询条件一致。平台通用改动，无客户专属逻辑。
+
+---
+
+### 2026-09-15（NAL 客户管理工作台"标已成交" → 自动写一条 Meta CAPI 成交记录）
+
+PR [#1715](https://github.com/bigbigraydeng-maker/magic-engine/pull/1715) 已合并并部署生产，配套的数据库改动（新增 `crm_stage_manual` 来源分类）已 apply。New Asian Logistics（NAL）的员工在客户管理工作台（今天新开通的临时 CRM）里把一个联系人手动推进到"已成交"档位、填上金额后，现在会直接生成一条走 Meta 广告转化 API（CAPI）回写通道的成交记录——复用今天已经跑通的同一条 `me_sale_outcomes` → 审核 → 发送通道，仍然是 dry_run 演习模式，不会真发给广告平台。只对 NAL 生效，不影响 CTS 现有的成交回传通道（表格同步）。
+
+设计过两轮子牙（架构）+ 魏征（挑刺）复审，实现完成后又过两轮实际代码复审——第一轮揪出一个真实 BLOCKER：原代码先把联系人阶段推进到"已成交"、再校验能不能生成合格的成交记录，如果这个人没有邮箱/电话/私信身份三个匹配键中的任何一个，校验会失败拒收，但阶段已经被永久改了——会出现"人被标成已成交、但一条成交记录都没有"的孤儿状态，且没人知道要去修。第一次修复把顺序换成了"先校验、通过了再推阶段"，第二轮复审又抓到同一类问题换了个触发条件重新出现（如果写库这一步本身失败，比如数据库偶发故障，阶段依然会先被推进）——最终把顺序理顺为"成交记录先真的写进数据库（或确认此前已经写过），成功了才推进阶段"，任何一步失败都不会让联系人的阶段被误改。全程 24 条自动化测试覆盖（含本次两轮复审各自新增的回归测试），构建通过。
+
+**Reuse Statement**：复用今天已上线的 `buildIntakeRow`/`me_sale_outcomes`/CAPI 回写这整条平台通道（L1），未另起一套；复用共享的联系人阶段推进逻辑（从 `crm/contacts/[cid]/stage` 路由抽成 `advanceContactStage()` 共享函数，CTS 也在用同一套阶段配置，未受影响）。新增的"根据 CRM 工作台标记已成交自动记账"这个入口是 NAL 的客户配置（L4），未写入跨客户共享逻辑；`crm_stage_manual` 这个来源分类标签是复用既有枚举扩展模式（跟 `crm_sheet_sync`/`messenger_conversation` 同一族）新增一个值，不是新表新逻辑。
+
+---
+
+### 2026-09-15（客户知识库 6 步全部合并 · 广告结果阶梯上线 CTS）
+
+PR [#1693](https://github.com/bigbigraydeng-maker/magic-engine/pull/1693) 已合并。客户知识库
+（Client Knowledge Base，L1 平台能力）6 步建设全部完成——步骤 6（issue #1648，rollout stage
++ 双签一次性确认链接）合并后，`getClientKnowledge(purpose:'customer_reply')` 补齐了最后一道
+闸：客户必须走完"ME 发起 + 客户自己确认"两次签名才算"正式上线"，上线前默认对客户不放行知识库
+事实（fail-closed）。合并前过子牙（架构）+ 魏征（挑刺）两轮独立复审：过程中发现并修复两处真
+问题——①合并冲突解决时两个既有测试的 fixture 修复一度只落在工作区没有真正提交，被复审用干净
+代码复核时抓到，重新提交并用直接读远端 commit 对象的方式验证；②另一并发会话在复审期间修了
+`consume_knowledge_rollout_advance_request` 一处真实竞态漏洞（客户点开一条已经被 ME 单方回退
+过的旧确认链接，本应拒绝却会把客户重新拉回已回退的阶段）。这一步合并后，此前被它挡住的
+Governed Reply Agent 两个 PR（#1638 verifier 框架、#1639 agent-core prompt/tools）确认跟主线
+无冲突，可以进入各自复审排期。
+
+同一会话把 CTS 接入了新上线的"广告结果阶梯"体检（issue ADS-IMPACT-P1）：留资（lead）定为主
+结果、私信开聊为领先信号、目标成本 $11/留资（按 CTS 最近 11 天真实均价 $9.78/留资定的目标线）。
+`ad_strategy_configs` 新增一行，走的是既有设置接口同款的字段/校验规则（顺序不能颠倒、成本区间
+0-100000）。
+
+**Reuse Statement**：#1693 是纯平台能力收尾，无新增独立能力线；`client_knowledge_rollout_advance_
+requests` 复用 issue #1646 已验证过的一次性签名链接安全姿态（GET 只读/POST 才消费/CSRF nonce），
+双签身份判据复用 `dual-sign.ts`，未另起第二套。CTS 结果阶梯是纯客户配置（L4），未写入 shared
+runtime；换成 Oztop/Roman 需要各自另填一行，逻辑代码不需要改。
+
+---
+
+### 2026-09-15（CRM 里能回邮件了，Leads 营销中心 M3）
+
+PR [#1716](https://github.com/bigbigraydeng-maker/magic-engine/pull/1716)（原 #1714，因单个 PR 改动超过自动修车道 800 行上限换分支重开）已合并。客户邮箱的读信同步（`mail-ingest.ts`）挂在 `messenger-sync-hourly` 里已经跑了一个多月，但从 CRM 里回一封邮件出去这件事此前完全不存在——授权时早就要过 `Mail.Send`，一直没人用。现在补上：`sendMailReply()` + `POST /api/clients/[id]/email/conversations/[conversationId]/reply`，形状照抄已上线的 Messenger 回复路由，走 Microsoft Graph 的 `createReply`+`send` 两步（不是一步到位的 `/reply`，因为后者拿不到消息 id，没法跟下一次每小时同步对上号）。
+
+三轮独立复审共抓出 6 个真会导致"发不出去"或"发错人"的问题，全部修好：① 建草稿这个动作需要 `Mail.ReadWrite` 权限，光有 `Mail.Send` 会在第一步就被拒（已扩展 `MICROSOFT_MAIL_SCOPES`）；② 客户连了不止一个邮箱时会拿错授权，改成按 `conversations.page_id` 精确匹配连接；③ 线程最后一条如果是我们自己发的，回复会把收件人变成自己、客人收不到，改成只认客人最后一次开口的那一封；④ Graph 消息 id 在草稿变已发送时会漂移，两端都加了 `Prefer: IdType="ImmutableId"`；⑤ 401 会强制刷新令牌重试一次；⑥ 那段处理"id 漂移导致重复"的兜底逻辑原本没有失效期，会永久误判同一秒内两封不同邮件为重复并静默丢弃，已加上只对切换时刻之前的历史信生效的时间闸（用变异测试验证过：临时关掉这道闸，相关测试会真的报错）。
+
+**范围内明确没做**：审计沿用 `conversation_outbound_log` 的自由文本列（`meta_message_id`/`messaging_type` 存字面量），不是给邮件另开一张 schema；没有接入 AI 自动回复（`messenger-agent/channel-dispatch.ts` 目前只认 `messenger`/`whatsapp` 两个渠道，接入邮件是 M7 的范围，需要单独设计+复审）；没有接进 `lib/messaging/channels.ts` 那套通用发送总线——那套总线目前零生产调用方，连 Messenger 自己都没注册进去，往上加只会多一层没人用的架子。
+
+**待办（不卡这次上线，但影响能不能真用）**：`Mail.ReadWrite` 是新申请的权限，CTS 现有邮箱连接刷新令牌时换不来一个从没同意过的权限，需要重新走一次登录同意才能用上这个新功能（读信本身不受影响，且 CTS 从没用过回信这个功能，不算回退）；本轮选定的首个真实测试客户 NAL 尚未连接邮箱（`platform_oauth_connections` 里还没有它的 `microsoft_mail` 记录），这个功能目前只有 145 个自动化测试验证过，还没有真实邮箱跑通过一次。
+
+**Reuse Statement**：完全复用既有平台能力——`conversations`/`conversation_messages`/`contact_touchpoints` 三张表、`platform_oauth_connections` + `token-manager` 的令牌管理、Messenger 回复路由已经验证过的隔离/错误映射形状。新增的发送半边（`mail-send.ts` + 路由）是平台通用能力，不含任何客户专属逻辑，NAL/CTS 用的是同一份代码。唯一的平台层改动是 `MICROSOFT_MAIL_SCOPES` 扩展一个权限，影响所有走这条授权的客户（目前只有 CTS），已在 PR 里说明其对现有连接的影响面。
+
+---
+
+### 2026-09-15（Daily Plan：新指令不再抹掉已发布帖子的回执）
+
+PR [#1687](https://github.com/bigbigraydeng-maker/magic-engine/pull/1687) 已合并（A 级）。给同一个推广活动再下一次 7 天内容指令时，`POST /api/clients/[id]/campaign-daily-plan` 原来会整份覆盖最新计划，连带清空 `publish_meta`（已发到客户 Facebook 主页的帖子唯一记录，撤回和防重复发布都靠它）和 `publish_queue_meta`。真实风险：CTS 计划 `f166a5c0-…` 已发 7 条，再下一次指令就撤不回来。
+
+现在：计划带发布回执（任何状态，含全部已撤回）→ 409 `PLAN_ALREADY_PUBLISHED`；带排队回执 → 409 `PLAN_PUBLISH_QUEUED`；写入时再核对两份回执都不在，读完后回执刚落进来 → 409 `PLAN_CHANGED_DURING_SAVE`；查计划出错 → 500（原来会误插第二行把回执藏起来）。只有审核结论的计划照旧覆盖。拒绝时提示「新建活动并归档旧活动」。选择拒绝而不是另插新行，是因为 GET / 发布 / 撤回都只读最新一行。
+
+验证：相关测试 122 条通过（新增 8 条，逐个删掉 6 处关键检查都能被测试抓到），CI 类型检查与编译通过，子牙 + 魏征两轮复审。未在生产上实测（唯一试法是真写客户计划）。后续见 ROADMAP「Daily Plan 发布回执保护的后续」。
+
+**Reuse Statement**：复用发布 / 排队接口已有的「写入前核对 `plan_data->…` 为空」做法和现有回执 schema；规则对所有客户、所有行业通用，无客户或行业专属逻辑，无新表、无数据库改动。
+
+---
+
+### 2026-09-15（NAL 私信 → Meta CAPI 有效咨询同步，dry_run）
+
+PR [#1675](https://github.com/bigbigraydeng-maker/magic-engine/pull/1675)、[#1684](https://github.com/bigbigraydeng-maker/magic-engine/pull/1684)、[#1689](https://github.com/bigbigraydeng-maker/magic-engine/pull/1689) 已合并并部署生产，migration 已 apply。New Asian Logistics（NAL，跨境集运物流代理）的 Facebook Messenger 私信对话现在能被自动判定为"有效咨询"并写入 `me_sale_outcomes`，复用 CTS 那条线已上线的 Meta 广告转化 API（CAPI）回写通道。判据用 21 个真实对话人工标注 + 模拟跑规则验证过（0 假阳性，约 69% 召回）；生产库真实跑通：186 段对话，判出 20 条有效咨询全部正确写入 `pending_review`，重跑确认幂等键生效。
+
+顺带修了一个跟 NAL 无关、影响 CTS 现有真实发送的漏洞：发送前的拒联检查原来只查 `contacts.do_not_contact` 一列，客人刚说"别再联系我"、这一列还没来得及被人工确认更新的窗口期内可能仍会发送，改成跟受众导出/今日名单同一套真相源（`contact_touchpoints`）判断。
+
+`me_sale_outcomes` 扩展支持 Facebook 私信身份（page-scoped user id）当第三种客户匹配键（原来只认邮箱/电话，NAL 182 个联系人几乎全无），已过 Meta 官方文档核实、两轮子牙+魏征设计评审 + 每次实现完再复审实际代码。客人要求删除个人信息的接口/约束同步扩展覆盖新字段。
+
+**范围内明确没做**：本轮不做"已成交"判定（NAL 184 个联系人的 CRM 阶段字段全空、集运报价无团价表可查金额，拼不出合法记录）；不接 WhatsApp（NAL 现有对话 100% 是 Messenger 渠道）；不接 cron/Inngest（人工手动触发 `POST /api/admin/conversions/nal-messenger-sync`）；不切换到真发送（`conversion_stage` 仍是 `dry_run`）。
+
+**Reuse Statement**：完整复用既有共享能力（CAPI 回写通道 `writeback-service.ts`/`me_sale_outcomes`/审核 UI、`qualified-buyer.ts` 抽出的否定窗口检测现独立成 `src/lib/crm/negation.ts` 共享模块）。NAL 专属的判断规则（关键词表、批次边界启发式）封在 `nal-messenger-lead-classify.ts` 一个文件里，按 `docs/registry/platform-candidates.md` 已登记的 L4 客户专属实现路线，未下沉进 shared runtime。`page_scoped_user_id`/`action_source` 是本次新增的跨客户共享字段/契约扩展（CTS 现有记录不受影响，行为原样不变）。
+
+---
+
+### 2026-09-14（CTS 行程路线地图 8 团上线 + ME 旅游版立版 + Tour 管理模块规划）
+
+PM 从「给 CTS 也做一张 Golden China 那样的路线图」起步，最终沉淀成 ME 旅游版的第一个共享能力候选 + 一条产品线立版。
+
+1. **8 个 CTS 在售团的「行程路线地图」上线正式站**（`chinatravel` 仓 `ctstours.co.nz`，PR #184/#185）：Golden China + 双城记 / 上海周边 / Best of China / 丝路 / 27 天全景 / 圣诞团（奥克兰 + 基督城）。每张按各团**真实行程**（城市顺序 / 每城住几晚 / 交通方式 / 活动，全部取自官网行程数据或 `tours.ts`，未编造）自动生成，PC 宽版 + 手机竖版随屏切换，挂在各团行程页「Itinerary」标签顶部。地图用真实中国边界数据（非手画）、台湾按中国惯例标注、CTS 品牌 + logo、无价格无固定出发日期（通用图）。
+2. **统一为 Golden China 风格**（PM 复审后返工）：卡片按到达顺序排（第一站在最上、国际进出/中转城市排到它实际停留的最后位置）、城市名紧贴圆点无引导线、城市铺开、箭头顺行程走，一眼读出第 1 站→第 2 站。
+3. **ME 旅游版正式立版**（PM 2026-09-14 拍板，`docs/registry/product-versions.md`）：Customer Zero = CTS；首个 L2 能力候选 = 行程转路线地图生成器（`candidate · 1/2`，未晋升共享能力）。
+4. **ME Tour 管理模块规划成文**（`docs/specs/2026-09-14-me-tour-management-module-plan.md`，未授权实施）：一个团推广前统一备好内容/定价/行程/地图；经 Codex 复审修正为「连接现有事实源（`offerings.yaml`/`FirstPartyTour`）+ 最小营销快照」，遵守 `ME_PRODUCT_DEFINITION.md` §3.2/§3.3——**ME 不自建旅游库存/报价系统**。生成器原型存进受跟踪路径 `docs/specs/prototypes/tour-route-map/`。
+
+**Reuse Statement**：地图生成器逻辑不含写死的客户名/城市/价格（全来自输入 specs）；但视觉资产（CTS 品牌色/logo、中国底图、台湾标注）当前**硬编码**，故严格范围 = 「中国线路 · CTS 首例」，未取得旅游版共享资格。产品化前置：品牌/底图/地理规则参数化 + 团事实走 Connector。晋升门槛 = 第 2 个旅游客户事实复制（L2，非 L1 跨行业）。
+
+---
+
+### 2026-09-13（Park Homes：Forrest Hill 效果图上线）
+
+PR [#1609](https://github.com/bigbigraydeng-maker/magic-engine/pull/1609) 已合并并部署生产。客户邮件发来的 4 张 Forrest Hill 楼盘效果图（artist's impression）已接入官网 `parkhomes.nz/forrest-hill` 项目页图集，"Register Interest" 询盘表单同页可用。生产验证：网页实际打开确认 4 张图全部正常加载、无 404/占位图。
+
+**Reuse Statement**：纯客户私有素材（Park Homes 自己的楼盘渲染图）接入既有 Park Homes 官网项目页模板，无新增平台能力，不涉及 shared runtime 改动。
+
+---
+
+### 2026-09-13（视频工厂：资料包自助管理界面 + 视频归属选择 + CTS 真实 7 团接入）
+
+同一天会话继续：PM 追问"这个能力在 Magic Engine 里是不是真的做完了"，倒逼出两块此前一直靠工程手改数据库的界面。
+
+1. **资料包管理界面**（客户设置页 → 内容 tab → 视频工厂配置）：FDE/PM 现在能自己增删"团/档位"及其真实字段（团名/路线/价格/出发日期，或任何客户/行业需要的字段），不用再找工程改 JSON。顺手修复一个真实存在的老 bug：Settings 页的保存接口（`mergeFactoryConfig`）此前完全没有回写 `offers`/`post_field_sources`/`static_overrides`/`required_post_fields` 这四个字段——新界面加了也会保存到空气里，现已修正为"没带就沿用、带 null 就清空、带合法值就覆盖"的正确合并语义。
+2. **视频归属选择框**（内容工厂看板"确认做"这一步）：客户配了 ≥2 个资料包时，必须先选这条视频对应哪个团才能确认，选不了就直接拦下，不让系统瞎猜——这条红线延续自 PR #1632 的设计。
+3. **对抗性复审抓出并修复两个真洞**：①`offer_key` 写入前此前不校验是否真的存在于客户当前配置里，选错/选到刚被删掉的档位，视频会先"确认成功"、几十秒后才在 Inngest 渲染任务里默默失败——已改成确认这一刻同步查库校验，不存在直接 400 拦下（顺带把这次查询和后面判断出片引擎的查询合并成一次，没多打库）。②资料包表单里如果手滑建了两个同名档位，后一个会静默覆盖前一个、保存显示成功但内容悄悄丢了——已改成检测到重复直接报错挡住保存。
+4. **CTS 真实 7 个在售团接入**：没有凭空编数据——发现另一个并行会话已经为"私信自动回复"功能做过一遍"CTS 现在卖哪些团"的真实调研（`config/clients/cts/offerings.yaml`，PM 已核实），直接复用这份数据导入视频工厂的资料包配置（Golden China / 圣诞团奥克兰+基督城两个出发城市 / Best of China / 丝路 / 双城记 / 上海周边），没有重新造一遍轮子。在生产环境用真实数据完整跑通一次闭环：看板选团 → 系统核对团存在 → 自动填对片尾信息（团名/路线/价格/日期）→ Creatomate 渲染成功。
+5. **顺带记录一个待还的技术债**：CTS 现在有两套"卖哪些团"的真实数据（视频工厂一套、私信回复 Agent 一套），语义重叠，以后团有变动要改两个地方——记入 ROADMAP，不在这轮解决。
+
+**Reuse Statement**：两块新界面都是共享连接器/看板代码的自然扩展（跟 `staticOverrides`/`requiredPostFields` 同级别的字段，不是 CTS 专属新能力），换客户/换行业都不用改代码，只是配置的资料包内容不同。CTS 的 7 团真实事实是客户私有数据，来自另一个已完成的调研工作，本轮只做了导入和格式转换，没有重新研究或编造。
+
+### 2026-09-13（视频工厂：字幕不再写死 + 片尾信息真正自动化 + 模板风格探索）
+
+同一天会话继续：PM 反馈"看不出 CTS 视频区别、NAL 视频就是发过的那条"，追问"视频里的文字该由 AI 统一想清楚存起来，不该 Creatomate 自己每次现设计"，推动了两处真正的架构修复。
+
+1. **字幕不再写死（配置改动，无需新代码）**——发现 `SceneSlotFieldMap.caption` 字段代码里早就存在，但 CTS 配置从未真正用上：长城/故宫/兵马俑/上海四镜头的字幕此前是模板固定文字，改成读 `scene_field_map` 里的 `caption` 映射后，字幕直接由分镜阶段（`planScenes`）逐镜头生成，跟着脚本内容变。已用真实渲染验证：两条不同脚本产出的字幕内容确实不同、非写死。
+2. **换了 3 个 Creatomate 自带模板风格试渲染**（Photo Collage / Search Field w/ Rating [16:9-only，中途放弃] / Searchlight Reveal）——验证"不用请设计师、Creatomate 自带模板库可直接换风格"这条能力路径，全部走"备份现有配置→临时切模板→真实渲染→验证→立刻还原"的安全流程。PM 反馈三个都"不像短视频爆款"，随后按 CLAUDE.md §8 规矩查了 `viral_reference_library` 里的真实高播放旅游参考数据（10 条，最高 2.6 亿播放）：发现共同点不是"切得快"（多条播放量最高的反而全片零剪辑），而是全部为真实动态画面/真人出镜/真实瞬间，没有一条是"照片+图形标题"形式——现有模板路线的天花板由此确认：不是参数能调出来的，而是内容形态本身的差异。
+3. **片尾信息此前的"自动化"其实是假的，全靠人工代填数据库**——PR #1613（见下一条 09-13 记录）设计了 `requiredPostFields`+`endcard` 机制，但复核发现全仓库没有任何代码真的往 `content_posts.generation_context_snapshot.endcard` 写值，此前两次"验证通过"全靠这个会话手动跑脚本代填，撞了"该给人填的字段不能只让人进数据库后台手填"这条红线。新增自动写入机制（PR [#1632](https://github.com/bigbigraydeng-maker/magic-engine/pull/1632)）：`CreatomateTemplateContract` 新增 `offers`（按团/出发城市变体分的真实事实字典）+ `postFieldSources`（元素名→事实字段的确定性映射，不走 LLM，杜绝幻觉/改写风险）；`resolveOfferFacts` 在"没指定用哪个团 + 客户配了 ≥2 个团"时 fail-closed 抛错，不会猜一份不相关的事实套上去（这条红线是"子牙"+"魏征"设计复审时明确要堵的：CTS 圣诞团奥克兰/基督城两个出发城市变体同时在打广告，套错团的价格/日期比模板写死的占位文字更危险）。实施完的复审又抓出一处真 bug：字段解析必须排在花钱生成分镜素材之前，否则一旦触发 fail-closed，job 会卡进无法自愈的状态（改配置也救不回来）——已修正执行顺序并补测试。
+4. **顺带发现并修正一条过期客户数据**：CTS 官网实测（`ctstours.co.nz/tours/china/discovery/beijing-xian`）发现 `factory_config.verified_cta.departure` 存的"15 Oct 2026"已过期（该场次已 sold out），官网当前显示下一场是"18 Mar 2027"——已更正。
+5. **`MUAPI_API_KEY` 生产环境确认缺失并已修复**——三次全新脚本真实渲染测试均在"某镜头配不到真实照片、回退 AI 生成动态画面"这一步失败（此前 09-13 早些时候的记录曾错误判断这个环境变量"命中率低不再紧迫"），PM 直接在 Render 后台补上，已用真实渲染验证 Muapi 回退路径恢复正常。
+6. **端到端真实渲染验证**：合并 PR #1632 并等 Render 部署完成后，用真实产品数据重新渲染一条 CTS 视频，`generation_context_snapshot.endcard` 全部字段自动写对（团名"China Discovery — A Tale of Two Cities"、路线"Beijing (Great Wall · Forbidden City) → Xi'an (Terracotta Warriors)"、价格"10 Days · From NZD $3,480 pp"、日期"Next departure 18 Mar 2027"），成片渲染成功（`ready_for_review`），全程零人工数据库写入。
+
+**Reuse Statement**：字幕修复是配置层面接入既有共享代码（`SceneSlotFieldMap.caption` 早就是连接器契约的一部分），未新增代码。`offers`/`postFieldSources`/自动写入机制是共享连接器能力（跟 `staticOverrides`/`requiredPostFields` 同级），对所有走 Creatomate 的客户生效，不是 CTS 专属；具体填哪些团、哪些事实值是 CTS 自己的客户配置。`viral_reference_library` 查询结论（爆款靠真实动态画面而非剪辑节奏）是行业级洞察，未来给其他旅游客户设计模板时同样适用，建议沉淀进对应的 Industry Playbook。
+
+### 2026-09-13（视频工厂：修复真实照片池致命 bug + 片尾信息动态化 + CTS/NAL 双客户内容量产）
+
+PM 要求给 CTS 和 NAL 各准备一批新内容，过程中发现并修复了两个真正阻塞出片的生产 bug，最终两个客户的内容都做出来了：
+
+1. **修复致命 bug：自动选真实照片功能几乎完全失效**（PR [#1615](https://github.com/bigbigraydeng-maker/magic-engine/pull/1615)）——`loadRankableClientAssets`（出片自动选真实照片的核心查询）和素材库人工搜索接口，都用 `.not('vision_metadata->>kind', 'eq', 'video')` 在数据库层排除视频行；但只有视频行才会写这个字段，绝大多数照片行根本没有它，PostgREST 对着"字段不存在"的行算出来是 NULL，被数据库整行排除——CTS 47 张已核实真实照片，命中这个 bug 后自动出片只能看到 1 张。这解释了本次会话早些时候就记录过的"MUAPI_API_KEY 缺失"报错：真正原因不是环境变量偶尔缺失，是几乎每次新脚本都因为这个 bug 配不到真实照片、被迫掉进 AI 兜底路径。改成跟同文件里已经写对的逻辑一致（内存里判断 kind==='video'，没有这个字段按"不是视频"处理）。修复后真实照片池从 1 张恢复到 50 张。
+2. **片尾信息（团名/路线/天数价格/出发日期）此前 100% 是模板作者写死的示例内容**（PR [#1613](https://github.com/bigbigraydeng-maker/magic-engine/pull/1613)）——每条视频不管实际推广哪个团，片尾显示的都是同一份跟内容无关的占位信息。新增 `CreatomateTemplateContract.requiredPostFields` 声明"这几个元素每条视频必须各自提供值"，读自 `content_posts.generation_context_snapshot.endcard`，缺字段直接拦渲染，绝不静默套用旧内容。经"子牙"（架构）+"魏征"（挑刺）两轮设计复审后落地。
+3. **CTS 新内容**：2 条视频（"Best of China"真实团，长城/故宫/兵马俑/上海真实照片+真实价格 NZD $4,080/15 天；"China Awaits"通用宣传片）+ 3 条图文（25 年品牌信任状、丝路 2027 团、双城记 10 天团），均已用真实渲染自检确认画面和片尾信息正确。
+4. **NAL（New Asian Logistics，物流客户）首次接入视频工厂**——此前完全空白（无模板、无素材）。真实素材取自 NAL 自己已发布的 Facebook 内容（Graph API 官方接口拿原图/原视频，非网页截图），做了 1 条视频（真实仓库/装柜实拍 + logo 水印 + 品牌结尾卡，ffmpeg 本地合成，未走 Creatomate）+ 1 条图文。
+
+**Reuse Statement**：两处 bug 修复都是共享连接器代码（`src/lib/factory/client-asset-pool.ts`、素材库搜索路由），修完对所有客户生效，不是 CTS 专属；`requiredPostFields`/`endcard` 机制同样是共享连接器能力（跟 `staticOverrides` 同级），具体填什么值是每个客户自己的内容。CTS 的 5 条内容、NAL 的账号研究结论和真实素材，均为客户私有，未进共享代码。NAL 目前用 ffmpeg 本地合成而非 Creatomate 模板，是该客户当前规模下的判断，不代表放弃 Creatomate 路线。
+
+### 2026-09-13（视频工厂：背景音乐接入 + 补齐胡同/西安城墙真实照片 + 清理僵尸 Render 服务）
+
+上一轮会话收尾后 PM 追加三个决定，当场处理完：
+
+1. **背景音乐**：PM 上传 3 首新曲目到 Dropbox（`MagicLab_Studio/Music/`）。检查 Creatomate 模板源码时发现模板其实自带一个通用 `Music` 音频图层（此前记录模板结构时漏记了这个，只记了画面/文字元素）。3 首曲目已转存到正式素材库，PM 选定 `Horizon's Call` 作为默认背景音乐，通过已有的 `static_overrides` 机制接入（跟 logo 覆盖用的是同一套机制，**不需要改代码**）。已用一条真实渲染验证音轨确实有声音（-16.8dB 均值，非静音桩轨）。
+2. **胡同/西安城墙真实照片**：PM 本让去 Unsplash 找，核实后发现公司自己的 Dropbox 素材库（`CTS/footage/photos/`）里其实早就有 2 张胡同 + 1 张西安城墙真实照片，只是从未录入 `client_assets`——不需要外部素材。已上传、PM 过目确认、标记 `client_verified`。这两个 landmark 目前仍不在该客户的 `scene_field_map` 里（脚本目前只生成 4 个镜头），要真正出现在成片里还需要后续把内容扩到 6 个镜头，记入 ROADMAP。
+3. **清理僵尸 Render 服务**：PM 拍板彻底删除此前发现的"退役但没真正关掉"的老服务 `content-factory-render-worker`（[render.yaml](../../render.yaml) 里早已没有这条声明，只留了一条归档注释，删除不会被下次部署复活）。已在 Render 后台执行删除，服务已不存在。
+
+**顺带发现一个新的生产缺口**：测试渲染时触发了"某镜头没配到真实照片、退回 AI 现画兜底"这条路径，暴露出生产环境的 `MUAPI_API_KEY` 环境变量实际上没配置（此前 `docs/ENV.md` 标记✅是错的，这条兜底路径此前从未被真实触发过）。按资源优先级三维打分定为 P3，记入 ROADMAP，不阻塞当前工作。
+
+另外发现 Render 账户当前有"Payment failed"提示（信用卡扣款失败），已单独告知 PM——这个不是工程优先级问题，是需要尽快更新付款方式的运营事项，拖下去可能导致全部 Render 服务被暂停。
+
+**Reuse Statement**：音乐/logo 都复用同一个 `staticOverrides` 通用机制（客户中立，哪个元素名对应哪个资产完全是每个客户自己的配置）；CTS 的曲目选择、真实照片素材、僵尸服务清理均为 CTS 客户私有配置/运维操作，未写入共享代码，本次也没有新增代码。
+
+### 2026-09-13（视频工厂：Creatomate 真实照片渲染链路端到端验证通过，附带修复两个生产事故）
+
+真实照片喂进 Creatomate "Golden China" 模板、渲染出正确成片，这条链路从代码合并到真人验证全部走完，产出多条真实渲染成片。过程中发现并处理了两个此前不知道的生产问题：
+
+1. **一个 2026-09-02"已退役"的老 ffmpeg 拼片工人（Render 服务 `content-factory-render-worker`）其实从未真正关闭**——只是摘掉了触发它的 cron，服务容器本体一直在运行。这次合并代码触发 Render 自动重新部署，该服务苏醒后抢占了新提交的渲染任务，写入旧数据格式，导致新 Creatomate 链路完全跑不起来。已在 Render 后台手动 Suspend（未删除，是否彻底移除待 PM 拍板）。
+2. **Creatomate 渲染产物下载被自己代码里的域名白名单拦下**——`src/lib/creatomate/store-result.ts` 原假设产物从 `cdn.creatomate.com` 出，实测实际存在 Backblaze B2（`f002.backblazeb2.com`）。PR [#1594](https://github.com/bigbigraydeng-maker/magic-engine/pull/1594) 已修复。
+
+另新增 `CreatomateTemplateContract.staticOverrides` 支持覆盖 `EndLogo`/`Watermark` 等不参与逐镜头轮换的固定品牌图层（PR [#1604](https://github.com/bigbigraydeng-maker/magic-engine/pull/1604)），CTS 收尾画面的 logo 已从模板作者放的占位白图换成真实品牌红白配色版本。
+
+同时从 Creatomate 模板编辑页面的 Code 视图直接读出了"Golden China"模板的完整真实结构（8 个镜头槽位各自写死的地名文案、EndCard 各元素名），此前靠试错渲染猜测的槽位映射（如误以为兵马俑在 Still-6）已全部更正为源码确认的真实值，记入 memory `project-cts-video-factory-decision-ledger`，以后不用再重新试错。
+
+CTS 真实素材库 47 张照片人工过目，44 张标记 `client_verified`（3 张文件名标注换脸/换 logo/AI 生成的确认排除），自动选真实照片功能现在对 CTS 真正有可用素材。
+
+**未完成**：Hutong（Still-5）、西安城墙（Still-6）两个镜头位置目前素材库没有专属真实照片；PM 拍板"AI 配音统一用 ElevenLabs"，但账号是免费版无法通过 API 调用任何声音，需要决定是否升级付费，配音这一步至今没有真正测试过。完整清单见 [ROADMAP.md](../ROADMAP.md) Creatomate Connector 落地后续。
+
+**Reuse Statement**：`staticOverrides` 是 Creatomate L3 Connector 契约的扩展，客户中立（哪个元素名对应哪个品牌资产完全是每个客户自己的配置，不进 shared runtime）；CTS 的模板真实结构、素材核实结果、logo 资产均为 CTS 客户私有配置，未写入共享代码。
+
+### 2026-09-13（视频工厂：Creatomate 出片真实照片优先 + 老 ffmpeg 引擎归档标注）
+
+PR [#1570](https://github.com/bigbigraydeng-maker/magic-engine/pull/1570) 已合并（PR #1569 因改动 835 行撞了 `claude/*` 自动修车道 800 行上限，换 `feat/*` 分支重开，代码不变）。`src/lib/creatomate/scene-assets.ts` 出片时先按镜头描述去客户真实素材库（`client_assets`）里找匹配的真实照片（只认 `client_verified`/`fde_shot` 核实过的来源，见 `src/lib/assets/provenance.ts::canBackRealPrice`），命中就直接用真照片，不再走 AI 现画（`generateImage`）也不再走 AI 逐帧重画（`imageToClip`）；素材库没有匹配的镜头（如已知空白地标：西藏/长江三峡）才回退到原有 AI 现画路径。真实照片的"动"交给 Creatomate 模板本身在编辑器里给槽位配置的入场/推拉动画，ME 侧不实现 Ken Burns（三层架构冻结决策：填槽不造槽）。
+
+顺手给 5 个已于 2026-09-02 退役的老 ffmpeg 拼片文件（`render-assemble.ts`/`render-pipeline.ts`/`render-queue.ts`/`lecture-render.ts`/`scripts/render-worker/worker.ts`）加了"已退役"说明注释，不改逻辑，防止被误当活代码维护或复活。
+
+**审查流程**：设计阶段子牙（架构）+ 魏征（挑刺）复审打回两条（素材真实性过滤缺失、动态化验收缺乏机制）→ 按两条修正后实施 → 实施后子牙+魏征再审一次，均判定可合并。复审留的 3 项后续小任务已登记 [ROADMAP.md](../ROADMAP.md)：真实照片路径补质量分门槛、`visualSource` 字段接入人工分镜自检表 UI、排图 LLM 调用补计费。
+
+**验证**：新增 `rank-assets-by-prompt.ts`（从 `asset-library/search` 路由抽出的共享排图逻辑）+ 25 个新增/改动测试全部通过；`tsc --noEmit` 触碰文件零错误；`npm run build` 成功；全仓 vitest 42 个失败均为触碰前既有、与本次改动无关的 baseline（cron/attribution、huatuo、kernel-approval、kernel、places）。
+
+**Reuse Statement**：`rank-assets-by-prompt.ts` 是 `asset-library/search` 路由与 `scene-assets.ts` 共用的 L3 Connector 内部实现细节修正（非新增能力线，未登记 platform-candidates）；复用既有 `client-asset-pool.ts::loadClientAssetPool`（新增 `requireVerified` 选项，默认 false 不影响 `evaluate.ts` 现有调用）与 `provenance.ts::canBackRealPrice`。`client_assets.source` 核实口径是平台共享判断，CTS/客户具体照片内容仍是客户配置，无客户名/客户 ID/行业规则写入 shared runtime。
+
+### 2026-09-10（竞争分析收敛为 IMPACT 单入口）
+
+PR [#1525](https://github.com/bigbigraydeng-maker/magic-engine/pull/1525) 已合并并部署生产（`66a17018`）。Industry Baselines 的入口改为「竞争分析」，决策者只需点一次「开始竞争分析」，系统便按 core 优先读取全部已配置业务页面；页面只把本轮真实启动的请求计入覆盖，未完成、失败或未启动的页面都会阻止整体「没有变化」结论。主界面按 IMPACT 展示发现、衡量和建议，明确标记尚未执行；配置、成本、运行记录和原始证据收进折叠区。
+
+生产 CTS 验收：对 Wendy Wu 的产品列表、`new-tours/` 和 `wonders-of-china.htm` 详情页启动同一批次，处理中从 0/3、1/3、2/3 逐步刷新，最终达到 3/3。三条均 `SUCCEEDED` 并各结算 NZ$0.02，本轮 NZ$0.06，CTS 当月累计由 NZ$0.39 增至 NZ$0.45；页面只在全量完成后显示「本轮没有发现需要调衡的竞争变化」。业务内容无可靠变化，因此三条均未调用 LLM（分析 US$0.00），没有自动执行动作。工作日志已写入 CTS 客户页。
+
+**验证**：84 项 Web Intelligence 针对性测试、changed-file ESLint、生产构建及 PR 全部检查通过；设计和实现复审无剩余 P0/P1。无 migration、无新 provider、无生产配置改动。
+
+**Reuse Statement**：复用既有竞品解析、监控网址、Apify 采集、snapshot/evidence、market signal、原子预算预留、Inngest 和 Industry Baselines。批次请求恢复、覆盖判定和 IMPACT 呈现属于 platform-shared；Tour 拆解仍位于既有 Travel profile；Wendy Wu 网址和 CTS 背景仍为客户配置。共享运行时没有加入客户名称、ID、私有事实或旅游行业判断，也没有把客户学习升级到行业或全局记忆。
+
+### 2026-09-10（CTS 竞品 Tour 具名对比上线）
+
+PR [#1523](https://github.com/bigbigraydeng-maker/magic-engine/pull/1523) 已合并并由 Render 将提交 `3ba2439` 部署为 Live。Travel profile 将产品列表归一化为具名 Tour 记录，对比名称、天数、价格、促销、评价、包含项目与路线；展示顺序及未绑定到具体 Tour 的重复促销标签不再形成业务信号。LLM 只可引用明确的 Tour 与变化前后值，证据不足必须判为无需行动。
+
+生产验收对 Wendy Wu `new-tours/` 连续采集两次：请求 `0b053d17-d17a-4f4e-9f5b-d13d97c10813` 建立 `me-travel-v2` 基线，请求 `72b981dc-b6fb-49a1-9641-eb9c6b9e2436` 对同一业务内容复采；两次均 `SUCCEEDED`、各结算 NZ$0.02，均未调用 LLM（分析 US$0.00），第二次没有新增 market signal。CTS 当月累计 NZ$0.39，低于 NZ$30 目标与 NZ$50 hard stop。历史 55% 误报保留作审计记录，没有冒充本轮结果。
+
+**验证**：77 项针对性测试、ESLint、本地生产构建，以及 PR 的类型检查、应用构建、CRM 回归、编排测试、Claude Review 和 Cloudflare 预览全部通过。无 migration、无新 provider、无自动执行动作。
+
+**Reuse Statement**：复用现有 Apify、snapshot/evidence、market signal、Inngest 和 Industry Baselines。共享层只增加可选行业投影与解释指引接口；Tour 规则位于 L2 Travel profile，CTS 只通过既有监控配置使用，客户名称、ID 和事实未写入共享运行时。
+
 ### 2026-09-09（Creatomate Connector 落地——重新点亮已退役的确认出片入口）
 
 PR [#1513](https://github.com/bigbigraydeng-maker/magic-engine/pull/1513) 已合并。给内容工厂接入 Creatomate 模板渲染引擎（PM 已订阅 Essential $54/月），把 2026-09-02 主动关掉的"确认选题→自动出片"入口重新点亮——只对配置了 `factory_config.render.engine='creatomate'` 的客户生效，其余客户维持原状不受影响。
@@ -28,6 +529,18 @@ PR #1500 已上线；用户明确批准生产数据库更新后应用 6 张隔�
 实际验收：生产 run `e7b5e805-e56f-45b5-9814-7ca9708f1f00` 经后台提交完成，Apify `X60junDpOkJqCAOig` SUCCEEDED，快照 `efb3fd1d-5cab-4b01-9acd-fcdec05ef3f6` 含 19,393 字符，基准跳过模型。供应商 US$0.0009246626，含间接成本记账 NZ$0.0215774744。启用暴露的既有客户 GUID / Actor 必需代理兼容问题已通过最小补丁 #1506/#1507 修复；后者 88 项相关测试、lint、远端构建及双人复审通过。
 
 真实变化的模型建议仍待独立回执。复用边界：共享 adapter / evidence / budget / workflow；CTS ID、网址、市场语境仅配置，无客户语义写入共享运行时代码，无行业/全局学习晋升。详细记录见 [rollout receipt](../specs/2026-09-09-web-intelligence-v01.md)。
+
+### 2026-09-08（Park Homes：网站搭了一条自动上线的通道，以前每次改动都要人手动推）
+
+PR [#1501](https://github.com/bigbigraydeng-maker/magic-engine/pull/1501) 已合并并实测跑通。发现 `parkhomes-site` 这个 Cloudflare Pages 项目从建站起就没接过任何自动部署——每次改动都是靠人手动在本机敲命令推上线，合并代码本身完全不会让网站更新。新增一条自动化：以后代码一合并到 `main` 且改动了 Park Homes 网站目录，会自动打包、自动推上线，不用再手动操作。用来推送的这把钥匙权限锁到最小（只能碰这一个网站的部署，碰不了这个账号下任何别的东西）。已实测：手动触发过一次，确认真的能从零到上线全程自动跑完。
+
+**Reuse Statement**：纯 Park Homes 专属的部署管线搭建（该网站独立托管在 Cloudflare Pages），不涉及平台共享代码，换客户不影响。
+
+### 2026-09-08（Park Homes：修复 Google 收录被拆成两份的问题）
+
+PR [#1496](https://github.com/bigbigraydeng-maker/magic-engine/pull/1496) 已合并并部署生产。排查网站数据时发现 `www.parkhomes.nz` 和 `parkhomes.nz` 两个网址一直没有互相跳转，导致 Google 把同一个网页当成两个不同页面分别计数，搜索数据被拆散。已在 Cloudflare 加了跳转规则把 www 版本统一跳到不带 www 的正式版本；顺手把一个查无来源的历史死链接也改成跳转到项目列表页，不再是 404。生产实测：两条跳转都返回正确的 301，网站首页、各项目页确认没有被误改。
+
+**Reuse Statement**：纯 Park Homes 网站配置修复（该客户独立域名/独立 Cloudflare 账号），不涉及平台共享代码。
 
 ### 2026-09-08（修复：Meta 广告「结果数」把表单和私信同一个人算两次）
 

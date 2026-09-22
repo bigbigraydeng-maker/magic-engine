@@ -265,6 +265,7 @@ describe('publish panel — what it calls published comes from the receipt', () 
     created_at: '2026-09-03T06:00:00.000Z',
     published: [{
       date: '2026-09-03',
+      idempotency_key: 'fbpost_a',
       post_id: `${PAGE_ID}_91`,
       page_id: PAGE_ID,
       published_at: '2026-09-03T06:00:00.000Z',
@@ -302,6 +303,7 @@ describe('publish panel — Tune 建议 fetch 行为', () => {
     created_at: '2026-09-03T06:00:00.000Z',
     published: [{
       date: '2026-09-03',
+      idempotency_key: 'fbpost_a',
       post_id: `${PAGE_ID}_91`,
       page_id: PAGE_ID,
       published_at: '2026-09-03T06:00:00.000Z',
@@ -326,6 +328,48 @@ describe('publish panel — Tune 建议 fetch 行为', () => {
         expect.objectContaining({ cache: 'no-store' }),
       )
     })
+  })
+
+  it('🔴 建议按 idempotency_key 取，不按 post_id —— 排期帖回执里的照片编号跟建议的帖子编号对不上', async () => {
+    const scheduledReceipt: PublishReceipt = {
+      ...publishedReceipt,
+      published: [{
+        date: '2026-09-03',
+        idempotency_key: 'fbpost_a',
+        post_id: '1750835520181969',
+        page_id: PAGE_ID,
+        published_at: '2026-09-03T06:00:00.000Z',
+        permalink: 'https://www.facebook.com/1750835520181969',
+      }],
+    }
+    // This effect reads `res.json()` (not `text()` like the publish calls), so answer with a real Response.
+    const fetchMock = vi.fn().mockImplementation(async () => Response.json({
+      success: true,
+      suggestions: {
+        fbpost_a: {
+          decision: 'REPEAT',
+          rationale: '本条明显比同类历史好',
+          primaryMetric: 'likes',
+          targetValue: 20,
+          cohortMean: 10,
+          deltaPct: 100,
+          sampleSize: 3,
+          caveats: [],
+          sourceActionIds: ['a1'],
+          thresholdsUsed: { minSampleSize: 3, repeatDeltaPct: 30, stopDeltaPct: -30 },
+        },
+      },
+    }))
+    global.fetch = fetchMock as never
+
+    await act(async () => {
+      render(<CampaignDailyPublishPanel {...props({ publishReceipt: scheduledReceipt })} />)
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText(/值得再做一次/)).toBeTruthy()
+    })
+    expect(screen.queryByText(/等 T\+72/)).toBeNull()
   })
 
   it('fetch 500 → 显示「暂时读不到」，绝不显示「等 T+72」', async () => {

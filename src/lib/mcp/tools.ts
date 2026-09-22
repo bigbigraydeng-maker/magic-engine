@@ -20,6 +20,7 @@ import { logMcpAccess, requireMeClientId } from '@/lib/auth/api-key-access'
 import { createScopedQueries, type ScopedQueries } from '@/lib/mcp/scoped-queries'
 import { checkRateLimit } from '@/lib/mcp/rate-limit'
 import { scrubVendorNames } from '@/lib/mcp/vendor-filter'
+import { META_ADS_SCOPE } from '@/lib/meta/ai/contract'
 
 type ToolResult = CallToolResult
 
@@ -32,6 +33,8 @@ async function runScoped(
   tool: string,
   fn: (q: ScopedQueries) => Promise<unknown>,
 ): Promise<ToolResult> {
+  const scopes = (authInfo as { scopes?: string[] } | undefined)?.scopes
+  if (scopes?.includes(META_ADS_SCOPE)) return errorResult('Scope does not permit this tool.')
   let ctx: { meClientId: string; keyId: string }
   try {
     ctx = requireMeClientId(authInfo)

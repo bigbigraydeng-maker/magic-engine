@@ -21,6 +21,8 @@ import { GET, POST } from '../route'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getCampaignById } from '@/lib/content/campaign-injector'
+import { CampaignDailyPostReviewMetaSchema, CampaignDailyPublishQueueMetaSchema } from '@/lib/campaign/daily-plan'
+import { CampaignDailyPublishMetaSchema } from '@/lib/campaign/daily-plan-publish'
 
 const mockAccess = vi.mocked(requireDashboardClientAccess)
 const mockFrom = vi.mocked(supabaseAdmin.from)
@@ -177,6 +179,218 @@ function tableStub(handlers: Record<string, unknown>) {
   }
   Object.assign(chain, handlers)
   return chain
+}
+
+/** A `social_plans` row with the real column set (see the social_plans migration). */
+interface SocialPlanRow {
+  id: string
+  client_id: string
+  campaign_id: string | null
+  platform: string
+  wave_number: number
+  plan_data: Record<string, unknown>
+  created_at: string
+}
+
+function isSubset(actual: unknown, expected: unknown): boolean {
+  if (expected === null || typeof expected !== 'object') return actual === expected
+  if (actual === null || typeof actual !== 'object') return false
+  return Object.entries(expected as Record<string, unknown>)
+    .every(([key, value]) => isSubset((actual as Record<string, unknown>)[key], value))
+}
+
+/**
+ * In-memory `social_plans` table. Filters are applied to stored rows rather
+ * than keyed to call order, so the route's read and its compare-and-set
+ * update are both evaluated against the same rows. `plan_data->key IS NULL`
+ * is SQL NULL, i.e. true only when the key is absent from the jsonb object.
+ */
+function socialPlansTable(
+  rows: SocialPlanRow[],
+  opts: { readError?: { message: string }; beforeUpdate?: (rows: SocialPlanRow[]) => void } = {}
+) {
+  const writes = { updates: [] as Array<Record<string, unknown>>, inserts: [] as Array<Record<string, unknown>> }
+
+  function query() {
+    const filters: Array<(row: SocialPlanRow) => boolean> = []
+    let patch: Partial<SocialPlanRow> | null = null
+    let limit: number | null = null
+
+    const readRows = () => {
+      const matched = rows
+        .filter(row => filters.every(f => f(row)))
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      return limit === null ? matched : matched.slice(0, limit)
+    }
+    const runUpdate = () => {
+      opts.beforeUpdate?.(rows)
+      const matched = rows.filter(row => filters.every(f => f(row)))
+      for (const row of matched) Object.assign(row, patch)
+      writes.updates.push(patch as Record<string, unknown>)
+      return { data: matched.map(row => ({ id: row.id })), error: null }
+    }
+
+    const builder = {
+      select: () => builder,
+      eq: (column: keyof SocialPlanRow, value: unknown) => {
+        filters.push(row => row[column] === value)
+        return builder
+      },
+      is: (path: string, value: null) => {
+        const [column, key] = path.split('->') as [keyof SocialPlanRow, string]
+        filters.push(row => value === null && (row[column] as Record<string, unknown>)[key] === undefined)
+        return builder
+      },
+      contains: (column: keyof SocialPlanRow, value: unknown) => {
+        filters.push(row => isSubset(row[column], value))
+        return builder
+      },
+      order: () => builder,
+      limit: (n: number) => {
+        limit = n
+        return builder
+      },
+      maybeSingle: async () => {
+        if (opts.readError) return { data: null, error: opts.readError }
+        return { data: readRows()[0] ?? null, error: null }
+      },
+      update: (values: Partial<SocialPlanRow>) => {
+        patch = values
+        return builder
+      },
+      then: (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) =>
+        Promise.resolve(patch ? runUpdate() : { data: readRows(), error: null }).then(resolve, reject),
+      insert: (values: Record<string, unknown>) => ({
+        select: () => ({
+          single: async () => {
+            writes.inserts.push(values)
+            const id = `inserted-${writes.inserts.length}`
+            rows.push({ id, created_at: new Date().toISOString(), ...values } as SocialPlanRow)
+            return { data: { id }, error: null }
+          },
+        }),
+      }),
+    }
+    return builder
+  }
+
+  return { query, rows, writes }
+}
+
+const EXISTING_PLAN_ID = 'f0000000-0000-0000-0000-000000000001'
+const STORED_PLAN_REVISION = '2026-09-08T00:00:00.000Z'
+const STORED_REVIEW_REVISION = '10000000-0000-0000-0000-000000000009'
+const CTS_PAGE_ID = '1616575215312482'
+
+function storedReviewMeta() {
+  return {
+    schema_version: 1,
+    plan_revision: STORED_PLAN_REVISION,
+    revision: STORED_REVIEW_REVISION,
+    updated_at: '2026-09-08T01:00:00.000Z',
+    posts: Object.fromEntries(sevenDays().map(d => [d.date, {
+      verdict: 'PASS',
+      reason: null,
+      reviewed_at: '2026-09-08T01:00:00.000Z',
+      reviewed_by_user_id: '20000000-0000-0000-0000-000000000001',
+    }])),
+  }
+}
+
+function storedQueueMeta() {
+  return {
+    schema_version: 1,
+    event_name: 'daily_plan.publish_queue.ready',
+    event_id: '01J0000000000000000000QUEUE',
+    request_id: '30000000-0000-0000-0000-000000000001',
+    client_id: CTS,
+    campaign_id: CAMPAIGN_ID,
+    plan_id: EXISTING_PLAN_ID,
+    plan_revision: STORED_PLAN_REVISION,
+    review_revision: STORED_REVIEW_REVISION,
+    status: 'READY_NO_PUBLISH',
+    no_publish: true,
+    publishing_authorization: 'NOT_AUTHORIZED',
+    provider_impact: 'NONE',
+    cost_usd: 0,
+    created_at: '2026-09-08T02:00:00.000Z',
+    created_by_user_id: '20000000-0000-0000-0000-000000000001',
+    posts: sevenDays().map((d, i) => ({
+      date: d.date,
+      image_asset_id: POST_ASSET_IDS[i],
+      cta_url: CAMPAIGN_URL,
+      review_verdict: 'PASS',
+    })),
+  }
+}
+
+function publishedPost(date: string, i: number) {
+  return {
+    date,
+    idempotency_key: `daily-plan:${EXISTING_PLAN_ID}:${date}`,
+    post_id: `${CTS_PAGE_ID}_12200000000000${i}`,
+    post_id_source: 'post_id',
+    page_id: CTS_PAGE_ID,
+    published_at: '2026-09-08T03:00:00.000Z',
+    permalink: `https://www.facebook.com/${CTS_PAGE_ID}_12200000000000${i}`,
+    provider_response: { id: `12200000000000${i}`, post_id: `${CTS_PAGE_ID}_12200000000000${i}` },
+  }
+}
+
+/** A PUBLISHED receipt with seven live Posts — the shape of the real CTS row this bug would erase. */
+function storedPublishMeta(overrides: Record<string, unknown> = {}) {
+  return {
+    schema_version: 1,
+    event_name: 'daily_plan.post.published',
+    status: 'PUBLISHED',
+    request_id: '40000000-0000-0000-0000-000000000001',
+    client_id: CTS,
+    campaign_id: CAMPAIGN_ID,
+    plan_id: EXISTING_PLAN_ID,
+    plan_revision: STORED_PLAN_REVISION,
+    review_revision: STORED_REVIEW_REVISION,
+    page_id: CTS_PAGE_ID,
+    publishing_authorization: 'AUTHORIZED',
+    approved_by_user_id: '20000000-0000-0000-0000-000000000001',
+    created_at: '2026-09-08T03:00:00.000Z',
+    published: sevenDays().map((d, i) => publishedPost(d.date, i)),
+    failed: [],
+    event_ids: ['01J00000000000000000PUBLISH'],
+    ...overrides,
+  }
+}
+
+function storedPlanRow(planDataExtras: Record<string, unknown> = {}): SocialPlanRow {
+  return {
+    id: EXISTING_PLAN_ID,
+    client_id: CTS,
+    campaign_id: CAMPAIGN_ID,
+    platform: 'facebook',
+    wave_number: 1,
+    created_at: '2026-09-08T00:00:00.000Z',
+    plan_data: {
+      plan_kind: 'campaign_daily_v1',
+      campaign_id: CAMPAIGN_ID,
+      master_brief_ref: { id: BRIEF_ID, version: 1 },
+      days: sevenDays(),
+      bundles: fullSevenDays(),
+      command_meta: { source: 'conversation_command', received_at: STORED_PLAN_REVISION, raw_summary: null },
+      ...planDataExtras,
+    },
+  }
+}
+
+function mockPostTables(plans: ReturnType<typeof socialPlansTable>) {
+  mockFrom.mockImplementation((table: string) => {
+    if (table === 'master_briefs') {
+      return tableStub({ maybeSingle: vi.fn().mockResolvedValue({ data: { id: BRIEF_ID, version: 1 } }) }) as never
+    }
+    if (table === 'client_assets') {
+      return tableStub({ in: vi.fn().mockResolvedValue({ data: validAssetsIn([ASSET_ID, ...POST_ASSET_IDS]) }) }) as never
+    }
+    if (table === 'social_plans') return plans.query() as never
+    return tableStub({}) as never
+  })
 }
 
 afterEach(() => {
@@ -1270,27 +1484,17 @@ describe('campaign-daily-plan POST — persists structured facts (no LLM/provide
   it('updates the existing campaign_daily_v1 row instead of duplicating it', async () => {
     allow()
     mockGetCampaign.mockResolvedValue(CAMPAIGN)
-    const update = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) })
-
-    mockFrom.mockImplementation((table: string) => {
-      if (table === 'master_briefs') {
-        return tableStub({ maybeSingle: vi.fn().mockResolvedValue({ data: { id: BRIEF_ID, version: 1 } }) }) as never
-      }
-      if (table === 'client_assets') {
-        return tableStub({ in: vi.fn().mockResolvedValue({ data: validAssetsIn([ASSET_ID, ...POST_ASSET_IDS]) }) }) as never
-      }
-      if (table === 'social_plans') {
-        return tableStub({ maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'existing-plan-id' } }), update }) as never
-      }
-      return tableStub({}) as never
-    })
+    const plans = socialPlansTable([storedPlanRow()])
+    mockPostTables(plans)
 
     const res = await POST(postRequest(validCommand()), params())
     const json = await res.json()
 
     expect(res.status).toBe(200)
-    expect(json.plan_id).toBe('existing-plan-id')
-    expect(update).toHaveBeenCalled()
+    expect(json.plan_id).toBe(EXISTING_PLAN_ID)
+    expect(plans.writes.updates).toHaveLength(1)
+    expect(plans.writes.inserts).toHaveLength(0)
+    expect(plans.rows).toHaveLength(1)
   })
 
   // Regression (Build Control scope shrink 5395216001, required test 6):
@@ -1301,13 +1505,10 @@ describe('campaign-daily-plan POST — persists structured facts (no LLM/provide
   it('replaces the stored bundles on UPDATE — no preserved-old bundles from a previous save survive', async () => {
     allow()
     mockGetCampaign.mockResolvedValue(CAMPAIGN)
-    const update = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) })
 
     // The old stored row includes a bundle for a date OUTSIDE the new seven-
     // day window. After a wholesale replace this old bundle must be gone.
-    const previouslyStoredPlan = {
-      plan_kind: 'campaign_daily_v1',
-      campaign_id: CAMPAIGN_ID,
+    const previousRow = storedPlanRow({
       master_brief_ref: { id: 'OLD_BRIEF_ID', version: 99 },
       days: sevenDays().map(d => ({ ...d, date: `2026-07-${(Number(d.date.slice(-1)) + 20).toString().padStart(2, '0')}` })),
       bundles: [bundle({ date: '2026-07-20' })], // outside the incoming window
@@ -1319,27 +1520,14 @@ describe('campaign-daily-plan POST — persists structured facts (no LLM/provide
         updated_at: '2026-07-20T01:00:00Z',
         posts: {},
       },
-    }
-    mockFrom.mockImplementation((table: string) => {
-      if (table === 'master_briefs') {
-        return tableStub({ maybeSingle: vi.fn().mockResolvedValue({ data: { id: BRIEF_ID, version: 1 } }) }) as never
-      }
-      if (table === 'client_assets') {
-        return tableStub({ in: vi.fn().mockResolvedValue({ data: validAssetsIn([ASSET_ID, ...POST_ASSET_IDS]) }) }) as never
-      }
-      if (table === 'social_plans') {
-        return tableStub({
-          maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'existing-plan-id', plan_data: previouslyStoredPlan } }),
-          update,
-        }) as never
-      }
-      return tableStub({}) as never
     })
+    const plans = socialPlansTable([previousRow])
+    mockPostTables(plans)
 
     const res = await POST(postRequest(validCommand()), params())
     expect(res.status).toBe(200)
 
-    const updateArg = update.mock.calls[0][0] as { plan_data: { bundles: Array<{ date: string }>, days: Array<{ date: string }>, review_meta?: unknown } }
+    const updateArg = plans.writes.updates[0] as { plan_data: { bundles: Array<{ date: string }>, days: Array<{ date: string }>, review_meta?: unknown } }
     expect(updateArg.plan_data.bundles).toHaveLength(7)
     // Old preserved date is GONE.
     expect(updateArg.plan_data.bundles.find(b => b.date === '2026-07-20')).toBeUndefined()
@@ -1385,5 +1573,169 @@ describe('campaign-daily-plan POST — persists structured facts (no LLM/provide
     expect(json.bundles).toHaveLength(1)
     expect(json.bundles[0].date).toBe('2026-08-24')
     expect(json.bundles[0].post.hook).toBe('hook')
+  })
+})
+
+// Regression (2026-09-15): a new seven-day command for a campaign whose plan
+// was already published rebuilt plan_data from scratch and erased
+// `publish_meta` — the only record recall needs to delete the live Posts.
+describe('campaign-daily-plan POST — never erases a publish or publish-queue receipt', () => {
+  it('fixtures match the real stored receipt schemas', () => {
+    expect(CampaignDailyPostReviewMetaSchema.safeParse(storedReviewMeta()).success).toBe(true)
+    expect(CampaignDailyPublishQueueMetaSchema.safeParse(storedQueueMeta()).success).toBe(true)
+    expect(CampaignDailyPublishMetaSchema.safeParse(storedPublishMeta()).success).toBe(true)
+  })
+
+  it('refuses with 409 PLAN_ALREADY_PUBLISHED and leaves the stored publish receipt untouched', async () => {
+    allow()
+    mockGetCampaign.mockResolvedValue(CAMPAIGN)
+    const row = storedPlanRow({
+      review_meta: storedReviewMeta(),
+      publish_queue_meta: storedQueueMeta(),
+      publish_meta: storedPublishMeta(),
+    })
+    const before = structuredClone(row.plan_data)
+    const plans = socialPlansTable([row])
+    mockPostTables(plans)
+
+    const res = await POST(postRequest(validCommand()), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(409)
+    expect(json).toMatchObject({
+      success: false,
+      error: 'PLAN_ALREADY_PUBLISHED',
+      plan_id: EXISTING_PLAN_ID,
+      publish_status: 'PUBLISHED',
+      next_step: 'CREATE_NEW_CAMPAIGN',
+    })
+    expect(plans.writes.updates).toHaveLength(0)
+    expect(plans.writes.inserts).toHaveLength(0)
+    expect(plans.rows).toHaveLength(1)
+    expect(plans.rows[0].plan_data).toEqual(before)
+  })
+
+  it('still refuses when every published Post was recalled — the recall entries are the audit trail', async () => {
+    allow()
+    mockGetCampaign.mockResolvedValue(CAMPAIGN)
+    const recalled = storedPublishMeta().published.map(p => ({
+      date: p.date,
+      idempotency_key: p.idempotency_key,
+      post_id: p.post_id,
+      recalled_at: '2026-09-09T00:00:00.000Z',
+      already_gone: false,
+    }))
+    const publishMeta = storedPublishMeta({ published: [], recalled })
+    expect(CampaignDailyPublishMetaSchema.safeParse(publishMeta).success).toBe(true)
+    const plans = socialPlansTable([storedPlanRow({
+      review_meta: storedReviewMeta(),
+      publish_queue_meta: storedQueueMeta(),
+      publish_meta: publishMeta,
+    })])
+    mockPostTables(plans)
+
+    const res = await POST(postRequest(validCommand()), params())
+
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toBe('PLAN_ALREADY_PUBLISHED')
+    expect(plans.writes.updates).toHaveLength(0)
+    expect(plans.rows[0].plan_data.publish_meta).toEqual(publishMeta)
+  })
+
+  it('refuses with 409 PLAN_PUBLISH_QUEUED when the plan is queued but not yet published', async () => {
+    allow()
+    mockGetCampaign.mockResolvedValue(CAMPAIGN)
+    const plans = socialPlansTable([storedPlanRow({
+      review_meta: storedReviewMeta(),
+      publish_queue_meta: storedQueueMeta(),
+    })])
+    mockPostTables(plans)
+
+    const res = await POST(postRequest(validCommand()), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(409)
+    expect(json).toMatchObject({ error: 'PLAN_PUBLISH_QUEUED', plan_id: EXISTING_PLAN_ID, publish_status: null })
+    expect(plans.writes.updates).toHaveLength(0)
+    expect(plans.rows[0].plan_data.publish_queue_meta).toEqual(storedQueueMeta())
+  })
+
+  it('still replaces a reviewed-but-unqueued plan and clears its now-stale review', async () => {
+    allow()
+    mockGetCampaign.mockResolvedValue(CAMPAIGN)
+    const plans = socialPlansTable([storedPlanRow({ review_meta: storedReviewMeta() })])
+    mockPostTables(plans)
+
+    const res = await POST(postRequest(validCommand()), params())
+
+    expect(res.status).toBe(200)
+    expect(plans.rows).toHaveLength(1)
+    expect(plans.rows[0].plan_data.review_meta).toBeUndefined()
+    expect((plans.rows[0].plan_data.command_meta as { received_at: string }).received_at)
+      .not.toBe(STORED_PLAN_REVISION)
+  })
+
+  it('does not erase a publish receipt that lands between the read and the write (409 PLAN_CHANGED_DURING_SAVE)', async () => {
+    allow()
+    mockGetCampaign.mockResolvedValue(CAMPAIGN)
+    const plans = socialPlansTable([storedPlanRow({ review_meta: storedReviewMeta() })], {
+      beforeUpdate: rows => {
+        rows[0].plan_data = {
+          ...rows[0].plan_data,
+          publish_queue_meta: storedQueueMeta(),
+          publish_meta: storedPublishMeta(),
+        }
+      },
+    })
+    mockPostTables(plans)
+
+    const res = await POST(postRequest(validCommand()), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(409)
+    expect(json).toMatchObject({ error: 'PLAN_CHANGED_DURING_SAVE', plan_id: EXISTING_PLAN_ID })
+    expect(plans.rows[0].plan_data.publish_meta).toEqual(storedPublishMeta())
+    expect((plans.rows[0].plan_data.command_meta as { received_at: string }).received_at).toBe(STORED_PLAN_REVISION)
+  })
+
+  // Each compare-and-set guard is locked on its own: the realistic race is a
+  // publish-queue write alone (publish needs that receipt first), but either
+  // receipt landing alone must stop the overwrite.
+  it.each([
+    ['publish_queue_meta', () => ({ publish_queue_meta: storedQueueMeta() })],
+    ['publish_meta', () => ({ publish_meta: storedPublishMeta() })],
+  ])('refuses when only %s lands between the read and the write', async (key, landed) => {
+    allow()
+    mockGetCampaign.mockResolvedValue(CAMPAIGN)
+    const plans = socialPlansTable([storedPlanRow({ review_meta: storedReviewMeta() })], {
+      beforeUpdate: rows => {
+        rows[0].plan_data = { ...rows[0].plan_data, ...landed() }
+      },
+    })
+    mockPostTables(plans)
+
+    const res = await POST(postRequest(validCommand()), params())
+
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toBe('PLAN_CHANGED_DURING_SAVE')
+    expect(plans.rows[0].plan_data[key]).toEqual(landed()[key as keyof ReturnType<typeof landed>])
+    expect((plans.rows[0].plan_data.command_meta as { received_at: string }).received_at).toBe(STORED_PLAN_REVISION)
+  })
+
+  it('a failed plan lookup returns 500 and never inserts a second row that would hide the receipt', async () => {
+    allow()
+    mockGetCampaign.mockResolvedValue(CAMPAIGN)
+    const plans = socialPlansTable(
+      [storedPlanRow({ publish_meta: storedPublishMeta() })],
+      { readError: { message: 'connection reset' } }
+    )
+    mockPostTables(plans)
+
+    const res = await POST(postRequest(validCommand()), params())
+
+    expect(res.status).toBe(500)
+    expect(plans.writes.inserts).toHaveLength(0)
+    expect(plans.writes.updates).toHaveLength(0)
+    expect(plans.rows).toHaveLength(1)
   })
 })

@@ -1,0 +1,595 @@
+{
+ "captured": "2026-09-14 Meta Graph v21.0 read-only GET (ads re-read with creative fields)",
+ "ad_account_id": "act_2202695063810470",
+ "account": {
+  "id": "act_2202695063810470",
+  "name": "CTS",
+  "account_status": 1,
+  "disable_reason": 0,
+  "spend_cap": "0",
+  "amount_spent": "29434",
+  "currency": "NZD",
+  "timezone_name": "Pacific/Auckland",
+  "timezone_offset_hours_utc": 12,
+  "min_daily_budget": 171,
+  "is_prepay_account": false
+ },
+ "campaigns": [
+  {
+   "id": "52551118114073",
+   "name": "GC · 再营销收割测试 · 私信组 · 北京上海看完95% · 20260913",
+   "objective": "OUTCOME_ENGAGEMENT",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "budget_remaining": "0",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2026-09-13T23:53:59+1200",
+   "created_time": "2026-09-13T23:53:58+1200",
+   "updated_time": "2026-09-14T00:11:45+1200"
+  },
+  {
+   "id": "52551117286873",
+   "name": "GC · 再营销收割测试 · 北京上海看完95% · 20260913",
+   "objective": "OUTCOME_LEADS",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "budget_remaining": "0",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2026-09-13T23:44:02+1200",
+   "created_time": "2026-09-13T23:43:52+1200",
+   "updated_time": "2026-09-14T00:11:44+1200"
+  },
+  {
+   "id": "52549857862873",
+   "name": "GC · 顶层认知 · 视频观看 · 20260908",
+   "objective": "OUTCOME_AWARENESS",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "budget_remaining": "0",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2026-09-08T00:54:59+1200",
+   "created_time": "2026-09-08T00:54:45+1200",
+   "updated_time": "2026-09-08T15:32:18+1200"
+  },
+  {
+   "id": "52549839818273",
+   "name": "CTS · Golden China · LAL实验 · 20260907",
+   "objective": "OUTCOME_LEADS",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "budget_remaining": "0",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2026-09-07T23:48:14+1200",
+   "created_time": "2026-09-07T23:43:45+1200",
+   "updated_time": "2026-09-07T23:43:45+1200"
+  }
+ ],
+ "adsets": [
+  {
+   "id": "52551118124873",
+   "name": "收割 · 北京上海看完95% · 私信 · $12 · 20260913",
+   "campaign_id": "52551118114073",
+   "optimization_goal": "CONVERSATIONS",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "MESSENGER",
+   "daily_budget": "1200",
+   "lifetime_budget": "0",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 25,
+    "excluded_custom_audiences": [
+     {
+      "id": "52549822861673",
+      "name": "CTS · LIST · fb+newsletter · 20260907"
+     }
+    ],
+    "custom_audiences": [
+     {
+      "id": "52551117275273",
+      "name": "CTS · GC 北京+上海视频看完95% · 365d · 20260913"
+     }
+    ],
+    "geo_locations": {
+     "countries": [
+      "NZ"
+     ],
+     "location_types": [
+      "frequently_in",
+      "home"
+     ]
+    },
+    "targeting_relaxation_types": {
+     "lookalike": 0,
+     "custom_audience": 0
+    },
+    "targeting_automation": {
+     "advantage_audience": 0
+    }
+   },
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "start_time": "2026-09-13T23:53:59+1200",
+   "created_time": "2026-09-13T23:53:59+1200",
+   "updated_time": "2026-09-14T00:11:48+1200",
+   "pacing_type": [
+    "standard"
+   ],
+   "promoted_object": {
+    "page_id": "1616575215312482",
+    "smart_pse_enabled": false
+   }
+  },
+  {
+   "id": "52551117304473",
+   "name": "收割 · 北京上海看完95% · 留资 · $12 · 20260913",
+   "campaign_id": "52551117286873",
+   "optimization_goal": "LEAD_GENERATION",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "ON_AD",
+   "daily_budget": "1200",
+   "lifetime_budget": "0",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 25,
+    "excluded_custom_audiences": [
+     {
+      "id": "52549822861673",
+      "name": "CTS · LIST · fb+newsletter · 20260907"
+     }
+    ],
+    "custom_audiences": [
+     {
+      "id": "52551117275273",
+      "name": "CTS · GC 北京+上海视频看完95% · 365d · 20260913"
+     }
+    ],
+    "geo_locations": {
+     "countries": [
+      "NZ"
+     ],
+     "location_types": [
+      "home"
+     ]
+    },
+    "targeting_relaxation_types": {
+     "lookalike": 0,
+     "custom_audience": 0
+    },
+    "targeting_automation": {
+     "advantage_audience": 0
+    }
+   },
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "start_time": "2026-09-13T23:44:02+1200",
+   "created_time": "2026-09-13T23:44:01+1200",
+   "updated_time": "2026-09-14T00:12:51+1200",
+   "pacing_type": [
+    "standard"
+   ],
+   "promoted_object": {
+    "page_id": "1616575215312482",
+    "smart_pse_enabled": false
+   }
+  },
+  {
+   "id": "52549857906273",
+   "name": "GC 顶层 · ThruPlay · 4 条各 $10 · 20260908",
+   "campaign_id": "52549857862873",
+   "optimization_goal": "THRUPLAY",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "UNDEFINED",
+   "daily_budget": "1000",
+   "lifetime_budget": "0",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 25,
+    "excluded_custom_audiences": [
+     {
+      "id": "52549822861673",
+      "name": "CTS · LIST · fb+newsletter · 20260907"
+     }
+    ],
+    "geo_locations": {
+     "countries": [
+      "NZ"
+     ],
+     "location_types": [
+      "home"
+     ]
+    },
+    "targeting_automation": {
+     "advantage_audience": 1
+    },
+    "user_age_unknown": true
+   },
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "start_time": "2026-09-08T00:54:59+1200",
+   "created_time": "2026-09-08T00:54:59+1200",
+   "updated_time": "2026-09-14T00:11:37+1200",
+   "pacing_type": [
+    "standard"
+   ]
+  },
+  {
+   "id": "52549843017273",
+   "name": "CTS · Golden China · LAL 1% · NZ 55+ · 20260907",
+   "campaign_id": "52549839818273",
+   "optimization_goal": "LINK_CLICKS",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "UNDEFINED",
+   "daily_budget": "2500",
+   "lifetime_budget": "0",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 18,
+    "excluded_custom_audiences": [
+     {
+      "id": "52549822861673",
+      "name": "CTS · LIST · fb+newsletter · 20260907"
+     }
+    ],
+    "custom_audiences": [
+     {
+      "id": "52549838527273",
+      "name": "类似受众 (NZ, 1%) - CTS · LIST · fb+newsletter · 20260907"
+     }
+    ],
+    "geo_locations": {
+     "countries": [
+      "NZ"
+     ],
+     "location_types": [
+      "frequently_in",
+      "home"
+     ]
+    },
+    "targeting_automation": {
+     "advantage_audience": 1
+    },
+    "user_age_unknown": true
+   },
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "start_time": "2026-09-07T23:48:14+1200",
+   "created_time": "2026-09-07T23:48:14+1200",
+   "updated_time": "2026-09-07T23:48:34+1200",
+   "pacing_type": [
+    "standard"
+   ]
+  }
+ ],
+ "ads": [
+  {
+   "id": "52551118152673",
+   "name": "GC · Beijing · EN · 私信收割 · 20260913",
+   "adset_id": "52551118124873",
+   "campaign_id": "52551118114073",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "created_time": "2026-09-13T23:54:02+1200",
+   "updated_time": "2026-09-14T00:12:14+1200",
+   "creative": {
+    "video_id": "3247643238956506",
+    "effective_object_story_id": "1616575215312482_1760890155843172",
+    "object_story_spec": {
+     "page_id": "1616575215312482",
+     "video_data": {
+      "video_id": "1620585116152417"
+     }
+    },
+    "id": "2460773220997689"
+   }
+  },
+  {
+   "id": "52551117325273",
+   "name": "GC · Beijing · EN · 收割 · 20260913",
+   "adset_id": "52551117304473",
+   "campaign_id": "52551117286873",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "created_time": "2026-09-13T23:44:19+1200",
+   "updated_time": "2026-09-14T00:12:11+1200",
+   "creative": {
+    "video_id": "1034180596286460",
+    "effective_object_story_id": "1616575215312482_1754804506451737",
+    "id": "1083416197392932"
+   }
+  },
+  {
+   "id": "52551117314273",
+   "name": "GC · Grand Tour · EN · 收割 · 20260913",
+   "adset_id": "52551117304473",
+   "campaign_id": "52551117286873",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "created_time": "2026-09-13T23:44:12+1200",
+   "updated_time": "2026-09-14T00:12:08+1200",
+   "creative": {
+    "video_id": "1811869926837720",
+    "effective_object_story_id": "1616575215312482_1754804249785096",
+    "id": "5701206620105414"
+   }
+  },
+  {
+   "id": "52549893770273",
+   "name": "GC · Beijing · EN · 20260908",
+   "adset_id": "52549857906273",
+   "campaign_id": "52549857862873",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "created_time": "2026-09-08T04:02:16+1200",
+   "updated_time": "2026-09-12T14:24:52+1200",
+   "creative": {
+    "video_id": "2354728365274921",
+    "effective_object_story_id": "1616575215312482_1759506872648167",
+    "object_story_spec": {
+     "page_id": "1616575215312482",
+     "video_data": {
+      "video_id": "2889090431457816"
+     }
+    },
+    "id": "1061239610129329"
+   }
+  },
+  {
+   "id": "52549893756273",
+   "name": "GC · Xi'an · EN · 20260908",
+   "adset_id": "52549857906273",
+   "campaign_id": "52549857862873",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "created_time": "2026-09-08T04:02:11+1200",
+   "updated_time": "2026-09-12T14:24:13+1200",
+   "creative": {
+    "video_id": "1014069841672235",
+    "effective_object_story_id": "1616575215312482_1759506875981500",
+    "object_story_spec": {
+     "page_id": "1616575215312482",
+     "video_data": {
+      "video_id": "1379126637752433"
+     }
+    },
+    "id": "2534794020277980"
+   }
+  },
+  {
+   "id": "52549893801073",
+   "name": "GC · Shanghai · EN · 20260908",
+   "adset_id": "52549857906273",
+   "campaign_id": "52549857862873",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "created_time": "2026-09-08T04:02:22+1200",
+   "updated_time": "2026-09-12T14:24:09+1200",
+   "creative": {
+    "video_id": "919925140801137",
+    "effective_object_story_id": "1616575215312482_1759506899314831",
+    "object_story_spec": {
+     "page_id": "1616575215312482",
+     "video_data": {
+      "video_id": "1577461386834053"
+     }
+    },
+    "id": "1588250602388523"
+   }
+  },
+  {
+   "id": "52549989429473",
+   "name": "GC · Food · EN · 20260908",
+   "adset_id": "52549857906273",
+   "campaign_id": "52549857862873",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "created_time": "2026-09-08T17:31:18+1200",
+   "updated_time": "2026-09-12T14:23:57+1200",
+   "creative": {
+    "video_id": "1016706784674387",
+    "effective_object_story_id": "1616575215312482_1759506879314833",
+    "object_story_spec": {
+     "page_id": "1616575215312482",
+     "video_data": {
+      "video_id": "3658504104316017"
+     }
+    },
+    "id": "975674198892179"
+   }
+  },
+  {
+   "id": "52549893739473",
+   "name": "GC · Grand Tour · EN · 20260908",
+   "adset_id": "52549857906273",
+   "campaign_id": "52549857862873",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "created_time": "2026-09-08T04:02:06+1200",
+   "updated_time": "2026-09-12T14:23:38+1200",
+   "creative": {
+    "video_id": "1105239395405046",
+    "effective_object_story_id": "1616575215312482_1759506865981501",
+    "object_story_spec": {
+     "page_id": "1616575215312482",
+     "video_data": {
+      "video_id": "3642598035891621"
+     }
+    },
+    "id": "1734640937763996"
+   }
+  },
+  {
+   "id": "52550116901073",
+   "name": "GC · VisaFree · EN · 20260909",
+   "adset_id": "52549857906273",
+   "campaign_id": "52549857862873",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "created_time": "2026-09-09T04:22:11+1200",
+   "updated_time": "2026-09-12T14:23:31+1200",
+   "creative": {
+    "video_id": "1053258604220140",
+    "effective_object_story_id": "1616575215312482_1759506885981499",
+    "object_story_spec": {
+     "page_id": "1616575215312482",
+     "video_data": {
+      "video_id": "1216953767307962"
+     }
+    },
+    "id": "1057257300543972"
+   }
+  },
+  {
+   "id": "52549847838473",
+   "name": "CTS · GoldenChina · LAL · B一辈子 · 20260908",
+   "adset_id": "52549843017273",
+   "campaign_id": "52549839818273",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "created_time": "2026-09-08T00:10:34+1200",
+   "updated_time": "2026-09-08T00:18:36+1200",
+   "creative": {
+    "effective_object_story_id": "1616575215312482_1754562303142624",
+    "object_story_spec": {
+     "page_id": "1616575215312482"
+    },
+    "id": "1422966763112542"
+   }
+  },
+  {
+   "id": "52549847826873",
+   "name": "CTS · GoldenChina · LAL · A免签全包 · 20260908",
+   "adset_id": "52549843017273",
+   "campaign_id": "52549839818273",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "created_time": "2026-09-08T00:10:30+1200",
+   "updated_time": "2026-09-08T00:14:57+1200",
+   "creative": {
+    "effective_object_story_id": "1616575215312482_1754561886475999",
+    "object_story_spec": {
+     "page_id": "1616575215312482"
+    },
+    "id": "1111845191524978"
+   }
+  }
+ ],
+ "audiences": [
+  {
+   "id": "52551117275273",
+   "name": "CTS · GC 北京+上海视频看完95% · 365d · 20260913",
+   "subtype": "ENGAGEMENT",
+   "approximate_count_lower_bound": 1000,
+   "approximate_count_upper_bound": 1000,
+   "time_created": 1789299810,
+   "time_updated": 1789299820,
+   "rule": "[{\"event_name\":\"video_completed\",\"object_id\":2354728365274921},{\"event_name\":\"video_completed\",\"object_id\":919925140801137}]",
+   "retention_days": 365,
+   "operation_status": {
+    "code": 200,
+    "description": "正常"
+   },
+   "delivery_status": {
+    "code": 200,
+    "description": "此受众可供使用了。"
+   }
+  },
+  {
+   "id": "52549865359073",
+   "name": "CTS · VIDEO · 看过50% · 365d",
+   "subtype": "ENGAGEMENT",
+   "approximate_count_lower_bound": 1000,
+   "approximate_count_upper_bound": 1000,
+   "time_created": 1788788658,
+   "time_updated": 1788788658,
+   "rule": "{\"inclusions\":{\"operator\":\"or\",\"rules\":[{\"event_sources\":[{\"id\":1616575215312482,\"type\":\"page\"}],\"retention_seconds\":31536000,\"filter\":{\"operator\":\"and\",\"filters\":[{\"field\":\"event\",\"operator\":\"eq\",\"value\":\"video_view\"},{\"field\":\"video_view_percentage\",\"operator\":\"gte\",\"value\":50}]}}]}}",
+   "retention_days": 365,
+   "operation_status": {
+    "code": 441,
+    "description": "我们正在寻找符合你标准的受众，你可以立即向这个受众投放广告，但请注意，随着人数越来越多，受众规模将增大。"
+   },
+   "delivery_status": {
+    "code": 300,
+    "description": "受众规模太小，无法用来创建广告系列。"
+   }
+  },
+  {
+   "id": "52549838527273",
+   "name": "类似受众 (NZ, 1%) - CTS · LIST · fb+newsletter · 20260907",
+   "subtype": "LOOKALIKE",
+   "approximate_count_lower_bound": 32600,
+   "approximate_count_upper_bound": 38400,
+   "time_created": 1788781229,
+   "time_updated": 1788781229,
+   "retention_days": 0,
+   "operation_status": {
+    "code": 200,
+    "description": "正常"
+   },
+   "delivery_status": {
+    "code": 200,
+    "description": "此受众可供使用了。"
+   },
+   "lookalike_spec": {
+    "country": "NZ",
+    "origin": [
+     {
+      "id": "52549822861673",
+      "name": "CTS · LIST · fb+newsletter · 20260907",
+      "type": "custom_audience"
+     }
+    ],
+    "ratio": 0.01,
+    "type": "custom_ratio"
+   }
+  },
+  {
+   "id": "52549822861673",
+   "name": "CTS · LIST · fb+newsletter · 20260907",
+   "subtype": "CUSTOM",
+   "approximate_count_lower_bound": 1000,
+   "approximate_count_upper_bound": 1000,
+   "time_created": 1788776901,
+   "time_updated": 1788777914,
+   "retention_days": 0,
+   "operation_status": {
+    "code": 200,
+    "description": "正常"
+   },
+   "delivery_status": {
+    "code": 200,
+    "description": "此受众可供使用了。"
+   }
+  },
+  {
+   "id": "6971567517469",
+   "name": "公共主页互动客户",
+   "subtype": "ENGAGEMENT",
+   "approximate_count_lower_bound": 1000,
+   "approximate_count_upper_bound": 1000,
+   "time_created": 1777902644,
+   "time_updated": 1777902644,
+   "rule": "{\"inclusions\":{\"operator\":\"or\",\"rules\":[{\"event_sources\":[{\"type\":\"page\",\"id\":1146745731851959}],\"retention_seconds\":31536000,\"filter\":{\"operator\":\"and\",\"filters\":[{\"field\":\"event\",\"operator\":\"eq\",\"value\":\"page_engaged\"}]}}]}}",
+   "retention_days": 365,
+   "operation_status": {
+    "code": 450,
+    "description": "此受众已过期。这可能是因为：受众未被任何广告使用至少 30 天；或是受众创建至今已超过 90 天，但从未被使用。"
+   },
+   "delivery_status": {
+    "code": 300,
+    "description": "受众规模太小，无法用来创建广告系列。"
+   }
+  }
+ ]
+}

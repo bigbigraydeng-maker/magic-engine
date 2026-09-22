@@ -15,7 +15,10 @@ export function buildModifications(
     )
   }
 
-  const modifications: Record<string, string> = {}
+  // 固定图层覆盖先铺底，镜头槽位再盖上去——sceneFieldMap 理论上不会跟 staticOverrides
+  // 撞同一个元素名（前者是逐镜头 Still-N，后者是品牌固定层），万一真撞了，镜头内容
+  // 优先，不能让一张品牌图静默吃掉这一镜的画面。
+  const modifications: Record<string, string> = { ...contract.staticOverrides }
   scenes.forEach((scene, i) => {
     const slot = sceneFieldMap[i]
     modifications[slot.visual] = scene.visualUrl

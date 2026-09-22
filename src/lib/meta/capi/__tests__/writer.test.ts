@@ -25,6 +25,7 @@ const writer = new MetaCapiWriter()
 const CONFIG: ClientSendConfig = {
   clientId: 'c0000000-0000-0000-0000-000000000000',
   defaultPhoneCountry: '64',
+  facebookPageId: null,
 }
 
 function outcome(over: Partial<OutcomeForSend> = {}): OutcomeForSend {
@@ -41,6 +42,8 @@ function outcome(over: Partial<OutcomeForSend> = {}): OutcomeForSend {
     amountMinor: 388000,
     currency: 'NZD',
     occurredAt: '2026-09-03T10:00:00Z',
+    pageScopedUserId: null,
+    actionSource: 'email',
     ...over,
   }
 }
@@ -115,6 +118,43 @@ describe('build · 身份哈希', () => {
       defaultPhoneCountry: '61',
     })
     expect(nz.data[0].user_data.ph).not.toEqual(au.data[0].user_data.ph)
+  })
+})
+
+describe('build · Facebook 私信身份（PSID）匹配键', () => {
+  it('原样落进 payload，不哈希 —— Meta 文档明确这两个字段"不哈希"', () => {
+    const p = writer.build(
+      outcome({ customerEmail: null, pageScopedUserId: '28681838868174032', actionSource: 'business_messaging' }),
+      { ...CONFIG, facebookPageId: '1177479655430100' },
+    )
+    expect(p.data[0].user_data.page_scoped_user_id).toBe('28681838868174032')
+    expect(p.data[0].user_data.page_id).toBe('1177479655430100')
+  })
+
+  it('没有 pageScopedUserId 时，两个字段都不出现（CTS 现状不受影响）', () => {
+    const p = writer.build(outcome(), { ...CONFIG, facebookPageId: '1177479655430100' })
+    expect(p.data[0].user_data.page_scoped_user_id).toBeUndefined()
+    expect(p.data[0].user_data.page_id).toBeUndefined()
+  })
+
+  it('有 PSID 但客户没配 facebookPageId 时，只带 PSID，不硬塞一个不存在的主页 id', () => {
+    const p = writer.build(
+      outcome({ pageScopedUserId: '28681838868174032', actionSource: 'business_messaging' }),
+      { ...CONFIG, facebookPageId: null },
+    )
+    expect(p.data[0].user_data.page_scoped_user_id).toBe('28681838868174032')
+    expect(p.data[0].user_data.page_id).toBeUndefined()
+  })
+
+  it('action_source 原样透传 outcome.actionSource，writer 自己不做推断', () => {
+    const email = writer.build(outcome({ actionSource: 'email' }), CONFIG)
+    expect(email.data[0].action_source).toBe('email')
+
+    const messenger = writer.build(
+      outcome({ pageScopedUserId: '28681838868174032', actionSource: 'business_messaging' }),
+      CONFIG,
+    )
+    expect(messenger.data[0].action_source).toBe('business_messaging')
   })
 })
 

@@ -40,6 +40,8 @@ const RULES: Array<{ hero: string; patterns: RegExp }> = [
   { hero: 'nanjing-road',       patterns: /nanjing road|南京路/i },
   { hero: 'zhujiajiao',         patterns: /zhujiajiao|朱家角/i },
   { hero: 'xian-bell-tower',    patterns: /bell tower|drum tower|钟楼|鼓楼/i },
+  // 三峡里叫得出名字的那几段，比泛泛的「三峡/长江」更具体，排在它前面才拿得到
+  { hero: 'yangtze-gorges-detail', patterns: /qutang gorge|wu gorge|xiling gorge|瞿塘峡|巫峡|西陵峡/i },
   { hero: 'yangtze-gorges',     patterns: /three gorges|yangtze|yichang|长江|三峡|宜昌/i },
   // —— 城市级（兜底）——
   { hero: 'zhangjiajie',    patterns: /zhangjiajie|tianmen|张家界|天门/i },
@@ -58,6 +60,7 @@ const RULES: Array<{ hero: string; patterns: RegExp }> = [
   { hero: 'forbidden-city', patterns: /forbidden city|故宫|紫禁城/i },
   { hero: 'great-wall',     patterns: /great wall|长城|mutianyu|慕田峪|badaling|八达岭/i },
   { hero: 'beijing',        patterns: /beijing|北京/i },
+  { hero: 'pingyao',        patterns: /pingyao|平遥/i },
 ]
 
 /** 全部都匹配不上时用它 —— 中国行程最不会出错的一张 */
@@ -148,4 +151,6 @@ export const HERO_CHOICES: Array<{ name: string; label: string }> = [
   { name: 'dazu-rock-carvings', label: '重庆 · 大足石刻' },
   { name: 'yu-garden',      label: '上海 · 豫园' },
   { name: 'oriental-pearl-tower', label: '上海 · 东方明珠' },
+  { name: 'pingyao',        label: '平遥 · 古城楼' },
+  { name: 'yangtze-gorges-detail', label: '长江 · 三峡峡口' },
 ]

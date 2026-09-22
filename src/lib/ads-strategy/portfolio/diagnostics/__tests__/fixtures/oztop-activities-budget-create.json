@@ -1,0 +1,794 @@
+[
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-28T07:25:40+0000",
+  "object_id": "120253131176910790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-24T16:11:09+0000",
+  "object_id": "120253053175980790",
+  "object_name": "OZ-FMQ-A-cost-showroom-202607",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120250860014210790,\"new\":120250860014210790}}"
+ },
+ {
+  "event_type": "update_campaign_budget",
+  "event_time": "2026-07-24T11:40:02+0000",
+  "object_id": "120252612541630790",
+  "object_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"old_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"old_value\":7500,\"additional_type\":\"status_string\",\"additional_value\":\"\"},\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"new_value\":6000,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "update_campaign_budget",
+  "event_time": "2026-07-13T05:32:29+0000",
+  "object_id": "120252612541630790",
+  "object_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"old_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"old_value\":5000,\"additional_type\":\"status_string\",\"additional_value\":\"\"},\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"new_value\":7500,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-13T05:18:47+0000",
+  "object_id": "120252742876560790",
+  "object_name": "OZ-REACH-SR04",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252742860150790,\"new\":120252742860150790}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-13T05:18:14+0000",
+  "object_id": "120252742872140790",
+  "object_name": "OZ-REACH-SR02",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252742860150790,\"new\":120252742860150790}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-13T05:17:42+0000",
+  "object_id": "120252742868250790",
+  "object_name": "OZ-REACH-SR01",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252742860150790,\"new\":120252742860150790}}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-07-13T05:16:43+0000",
+  "object_id": "120252742860150790",
+  "object_name": "OZ-REACH-S4-BNE-GC-home",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"new_value\":1500,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_campaign_group",
+  "event_time": "2026-07-13T05:16:22+0000",
+  "object_id": "120252742855760790",
+  "object_name": "OZ-REACH-Warmpool-BNE-GC",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-13T04:54:11+0000",
+  "object_id": "120252741347540790",
+  "object_name": "OZ-S1-D-Showroom-SR01",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252412058520790,\"new\":120252412058520790},\"last_learning_exit\":1783864800}"
+ },
+ {
+  "event_type": "update_ad_set_budget",
+  "event_time": "2026-07-10T12:10:25+0000",
+  "object_id": "120252620658980790",
+  "object_name": "新互动广告组",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"old_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"old_value\":3000,\"additional_type\":\"status_string\",\"additional_value\":\"\"},\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"new_value\":2500,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "update_ad_set_budget",
+  "event_time": "2026-07-10T12:10:22+0000",
+  "object_id": "120252412058520790",
+  "object_name": "OZ-THRU-S1-BNE-GC",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"old_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"old_value\":1500,\"additional_type\":\"status_string\",\"additional_value\":\"\"},\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"new_value\":2500,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-10T06:59:44+0000",
+  "object_id": "120252666295320790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-10T06:59:44+0000",
+  "object_id": "120252666295310790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-10T06:59:44+0000",
+  "object_id": "120252666295280790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-10T06:59:44+0000",
+  "object_id": "120252666295290790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-10T06:59:44+0000",
+  "object_id": "120252666295300790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-10T01:27:06+0000",
+  "object_id": "120252656390870790",
+  "object_name": "类似受众 (AU) - Oztop Video Viewers 25% - Retarget",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"\\u7c7b\\u4f3c\\u53d7\\u4f17 (AU) - Oztop Video Viewers 25\\u0025 - Retarget\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-10T01:27:06+0000",
+  "object_id": "120252656390840790",
+  "object_name": "类似受众 (AU, 1%) - Oztop Page Engagers 365d - Retarget",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"\\u7c7b\\u4f3c\\u53d7\\u4f17 (AU, 1\\u0025) - Oztop Page Engagers 365d - Retarget\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-10T01:27:06+0000",
+  "object_id": "120252656390860790",
+  "object_name": "类似受众 (AU) - Oztop Page Engagers 365d - Retarget",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"\\u7c7b\\u4f3c\\u53d7\\u4f17 (AU) - Oztop Page Engagers 365d - Retarget\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-10T01:27:06+0000",
+  "object_id": "120252656390850790",
+  "object_name": "类似受众 (AU, 1%) - Oztop Video Viewers 25% - Retarget",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"\\u7c7b\\u4f3c\\u53d7\\u4f17 (AU, 1\\u0025) - Oztop Video Viewers 25\\u0025 - Retarget\"}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-10T01:26:50+0000",
+  "object_id": "120252643974910790",
+  "object_name": "新互动广告",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252643974920790,\"new\":120252643974920790}}"
+ },
+ {
+  "event_type": "update_campaign_budget_scheduling_state",
+  "event_time": "2026-07-10T01:26:48+0000",
+  "object_id": "120252643974920790",
+  "object_name": "新互动广告组",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"new_value\":false,\"old_value\":null,\"type\":\"update_budget_schedule_state\"}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-07-10T01:26:48+0000",
+  "object_id": "120252643974920790",
+  "object_name": "新互动广告组",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"new_value\":3000,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "update_campaign_group_budget_scheduling_state",
+  "event_time": "2026-07-10T01:26:47+0000",
+  "object_id": "120252643974900790",
+  "object_name": "Oztop — WhatsApp — RETARGET Warm Pool — 20260710",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"new_value\":false,\"old_value\":null,\"type\":\"update_budget_schedule_state\"}"
+ },
+ {
+  "event_type": "create_campaign_group",
+  "event_time": "2026-07-10T01:26:47+0000",
+  "object_id": "120252643974900790",
+  "object_name": "Oztop — WhatsApp — RETARGET Warm Pool — 20260710",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-08T22:23:22+0000",
+  "object_id": "120252620658970790",
+  "object_name": "新互动广告",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252620658980790,\"new\":120252620658980790}}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-07-08T22:23:21+0000",
+  "object_id": "120252620658980790",
+  "object_name": "新互动广告组",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"new_value\":3000,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_campaign_group",
+  "event_time": "2026-07-08T22:23:20+0000",
+  "object_id": "120252620658990790",
+  "object_name": "Oztop — WhatsApp — Cold Broad — 20260709",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-08T21:21:24+0000",
+  "object_id": "120252620372110790",
+  "object_name": "新潜在客户广告 - 广告副本",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252612541620790,\"new\":120252612541620790}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-08T21:10:57+0000",
+  "object_id": "120252612541610790",
+  "object_name": "新潜在客户广告",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252612541620790,\"new\":120252612541620790}}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-07-08T21:10:55+0000",
+  "object_id": "120252612541620790",
+  "object_name": "新潜在客户广告组",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_campaign_group",
+  "event_time": "2026-07-08T21:10:54+0000",
+  "object_id": "120252612541630790",
+  "object_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"new_value\":5000,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-08T20:46:29+0000",
+  "object_id": "120252619977830790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-08T20:46:29+0000",
+  "object_id": "120252619977930790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-08T20:46:29+0000",
+  "object_id": "120252619977920790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-08T20:46:29+0000",
+  "object_id": "120252619977900790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-08T20:46:29+0000",
+  "object_id": "120252619977910790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-08T20:46:29+0000",
+  "object_id": "120252619976820790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-08T20:46:29+0000",
+  "object_id": "120252619977860790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-08T20:46:29+0000",
+  "object_id": "120252619977840790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-08T20:46:29+0000",
+  "object_id": "120252619977850790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-08T20:46:29+0000",
+  "object_id": "120252619977890790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-08T20:46:29+0000",
+  "object_id": "120252619977870790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-08T20:46:29+0000",
+  "object_id": "120252619977880790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-08T20:36:05+0000",
+  "object_id": "120252619812090790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-08T20:36:05+0000",
+  "object_id": "120252619812030790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-08T20:36:05+0000",
+  "object_id": "120252619812060790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-08T20:36:05+0000",
+  "object_id": "120252619812080790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-08T20:36:05+0000",
+  "object_id": "120252619812050790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-08T20:36:05+0000",
+  "object_id": "120252619812070790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-08T20:36:05+0000",
+  "object_id": "120252619812040790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-07T04:38:56+0000",
+  "object_id": "120252557279270790",
+  "object_name": "OZ-S3-W1-pricetag",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252557279220790,\"new\":120252557279220790}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-07T04:38:56+0000",
+  "object_id": "120252557279300790",
+  "object_name": "OZ-S3-W3-texture",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252557279220790,\"new\":120252557279220790}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-07T04:38:56+0000",
+  "object_id": "120252557279230790",
+  "object_name": "OZ-S3-T2-spillpromo",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252557279220790,\"new\":120252557279220790}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-07T04:38:56+0000",
+  "object_id": "120252557279280790",
+  "object_name": "OZ-S3-W2-stockscale",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252557279220790,\"new\":120252557279220790}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-07T04:38:56+0000",
+  "object_id": "120252557279240790",
+  "object_name": "OZ-S3-T3-julyspecial",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252557279220790,\"new\":120252557279220790}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-07T04:38:56+0000",
+  "object_id": "120252557279210790",
+  "object_name": "OZ-S3-T1-savingsmath",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252557279220790,\"new\":120252557279220790}}"
+ },
+ {
+  "event_type": "update_campaign_budget_scheduling_state",
+  "event_time": "2026-07-07T04:38:54+0000",
+  "object_id": "120252557279220790",
+  "object_name": "OZ-THRU-S3-Promo-BNE-GC",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"new_value\":false,\"old_value\":null,\"type\":\"update_budget_schedule_state\"}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-07-07T04:38:54+0000",
+  "object_id": "120252557279220790",
+  "object_name": "OZ-THRU-S3-Promo-BNE-GC",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"new_value\":2500,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-07T01:18:02+0000",
+  "object_id": "120252526551740790",
+  "object_name": "OZ-S2-R5-coastaltiles",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252526551730790,\"new\":120252526551730790}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-07T01:18:02+0000",
+  "object_id": "120252528609620790",
+  "object_name": "OZ-S2-R9-rentvslive",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252526551730790,\"new\":120252526551730790}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-07T01:18:02+0000",
+  "object_id": "120252528609590790",
+  "object_name": "OZ-S2-Rx-spcwaterproof",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252526551730790,\"new\":120252526551730790}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-07T01:18:02+0000",
+  "object_id": "120252528609610790",
+  "object_name": "OZ-S2-R7-urgency",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252526551730790,\"new\":120252526551730790}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-07T01:18:02+0000",
+  "object_id": "120252528609600790",
+  "object_name": "OZ-S2-R6-kidsdog",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252526551730790,\"new\":120252526551730790}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-07T01:18:02+0000",
+  "object_id": "120252526551720790",
+  "object_name": "OZ-S2-R4-lifestylefit",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252526551730790,\"new\":120252526551730790}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-07T01:18:02+0000",
+  "object_id": "120252526551710790",
+  "object_name": "OZ-S2-R3-avoidproblems",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252526551730790,\"new\":120252526551730790}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-07T01:18:02+0000",
+  "object_id": "120252528609630790",
+  "object_name": "OZ-S2-R10-reviews",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252526551730790,\"new\":120252526551730790}}"
+ },
+ {
+  "event_type": "update_campaign_budget_scheduling_state",
+  "event_time": "2026-07-07T01:18:01+0000",
+  "object_id": "120252526551730790",
+  "object_name": "OZ-THRU-S2-LeadReels-BNE-GC",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"new_value\":false,\"old_value\":null,\"type\":\"update_budget_schedule_state\"}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-07-07T01:18:01+0000",
+  "object_id": "120252526551730790",
+  "object_name": "OZ-THRU-S2-LeadReels-BNE-GC",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"new_value\":2500,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-06T21:21:14+0000",
+  "object_id": "120252552342150790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-06T21:21:14+0000",
+  "object_id": "120252552343680790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-06T21:21:14+0000",
+  "object_id": "120252552343690790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-06T21:21:14+0000",
+  "object_id": "120252552342990790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-06T20:42:53+0000",
+  "object_id": "120252551660410790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-06T20:42:53+0000",
+  "object_id": "120252551660340790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-06T20:42:53+0000",
+  "object_id": "120252551660380790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-06T20:42:53+0000",
+  "object_id": "120252551660350790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-06T20:42:53+0000",
+  "object_id": "120252551660400790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-06T20:42:53+0000",
+  "object_id": "120252551660330790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-06T20:42:53+0000",
+  "object_id": "120252551660370790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-06T20:42:53+0000",
+  "object_id": "120252551660390790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-06T20:42:53+0000",
+  "object_id": "120252551660360790",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-03T03:54:50+0000",
+  "object_id": "120252445643140790",
+  "object_name": "Oztop Form Openers 90d - Retarget",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"Oztop Form Openers 90d - Retarget\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-03T03:50:15+0000",
+  "object_id": "120252445605260790",
+  "object_name": "Oztop Page Engagers 365d - Retarget",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"Oztop Page Engagers 365d - Retarget\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-07-03T03:43:19+0000",
+  "object_id": "120252445512480790",
+  "object_name": "Oztop Video Viewers 25% - Retarget",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"Oztop Video Viewers 25\\u0025 - Retarget\"}"
+ },
+ {
+  "event_type": "update_ad_set_budget",
+  "event_time": "2026-07-03T03:31:29+0000",
+  "object_id": "120252422464770790",
+  "object_name": "New Leads ad set",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"old_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"old_value\":1000,\"additional_type\":\"status_string\",\"additional_value\":\"\"},\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"new_value\":3000,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-02T12:19:27+0000",
+  "object_id": "120252424319420790",
+  "object_name": "OZ-S1-C-alex",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252412058520790,\"new\":120252412058520790}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-02T12:18:14+0000",
+  "object_id": "120252424319430790",
+  "object_name": "OZ-S1-B-warp",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252412058520790,\"new\":120252412058520790}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-02T12:01:52+0000",
+  "object_id": "120252412058530790",
+  "object_name": "OZ-S1-A-spill",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252412058520790,\"new\":120252412058520790}}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-07-02T11:25:39+0000",
+  "object_id": "120252412058520790",
+  "object_name": "OZ-THRU-S1-BNE-GC",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"new_value\":1500,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_campaign_group",
+  "event_time": "2026-07-02T11:25:39+0000",
+  "object_id": "120252412058510790",
+  "object_name": "OZ-THRU-S1-hooktest-202607",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "update_ad_set_budget",
+  "event_time": "2026-07-02T11:19:18+0000",
+  "object_id": "120252422464770790",
+  "object_name": "New Leads ad set",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"old_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"old_value\":500,\"additional_type\":\"status_string\",\"additional_value\":\"\"},\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"new_value\":1000,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-02T11:17:41+0000",
+  "object_id": "120252422464750790",
+  "object_name": "New Leads ad",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252422464770790,\"new\":120252422464770790}}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-07-02T11:17:39+0000",
+  "object_id": "120252422464770790",
+  "object_name": "New Leads ad set",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"new_value\":500,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_campaign_group",
+  "event_time": "2026-07-02T11:17:39+0000",
+  "object_id": "120252422464760790",
+  "object_name": "New Leads campaign Jul 26",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-07-01T13:31:37+0000",
+  "object_id": "120252382876530790",
+  "object_name": "New Leads ad",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":120252382876540790,\"new\":120252382876540790}}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-07-01T13:23:38+0000",
+  "object_id": "120252382876540790",
+  "object_name": "New Leads ad set",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_campaign_group",
+  "event_time": "2026-07-01T13:23:37+0000",
+  "object_id": "120252382876550790",
+  "object_name": "OZTOP | Leads | Brisbane Flooring | Jul2026",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"AUD\",\"new_value\":1500,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ }
+]

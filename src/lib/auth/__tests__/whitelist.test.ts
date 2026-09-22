@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { getUserPermissions, isAllowedEmail } from '../whitelist'
+import { getUserPermissions, isAllowedEmail, isGlobalAdminEmail } from '../whitelist'
 
 const KEYS = ['ADMIN_EMAILS', 'ADMIN_EMAIL_DOMAIN', 'CLIENT_VIEWERS'] as const
 
@@ -154,5 +154,55 @@ describe('isAllowedEmail', () => {
   it('returns true for a client-viewer email', () => {
     process.env.CLIENT_VIEWERS = 'viewer@x.com:client-x'
     expect(isAllowedEmail('viewer@x.com')).toBe(true)
+  })
+})
+
+describe('isGlobalAdminEmail', () => {
+  const KEYS2 = ['ADMIN_EMAILS', 'ADMIN_EMAIL_DOMAIN'] as const
+  const saved: Record<string, string | undefined> = {}
+
+  beforeEach(() => {
+    for (const k of KEYS2) {
+      saved[k] = process.env[k]
+      delete process.env[k]
+    }
+  })
+
+  afterEach(() => {
+    for (const k of KEYS2) {
+      if (saved[k] === undefined) delete process.env[k]
+      else process.env[k] = saved[k]
+    }
+  })
+
+  it('returns false when ADMIN_EMAILS is not configured (fail-closed)', () => {
+    expect(isGlobalAdminEmail('anyone@magicengine.cloud')).toBe(false)
+  })
+
+  it('returns true for an exact ADMIN_EMAILS match', () => {
+    process.env.ADMIN_EMAILS = 'ray@magicengine.cloud'
+    expect(isGlobalAdminEmail('ray@magicengine.cloud')).toBe(true)
+  })
+
+  it('is case-insensitive and trims whitespace', () => {
+    process.env.ADMIN_EMAILS = '  Ray@MagicEngine.cloud '
+    expect(isGlobalAdminEmail('RAY@magicengine.cloud')).toBe(true)
+  })
+
+  it('returns false for an email not in the exact list', () => {
+    process.env.ADMIN_EMAILS = 'ray@magicengine.cloud'
+    expect(isGlobalAdminEmail('someone-else@magicengine.cloud')).toBe(false)
+  })
+
+  it('does NOT fall back to ADMIN_EMAIL_DOMAIN — 只认精确名单', () => {
+    // Issue #1644 §双签变异测试③：全局管理员判定只认写死的 ADMIN_EMAILS 精确
+    // 名单，不认邮箱域名匹配 —— 否则公司里任何一个人都会被当成"全局管理员"。
+    process.env.ADMIN_EMAIL_DOMAIN = 'magicengine.cloud'
+    expect(isGlobalAdminEmail('anyone@magicengine.cloud')).toBe(false)
+  })
+
+  it('returns false for an empty email', () => {
+    process.env.ADMIN_EMAILS = 'ray@magicengine.cloud'
+    expect(isGlobalAdminEmail('')).toBe(false)
   })
 })

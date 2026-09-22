@@ -143,7 +143,10 @@ describe('🔴 页面不留客户明文（会被截图、会投屏）', () => {
     await screen.findByText(/收到定金/)
     const text = document.body.textContent ?? ''
     expect(text).not.toMatch(/@/)
-    expect(text).not.toMatch(/\d{8,}/) // 连号数字（电话）
+    // 连号数字（电话，规范化后一律 9 位以上，如 NZ「64215551234」11 位）。
+    // 门槛从 8 提到 9——名单下载区块（下载文件名带 YYYYMMDD 日期）现在会自动
+    // 统计并渲染，8 位的日期字符串不是客户数据，不该被这条测试当成电话误判。
+    expect(text).not.toMatch(/\d{9,}/)
   })
 })
 
@@ -166,7 +169,7 @@ describe('回写表还没建时优雅降级（不弹红）', () => {
     // 不该出现"读取出错"的红色报错
     expect(screen.queryByText(/读取出错/)).toBeNull()
     // 名单下载那块照常在（不受影响）
-    expect(screen.getAllByText(/先看人数/).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText(/重新统计人数/).length).toBeGreaterThanOrEqual(1)
   })
 })
 
@@ -202,6 +205,38 @@ describe('看得懂', () => {
   it('没有待办时说清楚是"都处理完了"，不是空白页', async () => {
     mountWith([])
     expect(await screen.findByText(/都处理完了/)).toBeTruthy()
+  })
+})
+
+describe('查看这个客人（否则一屏记录长得都一样，没法判断该不该批）', () => {
+  it('有 contact_id 时给出跳转链接，指向客户管理页的直达地址', async () => {
+    mountWith([
+      outcome({ outcome_kind: 'lead', amount_minor: null, currency: null, contact_id: 'ct-1' }),
+    ])
+    const link = (await screen.findByText('查看这个客人 →')) as HTMLAnchorElement
+    expect(link.closest('a')?.getAttribute('href')).toBe(
+      `/dashboard/clients/${CLIENT}/crm/all?contact=ct-1`,
+    )
+  })
+
+  it('没有 contact_id 时不出现这个链接（没东西可查）', async () => {
+    mountWith([outcome({ contact_id: null })])
+    await screen.findByText(/收到定金/)
+    expect(screen.queryByText('查看这个客人 →')).toBeNull()
+  })
+})
+
+describe('看得见名字（PM 反馈：一屏记录都长一样，看不出是谁没法判断该不该批）', () => {
+  it('customer_first 有值时显示名字，且首字母大写（库里存的是全小写规范化形式）', async () => {
+    mountWith([outcome({ customer_first: 'dundee montealegre tan' })])
+    expect(await screen.findByText('Dundee Montealegre Tan')).toBeTruthy()
+  })
+
+  it('没有 customer_first 时不显示名字那一行，也不报错', async () => {
+    mountWith([outcome({ customer_first: null })])
+    await screen.findByText(/收到定金/)
+    // 没有名字可显示——不应该出现空字符串或 "null" 这类渲染事故
+    expect(document.body.textContent).not.toContain('null')
   })
 })
 
@@ -254,11 +289,11 @@ describe('邮件深链 ?focus= 和 ?status= 支持', () => {
     // 三条都渲染出来
     await screen.findByText(/单号 TARGET/)
 
-    // cursor 跳到 target-o（第 2 条，index=1）→ 该行会有 focus 蓝框（2px solid #2563eb）
-    // 找到那条卡片 wrapper 并断言它的 style
-    const targetCard = screen.getByText(/单号 TARGET/).closest('div[style*="cursor"]') as HTMLElement | null
+    // cursor 跳到 target-o（第 2 条，index=1）→ 该行会带上 focus 描边（border-me-ochre）
+    // 找到那条卡片 wrapper 并断言它的 class
+    const targetCard = screen.getByText(/单号 TARGET/).closest('.cursor-pointer') as HTMLElement | null
     expect(targetCard).toBeTruthy()
-    expect(targetCard!.getAttribute('style')).toContain('2px solid')
+    expect(targetCard!.className).toContain('border-me-ochre')
 
     // scrollIntoView 被调过
     expect(Element.prototype.scrollIntoView).toHaveBeenCalled()

@@ -352,6 +352,56 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
 // ─── POST ─────────────────────────────────────────────────────────────────────
 
+type PlanLockReason = 'PLAN_ALREADY_PUBLISHED' | 'PLAN_PUBLISH_QUEUED'
+
+/**
+ * A complete-snapshot POST rebuilds `plan_data` from scratch, so overwriting
+ * a row drops every receipt stored on it.
+ *
+ * - `publish_meta` is the only record of Posts live on the client's Page:
+ *   recall needs it to delete them and publish needs it for idempotency.
+ *   Any receipt counts (including FAILED or fully recalled) — failed and
+ *   recalled entries are the audit trail too.
+ * - `publish_queue_meta` is the gate publish reads; while it exists a publish
+ *   may be in flight, and its Inngest receipt must not silently disappear.
+ * - `review_meta` alone is NOT a lock: reviews belong to the old copy and a
+ *   new snapshot must be re-reviewed (GET rejects a review whose
+ *   plan_revision no longer matches), with no external side effect lost.
+ *
+ * Inserting a second row instead is not safe either: every reader picks the
+ * newest row by created_at, which would orphan the old receipt (recall would
+ * answer PLAN_ID_MISMATCH for posts that are still live).
+ */
+function receiptBlockingOverwrite(planData: Partial<CampaignDailyPlanData> | null): PlanLockReason | null {
+  if (!planData) return null
+  if (planData.publish_meta !== undefined) return 'PLAN_ALREADY_PUBLISHED'
+  if (planData.publish_queue_meta !== undefined) return 'PLAN_PUBLISH_QUEUED'
+  return null
+}
+
+function planLockedResponse(
+  reason: PlanLockReason,
+  planId: string,
+  planData: Partial<CampaignDailyPlanData> | null
+) {
+  const publishStatus = (planData?.publish_meta as { status?: unknown } | undefined)?.status
+  return NextResponse.json(
+    {
+      success: false,
+      error: reason,
+      plan_id: planId,
+      publish_status: typeof publishStatus === 'string' ? publishStatus : null,
+      // Archiving keeps the old campaign out of active-campaign prompt
+      // injection; GET and recall still resolve it by id regardless of status.
+      message: `${reason === 'PLAN_ALREADY_PUBLISHED'
+        ? 'This campaign plan already has Posts published to Facebook. Saving a new plan here would erase the publish record needed to recall them.'
+        : 'This campaign plan is already in the publish queue. Saving a new plan here would discard that queue record.'} Create a new campaign for the new plan and archive this one.`,
+      next_step: 'CREATE_NEW_CAMPAIGN',
+    },
+    { status: 409 }
+  )
+}
+
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const clientId = params.id
   const access = await requireDashboardClientAccess(clientId)
@@ -445,15 +495,25 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       }
     }
 
-    const { data: existing } = await supabaseAdmin
+    // A failed lookup must not read as "no plan yet": inserting a second row
+    // would become the newest snapshot and hide an existing publish receipt
+    // from GET / publish / recall, all of which only read the newest row.
+    const { data: existing, error: existingReadError } = await supabaseAdmin
       .from('social_plans')
-      .select('id')
+      .select('id, plan_data')
       .eq('client_id', clientId)
       .eq('campaign_id', cmd.campaign_id)
       .contains('plan_data', { plan_kind: CAMPAIGN_DAILY_PLAN_KIND })
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
+    if (existingReadError) throw existingReadError
+
+    const existingPlanData = (existing?.plan_data ?? null) as Partial<CampaignDailyPlanData> | null
+    const blockedBy = receiptBlockingOverwrite(existingPlanData)
+    if (existing?.id && blockedBy) {
+      return planLockedResponse(blockedBy, existing.id, existingPlanData)
+    }
 
     // Complete-snapshot contract: the incoming command IS the new stored
     // seven-day plan; previously stored bundles are replaced wholesale, not
@@ -479,11 +539,23 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     let planId: string
     if (existing?.id) {
-      const { error } = await supabaseAdmin
+      // Compare-and-set: a publish-queue or publish receipt that landed after
+      // the read above must still stop the overwrite, not be erased by it.
+      const { data: updated, error } = await supabaseAdmin
         .from('social_plans')
         .update({ plan_data: planData })
         .eq('id', existing.id)
+        .eq('client_id', clientId)
+        .is('plan_data->publish_meta', null)
+        .is('plan_data->publish_queue_meta', null)
+        .select('id')
       if (error) throw error
+      if (!updated || updated.length === 0) {
+        return NextResponse.json(
+          { success: false, error: 'PLAN_CHANGED_DURING_SAVE', plan_id: existing.id },
+          { status: 409 }
+        )
+      }
       planId = existing.id
     } else {
       const { data: inserted, error } = await supabaseAdmin

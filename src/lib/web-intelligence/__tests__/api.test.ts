@@ -9,6 +9,7 @@ vi.mock('@/lib/inngest/client', () => ({ inngest: { send: mock.send } }))
 vi.mock('@/lib/inngest/functions/web-intelligence', () => ({ WEB_CAPTURE_EVENT: 'web_intelligence.website.capture.requested' }))
 import { GET, PATCH, POST } from '@/app/api/clients/[id]/web-intelligence/route'
 const id = '00000000-0000-4000-8000-000000000001'
+const requestedId = '00000000-0000-4000-8000-000000000002'
 const ctx = { params: Promise.resolve({ id }) }
 const request = () => new Request('http://localhost/api', { method: 'POST', body: JSON.stringify({ domain: 'example.com', url: 'https://example.com/' }) })
 beforeEach(() => { vi.resetAllMocks() })
@@ -27,6 +28,14 @@ describe('server-side client access and handoff', () => {
     const response = await POST(request(), ctx)
     expect(response.status).toBe(202)
     expect(mock.send).toHaveBeenCalledWith(expect.objectContaining({ id, data: expect.objectContaining({ request_id: id, client_id: id }) }))
+  })
+  it('preserves a caller request identity so a partial batch can retry safely', async () => {
+    mock.access.mockResolvedValue({ ok: true, role: 'admin' }); mock.authorize.mockResolvedValue({ id: requestedId })
+    const input = new Request('http://localhost/api', { method: 'POST', body: JSON.stringify({ domain: 'example.com', url: 'https://example.com/', request_id: requestedId }) })
+    const response = await POST(input, ctx)
+    expect(response.status).toBe(202)
+    expect(mock.authorize).toHaveBeenCalledWith(expect.objectContaining({ request_id: requestedId }))
+    expect(mock.send).toHaveBeenCalledWith(expect.objectContaining({ id: requestedId }))
   })
   it('does not dispatch when budget rejects the request', async () => {
     mock.access.mockResolvedValue({ ok: true, role: 'admin' }); mock.authorize.mockRejectedValue(new Error('hard_stop'))

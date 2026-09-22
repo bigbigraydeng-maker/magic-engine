@@ -54,6 +54,7 @@ function normaliseList(raw: unknown): string[] {
 export async function getClientKeywords(
   clientId: string,
   max: number = 10,
+  options: { strict?: boolean } = {},
 ): Promise<ResolvedKeywords> {
   // Fetch the two persisted sources in parallel.
   const [clientResult, briefResult] = await Promise.all([
@@ -71,6 +72,10 @@ export async function getClientKeywords(
       .limit(1)
       .maybeSingle(),
   ])
+
+  if (options.strict && (clientResult.error || briefResult.error)) {
+    throw new Error('keyword_sources_read_failed')
+  }
 
   const fdeKeywords   = normaliseList(clientResult.data?.primary_keywords)
   const briefKeywords = normaliseList(briefResult.data?.keyword_seeds)

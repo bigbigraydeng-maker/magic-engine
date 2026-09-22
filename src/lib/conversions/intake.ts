@@ -24,6 +24,24 @@ export type SourceKind =
   | 'api'
   /** 外部 CRM 同步（PM 2026-09-05：一个月内上 HubSpot）。source_ref 存对方的交易编号。 */
   | 'crm_hubspot'
+  /**
+   * 读取一张人工维护的表格（Google Sheet / Excel），不是正式 CRM 系统的 API 对接。
+   * 跟 `crm_hubspot` 分开：那个专留给未来接入真正的 CRM API，可信度和这个不一样，
+   * 混在一起以后没法按来源筛问题记录（CTS Meta CAPI 项目，2026-09-13，待 PM 确认命名）。
+   */
+  | 'crm_sheet_sync'
+  /**
+   * 从 Facebook Messenger 私信对话文本判断出的有效咨询（NAL，2026-09-15）。
+   * 跟 `crm_sheet_sync` 是姊妹枚举值：都是"规则式判断非官方 CRM 数据源"，
+   * 区别只在于一个读结构化表格、一个读非结构化对话。
+   */
+  | 'messenger_conversation'
+  /**
+   * 员工在 ME 客户管理工作台里把联系人手动推进到"已成交"档位时录入（NAL，
+   * 2026-09-15）。跟 `messenger_conversation` 区分开：那个是规则自动判断的咨询，
+   * 这个是人已经确认过金额的成交，可信度更高，以后要按来源筛问题记录时不能混在一起。
+   */
+  | 'crm_stage_manual'
 
 export const OUTCOME_KINDS: readonly OutcomeKind[] = ['purchase', 'balance', 'lead']
 export const SOURCE_KINDS: readonly SourceKind[] = [
@@ -33,7 +51,24 @@ export const SOURCE_KINDS: readonly SourceKind[] = [
   'meta_lead_form',
   'api',
   'crm_hubspot',
+  'crm_sheet_sync',
+  'messenger_conversation',
+  'crm_stage_manual',
 ]
+
+/**
+ * Meta 要求"这笔转化实际发生在哪个渠道"，跟"这条记录里有没有采集到某个字段"是
+ * 两回事——调用方按 `sourceKind` 显式决定，不能让发送层从字段存在与否反推
+ * （魏征评审：反推会把"历史上留过私信身份、但这笔其实是邮件/转账促成"的成交
+ * 错误地报成私信转化）。
+ */
+export type ActionSource = 'email' | 'business_messaging'
+
+const MESSENGER_SOURCED: ReadonlySet<SourceKind> = new Set(['messenger_conversation', 'crm_stage_manual'])
+
+export function actionSourceForSourceKind(sourceKind: SourceKind): ActionSource {
+  return MESSENGER_SOURCED.has(sourceKind) ? 'business_messaging' : 'email'
+}
 
 export type IntakeInput = {
   clientId: string
@@ -52,6 +87,11 @@ export type IntakeInput = {
   sourceKind: string
   sourceRef?: string | null
   createdBy?: string | null
+  /**
+   * Facebook Messenger 私信身份（page-scoped user id）。没有邮箱/电话时的第三种
+   * 匹配键——Meta 官方文档要求原样传（不哈希），跟邮箱/电话的哈希处理不一样。
+   */
+  pageScopedUserId?: string | null
 }
 
 export type IntakeContext = {
@@ -76,6 +116,7 @@ export type IntakeRow = {
   source_kind: SourceKind
   source_ref: string | null
   created_by: string | null
+  page_scoped_user_id: string | null
 }
 
 export type IntakeResult =
@@ -177,8 +218,23 @@ export function buildIntakeRow(input: IntakeInput, ctx: IntakeContext): IntakeRe
     )
   }
 
-  if (!email && !phone) {
-    errors.push('至少要有邮箱或电话之一 —— 两个都没有的话，发给 Meta 100% 匹配不上')
+  const pageScopedUserId = input.pageScopedUserId?.trim() || null
+
+  if (!email && !phone && !pageScopedUserId) {
+    errors.push(
+      '至少要有邮箱、电话、或 Facebook 私信身份之一 —— 一个都没有的话，发给 Meta 100% 匹配不上',
+    )
+  }
+
+  // 🔴 魏征评审：contact_id 为空会让 writeback-service.ts 的拒联检查整段静默跳过。
+  //    只靠邮箱/电话时这条风险本来就在（历史遗留），但只靠 PSID 时新开一条数据源，
+  //    不能再放过这个口子——这条路径下必须强制要求 contact_id。
+  const contactId = input.contactId && input.contactId !== '' ? input.contactId : null
+  if (!email && !phone && pageScopedUserId && !contactId) {
+    errors.push(
+      '只有 Facebook 私信身份、没有邮箱电话时，contactId 必须提供——' +
+        '否则发送前的「客人是否拒联」检查会被整段跳过',
+    )
   }
 
   if (errors.length > 0) return { ok: false, errors }
@@ -188,7 +244,7 @@ export function buildIntakeRow(input: IntakeInput, ctx: IntakeContext): IntakeRe
     warnings,
     row: {
       client_id: input.clientId,
-      contact_id: input.contactId && input.contactId !== '' ? input.contactId : null,
+      contact_id: contactId,
       outcome_kind: outcomeKind,
       customer_email: email,
       customer_phone: phone,
@@ -201,6 +257,7 @@ export function buildIntakeRow(input: IntakeInput, ctx: IntakeContext): IntakeRe
       source_kind: sourceKind,
       source_ref: input.sourceRef?.trim() || null,
       created_by: input.createdBy?.trim() || null,
+      page_scoped_user_id: pageScopedUserId,
     },
   }
 }

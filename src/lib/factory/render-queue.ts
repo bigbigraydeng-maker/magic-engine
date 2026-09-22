@@ -1,3 +1,7 @@
+// 🔴 已退役(2026-09-02，render.yaml 同一条注释)：这条旧 ffmpeg 拼片管线的排队入口，
+// 已没有 worker 在消费。留仓库不删，不要当活代码维护——出片现在走 Creatomate 链
+// (scene-assets.ts，走 content_factory_render_jobs 同一张表但 render_engine='creatomate')。
+//
 // 做片任务队列 — 流水线入口。确认选题时建一条做片任务(排队)，后台 worker 领着做。
 // content_factory_render_jobs: queued→planning→rendering→assembling→ready_for_review / failed
 

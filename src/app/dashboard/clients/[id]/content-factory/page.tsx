@@ -56,6 +56,9 @@ interface BoardData {
   stages: Record<Stage, Card[]>
   counts: Record<Stage, number>
   courses?: Course[]
+  /** 客户配置了哪些「资料包」（团/档位），供确认做片时选归属。0-1 个不用选
+   *  （见 post-fields.ts::resolveOfferFacts 的兜底规则），≥2 个必须选一个。 */
+  offerKeys?: string[]
 }
 
 // 单讲在流程里的人话状态(比看板段更细)
@@ -111,13 +114,15 @@ export default function ContentFactoryBoardPage() {
   const [notice, setNotice] = useState<string | null>(null)
   const [uploadPct, setUploadPct] = useState<number | null>(null)
   const [videoLink, setVideoLink] = useState('')
+  const [offerKey, setOfferKey] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // 换卡片/关抽屉一律把链接输入框清空 —— 在 A 里粘了链接不提交就关掉，
-  // 再打开 B 时输入框还留着 A 的链接，点确定就把错的片挂到 B 上了。
+  // 换卡片/关抽屉一律把链接输入框和归属选择清空 —— 在 A 里选了归属不提交就关掉，
+  // 再打开 B 时选择还留着 A 的，点确认就把错的归属存到 B 上了（跟 videoLink 同一个教训）。
   const setSelected = useCallback((c: Card | null) => {
     setSelectedRaw(c)
     setVideoLink('')
+    setOfferKey('')
   }, [])
 
   const load = useCallback(async () => {
@@ -143,7 +148,9 @@ export default function ContentFactoryBoardPage() {
       const r = await fetch(`/api/clients/${clientId}/content-factory/${selected.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify(
+          action === 'confirm' && offerKey ? { action, offer_key: offerKey } : { action },
+        ),
       })
       const data = (await r.json().catch(() => ({}))) as {
         error?: string
@@ -439,23 +446,44 @@ export default function ContentFactoryBoardPage() {
               {(selected.platforms ?? []).map((p) => <span key={p}>{PLATFORM_LABEL[p] ?? p}</span>)}
             </div>
 
-            {/* 选题段：确认 / 打回 */}
+            {/* 选题段：确认 / 打回。配了 ≥2 份资料包（团/档位）时必须先选这条视频
+                对应哪一份，不然出片会因为系统不敢乱猜而被拦下（见 post-fields.ts
+                ::resolveOfferFacts）——只配 0-1 份时不用选，不显示这个下拉框。 */}
             {selected.stage === '选题' && (
-              <div className="flex gap-2 sticky bottom-0 bg-white pt-3 border-t border-me-stone">
-                <button
-                  disabled={acting}
-                  onClick={() => act('confirm')}
-                  className="flex-1 text-sm font-semibold text-white bg-status-track rounded-xl py-2.5 disabled:opacity-50"
-                >
-                  {acting ? '处理中…' : '确认做 → 进备料'}
-                </button>
-                <button
-                  disabled={acting}
-                  onClick={() => act('reject')}
-                  className="text-sm text-status-rej border border-me-stone rounded-xl px-4 disabled:opacity-50"
-                >
-                  打回
-                </button>
+              <div className="sticky bottom-0 bg-white pt-3 border-t border-me-stone">
+                {(board?.offerKeys?.length ?? 0) >= 2 && (
+                  <div className="mb-2">
+                    <label className="text-[11px] font-semibold text-me-taupe mb-1 block">
+                      这条视频对应哪份资料（团/档位）
+                    </label>
+                    <select
+                      value={offerKey}
+                      onChange={(e) => setOfferKey(e.target.value)}
+                      className="w-full text-sm border border-me-stone rounded-xl px-3 py-2"
+                    >
+                      <option value="">先选一个…</option>
+                      {board?.offerKeys?.map((k) => (
+                        <option key={k} value={k}>{k}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    disabled={acting || ((board?.offerKeys?.length ?? 0) >= 2 && !offerKey)}
+                    onClick={() => act('confirm')}
+                    className="flex-1 text-sm font-semibold text-white bg-status-track rounded-xl py-2.5 disabled:opacity-50"
+                  >
+                    {acting ? '处理中…' : '确认做 → 进备料'}
+                  </button>
+                  <button
+                    disabled={acting}
+                    onClick={() => act('reject')}
+                    className="text-sm text-status-rej border border-me-stone rounded-xl px-4 disabled:opacity-50"
+                  >
+                    打回
+                  </button>
+                </div>
               </div>
             )}
 

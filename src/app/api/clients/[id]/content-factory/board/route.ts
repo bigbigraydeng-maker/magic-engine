@@ -1,6 +1,7 @@
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { projectFactoryConfig } from '@/lib/factory/client-config'
 
 /** 做片流水线还没结束的状态（与 video 路由同一套判据） */
 const ACTIVE_JOB_STATUSES = ['queued', 'planning', 'rendering', 'assembling']
@@ -129,8 +130,19 @@ export async function GET(
       FACTORY_STAGES.map((s) => [s, stages[s].length]),
     ) as Record<FactoryStage, number>
 
+    // 这个客户配了哪些「资料包」（团/档位）——供前端"确认做"时的归属下拉框用。
+    // 只有一个（或零个）档位时前端不需要下拉框（见 post-fields.ts::resolveOfferFacts
+    // 的兜底规则：客户只配一个档位可以不指定），这里始终把 key 列表吐出来，
+    // 由前端决定要不要渲染选择框，不在接口层做"只有一个就不返回"这种特殊情形。
+    const { data: clientRow } = await supabaseAdmin
+      .from('clients')
+      .select('factory_config')
+      .eq('id', params.id)
+      .single()
+    const offerKeys = Object.keys(projectFactoryConfig(clientRow?.factory_config).render?.creatomate?.offers ?? {})
+
     // 看板是每客户实时数据，绝不能被边缘/浏览器缓存(否则新写入的选题/成片看不到)。
-    return NextResponse.json({ stages, counts, courses }, {
+    return NextResponse.json({ stages, counts, courses, offerKeys }, {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate', 'CDN-Cache-Control': 'no-store' },
     })
   } catch (err: unknown) {

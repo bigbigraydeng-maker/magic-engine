@@ -6,7 +6,7 @@ import { startWebsiteCapture } from '@/lib/apify/website'
 import { claim, readRun, updateRun } from '../store'
 import type { Evidence, Run, Signal } from '../contracts'
 
-vi.mock('@/lib/anthropic/client', () => ({ callClaudeChat: vi.fn(), MODEL_SONNET: 'test-model', parseJsonResponse: JSON.parse }))
+vi.mock('@/lib/anthropic/client', () => ({ callClaudeChat: vi.fn(), MODEL_SONNET: 'test-model', MODEL_HAIKU: 'test-haiku', parseJsonResponse: JSON.parse }))
 vi.mock('@/lib/apify/website', () => ({ startWebsiteCapture: vi.fn(), getWebsiteCapture: vi.fn() }))
 vi.mock('@/lib/apify/client', () => ({ abortRun: vi.fn() }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))

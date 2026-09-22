@@ -20,6 +20,13 @@
  *    时间线上要看全文再单独去拉。
  * 3. **水位线用 `receivedDateTime` 而不是 `sentDateTime`**。晚到的邮件
  *    （对方服务器延迟几小时）按发送时间算会直接跳过水位线，那封信永远读不到。
+ * 4. **必须要 `Prefer: IdType="ImmutableId"`**。Graph 默认给的消息 id 在这封信
+ *    换文件夹时会变——而「草稿变已发送」正是 `mail-send.ts` 从 CRM 回信时
+ *    必经的那一步。不要这个请求头，`mail-send.ts` 存的 id 跟这里之后同步
+ *    读到的 id 会对不上，那封刚发的信会在时间线上插出重复的一行——
+ *    正是两边都想避免的那个问题，只是换个更隐蔽的方式重新发生
+ *    （2026-09-15 子牙架构复审 PR #1714 揪出来的，见微软官方文档
+ *    "Get Outlook mail, calendar, or contact IDs to remain the same"）。
  */
 
 const GRAPH = 'https://graph.microsoft.com/v1.0'
@@ -130,7 +137,9 @@ export async function fetchMailSince(
     pages += 1
     let res: Response
     try {
-      res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } })
+      res = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}`, Prefer: 'IdType="ImmutableId"' },
+      })
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : '读取邮箱失败' }
     }

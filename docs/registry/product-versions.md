@@ -28,7 +28,10 @@
 - **中文名**：ME 旅游版
 - **是什么**：面向旅游运营商 · 目的地营销的垂直版本
 - **归属**：L2 Playbook / Version
-- **当前状态**：规划中（当前 CTS 客户在 platform 上试跑，未真正抽出 me-travel 版）
+- **当前状态**：**已正式立版（PM 2026-09-14 拍板）**。Customer Zero = CTS Tours NZ。
+  - 首个 L2 能力候选（尚未晋升为共享能力）：**行程转路线地图生成器**（PC + 手机两版，按团自动出图；CTS 8 个团已用首例验证，见 `docs/registry/platform-candidates.md`——该条目当前状态仍为 `candidate`，证据 1/2 客户，需第 2 个旅游客户出现事实复制后才能晋升为 ME 旅游版共享能力）。
+  - 首个模块规划：**ME Tour 管理模块**（一个团在推广前统一备好内容/定价/行程/地图），规划见 [`docs/specs/2026-09-14-me-tour-management-module-plan.md`](../specs/2026-09-14-me-tour-management-module-plan.md)，**未授权实施**，待 P1 团数据结构立项。
+  - 红线：客户具体团数据（城市/价格/活动）= L4 配置按 client 隔离，不入 shared runtime。
 - **触发词**：`ME 旅游版` · `旅游版` · `travel playbook` · `tourism`
 
 ### ME 电商版
@@ -66,3 +69,4 @@
 ## 历史
 
 - 2026-08-27 · 建仓，v1 · 收录 4 个版本（platform / real-estate / travel / commerce）。skill v2 上线的配套 registry。
+- 2026-09-14 · **ME 旅游版正式立版**（PM 拍板）。从「规划中」转「已立版」；Customer Zero = CTS；首个共享能力 = 行程转路线地图生成器；首个模块规划 = ME Tour 管理模块（`docs/specs/2026-09-14-me-tour-management-module-plan.md`）。

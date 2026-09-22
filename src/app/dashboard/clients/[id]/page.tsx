@@ -716,6 +716,7 @@ export default function ClientDetailPage() {
               <ToolCard href={`/dashboard/clients/${clientId}/messenger`}          title="客户消息"       desc="Facebook 私信 · AI 写好需求卡和回复草稿 · 你按发送"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/business-inbox`}      title="商务收件箱"     desc="已连接的 Outlook 邮件 · 只读查看 · 显示 CRM 判到的跟进阶段"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/zhangqian`}          title="张骞发现"       desc="扫描社媒、评价、关键词、竞品，生成品牌现状全景报告"  badge="in_house" />
+              <ToolCard href={`/dashboard/clients/${clientId}/operating-agent`}   title="经营 Agent"      desc="把客户目标、产品范围和竞品证据合成下一步经营判断；无证据时明确说不知道" badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/diagnostic`}         title="华佗深度诊断"   desc="从 SEO/社媒/口碑/广告/AI可见/竞品六维打分，找到核心病灶"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/prescription/new`}   title="诸葛亮处方"     desc="基于华佗诊断结果，生成优先级排序的具体执行行动路线图"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/site-audit/pages`}   title="站点审计"       desc="逐页检查标题/描述/H1/图片ALT等 SEO 技术项，输出修复清单"  badge="in_house" />

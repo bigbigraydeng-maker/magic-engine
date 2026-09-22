@@ -173,3 +173,72 @@ describe('ReplyBox — refusals', () => {
     expect(screen.getByRole('textbox')).toHaveValue(DRAFT)
   })
 })
+
+/**
+ * 邮件渠道——同一个组件，2026-09-15 加的第二条线。这里只钉渠道之间真正
+ * 不同的三件事（发去哪 / 确认文案 / 失败翻译），组件逻辑本身已经被上面
+ * 那一整组 messenger 用例钉住了，不重复测。
+ */
+describe('ReplyBox — 邮件渠道', () => {
+  it('发去邮件的回复接口，不是私信那条', async () => {
+    const fetchMock = mockFetchOk()
+    renderBox({ channel: 'email' })
+
+    await userEvent.click(screen.getByRole('button', { name: '发送给客户' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      `/api/clients/${CLIENT}/email/conversations/${CONVO}/reply`,
+    )
+  })
+
+  it('确认文案说的是邮件，不是 Facebook', async () => {
+    mockFetchOk()
+    renderBox({ channel: 'email' })
+
+    await userEvent.click(screen.getByRole('button', { name: '发送给客户' }))
+
+    expect(globalThis.confirm).toHaveBeenCalledWith(expect.stringContaining('邮件'))
+    expect(globalThis.confirm).toHaveBeenCalledWith(expect.not.stringContaining('Facebook'))
+  })
+
+  it('邮箱授权掉线 → 说清楚是邮箱的事，不是 Facebook 的事', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 424,
+        json: async () => ({ error: 'no token', reason: 'no_token' }),
+      }),
+    )
+    renderBox({ channel: 'email' })
+
+    await userEvent.click(screen.getByRole('button', { name: '发送给客户' }))
+
+    expect(await screen.findByText(/邮箱授权掉线了/)).toBeInTheDocument()
+    expect(screen.queryByText(/Facebook/)).not.toBeInTheDocument()
+  })
+
+  it('没有客人来信可回 → 说清楚，不套用 Messenger 的「窗口关了」说法', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: async () => ({ error: 'no thread', reason: 'no_thread' }),
+      }),
+    )
+    renderBox({ channel: 'email' })
+
+    await userEvent.click(screen.getByRole('button', { name: '发送给客户' }))
+
+    expect(await screen.findByText(/还没跟你们邮件往来过/)).toBeInTheDocument()
+  })
+
+  it('email 没有窗口过期这回事 —— 传 null 也不会把发送按钮锁死', () => {
+    mockFetchOk()
+    renderBox({ channel: 'email', window: null })
+
+    expect(screen.getByRole('button', { name: '发送给客户' })).not.toBeDisabled()
+  })
+})

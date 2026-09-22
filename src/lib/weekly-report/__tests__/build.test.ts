@@ -56,7 +56,7 @@ describe('renderWeeklyReport — 断流 rule', () => {
       findings_week: 2,
       freshness: { latest: '2026-08-02', stale: false },
     },
-    auto_changes: { titles_applied_week: 8, freshness: { latest: '2026-08-01', stale: false } },
+    auto_changes: { titles_applied_week: 8, freshness: { latest: '2026-08-01', stale: false }, outcomes_checked_week: [] },
     blog: { generated_week: 1, published_week: 0, awaiting_review: 2 },
     social: {
       posts_7d: null, reactions_7d: null, days_since_last_post: null, reels_awaiting: 11,
@@ -83,6 +83,26 @@ describe('renderWeeklyReport — 断流 rule', () => {
     expect(html).toContain('$120.5')
     expect(html).toContain('2 篇草稿等你点头')
     expect(html).toContain('自动改了 <b>8</b> 个页面标题')
+  })
+
+  it('shows this week\'s SEO meta-cycle outcome checks with before/after CTR and the verdict (PM 2026-09-20 item 8)', () => {
+    const c: ClientWeekly = {
+      ...base,
+      auto_changes: {
+        ...base.auto_changes,
+        outcomes_checked_week: [
+          { page_slug: 'rotorua-tours', baseline_ctr: 0.021, observed_ctr: 0.035, observed_impressions: 210, outcome: 'improved' },
+          { page_slug: 'taupo-day-trip', baseline_ctr: 0.035, observed_ctr: 0.018, observed_impressions: 180, outcome: 'regressed' },
+        ],
+      },
+    }
+    const { html } = renderWeeklyReport([c], '3 Aug 2026')
+    expect(html).toContain('/rotorua-tours')
+    expect(html).toContain('2.10%')
+    expect(html).toContain('3.50%')
+    expect(html).toContain('✅ 改好了')
+    expect(html).toContain('/taupo-day-trip')
+    expect(html).toContain('⚠️ 变差了')
   })
 
   it('断更 ≥7 天 renders the streak warning', () => {

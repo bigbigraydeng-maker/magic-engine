@@ -95,6 +95,34 @@ describe('shouldGenerateBrief', () => {
     })
     expect(shouldGenerateBrief(yesterdayMaxed, NOW)).toBe(true)
   })
+
+  /**
+   * Issue #1647 §5: a knowledge-base read failure writes the brief with an
+   * empty draft_reply and `knowledge_status='read_failed'`. Without this
+   * carve-out, a quiet thread whose brief already "covers every message"
+   * would never be retried — the card would sit with a permanently empty
+   * draft_reply until a new customer message happened to arrive.
+   */
+  it('🔴 read_failed 状态即使没有新消息也要重试（否则永远卡在空 draft_reply）', () => {
+    const stuck = candidate({ existingBriefMessageCount: 4, existingKnowledgeStatus: 'read_failed' })
+    expect(shouldGenerateBrief(stuck, NOW)).toBe(true)
+  })
+
+  it('read_failed 重试仍然受每日上限约束', () => {
+    const stuckButMaxed = candidate({
+      existingBriefMessageCount: 4,
+      existingKnowledgeStatus: 'read_failed',
+      regenCount: MAX_REGENS_PER_DAY,
+      regenCountDate: TODAY,
+    })
+    expect(shouldGenerateBrief(stuckButMaxed, NOW)).toBe(false)
+  })
+
+  it('正常状态（null）没有新消息时仍然跳过——只有 read_failed 才有这条例外', () => {
+    expect(shouldGenerateBrief(candidate({ existingBriefMessageCount: 4, existingKnowledgeStatus: null }), NOW)).toBe(
+      false,
+    )
+  })
 })
 
 describe('fallbackBrief', () => {

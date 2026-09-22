@@ -144,6 +144,23 @@ export function projectFactoryConfig(raw: unknown): FactoryConfigView {
   }
 }
 
+/** 校验 Record<string,string>——脏数据(非对象/含非字符串值)一律拒绝,不半收半弃。 */
+function isStringRecord(v: unknown): v is Record<string, string> {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  return Object.values(v as Record<string, unknown>).every((x) => typeof x === 'string')
+}
+
+/** 校验 string[]，同上原则：脏数据一律拒绝。 */
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === 'string')
+}
+
+/** 校验 Record<string, Record<string,string>>（offers 的形状），同上原则：脏数据一律拒绝。 */
+function isNestedStringRecord(v: unknown): v is Record<string, Record<string, string>> {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  return Object.values(v as Record<string, unknown>).every((x) => isStringRecord(x))
+}
+
 function projectRender(raw: unknown): FactoryConfigView['render'] {
   const r = (raw ?? null) as Record<string, unknown> | null
   if (!r) return null
@@ -157,6 +174,10 @@ function projectRender(raw: unknown): FactoryConfigView['render'] {
           outputWidth: typeof c.output_width === 'number' ? c.output_width : undefined,
           outputHeight: typeof c.output_height === 'number' ? c.output_height : undefined,
           outputFrameRate: typeof c.output_frame_rate === 'number' ? c.output_frame_rate : undefined,
+          staticOverrides: isStringRecord(c.static_overrides) ? c.static_overrides : undefined,
+          requiredPostFields: isStringArray(c.required_post_fields) ? c.required_post_fields : undefined,
+          offers: isNestedStringRecord(c.offers) ? c.offers : undefined,
+          postFieldSources: isStringRecord(c.post_field_sources) ? c.post_field_sources : undefined,
         }
       : null
   return { engine, creatomate }
@@ -341,12 +362,53 @@ export function mergeFactoryConfig(
           const outputWidth = c.output_width != null ? Number(c.output_width) : undefined
           const outputHeight = c.output_height != null ? Number(c.output_height) : undefined
           const outputFrameRate = c.output_frame_rate != null ? Number(c.output_frame_rate) : undefined
+
+          // 🔴 2026-09-13 修复：这四个字段此前完全没接进 PATCH 合并——即便调用方传了
+          // static_overrides/required_post_fields/offers/post_field_sources，这里重新拼
+          // merged.creatomate 时全部丢弃，写库前悄悄没了（复审 ad68ebde 发现：资料包管理
+          // UI 加了也白加，因为保存路径根本不认这几个字段）。跟 `render` 顶层同一个原则——
+          // 每个字段各自判断"这次 PATCH 有没有带"：带了就校验+覆盖（`null` = 清空），没带
+          // 就沿用已存的值，不能因为这次 PATCH 只想改 template_id 就把其它字段清空。
+          const existingCreatomate = (existingRender.creatomate ?? {}) as Record<string, unknown>
+
+          let staticOverrides = existingCreatomate.static_overrides
+          if ('static_overrides' in c) {
+            if (c.static_overrides === null) staticOverrides = undefined
+            else if (isStringRecord(c.static_overrides)) staticOverrides = c.static_overrides
+            else return { ok: false, error: 'static_overrides 必须是元素名→文字/链接的键值对（值只能是字符串）' }
+          }
+
+          let requiredPostFields = existingCreatomate.required_post_fields
+          if ('required_post_fields' in c) {
+            if (c.required_post_fields === null) requiredPostFields = undefined
+            else if (isStringArray(c.required_post_fields)) requiredPostFields = c.required_post_fields
+            else return { ok: false, error: 'required_post_fields 必须是元素名组成的字符串数组' }
+          }
+
+          let offers = existingCreatomate.offers
+          if ('offers' in c) {
+            if (c.offers === null) offers = undefined
+            else if (isNestedStringRecord(c.offers)) offers = c.offers
+            else return { ok: false, error: 'offers 必须是「档位名 → {字段名: 字符串值}」这样的两层键值对' }
+          }
+
+          let postFieldSources = existingCreatomate.post_field_sources
+          if ('post_field_sources' in c) {
+            if (c.post_field_sources === null) postFieldSources = undefined
+            else if (isStringRecord(c.post_field_sources)) postFieldSources = c.post_field_sources
+            else return { ok: false, error: 'post_field_sources 必须是元素名→档位字段名的键值对（值只能是字符串）' }
+          }
+
           merged.creatomate = {
             template_id: templateId,
             scene_field_map: sceneFieldMap,
             ...(outputWidth ? { output_width: outputWidth } : {}),
             ...(outputHeight ? { output_height: outputHeight } : {}),
             ...(outputFrameRate ? { output_frame_rate: outputFrameRate } : {}),
+            ...(staticOverrides ? { static_overrides: staticOverrides } : {}),
+            ...(requiredPostFields ? { required_post_fields: requiredPostFields } : {}),
+            ...(offers ? { offers } : {}),
+            ...(postFieldSources ? { post_field_sources: postFieldSources } : {}),
           }
         }
       }

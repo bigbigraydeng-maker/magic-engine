@@ -89,6 +89,29 @@ apply 时炸在 policy 步骤。影响 19 个客户的关键词排名 cron 全�
 
 **怎么防**：每次改 `type X = 'a' | 'b' | 'c'` 必须 grep 全仓 `Record` / `switch` / `STATUS_META` 的 key。
 
+### B5 · 判断「schema 漂移」前必须 grep 该列全部历史 migration，不能只看引入它的那一条 🔴
+
+**事故**（2026-09-21）：排查品牌别名设置面板**能加不能清空**的问题时，看到仓库里引入
+`clients.brand_aliases` 的那条 migration（`20260624010000_client_brand_aliases.sql`）把它声明为
+可以为空（nullable，无默认值），而线上库（`glbdnayojixmexgofbsd`）实际是 `NOT NULL DEFAULT '{}'`，
+于是先入为主判断成「线上被手工改过、仓库没记录」，并打算新增一条对齐 migration 补记录。
+实际上后续 `20260625000001_a21_goal_current_value.sql:35-41` 早就把这一列回填 NULL、
+`SET DEFAULT '{}'`、`SET NOT NULL` 做齐了——按仓库全部 migration 重建的环境本就等于线上，
+根本没有漂移，只是排查时漏看了同一列后续还被加固过。真正的 bug 只在接口代码：PATCH 清空别名时
+仍写 NULL，数据库拒绝（23502），接口 500。这个 bug 从 6 月潜伏到 9 月才被顺手发现，但「schema 漂移」
+是误判，不是事故本体。
+
+**怎么防**：
+1. 怀疑某一列「仓库和线上不一致」之前，先 `grep -rn <column_name> supabase/migrations/` 看该列
+   有没有被后续 migration 再动过，不能只读引入它的那一条。
+2. 只有 grep 完整历史后仍对不上，才是真漂移，这时才需要新增对齐 migration；此前的空判会让文档
+   记错事故性质，也会多一条实际上什么都不做的 migration 去扫描/锁表。
+3. 除非真有读取方靠 NULL 和 `[]` 区分行为，数组列一律存 `[]`，别存 NULL —— 少一个没有含义、
+   却能把写操作打挂的状态。`clients.primary_keywords` / `clients.competitor_domains` /
+   `master_briefs.products` / `master_briefs.excluded_topics` 四个兄弟接口今天还在写
+   `cleaned.length === 0 ? null : cleaned`；2026-09-21 实测这四列线上仍是 nullable，所以暂时没炸，
+   但任何一列被加上 NOT NULL，同样的 500 就会复现。
+
 ---
 
 ## C. Git / 分支
@@ -205,6 +228,81 @@ PM 反馈「太平静」「一堆照片的串联」「这不是爆款短视频�
 
 ---
 
+### D7 · 给客户开一个新功能的授权开关，必须同时确认它依赖的所有其它开关也已到位
+
+**背景（issue #1648，客户知识库上线阶段闸）**：`getClientKnowledge()` 对 `customer_reply` 有两道独立的闸——① 有没有被授权用这个功能（`client_automation_policies` 一行）② 这个客户是否已经走完双签流程正式"上线"（`client_knowledge_events` 的 rollout stage）。**两道闸都要过，缺一道，结果是静默返回空**（`{entries: [], forbiddenFactKeys: []}`），跟"这个客户真的没有知识库事实"完全无法区分——不报错、不告警，只是 AI 什么都不说。
+
+**怎么防**：以后任何 FDE/PM 要给一个客户打开 `client_knowledge.read` 这类授权开关之前，先确认这个功能所有配套的前置状态（这里是 rollout stage 必须到 2）都已经就位，或者干脆走同一个流程一次性办完，不要把"给权限"和"走完上线手续"当成两件可以分开、可以先后顺序随意的事——前者一旦单独打开，后者没跟上，问题不会报错提醒你，只会在客户那边表现成"AI 什么都不知道"，排查起来毫无线索。
+
+**这不是留白，是故意设计的默认最不放行**：换个角度看，这套机制的存在就是为了让"AI 对客户说什么"这件事永远需要经过明确批准，宁可暂时什么都不说，也不要在没人真正确认过的情况下开口。
+
+---
+
+### D8 · 只靠 fact_key 命名约定传递"这条事实是什么类型"，写入侧没有任何强制，等于没有契约
+
+**背景（issue #1579/#1580，CTS Verifier v3 改接客户知识库，子牙+魏征复审 2026-09-15 共同指出）**：`client_knowledge_facts.visibility='forbidden'` 的事实，`getClientKnowledge()` 在任何用途下都不返回正文（`statement`/`structured_value`），只把 `fact_key` 报给调用方——这是刻意设计（防止连 Verifier 的调试日志/人工复核界面都意外泄露"这个下架产品叫什么、为什么下架"）。`src/lib/messenger-agent/verifier/policies/cts.ts` 因此把"能不能识别这个 fact_key 对应哪个产品"的全部信息编码进 `fact_key` 命名约定本身（`tour.active.<code>` / `tour.retired.<code>[.alias.<slug>]`）。
+
+**问题**：这套命名约定**只存在于 `cts.ts` 的注释里**，负责写入知识库的两条路径都不知道、也不检查它——萃取工作流（issue #1645）的抽取 prompt 是刻意行业中立的通用 prompt（不该、也不会知道"CTS 团要叫 `tour.retired.xxx`"这种客户专属规则）；FDE 审核页（issue #1646）只是"批准/改后批准/驳回"已经产出的候选，UI 上没有任何地方提示格式要求。这意味着如果录入时 `fact_key` 拼错前缀（比如打成 `tours.retired.xxx` 或 `tour.retire.xxx`），这条记录会在 Verifier 的所有闸门里**静默隐形**——不报错、不告警，只是从此在 gate 2/3/5/7 里都"不存在"，跟这个功能要解决的原始事故（下架团被当成在售报给客户）是同一种失败模式，只是换了个失效点。
+
+**怎么防（当下已做的最小止血 + 真正要做的）**：
+1. 已做：`parseActiveProductFact`/`extractForbiddenProductSlugs` 对"看起来想写 `tour.*` 但拼错前缀"的情况打 `console.warn`（只能覆盖"还是 `tour.` 开头但后半段拼错"这类典型笔误，不是穷尽校验）。
+2. **未做、已开 issue 跟进**（[#1726](https://github.com/bigbigraydeng-maker/magic-engine/issues/1726)，P3）：任何"某个模块靠 `fact_key`/字符串命名约定传递业务语义"的设计，如果写入这张表的路径不止一个、且其中至少一个路径是通用/跨客户的（本例是行业中立的 LLM 抽取 prompt），就不能只在读取侧的注释里定契约——要么在 FDE 审核页加格式校验/提示，要么在心跳监控里加"有多少条记录的 fact_key 不匹配任何已知命名约定"这类可观测统计，把"静默不生效"变成"看得见的数据质量问题"。
+3. 上线前的 T-14d dry-run（design doc `~/.claude/plans/cts-tours-messenger-dynamic-pearl.md` 的验证计划）必须包含至少一条走完整"萃取 → 审核批准 → Verifier 核验"链路的真实数据用例，而不是只用手写的、已经跟约定对齐好的测试 fixture 自证闭环。
+
+---
+
+### D9 · Meta 视频广告"投放位置"留默认自动 + 优化目标是"看完成本最低"，预算会被系统自动导向 Audience Network 奖励视频，数据看起来很好但都是假信号 🔴
+
+**背景（2026-09-16，CTS 两个账户 7 天数据深挖发现）**：CTS 两条以"看完视频"为目标（`optimization_goal=THRUPLAY`）的广告——个人账户 `ThruPlay - NZ - Reels`（广告组 `120248221094190307`）、官方账户 `GC 顶层 · ThruPlay · 4 条各 $10`（广告组 `52549857906273`）——建的时候"投放位置"都没有手动设置（`targeting.publisher_platforms` 为空 = 留给系统"自动版位"）。实测两条广告过去 7 天分别有 **95%（$77.45/$81.38）和 97%（$308.99/$317.01）的花费与曝光，全部落在 `audience_network/rewarded_video`（Audience Network 奖励视频——用户在第三方手游里为换游戏内奖励被迫看完广告的场景，不是 Facebook/Instagram 版位）**，完播率高达 97%–99%，但这是"被迫看完换奖励"造成的假信号，不代表真实兴趣。
+
+**根因**：`optimization_goal=THRUPLAY`（"用最低成本换看完次数"）+ 投放位置留自动 = 系统会自动找全网最便宜的"看完"来源，Audience Network 奖励视频正是这类库存里最便宜、完播率必然接近 100% 的一种（用户是被游戏奖励机制"绑住"看完的，不是被内容打动）。这两个因素任一单独存在都不必然出问题（比如只做留资/私信优化目标的广告组，同账户里几乎不受影响——参照组数据显示留资类广告 97%+ 花费落在真实 FB/IG 版位），必须两者叠加才会触发。
+
+**连带影响**：从这两条被污染广告的视频建立的自定义受众（再营销/相似受众的种子池）同样被污染——CTS 官方账户的"GC 北京+上海视频看完95%"受众（`52551117275273`，用于 9/13 上线的收割 A/B 测试）**规则里的两条视频 100% 来自被污染的官方账户广告**；更大范围的"看过任意 CTS 视频 50%"受众（16 条视频的规则）里也有至少 5 条视频来自被污染的个人账户 ThruPlay 系列。这些受众建成后曾被当作"证明内容爆款"的证据引用过（已知的"13,000+ 人看完 95%"表述曾被指出是重复观看而非独立触达人数，这次发现的是另一层、更深的问题：即便只看独立触达人数，其中相当一部分本身就不是真实感兴趣的人）。
+
+**怎么防**：
+1. 任何 `optimization_goal` 是纯播放/完播类（THRUPLAY、`video_view` 等，不落地到留资/私信/购买这类真实商业结果）的广告组，建的时候必须显式设置 `targeting.publisher_platforms`，手动排除 `audience_network`（或至少排除 `rewarded_video` 这个具体版位），不能留给"自动版位"。
+2. 建广告组后必须按版位（`breakdowns=publisher_platform,platform_position`）回读一次花费/完播分布，确认没有异常集中在某一个版位——不能只看汇总层面的完播率数字，汇总数字会把一个占 95%+ 花费的坏版位和一堆占比很小的好版位平均成一个"看起来还不错"的数。
+3. 用视频观看数据建自定义受众（再营销/相似受众种子）前，先确认视频来源的广告本身版位健康——被污染广告的观看事件不应该被当作"真实兴趣信号"用来建种子受众。
+4. ✅ **2026-09-22 已实现**：这条检测规则（D9）已经写进 `src/lib/ads-strategy/portfolio/diagnostics/d9-placement-leak.ts`，接进每日内部诊断日报，不用再靠人工深挖 7 天数据。**已知限制**：目前打不到共用账户（CTS 跟 Oztop/30 Kiteroa 共用的个人账户 `act_2775766642787274`）——快照采集对共用账户整层跳过广告组设置抓取，覆盖共用账户需要先解决"设置抓了归哪个客户"的架构问题，暂未排期。
+
+---
+
+### D10 · 六步回执全绿，改出来的文案却是错的：自动改客户网站文案，要验「改成了什么字」，不是验「流程跑没跑通」🔴
+
+**事故（2026-09-20 NZ 凌晨，SEO 标题周循环 v1 第一次真跑）**：自动开 PR 并自动合并了 2 条 CTS 官网改动，都是错的——
+Liziba 轻轨站页面被换成了别的页面的关键词「how many days in chongqing」（chinatravel #199）；
+「新西兰人免签去中国」页面的描述被改成暗示要办签证、有申请步骤（#200，跟页面事实正好相反）。
+PM 发现后约 5 分钟用 GitHub 的 Revert 按钮撤回（#201/#202），随即关掉 CTS 的开关（`seo_config.meta_cycle_enabled=false`）。
+
+**四个根因（PR #1816 代码级核实）**：
+1. 关键词是拿「全站所有搜索词」按共有单词去配页面的，不是用这个页面自己在 GSC 里的搜索词——于是一个页面配到了另一个页面的词；
+2. DataForSEO 的搜索量 / 难度没查到时，代码默认填 0 = 「难度 0，放行」——缺数据被当成最安全；
+3. 搜索量、难度、对手标题这些数据算出来了，却从没写进 PR 描述——人看 PR 看不到任何依据，没法事前拦；
+4. 被选中的候选中途失败时直接消失，不留任何记录。
+
+**教训**：
+- **六步的运行回执全是绿的，改出来的字是错的。** 回执只证明管子通了，不证明货对了。验收要看最终改出来的那句标题 / 描述本身。
+- 自动改对外文案必须先过「信息完整闸门」：搜索量 + 难度 + 实时搜索结果前 3 都在、关键词确实属于这个页面，才许改；**缺一样就跳过并留原因，绝不默认填值**。
+- 给某个客户打开自动改文案的开关之前，先跑一次演练（`dry_run`，不写任何东西）给 PM 看这一轮会改成什么，PM 点头再开。
+
+### D11 · 客户原始素材直传进 Campaign，尺寸没人把关，发出去图歪了 🟡
+
+**事故（2026-09-21，NM Medspa 暖场 7 帖）**：从 Dropbox 拿来客户原图（横版 4:3、2:3、3:4 各种比例），直接 INSERT 进 `client_assets`，再把 ID 填进 `social_plans`。Campaign UI 能显示图片，PM 批准后才发现比例全错——Facebook/Instagram feed 要求 4:5（1080×1350），横版图在 feed 里会被裁掉上下，竖版图比例不对也会留黑边。
+
+**Jev 有没有参与？没有。** Jev 是从现有候选库里挑图的工具，这次是手动上传新素材，Jev 完全没介入。即使 Jev 参与了图片候选，它也不做尺寸校验——它评估的是画面内容，不是像素比例。
+
+**根因**：
+1. `client_assets` 表的插入流程没有尺寸校验，status='analyzed' 可以手动设，绕过了任何 AI 分析；
+2. Campaign UI 的图片选择器不展示图片实际尺寸，选了也看不出来；
+3. 没有在入库时用 ffprobe/sharp 检查宽高比。
+
+**怎么防**：
+- 手动上传客户原始素材时，**入库前先检查所有图片尺寸**：`ffprobe -v quiet -show_entries stream=width,height <file>`；
+- 不符合 4:5（或最接近平台要求的比例）的图，先用 `ffmpeg -vf crop=...` 裁成目标比例再上传；
+- 最终验证标准：看 Campaign UI 里的图片预览，确认图片无明显拉伸或黑边，再交 PM 批准。
+
+---
+
 ## E. 匹配 / 算法逻辑
 
 ### E1 · token equality 漏掉 80% 的多词品牌
@@ -223,6 +321,14 @@ SOP：`docs/sops/brand-aliases-setup-for-gsc.md`。
 
 **怎么防**：`isBusinessRelevantKeyword` 加 `excludedTopics`，**排除检查必须在 business-relevance 之前跑**。
 数据源是 `master_briefs.excluded_topics`，配套 `ExcludedTopicsPanel` UI（符合 D4）。
+
+### E3 · 把整段文本压成一整条 slug 再做子串匹配，句子边界和产品名前缀关系都会制造假阳性
+
+**事故（子牙+魏征复审 2026-09-15 各自独立用真实数据复现，CTS Verifier gate 2 上线前拦下）**：`src/lib/messenger-agent/verifier/policies/cts.ts` 的"下架产品提及"闸门最初把整段回复文本一次性 `slugify` 成一条 kebab-case 字符串，再用 `.includes(禁止slug)` 判断。两个独立复审各自手算出一个会误伤合法回复的真实案例：
+1. **跨句拼接**：句号/换行被当成普通分隔符压扁——"…a full day in Shanghai. Surroundings like Zhouzhuang…" 会拼成 `…shanghai-surroundings-like…`，精确命中一个真实存在的下架团 slug `shanghai-surroundings`，但这两个词分属两句话、语义完全无关。
+2. **产品名前缀关系**：CTS 真实产品线里 `china-icons-collection` 恰好是 `china-icons-collection-christchurch` 的 slug 前缀——如果前者下架、后者仍在售，任何合法提到 Christchurch 那个团的回复都会被子串匹配误判成提到了下架团。
+
+**怎么防**：不要把"一大段自由文本"整体压成一条字符串再做子串匹配——① 先按句子边界切分，只在同一句话内部匹配，避免相邻句子的词被拼在一起；② 用词序列（token 数组）比较而不是字符子串比较，命中后额外检查这次匹配是否其实是某个更长的、合法存在的同类实体（这里是仍在售的产品）名字的前缀延伸，如果是就不算命中。这两条对任何"把一批禁止关键词/黑名单跟一段自由文本做匹配"的场景都适用，不只是这一个 gate。
 
 ---
 
@@ -325,6 +431,34 @@ Meta 400 —— `(#10) 缺 pages_read_user_content`、`(#100/33) 帖子不存在
 
 ---
 
+### F10 · `step.run` 里用 `setTimeout` 轮询 = 服务器函数超时静默挂掉
+
+**症状**（2026-09-21，NM Medspa Reel 全尺寸渲染）：Inngest 工作流触发、批准都成功，
+但 5 条 1080×1920 视频一直 0/5，`client_assets` 始终空，`cron_run_logs` 没有"已完成"记录。
+`retries: 0`，Inngest 不重试，整个工作流静默死亡。
+
+**根因**：`poll-full-renders` 步骤在 `step.run(...)` 回调里用 `setTimeout` 逐条轮询
+（每条最多 30 次 × 20 秒 = 10 分钟），5 条合计最多 50 分钟。
+Render.com 的 HTTP 请求有超时上限（通常 3~5 分钟），
+函数被服务器强杀 → 步骤失败 → 因 `retries: 0` 工作流终止。
+`cron_run_logs` 的"完成"记录只有步骤跑完后才写，所以什么日志都没有。
+
+**`setTimeout` 在 Inngest `step.run` 里是错误的**：`step.run` 期望每次执行几秒内完成。
+分钟级等待必须用 `step.sleep`——它会暂停工作流、交还控制权、由 Inngest 在指定时间重新唤起，
+服务器函数每次只跑几十毫秒。
+
+**还有一个副作用**：轮询脚本如果没按触发时间戳过滤 `cron_run_logs`（或过滤条件失效），
+就会把旧批次的日志误当"新小样完成"，在新工作流还没到 `waitForEvent` 前就发批准事件，
+导致批准丢失、工作流永远等待。脚本必须按触发时间戳过滤，只认比触发时间新的记录。
+
+**怎么防**：
+- Inngest 步骤里**禁止 `setTimeout` + 循环**做分钟级轮询；
+- 轮询改成 `step.run(check) + step.sleep('30s')`，每次只检查一次状态；
+- 触发脚本轮询日志时，必须用触发时间戳过滤，不能直接数条数；
+- 相关函数加注释标明「此处用 step.sleep，不是 setTimeout，原因见 PITFALLS F10」。
+
+---
+
 ### F9 · Supabase 一次最多返回 1000 行，而且不报错
 
 **症状**：把「按人逐个查」改成「批量 `.in(...)` 查一次」提速时，命中 1000 行上限的那次
@@ -363,3 +497,5 @@ Meta 400 —— `(#10) 缺 pages_read_user_content`、`(#100/33) 帖子不存在
 ### G4 · 一个分支同一时间只允许一个窗口开
 
 并行任务用 `git worktree` 物理隔离。接力同一大任务用同一分支，全新任务基于最新 main 开新分支。
+
+**实测撞过一次（2026-09-15，PR #1693 `feat/knowledge-rollout-stage-gate`）**：一个窗口在修这条分支跟主线的冲突，两轮复审跑到一半，分支远端又被另一个没有登记窗口契约的会话推了新提交上去（新增两个路由 + 一处竞态修复），复审中途拉代码发现分支比开审时又长了一截。这次运气好——两边改动没有互相覆盖，最终复审重新跑通过了；但这属于事后才发现，本该在动手前查一次分支是否已有人在改（`git log origin/<branch> --oneline` 对一下时间线），而不是审完才意外碰上。

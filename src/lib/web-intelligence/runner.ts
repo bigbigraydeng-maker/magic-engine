@@ -5,9 +5,9 @@ import { supabaseAdmin as db } from '@/lib/supabase'
 import { allowedClient, type CaptureRequest, type Run } from './contracts'
 import { assertEligibleTarget, validatePublicTarget } from './targets'
 import { claim, readRun, updateRun, reserve, settle, loadInterpretationInput, updateSignal } from './store'
-import { interpretChange, validateInterpretation, interpretationPrompt, MODEL_SONNET, PROMPT_VERSION } from './interpret'
+import { interpretChange, validateInterpretation, interpretationPrompt, INTERPRETATION_MODEL, PROMPT_VERSION } from './interpret'
 import { BUSINESS_PROJECTION_VERSION, classifyBusinessPage, projectBusinessContent } from './content-projection'
-import { profileForTags } from './profiles/travel'
+import { matchChangedToursScope, profileForTags } from './profiles/travel'
 
 export async function authorize(req: CaptureRequest): Promise<Run> {
   if (!allowedClient(req.client_id)) throw new Error('client_not_in_rollout')
@@ -24,6 +24,14 @@ export async function startCapture(run: Run): Promise<string | null> {
   if (permission === 'disabled') return null
   if (permission === 'unknown') {
     await updateRun(run.id, run.client_id, { status: 'reconciliation', error_code: 'capture_start_unknown' })
+    return null
+  }
+  // The target may be edited after the pre-claim check. Once budget is claimed,
+  // re-read eligibility immediately before the paid provider call; an invalid
+  // post-claim state is reconciled rather than silently starting the old URL.
+  try { await assertEligibleTarget(run.client_id, run.domain, run.url) }
+  catch {
+    await updateRun(run.id, run.client_id, { status: 'reconciliation', error_code: 'target_changed_before_capture' })
     return null
   }
   try {
@@ -54,7 +62,10 @@ export async function collectCapture(run: Run, providerId: string): Promise<'pen
   try { target = await assertEligibleTarget(run.client_id, run.domain, run.url) }
   catch { return failKnownCapture(run, 'target_changed_after_capture') }
   const content = normaliseContent(capture.page.text)
-  const projection = projectBusinessContent(content)
+  const profile = profileForTags(target.tags)
+  const pageRole = classifyBusinessPage(capture.page.url, profile)
+  const projection = profile?.projectContent?.(content, pageRole) ?? projectBusinessContent(content)
+  const projectionVersion = [BUSINESS_PROJECTION_VERSION, profile?.id, `actor-${run.actor_build}`].filter(Boolean).join('+')
   if (content.length < 100 || content.length > 200000 || projection.length < 80 || projection.length > 200000) {
     return failKnownCapture(run, 'capture_content_limit')
   }
@@ -64,8 +75,8 @@ export async function collectCapture(run: Run, providerId: string): Promise<'pen
     p_raw_hash: createHash('sha256').update(content).digest('hex'),
     p_projection: projection,
     p_projection_hash: createHash('sha256').update(projection).digest('hex'),
-    p_projection_version: `${BUSINESS_PROJECTION_VERSION}+actor-${run.actor_build}`,
-    p_page_role: classifyBusinessPage(capture.page.url, profileForTags(target.tags)),
+    p_projection_version: projectionVersion,
+    p_page_role: pageRole,
   })
   if (saved.error) throw new Error('snapshot_write_failed')
   return 'captured'
@@ -86,32 +97,62 @@ export async function understand(run: Run): Promise<void> {
     return
   }
   if (input.signal.interpretation_status === 'complete') return
+  let industryGuidance = ''
+  try {
+    const target = await assertEligibleTarget(run.client_id, run.domain, run.url)
+    industryGuidance = profileForTags(target.tags)?.interpretationGuidance ?? ''
+  } catch {
+    // The Inngest step may replay a cached pre-claim Run. Preserve unknown cost
+    // rather than trusting its interpretation_claimed value and releasing budget.
+    await updateRun(run.id, run.client_id, { status: 'reconciliation', error_code: 'target_unavailable_interpretation_state_unknown' })
+    return
+  }
+  const productScope = industryGuidance ? input.productScope : undefined
   // Validate bounded input before claiming a paid attempt.
-  interpretationPrompt(input.signal, input.evidence, input.context)
+  interpretationPrompt(input.signal, input.evidence, input.context, industryGuidance, productScope)
   const permission = await claimPaid(run, 'interpretation_claimed')
   if (permission === 'disabled') return
   if (permission === 'unknown') {
     await updateRun(run.id, run.client_id, { status: 'reconciliation', error_code: 'interpretation_attempt_unknown' })
     return
   }
-  await invokeInterpretation(run, input)
+  await invokeInterpretation(run, input, industryGuidance)
 }
-async function invokeInterpretation(run: Run, input: Awaited<ReturnType<typeof loadInterpretationInput>>): Promise<void> {
+async function invokeInterpretation(run: Run, input: Awaited<ReturnType<typeof loadInterpretationInput>>, industryGuidance: string): Promise<void> {
   const signal = input.signal!
   let failureCode = 'interpretation_failed'
   try {
-    const result = await interpretChange(signal, input.evidence, input.context)
+    const result = await interpretChange(signal, input.evidence, input.context, industryGuidance, industryGuidance ? input.productScope : undefined)
     await updateRun(run.id, run.client_id, { interpretation_cost_usd: knownCost(result.cost_usd) })
     failureCode = 'interpretation_truncated'
     if (result.stop_reason === 'max_tokens') throw new Error(failureCode)
     failureCode = 'interpretation_invalid_result'
-    const interpretation = validateInterpretation(result.text, signal)
+    const modelInterpretation = validateInterpretation(result.text, signal)
+    const interpretation = industryGuidance
+      ? guardInterpretationByProductScope(modelInterpretation, signal, input.evidence, input.productScope, input.productScopeAvailable)
+      : modelInterpretation
     failureCode = 'interpretation_persist_failed'
-    await updateSignal(signal.id, run.client_id, { interpretation_status: 'complete', classification: interpretation.classification, interpretation: { ...interpretation, input_tokens: result.input_tokens, output_tokens: result.output_tokens }, recommended_action: interpretation.recommended_action, model: MODEL_SONNET, prompt_version: PROMPT_VERSION })
+    await updateSignal(signal.id, run.client_id, { interpretation_status: 'complete', classification: interpretation.classification, interpretation: { ...interpretation, input_tokens: result.input_tokens, output_tokens: result.output_tokens }, recommended_action: interpretation.recommended_action, model: INTERPRETATION_MODEL, prompt_version: PROMPT_VERSION })
   } catch {
     await updateSignal(signal.id, run.client_id, { interpretation_status: 'failed' })
     await updateRun(run.id, run.client_id, { status: 'failed', error_code: failureCode })
   }
+}
+
+export function guardInterpretationByProductScope<T extends { classification: 'threat' | 'opportunity' | 'ignore'; recommended_action: string }>(
+  interpretation: T,
+  signal: NonNullable<Awaited<ReturnType<typeof loadInterpretationInput>>['signal']>,
+  evidence: Awaited<ReturnType<typeof loadInterpretationInput>>['evidence'],
+  scope: Awaited<ReturnType<typeof loadInterpretationInput>>['productScope'],
+  scopeAvailable: boolean,
+): T {
+  const before = evidence.find(item => item.id === signal.before_evidence_id)
+  const after = evidence.find(item => item.id === signal.after_evidence_id)
+  const match = scopeAvailable && before && after
+    ? matchChangedToursScope(before.excerpt, after.excerpt, after.source_url, scope)
+    : { status: 'unknown' as const }
+  if (match.status === 'matched') return interpretation
+  return { ...interpretation, classification: 'ignore', recommended_action: '无需采取行动。' }
 }
 async function claimPaid(run: Run, stage: 'capture_claimed' | 'interpretation_claimed'): Promise<'claimed' | 'unknown' | 'disabled'> {
   try {

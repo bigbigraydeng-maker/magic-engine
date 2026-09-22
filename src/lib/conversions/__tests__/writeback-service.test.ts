@@ -20,9 +20,14 @@ class FakeDb {
     me_conversion_writebacks: [],
     clients: [],
     contacts: [],
+    contact_touchpoints: [],
   }
 
+  /** 按表名注入一次性查询失败，测「查不到就当放行」这类假开的坑。 */
+  errorOn: Partial<Record<string, { message: string }>> = {}
+
   from(table: string) {
+    const failure = this.errorOn[table]
     const rows = this.tables[table] ?? []
     const q: {
       _filters: Array<(r: Row) => boolean>
@@ -34,8 +39,10 @@ class FakeDb {
       in: (c: string, v: unknown[]) => typeof q
       update: (p: Row) => typeof q
       insert: (r: Row) => Promise<{ data: null; error: { message: string; code?: string } | null }>
-      maybeSingle: () => Promise<{ data: Row | null; error: null }>
-      then: (res: (v: { data: Row[]; error: null }) => unknown) => Promise<unknown>
+      maybeSingle: () => Promise<{ data: Row | null; error: { message: string } | null }>
+      then: (
+        res: (v: { data: Row[] | null; error: { message: string } | null }) => unknown,
+      ) => Promise<unknown>
     } = {
       _filters: [],
       _op: 'select',
@@ -79,10 +86,12 @@ class FakeDb {
         return { data: null, error: null }
       },
       maybeSingle: async () => {
+        if (failure) return { data: null, error: failure }
         const hit = rows.find((r) => q._filters.every((f) => f(r)))
         return { data: hit ?? null, error: null }
       },
       then: async (resolve) => {
+        if (failure) return resolve({ data: null, error: failure })
         const matched = rows.filter((r) => q._filters.every((f) => f(r)))
         if (q._op === 'update') {
           // 条件更新的真语义：只改命中的行，返回改到的行数
@@ -121,11 +130,15 @@ function makeWriter(over: Partial<DestinationWriter<unknown>> = {}) {
 const CLIENT = 'c0000000-0000-0000-0000-000000000000'
 const OUTCOME = '11111111-2222-3333-4444-555555555555'
 
-function seed(db: FakeDb, over: { outcome?: Row; client?: Row; contact?: Row } = {}) {
+function seed(
+  db: FakeDb,
+  over: { outcome?: Row; client?: Row; contact?: Row; touchpoints?: Row[] } = {},
+) {
   db.tables.clients.push({
     id: CLIENT,
     default_phone_country: '64',
     conversion_stage: 'live',
+    facebook_page_id: null,
     ...over.client,
   })
   db.tables.me_sale_outcomes.push({
@@ -143,9 +156,12 @@ function seed(db: FakeDb, over: { outcome?: Row; client?: Row; contact?: Row } =
     occurred_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
     review_status: 'approved',
     redacted_at: null,
+    page_scoped_user_id: null,
+    source_kind: 'manual_seed',
     ...over.outcome,
   })
   if (over.contact) db.tables.contacts.push(over.contact)
+  if (over.touchpoints) db.tables.contact_touchpoints.push(...over.touchpoints)
 }
 
 function deps(db: FakeDb, writer = makeWriter()) {
@@ -300,6 +316,90 @@ describe('不该发的都不发', () => {
     expect(r.message).toContain('别再联系')
   })
 
+  it('私信里刚说过「别再联系」、contacts 那一列还没来得及更新的，也不发', async () => {
+    // 🔴 回归测试：修复前这里只查 contacts.do_not_contact（还是 false），
+    // 会把明确拒联的客人数据发出去。真相源是触点，不是那一列——
+    // 见 src/lib/crm/dnc.ts。
+    seed(db, {
+      outcome: { contact_id: 'ct-1' },
+      contact: { id: 'ct-1', do_not_contact: false },
+      touchpoints: [
+        {
+          contact_id: 'ct-1',
+          client_id: CLIENT,
+          occurred_at: new Date().toISOString(),
+          metadata: { outcome: 'do_not_contact' },
+        },
+      ],
+    })
+    const w = makeWriter()
+    const r = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(w.sendSpy).not.toHaveBeenCalled()
+    expect(r.message).toContain('别再联系')
+  })
+
+  it('拒联触点后来被人明确纠正过的，照常发', async () => {
+    // 纠正（dnc_cleared）晚于那条拒联触点 → isDoNotContact 判否，
+    // 这条要确认走通用判据后没有反而把已纠正的人也拦住。
+    seed(db, {
+      outcome: { contact_id: 'ct-1' },
+      contact: { id: 'ct-1', do_not_contact: false },
+      touchpoints: [
+        {
+          contact_id: 'ct-1',
+          client_id: CLIENT,
+          occurred_at: new Date(Date.now() - 60_000).toISOString(),
+          metadata: { outcome: 'do_not_contact' },
+        },
+        {
+          contact_id: 'ct-1',
+          client_id: CLIENT,
+          occurred_at: new Date().toISOString(),
+          metadata: { outcome: 'dnc_cleared' },
+        },
+      ],
+    })
+    const w = makeWriter()
+    const r = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(w.sendSpy).toHaveBeenCalled()
+    expect(r.message).not.toContain('别再联系')
+  })
+
+  it('只查这个联系人自己的触点——别的联系人、别的客户标了拒联不受牵连', async () => {
+    // 干扰行：换 contact_id、换 client_id 各标一条拒联，任何一个过滤条件
+    // 手滑被删掉，这条测试都会因为误判成「别再联系」而红。
+    seed(db, {
+      outcome: { contact_id: 'ct-1' },
+      contact: { id: 'ct-1', do_not_contact: false },
+      touchpoints: [
+        {
+          contact_id: 'ct-other',
+          client_id: CLIENT,
+          occurred_at: new Date().toISOString(),
+          metadata: { outcome: 'do_not_contact' },
+        },
+        {
+          contact_id: 'ct-1',
+          client_id: 'other-client',
+          occurred_at: new Date().toISOString(),
+          metadata: { outcome: 'do_not_contact' },
+        },
+      ],
+    })
+    const w = makeWriter()
+    const r = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(w.sendSpy).toHaveBeenCalled()
+    expect(r.message).not.toContain('别再联系')
+  })
+
+  it('查拒联记录时数据库出错——绝不能当成「没说过别联系」就放行发送', async () => {
+    seed(db, { outcome: { contact_id: 'ct-1' }, contact: { id: 'ct-1', do_not_contact: false } })
+    db.errorOn.contact_touchpoints = { message: '数据库连接超时' }
+    const w = makeWriter()
+    await expect(sendApprovedOutcome(OUTCOME, deps(db, w))).rejects.toThrow('触点')
+    expect(w.sendSpy).not.toHaveBeenCalled()
+  })
+
   it('超过平台时间窗口的不发，并说清早了几天', async () => {
     seed(db, { outcome: { occurred_at: new Date(Date.now() - 35 * 86_400_000).toISOString() } })
     const w = makeWriter()
@@ -320,6 +420,43 @@ describe('不该发的都不发', () => {
     expect(w.sendSpy).not.toHaveBeenCalled()
     expect(r.status).toBe('failed_permanent')
     expect(r.message).toContain('JPY')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+describe('Facebook 私信身份（PSID）匹配键 —— NAL 数据源', () => {
+  it('DB 里的 page_scoped_user_id / facebook_page_id 原样递给 writer.build()，actionSource 按 source_kind 算', async () => {
+    seed(db, {
+      client: { facebook_page_id: '1177479655430100' },
+      outcome: {
+        contact_id: 'ct-1',
+        customer_email: null,
+        customer_phone: null,
+        page_scoped_user_id: '28681838868174032',
+        source_kind: 'messenger_conversation',
+      },
+      contact: { id: 'ct-1', do_not_contact: false },
+    })
+    const buildSpy = vi.fn().mockReturnValue({ data: [] })
+    const w = makeWriter({ build: buildSpy })
+    await sendApprovedOutcome(OUTCOME, deps(db, w))
+
+    expect(buildSpy).toHaveBeenCalledTimes(1)
+    const [outcomeArg, configArg] = buildSpy.mock.calls[0]
+    expect(outcomeArg.pageScopedUserId).toBe('28681838868174032')
+    expect(outcomeArg.actionSource).toBe('business_messaging')
+    expect(configArg.facebookPageId).toBe('1177479655430100')
+  })
+
+  it('CTS 这类走邮箱/电话的记录，actionSource 仍是 email，PSID 恒为 null', async () => {
+    seed(db) // 默认 source_kind: 'manual_seed'，走邮箱
+    const buildSpy = vi.fn().mockReturnValue({ data: [] })
+    const w = makeWriter({ build: buildSpy })
+    await sendApprovedOutcome(OUTCOME, deps(db, w))
+
+    const [outcomeArg] = buildSpy.mock.calls[0]
+    expect(outcomeArg.actionSource).toBe('email')
+    expect(outcomeArg.pageScopedUserId).toBeNull()
   })
 })
 

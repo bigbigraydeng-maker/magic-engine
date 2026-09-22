@@ -45,7 +45,17 @@ type Outcome = {
   redacted_at: string | null
   source_kind: string
   created_at: string
+  /** contact_id 本身不是 PII（一个内部 UUID），用来跳转去客户管理页看这个人是谁。 */
+  contact_id: string | null
+  /** 存的是规范化过的小写形式（给 Meta 哈希用），显示前要转成首字母大写。 */
+  customer_first: string | null
   me_conversion_writebacks?: Writeback[]
+}
+
+/** customer_first 存库时全小写（给 Meta 哈希用），这里只管显示好看，不改数据。 */
+function displayName(name: string | null): string | null {
+  if (!name) return null
+  return name.replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
 /** 这条记录当前的发送状态（一个事实目前只发一个平台，取第一条即可）。 */
@@ -410,6 +420,12 @@ export default function ConversionsPage() {
     setAudienceLoading(false)
   }, [clientId])
 
+  // PM 反馈：要点一下"先看人数"才有东西看，多余的一步——名单统计是只读查询，
+  // 跟主列表一样，客户 ID 一到手就该自动跑，不用等人点。按钮留着当"重新统计"用。
+  useEffect(() => {
+    void checkAudience()
+  }, [checkAudience])
+
   const summary = useMemo(() => {
     const purchases = rows.filter((r) => r.outcome_kind !== 'lead' && r.amount_minor != null)
     const currencies = new Set(purchases.map((r) => r.currency))
@@ -426,32 +442,38 @@ export default function ConversionsPage() {
   }, [rows])
 
   return (
-    <div style={{ maxWidth: 860, margin: '0 auto', padding: '24px 16px', fontFamily: 'system-ui, sans-serif' }}>
-      <h1 style={{ fontSize: 22, marginBottom: 4 }}>成交与咨询 · 待核对</h1>
-      <p style={{ color: '#666', fontSize: 14, marginTop: 0 }}>
-        核对无误后点「告诉广告平台」，平台就会去找更多像这位客人一样的人。
-        <strong>发出去撤不回</strong>，所以每条都会再确认一次。
-      </p>
+    <div className="mx-auto max-w-3xl space-y-6 p-6 font-sans text-me-charcoal">
+      <header>
+        <h1 className="font-display text-2xl font-bold text-me-charcoal">成交与咨询 · 待核对</h1>
+        <p className="mt-1.5 text-sm leading-relaxed text-me-charcoal/60">
+          核对无误后点「告诉广告平台」，平台就会去找更多像这位客人一样的人。
+          <strong className="font-semibold text-me-charcoal">发出去撤不回</strong>，所以每条都会再确认一次。
+        </p>
+      </header>
 
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '16px 0' }}>
+      <div className="flex items-center gap-2">
         <input
           value={clientId}
           onChange={(e) => setClientId(e.target.value)}
           placeholder="客户 ID"
-          style={{ flex: 1, padding: '8px 10px', border: '1px solid #ccc', borderRadius: 6 }}
+          className="flex-1 rounded-lg border border-me-stone bg-white px-3 py-2 text-sm text-me-charcoal placeholder:text-me-charcoal/35 focus:border-me-ochre focus:outline-none"
         />
-        <button onClick={() => void load()} style={btn()}>
+        <button onClick={() => void load()} className={btnNeutral()}>
           刷新
         </button>
       </div>
 
-      <div style={{ border: '1px solid #d4c4a6', background: '#faf6ec', borderRadius: 8, padding: 14, marginBottom: 16 }}>
-        <div style={{ fontWeight: 600, fontSize: 15 }}>Meta 客户名单（做 lookalike 用）</div>
-        <div style={{ fontSize: 13, color: '#6a5f4a', margin: '4px 0 10px' }}>
-          只含<strong>终端客户</strong>（旅行社同行、员工、拒联的自动排除）。看够不够 100 人再下载。
+      <div className="rounded-xl border border-me-ochre/25 bg-me-gold/10 p-4">
+        <div className="text-sm font-bold text-me-charcoal">Meta 客户名单（做 lookalike 用）</div>
+        <div className="mt-1 text-xs leading-relaxed text-me-charcoal/60">
+          只含<strong className="font-semibold text-me-charcoal">终端客户</strong>（旅行社同行、员工、拒联的自动排除）。看够不够 100 人再下载。
         </div>
-        <button onClick={() => void checkAudience()} disabled={!clientId || audienceLoading} style={btn()}>
-          {audienceLoading ? '统计中…' : '① 先看人数'}
+        <button
+          onClick={() => void checkAudience()}
+          disabled={!clientId || audienceLoading}
+          className={`mt-3 ${btnNeutral()} disabled:cursor-not-allowed disabled:opacity-50`}
+        >
+          {audienceLoading ? '统计中…' : '重新统计人数'}
         </button>
 
         {(['fbleads'] as const).map((source) => {
@@ -459,91 +481,85 @@ export default function ConversionsPage() {
           if (!st) return null
           const today = new Date().toISOString().slice(0, 10)
           return (
-            <div key={source} style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #e8ddc9', fontSize: 13 }}>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <strong style={{ minWidth: 130 }}>FB 广告来的</strong>
+            <div key={source} className="mt-3 border-t border-me-ochre/15 pt-3 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <strong className="min-w-[130px] font-semibold text-me-charcoal">FB 广告来的</strong>
                 {st.error ? (
-                  <span style={{ color: '#c00' }}>出错：{String(st.note)}</span>
+                  <span className="text-status-rej">出错：{String(st.note)}</span>
                 ) : (
                   <>
-                    <span>可上传 <strong>{st.kept}</strong> 人</span>
+                    <span className="text-me-charcoal/70">
+                      可上传 <strong className="font-semibold text-me-charcoal">{st.kept}</strong> 人
+                    </span>
                     <a
                       href={`/api/admin/conversions/audience-export?client_id=${encodeURIComponent(clientId)}&format=csv&source=${source}`}
-                      style={{ ...btn('#16a34a', '#fff'), textDecoration: 'none', padding: '4px 10px' }}
+                      className="rounded-lg bg-status-track px-3 py-1.5 text-xs font-semibold text-white no-underline hover:opacity-90"
                     >
                       下载（命名 CTS · LIST · fbleads · {today.replace(/-/g, '')}）
                     </a>
                   </>
                 )}
               </div>
-              {!st.error && <div style={{ color: '#8a7d64', marginTop: 4 }}>{st.note}</div>}
+              {!st.error && <div className="mt-1 text-me-charcoal/50">{st.note}</div>}
             </div>
           )
         })}
 
         {Object.keys(aud).length > 0 && (
-          <div style={{ color: '#a15c00', marginTop: 10, fontSize: 13 }}>
-            🔴 下载后到 Meta 后台建 Customer List 上传（Meta 自己加密）。<strong>传完请删掉文件。</strong>
+          <div className="mt-3 text-xs leading-relaxed text-me-ochre">
+            🔴 下载后到 Meta 后台建 Customer List 上传（Meta 自己加密）。
+            <strong className="font-semibold">传完请删掉文件。</strong>
             退订/未订阅的人已自动不在名单里。
           </div>
         )}
       </div>
 
       {writebackDisabled && (
-        <div style={box('#f5efe4', '#6a5f4a')}>
+        <div className={box('neutral')}>
           成交回写功能尚未启用（需先建数据表并重新连接 Meta）。上面的「客户名单下载」不受影响，可以正常使用。
         </div>
       )}
-      {error && <div style={box('#fee', '#c00')}>读取出错：{error}</div>}
-      {loading && <div style={{ color: '#666' }}>读取中…</div>}
+      {error && <div className={box('error')}>读取出错：{error}</div>}
+      {loading && <div className="text-sm text-me-charcoal/50">读取中…</div>}
 
       {!loading && !error && !writebackDisabled && rows.length === 0 && stuck.length === 0 && clientId && (
-        <div style={box('#f4f9f4', '#276')}>没有待核对的记录 —— 都处理完了。</div>
+        <div className={box('success')}>没有待核对的记录 —— 都处理完了。</div>
       )}
 
       {stuck.length > 0 && (
-        <div ref={stuckSectionRef} style={{ marginBottom: 20 }}>
-          <h2 style={{ fontSize: 16, margin: '0 0 8px' }}>需要你动手（{stuck.length}）</h2>
+        <div ref={stuckSectionRef} className="space-y-2.5">
+          <h2 className="font-display text-base font-bold text-me-charcoal">需要你动手（{stuck.length}）</h2>
           {stuck.map((o) => {
             const wb = sendState(o)!
             const doubt = wb.status === 'in_doubt'
             return (
-              <div
-                key={o.id}
-                style={{
-                  border: '1px solid #f0c36d',
-                  background: '#fffbe6',
-                  borderRadius: 8,
-                  padding: 14,
-                  marginBottom: 10,
-                }}
-              >
-                <div style={{ fontWeight: 600, fontSize: 15 }}>
+              <div key={o.id} className="rounded-xl border border-status-attn/40 bg-me-gold/15 p-4">
+                <div className="text-[15px] font-semibold text-me-charcoal">
                   {kindLabel(o.outcome_kind)}
                   {o.outcome_kind !== 'lead' && ` · ${money(o)}`}
-                  {o.order_ref && <span style={{ color: '#888', fontWeight: 400 }}> · 单号 {o.order_ref}</span>}
+                  {o.order_ref && <span className="font-normal text-me-charcoal/50"> · 单号 {o.order_ref}</span>}
                 </div>
-                <div style={{ fontSize: 13, color: '#7a5c00', margin: '6px 0 10px' }}>
+                <div className="my-2 text-sm leading-relaxed text-me-charcoal/70">
                   {doubt
                     ? '这一笔发出去时断线了，不确定平台收到没有。系统不会自己重发 —— 重发一次就是把同一笔算成两笔，撤不回。'
                     : `上次发送没成功：${wb.last_error ?? '未知原因'}。可以再试一次。`}
                 </div>
                 {doubt ? (
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <button disabled={busy === o.id} onClick={() => void resolve(o, 'confirmed')} style={btn('#16a34a', '#fff')}>
+                  <div className="flex flex-wrap gap-2">
+                    <button disabled={busy === o.id} onClick={() => void resolve(o, 'confirmed')} className={btnSolid('status-track')}>
                       平台后台看到了 · 记为已收到
                     </button>
-                    <button disabled={busy === o.id} onClick={() => void resolve(o, 'resend')} style={btn('#b45309', '#fff')}>
+                    <button disabled={busy === o.id} onClick={() => void resolve(o, 'resend')} className={btnSolid('status-attn')}>
                       确认没收到 · 重新发送
                     </button>
                   </div>
                 ) : (
-                  <button disabled={busy === o.id} onClick={() => void retry(o)} style={btn('#374151', '#fff')}>
+                  <button disabled={busy === o.id} onClick={() => void retry(o)} className={btnSolid('me-charcoal')}>
                     再试一次
                   </button>
                 )}
                 {flash?.id === o.id && (
-                  <div style={{ marginTop: 10, fontSize: 13, color: flash.ok ? '#276' : '#c00' }}>{flash.text}</div>
+                  <div className={`mt-2.5 text-sm ${flash.ok ? 'text-status-track' : 'text-status-rej'}`}>{flash.text}</div>
                 )}
               </div>
             )
@@ -552,159 +568,184 @@ export default function ConversionsPage() {
       )}
 
       {rows.length > 0 && (
-        <div style={{ marginBottom: 12, fontSize: 14, color: '#444' }}>
-          共 <strong>{summary.count}</strong> 条待核对
+        <div className="text-sm text-me-charcoal/60">
+          共 <strong className="font-semibold text-me-charcoal">{summary.count}</strong> 条待核对
           {summary.purchases > 0 && (
             <>
               ，其中 {summary.purchases} 笔成交
               {summary.total ? (
                 <>
-                  合计 <strong>{summary.total}</strong>
+                  合计 <strong className="font-semibold tabular-nums text-me-charcoal">{summary.total}</strong>
                 </>
               ) : summary.mixed ? (
-                <span style={{ color: '#888' }}>（多种币种，不显示合计）</span>
+                <span className="text-me-charcoal/45">（多种币种，不显示合计）</span>
               ) : null}
             </>
           )}
-          。快捷键：<kbd>Y</kbd> 告诉平台 · <kbd>N</kbd> 不发送 · <kbd>↑</kbd><kbd>↓</kbd> 换一条
+          。快捷键：{kbd('Y')} 告诉平台 · {kbd('N')} 不发送 · {kbd('↑')}
+          {kbd('↓')} 换一条
         </div>
       )}
 
-      {rows.map((o, i) => {
-        const age = daysAgo(o.occurred_at)
-        const expired = age > MAX_AGE_DAYS
-        const focused = i === cursor
-        return (
-          <div
-            key={o.id}
-            ref={(el) => {
-              outcomeRefs.current[o.id] = el
-            }}
-            onClick={() => setCursor(i)}
-            style={{
-              border: focused ? '2px solid #2563eb' : '1px solid #ddd',
-              borderRadius: 8,
-              padding: 14,
-              marginBottom: 10,
-              background: expired ? '#fffbe6' : '#fff',
-              cursor: 'pointer',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 600 }}>
-                  {kindLabel(o.outcome_kind)}
-                  {o.outcome_kind !== 'lead' && ` · ${money(o)}`}
-                  {o.order_ref && <span style={{ color: '#888', fontWeight: 400 }}> · 单号 {o.order_ref}</span>}
-                </div>
-                <div style={{ color: '#666', fontSize: 13, marginTop: 4 }}>
-                  {age < 1 ? '今天' : `${Math.floor(age)} 天前`}
-                  {' · 来源：'}
-                  {{
-                    manual_seed: '人工录入',
-                    inbox_extract: '邮箱抓取',
-                    web_form: '网站表单',
-                    meta_lead_form: '广告表单',
-                    api: '接口',
-                  }[o.source_kind] ?? o.source_kind}
-                </div>
-                {expired && (
-                  <div style={{ color: '#a15c00', fontSize: 13, marginTop: 6 }}>
-                    ⚠️ 已过去 {Math.floor(age)} 天，广告平台只收 {MAX_AGE_DAYS} 天内的 —— 现在发也收不进去，选「不发送」即可。
+      <div className="space-y-2.5">
+        {rows.map((o, i) => {
+          const age = daysAgo(o.occurred_at)
+          const expired = age > MAX_AGE_DAYS
+          const focused = i === cursor
+          return (
+            <div
+              key={o.id}
+              ref={(el) => {
+                outcomeRefs.current[o.id] = el
+              }}
+              onClick={() => setCursor(i)}
+              className={`cursor-pointer rounded-xl border p-4 shadow-card transition-colors ${
+                focused ? 'border-me-ochre ring-2 ring-me-ochre/30' : 'border-black/10'
+              } ${expired ? 'bg-me-gold/10' : 'bg-white'}`}
+            >
+              <div className="flex justify-between gap-3">
+                <div>
+                  {displayName(o.customer_first) && (
+                    <div className="text-base font-bold text-me-charcoal">{displayName(o.customer_first)}</div>
+                  )}
+                  <div className={`text-[15px] font-semibold ${displayName(o.customer_first) ? 'mt-0.5 text-me-charcoal/70' : 'text-me-charcoal'}`}>
+                    {kindLabel(o.outcome_kind)}
+                    {o.outcome_kind !== 'lead' && <span className="tabular-nums"> · {money(o)}</span>}
+                    {o.order_ref && <span className="font-normal text-me-charcoal/50"> · 单号 {o.order_ref}</span>}
                   </div>
-                )}
-              </div>
+                  <div className="mt-1 text-xs text-me-charcoal/50">
+                    {age < 1 ? '今天' : `${Math.floor(age)} 天前`}
+                    {' · 来源：'}
+                    {{
+                      manual_seed: '人工录入',
+                      inbox_extract: '邮箱抓取',
+                      web_form: '网站表单',
+                      meta_lead_form: '广告表单',
+                      api: '接口',
+                      crm_hubspot: 'HubSpot 同步',
+                      crm_sheet_sync: '表格同步',
+                      messenger_conversation: '私信判断',
+                    }[o.source_kind] ?? o.source_kind}
+                  </div>
+                  {o.contact_id && (
+                    <a
+                      href={`/dashboard/clients/${clientId}/crm/all?contact=${o.contact_id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="mt-1.5 inline-block text-sm font-semibold text-me-ochre hover:underline"
+                    >
+                      查看这个客人 →
+                    </a>
+                  )}
+                  {expired && (
+                    <div className="mt-1.5 text-xs leading-relaxed text-me-ochre">
+                      ⚠️ 已过去 {Math.floor(age)} 天，广告平台只收 {MAX_AGE_DAYS} 天内的 —— 现在发也收不进去，选「不发送」即可。
+                    </div>
+                  )}
+                </div>
 
-              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                <button
-                  disabled={busy === o.id || expired}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    void approve(o)
-                  }}
-                  title={expired ? '超过 7 天，平台不收' : '告诉广告平台（会再确认一次）'}
-                  style={btn(expired ? '#eee' : '#16a34a', expired ? '#999' : '#fff')}
-                >
-                  ✓ 告诉广告平台
-                </button>
-                <button
-                  disabled={busy === o.id}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setRejecting(o.id)
-                  }}
-                  style={btn('#f3f4f6', '#333')}
-                >
-                  ✕ 不发送
-                </button>
-              </div>
-            </div>
-
-            {rejecting === o.id && (
-              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #eee' }}>
-                <div style={{ fontSize: 13, marginBottom: 6 }}>为什么不发送？（必选，将来复查要用）</div>
-                <select
-                  value={rejectReason}
-                  onChange={(e) => setRejectReason(e.target.value)}
-                  style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc', width: '100%' }}
-                >
-                  <option value="">请选择…</option>
-                  {REJECT_REASONS.map((r) => (
-                    <option key={r.value} value={r.value}>
-                      {r.label}
-                    </option>
-                  ))}
-                </select>
-                {rejectReason === 'other' && (
-                  <input
-                    value={rejectNote}
-                    onChange={(e) => setRejectNote(e.target.value)}
-                    placeholder="写一句原因"
-                    style={{ marginTop: 8, padding: 8, borderRadius: 6, border: '1px solid #ccc', width: '100%' }}
-                  />
-                )}
-                <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                <div className="flex shrink-0 items-start gap-2">
                   <button
-                    disabled={!rejectReason || busy === o.id}
-                    onClick={() => void reject(o, rejectReason, rejectNote)}
-                    style={btn(rejectReason ? '#374151' : '#eee', rejectReason ? '#fff' : '#999')}
+                    disabled={busy === o.id || expired}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void approve(o)
+                    }}
+                    title={expired ? '超过 7 天，平台不收' : '告诉广告平台（会再确认一次）'}
+                    className={`${btnSolid('status-track')} disabled:cursor-not-allowed disabled:bg-me-stone disabled:text-me-charcoal/40`}
                   >
-                    确认不发送
+                    ✓ 告诉广告平台
                   </button>
-                  <button onClick={() => setRejecting(null)} style={btn('#f3f4f6', '#333')}>
-                    取消
+                  <button
+                    disabled={busy === o.id}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setRejecting(o.id)
+                    }}
+                    className={btnNeutral()}
+                  >
+                    ✕ 不发送
                   </button>
                 </div>
               </div>
-            )}
 
-            {flash?.id === o.id && (
-              <div style={{ marginTop: 10, fontSize: 13, color: flash.ok ? '#276' : '#c00' }}>{flash.text}</div>
-            )}
-          </div>
-        )
-      })}
+              {rejecting === o.id && (
+                <div className="mt-3 border-t border-black/5 pt-3" onClick={(e) => e.stopPropagation()}>
+                  <div className="mb-1.5 text-sm text-me-charcoal/70">为什么不发送？（必选，将来复查要用）</div>
+                  <select
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                    className="w-full rounded-lg border border-me-stone bg-white px-2.5 py-2 text-sm text-me-charcoal focus:border-me-ochre focus:outline-none"
+                  >
+                    <option value="">请选择…</option>
+                    {REJECT_REASONS.map((r) => (
+                      <option key={r.value} value={r.value}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                  {rejectReason === 'other' && (
+                    <input
+                      value={rejectNote}
+                      onChange={(e) => setRejectNote(e.target.value)}
+                      placeholder="写一句原因"
+                      className="mt-2 w-full rounded-lg border border-me-stone bg-white px-2.5 py-2 text-sm text-me-charcoal placeholder:text-me-charcoal/35 focus:border-me-ochre focus:outline-none"
+                    />
+                  )}
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      disabled={!rejectReason || busy === o.id}
+                      onClick={() => void reject(o, rejectReason, rejectNote)}
+                      className={`${btnSolid('me-charcoal')} disabled:cursor-not-allowed disabled:bg-me-stone disabled:text-me-charcoal/40`}
+                    >
+                      确认不发送
+                    </button>
+                    <button onClick={() => setRejecting(null)} className={btnNeutral()}>
+                      取消
+                    </button>
+                  </div>
+                </div>
+              )}
 
-      {flash && !rows.some((r) => r.id === flash.id) && (
-        <div style={box(flash.ok ? '#f4f9f4' : '#fee', flash.ok ? '#276' : '#c00')}>{flash.text}</div>
-      )}
+              {flash?.id === o.id && (
+                <div className={`mt-2.5 text-sm ${flash.ok ? 'text-status-track' : 'text-status-rej'}`}>{flash.text}</div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {flash && !rows.some((r) => r.id === flash.id) && <div className={box(flash.ok ? 'success' : 'error')}>{flash.text}</div>}
     </div>
   )
 }
 
-function btn(bg = '#f3f4f6', fg = '#111'): React.CSSProperties {
-  return {
-    padding: '8px 12px',
-    borderRadius: 6,
-    border: '1px solid rgba(0,0,0,0.1)',
-    background: bg,
-    color: fg,
-    fontSize: 14,
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
-  }
+/** 次要动作——白底描边，用在"刷新""不发送""取消"这类不撤不回的按钮上。 */
+function btnNeutral(): string {
+  return 'whitespace-nowrap rounded-lg border border-me-stone bg-white px-3.5 py-2 text-sm font-semibold text-me-charcoal hover:bg-me-ivory'
 }
 
-function box(bg: string, fg: string): React.CSSProperties {
-  return { background: bg, color: fg, padding: 12, borderRadius: 8, fontSize: 14, marginBottom: 12 }
+/** 主要动作——纯色底，颜色按语义传（status-track=确认成功一类，status-attn=需要留意，me-charcoal=中性强调）。 */
+function btnSolid(tone: 'status-track' | 'status-attn' | 'me-charcoal'): string {
+  const bg = { 'status-track': 'bg-status-track', 'status-attn': 'bg-status-attn', 'me-charcoal': 'bg-me-charcoal' }[tone]
+  return `whitespace-nowrap rounded-lg ${bg} px-3.5 py-2 text-sm font-semibold text-white hover:opacity-90`
+}
+
+/** 页面级提示条：读取出错 / 都处理完了 / 功能未启用。 */
+function box(tone: 'error' | 'success' | 'neutral'): string {
+  const styles = {
+    error: 'bg-status-rej/10 text-status-rej',
+    success: 'bg-status-track/10 text-status-track',
+    neutral: 'bg-me-stone/50 text-me-charcoal/70',
+  }
+  return `rounded-lg px-3.5 py-3 text-sm ${styles[tone]}`
+}
+
+function kbd(key: string): React.ReactElement {
+  return (
+    <kbd className="rounded border border-me-stone bg-white px-1.5 py-0.5 font-mono text-xs font-semibold text-me-charcoal/70">
+      {key}
+    </kbd>
+  )
 }

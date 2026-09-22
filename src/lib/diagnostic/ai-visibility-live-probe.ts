@@ -63,6 +63,7 @@ export function createDefaultLiveProbe(supabase: SupabaseClient): LiveProbe {
         return emptyResult(start, 'no enabled queries configured')
       }
 
+      const identity = await loadClientIdentity(supabase, clientId)
       const questions: LiveProbeQuestionResult[] = []
       let mentions = 0
       const ranks: number[] = []
@@ -78,6 +79,9 @@ export function createDefaultLiveProbe(supabase: SupabaseClient): LiveProbe {
           const parsed = await parseRanking({
             rawResponse: out.raw_response,
             clientBrandName: brandName,
+            clientDomain: identity.domain,
+            clientAliases: identity.brand_aliases,
+            clientGeoAnchors: identity.brand_geo_anchors,
           })
           questions.push({ question: q.question, client_brand_rank: parsed.client_brand_rank })
           if (parsed.client_brand_rank !== null) {
@@ -117,6 +121,37 @@ function emptyResult(start: number, reason: string): LiveProbeResult {
     latency_ms: Date.now() - start,
     skipped: true,
     skip_reason: reason,
+  }
+}
+
+interface ClientIdentityRow {
+  domain: string | null
+  brand_aliases: string[] | null
+  brand_geo_anchors: string[] | null
+}
+
+async function loadClientIdentity(
+  supabase: SupabaseClient,
+  clientId: string,
+): Promise<ClientIdentityRow> {
+  const { data, error } = await supabase
+    .from('clients')
+    .select('domain, brand_aliases, brand_geo_anchors')
+    .eq('id', clientId)
+    .maybeSingle<ClientIdentityRow>()
+  // A missing ROW is fine — matching just falls back to the brand name. A
+  // failed QUERY is not: it would drop domain, aliases and anchors together,
+  // for every client at once, and the diagnostic score would quietly sag with
+  // nothing in the run to explain it. Fail loudly instead.
+  if (error) {
+    throw new Error(
+      `[ai-visibility-live-probe] client identity load failed (${clientId}): ${error.message}`
+    )
+  }
+  return {
+    domain: data?.domain ?? null,
+    brand_aliases: data?.brand_aliases ?? null,
+    brand_geo_anchors: data?.brand_geo_anchors ?? null,
   }
 }
 

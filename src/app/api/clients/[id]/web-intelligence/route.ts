@@ -33,9 +33,9 @@ export async function POST(req: Request, { params }: Context) {
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
   if (access.role !== 'admin') return NextResponse.json({ error: 'Administrator required' }, { status: 403 })
   try {
-    const body = await req.json() as { domain: string; url: string }
+    const body = await req.json() as { domain: string; url: string; request_id?: string }
     const domain = canonicalDomain(body.domain)
-    const request = requestSchema.parse({ client_id: id, request_id: randomUUID(), domain, url: approvedUrl(body.url, domain) })
+    const request = requestSchema.parse({ client_id: id, request_id: body.request_id ?? randomUUID(), domain, url: approvedUrl(body.url, domain) })
     // Persist the reserved request before handing off. Failed dispatch retains its receipt.
     const run = await authorize(request)
     request.request_id = run.id

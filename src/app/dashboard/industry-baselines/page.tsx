@@ -629,7 +629,7 @@ export default function IndustryBaselinesPage() {
             { key: 'ai_visibility', label: 'AI 可见度' },
             { key: 'google_serp',   label: 'Google 排名' },
             { key: 'runs',          label: 'Cron Runs' },
-            { key: 'web_intelligence', label: 'Web Intelligence' },
+            { key: 'web_intelligence', label: '竞争分析' },
           ] as const).map(({ key, label }) => (
             <button
               key={key}

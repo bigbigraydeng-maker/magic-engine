@@ -38,6 +38,9 @@ export async function upsertConnection(input: UpsertConnectionInput): Promise<vo
       {
         client_id:         input.clientId,
         provider:          input.provider,
+        ...(input.purpose ? { purpose: input.purpose } : {}),
+        ...(input.authorizingPrincipalId ? { authorizing_principal_id: input.authorizingPrincipalId } : {}),
+        ...(input.entitlementRevision ? { entitlement_revision: input.entitlementRevision } : {}),
         access_token_enc:  encryptToken(input.accessToken),
         refresh_token_enc: encryptToken(input.refreshToken),
         token_expiry:      input.tokenExpiry.toISOString(),

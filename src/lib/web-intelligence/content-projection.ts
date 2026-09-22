@@ -5,6 +5,8 @@ export type BusinessPageRole = 'homepage' | 'product_listing' | 'product_detail'
 export interface BusinessContentProfile {
   id: string
   classifyPath(pathname: string): BusinessPageRole | null
+  projectContent?(raw: string, role: BusinessPageRole): string | null
+  interpretationGuidance?: string
 }
 
 const TRACKER = /(?:bat\.bing\.com|google-analytics\.com|googletagmanager\.com|doubleclick\.net|facebook\.com\/tr|connect\.facebook\.net)/i

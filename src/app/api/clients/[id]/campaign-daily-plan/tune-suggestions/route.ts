@@ -25,7 +25,7 @@ const ACTION_LIMIT = 50
 
 interface ActionDbRow {
   id:      string
-  payload: { post_id?: unknown; [k: string]: unknown } | null
+  payload: { idempotency_key?: unknown; [k: string]: unknown } | null
 }
 
 interface ReceiptDbRow {
@@ -69,9 +69,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const rawActions = (actionsData ?? []) as ActionDbRow[]
     const actions: CampaignActionRow[] = []
     for (const r of rawActions) {
-      const pid = r.payload?.post_id
-      if (typeof pid !== 'string' || pid.length === 0) continue
-      actions.push({ id: r.id, postId: pid })
+      // Keyed by idempotency_key, not post_id: a scheduled post's receipt holds
+      // the photo id while its action row holds the resolved story id.
+      const key = r.payload?.idempotency_key
+      if (typeof key !== 'string' || key.length === 0) continue
+      actions.push({ id: r.id, idempotencyKey: key })
     }
 
     if (actions.length === 0) {

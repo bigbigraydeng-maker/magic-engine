@@ -60,6 +60,8 @@ export interface CreateDraftDeps {
   accessToken: string
   /** 客户所在地区，用来对照投放地区。给不出就跳过那条检查。 */
   expectedGeo?: string | null
+  /** 客户行业（`clients.industry`），闸门文案从广告剧本取叫法。给不出就用中性词。 */
+  industry?: string | null
 }
 
 async function record(
@@ -142,8 +144,8 @@ export async function createDraftForApproval(
   }
 
   // ── 3. 闸门 ────────────────────────────────────────────────────────
-  const report = checkLaunch(
-    adaptMetaAdSet(rawAdSet, creatives, {
+  const report = checkLaunch({
+    ...adaptMetaAdSet(rawAdSet, creatives, {
       expectedGeo: deps.expectedGeo ?? null,
       // 打法确实是重定向就直说；**不是的时候不能传 false**。
       // 传 false 会顶掉名字启发式那道保险 —— 一个叫「暖池重定向」的组
@@ -151,7 +153,8 @@ export async function createDraftForApproval(
       // 2026-08-05 自测抓到：这行原来无条件传 false，等于把闸门关了一半。
       isRetargeting: DRAFT_PLAY[draft.kind] === 'warm_pool_retarget' ? true : undefined,
     }),
-  )
+    industry: deps.industry ?? null,
+  })
   const status: DraftStatus = report.safeToActivate ? 'awaiting_approval' : 'blocked'
   const readback = renderReadback(report)
 

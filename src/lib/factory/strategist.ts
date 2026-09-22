@@ -47,7 +47,14 @@ export function pickFactoryGoal(configGoalId: unknown, activeGoals: GoalSlice[])
   return activeGoals[0] ?? null
 }
 
-function containsPhrase(haystack: string, phrase: string): boolean {
+/**
+ * Exported (issue #1579) so `src/lib/messenger-agent/verifier/policies/cts.ts` can
+ * reuse the exact same phrase-matching semantics for its brand-redline gate instead
+ * of re-implementing an equivalent-but-subtly-different normalize+includes check.
+ * This is a minimal-diff export, not a move — the factory strategist medium-priority
+ * backlog item to hoist this into a shared `shared/normalize-match` util still stands.
+ */
+export function containsPhrase(haystack: string, phrase: string): boolean {
   return normalizeAngle(haystack).includes(normalizeAngle(phrase))
 }
 

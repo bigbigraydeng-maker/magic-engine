@@ -52,6 +52,17 @@ export type OutcomeForSend = {
   amountMinor: number | null
   currency: string | null
   occurredAt: string
+  /**
+   * 没有邮箱/电话时的第三种匹配键——Facebook Messenger 私信身份（不哈希发送，
+   * 见 `src/lib/meta/capi/writer.ts`）。CTS 这类走结构化数据源的记录恒为 null。
+   */
+  pageScopedUserId: string | null
+  /**
+   * 这笔事实来自哪个渠道，由调用方（intake 层）按 `sourceKind` 决定，
+   * `writer.ts` 只做字段拼装，不从 `pageScopedUserId` 是否存在反推——
+   * 见 `src/lib/conversions/intake.ts::actionSourceForSourceKind` 的注释。
+   */
+  actionSource: 'email' | 'business_messaging'
 }
 
 /** 客户侧配置。谁去读库是调用方的事，这一层只拿现成的值。 */
@@ -59,6 +70,8 @@ export type ClientSendConfig = {
   clientId: string
   /** '64' / '61'，用于电话转国际格式。来自 clients.default_phone_country。 */
   defaultPhoneCountry: string | null
+  /** Facebook 主页 id，配合 pageScopedUserId 一起发。来自 clients.facebook_page_id。 */
+  facebookPageId: string | null
 }
 
 export interface DestinationWriter<TPayload = unknown> {

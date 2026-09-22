@@ -14,6 +14,8 @@
  * real Reborn numbers as a regression (see baseline.test.ts).
  */
 
+import { resolveAdsPlaybook, type AdsPlaybook } from './playbooks'
+
 /** One day of one campaign's metrics, as read from `ad_daily_insights`. */
 export interface DailyPoint {
   insight_date: string   // YYYY-MM-DD
@@ -143,6 +145,7 @@ function evaluateMetric(
   metric: 'ctr' | 'cost_per_result',
   direction: Direction,
   cfg: BaselineConfig,
+  playbook: AdsPlaybook,
 ): MetricVerdict {
   const pick = (p: DailyPoint) =>
     metric === 'ctr' ? p.ctr : p.cost_per_result
@@ -216,7 +219,8 @@ function evaluateMetric(
   const alerts = (r: number) =>
     direction === 'lower_is_worse' ? r < alertRatio : r > alertRatio
 
-  const label = metric === 'ctr' ? '点击率' : '每个询盘成本'
+  // Result noun comes from the industry playbook (G11) — never hardcode one industry's word here.
+  const label = metric === 'ctr' ? '点击率' : `${playbook.costPerResultLabel}成本`
   const pct = Math.round(Math.abs(1 - ratio) * 100)
 
   let verdict: Verdict = 'healthy'
@@ -292,18 +296,23 @@ const VERDICT_RANK: Record<Verdict, number> = {
  * Judge one campaign from its daily series (oldest → newest order not required;
  * sorted internally). Evaluates CTR (lower is worse) and cost-per-result
  * (higher is worse), then reports the worst of the two.
+ *
+ * `industry` is `clients.industry`; it only picks the words in the reason text
+ * (via the ads playbook). null / unknown → neutral default words.
  */
 export function judgeCampaign(
   points: DailyPoint[],
   cfg: BaselineConfig = DEFAULT_BASELINE_CONFIG,
+  industry: string | null = null,
 ): CampaignVerdict {
+  const playbook = resolveAdsPlaybook(industry)
   const sorted = [...points].sort((a, b) =>
     a.insight_date < b.insight_date ? -1 : a.insight_date > b.insight_date ? 1 : 0,
   )
 
   const metrics = [
-    evaluateMetric(sorted, 'ctr', 'lower_is_worse', cfg),
-    evaluateMetric(sorted, 'cost_per_result', 'higher_is_worse', cfg),
+    evaluateMetric(sorted, 'ctr', 'lower_is_worse', cfg, playbook),
+    evaluateMetric(sorted, 'cost_per_result', 'higher_is_worse', cfg, playbook),
   ]
 
   // Worst verdict wins, but insufficient_history only "wins" if EVERY metric is

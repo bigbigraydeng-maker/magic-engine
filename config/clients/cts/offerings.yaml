@@ -1,0 +1,206 @@
+# CTS Tours NZ — offerings fact layer (Issue #1577)
+#
+# This file is the SINGLE SOURCE OF TRUTH for which China tours CTS Tours NZ is
+# currently selling. It exists to stop the exact incident that started this
+# project: Meta's official AI reading a still-live website page and telling a
+# customer a retired tour is bookable.
+#
+# Owner: PM / FDE (manual edits only — no code should write to this file).
+# Consumers: Agent reasoning layer (Issue F) + Verifier governance layer
+# (Issue D), both loaded through src/lib/messenger-agent/offerings-loader.ts
+# (Zod-validated, 5-minute in-memory cache).
+#
+# Maintenance rule: edit this file first, then the change is live for the
+# reply agent within 5 minutes (see offerings-loader.ts cache TTL). Always
+# bump last_verified_at when you touch active_tours / retired_tours.
+#
+# `retired_tours[].still_visible_on_website: true` means the marketing page
+# is still live even though the tour is not for sale — that gap is exactly
+# what this file exists to close.
+#
+# ── 2026-09-13 first draft — READ BEFORE TRUSTING THIS FILE ────────────────
+# This draft was assembled by a Claude Code agent via WebFetch against the
+# live ctstours.co.nz site, per Issue #1577. It has NOT been reviewed by PM
+# or FDE yet. See the PR description for the full list of fields that are
+# agent-generated guesses or unresolved conflicts, in particular:
+#   - All `aliases` are agent-guessed customer phrasing, not sourced from the
+#     website or from PM/FDE. The issue recommended generating aliases with
+#     two independent agents and merging by hand; this draft only used one.
+#   - `reply_forbidden_topics` is an agent-drafted default list based on
+#     general travel-agency good practice, not something CTS or PM supplied.
+#     It needs PM/FDE sign-off before the Verifier layer enforces it.
+#
+# ── 2026-09-13 PM resolution on the 3 "known retired" tours ────────────────
+# Issue #1577 named Silk Road Discovery / A Tale of Two Cities / Shanghai &
+# Surroundings as the tours Meta's AI had wrongly reported as bookable. Live
+# WebFetch found all three still bookable with real 2027 pricing/dates. PM
+# confirmed (2026-09-13): these are genuine current tours — only their 2026
+# departure had sold out, not the tour itself. Moved to `active_tours` below
+# with real 2027 data (nights/highlights independently re-fetched from each
+# live page, not carried over from guesses). `retired_tours` is intentionally
+# empty for now — CTS has no currently-known discontinued tour on file. The
+# underlying incident (Meta's AI trusting stale/cached site info instead of
+# real-time inventory) is still the reason this whole system exists; it just
+# means the *next* wrongly-reported tour could be any tour, not only these
+# three — the Verifier's number/date-claim gates (not just the retired-tour
+# gate) are what actually protect against that.
+
+active_tours:
+  - code: golden-china
+    name: "China Discovery — Golden China"
+    aliases:
+      - "Golden China"
+      - "Golden China tour"
+      - "12-day Golden China tour"
+    price_nzd: 4999
+    departure_dates:
+      - "2026-11-16"
+    nights: 9
+    itinerary_url: "https://www.ctstours.co.nz/tours/china/discovery/golden-china"
+    highlights:
+      - "Walk the Great Wall at the Juyongguan section"
+      - "2,000-year-old Terracotta Warriors of Xi'an"
+      - "Forbidden City and Tiananmen Square"
+      - "Evening cruise on Shanghai's Huangpu River"
+      - "Hutong pedi-cab tour and family visit in old Beijing"
+      - "Zhujiajiao ancient water town"
+
+  - code: xmas-nye-akl
+    name: "China Discovery — Christmas & New Year in China (Auckland departure)"
+    aliases:
+      - "Christmas China tour"
+      - "Christmas and New Year China tour"
+      - "China Icons Collection"
+    price_nzd: 7188
+    departure_dates:
+      - "2026-12-22"
+    nights: 13
+    itinerary_url: "https://www.ctstours.co.nz/tours/china/discovery/china-icons-collection"
+    highlights:
+      - "Christmas Eve in Shanghai — Xintiandi lighting ceremony and Bund German Christmas Market"
+      - "New Year's Eve at Tang Dynasty Ever-Bright City, Xi'an"
+      - "Great Wall at Mutianyu and Beijing's Forbidden City"
+      - "Terracotta Warriors with Circle Vision Movie and Bronze Chariot"
+      - "Zhujiajiao Watertown, hutong pedi-cab tour, Beijing Duck banquet"
+      - "Chongqing's Hongyadong night view"
+      - "Yum Cha finale in Guangzhou"
+
+  - code: xmas-nye-chch
+    name: "China Discovery — Christmas & New Year in China (Christchurch departure)"
+    aliases:
+      - "Christmas China tour Christchurch"
+      - "China Icons Collection Christchurch"
+      - "South Island Christmas China tour"
+    price_nzd: 6188
+    departure_dates:
+      - "2026-12-22"
+    nights: 12
+    itinerary_url: "https://www.ctstours.co.nz/tours/china/discovery/china-icons-collection-christchurch"
+    highlights:
+      - "Direct flight ex-Christchurch via Guangzhou — no Auckland transfer"
+      - "Christmas Eve in Shanghai — Xintiandi lighting ceremony and Bund German Christmas Market"
+      - "New Year's Eve at Tang Dynasty Ever-Bright City, Xi'an"
+      - "Great Wall at Mutianyu, Forbidden City, Tian'anmen Square, Summer Palace"
+      - "Terracotta Warriors with Circle Vision Movie"
+      - "Chongqing's Hongyadong night view"
+
+  - code: best-of-china
+    name: "China Discovery — Best of China"
+    aliases:
+      - "Best of China"
+      - "Best of China tour"
+      - "China Essentials"
+    price_nzd: 4080
+    departure_dates:
+      - "2027-03-11"
+      - "2027-05-13"
+    nights: 12
+    itinerary_url: "https://www.ctstours.co.nz/tours/china/discovery/essentials"
+    highlights:
+      - "Temple of Heaven, Forbidden City, Tian'anmen Square, Great Wall, hutong pedi-cab tour"
+      - "High-speed train from Beijing to Xi'an"
+      - "Terracotta Warriors, Xi'an City Wall, Big Wild Goose Pagoda, Muslim Quarter"
+      - "Hangzhou West Lake boat tour and Longjing tea plantation"
+      - "Shanghai: Yuyuan Garden, the Bund, Nanjing Road"
+
+  - code: silk-road-discovery
+    name: "China Signature — Silk Road"
+    aliases:
+      - "Silk Road"
+      - "Silk Road Discovery"
+      - "China Signature — Silk Road"
+    price_nzd: 7999
+    departure_dates:
+      - "2027-05-13"
+      - "2027-10-21"
+    nights: 15
+    itinerary_url: "https://www.ctstours.co.nz/tours/china/signature/silk-road"
+    highlights:
+      - "Terracotta Warriors of Xi'an"
+      - "1,700-year-old Buddhist cave murals at the Mogao Caves, Dunhuang"
+      - "Zhangye Danxia rainbow rock formations"
+      - "Alpine boat cruise on Tianshan Tianchi lake beneath snow peaks"
+      - "Turpan's Flaming Mountains and Bezeklik Thousand Buddha Caves"
+      - "Jiayuguan Fort and the hanging Great Wall at the western end of the Ming Wall"
+
+  - code: tale-of-two-cities
+    name: "China Discovery — A Tale of Two Cities"
+    aliases:
+      - "A Tale of Two Cities"
+      - "Beijing Xi'an tour"
+    price_nzd: 3480
+    departure_dates:
+      - "2027-03-18"
+      - "2027-06-10"
+    nights: 7
+    itinerary_url: "https://www.ctstours.co.nz/tours/china/discovery/beijing-xian"
+    highlights:
+      - "500-year-old Temple of Heaven and its imperial gardens"
+      - "Tian'anmen Square, the world's largest public square"
+      - "The Forbidden City, 500 years of imperial residence"
+      - "The Great Wall of China"
+      - "Beijing Olympic Park — Bird's Nest and Water Cube"
+      - "High-speed train G89 to Xi'an, Terracotta Warriors"
+
+  - code: shanghai-surroundings
+    name: "China Discovery — Shanghai & Surroundings"
+    aliases:
+      - "Shanghai & Surroundings"
+      - "Shanghai Surroundings tour"
+    price_nzd: 3399
+    departure_dates:
+      - "2027-03-25"
+    nights: 7
+    itinerary_url: "https://www.ctstours.co.nz/tours/china/discovery/shanghai-surroundings"
+    highlights:
+      - "Suzhou — Master-of-Nets Garden, Tiger Hill, Shantang Street"
+      - "Wuxi — silk factory, Three Kingdoms City warship cruise and cavalry show"
+      - "Xinshi ancient water town — Hanfu photography and afternoon tea"
+      - "Hangzhou — West Lake cruise, Su Causeway, Leifeng Pagoda"
+      - "Hangzhou — Liuhe Pagoda and Longjing tea tasting"
+      - "Shanghai — the Bund, City God Temple, Nanjing Road"
+
+retired_tours: []
+# Intentionally empty (2026-09-13) — no currently-known discontinued CTS tour
+# on file. The three tours originally listed here (Silk Road / A Tale of Two
+# Cities / Shanghai & Surroundings) were confirmed by PM to still be genuine
+# current products, not retired; see the header comment. When a tour is
+# actually discontinued, add it here with `still_visible_on_website` set
+# accurately — do not leave this list empty just because nothing is top of
+# mind; the Verifier's retired-tour gate has nothing to check against while
+# this stays empty.
+
+factual_bullets:
+  - "CTS Tours NZ has operated in New Zealand for 25 years (Auckland-founded, since 2001), backed by China Travel Service — the China-wide travel brand founded in 1928. Never state 1928 alone as CTS Tours NZ's own founding year; always pair it with the 25-years-in-NZ fact (PM hard rule, repeat incident — see MEMORY project-cts-1928-vs-nz-25-years)."
+  - "NZ passport holders can visit mainland China visa-free for up to 30 days. Per ctstours.co.nz this policy is confirmed valid until 31 Dec 2026 — re-verify before quoting a travel date on or after that."
+
+reply_forbidden_topics:
+  - "Visa/immigration legal advice beyond linking the published 30-day visa-free policy"
+  - "Medical fitness or travel insurance claims advice"
+  - "Refund, cancellation, or compensation decisions — hand off to a human"
+  - "Price negotiation or discounts beyond the published per-person price"
+  - "Political or historically sensitive topics about mainland China (Taiwan, Tibet, Xinjiang, Hong Kong, Tiananmen)"
+  - "Disparaging comparisons with competitor tour operators"
+  - "Collecting or repeating a customer's passport number, ID number, or payment card details in chat"
+
+last_verified_at: "2026-09-13T00:00:00+13:00"

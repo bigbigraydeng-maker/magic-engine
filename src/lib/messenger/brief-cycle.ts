@@ -59,6 +59,7 @@ interface ConversationRow {
     source_message_count: number
     regen_count: number
     regen_count_date: string | null
+    knowledge_status: string | null
   }[]
 }
 
@@ -93,6 +94,7 @@ function toCandidate(row: ConversationRow): BriefCandidate {
     existingBriefMessageCount: brief?.source_message_count ?? null,
     regenCount: brief?.regen_count ?? 0,
     regenCountDate: brief?.regen_count_date ?? null,
+    existingKnowledgeStatus: brief?.knowledge_status === 'read_failed' ? 'read_failed' : null,
   }
 }
 
@@ -124,7 +126,7 @@ export async function loadDueBriefs(
   const { data, error } = await supabaseAdmin
     .from('conversations')
     .select(
-      'id, client_id, message_count, last_message_at, last_message_from, conversation_briefs(source_message_count, regen_count, regen_count_date)',
+      'id, client_id, message_count, last_message_at, last_message_from, conversation_briefs(source_message_count, regen_count, regen_count_date, knowledge_status)',
     )
     .gt('message_count', 0)
     // 只认私信。这个任务写出来的是「Facebook 私信简报」，喂邮件进去会得到一张
@@ -161,13 +163,13 @@ export async function generateDueBriefs(
     try {
       const messages = await loadMessages(candidate.conversationId)
       if (messages.length === 0) continue
-      const brief = await generateBrief(messages, {
+      const { brief, knowledgeStatus } = await generateBrief(messages, candidate.clientId, {
         awaitingReply: candidate.awaitingReply,
         hoursSinceLastMessage: candidate.lastMessageAt
           ? Math.round((now.getTime() - new Date(candidate.lastMessageAt).getTime()) / 3_600_000)
           : 0,
       })
-      await storeBrief(candidate, brief, now)
+      await storeBrief(candidate, brief, now, knowledgeStatus)
       generated++
     } catch (err) {
       failed++

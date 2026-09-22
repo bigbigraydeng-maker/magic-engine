@@ -246,7 +246,7 @@ describe('录入校验 · 匹配键', () => {
     const r = buildIntakeRow(purchase({ customerEmail: null, customerPhone: null }), CTX)
     expect(r.ok).toBe(false)
     if (r.ok) return
-    expect(r.errors.join()).toContain('至少要有邮箱或电话')
+    expect(r.errors.join()).toContain('至少要有邮箱、电话')
   })
 
   it('只有电话也可以', () => {
@@ -263,7 +263,56 @@ describe('录入校验 · 匹配键', () => {
     )
     expect(r.ok).toBe(false)
     if (r.ok) return
-    expect(r.errors.join()).toContain('至少要有邮箱或电话')
+    expect(r.errors.join()).toContain('至少要有邮箱、电话')
+  })
+
+  it('没有邮箱电话，但有 Facebook 私信身份 + contactId → 放行（NAL 场景）', () => {
+    const r = buildIntakeRow(
+      {
+        clientId: CTS,
+        contactId: '11111111-2222-3333-4444-555555555555',
+        outcomeKind: 'lead',
+        occurredAt: '2026-09-04T00:00:00Z',
+        sourceKind: 'messenger_conversation',
+        pageScopedUserId: '28681838868174032',
+      },
+      CTX,
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.row.page_scoped_user_id).toBe('28681838868174032')
+    expect(r.row.contact_id).toBe('11111111-2222-3333-4444-555555555555')
+  })
+
+  it('只有 Facebook 私信身份、没有 contactId → 拒——拒联检查会被整段跳过', () => {
+    const r = buildIntakeRow(
+      {
+        clientId: CTS,
+        outcomeKind: 'lead',
+        occurredAt: '2026-09-04T00:00:00Z',
+        sourceKind: 'messenger_conversation',
+        pageScopedUserId: '28681838868174032',
+      },
+      CTX,
+    )
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.errors.join()).toContain('contactId 必须提供')
+  })
+
+  it('邮箱/电话/PSID 一个都没有 → 拒，错误信息带上三个选项', () => {
+    const r = buildIntakeRow(
+      {
+        clientId: CTS,
+        outcomeKind: 'lead',
+        occurredAt: '2026-09-04T00:00:00Z',
+        sourceKind: 'messenger_conversation',
+      },
+      CTX,
+    )
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.errors.join()).toContain('Facebook 私信身份')
   })
 
   it('电话解析失败但有邮箱 → 放行 + 警告，不静默吞掉输入', () => {

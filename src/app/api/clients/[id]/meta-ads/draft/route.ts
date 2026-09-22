@@ -38,7 +38,7 @@ export async function POST(
 
   const { data: client } = await supabaseAdmin
     .from('clients')
-    .select('meta_ad_account_id, facebook_page_id, country')
+    .select('meta_ad_account_id, facebook_page_id, country, industry')
     .eq('id', clientId)
     .maybeSingle()
 
@@ -57,11 +57,20 @@ export async function POST(
 
   // client_id / page_id 一律以库为准，不信请求体 —— 否则一个客户的接口能往
   // 另一个客户的账户里建广告。
+  // 🔴 AD-SEC-2：这条注释原来只兑现了一半——客户没配主页时会回退 body.pageId，
+  // 等于又信了请求体。改成 fail closed：客户没配主页就直接拒绝，不静默用
+  // 请求体里的值顶上（那正是这个守卫本来要挡住的事）。
+  const registeredPageId = (client as { facebook_page_id?: string } | null)?.facebook_page_id
+  if (!registeredPageId) {
+    return NextResponse.json(
+      { error: '这个客户还没配 Facebook 主页（设置页 → Facebook 主页），无法建广告' },
+      { status: 424 },
+    )
+  }
   const draft: AdDraft = {
     ...(body as AdDraft),
     clientId,
-    pageId:
-      (client as { facebook_page_id?: string } | null)?.facebook_page_id ?? body.pageId ?? '',
+    pageId: registeredPageId,
   }
 
   const outcome = await createDraftForApproval(draft, {
@@ -69,6 +78,7 @@ export async function POST(
     adAccountId,
     accessToken,
     expectedGeo: (client as { country?: string } | null)?.country ?? null,
+    industry: (client as { industry?: string | null } | null)?.industry ?? null,
   })
 
   return NextResponse.json(outcome)

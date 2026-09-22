@@ -135,6 +135,14 @@ export class MetaCapiWriter implements DestinationWriter<MetaCapiPayload> {
     if (fn) userData.fn = [fn]
     if (ln) userData.ln = [ln]
 
+    // 🔴 第三种匹配键——Facebook Messenger 私信身份。官方文档原话"Do not hash"，
+    //    两个字段（PSID + 主页 id）都不哈希，跟上面 em/ph/fn/ln 处理方式不一样，
+    //    不能顺手套进 hash* 函数里。
+    if (outcome.pageScopedUserId) {
+      userData.page_scoped_user_id = outcome.pageScopedUserId
+      if (config.facebookPageId) userData.page_id = config.facebookPageId
+    }
+
     const event: MetaCapiPayload['data'][number] = {
       event_name: EVENT_NAME[outcome.outcomeKind],
       event_time: Math.floor(new Date(outcome.occurredAt).getTime() / 1000),
@@ -142,8 +150,10 @@ export class MetaCapiWriter implements DestinationWriter<MetaCapiPayload> {
       // 注意：Meta 只在 pixel↔server 之间用它去重，服务端之间不去重 ——
       // 真正防重复靠我们自己那道数据库锁，这里带上是为了跟浏览器端事件对齐。
       event_id: outcome.id,
-      // 成交来自邮件/银行转账，不是网站结账，所以是 email 不是 website。
-      action_source: 'email',
+      // 由调用方按数据来源渠道决定（见 destination-writer.ts 的字段注释），
+      // 这一层不做推断——同一个人可能既留过私信身份、又是靠邮件促成的成交，
+      // 判断"这笔事实来自哪"是业务层的事，不是"这条记录里有没有某个字段"。
+      action_source: outcome.actionSource,
       user_data: userData,
     }
 

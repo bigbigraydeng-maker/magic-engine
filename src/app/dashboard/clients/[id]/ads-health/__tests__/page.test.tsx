@@ -120,7 +120,8 @@ describe('the money question is answered before any diagnosis', () => {
       '/ad-health': respond([{ ...OZTOP_ALERT, latest_results_7d: 0 }]),
     }))
     render(<AdsHealthPage />)
-    await waitFor(() => expect(screen.getByText(/一个询盘都没来/)).toBeTruthy())
+    // No industry in the response → neutral playbook words (G11).
+    await waitFor(() => expect(screen.getByText(/一个结果都没来/)).toBeTruthy())
   })
 
   it('labels the per-lead figure 实付 so it cannot be mistaken for the verdict number', async () => {
@@ -128,7 +129,19 @@ describe('the money question is answered before any diagnosis', () => {
     // are correct and they differ — unlabelled they read as a contradiction.
     vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([OZTOP_ALERT]) }))
     render(<AdsHealthPage />)
-    await waitFor(() => expect(screen.getByText(/实付每个询盘/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/实付每个结果/)).toBeTruthy())
+  })
+
+  it('uses the client industry words from the playbook — a travel client never sees 询盘 (G11)', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health': { ...respond([OZTOP_ALERT, HEALTHY]), industry: 'travel' },
+    }))
+    render(<AdsHealthPage />)
+    await waitFor(() => expect(screen.getAllByText(/实付每个咨询/).length).toBe(2))
+    expect(screen.getByText(/过去 7 天花了/).textContent).toContain('个咨询')
+    expect(screen.getByText(/最贵的是/).textContent).toContain('一个咨询')
+    expect(screen.getAllByText(/近 7 天咨询/).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/实付每个询盘|实付每个结果/)).toBeNull()
   })
 })
 

@@ -11,6 +11,24 @@ export function isAllowedEmail(email: string): boolean {
   return getUserPermissions(email) !== null
 }
 
+/**
+ * 全局管理员精确判定——只认 `ADMIN_EMAILS` 写死名单里的精确匹配，
+ * **不**认 `ADMIN_EMAIL_DOMAIN` 的域名匹配。
+ *
+ * 用途：客户知识库双签闸（Issue #1644）判定"这个邮箱是不是 ME 全局管理员"时，
+ * 域名匹配太松——`ADMIN_EMAIL_DOMAIN=magicengine.cloud` 会让公司里任何一个人
+ * 的邮箱都被当成"全局管理员"，而这里要拦的是"内部人员冒充客户去确认自己批
+ * 准过的事实"，判据必须收紧到真正登记过的管理员名单。
+ */
+export function isGlobalAdminEmail(email: string): boolean {
+  const normalised = email.toLowerCase().trim()
+  if (!normalised) return false
+  const allowedEmails = process.env.ADMIN_EMAILS
+  if (!allowedEmails) return false
+  const list = allowedEmails.split(',').map((e) => e.toLowerCase().trim())
+  return list.includes(normalised)
+}
+
 /** 解析 "email:clientId,email2:clientId2" 这类映射 */
 function lookupScopedEntry(raw: string, normalisedEmail: string): string | null {
   for (const entry of raw.split(',').map((e) => e.trim()).filter(Boolean)) {

@@ -32,6 +32,21 @@ import { createHmac, timingSafeEqual } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { buildIdentities, resolveContact } from '@/lib/crm/identity'
+import { isOptOutKeyword, recordOptOutKeywordTouch } from '@/lib/messenger-agent/optout'
+import { recordOptOutWriteFailure } from '@/lib/messenger-agent/optout-failures'
+import { inngest } from '@/lib/inngest/client'
+// 🔴 魏征复审（2026-09-15）实测发现：这里原来自己重新声明一份同名字符串常量，
+// 而不是 import 共享契约模块 `@/lib/conversations/events.ts` 的
+// `CONVERSATION_MESSAGE_RECEIVED_EVENT` —— 那份契约模块自己的文件头就警告过
+// "改这个字符串前必须先跟 WhatsApp 那条线的实现对齐"，而这条实现的 payload
+// 形状（`body`/`occurred_at`）跟契约模块要求的 `ConversationMessageReceivedSchema`
+// （要求 `sent_at`，没有 `body`）实际上早就对不上——这条不一致因为事件名字符串
+// 本身没变而完全没被发现，直到 F1（issue #1584）第一次真的去解析这个事件才
+// 实测出来：每一条 WhatsApp 消息都会被判定成 payload 不合法，静默丢弹。
+// 改成直接 import 契约模块本身，让 TypeScript 在编译期就能看到两边共用同一个
+// 字符串常量；payload 形状也改成跟 `ConversationMessageReceivedSchema` 完全
+// 一致（见下面 emit 调用处）。
+import { CONVERSATION_MESSAGE_RECEIVED_EVENT } from '@/lib/conversations/events'
 
 export const dynamic = 'force-dynamic'
 
@@ -377,6 +392,94 @@ async function storeMessage(
     } catch (err) {
       console.error(`[webhooks/whatsapp] 记 CRM 触点失败（消息已入库，但可能不会出现在今日待办）:`, err)
     }
+  }
+
+  // Opt-out 检测（issue #1575 / #1582）：只判文本消息本身的整条内容，不是
+  // messageBody() 拼过 `[image] ...` 这类前缀的展示用文案。best-effort（跟上面
+  // 的 CRM 触点一样）——消息已经落库，退订判定写失败不该让 Meta 重投整条消息；
+  // 代价是极端情况下这一条命中会被漏记，等下一条重复的退订消息（或人工核对）
+  // 兜底，比因为这里失败而把已经存好的消息也标记成失败要小。
+  if (isOptOutKeyword(msg.text?.body ?? '')) {
+    try {
+      if (contactId) {
+        // 有 contact_id：走 optout.ts 的跨渠道写入路径（触点 + 反规范化镜像列）。
+        await recordOptOutKeywordTouch(
+          {
+            clientId,
+            contactId,
+            channel: 'whatsapp',
+            conversationId,
+            messageId: msg.id,
+            // 必须传消息真实的发送时间，不能让函数省略参数落到「现在」——
+            // 那样 Meta 的 webhook 重投会让「晚于人工纠正」这个判断永远失效
+            // （见 optout.ts 头部注释）。
+            occurredAt: sentAt,
+          },
+          supabaseAdmin,
+        )
+      } else {
+        // 没解析出 contact_id（resolveContact 是 best-effort，可能失败）：
+        // optout.ts 假设 contact 已经存在，这条会话没有可查的联系人，退回
+        // 会话级兜底列（issue #1574），不经过 optout.ts。
+        const { error: unlinkedErr } = await supabaseAdmin
+          .from('conversations')
+          .update({ optout_unlinked: true })
+          .eq('id', conversationId)
+          .eq('client_id', clientId)
+        if (unlinkedErr) {
+          console.error(
+            `[webhooks/whatsapp] 写 conversations.optout_unlinked 失败（会话 ${conversationId}）:`,
+            unlinkedErr.message,
+          )
+          // 心跳检查（issue #1587）要能看到这次失败——否则会被误判成
+          // 「没人退订、一切正常」。
+          await recordOptOutWriteFailure(
+            {
+              clientId,
+              channel: 'whatsapp',
+              conversationId,
+              contactId: null,
+              errorMessage: unlinkedErr.message,
+            },
+            supabaseAdmin,
+          )
+        }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error(`[webhooks/whatsapp] 退订触点写入失败（消息已入库）:`, err)
+      await recordOptOutWriteFailure(
+        {
+          clientId,
+          channel: 'whatsapp',
+          conversationId,
+          contactId: contactId ?? null,
+          errorMessage: message,
+        },
+        supabaseAdmin,
+      )
+    }
+  }
+
+  // emit 渠道无关事件（issue #1582）：下游分类 / agent-core 靠这个事件驱动，
+  // 不靠轮询。跟 CRM 触点一样 best-effort——消息已经落库，emit 失败不该让
+  // Meta 重投整条已经存好的消息。
+  try {
+    await inngest.send({
+      id: `whatsapp:${conversationId}:${msg.id}`,
+      name: CONVERSATION_MESSAGE_RECEIVED_EVENT,
+      data: {
+        channel: 'whatsapp',
+        client_id: clientId,
+        conversation_id: conversationId,
+        contact_id: contactId,
+        message_id: msg.id,
+        direction: 'inbound',
+        sent_at: sentAt,
+      },
+    })
+  } catch (err) {
+    console.error(`[webhooks/whatsapp] emit ${CONVERSATION_MESSAGE_RECEIVED_EVENT} 失败（消息已入库）:`, err)
   }
 }
 

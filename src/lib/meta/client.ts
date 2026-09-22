@@ -18,7 +18,7 @@ import {
   type MetaObjectiveCosts,
 } from './objective-metrics'
 
-const GRAPH_BASE = 'https://graph.facebook.com/v19.0'
+export const GRAPH_BASE = 'https://graph.facebook.com/v19.0'
 
 export interface MetaAdsInsights extends MetaObjectiveCosts {
   spend: number
@@ -212,6 +212,17 @@ export interface MetaCampaignDailyRow {
   messaging_conversations: number // CTWA conversations started
   results:       number        // max(leads, messaging) — the north-star unit, NEVER summed (see parseDailyMetrics)
   cost_per_result: number | null
+  // ── 视频完播（ads IMPACT 阶段 1 §2.2）。null = Meta 没返回（非视频广告），不是 0。
+  video_3s_views:          number | null // actions[video_view]：Meta 口径的 3 秒播放
+  video_thruplays:         number | null
+  video_p25:               number | null
+  video_p50:               number | null
+  video_p75:               number | null
+  video_p95:               number | null
+  video_p100:              number | null
+  video_avg_watch_seconds: number | null
+  /** 原始 actions 整包：结果阶梯由客户配置决定，不用每换一种结果就改表。 */
+  actions:                 MetaActionStat[] | null
 }
 
 interface GraphCampaignDailyRow extends GraphCampaignRow {
@@ -219,6 +230,24 @@ interface GraphCampaignDailyRow extends GraphCampaignRow {
   reach?:      string
   frequency?:  string
   cpm?:        string
+  video_thruplay_watched_actions?: MetaActionStat[]
+  video_p25_watched_actions?:      MetaActionStat[]
+  video_p50_watched_actions?:      MetaActionStat[]
+  video_p75_watched_actions?:      MetaActionStat[]
+  video_p95_watched_actions?:      MetaActionStat[]
+  video_p100_watched_actions?:     MetaActionStat[]
+  video_avg_time_watched_actions?: MetaActionStat[]
+}
+
+/**
+ * 视频类字段 Meta 返回 `[{action_type:'video_view', value:'544'}]`（2026-09-14 NAL 实拉）。
+ * 字段缺失 → null（这条广告没有视频数据），不伪造 0。
+ */
+function videoStat(stats: MetaActionStat[] | undefined): number | null {
+  if (!stats || stats.length === 0) return null
+  const hit = stats.find(s => s.action_type === 'video_view') ?? stats[0]
+  const n = Number(hit.value)
+  return Number.isFinite(n) ? n : null
 }
 
 // Action-type priority lists and the never-sum picker live in
@@ -272,6 +301,16 @@ function parseDailyMetrics(row: GraphCampaignDailyRow): DailyMetrics {
     messaging_conversations: messaging,
     results,
     cost_per_result: results > 0 ? base.spend / results : null,
+    video_3s_views:          row.actions?.some(a => a.action_type === 'video_view')
+      ? pickAction(row.actions, ['video_view']) : null,
+    video_thruplays:         videoStat(row.video_thruplay_watched_actions),
+    video_p25:               videoStat(row.video_p25_watched_actions),
+    video_p50:               videoStat(row.video_p50_watched_actions),
+    video_p75:               videoStat(row.video_p75_watched_actions),
+    video_p95:               videoStat(row.video_p95_watched_actions),
+    video_p100:              videoStat(row.video_p100_watched_actions),
+    video_avg_watch_seconds: videoStat(row.video_avg_time_watched_actions),
+    actions:                 row.actions ?? null,
   }
 }
 
@@ -296,6 +335,13 @@ const DAILY_FIELD_LIST = [
   'frequency',
   'cpm',
   'actions',
+  'video_thruplay_watched_actions',
+  'video_p25_watched_actions',
+  'video_p50_watched_actions',
+  'video_p75_watched_actions',
+  'video_p95_watched_actions',
+  'video_p100_watched_actions',
+  'video_avg_time_watched_actions',
 ]
 
 const DAILY_FIELDS = DAILY_FIELD_LIST.join(',')
@@ -469,6 +515,58 @@ export async function getAdDailyInsights(
     `${GRAPH_BASE}/${adAccountId}/insights?${params.toString()}`,
     'ad daily',
     parseAdDailyRow,
+  )
+}
+
+// ── Ad-set-level daily time series (ads IMPACT 阶段 1 §2.2) ─────────────────
+
+/**
+ * 一个广告组一天的指标。漏斗角色（破冰/获客/再营销）是按广告组的优化目标和受众判的，
+ * ABO 预算也挂在广告组上——只有系列级和广告级数据时，D4/D5 拿不到判定单位的花费。
+ */
+export interface MetaAdsetDailyRow extends MetaCampaignDailyRow {
+  adset_id:   string
+  adset_name: string
+}
+
+interface GraphAdsetDailyRow extends GraphCampaignDailyRow {
+  adset_id?:   string
+  adset_name?: string
+}
+
+function parseAdsetDailyRow(row: GraphAdsetDailyRow): MetaAdsetDailyRow | null {
+  if (!row.adset_id || !row.date_start) return null
+  return {
+    adset_id:      row.adset_id,
+    adset_name:    row.adset_name ?? row.adset_id,
+    campaign_id:   row.campaign_id ?? '',
+    campaign_name: row.campaign_name ?? row.campaign_id ?? '',
+    insight_date:  row.date_start,
+    ...parseDailyMetrics(row),
+  }
+}
+
+const ADSET_DAILY_FIELDS = [...DAILY_FIELD_LIST, 'adset_id', 'adset_name'].join(',')
+
+export async function getAdsetDailyInsights(
+  adAccountId: string,
+  accessToken: string,
+  since: string,
+  until: string,
+): Promise<InsightPageWalk<MetaAdsetDailyRow>> {
+  const params = new URLSearchParams({
+    fields: ADSET_DAILY_FIELDS,
+    time_range: JSON.stringify({ since, until }),
+    access_token: accessToken,
+    level: 'adset',
+    time_increment: '1',
+    limit: '500',
+  })
+
+  return fetchInsightPages<GraphAdsetDailyRow, MetaAdsetDailyRow>(
+    `${GRAPH_BASE}/${adAccountId}/insights?${params.toString()}`,
+    'adset daily',
+    parseAdsetDailyRow,
   )
 }
 

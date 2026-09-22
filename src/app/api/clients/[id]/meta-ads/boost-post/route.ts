@@ -72,7 +72,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   // Fetch client's Meta ad account ID
   const { data: client, error: clientErr } = await supabaseAdmin
     .from('clients')
-    .select('name, meta_ad_account_id')
+    .select('name, meta_ad_account_id, facebook_page_id')
     .eq('id', clientId)
     .single()
 
@@ -86,6 +86,34 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         error: 'Meta ad account not configured for this client. Set meta_ad_account_id in client settings.',
       },
       { status: 422 },
+    )
+  }
+
+  // AD-SEC-1 同类：page_id 来自请求体，必须核对它真的是这个客户登记的主页——
+  // 否则有权限的人能提交别家客户的 page_id/post_id，把广告花在别人的帖子上。
+  if (!client.facebook_page_id) {
+    return NextResponse.json(
+      { error: 'Facebook page not configured for this client. Set facebook_page_id in client settings.' },
+      { status: 422 },
+    )
+  }
+  if (client.facebook_page_id !== page_id) {
+    return NextResponse.json(
+      { error: 'page_id does not match this client\'s registered Facebook page — rejected to prevent cross-client boosting.' },
+      { status: 403 },
+    )
+  }
+  // 🔴 Codex 复审 P1：post_id 可以是「pageId_postId」复合格式，自己携带一个
+  // 主页 id。boostPagePost（meta/client.ts）里 object_story_id 的写法是
+  // 「post_id 里带下划线就原样用它，不管 pageId 参数」——如果调用方把已校验
+  // 通过的 page_id 填成 A（自己的主页），却把 post_id 填成复合格式的
+  // "B_12345"（别家主页 B 的帖子），上面那道 page_id 校验完全挡不住，Meta
+  // 那边最终推广的其实是主页 B 的帖子。这里额外核对复合 id 里嵌的主页部分。
+  const compoundPagePrefix = post_id.includes('_') ? post_id.slice(0, post_id.indexOf('_')) : null
+  if (compoundPagePrefix && compoundPagePrefix !== client.facebook_page_id) {
+    return NextResponse.json(
+      { error: 'post_id 里嵌的主页 id 跟这个客户登记的主页对不上 — 已拒绝执行，防止跨客户投放。' },
+      { status: 403 },
     )
   }
 

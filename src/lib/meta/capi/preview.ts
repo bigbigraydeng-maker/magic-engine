@@ -51,6 +51,11 @@ export function maskForPreview(
   note('电话', phone != null)
   note('名', outcome.customerFirst != null)
   note('姓', outcome.customerLast != null)
+  // 🔴 只给「有/无」，绝不把 PSID 原始值放进返回对象——这个对象会被写进
+  // me_conversion_writebacks.payload_preview 永久留底（试运行阶段必经路径）。
+  // Meta 文档说这个字段发给他们时"不哈希"，跟"我们自己存的时候要不要打码"
+  // 是两件事，不能因为前者就默认后者也不用管。
+  note('Facebook 私信身份', outcome.pageScopedUserId != null)
 
   const ageDays = (Date.now() - new Date(outcome.occurredAt).getTime()) / 86_400_000
   const tooOld = ageDays > meta.maxEventAgeDays

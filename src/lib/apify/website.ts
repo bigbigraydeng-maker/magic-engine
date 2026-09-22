@@ -39,7 +39,10 @@ export async function startWebsiteCapture(args: {
     saveMarkdown: true, saveHtml: false, saveHtmlAsFile: false,
     saveFiles: false, saveContentTypes: '', saveScreenshots: false,
     summarize: false, blockMedia: true, expandIframes: false, clickElementsCssSelector: '',
-    htmlTransformer: 'readableTextIfPossible', aggressivePrune: false,
+    // Product pages often place pricing and availability outside the article-like
+    // overview. Keep the complete cleaned page, then let ME's business projection
+    // remove framework noise without dropping commercial evidence.
+    htmlTransformer: 'none', maxScrollHeightPixels: 20_000, aggressivePrune: false,
   }, { build: args.build, maxTotalChargeUsd: args.maxChargeUsd, timeout: 120, memory: 1024 })
 }
 

@@ -47,15 +47,32 @@ export const INDEXING_SCOPE = 'https://www.googleapis.com/auth/indexing'
 export const GBP_SCOPE = 'https://www.googleapis.com/auth/business.manage'
 
 /**
+ * 只读 Google 表格权限（2026-09-13，CTS CAPI 项目）。
+ *
+ * 这套客户没有配置任何 Google 服务账号（`GOOGLE_SERVICE_ACCOUNT_CREDENTIALS`
+ * 在生产环境里根本不存在，PM 实测确认过）——所以读表格不能走服务账号那条路，
+ * 只能走这里：客户本来就用自己的 Google 账号连过一次 GSC/GA4（见
+ * `google_oauth_tokens`），这次只是给同一个连接多要一个权限，不需要另建
+ * 任何新的授权身份。
+ */
+export const SHEETS_READONLY_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly'
+
+/**
  * Combined scopes for the recommended "connect Google" flow —
- * grants GBP + GSC + GA4 + Indexing in one consent (2026-09-07 铁律 3
+ * grants GBP + GSC + GA4 + Indexing + Sheets in one consent (2026-09-07 铁律 3
  * "遇卡点必自动化"：从两次 OAuth 点击合并成一次，见 PR grant-permissions-fix).
+ *
+ * 🔴 加了新 scope 之后，**已经连过的客户不会自动拿到它**——`google_oauth_tokens`
+ *    里存的是上次同意时 Google 实际批准的 scope 列表，服务端拿旧 token 去调
+ *    新权限的 API 会被 Google 判 403。客户必须重新走一次 `/api/auth/google/connect`
+ *    才会在 Google 的同意页面上看到新权限、批准后才写得进新 token。
  */
 export const COMBINED_GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/webmasters.readonly',
   'https://www.googleapis.com/auth/analytics.readonly',
   INDEXING_SCOPE,
   GBP_SCOPE,
+  SHEETS_READONLY_SCOPE,
   'email',
 ]
 

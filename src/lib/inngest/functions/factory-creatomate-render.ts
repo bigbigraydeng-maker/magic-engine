@@ -27,6 +27,7 @@ import {
 } from '@/lib/creatomate/events'
 import { prepareSceneAssets, type PreparedScene } from '@/lib/creatomate/scene-assets'
 import { buildModifications } from '@/lib/creatomate/modifications'
+import { resolveOfferFacts, resolvePostFields } from '@/lib/creatomate/post-fields'
 import { submitRender, getRender } from '@/lib/creatomate/render'
 import { isTerminalStatus, type CreatomateRender, type CreatomateTemplateContract } from '@/lib/creatomate/types'
 import { storeCreatomateResult } from '@/lib/creatomate/store-result'
@@ -97,6 +98,16 @@ function extractTemplateContract(factoryConfig: unknown, clientId: string): Crea
   if (!c) {
     throw new Error(`该客户未配置 Creatomate 模板（clients.factory_config.render.creatomate，client=${clientId}）`)
   }
+  // 🔴 子牙设计复审 5(a)：sceneFieldMap 的 caption 槽位和 requiredPostFields 如果撞了同一个
+  // 元素名，buildModifications 里谁覆盖谁完全取决于调用顺序，是隐藏 bug 温床——运行时
+  // 直接拦，不指望配模板的人自己记得这条约束。
+  const sceneCaptions = new Set(c.sceneFieldMap.map((s) => s.caption).filter((x): x is string => !!x))
+  const overlap = (c.requiredPostFields ?? []).filter((f) => sceneCaptions.has(f))
+  if (overlap.length > 0) {
+    throw new Error(
+      `模板配置冲突：${overlap.join('、')} 同时出现在 sceneFieldMap 的镜头字幕槽位和 requiredPostFields 里，两条路径会抢着写同一个元素（client=${clientId}）`,
+    )
+  }
   return c
 }
 
@@ -108,6 +119,107 @@ async function readPostFields(
   if (error || !data) throw new Error(`content_posts not found: ${postId}`)
   if (!data.script?.trim()) throw new Error('选题没有逐字稿，无法做片')
   return { title: data.title ?? '', script: data.script }
+}
+
+/** 校验 Record<string,string>——脏数据(非对象/含非字符串值)一律拒绝，跟
+ *  client-config.ts::isStringRecord 同一套原则（这里不 import 那个私有函数，
+ *  两处各自维护同一份简单校验比跨模块导出一个内部 helper 更省心）。 */
+function isStringRecord(v: unknown): v is Record<string, string> {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  return Object.values(v as Record<string, unknown>).every((x) => typeof x === 'string')
+}
+
+/** 这条视频专属的文字覆盖——读自 `content_posts.generation_context_snapshot.endcard`
+ *  （子牙+魏征复审后的设计，2026-09-13）。`endcard` 这个 key 名是历史命名，装的不只是
+ *  片尾卡片——只要是"这条视频必须自己给值、不能用模板默认内容"的元素（片尾团名/
+ *  路线/价格/日期，以及往后可能加入的开场钩子/CTA），都走这同一个 key，不为此另开
+ *  一个子 key。`generation_context_snapshot` 这一列同时被别的功能用（如发布失败原因），
+ *  写入时必须只动 `endcard` 这个子 key，不能整列覆盖——写入侧见 `ensurePostFieldsWritten`
+ *  （2026-09-13 新增，替代了这里此前"设计上要求人填、但没有代码真的去写"的缺口）。
+ *  这里只负责读+校验。
+ *
+ *  `requiredPostFields` 声明了哪些元素名这条视频必须自己提供值——一个都不能少，缺了直接
+ *  抛错（外层 handleCreatomateRenderRequested 会把 job 标 failed，不会静默套用模板作者
+ *  写的示例内容当真发布，魏征复审 ②）。没声明 `requiredPostFields`（该客户模板没有需要
+ *  逐视频变化的文字）时，也不要求 snapshot 里有 endcard，返回空对象即可。 */
+export function resolvePostEndcardOverrides(
+  snapshot: unknown,
+  requiredPostFields: string[] | undefined,
+): Record<string, string> {
+  if (!requiredPostFields || requiredPostFields.length === 0) return {}
+
+  const root = (snapshot ?? null) as Record<string, unknown> | null
+  const endcard = root?.endcard
+  if (!isStringRecord(endcard)) {
+    throw new Error(
+      `该视频缺少 EndCard 内容（content_posts.generation_context_snapshot.endcard），模板要求填：${requiredPostFields.join('/')}`,
+    )
+  }
+
+  const missing = requiredPostFields.filter((key) => !endcard[key]?.trim())
+  if (missing.length > 0) {
+    throw new Error(`该视频 EndCard 缺字段：${missing.join('/')}——不允许静默套用模板默认内容发布`)
+  }
+  return endcard
+}
+
+async function readPostEndcardSnapshot(supabase: SupabaseClient, postId: string): Promise<unknown> {
+  const { data, error } = await supabase
+    .from('content_posts')
+    .select('generation_context_snapshot')
+    .eq('id', postId)
+    .single()
+  if (error || !data) throw new Error(`content_posts not found: ${postId}`)
+  return data.generation_context_snapshot
+}
+
+/** 这条视频指定用哪个团/档位的真实事实（如 "best_of_china"）——跟 endcard 同一列的
+ *  兄弟 key，选题/审核阶段人工标注。客户只配了一个档位时可以不标，见 post-fields.ts
+ *  ::resolveOfferFacts 的兜底规则。 */
+async function readPostOfferKey(supabase: SupabaseClient, postId: string): Promise<string | null> {
+  const snapshot = await readPostEndcardSnapshot(supabase, postId)
+  const key = (snapshot as Record<string, unknown> | null)?.offer_key
+  return typeof key === 'string' && key.trim() ? key.trim() : null
+}
+
+/**
+ * 自动把这条视频该填的真实事实（团名/路线/价格/出发日期……）算出来、写回
+ * `content_posts.generation_context_snapshot.endcard`——2026-09-13 子牙+魏征设计复审后
+ * 新增，取代此前"设计上要求人填、但从没有代码真的去写"的缺口（此前全靠人工跑脚本
+ * 代填，撞了 CLAUDE.md「FDE/PM 要填的字段必须连 Settings UI 一起做完」这条红线）。
+ *
+ * 只做**有边界的合并**：只读、只改 `.endcard` 这个子 key，`generation_context_snapshot`
+ * 上别的子 key（如发布失败原因）原样保留，不整列覆盖。
+ *
+ * 幂等：resolveOfferFacts/resolvePostFields 都是纯函数，同样的 offer_key + 客户配置
+ * 永远算出同样的值——Inngest 这一步重跑多少次，结果都一样，不会漂移（子牙复审 4）。
+ * requiredPostFields 为空（客户模板没有"每条视频必须自己给值"的字段）时整段跳过，
+ * 不产生任何写入。
+ */
+async function ensurePostFieldsWritten(
+  supabase: SupabaseClient,
+  postId: string,
+  contract: CreatomateTemplateContract,
+): Promise<void> {
+  if (!contract.requiredPostFields || contract.requiredPostFields.length === 0) return
+
+  const offerKey = await readPostOfferKey(supabase, postId)
+  const offerFacts = resolveOfferFacts({ offers: contract.offers, offerKey })
+  const postFields = resolvePostFields({
+    requiredPostFields: contract.requiredPostFields,
+    postFieldSources: contract.postFieldSources,
+    offerFacts,
+  })
+
+  const current = (await readPostEndcardSnapshot(supabase, postId)) as Record<string, unknown> | null
+  const currentEndcard = isStringRecord(current?.endcard) ? current!.endcard : {}
+  const merged = { ...(current ?? {}), endcard: { ...currentEndcard, ...postFields } }
+
+  const { error } = await supabase
+    .from('content_posts')
+    .update({ generation_context_snapshot: merged })
+    .eq('id', postId)
+  if (error) throw new Error(`写入 postFields 到 generation_context_snapshot.endcard 失败: ${error.message}`)
 }
 
 async function finalizeSuccess(
@@ -251,6 +363,18 @@ async function ensureSceneAssets(
   return step.run('prepare-assets', async () => {
     const { title, script } = await readPostFields(supabase, job.content_post_id)
     const factoryConfig = await readFactoryConfig(supabase, job.client_id)
+
+    // 🔴 必须在花钱生成分镜素材之前做，且必须在 patchJob 写 job.scenes 之前做——
+    // 外层 runWorkflow 用 `job.scenes ?? (await ensureSceneAssets(...))` 判断要不要
+    // 重跑这一步：如果这段校验排在 patchJob 之后，一旦它抛错（如客户没配这个团的
+    // 事实字典），job.scenes 已经非空，之后哪怕把配置改对了重新触发，也会因为
+    // job.scenes 非空而永远跳过这一步、跳过这段校验，只会在 submit 步骤被
+    // resolvePostEndcardOverrides 拦第二次——又变回"只能人工改数据库才能救"，
+    // 正是这条改动本来要消灭的操作（复审 acf8139a 抓出）。排在最前面，失败时
+    // job.scenes 还是空的，下次重跑会从头再来一遍，配置改对了就能自愈。
+    const contract = extractTemplateContract(factoryConfig, job.client_id)
+    await ensurePostFieldsWritten(supabase, job.content_post_id, contract)
+
     const scenes = await prepareSceneAssets({
       clientId: job.client_id,
       jobId: job.id,
@@ -260,6 +384,7 @@ async function ensureSceneAssets(
     })
     const sceneCostUsd = scenes.reduce((sum, s) => sum + s.costUsd, 0)
     await patchJob(supabase, job.id, { status: 'rendering', scenes, cost_usd: sceneCostUsd })
+
     return scenes
   })
 }
@@ -273,7 +398,18 @@ async function ensureSubmitted(
   const renderId = await step.run('submit', async () => {
     const factoryConfig = await readFactoryConfig(supabase, job.client_id)
     const contract = extractTemplateContract(factoryConfig, job.client_id)
-    const modifications = buildModifications(scenes, contract)
+
+    // 这条视频专属的 EndCard 覆盖，合并进 staticOverrides 之上——buildModifications 本身
+    // 不用感知"客户级 vs 单视频"这两层来源，调用它之前就拼成一份（子牙复审：避免
+    // buildModifications 内部再背一层新的优先级心智负担）。
+    const endcardSnapshot = await readPostEndcardSnapshot(supabase, job.content_post_id)
+    const postOverrides = resolvePostEndcardOverrides(endcardSnapshot, contract.requiredPostFields)
+    const effectiveContract: CreatomateTemplateContract = {
+      ...contract,
+      staticOverrides: { ...contract.staticOverrides, ...postOverrides },
+    }
+
+    const modifications = buildModifications(scenes, effectiveContract)
     const webhookUrl = `${requireBaseUrl()}/api/webhooks/creatomate`
     const { renderId } = await submitRender({ templateId: contract.templateId, modifications, webhookUrl })
     return renderId

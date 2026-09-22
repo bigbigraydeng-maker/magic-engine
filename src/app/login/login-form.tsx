@@ -15,8 +15,27 @@ import { createBrowserClient } from '@supabase/ssr'
  */
 
 type Mode = 'password' | 'magic'
+type Locale = 'en' | 'zh-CN'
 
-export default function LoginForm({ next, authFailed }: { next: string; authFailed?: boolean }) {
+const loginCopy = {
+  en: {
+    magicExpired: 'Magic link has expired. Please request a new one.', authFailed: 'Authentication failed. Please try again.',
+    invalidCredentials: 'Email or password is incorrect.', signInFailed: 'Sign in failed. Please try again.', sendFailed: 'Unable to send link. Please try again.',
+    checkEmail: 'Check your email', linkSent: 'Magic link sent to', expires: 'Expires in 15 minutes.', redirecting: 'Redirecting…', google: 'Continue with Google',
+    or: 'or', email: 'Email address', password: 'Password', signingIn: 'Signing in…', sending: 'Sending…', signIn: 'Sign in →', sendLink: 'Send magic link →',
+    emailLink: 'Email me a link instead', passwordLogin: 'Sign in with password',
+  },
+  'zh-CN': {
+    magicExpired: '登录链接已过期，请重新申请。', authFailed: '身份验证失败，请重试。',
+    invalidCredentials: '邮箱或密码不正确。', signInFailed: '登录失败，请重试。', sendFailed: '无法发送登录链接，请重试。',
+    checkEmail: '请检查邮箱', linkSent: '登录链接已发送至', expires: '链接将在 15 分钟后失效。', redirecting: '正在跳转…', google: '使用 Google 账号继续',
+    or: '或', email: '邮箱地址', password: '密码', signingIn: '正在登录…', sending: '正在发送…', signIn: '登录 →', sendLink: '发送登录链接 →',
+    emailLink: '改用邮箱登录链接', passwordLogin: '改用密码登录',
+  },
+} as const
+
+export default function LoginForm({ next, authFailed, locale = 'en' }: { next: string; authFailed?: boolean; locale?: Locale }) {
+  const copy = loginCopy[locale]
   const [mode, setMode]             = useState<Mode>('password')
   const [email, setEmail]           = useState('')
   const [password, setPassword]     = useState('')
@@ -31,12 +50,12 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
     const params = new URLSearchParams(hash.slice(1))
     const code = params.get('error_code')
     if (code === 'otp_expired') {
-      setError('Magic link has expired. Please request a new one.')
+      setError(copy.magicExpired)
     } else if (code) {
-      setError('Authentication failed. Please try again.')
+      setError(copy.authFailed)
     }
     window.history.replaceState(null, '', window.location.pathname + window.location.search)
-  }, [])
+  }, [copy.authFailed, copy.magicExpired])
 
   function handleGoogleLogin() {
     setGoogleLoading(true)
@@ -65,7 +84,7 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
 
       if (signInError) {
         // 不区分「账号不存在」和「密码错误」，避免暴露哪些邮箱已注册
-        setError('Email or password is incorrect.')
+        setError(copy.invalidCredentials)
         return
       }
 
@@ -74,7 +93,7 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
       })
       window.location.href = res.redirected ? res.url : next
     } catch {
-      setError('Sign in failed. Please try again.')
+      setError(copy.signInFailed)
     } finally {
       setLoading(false)
     }
@@ -92,12 +111,12 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
         body: JSON.stringify({ email: email.trim().toLowerCase(), redirectTo }),
       })
       if (!res.ok) {
-        setError('Unable to send link. Please try again.')
+        setError(copy.sendFailed)
       } else {
         setSent(true)
       }
     } catch {
-      setError('Unable to send link. Please try again.')
+      setError(copy.sendFailed)
     } finally {
       setLoading(false)
     }
@@ -116,12 +135,12 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
           className="text-xl font-black"
           style={{ fontFamily: "'Fraunces', Georgia, serif", color: '#16181D', letterSpacing: '-.02em' }}
         >
-          Check your email
+          {copy.checkEmail}
         </h3>
         <p className="mt-2 text-sm leading-6" style={{ color: 'rgba(22,24,29,.60)' }}>
-          Magic link sent to{' '}
-          <span className="font-semibold" style={{ color: '#16181D' }}>{email}</span>.
-          {' '}Expires in 15 minutes.
+          {copy.linkSent}{' '}
+          <span className="font-semibold" style={{ color: '#16181D' }}>{email}</span>{locale === 'zh-CN' ? '。' : '.'}
+          {' '}{copy.expires}
         </p>
       </div>
     )
@@ -147,13 +166,13 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
           <path d="M3.964 10.706A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.706V4.962H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.038l3.007-2.332z" fill="#FBBC05"/>
           <path d="M9 3.583c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.962L3.964 7.294C4.672 5.163 6.656 3.583 9 3.583z" fill="#EA4335"/>
         </svg>
-        {googleLoading ? 'Redirecting…' : 'Continue with Google'}
+        {googleLoading ? copy.redirecting : copy.google}
       </button>
 
       {/* Divider */}
       <div className="flex items-center gap-3 my-1">
         <div className="h-px flex-1" style={{ background: 'rgba(22,24,29,.12)' }} />
-        <span className="text-xs font-bold uppercase tracking-[0.12em]" style={{ color: 'rgba(22,24,29,.35)' }}>or</span>
+        <span className="text-xs font-bold uppercase tracking-[0.12em]" style={{ color: 'rgba(22,24,29,.35)' }}>{copy.or}</span>
         <div className="h-px flex-1" style={{ background: 'rgba(22,24,29,.12)' }} />
       </div>
 
@@ -165,7 +184,7 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
             className="block text-xs font-bold uppercase tracking-[0.12em] mb-1.5"
             style={{ color: 'rgba(22,24,29,.55)' }}
           >
-            Email address
+            {copy.email}
           </label>
           <input
             id="email"
@@ -191,7 +210,7 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
               className="block text-xs font-bold uppercase tracking-[0.12em] mb-1.5"
               style={{ color: 'rgba(22,24,29,.55)' }}
             >
-              Password
+              {copy.password}
             </label>
             <input
               id="password"
@@ -214,7 +233,7 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
             className="rounded-xl border px-3 py-2 text-sm font-semibold"
             style={{ background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }}
           >
-            {error || 'Authentication failed. Please try again.'}
+            {error || copy.authFailed}
           </p>
         )}
 
@@ -229,8 +248,8 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
           }}
         >
           {loading
-            ? (mode === 'password' ? 'Signing in…' : 'Sending…')
-            : (mode === 'password' ? 'Sign in →' : 'Send magic link →')}
+            ? (mode === 'password' ? copy.signingIn : copy.sending)
+            : (mode === 'password' ? copy.signIn : copy.sendLink)}
         </button>
 
         <div className="flex items-center justify-between pt-1 text-xs font-semibold">
@@ -240,7 +259,7 @@ export default function LoginForm({ next, authFailed }: { next: string; authFail
             style={{ color: 'rgba(22,24,29,.55)' }}
             className="underline underline-offset-2 hover:opacity-70"
           >
-            {mode === 'password' ? 'Email me a link instead' : 'Sign in with password'}
+            {mode === 'password' ? copy.emailLink : copy.passwordLogin}
           </button>
           {/*
             暂不放「忘记密码」入口：/api/auth/forgot-password 有接口但没有页面，

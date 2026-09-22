@@ -24,6 +24,10 @@ yarn-error.log*
 
 # Local env files
 .env.local
+
+# Claude Code session scratch output (used by scratch-preview launch config)
+/.claude/scratch/*
+!/.claude/scratch/.gitkeep
 .env.*.local
 
 # IDEs

@@ -25,6 +25,42 @@ export const settingsSchema = z.object({
 export type Settings = z.infer<typeof settingsSchema>
 export const requestSchema = z.object({ client_id: z.string().guid(), request_id: z.string().uuid(), domain: z.string().max(253), url: z.string().url().max(2048) }).strict()
 export type CaptureRequest = z.infer<typeof requestSchema>
+
+/** Shared vocabulary for website, media, jobs and other external intelligence feeds. */
+export const externalSourceTypeSchema = z.enum([
+  'website', 'mainstream_news', 'industry_news', 'industry_media', 'jobs',
+  'facebook_group', 'serp', 'public_ads', 'ai_visibility', 'reputation',
+])
+export type ExternalSourceType = z.infer<typeof externalSourceTypeSchema>
+export const externalSourceTierSchema = z.enum(['A', 'B', 'C'])
+export type ExternalSourceTier = z.infer<typeof externalSourceTierSchema>
+export const externalObservationStatusSchema = z.enum(['observed', 'stale', 'unavailable', 'rejected'])
+export type ExternalObservationStatus = z.infer<typeof externalObservationStatusSchema>
+export const externalObservationSchema = z.object({
+  client_id: z.string().guid(), source_type: externalSourceTypeSchema,
+  source_tier: externalSourceTierSchema, source_name: z.string().trim().min(1).max(120),
+  source_url: z.string().url().max(2048), canonical_url: z.string().url().max(2048),
+  title: z.string().trim().max(500), excerpt: z.string().trim().max(5000),
+  competitor_domain: z.string().trim().max(253).nullable(),
+  published_at: z.string().datetime({ offset: true }).nullable(),
+  observed_at: z.string().datetime({ offset: true }),
+  valid_until: z.string().datetime({ offset: true }).nullable(),
+  content_hash: z.string().regex(/^[a-f0-9]{64}$/), status: externalObservationStatusSchema,
+}).strict()
+export type ExternalObservation = z.infer<typeof externalObservationSchema>
+export const externalEventSchema = z.object({
+  client_id: z.string().guid(), event_type: z.string().trim().min(1).max(80),
+  subject: z.string().trim().min(1).max(240), competitor_domain: z.string().trim().max(253).nullable(),
+  market: z.string().trim().max(120).nullable(), related_product: z.string().trim().max(240).nullable(),
+  observation_ids: z.array(z.string().uuid()).min(1).max(20),
+  fact_status: z.enum(['fact', 'inference', 'unknown']), confidence: z.number().finite().min(0).max(1),
+}).strict()
+export type ExternalEvent = z.infer<typeof externalEventSchema>
+
+export function sourceMayStandAlone(tier: ExternalSourceTier): boolean {
+  return tier === 'A' || tier === 'B'
+}
+
 export interface Run {
   id: string; client_id: string; domain: string; url: string; period_key: string
   status: string; capture_claimed: boolean; interpretation_claimed: boolean

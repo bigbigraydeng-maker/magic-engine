@@ -204,6 +204,11 @@ function trackMarketingEvent(name, params = {}) {
 
   window.dataLayer = window.dataLayer || [];
   window.dataLayer.push({ event: name, ...payload });
+
+  if (typeof window.meTrackMetaEvent === 'function') {
+    // The Meta bridge applies its own allow-list and never receives form data.
+    window.meTrackMetaEvent(name);
+  }
 }
 
 function inferLeadDestination(href) {

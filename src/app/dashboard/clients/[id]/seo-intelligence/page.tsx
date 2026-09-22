@@ -1024,6 +1024,9 @@ export default function SeoIntelligencePage() {
     new_title: string
     new_desc: string
     wp_updated: boolean
+    applied_channel?: string
+    /** Channel-aware "is this actually live" flag from the API — wp_updated alone is only ever true for the WordPress-plugin channel. */
+    applied: boolean
     optimised_at: string
   }
   const [metaLog,        setMetaLog]        = useState<MetaLogEntry[]>([])
@@ -1469,7 +1472,7 @@ export default function SeoIntelligencePage() {
                         onClick={() => setMetaLogExpanded(isOpen ? null : entry.id)}
                       >
                         {/* Status dot */}
-                        <span className={`mt-0.5 flex-shrink-0 w-2 h-2 rounded-full mt-1.5 ${entry.wp_updated ? 'bg-green-400' : 'bg-amber-400'}`} />
+                        <span className={`mt-0.5 flex-shrink-0 w-2 h-2 rounded-full mt-1.5 ${entry.applied ? 'bg-green-400' : 'bg-amber-400'}`} />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-sm font-medium text-gray-900 truncate">
@@ -1484,8 +1487,10 @@ export default function SeoIntelligencePage() {
                               &ldquo;{entry.keyword}&rdquo;
                             </span>
                             <span className="text-xs text-gray-400">{dateStr} {timeStr}</span>
-                            {entry.wp_updated
-                              ? <span className="text-xs text-green-600 font-medium">✓ 已写入 WP</span>
+                            {entry.applied
+                              ? <span className="text-xs text-green-600 font-medium">
+                                  ✓ {entry.applied_channel === 'pr' ? '已合并上线' : '已写入 WP'}
+                                </span>
                               : <span className="text-xs text-amber-600">⚠ 未写入</span>
                             }
                           </div>

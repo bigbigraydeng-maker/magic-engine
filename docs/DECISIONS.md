@@ -7,6 +7,88 @@
 
 ---
 
+## 2026-09-21 · Campaign 作为所有增长类营销活动的唯一组织单元
+
+**决策**：ME 所有面向增长的营销执行，统一以 **Campaign** 为组织单元，不再允许"散单内容"并行运转。原 `content_posts` 直写路线、`social_plans` 独立写入路线，全部归并到 Campaign 之下。
+
+**PM 拍板（2026-09-21）**：
+
+1. **Campaign 是增长执行的入口**：Campaign 对应一个有明确目的的销售/推广周期（例如：Signature Escape 十月推广、圣诞团预售、品牌暖场），而不是"今天发一条"这种松散模式。Campaign 下可包含：社媒内容（FB/IG Post、Reel、Story）、广告计划、Newsletter。
+
+2. **Campaign 创建走对话，不走表单**：用户（客户或 FDE）用自然语言多轮对话完成 Campaign 设置——说清楚"推什么、给谁看、在哪段时间、目标是什么"，系统自动建 Campaign、拉 Master Brief、生成内容框架。传统表单 / 多级菜单 UI 退为应急兜底，不是主路径。
+
+3. **内容工厂保留，但定位收窄为"下载用内容"**：小红书推文、用于人工转发的素材、非发布用的生成内容继续走内容工厂；不与 Campaign 发布管道混用。
+
+4. **`content_posts` 降级为 Campaign 写入的存储层**：用户不直接接触 `content_posts` 这个概念；Campaign Bundle 批准后写入 `content_posts` 再流向发布，是内部实现细节。
+
+**为什么**：
+
+- ME 的核心命题是增长智能（Digital Marketing Growth Intelligence）。增长不是"每天发内容"，而是"围绕一个目标，设计一段时间窗口里的动作序列"——这就是 Campaign 的语义。散单内容无法追踪 Outcome，Campaign 有完整的 Check/Tune 闭环。
+- 当前后台存在 `content_posts`（直写）、`social_plans`（Campaign Daily Plan）、视频工厂等多套并行路径，FDE 和客户不知道从哪里进、从哪里发，发出去的内容也无法归因到某个增长目标。
+- 对话式创建是 ME 区别于传统营销 SaaS 的核心差异点：客户不需要学软件，只需要说清楚"我想做什么"。
+
+**影响**：
+
+- 新客户（含 NM Medspa）的社媒内容，后续统一先建 Campaign，再从 Campaign 出内容，不再直写 `content_posts`。
+- 现有无 Campaign 归属的 `content_posts` 记录（历史散单内容），在 UI 上标"散单 / 待归入"，不迁移但也不继续新增。
+- Campaign 创建界面：v1 实现多轮对话补全（`campaign_id`、时间窗、目标受众、核心诉求、关联 Master Brief），表单填写降为备用。
+- Newsletter 纳入 Campaign 作为一路输出，与社媒内容共享 Campaign 目的和受众定义，单独管理发送时间和内容格式。
+- 发布管道：Campaign Bundle 批准 → 写 `content_posts`（`status=approved`）→ 发布 → 回写 `content_posts.publer_post_id` / `published_at`。
+
+---
+
+## 2026-09-21 · 数组列一律存空数组不存 NULL；订正 `clients.brand_aliases`「schema 漂移」误判
+
+**决策（技术决策，两条）**：
+1. **接口清空别名时写 `[]`，不再写 NULL。** `clients.brand_aliases` 自 `20260625000001_a21_goal_current_value.sql`
+   起就是 `NOT NULL DEFAULT '{}'`（该 migration 已回填存量 NULL 并 `SET DEFAULT` / `SET NOT NULL`），仓库和线上
+   本就一致，**没有漂移，不需要新增对齐 migration**——最初排查时只看了引入该列的 `20260624010000`，漏看了同一列
+   后续还被 `20260625000001` 加固过，误判成「线上手工改动、仓库未记录」。
+2. **往后数组列一律存 `[]`，除非确有读取方靠 NULL 和 `[]` 区分行为。** NULL 在这里没有任何含义，
+   只多出一个能把写操作打挂的状态。这条判断本身不受上面订正影响。
+
+**为什么**：真正的 bug 只在接口代码——`clients.brand_aliases` 早就是 NOT NULL，但 PATCH 清空时仍写 NULL，
+数据库拒绝（23502），接口 500，品牌别名设置面板能加不能清空。2026-09-21 在本机 Postgres 沙盘复现确认。
+现有全部读取方（`isBrandedKeywordWithAliases`、`auto-fetch`、`rankings`、`crm/touchpoints`、`serp-capture`）
+本来就把 NULL 和 `[]` 当同一件事，所以存 `[]` 是零行为变化的那一侧。
+
+**影响**：[PITFALLS B5](./PITFALLS.md) 记录的教训改为「判断 schema 漂移前必须 grep 该列全部历史 migration，
+不能只看引入它的那一条」，而不是「线上被手工改过仓库不知道」。兄弟接口 `primary-keywords` / `competitor-domains` /
+`products` / `excluded-topics` 仍在写 `? null :`，2026-09-21 实测这四列线上确实是可空所以没炸，已记入 B5 待清理，
+本次不动以保持改动范围最小。
+
+## 2026-09-20 · SEO 标题周循环 v1：新自动化一律上 Inngest、按真实用量定规模、自动改文案必过信息完整闸门
+
+**决策（PM 2026-09-20 拍板，三条）**：
+1. **往后所有新的跨步骤自动化流程，一律跑在 Inngest 上，每一步留机器可读回执。** 旧的 `cts-seo-optimizer`（Render 定时盲改标题）已退役，换成 Inngest 两段式 `cloud-seo-meta-cycle-fanout` + `cloud-seo-meta-cycle-run-one`，六步各写一条 `cron_run_logs`。
+2. **按真实用量定设计规模。** 实际用量是一个客户每周 ≤3 个页面，所以自动撤回、来回改封顶、学习记忆写入、跨客户预算熔断这套机器全部砍掉——复审两轮找到的 bug 全出在自动撤回这块。改坏了（14 天回查判定变差）只下发一条人工看板待办，指向那条已合并 PR 自带的 GitHub Revert 按钮，不写任何新的撤回代码。
+3. **SEO 文案只在信息完整时才改。** 必须同时有 DataForSEO 搜索量 + 难度、实时搜索结果前 3、且关键词确实属于这个页面（这个页面自己的 GSC 搜索词），才许改；缺任何一样 = 跳过并记原因，**绝不默认填值**。给客户打开开关前，先跑一次演练（`dry_run`）给 PM 看。
+
+**为什么**：第一次真跑（W38）自动合并了 2 条错误改动（见 [PITFALLS D10](./PITFALLS.md)），六步回执全绿却改错了字——缺数据时默认填 0、关键词跨页借用，是直接原因。
+
+**影响**：信息完整闸门见 `src/lib/seo-meta/cycle/gate.ts`（PR #1816）；CTS 开关 `clients.seo_config.meta_cycle_enabled` 目前关闭，等 PM 看过下一次演练再开。设计文档 [`docs/specs/2026-09-20-seo-meta-cycle-v1-spec.md`](./specs/2026-09-20-seo-meta-cycle-v1-spec.md)，跟进清单见 Issue [#1807](https://github.com/bigbigraydeng-maker/magic-engine/issues/1807)。
+
+## 2026-09-13 · 客户知识库作为 Governed Lead-Reply Agent 的事实层，替代 offerings.yaml 路线
+
+**决策**：AI 对终端客人说出口的业务事实（价格、时效、承诺、退改政策、在售/停售产品等），统一存放在**逐条治理的客户知识表**里，而不是按客户放 `config/clients/<client>/offerings.yaml` 文件。该知识表是已登记 L1 候选「Governed Lead-Reply Agent」（`docs/registry/platform-candidates.md`）的**事实层子能力**，不另立 L1。原方案"3 个客户后再抽 `client_offerings` 表"作废。
+
+**PM 拍板（2026-09-13）**：
+1. **双签**：ME/FDE 先批草稿；价格/时效/承诺/政策类条目必须**客户本人确认**后才对终端客人生效。确认人由全局管理员单独登记，经发到客户邮箱的一次性链接、点按钮提交确认；确认人不得是任何 ME 身份，不得是登记人或批草稿的人。
+2. **先做功能，套餐准入延后**：原"仅 NZ$499 档以上或 FDE 托管客户开放"暂不实现（五档会员在代码里尚不存在，`clients.plan_tier` 仍是老三档 starter/growth/enterprise）；v1 只做单客户开通开关（默认关）。
+3. **必须和客户一起测试上线**：内部整理 → 客户共测（AI 出草稿不发送，双方抽查）→ 上线。首个试点客户 = New Asian Logistics。
+
+**为什么**：
+- 文件 + PR 路线做不到逐条客户确认、有效期、证据溯源；改一次价格要合一次代码。
+- ME 已有 6 套互不相通的"AI 脑子"（`master_briefs`、`voice_knowledge_documents`、`voice_tenants.settings.brain`、`src/lib/messenger/brief.ts` 提示词、规划中的 offerings.yaml、ME 之外的 ElevenLabs 提示词），其中 `brief.ts` 把 CTS 的事实写死在所有客户共用的代码里，且 `brief-cycle.ts` 调用时不传 clientId——非 CTS 客户拿到的也是 CTS 提示词。
+- NAL 真实私信证明对话不能直接当训练材料：同一价格有 4/2、7/5、6/4 多个版本，一个快捷回复模板把"20 公斤以下"写成"10 公斤以下"已发给 28 位顾客。
+
+**影响**：
+- Governed Lead-Reply Agent 方案的 Layer 1 改读知识库读取入口；数字核实闸核对"已批 + 客户已确认 + 有效期内"的值；自动确认回复不得读知识库事实。随该方案 2026-09-15 三审同步修改。
+- 对话知识萃取永不自动上线；敏感度用确定性规则判定（出现任意数字即非 general），不依赖 AI 标签。
+- 回复草稿在显示和发送前各做一次输出检查，草稿里的数字对不上生效条目即撤回转人工。
+- 上线发送走 Governed Reply 的"草稿 → 人工点发"链路，不经执行内核（内核 v1 拒绝撤不回的对外动作）。
+- 设计与两轮复审记录：本机 plan `client-knowledge-base-capability.md` §9–§9.14。实施按 A 级分 6 个 PR，每个实施后复审。
+
 ## 2026-09-09 · ME ↔ Creatomate 视频生产职责边界冻结
 
 **决策**：PM 拍板，Magic Engine 视频生产系统里 ME 与 Creatomate 的分工边界正式冻结为后续架构依据（PM 原话，逐字保留）：

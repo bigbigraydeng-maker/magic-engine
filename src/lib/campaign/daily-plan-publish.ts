@@ -98,8 +98,15 @@ export interface CampaignDailyPublishedPost {
   idempotency_key: string
   /** Real Graph API post id. Never synthesised. */
   post_id: string
-  /** Which Graph field the id came from, so an audit can tell them apart. */
+  /** Which Graph field the id came from, so an audit can tell them apart.
+   *  `id` = bare photo id (a scheduled photo); its feed story id is resolved
+   *  after it goes public by the story-resolve workflow, not stored here. */
   post_id_source: 'post_id' | 'id'
+  /** Fixed code, present when the measurement-bound event (published or
+   *  story-resolve) was not handed off: `event_contract_invalid` or
+   *  `event_send_failed`. The post is still on Facebook; only measurement is
+   *  missing, and a failed record was written for the daily to-do list. */
+  measurement_skipped_reason?: string
   page_id: string
   /** When *we* handed the post to Facebook. Same value whether Facebook
    *  publishes immediately or holds it until `scheduled_publish_time`. */
@@ -160,6 +167,7 @@ const publishedPostSchema = z.object({
   idempotency_key: z.string().min(1),
   post_id: z.string().min(1),
   post_id_source: z.enum(['post_id', 'id']),
+  measurement_skipped_reason: z.string().min(1).optional(),
   page_id: pageIdSchema,
   published_at: z.string().datetime(),
   scheduled_publish_time: z.string().datetime().optional(),
@@ -400,4 +408,85 @@ export type DailyPlanPostPublishedEvent = z.infer<typeof DailyPlanPostPublishedE
 /** Stable id for the internal per-window measurement event. */
 export function measurementEventId(idempotencyKey: string, hours: number): string {
   return `${idempotencyKey}:measurement:${hours}`
+}
+
+// ─── Story-resolve contract (scheduled photo → feed story id) ───────────────
+
+/**
+ * A scheduled photo comes back from `/photos` with only its photo id, and Meta
+ * documents `page_story_id` as applying only to *published* photos
+ * (https://developers.facebook.com/docs/graph-api/reference/photo/). So the
+ * publisher cannot know the feed post id at publish time. Instead it emits this
+ * event; a cloud workflow waits until the photo is public, reads the story id
+ * back, and only then emits the standard `daily_plan.post.published` with the
+ * same idempotency key as its event id.
+ *
+ * The payload carries every field the standard event needs except `post_id`
+ * and `permalink`, which only exist after resolution.
+ */
+export const DAILY_PLAN_POST_STORY_RESOLVE_EVENT = 'daily_plan.post.story_resolve_due' as const
+
+export const StoryResolveDueSchema = z.object({
+  client_id: uuidLike,
+  campaign_id: uuidLike,
+  plan_id: uuidLike,
+  plan_revision: z.string().datetime(),
+  review_revision: uuidLike,
+  date: dateStringSchema,
+  idempotency_key: z.string().min(1).max(512),
+  photo_id: z.string().regex(/^\d{5,25}$/, 'photo_id must be a numeric Meta photo id'),
+  page_id: pageIdSchema,
+  published_at: z.string().datetime(),
+  scheduled_publish_time: z.string().datetime().optional(),
+  measure_at: z.array(measureWindowSchema).min(1).max(4),
+})
+
+export type StoryResolveDue = z.infer<typeof StoryResolveDueSchema>
+
+/** `cron_run_logs.job_name` for the story-resolve workflow's outcome records (read by the daily to-do list). */
+export const STORY_RESOLVE_JOB_NAME = 'daily-plan-post-story-resolve'
+
+/**
+ * Includes the photo id: recalling a Post and re-publishing the same content
+ * reuses the idempotency key but creates a *new* photo. Keying on the key alone
+ * would let Inngest's event dedupe swallow the re-publish's resolve event while
+ * the old run wakes up, finds its photo recalled and ends — leaving the live
+ * re-published Post unmeasured.
+ */
+export function storyResolveEventId(idempotencyKey: string, photoId: string): string {
+  return `${idempotencyKey}:resolve:${photoId}`
+}
+
+/**
+ * When to try reading the story id, in minutes after the photo is due to be
+ * public. Bounded on purpose: a photo that still has no story id six hours
+ * after its publish time needs a human, not another retry.
+ */
+export const STORY_RESOLVE_ATTEMPT_OFFSETS_MINUTES = [10, 60, 360] as const
+
+export function storyResolveAttempts(due: Pick<StoryResolveDue, 'published_at' | 'scheduled_publish_time'>): { attempt: number; at: string }[] {
+  const visibleAt = Date.parse(due.scheduled_publish_time ?? due.published_at)
+  return STORY_RESOLVE_ATTEMPT_OFFSETS_MINUTES.map((minutes, index) => ({
+    attempt: index + 1,
+    at: new Date(visibleAt + minutes * 60_000).toISOString(),
+  }))
+}
+
+/** The standard published-event payload, once the story id is known. Validate before sending. */
+export function publishedEventFromResolved(due: StoryResolveDue, storyId: string): Record<string, unknown> {
+  return {
+    client_id: due.client_id,
+    campaign_id: due.campaign_id,
+    plan_id: due.plan_id,
+    plan_revision: due.plan_revision,
+    review_revision: due.review_revision,
+    date: due.date,
+    idempotency_key: due.idempotency_key,
+    post_id: storyId,
+    page_id: due.page_id,
+    published_at: due.published_at,
+    ...(due.scheduled_publish_time ? { scheduled_publish_time: due.scheduled_publish_time } : {}),
+    permalink: `https://www.facebook.com/${storyId}`,
+    measure_at: due.measure_at,
+  }
 }

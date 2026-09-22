@@ -148,6 +148,16 @@ describe('createDraftForApproval', () => {
     expect(r.status).toBe('blocked')
   })
 
+  it('客户行业真的传进闸门文案（G11 接线）：travel 说「客户服务市场」，不说中性词', async () => {
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(DRAFT, {
+      supabase: sb, adAccountId: 'act_1', accessToken: 'tok', expectedGeo: 'Auckland', industry: 'travel',
+    })
+    const geo = r.findings.find((f) => f.code === 'geo_mismatch')
+    expect(geo?.message).toContain('客户服务市场在「Auckland」')
+    expect(geo?.message).not.toContain('客户业务')
+  })
+
   it('建到一半失败 → failed，并且把没删干净的东西记下来', async () => {
     mPublish.mockResolvedValue({
       ok: false, step: 'creative', error: 'bad image_hash', orphans: ['camp1'],

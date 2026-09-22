@@ -37,6 +37,8 @@ import { getValidTokenForConnection } from '@/lib/platform-oauth/token-manager'
 import { fetchMailSince, type MailFolder, type MailMessage } from '@/lib/microsoft/mail-graph'
 import { classifySender } from '@/lib/microsoft/mail-sender'
 import { resolveContact } from '@/lib/crm/identity'
+import { sendInngestEvent } from '@/lib/workflows/inngest-event'
+import { CONVERSATION_MESSAGE_RECEIVED_EVENT } from '@/lib/conversations/events'
 
 // ─── 计划（纯函数，不碰数据库） ──────────────────────────────────────────────
 
@@ -349,6 +351,45 @@ interface StoredThread {
   conversationId: string
   contactId: string | null
   newMessages: number
+  /**
+   * Graph 消息 id，这一轮真正新插进 `conversation_messages` 的那些（不含被
+   * `ignoreDuplicates` 挡掉的重复行）。`syncMailbox` 用它决定该给哪几条消息
+   * emit `conversation/message.received`——只有"这一轮真的新存了"才该触发
+   * 下游 F1-F4，重放/重复同步不能对着同一封信再触发一遍。
+   */
+  insertedMessageIds: string[]
+}
+
+/**
+ * 「同一封信」的兜底指纹——方向 + 发送时间，精确到秒（Graph 给的时间戳本身
+ * 就是秒级精度，取毫秒只是白多一层假精确）。
+ *
+ * PR #1714 把 `mail-graph.ts` 读信时用的消息 id 从 Graph 默认的 REST id 换成了
+ * `ImmutableId`。这个同步在那之前已经长期把 REST id 存进 `message_id` /
+ * `source_ref`，上线当次的水位线回看窗口（6 小时，见 `WATERMARK_LOOKBACK_MS`）
+ * 会把刚存过的信再读一遍——但这次 Graph 吐出来的是另一种 id，跟库里存的对不上，
+ * `(conversation_id, message_id)` / `(client_id, source, source_ref)` 两个唯一键
+ * 都认不出是同一封，会被当成新信重复插入。同一封信不管用哪种 id 格式，方向和
+ * 发送时间不会变，拿它兜底再认一次（2026-09-15 Codex 复审 PR #1714 指出）。
+ *
+ * 🔴 **只在切换那一刻之前收到的信上生效，不是永久规则**（2026-09-15 子牙架构
+ * 复审同一个 PR 指出）。真实邮件时间戳只有秒级精度——同一条线程 / 同一个人
+ * 名下，只要同一秒内来了两封方向相同的不同邮件（客户连发两条、或历史批量
+ * 回填时的巧合），指纹会撞上，第二封会被**永久静默丢弃**，违反这个同步自己
+ * 「一封都不能丢」的铁律。这个兜底存在的理由只是「换 id 格式那一刻，库里
+ * 已经躺着一批用旧格式存的信」——`IMMUTABLE_ID_CUTOVER_AT` 之后收到的信，
+ * 从第一次读到最后一次读用的都是同一种（`ImmutableId`）格式，根本不会撞上
+ * 这个问题，也就不该承担这份「误判成重复」的风险。
+ */
+const IMMUTABLE_ID_CUTOVER_AT = new Date('2026-09-15T20:00:00Z').getTime()
+
+function messageSignature(direction: string, at: string): string {
+  return `${direction}|${Math.floor(new Date(at).getTime() / 1000)}`
+}
+
+/** 这封信收到时，`mail-graph.ts` 是不是已经在用稳定 id 了——是的话直接信 id，不用指纹兜底。 */
+function receivedBeforeIdFormatCutover(at: string): boolean {
+  return new Date(at).getTime() < IMMUTABLE_ID_CUTOVER_AT
 }
 
 /** 存一条邮件线程和它的信。抛异常一路上抛 —— 调用方要靠它决定停不停。 */
@@ -385,24 +426,55 @@ async function storeThread(
     throw new Error(`存邮件对话失败: ${error?.message}`)
   }
 
-  const { data: inserted, error: msgErr } = await supabaseAdmin
+  // 先看这条线程库里已经有哪些信——message_id 精确匹配的照常交给下面的 upsert
+  // 去重；id 对不上但「方向 + 发送时间」对得上的，说明是同一封信换了个 id 格式
+  // 读回来的，直接跳过，不再插一行。
+  const { data: existingRows } = await supabaseAdmin
     .from('conversation_messages')
-    .upsert(
-      thread.messages.map((m) => ({
-        conversation_id: row.id,
-        message_id: m.id,
-        direction: m.direction,
-        sender_name: m.direction === 'inbound' ? thread.counterparty.name : null,
-        body: m.preview,
-        sent_at: m.receivedAt,
-      })),
-      { onConflict: 'conversation_id,message_id', ignoreDuplicates: true },
-    )
-    .select('id')
+    .select('message_id, direction, sent_at')
+    .eq('conversation_id', row.id)
 
-  if (msgErr) {
-    // 信没存下是可惜，但线程行已经在了、人还能接上 —— 不为此放弃整条线程。
-    console.error('[mail-ingest] 存邮件正文失败:', msgErr)
+  const existingIds = new Set((existingRows ?? []).map((r) => r.message_id as string))
+  const existingSignatures = new Set(
+    (existingRows ?? []).map((r) =>
+      messageSignature(r.direction as string, r.sent_at as string),
+    ),
+  )
+  const toStore = thread.messages.filter((m) => {
+    if (existingIds.has(m.id)) return true
+    // 换过 id 格式那一刻之后收到的信，从第一次读到之后每一次都是同一种格式，
+    // 不会撞上「同一封信、两种 id」这个问题——不用指纹兜底，直接当新信存，
+    // 免得把同一秒内两封方向相同的不同邮件误判成重复、悄悄丢掉一封。
+    if (!receivedBeforeIdFormatCutover(m.receivedAt)) return true
+    return !existingSignatures.has(messageSignature(m.direction, m.receivedAt))
+  })
+
+  let inserted: { id: string; message_id: string }[] | null = []
+  if (toStore.length > 0) {
+    const { data, error: msgErr } = await supabaseAdmin
+      .from('conversation_messages')
+      .upsert(
+        toStore.map((m) => ({
+          conversation_id: row.id,
+          message_id: m.id,
+          direction: m.direction,
+          sender_name: m.direction === 'inbound' ? thread.counterparty.name : null,
+          body: m.preview,
+          sent_at: m.receivedAt,
+        })),
+        { onConflict: 'conversation_id,message_id', ignoreDuplicates: true },
+      )
+      // `ignoreDuplicates: true` 生成 `ON CONFLICT DO NOTHING`——PostgREST 的
+      // `.select()` 只回传真正插进去的行，被去重挡掉的重复行不会出现在这里。
+      // `insertedMessageIds` 因此天然就是"这一轮真的新存了"的集合，不用另外
+      // 再比对一次 existingIds。
+      .select('id, message_id')
+
+    if (msgErr) {
+      // 信没存下是可惜，但线程行已经在了、人还能接上 —— 不为此放弃整条线程。
+      console.error('[mail-ingest] 存邮件正文失败:', msgErr)
+    }
+    inserted = data
   }
 
   // 消息数用**库里实际有多少条**，不能用这一批的条数。
@@ -424,6 +496,53 @@ async function storeThread(
     conversationId: row.id as string,
     contactId: (row.contact_id as string | null) ?? null,
     newMessages: inserted?.length ?? 0,
+    insertedMessageIds: (inserted ?? []).map((r) => r.message_id),
+  }
+}
+
+/**
+ * 这一轮真正新存的入站信，逐条 emit `conversation/message.received`——issue
+ * #1745 调研结论指出的缺口：Messenger/WhatsApp webhook 早就在 emit 这个事件，
+ * 邮件同步却从来没有，导致就算 `channel-dispatch.ts` 认识了 `'email'`，F1-F4
+ * 也永远不会被邮件触发。
+ *
+ * Best-effort，跟 Messenger/WhatsApp webhook 同一个态度（见
+ * `webhooks/whatsapp/route.ts` emit 前的注释）：消息已经落库是这次同步真正要
+ * 保证的事，emit 失败只打日志，不能让一次 Inngest 网络抖动导致整个邮箱同步
+ * 提前失败、更晚的线程也读不到。
+ *
+ * 只处理入站（`direction === 'inbound'`）——我们自己发出去的信（比如
+ * `sendMailReply` 立刻写进时间线那条）不该触发一次"客户消息进来了"。
+ */
+async function emitNewInboundMessageEvents(
+  clientId: string,
+  conversationId: string,
+  contactId: string | null,
+  thread: PlannedThread,
+  insertedMessageIds: readonly string[],
+): Promise<void> {
+  if (insertedMessageIds.length === 0) return
+  const insertedIds = new Set(insertedMessageIds)
+  const newInbound = thread.messages.filter((m) => m.direction === 'inbound' && insertedIds.has(m.id))
+
+  for (const m of newInbound) {
+    try {
+      await sendInngestEvent({
+        id: `mail:${conversationId}:${m.id}`,
+        name: CONVERSATION_MESSAGE_RECEIVED_EVENT,
+        data: {
+          channel: 'email',
+          client_id: clientId,
+          conversation_id: conversationId,
+          contact_id: contactId,
+          message_id: m.id,
+          direction: 'inbound',
+          sent_at: m.receivedAt,
+        },
+      })
+    } catch (err) {
+      console.error(`[mail-ingest] emit ${CONVERSATION_MESSAGE_RECEIVED_EVENT} 失败（消息已入库）:`, err)
+    }
   }
 }
 
@@ -433,10 +552,38 @@ async function writeTouchpoints(
   contactId: string,
   thread: PlannedThread,
 ): Promise<number> {
+  // 按**这个人**取已有触点，不按这条线程——线程缺 conversationId 时会用
+  // `mail-msg:<id>` 自成一条线程（见 threadKey），id 格式一换，那条线程本身
+  // 都是新的，光比对同一条线程里的旧记录挡不住重复。同一个人身上不会有两条
+  // 「同一时刻、同一方向」的真实触点，按人比对能兜住这种情况。
+  const { data: existingRows } = await supabaseAdmin
+    .from('contact_touchpoints')
+    .select('source_ref, direction, occurred_at')
+    .eq('client_id', clientId)
+    .eq('contact_id', contactId)
+    .eq('channel', 'email')
+
+  const existingRefs = new Set((existingRows ?? []).map((r) => r.source_ref as string))
+  const existingSignatures = new Set(
+    (existingRows ?? []).map((r) =>
+      messageSignature(r.direction as string, r.occurred_at as string),
+    ),
+  )
+  const toWrite = thread.messages.filter((m) => {
+    if (existingRefs.has(m.id)) return true
+    // 同上（见 storeThread）：只在换 id 格式那一刻之前收到的信上信这份指纹，
+    // 这份兜底比消息去重更宽——按人比对，不按单条线程——过了切换时刻还
+    // 继续按指纹判重复，撞车概率会比消息去重更高。
+    if (!receivedBeforeIdFormatCutover(m.receivedAt)) return true
+    return !existingSignatures.has(messageSignature(m.direction, m.receivedAt))
+  })
+
+  if (toWrite.length === 0) return 0
+
   const { data, error } = await supabaseAdmin
     .from('contact_touchpoints')
     .upsert(
-      thread.messages.map((m) => ({
+      toWrite.map((m) => ({
         client_id: clientId,
         contact_id: contactId,
         channel: 'email',
@@ -563,6 +710,17 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
             .is('contact_id', null)
         }
       }
+
+      // 下游 F1-F4 靠这个事件驱动（issue #1745）——contact_id 允许 null（客人
+      // 第一次来信、这条对话还没认到人），下游据此决定要不要跳过需要联系方式
+      // 的步骤，跟 Messenger/WhatsApp webhook 是同一个约定。
+      await emitNewInboundMessageEvents(
+        target.clientId,
+        stored.conversationId,
+        contactId,
+        thread,
+        stored.insertedMessageIds,
+      )
 
       if (contactId) {
         touchpoints += await writeTouchpoints(target.clientId, contactId, thread)
