@@ -89,6 +89,24 @@
 - 上线发送走 Governed Reply 的"草稿 → 人工点发"链路，不经执行内核（内核 v1 拒绝撤不回的对外动作）。
 - 设计与两轮复审记录：本机 plan `client-knowledge-base-capability.md` §9–§9.14。实施按 A 级分 6 个 PR，每个实施后复审。
 
+## 2026-09-09 · ME ↔ Creatomate 视频生产职责边界冻结
+
+**决策**：PM 拍板，Magic Engine 视频生产系统里 ME 与 Creatomate 的分工边界正式冻结为后续架构依据（PM 原话，逐字保留）：
+
+1. Magic Engine 负责导演和决策，包括目标理解、叙事结构、脚本、镜头表、素材选择、节奏、字幕、音乐情绪、CTA 和审片。
+2. Creatomate 负责执行已经制作好的模板，只能填充模板中已声明的槽位，不能动态创建新的镜头结构、页面或时间线。
+3. 每一种新的视频形态，都必须先在 Creatomate 可视化工具中制作新模板。
+4. ME 需要维护模板注册表，记录模板版本、可用槽位、字段类型、约束、画幅、时长和预览信息。
+5. Creatomate 不提供低成本分镜预览，也不支持局部重渲染；修改一个镜头通常需要重新渲染整片。
+6. 模板槽位映射是持续维护的隐性工作，模板变化时必须同步更新。
+7. 外部通知不能作为唯一状态依据，ME 必须通过任务状态查询、轮询和补偿机制确认渲染结果。
+
+**为什么**：第 2/3 条纠正了一个容易高估系统灵活性的误区——结构化数据只能"填槽"，不能"造槽"；新增镜头数量/顺序/风格仍然需要人在 Creatomate 编辑器里画新模板，这条边界呼应了更早「旅游 vlog 剪辑买不做」的拍板，没有因为接了 Creatomate 就等于 ME 有了任意编排视频的自由度。第 5/6/7 条是本次接入 Creatomate（PR #1513）过程中两轮复审揪出的真实运维约束（付费步骤不可重放、webhook 无签名机制不可信、模板槽位表需要人工维护且没有自动同步手段），不是设计偏好，是 Creatomate 官方 API 的真实能力边界。
+
+**来源**：[PR #1520](https://github.com/bigbigraydeng-maker/magic-engine/pull/1520)（[`docs/specs/2026-09-09-me-creatomate-responsibility-boundary.md`](./specs/2026-09-09-me-creatomate-responsibility-boundary.md) 完整分析，含每条结论的验证依据标注）。
+
+**影响**：后续任何"能不能让 Creatomate 做 X"的讨论，先查这条决策和源文档的验证依据，不用重新论证一遍；新增视频形态（新镜头数/新结构）默认走"先人工画模板"路径，不应假设可以纯代码实现。`src/lib/creatomate/` 的模板契约（`factory_config.render.creatomate`）是第 4 条"模板注册表"的雏形，尚未做到版本化/约束校验/预览，后续加强时对齐这条决策的字段清单。
+
 ## 2026-08-22 · 产品定位与 IMPACT v1.0 冻结：Digital Marketing Growth Intelligence System
 
 **决策**：Magic Engine 的正式产品类别冻结为 **Digital Marketing Growth Intelligence System（数字营销增长智能系统）**。唯一端到端产品闭环冻结为 **IMPACT = Inspect → Measure → Prescribe → Act → Check → Tune**。DAPE 保留为内部工作方法，主要服务 IMPACT 前四段，不能与 IMPACT 互换，也不能用执行完成代替 Check、Outcome 与 Tune。
