@@ -131,10 +131,10 @@ async function loadEvidence(clientId: string, principalId: string, grant: GrantR
     completeRows(path, connection.token, { ...insightParams(window, 'ad'), time_increment: '1' }, deadline),
     completeRows(path, connection.token, insightParams(window, 'ad', { fields: `${BASE_FIELDS},${VIDEO_FIELDS}` }), deadline),
     completeRows(path, connection.token, insightParams(window, 'account', { breakdowns: 'age,gender' }), deadline),
-    completeRows(path, connection.token, insightParams(window, 'account', { breakdowns: 'publisher_platform,platform_position' }), deadline),
-    completeRows(path, connection.token, { ...insightParams(window, 'campaign'), time_increment: '1' }, deadline),
-    completeRows(path, connection.token, insightParams(window, 'account', { breakdowns: 'device_platform' }), deadline),
-    completeRows(path, connection.token, insightParams(window, 'account', { breakdowns: 'country' }), deadline),
+    completeRows(path, connection.token, insightParams(window, 'account', { breakdowns: 'publisher_platform,platform_position' }), deadline).catch(() => [] as Record<string, unknown>[]),
+    completeRows(path, connection.token, { ...insightParams(window, 'campaign'), time_increment: '1' }, deadline).catch(() => [] as Record<string, unknown>[]),
+    completeRows(path, connection.token, insightParams(window, 'account', { breakdowns: 'device_platform' }), deadline).catch(() => [] as Record<string, unknown>[]),
+    completeRows(path, connection.token, insightParams(window, 'account', { breakdowns: 'country' }), deadline).catch(() => [] as Record<string, unknown>[]),
   ])
   const current = normaliseInsight(accountRows[0] ?? {}, 'lead')
   const before = normaliseInsight(previousRows[0] ?? {}, 'lead')
@@ -262,8 +262,10 @@ export async function generateAnalysis(clientId: string, principalId: string, gr
 async function runAnalysis(clientId: string, principalId: string, grant: GrantRow, connectionVersion: string,
   jobId: string, reserveUsd: number, window: Window, timezone: string, currency: string) {
   let modelAttempted = false
+  let loadedEvidence: unknown = null
   try {
     const evidence = await loadEvidence(clientId, principalId, grant, window, timezone, currency)
+    loadedEvidence = evidence
     const hasData = Number(evidence.totals.impressions ?? 0) > 0 || evidence.campaigns.length > 0
     if (!hasData) {
       await finish(clientId, principalId, jobId, 'no_data', 0, evidence, null, null, null, null, null)
@@ -274,8 +276,11 @@ async function runAnalysis(clientId: string, principalId: string, grant: GrantRo
     if (Buffer.byteLength(payload, 'utf8') > 35_000) throw new MetaReadError('analysis_too_large', 409)
     await authorizeModelDispatch(clientId, principalId, jobId)
     modelAttempted = true
-    const result = await callClaudeChat({ systemPrompt: systemPrompt(), messages: [{ role: 'user', content: `以下是只读汇总证据：\n${payload}` }],
-      model: MODEL_SONNET, maxOutputTokens: 4000, singleAttempt: true })
+    let result
+    try {
+      result = await callClaudeChat({ systemPrompt: systemPrompt(), messages: [{ role: 'user', content: `以下是只读汇总证据：\n${payload}` }],
+        model: MODEL_SONNET, maxOutputTokens: 4000, singleAttempt: true })
+    } catch { throw new MetaReadError('model_unavailable', 502) }
     if (!result.text.trim() || result.stop_reason === 'max_tokens') throw new MetaReadError('analysis_incomplete', 502)
     await requireSnapshot(clientId, principalId, grant, connectionVersion)
     await finish(clientId, principalId, jobId, 'completed', result.cost_usd, evidence, result.text.trim(), MODEL_SONNET,
@@ -283,7 +288,7 @@ async function runAnalysis(clientId: string, principalId: string, grant: GrantRo
     return job(clientId, principalId, jobId)
   } catch (error) {
     const code = error instanceof MetaReadError ? error.code : 'analysis_failed'
-    await finish(clientId, principalId, jobId, 'failed', modelAttempted ? reserveUsd : 0, null, null,
+    await finish(clientId, principalId, jobId, 'failed', modelAttempted ? reserveUsd : 0, loadedEvidence, null,
       modelAttempted ? MODEL_SONNET : null, null, null, code).catch(() => undefined)
     throw error instanceof MetaReadError ? error : new MetaReadError('analysis_failed', 502)
   }

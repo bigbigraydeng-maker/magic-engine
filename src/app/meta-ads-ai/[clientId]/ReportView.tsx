@@ -94,7 +94,10 @@ function ReportState({ analysis }: { analysis: ReportAnalysis }) {
   if (analysis.status === 'running') return <p role="status" className="rounded-xl bg-blue-50 p-4 text-blue-900">报告正在生成，请稍后刷新页面。</p>
   const message=(analysis.error_code && META_ADS_AI_MESSAGES[analysis.error_code])
     ?? '本次分析没有完成。请稍后重试；如持续失败，请联系 Magic Engine 支持。'
-  return <p role="alert" className="rounded-xl bg-red-50 p-4 text-red-800">{message}</p>
+  return <div className="space-y-4">
+    {analysis.evidence != null ? <ReportCharts evidence={analysis.evidence} /> : null}
+    <p role="alert" className="rounded-xl bg-red-50 p-4 text-red-800">{message}</p>
+  </div>
 }
 
 export default function ReportView({ analysis }: { analysis: ReportAnalysis }) {
