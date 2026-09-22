@@ -41,14 +41,29 @@ const LOGIN_REQUIRED_HOSTS = [
   // 对 Render 的出口 IP 返 403，整条「待确认付款」人工车道会被 dropBrokenLinks
   // 静默丢掉，只剩一行 console.warn。那正是铁律 3 下半禁止的断头。
   'mailchimp.com',
-  // 本仓库是私有仓库（2026-09-21 实测 `gh repo view --json visibility`）——未登录
-  // 直接 curl 任意 blob 深链一律 404（跟登录墙同一个信号，不是链接本身有问题）。
-  // 不加这条，`client-doc-manual-tasks.ts` 里指向本仓库文件的 GitHub 深链会被
-  // `dropBrokenLinks` 当成「打不开」静默丢掉——待办本身消失，人根本看不到。
-  'github.com',
 ]
 
+// 本仓库是私有仓库（2026-09-21 实测 `gh repo view --json visibility`）——未登录
+// 直接 curl 任意 blob 深链一律 404（跟登录墙同一个信号，不是链接本身有问题）。
+// 不加这条，`client-doc-manual-tasks.ts` 里指向本仓库文件的 GitHub 深链会被
+// `dropBrokenLinks` 当成「打不开」静默丢掉——待办本身消失，人根本看不到。
+// 只挡这一个私有仓库的路径，不把整个 github.com 当登录墙——公开仓库/PR 链接
+// （比如 client-doc-manual-tasks.ts 之外别处用到的公开 issue/PR 深链）应该照常
+// 能被 verifyActionLink 实测，一刀切封掉整个域名会让那些链接也变成「验不了」。
+const PRIVATE_REPO_PATH_PREFIX = '/bigbigraydeng-maker/magic-engine'
+
+function isPrivateRepoPath(href: string): boolean {
+  try {
+    const url = new URL(href)
+    const host = url.hostname.replace(/^www\./, '')
+    return host === 'github.com' && url.pathname.startsWith(PRIVATE_REPO_PATH_PREFIX)
+  } catch {
+    return false
+  }
+}
+
 export function isLoginRequiredHost(href: string): boolean {
+  if (isPrivateRepoPath(href)) return true
   try {
     const host = new URL(href).hostname.replace(/^www\./, '')
     return LOGIN_REQUIRED_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))
