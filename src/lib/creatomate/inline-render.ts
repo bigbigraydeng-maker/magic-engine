@@ -134,7 +134,11 @@ export function buildReelSource(
       trim_duration: CTA_CLIP_S,
       fit: 'cover',
       brightness: 0.3,
-      audio_fade_out: 1.5,
+      volume: [
+        { time: 0, value: 1 },
+        { time: CTA_CLIP_S - 1.5, value: 1 },
+        { time: CTA_CLIP_S, value: 0 },
+      ],
       animations: [
         { time: 0, duration: FADE_S, type: 'fade', easing: 'quadratic-out' },
         { time: CTA_CLIP_S - 1.5, duration: 1.5, type: 'fade', fade: false, easing: 'quadratic-in' },
@@ -153,8 +157,6 @@ export function buildReelSource(
       font_size: '3.5 vmin',
       font_weight: '300',
       fill_color: 'rgba(255,220,168,0.85)',
-      shadow_color: 'rgba(0,0,0,0.5)',
-      shadow_blur: 6,
     },
     // Hook text (0–4 s): slide up from element start (relative: 0)
     {
@@ -170,8 +172,6 @@ export function buildReelSource(
       font_size: '11 vmin',
       font_weight: '300',
       fill_color: '#FFFFFF',
-      shadow_color: 'rgba(0,0,0,0.7)',
-      shadow_blur: 8,
       animations: [
         { time: 0, duration: 0.5, type: 'slide', direction: 'up', easing: 'cubic-out' },
       ],
@@ -190,8 +190,6 @@ export function buildReelSource(
       font_size: '4.5 vmin',
       font_weight: '300',
       fill_color: 'rgba(255,255,255,0.9)',
-      shadow_color: 'rgba(0,0,0,0.6)',
-      shadow_blur: 6,
       animations: [
         { time: 0, duration: 0.5, type: 'fade', easing: 'quadratic-out' },
       ],
@@ -211,8 +209,6 @@ export function buildReelSource(
       font_weight: '300',
       fill_color: '#FFFFFF',
       text_align: 'center',
-      shadow_color: 'rgba(0,0,0,0.7)',
-      shadow_blur: 8,
       animations: [
         { time: 0, duration: 0.5, type: 'slide', direction: 'up', easing: 'cubic-out' },
       ],
