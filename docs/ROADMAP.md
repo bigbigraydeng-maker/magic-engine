@@ -21,6 +21,18 @@
 
 ---
 
+## Kernel 认领执行权函数字段歧义 bug 已修复、代码已合并 main，生产数据库还没真正应用（2026-09-23 发现并修复，P0）
+
+**§11 打分**：频率高（这个数据库函数每次被真实调用都会报错，不是偶发）· IMPACT 闭环关键度高（卡在 Kernel「提交动作 → 认领执行权」这一步，是所有走 Kernel 执行的能力共用的入口）· 收入关联度高（已上线的 `page.apply_optimization_request` 页面优化 PR 提交能力也共用这两个函数）→ 零个低、两个以上高 → **P0**。
+
+- **背景**：`kernel_claim_or_takeover_run` 和 `kernel_claim_run_step`（`supabase/migrations/20260808000003_me2_execution_kernel_v1.sql`）各有一处 PL/pgSQL 裸列名歧义（`RETURNS TABLE` 输出列名跟被更新的表列名撞名），Postgres 默认设置下直接拒绝执行，报 `column reference is ambiguous`。这不是偶发，是这两个函数每次真被调用都会炸。
+- **已完成**：修复已写成新 migration `supabase/migrations/20260923000000_kernel_fix_ambiguous_column_refs.sql`，本地 Postgres 沙盘真跑验证过（含负对照：换回原版定义精确复现报错、换回修复版恢复正常），经子牙 + 魏征两个独立复审都通过，[PR #1905](https://github.com/bigbigraydeng-maker/magic-engine/pull/1905) 已合并 main（`758675f`）。
+- **还没做的（需要 PM 显式点头才能做）**：
+  - [ ] 把这条 migration 真正 `apply` 到生产 Supabase 数据库——合并到 main 只是代码进了仓库，**不会**自动跑数据库结构变更，这一步需要 PM 明确说"去 apply"才能做。
+  - [ ] 有生产库权限的人确认这个 bug 是否已经在生产复现：查生产 `action_runs` 表里有没有真实成功从 `queued`/`authorizing` 推进到 `authorized`/`running` 的记录，如果一条都没有，说明「提交动作 → 认领执行权」这条链路可能从上线到现在一次都没真正跑通过。
+
+---
+
 ## CTS 每日广告日报定时任务 · 权限模式不固定，摊上"要问人"那天会无人值守卡死（2026-09-22 排查，已部分修复，P3）
 
 **§11 打分**：频率高（每天一次）· IMPACT 闭环关键度低（只影响内部日报，不卡广告投放本身的 Act 动作）· 收入关联度低（无客户投诉/续费风险）→ 两项低 → **P3**，已修复一半，剩下的登记待认领。
