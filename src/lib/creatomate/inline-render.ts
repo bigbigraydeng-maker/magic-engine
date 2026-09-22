@@ -17,6 +17,7 @@ export interface ReelTemplate {
   tagline: string
   cta: string
   endingScreen?: ReelEndingScreen
+  musicUrl?: string  // optional background music; must be a public URL (mp3/m4a)
 }
 
 export interface ReelSpec {
@@ -59,6 +60,7 @@ const ENDING_DURATION_S = 3
 const HOOK_S = 4             // scene 1: 0–4 s
 const MIDDLE_S = 5           // scene 2: 4–9 s
 const CTA_CLIP_S = 3         // scene 3: 9–12 s (HOOK_S + MIDDLE_S + CTA_CLIP_S = 12)
+const FADE_S = 0.4           // cross-scene video fade duration
 
 export function buildReelSource(
   reel: ReelSpec,
@@ -74,9 +76,23 @@ export function buildReelSource(
   const CTA_START = HOOK_S + MIDDLE_S    // 9
 
   // 安全区：1080×1920 Reel 关键内容必须在 y=14%~65%（y=270~1248px）
-  // Three scenes from the same source using trim_start offsets for hook/middle/CTA structure
+  // Animation time values are RELATIVE to each element's own start (not absolute timeline).
+  // e.g. CTA video starts at time:9 — its fade-out uses time:1.5 (= 1.5s after element start),
+  //      NOT time:10.5 (absolute), which would never fire within the 3s clip duration.
   const mainElements: Record<string, unknown>[] = [
-    // Scene 1 — Hook (0–4 s): abrupt cut, service name large
+    // Black base layer — full duration, so fade-outs reveal black not white
+    {
+      type: 'shape',
+      shape: 'rectangle',
+      track: 0,
+      time: 0,
+      duration: totalDuration,
+      x: '50%', y: '50%',
+      x_anchor: '50%', y_anchor: '50%',
+      width: '100%', height: '100%',
+      fill_color: '#000000',
+    },
+    // Scene 1 — Hook (0–4 s): fade out last 0.4s (relative: 3.6)
     {
       type: 'video',
       track: 1,
@@ -87,8 +103,11 @@ export function buildReelSource(
       trim_duration: HOOK_S,
       fit: 'cover',
       brightness: 0.3,
+      animations: [
+        { time: HOOK_S - FADE_S, duration: FADE_S, type: 'fade', fade: false, easing: 'quadratic-in' },
+      ],
     },
-    // Scene 2 — Middle (4–9 s): treatment in action
+    // Scene 2 — Middle (4–9 s): fade in first 0.4s (relative: 0), fade out last 0.4s (relative: 4.6)
     {
       type: 'video',
       track: 2,
@@ -99,9 +118,12 @@ export function buildReelSource(
       trim_duration: MIDDLE_S,
       fit: 'cover',
       brightness: 0.2,
+      animations: [
+        { time: 0, duration: FADE_S, type: 'fade', easing: 'quadratic-out' },
+        { time: MIDDLE_S - FADE_S, duration: FADE_S, type: 'fade', fade: false, easing: 'quadratic-in' },
+      ],
     },
-    // Scene 3 — CTA (9–12 s): call to action
-    // Audio fades via volume keyframes (element-relative time 0–3 s); visual via black overlay below
+    // Scene 3 — CTA (9–12 s): fade in (relative: 0), audio+visual fade out last 1.5s (relative: 1.5)
     {
       type: 'video',
       track: 3,
@@ -112,24 +134,11 @@ export function buildReelSource(
       trim_duration: CTA_CLIP_S,
       fit: 'cover',
       brightness: 0.3,
-      volume: [
-        { time: 0, value: 1 },
-        { time: CTA_CLIP_S - 1.5, value: 1 },
-        { time: CTA_CLIP_S, value: 0 },
+      audio_fade_out: 1.5,
+      animations: [
+        { time: 0, duration: FADE_S, type: 'fade', easing: 'quadratic-out' },
+        { time: CTA_CLIP_S - 1.5, duration: 1.5, type: 'fade', fade: false, easing: 'quadratic-in' },
       ],
-    },
-    // Visual fade-to-black overlay: ramps from transparent → opaque in last 1.5 s before brand screen
-    {
-      type: 'shape',
-      shape: 'rectangle',
-      track: 19,
-      time: CTA_START + CTA_CLIP_S - 1.5,
-      duration: 1.5,
-      x: '50%', y: '50%',
-      x_anchor: '50%', y_anchor: '50%',
-      width: '100%', height: '100%',
-      fill_color: '#000000',
-      fade_in: 1.5,
     },
     // Brand name — persistent across all scenes
     {
@@ -144,8 +153,10 @@ export function buildReelSource(
       font_size: '3.5 vmin',
       font_weight: '300',
       fill_color: 'rgba(255,220,168,0.85)',
+      shadow_color: 'rgba(0,0,0,0.5)',
+      shadow_blur: 6,
     },
-    // Hook text (0–4 s): service name large
+    // Hook text (0–4 s): slide up from element start (relative: 0)
     {
       type: 'text',
       track: 5,
@@ -159,8 +170,13 @@ export function buildReelSource(
       font_size: '11 vmin',
       font_weight: '300',
       fill_color: '#FFFFFF',
+      shadow_color: 'rgba(0,0,0,0.7)',
+      shadow_blur: 8,
+      animations: [
+        { time: 0, duration: 0.5, type: 'slide', direction: 'up', easing: 'cubic-out' },
+      ],
     },
-    // Middle text (4–9 s): tagline / location
+    // Middle text (4–9 s): fade in from element start (relative: 0)
     {
       type: 'text',
       track: 6,
@@ -174,8 +190,13 @@ export function buildReelSource(
       font_size: '4.5 vmin',
       font_weight: '300',
       fill_color: 'rgba(255,255,255,0.9)',
+      shadow_color: 'rgba(0,0,0,0.6)',
+      shadow_blur: 6,
+      animations: [
+        { time: 0, duration: 0.5, type: 'fade', easing: 'quadratic-out' },
+      ],
     },
-    // CTA text (9–12 s): call to action centred
+    // CTA text (9–12 s): slide up from element start (relative: 0)
     {
       type: 'text',
       track: 7,
@@ -190,8 +211,28 @@ export function buildReelSource(
       font_weight: '300',
       fill_color: '#FFFFFF',
       text_align: 'center',
+      shadow_color: 'rgba(0,0,0,0.7)',
+      shadow_blur: 8,
+      animations: [
+        { time: 0, duration: 0.5, type: 'slide', direction: 'up', easing: 'cubic-out' },
+      ],
     },
   ]
+
+  // Optional background music — loops for full clip duration, fades in/out
+  if (template.musicUrl) {
+    mainElements.push({
+      type: 'audio',
+      track: 20,
+      time: 0,
+      duration: totalDuration,
+      source: template.musicUrl,
+      volume: '30%',
+      loop: true,
+      audio_fade_in: 1,
+      audio_fade_out: 1.5,
+    })
+  }
 
   if (!hasEnding || !ending) {
     return { output_format: 'mp4', duration: totalDuration, elements: mainElements }
@@ -199,6 +240,7 @@ export function buildReelSource(
 
   // Ending screen: dark background + brand name + contact info
   // All elements confined to y=14%~65% safe zone, starting at clipDuration
+  // animations use relative time (0 = element start = clipDuration on the timeline)
   const endingElements: Record<string, unknown>[] = [
     {
       type: 'shape',
@@ -210,6 +252,9 @@ export function buildReelSource(
       x_anchor: '50%', y_anchor: '50%',
       width: '100%', height: '100%',
       fill_color: '#1A1614',
+      animations: [
+        { time: 0, duration: 0.8, type: 'fade', easing: 'quadratic-out' },
+      ],
     },
     ...(ending.logoUrl
       ? [{
