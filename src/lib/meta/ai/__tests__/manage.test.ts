@@ -102,6 +102,18 @@ describe('持久授权写入边界',()=>{
     expect(mocks.from).not.toHaveBeenCalled()
   })
 
+  it('grant 写入被 Postgres 拒绝时，记下真实错误再报 account_unavailable — 2026-09-22 生产实测这条报错信息经常文不对题（该客户尚未获得测试资格/已绑定其他客户），不记下真错误就永远查不出来',async()=>{
+    const warn=vi.spyOn(console,'warn').mockImplementation(()=>{})
+    const upsertChain={ select:vi.fn(()=>upsertChain),single:vi.fn(()=>Promise.resolve({ data:null,error:{ code:'23505',message:'duplicate key value violates unique constraint "meta_ads_exclusive_active_account"',details:'Key (ad_account_id)=(act_1234567890) already exists.',hint:null } })) }
+    mocks.from.mockReturnValue({ upsert:vi.fn(()=>upsertChain) })
+    mocks.activeConnectionForPrincipal.mockResolvedValue({ token:'private',version:'v1',entitlementRevision:'ent-1' })
+    vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({ id:'act_1234567890' }),{ status:200 })))
+    await expect(bind('client','principal','connection','act_1234567890')).rejects.toThrow('account_unavailable')
+    expect(warn).toHaveBeenCalledWith('[meta-ads-ai] grant upsert failed',expect.objectContaining({
+      clientId:'client',code:'23505',message:expect.stringContaining('meta_ads_exclusive_active_account'),
+    }))
+  })
+
   it('创建 key 前若邀请暂停则不写入凭据',async()=>{
     mocks.from.mockImplementation((table:string)=>{
       if(table==='meta_ads_read_grants') return selectQuery({ connection_id:'connection',revision:'grant-r1',principal_id:'principal',entitlement_revision:'ent-1' })
