@@ -81,10 +81,11 @@ export function buildReelSource(
   //      NOT time:10.5 (absolute), which would never fire within the 3s clip duration.
   const mainElements: Record<string, unknown>[] = [
     // Black base layer — full duration, so fade-outs reveal black not white
+    // track must be ≥ 1 (Creatomate v2 rejects track: 0)
     {
       type: 'shape',
       shape: 'rectangle',
-      track: 0,
+      track: 1,
       time: 0,
       duration: totalDuration,
       x: '50%', y: '50%',
@@ -95,7 +96,7 @@ export function buildReelSource(
     // Scene 1 — Hook (0–4 s): fade out last 0.4s (relative: 3.6)
     {
       type: 'video',
-      track: 1,
+      track: 2,
       time: 0,
       duration: HOOK_S,
       source: reel.sourceUrl,
@@ -110,7 +111,7 @@ export function buildReelSource(
     // Scene 2 — Middle (4–9 s): fade in first 0.4s (relative: 0), fade out last 0.4s (relative: 4.6)
     {
       type: 'video',
-      track: 2,
+      track: 3,
       time: MIDDLE_START,
       duration: MIDDLE_S,
       source: reel.sourceUrl,
@@ -126,7 +127,7 @@ export function buildReelSource(
     // Scene 3 — CTA (9–12 s): fade in (relative: 0), audio+visual fade out last 1.5s (relative: 1.5)
     {
       type: 'video',
-      track: 3,
+      track: 4,
       time: CTA_START,
       duration: CTA_CLIP_S,
       source: reel.sourceUrl,
@@ -147,7 +148,7 @@ export function buildReelSource(
     // Brand name — persistent across all scenes
     {
       type: 'text',
-      track: 4,
+      track: 5,
       time: 0,
       duration: clipDuration,
       text: template.brandName,
@@ -161,7 +162,7 @@ export function buildReelSource(
     // Hook text (0–4 s): slide up from element start (relative: 0)
     {
       type: 'text',
-      track: 5,
+      track: 6,
       time: 0,
       duration: HOOK_S,
       text: reel.serviceName,
@@ -179,7 +180,7 @@ export function buildReelSource(
     // Middle text (4–9 s): fade in from element start (relative: 0)
     {
       type: 'text',
-      track: 6,
+      track: 7,
       time: MIDDLE_START,
       duration: MIDDLE_S,
       text: template.tagline,
@@ -197,7 +198,7 @@ export function buildReelSource(
     // CTA text (9–12 s): slide up from element start (relative: 0)
     {
       type: 'text',
-      track: 7,
+      track: 8,
       time: CTA_START,
       duration: CTA_CLIP_S,
       text: template.cta,
@@ -241,7 +242,7 @@ export function buildReelSource(
     {
       type: 'shape',
       shape: 'rectangle',
-      track: 8,
+      track: 9,
       time: clipDuration,
       duration: ENDING_DURATION_S,
       x: '50%', y: '50%',
@@ -255,7 +256,7 @@ export function buildReelSource(
     ...(ending.logoUrl
       ? [{
           type: 'image',
-          track: 9,
+          track: 10,
           time: clipDuration,
           duration: ENDING_DURATION_S,
           source: ending.logoUrl,
@@ -267,7 +268,7 @@ export function buildReelSource(
       : []),
     {
       type: 'text',
-      track: ending.logoUrl ? 10 : 9,
+      track: ending.logoUrl ? 11 : 10,
       time: clipDuration,
       duration: ENDING_DURATION_S,
       text: template.brandName,
@@ -282,7 +283,7 @@ export function buildReelSource(
     },
     {
       type: 'text',
-      track: ending.logoUrl ? 11 : 10,
+      track: ending.logoUrl ? 12 : 11,
       time: clipDuration,
       duration: ENDING_DURATION_S,
       text: template.tagline,
@@ -298,7 +299,7 @@ export function buildReelSource(
     {
       type: 'shape',
       shape: 'rectangle',
-      track: ending.logoUrl ? 12 : 11,
+      track: ending.logoUrl ? 13 : 12,
       time: clipDuration,
       duration: ENDING_DURATION_S,
       x: '50%', y: ending.logoUrl ? '46%' : '37%',
@@ -309,7 +310,7 @@ export function buildReelSource(
     // Contact info — font size increased from 2.8 vmin to 5 vmin for legibility
     {
       type: 'text',
-      track: ending.logoUrl ? 13 : 12,
+      track: ending.logoUrl ? 14 : 13,
       time: clipDuration,
       duration: ENDING_DURATION_S,
       text: `${ending.address}\n${ending.hours}  ·  ${ending.phone}`,
