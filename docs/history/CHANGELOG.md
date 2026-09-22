@@ -13,7 +13,7 @@
 约 125 秒的超时强杀，又因为 `retries: 0`、没配失败处理，整条静默死掉——`docs/PITFALLS.md` F10 的
 第二实例（不是 setTimeout，是「一个 step 逐行处理大表」）。
 
-改了什么（PR [#PR_NUMBER](https://github.com/bigbigraydeng-maker/magic-engine/pull/PR_NUMBER)）：
+改了什么（PR [#1897](https://github.com/bigbigraydeng-maker/magic-engine/pull/1897)）：
 - 同步和 AI 审核全部拆成小块（CTS 20 行 / NAL 25 个对话 / AI 审核 5 条），每块一个 Inngest step，
   块之间用返回值传游标；已同步的行先查一次幂等键集合直接跳过，不再逐行往返；
 - 编排函数 `retries: 2`（只重跑挂掉的那一步）+ 函数级 `onFailure`：重试耗尽仍失败就把运行记录
