@@ -139,4 +139,69 @@ export async function pushConversionReviewItems(
       href: `https://app.magicengine.com.au/dashboard/conversions?client=${outcome.client_id}&focus=${row.outcome_id}&status=in_doubt`,
     })
   }
+
+  await pushTokenDeadItems(supabase, items, clientNames, now)
+}
+
+type AuthFailedRow = {
+  id: string
+  outcome_id: string
+  me_sale_outcomes: { client_id: string; occurred_at: string; review_status: string; redacted_at: string | null } | null
+}
+
+/**
+ * 已批准、但因**授权失效**发不出去的成交/咨询——按客户合并成一条「需要你动手」。
+ *
+ * 2026-09-22 起授权失败不再永久作废，而是等令牌修好后由 `writeback-resend-run.ts`
+ * 每天自动补发；但「令牌还没修好」这件事之前只写在 cron summary 里，PM 看不见，
+ * CTS 19 条就是这样静静过了 7 天窗口的（子牙复审 M2：发现不许死在日志里）。
+ * 这里是拉模式：直接查库，不依赖补发步骤有没有跑。
+ */
+async function pushTokenDeadItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  clientNames: Map<string, { name: string }>,
+  now: Date,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('me_conversion_writebacks')
+    .select('id, outcome_id, me_sale_outcomes(client_id, occurred_at, review_status, redacted_at)')
+    .eq('status', 'failed')
+    .eq('last_error_code', 'auth')
+    .limit(200)
+
+  if (error) throw new Error(`授权失效待补发查询失败: ${error.message}`)
+
+  const byClient = new Map<string, { count: number; oldestOccurredAt: string }>()
+  for (const row of (data ?? []) as unknown as AuthFailedRow[]) {
+    const o = row.me_sale_outcomes
+    if (!o || o.review_status !== 'approved' || o.redacted_at) continue
+    // 已经过了 7 天的补发步骤会自己判过期，这里只催还救得回来的。
+    if (daysAgo(o.occurred_at, now) > 7) continue
+    const cur = byClient.get(o.client_id)
+    if (!cur) byClient.set(o.client_id, { count: 1, oldestOccurredAt: o.occurred_at })
+    else {
+      cur.count++
+      if (o.occurred_at < cur.oldestOccurredAt) cur.oldestOccurredAt = o.occurred_at
+    }
+  }
+
+  for (const [clientId, agg] of byClient) {
+    const clientName = clientNames.get(clientId)?.name ?? '客户'
+    const daysLeft = Math.max(0, 7 - daysAgo(agg.oldestOccurredAt, now))
+    items.push({
+      kind: 'conversion_capi_token_dead',
+      client_name: clientName,
+      client_id: clientId,
+      what:
+        `有 ${agg.count} 条已经批准的成交/咨询发不到广告平台：连接广告平台的授权失效了。` +
+        `最早的一条再过 ${daysLeft} 天就超过平台只收 7 天内的限制，到时候这些就永久丢了，` +
+        '广告平台会继续找不对的人。',
+      how:
+        '重新连接一次这个客户的广告平台授权（跟上次令牌过期时同一个步骤）。' +
+        '连好之后不用手动补发——系统每天早上会自动把还在 7 天内的补发出去，看板上这些条目会自己消失。',
+      // 🔴 必须是绝对网址（见上面同类注释）。
+      href: `https://app.magicengine.com.au/dashboard/conversions?client=${clientId}&status=failed`,
+    })
+  }
 }

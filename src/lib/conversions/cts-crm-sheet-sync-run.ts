@@ -8,9 +8,11 @@
  * 单独导出成一个函数（不塞进 API 路由 handler 里），是子牙复审建议：以后如果
  * 这条同步要转成 Inngest 事件处理器，直接复用这个函数，不用重写判断逻辑。
  *
- * 这一轮**只人工触发**，不接 cron/Inngest（CTS 平均一天不到 6 条真实事件，这条
- * 同步本身也是一次性同步读+写，不是跨步骤异步接力，符合 CLAUDE.md Inngest 硬
- * 约束里"单次同步读取"的例外）。
+ * ~~这一轮**只人工触发**，不接 cron/Inngest~~ —— 2026-09-15 起由
+ * `conversion-daily-pipeline`（Inngest）每天自动调；2026-09-22 起改成**分块**调
+ * `runCtsCrmSyncChunk()`（每块 ≤ 20 行）：整表一步跑 4–24 分钟，被网关 ~125 秒
+ * 超时强杀，流水线连续 6 天没跑完（PITFALLS F10 第二实例）。手动路由仍走
+ * `runCtsCrmSync()` 一次跑整表，两条调用路径并存。
  *
  * `maxInsertsPerRun` 是给现有人工审核页面（固定 limit=200）留的安全阀：不会
  * 一次性把几百条历史存量全灌进待审核队列，超出的部分下次再跑会继续处理
@@ -167,6 +169,92 @@ export interface RunCtsCrmSyncDeps {
   maxInsertsPerRun?: number
 }
 
+/**
+ * 分块游标——给 Inngest 逐块推进用（2026-09-22，PITFALLS F10 第二实例）。
+ *
+ * 🔴 三个字段全是 number：它要经过 Inngest 的 step 记忆化（JSON 序列化），
+ *    `Date`/`undefined`/`Infinity` 都会在那一层变形。
+ */
+export interface CtsCrmSyncCursor {
+  /** 从 CRM管理 的第几行（0 起）开始处理。 */
+  offset: number
+  /** 这一块最多看多少行；不传 = 一直看到表尾（手动路由沿用这个）。 */
+  limit?: number
+  /** 之前几块累计写入了多少条——`maxInsertsPerRun` 这道安全阀要跨块生效。 */
+  insertedSoFar: number
+}
+
+export interface CtsCrmSyncChunkResult {
+  /** 只含这一块处理的行；跨块汇总用 `mergeCtsCrmSummaries`。 */
+  summary: CtsCrmSyncSummary
+  nextOffset: number
+  /** 这次读到的 CRM管理 总行数——两块之间表格可能变化，以每次读到的为准。 */
+  totalSheetRows: number
+  insertedSoFar: number
+  /** 已经看到表尾。 */
+  done: boolean
+}
+
+/** 跨块合并：计数相加、清单拼接（搁置项按打码电话+团名去重——同一行在两块之间因表格插行被看两次时不重复列）。 */
+export function mergeCtsCrmSummaries(a: CtsCrmSyncSummary, b: CtsCrmSyncSummary): CtsCrmSyncSummary {
+  const heldKeys = new Set(a.heldForManualReview.map((h) => `${h.phoneMasked}|${h.tourInterest ?? ''}`))
+  const held = [...a.heldForManualReview]
+  for (const h of b.heldForManualReview) {
+    const key = `${h.phoneMasked}|${h.tourInterest ?? ''}`
+    if (!heldKeys.has(key)) {
+      heldKeys.add(key)
+      held.push(h)
+    }
+  }
+  return {
+    totalCrmRows: a.totalCrmRows + b.totalCrmRows,
+    excludedNoPhone: a.excludedNoPhone + b.excludedNoPhone,
+    excludedByNotes: a.excludedByNotes + b.excludedByNotes,
+    excludedNoDate: a.excludedNoDate + b.excludedNoDate,
+    insertedLeads: a.insertedLeads + b.insertedLeads,
+    insertedPurchases: a.insertedPurchases + b.insertedPurchases,
+    skippedAlreadySynced: a.skippedAlreadySynced + b.skippedAlreadySynced,
+    heldForManualReview: held,
+    contactNotLinked: a.contactNotLinked + b.contactNotLinked,
+    insertErrors: [...a.insertErrors, ...b.insertErrors],
+    cappedAtMaxInserts: a.cappedAtMaxInserts || b.cappedAtMaxInserts,
+  }
+}
+
+/** Supabase 一次最多回 1000 行（PITFALLS F9）——按主键分页读全。 */
+const EXISTING_REFS_PAGE = 1000
+
+/**
+ * 已同步过的幂等键集合——在任何按行的数据库往返之前先判「已同步」直接跳过。
+ *
+ * 🔴 这不是安全闸，只是省事：真正防重复的仍是 `(client_id, source_kind, source_ref)`
+ *    唯一索引 + 23505 处理。没有这一步时，600 行历史行每行都要先查联系人、查价、
+ *    再撞唯一索引（每行 3–5 次往返，实测 0.4–2.4 秒/行），拆块只是把 20 分钟分摊、
+ *    没有减少（子牙 2026-09-22 复审 M6）。
+ */
+async function loadExistingSourceRefs(supabase: SupabaseClient): Promise<Set<string>> {
+  const refs = new Set<string>()
+  let lastId: string | null = null
+  for (;;) {
+    let q = supabase
+      .from('me_sale_outcomes')
+      .select('id, source_ref')
+      .eq('client_id', CTS_CLIENT_ID)
+      .eq('source_kind', 'crm_sheet_sync')
+      .not('source_ref', 'is', null)
+      .order('id', { ascending: true })
+      .limit(EXISTING_REFS_PAGE)
+    if (lastId) q = q.gt('id', lastId)
+    const { data, error } = await q
+    if (error) throw new Error(`读取已同步记录失败：${error.message}`)
+    const rows = (data ?? []) as Array<{ id: string; source_ref: string | null }>
+    for (const r of rows) if (r.source_ref) refs.add(r.source_ref)
+    if (rows.length < EXISTING_REFS_PAGE) break
+    lastId = rows[rows.length - 1].id
+  }
+  return refs
+}
+
 function tallyExcluded(summary: CtsCrmSyncSummary, reason: 'no_qualifying_phone' | 'excluded_by_notes' | 'no_usable_date'): void {
   if (reason === 'no_qualifying_phone') summary.excludedNoPhone++
   else if (reason === 'excluded_by_notes') summary.excludedByNotes++
@@ -252,25 +340,38 @@ async function processPurchaseCandidate(
   )
 }
 
-export async function runCtsCrmSync(deps: RunCtsCrmSyncDeps = {}): Promise<CtsCrmSyncSummary> {
+/**
+ * 处理表格的一块（`cursor.offset` 起、最多 `cursor.limit` 行）。
+ *
+ * 每块都重新读整张表，而不是第一块把快照存起来：快照会经过 Inngest 的 step 记忆化
+ * 存到它的云端，而整表含电话/邮箱/姓名（客户 PII）；这里返回的 summary 只有打码电话。
+ * 两块之间表格被人改动的代价是某一行这次跳过、明天再来（幂等键保证不会重复写）。
+ */
+export async function runCtsCrmSyncChunk(
+  cursor: CtsCrmSyncCursor,
+  deps: RunCtsCrmSyncDeps = {},
+): Promise<CtsCrmSyncChunkResult> {
   const supabase = deps.supabase ?? supabaseAdmin
   const maxInserts = deps.maxInsertsPerRun ?? DEFAULT_MAX_INSERTS_PER_RUN
   const summary = emptySummary()
 
-  const [sheet1Raw, crmRaw] = await Promise.all([
+  const [sheet1Raw, crmRaw, existingRefs] = await Promise.all([
     readSheetValues(CTS_CLIENT_ID, SPREADSHEET_ID, SHEET1_RANGE),
     readSheetValues(CTS_CLIENT_ID, SPREADSHEET_ID, CRM_MANAGEMENT_RANGE),
+    loadExistingSourceRefs(supabase),
   ])
 
   const sheet1ByPhone = indexSheet1ByPhone(sheet1Raw.map(parseSheet1Row))
   const crmRows = crmRaw.map(parseCrmManagementRow)
+  const start = Math.max(0, cursor.offset)
+  const end = cursor.limit == null ? crmRows.length : Math.min(crmRows.length, start + cursor.limit)
 
-  let insertedThisRun = 0
+  let insertedThisRun = cursor.insertedSoFar
   const markInserted = () => {
     insertedThisRun++
   }
 
-  for (const crmRow of crmRows) {
+  for (const crmRow of crmRows.slice(start, end)) {
     summary.totalCrmRows++
     const phoneKey = ctsPhoneE164(crmRow.phoneRaw)
     const matchedSheet1 = phoneKey ? (sheet1ByPhone.get(phoneKey) ?? null) : null
@@ -288,6 +389,14 @@ export async function runCtsCrmSync(deps: RunCtsCrmSyncDeps = {}): Promise<CtsCr
       })
       continue
     }
+    const sourceRef =
+      classified.kind === 'qualified_lead'
+        ? ctsSourceRef(classified.phoneE164, 'lead')
+        : ctsSourceRef(classified.phoneE164, 'purchase', classified.tourInterest)
+    if (existingRefs.has(sourceRef)) {
+      summary.skippedAlreadySynced++
+      continue
+    }
     if (insertedThisRun >= maxInserts) {
       summary.cappedAtMaxInserts = true
       continue
@@ -300,5 +409,17 @@ export async function runCtsCrmSync(deps: RunCtsCrmSyncDeps = {}): Promise<CtsCr
     }
   }
 
-  return summary
+  return {
+    summary,
+    nextOffset: end,
+    totalSheetRows: crmRows.length,
+    insertedSoFar: insertedThisRun,
+    done: end >= crmRows.length,
+  }
+}
+
+/** 一次处理整张表——手动路由 `cts-crm-sync` 走这条，行为跟拆块之前一样。 */
+export async function runCtsCrmSync(deps: RunCtsCrmSyncDeps = {}): Promise<CtsCrmSyncSummary> {
+  const chunk = await runCtsCrmSyncChunk({ offset: 0, insertedSoFar: 0 }, deps)
+  return chunk.summary
 }

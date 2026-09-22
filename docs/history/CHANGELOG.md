@@ -5,6 +5,35 @@
 
 ---
 
+### 2026-09-22（成交回传每日流水线 6 天没跑完：拆成小步骤 + 失败留痕 + 授权失效不再永久作废）
+
+每天早上 6 点（新西兰时间）自动跑的「成交/咨询回传」流水线（`conversion-daily-pipeline`）自 9/16 起
+连续 6 天没有跑完：`cron_run_logs` 全停在「在跑」、后面的 AI 审核一次没跑到、49 条待审核记录没人碰。
+根因是 CTS 表格同步这一步一口气逐行处理 ~600 行（每行 3–5 次数据库往返，实测 4–24 分钟），被网关
+约 125 秒的超时强杀，又因为 `retries: 0`、没配失败处理，整条静默死掉——`docs/PITFALLS.md` F10 的
+第二实例（不是 setTimeout，是「一个 step 逐行处理大表」）。
+
+改了什么（PR [#PR_NUMBER](https://github.com/bigbigraydeng-maker/magic-engine/pull/PR_NUMBER)）：
+- 同步和 AI 审核全部拆成小块（CTS 20 行 / NAL 25 个对话 / AI 审核 5 条），每块一个 Inngest step，
+  块之间用返回值传游标；已同步的行先查一次幂等键集合直接跳过，不再逐行往返；
+- 编排函数 `retries: 2`（只重跑挂掉的那一步）+ 函数级 `onFailure`：重试耗尽仍失败就把运行记录
+  写成 `failed`，不再留「永远在跑」的假记录（`failOpenCronRuns`，任何 Inngest cron 函数可复用）；
+- 授权失效（Meta 用 401/403/code 190 拒了请求、事件没入账）从「永久作废」改成「可重发」：
+  令牌修好后流水线每天自动补发 7 天内的（先只读探活令牌，没修好就跳过、不烧尝试次数），
+  且「令牌没修好、有 N 条发不出去」会进今日待办「需要你动手」，不再只死在日志里；
+  限流/5xx 那一档仍留给人点「再试一次」，`in_doubt` 一个字没动；
+- 看板对「授权失效」的失败行改成说清楚会自动补发。
+
+验证：单测覆盖分块推进/停止、carried 硬顶、onFailure、授权失败可重发、补发只挑 auth；本地 Inngest
+dev server 用假依赖真跑一遍（3+5 个同步块、3 个审核块、2 个补发步、log-finish，run 状态 COMPLETED），
+并验证 log-start 抛错时重试耗尽后 onFailure 真的被调到。上线后须在 Inngest 后台对 `/api/inngest`
+手动 Sync 一次；次日 09:00 查 `cron_run_logs` 是否 `completed`、`me_conversion_audit` 是否出现
+AI 审核记录（已建日历提醒）。已知风险：熔断器基线是自参照的（第 1 天批准的会算进第 2 天的
+「近 24 小时激增」），流水线真的跑起来后第二天可能见到熔断——那是基线口径问题、不是 AI 判错，
+修法另开条目。
+
+---
+
 ### 2026-09-22（广告支柱 IMPACT 闭环升级阶段 0/1：PM go 与 migration 核实为已完成，补记录并从 ROADMAP 移除过期条目）
 
 ROADMAP 里一直挂着「待 PM go：按依赖顺序合并（#1659 → #1662 → #1664 → #1665），并单独授权 apply migration」这条未完成事项。核实后确认这条已经完成——4 个 PR 早已合并，两张表（`ad_entity_snapshots`/`ad_strategy_configs`）已建好并在生产库里跑着真实数据（`ad_entity_snapshots` 2052 行，最新快照 9/21；快照 cron `ad-entity-snapshot`（[render.yaml](../../render.yaml)）按 `30 */6 * * *` 每 6 小时运行一次，非此前误记的 3 小时）。之前一直没人去数据库和 `render.yaml` 里核实，只看代码注释和这份清单，就以为还卡着——教训见会话记忆 `reference-cts-domain-token-dead-20260921` 的更正记录。已从 ROADMAP 对应清单删除这条，标题同步改为「PM go 已完成，验证与收尾进行中」。
