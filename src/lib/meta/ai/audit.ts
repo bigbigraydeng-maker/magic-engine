@@ -11,6 +11,14 @@ export async function auditedControl<T>(clientId:string,email:string,event:strin
   try {
     result=await run()
   } catch(error) {
+    if(!(error instanceof MetaReadError)) {
+      // A non-MetaReadError here always means something unexpected — every caller was already
+      // collapsing this to the generic 'request_failed' tag with the real cause never logged
+      // anywhere (2026-09-22: a plain upsertConnection() Error hid this way during a real CTS
+      // Tours NZ retry). No token/secret is in scope at this call boundary.
+      console.warn('[audit] non-MetaReadError caught, mapped to request_failed',{ clientId,event,errorName:error instanceof Error ? error.name : typeof error,
+        message:error instanceof Error ? error.message : String(error) })
+    }
     await finishBindingAudit(receipt.id,'write_failed',`${event}:${error instanceof MetaReadError ? error.code : 'request_failed'}`)
     throw error
   }
