@@ -34,6 +34,9 @@ import {
   CONVERSION_DAILY_PIPELINE_RETRIES,
   AI_REVIEW_CHUNK_SIZE,
   MAX_SYNC_CHUNKS,
+  TRANSIENT_BACKOFF_MS,
+  TRANSIENT_MAX_RETRIES,
+  isTransientError,
   type ConversionPipelineDeps,
   type PipelineStep,
 } from '../functions/conversion-daily-pipeline'
@@ -67,6 +70,7 @@ function optsOf(fn: Fn) {
 function fakeStep() {
   const ranStepIds: string[] = []
   const outputs: unknown[] = []
+  const sleeps: Array<{ id: string; ms: number }> = []
   const step: PipelineStep = {
     run: async <T,>(id: string, fn: () => Promise<T>): Promise<T> => {
       ranStepIds.push(id)
@@ -74,8 +78,17 @@ function fakeStep() {
       outputs.push(value)
       return value
     },
+    sleep: async (id, ms) => {
+      ranStepIds.push(`sleep:${id}`)
+      sleeps.push({ id, ms })
+    },
   }
-  return { ranStepIds, outputs, step }
+  return { ranStepIds, outputs, sleeps, step }
+}
+
+/** 造一个长得像 Google Sheets 客户端 / SDK 抛出来的 HTTP 错误。 */
+function httpError(status: number, message = `HTTP ${status}`): Error & { httpStatus: number } {
+  return Object.assign(new Error(message), { httpStatus: status })
 }
 
 function ctsSummary(over: Partial<CtsCrmSyncSummary> = {}): CtsCrmSyncSummary {
@@ -364,5 +377,84 @@ describe('分块循环怎么推进、怎么停', () => {
     const { harness, start } = await run()
     expect(harness.ranStepIds[0]).toBe('log-start')
     expect(start).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('瞬时错误：sleep 一会儿再把同一块当新 step 重跑（魏征实施后复审 MAJOR：Sheets 每分钟 60 次读配额）', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('isTransientError：429 / 5xx（httpStatus 或 status 字段）/ fetch failed 算瞬时；业务错误、4xx 不算', () => {
+    expect(isTransientError(httpError(429))).toBe(true)
+    expect(isTransientError(httpError(503))).toBe(true)
+    expect(isTransientError(Object.assign(new Error('overloaded'), { status: 529 }))).toBe(true)
+    expect(isTransientError(Object.assign(new TypeError('fetch failed'), {}))).toBe(true)
+    expect(isTransientError(httpError(400))).toBe(false)
+    expect(isTransientError(httpError(401))).toBe(false)
+    expect(isTransientError(new Error('读取已同步记录失败：permission denied'))).toBe(false)
+    expect(isTransientError('string')).toBe(false)
+    expect(isTransientError(null)).toBe(false)
+  })
+
+  it('CTS 第 2 块撞 429 → step.sleep 65 秒 → 以新 step id 重跑同一块（游标不变）→ 继续到表尾', async () => {
+    let calls = 0
+    const { harness, result, calls: c } = await run({
+      syncCtsChunk: async (cursor) => {
+        calls++
+        if (calls === 2) throw httpError(429, 'Quota exceeded for quota metric Read requests')
+        return { summary: ctsSummary({ totalCrmRows: 1 }), nextOffset: cursor.offset + 1, totalSheetRows: 2, insertedSoFar: 0, done: cursor.offset > 0 }
+      },
+    })
+    const cts = harness.ranStepIds.filter((id) => id.includes('sync-cts'))
+    expect(cts).toEqual(['sync-cts-1', 'sync-cts-2', 'sleep:sync-cts-2-backoff-1', 'sync-cts-2-retry-1'])
+    expect(harness.sleeps).toEqual([{ id: 'sync-cts-2-backoff-1', ms: TRANSIENT_BACKOFF_MS }])
+    expect(TRANSIENT_BACKOFF_MS).toBeGreaterThanOrEqual(60_000) // 配额按分钟算
+    // 重跑的那一块拿到的是同一个游标
+    expect(c.cts[1]).toEqual(c.cts[2])
+    expect(result.ctsSync).toMatchObject({ ok: true, chunks: 2, transientRetries: 1, summary: { totalCrmRows: 2 } })
+  })
+
+  it(`连续 ${TRANSIENT_MAX_RETRIES + 1} 次瞬时错误 → 放弃该线，记 transient:true，其余段照常`, async () => {
+    const { harness, result } = await run({
+      syncCtsChunk: async () => {
+        throw httpError(429)
+      },
+    })
+    const cts = harness.ranStepIds.filter((id) => id.startsWith('sync-cts'))
+    expect(cts).toEqual(['sync-cts-1', 'sync-cts-1-retry-1', 'sync-cts-1-retry-2'])
+    expect(harness.sleeps).toHaveLength(TRANSIENT_MAX_RETRIES)
+    expect(result.ctsSync).toMatchObject({ ok: false, transient: true, transientRetries: TRANSIENT_MAX_RETRIES })
+    expect(harness.ranStepIds).toContain('ai-review-cts-1')
+    expect(harness.ranStepIds.at(-1)).toBe('log-finish')
+  })
+
+  it('业务错误（不是 429/5xx/断网）不 sleep、不重跑，直接停该线', async () => {
+    const { harness, result } = await run({
+      syncCtsChunk: async () => {
+        throw httpError(403, '没权限读这张表')
+      },
+    })
+    expect(harness.ranStepIds.filter((id) => id.includes('sync-cts'))).toEqual(['sync-cts-1'])
+    expect(harness.sleeps).toHaveLength(0)
+    expect(result.ctsSync).toMatchObject({ ok: false, transient: false })
+  })
+
+  it('审核块撞 AI 上游 529 → 同样 sleep 后重跑，carried 不变', async () => {
+    let k = 0
+    const { harness, calls } = await run({
+      reviewClient: async (clientId) => {
+        if (clientId !== CTS) return ranSummary(0)
+        k++
+        if (k === 2) throw Object.assign(new Error('Overloaded'), { status: 529 })
+        return k === 1 ? ranSummary(AI_REVIEW_CHUNK_SIZE, { approved: 1, approvedAmountMinor: 10 }) : ranSummary(1)
+      },
+    })
+    expect(harness.ranStepIds.filter((id) => id.includes('ai-review-cts'))).toEqual([
+      'ai-review-cts-1',
+      'ai-review-cts-2',
+      'sleep:ai-review-cts-2-backoff-1',
+      'ai-review-cts-2-retry-1',
+    ])
+    const cts = calls.review.filter((c) => c.clientId === CTS)
+    expect(cts[1].opts.carried).toEqual(cts[2].opts.carried)
   })
 })

@@ -246,7 +246,8 @@ export default function ConversionsPage() {
    * 跳完清空 autoScrollStatus，别在后续 stuck 变化时重复 scroll。
    */
   useEffect(() => {
-    if (autoScrollStatus !== 'in_doubt' || stuck.length === 0) return
+    // 2026-09-22 起今日待办「授权失效发不出去」那条链接带 ?status=failed，同样滚到这个区块。
+    if ((autoScrollStatus !== 'in_doubt' && autoScrollStatus !== 'failed') || stuck.length === 0) return
     setTimeout(() => stuckSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
     setAutoScrollStatus(null)
   }, [autoScrollStatus, stuck])

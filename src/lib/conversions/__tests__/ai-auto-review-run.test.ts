@@ -373,6 +373,15 @@ describe('分块调用（2026-09-22 conversion-daily-pipeline 拆块）', () => 
     expect((clients[0] as { ai_auto_review_enabled: boolean }).ai_auto_review_enabled).toBe(false)
   })
 
+  it('🔴 发送不透传判断用的 now——状态机要用真实时间写 last_attempt_at，否则「卡在 sending 超过 5 分钟」会被误触发（子牙实施后复审 MAJOR）', async () => {
+    outcomes.push(pendingRow())
+    approve()
+    await runWith({ maxBatchSize: 5 })
+    expect(sendApprovedOutcome).toHaveBeenCalledTimes(1)
+    const sendDeps = vi.mocked(sendApprovedOutcome).mock.calls[0][1]
+    expect(sendDeps).not.toHaveProperty('now')
+  })
+
   it('🔴 「AI 刚看过」时间戳写失败要抛——它是分块的冷却依据，写丢了下一块会再判一次', async () => {
     outcomes.push(pendingRow())
     approve()

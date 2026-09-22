@@ -117,6 +117,14 @@ describe('runFailedWritebackResend', () => {
     expect(RESEND_ACTOR).not.toBe('ai-auto-review@system')
   })
 
+  it('🔴 发送不透传判断用的 now（状态机用真实时间写 last_attempt_at）', async () => {
+    writebacks.push(wb({ outcome_id: 'o1' }))
+    outcomes.push(outcome('o1'))
+    await run(true).result
+    const sendDeps = vi.mocked(sendApprovedOutcome).mock.calls[0][1]
+    expect(sendDeps).not.toHaveProperty('now')
+  })
+
   it('🔴 令牌还没修好 → 一条都不发、不烧尝试次数，summary 说清跳过了几条', async () => {
     writebacks.push(wb({ outcome_id: 'o1' }))
     outcomes.push(outcome('o1'))

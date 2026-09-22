@@ -40,11 +40,24 @@
  * 🔴 **`retries: 2`（2026-09-22 起，原来是 0）**——Inngest 重试时已成功的 step 走缓存，
  *    **只重跑挂掉的那一步**，不是"四步全部再来一遍"（子牙 2026-09-07 在
  *    `messenger-brief-after-sync.ts` 复审时已经写死的结论，这里第一版抄错了 worker 的
- *    0）。拆成几十块之后，一次网络抖动就让全天报废是不能接受的。重跑一块是安全的：
+ *    0）。它管的是「step 根本没回应」的那类失败：网关强杀、进程被杀、`log-start`/
+ *    `log-finish` 抛错。块**内部**的异常被 `guarded()` 吞成 `ok:false`，Inngest 看不到、
+ *    不会重试——所以瞬时错误（Sheets 429 限流、fetch 断网、上游 5xx）由本文件自己处理：
+ *    `step.sleep` 等一会儿再把那一块当新 step 重跑一次（见 `TRANSIENT_*`），不是在
+ *    step 里 setTimeout（F10）；业务错误照旧 `ok:false` 停该线。重跑一块是安全的：
  *    同步块靠幂等键；审核块里已批准的行状态已变、不会再被捞到；发送有
  *    `post_started_at` 抢占，卡在 `sending` 的由补发步骤推给状态机转 `in_doubt` 交人。
  *    人在 Inngest 后台手动点 "Replay" 是另一回事：那会开全新的 run id，step 缓存不复用，
  *    四段全部真跑一遍——那种场景下兜底的仍是 `writeback-service.ts` 的 CAS 幂等。
+ *
+ * 🔴 **`now` 只给判断用，不给发送用**（子牙实施后复审 MAJOR）：`log-start` 取一次的
+ *    `nowIso` 传给审核/补发做「7 天窗口」「6 小时冷却」的判断，保证跨块口径一致；但
+ *    `sendApprovedOutcome()` 必须用真实时间——它拿 `now` 写 `last_attempt_at`，再用
+ *    `now - last_attempt_at` 判「卡在 sending 超过 5 分钟」。同步几十块跑完后 `nowIso`
+ *    已落后十几分钟，若透传进去，写出的 `last_attempt_at` 就是过去时，看板那边用真实时间
+ *    一算就把在途的那 1 秒发送误判成断线 → 转 in_doubt → 回执丢失 → 人点重发 → 双发。
+ *    这正是 2026-09-05 那条双发路径。`ai-auto-review-run.ts` / `writeback-resend-run.ts`
+ *    调发送时都不透传 `now`。
  *
  * 🔴 **`concurrency: { limit: 1 }` 防的是"同一时刻两个实例同时跑"（竞态），不是
  *    "重复处理"**——如果 Inngest 平台故障导致同一天被调度了两次（间隔几分钟到几
@@ -102,9 +115,31 @@ export const NAL_SYNC_CHUNK_CONVERSATIONS = 25
 export const AI_REVIEW_CHUNK_SIZE = 5
 /** 同步块数硬顶——防表格无限长导致无限循环。到顶算失败（那样表尾的行会永远同步不到）。 */
 export const MAX_SYNC_CHUNKS = 100
+/**
+ * 瞬时错误（限流 / 断网 / 上游 5xx）的重试：`step.sleep` 等这么久再把同一块当新 step 重跑，
+ * 每块最多重试这么多次。65 秒是冲着 Google Sheets「每用户每分钟 60 次读」的配额来的
+ * （魏征实施后复审 MAJOR：CTS 30 块 × 2 次读，历史行秒过之后很可能 1 分钟内撞上 429，
+ * 撞上的恰是表尾最新的客户，且每天同一位置复现）。
+ */
+export const TRANSIENT_BACKOFF_MS = 65_000
+export const TRANSIENT_MAX_RETRIES = 2
 
-type StepResult<T> = { ok: true; summary: T } | { ok: false; error: string }
-type ChunkedResult<T> = StepResult<T> & { chunks: number; durationMs: number[] }
+/**
+ * 哪些错误算「等一会儿再来就好」：Sheets/Graph 一类 HTTP 客户端抛的 429 与 5xx、
+ * SDK 错误对象上的 `status` 429/5xx（Anthropic/OpenAI SDK 都这么放）、Node fetch 断网。
+ * 认错误对象的形状不认文案；认不出来的一律当业务错误（不重试，宁可停也不盲跑）。
+ */
+export function isTransientError(e: unknown): boolean {
+  if (!e || typeof e !== 'object') return false
+  const err = e as { name?: string; message?: string; status?: unknown; httpStatus?: unknown; cause?: unknown }
+  const status = typeof err.httpStatus === 'number' ? err.httpStatus : typeof err.status === 'number' ? err.status : null
+  if (status === 429 || (status != null && status >= 500 && status < 600)) return true
+  if (err.name === 'TypeError' && /fetch failed/i.test(err.message ?? '')) return true
+  return false
+}
+
+type StepResult<T> = { ok: true; summary: T } | { ok: false; error: string; transient?: boolean }
+type ChunkedResult<T> = StepResult<T> & { chunks: number; durationMs: number[]; transientRetries?: number }
 
 async function guarded<T>(label: string, fn: () => Promise<T>): Promise<StepResult<T>> {
   try {
@@ -112,7 +147,7 @@ async function guarded<T>(label: string, fn: () => Promise<T>): Promise<StepResu
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e)
     console.error(`[${CONVERSION_DAILY_PIPELINE_JOB}] ${label} 失败：${error}`)
-    return { ok: false, error }
+    return { ok: false, error, transient: isTransientError(e) }
   }
 }
 
@@ -128,6 +163,27 @@ async function timed<T>(label: string, fn: () => Promise<T>): Promise<Timed<T>> 
 /** 装配层只认识这个最小接口，测试用假 step 即可（跟 daily-plan-post-story-resolve 同一做法）。 */
 export type PipelineStep = {
   run<T>(id: string, fn: () => Promise<T>): Promise<T>
+  /** 暂停工作流、交还控制权、到点由 Inngest 唤起（不是进程内等待）。 */
+  sleep(id: string, ms: number): Promise<void>
+}
+
+/**
+ * 跑一块；瞬时错误就 `step.sleep` 后用新 step id 再跑，最多 TRANSIENT_MAX_RETRIES 次。
+ * 每次尝试都是独立 step（`<id>` / `<id>-retry-1` …），重放时按记忆化结果原样推进。
+ */
+async function runChunkWithBackoff<T>(
+  step: PipelineStep,
+  id: string,
+  fn: () => Promise<T>,
+): Promise<Timed<T> & { transientRetries: number }> {
+  let attempt = 0
+  for (;;) {
+    const stepId = attempt === 0 ? id : `${id}-retry-${attempt}`
+    const r = await step.run(stepId, () => timed(stepId, fn))
+    if (r.ok || !r.transient || attempt >= TRANSIENT_MAX_RETRIES) return { ...r, transientRetries: attempt }
+    attempt++
+    await step.sleep(`${id}-backoff-${attempt}`, TRANSIENT_BACKOFF_MS)
+  }
 }
 
 export type ReviewChunkOptions = RunOptions & { nowIso: string }
@@ -161,12 +217,15 @@ async function runSyncChunks<Cursor extends { offset: number; insertedSoFar: num
   let cursor = first
   let merged: Summary | null = null
   const durationMs: number[] = []
+  let transientRetries = 0
   for (let n = 1; n <= MAX_SYNC_CHUNKS; n++) {
-    const r = await step.run(`${label}-${n}`, () => timed(`${label}-${n}`, () => runChunk(cursor)))
+    const cur = cursor
+    const r = await runChunkWithBackoff(step, `${label}-${n}`, () => runChunk(cur))
     durationMs.push(r.durationMs)
-    if (!r.ok) return { ok: false, error: r.error, chunks: n, durationMs }
+    transientRetries += r.transientRetries
+    if (!r.ok) return { ok: false, error: r.error, transient: r.transient, chunks: n, durationMs, transientRetries }
     merged = merged ? merge(merged, r.summary.summary) : r.summary.summary
-    if (r.summary.done) return { ok: true, summary: merged, chunks: n, durationMs }
+    if (r.summary.done) return { ok: true, summary: merged, chunks: n, durationMs, transientRetries }
     cursor = { ...cursor, offset: r.summary.nextOffset, insertedSoFar: r.summary.insertedSoFar }
   }
   return {
@@ -174,6 +233,7 @@ async function runSyncChunks<Cursor extends { offset: number; insertedSoFar: num
     error: `${label} 跑满 ${MAX_SYNC_CHUNKS} 块仍没到表尾——表尾的行永远同步不到，块大小或硬顶要调`,
     chunks: MAX_SYNC_CHUNKS,
     durationMs,
+    transientRetries,
   }
 }
 
@@ -204,11 +264,13 @@ async function runReviewChunks(
     uncertain: 0,
     expired: 0,
   }
+  let transientRetries = 0
   for (let n = 1; n <= maxChunks; n++) {
     const opts: ReviewChunkOptions = { maxBatchSize: AI_REVIEW_CHUNK_SIZE, nowIso, ...(carried ? { carried } : {}) }
-    const r = await step.run(`${label}-${n}`, () => timed(`${label}-${n}`, () => review(clientId, opts)))
+    const r = await runChunkWithBackoff(step, `${label}-${n}`, () => review(clientId, opts))
     durationMs.push(r.durationMs)
-    if (!r.ok) return { ok: false, error: r.error, chunks: n, durationMs }
+    transientRetries += r.transientRetries
+    if (!r.ok) return { ok: false, error: r.error, transient: r.transient, chunks: n, durationMs, transientRetries }
     const s = r.summary
     if (!s.ran) {
       // 首块就没跑（开关关着 / 熔断）→ 如实报原因；中途熔断 → 保留前几块的汇总，附上原因。
@@ -227,7 +289,7 @@ async function runReviewChunks(
     carried = { approvedCount: agg.approved, approvedAmountMinor: agg.approvedAmountMinor }
     if (s.processed < AI_REVIEW_CHUNK_SIZE) break
   }
-  return { ok: true, summary: agg, chunks: durationMs.length, durationMs }
+  return { ok: true, summary: agg, chunks: durationMs.length, durationMs, transientRetries }
 }
 
 /**
@@ -256,6 +318,9 @@ export function createConversionDailyPipelineFunction(deps: ConversionPipelineDe
           // Inngest 把记忆化结果标成 Jsonify<T>。本函数每个 step 的返回值都是纯 JSON
           // （游标是 number/string、汇总是计数和打码清单），Jsonify<T> 与 T 同形。
           run: <T>(id: string, fn: () => Promise<T>) => step.run(id, fn) as Promise<T>,
+          sleep: async (id, ms) => {
+            await step.sleep(id, ms)
+          },
         },
         deps,
         runLog,

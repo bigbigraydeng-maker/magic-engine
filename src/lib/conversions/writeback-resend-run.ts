@@ -178,16 +178,21 @@ export async function runFailedWritebackResend(clientId: string, deps: ResendDep
 
   for (const row of toSend) {
     try {
-      const result = await sendApprovedOutcome(row.outcome_id, { supabase, ...sendDeps, now })
+      // 🔴 发送不透传 `now`（判断用的流水线开跑时刻可能已落后十几分钟；状态机要用真实时间
+      //    写 `last_attempt_at`，否则「卡在 sending 超过 5 分钟」会被误触发——见
+      //    conversion-daily-pipeline.ts 文件头「now 只给判断用」）。
+      const result = await sendApprovedOutcome(row.outcome_id, { supabase, ...sendDeps })
       tally(summary, result.status)
       summary.items.push({ outcomeId: row.outcome_id, writebackId: row.id, status: result.status, message: result.message })
-      await supabase.from('me_conversion_audit').insert({
+      const { error: auditErr } = await supabase.from('me_conversion_audit').insert({
         outcome_id: row.outcome_id,
         writeback_id: row.id,
         action: 'resent',
         actor: RESEND_ACTOR,
         detail: { status: result.status, trigger: row.status === 'sending' ? 'stuck_sending' : 'auth_recovered' },
       })
+      // 审计不是安全闸，但它是「机器自动补发碰过这一行」的唯一痕迹——写丢了要喊出来。
+      if (auditErr) console.error(`[writeback-resend] 审计写入失败 outcome=${row.outcome_id}：${auditErr.message}`)
     } catch (e) {
       summary.errors.push({ outcomeId: row.outcome_id, error: e instanceof Error ? e.message : String(e) })
     }

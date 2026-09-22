@@ -293,7 +293,11 @@ export async function runAiAutoReviewForClient(
 
       let sendMessage = '已批准，发送时出错，可以稍后在页面上重试'
       try {
-        const sendResult = await sendApprovedOutcome(row.id, { supabase, ...deps.sendDeps, now })
+        // 🔴 不把判断用的 `now` 透传给发送：分块调用时 `now` 是流水线开跑时刻，可能已落后
+        //    十几分钟；发送状态机拿它写 `last_attempt_at`、再用它判「卡在 sending 超过 5 分钟」，
+        //    过去时的 `last_attempt_at` 会让看板那边把在途发送误判成断线 → in_doubt → 双发
+        //    （子牙 2026-09-22 实施后复审 MAJOR）。发送一律用真实时间。
+        const sendResult = await sendApprovedOutcome(row.id, { supabase, ...deps.sendDeps })
         sendMessage = sendResult.message
         await writeAudit(supabase, row.id, 'sent', { status: sendResult.status })
       } catch (e) {
