@@ -113,11 +113,16 @@ describe('托管 Meta 广告分析',()=>{
 })
 
 describe('listAnalyses 只把图表用得到的证据字段发给浏览器',()=>{
-  it('裁掉 age_gender/video_ads/fatigue_candidates 等图表不用的字段——2026-09-22 复审指出完整 evidence 会把本来只发给托管模型的逐条广告 ID 和人群细分也回传给浏览器，收窄成只剩 campaigns/comparison',async()=>{
+  it('透传图表需要的 7 个字段，裁掉 video_ads/fatigue_candidates 等逐条广告 ID',async()=>{
     const fullEvidence={
       campaigns:[{ campaign_name:'A',spend:1 }],
       comparison:{ spend:{ current:1,previous:2,percent_change:-50 } },
-      age_gender:[{ age:'18-24' }],video_ads:[{ ad_id:'x' }],fatigue_candidates:[{ ad_id:'y' }],
+      daily_campaigns:[{ date_start:'2026-09-15',spend:10 }],
+      placements:[{ publisher_platform:'facebook',spend:5 }],
+      age_gender:[{ age:'18-24',gender:'male',spend:3 }],
+      devices:[{ device_platform:'mobile',spend:8 }],
+      regions:[{ country:'NZ',spend:6 }],
+      video_ads:[{ ad_id:'x' }],fatigue_candidates:[{ ad_id:'y' }],
     }
     const chain:Record<string,unknown>={}
     for(const method of ['select','eq','order','limit']) chain[method]=vi.fn(()=>chain)
@@ -126,8 +131,11 @@ describe('listAnalyses 只把图表用得到的证据字段发给浏览器',()=>
       evidence:fullEvidence }],error:null }).then(resolve)
     mocks.from.mockReturnValue(chain)
     const [result]=await listAnalyses('client','principal')
-    expect(result.evidence).toEqual({ campaigns:fullEvidence.campaigns,comparison:fullEvidence.comparison })
-    expect(result.evidence).not.toHaveProperty('age_gender')
+    expect(result.evidence).toEqual({
+      campaigns:fullEvidence.campaigns,comparison:fullEvidence.comparison,
+      daily_campaigns:fullEvidence.daily_campaigns,placements:fullEvidence.placements,
+      age_gender:fullEvidence.age_gender,devices:fullEvidence.devices,regions:fullEvidence.regions,
+    })
     expect(result.evidence).not.toHaveProperty('video_ads')
     expect(result.evidence).not.toHaveProperty('fatigue_candidates')
   })
