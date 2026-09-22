@@ -74,6 +74,23 @@ describe('Meta Ads AI report view',()=>{
     expect(screen.queryByText(/本次分析没有完成/)).not.toBeInTheDocument()
   })
 
+  it('shows model_unavailable message when AI model fails but data was saved',()=>{
+    render(<ReportView analysis={{ ...base,status:'failed',report_markdown:null,error_code:'model_unavailable' }} />)
+    expect(screen.getByText(/AI 模型暂时无法响应/)).toBeInTheDocument()
+    expect(screen.queryByText(/本次分析没有完成/)).not.toBeInTheDocument()
+  })
+
+  it('renders charts from evidence even when the analysis failed — model timeout should not hide collected data',()=>{
+    const evidence={
+      campaigns:[{ campaign_name:'测试广告',spend:50 }],comparison:null,
+      daily_campaigns:null,placements:null,age_gender:null,devices:null,regions:null,
+    }
+    render(<ReportView analysis={{ ...base,status:'failed',report_markdown:null,error_code:'model_unavailable',evidence }} />)
+    expect(screen.getByTestId('report-charts')).toBeInTheDocument()
+    expect(screen.getByText(/广告系列花费排行/)).toBeInTheDocument()
+    expect(screen.getByText(/AI 模型暂时无法响应/)).toBeInTheDocument()
+  })
+
   it('falls back to the generic message when error_code is unrecognised',()=>{
     render(<ReportView analysis={{ ...base,status:'failed',report_markdown:null,error_code:'something_new' }} />)
     expect(screen.getByText(/本次分析没有完成/)).toBeInTheDocument()
