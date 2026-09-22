@@ -317,3 +317,86 @@ describe('runAiAutoReviewForClient', () => {
     expect(audits.some((a) => a.action === 'ai_auto_rejected')).toBe(false)
   })
 })
+
+describe('分块调用（2026-09-22 conversion-daily-pipeline 拆块）', () => {
+  beforeEach(() => vi.mocked(checkCircuitBreaker).mockClear())
+  const approve = () =>
+    vi.mocked(judgeOutcome).mockResolvedValue({
+      verdict: 'approve',
+      reason: '数据完整',
+      model: 'claude-sonnet-4-6',
+      promptVersion: 'v1',
+      inputSnapshot: {},
+      rawOutput: '{}',
+    })
+  const runWith = (opts: Parameters<typeof runAiAutoReviewForClient>[2]) =>
+    runAiAutoReviewForClient('c1', { supabase: supabaseHolder as never, sendDeps: { writer: {} as never, fetcher: fetch }, now: NOW }, opts)
+
+  it('maxBatchSize 生效：铺 7 条、每块 5 → 一次只处理 5 条', async () => {
+    for (let i = 0; i < 7; i++) outcomes.push(pendingRow({ id: `o${i}`, amount_minor: 100 }))
+    approve()
+    const summary = await runWith({ maxBatchSize: 5 })
+    expect(summary).toMatchObject({ ran: true, processed: 5, approved: 5, approvedAmountMinor: 500 })
+  })
+
+  it('🔴 非首块（带 carried）跳过开工前的熔断预检——否则前几块刚批的行会被当成「近 24 小时激增」把客户关掉', async () => {
+    outcomes.push(pendingRow({ amount_minor: 100 }))
+    approve()
+    await runWith({ maxBatchSize: 5, carried: { approvedCount: 2, approvedAmountMinor: 200 } })
+    expect(checkCircuitBreaker).not.toHaveBeenCalled()
+    expect((clients[0] as { ai_auto_review_enabled: boolean }).ai_auto_review_enabled).toBe(true)
+  })
+
+  it('首块（不带 carried）照常预检', async () => {
+    outcomes.push(pendingRow({ amount_minor: 100 }))
+    approve()
+    await runWith({ maxBatchSize: 5 })
+    expect(checkCircuitBreaker).toHaveBeenCalledTimes(1)
+  })
+
+  it('🔴 carried 是「单次运行硬顶」的起点：前几块累计已到硬顶 → 本块第一条之前就熔断，processed=0', async () => {
+    outcomes.push(pendingRow({ amount_minor: 100 }))
+    approve()
+    const summary = await runWith({ maxBatchSize: 5, carried: { approvedCount: BATCH_HARD_STOP_COUNT, approvedAmountMinor: 100 } })
+    expect(summary).toMatchObject({ ran: true, processed: 0, approved: 0 })
+    expect(judgeOutcome).not.toHaveBeenCalled()
+    expect((clients[0] as { ai_auto_review_enabled: boolean }).ai_auto_review_enabled).toBe(false)
+    const trip = audits.find((a) => a.action === 'circuit_breaker_tripped')
+    expect(JSON.stringify(trip?.detail)).toContain('前几块累计')
+  })
+
+  it('carried 差一条到硬顶 → 本块批 1 条后停，跟一块 50 条时的行为一致', async () => {
+    for (let i = 0; i < 3; i++) outcomes.push(pendingRow({ id: `o${i}`, amount_minor: 100 }))
+    approve()
+    const summary = await runWith({ maxBatchSize: 5, carried: { approvedCount: BATCH_HARD_STOP_COUNT - 1, approvedAmountMinor: 0 } })
+    expect(summary).toMatchObject({ ran: true, approved: 1 })
+    expect((clients[0] as { ai_auto_review_enabled: boolean }).ai_auto_review_enabled).toBe(false)
+  })
+
+  it('🔴 发送不透传判断用的 now——状态机要用真实时间写 last_attempt_at，否则「卡在 sending 超过 5 分钟」会被误触发（子牙实施后复审 MAJOR）', async () => {
+    outcomes.push(pendingRow())
+    approve()
+    await runWith({ maxBatchSize: 5 })
+    expect(sendApprovedOutcome).toHaveBeenCalledTimes(1)
+    const sendDeps = vi.mocked(sendApprovedOutcome).mock.calls[0][1]
+    expect(sendDeps).not.toHaveProperty('now')
+  })
+
+  it('🔴 「AI 刚看过」时间戳写失败要抛——它是分块的冷却依据，写丢了下一块会再判一次', async () => {
+    outcomes.push(pendingRow())
+    approve()
+    fromFn.mockImplementation((table: string) => {
+      const b = fakeDb(table)
+      if (table === 'me_sale_outcomes') {
+        const origUpdate = b.update as (patch: Row) => typeof b
+        b.update = (patch: Row) =>
+          'ai_last_reviewed_at' in patch
+            ? ({ eq: () => Promise.resolve({ data: null, error: { message: '模拟写失败' } }) } as unknown as typeof b)
+            : origUpdate(patch)
+      }
+      return b
+    })
+    await expect(runWith({ maxBatchSize: 5 })).rejects.toThrow('模拟写失败')
+    expect(sendApprovedOutcome).not.toHaveBeenCalled()
+  })
+})

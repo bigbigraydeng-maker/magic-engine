@@ -99,6 +99,8 @@ export type ManualItemKind =
   | 'conversion_needs_review'
   /** 发给广告平台时断线了，不知道对方收没收 —— 程序绝不自己重发，等人核对 */
   | 'conversion_send_in_doubt'
+  /** 已批准的成交/咨询因为连接广告平台的授权失效发不出去，7 天内不修就永久丢（2026-09-22） */
+  | 'conversion_capi_token_dead'
   /** AI 全自动审核发现异常，已经自动暂停发送（PM 拍板 2026-09-15："要有异常刹车"） */
   | 'ai_auto_review_circuit_breaker'
   /** AI 客服回复草稿写好了，等人批准发送（issue #1589） */

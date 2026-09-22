@@ -457,6 +457,22 @@ Render.com 的 HTTP 请求有超时上限（通常 3~5 分钟），
 - 触发脚本轮询日志时，必须用触发时间戳过滤，不能直接数条数；
 - 相关函数加注释标明「此处用 step.sleep，不是 setTimeout，原因见 PITFALLS F10」。
 
+**第二实例（2026-09-22，`conversion-daily-pipeline` 成交回传每日流水线）——不是 setTimeout，
+是一个 step 逐行处理整张大表**：`sync-cts` 一步读 CTS CRM 表格 ~600 行、每行 3–5 次数据库往返
+（查联系人、查价、写入、撞唯一索引），实测跑 4–24 分钟 → 被网关 ~125 秒（F8）强杀 → `retries: 0`
+→ 工作流静默死。9/16 起连续 6 天 `cron_run_logs` 全部停在 `running`、`finished_at` 为空，
+后面的 AI 审核步一次都没跑到，49 条待审核记录 `ai_review_attempts=0`——而且**没有任何报警**，
+因为完成记录只在最后一步写、又没配 `onFailure`。
+
+同类判据：只要一个 `step.run` 里有「对 N 行逐行做 I/O」的循环，N 又不受你控制（表格、对话列表、
+待审核队列），它就会在某一天超过 125 秒。修法（PR 见 CHANGELOG 2026-09-22）：
+- 每个 step 只处理一小块（20 行 / 25 个对话 / 5 条 AI 判断），块之间用 step 返回值传游标
+  （只放 number/string，能过 JSON；**PII 不进 step 返回值**——Inngest 会把它存到云端）；
+- 逐行的「已同步」判断改成一次预查幂等键集合，历史行不再逐行往返；
+- 函数级 `onFailure` 把停在 `running` 的运行记录收成 `failed`（`failOpenCronRuns`）；
+- 编排函数 `retries: 2`（只重跑挂掉的那一步），不要抄 worker 的 0；
+- 单步目标 ≤ 60 秒、硬上限 125 秒，块耗时记进 summary 上线后看真实分布。
+
 ---
 
 ### F9 · Supabase 一次最多返回 1000 行，而且不报错

@@ -30,6 +30,8 @@ type Writeback = {
   id: string
   status: string
   last_error: string | null
+  /** 'auth' = 授权失效，系统会在令牌修好后自动补发（2026-09-22）；其它值走「再试一次」文案。 */
+  last_error_code: string | null
   next_attempt_at: string | null
 }
 
@@ -244,7 +246,8 @@ export default function ConversionsPage() {
    * 跳完清空 autoScrollStatus，别在后续 stuck 变化时重复 scroll。
    */
   useEffect(() => {
-    if (autoScrollStatus !== 'in_doubt' || stuck.length === 0) return
+    // 2026-09-22 起今日待办「授权失效发不出去」那条链接带 ?status=failed，同样滚到这个区块。
+    if ((autoScrollStatus !== 'in_doubt' && autoScrollStatus !== 'failed') || stuck.length === 0) return
     setTimeout(() => stuckSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
     setAutoScrollStatus(null)
   }, [autoScrollStatus, stuck])
@@ -542,7 +545,9 @@ export default function ConversionsPage() {
                 <div className="my-2 text-sm leading-relaxed text-me-charcoal/70">
                   {doubt
                     ? '这一笔发出去时断线了，不确定平台收到没有。系统不会自己重发 —— 重发一次就是把同一笔算成两笔，撤不回。'
-                    : `上次发送没成功：${wb.last_error ?? '未知原因'}。可以再试一次。`}
+                    : wb.last_error_code === 'auth'
+                      ? '连接广告平台的授权失效了，这条还没发出去。重新连接授权后，系统每天早上会自动补发（7 天内有效）；连好后也可以现在点「再试一次」。'
+                      : `上次发送没成功：${wb.last_error ?? '未知原因'}。可以再试一次。`}
                 </div>
                 {doubt ? (
                   <div className="flex flex-wrap gap-2">

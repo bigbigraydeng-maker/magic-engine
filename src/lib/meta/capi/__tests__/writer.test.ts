@@ -310,6 +310,36 @@ describe('accept · 授权', () => {
       expect(v.kind).toBe('auth')
     }
   })
+
+  /**
+   * 🔴 2026-09-22 起 auth 这一档在状态机里变成**可重发**（`writeback-service.ts` case 'auth'）。
+   * 可重发的前提是：判成 auth 的响应都是 Meta 在处理事件之前就拒了请求、事件没入账。
+   * 这两条锁住那个前提——判定顺序或判据一变，这里先红。
+   */
+  it('判成 auth 的响应体里没有 events_received（事件没入账，重发不会双发）', () => {
+    const cases = [
+      raw({ status: 401, bodyText: jsonBody({ error: { message: 'Invalid OAuth access token', code: 190 } }) }),
+      raw({ status: 400, bodyText: jsonBody({ error: { message: 'Error validating access token: Session has expired', code: 190, error_subcode: 463 } }) }),
+      raw({ status: 403, bodyText: jsonBody({ error: { message: '(#200) Requires ads_management permission', code: 200 } }) }),
+    ]
+    for (const r of cases) {
+      const v = writer.accept(r)
+      expect(v.kind).toBe('auth')
+      expect(r.ok && JSON.parse(r.bodyText)).not.toHaveProperty('events_received')
+    }
+  })
+
+  it('真正的令牌失效文案（含 "session"/"password"）不会被「太旧」那条正则截胡', () => {
+    const v = writer.accept(
+      raw({
+        status: 400,
+        bodyText: jsonBody({
+          error: { message: 'Error validating access token: The session has been invalidated because the user changed their password', code: 190, error_subcode: 460 },
+        }),
+      }),
+    )
+    expect(v.kind).toBe('auth')
+  })
 })
 
 describe('accept · 限流与重试', () => {
