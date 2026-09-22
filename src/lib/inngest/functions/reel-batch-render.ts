@@ -174,21 +174,30 @@ export function createReelBatchRender() {
       type PreviewResult = { tag: string; renderId: string; url: string }
       const previews: PreviewResult[] = []
 
-      for (const { tag, renderId } of previewIds) {
-        let previewUrl: string | null = null
-        for (let attempt = 0; attempt < 20 && previewUrl === null; attempt++) {
-          const render = await step.run(`check-preview-${tag}-${attempt}`, () => getRender(renderId))
-          if (render.status === 'succeeded' && render.url) {
-            previewUrl = render.url
-          } else if (render.status === 'failed' || render.status === 'cancelled') {
-            throw new Error(`小样渲染失败 ${tag}: ${render.status} ${render.errorMessage ?? ''}`)
-          } else if (attempt < 19) {
-            await step.sleep(`sleep-preview-${tag}-${attempt}`, '15s')
-          } else {
-            throw new Error(`小样渲染超时 ${tag}（已等5分钟）`)
+      try {
+        for (const { tag, renderId } of previewIds) {
+          let previewUrl: string | null = null
+          for (let attempt = 0; attempt < 20 && previewUrl === null; attempt++) {
+            const render = await step.run(`check-preview-${tag}-${attempt}`, () => getRender(renderId))
+            if (render.status === 'succeeded' && render.url) {
+              previewUrl = render.url
+            } else if (render.status === 'failed' || render.status === 'cancelled') {
+              throw new Error(`小样渲染失败 ${tag}: ${render.status} ${render.errorMessage ?? ''}`)
+            } else if (attempt < 19) {
+              await step.sleep(`sleep-preview-${tag}-${attempt}`, '15s')
+            } else {
+              throw new Error(`小样渲染超时 ${tag}（已等5分钟）`)
+            }
           }
+          if (previewUrl) previews.push({ tag, renderId, url: previewUrl })
         }
-        if (previewUrl) previews.push({ tag, renderId, url: previewUrl })
+      } catch (pollErr) {
+        const errMsg = pollErr instanceof Error ? pollErr.message : String(pollErr)
+        console.error(`[reel-batch-render] 小样轮询失败: ${errMsg}`)
+        await cronRunHandle('reel-batch-render', runId, startedAt).finish({
+          error: `poll-previews: ${errMsg}`,
+        })
+        throw pollErr
       }
 
       // 记录小样 URL——Claude Code 会把这些发给 PM 看
