@@ -35,6 +35,7 @@ import { pushPageBindingItems, type PageBindingItemKind } from './page-binding-i
 import { AUTO_LANDED_AGENT } from '@/lib/diagnostic/auto-prescribe'
 import { isHandAddedItem } from '@/lib/diagnostic/prescription-landing'
 import { LINKEDIN_PROGRESS_CLIENT_ID, LINKEDIN_PROGRESS_SOURCE } from '@/lib/linkedin-progress/constants'
+import { pushAdsAutoPauseItems, type AdsAutoPauseItemKind } from './ads-auto-pause-items'
 
 /**
  * 这些条目**链接坏了也照样下发**。
@@ -123,6 +124,7 @@ export type ManualItemKind =
   | DailyPlanMeasurementItemKind
   /** 私信客服健康心跳查出问题（issue #1587）：消息量骤降 / 验证器拦截率或出错率过高 / 退订登记写入失败 */
   | 'conversation_health_alert'
+  | AdsAutoPauseItemKind
 
 export interface ManualItem {
   kind: ManualItemKind
@@ -442,6 +444,11 @@ export async function loadManualItems(
 
   const ids = Array.from(clients.keys())
   const nameOf = (id: string) => clients.get(id)?.name ?? '未知客户'
+
+  // 广告 D3（花钱没结果）自动暂停建议等人批准——点一下就执行，不用去 Meta 后台
+  await pushAdsAutoPauseItems(supabase, items, nameOf).catch((e) =>
+    console.warn('[manual-items] Ads D3 自动暂停待批准读取失败（不阻塞其他待办）:', e),
+  )
 
   // 新诊断结果 —— PM 2026-08-03 拍板要逐条看；没有消费方的自动化 = 再造一个没人看的数据源。
   // 必须放在 nameOf 定义之后：待办上显示 uuid 等于没显示。

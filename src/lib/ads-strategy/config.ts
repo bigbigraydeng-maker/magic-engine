@@ -13,6 +13,18 @@ export interface AdStrategyConfig {
   client_id: string
   enabled: boolean
   digest_recipients: string[]
+  /**
+   * D3（花钱没结果）自动出暂停建议的总开关。默认 false——只有 PM 显式为
+   * 某个客户打开才生效（2026-09-22 拍板：CTS 打开，别的客户默认不受影响）。
+   */
+  autopilot_enabled: boolean
+  /**
+   * 双重开关的第二把锁。`autopilot_enabled` 打开后，先默认 `autopilot_dry_run:
+   * true`——只写 `flywheel_actions` 记录"如果开启会做什么"，不真的调 Meta
+   * API、不生成需要人点头的待办。两个开关都要是「活」的那一面（enabled=true
+   * 且 dry_run=false）才会真的提交到 Kernel 等人批准执行。
+   */
+  autopilot_dry_run: boolean
 }
 
 /**
@@ -23,9 +35,15 @@ export interface AdStrategyConfig {
  */
 export type ConfigSource = 'row' | 'default' | 'fallback'
 
-/** Default when a client has no config row: on, digest to the global inbox. */
+/** Default when a client has no config row: on, digest to the global inbox, autopilot off. */
 export function defaultConfig(clientId: string): AdStrategyConfig {
-  return { client_id: clientId, enabled: true, digest_recipients: [] }
+  return {
+    client_id: clientId,
+    enabled: true,
+    digest_recipients: [],
+    autopilot_enabled: false,
+    autopilot_dry_run: true,
+  }
 }
 
 /**
@@ -42,7 +60,7 @@ export async function loadAdStrategyConfigWithSource(
 ): Promise<{ config: AdStrategyConfig; source: ConfigSource }> {
   const { data, error } = await supabaseAdmin
     .from('ad_strategy_configs')
-    .select('client_id, enabled, digest_recipients')
+    .select('client_id, enabled, digest_recipients, autopilot_enabled, autopilot_dry_run')
     .eq('client_id', clientId)
     .maybeSingle()
 
@@ -57,6 +75,10 @@ export async function loadAdStrategyConfigWithSource(
       client_id: clientId,
       enabled: data.enabled ?? true,
       digest_recipients: Array.isArray(data.digest_recipients) ? data.digest_recipients : [],
+      // 🔴 fail closed，不是 fail open：读到旧行（列还没 migrate）或字段缺失
+      //    一律当「没打开」，绝不能让一次读取异常把自动暂停悄悄打开。
+      autopilot_enabled: data.autopilot_enabled === true,
+      autopilot_dry_run: data.autopilot_dry_run !== false,
     },
     source: 'row',
   }

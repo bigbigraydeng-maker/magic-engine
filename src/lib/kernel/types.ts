@@ -32,6 +32,7 @@ import type { AccessTier } from '@/lib/auth/access-types'
 export type ActionKey =
   | 'seo.build_publish_package'
   | 'page.apply_optimization_request'
+  | 'ads.auto_pause_on_d3'
 
 /** 一个 run 为了什么而跑。决定它需不需要挂 Goal。 */
 export type ActionPurpose =
@@ -142,6 +143,11 @@ export type VerificationMethod =
    *    Growth 层的 matched remeasurement 走下游 Measurement/Verification 链，跟这个 method 无关。
    */
   | 'page_apply_integrity'
+  /**
+   * 🔴 `ads.auto_pause_on_d3` 专用：暂停之后回读 Meta 广告组状态，
+   *    确认它真的是 `PAUSED`（不是「写入没报错就算数」）。
+   */
+  | 'ads_pause_integrity'
 
 export interface VerificationSpec {
   readonly method: VerificationMethod

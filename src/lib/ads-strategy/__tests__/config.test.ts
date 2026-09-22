@@ -39,6 +39,30 @@ describe('loadAdStrategyConfigWithSource — asymmetric fail-open', () => {
     expect(config.digest_recipients).toEqual(['a@b.com'])
     expect(source).toBe('row')
   })
+
+  it('fail-closed on autopilot: a row missing the new columns reads as disabled + dry-run', async () => {
+    maybeSingle.mockResolvedValue({ data: { client_id: 'c1', enabled: true, digest_recipients: [] }, error: null })
+    const { config } = await loadAdStrategyConfigWithSource('c1')
+    expect(config.autopilot_enabled).toBe(false)
+    expect(config.autopilot_dry_run).toBe(true)
+  })
+
+  it('reads an explicit autopilot_enabled=true, autopilot_dry_run=false row through', async () => {
+    maybeSingle.mockResolvedValue({
+      data: { client_id: 'c1', enabled: true, digest_recipients: [], autopilot_enabled: true, autopilot_dry_run: false },
+      error: null,
+    })
+    const { config } = await loadAdStrategyConfigWithSource('c1')
+    expect(config.autopilot_enabled).toBe(true)
+    expect(config.autopilot_dry_run).toBe(false)
+  })
+
+  it('a read error falls back to autopilot disabled — never silently auto-pauses on a DB hiccup', async () => {
+    maybeSingle.mockResolvedValue({ data: null, error: { message: 'timeout' } })
+    const { config } = await loadAdStrategyConfigWithSource('c1')
+    expect(config.autopilot_enabled).toBe(false)
+    expect(config.autopilot_dry_run).toBe(true)
+  })
 })
 
 describe('defaultConfig', () => {
@@ -54,19 +78,21 @@ describe('resolveDigestRecipients', () => {
   beforeEach(() => { delete process.env.AD_HEALTH_DIGEST_TO })
   afterEach(() => { if (OLD) process.env.AD_HEALTH_DIGEST_TO = OLD; else delete process.env.AD_HEALTH_DIGEST_TO })
 
+  const base = { autopilot_enabled: false, autopilot_dry_run: true }
+
   it('uses the client list when set', () => {
-    expect(resolveDigestRecipients({ client_id: 'x', enabled: true, digest_recipients: ['a@b.com', 'c@d.com'] }))
+    expect(resolveDigestRecipients({ client_id: 'x', enabled: true, digest_recipients: ['a@b.com', 'c@d.com'], ...base }))
       .toEqual(['a@b.com', 'c@d.com'])
   })
 
   it('falls back to the env inbox when the client list is empty', () => {
     process.env.AD_HEALTH_DIGEST_TO = 'ops@magicengine.com.au'
-    expect(resolveDigestRecipients({ client_id: 'x', enabled: true, digest_recipients: [] }))
+    expect(resolveDigestRecipients({ client_id: 'x', enabled: true, digest_recipients: [], ...base }))
       .toEqual(['ops@magicengine.com.au'])
   })
 
   it('falls back to the shared verified-domain ME inbox when no env is set', () => {
-    expect(resolveDigestRecipients({ client_id: 'x', enabled: true, digest_recipients: [] }))
+    expect(resolveDigestRecipients({ client_id: 'x', enabled: true, digest_recipients: [], ...base }))
       .toEqual(['hello@magicengine.cloud'])
   })
 })
