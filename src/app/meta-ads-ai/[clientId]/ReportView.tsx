@@ -1,3 +1,5 @@
+import { META_ADS_AI_MESSAGES } from '@/lib/meta/ai/error-messages'
+
 type ReportStatus = 'running' | 'completed' | 'no_data' | 'failed'
 
 export type ReportAnalysis = {
@@ -85,7 +87,9 @@ function ReportState({ analysis }: { analysis: ReportAnalysis }) {
   }
   if (analysis.status === 'no_data') return <p role="status" className="rounded-xl bg-slate-50 p-4 text-slate-700">这个期间没有可分析的广告数据，因此没有产生 AI 分析费用。</p>
   if (analysis.status === 'running') return <p role="status" className="rounded-xl bg-blue-50 p-4 text-blue-900">报告正在生成，请稍后刷新页面。</p>
-  return <p role="alert" className="rounded-xl bg-red-50 p-4 text-red-800">本次分析没有完成。请稍后重试；如持续失败，请联系 Magic Engine 支持。</p>
+  const message=(analysis.error_code && META_ADS_AI_MESSAGES[analysis.error_code])
+    ?? '本次分析没有完成。请稍后重试；如持续失败，请联系 Magic Engine 支持。'
+  return <p role="alert" className="rounded-xl bg-red-50 p-4 text-red-800">{message}</p>
 }
 
 export default function ReportView({ analysis }: { analysis: ReportAnalysis }) {
