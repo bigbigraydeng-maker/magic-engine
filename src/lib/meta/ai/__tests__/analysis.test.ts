@@ -12,7 +12,7 @@ vi.mock('../../graph-read',async()=>{
   return { ...actual,metaGraphGet:mocks.metaGraphGet }
 })
 
-import { generateAnalysis } from '../analysis'
+import { generateAnalysis,listAnalyses } from '../analysis'
 
 const grant={ id:'10000000-0000-4000-8000-000000000001',connection_id:'20000000-0000-4000-8000-000000000001',
   ad_account_id:'act_1234567890',revision:'30000000-0000-4000-8000-000000000001',entitlement_revision:'40000000-0000-4000-8000-000000000001' }
@@ -73,7 +73,7 @@ describe('托管 Meta 广告分析',()=>{
     mocks.callClaudeChat.mockResolvedValue({ text:'中文报告',input_tokens:500,output_tokens:200,cost_usd:0.0045,stop_reason:'end_turn' })
     const result=await generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id)
     expect(result.status).toBe('completed')
-    expect(mocks.callClaudeChat).toHaveBeenCalledWith(expect.objectContaining({ model:'claude-sonnet-test',singleAttempt:true,maxOutputTokens:2800 }))
+    expect(mocks.callClaudeChat).toHaveBeenCalledWith(expect.objectContaining({ model:'claude-sonnet-test',singleAttempt:true,maxOutputTokens:4000 }))
     expect(mocks.activeConnection).toHaveBeenCalledTimes(4)
     expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_authorize_sponsored_analysis',{
       tenant:'a1000000-0000-4000-8000-000000000001',principal:'50000000-0000-4000-8000-000000000001',job:'job-1',
@@ -101,7 +101,7 @@ describe('托管 Meta 广告分析',()=>{
 
   it('按 UTF-8 字节限制多语言证据，超限时不会调用付费模型',async()=>{
     mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
-      if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'元'.repeat(7_000),timezone_name:'Pacific/Auckland' }
+      if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'元'.repeat(12_000),timezone_name:'Pacific/Auckland' }
       if(params.level==='account') return { data:[{ spend:'100',impressions:'1000',clicks:'20' }] }
       return { data:[] }
     })
@@ -109,5 +109,37 @@ describe('托管 Meta 广告分析',()=>{
       .rejects.toThrow('analysis_too_large')
     expect(mocks.callClaudeChat).not.toHaveBeenCalled()
     expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_finish_sponsored_analysis',expect.objectContaining({ final_status:'failed',charged_usd:0 }))
+  })
+})
+
+describe('listAnalyses 只把图表用得到的证据字段发给浏览器',()=>{
+  it('裁掉 age_gender/video_ads/fatigue_candidates 等图表不用的字段——2026-09-22 复审指出完整 evidence 会把本来只发给托管模型的逐条广告 ID 和人群细分也回传给浏览器，收窄成只剩 campaigns/comparison',async()=>{
+    const fullEvidence={
+      campaigns:[{ campaign_name:'A',spend:1 }],
+      comparison:{ spend:{ current:1,previous:2,percent_change:-50 } },
+      age_gender:[{ age:'18-24' }],video_ads:[{ ad_id:'x' }],fatigue_candidates:[{ ad_id:'y' }],
+    }
+    const chain:Record<string,unknown>={}
+    for(const method of ['select','eq','order','limit']) chain[method]=vi.fn(()=>chain)
+    chain.then=(resolve:(value:unknown)=>unknown)=>Promise.resolve({ data:[{ id:'job-1',status:'completed',ad_account_id:'act_1',
+      window_since:'2026-09-15',window_until:'2026-09-21',report_markdown:'x',error_code:null,created_at:'t',completed_at:'t',
+      evidence:fullEvidence }],error:null }).then(resolve)
+    mocks.from.mockReturnValue(chain)
+    const [result]=await listAnalyses('client','principal')
+    expect(result.evidence).toEqual({ campaigns:fullEvidence.campaigns,comparison:fullEvidence.comparison })
+    expect(result.evidence).not.toHaveProperty('age_gender')
+    expect(result.evidence).not.toHaveProperty('video_ads')
+    expect(result.evidence).not.toHaveProperty('fatigue_candidates')
+  })
+
+  it('evidence 为 null 时不报错，直接透传 null',async()=>{
+    const chain:Record<string,unknown>={}
+    for(const method of ['select','eq','order','limit']) chain[method]=vi.fn(()=>chain)
+    chain.then=(resolve:(value:unknown)=>unknown)=>Promise.resolve({ data:[{ id:'job-1',status:'failed',ad_account_id:'act_1',
+      window_since:'2026-09-15',window_until:'2026-09-21',report_markdown:null,error_code:'analysis_too_large',created_at:'t',completed_at:'t',
+      evidence:null }],error:null }).then(resolve)
+    mocks.from.mockReturnValue(chain)
+    const [result]=await listAnalyses('client','principal')
+    expect(result.evidence).toBeNull()
   })
 })
