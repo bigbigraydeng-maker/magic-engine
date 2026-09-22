@@ -205,14 +205,16 @@ async function authorizeModelDispatch(clientId: string, principalId: string, job
   if (data !== true) throw new MetaReadError('authorization_changed', 403)
 }
 
-/** loadEvidence's full payload also carries per-ad IDs/names, video retention and age/gender
- * splits that no chart reads — only forward what src/app/meta-ads-ai/[clientId]/ReportCharts.tsx
- * actually consumes, so a browser DevTools look at the API response doesn't see more than the
- * report itself already says. */
-function chartEvidence(evidence: unknown): { campaigns: unknown; comparison: unknown } | null {
+/** Only forward the evidence fields ReportCharts.tsx actually renders — not per-ad IDs,
+ * video retention curves, or fatigue candidates that only the model report consumes. */
+function chartEvidence(evidence: unknown): Record<string, unknown> | null {
   if (evidence === null || typeof evidence !== 'object' || Array.isArray(evidence)) return null
   const record = evidence as Record<string, unknown>
-  return { campaigns: record.campaigns ?? null, comparison: record.comparison ?? null }
+  return {
+    campaigns: record.campaigns ?? null, comparison: record.comparison ?? null,
+    daily_campaigns: record.daily_campaigns ?? null, placements: record.placements ?? null,
+    age_gender: record.age_gender ?? null, devices: record.devices ?? null, regions: record.regions ?? null,
+  }
 }
 
 async function job(clientId: string, principalId: string, jobId: string): Promise<JobRow> {

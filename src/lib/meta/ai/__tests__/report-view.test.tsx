@@ -91,16 +91,40 @@ describe('Meta Ads AI report view',()=>{
         ctr:{ current:0.0152, previous:0.0016, percent_change:874.39 },
         reach:{ current:9884, previous:6527, percent_change:51.43 },
       },
+      daily_campaigns:[
+        { date_start:'2026-09-15',campaign_name:'A',spend:50,impressions:5000,clicks:80 },
+        { date_start:'2026-09-16',campaign_name:'A',spend:60,impressions:6000,clicks:100 },
+        { date_start:'2026-09-17',campaign_name:'A',spend:55,impressions:5500,clicks:90 },
+      ],
+      placements:[
+        { publisher_platform:'facebook',platform_position:'feed',spend:120,impressions:8000,clicks:150 },
+        { publisher_platform:'instagram',platform_position:'story',spend:80,impressions:5000,clicks:60 },
+      ],
+      age_gender:[
+        { age:'25-34',gender:'male',spend:80,impressions:4000 },
+        { age:'25-34',gender:'female',spend:90,impressions:4500 },
+        { age:'35-44',gender:'male',spend:40,impressions:2000 },
+      ],
+      devices:[
+        { device_platform:'mobile_app',spend:180,impressions:12000 },
+        { device_platform:'desktop',spend:60,impressions:3000 },
+      ],
+      regions:[
+        { country:'NZ',spend:200,impressions:13000 },
+        { country:'AU',spend:50,impressions:2000 },
+      ],
     }
     render(<ReportView analysis={{ ...base,report_markdown:'一、总体结果\n数据充足。',evidence }} />)
     const charts=screen.getByTestId('report-charts')
     expect(charts).toBeInTheDocument()
-    // recharts wraps long labels and decimates axis ticks under jsdom's approximate text
-    // measurement, so this only pins the wiring (real chart titles + comparison numbers render),
-    // not which specific campaign tick survives — that's confirmed against production data instead.
     expect(charts.textContent).toContain('广告系列花费排行')
     expect(charts.textContent).toContain('基督城')
     expect(charts.textContent).toContain('739.0%')
+    expect(charts.textContent).toContain('每日花费与点击率趋势')
+    expect(charts.textContent).toContain('版位花费分布')
+    expect(charts.textContent).toContain('受众画像')
+    expect(charts.textContent).toContain('设备分布')
+    expect(charts.textContent).toContain('地区花费分布')
   })
 
   it('renders no chart section when there is no usable evidence — must not crash on an older job or a no_data/failed status carrying null evidence',()=>{
