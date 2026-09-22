@@ -5,6 +5,7 @@ import { normaliseAttribution } from '@/lib/marketing/attribution'
 import { meMailFrom, ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
 
 const TO_EMAIL = ME_MAIL_TO_ADDRESS
+const META_ADS_AI_PILOT_FORM = 'meta_ads_ai_pilot'
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.RESEND_API_KEY
@@ -24,6 +25,7 @@ export async function POST(req: NextRequest) {
   const email = typeof payload.email === 'string' ? payload.email : ''
   const company = typeof payload.company === 'string' ? payload.company : ''
   const message = typeof payload.message === 'string' ? payload.message : ''
+  const isMetaAdsAiPilotApplication = payload.formType === META_ADS_AI_PILOT_FORM
   const attribution = normaliseAttribution({
     ...payload,
     referrer: typeof payload.referrer === 'string' ? payload.referrer : req.headers.get('referer'),
@@ -53,14 +55,18 @@ export async function POST(req: NextRequest) {
         .join('')
     : ''
 
-  const { error } = await resend.emails.send({
-    from: meMailFrom('Magic Engine Contact'),
-    to: [TO_EMAIL],
-    replyTo: email,
-    subject: `New enquiry from ${name.trim()} - Magic Engine`,
-    html: `
+  let internalError: unknown
+  try {
+    const result = await resend.emails.send({
+      from: meMailFrom(isMetaAdsAiPilotApplication ? 'Magic Engine 内测申请' : 'Magic Engine Contact'),
+      to: [TO_EMAIL],
+      replyTo: email.trim(),
+      subject: isMetaAdsAiPilotApplication
+        ? `Meta Ads AI 内测申请：${name.trim()}`
+        : `New enquiry from ${name.trim()} - Magic Engine`,
+      html: `
       <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
-        <h2 style="margin:0 0 20px;font-size:18px;color:#0f172a">New contact form submission</h2>
+        <h2 style="margin:0 0 20px;font-size:18px;color:#0f172a">${isMetaAdsAiPilotApplication ? 'Meta Ads AI 内测申请' : 'New contact form submission'}</h2>
         <table style="width:100%;border-collapse:collapse;font-size:14px">
           <tr>
             <td style="padding:8px 12px;background:#f8fafc;font-weight:600;width:100px;color:#475569">Name</td>
@@ -87,11 +93,43 @@ export async function POST(req: NextRequest) {
         </p>
       </div>
     `,
-  })
+    })
+    internalError = result.error
+  } catch (error) {
+    internalError = error
+  }
 
-  if (error) {
-    console.error('[contact] Resend error:', error)
+  if (internalError) {
+    console.error('[contact] Internal notification delivery failed:', internalError)
     return NextResponse.json({ error: 'Failed to send message. Please try again.' }, { status: 500 })
+  }
+
+  if (isMetaAdsAiPilotApplication) {
+    let confirmationError: unknown
+    try {
+      const result = await resend.emails.send({
+        from: meMailFrom('Magic Engine'),
+        to: [email.trim().toLowerCase()],
+        replyTo: TO_EMAIL,
+        subject: '我们已收到你的 Meta Ads AI 内测申请',
+        html: buildMetaAdsAiPilotConfirmation(name.trim()),
+      })
+      confirmationError = result.error
+    } catch (error) {
+      confirmationError = error
+    }
+
+    if (confirmationError) {
+      console.error('[contact] Applicant confirmation delivery failed after internal notification succeeded:', confirmationError)
+      return NextResponse.json(
+        {
+          error: `申请已收到，但确认邮件发送失败。如需帮助，请联系 ${TO_EMAIL}。`,
+          code: 'APPLICANT_CONFIRMATION_FAILED',
+          received: true,
+        },
+        { status: 502 },
+      )
+    }
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -129,4 +167,19 @@ function escapeHtml(str: string) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+}
+
+function buildMetaAdsAiPilotConfirmation(name: string) {
+  return `
+    <div style="font-family:Arial,'PingFang SC','Microsoft YaHei',sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#1f2937;line-height:1.7">
+      <h2 style="margin:0 0 20px;font-size:20px;color:#111827">我们已收到你的申请</h2>
+      <p>${escapeHtml(name)}，你好：</p>
+      <p>感谢你申请 Magic Engine Meta Ads AI Connector 内测。</p>
+      <p>本轮采用邀请制，我们正在审核申请。申请已收到不代表已经批准或开通。</p>
+      <p>审核期间，你无需向我们发送 Facebook 密码、广告报表或任何连接凭据。</p>
+      <p>如果符合本轮测试条件，我们会通过这个邮箱联系你，并发送专属连接方式。</p>
+      <p>如果有问题，可以直接回复这封邮件，或联系 <a href="mailto:${escapeHtml(TO_EMAIL)}" style="color:#1d4ed8">${escapeHtml(TO_EMAIL)}</a>。</p>
+      <p style="margin-top:24px">Magic Engine 团队</p>
+    </div>
+  `
 }

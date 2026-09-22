@@ -215,6 +215,21 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   //    src/lib/inngest/functions/conversion-daily-pipeline.ts 的
   //    CONVERSION_DAILY_PIPELINE_CRON，抄错的后果同上一条 flywheel 注释。
   { service: 'inngest:cloud-conversion-daily-pipeline', jobName: 'conversion-daily-pipeline', schedule: '0 6 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-15' },
+  // 每周竞品快照。competitor_snapshots 这张表 2026-05-18 就建好了，唯一的写入方是一个纯
+  // 手动 POST 接口，从来没有 cron；那个接口 2026-08-05 死管道清理时被当陪葬删掉，表一直是空的。
+  // 2026-09-20 审计发现并重写，PM 拍板开，先只给 CTS（seo_config.competitor_watch_enabled）。
+  //
+  // 🔴 schedule 这一列不许手抄：唯一定义在 src/lib/competitors/watch.ts 的
+  //    COMPETITOR_WATCH_CRON，同目录的测试会断言两边一致。
+  { service: 'inngest:cloud-competitor-watch-weekly-fanout', jobName: 'competitor-watch-weekly', schedule: '45 5 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-20' },
+  // 每周 AI 可见度追踪（GEO）灰度迁移。旧 Render cron `ai-tracker-weekly`（上面那条老登记）
+  // 原样保留、对没开灰度开关的客户继续跑；这条新登记只覆盖开了
+  // `seo_config.ai_visibility_inngest_enabled` 的客户，故意用不同的 jobName——两条链路
+  // 覆盖范围不同，混进同一份健康检查会看不出「这周是哪条链路给这个客户出的数据」。
+  //
+  // 🔴 schedule 这一列不许手抄：唯一定义在 src/lib/ai-tracker/weekly-fanout.ts 的
+  //    AI_VISIBILITY_WEEKLY_CRON，同目录的测试会断言两边一致。
+  { service: 'inngest:cloud-ai-visibility-weekly-fanout', jobName: 'ai-visibility-tracker-weekly', schedule: '0 6 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-21' },
 ] as const
 
 /**

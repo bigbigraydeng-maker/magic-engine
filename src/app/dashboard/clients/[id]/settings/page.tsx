@@ -42,6 +42,7 @@ import { CompetitorDomainsPanel } from './_components/CompetitorDomainsPanel'
 import { ReputationIdentityPanel } from './_components/ReputationIdentityPanel'
 import { PrimaryKeywordsPanel } from './_components/PrimaryKeywordsPanel'
 import { BrandAliasesPanel } from './_components/BrandAliasesPanel'
+import { BrandGeoAnchorsPanel } from './_components/BrandGeoAnchorsPanel'
 import { SocialHandlesPanel } from './_components/SocialHandlesPanel'
 import { ApiKeysPanel } from './_components/ApiKeysPanel'
 import { ExcludedTopicsPanel } from './_components/ExcludedTopicsPanel'
@@ -155,6 +156,9 @@ function TabBody({
           </SettingsSection>
           <SettingsSection icon="🏷️" title="品牌词别名">
             <BrandAliasesPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="📍" title="品牌地域锚点（防同名海外分公司冒领）">
+            <BrandGeoAnchorsPanel clientId={clientId} />
           </SettingsSection>
           <SettingsSection icon="🥊" title="竞品域名清单">
             <CompetitorDomainsPanel clientId={clientId} />

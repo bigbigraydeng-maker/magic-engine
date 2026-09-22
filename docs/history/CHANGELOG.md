@@ -5,13 +5,94 @@
 
 ---
 
-### 2026-09-20（广告支柱 IMPACT 闭环阶段 0+1 全部合并上线；Roman HU / 30 Kiteroa 共用账户解绑停投）
+### 2026-09-22（广告支柱 IMPACT 闭环升级阶段 0/1：PM go 与 migration 核实为已完成，补记录并从 ROADMAP 移除过期条目）
 
-PR #1656/#1658/#1659/#1660/#1662/#1664/#1665 全部合并；2026-09-20 实查生产确认两张核心表已在线（`ad_entity_snapshots` 1,602 行，`ad_strategy_configs` 结果阶梯列已存在）。同一天 PM 确认 Roman HU 与 30 Kiteroa 两个客户都已停投，已把此前两客户共用的 Meta 广告账户 `act_1260456876069575` 从两客户的 `client_meta_ad_accounts` 登记中解绑、关闭广告引擎，`client_binding_audit` 留下 `clear`/`applied` 各一条记录（撤回所需原值在 detail 字段里）。此前该账户没有给 ME 读权限，此前一直把 `ad-entity-snapshot`（7 天 31/31 次）和 `google-data-pullback-daily`（每天）整体标成"失败"。
+ROADMAP 里一直挂着「待 PM go：按依赖顺序合并（#1659 → #1662 → #1664 → #1665），并单独授权 apply migration」这条未完成事项。核实后确认这条已经完成——4 个 PR 早已合并，两张表（`ad_entity_snapshots`/`ad_strategy_configs`）已建好并在生产库里跑着真实数据（`ad_entity_snapshots` 2052 行，最新快照 9/21；快照 cron `ad-entity-snapshot`（[render.yaml](../../render.yaml)）按 `30 */6 * * *` 每 6 小时运行一次，非此前误记的 3 小时）。之前一直没人去数据库和 `render.yaml` 里核实，只看代码注释和这份清单，就以为还卡着——教训见会话记忆 `reference-cts-domain-token-dead-20260921` 的更正记录。已从 ROADMAP 对应清单删除这条，标题同步改为「PM go 已完成，验证与收尾进行中」。
+
+---
+
+### 2026-09-22（CTS 圣诞团 ThruPlay 上线 + Meta 授权修复 + Reborn 留资表单 v4 A/B 测试 + 新增 D9 自动检测：纯播放广告漏排除 Audience Network）
+
+PM 拍板打开的圣诞团专属 ThruPlay 广告（官方账户 `act_2202695063810470`）三层从 PAUSED 改 ACTIVE，
+核实后确认 CTS 两个 Meta 广告账户当前合计每天花费 $130 纽币（$150 上限内）。核实过程中发现 CTS 域名专属
+Meta 令牌已失效（Facebook 判定会话失效），PM 重新走授权流程生成新口令，已换成长期有效版并验证两个账户
+均可读。Reborn 留资广告组新增一版留资表单（v4，多问"出行时间"+"每人预算"两题）+ 一条新广告 A/B 测试，
+共用现有预算，不加新花费。
+
+核查 ThruPlay 完播率时发现命中 `docs/PITFALLS.md` D9 那个已知坑——新广告因建时未排除 Audience Network
+版位，次日 95%+ 花费落入假用户；追查到同一模式在更早的 ThruPlay 系列广告上已持续存在（$454 纽币基本
+打水漂）。已修复圣诞团 ThruPlay 的投放位置（只投 Facebook/Instagram），并把这条检测规则写成新的只读
+诊断 D9（PR [#1874](https://github.com/bigbigraydeng-maker/magic-engine/pull/1874) 已合并），接进已在跑
+的每日内部诊断日报；CTS 日检手册（PR [#1873](https://github.com/bigbigraydeng-maker/magic-engine/pull/1873)
+已合并）同步补了一条不依赖数据库快照表的临时排查步骤。
+
+D9 已知限制：目前打不到共用账户（CTS 跟 Oztop/30 Kiteroa 共用的个人账户 `act_2775766642787274`
+整层跳过广告组设置抓取），已记入 ROADMAP。
+
+- 审计/操作留痕：`~/Documents/ME-backfill-backups/cts-thruplay-activate-20260921/`
+
+**Reuse Statement**：D9 复用既有诊断框架（`context.ts`/`types.ts`/`run.ts` 的编排模式，跟 D1/D7/D8
+同一套 `Diagnosis` 契约），新增的只有这一条规则文件 + `targeting_summary` 补一个字段（平台共享，无客户
+语义）；ThruPlay 开关、令牌刷新、表单 A/B 测试全部是 CTS 一个客户的配置/内容操作，未写入共享代码。
+
+---
+
+### 2026-09-21（Meta 广告数据每日同步：补上两个"能蹭到别人授权令牌"的漏洞入口，AD-SEC-4 续）
+
+PR [#1864](https://github.com/bigbigraydeng-maker/magic-engine/pull/1864) 已合并。之前修过一次的漏洞（AD-SEC-4，见 9 月更早的记录）：客户如果自助注册时把公司名或网址填得跟正牌客户一样，理论上能蹭到那个正牌客户在 Meta（Facebook/Instagram 广告）那边的授权令牌，看到不该看的广告账户数据。上次修的是大部分入口，唯独"每天自动拉取 Meta 广告数据"这条定时任务当时漏掉了，自己抄了一遍老的查找逻辑，没走新的验证关卡。
+
+这次补上：这条定时任务现在跟系统里所有其他调用 Meta 的地方一样，统一走"先验证归属再给令牌"的关卡。过程中经自动审查机器人（Codex）连续 6 轮挑错，额外发现并堵上了几个"数据库偶尔读取失败时该不该硬撑用一把可能不对的令牌"的边角问题——统一原则是：查不清楚就今天先不跑这个客户，绝不猜。全部改动配了对应测试，且逐条做过"故意去掉防护看测试是否报红"的验证。
+
+**Reuse Statement**：全部复用已有的 AD-SEC-4 令牌归属校验能力（`src/lib/meta/token-selection.ts`），未新增支柱或独立能力；把域名归属判定的算法泛化成通用版本供"按客户名字找令牌"这条遗留兜底路径复用，避免另起一套判断逻辑。属于平台共享的安全底座代码，无客户专属内容。
+
+---
+
+### 2026-09-21（CTS AI 可见度：地域锚点补配生效，9-20 回填按新规则复算完毕）
+
+2026-09-20 合并的「地域锚点」判定闸门（PR #1857）上线后 CTS 一直没配上锚点词，闸门形同虚设。
+本次给 CTS 配上 `new zealand / nz / aotearoa / auckland` 四个地域词，并用新规则复算 9-20 回填的
+137 条 + 当时排除的 7 条：137 条零变化，7 条里 6 条本来就没错、1 条（`21dc3d0c`）历史误记的「排第 6」
+改成正确的「未提及」。PM 在窗口内本人回「开始」后执行，写前存了旧值底稿，可撤回。
+
+- 审计与执行记录：[2026-09-21-cts-ai-visibility-geo-anchor-recompute.md](../audits/2026-09-21-cts-ai-visibility-geo-anchor-recompute.md)
+
+**Reuse Statement**：复用 `src/lib/ai-tracker/client-brand-match.ts` 已合并的判定函数与
+`PATCH /api/clients/[id]/brand-geo-anchors` 同一套归一化校验，未新增代码；本次只是配置写入
+（CTS 一个客户）+ 1 行历史数据修正，client-specific 内容全部落在 `clients` 表 CTS 那一行。
+
+---
+
+### 2026-09-21（Park Homes 官网：Greenview 加"工程日志"时间线 + "关于我们"页换上创始人真实肖像）
+
+PR [#1858](https://github.com/bigbigraydeng-maker/magic-engine/pull/1858) 已合并并部署，线上已核实。客户 Jason 2026-09-21 回信补了两样素材：4 张 Greenview 工地航拍 + 他本人的肖像照。逐张核对后发现 4 张全是施工现场（没有新效果图）；此前网站口径是"不放施工中照片"，但客户上周自己在 Riverside V2 里要求了"工程进度"板块，PM 拍板放，并提出把 Greenview 页做成"持续记录项目进展"的样子。实现：项目页新增 **Progress log**——按时间倒序的竖向时间线，由 `projects.js` 里的 `progress` 数组驱动，每条 = 收到的一批工地照（日期写"收到时间"，不推断拍摄/分期日期）+ 一段说明 + 最多 3 张 16:9 照片，末尾挂一条虚线的"More to come · 登记接收下次更新"。以后加一次更新只改数据。共用灯箱改为页面加载完再收集图片，并按每张图自己的图注显示（原来写死"Artist's impression"）。"关于我们"页创始人占位框换成客户提供的肖像（4:5，1000×1250）。验证：构建 20 页、灯箱对效果图和进度照各测一次、305px 窄屏无横向溢出（顺手修了图片 `height` 属性压过 `aspect-ratio` 导致照片被拉成竖条的问题）、上线后线上 4 张新图均 200。
+
+**Reuse Statement**：客户专属站点改动。复用既有 `.milestones` 时间线样式、共用灯箱、登记表单；新增约 12 行样式和页面模板里一个数据驱动板块，全部在客户站点目录内。"在建项目进度日志 + 配套文章"这个套路记为地产行业打法候选（见 ROADMAP），未做成共享代码。
+
+---
+
+### 2026-09-20（SEO 标题周循环 v1 上线，首跑改错 2 页已撤回、已补信息完整闸门）
+
+CTS 每周自动改网站标题/描述的功能重做成 6 步版本，跑在 Inngest 上；首跑改错 2 页，约 5 分钟内撤回，CTS 开关已关，等 PM 看过演练再开。
+
+- PR [#1802](https://github.com/bigbigraydeng-maker/magic-engine/pull/1802)：旧版每周开的标题修改 PR 改成自动合并，不用 PM 手点。
+- PR [#1805](https://github.com/bigbigraydeng-maker/magic-engine/pull/1805)：旧版定时任务跳过 9/21 那次（临时改成只跑 9/28 一次，后被 #1812 整条删掉）。
+- PR [#1810](https://github.com/bigbigraydeng-maker/magic-engine/pull/1810)：`seo_meta_log` 表的访问权限收紧到只有后台服务能读写（数据库改动文件已合并）。
+- PR [#1812](https://github.com/bigbigraydeng-maker/magic-engine/pull/1812)：新版 6 步流程上线（回查上次改动效果 → 选页面 → 定动作 → 改文案开 PR → 记改前数据 → 汇总），每客户一个开关、默认关；旧定时任务从 render.yaml 删掉。
+- PR [#1814](https://github.com/bigbigraydeng-maker/magic-engine/pull/1814)：加手动触发入口，不用等周一就能跑一次。
+- chinatravel [#199](https://github.com/bigbigraydeng-maker/chinatravel/pull/199) / [#200](https://github.com/bigbigraydeng-maker/chinatravel/pull/200)：首跑自动合并的 2 条错误改动（Liziba 页配错关键词；免签页描述被改成像要办签证）。
+- chinatravel [#201](https://github.com/bigbigraydeng-maker/chinatravel/pull/201) / [#202](https://github.com/bigbigraydeng-maker/chinatravel/pull/202)：PM 用 GitHub Revert 撤回上面两条，官网标题已恢复原样。
+- PR [#1816](https://github.com/bigbigraydeng-maker/magic-engine/pull/1816)：根因修复——关键词只认这个页面自己的搜索词、缺数据一律跳过、PR 描述写全数据依据、每个候选都留记录、新文案先做事实核对；手动入口支持 `dry_run` 演练（不写任何东西）；把撤回的 2 条记录标记为已撤回。
+
+事故经过与教训见 [PITFALLS D10](../PITFALLS.md)，PM 决策见 [DECISIONS 2026-09-20](../DECISIONS.md)。
+
+**Reuse Statement**：复用已有 GSC、DataForSEO、竞对解析、人工看板（`zhuge/action-persister`）、Inngest 两段式派单范式、`cts-meta-pr.ts` 的窄道改文件逻辑；新增的 `src/lib/seo-meta/cycle/` 是不带客户身份的共享流程（有测试断言不含 CTS ID）；客户差异只在 `clients.seo_config.meta_cycle_*` 配置和 CTS 仓库的写入适配器里。
+### 2026-09-20（Roman HU / 30 Kiteroa 确认停投：共用广告账户解绑、广告引擎关闭）
+
+PM 确认 Roman HU 与 30 Kiteroa 两个客户都已停投，已把此前两客户共用的 Meta 广告账户 `act_1260456876069575` 从两客户的 `client_meta_ad_accounts` 登记中解绑（同时清 `clients.meta_ad_account_id`）、关闭广告引擎，`client_binding_audit` 留下 `clear`/`applied` 各一条记录（撤回所需原值在 detail 字段里）。此前该账户没有给 ME 读权限，一直把 `ad-entity-snapshot`（7 天 31/31 次）和 `google-data-pullback-daily`（每天）整体标成"失败"，淹没其它客户的真故障。
 
 解绑后 `act_1260456876069575` 不再是生产里的共用账户案例——`findSharedAdAccounts` 只查询当前 `client_meta_ad_accounts` 登记，之后拿这个账户号去验证阶段 2 的 fail-closed 共用账户守卫会得到假阴性；`docs/ROADMAP.md` 广告执行层章节已同步改成历史案例描述，并改为用可重复的单测 fixture（两个不同 `client_id` 登记同一 `ad_account_id`）或另找生产里真实存在的共用账户来验证该守卫。
 
-**Reuse Statement**：纯上线状态记录 + 一次生产账户解绑操作，未新增代码能力；`findSharedAdAccounts`（`src/lib/meta/client-ad-accounts.ts`）等既有平台能力未改动，仍按 `client_meta_ad_accounts` 表实时判定共用账户，客户差异只体现在该表的行数据里，未写入 shared runtime。
+**Reuse Statement**：纯状态记录 + 一次生产账户解绑操作，未新增代码能力；`findSharedAdAccounts`（`src/lib/meta/client-ad-accounts.ts`）等既有平台能力未改动，仍按 `client_meta_ad_accounts` 表实时判定共用账户，客户差异只体现在该表的行数据里，未写入 shared runtime。
 
 ---
 

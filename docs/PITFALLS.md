@@ -89,6 +89,29 @@ apply 时炸在 policy 步骤。影响 19 个客户的关键词排名 cron 全�
 
 **怎么防**：每次改 `type X = 'a' | 'b' | 'c'` 必须 grep 全仓 `Record` / `switch` / `STATUS_META` 的 key。
 
+### B5 · 判断「schema 漂移」前必须 grep 该列全部历史 migration，不能只看引入它的那一条 🔴
+
+**事故**（2026-09-21）：排查品牌别名设置面板**能加不能清空**的问题时，看到仓库里引入
+`clients.brand_aliases` 的那条 migration（`20260624010000_client_brand_aliases.sql`）把它声明为
+可以为空（nullable，无默认值），而线上库（`glbdnayojixmexgofbsd`）实际是 `NOT NULL DEFAULT '{}'`，
+于是先入为主判断成「线上被手工改过、仓库没记录」，并打算新增一条对齐 migration 补记录。
+实际上后续 `20260625000001_a21_goal_current_value.sql:35-41` 早就把这一列回填 NULL、
+`SET DEFAULT '{}'`、`SET NOT NULL` 做齐了——按仓库全部 migration 重建的环境本就等于线上，
+根本没有漂移，只是排查时漏看了同一列后续还被加固过。真正的 bug 只在接口代码：PATCH 清空别名时
+仍写 NULL，数据库拒绝（23502），接口 500。这个 bug 从 6 月潜伏到 9 月才被顺手发现，但「schema 漂移」
+是误判，不是事故本体。
+
+**怎么防**：
+1. 怀疑某一列「仓库和线上不一致」之前，先 `grep -rn <column_name> supabase/migrations/` 看该列
+   有没有被后续 migration 再动过，不能只读引入它的那一条。
+2. 只有 grep 完整历史后仍对不上，才是真漂移，这时才需要新增对齐 migration；此前的空判会让文档
+   记错事故性质，也会多一条实际上什么都不做的 migration 去扫描/锁表。
+3. 除非真有读取方靠 NULL 和 `[]` 区分行为，数组列一律存 `[]`，别存 NULL —— 少一个没有含义、
+   却能把写操作打挂的状态。`clients.primary_keywords` / `clients.competitor_domains` /
+   `master_briefs.products` / `master_briefs.excluded_topics` 四个兄弟接口今天还在写
+   `cleaned.length === 0 ? null : cleaned`；2026-09-21 实测这四列线上仍是 nullable，所以暂时没炸，
+   但任何一列被加上 NOT NULL，同样的 500 就会复现。
+
 ---
 
 ## C. Git / 分支
@@ -240,7 +263,43 @@ PM 反馈「太平静」「一堆照片的串联」「这不是爆款短视频�
 1. 任何 `optimization_goal` 是纯播放/完播类（THRUPLAY、`video_view` 等，不落地到留资/私信/购买这类真实商业结果）的广告组，建的时候必须显式设置 `targeting.publisher_platforms`，手动排除 `audience_network`（或至少排除 `rewarded_video` 这个具体版位），不能留给"自动版位"。
 2. 建广告组后必须按版位（`breakdowns=publisher_platform,platform_position`）回读一次花费/完播分布，确认没有异常集中在某一个版位——不能只看汇总层面的完播率数字，汇总数字会把一个占 95%+ 花费的坏版位和一堆占比很小的好版位平均成一个"看起来还不错"的数。
 3. 用视频观看数据建自定义受众（再营销/相似受众种子）前，先确认视频来源的广告本身版位健康——被污染广告的观看事件不应该被当作"真实兴趣信号"用来建种子受众。
-4. 已排期的动作：广告引擎（`~/.claude/plans/ads-impact-loop-capability.md`）阶段 1 的诊断表 `ad_entity_snapshots` 已经存了 `targeting_summary`（含版位设置），后续诊断应该加一条"纯播放类优化目标 + 未排除 Audience Network"的规则检测，把这类配置错误自动检出，不必每次靠人工深挖 7 天数据才发现。
+4. ✅ **2026-09-22 已实现**：这条检测规则（D9）已经写进 `src/lib/ads-strategy/portfolio/diagnostics/d9-placement-leak.ts`，接进每日内部诊断日报，不用再靠人工深挖 7 天数据。**已知限制**：目前打不到共用账户（CTS 跟 Oztop/30 Kiteroa 共用的个人账户 `act_2775766642787274`）——快照采集对共用账户整层跳过广告组设置抓取，覆盖共用账户需要先解决"设置抓了归哪个客户"的架构问题，暂未排期。
+
+---
+
+### D10 · 六步回执全绿，改出来的文案却是错的：自动改客户网站文案，要验「改成了什么字」，不是验「流程跑没跑通」🔴
+
+**事故（2026-09-20 NZ 凌晨，SEO 标题周循环 v1 第一次真跑）**：自动开 PR 并自动合并了 2 条 CTS 官网改动，都是错的——
+Liziba 轻轨站页面被换成了别的页面的关键词「how many days in chongqing」（chinatravel #199）；
+「新西兰人免签去中国」页面的描述被改成暗示要办签证、有申请步骤（#200，跟页面事实正好相反）。
+PM 发现后约 5 分钟用 GitHub 的 Revert 按钮撤回（#201/#202），随即关掉 CTS 的开关（`seo_config.meta_cycle_enabled=false`）。
+
+**四个根因（PR #1816 代码级核实）**：
+1. 关键词是拿「全站所有搜索词」按共有单词去配页面的，不是用这个页面自己在 GSC 里的搜索词——于是一个页面配到了另一个页面的词；
+2. DataForSEO 的搜索量 / 难度没查到时，代码默认填 0 = 「难度 0，放行」——缺数据被当成最安全；
+3. 搜索量、难度、对手标题这些数据算出来了，却从没写进 PR 描述——人看 PR 看不到任何依据，没法事前拦；
+4. 被选中的候选中途失败时直接消失，不留任何记录。
+
+**教训**：
+- **六步的运行回执全是绿的，改出来的字是错的。** 回执只证明管子通了，不证明货对了。验收要看最终改出来的那句标题 / 描述本身。
+- 自动改对外文案必须先过「信息完整闸门」：搜索量 + 难度 + 实时搜索结果前 3 都在、关键词确实属于这个页面，才许改；**缺一样就跳过并留原因，绝不默认填值**。
+- 给某个客户打开自动改文案的开关之前，先跑一次演练（`dry_run`，不写任何东西）给 PM 看这一轮会改成什么，PM 点头再开。
+
+### D11 · 客户原始素材直传进 Campaign，尺寸没人把关，发出去图歪了 🟡
+
+**事故（2026-09-21，NM Medspa 暖场 7 帖）**：从 Dropbox 拿来客户原图（横版 4:3、2:3、3:4 各种比例），直接 INSERT 进 `client_assets`，再把 ID 填进 `social_plans`。Campaign UI 能显示图片，PM 批准后才发现比例全错——Facebook/Instagram feed 要求 4:5（1080×1350），横版图在 feed 里会被裁掉上下，竖版图比例不对也会留黑边。
+
+**Jev 有没有参与？没有。** Jev 是从现有候选库里挑图的工具，这次是手动上传新素材，Jev 完全没介入。即使 Jev 参与了图片候选，它也不做尺寸校验——它评估的是画面内容，不是像素比例。
+
+**根因**：
+1. `client_assets` 表的插入流程没有尺寸校验，status='analyzed' 可以手动设，绕过了任何 AI 分析；
+2. Campaign UI 的图片选择器不展示图片实际尺寸，选了也看不出来；
+3. 没有在入库时用 ffprobe/sharp 检查宽高比。
+
+**怎么防**：
+- 手动上传客户原始素材时，**入库前先检查所有图片尺寸**：`ffprobe -v quiet -show_entries stream=width,height <file>`；
+- 不符合 4:5（或最接近平台要求的比例）的图，先用 `ffmpeg -vf crop=...` 裁成目标比例再上传；
+- 最终验证标准：看 Campaign UI 里的图片预览，确认图片无明显拉伸或黑边，再交 PM 批准。
 
 ---
 
@@ -369,6 +428,34 @@ Meta 400 —— `(#10) 缺 pages_read_user_content`、`(#100/33) 帖子不存在
   漏掉一件活儿的方向是安静地不干、不会响；
 - 一个请求跑 160 秒以上的活儿，本来就该拆段：拆成 Inngest 的 step，每段一个请求，
   失败只重试那一段。
+
+---
+
+### F10 · `step.run` 里用 `setTimeout` 轮询 = 服务器函数超时静默挂掉
+
+**症状**（2026-09-21，NM Medspa Reel 全尺寸渲染）：Inngest 工作流触发、批准都成功，
+但 5 条 1080×1920 视频一直 0/5，`client_assets` 始终空，`cron_run_logs` 没有"已完成"记录。
+`retries: 0`，Inngest 不重试，整个工作流静默死亡。
+
+**根因**：`poll-full-renders` 步骤在 `step.run(...)` 回调里用 `setTimeout` 逐条轮询
+（每条最多 30 次 × 20 秒 = 10 分钟），5 条合计最多 50 分钟。
+Render.com 的 HTTP 请求有超时上限（通常 3~5 分钟），
+函数被服务器强杀 → 步骤失败 → 因 `retries: 0` 工作流终止。
+`cron_run_logs` 的"完成"记录只有步骤跑完后才写，所以什么日志都没有。
+
+**`setTimeout` 在 Inngest `step.run` 里是错误的**：`step.run` 期望每次执行几秒内完成。
+分钟级等待必须用 `step.sleep`——它会暂停工作流、交还控制权、由 Inngest 在指定时间重新唤起，
+服务器函数每次只跑几十毫秒。
+
+**还有一个副作用**：轮询脚本如果没按触发时间戳过滤 `cron_run_logs`（或过滤条件失效），
+就会把旧批次的日志误当"新小样完成"，在新工作流还没到 `waitForEvent` 前就发批准事件，
+导致批准丢失、工作流永远等待。脚本必须按触发时间戳过滤，只认比触发时间新的记录。
+
+**怎么防**：
+- Inngest 步骤里**禁止 `setTimeout` + 循环**做分钟级轮询；
+- 轮询改成 `step.run(check) + step.sleep('30s')`，每次只检查一次状态；
+- 触发脚本轮询日志时，必须用触发时间戳过滤，不能直接数条数；
+- 相关函数加注释标明「此处用 step.sleep，不是 setTimeout，原因见 PITFALLS F10」。
 
 ---
 

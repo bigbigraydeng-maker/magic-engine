@@ -45,6 +45,12 @@ export const D5_FDR_Q = 0.1
 /** 花费占比与主结果占比至少差这么多（绝对值）才报 */
 export const D5_MIN_SHARE_GAP = 0.15
 
+// ── D9 纯播放目标漏排除 Audience Network（PITFALLS D9） ──────
+/** 这些优化目标是"用最低成本换看完/播放次数"，留自动版位时 Meta 会偏爱 Audience Network 奖励视频（假信号）。 */
+export const D9_VIEW_OPTIMIZATION_GOALS = ['THRUPLAY', 'VIDEO_VIEW'] as const
+/** 窗口内至少有这么多花费才报——刚建还没花钱的广告组不判，避免噪音。 */
+export const D9_MIN_WINDOW_SPEND = 1
+
 // ── D7 授权/数据体检 ────────────────────────────────────────
 /** 有在投设置但日数据停更超过几天 → 命中 */
 export const D7_STALE_DATA_DAYS = 2

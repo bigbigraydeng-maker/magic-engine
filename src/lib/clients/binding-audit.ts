@@ -13,7 +13,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import type { MetaTokenSource } from '@/lib/meta/token-manager'
 
-export type BindingKind = 'meta_ad_account' | 'facebook_page'
+export type BindingKind = 'meta_ad_account' | 'facebook_page' | 'meta_ads_read'
 
 /** 核实用的令牌来源；client_oauth = 客户「连接 Meta」授权后存下的主页令牌。 */
 export type BindingTokenSource = MetaTokenSource | 'client_oauth'
@@ -74,12 +74,16 @@ export async function finishBindingAudit(
   outcome: 'applied' | 'write_failed',
   detail?: string,
 ): Promise<boolean> {
-  const { error } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('client_binding_audit')
     .update({ outcome, detail: clip(detail, 500), updated_at: new Date().toISOString() })
     .eq('id', id)
-  if (error) console.error('[binding-audit] failed to finish audit row', id, error.message)
-  return !error
+    .select('id')
+  const updated = Array.isArray(data) && data.length === 1 && data[0]?.id === id
+  if (error || !updated) {
+    console.error('[binding-audit] failed to finish exactly one audit row', id, error?.message ?? `updated=${Array.isArray(data) ? data.length : 'unknown'}`)
+  }
+  return !error && updated
 }
 
 /** 拒绝类结果：尽力记一笔，写失败不改变拒绝结论。 */
