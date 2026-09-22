@@ -1,6 +1,16 @@
 import { cleanup,render,screen } from '@testing-library/react'
-import { afterEach,describe,expect,it } from 'vitest'
+import { afterEach,beforeAll,describe,expect,it,vi } from 'vitest'
 import ReportView, { splitReportSections,type ReportAnalysis } from '@/app/meta-ads-ai/[clientId]/ReportView'
+
+// recharts' ResponsiveContainer only renders its children once it measures a non-zero size,
+// which jsdom never reports on its own.
+beforeAll(()=>{
+  vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(600)
+  vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockReturnValue(300)
+  vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockReturnValue(
+    { width:600,height:300,top:0,left:0,right:600,bottom:300,x:0,y:0,toJSON(){} } as DOMRect,
+  )
+})
 
 const base: ReportAnalysis={
   id:'report-1',status:'completed',ad_account_id:'act_123456789012345678901234567890',
@@ -67,5 +77,34 @@ describe('Meta Ads AI report view',()=>{
   it('falls back to the generic message when error_code is unrecognised',()=>{
     render(<ReportView analysis={{ ...base,status:'failed',report_markdown:null,error_code:'something_new' }} />)
     expect(screen.getByText(/本次分析没有完成/)).toBeInTheDocument()
+  })
+
+  it('renders charts from real evidence alongside the text report',()=>{
+    const evidence={
+      campaigns:[
+        { campaign_name:'圣诞团-奥克兰 · 私信 · 20260916', spend:140.04 },
+        { campaign_name:'圣诞团-基督城 · 私信 · 20260916', spend:107.72 },
+      ],
+      comparison:{
+        spend:{ current:288.78, previous:324.29, percent_change:-10.95 },
+        clicks:{ current:344, previous:41, percent_change:739.02 },
+        ctr:{ current:0.0152, previous:0.0016, percent_change:874.39 },
+        reach:{ current:9884, previous:6527, percent_change:51.43 },
+      },
+    }
+    render(<ReportView analysis={{ ...base,report_markdown:'一、总体结果\n数据充足。',evidence }} />)
+    const charts=screen.getByTestId('report-charts')
+    expect(charts).toBeInTheDocument()
+    // recharts wraps long labels and decimates axis ticks under jsdom's approximate text
+    // measurement, so this only pins the wiring (real chart titles + comparison numbers render),
+    // not which specific campaign tick survives — that's confirmed against production data instead.
+    expect(charts.textContent).toContain('广告系列花费排行')
+    expect(charts.textContent).toContain('基督城')
+    expect(charts.textContent).toContain('739.0%')
+  })
+
+  it('renders no chart section when there is no usable evidence — must not crash on an older job or a no_data/failed status carrying null evidence',()=>{
+    render(<ReportView analysis={{ ...base,report_markdown:'一、总体结果\n数据充足。',evidence:null }} />)
+    expect(screen.queryByTestId('report-charts')).not.toBeInTheDocument()
   })
 })
