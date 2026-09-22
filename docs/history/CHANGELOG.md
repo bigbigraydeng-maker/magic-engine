@@ -5,6 +5,40 @@
 
 ---
 
+### 2026-09-22（Meta Ads AI 只读内测：CTS Tours NZ 连接 Facebook 卡了一整天，三个不同根因逐个查实修复）
+
+Codex 用量耗尽后接手。开工时生产环境已合并 PR [#1882](https://github.com/bigbigraydeng-maker/magic-engine/pull/1882)
+（授权过期时间读不到就报错的第一版修复），但客户仍连不上——同一个报错反复出现，说明第一版修复没有真正
+解决问题。全程按"先加只读诊断日志、等客户真实重试一次、拿生产日志实测证据、再动代码"的顺序处理，
+不再靠猜：
+
+1. **PR [#1885](https://github.com/bigbigraydeng-maker/magic-engine/pull/1885)**（初步假设，效果有限）：以为是
+   Facebook 用 `expires_in:0` 表示"永不过期"被误判成"未知"，加了处理——上线后同一客户立刻重试，仍报同一个错。
+2. **PR [#1887](https://github.com/bigbigraydeng-maker/magic-engine/pull/1887)**：加诊断日志抓 Facebook 换令牌接口
+   真实返回了什么。客户重试后确认：无论第一次还是第二次换令牌，Facebook 返回的内容里**根本没有**"有效期"这个
+   字段（不是 0，是完全缺失）——此前两版都猜错了字段值，真正问题是这个字段本来就不存在。
+3. **PR [#1891](https://github.com/bigbigraydeng-maker/magic-engine/pull/1891)**：改成"读不到有效期就按 60 天算"
+   （Meta 官方对长期令牌的标准寿命），不再直接报错拒绝整个连接流程；已确认这不会削弱安全性——真正管"能不能
+   读数据"的是另一套独立检查（授权范围 + 邀请资格 + Meta 自己的实时权限校验），有效期只影响"什么时候主动提醒
+   重新连接"。客户重试后**第一次真正连接成功**，数据库里也确认写入了正确记录。
+4. 选广告账户环节又冒出"该账户已绑定其他客户"的提示，但数据库里查无任何冲突记录——**PR
+   [#1893](https://github.com/bigbigraydeng-maker/magic-engine/pull/1893)** 补日志后发现，那句提示本身文不对题，
+   真实失败点在存档这一步。
+5. 客户换了个人登录账号重试后，又回到最初那句"授权已取消或过期"——**PR
+   [#1894](https://github.com/bigbigraydeng-maker/magic-engine/pull/1894)** 补日志后确认，是审计基础设施里一个
+   通用写法把非预期异常一律吞成同一个笼统标签，真实原因（数据库触发器"连接归属人不可更改"）从来没被记录过。
+6. 定位后确认这是**有意的安全设计**：不允许换一个 Magic Engine 登录账号接管已经连好的授权，不是 bug——但顺手
+   发现"断开连接"功能本身有个死角（永远清不空归属记录，导致换人重连在数据库层面走不通），已记入
+   [ROADMAP](../ROADMAP.md)（P3，[#1895](https://github.com/bigbigraydeng-maker/magic-engine/pull/1895)），
+   给出当下绕过办法（换回最初连接成功时用的账号），暂不列入本次修复范围。
+
+**Reuse Statement**：全部改动只碰 `src/lib/meta-oauth/`、`src/lib/meta/ai/manage.ts`、`src/lib/meta/ai/audit.ts`
+三个既有共享模块内部逻辑（Facebook 令牌解析、账户绑定、通用审计写入），未新增表、未新增客户专属分支，
+诊断日志全部只记非敏感字段（不含令牌本身）；这条只读内测的实体（entitlement/连接/授权记录）本身就是平台通用
+设计，CTS 只是第一个真实验证客户，未把 CTS 的客户 ID 或业务判断写进 shared runtime。
+
+---
+
 ### 2026-09-22（广告支柱 IMPACT 闭环升级阶段 0/1：PM go 与 migration 核实为已完成，补记录并从 ROADMAP 移除过期条目）
 
 ROADMAP 里一直挂着「待 PM go：按依赖顺序合并（#1659 → #1662 → #1664 → #1665），并单独授权 apply migration」这条未完成事项。核实后确认这条已经完成——4 个 PR 早已合并，两张表（`ad_entity_snapshots`/`ad_strategy_configs`）已建好并在生产库里跑着真实数据（`ad_entity_snapshots` 2052 行，最新快照 9/21；快照 cron `ad-entity-snapshot`（[render.yaml](../../render.yaml)）按 `30 */6 * * *` 每 6 小时运行一次，非此前误记的 3 小时）。之前一直没人去数据库和 `render.yaml` 里核实，只看代码注释和这份清单，就以为还卡着——教训见会话记忆 `reference-cts-domain-token-dead-20260921` 的更正记录。已从 ROADMAP 对应清单删除这条，标题同步改为「PM go 已完成，验证与收尾进行中」。
