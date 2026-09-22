@@ -76,13 +76,16 @@ describe('OAuth state principal and browser binding',()=>{
   it('uses the long-lived expiry when present and conservatively falls back to the short-lived expiry',()=>{
     expect(conservativeTokenSeconds(3600,5184000)).toBe(5184000)
     expect(conservativeTokenSeconds(3600,null)).toBe(3600)
-    expect(()=>conservativeTokenSeconds(null,null)).toThrow('oauth_expiry_unknown')
   })
-  it('treats an explicit long-lived expires_in:0 as non-expiring rather than unknown',()=>{
-    expect(conservativeTokenSeconds(3600,0)).toBe(NON_EXPIRING_TOKEN_SECONDS)
+  it('falls back to a conservative default instead of failing closed when neither exchange reports an expiry — confirmed in production 2026-09-22 logs: real CTS Tours NZ exchanges return access_token+token_type only, no expires_in, on both calls, which used to fail every connect attempt over an expiry we never needed to know exactly',()=>{
+    expect(conservativeTokenSeconds(null,null)).toBe(NON_EXPIRING_TOKEN_SECONDS)
+    expect(conservativeTokenSeconds(0,0)).toBe(NON_EXPIRING_TOKEN_SECONDS)
   })
-  it('does not extend the non-expiring treatment to a short-lived-only 0 — that is not a known Meta convention',()=>{
-    expect(()=>conservativeTokenSeconds(0,null)).toThrow('oauth_expiry_unknown')
+  it('also applies the conservative default to a short-lived expires_in:0 — that combination used to fail closed on purpose, now deliberately folded into the same "unknown" bucket rather than left as an untested edge',()=>{
+    expect(conservativeTokenSeconds(0,null)).toBe(NON_EXPIRING_TOKEN_SECONDS)
+  })
+  it('prefers a real short-lived value over the conservative default when the long-lived exchange reports nothing usable',()=>{
+    expect(conservativeTokenSeconds(3600,0)).toBe(3600)
   })
   it('atomically consumes with all identity constraints and TTL',async()=>{
     const q=chain({ client_id:'tenant',entitlement_revision:'ent-1' });mocks.from.mockReturnValue(q)

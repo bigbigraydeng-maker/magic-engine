@@ -39,25 +39,23 @@ async function exchange(params: Record<string,string>): Promise<{ token:string; 
   if(!result) throw new MetaReadError('oauth_exchange_failed',502)
   return result
 }
-/** Fallback lifetime when the long-lived exchange reports expires_in:0 (see conservativeTokenSeconds). */
-export const NON_EXPIRING_TOKEN_SECONDS = 60 * 24 * 60 * 60
 /**
- * A short-lived token reporting expires_in:0 is not a known Meta convention (it always expires in
- * ~1-2h) so that case still fails closed as unknown. Only the long-lived exchange gets the
- * "0 means does not expire" treatment, and only for that value specifically — mixing the two up
- * previously risked recording a possibly-bad short-lived-only 0 as valid for 60 days.
+ * Fallback lifetime when neither exchange reports a usable expiry. Confirmed in production
+ * 2026-09-22 logs (not guessed): a real CTS Tours NZ connect got `access_token`+`token_type` only
+ * — no `expires_in` key at all — from BOTH the short-lived and the long-lived exchange. Failing
+ * the whole connect over an unknown expiry blocked every attempt for this app permanently, while
+ * the real access gate is the `me/permissions` check right after — this value only bounds how
+ * long we trust our own cached copy before prompting reconnect, so a conservative 60 days is safe
+ * to assume rather than refusing to store the token at all.
  */
+export const NON_EXPIRING_TOKEN_SECONDS = 60 * 24 * 60 * 60
 export function conservativeTokenSeconds(shortSeconds:number|null,longSeconds:number|null) {
-  if (longSeconds===0) return NON_EXPIRING_TOKEN_SECONDS
-  if (longSeconds) return longSeconds
-  if (!shortSeconds) throw new MetaReadError('oauth_expiry_unknown',502)
-  return shortSeconds
+  return longSeconds || shortSeconds || NON_EXPIRING_TOKEN_SECONDS
 }
 export async function finishAdsConsent(code: string, clientId: string, principalId: string,entitlementRevision:string) {
   const short = await exchange({ code,redirect_uri:adsRedirectUri() })
   const long = await exchange({ grant_type:'fb_exchange_token',fb_exchange_token:short.token })
-  // Not the token itself — only the parsed lifetimes — so this is safe to keep logging while the
-  // 2026-09-21 oauth_expiry_unknown root cause is still unconfirmed against a real Meta response.
+  // Not the token itself — only the parsed lifetimes.
   console.warn('[meta-ads-ai] token expiry seconds',{ clientId,shortSeconds:short.seconds,longSeconds:long.seconds })
   const tokenSeconds=conservativeTokenSeconds(short.seconds,long.seconds)
   const permissions = await metaGraphGet('me/permissions',long.token,{ limit:'100' })
