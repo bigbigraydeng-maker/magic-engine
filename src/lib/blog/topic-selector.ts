@@ -14,6 +14,11 @@
  */
 
 import { supabaseAdmin } from '../supabase'
+import {
+  RUN_CONCLUSIVENESS_COLUMNS,
+  isRunConclusive,
+  type RunConclusiveness,
+} from '../ai-tracker/run-conclusive'
 import { bulkKeywordVolume } from '../dataforseo/labs'
 import { extractKeywordCandidates } from './keyword-candidates'
 import type { BlogOpportunity, BlogMode } from '@/types/magic-engine'
@@ -82,11 +87,19 @@ export async function getWeakSpotOpportunities(
 
   // ── Step 2: Load recent runs for all queries ──────────────────────────────
 
+  // Only probes that actually completed may be scored. A failed run carries a
+  // null rank exactly like a completed run that did not mention the client, so
+  // counting it would mean "we could not reach the provider" landing in both
+  // numerator and denominator of weakness_score as a miss. Filtered in SQL so
+  // the row limit below spends itself on conclusive rows, then re-checked in
+  // memory via the shared predicate (see ai-tracker/run-conclusive.ts).
   const { data: runs, error: rErr } = await supabaseAdmin
     .from('ai_visibility_runs')
-    .select('query_id, ai_engine, client_brand_rank, ran_at')
+    .select(`query_id, ai_engine, client_brand_rank, ran_at, ${RUN_CONCLUSIVENESS_COLUMNS}`)
     .eq('client_id', clientId)
     .in('query_id', queryIds)
+    .is('error_message', null)
+    .is('parse_error_message', null)
     .order('ran_at', { ascending: false })
     .limit(queryIds.length * lookback)
 
@@ -95,16 +108,18 @@ export async function getWeakSpotOpportunities(
   // ── Step 3: Aggregate per-query run summaries ─────────────────────────────
 
   const summaryMap = buildSummaryMap(queryIds, questionMap)
-  populateSummaries(
-    summaryMap,
-    runs as Array<{
-      query_id: string
-      ai_engine: string
-      client_brand_rank: number | null
-      ran_at: string
-    }>,
-    lookback
-  )
+  const conclusiveRuns = (
+    runs as unknown as Array<
+      RunConclusiveness & {
+        query_id: string
+        ai_engine: string
+        client_brand_rank: number | null
+        ran_at: string
+      }
+    >
+  ).filter(isRunConclusive)
+
+  populateSummaries(summaryMap, conclusiveRuns, lookback)
 
   // ── Step 4: Identify AI weak spots (score >= threshold) ───────────────────
 

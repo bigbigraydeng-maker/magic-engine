@@ -65,6 +65,36 @@ function makeSelectChain(data: unknown, error: unknown = null) {
 
 const CLIENT_ID = 'client-abc'
 
+/** A run that completed. `rank = null` means the AI answered without naming us. */
+function okRun(rank: number | null) {
+  return {
+    client_brand_rank: rank,
+    ran_at: new Date().toISOString(),
+    error_message: null,
+    parse_error_message: null,
+  }
+}
+
+/** A run the provider never answered — no measurement was taken. */
+function failedRun(message: string) {
+  return {
+    client_brand_rank: null,
+    ran_at: new Date().toISOString(),
+    error_message: message,
+    parse_error_message: null,
+  }
+}
+
+/** A run the provider answered but the parser could not read. */
+function parseFailedRun(message: string) {
+  return {
+    client_brand_rank: null,
+    ran_at: new Date().toISOString(),
+    error_message: null,
+    parse_error_message: message,
+  }
+}
+
 const SAMPLE_PAGE: ClientSitePageSummary = {
   id: 'page-1',
   url: 'https://example.com/china-tours',
@@ -200,8 +230,8 @@ describe('fetchWeakAIQueries', () => {
       { id: 'q2', question: 'another question', enabled: true },
     ]
     const runsForQ1 = [
-      { client_brand_rank: null, ran_at: new Date().toISOString() },
-      { client_brand_rank: 5, ran_at: new Date().toISOString() },
+      okRun(null),
+      okRun(5),
     ]
     const runsForQ2: unknown[] = []
 
@@ -225,9 +255,7 @@ describe('fetchWeakAIQueries', () => {
 
   it('sets avg_rank to null when no runs have valid ranks', async () => {
     const queries = [{ id: 'q1', question: 'test question', enabled: true }]
-    const runs = [
-      { client_brand_rank: null, ran_at: new Date().toISOString() },
-    ]
+    const runs = [okRun(null)]
 
     let callCount = 0
     mockFrom.mockImplementation(() => {
@@ -240,6 +268,96 @@ describe('fetchWeakAIQueries', () => {
 
     const result = await fetchWeakAIQueries(CLIENT_ID)
     expect(result[0].avg_rank).toBeNull()
+  })
+
+  // ── 2026-09-23 regression: a probe we failed to take is not a zero ────────
+  //
+  // ai_visibility_runs keeps failed probes, and a failed row carries
+  // client_brand_rank = null exactly like a completed probe that did not
+  // mention the client. These used to be indistinguishable here, so provider
+  // outages were driving GEO opportunity generation.
+
+  it('returns nothing for a query whose every run failed — not a weak_model_count', async () => {
+    const queries = [{ id: 'q1', question: 'best china tours', enabled: true }]
+    const runs = [
+      failedRun('[GoogleGenerativeAI Error]: Error fetching from generativelanguage'),
+      failedRun('429 You have no credits remaining.'),
+      parseFailedRun('LLM parse timeout'),
+    ]
+
+    let callCount = 0
+    mockFrom.mockImplementation(() => {
+      callCount++
+      return makeSelectChain(
+        callCount === 1 ? queries : runs,
+        null
+      ) as unknown as ReturnType<typeof mockFrom>
+    })
+
+    const result = await fetchWeakAIQueries(CLIENT_ID)
+    expect(result).toEqual([])
+  })
+
+  it('still reports a genuinely weak query — completed runs ranked outside the top 3', async () => {
+    const queries = [{ id: 'q1', question: 'best china tours', enabled: true }]
+    const runs = [okRun(7), okRun(9)]
+
+    let callCount = 0
+    mockFrom.mockImplementation(() => {
+      callCount++
+      return makeSelectChain(
+        callCount === 1 ? queries : runs,
+        null
+      ) as unknown as ReturnType<typeof mockFrom>
+    })
+
+    const result = await fetchWeakAIQueries(CLIENT_ID)
+    expect(result).toHaveLength(1)
+    expect(result[0].weak_model_count).toBe(2)
+    expect(result[0].avg_rank).toBe(8)
+  })
+
+  it('counts only the conclusive runs when a batch is part-failed', async () => {
+    const queries = [{ id: 'q1', question: 'best china tours', enabled: true }]
+    // Three provider failures plus one real miss. The old code reported 4 weak
+    // models, tripping the scorer's >=3 "AI is ignoring us everywhere" branch
+    // on the strength of three calls that never happened.
+    const runs = [
+      failedRun('provider down'),
+      failedRun('provider down'),
+      failedRun('provider down'),
+      okRun(null),
+    ]
+
+    let callCount = 0
+    mockFrom.mockImplementation(() => {
+      callCount++
+      return makeSelectChain(
+        callCount === 1 ? queries : runs,
+        null
+      ) as unknown as ReturnType<typeof mockFrom>
+    })
+
+    const result = await fetchWeakAIQueries(CLIENT_ID)
+    expect(result).toHaveLength(1)
+    expect(result[0].weak_model_count).toBe(1)
+  })
+
+  it('ignores a run row whose error columns are absent (fail-closed)', async () => {
+    const queries = [{ id: 'q1', question: 'best china tours', enabled: true }]
+    const runs = [{ client_brand_rank: null, ran_at: new Date().toISOString() }]
+
+    let callCount = 0
+    mockFrom.mockImplementation(() => {
+      callCount++
+      return makeSelectChain(
+        callCount === 1 ? queries : runs,
+        null
+      ) as unknown as ReturnType<typeof mockFrom>
+    })
+
+    const result = await fetchWeakAIQueries(CLIENT_ID)
+    expect(result).toEqual([])
   })
 })
 

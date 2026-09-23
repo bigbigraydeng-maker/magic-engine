@@ -96,13 +96,36 @@ function makeRuns(
   queryId: string,
   count: number,
   weak = true
-): Array<{ query_id: string; ai_engine: string; client_brand_rank: number | null; ran_at: string }> {
-  return Array.from({ length: count }, (_, i) => ({
-    query_id: queryId,
-    ai_engine: 'openai',
-    client_brand_rank: weak ? null : 1,
-    ran_at: `2026-05-${String(i + 1).padStart(2, '0')}T10:00:00Z`,
-  }))
+): Array<RunRow> {
+  return Array.from({ length: count }, (_, i) =>
+    run({
+      query_id: queryId,
+      ai_engine: 'openai',
+      client_brand_rank: weak ? null : 1,
+      ran_at: `2026-05-${String(i + 1).padStart(2, '0')}T10:00:00Z`,
+    })
+  )
+}
+
+/**
+ * A row as `ai_visibility_runs` actually stores it. The two error columns
+ * decide whether the probe completed at all: a failed probe carries a null
+ * rank exactly like a completed probe that did not mention the client, and
+ * only the error columns tell them apart.
+ */
+interface RunRow {
+  query_id: string
+  ai_engine: string
+  client_brand_rank: number | null
+  ran_at: string
+  error_message: string | null
+  parse_error_message: string | null
+}
+
+/** Completed probe by default; pass an error column to make it a failed one. */
+function run(partial: Omit<RunRow, 'error_message' | 'parse_error_message'> &
+  Partial<Pick<RunRow, 'error_message' | 'parse_error_message'>>): RunRow {
+  return { error_message: null, parse_error_message: null, ...partial }
 }
 
 // ─── Test Suite ───────────────────────────────────────────────────────────────
@@ -590,10 +613,10 @@ describe('getWeakSpotOpportunities', () => {
           // q-high: 5/5 weak → score = 1.0
           ...makeRuns('q-high', 5, true),
           // q-low: 2/4 weak → score = 0.5
-          { query_id: 'q-low', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' },
-          { query_id: 'q-low', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-02T10:00:00Z' },
-          { query_id: 'q-low', ai_engine: 'openai', client_brand_rank: 1, ran_at: '2026-05-03T10:00:00Z' },
-          { query_id: 'q-low', ai_engine: 'openai', client_brand_rank: 1, ran_at: '2026-05-04T10:00:00Z' },
+          run({ query_id: 'q-low', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-low', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-02T10:00:00Z' }),
+          run({ query_id: 'q-low', ai_engine: 'openai', client_brand_rank: 1, ran_at: '2026-05-03T10:00:00Z' }),
+          run({ query_id: 'q-low', ai_engine: 'openai', client_brand_rank: 1, ran_at: '2026-05-04T10:00:00Z' }),
         ]
       )
 
@@ -616,14 +639,14 @@ describe('getWeakSpotOpportunities', () => {
         null,
         [
           // q-multi: weak across 3 engines (3/3 runs → score=1.0, 3 engines)
-          { query_id: 'q-multi', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' },
-          { query_id: 'q-multi', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-01T11:00:00Z' },
-          { query_id: 'q-multi', ai_engine: 'perplexity', client_brand_rank: null, ran_at: '2026-05-01T12:00:00Z' },
+          run({ query_id: 'q-multi', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-multi', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-01T11:00:00Z' }),
+          run({ query_id: 'q-multi', ai_engine: 'perplexity', client_brand_rank: null, ran_at: '2026-05-01T12:00:00Z' }),
           // q-single: weak in 1 engine, strong in 2 (1/3 runs weak → score=0.33, 1 engine)
           // But 0.33 >= 0.3, so it's included
-          { query_id: 'q-single', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' },
-          { query_id: 'q-single', ai_engine: 'anthropic', client_brand_rank: 1, ran_at: '2026-05-01T11:00:00Z' },
-          { query_id: 'q-single', ai_engine: 'perplexity', client_brand_rank: 1, ran_at: '2026-05-01T12:00:00Z' },
+          run({ query_id: 'q-single', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-single', ai_engine: 'anthropic', client_brand_rank: 1, ran_at: '2026-05-01T11:00:00Z' }),
+          run({ query_id: 'q-single', ai_engine: 'perplexity', client_brand_rank: 1, ran_at: '2026-05-01T12:00:00Z' }),
         ]
       )
 
@@ -648,9 +671,9 @@ describe('getWeakSpotOpportunities', () => {
         [{ id: 'q-1', question: 'best china tours from auckland' }],
         null,
         [
-          { query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' },
-          { query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-02T10:00:00Z' },
-          { query_id: 'q-1', ai_engine: 'perplexity', client_brand_rank: 1, ran_at: '2026-05-03T10:00:00Z' },
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-02T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'perplexity', client_brand_rank: 1, ran_at: '2026-05-03T10:00:00Z' }),
         ]
       )
 
@@ -705,9 +728,9 @@ describe('getWeakSpotOpportunities', () => {
         [{ id: 'q-1', question: 'china tour packages from wellington' }],
         null,
         [
-          { query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' },
-          { query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-02T10:00:00Z' },
-          { query_id: 'q-1', ai_engine: 'perplexity', client_brand_rank: 2, ran_at: '2026-05-03T10:00:00Z' },
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-02T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'perplexity', client_brand_rank: 2, ran_at: '2026-05-03T10:00:00Z' }),
         ]
       )
 
@@ -774,7 +797,7 @@ describe('getWeakSpotOpportunities', () => {
       setupSupabaseMock(
         [{ id: 'q-1', question: 'china tours nz booking' }],
         null,
-        [{ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' }]
+        [run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' })]
       )
 
       mockBulkKeywordVolume.mockResolvedValue([])
@@ -786,7 +809,7 @@ describe('getWeakSpotOpportunities', () => {
       setupSupabaseMock(
         [{ id: 'q-1', question: 'china holiday packages nz' }],
         null,
-        [{ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 4, ran_at: '2026-05-01T10:00:00Z' }]
+        [run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 4, ran_at: '2026-05-01T10:00:00Z' })]
       )
 
       mockBulkKeywordVolume.mockResolvedValue([])
@@ -799,7 +822,7 @@ describe('getWeakSpotOpportunities', () => {
       setupSupabaseMock(
         [{ id: 'q-1', question: 'china tours booking nz' }],
         null,
-        [{ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 3, ran_at: '2026-05-01T10:00:00Z' }]
+        [run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 3, ran_at: '2026-05-01T10:00:00Z' })]
       )
 
       mockBulkKeywordVolume.mockResolvedValue([])
@@ -812,9 +835,9 @@ describe('getWeakSpotOpportunities', () => {
         [{ id: 'q-1', question: 'latest run date test' }],
         null,
         [
-          { query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' },
-          { query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-04T15:00:00Z' },
-          { query_id: 'q-1', ai_engine: 'perplexity', client_brand_rank: null, ran_at: '2026-05-02T08:00:00Z' },
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-04T15:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'perplexity', client_brand_rank: null, ran_at: '2026-05-02T08:00:00Z' }),
         ]
       )
 
@@ -822,6 +845,91 @@ describe('getWeakSpotOpportunities', () => {
 
       const result = await getWeakSpotOpportunities('client-1', 20, 10, true)
       expect(result[0].last_run_at).toBe('2026-05-04T15:00:00Z')
+    })
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 8b. Failed probes are not measurements (2026-09-23 regression)
+  //
+  // A run the provider never answered is stored with client_brand_rank = null,
+  // the same as a run where the AI answered and did not mention the client.
+  // Counting the former used to put "we could not reach the model" into both
+  // the numerator and the denominator of weakness_score.
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('failed probes', () => {
+
+    it('drops a provider failure from both numerator and denominator', async () => {
+      // 1 completed run where the brand ranked 1st (strong), plus 3 provider
+      // failures. Old behaviour: 3 weak / 4 runs = 0.75 → surfaced as a GEO
+      // weak spot. Correct behaviour: 0 weak / 1 run = 0 → nothing to say.
+      setupSupabaseMock(
+        [{ id: 'q-1', question: 'china tours nz booking' }],
+        null,
+        [
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 1, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'google', client_brand_rank: null, ran_at: '2026-05-01T11:00:00Z', error_message: 'GoogleGenerativeAI fetch failed' }),
+          run({ query_id: 'q-1', ai_engine: 'google', client_brand_rank: null, ran_at: '2026-05-02T11:00:00Z', error_message: 'GoogleGenerativeAI fetch failed' }),
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-02T12:00:00Z', error_message: '429 no credits remaining' }),
+        ]
+      )
+
+      mockBulkKeywordVolume.mockResolvedValue([])
+      const result = await getWeakSpotOpportunities('client-1', 20, 10, true)
+      expect(result).toEqual([])
+    })
+
+    it('drops a parse failure too — the rank was never determined', async () => {
+      setupSupabaseMock(
+        [{ id: 'q-1', question: 'china tours nz booking' }],
+        null,
+        [
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 2, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-01T11:00:00Z', parse_error_message: 'LLM parse timeout' }),
+        ]
+      )
+
+      mockBulkKeywordVolume.mockResolvedValue([])
+      const result = await getWeakSpotOpportunities('client-1', 20, 10, true)
+      expect(result).toEqual([])
+    })
+
+    it('says nothing at all when every probe for a query failed', async () => {
+      setupSupabaseMock(
+        [{ id: 'q-1', question: 'china tours nz booking' }],
+        null,
+        [
+          run({ query_id: 'q-1', ai_engine: 'google', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z', error_message: 'provider down' }),
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T11:00:00Z', error_message: 'provider down' }),
+        ]
+      )
+
+      mockBulkKeywordVolume.mockResolvedValue([])
+      const result = await getWeakSpotOpportunities('client-1', 20, 10, true)
+      expect(result).toEqual([])
+    })
+
+    it('still scores a genuine weak spot measured alongside failures', async () => {
+      // 2 completed runs, both misses, plus a provider failure. The real
+      // weakness must survive: 2 weak / 2 conclusive = 1.0.
+      setupSupabaseMock(
+        [{ id: 'q-1', question: 'china tours nz booking' }],
+        null,
+        [
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: 8, ran_at: '2026-05-01T11:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'google', client_brand_rank: null, ran_at: '2026-05-01T12:00:00Z', error_message: 'provider down' }),
+        ]
+      )
+
+      mockBulkKeywordVolume.mockResolvedValue([])
+      const result = await getWeakSpotOpportunities('client-1', 20, 10, true)
+      expect(result).toHaveLength(1)
+      expect(result[0].weakness_score).toBe(1)
+      expect(result[0].total_runs_checked).toBe(2)
+      // The engine that never answered must not be reported as one that
+      // answered without mentioning us.
+      expect(result[0].engines_missing).not.toContain('google')
     })
   })
 

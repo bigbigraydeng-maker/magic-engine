@@ -5,6 +5,12 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { locationCodeFor } from '@/lib/dataforseo/client'
+import {
+  RUN_CONCLUSIVENESS_COLUMNS,
+  partitionConclusiveRuns,
+  summariseRunFailures,
+  type RunConclusiveness,
+} from '@/lib/ai-tracker/run-conclusive'
 import type {
   ClientSitePageSummary,
   WeakAIQuery,
@@ -59,6 +65,24 @@ export async function fetchWeakAIQueries(clientId: string): Promise<WeakAIQuery[
   }
 }
 
+/**
+ * Weakness evidence for one AI query over the trailing 30 days, or `null` when
+ * there is nothing measurable to say.
+ *
+ * 🔴 2026-09-23 fix. This used to select only `client_brand_rank` and treat
+ *    every null rank as "the AI did not rank this client in the top 3". But
+ *    `ai_visibility_runs` also stores the probes that never completed — a
+ *    provider error or an exhausted balance leaves a row with a null rank too
+ *    (see `ai-tracker/run-conclusive.ts`). On production data at the time of
+ *    the fix that was ~40% of all runs, so "we could not reach Gemini" was
+ *    being fed into GEO opportunity generation as "AI ranks this client badly"
+ *    and turned into content prescriptions for the client.
+ *
+ *    Now only conclusive runs count. A null rank on a conclusive run is still
+ *    real evidence — the model answered and did not mention the client — and
+ *    still counts as weak. When no conclusive run survives we return `null`
+ *    ("not measurable"), never a weak_model_count built on failures.
+ */
 async function fetchRunsForQuery(
   queryId: string,
   thirtyDaysAgo: string
@@ -66,20 +90,36 @@ async function fetchRunsForQuery(
   try {
     const { data: runsData, error: runsError } = await supabaseAdmin
       .from('ai_visibility_runs')
-      .select('client_brand_rank, ran_at')
+      .select(`client_brand_rank, ran_at, ${RUN_CONCLUSIVENESS_COLUMNS}`)
       .eq('query_id', queryId)
       .gte('ran_at', thirtyDaysAgo)
 
     if (runsError || !runsData) return null
 
-    const runs = runsData as Array<{ client_brand_rank: number | null; ran_at: string }>
-    const weakRuns = runs.filter(
+    const runs = runsData as unknown as Array<
+      RunConclusiveness & { client_brand_rank: number | null; ran_at: string }
+    >
+    const { conclusive, failed } = partitionConclusiveRuns(runs)
+
+    // Nothing was measured for this query — say so by returning null rather
+    // than reporting a weakness count. Silence beats a confident wrong answer.
+    if (conclusive.length === 0) {
+      if (failed.length > 0) {
+        console.warn(
+          `[strategy] query ${queryId}: no conclusive AI runs in the last 30 days ` +
+            `(${failed.length} failed: ${summariseRunFailures(failed)}) — skipped, not scored as weak`,
+        )
+      }
+      return null
+    }
+
+    const weakRuns = conclusive.filter(
       r => r.client_brand_rank === null || r.client_brand_rank > 3
     )
 
     if (weakRuns.length === 0) return null
 
-    const rankedRuns = runs.filter(r => r.client_brand_rank !== null)
+    const rankedRuns = conclusive.filter(r => r.client_brand_rank !== null)
     const avg_rank =
       rankedRuns.length > 0
         ? rankedRuns.reduce((sum, r) => sum + (r.client_brand_rank as number), 0) / rankedRuns.length

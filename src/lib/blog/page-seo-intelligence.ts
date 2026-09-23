@@ -11,6 +11,11 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import {
+  RUN_CONCLUSIVENESS_COLUMNS,
+  isRunConclusive,
+  type RunConclusiveness,
+} from '@/lib/ai-tracker/run-conclusive'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -121,20 +126,34 @@ async function fetchGeoGaps(
 
   const avgRank = (snapshot?.avg_rank as number | null) ?? null
 
-  // Queries from recent runs where brand rank is null or > 3 (poor visibility)
+  // Queries from recent runs where brand rank is null or > 3 (poor visibility).
+  //
+  // 🔴 2026-09-23: the null half of that filter used to sweep up probes that
+  // never completed — a provider error leaves a row with a null rank too — so
+  // "we could not reach the model" was surfacing to the prompt as "the AI does
+  // not mention this client for this question". Only conclusive runs qualify;
+  // filtered in SQL so the row limit spends itself on real measurements, then
+  // re-checked in memory (see ai-tracker/run-conclusive.ts).
   const { data: runs } = await supabaseAdmin
     .from('ai_visibility_runs')
-    .select('client_brand_rank, query:ai_visibility_queries!inner(question)')
+    .select(
+      `client_brand_rank, ${RUN_CONCLUSIVENESS_COLUMNS}, query:ai_visibility_queries!inner(question)`,
+    )
     .eq('client_id', clientId)
     .or('client_brand_rank.is.null,client_brand_rank.gt.3')
+    .is('error_message', null)
+    .is('parse_error_message', null)
     .order('ran_at', { ascending: false })
     .limit(50)
 
   if (!runs) return { gaps: [], avgRank }
 
+  const conclusiveRuns = (runs as unknown as Array<RunConclusiveness & Record<string, unknown>>)
+    .filter(isRunConclusive)
+
   // Deduplicate by question — keep worst (null > high rank)
   const seen = new Map<string, GeoGapSignal>()
-  for (const run of runs) {
+  for (const run of conclusiveRuns) {
     const queryRaw = run.query as unknown
     const question: string = Array.isArray(queryRaw)
       ? ((queryRaw[0] as { question: string })?.question ?? '')
