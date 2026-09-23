@@ -102,5 +102,33 @@ BEGIN
   RAISE NOTICE '✅ 不变量4：无 anon/authenticated 可执行的 SECURITY DEFINER 函数';
 END $$;
 
+-- ── 不变量 5：seo_patrol_findings 对 anon/authenticated 无表级授权，策略锁死 service_role ──
+-- 20260924000000 把这张表的收紧断言从迁移事务内移到了这里（事务内 RAISE EXCEPTION
+-- 会连同已经成功的 REVOKE/ALTER POLICY 一起回滚，见该 migration 顶部注释）。
+DO $$
+DECLARE leftover_grants INT; leftover_policy INT;
+BEGIN
+  SELECT count(*) INTO leftover_grants
+    FROM information_schema.role_table_grants
+   WHERE table_schema = 'public'
+     AND table_name = 'seo_patrol_findings'
+     AND grantee IN ('anon', 'authenticated');
+  IF leftover_grants <> 0 THEN
+    RAISE EXCEPTION '[不变量5] seo_patrol_findings 仍有 % 条 anon/authenticated 的表级授权', leftover_grants;
+  END IF;
+
+  SELECT count(*) INTO leftover_policy
+    FROM pg_policies
+   WHERE schemaname = 'public'
+     AND tablename = 'seo_patrol_findings'
+     AND policyname = 'service_role_full'
+     AND roles::text <> '{service_role}';
+  IF leftover_policy <> 0 THEN
+    RAISE EXCEPTION '[不变量5] seo_patrol_findings."service_role_full" 未锁到 TO service_role';
+  END IF;
+
+  RAISE NOTICE '✅ 不变量5：seo_patrol_findings 已收回 anon/authenticated 授权，策略已锁到 TO service_role';
+END $$;
+
 \echo ''
 \echo '✅ 全部数据库安全不变量通过'

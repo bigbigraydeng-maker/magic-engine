@@ -35,7 +35,14 @@ BEGIN
   ALTER POLICY "service_role_full" ON public.seo_patrol_findings TO service_role;
 END $$;
 
--- ── 验证（迁移内自检，不通过即整体回滚）──────────────────────────────────
+-- ── 验证（仅告警，不回滚）─────────────────────────────────────────────────
+-- 不用 RAISE EXCEPTION：如果 Supabase 把整份文件当一个事务应用，抛错会连同
+-- 上面已经成功的 REVOKE / ALTER POLICY 一起回滚，反而把库留在收紧前的更不
+-- 安全状态（见 .github/workflows/db-security-invariants.yml 开头记录的事故
+-- 模式：收紧类 migration 的闸门放在同一事务里在语义上不可能 fail-safe）。
+-- 真正的末态断言放在事务外的 scripts/db-invariants.sql（不变量5），由
+-- scripts/db-replay-and-verify.sh 在全部 migration 重放完之后独立跑、独立报警。
+-- 这里只做尽力而为的告警，不影响本迁移的提交结果。
 DO $$
 DECLARE
   leftover_grants INT;
@@ -48,7 +55,7 @@ BEGIN
      AND grantee IN ('anon', 'authenticated');
 
   IF leftover_grants <> 0 THEN
-    RAISE EXCEPTION 'seo_patrol_findings 仍有 % 条 anon/authenticated 的表级授权，已回滚', leftover_grants;
+    RAISE WARNING 'seo_patrol_findings 仍有 % 条 anon/authenticated 的表级授权，见 scripts/db-invariants.sql 不变量5', leftover_grants;
   END IF;
 
   SELECT count(*) INTO leftover_policy
@@ -59,8 +66,10 @@ BEGIN
      AND roles::text <> '{service_role}';
 
   IF leftover_policy <> 0 THEN
-    RAISE EXCEPTION 'seo_patrol_findings."service_role_full" 未锁到 TO service_role，已回滚';
+    RAISE WARNING 'seo_patrol_findings."service_role_full" 未锁到 TO service_role，见 scripts/db-invariants.sql 不变量5';
   END IF;
 
-  RAISE NOTICE '✅ seo_patrol_findings 已收回 anon/authenticated 授权，策略已锁到 TO service_role';
+  IF leftover_grants = 0 AND leftover_policy = 0 THEN
+    RAISE NOTICE '✅ seo_patrol_findings 已收回 anon/authenticated 授权，策略已锁到 TO service_role';
+  END IF;
 END $$;
