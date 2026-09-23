@@ -15,6 +15,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 // Pure data module (no server imports) — safe in a client component.
 import { resolveAdsPlaybook, type AdsPlaybook } from '@/lib/ads-strategy/playbooks'
+import AutonomySettings from './autonomy-settings'
 
 type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history' | 'paused'
 
@@ -508,6 +509,8 @@ export default function AdsHealthPage() {
         <h1 className="mt-2 text-2xl font-semibold text-gray-800">广告健康</h1>
         <p className="text-sm text-gray-400">每天自动体检 · 把每条广告跟它自己最好的一周比</p>
       </div>
+
+      <div className="mb-6"><AutonomySettings clientId={clientId} /></div>
 
       {loading && <div className="text-gray-400 text-sm py-12 text-center">加载中…</div>}
 
