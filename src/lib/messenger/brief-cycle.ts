@@ -21,6 +21,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { fatalAiReason } from '@/lib/ai/fatal-error'
 import {
   shouldGenerateBrief,
   generateBrief,
@@ -45,6 +46,20 @@ export const MAX_BRIEFS_PER_RUN = 50
  *    调大到 40 张就会重新踩回这次事故的那条线。
  */
 export const BRIEFS_PER_CHUNK = 12
+
+/**
+ * 一段最多允许跑多久（毫秒）。**这是防「段永远不返回」的硬闸。**
+ *
+ * 🔴 `BRIEFS_PER_CHUNK = 12` 这个数字是按「每张约 3.2 秒」算出来的，而每张卡到底多久
+ *    取决于外面那个 AI 服务当时的状态 —— 一旦它变慢（2026-09-23 实测：余额用光时
+ *    SDK 对 429 重试两次，一张卡烧 20.1 秒），12 张要约 242 秒，网关约 125 秒就把
+ *    连接掐断：这一段**永远不返回**，`log-finish` 一次都跑不到，运行记录永远停在
+ *    「在跑」—— 监控上跟健康一模一样。
+ *
+ *    条数上限管不住这件事，只有时间上限管得住：写完一张就看一眼表，超了就把剩下的
+ *    留给下一轮，**把段返回出去**。90 秒留了 35 秒余量给最后那张卡跑完。
+ */
+export const CHUNK_TIME_BUDGET_MS = 90_000
 
 /** 候选池一次最多从库里捞多少条对话（挑之前的粗筛上限，不是写卡上限）。 */
 const CANDIDATE_POOL = 500
@@ -77,6 +92,21 @@ export interface DueBrief extends BriefCandidate {
 export interface BriefGenerationResult {
   generated: number
   failed: number
+  /**
+   * 这一段被提前掐掉的原因，正常跑完是 null。
+   *
+   * 🔴 调用方**必须**看这个字段：有值就别再排下一段了，而且这一轮要记成失败 ——
+   *    「余额用光」和「今天没人要写卡」在运行记录里长得一样的话，这次事故会再发生一遍。
+   */
+  aborted: string | null
+}
+
+/** 给 `generateDueBriefs` 的旋钮，全部有默认值；测试用来注入假表和短预算。 */
+export interface GenerateDueBriefsOptions {
+  /** 这一段的时间预算，默认 `CHUNK_TIME_BUDGET_MS`。 */
+  budgetMs?: number
+  /** 读表用的时钟，默认 `Date.now`。测试注入假表，不用真等 90 秒。 */
+  clock?: () => number
 }
 
 export interface PostBriefSweepResult {
@@ -151,15 +181,39 @@ export async function loadDueBriefs(
  *
  * 单条失败只记一笔继续下一条 —— 一个人的对话数据坏了，不该让这一批剩下的人
  * 今天都看不到卡。
+ *
+ * 但有两种情况必须**当场把这一段返回出去**，否则段会撞穿网关那条约 125 秒的线、
+ * 永远不返回，运行记录就永远停在「在跑」（2026-09-23 事故，见
+ * `CHUNK_TIME_BUDGET_MS` 和 `@/lib/ai/fatal-error`）：
+ *
+ *   1. **账户级 AI 故障**（余额用光 / 密钥被拒）—— 对剩下每一条都是同一个结论，
+ *      逐条确认只是把 20 秒乘以条数。
+ *   2. **时间预算用完** —— 无论慢在哪里，剩下的留给下一轮，先把段交出去。
  */
 export async function generateDueBriefs(
   due: readonly DueBrief[],
   now: Date,
+  opts: GenerateDueBriefsOptions = {},
 ): Promise<BriefGenerationResult> {
+  const budgetMs = opts.budgetMs ?? CHUNK_TIME_BUDGET_MS
+  const clock = opts.clock ?? Date.now
+  const startedAt = clock()
   let generated = 0
   let failed = 0
+  let done = 0
 
   for (const candidate of due) {
+    // 先看表再干活：这一张要是开工就注定超时，不如把段先交出去。
+    if (clock() - startedAt >= budgetMs) {
+      const left = due.length - done
+      return {
+        generated,
+        failed,
+        aborted: `这一段跑满了 ${Math.round(budgetMs / 1000)} 秒的时间预算，剩下 ${left} 条留给下一轮（防止整段撞穿网关超时、运行记录卡在「在跑」）`,
+      }
+    }
+    done++
+
     try {
       const messages = await loadMessages(candidate.conversationId)
       if (messages.length === 0) continue
@@ -172,12 +226,17 @@ export async function generateDueBriefs(
       await storeBrief(candidate, brief, now, knowledgeStatus)
       generated++
     } catch (err) {
+      const fatal = fatalAiReason(err)
+      if (fatal) {
+        console.error(`[messenger/brief] 账户级故障，这一轮当场停下：${fatal}`, err)
+        return { generated, failed, aborted: fatal }
+      }
       failed++
       console.error(`[messenger/brief] ${candidate.conversationId} failed:`, err)
     }
   }
 
-  return { generated, failed }
+  return { generated, failed, aborted: null }
 }
 
 /**

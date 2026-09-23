@@ -70,7 +70,7 @@ export interface HealthReport {
    *    最多的 messenger-brief-hourly 一家 15 条；attribution-cron 2026-09-02 18:00
    *    那轮卡了 4 天没人发现。
    */
-  stuck: { service: string; startedAt: string; minutesRunning: number }[]
+  stuck: StuckRun[]
   /**
    * **跑成了但下游表没新行** —— 2026-09-23 事故对应的病态。
    *
@@ -116,27 +116,33 @@ async function lastRunByJob(supabase: SupabaseClient, jobNames: string[]): Promi
   return out
 }
 
-interface LastOutcome {
+export interface LastOutcome {
   status: string
   error: string | null
   startedAt: string
   finishedAt: string | null
 }
 
-/** 每个任务**最近一次**的结果 —— 只有最后一次失败才算「现在是坏的」。 */
+/**
+ * 每个任务**最近一次**的结果 —— 只有最后一次失败才算「现在是坏的」。
+ *
+ * `startedBefore` 只取在那个时刻**之前**开跑的那一条（不传 = 不限）。卡死判定要用它，
+ * 理由见 `lastSettleableOutcome`。
+ */
 async function lastOutcome(
   supabase: SupabaseClient,
   jobNames: string[],
+  startedBefore?: Date,
 ): Promise<Map<string, LastOutcome>> {
   const out = new Map<string, LastOutcome>()
   const rows = await Promise.all(
     jobNames.map(async (name) => {
-      const { data } = await supabase
+      let q = supabase
         .from('cron_run_logs')
         .select('status, error_message, started_at, finished_at')
         .eq('job_name', name)
-        .order('started_at', { ascending: false })
-        .limit(1)
+      if (startedBefore) q = q.lt('started_at', startedBefore.toISOString())
+      const { data } = await q.order('started_at', { ascending: false }).limit(1)
       const r = (data ?? [])[0] as
         | { status: string; error_message: string | null; started_at: string; finished_at: string | null }
         | undefined
@@ -149,6 +155,64 @@ async function lastOutcome(
     }),
   )
   for (const [name, v] of rows) if (v) out.set(name, v)
+  return out
+}
+
+/**
+ * 读「某个任务在 `startedBefore` 之前最近一次运行」的抽象。
+ *
+ * 跟 `DownstreamProber` 完全同样的理由抽成窄函数：SupabaseClient 的类型体太大，
+ * 测试里造一个满足它整套类型的假客户端做不到形状一致。卡死判定现在跑在这个接口上，
+ * 测试直接传 fake，不碰 supabase。
+ */
+export type OutcomeReader = (jobName: string, startedBefore: Date | null) => Promise<LastOutcome | null>
+
+export function makeSupabaseOutcomeReader(supabase: SupabaseClient): OutcomeReader {
+  return async (jobName, startedBefore) => {
+    const m = await lastOutcome(supabase, [jobName], startedBefore ?? undefined)
+    return m.get(jobName) ?? null
+  }
+}
+
+export interface StuckRun {
+  service: string
+  startedAt: string
+  minutesRunning: number
+}
+
+/**
+ * 挑出卡死在半路的任务。
+ *
+ * 🔴 **判据看的不是「最新一条」，是「最近一条早该跑完了的」**（2026-09-23 事故的
+ *    「看不见」那一半）：`isStuck` 要求开跑满 60 分钟才算卡死（不然会把正在正常跑的
+ *    那一次报成卡死）。可每小时任务**每小时都会新插一行 `running`**，所以它的
+ *    「最新一条」永远不满 60 分钟 —— 这道判定对所有小时级任务**结构性地永远不成立**。
+ *
+ *    实测代价：`messenger-brief-hourly` 从 2026-09-20 19:11 起每小时留下一行永远
+ *    停在 `running` 的记录，攒到 50 行、客户需求卡停产 3 天，而体检报告上 `stuck`
+ *    一条都没有 —— 每小时都被那行「刚开跑 20 分钟、完全正常」的新记录挡在前面。
+ *
+ *    改法：把视线往回退 60 分钟，只看那条线之前最新的一条。它要么已经有终态（健康），
+ *    要么就是真的卡死了；而正在跑的那一次还没跨过这条线，根本不在视野里 ——
+ *    原来防误报的那层保护一并保住，不是拿误报换灵敏。
+ */
+export async function checkStuckRuns(
+  read: OutcomeReader,
+  now: Date,
+  entries: readonly { service: string; jobName: string }[] = CRON_REGISTRY,
+): Promise<StuckRun[]> {
+  const cutoff = new Date(now.getTime() - STUCK_AFTER_MS)
+  const rows = await Promise.all(entries.map((e) => read(e.jobName, cutoff)))
+  const out: StuckRun[] = []
+  for (let i = 0; i < entries.length; i++) {
+    const o = rows[i]
+    if (!o || !isStuck(o, now)) continue
+    out.push({
+      service: entries[i].service,
+      startedAt: o.startedAt,
+      minutesRunning: Math.round((now.getTime() - new Date(o.startedAt).getTime()) / 60000),
+    })
+  }
   return out
 }
 
@@ -273,9 +337,10 @@ export async function checkCronHealth(
   now: Date = new Date(),
 ): Promise<HealthReport> {
   const names = Array.from(new Set(CRON_REGISTRY.map((e) => e.jobName)))
-  const [lastRun, outcomes, silentSuccess] = await Promise.all([
+  const [lastRun, outcomes, stuck, silentSuccess] = await Promise.all([
     lastRunByJob(supabase, names),
     lastOutcome(supabase, names),
+    checkStuckRuns(makeSupabaseOutcomeReader(supabase), now),
     checkDownstreamFreshness(makeSupabaseProber(supabase), now),
   ])
 
@@ -300,15 +365,9 @@ export async function checkCronHealth(
     failing: CRON_REGISTRY
       .filter((e) => outcomes.get(e.jobName)?.status === 'failed')
       .map((e) => ({ service: e.service, lastError: outcomes.get(e.jobName)?.error ?? null })),
-    stuck: CRON_REGISTRY.flatMap((e) => {
-      const o = outcomes.get(e.jobName)
-      if (!o || !isStuck(o, now)) return []
-      return [{
-        service: e.service,
-        startedAt: o.startedAt,
-        minutesRunning: Math.round((now.getTime() - new Date(o.startedAt).getTime()) / 60000),
-      }]
-    }),
+    // 🔴 卡死判定单独走 `checkStuckRuns`（它看的是回退 60 分钟之后最新的那一条，
+    //    不是 `outcomes` 里的最新一条）—— 为什么见那个函数的注释。
+    stuck,
     silentSuccess,
   }
 }

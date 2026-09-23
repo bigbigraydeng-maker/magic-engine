@@ -69,6 +69,11 @@ export type ManualItemKind =
   | 'cron_blind'
   /** 自动任务跑到一半卡死（状态永远停在 running，路由的 catch 没机会执行） */
   | 'cron_stuck'
+  /**
+   * 自动任务「显示跑成了，但它声明的下游表一行没写」（2026-09-23 事故）。
+   * 跟 cron_stuck 的区别：那边状态位就不对，这边状态位是绿的、只有产出是空的。
+   */
+  | 'cron_silent_success'
   | 'goal_baseline_mismatch'
   | 'diagnostic_findings'
   | 'prescription_updated'
@@ -929,6 +934,8 @@ export async function pushDataForSeoCreditsItem(
 
 /** Render 后台首页 —— 稳定入口，登录后一定打得开（不是会 404 的深链）。 */
 const RENDER_DASHBOARD_URL = 'https://dashboard.render.com'
+/** 「跑成了但没写出东西」那张详情页 —— 每条都写了下游表最后一行是什么时候写的。 */
+const WORKFLOWS_HEALTH_URL = 'https://app.magicengine.com.au/dashboard/workflows-health'
 
 /**
  * 「任务该跑没跑」按调度方给不同的动手指引。
@@ -1012,6 +1019,22 @@ async function pushCronHealthItems(
       what: `${r.stuck.length} 个自动任务开跑了但一直没结束：${names} —— 这类不会报错，它就那么挂着，那一轮该干的活儿等于没干`,
       how: '打开链接 → 找到这几个服务 → Logs 看最后停在哪一步。常见是卡在某个外部接口没有超时保护。确认死了就手动重跑一次，并把那段调用加上超时',
       href: RENDER_DASHBOARD_URL,
+    })
+  }
+
+  // 「跑成了但没写出东西」—— 2026-09-23 事故的形态。它必须进待办，不能只躺在
+  // /dashboard/workflows-health 那张页面上：这条判据存在的全部理由就是「状态位说没坏、
+  // 产出说坏了」，而只有产出这一侧是客户真正看得见的东西。
+  // 停在一个要人主动去开的看板上 = 跟停在日志里没区别（CLAUDE.md 铁律 3：发现不许死在日志里）。
+  if (r.silentSuccess.length > 0) {
+    const names = r.silentSuccess.map((s) => `${s.service} → ${s.table}`).join('、')
+    items.push({
+      kind: 'cron_silent_success',
+      client_id: 'infra',
+      client_name: 'Magic Engine 后台',
+      what: `${r.silentSuccess.length} 个自动任务「显示跑成了，但该写的东西一行没写」：${names} —— 状态位是绿的，产出是空的，先信产出`,
+      how: '打开链接看这几条的详情（每条都写了最后一行是什么时候写的）。最常见两种原因：它依赖的外部服务断了（余额用光 / 授权过期），或者写库那一步被跳过了。回我一句「查一下」我就去定位',
+      href: WORKFLOWS_HEALTH_URL,
     })
   }
 

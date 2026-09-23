@@ -23,7 +23,7 @@
  */
 
 import { inngest, CLOUD_FN_PREFIX } from '../client'
-import { cronRunHandle, startCronRunId } from '@/lib/cron/run-logger'
+import { cronRunHandle, failOpenCronRuns, startCronRunId } from '@/lib/cron/run-logger'
 import {
   BRIEFS_PER_CHUNK,
   chunkDueBriefs,
@@ -42,7 +42,7 @@ import {
 /** 这一轮的回执 —— Inngest 后台里能直接看懂的那份。 */
 export interface BriefCycleReceipt {
   readonly job: string
-  readonly status: 'written' | 'nothing_due' | 'load_failed' | 'invalid_payload'
+  readonly status: 'written' | 'nothing_due' | 'load_failed' | 'invalid_payload' | 'aborted'
   readonly candidates: number
   readonly generated: number
   readonly failed: number
@@ -54,7 +54,10 @@ export interface BriefCycleReceipt {
 /** 依赖注入版：便于直接注入假的挑人 / 假的写卡，不碰真模型、不花钱。 */
 export function createMessengerBriefAfterSyncFunction(deps: {
   loadDue: (now: Date) => Promise<DueBrief[]>
-  generate: (due: readonly DueBrief[], now: Date) => Promise<{ generated: number; failed: number }>
+  generate: (
+    due: readonly DueBrief[],
+    now: Date,
+  ) => Promise<{ generated: number; failed: number; aborted?: string | null }>
   sweeps: (now: Date) => Promise<PostBriefSweepResult>
 }) {
   return inngest.createFunction(
@@ -85,6 +88,28 @@ export function createMessengerBriefAfterSyncFunction(deps: {
        * 第一版把 worker 的值抄到了编排函数上。
        */
       retries: 2,
+      /**
+       * 🔴 **重试耗尽后仍失败，必须把那行运行记录收成 `failed`。**
+       *
+       * 2026-09-23 事故的「看不见」那一半就死在这里：原来没配 `onFailure`，
+       * 于是一段被网关掐断 → 重试也被掐断 → 整条 run 判死 → `log-finish` 一次都没跑到
+       * → `cron_run_logs` 那行永远停在 `running`，而健康检查的 `failing` 只认
+       * `status='failed'`，`stuck` 又只看最新一条（每小时任务的最新一条永远不满一小时）。
+       * 结果：链路停产 3 天，体检报告上全绿，累计 50 行假的「在跑」。
+       *
+       * 收口本身早就有现成的（`failOpenCronRuns`，conversion-daily-pipeline 在用），
+       * 这个函数只是一直没接上。
+       */
+      onFailure: async ({ event, error }) => {
+        const message =
+          error?.message ||
+          (event.data as { error?: { message?: string } } | undefined)?.error?.message ||
+          '未知错误'
+        // 失败事件自带发生时刻（EventPayload.ts；FailureEventPayload 的类型没把它露出来）。
+        const ts = (event as { ts?: number }).ts
+        const startedBefore = new Date(typeof ts === 'number' ? ts : Date.now())
+        await failOpenCronRuns(MESSENGER_BRIEF_JOB, `重试耗尽后仍失败：${message}`, { startedBefore })
+      },
     },
     { event: MESSENGER_SYNC_COMPLETED_EVENT },
     async ({ event, step }): Promise<BriefCycleReceipt> => {
@@ -128,10 +153,59 @@ export function createMessengerBriefAfterSyncFunction(deps: {
       const chunks = chunkDueBriefs(due.list, BRIEFS_PER_CHUNK)
       let generated = 0
       let failed = 0
+      /**
+       * 🔴 某一段自己主动停下来（余额用光 / 时间预算用完）就**别再排下一段**。
+       *    余额用光时后面每一段都会同样失败，而每一段都要先烧掉 20 秒 × 12 条才知道 ——
+       *    这就是 2026-09-23 那次「段永远不返回」的来源。
+       */
+      let aborted: string | null = null
       for (const [i, chunk] of chunks.entries()) {
         const r = await step.run(`write-briefs-${i}`, async () => deps.generate(chunk, now))
         generated += r.generated
         failed += r.failed
+        if (r.aborted) {
+          aborted = r.aborted
+          break
+        }
+      }
+
+      // 主动停下来的那一轮：如实记成失败就收工。
+      //
+      // 🔴 不重试、不抛异常。余额用光重试一百次也不会好（`fatalAiReason` 的判据），
+      //    时间预算用完更不该在同一轮里接着跑 —— 该做的是让这行运行记录带着真实原因
+      //    变成 `failed`，让体检报告红灯、待办里出现一条人能动手的事。
+      //    积压会顺着后面几轮慢慢排掉（每轮 50 张的闸照旧生效）。
+      if (aborted) {
+        await step.run('log-finish-aborted', async () => {
+          await run.finish({
+            processed: due.list.length,
+            completed: generated,
+            failed,
+            error: aborted ?? '未知原因',
+            summary: {
+              candidates: due.list.length,
+              generated,
+              failed,
+              chunks: chunks.length,
+              chunkSize: BRIEFS_PER_CHUNK,
+              aborted,
+              triggeredBy: MESSENGER_SYNC_COMPLETED_EVENT,
+              syncReceipt: parsed.value,
+              // 扫尾两遍这一轮故意没跑 —— 它们要读刚写好的卡，而这一轮没写完。
+              sweepsSkipped: true,
+            },
+          })
+          return null
+        })
+        return {
+          ...base,
+          status: 'aborted',
+          candidates: due.list.length,
+          generated,
+          failed,
+          chunks: chunks.length,
+          error: aborted,
+        }
       }
 
       // 写完卡之后的两遍扫描。要读刚写好的卡，所以排在最后。
