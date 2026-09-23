@@ -113,12 +113,83 @@ async function needsBackfill(
   return earliest > toIsoDate(shiftDays(new Date(), -BACKFILL_LOOKBACK_DAYS))
 }
 
-/** The date window a run should request, given whether it is backfilling. */
-function requestWindow(backfill: boolean): { since: string; until: string; lookback: number } {
+/**
+ * Which calendar day it is right now IN THE AD ACCOUNT'S OWN TIMEZONE.
+ *
+ * Unknown timezone falls back to UTC — identical to what this file did before
+ * it knew about timezones, so an account with no snapshot yet is no worse off.
+ */
+function accountDayKey(timezone: string | null, now: Date): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone ?? 'UTC',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(now)
+}
+
+/**
+ * The ad account's reporting timezone, as Meta reported it into the latest
+ * account-level snapshot.
+ *
+ * Read from storage rather than the Graph API on purpose: the value changes
+ * essentially never, the same daily cron's snapshot sync already captures it
+ * for every account, and Meta's BUC quota is charged per call — spending one
+ * on a constant, three times a day per account, buys nothing.
+ *
+ * Deliberately NOT scoped by client_id. The timezone is a property of the ad
+ * account, not of whoever registered it, so a shared or secondary account
+ * snapshotted under another client still resolves instead of silently
+ * dropping back to UTC.
+ *
+ * Never throws and never propagates an error: a failed timezone read must
+ * degrade to UTC, not take the day's data sync down with it.
+ */
+async function resolveAccountTimezone(adAccountId: string): Promise<string | null> {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('ad_entity_snapshots')
+      .select('timezone_name')
+      .eq('ad_account_id', adAccountId)
+      .eq('level', 'account')
+      .order('captured_at', { ascending: false })
+      .limit(1)
+    if (error) return null
+    return (data as Array<{ timezone_name: string | null }> | null)?.[0]?.timezone_name ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The date window a run should request, given whether it is backfilling.
+ *
+ * "Yesterday" has to be yesterday IN THE AD ACCOUNT'S TIMEZONE, because that is
+ * the day boundary Meta reports on — and it is the last day guaranteed to be
+ * complete. Reading it off the server clock instead is wrong wherever the
+ * account is not on UTC, and Render runs in UTC:
+ *
+ *   Real incident (2026-09-23). The cron fired at 17:00 UTC, which is already
+ *   05:00 on 09-24 in Pacific/Auckland — 09-23 was a finished day. UTC's
+ *   "yesterday" was 09-22, so 09-23 was never requested and both CTS accounts
+ *   stored nothing for it while two ad sets were still delivering (~NZ$135 of
+ *   spend invisible to the engine). Every Pacific/Auckland and Australia/*
+ *   account carried the same systematic one-day hole.
+ *
+ * `since` moves on the same basis — a window anchored half in one timezone and
+ * half in another is its own bug.
+ *
+ * Exported for tests: the timezone arithmetic is the whole point of this
+ * function and deserves to be pinned directly rather than inferred from
+ * `days_requested`.
+ */
+export function requestWindow(
+  backfill: boolean,
+  timezone: string | null,
+  now: Date = new Date(),
+): { since: string; until: string; lookback: number } {
   const lookback = backfill ? BACKFILL_LOOKBACK_DAYS : DEFAULT_LOOKBACK_DAYS
-  // Meta reports in the ad account's timezone; "yesterday" is the last day
-  // guaranteed to be complete.
-  const today = new Date()
+  // Date-only arithmetic in UTC on an already-localised day key: no DST edge,
+  // because nothing here ever crosses a wall-clock hour.
+  const today = new Date(`${accountDayKey(timezone, now)}T00:00:00Z`)
   return {
     since: toIsoDate(shiftDays(today, -lookback)),
     until: toIsoDate(shiftDays(today, -1)),
@@ -268,8 +339,11 @@ export async function syncCampaignDailyInsights(
   opts: SyncOptions = {},
 ): Promise<SyncDailyInsightsResult> {
   try {
-    const backfill = await needsBackfill(clientId, 'campaign', { adAccountId, withVideo: opts.withVideo })
-    const { since, until, lookback } = requestWindow(backfill)
+    const [backfill, timezone] = await Promise.all([
+      needsBackfill(clientId, 'campaign', { adAccountId, withVideo: opts.withVideo }),
+      resolveAccountTimezone(adAccountId),
+    ])
+    const { since, until, lookback } = requestWindow(backfill, timezone)
 
     const { rows, complete } = await getCampaignDailyInsights(adAccountId, accessToken, since, until)
     if (rows.length === 0) {
@@ -346,8 +420,11 @@ export async function syncAdDailyInsights(
   opts: SyncOptions = {},
 ): Promise<SyncDailyInsightsResult> {
   try {
-    const backfill = await needsBackfill(clientId, 'ad', { adAccountId, withVideo: opts.withVideo })
-    const { since, until, lookback } = requestWindow(backfill)
+    const [backfill, timezone] = await Promise.all([
+      needsBackfill(clientId, 'ad', { adAccountId, withVideo: opts.withVideo }),
+      resolveAccountTimezone(adAccountId),
+    ])
+    const { since, until, lookback } = requestWindow(backfill, timezone)
 
     const { rows, complete } = await getAdDailyInsights(adAccountId, accessToken, since, until)
     if (rows.length === 0) {
@@ -406,8 +483,11 @@ export async function syncAdsetDailyInsights(
   opts: SyncOptions = {},
 ): Promise<SyncDailyInsightsResult> {
   try {
-    const backfill = await needsBackfill(clientId, 'adset', { adAccountId, withVideo: opts.withVideo })
-    const { since, until, lookback } = requestWindow(backfill)
+    const [backfill, timezone] = await Promise.all([
+      needsBackfill(clientId, 'adset', { adAccountId, withVideo: opts.withVideo }),
+      resolveAccountTimezone(adAccountId),
+    ])
+    const { since, until, lookback } = requestWindow(backfill, timezone)
 
     const { rows, complete } = await getAdsetDailyInsights(adAccountId, accessToken, since, until)
     if (rows.length === 0) {
