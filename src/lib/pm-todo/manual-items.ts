@@ -35,6 +35,8 @@ import { pushPageBindingItems, type PageBindingItemKind } from './page-binding-i
 import { AUTO_LANDED_AGENT } from '@/lib/diagnostic/auto-prescribe'
 import { isHandAddedItem } from '@/lib/diagnostic/prescription-landing'
 import { LINKEDIN_PROGRESS_CLIENT_ID, LINKEDIN_PROGRESS_SOURCE } from '@/lib/linkedin-progress/constants'
+import { makeSupabaseOutageReader, readRecentOutages, streakDays, utcDate, type OutageQuery } from '@/lib/ai/outage-ledger'
+import { shouldRemindToday, streakPhrase } from './remind-cadence'
 
 /**
  * 这些条目**链接坏了也照样下发**。
@@ -47,7 +49,15 @@ import { LINKEDIN_PROGRESS_CLIENT_ID, LINKEDIN_PROGRESS_SOURCE } from '@/lib/lin
  * kept=0，整套排查产出为零。
  */
 // facebook_page_binding_unverified：同步被暂停时客人私信/留资不进 CRM，链接坏了也得有人看见（AD-SEC-4）。
-const NEVER_DROP_KINDS = new Set<ManualItemKind>(['cross_client_leak', 'facebook_page_binding_unverified'])
+// ai_provider_exhausted / ai_alerting_broken：OpenAI 和 Cloudflare 的后台都在登录墙后面，
+//   我们的探活 fetch 很可能拿到 403 → 整条被当坏链接丢掉。而这两条恰恰是
+//   「全站 AI 在空跑」和「这套告警自己瞎了」—— 宁可让人自己找入口，也不能让它静默消失。
+const NEVER_DROP_KINDS = new Set<ManualItemKind>([
+  'cross_client_leak',
+  'facebook_page_binding_unverified',
+  'ai_provider_exhausted',
+  'ai_alerting_broken',
+])
 
 /** Meta queued this long without being applied = the applier is stuck. */
 const META_PENDING_STALE_DAYS = 3
@@ -69,6 +79,20 @@ export type ManualItemKind =
   | 'cron_blind'
   /** 自动任务跑到一半卡死（状态永远停在 running，路由的 catch 没机会执行） */
   | 'cron_stuck'
+  /**
+   * 自动任务最近一次是**报错**结束的。
+   *
+   * `cron/health.ts` 从 2026-09-06 起就算出了 `failing` 这一类，但它**一次都没被下发过**——
+   * 算完只去了一个没人天天开的看板页和一封每天没人细看的邮件。这条把它接上。
+   */
+  | 'cron_failing'
+  /**
+   * AI 供应商账户级失效（余额耗尽 / 钥匙不认了 / 卡在网关）。
+   * 2026-09-20 那次全站断电三天没人知道，就是因为这条路以前不存在。
+   */
+  | 'ai_provider_exhausted'
+  /** 上面那条告警**自己**读不出来了 —— 不报 ≠ 没事，必须单独说 */
+  | 'ai_alerting_broken'
   | 'goal_baseline_mismatch'
   | 'diagnostic_findings'
   | 'prescription_updated'
@@ -380,6 +404,11 @@ export async function loadManualItems(
   // 关键词数据供应商余额用完 —— 同样只有人能充值；仅 40210 进入人工车道。
   await pushDataForSeoCreditsItem(supabase, items, now).catch((e) =>
     console.warn('[manual-items] Keyword Intelligence 余额检查失败（不阻塞其他待办）:', e),
+  )
+  // AI 文字账户断电（没钱 / 钥匙失效 / 卡在网关）—— 2026-09-20 那次全站三天没人知道。
+  // 跟上面两条余额待办同一条纪律：只有人能充钱，必须当天摆到眼前。
+  await pushProviderOutageItems(supabase, items, now).catch((e) =>
+    console.error('[manual-items] AI 断电告警读取失败（这只眼睛瞎了，不是没事）:', e),
   )
   // 按时没跑 / 查不出跑没跑 —— PM 2026-08-03 要求「不能完成需要有报错」
   await pushCronHealthItems(supabase, items, now)
@@ -927,6 +956,95 @@ export async function pushDataForSeoCreditsItem(
 }
 
 
+/**
+ * AI 账户断电 —— 只有人能充值 / 换钥匙，必须当天摆到眼前。
+ *
+ * 真实事故（2026-09-20）：ME 全站只有一把 OpenAI 钥匙，它背后的账户当天
+ * 18:01~19:11 (UTC) 余额耗尽，约 35 个调用点一起死，**三天没人知道**。
+ * 当时全仓只有市场情报那一条链路会喊出来，其余十几处都是 catch {} 静默吞掉。
+ *
+ * 判据用「最近几天有没有落地的断电记录」，**不是**「现在还坏着」——
+ * 后者会让 9/20 那种只持续 70 分钟的断电在充值后彻底消失（今日待办一天才跑一次，
+ * 而且只有周日到周四）。见 outage-ledger.ts 顶部那段。
+ */
+const AI_ACCOUNT_GUIDE: Record<string, { what: string; how: string; href: string }> = {
+  account_exhausted: {
+    what: 'AI 文字账户的钱用完了 —— 这把钥匙全站在用：写内容、判客户到哪一步了、读通话记录、做 AI 可见度体检，全都会安静地跳过，看上去像「今天没什么发现」',
+    how: '打开链接充值（这是我们生成文字用的账户，跟出片那个不是同一个）。充完回我一句，我把这几天被跳过的活儿重跑一遍',
+    href: 'https://platform.openai.com/settings/organization/billing/overview',
+  },
+  credential_invalid: {
+    what: 'AI 文字账户的钥匙不认了（被撤销或过期）—— 全站用到 AI 的地方都在安静地跳过',
+    how: '打开链接 → 新建一把 API key → 回我一句，我来换上去（钥匙别贴在聊天里，我会告诉你放哪）',
+    href: 'https://platform.openai.com/api-keys',
+  },
+  gateway_auth_failed: {
+    what: 'AI 调用卡在中间那道 Cloudflare 关口上了 —— **不是 OpenAI 的问题，去 OpenAI 查不出东西**。全站用到 AI 的地方都在安静地跳过',
+    how: '这条不用你动手 —— 是我们这边的网关令牌过期了。回我一句「换网关令牌」我就去换',
+    href: 'https://dash.cloudflare.com',
+  },
+}
+
+async function pushProviderOutageItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+): Promise<void> {
+  const query = await readRecentOutages(makeSupabaseOutageReader(supabase), now)
+  items.push(...buildProviderOutageItems(query, now))
+}
+
+/**
+ * 从断电记录造待办 —— 纯函数，可完全单测（这是验收条件 1 的落点）。
+ */
+export function buildProviderOutageItems(query: OutageQuery, now: Date): ManualItem[] {
+  const items: ManualItem[] = []
+  const { rows, error } = query
+
+  // 🔴 「查不了」绝不能长得跟「一切正常」一样 —— 那正是这张卡存在的原因。
+  //    表没建 / 权限不对 / 查询挂了，都必须有人看见，否则这套告警瞎了也没人知道
+  //    （memory: monitoring-writer-silent-failure-inverts-health-check）。
+  if (error) {
+    items.push({
+      kind: 'ai_alerting_broken',
+      client_id: 'infra',
+      client_name: 'Magic Engine 后台',
+      what: `「AI 账户断电」的告警自己读不出来了（${error.slice(0, 160)}）—— 现在不报警**不等于**没事，等于这只眼睛瞎了`,
+      how: '这条不用你动手 —— 是我们这边的欠账（记录表没建好或权限不对）。回我一句「修一下断电告警」我就去修',
+      href: '',
+    })
+    return items
+  }
+
+  const today = utcDate(now)
+  const byReason = new Map<string, { dates: string[]; detail: string | null }>()
+  for (const r of rows) {
+    const key = `${r.provider}::${r.reason}`
+    const g = byReason.get(key) ?? { dates: [], detail: null }
+    g.dates.push(r.outage_date)
+    if (r.outage_date === today || g.detail === null) g.detail = r.detail
+    byReason.set(key, g)
+  }
+
+  for (const [key, g] of byReason) {
+    const streak = streakDays(g.dates, today)
+    if (!shouldRemindToday(streak, now)) continue
+    const reason = key.split('::')[1] ?? ''
+    const guide = AI_ACCOUNT_GUIDE[reason]
+    // 认不出来的新失败形态照样下发 —— 说不清楚也好过不说
+    const what = guide?.what ?? `AI 供应商报了一个我们还没见过的账户级问题（${reason}）—— 全站用到 AI 的地方可能在安静地跳过`
+    items.push({
+      kind: 'ai_provider_exhausted',
+      client_id: 'infra',
+      client_name: 'Magic Engine 后台',
+      what: `${streakPhrase(streak)}：${what}`,
+      how: guide?.how ?? '回我一句「查一下 AI 账户」，我去看供应商后台具体报的是什么',
+      href: guide?.href ?? '',
+    })
+  }
+  return items
+}
+
 /** Render 后台首页 —— 稳定入口，登录后一定打得开（不是会 404 的深链）。 */
 const RENDER_DASHBOARD_URL = 'https://dashboard.render.com'
 
@@ -969,7 +1087,20 @@ async function pushCronHealthItems(
   items: ManualItem[],
   now: Date,
 ): Promise<void> {
-  const r = await checkCronHealth(supabase, now).catch(() => null)
+  // 🔴 体检整体挂掉时**不能什么都不报**。原来是 `.catch(() => null); if (!r) return` ——
+  //    于是「40 个自动任务的体检自己坏了」跟「40 个全部正常」长得一模一样，
+  //    正是这个文件存在要消灭的那种静默。
+  const r = await checkCronHealth(supabase, now).catch((e: unknown) => {
+    items.push({
+      kind: 'ai_alerting_broken',
+      client_id: 'infra',
+      client_name: 'Magic Engine 后台',
+      what: `自动任务的体检自己跑挂了（${(e instanceof Error ? e.message : String(e)).slice(0, 160)}）—— 今天**没有任何**「任务停了/卡死/报错」的检查结果，不报警不等于一切正常`,
+      how: '这条不用你动手 —— 是我们这边的查询挂了。回我一句「修一下任务体检」我就去修',
+      href: '',
+    })
+    return null
+  })
   if (!r) return
 
   const stopped = [...r.neverRan, ...r.overdue]
@@ -1002,16 +1133,42 @@ async function pushCronHealthItems(
   // 两边都接不住它：failing 只认 status='failed'，可容器被杀时路由的 catch 根本没机会跑；
   // overdue 看 started_at，而卡死的任务开跑记录是有的。所以跑死的任务在体检里等于健康。
   if (r.stuck.length > 0) {
+    // 🔴 `r.stuck` 已经在 health.ts 里**按服务聚合过**，所以 `.length` 说的是
+    //    「几个任务」而不是「几条记录」。不聚合的话 attribution-cron 一家 4 条孤儿行
+    //    会被渲染成「4 个自动任务卡死」，是个会骗人的数（魏征 2026-09-23 复审）。
     const names = r.stuck
-      .map((s) => `${s.service}（已卡 ${s.minutesRunning >= 120 ? Math.round(s.minutesRunning / 60) + ' 小时' : s.minutesRunning + ' 分钟'}）`)
+      .map((s) => {
+        const dur = s.minutesRunning >= 120 ? `${Math.round(s.minutesRunning / 60)} 小时` : `${s.minutesRunning} 分钟`
+        const rounds = s.rounds > 1 ? `，48 小时里卡了 ${s.rounds} 轮` : ''
+        return `${s.service}（已卡 ${dur}${rounds}）`
+      })
       .join('、')
     items.push({
       kind: 'cron_stuck',
       client_id: 'infra',
       client_name: 'Magic Engine 后台',
       what: `${r.stuck.length} 个自动任务开跑了但一直没结束：${names} —— 这类不会报错，它就那么挂着，那一轮该干的活儿等于没干`,
-      how: '打开链接 → 找到这几个服务 → Logs 看最后停在哪一步。常见是卡在某个外部接口没有超时保护。确认死了就手动重跑一次，并把那段调用加上超时',
+      how: '这条不用你动手 —— 是我们代码里的欠账（某段外部调用没有超时保护）。回我一句「查一下卡死的那几个」我就去看 Logs 停在哪一步、补上超时',
       href: RENDER_DASHBOARD_URL,
+    })
+  }
+
+  // 最近一次是**报错**结束的。`health.ts` 从 2026-09-06 就算出了这一类，
+  // 但 `pushCronHealthItems` 里一次都没用过 —— 算完只去了一个没人天天开的看板页
+  // 和一封每天没人细看的邮件。这条把它接上（铁律 3 下半：发现不许死在日志里）。
+  //
+  // 合成一条，不是一个任务一条：9-22 那天今日待办一共 170 条，
+  // 真告警就是这么被淹死的。
+  if (r.failing.length > 0) {
+    const names = r.failing.map((f) => f.service).join('、')
+    const sample = r.failing.find((f) => f.lastError)?.lastError
+    items.push({
+      kind: 'cron_failing',
+      client_id: 'infra',
+      client_name: 'Magic Engine 后台',
+      what: `${r.failing.length} 个自动任务最近一次是报错结束的：${names}${sample ? `（例如：${sample.slice(0, 120)}）` : ''} —— 它们负责的活儿这一轮没干成`,
+      how: '这条不用你动手 —— 多数是我们代码或某个外部账号的问题。回我一句「查一下报错的那几个」我就逐个看是代码要改、还是哪个账号要你去续费/重新授权',
+      href: 'https://app.magicengine.com.au/dashboard/admin/cron-health',
     })
   }
 

@@ -64,6 +64,17 @@ const DEV_OWNED_KINDS: ManualItemKind[] = [
   // （cron-registry-logs-runs.test.ts）阻止未来回归。留在 DEV_OWNED_KINDS 作为
   // 双保险：万一 CI 漏了，运行时也不再往 PM 邮件的「需要你动手」里塞。
   'cron_blind',
+  // 自动任务跑到一半卡死 → how 写的是「回我一句『查一下卡死的那几个』」。
+  // 孤儿行没有任何代码会回头改好，PM 做什么都不会让它消失（它只会在 48 小时后
+  // 滑出窗口）—— 放在 PM 的动手栏里等于每天给他一件做不了的事。
+  'cron_stuck',
+  // 自动任务最近一次报错 → how 写的是「回我一句『查一下报错的那几个』」。
+  // 「某任务抛了个异常」PM 没法直接动手，得先有人诊断是代码问题还是账号问题。
+  'cron_failing',
+  // 「AI 断电告警自己读不出来了」→ how 写的是「回我一句『修一下断电告警』」。
+  // 🔴 注意：真的断电那条（ai_provider_exhausted）**不在这里** ——
+  //    那条只有 PM 能处理（去充钱 / 换钥匙），必须留在动手栏。
+  'ai_alerting_broken',
 ]
 
 /** FDE focus clients: CTS + Oztop. */
