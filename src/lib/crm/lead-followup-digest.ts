@@ -7,10 +7,19 @@
  *
  * ## 四个刻意的约束
  *
- * 1. **第一步只发给 ME 自己**（PM 2026-09-24 拍板）。收件人由调用方传，传空
- *    退回 `ME_MAIL_TO_ADDRESS`，**绝不去猜客户的地址**。猜错的代价是把一个
- *    客户的客人名单发给别人 —— 这条线不接受「大概是对的」。
- *    要改成发给客户的销售，是改调用方传的收件人，不是改这里。
+ * 1. **第一步只发给 ME 自己**（PM 2026-09-24 拍板）。收件人**必须由调用方传**，
+ *    一个都没传就干脆不发，**绝不去猜、也不退回任何默认地址**。猜错的代价是把
+ *    一个客户的客人名单发给别人 —— 这条线不接受「大概是对的」。
+ *    🔴 早前这里退回 `ME_MAIL_TO_ADDRESS`，而那个常量读的是 `ME_MAIL_TO`
+ *       环境变量（`lib/email/sender.ts`），并且是**全站共用**的（联系表单、
+ *       cron 摘要、今日待办都读它）。于是「收件人写死在代码里」这句话是假的：
+ *       有人为了别的原因改一下配置，客人 PII 就跟着走了（魏征复审 2026-09-24）。
+ *
+ * 1b. **转发给客户销售之前必须重审三件事**（现在只发到 ME 自己的信箱所以还没暴露）：
+ *    ① `interest` 这类自由文本的脱敏够不够；② 「同一个人连着几天出现在信里」
+ *    需要提醒节奏（仓库里已有 `pm-todo/remind-cadence`，本函数还没接）；
+ *    ③ `calibrationNote` 里那句「直接回复这封邮件告诉我们」得换成一个真能点的入口，
+ *    否则就是「下发给人的任务做不到」。
  *
  * 2. **正文不写客人的邮箱和电话**。名字 + 感兴趣的团 + 等了多久足够认人，
  *    点链接就看到全部联系方式。多带一个号码，就是把客人的联系方式复制进了
@@ -33,18 +42,18 @@
  * 发送函数永不抛异常：发信失败不该把上游那趟巡检一起带崩。
  */
 
-import { ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
 import { contactCardTitle } from '@/lib/crm/display-name'
 import {
   contactUrl,
   esc,
   humanWait,
+  scrubContactDetails,
   sendDigestMail,
   stripAddress,
   type DigestMailer,
   type DigestSendResult,
 } from '@/lib/crm/digest-shared'
-import type { LeadDueItem } from './lead-followup-due'
+import { LEAD_WINDOW_DAYS, type LeadDueItem } from './lead-followup-due'
 
 /** 测试期标记。这封信从「只发给 ME」转正时，只改这一处。 */
 export const LEAD_DIGEST_TEST_PREFIX = '【测试中】'
@@ -52,13 +61,31 @@ export const LEAD_DIGEST_TEST_PREFIX = '【测试中】'
 export interface LeadDigestExtra {
   /** 窗口内被上限压掉、没列出来的条数。 */
   dropped?: number
-  /** 窗口之外、同样没人回的积压人数。 */
-  backlog?: number
+  /** 窗口之外、同样没人回的积压人数。`null` = 这次没算出来（照说，不当 0）。 */
+  backlog?: number | null
+  /** 积压只算到多少天以前。 */
+  backlogLookbackDays?: number
 }
 
-/** @param count 窗口内在等的**总数**（含被压掉的），不是名单长度。 */
-export function buildLeadDigestSubject(clientName: string, count: number): string {
-  return `${LEAD_DIGEST_TEST_PREFIX}${clientName}：${count} 个客人填了表还没人回`
+/**
+ * @param windowCount 窗口内在等的总数（含被压掉的）
+ * @param backlog     窗口外的积压；`null` = 这次没算出来
+ *
+ * 🔴 主题里报的是**所有在等的人**，不只是窗口内那几个。主题是被一眼扫过、
+ *    被转发的那一行；只写 38 而实际 315，就是这个文件第 3 条说的「说小了」。
+ */
+export function buildLeadDigestSubject(
+  clientName: string,
+  windowCount: number,
+  backlog: number | null = 0,
+): string {
+  const total = windowCount + (backlog ?? 0)
+  const tail = backlog === null
+    ? `${windowCount} 个客人填了表还没人回（更早的积压这次没算出来）`
+    : total > windowCount
+      ? `${total} 个客人填了表还没人回（最近 ${LEAD_WINDOW_DAYS} 天的 ${windowCount} 个列在信里）`
+      : `${windowCount} 个客人填了表还没人回`
+  return `${LEAD_DIGEST_TEST_PREFIX}${clientName}：${tail}`
 }
 
 function waitedMs(item: LeadDueItem, now: Date): number {
@@ -76,7 +103,7 @@ function byWaitDesc(a: number, b: number): number {
 
 function renderRow(item: LeadDueItem, index: number, ms: number): string {
   const name = stripAddress(contactCardTitle(item.displayName))
-  const interest = item.interest?.trim()
+  const interest = item.interest ? scrubContactDetails(item.interest) : ''
   return `
       <div style="margin:12px 0;padding:12px 14px;background:#f8fafc;border-radius:8px">
         <div style="font-weight:600;color:#0f172a">${index + 1}. ${esc(name)}</div>
@@ -102,13 +129,26 @@ function cappedNote(dropped: number): string {
       </p>`
 }
 
-/** 更早进来、同样没人回的积压。放在最后，跟今天的名单分开说。 */
-function backlogNote(backlog: number, windowDays: number): string {
+/**
+ * 更早进来、同样没人回的积压。放在最后，跟今天的名单分开说。
+ *
+ * `backlog === null` = 这次**没算出来**（那次查询单独失败了）。必须照说，
+ * 不能当成 0 —— 「没测成 ≠ 测出来是零」。
+ */
+function backlogNote(backlog: number | null, windowDays: number, lookbackDays: number): string {
+  if (backlog === null) {
+    return `
+      <p style="margin:14px 0 0;padding:10px 12px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;font-size:14px;color:#991b1b">
+        <b>更早以前的积压这次没算出来</b>（那一步查询失败了）—— 所以「就上面这些」这句话
+        今天不成立，别把它当成 0。
+      </p>`
+  }
   if (backlog <= 0) return ''
   return `
       <p style="margin:14px 0 0;padding:10px 12px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;font-size:14px;color:#991b1b">
-        上面只是最近 ${windowDays} 天进来的。更早以前还有 <b>${backlog}</b> 个人同样填了表、
-        同样没有人回过 —— 这封信不逐个列，免得看成一堵墙。
+        上面只是最近 ${windowDays} 天进来的。再往前数到 ${lookbackDays} 天以前，还有
+        <b>${backlog}</b> 个人同样填了表、同样没有人回过 —— 这封信不逐个列，免得看成一堵墙。
+        （更久远的没有算进这个数字。）
         <b>要不要补回这批人，是一次单独的决定，系统不会自己动。</b>
       </p>`
 }
@@ -138,7 +178,8 @@ export function buildLeadDigestBody(
   extra: LeadDigestExtra = {},
 ): string {
   const dropped = extra.dropped ?? 0
-  const backlog = extra.backlog ?? 0
+  const backlog = extra.backlog === undefined ? 0 : extra.backlog
+  const lookbackDays = extra.backlogLookbackDays ?? 0
   const rows = items
     .map((item) => ({ item, ms: waitedMs(item, now) }))
     .sort((a, b) => byWaitDesc(a.ms, b.ms))
@@ -157,7 +198,7 @@ export function buildLeadDigestBody(
       </p>
       ${rows}
       ${cappedNote(dropped)}
-      ${backlogNote(backlog, windowDays)}
+      ${backlogNote(backlog, windowDays, lookbackDays)}
       ${calibrationNote()}
       <p style="margin-top:20px;font-size:11px;color:#94a3b8">
         Magic Engine · 测试中的功能，暂不影响现有的工作方式。
@@ -182,31 +223,38 @@ export async function sendLeadFollowupDigest(
     mailerFactory?: (apiKey: string) => DigestMailer
   } = {},
 ): Promise<DigestSendResult> {
-  const recipients =
-    options.recipients && options.recipients.length > 0
-      ? options.recipients
-      : [ME_MAIL_TO_ADDRESS]
+  const recipients = options.recipients ?? []
+  // 🔴 不猜、不退回默认地址。见文件头第 1 条。
+  if (recipients.length === 0) {
+    return { sent: false, reason: '没有收件人（调用方必须显式指定，本函数不猜）', recipients }
+  }
 
   // 一个都没有就不发。没有「今天很干净」这种信 —— 那种信发几天就没人看了，
-  // 真有事的那天也一起被跳过。
+  // 真有事的那天也一起被跳过。窗口外的积压由调用方在回执里如实报出来，
+  // 不为它单独发一封「什么都没发生但历史很糟」的信（那会变成每天一封的背景噪音）。
   if (items.length === 0) {
-    return { sent: false, reason: '没有待跟进的表单线索', recipients }
+    return { sent: false, reason: '窗口内没有新的待跟进表单线索', recipients }
   }
 
   const extra: LeadDigestExtra = {
     dropped: options.dropped ?? 0,
-    backlog: options.backlog ?? 0,
+    backlog: options.backlog === undefined ? 0 : options.backlog,
+    backlogLookbackDays: options.backlogLookbackDays,
   }
 
   return sendDigestMail({
     fromLabel: `${LEAD_DIGEST_TEST_PREFIX}Magic Engine 表单线索提醒`,
     recipients,
-    subject: buildLeadDigestSubject(clientName, items.length + (extra.dropped ?? 0)),
+    subject: buildLeadDigestSubject(
+      clientName,
+      items.length + (extra.dropped ?? 0),
+      extra.backlog ?? null,
+    ),
     html: buildLeadDigestBody(
       clientName,
       items,
       options.now ?? new Date(),
-      options.windowDays ?? 7,
+      options.windowDays ?? LEAD_WINDOW_DAYS,
       extra,
     ),
     apiKey: options.apiKey,

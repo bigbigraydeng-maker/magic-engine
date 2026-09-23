@@ -41,6 +41,24 @@ export function stripAddress(name: string): string {
   return out || '未留姓名'
 }
 
+/** 连着 7 位以上的数字 —— 电话号码的形状。 */
+const DIGIT_RUN = /\d[\d\s()+-]{5,}\d/g
+
+/**
+ * 客人自己打进来的自由文本，掐掉里面的联系方式再渲染。
+ *
+ * 为什么不只做 `stripAddress`：Meta 表单的自定义问题（比如「想去哪条线」）
+ * 是一个**自由输入框**，客人完全可能在里面写「想去黄石，我电话 021xxx」。
+ * 这封信的纪律是「正文不写客人的邮箱和电话」—— 名字过了脱敏、这一栏没过，
+ * 等于纪律只执行了一半（子牙复审 2026-09-24）。
+ *
+ * 掐掉而不是整条丢：那句话里除了号码还有「想去黄石」这种真有用的信息。
+ */
+export function scrubContactDetails(s: string): string {
+  const noEmail = s.replace(EMAIL_TOKEN, (addr) => addr.slice(0, addr.indexOf('@')))
+  return noEmail.replace(DIGIT_RUN, '（号码略）').trim()
+}
+
 /**
  * 等了多久说成人话。
  *
@@ -78,7 +96,7 @@ export interface DigestMailer {
       to: string[]
       subject: string
       html: string
-    }): Promise<{ error: unknown }>
+    }): Promise<{ error: unknown; data?: { id?: string } | null }>
   }
 }
 
@@ -88,6 +106,15 @@ export interface DigestSendResult {
   reason?: string
   /** 这次实际用的收件人（含 fallback 之后的结果），方便调用方记日志 */
   recipients: string[]
+  /**
+   * 发信服务那边给的凭据 id。
+   *
+   * 为什么要留：`sent: true` 只代表「对方接受了这次请求」，它是我们自己算出来的
+   * 一个布尔值。将来问「9 月 25 号那封信到底发出去没有」，光有布尔值只能自证；
+   * 有这个 id 才能去发信服务那边对账（铁律 3：每个关键阶段要有机器可读 receipt）。
+   * 拿不到就是 undefined，不编。
+   */
+  messageId?: string
 }
 
 export function defaultMailer(apiKey: string): DigestMailer {
@@ -115,14 +142,15 @@ export async function sendDigestMail(params: {
 
   try {
     const mailer = (params.mailerFactory ?? defaultMailer)(apiKey)
-    const { error } = await mailer.emails.send({
+    const { error, data } = await mailer.emails.send({
       from: meMailFrom(fromLabel),
       to: recipients,
       subject,
       html,
     })
     if (error) return { sent: false, reason: describeSendError(error), recipients }
-    return { sent: true, recipients }
+    const messageId = typeof data?.id === 'string' ? data.id : undefined
+    return { sent: true, recipients, ...(messageId ? { messageId } : {}) }
   } catch (err) {
     return {
       sent: false,

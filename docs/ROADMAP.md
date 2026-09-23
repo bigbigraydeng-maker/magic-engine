@@ -27,9 +27,24 @@
 
 - **现象**：CTS 表单线索进 CRM 之后，Meta 自家的 AI 客服会在几分钟内自动回一条。这条回复写成 `contact_touchpoints`（`channel='messenger'`, `direction='outbound'`, `source='messenger'`, `raw` 恒空），跟一通真人回复在库里**长得一模一样**。`crm/segments` 的 `segmentContact` 只看 `lastOutbound > 0`，于是这个人不再是「新客人，还没打过」，被冲进 `stale_conversation` / `retry_channel` 埋掉。
 - **证据**：`conversation_messages` 里 CTS 2026-09 的 messenger 外发原文，最多的三条是「你的 AI 客服将会回复。」（86）「你已接管 AI 客服的这场聊天。」（40）「你的 AI 客服已将这个聊天转移给你。」（24），其余多为欢迎语和节日群发模板。生产核对：30 天 259 条线索，160 个在系统眼里「已联系」，其中 **116 个唯一联系过他们的是机器人**。
-- **修法（写入侧，不是读取侧）**：`isAutomatedTouch`（`crm/automated-touch`）已经支持读 `metadata.automated`，缺的是写入方不填。应在 `messenger/sync.ts` 写触点时按 `conversation_messages.body` 判定 Meta AI 客服 / 系统通知 / 群发模板，落 `metadata.automated = true`；并对存量行做一次回填（回填属于改客户数据，需 PM 单独授权）。「你已接管 AI 客服的这场聊天」反过来是**真人介入**的正信号，别一起标成机器。
+- **🔴 一个想当然的修法先排除掉**（子牙复审 2026-09-24）：「在 `messenger/sync.ts` 写触点时按消息正文标 `metadata.automated`」**做不出来**。Messenger 出站触点是**一个会话一行**，不是一条消息一行（`messenger/link-contacts.ts` 的 `source_ref = <convId>:out`，`messenger/send.ts` 销售手动回复写的是同一个键的同一行）。AI 客服 10:00 自动回一条、真人 15:00 回一条，库里只有这一行——标了就把真人那次也抹掉，不标等于没修。照这句去做的人会先写完代码才发现打不通。
+- **两个真能做的修法**：
+  1. **拿 `conversation_outbound_log` 反查**（推荐）。那张表记着每一条 **ME 自己发出**的消息（`messenger/send.ts` / `microsoft/mail-send.ts` / `inngest/functions/conversation-inbound-autoack.ts` 都在写），拿它判「这个会话里有没有一条出站是真人经我们系统发的」，比猜正文硬得多。代价：多一次查询；不动写入侧、不影响任何现有统计。
+  2. **拆键**：出站触点分 `<convId>:out`（真人）和 `<convId>:out-auto`（机器）两行。代价：所有按触点条数做的聚合要同步改（`link-contacts.ts` 注释点名的那类），并且要回填存量（改客户数据，需 PM 单独授权）。
+- 两条路都要注意：「你已接管 AI 客服的这场聊天」反过来是**真人介入**的正信号，别一起标成机器。
 - **改完要一起撤掉的权宜之计**：`crm/lead-followup-due` 的 `isHumanFollowup` 现在把 Facebook 私信外发**整类**排除，`crm/lead-followup-digest` 的正文里也为此写了一段「为什么这个名单比后台那一页长」。根子修好之后这两处一起收回，否则两个地方对「联系过了没有」长期给不同答案（同 2026-09-22 广告看板 D5/O3 的坑）。
 - 来源：PR「客人填了表还没人回 —— 每天提醒一次」查证过程，2026-09-24。
+
+---
+
+## 「填了表没人回」汇总信转发给客户销售之前，必须先补提醒节奏（2026-09-24 复审提出，P2）
+
+**§11 打分**：频率中（只在这封信真的转给客户销售之后才天天发生，现在只发到 ME 自己信箱）· IMPACT 闭环关键度中（不影响判据对错，影响人会不会继续看这封信）· 收入关联度中（信被当噪音忽略 → 线索照样没人回）→ 零个低、零个高 → **P2**。
+
+- **现象**：`crm/lead-followup-due` 排序是「等最久排最前」再切 15 条，所以每天早上是**同一批最老的 15 个人**，一直到他们掉出 7 天窗口（约 6 天）、然后彻底沉进积压数字里再不出现。没有任何「已经提醒过了」的台账。
+- 现在收件人只有 ME 自己，看几天就知道准不准，无害。**一旦按计划转给客户的销售，那就是连续 6 天同样的名单、之后永久静音** —— 销售会先烦、再无视这一栏。
+- **修法**：接 `src/lib/pm-todo/remind-cadence.ts`（已有的两段式节奏，且明确避开 7 的倍数），并参照 `pm-todo/manual-crm-items.ts` 的做法，在生成名单的那一刻按当前状态再过滤一次，做到「有人处理完就不再冒出来」。
+- 同批还要一起做的两件（写在 `crm/lead-followup-digest.ts` 文件头 1b 条）：`interest` 之外的自由文本脱敏复核；正文里「直接回复这封邮件告诉我们」要换成一个真能点的入口，否则就是「下发给人的任务做不到」。
 
 ---
 

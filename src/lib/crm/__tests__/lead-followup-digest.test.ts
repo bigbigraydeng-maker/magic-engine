@@ -13,7 +13,8 @@ import {
 } from '../lead-followup-digest'
 import type { LeadDueItem } from '../lead-followup-due'
 import type { DigestMailer } from '../digest-shared'
-import { ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
+
+const TO = ['ops@example.test']
 
 const NOW = new Date('2026-09-24T00:00:00Z')
 
@@ -36,7 +37,7 @@ function fakeMailer(): { mailer: DigestMailer; sent: Array<{ to: string[]; subje
       emails: {
         send: vi.fn(async (p: { from: string; to: string[]; subject: string; html: string }) => {
           sent.push(p)
-          return { error: null }
+          return { error: null, data: { id: 'msg_123' } }
         }),
       },
     },
@@ -73,13 +74,28 @@ describe('正文', () => {
   })
 
   it('🔴 窗口之外的积压必须说出来，并且点明「补不补是单独的决定」', () => {
-    const html = buildLeadDigestBody('X', [item()], NOW, 7, { backlog: 277 })
+    const html = buildLeadDigestBody('X', [item()], NOW, 7, { backlog: 277, backlogLookbackDays: 180 })
     expect(html).toContain('277')
+    expect(html).toContain('180')
     expect(html).toContain('单独的决定')
   })
 
   it('没有积压时不出现那段红框', () => {
-    expect(buildLeadDigestBody('X', [item()], NOW, 7, { backlog: 0 })).not.toContain('更早以前还有')
+    expect(buildLeadDigestBody('X', [item()], NOW, 7, { backlog: 0 })).not.toContain('还有')
+  })
+
+  it('🔴 积压**没算出来**时必须照说，绝不当成 0（没测成 ≠ 测出来是零）', () => {
+    const html = buildLeadDigestBody('X', [item()], NOW, 7, { backlog: null })
+    expect(html).toContain('没算出来')
+    expect(html).toContain('别把它当成 0')
+  })
+
+  it('🔴 感兴趣的团是客人自己打的自由文本，里面的电话邮箱要掐掉', () => {
+    const html = buildLeadDigestBody('X', [item({ interest: '想去黄石，我电话 021 555 8899，邮箱 me@x.com' })], NOW, 7)
+    expect(html).toContain('想去黄石')
+    expect(html).toContain('（号码略）')
+    expect(html).not.toContain('me@x.com')
+    expect(html).not.toContain('555 8899')
   })
 
   it('🔴 必须解释「为什么这个名单比后台那一页长」—— 否则看的人以为系统坏了', () => {
@@ -106,42 +122,68 @@ describe('正文', () => {
 })
 
 describe('主题', () => {
-  it('数字是总数（含被压掉的），不是名单长度', () => {
-    expect(buildLeadDigestSubject('CTS Tours NZ', 20)).toBe(
+  it('窗口内的数字含被压掉的，不是名单长度', () => {
+    expect(buildLeadDigestSubject('CTS Tours NZ', 20, 0)).toBe(
       `${LEAD_DIGEST_TEST_PREFIX}CTS Tours NZ：20 个客人填了表还没人回`,
     )
+  })
+
+  it('🔴 有积压时主题报的是**所有**在等的人 —— 主题是被一眼扫过、被转发的那一行', () => {
+    const s = buildLeadDigestSubject('CTS Tours NZ', 38, 277)
+    expect(s).toContain('315')
+    expect(s).toContain('38')
+  })
+
+  it('积压没算出来时主题照说，不假装只有窗口内那些', () => {
+    expect(buildLeadDigestSubject('X', 38, null)).toContain('没算出来')
   })
 })
 
 describe('发送', () => {
   it('一条都没有就不发 —— 不发「今天很干净」那种信', async () => {
     const { mailer, sent } = fakeMailer()
-    const r = await sendLeadFollowupDigest('X', [], { apiKey: 'k', mailerFactory: () => mailer })
+    const r = await sendLeadFollowupDigest('X', [], { recipients: TO, apiKey: 'k', mailerFactory: () => mailer })
     expect(r.sent).toBe(false)
     expect(sent).toHaveLength(0)
   })
 
-  it('🔴 没给收件人就退回 ME 自己的信箱，绝不猜客户地址', async () => {
+  it('🔴 没给收件人就不发 —— 不猜，也不退回任何默认地址', async () => {
     const { mailer, sent } = fakeMailer()
     const r = await sendLeadFollowupDigest('X', [item()], { apiKey: 'k', mailerFactory: () => mailer })
-    expect(r.sent).toBe(true)
-    expect(sent[0].to).toEqual([ME_MAIL_TO_ADDRESS])
+    expect(r.sent).toBe(false)
+    expect(r.reason).toContain('没有收件人')
+    expect(sent).toHaveLength(0)
   })
 
-  it('传了空数组也退回 ME 自己的信箱', async () => {
+  it('传了空数组同样不发', async () => {
     const { mailer, sent } = fakeMailer()
-    await sendLeadFollowupDigest('X', [item()], { recipients: [], apiKey: 'k', mailerFactory: () => mailer })
-    expect(sent[0].to).toEqual([ME_MAIL_TO_ADDRESS])
+    const r = await sendLeadFollowupDigest('X', [item()], { recipients: [], apiKey: 'k', mailerFactory: () => mailer })
+    expect(r.sent).toBe(false)
+    expect(sent).toHaveLength(0)
+  })
+
+  it('发给调用方指定的人', async () => {
+    const { mailer, sent } = fakeMailer()
+    const r = await sendLeadFollowupDigest('X', [item()], { recipients: TO, apiKey: 'k', mailerFactory: () => mailer })
+    expect(r.sent).toBe(true)
+    expect(sent[0].to).toEqual(TO)
+  })
+
+  it('🔴 留下发信服务的凭据 id —— sent:true 只是我们自己算的一个布尔值', async () => {
+    const { mailer } = fakeMailer()
+    const r = await sendLeadFollowupDigest('X', [item()], { recipients: TO, apiKey: 'k', mailerFactory: () => mailer })
+    expect(r.messageId).toBe('msg_123')
   })
 
   it('没有 API key 时如实说原因，不假装发了', async () => {
-    const r = await sendLeadFollowupDigest('X', [item()], { apiKey: '' })
+    const r = await sendLeadFollowupDigest('X', [item()], { recipients: TO, apiKey: '' })
     expect(r.sent).toBe(false)
     expect(r.reason).toContain('RESEND_API_KEY')
   })
 
   it('发信通道抛异常时不往上炸 —— 上游那趟巡检不该被带崩', async () => {
     const r = await sendLeadFollowupDigest('X', [item()], {
+      recipients: TO,
       apiKey: 'k',
       mailerFactory: () => ({ emails: { send: async () => { throw new Error('网络挂了') } } }),
     })
