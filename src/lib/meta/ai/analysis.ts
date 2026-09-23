@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { callClaudeChat, MODEL_SONNET } from '@/lib/anthropic/client'
+import { callClaudeChat, MODEL_HAIKU } from '@/lib/anthropic/client'
 import { supabaseAdmin } from '@/lib/supabase'
 import { AI_ENTITY_FIELDS } from '../entity-settings'
 import { graphAfter, graphRows, metaGraphGet, MetaReadError } from '../graph-read'
@@ -279,17 +279,17 @@ async function runAnalysis(clientId: string, principalId: string, grant: GrantRo
     let result
     try {
       result = await callClaudeChat({ systemPrompt: systemPrompt(), messages: [{ role: 'user', content: `以下是只读汇总证据：\n${payload}` }],
-        model: MODEL_SONNET, maxOutputTokens: 4000, singleAttempt: true })
+        model: MODEL_HAIKU, maxOutputTokens: 2000, singleAttempt: true })
     } catch { throw new MetaReadError('model_unavailable', 502) }
     if (!result.text.trim() || result.stop_reason === 'max_tokens') throw new MetaReadError('analysis_incomplete', 502)
     await requireSnapshot(clientId, principalId, grant, connectionVersion)
-    await finish(clientId, principalId, jobId, 'completed', result.cost_usd, evidence, result.text.trim(), MODEL_SONNET,
+    await finish(clientId, principalId, jobId, 'completed', result.cost_usd, evidence, result.text.trim(), MODEL_HAIKU,
       result.input_tokens, result.output_tokens, null)
     return job(clientId, principalId, jobId)
   } catch (error) {
     const code = error instanceof MetaReadError ? error.code : 'analysis_failed'
     await finish(clientId, principalId, jobId, 'failed', modelAttempted ? reserveUsd : 0, loadedEvidence, null,
-      modelAttempted ? MODEL_SONNET : null, null, null, code).catch(() => undefined)
+      modelAttempted ? MODEL_HAIKU : null, null, null, code).catch(() => undefined)
     throw error instanceof MetaReadError ? error : new MetaReadError('analysis_failed', 502)
   }
 }
