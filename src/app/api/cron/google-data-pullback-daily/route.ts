@@ -60,6 +60,7 @@ import { resolveMetaTokenDetailed, ownsKey, loadTokenOwnerPeers, type TokenOwner
 import { findSharedAdAccounts, getClientAdAccountIds } from '@/lib/meta/client-ad-accounts'
 import { hasVideoColumns, syncAdDailyInsights, syncAdsetDailyInsights, syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
 import { buildGrowthState } from '@/lib/ads-strategy/agents/patrol'
+import { resolveClientEvaluationDate } from '@/lib/ads-strategy/account-timezone'
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
 import { sendAdHealthDigest } from '@/lib/ads-strategy/digest'
 import { runPortfolioDiagnostics } from '@/lib/ads-strategy/portfolio/run-daily'
@@ -418,16 +419,25 @@ export async function GET(req: NextRequest) {
             }
           }
 
+          // 评估日 = 这个客户名下每个广告账户「自己时区的昨天」里最早的那一天（2026-09-24）。
+          // 上游取数窗口已按账户时区算「昨天」（daily-insights.requestWindow），这一侧再按 UTC 算
+          // 就会用 `lte(insight_date, …)` 把当天刚存进来的最新一天滤掉——数据白存一天才被看到。
+          // 判定、原日报、只读诊断、经营状态**共用同一个日期**：数据到哪天、判定写哪天、
+          // 日报标题写哪天必须是同一天，否则 PM 看到的三处日期对不上。
+          // 取最早（而不是最新）的理由见 resolveClientEvaluationDate 的注释：跨时区客户上
+          // 取最新会把没跑完的半天当整天喂进自动收放回路。
+          const evaluationDate = await resolveClientEvaluationDate([
+            client.meta_ad_account_id,
+            ...allAccountIds,
+          ])
+
           // P21.K.2: judge each campaign against its own baseline and store the
           // day's account-health narrative. Reads the series just written above
           // PLUS any secondary accounts synced just above — evaluateClientAdHealth
           // queries ad_daily_insights by client_id only, no account filter.
           // Non-fatal — a judging failure must not affect data collection.
           if (result.ad_daily?.success) {
-            const insightDate = new Date()
-            insightDate.setUTCDate(insightDate.getUTCDate() - 1)
-            const insightDateStr = insightDate.toISOString().slice(0, 10)
-            result.ad_health = await evaluateClientAdHealth(client.client_id, insightDateStr)
+            result.ad_health = await evaluateClientAdHealth(client.client_id, evaluationDate)
 
             // P21.K.4: email the day's digest (best-effort). Green is
             // de-frequenced so the PM isn't trained to ignore a daily 🟢.
@@ -441,7 +451,7 @@ export async function GET(req: NextRequest) {
               const digest = await sendAdHealthDigest(
                 client.client_id,
                 client.client_name ?? 'Client',
-                insightDateStr,
+                evaluationDate,
                 resolveDigestRecipients(adStrategyConfig),
               )
               result.ad_digest = { sent: digest.sent, decision: digest.decision, error: digest.error }
@@ -470,15 +480,14 @@ export async function GET(req: NextRequest) {
           // 且**不依赖**当天拉数/体检成功——授权断了导致拉数失败时，D7「授权/数据体检」正是要报这件事（子牙复审）。
           // 诊断出错：计入 errors；当天原体检成功的话退回发原日报，保证 PM 当天仍收得到信（魏征复审）。
           if (snapshotsReady && adConfigSource !== 'fallback') {
-            const diagDate = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
             result.ad_diagnostics = await runPortfolioDiagnostics(
               client.client_id,
               client.client_name ?? 'Client',
-              diagDate,
+              evaluationDate,
               adStrategyConfig.digest_recipients,
             )
             if (!result.ad_diagnostics.success && result.ad_health?.success && result.ad_health.overall_verdict) {
-              const digest = await sendAdHealthDigest(client.client_id, client.client_name ?? 'Client', diagDate, resolveDigestRecipients(adStrategyConfig))
+              const digest = await sendAdHealthDigest(client.client_id, client.client_name ?? 'Client', evaluationDate, resolveDigestRecipients(adStrategyConfig))
               result.ad_digest = { sent: digest.sent, decision: `fallback:${digest.decision}`, error: digest.error }
             }
 
@@ -486,7 +495,7 @@ export async function GET(req: NextRequest) {
             // 看板和日报从那一行读。放在诊断之后：两边都要广告组级数据，顺序一致好排错。
             // 🔴 三层日数据的成败要**逐层**传进去——上面那个 `if (result.ad_daily?.success)`
             //    只看广告系列级，而机会规则大多是广告组粒度（`resolveCompleteness` 的变异用例钉着这条）。
-            result.ads_growth_state = await buildGrowthState(client.client_id, diagDate, [
+            result.ads_growth_state = await buildGrowthState(client.client_id, evaluationDate, [
               { campaign: result.ad_daily, adset: result.adset_level, ad: result.ad_level },
               ...(result.ad_daily_secondary ?? []).map(s => ({
                 campaign: s.ad_daily, adset: s.adset_level, ad: s.ad_level,
