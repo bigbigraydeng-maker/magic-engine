@@ -33,7 +33,7 @@
   1. 用 DataForSEO 账号调它的位置清单接口 `POST /v3/serp/google/locations`（这个接口**不收费**），把返回里 `location_name` 含上面这些城市的条目捞出来，看它到底要求写成什么（很可能是带州/大区的三段式，例如 `"Brisbane,Queensland,Australia"`，但**必须以接口返回为准，不要照抄这个猜测**）。
   2. 按接口返回改 `src/lib/dataforseo/serp.ts` 的 `CITY_DISPLAY_NAME`（或改成直接用供应商的 `location_code`，比字符串更稳）。
   3. 逐个城市真发一次请求确认不再报 40501，再看第二天的采集里这些城市的行 `error_code` 是不是变成了 `null` 或 `no_ai_overview`。**回执全绿不算数，要看到真数据落库。**
-- **连带影响（已在 [PR #1923](https://github.com/bigbigraydeng-maker/magic-engine/pull/1923) 里挡住，不会再出错数字）**：这个故障让每天的采集覆盖率长期掉到 40%~50%，所以修好之前，AI 可见度分数会经常正确地返回「算不出来」而不是一个数。**这是预期行为，不是新 bug。** 覆盖率恢复到 60% 以上就会自动恢复出分。
+- **连带影响（已在 [PR #1928](https://github.com/bigbigraydeng-maker/magic-engine/pull/1928) 里挡住，不会再出错数字）**：这个故障让每天的采集覆盖率长期掉到 40%~50%，所以修好之前，AI 可见度分数会经常正确地返回「算不出来」而不是一个数。**这是预期行为，不是新 bug。** 覆盖率恢复到 60% 以上就会自动恢复出分。
 
 ---
 
