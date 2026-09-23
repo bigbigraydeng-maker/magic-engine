@@ -39,10 +39,13 @@ import {
   summariseFailureCodes,
 } from '@/lib/industry-ai-visibility/snapshot-conclusive'
 import { resolveIndustryCode, matchAliases } from './industry-mapping'
+import { countOutcome, type OutcomeStep } from '@/lib/ads-strategy/portfolio/outcome-ladder'
 
 export type AutoFetchResult =
   | { ok: true;  value: number; source: string; snapshot_date: string; label: string }
   | { ok: false; reason: string }
+  /** 归属数据不足，不是 0 —— callers must never display 0 for this variant. */
+  | { ok: false; reason: string; unknown: true }
 
 /**
  * Attempt to auto-fetch a current value for the given metric key.
@@ -62,12 +65,20 @@ export async function autoFetchMetricValue(
     case 'brand_search_volume':
       return fetchBrandSearchVolume(supabase, clientId)
     case 'form_submissions':
-    case 'leads_count':
+      return fetchFormSubmissions(supabase, clientId)
+    case 'leads_count': {
       // leads_count is hybrid (catalog.measurement='hybrid'): GA4 conversions
       // are the auto half; FDE adds phone/wechat counts via Submit Verdict.
       // We surface only the auto half here — the hybrid hint in CurrentValueCell
-      // tells FDE to top up the rest.
-      return fetchFormSubmissions(supabase, clientId)
+      // tells FDE to top up the rest. When GA4 has nothing, fall back to the
+      // ads outcome ladder (spec 2026-09-24 ads IMPACT §3 G1).
+      const ga = await fetchFormSubmissions(supabase, clientId)
+      return ga.ok ? ga : fetchAdsOutcome(supabase, clientId, 'lead')
+    }
+    case 'signups_count':
+      return fetchAdsOutcome(supabase, clientId, 'lead')
+    case 'messaging_started':
+      return fetchAdsOutcome(supabase, clientId, 'messaging_started')
     case 'ai_visibility_score':
       return fetchAiVisibilityScore(supabase, clientId)
     default:
@@ -629,4 +640,109 @@ async function fetchAiVisibilityScore(
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })
+}
+
+// ── ads outcomes（spec 2026-09-24 ads IMPACT §3 G1）────────────────────────────
+// 广告结果从 ad_daily_insights 按 outcome-ladder 口径累计；任何一行归不上（M2）→ unknown，绝不当 0。
+
+interface ActiveGoalPeriod {
+  period_start: string
+  period_end: string
+}
+
+/** The exact columns InsightForOutcome needs — never select '*'. */
+interface AdsetInsightRow {
+  reach: number | null
+  video_thruplays: number | null
+  actions: ReadonlyArray<{ action_type: string; value: string }> | null
+}
+
+const ADSET_INSIGHT_COLUMNS = 'reach, video_thruplays, actions'
+const ADSET_PAGE_SIZE = 1000
+
+async function loadActiveGoalPeriod(
+  supabase: SupabaseClient,
+  clientId: string,
+): Promise<{ ok: true; period: ActiveGoalPeriod } | { ok: false; reason: string; unknown: true }> {
+  const { data, error } = await supabase
+    .from('goals')
+    .select('period_start, period_end')
+    .eq('client_id', clientId)
+    .eq('status', 'active')
+    .maybeSingle<ActiveGoalPeriod>()
+
+  if (error) return { ok: false, reason: error.message, unknown: true }
+  if (!data) return { ok: false, reason: 'no active goal', unknown: true }
+  return { ok: true, period: data }
+}
+
+/**
+ * Page through ad_daily_insights with .range() until a short page arrives.
+ * PostgREST silently caps a single response at 1000 rows, so a single read
+ * would under-count without ever erroring.
+ */
+async function loadAdsetRowsPaged(
+  supabase: SupabaseClient,
+  clientId: string,
+  period: ActiveGoalPeriod,
+): Promise<{ ok: true; rows: AdsetInsightRow[] } | { ok: false; reason: string; unknown: true }> {
+  const rows: AdsetInsightRow[] = []
+  for (let from = 0; ; from += ADSET_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('ad_daily_insights')
+      .select(ADSET_INSIGHT_COLUMNS)
+      .eq('client_id', clientId)
+      .eq('level', 'adset')
+      .gte('insight_date', period.period_start)
+      .lte('insight_date', period.period_end)
+      .range(from, from + ADSET_PAGE_SIZE - 1)
+
+    if (error) return { ok: false, reason: error.message, unknown: true }
+    const page = (data ?? []) as AdsetInsightRow[]
+    rows.push(...page)
+    if (page.length < ADSET_PAGE_SIZE) break
+  }
+  return { ok: true, rows }
+}
+
+/**
+ * Sum one outcome step across rows. Any row that cannot be attributed (M2)
+ * makes the whole total UNKNOWN — never 0.
+ */
+function sumOutcome(
+  step: OutcomeStep,
+  rows: AdsetInsightRow[],
+): { ok: true; value: number } | { ok: false; reason: string; unknown: true } {
+  let sum = 0
+  for (const row of rows) {
+    const count = countOutcome(step, row, { messagingReferralAvailable: false, optimizationGoal: undefined })
+    if (count.value === null) {
+      return { ok: false, reason: '主结果归不到广告（§14 M2）', unknown: true }
+    }
+    sum += count.value
+  }
+  return { ok: true, value: sum }
+}
+
+async function fetchAdsOutcome(
+  supabase: SupabaseClient,
+  clientId: string,
+  step: OutcomeStep,
+): Promise<AutoFetchResult> {
+  const goal = await loadActiveGoalPeriod(supabase, clientId)
+  if (!goal.ok) return goal
+
+  const loaded = await loadAdsetRowsPaged(supabase, clientId, goal.period)
+  if (!loaded.ok) return loaded
+
+  const summed = sumOutcome(step, loaded.rows)
+  if (!summed.ok) return summed
+
+  return {
+    ok: true,
+    value: summed.value,
+    source: 'ad_daily_insights',
+    snapshot_date: goal.period.period_end,
+    label: step,
+  }
 }
