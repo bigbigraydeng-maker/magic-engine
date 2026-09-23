@@ -8,7 +8,7 @@ import type { SchedulingPlatform } from '@/lib/scheduling/slot-finder'
 import { ZhugeWorkbenchFab } from '@/components/workbench/ZhugeWorkbenchFab'
 import { ZhugeWorkbenchDrawer } from '@/components/workbench/ZhugeWorkbenchDrawer'
 import { GuardBadge } from '@/components/content/GuardBadge'
-import type { GuardFlag } from '@/lib/content/guard-receipt'
+import type { PublicGuardFlag } from '@/lib/content/guard-receipt'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,7 +27,7 @@ interface ContentPost {
   id: string; title: string; caption: string | null; status: string
   platforms: string[] | null; scheduled_at: string | null; visual_brief: string | null
   /** 发布前自检结果。null = 这条没跑过自检，不是「查过没问题」。 */
-  guard?: GuardFlag | null
+  guard?: PublicGuardFlag | null
 }
 interface BlogPost {
   id: string; title: string; slug: string | null; status: string
@@ -486,6 +486,22 @@ function SchedulingPanel({
             <p className="text-xs text-green-600">内容状态已更新为「已批准」，可在 Content Hub 中查看发布状态。</p>
           </div>
         )}
+        {/* 一条都没排上、也不是被自检拦下的 —— 必须说出来。不然这一块整个是空的，
+            人点完「确认排期」看到一片空白，既不知道成没成，也不知道下一步做什么。*/}
+        {result.scheduled === 0 && result.skipped.length === 0 && (
+          <div className="bg-red-50 border border-red-300 rounded-xl p-5 text-center space-y-1">
+            <p className="text-sm font-semibold text-red-700">✗ 一条都没排上</p>
+            <p className="text-xs text-red-700">
+              不是内容的问题，是系统没存进去。刷新页面再试一次；再不行把这个页面的链接发给技术窗口。
+            </p>
+          </div>
+        )}
+        <button
+          onClick={() => setResult(null)}
+          className="w-full text-xs text-gray-600 border border-gray-300 rounded-lg py-2 hover:border-gray-400"
+        >
+          ← 回到排期，重新挑时间
+        </button>
       </div>
     )
   }

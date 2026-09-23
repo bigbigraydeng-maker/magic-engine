@@ -1,7 +1,7 @@
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { readGuardFlag } from '@/lib/content/guard-receipt'
+import { readGuardFlag, toPublicGuardFlag } from '@/lib/content/guard-receipt'
 import { logPackagePublishedAction } from '@/lib/flywheel/package-publish'
 
 type RouteContext = { params: { id: string; packageId: string } }
@@ -138,7 +138,7 @@ export async function GET(_req: NextRequest, { params }: RouteContext) {
   // 内部字段，不是给审核人看的）。null = 这条没跑过自检，不是「查过没问题」。
   const postMap    = Object.fromEntries((postsResult.data   ?? []).map(r => {
     const { generation_context_snapshot, ...rest } = r
-    return [r.id, { ...rest, guard: readGuardFlag(generation_context_snapshot) }]
+    return [r.id, { ...rest, guard: toPublicGuardFlag(readGuardFlag(generation_context_snapshot)) }]
   }))
   const blogMap    = Object.fromEntries((blogsResult.data   ?? []).map(r => [r.id, r]))
   const reelMap    = Object.fromEntries((reelsResult.data   ?? []).map(r => [r.id, r]))

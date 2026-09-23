@@ -33,6 +33,20 @@ export interface GuardFlag {
   checkedAt: string | null
 }
 
+/**
+ * What the browser is allowed to see. `judgeError` is the raw error text from the
+ * judging service — it names the vendor and is pure jargon, and the content-factory
+ * board is a screen clients open. It stays server-side (logs, cron summaries,
+ * receipts) and never rides out in an API response.
+ */
+export type PublicGuardFlag = Omit<GuardFlag, 'judgeError'>
+
+export function toPublicGuardFlag(flag: GuardFlag | null): PublicGuardFlag | null {
+  if (!flag) return null
+  const { judgeError: _judgeError, ...safe } = flag
+  return safe
+}
+
 export interface BlockedPost {
   id: string
   title: string | null

@@ -336,7 +336,10 @@ describe('pushLinkedinProgressItems — 同一类卡点只出一条，别刷屏'
     expect(items[0].what).toContain('发布前自检')
     // 兜底那句是「系统没能说清具体原因」——自检标红必须说得比它具体
     expect(items[0].what).not.toContain('没能说清具体原因')
+    // how 必须指向那一屏真有的按钮（板桥复审：原文案让人去点一个不存在的「确认发布」）
     expect(items[0].how).toContain('needs review')
+    expect(items[0].how).toContain('确认做 → 进备料')
+    expect(items[0].how).not.toContain('确认发布')
   })
 
   it('自检标红和敏感信息分开下发 —— 要改的东西不是同一件事', async () => {

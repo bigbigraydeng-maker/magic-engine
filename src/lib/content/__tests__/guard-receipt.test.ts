@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readGuardFlag, needsHumanReview, splitByGuard } from '../guard-receipt'
+import { readGuardFlag, needsHumanReview, splitByGuard, toPublicGuardFlag } from '../guard-receipt'
 
 const receipt = (over: Record<string, unknown> = {}) => ({
   content_guard: {
@@ -105,5 +105,27 @@ describe('splitByGuard', () => {
     const { allowed, blocked } = splitByGuard(rows)
     expect(allowed.map(r => r.id)).toEqual(['clean', 'never-checked'])
     expect(blocked).toEqual([{ id: 'flagged', title: '中英混杂的', reasons: ['mixed_language'] }])
+  })
+})
+
+describe('toPublicGuardFlag', () => {
+  it('drops the raw judge error — the board is a screen clients open, and that text names the vendor', () => {
+    const flag = readGuardFlag(receipt({
+      status: 'unavailable',
+      needs_human_review: true,
+      judge_error: 'jev call failed (503): TYPESAFE_API_KEY rejected',
+    }))!
+    const publicFlag = toPublicGuardFlag(flag)
+
+    expect(JSON.stringify(publicFlag)).not.toContain('jev')
+    expect(JSON.stringify(publicFlag)).not.toContain('TYPESAFE')
+    expect('judgeError' in (publicFlag as Record<string, unknown>)).toBe(false)
+    // …but the reason a human has to look survives the trip.
+    expect(publicFlag?.needsReview).toBe(true)
+    expect(publicFlag?.reasons).toEqual(['check_unavailable'])
+  })
+
+  it('passes null through (no receipt ⇒ nothing to show)', () => {
+    expect(toPublicGuardFlag(null)).toBeNull()
   })
 })

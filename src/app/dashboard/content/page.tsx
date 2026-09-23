@@ -674,10 +674,13 @@ export default function ContentBoardPage() {
         const skippedIds = new Set(skipped.map(p => p.id));
         setPosts(applyStatus(prevPosts, ids.filter(id => !skippedIds.has(id))));
         setSelectedIds(skippedIds);
+        // ⚠ 开头 —— 提示条按首字符上色（见下面渲染处），被拦下的绝不能显示成绿色成功。
         setBatchMsg(
-          `✓ 已更新 ${json.updated} 条至"${label}"；`
-          + `另有 ${skipped.length} 条需人工复核（中英混杂 / 套话开头 / 检查没跑成），没动：`
+          `⚠ 拦下 ${skipped.length} 条没动，状态还是原样：`
           + skipped.map(p => p.title || p.id).join('、')
+          + `（发布前自检标红：中英混杂 / 套话开头 / 自检没跑成）。`
+          + `已经替你重新勾上，逐条点开看过再单独改状态。`
+          + (json.updated ? `另外 ${json.updated} 条已改成"${label}"。` : '')
         );
       } else {
         setBatchMsg(`✓ 已更新 ${json.updated} 条至"${label}"`);
@@ -842,6 +845,7 @@ export default function ContentBoardPage() {
       </div>
 
       {batchMsg && (
+        // 只有 ✓ 开头才是绿的；拦下(⚠)和报错(✗)都走红字，别让被拦下的看着像成功
         <p className={`text-sm px-1 ${batchMsg.startsWith('✓') ? 'text-[#5C8A4A]' : 'text-[#C2453A]'}`}>
           {batchMsg}
         </p>
