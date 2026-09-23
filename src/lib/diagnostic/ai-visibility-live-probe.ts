@@ -56,9 +56,20 @@ export interface LiveProbeResult {
   questions: LiveProbeQuestionResult[]
   /** Total latency for the probe call, in milliseconds. */
   latency_ms: number
-  /** `true` when the probe could not run (missing API key, no queries, etc.). */
+  /** `true` when the probe did not produce a conclusive measurement. */
   skipped: boolean
   skip_reason?: string
+  /**
+   * Distinguishes WHY `skipped` is true. `'not_configured'` means the probe
+   * never attempted a call (missing API key, no priority questions set up) —
+   * a genuine "tracking was never enabled" state. `'attempt_failed'` means
+   * the probe DID try and the attempt itself broke (the outer timeout fired,
+   * or `probe.run()` rejected) — a transient failure, not evidence that
+   * tracking is unconfigured. Callers must not collapse the two: reporting
+   * an `attempt_failed` skip as "not tracked" tells the client to go
+   * configure something that is already configured and simply timed out.
+   */
+  skip_kind?: 'not_configured' | 'attempt_failed'
 }
 
 export interface LiveProbe {
@@ -187,6 +198,7 @@ function emptyResult(start: number, reason: string): LiveProbeResult {
     latency_ms: Date.now() - start,
     skipped: true,
     skip_reason: reason,
+    skip_kind: 'not_configured',
   }
 }
 
@@ -256,6 +268,7 @@ export async function runProbeWithTimeout(
         latency_ms: Date.now() - start,
         skipped: true,
         skip_reason: `live probe exceeded ${timeoutMs}ms`,
+        skip_kind: 'attempt_failed',
       })
     }, timeoutMs)
 
@@ -276,6 +289,7 @@ export async function runProbeWithTimeout(
           latency_ms: Date.now() - start,
           skipped: true,
           skip_reason: 'live probe threw',
+          skip_kind: 'attempt_failed',
         })
       },
     )

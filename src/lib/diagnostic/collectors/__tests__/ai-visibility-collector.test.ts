@@ -268,12 +268,29 @@ describe('AiVisibilityCollector.collect() — live probe (P8.10.S2.5)', () => {
 
   it('falls back to ai_visibility_not_tracked when probe is skipped and no snapshot', async () => {
     const supabase = makeSupabase({ snapshot: null })
-    const probe = makeProbe({ skipped: true, skip_reason: 'no key' })
+    const probe = makeProbe({ skipped: true, skip_reason: 'no key', skip_kind: 'not_configured' })
     const { score, findings } = await new AiVisibilityCollector(supabase, probe).collect(
       CLIENT_ID, DOMAIN, KEYWORDS,
     )
     expect(score).toBeNull()
     expect(findings.find(x => x.finding_type === 'ai_visibility_not_tracked')).toBeDefined()
+  })
+
+  // Regression: a live probe that TRIED (outer 45s timeout fired, or
+  // `probe.run()` rejected) must not be reported as "tracking never
+  // enabled" — the client already configured it, the attempt just broke.
+  it('does NOT emit ai_visibility_not_tracked when probe is skipped with skip_kind=attempt_failed', async () => {
+    const supabase = makeSupabase({ snapshot: null })
+    const probe = makeProbe({
+      skipped: true,
+      skip_reason: 'live probe exceeded 45000ms',
+      skip_kind: 'attempt_failed',
+    })
+    const { score, findings } = await new AiVisibilityCollector(supabase, probe).collect(
+      CLIENT_ID, DOMAIN, KEYWORDS,
+    )
+    expect(score).toBeNull()
+    expect(findings).toEqual([])
   })
 
   it('emits live_probe_no_mention when snapshot has mentions but live probe finds none', async () => {

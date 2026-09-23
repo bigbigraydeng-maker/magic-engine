@@ -72,6 +72,7 @@ export class AiVisibilityCollector {
           `[ai-visibility-collector] live probe not conclusive for ${clientId} — ` +
             `attempted=${rawProbe.runs} measured=${rawProbe.measured_runs} ` +
             `failed=${rawProbe.failed_runs} skipped=${rawProbe.skipped}` +
+            (rawProbe.skip_kind ? ` skip_kind=${rawProbe.skip_kind}` : '') +
             (rawProbe.skip_reason ? ` reason=${rawProbe.skip_reason}` : '') +
             ' — treating AI visibility as NOT MEASURED, not as zero mentions',
         )
@@ -83,13 +84,16 @@ export class AiVisibilityCollector {
         if (probe) {
           return this.buildFromLiveProbe(clientId, probe)
         }
-        // The probe ran and is configured (not skipped for missing API key /
-        // no queries) but failed to measure anything usable — e.g. 429 or
-        // timeout on every question. That is a transient measurement failure,
-        // not evidence tracking was never enabled. Fabricating the "not
-        // tracked / needs configuring" finding here would be the exact bug
-        // this file already guards against for the mentions-count path.
-        if (rawProbe && !rawProbe.skipped) {
+        // The probe attempted a measurement but failed to produce anything
+        // usable — either every question's engine call failed (rawProbe not
+        // skipped, per-question errors) or the attempt itself broke: the
+        // outer timeout fired, or `probe.run()` rejected outright
+        // (`skip_kind === 'attempt_failed'`). Either way that is a transient
+        // measurement failure, not evidence tracking was never enabled.
+        // Fabricating the "not tracked / needs configuring" finding here
+        // would be the exact bug this file already guards against for the
+        // mentions-count path.
+        if (rawProbe && (!rawProbe.skipped || rawProbe.skip_kind === 'attempt_failed')) {
           return { score: null, findings: [] }
         }
         return {
