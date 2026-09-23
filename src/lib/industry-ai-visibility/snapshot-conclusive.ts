@@ -194,8 +194,17 @@ export function groupQuestionCoverage<
     // 0 === 0 must NOT read as fully measured — that would count a question that
     // was never probed on any platform as complete evidence.
     if (requiredPlatforms.length === 0) failedQuestionIds.push(questionId)
-    else if (conclusiveCount === requiredPlatforms.length) fullyMeasured.set(questionId, questionRows)
-    else if (conclusiveCount === 0) failedQuestionIds.push(questionId)
+    else if (conclusiveCount === requiredPlatforms.length) {
+      // Only the REQUIRED platform rows may be scored. A question whose
+      // platform config was narrowed after collection (e.g. ChatGPT + SERP
+      // → ChatGPT only) still has the now-unrequired SERP row sitting in
+      // `questionRows` from that day's upsert; including it would let a
+      // stale platform's hit/miss leak into a score it is no longer part of.
+      const requiredRows = requiredPlatforms
+        .map(platform => rowByPlatform.get(platform))
+        .filter((row): row is T => row !== undefined)
+      fullyMeasured.set(questionId, requiredRows)
+    } else if (conclusiveCount === 0) failedQuestionIds.push(questionId)
     else partialQuestionIds.push(questionId)
   }
 

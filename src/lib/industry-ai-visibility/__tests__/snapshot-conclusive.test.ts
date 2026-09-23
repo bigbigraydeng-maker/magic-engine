@@ -148,6 +148,29 @@ describe('groupQuestionCoverage', () => {
     expect(totalQuestions).toBe(2)
   })
 
+  it('excludes stale rows from platforms no longer required, even when the question is fully measured', () => {
+    // Codex review round 3 on PR #1923: a question's `platforms` config can be
+    // narrowed (e.g. ChatGPT + google_serp → ChatGPT only) after that day's
+    // upsert already wrote a google_serp row. The question now reads as fully
+    // measured on its one required platform, but the leftover google_serp row
+    // must NOT ride along into `fullyMeasured` — otherwise a stale platform's
+    // hit/miss still gets scored even though it is no longer in scope.
+    const { fullyMeasured } = groupQuestionCoverage(
+      [row('narrowed', 'chatgpt', 'chatgpt_error'), row('narrowed', 'google_serp', null)],
+      [scope('narrowed', ['chatgpt'])],
+    )
+    expect(fullyMeasured.size).toBe(0)
+
+    const { fullyMeasured: fullyMeasured2 } = groupQuestionCoverage(
+      [row('narrowed2', 'chatgpt', null), row('narrowed2', 'google_serp', null)],
+      [scope('narrowed2', ['chatgpt'])],
+    )
+    expect([...fullyMeasured2.keys()]).toEqual(['narrowed2'])
+    const rows = fullyMeasured2.get('narrowed2')
+    expect(rows).toHaveLength(1)
+    expect(rows?.[0].platform).toBe('chatgpt')
+  })
+
   it('does not count a question as fully measured when only some of its required platforms were written', () => {
     // A question requiring 3 platforms but only ever probed on 1 (e.g. the
     // collector ran with ?platforms=chatgpt) must not read as complete just
