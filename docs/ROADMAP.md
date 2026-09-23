@@ -21,6 +21,17 @@
 
 ---
 
+## AI 可见度周快照聚合把失败的 API 调用也计入总数，客户分数被系统性腰斩（2026-09-23 两位复审确认，A 级，P0）
+
+**§11 打分**：频率高（每周每个客户都在发生，生产数据 CTS 9-14 那周 221/408 次失败混入分母）· IMPACT 闭环关键度高（分数直接喂进下一轮处方，算低等于给错建议）· 收入关联度高（影响客户可见诊断报告的核心维度分数）→ 零个低、两个以上高 → **P0**。
+
+- **背景**：`ai-tracker/orchestrator.ts` 的 `aggregateSnapshot` 拉本周 `ai_visibility_runs` 时不排除 `error_message` 有值的行，失败次数计入 `total_runs`，`mentionRate = mentions_count / total_runs` 的分母被撑大。CTS 9-14 那周落库 23.3%，真值 50.8%。
+- `ai-visibility-collector.ts:93` 看到 `mentions_count === 0` 就直出 critical「Brand Not Mentioned by AI」，不检查这些 run 是否真的测到过——这跟 PR #1919 修的实时探测是同一类 bug，走了快照这条管子。
+- **修法**：`aggregateSnapshot` 过滤 `error_message IS NULL`；给快照补 `failed_runs` 列；collector 的 `mentions_count === 0` 分支加 guard。
+- 见 PITFALLS D12 补充段。
+
+---
+
 ## 行业 AI 可见度采集 · 除奥克兰外所有城市的问题 100% 采不到数（2026-09-23 查实根因，P1）
 
 **§11 打分**：频率高（每天跑，每天所有非奥克兰城市的问题全军覆没，自 09-10 至今没有一天例外）· IMPACT 闭环关键度高（Measure 段给的是空数据，行业基线的城市维度整片缺失，下游 AI 可见度分数因此长期算不出来）· 收入关联度低（目前没有活着的客户目标在读这个分数，两个历史 goal 都已归档/过期，也没有客户投诉）→ 恰好一个低、两个高 → **P1**。
