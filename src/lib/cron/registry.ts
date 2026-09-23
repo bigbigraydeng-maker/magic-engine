@@ -119,7 +119,7 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // cron_run_logs 里零条运行记录，而 Check 段 2026-08~09 产出了 285 条结论。
   // 「没通电」和「一切正常」在监控里长得一模一样，正是这张表要解决的那个病。
   { service: 'memory-extractor', jobName: 'memory-extractor', schedule: '30 6 * * *', logsRuns: true, addedAt: '2026-09-06' },
-  { service: 'ai-tracker-weekly', jobName: 'ai-tracker-weekly', schedule: '0 1 * * 1', logsRuns: true },
+  { service: 'ai-tracker-weekly', jobName: 'ai-tracker-weekly', schedule: '0 1 * * 1', logsRuns: true, healthcheckUuid: 'c4f101fe-c2cf-47f9-807f-08ea09d43934' },
   { service: 'anomaly-detector-daily', jobName: 'anomaly-detector-daily', schedule: '0 5 * * *', logsRuns: true },
   // 🔴 healthcheckUuid：这条任务每轮跑约 505 秒，远超 Cloudflare 约 125 秒的源站上限，
   //    cron 容器那条 curl 每轮都收 524、退出码 22，`&&` 后面的上报**一次都没发出去过**
@@ -162,13 +162,13 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
       { table: 'ad_daily_insights', freshnessHours: 26 },
       { table: 'ad_health_narratives', freshnessHours: 26 },
     ] },
-  { service: 'industry-ai-visibility-daily', jobName: 'industry-ai-visibility-daily', schedule: '30 2 * * *', logsRuns: true },
+  { service: 'industry-ai-visibility-daily', jobName: 'industry-ai-visibility-daily', schedule: '30 2 * * *', logsRuns: true, healthcheckUuid: '1400fe83-cc62-4634-9f7e-a2345553beee' },
   { service: 'job-boards-weekly', jobName: 'job-boards-weekly', schedule: '0 2 * * 1', logsRuns: true },
   // 效果回流两条 —— 2026-08-04 补接线：代码早就有，但从没进过 render.yaml，
   // 于是 prescription_outcomes 一条记录都没有（「方案有没有用」从没被回答过）。
   { service: 'kpi-backfill', jobName: 'kpi-backfill', schedule: '20 6 * * *', logsRuns: true, addedAt: '2026-08-04' },
   { service: 'benchmark-accumulator', jobName: 'benchmark-accumulator', schedule: '40 7 * * 1', logsRuns: true, addedAt: '2026-08-04' },
-  { service: 'keyword-snapshots-weekly', jobName: 'keyword-snapshots-weekly', schedule: '0 2 * * 1', logsRuns: true },
+  { service: 'keyword-snapshots-weekly', jobName: 'keyword-snapshots-weekly', schedule: '0 2 * * 1', logsRuns: true, healthcheckUuid: 'db156874-3c69-4b5a-b534-a6bbea63a467' },
   { service: 'linkedin-progress-post-mon', jobName: 'linkedin-progress-post-mon', schedule: '30 20 * * 0', logsRuns: true, addedAt: '2026-08-20' },
   { service: 'linkedin-progress-post-thu', jobName: 'linkedin-progress-post-thu', schedule: '30 20 * * 3', logsRuns: true, addedAt: '2026-08-20' },
   // mailbox-sync-hourly 已于 2026-08-03 从 render.yaml 移除：它作为独立服务一次都没跑过
@@ -223,7 +223,7 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   { service: 'proposal-view-digest', jobName: 'proposal-view-digest', schedule: '0 19 * * *', logsRuns: true },
   { service: 'prospecting-sweep', jobName: 'prospecting-sweep', schedule: '*/30 * * * *', logsRuns: true },
   { service: 'reputation-snapshots-weekly', jobName: 'reputation-snapshots-weekly', schedule: '30 3 * * 1', logsRuns: true },
-  { service: 'seo-patrol-daily', jobName: 'seo-patrol-daily', schedule: '0 4 * * *', logsRuns: true },
+  { service: 'seo-patrol-daily', jobName: 'seo-patrol-daily', schedule: '0 4 * * *', logsRuns: true, healthcheckUuid: 'db58fff5-fd32-45e0-a7fd-b067bede6689' },
   { service: 'site-audit-cron', jobName: 'site-audit-cron', schedule: '0 2 * * *', logsRuns: true },
   { service: 'site-audit-weekly', jobName: 'site-audit-weekly', schedule: '0 1 * * 0', logsRuns: true },
   { service: 'social-comment-autoreply', jobName: 'social-comment-autoreply', schedule: '*/30 * * * *', logsRuns: true },
@@ -238,7 +238,7 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   { service: 'weekly-seo-report', jobName: 'weekly-seo-report', schedule: '30 18 * * 0', logsRuns: true },
   { service: 'winner-reel-sync-daily', jobName: 'winner-reel-sync-daily', schedule: '0 15 * * *', logsRuns: true },
   { service: 'zhangqian-sweeper', jobName: 'zhangqian-sweeper', schedule: '35 * * * *', logsRuns: true },
-  { service: 'zhuge-weekly-recalculate', jobName: 'zhuge-weekly-recalculate', schedule: '0 3 * * 1', logsRuns: true },
+  { service: 'zhuge-weekly-recalculate', jobName: 'zhuge-weekly-recalculate', schedule: '0 3 * * 1', logsRuns: true, healthcheckUuid: 'a2c4d128-e09c-41eb-843e-98c9a0afecba' },
 
   // ── 不在 render.yaml，但确实有人在定时敲 ─────────────────────────────────────
   // 这两条 2026-09-07 才补进来。在此之前它们不在监控范围内，理由是个错的假设：

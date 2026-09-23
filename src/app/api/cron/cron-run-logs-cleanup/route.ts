@@ -12,13 +12,20 @@
  *   ① 7 天以上、跑完了、什么都没留下的空记录才删（每个任务至少保留最新一条）
  *   ② 180 天以上的一律删
  *
+ * 🔴 2026-09-23 加了第二件活儿：清扫**停在「在跑」太久**的记录（`reapAbandonedCronRuns`）。
+ *    放这里是因为它跟清理是同一种活儿 —— 都是这张表自己的家务，而且都不能失败得没人知道。
+ *    为什么非要有这道清扫：部署换机会把在途请求连同收尾代码一起杀掉，那一行就永远停在
+ *    `running`。SIGTERM 收口是尽力而为、不保证跑得到，这条才是保证（整段见 run-logger.ts 文件头）。
+ *    代价是最坏要等到第二天这一轮才收 —— 在那之前，`health.ts` 的 `stuck` 判据
+ *    （开跑超 1 小时）已经在报了，只是报得泛泛，说不出是哪个客户的什么东西丢了。
+ *
  * Auth: Authorization: Bearer ${CRON_SECRET}
  * 排班: render.yaml 服务 cron-run-logs-cleanup（50 16 * * *，UTC）
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { startCronRun } from '@/lib/cron/run-logger'
+import { reapAbandonedCronRuns, startCronRun } from '@/lib/cron/run-logger'
 
 export const maxDuration = 120
 
@@ -53,13 +60,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const result = data as PurgeResult
   const purged = result.purged_noise + result.purged_expired
 
-  console.log('[cron-run-logs-cleanup]', result)
+  // 清扫写失败只记日志、不把这一轮判成失败：它跟上面的清理是两件独立的家务，
+  // 一件没干成不该把另一件的结果也抹掉。失败时 reapAbandonedCronRuns 自己会 console.error。
+  const reaped = await reapAbandonedCronRuns()
+
+  console.log('[cron-run-logs-cleanup]', { ...result, reaped_abandoned: reaped })
   await cronRun.finish({
     processed: purged,
     completed: purged,
     failed: 0,
-    summary: { ...result },
+    summary: { ...result, reaped_abandoned: reaped },
   })
 
-  return NextResponse.json(result)
+  return NextResponse.json({ ...result, reaped_abandoned: reaped })
 }

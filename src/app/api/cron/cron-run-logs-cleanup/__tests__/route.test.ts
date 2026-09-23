@@ -12,8 +12,12 @@ vi.mock('@/lib/supabase', () => ({
 }))
 
 const finish = vi.fn(async () => {})
+// 2026-09-23：这条路由多了第二件活儿 —— 清扫停在「在跑」太久的记录。
+// 假件返回一个固定条数，用例据此断言它**确实被调了**、并且条数写进了运行记录。
+const reapAbandonedCronRuns = vi.fn(async () => 2)
 vi.mock('@/lib/cron/run-logger', () => ({
   startCronRun: vi.fn(async () => ({ finish })),
+  reapAbandonedCronRuns: (...args: unknown[]) => reapAbandonedCronRuns(...(args as [])),
 }))
 
 import { GET } from '../route'
@@ -76,6 +80,17 @@ describe('GET /api/cron/cron-run-logs-cleanup', () => {
         summary: expect.objectContaining({ purged_noise: 12, purged_expired: 3, remaining: 31000 }),
       }),
     )
+
+    // 🔴 清扫停在「在跑」太久的记录必须真的跑，而且条数要进运行记录 ——
+    //    「声明了但没接上」在这里的表现是：部署换机杀掉的那些行永远挂着，
+    //    今日待办里只剩泛泛的「卡死」，说不出是哪个客户的什么东西丢了。
+    expect(reapAbandonedCronRuns).toHaveBeenCalledTimes(1)
+    expect(finish).toHaveBeenCalledWith(
+      expect.objectContaining({ summary: expect.objectContaining({ reaped_abandoned: 2 }) }),
+    )
+    expect(await (await GET(makeReq('Bearer test-secret-123'))).json()).toMatchObject({
+      reaped_abandoned: 2,
+    })
   })
 
   it('数据库报错 → 500 且运行记录记成失败，不许静默当成功', async () => {

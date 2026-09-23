@@ -38,19 +38,35 @@ import { supabaseAdmin } from '@/lib/supabase'
  *    正在逐个客户生成博客草稿，新实例 03:02:12.695 上线，旧实例 `…-2zsx6` 的日志
  *    停在 03:02:38.501 —— 正好是 oztop 那篇写进库的前 0.5 秒。排在后面的 CTS Tours NZ
  *    一个字都没生成，而 `finish()` 从头到尾没机会执行，运行记录**永远停在 running**。
- *    「停在 running」在健康检查眼里是一道缝：`failing` 只认 `failed`，`overdue` 看
- *    `started_at`（记录是有的），于是一次真实的客户交付损失既不报错也不逾期。
+ *    ⚠️ **口径更正（复审查出来的，原来写错了）**：不是「没有任何告警」。`health.ts` 的
+ *    `stuck` 判据（running + finished_at 空 + 超 1 小时）命中了，也确实进了当天的今日待办
+ *    —— 9/22 19:01 那封信实测 `total_items=170`，它是其中一条。问题是那条说的是
+ *    「N 个自动任务开跑了但一直没结束，去 Render 看日志」：**不点名是哪个客户的什么东西丢了，
+ *    也不说下一步是补跑**，混在 170 条里没人看得出这是一次客户交付损失。
+ *    所以这里要解决的不是「没人报」，是「报得没法用」。
  *
  *    怎么认出这类死法（**这条判据比日志好用，日志会滚掉**）：开跑那行走的是建表 DDL 的
  *    `NOW()` 默认值 —— **微秒精度（6 位小数）**；`finish()` 传的是 JS 的
  *    `toISOString()` —— **毫秒精度（3 位小数）**，upsert 会把 `started_at` 一起盖掉。
  *    所以 `started_at` 还是 6 位小数 = 收尾代码一次都没跑过（进程被杀），3 位 = 跑过。
  *
- *    修法：容器被换掉之前 Render 会先发 SIGTERM（默认约 30 秒后才真杀），这段时间足够
- *    写一行库。`startCronRun()` 把本进程里还没收尾的运行记录登记在 `inFlight` 里，
- *    收到 SIGTERM 就把它们收成 `failed` 并打上 `interrupted_by` 标记 ——
- *    从「永远停在 running」变成「有终态、带原因」，今日待办那条才接得住（见
- *    `src/lib/pm-todo/manual-items.ts` 的 `pushInterruptedCronRunItems`）。
+ *    修法分两层，**兜底的是第二层，第一层只是锦上添花**：
+ *
+ *    ① `closeInFlightCronRuns()` —— 容器被换掉之前 Render 先发 SIGTERM，赶在被杀前把
+ *       本进程还没收尾的记录写成 `failed`。它能给出「**是被部署掐的**」这个原因，清扫给不出。
+ *       但它**不保证跑得到**：Next 的 `next start` 收到 SIGTERM 走 `server.close(() => exit(0))`，
+ *       回调在连接清空那一刻触发，而 `process.exit` 不等 pending 的 promise。
+ *       连接还开着（blog-weekly 那种开跑 98 秒被换机）→ 写得进去；连接已经被 Cloudflare
+ *       在 125 秒时 524 掐掉（attribution-cron 那种跑 500 秒的）→ 可能当场就退了。
+ *       信号本身穿得过 `npm start` 那层（实测 npm 11.19 会转发给子进程，子进程的异步收尾也跑完了；
+ *       Render 上是 Node 24.14.1，同为 npm 11.x）。
+ *
+ *    ② `reapAbandonedCronRuns()` —— **这条才是保证**。不依赖进程还活着：任何停在 `running`、
+ *       开跑超过 `ABANDONED_AFTER_MS` 的行，一律收成 `failed`。SIGKILL / OOM / 进程直接崩，
+ *       SIGTERM 一个都兜不住，这条都兜得住。挂在 `cron-run-logs-cleanup` 里每天跑一次。
+ *
+ *    两层都写同一个 `summary.interrupted_by` 标记（取值不同），今日待办那条按标记出人工任务
+ *    （见 `src/lib/pm-todo/manual-items.ts` 的 `pushInterruptedCronRunItems`）。
  *
  * 写日志本身失败**不抛异常**：它是观测手段，不是安全闸，不该把正在跑的业务任务弄挂。
  */
@@ -84,16 +100,40 @@ function describe(error: { message: string; code?: string; details?: string | nu
  */
 export const INTERRUPTED_BY_KEY = 'interrupted_by'
 
-/** `summary.interrupted_by` 的取值：部署换机把在途请求杀了。 */
+/** `summary.interrupted_by` 的取值：进程收到关机信号时这一轮还没收尾（多半是部署换机）。 */
 export const INTERRUPTED_BY_DEPLOY = 'deploy_shutdown'
+
+/**
+ * `summary.interrupted_by` 的取值：**不知道它怎么没的**，只知道开跑很久了还停在 `running`。
+ *
+ * SIGKILL / OOM / 进程直接崩，都不会留下 SIGTERM 那一手，只能靠事后清扫认出来。
+ * 跟 `deploy_shutdown` 分开取值，是因为下一步动作一样（补跑），但**能不能说出原因**不一样 ——
+ * 对 PM 说「有人上线把机器换了」和「它没了，原因不明」是两句不同的话，不能混成一句。
+ */
+export const INTERRUPTED_BY_PROCESS_GONE = 'process_gone'
+
+/**
+ * 停在 `running` 多久之后就认定「它已经没了」。
+ *
+ * 🔴 这个数不能拍脑袋：实测（近 14 天跑完的运行）HTTP 定时任务里最长的是
+ *    `ai-tracker-weekly`，一轮 6093 秒 ≈ 1.7 小时。取 6 小时 ≈ 3.5 倍余量 ——
+ *    收早了会把**正在好好跑**的一轮判成失败，那比漏报更糟（误报成常态之后，真出事那天
+ *    也会被当噪音划掉，这是本文件头一段的教训）。
+ */
+export const ABANDONED_AFTER_MS = 6 * 60 * 60 * 1000
 
 /**
  * 本进程里**开了跑、还没收尾**的运行记录。收到 SIGTERM 时靠它知道该收哪几行。
  *
  * 🔴 只登记 `startCronRun()`（HTTP 路由那条路），不登记 `startCronRunId()`（Inngest 那条路）。
  *    Inngest 的步骤可能落在任意一台实例上：这台收到 SIGTERM 时，那一轮说不定正在
- *    另一台上好好跑着，按本进程的记忆去收就是误伤。Inngest 侧本来就有 `onFailure`
- *    → `failOpenCronRuns()` 收口，不需要这里插一脚。
+ *    另一台上好好跑着，按本进程的记忆去收就是误伤。
+ *
+ *    ⚠️ 不代表 Inngest 那边没问题。实测 9 月停在 `running` 的 98 行里，最大头正是 Inngest 的
+ *    `messenger-brief-hourly`（59 行，9/7 起每小时一条），说明那边的 `onFailure`
+ *    → `failOpenCronRuns()` **实际上没有在收口**。那是另一条线的事（有独立窗口在修），
+ *    本模块不认领；但 `reapAbandonedCronRuns()` 同样不去碰 Inngest 的任务，
+ *    免得跟那边的收口互相打架 —— 它们的一轮可以合法地跑很久。
  */
 const inFlight = new Map<string, { jobName: string; startedAt: number }>()
 
@@ -114,7 +154,12 @@ function installShutdownHook(): void {
   shutdownHookInstalled = true
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     process.on(signal, () => {
-      void closeInFlightCronRuns(signal)
+      // 必须接住：supabase 客户端万一是**抛**而不是返 error，这里没人接就是一个
+      // unhandledRejection —— 而 Next 给 unhandledRejection 装的处理器只会打印，
+      // 关机路径上的一次静默失败正是本文件在防的东西。
+      closeInFlightCronRuns(signal).catch((err) => {
+        console.error(`[cron-run-logger] ${signal} 收口整体抛异常：${err instanceof Error ? err.message : String(err)}`)
+      })
     })
   }
 }
@@ -139,14 +184,25 @@ export async function closeInFlightCronRuns(signal: string): Promise<number> {
   let closed = 0
 
   for (const [runId, { jobName, startedAt }] of runs) {
+    // 🔴 登记表里躺太久的那些**不能说成「被部署掐的」**。路由如果没有 try/catch，
+    //    业务函数一抛异常 `finish()` 就永远不跑，条目会一直留到下一次部署 ——
+    //    那时按 deploy_shutdown 收口就是**编造原因**：真实死因是那次异常。
+    //    编出来的原因会让 PM 照着去补跑，下一轮同样抛异常，他还会再收到一条。
+    const ageMs = Date.now() - startedAt
+    const abandoned = ageMs > ABANDONED_AFTER_MS
     const { data, error } = await supabaseAdmin
       .from('cron_run_logs')
       .update({
         status: 'failed',
         finished_at: finishedAt,
-        duration_ms: Date.now() - startedAt,
-        error_message: `跑到一半被掐断（${signal}）—— 多半是一次部署把这台机器换掉了，这一轮没跑完`,
-        summary: { [INTERRUPTED_BY_KEY]: INTERRUPTED_BY_DEPLOY, signal },
+        duration_ms: ageMs,
+        error_message: abandoned
+          ? `开跑后一直没收尾，进程关闭（${signal}）时一并收口 —— 死因不明，不要当成「被部署掐的」`
+          : `跑到一半被掐断（${signal}）—— 多半是一次部署把这台机器换掉了，这一轮没跑完`,
+        summary: {
+          [INTERRUPTED_BY_KEY]: abandoned ? INTERRUPTED_BY_PROCESS_GONE : INTERRUPTED_BY_DEPLOY,
+          signal,
+        },
       })
       .eq('id', runId)
       .eq('status', 'running')
@@ -163,10 +219,62 @@ export async function closeInFlightCronRuns(signal: string): Promise<number> {
       console.error(
         `[cron-run-logger] ${jobName}: 收到 ${signal}，这一轮没跑完就被掐断了（id=${runId}），已记成 failed。`,
       )
+      // 主动报 /fail，别等 healthchecks.io 那边「到点没人报到」才响 —— 那要多等一个宽限期。
+      await pingHealthcheck(jobName, true)
     }
   }
 
   return closed
+}
+
+/**
+ * 事后清扫：把停在 `running` 太久的运行收成 `failed`。**这条是「断了必定有人知道」的保证。**
+ *
+ * 🔴 为什么不能只靠 SIGTERM 收口：SIGKILL、OOM、进程直接崩，一个信号都不会有；
+ *    就算有 SIGTERM，Next 的 `server.close(() => process.exit(0))` 也可能在异步写库
+ *    落地之前就退了（整段推理见本文件头）。判据不该建在「进程还活着」上面 ——
+ *    这次事故的本质恰恰是**进程不在了**。
+ *
+ * 🔴 跳过 Inngest 调度的任务：它们的一轮可以合法地跑很久（实测 `messenger-brief-hourly`
+ *    有跑完用时 95494 秒的记录），按 6 小时去收就是误伤；那边另有 `onFailure` 这条路。
+ *
+ * 写失败不抛异常，理由同本文件其余部分。返回收掉的行数。
+ */
+export async function reapAbandonedCronRuns(now: Date = new Date()): Promise<number> {
+  const httpJobs = CRON_REGISTRY
+    .filter((e) => (e.scheduler ?? 'render') !== 'inngest')
+    .map((e) => e.jobName)
+  if (httpJobs.length === 0) return 0
+
+  const cutoff = new Date(now.getTime() - ABANDONED_AFTER_MS).toISOString()
+  const { data, error } = await supabaseAdmin
+    .from('cron_run_logs')
+    .update({
+      status: 'failed',
+      finished_at: now.toISOString(),
+      error_message: `开跑超过 ${Math.round(ABANDONED_AFTER_MS / 3_600_000)} 小时还停在「在跑」—— 进程多半已经没了（部署换机 / 被杀 / 崩了），这一轮没跑完`,
+      summary: { [INTERRUPTED_BY_KEY]: INTERRUPTED_BY_PROCESS_GONE },
+    })
+    .in('job_name', httpJobs)
+    .eq('status', 'running')
+    .is('finished_at', null)
+    .lt('started_at', cutoff)
+    .select('id, job_name')
+
+  if (error) {
+    console.error(
+      `[cron-run-logger] 清扫停在 running 的旧运行失败 —— 这些行会继续挂着，今日待办里只会看到泛泛的「卡死」。${describe(error)}`,
+    )
+    return 0
+  }
+
+  const reaped = data ?? []
+  if (reaped.length > 0) {
+    console.error(
+      `[cron-run-logger] 清扫掉 ${reaped.length} 条停在 running 的旧运行：${[...new Set(reaped.map((r) => r.job_name))].join('、')}`,
+    )
+  }
+  return reaped.length
 }
 
 /** 只给测试用：清掉登记表，避免用例之间互相串味。 */
@@ -219,9 +327,6 @@ function finisher(jobName: string, runId: string, startedAt: number): CronRunHan
 
   return {
     async finish({ processed = 0, completed = 0, failed = 0, summary, error: jobError }) {
-      // 正常收尾了就从「在途」名单里摘掉 —— 摘在写库**之前**：哪怕写库这一步失败，
-      // 这一行也已经走完了业务逻辑，不该再被 SIGTERM 收口改写成「被掐断」。
-      inFlight.delete(runId)
       const durationMs = Date.now() - startedAt
       const outcome = {
         id: runId,
@@ -244,6 +349,12 @@ function finisher(jobName: string, runId: string, startedAt: number): CronRunHan
       const { error: upsertError } = await supabaseAdmin
         .from('cron_run_logs')
         .upsert(outcome, { onConflict: 'id' })
+
+      // 🔴 摘在 upsert **之后**，不是之前。摘在前面的话，「已摘除、但 upsert 还没落库」
+      //    这个窗口里被杀，这一行就回到「永远停在 running」—— 正是要修的那个病。
+      //    摘在后面最坏是收口先写了 failed、upsert 再盖成 completed，结果依然正确
+      //    （反过来不成立：upsert 之后到达的收口会被 `.eq('status','running')` 挡住）。
+      inFlight.delete(runId)
 
       if (upsertError) {
         console.error(

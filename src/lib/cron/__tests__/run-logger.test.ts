@@ -42,9 +42,17 @@ vi.mock('@/lib/supabase', () => {
     let payload: Row = {}
     const eqs: Array<[string, unknown]> = []
     const ltes: Array<[string, string]> = []
+    const lts: Array<[string, string]> = []
+    const ins: Array<[string, unknown[]]> = []
+    const iss: Array<[string, unknown]> = []
     const hits = () =>
       state.rows.filter(
-        (r) => eqs.every(([c, v]) => r[c] === v) && ltes.every(([c, v]) => String(r[c] ?? '') <= v),
+        (r) =>
+          eqs.every(([c, v]) => r[c] === v) &&
+          ltes.every(([c, v]) => String(r[c] ?? '') <= v) &&
+          lts.every(([c, v]) => String(r[c] ?? '') < v) &&
+          ins.every(([c, v]) => v.includes(r[c])) &&
+          iss.every(([c, v]) => (r[c] ?? null) === v),
       )
     // 真表上的两条约束 —— 少写 job_name 或写错 status，库里是会拒的。insert 和 upsert 都要过这一关。
     function checkConstraints(row: Row): PgError | null {
@@ -111,6 +119,9 @@ vi.mock('@/lib/supabase', () => {
       upsert(p: Row, _opts?: { onConflict?: string }) { mode = 'upsert'; payload = p; return builder },
       eq(col: string, val: unknown) { eqs.push([col, val]); return builder },
       lte(col: string, val: string) { ltes.push([col, val]); return builder },
+      lt(col: string, val: string) { lts.push([col, val]); return builder },
+      in(col: string, vals: unknown[]) { ins.push([col, vals]); return builder },
+      is(col: string, val: unknown) { iss.push([col, val]); return builder },
       single() { const { data, error } = run(); return Promise.resolve({ data: data?.[0] ?? null, error }) },
       then(resolve: (r: { data: Row[] | null; error: PgError | null }) => void) { resolve(run()) },
     }
@@ -126,6 +137,9 @@ const {
   cronRunHandle,
   failOpenCronRuns,
   closeInFlightCronRuns,
+  reapAbandonedCronRuns,
+  ABANDONED_AFTER_MS,
+  INTERRUPTED_BY_PROCESS_GONE,
   __resetInFlightForTests,
   INTERRUPTED_BY_KEY,
   INTERRUPTED_BY_DEPLOY,
@@ -405,5 +419,121 @@ describe('被 SIGTERM 掐断时的收口', () => {
     const before = state.updateAttempts
     expect(await closeInFlightCronRuns('SIGTERM')).toBe(0)
     expect(state.updateAttempts).toBe(before)
+  })
+})
+
+/**
+ * 🔴 这条补的是复审查出来的一个「测试在自欺」：上面那条「已经跑完的不许被反写」
+ *    之所以是 0，是因为 `finish()` 把条目从 inFlight 里摘掉了 ——
+ *    走的根本不是 `.eq('status','running')` 那道守卫。
+ *    这里造出注释里真正声称要防的场景：**条目还挂在 inFlight，库里这一行已经是 completed**。
+ */
+describe('带条件 update 这道守卫本身', () => {
+  it('🔴 条目还挂着、但库里已经收成 completed：守卫必须挡住，不许反写成失败', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await startCronRun('blog-weekly')
+    expect(state.rows[0].status).toBe('running')
+    // 模拟「这一轮其实已经在别处收成了 completed」，而本进程的登记表还没来得及摘
+    state.rows[0].status = 'completed'
+    state.rows[0].finished_at = '2026-09-22T03:04:00.000Z'
+
+    const closed = await closeInFlightCronRuns('SIGTERM')
+
+    expect(closed).toBe(0)
+    expect(state.rows[0].status).toBe('completed')       // 没被反写
+    expect(state.rows[0].summary).toBeNull()             // 也没被盖上「被掐断」的标记
+  })
+
+  it('🔴 登记表里躺太久的，不许说成「被部署掐的」—— 那是编造原因', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const nowSpy = vi.spyOn(Date, 'now')
+
+    const t0 = new Date('2026-09-22T03:00:00.000Z').getTime()
+    nowSpy.mockReturnValue(t0)
+    await startCronRun('blog-weekly')
+
+    // 路由抛了异常、finish() 永远没跑，条目一直留到下一次部署（远超 ABANDONED_AFTER_MS）
+    nowSpy.mockReturnValue(t0 + ABANDONED_AFTER_MS + 60_000)
+    await closeInFlightCronRuns('SIGTERM')
+
+    expect(state.rows[0].status).toBe('failed')
+    expect(state.rows[0].summary).toMatchObject({ [INTERRUPTED_BY_KEY]: INTERRUPTED_BY_PROCESS_GONE })
+    expect(String(state.rows[0].error_message)).toContain('死因不明')
+    nowSpy.mockRestore()
+  })
+})
+
+/**
+ * 事后清扫 —— 「断了必定有人知道」靠的是这条，不是 SIGTERM。
+ * SIGKILL / OOM / 进程直接崩，一个信号都不会有；就算有 SIGTERM，Next 的
+ * `server.close(() => process.exit(0))` 也可能在异步写库落地之前就退了。
+ */
+describe('reapAbandonedCronRuns', () => {
+  /** 直接往假表里塞一行「停在 running」的旧记录。 */
+  function seedRunning(jobName: string, startedAt: string) {
+    state.rows.push({
+      id: `seed-${state.rows.length}`,
+      job_name: jobName,
+      status: 'running',
+      started_at: startedAt,
+      finished_at: null,
+      duration_ms: null,
+      processed: 0,
+      completed_count: 0,
+      failed_count: 0,
+      summary: null,
+      error_message: null,
+    })
+  }
+
+  const NOW = new Date('2026-09-23T04:00:00.000Z')
+
+  it('🔴 停在 running 太久的收成 failed，并标上「死因不明」', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    seedRunning('blog-weekly', '2026-09-22T03:01:04.084272+00:00')
+
+    expect(await reapAbandonedCronRuns(NOW)).toBe(1)
+    expect(state.rows[0].status).toBe('failed')
+    expect(state.rows[0].summary).toMatchObject({ [INTERRUPTED_BY_KEY]: INTERRUPTED_BY_PROCESS_GONE })
+    expect(state.rows[0].finished_at).toEqual(expect.any(String))
+  })
+
+  it('🔴 还没到点的不许碰 —— 收早了会把正在好好跑的一轮判成失败', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const justStarted = new Date(NOW.getTime() - 60_000).toISOString()
+    seedRunning('blog-weekly', justStarted)
+
+    expect(await reapAbandonedCronRuns(NOW)).toBe(0)
+    expect(state.rows[0].status).toBe('running')
+  })
+
+  it('🔴 Inngest 调度的任务一概不碰 —— 它们一轮可以合法地跑很久', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    seedRunning('messenger-brief-hourly', '2026-09-20T00:00:00.000000+00:00')
+
+    expect(await reapAbandonedCronRuns(NOW)).toBe(0)
+    expect(state.rows[0].status).toBe('running')
+  })
+
+  it('🔴 已经收尾的不许重新打开', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    state.rows.push({
+      id: 'done-1', job_name: 'blog-weekly', status: 'completed',
+      started_at: '2026-09-15T03:01:00.349Z', finished_at: '2026-09-15T03:04:02.387Z',
+      duration_ms: 182038, processed: 2, completed_count: 2, failed_count: 0,
+      summary: null, error_message: null,
+    })
+    expect(await reapAbandonedCronRuns(NOW)).toBe(0)
+    expect(state.rows[0].status).toBe('completed')
+  })
+
+  it('🔴 清扫写不进去必须喊出来，不许静默', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    seedRunning('blog-weekly', '2026-09-22T03:01:04.084272+00:00')
+    state.failUpdate = { message: 'permission denied for table cron_run_logs', code: '42501' }
+
+    expect(await reapAbandonedCronRuns(NOW)).toBe(0)
+    expect(said(spy)).toContain('permission denied for table cron_run_logs')
   })
 })

@@ -231,6 +231,10 @@ services:
   # Reference: ROADMAP.md P7.4.13
   # healthchecks.io: ai-tracker-weekly (c4f101fe-c2cf-47f9-807f-08ea09d43934)
   # Schedule moved from Mon 01:00 UTC to Sun 18:00 UTC = Mon 06:00 NZST (PM decision 2026-09-16: NZ morning window).
+  # ⚠️ 2026-09-23：healthchecks.io 上报搬到服务端（src/lib/cron/registry.ts 的
+  #    healthcheckUuid），这里**故意没有** `&& curl hc-ping.com/...`。每轮约 5770 秒，
+  #    远超 Cloudflare 约 125 秒的源站上限，原来那条 curl 每轮都收 524、退出码非 0，
+  #    `&&` 短路 —— 上报从上线起一次都没发出去过。整段实测见 docs/PITFALLS.md F12。
   - type: cron
     name: ai-tracker-weekly
     env: node
@@ -238,8 +242,7 @@ services:
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 30 -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/ai-tracker-weekly \
-        && curl -fsS "https://hc-ping.com/c4f101fe-c2cf-47f9-807f-08ea09d43934"
+        https://app.magicengine.com.au/api/cron/ai-tracker-weekly
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -252,6 +255,10 @@ services:
   # Migration 20260622000003 enabled daily UNIQUE constraint.
   # Schedule moved from 02:30 UTC to 16:30 UTC (PM decision 2026-09-16: run in NZ morning window so data is ready on wake-up).
   # healthchecks.io: industry-ai-visibility-daily (1400fe83-cc62-4634-9f7e-a2345553beee)
+  # ⚠️ 2026-09-23：healthchecks.io 上报搬到服务端（src/lib/cron/registry.ts 的
+  #    healthcheckUuid），这里**故意没有** `&& curl hc-ping.com/...`。每轮约 628 秒，
+  #    远超 Cloudflare 约 125 秒的源站上限，原来那条 curl 每轮都收 524、退出码非 0，
+  #    `&&` 短路 —— 上报从上线起一次都没发出去过。整段实测见 docs/PITFALLS.md F12。
   - type: cron
     name: industry-ai-visibility-daily
     env: node
@@ -259,8 +266,7 @@ services:
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 600 -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/ai-visibility-weekly \
-        && curl -fsS "https://hc-ping.com/1400fe83-cc62-4634-9f7e-a2345553beee"
+        https://app.magicengine.com.au/api/cron/ai-visibility-weekly
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -288,6 +294,10 @@ services:
   # Stores DataForSEO ranked keyword rows for SEO Intelligence trends.
   # Reference: ROADMAP.md P12.I.8
   # healthchecks.io: keyword-snapshots-weekly (db156874-3c69-4b5a-b534-a6bbea63a467)
+  # ⚠️ 2026-09-23：healthchecks.io 上报搬到服务端（src/lib/cron/registry.ts 的
+  #    healthcheckUuid），这里**故意没有** `&& curl hc-ping.com/...`。每轮约 368 秒，
+  #    远超 Cloudflare 约 125 秒的源站上限，原来那条 curl 每轮都收 524、退出码非 0，
+  #    `&&` 短路 —— 上报从上线起一次都没发出去过。整段实测见 docs/PITFALLS.md F12。
   - type: cron
     name: keyword-snapshots-weekly
     env: node
@@ -295,8 +305,7 @@ services:
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/keyword-snapshots-weekly \
-        && curl -fsS "https://hc-ping.com/db156874-3c69-4b5a-b534-a6bbea63a467"
+        https://app.magicengine.com.au/api/cron/keyword-snapshots-weekly
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -379,6 +388,10 @@ services:
   # writes fresh recommendations to execution_items kanban.
   # Reference: ROADMAP.md P24.B
   # healthchecks.io: zhuge-weekly-recalculate (a2c4d128-e09c-41eb-843e-98c9a0afecba)
+  # ⚠️ 2026-09-23：healthchecks.io 上报搬到服务端（src/lib/cron/registry.ts 的
+  #    healthcheckUuid），这里**故意没有** `&& curl hc-ping.com/...`。每轮约 124 秒、最长 142 秒，一半的轮次过线，
+  #    远超 Cloudflare 约 125 秒的源站上限，原来那条 curl 每轮都收 524、退出码非 0，
+  #    `&&` 短路 —— 上报从上线起一次都没发出去过。整段实测见 docs/PITFALLS.md F12。
   - type: cron
     name: zhuge-weekly-recalculate
     env: node
@@ -386,8 +399,7 @@ services:
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/zhuge-recalculate \
-        && curl -fsS "https://hc-ping.com/a2c4d128-e09c-41eb-843e-98c9a0afecba"
+        https://app.magicengine.com.au/api/cron/zhuge-recalculate
     envVars:
       - key: CRON_SECRET
         sync: false
@@ -787,6 +799,10 @@ services:
 
   # Reference: ROADMAP.md § Phase 22.E · docs/seo-sop-implementation-design.md
   # healthchecks.io: seo-patrol-daily (db58fff5-fd32-45e0-a7fd-b067bede6689)
+  # ⚠️ 2026-09-23：healthchecks.io 上报搬到服务端（src/lib/cron/registry.ts 的
+  #    healthcheckUuid），这里**故意没有** `&& curl hc-ping.com/...`。每轮约 311 秒，
+  #    远超 Cloudflare 约 125 秒的源站上限，原来那条 curl 每轮都收 524、退出码非 0，
+  #    `&&` 短路 —— 上报从上线起一次都没发出去过。整段实测见 docs/PITFALLS.md F12。
   - type: cron
     name: seo-patrol-daily
     env: node
@@ -794,8 +810,7 @@ services:
     buildCommand: ""
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/seo-patrol-daily \
-        && curl -fsS "https://hc-ping.com/db58fff5-fd32-45e0-a7fd-b067bede6689"
+        https://app.magicengine.com.au/api/cron/seo-patrol-daily
     envVars:
       - key: CRON_SECRET
         sync: false

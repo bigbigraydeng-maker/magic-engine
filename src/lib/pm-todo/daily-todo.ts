@@ -16,6 +16,11 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
+  INTERRUPTED_BY_DEPLOY,
+  INTERRUPTED_BY_KEY,
+  INTERRUPTED_BY_PROCESS_GONE,
+} from '@/lib/cron/run-logger'
+import {
   loadManualItems,
   dropBrokenLinks,
   type ManualItem,
@@ -241,7 +246,7 @@ export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCoun
       .in('status', [...REEL_REVIEW_STATUSES]),
     supabase
       .from('cron_run_logs')
-      .select('id, status, failed_count')
+      .select('id, status, failed_count, summary')
       .gte('started_at', since24h),
     loadGbpSetupTasks(supabase),
   ])
@@ -275,8 +280,19 @@ export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCoun
     .then((r) => r.kept)
     .catch(() => rawManualItems)
 
-  const failedRuns = ((failures.data ?? []) as Array<{ status: string; failed_count: number | null }>)
+  // 🔴 「被掐断 / 跑到一半没了」的那些**不算进这个数**。它们在「🙋 需要你动手」那栏
+  //    已经有自己的一条（`pushInterruptedCronRunItems`），两边都数就是同一件事数两遍 ——
+  //    而 PM 2026-08-04 为这个口径拍过板：「一个数不准的数字比没有数字更糟」。
+  //    另外每次上线撞上在跑的任务都会新增一条 failed，不排掉的话这一栏会凭空多出
+  //    约每两天一次的噪音（按 2026 年 9 月的量级）。
+  const failedRuns = (
+    (failures.data ?? []) as Array<{ status: string; failed_count: number | null; summary: unknown }>
+  )
     .filter((r) => r.status === 'failed' || (r.failed_count ?? 0) > 0)
+    .filter((r) => {
+      const mark = (r.summary as Record<string, unknown> | null)?.[INTERRUPTED_BY_KEY]
+      return mark !== INTERRUPTED_BY_DEPLOY && mark !== INTERRUPTED_BY_PROCESS_GONE
+    })
 
   return {
     setupTasks,
