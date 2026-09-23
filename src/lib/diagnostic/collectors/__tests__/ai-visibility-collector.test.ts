@@ -80,10 +80,18 @@ function makeSupabase(
 // LiveProbe mock factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Defaults describe a probe where every attempted question was measured
+ * successfully — i.e. a zero here is a REAL zero. Tests that need a failed
+ * measurement must set `failed_runs` (and `measured_runs`) explicitly.
+ */
 function makeProbe(result: Partial<LiveProbeResult>): LiveProbe {
+  const runs = result.runs ?? 0
   return {
     run: vi.fn().mockResolvedValue({
-      runs: 0,
+      runs,
+      measured_runs: runs,
+      failed_runs: 0,
       mentions: 0,
       avg_rank: null,
       questions: [],
@@ -92,6 +100,22 @@ function makeProbe(result: Partial<LiveProbeResult>): LiveProbe {
       ...result,
     } as LiveProbeResult),
   }
+}
+
+/** A probe where every question's engine call failed (e.g. OpenAI 429). */
+function makeFailedProbe(runs = 3): LiveProbe {
+  return makeProbe({
+    runs,
+    measured_runs: 0,
+    failed_runs: runs,
+    mentions: 0,
+    avg_rank: null,
+    questions: Array.from({ length: runs }, (_, i) => ({
+      question: `q${i + 1}`,
+      client_brand_rank: null,
+      error: '429 Rate limit reached',
+    })),
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -311,5 +335,112 @@ describe('AiVisibilityCollector.collect() — DB failure', () => {
     const result = await new AiVisibilityCollector(supabase).collect(CLIENT_ID, DOMAIN, KEYWORDS)
     expect(result.score).toBeNull()
     expect(result.findings).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Regression: a FAILED probe must never be reported as a measured zero.
+//
+// 2026-09-21: the shared OpenAI account hit its spend cap and every probe call
+// returned 429. The probe still reported runs=3 / mentions=0, and 5 clients got
+// AI-visibility findings — one of them a `critical` "Brand Not Mentioned by AI"
+// — that were never measured at all. See CLAUDE.md 铁律 8.
+// ---------------------------------------------------------------------------
+
+describe('AiVisibilityCollector — failed probe is "not measured", not "zero"', () => {
+  it('does NOT emit brand_not_mentioned when every probe question failed and no snapshot exists', async () => {
+    const supabase = makeSupabase({ snapshot: null })
+    const { score, findings } = await new AiVisibilityCollector(
+      supabase,
+      makeFailedProbe(),
+    ).collect(CLIENT_ID, DOMAIN, KEYWORDS)
+
+    expect(findings.find(x => x.finding_type === 'brand_not_mentioned')).toBeUndefined()
+    // Falls back to the honest "we have never tracked this" signal instead.
+    expect(score).toBeNull()
+    expect(findings.find(x => x.finding_type === 'ai_visibility_not_tracked')).toBeDefined()
+  })
+
+  it('does NOT emit live_probe_no_mention when every probe question failed', async () => {
+    const supabase = makeSupabase({
+      snapshot: { avg_rank: 2, mentions_count: 95, total_runs: 120, week_of: '2026-09-14' },
+    })
+    const { findings } = await new AiVisibilityCollector(supabase, makeFailedProbe()).collect(
+      CLIENT_ID, DOMAIN, KEYWORDS,
+    )
+    expect(findings.find(x => x.finding_type === 'live_probe_no_mention')).toBeUndefined()
+  })
+
+  it('does NOT attach failed-probe counts as evidence on snapshot-derived findings', async () => {
+    const supabase = makeSupabase({
+      snapshot: { avg_rank: 4.5, mentions_count: 4, total_runs: 40, week_of: '2026-09-14' },
+    })
+    const { findings } = await new AiVisibilityCollector(supabase, makeFailedProbe()).collect(
+      CLIENT_ID, DOMAIN, KEYWORDS,
+    )
+    const lowRank = findings.find(x => x.finding_type === 'low_ai_rank')
+    expect(lowRank).toBeDefined()
+    expect(
+      (lowRank?.evidence as { parsed?: Record<string, unknown> } | null)?.parsed?.live_probe,
+    ).toBeNull()
+  })
+
+  it('treats a PARTIALLY failed probe as inconclusive (fail-closed on a 3-question sample)', async () => {
+    const supabase = makeSupabase({ snapshot: null })
+    const probe = makeProbe({
+      runs: 3,
+      measured_runs: 2,
+      failed_runs: 1,
+      mentions: 0,
+      questions: [
+        { question: 'q1', client_brand_rank: null, error: null },
+        { question: 'q2', client_brand_rank: null, error: null },
+        { question: 'q3', client_brand_rank: null, error: '429 Rate limit reached' },
+      ],
+    })
+    const { score, findings } = await new AiVisibilityCollector(supabase, probe).collect(
+      CLIENT_ID, DOMAIN, KEYWORDS,
+    )
+    expect(findings.find(x => x.finding_type === 'brand_not_mentioned')).toBeUndefined()
+    expect(score).toBeNull()
+  })
+
+  it('STILL reports a genuine zero — all questions measured, brand absent', async () => {
+    // Guard against over-correcting: a real zero must remain a critical finding.
+    const supabase = makeSupabase({ snapshot: null })
+    const probe = makeProbe({
+      runs: 3,
+      measured_runs: 3,
+      failed_runs: 0,
+      mentions: 0,
+      questions: [
+        { question: 'q1', client_brand_rank: null, error: null },
+        { question: 'q2', client_brand_rank: null, error: null },
+        { question: 'q3', client_brand_rank: null, error: null },
+      ],
+    })
+    const { score, findings } = await new AiVisibilityCollector(supabase, probe).collect(
+      CLIENT_ID, DOMAIN, KEYWORDS,
+    )
+    const f = findings.find(x => x.finding_type === 'brand_not_mentioned')
+    expect(f).toBeDefined()
+    expect(f?.severity).toBe('critical')
+    expect(score).toBe(0)
+    expect(f?.evidence).toMatchObject({
+      parsed: { live_probe: { measured_runs: 3, failed_runs: 0, mentions: 0 } },
+    })
+  })
+
+  it('STILL reports a genuine live-probe regression against a healthy snapshot', async () => {
+    const supabase = makeSupabase({
+      snapshot: { avg_rank: 2, mentions_count: 95, total_runs: 120, week_of: '2026-09-14' },
+    })
+    const probe = makeProbe({ runs: 3, measured_runs: 3, failed_runs: 0, mentions: 0 })
+    const { findings } = await new AiVisibilityCollector(supabase, probe).collect(
+      CLIENT_ID, DOMAIN, KEYWORDS,
+    )
+    const f = findings.find(x => x.finding_type === 'live_probe_no_mention')
+    expect(f).toBeDefined()
+    expect(f?.severity).toBe('high')
   })
 })

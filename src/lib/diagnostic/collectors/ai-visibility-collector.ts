@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { CollectorResult, NewFinding } from '../types'
 import { makeEvidence } from '../types'
 import {
+  isProbeConclusive,
   runProbeWithTimeout,
   type LiveProbe,
   type LiveProbeResult,
@@ -58,11 +59,28 @@ export class AiVisibilityCollector {
       // snapshot yet) still gets a real signal in this diagnostic. The probe
       // is also useful when the snapshot is stale or shows 0 mentions — the
       // probe can either confirm or contradict the cached state.
-      const probe = await this.maybeRunLiveProbe(clientId)
+      const rawProbe = await this.maybeRunLiveProbe(clientId)
+
+      // A probe that could not complete every question tells us nothing about
+      // the brand. Drop it here, once, so no downstream branch can mistake a
+      // failed measurement for a measured zero — the bug that produced
+      // fabricated "your brand is never mentioned by AI" findings for 5 clients
+      // on 2026-09-21 while the OpenAI account was rate-limited (429).
+      const probe = isProbeConclusive(rawProbe) ? rawProbe : null
+      if (rawProbe && !probe) {
+        console.warn(
+          `[ai-visibility-collector] live probe not conclusive for ${clientId} — ` +
+            `attempted=${rawProbe.runs} measured=${rawProbe.measured_runs} ` +
+            `failed=${rawProbe.failed_runs} skipped=${rawProbe.skipped}` +
+            (rawProbe.skip_reason ? ` reason=${rawProbe.skip_reason}` : '') +
+            ' — treating AI visibility as NOT MEASURED, not as zero mentions',
+        )
+      }
 
       if (!snapshot) {
-        // No weekly snapshot — fall back to live probe results when present.
-        if (probe && !probe.skipped && probe.runs > 0) {
+        // No weekly snapshot — fall back to live probe results, but only when
+        // the probe actually measured something.
+        if (probe) {
           return this.buildFromLiveProbe(clientId, probe)
         }
         return {
@@ -190,14 +208,14 @@ export class AiVisibilityCollector {
 
     // P8.10.S2.5: when the live probe contradicts a healthy snapshot
     // (0 mentions across 3 fresh questions), surface the regression early.
-    if (probe && !probe.skipped && probe.runs > 0 && probe.mentions === 0 && snapshot.mentions_count > 0) {
+    if (probe && probe.mentions === 0 && snapshot.mentions_count > 0) {
       findings.push({
         client_id: clientId,
         dimension: 'ai_visibility',
         finding_type: 'live_probe_no_mention',
         severity: 'high',
         title: 'Live AI probe found no mentions',
-        description: `The diagnostic-time probe ran ${probe.runs} priority question(s) on ChatGPT and your brand was not mentioned, even though last week's snapshot showed ${snapshot.mentions_count} mention(s). This may indicate a regression in AI visibility.`,
+        description: `The diagnostic-time probe ran ${probe.measured_runs} priority question(s) on ChatGPT and your brand was not mentioned, even though last week's snapshot showed ${snapshot.mentions_count} mention(s). This may indicate a regression in AI visibility.`,
         evidence: makeEvidence({
           parsed: {
             snapshot_mentions: snapshot.mentions_count,
@@ -214,8 +232,9 @@ export class AiVisibilityCollector {
     return { score, findings }
   }
 
+  /** Caller must pass a probe that satisfies `isProbeConclusive`. */
   private buildFromLiveProbe(clientId: string, probe: LiveProbeResult): CollectorResult {
-    const mentionRate = probe.mentions / Math.max(1, probe.runs)
+    const mentionRate = probe.mentions / Math.max(1, probe.measured_runs)
     const rankScore =
       probe.avg_rank !== null ? Math.max(0, (5 - probe.avg_rank) / 4) : 0
     const score = Math.min(100, Math.max(0, Math.round(mentionRate * 70 + rankScore * 30)))
@@ -228,7 +247,7 @@ export class AiVisibilityCollector {
         finding_type: 'brand_not_mentioned',
         severity: 'critical',
         title: 'Brand Not Mentioned by AI (live probe)',
-        description: `A diagnostic-time probe ran ${probe.runs} priority question(s) on ChatGPT and your brand was not mentioned. AI-powered search is growing rapidly — missing from AI results means missing a key discovery channel.`,
+        description: `A diagnostic-time probe ran ${probe.measured_runs} priority question(s) on ChatGPT and your brand was not mentioned. AI-powered search is growing rapidly — missing from AI results means missing a key discovery channel.`,
         evidence: makeEvidence({ parsed: { live_probe: probeEvidence(probe) } }),
         recommendation:
           'Add GEO directives to your content, create entity-rich FAQ pages, and build citations on authoritative NZ/AU sites to improve AI visibility. Enable the weekly AI Tracker to monitor progress.',
@@ -242,7 +261,7 @@ export class AiVisibilityCollector {
         finding_type: 'low_ai_rank',
         severity: 'high',
         title: 'Low AI Ranking Position (live probe)',
-        description: `Your brand appeared at an average position of ${probe.avg_rank.toFixed(1)} in a ${probe.runs}-question diagnostic probe, below the recommended threshold of 3.`,
+        description: `Your brand appeared at an average position of ${probe.avg_rank.toFixed(1)} in a ${probe.measured_runs}-question diagnostic probe, below the recommended threshold of 3.`,
         evidence: makeEvidence({ parsed: { live_probe: probeEvidence(probe) } }),
         recommendation:
           'Strengthen your brand\'s online authority by creating comprehensive FAQ content, earning mentions on authoritative sites, and implementing GEO directives in your content.',
@@ -263,7 +282,7 @@ export class AiVisibilityCollector {
       title: 'Brand Not Mentioned by AI',
       description:
         'Your brand was not mentioned in any AI engine responses this week. AI-powered search is growing rapidly — missing from AI results means missing a key discovery channel.',
-      evidence: probe && !probe.skipped
+      evidence: probe
         ? makeEvidence({ parsed: { live_probe: probeEvidence(probe) } })
         : null,
       recommendation:
@@ -279,9 +298,13 @@ export class AiVisibilityCollector {
 // ---------------------------------------------------------------------------
 
 function probeEvidence(probe: LiveProbeResult | null): Record<string, unknown> | null {
-  if (!probe || probe.skipped) return null
+  // Second gate on purpose: evidence is the artefact a human later audits, so
+  // it must never carry counts from a probe that failed to measure.
+  if (!isProbeConclusive(probe)) return null
   return {
     runs: probe.runs,
+    measured_runs: probe.measured_runs,
+    failed_runs: probe.failed_runs,
     mentions: probe.mentions,
     avg_rank: probe.avg_rank,
     questions: probe.questions,

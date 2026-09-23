@@ -28,10 +28,29 @@ export interface LiveProbeInput {
 export interface LiveProbeQuestionResult {
   question: string
   client_brand_rank: number | null
+  /**
+   * Set when this question could NOT be measured at all (engine error, empty
+   * response, exception). `client_brand_rank: null` alongside a non-null
+   * `error` means "we do not know", NOT "the brand was absent" — the two are
+   * indistinguishable without this field, and conflating them fabricates a
+   * client-facing measurement result. See CLAUDE.md 铁律 8.
+   */
+  error: string | null
 }
 
 export interface LiveProbeResult {
+  /** Questions attempted. */
   runs: number
+  /**
+   * Questions that actually produced a usable engine answer. Only these can
+   * carry evidence about the brand. `runs - failed_runs`.
+   */
+  measured_runs: number
+  /**
+   * Questions whose engine call failed (429 / timeout / model error). A brand
+   * missing from a failed run is NOT evidence of absence.
+   */
+  failed_runs: number
   mentions: number
   avg_rank: number | null
   questions: LiveProbeQuestionResult[]
@@ -44,6 +63,29 @@ export interface LiveProbeResult {
 
 export interface LiveProbe {
   run(input: LiveProbeInput): Promise<LiveProbeResult>
+}
+
+/**
+ * Whether a probe result may back a client-facing conclusion.
+ *
+ * Fail-closed on purpose: the probe samples only
+ * {@link LIVE_PROBE_QUESTION_LIMIT} questions, so losing even one of them
+ * leaves too little to assert either presence or absence — and the lost one
+ * may well have been the hit. A probe is therefore conclusive only when every
+ * attempted question was actually measured.
+ *
+ * Callers must treat a non-conclusive probe as "not measured" (score `null`,
+ * no findings, no evidence), never as "measured zero". See
+ * docs/PITFALLS.md and CLAUDE.md 铁律 8 —— a measurement we failed to take is
+ * not a measurement of zero.
+ */
+export function isProbeConclusive(probe: LiveProbeResult | null): probe is LiveProbeResult {
+  return (
+    probe !== null &&
+    !probe.skipped &&
+    probe.failed_runs === 0 &&
+    probe.measured_runs > 0
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +108,7 @@ export function createDefaultLiveProbe(supabase: SupabaseClient): LiveProbe {
       const identity = await loadClientIdentity(supabase, clientId)
       const questions: LiveProbeQuestionResult[] = []
       let mentions = 0
+      let failedRuns = 0
       const ranks: number[] = []
 
       for (const q of queries) {
@@ -73,7 +116,17 @@ export function createDefaultLiveProbe(supabase: SupabaseClient): LiveProbe {
         try {
           const out = await runOpenAI({ question: q.question, market })
           if (out.error_message || !out.raw_response) {
-            questions.push({ question: q.question, client_brand_rank: null })
+            // The engine call did not come back with an answer — we measured
+            // NOTHING here. Recording this as a plain `rank: null` used to make
+            // it indistinguishable from "the engine answered and did not name
+            // the brand", which downstream turned into a critical client-facing
+            // finding out of thin air.
+            failedRuns++
+            questions.push({
+              question: q.question,
+              client_brand_rank: null,
+              error: out.error_message || 'engine returned an empty response',
+            })
             continue
           }
           const parsed = await parseRanking({
@@ -83,13 +136,22 @@ export function createDefaultLiveProbe(supabase: SupabaseClient): LiveProbe {
             clientAliases: identity.brand_aliases,
             clientGeoAnchors: identity.brand_geo_anchors,
           })
-          questions.push({ question: q.question, client_brand_rank: parsed.client_brand_rank })
+          questions.push({
+            question: q.question,
+            client_brand_rank: parsed.client_brand_rank,
+            error: null,
+          })
           if (parsed.client_brand_rank !== null) {
             mentions++
             ranks.push(parsed.client_brand_rank)
           }
-        } catch {
-          questions.push({ question: q.question, client_brand_rank: null })
+        } catch (err) {
+          failedRuns++
+          questions.push({
+            question: q.question,
+            client_brand_rank: null,
+            error: err instanceof Error ? err.message : 'probe threw',
+          })
         }
       }
 
@@ -98,6 +160,8 @@ export function createDefaultLiveProbe(supabase: SupabaseClient): LiveProbe {
 
       return {
         runs,
+        measured_runs: runs - failedRuns,
+        failed_runs: failedRuns,
         mentions,
         avg_rank: avgRank,
         questions,
@@ -115,6 +179,8 @@ export function createDefaultLiveProbe(supabase: SupabaseClient): LiveProbe {
 function emptyResult(start: number, reason: string): LiveProbeResult {
   return {
     runs: 0,
+    measured_runs: 0,
+    failed_runs: 0,
     mentions: 0,
     avg_rank: null,
     questions: [],
@@ -182,6 +248,8 @@ export async function runProbeWithTimeout(
     const timer = setTimeout(() => {
       resolve({
         runs: 0,
+        measured_runs: 0,
+        failed_runs: 0,
         mentions: 0,
         avg_rank: null,
         questions: [],
@@ -200,6 +268,8 @@ export async function runProbeWithTimeout(
         clearTimeout(timer)
         resolve({
           runs: 0,
+          measured_runs: 0,
+          failed_runs: 0,
           mentions: 0,
           avg_rank: null,
           questions: [],
