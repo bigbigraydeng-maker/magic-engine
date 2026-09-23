@@ -60,6 +60,13 @@ export const META_PAGE_SCOPES = [
   // 而当时 token 已经带着 pages_show_list。Graph 要的就是这一条,没有替代品。
   // 教训:注释与生产报错冲突时,信报错。
   'pages_manage_ads',
+  // 读 Reel 播放量(post_video_views insight)必须有这一条。没有它,
+  // fetchPageReelVideoViews 对着已连接客户的存量 Page token 请求 Graph
+  // insights 边一律被拒,`social.fb.reel.video_views` 永远写不出数据 ——
+  // 2026-09-23 code review 发现该指标自上线起从未产出过一行(见
+  // src/lib/meta/page-posts.ts fetchPageReelVideoViews 的注释)。
+  // 已经连过的客户要重新点一次「连接 Meta」才能拿到它。
+  'read_insights',
 ] as const
 
 /**

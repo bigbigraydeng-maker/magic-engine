@@ -195,10 +195,14 @@ interface RawReelInsightItem {
 /**
  * Fetch per-reel lifetime video views via Graph Insights — a SEPARATE request
  * from fetchPageReels (see the note above it) so a token without `read_insights`
- * still gets the base reel list; this call just comes back empty for that token.
+ * still gets the base reel list from that call.
  *
- * Graceful: returns [] on any error. Callers that only care about view counts
- * (metrics sync) simply skip reels this omits.
+ * Throws on any fetch/HTTP/Graph-level error (e.g. a token missing
+ * `read_insights`) instead of swallowing it to `[]` — a caller that folds an
+ * empty array into "no reels have views yet" cannot tell that apart from
+ * "every reel's view count is silently missing". Callers that treat this leg
+ * as non-fatal (metrics sync) must catch it themselves and surface the
+ * failure (e.g. `reel_metrics_error`) rather than let it disappear.
  */
 export async function fetchPageReelVideoViews(
   pageId: string,
@@ -208,27 +212,16 @@ export async function fetchPageReelVideoViews(
   const fields = ['id', 'insights.metric(post_video_views){values}'].join(',')
   const url = `${GRAPH_BASE}/${pageId}/video_reels?fields=${fields}&limit=${limit}&access_token=${encodeURIComponent(pageAccessToken)}`
 
-  let res: Response
-  try {
-    res = await fetch(url)
-  } catch (err) {
-    console.error('[meta/page-posts] fetchPageReelVideoViews error:', err)
-    return []
-  }
+  const res = await fetch(url)
   if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    console.error(`[meta/page-posts] fetchPageReelVideoViews HTTP ${res.status}:`, body.slice(0, 200))
-    return []
+    throw new Error(`fetchPageReelVideoViews ${pageId}: ${res.status} ${await res.text()}`)
   }
 
   const body = (await res.json()) as {
     data?: Array<{ id: string; insights?: { data?: RawReelInsightItem[] } }>
     error?: { message: string }
   }
-  if (body.error) {
-    console.error('[meta/page-posts] fetchPageReelVideoViews error:', body.error.message)
-    return []
-  }
+  if (body.error) throw new Error(`fetchPageReelVideoViews ${pageId}: ${body.error.message}`)
 
   const out: ReelVideoViews[] = []
   for (const r of body.data ?? []) {
