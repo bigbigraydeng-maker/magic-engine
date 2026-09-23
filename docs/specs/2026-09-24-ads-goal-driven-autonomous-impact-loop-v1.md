@@ -104,7 +104,7 @@ PM 原话："不需要让我批准，我们最大权限的让 AI 去介入。但
 - **`outside_autonomy_envelope` 不许死锁（魏征第一轮，`runner.ts:291/714/744` 实锤）**：
   1. **正常流程根本不产生这条 deny**：孔明提交前先用同一个纯函数 `isWithinEnvelope(input, snapshot, config)` 预检；不在信封内 → **不提交 Kernel run**，直接出 `ads.escalate_to_pm` 三件套。Kernel 的实例闸只是纵深防御，命中即说明预检和授权用的快照/配置不一致，要记 `envelope_preflight_mismatch` 指标。
   2. 万一命中：`outside_autonomy_envelope` **加入** `RECOVERABLE_DENY_CODES`（`runner.ts:714`）**和** `kernel_claim_run_recovery` RPC 里那份必须一字不差的副本（新 migration，仿 `20260811040000_kernel_recovery_outward_requires_human_policy.sql`，架构测试 `architecture.test.ts:2011` 同步加断言）。
-  3. **恢复调用点写死在一步**：下一轮 `ads/impact.cycle.due` 的孔明步骤开头，查该客户 `action_runs.status='denied' AND deny_code='outside_autonomy_envelope' AND denied_at < ad_strategy_configs.updated_at OR goals.updated_at`（即 PM 改过上限/目标之后），命中的先 `recoverDeniedRun(runId, 'system:ads-strategist', reason)` 再决定是否重提；PM 保存 Settings 时不直接调 Kernel（保持"所有触达 Kernel 的路径都走每客户队列"，见 G11）。
+  3. **恢复调用点写死在一步**：下一轮 `ads/impact.cycle.due` 的孔明步骤开头，查该客户 `action_runs.status='denied' AND deny_code='outside_autonomy_envelope' AND (denied_at < ad_strategy_configs.updated_at OR denied_at < goals.updated_at)`（即 PM 改过上限**或**目标之后，任一更新都要重新考虑），命中的先 `recoverDeniedRun(runId, 'system:ads-strategist', reason)` 再决定是否重提；PM 保存 Settings 时不直接调 Kernel（保持"所有触达 Kernel 的路径都走每客户队列"，见 G11）。
   4. **幂等键含 `cycle_date`**：6 个广告 ActionKey 的 `idempotency.keyFields` 一律包含 `cycle_date` + 实体 id + 动作参数 hash，不同天的同内容处方不共用幂等键，昨天的 denied 不会被今天命中。
 - 保留：K1 撤回处理函数必填、K3 延迟回读不自动恢复、K4 广告花费不进 Kernel 成本字段、K5 无 goal 拒绝、K6 学习受限只建议、K10/K11 改前值核对 + 回滚失败冻结客户、K13 禁回落共享令牌、K14 先对齐注册表与生产。
 
