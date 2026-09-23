@@ -58,6 +58,20 @@ export const GBP_SCOPE = 'https://www.googleapis.com/auth/business.manage'
 export const SHEETS_READONLY_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly'
 
 /**
+ * 读写 Google 表格（2026-09-24，线索分流回写客户表格）。
+ *
+ * 比 `SHEETS_READONLY_SCOPE` 多的只有「能往表里追加行」。ME 往客户表格里
+ * **只 append、不改也不删**（见 `lib/google-sheets/client.ts::appendSheetValues`），
+ * 但 Google 没有「只允许追加」的更小权限，只能要完整的 spreadsheets。
+ *
+ * 🔴 已经连过的客户**不会自动拿到它** —— `google_oauth_tokens.scopes` 里存的是
+ *    上次同意时 Google 实际批准的清单，拿旧 token 调写接口会被判 403。
+ *    客户（或 PM）必须重新走一次 `/api/auth/google/connect` 才会在同意页上
+ *    看到这个新权限。写表格失败时会下发人工待办点名这件事，不会静默。
+ */
+export const SHEETS_RW_SCOPE = 'https://www.googleapis.com/auth/spreadsheets'
+
+/**
  * Combined scopes for the recommended "connect Google" flow —
  * grants GBP + GSC + GA4 + Indexing + Sheets in one consent (2026-09-07 铁律 3
  * "遇卡点必自动化"：从两次 OAuth 点击合并成一次，见 PR grant-permissions-fix).
@@ -72,7 +86,8 @@ export const COMBINED_GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/analytics.readonly',
   INDEXING_SCOPE,
   GBP_SCOPE,
-  SHEETS_READONLY_SCOPE,
+  // 读写版覆盖只读版（Google 认的是「读写」这一条，不需要两条都列）。
+  SHEETS_RW_SCOPE,
   'email',
 ]
 

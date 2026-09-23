@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { generateKeyPairSync } from 'crypto'
-import { readSheetValues, GoogleSheetsError, GoogleSheetsNotConfiguredError } from '../client'
+import { readSheetValues, appendSheetValues, GoogleSheetsError, GoogleSheetsNotConfiguredError } from '../client'
 
 const getValidAccessTokenMock = vi.fn<(clientId: string) => Promise<string | null>>()
 
 vi.mock('@/lib/google-oauth/client', () => ({
   getValidAccessToken: (clientId: string) => getValidAccessTokenMock(clientId),
   SHEETS_READONLY_SCOPE: 'https://www.googleapis.com/auth/spreadsheets.readonly',
+  SHEETS_RW_SCOPE: 'https://www.googleapis.com/auth/spreadsheets',
 }))
 
 const { privateKey } = generateKeyPairSync('rsa', {
@@ -94,5 +95,83 @@ describe('readSheetValues', () => {
 
     const rows = await readSheetValues('client-1', 'sheet-id', 'Tab!A:Z', { fetcher })
     expect(rows).toEqual([[], ['only-one']])
+  })
+})
+
+describe('appendSheetValues', () => {
+  function okAppend(updatedRows: number) {
+    return vi.fn(async () =>
+      new Response(JSON.stringify({ updates: { updatedRows } }), { status: 200 }),
+    )
+  }
+
+  it('走 values:append + INSERT_ROWS —— 只在末尾插行，不碰任何已有单元格', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const fetcher = okAppend(1)
+    await appendSheetValues('c1', 'sheet-1', 'Sheet1!A:ZZ', [['a', 'b']], { fetcher: asFetch(fetcher) })
+
+    const url = String(fetcher.mock.calls[0][0])
+    expect(url).toContain(':append')
+    expect(url).toContain('insertDataOption=INSERT_ROWS')
+    expect(fetcher.mock.calls[0][1]).toMatchObject({ method: 'POST' })
+  })
+
+  it('用 RAW 写 —— 电话的前导 0 和开头的 + 都不能被 Sheets 解析掉', async () => {
+    // 实测过的两个坑：USER_ENTERED 会把 0210140952 变成 210140952，
+    // 也会把 +64211... 当成公式。这条测试就是锁死 RAW。
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const fetcher = okAppend(1)
+    await appendSheetValues('c1', 's', 'T!A:ZZ', [['0210140952', '+64211914575']], {
+      fetcher: asFetch(fetcher),
+    })
+
+    expect(String(fetcher.mock.calls[0][0])).toContain('valueInputOption=RAW')
+    const body = JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))
+    expect(body.values).toEqual([['0210140952', '+64211914575']])
+  })
+
+  it('没有行就不发请求', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const fetcher = okAppend(0)
+    expect(await appendSheetValues('c1', 's', 'T!A:ZZ', [], { fetcher: asFetch(fetcher) })).toBe(0)
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('报的是 Sheets 认下的行数，不是我们打算写的行数', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const fetcher = okAppend(1)
+    const n = await appendSheetValues('c1', 's', 'T!A:ZZ', [['a'], ['b']], { fetcher: asFetch(fetcher) })
+    expect(n).toBe(1)
+  })
+
+  it('403（只授过只读）原样抛出去，不吞 —— 调用方要拿它下发人工待办', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const fetcher = vi.fn(async () => new Response('insufficient authentication scopes', { status: 403 }))
+    const err = await appendSheetValues('c1', 's', 'T!A:ZZ', [['a']], { fetcher: asFetch(fetcher) }).catch((e) => e)
+    expect(err).toBeInstanceOf(GoogleSheetsError)
+    expect((err as GoogleSheetsError).httpStatus).toBe(403)
+  })
+
+  it('完全没有可用身份时抛 NotConfigured', async () => {
+    getValidAccessTokenMock.mockResolvedValue(null)
+    await expect(appendSheetValues('c1', 's', 'T!A:ZZ', [['a']])).rejects.toBeInstanceOf(
+      GoogleSheetsNotConfiguredError,
+    )
+  })
+})
+
+describe('readSheetValues render 选项', () => {
+  it('默认还是 UNFORMATTED（老调用方行为不变）', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ values: [] }), { status: 200 }))
+    await readSheetValues('c1', 's', 'T!A:B', { fetcher: asFetch(fetcher) })
+    expect(String(fetcher.mock.calls[0][0])).toContain('valueRenderOption=UNFORMATTED_VALUE')
+  })
+
+  it('要判重就得按人看到的文本读 —— formatted', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ values: [] }), { status: 200 }))
+    await readSheetValues('c1', 's', 'T!A:B', { fetcher: asFetch(fetcher), render: 'formatted' })
+    expect(String(fetcher.mock.calls[0][0])).toContain('valueRenderOption=FORMATTED_VALUE')
   })
 })

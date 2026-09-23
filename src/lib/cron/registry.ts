@@ -318,6 +318,8 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   //
   // 🔴 schedule 这一列不许手抄：唯一定义在 src/lib/ai-tracker/weekly-fanout.ts 的
   //    AI_VISIBILITY_WEEKLY_CRON，同目录的测试会断言两边一致。
+  // 线索 → 客户指定的 Google 表格。每小时 20 分跑，排在 meta-leads-sync（整点）之后。
+  { service: 'inngest:cloud-lead-sheet-sync-fanout', jobName: 'lead-sheet-sync', schedule: '20 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-24' },
   { service: 'inngest:cloud-ai-visibility-weekly-fanout', jobName: 'ai-visibility-tracker-weekly', schedule: '0 6 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-21' },
 ] as const
 

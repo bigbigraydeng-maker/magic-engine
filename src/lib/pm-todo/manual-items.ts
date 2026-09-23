@@ -29,6 +29,7 @@ import { pushDailyPlanMeasurementItems } from './daily-plan-measurement-items'
 import { pushEmailReplyItems } from './email-reply-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
+import { pushLeadSheetItems } from './lead-sheet-items'
 import {
   buildNotIndexedItems,
   daysAgo,
@@ -138,6 +139,11 @@ export async function loadManualItems(
   // 这类失败从不设置 cron 结果的 error，cron 整体照样显示 completed，不单独捞出来就永远没人看见
   await pushMailchimpExportItems(supabase, items, now).catch((e) =>
     console.warn('[manual-items] Mailchimp 出口检查失败（不阻塞其他待办）:', e),
+  )
+  // 线索没写进客户自己的 Google 表格 —— 销售看的就是那张表，缺一条就是少跟一个人，
+  // 而 Facebook 的留资只保留 90 天，超期永久取不回
+  await pushLeadSheetItems(supabase, items).catch((e) =>
+    console.warn('[manual-items] 线索表格同步待办检查失败（不阻塞其他待办）:', e),
   )
   // ME 产品动态自动发 LinkedIn —— 敏感内容待审 / 账号未连 / 发布失败三种卡点
   await pushLinkedinProgressItems(supabase, items, now).catch((e) =>
