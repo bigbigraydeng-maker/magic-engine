@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { readGuardFlag, toPublicGuardFlag } from '@/lib/content/guard-receipt'
 
 export async function GET(
   _req: NextRequest,
@@ -9,7 +10,7 @@ export async function GET(
   try {
     const { data, error } = await supabaseAdmin
       .from('content_posts')
-      .select('id, client_id, title, route, platforms, status, caption, script, hashtags, visual_brief, scheduled_at, created_at, execution_item_id, clients(name)')
+      .select('id, client_id, title, route, platforms, status, caption, script, hashtags, visual_brief, scheduled_at, created_at, execution_item_id, generation_context_snapshot, clients(name)')
       .eq('id', params.id)
       .maybeSingle()
 
@@ -43,10 +44,15 @@ export async function GET(
       visual_asset_type = assetRow.asset_type
     }
 
+    // 发布前自检的红旗翻给前端；整份 snapshot 不外送（生成过程的内部字段，不是
+    // 给审核人看的），判分服务的原始报错也在 toPublicGuardFlag 里摘掉了。
+    const { generation_context_snapshot, ...publicData } = data
+
     return NextResponse.json({
       success: true,
       post: {
-        ...data,
+        ...publicData,
+        guard: toPublicGuardFlag(readGuardFlag(generation_context_snapshot)),
         visual_asset_url,
         visual_asset_type,
       },

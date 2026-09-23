@@ -105,6 +105,27 @@ describe('readGuardFlag — 回执自相矛盾时不许放行（魏征复审）'
         .toMatchObject({ needsReview: true, reasons: ['check_unavailable'] })
     }
   })
+
+  it('a malformed language_findings is unreadable, not silently emptied', () => {
+    for (const bad of ['not an array', { sentence: 'x', fragment: 'y' }, [{ sentence: 'x' }], [{ fragment: 'y' }]]) {
+      expect(readGuardFlag(receipt({ language_findings: bad })), JSON.stringify(bad))
+        .toMatchObject({ needsReview: true, reasons: ['check_unavailable'] })
+    }
+  })
+
+  it('an out-of-range or non-numeric cliche_probability is unreadable, not dropped to null', () => {
+    for (const bad of ['0.9', 1.5, -0.1, NaN]) {
+      expect(readGuardFlag(receipt({ cliche_probability: bad })), String(bad))
+        .toMatchObject({ needsReview: true, reasons: ['check_unavailable'] })
+    }
+  })
+
+  it('an out-of-range or non-numeric cliche_threshold is unreadable, not defaulted', () => {
+    for (const bad of ['0.8', 1.2, -0.2, NaN]) {
+      expect(readGuardFlag(receipt({ cliche_threshold: bad })), String(bad))
+        .toMatchObject({ needsReview: true, reasons: ['check_unavailable'] })
+    }
+  })
 })
 
 describe('splitByGuard', () => {

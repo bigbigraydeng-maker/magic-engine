@@ -65,6 +65,12 @@ function finiteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+/** Probability and threshold are both fractions; a value outside 0–1 is corrupt, not merely absent. */
+function fractionInRange(value: unknown): number | null {
+  const n = finiteNumber(value)
+  return n !== null && n >= 0 && n <= 1 ? n : null
+}
+
 /** A receipt we cannot read is still a receipt: somebody ran the guard, so review it. */
 function unreadable(detail: string): GuardFlag {
   return {
@@ -96,13 +102,36 @@ export function readGuardFlag(snapshot: unknown): GuardFlag | null {
     return unreadable('needs_human_review is not a boolean')
   }
 
-  const languageFindings = Array.isArray(raw.language_findings)
-    ? raw.language_findings.filter(isLanguageFinding)
-    : []
-  const clicheProbability = finiteNumber(raw.cliche_probability)
+  // A present-but-malformed field means the writer's shape changed underneath us —
+  // dropping it silently (empty array, null, default threshold) would read as
+  // "checked, nothing found" instead of "cannot be trusted". Fail closed instead.
+  let languageFindings: LanguageFinding[] = []
+  if (raw.language_findings !== undefined) {
+    if (!Array.isArray(raw.language_findings)) {
+      return unreadable('language_findings is not an array')
+    }
+    if (!raw.language_findings.every(isLanguageFinding)) {
+      return unreadable('language_findings contains an entry missing sentence/fragment')
+    }
+    languageFindings = raw.language_findings
+  }
+
+  let clicheProbability: number | null = null
+  if (raw.cliche_probability !== undefined && raw.cliche_probability !== null) {
+    const p = fractionInRange(raw.cliche_probability)
+    if (p === null) return unreadable(`cliche_probability is not a number in 0–1: ${JSON.stringify(raw.cliche_probability)}`)
+    clicheProbability = p
+  }
+
   // Threshold travels with the receipt so an old post is judged by the threshold
   // that was in force when it was written, not by today's env value.
-  const clicheThreshold = finiteNumber(raw.cliche_threshold) ?? DEFAULT_CONTENT_GUARD_CONFIG.clicheThreshold
+  let clicheThreshold = DEFAULT_CONTENT_GUARD_CONFIG.clicheThreshold
+  if (raw.cliche_threshold !== undefined && raw.cliche_threshold !== null) {
+    const t = fractionInRange(raw.cliche_threshold)
+    if (t === null) return unreadable(`cliche_threshold is not a number in 0–1: ${JSON.stringify(raw.cliche_threshold)}`)
+    clicheThreshold = t
+  }
+
   const judgeError = typeof raw.judge_error === 'string' && raw.judge_error.trim() ? raw.judge_error : null
 
   const reasons: GuardReason[] = []
