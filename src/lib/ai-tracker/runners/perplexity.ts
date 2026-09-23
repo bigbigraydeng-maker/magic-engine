@@ -11,6 +11,8 @@
  */
 
 import OpenAI from 'openai'
+import { classifyPerplexityFailure } from '@/lib/ai/provider-failure'
+import { recordRunnerOutage } from './outage-bridge'
 import { marketToLocation, type RunnerInput, type RunnerOutput } from './types'
 
 const SEARCH_MODEL = 'sonar'
@@ -24,6 +26,8 @@ export async function runPerplexity(input: RunnerInput): Promise<RunnerOutput> {
   const start = Date.now()
   const apiKey = process.env.PERPLEXITY_API_KEY
   if (!apiKey) {
+    // 漏挂 / 删 secret 跟运行时 credential_invalid 是同一件事：只有人能修，必须落断电台账。
+    void recordRunnerOutage('perplexity', 'credential_invalid', 'PERPLEXITY_API_KEY environment variable is not set')
     return errorOutput(start, 'PERPLEXITY_API_KEY environment variable is not set')
   }
 
@@ -73,6 +77,11 @@ export async function runPerplexity(input: RunnerInput): Promise<RunnerOutput> {
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
+
+    // 接上断电台账 —— 跟 gemini.ts 同一套接线。
+    const kind = classifyPerplexityFailure(err)
+    void recordRunnerOutage('perplexity', kind, `Perplexity ${SEARCH_MODEL}: ${message}`)
+
     return errorOutput(start, message)
   }
 }

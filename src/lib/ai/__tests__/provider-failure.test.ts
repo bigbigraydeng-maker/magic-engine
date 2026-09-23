@@ -96,6 +96,7 @@ describe('needsHuman', () => {
   it('只有「重试一万次也不会好」的那几种才惊动人', () => {
     expect(needsHuman('account_exhausted')).toBe(true)
     expect(needsHuman('credential_invalid')).toBe(true)
+    expect(needsHuman('project_permission_denied')).toBe(true)
     expect(needsHuman('gateway_auth_failed')).toBe(true)
     expect(needsHuman('rate_limited')).toBe(false)
     expect(needsHuman('other')).toBe(false)

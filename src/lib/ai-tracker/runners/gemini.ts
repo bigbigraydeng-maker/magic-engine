@@ -10,6 +10,8 @@
  */
 
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { classifyGeminiFailure } from '@/lib/ai/provider-failure'
+import { recordRunnerOutage } from './outage-bridge'
 import { marketToLocation, type RunnerInput, type RunnerOutput } from './types'
 
 const SEARCH_MODEL = 'gemini-2.5-flash'
@@ -22,6 +24,8 @@ export async function runGemini(input: RunnerInput): Promise<RunnerOutput> {
   const start = Date.now()
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
+    // 漏挂 / 删 secret 跟运行时 credential_invalid 是同一件事：只有人能修，必须落断电台账。
+    void recordRunnerOutage('google', 'credential_invalid', 'GEMINI_API_KEY environment variable is not set')
     return errorOutput(start, 'GEMINI_API_KEY environment variable is not set')
   }
 
@@ -74,6 +78,12 @@ export async function runGemini(input: RunnerInput): Promise<RunnerOutput> {
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
+
+    // 接上断电台账 —— Gemini 挂掉时 PM 能在今日待办看到，不再只是 run 行里一行 error_message。
+    // void：绝不阻塞返回，绝不向调用方抛（outage-bridge 内部已吞错）。
+    const kind = classifyGeminiFailure(err)
+    void recordRunnerOutage('google', kind, `Gemini ${SEARCH_MODEL}: ${message}`)
+
     return errorOutput(start, message)
   }
 }
