@@ -30,11 +30,18 @@
  * snapshot-conclusive.ts`: that table stores an enumerated `error_code`, where
  * `no_ai_overview` means "collection succeeded, the emptiness is real" and has
  * to stay in the denominator. This table stores a free-text driver message
- * instead, and every writer (`runners/*.ts`) sets it only from a catch block
- * or the disabled-engine guard — there is no "succeeded but empty" branch to
- * carve out. Free-text matching would be the wrong tool for one anyway. If a
- * runner ever grows such a branch, it must signal it with something other
- * than `error_message`, not by writing a string this predicate has to guess at.
+ * instead — `runners/*.ts` write it only from a catch block or the
+ * disabled-engine guard — and free-text matching would be the wrong tool for
+ * an allowlist anyway.
+ *
+ * ⚠️ That does NOT mean no "succeeded but empty" case exists. One does, and it
+ * lives a layer down: a runner returns `content ?? ''` with
+ * `error_message: null` when a model refuses or truncates, so an empty answer
+ * reaches the parser looking like a successful call. `parser.ts` therefore
+ * THROWS on a too-short response instead of returning an empty ranking, which
+ * routes it to `parse_error_message` and lets this predicate reject it. If you
+ * are adding a branch anywhere in that chain that means "we got nothing back",
+ * it must end in one of these two columns — never in a quietly empty result.
  */
 
 /**

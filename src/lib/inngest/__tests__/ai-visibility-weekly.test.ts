@@ -133,6 +133,7 @@ describe('fan-out 函数行为（依赖注入版，不碰真数据库）——�
 describe('干活函数行为（依赖注入版）', () => {
   const okResult: TrackerRunOutcome = {
     runs_attempted: 2, runs_succeeded: 2, runs_failed: 0, client_brand_mentions: 1, total_cost_usd: 0.02, snapshot_id: 'snap-1',
+    snapshot_skipped_reason: null,
   }
 
   it('非法条子 → invalid_payload，不调用 runTracker', async () => {

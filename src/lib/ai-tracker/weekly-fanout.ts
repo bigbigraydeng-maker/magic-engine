@@ -199,6 +199,15 @@ export interface TrackerRunOutcome {
   readonly client_brand_mentions: number
   readonly total_cost_usd: number
   readonly snapshot_id: string | null
+  /**
+   * 为什么这次没算出数字（`runTracker` 给的原话，没有就是 null）。
+   *
+   * 🔴 这个字段必须进回执：引擎答了但解析全挂、或者读库/写快照失败时，
+   *    `runs_succeeded` 仍然大于 0（引擎确实答了），可是一个数字都没落库。
+   *    只看 `runs_succeeded` 会把这种情况写成 `completed`、`error: null`，
+   *    真因只活在 console 里 —— 那正是「发现死在日志里」。
+   */
+  readonly snapshot_skipped_reason: string | null
 }
 
 /**
@@ -208,8 +217,10 @@ export interface TrackerRunOutcome {
  */
 export interface TrackerReceipt {
   /**
-   * · `completed` `runTracker` 至少成功跑完一次、写下了快照
-   * · `no_data`   跑了但一次都没成功（比如全部 provider 超时）——不算成功，别混进 completed
+   * · `completed` `runTracker` 至少成功跑完一次、**而且写下了快照**
+   * · `no_data`   跑了但没能产出数字——一次都没成功（比如全部 provider 超时），
+   *               或者跑成了但没有一条完整到可以算数（比如解析全挂）。
+   *               判据是 `snapshot_id`，不是 `runs_succeeded`：没快照就是没数。
    * · `skipped`   最近追踪过了，这次不花钱（防重复扣费闸拦下的）
    * · `failed`    `runTracker` 本身抛出异常了（比如这个客户一条启用的问题都没有）
    */
@@ -269,16 +280,20 @@ export async function runOneClientTracker(
 
   try {
     const result = await runTracker({ client_id: due.client_id })
+    // 有快照才叫 completed。`runs_succeeded > 0` 不够：引擎答了但解析全挂时
+    // 它照样大于 0，而那一周一个数字都没落库。
+    const produced = result.snapshot_id !== null
     return {
       ...base,
-      status: result.runs_succeeded > 0 ? 'completed' : 'no_data',
+      status: produced ? 'completed' : 'no_data',
       runs_attempted: result.runs_attempted,
       runs_succeeded: result.runs_succeeded,
       runs_failed: result.runs_failed,
       client_brand_mentions: result.client_brand_mentions,
       total_cost_usd: result.total_cost_usd,
       snapshot_id: result.snapshot_id,
-      error: result.runs_succeeded > 0 ? null : 'no_successful_runs',
+      // 原因照抄 runTracker 的原话；它没给原话才退回笼统的 no_successful_runs。
+      error: produced ? null : result.snapshot_skipped_reason ?? 'no_successful_runs',
     }
   } catch (err: unknown) {
     return {
