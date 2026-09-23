@@ -426,6 +426,8 @@ Meta 400 —— `(#10) 缺 pages_read_user_content`、`(#100/33) 帖子不存在
   （`src/lib/cron/registry.test.ts` 已锁死，加回去当场红）。串在后面的
   `&& curl hc-ping.com/...` 健康检查上报不受影响 —— 它漏掉的方向是「误报没跑」会响，
   漏掉一件活儿的方向是安静地不干、不会响；
+  ⚠️ 2026-09-23 修正：这条只对**跑得快**的任务成立。跑过 125 秒的任务每一轮都 524，
+  上报从上线起一次都没发出去过，等于把一个永远红的检查挂在那里 —— 见 F12；
 - 一个请求跑 160 秒以上的活儿，本来就该拆段：拆成 Inngest 的 step，每段一个请求，
   失败只重试那一段。
 
@@ -487,6 +489,59 @@ Render.com 的 HTTP 请求有超时上限（通常 3~5 分钟），
 不要返回空数组 —— 空数组跟「这个人真的没有数据」长得一模一样。
 
 ---
+
+---
+
+### F11 · 部署换机会把在途的定时任务连同收尾代码一起杀掉 —— 记录永远停在「在跑」
+
+**症状**（2026-09-22，CTS Tours NZ 本周的博客草稿整周没有）：`blog-weekly` 03:01:04 开跑，
+按客户逐个生成。oztop 那篇 03:02:39 写进库，排在后面的 CTS **一个字都没生成**。
+`cron_run_logs` 里那一行永远停在 `running`、`finished_at` 为空 —— 既不是 `failed`、
+也不是「逾期没跑」，健康检查两边都接不住，一次真实的客户交付损失没有任何人被告知。
+
+**现场**（Render 实例级日志，不是推断）：新实例 03:02:12.695 上线，跑着这一轮的旧实例
+`srv-…-2zsx6` 的日志停在 **03:02:38.501**，正好是 oztop 那篇入库的前 0.5 秒，此后一个字节都没有。
+Render 在新实例上线后给旧实例约 30 秒宽限期，到点直接杀 —— CTS 那篇要 60 秒以上，没机会。
+
+**怎么认出这类死法**（**判据比日志好用，日志会滚掉**）：开跑那行的 `started_at` 走的是建表 DDL
+的 `NOW()`，**微秒精度（6 位小数）**；`finish()` 传的是 JS `toISOString()`，**毫秒精度（3 位）**，
+upsert 会把 `started_at` 一起盖掉。所以 `started_at` 还是 6 位小数 = 收尾代码一次都没跑过。
+按这条判据回查 9 月：`attribution-cron` 8 次停在 running 的**全部 8 次**、
+`industry-ai-visibility-daily` 5/5、`blog-weekly` 1/1、`meta-leads-sync` 1/1，
+运行窗口里都压着一次「部署完成 + 30 秒」的时刻；同期正常跑完的 570 次里只有 5 次（约 1%）压到。
+
+**怎么防**：
+- 容器被换掉之前 Render 会先发 SIGTERM，那 ~30 秒足够写一行库。`startCronRun()` 登记在途运行，
+  SIGTERM 收口把它们写成 `failed` + `summary.interrupted_by='deploy_shutdown'`
+  （`src/lib/cron/run-logger.ts`）；
+- 收口用**带条件的 update**（`status='running'`），绝不 upsert —— 万一这一行其实已经在别处
+  收成 `completed`，upsert 会把一次成功反写成失败；
+- 收口只登记 HTTP 那条路（`startCronRun`），不登记 Inngest 那条（`startCronRunId`）：
+  Inngest 的步骤可能落在别的实例上，按本进程的记忆去收就是误伤，那边有 `onFailure` 收口；
+- **改状态之前先确认告警接得住**。`failed` 目前只到 /dashboard/workflows-health 页面，
+  没进今日待办；只改状态不补下发，这个修复反而会把唯一那条 `cron_stuck` 告警弄没。
+  所以同一个 PR 里加了 `pushInterruptedCronRunItems`，直接读 `cron_run_logs` 出待办；
+- 真正的结构性修法还是 F8/F10 那句：**一个请求跑 125 秒以上的活儿本来就该拆成 Inngest 的 step**。
+  拆了之后部署换机只影响一个 step，重试就好。本次没做，记在 ROADMAP。
+
+---
+
+### F12 · `&& curl hc-ping.com/...` 在跑得久的任务上，从上线起一次都没发出去过
+
+**症状**：`attribution-cron` 的 healthchecks.io 上报永远不响 —— 不是偶尔漏，是**每一轮都漏**。
+
+**现场**（2026-09-22 12:01 Render cron 日志）：
+`curl: (22) The requested URL returned error: 524`，发生在开跑后 **125.1 秒**；
+而同一轮服务端跑了约 505 秒、正常跑完并写了运行记录。源站前面挂着 Cloudflare，
+响应超过约 125 秒直接 524 断连 → `curl -f` 退出码 22 → `&&` 短路 → 上报没了。
+
+**判据错在哪**（跟 F8 同源）：退出码回答的是「网关有没有在超时前把响应给 curl」，
+不是「这件活儿有没有干完」。**调大 `--max-time` 不解决问题 —— 掐断的是网关，不是 curl。**
+
+**怎么防**：跑得久的任务，上报搬到服务端收尾时做 ——
+`src/lib/cron/registry.ts` 填 `healthcheckUuid`，`run-logger.ts` 的 `finish()` 负责 ping，
+render.yaml 里那条 `&& curl hc-ping.com/...` **同步删掉**，否则一件事报两遍。
+短任务（远低于 125 秒）沿用 `&&` 没问题，不用一刀切改。
 
 ---
 

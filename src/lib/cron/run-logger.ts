@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { CRON_REGISTRY } from '@/lib/cron/registry'
 import { supabaseAdmin } from '@/lib/supabase'
 
 /**
@@ -32,6 +33,25 @@ import { supabaseAdmin } from '@/lib/supabase'
  *    「插过 / 没插过」，一律用这个 id `upsert`。插过的话 upsert 落到同一行变成终态，
  *    没插过的话 upsert 把它插出来 —— 两种真实结果都收敛成一行，不会再产生孤儿记录。
  *
+ * 🔴 2026-09-23 再补一刀：**部署换机会把在途请求连同收尾代码一起杀掉。**
+ *    实测（Render 服务 crazycontent，实例级日志）：9/22 03:01:04 开跑的 `blog-weekly`
+ *    正在逐个客户生成博客草稿，新实例 03:02:12.695 上线，旧实例 `…-2zsx6` 的日志
+ *    停在 03:02:38.501 —— 正好是 oztop 那篇写进库的前 0.5 秒。排在后面的 CTS Tours NZ
+ *    一个字都没生成，而 `finish()` 从头到尾没机会执行，运行记录**永远停在 running**。
+ *    「停在 running」在健康检查眼里是一道缝：`failing` 只认 `failed`，`overdue` 看
+ *    `started_at`（记录是有的），于是一次真实的客户交付损失既不报错也不逾期。
+ *
+ *    怎么认出这类死法（**这条判据比日志好用，日志会滚掉**）：开跑那行走的是建表 DDL 的
+ *    `NOW()` 默认值 —— **微秒精度（6 位小数）**；`finish()` 传的是 JS 的
+ *    `toISOString()` —— **毫秒精度（3 位小数）**，upsert 会把 `started_at` 一起盖掉。
+ *    所以 `started_at` 还是 6 位小数 = 收尾代码一次都没跑过（进程被杀），3 位 = 跑过。
+ *
+ *    修法：容器被换掉之前 Render 会先发 SIGTERM（默认约 30 秒后才真杀），这段时间足够
+ *    写一行库。`startCronRun()` 把本进程里还没收尾的运行记录登记在 `inFlight` 里，
+ *    收到 SIGTERM 就把它们收成 `failed` 并打上 `interrupted_by` 标记 ——
+ *    从「永远停在 running」变成「有终态、带原因」，今日待办那条才接得住（见
+ *    `src/lib/pm-todo/manual-items.ts` 的 `pushInterruptedCronRunItems`）。
+ *
  * 写日志本身失败**不抛异常**：它是观测手段，不是安全闸，不该把正在跑的业务任务弄挂。
  */
 
@@ -52,6 +72,106 @@ function describe(error: { message: string; code?: string; details?: string | nu
   if (error.details) parts.push(`details=${error.details}`)
   if (error.hint) parts.push(`hint=${error.hint}`)
   return parts.join(' | ')
+}
+
+/**
+ * 这次运行是被部署换机（或任何 SIGTERM）掐断的 —— 写进 `summary` 的标记键。
+ *
+ * 为什么是 `summary` 里的标记、而不是新开一个 `status='interrupted'`：
+ * `cron_run_logs.status` 上有 CHECK 约束，只认 running / completed / failed，
+ * 加第四种值要改库。而「被掐断」本来就是一种失败，`failed` 是对的终态；
+ * 需要区分的地方（今日待办要说人话、要跟真正的业务报错分开）读这个标记就够了。
+ */
+export const INTERRUPTED_BY_KEY = 'interrupted_by'
+
+/** `summary.interrupted_by` 的取值：部署换机把在途请求杀了。 */
+export const INTERRUPTED_BY_DEPLOY = 'deploy_shutdown'
+
+/**
+ * 本进程里**开了跑、还没收尾**的运行记录。收到 SIGTERM 时靠它知道该收哪几行。
+ *
+ * 🔴 只登记 `startCronRun()`（HTTP 路由那条路），不登记 `startCronRunId()`（Inngest 那条路）。
+ *    Inngest 的步骤可能落在任意一台实例上：这台收到 SIGTERM 时，那一轮说不定正在
+ *    另一台上好好跑着，按本进程的记忆去收就是误伤。Inngest 侧本来就有 `onFailure`
+ *    → `failOpenCronRuns()` 收口，不需要这里插一脚。
+ */
+const inFlight = new Map<string, { jobName: string; startedAt: number }>()
+
+let shutdownHookInstalled = false
+
+/**
+ * 装一次进程级的 SIGTERM / SIGINT 收口 —— 幂等，第一个 `startCronRun()` 触发。
+ *
+ * 为什么不放 `instrumentation.ts`：那需要开 Next 的 experimental 开关、影响每一次构建，
+ * 而这件事只跟「本进程有没有正在跑的定时任务」有关，状态就在这个模块里。
+ *
+ * 为什么来得及写库：Next 的 `next start` 收到 SIGTERM 走的是 `server.close(() => exit)`，
+ * 它要等在途连接自己结束才退出，**不是同步 `process.exit()`**；Node 又会把同一个信号的
+ * 所有监听器都调一遍。所以这里的异步写库有 Render 那 ~30 秒宽限期可用，够写一行。
+ */
+function installShutdownHook(): void {
+  if (shutdownHookInstalled) return
+  shutdownHookInstalled = true
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+    process.on(signal, () => {
+      void closeInFlightCronRuns(signal)
+    })
+  }
+}
+
+/**
+ * 把本进程里还没收尾的运行记录收成 `failed`，并标上「是被掐断的」。
+ *
+ * 🔴 用**带条件的 update**（`status='running'`）而不是 `finish()` 的 upsert：
+ *    万一这一行其实已经在别处收成 `completed` 了（或者这个登记是残留），
+ *    条件不满足就什么都不改 —— 宁可漏记一次，也不能把一次成功的运行写成失败。
+ *    代价是「开跑那行压根没插进去」的情况这里补不回来，那种情况 `startCronRunId`
+ *    已经 console.error 过了。
+ *
+ * 返回真正改到的行数。写失败不抛异常，理由同本文件其余部分。
+ */
+export async function closeInFlightCronRuns(signal: string): Promise<number> {
+  const runs = [...inFlight.entries()]
+  if (runs.length === 0) return 0
+  inFlight.clear()
+
+  const finishedAt = new Date().toISOString()
+  let closed = 0
+
+  for (const [runId, { jobName, startedAt }] of runs) {
+    const { data, error } = await supabaseAdmin
+      .from('cron_run_logs')
+      .update({
+        status: 'failed',
+        finished_at: finishedAt,
+        duration_ms: Date.now() - startedAt,
+        error_message: `跑到一半被掐断（${signal}）—— 多半是一次部署把这台机器换掉了，这一轮没跑完`,
+        summary: { [INTERRUPTED_BY_KEY]: INTERRUPTED_BY_DEPLOY, signal },
+      })
+      .eq('id', runId)
+      .eq('status', 'running')
+      .select('id')
+
+    if (error) {
+      console.error(
+        `[cron-run-logger] ${jobName}: 被 ${signal} 掐断后收口失败（id=${runId}）—— 这次运行会永远停在 running。${describe(error)}`,
+      )
+      continue
+    }
+    if (data?.length) {
+      closed += data.length
+      console.error(
+        `[cron-run-logger] ${jobName}: 收到 ${signal}，这一轮没跑完就被掐断了（id=${runId}），已记成 failed。`,
+      )
+    }
+  }
+
+  return closed
+}
+
+/** 只给测试用：清掉登记表，避免用例之间互相串味。 */
+export function __resetInFlightForTests(): void {
+  inFlight.clear()
 }
 
 /**
@@ -88,6 +208,9 @@ export function cronRunHandle(jobName: string, runId: string, startedAt: number)
 export async function startCronRun(jobName: string): Promise<CronRunHandle> {
   const startedAt = Date.now()
   const runId = await startCronRunId(jobName)
+  // 登记 + 装收口钩子：从这一刻起，这台机器被换掉的话这一行不会再无声地停在 running。
+  inFlight.set(runId, { jobName, startedAt })
+  installShutdownHook()
   return finisher(jobName, runId, startedAt)
 }
 
@@ -96,6 +219,9 @@ function finisher(jobName: string, runId: string, startedAt: number): CronRunHan
 
   return {
     async finish({ processed = 0, completed = 0, failed = 0, summary, error: jobError }) {
+      // 正常收尾了就从「在途」名单里摘掉 —— 摘在写库**之前**：哪怕写库这一步失败，
+      // 这一行也已经走完了业务逻辑，不该再被 SIGTERM 收口改写成「被掐断」。
+      inFlight.delete(runId)
       const durationMs = Date.now() - startedAt
       const outcome = {
         id: runId,
@@ -124,7 +250,33 @@ function finisher(jobName: string, runId: string, startedAt: number): CronRunHan
           `[cron-run-logger] ${jobName}: 收尾写不进 cron_run_logs（id=${runId}）—— 这次运行可能永远停在 running，或者彻底没有痕迹。${describe(upsertError)}`,
         )
       }
+
+      await pingHealthcheck(jobName, Boolean(jobError))
     },
+  }
+}
+
+/**
+ * 跑完了往 healthchecks.io 报个到 —— 只对在清单里填了 `healthcheckUuid` 的任务生效。
+ *
+ * 🔴 为什么由服务端报、而不是 render.yaml 里那条 `&& curl hc-ping.com/...`：
+ *    源站前面挂着 Cloudflare，响应超过约 125 秒就 524 断连，cron 容器那条 curl 于是
+ *    退出码非 0、`&&` 短路，上报一次都发不出去 —— 而服务端每一轮都跑完了。
+ *    退出码回答的是「网关有没有等到响应」，不是「这件活儿干完没有」。整段实测见
+ *    `src/lib/cron/registry.ts` 的 `healthcheckUuid` 注释。
+ *
+ * 上报失败只记日志、绝不抛：它是观测手段，不能把已经跑完的任务反过来弄成失败。
+ */
+async function pingHealthcheck(jobName: string, failed: boolean): Promise<void> {
+  const uuid = CRON_REGISTRY.find((e) => e.jobName === jobName)?.healthcheckUuid
+  if (!uuid) return
+  const url = `https://hc-ping.com/${uuid}${failed ? '/fail' : ''}`
+  try {
+    await fetch(url, { signal: AbortSignal.timeout(10_000) })
+  } catch (err) {
+    console.error(
+      `[cron-run-logger] ${jobName}: healthchecks.io 上报失败（这一轮的结果不受影响）: ${err instanceof Error ? err.message : String(err)}`,
+    )
   }
 }
 

@@ -84,6 +84,22 @@ export interface CronRegistryEntry {
    * 沉默死亡（2026-09-23 事故）。
    */
   outputTables?: readonly CronOutputTable[]
+  /**
+   * healthchecks.io 的 check UUID —— 填了就由**服务端自己**在收尾时上报（见
+   * `src/lib/cron/run-logger.ts` 的 `finish()`），render.yaml 里那条
+   * `&& curl hc-ping.com/...` 要同步删掉，否则一件事报两遍。
+   *
+   * 🔴 为什么要把上报搬进服务端：app.magicengine.com.au 前面挂着 Cloudflare，
+   *    源站响应超过约 125 秒就直接 524 断连。跑得久的任务因此**每一轮**都让
+   *    cron 容器里那条 curl 退出码非 0 → `&&` 短路 → 上报一次都发不出去。
+   *    2026-09-22 12:01 的 attribution-cron 实测：`curl: (22) ... error: 524`，
+   *    发生在开跑后 125.1 秒，而服务端那一轮实际跑了约 505 秒并且正常跑完了。
+   *    调大 `--max-time` 没用 —— 掐断的是网关，不是 curl。
+   *    服务端上报回答的才是「这件活儿干完没有」，而不是「网关有没有等到响应」。
+   *
+   * UUID 本来就明文写在 render.yaml 里，不是密钥，可以直接放这儿。
+   */
+  healthcheckUuid?: string
 }
 
 export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
@@ -105,7 +121,10 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   { service: 'memory-extractor', jobName: 'memory-extractor', schedule: '30 6 * * *', logsRuns: true, addedAt: '2026-09-06' },
   { service: 'ai-tracker-weekly', jobName: 'ai-tracker-weekly', schedule: '0 1 * * 1', logsRuns: true },
   { service: 'anomaly-detector-daily', jobName: 'anomaly-detector-daily', schedule: '0 5 * * *', logsRuns: true },
-  { service: 'attribution-cron', jobName: 'attribution-cron', schedule: '0 */6 * * *', logsRuns: true },
+  // 🔴 healthcheckUuid：这条任务每轮跑约 505 秒，远超 Cloudflare 约 125 秒的源站上限，
+  //    cron 容器那条 curl 每轮都收 524、退出码 22，`&&` 后面的上报**一次都没发出去过**
+  //    （2026-09-22 12:01 Render 日志实测）。改由服务端收尾时自己上报。
+  { service: 'attribution-cron', jobName: 'attribution-cron', schedule: '0 */6 * * *', logsRuns: true, healthcheckUuid: '87926446-35cf-4e5b-a868-bb784c27ee5f' },
   { service: 'blog-stuck-generating-sweeper', jobName: 'blog-stuck-generating-sweeper', schedule: '45 * * * *', logsRuns: true },
   { service: 'blog-weekly', jobName: 'blog-weekly', schedule: '0 3 * * 2', logsRuns: true },
   { service: 'content-factory-intake', jobName: 'content-factory-intake', schedule: '0 22 * * *', logsRuns: true },

@@ -69,6 +69,8 @@ export type ManualItemKind =
   | 'cron_blind'
   /** 自动任务跑到一半卡死（状态永远停在 running，路由的 catch 没机会执行） */
   | 'cron_stuck'
+  /** 自动任务被一次部署换机掐断了 —— 那一轮的活儿没干完，而且不会自己补（2026-09-23） */
+  | 'cron_interrupted_by_deploy'
   | 'goal_baseline_mismatch'
   | 'diagnostic_findings'
   | 'prescription_updated'
@@ -177,6 +179,7 @@ import { verifyActionLink } from './action-link'
 import { fetchAll } from '@/lib/supabase-paginate'
 import { checkCronHealth } from '@/lib/cron/health'
 import { CRON_REGISTRY } from '@/lib/cron/registry'
+import { INTERRUPTED_BY_DEPLOY, INTERRUPTED_BY_KEY } from '@/lib/cron/run-logger'
 import { fetchGa4KeyEventBreakdown } from '@/lib/ga4/client'
 import { judgeLeadsSanity } from '@/lib/strategy/leads-sanity'
 import { judgeWorkerPresence, judgeQueueByClient } from '@/lib/factory/worker-presence'
@@ -383,6 +386,10 @@ export async function loadManualItems(
   )
   // 按时没跑 / 查不出跑没跑 —— PM 2026-08-03 要求「不能完成需要有报错」
   await pushCronHealthItems(supabase, items, now)
+  // 跑到一半被一次上线换机器掐断 —— 原因已知，要的是补跑，不是查日志（2026-09-23 CTS 周更事故）
+  await pushInterruptedCronRunItems(supabase, items, now).catch((e) =>
+    console.warn('[manual-items] 被掐断的自动任务检查失败（不阻塞其他待办）:', e),
+  )
   // 平台候选到了复查日期 —— 不落库、不查表，纯本地日期判断
   pushPlatformCandidateReviewItems(items, now)
   // 客户方案文档里写的一次性人工动作 —— 同样不落库、纯本地日期判断，过期自动消失
@@ -954,6 +961,81 @@ const CRON_STOPPED_GUIDE = {
     href: RENDER_DASHBOARD_URL,
   },
 } as const
+
+/** 往前翻几天找「被掐断」的运行记录。再久远的已经没有补救意义，只会刷屏。 */
+const INTERRUPTED_LOOKBACK_DAYS = 7
+
+/**
+ * 自动任务被一次部署换机掐断 → 下发。
+ *
+ * 🔴 为什么单独一条、不并进上面的「卡死」：
+ *    这两件事**下一步动作不一样**。卡死是「不知道它卡在哪，去看日志」；被掐断是
+ *    「已经知道为什么死的（有人合并代码、机器被换掉），不用查，直接补跑这一轮」。
+ *    把已知原因的那条混进「去看日志」里，等于把一件五秒钟能决定的事说成一件要调查的事。
+ *
+ * 🔴 为什么不靠 health.ts 的 `stuck`：`closeInFlightCronRuns()` 一收口，那一行就从
+ *    `running` 变成 `failed`，`stuck` 判据（status='running'）当场不再命中 ——
+ *    而 `failing` 目前**没有接进今日待办**（只在 /dashboard/workflows-health 页面上）。
+ *    不自己出这一条的话，这次修复反而会把唯一那条告警弄没。
+ *    这里直接读 `cron_run_logs`，不经过 health.ts，两边互不影响。
+ *
+ * 已经被后面某一轮成功跑完的不再提 —— 周更这类下一轮在一周后，所以「有没有补上」
+ * 必须按**这个任务后来有没有跑成**判，不能按日期过期自动消失。
+ */
+export async function pushInterruptedCronRunItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+): Promise<void> {
+  const since = new Date(now.getTime() - INTERRUPTED_LOOKBACK_DAYS * 86_400_000).toISOString()
+
+  const { data: failedRuns, error } = await supabase
+    .from('cron_run_logs')
+    .select('job_name, started_at, summary')
+    .eq('status', 'failed')
+    .gte('started_at', since)
+    .order('started_at', { ascending: false })
+    .limit(1000)
+  if (error || !failedRuns) return
+
+  // 标记在 summary 里，过滤放本地做：PostgREST 的 JSON 过滤语法一改就静默返空，
+  // 而「静默返空」在这里的表现就是「告警消失」—— 正是这次要修的那种病。
+  const interrupted = new Map<string, string>() // job_name → 最近一次被掐断的 started_at
+  for (const run of failedRuns) {
+    const summary = run.summary as Record<string, unknown> | null
+    if (summary?.[INTERRUPTED_BY_KEY] !== INTERRUPTED_BY_DEPLOY) continue
+    if (!interrupted.has(run.job_name)) interrupted.set(run.job_name, run.started_at)
+  }
+  if (interrupted.size === 0) return
+
+  const { data: laterOk } = await supabase
+    .from('cron_run_logs')
+    .select('job_name, started_at')
+    .in('job_name', [...interrupted.keys()])
+    .eq('status', 'completed')
+    .gte('started_at', since)
+    .limit(1000)
+
+  const lastOk = new Map<string, string>()
+  for (const run of laterOk ?? []) {
+    const prev = lastOk.get(run.job_name)
+    if (!prev || run.started_at > prev) lastOk.set(run.job_name, run.started_at)
+  }
+
+  const unrecovered = [...interrupted.entries()]
+    .filter(([job, cutAt]) => (lastOk.get(job) ?? '') <= cutAt)
+    .map(([job, cutAt]) => `${job}（${daysAgo(cutAt, now) ?? 0} 天前那轮）`)
+  if (unrecovered.length === 0) return
+
+  items.push({
+    kind: 'cron_interrupted_by_deploy',
+    client_id: 'infra',
+    client_name: 'Magic Engine 后台',
+    what: `${unrecovered.length} 个自动任务跑到一半被换机器掐断了，之后一直没跑成：${unrecovered.join('、')} —— 原因已经清楚（那会儿正好有一次上线把机器换掉了），不用查；但那一轮该产出的东西没产出，它自己不会补`,
+    how: '打开链接 → 找到这几个服务 → 右上角 "Trigger Run" 手动补跑一次。这几个任务重复跑是安全的（已经做过的那部分会自己跳过）。补跑完回来看一眼这条待办消失了没有',
+    href: RENDER_DASHBOARD_URL,
+  })
+}
 
 /**
  * 自动任务该跑没跑 → 下发。

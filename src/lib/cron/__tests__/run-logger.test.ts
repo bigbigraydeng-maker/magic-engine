@@ -120,7 +120,16 @@ vi.mock('@/lib/supabase', () => {
   return { supabaseAdmin: { from } }
 })
 
-const { startCronRun, startCronRunId, cronRunHandle, failOpenCronRuns } = await import('../run-logger')
+const {
+  startCronRun,
+  startCronRunId,
+  cronRunHandle,
+  failOpenCronRuns,
+  closeInFlightCronRuns,
+  __resetInFlightForTests,
+  INTERRUPTED_BY_KEY,
+  INTERRUPTED_BY_DEPLOY,
+} = await import('../run-logger')
 
 /** 把这次测试里 console.error 说过的所有话拼成一段，方便断言「喊了什么」。 */
 function said(spy: ReturnType<typeof vi.spyOn>): string {
@@ -136,6 +145,7 @@ beforeEach(() => {
   state.updateAttempts = 0
   state.upsertAttempts = 0
   state.seq = 0
+  __resetInFlightForTests()
   vi.restoreAllMocks()
 })
 
@@ -336,5 +346,64 @@ describe('failOpenCronRuns（Inngest onFailure 收口）', () => {
     const closed = await failOpenCronRuns('conversion-daily-pipeline', 'x', { startedBefore: new Date(T1) })
     expect(closed).toBe(0)
     expect(said(spy)).toContain('模拟断网')
+  })
+})
+
+/**
+ * 部署换机把在途请求杀掉这一类死法（2026-09-23 CTS 周更博客草稿丢失）。
+ *
+ * 实测现场：`blog-weekly` 9/22 03:01:04 开跑，新实例 03:02:12.695 上线，
+ * 跑着这一轮的旧实例日志停在 03:02:38.501（oztop 那篇写进库的前 0.5 秒），
+ * 排在后面的 CTS Tours NZ 一个字都没生成。`finish()` 没机会执行，
+ * 运行记录永远停在 running —— 既不报错、也不逾期，等于一次静默的客户交付损失。
+ */
+describe('被 SIGTERM 掐断时的收口', () => {
+  it('🔴 还没收尾的那一轮：收成 failed，并留下「是被掐断的」这个标记', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await startCronRun('blog-weekly')
+    expect(state.rows[0].status).toBe('running')           // 锚点：确实是在跑的状态被打断的
+
+    const closed = await closeInFlightCronRuns('SIGTERM')
+
+    expect(closed).toBe(1)
+    expect(state.rows).toHaveLength(1)                     // 不许另插一条孤儿记录
+    expect(state.rows[0].status).toBe('failed')
+    expect(state.rows[0].finished_at).toEqual(expect.any(String))
+    expect(String(state.rows[0].error_message)).toContain('SIGTERM')
+    expect(state.rows[0].summary).toMatchObject({ [INTERRUPTED_BY_KEY]: INTERRUPTED_BY_DEPLOY })
+  })
+
+  it('🔴 已经正常跑完的那一轮：SIGTERM 不许把它改写成失败', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const run = await startCronRun('blog-weekly')
+    await run.finish({ processed: 2, completed: 2 })
+    expect(state.rows[0].status).toBe('completed')
+
+    const closed = await closeInFlightCronRuns('SIGTERM')
+
+    expect(closed).toBe(0)
+    expect(state.rows[0].status).toBe('completed')         // 没被反向改写
+    expect(state.rows[0].summary).toBeNull()
+  })
+
+  it('🔴 Inngest 那条路（startCronRunId）不登记：它的步骤可能跑在别的机器上，按本进程的记忆收就是误伤', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await startCronRunId('cloud-seo-meta-cycle-fanout')
+    expect(state.rows[0].status).toBe('running')           // 锚点：记录确实开出来了
+
+    const closed = await closeInFlightCronRuns('SIGTERM')
+
+    expect(closed).toBe(0)
+    expect(state.rows[0].status).toBe('running')           // 留给 onFailure → failOpenCronRuns 收
+  })
+
+  it('一个在跑的都没有时不去写库 —— 每次部署都跑这段，不能白发请求', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const before = state.updateAttempts
+    expect(await closeInFlightCronRuns('SIGTERM')).toBe(0)
+    expect(state.updateAttempts).toBe(before)
   })
 })
