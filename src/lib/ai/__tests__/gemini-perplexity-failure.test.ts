@@ -177,6 +177,20 @@ describe('classifyPerplexityFailure', () => {
     expect(classifyPerplexityFailure(err)).toBe('credential_invalid')
   })
 
+  it('🔴 402 Payment Required（余额耗尽，无 insufficient_quota code）→ account_exhausted', () => {
+    // Perplexity 余额耗尽走 402，不是 OpenAI 那套 429 + insufficient_quota 形状。
+    // 之前 402 会落进 other，isRecordable('other') 为 false，断电既不进
+    // provider_outages 也不上今日待办（Codex review 2026-09-23 抓到）。
+    const err = makeAPIError('Payment required', 402)
+    expect(classifyPerplexityFailure(err)).toBe('account_exhausted')
+    expect(needsHuman(classifyPerplexityFailure(err))).toBe(true)
+  })
+
+  it('402 + 结构化 code（万一真复用了 OpenAI 格式）→ 同样 account_exhausted', () => {
+    const err = makeAPIError('Payment required', 402, { code: 'insufficient_quota' })
+    expect(classifyPerplexityFailure(err)).toBe('account_exhausted')
+  })
+
   it('429 with quota keyword → account_exhausted', () => {
     const err = makeAPIError('Rate limit: quota exceeded', 429)
     expect(classifyPerplexityFailure(err)).toBe('account_exhausted')

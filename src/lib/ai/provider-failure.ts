@@ -318,6 +318,13 @@ export function classifyPerplexityFailure(err: unknown): ProviderFailureKind {
 
   // Status 回退
   if (status === 401 || status === 403) return 'credential_invalid'
+  // 🔴 402 = Payment Required，Perplexity 余额耗尽走的是这个状态码，
+  //    跟 OpenAI 复用同一个 `insufficient_quota` code 的形状完全不同
+  //    （Codex review 2026-09-23 抓到）。之前没有这条分支，402 直接落进
+  //    `other`，而 `isRecordable('other')` 为 false —— 断电既不进
+  //    `provider_outages`，也不上今日待办，等于本模块要防的
+  //    2026-09-20 三天静默在 Perplexity 上重演一次。
+  if (status === 402) return 'account_exhausted'
   if (status === 429) {
     if (/quota|billing/i.test(msg)) return 'account_exhausted'
     return 'rate_limited'
