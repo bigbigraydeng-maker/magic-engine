@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { classifyOpenAIFailure, needsHuman, parseProviderError } from '../provider-failure'
+import { classifyOpenAIFailure, classifyThrownOpenAIError, needsHuman, parseProviderError } from '../provider-failure'
 
 /** OpenAI 余额耗尽时真实返回的形状。 */
 const INSUFFICIENT_QUOTA = JSON.stringify({
@@ -109,5 +109,57 @@ describe('parseProviderError', () => {
 
   it('JSON 但没有 error 字段也返回空', () => {
     expect(parseProviderError('{"ok":true}')).toEqual({ code: '', type: '', message: '' })
+  })
+})
+
+/**
+ * SDK 抛出来的异常走同一套判据 —— 给分批循环用（余额没钱时当场熄火，
+ * 别把 SDK 的 429 退避乘以条数，见 messenger/brief-cycle.ts）。
+ */
+describe('classifyThrownOpenAIError', () => {
+  /** 2026-09-23 生产实测那个错误对象（req_b9a3b644022849b2a76c76b3d5116e6f）。 */
+  const noCredits = () =>
+    Object.assign(new Error('You have no credits remaining.'), {
+      status: 429,
+      code: 'credit_balance_exhausted',
+      type: 'insufficient_quota',
+      error: { code: 'credit_balance_exhausted', type: 'insufficient_quota', message: 'You have no credits remaining.' },
+    })
+
+  it('余额用光 → account_exhausted（跟响应版同一个结论）', () => {
+    expect(classifyThrownOpenAIError(noCredits())).toBe('account_exhausted')
+  })
+
+  it('SDK 没把 error 对象挂上来时，用平铺的 code/type 兜住', () => {
+    const err = Object.assign(new Error('quota'), { status: 429, type: 'insufficient_quota' })
+    expect(classifyThrownOpenAIError(err)).toBe('account_exhausted')
+  })
+
+  it('🔴 普通限流不许判成没钱 —— 熄火会把一次拥堵变成一轮不干活', () => {
+    const err = Object.assign(new Error('Rate limit reached'), {
+      status: 429,
+      error: { code: 'rate_limit_exceeded', type: 'requests' },
+    })
+    expect(classifyThrownOpenAIError(err)).toBe('rate_limited')
+    expect(needsHuman(classifyThrownOpenAIError(err))).toBe(false)
+  })
+
+  it('钥匙不认了 → credential_invalid（要换钥匙的人跟充值的人不是同一个）', () => {
+    const err = Object.assign(new Error('Incorrect API key'), {
+      status: 401,
+      error: { code: 'invalid_api_key', type: 'invalid_request_error' },
+    })
+    expect(classifyThrownOpenAIError(err)).toBe('credential_invalid')
+  })
+
+  it('业务错误和 5xx 一律 other —— 一个人的数据坏了不该停掉整批', () => {
+    expect(classifyThrownOpenAIError(new Error('brief upsert failed'))).toBe('other')
+    expect(classifyThrownOpenAIError(Object.assign(new Error('boom'), { status: 500 }))).toBe('other')
+  })
+
+  it('不是对象 / 没有状态码的不许猜', () => {
+    expect(classifyThrownOpenAIError(null)).toBe('other')
+    expect(classifyThrownOpenAIError('no credits remaining')).toBe('other')
+    expect(classifyThrownOpenAIError({ code: 'insufficient_quota' })).toBe('other')
   })
 })
