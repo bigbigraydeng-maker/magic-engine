@@ -11,6 +11,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { getAccounts, schedulePost, type PublerAccount } from '@/lib/publer/client'
+import { needsHumanReview } from '@/lib/content/guard-receipt'
 
 // 调用方要给 resolveBoundPublerAccount() 的返回值起名字时，从这里取类型 ——
 // 直接 import '@/lib/publer/client' 会撞执行内核的 L1 边界（那是对外写能力模块，
@@ -124,7 +125,7 @@ export async function scheduleSocialPost(
   // 1. Load the post (ownership + status guard)
   const { data: post, error: postErr } = await supabaseAdmin
     .from('content_posts')
-    .select('id, client_id, caption, script, hashtags, platforms, status')
+    .select('id, client_id, caption, script, hashtags, platforms, status, generation_context_snapshot')
     .eq('id', postId)
     .eq('client_id', clientId)
     .single()
@@ -134,6 +135,17 @@ export async function scheduleSocialPost(
   }
   if (post.status !== 'approved') {
     return { ok: false, error: `Post status is "${post.status}" — must be "approved" to publish` }
+  }
+
+  // Content guard: reject posts whose pre-publish self-check flagged issues.
+  // Posts without a receipt (never checked) pass through — blocking them would
+  // freeze every legacy post. Only posts with a receipt that says "needs human
+  // review" are stopped here. Unreadable receipts also block (fail closed).
+  if (needsHumanReview(post.generation_context_snapshot)) {
+    return {
+      ok: false,
+      error: 'This post was flagged by the pre-publish content check and needs human review before it can be published. Go to the content board to review it.',
+    }
   }
 
   // 2. Resolve Publer account — reuse an already-verified account when the

@@ -4,6 +4,7 @@ import { getAccounts, uploadMediaFromUrl, schedulePost } from '@/lib/publer/clie
 import { getAdapter } from '@/lib/flywheel/adapters/registry'
 import { SOCIAL_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
 import { judgeOutgoingPost, priceGateMessage } from '@/lib/content/price-claim-gate'
+import { needsHumanReview } from '@/lib/content/guard-receipt'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import '@/lib/flywheel/adapters/SocialContentAdapter'
 
@@ -29,7 +30,7 @@ export async function POST(req: NextRequest) {
 
     const { data: post } = await supabaseAdmin
       .from('content_posts')
-      .select('id, client_id, caption, script, hashtags, platforms, status')
+      .select('id, client_id, caption, script, hashtags, platforms, status, generation_context_snapshot')
       .eq('id', post_id)
       .single()
 
@@ -51,6 +52,21 @@ export async function POST(req: NextRequest) {
 
     if (post.status !== 'approved') {
       return NextResponse.json({ success: false, error: 'Post not approved' }, { status: 400 })
+    }
+
+    // Content guard: reject posts whose pre-publish self-check flagged issues.
+    // Posts without a receipt (never checked) pass through — blocking them would
+    // freeze every legacy post. Only posts with a receipt that says "needs human
+    // review" are stopped here. Unreadable receipts also block (fail closed).
+    if (needsHumanReview(post.generation_context_snapshot)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'This post was flagged by the pre-publish content check and needs human review before it can be published. Go to the content board to review it.',
+          code: 'content_guard_blocked',
+        },
+        { status: 409 },
+      )
     }
 
     // Prefer is_final=true assets (externally edited final versions),
