@@ -14,6 +14,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { accountDayKey, resolveAccountTimezone } from './account-timezone'
 import {
   getAdDailyInsights,
   getAdsetDailyInsights,
@@ -111,52 +112,6 @@ async function needsBackfill(
   const earliest = (data as Array<{ insight_date: string }> | null)?.[0]?.insight_date
   if (!earliest) return true
   return earliest > toIsoDate(shiftDays(new Date(), -BACKFILL_LOOKBACK_DAYS))
-}
-
-/**
- * Which calendar day it is right now IN THE AD ACCOUNT'S OWN TIMEZONE.
- *
- * Unknown timezone falls back to UTC — identical to what this file did before
- * it knew about timezones, so an account with no snapshot yet is no worse off.
- */
-function accountDayKey(timezone: string | null, now: Date): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone ?? 'UTC',
-    year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(now)
-}
-
-/**
- * The ad account's reporting timezone, as Meta reported it into the latest
- * account-level snapshot.
- *
- * Read from storage rather than the Graph API on purpose: the value changes
- * essentially never, the same daily cron's snapshot sync already captures it
- * for every account, and Meta's BUC quota is charged per call — spending one
- * on a constant, three times a day per account, buys nothing.
- *
- * Deliberately NOT scoped by client_id. The timezone is a property of the ad
- * account, not of whoever registered it, so a shared or secondary account
- * snapshotted under another client still resolves instead of silently
- * dropping back to UTC.
- *
- * Never throws and never propagates an error: a failed timezone read must
- * degrade to UTC, not take the day's data sync down with it.
- */
-async function resolveAccountTimezone(adAccountId: string): Promise<string | null> {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('ad_entity_snapshots')
-      .select('timezone_name')
-      .eq('ad_account_id', adAccountId)
-      .eq('level', 'account')
-      .order('captured_at', { ascending: false })
-      .limit(1)
-    if (error) return null
-    return (data as Array<{ timezone_name: string | null }> | null)?.[0]?.timezone_name ?? null
-  } catch {
-    return null
-  }
 }
 
 /**
