@@ -81,6 +81,7 @@ const lastWriteAt = new Map<string, number>()
 const RECORDABLE: ReadonlySet<ProviderFailureKind> = new Set<ProviderFailureKind>([
   'account_exhausted',
   'credential_invalid',
+  'project_permission_denied',
   'gateway_auth_failed',
 ])
 

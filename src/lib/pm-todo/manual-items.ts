@@ -1020,6 +1020,15 @@ const AI_ACCOUNT_GUIDE: Record<
     how: '打开链接 → 生成新的 API Key → 去 Render 后台（dashboard.render.com → 服务 → Environment）把 GEMINI_API_KEY 的值换成新的 → Save。换完回我一句',
     href: 'https://aistudio.google.com/apikey',
   },
+  // 🔴 跟上面 credential_invalid 分开：这条不是钥匙坏了，换新钥匙也修不好
+  // （Codex review 2026-09-23 抓到）。真正原因是 API 没启用 / key 没被授权用这个模型 /
+  // 项目没开计费，链接必须指到 Cloud Console 让人查项目配置，而不是指到「生成新 Key」。
+  'google::project_permission_denied': {
+    kind: 'ai_provider_exhausted',
+    what: 'Gemini（Google AI）报了权限拒绝 —— 不是钥匙坏了，换新钥匙也修不好。AI 可见度体检里 Google 那条线在安静地跳过',
+    how: '打开链接 → 确认这个项目的 Generative Language API 是「已启用」、账号有这个模型的访问权限、且项目已开启计费（免费额度用完但没绑定计费卡也会报这个）。改完回我一句，我把被跳过的体检重跑一遍',
+    href: 'https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com',
+  },
 
   // ── Perplexity ─────────────────────────────────────────────────────────
   'perplexity::account_exhausted': {

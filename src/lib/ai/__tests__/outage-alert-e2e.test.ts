@@ -251,6 +251,25 @@ describe('长期断电的提醒节奏', () => {
     expect(items[0].how).toContain('配额')
   })
 
+  it('Gemini project_permission_denied → 指向 Cloud Console 查权限，不是「换新钥匙」', () => {
+    // 🔴 Codex review 2026-09-23 抓到：权限/项目配置错误换新钥匙修不好，
+    // 待办必须指去检查 API 启用 / 权限 / 计费状态，不能复用 credential_invalid 的「生成新 Key」指引。
+    const now = new Date('2026-09-23T19:00:00Z')
+    const rows: OutageRow[] = [{
+      provider: 'google',
+      reason: 'project_permission_denied',
+      outage_date: '2026-09-23',
+      detail: 'Gemini gemini-2.5-flash: [GoogleGenerativeAI Error]: PERMISSION_DENIED: API not enabled',
+      first_seen_at: '2026-09-23T18:00:00Z',
+      last_seen_at: '2026-09-23T18:05:00Z',
+    }]
+    const items = buildProviderOutageItems({ rows, error: null }, now)
+    expect(items).toHaveLength(1)
+    expect(items[0].href).toContain('console.cloud.google.com')
+    expect(items[0].how).not.toContain('生成新的 API Key')
+    expect(items[0].how).toContain('计费')
+  })
+
   it('Perplexity credential_invalid → 指向 Perplexity 后台', () => {
     const now = new Date('2026-09-23T19:00:00Z')
     const rows: OutageRow[] = [{

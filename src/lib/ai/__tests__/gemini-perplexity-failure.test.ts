@@ -12,6 +12,19 @@ import {
   needsHuman,
 } from '../provider-failure'
 
+/** 造一个带 `QuotaFailure` errorDetails 的 Gemini 429，方便造不同 quotaId 的用例。 */
+function makeGeminiQuotaError(quotaId: string, message = 'Too many requests') {
+  return Object.assign(new Error(message), {
+    status: 429,
+    errorDetails: [
+      {
+        '@type': 'type.googleapis.com/google.rpc.QuotaFailure',
+        violations: [{ quotaId }],
+      },
+    ],
+  })
+}
+
 // ─── Gemini ──────────────────────────────────────────────────────────────────
 
 describe('classifyGeminiFailure', () => {
@@ -28,14 +41,15 @@ describe('classifyGeminiFailure', () => {
     expect(classifyGeminiFailure(err)).toBe('credential_invalid')
   })
 
-  it('PERMISSION_DENIED → credential_invalid', () => {
+  it('PERMISSION_DENIED → project_permission_denied（不是坏钥匙，换钥匙修不好）', () => {
     const err = new Error('[GoogleGenerativeAI Error]: PERMISSION_DENIED: API not enabled')
-    expect(classifyGeminiFailure(err)).toBe('credential_invalid')
+    expect(classifyGeminiFailure(err)).toBe('project_permission_denied')
+    expect(needsHuman(classifyGeminiFailure(err))).toBe(true)
   })
 
-  it('403 → credential_invalid', () => {
+  it('403 → project_permission_denied', () => {
     const err = Object.assign(new Error('Forbidden'), { status: 403 })
-    expect(classifyGeminiFailure(err)).toBe('credential_invalid')
+    expect(classifyGeminiFailure(err)).toBe('project_permission_denied')
   })
 
   it('RESOURCE_EXHAUSTED → account_exhausted (宁可多报)', () => {
@@ -81,6 +95,26 @@ describe('classifyGeminiFailure', () => {
       ],
     })
     expect(classifyGeminiFailure(err)).toBe('account_exhausted')
+  })
+
+  it('QuotaFailure 的 quotaId 是 PerMinute（RPM）→ rate_limited，不当账户断电报', () => {
+    // 🔴 Codex review 2026-09-23 抓到：RPM/TPM 撞顶跟硬配额耗尽长得一模一样
+    // （同样是 RESOURCE_EXHAUSTED + QuotaFailure），但下一分钟自己就好，
+    // 不该写进断电台账、更不该生成「配额用完、升级付费方案」的人工待办。
+    const err = makeGeminiQuotaError('GenerateRequestsPerMinutePerProjectPerModel-FreeTier')
+    expect(classifyGeminiFailure(err)).toBe('rate_limited')
+    expect(needsHuman(classifyGeminiFailure(err))).toBe(false)
+  })
+
+  it('QuotaFailure 的 quotaId 是 TPM（每分钟 token 数）→ rate_limited', () => {
+    const err = makeGeminiQuotaError('GenerateContentInputTokensPerMinutePerProjectPerModel-FreeTier')
+    expect(classifyGeminiFailure(err)).toBe('rate_limited')
+  })
+
+  it('QuotaFailure 的 quotaId 是 PerDay（RPD）→ account_exhausted，仍要惊动人', () => {
+    const err = makeGeminiQuotaError('GenerateRequestsPerDayPerProjectPerModel-FreeTier')
+    expect(classifyGeminiFailure(err)).toBe('account_exhausted')
+    expect(needsHuman(classifyGeminiFailure(err))).toBe(true)
   })
 
   it('UNAUTHENTICATED → credential_invalid', () => {

@@ -18,14 +18,24 @@
  */
 
 /**
- * 判定结果。只有 `account_exhausted` / `credential_invalid` / `gateway_auth_failed`
- * 需要惊动人 —— 它们的共同点是**重试一万次也不会好**。
+ * 判定结果。只有 `account_exhausted` / `credential_invalid` / `project_permission_denied` /
+ * `gateway_auth_failed` 需要惊动人 —— 它们的共同点是**重试一万次也不会好**。
  */
 export type ProviderFailureKind =
   /** 账户没钱 / 撞了账单硬顶 / 账户被停 —— 只有人去充值或恢复账户才行 */
   | 'account_exhausted'
   /** 钥匙本身不认了（被撤销 / 打错 / 过期）—— 要人去换钥匙 */
   | 'credential_invalid'
+  /**
+   * 钥匙本身没问题，但项目 / 账号层面的权限配置挡住了这次调用 ——
+   * 常见于 API 没启用、这把 key 没被授权用这个模型、或项目计费没开。
+   *
+   * 🔴 必须跟 `credential_invalid` 分开（Codex review 2026-09-23 抓到）：两者都可能报
+   *    401/403，但**换一把新钥匙修不好这一类** —— 新钥匙挂在同一个项目下，权限配置
+   *    原封不动。混成一条，PM 会被支去重新生成 key，改完还是那个错，
+   *    正是 CLAUDE.md 铁律 3 说的「下发了但没法照做」。
+   */
+  | 'project_permission_denied'
   /**
    * 卡在 Cloudflare AI Gateway 这一层，还没走到 OpenAI。
    *
@@ -144,7 +154,12 @@ export function classifyOpenAIFailure(input: ProviderFailureInput): ProviderFail
 
 /** 哪几类值得惊动人：重试一万次也不会好的那几种。 */
 export function needsHuman(kind: ProviderFailureKind): boolean {
-  return kind === 'account_exhausted' || kind === 'credential_invalid' || kind === 'gateway_auth_failed'
+  return (
+    kind === 'account_exhausted' ||
+    kind === 'credential_invalid' ||
+    kind === 'project_permission_denied' ||
+    kind === 'gateway_auth_failed'
+  )
 }
 
 // ─── Shared helpers for SDK error objects ────────────────────────────────────
@@ -203,10 +218,15 @@ function extractGeminiErrorDetails(err: object): unknown[] | null {
  * 但「明确的错误码」对 Gemini 配额场景必须落到真实可用的字段上，不能只赌
  * message 里出现一个 SDK 根本不会写进去的字符串。
  *
- * 🔴 配额耗尽（HTTP 429）同时覆盖「配额用完」和「请求速率过快」。
- *    Google AI SDK 不做内部重试（跟 OpenAI SDK maxRetries=2 不同），所以限流也会
- *    走到 catch。识别到配额信号的，往 `account_exhausted` 偏 —— 理由跟
- *    outage-ledger.ts 一致：宁可多报一次，也不能让真实断电悄悄过去。
+ * 🔴 配额耗尽（HTTP 429）同时覆盖「配额用完」和「请求速率过快」，而且哪怕真的带了
+ *    `QuotaFailure` 详情也不能直接当账户级断电处理（Codex review 2026-09-23 抓到）：
+ *    Gemini 对每分钟请求数 / 每分钟 token 数（RPM / TPM）撞顶也会返回同一个
+ *    `RESOURCE_EXHAUSTED` + `QuotaFailure` 形状，那是**瞬时**限流，下一分钟自己就好，
+ *    跟真正需要人去升级方案 / 提额度的每日 (RPD) 或账单硬顶配额是两回事。
+ *    区分点是 `QuotaFailure.violations[].quotaId`/`quotaMetric` 里的周期字样 ——
+ *    带 `PerMinute`/`PerSecond` 且不带 `PerDay`/`Billing` 的，按 `rate_limited` 处理；
+ *    其余（含读不出周期的兜底情形）沿用旧逻辑往 `account_exhausted` 偏 ——
+ *    理由跟 outage-ledger.ts 一致：宁可多报一次，也不能让真实断电悄悄过去。
  */
 export function classifyGeminiFailure(err: unknown): ProviderFailureKind {
   if (!(err instanceof Error)) return 'other'
@@ -218,36 +238,55 @@ export function classifyGeminiFailure(err: unknown): ProviderFailureKind {
   if (/API_KEY_INVALID|UNAUTHENTICATED/i.test(msg)) return 'credential_invalid'
   if (status === 401) return 'credential_invalid'
 
-  // 2. 权限拒绝 —— API 没开、key 限制、项目计费未启用
-  if (/PERMISSION_DENIED/i.test(msg)) return 'credential_invalid'
-  if (status === 403) return 'credential_invalid'
+  // 2. 权限拒绝 —— API 没开 / key 没被授权用这个模型 / 项目计费未启用。
+  //    🔴 不能归 `credential_invalid`：新钥匙挂在同一个项目下，这类错误原封不动，
+  //    操作人换完钥匙还是同一个错（见 ProviderFailureKind 里 project_permission_denied 的注释）。
+  if (/PERMISSION_DENIED/i.test(msg)) return 'project_permission_denied'
+  if (status === 403) return 'project_permission_denied'
 
   // 3. 资源耗尽 —— 先看真实字段（errorDetails / message 里的配额文案），
   //    RESOURCE_EXHAUSTED 字面匹配只是兜底（几乎不会命中，见上方注释）
-  if (/RESOURCE_EXHAUSTED/i.test(msg)) return 'account_exhausted'
-  if (looksLikeGeminiQuotaExhausted(err, msg)) return 'account_exhausted'
+  const quotaKind = classifyGeminiQuotaSignal(err, msg)
+  if (quotaKind) return quotaKind
   if (status === 429) return 'rate_limited'
 
   return 'other'
 }
 
 /**
- * 从 SDK 实际暴露的字段判断这次失败是不是配额耗尽，而不是纯限流。
+ * 从 SDK 实际暴露的字段判断这次失败是「配额用完」还是「这一分钟打太快了」。
  *
- *   · `.errorDetails`：Google 配额耗尽响应通常带一个
+ *   · `.errorDetails`：Google 配额响应通常带一个
  *     `type.googleapis.com/google.rpc.QuotaFailure` detail —— 这是结构化字段，
- *     比正则猜 message 可靠得多。
+ *     比正则猜 message 可靠得多。`violations[].quotaId` / `quotaMetric` 的命名
+ *     带着周期（`GenerateRequestsPerMinutePerProjectPerModel-FreeTier` 之类），
+ *     这是唯一能可靠区分「瞬时限流」和「硬配额」的信号。
  *   · message 文案：SDK 会把 `error.message` 原文拼进异常，Google 配额耗尽的
  *     固定文案是 "You exceeded your current quota, please check your plan
- *     and billing details."，含 "quota" 关键字。
+ *     and billing details."，含 "quota" 关键字，但不带周期信息。
+ *
+ * 返回 `null` 表示没看到配额信号，交给调用方按状态码兜底。
  */
-function looksLikeGeminiQuotaExhausted(err: object, msg: string): boolean {
+function classifyGeminiQuotaSignal(
+  err: object,
+  msg: string,
+): 'account_exhausted' | 'rate_limited' | null {
   const details = extractGeminiErrorDetails(err)
-  if (details && details.length > 0) {
-    const detailsText = JSON.stringify(details)
-    if (/QuotaFailure|quotaId|quotaMetric/i.test(detailsText)) return true
-  }
-  return /exceeded your current quota|quota exceeded|check your plan and billing/i.test(msg)
+  const detailsText = details && details.length > 0 ? JSON.stringify(details) : ''
+  const hasQuotaSignal =
+    /RESOURCE_EXHAUSTED/i.test(msg) ||
+    /QuotaFailure|quotaId|quotaMetric/i.test(detailsText) ||
+    /exceeded your current quota|quota exceeded|check your plan and billing/i.test(msg)
+  if (!hasQuotaSignal) return null
+
+  // 每分钟/每秒额度（RPM/TPM）打满是瞬时限流，下一分钟自己就好；
+  // 每天额度（RPD）或账单相关的硬顶只有人能修（升级方案 / 提高上限）。
+  // 读不出周期信息（例如只有 message 文案、没有结构化 details）时按硬配额处理，
+  // 跟模块顶注一致：宁可多报，不能让真实断电悄悄过去。
+  const isPerMinuteOrSecond = /PerMinute|PerSecond|\bRPM\b|\bTPM\b/i.test(detailsText)
+  const isDailyOrBilling = /PerDay|Billing/i.test(detailsText)
+  if (isPerMinuteOrSecond && !isDailyOrBilling) return 'rate_limited'
+  return 'account_exhausted'
 }
 
 // ─── Perplexity failure classifier ───────────────────────────────────────────
