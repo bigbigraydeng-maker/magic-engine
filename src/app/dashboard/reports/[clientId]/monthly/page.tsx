@@ -304,11 +304,23 @@ export default function MonthlyReportPage() {
                 </thead>
                 <tbody className="divide-y divide-black/[.06]">
                   {competitive.map((row, i) => {
-                    const rankBadge = row.client_rank == null
+                    // Not measured (probe failed) → neutral grey
+                    // Measured but not mentioned → red
+                    // Mentioned, top 3 → green
+                    // Mentioned, 4+ → ochre
+                    const rankBadge = !row.measured
+                      ? 'bg-black/5 text-me-charcoal/45'
+                      : row.client_rank == null
                       ? 'bg-[#C2453A]/10 text-[#C2453A]'
                       : row.client_rank <= 3
                       ? 'bg-[#5C8A4A]/10 text-[#5C8A4A]'
                       : 'bg-me-ochre/10 text-me-ochre';
+
+                    const rankLabel = !row.measured
+                      ? '—'
+                      : row.client_rank != null
+                      ? `#${row.client_rank}`
+                      : 'N/M';
 
                     return (
                       <tr key={i} className="hover:bg-me-ivory/50">
@@ -316,13 +328,15 @@ export default function MonthlyReportPage() {
                           &quot;{row.question}&quot;
                         </td>
                         <td className="px-3 py-3 text-center">
-                          <span className={`inline-block text-xs font-bold px-2 py-0.5 rounded-full ${rankBadge}`}>
-                            {row.client_rank != null ? `#${row.client_rank}` : 'N/M'}
+                          <span className={`inline-block text-xs font-bold px-2 py-0.5 rounded-full ${rankBadge}`} title={!row.measured ? 'Probe failed — not measured' : undefined}>
+                            {rankLabel}
                           </span>
                         </td>
                         <td className="px-4 py-3">
-                          {row.competitors.length === 0 ? (
-                            <span className="text-xs text-me-charcoal/45">No run data</span>
+                          {!row.measured ? (
+                            <span className="text-xs text-me-charcoal/35 italic">Not measured</span>
+                          ) : row.competitors.length === 0 ? (
+                            <span className="text-xs text-me-charcoal/45">No competitors found</span>
                           ) : (
                             <div className="flex flex-wrap gap-1.5">
                               {row.competitors.map((c, ci) => (

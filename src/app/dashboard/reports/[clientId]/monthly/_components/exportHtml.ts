@@ -13,18 +13,33 @@ export function buildExportHtml(report: MonthlyReportData, recommendations: stri
 
   const competitiveRows = competitive
     .map(
-      row => `
+      row => {
+        // Not measured → neutral grey; Measured but absent → red; Ranked ≤3 → green; else ochre
+        const bg = !row.measured
+          ? 'rgba(0,0,0,0.06)'
+          : row.client_rank == null ? 'rgba(194,69,58,0.10)' : row.client_rank <= 3 ? 'rgba(92,138,74,0.12)' : 'rgba(196,145,46,0.10)'
+        const fg = !row.measured
+          ? 'rgba(26,26,26,0.40)'
+          : row.client_rank == null ? '#C2453A' : row.client_rank <= 3 ? '#5C8A4A' : '#C4912E'
+        const label = !row.measured
+          ? '—'
+          : row.client_rank != null ? `#${row.client_rank}` : 'N/M'
+        const competitorsCell = !row.measured
+          ? '<em style="color:rgba(26,26,26,0.35);">Not measured</em>'
+          : (row.competitors.map(c => `#${c.rank} ${escHtml(c.brand)}`).join(' · ') || '—')
+        return `
     <tr>
       <td style="padding:8px 12px; font-size:12px; color:#1A1A1A;">"${escHtml(row.question)}"</td>
       <td style="padding:8px 12px; text-align:center;">
-        <span style="font-size:11px; font-weight:700; padding:2px 8px; border-radius:12px; background:${row.client_rank == null ? 'rgba(194,69,58,0.10)' : row.client_rank <= 3 ? 'rgba(92,138,74,0.12)' : 'rgba(196,145,46,0.10)'}; color:${row.client_rank == null ? '#C2453A' : row.client_rank <= 3 ? '#5C8A4A' : '#C4912E'};">
-          ${row.client_rank != null ? `#${row.client_rank}` : 'N/M'}
+        <span style="font-size:11px; font-weight:700; padding:2px 8px; border-radius:12px; background:${bg}; color:${fg};">
+          ${label}
         </span>
       </td>
       <td style="padding:8px 12px; font-size:11px; color:rgba(26,26,26,0.60);">
-        ${row.competitors.map(c => `#${c.rank} ${escHtml(c.brand)}`).join(' · ') || '—'}
+        ${competitorsCell}
       </td>
-    </tr>`,
+    </tr>`
+      },
     )
     .join('')
 
