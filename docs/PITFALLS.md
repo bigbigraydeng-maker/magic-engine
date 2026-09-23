@@ -426,6 +426,8 @@ Meta 400 —— `(#10) 缺 pages_read_user_content`、`(#100/33) 帖子不存在
   （`src/lib/cron/registry.test.ts` 已锁死，加回去当场红）。串在后面的
   `&& curl hc-ping.com/...` 健康检查上报不受影响 —— 它漏掉的方向是「误报没跑」会响，
   漏掉一件活儿的方向是安静地不干、不会响；
+  ⚠️ 2026-09-23 修正：这条只对**跑得快**的任务成立。跑过 125 秒的任务每一轮都 524，
+  上报从上线起一次都没发出去过，等于把一个永远红的检查挂在那里 —— 见 F12；
 - 一个请求跑 160 秒以上的活儿，本来就该拆段：拆成 Inngest 的 step，每段一个请求，
   失败只重试那一段。
 
@@ -487,6 +489,91 @@ Render.com 的 HTTP 请求有超时上限（通常 3~5 分钟），
 不要返回空数组 —— 空数组跟「这个人真的没有数据」长得一模一样。
 
 ---
+
+---
+
+### F11 · 部署换机会把在途的定时任务连同收尾代码一起杀掉 —— 记录永远停在「在跑」
+
+**症状**（2026-09-22，CTS Tours NZ 本周的博客草稿整周没有）：`blog-weekly` 03:01:04 开跑，
+按客户逐个生成。oztop 那篇 03:02:39 写进库，排在后面的 CTS **一个字都没生成**。
+`cron_run_logs` 里那一行永远停在 `running`、`finished_at` 为空。
+
+**⚠️ 口径更正（复审查出来的）**：**不是「没有任何人被告知」。** `health.ts` 的 `stuck` 判据
+（running + finished_at 空 + 开跑超 1 小时）命中了，也确实进了当天的今日待办 —— 9/22 19:01
+那封信实测 `total_items=170`，它是其中一条。问题是那条写的是「N 个自动任务开跑了但一直没结束，
+去 Render 看日志」：**不点名是哪个客户的什么东西丢了，也不说下一步是补跑**。
+所以真正的病不是「没人报」，是**报得没法用** —— 而「每天 170 条待办」本身是另一件更大的事，
+单独立卡，别混进来。
+
+**现场**（Render 实例级日志，不是推断）：新实例 03:02:12.695 上线，跑着这一轮的旧实例
+`srv-…-2zsx6` 的日志停在 **03:02:38.501**，正好是 oztop 那篇入库的前 0.5 秒，此后一个字节都没有。
+Render 在新实例上线后给旧实例约 30 秒宽限期，到点直接杀 —— CTS 那篇要 60 秒以上，没机会。
+
+**怎么认出这类死法**（**判据比日志好用，日志会滚掉**）：开跑那行的 `started_at` 走的是建表 DDL
+的 `NOW()`，**微秒精度（6 位小数）**；`finish()` 传的是 JS `toISOString()`，**毫秒精度（3 位）**，
+upsert 会把 `started_at` 一起盖掉。所以 `started_at` 还是 6 位小数 = 收尾代码一次都没跑过。
+按这条判据回查 9 月：`attribution-cron` 8 次停在 running 的**全部 8 次**、
+`industry-ai-visibility-daily` 5/5、`blog-weekly` 1/1、`meta-leads-sync` 1/1，
+运行窗口里都压着一次「部署完成 + 30 秒」的时刻；同期正常跑完的 570 次里只有 5 次（约 1%）压到。
+
+**怎么防**：
+- **兜底的是事后清扫，不是 SIGTERM。** `reapAbandonedCronRuns()`：任何停在 `running`、开跑超过
+  6 小时的行一律收成 `failed`（挂在 `cron-run-logs-cleanup` 里每天跑）。SIGKILL / OOM / 进程直接崩，
+  SIGTERM 一个都兜不住，这条都兜得住。6 小时不是拍的 —— HTTP 定时任务实测最长一轮
+  `ai-tracker-weekly` 6093 秒 ≈ 1.7 小时，留 3.5 倍余量；收早了会把正在好好跑的一轮判成失败；
+- SIGTERM 收口（`closeInFlightCronRuns()`）是**加分项**，价值在于它能说出「是被部署掐的」这个原因。
+  但别把保证建在它上面：Next 的 `next start` 收到 SIGTERM 走 `server.close(() => process.exit(0))`，
+  回调在连接清空那一刻触发，而 `process.exit` 不等 pending 的 promise。连接还开着（开跑 98 秒被换机）
+  → 写得进去；连接已被 Cloudflare 在 125 秒掐掉（跑 500 秒那种）→ 可能当场就退了。
+  信号本身穿得过 `npm start` 那层（实测 npm 11.19 转发给子进程，子进程的异步收尾也跑完了）；
+- 收口用**带条件的 update**（`status='running'`），绝不 upsert —— 万一这一行其实已经在别处
+  收成 `completed`，upsert 会把一次成功反写成失败；
+- 收口只登记 HTTP 那条路（`startCronRun`），不登记 Inngest 那条（`startCronRunId`）：
+  Inngest 的步骤可能落在别的实例上，按本进程的记忆去收就是误伤，而且它们一轮可以合法地跑很久
+  （实测 `messenger-brief-hourly` 有跑完用时 95494 秒的记录）。
+  ⚠️ **不代表 Inngest 那边没问题**：9 月停在 `running` 的 98 行里最大头正是 Inngest 的
+  `messenger-brief-hourly`（59 行，9/7 起每小时一条），说明那边的 `onFailure` → `failOpenCronRuns`
+  实际上**没有在收口**。那是另一条线的事，别当成「已经有人管」略过去；
+- 登记表里躺太久的条目**不许说成「被部署掐的」**：路由没有 try/catch 时业务函数一抛异常
+  `finish()` 就永远不跑，条目会留到下一次部署 —— 那时按 `deploy_shutdown` 收口就是**编造原因**，
+  PM 会照着去补跑，下一轮同样抛异常。超过阈值的改标 `process_gone`（死因不明）；
+- **改状态之前先确认告警接得住**。`failed` 目前只到 /dashboard/workflows-health 页面，
+  没进今日待办；只改状态不补下发，这个修复反而会把唯一那条 `cron_stuck` 告警弄没。
+  所以同一个 PR 里加了 `pushInterruptedCronRunItems`，直接读 `cron_run_logs` 出待办；
+- 真正的结构性修法还是 F8/F10 那句：**一个请求跑 125 秒以上的活儿本来就该拆成 Inngest 的 step**。
+  拆了之后部署换机只影响一个 step，重试就好。本次没做，记在 ROADMAP。
+
+---
+
+### F12 · `&& curl hc-ping.com/...` 在跑得久的任务上，从上线起一次都没发出去过
+
+**症状**：`attribution-cron` 的 healthchecks.io 上报永远不响 —— 不是偶尔漏，是**每一轮都漏**。
+
+**现场**（2026-09-22 12:01 Render cron 日志）：
+`curl: (22) The requested URL returned error: 524`，发生在开跑后 **125.1 秒**；
+而同一轮服务端跑了约 505 秒、正常跑完并写了运行记录。源站前面挂着 Cloudflare，
+响应超过约 125 秒直接 524 断连 → `curl -f` 退出码 22 → `&&` 短路 → 上报没了。
+
+**判据错在哪**（跟 F8 同源）：退出码回答的是「网关有没有在超时前把响应给 curl」，
+不是「这件活儿有没有干完」。**调大 `--max-time` 不解决问题 —— 掐断的是网关，不是 curl。**
+
+**同病的不止一个。** 查库（近 14 天跑完的运行）对照 render.yaml 里当时还挂着 `&& curl hc-ping` 的服务：
+
+| 服务 | 平均每轮 | 超 125 秒的比例 |
+|---|---|---|
+| `ai-tracker-weekly` | 5770 秒 | 2/2 |
+| `industry-ai-visibility-daily` | 628 秒 | 10/10 |
+| `keyword-snapshots-weekly` | 368 秒 | 2/2 |
+| `seo-patrol-daily` | 311 秒 | 14/14 |
+| `zhuge-weekly-recalculate` | 124 秒（最长 142） | 1/2 |
+
+这 5 个的上报同样从上线起一次都没发出去过，已在同一个 PR 里一并改掉。
+
+**怎么防**：跑得久的任务，上报搬到服务端收尾时做 ——
+`src/lib/cron/registry.ts` 填 `healthcheckUuid`，`run-logger.ts` 的 `finish()` 负责 ping，
+render.yaml 里那条 `&& curl hc-ping.com/...` **同步删掉**，否则一件事报两遍。
+短任务（远低于 125 秒）沿用 `&&` 没问题，不用一刀切改 —— 但**加新 cron 时要先看它跑多久**，
+别再留一个永远红的检查在那儿。
 
 ---
 

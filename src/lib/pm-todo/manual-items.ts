@@ -69,6 +69,8 @@ export type ManualItemKind =
   | 'cron_blind'
   /** 自动任务跑到一半卡死（状态永远停在 running，路由的 catch 没机会执行） */
   | 'cron_stuck'
+  /** 自动任务被一次部署换机掐断了 —— 那一轮的活儿没干完，而且不会自己补（2026-09-23） */
+  | 'cron_interrupted_by_deploy'
   | 'goal_baseline_mismatch'
   | 'diagnostic_findings'
   | 'prescription_updated'
@@ -177,6 +179,7 @@ import { verifyActionLink } from './action-link'
 import { fetchAll } from '@/lib/supabase-paginate'
 import { checkCronHealth } from '@/lib/cron/health'
 import { CRON_REGISTRY } from '@/lib/cron/registry'
+import { INTERRUPTED_BY_DEPLOY, INTERRUPTED_BY_KEY, INTERRUPTED_BY_PROCESS_GONE } from '@/lib/cron/run-logger'
 import { fetchGa4KeyEventBreakdown } from '@/lib/ga4/client'
 import { judgeLeadsSanity } from '@/lib/strategy/leads-sanity'
 import { judgeWorkerPresence, judgeQueueByClient } from '@/lib/factory/worker-presence'
@@ -383,6 +386,10 @@ export async function loadManualItems(
   )
   // 按时没跑 / 查不出跑没跑 —— PM 2026-08-03 要求「不能完成需要有报错」
   await pushCronHealthItems(supabase, items, now)
+  // 跑到一半被一次上线换机器掐断 —— 原因已知，要的是补跑，不是查日志（2026-09-23 CTS 周更事故）
+  await pushInterruptedCronRunItems(supabase, items, now).catch((e) =>
+    console.warn('[manual-items] 被掐断的自动任务检查失败（不阻塞其他待办）:', e),
+  )
   // 平台候选到了复查日期 —— 不落库、不查表，纯本地日期判断
   pushPlatformCandidateReviewItems(items, now)
   // 客户方案文档里写的一次性人工动作 —— 同样不落库、纯本地日期判断，过期自动消失
@@ -951,6 +958,155 @@ const CRON_STOPPED_GUIDE = {
   },
   external: {
     how: '这几个的定时器**不在我们代码仓库里**，是有人在 Render 后台手工建的 —— 打开链接 → 在服务列表里按名字找 → 看它还在不在、Events 里最后一次跑成什么样。如果整条被删了，回我一句我把它接回代码里管',
+    href: RENDER_DASHBOARD_URL,
+  },
+} as const
+
+/**
+ * 往前翻几天找「被掐断 / 没了」的运行记录。
+ *
+ * 🔴 14 天不是 7 天：最长的任务就是周更（`blog-weekly`，`0 3 * * 2`），7 天的窗口
+ *    刚好卡在下一轮上 —— 出事那轮还没被人处理就掉出窗口，**告警自己消失**，
+ *    跟这条待办要解决的问题是同一个形状。给两个周期的余量。
+ */
+const INTERRUPTED_LOOKBACK_DAYS = 14
+
+/** 一次扫多少条 failed 记录。超过就分页，绝不靠 limit 截断（记忆：PostgREST 1000 行悄悄截断）。 */
+const INTERRUPTED_SCAN_PAGE = 500
+
+/**
+ * 自动任务被掐断 / 跑到一半没了 → 下发。
+ *
+ * 🔴 为什么单独一条、不并进上面的「卡死」：
+ *    这两件事**下一步动作不一样**。卡死是「不知道它卡在哪，去看日志」；这一条是
+ *    「已经知道它没跑完，要的是补跑」。而且「卡死」那条是把当天所有卡住的任务
+ *    合成一句泛泛的话，点不出是哪个客户的什么东西丢了 —— 2026-09-22 CTS 周更博客
+ *    那次实测就是这样：`stuck` 确实报了，也确实进了当天的信，但它是 **170 条里的一条**，
+ *    写的是「去 Render 看日志」。所以这里要解决的不是「没人报」，是「报得没法用」。
+ *
+ * 🔴 为什么不靠 health.ts 的 `stuck`：收口一把 `running` 改成 `failed`，
+ *    `stuck` 判据（status='running'）当场不再命中，而 `failing` **没有接进今日待办**
+ *    （只在 /dashboard/workflows-health 页面上）。不自己出这一条，这次修复反而会把
+ *    原来那条告警弄没。这里直接读 `cron_run_logs`，不经过 health.ts，两边互不影响。
+ *
+ * ⚠️ **已知局限，没修**：判「补上了没有」用的是「这个任务后来有没有跑成」。这对
+ *    `attribution-cron` 这种每轮重扫一遍的任务成立；对 `blog-weekly` 这种**每轮产出不同内容**
+ *    的任务不成立 —— 下周那轮跑成了，上周丢的那篇稿子并没有回来，待办却会自己消失。
+ *    所以 `what` 里明说了「补跑要趁下一轮之前」。要真正修好得按任务标注「重跑能不能找回产出」，
+ *    那是另一件事，记在 ROADMAP。
+ */
+export async function pushInterruptedCronRunItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+): Promise<void> {
+  const since = new Date(now.getTime() - INTERRUPTED_LOOKBACK_DAYS * 86_400_000).toISOString()
+
+  // 分页扫完，不靠 limit 截断 —— 截断在这里的表现就是「告警消失」，正是要修的那种病。
+  const failedRuns: Array<{ job_name: string; started_at: string; summary: unknown }> = []
+  for (let page = 0; ; page++) {
+    const { data, error } = await supabase
+      .from('cron_run_logs')
+      .select('job_name, started_at, summary')
+      .eq('status', 'failed')
+      .gte('started_at', since)
+      .order('started_at', { ascending: false })
+      .range(page * INTERRUPTED_SCAN_PAGE, (page + 1) * INTERRUPTED_SCAN_PAGE - 1)
+    if (error) {
+      // 🔴 读库失败必须喊出来。外层那个 .catch() 只接抛出来的异常，接不住 PostgREST
+      //    用返回值报的错 —— 静默 return 就是让告警凭空消失。
+      console.error('[manual-items] 被掐断的自动任务：读 cron_run_logs 失败，这一栏这次不出', error)
+      return
+    }
+    if (!data || data.length === 0) break
+    failedRuns.push(...data)
+    if (data.length < INTERRUPTED_SCAN_PAGE) break
+  }
+
+  // 标记在 summary 里，过滤放本地做：PostgREST 的 JSON 过滤语法一改就静默返空，
+  // 而「静默返空」在这里的表现就是「告警消失」。
+  const cutAt = new Map<string, string>() // job_name → 最近一次没跑完的 started_at
+  for (const run of failedRuns) {
+    const summary = run.summary as Record<string, unknown> | null
+    const mark = summary?.[INTERRUPTED_BY_KEY]
+    if (mark !== INTERRUPTED_BY_DEPLOY && mark !== INTERRUPTED_BY_PROCESS_GONE) continue
+    if (!cutAt.has(run.job_name)) cutAt.set(run.job_name, run.started_at)
+  }
+  if (cutAt.size === 0) return
+
+  // 🔴 每个任务各查一条「最近一次跑成」，不是「拉最近 1000 条再分组」。
+  //    后者正是 health.ts:94 注释里写过的那个翻车写法：高频任务一周就能自己撑爆
+  //    1000 行（`viral-analyzer-worker` 每 10 分钟一轮 = 1008 行/周），
+  //    取不到真正最近那次成功 → 补跑完待办也不消失。
+  const unrecovered: string[] = []
+  for (const [jobName, cut] of cutAt) {
+    const { data, error } = await supabase
+      .from('cron_run_logs')
+      .select('started_at')
+      .eq('job_name', jobName)
+      .eq('status', 'completed')
+      .gt('started_at', cut)
+      .order('started_at', { ascending: false })
+      .limit(1)
+    if (error) {
+      console.error(`[manual-items] 被掐断的自动任务：查 ${jobName} 后来有没有跑成失败，先当成没补上`, error)
+    }
+    if (!error && data && data.length > 0) continue
+    unrecovered.push(jobName)
+  }
+  if (unrecovered.length === 0) return
+
+  // 🔴 按**谁在调度它**分组。同一个文件上面那条「该跑没跑」已经为这件事挨过一次打：
+  //    照着「去 Render 找这几个服务」的指引去找一个由 GitHub Actions 调度的任务，
+  //    人会翻半天再回来问 —— 等于这条待办没下发好。走 `CRON_STOPPED_GUIDE` 同一套分组。
+  // 🔴 而且要把**任务名换成 Render 上真正显示的服务名**：两者经常不一样
+  //    （`meta-leads-sync` 的服务叫 `meta-leads-hourly`），照任务名去搜是搜不到的。
+  const byJob = new Map(CRON_REGISTRY.map((e) => [e.jobName, e]))
+  const groups = new Map<string, string[]>()
+  for (const jobName of unrecovered) {
+    const entry = byJob.get(jobName)
+    const who = entry?.scheduler ?? 'render'
+    const shown = entry && entry.service !== jobName ? `${entry.service}（任务名 ${jobName}）` : jobName
+    groups.set(who, [...(groups.get(who) ?? []), `${shown}，${daysAgo(cutAt.get(jobName)!, now) ?? 0} 天前那轮`])
+  }
+
+  for (const [who, names] of groups) {
+    const guide = INTERRUPTED_RERUN_GUIDE[who as keyof typeof INTERRUPTED_RERUN_GUIDE] ?? INTERRUPTED_RERUN_GUIDE.render
+    items.push({
+      kind: 'cron_interrupted_by_deploy',
+      client_id: 'infra',
+      client_name: 'Magic Engine 后台',
+      what: `${names.length} 个自动任务跑到一半没跑完，之后一直没跑成：${names.join('；')} —— 那一轮该产出的东西没产出，它自己不会补。**补跑要趁下一轮之前**：像周更博客这种，下周那轮生成的是下周的稿子，这周丢的那篇不会回来`,
+      how: guide.how,
+      href: guide.href,
+    })
+  }
+}
+
+/**
+ * 「被掐断了要补跑」按调度方给不同的动手指引。
+ *
+ * 🔴 **故意不说「重复跑是安全的」。** 会走到这条待办的任务里有真发 LinkedIn 帖
+ *    （`linkedin-progress-post-mon/-thu`）、真发邮件（`email-reply-digest`）、
+ *    真发社媒成片（`factory-publish-worker`，2026-08-04「同一条片连发三次」那次就出在这条线上）。
+ *    对全部任务一律断言幂等，等于让 PM 照着点一下就发第二遍 —— 这正是 CLAUDE.md
+ *    说的「下发了但没法照做」的反面：能照做，但照做会闯祸。
+ */
+const INTERRUPTED_RERUN_GUIDE = {
+  render: {
+    how: '先回我一句「这条能不能重跑」—— 名单里有会发帖 / 发邮件 / 发成片的任务，重跑会发第二遍，不能一概而论。确认能重跑之后：打开链接 → 按上面括号里的服务名找到它 → 进 Runs 页面 → 点 "Trigger Run"',
+    href: RENDER_DASHBOARD_URL,
+  },
+  'github-actions': {
+    how: '先回我一句「这条能不能重跑」（有些任务重跑会对外发第二遍）。确认之后：打开链接 → Actions 页找到同名工作流 → 点 Run workflow 手动跑一次',
+    href: 'https://github.com/bigbigraydeng-maker/magic-engine/actions',
+  },
+  inngest: {
+    how: '先回我一句「这条能不能重跑」。确认之后：打开链接 → Production 环境 → Functions 找到同名函数 → 在 Runs 里对失败那轮点 Replay',
+    href: 'https://app.inngest.com',
+  },
+  external: {
+    how: '这几个的定时器**不在我们代码仓库里**，是有人在 Render 后台手工建的。先回我一句「这条能不能重跑」，确认之后打开链接 → 在服务列表里按名字找到它 → 进 Runs 页面点 "Trigger Run"',
     href: RENDER_DASHBOARD_URL,
   },
 } as const
