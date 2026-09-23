@@ -24,6 +24,8 @@ export async function runGemini(input: RunnerInput): Promise<RunnerOutput> {
   const start = Date.now()
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
+    // 漏挂 / 删 secret 跟运行时 credential_invalid 是同一件事：只有人能修，必须落断电台账。
+    void recordRunnerOutage('google', 'credential_invalid', 'GEMINI_API_KEY environment variable is not set')
     return errorOutput(start, 'GEMINI_API_KEY environment variable is not set')
   }
 

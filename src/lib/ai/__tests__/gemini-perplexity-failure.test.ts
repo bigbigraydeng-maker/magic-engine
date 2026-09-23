@@ -55,6 +55,34 @@ describe('classifyGeminiFailure', () => {
     expect(needsHuman(classifyGeminiFailure(err))).toBe(false)
   })
 
+  it('真实配额耗尽响应（SDK 不会把 RESOURCE_EXHAUSTED 拼进 message）→ account_exhausted', () => {
+    // 🔴 这是 GoogleGenerativeAIFetchError 的真实构造形状：SDK 只把 error.message
+    //    拼进异常 message，error.status（gRPC 状态名）从未被读取，所以字面的
+    //    "RESOURCE_EXHAUSTED" 不会出现。识别必须靠 message 里的配额文案。
+    const err = Object.assign(
+      new Error(
+        'Error fetching from https://generativelanguage.googleapis.com/...: ' +
+          '[429 Too Many Requests] You exceeded your current quota, please check your plan and billing details.',
+      ),
+      { status: 429 },
+    )
+    expect(classifyGeminiFailure(err)).toBe('account_exhausted')
+    expect(needsHuman(classifyGeminiFailure(err))).toBe(true)
+  })
+
+  it('errorDetails 带 QuotaFailure（无配额文案）→ account_exhausted', () => {
+    const err = Object.assign(new Error('Too many requests'), {
+      status: 429,
+      errorDetails: [
+        {
+          '@type': 'type.googleapis.com/google.rpc.QuotaFailure',
+          violations: [{ quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier' }],
+        },
+      ],
+    })
+    expect(classifyGeminiFailure(err)).toBe('account_exhausted')
+  })
+
   it('UNAUTHENTICATED → credential_invalid', () => {
     const err = new Error('[GoogleGenerativeAI Error]: UNAUTHENTICATED')
     expect(classifyGeminiFailure(err)).toBe('credential_invalid')

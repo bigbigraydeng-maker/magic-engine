@@ -171,23 +171,42 @@ function extractErrorPayload(err: object): Record<string, unknown> | null {
   return null
 }
 
+/**
+ * `GoogleGenerativeAIFetchError` 把 Google 返回的 `error.details` 数组原样挂在 `.errorDetails`。
+ * 配额耗尽时这里面通常有一个 `google.rpc.QuotaFailure` detail —— 这是比正则猜 message 文本
+ * 更可靠的信号（详见 `looksLikeQuotaExhausted` 的注释）。
+ */
+function extractGeminiErrorDetails(err: object): unknown[] | null {
+  if ('errorDetails' in err && Array.isArray((err as { errorDetails?: unknown }).errorDetails)) {
+    return (err as { errorDetails: unknown[] }).errorDetails
+  }
+  return null
+}
+
 // ─── Gemini (Google AI) failure classifier ───────────────────────────────────
 
 /**
  * 判 Gemini SDK 抛出的异常属于哪一类。
  *
  * Google AI SDK (`@google/generative-ai`) 的错误体跟 OpenAI 完全不同：
- *   · `GoogleGenerativeAIFetchError` 带 `.status`（HTTP 状态码）
- *   · 错误信息里嵌 gRPC 状态名（`RESOURCE_EXHAUSTED` / `PERMISSION_DENIED` …）
+ *   · `GoogleGenerativeAIFetchError` 带 `.status`（HTTP 状态码）和 `.errorDetails`
+ *     （Google 响应体里 `error.details` 数组的原样透传）
+ *   · 错误信息里嵌 gRPC 状态名（`PERMISSION_DENIED` / `UNAUTHENTICATED` …）——
+ *     **除了 `RESOURCE_EXHAUSTED`**。SDK 构造异常时只把 `error.message` 和
+ *     `JSON.stringify(error.details)` 拼进 `.message`，`error.status` 这个字段
+ *     （gRPC 状态名的来源）**从未被读取**，所以配额耗尽时字面的
+ *     "RESOURCE_EXHAUSTED" 几乎不会出现在 `.message` 里（Codex review 2026-09-23 抓到）。
  *   · 没有独立的结构化 `{error:{code,type}}` 字段
  *
- * 所以这里从 message 文本 + HTTP status 两路判断，跟 `classifyOpenAIFailure`
- * 遵循同一条原则：**先认明确的错误码，再看状态码**。
+ * 所以这里从 message 文本 + HTTP status + `.errorDetails` 三路判断，跟
+ * `classifyOpenAIFailure` 遵循同一条原则：**先认明确的错误码，再看状态码**，
+ * 但「明确的错误码」对 Gemini 配额场景必须落到真实可用的字段上，不能只赌
+ * message 里出现一个 SDK 根本不会写进去的字符串。
  *
- * 🔴 RESOURCE_EXHAUSTED 在 Google API 里同时覆盖「配额用完」和「请求速率过快」。
+ * 🔴 配额耗尽（HTTP 429）同时覆盖「配额用完」和「请求速率过快」。
  *    Google AI SDK 不做内部重试（跟 OpenAI SDK maxRetries=2 不同），所以限流也会
- *    走到 catch。到这一步还是 RESOURCE_EXHAUSTED 的，往 `account_exhausted` 偏 ——
- *    理由跟 outage-ledger.ts 一致：宁可多报一次，也不能让真实断电悄悄过去。
+ *    走到 catch。识别到配额信号的，往 `account_exhausted` 偏 —— 理由跟
+ *    outage-ledger.ts 一致：宁可多报一次，也不能让真实断电悄悄过去。
  */
 export function classifyGeminiFailure(err: unknown): ProviderFailureKind {
   if (!(err instanceof Error)) return 'other'
@@ -203,11 +222,32 @@ export function classifyGeminiFailure(err: unknown): ProviderFailureKind {
   if (/PERMISSION_DENIED/i.test(msg)) return 'credential_invalid'
   if (status === 403) return 'credential_invalid'
 
-  // 3. 资源耗尽 —— Google 把配额和限流都塞在这个码里
+  // 3. 资源耗尽 —— 先看真实字段（errorDetails / message 里的配额文案），
+  //    RESOURCE_EXHAUSTED 字面匹配只是兜底（几乎不会命中，见上方注释）
   if (/RESOURCE_EXHAUSTED/i.test(msg)) return 'account_exhausted'
+  if (looksLikeGeminiQuotaExhausted(err, msg)) return 'account_exhausted'
   if (status === 429) return 'rate_limited'
 
   return 'other'
+}
+
+/**
+ * 从 SDK 实际暴露的字段判断这次失败是不是配额耗尽，而不是纯限流。
+ *
+ *   · `.errorDetails`：Google 配额耗尽响应通常带一个
+ *     `type.googleapis.com/google.rpc.QuotaFailure` detail —— 这是结构化字段，
+ *     比正则猜 message 可靠得多。
+ *   · message 文案：SDK 会把 `error.message` 原文拼进异常，Google 配额耗尽的
+ *     固定文案是 "You exceeded your current quota, please check your plan
+ *     and billing details."，含 "quota" 关键字。
+ */
+function looksLikeGeminiQuotaExhausted(err: object, msg: string): boolean {
+  const details = extractGeminiErrorDetails(err)
+  if (details && details.length > 0) {
+    const detailsText = JSON.stringify(details)
+    if (/QuotaFailure|quotaId|quotaMetric/i.test(detailsText)) return true
+  }
+  return /exceeded your current quota|quota exceeded|check your plan and billing/i.test(msg)
 }
 
 // ─── Perplexity failure classifier ───────────────────────────────────────────
