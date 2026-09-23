@@ -70,6 +70,8 @@ PM 原话："不需要让我批准，我们最大权限的让 AI 去介入。但
   - `autonomy_mode text CHECK IN ('observe','bounded_auto') DEFAULT 'observe'`
   - `creative_pool jsonb DEFAULT '[]'`：`[{kind:'meta_video'|'work_order', ref, approved_by, approved_at}]`；agent 只从这里选素材
 - Settings UI：`/dashboard/clients/[id]/ads-health` 顶部加"目标 / 日预算上限 / 素材池"三块（铁律 8：不许让 PM 进 Supabase 直填）。
+- **写入路径守卫（狄仁杰第一轮，四条实锤）**：三列的写入**只走现有** `/api/clients/[id]/ad-strategy-config` PATCH 的 `requirePaidClientAccess` + `guardGlobalAdmin` 双守卫（`route.ts:36-44`），不新开路由、不只挂 `requirePaidClientAccess`（它的 `ACCESS_TYPES_DASHBOARD` 含 `'fde'` 和 `'client'`，等于让客户/FDE 能改自治开关和预算上限，污染信封基准）。
+- **素材池批准与提报分离**：`creative_pool[]` 条目带 `status:'candidate'|'approved'`；PATCH 只能写 `kind/ref/status='candidate'`；`approved_by/approved_at/status='approved'` **只能由** `POST /api/clients/[id]/ad-strategy-config/creative-pool/approve` 写入，`approved_by` **服务端从会话派生、拒绝任何客户端传入**（沿用 `src/lib/diagnostic/prescription-patch.ts` 2026-08-04 事故后的规则），且该路由挂 `guardGlobalAdmin`。agent 只读 `status='approved'` 的条目。
 
 ### G2 目标节奏（goal pace，纯函数）
 `src/lib/ads-strategy/goal-pace.ts`：输入 goal + 当期累计 + 已过天数 → `{expectedToDate, actualToDate, gapPct, projectedEnd, verdict:'on_track'|'behind'|'unreachable_within_caps'}`。`unreachable_within_caps` 的判据：按过去 7 天中位数每结果成本 × 剩余日预算上限 × 剩余天数，仍到不了目标的 80%。这是**请示 PM 的唯一触发器**。
@@ -99,6 +101,11 @@ PM 原话："不需要让我批准，我们最大权限的让 AI 去介入。但
   2. **实例闸** `authorize.ts` ⑥b（policy 层）：`sideEffect==='outward' && policy.mode==='auto_approve'` → 若声明为 `bounded` 且 **本次 input 落在信封内**（每项在授权时用真实快照重算，K9）→ 放行；否则 **不是转 pending_approval，而是 deny（可恢复码 `outside_autonomy_envelope`）+ 生成 `ads.escalate_to_pm` 三件套**。审批界面因此不需要存在。
   3. **实例闸的兜底副本**：`gateway.ts` 在 `outwardBlockReason` 之后、provider 调用之前，用运行前快照（M1 `kernel_pre`）**再算一次输入是否在信封内**，不一致直接 `dead_letter` + 回滚不触发（还没动 provider）。这样"拆掉 authorize.ts 那一层，gateway 仍拦得住"对实例级检查同样成立——双保险从"两处都查声明"变成"两处查声明 + 两处查实例"，不是变单保险。
   4. 变异测试四条必红：删 gateway 的结构闸调用 / 删 gateway 的实例重算 / 把信封某项声明成 `false` / 把 `maxBudgetDeltaRatio` 声明成 0.5。
+- **`outside_autonomy_envelope` 不许死锁（魏征第一轮，`runner.ts:291/714/744` 实锤）**：
+  1. **正常流程根本不产生这条 deny**：孔明提交前先用同一个纯函数 `isWithinEnvelope(input, snapshot, config)` 预检；不在信封内 → **不提交 Kernel run**，直接出 `ads.escalate_to_pm` 三件套。Kernel 的实例闸只是纵深防御，命中即说明预检和授权用的快照/配置不一致，要记 `envelope_preflight_mismatch` 指标。
+  2. 万一命中：`outside_autonomy_envelope` **加入** `RECOVERABLE_DENY_CODES`（`runner.ts:714`）**和** `kernel_claim_run_recovery` RPC 里那份必须一字不差的副本（新 migration，仿 `20260811040000_kernel_recovery_outward_requires_human_policy.sql`，架构测试 `architecture.test.ts:2011` 同步加断言）。
+  3. **恢复调用点写死在一步**：下一轮 `ads/impact.cycle.due` 的孔明步骤开头，查该客户 `action_runs.status='denied' AND deny_code='outside_autonomy_envelope' AND denied_at < ad_strategy_configs.updated_at OR goals.updated_at`（即 PM 改过上限/目标之后），命中的先 `recoverDeniedRun(runId, 'system:ads-strategist', reason)` 再决定是否重提；PM 保存 Settings 时不直接调 Kernel（保持"所有触达 Kernel 的路径都走每客户队列"，见 G11）。
+  4. **幂等键含 `cycle_date`**：6 个广告 ActionKey 的 `idempotency.keyFields` 一律包含 `cycle_date` + 实体 id + 动作参数 hash，不同天的同内容处方不共用幂等键，昨天的 denied 不会被今天命中。
 - 保留：K1 撤回处理函数必填、K3 延迟回读不自动恢复、K4 广告花费不进 Kernel 成本字段、K5 无 goal 拒绝、K6 学习受限只建议、K10/K11 改前值核对 + 回滚失败冻结客户、K13 禁回落共享令牌、K14 先对齐注册表与生产。
 
 ### G6 Inngest 闭环（业务可读事件，函数 id 一律 `cloud-ads-*`）
@@ -113,6 +120,8 @@ ads/verification.completed  ← 韩信：before/after → flywheel_outcomes（ev
 ads/memory.recorded         ← 孔明：saveProvenPattern / saveFailedExperiment / updateDecisionOutcome
 ads/pm_digest.ready         ← G10 日检报告
 ```
+**数据完整性门槛跟着搬（子牙第一轮）**：现有 `google-data-pullback-daily/route.ts:423` 只在 `result.ad_daily.success` 时才跑评估，这道门槛**必须原样进入** `ads/growth_state.built`：`impact.cycle.due` 事件携带三个同步函数（campaign / adset / ad 级）的 `success/complete` 信号 + 当日 `ad_snapshot_captures` 完整性；任一不完整 → `ads_growth_states.data_completeness='partial'`，**卫青只写状态不出机会、孔明本轮不提交任何 run**，日报"今天系统做了什么"段写明"数据没拉全，今天不动"。不是 low-confidence 继续算——因为 API 不稳定和账户端出事常同源，数据缺失日恰恰是花费异常日，缺分子会让 G11 反而更难触发。
+
 每步 `step.run` 内落 receipt（request id / client id / entity id / status / spend impact / authorization status / created_at）。**上线后必须手动 Sync `/api/inngest`**（PITFALLS F10）。现有 `google-data-pullback-daily` 内同步调用的 `evaluateClientAdHealth` + `runPortfolioDiagnostics` **迁入 `ads/growth_state.built` 这一步，旧路径收编不并行**（禁双跑）。
 
 ### G7 Check
@@ -143,7 +152,8 @@ ads/pm_digest.ready         ← G10 日检报告
 - 单账户当日累计变动 > 日预算上限
 - Kernel 回滚失败（K11）
 - Jev 连续低分（G9）
-- 快照采集 `ad_snapshot_captures` 当日不完整（看不见就不动）
+- 快照采集 `ad_snapshot_captures` 或日数据同步当日不完整（看不见就不动）——**这一条是"当日冻结"不是"切回 observe"**：`data_completeness='partial'` 的日子不出动作，次日数据补全自动恢复，不需要 PM 点开关；前四条才切 `observe`。
+- **串行化锁死（魏征补充）**：所有会触达 Kernel 授权的广告路径——每日循环、denied 恢复、WP4 多账户、任何未来的手动触发——**一律经由** `ads/impact.cycle.due` 这条 `concurrency: {limit:1, key:'event.data.client_id'}` 队列，没有旁路直接调 `submitActionRun`；同账户多单位的信封加总由此天然串行，gateway 第 3 道实例重算用的 `kernel_pre` 快照已含前一条 run 改后的预算。架构测试加断言：`src/lib/ads-strategy/**` 与 `src/lib/capabilities/ads/**` 之外禁止 import `submitActionRun` / `recoverDeniedRun`。
 
 ### G12 看板
 `/dashboard/clients/[id]/ads-health` 改为经营看板：目标进度条 / 今日动作时间线 / 问题卡 + 机会卡 / 验证追踪 / 自治开关（observe ↔ bounded_auto）。数据全部来自 `ads_growth_states` + `action_runs` + `flywheel_outcomes`，不新建 API 之外的读路径。
