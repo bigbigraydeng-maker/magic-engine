@@ -22,9 +22,11 @@ vi.mock('@/lib/supabase', () => ({
     from: () => ({
       select: () => ({
         eq: () => ({
-          order: () => Promise.resolve({
-            data: [{ direction: 'inbound', sender_name: 'Kelly', body: 'hi', sent_at: '2026-09-23T00:00:00Z' }],
-            error: null,
+          order: () => ({
+            abortSignal: () => Promise.resolve({
+              data: [{ direction: 'inbound', sender_name: 'Kelly', body: 'hi', sent_at: '2026-09-23T00:00:00Z' }],
+              error: null,
+            }),
           }),
         }),
       }),

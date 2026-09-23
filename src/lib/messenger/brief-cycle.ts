@@ -128,12 +128,15 @@ function toCandidate(row: ConversationRow): BriefCandidate {
   }
 }
 
-async function loadMessages(conversationId: string): Promise<StoredMessage[]> {
-  const { data } = await supabaseAdmin
+async function loadMessages(conversationId: string, signal?: AbortSignal): Promise<StoredMessage[]> {
+  let query = supabaseAdmin
     .from('conversation_messages')
     .select('direction, sender_name, body, sent_at')
     .eq('conversation_id', conversationId)
     .order('sent_at', { ascending: true })
+  if (signal) query = query.abortSignal(signal)
+
+  const { data } = await query
 
   return (data ?? []).map((m) => ({
     direction: m.direction as 'inbound' | 'outbound',
@@ -189,6 +192,11 @@ export async function loadDueBriefs(
  *   1. **账户级 AI 故障**（余额用光 / 密钥被拒）—— 对剩下每一条都是同一个结论，
  *      逐条确认只是把 20 秒乘以条数。
  *   2. **时间预算用完** —— 无论慢在哪里，剩下的留给下一轮，先把段交出去。
+ *
+ * 这道时间预算检查只在条目**之间**生效；单条 `loadMessages` / OpenAI 请求 /
+ * `storeBrief` 自己卡住的话，检查永远等不到下一次循环。所以每条候选还会拿到
+ * 一个按剩余预算算出来的 `AbortSignal.timeout(...)`，逐一传进这三步——单条调用
+ * 到点自己中止，不靠外面这层检查兜底。
  */
 export async function generateDueBriefs(
   due: readonly DueBrief[],
@@ -204,7 +212,8 @@ export async function generateDueBriefs(
 
   for (const candidate of due) {
     // 先看表再干活：这一张要是开工就注定超时，不如把段先交出去。
-    if (clock() - startedAt >= budgetMs) {
+    const elapsed = clock() - startedAt
+    if (elapsed >= budgetMs) {
       const left = due.length - done
       return {
         generated,
@@ -214,16 +223,27 @@ export async function generateDueBriefs(
     }
     done++
 
+    // 🔴 上面那个时间检查只在条目之间生效——单条 loadMessages / OpenAI 请求 /
+    // storeBrief 自己挂住的话，这个检查永远没有机会跑到下一轮。把剩余的段预算
+    // 落成一个真实的 AbortSignal 传给这一条调用本身，让它到点自己中止，而不是
+    // 靠调用方在外面干等到网关把整段连接掐断（2026-09-23 事故）。
+    const signal = AbortSignal.timeout(budgetMs - elapsed)
+
     try {
-      const messages = await loadMessages(candidate.conversationId)
+      const messages = await loadMessages(candidate.conversationId, signal)
       if (messages.length === 0) continue
-      const { brief, knowledgeStatus } = await generateBrief(messages, candidate.clientId, {
-        awaitingReply: candidate.awaitingReply,
-        hoursSinceLastMessage: candidate.lastMessageAt
-          ? Math.round((now.getTime() - new Date(candidate.lastMessageAt).getTime()) / 3_600_000)
-          : 0,
-      })
-      await storeBrief(candidate, brief, now, knowledgeStatus)
+      const { brief, knowledgeStatus } = await generateBrief(
+        messages,
+        candidate.clientId,
+        {
+          awaitingReply: candidate.awaitingReply,
+          hoursSinceLastMessage: candidate.lastMessageAt
+            ? Math.round((now.getTime() - new Date(candidate.lastMessageAt).getTime()) / 3_600_000)
+            : 0,
+        },
+        { signal },
+      )
+      await storeBrief(candidate, brief, now, knowledgeStatus, signal)
       generated++
     } catch (err) {
       const fatal = fatalAiReason(err)
