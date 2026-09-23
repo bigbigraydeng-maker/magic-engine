@@ -27,6 +27,7 @@ import {
   isClientBrand,
   type ClientBrandIdentity,
 } from './client-brand-match'
+import { isRunConclusive } from './run-conclusive'
 import { supabaseAdmin } from '../supabase'
 import { writeTrackerFlywheelMetrics } from '../flywheel/metrics/writeTrackerMetrics'
 import type {
@@ -420,25 +421,33 @@ async function aggregateSnapshot(
   const weekStart = new Date(weekOf + 'T00:00:00.000Z').toISOString()
   const { data: runs, error } = await supabaseAdmin
     .from('ai_visibility_runs')
-    .select('ai_engine, ai_model, client_brand_rank, brands_mentioned')
+    .select('ai_engine, ai_model, client_brand_rank, brands_mentioned, error_message, parse_error_message')
     .eq('client_id', clientId)
     .gte('ran_at', weekStart)
 
   if (error || !runs) return null
 
-  const totalRuns = runs.length
-  const ranks = runs
+  // Failed provider calls / parser errors carry a null client_brand_rank that
+  // is indistinguishable from "AI answered but didn't mention the client" —
+  // counting them here would drag the same head-line mention rate the
+  // dashboard's per-engine cards already exclude them from back down to
+  // "failure == not mentioned". Same filter as isRunConclusive() everywhere
+  // else this data is displayed.
+  const conclusiveRuns = runs.filter(isRunConclusive)
+
+  const totalRuns = conclusiveRuns.length
+  const ranks = conclusiveRuns
     .map(r => (r as { client_brand_rank: number | null }).client_brand_rank)
     .filter((r): r is number => r !== null)
   const mentionsCount = ranks.length
   const avgRank =
     mentionsCount > 0 ? ranks.reduce((a, b) => a + b, 0) / mentionsCount : null
   const modelsCovered = Array.from(
-    new Set(runs.map(r => (r as { ai_model: string }).ai_model))
+    new Set(conclusiveRuns.map(r => (r as { ai_model: string }).ai_model))
   )
   // Distinct engines where brand appeared at least once
   const engineCoverage = new Set(
-    runs
+    conclusiveRuns
       .filter(r => (r as { client_brand_rank: number | null }).client_brand_rank !== null)
       .map(r => (r as { ai_engine: string }).ai_engine)
   ).size
@@ -446,7 +455,7 @@ async function aggregateSnapshot(
   // Build a compact ranking_table for reporting:
   //   { brands: [{ name, mentions, avg_rank, by_engine }] }
   const ranking_table = buildRankingTable(
-    runs as Array<{
+    conclusiveRuns as Array<{
       ai_engine: string
       brands_mentioned: BrandMention[]
       client_brand_rank: number | null
