@@ -879,6 +879,10 @@ describe('GET /api/cron/google-data-pullback-daily — 评估日按广告账户�
     mockLoadTokenOwnerPeers.mockResolvedValue(null)
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('评估日按客户名下**每一个**广告账户算，主账户和次账户都要参与', async () => {
     const { GET } = await import('./route')
     await GET(makeRequest(CRON_SECRET))
@@ -914,6 +918,9 @@ describe('GET /api/cron/google-data-pullback-daily — 评估日按广告账户�
   it('不再按 UTC 算昨天：评估日只来自账户时区解析，不是服务器时钟', async () => {
     // 服务器时钟的「昨天」跟账户时区的「昨天」故意不同：cron 17:00 UTC 触发时
     // UTC 是 09-22、奥克兰是 09-23。路由必须原样用解析出来的那一天。
+    // 系统时间固定到这个事故时刻，否则测试在 UTC 09-24 运行时
+    // `utcYesterday` 也会算成 2026-09-23，`not.toBe` 就会误判失败。
+    vi.setSystemTime(new Date('2026-09-22T17:00:00Z'))
     mockResolveClientEvaluationDate.mockResolvedValueOnce('2026-09-23')
     const { evaluateClientAdHealth } = await import('@/lib/ads-strategy/evaluate')
     const { sendAdHealthDigest } = await import('@/lib/ads-strategy/digest')
