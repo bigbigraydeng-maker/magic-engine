@@ -102,7 +102,7 @@ BEGIN
   RAISE NOTICE '✅ 不变量4：无 anon/authenticated 可执行的 SECURITY DEFINER 函数';
 END $$;
 
--- ── 不变量 5：seo_patrol_findings 对 anon/authenticated 无表级授权，策略锁死 service_role ──
+-- ── 不变量 5：seo_patrol_findings 对 anon/authenticated/PUBLIC 无表级授权，策略锁死 service_role ──
 -- 20260924000000 把这张表的收紧断言从迁移事务内移到了这里（事务内 RAISE EXCEPTION
 -- 会连同已经成功的 REVOKE/ALTER POLICY 一起回滚，见该 migration 顶部注释）。
 DO $$
@@ -112,9 +112,9 @@ BEGIN
     FROM information_schema.role_table_grants
    WHERE table_schema = 'public'
      AND table_name = 'seo_patrol_findings'
-     AND grantee IN ('anon', 'authenticated');
+     AND grantee IN ('anon', 'authenticated', 'PUBLIC');
   IF leftover_grants <> 0 THEN
-    RAISE EXCEPTION '[不变量5] seo_patrol_findings 仍有 % 条 anon/authenticated 的表级授权', leftover_grants;
+    RAISE EXCEPTION '[不变量5] seo_patrol_findings 仍有 % 条 anon/authenticated/PUBLIC 的表级授权', leftover_grants;
   END IF;
 
   SELECT count(*) INTO leftover_policy
@@ -127,7 +127,7 @@ BEGIN
     RAISE EXCEPTION '[不变量5] seo_patrol_findings."service_role_full" 未锁到 TO service_role';
   END IF;
 
-  RAISE NOTICE '✅ 不变量5：seo_patrol_findings 已收回 anon/authenticated 授权，策略已锁到 TO service_role';
+  RAISE NOTICE '✅ 不变量5：seo_patrol_findings 已收回 anon/authenticated/PUBLIC 授权，策略已锁到 TO service_role';
 END $$;
 
 \echo ''

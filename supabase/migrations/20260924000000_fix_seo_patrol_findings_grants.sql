@@ -1,4 +1,4 @@
--- 修复 seo_patrol_findings 的权限漏洞：收回 anon/authenticated 的表级授权 +
+-- 修复 seo_patrol_findings 的权限漏洞：收回 anon/authenticated/PUBLIC 的表级授权 +
 -- 把 RLS 策略显式锁到 service_role。
 --
 -- ── 背景 ────────────────────────────────────────────────────────────────────
@@ -21,14 +21,18 @@
 --
 -- ── 做法 ────────────────────────────────────────────────────────────────────
 -- 不改 20260604000002（已 apply 过的旧文件不动），新开一份：
---   1. REVOKE ALL 收掉 anon/authenticated 的表级授权（纵深防御）。
+--   1. REVOKE ALL 收掉 anon/authenticated/PUBLIC 的表级授权（纵深防御）。
+--      单独 REVOKE anon/authenticated 不够：如果这张表曾经被
+--      `GRANT ... TO PUBLIC` 过，anon/authenticated 会通过所有角色隐含
+--      所属的 PUBLIC 继续拿到权限，REVOKE FROM anon, authenticated 撤不掉
+--      这条继承路径，必须连 PUBLIC 一起收。
 --   2. ALTER POLICY 只改角色、不动条件 —— 不 DROP 再 CREATE，中间没有
 --      「表裸奔」的时间窗，策略名跟建表迁移里的原名对上。
 --
 -- 不需要任何 app 代码改动：写这张表的路径（src/lib/seo-patrol/job.ts 的每日巡检 cron）
 -- 用的是 SUPABASE_SERVICE_ROLE_KEY 初始化的 client，本来就符合收紧后的策略。
 
-REVOKE ALL ON public.seo_patrol_findings FROM anon, authenticated;
+REVOKE ALL ON public.seo_patrol_findings FROM anon, authenticated, PUBLIC;
 
 DO $$
 BEGIN
@@ -52,10 +56,10 @@ BEGIN
     FROM information_schema.role_table_grants
    WHERE table_schema = 'public'
      AND table_name = 'seo_patrol_findings'
-     AND grantee IN ('anon', 'authenticated');
+     AND grantee IN ('anon', 'authenticated', 'PUBLIC');
 
   IF leftover_grants <> 0 THEN
-    RAISE WARNING 'seo_patrol_findings 仍有 % 条 anon/authenticated 的表级授权，见 scripts/db-invariants.sql 不变量5', leftover_grants;
+    RAISE WARNING 'seo_patrol_findings 仍有 % 条 anon/authenticated/PUBLIC 的表级授权，见 scripts/db-invariants.sql 不变量5', leftover_grants;
   END IF;
 
   SELECT count(*) INTO leftover_policy
@@ -70,6 +74,6 @@ BEGIN
   END IF;
 
   IF leftover_grants = 0 AND leftover_policy = 0 THEN
-    RAISE NOTICE '✅ seo_patrol_findings 已收回 anon/authenticated 授权，策略已锁到 TO service_role';
+    RAISE NOTICE '✅ seo_patrol_findings 已收回 anon/authenticated/PUBLIC 授权，策略已锁到 TO service_role';
   END IF;
 END $$;
