@@ -27,6 +27,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-items'
 import { shouldRemindToday, streakPhrase } from './remind-cadence'
+import { fetchAll } from '@/lib/supabase-paginate'
 
 // ─── Error bucketing ────────────────────────────────────────────────────────
 
@@ -182,22 +183,31 @@ export type ClientNameMap = Map<string, string>
  * Looks back 28 days (4 weekly cycles) to detect long-running failures.
  * The weekly tracker runs once per week, so we need multiple weeks of data
  * to compute a streak.
+ *
+ * 🔴 Uses `fetchAll` to paginate past PostgREST's 1000-row hard cap.
+ *    Without it, 7+ active clients × 24 runs/week × 4 weeks = 672+ rows,
+ *    and adding a third engine or more queries pushes past 1000, silently
+ *    dropping the oldest weeks — exactly the data the streak calculation needs.
+ *    子牙 + 魏征 both flagged this in review (2026-09-23).
  */
 export async function readRecentAiTrackerRuns(
   supabase: SupabaseClient,
   now: Date,
 ): Promise<AiTrackerRunQuery> {
   const since = new Date(now.getTime() - 28 * 86_400_000).toISOString()
-  const { data, error } = await supabase
-    .from('ai_visibility_runs')
-    .select('client_id, error_message, ran_at')
-    .gte('ran_at', since)
-    .order('ran_at', { ascending: false })
-
-  if (error) {
-    return { rows: [], error: error.message }
+  try {
+    const rows = await fetchAll<RunRow>((from, to) =>
+      supabase
+        .from('ai_visibility_runs')
+        .select('client_id, error_message, ran_at')
+        .gte('ran_at', since)
+        .order('ran_at', { ascending: false })
+        .range(from, to),
+    )
+    return { rows, error: null }
+  } catch (err) {
+    return { rows: [], error: err instanceof Error ? err.message : String(err) }
   }
-  return { rows: (data ?? []) as RunRow[], error: null }
 }
 
 /**
@@ -321,6 +331,8 @@ export function buildAiTrackerFailureItems(
             (new Date(currentMonday).getTime() - new Date(latestMonday).getTime()) /
               (7 * 86_400_000),
           )
+    // 🔴 weeks-as-days: works because daily thresholds (≤1, ≤3) map to weekly
+    //    semantics. If remind-cadence.ts thresholds change, recheck this mapping.
     if (!shouldRemindToday(streak, weeksSinceLatest, now)) continue
 
     const clientName = clientNames.get(clientId) ?? clientId.slice(0, 8)
