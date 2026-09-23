@@ -55,18 +55,18 @@ describe('resolveDigestRecipients', () => {
   afterEach(() => { if (OLD) process.env.AD_HEALTH_DIGEST_TO = OLD; else delete process.env.AD_HEALTH_DIGEST_TO })
 
   it('uses the client list when set', () => {
-    expect(resolveDigestRecipients({ client_id: 'x', enabled: true, digest_recipients: ['a@b.com', 'c@d.com'] }))
+    expect(resolveDigestRecipients({ ...defaultConfig('x'), digest_recipients: ['a@b.com', 'c@d.com'] }))
       .toEqual(['a@b.com', 'c@d.com'])
   })
 
   it('falls back to the env inbox when the client list is empty', () => {
     process.env.AD_HEALTH_DIGEST_TO = 'ops@magicengine.com.au'
-    expect(resolveDigestRecipients({ client_id: 'x', enabled: true, digest_recipients: [] }))
+    expect(resolveDigestRecipients({ ...defaultConfig('x'), digest_recipients: [] }))
       .toEqual(['ops@magicengine.com.au'])
   })
 
   it('falls back to the shared verified-domain ME inbox when no env is set', () => {
-    expect(resolveDigestRecipients({ client_id: 'x', enabled: true, digest_recipients: [] }))
+    expect(resolveDigestRecipients({ ...defaultConfig('x'), digest_recipients: [] }))
       .toEqual(['hello@magicengine.cloud'])
   })
 })
