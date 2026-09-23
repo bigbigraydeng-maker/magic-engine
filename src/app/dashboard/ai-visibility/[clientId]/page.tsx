@@ -380,8 +380,9 @@ export default function AiVisibilityPage() {
                   </div>
                   <div>
                     <div className="font-display text-[18px] font-bold tabular-nums text-me-charcoal">
-                      {snapshot.mentions_count}
-                      <span className="text-black/35">/{snapshot.total_runs}</span>
+                      {snapshot.total_runs > 0
+                        ? <>{snapshot.mentions_count}<span className="text-black/35">/{snapshot.total_runs}</span></>
+                        : '—'}
                     </div>
                     <div className="text-[11.5px] text-black/55">Mentions / runs</div>
                   </div>

@@ -96,7 +96,27 @@ export class AiVisibilityCollector {
         }
       }
 
-      // Snapshot exists with 0 mentions → real signal: client is invisible to AI
+      // total_runs === 0 means every probe this week failed (provider errors /
+      // parser errors) — we have NO measurement, not a measurement of zero.
+      // Fall back to the live probe if available, otherwise report "not tracked".
+      if (snapshot.total_runs === 0) {
+        if (probe) {
+          return this.buildFromLiveProbe(clientId, probe)
+        }
+        if (probeFailed) {
+          return {
+            score: null,
+            findings: [this.makeProbeFailedFinding(clientId, rawProbe!)],
+          }
+        }
+        return {
+          score: null,
+          findings: [this.makeAiVisibilityNotTrackedFinding(clientId)],
+        }
+      }
+
+      // Snapshot exists with 0 mentions but total_runs > 0 → real signal:
+      // client is invisible to AI.
       if (snapshot.mentions_count === 0) {
         return {
           score: 0,

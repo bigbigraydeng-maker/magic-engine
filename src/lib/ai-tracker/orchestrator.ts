@@ -27,6 +27,10 @@ import {
   isClientBrand,
   type ClientBrandIdentity,
 } from './client-brand-match'
+import {
+  partitionConclusiveRuns,
+  RUN_CONCLUSIVENESS_COLUMNS,
+} from './run-conclusive'
 import { supabaseAdmin } from '../supabase'
 import { writeTrackerFlywheelMetrics } from '../flywheel/metrics/writeTrackerMetrics'
 import type {
@@ -416,15 +420,23 @@ async function aggregateSnapshot(
 ): Promise<AggregateResult | null> {
   const weekOf = mondayOfThisWeek().toISOString().slice(0, 10) // YYYY-MM-DD
 
-  // Pull all runs for this client this week
+  // Pull all runs for this client this week.
+  // Include error columns so we can tell failed probes from real zeros
+  // (playbook-geo-general §九: 没测成 ≠ 测出来是零).
   const weekStart = new Date(weekOf + 'T00:00:00.000Z').toISOString()
-  const { data: runs, error } = await supabaseAdmin
+  const { data: allRuns, error } = await supabaseAdmin
     .from('ai_visibility_runs')
-    .select('ai_engine, ai_model, client_brand_rank, brands_mentioned')
+    .select(`ai_engine, ai_model, client_brand_rank, brands_mentioned, ${RUN_CONCLUSIVENESS_COLUMNS}`)
     .eq('client_id', clientId)
     .gte('ran_at', weekStart)
 
-  if (error || !runs) return null
+  if (error || !allRuns) return null
+
+  // Only conclusive (successfully completed) runs count toward mention rate.
+  // Failed probes carry client_brand_rank = null, which looks identical to
+  // "AI answered but didn't mention the client" — mixing them into the
+  // denominator halves the displayed rate. See PITFALLS / GEO-CONCLUSIVE.
+  const { conclusive: runs } = partitionConclusiveRuns(allRuns)
 
   const totalRuns = runs.length
   const ranks = runs

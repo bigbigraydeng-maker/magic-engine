@@ -169,15 +169,18 @@ export function buildCompetitionBrief(input: BriefInput): CompetitionBrief {
   }
 
   const aiAt = input.ai.data?.week_of ?? null
+  // total_runs now counts only conclusive (successfully completed) probes.
+  // total_runs === 0 means "all probes failed this week" — not computable,
+  // distinct from "tested N times but never mentioned" (total_runs > 0, mentions_count === 0).
   const hasAiRuns = Boolean(input.ai.data && input.ai.data.total_runs > 0)
   const aiStatus: BriefStatus = input.ai.failed ? 'failed' : !hasAiRuns ? 'no_observation' : isStale(aiAt, 14, now) ? 'stale' : 'limited'
-  const mentionRate = input.ai.data?.total_runs ? Math.round(input.ai.data.mentions_count / input.ai.data.total_runs * 100) : null
+  const mentionRate = input.ai.data && input.ai.data.total_runs > 0 ? Math.round(input.ai.data.mentions_count / input.ai.data.total_runs * 100) : null
   const ai: BriefDimension = {
     key: 'ai_visibility', label: 'AI 推荐表现', status: aiStatus,
     headline: hasAiRuns ? `${input.clientName} 被提及 ${mentionRate}%${input.ai.data?.avg_rank == null ? '' : ` · 平均第 ${input.ai.data.avg_rank} 名`}` : `尚无 ${input.clientName} 的有效 AI 推荐快照`,
     detail: '当前只展示客户自身表现；没有明确竞品品牌记录时，不推断竞品 AI 排名。',
     source: input.ai.data?.models_covered?.join('、') || 'AI Visibility', observed_at: aiAt,
-    coverage: input.ai.data ? `${input.ai.data.total_runs} 次有效问答。` : '尚无观测记录。',
+    coverage: input.ai.data && input.ai.data.total_runs > 0 ? `${input.ai.data.total_runs} 次有效问答。` : '尚无有效观测记录。',
   }
 
   const dimensions = [product, search, reputation, ai]
