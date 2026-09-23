@@ -21,6 +21,15 @@
 
 ---
 
+## AI 可见度周快照聚合把失败的 API 调用也计入总数，客户分数被系统性腰斩（2026-09-23 两位复审确认，A 级，P0）
+
+**§11 打分**：频率高（每周每个客户都在发生，生产数据 CTS 9-14 那周 221/408 次失败混入分母）· IMPACT 闭环关键度高（分数直接喂进下一轮处方，算低等于给错建议）· 收入关联度高（影响客户可见诊断报告的核心维度分数）→ 零个低、两个以上高 → **P0**。
+
+- **背景**：`ai-tracker/orchestrator.ts` 的 `aggregateSnapshot` 拉本周 `ai_visibility_runs` 时不排除 `error_message` 有值的行，失败次数计入 `total_runs`，`mentionRate = mentions_count / total_runs` 的分母被撑大。CTS 9-14 那周落库 23.3%，真值 50.8%。
+- `ai-visibility-collector.ts:93` 看到 `mentions_count === 0` 就直出 critical「Brand Not Mentioned by AI」，不检查这些 run 是否真的测到过——这跟 PR #1919 修的实时探测是同一类 bug，走了快照这条管子。
+- **修法**：`aggregateSnapshot` 过滤 `error_message IS NULL`；给快照补 `failed_runs` 列；collector 的 `mentions_count === 0` 分支加 guard。
+- 见 PITFALLS D12 补充段。
+
 ## Kernel 认领执行权函数字段歧义 bug 已修复、代码已合并 main，生产数据库还没真正应用（2026-09-23 发现并修复，P0）
 
 **§11 打分**：频率高（这个数据库函数每次被真实调用都会报错，不是偶发）· IMPACT 闭环关键度高（卡在 Kernel「提交动作 → 认领执行权」这一步，是所有走 Kernel 执行的能力共用的入口）· 收入关联度高（已上线的 `page.apply_optimization_request` 页面优化 PR 提交能力也共用这两个函数）→ 零个低、两个以上高 → **P0**。

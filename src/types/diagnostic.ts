@@ -46,6 +46,7 @@ export type AiVisibilityFindingType =
   | 'insufficient_entity_coverage'
   | 'ai_visibility_not_tracked'  // P8.5.22: AI Tracker never ran for this client
   | 'live_probe_no_mention'
+  | 'ai_visibility_probe_failed'  // 2026-09-23: probe failed (429/timeout), not silent — emits finding
 
 export type AdsFindingType =
   | 'high_cpc'

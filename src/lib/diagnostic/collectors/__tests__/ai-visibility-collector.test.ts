@@ -356,9 +356,10 @@ describe('AiVisibilityCollector — failed probe is "not measured", not "zero"',
     ).collect(CLIENT_ID, DOMAIN, KEYWORDS)
 
     expect(findings.find(x => x.finding_type === 'brand_not_mentioned')).toBeUndefined()
-    // Falls back to the honest "we have never tracked this" signal instead.
+    // Emits a probe-failed finding so the failure is visible, not "not tracked".
     expect(score).toBeNull()
-    expect(findings.find(x => x.finding_type === 'ai_visibility_not_tracked')).toBeDefined()
+    expect(findings.find(x => x.finding_type === 'ai_visibility_probe_failed')).toBeDefined()
+    expect(findings.find(x => x.finding_type === 'ai_visibility_not_tracked')).toBeUndefined()
   })
 
   it('does NOT emit live_probe_no_mention when every probe question failed', async () => {
@@ -442,5 +443,47 @@ describe('AiVisibilityCollector — failed probe is "not measured", not "zero"',
     const f = findings.find(x => x.finding_type === 'live_probe_no_mention')
     expect(f).toBeDefined()
     expect(f?.severity).toBe('high')
+  })
+
+  it('partial failure with brand mentioned is STILL inconclusive (known trade-off: drops real evidence)', async () => {
+    // 2/3 questions measured, brand found in both — but 1 failed, so
+    // isProbeConclusive returns false. This loses genuine evidence; we accept
+    // that at n=3 because asserting absence from a 2-question sample is worse.
+    const supabase = makeSupabase({ snapshot: null })
+    const probe = makeProbe({
+      runs: 3,
+      measured_runs: 2,
+      failed_runs: 1,
+      mentions: 2,
+      avg_rank: 1,
+      questions: [
+        { question: 'q1', client_brand_rank: 1, error: null },
+        { question: 'q2', client_brand_rank: 1, error: null },
+        { question: 'q3', client_brand_rank: null, error: '429 Rate limit reached' },
+      ],
+    })
+    const { score, findings } = await new AiVisibilityCollector(supabase, probe).collect(
+      CLIENT_ID, DOMAIN, KEYWORDS,
+    )
+    // Probe dropped — no brand_not_mentioned, no false positive either.
+    expect(score).toBeNull()
+    expect(findings.find(x => x.finding_type === 'brand_not_mentioned')).toBeUndefined()
+    expect(findings.find(x => x.finding_type === 'ai_visibility_probe_failed')).toBeDefined()
+  })
+
+  it('emits ai_visibility_probe_failed with error details when probe calls all failed', async () => {
+    const supabase = makeSupabase({ snapshot: null })
+    const { findings } = await new AiVisibilityCollector(
+      supabase,
+      makeFailedProbe(3),
+    ).collect(CLIENT_ID, DOMAIN, KEYWORDS)
+
+    const f = findings.find(x => x.finding_type === 'ai_visibility_probe_failed')
+    expect(f).toBeDefined()
+    expect(f?.severity).toBe('high')
+    expect(f?.fix_type).toBe('fde_manual')
+    const parsed = (f?.evidence as { parsed?: Record<string, unknown> } | null)?.parsed
+    expect(parsed).toMatchObject({ attempted: 3, measured: 0, failed: 3 })
+    expect((parsed as { errors?: unknown[] })?.errors).toHaveLength(3)
   })
 })

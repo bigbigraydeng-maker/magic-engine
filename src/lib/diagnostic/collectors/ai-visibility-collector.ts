@@ -67,6 +67,7 @@ export class AiVisibilityCollector {
       // fabricated "your brand is never mentioned by AI" findings for 5 clients
       // on 2026-09-21 while the OpenAI account was rate-limited (429).
       const probe = isProbeConclusive(rawProbe) ? rawProbe : null
+      const probeFailed = rawProbe && !probe && !rawProbe.skipped
       if (rawProbe && !probe) {
         console.warn(
           `[ai-visibility-collector] live probe not conclusive for ${clientId} — ` +
@@ -85,7 +86,9 @@ export class AiVisibilityCollector {
         }
         return {
           score: null,
-          findings: [this.makeAiVisibilityNotTrackedFinding(clientId)],
+          findings: probeFailed
+            ? [this.makeProbeFailedFinding(clientId, rawProbe!)]
+            : [this.makeAiVisibilityNotTrackedFinding(clientId)],
         }
       }
 
@@ -160,6 +163,39 @@ export class AiVisibilityCollector {
         'Enable weekly AI Tracker: configure 10–20 priority brand/category questions in Client Settings → AI Visibility, then wait for the next Monday cron run (or trigger an ad-hoc run via Run-once button).',
       fix_type: 'me_auto',
       priority_score: 88,
+    }
+  }
+
+  private makeProbeFailedFinding(
+    clientId: string,
+    rawProbe: LiveProbeResult,
+  ): NewFinding {
+    return {
+      client_id: clientId,
+      dimension: 'ai_visibility',
+      finding_type: 'ai_visibility_probe_failed',
+      severity: 'high',
+      title: 'AI visibility probe failed — no measurement this run',
+      description:
+        `The real-time AI visibility probe attempted ${rawProbe.runs} question(s) but ` +
+        `${rawProbe.failed_runs} failed (e.g. rate-limit, timeout, model error). ` +
+        'The result is not reported as zero mentions — it is treated as unmeasured.',
+      evidence: makeEvidence({
+        parsed: {
+          attempted: rawProbe.runs,
+          measured: rawProbe.measured_runs,
+          failed: rawProbe.failed_runs,
+          latency_ms: rawProbe.latency_ms,
+          errors: rawProbe.questions
+            .filter(q => q.error)
+            .map(q => ({ question: q.question, error: q.error })),
+        },
+      }),
+      recommendation:
+        'Check the OpenAI account balance and API key validity. ' +
+        'Look for "[ai-visibility-live-probe]" errors in Render logs around the diagnostic run time.',
+      fix_type: 'fde_manual',
+      priority_score: 75,
     }
   }
 

@@ -314,7 +314,7 @@ East International 拿到 `critical`、优先级 95 的「你的品牌在 AI 里
 CTS / Oztop / NM Medspa / Roman HU 各拿到一条 `high` 的「相比上周在退步」（CTS 那条写着「上周 95 次提及，现在 0 次」）。
 客户门户的诊断页和报告页直接读这张表，按严重度排序展示，critical 排最前。
 
-**怎么一眼看出是假的**：这批探测耗时 6.5 秒，历史正常值 29–44 秒——3 次 429 是立刻返回的，根本没在等 AI 回答。
+**怎么一眼看出是假的**：这批探测耗时 6.5 秒，历史正常值 24–45 秒——3 次 429 是立刻返回的，根本没在等 AI 回答。
 
 **根因**：失败路径和「问到了但没提及」路径共用同一个返回形状（`client_brand_rank: null`），且失败仍计入 `runs`。
 只有「钥匙没配」走 `skipped: true`；调用真的发出去但失败（429 / 超时 / 模型报错）一律落进「跑了 N 轮、0 次提及」。
@@ -325,9 +325,13 @@ CTS / Oztop / NM Medspa / Roman HU 各拿到一条 `high` 的「相比上周在�
 - 缺数据时的默认值几乎总会朝某一边偏。这次偏的方向是「把客户说得更差」，还能拿来卖服务，性质比偏好更糟。
 - 同类口径见 AI 可见度手册：测不出来要写「未能测量」，**绝不能写成 0 或 false**。
 
-**修复**：`isProbeConclusive()` 成为唯一判据——每一个问题都真的测到了，探测结果才可以支撑任何客户可见结论；
-否则整维退回 `score: null`（系统里既有的「这一维测不出来」约定），不出 finding、不附证据。
+**修复（PR #1919，仅诊断期实时探测这一半）**：`isProbeConclusive()` 成为唯一判据——每一个问题都真的测到了，探测结果才可以支撑任何客户可见结论；
+否则整维退回 `score: null`（系统里既有的「这一维测不出来」约定），产出 `ai_visibility_probe_failed` finding（带失败详情），不附证据。
 真实的零提及仍然照常报 critical，有专门的守卫测试防止这条修复被过度矫正成「什么都不报」。
+
+**⚠️ 同类路径尚未修复：周度快照聚合不过滤失败 run。** `ai-tracker/orchestrator.ts` 的 `aggregateSnapshot` 拉本周全部 `ai_visibility_runs` 时不排除 `error_message` 有值的行，
+失败次数计入 `total_runs`、拉低 `mentionRate`。诊断的 `collector.ts:93` 一看到快照 `mentions_count === 0` 就直出 critical「Brand Not Mentioned by AI」，不检查这些 run 是不是真测到的。
+生产数据表明 CTS 9-14 那周 `mentionRate` 被稀释了一半（408 次调用里 221 次失败）。此路径需 A 级独立修复，见 ROADMAP。
 
 ## E. 匹配 / 算法逻辑
 
