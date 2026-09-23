@@ -932,6 +932,9 @@ describe('GET /api/cron/google-data-pullback-daily — 评估日按广告账户�
 
     const usedDate = vi.mocked(evaluateClientAdHealth).mock.calls[0][1]
     const utcYesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
+    // 先确认时钟真的被钉住了：`vi.setSystemTime` 要是哪天不再生效（版本升级 / 少了
+    // useFakeTimers），下面两条断言会退化成「碰巧今天成立」，这一条让它当场红。
+    expect(utcYesterday).toBe('2026-09-21')
     expect(usedDate).toBe('2026-09-23')
     expect(usedDate).not.toBe(utcYesterday)
 
