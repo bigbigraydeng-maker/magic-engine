@@ -81,6 +81,22 @@ describe('托管 Meta 广告分析',()=>{
     expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_finish_sponsored_analysis',expect.objectContaining({ final_status:'completed',charged_usd:0.0045 }))
   })
 
+  it('模型失败只记录非敏感错误类别和模型名',async()=>{
+    mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
+      if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'NZD',timezone_name:'Pacific/Auckland' }
+      if(params.level==='account') return { data:[{ spend:'100',impressions:'1000',clicks:'20' }] }
+      return { data:[] }
+    })
+    const log=vi.spyOn(console,'error').mockImplementation(()=>undefined)
+    mocks.callClaudeChat.mockRejectedValue({ status:403,error:{ type:'permission_error',message:'secret upstream detail' } })
+    await expect(generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id))
+      .rejects.toThrow('model_unavailable')
+    expect(log).toHaveBeenCalledWith('[meta-ads-ai] hosted model call failed',{
+      category:'permission',model:'claude-haiku-test',
+    })
+    expect(JSON.stringify(log.mock.calls)).not.toContain('secret upstream detail')
+  })
+
   it('模型外发原子授权门拒绝时不发送证据',async()=>{
     mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
       if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'NZD',timezone_name:'Pacific/Auckland' }
