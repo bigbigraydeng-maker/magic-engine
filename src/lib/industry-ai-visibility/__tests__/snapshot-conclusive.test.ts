@@ -68,15 +68,25 @@ describe('summariseFailureCodes', () => {
 })
 
 describe('groupQuestionCoverage', () => {
-  const q = (question_id: string, error_code: string | null) => ({ question_id, error_code })
+  const row = (question_id: string, platform: string, error_code: string | null) => ({
+    question_id,
+    platform,
+    error_code,
+  })
+  const scope = (question_id: string, platforms: string[]) => ({ question_id, platforms })
+  const THREE_PLATFORMS = ['chatgpt', 'google_ai_overview', 'google_serp']
 
-  it('classifies a question as fully measured only when every row completed', () => {
+  it('classifies a question as fully measured only when every required platform completed', () => {
+    const expected = [scope('full', THREE_PLATFORMS), scope('partial', THREE_PLATFORMS), scope('dead', THREE_PLATFORMS)]
     const { fullyMeasured, partialQuestionIds, failedQuestionIds, totalQuestions } =
-      groupQuestionCoverage([
-        q('full', null), q('full', 'no_ai_overview'), q('full', null),
-        q('partial', null), q('partial', 'dataforseo_error'),
-        q('dead', 'chatgpt_error'), q('dead', 'dataforseo_error'),
-      ])
+      groupQuestionCoverage(
+        [
+          row('full', 'chatgpt', null), row('full', 'google_ai_overview', 'no_ai_overview'), row('full', 'google_serp', null),
+          row('partial', 'chatgpt', null), row('partial', 'google_ai_overview', 'dataforseo_error'), row('partial', 'google_serp', null),
+          row('dead', 'chatgpt', 'chatgpt_error'), row('dead', 'google_ai_overview', 'dataforseo_error'), row('dead', 'google_serp', 'dataforseo_error'),
+        ],
+        expected,
+      )
 
     expect([...fullyMeasured.keys()]).toEqual(['full'])
     expect(fullyMeasured.get('full')).toHaveLength(3)
@@ -85,25 +95,57 @@ describe('groupQuestionCoverage', () => {
     expect(totalQuestions).toBe(3)
   })
 
-  it('treats a single-row question as fully measured when that row completed', () => {
-    const { fullyMeasured } = groupQuestionCoverage([q('solo', null)])
+  it('treats a single-platform question as fully measured when its one required platform completed', () => {
+    const { fullyMeasured } = groupQuestionCoverage(
+      [row('solo', 'chatgpt', null)],
+      [scope('solo', ['chatgpt'])],
+    )
     expect([...fullyMeasured.keys()]).toEqual(['solo'])
   })
 
   it('does not count a partially-measured question as fully measured even if it hit', () => {
     // The surviving platform may not be the one that would have hit — that is
     // the whole point of complete-case analysis.
-    const { fullyMeasured, partialQuestionIds } = groupQuestionCoverage([
-      q('mixed', null), q('mixed', 'dataforseo_error'),
-    ])
+    const { fullyMeasured, partialQuestionIds } = groupQuestionCoverage(
+      [row('mixed', 'chatgpt', null), row('mixed', 'google_ai_overview', 'dataforseo_error')],
+      [scope('mixed', ['chatgpt', 'google_ai_overview'])],
+    )
     expect(fullyMeasured.size).toBe(0)
     expect(partialQuestionIds).toEqual(['mixed'])
   })
 
   it('handles an empty input', () => {
-    const c = groupQuestionCoverage([])
+    const c = groupQuestionCoverage([], [])
     expect(c.totalQuestions).toBe(0)
     expect(c.fullyMeasured.size).toBe(0)
+  })
+
+  it('counts a question missing from the rows entirely as failed, not invisible', () => {
+    // Regression for Codex review on PR #1923: a scoped/partial collection run
+    // (limit / platforms query params, or a cron killed mid-batch) only writes
+    // rows for the slice it actually attempted. A question in the active
+    // config that never got ANY row must still count against totalQuestions —
+    // otherwise a 5-question slice of an 18-question active set reads as
+    // complete (5/5) instead of the true 5/18.
+    const { fullyMeasured, failedQuestionIds, totalQuestions } = groupQuestionCoverage(
+      [row('attempted', 'chatgpt', null), row('attempted', 'google_ai_overview', null), row('attempted', 'google_serp', null)],
+      [scope('attempted', THREE_PLATFORMS), scope('never-run', THREE_PLATFORMS)],
+    )
+    expect([...fullyMeasured.keys()]).toEqual(['attempted'])
+    expect(failedQuestionIds).toEqual(['never-run'])
+    expect(totalQuestions).toBe(2)
+  })
+
+  it('does not count a question as fully measured when only some of its required platforms were written', () => {
+    // A question requiring 3 platforms but only ever probed on 1 (e.g. the
+    // collector ran with ?platforms=chatgpt) must not read as complete just
+    // because every row that DOES exist for it is conclusive.
+    const { fullyMeasured, partialQuestionIds } = groupQuestionCoverage(
+      [row('one-of-three', 'chatgpt', null)],
+      [scope('one-of-three', THREE_PLATFORMS)],
+    )
+    expect(fullyMeasured.size).toBe(0)
+    expect(partialQuestionIds).toEqual(['one-of-three'])
   })
 })
 

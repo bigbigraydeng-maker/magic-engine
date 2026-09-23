@@ -487,8 +487,14 @@ interface ClientRow {
 
 interface SnapshotRow {
   question_id: string
+  platform: string
   top3_brands: string[] | null
   error_code: string | null
+}
+
+interface ActiveQuestionRow {
+  id: string
+  platforms: string[] | null
 }
 
 async function fetchAiVisibilityScore(
@@ -549,10 +555,33 @@ async function fetchAiVisibilityScore(
     }
   }
 
-  // 5. Pull today's snapshots for this industry
+  // 5. Expected (question, platform) scope = the industry's ACTIVE question
+  // config, not whatever subset of snapshots happened to get written today.
+  // A scoped/partial collection run (see /api/baselines/ai-collect `limit` /
+  // `platforms`) or a cron job killed mid-batch only writes a slice of rows;
+  // inferring "fully measured" from that slice alone would silently accept
+  // it as complete coverage (Codex review, PR #1923).
+  const { data: activeQuestions, error: activeQErr } = await supabase
+    .from('industry_ai_visibility_questions')
+    .select('id, platforms')
+    .eq('industry_code', industryCode)
+    .eq('is_active', true)
+
+  if (activeQErr) return { ok: false, reason: `active question config query failed: ${activeQErr.message}` }
+
+  const expectedQuestions = ((activeQuestions ?? []) as ActiveQuestionRow[]).map(q => ({
+    question_id: q.id,
+    platforms: q.platforms ?? [],
+  }))
+
+  if (expectedQuestions.length === 0) {
+    return { ok: false, reason: `no active AI visibility questions configured for industry "${industryCode}"` }
+  }
+
+  // 6. Pull today's snapshots for this industry
   const { data: snaps, error: snapsErr } = await supabase
     .from('industry_ai_visibility_snapshots')
-    .select('question_id, top3_brands, error_code, industry_ai_visibility_questions!inner(industry_code)')
+    .select('question_id, platform, top3_brands, error_code, industry_ai_visibility_questions!inner(industry_code)')
     .eq('industry_ai_visibility_questions.industry_code', industryCode)
     .eq('collected_date', latestDate)
 
@@ -561,11 +590,13 @@ async function fetchAiVisibilityScore(
   const snapshots = (snaps ?? []) as SnapshotRow[]
   const { failed } = partitionConclusiveSnapshots(snapshots)
 
-  // 5b. Complete-case analysis: score ONLY questions whose every platform row
-  // completed. A question measured on one platform but not the others is
-  // evidence we do not have — see groupQuestionCoverage() for why keeping
-  // either half of a partial question biases the score (down, then up).
-  const coverage = groupQuestionCoverage(snapshots)
+  // 7. Complete-case analysis against the EXPECTED scope: score ONLY
+  // questions whose every required platform has a conclusive row. A question
+  // never attempted today, or measured on fewer platforms than its config
+  // requires, is evidence we do not have — see groupQuestionCoverage() for
+  // why keeping either half of a partial question biases the score (down,
+  // then up).
+  const coverage = groupQuestionCoverage(snapshots, expectedQuestions)
   const scorable = coverage.fullyMeasured
   const incompleteCount = coverage.partialQuestionIds.length + coverage.failedQuestionIds.length
 
@@ -583,7 +614,7 @@ async function fetchAiVisibilityScore(
     }
   }
 
-  // 5c. Coverage gate. Probe failures are NOT random — city-scoped questions
+  // 8. Coverage gate. Probe failures are NOT random — city-scoped questions
   // fail at the SERP provider while national ones succeed — so a thin surviving
   // sample is a skewed sample, not just a small one.
   const coverageRatio = scorable.size / coverage.totalQuestions
@@ -599,7 +630,7 @@ async function fetchAiVisibilityScore(
     }
   }
 
-  // 6. Count fully-measured questions where the brand appears in a top3
+  // 9. Count fully-measured questions where the brand appears in a top3
   let hits = 0
   for (const questionRows of scorable.values()) {
     const matched = questionRows.some(s =>

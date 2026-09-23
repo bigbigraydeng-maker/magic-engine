@@ -104,6 +104,21 @@ export function summariseFailureCodes(rows: readonly SnapshotConclusiveness[]): 
 // So: complete-case analysis. Only questions whose every platform row is
 // conclusive are scored — as a hit or as a miss. Everything else is evidence
 // we do not have, and is excluded from both numerator and denominator.
+//
+// A third failure mode (Codex review on PR #1923, 2026-09-23): inferring
+// "the expected (question, platform) set" from the rows themselves. A batch
+// run can be scoped with `limit` / `platforms` (see /api/baselines/ai-collect),
+// or a cron job can be killed mid-batch. Either way the snapshots table only
+// has rows for the SLICE that actually ran. Grouping by whatever question_ids
+// happen to appear — and treating "every row present for this question is
+// conclusive" as "fully measured" — silently accepts that slice as 100%
+// coverage: 5 questions collected out of an 18-question active set reads as
+// n=5/5, and a question collected on only 1 of its 3 required platforms reads
+// as fully measured because no sibling row exists to contradict it. The caller
+// MUST supply the expected (question, platforms) scope — the active question
+// config for the industry, each with the platform set it is supposed to run
+// on — so both "question never attempted" and "question attempted on fewer
+// platforms than required" are counted as incomplete instead of invisible.
 
 /**
  * Minimum share of the day's questions that must be fully measured before a
@@ -122,23 +137,39 @@ export function summariseFailureCodes(rows: readonly SnapshotConclusiveness[]): 
 export const MIN_FULL_COVERAGE_RATIO = 0.6
 
 export interface QuestionCoverage<T> {
-  /** Questions whose every platform row completed — the only scorable set. */
+  /** Questions whose every REQUIRED platform has a conclusive row — the only scorable set. */
   fullyMeasured: Map<string, T[]>
-  /** Question ids with some rows conclusive and some failed. */
+  /** Question ids with some required platforms conclusive and some missing/failed. */
   partialQuestionIds: string[]
-  /** Question ids where every row failed. */
+  /** Question ids where no required platform has a conclusive row (including never attempted). */
   failedQuestionIds: string[]
-  /** Total distinct questions seen, scorable or not. */
+  /** Total questions in the expected scope, scorable or not. */
   totalQuestions: number
 }
 
 /**
- * Group snapshot rows by question and classify each question's coverage.
+ * The expected scope for one question: which platforms it is supposed to be
+ * probed on this run. Comes from the active question config
+ * (`industry_ai_visibility_questions.platforms`), NOT from whatever rows
+ * happen to exist — see the module-level comment above for why.
+ */
+export interface ExpectedQuestionScope {
+  question_id: string
+  platforms: readonly string[]
+}
+
+/**
+ * Group snapshot rows by question and classify each question's coverage
+ * against the EXPECTED (question, platform) scope — not against whatever
+ * subset of rows happened to get written. A question missing from `rows`
+ * entirely, or missing one of its required platform rows, counts as
+ * incomplete exactly like a row that failed with an error_code.
+ *
  * Callers score `fullyMeasured` only.
  */
 export function groupQuestionCoverage<
-  T extends SnapshotConclusiveness & { question_id: string },
->(rows: readonly T[]): QuestionCoverage<T> {
+  T extends SnapshotConclusiveness & { question_id: string; platform: string },
+>(rows: readonly T[], expected: readonly ExpectedQuestionScope[]): QuestionCoverage<T> {
   const byQuestion = new Map<string, T[]>()
   for (const row of rows) {
     const bucket = byQuestion.get(row.question_id)
@@ -150,9 +181,16 @@ export function groupQuestionCoverage<
   const partialQuestionIds: string[] = []
   const failedQuestionIds: string[] = []
 
-  for (const [questionId, questionRows] of byQuestion) {
-    const conclusiveCount = questionRows.filter(isSnapshotConclusive).length
-    if (conclusiveCount === questionRows.length) fullyMeasured.set(questionId, questionRows)
+  for (const { question_id: questionId, platforms: requiredPlatforms } of expected) {
+    const questionRows = byQuestion.get(questionId) ?? []
+    const rowByPlatform = new Map(questionRows.map(row => [row.platform, row]))
+
+    const conclusiveCount = requiredPlatforms.filter(platform => {
+      const row = rowByPlatform.get(platform)
+      return row !== undefined && isSnapshotConclusive(row)
+    }).length
+
+    if (conclusiveCount === requiredPlatforms.length) fullyMeasured.set(questionId, questionRows)
     else if (conclusiveCount === 0) failedQuestionIds.push(questionId)
     else partialQuestionIds.push(questionId)
   }
@@ -161,6 +199,6 @@ export function groupQuestionCoverage<
     fullyMeasured,
     partialQuestionIds,
     failedQuestionIds,
-    totalQuestions: byQuestion.size,
+    totalQuestions: expected.length,
   }
 }

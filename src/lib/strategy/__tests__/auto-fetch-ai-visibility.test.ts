@@ -114,6 +114,22 @@ describe('autoFetchMetricValue("ai_visibility_score") — error branches', () =>
             }),
           }
         }
+        if (table === 'industry_ai_visibility_questions') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: async () => ({
+                  data: [
+                    { id: 'q1', platforms: ['chatgpt'] },
+                    { id: 'q2', platforms: ['chatgpt'] },
+                    { id: 'q3', platforms: ['chatgpt'] },
+                  ],
+                  error: null,
+                }),
+              }),
+            }),
+          }
+        }
         if (table === 'industry_ai_visibility_snapshots') {
           callCount++
           if (callCount === 1) {
@@ -136,9 +152,9 @@ describe('autoFetchMetricValue("ai_visibility_score") — error branches', () =>
               eq: () => ({
                 eq: async () => ({
                   data: [
-                    { question_id: 'q1', top3_brands: ['A', 'B', 'C'], error_code: null },
-                    { question_id: 'q2', top3_brands: ['D', 'E', 'F'], error_code: null },
-                    { question_id: 'q3', top3_brands: ['G', 'H', 'I'], error_code: null },
+                    { question_id: 'q1', platform: 'chatgpt', top3_brands: ['A', 'B', 'C'], error_code: null },
+                    { question_id: 'q2', platform: 'chatgpt', top3_brands: ['D', 'E', 'F'], error_code: null },
+                    { question_id: 'q3', platform: 'chatgpt', top3_brands: ['G', 'H', 'I'], error_code: null },
                   ],
                   error: null,
                 }),
@@ -171,6 +187,18 @@ describe('autoFetchMetricValue("ai_visibility_score") — error branches', () =>
             }),
           }
         }
+        if (table === 'industry_ai_visibility_questions') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: async () => ({
+                  data: Array.from({ length: 10 }, (_, i) => ({ id: `q${i}`, platforms: ['chatgpt'] })),
+                  error: null,
+                }),
+              }),
+            }),
+          }
+        }
         if (table === 'industry_ai_visibility_snapshots') {
           callCount++
           if (callCount === 1) {
@@ -192,6 +220,7 @@ describe('autoFetchMetricValue("ai_visibility_score") — error branches', () =>
                 eq: async () => ({
                   data: Array.from({ length: 10 }, (_, i) => ({
                     question_id: `q${i}`,
+                    platform: 'chatgpt',
                     top3_brands: ['Wendy Wu', 'Intrepid', 'Globus'],
                     error_code: null,
                   })),
@@ -229,6 +258,18 @@ describe('autoFetchMetricValue("ai_visibility_score") — error branches', () =>
             }),
           }
         }
+        if (table === 'industry_ai_visibility_questions') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: async () => ({
+                  data: Array.from({ length: 10 }, (_, i) => ({ id: `q${i + 1}`, platforms: ['chatgpt'] })),
+                  error: null,
+                }),
+              }),
+            }),
+          }
+        }
         if (table === 'industry_ai_visibility_snapshots') {
           callCount++
           if (callCount === 1) {
@@ -249,16 +290,16 @@ describe('autoFetchMetricValue("ai_visibility_score") — error branches', () =>
               eq: () => ({
                 eq: async () => ({
                   data: [
-                    { question_id: 'q1', top3_brands: ['CTS Tours', 'X', 'Y'], error_code: null },          // hit (name)
-                    { question_id: 'q2', top3_brands: ['Wendy Wu', '中国旅行社', 'Y'], error_code: null },  // hit (alias)
-                    { question_id: 'q3', top3_brands: ['Intrepid', 'cts tours', 'Y'], error_code: null },   // hit (case-insensitive name)
-                    { question_id: 'q4', top3_brands: ['Globus', 'Y', 'Z'], error_code: null },             // miss
-                    { question_id: 'q5', top3_brands: ['CTS Tours NZ Limited', 'Y'], error_code: null },    // hit (substring)
-                    { question_id: 'q6', top3_brands: ['Other'], error_code: null },                        // miss
-                    { question_id: 'q7', top3_brands: ['Other'], error_code: null },                        // miss
-                    { question_id: 'q8', top3_brands: ['Other'], error_code: null },                        // miss
-                    { question_id: 'q9', top3_brands: ['Other'], error_code: null },                        // miss
-                    { question_id: 'q10', top3_brands: ['Other'], error_code: null },                       // miss
+                    { question_id: 'q1', platform: 'chatgpt', top3_brands: ['CTS Tours', 'X', 'Y'], error_code: null },          // hit (name)
+                    { question_id: 'q2', platform: 'chatgpt', top3_brands: ['Wendy Wu', '中国旅行社', 'Y'], error_code: null },  // hit (alias)
+                    { question_id: 'q3', platform: 'chatgpt', top3_brands: ['Intrepid', 'cts tours', 'Y'], error_code: null },   // hit (case-insensitive name)
+                    { question_id: 'q4', platform: 'chatgpt', top3_brands: ['Globus', 'Y', 'Z'], error_code: null },             // miss
+                    { question_id: 'q5', platform: 'chatgpt', top3_brands: ['CTS Tours NZ Limited', 'Y'], error_code: null },    // hit (substring)
+                    { question_id: 'q6', platform: 'chatgpt', top3_brands: ['Other'], error_code: null },                        // miss
+                    { question_id: 'q7', platform: 'chatgpt', top3_brands: ['Other'], error_code: null },                        // miss
+                    { question_id: 'q8', platform: 'chatgpt', top3_brands: ['Other'], error_code: null },                        // miss
+                    { question_id: 'q9', platform: 'chatgpt', top3_brands: ['Other'], error_code: null },                        // miss
+                    { question_id: 'q10', platform: 'chatgpt', top3_brands: ['Other'], error_code: null },                       // miss
                   ],
                   error: null,
                 }),
@@ -284,13 +325,41 @@ describe('autoFetchMetricValue("ai_visibility_score") — error branches', () =>
  * acceptance criteria for the fix — an all-failed collection must report
  * "not computable", and healthy data must still score normally.
  */
+const PLATFORM_ORDER = ['chatgpt', 'google_ai_overview', 'google_serp']
+
+/**
+ * Assigns a platform to each row by occurrence order within its question_id
+ * group (1st row → chatgpt, 2nd → google_ai_overview, 3rd → google_serp),
+ * and derives the active-question config from that same assignment — so a
+ * question with 3 rows in a test requires all 3 platforms, one with 1 row
+ * requires only that platform, matching the pre-existing test semantics.
+ */
+function withPlatforms<T extends { question_id: string }>(
+  rows: readonly T[],
+): { rows: (T & { platform: string })[]; activeQuestions: { id: string; platforms: string[] }[] } {
+  const seen = new Map<string, number>()
+  const platformsByQuestion = new Map<string, string[]>()
+  const platformedRows = rows.map(row => {
+    const idx = seen.get(row.question_id) ?? 0
+    seen.set(row.question_id, idx + 1)
+    const platform = PLATFORM_ORDER[idx] ?? `platform_${idx}`
+    const list = platformsByQuestion.get(row.question_id) ?? []
+    list.push(platform)
+    platformsByQuestion.set(row.question_id, list)
+    return { ...row, platform }
+  })
+  const activeQuestions = [...platformsByQuestion.entries()].map(([id, platforms]) => ({ id, platforms }))
+  return { rows: platformedRows, activeQuestions }
+}
+
 function stubSupabaseWithSnapshots(
-  rows: Array<{ question_id: string; top3_brands: string[]; error_code: string | null }>,
+  rawRows: Array<{ question_id: string; top3_brands: string[]; error_code: string | null }>,
   client: { name: string; industry: string; brand_aliases: string[] } = {
     name: 'CTS Tours', industry: 'travel', brand_aliases: [],
   },
 ) {
   const today = new Date().toISOString().slice(0, 10)
+  const { rows, activeQuestions } = withPlatforms(rawRows)
   let callCount = 0
   return {
     from: (table: string) => {
@@ -298,6 +367,13 @@ function stubSupabaseWithSnapshots(
         return {
           select: () => ({
             eq: () => ({ single: async () => ({ data: client, error: null }) }),
+          }),
+        }
+      }
+      if (table === 'industry_ai_visibility_questions') {
+        return {
+          select: () => ({
+            eq: () => ({ eq: async () => ({ data: activeQuestions, error: null }) }),
           }),
         }
       }
@@ -450,5 +526,100 @@ describe('autoFetchMetricValue("ai_visibility_score") — failed probes are not 
       expect(result.reason).toMatch(/coverage too low/)
       expect(result.reason).toMatch(/6\/18 questions \(33%\)/)
     }
+  })
+})
+
+/**
+ * Codex review on PR #1923 (2026-09-23): treating "every row currently in the
+ * table is conclusive" as "fully measured" ignores that /api/baselines/ai-collect
+ * accepts `limit` / `platforms`, and a cron batch can be killed mid-run. Either
+ * way, `industry_ai_visibility_snapshots` can hold only a SLICE of the industry's
+ * active question set for the day. These tests wire the active-question config
+ * (`industry_ai_visibility_questions`) independently of what got written, so a
+ * short/scoped run cannot read as complete coverage.
+ */
+describe('autoFetchMetricValue("ai_visibility_score") — validates against the active question config, not just written rows', () => {
+  function stubWithActiveConfig(
+    activeQuestions: Array<{ id: string; platforms: string[] }>,
+    snapshotRows: Array<{ question_id: string; platform: string; top3_brands: string[]; error_code: string | null }>,
+    client: { name: string; industry: string; brand_aliases: string[] } = {
+      name: 'CTS Tours', industry: 'travel', brand_aliases: [],
+    },
+  ) {
+    const today = new Date().toISOString().slice(0, 10)
+    let callCount = 0
+    return {
+      from: (table: string) => {
+        if (table === 'clients') {
+          return { select: () => ({ eq: () => ({ single: async () => ({ data: client, error: null }) }) }) }
+        }
+        if (table === 'industry_ai_visibility_questions') {
+          return {
+            select: () => ({ eq: () => ({ eq: async () => ({ data: activeQuestions, error: null }) }) }),
+          }
+        }
+        if (table === 'industry_ai_visibility_snapshots') {
+          callCount++
+          if (callCount === 1) {
+            return {
+              select: () => ({
+                eq: () => ({
+                  order: () => ({
+                    limit: () => ({ maybeSingle: async () => ({ data: { collected_date: today }, error: null }) }),
+                  }),
+                }),
+              }),
+            }
+          }
+          return {
+            select: () => ({ eq: () => ({ eq: async () => ({ data: snapshotRows, error: null }) }) }),
+          }
+        }
+        return {} as any
+      },
+    } as any
+  }
+
+  it('treats a question absent from today\'s rows as not-fully-measured, not invisible', async () => {
+    // Active config has 18 questions (the real industry set); today's batch
+    // only wrote rows for 5 of them, e.g. via ?limit=5. Pre-fix, totalQuestions
+    // was derived from the rows themselves, so this read as 5/5 = 100% coverage.
+    const activeQuestions = Array.from({ length: 18 }, (_, i) => ({
+      id: `q${i}`,
+      platforms: ['chatgpt', 'google_ai_overview', 'google_serp'],
+    }))
+    const snapshotRows = Array.from({ length: 5 }, (_, i) => [
+      { question_id: `q${i}`, platform: 'chatgpt', top3_brands: ['CTS Tours'], error_code: null },
+      { question_id: `q${i}`, platform: 'google_ai_overview', top3_brands: ['CTS Tours'], error_code: null },
+      { question_id: `q${i}`, platform: 'google_serp', top3_brands: ['CTS Tours'], error_code: null },
+    ]).flat()
+
+    const result = await autoFetchMetricValue(
+      stubWithActiveConfig(activeQuestions, snapshotRows), 'client-1', 'ai_visibility_score')
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.reason).toMatch(/coverage too low/)
+      expect(result.reason).toMatch(/5\/18 questions \(28%\)/)
+    }
+  })
+
+  it('treats a question probed on fewer platforms than its config requires as incomplete', async () => {
+    // Active config requires 3 platforms per question; today's rows only cover
+    // 1 platform (e.g. the batch ran with ?platforms=chatgpt). Pre-fix, a
+    // question with only 1 row and that row conclusive read as fully measured.
+    const activeQuestions = Array.from({ length: 6 }, (_, i) => ({
+      id: `q${i}`,
+      platforms: ['chatgpt', 'google_ai_overview', 'google_serp'],
+    }))
+    const snapshotRows = Array.from({ length: 6 }, (_, i) => ({
+      question_id: `q${i}`, platform: 'chatgpt', top3_brands: ['CTS Tours'], error_code: null,
+    }))
+
+    const result = await autoFetchMetricValue(
+      stubWithActiveConfig(activeQuestions, snapshotRows), 'client-1', 'ai_visibility_score')
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toMatch(/insufficient fully-measured/)
   })
 })
