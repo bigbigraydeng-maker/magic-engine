@@ -199,6 +199,12 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   //       小时级任务 × 2.5 倍宽限 ≈ 2.5h，取 3h（同 overdue 的宽限口径）。
   //       `generated_at` 才是「这张卡这一轮被写过」的时刻；`updated_at` 同样会被写，
   //       但前者语义更直，别人改动时不容易误解。
+  //    🔴 **2026-09-23 Codex 复审再补一道：连续 3 小时没有新私信对话，或所有对话都
+  //       已有最新简报时，这个任务会合法 `processed=0` 收工——这种情况下
+  //       `conversation_briefs.generated_at` 本来就不该前进，不是故障。判定这边
+  //       （`checkDownstreamFreshness` in `health.ts`）已经配上运行回执的
+  //       `RunActivityReader`：窗口内查不到任何一次 `processed > 0` 的运行记录
+  //       时不报——只有「候选是有的、但没写下去」才算真的沉默死。
   { service: 'inngest:cloud-messenger-brief-after-sync', jobName: 'messenger-brief-hourly', schedule: '10 * * * *', logsRuns: true, scheduler: 'inngest',
     outputTables: [{ table: 'conversation_briefs', freshnessHours: 3, timestampColumn: 'generated_at' }] },
   { service: 'meta-leads-hourly', jobName: 'meta-leads-sync', schedule: '25 * * * *', logsRuns: true },

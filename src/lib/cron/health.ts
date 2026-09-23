@@ -318,13 +318,62 @@ export function makeSupabaseProber(supabase: SupabaseClient): DownstreamProber {
 }
 
 /**
+ * 窗口内这个任务有没有"本该写点什么"的一轮 —— 判据是 `cron_run_logs.processed`。
+ *
+ * 🔴 加这一层是因为 Codex 审出的漏洞（2026-09-23）：`messenger-brief-hourly`
+ *    连续 3 小时没有新对话、或所有对话已有最新简报时，会合法地 `processed=0`
+ *    收工 —— `conversation_briefs.generated_at` 本来就不该前进。旧版
+ *    `checkDownstreamFreshness` 只看表新鲜度，会把这种正常空轮次当成
+ *    「任务跑成了但没写东西」持续报错，天天生成一条没人能处理的人工待办。
+ *
+ *    判据用 `processed`（不是 `completed_count`）：这一列在各任务里记的是
+ *    「这一轮挑出了几个候选」，0 就是「这一轮本来就没有该处理的东西」——
+ *    跟这一轮到底写成了几条是两件事。窗口内只要有一次 `processed > 0`
+ *    但表还是没新行，就还是要报：候选是有的，只是没写下去。
+ */
+export interface RunActivityProbe {
+  /** 窗口内是否存在证据表明这一轮本该产出（某次运行 processed > 0） */
+  hadDueWork: boolean
+  /** 查不出来时给出原因；查不出来时按旧行为处理（当作可能有该产出的一轮），别默认放行 */
+  error: string | null
+}
+
+/**
+ * 读某个任务从 `since` 到现在，运行记录里有没有 `processed > 0` 的一轮。
+ *
+ * 抽成窄函数的理由跟 `DownstreamProber` 一样：测试直接传 fake，不用造一个
+ * 满足 SupabaseClient 整套类型的假客户端。
+ */
+export type RunActivityReader = (jobName: string, since: Date) => Promise<RunActivityProbe>
+
+export function makeSupabaseRunActivityReader(supabase: SupabaseClient): RunActivityReader {
+  return async (jobName, since) => {
+    const { data, error } = await supabase
+      .from('cron_run_logs')
+      .select('processed')
+      .eq('job_name', jobName)
+      .eq('status', 'completed')
+      .gte('started_at', since.toISOString())
+      .order('started_at', { ascending: false })
+      .limit(50)
+    if (error) return { hadDueWork: true, error: error.message }
+    const hadDueWork = (data ?? []).some((r) => ((r as { processed: number | null }).processed ?? 0) > 0)
+    return { hadDueWork, error: null }
+  }
+}
+
+/**
  * 只把"真的 stale"的抽出来。查不到（error 非空）不算 stale —— 单独报，
  * 由前端决定摆在哪。查得到但从来没写过（lastRowAt=null, error=null）当作 stale
  * 报出来 —— 一张有 outputTables 声明的表却零行，多半就是我们要抓的沉默死。
+ *
+ * `activityReader` 不传时保持老行为（不做「本轮是否应产出」的判断）——
+ * 现有测试和还没接上运行回执的调用方不受影响。
  */
 export async function checkDownstreamFreshness(
   prober: DownstreamProber,
   now: Date = new Date(),
+  activityReader?: RunActivityReader,
 ): Promise<SilentSuccess[]> {
   const targets = CRON_REGISTRY.flatMap((e) =>
     (e.outputTables ?? []).map((t) => ({ entry: e, target: t })),
@@ -332,6 +381,15 @@ export async function checkDownstreamFreshness(
   if (targets.length === 0) return []
 
   const probes = await Promise.all(targets.map((t) => prober(t.target)))
+
+  // 查不到「未写过」情形的窗口用不设下限，覆盖这张表存在以来的全部运行记录；
+  // 「stale」情形从最后一次写入开始查，只覆盖真正的空窗期。
+  const hadDueWork = async (jobName: string, since: Date): Promise<boolean> => {
+    if (!activityReader) return true
+    const probe = await activityReader(jobName, since)
+    // 查不出来时不默认放行——维持旧行为，照样按表新鲜度报
+    return probe.error ? true : probe.hadDueWork
+  }
 
   const out: SilentSuccess[] = []
   for (let i = 0; i < targets.length; i++) {
@@ -353,6 +411,7 @@ export async function checkDownstreamFreshness(
     }
 
     if (!lastRowAt) {
+      if (!(await hadDueWork(entry.jobName, new Date(0)))) continue
       out.push({
         service: entry.service,
         jobName: entry.jobName,
@@ -367,6 +426,7 @@ export async function checkDownstreamFreshness(
 
     const hoursSince = (now.getTime() - lastRowAt.getTime()) / 3_600_000
     if (hoursSince > target.freshnessHours) {
+      if (!(await hadDueWork(entry.jobName, lastRowAt))) continue
       out.push({
         service: entry.service,
         jobName: entry.jobName,
@@ -389,7 +449,10 @@ export async function checkCronHealth(
   const [lastRun, outcomes, silentSuccess, stuck] = await Promise.all([
     lastRunByJob(supabase, names),
     lastOutcome(supabase, names),
-    checkDownstreamFreshness(makeSupabaseProber(supabase), now),
+    // 卡死判定用主干那份（48 小时窗口全量扫、按服务汇总），本分支原来那版
+    // 「只看回退 60 分钟后最新一条」已删 —— 主干那份同样修掉小时级任务的盲点，
+    // 还额外接住「卡死被下一轮成功掩埋」那种形态。
+    checkDownstreamFreshness(makeSupabaseProber(supabase), now, makeSupabaseRunActivityReader(supabase)),
     stuckByService(makeSupabaseStuckProber(supabase), now),
   ])
 

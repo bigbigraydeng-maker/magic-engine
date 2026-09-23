@@ -13,7 +13,13 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
-import { checkDownstreamFreshness, type DownstreamProbe, type DownstreamProber } from './health'
+import {
+  checkDownstreamFreshness,
+  type DownstreamProbe,
+  type DownstreamProber,
+  type RunActivityProbe,
+  type RunActivityReader,
+} from './health'
 import type { CronOutputTable } from './registry'
 
 const NOW = new Date('2026-09-23T09:00:00Z')
@@ -24,6 +30,11 @@ function proberOf(byTable: Record<string, DownstreamProbe>): DownstreamProber {
   return async (target: CronOutputTable): Promise<DownstreamProbe> => {
     return byTable[target.table] ?? { lastRowAt: null, error: null }
   }
+}
+
+/** 建一个固定返回同一个结果的 fake activity reader，不看 jobName / since。 */
+function activityReaderOf(probe: RunActivityProbe): RunActivityReader {
+  return async () => probe
 }
 
 // 单独 mock registry 让测试不受它变化影响
@@ -117,5 +128,66 @@ describe('checkDownstreamFreshness —— 2026-09-23 事故防御', () => {
     // → 应作为 "从没写过" 报出，但它没声明 outputTables，就一条不该出现
     const out = await checkDownstreamFreshness(proberOf({}), NOW)
     expect(out.map((s) => s.service)).not.toContain('no-downstream-fixture')
+  })
+})
+
+describe('checkDownstreamFreshness × activityReader —— Codex 2026-09-23 复审：空轮次不能报', () => {
+  it('窗口内没有 processed>0 的运行（一直是 nothing_due）→ 表再 stale 也不报', async () => {
+    const out = await checkDownstreamFreshness(
+      proberOf({
+        ad_health_narratives: { lastRowAt: hoursAgo(72), error: null },
+        ad_daily_insights: { lastRowAt: hoursAgo(72), error: null },
+      }),
+      NOW,
+      activityReaderOf({ hadDueWork: false, error: null }),
+    )
+    expect(out).toEqual([])
+  })
+
+  it('窗口内有一次 processed>0（真的有候选）但表还是 stale → 照样报', async () => {
+    const out = await checkDownstreamFreshness(
+      proberOf({
+        ad_health_narratives: { lastRowAt: hoursAgo(72), error: null },
+        ad_daily_insights: { lastRowAt: hoursAgo(72), error: null },
+      }),
+      NOW,
+      activityReaderOf({ hadDueWork: true, error: null }),
+    )
+    expect(out).toHaveLength(2)
+  })
+
+  it('从没写过 + 窗口内没有 processed>0 的运行 → 不报（表还没等到第一批候选）', async () => {
+    const out = await checkDownstreamFreshness(
+      proberOf({
+        ad_health_narratives: { lastRowAt: null, error: null },
+        ad_daily_insights: { lastRowAt: hoursAgo(1), error: null },
+      }),
+      NOW,
+      activityReaderOf({ hadDueWork: false, error: null }),
+    )
+    expect(out).toEqual([])
+  })
+
+  it('activityReader 查询出错 → 不默认放行，按老行为照样报', async () => {
+    const out = await checkDownstreamFreshness(
+      proberOf({
+        ad_health_narratives: { lastRowAt: hoursAgo(72), error: null },
+        ad_daily_insights: { lastRowAt: hoursAgo(72), error: null },
+      }),
+      NOW,
+      activityReaderOf({ hadDueWork: false, error: 'cron_run_logs 查询超时' }),
+    )
+    expect(out).toHaveLength(2)
+  })
+
+  it('不传 activityReader → 保持老行为（不做本轮是否应产出的判断）', async () => {
+    const out = await checkDownstreamFreshness(
+      proberOf({
+        ad_health_narratives: { lastRowAt: hoursAgo(72), error: null },
+        ad_daily_insights: { lastRowAt: hoursAgo(72), error: null },
+      }),
+      NOW,
+    )
+    expect(out).toHaveLength(2)
   })
 })

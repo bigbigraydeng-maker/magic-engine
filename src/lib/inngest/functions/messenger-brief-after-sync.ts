@@ -171,7 +171,7 @@ export function createMessengerBriefAfterSyncFunction(deps: {
 
       // 主动停下来的那一轮：如实记成失败就收工。
       //
-      // 🔴 不重试、不抛异常。余额用光重试一百次也不会好（`fatalAiReason` 的判据），
+      // 🔴 不重试、不抛异常。余额用光重试一百次也不会好（判据见 `@/lib/ai/provider-failure`），
       //    时间预算用完更不该在同一轮里接着跑 —— 该做的是让这行运行记录带着真实原因
       //    变成 `failed`，让体检报告红灯、待办里出现一条人能动手的事。
       //    积压会顺着后面几轮慢慢排掉（每轮 50 张的闸照旧生效）。
