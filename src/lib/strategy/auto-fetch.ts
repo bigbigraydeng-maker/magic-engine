@@ -33,6 +33,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { bulkKeywordVolume } from '@/lib/dataforseo/labs'
 import { locationCodeForDb } from '@/lib/seo-intelligence/keyword-snapshots'
 import {
+  MIN_FULL_COVERAGE_RATIO,
+  groupQuestionCoverage,
   partitionConclusiveSnapshots,
   summariseFailureCodes,
 } from '@/lib/industry-ai-visibility/snapshot-conclusive'
@@ -454,18 +456,28 @@ async function fetchFormSubmissions(
 //   - industry not in mapping table → ok:false 'industry "X" not mapped...'
 //   - no snapshot for this industry yet → ok:false 'no AI visibility snapshots'
 //   - latest snapshot < today → ok:false 'not refreshed today' (魏征 P1-2)
-//   - CONCLUSIVE question count < 5 → ok:false 'insufficient conclusive questions'
-//   - 0 hits among conclusive rows → ok:true value:0 (REAL value, brand absent)
+//   - fully-measured question count < 5 → ok:false 'insufficient fully-measured'
+//   - fully-measured share < 60% → ok:false 'coverage too low'
+//   - 0 hits among fully-measured questions → ok:true value:0
+//     (REAL value, brand genuinely absent)
 //
 // 2026-09-23 红线修复 (docs/PITFALLS.md D12, 同一个病的第二处):
 // Snapshot rows whose probe FAILED (OpenAI quota exhausted, DataForSEO error)
 // carry empty top3_brands. Counting them in the denominator silently drags the
 // client's score DOWN and makes "我们没测成" look like "AI 从来不提我们" —
 // the strategy layer then prescribes off a number that was never measured.
-// Both numerator and denominator now come from conclusive rows only, and the
-// n<5 gate counts conclusive questions, not raw rows. See
-// src/lib/industry-ai-visibility/snapshot-conclusive.ts for why the predicate
-// is NOT simply `error_code IS NULL` ('no_ai_overview' is a real zero).
+//
+// The fix is complete-case analysis at QUESTION level, not just row level:
+// a question is scored only when every platform row for it completed. Scoring
+// partially-measured questions biases down by up to 46% (measured on
+// 2026-09-20 production data); keeping their hits but dropping their misses
+// biases up to 100%. On top of that a 60% coverage floor, because probe
+// failures are systematic (city-scoped questions fail, national ones do not),
+// so a thin surviving sample is a skewed one.
+//
+// See src/lib/industry-ai-visibility/snapshot-conclusive.ts for why the
+// row predicate is NOT simply `error_code IS NULL` ('no_ai_overview' means
+// the probe completed and Google showed no AI Overview — a genuine zero).
 
 interface ClientRow {
   name: string | null
@@ -522,7 +534,12 @@ async function fetchAiVisibilityScore(
   const latestDate = (latestRow as { collected_date: string }).collected_date
   const today = new Date().toISOString().slice(0, 10)
 
-  // 4. Stale data guard (魏征 P1-2)
+  // 4. Stale data guard (魏征 P1-2).
+  // NOTE: step 3 picks latestDate from ALL rows, failed ones included. That is
+  // safe ONLY because this gate refuses anything older than today: a day whose
+  // entire batch failed gets latestDate=today, passes here, and is then caught
+  // by the coverage gates below. If this freshness gate is ever relaxed, step 3
+  // must start picking the latest date that has conclusive rows.
   if (latestDate < today) {
     return {
       ok: false,
@@ -542,37 +559,61 @@ async function fetchAiVisibilityScore(
   if (snapsErr) return { ok: false, reason: `snapshot query failed: ${snapsErr.message}` }
 
   const snapshots = (snaps ?? []) as SnapshotRow[]
+  const { failed } = partitionConclusiveSnapshots(snapshots)
 
-  // 5b. Drop probes that never completed — they are "not measured", not zero.
-  const { conclusive, failed } = partitionConclusiveSnapshots(snapshots)
-  const uniqueQuestions = new Set(conclusive.map(s => s.question_id))
+  // 5b. Complete-case analysis: score ONLY questions whose every platform row
+  // completed. A question measured on one platform but not the others is
+  // evidence we do not have — see groupQuestionCoverage() for why keeping
+  // either half of a partial question biases the score (down, then up).
+  const coverage = groupQuestionCoverage(snapshots)
+  const scorable = coverage.fullyMeasured
+  const incompleteCount = coverage.partialQuestionIds.length + coverage.failedQuestionIds.length
 
-  if (uniqueQuestions.size < 5) {
-    const failureNote = failed.length > 0
-      ? ` ${failed.length}/${snapshots.length} probes failed (${summariseFailureCodes(failed)}) — ` +
-        `score is NOT COMPUTABLE, not zero.`
-      : ''
+  const failureNote = failed.length > 0
+    ? ` ${incompleteCount}/${coverage.totalQuestions} questions were left incomplete by ` +
+      `${failed.length} failed platform probes (${summariseFailureCodes(failed)}) — ` +
+      `the score is NOT COMPUTABLE, not zero.`
+    : ''
+
+  if (scorable.size < 5) {
     return {
       ok: false,
-      reason: `insufficient conclusive AI visibility probes for industry "${industryCode}" ` +
-              `(n=${uniqueQuestions.size} < 5 on ${latestDate}).${failureNote}`,
+      reason: `insufficient fully-measured AI visibility questions for industry "${industryCode}" ` +
+              `(n=${scorable.size} < 5 on ${latestDate}).${failureNote}`,
     }
   }
 
-  // 6. Count questions where brand appears in top3 — conclusive rows only
-  const hitQuestions = new Set<string>()
-  for (const s of conclusive) {
-    const top3 = s.top3_brands ?? []
-    const matched = top3.some(b => matchAliases(b, c.name as string, c.brand_aliases))
-    if (matched) hitQuestions.add(s.question_id)
+  // 5c. Coverage gate. Probe failures are NOT random — city-scoped questions
+  // fail at the SERP provider while national ones succeed — so a thin surviving
+  // sample is a skewed sample, not just a small one.
+  const coverageRatio = scorable.size / coverage.totalQuestions
+  if (coverageRatio < MIN_FULL_COVERAGE_RATIO) {
+    return {
+      ok: false,
+      reason: `AI visibility coverage too low for industry "${industryCode}" on ${latestDate}: ` +
+              `only ${scorable.size}/${coverage.totalQuestions} questions ` +
+              `(${Math.round(coverageRatio * 100)}%) were measured on every platform, below the ` +
+              `${Math.round(MIN_FULL_COVERAGE_RATIO * 100)}% minimum. Probe failures skew towards ` +
+              `city-scoped questions, so the surviving sample is biased, not merely small.` +
+              `${failureNote}`,
+    }
   }
 
-  const score = Math.round((hitQuestions.size / uniqueQuestions.size) * 100)
+  // 6. Count fully-measured questions where the brand appears in a top3
+  let hits = 0
+  for (const questionRows of scorable.values()) {
+    const matched = questionRows.some(s =>
+      (s.top3_brands ?? []).some(b => matchAliases(b, c.name as string, c.brand_aliases)),
+    )
+    if (matched) hits++
+  }
 
-  // Disclose partial coverage: a score off 5 conclusive probes is weaker
-  // evidence than the same score off 18, and the reader must be able to see it.
-  const coverageNote = failed.length > 0
-    ? ` (${failed.length}/${snapshots.length} probes failed and were excluded)`
+  const score = Math.round((hits / scorable.size) * 100)
+
+  // Disclose partial coverage in the same unit as the score (questions, not
+  // rows), so 5/18 never reads like a full measurement.
+  const coverageNote = incompleteCount > 0
+    ? ` (${incompleteCount}/${coverage.totalQuestions} questions excluded — incomplete evidence)`
     : ''
 
   return {
@@ -580,7 +621,7 @@ async function fetchAiVisibilityScore(
     value: score,
     source: 'auto.ai_visibility_top3',
     snapshot_date: latestDate,
-    label: `${score}/100 — top3 in ${hitQuestions.size}/${uniqueQuestions.size} ${industryCode} questions${coverageNote}`,
+    label: `${score}/100 — top3 in ${hits}/${scorable.size} fully-measured ${industryCode} questions${coverageNote}`,
   }
 }
 

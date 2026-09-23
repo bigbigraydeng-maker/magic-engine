@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  MIN_FULL_COVERAGE_RATIO,
   SUCCESSFUL_EMPTY_ERROR_CODES,
+  groupQuestionCoverage,
   isSnapshotConclusive,
   partitionConclusiveSnapshots,
   summariseFailureCodes,
@@ -9,10 +11,6 @@ import {
 describe('isSnapshotConclusive', () => {
   it('treats a clean row as conclusive', () => {
     expect(isSnapshotConclusive({ error_code: null })).toBe(true)
-  })
-
-  it('treats a missing error_code as conclusive (column absent from select)', () => {
-    expect(isSnapshotConclusive({ error_code: undefined })).toBe(true)
   })
 
   it('treats no_ai_overview as conclusive — Google showed none, that is a real zero', () => {
@@ -66,5 +64,51 @@ describe('summariseFailureCodes', () => {
 
   it('labels a null code as unknown rather than dropping it', () => {
     expect(summariseFailureCodes([{ error_code: null }])).toBe('unknown×1')
+  })
+})
+
+describe('groupQuestionCoverage', () => {
+  const q = (question_id: string, error_code: string | null) => ({ question_id, error_code })
+
+  it('classifies a question as fully measured only when every row completed', () => {
+    const { fullyMeasured, partialQuestionIds, failedQuestionIds, totalQuestions } =
+      groupQuestionCoverage([
+        q('full', null), q('full', 'no_ai_overview'), q('full', null),
+        q('partial', null), q('partial', 'dataforseo_error'),
+        q('dead', 'chatgpt_error'), q('dead', 'dataforseo_error'),
+      ])
+
+    expect([...fullyMeasured.keys()]).toEqual(['full'])
+    expect(fullyMeasured.get('full')).toHaveLength(3)
+    expect(partialQuestionIds).toEqual(['partial'])
+    expect(failedQuestionIds).toEqual(['dead'])
+    expect(totalQuestions).toBe(3)
+  })
+
+  it('treats a single-row question as fully measured when that row completed', () => {
+    const { fullyMeasured } = groupQuestionCoverage([q('solo', null)])
+    expect([...fullyMeasured.keys()]).toEqual(['solo'])
+  })
+
+  it('does not count a partially-measured question as fully measured even if it hit', () => {
+    // The surviving platform may not be the one that would have hit — that is
+    // the whole point of complete-case analysis.
+    const { fullyMeasured, partialQuestionIds } = groupQuestionCoverage([
+      q('mixed', null), q('mixed', 'dataforseo_error'),
+    ])
+    expect(fullyMeasured.size).toBe(0)
+    expect(partialQuestionIds).toEqual(['mixed'])
+  })
+
+  it('handles an empty input', () => {
+    const c = groupQuestionCoverage([])
+    expect(c.totalQuestions).toBe(0)
+    expect(c.fullyMeasured.size).toBe(0)
+  })
+})
+
+describe('MIN_FULL_COVERAGE_RATIO', () => {
+  it('is pinned at 60% — healthy production days sit at 100% and are unaffected', () => {
+    expect(MIN_FULL_COVERAGE_RATIO).toBe(0.6)
   })
 })

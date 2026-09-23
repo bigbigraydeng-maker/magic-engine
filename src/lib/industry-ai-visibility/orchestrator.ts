@@ -339,6 +339,9 @@ export async function runCollection(opts: RunCollectionOptions): Promise<RunSumm
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+/** Drift keys already reported, so one broken batch logs once, not once per row. */
+const reportedDrift = new Set<string>()
+
 function snapshotRow(
   questionId: string,
   platform: Platform,
@@ -351,17 +354,22 @@ function snapshotRow(
   // error_code and are the audit trail for "this batch never ran" (see
   // playbook-geo-general §八: 失败批次要如实留存). The cost of keeping them is
   // that `ok` is NOT a column, so every downstream reader has to rebuild it
-  // from error_code via isSnapshotConclusive(). Guard that reconstruction
-  // here: if the collector ever returns ok:true with an error_code that the
-  // allowlist doesn't know, downstream would silently score a failed probe
-  // as a real zero. Loud log now beats a wrong client number later.
+  // from error_code via isSnapshotConclusive(). Guard that reconstruction:
+  // if the collector ever returns ok:true with an error_code the allowlist
+  // doesn't know, downstream would silently score a failed probe as a real
+  // zero. Reported once per (run, code) — a broken batch is 18+ identical
+  // rows and must not flood the log.
   if (r.ok !== isSnapshotConclusive({ error_code: r.error_code })) {
-    console.error(
-      `[industry-ai-visibility] conclusiveness drift on ${platform}: ` +
-      `collector ok=${r.ok} but error_code=${r.error_code ?? 'null'}. ` +
-      `Add this code to SUCCESSFUL_EMPTY_ERROR_CODES in snapshot-conclusive.ts, ` +
-      `or downstream scoring will misread it.`,
-    )
+    const driftKey = `${runId}::${platform}::${r.error_code ?? 'null'}`
+    if (!reportedDrift.has(driftKey)) {
+      reportedDrift.add(driftKey)
+      console.error(
+        `[industry-ai-visibility] conclusiveness drift on ${platform} (run ${runId}): ` +
+        `collector ok=${r.ok} but error_code=${r.error_code ?? 'null'}. ` +
+        `Add this code to SUCCESSFUL_EMPTY_ERROR_CODES in snapshot-conclusive.ts, ` +
+        `or downstream scoring will misread it as a measured zero.`,
+      )
+    }
   }
 
   return {
