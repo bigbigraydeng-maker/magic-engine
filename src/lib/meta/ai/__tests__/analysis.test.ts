@@ -209,3 +209,29 @@ describe('listAnalyses 只把图表用得到的证据字段发给浏览器',()=>
     expect(result.evidence).toBeNull()
   })
 })
+
+describe('历史报告隔离',()=>{
+  it('listAnalyses 同时按 client_id 与 principal_id 过滤，新 owner 查不到原 owner 的报告',async()=>{
+    const chain:Record<string,unknown>={}
+    for(const method of ['select','eq','order','limit']) chain[method]=vi.fn(()=>chain)
+    chain.then=(resolve:(value:unknown)=>unknown)=>Promise.resolve({ data:[],error:null }).then(resolve)
+    mocks.from.mockReturnValue(chain)
+    await listAnalyses('client','new-principal')
+    expect(mocks.from).toHaveBeenCalledWith('meta_ads_ai_analysis_jobs')
+    expect(chain.eq).toHaveBeenCalledWith('client_id','client')
+    expect(chain.eq).toHaveBeenCalledWith('principal_id','new-principal')
+    expect(chain.order).toHaveBeenCalledWith('created_at',{ ascending:false })
+    expect(chain.limit).toHaveBeenCalledWith(10)
+  })
+
+  it('listAnalyses 返回原 owner 自己的报告',async()=>{
+    const chain:Record<string,unknown>={}
+    for(const method of ['select','eq','order','limit']) chain[method]=vi.fn(()=>chain)
+    chain.then=(resolve:(value:unknown)=>unknown)=>Promise.resolve({ data:[{ id:'job-1',status:'completed',ad_account_id:'act_1',
+      window_since:'2026-09-15',window_until:'2026-09-21',report_markdown:'报告',error_code:null,created_at:'t',completed_at:'t',
+      evidence:null }],error:null }).then(resolve)
+    mocks.from.mockReturnValue(chain)
+    const result=await listAnalyses('client','principal')
+    expect(result).toEqual([expect.objectContaining({ id:'job-1',report_markdown:'报告' })])
+  })
+})
