@@ -56,6 +56,10 @@
 | `GEMINI_API_KEY` | Google Gemini（AI 可见度追踪第 4 引擎） | Render-web | ❌ |
 | `AI_TRACKER_ENABLE_CLAUDE` | 开关：AI Tracker 是否跑 Claude 引擎 | Render-web | ❌ |
 | `TYPESAFE_API_KEY` | TypeSafe Jev 判断模型（`src/lib/jev/client.ts`，对外封装名「Compliance Engine」）。三个判断点在用：① SEO 事实核对（`fact-check.ts`，PR #1826）；② 内容工厂成片文案品控——判断竞品品牌/占位字幕/人称口吻（`content-quality-guard.ts` / `scanContentQualityFlags`，PR #1825/#1832）；③ CTS Messenger AI 客服 verifier 的品牌红线/数字核实语义补充判断（`verifier/policies/cts.ts` / `verifyCtsReplyWithSemanticChecks`，2026-09-20，PM 已确认可发客户对话内容给 Jev）。`callJev` 缺这个变量会直接抛错：①处 `checkFactPreservation` fail-closed 恒定返回「有矛盾」；②处 `scanContentQualityFlags` 把每个带文案的工单标成 `quality_check_unavailable`；③处 fail-open 退回七道正则闸原结果（不阻塞发送，见 `MESSENGER_VERIFIER_SEMANTIC_DISABLED`）。**2026-09-20 晚间已在 `crazycontent`（Render-web）配上真实值，并现场拿 CTS 真实候选页验证过——拿到真实 `consistent:true`（score 0.08–0.10）而不是报错兜底，①处已确认生效。②③两处尚未单独验证，合并/复用前建议再跑一次确认。** | Render-web | ✅ |
+| `CONTENT_GUARD_CLICHE_THRESHOLD` | 发布前内容守卫：套话概率阈值（0–1，默认 0.8），≥ 即标记需人工复核 | 可选 | ✅ (仅 example) |
+| `CONTENT_GUARD_MAX_EMBEDDED_LATIN_WORDS` | 中文句子里允许夹的连续英文词数（默认 3，品牌名用） | 可选 | ✅ (仅 example) |
+| `CONTENT_GUARD_MAX_EMBEDDED_CJK_CHARS` | 英文句子里允许夹的汉字数（默认 0） | 可选 | ✅ (仅 example) |
+| `CONTENT_GUARD_CLICHE_DISABLED` | 开关：设 true 只关停套话判断——这是「主动不查」，不会把内容标成需复核；中英混杂检测照常跑、照常拦 | 可选 | ✅ (仅 example) |
 
 ## 3. 视觉 / 视频 / 素材
 
