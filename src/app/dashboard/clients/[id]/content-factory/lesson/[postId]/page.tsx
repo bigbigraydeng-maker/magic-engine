@@ -7,6 +7,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+import { GuardReviewPanel } from '@/components/content/GuardBadge'
+import type { GuardFlag } from '@/lib/content/guard-receipt'
 
 interface LectureSection {
   spoken: string
@@ -62,6 +64,8 @@ interface Detail {
     videoUrl: string | null
     lessonNo: number | null
     source: string | null
+    /** 发布前自检结果。null = 这一讲没跑过自检，不是「查过没问题」。 */
+    guard?: GuardFlag | null
   }
   lecture: Lecture
   production: Production | null
@@ -484,6 +488,8 @@ export default function LectureWorkbenchPage() {
         {draft.title}
       </h1>
       <p className="text-sm text-me-taupe mb-4">{data.post.source?.replace(/^系列课[·:：]?/, '')}</p>
+
+      <GuardReviewPanel flag={data.post.guard} />
 
       {error && <div className="text-sm text-status-rej bg-me-ivory border border-me-stone rounded-2xl p-3 mb-3">{error}</div>}
       {notice && (

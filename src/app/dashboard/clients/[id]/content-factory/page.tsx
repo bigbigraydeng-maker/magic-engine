@@ -8,6 +8,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+import { GuardBadge, GuardReviewPanel } from '@/components/content/GuardBadge'
+import type { GuardFlag } from '@/lib/content/guard-receipt'
 
 const STAGES = ['选题', '备料', '出片', '发布', '看表现'] as const
 type Stage = (typeof STAGES)[number]
@@ -40,6 +42,8 @@ interface Card {
   visualBrief: string
   mode?: string          // '讲课式' 等制作形态
   rendering?: boolean    // 流水线正在给这条做片 —— 做片中不给挂片入口
+  /** 发布前自检的结果。null = 这条从来没跑过自检（老内容/链路没接），不是「没问题」。 */
+  guard?: GuardFlag | null
 }
 
 interface Lesson extends Card {
@@ -326,6 +330,9 @@ export default function ContentFactoryBoardPage() {
                         <span className={`mt-1 w-1.5 h-1.5 rounded-full flex-none ${dotClass(c.status)}`} />
                         <span className="text-[13px] font-medium leading-snug">{c.title}</span>
                       </div>
+                      {c.guard?.needsReview && (
+                        <div className="mb-1.5"><GuardBadge flag={c.guard} /></div>
+                      )}
                       {c.status === 'approved' && !c.hasVideo && (
                         <div className="inline-flex items-center gap-1 text-[10px] text-me-ochre bg-me-ivory border border-me-stone rounded px-1.5 py-0.5 mb-1.5">
                           <span className="animate-pulse">⏳</span> 制作中
@@ -373,7 +380,10 @@ export default function ContentFactoryBoardPage() {
                           className="text-left bg-white border border-me-stone rounded-xl px-3 py-2.5 hover:border-me-ochre transition-colors flex items-center gap-3"
                         >
                           <span className="text-[11px] font-semibold text-me-taupe w-12 flex-none tabular-nums">第{l.lessonNo}讲</span>
-                          <span className="flex-1 text-[13px] font-medium leading-snug">{l.title.replace(/^【系列课·第\d+讲】/, '')}</span>
+                          <span className="flex-1 text-[13px] font-medium leading-snug">
+                            {l.title.replace(/^【系列课·第\d+讲】/, '')}
+                            {l.guard?.needsReview && <span className="ml-1.5 align-middle"><GuardBadge flag={l.guard} /></span>}
+                          </span>
                           {l.mode && <span className="text-[10px] text-me-charcoal bg-me-ivory border border-me-stone rounded px-1.5 py-0.5 flex-none">{l.mode}</span>}
                           <span className="hidden sm:flex flex-none items-center gap-1">
                             {(l.platforms ?? []).slice(0, 3).map((p) => (
@@ -408,6 +418,8 @@ export default function ContentFactoryBoardPage() {
             </div>
 
             <h2 className="text-base font-display font-bold leading-snug mb-3">{selected.title}</h2>
+
+            <GuardReviewPanel flag={selected.guard} />
 
             {selected.videoUrl && (
               <div className="mb-3">

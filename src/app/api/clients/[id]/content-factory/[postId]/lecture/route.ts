@@ -16,6 +16,7 @@ import {
   type LectureScript,
 } from '@/lib/factory/lecture-script'
 import { looksLikeVideoResponse, normalizeRecordingLink } from '@/lib/factory/recording-link'
+import { readGuardFlag } from '@/lib/content/guard-receipt'
 import {
   loadLecturePost,
   saveCaptions,
@@ -83,6 +84,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
           videoUrl: loaded.post.source_video_url,
           lessonNo: loaded.lessonNo,
           source: loaded.post.source,
+          // 发布前自检的红旗（中英混杂 / 套话开头 / 没跑成）。null = 这一讲没跑过
+          // 自检，不是「查过没问题」——工作台据此决定要不要提示人工复核。
+          guard: readGuardFlag(loaded.post.generation_context_snapshot),
         },
         lecture: loaded.lecture,
         production: loaded.production,

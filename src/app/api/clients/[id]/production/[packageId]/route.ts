@@ -1,6 +1,7 @@
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { readGuardFlag } from '@/lib/content/guard-receipt'
 import { logPackagePublishedAction } from '@/lib/flywheel/package-publish'
 
 type RouteContext = { params: { id: string; packageId: string } }
@@ -91,7 +92,7 @@ export async function GET(_req: NextRequest, { params }: RouteContext) {
     postIds.length
       ? supabaseAdmin
           .from('content_posts')
-          .select('id, title, caption, status, platforms, scheduled_at, visual_brief')
+          .select('id, title, caption, status, platforms, scheduled_at, visual_brief, generation_context_snapshot')
           .in('id', postIds)
       : Promise.resolve({ data: [], error: null }),
     blogIds.length
@@ -133,7 +134,12 @@ export async function GET(_req: NextRequest, { params }: RouteContext) {
   ])
 
   // 5. Build lookup maps for O(1) merge
-  const postMap    = Object.fromEntries((postsResult.data   ?? []).map(r => [r.id, r]))
+  // 发布前自检的回执翻成一个红旗给前端；整份 snapshot 不外送（里面是生成过程的
+  // 内部字段，不是给审核人看的）。null = 这条没跑过自检，不是「查过没问题」。
+  const postMap    = Object.fromEntries((postsResult.data   ?? []).map(r => {
+    const { generation_context_snapshot, ...rest } = r
+    return [r.id, { ...rest, guard: readGuardFlag(generation_context_snapshot) }]
+  }))
   const blogMap    = Object.fromEntries((blogsResult.data   ?? []).map(r => [r.id, r]))
   const reelMap    = Object.fromEntries((reelsResult.data   ?? []).map(r => [r.id, r]))
   const visualMap  = Object.fromEntries((visualsResult.data ?? []).map(r => [r.id, r]))

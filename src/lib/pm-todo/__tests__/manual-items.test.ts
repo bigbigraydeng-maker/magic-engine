@@ -322,6 +322,36 @@ describe('pushLinkedinProgressItems — 同一类卡点只出一条，别刷屏'
     expect(items[0].what).not.toContain('条')
   })
 
+  it('自检标红的草稿 → 单独一条待办，说清要改什么，不落进「说不清原因」的兜底', async () => {
+    const items: ManualItem[] = []
+    await pushLinkedinProgressItems(
+      fakePostsQuery([draft('content_guard_flagged'), draft('content_guard_flagged')]),
+      items,
+      NOW,
+    )
+
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('linkedin_progress_needs_review')
+    expect(items[0].what).toContain('2 条')
+    expect(items[0].what).toContain('发布前自检')
+    // 兜底那句是「系统没能说清具体原因」——自检标红必须说得比它具体
+    expect(items[0].what).not.toContain('没能说清具体原因')
+    expect(items[0].how).toContain('needs review')
+  })
+
+  it('自检标红和敏感信息分开下发 —— 要改的东西不是同一件事', async () => {
+    const items: ManualItem[] = []
+    await pushLinkedinProgressItems(
+      fakePostsQuery([draft('sensitive_content_flagged'), draft('content_guard_flagged')]),
+      items,
+      NOW,
+    )
+
+    expect(items).toHaveLength(2)
+    expect(items.filter((i) => i.what.includes('敏感信息'))).toHaveLength(1)
+    expect(items.filter((i) => i.what.includes('发布前自检'))).toHaveLength(1)
+  })
+
   it('账号未连的多条草稿 → 只出一条 needs_setup（账号连一次就都能发）', async () => {
     const items: ManualItem[] = []
     await pushLinkedinProgressItems(

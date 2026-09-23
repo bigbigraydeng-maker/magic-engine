@@ -8,12 +8,17 @@
  *   approve      boolean  — if true, also flip package status → 'approved' (default false)
  *
  * Returns:
- *   { success, scheduled: number, failed: number, packageStatus }
+ *   { success, scheduled: number, failed: number, skipped: BlockedPost[], packageStatus }
+ *
+ * `skipped` = posts the pre-publish content guard flagged for human review
+ * (mixed language / cliché opener / the check never completed). This route
+ * approves in bulk, so those never ride along — see src/lib/content/guard-receipt.ts.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { splitByGuard, type BlockedPost } from '@/lib/content/guard-receipt'
 
 type RouteContext = { params: { id: string; packageId: string } }
 
@@ -64,12 +69,39 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ success: false, error: 'Production package not found' }, { status: 404 })
   }
 
+  // Pre-publish guard: this route flips posts to 'approved' in bulk, so a post
+  // the guard flagged for human review must not ride along. It is dropped from
+  // the batch and named back to the caller — approving it one at a time, with a
+  // human looking at the flag in the UI, stays allowed.
+  const { data: guardRows, error: guardErr } = await supabaseAdmin
+    .from('content_posts')
+    .select('id, title, generation_context_snapshot')
+    .in('id', assignments.map(a => a.post_id))
+    .eq('client_id', clientId)
+  if (guardErr) {
+    return NextResponse.json({ success: false, error: guardErr.message }, { status: 500 })
+  }
+  const skipped: BlockedPost[] = splitByGuard(guardRows ?? []).blocked
+  const blockedIds = new Set(skipped.map(b => b.id))
+  const allowedAssignments = assignments.filter(a => !blockedIds.has(a.post_id))
+
+  if (allowedAssignments.length === 0) {
+    return NextResponse.json({
+      success: false,
+      scheduled: 0,
+      failed: 0,
+      skipped,
+      packageStatus: pkg.status as string,
+      error: `这 ${skipped.length} 条都被发布前自检标了「需人工复核」，批量排期不放行——逐条打开看过再单独确认`,
+    }, { status: 409 })
+  }
+
   // Batch-update content_posts.scheduled_at + status → 'approved'
   let scheduled = 0
   let failed = 0
 
   await Promise.all(
-    assignments.map(async ({ post_id, scheduled_at }) => {
+    allowedAssignments.map(async ({ post_id, scheduled_at }) => {
       const { error } = await supabaseAdmin
         .from('content_posts')
         .update({ scheduled_at, status: 'approved' })
@@ -102,6 +134,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     success: scheduled > 0,
     scheduled,
     failed,
+    skipped,
     packageStatus,
   }, { status: scheduled > 0 ? 200 : 500 })
 }

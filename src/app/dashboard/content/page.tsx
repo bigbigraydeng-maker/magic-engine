@@ -639,13 +639,17 @@ export default function ContentBoardPage() {
   const batchUpdate = async (ids: string[], status: string) => {
     if (ids.length === 0) return;
     const prevPosts = posts;
-    setPosts(prev => {
-      const mapped = prev.map(p => ids.includes(p.id) ? { ...p, status } : p);
+    // 把「这批 id 改成这个状态」这件事抽出来：乐观更新用它，接口回执说某几条
+    // 被拦下时，也用它从改动前的列表重算一次（不能只在当前列表上打补丁 —— 带
+    // 状态筛选时被拦下的那几条已经从列表里消失了，补丁打不到它们）。
+    const applyStatus = (list: typeof posts, targetIds: string[]) => {
+      const mapped = list.map(p => targetIds.includes(p.id) ? { ...p, status } : p);
       // Remove posts that no longer match the active status filter
       if (!selectedStatus) return mapped;
       const allowed = selectedStatus.split(',');
       return mapped.filter(p => allowed.includes(p.status));
-    });
+    };
+    setPosts(prev => applyStatus(prev, ids));
     setSelectedIds(new Set());
     setBatchTargetStatus('');
     setBatching(true);
@@ -656,10 +660,28 @@ export default function ContentBoardPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ post_ids: ids, action: 'updateStatus', status }),
       });
-      const json = await res.json();
+      const json = await res.json() as {
+        success: boolean; error?: string; updated?: number;
+        skipped?: { id: string; title: string | null }[];
+      };
       if (!json.success) throw new Error(json.error);
       const label = ({ draft: '草稿', approved: '已批准', scheduled: '已排期', published: '已发布', rejected: '已拒绝' } as Record<string, string>)[status] ?? status;
-      setBatchMsg(`✓ 已更新 ${json.updated} 条至"${label}"`);
+      // 发布前自检标红的内容不会被批量通过（接口那侧拦的）。乐观更新已经把它们
+      // 画成新状态了，这里必须按接口的真实回执改回去——不然界面显示"已批准"，
+      // 数据库里其实还是原状态，人看着绿灯就以为发得出去。
+      const skipped = json.skipped ?? [];
+      if (skipped.length > 0) {
+        const skippedIds = new Set(skipped.map(p => p.id));
+        setPosts(applyStatus(prevPosts, ids.filter(id => !skippedIds.has(id))));
+        setSelectedIds(skippedIds);
+        setBatchMsg(
+          `✓ 已更新 ${json.updated} 条至"${label}"；`
+          + `另有 ${skipped.length} 条需人工复核（中英混杂 / 套话开头 / 检查没跑成），没动：`
+          + skipped.map(p => p.title || p.id).join('、')
+        );
+      } else {
+        setBatchMsg(`✓ 已更新 ${json.updated} 条至"${label}"`);
+      }
     } catch (err) {
       setPosts(prevPosts);
       setSelectedIds(new Set(ids));

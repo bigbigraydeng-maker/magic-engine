@@ -7,6 +7,8 @@ import { findSlots } from '@/lib/scheduling/slot-finder'
 import type { SchedulingPlatform } from '@/lib/scheduling/slot-finder'
 import { ZhugeWorkbenchFab } from '@/components/workbench/ZhugeWorkbenchFab'
 import { ZhugeWorkbenchDrawer } from '@/components/workbench/ZhugeWorkbenchDrawer'
+import { GuardBadge } from '@/components/content/GuardBadge'
+import type { GuardFlag } from '@/lib/content/guard-receipt'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,6 +26,8 @@ type ContentType = 'content_post' | 'blog_post' | 'reel' | 'visual_asset'
 interface ContentPost {
   id: string; title: string; caption: string | null; status: string
   platforms: string[] | null; scheduled_at: string | null; visual_brief: string | null
+  /** 发布前自检结果。null = 这条没跑过自检，不是「查过没问题」。 */
+  guard?: GuardFlag | null
 }
 interface BlogPost {
   id: string; title: string; slug: string | null; status: string
@@ -215,6 +219,7 @@ function ContentPostCard({ post }: { post: ContentPost }) {
   return (
     <div className="space-y-1">
       <p className="text-sm font-medium text-gray-900 truncate">{post.title || '(无标题)'}</p>
+      {post.guard?.needsReview && <GuardBadge flag={post.guard} />}
       {post.caption && (
         <p className="text-xs text-gray-500 line-clamp-2">{post.caption}</p>
       )}
@@ -383,7 +388,7 @@ function SchedulingPanel({
   const [entries, setEntries] = useState<PostScheduleEntry[]>([])
   const [suggested, setSuggested] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [result, setResult] = useState<{ scheduled: number; failed: number } | null>(null)
+  const [result, setResult] = useState<{ scheduled: number; failed: number; skipped: { id: string; title: string | null }[] } | null>(null)
 
   const generateSuggestions = useCallback(() => {
     const base = new Date(`${baseDate}T00:00:00+10:00`)
@@ -432,13 +437,18 @@ function SchedulingPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assignments, approve: true }),
       })
-      const data = await res.json() as { success: boolean; scheduled: number; failed: number; packageStatus: string }
-      setResult({ scheduled: data.scheduled, failed: data.failed })
+      const data = await res.json() as {
+        success: boolean; scheduled?: number; failed?: number; packageStatus?: string
+        skipped?: { id: string; title: string | null }[]
+      }
+      // skipped = 被发布前自检标了「需人工复核」的，接口不放行批量排期。
+      // 必须原样显示出来，否则人只看到"排期完成 N 条"，不知道少了几条。
+      setResult({ scheduled: data.scheduled ?? 0, failed: data.failed ?? 0, skipped: data.skipped ?? [] })
       if (data.packageStatus) {
         onScheduled(data.packageStatus)
       }
     } catch {
-      setResult({ scheduled: 0, failed: assignments.length })
+      setResult({ scheduled: 0, failed: assignments.length, skipped: [] })
     } finally {
       setSubmitting(false)
     }
@@ -454,12 +464,28 @@ function SchedulingPanel({
 
   if (result) {
     return (
-      <div className="bg-green-50 border border-green-200 rounded-xl p-5 text-center space-y-2">
-        <p className="text-sm font-semibold text-green-800">
-          ✅ 排期完成：{result.scheduled} 条已确认
-          {result.failed > 0 && `，${result.failed} 条失败`}
-        </p>
-        <p className="text-xs text-green-600">内容状态已更新为「已批准」，可在 Content Hub 中查看发布状态。</p>
+      <div className="space-y-2">
+        {result.skipped.length > 0 && (
+          <div className="bg-red-50 border border-red-300 rounded-xl p-4 space-y-1">
+            <p className="text-sm font-semibold text-red-700">
+              ⚠ {result.skipped.length} 条需人工复核，没有排期
+            </p>
+            <p className="text-xs text-red-700">
+              这几条被发布前自检标红了（中英混杂 / 套话开头 / 检查没跑成）：
+              {result.skipped.map(p => p.title || p.id).join('、')}。
+              批量排期一律不放行，改好或逐条看过再单独确认。
+            </p>
+          </div>
+        )}
+        {result.scheduled > 0 && (
+          <div className="bg-green-50 border border-green-200 rounded-xl p-5 text-center space-y-2">
+            <p className="text-sm font-semibold text-green-800">
+              ✅ 排期完成：{result.scheduled} 条已确认
+              {result.failed > 0 && `，${result.failed} 条失败`}
+            </p>
+            <p className="text-xs text-green-600">内容状态已更新为「已批准」，可在 Content Hub 中查看发布状态。</p>
+          </div>
+        )}
       </div>
     )
   }

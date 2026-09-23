@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { splitByGuard, type BlockedPost } from '@/lib/content/guard-receipt'
 
 const ALLOWED_STATUSES = ['draft', 'approved', 'scheduled', 'published', 'rejected'] as const
 type PostStatus = typeof ALLOWED_STATUSES[number]
@@ -63,15 +64,46 @@ export async function POST(req: NextRequest) {
         )
       }
 
+      // Pre-publish guard (src/lib/content/guard-receipt.ts). Bulk approval is a
+      // machine flipping rows nobody read, so a post the guard flagged for human
+      // review must not ride along — it is skipped and named in the response.
+      // Approving one post at a time, where a human is looking at the flag in the
+      // UI, stays allowed. Only 'approved' is gated: rejecting or re-drafting a
+      // flagged post is exactly what we want people to be able to do in bulk.
+      let targetIds = post_ids as string[]
+      let skipped: BlockedPost[] = []
+      if (status === 'approved') {
+        const { data: rows, error: guardError } = await supabaseAdmin
+          .from('content_posts')
+          .select('id, title, generation_context_snapshot')
+          .in('id', post_ids)
+          .in('client_id', clientIds)
+        if (guardError) throw guardError
+        const split = splitByGuard(rows ?? [])
+        targetIds = split.allowed.map(row => row.id)
+        skipped = split.blocked
+        if (targetIds.length === 0) {
+          return NextResponse.json(
+            {
+              success: false,
+              updated: 0,
+              skipped,
+              error: `这 ${skipped.length} 条都被发布前自检标了「需人工复核」，批量通过不放行——逐条打开看过再单独确认`,
+            },
+            { status: 409 }
+          )
+        }
+      }
+
       const { data, error } = await supabaseAdmin
         .from('content_posts')
         .update({ status })
-        .in('id', post_ids)
+        .in('id', targetIds)
         .in('client_id', clientIds)
         .select('id, status')
 
       if (error) throw error
-      return NextResponse.json({ success: true, updated: data?.length ?? 0 })
+      return NextResponse.json({ success: true, updated: data?.length ?? 0, skipped })
     }
 
     return NextResponse.json({ success: false, error: 'Invalid action' }, { status: 400 })
