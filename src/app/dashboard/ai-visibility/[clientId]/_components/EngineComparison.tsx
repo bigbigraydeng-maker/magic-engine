@@ -137,7 +137,7 @@ export function EngineComparison({ runs, brandName }: Props) {
             </thead>
             <tbody className="divide-y divide-black/[.06]">
               {runs.slice(0, 30).map(run => (
-                <tr key={run.id} className={run.error_message ? 'bg-[#C2453A]/10' : 'hover:bg-me-ivory'}>
+                <tr key={run.id} className={!isRunConclusive(run) ? 'bg-[#C2453A]/10' : 'hover:bg-me-ivory'}>
                   <td className="px-4 py-2.5">
                     <span className={`font-medium ${ENGINE_BADGE_STYLE[run.ai_engine] ?? ''} px-2 py-0.5 rounded`}>
                       {getEngineDisplayName(run.ai_engine)}
@@ -161,8 +161,8 @@ export function EngineComparison({ runs, brandName }: Props) {
                     {run.ran_at ? new Date(run.ran_at).toLocaleString() : '—'}
                   </td>
                   <td className="px-4 py-2.5">
-                    {run.error_message ? (
-                      <span className="text-[#C2453A]" title={run.error_message}>❌</span>
+                    {!isRunConclusive(run) ? (
+                      <span className="text-[#C2453A]" title={run.error_message ?? run.parse_error_message ?? undefined}>❌</span>
                     ) : (
                       <span className="text-[#5C8A4A]">✓</span>
                     )}
