@@ -94,7 +94,11 @@ PM 原话："不需要让我批准，我们最大权限的让 AI 去介入。但
   authorization: { mode: 'human_only' } | { mode: 'bounded', envelope: AutonomyEnvelope }
   ```
   `AutonomyEnvelope = { maxBudgetDeltaRatio: 0.2; respectDailyCapCents: true; minHoursSinceLastChange: 72; excludeLearningPhase: true; excludeAdStudies: true; requiresRollbackHandler: true }`
-- `authorize.ts` ⑥b 改为：`sideEffect==='outward' && policy.mode==='auto_approve'` → 若 definition 声明 `bounded` 且 **本次 input 落在信封内**（每项在授权时用真实快照重算，K9）→ 放行；否则 **不是转 pending_approval，而是 deny（可恢复码 `outside_autonomy_envelope`）+ 生成 `ads.escalate_to_pm` 三件套**。审批界面因此不需要存在。
+- **Kernel 现有两道互相独立的"对外动作必须人审"闸，两道都要改、双保险保留**（子牙设计审 2026-09-24 指出，spec v1 初稿漏了第一道）：
+  1. **结构闸** `outward-authorization.ts` `outwardBlockReason()`（`authorize.ts:330` 与 `gateway.ts:295` 各自独立调用，后者在任何 provider 副作用之前再跑一次）：现检查 `requiresHumanApproval !== true` 即拦。改为检查**声明本身是否完整合法**：`authorization.mode ∈ {human_only, bounded}`；`bounded` 时信封 6 项必须全部声明且值在允许域内（`maxBudgetDeltaRatio ∈ (0, 0.2]`、`minHoursSinceLastChange ≥ 72`、四个布尔项必须为 `true`），且 `rollback` 已声明、`reversible === true`、`providerIdempotency ≠ not_applicable`、capability 已注册撤回处理函数。缺任一项 → 与现在同样的"根本不做"语义（不是转审批）。这道闸只看**声明**，不看本次输入。
+  2. **实例闸** `authorize.ts` ⑥b（policy 层）：`sideEffect==='outward' && policy.mode==='auto_approve'` → 若声明为 `bounded` 且 **本次 input 落在信封内**（每项在授权时用真实快照重算，K9）→ 放行；否则 **不是转 pending_approval，而是 deny（可恢复码 `outside_autonomy_envelope`）+ 生成 `ads.escalate_to_pm` 三件套**。审批界面因此不需要存在。
+  3. **实例闸的兜底副本**：`gateway.ts` 在 `outwardBlockReason` 之后、provider 调用之前，用运行前快照（M1 `kernel_pre`）**再算一次输入是否在信封内**，不一致直接 `dead_letter` + 回滚不触发（还没动 provider）。这样"拆掉 authorize.ts 那一层，gateway 仍拦得住"对实例级检查同样成立——双保险从"两处都查声明"变成"两处查声明 + 两处查实例"，不是变单保险。
+  4. 变异测试四条必红：删 gateway 的结构闸调用 / 删 gateway 的实例重算 / 把信封某项声明成 `false` / 把 `maxBudgetDeltaRatio` 声明成 0.5。
 - 保留：K1 撤回处理函数必填、K3 延迟回读不自动恢复、K4 广告花费不进 Kernel 成本字段、K5 无 goal 拒绝、K6 学习受限只建议、K10/K11 改前值核对 + 回滚失败冻结客户、K13 禁回落共享令牌、K14 先对齐注册表与生产。
 
 ### G6 Inngest 闭环（业务可读事件，函数 id 一律 `cloud-ads-*`）
