@@ -67,6 +67,15 @@ export class AiVisibilityCollector {
       // fabricated "your brand is never mentioned by AI" findings for 5 clients
       // on 2026-09-21 while the OpenAI account was rate-limited (429).
       const probe = isProbeConclusive(rawProbe) ? rawProbe : null
+      // A probe counts as "failed" (not "unconfigured") both when it ran and
+      // came back with per-question errors (skipped=false) AND when the
+      // attempt itself broke — the outer timeout fired, or `probe.run()`
+      // rejected outright (`skip_kind === 'attempt_failed'`). Both are
+      // transient measurement failures, not evidence tracking was never
+      // enabled — collapsing them into `ai_visibility_not_tracked` would
+      // wrongly tell an already-configured client to go configure it.
+      const probeFailed =
+        rawProbe && !probe && (!rawProbe.skipped || rawProbe.skip_kind === 'attempt_failed')
       if (rawProbe && !probe) {
         console.warn(
           `[ai-visibility-collector] live probe not conclusive for ${clientId} — ` +
@@ -84,17 +93,11 @@ export class AiVisibilityCollector {
         if (probe) {
           return this.buildFromLiveProbe(clientId, probe)
         }
-        // The probe attempted a measurement but failed to produce anything
-        // usable — either every question's engine call failed (rawProbe not
-        // skipped, per-question errors) or the attempt itself broke: the
-        // outer timeout fired, or `probe.run()` rejected outright
-        // (`skip_kind === 'attempt_failed'`). Either way that is a transient
-        // measurement failure, not evidence tracking was never enabled.
-        // Fabricating the "not tracked / needs configuring" finding here
-        // would be the exact bug this file already guards against for the
-        // mentions-count path.
-        if (rawProbe && (!rawProbe.skipped || rawProbe.skip_kind === 'attempt_failed')) {
-          return { score: null, findings: [] }
+        if (probeFailed) {
+          return {
+            score: null,
+            findings: [this.makeProbeFailedFinding(clientId, rawProbe!)],
+          }
         }
         return {
           score: null,
@@ -173,6 +176,39 @@ export class AiVisibilityCollector {
         'Enable weekly AI Tracker: configure 10–20 priority brand/category questions in Client Settings → AI Visibility, then wait for the next Monday cron run (or trigger an ad-hoc run via Run-once button).',
       fix_type: 'me_auto',
       priority_score: 88,
+    }
+  }
+
+  private makeProbeFailedFinding(
+    clientId: string,
+    rawProbe: LiveProbeResult,
+  ): NewFinding {
+    return {
+      client_id: clientId,
+      dimension: 'ai_visibility',
+      finding_type: 'ai_visibility_probe_failed',
+      severity: 'high',
+      title: 'AI visibility probe failed — no measurement this run',
+      description:
+        `The real-time AI visibility probe attempted ${rawProbe.runs} question(s) but ` +
+        `${rawProbe.failed_runs} failed (e.g. rate-limit, timeout, model error). ` +
+        'The result is not reported as zero mentions — it is treated as unmeasured.',
+      evidence: makeEvidence({
+        parsed: {
+          attempted: rawProbe.runs,
+          measured: rawProbe.measured_runs,
+          failed: rawProbe.failed_runs,
+          latency_ms: rawProbe.latency_ms,
+          errors: rawProbe.questions
+            .filter(q => q.error)
+            .map(q => ({ question: q.question, error: q.error })),
+        },
+      }),
+      recommendation:
+        'Check the OpenAI account balance and API key validity. ' +
+        'Look for "[ai-visibility-live-probe]" errors in Render logs around the diagnostic run time.',
+      fix_type: 'fde_manual',
+      priority_score: 75,
     }
   }
 
