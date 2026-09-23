@@ -56,6 +56,27 @@ describe('checkHardFactsPreserved — regex-only fact preservation, no AI involv
     expect(result.droppedFacts).toContain('Queenstown')
   })
 
+  it('🔴 魏征 复审 2026-09-23: catches the same narrowing incident when the original says "NZ" instead of "New Zealand" (short form, not in the full-name list)', () => {
+    const result = checkHardFactsPreserved(
+      'China Tours across NZ | CTS',
+      'Departures from multiple NZ cities.',
+      'China Tours from Auckland | CTS',
+      'Departures from Auckland.',
+    )
+    expect(result.consistent).toBe(false)
+    expect(result.droppedFacts).toContain('NZ')
+  })
+
+  it('"NZ"/"AU" abbreviation matching does not false-positive inside a lowercase domain or a longer word (ctstours.co.nz, AUCKLAND)', () => {
+    const result = checkHardFactsPreserved(
+      'Auckland City Tour — ctstours.co.nz',
+      'Book now.',
+      'Auckland City Tour: New Edition — ctstours.co.nz',
+      'Book now, updated for 2026.',
+    )
+    expect(result.consistent).toBe(true)
+  })
+
   it('common short acronyms (SEO, UK, AI) never trigger a false positive on their own', () => {
     const result = checkHardFactsPreserved(
       'SEO Tips for Small Business',

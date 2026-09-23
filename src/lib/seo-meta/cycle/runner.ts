@@ -274,7 +274,7 @@ export async function runStep3Gate(
     // canEditSlug — a protected conversion page (e.g. CTS's /china-tours)
     // must never be auto-edited, no matter what the rest of the gate or the
     // fact-check would otherwise allow. Zero cost: no network call.
-    if (candidate.slug && config.protectedSlugs.includes(candidate.slug)) {
+    if (candidate.slug && config.protectedSlugs.includes(candidate.slug.toLowerCase())) {
       failures.push({
         candidate,
         reason: GATE_REASON.PROTECTED_PAGE,

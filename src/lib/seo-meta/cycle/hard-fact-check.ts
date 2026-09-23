@@ -35,6 +35,15 @@ export interface HardFactCheckResult {
 const PRICE_RE = /\$\s?\d[\d,]*(?:\.\d+)?/g
 const DATE_RE = /\b(?:\d{1,2}\s+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(?:\d{1,2},?\s+)?\d{4}\b/gi
 const ACRONYM_RE = /\b[A-Z]{3,}\b/g
+/**
+ * "NZ"/"AU" as standalone words — 魏征 复审 2026-09-23: the exact incident
+ * shape ("from New Zealand" -> "from Auckland") could equally have been
+ * written as "from NZ" in the original, which ACRONYM_RE (3+ letters) and
+ * AU_NZ_PLACE_NAMES (full names only) both miss. Case-sensitive, word-
+ * bounded on purpose: catches "Tours across NZ" but not "ctstours.co.nz"
+ * (lowercase) or "AUCKLAND" (no boundary after "AU").
+ */
+const PLACE_ABBREVIATION_RE = /\b(?:NZ|AU)\b/g
 
 // Generic ALLCAPS words that read as acronyms but never carry a page-specific
 // fact (unlike e.g. "TAANZ", an actual travel-industry accreditation name).
@@ -46,12 +55,18 @@ const ACRONYM_ALLOWLIST = new Set(['SEO', 'FAQ', 'USA', 'UK', 'AI'])
  * not client-specific — the same category as the AU=2036/NZ=2554 DataForSEO
  * location codes already shared across every client
  * (src/lib/dataforseo/client.ts). Sorted longest-first so "New Zealand"
- * matches before any shorter overlapping token would.
+ * matches before any shorter overlapping token would. Not exhaustive by
+ * design (a small, deliberately high-value list, same spirit as the
+ * accreditation allowlist below) — 魏征 复审 2026-09-23 flagged missing
+ * secondary NZ towns; added the ones a CTS-style itinerary is most likely to
+ * name. PLACE_ABBREVIATION_RE (above) separately covers the "NZ"/"AU"
+ * short-form case this list can't.
  */
 const AU_NZ_PLACE_NAMES = [
-  'New Zealand', 'Palmerston North', 'Bay of Plenty', 'Gold Coast', 'Christchurch',
-  'Wellington', 'Auckland', 'Queenstown', 'Rotorua', 'Tauranga', 'Hamilton',
-  'Dunedin', 'Nelson', 'Napier', 'Melbourne', 'Brisbane', 'Adelaide', 'Canberra',
+  'New Zealand', 'Palmerston North', 'Bay of Plenty', 'Gold Coast', 'New Plymouth',
+  'Christchurch', 'Wellington', 'Auckland', 'Queenstown', 'Rotorua', 'Tauranga',
+  'Hamilton', 'Dunedin', 'Nelson', 'Napier', 'Taupo', 'Invercargill', 'Whanganui',
+  'Gisborne', 'Wanaka', 'Timaru', 'Melbourne', 'Brisbane', 'Adelaide', 'Canberra',
   'Sydney', 'Darwin', 'Hobart', 'Cairns', 'Perth', 'Australia',
 ].sort((a, b) => b.length - a.length)
 
@@ -76,7 +91,9 @@ function extractAcronyms(text: string): string[] {
 }
 
 function extractPlaceNames(text: string): string[] {
-  return AU_NZ_PLACE_NAMES.filter((name) => text.includes(name))
+  const fullNames = AU_NZ_PLACE_NAMES.filter((name) => text.includes(name))
+  const abbreviations = [...new Set([...text.matchAll(PLACE_ABBREVIATION_RE)].map((m) => m[0]))]
+  return [...fullNames, ...abbreviations]
 }
 
 /** Facts present in oldText (by `extract`) that are no longer anywhere in newText, compared via `normalize` but reported in their original raw form. */

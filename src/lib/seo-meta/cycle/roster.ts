@@ -72,11 +72,16 @@ function parseKeywordFallbackLocations(raw: unknown): number[] {
     .slice(0, MAX_KEYWORD_FALLBACK_LOCATIONS)
 }
 
+// Case-insensitive: 魏征 复审 2026-09-23 — a slug typed with different
+// casing than what GSC/the candidate pipeline actually produces (both
+// lowercase in every real case seen so far, but never guaranteed) would
+// otherwise silently fail to match in runner.ts's protectedSlugs check,
+// with no error — "configured but not actually protected".
 function parseProtectedSlugs(raw: unknown): string[] {
   if (!Array.isArray(raw)) return []
   return raw
     .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
-    .map((v) => v.trim())
+    .map((v) => v.trim().toLowerCase())
     .slice(0, MAX_PROTECTED_SLUGS)
 }
 
