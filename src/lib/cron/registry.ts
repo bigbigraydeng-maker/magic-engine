@@ -58,6 +58,21 @@ export interface CronOutputTable {
   table: string
   freshnessHours: number
   timestampColumn?: string
+  /**
+   * 这个任务**确实存在「这一轮本来就没东西可写」的合法空轮**吗？
+   *
+   * 🔴 默认 `false`，而且**默认必须是 false**（Codex 复审 2026-09-23 P2）。
+   *    判「本轮该不该产出」的唯一现成信号是运行记录里的 `processed`，可这个字段
+   *    **没有统一语义**：`google-data-pullback-daily` 在读客户 Meta 账户报错时会
+   *    忽略错误、得到空 work，然后以 `processed: 0` + `completed` 收尾 ——
+   *    把 `processed=0` 无条件当成「合法空轮」，正好会把它数据源断线这件事再藏一次，
+   *    而那恰恰就是当初加 `outputTables` 要抓的那个事故。
+   *
+   *    所以空轮豁免改成**任务级显式声明**：只有确实会有合法空轮、而且
+   *    `processed` 在这个任务里真的等于「挑出了几个候选」的，才填 `true`。
+   *    不确定 = 不填 —— 宁可偶尔多报一条，也不要把断线又藏回去。
+   */
+  emptyRoundsAreLegitimate?: boolean
 }
 
 export interface CronRegistryEntry {
@@ -191,7 +206,31 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   //    🔴 **故意不填 `addedAt`。** 它不是新任务，是一条停了 14 天的老任务改了触发方式。
   //       填今天的日期会给它约 62 小时宽限期，而这段时间正好会盖住「Inngest 那边忘了
   //       重新 Sync、它其实还是没跑」—— 那恰恰是这次最该被喊出来的失败形态。
-  { service: 'inngest:cloud-messenger-brief-after-sync', jobName: 'messenger-brief-hourly', schedule: '10 * * * *', logsRuns: true, scheduler: 'inngest' },
+  //    🔴 **2026-09-23 再补一道：声明下游表。** 这条链路又停了一次（9/20 19:11 起 3 天），
+  //       这次的形状是「每小时都开跑、然后段撞穿网关不返回」，运行记录停在 `running`。
+  //       状态位这一侧的两个洞已经分别补掉（函数配上 `onFailure` 收口、health 的卡死
+  //       判定改看回退 60 分钟那一条），这里再加一层**只认真实产出**的判据：
+  //       `conversation_briefs` 超过 3 小时没新行就红灯 —— 不管运行记录写的是什么。
+  //       小时级任务 × 2.5 倍宽限 ≈ 2.5h，取 3h（同 overdue 的宽限口径）。
+  //       `generated_at` 才是「这张卡这一轮被写过」的时刻；`updated_at` 同样会被写，
+  //       但前者语义更直，别人改动时不容易误解。
+  //    🔴 **2026-09-23 Codex 复审再补一道：连续 3 小时没有新私信对话，或所有对话都
+  //       已有最新简报时，这个任务会合法 `processed=0` 收工——这种情况下
+  //       `conversation_briefs.generated_at` 本来就不该前进，不是故障。判定这边
+  //       （`checkDownstreamFreshness` in `health.ts`）已经配上运行回执的
+  //       `RunActivityReader`：窗口内查不到任何一次 `processed > 0` 的运行记录
+  //       时不报——只有「候选是有的、但没写下去」才算真的沉默死。
+  { service: 'inngest:cloud-messenger-brief-after-sync', jobName: 'messenger-brief-hourly', schedule: '10 * * * *', logsRuns: true, scheduler: 'inngest',
+    outputTables: [{
+      table: 'conversation_briefs',
+      freshnessHours: 3,
+      timestampColumn: 'generated_at',
+      // 这个任务**确实**有合法空轮：连续几小时没有新私信、或所有对话都已经有最新的卡时，
+      // `loadDueBriefs` 合法返回 0 条候选，`generated_at` 本来就不该前进。
+      // 而它的 `processed` 写的正是「这一轮挑出了几个候选」（见 messenger-brief-after-sync
+      // 的 `run.finish({ processed: due.list.length })`），语义对得上，可以当判据。
+      emptyRoundsAreLegitimate: true,
+    }] },
   { service: 'meta-leads-hourly', jobName: 'meta-leads-sync', schedule: '25 * * * *', logsRuns: true },
   { service: 'oztop-seo-optimizer', jobName: 'oztop-seo-optimizer', schedule: '0 5 * * 1', logsRuns: true },
   { service: 'pm-daily-todo', jobName: 'pm-daily-todo', schedule: '0 19 * * 0-4', logsRuns: true },
