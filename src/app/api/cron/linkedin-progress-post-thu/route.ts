@@ -14,7 +14,10 @@ import { startCronRun } from '@/lib/cron/run-logger'
 import { runLinkedinProgressPost } from '@/lib/linkedin-progress/run'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60
+// 120 不是 60：这条链路串了一次起草（Anthropic）+ 发布前自检（判断服务最坏
+// 约 13 秒：6s 超时 ×2 次尝试 + 退避）+ 若干次数据库往返 + Publer 排期。
+// 60 秒预算太紧，掐在中间会留下一条「发了一半」的记录（魏征复审）。
+export const maxDuration = 120
 
 export async function GET(req: NextRequest) {
   if (req.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {

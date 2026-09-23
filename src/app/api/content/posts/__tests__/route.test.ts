@@ -58,7 +58,38 @@ describe('content review collection auth', () => {
     expect(response.status).toBe(200)
     expect(posts.update).not.toHaveBeenCalled()
     expect(await response.json()).toEqual({
-      posts: [{ id: 'post-1', client_id: CLIENT, visual_asset_url: null, visual_asset_type: null }],
+      // guard: null —— 这条没跑过发布前自检。不是「查过没问题」，界面据此不亮红旗。
+      posts: [{ id: 'post-1', client_id: CLIENT, guard: null, visual_asset_url: null, visual_asset_type: null }],
     })
+  })
+
+  it('surfaces the pre-publish flag, without the judging service\'s raw error', async () => {
+    mockAccess.mockResolvedValue({ ok: true, tier: 'paid_client' } as never)
+    const posts = thenable([{
+      id: 'post-1',
+      client_id: CLIENT,
+      generation_context_snapshot: {
+        content_guard: {
+          status: 'unavailable',
+          needs_human_review: true,
+          target_language: 'en',
+          language_findings: [],
+          cliche_probability: null,
+          judge_error: 'jev call failed (503)',
+          cliche_threshold: 0.8,
+          checked_at: '2026-09-23T00:00:00.000Z',
+        },
+      },
+    }])
+    mockFrom.mockImplementation((table: string) => (table === 'content_posts' ? posts : thenable([])) as never)
+
+    const body = await (await GET(new NextRequest(`http://localhost/api/content/posts?client_id=${CLIENT}`))).json()
+
+    expect(body.posts[0].guard.needsReview).toBe(true)
+    expect(body.posts[0].guard.reasons).toEqual(['check_unavailable'])
+    // 看板客户也能打开：判分服务的原始报错（带供应商名）绝不能出现在响应里，
+    // 整份 snapshot 也不外送。
+    expect(JSON.stringify(body)).not.toContain('jev')
+    expect(body.posts[0].generation_context_snapshot).toBeUndefined()
   })
 })

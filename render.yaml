@@ -1143,7 +1143,7 @@ services:
     schedule: "30 20 * * 0"
     buildCommand: ""
     startCommand: |
-      curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
+      curl -fsS --max-time 150 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/linkedin-progress-post-mon
     envVars:
       - fromGroup: me-shared-cron-secret
@@ -1154,7 +1154,7 @@ services:
     schedule: "30 20 * * 3"
     buildCommand: ""
     startCommand: |
-      curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
+      curl -fsS --max-time 150 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/linkedin-progress-post-thu
     envVars:
       - fromGroup: me-shared-cron-secret

@@ -2,6 +2,7 @@ import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { projectFactoryConfig } from '@/lib/factory/client-config'
+import { readGuardFlag, toPublicGuardFlag } from '@/lib/content/guard-receipt'
 
 /** 做片流水线还没结束的状态（与 video 路由同一套判据） */
 const ACTIVE_JOB_STATUSES = ['queued', 'planning', 'rendering', 'assembling']
@@ -63,6 +64,10 @@ export async function GET(
       script: p.script ?? '',
       pillar: p.pillar_id ?? '',
       visualBrief: p.visual_brief ?? '',
+      // 发布前自检的回执（见 src/lib/content/guard-receipt.ts）。null = 这条内容
+      // 从来没跑过自检（老内容 / 生成链路还没接），不是「查过没问题」——界面
+      // 据此决定要不要亮红旗，别在这里把两种情况揉成一个布尔值。
+      guard: toPublicGuardFlag(readGuardFlag(p.generation_context_snapshot)),
     })
 
     for (const p of data ?? []) {

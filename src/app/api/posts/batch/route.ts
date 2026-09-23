@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { splitByGuard, type BlockedPost } from '@/lib/content/guard-receipt'
 
 const ALLOWED_STATUSES = ['draft', 'approved', 'scheduled', 'published', 'rejected'] as const
 type PostStatus = typeof ALLOWED_STATUSES[number]
+
+/**
+ * Statuses that move content TOWARDS the public. All of them must clear the
+ * pre-publish guard, not just 'approved' — 'scheduled' and 'published' are
+ * downstream of it, so gating only 'approved' leaves the more dangerous two as
+ * a way straight past the gate (魏征 review). Sending content BACK ('draft',
+ * 'rejected') is never gated: bulk-rejecting flagged copy is the point.
+ */
+const GUARDED_STATUSES = new Set<PostStatus>(['approved', 'scheduled', 'published'])
 
 export async function POST(req: NextRequest) {
   try {
@@ -63,15 +73,45 @@ export async function POST(req: NextRequest) {
         )
       }
 
+      // Pre-publish guard (src/lib/content/guard-receipt.ts). Bulk status changes
+      // are a machine flipping rows nobody read, so a post the guard flagged for
+      // human review must not ride along — it is skipped and named in the
+      // response. Approving one post at a time, where a human is looking at the
+      // flag in the UI, stays allowed and goes through PATCH /api/posts/[id].
+      let targetIds = post_ids as string[]
+      let skipped: BlockedPost[] = []
+      if (GUARDED_STATUSES.has(status as PostStatus)) {
+        const { data: rows, error: guardError } = await supabaseAdmin
+          .from('content_posts')
+          .select('id, title, generation_context_snapshot')
+          .in('id', post_ids)
+          .in('client_id', clientIds)
+        if (guardError) throw guardError
+        const split = splitByGuard(rows ?? [])
+        targetIds = split.allowed.map(row => row.id)
+        skipped = split.blocked
+        if (targetIds.length === 0) {
+          return NextResponse.json(
+            {
+              success: false,
+              updated: 0,
+              skipped,
+              error: `这 ${skipped.length} 条都被发布前自检标了「需人工复核」，批量操作不放行——逐条打开看过再单独确认`,
+            },
+            { status: 409 }
+          )
+        }
+      }
+
       const { data, error } = await supabaseAdmin
         .from('content_posts')
         .update({ status })
-        .in('id', post_ids)
+        .in('id', targetIds)
         .in('client_id', clientIds)
         .select('id, status')
 
       if (error) throw error
-      return NextResponse.json({ success: true, updated: data?.length ?? 0 })
+      return NextResponse.json({ success: true, updated: data?.length ?? 0, skipped })
     }
 
     return NextResponse.json({ success: false, error: 'Invalid action' }, { status: 400 })

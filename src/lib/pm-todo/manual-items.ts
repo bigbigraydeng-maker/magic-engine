@@ -1562,9 +1562,11 @@ const LINKEDIN_PUBLISH_FAILURE_STALE_HOURS = 2
  * ME 产品动态自动发 LinkedIn（P24 新建）—— 三种"这条本该自动完成却没完成"的状态，
  * 全部要下发,不能只写进 cron_run_logs：
  *   1. 敏感内容命中硬过滤,转人审草稿(status='draft', reason='sensitive_content_flagged')
- *   2. LinkedIn 账号还没连(status='draft', reason='linkedin_account_not_configured')
- *   3. 账号已连但发布调用本身失败(status 卡在 'approved' 超过 2 小时)
- * 三种原因给不同的 how —— 同一句话应付三种原因,FDE/PM 会点错地方白跑一趟。
+ *   2. 发布前自检标红(中英混杂/套话开头/自检没跑成),转人审草稿
+ *      (status='draft', reason='content_guard_flagged')
+ *   3. LinkedIn 账号还没连(status='draft', reason='linkedin_account_not_configured')
+ *   4. 账号已连但发布调用本身失败(status 卡在 'approved' 超过 2 小时)
+ * 每种原因给不同的 how —— 同一句话应付几种原因,FDE/PM 会点错地方白跑一趟。
  *
  * "cron 该跑没跑"不在这里报 —— pushCronHealthItems 已经通过 CRON_REGISTRY
  * 通用覆盖了 linkedin-progress-post-mon/-thu 这两个 job，不用再单独登记。
@@ -1623,6 +1625,7 @@ export async function pushLinkedinProgressItems(
   const countLabel = (n: number) => `${n}`
 
   let sensitiveReview = 0
+  let guardReview = 0
   let needsSetup = 0
   let unknownDraft = 0
   let dbSyncFailed = 0
@@ -1633,6 +1636,7 @@ export async function pushLinkedinProgressItems(
 
     if (row.status === 'draft') {
       if (reason === 'sensitive_content_flagged') sensitiveReview += 1
+      else if (reason === 'content_guard_flagged') guardReview += 1
       else if (reason === 'linkedin_account_not_configured') needsSetup += 1
       // 草稿但 reason 不认识(未来 run.ts 加了新原因、或者字段意外为空)——
       // 兜底也要归一堆,不能让它悄悄消失在待办之外。
@@ -1673,6 +1677,26 @@ export async function pushLinkedinProgressItems(
       how: many(n)
         ? '打开内容工厂看板，找到标题带「(needs review)」的这几条草稿，逐条读一遍确认没问题就批准发布；不想发就直接拒绝，下周照常自动生成新的'
         : '打开内容工厂看板，找到标题带「(needs review)」的那条草稿，读一遍确认没问题就批准发布；不想发就直接拒绝，下周照常自动生成新的',
+      href: LINKEDIN_CONTENT_BOARD_URL,
+    })
+  }
+
+  if (guardReview > 0) {
+    // 发布前自检标红：跟敏感信息那条分开下发 —— 要改的东西完全不同
+    // （那条是"能不能发"，这条是"这句话得重写"），混成一句人会点错地方。
+    const n = guardReview
+    items.push({
+      kind: 'linkedin_progress_needs_review',
+      client_id: LINKEDIN_PROGRESS_CLIENT_ID,
+      client_name: 'ME 产品动态（LinkedIn）',
+      what: many(n)
+        ? `有 ${countLabel(n)} 条 LinkedIn 进度贴草稿没过发布前自检（中英混杂 / 套话开头 / 自检本身没跑成），系统都没敢自动发`
+        : '这周的 LinkedIn 进度贴草稿没过发布前自检（中英混杂 / 套话开头 / 自检本身没跑成），系统没敢自动发',
+      // how 必须对得上那一屏真有的按钮：草稿停在「选题」段，抽屉里只有
+      // 「确认做 → 进备料」和「打回」两个键，没有「确认发布」。对 LinkedIn 这条
+      // 线，「确认做」点下去就是真发出去（见 content-factory/[postId]/route.ts
+      // 对 LINKEDIN_PROGRESS_SOURCE 的分支），所以要把这层说破，别让人以为只是入队。
+      how: '打开内容工厂看板，在「选题」那一列点开标题带「(needs review)」的那条，红框里写了是哪句话、哪个词出的问题。读一遍：能发就点「确认做 → 进备料」——这条帖子点下去就是直接发到 LinkedIn，不做片；不能发就点「打回」。这一屏改不了文字，要改内容得回我一句，我重跑一次生成。这条不处理也不卡下一条，下周照常自动生成新的',
       href: LINKEDIN_CONTENT_BOARD_URL,
     })
   }

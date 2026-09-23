@@ -16,13 +16,18 @@
  * on after connecting the LinkedIn account in Publer and binding it on the
  * Magic Lab Class connectors page).
  *
- * Two things never auto-publish, even when the switch is on — they land as a
+ * Three things never auto-publish, even when the switch is on — they land as a
  * 'draft' content_post instead and surface through the PM-todo manual-item
  * pipeline (see src/lib/pm-todo/manual-items.ts):
  *   1. The LinkedIn account isn't bound yet (one-time setup not done).
  *   2. The sensitive-content backstop trips on the source material or the
  *      LLM's own draft (CHANGELOG.md genuinely contains real client names
  *      and operational numbers — see sensitive-filter.ts).
+ *   3. The pre-publish content guard flags the draft (src/lib/content/content-guard.ts).
+ *      This is the only fully unattended publish path in the product — nobody
+ *      ever reads the post before it goes out — and the source material is
+ *      Chinese while the post must be English, which is exactly the
+ *      mixed-language leak the deterministic half of the guard catches.
  *
  * No "already posted" state is stored — dedupe is a lookback query on
  * content_posts itself, and the changelog window is derived from NZ weekday,
@@ -36,6 +41,7 @@ import { scheduleSocialPost, resolveBoundPublerAccount } from '@/lib/flywheel/so
 import { loadChangelogWindow, nzDateString } from './changelog-window'
 import { draftLinkedinPost, validateDraftFormat } from './draft-post'
 import { loadClientKeywords, findSensitiveMatches } from './sensitive-filter'
+import { runContentGuard, contentGuardSnapshot } from '@/lib/content/content-guard'
 import { LINKEDIN_PROGRESS_CLIENT_ID, LINKEDIN_PROGRESS_SOURCE, LINKEDIN_PROGRESS_PLATFORM } from './constants'
 
 /** How far back the dedupe check looks for an already-created post this window. */
@@ -55,9 +61,12 @@ interface GenerationSnapshot {
   entry_count: number
   flagged_terms: string[]
   format_violations: string[]
+  /** Pre-publish guard receipt — same shape every other generator writes. */
+  content_guard: Record<string, unknown>
   reason?:
     | 'sensitive_content_flagged'
     | 'format_violation'
+    | 'content_guard_flagged'
     | 'linkedin_account_not_configured'
     | 'publish_failed'
     | 'published_but_db_sync_failed'
@@ -108,6 +117,10 @@ export async function runLinkedinProgressPost(cronRun: CronRunHandle, now: Date 
     ]
     const flaggedTerms = Array.from(new Set(matches.map((m) => `${m.kind}:${m.term}`)))
     const formatViolations = validateDraftFormat(caption)
+    // Third backstop. Never throws; a judge outage resolves to
+    // needsHumanReview, which routes to draft rather than auto-publishing —
+    // the right trade on a path where no human is watching.
+    const guard = await runContentGuard(caption, { targetLanguage: 'en' })
 
     const baseSnapshot: GenerationSnapshot = {
       cutoff_date: cutoffDate,
@@ -115,12 +128,16 @@ export async function runLinkedinProgressPost(cronRun: CronRunHandle, now: Date 
       entry_count: entries.length,
       flagged_terms: flaggedTerms,
       format_violations: formatViolations.map((v) => `${v.rule}:${v.detail}`),
+      content_guard: contentGuardSnapshot(guard),
     }
 
     const title = `ME product update — ${nzDateString(now)}`
 
-    if (flaggedTerms.length > 0 || formatViolations.length > 0) {
-      const reason = flaggedTerms.length > 0 ? 'sensitive_content_flagged' : 'format_violation'
+    if (flaggedTerms.length > 0 || formatViolations.length > 0 || guard.needsHumanReview) {
+      const reason =
+        flaggedTerms.length > 0 ? 'sensitive_content_flagged'
+        : formatViolations.length > 0 ? 'format_violation'
+        : 'content_guard_flagged'
       const { error: insertErr } = await supabaseAdmin.from('content_posts').insert({
         client_id: LINKEDIN_PROGRESS_CLIENT_ID,
         title: `${title} (needs review)`,
@@ -137,6 +154,8 @@ export async function runLinkedinProgressPost(cronRun: CronRunHandle, now: Date 
         summary: {
           flagged: flaggedTerms.length > 0,
           formatInvalid: formatViolations.length > 0,
+          guardFlagged: guard.needsHumanReview,
+          guardStatus: guard.status,
           terms: flaggedTerms,
         },
       })
@@ -144,6 +163,7 @@ export async function runLinkedinProgressPost(cronRun: CronRunHandle, now: Date 
         ok: true,
         flagged: flaggedTerms.length > 0,
         formatInvalid: formatViolations.length > 0,
+        guardFlagged: guard.needsHumanReview,
         terms: flaggedTerms,
       })
     }
