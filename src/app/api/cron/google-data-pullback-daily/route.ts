@@ -59,6 +59,7 @@ import { startCronRun } from '@/lib/cron/run-logger'
 import { resolveMetaTokenDetailed, ownsKey, loadTokenOwnerPeers, type TokenOwnerRow } from '@/lib/meta/token-selection'
 import { findSharedAdAccounts, getClientAdAccountIds } from '@/lib/meta/client-ad-accounts'
 import { hasVideoColumns, syncAdDailyInsights, syncAdsetDailyInsights, syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
+import { buildGrowthState } from '@/lib/ads-strategy/agents/patrol'
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
 import { sendAdHealthDigest } from '@/lib/ads-strategy/digest'
 import { runPortfolioDiagnostics } from '@/lib/ads-strategy/portfolio/run-daily'
@@ -104,6 +105,8 @@ interface ClientResult {
   ad_digest?: { sent: boolean; decision: string; error?: string }
   /** ads IMPACT 阶段 1：只读诊断 + 内部版日报 */
   ad_diagnostics?: { success: boolean; hits: number; not_comparable: number; excluded: number; digest_decision?: string; digest_sent?: boolean; recipients_dropped?: number; error?: string }
+  /** 卫青巡察：问题 + 机会 + 目标节奏 → ads_growth_states 一行（spec 2026-09-24 §4）。 */
+  ads_growth_state?: { success: boolean; date?: string; problems?: number; opportunities?: number; completeness?: string; error?: string }
   /**
    * 2026-09-13: `ad_daily`/`ad_level` above stay the PRIMARY account's result
    * (unchanged shape, unchanged tallying). Any additional registered accounts
@@ -478,6 +481,17 @@ export async function GET(req: NextRequest) {
               const digest = await sendAdHealthDigest(client.client_id, client.client_name ?? 'Client', diagDate, resolveDigestRecipients(adStrategyConfig))
               result.ad_digest = { sent: digest.sent, decision: `fallback:${digest.decision}`, error: digest.error }
             }
+
+            // 卫青巡察（spec 2026-09-24 §4）：问题 + 机会 + 目标节奏合成一行经营状态，
+            // 看板和日报从那一行读。放在诊断之后：两边都要广告组级数据，顺序一致好排错。
+            // 🔴 三层日数据的成败要**逐层**传进去——上面那个 `if (result.ad_daily?.success)`
+            //    只看广告系列级，而机会规则大多是广告组粒度（`resolveCompleteness` 的变异用例钉着这条）。
+            result.ads_growth_state = await buildGrowthState(client.client_id, diagDate, [
+              { campaign: result.ad_daily, adset: result.adset_level, ad: result.ad_level },
+              ...(result.ad_daily_secondary ?? []).map(s => ({
+                campaign: s.ad_daily, adset: s.adset_level, ad: s.ad_level,
+              })),
+            ])
           }
         }
       } else {
@@ -538,7 +552,7 @@ export async function GET(req: NextRequest) {
   // Collect per-client errors so postmortem is possible without Render logs.
   // Diagnostic only — no behavior change.
   const errors = results.flatMap(r => {
-    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ad_daily_secondary'; error: string }> = []
+    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ads_growth_state'|'ad_daily_secondary'; error: string }> = []
     if (r.gsc?.success === false && r.gsc.error)               out.push({ client_id: r.client_id, source: 'gsc',        error: r.gsc.error })
     if (r.ga4?.success === false && r.ga4.error)               out.push({ client_id: r.client_id, source: 'ga4',        error: r.ga4.error })
     if (r.meta?.success === false && r.meta.error)             out.push({ client_id: r.client_id, source: 'meta',       error: r.meta.error })
@@ -549,6 +563,7 @@ export async function GET(req: NextRequest) {
     if (r.ad_health?.success === false && r.ad_health.error)   out.push({ client_id: r.client_id, source: 'ad_health', error: r.ad_health.error })
     if (r.ad_digest && !r.ad_digest.sent && r.ad_digest.error)  out.push({ client_id: r.client_id, source: 'ad_digest', error: r.ad_digest.error })
     if (r.ad_diagnostics?.error) out.push({ client_id: r.client_id, source: 'ad_diagnostics', error: r.ad_diagnostics.error })
+    if (r.ads_growth_state?.error) out.push({ client_id: r.client_id, source: 'ads_growth_state', error: r.ads_growth_state.error })
     // 2026-09-13 (魏征 review): a secondary account's sync failure used to be
     // completely invisible — not in `failed`, not here, not console.error'd —
     // the exact "looks fine, actually never worked" shape this whole PR is

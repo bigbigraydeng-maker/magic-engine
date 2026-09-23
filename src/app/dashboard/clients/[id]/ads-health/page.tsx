@@ -16,6 +16,7 @@ import Link from 'next/link'
 // Pure data module (no server imports) — safe in a client component.
 import { resolveAdsPlaybook, type AdsPlaybook } from '@/lib/ads-strategy/playbooks'
 import AutonomySettings from './autonomy-settings'
+import GrowthPanel, { type GrowthStateView } from './growth-panel'
 
 type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history' | 'paused'
 
@@ -69,6 +70,8 @@ interface AdHealthResponse {
   history: Array<{ insight_date: string; overall_verdict: Verdict }>
   /** clients.industry — picks the result words; absent → neutral words. */
   industry?: string | null
+  /** 卫青巡察当天的经营状态。null = 今天还没跑；缺字段 = 这一段读不到（接口出错）。 */
+  growth?: GrowthStateView | null
 }
 
 // ─── Verdict styling (colour = conclusion, per 板桥) ───────────────────────────
@@ -509,6 +512,10 @@ export default function AdsHealthPage() {
         <h1 className="mt-2 text-2xl font-semibold text-gray-800">广告健康</h1>
         <p className="text-sm text-gray-400">每天自动体检 · 把每条广告跟它自己最好的一周比</p>
       </div>
+
+      {!loading && !error && (
+        <div className="mb-6"><GrowthPanel state={data ? data.growth : undefined} /></div>
+      )}
 
       <div className="mb-6"><AutonomySettings clientId={clientId} /></div>
 

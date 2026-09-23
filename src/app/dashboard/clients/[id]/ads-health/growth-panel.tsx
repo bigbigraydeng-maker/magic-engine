@@ -1,0 +1,185 @@
+'use client'
+
+/**
+ * 经营视图（spec 2026-09-24 §3 G12）。卫青每天写的那一行 `ads_growth_states` 的读侧。
+ *
+ * 跟下面的体检卡片分工：体检回答「每条广告跟自己比怎么样」，这一段回答
+ * 「目标追不追得上、今天有哪些要看的事、哪里还有空间」。全部只读。
+ *
+ * 🔴 三种「没有数字」必须分开显示，不能都渲染成 0 或空白：
+ *    读不到（接口出错）· 今天还没巡察（没有行）· 判不了（数据不全 / 归属缺失）。
+ */
+
+import React from 'react'
+
+export type GrowthVerdict = 'on_track' | 'behind' | 'unreachable_within_caps' | 'unknown'
+
+export interface GoalPaceView {
+  expectedToDate: number | null
+  actualToDate: number | null
+  gapPct: number | null
+  projectedEnd: number | null
+  verdict: GrowthVerdict
+  reason: string
+}
+
+export interface GrowthFinding {
+  code: string
+  status: 'hit' | 'not_comparable'
+  title: string
+  reasons?: string[]
+  sample?: Array<{ label: string; value: number }>
+  units?: Array<{ id: string; name: string | null }>
+}
+
+export interface GrowthStateView {
+  date: string
+  data_completeness: 'complete' | 'partial'
+  goal_pace: GoalPaceView | null
+  payload: {
+    headline?: string
+    completenessReasons?: string[]
+    problems?: GrowthFinding[]
+    opportunities?: GrowthFinding[]
+    opportunitiesSkippedReason?: string | null
+    goal?: { title: string; label: string; target: number; dayIndex: number; totalDays: number } | null
+  } | null
+}
+
+const PACE_TONE: Record<GrowthVerdict, { dot: string; text: string; tint: string; label: string }> = {
+  on_track:                { dot: 'bg-emerald-500', text: 'text-emerald-700', tint: 'border-emerald-200 bg-emerald-50', label: '按节奏走' },
+  behind:                  { dot: 'bg-amber-500',   text: 'text-amber-700',   tint: 'border-amber-200 bg-amber-50',     label: '进度落后' },
+  unreachable_within_caps: { dot: 'bg-red-500',     text: 'text-red-700',     tint: 'border-red-200 bg-red-50',         label: '按现在的预算到不了' },
+  unknown:                 { dot: 'bg-gray-300',    text: 'text-gray-600',    tint: 'border-gray-200 bg-gray-50',       label: '未判' },
+}
+
+function GoalBar({ state }: { state: GrowthStateView }) {
+  const goal = state.payload?.goal ?? null
+  const pace = state.goal_pace
+  if (!goal || !pace) {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
+        这个客户还没有生效中的目标 —— 设了目标之后，这里会显示「还差多少、来不来得及」。
+      </div>
+    )
+  }
+  const tone = PACE_TONE[pace.verdict]
+  // 未判时进度条不画：画一条 0% 的条会被读成「一个都没有」。
+  const pct = pace.verdict === 'unknown' || pace.actualToDate === null
+    ? null
+    : Math.max(0, Math.min(100, Math.round((pace.actualToDate / goal.target) * 100)))
+
+  return (
+    <div className={`rounded-xl border p-5 ${tone.tint}`}>
+      <div className="flex items-center gap-2.5">
+        <span className={`inline-block w-3 h-3 rounded-full ${tone.dot}`} />
+        <span className={`text-base font-semibold ${tone.text}`}>{goal.title} · {tone.label}</span>
+      </div>
+
+      {pct === null ? (
+        <p className="mt-2 text-sm text-gray-600">{pace.reason}</p>
+      ) : (
+        <>
+          <div className="mt-3 h-2 w-full rounded-full bg-white/70 overflow-hidden">
+            <div className={`h-full ${tone.dot}`} style={{ width: `${pct}%` }} />
+          </div>
+          <p className="mt-2 text-sm text-gray-700">
+            目标 {goal.target} {goal.label} · 第 {goal.dayIndex}/{goal.totalDays} 天 · 已到{' '}
+            <b>{pace.actualToDate}</b>
+            {pace.projectedEnd !== null && <> · 按现在的速度到期约 <b>{pace.projectedEnd}</b></>}
+          </p>
+          <p className="mt-1 text-xs text-gray-500">{pace.reason}</p>
+        </>
+      )}
+    </div>
+  )
+}
+
+function FindingCard({ f, kind }: { f: GrowthFinding; kind: 'problem' | 'opportunity' }) {
+  const isHit = f.status === 'hit'
+  const tint = !isHit ? 'border-gray-200 bg-gray-50'
+    : kind === 'problem' ? 'border-amber-200 bg-amber-50' : 'border-sky-200 bg-sky-50'
+  return (
+    <div className={`rounded-xl border p-4 ${tint}`}>
+      <div className="flex items-start gap-2">
+        <span className="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-mono text-gray-500 bg-white/80 border border-gray-200">{f.code}</span>
+        <p className="text-sm text-gray-800">{f.title}</p>
+      </div>
+      {f.units && f.units.length > 0 && (
+        <p className="mt-1.5 text-xs text-gray-500">涉及：{f.units.map(u => u.name ?? u.id).join('、')}</p>
+      )}
+      {f.sample && f.sample.length > 0 && (
+        <p className="mt-1 text-xs text-gray-400">样本：{f.sample.map(s => `${s.label} ${s.value}`).join(' · ')}</p>
+      )}
+      {f.reasons && f.reasons.length > 0 && (
+        <p className="mt-1 text-xs text-gray-500">{f.reasons[0]}</p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * @param state  null = 今天还没巡察过；undefined = 这一段读不到（接口出错）
+ */
+export default function GrowthPanel({ state }: { state: GrowthStateView | null | undefined }) {
+  if (state === undefined) {
+    return (
+      <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        经营视图这一段读不到，下面的体检结果不受影响。
+      </div>
+    )
+  }
+  if (state === null) {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
+        今天还没有巡察记录 —— 系统每天自动跑一次，跑完这里会出现目标进度和机会。
+      </div>
+    )
+  }
+
+  const problems = (state.payload?.problems ?? []).filter(f => f.status === 'hit')
+  const opportunities = (state.payload?.opportunities ?? []).filter(f => f.status === 'hit')
+  const partial = state.data_completeness === 'partial'
+
+  return (
+    <div className="space-y-4">
+      <GoalBar state={state} />
+
+      {partial && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-sm font-medium text-amber-800">当天数据没拉全，机会没判</p>
+          <p className="mt-1 text-xs text-amber-700">
+            {state.payload?.opportunitiesSkippedReason ?? '机会判断靠占比和趋势，数据缺一块最容易凭空报出「潜在爆款」，所以这天只看不动。'}
+          </p>
+          {(state.payload?.completenessReasons ?? []).length > 0 && (
+            <ul className="mt-2 list-disc pl-5 text-xs text-amber-700">
+              {state.payload!.completenessReasons!.map((r, i) => <li key={i}>{r}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <section>
+          <h3 className="mb-2 text-sm font-semibold text-gray-700">要看的事（{problems.length}）</h3>
+          {problems.length === 0
+            ? <p className="text-xs text-gray-400">今天没发现要紧的问题。</p>
+            : <div className="space-y-2">{problems.map((f, i) => <FindingCard key={`${f.code}-${i}`} f={f} kind="problem" />)}</div>}
+        </section>
+
+        <section>
+          <h3 className="mb-2 text-sm font-semibold text-gray-700">可以加力的地方（{opportunities.length}）</h3>
+          {partial
+            ? <p className="text-xs text-gray-400">数据不全，这天没判。</p>
+            : opportunities.length === 0
+              ? <p className="text-xs text-gray-400">今天没发现明显还有空间的地方。</p>
+              : <div className="space-y-2">{opportunities.map((f, i) => <FindingCard key={`${f.code}-${i}`} f={f} kind="opportunity" />)}</div>}
+        </section>
+      </div>
+
+      <p className="text-xs text-gray-300 text-center">
+        巡察日期 {state.date} · 只读，系统这一段不改任何广告和预算
+      </p>
+    </div>
+  )
+}
