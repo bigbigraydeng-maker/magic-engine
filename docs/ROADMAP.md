@@ -21,6 +21,33 @@
 
 ---
 
+## 发布前内容自检：改完文案后回执不失效（B 级，P2）
+
+**§11 打分**：频率中（每次编辑已审内容都会发生）· IMPACT 闭环关键度中（闸门在但能被绕过）· 收入关联度低（目前内容量不大、编辑后通常会重新审批）→ 一个低 → P2。
+
+- **问题**：回执里只有 `checked_at`，没有正文指纹（`content_sha256`）。「查过之后正文被改了」判不出来。
+- **禁止用 `checked_at` 对比 `updated_at`**——`content_posts` 的 `updated_at` 触发器对任何 UPDATE 都跳（含改 status），那样几乎所有内容都会被判成需复核，等于锁死全线。
+- **正解**：`contentGuardSnapshot` 里加 `content_sha256`，`readGuardFlag` 接可选的当前正文哈希，对不上就降级成 `check_unavailable`；老回执没这个字段 = 不知道，不影响现状。
+- 来源：#1936 子牙架构复审。
+
+## 发布前内容自检：博客/Reel 详情页有回执却不显红旗（C 级，P3）
+
+**§11 打分**：频率低（只在生产包详情页看）· IMPACT 闭环关键度低（不影响外发拦截，外发闸已补在 #1938）· 收入关联度低（纯界面展示）→ 三个低 → P3。
+
+- **问题**：`BlogPostCard` / `ReelCard` 不读 `readGuardFlag`，同一页社媒帖有红旗、博客没有，人会以为博客查过没问题。
+- `src/lib/blog/quality-audit.ts` 和 `src/lib/reels/quality-audit.ts` 写的是同一套回执，但 `src/app/api/clients/[id]/production/[packageId]/route.ts` 只对 `content_posts` 解读。
+- 来源：#1936 子牙架构复审。
+
+## 发布前内容自检：上游回执覆盖率低（B 级，P3）
+
+**§11 打分**：频率中（多条生产路径每天跑）· IMPACT 闭环关键度低（不影响外发拦截——没回执的放行是刻意的，不是漏洞）· 收入关联度低（闸门防的是已有回执的标红内容）→ 两个低 → P3。
+
+- **问题**：真正写回执的只有 `route-a/b/c` 和 `campaign/[campaignId]/batch-generate`。`content-factory/intake-runner.ts`、讲课式流水线、`ai-factory/fan-out` 插 `content_posts` 时都不写回执。
+- 产品排期问题：逐条路径补 `contentGuardSnapshot()`。
+- 来源：#1936 子牙架构复审。
+
+---
+
 ## AI 可见度周快照聚合把失败的 API 调用也计入总数，客户分数被系统性腰斩（2026-09-23 两位复审确认，A 级，P0）
 
 **§11 打分**：频率高（每周每个客户都在发生，生产数据 CTS 9-14 那周 221/408 次失败混入分母）· IMPACT 闭环关键度高（分数直接喂进下一轮处方，算低等于给错建议）· 收入关联度高（影响客户可见诊断报告的核心维度分数）→ 零个低、两个以上高 → **P0**。
