@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { activeDashboardAccess,pilotDashboardAccess,checkOrigin,json,failure,boundedBody } from '@/lib/meta/ai/http'
 import { status,discover,bind,issueKey,revoke } from '@/lib/meta/ai/manage'
+import { followUp } from '@/lib/meta/ai/analysis'
 import { auditedControl } from '@/lib/meta/ai/audit'
 import { MetaReadError } from '@/lib/meta/graph-read'
 import { generateAnalysis } from '@/lib/meta/ai/analysis'
@@ -10,6 +11,8 @@ const actionSchema=z.discriminatedUnion('action',[
   z.object({ action:z.literal('bind'),connection_id:uuid,account_id:z.string().regex(/^act_[1-9]\d{9,24}$/) }).strict(),
   z.object({ action:z.literal('issue_key'),grant_id:uuid }).strict(),
   z.object({ action:z.literal('generate_analysis'),grant_id:uuid }).strict(),
+  z.object({ action:z.literal('follow_up'),job_id:uuid,question:z.string().min(1).max(500),
+    history:z.array(z.object({ role:z.enum(['user','assistant']),content:z.string().max(4000) }).strict()).max(6).default([]) }).strict(),
   z.object({ action:z.literal('revoke'),type:z.enum(['key','grant','connection']),id:uuid }).strict(),
 ])
 type Context={ params:{ id:string } }
@@ -36,6 +39,7 @@ export async function POST(request: Request,{ params }: Context) {
     if(action.action==='bind') return json(await audit('bind',action.account_id,()=>bind(params.id,access.user.id,action.connection_id,action.account_id)))
     if(action.action==='issue_key') return json(await audit('issue_key',action.grant_id,()=>issueKey(params.id,access.user.id,action.grant_id,access.user.email ?? '')))
     if(action.action==='generate_analysis') return json(await generateAnalysis(params.id,access.user.id,action.grant_id))
+    if(action.action==='follow_up') return json(await audit('follow_up',action.job_id,()=>followUp(params.id,access.user.id,action.job_id,action.question,action.history)))
     throw new MetaReadError('invalid_arguments')
   } catch(error) { return failure(error) }
 }

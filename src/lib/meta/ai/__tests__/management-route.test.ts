@@ -2,7 +2,7 @@
 import { beforeEach,describe,expect,it,vi } from 'vitest'
 
 const mocks=vi.hoisted(()=>({
-  body:vi.fn(),pilotDashboardAccess:vi.fn(),activeDashboardAccess:vi.fn(),status:vi.fn(),discover:vi.fn(),bind:vi.fn(),issueKey:vi.fn(),revoke:vi.fn(),generateAnalysis:vi.fn(),
+  body:vi.fn(),pilotDashboardAccess:vi.fn(),activeDashboardAccess:vi.fn(),status:vi.fn(),discover:vi.fn(),bind:vi.fn(),issueKey:vi.fn(),revoke:vi.fn(),generateAnalysis:vi.fn(),followUp:vi.fn(),auditedControl:vi.fn(),
 }))
 vi.mock('../http',()=>({
   checkOrigin:vi.fn(),boundedBody:mocks.body,pilotDashboardAccess:mocks.pilotDashboardAccess,activeDashboardAccess:mocks.activeDashboardAccess,
@@ -10,8 +10,8 @@ vi.mock('../http',()=>({
   failure:(error:unknown)=>Response.json({ error:error instanceof Error ? error.message : 'request_failed' },{ status:(error as { status?:number })?.status ?? 500 }),
 }))
 vi.mock('../manage',()=>({ status:mocks.status,discover:mocks.discover,bind:mocks.bind,issueKey:mocks.issueKey,revoke:mocks.revoke }))
-vi.mock('../analysis',()=>({ generateAnalysis:mocks.generateAnalysis }))
-vi.mock('../audit',()=>({ auditedControl:vi.fn(async(_client:string,_email:string,_event:string,_target:string|null,run:()=>Promise<unknown>)=>run()) }))
+vi.mock('../analysis',()=>({ generateAnalysis:mocks.generateAnalysis,followUp:mocks.followUp }))
+vi.mock('../audit',()=>({ auditedControl:mocks.auditedControl }))
 
 import { GET,POST } from '@/app/api/clients/[id]/meta-ads-ai/route'
 import { MetaReadError } from '../../graph-read'
@@ -26,6 +26,8 @@ beforeEach(()=>{
   mocks.status.mockResolvedValue({ pilot:{ new_actions_allowed:true },connections:[],grants:[],keys:[] })
   mocks.revoke.mockResolvedValue(undefined)
   mocks.generateAnalysis.mockResolvedValue({ id:'job-1',status:'completed' })
+  mocks.followUp.mockResolvedValue({ answer:'CTR 是 2%。' })
+  mocks.auditedControl.mockImplementation(async(_client:string,_email:string,_event:string,_target:string|null,run:()=>Promise<unknown>)=>run())
 })
 
 describe('邀请测试管理接口',()=>{
@@ -44,6 +46,32 @@ describe('邀请测试管理接口',()=>{
     const response=await POST(request,context)
     expect(response.status).toBe(404)
     expect(mocks.discover).not.toHaveBeenCalled()
+  })
+
+  it('追问走当前登录人的客户权限，并透传报告 id、问题与历史',async()=>{
+    const jobId='00000000-0000-4000-8000-000000000003'
+    mocks.body.mockResolvedValue({ action:'follow_up',job_id:jobId,question:'CTR 是多少？',
+      history:[{ role:'user',content:'先看总体' },{ role:'assistant',content:'总体正常。' }] })
+    const response=await POST(request,context)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ answer:'CTR 是 2%。' })
+    expect(mocks.activeDashboardAccess).toHaveBeenCalledWith(context.params.id)
+    expect(mocks.followUp).toHaveBeenCalledWith(context.params.id,'principal',jobId,'CTR 是多少？',
+      [{ role:'user',content:'先看总体' },{ role:'assistant',content:'总体正常。' }])
+  })
+
+  it('追问写入审计，与绑定和发 key 走同一条路径',async()=>{
+    const jobId='00000000-0000-4000-8000-000000000003'
+    mocks.body.mockResolvedValue({ action:'follow_up',job_id:jobId,question:'问题',history:[] })
+    await POST(request,context)
+    expect(mocks.auditedControl).toHaveBeenCalledWith(context.params.id,'person@example.test','follow_up',jobId,expect.any(Function))
+  })
+
+  it('暂停时阻止追问',async()=>{
+    mocks.activeDashboardAccess.mockRejectedValue(new MetaReadError('service_paused',404))
+    mocks.body.mockResolvedValue({ action:'follow_up',job_id:'00000000-0000-4000-8000-000000000003',question:'问题',history:[] })
+    expect((await POST(request,context)).status).toBe(404)
+    expect(mocks.followUp).not.toHaveBeenCalled()
   })
 
   it('用当前登录人的客户权限生成托管分析',async()=>{
