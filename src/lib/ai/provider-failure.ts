@@ -146,3 +146,103 @@ export function classifyOpenAIFailure(input: ProviderFailureInput): ProviderFail
 export function needsHuman(kind: ProviderFailureKind): boolean {
   return kind === 'account_exhausted' || kind === 'credential_invalid' || kind === 'gateway_auth_failed'
 }
+
+// ─── Shared helpers for SDK error objects ────────────────────────────────────
+
+/**
+ * SDK 异常对象里取 HTTP 状态码。
+ *
+ * Google AI SDK 的 `GoogleGenerativeAIFetchError` 和 OpenAI SDK 的 `APIError`
+ * 都把 HTTP status 挂在 `.status` 上，但 TypeScript 的 `Error` 类型里没有这个字段。
+ * 用 `in` 运算符窄化：运行时判 `.status` 存在且为 number 才取，避免强转。
+ */
+function extractHttpStatus(err: object): number | null {
+  if ('status' in err && typeof err.status === 'number') return err.status
+  return null
+}
+
+/**
+ * OpenAI SDK 的 `APIError` 把解析后的响应体挂在 `.error`。Perplexity 用同一个 SDK。
+ */
+function extractErrorPayload(err: object): Record<string, unknown> | null {
+  if ('error' in err && err.error !== null && typeof err.error === 'object') {
+    return err.error as Record<string, unknown>
+  }
+  return null
+}
+
+// ─── Gemini (Google AI) failure classifier ───────────────────────────────────
+
+/**
+ * 判 Gemini SDK 抛出的异常属于哪一类。
+ *
+ * Google AI SDK (`@google/generative-ai`) 的错误体跟 OpenAI 完全不同：
+ *   · `GoogleGenerativeAIFetchError` 带 `.status`（HTTP 状态码）
+ *   · 错误信息里嵌 gRPC 状态名（`RESOURCE_EXHAUSTED` / `PERMISSION_DENIED` …）
+ *   · 没有独立的结构化 `{error:{code,type}}` 字段
+ *
+ * 所以这里从 message 文本 + HTTP status 两路判断，跟 `classifyOpenAIFailure`
+ * 遵循同一条原则：**先认明确的错误码，再看状态码**。
+ *
+ * 🔴 RESOURCE_EXHAUSTED 在 Google API 里同时覆盖「配额用完」和「请求速率过快」。
+ *    Google AI SDK 不做内部重试（跟 OpenAI SDK maxRetries=2 不同），所以限流也会
+ *    走到 catch。到这一步还是 RESOURCE_EXHAUSTED 的，往 `account_exhausted` 偏 ——
+ *    理由跟 outage-ledger.ts 一致：宁可多报一次，也不能让真实断电悄悄过去。
+ */
+export function classifyGeminiFailure(err: unknown): ProviderFailureKind {
+  if (!(err instanceof Error)) return 'other'
+  const msg = err.message
+  // GoogleGenerativeAIFetchError 带 .status —— 用 in 窄化而不是强转
+  const status = extractHttpStatus(err)
+
+  // 1. API key 不对 —— 最明确，先判
+  if (/API_KEY_INVALID|UNAUTHENTICATED/i.test(msg)) return 'credential_invalid'
+  if (status === 401) return 'credential_invalid'
+
+  // 2. 权限拒绝 —— API 没开、key 限制、项目计费未启用
+  if (/PERMISSION_DENIED/i.test(msg)) return 'credential_invalid'
+  if (status === 403) return 'credential_invalid'
+
+  // 3. 资源耗尽 —— Google 把配额和限流都塞在这个码里
+  if (/RESOURCE_EXHAUSTED/i.test(msg)) return 'account_exhausted'
+  if (status === 429) return 'rate_limited'
+
+  return 'other'
+}
+
+// ─── Perplexity failure classifier ───────────────────────────────────────────
+
+/**
+ * 判 Perplexity SDK 抛出的异常属于哪一类。
+ *
+ * Perplexity 用 OpenAI 兼容协议，runner 里用的就是 `new OpenAI({ baseURL })` ——
+ * 所以 SDK 抛出来的是 `OpenAI.APIError`，带 `.status` 和 `.error`（解析后的 body）。
+ *
+ * 但 Perplexity 的错误码不保证跟 OpenAI 一一对应：它可能用自己的文案。
+ * 保守策略：先读 `.error.code`（万一它真返回了 OpenAI 格式的码），
+ * 读不出来再按 HTTP status + message 关键字回退。
+ */
+export function classifyPerplexityFailure(err: unknown): ProviderFailureKind {
+  if (!(err instanceof Error)) return 'other'
+  const msg = err.message
+  const status = extractHttpStatus(err)
+
+  // 读 .error.code（OpenAI SDK APIError 把 body 解析到这里）
+  const errorObj = extractErrorPayload(err)
+  if (errorObj && typeof errorObj === 'object') {
+    const code = (errorObj as Record<string, unknown>).code
+    if (typeof code === 'string') {
+      if (ACCOUNT_LEVEL_CODES.has(code)) return 'account_exhausted'
+      if (CREDENTIAL_CODES.has(code)) return 'credential_invalid'
+    }
+  }
+
+  // Status 回退
+  if (status === 401 || status === 403) return 'credential_invalid'
+  if (status === 429) {
+    if (/quota|billing/i.test(msg)) return 'account_exhausted'
+    return 'rate_limited'
+  }
+
+  return 'other'
+}

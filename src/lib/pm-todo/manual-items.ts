@@ -1005,6 +1005,35 @@ const AI_ACCOUNT_GUIDE: Record<
     how: '这条不用你动手 —— 是我们这边的网关令牌过期了。回我一句「换网关令牌」我就去换；不说的话它会一直这么空着',
     href: 'https://dash.cloudflare.com',
   },
+
+  // ── Gemini (Google AI) ─────────────────────────────────────────────────
+  // PM 看到的链接必须指向 Google AI Studio，不能指向 OpenAI —— 否则等于「下发了但没法照做」。
+  'google::account_exhausted': {
+    kind: 'ai_provider_exhausted',
+    what: 'Gemini（Google AI）的配额用完了 —— AI 可见度体检里「Google 怎么看这个客户」那条线会安静地跳过，看上去像「Google 今天没结果」',
+    how: '打开链接 → 看 Gemini API 的用量和配额。如果是免费额度到顶了就升级到付费方案或提高配额上限。改完回我一句，我把被跳过的体检重跑一遍',
+    href: 'https://aistudio.google.com/apikey',
+  },
+  'google::credential_invalid': {
+    kind: 'ai_provider_exhausted',
+    what: 'Gemini（Google AI）的钥匙不认了 —— AI 可见度体检里 Google 那条线在安静地跳过',
+    how: '打开链接 → 生成新的 API Key → 去 Render 后台（dashboard.render.com → 服务 → Environment）把 GEMINI_API_KEY 的值换成新的 → Save。换完回我一句',
+    href: 'https://aistudio.google.com/apikey',
+  },
+
+  // ── Perplexity ─────────────────────────────────────────────────────────
+  'perplexity::account_exhausted': {
+    kind: 'ai_provider_exhausted',
+    what: 'Perplexity（研究引擎）的额度用完了 —— AI 可见度体检里 Perplexity 那条线会安静地跳过',
+    how: '打开链接 → Settings → API → Usage，看额度是不是用光了。充值或提高额度上限后回我一句，我把被跳过的体检重跑一遍',
+    href: 'https://www.perplexity.ai/settings/api',
+  },
+  'perplexity::credential_invalid': {
+    kind: 'ai_provider_exhausted',
+    what: 'Perplexity（研究引擎）的钥匙不认了 —— AI 可见度体检里 Perplexity 那条线在安静地跳过',
+    how: '打开链接 → 生成新的 API Key → 去 Render 后台把 PERPLEXITY_API_KEY 的值换成新的 → Save。换完回我一句',
+    href: 'https://www.perplexity.ai/settings/api',
+  },
 }
 
 async function pushProviderOutageItems(
@@ -1053,7 +1082,9 @@ export function buildProviderOutageItems(query: OutageQuery, now: Date): ManualI
     const sinceLatest = daysSinceLatest(g.dates, today)
     if (!shouldRemindToday(streak, sinceLatest, now)) continue
     const reason = key.split('::')[1] ?? ''
-    const guide = AI_ACCOUNT_GUIDE[reason]
+    // 先按 provider::reason 查（Gemini/Perplexity 各有自己的链接和说法），
+    // 查不到再按 reason 回退到 OpenAI 的通用指引。
+    const guide = AI_ACCOUNT_GUIDE[key] ?? AI_ACCOUNT_GUIDE[reason]
     // 认不出来的新失败形态照样下发 —— 说不清楚也好过不说。
     // 供应商原话一起带上（截断），否则 PM 只看到一个代号，连问我第二遍都没法问。
     const raw = (g.detail ?? '').trim()

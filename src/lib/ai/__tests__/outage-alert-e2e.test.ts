@@ -227,4 +227,61 @@ describe('长期断电的提醒节奏', () => {
     expect(items).toHaveLength(1)
     expect(items[0].what).toContain('已经连续 9 天')
   })
+
+  // ── Gemini / Perplexity 断电 → PM 看到的是对应供应商的链接和说法 ──────────
+
+  it('Gemini account_exhausted → 指向 Google AI Studio，不指向 OpenAI', () => {
+    const now = new Date('2026-09-23T19:00:00Z')
+    const rows: OutageRow[] = [{
+      provider: 'google',
+      reason: 'account_exhausted',
+      outage_date: '2026-09-23',
+      detail: 'Gemini gemini-2.5-flash: [GoogleGenerativeAI Error]: RESOURCE_EXHAUSTED',
+      first_seen_at: '2026-09-23T18:00:00Z',
+      last_seen_at: '2026-09-23T18:05:00Z',
+    }]
+    const items = buildProviderOutageItems({ rows, error: null }, now)
+    expect(items).toHaveLength(1)
+    // 指向 Google AI Studio
+    expect(items[0].href).toContain('aistudio.google.com')
+    // 说的是 Gemini 不是 OpenAI
+    expect(items[0].what).toContain('Gemini')
+    expect(items[0].what).not.toContain('OpenAI')
+    expect(items[0].what).not.toContain('文字账户')
+    expect(items[0].how).toContain('配额')
+  })
+
+  it('Perplexity credential_invalid → 指向 Perplexity 后台', () => {
+    const now = new Date('2026-09-23T19:00:00Z')
+    const rows: OutageRow[] = [{
+      provider: 'perplexity',
+      reason: 'credential_invalid',
+      outage_date: '2026-09-23',
+      detail: 'Perplexity sonar: 401 Unauthorized',
+      first_seen_at: '2026-09-23T18:00:00Z',
+      last_seen_at: '2026-09-23T18:05:00Z',
+    }]
+    const items = buildProviderOutageItems({ rows, error: null }, now)
+    expect(items).toHaveLength(1)
+    expect(items[0].href).toContain('perplexity.ai')
+    expect(items[0].what).toContain('Perplexity')
+    expect(items[0].how).toContain('PERPLEXITY_API_KEY')
+  })
+
+  it('OpenAI account_exhausted → 仍然指向 OpenAI（向后兼容）', () => {
+    const now = new Date('2026-09-23T19:00:00Z')
+    const rows: OutageRow[] = [{
+      provider: 'openai',
+      reason: 'account_exhausted',
+      outage_date: '2026-09-23',
+      detail: 'HTTP 429: insufficient_quota',
+      first_seen_at: '2026-09-23T18:00:00Z',
+      last_seen_at: '2026-09-23T18:05:00Z',
+    }]
+    const items = buildProviderOutageItems({ rows, error: null }, now)
+    expect(items).toHaveLength(1)
+    // 回退到按 reason 查找的通用 OpenAI 指引
+    expect(items[0].href).toContain('platform.openai.com')
+    expect(items[0].what).toContain('钱用完了')
+  })
 })

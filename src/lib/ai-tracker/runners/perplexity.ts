@@ -11,6 +11,8 @@
  */
 
 import OpenAI from 'openai'
+import { classifyPerplexityFailure } from '@/lib/ai/provider-failure'
+import { recordRunnerOutage } from './outage-bridge'
 import { marketToLocation, type RunnerInput, type RunnerOutput } from './types'
 
 const SEARCH_MODEL = 'sonar'
@@ -73,6 +75,11 @@ export async function runPerplexity(input: RunnerInput): Promise<RunnerOutput> {
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
+
+    // 接上断电台账 —— 跟 gemini.ts 同一套接线。
+    const kind = classifyPerplexityFailure(err)
+    void recordRunnerOutage('perplexity', kind, `Perplexity ${SEARCH_MODEL}: ${message}`)
+
     return errorOutput(start, message)
   }
 }
