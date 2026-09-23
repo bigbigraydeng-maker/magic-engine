@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { APIConnectionError, APIConnectionTimeoutError } from '@anthropic-ai/sdk'
 import { callClaudeChat, MODEL_HAIKU } from '@/lib/anthropic/client'
 import { supabaseAdmin } from '@/lib/supabase'
 import { AI_ENTITY_FIELDS } from '../entity-settings'
@@ -10,6 +11,25 @@ import { requirePilotActive } from './entitlement'
 const BASE_FIELDS = 'account_id,campaign_id,campaign_name,ad_id,ad_name,date_start,date_stop,spend,impressions,reach,frequency,clicks,actions'
 const VIDEO_FIELDS = 'video_play_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p95_watched_actions,video_p100_watched_actions,video_thruplay_watched_actions'
 const PROMPT_VERSION = 'meta-hosted-analysis-v1'
+
+function modelFailureCategory(error: unknown): string {
+  if (error instanceof APIConnectionTimeoutError) return 'timeout'
+  if (error instanceof APIConnectionError) return 'network'
+  if (!error || typeof error !== 'object') return 'unknown'
+  const value = error as { status?: unknown; name?: unknown; error?: unknown }
+  const detail = value.error && typeof value.error === 'object'
+    ? value.error as { type?: unknown }
+    : null
+  const type = typeof detail?.type === 'string' ? detail.type : ''
+  if (type.includes('billing')) return 'billing'
+  if (type === 'authentication_error' || value.status === 401) return 'authentication'
+  if (type === 'permission_error' || value.status === 403) return 'permission'
+  if (type === 'rate_limit_error' || value.status === 429) return 'rate_limit'
+  if (type === 'overloaded_error' || value.status === 529) return 'overloaded'
+  if (type === 'invalid_request_error' || value.status === 400) return 'invalid_request'
+  if (value.name === 'AbortError') return 'timeout'
+  return 'upstream'
+}
 
 interface GrantRow {
   id: string
@@ -280,7 +300,12 @@ async function runAnalysis(clientId: string, principalId: string, grant: GrantRo
     try {
       result = await callClaudeChat({ systemPrompt: systemPrompt(), messages: [{ role: 'user', content: `以下是只读汇总证据：\n${payload}` }],
         model: MODEL_HAIKU, maxOutputTokens: 2000, singleAttempt: true })
-    } catch { throw new MetaReadError('model_unavailable', 502) }
+    } catch (error) {
+      console.error('[meta-ads-ai] hosted model call failed', {
+        category: modelFailureCategory(error), model: MODEL_HAIKU,
+      })
+      throw new MetaReadError('model_unavailable', 502)
+    }
     if (!result.text.trim() || result.stop_reason === 'max_tokens') throw new MetaReadError('analysis_incomplete', 502)
     await requireSnapshot(clientId, principalId, grant, connectionVersion)
     await finish(clientId, principalId, jobId, 'completed', result.cost_usd, evidence, result.text.trim(), MODEL_HAIKU,
