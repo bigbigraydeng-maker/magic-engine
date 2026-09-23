@@ -58,6 +58,21 @@ export interface CronOutputTable {
   table: string
   freshnessHours: number
   timestampColumn?: string
+  /**
+   * 这个任务**确实存在「这一轮本来就没东西可写」的合法空轮**吗？
+   *
+   * 🔴 默认 `false`，而且**默认必须是 false**（Codex 复审 2026-09-23 P2）。
+   *    判「本轮该不该产出」的唯一现成信号是运行记录里的 `processed`，可这个字段
+   *    **没有统一语义**：`google-data-pullback-daily` 在读客户 Meta 账户报错时会
+   *    忽略错误、得到空 work，然后以 `processed: 0` + `completed` 收尾 ——
+   *    把 `processed=0` 无条件当成「合法空轮」，正好会把它数据源断线这件事再藏一次，
+   *    而那恰恰就是当初加 `outputTables` 要抓的那个事故。
+   *
+   *    所以空轮豁免改成**任务级显式声明**：只有确实会有合法空轮、而且
+   *    `processed` 在这个任务里真的等于「挑出了几个候选」的，才填 `true`。
+   *    不确定 = 不填 —— 宁可偶尔多报一条，也不要把断线又藏回去。
+   */
+  emptyRoundsAreLegitimate?: boolean
 }
 
 export interface CronRegistryEntry {
@@ -206,7 +221,16 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   //       `RunActivityReader`：窗口内查不到任何一次 `processed > 0` 的运行记录
   //       时不报——只有「候选是有的、但没写下去」才算真的沉默死。
   { service: 'inngest:cloud-messenger-brief-after-sync', jobName: 'messenger-brief-hourly', schedule: '10 * * * *', logsRuns: true, scheduler: 'inngest',
-    outputTables: [{ table: 'conversation_briefs', freshnessHours: 3, timestampColumn: 'generated_at' }] },
+    outputTables: [{
+      table: 'conversation_briefs',
+      freshnessHours: 3,
+      timestampColumn: 'generated_at',
+      // 这个任务**确实**有合法空轮：连续几小时没有新私信、或所有对话都已经有最新的卡时，
+      // `loadDueBriefs` 合法返回 0 条候选，`generated_at` 本来就不该前进。
+      // 而它的 `processed` 写的正是「这一轮挑出了几个候选」（见 messenger-brief-after-sync
+      // 的 `run.finish({ processed: due.list.length })`），语义对得上，可以当判据。
+      emptyRoundsAreLegitimate: true,
+    }] },
   { service: 'meta-leads-hourly', jobName: 'meta-leads-sync', schedule: '25 * * * *', logsRuns: true },
   { service: 'oztop-seo-optimizer', jobName: 'oztop-seo-optimizer', schedule: '0 5 * * 1', logsRuns: true },
   { service: 'pm-daily-todo', jobName: 'pm-daily-todo', schedule: '0 19 * * 0-4', logsRuns: true },

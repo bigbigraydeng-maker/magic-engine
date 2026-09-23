@@ -411,7 +411,7 @@ export async function checkDownstreamFreshness(
     }
 
     if (!lastRowAt) {
-      if (!(await hadDueWork(entry.jobName, new Date(0)))) continue
+      if (target.emptyRoundsAreLegitimate && !(await hadDueWork(entry.jobName, new Date(0)))) continue
       out.push({
         service: entry.service,
         jobName: entry.jobName,
@@ -426,7 +426,11 @@ export async function checkDownstreamFreshness(
 
     const hoursSince = (now.getTime() - lastRowAt.getTime()) / 3_600_000
     if (hoursSince > target.freshnessHours) {
-      if (!(await hadDueWork(entry.jobName, lastRowAt))) continue
+      // 🔴 空轮豁免**只对显式声明过的任务**生效（Codex 复审 2026-09-23 P2）：
+      //    `processed=0` 在不同任务里不是同一个意思，无条件套用会把
+      //    `google-data-pullback-daily` 的数据源断线又藏回去 —— 那正是当初
+      //    加这套判据要抓的事故。判据见 registry 的 `emptyRoundsAreLegitimate`。
+      if (target.emptyRoundsAreLegitimate && !(await hadDueWork(entry.jobName, lastRowAt))) continue
       out.push({
         service: entry.service,
         jobName: entry.jobName,

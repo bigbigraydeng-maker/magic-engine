@@ -170,7 +170,7 @@ describe('超时绝不许被记成成功', () => {
     // 卡住一条永不返回的调用：没有外层硬闸，函数会走完循环返回 aborted=null
     generateBrief.mockImplementation(() => new Promise(() => {}))
 
-    const r = await generateDueBriefs(due(1), NOW, { budgetMs: 60 })
+    const r = await generateDueBriefs(due(1), NOW, { budgetMs: 60, perCandidateMs: 60 })
 
     expect(r.aborted).not.toBeNull()
     expect(r.aborted).toContain('预算')
@@ -180,11 +180,38 @@ describe('超时绝不许被记成成功', () => {
   it('🔴 卡住的那条不许把后面的段也拖上 —— 报了 aborted 就当场收工', async () => {
     generateBrief.mockResolvedValueOnce(OK).mockImplementation(() => new Promise(() => {}))
 
-    const r = await generateDueBriefs(due(5), NOW, { budgetMs: 60 })
+    const r = await generateDueBriefs(due(5), NOW, { budgetMs: 60, perCandidateMs: 60 })
 
     expect(r.generated).toBe(1)
     expect(r.aborted).toContain('留给下一轮')
     // 卡住那条之后的候选一条都不该再开工
     expect(generateBrief).toHaveBeenCalledTimes(2)
+  })
+})
+
+/**
+ * Codex 复审 2026-09-23 · P1：队首饿死。
+ *
+ * `loadDueBriefs` 按 `last_message_at` 倒序排，队首永远是同一条。让它吃满整段预算，
+ * 它下一小时又排在最前面再吃一次 —— 其他客户的卡可以永久排不到。
+ */
+describe('一条坏对话不许饿死其他所有客户', () => {
+  it('🔴 队首那条挂住 → 只吃掉它自己那份上限，后面的照样写得出来', async () => {
+    // 第一条永不返回，其余正常
+    generateBrief.mockImplementationOnce(() => new Promise(() => {})).mockResolvedValue(OK)
+
+    const r = await generateDueBriefs(due(4), NOW, { budgetMs: 5_000, perCandidateMs: 50 })
+
+    // 关键：队首失败了，但后面 3 条都写成了 —— 队列往前推进了
+    expect(r.generated).toBe(3)
+    expect(r.failed).toBe(1)
+    expect(r.aborted).toBeNull()
+  })
+
+  it('单条上限不许 >= 整段预算（配置层面就不能让一条吃满整段）', async () => {
+    const { CHUNK_TIME_BUDGET_MS, PER_CANDIDATE_BUDGET_MS } = await import('../brief-cycle')
+    expect(PER_CANDIDATE_BUDGET_MS).toBeLessThan(CHUNK_TIME_BUDGET_MS)
+    // 留足能往前推进的条数：一段里最坏情况也要还能推进 4 条以上
+    expect(CHUNK_TIME_BUDGET_MS / PER_CANDIDATE_BUDGET_MS).toBeGreaterThanOrEqual(4)
   })
 })

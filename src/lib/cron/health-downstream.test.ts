@@ -49,7 +49,12 @@ vi.mock('./registry', async () => {
         schedule: '0 3 * * *',
         logsRuns: true,
         outputTables: [
-          { table: 'ad_health_narratives', freshnessHours: 26 } satisfies CronOutputTable,
+          // 🔴 一张声明空轮豁免、一张**故意不声明** —— 空轮豁免只对声明过的表生效
+          //    （Codex 2026-09-23 P2：`processed=0` 在不同任务里不是同一个意思）。
+          //    `ad_daily_insights` 这张守的就是反面：复刻 google-data-pullback-daily，
+          //    它数据源断线时也会以 `processed: 0` + `completed` 收尾，
+          //    豁免要是无条件生效，就会把断线又藏一次 —— 而那正是加这套判据要抓的事故。
+          { table: 'ad_health_narratives', freshnessHours: 26, emptyRoundsAreLegitimate: true } satisfies CronOutputTable,
           { table: 'ad_daily_insights', freshnessHours: 26 } satisfies CronOutputTable,
         ],
       },
@@ -135,8 +140,11 @@ describe('checkDownstreamFreshness × activityReader —— Codex 2026-09-23 复
   it('窗口内没有 processed>0 的运行（一直是 nothing_due）→ 表再 stale 也不报', async () => {
     const out = await checkDownstreamFreshness(
       proberOf({
+        // 只让**声明了空轮豁免**的那张 stale；另一张保持新鲜。
+        // （`ad_daily_insights` 故意没声明豁免，见上面 fixture 的注释 ——
+        //  它 stale 的话本来就该报，那是另一条测试的事。）
         ad_health_narratives: { lastRowAt: hoursAgo(72), error: null },
-        ad_daily_insights: { lastRowAt: hoursAgo(72), error: null },
+        ad_daily_insights: { lastRowAt: hoursAgo(1), error: null },
       }),
       NOW,
       activityReaderOf({ hadDueWork: false, error: null }),
@@ -189,5 +197,36 @@ describe('checkDownstreamFreshness × activityReader —— Codex 2026-09-23 复
       NOW,
     )
     expect(out).toHaveLength(2)
+  })
+})
+
+/**
+ * Codex 2026-09-23 复审 P2：空轮豁免必须是**任务级显式声明**，不能无条件套用。
+ *
+ * `processed=0` 在不同任务里不是同一个意思 —— `google-data-pullback-daily` 在读客户
+ * Meta 账户报错时会忽略错误、得到空 work，然后以 `processed: 0` + `completed` 收尾。
+ * 无条件豁免会把它数据源断线这件事再藏一次，而那正是当初加这套判据要抓的事故。
+ */
+describe('空轮豁免只对声明过的任务生效', () => {
+  it('🔴 没声明豁免的那张表：即使窗口里全是 processed=0，stale 照样要报', async () => {
+    const found = await checkDownstreamFreshness(
+      proberOf({
+        ad_health_narratives: { lastRowAt: hoursAgo(72), error: null },
+        ad_daily_insights: { lastRowAt: hoursAgo(72), error: null },
+      }),
+      NOW,
+      async () => ({ hadDueWork: false, error: null }),
+    )
+    // 声明了豁免的那张被抑制，没声明的那张必须还在 —— 否则断线又被藏回去了
+    expect(found.map((f) => f.table)).toEqual(['ad_daily_insights'])
+  })
+
+  it('声明了豁免的任务：窗口里全是 processed=0 就不报（合法空轮）', async () => {
+    const found = await checkDownstreamFreshness(
+      proberOf({ ad_health_narratives: { lastRowAt: hoursAgo(72), error: null } }),
+      NOW,
+      async () => ({ hadDueWork: false, error: null }),
+    )
+    expect(found.filter((f) => f.table === 'ad_health_narratives')).toHaveLength(0)
   })
 })

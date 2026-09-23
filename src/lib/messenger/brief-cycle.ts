@@ -62,6 +62,23 @@ export const BRIEFS_PER_CHUNK = 12
 export const CHUNK_TIME_BUDGET_MS = 90_000
 
 /**
+ * **单条候选**最多允许占多久。必须明显小于整段预算，不是等于它。
+ *
+ * 🔴 为什么不能让一条候选吃掉整段预算（Codex 复审 2026-09-23 · P1，本分支原来就是这样）：
+ *    `loadDueBriefs` 按 `last_message_at` 倒序排，**排在最前面的永远是同一条**。
+ *    如果队首那条在模型调用或写库上一直挂着，它会吃满 90 秒 → 整段报 aborted →
+ *    编排器停掉后面所有段。而它没写成卡，下一小时它**又排在最前面**，再吃满一次 ——
+ *    于是这一条坏对话可以让**其他所有客户的卡永久饿死**，而且每一轮的运行记录
+ *    看起来都「有在跑、只是没写完」。
+ *
+ *    20 秒的依据是实测：正常一张卡 3.75 秒（2026-09-23 生产，50 张 187 秒），
+ *    留 5 倍余量；而余额用光时 SDK 重试两次刚好把一条烧到约 20 秒，
+ *    也就是说「最贵的已知正常形态」正好在这条线上。
+ *    90 ÷ 20 = 一段里最坏情况也还能往前推进 4 条以上，队列不会停在原地。
+ */
+export const PER_CANDIDATE_BUDGET_MS = 20_000
+
+/**
  * 账户级失效各自对应的一句中文 —— 它会原样进 `cron_run_logs.error_message`，
  * 也就是 PM 在体检报告和今日待办里看到的那句话，所以要说清「谁该动手」。
  */
@@ -115,6 +132,8 @@ export interface BriefGenerationResult {
 export interface GenerateDueBriefsOptions {
   /** 这一段的时间预算，默认 `CHUNK_TIME_BUDGET_MS`。 */
   budgetMs?: number
+  /** 单条候选的上限，默认 `PER_CANDIDATE_BUDGET_MS`。 */
+  perCandidateMs?: number
   /** 读表用的时钟，默认 `Date.now`。测试注入假表，不用真等 90 秒。 */
   clock?: () => number
 }
@@ -269,6 +288,7 @@ export async function generateDueBriefs(
   opts: GenerateDueBriefsOptions = {},
 ): Promise<BriefGenerationResult> {
   const budgetMs = opts.budgetMs ?? CHUNK_TIME_BUDGET_MS
+  const perCandidateMs = opts.perCandidateMs ?? PER_CANDIDATE_BUDGET_MS
   const clock = opts.clock ?? Date.now
   const startedAt = clock()
   let generated = 0
@@ -292,8 +312,11 @@ export async function generateDueBriefs(
     // storeBrief 自己挂住的话，这个检查永远没有机会跑到下一轮。把剩余的段预算
     // 落成一个真实的 AbortSignal 传给这一条调用本身，让它到点自己中止，而不是
     // 靠调用方在外面干等到网关把整段连接掐断（2026-09-23 事故）。
+    // 🔴 两条线取小：既不许超过整段剩余预算，也不许让这一条独占太久（见
+    //    `PER_CANDIDATE_BUDGET_MS` —— 队首那条挂住会饿死其他所有客户）。
     const remaining = budgetMs - elapsed
-    const signal = AbortSignal.timeout(remaining)
+    const candidateMs = Math.min(remaining, perCandidateMs)
+    const signal = AbortSignal.timeout(candidateMs)
 
     try {
       // 外层硬闸 + 内层 signal 两层一起上，理由见 withCandidateDeadline。
@@ -315,7 +338,7 @@ export async function generateDueBriefs(
           await storeBrief(candidate, brief, now, knowledgeStatus, signal)
           generated++
         })(),
-        remaining,
+        candidateMs,
         candidate.conversationId,
       )
     } catch (err) {
@@ -323,13 +346,22 @@ export async function generateDueBriefs(
       //    继续走的话，如果它恰好是最后一条候选，函数会返回 `aborted: null`，
       //    一次超时就被记成成功 —— 正是本 PR 要消灭的那个形态。
       if (err instanceof CandidateBudgetExhausted) {
-        const left = due.length - done
-        console.error(`[messenger/brief] ${err.message}，本段收工`)
-        return {
-          generated,
-          failed,
-          aborted: `有一条候选卡到了本段 ${Math.round(budgetMs / 1000)} 秒预算的尽头（对话 ${err.conversationId}），剩下 ${left} 条留给下一轮（防止整段撞穿网关超时、运行记录卡在「在跑」）`,
+        // 🔴 这里必须分两种情况，合成一种就会重新造出队首饿死（Codex P1）：
+        //
+        //    · 整段预算真的用完了 → 收工，剩下的留给下一轮。
+        //    · 只是**这一条**吃满了自己那 20 秒、整段还有时间 → **记一笔失败继续下一条**。
+        //      停下来的话，队首那条坏对话每一轮都会把整段掐掉，其他客户永远排不到。
+        failed++
+        console.error(`[messenger/brief] ${err.message}（单条上限 ${Math.round(candidateMs / 1000)} 秒）`)
+        if (clock() - startedAt >= budgetMs) {
+          const left = due.length - done
+          return {
+            generated,
+            failed,
+            aborted: `这一段跑满了 ${Math.round(budgetMs / 1000)} 秒的时间预算，剩下 ${left} 条留给下一轮（防止整段撞穿网关超时、运行记录卡在「在跑」）`,
+          }
         }
+        continue
       }
 
       // 账户级失效（没钱 / 钥匙不认了 / 卡在网关）对这一批剩下的每一条都是同一个结论。
