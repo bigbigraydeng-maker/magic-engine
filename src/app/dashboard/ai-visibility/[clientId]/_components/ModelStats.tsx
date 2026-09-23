@@ -2,6 +2,7 @@
 
 import type { AiVisibilityRun } from '@/types/magic-engine';
 import { getEngineDisplayName } from '@/lib/ai-tracker/engine-display-names';
+import { isRunConclusive } from '@/lib/ai-tracker/run-conclusive';
 
 interface Props {
   runs: AiVisibilityRun[];
@@ -28,7 +29,7 @@ export function ModelStats({ runs, brandName }: Props) {
 
   const stats = models.map(model => {
     const modelRuns = runs.filter(r => r.ai_model === model);
-    const successful = modelRuns.filter(r => !r.error_message);
+    const successful = modelRuns.filter(isRunConclusive);
     const withMention = successful.filter(r => r.client_brand_rank != null);
     const ranks = withMention.map(r => r.client_brand_rank as number);
     const avgRank = ranks.length > 0

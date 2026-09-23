@@ -89,7 +89,7 @@ function aggregateByEngine(runs: AiVisibilityRun[]): EngineStat[] {
       avgRank,
       dir,
       trendLabel,
-      totalRuns: engineRuns.length,
+      totalRuns: successful.length,
       mentionRuns: mentioned.length,
     };
   });
