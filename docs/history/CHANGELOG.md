@@ -5,6 +5,20 @@
 
 ---
 
+### 2026-09-23（AI 可见度探测失败被当成「零提及」发给客户：数据结构分离 + 回执 finding + 过度矫正守卫）
+
+OpenAI 9-20 余额耗尽后，诊断里的 AI 探测全部 429 失败，系统把"没测到"写成了"AI 里一次都没提到你的品牌"
+（critical 级、优先级 95），5 家客户拿到假结论。根因是失败和真实零提及共用同一个 `null`，下游分不开。
+
+PR [#1919](https://github.com/bigbigraydeng-maker/magic-engine/pull/1919)：
+- `LiveProbeResult` 新增 `measured_runs` / `failed_runs`，`LiveProbeQuestionResult` 新增 `error` 字段
+- `isProbeConclusive()` 函数：每个问题都真测到了才允许出结论，否则退 `score: null`
+- 探测失败时产出 `ai_visibility_probe_failed` finding（不再静默），带失败详情和耗时
+- 过度矫正守卫测试：真实零提及仍报 critical、真实退步仍报 high
+- 经子牙（架构）+ 魏征（挑刺）两轮独立复审
+
+⚠️ 同一类 bug 在周度快照聚合那条路还没修（`aggregateSnapshot` 不过滤失败行），已开 P0 卡跟踪。
+
 ### 2026-09-22（成交回传每日流水线 6 天没跑完：拆成小步骤 + 失败留痕 + 授权失效不再永久作废）
 
 每天早上 6 点（新西兰时间）自动跑的「成交/咨询回传」流水线（`conversion-daily-pipeline`）自 9/16 起
