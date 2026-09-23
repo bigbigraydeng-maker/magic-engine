@@ -105,8 +105,14 @@ END $$;
 -- ── 不变量 5：seo_patrol_findings 对 anon/authenticated/PUBLIC 无表级授权，策略锁死 service_role ──
 -- 20260924000000 把这张表的收紧断言从迁移事务内移到了这里（事务内 RAISE EXCEPTION
 -- 会连同已经成功的 REVOKE/ALTER POLICY 一起回滚，见该 migration 顶部注释）。
+-- 2026-09-23 修正：只按策略名 'service_role_full' 精确匹配会漏掉两种后续退化——
+--   (a) 该策略被重命名后仍锁着 service_role，旧名匹配不到 → 误报「未锁死」；
+--   (b) 之后新增一条给 anon/authenticated 放行的同表策略（名字不叫 service_role_full）
+--       → 旧检查看不到它，不变量却宣告通过。
+-- 所以这里既确认目标策略确实存在且锁到 service_role，也额外扫描这张表上
+-- 是否存在任何 roles ≠ {service_role} 的策略，堵住改名 / 新增两条退化路径。
 DO $$
-DECLARE leftover_grants INT; leftover_policy INT;
+DECLARE leftover_grants INT; target_policy_count INT; wrong_roles_count INT; wrong_roles_detail text;
 BEGIN
   SELECT count(*) INTO leftover_grants
     FROM information_schema.role_table_grants
@@ -117,17 +123,27 @@ BEGIN
     RAISE EXCEPTION '[不变量5] seo_patrol_findings 仍有 % 条 anon/authenticated/PUBLIC 的表级授权', leftover_grants;
   END IF;
 
-  SELECT count(*) INTO leftover_policy
+  SELECT count(*) INTO target_policy_count
     FROM pg_policies
    WHERE schemaname = 'public'
      AND tablename = 'seo_patrol_findings'
      AND policyname = 'service_role_full'
-     AND roles::text <> '{service_role}';
-  IF leftover_policy <> 0 THEN
-    RAISE EXCEPTION '[不变量5] seo_patrol_findings."service_role_full" 未锁到 TO service_role';
+     AND roles::text = '{service_role}';
+  IF target_policy_count <> 1 THEN
+    RAISE EXCEPTION '[不变量5] seo_patrol_findings."service_role_full" 未锁到 TO service_role，或策略缺失/被改名';
   END IF;
 
-  RAISE NOTICE '✅ 不变量5：seo_patrol_findings 已收回 anon/authenticated/PUBLIC 授权，策略已锁到 TO service_role';
+  SELECT count(*), string_agg(policyname||':'||roles::text, ', ' ORDER BY policyname)
+    INTO wrong_roles_count, wrong_roles_detail
+    FROM pg_policies
+   WHERE schemaname = 'public'
+     AND tablename = 'seo_patrol_findings'
+     AND roles::text <> '{service_role}';
+  IF wrong_roles_count <> 0 THEN
+    RAISE EXCEPTION E'[不变量5] seo_patrol_findings 上存在 % 条非 {service_role} 策略：\n  %', wrong_roles_count, wrong_roles_detail;
+  END IF;
+
+  RAISE NOTICE '✅ 不变量5：seo_patrol_findings 已收回 anon/authenticated/PUBLIC 授权，策略已锁到 TO service_role，且表上无其他角色策略';
 END $$;
 
 \echo ''
