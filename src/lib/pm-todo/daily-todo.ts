@@ -79,6 +79,10 @@ const DEV_OWNED_KINDS: ManualItemKind[] = [
   // 跟真断电（ai_provider_exhausted）分成两个 kind 就是为了这一刻：
   // 那条要 PM 去充钱 / 换钥匙，这条只有我们能换令牌。
   'ai_gateway_broken',
+  // 经验手册（Claude 持久记忆，不在仓库）里点名的代码引用疑似过期——
+  // 「这句话要不要改」是技术判断，不是 PM 该做的业务决策，how 字段同样是
+  // 「回我一句我去查」的话术。见 playbook-staleness-items.ts。
+  'playbook_reference_stale',
 ]
 
 /** FDE focus clients: CTS + Oztop. */

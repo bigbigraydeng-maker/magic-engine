@@ -58,6 +58,11 @@ export type ManualItemKind =
   /** 自动任务跑到一半卡死（状态永远停在 running，路由的 catch 没机会执行） */
   | 'cron_stuck'
   /**
+   * 自动任务「显示跑成了，但它声明的下游表一行没写」（2026-09-23 事故）。
+   * 跟 cron_stuck 的区别：那边状态位就不对，这边状态位是绿的、只有产出是空的。
+   */
+  | 'cron_silent_success'
+  /**
    * 自动任务最近一次是**报错**结束的。
    *
    * `cron/health.ts` 从 2026-09-06 起就算出了 `failing` 这一类，但它**一次都没被下发过**——
@@ -135,6 +140,8 @@ export type ManualItemKind =
   | DailyPlanMeasurementItemKind
   /** 私信客服健康心跳查出问题（issue #1587）：消息量骤降 / 验证器拦截率或出错率过高 / 退订登记写入失败 */
   | 'conversation_health_alert'
+  /** 经验手册（Claude 持久记忆，不在仓库）里点名的函数/路径/表名疑似过期，每周巡检自动发现 */
+  | 'playbook_reference_stale'
 
 export interface ManualItem {
   kind: ManualItemKind

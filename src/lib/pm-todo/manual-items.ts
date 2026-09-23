@@ -63,6 +63,7 @@ import {
   type PlatformCandidateReview,
 } from './platform-candidate-reviews'
 import { CLIENT_DOC_MANUAL_TASKS, type ClientDocManualTask } from './client-doc-manual-tasks'
+import { pushPlaybookStalenessItems } from './playbook-staleness-items'
 
 export async function loadManualItems(
   supabase: SupabaseClient,
@@ -377,6 +378,11 @@ export async function loadManualItems(
       href: `https://app.magicengine.com.au/dashboard/clients/${clientId}/site-audit/pages`,
     })
   }
+
+  // 经验手册疑似过期——每周巡检写进 playbook_staleness_findings，这里拉模式读出来
+  await pushPlaybookStalenessItems(supabase, items).catch((e) =>
+    console.warn('[manual-items] 经验手册过期检查读取失败（不阻塞其他待办）:', e),
+  )
 
   return items
 }
