@@ -5,6 +5,37 @@
 
 ---
 
+### 2026-09-23（发布前内容守卫：中英混杂 + 套话开头 → 转人工复核）
+
+触发它的是 2026-09-20 用 Jev 对 54 条真实内容做的评估：NAL 有两条**已发布**的帖子标题写成
+`Unlock the Power of 一件代发物流支持 with NAL Express!` —— 一句话里中英混排、且套话开头。
+现有质检（`quality-rubric.ts`，gpt-4o-mini 的 brand-fit 维度）给这 54 条**全部**打了 8–9 分，
+一条都没拦：它压根不看语言一致性。
+
+改了什么（PR [#1824](https://github.com/bigbigraydeng-maker/magic-engine/pull/1824)，风险级 B）：
+
+- **`src/lib/content/content-guard.ts`** 两道检查：① `language-consistency` 纯规则、不花钱 ——
+  英文句子里夹未翻译的汉字、中文句子里夹超长英文串、整句跑偏目标语言都算命中；目标语言由调用方
+  `target_language` 指定，没给就按正文推断。URL / 邮箱 / hashtag / HTML 标签属性 / `<script>` JSON-LD
+  先剥掉，避免误伤。② `cliche-opener` 走**已有的** `src/lib/jev/client.ts`（对外封装名 Compliance
+  Engine），跟 `factory/content-quality-guard.ts` 同一条连接器 —— 本 PR 早期自己写了第二个适配器，
+  复审时按 Reuse First 整份删掉。
+- **接进三个已有质检入口**（social / reels / blog）：命中 → `rubricResult.pass=false`（重试时把
+  失败原因当提示喂回生成器），回执写进 `generation_context_snapshot.content_guard`。判断模型故障、
+  超时、返回不可用一律 fail-closed 记「需人工复核」，绝不静默放行；但**只有判断模型不可用**时
+  `retryable=false`，不浪费重新生成的钱。
+- **阈值全部是配置**：`CONTENT_GUARD_CLICHE_THRESHOLD` / `_MAX_EMBEDDED_LATIN_WORDS` /
+  `_MAX_EMBEDDED_CJK_CHARS`，env 与代码覆盖走同一套边界校验。另有 `CONTENT_GUARD_CLICHE_DISABLED`，
+  语义对齐 `factoryQualityGuardEnabled()`：**人主动关掉 ≠ 故障**，只是不判套话，中英混杂照拦。
+- 验证：两条 NAL 标题 + 干净英文 / 干净中文回归用例；拿评估里那 54 条标题跑确定性规则，
+  只命中 3 条 NAL，其余 51 条零误报（只测了标题，正文没重新拉）。子牙 + 魏征两轮复审的问题
+  已全部修掉（email 正则 ReDoS、never-throw、重音拉丁字母、HTML 属性、覆盖值校验）。
+
+**已知缺口（不在本 PR）**：现在只打标记，审核看板还看不到它、`posts/batch` 批量批准也不检查它；
+三条路本来就落草稿、发布仍需人工点批准，所以没有自动发布风险。补这一步另开窗口在做。
+
+---
+
 ### 2026-09-23（AI 账户断电 / 任务卡死 / 长期故障，当天就有人看得见）
 
 **这条不修任何具体功能的 bug，只修「坏了没人知道」。** 触发它的是一次真实的三天静默故障：
