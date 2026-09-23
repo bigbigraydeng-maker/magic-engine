@@ -162,6 +162,8 @@ export type ManualItemKind =
   | DailyPlanMeasurementItemKind
   /** 私信客服健康心跳查出问题（issue #1587）：消息量骤降 / 验证器拦截率或出错率过高 / 退订登记写入失败 */
   | 'conversation_health_alert'
+  /** 经验手册（Claude 持久记忆，不在仓库）里点名的函数/路径/表名疑似过期，每周巡检自动发现 */
+  | 'playbook_reference_stale'
 
 export interface ManualItem {
   kind: ManualItemKind
@@ -234,6 +236,7 @@ import {
   type PlatformCandidateReview,
 } from './platform-candidate-reviews'
 import { CLIENT_DOC_MANUAL_TASKS, type ClientDocManualTask } from './client-doc-manual-tasks'
+import { pushPlaybookStalenessItems } from './playbook-staleness-items'
 
 export function daysAgo(iso: string | null, now: Date): number | null {
   if (!iso) return null
@@ -716,6 +719,11 @@ export async function loadManualItems(
       href: `https://app.magicengine.com.au/dashboard/clients/${clientId}/site-audit/pages`,
     })
   }
+
+  // 经验手册疑似过期——每周巡检写进 playbook_staleness_findings，这里拉模式读出来
+  await pushPlaybookStalenessItems(supabase, items).catch((e) =>
+    console.warn('[manual-items] 经验手册过期检查读取失败（不阻塞其他待办）:', e),
+  )
 
   return items
 }
