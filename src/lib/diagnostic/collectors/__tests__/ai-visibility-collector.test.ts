@@ -135,8 +135,8 @@ describe('AiVisibilityCollector.collect() — no data', () => {
     expect(f?.severity).toBe('critical')
   })
 
-  it('returns score=0 and brand_not_mentioned when snapshot exists but mentions_count=0', async () => {
-    // Snapshot exists with 0 mentions = real signal: brand IS invisible to AI
+  it('returns score=0 and brand_not_mentioned when snapshot has genuine runs but mentions_count=0', async () => {
+    // Snapshot exists with 0 mentions AND total_runs > 0 = real signal: brand IS invisible to AI
     const supabase = makeSupabase({
       snapshot: { avg_rank: null, mentions_count: 0, total_runs: 10, week_of: '2026-05-12' },
     })
@@ -145,6 +145,21 @@ describe('AiVisibilityCollector.collect() — no data', () => {
     )
     expect(score).toBe(0)
     expect(findings.find(x => x.finding_type === 'brand_not_mentioned')).toBeDefined()
+  })
+
+  it('returns score=null and all_runs_failed when total_runs=0 (all API calls errored)', async () => {
+    // total_runs=0 means every API call failed — cannot evaluate, not zero
+    const supabase = makeSupabase({
+      snapshot: { avg_rank: null, mentions_count: 0, total_runs: 0, week_of: '2026-09-15' },
+    })
+    const { score, findings } = await new AiVisibilityCollector(supabase).collect(
+      CLIENT_ID, DOMAIN, KEYWORDS,
+    )
+    expect(score).toBeNull()
+    const f = findings.find(x => x.finding_type === 'ai_visibility_all_runs_failed')
+    expect(f).toBeDefined()
+    expect(f?.severity).toBe('high')
+    expect(findings.find(x => x.finding_type === 'brand_not_mentioned')).toBeUndefined()
   })
 })
 

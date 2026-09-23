@@ -416,12 +416,15 @@ async function aggregateSnapshot(
 ): Promise<AggregateResult | null> {
   const weekOf = mondayOfThisWeek().toISOString().slice(0, 10) // YYYY-MM-DD
 
-  // Pull all runs for this client this week
+  // Pull only successful runs for this client this week.
+  // Failed calls (429 / timeout / etc.) have error_message set and
+  // client_brand_rank null — including them dilutes mentionRate. §9.1
   const weekStart = new Date(weekOf + 'T00:00:00.000Z').toISOString()
   const { data: runs, error } = await supabaseAdmin
     .from('ai_visibility_runs')
     .select('ai_engine, ai_model, client_brand_rank, brands_mentioned')
     .eq('client_id', clientId)
+    .is('error_message', null)
     .gte('ran_at', weekStart)
 
   if (error || !runs) return null

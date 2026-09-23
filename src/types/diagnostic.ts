@@ -45,6 +45,7 @@ export type AiVisibilityFindingType =
   | 'missing_faq_content'
   | 'insufficient_entity_coverage'
   | 'ai_visibility_not_tracked'  // P8.5.22: AI Tracker never ran for this client
+  | 'ai_visibility_all_runs_failed'
   | 'live_probe_no_mention'
 
 export type AdsFindingType =

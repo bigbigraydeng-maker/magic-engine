@@ -71,7 +71,15 @@ export class AiVisibilityCollector {
         }
       }
 
-      // Snapshot exists with 0 mentions → real signal: client is invisible to AI
+      // All runs failed (total_runs=0 after filtering errors) → cannot evaluate
+      if (snapshot.total_runs === 0) {
+        return {
+          score: null,
+          findings: [this.makeAllRunsFailedFinding(clientId, snapshot.week_of)],
+        }
+      }
+
+      // Snapshot has genuine measured runs with 0 mentions → real signal
       if (snapshot.mentions_count === 0) {
         return {
           score: 0,
@@ -270,6 +278,23 @@ export class AiVisibilityCollector {
         'Add GEO directives to your content, create entity-rich FAQ pages, and build citations on authoritative NZ/AU sites to improve AI visibility.',
       fix_type: 'fde_manual',
       priority_score: 95,
+    }
+  }
+
+  private makeAllRunsFailedFinding(clientId: string, weekOf: string): NewFinding {
+    return {
+      client_id: clientId,
+      dimension: 'ai_visibility',
+      finding_type: 'ai_visibility_all_runs_failed',
+      severity: 'high',
+      title: 'AI Visibility — all API calls failed this week',
+      description:
+        `Every AI engine call for the week of ${weekOf} failed (429 / timeout / model error). No mention rate can be calculated — this is not a score of zero, it is missing data.`,
+      evidence: makeEvidence({ parsed: { week_of: weekOf, successful_runs: 0 } }),
+      recommendation:
+        'Check AI engine API keys and quotas. If failures persist across multiple weeks, review the AI Tracker error logs for the specific failure pattern.',
+      fix_type: 'me_auto',
+      priority_score: 80,
     }
   }
 }
