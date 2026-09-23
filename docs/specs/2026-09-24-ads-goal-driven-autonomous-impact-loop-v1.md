@@ -120,7 +120,11 @@ ads/verification.completed  ← 韩信：before/after → flywheel_outcomes（ev
 ads/memory.recorded         ← 孔明：saveProvenPattern / saveFailedExperiment / updateDecisionOutcome
 ads/pm_digest.ready         ← G10 日检报告
 ```
-**数据完整性门槛跟着搬（子牙第一轮）**：现有 `google-data-pullback-daily/route.ts:423` 只在 `result.ad_daily.success` 时才跑评估，这道门槛**必须原样进入** `ads/growth_state.built`：`impact.cycle.due` 事件携带三个同步函数（campaign / adset / ad 级）的 `success/complete` 信号 + 当日 `ad_snapshot_captures` 完整性；任一不完整 → `ads_growth_states.data_completeness='partial'`，**卫青只写状态不出机会、孔明本轮不提交任何 run**，日报"今天系统做了什么"段写明"数据没拉全，今天不动"。不是 low-confidence 继续算——因为 API 不稳定和账户端出事常同源，数据缺失日恰恰是花费异常日，缺分子会让 G11 反而更难触发。
+**数据完整性：三段三种处理（子牙 + 魏征第一轮）**。现有 `route.ts` 里两道门槛是**故意不同的**：`:423` 的 `ad_daily.success` 只挡旧体检和日报；`:469` 的 D 系列诊断**刻意不设门槛**——授权断了拉不到数时，D7 的职责恰恰是报告这件事。迁入 `ads/growth_state.built` 后必须保留这个区分：
+- **诊断（D1–D9）**：不设完整性门槛，照旧跑；数据坏了由 D7 报出来。
+- **机会（O1–O4）+ 处方 + 动作**：`impact.cycle.due` 事件携带 **campaign / adset / ad 三级**同步函数各自的 `success/complete`（现有 `:403` 那个 if 只查了 campaign 级，不够）+ 当日 `ad_snapshot_captures` 完整性；任一不完整 → `ads_growth_states.data_completeness='partial'`，卫青仍写诊断但不出机会，**孔明本轮不提交任何 run**，日报写明"数据没拉全，今天不动"。
+- **G11 熔断第 1/2 条（花费突增 / 账户超上限）是新逻辑，不是 D 系列，没有 D7 那种自报能力**：它**单独读**同一份完整性信号；`partial` 时花费异常判定结果为 `unknown`——既不触发熔断也不放行动作（本轮反正不提交），并在日报标"今日花费异常判定：数据不全，未判"。不做 low-confidence 继续算：API 不稳定和账户端出事常同源，缺分子会让"花费 > 中位数 × 3"反而更难触发。
+- WP1 / WP3 验收项：完整性信号必须含 adset_level / ad_level，变异测试"只查 campaign 级"必红。
 
 每步 `step.run` 内落 receipt（request id / client id / entity id / status / spend impact / authorization status / created_at）。**上线后必须手动 Sync `/api/inngest`**（PITFALLS F10）。现有 `google-data-pullback-daily` 内同步调用的 `evaluateClientAdHealth` + `runPortfolioDiagnostics` **迁入 `ads/growth_state.built` 这一步，旧路径收编不并行**（禁双跑）。
 
