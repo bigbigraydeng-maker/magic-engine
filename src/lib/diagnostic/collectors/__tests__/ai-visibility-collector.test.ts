@@ -242,9 +242,9 @@ describe('AiVisibilityCollector.collect() — live probe (P8.10.S2.5)', () => {
       mentions: 3,
       avg_rank: 1,
       questions: [
-        { question: 'q1', client_brand_rank: 1 },
-        { question: 'q2', client_brand_rank: 1 },
-        { question: 'q3', client_brand_rank: 1 },
+        { question: 'q1', client_brand_rank: 1, error: null },
+        { question: 'q2', client_brand_rank: 1, error: null },
+        { question: 'q3', client_brand_rank: 1, error: null },
       ],
     })
     const result = await new AiVisibilityCollector(supabase, probe).collect(
@@ -297,7 +297,7 @@ describe('AiVisibilityCollector.collect() — live probe (P8.10.S2.5)', () => {
       runs: 3,
       mentions: 2,
       avg_rank: 3.5,
-      questions: [{ question: 'q1', client_brand_rank: 3 }],
+      questions: [{ question: 'q1', client_brand_rank: 3, error: null }],
     })
     const { findings } = await new AiVisibilityCollector(supabase, probe).collect(
       CLIENT_ID, DOMAIN, KEYWORDS,
