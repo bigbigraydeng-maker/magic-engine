@@ -5,6 +5,37 @@
 
 ---
 
+### 2026-09-23（私信简报停产 3 天而监控全绿：账户级失效当场熄火 + 段一定返回 + 只认真实产出）
+
+销售看的「客户需求卡」自 2026-09-20 19:11 UTC 起 3 天一张没写，而体检报告全绿。
+根因跟上面那条同源 —— OpenAI 账户余额耗尽（PM 9-23 充值后产出立刻恢复）；
+但真正让它**藏了三天**的是代码：写卡循环逐条 try/catch 所以不中断，而 SDK 对 429
+默认重试两次，一条注定失败的调用要烧 20.1 秒（正常一张卡 3.75 秒）。一段 12 条
+约 242 秒，撞穿网关约 125 秒 → 段永远不返回 → 收尾那步一次没跑到 →
+`cron_run_logs` 累计 64 行永远停在 `running`。而卡死判定只看「最新一条」运行记录，
+每小时任务的最新一条永远不满 60 分钟 —— 这道判定对小时级任务结构性地永远不成立。
+
+PR [#1949](https://github.com/bigbigraydeng-maker/magic-engine/pull/1949)（接续已关闭的 #1920）：
+- **不重复造**：主干同日 `4f47eaba`/`1e4ce6af` 已做 AI 断电告警与 48h 窗口卡死判定，
+  本 PR 删掉自己那两个重复件，改用主干的 `provider-failure.ts` / `stuckByService`
+- 新增 `classifyThrownOpenAIError`：SDK 抛出的异常走**同一套**判据（不另立第三份错误码清单）
+- 接住 `openai-client.ts` 点名留给本窗口的收口：`brief.ts` 不再自己 `new OpenAI()`，
+  改走 `getOpenAIClient({ bypassGateway: true })`，这条链路的失败终于进得了拦截
+- 段一定返回：账户级失效当场熄火 + 段内 90 秒预算 + **单条 20 秒上限**
+  （上限是复审 P1 逼出来的：让一条候选吃满整段，队首那条挂住会永久饿死其他所有客户）
+- 超时绝不许记成成功：`loadMessages` 查询失败必须抛（PostgREST 被 AbortSignal 掐断时
+  返回 `{data:null,error}` 不抛，旧写法会把超时变成「这条对话没消息」）
+- Inngest 函数补 `onFailure` → `failOpenCronRuns`，重试耗尽不再留「在跑」的假记录
+- 只认真实产出的第二道判据：registry 声明 `conversation_briefs`（3h），
+  `silentSuccess` 接进 PM 今日待办；空轮豁免改成表级显式声明 `emptyRoundsAreLegitimate`
+  （`processed=0` 在不同任务里不是一个意思，无条件套用会把广告数据源断线又藏一次）
+
+真实产出已验证：充值后写出 50 张卡 / 0 失败，内容跟 `conversation_messages` 原文逐条对得上；
+11:12 UTC 那轮定时任务无人干预自行 `completed`（processed 50 / failed 0）。
+经 Codex 两轮共 6 条复审，全部答复并关闭。
+
+---
+
 ### 2026-09-23（AI 可见度探测失败被当成「零提及」发给客户：数据结构分离 + 回执 finding + 过度矫正守卫）
 
 OpenAI 9-20 余额耗尽后，诊断里的 AI 探测全部 429 失败，系统把"没测到"写成了"AI 里一次都没提到你的品牌"
