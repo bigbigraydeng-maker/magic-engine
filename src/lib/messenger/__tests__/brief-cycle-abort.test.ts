@@ -17,16 +17,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 /** 每条对话都有 1 条消息 —— 让循环不会因为「没消息」跳过。 */
+/** 消息查询的返回值 —— 默认一条消息；个别用例改成「查询被中止」。 */
+let messagesResult: { data: unknown; error: { message: string } | null } = {
+  data: [{ direction: 'inbound', sender_name: 'Kelly', body: 'hi', sent_at: '2026-09-23T00:00:00Z' }],
+  error: null,
+}
+
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
     from: () => ({
       select: () => ({
         eq: () => ({
           order: () => ({
-            abortSignal: () => Promise.resolve({
-              data: [{ direction: 'inbound', sender_name: 'Kelly', body: 'hi', sent_at: '2026-09-23T00:00:00Z' }],
-              error: null,
-            }),
+            abortSignal: () => Promise.resolve(messagesResult),
           }),
         }),
       }),
@@ -82,6 +85,10 @@ beforeEach(() => {
   generateBrief.mockReset()
   storeBrief.mockReset()
   storeBrief.mockResolvedValue(undefined)
+  messagesResult = {
+    data: [{ direction: 'inbound', sender_name: 'Kelly', body: 'hi', sent_at: '2026-09-23T00:00:00Z' }],
+    error: null,
+  }
 })
 
 describe('generateDueBriefs：余额用光必须当场熄火', () => {
@@ -138,5 +145,46 @@ describe('generateDueBriefs：时间预算是「段必须返回」的兜底闸',
     const r = await generateDueBriefs(due(12), NOW)
 
     expect(r).toEqual({ generated: 12, failed: 0, aborted: null })
+  })
+})
+
+/**
+ * Codex 复审 2026-09-23 抓到的两处 —— 都是「超时被记成成功」这同一个毛病换了位置，
+ * 也就是本 PR 存在的全部理由。所以各锁一条。
+ */
+describe('超时绝不许被记成成功', () => {
+  it('🔴 消息查询被中止 → 必须抛，不许当成「这条对话没消息」跳过', async () => {
+    // PostgREST 被 AbortSignal 掐断时不抛异常，返回 { data: null, error }
+    messagesResult = { data: null, error: { message: 'AbortError: signal is aborted without reason' } }
+    generateBrief.mockResolvedValue(OK)
+
+    const r = await generateDueBriefs(due(1), NOW)
+
+    // 旧写法会得到 generated 0 / failed 0 / aborted null —— 一次超时记成成功
+    expect(r.generated).toBe(0)
+    expect(r.failed).toBe(1)
+    expect(generateBrief).not.toHaveBeenCalled()
+  })
+
+  it('🔴 最后一条候选自己卡住 → 整段必须报 aborted，不许返回 aborted=null', async () => {
+    // 卡住一条永不返回的调用：没有外层硬闸，函数会走完循环返回 aborted=null
+    generateBrief.mockImplementation(() => new Promise(() => {}))
+
+    const r = await generateDueBriefs(due(1), NOW, { budgetMs: 60 })
+
+    expect(r.aborted).not.toBeNull()
+    expect(r.aborted).toContain('预算')
+    expect(r.generated).toBe(0)
+  })
+
+  it('🔴 卡住的那条不许把后面的段也拖上 —— 报了 aborted 就当场收工', async () => {
+    generateBrief.mockResolvedValueOnce(OK).mockImplementation(() => new Promise(() => {}))
+
+    const r = await generateDueBriefs(due(5), NOW, { budgetMs: 60 })
+
+    expect(r.generated).toBe(1)
+    expect(r.aborted).toContain('留给下一轮')
+    // 卡住那条之后的候选一条都不该再开工
+    expect(generateBrief).toHaveBeenCalledTimes(2)
   })
 })

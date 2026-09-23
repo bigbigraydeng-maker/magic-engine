@@ -138,6 +138,16 @@ function toCandidate(row: ConversationRow): BriefCandidate {
   }
 }
 
+/**
+ * 读这条对话的全部消息。
+ *
+ * 🔴 **查询失败必须抛，绝不能吞成空数组**（Codex 复审 2026-09-23 抓到，而且这正是
+ *    本 PR 要消灭的那类毛病换了个位置）：PostgREST 被 `AbortSignal` 掐断时**不抛异常**，
+ *    而是返回 `{ data: null, error: AbortError }`。旧写法只取 `data`，于是
+ *    「查询超时了」会变成「这条对话一条消息都没有」→ 调用方 `continue` 当正常空对话跳过。
+ *    如果它恰好是这一段的最后一条候选，循环直接结束、返回 `aborted: null` ——
+ *    **一次超时被记成成功，`failed=0`**，跟 9/20 那次「监控上一切正常」一模一样。
+ */
 async function loadMessages(conversationId: string, signal?: AbortSignal): Promise<StoredMessage[]> {
   let query = supabaseAdmin
     .from('conversation_messages')
@@ -146,7 +156,8 @@ async function loadMessages(conversationId: string, signal?: AbortSignal): Promi
     .order('sent_at', { ascending: true })
   if (signal) query = query.abortSignal(signal)
 
-  const { data } = await query
+  const { data, error } = await query
+  if (error) throw new Error(`读对话 ${conversationId} 的消息失败：${error.message}`)
 
   return (data ?? []).map((m) => ({
     direction: m.direction as 'inbound' | 'outbound',
@@ -154,6 +165,50 @@ async function loadMessages(conversationId: string, signal?: AbortSignal): Promi
     body: m.body ?? '',
     sentAt: m.sent_at,
   }))
+}
+
+/**
+ * 「这一条候选跑过了本段剩余预算」—— 专门起一个类，让 catch 能**无歧义地**认出它。
+ *
+ * 靠 `err.name === 'AbortError'` 认是不够的：业务代码里别的地方也可能冒出中止错误，
+ * 而这里要的判断是「该不该把整段停下来」，不是「刚才那次网络怎么了」。
+ */
+class CandidateBudgetExhausted extends Error {
+  constructor(readonly conversationId: string) {
+    super(`候选 ${conversationId} 跑过了本段剩余预算`)
+    this.name = 'CandidateBudgetExhausted'
+  }
+}
+
+/**
+ * 给一条候选的**整条流程**套一个硬截止时间。
+ *
+ * 🔴 为什么 `AbortSignal` 一个人守不住（Codex 复审 2026-09-23）：signal 只传给了
+ *    模型调用和两处 Supabase 查询，可 `generateBrief()` 在调模型**之前**还要先读
+ *    `clients`（身份）和知识库，那两组读取既没收这个 signal、也没有自己的超时。
+ *    任一处挂住，90 秒预算就形同不存在，整段照旧被网关强杀、留下一行「在跑」。
+ *    一条一条去接 signal 要动到共享的知识库模块（`getClientKnowledge` 的 deps 里
+ *    没有 signal），爆炸半径比这件事本身大得多。
+ *
+ *    所以改成一道**外层硬闸**：不管卡在哪一步，到点就让这一条以
+ *    `CandidateBudgetExhausted` 结束，把控制权交回循环。signal 照旧保留 ——
+ *    它负责真正取消在飞的 HTTP 请求（省资源），这道闸负责保证控制流一定回来。
+ *
+ * 🔴 这里的 `setTimeout` 不是 PITFALLS §F 说的那种「在 step.run 里轮询」：
+ *    它不轮询、不续命，而且 `finally` 里一定清掉，不会把 step 吊着。
+ */
+function withCandidateDeadline<T>(
+  work: Promise<T>,
+  ms: number,
+  conversationId: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new CandidateBudgetExhausted(conversationId)), ms)
+  })
+  return Promise.race([work, deadline]).finally(() => {
+    if (timer) clearTimeout(timer)
+  }) as Promise<T>
 }
 
 /**
@@ -237,25 +292,46 @@ export async function generateDueBriefs(
     // storeBrief 自己挂住的话，这个检查永远没有机会跑到下一轮。把剩余的段预算
     // 落成一个真实的 AbortSignal 传给这一条调用本身，让它到点自己中止，而不是
     // 靠调用方在外面干等到网关把整段连接掐断（2026-09-23 事故）。
-    const signal = AbortSignal.timeout(budgetMs - elapsed)
+    const remaining = budgetMs - elapsed
+    const signal = AbortSignal.timeout(remaining)
 
     try {
-      const messages = await loadMessages(candidate.conversationId, signal)
-      if (messages.length === 0) continue
-      const { brief, knowledgeStatus } = await generateBrief(
-        messages,
-        candidate.clientId,
-        {
-          awaitingReply: candidate.awaitingReply,
-          hoursSinceLastMessage: candidate.lastMessageAt
-            ? Math.round((now.getTime() - new Date(candidate.lastMessageAt).getTime()) / 3_600_000)
-            : 0,
-        },
-        { signal },
+      // 外层硬闸 + 内层 signal 两层一起上，理由见 withCandidateDeadline。
+      await withCandidateDeadline(
+        (async () => {
+          const messages = await loadMessages(candidate.conversationId, signal)
+          if (messages.length === 0) return
+          const { brief, knowledgeStatus } = await generateBrief(
+            messages,
+            candidate.clientId,
+            {
+              awaitingReply: candidate.awaitingReply,
+              hoursSinceLastMessage: candidate.lastMessageAt
+                ? Math.round((now.getTime() - new Date(candidate.lastMessageAt).getTime()) / 3_600_000)
+                : 0,
+            },
+            { signal },
+          )
+          await storeBrief(candidate, brief, now, knowledgeStatus, signal)
+          generated++
+        })(),
+        remaining,
+        candidate.conversationId,
       )
-      await storeBrief(candidate, brief, now, knowledgeStatus, signal)
-      generated++
     } catch (err) {
+      // 🔴 预算跑完了 → 整段收工，**不能只记一笔 failed 继续往下走**。
+      //    继续走的话，如果它恰好是最后一条候选，函数会返回 `aborted: null`，
+      //    一次超时就被记成成功 —— 正是本 PR 要消灭的那个形态。
+      if (err instanceof CandidateBudgetExhausted) {
+        const left = due.length - done
+        console.error(`[messenger/brief] ${err.message}，本段收工`)
+        return {
+          generated,
+          failed,
+          aborted: `有一条候选卡到了本段 ${Math.round(budgetMs / 1000)} 秒预算的尽头（对话 ${err.conversationId}），剩下 ${left} 条留给下一轮（防止整段撞穿网关超时、运行记录卡在「在跑」）`,
+        }
+      }
+
       // 账户级失效（没钱 / 钥匙不认了 / 卡在网关）对这一批剩下的每一条都是同一个结论。
       // 判据原样用 `@/lib/ai/provider-failure` 那一份，这里不另立标准。
       const kind = classifyThrownOpenAIError(err)
