@@ -48,6 +48,8 @@ const mockExtractKeywordCandidates = vi.mocked(extractKeywordCandidates)
  * Supports arbitrary chaining: .select().eq().eq().order().limit() etc.
  * The returned object is also a Promise (thenable) so `await chain` works.
  */
+let chainCalls: string[] = []
+
 function buildSupabaseChain(resolvedValue: { data: unknown; error: unknown }) {
   const promise = Promise.resolve(resolvedValue)
 
@@ -62,7 +64,14 @@ function buildSupabaseChain(resolvedValue: { data: unknown; error: unknown }) {
       }
       // Any other property access (select, eq, in, order, limit, neq…) returns
       // a function that re-wraps the same promise, keeping the chain going.
-      return () => new Proxy(promise, handler)
+      // Calls are recorded so the SQL half of a filter can be asserted: this
+      // stub answers every method, so row-level assertions alone stay green
+      // even if the query never filtered anything (verified by mutation,
+      // 2026-09-23).
+      return (...args: unknown[]) => {
+        chainCalls.push(`${String(prop)}(${args.map(a => JSON.stringify(a)).join(', ')})`)
+        return new Proxy(promise, handler)
+      }
     },
   }
 
@@ -91,18 +100,50 @@ function setupSupabaseMock(
   })
 }
 
-/** Generate N run rows for a query, all weak or all strong. */
+/**
+ * Generate N run rows for a query, all weak or all strong.
+ *
+ * Engines cycle, because that is what production looks like — one query is
+ * probed on every configured engine. A fixture pinned to a single engine also
+ * pins a query to one engine's opinion, which the "already strong in AI" gate
+ * (MIN_ENGINES_FOR_STRENGTH_CLAIM) correctly refuses to act on.
+ */
+const FIXTURE_ENGINES = ['openai', 'anthropic', 'perplexity', 'google']
+
 function makeRuns(
   queryId: string,
   count: number,
   weak = true
-): Array<{ query_id: string; ai_engine: string; client_brand_rank: number | null; ran_at: string }> {
-  return Array.from({ length: count }, (_, i) => ({
-    query_id: queryId,
-    ai_engine: 'openai',
-    client_brand_rank: weak ? null : 1,
-    ran_at: `2026-05-${String(i + 1).padStart(2, '0')}T10:00:00Z`,
-  }))
+): Array<RunRow> {
+  return Array.from({ length: count }, (_, i) =>
+    run({
+      query_id: queryId,
+      ai_engine: FIXTURE_ENGINES[i % FIXTURE_ENGINES.length],
+      client_brand_rank: weak ? null : 1,
+      ran_at: `2026-05-${String(i + 1).padStart(2, '0')}T10:00:00Z`,
+    })
+  )
+}
+
+/**
+ * A row as `ai_visibility_runs` actually stores it. The two error columns
+ * decide whether the probe completed at all: a failed probe carries a null
+ * rank exactly like a completed probe that did not mention the client, and
+ * only the error columns tell them apart.
+ */
+interface RunRow {
+  query_id: string
+  ai_engine: string
+  client_brand_rank: number | null
+  ran_at: string
+  error_message: string | null
+  parse_error_message: string | null
+}
+
+/** Completed probe by default; pass an error column to make it a failed one. */
+function run(partial: Omit<RunRow, 'error_message' | 'parse_error_message'> &
+  Partial<Pick<RunRow, 'error_message' | 'parse_error_message'>>): RunRow {
+  return { error_message: null, parse_error_message: null, ...partial }
 }
 
 // ─── Test Suite ───────────────────────────────────────────────────────────────
@@ -590,10 +631,10 @@ describe('getWeakSpotOpportunities', () => {
           // q-high: 5/5 weak → score = 1.0
           ...makeRuns('q-high', 5, true),
           // q-low: 2/4 weak → score = 0.5
-          { query_id: 'q-low', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' },
-          { query_id: 'q-low', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-02T10:00:00Z' },
-          { query_id: 'q-low', ai_engine: 'openai', client_brand_rank: 1, ran_at: '2026-05-03T10:00:00Z' },
-          { query_id: 'q-low', ai_engine: 'openai', client_brand_rank: 1, ran_at: '2026-05-04T10:00:00Z' },
+          run({ query_id: 'q-low', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-low', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-02T10:00:00Z' }),
+          run({ query_id: 'q-low', ai_engine: 'openai', client_brand_rank: 1, ran_at: '2026-05-03T10:00:00Z' }),
+          run({ query_id: 'q-low', ai_engine: 'openai', client_brand_rank: 1, ran_at: '2026-05-04T10:00:00Z' }),
         ]
       )
 
@@ -616,14 +657,14 @@ describe('getWeakSpotOpportunities', () => {
         null,
         [
           // q-multi: weak across 3 engines (3/3 runs → score=1.0, 3 engines)
-          { query_id: 'q-multi', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' },
-          { query_id: 'q-multi', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-01T11:00:00Z' },
-          { query_id: 'q-multi', ai_engine: 'perplexity', client_brand_rank: null, ran_at: '2026-05-01T12:00:00Z' },
+          run({ query_id: 'q-multi', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-multi', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-01T11:00:00Z' }),
+          run({ query_id: 'q-multi', ai_engine: 'perplexity', client_brand_rank: null, ran_at: '2026-05-01T12:00:00Z' }),
           // q-single: weak in 1 engine, strong in 2 (1/3 runs weak → score=0.33, 1 engine)
           // But 0.33 >= 0.3, so it's included
-          { query_id: 'q-single', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' },
-          { query_id: 'q-single', ai_engine: 'anthropic', client_brand_rank: 1, ran_at: '2026-05-01T11:00:00Z' },
-          { query_id: 'q-single', ai_engine: 'perplexity', client_brand_rank: 1, ran_at: '2026-05-01T12:00:00Z' },
+          run({ query_id: 'q-single', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-single', ai_engine: 'anthropic', client_brand_rank: 1, ran_at: '2026-05-01T11:00:00Z' }),
+          run({ query_id: 'q-single', ai_engine: 'perplexity', client_brand_rank: 1, ran_at: '2026-05-01T12:00:00Z' }),
         ]
       )
 
@@ -648,9 +689,9 @@ describe('getWeakSpotOpportunities', () => {
         [{ id: 'q-1', question: 'best china tours from auckland' }],
         null,
         [
-          { query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' },
-          { query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-02T10:00:00Z' },
-          { query_id: 'q-1', ai_engine: 'perplexity', client_brand_rank: 1, ran_at: '2026-05-03T10:00:00Z' },
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-02T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'perplexity', client_brand_rank: 1, ran_at: '2026-05-03T10:00:00Z' }),
         ]
       )
 
@@ -705,9 +746,9 @@ describe('getWeakSpotOpportunities', () => {
         [{ id: 'q-1', question: 'china tour packages from wellington' }],
         null,
         [
-          { query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' },
-          { query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-02T10:00:00Z' },
-          { query_id: 'q-1', ai_engine: 'perplexity', client_brand_rank: 2, ran_at: '2026-05-03T10:00:00Z' },
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-02T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'perplexity', client_brand_rank: 2, ran_at: '2026-05-03T10:00:00Z' }),
         ]
       )
 
@@ -774,7 +815,7 @@ describe('getWeakSpotOpportunities', () => {
       setupSupabaseMock(
         [{ id: 'q-1', question: 'china tours nz booking' }],
         null,
-        [{ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' }]
+        [run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' })]
       )
 
       mockBulkKeywordVolume.mockResolvedValue([])
@@ -786,7 +827,7 @@ describe('getWeakSpotOpportunities', () => {
       setupSupabaseMock(
         [{ id: 'q-1', question: 'china holiday packages nz' }],
         null,
-        [{ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 4, ran_at: '2026-05-01T10:00:00Z' }]
+        [run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 4, ran_at: '2026-05-01T10:00:00Z' })]
       )
 
       mockBulkKeywordVolume.mockResolvedValue([])
@@ -799,7 +840,7 @@ describe('getWeakSpotOpportunities', () => {
       setupSupabaseMock(
         [{ id: 'q-1', question: 'china tours booking nz' }],
         null,
-        [{ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 3, ran_at: '2026-05-01T10:00:00Z' }]
+        [run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 3, ran_at: '2026-05-01T10:00:00Z' })]
       )
 
       mockBulkKeywordVolume.mockResolvedValue([])
@@ -812,9 +853,9 @@ describe('getWeakSpotOpportunities', () => {
         [{ id: 'q-1', question: 'latest run date test' }],
         null,
         [
-          { query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' },
-          { query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-04T15:00:00Z' },
-          { query_id: 'q-1', ai_engine: 'perplexity', client_brand_rank: null, ran_at: '2026-05-02T08:00:00Z' },
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-04T15:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'perplexity', client_brand_rank: null, ran_at: '2026-05-02T08:00:00Z' }),
         ]
       )
 
@@ -822,6 +863,174 @@ describe('getWeakSpotOpportunities', () => {
 
       const result = await getWeakSpotOpportunities('client-1', 20, 10, true)
       expect(result[0].last_run_at).toBe('2026-05-04T15:00:00Z')
+    })
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 8b. Failed probes are not measurements (2026-09-23 regression)
+  //
+  // A run the provider never answered is stored with client_brand_rank = null,
+  // the same as a run where the AI answered and did not mention the client.
+  // Counting the former used to put "we could not reach the model" into both
+  // the numerator and the denominator of weakness_score.
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('failed probes', () => {
+
+    it('drops a provider failure from both numerator and denominator', async () => {
+      // 1 completed run where the brand ranked 1st (strong), plus 3 provider
+      // failures. Old behaviour: 3 weak / 4 runs = 0.75 → surfaced as a GEO
+      // weak spot. Correct behaviour: 0 weak / 1 run = 0 → nothing to say.
+      setupSupabaseMock(
+        [{ id: 'q-1', question: 'china tours nz booking' }],
+        null,
+        [
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 1, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'google', client_brand_rank: null, ran_at: '2026-05-01T11:00:00Z', error_message: 'GoogleGenerativeAI fetch failed' }),
+          run({ query_id: 'q-1', ai_engine: 'google', client_brand_rank: null, ran_at: '2026-05-02T11:00:00Z', error_message: 'GoogleGenerativeAI fetch failed' }),
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-02T12:00:00Z', error_message: '429 no credits remaining' }),
+        ]
+      )
+
+      mockBulkKeywordVolume.mockResolvedValue([])
+      const result = await getWeakSpotOpportunities('client-1', 20, 10, true)
+      expect(result).toEqual([])
+    })
+
+    it('drops a parse failure too — the rank was never determined', async () => {
+      setupSupabaseMock(
+        [{ id: 'q-1', question: 'china tours nz booking' }],
+        null,
+        [
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 2, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-01T11:00:00Z', parse_error_message: 'LLM parse timeout' }),
+        ]
+      )
+
+      mockBulkKeywordVolume.mockResolvedValue([])
+      const result = await getWeakSpotOpportunities('client-1', 20, 10, true)
+      expect(result).toEqual([])
+    })
+
+    it('says nothing at all when every probe for a query failed', async () => {
+      setupSupabaseMock(
+        [{ id: 'q-1', question: 'china tours nz booking' }],
+        null,
+        [
+          run({ query_id: 'q-1', ai_engine: 'google', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z', error_message: 'provider down' }),
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T11:00:00Z', error_message: 'provider down' }),
+        ]
+      )
+
+      mockBulkKeywordVolume.mockResolvedValue([])
+      const result = await getWeakSpotOpportunities('client-1', 20, 10, true)
+      expect(result).toEqual([])
+    })
+
+    it('asks the database to exclude failed probes, not just filters them after', async () => {
+      // The per-query row budget is spent on whatever the database returns, so
+      // a filter that only runs in memory lets failed probes crowd out real runs.
+      chainCalls = []
+      setupSupabaseMock(
+        [{ id: 'q-1', question: 'china tours nz booking' }],
+        null,
+        [run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' })]
+      )
+      mockBulkKeywordVolume.mockResolvedValue([])
+      await getWeakSpotOpportunities('client-1', 20, 10, true)
+
+      expect(chainCalls).toContain('is("error_message", null)')
+      expect(chainCalls).toContain('is("parse_error_message", null)')
+      expect(chainCalls.some(c => c.startsWith('select(') && c.includes('error_message'))).toBe(true)
+    })
+
+    it('will not claim "already strong in AI" off a single engine', async () => {
+      // NM Medspa shape (production, 2026-09-23): Google failed on every probe,
+      // one OpenAI call came back with the brand ranked 1st. Dropping the
+      // failures makes weakness_score 0, which used to fall straight through
+      // into the seo_only branch — whose stated meaning is "brand already
+      // strong in AI". One engine cannot support that.
+      setupSupabaseMock(
+        [{ id: 'q-1', question: 'best medspa newmarket auckland' }],
+        null,
+        [
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 1, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'google', client_brand_rank: null, ran_at: '2026-05-01T11:00:00Z', error_message: 'GoogleGenerativeAI fetch failed' }),
+        ]
+      )
+
+      mockBulkKeywordVolume.mockResolvedValue([
+        {
+          keyword: 'best medspa newmarket auckland',
+          search_volume: 900,
+          keyword_difficulty: 12,
+          cpc: 2.5,
+          competition: 0.4,
+          intent: 'commercial',
+          position: null,
+        },
+      ])
+      mockExtractKeywordCandidates.mockReturnValue([
+        { keyword: 'best medspa newmarket auckland', confidence: 1, source: 'title' },
+      ])
+
+      const result = await getWeakSpotOpportunities('client-1', 20, 10, true)
+      expect(result).toEqual([])
+    })
+
+    it('does claim "already strong in AI" once two engines have answered', async () => {
+      setupSupabaseMock(
+        [{ id: 'q-1', question: 'best medspa newmarket auckland' }],
+        null,
+        [
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 1, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: 2, ran_at: '2026-05-01T11:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'google', client_brand_rank: null, ran_at: '2026-05-01T12:00:00Z', error_message: 'GoogleGenerativeAI fetch failed' }),
+        ]
+      )
+
+      mockBulkKeywordVolume.mockResolvedValue([
+        {
+          keyword: 'best medspa newmarket auckland',
+          search_volume: 900,
+          keyword_difficulty: 12,
+          cpc: 2.5,
+          competition: 0.4,
+          intent: 'commercial',
+          position: null,
+        },
+      ])
+      mockExtractKeywordCandidates.mockReturnValue([
+        { keyword: 'best medspa newmarket auckland', confidence: 1, source: 'title' },
+      ])
+
+      const result = await getWeakSpotOpportunities('client-1', 20, 10, true)
+      expect(result).toHaveLength(1)
+      expect(result[0].mode).toBe('seo_only')
+      expect(result[0].total_runs_checked).toBe(2)
+    })
+
+    it('still scores a genuine weak spot measured alongside failures', async () => {
+      // 2 completed runs, both misses, plus a provider failure. The real
+      // weakness must survive: 2 weak / 2 conclusive = 1.0.
+      setupSupabaseMock(
+        [{ id: 'q-1', question: 'china tours nz booking' }],
+        null,
+        [
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: 8, ran_at: '2026-05-01T11:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'google', client_brand_rank: null, ran_at: '2026-05-01T12:00:00Z', error_message: 'provider down' }),
+        ]
+      )
+
+      mockBulkKeywordVolume.mockResolvedValue([])
+      const result = await getWeakSpotOpportunities('client-1', 20, 10, true)
+      expect(result).toHaveLength(1)
+      expect(result[0].weakness_score).toBe(1)
+      expect(result[0].total_runs_checked).toBe(2)
+      // The engine that never answered must not be reported as one that
+      // answered without mentioning us.
+      expect(result[0].engines_missing).not.toContain('google')
     })
   })
 
