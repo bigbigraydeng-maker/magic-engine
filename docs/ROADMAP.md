@@ -21,6 +21,44 @@
 
 ---
 
+## AI 可见度周快照聚合把失败的 API 调用也计入总数，客户分数被系统性腰斩（2026-09-23 两位复审确认，A 级，P0）
+
+**§11 打分**：频率高（每周每个客户都在发生，生产数据 CTS 9-14 那周 221/408 次失败混入分母）· IMPACT 闭环关键度高（分数直接喂进下一轮处方，算低等于给错建议）· 收入关联度高（影响客户可见诊断报告的核心维度分数）→ 零个低、两个以上高 → **P0**。
+
+- **背景**：`ai-tracker/orchestrator.ts` 的 `aggregateSnapshot` 拉本周 `ai_visibility_runs` 时不排除 `error_message` 有值的行，失败次数计入 `total_runs`，`mentionRate = mentions_count / total_runs` 的分母被撑大。CTS 9-14 那周落库 23.3%，真值 50.8%。
+- `ai-visibility-collector.ts:93` 看到 `mentions_count === 0` 就直出 critical「Brand Not Mentioned by AI」，不检查这些 run 是否真的测到过——这跟 PR #1919 修的实时探测是同一类 bug，走了快照这条管子。
+- **修法**：`aggregateSnapshot` 过滤 `error_message IS NULL`；给快照补 `failed_runs` 列；collector 的 `mentions_count === 0` 分支加 guard。
+- 见 PITFALLS D12 补充段。
+
+---
+
+## 行业 AI 可见度采集 · 除奥克兰外所有城市的问题 100% 采不到数（2026-09-23 查实根因，P1）
+
+**§11 打分**：频率高（每天跑，每天所有非奥克兰城市的问题全军覆没，自 09-10 至今没有一天例外）· IMPACT 闭环关键度高（Measure 段给的是空数据，行业基线的城市维度整片缺失，下游 AI 可见度分数因此长期算不出来）· 收入关联度低（目前没有活着的客户目标在读这个分数，两个历史 goal 都已归档/过期，也没有客户投诉）→ 恰好一个低、两个高 → **P1**。
+
+- **现象**：`industry_ai_visibility_snapshots` 里 `error_code = 'dataforseo_error'`，报错原文 `DataForSEO SERP task 40501: Invalid Field: 'location_name'`。自 2026-09-10 起累计 390 条 × 2 个平台（`google_ai_overview` 和 `google_serp` 共用同一次调用，所以一炸炸两个）。
+- **规律非常干净（已在生产库逐城核对）**：`auckland` 100% 成功；`brisbane` / `sydney` / `melbourne` / `perth` / `adelaide` / `gold-coast` / `christchurch` / `wellington` / `queenstown` **100% 失败，一条都没成功过**。`geo_scope='national'` 的问题完全不受影响。
+- **根因位置**：`src/lib/dataforseo/serp.ts` 的 `CITY_DISPLAY_NAME`（约 68–85 行）。城市位置是拼成 `location_name = "{城市},{国家全名}"` 发出去的，例如 `"Brisbane,Australia"`——供应商不认这个写法。奥克兰能过，说明只有它恰好命中了供应商的合法名称。
+- **为什么 2026-09-23 这一轮没有顺手修**：要改就必须先拿到供应商认的城市全名到底怎么写，而当时的工作目录拿不到它的账号密码（`.env.local` 复制被权限拦下），改了也验证不了。按「没真跑过的不许说成功」，只登记不动手，不猜着改。
+- **接手的人怎么做（三步，不用问人）**：
+  1. 用 DataForSEO 账号调它的位置清单接口 `POST /v3/serp/google/locations`（这个接口**不收费**），把返回里 `location_name` 含上面这些城市的条目捞出来，看它到底要求写成什么（很可能是带州/大区的三段式，例如 `"Brisbane,Queensland,Australia"`，但**必须以接口返回为准，不要照抄这个猜测**）。
+  2. 按接口返回改 `src/lib/dataforseo/serp.ts` 的 `CITY_DISPLAY_NAME`（或改成直接用供应商的 `location_code`，比字符串更稳）。
+  3. 逐个城市真发一次请求确认不再报 40501，再看第二天的采集里这些城市的行 `error_code` 是不是变成了 `null` 或 `no_ai_overview`。**回执全绿不算数，要看到真数据落库。**
+- **连带影响（已在 [PR #1928](https://github.com/bigbigraydeng-maker/magic-engine/pull/1928) 里挡住，不会再出错数字）**：这个故障让每天的采集覆盖率长期掉到 40%~50%，所以修好之前，AI 可见度分数会经常正确地返回「算不出来」而不是一个数。**这是预期行为，不是新 bug。** 覆盖率恢复到 60% 以上就会自动恢复出分。
+
+---
+
+## 行业 AI 可见度采集 · 2026-09-23 当天一行数据都没写进去（2026-09-23 发现，待查）
+
+**§11 打分**：频率未知（只观察到一次，需要看是不是每天都这样）· IMPACT 闭环关键度高（整个 Measure 段当天空白）· 收入关联度低（同上，没有活着的客户目标在读）→ 一个低、一个高、一个未知 → 暂按 **P2** 记，查清频率后重定。
+
+- **现象**：2026-09-23 05:30 UTC 查生产库，`industry_ai_visibility_snapshots` 的 `max(collected_date)` 还停在 `2026-09-22`，当天 0 行。而这个采集的定时任务排在 02:30 UTC，三小时前就该跑完了。
+- **注意**：9-21 只采了 25 个问题（正常是 78 个），9-19 采了 54 个——说明「没跑完」不是第一次，只是以前没被发现。
+- **第一步查什么**：看 `industry_ai_visibility_runs` 表里 2026-09-23 有没有 run 行、状态是 `running` 卡住还是 `failed`；再看 Render 上 `industry-ai-visibility-daily` 这个定时任务当天的日志。
+- **跟 AI 可见度分数算不出来的关系**：当天没有数据 → 新鲜度闸门直接拦下 → 所有客户的 AI 可见度分数返回「今天还没刷新」。这跟上面那条城市 bug 是**两件独立的事**，都会导致算不出分，别只修一个就以为好了。
+
+---
+
 ## Kernel 认领执行权函数字段歧义 bug 已修复、代码已合并 main，生产数据库还没真正应用（2026-09-23 发现并修复，P0）
 
 **§11 打分**：频率高（这个数据库函数每次被真实调用都会报错，不是偶发）· IMPACT 闭环关键度高（卡在 Kernel「提交动作 → 认领执行权」这一步，是所有走 Kernel 执行的能力共用的入口）· 收入关联度高（已上线的 `page.apply_optimization_request` 页面优化 PR 提交能力也共用这两个函数）→ 零个低、两个以上高 → **P0**。
@@ -1540,3 +1578,54 @@ Gate B 定的 `minSampleSize=3`，页面目前只会显示「数据还不够说�
 **🔴 唯一卡住的数字**：CTS + Oztop 过去 30 天真实外部 API 消耗（美元）仍未到手（v0.4 就要求过）。**在它到位之前 $199 / $499 的具体额度不许写进代码**；任一档毛利 < 40% 就得调额度或加价。免费档与 $39 档不受此约束，可以先跑。
 
 **⚠️ 对外仍挂着已作废的旧价**：公开收费页 `magic-engine-pricing.pages.dev` 还显示 NZ$500 / NZ$2,500 三档。源码不在当前主力 Mac 上（线上是 37KB 自包含 HTML，可 curl 抓下来当基线重建）。改页面前先解决 Cloudflare 账号权限：该项目在 `hello@magicengine.cloud` 名下，本机 wrangler 登录身份看不到它。
+
+---
+
+## AI 断电告警 · 上线后跟进（2026-09-23 开 PR，A 级；本体已做完，以下是**刻意没做**的部分）
+
+主体改动见该 PR：AI 账户级失效识别 + 落库 + 下发今日待办、卡死任务进失败邮件、
+`health.ts` 的 `failing` 接进待办、日报按「同任务同原因」去重。以下是两轮设计复审
+（子牙 / 魏征）点出、但按 Scope 闸「只实现当前调用方需要的最小契约」**故意留下**的：
+
+- [ ] **[P2] 验证 Cloudflare AI Gateway 到底代不代理 `/v1/responses`。**
+      现状：全仓 40+ 个走网关的调用方 100% 用 `chat.completions`，而 7 处 `responses.create`
+      **从来没有一次经过这个网关**（2026-09-23 核对，两组文件零交集）。所以这次收编它们时
+      传了 `bypassGateway: true`：只拿失败拦截、不换路由。
+      要做的事：拿真 key 对网关打一次 `responses.create`（**含 voice/knowledge 那个
+      `file_search` + `vector_store_ids`**），通了就去掉这个开关，它们才能进网关的日志和缓存。
+      不验就切 = 用一条没验证过的路由换掉七条在跑的链路，其中 6 处失败被 catch 吞掉。
+
+- [ ] **[P3] 失败邮件只看最近 24 小时，卡死超过 24 小时的轮次进不了它。**
+      今日待办那条按 48 小时窗口接住它，之后两边都看不见（attribution-cron 2026-09-02
+      那次卡了 4 天）。两个窗口怎么对齐值得单独想一次，别顺手拍一个数。
+
+- [ ] **[P3] `checkCronHealth()` 整体仍然没有单测。**
+      这次把「查某任务窗口内卡死行」抽成了可注入的窄接口（`StuckProber`）、
+      并给纯函数 `collapseStuckRuns` 补了 8 条断言，但**编排本身**（三个查询怎么合并成
+      HealthReport）还是没覆盖。照 `DownstreamProber` 那套把另外两个查询也抽成窄接口就能测。
+
+- [ ] **[P3] `src/lib/messenger/brief.ts:414` 仍然自己 `new OpenAI()`，绕开统一封装。**
+      归另一个窗口（它的 `fallbackBrief` 是「只挡钥匙缺失、挡不住 429」的同一个病）。
+      那条收口后，全仓就只剩 `ai-tracker/runners/perplexity.ts` 直连 —— 那个是 Perplexity，
+      本来就不该走 OpenAI 的封装。
+
+- [ ] **[P3] `voice/finalize.ts:131-137` 账户没钱时仍然安静回落 mock。**
+      这次只是把**信号**接到了断电记录上（PM 会看见「AI 账户没钱」），
+      但那一处自己的降级行为一个字没改。**别把「收编了」说成「这处不再静默」**，是两件事。
+
+- [ ] **[P2] 「卡死」的 60 分钟阈值对 Inngest 那几条长流程可能是误报。**
+      `health.ts` 里写的理由是「全仓最长 maxDuration 900 秒」—— 但 `maxDuration` 是
+      Vercel 的旋钮，我们跑在 Render 的 `next start` 上，**根本不执行它**，这个论据不成立。
+      实际反例（它们也写 `cron_run_logs`，新的失败邮件判据同样会扫到）：
+      `conversion-daily-pipeline` 最坏情况（100 块 × 退避 65 秒）远超 60 分钟；
+      `factory-creatomate-render`（15 分钟等事件 + 10 × 2 分钟轮询）最坏约 35-40 分钟。
+      要做的事：给 registry 加一个「本来就长跑」的标记，或对 Inngest 来源的任务用更长阈值。
+      **误报一旦成为常态，真出事那天也会被当噪音划掉** —— 这条不修迟早反噬。
+
+- [ ] **[P3] `makeSupabaseStuckProber` 查询报错时返回 `[]`，等于「没有卡死」。**
+      跟旁边的 `lastRunByJob` / `lastOutcome` 是同一个既有毛病（都吞错），
+      但这正是本文件反复声讨的「主动报平安」。照 `DownstreamProbe` 那样加一条 error 通道。
+
+- [ ] **[P3] 看板 `workflows-health/page.tsx:214` 的文案过期了。**
+      它写「**最近一次**挂着 running」，而现在 `startedAt` 是 48 小时窗口内**最早**那一轮；
+      而且新加的 `rounds`（卡了几轮）没渲染出来，看板比待办少一条信息。

@@ -83,7 +83,43 @@
 
 ---
 
-## 五、Memory Layer 接口
+## 五、账户经理日常运营节奏
+
+诸葛亮是 AM 本身，不是只在被叫到时才响应的工具。AM 的核心日常 = **检查 + 记录 + 判断 + 升级**，四件事按日/周/月三个节拍跑。
+
+### 5.1 三个节拍
+
+| 节拍 | 做什么 | 输出 | 权威清单在哪 |
+|------|--------|------|-------------|
+| **日检** | 昨天该跑的任务是否都跑了 · 跑出来的东西是否真的对（抽查真实产出，不是看状态位）· 有没有今天就要 PM 拍板的事 · 广告有没有偷偷烧钱进假用户 | 一段简报，最多 3 条待拍板 | 各客户项目经理手册（如 [`docs/sops/cts-project-manager-playbook.md`](../sops/cts-project-manager-playbook.md)） |
+| **周检** | 验收上周交付（抽查真实产出）· 下周先做哪个（三维打分排序）· 周报本身有没有断流 · 风险清单 · 窗口清理 | 周检简报 + 本周优先级排序 | 同上 |
+| **月检** | 目标对账（current_value vs target）· 花费对账 · "这些自动化还值不值"复盘 · 月报材料 | 月检简报 + 自动化价值审计 | 同上 |
+
+**核心原则**（来自 2026-09-20 SEO 事故教训）：回执全绿只证明流程走完了，不证明结果是对的。每次检查必须至少抽查一条真实产出——去看那个真实的东西本身，不是看内部日志的状态位。
+
+### 5.2 记录三件套
+
+AM 日常产出的记录分三类，每一类都有固定的落库位置，不能只留在对话里：
+
+| 记录类型 | 写到哪 | 什么时候写 |
+|----------|--------|-----------|
+| **工作日志** | `fde_work_logs` 表 | 每次对客户有实际操作后（不是纯聊天）。摘要格式：`【SEO】… 【GEO】… 【广告】…` ≤300 字中文 |
+| **决策记录** | `client_decision_history`（Memory Layer） | 每次产出 work order 或做出重大判断时 |
+| **发现与异常** | 今日待办 / `spawn_task` 卡片 | 发现问题但不自己修，发卡片给 PM 点开派人修 |
+
+### 5.3 每个客户一份项目经理手册
+
+三个节拍的具体检查项因客户而异（不同客户开了不同的自动化、投了不同渠道的广告、有不同的目标），所以**每个客户一份手册**，放在 `docs/sops/<客户名>-project-manager-playbook.md`。手册是权威版本，定时任务的提示词只是兜底。
+
+当前已有：CTS Tours NZ（[`docs/sops/cts-project-manager-playbook.md`](../sops/cts-project-manager-playbook.md)）。新客户接入时，照 CTS 这份的结构起草该客户的手册。
+
+### 5.4 运行方式
+
+目前三个节拍各自是一个 Claude 定时任务（`~/.claude/scheduled-tasks/<客户>-pm-daily/weekly/monthly/`），跑在只读模式——只查不改，需要修的东西发 `spawn_task` 卡片。这个约束见 CLAUDE.md 铁律 §3 下半和会话记忆 `feedback-coordinator-window-no-code-use-spawn-task`。
+
+---
+
+## 六、Memory Layer 接口
 
 | 操作 | 字段 | 说明 |
 |------|------|------|
@@ -98,7 +134,7 @@ const memoryBlock = formatMemoryForPrompt(memory)  // 默认全开
 
 ---
 
-## 六、输出格式（PriorityAction）
+## 七、输出格式（PriorityAction）
 
 ```typescript
 PriorityAction = {
@@ -115,7 +151,7 @@ PriorityAction = {
 
 ---
 
-## 七、停手条件
+## 八、停手条件
 
 - 客户预算变更 / Stripe 操作
 - 需要新建或修改 OAuth 授权
@@ -124,7 +160,7 @@ PriorityAction = {
 
 ---
 
-## 八、典型任务示例
+## 九、典型任务示例
 
 **FDE 提问**：「CTS 这周该做什么？」
 ```
@@ -145,9 +181,10 @@ PriorityAction = {
 
 ---
 
-## 九、相关文档
+## 十、相关文档
 
 - 总架构：`docs/agents/00-architecture.md`
 - 子牙手册：`docs/agents/10-ziya.md`（业务问题以外交子牙）
 - 诊断链类型：`src/lib/zhuge/types.ts`
 - Memory Layer：`src/lib/memory/`
+- CTS 项目经理手册：`docs/sops/cts-project-manager-playbook.md`（日/周/月检查的第一个落地范本）
