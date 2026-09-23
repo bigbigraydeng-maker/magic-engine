@@ -119,10 +119,22 @@ async function runInBackground() {
     try {
       const result = await runTracker({ client_id: clientId })
       totalCost += result.total_cost_usd
-      succeeded++
-      console.log(
-        `[ai-tracker-weekly] client=${clientId} succeeded=${result.runs_succeeded} failed=${result.runs_failed} cost=$${result.total_cost_usd.toFixed(4)}`
-      )
+      // 🔴 2026-09-23 fix: when every single probe failed, this client got
+      //    ZERO data this week. Counting it as "succeeded" hides total-probe-
+      //    failure behind a green "all clients completed" summary — the exact
+      //    blind spot that let East International's 24/24 failure go unnoticed
+      //    for three days (2026-09-20).
+      if (result.runs_succeeded === 0 && result.runs_failed > 0) {
+        failed++
+        console.warn(
+          `[ai-tracker-weekly] client=${clientId} ALL PROBES FAILED — runs_attempted=${result.runs_attempted} runs_failed=${result.runs_failed} cost=$${result.total_cost_usd.toFixed(4)}`
+        )
+      } else {
+        succeeded++
+        console.log(
+          `[ai-tracker-weekly] client=${clientId} succeeded=${result.runs_succeeded} failed=${result.runs_failed} cost=$${result.total_cost_usd.toFixed(4)}`
+        )
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error'
       console.error(`[ai-tracker-weekly] client=${clientId} error:`, message)

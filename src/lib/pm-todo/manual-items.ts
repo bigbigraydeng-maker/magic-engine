@@ -21,6 +21,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { pushAttributionItems, type AttributionItemKind } from './attribution-items'
 import { clientListUnreadableItem, loadActiveClients, type ClientRosterItemKind, type ClientRow } from './client-roster'
+import { pushAiTrackerFailureItems } from './ai-tracker-failure-items'
 import { pushConversionReviewItems } from './conversion-review-items'
 import { pushAiAutoReviewCircuitBreakerItems } from './ai-auto-review-circuit-breaker-items'
 import { pushMessengerDraftItems } from './messenger-draft-items'
@@ -57,6 +58,9 @@ const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   'facebook_page_binding_unverified',
   'ai_provider_exhausted',
   'ai_alerting_broken',
+  // 全量探测失败跟「AI 没提到我们」长得一模一样 —— 测不成被当测出来是零，
+  // 2026-09-20 East International 三天没人知道。
+  'ai_tracker_all_failed',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */
@@ -101,6 +105,12 @@ export type ManualItemKind =
    * 写着「这条不用你动手」的活（魏征 / 子牙 2026-09-23 都点了这条）。
    */
   | 'ai_gateway_broken'
+  /**
+   * 某客户整周的 AI 可见度探测全部失败 —— 不是「没被提到」，是「根本没测成」。
+   * 2026-09-20 East International 24/24 探测全挂（OpenAI 没钱 + Google 报错），
+   * 但在所有现有看板上跟「没什么 AI 提到我们」长得一模一样。
+   */
+  | 'ai_tracker_all_failed'
   | 'goal_baseline_mismatch'
   | 'diagnostic_findings'
   | 'prescription_updated'
@@ -426,6 +436,11 @@ export async function loadManualItems(
       href: '',
     })
   })
+  // 某客户的 AI 可见度探测整周全挂了 —— 没测成被当测出来是零（2026-09-20 三天没人知道）。
+  // 放在 infra 区而不是 per-client 区：它自己查 ai_visibility_runs，不依赖 clients Map。
+  await pushAiTrackerFailureItems(supabase, items, now).catch((e) =>
+    console.warn('[manual-items] AI 可见度全挂检查失败（不阻塞其他待办）:', e),
+  )
   // 按时没跑 / 查不出跑没跑 —— PM 2026-08-03 要求「不能完成需要有报错」
   await pushCronHealthItems(supabase, items, now)
   // 平台候选到了复查日期 —— 不落库、不查表，纯本地日期判断
