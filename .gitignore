@@ -37,6 +37,9 @@ yarn-error.log*
 *.swo
 *~
 
+# aider (per-user tool cache/history — never committed)
+.aider*
+
 # Microsoft Office lock files
 ~$*
 
