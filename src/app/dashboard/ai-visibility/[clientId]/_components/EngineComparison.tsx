@@ -2,6 +2,7 @@
 
 import type { AiVisibilityRun } from '@/types/magic-engine';
 import { getEngineDisplayName } from '@/lib/ai-tracker/engine-display-names';
+import { isRunConclusive } from '@/lib/ai-tracker/run-conclusive';
 
 // Tailwind-safe colour maps per engine
 const ENGINE_CARD_STYLE: Record<string, string> = {
@@ -41,7 +42,7 @@ export function EngineComparison({ runs, brandName }: Props) {
 
   const stats = engines.map(engine => {
     const engineRuns = runs.filter(r => r.ai_engine === engine);
-    const successful = engineRuns.filter(r => !r.error_message);
+    const successful = engineRuns.filter(isRunConclusive);
     const withMention = successful.filter(r => r.client_brand_rank != null);
     const ranks = withMention.map(r => r.client_brand_rank as number);
     const avgRank = ranks.length > 0
@@ -58,7 +59,7 @@ export function EngineComparison({ runs, brandName }: Props) {
       mentionRate: successful.length > 0 ? (withMention.length / successful.length) * 100 : 0,
       avgRank,
       avgLatency,
-      errors: engineRuns.filter(r => r.error_message).length,
+      errors: engineRuns.filter(r => !isRunConclusive(r)).length,
     };
   });
 
