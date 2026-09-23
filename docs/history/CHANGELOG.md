@@ -5,6 +5,28 @@
 
 ---
 
+### 2026-09-24（广告每日数据取数窗口按 UTC 算「昨天」，AU/NZ 客户每天少拿一天数据）
+
+`daily-insights.ts` 的 `requestWindow()` 用 `new Date()` 取「今天」，Render 跑在 UTC，而 Meta 是按
+广告账户自己的时区切天。cron 17:00 UTC 触发时新西兰已是次日 05:00，当地的昨天是完整的一天，却因为
+UTC 的昨天早一天而从未被请求。实测：2026-09-23 那次跑完后，CTS 两个账户 campaign/adset/ad 三个层级
+的最新数据日期全停在 09-22，09-23 一行没有，而当天两个广告组仍是 ACTIVE（约 NZ$135 花费对引擎不可见）。
+不是客户特例——库里 7 个广告账户 6 个 `Pacific/Auckland` + 1 个 `Australia/Brisbane`，一个 UTC 的都没有。
+
+PR [#1964](https://github.com/bigbigraydeng-maker/magic-engine/pull/1964)：
+- 账户时区从 `ad_entity_snapshots`（`level='account'`）最新一条读，不硬编码、不额外打 Graph API
+  （时区几乎不变，Meta 按次计配额）；查不到回落 UTC，跟改之前行为一致
+- 时区查询只按 `ad_account_id` 不带 `client_id`——时区是账户的属性，共用/次账户挂在别的客户名下也要能查到
+- `since` 与 `until` 同一时区基准，不留半 UTC 半本地的窗口；`requestWindow` 导出以便直接钉住时区算术
+- campaign / adset / ad 三个入口一起改；新增 9 条回归测试（含 `America/Los_Angeles` 反向用例，
+  确认不会请求当地还没跑完的一天），并做变异验证：把时区写死回 UTC 时 6 条当场失败
+- 09-23 缺的那天由既有 7 天回溯窗口在下一次 cron 自然补回，未跑补数脚本
+- 未改 `evaluate.ts` 的 `PAUSED_AFTER_DAYS`：已验证 cron 里的 `insightDate` 同样是 UTC 昨天，两边同步
+  偏移，3 天阈值没被吃掉（09-22 判「已停投」的 2 条最后花钱都是 09-16，是真停投）。把评估日也对齐
+  时区已另开任务
+
+---
+
 ### 2026-09-24（7 本经验手册每周过期巡检：读手册 + grep 仓库核实代码引用，接入今日待办）
 
 7 本跨客户经验手册（Claude 持久记忆，不在仓库）经常点名具体代码路径/函数名/表名，代码重构后这些
