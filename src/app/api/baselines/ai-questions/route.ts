@@ -53,6 +53,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'question_text required' }, { status: 400 })
   }
 
+  if (body.platforms !== undefined && body.platforms.length === 0) {
+    return NextResponse.json(
+      { error: 'platforms must not be empty — an empty set can never be conclusively measured' },
+      { status: 400 },
+    )
+  }
+
   const questionHash = createHash('sha256').update(body.question_text).digest('hex')
 
   const { data, error } = await supabaseAdmin

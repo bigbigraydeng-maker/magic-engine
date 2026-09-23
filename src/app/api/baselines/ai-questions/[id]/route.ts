@@ -35,6 +35,13 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     return NextResponse.json({ error: 'Question not found' }, { status: 404 })
   }
 
+  if (body.platforms !== undefined && body.platforms.length === 0) {
+    return NextResponse.json(
+      { error: 'platforms must not be empty — an empty set can never be conclusively measured' },
+      { status: 400 },
+    )
+  }
+
   const updates: Record<string, unknown> = {}
   if (body.notes        !== undefined) updates.notes        = body.notes
   if (body.is_active    !== undefined) updates.is_active    = body.is_active

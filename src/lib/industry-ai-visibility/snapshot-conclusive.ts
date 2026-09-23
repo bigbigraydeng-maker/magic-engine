@@ -190,7 +190,11 @@ export function groupQuestionCoverage<
       return row !== undefined && isSnapshotConclusive(row)
     }).length
 
-    if (conclusiveCount === requiredPlatforms.length) fullyMeasured.set(questionId, questionRows)
+    // An empty required-platform set is a config error, not "nothing to measure".
+    // 0 === 0 must NOT read as fully measured — that would count a question that
+    // was never probed on any platform as complete evidence.
+    if (requiredPlatforms.length === 0) failedQuestionIds.push(questionId)
+    else if (conclusiveCount === requiredPlatforms.length) fullyMeasured.set(questionId, questionRows)
     else if (conclusiveCount === 0) failedQuestionIds.push(questionId)
     else partialQuestionIds.push(questionId)
   }

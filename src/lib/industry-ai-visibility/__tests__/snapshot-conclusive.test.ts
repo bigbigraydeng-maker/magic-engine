@@ -120,6 +120,18 @@ describe('groupQuestionCoverage', () => {
     expect(c.fullyMeasured.size).toBe(0)
   })
 
+  it('does not count a question with an empty required-platform set as fully measured', () => {
+    // Codex review round 2 on PR #1923: `platforms: []` makes
+    // conclusiveCount === requiredPlatforms.length via 0 === 0, which would
+    // otherwise read as "fully measured" despite zero platforms ever probed.
+    const { fullyMeasured, failedQuestionIds } = groupQuestionCoverage(
+      [],
+      [scope('no-platforms', [])],
+    )
+    expect(fullyMeasured.size).toBe(0)
+    expect(failedQuestionIds).toEqual(['no-platforms'])
+  })
+
   it('counts a question missing from the rows entirely as failed, not invisible', () => {
     // Regression for Codex review on PR #1923: a scoped/partial collection run
     // (limit / platforms query params, or a cron killed mid-batch) only writes
