@@ -8,12 +8,13 @@ vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 vi.mock('@/lib/meta/page-sync-authorization', () => ({ authorizeConfiguredPage: vi.fn() }))
 vi.mock('@/lib/meta/page-posts', () => ({
   fetchPagePosts: vi.fn(),
+  fetchPageReelVideoViews: vi.fn(),
 }))
 
 import { computeSocialRollup, syncPageMetrics } from '../page-metrics-sync'
 import type { PagePost } from '@/lib/meta/page-posts'
 import { authorizeConfiguredPage } from '@/lib/meta/page-sync-authorization'
-import { fetchPagePosts } from '@/lib/meta/page-posts'
+import { fetchPagePosts, fetchPageReelVideoViews } from '@/lib/meta/page-posts'
 
 const NOW = new Date('2026-08-01T12:00:00Z')
 
@@ -103,6 +104,7 @@ describe('syncPageMetrics token resolution', () => {
   it('reads with the Page token the ownership gate hands back', async () => {
     vi.mocked(authorizeConfiguredPage).mockResolvedValue({ ok: true, pageToken: 'stored-page-token', via: 'client_oauth' })
     vi.mocked(fetchPagePosts).mockResolvedValue([post({ createdAt: '2026-09-02T00:00:00Z', reactions: 3 })])
+    vi.mocked(fetchPageReelVideoViews).mockResolvedValue([])
     const inserts: unknown[] = []
 
     const result = await syncPageMetrics(fakeDb(inserts) as never)
@@ -110,6 +112,7 @@ describe('syncPageMetrics token resolution', () => {
     expect(result.results).toEqual([{ client_id: 'client-1', page_id: 'page-1', outcome: 'synced', posts_seen: 1 }])
     expect(authorizeConfiguredPage).toHaveBeenCalledWith(expect.anything(), 'client-1', 'page-1', expect.anything())
     expect(fetchPagePosts).toHaveBeenCalledWith('page-1', 'stored-page-token', expect.any(Number))
+    expect(fetchPageReelVideoViews).toHaveBeenCalledWith('page-1', 'stored-page-token', expect.any(Number))
     expect(inserts).toHaveLength(1)
   })
 
@@ -123,5 +126,58 @@ describe('syncPageMetrics token resolution', () => {
     expect(result.results).toEqual([{ client_id: 'client-1', page_id: 'page-1', outcome: 'error', error: 'page_not_verified: not_bound_page' }])
     expect(fetchPagePosts).not.toHaveBeenCalled()
     expect(inserts).toHaveLength(0)
+  })
+
+  it('a failed reel video_views insert surfaces as reel_metrics_error, not a swallowed console.error — post metrics still count as synced', async () => {
+    vi.mocked(authorizeConfiguredPage).mockResolvedValue({ ok: true, pageToken: 'stored-page-token', via: 'client_oauth' })
+    vi.mocked(fetchPagePosts).mockResolvedValue([post({ createdAt: '2026-09-02T00:00:00Z', reactions: 3 })])
+    vi.mocked(fetchPageReelVideoViews).mockResolvedValue([{ id: 'reel-1', videoViews: 500 }])
+    const inserts: unknown[] = []
+
+    const db = {
+      from(table: string) {
+        if (table === 'clients') {
+          return { select: () => ({ eq: async () => ({ data: [{ id: 'client-1', factory_config: null }], error: null }) }) }
+        }
+        if (table === 'social_comment_config') {
+          return { select: async () => ({ data: [{ client_id: 'client-1', fb_page_id: 'page-1' }], error: null }) }
+        }
+        if (table === 'flywheel_metrics') {
+          return {
+            insert: async (rows: unknown) => {
+              inserts.push(rows)
+              const isReelRow = Array.isArray(rows) && rows[0]?.metric_key === 'social.fb.reel.video_views'
+              return isReelRow ? { error: { message: 'insert failed: constraint violation' } } : { error: null }
+            },
+          }
+        }
+        throw new Error(`unexpected table ${table}`)
+      },
+    }
+
+    const result = await syncPageMetrics(db as never)
+
+    expect(result.results).toEqual([
+      {
+        client_id: 'client-1',
+        page_id: 'page-1',
+        outcome: 'synced',
+        posts_seen: 1,
+        reel_metrics_error: 'insert failed: constraint violation',
+      },
+    ])
+  })
+
+  it('fetchPageReelVideoViews throwing surfaces as reel_metrics_error without failing the batch', async () => {
+    vi.mocked(authorizeConfiguredPage).mockResolvedValue({ ok: true, pageToken: 'stored-page-token', via: 'client_oauth' })
+    vi.mocked(fetchPagePosts).mockResolvedValue([post({ createdAt: '2026-09-02T00:00:00Z', reactions: 3 })])
+    vi.mocked(fetchPageReelVideoViews).mockRejectedValue(new Error('network boom'))
+    const inserts: unknown[] = []
+
+    const result = await syncPageMetrics(fakeDb(inserts) as never)
+
+    expect(result.results).toEqual([
+      { client_id: 'client-1', page_id: 'page-1', outcome: 'synced', posts_seen: 1, reel_metrics_error: 'network boom' },
+    ])
   })
 })

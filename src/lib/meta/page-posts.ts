@@ -17,7 +17,6 @@ export interface PagePost {
   comments: number
   shares: number
   score: number        // engagement score, see scorePost()
-  videoViews?: number  // lifetime video views; present for reels when insights are available
 }
 
 interface RawAttachment {
@@ -124,36 +123,20 @@ export function rankVideoWinners(
  * with the /{id}/comments edge.
  *
  * Graceful: returns [] on any error (the edge/permission may vary per account).
+ *
+ * Deliberately requests only fields covered by META_PAGE_SCOPES (no `insights`,
+ * which needs `read_insights` — a permission most connected Page tokens do not
+ * have). Folding an insights field into this query would make Graph reject the
+ * WHOLE request for those tokens, and this function turns any non-2xx response
+ * into `[]` — silently hiding every Reel from comment-autoreply callers. Reel
+ * view-count metrics are fetched separately by fetchPageReelVideoViews below.
  */
-interface RawReelInsightValue {
-  value: number
-}
-
-interface RawReelInsightItem {
-  name: string
-  values?: RawReelInsightValue[]
-}
-
-interface RawReel {
-  id: string
-  created_time?: string
-  description?: string
-  comments?: { summary?: { total_count?: number } }
-  insights?: { data?: RawReelInsightItem[] }
-}
-
 export async function fetchPageReels(
   pageId: string,
   pageAccessToken: string,
   limit = 50,
 ): Promise<PagePost[]> {
-  const fields = [
-    'id',
-    'created_time',
-    'description',
-    'comments.filter(stream).summary(true).limit(0)',
-    'insights.metric(post_video_views){values}',
-  ].join(',')
+  const fields = ['id', 'created_time', 'description', 'comments.filter(stream).summary(true).limit(0)'].join(',')
   const url = `${GRAPH_BASE}/${pageId}/video_reels?fields=${fields}&limit=${limit}&access_token=${encodeURIComponent(pageAccessToken)}`
 
   let res: Response
@@ -170,7 +153,7 @@ export async function fetchPageReels(
   }
 
   const body = (await res.json()) as {
-    data?: RawReel[]
+    data?: Array<{ id: string; created_time?: string; description?: string; comments?: { summary?: { total_count?: number } } }>
     error?: { message: string }
   }
   if (body.error) {
@@ -181,8 +164,6 @@ export async function fetchPageReels(
   return (body.data ?? []).map((r) => {
     const createdAt = r.created_time ?? new Date().toISOString()
     const cm = r.comments?.summary?.total_count ?? 0
-    const viewsItem = r.insights?.data?.find((d) => d.name === 'post_video_views')
-    const videoViews = viewsItem?.values?.[0]?.value
     return {
       postId: r.id,
       fullId: r.id,
@@ -192,10 +173,70 @@ export async function fetchPageReels(
       reactions: 0,
       comments: cm,
       shares: 0,
-      score: videoViews ?? 0,
-      ...(videoViews !== undefined && { videoViews }),
+      score: 0,
     }
   })
+}
+
+export interface ReelVideoViews {
+  id: string
+  videoViews: number
+}
+
+interface RawReelInsightValue {
+  value: number
+}
+
+interface RawReelInsightItem {
+  name: string
+  values?: RawReelInsightValue[]
+}
+
+/**
+ * Fetch per-reel lifetime video views via Graph Insights — a SEPARATE request
+ * from fetchPageReels (see the note above it) so a token without `read_insights`
+ * still gets the base reel list; this call just comes back empty for that token.
+ *
+ * Graceful: returns [] on any error. Callers that only care about view counts
+ * (metrics sync) simply skip reels this omits.
+ */
+export async function fetchPageReelVideoViews(
+  pageId: string,
+  pageAccessToken: string,
+  limit = 50,
+): Promise<ReelVideoViews[]> {
+  const fields = ['id', 'insights.metric(post_video_views){values}'].join(',')
+  const url = `${GRAPH_BASE}/${pageId}/video_reels?fields=${fields}&limit=${limit}&access_token=${encodeURIComponent(pageAccessToken)}`
+
+  let res: Response
+  try {
+    res = await fetch(url)
+  } catch (err) {
+    console.error('[meta/page-posts] fetchPageReelVideoViews error:', err)
+    return []
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    console.error(`[meta/page-posts] fetchPageReelVideoViews HTTP ${res.status}:`, body.slice(0, 200))
+    return []
+  }
+
+  const body = (await res.json()) as {
+    data?: Array<{ id: string; insights?: { data?: RawReelInsightItem[] } }>
+    error?: { message: string }
+  }
+  if (body.error) {
+    console.error('[meta/page-posts] fetchPageReelVideoViews error:', body.error.message)
+    return []
+  }
+
+  const out: ReelVideoViews[] = []
+  for (const r of body.data ?? []) {
+    const viewsItem = r.insights?.data?.find((d) => d.name === 'post_video_views')
+    const videoViews = viewsItem?.values?.[0]?.value
+    if (videoViews !== undefined) out.push({ id: r.id, videoViews })
+  }
+  return out
 }
 
 export interface ManagedPage {
