@@ -66,6 +66,30 @@
 
 ## 五、诊断判据（每天跑，源码在 `src/lib/ads-strategy/evaluate.ts`）
 
+### 5.0 结果数口径（这一步算错，下面所有判据和处方全错）
+
+**硬规则：Meta `actions` 数组里的"开聊"和"留资"两类数字，永远不许相加。**
+
+Messenger 留资广告（在聊天里填表那种）会给**同一个人**同时记一次"开聊"和一次"留资"。两类一加，等于把同一个人数了两遍，每结果成本被腰斩，`evaluate.ts` 那一整张健康档表就会集体判轻——本该 alert 的广告被判成 healthy，本该加预算的反而看着不值得加。
+
+正确算法，两个数各自独立算、各自独立报：
+
+| 要算的数 | 从 `actions` 里取这几个 | 怎么取 |
+|---|---|---|
+| **开聊人数** | `onsite_conversion.total_messaging_connection`、`onsite_conversion.messaging_conversation_started_7d`、`onsite_conversion.messaging_first_reply` | 取**最大值**（同一件事的不同口径，不相加） |
+| **留资人数** | `lead`、`onsite_conversion.lead_grouped`、`offsite_complete_registration_add_meta_leads` | 取**最大值**（同上，不相加） |
+
+- 正常形态是**留资人数 ≤ 开聊人数**（同一批人走完一条路），表述为"Y 个人开聊、其中 Z 个留资"。
+- 例外一：开聊为 0、留资 > 0 → 纯表单广告不走 Messenger，只报留资数。
+- 例外二：留资 > 开聊 → 这两个数不是同一批人，两个数都照实报，并标注"口径存疑"，不要合成一个数。
+- **每结果成本一律用留资人数做分母**，不用开聊数，也不用两者之和。
+
+**真实事故（2026-09-22，PM 当天抓出）**：CTS 老客户召回那条，真实是 7 个人开聊、其中 6 个留资，被按"6+7"报成 13 个结果，每结果成本从 $9.6 被稀释到 $4.4，差一倍多。同一天的留资表单那条被 5 个（实为 3 开聊/2 留资）。根因是日报算法写的是"几类加总"。已修，见 `~/.claude/scheduled-tasks/cts-daily-ads-report/SKILL.md` 与 [[playbook-ads-meta-general]]。
+
+---
+
+### 5.1 健康档
+
 每条广告独立评估，共 4 个健康档：
 
 | 档次 | 意思 | 触发条件（示例，实际读 `evaluate.ts`） |
