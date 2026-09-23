@@ -61,21 +61,12 @@ export class AiVisibilityCollector {
       // probe can either confirm or contradict the cached state.
       const rawProbe = await this.maybeRunLiveProbe(clientId)
 
-      // A probe that could not complete every question tells us nothing about
-      // the brand. Drop it here, once, so no downstream branch can mistake a
-      // failed measurement for a measured zero — the bug that produced
-      // fabricated "your brand is never mentioned by AI" findings for 5 clients
-      // on 2026-09-21 while the OpenAI account was rate-limited (429).
+      // Inconclusive probe → null; probeFailed distinguishes "tried and broke"
+      // from "never configured" so the no-snapshot branch picks the right finding.
       const probe = isProbeConclusive(rawProbe) ? rawProbe : null
-      // A probe counts as "failed" (not "unconfigured") both when it ran and
-      // came back with per-question errors (skipped=false) AND when the
-      // attempt itself broke — the outer timeout fired, or `probe.run()`
-      // rejected outright (`skip_kind === 'attempt_failed'`). Both are
-      // transient measurement failures, not evidence tracking was never
-      // enabled — collapsing them into `ai_visibility_not_tracked` would
-      // wrongly tell an already-configured client to go configure it.
-      const probeFailed =
+      const probeFailed = !!(
         rawProbe && !probe && (!rawProbe.skipped || rawProbe.skip_kind === 'attempt_failed')
+      )
       if (rawProbe && !probe) {
         console.warn(
           `[ai-visibility-collector] live probe not conclusive for ${clientId} — ` +

@@ -115,6 +115,48 @@ function answered(text: string) {
   }
 }
 
+function shortRefusal() {
+  return {
+    ai_engine: 'openai',
+    ai_model: 'gpt-5-search-api',
+    raw_response: 'I cannot answer that.',
+    citations: [],
+    tokens_used: 5,
+    cost_usd: 0.0001,
+    latency_ms: 300,
+    error_message: null,
+  }
+}
+
+// Shape mirrors makeSupabase (line 36) — verified by 5 existing tests in this file
+function makeQueryErrorSupabase(): SupabaseClient {
+  return makeSupabaseWith({ queriesError: true })
+}
+
+function makeSupabaseWith(opts: { queriesError?: boolean } = {}): SupabaseClient {
+  const sb = makeSupabase(null)
+  if (opts.queriesError) {
+    const origFrom = sb.from as ReturnType<typeof vi.fn>
+    sb.from = vi.fn((table: string) => {
+      if (table === 'ai_visibility_queries') {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                order: () => ({
+                  limit: () => Promise.resolve({ data: null, error: { message: 'connection refused' } }),
+                }),
+              }),
+            }),
+          }),
+        }
+      }
+      return origFrom(table)
+    }) as typeof sb.from
+  }
+  return sb
+}
+
 beforeEach(() => {
   // mockReset, not clearAllMocks: the latter clears call history but KEEPS the
   // implementation, so a `mockResolvedValue` from an earlier test would silently
@@ -192,13 +234,40 @@ describe('live probe under OpenAI 429 — the 2026-09-21 incident', () => {
     expect(score).toBe(0)
   })
 
+  it('counts engine short-refusal (<30 chars) as a failed run, not a measured zero', async () => {
+    runOpenAI.mockResolvedValue(shortRefusal())
+
+    const supabase = makeSupabase(null)
+    const probe = createDefaultLiveProbe(supabase)
+    const result = await probe.run({ clientId: CLIENT_ID, brandName: 'Test Brand' })
+
+    expect(result.runs).toBe(3)
+    expect(result.failed_runs).toBe(3)
+    expect(result.measured_runs).toBe(0)
+    expect(result.questions.every(q => q.error !== null)).toBe(true)
+    expect(result.questions[0].error).toContain('too short')
+    expect(isProbeConclusive(result)).toBe(false)
+  })
+
+  it('reports probe_failed (not not_tracked) when DB query for questions fails', async () => {
+    const supabase = makeQueryErrorSupabase()
+    const { score, findings } = await new AiVisibilityCollector(
+      supabase,
+      createDefaultLiveProbe(supabase),
+    ).collect(CLIENT_ID, 'test.co.nz', [])
+
+    expect(score).toBeNull()
+    expect(findings.find(f => f.finding_type === 'ai_visibility_not_tracked')).toBeUndefined()
+    expect(findings.find(f => f.finding_type === 'ai_visibility_probe_failed')).toBeDefined()
+  })
+
   it('treats a single 429 among three questions as inconclusive', async () => {
     // The probe runs TWICE below — once directly (to assert its shape) and once
     // inside the collector — so queue two identical rounds of three answers.
     for (let round = 0; round < 2; round++) {
       runOpenAI
         .mockResolvedValueOnce(answered('Intrepid Travel and Wendy Wu Tours.'))
-        .mockResolvedValueOnce(answered('G Adventures is popular.'))
+        .mockResolvedValueOnce(answered('G Adventures is a popular choice for budget-conscious travellers.'))
         .mockResolvedValueOnce(rateLimited())
     }
     parseRanking.mockResolvedValue({ client_brand_rank: null })

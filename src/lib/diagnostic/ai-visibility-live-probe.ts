@@ -127,16 +127,20 @@ export function createDefaultLiveProbe(supabase: SupabaseClient): LiveProbe {
         try {
           const out = await runOpenAI({ question: q.question, market })
           if (out.error_message || !out.raw_response) {
-            // The engine call did not come back with an answer — we measured
-            // NOTHING here. Recording this as a plain `rank: null` used to make
-            // it indistinguishable from "the engine answered and did not name
-            // the brand", which downstream turned into a critical client-facing
-            // finding out of thin air.
             failedRuns++
             questions.push({
               question: q.question,
               client_brand_rank: null,
               error: out.error_message || 'engine returned an empty response',
+            })
+            continue
+          }
+          if (out.raw_response.trim().length < 30) {
+            failedRuns++
+            questions.push({
+              question: q.question,
+              client_brand_rank: null,
+              error: `engine response too short to parse (${out.raw_response.trim().length} chars)`,
             })
             continue
           }
@@ -245,7 +249,12 @@ async function loadPriorityQueries(
     .order('created_at', { ascending: true })
     .limit(LIVE_PROBE_QUESTION_LIMIT)
 
-  if (error || !data) return []
+  if (error) {
+    throw new Error(
+      `[ai-visibility-live-probe] ai_visibility_queries load failed: ${error.message}`,
+    )
+  }
+  if (!data) return []
   return data as AiVisibilityQuery[]
 }
 
