@@ -1567,3 +1567,54 @@ Gate B 定的 `minSampleSize=3`，页面目前只会显示「数据还不够说�
 **🔴 唯一卡住的数字**：CTS + Oztop 过去 30 天真实外部 API 消耗（美元）仍未到手（v0.4 就要求过）。**在它到位之前 $199 / $499 的具体额度不许写进代码**；任一档毛利 < 40% 就得调额度或加价。免费档与 $39 档不受此约束，可以先跑。
 
 **⚠️ 对外仍挂着已作废的旧价**：公开收费页 `magic-engine-pricing.pages.dev` 还显示 NZ$500 / NZ$2,500 三档。源码不在当前主力 Mac 上（线上是 37KB 自包含 HTML，可 curl 抓下来当基线重建）。改页面前先解决 Cloudflare 账号权限：该项目在 `hello@magicengine.cloud` 名下，本机 wrangler 登录身份看不到它。
+
+---
+
+## AI 断电告警 · 上线后跟进（2026-09-23 开 PR，A 级；本体已做完，以下是**刻意没做**的部分）
+
+主体改动见该 PR：AI 账户级失效识别 + 落库 + 下发今日待办、卡死任务进失败邮件、
+`health.ts` 的 `failing` 接进待办、日报按「同任务同原因」去重。以下是两轮设计复审
+（子牙 / 魏征）点出、但按 Scope 闸「只实现当前调用方需要的最小契约」**故意留下**的：
+
+- [ ] **[P2] 验证 Cloudflare AI Gateway 到底代不代理 `/v1/responses`。**
+      现状：全仓 40+ 个走网关的调用方 100% 用 `chat.completions`，而 7 处 `responses.create`
+      **从来没有一次经过这个网关**（2026-09-23 核对，两组文件零交集）。所以这次收编它们时
+      传了 `bypassGateway: true`：只拿失败拦截、不换路由。
+      要做的事：拿真 key 对网关打一次 `responses.create`（**含 voice/knowledge 那个
+      `file_search` + `vector_store_ids`**），通了就去掉这个开关，它们才能进网关的日志和缓存。
+      不验就切 = 用一条没验证过的路由换掉七条在跑的链路，其中 6 处失败被 catch 吞掉。
+
+- [ ] **[P3] 失败邮件只看最近 24 小时，卡死超过 24 小时的轮次进不了它。**
+      今日待办那条按 48 小时窗口接住它，之后两边都看不见（attribution-cron 2026-09-02
+      那次卡了 4 天）。两个窗口怎么对齐值得单独想一次，别顺手拍一个数。
+
+- [ ] **[P3] `checkCronHealth()` 整体仍然没有单测。**
+      这次把「查某任务窗口内卡死行」抽成了可注入的窄接口（`StuckProber`）、
+      并给纯函数 `collapseStuckRuns` 补了 8 条断言，但**编排本身**（三个查询怎么合并成
+      HealthReport）还是没覆盖。照 `DownstreamProber` 那套把另外两个查询也抽成窄接口就能测。
+
+- [ ] **[P3] `src/lib/messenger/brief.ts:414` 仍然自己 `new OpenAI()`，绕开统一封装。**
+      归另一个窗口（它的 `fallbackBrief` 是「只挡钥匙缺失、挡不住 429」的同一个病）。
+      那条收口后，全仓就只剩 `ai-tracker/runners/perplexity.ts` 直连 —— 那个是 Perplexity，
+      本来就不该走 OpenAI 的封装。
+
+- [ ] **[P3] `voice/finalize.ts:131-137` 账户没钱时仍然安静回落 mock。**
+      这次只是把**信号**接到了断电记录上（PM 会看见「AI 账户没钱」），
+      但那一处自己的降级行为一个字没改。**别把「收编了」说成「这处不再静默」**，是两件事。
+
+- [ ] **[P2] 「卡死」的 60 分钟阈值对 Inngest 那几条长流程可能是误报。**
+      `health.ts` 里写的理由是「全仓最长 maxDuration 900 秒」—— 但 `maxDuration` 是
+      Vercel 的旋钮，我们跑在 Render 的 `next start` 上，**根本不执行它**，这个论据不成立。
+      实际反例（它们也写 `cron_run_logs`，新的失败邮件判据同样会扫到）：
+      `conversion-daily-pipeline` 最坏情况（100 块 × 退避 65 秒）远超 60 分钟；
+      `factory-creatomate-render`（15 分钟等事件 + 10 × 2 分钟轮询）最坏约 35-40 分钟。
+      要做的事：给 registry 加一个「本来就长跑」的标记，或对 Inngest 来源的任务用更长阈值。
+      **误报一旦成为常态，真出事那天也会被当噪音划掉** —— 这条不修迟早反噬。
+
+- [ ] **[P3] `makeSupabaseStuckProber` 查询报错时返回 `[]`，等于「没有卡死」。**
+      跟旁边的 `lastRunByJob` / `lastOutcome` 是同一个既有毛病（都吞错），
+      但这正是本文件反复声讨的「主动报平安」。照 `DownstreamProbe` 那样加一条 error 通道。
+
+- [ ] **[P3] 看板 `workflows-health/page.tsx:214` 的文案过期了。**
+      它写「**最近一次**挂着 running」，而现在 `startedAt` 是 48 小时窗口内**最早**那一轮；
+      而且新加的 `rounds`（卡了几轮）没渲染出来，看板比待办少一条信息。
