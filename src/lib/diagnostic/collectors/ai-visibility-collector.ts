@@ -183,30 +183,43 @@ export class AiVisibilityCollector {
     clientId: string,
     rawProbe: LiveProbeResult,
   ): NewFinding {
+    // `attempt_failed` means the probe never got to run individual questions
+    // (outer timeout fired, or `probe.run()` rejected outright) — `runs` and
+    // `failed_runs` are both 0 here, so describing the failure in those terms
+    // would read as "attempted 0 question(s) but 0 failed", which hides what
+    // actually happened. Use `skip_reason` instead for that case.
+    const description =
+      rawProbe.skip_kind === 'attempt_failed'
+        ? `The real-time AI visibility probe did not complete this run` +
+          (rawProbe.skip_reason ? ` (${rawProbe.skip_reason})` : '') +
+          '. The result is not reported as zero mentions — it is treated as unmeasured.'
+        : `The real-time AI visibility probe attempted ${rawProbe.runs} question(s) but ` +
+          `${rawProbe.failed_runs} failed (e.g. rate-limit, timeout, model error). ` +
+          'The result is not reported as zero mentions — it is treated as unmeasured.'
+
     return {
       client_id: clientId,
       dimension: 'ai_visibility',
       finding_type: 'ai_visibility_probe_failed',
       severity: 'high',
       title: 'AI visibility probe failed — no measurement this run',
-      description:
-        `The real-time AI visibility probe attempted ${rawProbe.runs} question(s) but ` +
-        `${rawProbe.failed_runs} failed (e.g. rate-limit, timeout, model error). ` +
-        'The result is not reported as zero mentions — it is treated as unmeasured.',
+      description,
       evidence: makeEvidence({
         parsed: {
           attempted: rawProbe.runs,
           measured: rawProbe.measured_runs,
           failed: rawProbe.failed_runs,
           latency_ms: rawProbe.latency_ms,
+          skip_kind: rawProbe.skip_kind ?? null,
+          skip_reason: rawProbe.skip_reason ?? null,
           errors: rawProbe.questions
             .filter(q => q.error)
             .map(q => ({ question: q.question, error: q.error })),
         },
       }),
       recommendation:
-        'Check the OpenAI account balance and API key validity. ' +
-        'Look for "[ai-visibility-live-probe]" errors in Render logs around the diagnostic run time.',
+        'Check the Content Engine account balance and API access. ' +
+        'If probes keep failing, review this diagnostic run\'s error logs to find the failure cause.',
       fix_type: 'fde_manual',
       priority_score: 75,
     }
