@@ -36,6 +36,30 @@
  */
 export type CronScheduler = 'render' | 'github-actions' | 'external' | 'inngest'
 
+/**
+ * 这个任务跑成之后**本该往哪些表写新数据**。
+ *
+ * 🔴 加这个字段是因为 2026-09-23 的事故：`google-data-pullback-daily` 每天跑
+ *    `status='completed'`，但下游 `ad_health_narratives` 从 9/20 起一行没写。
+ *    现有 `judgeJob` 只看 `cron_run_logs.status`，任务写"completed"就算健康——
+ *    上游数据源断了、路由里的写这一步被跳过，一样绿灯放行。断了 3 天没人察觉。
+ *
+ *    这里声明"我跑完该写哪些表"，配合 `silentSuccess` 判定，就能把这类
+ *    "跑成了但没写出东西"抓出来。
+ *
+ * · `table` —— 目标表名（public schema）
+ * · `freshnessHours` —— 这个表多久没新行就算 stale。通常应比 cron 间隔略宽
+ *   （日 cron 26h，周 cron 8 天，等等）—— 跟 overdue 阈值同一个逻辑
+ * · `timestampColumn` —— 判 stale 用哪个时间列，默认 `updated_at`。
+ *   upsert 表用 `updated_at` 更敏感（re-run 不改 `created_at`）；
+ *   insert-only 表用 `created_at` 也一样
+ */
+export interface CronOutputTable {
+  table: string
+  freshnessHours: number
+  timestampColumn?: string
+}
+
 export interface CronRegistryEntry {
   /** 调度它的那个东西的名字：render.yaml 服务名 / 工作流文件名 / 仓库外的标识 */
   service: string
@@ -54,6 +78,12 @@ export interface CronRegistryEntry {
    *    老任务不用补（它们早跑过很多轮，这层保护对它们没意义）。
    */
   addedAt?: string
+  /**
+   * 这个任务跑完**本该**往哪些表写新行。声明了才做下游对账；不声明 = 只查
+   * `cron_run_logs`（跟老行为一致）。用来抓"任务跑成了但没写出东西"这类
+   * 沉默死亡（2026-09-23 事故）。
+   */
+  outputTables?: readonly CronOutputTable[]
 }
 
 export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
@@ -104,7 +134,15 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   //    恢复三件套:render.yaml 取消注释 + 本行加回来 + 先把 stock-transform 接进调用链。
   // { service: 'factory-stock-refill', jobName: 'factory-stock-refill', schedule: '0 19 * * 1', logsRuns: true },
   { service: 'goal-current-value-refresh', jobName: 'goal-current-value-refresh', schedule: '0 3 * * *', logsRuns: true },
-  { service: 'google-data-pullback-daily', jobName: 'google-data-pullback-daily', schedule: '0 3 * * *', logsRuns: true },
+  // 2026-09-23 事故防御：这个任务负责每天写 ad_daily_insights + ad_health_narratives，
+  // 但 9/20-9/23 三天 status='completed' 却一行没写（上游数据源断了，写下游被跳过），
+  // 现有 judgeJob 只看 cron_run_logs 状态放行——outputTables 声明就是补这个缝：
+  // 26h 没新行就算 silent_success，红灯喊出来。日 cron × 2.5 宽限 ≈ 26h（同 overdue 逻辑）。
+  { service: 'google-data-pullback-daily', jobName: 'google-data-pullback-daily', schedule: '0 3 * * *', logsRuns: true,
+    outputTables: [
+      { table: 'ad_daily_insights', freshnessHours: 26 },
+      { table: 'ad_health_narratives', freshnessHours: 26 },
+    ] },
   { service: 'industry-ai-visibility-daily', jobName: 'industry-ai-visibility-daily', schedule: '30 2 * * *', logsRuns: true },
   { service: 'job-boards-weekly', jobName: 'job-boards-weekly', schedule: '0 2 * * 1', logsRuns: true },
   // 效果回流两条 —— 2026-08-04 补接线：代码早就有，但从没进过 render.yaml，
@@ -215,6 +253,21 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   //    src/lib/inngest/functions/conversion-daily-pipeline.ts 的
   //    CONVERSION_DAILY_PIPELINE_CRON，抄错的后果同上一条 flywheel 注释。
   { service: 'inngest:cloud-conversion-daily-pipeline', jobName: 'conversion-daily-pipeline', schedule: '0 6 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-15' },
+  // 每周竞品快照。competitor_snapshots 这张表 2026-05-18 就建好了，唯一的写入方是一个纯
+  // 手动 POST 接口，从来没有 cron；那个接口 2026-08-05 死管道清理时被当陪葬删掉，表一直是空的。
+  // 2026-09-20 审计发现并重写，PM 拍板开，先只给 CTS（seo_config.competitor_watch_enabled）。
+  //
+  // 🔴 schedule 这一列不许手抄：唯一定义在 src/lib/competitors/watch.ts 的
+  //    COMPETITOR_WATCH_CRON，同目录的测试会断言两边一致。
+  { service: 'inngest:cloud-competitor-watch-weekly-fanout', jobName: 'competitor-watch-weekly', schedule: '45 5 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-20' },
+  // 每周 AI 可见度追踪（GEO）灰度迁移。旧 Render cron `ai-tracker-weekly`（上面那条老登记）
+  // 原样保留、对没开灰度开关的客户继续跑；这条新登记只覆盖开了
+  // `seo_config.ai_visibility_inngest_enabled` 的客户，故意用不同的 jobName——两条链路
+  // 覆盖范围不同，混进同一份健康检查会看不出「这周是哪条链路给这个客户出的数据」。
+  //
+  // 🔴 schedule 这一列不许手抄：唯一定义在 src/lib/ai-tracker/weekly-fanout.ts 的
+  //    AI_VISIBILITY_WEEKLY_CRON，同目录的测试会断言两边一致。
+  { service: 'inngest:cloud-ai-visibility-weekly-fanout', jobName: 'ai-visibility-tracker-weekly', schedule: '0 6 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-21' },
 ] as const
 
 /**

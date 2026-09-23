@@ -78,6 +78,8 @@ export interface GraphTargeting {
   geo_locations?: unknown
   age_min?: number
   age_max?: number
+  /** 未设置 = 留给 Meta「自动版位」，纯播放类优化目标下会把钱导去 audience_network 奖励视频（PITFALLS D9）。 */
+  publisher_platforms?: string[]
 }
 
 export interface GraphAdsetSettings {
@@ -237,3 +239,11 @@ export function fetchHourlyAdsetSpend(adAccountId: string, accessToken: string, 
     limit: '500',
   }, accessToken))
 }
+
+/** Minimal public read projection. Shared with the model-neutral AI tools; no targeting/PII. */
+export const AI_ENTITY_FIELDS = {
+  account: 'id,name,account_status,currency,timezone_name',
+  campaigns: 'id,name,objective,status,effective_status,updated_time',
+  adsets: 'id,name,campaign_id,optimization_goal,status,effective_status,updated_time',
+  ads: 'id,name,adset_id,campaign_id,status,effective_status,updated_time,creative{id,video_id}',
+} as const

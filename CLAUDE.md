@@ -4,6 +4,7 @@
 
 **产品定义必读**：[ME Product Definition](./docs/strategy/ME_PRODUCT_DEFINITION.md) —— **产品定位、IMPACT、DAPE、Connector、Build vs Connect 与行业版本的最高优先级定义；冲突时以它为准。**
 **每次开新会话先读**：[docs/STATE.md](./docs/STATE.md)（系统现状）→ [docs/ROADMAP.md](./docs/ROADMAP.md)（要做什么）。
+**碰 6 大支柱任一件活先读对应手册**：广告 / SEO / GEO（AI 可见度）/ 社媒 / 口碑，各有一份跨客户经验手册存在 Claude 持久记忆里（不在这个代码仓库中），路径 `~/.claude/projects/-Users-raydeng-Projects-magic-engine/memory/playbook-<支柱>-*.md`。开工前必读对应那份，并在回复里明确说出"读了哪份"——说不出来 = 没读。行业层手册（文件名带 `-industry-`）目前多数只有单客户证据，当"候选参考"用，不当"已验证定论"套用；竞品支柱目前没有可用手册，不用去找。
 **平台化必读**：[ME2 Reuse & Platformization Principle](./docs/roadmap/2026-08-19-me2-platformization-principle.md) —— **所有开发窗口、Work Package、Claude Code/Codex 会话都受它约束。**
 **平台层级门必挂 skill**：[`.claude/skills/me-platform-tier-gate/`](./.claude/skills/me-platform-tier-gate/SKILL.md) —— **Claude Code 会话每次开工前必先调用 `Skill me-platform-tier-gate` 加载**（`Skill` 调用接口仅 Claude Code 提供）；**Codex 会话没有 `Skill` 调用接口，改为直接阅读 `SKILL.md` 全文并遵循其判据 / 红线 / 输出格式**。两种入口下，任何提议新增能力线 / 支柱 / capability / 智能层 / 分析层 / Build vs Connect vs Buy 决策 / 客户新需求判断"ME 要不要自己做"，都必须先输出 Tier Classification Report 再继续。跳过 = 治理失职。
 **必读规则**：[`~/.claude/rules/coding-style.md`](~/.claude/rules/coding-style.md) · [`~/.claude/rules/development-workflow.md`](~/.claude/rules/development-workflow.md)
@@ -182,6 +183,7 @@ Claude Code 干：大范围重构 · 跨模块长链路 · 复杂调试 · 架�
 - **客户营销落地页必须建在客户自己的域名**，绝对禁止 `magicengine.com.au/<客户>/...`
 - **FDE/PM 要填的字段必须连 Settings UI 一起做完**，绝不写「让 PM 进 Supabase Studio 直填」
 - **素材不足去全网抓**：Unsplash/Pexels（首选，零风险）→ Apify（找参考定风格）→ 客户自传（质量最高）。但客户**真实产品 / 真实价格**的画面只能用客户自己提供的素材
+- **自动改客户网站文案（标题/摘要/正文）前必过信息完整闸门**：目标词有 DataForSEO 搜索量+难度（快照 ≤14 天或现场查到）· 已取实时 SERP 前 3 标题 · SERP 里客户排名的是这一页而不是自家另一页 · 词含该页主题词且为受众语言 · 同词 90 天内未被别页用过 · 新文案不与原文事实矛盾。**任何一项缺失 = 跳过并写原因，绝不按 0 或借别页的词兜底。** 给客户打开自动开关前先跑 `dry_run` 给 PM 看；验收看最终改出来的文字，回执全绿不算数。2026-09-20 W38 事故见 [PITFALLS D10](./docs/PITFALLS.md) · [DECISIONS 2026-09-20](./docs/DECISIONS.md)
 - 每条都是真实事故，细节见 [PITFALLS §D](./docs/PITFALLS.md)
 
 ### 9. 会话结束前必做

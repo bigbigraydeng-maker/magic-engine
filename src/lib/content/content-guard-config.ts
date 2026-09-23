@@ -6,7 +6,7 @@
 export type GuardLanguage = 'en' | 'zh'
 
 export interface ContentGuardConfig {
-  /** Copy Judge probability (0–1) at or above which a cliché opener fails. */
+  /** Jev noul probability (0–1) at or above which a cliché opener fails. */
   clicheThreshold: number
   /** In a Chinese-target text, the longest run of consecutive Latin words allowed
    *  inside a Chinese sentence (covers brand / product names like "NAL Express"). */
@@ -14,15 +14,19 @@ export interface ContentGuardConfig {
   /** In an English-target text, the number of CJK characters tolerated inside an
    *  English sentence before it counts as an untranslated fragment. */
   maxEmbeddedCjkChars: number
-  /** Copy Judge request timeout. */
-  judgeTimeoutMs: number
+}
+
+/** Kill switch for the model-backed half only; the deterministic language check always runs.
+ *  Read at call time (not module load) so it can be flipped without a redeploy —
+ *  same shape as factoryQualityGuardEnabled() in src/lib/factory/constants.ts. */
+export function clicheCheckEnabled(): boolean {
+  return process.env.CONTENT_GUARD_CLICHE_DISABLED !== 'true'
 }
 
 export const DEFAULT_CONTENT_GUARD_CONFIG: ContentGuardConfig = {
   clicheThreshold: 0.8,
   maxEmbeddedLatinWords: 3,
   maxEmbeddedCjkChars: 0,
-  judgeTimeoutMs: 8000,
 }
 
 function readNumber(raw: string | undefined, fallback: number, min: number, max: number): number {
@@ -43,14 +47,12 @@ const BOUNDS: Record<keyof ContentGuardConfig, [number, number]> = {
   clicheThreshold:       [0.5, 1],
   maxEmbeddedLatinWords: [0, 50],
   maxEmbeddedCjkChars:   [0, 50],
-  judgeTimeoutMs:        [500, 60000],
 }
 
 const ENV_KEYS: Record<keyof ContentGuardConfig, string> = {
   clicheThreshold:       'CONTENT_GUARD_CLICHE_THRESHOLD',
   maxEmbeddedLatinWords: 'CONTENT_GUARD_MAX_EMBEDDED_LATIN_WORDS',
   maxEmbeddedCjkChars:   'CONTENT_GUARD_MAX_EMBEDDED_CJK_CHARS',
-  judgeTimeoutMs:        'CONTENT_GUARD_JUDGE_TIMEOUT_MS',
 }
 
 /**

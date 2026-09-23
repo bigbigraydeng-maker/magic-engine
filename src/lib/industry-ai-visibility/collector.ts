@@ -83,7 +83,7 @@ export async function collectChatGPT(question: Question): Promise<CollectionResu
 
     // Reuse existing parser. For industry-level we don't have a single
     // "client brand" — pass an empty string and ignore client_brand_rank.
-    const parsed = await parseRanking({ rawResponse: answer, clientBrandName: '___NONE___' })
+    const parsed = await parseRanking({ rawResponse: answer, clientBrandName: '' })
 
     const brands = parsed.brands.map(b => b.brand)
     const top3 = parsed.brands
@@ -164,7 +164,7 @@ async function collectDataForSeoPair(question: Question): Promise<SerpPair> {
     } else {
       const parsed = await parseRanking({
         rawResponse: serp.ai_overview_text,
-        clientBrandName: '___NONE___',
+        clientBrandName: '',
       })
       const aiBrands = parsed.brands.map(b => b.brand)
       const aiTop3 = parsed.brands

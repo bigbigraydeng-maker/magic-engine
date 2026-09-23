@@ -12,14 +12,14 @@ vi.mock('openai', () => ({
   default: vi.fn().mockImplementation(() => ({})),
 }))
 
-// Copy Judge (cliché check) — never hit the network in tests
-vi.mock('@/lib/ai/copy-judge-client', () => ({
-  askCopyJudge: vi.fn(),
+// Jev judgement (cliché check) — never hit the network in tests
+vi.mock('@/lib/jev/client', () => ({
+  callJev: vi.fn(),
 }))
 
 import { evaluate } from '@/lib/content/quality-rubric'
-import { askCopyJudge } from '@/lib/ai/copy-judge-client'
-const mockJudge = vi.mocked(askCopyJudge)
+import { callJev } from '@/lib/jev/client'
+const mockJudge = vi.mocked(callJev)
 const mockEvaluate = vi.mocked(evaluate)
 
 const PASSING_RESULT = {
@@ -62,7 +62,7 @@ describe('auditBlogPost', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     process.env.OPENAI_API_KEY = 'test-key'
-    mockJudge.mockResolvedValue({ cliche: 0.1 })
+    mockJudge.mockResolvedValue({ answers: { cliche: { noul: 0.1 } } })
   })
 
   afterEach(() => {
@@ -158,7 +158,7 @@ describe('auditBlogPost', () => {
       expect(guard.status).toBe('fail')
     })
 
-    it('treats a Copy Judge error as needs-review, not pass, and not retryable', async () => {
+    it('treats a judgement error as needs-review, not pass, and not retryable', async () => {
       mockEvaluate.mockResolvedValueOnce(PASSING_RESULT)
       mockJudge.mockRejectedValueOnce(new Error('HTTP 503'))
       const result = await auditBlogPost('Book the 12-day Golden China tour from Auckland today.', 'geo_only', SAMPLE_METADATA)

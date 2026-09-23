@@ -82,3 +82,23 @@ export const FACTORY_SHOT_PLAN = [
   { role: 'middle', duration_hint_s: 2.6 },
   { role: 'cta', duration_hint_s: 2.8 },
 ] as const
+
+/**
+ * 成片文案品控（2026-09-20 Jev 评估,魏征复审后定案):静态红线短语黑名单
+ * (scanRedlineHits)查不出的语义类缺陷 —— 竞品品牌当角度、内部分类标签冒充文案、
+ * 人称口吻不符简报。全局统一,不按客户/行业硬编(平台化红线 4/5)。
+ */
+/** Jev noul 分数阈值:>= 视为命中。三类问题共用同一口径,不按客户覆写。 */
+export const FACTORY_QUALITY_GUARD_THRESHOLD = 0.5
+/** 占位字幕确定性检测:同一非平凡字幕跨 >= 此数量的段落完全重复即判定命中(不必等 Jev)。 */
+export const FACTORY_QUALITY_GUARD_MIN_REPEATS = 2
+/** 上面这条的最短字符数——太短的重复(如两段都写 "Shop now")是正常 CTA,不算占位符信号。 */
+export const FACTORY_QUALITY_GUARD_MIN_REPEAT_LEN = 12
+/**
+ * 总开关(env FACTORY_QUALITY_GUARD_DISABLED=true 可临时全局关停,不需要重新部署代码)。
+ * 写成函数而不是模块级常量:按调用时刻读 env,方便测试用 vi.stubEnv 覆盖,
+ * 也不会在导入时就把值锁死。
+ */
+export function factoryQualityGuardEnabled(): boolean {
+  return process.env.FACTORY_QUALITY_GUARD_DISABLED !== 'true'
+}

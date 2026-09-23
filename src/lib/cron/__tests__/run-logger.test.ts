@@ -41,7 +41,11 @@ vi.mock('@/lib/supabase', () => {
     let mode: 'select' | 'insert' | 'update' | 'upsert' = 'select'
     let payload: Row = {}
     const eqs: Array<[string, unknown]> = []
-    const hits = () => state.rows.filter((r) => eqs.every(([c, v]) => r[c] === v))
+    const ltes: Array<[string, string]> = []
+    const hits = () =>
+      state.rows.filter(
+        (r) => eqs.every(([c, v]) => r[c] === v) && ltes.every(([c, v]) => String(r[c] ?? '') <= v),
+      )
     // 真表上的两条约束 —— 少写 job_name 或写错 status，库里是会拒的。insert 和 upsert 都要过这一关。
     function checkConstraints(row: Row): PgError | null {
       if (!row.job_name) return { message: 'null value in column "job_name"', code: '23502' }
@@ -106,6 +110,7 @@ vi.mock('@/lib/supabase', () => {
       update(p: Row) { mode = 'update'; payload = p; return builder },
       upsert(p: Row, _opts?: { onConflict?: string }) { mode = 'upsert'; payload = p; return builder },
       eq(col: string, val: unknown) { eqs.push([col, val]); return builder },
+      lte(col: string, val: string) { ltes.push([col, val]); return builder },
       single() { const { data, error } = run(); return Promise.resolve({ data: data?.[0] ?? null, error }) },
       then(resolve: (r: { data: Row[] | null; error: PgError | null }) => void) { resolve(run()) },
     }
@@ -115,7 +120,7 @@ vi.mock('@/lib/supabase', () => {
   return { supabaseAdmin: { from } }
 })
 
-const { startCronRun, startCronRunId, cronRunHandle } = await import('../run-logger')
+const { startCronRun, startCronRunId, cronRunHandle, failOpenCronRuns } = await import('../run-logger')
 
 /** 把这次测试里 console.error 说过的所有话拼成一段，方便断言「喊了什么」。 */
 function said(spy: ReturnType<typeof vi.spyOn>): string {
@@ -288,5 +293,48 @@ describe('cronRunHandle（工作流跨步骤用的那条路）', () => {
     expect(state.rows[0].status).toBe('completed')
     expect(state.rows[0].processed).toBe(4)
     expect(spy).not.toHaveBeenCalled()
+  })
+})
+
+describe('failOpenCronRuns（Inngest onFailure 收口）', () => {
+  const T0 = '2026-09-22T18:00:00.000Z'
+  const T1 = '2026-09-22T18:30:00.000Z'
+  function running(id: string, startedAt: string, job = 'conversion-daily-pipeline'): Row {
+    return { id, job_name: job, status: 'running', started_at: startedAt, finished_at: null, error_message: null }
+  }
+
+  it('只把「同名 + 还在跑 + 在失败事件之前开跑」的行写成 failed，带上错误信息', async () => {
+    state.rows.push(
+      running('a', T0),
+      running('b', '2026-09-22T19:00:00.000Z'), // 失败事件之后才开跑（人点了 Replay）——不能误伤
+      running('c', T0, 'other-job'), // 别的任务——不碰
+      { ...running('d', T0), status: 'completed' }, // 已经收尾的——不碰
+    )
+    const closed = await failOpenCronRuns('conversion-daily-pipeline', '步骤被强杀', { startedBefore: new Date(T1) })
+    expect(closed).toBe(1)
+    const a = state.rows.find((r) => r.id === 'a')!
+    expect(a.status).toBe('failed')
+    expect(a.finished_at).toBeTruthy()
+    expect(a.error_message).toBe('步骤被强杀')
+    expect(state.rows.find((r) => r.id === 'b')!.status).toBe('running')
+    expect(state.rows.find((r) => r.id === 'c')!.status).toBe('running')
+    expect(state.rows.find((r) => r.id === 'd')!.status).toBe('completed')
+    expect(state.rows).toHaveLength(4) // 没有另插兜底行
+  })
+
+  it('一行 running 都没有（log-start 自己就被掐死）→ 仍然落一条 failed，不能没痕迹', async () => {
+    const closed = await failOpenCronRuns('conversion-daily-pipeline', '开跑那步就超时', { startedBefore: new Date(T1) })
+    expect(closed).toBe(0)
+    expect(state.rows).toHaveLength(1)
+    expect(state.rows[0]).toMatchObject({ job_name: 'conversion-daily-pipeline', status: 'failed', error_message: '开跑那步就超时' })
+  })
+
+  it('写失败不抛、要喊出来', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    state.rows.push(running('a', T0))
+    state.failUpdate = { message: '模拟断网' }
+    const closed = await failOpenCronRuns('conversion-daily-pipeline', 'x', { startedBefore: new Date(T1) })
+    expect(closed).toBe(0)
+    expect(said(spy)).toContain('模拟断网')
   })
 })

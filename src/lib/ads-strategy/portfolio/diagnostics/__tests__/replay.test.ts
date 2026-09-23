@@ -4,7 +4,8 @@
  *
  *   正例：NAL 8/17–9/13 → D4 命中（两条 ThruPlay 3 天 ~$50、再营销名单为 0 的阶段）；9 月新 3PL 系列 D5 not_comparable；
  *         D3 在未配目标单次成本时 not_comparable。CTS 2026-09-13 → D1 命中（官方账户 14:00 后零投放）。
- *   反例：CTS、Oztop 历史健康日零诊断。
+ *   反例：Oztop 历史健康日零诊断；CTS 9/8-9/9 除 D9（GC 顶层 ThruPlay 没排除 Audience Network，
+ *         真实存在的配置问题，2026-09-22 补规则后才抓出来）外零诊断。
  *   CTS 正在跑的 A/B 实验（1489853439620194）必须被排除。
  */
 import { beforeAll, describe, expect, it } from 'vitest'
@@ -160,15 +161,20 @@ describe('CTS 官方账户回放', () => {
     expect(d1?.reasons[0]).toContain('账户状态正常')
   })
 
-  it('2026-09-13 除 D1 外没有别的命中', () => {
+  it('2026-09-13 除 D1、D9 外没有别的命中', () => {
     const run = ctsRun('2026-09-13', '2026-09-13T11:59:59Z', '2026-09-14T03:00:00Z')
-    expect(run.diagnoses.filter(d => d.status === 'hit').map(d => d.code)).toEqual(['D1'])
+    // D9 = GC 顶层 ThruPlay 广告组（52549857906273）没排除 Audience Network，
+    // 这是 2026-09-22 补的规则，抓的是从 9/8 就存在的真实配置问题（docs/PITFALLS.md D9），不是新回归。
+    expect(run.diagnoses.filter(d => d.status === 'hit').map(d => d.code).sort()).toEqual(['D1', 'D9'])
   })
 
-  it('反例：2026-09-08、09-09（视频刚开投、全天在投）零诊断', () => {
+  it('反例：2026-09-08、09-09（视频刚开投、全天在投）——除了真实存在的 D9 配置漏洞，没有别的诊断', () => {
     for (const [date, asOf] of [['2026-09-08', '2026-09-08T11:59:59Z'], ['2026-09-09', '2026-09-09T11:59:59Z']] as const) {
       const run = ctsRun(date, asOf, `${date}T23:00:00Z`)
-      expect(run.diagnoses).toEqual([])
+      // GC 顶层 ThruPlay（52549857906273）建的时候就没设 publisher_platforms，D9 从第一天就该命中——
+      // 这不是这条测试原本想验的"投放卡住/花钱没结果"那类问题，但确实是真实存在的问题，不能再断言零诊断。
+      expect(run.diagnoses.map(d => d.code)).toEqual(['D9'])
+      expect(run.diagnoses[0].units.map(u => u.id)).toEqual(['52549857906273'])
     }
   })
 

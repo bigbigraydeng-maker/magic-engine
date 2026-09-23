@@ -177,6 +177,17 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
     setReviewError('')
   }, [selectedDate, selectedBundle?.post_review?.reason, selectedBundle?.post_review?.reviewed_at])
 
+  const [postImageNaturalSize, setPostImageNaturalSize] = useState<{ width: number; height: number } | null>(null)
+  useEffect(() => {
+    setPostImageNaturalSize(null)
+  }, [selectedBundle?.post_image?.id])
+  const postImageAspectMismatch = useMemo(() => {
+    if (!postImageNaturalSize) return false
+    const actualRatio = postImageNaturalSize.width / postImageNaturalSize.height
+    const targetRatio = 4 / 5
+    return Math.abs(actualRatio - targetRatio) / targetRatio > 0.02
+  }, [postImageNaturalSize])
+
   const submitPostReview = useCallback(async (verdict: PostReview['verdict'], dateOverride?: string, expectedReviewRevisionOverride?: string | null) => {
     const scope = `${clientId}:${campaignId}`
     const reviewDate = dateOverride ?? selectedDate
@@ -418,11 +429,25 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
                       <img
                         src={selectedBundle.post_image.preview_url}
                         alt={selectedBundle.post_image.filename ?? 'Post image'}
-                        className="w-full h-32 object-cover rounded mb-2"
+                        className="w-full max-h-96 object-contain rounded mb-2 bg-me-ivory"
+                        onLoad={e => {
+                          const img = e.currentTarget
+                          setPostImageNaturalSize({ width: img.naturalWidth, height: img.naturalHeight })
+                        }}
                       />
                     ) : (
-                      <div className="w-full h-32 rounded mb-2 bg-me-ivory flex items-center justify-center">
+                      <div className="w-full aspect-[4/5] rounded mb-2 bg-me-ivory flex items-center justify-center">
                         <span className="text-[10px] text-me-charcoal/40 italic">未绑定 Post 图片</span>
+                      </div>
+                    )}
+                    {selectedBundle.post_image && postImageAspectMismatch && postImageNaturalSize && (
+                      <div className="mb-2 rounded-lg border border-[#C2453A]/25 bg-[#C2453A]/8 px-3 py-2">
+                        <p className="text-[11px] font-semibold text-[#C2453A]">
+                          ⚠ 图片实际比例 {postImageNaturalSize.width}:{postImageNaturalSize.height}，不是 Facebook 要求的 4:5
+                        </p>
+                        <p className="mt-0.5 text-[10px] text-me-charcoal/45">
+                          发布时会按原图直接发送给 Facebook，构图与这里预览一致；如需 4:5 构图，请先替换或裁剪素材再通过审核。
+                        </p>
                       </div>
                     )}
                     {selectedBundle.post_image && (

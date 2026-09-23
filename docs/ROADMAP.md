@@ -21,28 +21,122 @@
 
 ---
 
+## 行业 AI 可见度采集 · 除奥克兰外所有城市的问题 100% 采不到数（2026-09-23 查实根因，P1）
+
+**§11 打分**：频率高（每天跑，每天所有非奥克兰城市的问题全军覆没，自 09-10 至今没有一天例外）· IMPACT 闭环关键度高（Measure 段给的是空数据，行业基线的城市维度整片缺失，下游 AI 可见度分数因此长期算不出来）· 收入关联度低（目前没有活着的客户目标在读这个分数，两个历史 goal 都已归档/过期，也没有客户投诉）→ 恰好一个低、两个高 → **P1**。
+
+- **现象**：`industry_ai_visibility_snapshots` 里 `error_code = 'dataforseo_error'`，报错原文 `DataForSEO SERP task 40501: Invalid Field: 'location_name'`。自 2026-09-10 起累计 390 条 × 2 个平台（`google_ai_overview` 和 `google_serp` 共用同一次调用，所以一炸炸两个）。
+- **规律非常干净（已在生产库逐城核对）**：`auckland` 100% 成功；`brisbane` / `sydney` / `melbourne` / `perth` / `adelaide` / `gold-coast` / `christchurch` / `wellington` / `queenstown` **100% 失败，一条都没成功过**。`geo_scope='national'` 的问题完全不受影响。
+- **根因位置**：`src/lib/dataforseo/serp.ts` 的 `CITY_DISPLAY_NAME`（约 68–85 行）。城市位置是拼成 `location_name = "{城市},{国家全名}"` 发出去的，例如 `"Brisbane,Australia"`——供应商不认这个写法。奥克兰能过，说明只有它恰好命中了供应商的合法名称。
+- **为什么 2026-09-23 这一轮没有顺手修**：要改就必须先拿到供应商认的城市全名到底怎么写，而当时的工作目录拿不到它的账号密码（`.env.local` 复制被权限拦下），改了也验证不了。按「没真跑过的不许说成功」，只登记不动手，不猜着改。
+- **接手的人怎么做（三步，不用问人）**：
+  1. 用 DataForSEO 账号调它的位置清单接口 `POST /v3/serp/google/locations`（这个接口**不收费**），把返回里 `location_name` 含上面这些城市的条目捞出来，看它到底要求写成什么（很可能是带州/大区的三段式，例如 `"Brisbane,Queensland,Australia"`，但**必须以接口返回为准，不要照抄这个猜测**）。
+  2. 按接口返回改 `src/lib/dataforseo/serp.ts` 的 `CITY_DISPLAY_NAME`（或改成直接用供应商的 `location_code`，比字符串更稳）。
+  3. 逐个城市真发一次请求确认不再报 40501，再看第二天的采集里这些城市的行 `error_code` 是不是变成了 `null` 或 `no_ai_overview`。**回执全绿不算数，要看到真数据落库。**
+- **连带影响（已在 [PR #1928](https://github.com/bigbigraydeng-maker/magic-engine/pull/1928) 里挡住，不会再出错数字）**：这个故障让每天的采集覆盖率长期掉到 40%~50%，所以修好之前，AI 可见度分数会经常正确地返回「算不出来」而不是一个数。**这是预期行为，不是新 bug。** 覆盖率恢复到 60% 以上就会自动恢复出分。
+
+---
+
+## 行业 AI 可见度采集 · 2026-09-23 当天一行数据都没写进去（2026-09-23 发现，待查）
+
+**§11 打分**：频率未知（只观察到一次，需要看是不是每天都这样）· IMPACT 闭环关键度高（整个 Measure 段当天空白）· 收入关联度低（同上，没有活着的客户目标在读）→ 一个低、一个高、一个未知 → 暂按 **P2** 记，查清频率后重定。
+
+- **现象**：2026-09-23 05:30 UTC 查生产库，`industry_ai_visibility_snapshots` 的 `max(collected_date)` 还停在 `2026-09-22`，当天 0 行。而这个采集的定时任务排在 02:30 UTC，三小时前就该跑完了。
+- **注意**：9-21 只采了 25 个问题（正常是 78 个），9-19 采了 54 个——说明「没跑完」不是第一次，只是以前没被发现。
+- **第一步查什么**：看 `industry_ai_visibility_runs` 表里 2026-09-23 有没有 run 行、状态是 `running` 卡住还是 `failed`；再看 Render 上 `industry-ai-visibility-daily` 这个定时任务当天的日志。
+- **跟 AI 可见度分数算不出来的关系**：当天没有数据 → 新鲜度闸门直接拦下 → 所有客户的 AI 可见度分数返回「今天还没刷新」。这跟上面那条城市 bug 是**两件独立的事**，都会导致算不出分，别只修一个就以为好了。
+
+---
+
+## Kernel 认领执行权函数字段歧义 bug 已修复、代码已合并 main，生产数据库还没真正应用（2026-09-23 发现并修复，P0）
+
+**§11 打分**：频率高（这个数据库函数每次被真实调用都会报错，不是偶发）· IMPACT 闭环关键度高（卡在 Kernel「提交动作 → 认领执行权」这一步，是所有走 Kernel 执行的能力共用的入口）· 收入关联度高（已上线的 `page.apply_optimization_request` 页面优化 PR 提交能力也共用这两个函数）→ 零个低、两个以上高 → **P0**。
+
+- **背景**：`kernel_claim_or_takeover_run` 和 `kernel_claim_run_step`（`supabase/migrations/20260808000003_me2_execution_kernel_v1.sql`）各有一处 PL/pgSQL 裸列名歧义（`RETURNS TABLE` 输出列名跟被更新的表列名撞名），Postgres 默认设置下直接拒绝执行，报 `column reference is ambiguous`。这不是偶发，是这两个函数每次真被调用都会炸。
+- **已完成**：修复已写成新 migration `supabase/migrations/20260923000000_kernel_fix_ambiguous_column_refs.sql`，本地 Postgres 沙盘真跑验证过（含负对照：换回原版定义精确复现报错、换回修复版恢复正常），经子牙 + 魏征两个独立复审都通过，[PR #1905](https://github.com/bigbigraydeng-maker/magic-engine/pull/1905) 已合并 main（`758675f`）。
+- **还没做的（需要 PM 显式点头才能做）**：
+  - [ ] 把这条 migration 真正 `apply` 到生产 Supabase 数据库——合并到 main 只是代码进了仓库，**不会**自动跑数据库结构变更，这一步需要 PM 明确说"去 apply"才能做。
+  - [ ] 有生产库权限的人确认这个 bug 是否已经在生产复现：查生产 `action_runs` 表里有没有真实成功从 `queued`/`authorizing` 推进到 `authorized`/`running` 的记录，如果一条都没有，说明「提交动作 → 认领执行权」这条链路可能从上线到现在一次都没真正跑通过。
+
+---
+
+## CTS 每日广告日报定时任务 · 权限模式不固定，摊上"要问人"那天会无人值守卡死（2026-09-22 排查，已部分修复，P3）
+
+**§11 打分**：频率高（每天一次）· IMPACT 闭环关键度低（只影响内部日报，不卡广告投放本身的 Act 动作）· 收入关联度低（无客户投诉/续费风险）→ 两项低 → **P3**，已修复一半，剩下的登记待认领。
+
+- **现象**：`~/.claude/scheduled-tasks/cts-daily-ads-report/SKILL.md`（不在本仓库，是本机定时任务配置）第一步要读本地 `.env.local` 拿 Render 的接口令牌、再查 Meta 广告数据，2026-09-21～22 出现两次异常：一次卡了 35 分钟才拿到数据（且拿到的是空文件，靠模型现场重新摸索出 Python 脚本才补救成功）；另一次挂起 4 分多钟毫无进展，靠人手动叫停。
+- **根因 1（已用命令层面绕开，未根治）**：直接 `grep`/`cat`/`Read` 读 `.env.local` 会被全局安全规则秒拒（预期行为，绕不过去也不用绕）；但换一种不在这条任务"已批准命令"名单里的写法（比如把读文件和调用接口合成一条 `curl`），如果这次任务运行摊上的是"敏感操作要问人"这种权限模式，就会卡住等一个没人在场点的审批。查了这条任务最近 8 次真实运行记录（2026-09-17～09-22），权限模式在"全自动不问人"和"要问人"之间来回切换，不是固定的——目前没找到能通过工具接口把它锁死成"全自动"的办法，只在 App 里那条任务自己的设置页面里可能有这个开关，需要 PM 找一下并锁定。
+- **根因 2（已修复并现场验证）**：即便摊上"全自动"模式，原来的查询命令用 `curl -s -o file` 会把请求失败悄悄吞掉、写出一个空文件却不报错，等于"看起来跑完了，其实什么也没查到"。已经把 `SKILL.md` 第一步改成一条固定、系统已永久批准、失败会显式报 `ERROR:` 的 Python 脚本，2026-09-22 现场手动触发测试一次，不到一分钟正常出报告（真实数据：留资表单花 $10.49 拿到 2 个留资，老客户召回花 $10.25 零结果）。
+- **还没做的**：PM 去 App 里找到这条定时任务的设置，把权限模式锁定成"全自动执行"（不要留"敏感操作要问人"那一档），这样万一以后命令写法又被绕过去，也不会再卡审批。
+
+---
+
+## Meta Ads AI 只读内测 · 换人接手一条已连接的 Facebook 授权时永久卡死（2026-09-22 发现，P3）
+
+**§11 打分**：频率低（一个客户通常固定一人/账号维护）· IMPACT 闭环关键度低（不阻塞当前 Act，有绕过办法）· 收入关联度低（无客户投诉/续费风险）→ 三项皆低 → **P3**，记入待认领，不现在动。
+
+- **现象**：CTS Tours NZ 用 `hello@magicengine.cloud` 登录连好 Facebook 后，`bigbigraydeng@gmail.com` 用同一个 Facebook 账号（同一个 `ads_user:<fb_id>`）再连一次，UI 报"Facebook 授权已取消、已过期或未完成"，实际生产日志真实原因是 `connection owner is immutable`（`supabase/migrations/20260920235723_meta_ads_ai_schema_forward_fix.sql:315-326` 的触发器）——不允许把一条 `meta_ads_read` 连接的 `authorizing_principal_id` 改绑给另一个 Magic Engine 平台账号。这本身是有意的安全设计，不是 bug。
+- **真正的 bug**：`src/lib/meta/ai/manage.ts` 的 `revoke()`（type='connection' 分支）只把 `status` 改成 `revoked`，从不把 `authorizing_principal_id` 清空为 `null`。而上面那条触发器允许换人接手的唯一合法路径，恰恰要求 `OLD.authorizing_principal_id IS NULL`——现在的断开连接功能永远做不到这一步，导致"断开重连换人"这条路径在数据库层面根本走不通，连原来的 owner 自己断开重连也一样卡死。
+- **当前绕过办法（2026-09-22 当天实测：这条走不通）**：本以为换回最初完成 Facebook 授权的账号（`hello@magicengine.cloud`）操作就行，但客户当天全程用的是 `bigbigraydeng@gmail.com` 登录，一直没能真正切到 `hello@magicengine.cloud`（可能是拿不到那个登录邮箱的收信权限）。最终是 PM 授权后**直接 `DELETE` 掉那一条卡住的 `platform_oauth_connections` 记录**（`id=972589ac-d997-49ad-9b91-618db8ed0409`，`meta_ads_read_grants` 当时对应记录为空，级联删除无副作用）才解开，删完后不管哪个账号登录去连都是全新 `INSERT`，不会撞到这条触发器。
+- **原计划的修法已验证行不通**：以为 `revoke()` 只要在 update payload 里加 `authorizing_principal_id: null` 就行，但实测这条触发器的豁免条件要求 `OLD.status IN ('revoked','expired','error')`——而"清空归属人"这个动作，不管是紧跟着断开一起做、还是断开之后再单独做一次 update，那一刻的 `OLD.status` 要么还是 `active`、要么虽然是 `revoked` 但 `OLD.authorizing_principal_id` 依然不是 `null`，两种情况都会被同一条触发器拦下来报同样的 `connection owner is immutable`。**这条触发器目前没有任何合法的 `UPDATE` 路径能把归属人清空**——只有 `DELETE`（触发器只挂在 `UPDATE` 上）能跳出这个死循环。
+- **将来要修的话**：`revoke()` 的 connection 分支改成"断开时如果没有存量依赖就直接 `DELETE` 这一行"，而不是把 `status` 改成 `revoked`；如果业务上必须保留断开记录做审计，就要改这条触发器本身（放宽豁免条件，或者单独开一个"清空归属人"的专用 RPC，用 `SECURITY DEFINER` + 显式业务校验绕开这条 immutable 检查，而不是让业务代码去猜怎么绕）。
+
+---
+
+## SEO 标题周循环 v1 · 上线后跟进（2026-09-20 上线，CTS 开关已关；清单来源 Issue [#1807](https://github.com/bigbigraydeng-maker/magic-engine/issues/1807) 评论）
+
+- [ ] **重新打开 CTS 的开关**：先用 `POST /api/cron/seo-meta-cycle-trigger` 带 `{"dry_run": true, "client_id": "<CTS>"}` 跑一次演练，把「这一轮会改哪些页、改成什么字、依据的搜索量/难度/前 3 标题」给 PM 看；PM 批准后才把 `clients.seo_config.meta_cycle_enabled` 改回 true（见 PITFALLS D10）
+
+**第 4 步（出文案 → 开 PR → 合并）重跑安全**
+- [ ] 1. AI 生成标题那步没包 try —— 一个候选失败会让整个第 4 步重跑，应只跳过这一个
+- [ ] 2. 重试时发现这条改动的 PR 已开过且已合并，代码什么也不做 —— 应补写 `seo_meta_log` 基线记录，不能让改动凭空消失
+- [ ] 3. 查对手标题的 DataForSEO 调用被重试会重复付费 —— 缓存，或拆成独立步骤
+- [ ] 4. 写 `seo_meta_log` 失败没检查错误 —— 失败要计入回执失败数，不能永远显示 0
+- [ ] 5. 第 4、5 步回执内容重复，考虑合并
+
+**14 天回查与人工待办**
+- [ ] 6. 现在先标「已回查」再写待办，写待办失败则回归没人知道 —— 顺序反过来
+- [ ] 7. 老记录 `pr_url` 为空时，待办仍写「点开这个 PR 链接」—— 改指向页面改动历史，或明说没有 PR 链接
+- [ ] 8. 判回归前先确认谷歌数据是改动之后才更新的，避免拿旧数据误判「没变化」
+- [ ] 9. 取待回查记录时排除没有基线曝光数据的历史补录，免得占每周名额
+- [ ] 10. 「有没有效果」的样本门槛（现 30 次曝光）按实际噪音再评估
+
+**代码清理**
+- [ ] 11. 删掉已无人调用的 `readMetaForSlug`
+- [ ] 12. `roster.ts` 精简（`toClientConfig` 重复代码；`run-one` 只读当前客户；`isoWeekKey` 重复导出）
+- [ ] 13. 手动补跑被跳过的客户时，别覆盖「最近跑过」时间戳（会误伤下周正常那次）
+- [ ] 14. 设计文档里关键词来源、学习记忆几段没跟上最新代码，需同步
+## 内容工厂发布前品控:生产环境未配 `TYPESAFE_API_KEY`（2026-09-20 #1832 已合并，功能代码就绪但未生效）
+
+`src/lib/jev/client.ts` + `src/lib/factory/content-quality-guard.ts` 已上线：成片交付时检测竞品品牌当角度 / 内部分类标签冒充字幕 / 人称口吻不符简报,命中标红转人工审核（详见 PR #1832）。是 fail-closed 设计——缺这个变量不会报错崩溃，但 `callJev` 会直接抛错，每个有文案的工单都只会写入 `quality_check_unavailable`，三类新语义检测在生产完全不会运行，跟没上线效果一样。
+
+- [ ] **需要人工操作**：在 Render `crazycontent` web 服务配置 `TYPESAFE_API_KEY`（TypeSafe Jev 判断模型密钥，对外封装名 Compliance Engine），配完跑一次真实工单交付验证 `output.quality_flags` 确实产出竞品品牌/占位字幕/人称口吻判断，而不是清一色 `quality_check_unavailable`。
+- 按 §11：频率高（内容工厂天天跑，不配就天天漏检）/ IMPACT 中（发布前把关环节）/ 收入高（原始动机——竞品品牌广告或占位字幕上线会真实损客户关系）→ 两个高 → P0，但这一步是纯配置操作，不占开发排期，谁能登录 Render 谁就能几分钟做完。
+
+---
+
 ## Park Homes 官网升级候选（2026-09-20 全站审计，按 §11 打分均为 P3，未开工）
 
 PM 要求把 parkhomes.nz 整体检查一遍还有什么可以升级。首页网图占位（最高优先级项）已在同次会话修复上线，见 CHANGELOG。以下两项按 [ENGINEERING_QUALITY_GATES.md §11](./ENGINEERING_QUALITY_GATES.md#11-资源优先级判断pm-2026-09-07-拍板) 打分：频率、收入关联度均判低 → 两个低 → 一律 P3，先登记不占用当前排期。
 
-- **补齐 Greenview / Castor Bay / Forrest Hill 的配套内容**：2026-09-13 已经在邮件里主动跟 Jason 说了要补（Greenview 目前只有 2 张图、零配套文章；Castor Bay / Forrest Hill 各只有 1 篇），但截至本次审计（2026-09-20）代码里还没有任何后续改动。文章本身可以照抓取真实区域数据的方法自己先写（不必等客户），但更多 Greenview 效果图仍需 Jason 提供。
+- **补齐 Greenview / Castor Bay / Forrest Hill 的配套内容**：2026-09-13 已经在邮件里主动跟 Jason 说了要补（Greenview 零配套文章；Castor Bay / Forrest Hill 各只有 1 篇）。**2026-09-21 进展**：Jason 补来 4 张 Greenview 工地航拍，已做成页面上的"工程日志"时间线上线（PR #1858）；效果图仍只有 2 张，配套文章仍未写。文章可以照抓取真实区域数据的方法自己先写（不必等客户）。
+  - **PM 2026-09-21 提的方向（候选，未开工）**：在建项目持续记录进展 + 每次更新产出一篇配套文章，当成给开发商的加分项。目前只在 Park Homes 站内实现了"进度日志"板块；"每次更新自动出文章"和"做成地产行业通用打法"都还没做——等第二个地产客户出现同样需求再评估往共享层提，届时先过平台层级门。
   - 频率：低（内容沉淀类工作，非每日撞上的问题）· IMPACT：中（SEO 自然流量导流环节，9-13 邮件里给 Jason 看的数据是 24 次点击/589 次曝光/平均排名 19，这几篇項目页搜索表现偏弱正是原因之一）· 收入：低（间接，非直接决定客户流失/续费）→ 两低 → P3。
 - **全站没有分享预览图（Open Graph / Twitter Card 元数据）**：链接被转发到微信/WhatsApp/Facebook/短信时，不会带图片和摘要预览，只显示裸链接。技术上是给 `Base.astro` 加几行 `<meta property="og:*">` 标签，工作量很小。
   - 频率：低（不是每天会撞上的故障，是"有人转发链接时"才体现）· IMPACT：中（影响转发链接后的点击欲望，偏 Act 前一步）· 收入：低（间接）→ 两低 → P3。
 
 ---
 
-## 广告支柱 IMPACT 闭环升级 · 阶段 0 止血 + 阶段 1 只读诊断（2026-09-14 已开 PR，待 PM go）
+## 广告支柱 IMPACT 闭环升级 · 阶段 0 止血 + 阶段 1 只读诊断（2026-09-14 已开 PR，PM go 已完成，验证与收尾进行中）
 
-设计定稿：`~/.claude/plans/ads-impact-loop-capability.md`（§14 为验收条款）。阶段 0：PR #1656（看板查错列）、#1657（STATE.md 内核事实）、#1658（替代 #1080 的广告写路径归属校验 + 主页绑定只许员工改）。阶段 1：#1659（设置快照表 + 视频/广告组日数据）→ #1662（角色判定 + 结果阶梯配置界面）→ #1664（诊断 D1/D3/D4/D5/D7/D8）→ #1665（内部版日报）；#1660（行业词下沉剧本 + 回读去客户名）。
+设计定稿：`~/.claude/plans/ads-impact-loop-capability.md`（§14 为验收条款）。阶段 0：PR #1656（看板查错列）、#1657（STATE.md 内核事实）、#1658（替代 #1080 的广告写路径归属校验 + 主页绑定只许员工改）。阶段 1：#1659（设置快照表 + 视频/广告组日数据）→ #1662（角色判定 + 结果阶梯配置界面）→ #1664（诊断 D1/D3/D4/D5/D7/D8）→ #1665（内部版日报）；#1660（行业词下沉剧本 + 回读去客户名）。PM go 与 migration 授权已完成，完成记录见 [CHANGELOG 2026-09-22](./history/CHANGELOG.md)。
 
-- [ ] **PM go**：按依赖顺序合并（#1659 → #1662 → #1664 → #1665），并单独授权 apply migration `20260914000001_ad_entity_snapshots_and_video_metrics.sql`、`20260914000002_ad_strategy_configs_outcome_ladder.sql`。表建好前新诊断不启用，原日报照旧。
 - [ ] **合并上线后正式站验证（登录后台页）**：`/dashboard/ad-engine`「汇总数字有没有在骗人」出数据；客户设置页「广告结果怎么算」面板能存。
 - [ ] **FDE 给在投客户配结果阶梯**（NAL / CTS / Oztop）：没配之前「花钱没结果」「钱和结果错配」会一直判不了，内部日报会提醒。
-- [ ] **客户真实情况待确认（P0-4）**：Roman HU / 30 Kiteroa 现在真正在投的是哪个账户（`act_1260456876069575` 读不到 403 / `act_1018365291238494` 能读、8/20–8/27 仍有花费未入库）；Oztop 8/19 起零花费是有意停投还是付款/审核问题。
-- [ ] **老接口鉴权**：`/api/clients/[id]/ad-strategy-config` PATCH 客户成员能关掉广告引擎（诊断随之停）——已登记独立任务；`domain` 绑定接口同类问题未查。
+- [ ] **客户真实情况待确认（P0-4 剩余，Roman HU / 30 Kiteroa 已了结见 CHANGELOG 2026-09-20）**：Oztop 8/19 起零花费是有意停投还是付款/审核问题——2026-09-20 实查每日回流仍报 Oztop 的 Meta 账户读不到（`getAdAccountInsights returned null`）。
+- [ ] **老接口鉴权**：`/api/clients/[id]/ad-strategy-config` PATCH 已改成只许内部员工（`8e4d2210`）；`domain` 绑定接口同类问题未查。
 - [ ] **主页改绑补全**：查「这个主页是否已绑给别的客户」+ 写 `client_binding_audit`（复用 #1649 引入的审计表，#1649 合并后做）。
-- [ ] **共用账户根治（G15 / M9）**：落广告系列级归属表；之前共用账户只做账户级诊断；老的系列级/广告级日数据同步仍会把共用账户写进两个客户名下。
+- [ ] **共用账户根治（G15 / M9）**：落广告系列级归属表；之前共用账户只做账户级诊断；老的系列级/广告级日数据同步仍会把共用账户写进两个客户名下。**2026-09-22 补充**：新增的 D9 诊断（纯播放广告漏排除 Audience Network，PR #1874）同样受这条限制——共用账户（CTS 跟 Oztop/30 Kiteroa 共用的 `act_2775766642787274`）整层跳过广告组设置抓取，D9 看不到里面的广告，这条账户归属表根治了之后 D9 应该顺带能覆盖。
 - [ ] **行业词表加 `logistics`**（物流剧本目前选不中），`E-commerce …` 自由文本行业值归一。
 - [ ] **L3 Meta Connector 收口**：Graph 版本统一（v19/v20/v21 混用）；`src/lib/meta/client.ts` 已超 800 行需拆文件；快照取令牌（`getMetaTokenForClient`）与每日同步 cron 的令牌口径统一。
 - [ ] **内部日报先影子跑几天、人工核对**：回放验收造不出「开着但不花钱」「白天被暂停」两种情况，不能证明生产不误报。
@@ -90,7 +184,7 @@ ads-act-executor（Inngest function）
 ### 待做清单
 
 - [ ] **`src/lib/meta/targeting-mutations.ts`**（路径经 Codex 复审纠正，原写 `meta-ads/` 是错的）：把上表五种操作从一次性脚本搬成有类型约束的模块函数，其中四个改 adset targeting 的函数签名带 `adAccountId`/`adsetId`/`token` 参数（不硬编码客户）。⚠️ **Codex P0 硬要求**：这四个写函数第一行必须先 `GET /{adset_id}?fields=targeting` 拿完整定向设置，在内存里合并修改后再整体 POST 回去——禁止局部传值，Meta 会把未传的字段全部清空（真实事故记录：`feedback-meta-targeting-update-not-safe-merge.md`）。这次 GET 到的原始 `targeting` 同时就是回滚快照，必须原样存进 `action_runs` 的可回滚载荷，不能只 GET 用完即丢。「创建相似受众」是账户级操作，函数签名只带 `adAccountId`/`token`（无 `adsetId`），不读取也不回写任何 adset 的 `targeting`，直接 `POST /act_{ad_account_id}/customaudiences`——见上表后的 Codex P2 复审结论，不适用 GET-merge-POST 规则；它的回滚不是恢复 targeting，而是要能删除这次新建的 `custom_audience_id`。
-- [ ] **执行前对目标账户跑 `findSharedAdAccounts` 核对，命中共用账户一律 fail-closed**（⚠️ Codex P1 复审结论）：生产已知 Roman HU 与 30 Kiteroa 共用 `act_1260456876069575`（`src/lib/meta/client-ad-accounts.ts:75-103`），而 `campaign-ownership.ts:14-18` 的归属校验明确说明只能挡「`campaign_id`/`ad_account_id` 完全不在客户注册账户里」这种跨账户误操作，挡不住同一账户内的跨客户资产——处方如果因为归因串线指向了同账户里另一个客户的 adset，四个改 targeting 的动作会直接改错客户的广告；账户级的「创建相似受众」风险更高，新建的受众直接挂在整个共用账户下，不区分客户。在账户级归属表落地前，Kernel 动作在生成 action_run 之前必须先查 `findSharedAdAccounts`，命中即拒绝执行、转人工，不生成任何 action_run（详见硬约束 5）。
+- [ ] **执行前对目标账户跑 `findSharedAdAccounts` 核对，命中共用账户一律 fail-closed**（⚠️ Codex P1 复审结论）：`campaign-ownership.ts:14-18` 的归属校验明确说明只能挡「`campaign_id`/`ad_account_id` 完全不在客户注册账户里」这种跨账户误操作，挡不住同一账户内的跨客户资产——处方如果因为归因串线指向了同账户里另一个客户的 adset，四个改 targeting 的动作会直接改错客户的广告；账户级的「创建相似受众」风险更高，新建的受众直接挂在整个共用账户下，不区分客户。历史案例：Roman HU 与 30 Kiteroa 曾共用 `act_1260456876069575`（`src/lib/meta/client-ad-accounts.ts:75-103`），2026-09-20 两客户停投后该账户已从 `client_meta_ad_accounts` 解绑（见 CHANGELOG 2026-09-20），`findSharedAdAccounts` 只查这张表的当前登记，此后再拿这个账户号去测不会命中共用——**验收时必须用单测 fixture**（往 `client_meta_ad_accounts` 插两个不同 `client_id` 登记同一个 `ad_account_id` 的 mock 数据）或另找一个生产里当前真实存在的共用账户，不能沿用这个已解绑的旧案例。在账户级归属表落地前，Kernel 动作在生成 action_run 之前必须先查 `findSharedAdAccounts`，命中即拒绝执行、转人工，不生成任何 action_run（详见硬约束 5）。
 - [ ] **五个动作各自挂真实 rollback handler，不能只挂声明**（⚠️ Codex P1 复审结论）：`src/lib/kernel/gateway.ts:238-257` 的 `assertRollbackHandlerAssembled` 只保证「`outward` + `provider_native` 的 capability 必须声明 rollback handler」，挡的是「忘记声明」，挡不住「声明了 `snapshot_restore` 但没真的实现恢复步骤」——那样失败后外部状态依然撤不回来。四个改 targeting 的动作，rollback handler 要把 GET 阶段存下的原始 `targeting` 快照原样 POST 回去；「创建相似受众」的 rollback handler 要能删除这次新建的 `custom_audience_id`。五个动作在 Kernel action 注册表里必须各自挂对应 handler，不能共用一个占位实现敷衍过关。
 - [ ] **Inngest function `ads/act-executor`**：监听 `ads/prescription.ready` 事件；解析处方里的 `executable_actions` 字段；每个动作单独 `step.run()` 经 Kernel gateway/action bridge 注册与执行，失败不级联。
 - [ ] **PM 审批门**：执行前发「审批卡」（Portal 通知 或 Telegram bot）；批准后由 Kernel 写入 append-only `authorization_decisions` 记录（含真实 PM 身份与时间戳），Inngest 拿到该 Kernel 授权记录才能触发执行——没有 Kernel 授权记录 = 不执行，不报错、不静默跳过，记录「待审批」状态。
@@ -107,7 +201,7 @@ ads-act-executor（Inngest function）
 2. **PM 审批不可绕过**：审批只能来自真实 PM 身份产生的 Kernel `authorization_decisions` 记录，不允许任何运行时输入（脚本参数、事件 payload、调用方字段）携带可自行声明的绕过开关（如 `force_approve: true`）；调试只能用测试环境专用、不进正式契约的假执行器（fake executor）。
 3. **令牌不写进代码**：从 `META_SYSTEM_USER_TOKEN` 环境变量取，不从函数参数传入字符串字面量。
 4. **一次执行一个动作**：不做批量「一键优化所有广告组」，每个 adset 的每个操作、以及账户级的「创建相似受众」，都要独立审批、独立执行、独立记录——这是刻意设计，防止一个错误决定大规模扩散。
-5. **命中共用广告账户 fail-closed**：生产已知同一 Meta 账户被多个客户登记（Roman HU / 30 Kiteroa 共用 `act_1260456876069575`，`src/lib/meta/client-ad-accounts.ts:75-103`），现有的 campaign 归属校验（`campaign-ownership.ts:14-18`）只挡得住「资产完全不在客户注册账户里」的跨账户误操作，挡不住同账户内的跨客户资产。在系列/adset 级归属表落地前，Kernel 动作生成 action_run 之前必须先跑 `findSharedAdAccounts`，命中共用账户一律拒绝执行、转人工处理，不生成 action_run，不允许「先执行再补隔离」。
+5. **命中共用广告账户 fail-closed**：现有的 campaign 归属校验（`campaign-ownership.ts:14-18`）只挡得住「资产完全不在客户注册账户里」的跨账户误操作，挡不住同账户内的跨客户资产。历史案例：Roman HU / 30 Kiteroa 曾共用同一 Meta 账户 `act_1260456876069575`（`src/lib/meta/client-ad-accounts.ts:75-103`），该账户已于 2026-09-20 两客户停投后从 `client_meta_ad_accounts` 解绑（见 CHANGELOG 2026-09-20），不再是生产里的共用账户，不能再拿它来验证本条守卫——验收改用单测 fixture（两个不同 `client_id` 登记同一 `ad_account_id`）或届时生产里真实存在的共用账户。在系列/adset 级归属表落地前，Kernel 动作生成 action_run 之前必须先跑 `findSharedAdAccounts`，命中共用账户一律拒绝执行、转人工处理，不生成 action_run，不允许「先执行再补隔离」。
 
 ### 开工前置条件（PM 2026-09-15 拍板）
 
@@ -207,6 +301,107 @@ ads-act-executor（Inngest function）
       当前正确性
 - [ ] 对话没有关联联系人的情况目前生产库实测 0 个，代码已加 `skippedNoContact` 计数防呆，
       后续若这个数字非零需要去查联系人建档流程是不是有延迟/漏建档
+
+## NAL 广告预算止血 + WhatsApp 对话接入排查（2026-09-21）
+
+**第一件事·广告预算已处理完**：主系列「新亚8月广告系列-物流」（`52589907084125`）预算
+$62/天但真正带咨询的 Messenger 广告组「物流潜在客户广告组」（`52589967398925`）当时是暂停
+状态，只剩再营销组在跑，当天只花掉 $9.76；同时两个零咨询零留资的播放量视频系列各花
+$10/天、$20/天。已执行：恢复 Messenger 广告组、暂停两个视频系列、主系列预算从 $62/天加到
+$92/天（把视频系列省下的 $30 并入）。四个改动都用 Graph API 直接确认回读生效，审计记录已
+写入 `flywheel_actions`，工作日志已写入 `fde_work_logs`。**待办**：观察 1-2 天，确认咨询量
+回到暂停前的每周 30-50 条水平；若没回升需要进一步排查。**2026-09-21 Codex 复审第 2 轮抓到**：
+这个复查此前只写在本文档里，没有任何执行管道会主动提醒，违反铁律 3 下半「管道不许断头」——
+已改成同时下发一条截止 2026-09-23 的今日待办（`src/lib/pm-todo/client-doc-manual-tasks.ts`），
+不再只靠人回头翻文档。做不到用已同步的广告数据自动判定回升与否（咨询量算不算「回升」目前
+要读对话内容判断，不是能可靠自动跑的规则），先用带截止时间的人工待办兜底。**2026-09-21
+Codex 复审第 3 轮抓到**：这条待办原本让操作者去 ME 的「广告健康」页面核对，但实测那个页面
+只按整个系列汇总近 7 天，没有广告组维度也没有逐日数字，指定的广告组在那页查不到；ME 系统内
+也没有其他页面能按天看某个广告组的咨询数（这个能力还没建）。已改成直接指向 Meta Ads Manager
+本尊查该广告组自己的原生逐日「Messaging conversations started」指标做粗判，不再指向一个查
+不到目标数据的链接。
+
+**第三件事·30天咨询量增长方案（PM 目标：每天稳定咨询 10 个以上）**：
+
+拉了 9 月以来的真实数据对账：9/1-9/12（私信广告组正常开着那段）平均每天"打开对话"9.6次，
+9/13-9/20（广告组被误停那段）掉到 4.4次/天——跟第一件事是同一个问题的另一半证据。平台拆分：
+Facebook 占过去14天91%的"打开对话"效果；Instagram 花得少但单次对话成本更低（$4.19 vs
+Facebook $5.93）；Audience Network 这个投放位置14天花了$69.67、零效果，纯浪费。专门做
+WhatsApp 的那条线单次打开对话$2.62，是三条线里最便宜的；ThruPlay 攒的重定向池子14天只带来
+2次对话、比直接投私信广告还贵，PM 已同意关停（Thruplay 两个系列在第一件事里已经停了）。
+
+PM 澄清目标口径：稳定在10个以上是"咨询"（客人开聊，哪怕当周没成交也算潜在客户，历史上这批
+咨询质量本来就不错），不是 Meta 表单那种"留资"（NAL 基本不用表单，这个数字一直趋近于0，不能
+当核心指标）。按这个口径，9/1-9/12 的 9.6次/天已经很接近目标，不是要从头翻3-4倍，主要是把这个
+水平稳住、再往上拱。
+
+**已执行**：PM 拍板把 WhatsApp 线（`52594661605725`）预算从 $25/天翻倍到 $50/天（三条线里
+最便宜、最确定的渠道，直接加码）。Graph API 执行+回读确认，审计记录已写 `flywheel_actions`，
+工作日志已写 `fde_work_logs`。
+
+**待办**：
+- [ ] 观察本周"打开对话"数量能不能回到并超过健康期 9.6次/天水平，单次对话成本有没有明显上涨
+      （超过健康期50%就是见顶信号，要停止加钱改用换素材/换受众，不能一路硬冲）
+- [ ] PM 待决定：Audience Network 这个零效果的投放位置要不要关掉（不花新钱，纯粹省掉浪费）
+- [ ] PM 待决定：一直停着的"3PL"留资表单系列（纽澳都投，不只新西兰）要不要小额重新测试，
+      作为扩大盘子的一条路——前提要先确认 NAL 是否真的服务澳洲客户
+- [ ] 第二步加码（私信线/WhatsApp线继续加预算）视本周数据决定，不会自动往下涨
+
+**第二件事·WhatsApp 对话接入排查结论——不是要新建，是要把已经写好但没启用的东西接通**：
+
+原以为要新建一条 Messenger 那样的 webhook 接入线，实测发现**代码早就写好了**：
+`src/app/api/webhooks/whatsapp/route.ts` 是一条完整的 WhatsApp Cloud API webhook（签名校验、
+建会话、写 CRM 触点、退订检测、事件广播全都有），`src/lib/whatsapp/send.ts` 管发送，跟
+Messenger 走的是同一套 `conversations`/`contact_touchpoints` 表、`channel='whatsapp'`。
+**真正卡住的是下面这几件事**，跟"要不要写代码"无关：
+
+1. **数据库那张表的新字段其实没加上**——`supabase/migrations/20260902000002_whatsapp_phone_number_id.sql`
+   这个改动文件半个月前就合并进主分支了，但从来没有真的对生产数据库执行过（`clients` 表里
+   实测没有 `whatsapp_phone_number_id` 这一列，查询直接报错"字段不存在"）。这是纯新增字段，
+   风险很低，但按铁律"改生产数据库需要 PM 明确拍板"，这次没有擅自执行，**等 PM 一句话**。
+2. **NAL 那个 WhatsApp 号码的技术编号（phone_number_id）现在拿不到**——想用现有的广告授权
+   直接从 Meta 后台查这个号码的编号，被 Meta 拒绝（403，权限不够），当前用的授权缺一个叫
+   `whatsapp_business_management` 的权限。这个权限只能在 Meta Business 后台里手动加，不是代码
+   能绕过的。**需要 PM/FDE 进 Meta Business 后台，给现在这个系统用户授权加上
+   `whatsapp_business_management`**，加完之后就能自动查到号码编号，不用再人工找。
+3. **卡的不是 NAL 自己的企业身份，是"魔法引擎"自己这个技术服务方的身份**（2026-09-21 PM
+   纠正：NAL 自己的企业身份验证是通过的）——[#1299](https://github.com/bigbigraydeng-maker/magic-engine/issues/1299)
+   说的是 Magic Engine 自己在 Meta 开发者后台注册的那个应用（`1752513682785923`）还没通过
+   Meta 对"技术服务提供方"这一层的身份核实，需要 PM 本人上传我们公司的证件。这一层过不了，
+   上面第2条要加的 `whatsapp_business_management` 权限就申请不下来——跟 NAL 自己有没有验证
+   过完全是两件事，NAL 验证过也没用，因为要验证的是我们。这一步不卡继续做前两步，但卡
+   "这条 WhatsApp 线真正在 Meta 那边生效、开始收到消息"这一天。
+4. **生产环境还缺两个必配变量，前三步全做完照样收不到消息**——查了 `docs/ENV.md` §10，
+   `META_VERIFY_TOKEN`（订阅握手用）和 `META_APP_SECRET`（签名验证用）在 Render 上都标
+   "⬜ 待配"。实测 `src/app/api/webhooks/whatsapp/route.ts:66-68` 缺 `META_VERIFY_TOKEN`
+   时订阅握手直接返回 500，`:487-489` 缺 `META_APP_SECRET` 时收消息也直接返回 500——不是
+   "配置不完美"，是**这条线现在物理上收不到消息**。如果还要让 ME 回复客户（不只是收），
+   `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` 同样待配（`lib/whatsapp/send.ts`
+   的关键路径依赖）。这四个变量的配置与验证必须跟前三步一起算作启用前置项，不能等前三步
+   做完才发现还缺这一环。
+
+**下一步（PM 拍板，不是技术选择；前三条已按铁律 3 下半下发到「今日待办 / 🙋 需要你动手」
+[`src/lib/pm-todo/client-doc-manual-tasks.ts`]，不只是留在这份文档里；2026-09-21 Codex 复审
+第 3 轮抓到 migration 决策和 `META_APP_SECRET` 此前都只留在本文档没进管道，已补下发）**：
+- [ ] （已下发今日待办，回 `go apply` / `暂不`）PM 决定：要不要把
+      `20260902000002_whatsapp_phone_number_id.sql` 这个已合并到主分支、纯新增字段的改动，
+      对生产数据库真正执行一次
+- [ ] （已下发今日待办）PM/FDE 去 Meta Business 后台给系统用户加 `whatsapp_business_management`
+      权限（加完后可以用现成脚本自动查出 NAL 的号码编号，不需要再人工翻）
+- [ ] （已下发今日待办，同一条里已把 `META_VERIFY_TOKEN` / `META_APP_SECRET` 配置一起带上）
+      PM/FDE 去 Meta App 后台确认这个号码的 webhook 订阅是否已经打开，并在 Render 后台把
+      收消息必配的 `META_VERIFY_TOKEN` / `META_APP_SECRET` 两个变量配上
+      （这一步也需要能登录 Meta 后台+Render 后台的人核实，无法从这台开发机验证）
+- [ ] PM/FDE 在 Render 后台把 `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID`
+      （要回消息才需要，不影响收消息）两个变量配上——优先级低于上面三条，暂未下发今日待办
+- [ ] #1299 企业验证走完，再确认线上真的开始收到 WhatsApp 消息
+      （命中一句话：企业验证走完后来查一下WhatsApp消息有没有开始进系统——建议这一步由 PM
+      在 #1299 验证通过当天，去 Supabase 查一次 `conversations` 表 `channel='whatsapp'` 的
+      条数是不是从 0 变化）
+
+不需要新写 webhook 代码、不需要子牙+魏征架构复审——因为没有新架构，是把已经审过、已经合并
+的现成能力接通。真正要做的几步全是配置/审批动作，不是技术选型，所以直接列出来等 PM 拍板，
+没有抛回"走 A 还是走 B"这类技术问题。
 
 ## NAL 客户管理工作台"标已成交" → 自动写一条 Meta CAPI 成交记录（PR #1715，dry_run，已合并，2026-09-15）
 
@@ -837,6 +1032,11 @@ chunked 绕过 OOM 闸 · 闸门没接在花钱那条线上 · 归档入口（�
 - [ ] **P31.X.2** 主指标 measurement='auto' 时自动拉取 current_value（GA4 / SerpAPI / Apify）
 - [ ] **P31.X.3** AI 参谋升级：基于历史 outcome 推荐 Initiative 组合（依赖数据沉淀）
 - [ ] **P31.X.4** 评分公式重做（reputation / SEO / ai_visibility 维度独立大工程）
+- [ ] **P31.X.4a** CTS 的 AI 可见度判断从 ai-tracker（系统 B）迁到 M1（系统 A = `geo-module`+`geo-baseline`）——**2026-09-20 投资调查结论**：PO 2026-08-19 已拍板「M1 唯一真相源、ai-tracker 整套退役」（见 [DECISIONS.md](./DECISIONS.md) 2026-08-19 条目 + [拆除清单](./specs/2026-08-19-ai-tracker-decommission-v1.md)），但退役从未执行，CTS 的每周可见度数字目前 100% 来自即将退役的 ai-tracker。M1 现在**接不了 CTS**，前置缺口：① M1 底层测量表（`geo_observations`/`geo_evidence`）目前确认有 Roman（批次 `688bd8ae`）和 ME 自家品牌（批次 `a2f09f81`，客户 `f1d062ca-929e-4b4e-ba6e-84752b748552`，18 条观测）两份真实数据；且 ME 那批当时是用 `docs/marketing/` 的人工五类规则（cited/recommended/described/compared/not_present）分类的，不是真跑了 `interpretObservation`（M1 判断函数本身）。**CTS 是否也已有真实数据待核实，不能再断言「空」**：只读诊断脚本 `scripts/diagnose-cts-geo.ts:30-31` 硬编码了一个具体批次 `77124a10-d22b-4722-94c2-aeae69f73d76`，且脚本 `:215-225` 把该批次观测真的送进 `runGeoModule`（→`pipeline.ts:164-171` 逐条调 `interpretObservation`）——这只能说明写这个脚本时数据库里已经有这个批次，但诊断结果从未落进任何文档（全仓 grep 该批次 ID 只命中脚本本身，无落盘记录；来源 issue [#1363](https://github.com/bigbigraydeng-maker/magic-engine/issues/1363) 至今仍 **OPEN**，验收清单「跑通 18 条证据→M1 解释」「结果报 PM」两项都还没打勾）。**推进本条前必须先核对这个批次现状**（是否仍在、观测数、重跑一次拿到最新输出），再准确定义缺口到底是「历史数据」「已有运行结果未沉淀」，还是仅剩「自动排期 + 客户配置持久化」——避免对已存在的测量重复采购，也避免遗漏已有 CTS 结果；② CTS 专属 `entityProfile`（消歧锚点等）只在手工诊断脚本 `scripts/diagnose-cts-geo.ts` 里有一份草稿（字段值已由 PM 2026-09-04 确认，见 #1363），从没进过任何客户配置或被排期任务读取过；③ M1 的每周自动采集调度（`geo-remeasure`）自己代码注释承认还是「slice 3a 骨架，不调 provider、不花钱、无 cron」，slice 3b 未落地；④ 子牙在拆除清单 §7/§9.2 里点名「M1 缺 living query set 能力（边发现边追加跟踪问题），删 ai-tracker 前必须先补」，至今未补；⑤ 拆除清单 §9.1 点名「归因靶心」——ai-tracker 退役后没有任何东西再往 `flywheel_metrics.geo.query.mention_rate` 写数，而这条 metric 是诸葛亮 AI 可见度动作的 `expected_metric`，断供会让归因永久失效、`GEO-01` 异常规则和健康分 GEO 维度静默归零，§9.1 要求二选一且不许静默留空：(a) M1 侧补一条写入路径，或 (b) ROADMAP 登记该指标断供 + 配可见告警，并让下游区分「未测量」与「真的差」。**本次先让 [#1823](https://github.com/bigbigraydeng-maker/magic-engine/pull/1823)（`00466090`）落地为 ai-tracker 侧 bug 修复上线**（修的是子串误判，让**以后**新采集的数字变准，历史记录尚未回填，见 [CHANGELOG](./history/CHANGELOG.md) 同日条目；判断口径本身也跟 M1 并不等价——ai-tracker 把「回答里引用了客户网址」算作提及，M1（`src/lib/geo-module/m1.ts`）的口径是「网址引用 ≠ 提及」，还要求推荐语义、消歧锚点和置信度门槛，两套规则有意不同，见 [口径说明](./audits/2026-09-20-ai-visibility-client-rank-grounding.md#规则口径说明与-geo-解读模块的差异有意为之)）；M1 迁移单独按这条 P31.X.4a 排期，规模跟 A 级任务一样大，需要逐步 PO `go`，不在这次任务里做。
+
+  **别把这条只当成「CTS 一个客户的事」**：`ai-tracker-weekly` cron（`src/app/api/cron/ai-tracker-weekly/route.ts:50-102`）是全体客户共用的一个任务，只要客户有 enabled 的 query 就会被它每周跑到。2026-09-20 审计实际摸到的数据集除 CTS 外还有 **11 个**：Roman、Magic Lab Class、New Asian Logistics、Magic Lab、Shop Five、CYHB Fashion、Dixon Homes、IB Real Estate、Sandcastles Hotel、oztop、Kingston International English（见 [审计表](./audits/2026-09-20-ai-visibility-client-rank-grounding.md#一句话结论) 上方对照表）。**只把 CTS 迁到 M1、然后停掉整个 cron 或删表，会让这些客户里任何还在 active 的立刻停止新增 AI 可见度数据**——先核实这份名单里哪些客户现在还是活跃订阅，逐个要么迁到 M1（补 query set + entityProfile + 排期）、要么拿到 PO 明确的停测决定，不能只顾 CTS 一个。
+
+  **验收条件**：①-⑤全部前置缺口都要闭合，其中⑤不能只续写 `mention_rate` 一条——`writeTrackerFlywheelMetrics`（`src/lib/flywheel/metrics/writeTrackerMetrics.ts:6-8`）实际写三条 `flywheel_metrics.geo.*`：`query.mention_rate`、`engine.coverage`、`query.avg_rank`（后者喂 `src/lib/flywheel/health/score.ts:66-69` 的 GEO 健康分），必须三条一起续写或一起显式登记未测量 + 可见告警，只接一条会让健康分先拿陈旧值算、再突然缺维度改口径；并由 PO 明确 CTS 迁移后采用 ai-tracker 式「网址引用=提及」还是 M1 式「网址引用≠提及」判断口径，不得默认「口径已看齐」。**⑥ 还必须核对引擎覆盖范围**：ai-tracker 每周默认跑 `['openai', 'google']`（`src/lib/ai-tracker/orchestrator.ts:79`），而 M1 目前唯一真实 provider 适配器明确只认 OpenAI（`src/lib/geo-baseline/provider.ts:36-37`）——直接切换会让 Google 那部分静默从提及率/平均名次里消失，却可能被误读成正常的趋势变化（GEO 测量契约把 engine coverage 定义为所有指标的分母修正项，见 `docs/specs/2026-08-10-me2-geo-measurement-contract-v1.0.md:134`）。迁移前要么给 M1 补齐等价引擎覆盖，要么显式重置基线并把缺失引擎标「未测量」，不能让两套系统的数字被当成同一条连续曲线看。**若本条最终推进到真删 `ai_visibility_snapshots`/`ai_visibility_runs`/`ai_visibility_queries` 三张表，DROP 前必须同时满足至少三条硬前置，缺一不可**：(a) 归档——原始回答 `raw_response` **实际存在 `ai_visibility_runs` 表**（`supabase/migrations/20260430000002_ai_visibility_tracker.sql:45`），**不在** `ai_visibility_snapshots`（同文件 `:69-85` 该表没有这一列），拆除清单 §9.3 只写了导出 snapshots+queries 是不完整的表述——**且这三张表是全体客户共用的，不是 CTS 专属**：2026-09-20 只读重算摸过全部 6,596 条历史记录，至少涉及 CTS、NAL、Roman、Dixon 四个客户，裸删表会把非 CTS 客户的原始回答也一起不可逆抹掉。归档范围必须是**全部客户**的 `ai_visibility_runs`（含 `raw_response`）+ `ai_visibility_snapshots` + `ai_visibility_queries` 一起导出 JSON（CTS 存 `docs/clients/cts/`，其余客户存各自 `docs/clients/<client>/`）——**导出脚本必须用 `src/lib/supabase-paginate.ts` 的 `fetchAll`，不能直接单次查询**：Supabase/PostgREST 单次硬顶 1000 行且不报错，`ai_visibility_runs` 有 6,596 条，裸查询会静默只导出前 1000 条，验收不能只看「文件存在」，要按表、按客户核对导出行数与删除前的数据库计数一致；(b) 拆除清单 §6 步骤 2–4 列出的全部**活消费方**已重接完成，不能只做归档就删表——§4 点名的组 F（诊断打分）、组 H（博客选题）、组 I 第 2 项（FDE 月报）、组 M（`strategy/analyzer`）、组 N（主看板 donut），加上这次复审另外核实到、拆除清单本身没登记的 `src/lib/web-intelligence/competition-sources.ts:43-44`（付费 Web Intelligence 接口的竞对 AI 推荐表现字段）——全部改到 M1 或补齐「未测量」降级读，并用全仓 grep 全 token + 生产 `pg_stat` 复核确认零读写；(c) 三张表另有 3 处外键会挡住裸 `DROP TABLE`：`geo_directives.source_tracker_snapshot_id`→`ai_visibility_snapshots`、`blog_posts.source_query_id`→`ai_visibility_queries`、`content_strategy_items.source_query_id`→`ai_visibility_queries`（均 `ON DELETE SET NULL`，只管行删不管表删），直接加 `CASCADE` 会悄悄丢约束、留下指向已删表的死列，DROP 前必须先决定这三列怎么处理（迁移数据 / 显式去约束）。**这条 DROP 清单已经过好几轮复审修正，真要执行前必须重新完整审计一遍，不要把这几条当作齐全的清单直接抄。**
 - [ ] **P31.X.5** Retention / Reactivation intent（需先接通 CRM/EDM）
 - [ ] **P31.X.6** Initiative 类型扩展：Operations / Market Intelligence / Product / Partnerships
 - [ ] **P33.11** Goal 详情页 Initiative 卡片展开显示：关联 Campaign 数量 + action 完成率
@@ -1367,3 +1567,54 @@ Gate B 定的 `minSampleSize=3`，页面目前只会显示「数据还不够说�
 **🔴 唯一卡住的数字**：CTS + Oztop 过去 30 天真实外部 API 消耗（美元）仍未到手（v0.4 就要求过）。**在它到位之前 $199 / $499 的具体额度不许写进代码**；任一档毛利 < 40% 就得调额度或加价。免费档与 $39 档不受此约束，可以先跑。
 
 **⚠️ 对外仍挂着已作废的旧价**：公开收费页 `magic-engine-pricing.pages.dev` 还显示 NZ$500 / NZ$2,500 三档。源码不在当前主力 Mac 上（线上是 37KB 自包含 HTML，可 curl 抓下来当基线重建）。改页面前先解决 Cloudflare 账号权限：该项目在 `hello@magicengine.cloud` 名下，本机 wrangler 登录身份看不到它。
+
+---
+
+## AI 断电告警 · 上线后跟进（2026-09-23 开 PR，A 级；本体已做完，以下是**刻意没做**的部分）
+
+主体改动见该 PR：AI 账户级失效识别 + 落库 + 下发今日待办、卡死任务进失败邮件、
+`health.ts` 的 `failing` 接进待办、日报按「同任务同原因」去重。以下是两轮设计复审
+（子牙 / 魏征）点出、但按 Scope 闸「只实现当前调用方需要的最小契约」**故意留下**的：
+
+- [ ] **[P2] 验证 Cloudflare AI Gateway 到底代不代理 `/v1/responses`。**
+      现状：全仓 40+ 个走网关的调用方 100% 用 `chat.completions`，而 7 处 `responses.create`
+      **从来没有一次经过这个网关**（2026-09-23 核对，两组文件零交集）。所以这次收编它们时
+      传了 `bypassGateway: true`：只拿失败拦截、不换路由。
+      要做的事：拿真 key 对网关打一次 `responses.create`（**含 voice/knowledge 那个
+      `file_search` + `vector_store_ids`**），通了就去掉这个开关，它们才能进网关的日志和缓存。
+      不验就切 = 用一条没验证过的路由换掉七条在跑的链路，其中 6 处失败被 catch 吞掉。
+
+- [ ] **[P3] 失败邮件只看最近 24 小时，卡死超过 24 小时的轮次进不了它。**
+      今日待办那条按 48 小时窗口接住它，之后两边都看不见（attribution-cron 2026-09-02
+      那次卡了 4 天）。两个窗口怎么对齐值得单独想一次，别顺手拍一个数。
+
+- [ ] **[P3] `checkCronHealth()` 整体仍然没有单测。**
+      这次把「查某任务窗口内卡死行」抽成了可注入的窄接口（`StuckProber`）、
+      并给纯函数 `collapseStuckRuns` 补了 8 条断言，但**编排本身**（三个查询怎么合并成
+      HealthReport）还是没覆盖。照 `DownstreamProber` 那套把另外两个查询也抽成窄接口就能测。
+
+- [ ] **[P3] `src/lib/messenger/brief.ts:414` 仍然自己 `new OpenAI()`，绕开统一封装。**
+      归另一个窗口（它的 `fallbackBrief` 是「只挡钥匙缺失、挡不住 429」的同一个病）。
+      那条收口后，全仓就只剩 `ai-tracker/runners/perplexity.ts` 直连 —— 那个是 Perplexity，
+      本来就不该走 OpenAI 的封装。
+
+- [ ] **[P3] `voice/finalize.ts:131-137` 账户没钱时仍然安静回落 mock。**
+      这次只是把**信号**接到了断电记录上（PM 会看见「AI 账户没钱」），
+      但那一处自己的降级行为一个字没改。**别把「收编了」说成「这处不再静默」**，是两件事。
+
+- [ ] **[P2] 「卡死」的 60 分钟阈值对 Inngest 那几条长流程可能是误报。**
+      `health.ts` 里写的理由是「全仓最长 maxDuration 900 秒」—— 但 `maxDuration` 是
+      Vercel 的旋钮，我们跑在 Render 的 `next start` 上，**根本不执行它**，这个论据不成立。
+      实际反例（它们也写 `cron_run_logs`，新的失败邮件判据同样会扫到）：
+      `conversion-daily-pipeline` 最坏情况（100 块 × 退避 65 秒）远超 60 分钟；
+      `factory-creatomate-render`（15 分钟等事件 + 10 × 2 分钟轮询）最坏约 35-40 分钟。
+      要做的事：给 registry 加一个「本来就长跑」的标记，或对 Inngest 来源的任务用更长阈值。
+      **误报一旦成为常态，真出事那天也会被当噪音划掉** —— 这条不修迟早反噬。
+
+- [ ] **[P3] `makeSupabaseStuckProber` 查询报错时返回 `[]`，等于「没有卡死」。**
+      跟旁边的 `lastRunByJob` / `lastOutcome` 是同一个既有毛病（都吞错），
+      但这正是本文件反复声讨的「主动报平安」。照 `DownstreamProbe` 那样加一条 error 通道。
+
+- [ ] **[P3] 看板 `workflows-health/page.tsx:214` 的文案过期了。**
+      它写「**最近一次**挂着 running」，而现在 `startedAt` 是 48 小时窗口内**最早**那一轮；
+      而且新加的 `rounds`（卡了几轮）没渲染出来，看板比待办少一条信息。

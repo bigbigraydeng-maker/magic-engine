@@ -132,7 +132,7 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 | zhuge-weekly-recalculate | `0 3 * * 1` | `/api/cron/zhuge-recalculate` |
 | reputation-snapshots-weekly | `30 3 * * 1` | `/api/cron/reputation-snapshots-weekly` |
 | oztop-seo-optimizer | `0 5 * * 1` | `/api/cron/oztop-seo-optimizer?max=8` |
-| cts-seo-optimizer | `30 5 * * 1` | `/api/cron/cts-seo-optimizer` |
+| ~~cts-seo-optimizer~~ | ~~`30 5 * * 1`~~ | **已退役 2026-09-20**（PR #1812 从 render.yaml 删掉；路由代码留着备回滚但不再被调度）。由 Inngest 版「SEO 标题周循环 v1」接替，见 §4.3 `seo-meta-cycle-trigger` 行 |
 | agent-learning-rollup | `0 7 * * 1` | `/api/cron/agent-learning-rollup` |
 | ~~factory-stock-refill~~ | ~~`0 19 * * 1`~~ | **已暂停 2026-09-08**（PM 停抓图：抓来的图无人消费，白花 Apify 钱；render.yaml/registry 已注释） |
 | blog-weekly | `0 3 * * 2` | `/api/cron/blog-weekly` |
@@ -166,6 +166,7 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 |---|---|
 | `admin-key-expiry` | ❓ 需确认是有意停用还是漏配 |
 | `flywheel-seo-weekly` | ✅ **2026-09-07 上线**（PM 拍板开）。调度改由 Inngest 自带定时器：每周一 05:15 NZ 派单，一个客户一单跑。`/api/cron/flywheel-seo-weekly` 保留为手动补触发（只发事件、不自己干活）。⚠️ 新增 / 改 Inngest 函数后要去 Inngest 后台对 `/api/inngest` 手动 Sync 一次，否则安静地不跑 |
+| `seo-meta-cycle-trigger` | ✅ **有意不进 render.yaml**（2026-09-20 上线，PR #1812/#1814/#1816）。「SEO 标题周循环 v1」（每周挑 ≤3 个页面改标题/描述，开 PR 改客户网站仓库）真正的定时在 Inngest：`cloud-seo-meta-cycle-fanout` 每周一 05:30 UTC 派单 → `cloud-seo-meta-cycle-run-one` 一个客户一单跑六步。这个路由只是手动补触发：`POST`，Bearer `CRON_SECRET`，可带 `client_id`；带 `"dry_run": true`（此时 `client_id` 必填）= 只演练 1-4 步、结果直接在响应里返回，**不开 PR、不写任何表**。每客户开关 `clients.seo_config.meta_cycle_enabled`（默认关）；**CTS 目前是关的**（W38 事故后关闭，见 PR #1816），等 PM 看过一次演练结果再开。每步回执写 `cron_run_logs`，任务名 `seo-meta-cycle-step1-check-due` … `seo-meta-cycle-step6-completed`。`seo_meta_log` 新增列：`baseline_ctr/position/impressions`、`observed_ctr/impressions`、`outcome`、`checked_at`、`pr_url`、`applied_channel`（`wp_plugin` / `pr`）、`reverted_at`（已撤回的改动，回查和 90 天冷却都排除）。首跑事故见 PITFALLS D10 |
 | `memory-extractor` | ❓ 同上（Phase 23 Memory Layer）。⚠️ 注意：**它没被调度 ≠ 从没跑过** —— `client_learned_lessons` 里已有 21 行，是别的路径写进去的 |
 | `factory-review-sweeper` | ✅ **有意退役** —— 审核已搬到 `/dashboard/factory`（PR #581），Airtable 停用后该端点必 500 |
 
@@ -203,6 +204,7 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 | SEMrush | **已被 DataForSEO 取代** — 代码 0 引用（`SEMRUSH_DB` 除外） | **Keyword Intelligence** | **已废弃，一律改用 DataForSEO** |
 | Zapier | **已完全移除** | — | 已移除 |
 | **AI 可见度 / LLM 问答**（Perplexity · ChatGPT · Claude · Gemini） | 问 AI 看它怎么回答、引用谁 | — | **`src/lib/geo-baseline/`** · **`src/lib/industry-ai-visibility/`** · 契约在 `src/lib/geo-measurement/` |
+| TypeSafe Jev | 内容工厂成片文案品控判断（竞品品牌/占位字幕/人称口吻,2026-09-20 接入） | **Compliance Engine** | `src/lib/jev/client.ts`（fetch 封装,无 SDK） |
 
 > 🔴 **第 4 列是防重复造轮子用的**：任何要调外部 API 的动作（含调研脚本、一次性探针）之前先查这一列。2026-08-30 有过一次实例——做市场调研时手写脚本直调 DataForSEO 与 AI 可见度接口，而两者的封装早已存在，错误认知进而污染了后续两轮架构判断。
 

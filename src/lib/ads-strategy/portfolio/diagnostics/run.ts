@@ -1,7 +1,7 @@
 /**
  * 广告只读诊断 · 编排（ads IMPACT 阶段 1，设计 §3.3 + §14 M4–M9）。纯函数。
  *
- * 顺序：按账户建上下文（角色、实验排除）→ 共用账户只做账户级（D1、D7）→ 其余账户跑 D1/D3/D4/D5/D7/D8
+ * 顺序：按账户建上下文（角色、实验排除）→ 共用账户只做账户级/配置级（D1、D7、D9）→ 其余账户再跑 D3/D4/D5/D8
  * → 客户级体检（日报收件人、结果阶梯配置）。
  * 健康的一天输出为空：not_comparable 只在「本可能命中但判不了」时才出。
  *
@@ -14,6 +14,7 @@ import { diagnoseSpendNoResult } from './d3-spend-no-result'
 import { diagnoseUnharvestedAudience } from './d4-unharvested-audience'
 import { diagnoseBudgetResultMismatch } from './d5-budget-result-mismatch'
 import { diagnoseAccountHealth, diagnoseClientConfigHealth, diagnoseOutcomeTruthGap } from './d7-d8-health'
+import { diagnosePlacementLeak } from './d9-placement-leak'
 import type { Diagnosis, DiagnosisInput, DiagnosisRun, ExcludedEntity } from './types'
 
 export function runDiagnostics(input: DiagnosisInput): DiagnosisRun {
@@ -27,6 +28,13 @@ export function runDiagnostics(input: DiagnosisInput): DiagnosisRun {
     const d1 = diagnoseDeliveryStall(ctx, input.evaluatedAt)
     if (d1) diagnoses.push(d1)
     diagnoses.push(...diagnoseAccountHealth(ctx, input))
+    // D9 是配置检查（这个广告组自己设置对不对），不涉及"这条结果算谁的"的归因问题，理论上可以对共用账户也跑。
+    // 🔴 但实际上对共用账户没用：`snapshot-sync.ts` 对 `shared=true` 的账户整个跳过 campaign/adset/ad/audience
+    // 四层抓取（§14 M9），`ctx.adsets` 永远是空的——挪到这里只是让意图正确，不代表真的覆盖了共用账户
+    // （2026-09-22 代码复审发现，本条注释此前的说法是错的）。CTS 共用的个人账户 `act_2775766642787274`
+    // 里那条被污染的 `ThruPlay - NZ - Reels`（现在是 PAUSED，暂不算活跃风险）目前还照不到，
+    // 要覆盖它需要先解决"共用账户的广告组设置抓不抓、抓了归给哪个客户"这个更大的架构问题，不在这次改动范围内。
+    diagnoses.push(...diagnosePlacementLeak(ctx))
 
     if (account.shared) {
       // §14 M9：同一账户登记给多个客户，未落广告系列级归属表前只到账户级

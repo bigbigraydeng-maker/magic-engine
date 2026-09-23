@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { runCtsCrmSync } from '../cts-crm-sheet-sync-run'
+import { runCtsCrmSync, runCtsCrmSyncChunk, mergeCtsCrmSummaries, type CtsCrmSyncSummary } from '../cts-crm-sheet-sync-run'
 
 const sheet1Fixture = vi.fn()
 const crmFixture = vi.fn()
@@ -58,9 +58,12 @@ function fakeSupabase(seed: { contactIdentities?: Row[]; groupTours?: Row[] } = 
   client: SupabaseClient
   outcomes: Row[]
   audits: Row[]
+  /** insert 被真的调了几次——证明「已同步」是靠预查幂等键跳过的，不是靠撞 23505。 */
+  insertAttempts: { n: number }
 } {
   const outcomes: Row[] = []
   const audits: Row[] = []
+  const insertAttempts = { n: 0 }
   const contactIdentities = seed.contactIdentities ?? []
   const groupTours = seed.groupTours ?? []
 
@@ -94,11 +97,33 @@ function fakeSupabase(seed: { contactIdentities?: Row[]; groupTours?: Row[] } = 
       }
       if (table === 'me_sale_outcomes') {
         // 实测核实：insertOutcome() 对这张表只调用
-        // .insert(row).select('id').single()（cts-crm-sheet-sync-run.ts 第 144 行）。
+        // .insert(row).select('id').single()；loadExistingSourceRefs() 调用
+        // .select('id, source_ref').eq(client_id).eq(source_kind).not('source_ref','is',null)
+        //   .order('id').limit(n)[.gt('id', lastId)] 然后 await（2026-09-22 拆块新增）。
+        const refQuery = () => {
+          let lastId: string | null = null
+          const q = {
+            eq: () => q,
+            not: () => q,
+            order: () => q,
+            limit: () => q,
+            gt: (_col: string, v: string) => ((lastId = v), q),
+            then: (resolve: (r: { data: Row[]; error: null }) => unknown) =>
+              resolve({
+                data: outcomes
+                  .filter((o) => o.source_kind === 'crm_sheet_sync' && o.source_ref != null && (lastId == null || (o.id as string) > lastId))
+                  .map((o) => ({ id: o.id, source_ref: o.source_ref })),
+                error: null,
+              }),
+          }
+          return q
+        }
         return {
+          select: () => refQuery(),
           insert: (row: Row) => ({
             select: () => ({
               single: async () => {
+                insertAttempts.n++
                 const dup = outcomes.some(
                   (r) => r.client_id === row.client_id && r.source_kind === row.source_kind && r.source_ref === row.source_ref,
                 )
@@ -124,7 +149,7 @@ function fakeSupabase(seed: { contactIdentities?: Row[]; groupTours?: Row[] } = 
     // 实现完整 SupabaseClient 接口——四条链均已逐一对着源码核实（见各分支注释）。
   } as unknown as SupabaseClient
 
-  return { client, outcomes, audits }
+  return { client, outcomes, audits, insertAttempts }
 }
 
 beforeEach(() => {
@@ -268,3 +293,73 @@ describe('runCtsCrmSync', () => {
     expect(outcomes).toHaveLength(1)
   })
 })
+
+describe('分块（2026-09-22，conversion-daily-pipeline 拆块）', () => {
+  function twoLeads() {
+    sheet1Fixture.mockReturnValue([
+      sheet1Row({ createdTime: '2026-06-14T02:39:49-05:00', phone: 'p:+6421363001' }),
+      sheet1Row({ createdTime: '2026-06-14T02:39:49-05:00', phone: 'p:+6421363002' }),
+    ])
+    crmFixture.mockReturnValue([
+      crmRow({ entryDate: '14/06/2026', phone: 'p:+6421363001', tour: 'Best of China 15D' }),
+      crmRow({ entryDate: '14/06/2026', phone: 'p:+6421363002', tour: 'Best of China 15D' }),
+    ])
+  }
+
+  it('limit=1 → 两块各处理一行，游标/总行数/done 正确，合并后跟一次跑完一样', async () => {
+    twoLeads()
+    const { client, outcomes } = fakeSupabase()
+    const c1 = await runCtsCrmSyncChunk({ offset: 0, limit: 1, insertedSoFar: 0 }, { supabase: client })
+    expect(c1).toMatchObject({ nextOffset: 1, totalSheetRows: 2, insertedSoFar: 1, done: false })
+    expect(c1.summary).toMatchObject({ totalCrmRows: 1, insertedLeads: 1 })
+    const c2 = await runCtsCrmSyncChunk({ offset: c1.nextOffset, limit: 1, insertedSoFar: c1.insertedSoFar }, { supabase: client })
+    expect(c2).toMatchObject({ nextOffset: 2, insertedSoFar: 2, done: true })
+    expect(mergeCtsCrmSummaries(c1.summary, c2.summary)).toMatchObject({ totalCrmRows: 2, insertedLeads: 2 })
+    expect(outcomes).toHaveLength(2)
+  })
+
+  it('🔴 maxInsertsPerRun 跨块生效：insertedSoFar 已到上限 → 第二块一条都不写、标 cappedAtMaxInserts', async () => {
+    twoLeads()
+    const { client, outcomes } = fakeSupabase()
+    const c1 = await runCtsCrmSyncChunk({ offset: 0, limit: 1, insertedSoFar: 0 }, { supabase: client, maxInsertsPerRun: 1 })
+    const c2 = await runCtsCrmSyncChunk({ offset: 1, limit: 1, insertedSoFar: c1.insertedSoFar }, { supabase: client, maxInsertsPerRun: 1 })
+    expect(c2.summary).toMatchObject({ insertedLeads: 0, cappedAtMaxInserts: true })
+    expect(outcomes).toHaveLength(1)
+  })
+
+  it('offset 超过表尾 → 空块、done=true（表在两块之间被删短了也不会死循环）', async () => {
+    twoLeads()
+    const { client } = fakeSupabase()
+    const c = await runCtsCrmSyncChunk({ offset: 10, limit: 20, insertedSoFar: 0 }, { supabase: client })
+    expect(c).toMatchObject({ nextOffset: 2, totalSheetRows: 2, done: true })
+    expect(c.summary.totalCrmRows).toBe(0)
+  })
+
+  it('🔴 已同步的行靠预查幂等键跳过，不再逐行走联系人查找 + 撞唯一索引（子牙复审 M6：这才是真正省时间的地方）', async () => {
+    twoLeads()
+    const { client, insertAttempts } = fakeSupabase()
+    await runCtsCrmSync({ supabase: client })
+    expect(insertAttempts.n).toBe(2)
+    const second = await runCtsCrmSync({ supabase: client })
+    expect(second.skippedAlreadySynced).toBe(2)
+    expect(insertAttempts.n).toBe(2) // 第二次一次 insert 都没试
+  })
+
+  it('mergeCtsCrmSummaries：计数相加、搁置项按打码电话+团名去重、cappedAtMaxInserts 取或', () => {
+    const held = { phoneMasked: '***3598', tourInterest: 'Golden China', reason: '查不到价' }
+    const a: CtsCrmSyncSummary = { ...emptyLike(), totalCrmRows: 3, heldForManualReview: [held], insertErrors: [{ phoneMasked: '***1', error: 'x' }] }
+    const b: CtsCrmSyncSummary = { ...emptyLike(), totalCrmRows: 2, heldForManualReview: [held, { ...held, tourInterest: 'Silk Road' }], cappedAtMaxInserts: true }
+    const m = mergeCtsCrmSummaries(a, b)
+    expect(m.totalCrmRows).toBe(5)
+    expect(m.heldForManualReview).toHaveLength(2)
+    expect(m.insertErrors).toHaveLength(1)
+    expect(m.cappedAtMaxInserts).toBe(true)
+  })
+})
+
+function emptyLike(): CtsCrmSyncSummary {
+  return {
+    totalCrmRows: 0, excludedNoPhone: 0, excludedByNotes: 0, excludedNoDate: 0, insertedLeads: 0, insertedPurchases: 0,
+    skippedAlreadySynced: 0, heldForManualReview: [], contactNotLinked: 0, insertErrors: [], cappedAtMaxInserts: false,
+  }
+}

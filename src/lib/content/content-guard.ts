@@ -1,13 +1,17 @@
 // Pre-publish content guard — two checks the rubric's brand-fit score never catches:
 //   1. language-consistency (deterministic): untranslated fragments of another
 //      script inside a sentence, or whole sentences off the target language.
-//   2. cliche-opener (Copy Judge): generic marketing clichés instead of concrete copy.
+//   2. cliche-opener: generic marketing clichés instead of concrete copy, judged by
+//      the shared Jev connector (src/lib/jev/client.ts, packaged name "Compliance
+//      Engine" — never surface the vendor name in UI or client-facing copy).
 //
-// Fail-closed: any Copy Judge error ⇒ `needsHumanReview`, never a silent pass.
+// Fail-closed: any judgement error ⇒ `needsHumanReview`, never a silent pass.
+// The model half can be switched off with CONTENT_GUARD_CLICHE_DISABLED; the
+// deterministic language check always runs.
 // Pure function + one outbound read; no side effects, so no Inngest step needed.
 
-import { askCopyJudge } from '@/lib/ai/copy-judge-client'
-import { resolveContentGuardConfig } from '@/lib/content/content-guard-config'
+import { callJev, type JevQuestion } from '@/lib/jev/client'
+import { clicheCheckEnabled, resolveContentGuardConfig } from '@/lib/content/content-guard-config'
 import type { ContentGuardConfig, GuardLanguage } from '@/lib/content/content-guard-config'
 import type { DimensionScore, RubricResult } from '@/lib/content/quality-rubric'
 
@@ -41,10 +45,13 @@ const JUDGE_SNIPPET_CHARS = 1500
 /** Bound the work per call (long blogs): regex cost must stay linear-ish and small. */
 const MAX_GUARD_INPUT_CHARS = 20000
 
-const CLICHE_INSTRUCTIONS =
-  'The post opens with or leans on generic marketing clichés (e.g. "Unlock the power of", ' +
-  '"Elevate your", "Discover the magic", "Your gateway to success", "开启…新篇章", "赋能", "一站式解决方案") ' +
-  'instead of saying something concrete.'
+const QUESTION_CLICHE: JevQuestion = {
+  type: 'noul',
+  instructions:
+    'The post opens with or leans on generic marketing clichés (e.g. "Unlock the power of", ' +
+    '"Elevate your", "Discover the magic", "Your gateway to success", "开启…新篇章", "赋能", ' +
+    '"一站式解决方案") instead of saying something concrete.',
+}
 
 // ─── Language consistency (deterministic) ────────────────────────────────────
 
@@ -135,19 +142,18 @@ function languageDimension(target: GuardLanguage, findings: LanguageFinding[]): 
       `Rewrite fully in ${target === 'en' ? 'English' : 'Chinese'}.` }
 }
 
-// ─── Cliché opener (Copy Judge) ──────────────────────────────────────────────
+// ─── Cliché opener (Jev judgement) ───────────────────────────────────────────
 
 async function judgeCliche(
   text: string,
-  config: ContentGuardConfig,
 ): Promise<{ probability: number | null; error: string | null }> {
   try {
-    const answers = await askCopyJudge(
-      { post: text.slice(0, JUDGE_SNIPPET_CHARS) },
-      { cliche: { instructions: CLICHE_INSTRUCTIONS } },
-      { timeoutMs: config.judgeTimeoutMs },
-    )
-    return { probability: answers.cliche, error: null }
+    const result = await callJev({ post: text.slice(0, JUDGE_SNIPPET_CHARS) }, { cliche: QUESTION_CLICHE })
+    const p = result.answers.cliche?.noul
+    if (typeof p !== 'number' || !Number.isFinite(p) || p < 0 || p > 1) {
+      return { probability: null, error: 'judgement returned no usable answer' }
+    }
+    return { probability: p, error: null }
   } catch (err) {
     return { probability: null, error: err instanceof Error ? err.message : String(err) }
   }
@@ -176,11 +182,17 @@ export async function runContentGuard(
   try {
     const text = normaliseForLanguageCheck(content)
     const { target, findings } = checkNormalised(text, config, options.targetLanguage)
-    const { probability, error } = await judgeCliche(text, config)
+    // A deliberate switch-off is not an outage: the cliché dimension is dropped
+    // rather than failed, so operators can stop paying for it without sending
+    // every post to review. The deterministic language check always runs.
+    const enabled = clicheCheckEnabled()
+    const { probability, error } = enabled ? await judgeCliche(text) : { probability: null, error: null }
 
-    const dimensions = [languageDimension(target, findings), clicheDimension(probability, error, config)]
+    const dimensions = [languageDimension(target, findings)]
+    if (enabled) dimensions.push(clicheDimension(probability, error, config))
     const checksFailed = findings.length > 0 || (probability !== null && probability >= config.clicheThreshold)
     const status = checksFailed ? 'fail' : error ? 'unavailable' : 'pass'
+
 
     return {
       status,

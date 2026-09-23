@@ -144,7 +144,7 @@ async function lookupByKind(kind: KeyKind, hash: string): Promise<LookupRow | nu
   if (kind === 'client') {
     const { data, error } = await supabaseAdmin
       .from('client_api_keys')
-      .select('id, client_id, scopes')
+      .select('id, client_id, scopes, expires_at')
       .eq('key_hash', hash)
       .is('revoked_at', null)
       .maybeSingle()
@@ -153,6 +153,7 @@ async function lookupByKind(kind: KeyKind, hash: string): Promise<LookupRow | nu
       return 'error'
     }
     if (!data) return null
+    if (data.expires_at && Date.parse(data.expires_at) <= Date.now()) return null
     return {
       keyId: data.id as string,
       clientId: data.client_id as string,

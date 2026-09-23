@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-vi.mock('@/lib/ai/copy-judge-client', () => ({
-  askCopyJudge: vi.fn(),
+vi.mock('@/lib/jev/client', () => ({
+  callJev: vi.fn(),
 }))
 
-import { askCopyJudge } from '@/lib/ai/copy-judge-client'
+import { callJev } from '@/lib/jev/client'
 import {
   runContentGuard,
   checkLanguageConsistency,
@@ -17,7 +17,7 @@ import {
 import { DEFAULT_CONTENT_GUARD_CONFIG, resolveContentGuardConfig } from '../content-guard-config'
 import type { RubricResult } from '../quality-rubric'
 
-const mockJudge = vi.mocked(askCopyJudge)
+const mockJudge = vi.mocked(callJev)
 const CFG = DEFAULT_CONTENT_GUARD_CONFIG
 
 // Regression fixtures — real published posts flagged in the 2026-09-20 evaluation (n=54).
@@ -100,8 +100,8 @@ describe('checkLanguageConsistency (deterministic)', () => {
 describe('runContentGuard', () => {
   beforeEach(() => vi.resetAllMocks())
 
-  it('NAL title: fails on language and on cliché (Copy Judge p=0.88)', async () => {
-    mockJudge.mockResolvedValueOnce({ cliche: 0.88 })
+  it('NAL title: fails on language and on cliché (Jev noul 0.88)', async () => {
+    mockJudge.mockResolvedValueOnce({ answers: { cliche: { noul: 0.88 } } })
     const g = await runContentGuard(NAL_TITLE_1, { config: CFG })
     expect(g.status).toBe('fail')
     expect(g.needsHumanReview).toBe(true)
@@ -110,26 +110,26 @@ describe('runContentGuard', () => {
   })
 
   it.each([CLEAN_EN, CLEAN_ZH])('clean copy with a low cliché score passes: %s', async text => {
-    mockJudge.mockResolvedValueOnce({ cliche: 0.1 })
+    mockJudge.mockResolvedValueOnce({ answers: { cliche: { noul: 0.1 } } })
     const g = await runContentGuard(text, { config: CFG })
     expect(g.status).toBe('pass')
     expect(g.needsHumanReview).toBe(false)
   })
 
   it('cliché alone (clean language) fails at the configured threshold', async () => {
-    mockJudge.mockResolvedValueOnce({ cliche: 0.8 })
+    mockJudge.mockResolvedValueOnce({ answers: { cliche: { noul: 0.8 } } })
     const g = await runContentGuard(CLEAN_EN, { config: CFG })
     expect(g.status).toBe('fail')
   })
 
   it('cliché threshold is configuration, not hardcoded', async () => {
-    mockJudge.mockResolvedValueOnce({ cliche: 0.88 })
+    mockJudge.mockResolvedValueOnce({ answers: { cliche: { noul: 0.88 } } })
     const g = await runContentGuard(CLEAN_EN, { config: { ...CFG, clicheThreshold: 0.9 } })
     expect(g.status).toBe('pass')
   })
 
-  it('fail-closed: Copy Judge error ⇒ unavailable + needs human review, never pass', async () => {
-    mockJudge.mockRejectedValueOnce(new Error('Copy Judge HTTP 503'))
+  it('fail-closed: judgement error ⇒ unavailable + needs human review, never pass', async () => {
+    mockJudge.mockRejectedValueOnce(new Error('jev HTTP 503'))
     const g = await runContentGuard(CLEAN_EN, { config: CFG })
     expect(g.status).toBe('unavailable')
     expect(g.needsHumanReview).toBe(true)
@@ -153,7 +153,7 @@ describe('mergeGuardIntoRubric / hasRetryableFailure', () => {
   beforeEach(() => vi.resetAllMocks())
 
   it('guard failure forces pass=false but keeps the rubric overallScore', async () => {
-    mockJudge.mockResolvedValueOnce({ cliche: 0.1 })
+    mockJudge.mockResolvedValueOnce({ answers: { cliche: { noul: 0.1 } } })
     const guard = await runContentGuard(NAL_TITLE_1, { config: CFG })
     const merged = mergeGuardIntoRubric(PASSING_RUBRIC, guard)
     expect(merged.pass).toBe(false)
@@ -190,6 +190,34 @@ describe('mergeGuardIntoRubric / hasRetryableFailure', () => {
   })
 })
 
+describe('cliché kill switch', () => {
+  beforeEach(() => vi.resetAllMocks())
+
+  it('CONTENT_GUARD_CLICHE_DISABLED=true skips the model call; language check still fails the NAL title', async () => {
+    vi.stubEnv('CONTENT_GUARD_CLICHE_DISABLED', 'true')
+    const g = await runContentGuard(NAL_TITLE_1, { config: CFG })
+    expect(mockJudge).not.toHaveBeenCalled()
+    expect(g.status).toBe('fail')
+    expect(g.dimensions.find(d => d.dimension === LANGUAGE_DIMENSION)?.pass).toBe(false)
+    vi.unstubAllEnvs()
+  })
+
+  it('a deliberate switch-off is not an outage: clean copy passes, cliché dimension dropped', async () => {
+    vi.stubEnv('CONTENT_GUARD_CLICHE_DISABLED', 'true')
+    const g = await runContentGuard(CLEAN_EN, { config: CFG })
+    expect(g.status).toBe('pass')
+    expect(g.dimensions.map(d => d.dimension)).toEqual([LANGUAGE_DIMENSION])
+    vi.unstubAllEnvs()
+  })
+
+  it('a real judgement failure is still fail-closed (switch off ≠ provider down)', async () => {
+    mockJudge.mockRejectedValueOnce(new Error('jev down'))
+    const g = await runContentGuard(CLEAN_EN, { config: CFG })
+    expect(g.status).toBe('unavailable')
+    expect(g.needsHumanReview).toBe(true)
+  })
+})
+
 describe('resolveContentGuardConfig', () => {
   it('reads env overrides and ignores out-of-range values', () => {
     const cfg = resolveContentGuardConfig({
@@ -200,7 +228,7 @@ describe('resolveContentGuardConfig', () => {
     expect(cfg.maxEmbeddedLatinWords).toBe(DEFAULT_CONTENT_GUARD_CONFIG.maxEmbeddedLatinWords)
     expect(resolveContentGuardConfig({ CONTENT_GUARD_CLICHE_THRESHOLD: '1.5' }).clicheThreshold).toBe(0.8)
     expect(resolveContentGuardConfig({ CONTENT_GUARD_CLICHE_THRESHOLD: '0' }).clicheThreshold).toBe(0.8)
-    expect(resolveContentGuardConfig({ CONTENT_GUARD_JUDGE_TIMEOUT_MS: '0x10' }).judgeTimeoutMs).toBe(8000)
+    expect(resolveContentGuardConfig({ CONTENT_GUARD_MAX_EMBEDDED_CJK_CHARS: '0x10' }).maxEmbeddedCjkChars).toBe(0)
   })
 
   it('code overrides are validated too (NaN cannot disable the cliché check)', () => {
