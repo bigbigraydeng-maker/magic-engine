@@ -141,10 +141,13 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     })
   )
 
-  // Optionally flip package to 'approved' (enables downstream publish workflow)
+  // Optionally flip package to 'approved' (enables downstream publish workflow).
+  // 只要还有 skipped（标红待复核）或 failed（写库失败）没处理完，包就不能变
+  // 「已批准」——仪表盘和详情页都只把 ready_for_review 算进待审核队列，一旦
+  // 提前标成 approved，这些没处理完的内容就会跟着退出审核队列，没人再看。
   let packageStatus = pkg.status as string
   const shouldApprove = body.approve === true
-  if (shouldApprove && scheduled > 0 && pkg.status !== 'approved') {
+  if (shouldApprove && scheduled > 0 && skipped.length === 0 && failed === 0 && pkg.status !== 'approved') {
     const { data: updated } = await supabaseAdmin
       .from('production_packages')
       .update({ status: 'approved' })

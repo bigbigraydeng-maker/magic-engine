@@ -80,6 +80,10 @@ describe('production package bulk scheduling respects the pre-publish content gu
     // Exactly one content_posts row was written, and it was the clean one.
     expect(postUpdate.update).toHaveBeenCalledTimes(1)
     expect(postUpdate.eq).toHaveBeenCalledWith('id', 'clean')
+    // 混合批次里还有一条被标红没处理完——包不能跟着改成 approved，
+    // 不然它会跟着退出待审核队列，没人再看那条标红内容（Codex 复审）。
+    expect(json.packageStatus).toBe('ready_for_review')
+    expect(pkgUpdate.update).not.toHaveBeenCalled()
   })
 
   it('refuses the whole batch (409, nothing written) when every post is flagged', async () => {

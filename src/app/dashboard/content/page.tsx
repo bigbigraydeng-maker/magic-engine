@@ -8,6 +8,7 @@ import { ZhugeWorkbenchFab } from '@/components/workbench/ZhugeWorkbenchFab';
 import { ZhugeWorkbenchDrawer } from '@/components/workbench/ZhugeWorkbenchDrawer';
 import { GuardBadge, GuardReviewPanel } from '@/components/content/GuardBadge';
 import type { PublicGuardFlag } from '@/lib/content/guard-receipt';
+import { LINKEDIN_PROGRESS_SOURCE } from '@/lib/linkedin-progress/constants';
 
 interface Client {
   id: string;
@@ -35,6 +36,8 @@ interface ContentPost {
   execution_item_id?: string | null;
   /** 发布前自检结果。null = 这条没跑过自检，不是「查过没问题」。 */
   guard?: PublicGuardFlag | null;
+  /** 内容来源标记，例如 LINKEDIN_PROGRESS_SOURCE 标出的纯文本 LinkedIn 进度贴。 */
+  source?: string | null;
 }
 
 interface ExecutionItemLite {
@@ -709,9 +712,38 @@ export default function ContentBoardPage() {
    * （409），而这里恰恰是「我已经看过红旗、我确认」的那个出口；复用批量接口
    * 等于把人堵死：标红的内容既批不掉、在这一屏也改不了（子牙 / 魏征复审）。
    * 打回走的已经是这条单条路（见 handleRejectWithNotes），批准跟它对齐。
+   *
+   * LinkedIn 进度贴（source === LINKEDIN_PROGRESS_SOURCE）是例外：它是纯文本贴，
+   * 真正调 scheduleSocialPost 发出去的逻辑只在 Content Factory 的 confirm 分支
+   * 里（见 content-factory/[postId]/route.ts）。这里如果只是把状态 PATCH 成
+   * approved，帖子会显示"已批准"但从没真正发布——批量发布还要求有视觉资产，
+   * 这条文本贴永远进不去那条路，两小时后被待办巡检当成发布失败（Codex 复审）。
    */
   const approveSingle = async (id: string) => {
     const prevPosts = posts;
+    const target = posts.find(p => p.id === id);
+    if (target?.source === LINKEDIN_PROGRESS_SOURCE) {
+      setBatchMsg('');
+      try {
+        const res = await fetch(`/api/clients/${target.client_id}/content-factory/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'confirm' }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
+        const newStatus = json.post?.status ?? 'scheduled';
+        setPosts(prev => {
+          const mapped = prev.map(p => p.id === id ? { ...p, status: newStatus } : p);
+          if (!selectedStatus) return mapped;
+          return mapped.filter(p => selectedStatus.split(',').includes(p.status));
+        });
+        setBatchMsg('✓ 已批准并发布这一条');
+      } catch (err) {
+        setBatchMsg(`✗ ${(err as Error).message}`);
+      }
+      return;
+    }
     setPosts(prev => {
       const mapped = prev.map(p => p.id === id ? { ...p, status: 'approved' } : p);
       if (!selectedStatus) return mapped;
