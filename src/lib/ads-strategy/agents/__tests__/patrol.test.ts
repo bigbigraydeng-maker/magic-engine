@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { resolveCompleteness, buildHeadline, capturesComplete } from '../patrol'
+import { resolveCompleteness, buildHeadline, capturesComplete, dropProblemsSupersededByOpportunities } from '../patrol'
 import type { AccountInput, CaptureCoverage, Diagnosis } from '../../portfolio/diagnostics/types'
 import type { DigestGoalContext } from '../../portfolio/internal-digest'
 import type { GoalPace } from '../../goal-pace'
@@ -96,6 +96,55 @@ function goalWith(verdict: GoalPace['verdict']): DigestGoalContext {
     pace: { expectedToDate: 33, actualToDate: 20, gapPct: -39, projectedEnd: 60, verdict, reason: 'r' },
   }
 }
+
+function withUnit(d: Diagnosis, id: string): Diagnosis {
+  return { ...d, units: [{ level: 'adset', id, name: id, adAccountId: 'act_1' }] }
+}
+
+describe('dropProblemsSupersededByOpportunities — D5 ⊇ O3 不要两栏各说一遍', () => {
+  it('同一个广告组同时被 D5 和 O3 命中 → 只留 O3，D5 那张不重复显示', () => {
+    const r = dropProblemsSupersededByOpportunities(
+      [withUnit(hit('D5'), 'as_a'), withUnit(hit('D3'), 'as_a')],
+      [withUnit(hit('O3'), 'as_a')],
+    )
+    expect(r.supersededCount).toBe(1)
+    expect(r.problems.map(p => p.code)).toEqual(['D3'])
+  })
+
+  it('D5 命中的是别的广告组 → 照常保留（不能一见 O3 就全砍）', () => {
+    const r = dropProblemsSupersededByOpportunities(
+      [withUnit(hit('D5'), 'as_b')],
+      [withUnit(hit('O3'), 'as_a')],
+    )
+    expect(r.supersededCount).toBe(0)
+    expect(r.problems.map(p => p.code)).toEqual(['D5'])
+  })
+
+  it('只丢 D5，不丢别的诊断码（O3 只跟 D5 同源）', () => {
+    const r = dropProblemsSupersededByOpportunities(
+      [withUnit(hit('D1'), 'as_a'), withUnit(hit('D4'), 'as_a')],
+      [withUnit(hit('O3'), 'as_a')],
+    )
+    expect(r.supersededCount).toBe(0)
+    expect(r.problems).toHaveLength(2)
+  })
+
+  it('O3 是 not_comparable 时不去重（没真命中就没重复一说）', () => {
+    const r = dropProblemsSupersededByOpportunities(
+      [withUnit(hit('D5'), 'as_a')],
+      [withUnit(notComparable('O3'), 'as_a')],
+    )
+    expect(r.supersededCount).toBe(0)
+    expect(r.problems).toHaveLength(1)
+  })
+
+  it('没有任何机会时原样返回', () => {
+    const problems = [withUnit(hit('D5'), 'as_a')]
+    const r = dropProblemsSupersededByOpportunities(problems, [])
+    expect(r.problems).toEqual(problems)
+    expect(r.supersededCount).toBe(0)
+  })
+})
 
 describe('buildHeadline — 一句人话', () => {
   it('有问题也有机会 → 两样都报', () => {

@@ -42,6 +42,7 @@ export interface GrowthStateView {
     problems?: GrowthFinding[]
     opportunities?: GrowthFinding[]
     opportunitiesSkippedReason?: string | null
+    problemsSupersededByOpportunities?: number
     goal?: { title: string; label: string; target: number; dayIndex: number; totalDays: number } | null
   } | null
 }
@@ -176,6 +177,13 @@ export default function GrowthPanel({ state }: { state: GrowthStateView | null |
               : <div className="space-y-2">{opportunities.map((f, i) => <FindingCard key={`${f.code}-${i}`} f={f} kind="opportunity" />)}</div>}
         </section>
       </div>
+
+      {(state.payload?.problemsSupersededByOpportunities ?? 0) > 0 && (
+        <p className="text-xs text-gray-400">
+          有 {state.payload!.problemsSupersededByOpportunities} 条「钱和结果错配」讲的是右边同一条广告组，
+          已合并到右栏显示，避免同一件事在两边各说一遍。
+        </p>
+      )}
 
       <p className="text-xs text-gray-300 text-center">
         巡察日期 {state.date} · 只读，系统这一段不改任何广告和预算

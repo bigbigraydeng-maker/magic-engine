@@ -85,6 +85,42 @@ export function capturesComplete(accounts: readonly AccountInput[]): boolean {
   return accounts.every(a => a.latestCaptures.every(c => c.skipped_shared || c.complete))
 }
 
+/**
+ * D5 与 O3 的方向性重叠去重（子牙 WP1 复审 2026-09-24 查出，已核实）。
+ *
+ * D5 的筛选用 `Math.abs(resultShare - spendShare)` —— 两侧都报；O3 只报
+ * `resultShare - spendShare` 为正的那一侧。两边共用同一组 `COMPARABLE_ROLES`、
+ * 同一套二项检验 + BH 修正、同一对阈值常量，所以数学上 **O3 ⊆ D5**：
+ * 每一条 O3 命中必然也是一条 D5 命中。
+ *
+ * 不去重的话，同一条广告组同一天会同时出现在经营视图的「要看的事」和
+ * 「可以加力的地方」两栏，而且说法相反（一个说错配、一个说该加钱），PM 无从判断。
+ *
+ * 只丢 D5 那张，留 O3：后者带方向、能直接对应到动作。
+ * 🔴 只作用于经营视图。现有技术版日报（runPortfolioDiagnostics → internal-digest）
+ *    那条链路完全不经过这里，D5 在那边照旧全量上报，行为零变化。
+ */
+export function dropProblemsSupersededByOpportunities(
+  problems: readonly Diagnosis[],
+  opportunities: readonly Diagnosis[],
+): { problems: Diagnosis[]; supersededCount: number } {
+  const o3Units = new Set(
+    opportunities
+      .filter(o => o.code === 'O3' && o.status === 'hit')
+      .flatMap(o => o.units.map(u => u.id)),
+  )
+  if (o3Units.size === 0) return { problems: [...problems], supersededCount: 0 }
+
+  let supersededCount = 0
+  const kept = problems.filter(p => {
+    const duplicate =
+      p.code === 'D5' && p.status === 'hit' && p.units.length > 0 && p.units.every(u => o3Units.has(u.id))
+    if (duplicate) supersededCount += 1
+    return !duplicate
+  })
+  return { problems: kept, supersededCount }
+}
+
 /** 存进 `ads_growth_states.payload` 的东西。看板和日报都读这个形状。 */
 export interface GrowthStatePayload {
   headline: string
@@ -94,6 +130,8 @@ export interface GrowthStatePayload {
   opportunities: Diagnosis[]
   /** 机会整段没跑时的人话原因；跑了就是 null。 */
   opportunitiesSkippedReason: string | null
+  /** 因为同一单位已在「可以加力的地方」出现而没在「要看的事」里重复显示的条数（D5 ⊇ O3）。 */
+  problemsSupersededByOpportunities: number
   excluded: ExcludedEntity[]
   goal: DigestGoalContext | null
   evaluatedAt: string
@@ -160,13 +198,20 @@ export async function buildGrowthState(
 
     const goal = await buildDigestGoalContext(clientId, date)
 
+    // O3 ⊆ D5：同一单位不要在两栏里各说一遍（见 dropProblemsSupersededByOpportunities）。
+    const { problems, supersededCount } = dropProblemsSupersededByOpportunities(
+      diagnosisRun.diagnoses,
+      opportunityRun.opportunities,
+    )
+
     const payload: GrowthStatePayload = {
-      headline: buildHeadline(diagnosisRun.diagnoses, opportunityRun.opportunities, completeness.completeness, goal),
+      headline: buildHeadline(problems, opportunityRun.opportunities, completeness.completeness, goal),
       dataCompleteness: completeness.completeness,
       completenessReasons: completeness.reasons,
-      problems: diagnosisRun.diagnoses,
+      problems,
       opportunities: opportunityRun.opportunities,
       opportunitiesSkippedReason: opportunityRun.skippedReason,
+      problemsSupersededByOpportunities: supersededCount,
       excluded: diagnosisRun.excluded,
       goal,
       evaluatedAt,
@@ -177,7 +222,7 @@ export async function buildGrowthState(
         client_id: clientId,
         date,
         payload,
-        problems_count: diagnosisRun.diagnoses.filter(d => d.status === 'hit').length,
+        problems_count: problems.filter(d => d.status === 'hit').length,
         opportunities_count: opportunityRun.opportunities.filter(d => d.status === 'hit').length,
         goal_pace: goal?.pace ?? null,
         data_completeness: completeness.completeness,
