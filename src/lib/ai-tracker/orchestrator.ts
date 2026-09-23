@@ -132,27 +132,30 @@ export async function runTracker(
     console.log(`[runTracker] Engine ${engine} completed: succeeded=${result.runs_succeeded}, failed=${result.runs_failed}`)
   }
 
-  // 4. Aggregate weekly snapshot (only if we got at least one successful run)
+  // 4. Aggregate weekly snapshot — always attempt, even when every call
+  // failed this pass. That still upserts an explicit total_runs=0 row for
+  // the week, which is what lets the diagnostic collector tell "no data
+  // this week" apart from "tracker never enabled" instead of silently
+  // falling back to last week's stale snapshot.
   console.log('[runTracker] Aggregating snapshot...')
-  if (result.runs_succeeded > 0) {
-    const agg = await aggregateSnapshot(client.id, {
-      brandName,
-      domain: client.domain,
-      aliases: client.brand_aliases,
-      geoAnchors: client.brand_geo_anchors,
-    })
-    result.snapshot_id = agg?.snapshotId ?? null
+  const agg = await aggregateSnapshot(client.id, {
+    brandName,
+    domain: client.domain,
+    aliases: client.brand_aliases,
+    geoAnchors: client.brand_geo_anchors,
+  })
+  result.snapshot_id = agg?.snapshotId ?? null
 
-    // 5. Write GEO flywheel metrics so attribution job can compute outcomes
-    if (agg) {
-      await writeTrackerFlywheelMetrics(client.id, {
-        snapshotId: agg.snapshotId,
-        mentionsCount: agg.mentionsCount,
-        totalRuns: agg.totalRuns,
-        avgRank: agg.avgRank,
-        engineCoverage: agg.engineCoverage,
-      })
-    }
+  // 5. Write GEO flywheel metrics so attribution job can compute outcomes
+  // (writeTrackerFlywheelMetrics no-ops when totalRuns is 0)
+  if (agg) {
+    await writeTrackerFlywheelMetrics(client.id, {
+      snapshotId: agg.snapshotId,
+      mentionsCount: agg.mentionsCount,
+      totalRuns: agg.totalRuns,
+      avgRank: agg.avgRank,
+      engineCoverage: agg.engineCoverage,
+    })
   }
 
   result.total_latency_ms = Date.now() - startTime
@@ -416,15 +419,21 @@ async function aggregateSnapshot(
 ): Promise<AggregateResult | null> {
   const weekOf = mondayOfThisWeek().toISOString().slice(0, 10) // YYYY-MM-DD
 
-  // Pull only successful runs for this client this week.
+  // Pull only successfully-parsed runs for this client this week.
   // Failed calls (429 / timeout / etc.) have error_message set and
   // client_brand_rank null — including them dilutes mentionRate. §9.1
+  // Runs where the runner succeeded but the parser failed/timed out carry
+  // parse_error_message instead, with error_message left null and rank left
+  // at its default empty/null state — those are just as unmeasurable and
+  // must be excluded the same way, or a parser outage silently depresses
+  // the mention rate instead of an API outage.
   const weekStart = new Date(weekOf + 'T00:00:00.000Z').toISOString()
   const { data: runs, error } = await supabaseAdmin
     .from('ai_visibility_runs')
     .select('ai_engine, ai_model, client_brand_rank, brands_mentioned')
     .eq('client_id', clientId)
     .is('error_message', null)
+    .is('parse_error_message', null)
     .gte('ran_at', weekStart)
 
   if (error || !runs) return null
