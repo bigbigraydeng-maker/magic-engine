@@ -39,7 +39,8 @@ export function normaliseInsight(row: Record<string, unknown>, conversion: strin
   const metrics = { spend, impressions, clicks, reach: numeric(row.reach), frequency: numeric(row.frequency),
     ctr: ratio(clicks, impressions), cpc: ratio(spend, clicks), cpm: ratio(spend, impressions,1000),
     leads, cpl: ratio(spend, leads), conversions, cost_per_conversion: ratio(spend, conversions) }
-  return { ...Object.fromEntries(['account_id','campaign_id','campaign_name','adset_id','adset_name','ad_id','ad_name','date_start','date_stop','age','gender']
+  return { ...Object.fromEntries(['account_id','campaign_id','campaign_name','adset_id','adset_name','ad_id','ad_name','date_start','date_stop',
+    'age','gender','publisher_platform','platform_position','device_platform','country']
     .filter(key => typeof row[key] === 'string').map(key => [key, row[key]])), ...metrics,
     availability: { metrics:Object.fromEntries(Object.entries(metrics).map(([name,value])=>[name,value===null ? 'not_reported_or_undefined' : 'available'])),
       video:videoRequested ? (starts === null ? 'not_reported_may_be_inapplicable_or_suppressed' : 'available') : 'not_requested' },
