@@ -356,9 +356,12 @@ describe('AiVisibilityCollector — failed probe is "not measured", not "zero"',
     ).collect(CLIENT_ID, DOMAIN, KEYWORDS)
 
     expect(findings.find(x => x.finding_type === 'brand_not_mentioned')).toBeUndefined()
-    // Falls back to the honest "we have never tracked this" signal instead.
+    // A probe that ran but failed (429 etc.) is a transient measurement
+    // failure, not evidence tracking was never configured — must not surface
+    // the "not tracked / needs configuring" finding either, since that is
+    // just as fabricated as reporting a measured zero.
     expect(score).toBeNull()
-    expect(findings.find(x => x.finding_type === 'ai_visibility_not_tracked')).toBeDefined()
+    expect(findings).toEqual([])
   })
 
   it('does NOT emit live_probe_no_mention when every probe question failed', async () => {

@@ -83,6 +83,15 @@ export class AiVisibilityCollector {
         if (probe) {
           return this.buildFromLiveProbe(clientId, probe)
         }
+        // The probe ran and is configured (not skipped for missing API key /
+        // no queries) but failed to measure anything usable — e.g. 429 or
+        // timeout on every question. That is a transient measurement failure,
+        // not evidence tracking was never enabled. Fabricating the "not
+        // tracked / needs configuring" finding here would be the exact bug
+        // this file already guards against for the mentions-count path.
+        if (rawProbe && !rawProbe.skipped) {
+          return { score: null, findings: [] }
+        }
         return {
           score: null,
           findings: [this.makeAiVisibilityNotTrackedFinding(clientId)],
