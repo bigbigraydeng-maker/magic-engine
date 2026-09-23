@@ -32,6 +32,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { bulkKeywordVolume } from '@/lib/dataforseo/labs'
 import { locationCodeForDb } from '@/lib/seo-intelligence/keyword-snapshots'
+import {
+  partitionConclusiveSnapshots,
+  summariseFailureCodes,
+} from '@/lib/industry-ai-visibility/snapshot-conclusive'
 import { resolveIndustryCode, matchAliases } from './industry-mapping'
 
 export type AutoFetchResult =
@@ -450,8 +454,18 @@ async function fetchFormSubmissions(
 //   - industry not in mapping table → ok:false 'industry "X" not mapped...'
 //   - no snapshot for this industry yet → ok:false 'no AI visibility snapshots'
 //   - latest snapshot < today → ok:false 'not refreshed today' (魏征 P1-2)
-//   - question count < 5 → ok:false 'insufficient questions (n<5)'
-//   - 0 hits → ok:true value:0 (REAL value, brand genuinely absent)
+//   - CONCLUSIVE question count < 5 → ok:false 'insufficient conclusive questions'
+//   - 0 hits among conclusive rows → ok:true value:0 (REAL value, brand absent)
+//
+// 2026-09-23 红线修复 (docs/PITFALLS.md D12, 同一个病的第二处):
+// Snapshot rows whose probe FAILED (OpenAI quota exhausted, DataForSEO error)
+// carry empty top3_brands. Counting them in the denominator silently drags the
+// client's score DOWN and makes "我们没测成" look like "AI 从来不提我们" —
+// the strategy layer then prescribes off a number that was never measured.
+// Both numerator and denominator now come from conclusive rows only, and the
+// n<5 gate counts conclusive questions, not raw rows. See
+// src/lib/industry-ai-visibility/snapshot-conclusive.ts for why the predicate
+// is NOT simply `error_code IS NULL` ('no_ai_overview' is a real zero).
 
 interface ClientRow {
   name: string | null
@@ -462,6 +476,7 @@ interface ClientRow {
 interface SnapshotRow {
   question_id: string
   top3_brands: string[] | null
+  error_code: string | null
 }
 
 async function fetchAiVisibilityScore(
@@ -520,25 +535,33 @@ async function fetchAiVisibilityScore(
   // 5. Pull today's snapshots for this industry
   const { data: snaps, error: snapsErr } = await supabase
     .from('industry_ai_visibility_snapshots')
-    .select('question_id, top3_brands, industry_ai_visibility_questions!inner(industry_code)')
+    .select('question_id, top3_brands, error_code, industry_ai_visibility_questions!inner(industry_code)')
     .eq('industry_ai_visibility_questions.industry_code', industryCode)
     .eq('collected_date', latestDate)
 
   if (snapsErr) return { ok: false, reason: `snapshot query failed: ${snapsErr.message}` }
 
   const snapshots = (snaps ?? []) as SnapshotRow[]
-  const uniqueQuestions = new Set(snapshots.map(s => s.question_id))
+
+  // 5b. Drop probes that never completed — they are "not measured", not zero.
+  const { conclusive, failed } = partitionConclusiveSnapshots(snapshots)
+  const uniqueQuestions = new Set(conclusive.map(s => s.question_id))
 
   if (uniqueQuestions.size < 5) {
+    const failureNote = failed.length > 0
+      ? ` ${failed.length}/${snapshots.length} probes failed (${summariseFailureCodes(failed)}) — ` +
+        `score is NOT COMPUTABLE, not zero.`
+      : ''
     return {
       ok: false,
-      reason: `insufficient questions for industry "${industryCode}" (n=${uniqueQuestions.size} < 5)`,
+      reason: `insufficient conclusive AI visibility probes for industry "${industryCode}" ` +
+              `(n=${uniqueQuestions.size} < 5 on ${latestDate}).${failureNote}`,
     }
   }
 
-  // 6. Count questions where brand appears in top3
+  // 6. Count questions where brand appears in top3 — conclusive rows only
   const hitQuestions = new Set<string>()
-  for (const s of snapshots) {
+  for (const s of conclusive) {
     const top3 = s.top3_brands ?? []
     const matched = top3.some(b => matchAliases(b, c.name as string, c.brand_aliases))
     if (matched) hitQuestions.add(s.question_id)
@@ -546,12 +569,18 @@ async function fetchAiVisibilityScore(
 
   const score = Math.round((hitQuestions.size / uniqueQuestions.size) * 100)
 
+  // Disclose partial coverage: a score off 5 conclusive probes is weaker
+  // evidence than the same score off 18, and the reader must be able to see it.
+  const coverageNote = failed.length > 0
+    ? ` (${failed.length}/${snapshots.length} probes failed and were excluded)`
+    : ''
+
   return {
     ok: true,
     value: score,
     source: 'auto.ai_visibility_top3',
     snapshot_date: latestDate,
-    label: `${score}/100 — top3 in ${hitQuestions.size}/${uniqueQuestions.size} ${industryCode} questions`,
+    label: `${score}/100 — top3 in ${hitQuestions.size}/${uniqueQuestions.size} ${industryCode} questions${coverageNote}`,
   }
 }
 

@@ -19,6 +19,7 @@ import {
   collectChatGPT,
   collectQuestionGooglePair,
 } from './collector'
+import { isSnapshotConclusive } from './snapshot-conclusive'
 import type {
   CollectionResult,
   Platform,
@@ -346,6 +347,23 @@ function snapshotRow(
   runId: string,
   r: CollectionResult,
 ): Record<string, unknown> {
+  // 2026-09-23: failed probes STAY in the table on purpose — they carry
+  // error_code and are the audit trail for "this batch never ran" (see
+  // playbook-geo-general §八: 失败批次要如实留存). The cost of keeping them is
+  // that `ok` is NOT a column, so every downstream reader has to rebuild it
+  // from error_code via isSnapshotConclusive(). Guard that reconstruction
+  // here: if the collector ever returns ok:true with an error_code that the
+  // allowlist doesn't know, downstream would silently score a failed probe
+  // as a real zero. Loud log now beats a wrong client number later.
+  if (r.ok !== isSnapshotConclusive({ error_code: r.error_code })) {
+    console.error(
+      `[industry-ai-visibility] conclusiveness drift on ${platform}: ` +
+      `collector ok=${r.ok} but error_code=${r.error_code ?? 'null'}. ` +
+      `Add this code to SUCCESSFUL_EMPTY_ERROR_CODES in snapshot-conclusive.ts, ` +
+      `or downstream scoring will misread it.`,
+    )
+  }
+
   return {
     question_id: questionId,
     platform,
