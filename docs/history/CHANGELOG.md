@@ -5,6 +5,24 @@
 
 ---
 
+### 2026-09-24（7 本经验手册每周过期巡检：读手册 + grep 仓库核实代码引用，接入今日待办）
+
+7 本跨客户经验手册（Claude 持久记忆，不在仓库）经常点名具体代码路径/函数名/表名，代码重构后这些
+引用会悄悄失效，此前没有任何机制回头核对。
+
+PR [#1952](https://github.com/bigbigraydeng-maker/magic-engine/pull/1952)：
+- 新增 `playbook_staleness_findings` 表（全量替换设计：每周先清空整表再写入本周结果，一条引用
+  被改好后自然从表里消失，不需要人工标记「已处理」）
+- 新增 `POST /api/cron/playbook-staleness-weekly` 接口，`CRON_SECRET` 鉴权（复用既有密钥）
+- 新增本地 Claude scheduled task `playbook-staleness-weekly`（每周一 08:30，仓库外触发，
+  `CRON_REGISTRY` 登记为 `scheduler: 'external'`）：读 7 本手册、grep 仓库核实引用是否还在
+- `pushPlaybookStalenessItems` 接入 `pm-daily-todo`，归进 `DEV_OWNED_KINDS`（不计入 PM 今日待办数量）
+- 经子牙（架构）+ 魏征（挑刺）两轮独立复审：设计阶段改掉「部分唯一索引配合 PostgREST upsert
+  跑不通」和「无人值守任务直接用生产库密钥」两处硬伤；实施后复审又抓出一个 Next.js App Router
+  导出限制的真实类型错误，已修
+
+---
+
 ### 2026-09-23（AI 可见度探测失败被当成「零提及」发给客户：数据结构分离 + 回执 finding + 过度矫正守卫）
 
 OpenAI 9-20 余额耗尽后，诊断里的 AI 探测全部 429 失败，系统把"没测到"写成了"AI 里一次都没提到你的品牌"
