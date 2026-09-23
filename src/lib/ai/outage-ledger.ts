@@ -49,8 +49,15 @@ export interface OutageRowInsert {
   reason: string
   outage_date: string
   detail: string
-  first_seen_at: string
   last_seen_at: string
+  /**
+   * 🔴 故意**没有** `first_seen_at`。
+   *
+   * upsert 的 `ON CONFLICT DO UPDATE` 会把传进去的每一列都写一遍 ——
+   * 把它一起传进去，同一天第二次命中就会把「第一次是什么时候」改成「最近一次」，
+   * 这个列名就开始说谎了（子牙 2026-09-23 实施后复审）。
+   * 表上有 `default now()`：insert 时走默认，冲突时因为不在列清单里自然保留。
+   */
 }
 
 export const PROVIDER_OUTAGES_TABLE = 'provider_outages'
@@ -119,7 +126,8 @@ export interface OutageWrite {
  *    只解构 data 不看 error 正是 run-logger.ts 头注点名的那个写法
  *    （memory: monitoring-writer-silent-failure-inverts-health-check ——
  *    监控数据源写入方静默失败时，健康检查不是失灵，是**主动报平安**）。
- *    光 console.error 还不够，所以读的那一侧另有 `probeOutageLedger()` 自检。
+ *    光 console.error 还不够，所以读的那一侧另有兜底自检：读不出这张表时会下发
+ *    一条 `ai_alerting_broken`（见 pm-todo/manual-items.ts 的 buildProviderOutageItems）。
  */
 export async function recordProviderOutage(
   write: OutageWriter,
@@ -131,7 +139,6 @@ export async function recordProviderOutage(
     reason: w.reason,
     outage_date: utcDate(w.now),
     detail: w.detail.slice(0, 500),
-    first_seen_at: nowIso,
     last_seen_at: nowIso,
   })
   if (error) {
@@ -227,16 +234,47 @@ export function makeSupabaseOutageReader(supabase: SupabaseClient): OutageReader
  * 于是第二次断电一声不吭（魏征复审 M6(b) 点名的坑）。
  */
 export function streakDays(dates: string[], today: string): number {
+  const latest = latestDate(dates, today)
+  if (!latest) return 0
   const set = new Set(dates)
-  // 断电只写到「今天」为止；如果今天还没有行，从昨天开始数（昨天断过、今天还没跑到）
-  let cursor = set.has(today) ? today : shiftDate(today, -1)
-  if (!set.has(cursor)) return 0
+  let cursor = latest
   let n = 0
   while (set.has(cursor)) {
     n += 1
     cursor = shiftDate(cursor, -1)
   }
   return n
+}
+
+/**
+ * 最近一次断电是哪天（不晚于今天）。没有就返回 null。
+ *
+ * 🔴 这个函数存在的原因是一个差点让整套方案失效的坑（子牙 2026-09-23 实施后复审）：
+ *    首版的 `streakDays` 只肯从「今天或昨天」起数，再往前一格没命中就返回 0。
+ *    可 `pm-daily-todo` 的调度是 `0 19 * * 0-4`（render.yaml:723），**周五周六不跑**。
+ *    于是：周四 20:00 发生一次 70 分钟的断电 → 记在周四那一天 → 下一次跑是周日 →
+ *    今天(周日)没有、昨天(周六)也没有 → 算成 0 → **一个字都不报**。
+ *    每周有约 72 小时的窗口，短时断电掉进去就永远没人知道 ——
+ *    正是这套东西立项要消灭的那件事，换了个形状又长了回来。
+ *
+ *    所以「有多新鲜」和「连续多久」必须分成两个问题问：
+ *    这里回答前者，`streakDays` 回答后者，节流判据两个都要看。
+ */
+export function latestDate(dates: string[], today: string): string | null {
+  let latest: string | null = null
+  for (const d of dates) {
+    if (d > today) continue // 时钟漂移 / 时区写歪的行，不拿来当「最近一次」
+    if (latest === null || d > latest) latest = d
+  }
+  return latest
+}
+
+/** 最近一次断电距今几天（0 = 今天）。没有记录返回 null。 */
+export function daysSinceLatest(dates: string[], today: string): number | null {
+  const latest = latestDate(dates, today)
+  if (!latest) return null
+  const ms = new Date(`${today}T00:00:00Z`).getTime() - new Date(`${latest}T00:00:00Z`).getTime()
+  return Math.round(ms / 86_400_000)
 }
 
 export function shiftDate(date: string, deltaDays: number): string {

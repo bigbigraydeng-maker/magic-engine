@@ -5,8 +5,10 @@
  * CF Gateway URL: https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/openai
  * All requests are logged in the AI Gateway dashboard automatically.
  *
- * 这里还是**全站唯一能一次盖住所有 OpenAI 调用点的位置** —— 所以
- * 「账户断电了要有人知道」这件事就装在这一层（见下面的 instrumentedFetch）。
+ * 「账户断电了要有人知道」这件事装在这一层，因为它是**一次能盖住最多调用点的位置**
+ * （2026-09-23 收编后，全仓走 OpenAI 的路径只剩 `src/lib/messenger/brief.ts:414`
+ * 还自己 new —— 那条归另一个窗口收口，见 docs/ROADMAP.md。别把这句写成「全站唯一」，
+ * 那是假的，下一个人会信）。
  */
 
 import OpenAI from 'openai'
@@ -84,8 +86,12 @@ async function inspectFailure(probe: Response, viaGateway: boolean): Promise<voi
 
     if (!needsHuman(kind)) {
       // 不惊动人，但**留一行日志**：新出现的失败形态不能永远进不了视野。
-      // （限流是常态，不刷屏；其余的记下来。）
-      if (kind !== 'rate_limited') {
+      //
+      // 只对 5xx 和「认不出来的 4xx」留一行：限流是常态；普通 400
+      //（参数错 / context_length_exceeded / 内容过滤）在正常运行里每天都有，
+      // 全打会把 Render 的日志刷满，反而埋掉真的新形态（魏征复审 backlog 4）。
+      const worthLogging = probe.status >= 500 || (probe.status >= 400 && kind === 'other')
+      if (worthLogging) {
         console.warn(`[openai-client] 未分类的调用失败 status=${probe.status} 走网关=${viaGateway}`)
       }
       return

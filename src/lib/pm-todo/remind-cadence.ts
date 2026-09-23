@@ -24,13 +24,34 @@ const WEEKLY_ANCHOR_UTC_DAY = 0
 export const DAILY_REMIND_UNTIL_STREAK = 3
 
 /**
- * @param streak 连续出现了几个日历天（0 = 现在没在坏）
- * @param now    用来判今天是不是每周那个锚点日
+ * 周五周六不跑，所以周日那一轮要能往回补几天 —— 不然周四晚/周五发生、
+ * 而且**已经自愈**的那种短断电（9/20 就是这一型）会整段掉进空档里没人知道。
  */
-export function shouldRemindToday(streak: number, now: Date): boolean {
-  if (streak <= 0) return false
+const GAP_CATCHUP_DAYS = 3
+
+/**
+ * @param streak            连续断了几个日历天（0 = 记录里根本没有）
+ * @param daysSinceLatest   最近一次断电距今几天（0 = 今天；null = 没有记录）
+ * @param now               用来判今天是不是每周那个锚点日
+ *
+ * 两个问题必须分开问，缺一个都会漏报：
+ *   · **还新鲜吗** —— 决定这件事今天值不值得说（自愈的短断电只有这一维是活的）
+ *   · **连续多久** —— 决定要不要天天说（长期故障靠它降噪）
+ */
+export function shouldRemindToday(
+  streak: number,
+  daysSinceLatest: number | null,
+  now: Date,
+): boolean {
+  if (streak <= 0 || daysSinceLatest === null) return false
+  const isAnchorDay = now.getUTCDay() === WEEKLY_ANCHOR_UTC_DAY
+
+  // 还新鲜吗：正常每天跑的情况看「今天或昨天」；周日那轮额外往回补周五周六
+  const fresh = daysSinceLatest <= 1 || (isAnchorDay && daysSinceLatest <= GAP_CATCHUP_DAYS)
+  if (!fresh) return false
+
   if (streak <= DAILY_REMIND_UNTIL_STREAK) return true
-  return now.getUTCDay() === WEEKLY_ANCHOR_UTC_DAY
+  return isAnchorDay
 }
 
 /**

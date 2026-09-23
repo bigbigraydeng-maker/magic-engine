@@ -14,6 +14,8 @@ import {
   readRecentOutages,
   recordProviderOutage,
   resetOutageThrottle,
+  daysSinceLatest,
+  latestDate,
   shiftDate,
   shouldWriteNow,
   streakDays,
@@ -61,8 +63,12 @@ describe('streakDays —— 连续断了几天', () => {
     expect(streakDays(['2026-09-20', '2026-09-25'], '2026-09-25')).toBe(1)
   })
 
-  it('最近两天都没有记录 → 0（已经好了）', () => {
-    expect(streakDays(['2026-09-20'], '2026-09-23')).toBe(0)
+  it('🔴 断电早于昨天也照样数得出来 —— 首版在这里栽过，周四断的周日就查不到了', () => {
+    // pm-daily-todo 周五周六不跑。首版的 streakDays 只肯从「今天或昨天」起数，
+    // 周日跑到时往回一格是周六（没记录）→ 直接 0 → 一个字都不报。
+    // 「有多新鲜」交给 daysSinceLatest 判，这里只负责「连续多久」。
+    expect(streakDays(['2026-09-20'], '2026-09-23')).toBe(1)
+    expect(streakDays(['2026-09-19', '2026-09-20'], '2026-09-23')).toBe(2)
   })
 
   it('一条记录都没有 → 0', () => {
@@ -71,6 +77,27 @@ describe('streakDays —— 连续断了几天', () => {
 
   it('同一天重复出现不会把天数数多', () => {
     expect(streakDays(['2026-09-23', '2026-09-23', '2026-09-22'], '2026-09-23')).toBe(2)
+  })
+})
+
+describe('latestDate / daysSinceLatest —— 「有多新鲜」这一维', () => {
+  it('取不晚于今天的最近一天', () => {
+    expect(latestDate(['2026-09-20', '2026-09-22', '2026-09-21'], '2026-09-23')).toBe('2026-09-22')
+    expect(daysSinceLatest(['2026-09-20', '2026-09-22'], '2026-09-23')).toBe(1)
+    expect(daysSinceLatest(['2026-09-23'], '2026-09-23')).toBe(0)
+  })
+
+  it('时钟漂移写出的「未来」那一行不拿来当最近一次', () => {
+    expect(latestDate(['2026-09-20', '2026-09-30'], '2026-09-23')).toBe('2026-09-20')
+  })
+
+  it('没有记录时返回 null，不返回 0（0 会被下游当成「今天断的」）', () => {
+    expect(latestDate([], '2026-09-23')).toBeNull()
+    expect(daysSinceLatest([], '2026-09-23')).toBeNull()
+  })
+
+  it('跨月也算得对', () => {
+    expect(daysSinceLatest(['2026-09-30'], '2026-10-02')).toBe(2)
   })
 })
 
@@ -100,6 +127,19 @@ describe('recordProviderOutage', () => {
       provider: 'openai',
       reason: 'account_exhausted',
       outage_date: '2026-09-20',
+    })
+  })
+
+  it('🔴 写入里不许带 first_seen_at —— upsert 会把它一起覆盖掉，那个列名就开始说谎', () => {
+    const written: OutageRowInsert[] = []
+    const write = async (row: OutageRowInsert): Promise<OutageWriteResult> => {
+      written.push(row)
+      return { error: null }
+    }
+    return recordProviderOutage(write, {
+      provider: 'openai', reason: 'account_exhausted', detail: 'x', now,
+    }).then(() => {
+      expect(Object.keys(written[0])).not.toContain('first_seen_at')
     })
   })
 

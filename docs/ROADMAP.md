@@ -1574,3 +1574,20 @@ Gate B 定的 `minSampleSize=3`，页面目前只会显示「数据还不够说�
 - [ ] **[P3] `voice/finalize.ts:131-137` 账户没钱时仍然安静回落 mock。**
       这次只是把**信号**接到了断电记录上（PM 会看见「AI 账户没钱」），
       但那一处自己的降级行为一个字没改。**别把「收编了」说成「这处不再静默」**，是两件事。
+
+- [ ] **[P2] 「卡死」的 60 分钟阈值对 Inngest 那几条长流程可能是误报。**
+      `health.ts` 里写的理由是「全仓最长 maxDuration 900 秒」—— 但 `maxDuration` 是
+      Vercel 的旋钮，我们跑在 Render 的 `next start` 上，**根本不执行它**，这个论据不成立。
+      实际反例（它们也写 `cron_run_logs`，新的失败邮件判据同样会扫到）：
+      `conversion-daily-pipeline` 最坏情况（100 块 × 退避 65 秒）远超 60 分钟；
+      `factory-creatomate-render`（15 分钟等事件 + 10 × 2 分钟轮询）最坏约 35-40 分钟。
+      要做的事：给 registry 加一个「本来就长跑」的标记，或对 Inngest 来源的任务用更长阈值。
+      **误报一旦成为常态，真出事那天也会被当噪音划掉** —— 这条不修迟早反噬。
+
+- [ ] **[P3] `makeSupabaseStuckProber` 查询报错时返回 `[]`，等于「没有卡死」。**
+      跟旁边的 `lastRunByJob` / `lastOutcome` 是同一个既有毛病（都吞错），
+      但这正是本文件反复声讨的「主动报平安」。照 `DownstreamProbe` 那样加一条 error 通道。
+
+- [ ] **[P3] 看板 `workflows-health/page.tsx:214` 的文案过期了。**
+      它写「**最近一次**挂着 running」，而现在 `startedAt` 是 48 小时窗口内**最早**那一轮；
+      而且新加的 `rounds`（卡了几轮）没渲染出来，看板比待办少一条信息。

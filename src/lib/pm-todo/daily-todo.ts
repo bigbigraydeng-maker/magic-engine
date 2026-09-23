@@ -75,6 +75,10 @@ const DEV_OWNED_KINDS: ManualItemKind[] = [
   // 🔴 注意：真的断电那条（ai_provider_exhausted）**不在这里** ——
   //    那条只有 PM 能处理（去充钱 / 换钥匙），必须留在动手栏。
   'ai_alerting_broken',
+  // 「AI 卡在 Cloudflare 网关那一层」→ how 写的是「回我一句『换网关令牌』」。
+  // 跟真断电（ai_provider_exhausted）分成两个 kind 就是为了这一刻：
+  // 那条要 PM 去充钱 / 换钥匙，这条只有我们能换令牌。
+  'ai_gateway_broken',
 ]
 
 /** FDE focus clients: CTS + Oztop. */

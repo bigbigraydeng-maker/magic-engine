@@ -120,10 +120,18 @@ export function classifyOpenAIFailure(input: ProviderFailureInput): ProviderFail
   // 1. 账户级错误码优先 —— 不管 HTTP 状态是 429 还是 403，认码不认码外
   if (ACCOUNT_LEVEL_CODES.has(code) || ACCOUNT_LEVEL_CODES.has(type)) return 'account_exhausted'
 
-  // 2. 401：必须区分「网关不让过」和「OpenAI 说钥匙不对」
+  // 2. 401/403：必须区分「网关不让过」和「OpenAI 说钥匙不对」
   if (input.status === 401 || input.status === 403) {
-    if (looksLikeGateway(input)) return 'gateway_auth_failed'
+    // 🔴 顺序是刻意的，而且**反过来写会翻车**（子牙 2026-09-23 实施后复审抓到）：
+    //    `looksLikeGateway` 的命中条件之一是响应头里有 `cf-ray`，而**经网关代理
+    //    回来的任何响应都带这个头** —— 包括 OpenAI 自己回的 invalid_api_key。
+    //    仓库里 40+ 个 chat.completions 调用点默认全走网关，所以先判网关的话，
+    //    真出现钥匙被撤销时 PM 会拿到「不是 OpenAI 的问题，去换网关令牌」。
+    //
+    //    读得出 OpenAI 自己的错误码 = 这次请求**确实到达了 OpenAI**，
+    //    跟上面第 1 步「认码不认码外」是同一条原则。
     if (CREDENTIAL_CODES.has(code) || CREDENTIAL_CODES.has(type)) return 'credential_invalid'
+    if (looksLikeGateway(input)) return 'gateway_auth_failed'
     // 读不出明确的 OpenAI 错误码就不猜 —— 宁可不报，也不制造一条让人白跑的告警
     return 'other'
   }

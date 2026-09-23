@@ -35,7 +35,7 @@ import { pushPageBindingItems, type PageBindingItemKind } from './page-binding-i
 import { AUTO_LANDED_AGENT } from '@/lib/diagnostic/auto-prescribe'
 import { isHandAddedItem } from '@/lib/diagnostic/prescription-landing'
 import { LINKEDIN_PROGRESS_CLIENT_ID, LINKEDIN_PROGRESS_SOURCE } from '@/lib/linkedin-progress/constants'
-import { makeSupabaseOutageReader, readRecentOutages, streakDays, utcDate, type OutageQuery } from '@/lib/ai/outage-ledger'
+import { daysSinceLatest, makeSupabaseOutageReader, readRecentOutages, streakDays, utcDate, type OutageQuery } from '@/lib/ai/outage-ledger'
 import { shouldRemindToday, streakPhrase } from './remind-cadence'
 
 /**
@@ -93,6 +93,14 @@ export type ManualItemKind =
   | 'ai_provider_exhausted'
   /** 上面那条告警**自己**读不出来了 —— 不报 ≠ 没事，必须单独说 */
   | 'ai_alerting_broken'
+  /**
+   * AI 调用卡在 Cloudflare 网关那一层，还没走到 OpenAI。
+   *
+   * 跟上面那条分开，是因为**要动手的人不一样**：那条要 PM 去充钱 / 换钥匙，
+   * 这条只有我们能换网关令牌。合成一条的话，PM 的动手栏里会出现一件
+   * 写着「这条不用你动手」的活（魏征 / 子牙 2026-09-23 都点了这条）。
+   */
+  | 'ai_gateway_broken'
   | 'goal_baseline_mismatch'
   | 'diagnostic_findings'
   | 'prescription_updated'
@@ -407,9 +415,17 @@ export async function loadManualItems(
   )
   // AI 文字账户断电（没钱 / 钥匙失效 / 卡在网关）—— 2026-09-20 那次全站三天没人知道。
   // 跟上面两条余额待办同一条纪律：只有人能充钱，必须当天摆到眼前。
-  await pushProviderOutageItems(supabase, items, now).catch((e) =>
-    console.error('[manual-items] AI 断电告警读取失败（这只眼睛瞎了，不是没事）:', e),
-  )
+  await pushProviderOutageItems(supabase, items, now).catch((e: unknown) => {
+    // 只打日志就等于这只眼睛瞎了也没人知道 —— 照样下发一条
+    items.push({
+      kind: 'ai_alerting_broken',
+      client_id: 'infra',
+      client_name: 'Magic Engine 后台',
+      what: `「AI 账户断电」的告警自己挂了（${(e instanceof Error ? e.message : String(e)).slice(0, 160)}）—— 今天没有这项检查的结果，不报警不等于没事`,
+      how: '这条不用你动手 —— 是我们这边的欠账。回我一句「修一下断电告警」我就去修',
+      href: '',
+    })
+  })
   // 按时没跑 / 查不出跑没跑 —— PM 2026-08-03 要求「不能完成需要有报错」
   await pushCronHealthItems(supabase, items, now)
   // 平台候选到了复查日期 —— 不落库、不查表，纯本地日期判断
@@ -967,20 +983,26 @@ export async function pushDataForSeoCreditsItem(
  * 后者会让 9/20 那种只持续 70 分钟的断电在充值后彻底消失（今日待办一天才跑一次，
  * 而且只有周日到周四）。见 outage-ledger.ts 顶部那段。
  */
-const AI_ACCOUNT_GUIDE: Record<string, { what: string; how: string; href: string }> = {
+const AI_ACCOUNT_GUIDE: Record<
+  string,
+  { kind: ManualItemKind; what: string; how: string; href: string }
+> = {
   account_exhausted: {
+    kind: 'ai_provider_exhausted',
     what: 'AI 文字账户的钱用完了 —— 这把钥匙全站在用：写内容、判客户到哪一步了、读通话记录、做 AI 可见度体检，全都会安静地跳过，看上去像「今天没什么发现」',
-    how: '打开链接充值（这是我们生成文字用的账户，跟出片那个不是同一个）。充完回我一句，我把这几天被跳过的活儿重跑一遍',
+    how: '打开链接 →「Add to credit balance」→ 充值（这是我们生成文字用的账户，跟出片那个不是同一个）。不确定充多少就回我一句「算一下烧了多少」，我按最近 30 天的真实用量给你一个数再充。充完也回我一句，我把这几天被跳过的活儿重跑一遍',
     href: 'https://platform.openai.com/settings/organization/billing/overview',
   },
   credential_invalid: {
-    what: 'AI 文字账户的钥匙不认了（被撤销或过期）—— 全站用到 AI 的地方都在安静地跳过',
-    how: '打开链接 → 新建一把 API key → 回我一句，我来换上去（钥匙别贴在聊天里，我会告诉你放哪）',
+    kind: 'ai_provider_exhausted',
+    what: 'AI 文字账户的那把钥匙不认了（被撤销或过期）—— 全站用到 AI 的地方都在安静地跳过，跟没钱时的表现一模一样',
+    how: '打开链接 →「Create new secret key」→ 名字随便填 → 复制。**别把它贴在聊天里**，直接去 Render 后台（dashboard.render.com → 服务 → Environment）把 OPENAI_API_KEY 这一项的值换成新的 → Save。换完回我一句，我把这几天被跳过的活儿重跑一遍',
     href: 'https://platform.openai.com/api-keys',
   },
   gateway_auth_failed: {
-    what: 'AI 调用卡在中间那道 Cloudflare 关口上了 —— **不是 OpenAI 的问题，去 OpenAI 查不出东西**。全站用到 AI 的地方都在安静地跳过',
-    how: '这条不用你动手 —— 是我们这边的网关令牌过期了。回我一句「换网关令牌」我就去换',
+    kind: 'ai_gateway_broken',
+    what: 'AI 调用卡在中间那道 Cloudflare 关口上了 —— **不是 OpenAI 的问题，你去 OpenAI 后台查不出任何东西**。全站用到 AI 的地方都在安静地跳过',
+    how: '这条不用你动手 —— 是我们这边的网关令牌过期了。回我一句「换网关令牌」我就去换；不说的话它会一直这么空着',
     href: 'https://dash.cloudflare.com',
   },
 }
@@ -1028,16 +1050,26 @@ export function buildProviderOutageItems(query: OutageQuery, now: Date): ManualI
 
   for (const [key, g] of byReason) {
     const streak = streakDays(g.dates, today)
-    if (!shouldRemindToday(streak, now)) continue
+    const sinceLatest = daysSinceLatest(g.dates, today)
+    if (!shouldRemindToday(streak, sinceLatest, now)) continue
     const reason = key.split('::')[1] ?? ''
     const guide = AI_ACCOUNT_GUIDE[reason]
-    // 认不出来的新失败形态照样下发 —— 说不清楚也好过不说
-    const what = guide?.what ?? `AI 供应商报了一个我们还没见过的账户级问题（${reason}）—— 全站用到 AI 的地方可能在安静地跳过`
+    // 认不出来的新失败形态照样下发 —— 说不清楚也好过不说。
+    // 供应商原话一起带上（截断），否则 PM 只看到一个代号，连问我第二遍都没法问。
+    const raw = (g.detail ?? '').trim()
+    const what =
+      guide?.what ??
+      `AI 供应商报了一个我们还没见过的账户级问题（${reason}）—— 全站用到 AI 的地方可能在安静地跳过${raw ? `。供应商原话：${raw.slice(0, 160)}` : ''}`
+    // 已经好了的那种（最近一次不是今天）要说清是哪天，别让人以为现在还坏着
+    const when =
+      sinceLatest !== null && sinceLatest > 0
+        ? `${sinceLatest} 天前断过一次（现在看起来已经恢复）`
+        : streakPhrase(streak)
     items.push({
-      kind: 'ai_provider_exhausted',
+      kind: guide?.kind ?? 'ai_provider_exhausted',
       client_id: 'infra',
       client_name: 'Magic Engine 后台',
-      what: `${streakPhrase(streak)}：${what}`,
+      what: `${when}：${what}`,
       how: guide?.how ?? '回我一句「查一下 AI 账户」，我去看供应商后台具体报的是什么',
       href: guide?.href ?? '',
     })
@@ -1161,12 +1193,14 @@ async function pushCronHealthItems(
   // 真告警就是这么被淹死的。
   if (r.failing.length > 0) {
     const names = r.failing.map((f) => f.service).join('、')
-    const sample = r.failing.find((f) => f.lastError)?.lastError
+    // 🔴 不把原始报错贴进来：它可能带客户 id 和一长串英文技术串，
+    //    跟隔壁那封日报的头注（"no client_ids, no raw error strings"）守同一条线。
+    //    具体错误在链接里那个页面上，要看的人点进去看。
     items.push({
       kind: 'cron_failing',
       client_id: 'infra',
       client_name: 'Magic Engine 后台',
-      what: `${r.failing.length} 个自动任务最近一次是报错结束的：${names}${sample ? `（例如：${sample.slice(0, 120)}）` : ''} —— 它们负责的活儿这一轮没干成`,
+      what: `${r.failing.length} 个自动任务最近一次是报错结束的：${names} —— 它们负责的活儿这一轮没干成`,
       how: '这条不用你动手 —— 多数是我们代码或某个外部账号的问题。回我一句「查一下报错的那几个」我就逐个看是代码要改、还是哪个账号要你去续费/重新授权',
       href: 'https://app.magicengine.com.au/dashboard/admin/cron-health',
     })
