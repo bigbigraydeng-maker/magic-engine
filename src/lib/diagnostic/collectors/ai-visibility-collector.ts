@@ -67,12 +67,21 @@ export class AiVisibilityCollector {
       // fabricated "your brand is never mentioned by AI" findings for 5 clients
       // on 2026-09-21 while the OpenAI account was rate-limited (429).
       const probe = isProbeConclusive(rawProbe) ? rawProbe : null
-      const probeFailed = rawProbe && !probe && !rawProbe.skipped
+      // A probe counts as "failed" (not "unconfigured") both when it ran and
+      // came back with per-question errors (skipped=false) AND when the
+      // attempt itself broke — the outer timeout fired, or `probe.run()`
+      // rejected outright (`skip_kind === 'attempt_failed'`). Both are
+      // transient measurement failures, not evidence tracking was never
+      // enabled — collapsing them into `ai_visibility_not_tracked` would
+      // wrongly tell an already-configured client to go configure it.
+      const probeFailed =
+        rawProbe && !probe && (!rawProbe.skipped || rawProbe.skip_kind === 'attempt_failed')
       if (rawProbe && !probe) {
         console.warn(
           `[ai-visibility-collector] live probe not conclusive for ${clientId} — ` +
             `attempted=${rawProbe.runs} measured=${rawProbe.measured_runs} ` +
             `failed=${rawProbe.failed_runs} skipped=${rawProbe.skipped}` +
+            (rawProbe.skip_kind ? ` skip_kind=${rawProbe.skip_kind}` : '') +
             (rawProbe.skip_reason ? ` reason=${rawProbe.skip_reason}` : '') +
             ' — treating AI visibility as NOT MEASURED, not as zero mentions',
         )
