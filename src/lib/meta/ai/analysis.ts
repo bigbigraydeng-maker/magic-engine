@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { APIConnectionError, APIConnectionTimeoutError } from '@anthropic-ai/sdk'
 import { callClaudeChat, MODEL_HAIKU } from '@/lib/anthropic/client'
 import { supabaseAdmin } from '@/lib/supabase'
 import { AI_ENTITY_FIELDS } from '../entity-settings'
@@ -12,6 +13,8 @@ const VIDEO_FIELDS = 'video_play_actions,video_p25_watched_actions,video_p50_wat
 const PROMPT_VERSION = 'meta-hosted-analysis-v1'
 
 function modelFailureCategory(error: unknown): string {
+  if (error instanceof APIConnectionTimeoutError) return 'timeout'
+  if (error instanceof APIConnectionError) return 'network'
   if (!error || typeof error !== 'object') return 'unknown'
   const value = error as { status?: unknown; name?: unknown; error?: unknown }
   const detail = value.error && typeof value.error === 'object'
@@ -24,8 +27,7 @@ function modelFailureCategory(error: unknown): string {
   if (type === 'rate_limit_error' || value.status === 429) return 'rate_limit'
   if (type === 'overloaded_error' || value.status === 529) return 'overloaded'
   if (type === 'invalid_request_error' || value.status === 400) return 'invalid_request'
-  if (value.name === 'APIConnectionTimeoutError' || value.name === 'AbortError') return 'timeout'
-  if (value.name === 'APIConnectionError') return 'network'
+  if (value.name === 'AbortError') return 'timeout'
   return 'upstream'
 }
 

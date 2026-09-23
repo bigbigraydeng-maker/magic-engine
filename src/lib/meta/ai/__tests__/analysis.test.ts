@@ -1,4 +1,5 @@
 import { beforeEach,describe,expect,it,vi } from 'vitest'
+import { APIConnectionError, APIConnectionTimeoutError } from '@anthropic-ai/sdk'
 
 const mocks=vi.hoisted(()=>({
   from:vi.fn(),rpc:vi.fn(),metaGraphGet:vi.fn(),callClaudeChat:vi.fn(),activeConnection:vi.fn(),reserveRead:vi.fn(),requirePilot:vi.fn(),
@@ -95,6 +96,25 @@ describe('托管 Meta 广告分析',()=>{
       category:'permission',model:'claude-haiku-test',
     })
     expect(JSON.stringify(log.mock.calls)).not.toContain('secret upstream detail')
+  })
+
+  it.each([
+    ['network',new APIConnectionError({ message:'secret connection detail' })],
+    ['timeout',new APIConnectionTimeoutError({ message:'secret timeout detail' })],
+  ])('按真实 Anthropic SDK 实例识别 %s 错误',async(category,error)=>{
+    mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
+      if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'NZD',timezone_name:'Pacific/Auckland' }
+      if(params.level==='account') return { data:[{ spend:'100',impressions:'1000',clicks:'20' }] }
+      return { data:[] }
+    })
+    const log=vi.spyOn(console,'error').mockImplementation(()=>undefined)
+    mocks.callClaudeChat.mockRejectedValue(error)
+    await expect(generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id))
+      .rejects.toThrow('model_unavailable')
+    expect(log).toHaveBeenCalledWith('[meta-ads-ai] hosted model call failed',{
+      category,model:'claude-haiku-test',
+    })
+    expect(JSON.stringify(log.mock.calls)).not.toContain(error.message)
   })
 
   it('模型外发原子授权门拒绝时不发送证据',async()=>{
