@@ -90,6 +90,11 @@ export function readGuardFlag(snapshot: unknown): GuardFlag | null {
   if (status !== 'pass' && status !== 'fail' && status !== 'unavailable') {
     return unreadable(`unknown status ${JSON.stringify(status)}`)
   }
+  // A non-boolean here (a string 'true', a 0/1) would silently read as "no review
+  // needed". Anything but a real boolean means we do not understand this receipt.
+  if (raw.needs_human_review !== undefined && typeof raw.needs_human_review !== 'boolean') {
+    return unreadable('needs_human_review is not a boolean')
+  }
 
   const languageFindings = Array.isArray(raw.language_findings)
     ? raw.language_findings.filter(isLanguageFinding)
@@ -105,7 +110,11 @@ export function readGuardFlag(snapshot: unknown): GuardFlag | null {
   if (clicheProbability !== null && clicheProbability >= clicheThreshold) reasons.push('cliche_opener')
   if (judgeError !== null) reasons.push('check_unavailable')
 
-  const needsReview = raw.needs_human_review === true || status !== 'pass'
+  // reasons counts too: a receipt whose own summary says 'pass' while its detail
+  // fields describe a failure is inconsistent, and the safe reading of an
+  // inconsistent receipt is "a human looks". Today's writer is self-consistent;
+  // this keeps a future writer's bug from becoming a silent green light.
+  const needsReview = raw.needs_human_review === true || status !== 'pass' || reasons.length > 0
   // Never show an unexplained red flag: if the receipt says "review me" but
   // carries no readable reason, say so rather than inventing one.
   if (needsReview && reasons.length === 0) reasons.push('check_unavailable')

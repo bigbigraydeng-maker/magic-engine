@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { guardGlobalAdmin } from '@/lib/auth/require-admin'
+import { readGuardFlag, toPublicGuardFlag } from '@/lib/content/guard-receipt'
 
 // GET /api/content/posts?client_id=&status=
 export async function GET(req: NextRequest) {
@@ -29,7 +30,7 @@ export async function GET(req: NextRequest) {
 
     let query = supabaseAdmin
       .from('content_posts')
-      .select('id, client_id, title, route, platforms, status, caption, script, hashtags, visual_brief, scheduled_at, created_at, execution_item_id, clients(name)')
+      .select('id, client_id, title, route, platforms, status, caption, script, hashtags, visual_brief, scheduled_at, created_at, execution_item_id, generation_context_snapshot, clients(name)')
       .order('created_at', { ascending: false })
       .limit(100)
 
@@ -75,8 +76,11 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const enriched = posts.map(p => ({
+    // 发布前自检的红旗翻给前端；整份 snapshot 不外送（生成过程的内部字段，不是
+    // 给审核人看的），判分服务的原始报错也在 toPublicGuardFlag 里摘掉了。
+    const enriched = posts.map(({ generation_context_snapshot, ...p }) => ({
       ...p,
+      guard: toPublicGuardFlag(readGuardFlag(generation_context_snapshot)),
       visual_asset_url: assetByPost[p.id]?.url ?? null,
       visual_asset_type: assetByPost[p.id]?.type ?? null,
     }))

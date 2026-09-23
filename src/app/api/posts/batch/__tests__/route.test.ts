@@ -145,6 +145,37 @@ describe('batch approval respects the pre-publish content guard', () => {
     expect(update.in).toHaveBeenCalledWith('id', ['old'])
   })
 
+  // 魏征复审 P1-1：只拦 approved 会留一个洞 —— scheduled / published 是 approved 的
+  // 下游，比它更靠近公开，却曾经一条不拦。
+  it.each(['approved', 'scheduled', 'published'])('gates bulk %s, not just approved', async (status) => {
+    const owners = builder({ data: [{ id: 'flagged', client_id: CLIENT_A }], error: null })
+    const guardRead = builder({
+      data: [{ id: 'flagged', title: '中英混杂的', generation_context_snapshot: guardReceipt() }],
+      error: null,
+    })
+    const update = builder({ data: [], error: null })
+    mockFrom.mockReturnValueOnce(owners as never).mockReturnValueOnce(guardRead as never).mockReturnValue(update as never)
+    mockAccess.mockResolvedValue({ ok: true, tier: 'paid_client' } as never)
+
+    const response = await callBatch({ post_ids: ['flagged'], action: 'updateStatus', status })
+
+    expect(response.status).toBe(409)
+    expect(update.update).not.toHaveBeenCalled()
+  })
+
+  it.each(['draft', 'rejected'])('does not gate bulk %s — sending flagged content back is the point', async (status) => {
+    const owners = builder({ data: [{ id: 'flagged', client_id: CLIENT_A }], error: null })
+    const update = builder({ data: [{ id: 'flagged', status }], error: null })
+    mockFrom.mockReturnValueOnce(owners as never).mockReturnValue(update as never)
+    mockAccess.mockResolvedValue({ ok: true, tier: 'paid_client' } as never)
+
+    const json = await (await callBatch({ post_ids: ['flagged'], action: 'updateStatus', status })).json()
+
+    expect(json.updated).toBe(1)
+    expect(json.skipped).toEqual([])
+    expect(update.in).toHaveBeenCalledWith('id', ['flagged'])
+  })
+
   it('does not gate non-approval bulk actions — rejecting flagged content in bulk is the point', async () => {
     const owners = builder({ data: [{ id: 'flagged', client_id: CLIENT_A }], error: null })
     const update = builder({ data: [{ id: 'flagged', status: 'rejected' }], error: null })

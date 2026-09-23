@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { BriefGateBanner } from '@/components/brief/BriefGateBanner';
 import { ZhugeWorkbenchFab } from '@/components/workbench/ZhugeWorkbenchFab';
 import { ZhugeWorkbenchDrawer } from '@/components/workbench/ZhugeWorkbenchDrawer';
+import { GuardBadge, GuardReviewPanel } from '@/components/content/GuardBadge';
+import type { PublicGuardFlag } from '@/lib/content/guard-receipt';
 
 interface Client {
   id: string;
@@ -31,6 +33,8 @@ interface ContentPost {
   visual_asset_type?: string | null;
   // 内容飞轮闭环：关联的处方执行项
   execution_item_id?: string | null;
+  /** 发布前自检结果。null = 这条没跑过自检，不是「查过没问题」。 */
+  guard?: PublicGuardFlag | null;
 }
 
 interface ExecutionItemLite {
@@ -334,13 +338,19 @@ export default function ContentBoardPage() {
       });
       const json = await res.json() as {
         success: boolean;
-        results?: { post_id: string; ok: boolean; error?: string }[];
+        results?: { post_id: string; ok: boolean; error?: string; guard_blocked?: boolean }[];
         error?: string;
       };
       if (!json.success) throw new Error(json.error ?? '批量生成失败');
       const ok = (json.results ?? []).filter(r => r.ok).length;
       const fail = (json.results ?? []).filter(r => !r.ok).length;
-      setBatchImgMsg(`✓ 成功 ${ok} 条${fail > 0 ? `，失败 ${fail} 条` : ''}`);
+      // 图生好了但被自检标红的，状态没有跟着升成「已批准」——必须说出来，
+      // 不然人以为生完图就能直接推送，推送那步会把它们默默漏掉。
+      const held = (json.results ?? []).filter(r => r.ok && r.guard_blocked).length;
+      setBatchImgMsg(
+        `✓ 成功 ${ok} 条${fail > 0 ? `，失败 ${fail} 条` : ''}`
+        + (held > 0 ? `；其中 ${held} 条被自检标红，图已生成但状态没动，要发得逐条看过再批准` : '')
+      );
       await fetchPosts();
     } catch (err) {
       setBatchImgMsg(`✗ ${(err as Error).message}`);
@@ -691,6 +701,35 @@ export default function ContentBoardPage() {
       setBatchMsg(`✗ ${(err as Error).message}`);
     } finally {
       setBatching(false);
+    }
+  };
+
+  /**
+   * 单条批准。**绝不能复用 /api/posts/batch** —— 那条路会把被自检标红的挡下来
+   * （409），而这里恰恰是「我已经看过红旗、我确认」的那个出口；复用批量接口
+   * 等于把人堵死：标红的内容既批不掉、在这一屏也改不了（子牙 / 魏征复审）。
+   * 打回走的已经是这条单条路（见 handleRejectWithNotes），批准跟它对齐。
+   */
+  const approveSingle = async (id: string) => {
+    const prevPosts = posts;
+    setPosts(prev => {
+      const mapped = prev.map(p => p.id === id ? { ...p, status: 'approved' } : p);
+      if (!selectedStatus) return mapped;
+      return mapped.filter(p => selectedStatus.split(',').includes(p.status));
+    });
+    setBatchMsg('');
+    try {
+      const res = await fetch(`/api/posts/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'approved' }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json.success === false) throw new Error(json.error || `HTTP ${res.status}`);
+      setBatchMsg('✓ 已批准这一条');
+    } catch (err) {
+      setPosts(prevPosts);
+      setBatchMsg(`✗ ${(err as Error).message}`);
     }
   };
 
@@ -1059,6 +1098,9 @@ export default function ContentBoardPage() {
                           {post.status === 'draft' ? '草稿' : post.status === 'approved' ? '已批准' : post.status === 'scheduled' ? '已排期' : post.status === 'published' ? '已发布' : post.status === 'rejected' ? '已拒绝' : post.status}
                         </span>
                       </div>
+                      {post.guard?.needsReview && (
+                        <div className="mt-1.5"><GuardBadge flag={post.guard} /></div>
+                      )}
                       <div className="flex flex-wrap gap-1.5 mt-2">
                         <span className={`text-xs px-2 py-0.5 rounded font-medium ${routeColors[post.route] ?? 'bg-me-ivory text-me-charcoal/60'}`}>
                           {routeLabels[post.route] ?? post.route}
@@ -1102,6 +1144,7 @@ export default function ContentBoardPage() {
                     <span className="text-xs bg-[#5C8A4A] text-white px-1.5 py-0.5 rounded font-bold tracking-wide flex-shrink-0">NEW</span>
                   )}
                 </div>
+                <div className="mt-2"><GuardReviewPanel flag={modalPost.guard} editable /></div>
                 <p className="text-xs text-me-charcoal/45 mt-0.5">
                   {new Date(modalPost.created_at).toLocaleString()} · {modalPost.clients?.name ?? ''}
                   {modalPost.scheduled_at && (
@@ -1375,7 +1418,7 @@ export default function ContentBoardPage() {
                     </div>
                   ) : (
                     <div className="flex gap-2">
-                      <button onClick={() => { const id = modalPost.id; closeModal(); batchUpdate([id], 'approved'); }} disabled={batching}
+                      <button onClick={() => { const id = modalPost.id; closeModal(); void approveSingle(id); }} disabled={batching}
                         className="flex-1 bg-[#5C8A4A] hover:bg-[#5C8A4A] text-white text-sm py-2 rounded-lg font-medium transition-colors disabled:opacity-50">
                         ✓ 批准此条
                       </button>

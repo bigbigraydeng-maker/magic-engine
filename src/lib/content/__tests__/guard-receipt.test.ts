@@ -87,6 +87,26 @@ describe('readGuardFlag', () => {
   })
 })
 
+describe('readGuardFlag — 回执自相矛盾时不许放行（魏征复审）', () => {
+  it('status says pass but the detail fields describe a failure ⇒ still review', () => {
+    for (const contradiction of [
+      { cliche_probability: 0.99 },
+      { language_findings: [{ kind: 'embedded_fragment', sentence: 'a 团 b', fragment: '团' }] },
+      { judge_error: 'quota exceeded' },
+    ]) {
+      const flag = readGuardFlag(receipt({ status: 'pass', needs_human_review: false, ...contradiction }))
+      expect(flag?.needsReview, JSON.stringify(contradiction)).toBe(true)
+    }
+  })
+
+  it('a non-boolean needs_human_review is unreadable, not falsy', () => {
+    for (const bad of ['true', 1, 0, null]) {
+      expect(readGuardFlag(receipt({ needs_human_review: bad })), String(bad))
+        .toMatchObject({ needsReview: true, reasons: ['check_unavailable'] })
+    }
+  })
+})
+
 describe('splitByGuard', () => {
   it('keeps unchecked and clean rows, blocks flagged ones with their reasons', () => {
     const rows = [

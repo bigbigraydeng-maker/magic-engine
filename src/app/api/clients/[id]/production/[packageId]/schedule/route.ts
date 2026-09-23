@@ -57,6 +57,19 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ success: false, error: 'No valid assignments provided' }, { status: 400 })
   }
 
+  // 同一条稿传两次会被算成排了两条；去重后再往下走（保留最后一次的时间）。
+  const deduped = Array.from(new Map(assignments.map(a => [a.post_id, a])).values())
+
+  // 上限跟 /api/posts/batch 的 100 条对齐。没有上限时，下面那次自检查询会撞上
+  // PostgREST 默认 1000 行的返回上限——被截掉的那些不在 blockedIds 里，于是
+  // 标红的稿会静默放行（魏征复审；同一个坑见 PostgREST 1000 行那条记忆）。
+  if (deduped.length > 100) {
+    return NextResponse.json(
+      { success: false, error: '一次最多排 100 条，分几批来' },
+      { status: 400 },
+    )
+  }
+
   // Verify the package belongs to this client
   const { data: pkg, error: pkgErr } = await supabaseAdmin
     .from('production_packages')
@@ -76,14 +89,22 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   const { data: guardRows, error: guardErr } = await supabaseAdmin
     .from('content_posts')
     .select('id, title, generation_context_snapshot')
-    .in('id', assignments.map(a => a.post_id))
+    .in('id', deduped.map(a => a.post_id))
     .eq('client_id', clientId)
   if (guardErr) {
     return NextResponse.json({ success: false, error: guardErr.message }, { status: 500 })
   }
+  // 少读到一行 = 这条不属于这个客户、或刚被删掉、或查询被截断。三种都不能当
+  // 「没标红所以放行」—— 读不到就是没查过，fail closed。
+  if ((guardRows ?? []).length !== deduped.length) {
+    return NextResponse.json(
+      { success: false, error: '有内容读不到（可能刚被删掉或不属于这个客户），这一批没动，刷新页面重新挑一次' },
+      { status: 409 },
+    )
+  }
   const skipped: BlockedPost[] = splitByGuard(guardRows ?? []).blocked
   const blockedIds = new Set(skipped.map(b => b.id))
-  const allowedAssignments = assignments.filter(a => !blockedIds.has(a.post_id))
+  const allowedAssignments = deduped.filter(a => !blockedIds.has(a.post_id))
 
   if (allowedAssignments.length === 0) {
     return NextResponse.json({
@@ -102,14 +123,17 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
   await Promise.all(
     allowedAssignments.map(async ({ post_id, scheduled_at }) => {
-      const { error } = await supabaseAdmin
+      // 必须 .select() 按真正写到的行数计数：命中 0 行时 Supabase 不报错，
+      // 光看 error 会把「什么都没改」显示成「✅ 排期完成」（魏征复审）。
+      const { data: written, error } = await supabaseAdmin
         .from('content_posts')
         .update({ scheduled_at, status: 'approved' })
         .eq('id', post_id)
         .eq('client_id', clientId)
+        .select('id')
 
-      if (error) {
-        console.error(`[production/schedule] failed to schedule post ${post_id}:`, error.message)
+      if (error || !written || written.length === 0) {
+        console.error(`[production/schedule] failed to schedule post ${post_id}:`, error?.message ?? 'no row updated')
         failed++
       } else {
         scheduled++
