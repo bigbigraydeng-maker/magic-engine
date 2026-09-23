@@ -148,7 +148,9 @@ async function fetchGeoGaps(
 
   if (!runs) return { gaps: [], avgRank }
 
-  const conclusiveRuns = (runs as unknown as Array<RunConclusiveness & Record<string, unknown>>)
+  // The cast buys no safety (untyped Supabase client); isRunConclusive is what
+  // rejects a row whose error columns never made it into the select.
+  const conclusiveRuns = (runs as Array<RunConclusiveness & Record<string, unknown>>)
     .filter(isRunConclusive)
 
   // Deduplicate by question — keep worst (null > high rank)

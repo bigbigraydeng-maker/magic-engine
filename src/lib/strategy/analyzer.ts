@@ -96,7 +96,11 @@ async function fetchRunsForQuery(
 
     if (runsError || !runsData) return null
 
-    const runs = runsData as unknown as Array<
+    // The cast buys no safety — this project's Supabase client is untyped, so
+    // the row is `any` either way (see run-conclusive.ts). The real guard is
+    // partitionConclusiveRuns below, which rejects a row whose error columns
+    // are absent. Single `as` only to match how the rest of the repo writes it.
+    const runs = runsData as Array<
       RunConclusiveness & { client_brand_rank: number | null; ran_at: string }
     >
     const { conclusive, failed } = partitionConclusiveRuns(runs)
@@ -125,6 +129,13 @@ async function fetchRunsForQuery(
         ? rankedRuns.reduce((sum, r) => sum + (r.client_brand_rank as number), 0) / rankedRuns.length
         : null
 
+    // NOTE (not introduced here, but this change makes it matter more):
+    // despite the name, this is a count of RUNS in the 30-day window, not of
+    // distinct models — one engine failing every week can reach 3 on its own.
+    // scorer.ts gates its "AI ignores us everywhere" branch on
+    // ai_weak_model_count >= 3, so the number it compares against now also
+    // moves with how many probes got through. Counting distinct engines
+    // instead is a behaviour change for the scorer and belongs in its own PR.
     return { weak_model_count: weakRuns.length, avg_rank }
   } catch {
     return null

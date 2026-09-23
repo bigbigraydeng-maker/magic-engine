@@ -28,9 +28,10 @@ import type { BlogOpportunity, BlogMode } from '@/types/magic-engine'
 interface QueryRunSummary {
   query_id: string
   question: string
-  total_runs: number
+  total_runs: number           // conclusive runs only — failed probes are not measurements
   weak_runs: number            // runs where brand rank was null or > 3
   engines_missing: Set<string>
+  engines_measured: Set<string>  // engines that actually answered for this query
   last_run_at: string | null
 }
 
@@ -45,6 +46,27 @@ interface KeywordMatch {
 // ─── Classification thresholds (per CLAUDE.md §十四) ─────────────────────────
 
 const WEAKNESS_SCORE_THRESHOLD = 0.3   // minimum to surface as GEO weak spot
+
+/**
+ * How many distinct engines must have actually answered before we are willing
+ * to tell anyone the brand is ALREADY STRONG in AI (the seo_only branch).
+ *
+ * 🔴 2026-09-23. Asymmetric on purpose, and the asymmetry is the whole point:
+ *   - "weak" is a claim about evidence we HAVE — one engine that answered and
+ *     did not mention the client is a real gap, worth surfacing on its own.
+ *   - "already strong" is a claim about evidence we DO NOT have — it asserts
+ *     that nothing out there is ignoring the client. One engine cannot support
+ *     it.
+ *
+ * Why this gate arrived with the failed-probe fix rather than before it:
+ * failed runs used to count as weak, which kept these queries above the
+ * weakness threshold and out of the seo_only branch entirely. Dropping the
+ * failures (correctly) let them fall through into it. Production case at the
+ * time: NM Medspa, where Google failed on every probe and a single successful
+ * OpenAI call would have produced "brand already strong in AI — just needs
+ * SEO", rendered in the UI as "Weak in 0% of 1 runs".
+ */
+const MIN_ENGINES_FOR_STRENGTH_CLAIM = 2
 const UNIFIED_MAX_KD = 30             // KD must be < 30
 const UNIFIED_MIN_VOLUME = 100        // volume must be > 100
 
@@ -108,8 +130,10 @@ export async function getWeakSpotOpportunities(
   // ── Step 3: Aggregate per-query run summaries ─────────────────────────────
 
   const summaryMap = buildSummaryMap(queryIds, questionMap)
+  // The cast buys no safety (untyped Supabase client); isRunConclusive is what
+  // rejects a row whose error columns never made it into the select.
   const conclusiveRuns = (
-    runs as unknown as Array<
+    runs as Array<
       RunConclusiveness & {
         query_id: string
         ai_engine: string
@@ -167,6 +191,7 @@ function buildSummaryMap(
       total_runs: 0,
       weak_runs: 0,
       engines_missing: new Set(),
+      engines_measured: new Set(),
       last_run_at: null,
     })
   }
@@ -194,6 +219,7 @@ function populateSummaries(
     if (!summary) continue
 
     summary.total_runs++
+    summary.engines_measured.add(run.ai_engine)
     if (!summary.last_run_at || run.ran_at > summary.last_run_at) {
       summary.last_run_at = run.ran_at
     }
@@ -324,6 +350,11 @@ function buildSeoOnlyOpportunities(
     const weaknessScore = summary.weak_runs / summary.total_runs
     // Only queries where brand is NOT consistently weak (already good AI visibility)
     if (weaknessScore >= WEAKNESS_SCORE_THRESHOLD) continue
+
+    // …and only when enough engines actually answered to support that claim.
+    // A query where one engine replied and the rest never connected tells us
+    // nothing about whether the brand is strong — see the constant's note.
+    if (summary.engines_measured.size < MIN_ENGINES_FOR_STRENGTH_CLAIM) continue
 
     // Check if there's a strong SEO keyword associated with this query
     const candidates = extractKeywordCandidates(summary.question)

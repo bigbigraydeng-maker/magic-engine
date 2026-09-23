@@ -48,6 +48,8 @@ const mockExtractKeywordCandidates = vi.mocked(extractKeywordCandidates)
  * Supports arbitrary chaining: .select().eq().eq().order().limit() etc.
  * The returned object is also a Promise (thenable) so `await chain` works.
  */
+let chainCalls: string[] = []
+
 function buildSupabaseChain(resolvedValue: { data: unknown; error: unknown }) {
   const promise = Promise.resolve(resolvedValue)
 
@@ -62,7 +64,14 @@ function buildSupabaseChain(resolvedValue: { data: unknown; error: unknown }) {
       }
       // Any other property access (select, eq, in, order, limit, neq…) returns
       // a function that re-wraps the same promise, keeping the chain going.
-      return () => new Proxy(promise, handler)
+      // Calls are recorded so the SQL half of a filter can be asserted: this
+      // stub answers every method, so row-level assertions alone stay green
+      // even if the query never filtered anything (verified by mutation,
+      // 2026-09-23).
+      return (...args: unknown[]) => {
+        chainCalls.push(`${String(prop)}(${args.map(a => JSON.stringify(a)).join(', ')})`)
+        return new Proxy(promise, handler)
+      }
     },
   }
 
@@ -91,7 +100,16 @@ function setupSupabaseMock(
   })
 }
 
-/** Generate N run rows for a query, all weak or all strong. */
+/**
+ * Generate N run rows for a query, all weak or all strong.
+ *
+ * Engines cycle, because that is what production looks like — one query is
+ * probed on every configured engine. A fixture pinned to a single engine also
+ * pins a query to one engine's opinion, which the "already strong in AI" gate
+ * (MIN_ENGINES_FOR_STRENGTH_CLAIM) correctly refuses to act on.
+ */
+const FIXTURE_ENGINES = ['openai', 'anthropic', 'perplexity', 'google']
+
 function makeRuns(
   queryId: string,
   count: number,
@@ -100,7 +118,7 @@ function makeRuns(
   return Array.from({ length: count }, (_, i) =>
     run({
       query_id: queryId,
-      ai_engine: 'openai',
+      ai_engine: FIXTURE_ENGINES[i % FIXTURE_ENGINES.length],
       client_brand_rank: weak ? null : 1,
       ran_at: `2026-05-${String(i + 1).padStart(2, '0')}T10:00:00Z`,
     })
@@ -907,6 +925,89 @@ describe('getWeakSpotOpportunities', () => {
       mockBulkKeywordVolume.mockResolvedValue([])
       const result = await getWeakSpotOpportunities('client-1', 20, 10, true)
       expect(result).toEqual([])
+    })
+
+    it('asks the database to exclude failed probes, not just filters them after', async () => {
+      // The per-query row budget is spent on whatever the database returns, so
+      // a filter that only runs in memory lets failed probes crowd out real runs.
+      chainCalls = []
+      setupSupabaseMock(
+        [{ id: 'q-1', question: 'china tours nz booking' }],
+        null,
+        [run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' })]
+      )
+      mockBulkKeywordVolume.mockResolvedValue([])
+      await getWeakSpotOpportunities('client-1', 20, 10, true)
+
+      expect(chainCalls).toContain('is("error_message", null)')
+      expect(chainCalls).toContain('is("parse_error_message", null)')
+      expect(chainCalls.some(c => c.startsWith('select(') && c.includes('error_message'))).toBe(true)
+    })
+
+    it('will not claim "already strong in AI" off a single engine', async () => {
+      // NM Medspa shape (production, 2026-09-23): Google failed on every probe,
+      // one OpenAI call came back with the brand ranked 1st. Dropping the
+      // failures makes weakness_score 0, which used to fall straight through
+      // into the seo_only branch — whose stated meaning is "brand already
+      // strong in AI". One engine cannot support that.
+      setupSupabaseMock(
+        [{ id: 'q-1', question: 'best medspa newmarket auckland' }],
+        null,
+        [
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 1, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'google', client_brand_rank: null, ran_at: '2026-05-01T11:00:00Z', error_message: 'GoogleGenerativeAI fetch failed' }),
+        ]
+      )
+
+      mockBulkKeywordVolume.mockResolvedValue([
+        {
+          keyword: 'best medspa newmarket auckland',
+          search_volume: 900,
+          keyword_difficulty: 12,
+          cpc: 2.5,
+          competition: 0.4,
+          intent: 'commercial',
+          position: null,
+        },
+      ])
+      mockExtractKeywordCandidates.mockReturnValue([
+        { keyword: 'best medspa newmarket auckland', confidence: 1, source: 'title' },
+      ])
+
+      const result = await getWeakSpotOpportunities('client-1', 20, 10, true)
+      expect(result).toEqual([])
+    })
+
+    it('does claim "already strong in AI" once two engines have answered', async () => {
+      setupSupabaseMock(
+        [{ id: 'q-1', question: 'best medspa newmarket auckland' }],
+        null,
+        [
+          run({ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 1, ran_at: '2026-05-01T10:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: 2, ran_at: '2026-05-01T11:00:00Z' }),
+          run({ query_id: 'q-1', ai_engine: 'google', client_brand_rank: null, ran_at: '2026-05-01T12:00:00Z', error_message: 'GoogleGenerativeAI fetch failed' }),
+        ]
+      )
+
+      mockBulkKeywordVolume.mockResolvedValue([
+        {
+          keyword: 'best medspa newmarket auckland',
+          search_volume: 900,
+          keyword_difficulty: 12,
+          cpc: 2.5,
+          competition: 0.4,
+          intent: 'commercial',
+          position: null,
+        },
+      ])
+      mockExtractKeywordCandidates.mockReturnValue([
+        { keyword: 'best medspa newmarket auckland', confidence: 1, source: 'title' },
+      ])
+
+      const result = await getWeakSpotOpportunities('client-1', 20, 10, true)
+      expect(result).toHaveLength(1)
+      expect(result[0].mode).toBe('seo_only')
+      expect(result[0].total_runs_checked).toBe(2)
     })
 
     it('still scores a genuine weak spot measured alongside failures', async () => {

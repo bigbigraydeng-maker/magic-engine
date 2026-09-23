@@ -12,10 +12,13 @@
  * non-conclusive rows from BOTH numerator and denominator, and report
  * "not computable" when no conclusive row survives.
  *
- * Measured on production 2026-09-23: 542 of the 1360 runs in the trailing 30
- * days (~40%) were provider failures — Gemini fetch errors and an exhausted
- * OpenAI balance — every one of them carrying a null rank that the strategy
- * analyzer was counting as "AI ranks this client badly".
+ * Measured on production 2026-09-23: 561 of the 1360 runs in the trailing 30
+ * days (41%) never produced a measurement — 542 provider failures (Gemini fetch
+ * errors and an exhausted OpenAI balance) plus 19 parser failures — every one of
+ * them carrying a null rank that the strategy analyzer was counting as "AI ranks
+ * this client badly". Both kinds matter: readers that check only `error_message`
+ * still let the 19 parser failures through, which is why the predicate covers
+ * both columns rather than the obvious one.
  *
  * Sister module to `industry-ai-visibility/snapshot-conclusive.ts`, but the two
  * tables mark failure differently and the predicates must NOT be shared:
@@ -41,10 +44,16 @@
 
 /**
  * The shape every caller must select. Deliberately `string | null`, NOT
- * `string | null | undefined`: a caller whose `.select()` forgot these columns
- * would otherwise have every row silently classified as a completed
- * measurement — the exact failure this module exists to prevent. Keeping
- * `undefined` out of the type makes that a compile error.
+ * `string | null | undefined`, to state the contract: a row without these
+ * columns is not a row this module can judge.
+ *
+ * The type alone does NOT enforce it. `src/lib/supabase.ts` calls
+ * `createClient` without a `Database` generic, so every `.select()` resolves to
+ * `any` and any cast onto this interface is accepted — verified 2026-09-23 by
+ * dropping the columns from a caller's select and getting a clean `tsc`. The
+ * enforcement is therefore at runtime, in `isRunConclusive` below: a missing
+ * column reads as `undefined`, which is not `null`, and the row is rejected.
+ * Keep it that way — do not "simplify" the check to a falsy test.
  */
 export interface RunConclusiveness {
   error_message: string | null

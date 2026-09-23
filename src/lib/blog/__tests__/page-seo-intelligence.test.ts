@@ -17,6 +17,17 @@ import { getPageSeoIntelligence } from '../page-seo-intelligence'
 
 const mockFrom = vi.mocked(supabaseAdmin.from)
 
+/**
+ * Every call made on a fluent chain, as `method(arg, arg)` strings.
+ *
+ * The stub below answers every method, so it cannot fail a query the way the
+ * database would — which means a test that only inspects the returned rows
+ * proves nothing about the SQL. Recording the calls lets the SQL half be
+ * asserted directly. Verified by mutation on 2026-09-23: deleting the
+ * `.is(...)` filters from the source left the row-level assertions green.
+ */
+let chainCalls: string[] = []
+
 /** Fluent-chain stub: every method returns itself, awaiting resolves the value. */
 function chain(resolved: { data: unknown; error: unknown }) {
   const promise = Promise.resolve(resolved)
@@ -26,7 +37,10 @@ function chain(resolved: { data: unknown; error: unknown }) {
         const val = (target as unknown as Record<string | symbol, unknown>)[prop]
         return typeof val === 'function' ? val.bind(target) : val
       }
-      return () => new Proxy(promise, handler)
+      return (...args: unknown[]) => {
+        chainCalls.push(`${String(prop)}(${args.map(a => JSON.stringify(a)).join(', ')})`)
+        return new Proxy(promise, handler)
+      }
     },
   }
   return new Proxy(promise, handler) as unknown as ReturnType<typeof supabaseAdmin.from>
@@ -63,7 +77,22 @@ function setupTables(runs: RunRow[], avgRank: number | null = 4.2) {
 }
 
 describe('getPageSeoIntelligence — GEO gaps', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    chainCalls = []
+  })
+
+  it('asks the database to exclude failed probes, not just filters them after', async () => {
+    // The row limit is spent on whatever the database returns, so a filter that
+    // only runs in memory lets 50 failed probes crowd out the real gaps.
+    setupTables([run({ question: 'anything' })])
+    await getPageSeoIntelligence('client-1', 'https://example.com/tours')
+
+    expect(chainCalls).toContain('is("error_message", null)')
+    expect(chainCalls).toContain('is("parse_error_message", null)')
+    // And the columns the predicate needs must actually be selected.
+    expect(chainCalls.some(c => c.startsWith('select(') && c.includes('error_message'))).toBe(true)
+  })
 
   it('reports a real gap: the AI answered and did not mention the client', async () => {
     setupTables([run({ question: 'best china tours nz' })])
@@ -84,6 +113,17 @@ describe('getPageSeoIntelligence — GEO gaps', () => {
     ])
     const result = await getPageSeoIntelligence('client-1', 'https://example.com/tours')
     expect(result.geo_gaps).toEqual([])
+    // weakness_signals is what actually reaches the Claude prompt, so assert on
+    // it too — geo_gaps being empty is not the same as the prompt staying quiet.
+    expect(result.weakness_signals.join(' ')).not.toContain('china holidays nz')
+    expect(result.weakness_signals.join(' ')).not.toContain('nz travel agents')
+  })
+
+  it('says nothing about GEO in the prompt when no snapshot and no conclusive run exist', async () => {
+    setupTables([run({ question: 'china holidays nz', error_message: 'provider down' })], null)
+    const result = await getPageSeoIntelligence('client-1', 'https://example.com/tours')
+    expect(result.has_geo_data).toBe(false)
+    expect(result.weakness_signals.some(sig => sig.startsWith('GEO'))).toBe(false)
   })
 
   it('does not report a probe whose parser failed as a gap', async () => {
