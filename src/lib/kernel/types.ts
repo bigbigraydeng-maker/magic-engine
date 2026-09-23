@@ -32,6 +32,20 @@ import type { AccessTier } from '@/lib/auth/access-types'
 export type ActionKey =
   | 'seo.build_publish_package'
   | 'page.apply_optimization_request'
+  /**
+   * 🔴 广告支柱 IMPACT 闭环 · 阶段 2 · 内核注册（P21.K）。
+   *    设计文档：`~/.claude/plans/ads-impact-loop-capability.md` §4.1/§4.2/§14.1 K1-K14。
+   *
+   *    这四个键**只完成类型声明 + 注册**，本轮不带执行器实现（K7/K8-K12 留给
+   *    PR-B/PR-C）。`src/lib/capabilities/` 目前没有为它们注册任何
+   *    `CapabilityImplementation` —— 真提交一次执行会在 Gateway 第 ⑤c 步撞
+   *    `CAPABILITY_NOT_IMPLEMENTED`（outward 动作在 `beginAuthorizedRun` 之前
+   *    fail-closed，授权决策不消费），这是刻意保留的安全状态。
+   */
+  | 'ads.budget_move_plan'
+  | 'ads.add_retargeting_adset'
+  | 'ads.create_audience'
+  | 'ads.pause'
 
 /** 一个 run 为了什么而跑。决定它需不需要挂 Goal。 */
 export type ActionPurpose =
@@ -142,6 +156,17 @@ export type VerificationMethod =
    *    Growth 层的 matched remeasurement 走下游 Measurement/Verification 链，跟这个 method 无关。
    */
   | 'page_apply_integrity'
+  /**
+   * 🔴 execution-integrity only，跟 `page_apply_integrity` 同一个原则：只判
+   *    「这次受授权的对外写入是否真的按声明发生」（Meta 回读的实体状态是否
+   *    符合本次 authorize 的 input），**不判 Growth 结果**（花费带来的转化
+   *    好不好走下游 Measurement/Verification 链，跟这个 method 无关）。
+   *
+   *    覆盖 `ads.budget_move_plan` / `ads.add_retargeting_adset` /
+   *    `ads.create_audience` / `ads.pause` 四个动作。真正的回读断言逻辑由
+   *    执行器 PR（PR-B/PR-C）实现 —— 本 PR 只声明契约，不带 capability。
+   */
+  | 'ads_action_integrity'
 
 export interface VerificationSpec {
   readonly method: VerificationMethod

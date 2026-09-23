@@ -16,7 +16,11 @@
               "**/lib/cms/meta-patcher",
               "**/lib/gbp/publisher",
               "**/lib/gsc/indexing-client",
-              "**/lib/gsc/sitemap-ping"
+              "**/lib/gsc/sitemap-ping",
+              "**/lib/meta/client",
+              "**/lib/meta/adsets",
+              "**/lib/meta/ad-publisher",
+              "**/lib/meta/audience-ladder"
             ],
             "message": "对外写能力只能由 src/lib/capabilities/** 调用。请提交一个 action_run，让执行内核去跑（见 src/lib/kernel/boundaries.ts）。"
           }
@@ -70,7 +74,15 @@
         "src/lib/cms/page-upgrade-pr-sync.ts",
         "src/lib/flywheel/social-post-publish.ts",
         "src/lib/luban/tools.ts",
-        "src/lib/seo-meta/cts-meta-pr.ts"
+        "src/lib/seo-meta/cts-meta-pr.ts",
+        "src/app/api/clients/\\[id\\]/ad-health/stop-loss/route.ts",
+        "src/app/api/clients/\\[id\\]/meta-ads/boost-post/route.ts",
+        "src/app/api/clients/\\[id\\]/meta-ads/execute/route.ts",
+        "src/app/api/clients/\\[id\\]/meta-ads/sync/route.ts",
+        "src/app/api/cron/google-data-pullback-daily/route.ts",
+        "src/lib/ads-strategy/daily-insights.ts",
+        "src/lib/ads-strategy/stop-loss.ts",
+        "src/lib/ads-strategy/draft-and-gate.ts"
       ],
       "rules": {
         "no-restricted-imports": "warn"

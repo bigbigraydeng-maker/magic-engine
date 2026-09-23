@@ -33,6 +33,15 @@ export const PROVIDER_WRITE_MODULES = [
   '@/lib/gbp/publisher',
   '@/lib/gsc/indexing-client',
   '@/lib/gsc/sitemap-ping',
+  // 🔴 K7（广告 IMPACT 闭环 · 阶段 2 · `~/.claude/plans/ads-impact-loop-capability.md`
+  //    §14.1）：Meta 广告写入模块只准由 `src/lib/capabilities/**` 调用。
+  //    现有调用方（stop-loss / draft-and-gate / execute route 等）进
+  //    PROVIDER_WRITE_GRANDFATHERED 降级为 warn（只减不增）；新执行器只能
+  //    落在 capabilities 目录下（PR-B/PR-C）。
+  '@/lib/meta/client',
+  '@/lib/meta/adsets',
+  '@/lib/meta/ad-publisher',
+  '@/lib/meta/audience-ladder',
 ] as const
 
 /** 允许 import 上面这些模块的目录（新代码只能落在这里）。 */
@@ -74,6 +83,18 @@ export const PROVIDER_WRITE_GRANDFATHERED = [
   'src/lib/flywheel/social-post-publish.ts',
   'src/lib/luban/tools.ts',
   'src/lib/seo-meta/cts-meta-pr.ts',
+  // 🔴 K7：以下是 `@/lib/meta/client` / `@/lib/meta/adsets` / `@/lib/meta/ad-publisher`
+  //    现有的调用方（2026-09-15 实查 `grep -rl`）。`@/lib/meta/audience-ladder`
+  //    当前无调用方（设计文档 §1.1 已核实），不加豁免——它的第一个真实调用方
+  //    必须走 capabilities 层。
+  'src/app/api/clients/[id]/ad-health/stop-loss/route.ts',
+  'src/app/api/clients/[id]/meta-ads/boost-post/route.ts',
+  'src/app/api/clients/[id]/meta-ads/execute/route.ts',
+  'src/app/api/clients/[id]/meta-ads/sync/route.ts',
+  'src/app/api/cron/google-data-pullback-daily/route.ts',
+  'src/lib/ads-strategy/daily-insights.ts',
+  'src/lib/ads-strategy/stop-loss.ts',
+  'src/lib/ads-strategy/draft-and-gate.ts',
 ] as const
 
 /**

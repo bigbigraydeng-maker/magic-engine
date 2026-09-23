@@ -16,6 +16,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { CapabilityImplementation } from '@/lib/kernel/types'
 import { createBuildPublishPackageCapability } from './seo/build-publish-package'
 import { createPageApplyOptimizationCapability } from './page-apply-optimization'
+import { createAdsCapabilities } from './ads'
 
 /**
  * 装配这个进程能执行的全部能力。
@@ -32,6 +33,9 @@ export function createCapabilities(
     // Page Optimization Apply v1 —— GitHub Draft PR path.
     // spec: docs/specs/2026-08-19-me2-page-optimization-apply-action-v1.0.md
     'page.apply_optimization_request': createPageApplyOptimizationCapability(sb),
+    // 广告支柱 IMPACT 闭环 · 阶段 2（P21.K）—— 骨架实现，无真实执行逻辑。
+    // 设计：~/.claude/plans/ads-impact-loop-capability.md §4.1/§14.1。见 ./ads/not-implemented.ts。
+    ...createAdsCapabilities(sb),
   }
 }
 
