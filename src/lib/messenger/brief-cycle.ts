@@ -21,7 +21,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
-import { fatalAiReason } from '@/lib/ai/fatal-error'
+import { classifyThrownOpenAIError, needsHuman } from '@/lib/ai/provider-failure'
 import {
   shouldGenerateBrief,
   generateBrief,
@@ -60,6 +60,16 @@ export const BRIEFS_PER_CHUNK = 12
  *    留给下一轮，**把段返回出去**。90 秒留了 35 秒余量给最后那张卡跑完。
  */
 export const CHUNK_TIME_BUDGET_MS = 90_000
+
+/**
+ * 账户级失效各自对应的一句中文 —— 它会原样进 `cron_run_logs.error_message`，
+ * 也就是 PM 在体检报告和今日待办里看到的那句话，所以要说清「谁该动手」。
+ */
+const ABORT_REASON: Record<string, string> = {
+  account_exhausted: 'AI 服务账户余额/额度用光了 —— 充值前这一轮剩下的都会同样失败，已当场停下',
+  credential_invalid: 'AI 服务的钥匙不认了（被撤销 / 打错 / 过期）—— 换钥匙前这一轮剩下的都会同样失败，已当场停下',
+  gateway_auth_failed: 'AI 调用卡在网关那一层，还没走到 OpenAI —— 要换网关令牌，这一轮剩下的都会同样失败，已当场停下',
+}
 
 /** 候选池一次最多从库里捞多少条对话（挑之前的粗筛上限，不是写卡上限）。 */
 const CANDIDATE_POOL = 500
@@ -226,10 +236,13 @@ export async function generateDueBriefs(
       await storeBrief(candidate, brief, now, knowledgeStatus)
       generated++
     } catch (err) {
-      const fatal = fatalAiReason(err)
-      if (fatal) {
-        console.error(`[messenger/brief] 账户级故障，这一轮当场停下：${fatal}`, err)
-        return { generated, failed, aborted: fatal }
+      // 账户级失效（没钱 / 钥匙不认了 / 卡在网关）对这一批剩下的每一条都是同一个结论。
+      // 判据原样用 `@/lib/ai/provider-failure` 那一份，这里不另立标准。
+      const kind = classifyThrownOpenAIError(err)
+      if (needsHuman(kind)) {
+        const reason = ABORT_REASON[kind]
+        console.error(`[messenger/brief] 账户级故障，这一轮当场停下：${reason}`, err)
+        return { generated, failed, aborted: reason }
       }
       failed++
       console.error(`[messenger/brief] ${candidate.conversationId} failed:`, err)
