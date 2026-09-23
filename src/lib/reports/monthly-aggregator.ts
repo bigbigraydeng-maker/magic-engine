@@ -178,7 +178,12 @@ export async function buildMonthlyReport(clientId: string): Promise<MonthlyRepor
     .order('week_of', { ascending: false })
     .limit(8)
 
-  const snaps: SnapshotRow[] = (snapsRaw ?? []) as SnapshotRow[]
+  // total_runs=0 marks a week where every runner/parser call failed (an
+  // outage snapshot, not a measurement) — exclude it so a provider or
+  // parser outage doesn't read as a real visibility decline.
+  const snaps: SnapshotRow[] = ((snapsRaw ?? []) as SnapshotRow[]).filter(
+    s => s.total_runs > 0
+  )
 
   const thisSnaps = snaps.filter(s => s.week_of >= periodFrom && s.week_of <= periodTo)
   const lastSnaps = snaps.filter(s => s.week_of >= lastFrom && s.week_of <= lastTo)

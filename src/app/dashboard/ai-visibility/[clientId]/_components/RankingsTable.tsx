@@ -38,6 +38,18 @@ export function RankingsTable({ snapshot, brandName }: Props) {
     );
   }
 
+  // total_runs=0 means every runner/parser call failed this week (an outage
+  // snapshot) — not a measurement of zero visibility. Must not render as
+  // "no brand mentions found", which reads as a real ranking drop.
+  if (snapshot.total_runs === 0) {
+    return (
+      <div className="bg-white rounded-xl border border-black/10 py-16 text-center space-y-1">
+        <p className="text-me-charcoal/55 text-sm font-medium">AI visibility data unavailable this week</p>
+        <p className="text-me-charcoal/45 text-xs">Every AI engine call failed — this is not a ranking drop. Click ▶ Run Now to retry.</p>
+      </div>
+    );
+  }
+
   const table = snapshot.ranking_table as { brands?: BrandEntry[] };
   const brands = table?.brands ?? [];
 

@@ -27,10 +27,19 @@ interface SnapshotRow {
   week_of: string
 }
 
+interface RunRow {
+  error_message: string | null
+  parse_error_message: string | null
+}
+
 function makeSupabase(
-  opts: { snapshot?: SnapshotRow | null; brandName?: string | null } = {},
+  opts: {
+    snapshot?: SnapshotRow | null
+    brandName?: string | null
+    runs?: RunRow[]
+  } = {},
 ): SupabaseClient {
-  const { snapshot = null, brandName = 'Test Brand' } = opts
+  const { snapshot = null, brandName = 'Test Brand', runs = [] } = opts
 
   return {
     from: vi.fn((table: string) => {
@@ -44,6 +53,15 @@ function makeSupabase(
                   error: null,
                 }),
               }),
+            }),
+          }),
+        }
+      }
+      if (table === 'ai_visibility_runs') {
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              gte: vi.fn().mockResolvedValue({ data: runs, error: null }),
             }),
           }),
         }
@@ -160,6 +178,52 @@ describe('AiVisibilityCollector.collect() — no data', () => {
     expect(f).toBeDefined()
     expect(f?.severity).toBe('high')
     expect(findings.find(x => x.finding_type === 'brand_not_mentioned')).toBeUndefined()
+  })
+
+  it('prefers a successful live probe over a total_runs=0 snapshot (provider recovered since aggregation)', async () => {
+    const supabase = makeSupabase({
+      snapshot: { avg_rank: null, mentions_count: 0, total_runs: 0, week_of: '2026-09-15' },
+    })
+    const probe = makeProbe({ runs: 3, mentions: 2, avg_rank: 2 })
+    const { score, findings } = await new AiVisibilityCollector(supabase, probe).collect(
+      CLIENT_ID, DOMAIN, KEYWORDS,
+    )
+    expect(score).not.toBeNull()
+    expect(findings.find(x => x.finding_type === 'ai_visibility_all_runs_failed')).toBeUndefined()
+  })
+
+  it('attributes the failure to the ranking parser, not the AI engine, when only parse_error_message is set', async () => {
+    const supabase = makeSupabase({
+      snapshot: { avg_rank: null, mentions_count: 0, total_runs: 0, week_of: '2026-09-15' },
+      runs: [
+        { error_message: null, parse_error_message: 'parser timeout' },
+        { error_message: null, parse_error_message: 'parser timeout' },
+      ],
+    })
+    const { findings } = await new AiVisibilityCollector(supabase).collect(
+      CLIENT_ID, DOMAIN, KEYWORDS,
+    )
+    const f = findings.find(x => x.finding_type === 'ai_visibility_all_runs_failed')
+    expect(f).toBeDefined()
+    expect(f?.description).toMatch(/ranking parser/i)
+    expect(f?.recommendation).toMatch(/parser/i)
+    expect(f?.recommendation).not.toMatch(/API keys and quotas/i)
+  })
+
+  it('attributes the failure to the AI engine when only error_message is set', async () => {
+    const supabase = makeSupabase({
+      snapshot: { avg_rank: null, mentions_count: 0, total_runs: 0, week_of: '2026-09-15' },
+      runs: [
+        { error_message: '429 rate limited', parse_error_message: null },
+        { error_message: '429 rate limited', parse_error_message: null },
+      ],
+    })
+    const { findings } = await new AiVisibilityCollector(supabase).collect(
+      CLIENT_ID, DOMAIN, KEYWORDS,
+    )
+    const f = findings.find(x => x.finding_type === 'ai_visibility_all_runs_failed')
+    expect(f).toBeDefined()
+    expect(f?.recommendation).toMatch(/API keys and quotas/i)
   })
 })
 

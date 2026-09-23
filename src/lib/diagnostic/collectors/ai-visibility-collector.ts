@@ -72,10 +72,17 @@ export class AiVisibilityCollector {
       }
 
       // All runs failed (total_runs=0 after filtering errors) → cannot evaluate
+      // from the snapshot, but a live probe run moments ago may have already
+      // succeeded (provider recovered since the snapshot was aggregated) —
+      // prefer that fresh signal over reporting a stale outage.
       if (snapshot.total_runs === 0) {
+        if (probe && !probe.skipped && probe.runs > 0) {
+          return this.buildFromLiveProbe(clientId, probe)
+        }
+        const cause = await this.diagnoseAllRunsFailedCause(clientId, snapshot.week_of)
         return {
           score: null,
-          findings: [this.makeAllRunsFailedFinding(clientId, snapshot.week_of)],
+          findings: [this.makeAllRunsFailedFinding(clientId, snapshot.week_of, cause)],
         }
       }
 
@@ -281,21 +288,97 @@ export class AiVisibilityCollector {
     }
   }
 
-  private makeAllRunsFailedFinding(clientId: string, weekOf: string): NewFinding {
+  // Snapshot-level total_runs=0 doesn't say *why* — the runner may have
+  // failed before returning a response, or it may have returned fine and
+  // the ranking parser failed on every response. Those need different
+  // operator action, so inspect this week's raw run rows before blaming
+  // the AI engine provider.
+  private async diagnoseAllRunsFailedCause(
+    clientId: string,
+    weekOf: string,
+  ): Promise<AllRunsFailedCause> {
+    try {
+      const weekStart = new Date(weekOf + 'T00:00:00.000Z').toISOString()
+      const { data, error } = await this.supabase
+        .from('ai_visibility_runs')
+        .select('error_message, parse_error_message')
+        .eq('client_id', clientId)
+        .gte('ran_at', weekStart)
+
+      if (error || !data || data.length === 0) return 'unknown'
+
+      const rows = data as Array<{
+        error_message: string | null
+        parse_error_message: string | null
+      }>
+      const runnerFailed = rows.some(r => r.error_message !== null)
+      const parserFailed = rows.some(r => r.parse_error_message !== null)
+
+      if (runnerFailed && parserFailed) return 'mixed'
+      if (runnerFailed) return 'runner'
+      if (parserFailed) return 'parser'
+      return 'unknown'
+    } catch {
+      return 'unknown'
+    }
+  }
+
+  private makeAllRunsFailedFinding(
+    clientId: string,
+    weekOf: string,
+    cause: AllRunsFailedCause,
+  ): NewFinding {
+    const { description, recommendation } = describeAllRunsFailedCause(weekOf, cause)
     return {
       client_id: clientId,
       dimension: 'ai_visibility',
       finding_type: 'ai_visibility_all_runs_failed',
       severity: 'high',
-      title: 'AI Visibility — all API calls failed this week',
-      description:
-        `Every AI engine call for the week of ${weekOf} failed (429 / timeout / model error). No mention rate can be calculated — this is not a score of zero, it is missing data.`,
-      evidence: makeEvidence({ parsed: { week_of: weekOf, successful_runs: 0 } }),
-      recommendation:
-        'Check AI engine API keys and quotas. If failures persist across multiple weeks, review the AI Tracker error logs for the specific failure pattern.',
+      title: 'AI Visibility — no successfully measured runs this week',
+      description,
+      evidence: makeEvidence({ parsed: { week_of: weekOf, successful_runs: 0, cause } }),
+      recommendation,
       fix_type: 'me_auto',
       priority_score: 80,
     }
+  }
+}
+
+type AllRunsFailedCause = 'runner' | 'parser' | 'mixed' | 'unknown'
+
+function describeAllRunsFailedCause(
+  weekOf: string,
+  cause: AllRunsFailedCause,
+): { description: string; recommendation: string } {
+  switch (cause) {
+    case 'runner':
+      return {
+        description:
+          `Every AI engine call for the week of ${weekOf} failed before a response was returned (429 / timeout / model error). No mention rate can be calculated — this is not a score of zero, it is missing data.`,
+        recommendation:
+          'Check AI engine API keys and quotas. If failures persist across multiple weeks, review the AI Tracker error logs for the specific failure pattern.',
+      }
+    case 'parser':
+      return {
+        description:
+          `Every AI engine call for the week of ${weekOf} returned a response, but the ranking parser failed to extract results from all of them. No mention rate can be calculated — this is not a score of zero, it is missing data.`,
+        recommendation:
+          'This looks like a ranking-parser issue, not an AI engine outage — check the parser model status and recent response-format changes before touching AI engine API keys or quotas.',
+      }
+    case 'mixed':
+      return {
+        description:
+          `Every AI engine call for the week of ${weekOf} failed — some before a response was returned (429 / timeout / model error), others during ranking parsing. No mention rate can be calculated — this is not a score of zero, it is missing data.`,
+        recommendation:
+          'Review the AI Tracker error logs for this week to split the failures between AI engine calls and the ranking parser before acting on either.',
+      }
+    default:
+      return {
+        description:
+          `No successfully parsed AI Visibility runs exist for the week of ${weekOf}. No mention rate can be calculated — this is not a score of zero, it is missing data.`,
+        recommendation:
+          'Review the AI Tracker error logs for this week to determine whether the AI engine calls or the ranking parser failed.',
+      }
   }
 }
 
