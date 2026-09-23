@@ -391,6 +391,16 @@ async function processOne(input: ProcessOneInput): Promise<void> {
       return
     }
 
+    // A run whose parser failed is excluded from the snapshot's total_runs
+    // (aggregateSnapshot filters on parse_error_message IS NULL), so it must
+    // also count as failed here — otherwise runOneClientTracker sees
+    // runs_succeeded > 0 and reports 'completed' for a batch the snapshot
+    // just recorded as entirely unmeasurable.
+    if (parseError !== null) {
+      result.runs_failed++
+      return
+    }
+
     result.runs_succeeded++
     if (clientBrandRank !== null) result.client_brand_mentions++
   } catch (err: unknown) {

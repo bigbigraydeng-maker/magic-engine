@@ -156,6 +156,38 @@ describe('runTracker — parse-failure update path', () => {
     expect(result.runs_failed).toBe(0)
     expect(result.errors).toHaveLength(0)
   })
+
+  it('counts the run as failed when the parser fails even though the DB update itself succeeds (regression: must match aggregateSnapshot excluding parse_error_message rows from total_runs)', async () => {
+    mocks.parseRanking.mockRejectedValue(new Error('LLM parse timeout'))
+
+    const runsStub = tableStub({ data: null, error: null })
+    runsStub.insert = vi.fn(() => runsStub)
+    runsStub.select = vi.fn(() => runsStub)
+    runsStub.single = vi.fn(() => Promise.resolve({ data: { id: RUN_ID }, error: null }))
+    runsStub.update = vi.fn(() =>
+      Object.assign(runsStub, {
+        then: (onF: (v: TableResult) => unknown) => Promise.resolve({ data: null, error: null }).then(onF),
+      })
+    )
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'ai_visibility_runs') return runsStub as never
+      if (table === 'clients') return tableStub({ data: { id: CLIENT_ID, name: 'CTS Tours', domain: 'ctstours.co.nz', brand_aliases: [] }, error: null }) as never
+      if (table === 'master_briefs') return tableStub({ data: null, error: null }) as never
+      if (table === 'ai_visibility_queries') {
+        return tableStub({
+          data: [{ id: QUERY_ID, client_id: CLIENT_ID, question: 'Who runs NZ tours?', source: 'manual', enabled: true, market_tag: 'nz', notes: null, created_at: '', updated_at: '' }],
+          error: null,
+        }) as never
+      }
+      return tableStub({ data: [], error: null }) as never
+    })
+
+    const result = await runTracker({ client_id: CLIENT_ID, engines: ['openai'] })
+
+    expect(result.runs_succeeded).toBe(0)
+    expect(result.runs_failed).toBe(1)
+    expect(result.errors.some(e => e.message.includes('Parser failed'))).toBe(true)
+  })
 })
 
 describe('runTracker — all-runs-failed aggregation', () => {
