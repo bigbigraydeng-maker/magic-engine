@@ -356,7 +356,8 @@ describe('AiVisibilityCollector — failed probe is "not measured", not "zero"',
     ).collect(CLIENT_ID, DOMAIN, KEYWORDS)
 
     expect(findings.find(x => x.finding_type === 'brand_not_mentioned')).toBeUndefined()
-    // Emits a probe-failed finding so the failure is visible, not "not tracked".
+    // A probe that ran but failed (429 etc.) is a transient measurement
+    // failure — emits probe_failed finding (not "not tracked").
     expect(score).toBeNull()
     expect(findings.find(x => x.finding_type === 'ai_visibility_probe_failed')).toBeDefined()
     expect(findings.find(x => x.finding_type === 'ai_visibility_not_tracked')).toBeUndefined()

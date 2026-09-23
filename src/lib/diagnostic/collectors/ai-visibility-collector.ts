@@ -84,11 +84,15 @@ export class AiVisibilityCollector {
         if (probe) {
           return this.buildFromLiveProbe(clientId, probe)
         }
+        if (probeFailed) {
+          return {
+            score: null,
+            findings: [this.makeProbeFailedFinding(clientId, rawProbe!)],
+          }
+        }
         return {
           score: null,
-          findings: probeFailed
-            ? [this.makeProbeFailedFinding(clientId, rawProbe!)]
-            : [this.makeAiVisibilityNotTrackedFinding(clientId)],
+          findings: [this.makeAiVisibilityNotTrackedFinding(clientId)],
         }
       }
 
