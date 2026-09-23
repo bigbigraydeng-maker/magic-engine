@@ -102,5 +102,44 @@ BEGIN
   RAISE NOTICE '✅ 不变量4：无 anon/authenticated 可执行的 SECURITY DEFINER 函数';
 END $$;
 
+-- ── 不变量 5：策略已锁 service_role（或零策略）的表，不残留 anon/authenticated/PUBLIC 表级授权 ──
+-- Supabase 建表默认会给 anon/authenticated GRANT 表级增删改查，平时全靠 RLS 兜着。
+-- 一张表如果所有策略都已经精确锁在 {service_role}（或压根没有策略，RLS 默认拒绝），
+-- 这些表级 GRANT 现在是死的，但只要以后谁加一条漏写 TO 的新策略、或有人把这张表
+-- 的 RLS 关掉，它们会立刻复活成真实的匿名读写口子 —— 是 2026-08-03 事故的存量
+-- 版本，只是这次是表级 GRANT 而不是策略角色。2026-09-24 全库审计发现 197 张表
+-- 中招，20260925010000 批量收回；这里断言末态，防止以后再冒出新的残留
+-- （新表照抄旧模板忘了 REVOKE，或者谁往已锁死的表上新 GRANT 了一次）。
+-- 跳过策略角色不是「恰好只有 service_role」的表（混了 anon/authenticated/public
+-- 的遗留多租户表簇）—— 那些是刻意设计的业务需求，不是本不变量要管的残留。
+DO $$
+DECLARE n INT; detail text;
+BEGIN
+  WITH policy_roles AS (
+    SELECT tablename,
+           bool_and(roles::text = '{service_role}') AS locked_to_service_role
+      FROM pg_policies
+     WHERE schemaname = 'public'
+     GROUP BY tablename
+  ),
+  rls_tables AS (
+    SELECT c.relname AS tablename
+      FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+     WHERE ns.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity = true
+  )
+  SELECT count(DISTINCT g.table_name), string_agg(DISTINCT g.table_name, ', ' ORDER BY g.table_name)
+    INTO n, detail
+    FROM information_schema.role_table_grants g
+    JOIN rls_tables rt ON rt.tablename = g.table_name
+    LEFT JOIN policy_roles pr ON pr.tablename = rt.tablename
+   WHERE g.table_schema = 'public'
+     AND g.grantee IN ('anon', 'authenticated', 'PUBLIC')
+     AND COALESCE(pr.locked_to_service_role, true);
+  IF n <> 0 THEN
+    RAISE EXCEPTION E'[不变量5] 有 % 张已锁 service_role（或零策略）的表仍残留 anon/authenticated/PUBLIC 表级授权：\n  %', n, detail;
+  END IF;
+  RAISE NOTICE '✅ 不变量5：已锁 service_role（或零策略）的表均无 anon/authenticated/PUBLIC 残留表级授权';
+END $$;
+
 \echo ''
 \echo '✅ 全部数据库安全不变量通过'
