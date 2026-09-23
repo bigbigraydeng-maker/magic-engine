@@ -9,8 +9,8 @@ import { computeGoalPace } from '../goal-pace'
 import type { DigestGoalContext } from './internal-digest'
 
 const DAY_MS = 86_400_000
-const MEDIAN_WINDOW_DAYS = 7
-const MIN_MEDIAN_DAYS = 3
+export const MEDIAN_WINDOW_DAYS = 7
+export const MIN_MEDIAN_DAYS = 3
 
 interface AdDailyInsightRow {
   insight_date: string
@@ -38,7 +38,7 @@ function medianOf(values: number[]): number {
  * 近 7 天每结果成本中位数（分）。按天汇总 spend/results 再算每天成本，
  * 少于 3 个可用天 → null（样本太薄，中位数不可信）。
  */
-async function medianCostPerResultCents(
+export async function medianCostPerResultCents(
   clientId: string,
   insightDate: string,
 ): Promise<number | null> {

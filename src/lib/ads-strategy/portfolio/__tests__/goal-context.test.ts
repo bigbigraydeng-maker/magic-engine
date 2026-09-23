@@ -1,0 +1,237 @@
+/**
+ * 目标进度取数的薄样本闸。少于 MIN_MEDIAN_DAYS 天可用数据就不给中位数——这道闸没有测试钉住的话，以后有人把阈值改坏不会有人发现（子牙 WP0 复审 2026-09-24）。
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
+vi.mock('@/lib/strategy/goals', () => ({ getActiveGoal: vi.fn() }))
+vi.mock('@/lib/strategy/auto-fetch', () => ({ autoFetchMetricValue: vi.fn() }))
+vi.mock('../../config', () => ({ loadAdStrategyConfig: vi.fn() }))
+
+import { supabaseAdmin } from '@/lib/supabase'
+import { getActiveGoal } from '@/lib/strategy/goals'
+import { autoFetchMetricValue } from '@/lib/strategy/auto-fetch'
+import { loadAdStrategyConfig } from '../../config'
+import { medianCostPerResultCents, buildDigestGoalContext, MIN_MEDIAN_DAYS } from '../goal-context'
+import type { GoalRow } from '@/types/strategy'
+import type { AdStrategyConfig } from '../../config'
+
+interface InsightRow {
+  insight_date: string
+  spend: number | null
+  results: number | null
+}
+
+/**
+ * Chainable stub for supabaseAdmin.from('ad_daily_insights'): every builder
+ * method returns the same object, and the object is awaitable (then) resolving
+ * to { data, error }. Any other table is a test bug — throw.
+ */
+function insightsTable(rows: InsightRow[]) {
+  const result = { data: rows, error: null }
+  const builder = {
+    select: () => builder,
+    eq: () => builder,
+    gte: () => builder,
+    lte: () => builder,
+    then: (resolve: (value: typeof result) => unknown) => resolve(result),
+  }
+  vi.mocked(supabaseAdmin.from).mockImplementation((table: string) => {
+    if (table !== 'ad_daily_insights') {
+      throw new Error(`unexpected table in test: ${table}`)
+    }
+    return builder as never
+  })
+}
+
+function insightsError() {
+  const result = { data: null, error: { message: 'boom' } }
+  const builder = {
+    select: () => builder,
+    eq: () => builder,
+    gte: () => builder,
+    lte: () => builder,
+    then: (resolve: (value: typeof result) => unknown) => resolve(result),
+  }
+  vi.mocked(supabaseAdmin.from).mockImplementation((table: string) => {
+    if (table !== 'ad_daily_insights') {
+      throw new Error(`unexpected table in test: ${table}`)
+    }
+    return builder as never
+  })
+}
+
+/** A full GoalRow — every required field present, no cast. */
+function goalRow(overrides: Partial<GoalRow> = {}): GoalRow {
+  return {
+    id: 'goal-1',
+    client_id: 'client-1',
+    intent: 'acquisition',
+    awareness_subtype: null,
+    sub_type: 'ongoing',
+    title: 'Oztop Brisbane 月询盘',
+    primary_metric_key: 'leads_count',
+    primary_metric_label: '新增线索/询盘',
+    primary_metric_unit: 'count/mo',
+    baseline_value: 20,
+    target_value: 50,
+    target_direction: 'increase',
+    supporting_metrics: [],
+    period_start: '2026-09-01',
+    period_end: '2026-09-30',
+    budget_amount: null,
+    budget_currency: 'AUD',
+    status: 'active',
+    verdict: null,
+    verdict_at: null,
+    verdict_summary: null,
+    fde_reasoning: null,
+    is_beta: true,
+    current_value: null,
+    current_value_fetched_at: null,
+    current_value_source: null,
+    created_at: '2026-09-01T00:00:00Z',
+    updated_at: '2026-09-01T00:00:00Z',
+    created_by: null,
+    ...overrides,
+  }
+}
+
+/** A full AdStrategyConfig — every field present, no cast. */
+function adStrategyConfig(overrides: Partial<AdStrategyConfig> = {}): AdStrategyConfig {
+  return {
+    client_id: 'client-1',
+    enabled: true,
+    digest_recipients: [],
+    daily_budget_cap_cents: null,
+    autonomy_mode: 'observe',
+    creative_pool: [],
+    ...overrides,
+  }
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
+
+describe('medianCostPerResultCents — 薄样本闸', () => {
+  it('只有 1 天有结果 → null', async () => {
+    insightsTable([{ insight_date: '2026-09-15', spend: 100, results: 4 }])
+    expect(await medianCostPerResultCents('client-1', '2026-09-15')).toBeNull()
+  })
+
+  it('只有 2 天有结果 → null', async () => {
+    insightsTable([
+      { insight_date: '2026-09-14', spend: 100, results: 4 },
+      { insight_date: '2026-09-15', spend: 50, results: 1 },
+    ])
+    expect(await medianCostPerResultCents('client-1', '2026-09-15')).toBeNull()
+  })
+
+  it('恰好 MIN_MEDIAN_DAYS 天 → 中位数', async () => {
+    expect(MIN_MEDIAN_DAYS).toBe(3)
+    insightsTable([
+      { insight_date: '2026-09-13', spend: 100, results: 4 }, // 2500
+      { insight_date: '2026-09-14', spend: 50, results: 1 },  // 5000
+      { insight_date: '2026-09-15', spend: 90, results: 3 },  // 3000
+    ])
+    expect(await medianCostPerResultCents('client-1', '2026-09-15')).toBe(3000)
+  })
+
+  it('4 天偶数个 → 两中值平均取整', async () => {
+    insightsTable([
+      { insight_date: '2026-09-12', spend: 10, results: 1 },  // 1000
+      { insight_date: '2026-09-13', spend: 20, results: 1 },  // 2000
+      { insight_date: '2026-09-14', spend: 30, results: 1 },  // 3000
+      { insight_date: '2026-09-15', spend: 50, results: 1 },  // 5000
+    ])
+    expect(await medianCostPerResultCents('client-1', '2026-09-15')).toBe(2500)
+  })
+
+  it('当天有花费但 0 结果的天被跳过', async () => {
+    insightsTable([
+      { insight_date: '2026-09-12', spend: 10, results: 1 },  // 1000
+      { insight_date: '2026-09-13', spend: 20, results: 1 },  // 2000
+      { insight_date: '2026-09-14', spend: 30, results: 1 },  // 3000
+      { insight_date: '2026-09-15', spend: 80, results: 0 },  // skipped
+    ])
+    expect(await medianCostPerResultCents('client-1', '2026-09-15')).toBe(2000)
+  })
+
+  it('同一天多个 campaign 行先按天汇总', async () => {
+    insightsTable([
+      { insight_date: '2026-09-13', spend: 60, results: 2 },
+      { insight_date: '2026-09-13', spend: 40, results: 2 }, // day total: 100/4 = 2500
+      { insight_date: '2026-09-14', spend: 10, results: 1 }, // 1000
+      { insight_date: '2026-09-15', spend: 20, results: 1 }, // 2000
+    ])
+    expect(await medianCostPerResultCents('client-1', '2026-09-15')).toBe(2000)
+  })
+
+  it('supabase 报错 → null', async () => {
+    insightsError()
+    expect(await medianCostPerResultCents('client-1', '2026-09-15')).toBeNull()
+  })
+
+  it('spend 为 null 当 0、results 为 null 当 0', async () => {
+    // 可用天必须够 MIN_MEDIAN_DAYS，否则先被薄样本闸拦掉、测不到 null 的折算。
+    insightsTable([
+      { insight_date: '2026-09-12', spend: 20, results: 1 },     // 2000
+      { insight_date: '2026-09-13', spend: null, results: 5 },   // spend null → 0 分，仍计入
+      { insight_date: '2026-09-14', spend: 100, results: null }, // results null → 跳过
+      { insight_date: '2026-09-15', spend: 30, results: 1 },     // 3000
+    ])
+    // 可用 3 天 [0, 2000, 3000] → 中位数 2000；被跳过的 09-14 若混进来中位数会变
+    expect(await medianCostPerResultCents('client-1', '2026-09-15')).toBe(2000)
+  })
+})
+
+describe('buildDigestGoalContext', () => {
+  it('没有 active goal → null，且 autoFetchMetricValue 没被调用', async () => {
+    vi.mocked(getActiveGoal).mockResolvedValue(null)
+    expect(await buildDigestGoalContext('client-1', '2026-09-15')).toBeNull()
+    expect(vi.mocked(autoFetchMetricValue)).not.toHaveBeenCalled()
+  })
+
+  it('autoFetch 返回 unknown → verdict unknown 且 reason 含归属数据不足', async () => {
+    vi.mocked(getActiveGoal).mockResolvedValue(goalRow())
+    vi.mocked(autoFetchMetricValue).mockResolvedValue({
+      ok: false,
+      reason: '主结果归不到广告（§14 M2）',
+      unknown: true,
+    })
+    vi.mocked(loadAdStrategyConfig).mockResolvedValue(adStrategyConfig())
+    insightsTable([])
+
+    const ctx = await buildDigestGoalContext('client-1', '2026-09-15')
+    expect(ctx).not.toBeNull()
+    expect(ctx?.pace.verdict).toBe('unknown')
+    expect(ctx?.pace.reason).toContain('归属数据不足')
+  })
+
+  it('getActiveGoal 抛错 → resolves 为 null（不抛）', async () => {
+    vi.mocked(getActiveGoal).mockRejectedValue(new Error('db down'))
+    await expect(buildDigestGoalContext('client-1', '2026-09-15')).resolves.toBeNull()
+  })
+
+  it('正常路径：dayIndex / totalDays 与字段透传', async () => {
+    vi.mocked(getActiveGoal).mockResolvedValue(goalRow())
+    vi.mocked(autoFetchMetricValue).mockResolvedValue({
+      ok: true,
+      value: 35,
+      source: 'auto.ga4_conversions',
+      snapshot_date: '2026-09-15',
+      label: '35 conversions',
+    })
+    vi.mocked(loadAdStrategyConfig).mockResolvedValue(adStrategyConfig())
+    insightsTable([])
+
+    const ctx = await buildDigestGoalContext('client-1', '2026-09-15')
+    expect(ctx).not.toBeNull()
+    expect(ctx?.dayIndex).toBe(15)
+    expect(ctx?.totalDays).toBe(30)
+    expect(ctx?.title).toBe('Oztop Brisbane 月询盘')
+    expect(ctx?.label).toBe('新增线索/询盘')
+    expect(ctx?.target).toBe(50)
+  })
+})
