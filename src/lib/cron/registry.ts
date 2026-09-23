@@ -240,6 +240,18 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   //    节流闸只挡得住重复的**采集**，挡不住重复的排班混乱，而且这活儿是花钱的。
   { service: 'render-dashboard:baseline-domains-monthly', jobName: 'baseline-domains-monthly', schedule: '0 17 * * 0', logsRuns: true, scheduler: 'external', addedAt: '2026-09-07' },
 
+  // 7 本跨客户经验手册（Claude 持久记忆，不在这个仓库）每周过期巡检。触发方是
+  // 仓库外的 Claude scheduled task（~/.claude/scheduled-tasks/playbook-staleness-weekly/
+  // SKILL.md），不在 render.yaml 里——本地每周一 08:30 NZT 跑，POST 结果给这个接口。
+  {
+    service: 'claude-scheduled-task:playbook-staleness-weekly',
+    jobName: 'playbook-staleness-weekly',
+    schedule: '30 8 * * 1',
+    logsRuns: true,
+    scheduler: 'external',
+    addedAt: '2026-09-24',
+  },
+
   // ── Inngest 自带定时器 ───────────────────────────────────────────────────────
   // 每周 SEO 快照。代码 2026-05-18 就写好了，但一次都没跑过（生产库 0 条运行记录），
   // 因为它每周要对每个在服务的客户各花一次 SEO 数据的钱 —— 2026-08-06 架构审计标成
