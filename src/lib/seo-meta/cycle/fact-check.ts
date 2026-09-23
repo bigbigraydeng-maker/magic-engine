@@ -60,7 +60,7 @@ export async function checkFactPreservation(
         contradiction: {
           type: 'noul',
           instructions:
-            'Compare oldTitle/oldDesc (the ORIGINAL page text) against newTitle/newDesc (the NEW proposed text) in the given state. Does the NEW text contradict any concrete fact stated or implied by the ORIGINAL (e.g. price, whether something is free vs paid, whether an application/visa is required vs not required, dates, availability, location)? Wording changes and added detail are fine — only a genuine factual contradiction or reversal counts. Answer with a high score if a contradiction exists, a low score if the texts are factually consistent.',
+            'Compare oldTitle/oldDesc (the ORIGINAL page text) against newTitle/newDesc (the NEW proposed text) in the given state. Does the NEW text contradict any concrete fact stated or implied by the ORIGINAL (e.g. price, whether something is free vs paid, whether an application/visa is required vs not required, dates, availability, location)? This includes the service area / geographic coverage / departure cities being NARROWED OR MADE VAGUER — e.g. the ORIGINAL states departures from multiple named cities/regions and the NEW only names one, or the ORIGINAL names a specific city/region and the NEW generalizes it away to a broader or different one. Treat that narrowing as a contradiction even though nothing is literally negated — it changes who the page is telling can use the service. Wording changes and added detail are fine — only a genuine factual contradiction, reversal, or narrowing of scope counts. Answer with a high score if a contradiction (including a scope-narrowing one) exists, a low score if the texts are factually consistent.',
         },
       },
     )

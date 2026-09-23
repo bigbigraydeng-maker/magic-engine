@@ -44,6 +44,8 @@ export interface MetaCycleRosterEntry {
   brandVoice: string
   /** See MetaCycleClientConfig.keywordFallbackLocations — validated here so a malformed config value can never reach the gate as garbage location_codes. */
   keywordFallbackLocations: number[]
+  /** See MetaCycleClientConfig.protectedSlugs — validated here so a malformed config value can never silently become "protect nothing". */
+  protectedSlugs: string[]
 }
 
 export type RosterResult =
@@ -60,12 +62,22 @@ const DEFAULT_COOLDOWN_DAYS = 30
 const DEFAULT_BRAND_VOICE = 'Professional, factual AU/NZ English. No invented prices, dates, or itinerary details.'
 /** PM 2026-09-20 (fourth pass): at most 2 fallback locations — this is a small, deliberate escape hatch (CTS configures [2036]/AU today), not a general multi-market crawl. */
 const MAX_KEYWORD_FALLBACK_LOCATIONS = 2
+/** Generous cap — a client should only ever need a handful of protected slugs (quote pages, homepage), not a full site list; a cap stops a malformed config from silently disabling the whole cycle. */
+const MAX_PROTECTED_SLUGS = 50
 
 function parseKeywordFallbackLocations(raw: unknown): number[] {
   if (!Array.isArray(raw)) return []
   return raw
     .filter((v): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0)
     .slice(0, MAX_KEYWORD_FALLBACK_LOCATIONS)
+}
+
+function parseProtectedSlugs(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+    .map((v) => v.trim())
+    .slice(0, MAX_PROTECTED_SLUGS)
 }
 
 /**
@@ -106,6 +118,7 @@ function rowToEntry(row: { id?: unknown; domain?: unknown; semrush_db?: unknown;
     cooldownDays: typeof cfg.meta_cycle_cooldown_days === 'number' && cfg.meta_cycle_cooldown_days > 0 ? cfg.meta_cycle_cooldown_days : DEFAULT_COOLDOWN_DAYS,
     brandVoice: typeof cfg.meta_cycle_brand_voice === 'string' && cfg.meta_cycle_brand_voice.trim().length > 0 ? cfg.meta_cycle_brand_voice : DEFAULT_BRAND_VOICE,
     keywordFallbackLocations: parseKeywordFallbackLocations(cfg.meta_cycle_keyword_fallback_locations),
+    protectedSlugs: parseProtectedSlugs(cfg.meta_cycle_protected_slugs),
   }
 }
 
@@ -136,6 +149,7 @@ export function toClientConfig(entry: MetaCycleRosterEntry): MetaCycleClientConf
     cooldownDays: entry.cooldownDays,
     brandVoice: entry.brandVoice,
     keywordFallbackLocations: entry.keywordFallbackLocations,
+    protectedSlugs: entry.protectedSlugs,
   }
 }
 
