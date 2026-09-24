@@ -495,6 +495,14 @@ export default function CrmAllContactsPage() {
   const [toast, setToast] = useState<string | null>(null)
 
   const [q, setQ] = useState('')
+  // 只有防抖后的值进 API —— 否则每敲一个字都打一次请求。
+  const [qDebounced, setQDebounced] = useState('')
+  // 服务端拒绝 q 里的逗号/括号（PostgREST or() 语法），单独一条提示，不覆盖整页错误。
+  const [qError, setQError] = useState<string | null>(null)
+  const [stageFilter, setStageFilter] = useState<string[]>([])
+  const [page, setPage] = useState(1)
+  // C1a 固定 100，先不给改每页条数的入口。
+  const [perPage] = useState(100)
   const [sortKey, setSortKey] = useState<'firstSeenAt' | 'lastTouchAt'>('lastTouchAt')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
@@ -508,23 +516,35 @@ export default function CrmAllContactsPage() {
   const loadList = useCallback(async () => {
     setError(null)
     try {
+      const params = new URLSearchParams()
+      params.set('page', String(page))
+      params.set('perPage', String(perPage))
+      if (qDebounced.trim()) params.set('q', qDebounced.trim())
+      for (const s of stageFilter) params.append('stage', s)
+
       const [res, stageRes] = await Promise.all([
-        fetch(`/api/clients/${clientId}/crm/contacts`),
+        fetch(`/api/clients/${clientId}/crm/contacts?${params.toString()}`),
         fetch(`/api/clients/${clientId}/pipeline-stages`),
       ])
       const json = (await res.json()) as {
-        contacts?: ContactRow[]
+        total?: number
         columns?: CustomColumnMeta[]
-        totalContacts?: number
+        items?: ContactRow[]
         error?: string
       }
       if (!res.ok) {
+        // 400 是搜索词非法（逗号/括号）—— 只提示搜索框，别把已有名单清空。
+        if (res.status === 400) {
+          setQError('搜索里不能有逗号或括号')
+          return
+        }
         setError(json.error ?? '加载失败')
         return
       }
-      setRows(json.contacts ?? [])
+      setQError(null)
+      setRows(json.items ?? [])
       setColumns(json.columns ?? [])
-      setTotal(json.totalContacts ?? 0)
+      setTotal(json.total ?? 0)
       if (stageRes.ok) {
         const s = (await stageRes.json()) as { stages?: StageOption[] }
         // marketingAction 之前被这里的映射漏掉了——NAL"标已成交"要靠它判断该弹
@@ -538,11 +558,22 @@ export default function CrmAllContactsPage() {
     } finally {
       setLoading(false)
     }
-  }, [clientId])
+  }, [clientId, page, perPage, qDebounced, stageFilter])
 
   useEffect(() => {
     void loadList()
   }, [loadList])
+
+  // 搜索词防抖：300ms 内还在敲就不发请求。
+  useEffect(() => {
+    const t = window.setTimeout(() => setQDebounced(q), 300)
+    return () => window.clearTimeout(t)
+  }, [q])
+
+  // 换了搜索词或筛选条件就回第一页 —— 否则会停在一个可能不存在的页码上。
+  useEffect(() => {
+    setPage(1)
+  }, [qDebounced, stageFilter])
 
   const loadTimeline = useCallback(
     async (contactId: string) => {
@@ -639,16 +670,8 @@ export default function CrmAllContactsPage() {
     }
   }
 
-  const kw = q.trim().toLowerCase()
-  const filtered = kw
-    ? rows.filter(
-        (r) =>
-          r.name.toLowerCase().includes(kw) ||
-          (r.phone ?? '').replace(/\s/g, '').includes(kw.replace(/\s/g, '')) ||
-          (r.email ?? '').toLowerCase().includes(kw),
-      )
-    : rows
-  const sorted = [...filtered].sort((a, b) => {
+  // 搜索交给服务端了，这里只排当前页。
+  const sorted = [...rows].sort((a, b) => {
     const av = sortKey === 'firstSeenAt' ? ts(a.firstSeenAt) : ts(a.lastTouchAt)
     const bv = sortKey === 'firstSeenAt' ? ts(b.firstSeenAt) : ts(b.lastTouchAt)
     return sortDir === 'desc' ? bv - av : av - bv
@@ -699,10 +722,37 @@ export default function CrmAllContactsPage() {
             className="w-full rounded-xl border border-black/10 bg-white px-4 py-2.5 text-sm focus:border-me-charcoal focus:outline-none"
           />
 
+          {qError && <p className="text-xs font-semibold text-[#C2453A]">{qError}</p>}
+
+          {stages.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs text-me-charcoal/45">跟进到哪步：</span>
+              {stages.map((s) => {
+                const on = stageFilter.includes(s.stageKey)
+                return (
+                  <button
+                    key={s.stageKey}
+                    onClick={() =>
+                      setStageFilter((prev) =>
+                        on ? prev.filter((k) => k !== s.stageKey) : [...prev, s.stageKey],
+                      )
+                    }
+                    className={`rounded-full border border-black/10 px-3 py-1 text-xs font-semibold ${
+                      on ? 'bg-me-charcoal text-white' : 'text-me-charcoal/60'
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
           <div className="flex items-center justify-between">
             <p className="text-xs font-bold text-me-charcoal/50">
-              {kw ? `找到 ${sorted.length} 人` : `共 ${total} 位客人`}
+              第 {page} 页，共 {total} 位客人
             </p>
+            <p className="text-xs text-me-charcoal/40">排序只对当前页生效</p>
           </div>
 
           {/* 刚搬过来时安抚一句，别让「全空的跟进阶段」像没做完的作业 */}
@@ -735,7 +785,7 @@ export default function CrmAllContactsPage() {
                 {sorted.length === 0 && (
                   <tr>
                     <td colSpan={colCount} className="px-4 py-10 text-center text-me-charcoal/40">
-                      {kw ? '没找到这个人。' : '还没有客人。'}
+                      {qDebounced.trim() || stageFilter.length > 0 ? '没找到这个人。' : '还没有客人。'}
                     </td>
                   </tr>
                 )}
@@ -800,6 +850,28 @@ export default function CrmAllContactsPage() {
                 })}
               </tbody>
             </table>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between text-sm">
+            <span className="text-me-charcoal/50">
+              共 {total} 人 · 第 {page} / {Math.max(1, Math.ceil(total / perPage))} 页
+            </span>
+            <div className="flex gap-2">
+              <button
+                disabled={page <= 1}
+                onClick={() => setPage((p) => p - 1)}
+                className="rounded-lg border border-black/10 px-3 py-1.5 disabled:opacity-40"
+              >
+                上一页
+              </button>
+              <button
+                disabled={page >= Math.ceil(total / perPage)}
+                onClick={() => setPage((p) => p + 1)}
+                className="rounded-lg border border-black/10 px-3 py-1.5 disabled:opacity-40"
+              >
+                下一页
+              </button>
+            </div>
           </div>
         </>
       )}
