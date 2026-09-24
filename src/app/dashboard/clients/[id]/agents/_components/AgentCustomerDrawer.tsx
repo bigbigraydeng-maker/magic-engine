@@ -10,16 +10,7 @@
 import { useEffect, useState } from 'react'
 import { formatRelative, type AgentCustomerRow, type AgentRow } from '../page'
 import { stageLabelOf } from './StageBoard'
-
-const STAGES = [
-  'new',
-  'quoting',
-  'quoted',
-  'confirmed',
-  'deposit_paid',
-  'completed',
-  'lost',
-] as const
+import { TRAVEL_AGENT_CUSTOMER_STAGES } from '@/lib/crm/agent-customer-stages'
 
 export function AgentCustomerDrawer({
   open,
@@ -178,7 +169,7 @@ export function AgentCustomerDrawer({
             onChange={(e) => void saveStage(e.target.value)}
             className="mt-1 w-full rounded-lg border border-me-charcoal/15 bg-white px-3 py-2 text-sm disabled:opacity-50"
           >
-            {STAGES.map((s) => (
+            {TRAVEL_AGENT_CUSTOMER_STAGES.map((s) => (
               <option key={s} value={s}>{stageLabelOf(s)}</option>
             ))}
           </select>

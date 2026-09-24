@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { isValidStage } from '@/lib/crm/agent-customer-stages'
+import { contactKindOf, readDomainRules } from '@/lib/crm/contact-kind'
 
 type Context = { params: Promise<{ id: string }> }
 
@@ -43,6 +44,44 @@ export async function POST(req: Request, { params }: Context) {
   const stage = parsed.stage ?? 'new'
   if (!isValidStage(stage)) {
     return NextResponse.json({ error: 'Invalid stage.' }, { status: 400 })
+  }
+
+  // 校验 agentContactId 属于这个 client_id 名下、且是 trade 类。
+  // 不校验的话，调用方可以拿别的客户的 contact id 建行，或者把散客当 Agent。
+  const { data: contactRow } = await supabaseAdmin
+    .from('contacts')
+    .select('id')
+    .eq('id', parsed.agentContactId)
+    .eq('client_id', id)
+    .maybeSingle()
+  if (!contactRow) {
+    return NextResponse.json({ error: '找不到这个联系人' }, { status: 400 })
+  }
+
+  // kind 是按域名算出来的，不存表（见 contact-kind.ts）—— 读这个 contact 的
+  // 邮箱，再按域名规则判。读法参考 mail-ingest.ts 的 findContactByEmail。
+  const { data: identityRows } = await supabaseAdmin
+    .from('contact_identities')
+    .select('value')
+    .eq('client_id', id)
+    .eq('contact_id', parsed.agentContactId)
+    .eq('kind', 'email')
+  const emails = (identityRows ?? []).map((r) => r.value as string)
+
+  let rules
+  try {
+    const { data: clientRow } = await supabaseAdmin
+      .from('clients')
+      .select('leads_config')
+      .eq('id', id)
+      .maybeSingle()
+    rules = readDomainRules(clientRow?.leads_config ?? null)
+  } catch {
+    rules = { own: [], trade: [] }
+  }
+
+  if (contactKindOf(emails, rules) !== 'trade') {
+    return NextResponse.json({ error: '不是同行 Agent' }, { status: 400 })
   }
 
   try {

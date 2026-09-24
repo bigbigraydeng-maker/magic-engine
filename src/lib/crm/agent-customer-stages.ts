@@ -26,3 +26,16 @@ export function isValidStage(value: unknown): value is TravelAgentCustomerStage 
   if (typeof value !== 'string') return false
   return (TRAVEL_AGENT_CUSTOMER_STAGES as readonly string[]).includes(value)
 }
+
+/**
+ * 7 个阶段的中文标签映射。UI 侧 import 使用，不再各自硬编码一份。
+ */
+export const TRAVEL_STAGE_LABELS: Record<TravelAgentCustomerStage, string> = {
+  new: '新询价',
+  quoting: '报价中',
+  quoted: '已报价',
+  confirmed: '已确认',
+  deposit_paid: '已付定',
+  completed: '已出行',
+  lost: '流失',
+}

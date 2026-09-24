@@ -7,30 +7,15 @@
  */
 
 import { formatRelative, type AgentCustomerRow, type AgentRow } from '../page'
-
-const STAGES = [
-  'new',
-  'quoting',
-  'quoted',
-  'confirmed',
-  'deposit_paid',
-  'completed',
-  'lost',
-] as const
-
-const STAGE_LABEL: Record<string, string> = {
-  new: '新询价',
-  quoting: '报价中',
-  quoted: '已报价',
-  confirmed: '已确认',
-  deposit_paid: '已付定',
-  completed: '已出行',
-  lost: '流失',
-}
+import {
+  TRAVEL_AGENT_CUSTOMER_STAGES,
+  TRAVEL_STAGE_LABELS,
+  isValidStage,
+} from '@/lib/crm/agent-customer-stages'
 
 /** 7 个英文阶段映射成中文；未知阶段原样返回，不假装认识它。 */
 export function stageLabelOf(stage: string): string {
-  return STAGE_LABEL[stage] ?? stage
+  return isValidStage(stage) ? TRAVEL_STAGE_LABELS[stage] : stage
 }
 
 export function StageBoard({
@@ -45,7 +30,7 @@ export function StageBoard({
 
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-7">
-      {STAGES.map((stage) => {
+      {TRAVEL_AGENT_CUSTOMER_STAGES.map((stage) => {
         const list = flat.filter((x) => x.customer.stage === stage)
         return (
           <div key={stage} className="rounded-2xl border border-me-charcoal/10 bg-me-ivory/40 p-2.5">

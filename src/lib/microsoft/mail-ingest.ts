@@ -38,7 +38,7 @@ import { fetchMailSince, type MailFolder, type MailMessage } from '@/lib/microso
 import { classifySender } from '@/lib/microsoft/mail-sender'
 import { resolveContact } from '@/lib/crm/identity'
 import { contactKindOf, readDomainRules, type DomainRules } from '@/lib/crm/contact-kind'
-import { extractAgentCustomers } from '@/lib/crm/agent-customer-extract'
+import { extractAgentCustomers } from '@/lib/crm/travel-agent-customer-extract'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { CONVERSATION_MESSAGE_RECEIVED_EVENT } from '@/lib/conversations/events'
 
@@ -652,9 +652,10 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
       .eq('id', target.clientId)
       .maybeSingle()
     domainRules = readDomainRules(clientRow?.leads_config ?? null)
-  } catch {
+  } catch (err) {
     // 读不到就当没配置 —— 测试 mock 里没这张表也走这条路。
     // agent-customer hook 会自然跳过，不影响主同步。
+    console.warn('[agent-customer-hook] leads_config 读失败，本轮跳过 trade 检测：', err)
     domainRules = { own: [], trade: [] }
   }
 
@@ -788,9 +789,14 @@ async function runAgentCustomerHook(
     const inbound = thread.messages.filter((m) => m.direction === 'inbound').slice(-20)
     if (inbound.length === 0) return
 
+    const latestInbound = inbound[inbound.length - 1]
+    const latestInboundAt = latestInbound.receivedAt
+    const latestInboundSummary = latestInbound.subject ?? latestInbound.preview.slice(0, 120) ?? null
+
     const result = await extractAgentCustomers({
       clientId,
       agentContactId: contactId,
+      conversationId,
       emails: inbound.map((m) => ({
         subject: m.subject,
         bodyPreview: m.preview,
@@ -800,49 +806,42 @@ async function runAgentCustomerHook(
     })
     if (result.customers.length === 0) return
 
-    const summary = inbound[0].subject ?? inbound[0].preview.slice(0, 120) ?? null
-
     for (const customer of result.customers) {
       if (!customer.customerName) continue
 
-      const { data: existing } = await supabaseAdmin
-        .from('agent_customers')
-        .select('id, pax, trip_type, travel_dates, specific_needs, conversation_id')
-        .eq('client_id', clientId)
-        .eq('agent_contact_id', contactId)
-        .eq('customer_name', customer.customerName)
-        .maybeSingle()
-
-      if (existing) {
-        await supabaseAdmin
-          .from('agent_customers')
-          .update({
-            last_contact_at: thread.lastAt,
-            last_contact_summary: summary,
-            pax: existing.pax ?? customer.pax,
-            trip_type: existing.trip_type ?? customer.tripType,
-            travel_dates: existing.travel_dates ?? customer.travelDates,
-            specific_needs: existing.specific_needs ?? customer.specificNeeds,
-            conversation_id: existing.conversation_id ?? conversationId,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', existing.id)
-      } else {
-        await supabaseAdmin.from('agent_customers').insert({
-          client_id: clientId,
-          agent_contact_id: contactId,
-          customer_name: customer.customerName,
-          pax: customer.pax,
-          trip_type: customer.tripType,
-          travel_dates: customer.travelDates,
-          specific_needs: customer.specificNeeds,
-          last_contact_at: thread.lastAt,
-          last_contact_summary: summary,
-          conversation_id: conversationId,
-        })
+      // 单次 upsert 走 ON CONFLICT —— 先 select 再 insert/update 在并发下会插两条。
+      // 幂等键跟 migration 里的 UNIQUE INDEX 列顺序一致。
+      //
+      // 「不覆盖已有非空字段」靠 payload 里**只在有值时才带这个键**实现：
+      // upsert 不会重写 payload 里没出现的列，所以 AI 这次没抽到的字段保持原样。
+      const payload: Record<string, unknown> = {
+        client_id: clientId,
+        agent_contact_id: contactId,
+        conversation_id: conversationId,
+        customer_name: customer.customerName,
+        last_contact_at: latestInboundAt,
+        last_contact_summary: latestInboundSummary,
+        updated_at: new Date().toISOString(),
       }
+      if (customer.pax != null) payload.pax = customer.pax
+      if (customer.tripType != null) payload.trip_type = customer.tripType
+      if (customer.travelDates != null) payload.travel_dates = customer.travelDates
+      if (customer.specificNeeds != null) payload.specific_needs = customer.specificNeeds
+      // 只在这次触发 suspicious 时才写 true —— PM 过目后手动改成 false 的行，
+      // 只要新一批不再触发，就不会被拉回 true。
+      if (customer.suspicious === true) payload.needs_review = true
+
+      await supabaseAdmin
+        .from('agent_customers')
+        .upsert(payload, {
+          onConflict: 'client_id,agent_contact_id,conversation_id,customer_name',
+        })
     }
   } catch (err) {
-    console.warn('[agent-customer-hook]', err instanceof Error ? err.message : String(err))
+    console.warn('[agent-customer-hook] AI 提取或 UPSERT 失败（不影响主同步）：', {
+      clientId,
+      contactId,
+      err: err instanceof Error ? err.message : String(err),
+    })
   }
 }
