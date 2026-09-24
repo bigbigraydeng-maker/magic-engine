@@ -46,6 +46,7 @@ import { MICROSOFT_MAIL_SCOPES } from '@/lib/microsoft/mail-oauth'
 import { COMBINED_GOOGLE_SCOPES, GSC_SCOPES } from '@/lib/google-oauth/client'
 import { META_PAGE_SCOPES } from '@/lib/meta-oauth/client'
 import { TIKTOK_SCOPES } from '@/lib/tiktok-oauth/client'
+import { REQUIRED_SCOPES } from '@/app/api/clients/[id]/comment-autoreply-probe/route'
 
 describe('授权权限清单变更闸门（改了就来读文件头注）', () => {
   it('微软邮箱的权限清单没有被悄悄改动', () => {
@@ -90,6 +91,17 @@ describe('授权权限清单变更闸门（改了就来读文件头注）', () =
 
   it('TikTok 授权的清单没有被悄悄改动', () => {
     expect([...TIKTOK_SCOPES]).toEqual(['user.info.basic', 'video.publish', 'video.upload'])
+  })
+
+  it('评论自动回复权限探针要求的清单没有被悄悄改动', () => {
+    // 之前这个常量只在 PINNED_SCOPE_CONSTANTS 里挂了名字/路径，没有内容断言 ——
+    // 改动它不会让任何测试失败，等于闸门对它完全没关上。
+    expect([...REQUIRED_SCOPES]).toEqual([
+      'pages_read_engagement',
+      'pages_read_user_content',
+      'pages_manage_engagement',
+      'pages_messaging',
+    ])
   })
 })
 

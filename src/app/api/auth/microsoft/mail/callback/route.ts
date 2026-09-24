@@ -122,7 +122,16 @@ export async function GET(req: NextRequest) {
       //    于是「权限比现在要的少」那条判据对真正危险的那种情况完全瞎掉 ——
       //    下一次刷新照样撞 AADSTS65001。Facebook / TikTok 的回调存的都是实际
       //    授予的，唯独刷新会重放 scope 的这个平台存的是请求的（魏征 2026-09-24 抓出）。
-      scopes: exchanged.tokens.scope.split(' ').filter(Boolean),
+      //
+      //    `offline_access` 是个例外：它换来的是刷新令牌的能力，不是某个资源的
+      //    读写权限，微软不会把它塞进令牌响应的 `scope` 字段——所以照原样落库
+      //    的话，`missingScopes()` 会把它判成永久缺口，即使这条连接刚刚成功换到
+      //    了 refresh_token（`exchangeCodeForTokens` 已经保证了这一点，见
+      //    mail-oauth.ts）。换到了 refresh_token 本身就证明这次同意包含
+      //    `offline_access`，直接补上，不靠 `scope` 字符串判断。
+      scopes: Array.from(
+        new Set(['offline_access', ...exchanged.tokens.scope.split(' ').filter(Boolean)]),
+      ),
       // 刚刚用授权码换到令牌、又用它成功读出了邮箱地址 —— 这就是一次货真价实的
       // 「跟对方通上话」，必须盖上时间戳。不盖的话，重连之后心跳仍停在断线那天，
       // 断线监控（platform-oauth/connection-health.ts）会在人已经修好之后继续

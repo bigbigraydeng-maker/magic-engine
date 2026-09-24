@@ -22,7 +22,7 @@ import { fetchPostCommentsResult } from '@/lib/meta/comments'
 const GRAPH_BASE = 'https://graph.facebook.com/v20.0'
 // pages_read_user_content 是读**别人写的**评论要的那一条；少了它，这个功能
 // 看起来在跑，实际每个帖子都被 Meta 挡在 #10（2026-08-15 生产实测）。
-const REQUIRED_SCOPES = [
+export const REQUIRED_SCOPES = [
   'pages_read_engagement',
   'pages_read_user_content',
   'pages_manage_engagement',

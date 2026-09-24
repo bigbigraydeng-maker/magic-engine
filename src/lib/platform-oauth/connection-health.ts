@@ -307,7 +307,18 @@ export function assessConnections(
     // 人主动断开的整条跳过 —— 它不是故障。
     const inScope = all.filter((r) => r.status !== CONNECTION_STATUS.REVOKED)
 
+    // `one_per_client` 的平台（GSC/GA4）取令牌只认这个客户最新的那一条活跃行
+    // （token-manager.ts::fetchConnectionRow 按 status=active 过滤）。客户换了
+    // 账号重连之后，旧账号那一行会永远停在 error/expired、永远不会再被运行时
+    // 碰到或更新——按条报「断了」等于让 PM 永远重连一个已经被换掉的旧账号。
+    // 只要同一客户还有活着的一行，旧的 error/expired 行就不算数。
+    const clientsWithActiveRow =
+      refreshScope === 'one_per_client'
+        ? new Set(all.filter((r) => r.status === CONNECTION_STATUS.ACTIVE).map((r) => r.client_id))
+        : null
+
     for (const row of inScope.filter((r) => BROKEN_STATUSES.has(r.status))) {
+      if (clientsWithActiveRow?.has(row.client_id)) continue
       findings.push({ kind: 'broken', row, sinceHours: hoursSince(row.updated_at, now) })
     }
 

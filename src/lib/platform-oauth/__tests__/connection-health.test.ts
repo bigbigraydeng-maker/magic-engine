@@ -195,6 +195,22 @@ describe('assessConnections · 心跳', () => {
     expect(findings).toEqual([])
   })
 
+  it('🔴 谷歌这类「每客户只刷最新一条」的平台，旧账号明确 error/expired 也不再永久报断线', () => {
+    // 客户用另一个谷歌账号重连 GSC/GA4：新行变成唯一的活跃行，旧行永远不会
+    // 再被运行时的 fetchConnectionRow 选中或刷新——按条报「断了」等于每天
+    // 让 PM 重连一个已经被换掉、重连也没用的旧账号。
+    const g = (o: Partial<ConnectionHealthRow> & { id: string }) =>
+      row({ provider: PLATFORM_PROVIDERS.GOOGLE_GSC, scopes: [], ...o })
+    const findings = assessConnections(
+      [
+        g({ id: 'old', status: 'error', updated_at: '2026-09-06T00:00:00Z' }),
+        g({ id: 'new', account_id: 'new@x', last_synced_at: '2026-09-23T17:00:00Z' }),
+      ],
+      NOW,
+    )
+    expect(findings).toEqual([])
+  })
+
   it('🔴 邮箱这类「逐条遍历」的平台按条判 —— 死掉的那个邮箱不会被活着的盖过去', () => {
     const findings = assessConnections(
       [
