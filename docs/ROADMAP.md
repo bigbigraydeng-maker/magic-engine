@@ -286,6 +286,23 @@ PM 要求把 parkhomes.nz 整体检查一遍还有什么可以升级。首页网
 
 ---
 
+## 广告 WP3 · Impact loop 接线 — 设计稿 v2.1 等 PM 认，实施按四小步（2026-09-25，A 级，P0）
+
+**§11 打分**：频率高（每日跑）· IMPACT 高（Check/Tune 段决定闭环通不通电）· 收入高（客户续费看广告效果）→ 三高 → **P0**。合同 [#1986](https://github.com/bigbigraydeng-maker/magic-engine/issues/1986)；设计稿 `docs/specs/2026-09-25-ads-impact-wp3-design-v1.md`（三方设计复审两轮：子牙 / 魏征 / 狄仁杰，21+27 条全部并入）。执行走 DeepSeek，本窗口统筹复审。
+
+- [ ] **WP3.1a 同步 worker**：`ad_strategy_configs.autonomy_mode` → `client_automation_policies.mode`（按 `(client_id, action_key)` 逐键条件 UPDATE，registry 动态取 `ads.*` 键；Kernel 一行不动；同步 SQL 函数 SECURITY DEFINER + REVOKE/GRANT；审计列 + receipts 表；架构测试 grep 禁令）。狄仁杰判「可进」。
+- [ ] **WP3.1b 熔断**：append-only `ads_circuit_events`（按账户，派生态：无 release 且 sticky/未过 24h = 熔断中）；resolver 钩子返回 unavailable → Kernel 两层拒；admin 解除接口 `guardGlobalAdmin`；**收编止损旁路** `ad-health/stop-loss/route.ts`（付费客户成员可直调 Meta 改预算/状态，不经 Kernel）；**账户级日预算上限**（`client_meta_ad_accounts.daily_budget_cap_cents` + envelope-facts 按账户取 + 绑定面板 UI；CTS 主 100 / 个人 50，客户级 150 为总闸）；**同 PR 修 WP2 遗留 [#1994](https://github.com/bigbigraydeng-maker/magic-engine/issues/1994)**（resolver 没接进生产 Kernel、pre_provider 不读 kernel_pre 快照、4000 行窗口）。migration 先 apply 再合并代码。
+- [ ] **WP3.2 链条**：`google-data-pullback-daily` 末尾发 `ads.impact_cycle.due`（不新开 cron）；韩信（新 agent `docs/agents/12-hanxin.md`）编排：熔断检查 → 孔明 `isWithinEnvelope` 预检 → denied 恢复入批 → 去冲突 → Kernel；批次表 + 成员表；pm-todo 四个拉取函数 + 活性项。
+- [ ] **WP3.3 Check + Tune + Jev + 日报两段**：韩信在 `runAction` 成功后写 `flywheel_actions`（加 `action_run_id` 列）；attribution 加 `ads_check` 评估器（扩 `flywheel_outcomes_evaluator_key_check`、`OUTCOME_EVALUATOR` 登记、`ads.` owner）；Tune 复用 `memory-extractor`（`pattern_type` CHECK 扩 `budget|pause|creative`）；`prescription_evaluations`；日报 Check/Tune 段。
+- **不在 WP3**：任何客户开 `bounded_auto`（单独授权）；三个 stub capability 的真实实现；`deny` 写入口（v1 不提供，管理员的「关」= `observe`）。
+- **PM 需知**：翻 `autonomy_mode` 触发 `policy_version +1`，当天在途授权作废、下一轮重提（正常，日报提示）。
+
+## Agent 管理系统（旅行社送来的终端客户）· 上线后两条小尾巴（2026-09-24 上线，P3）
+
+PR [#1983](https://github.com/bigbigraydeng-maker/magic-engine/pull/1983) 已合并，两张 migration 已 apply。按 §11：频率低（CTS 一家在用）· IMPACT 低 · 收入中 → 两低 → **P3**，待认领。
+- [ ] 页面顶栏「最后同步时间」硬编码「每小时一次」+ TODO，改从 `mailbox-sync` 心跳读。
+- [ ] 大团客户（pax > 30 常态）会被 `needs_review` 淹掉看板；判据升级成「同 Agent 30 天内见过一次即默认信任」。CTS 短期不撞。
+
 ## 广告支柱 IMPACT 闭环升级 · 阶段 0 止血 + 阶段 1 只读诊断（2026-09-14 已开 PR，PM go 已完成，验证与收尾进行中）
 
 设计定稿：`~/.claude/plans/ads-impact-loop-capability.md`（§14 为验收条款）。阶段 0：PR #1656（看板查错列）、#1657（STATE.md 内核事实）、#1658（替代 #1080 的广告写路径归属校验 + 主页绑定只许员工改）。阶段 1：#1659（设置快照表 + 视频/广告组日数据）→ #1662（角色判定 + 结果阶梯配置界面）→ #1664（诊断 D1/D3/D4/D5/D7/D8）→ #1665（内部版日报）；#1660（行业词下沉剧本 + 回读去客户名）。PM go 与 migration 授权已完成，完成记录见 [CHANGELOG 2026-09-22](./history/CHANGELOG.md)。
