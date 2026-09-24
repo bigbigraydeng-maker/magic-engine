@@ -122,6 +122,32 @@ export async function loadEntityNames(
 }
 
 /**
+ * 数一数 `before` 之前一共有多少条线索——**不**把它们读回来。
+ *
+ * 🔴 **为什么需要这个**：`loadLeadsSince` 按 `since` 截断查询，`since` 之前的线索
+ *    根本没被取到内存里，`syncOneRoute` 那边逐条线索去比 `backfillSince` 的算法
+ *    永远看不见它们。几条路线共用同一个 `backfillSince`（当下常态）时，
+ *    这意味着「窗口外还有多少条」永远算成 0 —— 703 条历史线索会一直在库里躺着，
+ *    却没有任何回执提过它们。这里单独数一次「取数范围之外」有多少条，
+ *    调用方把这个数字当成每条路线 `outsideWindow` 的起点。
+ */
+export async function countLeadsBefore(
+  supabase: SupabaseClient,
+  clientId: string,
+  before: string,
+): Promise<number> {
+  const { count, error } = await supabase
+    .from('contact_touchpoints')
+    .select('source_ref', { count: 'exact', head: true })
+    .eq('client_id', clientId)
+    .eq('channel', 'meta_lead_form')
+    .not('source_ref', 'is', null)
+    .lt('occurred_at', before)
+  if (error) throw new Error(error.message)
+  return count ?? 0
+}
+
+/**
  * 读这个客户从 `since` 起的全部 Meta 表单线索。
  *
  * `since` 取所有路线里最早的 `backfill_since`（调用方算好传进来）——

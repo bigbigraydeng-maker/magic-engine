@@ -15,7 +15,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { appendSheetValues, readSheetValues } from '@/lib/google-sheets/client'
 import { loadClientRoutes } from './config'
-import { loadLeadsSince } from './leads'
+import { countLeadsBefore, loadLeadsSince } from './leads'
 import { buildRow, dedupKeys, emptyNotes } from './row'
 import { isWithinBackfillWindow, pickRoute } from './route-match'
 import { destinationKey } from './types'
@@ -93,8 +93,10 @@ export function newDestinationSnapshot(): DestinationSnapshot {
  *    这张表是销售直接看的 —— **错位比不写更糟，而且追加不可逆**。
  *    整张表本来就读回来了，第一行是白拿的。
  *
- * 🔴 空表不检查：新配一条路线、表里还一行都没有是正常的，不能因此卡住第一次写入。
- *    没配 `header_row` 也不检查 —— 行为跟以前完全一样。
+ * 🔴 配了表头签名、表却整个空着时**同样 fail-closed**，不是放行：空表照写第一条
+ *    线索，那一行会被当成第 1 行写进去；下一轮再读表，这行数据就会被当成表头去
+ *    跟配置比对，报「对不上」然后整轮停手——表头始终没人建，只是从「一开始就拦住」
+ *    变成「写脏一行之后才拦住」。没配 `header_row` 则完全不检查 —— 行为跟以前一样。
  *
  * 比对忽略首尾空白；表头右边多出来的空格子不算数（Sheets 会把尾部空单元格截掉，
  * 人也常在右边留几列自己用的草稿，那不影响我们前 N 列的位置）。
@@ -105,7 +107,12 @@ export function describeHeaderProblem(
 ): string | null {
   const expected = route.headerRow
   if (!expected || expected.length === 0) return null
-  if (existing.length === 0) return null
+  if (existing.length === 0) {
+    return (
+      '目标表格要求按固定表头写入，但整张表还是空的（连表头都没有）：本轮一行都没写 —— ' +
+      `先照配置把表头这一行建好（应为「${expected.join('、')}」），下一轮会自动接着写。`
+    )
+  }
 
   const actual = existing[0] ?? []
   for (let i = 0; i < expected.length; i++) {
@@ -153,10 +160,20 @@ export async function syncOneRoute(
    * 都是这个用法），行为跟以前完全一样。
    */
   snapshot: DestinationSnapshot = newDestinationSnapshot(),
+  /**
+   * 🔴 取数查询本身已经按「所有路线里最早的 backfillSince」截断过——比这更早的
+   *    线索根本没进 `leads`，下面这个逐条比对永远看不见它们。几条路线共用同一个
+   *    `backfillSince`（当下常态）时，这意味着窗口外永远算成 0。调用方
+   *    （`syncClientLeadSheets`）用 `countLeadsBefore` 把「查询截断掉多少条」
+   *    数出来传进来，这里当成起点，不是从 0 开始数。单独跑（脚本试算传的是
+   *    `since = null`，取的是全量）不传就是 0，行为跟以前一样。
+   */
+  outsideWindowBaseline = 0,
 ): Promise<LeadSheetRouteReceipt> {
   const read = deps.readSheet ?? readSheetValues
   const append = deps.appendSheet ?? appendSheetValues
   const receipt = emptyRouteReceipt(route)
+  receipt.outsideWindow = outsideWindowBaseline
 
   const inWindow: LeadRecord[] = []
   for (const lead of leads) {
@@ -343,6 +360,29 @@ export async function syncClientLeadSheets(
     return receipt
   }
 
+  /**
+   * 🔴 `loadLeadsSince` 已经按 `since` 把更早的线索挡在查询之外，`leads` 里
+   *    压根不会出现它们——下面按路线分组、`syncRoutes` 里逐条线索去比
+   *    `backfillSince` 的算法看不到「查询范围之外」还有多少条。这里单独数一次，
+   *    数字统一交给每条路线的 `outsideWindow` 当起点（本节所有路线的 `backfillSince`
+   *    都 >= `since`，所以 `since` 之前的线索对每条路线都算「窗口外」）。
+   *    数不出来不阻断同步本身——这只是一个报数字段，宁可这一轮暂时偏小，
+   *    也不能因为数不出「还剩多少」就不写线索了。
+   */
+  let outsideWindowBaseline = 0
+  if (since) {
+    try {
+      outsideWindowBaseline = await countLeadsBefore(supabase, client.id, since)
+    } catch (err) {
+      receipt.error = [
+        receipt.error,
+        `数窗口外线索失败（不影响本轮写入，只是「还有多少条没补」这个数字这轮不准）：${err instanceof Error ? err.message : String(err)}`,
+      ]
+        .filter(Boolean)
+        .join(' | ')
+    }
+  }
+
   const byRoute = new Map<string, LeadRecord[]>()
   for (const lead of leads) {
     const route = pickRoute(lead, routes)
@@ -355,7 +395,7 @@ export async function syncClientLeadSheets(
     else byRoute.set(route.routeKey, [lead])
   }
 
-  receipt.routes = await syncRoutes(client.id, routes, byRoute, deps)
+  receipt.routes = await syncRoutes(client.id, routes, byRoute, deps, outsideWindowBaseline)
   return receipt
 }
 
@@ -374,6 +414,8 @@ export async function syncRoutes(
   routes: readonly LeadSheetRoute[],
   byRoute: ReadonlyMap<string, LeadRecord[]>,
   deps: SyncDeps = {},
+  /** 见 `syncOneRoute` 同名参数。脚本试算传的是全量线索，不传就是 0，行为不变。 */
+  outsideWindowBaseline = 0,
 ): Promise<LeadSheetRouteReceipt[]> {
   const snapshots = new Map<string, DestinationSnapshot>()
   const receipts: LeadSheetRouteReceipt[] = []
@@ -388,7 +430,14 @@ export async function syncRoutes(
     // 没分到线索的路线也出一条回执 —— 「这条路线今天 0 条」和「这条路线没跑」
     // 必须分得开。
     receipts.push(
-      await syncOneRoute(clientId, route, byRoute.get(route.routeKey) ?? [], deps, snapshot),
+      await syncOneRoute(
+        clientId,
+        route,
+        byRoute.get(route.routeKey) ?? [],
+        deps,
+        snapshot,
+        outsideWindowBaseline,
+      ),
     )
   }
 
