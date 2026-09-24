@@ -80,8 +80,25 @@ export async function POST(req: Request, { params }: Context) {
     rules = { own: [], trade: [] }
   }
 
+  // 更清晰的错误分级 —— 上一轮魏征反馈：只回「不是同行 Agent」时，新客户还没配
+  // 同行域名清单会一律拒绝、PM 卡在鸡生蛋。区分三种情况让 PM 一看就知道怎么办。
+  if (rules.trade.length === 0) {
+    return NextResponse.json(
+      { error: '这个客户还没配同行域名清单。请先在设置页 → 客户资料 → 同行域名里添加，例如 hot.co.nz、helloworld.co.nz。' },
+      { status: 400 },
+    )
+  }
+  if (emails.length === 0) {
+    return NextResponse.json(
+      { error: '这个联系人没有邮箱记录，判不了是不是同行 Agent。请先补邮箱再手动添加。' },
+      { status: 400 },
+    )
+  }
   if (contactKindOf(emails, rules) !== 'trade') {
-    return NextResponse.json({ error: '不是同行 Agent' }, { status: 400 })
+    return NextResponse.json(
+      { error: '这个联系人的邮箱域名不在同行清单里。要么改邮箱、要么在设置页把这个域名加进同行清单。' },
+      { status: 400 },
+    )
   }
 
   try {

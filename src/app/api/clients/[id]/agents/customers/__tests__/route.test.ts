@@ -5,8 +5,12 @@ vi.mock('@/lib/auth/client-access', () => ({
   requirePaidClientAccess: (...a: unknown[]) => mockRequire(...a),
 }))
 
-// Supabase mock：contacts 表按 (id, client_id) 查 —— clientA 查 clientB 的 contact 返回 null
+// Supabase mock：三张表可配置 —— 每个 test case 单独摆好 contact/identity/leads_config，
+// 覆盖魏征二审要求的 3 条判据分支（散客拒绝、空 leads_config、trade happy path）。
 let contactMatchesClient = false
+let contactEmail = 'agent@hot.co.nz'
+let tradeDomains: string[] = ['hot.co.nz']
+
 const contactsSelect = vi.fn().mockImplementation(() => ({
   eq: () => ({
     eq: () => ({
@@ -21,7 +25,7 @@ const contactsSelect = vi.fn().mockImplementation(() => ({
 const identitiesSelect = vi.fn().mockImplementation(() => ({
   eq: () => ({
     eq: () => ({
-      eq: () => Promise.resolve({ data: [{ value: 'agent@hot.co.nz' }], error: null }),
+      eq: () => Promise.resolve({ data: [{ value: contactEmail }], error: null }),
     }),
   }),
 }))
@@ -29,7 +33,7 @@ const identitiesSelect = vi.fn().mockImplementation(() => ({
 const clientsSelect = vi.fn().mockImplementation(() => ({
   eq: () => ({
     maybeSingle: () => Promise.resolve({
-      data: { leads_config: { trade_domains: ['hot.co.nz'] } },
+      data: { leads_config: { trade_domains: tradeDomains } },
       error: null,
     }),
   }),
@@ -66,6 +70,8 @@ describe('POST /api/clients/[id]/agents/customers', () => {
     vi.clearAllMocks()
     mockRequire.mockResolvedValue({ ok: true })
     contactMatchesClient = false
+    contactEmail = 'agent@hot.co.nz'
+    tradeDomains = ['hot.co.nz']
   })
 
   it('拒绝跨客户的 agentContactId（clientA 想插 clientB 的 contact）', async () => {
@@ -80,5 +86,56 @@ describe('POST /api/clients/[id]/agents/customers', () => {
     const json = await res.json()
     expect(json.error).toContain('找不到这个联系人')
     expect(agentCustomersInsert).not.toHaveBeenCalled()
+  })
+
+  it('空 leads_config → 明确报"请先在设置页配置同行域名"（不是笼统的"不是同行 Agent"）', async () => {
+    contactMatchesClient = true
+    tradeDomains = [] // 新客户还没配同行域名清单
+
+    const res = await POST(makeReq({
+      agentContactId: '00000000-0000-0000-0000-000000000000',
+      customerName: 'Chris Brown',
+    }), { params: Promise.resolve({ id: 'clientA' }) })
+
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json.error).toContain('同行域名清单')
+    expect(json.error).toContain('设置页')
+    expect(agentCustomersInsert).not.toHaveBeenCalled()
+  })
+
+  it('拒绝散客（trade 清单里没这个域名）→ 提示改邮箱或加清单', async () => {
+    contactMatchesClient = true
+    contactEmail = 'guest@gmail.com' // 散客邮箱
+    tradeDomains = ['hot.co.nz'] // 只有 HoT 在清单里
+
+    const res = await POST(makeReq({
+      agentContactId: '00000000-0000-0000-0000-000000000000',
+      customerName: 'Chris Brown',
+    }), { params: Promise.resolve({ id: 'clientA' }) })
+
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json.error).toContain('不在同行清单里')
+    expect(agentCustomersInsert).not.toHaveBeenCalled()
+  })
+
+  it('happy path：trade contact + 匹配域名 → 201 创建成功', async () => {
+    contactMatchesClient = true
+    contactEmail = 'alex@hot.co.nz'
+    tradeDomains = ['hot.co.nz']
+
+    const res = await POST(makeReq({
+      agentContactId: '00000000-0000-0000-0000-000000000000',
+      customerName: 'Chris Brown',
+      pax: 2,
+    }), { params: Promise.resolve({ id: 'clientA' }) })
+
+    expect(res.status).toBe(201)
+    expect(agentCustomersInsert).toHaveBeenCalledOnce()
+    const insertPayload = agentCustomersInsert.mock.calls[0][0] as Record<string, unknown>
+    expect(insertPayload.client_id).toBe('clientA')
+    expect(insertPayload.customer_name).toBe('Chris Brown')
+    expect(insertPayload.pax).toBe(2)
   })
 })
