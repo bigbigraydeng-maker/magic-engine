@@ -3,7 +3,7 @@
 状态：PM 2026-09-24 拍板（`认`），执行走 DeepSeek，子牙审 · 风险分级见 §5 · 不新增能力线
 Repository Fact Gate：`origin/main` = `8d3d84f9` · fetched 2026-09-24 23:50 NZST
 Tier Classification：把广告支柱已落地的「信封内自治 + PM 日检」模式复制到其他支柱与运营 agent。机制层（信封、Kernel、pm-todo、Inngest）归平台底盘；各支柱「不问 PM 能做什么」归各自规则。不进 platform-candidates。
-前置：[`2026-09-24-ads-goal-driven-autonomous-impact-loop-v1.md`](./2026-09-24-ads-goal-driven-autonomous-impact-loop-v1.md)（广告支柱 WP0–WP2 已合并/已审，WP3 待做）· [`docs/agents/00-architecture.md`](../agents/00-architecture.md)
+前置：广告支柱自治 spec —— [PR #1956](https://github.com/bigbigraydeng-maker/magic-engine/pull/1956)（`docs/specs/2026-09-24-ads-goal-driven-autonomous-impact-loop-v1.md`，**该 spec PR 尚未合并，合并前以 PR 为权威**；其 WP0 = PR #1960、WP1 = PR #1962 已合并，WP2 = PR #1979 已三人复审待合并，WP3 待做）· [`docs/agents/00-architecture.md`](../agents/00-architecture.md)
 
 ---
 
