@@ -114,6 +114,8 @@ export type ManualItemKind =
   | 'ledger_verification_failed'
   /** 台账目录读不出来或某条格式不合规——这一栏空着不等于没事 */
   | 'ledger_unreadable'
+  /** 台账：到期的卡两天没被夜巡盖章——夜巡没来，不是没事 */
+  | 'ledger_patrol_missing'
   /** 客人像是说他付款了，但不是我们自己确认的 —— 只有人能核对到账，不许机器自己打 paid 标签 */
   | 'paid_signal_needs_review'
   | CommentScopeTodoKind

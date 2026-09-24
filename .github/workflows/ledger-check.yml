@@ -21,8 +21,7 @@ concurrency:
 
 jobs:
   ledger-entries-valid:
-    # claude/* 自动修复通道与 dependabot 豁免，避免机器提交被台账闸卡住。
-    if: ${{ !startsWith(github.head_ref, 'claude/') && !startsWith(github.head_ref, 'dependabot/') }}
+    # 格式永不豁免：任何 PR 的台账条目都必须合法。
     name: Ledger entries valid
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -41,8 +40,8 @@ jobs:
         run: npx vitest run src/lib/ledger
 
   code-change-has-ledger-entry:
-    # claude/* 自动修复通道与 dependabot 豁免，避免机器提交被台账闸卡住。
-    if: ${{ !startsWith(github.head_ref, 'claude/') && !startsWith(github.head_ref, 'dependabot/') }}
+    # dependabot 与夜巡分支豁免，避免机器提交被台账闸卡住。
+    if: ${{ !startsWith(github.head_ref, 'dependabot/') && !startsWith(github.head_ref, 'claude/ledger-verify-') }}
     name: Code change has ledger entry
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -60,11 +59,11 @@ jobs:
           head="${{ github.event.pull_request.head.sha }}"
           # 三点比对 = 只看这个 PR 自己改了什么；两点比对会把主干这段时间的改动也算进来，主干一动就误拦
           changed=$(git diff --name-only "$base...$head")
-          code=$(grep -E '^(src/|supabase/migrations/|render\.yaml$)' <<<"$changed" || true)
+          code=$(grep -E '^(src/|supabase/migrations/|scripts/|\.github/workflows/|render\.yaml$)' <<<"$changed" || true)
           ledger=$(grep -E '^docs/ledger/[^/]+\.md$' <<<"$changed" | grep -v 'README\.md' || true)
 
           if [[ -n "${code}" && -z "${ledger}" ]]; then
-            echo '::error::这个 PR 改了代码（src/、supabase/migrations/ 或 render.yaml）但没写台账。请在 docs/ledger/ 新增或更新一条（格式见 docs/ledger/README.md）。'
+            echo '::error::这个 PR 改了代码（src/、supabase/migrations/、scripts/、.github/workflows/ 或 render.yaml）但没写台账。请在 docs/ledger/ 新增或更新一条（格式见 docs/ledger/README.md）。'
             echo 'Changed code files:'
             echo "${code}"
             exit 1
@@ -85,3 +84,45 @@ jobs:
               echo '- Ledger files touched: none'
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
+
+  ledger-refs-exist:
+    # dependabot 与夜巡分支豁免。
+    if: ${{ !startsWith(github.head_ref, 'dependabot/') && !startsWith(github.head_ref, 'claude/ledger-verify-') }}
+    name: Ledger refs exist
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check ledger pointers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: bash scripts/ledger-check-refs.sh
+
+  ledger-verify-branch-shape:
+    # 只在夜巡分支上跑：确保它只翻状态，不碰别的。
+    if: ${{ startsWith(github.head_ref, 'claude/ledger-verify-') }}
+    name: Ledger verify branch shape
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check verify branch shape
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/ledger-check-verify-branch.sh

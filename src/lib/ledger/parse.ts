@@ -1,5 +1,8 @@
 import { parse as parseYaml } from 'yaml'
-import { LEDGER_OWNERS, LEDGER_STATUSES, type LedgerEntry, type LedgerOwner, type LedgerParseResult, type LedgerStatus } from './types'
+import { parseRef, LEDGER_REF_HELP } from './refs'
+import { LEDGER_OWNERS, LEDGER_STATUSES, REF_KINDS_BY_FIELD, type LedgerEntry, type LedgerOwner, type LedgerParseResult, type LedgerStatus } from './types'
+
+type RefField = keyof typeof REF_KINDS_BY_FIELD
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 // 10 位以上连续数字像账户号，台账只写指针不抄正文
@@ -50,9 +53,89 @@ function firstBadDate(obj: Record<string, unknown>, keys: readonly string[]): st
   return null
 }
 
+/** 校验指向字段的写法与类型白名单，返回第一个不合规的字段名 */
+function firstBadRef(obj: Record<string, unknown>): RefField | null {
+  for (const [key, kinds] of Object.entries(REF_KINDS_BY_FIELD) as [RefField, readonly string[]][]) {
+    const value = str(obj, key)
+    if (value === null) continue
+    const ref = parseRef(value)
+    if (ref === null || !(kinds as readonly string[]).includes(ref.kind)) return key
+  }
+  return null
+}
+
+/** 状态与各日期/指向字段的搭配规则，返回第一条违规说明 */
+function statusShapeError(raw: Record<string, unknown>, status: string): string | null {
+  const decidedOn = str(raw, 'decided_on') as string
+  const doneOn = str(raw, 'done_on')
+  const doneRef = str(raw, 'done_ref')
+  const verifiedRef = str(raw, 'verified_ref')
+  const lastChecked = str(raw, 'last_checked')
+
+  if (status === 'decided' && (doneOn !== null || doneRef !== null || verifiedRef !== null)) {
+    return 'status 为 decided 时不能填 done_on / done_ref / verified_ref'
+  }
+  if (doneOn !== null && doneOn < decidedOn) return 'done_on 不能早于 decided_on'
+  if (status === 'verified' || status === 'failed') {
+    if (lastChecked === null) return `status 为 ${status} 时必须填 last_checked`
+    if (doneOn !== null && lastChecked < doneOn) return 'last_checked 不能早于 done_on'
+    if (verifiedRef !== null && verifiedRef === doneRef) {
+      return 'verified_ref 不能跟 done_ref 是同一个——证据不能是"做的那个 PR"本身'
+    }
+  }
+  return null
+}
+
+/** 文件头的字段级校验（缺字段 / id / status / owner / 指向 / 日期 / done 与 verified 必填），返回第一条违规说明 */
+function headerError(raw: Record<string, unknown>, file: string): string | null {
+  const missing = firstMissing(raw, ['id', 'title', 'status', 'owner', 'decided_on', 'source', 'verify_how'])
+  if (missing !== null) return `缺少字段 ${missing}`
+
+  const id = str(raw, 'id') as string
+  if (id !== file.replace(/\.md$/, '')) return 'id 跟文件名对不上'
+
+  const status = str(raw, 'status') as string
+  if (!LEDGER_STATUSES.includes(status as LedgerStatus)) {
+    return 'status 只能是 decided/done/verified/failed'
+  }
+  const owner = str(raw, 'owner') as string
+  if (!LEDGER_OWNERS.includes(owner as LedgerOwner)) {
+    return 'owner 只能是 pm/agent'
+  }
+
+  const badRef = firstBadRef(raw)
+  if (badRef !== null) {
+    return `${badRef} 格式不对或类型不允许（${LEDGER_REF_HELP}；${badRef} 只准 ${REF_KINDS_BY_FIELD[badRef].join('/')}）`
+  }
+
+  const badDate = firstBadDate(raw, ['decided_on', 'verify_by', 'done_on', 'last_checked'])
+  if (badDate !== null) return `${badDate} 不是 YYYY-MM-DD`
+
+  return requiredByStatusError(raw, status)
+}
+
+/** 按 status 校验 done_on / done_ref / verified_ref 的必填，返回第一条违规说明 */
+function requiredByStatusError(raw: Record<string, unknown>, status: string): string | null {
+  const doneOn = str(raw, 'done_on')
+  const doneRef = str(raw, 'done_ref')
+  const verifiedRef = str(raw, 'verified_ref')
+  if (status !== 'decided' && (doneOn === null || doneRef === null)) {
+    return `status 为 ${status} 时必须填 done_on 和 done_ref`
+  }
+  if ((status === 'verified' || status === 'failed') && verifiedRef === null) {
+    return `status 为 ${status} 时必须填 verified_ref`
+  }
+  return null
+}
+
 export function parseLedgerFile(file: string, text: string): LedgerParseResult {
-  const split = splitFrontmatter(text)
+  const normalised = text.replace(/\r\n/g, '\n')
+  const split = splitFrontmatter(normalised)
   if (split === null) return fail(file, '缺少文件头（--- ... ---）')
+
+  if (ACCOUNT_RE.test(normalised)) {
+    return fail(file, '文件里有 10 位以上连续数字（像账户号），台账只写指针')
+  }
 
   let raw: unknown
   try {
@@ -62,51 +145,29 @@ export function parseLedgerFile(file: string, text: string): LedgerParseResult {
   }
   if (!isPlainObject(raw)) return fail(file, '文件头不是键值对')
 
-  const missing = firstMissing(raw, ['id', 'title', 'status', 'owner', 'decided_on', 'source', 'verify_how'])
-  if (missing !== null) return fail(file, `缺少字段 ${missing}`)
-
-  const id = str(raw, 'id') as string
-  if (id !== file.replace(/\.md$/, '')) return fail(file, 'id 跟文件名对不上')
+  const headerProblem = headerError(raw, file)
+  if (headerProblem !== null) return fail(file, headerProblem)
 
   const status = str(raw, 'status') as string
-  if (!LEDGER_STATUSES.includes(status as LedgerStatus)) {
-    return fail(file, 'status 只能是 decided/done/verified/failed')
-  }
-  const owner = str(raw, 'owner') as string
-  if (!LEDGER_OWNERS.includes(owner as LedgerOwner)) {
-    return fail(file, 'owner 只能是 pm/agent')
-  }
-
-  const badDate = firstBadDate(raw, ['decided_on', 'verify_by', 'done_on'])
-  if (badDate !== null) return fail(file, `${badDate} 不是 YYYY-MM-DD`)
-
-  const doneOn = str(raw, 'done_on')
-  const doneRef = str(raw, 'done_ref')
-  const verifiedRef = str(raw, 'verified_ref')
-  if (status !== 'decided' && (doneOn === null || doneRef === null)) {
-    return fail(file, `status 为 ${status} 时必须填 done_on 和 done_ref`)
-  }
-  if ((status === 'verified' || status === 'failed') && verifiedRef === null) {
-    return fail(file, `status 为 ${status} 时必须填 verified_ref`)
-  }
+  const shapeError = statusShapeError(raw, status)
+  if (shapeError !== null) return fail(file, shapeError)
 
   const body = split.body.trim()
-  if (ACCOUNT_RE.test(body)) {
-    return fail(file, '正文里有 10 位以上连续数字（像账户号），台账只写指针')
-  }
 
   const entry: LedgerEntry = {
-    id,
+    id: str(raw, 'id') as string,
     title: str(raw, 'title') as string,
     status: status as LedgerStatus,
-    owner: owner as LedgerOwner,
+    owner: str(raw, 'owner') as LedgerOwner,
     decidedOn: str(raw, 'decided_on') as string,
     source: str(raw, 'source') as string,
     verifyBy: str(raw, 'verify_by'),
     verifyHow: str(raw, 'verify_how') as string,
-    doneOn,
-    doneRef,
-    verifiedRef,
+    doneOn: str(raw, 'done_on'),
+    doneRef: str(raw, 'done_ref'),
+    verifiedRef: str(raw, 'verified_ref'),
+    lastChecked: str(raw, 'last_checked'),
+    checkNote: str(raw, 'check_note'),
     body,
   }
   return { ok: true, entry }

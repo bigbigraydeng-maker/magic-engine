@@ -35,40 +35,59 @@ function infraItem(kind: ManualItem['kind'], what: string, how: string, href: st
   return { kind, client_id: 'infra', client_name: 'Magic Engine 平台治理', what, how, href }
 }
 
-function findingItem(finding: LedgerFinding): ManualItem {
+/** 每种发现对应的 what / how 文案。拆出来是为了让 findingItem 保持短小。 */
+function findingText(finding: LedgerFinding): { what: string; how: string } {
   const entry = finding.entry
   const t = truncate(entry.title, 120)
-  const href = `${LEDGER_ENTRY_URL}${entry.id}.md`
   switch (finding.kind) {
     case 'decided_stale':
-      return infraItem(
-        'ledger_decided_stale',
-        `「${t}」决定了 ${finding.daysIdle} 天还没动（台账 ${entry.id}）`,
-        `告诉我哪个窗口在做；不做了就回一句「台账 ${entry.id} 取消」，做了就让那个窗口把记录改成 done`,
-        href,
-      )
-    case 'done_unverified':
-      return infraItem(
-        'ledger_done_unverified',
-        `「${t}」做完 ${finding.daysIdle} 天了还没验：${entry.verifyHow}`,
-        '让做的窗口按上面那句去验，验完把记录改成 verified 或 failed',
-        href,
-      )
+      return {
+        what: `「${t}」决定了 ${finding.daysIdle} 天还没动（台账 ${entry.id}）`,
+        how: `找任何一个 Claude Code 窗口说「台账 ${entry.id} 取消」或「台账 ${entry.id} 谁在做」，它会开 PR 改这张卡`,
+      }
+    case 'done_unverified': {
+      const checked =
+        entry.lastChecked === null
+          ? ''
+          : `｜上次自动核查 ${entry.lastChecked}：${entry.checkNote ?? '（没留备注）'}`
+      return {
+        what: `「${t}」做完 ${finding.daysIdle} 天了还没验：${entry.verifyHow}${checked}`,
+        how: '让做的窗口按上面那句去验，验完把记录改成 verified 或 failed',
+      }
+    }
+    case 'patrol_missing':
+      return {
+        what: `「${t}」到了该验的日子，夜巡已经 ${finding.daysSilent} 天没来摸这张卡——不是没事，是没人查`,
+        how: '找任何一个 Claude Code 窗口说「查夜巡」，让它看 ledger-nightly-verify 这个定时任务最近跑没跑',
+      }
     case 'verification_failed':
-      return infraItem(
-        'ledger_verification_failed',
-        `「${t}」验过了，不成（证据：${entry.verifiedRef ?? '未填'}）`,
-        `决定重做还是放弃：重做就新开一条台账，放弃就回一句「台账 ${entry.id} 关闭」`,
-        href,
-      )
+      return {
+        what: `「${t}」验过了，不成（证据：${entry.verifiedRef ?? '未填'}）`,
+        how: `找任何一个 Claude Code 窗口说「台账 ${entry.id} 重做」或「台账 ${entry.id} 关闭」，重做会新开一张卡`,
+      }
   }
+}
+
+function findingItem(finding: LedgerFinding): ManualItem {
+  const { what, how } = findingText(finding)
+  return infraItem(
+    `ledger_${finding.kind}`,
+    what,
+    how,
+    `${LEDGER_ENTRY_URL}${finding.entry.id}.md`,
+  )
 }
 
 export function buildLedgerItems(findings: LedgerFinding[], errors: LedgerParseError[]): ManualItem[] {
   return [
     ...findings.map(findingItem),
     ...errors.map((error) =>
-      infraItem('ledger_unreadable', `台账 ${error.file} 读不出来：${error.reason}——这一栏空着不等于没事`, '回我一句「修台账」', ''),
+      infraItem(
+        'ledger_unreadable',
+        `台账 ${error.file} 读不出来：${error.reason}——这一栏空着不等于没事`,
+        '找任何一个 Claude Code 窗口说「修台账」',
+        '',
+      ),
     ),
   ]
 }
@@ -79,7 +98,14 @@ export function pushLedgerItems(items: ManualItem[], now: Date, dir?: string): v
     loaded = dir === undefined ? loadLedger() : loadLedger(dir)
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e)
-    items.push(infraItem('ledger_unreadable', `台账目录读不出来（${message}）——这一栏空着不等于没事`, '回我一句「修台账」', ''))
+    items.push(
+      infraItem(
+        'ledger_unreadable',
+        `台账目录读不出来（${message}）——这一栏空着不等于没事`,
+        '找任何一个 Claude Code 窗口说「修台账」',
+        '',
+      ),
+    )
     return
   }
   items.push(...buildLedgerItems(walkLedger(loaded.entries, nzToday(now)), loaded.errors))

@@ -14,7 +14,7 @@ function entryFile(id: string): string {
     'status: decided',
     'owner: pm',
     'decided_on: 2026-01-01',
-    'source: session:test',
+    'source: session:abcd1234',
     'verify_how: 人工确认',
     '---',
     '',

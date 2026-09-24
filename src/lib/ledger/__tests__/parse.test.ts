@@ -12,7 +12,7 @@ const VALID = [
   'status: decided',
   'owner: pm',
   'decided_on: 2026-09-24',
-  'source: session:abc123',
+  'source: session:abc12345',
   'verify_by: 2026-10-01',
   'verify_how: 跑一遍抓取脚本看还报不报错',
 ].join('\n')
@@ -78,5 +78,112 @@ describe('parseLedgerFile', () => {
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.error.reason).toContain('YYYY-MM-DD')
+  })
+
+  it('source 写法不合法 → 报错', () => {
+    const result = parseLedgerFile('2026-09-24-foo.md', fm(VALID.replace('source: session:abc12345', 'source: 随便写的')))
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.reason).toContain('source')
+  })
+
+  it('done 但 done_ref 写法不合法 → 报错', () => {
+    const fields = VALID.replace('status: decided', 'status: done') + '\ndone_on: 2026-09-25\ndone_ref: 做完了'
+    const result = parseLedgerFile('2026-09-24-foo.md', fm(fields))
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.reason).toContain('done_ref')
+  })
+
+  it('done_ref 用 url → 报错', () => {
+    const fields = VALID.replace('status: decided', 'status: done') + '\ndone_on: 2026-09-25\ndone_ref: url:https://x.y/z'
+    const result = parseLedgerFile('2026-09-24-foo.md', fm(fields))
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.reason).toContain('done_ref')
+  })
+
+  it('done 且 done_ref 合法 → ok', () => {
+    const fields = VALID.replace('status: decided', 'status: done') + '\ndone_on: 2026-09-25\ndone_ref: pr:1984'
+    const result = parseLedgerFile('2026-09-24-foo.md', fm(fields))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.entry.doneRef).toBe('pr:1984')
+  })
+
+  it('decided 却填了 done_on → 报错', () => {
+    const result = parseLedgerFile('2026-09-24-foo.md', fm(VALID + '\ndone_on: 2026-09-25'))
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.reason).toContain('decided')
+  })
+
+  it('done_on 早于 decided_on → 报错', () => {
+    const fields = VALID.replace('status: decided', 'status: done') + '\ndone_on: 2026-09-01\ndone_ref: pr:1'
+    const result = parseLedgerFile('2026-09-24-foo.md', fm(fields))
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.reason).toContain('done_on 不能早于')
+  })
+
+  it('verified_ref 跟 done_ref 相同 → 报错', () => {
+    const fields =
+      VALID.replace('status: decided', 'status: verified') +
+      '\ndone_on: 2026-09-25\ndone_ref: pr:1984\nverified_ref: pr:1984\nlast_checked: 2026-09-26'
+    const result = parseLedgerFile('2026-09-24-foo.md', fm(fields))
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.reason).toContain('verified_ref 不能跟 done_ref')
+  })
+
+  it('verified 但没填 last_checked → 报错', () => {
+    const fields =
+      VALID.replace('status: decided', 'status: verified') +
+      '\ndone_on: 2026-09-25\ndone_ref: pr:1984\nverified_ref: url:https://github.com/x/y/pull/1990'
+    const result = parseLedgerFile('2026-09-24-foo.md', fm(fields))
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.reason).toContain('last_checked')
+  })
+
+  it('last_checked 早于 done_on → 报错', () => {
+    const fields =
+      VALID.replace('status: decided', 'status: verified') +
+      '\ndone_on: 2026-09-25\ndone_ref: pr:1984\nverified_ref: url:https://github.com/x/y/pull/1990\nlast_checked: 2026-09-20'
+    const result = parseLedgerFile('2026-09-24-foo.md', fm(fields))
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.reason).toContain('last_checked 不能早于')
+  })
+
+  it('verified 且字段齐全 → ok，lastChecked/checkNote 映射正确', () => {
+    const fields =
+      VALID.replace('status: decided', 'status: verified') +
+      '\ndone_on: 2026-09-25\ndone_ref: pr:1984\nverified_ref: url:https://github.com/x/y/pull/1990\nlast_checked: 2026-09-26\ncheck_note: 邮件里看到了'
+    const result = parseLedgerFile('2026-09-24-foo.md', fm(fields))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.entry.lastChecked).toBe('2026-09-26')
+    expect(result.entry.checkNote).toBe('邮件里看到了')
+  })
+
+  it('title 里出现像账户号的连续数字 → 报错', () => {
+    const result = parseLedgerFile('2026-09-24-foo.md', fm(VALID.replace('title: 换掉旧的抓取库', 'title: 账户 act_1234567890 出问题')))
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.reason).toContain('10 位')
+  })
+
+  it('CRLF 换行也能解析 → ok', () => {
+    const result = parseLedgerFile('2026-09-24-foo.md', fm(VALID).replace(/\n/g, '\r\n'))
+    expect(result.ok).toBe(true)
+  })
+
+  it('没填 last_checked/check_note → 都是 null', () => {
+    const result = parseLedgerFile('2026-09-24-foo.md', fm(VALID))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.entry.lastChecked).toBeNull()
+    expect(result.entry.checkNote).toBeNull()
   })
 })

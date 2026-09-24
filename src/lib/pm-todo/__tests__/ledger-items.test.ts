@@ -20,6 +20,8 @@ function mk(over: Partial<LedgerEntry>): LedgerEntry {
     doneOn: null,
     doneRef: null,
     verifiedRef: null,
+    lastChecked: null,
+    checkNote: null,
     body: '',
     ...over,
   }
@@ -60,6 +62,52 @@ describe('buildLedgerItems', () => {
     expect(items[0].what).toContain('测试条目')
     expect(items[0].what).toContain('9 天')
   })
+
+  it('夜巡没来单独报一条，并说清几天没来', () => {
+    const items = buildLedgerItems(
+      [{ kind: 'patrol_missing', entry: mk({ id: 'p', title: '测试条目' }), daysSilent: 3 }],
+      [],
+    )
+
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('ledger_patrol_missing')
+    expect(items[0].what).toContain('3 天没来')
+    expect(items[0].href.startsWith(LEDGER_ENTRY_URL)).toBe(true)
+  })
+
+  it('done_unverified 带上最近一次自动核查的日期和备注', () => {
+    const items = buildLedgerItems(
+      [
+        {
+          kind: 'done_unverified',
+          entry: mk({ id: 'd', lastChecked: '2026-09-27', checkNote: 'PR 还没合并' }),
+          daysIdle: 3,
+        },
+      ],
+      [],
+    )
+
+    expect(items[0].what).toContain('上次自动核查 2026-09-27')
+    expect(items[0].what).toContain('PR 还没合并')
+  })
+
+  it('没被夜巡盖过章的 done_unverified 不提自动核查', () => {
+    const items = buildLedgerItems(
+      [{ kind: 'done_unverified', entry: mk({ id: 'd', lastChecked: null }), daysIdle: 3 }],
+      [],
+    )
+
+    expect(items[0].what).not.toContain('上次自动核查')
+  })
+
+  it('decided_stale 的 how 指向 Claude Code 窗口', () => {
+    const items = buildLedgerItems(
+      [{ kind: 'decided_stale', entry: mk({ id: 'a' }), daysIdle: 9 }],
+      [],
+    )
+
+    expect(items[0].how).toContain('Claude Code 窗口')
+  })
 })
 
 describe('pushLedgerItems', () => {
@@ -84,7 +132,7 @@ describe('pushLedgerItems', () => {
           'status: decided',
           'owner: agent',
           'decided_on: 2026-08-01',
-          'source: session:test',
+          'source: session:abcd1234',
           'verify_how: 看一眼',
           '---',
           '',
