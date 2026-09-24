@@ -30,6 +30,7 @@ import { pushEmailReplyItems } from './email-reply-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
+import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import {
   buildNotIndexedItems,
   daysAgo,
@@ -204,6 +205,11 @@ export async function loadManualItems(
   // 执行内核停手的 / 等你点头的 / 被规则挡下的 —— 死信不许只写进库里没人看
   await pushKernelItems(supabase, items, now, nameOf).catch((e) =>
     console.warn('[manual-items] 执行内核待办生成失败（不阻塞其他待办）:', e),
+  )
+
+  // 自治开关没同步到执行内核 —— 面板档位跟内核实际档位对不上，必须有人看见（WP3.1a）
+  await pushAdsAutonomySyncItems(supabase, items, now, nameOf).catch((e) =>
+    console.warn('[manual-items] 自治开关同步待办生成失败（不阻塞其他待办）:', e),
   )
 
   // 客户之间有没有串台 —— PM 2026-08-05：「坚决不能胡窜」。
