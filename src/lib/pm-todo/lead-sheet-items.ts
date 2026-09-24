@@ -22,6 +22,12 @@ export type LeadSheetItemKind =
   | 'lead_sheet_backfill_pending'
   /** 有线索一条路线都没匹配上 —— 配置缺兜底路线 */
   | 'lead_sheet_unrouted'
+  /**
+   * `countLeadsBefore` 数「窗口外还剩多少条」失败了（不是写表失败，新线索这轮照常写进去了）。
+   * 光靠 `receipt.warning` 没人读——不接进待办的话，`lead_sheet_backfill_pending`
+   * 会一直显示 0，看起来像「历史全补完了」，其实只是这轮没数出来。
+   */
+  | 'lead_sheet_backfill_count_unreliable'
 
 /** 回执在 `cron_run_logs.summary` 里的形状（只取我们要用的那几项）。 */
 interface RouteReceiptLike {
@@ -46,6 +52,8 @@ interface ClientReceiptLike {
   /** 一条路线都没匹配上的线索数。 */
   unrouted?: number
   error?: string | null
+  /** 不影响本轮写入的次要问题（目前只有「数窗口外线索失败」这一种）。 */
+  warning?: string | null
 }
 
 interface RunRow {
@@ -141,6 +149,27 @@ export async function pushLeadSheetItems(
         client_id: clientId,
         what: `${clientName} 的线索这轮没能写进 Google 表格：${client.error}。销售看的那张表现在是缺的，新留资的人没人跟。`,
         how: howFor(clientId, client.error),
+        href: sheetHref(undefined),
+      })
+    }
+
+    /**
+     * 🔴 **这是 warning，不能跟 `lead_sheet_sync_failed` 合并下发。**
+     *
+     * 新线索这轮照常写进表了，坏的只是「窗口外还剩多少条没补」这一个数字——
+     * 按 `client.error` 那条的措辞喊「没能写进表格」是误报。但也不能什么都不做：
+     * `countLeadsBefore` 一直坏下去，`lead_sheet_backfill_pending` 会一直显示 0，
+     * 看起来像「历史全补完了」，没人会去查其实是数不出来。
+     */
+    if (client.warning) {
+      items.push({
+        kind: 'lead_sheet_backfill_count_unreliable',
+        client_name: clientName,
+        client_id: clientId,
+        what:
+          `${clientName} 的线索这轮正常写进了 Google 表格，但「还有多少条历史没补」这个数字这轮没数出来：` +
+          `${client.warning}。不影响新线索，只是这个数字这轮不准，可能一直卡在坏之前的旧值。`,
+        how: '把这句话发到开发窗口；在修好之前，「还有历史没补」那条待办里的数字先别当真。',
         href: sheetHref(undefined),
       })
     }

@@ -35,12 +35,13 @@ function run(
   routes: unknown[],
   error: string | null = null,
   unrouted = 0,
+  warning: string | null = null,
 ) {
   return {
     job_name: 'lead-sheet-sync',
     status: 'completed',
     started_at: '2026-09-24T11:20:00Z',
-    summary: { results: [{ clientId, clientName: name, routes, error, unrouted }] },
+    summary: { results: [{ clientId, clientName: name, routes, error, unrouted, warning }] },
   }
 }
 
@@ -346,5 +347,24 @@ describe('算出来但以前没人读的两个数字', () => {
     const unrouted = items.filter((i) => i.kind === 'lead_sheet_unrouted')
     expect(unrouted).toHaveLength(1)
     expect(unrouted[0].what).toContain('12 条')
+  })
+
+  it('🔴 countLeadsBefore 失败留下的 warning → 单独下发一条待办，不当成写表失败', async () => {
+    // 这条锁死的是 Codex review 挑出的问题：warning 只填进回执没人读，
+    // 「窗口外还剩多少」这个数字会一直卡在坏之前的旧值，没人知道链路已经坏了。
+    const items: ManualItem[] = []
+    await pushLeadSheetItems(
+      fakeSupabase([
+        run('c1', 'CTS', [{ routeKey: 'v4', spreadsheetId: 'sheet-1', tabName: 'T', appended: 3, error: null }], null, 0, 'boom'),
+      ]),
+      items,
+      NOW,
+    )
+    const unreliable = items.filter((i) => i.kind === 'lead_sheet_backfill_count_unreliable')
+    expect(unreliable).toHaveLength(1)
+    expect(unreliable[0].what).toContain('boom')
+    // 不能被当成写表失败下发 —— 那句话会误报「这轮没能写进 Google 表格」，
+    // 而实际上新线索已经写进去了。
+    expect(items.filter((i) => i.kind === 'lead_sheet_sync_failed')).toHaveLength(0)
   })
 })
