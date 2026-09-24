@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { syncOneRoute } from '../sync'
+import { newDestinationSnapshot, syncOneRoute } from '../sync'
 import type { LeadRecord, LeadSheetRoute } from '../types'
 
 /**
@@ -257,5 +257,122 @@ describe('syncOneRoute', () => {
     expect(appendSheet).not.toHaveBeenCalled()
     expect(r.appended).toBe(0)
     expect(r.appendedLeadIds).toEqual(['lead-1'])
+  })
+})
+
+/**
+ * PM 2026-09-24 拍板「所有表单的线索汇总进一张表，用一列来源表单区分」之后，
+ * 几条路线写同一张表成了常态。这一组盯的就是那个新常态。
+ */
+describe('同一张表上的几条路线共用一份快照', () => {
+  /** 跟线上一样的两条路线：列定义一模一样，只有「来源表单」那一列的固定文本不同。 */
+  function routeWithLabel(routeKey: string, label: string): LeadSheetRoute {
+    return {
+      ...route,
+      routeKey,
+      matchAnyAnswerFields: routeKey === 'fallback' ? [] : route.matchAnyAnswerFields,
+      priority: routeKey === 'fallback' ? 900 : 10,
+      columns: [
+        { field: 'occurred_at', format: 'local' },
+        { field: 'contact_name' },
+        { field: 'contact_phone' },
+        { field: 'literal', value: label },
+      ],
+    }
+  }
+
+  const routeA = routeWithLabel('v4', '含预算与出发时间')
+  const routeB = routeWithLabel('fallback', '基础表单')
+
+  it('只读一次表 —— 第二条路线不再去读一遍', async () => {
+    const readSheet = vi.fn<ReadMock>(async () => [HEADER])
+    const appendSheet = vi.fn<AppendMock>(async (_c, _s, _r, rows) => rows.length)
+    const snapshot = newDestinationSnapshot()
+
+    await syncOneRoute('c1', routeA, [lead({ leadId: 'a' })], { readSheet, appendSheet }, snapshot)
+    await syncOneRoute(
+      'c1',
+      routeB,
+      [lead({ leadId: 'b', phone: '+64220000000' })],
+      { readSheet, appendSheet },
+      snapshot,
+    )
+
+    expect(readSheet).toHaveBeenCalledTimes(1)
+    expect(appendSheet).toHaveBeenCalledTimes(2)
+  })
+
+  it('来源表单那一列按路线写不同的标签，其余列一模一样', async () => {
+    const readSheet = vi.fn<ReadMock>(async () => [HEADER])
+    const appendSheet = vi.fn<AppendMock>(async (_c, _s, _r, rows) => rows.length)
+    const snapshot = newDestinationSnapshot()
+
+    await syncOneRoute('c1', routeA, [lead({ leadId: 'a' })], { readSheet, appendSheet }, snapshot)
+    await syncOneRoute(
+      'c1',
+      routeB,
+      [lead({ leadId: 'b', phone: '+64220000000' })],
+      { readSheet, appendSheet },
+      snapshot,
+    )
+
+    expect(appendSheet.mock.calls[0][3][0][3]).toBe('含预算与出发时间')
+    expect(appendSheet.mock.calls[1][3][0][3]).toBe('基础表单')
+  })
+
+  it('🔴 试算模式下，第二条路线看得见第一条已经排进队列的人 —— 不重复报', async () => {
+    // 同一个人同一分钟在两张表单上各留了一次。真跑时第二条路线会读到第一条写进去的
+    // 那行；试算时读不到，所以必须靠共享的键集合挡住，否则试算跟真跑对不上。
+    const readSheet = vi.fn<ReadMock>(async () => [HEADER])
+    const snapshot = newDestinationSnapshot()
+    const same = { occurredAt: '2026-09-23T21:52:24Z', phone: '+64221543231' }
+
+    const a = await syncOneRoute(
+      'c1',
+      routeA,
+      [lead({ leadId: 'a', ...same })],
+      { readSheet, dryRun: true },
+      snapshot,
+    )
+    const b = await syncOneRoute(
+      'c1',
+      routeB,
+      [lead({ leadId: 'b', ...same })],
+      { readSheet, dryRun: true },
+      snapshot,
+    )
+
+    expect(a.appendedLeadIds).toEqual(['a'])
+    expect(b.appendedLeadIds).toEqual([])
+    expect(b.alreadyPresent).toBe(1)
+  })
+
+  it('🔴 读表失败时，同一张表上的每条路线都要在自己的回执里说 —— 不能只记在第一条', async () => {
+    const readSheet = vi.fn<ReadMock>(async () => {
+      throw new Error('403 insufficient scope')
+    })
+    const appendSheet = vi.fn<AppendMock>(async () => 0)
+    const snapshot = newDestinationSnapshot()
+
+    const a = await syncOneRoute('c1', routeA, [lead({ leadId: 'a' })], { readSheet, appendSheet }, snapshot)
+    const b = await syncOneRoute('c1', routeB, [lead({ leadId: 'b' })], { readSheet, appendSheet }, snapshot)
+
+    expect(a.error).toContain('403')
+    expect(b.error).toContain('403')
+    // 读失败不重试第二遍，也一行都不写。
+    expect(readSheet).toHaveBeenCalledTimes(1)
+    expect(appendSheet).not.toHaveBeenCalled()
+  })
+
+  it('一条线索都没分到的路线不去读表 —— 让真正有活的那条去读', async () => {
+    const readSheet = vi.fn<ReadMock>(async () => [HEADER])
+    const snapshot = newDestinationSnapshot()
+
+    const empty = await syncOneRoute('c1', routeA, [], { readSheet, dryRun: true }, snapshot)
+    expect(readSheet).not.toHaveBeenCalled()
+    expect(empty.matched).toBe(0)
+
+    await syncOneRoute('c1', routeB, [lead({ leadId: 'b' })], { readSheet, dryRun: true }, snapshot)
+    expect(readSheet).toHaveBeenCalledTimes(1)
   })
 })

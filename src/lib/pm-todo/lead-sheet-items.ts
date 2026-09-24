@@ -135,15 +135,57 @@ export async function pushLeadSheetItems(
       })
     }
 
+    /**
+     * 🔴 **按「目标表格」汇总下发，不按路线。**
+     *
+     * PM 2026-09-24 拍板所有表单汇总进一张表之后，几条路线指向同一张表是常态。
+     * 逐路线下发的话，读表失败会让 PM 在待办里看见**一模一样的一句话两遍**，
+     * 而要做的事只有一件（重新授权 / 看一眼那张表）。重复的待办不是多提醒一次，
+     * 是让人开始跳着看待办 —— 这条通道就白建了。
+     */
+    const buckets = new Map<
+      string,
+      {
+        spreadsheetId: string | undefined
+        where: string
+        errors: Set<string>
+        skipped: number
+        skippedIds: string[]
+        unmapped: Set<string>
+      }
+    >()
+
     for (const route of client.routes ?? []) {
-      if (route.error) {
+      const where = route.tabName ?? route.routeKey ?? '目标表格'
+      const key = `${route.spreadsheetId ?? ''}\u0000${where}`
+      let b = buckets.get(key)
+      if (!b) {
+        b = {
+          spreadsheetId: route.spreadsheetId,
+          where,
+          errors: new Set(),
+          skipped: 0,
+          skippedIds: [],
+          unmapped: new Set(),
+        }
+        buckets.set(key, b)
+      }
+      // 同一张表上两条路线报同一句错只说一遍；报的错不一样就各说各的。
+      if (route.error) b.errors.add(route.error)
+      b.skipped += route.skippedNoIdentity ?? 0
+      b.skippedIds.push(...(route.skippedLeadIds ?? []))
+      for (const v of route.unmappedValues ?? []) b.unmapped.add(v)
+    }
+
+    for (const b of buckets.values()) {
+      for (const err of b.errors) {
         items.push({
           kind: 'lead_sheet_sync_failed',
           client_name: clientName,
           client_id: clientId,
-          what: `${clientName} 的线索写不进「${route.tabName ?? route.routeKey ?? '目标表格'}」：${route.error}。这张表上的新线索现在是缺的。`,
-          how: howFor(clientId, route.error),
-          href: sheetHref(route.spreadsheetId),
+          what: `${clientName} 的线索写不进「${b.where}」：${err}。这张表上的新线索现在是缺的。`,
+          how: howFor(clientId, err),
+          href: sheetHref(b.spreadsheetId),
         })
       }
 
@@ -154,26 +196,25 @@ export async function pushLeadSheetItems(
        * 而这条路径上 `error` 是 null、定时任务记的是 completed、日报是绿的，
        * 不在这里喊一声就没有任何地方会喊。
        */
-      const skipped = route.skippedNoIdentity ?? 0
-      if (skipped > 0) {
-        const ids = (route.skippedLeadIds ?? []).slice(0, 5)
+      if (b.skipped > 0) {
+        const ids = b.skippedIds.slice(0, 5)
         items.push({
           kind: 'lead_sheet_lead_skipped',
           client_name: clientName,
           client_id: clientId,
           what:
-            `${clientName} 有 ${skipped} 条线索没写进「${route.tabName ?? route.routeKey ?? '目标表格'}」——` +
+            `${clientName} 有 ${b.skipped} 条线索没写进「${b.where}」——` +
             '这些人连姓名电话邮箱都没拿到，表里认不出是谁，所以没敢往里写。' +
             '他们**没有**到销售手上。',
           how:
             '这多半是 Facebook 那条线索本身就没留下联系方式。' +
-            `去 Meta 后台按线索编号查原始提交${ids.length ? `（${ids.join('、')}${skipped > ids.length ? ' 等' : ''}）` : ''}，` +
+            `去 Meta 后台按线索编号查原始提交${ids.length ? `（${ids.join('、')}${b.skipped > ids.length ? ' 等' : ''}）` : ''}，` +
             '有电话或邮箱就手工补进表格；确实什么都没有就不用管，不是系统坏了。',
-          href: sheetHref(route.spreadsheetId),
+          href: sheetHref(b.spreadsheetId),
         })
       }
 
-      const unmapped = route.unmappedValues ?? []
+      const unmapped = [...b.unmapped].sort()
       if (unmapped.length > 0) {
         items.push({
           kind: 'lead_sheet_value_unmapped',
@@ -186,7 +227,7 @@ export async function pushLeadSheetItems(
           how:
             '这是表单改版后的正常现象。把这几个英文值和它们对应的中文短语发到开发窗口，' +
             '加进这个客户的选项对照表就行（一次配置，以后自动）。急的话销售照英文也看得懂。',
-          href: sheetHref(route.spreadsheetId),
+          href: sheetHref(b.spreadsheetId),
         })
       }
     }

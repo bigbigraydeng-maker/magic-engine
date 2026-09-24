@@ -19,7 +19,8 @@ import { loadClientRoutes, parseRoute } from '../src/lib/lead-sheets/config'
 import { loadLeadsSince } from '../src/lib/lead-sheets/leads'
 import { buildRow, emptyNotes } from '../src/lib/lead-sheets/row'
 import { pickRoute } from '../src/lib/lead-sheets/route-match'
-import { syncOneRoute } from '../src/lib/lead-sheets/sync'
+import { destinationKey, newDestinationSnapshot, syncOneRoute } from '../src/lib/lead-sheets/sync'
+import type { DestinationSnapshot } from '../src/lib/lead-sheets/sync'
 
 async function main(): Promise<void> {
   const clientId = process.argv[2]
@@ -89,9 +90,18 @@ async function main(): Promise<void> {
     const b = byRoute.get(r.routeKey)
     if (b) b.push(lead); else byRoute.set(r.routeKey, [lead])
   }
+  // 跟线上同一个写法：同一张表只读一次，判重键在几条路线之间共享 ——
+  // 否则试算会把「另一条路线已经收了这个人」重复报成还要写一行。
+  const snapshots = new Map<string, DestinationSnapshot>()
   for (const route of routes) {
+    const dest = destinationKey(route)
+    let snapshot = snapshots.get(dest)
+    if (!snapshot) {
+      snapshot = newDestinationSnapshot()
+      snapshots.set(dest, snapshot)
+    }
     receipt.routes.push(
-      await syncOneRoute(clientId, route, byRoute.get(route.routeKey) ?? [], { dryRun: !live }),
+      await syncOneRoute(clientId, route, byRoute.get(route.routeKey) ?? [], { dryRun: !live }, snapshot),
     )
   }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { LeadSheetConfigError, loadClientRoutes, parseRoute } from '../config'
+import { LeadSheetConfigError, describeLayoutMismatch, loadClientRoutes, parseRoute } from '../config'
 
 function row(over: Record<string, unknown> = {}) {
   return {
@@ -76,19 +76,82 @@ describe('loadClientRoutes — 跨路线校验', () => {
     return { from: () => q } as unknown as Parameters<typeof loadClientRoutes>[0]
   }
 
-  it('两条路线指到同一张表同一个 tab → 后一条判坏并剔掉', async () => {
-    // 不拦的话：两边列定义不同，A 会去读 B 写的行的那几格来判重，
-    // 而那几格在 B 的列定义里语义完全不同 → 误判成「已存在」→ 静默丢线索。
+  /**
+   * PM 2026-09-24 拍板「所有表单汇总进一张表」之后，几条路线写同一张表是**常态**，
+   * 不再一律判坏 —— 但只有结构一样才放行。
+   */
+  it('两条路线写同一张表、列定义一模一样（只有来源标签不同）→ 都留着', async () => {
+    const withLabel = (label: string) => [
+      { field: 'lead_id' },
+      { field: 'contact_phone' },
+      { field: 'literal', value: label },
+    ]
+    const { routes, invalid } = await loadClientRoutes(
+      fakeSupabase([
+        { ...row(), route_key: 'a', priority: 1, columns: withLabel('含预算与出发时间') },
+        { ...row(), route_key: 'b', priority: 2, columns: withLabel('基础表单') },
+      ]),
+      'c1',
+    )
+    expect(routes.map((r) => r.routeKey)).toEqual(['a', 'b'])
+    expect(invalid).toHaveLength(0)
+  })
+
+  it('两条路线写同一张表但列数不一样 → 后一条判坏并剔掉', async () => {
+    // 不拦的话：A 会去读 B 写的行的那几格来判重，而那几格在 B 的列定义里语义
+    // 完全不同 → 误判成「已存在」→ 静默丢线索。
     const { routes, invalid } = await loadClientRoutes(
       fakeSupabase([
         { ...row(), route_key: 'a', priority: 1 },
-        { ...row(), route_key: 'b', priority: 2 },
+        { ...row(), route_key: 'b', priority: 2, columns: [{ field: 'lead_id' }] },
       ]),
       'c1',
     )
     expect(routes.map((r) => r.routeKey)).toEqual(['a'])
     expect(invalid).toHaveLength(1)
     expect(invalid[0].reason).toContain('同一张表的同一个 tab')
+    expect(invalid[0].reason).toContain('列数不一样')
+  })
+
+  it('两条路线写同一张表、列数一样但某一列放的东西不同 → 后一条判坏', async () => {
+    const { routes, invalid } = await loadClientRoutes(
+      fakeSupabase([
+        { ...row(), route_key: 'a', priority: 1 },
+        {
+          ...row(),
+          route_key: 'b',
+          priority: 2,
+          columns: [{ field: 'lead_id' }, { field: 'contact_email' }],
+        },
+      ]),
+      'c1',
+    )
+    expect(routes.map((r) => r.routeKey)).toEqual(['a'])
+    expect(invalid[0].reason).toContain('第 2 列放的东西不一样')
+  })
+
+  it('🔴 两条路线写同一张表但判重配置不同 → 判坏（sync 用第一条的尺子量所有行）', async () => {
+    const { routes, invalid } = await loadClientRoutes(
+      fakeSupabase([
+        { ...row(), route_key: 'a', priority: 1, dedup_columns: [0] },
+        { ...row(), route_key: 'b', priority: 2, dedup_columns: [1] },
+      ]),
+      'c1',
+    )
+    expect(routes.map((r) => r.routeKey)).toEqual(['a'])
+    expect(invalid[0].reason).toContain('判重列不一样')
+  })
+
+  it('🔴 两条路线写同一张表但时区不同 → 判坏（时间列会写出两种读数，判重对不上）', async () => {
+    const { routes, invalid } = await loadClientRoutes(
+      fakeSupabase([
+        { ...row(), route_key: 'a', priority: 1 },
+        { ...row(), route_key: 'b', priority: 2, timezone: 'Australia/Sydney' },
+      ]),
+      'c1',
+    )
+    expect(routes.map((r) => r.routeKey)).toEqual(['a'])
+    expect(invalid[0].reason).toContain('时区不一样')
   })
 
   it('指到不同 tab 就都留着', async () => {
@@ -101,6 +164,35 @@ describe('loadClientRoutes — 跨路线校验', () => {
     )
     expect(routes).toHaveLength(2)
     expect(invalid).toHaveLength(0)
+  })
+})
+
+describe('describeLayoutMismatch', () => {
+  const base = parseRoute(
+    row({ columns: [{ field: 'lead_id' }, { field: 'literal', value: 'A' }], dedup_columns: [0] }),
+  )
+
+  it('只有 literal 的固定文本不同 → 算一样（「来源表单」那一列就靠这个）', () => {
+    const other = parseRoute(
+      row({
+        route_key: 'r2',
+        columns: [{ field: 'lead_id' }, { field: 'literal', value: 'B' }],
+        dedup_columns: [0],
+      }),
+    )
+    expect(describeLayoutMismatch(base, other)).toBeNull()
+  })
+
+  it('机器键列不同 → 说出来', () => {
+    const other = parseRoute(
+      row({
+        route_key: 'r2',
+        columns: [{ field: 'lead_id' }, { field: 'literal', value: 'B' }],
+        dedup_columns: [0],
+        dedup_id_column: 0,
+      }),
+    )
+    expect(describeLayoutMismatch(base, other)).toContain('机器键列不一样')
   })
 })
 

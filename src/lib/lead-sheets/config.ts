@@ -142,6 +142,50 @@ export function parseRoute(row: RouteRow): LeadSheetRoute {
   }
 }
 
+/**
+ * 两条写同一张表同一个 tab 的路线，结构对不对得上。
+ * 对得上返回 null；对不上返回一句人话，直接拼进待办里给人看。
+ *
+ * 只比**会影响判重和列位**的东西。`value`（literal 的固定文本）故意不比 ——
+ * 「来源表单」那一列每条路线各写各的标签，正是这个能力的用途。
+ */
+export function describeLayoutMismatch(
+  a: LeadSheetRoute,
+  b: LeadSheetRoute,
+): string | null {
+  if (a.columns.length !== b.columns.length) {
+    return `列数不一样（${a.columns.length} 列 vs ${b.columns.length} 列）`
+  }
+  for (let i = 0; i < a.columns.length; i++) {
+    const x = a.columns[i]
+    const y = b.columns[i]
+    if (
+      x.field !== y.field ||
+      x.key !== y.key ||
+      x.prefix !== y.prefix ||
+      x.format !== y.format ||
+      x.mapped !== y.mapped
+    ) {
+      return `第 ${i + 1} 列放的东西不一样（「${describeColumn(x)}」vs「${describeColumn(y)}」）`
+    }
+  }
+  if (a.dedupColumns.join(',') !== b.dedupColumns.join(',')) {
+    return `判重列不一样（[${a.dedupColumns.join(', ')}] vs [${b.dedupColumns.join(', ')}]）`
+  }
+  if (a.dedupIdColumn !== b.dedupIdColumn) {
+    return `机器键列不一样（${a.dedupIdColumn ?? '没有'} vs ${b.dedupIdColumn ?? '没有'}）`
+  }
+  if (a.timezone !== b.timezone) {
+    return `时区不一样（${a.timezone} vs ${b.timezone}）—— 时间列会写出两种读数，判重对不上`
+  }
+  return null
+}
+
+/** 一列的可读说明，只用在上面那条错误原话里。 */
+function describeColumn(col: LeadSheetColumn): string {
+  return col.field === 'answer' ? `answer:${col.key ?? ''}` : col.field
+}
+
 export interface LoadedRoutes {
   routes: LeadSheetRoute[]
   /** 配置坏掉、这轮被跳过的路线（会进人工待办）。 */
@@ -175,24 +219,44 @@ export async function loadClientRoutes(
   }
 
   /**
-   * 🔴 两条路线指到**同一张表的同一个 tab** 一律判坏。
+   * 🔴 几条路线**允许**写同一张表的同一个 tab，但必须「长得一模一样」。
    *
-   * 它们的列定义多半不一样（比如一条 10 列一条 32 列），写进同一个 tab 之后
-   * 表会变成参差的；更糟的是 A 路线判重时会去读 B 路线写的行的那几格，
-   * 而那几格在 B 的列定义里语义完全不同 —— 于是误判成「已存在」，**静默丢线索**。
+   * PM 2026-09-24 拍板：CTS 所有表单的线索汇总进**一张**表，用一列「来源表单」
+   * 区分。所以「多条路线 → 同一张表」从异常变成了**常态**：分流判据仍然只看
+   * 「这条线索的问答里出现了哪些字段名」，分流的结果从「写哪张表」变成
+   * 「那一列写哪个来源标签」。
+   *
+   * 但只有结构相同才安全。原先一律判坏防的是这个：列定义不一样时，A 路线判重
+   * 会去读 B 路线写的那几格，而那几格在 B 的列定义里语义完全不同 —— 误判成
+   * 「已存在」，**静默丢线索**。所以下面逐项比对，对不上照样判坏：
+   *
+   *   · 每一列的 field / key / prefix / format / mapped 必须一致。只有 `value`
+   *     （literal 的固定文本）可以不同 —— 那正是「来源表单」这一列存在的理由。
+   *   · dedup_columns / dedup_id_column / timezone 必须一致 —— `sync.ts` 对同一张表
+   *     只读一次，判重键在这一组路线之间共享，用的是**第一条**路线的判重配置；
+   *     不一致就等于后面那条路线拿别人的尺子量自己的行。
+   *
+   * 不比 value_labels：那顶多让同一个选项在同一列里出现两种写法（难看、销售按
+   * 那一列筛会漏），不会丢线索。而配置坏一条 = 整个客户这轮停手，为这个把线索
+   * 全停掉不划算。
    */
-  const seen = new Map<string, string>()
+  const seen = new Map<string, LeadSheetRoute>()
   for (const r of [...routes]) {
     const key = `${r.spreadsheetId}\u0000${r.tabName}`
     const first = seen.get(key)
-    if (first) {
+    if (!first) {
+      seen.set(key, r)
+      continue
+    }
+    const mismatch = describeLayoutMismatch(first, r)
+    if (mismatch) {
       routes.splice(routes.indexOf(r), 1)
       invalid.push({
         routeKey: r.routeKey,
-        reason: `路线「${r.routeKey}」跟「${first}」指向同一张表的同一个 tab（${r.tabName}），两边列定义不同会互相误判成「已存在」而丢线索`,
+        reason:
+          `路线「${r.routeKey}」跟「${first.routeKey}」指向同一张表的同一个 tab（${r.tabName}），` +
+          `但两边${mismatch} —— 写进同一个 tab 会互相误判成「已存在」而丢线索`,
       })
-    } else {
-      seen.set(key, r.routeKey)
     }
   }
 

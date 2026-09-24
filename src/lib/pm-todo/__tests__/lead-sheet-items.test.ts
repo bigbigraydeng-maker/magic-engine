@@ -135,3 +135,111 @@ describe('pushLeadSheetItems', () => {
     expect(items[0].what).toContain('连不上')
   })
 })
+
+/**
+ * PM 2026-09-24 拍板「所有表单汇总进一张表」之后，同一个客户的几条路线指向
+ * 同一张表是常态。待办必须按**表**说话，不按路线。
+ */
+describe('几条路线写同一张表时的待办', () => {
+  const sheet = 'sheet-1'
+
+  it('🔴 同一张表上两条路线报同一句错 → 只下发一条待办，不让人看见两遍一模一样的话', async () => {
+    const items: ManualItem[] = []
+    const err = '读目标表格失败，本轮一行都没写：Sheets API 读取失败 (403)'
+    await pushLeadSheetItems(
+      fakeSupabase([
+        run('c1', 'CTS', [
+          { routeKey: 'v4', spreadsheetId: sheet, tabName: 'Untitled', error: err },
+          { routeKey: 'default', spreadsheetId: sheet, tabName: 'Untitled', error: err },
+        ]),
+      ]),
+      items,
+      NOW,
+    )
+    const failed = items.filter((i) => i.kind === 'lead_sheet_sync_failed')
+    expect(failed).toHaveLength(1)
+    expect(failed[0].how).toContain('重新授权')
+  })
+
+  it('同一张表上两条路线报的错不一样 → 各说各的，不能合并掉', async () => {
+    const items: ManualItem[] = []
+    await pushLeadSheetItems(
+      fakeSupabase([
+        run('c1', 'CTS', [
+          { routeKey: 'v4', spreadsheetId: sheet, tabName: 'Untitled', error: '读目标表格失败：403' },
+          { routeKey: 'default', spreadsheetId: sheet, tabName: 'Untitled', error: '写目标表格失败：500' },
+        ]),
+      ]),
+      items,
+      NOW,
+    )
+    expect(items.filter((i) => i.kind === 'lead_sheet_sync_failed')).toHaveLength(2)
+  })
+
+  it('跳过的线索按表加总、编号合在一起 —— 不是两条各报各的半截数', async () => {
+    const items: ManualItem[] = []
+    await pushLeadSheetItems(
+      fakeSupabase([
+        run('c1', 'CTS', [
+          {
+            routeKey: 'v4',
+            spreadsheetId: sheet,
+            tabName: 'Untitled',
+            skippedNoIdentity: 2,
+            skippedLeadIds: ['l1', 'l2'],
+          },
+          {
+            routeKey: 'default',
+            spreadsheetId: sheet,
+            tabName: 'Untitled',
+            skippedNoIdentity: 1,
+            skippedLeadIds: ['l3'],
+          },
+        ]),
+      ]),
+      items,
+      NOW,
+    )
+    const skipped = items.filter((i) => i.kind === 'lead_sheet_lead_skipped')
+    expect(skipped).toHaveLength(1)
+    expect(skipped[0].what).toContain('3 条线索')
+    expect(skipped[0].how).toContain('l3')
+  })
+
+  it('没见过的选项按表合并去重 —— 两条路线都报同一个值只说一遍', async () => {
+    const items: ManualItem[] = []
+    await pushLeadSheetItems(
+      fakeSupabase([
+        run('c1', 'CTS', [
+          { routeKey: 'v4', spreadsheetId: sheet, tabName: 'Untitled', unmappedValues: ['x_tour'] },
+          {
+            routeKey: 'default',
+            spreadsheetId: sheet,
+            tabName: 'Untitled',
+            unmappedValues: ['x_tour', 'y_tour'],
+          },
+        ]),
+      ]),
+      items,
+      NOW,
+    )
+    const unmapped = items.filter((i) => i.kind === 'lead_sheet_value_unmapped')
+    expect(unmapped).toHaveLength(1)
+    expect(unmapped[0].what).toContain('x_tour、y_tour')
+  })
+
+  it('指向两张不同的表 → 还是各下发各的', async () => {
+    const items: ManualItem[] = []
+    await pushLeadSheetItems(
+      fakeSupabase([
+        run('c1', 'CTS', [
+          { routeKey: 'a', spreadsheetId: 'sheet-1', tabName: 'T1', error: '读目标表格失败：403' },
+          { routeKey: 'b', spreadsheetId: 'sheet-2', tabName: 'T2', error: '读目标表格失败：403' },
+        ]),
+      ]),
+      items,
+      NOW,
+    )
+    expect(items.filter((i) => i.kind === 'lead_sheet_sync_failed')).toHaveLength(2)
+  })
+})

@@ -2,9 +2,11 @@
  * 编排：把一个客户的线索按路线分流、判重、追加进各自的 Google 表格。
  *
  * 纪律（跟 `meta/leads-sync.ts` 同一套，不另立规矩）：
- *   · **先读后写** —— 每条路线先把目标表现有的行读回来算判重键，再决定写什么。
+ *   · **先读后写** —— 先把目标表现有的行读回来算判重键，再决定写什么。
  *     重跑不会写出第二行；跟别的管道（客户自己的 Zapier/Make、人手粘贴）
  *     往同一张表里写也不会互相写重。
+ *   · **同一张表只读一次** —— 几条路线写同一张表是常态（所有表单汇总进一张，
+ *     用「来源表单」那一列区分），它们共用一份判重键集合，见 `DestinationSnapshot`。
  *   · **只追加** —— 一个已有单元格都不碰（见 `google-sheets/client.ts`）。
  *   · **一条路线炸了不牵连另一条** —— 错误记进那条路线的回执，继续跑下一条。
  *   · **失败要说人话** —— 原话带进回执，调用方据此下发人工待办。
@@ -46,6 +48,42 @@ export interface SyncDeps {
   dryRun?: boolean
 }
 
+/**
+ * 同一张表（同一个 tab）在这一轮里的共享状态。
+ *
+ * 🔴 **为什么要共享**：PM 2026-09-24 拍板「所有表单汇总进一张表」之后，几条路线
+ *    写同一张表成了常态。各读各的会出两个毛病：
+ *      1. 同一张表读两遍，纯浪费（而且第二遍读到的内容取决于第一条路线写没写完，
+ *         等于让判重结果跟路线顺序挂钩）。
+ *      2. **试算模式下会多报**：第一条路线只算不写，第二条再读回来的还是老内容，
+ *         两条路线上身份键相同的两个人会双双显示「会写」。真跑时不会重复（第二遍
+ *         读得到第一条写进去的行），于是试算跟真跑对不上 —— 而试算存在的全部意义
+ *         就是「先看清楚会写什么」。
+ *
+ *    共享一份键集合两个毛病一起没了：读一次，谁排进队列谁就把键加进去。
+ *
+ * 🔴 拿**第一条**路线的 dedup 配置去算已有行的键。这一点成立的前提是
+ *    `config.ts::describeLayoutMismatch` 已经保证同一张表上的路线判重配置一致 ——
+ *    两处是绑定的，改一边要看另一边。
+ */
+export interface DestinationSnapshot {
+  /** 表里已有的 + 本轮已排进队列的判重键。 */
+  keys: Set<string>
+  /** 读过了没。第一条用到这张表的路线负责读。 */
+  loaded: boolean
+  /** 读表失败时的原话。非 null = 这张表上的路线这一轮全部停手。 */
+  readError: string | null
+}
+
+export function newDestinationSnapshot(): DestinationSnapshot {
+  return { keys: new Set(), loaded: false, readError: null }
+}
+
+/** 同一个 key = 同一张表的同一个 tab。 */
+export function destinationKey(route: LeadSheetRoute): string {
+  return `${route.spreadsheetId}\u0000${route.tabName}`
+}
+
 function emptyRouteReceipt(route: LeadSheetRoute): LeadSheetRouteReceipt {
   return {
     routeKey: route.routeKey,
@@ -70,6 +108,11 @@ export async function syncOneRoute(
   route: LeadSheetRoute,
   leads: readonly LeadRecord[],
   deps: SyncDeps = {},
+  /**
+   * 同一张表上几条路线共用的键集合。不传就自己建一个（单条路线跑、脚本试算
+   * 都是这个用法），行为跟以前完全一样。
+   */
+  snapshot: DestinationSnapshot = newDestinationSnapshot(),
 ): Promise<LeadSheetRouteReceipt> {
   const read = deps.readSheet ?? readSheetValues
   const append = deps.appendSheet ?? appendSheetValues
@@ -81,34 +124,42 @@ export async function syncOneRoute(
     else receipt.outsideWindow++
   }
   receipt.matched = inWindow.length
+  // 一条线索都没有就别读表 —— 同一张表上后面还有别的路线，谁先有活谁去读。
   if (inWindow.length === 0) return receipt
 
-  let existing: string[][]
-  try {
-    // 🔴 必须按「人看到的文本」读，不能按原始值读 —— 判重要跟人手填的行对上。
-    //    用 unformatted 的话日期列回来是 46289.411… 这种序列号，永远对不上（实测）。
-    existing = await read(clientId, route.spreadsheetId, fullRange(route.tabName), {
-      render: 'formatted',
-    })
-  } catch (err) {
-    // 🔴 读不到已有行就**什么都不写**。看不见表里有什么却照写不误 = 写一堆重复行，
-    //    而重复行在这种表上是不可逆的（人会在上面手工标注跟进）。
-    receipt.error = `读目标表格失败，本轮一行都没写：${err instanceof Error ? err.message : String(err)}`
+  const idCol = route.dedupIdColumn ?? undefined
+
+  if (!snapshot.loaded) {
+    snapshot.loaded = true
+    try {
+      // 🔴 必须按「人看到的文本」读，不能按原始值读 —— 判重要跟人手填的行对上。
+      //    用 unformatted 的话日期列回来是 46289.411… 这种序列号，永远对不上（实测）。
+      const existing = await read(clientId, route.spreadsheetId, fullRange(route.tabName), {
+        render: 'formatted',
+      })
+      // 表里每一行贡献它**全部**能算出来的键：老行只有身份键，我们以前写的行两把都有。
+      for (const row of existing) {
+        for (const key of dedupKeys(row, route.dedupColumns, idCol)) snapshot.keys.add(key)
+      }
+    } catch (err) {
+      // 🔴 读不到已有行就**什么都不写**。看不见表里有什么却照写不误 = 写一堆重复行，
+      //    而重复行在这种表上是不可逆的（人会在上面手工标注跟进）。
+      snapshot.readError = `读目标表格失败，本轮一行都没写：${err instanceof Error ? err.message : String(err)}`
+    }
+  }
+
+  if (snapshot.readError) {
+    // 同一张表上的每条路线都要在**自己的**回执里说这件事 —— 待办按路线下发，
+    // 只记在第一条上的话，后面那几条看起来像「这轮 0 条、一切正常」。
+    receipt.error = snapshot.readError
     return receipt
   }
 
-  const idCol = route.dedupIdColumn ?? undefined
-  // 表里每一行贡献它**全部**能算出来的键：老行只有身份键，我们以前写的行两把都有。
-  const present = new Set<string>()
-  for (const row of existing) {
-    for (const key of dedupKeys(row, route.dedupColumns, idCol)) present.add(key)
-  }
+  const present = snapshot.keys
 
   const notes = emptyNotes()
   const toAppend: string[][] = []
   const toAppendLeadIds: string[] = []
-  // 同一轮里两条线索算出同一把键（例如同一个人同一分钟填了两次）也只写一条。
-  const seenThisRun = new Set<string>()
 
   for (const lead of inWindow) {
     const cells = buildRow(lead, route, notes)
@@ -126,13 +177,23 @@ export async function syncOneRoute(
       receipt.skippedLeadIds.push(lead.leadId)
       continue
     }
-    // 🔴 **任一把键撞上就算已经有了**：机器键认我们自己写过的行，
-    //    身份键认人手填的 / 外部管道写的老行。少一边就会写重复。
-    if (keys.some((k) => present.has(k) || seenThisRun.has(k))) {
+    /**
+     * 🔴 **任一把键撞上就算已经有了**：机器键认我们自己写过的行，
+     *    身份键认人手填的 / 外部管道写的老行。少一边就会写重复。
+     *
+     *    `present` 里除了表里已有的行，还有这一轮已经排进队列的行 —— 同一个人
+     *    同一分钟填了两次、或者同一张表上另一条路线已经收了他，都只写一条。
+     *
+     *    排进队列就先占键（不等写成功）。代价是：万一前一条路线的追加失败了，
+     *    同一张表上后一条路线里跟它撞键的那条会被当成「已有」跳过一轮。
+     *    下一轮两边都会重新算，自己会追上 —— 反过来「等写成功再占键」会在
+     *    追加成功但回执丢了的时候写出重复行，那个是不可逆的。
+     */
+    if (keys.some((k) => present.has(k))) {
       receipt.alreadyPresent++
       continue
     }
-    for (const k of keys) seenThisRun.add(k)
+    for (const k of keys) present.add(k)
     toAppend.push(cells)
     toAppendLeadIds.push(lead.leadId)
   }
@@ -249,11 +310,24 @@ export async function syncClientLeadSheets(
     else byRoute.set(route.routeKey, [lead])
   }
 
+  /**
+   * 同一张表（同一个 tab）上的几条路线共用一份快照：读一次、判重键互通。
+   * `config.ts::describeLayoutMismatch` 已经保证同一张表上的路线判重配置一致，
+   * 所以这份键集合对它们是同一把尺子。
+   */
+  const snapshots = new Map<string, DestinationSnapshot>()
+
   for (const route of routes) {
+    const dest = destinationKey(route)
+    let snapshot = snapshots.get(dest)
+    if (!snapshot) {
+      snapshot = newDestinationSnapshot()
+      snapshots.set(dest, snapshot)
+    }
     // 没分到线索的路线也出一条回执 —— 「这条路线今天 0 条」和「这条路线没跑」
     // 必须分得开。
     receipt.routes.push(
-      await syncOneRoute(client.id, route, byRoute.get(route.routeKey) ?? [], deps),
+      await syncOneRoute(client.id, route, byRoute.get(route.routeKey) ?? [], deps, snapshot),
     )
   }
 
