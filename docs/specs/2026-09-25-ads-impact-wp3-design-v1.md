@@ -176,6 +176,17 @@ sequenceDiagram
 
 ---
 
+### 3.9 日预算上限按账户存（PM 2026-09-25 提出：CTS 主账户 100 / 个人账户 50，客户级一行装不下）
+
+实测：`ad_strategy_configs.daily_budget_cap_cents` 按客户一行；`client_meta_ad_accounts(id, client_id, ad_account_id, label, is_primary, …)` 已是「客户 ↔ 广告账户」绑定表，唯一键 `(client_id, ad_account_id)`，CTS 两行、其余客户各一行。信封事实 `accountDailyTotalBeforeCents` 本来就按**账户**算（`envelope-facts.ts`，CBO/ABO 分别加总），拿它去比客户级上限 = 每个账户都能到上限、合计 2×（狄仁杰 R2 专攻 6 同一个坑）。
+
+**拍板（技术，本窗口）：不新建表，上限落到绑定表上；客户级那一行变成总闸。**
+- `client_meta_ad_accounts` 加 `daily_budget_cap_cents integer NULL`（3.1b migration，`ADD COLUMN IF NOT EXISTS`）。
+- `ad_strategy_configs.daily_budget_cap_cents` = **全部账户合计不许超**的总闸：熔断 #2 比它；PATCH 校验 `sum(账户上限) ≤ 客户总闸`，否则 400。
+- 信封事实（3.1b `envelope-facts.ts`）：`dailyCapCents` = 该实体所属账户的上限；账户上限 NULL 时——客户只绑 1 个账户 → 用客户总闸；绑 ≥2 个 → `unavailable('facts: 账户级日上限未配置')` → 拒（读不到 = 不动）。
+- Settings UI：账户绑定面板上可填每个账户的上限（走同一条 `guardGlobalAdmin` PATCH），铁律 8「要填的字段必须连 UI 一起做」。
+- CTS 现状：客户级已存 150（总闸），账户级 100 / 50 等 3.1b 上线后在面板填；在那之前任何自动动作本来就不会发生（resolver 未挂载）。
+
 ## 4. §3 autonomy_mode ↔ client_automation_policies.mode 同步
 
 ### 4.1 两个源的角色
@@ -937,12 +948,21 @@ ALTER TABLE public.client_proven_patterns
 
 ---
 
+### 11.11 账户级日预算上限（§3.9）
+
+```sql
+ALTER TABLE public.client_meta_ad_accounts
+  ADD COLUMN IF NOT EXISTS daily_budget_cap_cents integer;
+COMMENT ON COLUMN public.client_meta_ad_accounts.daily_budget_cap_cents IS
+  '该广告账户的日预算上限（账户币种）。信封按账户比它；NULL 且客户绑 ≥2 账户 = 信封事实 unavailable。客户级 ad_strategy_configs.daily_budget_cap_cents 是全部账户合计的总闸。';
+```
+
 ## 12. §11 分批实施顺序
 
 | Sub-WP | 内容 | 风险级 | 依赖 |
 |---|---|---|---|
 | **WP3.1a 同步 worker + 架构测试 + 审计列 + receipts 表** | §4 全部 + §11.10 的 SQL 函数（含权限 / 守卫 / 黑词） | A | 无 |
-| **WP3.1b 熔断事件表 + resolver 挂载 + WP2 遗留两处 + admin 解除接口 + 关旁路** | §6 全部 + §5.2 的两条 WP2 遗留缺陷（`at` 未解构、`limit(4000)` 窗口）+ **resolver 生产挂载三件套**（§6.1，issue:1994）+ **收编止损旁路** `src/app/api/clients/[id]/ad-health/stop-loss/route.ts:48-50,124`（直调 `setAdSetStatus` / `setAdSetDailyBudget` 不经 Kernel，`requirePaidClientAccess` 即可点）→ 改为提交 Kernel `ads.pause_unit` / `ads.cut_unit_budget`（人点也走 Kernel、留回执），过渡期至少 `guardGlobalAdmin`；架构断言：`boundaries.ts` `PROVIDER_WRITE_MODULES` 加 `@/lib/meta/adsets`；`ads-strategy/` 与 `capabilities/` 之外禁 import `submitActionRun` / `recoverDeniedRun` | A | 依赖 `envelope-facts`，不依赖 3.1a |
+| **WP3.1b 熔断事件表 + resolver 挂载 + WP2 遗留两处 + admin 解除接口 + 关旁路** | §6 全部 + §5.2 的两条 WP2 遗留缺陷（`at` 未解构、`limit(4000)` 窗口）+ **resolver 生产挂载三件套**（§6.1，issue:1994）+ **收编止损旁路** `src/app/api/clients/[id]/ad-health/stop-loss/route.ts:48-50,124`（直调 `setAdSetStatus` / `setAdSetDailyBudget` 不经 Kernel，`requirePaidClientAccess` 即可点）→ 改为提交 Kernel `ads.pause_unit` / `ads.cut_unit_budget`（人点也走 Kernel、留回执），过渡期至少 `guardGlobalAdmin`；架构断言：`boundaries.ts` `PROVIDER_WRITE_MODULES` 加 `@/lib/meta/adsets`；`ads-strategy/` 与 `capabilities/` 之外禁 import `submitActionRun` / `recoverDeniedRun`；**账户级日上限**（§3.9：`client_meta_ad_accounts.daily_budget_cap_cents` 列 + envelope-facts 按账户取上限、多账户缺配置即 unavailable + PATCH 校验合计 ≤ 客户总闸 + 绑定面板 UI） | A | 依赖 `envelope-facts`，不依赖 3.1a |
 | **WP3.2 链条接线 + 韩信 + 孔明预检 + denied 恢复入批** | §2、§5、批次两张表、§K 的前三个拉取函数；**补查询**「按 client + `deny_code` + 晚于 `policy_version` 变更」列 denied run（`store.ts:858 listDeadLetterRuns` 只按 `needs_human`；`deny_code` 在 `authorization_decisions` 不在 `action_runs`，要 join）；新 Inngest 函数部署后**手动 Sync**（STATE.md:174、PITFALLS F10） | A | 依赖 3.1a / 3.1b |
 | **WP3.3 Check + Tune + Jev + 日报两段** | §7、§8、§9、韩信写 `flywheel_actions`（+ §11.2 的列）、ads 评估器（sibling + CHECK 扩展 + `OUTCOME_EVALUATOR` 登记 + `ads.` owner）、extractor 映射 + `pattern_type` CHECK 扩展 | A（两处 CHECK 扩展是 schema 改动，见 §8.2 / §11.9） | 依赖 3.2 |
 
