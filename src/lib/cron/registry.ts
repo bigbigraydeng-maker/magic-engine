@@ -321,6 +321,13 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 线索 → 客户指定的 Google 表格。每小时 20 分跑，排在 meta-leads-sync（整点）之后。
   { service: 'inngest:cloud-lead-sheet-sync-fanout', jobName: 'lead-sheet-sync', schedule: '20 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-24' },
   { service: 'inngest:cloud-ai-visibility-weekly-fanout', jobName: 'ai-visibility-tracker-weekly', schedule: '0 6 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-21' },
+  // 「客人填了表还没人回」每天一封汇总信。新西兰早上 8 点（Inngest 的 cron 带 TZ=）。
+  //
+  // 🔴 为什么一定要登记：`LEAD_FOLLOWUP_DIGEST_ENABLED` 默认是关的，所以上线后
+  //    「信箱里没信」本来就是预期行为。等有人打开开关、信还是不来，没有这条登记
+  //    就分不出「Inngest 忘了重新 Sync 所以函数压根没注册」和「今天真的没人欠跟进」。
+  //    这类登记的全部意义就是把「安静地不跑」喊出来。
+  { service: 'inngest:cloud-crm-lead-followup-digest', jobName: 'crm-lead-followup-digest', schedule: '0 8 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-24' },
 ] as const
 
 /**
