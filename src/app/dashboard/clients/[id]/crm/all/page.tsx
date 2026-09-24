@@ -138,6 +138,8 @@ interface ContactRow {
   stageLabel: string | null
   /** 人工置顶时间（contacts.pinned_at）。非 null = 被钉在名单最前面。 */
   pinnedAt: string | null
+  /** 「⭐置顶」附带的原因和到期日（contacts.important_note / important_due_at）。 */
+  important: { note: string | null; dueAt: string | null }
   segment: string
   segmentLabel: string
   temperature: 'hot' | 'warm' | 'cold' | 'off'
@@ -300,6 +302,90 @@ function TimelineItem({ e }: { e: TimelineEntry }) {
   )
 }
 
+/**
+ * 「⭐置顶」附带的原因 + 到期日编辑。
+ *
+ * 星本身（pinned_at）在表格那一列直接点，这里只管"标了什么"和"到什么时候"——
+ * 对应员工老表 R/S 列的红字。受控 state，按「保存」才落库，不是每敲一个字发一次。
+ */
+function ImportantMarkerEditor({
+  clientId,
+  row,
+  onSaved,
+}: {
+  clientId: string
+  row: ContactRow
+  onSaved: (msg: string) => void
+}) {
+  const [note, setNote] = useState(row.important?.note ?? '')
+  const [dueDate, setDueDate] = useState(row.important?.dueAt ? row.important.dueAt.slice(0, 10) : '')
+  const [busy, setBusy] = useState(false)
+
+  const save = async () => {
+    setBusy(true)
+    try {
+      const body: { note: string | null; dueAt: string | null } = {
+        note: note.trim() === '' ? null : note.trim(),
+        // 空 = 清空；非空 date → 当天 12:00 本地时区当作截止时刻（员工只想标一天，不写具体时间）
+        dueAt: dueDate === '' ? null : new Date(`${dueDate}T12:00:00`).toISOString(),
+      }
+      const res = await fetch(`/api/clients/${clientId}/crm/contacts/${row.contactId}/important`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error()
+      onSaved('✓ 存好了')
+    } catch {
+      onSaved('没存上，再试一次')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-me-charcoal/10 bg-me-ivory p-3">
+      <div className="text-xs font-bold text-me-charcoal/60">
+        ⭐ 重要标记（选填）—— 员工老表 R/S 列的红字放这里
+      </div>
+      <textarea
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="约好周三 3 点回电 / 只发邮件不打电话 / ..."
+        maxLength={500}
+        rows={2}
+        className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm focus:border-me-charcoal focus:outline-none"
+      />
+      <div className="flex items-center gap-2 text-sm">
+        <span className="text-xs text-me-charcoal/50">到期：</span>
+        <input
+          type="date"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
+          className="rounded-lg border border-black/10 bg-white px-2 py-1 text-sm"
+        />
+        {dueDate && (
+          <button
+            type="button"
+            onClick={() => setDueDate('')}
+            className="text-xs text-me-charcoal/40 hover:text-me-charcoal"
+          >
+            清除日期
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void save()}
+          className="ml-auto rounded-lg bg-me-charcoal px-3 py-1 text-xs font-black text-white disabled:opacity-40"
+        >
+          {busy ? '存中…' : '保存'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 /** 展开区：往来时间线 + 记一笔 + 改状态。一次只有一行展开。 */
 function ContactDetail({
   clientId,
@@ -345,6 +431,9 @@ function ContactDetail({
 
   return (
     <div className="space-y-4">
+      {/* 重要标记放最上面 —— 员工打开抽屉第一眼就该看到"红字"，跟老表习惯一致。 */}
+      <ImportantMarkerEditor clientId={clientId} row={row} onSaved={(msg) => onWrote(msg, true)} />
+
       {/* 联系方式 —— 展开里再给一次，方便直接拨号/发信 */}
       <div className="flex flex-wrap gap-2">
         {/* 号码打不通就不给拨号链接 —— 号码照旧显示（要改号得先看得见），
@@ -857,7 +946,22 @@ export default function CrmAllContactsPage() {
                           {r.pinnedAt ? '⭐' : '☆'}
                         </button>
                       </td>
-                      <td className="px-4 py-3 font-medium text-me-charcoal">{r.name}</td>
+                      <td className="px-4 py-3 font-medium text-me-charcoal">
+                        {r.name}
+                        {r.important?.note && (
+                          <span
+                            title={r.important.note}
+                            className="ml-2 rounded bg-me-gold/20 px-1.5 py-0.5 text-[10px] font-bold text-me-charcoal/70"
+                          >
+                            ⭐ {r.important.note.length > 12 ? `${r.important.note.slice(0, 12)}…` : r.important.note}
+                          </span>
+                        )}
+                        {r.important?.dueAt && new Date(r.important.dueAt) < new Date() && (
+                          <span className="ml-1 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-bold text-red-600">
+                            到期
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-me-charcoal/60">{fmtDate(r.firstSeenAt)}</td>
                       <td className="px-4 py-3 text-me-charcoal/60">
                         {r.lastTouchAt ? relTime(r.lastTouchAt) : <span className="text-me-charcoal/35">还没联系过</span>}
