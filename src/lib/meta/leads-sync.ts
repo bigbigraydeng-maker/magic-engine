@@ -123,11 +123,23 @@ export async function getLeadWatermark(clientId: string, now: Date = new Date())
 }
 
 /**
+ * 一次 `.in()` 最多塞多少个 lead id。
+ *
+ * 单个表单最多能返回 2000 条 lead（`lead-forms.ts` 的 `MAX_PAGES` × `limit`）。
+ * 2000 个 17 位 id 拼出来的 query string 约 34KB，会被网关按 414 打回；
+ * PostgREST 不分页还有 1000 行默认上限会**静默截断**。两种都只会降级成
+ * 「这一批全部重跑」（不会算错数），但那等于这个优化悄悄失效 —— 所以切批。
+ */
+const SETTLED_LOOKUP_BATCH = 200
+
+/**
  * 这一批 lead 里，哪些上一轮已经办完了（触点里的 Mailchimp 回执已是终态）。
  *
- * **一次查询拿回整批**，不逐条查 —— 逐条查正是这次要修的那种浪费。
+ * **批量查，不逐条查** —— 逐条查正是这次要修的那种浪费。
  *
  * 读失败返回空集合：判不出来就当都没办完，照常重跑。宁可多打一次，不可漏一次。
+ * 但**必须出声** —— 这道闸静默失效的样子跟它正常工作一模一样（都是「照常重跑」），
+ * 不喊一嗓子就没有任何人会发现。
  */
 export async function readSettledLeadIds(
   clientId: string,
@@ -136,22 +148,30 @@ export async function readSettledLeadIds(
   const settled = new Set<string>()
   if (leadIds.length === 0) return settled
 
-  const { data, error } = await supabaseAdmin
-    .from('contact_touchpoints')
-    .select('source_ref, metadata')
-    .eq('client_id', clientId)
-    .eq('source', 'meta_lead_form')
-    .in('source_ref', leadIds)
+  for (let i = 0; i < leadIds.length; i += SETTLED_LOOKUP_BATCH) {
+    const batch = leadIds.slice(i, i + SETTLED_LOOKUP_BATCH)
+    const { data, error } = await supabaseAdmin
+      .from('contact_touchpoints')
+      .select('source_ref, metadata')
+      .eq('client_id', clientId)
+      .eq('source', 'meta_lead_form')
+      .in('source_ref', batch)
 
-  if (error || !data) return settled
+    if (error || !data) {
+      console.warn(
+        `[meta-leads] client ${clientId} 读已办完回执失败，这批 ${batch.length} 条全部重跑: ${error?.message ?? 'no data'}`,
+      )
+      continue
+    }
 
-  for (const row of data as Array<{ source_ref?: unknown; metadata?: unknown }>) {
-    const ref = typeof row.source_ref === 'string' ? row.source_ref : ''
-    if (!ref) continue
-    const meta = row.metadata
-    if (typeof meta !== 'object' || meta === null) continue
-    if (isMailchimpSettled((meta as { mailchimp_result?: unknown }).mailchimp_result)) {
-      settled.add(ref)
+    for (const row of data as Array<{ source_ref?: unknown; metadata?: unknown }>) {
+      const ref = typeof row.source_ref === 'string' ? row.source_ref : ''
+      if (!ref) continue
+      const meta = row.metadata
+      if (typeof meta !== 'object' || meta === null) continue
+      if (isMailchimpSettled((meta as { mailchimp_result?: unknown }).mailchimp_result)) {
+        settled.add(ref)
+      }
     }
   }
   return settled
@@ -233,6 +253,10 @@ export async function syncClientMetaLeads(
         // 唯一例外 —— 本轮解析出**明确 opt-out** 的照常走完整流程。那一位会被写进
         // 触点 metadata 的 `do_not_contact`，以后拦住这个人所有渠道的外发（合同
         // 5426843158）；解析规则改宽之后，窗口内的老 lead 要还能被重新判一次。
+        //
+        // 取舍：办完之后就不再每轮回头看了。所以「有人在 Mailchimp 后台手工摘掉来源
+        // 标签」这种事，原来 24 小时窗口内会被下一轮自愈，现在不会 —— 超出窗口本来
+        // 也不自愈，这里只是把不自愈的起点从 24 小时提前到了办完那一刻。
         if (settled.has(lead.leadId) && parseLeadAnswers(lead.answers).optOutEvidence === null) {
           const key = `skipped:${ALREADY_SYNCED_REASON}`
           mailchimp[key] = (mailchimp[key] ?? 0) + 1

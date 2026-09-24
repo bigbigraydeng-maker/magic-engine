@@ -35,10 +35,17 @@ const CLIENT = {
 
 const mock = <T>(fn: T) => fn as unknown as ReturnType<typeof vi.fn>
 
+/** 已办完批量查这一条链上，实际传给 `.eq()` / `.in()` 的参数。每次 `mockDb` 重置。 */
+let settledQueryCalls: Array<{ filters: Array<[string, unknown]>; ids: string[] }> = []
+
 /**
  * `supabaseAdmin.from()` 的假件，同时服务两条链：
  *   · 水位线查询   `.select().eq().eq().order().limit().maybeSingle()`
  *   · 已办完批量查 `.select().eq().eq().in()`
+ *
+ * 已办完那条链会把 `.eq()` / `.in()` 的**实参**记进 `settledQueryCalls` ——
+ * 跨客户红线（`.eq('client_id', …)`）必须在测试层有结构性保证，
+ * 不然那一行被删掉，所有用例照样全绿。
  */
 function mockDb(
   opts: {
@@ -48,25 +55,35 @@ function mockDb(
   } = {},
 ) {
   const { newest = null, settled = [], settledError = false } = opts
+  settledQueryCalls = []
   ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-    select: () => ({
-      eq: () => ({
-        eq: () => ({
-          order: () => ({
-            limit: () => ({
-              maybeSingle: () =>
-                Promise.resolve({ data: newest ? { occurred_at: newest } : null }),
+    select: () => {
+      const filters: Array<[string, unknown]> = []
+      const chain = {
+        eq: (col: string, val: unknown) => {
+          filters.push([col, val])
+          return {
+            ...chain,
+            order: () => ({
+              limit: () => ({
+                maybeSingle: () =>
+                  Promise.resolve({ data: newest ? { occurred_at: newest } : null }),
+              }),
             }),
-          }),
-          in: () =>
-            Promise.resolve(
-              settledError
-                ? { data: null, error: { message: 'boom' } }
-                : { data: settled, error: null },
-            ),
-        }),
-      }),
-    }),
+          }
+        },
+        in: (_col: string, ids: string[]) => {
+          settledQueryCalls.push({ filters: [...filters], ids: [...ids] })
+          const hit = settled.filter((row) => ids.includes(row.source_ref))
+          return Promise.resolve(
+            settledError
+              ? { data: null, error: { message: 'boom' } }
+              : { data: hit, error: null },
+          )
+        },
+      }
+      return chain
+    },
   }))
 }
 
@@ -465,5 +482,29 @@ describe('已办完的线索不再重复打 Mailchimp', () => {
     await syncClientMetaLeads(CLIENT)
 
     expect(mock(ingestMetaLead)).toHaveBeenCalledTimes(1)
+  })
+
+  it('批量查必须按 client_id 和 source 过滤 —— 跨客户红线', async () => {
+    mockDb({ newest: '2026-07-25T11:48:46.000Z' })
+    mock(fetchFormLeads).mockResolvedValue({ rows: [lead('l1')], error: null })
+
+    await syncClientMetaLeads(CLIENT)
+
+    expect(settledQueryCalls).toHaveLength(1)
+    expect(settledQueryCalls[0].filters).toEqual([
+      ['client_id', CLIENT.id],
+      ['source', 'meta_lead_form'],
+    ])
+    expect(settledQueryCalls[0].ids).toEqual(['l1'])
+  })
+
+  it('一个表单几百条线索时按批切，不把几千个 id 塞进一条查询', async () => {
+    const rows = Array.from({ length: 450 }, (_, i) => lead(`l${i}`))
+    mockDb({ newest: '2026-07-25T11:48:46.000Z' })
+    mock(fetchFormLeads).mockResolvedValue({ rows, error: null })
+
+    await syncClientMetaLeads(CLIENT)
+
+    expect(settledQueryCalls.map((c) => c.ids.length)).toEqual([200, 200, 50])
   })
 })
