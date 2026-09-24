@@ -69,10 +69,35 @@ export interface HeartbeatPolicy {
    * 认（谷歌 / 微软）：令牌过期是**常态** —— 下一次调用会自动换新的，
    * 所以 `token_expiry` 已过期完全不说明有问题（2026-09-24 实测 7 条谷歌连接
    * 全部处于"已过期待刷新"状态，全都健康）。
-   * 不认（Meta / TikTok，用的是长期令牌）：过期就是**真的死了**，
-   * 只能让人重新走一次授权。这是这两个平台唯一不依赖心跳的硬信号。
+   * 不认（Meta / TikTok）：`token-manager.ts` 没实现它们的刷新，**但这不代表
+   * 它们真的没有自动续期** —— 见 `tokenExpirySignalsDeath`，两者是分开的问题。
    */
   refreshable: boolean
+  /**
+   * `token_expiry` 这一列，对这个平台来说，过期是不是「真的死了，需要人重连」。
+   *
+   * 跟 `refreshable` 是两件事：`refreshable` 问的是「`token-manager.ts` 认不认
+   * 这个平台」，这里问的是「这个平台的**真实调用链**（不一定走 token-manager）
+   * 有没有自动续期，以及这一列是不是那条真实调用链会看的字段」。
+   *
+   * 2026-09-24 两次实测都栽在把两者混为一谈：
+   *  · TikTok：`refreshable=false`（token-manager 确实没实现），但真实调用链
+   *    `tiktok/token.ts::getValidTikTokToken()` 走的是 `tiktok-oauth/client.ts`
+   *    自己的 `refreshTokens()`，每次用之前就近自动换新——24 小时的 access token
+   *    过期是**设计如此的常态**，不是故障。按 `!refreshable` 报的话，每条 TikTok
+   *    连接一天后、下次真正被用到之前，都会被误报成要重连。
+   *  · Meta：Page token 授权不撤就不过期，`facebook/callback/route.ts` 存的
+   *    60 天到期日是**编出来给报表一个可读数字用的**，运行时
+   *    `token-selection.ts::loadStoredPageToken()` 读令牌根本不看
+   *    `token_expiry` 这一列。按它报「过期」等于每 60 天造一条假的重连待办，
+   *    连上的连接从没死过。真正的失效只有 API 撤权/报错才知道，落在
+   *    `status` 上——那是 `BROKEN_STATUSES` 已经在管的事，不需要靠这一列。
+   *
+   * 目前没有一个平台把这一列当真实死亡信号用；留着这道判据是给以后接入
+   * 「真长期令牌 + 没有别的撤权信号」的平台用的，不要图省事又拿 `!refreshable`
+   * 顶上去。
+   */
+  tokenExpirySignalsDeath: boolean
   /** 为什么是这个数 / 为什么没有。下一个人改判据前先读这句。 */
   why: string
 }
@@ -88,24 +113,28 @@ export interface HeartbeatPolicy {
 export const HEARTBEAT_POLICY: Record<PlatformProvider, HeartbeatPolicy> = {
   [PLATFORM_PROVIDERS.MICROSOFT_MAIL]: {
     refreshable: true,
+    tokenExpirySignalsDeath: false,
     staleHours: 12,
     refreshScope: 'per_connection',
     why: '邮箱同步挂在 messenger-hourly 里（render.yaml `10 * * * *`），逐个邮箱遍历、每轮都会刷令牌；12 小时 = 连着 12 轮没通上话',
   },
   [PLATFORM_PROVIDERS.GOOGLE_GSC]: {
     refreshable: true,
+    tokenExpirySignalsDeath: false,
     staleHours: 48,
     refreshScope: 'one_per_client',
     why: 'google-data-pullback-daily 每天一次会刷令牌（render.yaml `0 17 * * *`），且每个客户只取最新那一条连接；给两轮余量，单日漏跑不报警',
   },
   [PLATFORM_PROVIDERS.GOOGLE_GA4]: {
     refreshable: true,
+    tokenExpirySignalsDeath: false,
     staleHours: 48,
     refreshScope: 'one_per_client',
     why: '同 google_gsc，同一个每日任务里刷，同样只取最新那一条',
   },
   [PLATFORM_PROVIDERS.GOOGLE_GBP]: {
     refreshable: true,
+    tokenExpirySignalsDeath: false,
     staleHours: null,
     // staleHours 为 null 时这个字段用不上，仍要填 —— 免得以后打开心跳时漏想一层。
     refreshScope: 'per_connection',
@@ -113,6 +142,7 @@ export const HEARTBEAT_POLICY: Record<PlatformProvider, HeartbeatPolicy> = {
   },
   [PLATFORM_PROVIDERS.GOOGLE_ADS]: {
     refreshable: true,
+    tokenExpirySignalsDeath: false,
     staleHours: null,
     // staleHours 为 null 时这个字段用不上，仍要填 —— 免得以后打开心跳时漏想一层。
     refreshScope: 'per_connection',
@@ -120,6 +150,7 @@ export const HEARTBEAT_POLICY: Record<PlatformProvider, HeartbeatPolicy> = {
   },
   [PLATFORM_PROVIDERS.GOOGLE_GTM]: {
     refreshable: true,
+    tokenExpirySignalsDeath: false,
     staleHours: null,
     // staleHours 为 null 时这个字段用不上，仍要填 —— 免得以后打开心跳时漏想一层。
     refreshScope: 'per_connection',
@@ -127,6 +158,11 @@ export const HEARTBEAT_POLICY: Record<PlatformProvider, HeartbeatPolicy> = {
   },
   [PLATFORM_PROVIDERS.META]: {
     refreshable: false,
+    // Page token 授权不撤就不过期；facebook/callback/route.ts 存的 60 天到期日
+    // 只是编给报表看的可读数字，运行时 token-selection.ts::loadStoredPageToken()
+    // 读令牌根本不看这一列。拿它当死亡信号 = 每 60 天造一条假的重连待办，连接
+    // 从没死过。真正失效只能看 status（见 BROKEN_STATUSES），不靠这一列。
+    tokenExpirySignalsDeath: false,
     staleHours: null,
     // staleHours 为 null 时这个字段用不上，仍要填 —— 免得以后打开心跳时漏想一层。
     refreshScope: 'per_connection',
@@ -134,10 +170,16 @@ export const HEARTBEAT_POLICY: Record<PlatformProvider, HeartbeatPolicy> = {
   },
   [PLATFORM_PROVIDERS.TIKTOK]: {
     refreshable: false,
+    // token-manager 确实没实现 TikTok 的刷新，但真实调用链
+    // tiktok/token.ts::getValidTikTokToken() 走的是 tiktok-oauth/client.ts 自己的
+    // refreshTokens()，每次真正要用之前才会去看、快过期就近自动换新。24 小时的
+    // access token 过期是设计如此的常态，不是故障 —— 拿它当死亡信号，等于每条
+    // TikTok 连接一天后、下次真正被用到之前都会被误报成要重连。
+    tokenExpirySignalsDeath: false,
     staleHours: null,
     // staleHours 为 null 时这个字段用不上，仍要填 —— 免得以后打开心跳时漏想一层。
     refreshScope: 'per_connection',
-    why: '同 meta，token-manager 里也还没有 TikTok 的刷新实现',
+    why: '同 meta，token-manager 里也还没有 TikTok 的刷新实现；但它有自己独立的刷新链路（见 tokenExpirySignalsDeath），不是真的没人管',
   },
 }
 
@@ -183,7 +225,11 @@ export interface ConnectionHealthRow {
    */
   scopes: string[] | null
   last_synced_at: string | null
-  /** 访问令牌的到期时间。**只有不能自动续期的平台**（Meta / TikTok）才有判断价值。 */
+  /**
+   * 访问令牌的到期时间。**只对 `tokenExpirySignalsDeath: true` 的平台才有判断
+   * 价值** —— 目前没有一个平台是（Meta 的是编出来的可读数字，TikTok 有自己
+   * 独立的自动续期链路），留着是给以后真的接入这种平台用的。
+   */
   token_expiry: string | null
   created_at: string
   /** 行最后一次被改动的时间。当成「断了多久」的**下界**用，不是断掉那一刻。 */
@@ -207,8 +253,9 @@ export type ConnectionFinding =
    */
   | { kind: 'broken'; row: ConnectionHealthRow; sinceHours: number | null }
   /**
-   * 长期令牌到期了（只对不能自动续期的平台成立）。跟 `broken` 分开，是因为
-   * 状态位还是绿的 —— 没有任何代码会去改它，这是唯一能提前看见它的判据。
+   * 长期令牌到期了（只对 `tokenExpirySignalsDeath: true` 的平台成立）。跟
+   * `broken` 分开，是因为状态位还是绿的 —— 没有任何代码会去改它，这是唯一能
+   * 提前看见它的判据。目前没有平台声明这个字段为 true，见该字段注释为什么。
    */
   | { kind: 'token_expired'; row: ConnectionHealthRow; expiredHours: number }
   /**
@@ -324,9 +371,10 @@ export function assessConnections(
 
     let live = inScope.filter((r) => r.status === CONNECTION_STATUS.ACTIVE)
 
-    // 不能自动续期的平台（Meta / TikTok）：令牌到期 = 真的死了，而状态位不会变。
-    // 能续期的平台跳过这条 —— 它们的令牌本来就长期处于"已过期待刷新"。
-    if (policy && !policy.refreshable) {
+    // 只对声明了「这一列是真死亡信号」的平台成立 —— 不是 `!refreshable` 就算数
+    // （token-manager 认不认是一回事，这个平台的真实调用链有没有自动续期是
+    // 另一回事，见 tokenExpirySignalsDeath 的注释）。目前没有平台声明为 true。
+    if (policy?.tokenExpirySignalsDeath) {
       const expired = live.filter((r) => (hoursSince(r.token_expiry, now) ?? -1) > 0)
       for (const row of expired) {
         findings.push({ kind: 'token_expired', row, expiredHours: hoursSince(row.token_expiry, now)! })

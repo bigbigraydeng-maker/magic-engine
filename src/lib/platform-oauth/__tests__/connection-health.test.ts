@@ -47,6 +47,7 @@ describe('每个平台都必须逐个表态，不许漏', () => {
     expect(policy.why.length).toBeGreaterThan(10)
     expect(['per_connection', 'one_per_client']).toContain(policy.refreshScope)
     expect(typeof policy.refreshable).toBe('boolean')
+    expect(typeof policy.tokenExpirySignalsDeath).toBe('boolean')
     if (policy.staleHours !== null) expect(policy.staleHours).toBeGreaterThan(0)
   })
 
@@ -241,14 +242,25 @@ describe('assessConnections · 心跳', () => {
 })
 
 describe('assessConnections · 长期令牌到期', () => {
-  it('Meta 令牌过期、状态还是绿的 → 报出来（唯一能提前看见它的判据）', () => {
-    const findings = assessConnections(
-      [meta({ id: 'm', token_expiry: '2026-09-20T00:00:00Z' })],
-      NOW,
-    )
-    expect(findings).toHaveLength(1)
-    expect(findings[0].kind).toBe('token_expired')
-    if (findings[0].kind === 'token_expired') expect(findings[0].expiredHours).toBeCloseTo(99, 0)
+  // 2026-09-24 P2 复盘：这道判据曾经按 `!refreshable` 一刀切,把 Meta 和 TikTok
+  // 都当成「过期=真的死了」。两个都是误报——Meta 的 60 天到期日是编出来给报表看
+  // 的可读数字,运行时压根不看它;TikTok 有自己独立的自动续期链路,24 小时的
+  // access token 过期是设计如此的常态。两者都改成 `tokenExpirySignalsDeath: false`,
+  // 这道判据目前对任何真实平台都不触发,留着是给以后接入真长期令牌的平台用的。
+  it('Meta 令牌"过期"、状态还是绿的 → 不报（到期日是编的,运行时不看它）', () => {
+    expect(
+      assessConnections([meta({ id: 'm', token_expiry: '2026-09-20T00:00:00Z' })], NOW),
+    ).toEqual([])
+  })
+
+  it('TikTok 令牌过 24 小时、状态还是绿的 → 不报（有自己独立的自动续期链路,不是死了）', () => {
+    const tiktok = row({
+      id: 't',
+      provider: PLATFORM_PROVIDERS.TIKTOK,
+      scopes: [],
+      token_expiry: '2026-09-23T00:00:00Z', // 27 小时前过期,TikTok access token 只活 24 小时,正常状态
+    })
+    expect(assessConnections([tiktok], NOW)).toEqual([])
   })
 
   it('🔴 谷歌/微软令牌过期是常态，绝不报 —— 下一次调用会自动换新的', () => {
