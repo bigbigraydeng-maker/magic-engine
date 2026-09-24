@@ -5,7 +5,13 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { countOutletGaps, isOutletGap, outletGapLabel } from '../outlet-tally'
+import {
+  ALREADY_SYNCED_REASON,
+  countOutletGaps,
+  isMailchimpSettled,
+  isOutletGap,
+  outletGapLabel,
+} from '../outlet-tally'
 
 describe('isOutletGap', () => {
   it('订阅成功不是问题', () => {
@@ -77,5 +83,69 @@ describe('countOutletGaps', () => {
     expect(countOutletGaps(undefined)).toBe(0)
     expect(countOutletGaps({})).toBe(0)
     expect(countOutletGaps({ 'failed:auth': 0 })).toBe(0)
+  })
+})
+
+describe('isMailchimpSettled', () => {
+  it('subscribed 算办完了', () => {
+    expect(isMailchimpSettled({ status: 'subscribed' })).toBe(true)
+  })
+
+  it('already_member 且标签 applied 算办完了', () => {
+    expect(isMailchimpSettled({ status: 'already_member', tagRepair: 'applied' })).toBe(true)
+  })
+
+  it('already_member 且标签 already_tagged 算办完了', () => {
+    expect(isMailchimpSettled({ status: 'already_member', tagRepair: 'already_tagged' })).toBe(true)
+  })
+
+  it('already_member 但标签打失败不算办完 —— 归因证据缺着，必须重跑', () => {
+    expect(isMailchimpSettled({ status: 'already_member', tagRepair: 'failed:http_429' })).toBe(false)
+  })
+
+  it('already_member 但历史行没有 tagRepair 不算办完', () => {
+    expect(isMailchimpSettled({ status: 'already_member' })).toBe(false)
+  })
+
+  it('already_member 但 tagRepair 是 not_attempted 不算办完 —— 「没试过」不等于「办完了」', () => {
+    expect(isMailchimpSettled({ status: 'already_member', tagRepair: 'not_attempted' })).toBe(false)
+  })
+
+  it('pending 不算办完 —— 回执没写完，重跑', () => {
+    expect(isMailchimpSettled({ status: 'pending' })).toBe(false)
+  })
+
+  it('skipped:no_audience_config 不算办完 —— 配置修好要能自愈', () => {
+    expect(isMailchimpSettled({ status: 'skipped', reason: 'no_audience_config' })).toBe(false)
+  })
+
+  it('skipped:no_email 不算办完', () => {
+    expect(isMailchimpSettled({ status: 'skipped', reason: 'no_email' })).toBe(false)
+  })
+
+  it('failed:auth 不算办完 —— 密钥修好要能自愈', () => {
+    expect(isMailchimpSettled({ status: 'failed', reason: 'auth' })).toBe(false)
+  })
+
+  it('failed:provider_5xx 不算办完', () => {
+    expect(isMailchimpSettled({ status: 'failed', reason: 'provider_5xx' })).toBe(false)
+  })
+
+  it('垃圾输入一律 false 且不抛', () => {
+    for (const raw of [null, undefined, 'subscribed', [], {}, 42]) {
+      expect(isMailchimpSettled(raw)).toBe(false)
+    }
+  })
+})
+
+describe('already_synced 是健康信号，不是故障', () => {
+  it('skipped:already_synced 不算问题 —— 稳态下日报不许多报一行', () => {
+    expect(isOutletGap(`skipped:${ALREADY_SYNCED_REASON}`)).toBe(false)
+  })
+
+  it('outletGapLabel 不给 already_synced 加条目 —— 它永远取不到，是死代码', () => {
+    expect(outletGapLabel(`skipped:${ALREADY_SYNCED_REASON}`)).toBe(
+      `邮件名单出口异常（skipped:${ALREADY_SYNCED_REASON}）`,
+    )
   })
 })

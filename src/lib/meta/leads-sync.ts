@@ -19,7 +19,8 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { authorizePageSync } from '@/lib/meta/page-sync-authorization'
 import { fetchFormLeads, fetchPageLeadForms } from '@/lib/meta/lead-forms'
-import { ingestMetaLead } from '@/lib/crm/meta-lead'
+import { ingestMetaLead, parseLeadAnswers } from '@/lib/crm/meta-lead'
+import { ALREADY_SYNCED_REASON, isMailchimpSettled } from '@/lib/mailchimp/outlet-tally'
 import type { SubscribeMemberResult } from '@/lib/mailchimp/client'
 import type { TagRepair } from '@/lib/mailchimp/tags'
 
@@ -121,6 +122,41 @@ export async function getLeadWatermark(clientId: string, now: Date = new Date())
   return since < floor ? floor : since
 }
 
+/**
+ * 这一批 lead 里，哪些上一轮已经办完了（触点里的 Mailchimp 回执已是终态）。
+ *
+ * **一次查询拿回整批**，不逐条查 —— 逐条查正是这次要修的那种浪费。
+ *
+ * 读失败返回空集合：判不出来就当都没办完，照常重跑。宁可多打一次，不可漏一次。
+ */
+export async function readSettledLeadIds(
+  clientId: string,
+  leadIds: string[],
+): Promise<Set<string>> {
+  const settled = new Set<string>()
+  if (leadIds.length === 0) return settled
+
+  const { data, error } = await supabaseAdmin
+    .from('contact_touchpoints')
+    .select('source_ref, metadata')
+    .eq('client_id', clientId)
+    .eq('source', 'meta_lead_form')
+    .in('source_ref', leadIds)
+
+  if (error || !data) return settled
+
+  for (const row of data as Array<{ source_ref?: unknown; metadata?: unknown }>) {
+    const ref = typeof row.source_ref === 'string' ? row.source_ref : ''
+    if (!ref) continue
+    const meta = row.metadata
+    if (typeof meta !== 'object' || meta === null) continue
+    if (isMailchimpSettled((meta as { mailchimp_result?: unknown }).mailchimp_result)) {
+      settled.add(ref)
+    }
+  }
+  return settled
+}
+
 /** 本地号码补哪个国码。跟 web-form-lead.ts 同一套判断。 */
 export function resolveDefaultCountry(client: {
   country: string | null
@@ -186,7 +222,26 @@ export async function syncClientMetaLeads(
       if (leadsRead.error) errors.push(`表单 ${form.formId}: ${leadsRead.error}`)
       leadsFetched += leadsRead.rows.length
 
+      const settled = await readSettledLeadIds(
+        client.id,
+        leadsRead.rows.map((row) => row.leadId),
+      )
+
       for (const lead of leadsRead.rows) {
+        // 上一轮已经办完的：零 provider 调用、零 metadata 覆盖，直接记账走人。
+        //
+        // 唯一例外 —— 本轮解析出**明确 opt-out** 的照常走完整流程。那一位会被写进
+        // 触点 metadata 的 `do_not_contact`，以后拦住这个人所有渠道的外发（合同
+        // 5426843158）；解析规则改宽之后，窗口内的老 lead 要还能被重新判一次。
+        if (settled.has(lead.leadId) && parseLeadAnswers(lead.answers).optOutEvidence === null) {
+          const key = `skipped:${ALREADY_SYNCED_REASON}`
+          mailchimp[key] = (mailchimp[key] ?? 0) + 1
+          // 它确实已经在 CRM 里，跟幂等命中同一口径算 ingested —— 这个数不能无声变样，
+          // PM 每天看的「今天进了几个人」靠它。
+          leadsIngested++
+          continue
+        }
+
         // ingestMetaLead 自己吞异常，这里的 try 是给「它之外还能炸的东西」兜底。
         const res = await ingestMetaLead({ clientId: client.id, defaultCountry, lead })
         // 出口结果先记账再分流 —— 无论这条 lead 后面算 ingested 还是 skipped，
