@@ -98,9 +98,24 @@ describe('readSheetValues', () => {
   })
 })
 
+/**
+ * 必须显式声明形参签名。`vi.fn(async () => ...)` 推断出来的 `mock.calls` 是
+ * 空元组 `[]`，按下标取 `calls[0][0]` 会被 TS 判成越界（TS2493）——
+ * 测试照样跑得过，但 type-check 是红的。
+ */
+type FetchMock = (url: string, init?: RequestInit) => Promise<Response>
+
+/**
+ * 同 `asFetch`，但收的是带签名的 mock。跟 `asFetch` 并存而不是改它 ——
+ * 改它会牵动这个文件里原有的一批测试，没必要。
+ */
+function asTypedFetch(fn: FetchMock): typeof fetch {
+  return fn as unknown as typeof fetch // 已核实：deps.fetcher 形参类型即 typeof fetch
+}
+
 describe('appendSheetValues', () => {
   function okAppend(updatedRows: number) {
-    return vi.fn(async () =>
+    return vi.fn<FetchMock>(async () =>
       new Response(JSON.stringify({ updates: { updatedRows } }), { status: 200 }),
     )
   }
@@ -108,7 +123,7 @@ describe('appendSheetValues', () => {
   it('走 values:append + INSERT_ROWS —— 只在末尾插行，不碰任何已有单元格', async () => {
     getValidAccessTokenMock.mockResolvedValue('tok')
     const fetcher = okAppend(1)
-    await appendSheetValues('c1', 'sheet-1', 'Sheet1!A:ZZ', [['a', 'b']], { fetcher: asFetch(fetcher) })
+    await appendSheetValues('c1', 'sheet-1', 'Sheet1!A:ZZ', [['a', 'b']], { fetcher: asTypedFetch(fetcher) })
 
     const url = String(fetcher.mock.calls[0][0])
     expect(url).toContain(':append')
@@ -122,32 +137,32 @@ describe('appendSheetValues', () => {
     getValidAccessTokenMock.mockResolvedValue('tok')
     const fetcher = okAppend(1)
     await appendSheetValues('c1', 's', 'T!A:ZZ', [['0210140952', '+64211914575']], {
-      fetcher: asFetch(fetcher),
+      fetcher: asTypedFetch(fetcher),
     })
 
     expect(String(fetcher.mock.calls[0][0])).toContain('valueInputOption=RAW')
-    const body = JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))
+    const body = JSON.parse(String(fetcher.mock.calls[0][1]?.body))
     expect(body.values).toEqual([['0210140952', '+64211914575']])
   })
 
   it('没有行就不发请求', async () => {
     getValidAccessTokenMock.mockResolvedValue('tok')
     const fetcher = okAppend(0)
-    expect(await appendSheetValues('c1', 's', 'T!A:ZZ', [], { fetcher: asFetch(fetcher) })).toBe(0)
+    expect(await appendSheetValues('c1', 's', 'T!A:ZZ', [], { fetcher: asTypedFetch(fetcher) })).toBe(0)
     expect(fetcher).not.toHaveBeenCalled()
   })
 
   it('报的是 Sheets 认下的行数，不是我们打算写的行数', async () => {
     getValidAccessTokenMock.mockResolvedValue('tok')
     const fetcher = okAppend(1)
-    const n = await appendSheetValues('c1', 's', 'T!A:ZZ', [['a'], ['b']], { fetcher: asFetch(fetcher) })
+    const n = await appendSheetValues('c1', 's', 'T!A:ZZ', [['a'], ['b']], { fetcher: asTypedFetch(fetcher) })
     expect(n).toBe(1)
   })
 
   it('403（只授过只读）原样抛出去，不吞 —— 调用方要拿它下发人工待办', async () => {
     getValidAccessTokenMock.mockResolvedValue('tok')
-    const fetcher = vi.fn(async () => new Response('insufficient authentication scopes', { status: 403 }))
-    const err = await appendSheetValues('c1', 's', 'T!A:ZZ', [['a']], { fetcher: asFetch(fetcher) }).catch((e) => e)
+    const fetcher = vi.fn<FetchMock>(async () => new Response('insufficient authentication scopes', { status: 403 }))
+    const err = await appendSheetValues('c1', 's', 'T!A:ZZ', [['a']], { fetcher: asTypedFetch(fetcher) }).catch((e) => e)
     expect(err).toBeInstanceOf(GoogleSheetsError)
     expect((err as GoogleSheetsError).httpStatus).toBe(403)
   })
@@ -163,15 +178,15 @@ describe('appendSheetValues', () => {
 describe('readSheetValues render 选项', () => {
   it('默认还是 UNFORMATTED（老调用方行为不变）', async () => {
     getValidAccessTokenMock.mockResolvedValue('tok')
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({ values: [] }), { status: 200 }))
-    await readSheetValues('c1', 's', 'T!A:B', { fetcher: asFetch(fetcher) })
+    const fetcher = vi.fn<FetchMock>(async () => new Response(JSON.stringify({ values: [] }), { status: 200 }))
+    await readSheetValues('c1', 's', 'T!A:B', { fetcher: asTypedFetch(fetcher) })
     expect(String(fetcher.mock.calls[0][0])).toContain('valueRenderOption=UNFORMATTED_VALUE')
   })
 
   it('要判重就得按人看到的文本读 —— formatted', async () => {
     getValidAccessTokenMock.mockResolvedValue('tok')
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({ values: [] }), { status: 200 }))
-    await readSheetValues('c1', 's', 'T!A:B', { fetcher: asFetch(fetcher), render: 'formatted' })
+    const fetcher = vi.fn<FetchMock>(async () => new Response(JSON.stringify({ values: [] }), { status: 200 }))
+    await readSheetValues('c1', 's', 'T!A:B', { fetcher: asTypedFetch(fetcher), render: 'formatted' })
     expect(String(fetcher.mock.calls[0][0])).toContain('valueRenderOption=FORMATTED_VALUE')
   })
 })
