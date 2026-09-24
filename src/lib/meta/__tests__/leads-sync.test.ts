@@ -35,17 +35,26 @@ const CLIENT = {
 
 const mock = <T>(fn: T) => fn as unknown as ReturnType<typeof vi.fn>
 
-/** 已办完批量查这一条链上，实际传给 `.eq()` / `.in()` 的参数。每次 `mockDb` 重置。 */
-let settledQueryCalls: Array<{ filters: Array<[string, unknown]>; ids: string[] }> = []
+/**
+ * 已办完批量查这一条链上，实际传给 `from()` / `select()` / `.eq()` / `.in()` 的参数。
+ * 每次 `mockDb` 重置。
+ *
+ * **连表名和字段一起记**：假件如果只看链条形状不看实参，把表名写错、字段写错、
+ * 或者把 `.eq('client_id', …)` 整行删掉，所有用例照样全绿，而生产上 PostgREST
+ * 会报错 → fail-open → 这道闸永不触发，悄悄退回每轮重打。
+ */
+let settledQueryCalls: Array<{
+  table: string
+  columns: string
+  filters: Array<[string, unknown]>
+  ids: string[]
+}> = []
 
 /**
  * `supabaseAdmin.from()` 的假件，同时服务两条链：
  *   · 水位线查询   `.select().eq().eq().order().limit().maybeSingle()`
- *   · 已办完批量查 `.select().eq().eq().in()`
- *
- * 已办完那条链会把 `.eq()` / `.in()` 的**实参**记进 `settledQueryCalls` ——
- * 跨客户红线（`.eq('client_id', …)`）必须在测试层有结构性保证，
- * 不然那一行被删掉，所有用例照样全绿。
+ *   · 已办完批量查 `.select().eq().eq().in()`（按批查，一批 200 条；
+ *     不走分页 —— 触点唯一键保证一个 id 最多一行，一批最多 200 行，够不着 1000 行硬顶）
  */
 function mockDb(
   opts: {
@@ -56,8 +65,8 @@ function mockDb(
 ) {
   const { newest = null, settled = [], settledError = false } = opts
   settledQueryCalls = []
-  ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-    select: () => {
+  ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => ({
+    select: (columns: string) => {
       const filters: Array<[string, unknown]> = []
       const chain = {
         eq: (col: string, val: unknown) => {
@@ -73,7 +82,7 @@ function mockDb(
           }
         },
         in: (_col: string, ids: string[]) => {
-          settledQueryCalls.push({ filters: [...filters], ids: [...ids] })
+          settledQueryCalls.push({ table, columns, filters: [...filters], ids: [...ids] })
           const hit = settled.filter((row) => ids.includes(row.source_ref))
           return Promise.resolve(
             settledError
@@ -435,6 +444,9 @@ describe('已办完的线索不再重复打 Mailchimp', () => {
     await syncClientMetaLeads(CLIENT)
 
     expect(mock(ingestMetaLead)).toHaveBeenCalledTimes(1)
+    // 实参也要钉：传成 `lead` 而不是 `lead.answers` 的话，生产上 opt-out 例外
+    // 整个失效，而所有用例照样全绿。
+    expect(mock(parseLeadAnswers)).toHaveBeenCalledWith(lead('l1').answers)
   })
 
   it('读已办完记录报错 → 全部照常重跑（宁可多打一次）', async () => {
@@ -491,6 +503,8 @@ describe('已办完的线索不再重复打 Mailchimp', () => {
     await syncClientMetaLeads(CLIENT)
 
     expect(settledQueryCalls).toHaveLength(1)
+    expect(settledQueryCalls[0].table).toBe('contact_touchpoints')
+    expect(settledQueryCalls[0].columns).toBe('source_ref, metadata')
     expect(settledQueryCalls[0].filters).toEqual([
       ['client_id', CLIENT.id],
       ['source', 'meta_lead_form'],

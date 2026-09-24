@@ -51,6 +51,14 @@ export interface MetaLeadsSyncResult {
   /** 单条出错跳过的条数。 */
   failed: number
   /**
+   * 「这条上轮办完没有」这个查询失败了几批。
+   *
+   * **不混进 `mailchimp` tally** —— 那是出口结果，混进去会被日报和今日待办当成
+   * 出口故障误报。这个数只说「去重闸这轮有没有瞎掉」：大于 0 时闸退化成改动前的
+   * 每轮重打，不丢数据、但白花 provider 调用，而且**看起来跟正常运行一模一样**。
+   */
+  settledLookupFailures: number
+  /**
    * Mailchimp 出口这一轮的结果分布，key = `subscribed` / `already_member` /
    * `skipped:<reason>` / `failed:<reason>`，value = 条数。
    *
@@ -135,18 +143,29 @@ const SETTLED_LOOKUP_BATCH = 200
 /**
  * 这一批 lead 里，哪些上一轮已经办完了（触点里的 Mailchimp 回执已是终态）。
  *
- * **批量查，不逐条查** —— 逐条查正是这次要修的那种浪费。
+ * **按批查，不逐条查** —— 逐条查正是这次要修的那种浪费。
  *
- * 读失败返回空集合：判不出来就当都没办完，照常重跑。宁可多打一次，不可漏一次。
- * 但**必须出声** —— 这道闸静默失效的样子跟它正常工作一模一样（都是「照常重跑」），
- * 不喊一嗓子就没有任何人会发现。
+ * 为什么切批而不是分页读全量（合并 07267cf1 时的取舍）：单表单最多能回补 2000 条
+ * （`lead-forms.ts` 的 `MAX_PAGES` × `limit`），一次性塞进 `.in()` 有两个坑 ——
+ * 2000 个 17 位 id 拼出的 query string 约 34KB 会被网关按 414 打回，以及 PostgREST
+ * 单次查询 1000 行硬顶会**静默截断**。切成每批 `SETTLED_LOOKUP_BATCH` 条之后：
+ *   · query string 永远在 4KB 量级，414 打不到；
+ *   · 触点表的唯一键是 `(client_id, source, source_ref)`，一个 id 最多命中一行，
+ *     所以一批最多 200 行 —— **1000 行硬顶在结构上够不着**，不需要再套分页。
+ * 两个坑一起堵掉，比只堵后一个更严。
+ *
+ * 读失败当没办完，照常重跑 —— 宁可多打一次，不可漏一次。但**必须出声**：这道闸
+ * 静默失效的样子跟它正常工作一模一样（都是「照常重跑」），不喊一嗓子没有任何人
+ * 会发现。所以除了 `console.warn`（只进 Render 日志，没人看），还把「这轮有几批
+ * 没读成」一路带回 `MetaLeadsSyncResult`，进 `cron_run_logs.summary`。
  */
 export async function readSettledLeadIds(
   clientId: string,
   leadIds: string[],
-): Promise<Set<string>> {
+): Promise<{ settled: Set<string>; lookupFailures: number }> {
   const settled = new Set<string>()
-  if (leadIds.length === 0) return settled
+  let failures = 0
+  if (leadIds.length === 0) return { settled, lookupFailures: failures }
 
   for (let i = 0; i < leadIds.length; i += SETTLED_LOOKUP_BATCH) {
     const batch = leadIds.slice(i, i + SETTLED_LOOKUP_BATCH)
@@ -154,6 +173,10 @@ export async function readSettledLeadIds(
       .from('contact_touchpoints')
       .select('source_ref, metadata')
       .eq('client_id', clientId)
+      // 用 `source` 不是 `channel`：`(client_id, source, source_ref)` 才是触点的
+      // 幂等唯一键（`meta-lead.ts` 的 Phase A upsert 用的就是它），`channel` 只是
+      // 业务分类。上面 `getLeadWatermark` 查 `channel` 是另一回事，两处都对，
+      // 但**别顺手统一**成同一列 —— 统一哪一边都会炸掉另一边。
       .eq('source', 'meta_lead_form')
       .in('source_ref', batch)
 
@@ -161,6 +184,7 @@ export async function readSettledLeadIds(
       console.warn(
         `[meta-leads] client ${clientId} 读已办完回执失败，这批 ${batch.length} 条全部重跑: ${error?.message ?? 'no data'}`,
       )
+      failures++
       continue
     }
 
@@ -174,7 +198,7 @@ export async function readSettledLeadIds(
       }
     }
   }
-  return settled
+  return { settled, lookupFailures: failures }
 }
 
 /** 本地号码补哪个国码。跟 web-form-lead.ts 同一套判断。 */
@@ -198,6 +222,7 @@ export async function syncClientMetaLeads(
     newContacts: 0,
     skippedNoIdentity: 0,
     failed: 0,
+    settledLookupFailures: 0,
     mailchimp: {} as Record<string, number>,
   }
 
@@ -233,6 +258,7 @@ export async function syncClientMetaLeads(
   let newContacts = 0
   let skippedNoIdentity = 0
   let failed = 0
+  let settledLookupFailures = 0
   const mailchimp: Record<string, number> = {}
 
   for (const form of formsRead.rows) {
@@ -242,10 +268,12 @@ export async function syncClientMetaLeads(
       if (leadsRead.error) errors.push(`表单 ${form.formId}: ${leadsRead.error}`)
       leadsFetched += leadsRead.rows.length
 
-      const settled = await readSettledLeadIds(
+      const settledRead = await readSettledLeadIds(
         client.id,
         leadsRead.rows.map((row) => row.leadId),
       )
+      const settled = settledRead.settled
+      settledLookupFailures += settledRead.lookupFailures
 
       for (const lead of leadsRead.rows) {
         // 上一轮已经办完的：零 provider 调用、零 metadata 覆盖，直接记账走人。
@@ -296,6 +324,7 @@ export async function syncClientMetaLeads(
     newContacts,
     skippedNoIdentity,
     failed,
+    settledLookupFailures,
     mailchimp,
     ...(errors.length ? { error: errors.join(' | ') } : {}),
   }

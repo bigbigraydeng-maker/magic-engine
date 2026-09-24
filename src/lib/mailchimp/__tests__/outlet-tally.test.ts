@@ -143,9 +143,14 @@ describe('already_synced 是健康信号，不是故障', () => {
     expect(isOutletGap(`skipped:${ALREADY_SYNCED_REASON}`)).toBe(false)
   })
 
-  it('outletGapLabel 不给 already_synced 加条目 —— 它永远取不到，是死代码', () => {
-    expect(outletGapLabel(`skipped:${ALREADY_SYNCED_REASON}`)).toBe(
-      `邮件名单出口异常（skipped:${ALREADY_SYNCED_REASON}）`,
-    )
+  /**
+   * 原来这条断言把「邮件名单出口异常（skipped:already_synced）」这句话**固化**了下来 ——
+   * 等于给一个健康信号盖章成「异常」的文案（魏征实施阶段复审）。真正该钉的是：
+   * `already_synced` 不进 `OUTLET_GAP_LABELS`，因为 `isOutletGap` 判 false 之后
+   * 那个 label 永远取不到，写进去就是死代码、还会误导下一个读这个文件的人。
+   */
+  it('already_synced 不在人话对照表里 —— 它不是 gap，label 永远取不到', () => {
+    expect(isOutletGap(`skipped:${ALREADY_SYNCED_REASON}`)).toBe(false)
+    expect(countOutletGaps({ [`skipped:${ALREADY_SYNCED_REASON}`]: 13 })).toBe(0)
   })
 })
