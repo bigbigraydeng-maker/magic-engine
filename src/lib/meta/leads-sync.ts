@@ -124,12 +124,28 @@ export async function getLeadWatermark(clientId: string, now: Date = new Date())
 }
 
 /**
+ * `.in('source_ref', leadIds)` 本身也有请求体积上限 —— 跟 `knowledge/mining.ts`
+ * 的 `fetchMessagesSince` 撞的是同一堵墙（2026-09-15，issue #1760，722 个 UUID
+ * 就能把 PostgREST/反代的请求体积顶爆，返回 400）。200 是同一个经验安全值
+ * （UUID 36 字符 + 逗号分隔，200 个约 7.4KB），不是精确算出来的边界。
+ */
+const LEAD_ID_CHUNK_SIZE = 200
+
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = []
+  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size))
+  return chunks
+}
+
+/**
  * 这一批 lead 里，哪些上一轮已经办完了（触点里的 Mailchimp 回执已是终态）。
  *
- * **分页拿回整批**，不逐条查 —— 逐条查正是这次要修的那种浪费。`fetchFormLeads`
- * 单表单最多能回补 2000 条，回看窗口撞上高流量客户时命中 PostgREST 单次查询
- * 1000 行硬顶会静默截断（见 `supabase-paginate.ts`）：漏查的那批老 lead 就会
- * 被判成「没办完」，重新打一轮 Mailchimp、覆盖回执，去重直接失效。
+ * **分批 + 分页拿回整批**，不逐条查 —— 逐条查正是这次要修的那种浪费。先按
+ * `LEAD_ID_CHUNK_SIZE` 把 `leadIds` 切开（回看窗口 + 首次回补单表单最多能有
+ * 2000 条，整批塞进一个 `.in()` 会撞请求体积上限），每一批各自再分页翻到底
+ * ——`fetchFormLeads` 单表单最多能回补 2000 条，命中 PostgREST 单次查询 1000
+ * 行硬顶会静默截断（见 `supabase-paginate.ts`）：漏查的那批老 lead 就会被判成
+ * 「没办完」，重新打一轮 Mailchimp、覆盖回执，去重直接失效。
  *
  * 读失败返回空集合：判不出来就当都没办完，照常重跑。宁可多打一次，不可漏一次。
  */
@@ -142,16 +158,21 @@ export async function readSettledLeadIds(
 
   let rows: Array<{ source_ref?: unknown; metadata?: unknown }>
   try {
-    rows = await fetchAll<{ source_ref?: unknown; metadata?: unknown }>((from, to) =>
-      supabaseAdmin
-        .from('contact_touchpoints')
-        .select('source_ref, metadata')
-        .eq('client_id', clientId)
-        .eq('source', 'meta_lead_form')
-        .in('source_ref', leadIds)
-        .order('source_ref', { ascending: true })
-        .range(from, to),
+    const chunks = await Promise.all(
+      chunkArray(leadIds, LEAD_ID_CHUNK_SIZE).map((idChunk) =>
+        fetchAll<{ source_ref?: unknown; metadata?: unknown }>((from, to) =>
+          supabaseAdmin
+            .from('contact_touchpoints')
+            .select('source_ref, metadata')
+            .eq('client_id', clientId)
+            .eq('source', 'meta_lead_form')
+            .in('source_ref', idChunk)
+            .order('source_ref', { ascending: true })
+            .range(from, to),
+        ),
+      ),
     )
+    rows = chunks.flat()
   } catch {
     return settled
   }
