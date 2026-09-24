@@ -60,6 +60,7 @@ import { resolveMetaTokenDetailed, ownsKey, loadTokenOwnerPeers, type TokenOwner
 import { findSharedAdAccounts, getClientAdAccountIds } from '@/lib/meta/client-ad-accounts'
 import { hasVideoColumns, syncAdDailyInsights, syncAdsetDailyInsights, syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
 import { buildGrowthState } from '@/lib/ads-strategy/agents/patrol'
+import { reconcileAutonomyMode } from '@/lib/ads-strategy/autonomy/notify'
 import { resolveClientEvaluationDate } from '@/lib/ads-strategy/account-timezone'
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
 import { sendAdHealthDigest } from '@/lib/ads-strategy/digest'
@@ -108,6 +109,8 @@ interface ClientResult {
   ad_diagnostics?: { success: boolean; hits: number; not_comparable: number; excluded: number; digest_decision?: string; digest_sent?: boolean; recipients_dropped?: number; error?: string }
   /** 卫青巡察：问题 + 机会 + 目标节奏 → ads_growth_states 一行（spec 2026-09-24 §4）。 */
   ads_growth_state?: { success: boolean; date?: string; problems?: number; opportunities?: number; completeness?: string; error?: string }
+  /** WP3.1a 每日 reconcile：给同步 worker 发一次叫醒铃（同一幂等 id，Inngest 24h 去重）。best-effort，不进 failed。 */
+  autonomy_sync?: { sent: boolean; events: number; error?: string }
   /**
    * 2026-09-13: `ad_daily`/`ad_level` above stay the PRIMARY account's result
    * (unchanged shape, unchanged tallying). Any additional registered accounts
@@ -502,6 +505,14 @@ export async function GET(req: NextRequest) {
               })),
             ])
           }
+        }
+
+        // WP3.1a 每日 reconcile（spec 2026-09-25 §4.4）：不只靠 PATCH 的事件，每天对账一次，
+        // 把 autonomy_mode 的意向同步进 Kernel 策略表。只对真有配置行的客户发；失败不进 failed。
+        if (adConfigSource === 'row') {
+          result.autonomy_sync = await reconcileAutonomyMode(supabaseAdmin, client.client_id).catch(
+            (e: unknown) => ({ sent: false, events: 0, error: e instanceof Error ? e.message : String(e) }),
+          )
         }
       } else {
         // Client has a Meta ad account but no usable token — surface it as a
