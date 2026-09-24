@@ -5,6 +5,23 @@
 
 ---
 
+### 2026-09-24（AI 可见度周快照聚合：失败探测不再算进提及率分母）[PR #1932]
+
+同一类 bug 的快照侧修复。`aggregateSnapshot()` 以前拉本周全部 `ai_visibility_runs` 算提及率，
+失败行（`error_message` 有值）混入分母，导致客户 AI 可见度分数被系统性压低（CTS 9-14 那周：落库 23.3%，真值 50.8%）。
+
+- 新增 `run-conclusive.ts`：共享判据「两个错误列都是 null 才算测成了」，fail-closed 设计
+- `orchestrator.ts`：用 `partitionConclusiveRuns` 过滤后再算 mention_rate / avg_rank / engine 覆盖
+- `parser.ts`：短响应（<30 字符）从静默返回空结果改成 throw，让错误列有值
+- `weekly-fanout.ts`：receipt 带 `snapshot_skipped_reason`，全失败时 status='no_data' 而不是假的 'completed'
+- Dashboard 页面统一用 `isRunConclusive` 替换原来的 `!r.error_message`（Codex 辅助修复 EngineComparison + ModelStats）
+- 用 `fetchAll` 分页替代单次查询，绕过 PostgREST 1000 行上限
+- 19 个新测试 + 回归测试，build 通过，1628 测试通过
+
+⚠️ collector 侧（`ai-visibility-collector.ts` 的 `mentions_count === 0` 不检查是否测成）未在本 PR 范围内。
+
+---
+
 ### 2026-09-23（AI 可见度探测失败被当成「零提及」发给客户：数据结构分离 + 回执 finding + 过度矫正守卫）
 
 OpenAI 9-20 余额耗尽后，诊断里的 AI 探测全部 429 失败，系统把"没测到"写成了"AI 里一次都没提到你的品牌"
