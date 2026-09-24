@@ -134,9 +134,15 @@ export async function getLeadWatermark(clientId: string, now: Date = new Date())
  * 一次 `.in()` 最多塞多少个 lead id。
  *
  * 单个表单最多能返回 2000 条 lead（`lead-forms.ts` 的 `MAX_PAGES` × `limit`）。
- * 2000 个 17 位 id 拼出来的 query string 约 34KB，会被网关按 414 打回；
- * PostgREST 不分页还有 1000 行默认上限会**静默截断**。两种都只会降级成
- * 「这一批全部重跑」（不会算错数），但那等于这个优化悄悄失效 —— 所以切批。
+ * 整批塞进一个 `.in()` 会撞请求体积上限 —— **这堵墙本仓已经撞过一次**：
+ * `knowledge/mining.ts:655-667`，2026-09-15 issue #1760，722 个 UUID 拼出的
+ * querystring 就把 PostgREST/反代顶爆返回 400。200 沿用那次验证过的经验安全值
+ * （不是精确算出来的边界），保持两处一致，将来要调一起调。
+ *
+ * 切到 200 之后顺带把另一个坑也堵死：触点表唯一键是
+ * `(client_id, source, source_ref)`，一个 id 最多命中一行 → 一批最多 200 行，
+ * PostgREST 那个 1000 行默认上限**在结构上够不着**，所以这里不需要再套分页
+ * （合并机器人 07267cf1 / a2860d16 时的取舍，见那两条提交）。
  */
 const SETTLED_LOOKUP_BATCH = 200
 
