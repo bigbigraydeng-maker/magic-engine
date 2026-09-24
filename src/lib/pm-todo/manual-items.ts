@@ -65,6 +65,7 @@ import {
 } from './platform-candidate-reviews'
 import { CLIENT_DOC_MANUAL_TASKS, type ClientDocManualTask } from './client-doc-manual-tasks'
 import { pushPlaybookStalenessItems } from './playbook-staleness-items'
+import { pushPlatformConnectionItems } from './platform-connection-items'
 
 export async function loadManualItems(
   supabase: SupabaseClient,
@@ -96,6 +97,10 @@ export async function loadManualItems(
   })
   // 按时没跑 / 查不出跑没跑 —— PM 2026-08-03 要求「不能完成需要有报错」
   await pushCronHealthItems(supabase, items, now)
+  // 外部平台的授权断了 —— 跟上面几条一样属于基础设施检查，跟「系统里有几个客户」
+  // 无关，所以放在客户名单那条提前返回之前。2026-09-24：CTS 邮箱断了 9 天没人知道，
+  // 全站没有任何一条路会把它端出来（模块自己会兜底，不抛给这里）。
+  await pushPlatformConnectionItems(supabase, items, now)
   // 平台候选到了复查日期 —— 不落库、不查表，纯本地日期判断
   pushPlatformCandidateReviewItems(items, now)
   // 客户方案文档里写的一次性人工动作 —— 同样不落库、纯本地日期判断，过期自动消失

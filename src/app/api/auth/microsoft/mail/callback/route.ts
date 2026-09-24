@@ -119,6 +119,11 @@ export async function GET(req: NextRequest) {
       accountId: address,
       displayName: address,
       scopes: [...MICROSOFT_MAIL_SCOPES],
+      // 刚刚用授权码换到令牌、又用它成功读出了邮箱地址 —— 这就是一次货真价实的
+      // 「跟对方通上话」，必须盖上时间戳。不盖的话，重连之后心跳仍停在断线那天，
+      // 断线监控（platform-oauth/connection-health.ts）会在人已经修好之后继续
+      // 报警，直到下一轮定时刷新为止。
+      lastSyncedAt: new Date(),
     })
   } catch (err) {
     return back(clientId, {

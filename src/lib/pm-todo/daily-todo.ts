@@ -83,6 +83,13 @@ const DEV_OWNED_KINDS: ManualItemKind[] = [
   // 「这句话要不要改」是技术判断，不是 PM 该做的业务决策，how 字段同样是
   // 「回我一句我去查」的话术。见 playbook-staleness-items.ts。
   'playbook_reference_stale',
+  // 「这个平台所有客户一起没了心跳」→ how 写的是「回我一句我去查」。
+  // 全部一起停说明是我们这边的取数任务停了，PM 去重连一百次也不会好。
+  // 🔴 注意：单条断线（platform_connection_broken / _silent / _scope_gap）
+  //    **不在这里** —— 那几条只有人能去点一次同意页，必须留在动手栏。
+  'platform_connection_pipeline_down',
+  // 「授权体检自己读不出来了」→ 同上，是我们这边的欠账。
+  'platform_connection_check_failed',
 ]
 
 /** FDE focus clients: CTS + Oztop. */

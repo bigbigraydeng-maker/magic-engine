@@ -16,6 +16,7 @@ import type { BindingRequestItemKind } from './binding-request-items'
 import type { PageBindingItemKind } from './page-binding-items'
 import type { CommentScopeTodoKind } from './comment-scope-items'
 import type { LeadSheetItemKind } from './lead-sheet-items'
+import type { PlatformConnectionItemKind } from './platform-connection-items'
 
 /**
  * 这些条目**链接坏了也照样下发**。
@@ -145,6 +146,11 @@ export type ManualItemKind =
   | 'conversation_health_alert'
   /** 经验手册（Claude 持久记忆，不在仓库）里点名的函数/路径/表名疑似过期，每周巡检自动发现 */
   | 'playbook_reference_stale'
+  /**
+   * 外部平台的授权断了 / 没了心跳 / 权限清单不够用（2026-09-24 CTS 邮箱断 9 天）。
+   * 只有人能重新走一次同意页，所以必须进人工车道，不许只躺在 error_message 里。
+   */
+  | PlatformConnectionItemKind
 
 export interface ManualItem {
   kind: ManualItemKind
