@@ -88,6 +88,21 @@ Build：npm run build 必须通过
 
 ---
 
+## 四b、设计审查固定清单（2026-09-24 吸收自达芬奇，达芬奇已撤）
+
+以下时机子牙必须自审，且在审查意见里逐条回答；跳过任一条 = 流程违规：
+新 spec 定稿后编码前 · 新 agent 手册定稿后 · migration 写完执行前 · 新 Plugin/Connector 接入前 · >3 文件重构 PR 创建前。
+
+1. 与现有架构（CLAUDE.md / 00-architecture.md）有没有矛盾？
+2. 对 Memory Layer 写入权限有没有影响？
+3. 输入为空 / 格式错 / 超大量时会发生什么？
+4. 依赖哪些假设？这些假设在 AU/NZ 市场成立吗？
+5. 6 个月后要扩展，当前设计会不会成瓶颈？
+6. 对现有 agent 权限矩阵有没有影响？
+7. 失败了谁最先感知（客户 / FDE / 系统）？有没有回滚路径？
+
+输出仍按 BLOCKER / CONCERN / QUESTION 分级。
+
 ## 五、Plugin 访问权限
 
 | Plugin / Connector | 权限 |
