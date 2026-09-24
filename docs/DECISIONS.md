@@ -7,6 +7,19 @@
 
 ---
 
+## 2026-09-25 · CRM 升级为传统列表模式 + 成交事实自动回流；解除 7/28 开发 hold；GoHighLevel 方向搁置
+
+**决策**（PM 2026-09-25）：升级 ME 自己的 CRM——放弃"系统挑今天该联系谁"的卡片模式，回到员工会用的传统列表/表格模式；同时让机器把已在 ME 里的成交证据（info@ 邮件、Messenger、Google 表备注）翻成阶段与成交记录。只出方案，代码由 DeepSeek 分轮写。方案：[docs/specs/2026-09-25-crm-list-mode-upgrade-v1.md](./specs/2026-09-25-crm-list-mode-upgrade-v1.md)。
+
+**改口的旧决定**：
+- 2026-07-28「CRM 工作台先不要开发 until 我同意」→ **解除**（v1 阶段模型仍 LOCKED，不改语义）
+- 2026-09-09「CTS CRM = GoHighLevel」→ **搁置**（PM 未明说作废；ME 自建先跑，GoHighLevel 接入不推进）
+- 2026-09-24「线索一律写老表、FB 默认格式」→ **沿用**：老表继续是落地点与备份，ME 只读不改
+
+**为什么**：员工至今在 Google 表上工作、不在 ME 上；系统里 CTS 只记到 5 单成交而 Best of China 已招满；`me_sale_outcomes` purchase = 0 → 销售目标进度永远"未判"，广告自治冲不了目标。问题不是 CRM 功能不够，是"员工不用 + 成交不回流"，卡片模式两个都没解决。
+
+**影响什么**：`/dashboard/clients/[id]/crm` 主视图重做；`GET /crm/contacts` 加服务端分页/排序/筛选；新增成交识别器与备注增量读取；今日待办新增 `crm_stage_suggestion`。碰 CRM 的窗口先读方案，别再推 GoHighLevel 接入。
+
 ## 2026-09-21 · Campaign 作为所有增长类营销活动的唯一组织单元
 
 **决策**：ME 所有面向增长的营销执行，统一以 **Campaign** 为组织单元，不再允许"散单内容"并行运转。原 `content_posts` 直写路线、`social_plans` 独立写入路线，全部归并到 Campaign 之下。
