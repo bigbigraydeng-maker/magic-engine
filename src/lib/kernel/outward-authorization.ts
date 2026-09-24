@@ -14,11 +14,64 @@
  *    拆掉任意一层，另一层仍然拦得住，且各有只有它能满足的测试。
  */
 
-import type { ActionDefinition } from './types'
+import type { ActionDefinition, OutwardApproval } from './types'
 
 /** 有限、非负的真实金额。NaN / ±Infinity / 负数 / 非数字一律不算。 */
 function isRealCeiling(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
+/** 信封允许的最大单次预算变动比例。跟 Meta 护栏的 ±20% 对齐，不许声明得更宽。 */
+const MAX_ALLOWED_BUDGET_DELTA_RATIO = 0.2
+/** 同一单位两次变动之间的最小间隔。低于这个数会反复重置 Meta 学习期。 */
+const MIN_ALLOWED_HOURS_SINCE_LAST_CHANGE = 72
+
+/**
+ * 审批声明本身完不完整合法。
+ *
+ * 🔴 四个布尔项在类型上已经写死成字面量 `true`，这里**仍然**逐项运行时再查一遍：
+ *    类型只在编译期管得住本仓库的代码，管不住 `as` 强转、`JSON.parse` 出来的东西、
+ *    或者以后有人把声明挪到库外。放行对外副作用这件事不靠「应该不会发生」。
+ */
+function approvalBlockReason(approval: OutwardApproval | undefined): string | null {
+  if (!approval || typeof approval !== 'object') {
+    return '对外授权声明必须写明要不要人点头（approval: human_only 或 bounded）'
+  }
+
+  if (approval.mode === 'human_only') return null
+
+  if (approval.mode !== 'bounded') {
+    return `对外授权声明的 approval.mode 只能是 human_only 或 bounded，收到「${String((approval as { mode?: unknown }).mode)}」`
+  }
+
+  const e = approval.envelope
+  if (!e || typeof e !== 'object') {
+    return 'approval.mode = bounded 必须同时给出完整的自治信封（envelope）'
+  }
+
+  if (!(typeof e.maxBudgetDeltaRatio === 'number' && Number.isFinite(e.maxBudgetDeltaRatio))
+      || e.maxBudgetDeltaRatio <= 0
+      || e.maxBudgetDeltaRatio > MAX_ALLOWED_BUDGET_DELTA_RATIO) {
+    return `信封的 maxBudgetDeltaRatio 必须在 (0, ${MAX_ALLOWED_BUDGET_DELTA_RATIO}] 之间，收到「${String(e.maxBudgetDeltaRatio)}」`
+  }
+  if (e.respectDailyCapCents !== true) {
+    return '信封的 respectDailyCapCents 必须是 true —— 不尊重日预算上限的自治不许存在'
+  }
+  if (!(typeof e.minHoursSinceLastChange === 'number' && Number.isFinite(e.minHoursSinceLastChange))
+      || e.minHoursSinceLastChange < MIN_ALLOWED_HOURS_SINCE_LAST_CHANGE) {
+    return `信封的 minHoursSinceLastChange 不得低于 ${MIN_ALLOWED_HOURS_SINCE_LAST_CHANGE} 小时，收到「${String(e.minHoursSinceLastChange)}」`
+  }
+  if (e.excludeLearningPhase !== true) {
+    return '信封的 excludeLearningPhase 必须是 true —— 学习期里自动调整会让指标失真'
+  }
+  if (e.excludeAdStudies !== true) {
+    return '信封的 excludeAdStudies 必须是 true —— 对比测试期间动手会毁掉实验结论'
+  }
+  if (e.requiresRollbackHandler !== true) {
+    return '信封的 requiresRollbackHandler 必须是 true —— 撤不回来的事不自动做'
+  }
+
+  return null
 }
 
 /**
@@ -46,9 +99,13 @@ export function outwardBlockReason(definition: ActionDefinition): string | null 
     return '对外授权声明必须写明出处（declaredIn），空白不算 —— 这条许可要能被追到是谁批的'
   }
 
-  if (declaration.requiresHumanApproval !== true) {
-    return '对外动作必须要求人工批准，这一项不允许声明成别的值'
-  }
+  // 🔴 这一段只查**声明本身完不完整合法**，不看这一次要做什么。
+  //    「这一次的具体改动在不在信封内」是实例级判断，在 authorize.ts ⑥b 和
+  //    gateway.ts 碰 provider 之前各算一次（用真实快照，不用提交方给的数字）。
+  //    两层分工刻意分开：结构闸拆了也拦不住越界的实例，实例闸拆了也拦不住
+  //    一份残缺的声明——两边各有只有它能满足的测试。
+  const approvalBlock = approvalBlockReason(declaration.approval)
+  if (approvalBlock) return approvalBlock
 
   if (declaration.rollback !== 'provider_native' && declaration.rollback !== 'snapshot_restore') {
     return '对外授权声明必须写明怎么撤回（provider_native 或 snapshot_restore）'

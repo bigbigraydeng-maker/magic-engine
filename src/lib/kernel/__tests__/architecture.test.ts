@@ -2007,8 +2007,11 @@ describe('两处清单不许分家（S1 / S2）', () => {
   //    这条前向迁移里的 CREATE OR REPLACE FUNCTION —— 不管目标环境有没有 apply
   //    过历史迁移，这条语句都会把函数换成最新版本。跟 runner.ts 比对必须用这份
   //    "最终生效" 的 SQL，历史文件本身不再改。
+  //
+  // 🔴 白名单的最新真相永远在**最新那份**前向迁移里。每次加新码都要把这个常量
+  //    往前挪到新的那份迁移上，历史文件一律不改。
   const RECOVERY_WHITELIST_MIGRATION_SQL =
-    'supabase/migrations/20260811040000_kernel_recovery_outward_requires_human_policy.sql'
+    'supabase/migrations/20260925000003_kernel_recovery_outside_autonomy_envelope.sql'
 
   it('🔴 可恢复拒绝码：SQL 里的白名单跟 runner.ts 的 RECOVERABLE_DENY_CODES 一字不差', async () => {
     // 真正的强制在 RPC 里（应用层那份只是为了把话说人话）。
@@ -2042,8 +2045,10 @@ describe('两处清单不许分家（S1 / S2）', () => {
     )
     // 新增的码必须在这份前向迁移里，且不在历史迁移里（否则又是原地改写）。
     expect(sql).toContain("'outward_requires_human_policy'")
+    expect(sql).toContain("'outside_autonomy_envelope'")
     const historical = read(MIGRATION_SQL)
     expect(historical).not.toContain('outward_requires_human_policy')
+    expect(historical).not.toContain('outside_autonomy_envelope')
   })
 
   it('🔴 恢复 RPC 里有状态 CAS 和指针 CAS 两道，且步骤重置在同一个函数里', () => {
