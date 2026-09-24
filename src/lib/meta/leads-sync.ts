@@ -21,6 +21,7 @@ import { authorizePageSync } from '@/lib/meta/page-sync-authorization'
 import { fetchFormLeads, fetchPageLeadForms } from '@/lib/meta/lead-forms'
 import { ingestMetaLead, parseLeadAnswers } from '@/lib/crm/meta-lead'
 import { ALREADY_SYNCED_REASON, isMailchimpSettled } from '@/lib/mailchimp/outlet-tally'
+import { fetchAll } from '@/lib/supabase-paginate'
 import type { SubscribeMemberResult } from '@/lib/mailchimp/client'
 import type { TagRepair } from '@/lib/mailchimp/tags'
 
@@ -125,7 +126,10 @@ export async function getLeadWatermark(clientId: string, now: Date = new Date())
 /**
  * 这一批 lead 里，哪些上一轮已经办完了（触点里的 Mailchimp 回执已是终态）。
  *
- * **一次查询拿回整批**，不逐条查 —— 逐条查正是这次要修的那种浪费。
+ * **分页拿回整批**，不逐条查 —— 逐条查正是这次要修的那种浪费。`fetchFormLeads`
+ * 单表单最多能回补 2000 条，回看窗口撞上高流量客户时命中 PostgREST 单次查询
+ * 1000 行硬顶会静默截断（见 `supabase-paginate.ts`）：漏查的那批老 lead 就会
+ * 被判成「没办完」，重新打一轮 Mailchimp、覆盖回执，去重直接失效。
  *
  * 读失败返回空集合：判不出来就当都没办完，照常重跑。宁可多打一次，不可漏一次。
  */
@@ -136,16 +140,23 @@ export async function readSettledLeadIds(
   const settled = new Set<string>()
   if (leadIds.length === 0) return settled
 
-  const { data, error } = await supabaseAdmin
-    .from('contact_touchpoints')
-    .select('source_ref, metadata')
-    .eq('client_id', clientId)
-    .eq('source', 'meta_lead_form')
-    .in('source_ref', leadIds)
+  let rows: Array<{ source_ref?: unknown; metadata?: unknown }>
+  try {
+    rows = await fetchAll<{ source_ref?: unknown; metadata?: unknown }>((from, to) =>
+      supabaseAdmin
+        .from('contact_touchpoints')
+        .select('source_ref, metadata')
+        .eq('client_id', clientId)
+        .eq('source', 'meta_lead_form')
+        .in('source_ref', leadIds)
+        .order('source_ref', { ascending: true })
+        .range(from, to),
+    )
+  } catch {
+    return settled
+  }
 
-  if (error || !data) return settled
-
-  for (const row of data as Array<{ source_ref?: unknown; metadata?: unknown }>) {
+  for (const row of rows) {
     const ref = typeof row.source_ref === 'string' ? row.source_ref : ''
     if (!ref) continue
     const meta = row.metadata

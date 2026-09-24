@@ -38,7 +38,8 @@ const mock = <T>(fn: T) => fn as unknown as ReturnType<typeof vi.fn>
 /**
  * `supabaseAdmin.from()` 的假件，同时服务两条链：
  *   · 水位线查询   `.select().eq().eq().order().limit().maybeSingle()`
- *   · 已办完批量查 `.select().eq().eq().in()`
+ *   · 已办完批量查 `.select().eq().eq().in().order().range()`（分页读全量，
+ *     测试里数据量小，一页就返回全部，`range` 之后不再有下一页）
  */
 function mockDb(
   opts: {
@@ -58,12 +59,16 @@ function mockDb(
                 Promise.resolve({ data: newest ? { occurred_at: newest } : null }),
             }),
           }),
-          in: () =>
-            Promise.resolve(
-              settledError
-                ? { data: null, error: { message: 'boom' } }
-                : { data: settled, error: null },
-            ),
+          in: () => ({
+            order: () => ({
+              range: () =>
+                Promise.resolve(
+                  settledError
+                    ? { data: null, error: { message: 'boom' } }
+                    : { data: settled, error: null },
+                ),
+            }),
+          }),
         }),
       }),
     }),
