@@ -3,7 +3,7 @@
 状态：PM 2026-09-24 拍板（`认`），执行走 DeepSeek，子牙审 · 风险分级见 §5 · 不新增能力线
 Repository Fact Gate：`origin/main` = `8d3d84f9` · fetched 2026-09-24 23:50 NZST
 Tier Classification：把广告支柱已落地的「信封内自治 + PM 日检」模式复制到其他支柱与运营 agent。机制层（信封、Kernel、pm-todo、Inngest）归平台底盘；各支柱「不问 PM 能做什么」归各自规则。不进 platform-candidates。
-前置：[`2026-09-24-ads-goal-driven-autonomous-impact-loop-v1.md`](./2026-09-24-ads-goal-driven-autonomous-impact-loop-v1.md)（广告支柱 WP0–WP2 已合并/已审，WP3 待做）· [`docs/agents/00-architecture.md`](../agents/00-architecture.md)
+前置：广告支柱 WP0–WP2（信封机制、Kernel 四张表、卫青诊断+处方引擎）现状见本文 §3「现状矩阵」卫青行，权威来源 [`docs/agents/11-weiqing.md`](../agents/11-weiqing.md) · [`docs/STATE.md`](../STATE.md) Ads Intelligence 行（WP3 即本文 B1，待做，无独立前置 spec）· [`docs/agents/00-architecture.md`](../agents/00-architecture.md)
 
 ---
 
