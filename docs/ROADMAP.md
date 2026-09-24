@@ -21,6 +21,37 @@
 
 ---
 
+## `meta-leads-sync` 每一轮都标红，「红了」这个信号已经不携带任何信息（2026-09-24 查实，P0）
+
+**§11 打分**：频率高（每 2 小时一轮，轮轮红）· IMPACT 闭环关键度高（Measure 段，报警器焊死在响，真出事分不出来）· 收入关联度高（这个报警器的职责就是发现线索断供；2026-08-21~08-30 同一个报警器失灵时 CTS 漏了 45 条线索）→ 零个低、三个高 → **P0**。
+
+- **现象**：`cron_run_logs` 里 `meta-leads-sync` 最近每一轮 `status='failed'`。根因不是 CTS —— 是 Magic Lab Class（`377468af-…`）和 New Asian Logistics（`4ae76381-…`）两个客户的主页令牌缺 `pages_read_engagement` 等权限，`leadgen_forms` 每轮回 HTTP 400 code 190。
+- **为什么会染红整轮**：`api/cron/meta-leads-sync/route.ts` 只要有任一客户 `error` 就把 `summariseSyncProblems` 传给 `finish()`，`run-logger.ts` 见到 error 就把整轮标 `failed`。
+- **要做什么**：把「取不到线索」和「出口有问题」分开决定 `status`，或者把已知的、非本轮新增的权限错误降级成不置 `error` 的持续性告警项。让「红」重新代表「今天有新问题」。
+- **顺带**：那两个客户的令牌权限本身也要么补齐、要么正式标成停用，不能一直挂着每轮报错。
+- 来源：PR [#1973](https://github.com/bigbigraydeng-maker/magic-engine/pull/1973) 复审过程查实（魏征）。
+
+---
+
+## 线索去重闸的两条后续（PR #1973 合并时明确留下，2026-09-24）
+
+PR #1973 给 Meta 留资同步加了「上一轮已办完就别重跑」的闸。Codex 复审提的两条 P2 当时没改（Ray 已按当时 head 授权合并，新增提交会作废环境审批），在这里记账：
+
+1. **settled 判据没绑定当前 audience / tag**（`lib/mailchimp/outlet-tally.ts` 的 `isMailchimpSettled`）。FDE 通过 `/api/clients/[id]/leads-config` 换了 audience id 或来源标签之后，回看窗口里那批已判 settled 的 lead 不会被推进**新**名单 —— 改动前它们会在 24 小时内被重新处理一次。
+   - 修法：把本次实际用的 `audienceId` + `tag` 一起写进 `metadata.mailchimp_result`（`crm/meta-lead.ts` Phase D），`isMailchimpSettled` 收一个期望配置参数，配置对不上就不算办完；历史回执缺这两个字段 → 判不成 settled → 部署后窗口内每条多跑一次然后收敛，自愈。
+   - **要动 `crm/meta-lead.ts` 的回执形状**（#1973 刻意一个字没动那个文件，那里带着合同 5425312107 / 5426843158 两份条款），按 A 级另走一轮设计 + 实施复审。
+2. **`settledLookupFailures` 没有消费者**。这个数已经进 `cron_run_logs.summary`，但没有任何告警在读它，所以「去重闸瞎了」目前只能靠人工查（已加 2026-09-26 的日历）。
+   - 修法：在 `pm-todo/manual-monitoring-items.ts` 加一条**独立**判据（不要复用 `isMailchimpExportFailureKey`，那是邮件出口的词汇表），`settledLookupFailures > 0` 时下发待办，带上客户和轮次。
+   - 后果有限：闸瞎掉只是退化成改动前每轮重打，不丢数据、不丢线索，白花 provider 调用。
+
+---
+
+## CTS 有人被判 opt-out 之后，系统改写了本地证据却没把人从 Mailchimp 名单里摘掉（2026-09-24 复审顺带查实）
+
+一个人被订阅进 Mailchimp 之后**才**被判成 opt-out 时，`crm/meta-lead.ts` 会把触点回执从 `subscribed` 覆盖成 `skipped:explicit_opt_out`、并写上 `do_not_contact: true`；但 `src/lib/mailchimp/` 里**没有任何退订 / 归档能力**（`client.ts` 开头明确写了不改现有会员状态）。结果：人还在名单里继续收信，而本地证据已经被改写成「没进名单」，没有任何人会知道要去后台摘掉他。涉及合同 5426843158。来源：魏征复审 PR #1973。
+
+---
+
 ## CTS 表格「员工跟进记录」换过列，转化回传那条线一直在读旧列（2026-09-24 查实并已修，记账用）
 
 **背景**：CTS 员工的电话跟进记录，表格第 505 行（含）以前写在 R 列，第 506 行起改写在 S 列（R 被拿去放 Facebook 后台链接）。`conversions/cts-crm-sheet-sync` 的 `parseSheet1Row` 恒读 R 列，于是 506 行之后的记录一个字都没读到。
