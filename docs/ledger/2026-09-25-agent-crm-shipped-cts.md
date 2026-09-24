@@ -11,5 +11,5 @@ done_on: 2026-09-24
 done_ref: pr:1983
 ---
 入口：客户工作台「同行渠道」卡。每小时邮件同步对 trade 域名联系人跑 AI 提取，pax>30 标 needs_review。
-migration 20260925001000 / 20260925001100 已 apply。测试向导窗口正带 PM 走一遍。
+两张 migration（agent_customers 建表 / dedup 唯一索引）已 apply。测试向导窗口正带 PM 走一遍。
 已知小尾巴（ROADMAP P3）：顶栏「最后同步」硬编码；大团客户 needs_review 过载。
