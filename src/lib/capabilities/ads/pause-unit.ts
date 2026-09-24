@@ -83,7 +83,8 @@ export function createPauseUnitCapability(sb: SupabaseClient): CapabilityImpleme
         const id = adsetId(step)
         const token = await requireMetaToken(step.ctx.clientId)
 
-        // 🔴 先读一次现状：不是为了信封（那道闸 Gateway 已经过了），是为撤回留证据。
+        // 🔴 先读一次现状：**不是**为了信封 —— 信封已由 gateway.ts 在这一步之前调 `preProviderEnvelopeBlockReason` 用 kernel_pre 快照重算过了。
+        //    这里读现状**只**为撤回留证据（handler 里读的是 provider 当下的值，snapshot 里读的是几秒前的值，两者可能因人工改动短暂不一致）。
         //    读失败 = 环境类，重试。
         const before = await getAdSetStatus(id, token)
         if (!before) throw new RetryableCapabilityError(`读不到广告组 ${id} 的当前状态`)
