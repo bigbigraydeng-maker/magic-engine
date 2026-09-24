@@ -318,6 +318,12 @@ describe('算出来但以前没人读的两个数字', () => {
     const pending = items.filter((i) => i.kind === 'lead_sheet_backfill_pending')
     expect(pending).toHaveLength(1)
     expect(pending[0].what).toContain('703 条')
+    /**
+     * 🔴 不许说成「这些人没进表」。窗口外的线索这一轮压根没读、也没跟表格比对过；
+     *    目标表格常常有别的管道也在写（CTS 就是），断言「销售看不到」= 每天一条假警。
+     */
+    expect(pending[0].what).toContain('可能早就在表里')
+    expect(pending[0].what).not.toContain('销售在表上看不到')
   })
 
   it('历史都补完了（0 条）就别再提醒', async () => {
