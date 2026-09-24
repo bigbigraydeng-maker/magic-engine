@@ -255,6 +255,7 @@ Claude Code、Codex、CMUX DeepSeek 都可按任务能力承担规划、实现�
    客户 ID：CTS Tours NZ `c0000000-0000-0000-0000-000000000000` · Oztop `d5c98811-1c1d-4ded-bdf0-4cefec6afb84`
    纯对话 / 纯查询 / 未落地的讨论**不算**实际操作，不写。
 5. 有实质开发/审计交付时附 **Reuse Statement**；不能只写“完成了什么”，还要说明共享/行业/客户边界与是否复用了已有平台能力。
+6. **本窗口聊定的每条结论写进 [docs/ledger/](./docs/ledger/README.md)**（一条一文件，状态 decided/done/verified/failed）。只写记忆或 ROADMAP 不算——那两处没有程序在读；台账每个工作日会被今日待办邮件读一遍，改了 `src/` 没写台账的 PR 合并前会被拦。
 
 ---
 

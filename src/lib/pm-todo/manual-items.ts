@@ -65,6 +65,7 @@ import {
 } from './platform-candidate-reviews'
 import { CLIENT_DOC_MANUAL_TASKS, type ClientDocManualTask } from './client-doc-manual-tasks'
 import { pushPlaybookStalenessItems } from './playbook-staleness-items'
+import { pushLedgerItems } from './ledger-items'
 
 export async function loadManualItems(
   supabase: SupabaseClient,
@@ -98,6 +99,9 @@ export async function loadManualItems(
   await pushCronHealthItems(supabase, items, now)
   // 平台候选到了复查日期 —— 不落库、不查表，纯本地日期判断
   pushPlatformCandidateReviewItems(items, now)
+  // 台账（docs/ledger）：决定了没做 / 做了没验 / 验了不成 —— 读仓库里的文件，不查表，
+  // 目录读不出来会自己下发一条「读不出来」，不靠 catch
+  pushLedgerItems(items, now)
   // 客户方案文档里写的一次性人工动作 —— 同样不落库、纯本地日期判断，过期自动消失
   pushClientDocManualTaskItems(items, now)
   // 成交/咨询等着人核对要不要告诉广告平台 —— 撤不回的动作，只能人点（#1397）
