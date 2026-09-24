@@ -32,13 +32,17 @@ PM 原话：「还是要升级 CRM，不要卡片模式，回到传统 crm 列�
 
 ## 3. 目标与验收
 
+**一句话**：员工从此在 ME 里干活、不回老表；机器把已经在 ME 里的成交证据翻成阶段和成交单；PM 主动收到"新成交"短邮件，不用打开系统。
+
 | # | 目标 | 验收（可观察） |
 |---|---|---|
-| T1 | 员工在 ME 列表里能完成表格上的全部日常动作 | 筛选 / 排序 / 搜索 / 分页 / 行内改阶段 / 记一笔 / 标重要 / 点行看时间线 / 批量改阶段；CTS 员工连续 5 个工作日不打开老表也能完成跟进（板桥验） |
-| T2 | 成交事实自动回流 | info@ 179 封含付款字样的邮件里 ≥50% 被翻成带证据的阶段建议；证据强的自动写 `contact_stage_events` + `me_sale_outcomes(purchase)`；证据弱的进今日待办一键确认 |
-| T3 | 表格备注不再断流 | `员工跟进记录` 列 7/24 之后的内容进 `contact_touchpoints`（channel=phone, source=sheet_followup），每日增量，幂等 |
+| T1 | 员工日常动作在 ME 里能全部做完 | 筛选/排序/搜索/分页/行内改阶段/记一笔/标重要（含到期日）/点行看时间线/批量改阶段/复制当前视图链接。**验收改成 3 周**：C1 上线后 3 周，CTS 员工"打开老表天数 / 打开 ME 天数"由 ≥1 降到 ≤0.3（老表日志抽样）；不到达 = C1 未完成。**C1 前板桥先跟 CTS 销售陪跑 30 分钟看她们真的在老表上干什么**，不是照方案抽象列打勾 |
+| T2 | 179 封"含付款字样"的邮件**100% 有下落** | 每封在系统里可查到状态之一：`auto_written`(强证据自动写)/`suggested_to_sales`(弱证据进员工待办)/`excluded:same_industry`(同行域名剔除)/`excluded:no_amount`(无金额)/`excluded:reversed`(改期/退款词覆盖)/`excluded:not_customer_email`(发件人不是本人)。**没有一封在识别器里默默消失**；有专用的"识别器巡检"页把这 6 类计数摆出来 |
+| T2a | 强证据自动写的质量 | 179 封回放集内：强证据命中 ≥50%（89 封以上）· 强证据误判率 <5%（自动写的里冤枉别人的占比）· 同行邮件误伤 = 0（Orbit/Asiascape/HoT 一封都不许自动写）；员工挑 20 封做金标准回归，识别器和金标准逐封对。不达标 C4 不给合并 |
+| T3 | 表格备注不再断流 | `员工跟进记录` 列 7/24 之后的内容进 `contact_touchpoints`（channel=phone, source=sheet_followup），每日增量、幂等 |
 | T4 | 目标进度能算 | 销售目标 `ce537a96` 的 `current_value` 出现非空数字；广告 WP3 的 Check 能读到 purchase |
-| T5 | 平台化 | 换一个客户（Oztop / NM Medspa）打开同一页面，列、阶段、筛选全部来自该客户配置，无 CTS 硬编码 |
+| **T5**（重定 · 现实版） | **CTS 页面上不出现别客户的语义** | 打开 CTS 的列表页看不到别客户名/团名/词表；`stage-from-conversation.ts:278`（CTS 提示词）/ `qualified-buyer.ts:198`（写死 stage_key `'qualified'`）等硬编码由本次触及的模块下沉到客户配置，**其他文件本次不动**。**Oztop / NM Medspa 可用性明确 out of scope v1**（这两家打开列表页会踩残留 CTS 语义，不当验收项） |
+| **T6**（板桥新增） | **PM 感知得到"9 单进度不再未判"** | 识别到一条强证据自动写 → **立即**给 PM 发一封短邮件（≤3 行：谁 / 哪句话 / 累计 X/9 单），不等每日汇总；不是重复日报，是速报 |
 
 **不做（v1 明确排除）**：GoHighLevel 接入 · 邮件营销序列编排（7/28 Phase 3）· AI 个性化回信生成 · 热度雷达重做（保留现有 `segmentContact`，只在列表里当一列显示）· 新建 deal 表（`contact_deals` v1 不建，成交金额先放 `me_sale_outcomes` 现有列）· 改老表任何一格。
 
@@ -50,15 +54,26 @@ PM 原话：「还是要升级 CRM，不要卡片模式，回到传统 crm 列�
 **做法**：**扩 `all/page.tsx` 为默认主视图**（`/dashboard/clients/[id]/crm` 直接落它）；卡片看板 `crm/page.tsx` 与 `decisions/page.tsx` 退役（路由 301 到主视图 + 预设筛选）；`_components/QuickNote.tsx` 已 import 未渲染，顺手删掉。「今天要联系」= 主视图上的预设筛选"今天该联系"（复用 `day-list.ts` 判据）；「决策列表」= 预设筛选"等我决定"。不保留双模式。
 
 ### 4.2 列（默认顺序，员工可拖动/隐藏，按客户保存）
-固定列：姓名 · 电话 · 邮箱 · **阶段**（行内下拉，选项来自 `client_pipeline_stages`）· 感兴趣的团/产品（`metadata.tour_interest`）· 来源（表单/私信/邮件/手工）· 进线时间 · **最近一次联系**（时间 + 渠道 + 一句摘要）· **下一步**（现有 next-step 判据的一句话）· 热度（现有 `segmentContact` 分桶）· 重要标记（对应老表红字）· 跟进记录（最新一条，悬停看全部）· v4 两问（出行时间 / 预算）· 邮件进度（E1–E4 发/开，来自 Mailchimp 触点）· 客户回复（最近一条 inbound 摘要）。
-客户专属列走现有 `CUSTOM_COLUMNS` 注册表，不新建配置表（沿用 PR #678 契约）。
+**默认视图分两套**：
+- **员工全表视图**（默认）：15 列，见下
+- **PM 简版视图**（板桥）：4 列 = 姓名 · 阶段 · 最近一次联系 · 下一步；PM 打开链接直接落这个视图
+
+员工全表视图 15 列：姓名 · 电话 · 邮箱 · **阶段**（行内下拉，选项来自 `client_pipeline_stages`）· 感兴趣的团/产品（`metadata.tour_interest`）· 来源（表单/私信/邮件/手工）· 进线时间 · **最近一次联系**（时间 + 渠道 + 一句摘要）· **下一步**（现有 next-step 判据的一句话）· 热度（现有 `segmentContact` 分桶）· **重要标记**（见下）· 跟进记录（最新一条，悬停看全部）· v4 两问（出行时间 / 预算）· 邮件进度（E1–E4 发/开，来自 Mailchimp 触点）· 客户回复（最近一条 inbound 摘要）。
+
+**重要标记**（板桥硬伤 2 · 从"一个 bool"升级）：一列显示"⭐ + 一行原因 + 可选到期日"，替代老表 R/S 列的红字（"约好周三 3 点回电"/"only email"）。**到期日到了自动冒到今日待办**（新 kind `crm_important_due`）。写回既有 `contacts.pinned_at`（复用现有 pin 接口 L23）+ 新加两列（`important_note text`, `important_due_at timestamptz`，一次 migration）。
+
+**默认排序**（魏征硬伤 6）：`pinned_at DESC NULLS LAST` → 用户选择的第二排序键。PM 不会再问"我置顶的跑哪去了"。
+
+客户专属列走现有 `CUSTOM_COLUMNS` 注册表，不新建配置表（沿用 PR #678 契约）。**默认每页 100 行**（板桥），不是 50。
 
 ### 4.3 交互
-- 服务端分页（50/页）、排序（任意列）、筛选（阶段多选 / 来源 / 热度 / 有无跟进 / 日期范围 / 关键词搜姓名电话邮箱备注）；URL 带参数，刷新不丢
-- 行内改阶段 → 现有 `PATCH contacts/[cid]/stage`；行内"记一笔"（渠道 + 结果 + 备注）→ 现有 `POST touchpoints`
+- 服务端分页（100/页）、排序（任意列，默认 `pinned_at DESC NULLS LAST` + 用户选）、筛选：阶段多选 / 来源 / 热度 / **"我没跟进的"** / 日期范围 / **关键词搜姓名电话邮箱 + 跟进记录正文**（魏征硬伤 7）；URL 带参数、有**"复制当前视图链接"按钮**（板桥），刷新和同事之间传都不丢
+- 行内改阶段 → 现有 `PATCH contacts/[cid]/stage`（新增 `machineGuards` 参数，见 §5.2）；行内"记一笔"（渠道 + 结果 + 备注）→ 现有 `POST touchpoints`；行内"标重要"（原因 + 可选到期日）→ 新接口 `PATCH contacts/[cid]/important`
 - 点行展开时间线（现有 `timeline` 接口，所有渠道，邮件/私信原文来自 `conversation_messages`）
-- 勾选多行 → 批量改阶段 / 批量推迟 / 批量清勿扰。**批量记一笔已有 `POST touchpoints/batch`（≤500 人，自动剔 DNC）**；缺的批量走**新增** `POST /crm/contacts/bulk`（action ∈ stage/snooze/dnc_clear，contactIds），照 batch 路由的 `.in + client_id` 收口，内部循环单人接口，逐条回执，失败逐条报（不整批回滚成"看起来没做"）
-- 改联系人资料（姓名/电话/邮箱）：目前**没有 PATCH 接口**（POST 只新建）——新增 `PATCH /crm/contacts/[cid]`，改 `contact_identities` 唯一约束的处理规则由子牙定
+- 勾选多行 → 批量改阶段 / 批量推迟 / 批量清勿扰。**批量记一笔已有 `POST touchpoints/batch`（≤500 人，自动剔 DNC）**；缺的批量走**新增** `POST /crm/contacts/bulk`（action ∈ stage/snooze/dnc_clear/important，contactIds），照 batch 路由的 `.in + client_id` 收口，内部循环单人接口，**回执 shape 沿用 `{recorded, skipped, failed, notOwned}`**（子牙 Q2），不做 DB 事务（Supabase HTTP client 没跨请求事务，逐条已有 IDOR/幂等），"部分失败"就是最终态，回执告诉前端谁失败
+- **新客人录入**（魏征硬伤 6）：列表左上角"+ 新客人"按钮 → 现有 `POST /crm/contacts`
+- **BCC 群发**（魏征硬伤 6 · 方案原来说错了）：`touchpoints/batch` 是**记内部触点日志**，不是发邮件。BCC 群发要重新接线：把现有卡片页 `BatchEmail` 组件搬进列表页，走"复制邮箱到剪贴板 → 员工在 Gmail 发 → 回列表点"我发了"→ POST touchpoints/batch 记录"这个已有路径；本 v1 不做"从 ME 里直接发邮件"
+- 改联系人资料（姓名/电话/邮箱）：新增 `PATCH /crm/contacts/[cid]` → `contact_identities` 唯一约束**一律拒绝返 409**（子牙 Q1），把冲突联系人 id 与提示"这个邮箱已属于另一个客人"给前端，员工点"打开那个人"或"换一个"——**绝不许自动合并**（合并不可逆，"打错一位数就撞到另一个真人是常态"，identity.ts:220-223 手工路径先例）
 - 导出当前筛选为 CSV（员工偶尔要给老板看；只导出可见列）
 - **不做**：自由拖拽看板、卡片、AI 推荐排序（热度只是一列，不决定顺序）
 
@@ -75,12 +90,29 @@ PM 原话：「还是要升级 CRM，不要卡片模式，回到传统 crm 列�
 | 表格 `员工跟进记录` | `src/lib/crm/sheet-followup-sync.ts:280` 写 phone 触点 source=sheet_followup（7/24 只导入 287 条后再没进）；`CLIENT_FOLLOWUP_SHEETS:61` 只配了 CTS | 修复每日增量：读老表该列（只读），按 `l:<lead id>` 定位联系人（735 条里 347 条历史行没真编号，那批按邮箱匹配、匹配不上就跳过并计数），新内容 upsert phone 触点（source_ref=`sheet:<row>:<hash>` 幂等），过 `parseNote` 出 outcome；同一识别器对备注也跑一遍（员工常写"已交定金 $500"） |
 
 ### 5.2 写回规则（fail-closed）
-- **强证据**（金额 + 付款动词 + 无反转词 + 发件人是本人）→ 自动 `advanceContactStage`（`src/lib/crm/advance-contact-stage.ts`，只许**向前**：quoted→deposit_paid→paid_full，不倒退）+ 写 `me_sale_outcomes`（kind=purchase，source_kind 新增 `email_deal_parser` 与 `messenger_deal_parser`，amount 若能解析，evidence 指向触点）+ 一条 `contact_stage_events`（changed_by=`system:deal-inference`，note 带引用句）
-- **弱证据**（只有付款词、无金额，或发件人身份不确定）→ 不改阶段，进今日待办 `crm_stage_suggestion`（what：谁 / 哪句话 / 建议改成什么；how：点"确认"或"忽略"；href：`/crm/all?contact=<id>`，跟现有三种 CRM 待办同一落点，L579-600 已支持）；确认即执行同一写回路径
-- 员工手动改过的阶段（`changed_by` 不以 `system:` 开头）**7 天内不被机器覆盖**（新加判据到 `advanceContactStage`）
-- 每次推断写 receipt（触点 id、规则命中、置信度、结果），可回放；触点 metadata 里加 `deal_inference` 字段（现在只有 subject/counterparty/automated/logged_by）
-- **`CONTACT_OUTCOMES` 需要新加 `quoted`/`deposit_paid`/`paid_full`**（现在 note-parser 只有 no_answer/bad_number/spoke 等 8 类，覆盖不了成交场景）；`SAFE_STAGES` 保持不含成交阶段，成交只准通过识别器强证据路径或人工确认路径进
-- 客户名、团名、金额门槛不进代码：付款词表为通用词表；同行域名走 `brand_aliases` / 客户配置；金额币种从 `clients.country` 派生（现在 `today/route.ts:327` 已有 NZ/AU 二选一逻辑，扩到识别器）
+
+**一句话**：宁少勿错，机器只在最有把握时动手；剩下的全给员工看一眼。
+
+**判定顺序（缺一不可，任何一项失败就不是强证据）**：
+1. **发件人是本人**（发件邮箱等于联系人身份邮箱）——不是本人，直接走"同行/身份不确定"路径，永不自动写（魏征硬伤 2）
+2. **发件域名不在同行名单里**（Orbit/Asiascape/HoT 等旅业同行）——同行邮件即使谈定金也是代终端客户结算，**永不自动写 `me_sale_outcomes`**，只出"建议新建联系人 + 阶段"双确认待办
+3. **命中付款动词 + 明确金额**（`$500 / NZ$500 / 500 纽币 / 5000 全款`）——**无金额一律弱证据**（"paid the full amount"/"invoice paid"没金额，不许自动写；魏征硬伤 3）
+4. **无反转词**（改期/退款/取消/refund/cancel/postpone）
+
+**写回**：
+- **强证据**（四条全通过）→ 自动 `advanceContactStage`（只许**向前**：quoted→deposit_paid→paid_full）+ 写 `me_sale_outcomes`（source_kind 新加 `email_deal_parser` / `messenger_deal_parser` / `sheet_note_deal_parser`；`metadata.parser_version = 'v1'` + `rule_signature` 词表 hash，子牙 Q4） + `contact_stage_events`（changed_by=`system:deal-inference`，note 带引用句）+ **T6 速报邮件立即推给 PM**（板桥硬伤 1）
+- **弱证据**（有付款词 / 无金额 / 或身份不确定 / 或同行代付）→ 不改阶段，进员工待办 `crm_stage_suggestion`（**默认发员工不发 PM**——板桥硬伤 3、§9 已定），what：谁/哪句话/建议改成什么；how：三个按钮——**"确认"（写回同强证据路径）/"这次不动"（24h 内同一人不再冒）/"永久忽略这封邮件"（触点 metadata 打 `deal_inference:{ignored_at, ignored_by, reason}`）**；魏征硬伤 5：忽略必选原因（同行 / 时机不对 / 需看老表）
+- **弱证据日增熔断**（魏征）：任一客户 24h 新增 >20 条 `crm_stage_suggestion` → 停出建议 + 一条 PM 报警"识别器可能出问题了"
+- **"179 封 100% 有下落"面板**（T2 板桥）：识别器巡检页把 6 种状态计数摆出来，没有一封在识别器里默默消失
+
+**软锁**（子牙 Q3 + 魏征硬伤 4 合并）：
+- `advanceContactStage` 新增 `machineGuards?: {humanLock?: boolean, forwardOnly?: boolean}` 参数；人工 PATCH 一律传 `undefined`（不受方向限制、可以向后退）；deal-inference 传 `{humanLock:true, forwardOnly:true}`
+- `humanLock` 判据 = **最近 7 天有 phone/sheet_followup 触点** OR **最近 7 天有 changed_by 不以 `system:` 开头的 stage_event**——两个都算"最近有人碰过"，覆盖"员工不登录 ME 但每天在老表上工作"（魏征）与"员工在 ME 里改过阶段"（子牙）两种场景；靠现有 `contact_stage_events` + `contact_touchpoints` 查历史行，**不加 `contacts.stage_locked_until` 列**（子牙："加列是第二个真相源一定会漂"）
+
+**其他**：
+- `CONTACT_OUTCOMES` 新加 `quoted`/`deposit_paid`/`paid_full`
+- 客户名、团名、金额门槛不进代码；付款词表为通用词表；同行域名与表格 ID 与备注列字母走**新加的 `clients.crm_config jsonb`**（**不塞 `brand_aliases`**——子牙 Q7：那列语义是品牌名，被 ai-tracker/geo-module 消费，塞表格 ID 会污染 AI 提示词）；金额币种从 `clients.country` 派生（`today/route.ts:327` 已有 NZ/AU 二选一）
+- `CTS_BRAND_TERMS` 可以进 `brand_aliases`（是真品牌词）；`crm_list_prefs`（列顺序偏好）与 `crm_config`（服务端配置）**别一列两用**（子牙）
 
 ### 5.3 触发
 `lead-sheet-sync`（已有 Inngest 函数）之后追加一步"备注增量 + 成交识别"；info@ / Messenger 同步函数结束后同样追加一步。**不新起独立 cron**；每步 receipt 落 `cron_run_logs` 或 Inngest step 输出。
@@ -94,18 +126,18 @@ PM 原话：「还是要升级 CRM，不要卡片模式，回到传统 crm 列�
 - 成交识别器：通用词表 + 客户配置的排除域名/币种；**禁止**出现 `ctstours` / `c0000000` / 团名
 - 现有硬编码（`BUSINESS_EMAIL_DOMAINS`、`CTS_NOTE_COLUMN_SWITCH_ROW`）在本次触及的文件里下沉到客户配置；未触及的记入 ROADMAP，不顺手改
 
-## 7. 分阶段交付（DeepSeek 分轮，每轮 ≤3 文件；接线点见 §10 盘点结果）
+## 7. 分阶段交付（DeepSeek 分轮，每轮 ≤3 文件；接线点见附录 §11）
 
-| WP | 内容 | 风险 | 复审 |
-|---|---|---|---|
-| **C0 读模型** | 服务端分页/排序/筛选/搜索接口（扩现有 `GET /crm/contacts`）+ 列定义扩展 + 测试 | B | 子牙 |
-| **C1 列表页** | 表组件替换卡片：列、行内改阶段、记一笔、抽屉时间线、批量、导出、URL 参数、列偏好保存 | B | 子牙 + 板桥（真人用一遍） |
-| **C2 备注增量** | 老表 `员工跟进记录` 每日增量 → phone 触点（幂等、只读表） | B | 魏征（幂等/匹配错人） |
-| **C3 成交识别器** | 纯函数 + 词表 + 反转词 + 置信度 + 测试（用 179 封真实邮件脱敏后当回放集） | B | 魏征 + 狄仁杰（同行/伪造邮件） |
-| **C4 写回 + 待办** | 强证据自动写回、弱证据 `crm_stage_suggestion` 待办 + 确认接口、receipt、Inngest 步骤接线 | **A**（写客户阶段与成交表） | 子牙 + 魏征 |
-| **C5 退役** | 卡片组件、旧「今天要联系」页、`decisions` 页改为预设筛选；CHANGELOG | C | 板桥 |
+| WP | 内容 | 风险 | 复审 | 定量验收（不达标不给合并 · 魏征硬伤 6） |
+|---|---|---|---|---|
+| **C0 读模型** | 服务端分页/排序/筛选/搜索接口（扩 `GET /crm/contacts`）**+ 聚合下沉到 SQL group by**（子牙 Q5：CTS 964 已在 PostgREST 1000 行截断边界，`segment/temperature/hasMessenger` 今天可能算错，不能沿用 `fetchAll`） + 列定义扩展 + 路由测试 | B | 子牙 | 同一筛选与老表人数对得上（抽 3 个阶段）；聚合口径变异测试红一次 |
+| **C1 列表页** | 扩 `all/page.tsx` 为主视图：列/行内改阶段/记一笔/抽屉时间线/批量/导出/URL 参数/列偏好/**重要标记升级（原因+到期日）**/**"我没跟进的"筛选**/**"复制视图链接"按钮**/**PM 简版视图 4 列**/新客人按钮/搬进 BatchEmail | B | 子牙 + **板桥（C1 前先跟 CTS 销售陪跑 30 分钟）** | **3 周**后 CTS 员工老表/ME 打开天数比 ≤0.3；不到达 = C1 未完成 |
+| **C2 备注增量** | 老表 `员工跟进记录` 每日增量 → phone 触点（幂等、只读表）；`CLIENT_FOLLOWUP_SHEETS` 下沉到 `clients.crm_config` | B | 魏征（幂等/匹配错人） | 老表新增 3 条备注 → 次日触点 +3，重跑不重复 |
+| **C3 成交识别器** | 纯函数 + 词表 + 反转词 + 置信度 + 同行域名判据 + 回放集 + **"179 封巡检页"** | B | 魏征 + 狄仁杰（同行/伪造邮件） | 179 封回放：**强证据命中 ≥50% · 强证据误判率 <5% · 同行邮件误伤 = 0**；每封在 6 种状态里 100% 落定 |
+| **C4 写回 + 待办 + 速报** | 强证据自动写 + `machineGuards`（子牙 Q3 + 魏征 4）+ 弱证据 `crm_stage_suggestion` 待办（**默认给员工**，三按钮，同人 24h 合并）+ 确认接口 + 弱证据日增 >20 熔断 + **T6 强证据速报邮件立即推给 PM**（板桥 1）+ Inngest 步骤接线 + `me_sale_outcomes.metadata.parser_version` | **A**（写客户阶段与成交表；花钱 no，但改真相 yes） | 子牙 + 魏征 + 狄仁杰（授权/回滚） | 一封"已付定金 $500"邮件 → 阶段 deposit_paid + `me_sale_outcomes` +1 + T6 速报邮件到达 + `ce537a96` current_value 更新 + receipt 可查；一封同行邮件 → 不动，只出建议 |
+| **C5 退役** | `crm/page.tsx`（1791 行）**直接删除文件不留 301**（魏征）；`decisions/page.tsx` 删；`crm/page.tsx` 的功能由 `all/page.tsx` 顶层组件承担（子牙 Q6：`[id]/crm/page.tsx` rewrite 渲染 all 组件，不做 client-side redirect）；**grep 所有邮件模板/Inngest digest 里有没有硬编 `/crm/today` 或 `/crm/decisions`**（子牙 Q6）；CHANGELOG | C | 板桥 | 旧路由访问 404 测试红一次；grep 结果 = 0 |
 
-顺序：C0 → C1 与 C2/C3 并行 → C4 → C5。C1 上线后先给 CTS 员工用 3 个工作日，板桥收反馈再进 C4。
+顺序：C0 → C1 与 C2/C3 并行 → C4 → C5。**C1 上线后先给 CTS 员工用 3 周**（不是 3 天），板桥收反馈再进 C4。
 
 ## 8. 安全底线
 1. 机器只向前推阶段、不倒退、不删人、不合并人（7/29 魏征红线：正文抽联系方式建人 = 造假客户）
@@ -117,12 +149,24 @@ PM 原话：「还是要升级 CRM，不要卡片模式，回到传统 crm 列�
 ## 9. PM 待拍板（只列业务）
 1. GoHighLevel 那条是正式作废还是继续搁置？
 2. 成交金额要不要在列表里显示（涉及员工可见工资敏感度？CTS 老板是否同意员工看见）
-3. 弱证据的确认由谁点：PM 还是 CTS 员工（决定待办发给谁）
+3. ~~弱证据的确认由谁点：PM 还是 CTS 员工（决定待办发给谁）~~ **已定：默认发 CTS 员工**（板桥硬伤 3；理由：员工每封邮件几秒钟就能判"真付了 $500"还是"客户在问什么时候付"，PM 会被 40-70 条/日淹没）；PM 每周只收一封"本周确认了 X 条 / 忽略 Y 条 / 命中率"摘要
 4. 老表那条 Zapier/Make 写入要不要让 ME 接管（9/24 遗留问题，本次不动）
 
-## 10. 盘点结果（接线点，路径:行号，2026-09-25 实查 origin/main ed0d19ba）
+## 10. 三方复审必改项汇总（2026-09-25 板桥 + 魏征 + 子牙）
 
-### 10.1 页面（PM 说的"卡片模式" vs 已有的表）
+**板桥（真人视角，3 硬伤已全部合进方案）**：①T6 强证据速报邮件（§3、§5.2、C4）② 重要标记升级为置顶+原因+到期日（§4.2）③ 弱证据默认给员工不给 PM（§5.2、§9）；其他合并：3 周验收（T1）· 每页 100（§4.3）· PM 4 列简版（§4.2）· §10-13 附录化（本节）
+
+**魏征（挑刺 6 硬伤已全部合进方案）**：①同行邮件永不自动写 me_sale_outcomes（§5.2 判定顺序 #2）②无金额一律弱证据（§5.2 判定顺序 #3）③软锁判据看"最近有触点"不看 changed_by 前缀（§5.2 软锁段落）④ BCC 群发不是 touchpoints/batch，改成剪贴板 + Gmail 手发（§4.3）⑤ T5 改成"CTS 页面不出现别客户影子"，Oztop/NM out of scope（§3 T5）⑥ 每 WP 定量验收（§7 表）；其他合并：新客人按钮 + `pinned_at DESC` 默认排序 + 关键词搜跟进正文 + "我没跟进的"筛选 + 忽略按钮三义 + 弱证据日增熔断 + 卡片页直接删文件不留 301
+
+**子牙（架构 3 必改已全部合进方案）**：①软锁用 `machineGuards` 参数查 `contact_stage_events` + `contact_touchpoints` 历史行，不加列（§5.2）②C0 聚合下沉 SQL group by 而不是 `fetchAll` 内存组装（§7 C0）③`crm_config jsonb` 单独一列不塞 `brand_aliases`，`CTS_BRAND_TERMS` 可以进 `brand_aliases`（§5.2、§6）；其他合并：Q1 PATCH 一律拒绝返 409（§4.3）· Q2 bulk 回执 shape 沿用 `{recorded, skipped, failed, notOwned}`（§4.3）· Q4 me_sale_outcomes 加 `metadata.parser_version`（§5.2、C4）· Q6 卡片页用 rewrite 不 redirect + grep 邮件模板（§7 C5）
+
+---
+
+## 11. 附录 · 盘点接线点（路径:行号，2026-09-25 实查 origin/main ed0d19ba）
+
+以下细节属实施参考，读一遍即可；DeepSeek 每一轮按 §7 表格 + 本附录里对应节动手。
+
+### 11.1 页面（PM 说的"卡片模式" vs 已有的表）
 | 文件 | 行数 | 类型 | 命运 |
 |---|---|---|---|
 | `src/app/dashboard/clients/[id]/crm/page.tsx` | 1791 | 三层桶卡片看板 + 内嵌 `ContactListView` L1238（跟 all 页重复）+ `OffList` L1286 卡片 | **退役**（301 到 `/all`） |
@@ -132,13 +176,13 @@ PM 原话：「还是要升级 CRM，不要卡片模式，回到传统 crm 列�
 | `_components/QuickNote.tsx` L240 | — | page.tsx L24 已 import 未渲染 | **删** |
 | `_components/PersonDrawer.tsx` / `ComposeNote.tsx` / `ContactTimeline.tsx` / `DncBanner.tsx` / `MessengerReply.tsx` / `EmailReply.tsx` | — | 抽屉四件套 | **原样复用**，all 页展开区已经在用 |
 
-### 10.2 读接口
+### 11.2 读接口
 - `GET /crm/contacts` `route.ts:83-268`：**零参数**、`fetchAll` 全量拉三张表内存组装 L100-128、返回 `{totalContacts, columns, contacts[]}` L263（含 segment/temperature、custom 列、DNC/坏号/hasMessenger）→ **加分页/排序/筛选/搜索参数**（C0）
 - `GET /crm/today` `route.ts:115-865`：卡片看板取数（三层桶 + offList + suggestedStage）→ 退役，判据函数 `day-list.ts:dayWorklist` L471 保留给"今天该联系"预设筛选
 - `GET /crm/contacts/[cid]/timeline` `route.ts:113`：抽屉时间线（≤2000/2000/3000 条）→ 原样复用
 - `src/lib/crm/table-columns.ts`：`CustomColumnKey = 'tour_interest'` L20 唯一自定义列；`extractCustomColumns` L89、`visibleCustomColumns` L101 数据驱动显隐 → 复用
 
-### 10.3 写接口（守卫全部 `requirePaidClientAccess`，无 `guardGlobalAdmin`）
+### 11.3 写接口（守卫全部 `requirePaidClientAccess`，无 `guardGlobalAdmin`）
 | 路由 | 方法 | 行 | 写表 | IDOR |
 |---|---|---|---|---|
 | `contacts/[cid]/stage` | PATCH | L24 → `advance-contact-stage.ts:27` | `contact_stage_events` L70 + `contacts.stage` L85 | L36-41 `id=cid AND client_id` |
@@ -155,7 +199,7 @@ PM 原话：「还是要升级 CRM，不要卡片模式，回到传统 crm 列�
 - `PATCH /crm/contacts/[cid]` 改姓名/电话/邮箱（`contact_identities` UNIQUE(client_id,kind,value) 冲突时的合并/拒绝规则由子牙定）
 - 阶段推断反悔：撤销一条 `contact_stage_events` = 写反向 event，不删（安全底线 #5）
 
-### 10.4 数据模型（migrations）
+### 11.4 数据模型（migrations）
 - `contacts` `20260726000004:29-50` + stage/stage_updated_at `20260728000001:69` + 归因列 `20260730145405:49` + snooze_until `20260803140000:23`；**`pinned_at` 代码在读写但仓库 migrations grep 不到 ADD COLUMN，需核生产库**
 - `contact_identities` UNIQUE(client_id,kind,value) `20260726000004:82`
 - `contact_touchpoints` UNIQUE(client_id,source,source_ref) `20260726000005:44`
@@ -166,7 +210,7 @@ PM 原话：「还是要升级 CRM，不要卡片模式，回到传统 crm 列�
 - **`contact_deals` 不存在**（src + supabase 零命中）——本次不建
 - 阶段流转：`pipeline.ts` `MARKETING_ACTIONS` L12、`stageSuppressesWorklist` L31；`advance-contact-stage.ts:advanceContactStage(supabase, clientId, contactId, toStage, note, changedByEmail)` L27
 
-### 10.5 信号入口
+### 11.5 信号入口
 - `note-parser.ts`：`CONTACT_OUTCOMES` L24-44（8 类，**无成交/报价**）；`parseNote(raw, opts)` L532（规则 `classifyNote` L288 + OpenAI 兜底 L550）→ **加 quoted/deposit_paid/paid_full**（C3）
 - `cts-crm-sheet-sync.ts:180 stageIsPurchase`：G 列以 4/5 开头 = 成交；`-run.ts` 只写 `me_sale_outcomes`，**不写 contacts/touchpoints**
 - `sheet-followup-sync.ts:280`：写 phone 触点 source=sheet_followup；`CLIENT_FOLLOWUP_SHEETS:61` 只有 CTS
@@ -175,14 +219,14 @@ PM 原话：「还是要升级 CRM，不要卡片模式，回到传统 crm 列�
 - `crm/stage-from-conversation.ts`：AI 读私信推非成交阶段（`SAFE_STAGES` 不含成交，L62）
 - **`email-deal-parser` 或任何成交识别模块：未找到**（本次 C3 的价值）
 
-### 10.6 今日待办 CRM 相关
+### 11.6 今日待办 CRM 相关
 - `dnc_maybe_wrong` `manual-crm-items.ts:pushDncReviewItems L171` → href `/crm/all?contact=`
 - `dm_maybe_stop` `pushMessengerStopItems L297` ← `messenger-stop-signal.ts:findMessengerStopSignals L202`
 - `email_reply_due` / `email_sync_stale` `email-reply-items.ts:44` ← `email-reply-due.ts:findEmailRepliesDue L432`
 - lead-followup 走 Inngest 每日汇总邮件 `crm-lead-followup-digest.ts`，不进今日待办
 - **新增 `crm_stage_suggestion` kind**（C4）：跟以上三种同一 href 落点
 
-### 10.7 硬编码清单（本次能收就收，收不了记 ROADMAP）
+### 11.7 硬编码清单（本次能收就收，收不了记 ROADMAP）
 - `all/page.tsx:30 NAL_CLIENT_ID` + L443 判 NAL 弹金额面板 → 保留
 - `sheet-followup-sync.ts:61 CLIENT_FOLLOWUP_SHEETS`（只有 CTS）→ **C2 顺手改成读客户配置**
 - `link-contacts.ts:62 BUSINESS_EMAIL_DOMAINS=['ctstours.co.nz']` → **C3 改成读 `clients.brand_aliases`**
@@ -192,26 +236,26 @@ PM 原话：「还是要升级 CRM，不要卡片模式，回到传统 crm 列�
 - `pm-todo/daily-todo.ts:89-92 FOCUS_CLIENT_IDS`（CTS + Oztop）→ 本次不动
 - `qualified-buyer.ts:198` / `contact-board.ts:110` 写死 `'qualified'` stage_key → 本次不动
 
-### 10.8 测试
+### 11.8 测试
 - `src/lib/crm/__tests__/` 41 个 → 复用
 - 路由测试有：dnc/email/messenger/stage/timeline；**无测试**：today、contacts(GET/POST)、touchpoints、touchpoints/batch、pin、snooze、segment-feedback → C0 顺手补 contacts GET 的测试
 - 页面测试 6 个 → all 页有测试可扩，crm/page.tsx 无测试可退役
 
-### 10.9 方案外的顺带发现（不进本次，记 ROADMAP）
+### 11.9 方案外的顺带发现（不进本次，记 ROADMAP）
 - `crm/page.tsx` 的"系统提议改阶段" `suggestedStage`（today/route.ts L468-578）如果 PM 舍不得，可以在列表页搞一列"系统建议"——本次先不做
 - `today/route.ts` 里 `tailor_made_itineraries` L186 提议"已报价"、正则 `/报价|行程单|quote/` L551 → 这两个是行业层，未来搬进 `travel` playbook
 
-## 11. Reuse Statement
+## 12. Reuse Statement
 - 复用：`contacts` / `contact_touchpoints` / `contact_identities` / `contact_stage_events` / `client_pipeline_stages`、`advanceContactStage`、`parseNote`、`segmentContact`、next-step 判据、`timeline` 接口、`CUSTOM_COLUMNS`、`me_sale_outcomes`、`autoFetchMetricValue`、Inngest `lead-sheet-sync`、pm-todo 三件套
-- 新增 platform-shared：服务端分页读模型、表组件、成交识别器（纯函数）、备注增量读取、`crm_stage_suggestion` 待办 kind
+- 新增 platform-shared：服务端分页读模型（含 SQL 聚合下沉）、表组件、成交识别器（纯函数，含同行判据 + 反转词 + 无金额降级）、备注增量读取、`crm_stage_suggestion` 待办 kind、`crm_important_due` 待办 kind、`clients.crm_config jsonb`（服务端配置，与偏好列 `crm_list_prefs` 分开）、T6 强证据速报邮件
 - industry-specific：无（付款词表通用；行业词进 playbook 时再说）
-- client-specific：阶段配置、列偏好、排除域名、币种——全在客户配置
+- client-specific：阶段配置、列偏好、排除域名、币种、同行域名、表格 ID、备注列字母——全在 `crm_config`
 - 落点与 tier-gate 判定一致：既有 L1 升级，不新建能力线
 
-## 12. 验证清单
-- C0：同一筛选条件 API 与老表人数对得上（抽 3 个阶段）
-- C1：板桥以 CTS 员工身份走完"筛今天该联系 → 打电话 → 记一笔 → 改阶段"，全程不打开老表
+## 13. 验证清单（对齐 §7 定量验收）
+- C0：聚合口径变异测试红一次；同一筛选人数与老表 3 个阶段对得上
+- C1：板桥 C1 前 30 分钟真人访谈完成；C1 上线 3 周后 CTS 员工"打开老表 vs 打开 ME"天数比 ≤0.3
 - C2：老表新增 3 条备注 → 次日触点 +3，重跑不重复
-- C3：179 封回放集：命中/漏判/误判各列出，误判率 <5%（同行邮件 0 误判）
-- C4：一封真实"已付定金"邮件 → 阶段变 deposit_paid、`me_sale_outcomes` +1、目标 `ce537a96` current_value 更新、receipt 可查；一封同行报价邮件 → 不动
-- C5：旧卡片路由 404 或重定向，无死链
+- C3：179 封回放集 100% 落定到 6 种状态；强证据命中 ≥50%、误判 <5%、同行 0 误伤
+- C4：一封"已付定金 $500"邮件 → 阶段 deposit_paid、`me_sale_outcomes` +1、T6 速报邮件到达 PM、目标 `ce537a96` current_value 更新、receipt 可查；一封同行邮件 → 只出建议不自动写
+- C5：旧路由访问返 404 测试红一次；grep 所有邮件模板/Inngest digest 里 `/crm/today`/`/crm/decisions` 结果 = 0
