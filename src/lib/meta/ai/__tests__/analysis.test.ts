@@ -75,7 +75,7 @@ describe('托管 Meta 广告分析',()=>{
     const result=await generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id)
     expect(result.status).toBe('completed')
     expect(mocks.callClaudeChat).toHaveBeenCalledWith(expect.objectContaining({ model:'claude-haiku-test',singleAttempt:true,maxOutputTokens:2000 }))
-    expect(mocks.callClaudeChat.mock.calls[0]?.[0].systemPrompt).toContain('全文不超过 900 个中文字')
+    expect(mocks.callClaudeChat.mock.calls[0]?.[0].systemPrompt).toContain('全文硬上限 700 个中文字')
     expect(mocks.activeConnection).toHaveBeenCalledTimes(4)
     expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_authorize_sponsored_analysis',{
       tenant:'a1000000-0000-4000-8000-000000000001',principal:'50000000-0000-4000-8000-000000000001',job:'job-1',
@@ -101,6 +101,24 @@ describe('托管 Meta 广告分析',()=>{
     })
     expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_finish_sponsored_analysis',expect.objectContaining({
       final_status:'failed',charged_usd:0.12,report_body:null,failure_code:'analysis_incomplete',
+    }))
+  })
+
+  it('报告被截断时按 analysis_incomplete 失败，且不保存半份报告',async()=>{
+    mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
+      if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'NZD',timezone_name:'Pacific/Auckland' }
+      if(params.level==='account') return { data:[{ spend:'100',impressions:'1000',clicks:'20' }] }
+      return { data:[] }
+    })
+    const log=vi.spyOn(console,'error').mockImplementation(()=>undefined)
+    mocks.callClaudeChat.mockResolvedValue({ text:'前半份报告',input_tokens:500,output_tokens:2000,cost_usd:0.02,stop_reason:'max_tokens' })
+    await expect(generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id))
+      .rejects.toThrow('analysis_incomplete')
+    expect(log).toHaveBeenCalledWith('[meta-ads-ai] hosted model response incomplete',{
+      category:'output_truncated',model:'claude-haiku-test',
+    })
+    expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_finish_sponsored_analysis',expect.objectContaining({
+      final_status:'failed',report_body:null,failure_code:'analysis_incomplete',
     }))
   })
 

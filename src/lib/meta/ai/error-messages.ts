@@ -11,6 +11,6 @@ export const META_ADS_AI_MESSAGES: Record<string,string> = {
   connection_owner_required:'请使用最初完成 Facebook 授权的 Magic Engine 账号操作。',disconnect_not_found:'该连接不存在、已被撤销，或不属于当前账号。',
   sponsored_analysis_unavailable:'当前邀请尚未开通免费分析额度，请联系 Magic Engine 支持。',sponsored_budget_exhausted:'本月免费分析预算已用完。',
   analysis_too_large:'当前广告数据量超过邀请测试版上限，请联系 Magic Engine 支持。',analysis_failed:'分析暂时失败，请稍后重试。',
-  analysis_incomplete:'本次报告未完整生成，请稍后重试。',model_unavailable:'AI 模型暂时无法响应，广告数据已保存。请稍后重试以生成中文报告。',
+  analysis_incomplete:'本次报告生成时被截断，未保存半份报告。广告数据已保存，请稍后重试。',model_unavailable:'AI 模型暂时无法响应，广告数据已保存。请稍后重试以生成中文报告。',
   authorization_changed:'Facebook 授权或广告账户权限已经变化，请刷新后重试。',
 }

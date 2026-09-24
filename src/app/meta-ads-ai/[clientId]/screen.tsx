@@ -33,7 +33,9 @@ function useConnector({ clientId,outcome }: { clientId:string;outcome?:string })
       if(code==='audit_completion_failed') {
         setError('操作可能已经完成，系统正在重新检查连接状态。')
         await load().catch(()=>undefined)
-      } else setError(messages[code] ?? '无法完成此步骤，请重试或重新连接 Facebook。')
+      } else setError(messages[code] ?? (owner === 3
+        ? '本次分析没有完成，广告数据已保存。请稍后重试。'
+        : '无法完成此步骤，请重试或重新连接 Facebook。'))
     }
     finally { setBusy(false);setBusyMessage('') }
   }
