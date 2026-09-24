@@ -5,6 +5,14 @@
 
 ---
 
+### 2026-09-25（台账 docs/ledger v0：窗口结论一条一卡、待办邮件每天读、改代码不写卡合并前拦、夜巡核实）
+
+- **为什么**：2026-09-24 三个 agent 全量审计——128 条教训记忆 73% 只在文字里没程序读过；7 簇重复踩坑全部"建了防护后再踩"；变成代码/CI 的防护起效、写成文字的没起效。ROADMAP/DECISIONS/PITFALLS/STATE 没有程序在读，"记了"无法被机器证伪。
+- **上线**（PR #1984，`d643e9c5`）：`docs/ledger/` 一张卡一个文件（decided/done/verified/failed）；`src/lib/ledger/*` 解析/指向/判定/读取；待办邮件多一栏（决定了没做/做了没验/验了不成/夜巡没来）；`ledger-check.yml` 四道检查（格式永不豁免 · 改代码必写卡 · 指向真实且绑定本 PR · 夜巡分支只准翻状态）；`scripts/ledger-update.mjs` 改卡统一入口；CLAUDE.md §9 第 1/6 条。
+- **仓库外**：夜巡定时任务 `~/.claude/scheduled-tasks/ledger-nightly-verify/`（每晚 21:30）；关窗钩子对 A/B 级窗口没写卡拦一次。
+- **PM 2026-09-25 拍板**：三道台账检查进主干必过清单（已设）；只改 `docs/ledger/` 的 PR 免人工合并审批、CI 全绿自动合（仓库 auto-merge 已开；工作流改动见 `.github/merge-authorization.md`）。
+- 设计：`docs/specs/2026-09-24-harness-ledger-v0.md`（子牙 + 魏征设计审必改项全吸收）。DeepSeek 写代码、Fable 窗口出 spec 并复审。
+
 ### 2026-09-24（Meta 留资同步：同一条线索每轮重打一次 Mailchimp，办完的不再重跑）
 
 `getLeadWatermark` 每轮回看 24 小时（为补 Meta 延迟吐出来的 lead，这个窗口必须留着），但

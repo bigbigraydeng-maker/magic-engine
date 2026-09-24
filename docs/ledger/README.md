@@ -56,6 +56,8 @@ check_note: 一句话         # 夜巡结论或"为什么判不了"
 - 每个指向都要真实存在：`pr:`/`issue:` 查 GitHub，`commit:` 查 git，`doc:` 查文件；`done_ref` 指向别的 PR 时那个 PR 必须已合并
 - 只有 `dependabot/*` 免门卫；**没有任何分支免格式检查**
 - 夜巡分支 `claude/ledger-verify-*` 另有专用检查：只准动本目录，只准改状态类字段（status / owner agent→pm / done_on / done_ref / verified_ref / last_checked / check_note），不准改标题、日期、来源、判据，不准新建卡
+- 三道检查（格式 / 改代码必写卡 / 指向真实）在主干规则集里是**必过**，红了管理员也合不进
+- **只改本目录的 PR 免 PM 合并审批，CI 全绿自动合**（PM 2026-09-25 拍板；`.github/merge-authorization.md`）。代价：非夜巡分支的台账专属 PR 能改卡的标题/判据而没人看——只靠格式和指向检查兜底
 
 ## 怎么改一张卡（所有人同一个入口）
 
