@@ -28,6 +28,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { EnvelopeFactsResolver } from '@/lib/kernel/deps'
 import type { EnvelopeChangeKind, EnvelopeFacts, EnvelopeRequest } from '@/lib/kernel/autonomy-envelope'
 import type { CapabilityImplementation } from '@/lib/kernel/types'
+import { DELIVERING_STATUSES } from '@/lib/ads-strategy/portfolio/diagnostics/context'
 
 /** 每个广告动作对花费的性质。信封按性质分流（暂停不走变动比例，等等）。 */
 const CHANGE_KIND: Readonly<Record<string, EnvelopeChangeKind>> = {
@@ -56,8 +57,16 @@ interface SnapRow {
 const SNAP_COLUMNS =
   'level, entity_id, adset_id, campaign_id, budget_level, daily_budget_minor, learning_stage, ad_studies, effective_status, capture_reason, captured_at'
 
-/** 只有这些投放状态算「在花钱」，用来加总账户当日预算。 */
-const DELIVERING = new Set(['ACTIVE', 'CAMPAIGN_PAUSED', 'PENDING_REVIEW', 'PENDING_BILLING_INFO'])
+/**
+ * 只有这些投放状态算「在花钱」，用来加总账户当日预算。
+ *
+ * 🔴 直接从诊断层 `context.ts` import —— 卫青 WP2 复审抓出：原本在这里另写了
+ *    一份，跟诊断层不一致，还把 `CAMPAIGN_PAUSED`（其实是「所属系列被暂停」的
+ *    信号，没在投放）当成在投放。真实场景是账户里但凡有几个历史关停的系列，
+ *    「账户当日预算合计」就会一直虚高，把以后合法的加预算动作误挡。
+ *    统一到诊断层的一份，改只改一处，两边不会分家。
+ */
+const DELIVERING = DELIVERING_STATUSES
 
 function studyCount(raw: unknown): number {
   return Array.isArray(raw) ? raw.length : 0
