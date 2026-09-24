@@ -942,8 +942,8 @@ ALTER TABLE public.client_proven_patterns
 | Sub-WP | 内容 | 风险级 | 依赖 |
 |---|---|---|---|
 | **WP3.1a 同步 worker + 架构测试 + 审计列 + receipts 表** | §4 全部 + §11.10 的 SQL 函数（含权限 / 守卫 / 黑词） | A | 无 |
-| **WP3.1b 熔断事件表 + resolver 挂载 + WP2 遗留两处 + admin 解除接口** | §6 全部 + §5.2 的两条 WP2 遗留缺陷（`at` 未解构、`limit(4000)` 窗口）+ **resolver 生产挂载三件套**（§6.1） | A | 依赖 `envelope-facts`，不依赖 3.1a |
-| **WP3.2 链条接线 + 韩信 + 孔明预检 + denied 恢复入批** | §2、§5、批次两张表、§K 的前三个拉取函数 | A | 依赖 3.1a / 3.1b |
+| **WP3.1b 熔断事件表 + resolver 挂载 + WP2 遗留两处 + admin 解除接口 + 关旁路** | §6 全部 + §5.2 的两条 WP2 遗留缺陷（`at` 未解构、`limit(4000)` 窗口）+ **resolver 生产挂载三件套**（§6.1，issue:1994）+ **收编止损旁路** `src/app/api/clients/[id]/ad-health/stop-loss/route.ts:48-50,124`（直调 `setAdSetStatus` / `setAdSetDailyBudget` 不经 Kernel，`requirePaidClientAccess` 即可点）→ 改为提交 Kernel `ads.pause_unit` / `ads.cut_unit_budget`（人点也走 Kernel、留回执），过渡期至少 `guardGlobalAdmin`；架构断言：`boundaries.ts` `PROVIDER_WRITE_MODULES` 加 `@/lib/meta/adsets`；`ads-strategy/` 与 `capabilities/` 之外禁 import `submitActionRun` / `recoverDeniedRun` | A | 依赖 `envelope-facts`，不依赖 3.1a |
+| **WP3.2 链条接线 + 韩信 + 孔明预检 + denied 恢复入批** | §2、§5、批次两张表、§K 的前三个拉取函数；**补查询**「按 client + `deny_code` + 晚于 `policy_version` 变更」列 denied run（`store.ts:858 listDeadLetterRuns` 只按 `needs_human`；`deny_code` 在 `authorization_decisions` 不在 `action_runs`，要 join）；新 Inngest 函数部署后**手动 Sync**（STATE.md:174、PITFALLS F10） | A | 依赖 3.1a / 3.1b |
 | **WP3.3 Check + Tune + Jev + 日报两段** | §7、§8、§9、韩信写 `flywheel_actions`（+ §11.2 的列）、ads 评估器（sibling + CHECK 扩展 + `OUTCOME_EVALUATOR` 登记 + `ads.` owner）、extractor 映射 + `pattern_type` CHECK 扩展 | A（两处 CHECK 扩展是 schema 改动，见 §8.2 / §11.9） | 依赖 3.2 |
 
 各自独立 PR、各过子牙 + 魏征；3.1a / 3.1b 狄仁杰再看一次。
@@ -1145,6 +1145,9 @@ Inngest 集成 = **本机 dev server 手动 harness**（不是自动化测试框
 ---
 
 ## 18. §L 文档与角色
+
+- 接线点地图（另一窗口 2026-09-25 只读调查，PR #1995 `docs/specs/2026-09-25-ads-wp3-wiring-map.md`）与本稿事实一致（resolver 未挂载、`flywheel_actions.action_run_id` 已有、evaluator CHECK、策略表粒度）；实施每轮按它的 `路径:行号` 派。**事件名以本稿为准**：仓库惯例是点分 `<域>.<对象>.<动词>`（`daily_plan.publish_queue.ready` / `daily_plan.post.published`），地图里的 `ads/impact.cycle.due` 斜杠式不采用。地图的两条「必须先修」= 本稿 3.1b 的 issue:1994 + 止损旁路收编。
+- 台账：本稿的卡 `docs/ledger/2026-09-25-ads-wp3-design-v21-approved.md`；WP2 遗留的卡以 PR #1995 的 `2026-09-25-ads-wp2-envelope-facts-not-wired.md` 为准（本 PR 撤掉了重复卡）。
 
 - `docs/agents/00-architecture.md`：agent 表 + 权限矩阵加卫青、韩信（12）、sync worker、系统 actor `agent:hanxin`。韩信编号 12 理由改为「紧跟卫青、同属广告支柱执行侧」，不说治理层。
 - 前置支柱 spec `2026-09-24-ads-goal-driven-autonomous-impact-loop-v1.md` 已随 PR #1956 合并（2026-09-24 `33e9df18`），本稿直接引用文件路径。
