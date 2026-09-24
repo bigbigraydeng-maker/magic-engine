@@ -361,7 +361,9 @@ export async function runCtsCrmSyncChunk(
     loadExistingSourceRefs(supabase),
   ])
 
-  const sheet1ByPhone = indexSheet1ByPhone(sheet1Raw.map(parseSheet1Row))
+  // 读的范围是 A2 起，所以数组下标 i 对应表格第 i+2 行 —— 跟进记录在 R 还是 S 列
+  // 要靠这个行号判（见 `ctsNoteColumnIndex`）。
+  const sheet1ByPhone = indexSheet1ByPhone(sheet1Raw.map((cells, i) => parseSheet1Row(cells, i + 2)))
   const crmRows = crmRaw.map(parseCrmManagementRow)
   const start = Math.max(0, cursor.offset)
   const end = cursor.limit == null ? crmRows.length : Math.min(crmRows.length, start + cursor.limit)
