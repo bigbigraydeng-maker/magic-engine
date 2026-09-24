@@ -29,6 +29,7 @@ import { pushDailyPlanMeasurementItems } from './daily-plan-measurement-items'
 import { pushEmailReplyItems } from './email-reply-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
+import { pushLeadSheetItems } from './lead-sheet-items'
 import {
   buildNotIndexedItems,
   daysAgo,
@@ -64,6 +65,7 @@ import {
 } from './platform-candidate-reviews'
 import { CLIENT_DOC_MANUAL_TASKS, type ClientDocManualTask } from './client-doc-manual-tasks'
 import { pushPlaybookStalenessItems } from './playbook-staleness-items'
+import { pushLedgerItems } from './ledger-items'
 
 export async function loadManualItems(
   supabase: SupabaseClient,
@@ -97,6 +99,9 @@ export async function loadManualItems(
   await pushCronHealthItems(supabase, items, now)
   // 平台候选到了复查日期 —— 不落库、不查表，纯本地日期判断
   pushPlatformCandidateReviewItems(items, now)
+  // 台账（docs/ledger）：决定了没做 / 做了没验 / 验了不成 —— 读仓库里的文件，不查表，
+  // 目录读不出来会自己下发一条「读不出来」，不靠 catch
+  pushLedgerItems(items, now)
   // 客户方案文档里写的一次性人工动作 —— 同样不落库、纯本地日期判断，过期自动消失
   pushClientDocManualTaskItems(items, now)
   // 成交/咨询等着人核对要不要告诉广告平台 —— 撤不回的动作，只能人点（#1397）
@@ -138,6 +143,11 @@ export async function loadManualItems(
   // 这类失败从不设置 cron 结果的 error，cron 整体照样显示 completed，不单独捞出来就永远没人看见
   await pushMailchimpExportItems(supabase, items, now).catch((e) =>
     console.warn('[manual-items] Mailchimp 出口检查失败（不阻塞其他待办）:', e),
+  )
+  // 线索没写进客户自己的 Google 表格 —— 销售看的就是那张表，缺一条就是少跟一个人，
+  // 而 Facebook 的留资只保留 90 天，超期永久取不回
+  await pushLeadSheetItems(supabase, items, now).catch((e) =>
+    console.warn('[manual-items] 线索表格同步待办检查失败（不阻塞其他待办）:', e),
   )
   // ME 产品动态自动发 LinkedIn —— 敏感内容待审 / 账号未连 / 发布失败三种卡点
   await pushLinkedinProgressItems(supabase, items, now).catch((e) =>

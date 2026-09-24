@@ -39,10 +39,13 @@ import {
   summariseFailureCodes,
 } from '@/lib/industry-ai-visibility/snapshot-conclusive'
 import { resolveIndustryCode, matchAliases } from './industry-mapping'
+import { countOutcome, type OutcomeStep } from '@/lib/ads-strategy/portfolio/outcome-ladder'
 
 export type AutoFetchResult =
   | { ok: true;  value: number; source: string; snapshot_date: string; label: string }
   | { ok: false; reason: string }
+  /** 归属数据不足，不是 0 —— callers must never display 0 for this variant. */
+  | { ok: false; reason: string; unknown: true }
 
 /**
  * Attempt to auto-fetch a current value for the given metric key.
@@ -62,12 +65,22 @@ export async function autoFetchMetricValue(
     case 'brand_search_volume':
       return fetchBrandSearchVolume(supabase, clientId)
     case 'form_submissions':
-    case 'leads_count':
+      return fetchFormSubmissions(supabase, clientId)
+    case 'leads_count': {
       // leads_count is hybrid (catalog.measurement='hybrid'): GA4 conversions
       // are the auto half; FDE adds phone/wechat counts via Submit Verdict.
       // We surface only the auto half here — the hybrid hint in CurrentValueCell
-      // tells FDE to top up the rest.
-      return fetchFormSubmissions(supabase, clientId)
+      // tells FDE to top up the rest. When GA4 has nothing, fall back to the
+      // ads outcome ladder (spec 2026-09-24 ads IMPACT §3 G1).
+      const ga = await fetchFormSubmissions(supabase, clientId)
+      return ga.ok ? ga : fetchAdsOutcome(supabase, clientId, 'lead')
+    }
+    // 🔴 「报名/预订数」是真成交，不是广告留资。WP0 一度把它接到 fetchAdsOutcome('lead')
+    //    上——那会让「33 个报名」的目标拿留资数去填，数字看着漂亮但名不符实。
+    case 'signups_count':
+      return fetchBookings(supabase, clientId)
+    case 'messaging_started':
+      return fetchAdsOutcome(supabase, clientId, 'messaging_started')
     case 'ai_visibility_score':
       return fetchAiVisibilityScore(supabase, clientId)
     default:
@@ -629,4 +642,148 @@ async function fetchAiVisibilityScore(
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })
+}
+
+// ── ads outcomes（spec 2026-09-24 ads IMPACT §3 G1）────────────────────────────
+// 广告结果从 ad_daily_insights 按 outcome-ladder 口径累计；任何一行归不上（M2）→ unknown，绝不当 0。
+
+interface ActiveGoalPeriod {
+  period_start: string
+  period_end: string
+}
+
+/** The exact columns InsightForOutcome needs — never select '*'. */
+interface AdsetInsightRow {
+  reach: number | null
+  video_thruplays: number | null
+  actions: ReadonlyArray<{ action_type: string; value: string }> | null
+}
+
+const ADSET_INSIGHT_COLUMNS = 'reach, video_thruplays, actions'
+const ADSET_PAGE_SIZE = 1000
+
+async function loadActiveGoalPeriod(
+  supabase: SupabaseClient,
+  clientId: string,
+): Promise<{ ok: true; period: ActiveGoalPeriod } | { ok: false; reason: string; unknown: true }> {
+  const { data, error } = await supabase
+    .from('goals')
+    .select('period_start, period_end')
+    .eq('client_id', clientId)
+    .eq('status', 'active')
+    .maybeSingle<ActiveGoalPeriod>()
+
+  if (error) return { ok: false, reason: error.message, unknown: true }
+  if (!data) return { ok: false, reason: 'no active goal', unknown: true }
+  return { ok: true, period: data }
+}
+
+/**
+ * Page through ad_daily_insights with .range() until a short page arrives.
+ * PostgREST silently caps a single response at 1000 rows, so a single read
+ * would under-count without ever erroring.
+ */
+async function loadAdsetRowsPaged(
+  supabase: SupabaseClient,
+  clientId: string,
+  period: ActiveGoalPeriod,
+): Promise<{ ok: true; rows: AdsetInsightRow[] } | { ok: false; reason: string; unknown: true }> {
+  const rows: AdsetInsightRow[] = []
+  for (let from = 0; ; from += ADSET_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('ad_daily_insights')
+      .select(ADSET_INSIGHT_COLUMNS)
+      .eq('client_id', clientId)
+      .eq('level', 'adset')
+      .gte('insight_date', period.period_start)
+      .lte('insight_date', period.period_end)
+      .range(from, from + ADSET_PAGE_SIZE - 1)
+
+    if (error) return { ok: false, reason: error.message, unknown: true }
+    const page = (data ?? []) as AdsetInsightRow[]
+    rows.push(...page)
+    if (page.length < ADSET_PAGE_SIZE) break
+  }
+  return { ok: true, rows }
+}
+
+/**
+ * Sum one outcome step across rows. Any row that cannot be attributed (M2)
+ * makes the whole total UNKNOWN — never 0.
+ */
+function sumOutcome(
+  step: OutcomeStep,
+  rows: AdsetInsightRow[],
+): { ok: true; value: number } | { ok: false; reason: string; unknown: true } {
+  let sum = 0
+  for (const row of rows) {
+    const count = countOutcome(step, row, { messagingReferralAvailable: false, optimizationGoal: undefined })
+    if (count.value === null) {
+      return { ok: false, reason: '主结果归不到广告（§14 M2）', unknown: true }
+    }
+    sum += count.value
+  }
+  return { ok: true, value: sum }
+}
+
+/**
+ * 真成交数（报名/预订）——读 `me_sale_outcomes` 的 purchase 行。
+ *
+ * 这些行由 CRM 表格同步流水线写入（`cts-crm-sheet-sync`），它的唯一输入是
+ * 客户 CRM 表「阶段Stage」那一列填了 `4-已订金` / `5-已出行归来`。
+ *
+ * 🔴 一条 purchase 都没有时返回 `unknown`，**绝不返回 0**：
+ *    「还没有人成交」和「没人填阶段那一列」在库里长得一模一样，
+ *    报 0 等于替客户断言生意没做成。2026-09-24 实测：613 条 lead、0 条 purchase，
+ *    而同期 CRM 表 1599 行里只有 1 行填了阶段——正是后者。
+ *    日报会显示「未判」并带上原因，这本身就是在催那一格被填上。
+ */
+async function fetchBookings(supabase: SupabaseClient, clientId: string): Promise<AutoFetchResult> {
+  const goal = await loadActiveGoalPeriod(supabase, clientId)
+  if (!goal.ok) return goal
+
+  // head:true → 不取行只取计数，计数在 `count` 里（`data` 是 null，别去读它的 length）。
+  const { count, error } = await supabase
+    .from('me_sale_outcomes')
+    .select('id', { count: 'exact', head: true })
+    .eq('client_id', clientId)
+    .eq('outcome_kind', 'purchase')
+    .is('redacted_at', null)
+    .neq('review_status', 'rejected')
+    .gte('occurred_at', `${goal.period.period_start}T00:00:00Z`)
+    .lte('occurred_at', `${goal.period.period_end}T23:59:59Z`)
+
+  if (error) return { ok: false, reason: error.message, unknown: true }
+
+  if (!count) {
+    return {
+      ok: false,
+      unknown: true,
+      reason: '成交数还没有任何记录 —— 可能是真的还没成交，也可能是 CRM「阶段」那一列没人填（两者在库里长得一样，不猜）',
+    }
+  }
+  return { ok: true, value: count, source: 'me_sale_outcomes', snapshot_date: goal.period.period_end, label: '报名/预订' }
+}
+
+async function fetchAdsOutcome(
+  supabase: SupabaseClient,
+  clientId: string,
+  step: OutcomeStep,
+): Promise<AutoFetchResult> {
+  const goal = await loadActiveGoalPeriod(supabase, clientId)
+  if (!goal.ok) return goal
+
+  const loaded = await loadAdsetRowsPaged(supabase, clientId, goal.period)
+  if (!loaded.ok) return loaded
+
+  const summed = sumOutcome(step, loaded.rows)
+  if (!summed.ok) return summed
+
+  return {
+    ok: true,
+    value: summed.value,
+    source: 'ad_daily_insights',
+    snapshot_date: goal.period.period_end,
+    label: step,
+  }
 }

@@ -2,15 +2,17 @@
  * GET/PATCH /api/clients/[id]/ad-strategy-config
  *
  * Reads and updates a client's Ad Strategy Engine control settings (on/off,
- * digest recipients). Backs the Settings panel (P21.K.5). Config edits go
- * through this route — never raw SQL — per the FDE-config red-line.
+ * digest recipients, daily budget cap, autonomy mode, creative pool). Backs the
+ * Settings panel (P21.K.5). Config edits go through this route — never raw SQL —
+ * per the FDE-config red-line. Creative-pool *approval* is NOT done here; it has
+ * its own endpoint (/creative-pool/approve).
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { guardGlobalAdmin } from '@/lib/auth/require-admin'
-import { loadAdStrategyConfig } from '@/lib/ads-strategy/config'
+import { loadAdStrategyConfig, parseCreativePool, type CreativePoolEntry } from '@/lib/ads-strategy/config'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,7 +46,13 @@ export async function PATCH(
   const staffGuard = await guardGlobalAdmin()
   if (staffGuard) return staffGuard
 
-  let body: { enabled?: unknown; digest_recipients?: unknown }
+  let body: {
+    enabled?: unknown
+    digest_recipients?: unknown
+    daily_budget_cap_cents?: unknown
+    autonomy_mode?: unknown
+    creative_pool?: unknown
+  }
   try {
     body = await req.json()
   } catch {
@@ -68,6 +76,40 @@ export async function PATCH(
     const bad = emails.find(e => !EMAIL_RE.test(e))
     if (bad) return NextResponse.json({ error: `Invalid email: ${bad}` }, { status: 400 })
     update.digest_recipients = emails
+  }
+
+  if (body.daily_budget_cap_cents !== undefined) {
+    const v = body.daily_budget_cap_cents
+    if (v !== null && !(Number.isInteger(v) && (v as number) > 0)) {
+      return NextResponse.json({ error: 'daily_budget_cap_cents must be a positive integer or null' }, { status: 400 })
+    }
+    update.daily_budget_cap_cents = v
+  }
+
+  if (body.autonomy_mode !== undefined) {
+    if (body.autonomy_mode !== 'observe' && body.autonomy_mode !== 'bounded_auto') {
+      return NextResponse.json({ error: "autonomy_mode must be 'observe' or 'bounded_auto'" }, { status: 400 })
+    }
+    update.autonomy_mode = body.autonomy_mode
+  }
+
+  if (body.creative_pool !== undefined) {
+    if (!Array.isArray(body.creative_pool)) {
+      return NextResponse.json({ error: 'creative_pool must be an array' }, { status: 400 })
+    }
+    // 这条路由永远不能"批准"素材（spec 2026-09-24 §3 G1；2026-08-04 事故：PATCH 曾接受客户端 approved_by）。
+    // 客户端若带 status:'approved' 或 approved_by / approved_at → 拒绝整个请求，不静默降级。
+    const tainted = body.creative_pool.some(e =>
+      typeof e === 'object' && e !== null &&
+      (('status' in e && e.status === 'approved') || 'approved_by' in e || 'approved_at' in e))
+    if (tainted) {
+      return NextResponse.json({ error: 'creative_pool approval must go through /creative-pool/approve' }, { status: 400 })
+    }
+    const parsed = parseCreativePool(body.creative_pool)
+    if (parsed.length !== body.creative_pool.length) {
+      return NextResponse.json({ error: 'creative_pool has malformed entries (need kind, ref, status=candidate)' }, { status: 400 })
+    }
+    update.creative_pool = parsed.map((e): CreativePoolEntry => ({ kind: e.kind, ref: e.ref, status: 'candidate' }))
   }
 
   const { error } = await supabaseAdmin

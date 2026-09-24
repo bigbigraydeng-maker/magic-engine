@@ -102,8 +102,8 @@ export default function PortalLoginPage({ searchParams }: Props) {
             </h2>
             <p className="mt-2 text-sm leading-6 text-me-charcoal/60">
               {fromProspect
-                ? 'Use your email to receive a secure link back to your saved report.'
-                : 'Use your email to receive a secure link back to your report or dashboard.'}
+                ? 'Sign in with Google or your email and password to return to your saved report.'
+                : 'Sign in with Google or your email and password to return to your workspace.'}
             </p>
           </div>
 

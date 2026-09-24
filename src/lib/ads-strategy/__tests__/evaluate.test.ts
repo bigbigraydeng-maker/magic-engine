@@ -161,3 +161,57 @@ describe('buildNarrativePayload', () => {
     expect(p.campaigns[0].latest_spend_7d).toBe(400)  // 5 × $80, not 7 × $80
   })
 })
+
+/**
+ * 评估日从「UTC 的昨天」改成「广告账户时区的昨天」之后（2026-09-24），
+ * PAUSED_AFTER_DAYS = 3 的行为必须原样不变。
+ *
+ * 为什么要单独钉：修之前取数窗口和评估日**都**按 UTC 算，两边同步偏移所以停投判定
+ * 是对的（实测 2026-09-22 那天 7 条广告里 2 条判 paused，它俩最后花钱都是 09-16，
+ * 确是真停投）。这次把评估日往后挪一天，如果数据侧没有同样挪，这个平衡就会被打破，
+ * 在投广告会被误判成停投——那正是 PM 2026-09-24 授权的自动收放回路最贵的错误方向。
+ */
+describe('评估日改按账户时区之后的停投判定', () => {
+  /** 连续 n 天、最后一天是 endDay 的日数据（9 月）。 */
+  function daysEnding(id: string, name: string, endDay: number, n: number): Row[] {
+    return Array.from({ length: n }, (_, i) => ({
+      entity_id: id,
+      entity_name: name,
+      insight_date: `2026-09-${String(endDay - n + 1 + i).padStart(2, '0')}`,
+      ctr: 0.03,
+      cost_per_result: null,
+      results: 2,
+      spend: 80,
+      impressions: 5000,
+      frequency_7d: i === n - 1 ? 1.2 : null,
+    }))
+  }
+
+  const NZ_DAY  = '2026-09-23'   // 奥克兰账户的「昨天」（cron 17:00 UTC 触发时）
+  const UTC_DAY = '2026-09-22'   // 同一刻 UTC 的「昨天」——修复前用的那一天
+
+  it('在投广告：数据和评估日一起前移一天，仍然判在投，而且看得到最新那一天', () => {
+    const live = buildNarrativePayload(grouped(daysEnding('a', 'Live', 23, 21)), NZ_DAY)
+    expect(live.campaigns[0].verdict).not.toBe('paused')
+    expect(live.campaigns[0].ctr_series.at(-1)?.date).toBe('2026-09-23')
+
+    // 修复前：同一批数据按 UTC 的昨天评估，09-23 那天存了也看不到。
+    const stale = buildNarrativePayload(grouped(daysEnding('a', 'Live', 23, 21)), UTC_DAY)
+    expect(stale.campaigns[0].ctr_series.at(-1)?.date).toBe('2026-09-22')
+  })
+
+  it('真停投的仍判停投：最后花钱 09-16，评估日 09-23（生产实测的那两条）', () => {
+    const stopped = buildNarrativePayload(grouped(daysEnding('a', 'Stopped', 16, 10)), NZ_DAY)
+    expect(stopped.campaigns[0].verdict).toBe('paused')
+    expect(stopped.campaigns[0].headline).toContain('2026-09-16')
+  })
+
+  it('宽限期没被吃掉：数据比评估日晚 1 天 / 2 天都还不算停投，第 3 天才算', () => {
+    const verdictFor = (lastDay: number) =>
+      buildNarrativePayload(grouped(daysEnding('a', 'Lagging', lastDay, 20)), NZ_DAY).campaigns[0].verdict
+
+    expect(verdictFor(22)).not.toBe('paused')   // 落后 1 天（某个账户当天还没写进来）
+    expect(verdictFor(21)).not.toBe('paused')   // 落后 2 天
+    expect(verdictFor(20)).toBe('paused')       // 落后 3 天 —— 边界仍在原处
+  })
+})

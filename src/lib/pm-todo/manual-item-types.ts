@@ -15,6 +15,7 @@ import type { EmailReplyItemKind } from './email-reply-items'
 import type { BindingRequestItemKind } from './binding-request-items'
 import type { PageBindingItemKind } from './page-binding-items'
 import type { CommentScopeTodoKind } from './comment-scope-items'
+import type { LeadSheetItemKind } from './lead-sheet-items'
 
 /**
  * 这些条目**链接坏了也照样下发**。
@@ -105,9 +106,21 @@ export type ManualItemKind =
   | 'platform_candidate_review_due'
   /** 客户方案文档里写了一次性人工动作（如"明早 09:00 前扫一眼 xx"），只登记在文档里等于没下发 */
   | 'client_doc_manual_task'
+  /** 台账（docs/ledger）：决定了超过 7 天没动，或过了验收日还没做 */
+  | 'ledger_decided_stale'
+  /** 台账：做完了、到了该验的日子还没验 */
+  | 'ledger_done_unverified'
+  /** 台账：验过了，不成——一直出现直到有人处理 */
+  | 'ledger_verification_failed'
+  /** 台账目录读不出来或某条格式不合规——这一栏空着不等于没事 */
+  | 'ledger_unreadable'
+  /** 台账：到期的卡两天没被夜巡盖章——夜巡没来，不是没事 */
+  | 'ledger_patrol_missing'
   /** 客人像是说他付款了，但不是我们自己确认的 —— 只有人能核对到账，不许机器自己打 paid 标签 */
   | 'paid_signal_needs_review'
   | CommentScopeTodoKind
+  /** 线索没写进客户的 Google 表格 —— 销售看的那张表缺人，留资 90 天后永久取不回 */
+  | LeadSheetItemKind
   /** 执行内核停手 / 等审批 / 被规则挡下 —— 必须有人看见，不许死在日志里 */
   | 'kernel_needs_human'
   /** 有成交/咨询等着人核对要不要告诉广告平台 —— 撤不回，所以必须人点 */

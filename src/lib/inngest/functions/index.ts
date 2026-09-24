@@ -19,6 +19,8 @@ import { seoMetaCycleFanOut, seoMetaCycleRunOne } from './seo-meta-cycle'
 import { competitorWatchWeeklyFanOut, competitorWatchRunOne } from './competitor-watch-weekly'
 import { aiVisibilityWeeklyFanOut, aiVisibilityTrackerRunOne } from './ai-visibility-weekly'
 import { reelBatchRender } from './reel-batch-render'
+import { leadSheetSyncFanOut, leadSheetSyncOne } from './lead-sheet-sync'
+import { crmLeadFollowupDigest } from './crm-lead-followup-digest'
 
 export const cloudFunctions = [
   webIntelligenceCapture,
@@ -48,6 +50,9 @@ export const cloudFunctions = [
   aiVisibilityWeeklyFanOut,
   aiVisibilityTrackerRunOne,
   reelBatchRender,
+  leadSheetSyncFanOut,
+  leadSheetSyncOne,
+  crmLeadFollowupDigest,
 ]
 
 /** 命名空间自检：所有注册函数 id 必须以 cloud- 开头（契约测试 + 运行期双保险）。 */
