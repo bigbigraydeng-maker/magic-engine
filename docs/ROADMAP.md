@@ -94,26 +94,51 @@ PR #1973 给 Meta 留资同步加了「上一轮已办完就别重跑」的闸�
 
 ---
 
-## 线索同步到客户 Google 表格：上线前还差两步人工动作（2026-09-24，B 级，P1）
+## 线索同步到客户 Google 表格：上线前还差几步人工动作（2026-09-24 最终改为「写老表」，B 级，P1）
 
 **§11 打分**：频率高（每天都有新线索）/ IMPACT 闭环关键度高（卡在 Act，线索进不了销售手上）/ 收入关联度高（留了电话没人跟＝丢单）→ 零低、三高 → **P0**（代码已交付，剩下的人工动作按 P1 挂着）。
 
-代码已在 PR #1972（`src/lib/lead-sheets/` + `client_lead_sheet_routes`）。**这条链路现在一行也写不进去**，还差：
+代码已在 PR #1972（`src/lib/lead-sheets/` + `client_lead_sheet_routes`）。2026-09-24 当天 PM 改口三次，**最终口径是第三次**：
+「不要过度开发，就按照 fb 默认的表格式，把几个 form 的信息拉齐到一张 form 上」——
+也就是**写客户一直在用的那张老表**（`FB 即时表单 Infrontof2000` / `Sheet1`，
+`1vISaVkVkcQMSaR6Jo7xdmym6Ed5eE-q9025snYWYDVA`），保持 Facebook 原样的 32 列，
+只在表尾追加两列给 v4 表单多问的两个问题。**不新建表、不翻中文、不合并列。**
+前两版（分两张表 / 汇总进一张新建的 13 列中文表）作废。
 
-1. **CTS 的 Google 连接要重新授权一次** —— 现有令牌只有 `spreadsheets.readonly`，没有写权限。Google 不会自动升级 scope，必须有人重新走一次
+**这条链路现在一行也写不进去**，还差：
+
+1. **在 Sheet1 表尾加两列**（第 33、34 列 = AG / AH），表头逐字写 `when_are_you_hoping_to_travel?` 和 `whats_your_budget_per_person_nzd?`（Facebook 原字段名，不要翻中文）。
+   🔴 **必须加在最右边**：下面那两条下游读的是固定列下标，中间插一列会让它们整体错位。
+   排错了不会闷声错位——配置里带了一份 34 格的「表头签名」，系统开工前逐格比对，对不上就整轮停手并出待办。
+2. **CTS 的 Google 连接要重新授权一次** —— 现有令牌只有「看表格」的权限。写权限 `spreadsheets` 早在 #1972 就合进 `COMBINED_GOOGLE_SCOPES` 了，本次没再改 scope；已经连过 GSC/GA4 的客户不会因此掉线，只是拿不到新权限，而需要写表格的只有 CTS。走一次
    `https://app.magicengine.com.au/api/auth/google/connect?client_id=c0000000-0000-0000-0000-000000000000&flow=admin`，在同意页上勾「查看、修改 Google 表格」。
-2. **migration + seed SQL 还没 apply**（`supabase/migrations/20260925000003_client_lead_sheet_routes.sql` · `scripts/seed-cts-lead-sheet-routes.sql`），按规矩等 PM 显式 go。
-3. **合并后去 Inngest 后台对 `/api/inngest` 点一次 Sync**，否则新函数安静地不跑。
+3. **两个 migration + seed SQL 还没 apply**（`supabase/migrations/20260925000003_client_lead_sheet_routes.sql` · `…000004_client_lead_sheet_routes_header.sql` · `scripts/seed-cts-lead-sheet-routes.sql`），按规矩等 PM 显式 go。
+4. **合并后去 Inngest 后台对 `/api/inngest` 点一次 Sync**，否则新函数安静地不跑。
 
-**另一件待 PM 决定的事**：旧表（`FB 即时表单 Infrontof2000`）实测已经有另一条管道在写（每天 7–16 行，带着 ME 库里没有的广告组名/系列名/表单名，几乎可以肯定是客户自己账号里的 Zapier/Make）。本 PR 把 ME 定位成"补漏的安全网"——只补别人漏掉的，不重复写。要不要反过来让 ME 接管、把那条外部管道停掉，是 PM 的决定，没有替 PM 做。
+### ✅ 「切表会打断两条下游」这条风险随这次决定消失了
 
-**已知留白**（不是 bug，是如实留空）：旧表的 `adset_name` / `campaign_name` 从 `ad_entity_snapshots` 回查，`form_name` 本地没有缓存一律留空。要补的话得另接一次 Meta Graph 查询，本轮没做。
+`src/lib/conversions/cts-crm-sheet-sync-run.ts`（读表取成交喂广告回传）和
+`src/lib/crm/sheet-followup-sync.ts`（读员工跟进记录回灌 CRM）都把这张表的 id 写死在代码里。
+上一版切到新表会让它们安静地停在切表当天、日报还是绿的。**现在不切表，这个风险不存在**，
+两条下游一行都不用改。`CLIENT_FOLLOWUP_SHEETS` 跟 `client_lead_sheet_routes` 指的是同一张表、
+同一个 tab，两处配置重复这条**降回普通欠账**（待认领，见下）。
 
-**子牙复审记下的三条欠账**（都不致命，不挡合并，待认领）：
+### 待 PM 决定的两件事
+
+- **旧表上那条外部管道要不要停。** 这张表每天还在进 7–16 行（带着 ME 库里没有的广告组名/系列名/表单名，几乎可以肯定是客户自己账号里的 Zapier/Make）。ME 现在的定位是**补漏安全网**：先读表 → 已有的跳过 → 只补它漏掉的。实测 2026-09-20 以来库里 26 条线索，那条管道写进去了 23 条，漏的正好是 v4 表单那 3 条（它一条 v4 线索都没进过表）。两者并存不会写重（判重靠第 1 列的 `l:` 线索编号），所以**不急**；要不要让 ME 接管，PM 拍。
+- **补档窗口要不要往前调。** 现在卡在 `2026-09-20`，开闸第一轮只会追加 3 行（就是那 3 条 v4）。2026-07-24 ~ 2026-09-20 这一段往前调是安全的（全是真线索编号，判重挡得住重复）。
+  🔴🔴 **但 2026-07-24 之前调不得**：库里 735 条线索有 **347 条的 `source_ref` 不是 Facebook 线索编号**，而是历史导入时拼的 `邮箱|时间戳`（如 `dave.attwell@outlook.com|2026-06-14T...`），全部落在 2026-06-14 ~ 2026-07-25。往前调会（a）在第 1 列写出邮箱、（b）机器键永远对不上 → **那 347 个人在销售正在用的表上被重写一遍**。要补这一段得先把 `contact_touchpoints.source_ref` 回填成真编号，不是改个日期的事。
+
+**已知留白**（不是 bug，是如实留空）：
+- `form_name`（第 10 列）**必然是空的** —— `leads.ts` 本地没有表单名缓存，一律留空。表单编号在第 9 列，认得出是哪张表单。
+- `lead_status`（第 17 列）、员工跟进记录 / Many Chat / 邮件追踪那一片（第 18–32 列）一律留空 —— 别的管道和员工手工维护的，这条链路只 append 不覆盖，碰不到已有内容。
+- `inbox_url`（第 32 列）留空，**这是一个留给 PM 的问题**：线索的问答里带着一个叫 `inbox_url` 的字段（Meta 原样给的），v3 表单上是真的 Messenger 会话链接，可 v4 那三条的值是「Nil」「What answer」「the right itinerary」，像是 v4 建表单时把它改成了自由文本题。表里现有 703 行这一列全是空的，本轮跟现状保持一致。
+
+**待认领欠账**（都不致命，不挡合并）：
 
 1. **`src/lib/lead-sheets/` 名字是「线索」，实际只吃 Meta 即时表单。** `leads.ts` 把 `.eq('channel','meta_lead_form')` 写死在共享层。第二个客户的线索如果来自官网表单或 GHL，这个模块要改代码。两条路二选一：目录改名点明 meta-lead；或给路线表加一列 `source_channel`（默认 `meta_lead_form`）由取数层读。
-2. **`CLIENT_FOLLOWUP_SHEETS`（`src/lib/crm/sheet-followup-sync.ts`）是同一件事的第二套配置**，把 CTS 的 client_id + 表格 id 写死在共享代码里，指的还是**同一张表**。它自己的注释承认「等第二个客户再挪进表」——本 PR 恰好把那张表建出来了。两套配置并存 = 换表要改两处，漏一处就一条链路读新表一条读旧表。建议收编进 `client_lead_sheet_routes`。
-3. **列对齐没有任何校验。** 配置说 32 列就写 32 列，没人比对过表头或现有行宽；有人在表格中间插一列，之后每一行都错位而回执全绿。模块已经把整张表读回来了，第一行是白拿的——可以加一个可选的列数/表头签名断言，对不上就停手不写。这张表是销售直接看的，错位比不写更糟。
+2. **`CLIENT_FOLLOWUP_SHEETS` 是同一张表的第二套配置。** 现在两处都指向同一张表同一个 tab，不会打架，但改表 id 要记得改两处。收编进 `client_lead_sheet_routes` 是正事，不急。
+3. **347 条历史线索的 `source_ref` 不是真线索编号**（见上）。修它才能补 2026-07-24 之前的历史。
 
 另外两条小的：`registry.ts` 里这条的 `schedule` 是手抄的，`registry.test.ts` 没有对它做「跟函数定义一致」的断言（漂移了 CI 不会红）；`leads.ts` 回查广告组/系列名字时把 `ad_entity_snapshots` 的全部历史快照分页拉回来，只为取一个名字，每小时一次的无谓开销。
 

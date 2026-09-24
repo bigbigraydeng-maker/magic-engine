@@ -160,7 +160,7 @@ export const leadSheetSyncOne = inngest.createFunction(
   async ({ event, step }): Promise<LeadSheetClientReceipt> => {
     const clientId = String(event.data?.client_id ?? '')
     if (!clientId) {
-      return { clientId: '', clientName: null, routes: [], unrouted: 0, error: '事件里没有 client_id' }
+      return { clientId: '', clientName: null, routes: [], unrouted: 0, error: '事件里没有 client_id', warning: null }
     }
 
     // 🔴 开始时刻也必须在步骤**里**取：步骤外的代码每次重放都会重跑一遍，

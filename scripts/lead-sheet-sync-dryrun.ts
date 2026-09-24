@@ -15,11 +15,12 @@
 
 import { supabaseAdmin } from '../src/lib/supabase'
 import { readFileSync } from 'node:fs'
-import { loadClientRoutes, parseRoute } from '../src/lib/lead-sheets/config'
+import { loadClientRoutes, parseRoute, validateRouteLayouts } from '../src/lib/lead-sheets/config'
 import { loadLeadsSince } from '../src/lib/lead-sheets/leads'
 import { buildRow, emptyNotes } from '../src/lib/lead-sheets/row'
 import { pickRoute } from '../src/lib/lead-sheets/route-match'
-import { syncOneRoute } from '../src/lib/lead-sheets/sync'
+import { syncRoutes } from '../src/lib/lead-sheets/sync'
+import type { LeadSheetRouteReceipt } from '../src/lib/lead-sheets/types'
 
 async function main(): Promise<void> {
   const clientId = process.argv[2]
@@ -51,6 +52,10 @@ async function main(): Promise<void> {
       try { routes.push(parseRoute(row)) }
       catch (e) { invalid.push({ routeKey: row.route_key, reason: e instanceof Error ? e.message : String(e) }) }
     }
+    // 跟 `loadClientRoutes` 共用同一道跨路线校验 —— 文件里两条同目标路线只要
+    // 列位/判重列/表头/时区有一处不一致，不跑这道就会在错的共享快照上试算,
+    // 跟生产加载的结果对不上（见 config.ts::validateRouteLayouts 顶部注释）。
+    validateRouteLayouts(routes, invalid)
     console.log(`(配置来自文件 ${process.argv[routesFlagIdx + 1]}，不是生产库)`)
   } else {
     ;({ routes, invalid } = await loadClientRoutes(supabaseAdmin, clientId))
@@ -80,7 +85,7 @@ async function main(): Promise<void> {
   // 逐条路线把「这一轮会写什么」摆出来。
   const receipt = {
     clientId, clientName: client?.name ?? null, unrouted: 0, error: null as string | null,
-    routes: [] as Awaited<ReturnType<typeof syncOneRoute>>[],
+    routes: [] as LeadSheetRouteReceipt[],
   }
   const byRoute = new Map<string, typeof allLeads>()
   for (const lead of allLeads) {
@@ -89,11 +94,9 @@ async function main(): Promise<void> {
     const b = byRoute.get(r.routeKey)
     if (b) b.push(lead); else byRoute.set(r.routeKey, [lead])
   }
-  for (const route of routes) {
-    receipt.routes.push(
-      await syncOneRoute(clientId, route, byRoute.get(route.routeKey) ?? [], { dryRun: !live }),
-    )
-  }
+  // 调线上那一份，不手抄 —— 同一张表只读一次、判重键在几条路线之间共享的规矩
+  // 必须跟真跑完全一致，否则这张试算报告就不能拿来做开闸决定。
+  receipt.routes = await syncRoutes(clientId, routes, byRoute, { dryRun: !live })
 
   console.log(`\n${'='.repeat(70)}`)
   for (const r of receipt.routes) {

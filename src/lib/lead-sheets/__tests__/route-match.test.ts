@@ -14,6 +14,7 @@ function route(over: Partial<LeadSheetRoute>): LeadSheetRoute {
     valueLabels: {},
     dedupColumns: [0],
   dedupIdColumn: null,
+  headerRow: null,
     timezone: 'Pacific/Auckland',
     backfillSince: null,
     enabled: true,
