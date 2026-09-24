@@ -5,6 +5,41 @@
 
 ---
 
+### 2026-09-24（Meta 留资同步：同一条线索每轮重打一次 Mailchimp，办完的不再重跑）
+
+`getLeadWatermark` 每轮回看 24 小时（为补 Meta 延迟吐出来的 lead，这个窗口必须留着），但
+`ingestMetaLead` 没有「这条上轮已经办完」的判断，于是同一条 lead 每轮被完整重跑，每次真打
+Mailchimp 两下。生产实测（CTS，2026-09-05~09-23，按 clientId 全量求和）：**188 条真实线索被
+重复处理 4926 次**，其中 4697 次回 `already_member`。
+
+更糟的是回执被覆盖：Phase B 每轮把 `metadata.mailchimp_result` 写回 `pending`、Phase D 再写本轮
+结果，所以库里最终态只反映**最后一次尝试**。195 条 `already_member` : 1 条 `subscribed` 因此被
+误读成「留资的几乎都是老客户」——那不是业务事实，是重跑次数的影子。
+
+PR [#1973](https://github.com/bigbigraydeng-maker/magic-engine/pull/1973)：
+- 闸门装在编排层 `lib/meta/leads-sync.ts` 的 `readSettledLeadIds()`，**`lib/crm/meta-lead.ts` 的
+  Phase A→D 一个字没动**（那段带着合同 5425312107 / 5426843158 两份条款和两次静默事故的疤）
+- 判据 `isMailchimpSettled()` 住在 `lib/mailchimp/outlet-tally.ts`，跟 `isOutletGap` 同一套词汇表。
+  只认 `subscribed` 和「`already_member` 且标签确实落地」；`pending` / `skipped:*` / `failed:*` /
+  标签没打上一律照常重跑 —— 24 小时窗口的重试能力完整保住
+- `not_attempted` 不算办完（它只代表「压根没给标签名」）；本轮解析出明确 opt-out 的照常走完整
+  流程（那一位要写进 `do_not_contact`）；读回执失败或回执是垃圾形状一律当没办完
+- 切批 200 查（沿用 `knowledge/mining.ts` issue #1760 验证过的安全值）；读失败进
+  `MetaLeadsSyncResult.settledLookupFailures`，**不混进 `mailchimp` tally**（混进去会被日报和今日
+  待办误报成出口故障）
+- `already_synced` 进 `EXPECTED_SKIP_REASONS` 白名单。⚠️ **它是健康信号**：稳态下一轮的 tally 长成
+  `{'skipped:already_synced': 13}`，今后任何健康检查都不得拿「没有 subscribed」当故障判据
+- `leadsIngested` / `newContacts` 口径不变，PM 每天看的「今天进了几个人」不会无声变样
+
+⚠️ 188 条历史行的「第一次结果」已被覆盖、不可恢复，那个 195:1 的误读修不回来，只能从上线后
+重新积累。**不要回填。**
+
+附带查清（不在本 PR 范围，已进 ROADMAP）：CTS 名单里相当一部分人是**客户自己**的 Mailchimp 原生
+Meta Lead Ads / Zapier / Make 三条平行管道当天送进去的 —— 所以 `already_member` 也不等于
+「这是老客户」，很大一部分只是别人比我们快。
+
+---
+
 ### 2026-09-24（广告健康判定 / 日报的「评估日」也按广告账户时区算，跟取数窗口对齐）
 
 上一条修好了取数那一半：数据按账户时区的「昨天」存进 `ad_daily_insights`。但判定这一半还在用
