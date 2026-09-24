@@ -136,6 +136,8 @@ interface ContactRow {
   hasMessenger: boolean
   stage: string | null
   stageLabel: string | null
+  /** 人工置顶时间（contacts.pinned_at）。非 null = 被钉在名单最前面。 */
+  pinnedAt: string | null
   segment: string
   segmentLabel: string
   temperature: 'hot' | 'warm' | 'cold' | 'off'
@@ -661,6 +663,37 @@ export default function CrmAllContactsPage() {
     window.setTimeout(() => setToast(null), 2400)
   }
 
+  /**
+   * 点星星：置顶 / 取消置顶。
+   *
+   * 先本地改（乐观更新），失败再翻回来并说一句 —— 星星是即时反馈的控件，
+   * 等一个来回才变色会让人以为没点上、连点两下。
+   */
+  const togglePin = async (row: ContactRow) => {
+    const next = row.pinnedAt === null
+    setRows((prev) =>
+      prev.map((r) =>
+        r.contactId === row.contactId
+          ? { ...r, pinnedAt: next ? new Date().toISOString() : null }
+          : r,
+      ),
+    )
+    try {
+      const res = await fetch(`/api/clients/${clientId}/crm/contacts/${row.contactId}/pin`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pinned: next }),
+      })
+      if (!res.ok) throw new Error()
+    } catch {
+      setRows((prev) =>
+        prev.map((r) => (r.contactId === row.contactId ? { ...r, pinnedAt: row.pinnedAt } : r)),
+      )
+      setToast('置顶失败，请重试')
+      window.setTimeout(() => setToast(null), 2400)
+    }
+  }
+
   const toggleSort = (key: 'firstSeenAt' | 'lastTouchAt') => {
     if (sortKey === key) {
       setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))
@@ -677,7 +710,7 @@ export default function CrmAllContactsPage() {
     return sortDir === 'desc' ? bv - av : av - bv
   })
 
-  const colCount = 6 + columns.length
+  const colCount = 7 + columns.length
   const sortArrow = (key: 'firstSeenAt' | 'lastTouchAt') =>
     sortKey === key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
 
@@ -766,6 +799,7 @@ export default function CrmAllContactsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-me-charcoal/10 text-left text-xs text-me-charcoal/50">
+                  <th className="px-2 py-3">⭐</th>
                   <th className="px-4 py-3">客人</th>
                   <th className="cursor-pointer select-none px-4 py-3" onClick={() => toggleSort('firstSeenAt')}>
                     进线时间{sortArrow('firstSeenAt')}
@@ -807,6 +841,22 @@ export default function CrmAllContactsPage() {
                       onClick={() => toggleDetail(r.contactId)}
                       className={`border-b border-me-charcoal/5 cursor-pointer hover:bg-me-ivory/40 ${expanded ? 'bg-me-ivory/50' : ''}`}
                     >
+                      <td className="px-2 py-3">
+                        {/* 点星星不能顺带展开抽屉 —— 两个动作是分开的。 */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void togglePin(r)
+                          }}
+                          title={r.pinnedAt ? '取消置顶' : '置顶'}
+                          aria-label={r.pinnedAt ? '取消置顶' : '置顶'}
+                          className={`p-1 text-base leading-none ${
+                            r.pinnedAt ? 'text-yellow-500' : 'text-me-charcoal/40 hover:text-me-charcoal'
+                          }`}
+                        >
+                          {r.pinnedAt ? '⭐' : '☆'}
+                        </button>
+                      </td>
                       <td className="px-4 py-3 font-medium text-me-charcoal">{r.name}</td>
                       <td className="px-4 py-3 text-me-charcoal/60">{fmtDate(r.firstSeenAt)}</td>
                       <td className="px-4 py-3 text-me-charcoal/60">

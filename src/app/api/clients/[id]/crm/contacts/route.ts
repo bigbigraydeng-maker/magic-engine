@@ -42,6 +42,7 @@ interface ContactRow {
   do_not_contact: boolean
   stage: string | null
   first_seen_at: string
+  pinned_at: string | null
 }
 
 interface TouchRow {
@@ -180,7 +181,7 @@ async function getPaged(clientId: string, query: ListQuery): Promise<NextRespons
 
     let pageBuilder = supabaseAdmin
       .from('contacts')
-      .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, first_seen_at')
+      .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, first_seen_at, pinned_at')
       .eq('client_id', clientId)
     if (filters.stages !== null) pageBuilder = pageBuilder.in('stage', filters.stages)
     if (filters.orExpr !== null) pageBuilder = pageBuilder.or(filters.orExpr)
@@ -283,7 +284,7 @@ export async function GET(
       fetchAll<ContactRow>((from, to) =>
         supabaseAdmin
           .from('contacts')
-          .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, first_seen_at')
+          .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, first_seen_at, pinned_at')
           .eq('client_id', clientId)
           .order('id', { ascending: true })
           .range(from, to),
@@ -458,6 +459,9 @@ function assembleRows(
       stage: c.stage,
       // 认不出的 stage_key（配置里删了）显示原值，别留空白。
       stageLabel: c.stage ? (stageMeta.get(c.stage)?.label ?? c.stage) : null,
+      // 人工置顶（contacts.pinned_at）。这一轮只读出来给页面显示 / 切换，
+      // 排序仍是系统算的 —— 置顶优先排序是下一轮的事。
+      pinnedAt: c.pinned_at,
       segment: seg.segment,
       segmentLabel: SEGMENT_ACTION_META[seg.segment].label,
       temperature: seg.temperature,
