@@ -84,6 +84,13 @@ export async function resolveAccountTimezone(adAccountId: string): Promise<strin
  * 错一天的新鲜度，比错一次自动暂停便宜得多，所以取最早。
  *
  * 一个账户都没有（或全都读不到时区）→ 回落 UTC 的昨天，与修复前行为一致。
+ *
+ * 🔴 读不到时区的账户被**排除在取最早之外**，不是当成 UTC 参与比较（卫青复审
+ *    2026-09-24）。cron 固定 17:00 UTC 跑，UTC 的「昨天」必然早于任何 UTC+7 以东账户的
+ *    「昨天」，所以只要有一个账户读不到时区（新绑的号，每 6 小时一次的设置快照还没为它
+ *    写过账户级行），它就会稳赢这个 min，把整个客户悄悄拖回修复前的 UTC 口径——没有报错、
+ *    没有日志，等于这次修复对这个客户静默失效。已知的账户时区是真事实，读不到是「不知道」，
+ *    不能让「不知道」压过「知道」。全都不知道时才回落 UTC。
  */
 export async function resolveClientEvaluationDate(
   adAccountIds: Array<string | null | undefined>,
@@ -92,7 +99,10 @@ export async function resolveClientEvaluationDate(
   const ids = Array.from(new Set(adAccountIds.filter((id): id is string => !!id)))
   if (ids.length === 0) return accountYesterday(null, now)
 
-  const timezones = await Promise.all(ids.map(id => resolveAccountTimezone(id)))
+  const timezones = (await Promise.all(ids.map(id => resolveAccountTimezone(id))))
+    .filter((tz): tz is string => tz !== null)
+  if (timezones.length === 0) return accountYesterday(null, now)
+
   // ISO 日期串按字典序排就是按时间排。
   return timezones.map(tz => accountYesterday(tz, now)).sort()[0]
 }

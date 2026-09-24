@@ -94,6 +94,15 @@ describe('resolveClientEvaluationDate', () => {
     await expect(resolveClientEvaluationDate(['act_new'], CRON_FIRE)).resolves.toBe('2026-09-22')
   })
 
+  it('🔴 一个账户读不到时区，不能把整个客户拖回 UTC 口径（卫青复审 2026-09-24）', async () => {
+    // 新绑的号，每 6 小时一次的设置快照还没为它写过账户级行。
+    accountsOn({ act_nz: 'Pacific/Auckland' })   // act_new 查不到
+
+    // 若把「读不到」当 UTC 参与取最早：17:00 UTC 跑时 UTC 的昨天是 09-22，
+    // 必然赢过奥克兰的 09-23，整个客户静默退回修复前的口径。
+    await expect(resolveClientEvaluationDate(['act_nz', 'act_new'], CRON_FIRE)).resolves.toBe('2026-09-23')
+  })
+
   it('一个广告账户都没有 → UTC 的昨天，且不查库', async () => {
     await expect(resolveClientEvaluationDate([null, undefined], CRON_FIRE)).resolves.toBe('2026-09-22')
     expect(timezoneProbe).not.toHaveBeenCalled()

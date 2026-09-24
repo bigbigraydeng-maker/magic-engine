@@ -5,6 +5,46 @@
 
 ---
 
+### 2026-09-24（广告健康判定 / 日报的「评估日」也按广告账户时区算，跟取数窗口对齐）
+
+上一条修好了取数那一半：数据按账户时区的「昨天」存进 `ad_daily_insights`。但判定这一半还在用
+`new Date()`（Render 跑在 UTC），`evaluateClientAdHealth` 的 `.lte('insight_date', 评估日)` 于是每天
+把刚存进来的最新一天滤掉——数据存对了，但要等一天才被看到。不报错、上下游各自的单测都绿。
+PM 2026-09-24 已授权广告全自动收放，决策输入晚一天不该留。
+
+PR [#1966](https://github.com/bigbigraydeng-maker/magic-engine/pull/1966)：
+- 新增 `src/lib/ads-strategy/account-timezone.ts`：`accountDayKey` / `resolveAccountTimezone` 从
+  `daily-insights.ts` **搬**过来（全仓只留一套时区解析），新增 `accountYesterday` 和
+  `resolveClientEvaluationDate`
+- 评估日 = 该客户名下每个广告账户「自己时区的昨天」里**最早**的那一天。体检和只读诊断都按
+  client_id 聚合、不分账户，取最新会把落后时区那个账户没跑完的半天当整天喂进相对基线——
+  在自动收放回路上是**误停在投广告**的方向。现网 7 个账户（6 × `Pacific/Auckland` +
+  1 × `Australia/Brisbane`）在 17:00 UTC 触发时算出来是同一天，这条取舍目前不产生损失
+- 判定 / 原日报 / 只读诊断 / 经营状态四处共用同一个 `evaluationDate`（原先 `insightDateStr` 与
+  `diagDate` 是两次独立的 UTC 计算），不会再出现「数据到 9/24、判定写 9/24、日报标题写 9/23」
+- `evaluate.ts` 未改：`PAUSED_AFTER_DAYS = 3` 的取值和比较都没动；数据和评估日一起前移一天，
+  偏移量不变，边界原地不动（新增用例钉住落后 1/2 天不算停投、第 3 天才算）
+- `portfolio/diagnostics/` 未改：`localDayEndUtc(date, timezone)` 本来就按账户时区把日期换算成
+  时刻边界，缺的只是传进去的日期串是 UTC 的
+- 验证：`vitest` ads-strategy 507 通过 / cron 路由 57 通过；`tsc --noEmit` 13 条错误与改前逐行一致
+  （既有基线，0 条在 ads-strategy）；`npm run build` 通过
+
+**卫青复审（2026-09-24，合并后）查出两件事**，后续 PR 处理：
+- 🔴 已修：只要有**一个**广告账户读不到时区，它按 UTC 算出来的「昨天」必然早于任何 UTC+7 以东的
+  账户，会稳赢 min 把整个客户静默拖回修复前口径。改成「读不到时区的账户排除在取最早之外，
+  全都读不到才回落 UTC」，并加变异验证过的回归用例
+- 🟡 记入 ROADMAP（P3）：D1「投放卡住」的报表滞后守卫在 UTC+7/+8 账户上会把跨午夜的零投放段
+  判成「判不了」且永不复评。现网没有这类账户，暂不动
+
+**过渡期的一个洞**：旧口径最后写的是 `insight_date = 2026-09-22`（2026-09-23 17:00 UTC 那轮），
+新口径下一轮（2026-09-24 17:00 UTC）写 `2026-09-24`，**`2026-09-23` 这一天不会有
+`ad_health_narratives` / `ads_growth_states` 行，也不会发那天的日报**，系统没有自动补写机制。
+（不是"多发一封"——那只会在同一个 UTC 日里先跑旧代码又手工重跑新代码时出现。）
+影响限于看板 30 天历史条上缺一格；断更告警看的是行的写入时间不是 `insight_date`，不会误报。
+要不要手工补跑那一天的体检由 PM 决定。
+
+---
+
 ### 2026-09-24（广告每日数据取数窗口按 UTC 算「昨天」，AU/NZ 客户每天少拿一天数据）
 
 `daily-insights.ts` 的 `requestWindow()` 用 `new Date()` 取「今天」，Render 跑在 UTC，而 Meta 是按
