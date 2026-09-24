@@ -1,7 +1,7 @@
 # Magic Engine — Agent 总架构
 
 > 最后更新：2026-06-03  
-> 权威来源：`src/lib/{ziya,zhangqian,huatuo,zhuge,luban,visual,blog,geo,davinci,weicheng,memory}/`  
+> 权威来源：`src/lib/{ziya,zhangqian,huatuo,zhuge,luban,visual,blog,geo,weicheng,memory}/`（`davinci/` 已撤，不建，见下方提示）  
 > 本文件管**规则**；各 agent 的行为细节见同目录的单独文件。
 
 ---
@@ -23,8 +23,10 @@ cron / 批量 / 基础设施                 随时被 FDE / 客户调用
                        ↓ 按任务路由
           ┌────────────┼──────────────────────────┐
        执行类         质量类                   工具类
-  张骞/华佗/鲁班    马良/李白                魏征（达芬奇已撤）
+  张骞/华佗/鲁班    马良/李白                魏征
 ```
+
+> 达芬奇已撤（PM 2026-09-24 拍板）：其审查清单并入子牙自审，见 [`10-ziya.md`](./10-ziya.md) §四b；不再作为独立 agent 存在，见 [`80-davinci.md`](./80-davinci.md)。
 
 **并联，不串联**：子牙和诸葛亮是两个独立入口，各自可调度下方 7 个工作 agent。
 
@@ -41,8 +43,9 @@ cron / 批量 / 基础设施                 随时被 FDE / 客户调用
 | **鲁班** | Sonnet/4o-mini | 执行：flywheel adapter + 落数据 | `src/lib/luban/` | ✅ |
 | **马良** | GPT-4o vision | 视觉学习：图片/视频质量 + 平台研究 | `src/lib/visual/` | 待扩展 |
 | **李白** | Claude Sonnet | 文案质量 + 全系统提示词管理 | `src/lib/blog/` + `src/lib/geo/` | 待扩展 |
-| **达芬奇** | — | **已撤（2026-09-24）**：7 个审查问题并入子牙 `10-ziya.md` §四b 固定清单 | `80-davinci.md` 仅历史参考 | 已撤 |
 | **魏征** | Sonnet + CI | 代码检查：关卡 + LLM审查 | `src/lib/weicheng/` | 待建 |
+
+> 达芬奇（原 PM：挑战设计方案，只读无执行权）已撤，见上方提示；`src/lib/davinci/` 不建。
 
 ### 垂直专项子模块（非独立 agent）
 
@@ -161,7 +164,7 @@ Step 1 — 规则匹配（0 LLM 成本）
   "数据采集"     → Data Engine adapter
   "Fix 执行"     → 诸葛亮 confirm → 鲁班 execute
   "代码审查"     → 魏征
-  "方案挑战"     → 子牙自审（10-ziya.md §四b）+ 魏征
+  "方案挑战"     → 子牙自审（`10-ziya.md` §四b，达芬奇已撤）
 
 Step 2 — LLM 兜底（Opus，仅规则未匹配时）
   推理意图 → 选最近规则分支 → 记录日志（供归纳新规则）
@@ -180,7 +183,6 @@ Step 2 — LLM 兜底（Opus，仅规则未匹配时）
 | 鲁班 | Publer / Meta Ads / Google Ads / Airtable / Atlas / Seedance | 读写 |
 | 马良 | Higgsfield AI / Seedance / WaveSpeed / Meta Insights / TikTok Insights | 只读+写 Memory |
 | 李白 | SEMrush / DataForSEO / Jina.ai | 只读+写 Memory |
-| ~~达芬奇~~ | 已撤（2026-09-24） | — |
 | 魏征 | Bash/shell / 代码仓库 | 读写（仅代码层）|
 
 ---
@@ -189,7 +191,7 @@ Step 2 — LLM 兜底（Opus，仅规则未匹配时）
 
 - **SDK 初始化**：Anthropic/OpenAI client 必须在 handler 内部初始化，不允许模块级
 - **封装名**：UI 层禁止出现真实供应商名（见 CLAUDE.md）
-- **设计审查清单触发场景**（强制；原达芬奇职责，2026-09-24 并入子牙 `10-ziya.md` §四b）：新 Phase 规格完成 / 新 agent 手册完成 / schema 变更前 / 重大重构前
+- **子牙自审场景**（强制，`10-ziya.md` §四b，达芬奇已撤）：新 Phase 规格完成 / 新 agent 手册完成 / schema 变更前 / 重大重构前
 - **魏征通过**（强制）：每次 PR merge 前，Codex 产出代码必须经过两层
 
 ### 通用停手条件
@@ -226,7 +228,7 @@ docs/agents/
 
 加新 agent 或扩展功能时必须确认：
 
-- [ ] 子牙 §四b 设计审查清单已走完（有 BLOCKER 禁止继续）
+- [ ] 子牙已按 `10-ziya.md` §四b 自审（有 BLOCKER 禁止继续）
 - [ ] 子牙路由表已更新（新任务类型加入规则路由）
 - [ ] Handoff schema 使用现有 types，不重复定义
 - [ ] Memory 注入规则遵守权限矩阵

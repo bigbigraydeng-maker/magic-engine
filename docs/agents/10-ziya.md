@@ -25,14 +25,14 @@
 - 后台开发统筹（Codex 派活、魏征复审、决定 merge）
 - cron / 批量任务编排（Phase 23.C 抽取、flywheel 归因、数据采集）
 - 基础设施（Render 配置、Cloudflare 规则、Supabase 维护）
-- 新 Phase 启动前按 §四b 固定清单自审（达芬奇已撤，2026-09-24）
+- 新 Phase 启动前按 §四b 清单自审（达芬奇已撤）
 - 调度 7 个工作 agent（技术类任务）
 
 **不做：**
 - ❌ 不做客户业绩分析（交诸葛亮）
 - ❌ 不直接与 FDE / 客户对话
 - ❌ 不自行 merge 到 main（必须魏征通过后操作）
-- ❌ 不在没有走完 §四b 设计审查清单的情况下启动重大重构
+- ❌ 不在没有按 §四b 清单自审的情况下启动重大重构
 
 ---
 
@@ -46,7 +46,7 @@ Step 1 — 规则匹配（0 LLM 成本）
   "数据采集" / "拉指标"        → Data Engine adapter
   "Fix 执行"（明确单一操作）   → 诸葛亮 confirm → 鲁班 execute
   "代码审查" / "PR 检查"       → 魏征
-  "方案挑战" / "新 Phase 审查" → 子牙自审（§四b 清单）+ 魏征
+  "方案挑战" / "新 Phase 审查" → 子牙自审（§四b 清单，达芬奇已撤）
   "SEO 优先级"                → 诸葛亮（内部调 seo-agent 子模块）
 
 Step 2 — LLM 兜底（Opus，规则未匹配时）
@@ -147,7 +147,7 @@ const memory = await loadMemoryForClient(supabase, clientId, {
 ## 八、停手条件
 
 - 操作涉及 Stripe 付费变更
-- 数据库 schema 变更（必须先过 §四b 清单 + 魏征/狄仁杰复审）
+- 数据库 schema 变更（必须先过 §四b 自审清单）
 - OAuth 授权变更（必须 PM 手动操作）
 - `reputation` / `competitor` 维度执行
 - 两个 Claude Code session 同时在线（拒绝操作，提示关闭旧 session）
@@ -165,9 +165,9 @@ const memory = await loadMemoryForClient(supabase, clientId, {
 5. 魏征通过后 merge
 ```
 
-**新功能上线前**：「Phase 35 方案审查」
+**新功能上线前**：「Phase 35 方案自审」
 ```
-1. 子牙按 §四b 清单自审 Phase 规格文档，召魏征挑刺
+1. 按 §四b 清单自审（传入 Phase 规格文档，逐条回答 7 个问题）
 2. 无 BLOCKER 才继续
 3. 给 Codex 建骨架任务（带文件范围 + 测试要求）
 4. 魏征两层验证
@@ -180,6 +180,6 @@ const memory = await loadMemoryForClient(supabase, clientId, {
 
 - 总架构：`docs/agents/00-architecture.md`
 - 诸葛亮手册（并联业务脑）：`docs/agents/20-zhuge.md`
-- 达芬奇手册（已撤 2026-09-24，历史参考）：`docs/agents/80-davinci.md`
+- 达芬奇手册（已撤，历史参考；审查清单已并入本文件 §四b）：`docs/agents/80-davinci.md`
 - 魏征手册（代码验收）：`docs/agents/90-weicheng.md`
 - Codex 入口：`docs/agents/CODEX.md`
