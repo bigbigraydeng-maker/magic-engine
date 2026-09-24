@@ -156,36 +156,57 @@ describe('信封 · 变动比例只管「改预算」这一类', () => {
   })
 })
 
-describe('信封 · 日预算上限', () => {
-  it('改完账户合计超上限 → 拒绝', () => {
-    // 账户合计 9900，这个单位 1000 → 改成 1100 后合计 10000... 刚好等于上限 → 放行
+describe('信封 · 日预算上限（PM 2026-09-24：20% 缓冲 + 超缓冲时放减类）', () => {
+  it('改完 ≤ 上限 → 放行（本来就在规则内）', () => {
     const ok = isWithinEnvelope(
       req({ afterCents: 1100 }),
       facts({ accountDailyTotalBeforeCents: 9900, dailyCapCents: 10_000 }),
       ENVELOPE,
     )
     expect(ok.within).toBe(true)
-
-    // 再多 1 分就超 → 拒绝
-    const bad = isWithinEnvelope(
-      req({ afterCents: 1101 }),
-      facts({ accountDailyTotalBeforeCents: 9900, dailyCapCents: 10_000 }),
-      ENVELOPE,
-    )
-    expect(bad.within).toBe(false)
-    expect(bad.reasons.some(r => r.includes('超过上限'))).toBe(true)
   })
 
-  it('🔴 上限算的是「改完之后」的合计，不是「改动量」—— 减预算即使账户本来就超上限也放行', () => {
+  it('改完在缓冲区内（上限 < accountAfter ≤ 上限×1.2）→ 放行', () => {
+    // accountAfter = 9900 - 1000 + 2100 = 11000，在 10000..12000 之间
+    const v = isWithinEnvelope(
+      req({ afterCents: 2100 }),
+      facts({ beforeCents: 1000, accountDailyTotalBeforeCents: 9900, dailyCapCents: 10_000 }),
+      { ...ENVELOPE, maxBudgetDeltaRatio: 1.5 }, // 放宽变动比例以孤立日上限这条判据
+    )
+    expect(v.within).toBe(true)
+  })
+
+  it('缓冲边界正好 = 上限×1.2 → 放行（边界含）', () => {
+    // accountAfter = 5000 - 1000 + 7000 = 11000 = 10000 × 1.1；再拉到 12000 试正好
+    const v = isWithinEnvelope(
+      req({ afterCents: 8000 }),
+      facts({ beforeCents: 1000, accountDailyTotalBeforeCents: 5000, dailyCapCents: 10_000 }),
+      { ...ENVELOPE, maxBudgetDeltaRatio: 8 }, // 放宽比例
+    )
+    // accountAfter = 12000，等于 10000×1.2 → 放行
+    expect(v.within).toBe(true)
+  })
+
+  it('🔴 加类超缓冲上限（accountAfter > 上限×1.2）→ 拒绝', () => {
+    // accountAfter = 5000 - 1000 + 8001 = 12001 > 12000 → 拒
+    const v = isWithinEnvelope(
+      req({ afterCents: 8001 }),
+      facts({ beforeCents: 1000, accountDailyTotalBeforeCents: 5000, dailyCapCents: 10_000 }),
+      { ...ENVELOPE, maxBudgetDeltaRatio: 8 },
+    )
+    expect(v.within).toBe(false)
+    expect(v.reasons.some(r => r.includes('缓冲'))).toBe(true)
+  })
+
+  it('🔴 账户已经远超上限，减预算 → 放行（让 AI 立刻自动降下来，PM 2026-09-24 拍板）', () => {
+    // accountBefore = 20000（远超 10000×1.2 = 12000）；减 100 → accountAfter = 19900，仍超缓冲，
+    // 但是"减类"：accountAfter < accountBefore，信封放行让 AI 帮忙降下来。
     const v = isWithinEnvelope(
       req({ afterCents: 900 }),
       facts({ beforeCents: 1000, accountDailyTotalBeforeCents: 20_000, dailyCapCents: 10_000 }),
       ENVELOPE,
     )
-    // 改完 19900 仍然超上限 → 按「改完之后」判会拒。这里断言的是当前实现的口径：
-    // 减预算也要过上限闸。若将来改成「只拦让合计变大的动作」，这条会变红，
-    // 那时必须显式讨论，而不是悄悄放宽。
-    expect(v.within).toBe(false)
+    expect(v.within).toBe(true)
   })
 
   it('暂停不走日上限（只会让花费变少）', () => {
@@ -197,14 +218,15 @@ describe('信封 · 日预算上限', () => {
     expect(v.within).toBe(true)
   })
 
-  it('新增花费要过日上限', () => {
+  it('新增花费超过上限×1.2 缓冲 → 拒绝', () => {
+    // accountAfter = 5000 + 7100 = 12100 > 10000×1.2 → 拒
     const v = isWithinEnvelope(
-      { kind: 'new_spend', afterCents: 6000 },
+      { kind: 'new_spend', afterCents: 7100 },
       facts({ beforeCents: 0, accountDailyTotalBeforeCents: 5000, dailyCapCents: 10_000 }),
       ENVELOPE,
     )
     expect(v.within).toBe(false)
-    expect(v.reasons.some(r => r.includes('超过上限'))).toBe(true)
+    expect(v.reasons.some(r => r.includes('缓冲'))).toBe(true)
   })
 })
 

@@ -155,13 +155,27 @@ export function isWithinEnvelope(
     }
   }
 
-  // ── 日上限：任何会让账户当日预算变多的动作都要过 ────────────────────────
+  // ── 日上限：PM 2026-09-24 拍板的三档 ────────────────────────────────────
+  //   ① 改完 ≤ 上限                → 放行（本来就在规则内）
+  //   ② 上限 < 改完 ≤ 上限×(1+缓冲) → 放行（缓冲区，真投手也会留几个百分点应对波动）
+  //   ③ 改完 > 上限×(1+缓冲)       → 拒绝**加**类，同时**放行**减类
+  //                                （账户已远超上限 → 让 AI 立刻自动往下降）
+  //
+  //   🔴 「减」的判据是 accountAfter < accountBefore，不是 request.kind：
+  //     一个改预算动作既可能把这个单位加钱、也可能把它减钱；决定的是**账户**
+  //     的总方向。信封在这一刻只放行「让账户往下走」的动作。
+  //   🔴 暂停 / 换素材从来只会让花费变少或不变 → 一直放行，不进这段判据。
+  //   🔴 new_spend 一律会让账户变多 → 走加类通道，超过缓冲上限就拒。
+  const OVERSHOOT_TOLERANCE = 0.2
   if (envelope.respectDailyCapCents && request.kind !== 'pause' && request.kind !== 'creative_only') {
     const cap = facts.dailyCapCents as number
     const accountAfter = accountBefore - before + after
-    if (accountAfter > cap) {
+    const capWithBuffer = cap * (1 + OVERSHOOT_TOLERANCE)
+    const isReducing = accountAfter < accountBefore
+    if (accountAfter > capWithBuffer && !isReducing) {
       reasons.push(
-        `改完账户当日预算合计 ${accountAfter} 分，超过上限 ${cap} 分`,
+        `改完账户当日预算合计 ${accountAfter} 分，超过上限 ${cap} 分的 ${Math.round(OVERSHOOT_TOLERANCE * 100)}% 缓冲` +
+          `（${Math.floor(capWithBuffer)} 分）`,
       )
     }
   }
