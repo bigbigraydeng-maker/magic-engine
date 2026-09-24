@@ -55,7 +55,15 @@ export interface EnvelopeFacts {
   dailyCapCents: number | null
   /** 距这个单位上一次**真实**设置变化过了多少小时（按快照算，含人工改动，§14 K12）。 */
   hoursSinceLastChange: number | null
-  /** Meta 学习期状态原文。非 null 且不是「已退出学习期」一律当作在学习期。 */
+  /**
+   * 学习期这条判据对这次动作**适不适用**。
+   *
+   * 🔴 新建一条还不存在的广告组时，没有任何东西在学习——这时判据不适用，
+   *    跟「读不到学习期状态」必须分开。混在一起的话，新建类动作会因为
+   *    「读不到 → 当作在学习期」而永远被拒，等于这个动作从来没上线过。
+   */
+  learningPhaseApplicable: boolean
+  /** Meta 学习期状态原文。适用时：非 null 且不是「已退出学习期」一律当作在学习期。 */
   learningStage: string | null
   /** 这个单位当前所在的 Meta 实验个数。 */
   adStudyCount: number
@@ -108,7 +116,7 @@ export function isWithinEnvelope(
   if (envelope.excludeAdStudies && facts.adStudyCount > 0) {
     reasons.push(`这个单位正在 ${facts.adStudyCount} 个 Meta 对比测试里，测试期间不动它`)
   }
-  if (envelope.excludeLearningPhase && inLearningPhase(facts.learningStage)) {
+  if (envelope.excludeLearningPhase && facts.learningPhaseApplicable && inLearningPhase(facts.learningStage)) {
     reasons.push(
       facts.learningStage === null
         ? '读不到学习期状态，按还在学习期处理，不动它'

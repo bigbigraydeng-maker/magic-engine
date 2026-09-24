@@ -23,6 +23,18 @@ const ADS_ENVELOPE: AutonomyEnvelope = {
   requiresRollbackHandler: true,
 }
 
+/**
+ * 🔴 六个动作**全部**声明 rollback: 'provider_native'，不是 'snapshot_restore'。
+ *
+ *    差别不在语义好看，在**谁来强制**：Gateway 只对 `provider_native` 把
+ *    「capability 必须提供 rollback handler」当执行前置条件（缺 handler →
+ *    ROLLBACK_HANDLER_MISSING，任何 provider 副作用发生前 fail-closed）。
+ *    声明成 snapshot_restore 的话 handler 是可选的，「撤得回来」就退化成口头承诺 ——
+ *    而这六个是**自动执行、会动真钱**的动作，撤回必须是真的、且必须有人强制。
+ *
+ *    撤回本身确实是「拿改前快照的值去调 Meta 写回去」，所以 provider_native 也如实：
+ *    撤回路径就是 provider 自己的写接口。
+ */
 const DECLARED_IN = 'docs/specs/2026-09-24-ads-goal-driven-autonomous-impact-loop-v1.md §3 G5'
 
 function zeroCeilings(steps: readonly string[]): Record<string, number> {
@@ -62,7 +74,7 @@ const ADS_PAUSE_UNIT: ActionDefinition<'ads.pause_unit'> = {
   outwardAuthorization: {
     declaredIn: DECLARED_IN,
     approval: { mode: 'bounded', envelope: ADS_ENVELOPE },
-    rollback: 'snapshot_restore',
+    rollback: 'provider_native',
   },
   idempotency: { keyFields: ['cycle_date', 'adset_id'], scope: 'client' },
   costModel: {
@@ -112,7 +124,7 @@ const ADS_CUT_UNIT_BUDGET: ActionDefinition<'ads.cut_unit_budget'> = {
   outwardAuthorization: {
     declaredIn: DECLARED_IN,
     approval: { mode: 'bounded', envelope: ADS_ENVELOPE },
-    rollback: 'snapshot_restore',
+    rollback: 'provider_native',
   },
   idempotency: { keyFields: ['cycle_date', 'adset_id', 'after_cents'], scope: 'client' },
   costModel: {
@@ -162,7 +174,7 @@ const ADS_SCALE_UNIT_BUDGET: ActionDefinition<'ads.scale_unit_budget'> = {
   outwardAuthorization: {
     declaredIn: DECLARED_IN,
     approval: { mode: 'bounded', envelope: ADS_ENVELOPE },
-    rollback: 'snapshot_restore',
+    rollback: 'provider_native',
   },
   idempotency: { keyFields: ['cycle_date', 'adset_id', 'after_cents'], scope: 'client' },
   costModel: {
@@ -211,7 +223,7 @@ const ADS_BUDGET_MOVE_PLAN: ActionDefinition<'ads.budget_move_plan'> = {
   outwardAuthorization: {
     declaredIn: DECLARED_IN,
     approval: { mode: 'bounded', envelope: ADS_ENVELOPE },
-    rollback: 'snapshot_restore',
+    rollback: 'provider_native',
   },
   idempotency: { keyFields: ['cycle_date', 'plan_hash'], scope: 'client' },
   costModel: {
