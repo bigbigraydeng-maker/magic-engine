@@ -59,6 +59,31 @@
 
 ---
 
+---
+
+## 线索同步到客户 Google 表格：上线前还差两步人工动作（2026-09-24，B 级，P1）
+
+**§11 打分**：频率高（每天都有新线索）/ IMPACT 闭环关键度高（卡在 Act，线索进不了销售手上）/ 收入关联度高（留了电话没人跟＝丢单）→ 零低、三高 → **P0**（代码已交付，剩下的人工动作按 P1 挂着）。
+
+代码已在 PR #1972（`src/lib/lead-sheets/` + `client_lead_sheet_routes`）。**这条链路现在一行也写不进去**，还差：
+
+1. **CTS 的 Google 连接要重新授权一次** —— 现有令牌只有 `spreadsheets.readonly`，没有写权限。Google 不会自动升级 scope，必须有人重新走一次
+   `https://app.magicengine.com.au/api/auth/google/connect?client_id=c0000000-0000-0000-0000-000000000000&flow=admin`，在同意页上勾「查看、修改 Google 表格」。
+2. **migration + seed SQL 还没 apply**（`supabase/migrations/20260925000003_client_lead_sheet_routes.sql` · `scripts/seed-cts-lead-sheet-routes.sql`），按规矩等 PM 显式 go。
+3. **合并后去 Inngest 后台对 `/api/inngest` 点一次 Sync**，否则新函数安静地不跑。
+
+**另一件待 PM 决定的事**：旧表（`FB 即时表单 Infrontof2000`）实测已经有另一条管道在写（每天 7–16 行，带着 ME 库里没有的广告组名/系列名/表单名，几乎可以肯定是客户自己账号里的 Zapier/Make）。本 PR 把 ME 定位成"补漏的安全网"——只补别人漏掉的，不重复写。要不要反过来让 ME 接管、把那条外部管道停掉，是 PM 的决定，没有替 PM 做。
+
+**已知留白**（不是 bug，是如实留空）：旧表的 `adset_name` / `campaign_name` 从 `ad_entity_snapshots` 回查，`form_name` 本地没有缓存一律留空。要补的话得另接一次 Meta Graph 查询，本轮没做。
+
+**子牙复审记下的三条欠账**（都不致命，不挡合并，待认领）：
+
+1. **`src/lib/lead-sheets/` 名字是「线索」，实际只吃 Meta 即时表单。** `leads.ts` 把 `.eq('channel','meta_lead_form')` 写死在共享层。第二个客户的线索如果来自官网表单或 GHL，这个模块要改代码。两条路二选一：目录改名点明 meta-lead；或给路线表加一列 `source_channel`（默认 `meta_lead_form`）由取数层读。
+2. **`CLIENT_FOLLOWUP_SHEETS`（`src/lib/crm/sheet-followup-sync.ts`）是同一件事的第二套配置**，把 CTS 的 client_id + 表格 id 写死在共享代码里，指的还是**同一张表**。它自己的注释承认「等第二个客户再挪进表」——本 PR 恰好把那张表建出来了。两套配置并存 = 换表要改两处，漏一处就一条链路读新表一条读旧表。建议收编进 `client_lead_sheet_routes`。
+3. **列对齐没有任何校验。** 配置说 32 列就写 32 列，没人比对过表头或现有行宽；有人在表格中间插一列，之后每一行都错位而回执全绿。模块已经把整张表读回来了，第一行是白拿的——可以加一个可选的列数/表头签名断言，对不上就停手不写。这张表是销售直接看的，错位比不写更糟。
+
+另外两条小的：`registry.ts` 里这条的 `schedule` 是手抄的，`registry.test.ts` 没有对它做「跟函数定义一致」的断言（漂移了 CI 不会红）；`leads.ts` 回查广告组/系列名字时把 `ad_entity_snapshots` 的全部历史快照分页拉回来，只为取一个名字，每小时一次的无谓开销。
+
 ## AI 可见度周快照聚合把失败的 API 调用也计入总数，客户分数被系统性腰斩（2026-09-23 两位复审确认，A 级，P0）
 
 **§11 打分**：频率高（每周每个客户都在发生，生产数据 CTS 9-14 那周 221/408 次失败混入分母）· IMPACT 闭环关键度高（分数直接喂进下一轮处方，算低等于给错建议）· 收入关联度高（影响客户可见诊断报告的核心维度分数）→ 零个低、两个以上高 → **P0**。
