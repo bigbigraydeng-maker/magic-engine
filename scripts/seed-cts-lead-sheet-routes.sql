@@ -14,7 +14,7 @@
 INSERT INTO public.client_lead_sheet_routes (
   client_id, route_key, label, spreadsheet_id, tab_name,
   match_any_answer_fields, priority, columns, value_labels, dedup_columns,
-  timezone, backfill_since, enabled
+  dedup_id_column, timezone, backfill_since, enabled
 ) VALUES (
   'c0000000-0000-0000-0000-000000000000',
   'timing-budget',
@@ -33,7 +33,8 @@ INSERT INTO public.client_lead_sheet_routes (
     {"field": "answer", "key": "whats_your_budget_per_person_nzd?", "mapped": true},
     {"field": "blank"},
     {"field": "blank"},
-    {"field": "blank"}
+    {"field": "blank"},
+    {"field": "lead_id"}
   ]'::jsonb,
   -- 键 = 归一化后的答案值（小写 + 各种破折号/下划线/空格压成一个 _，见 row.ts::normaliseAnswerValue）。
   -- 所以同一个选项的多种写法落在同一个键上：`still_deciding_-_show_me_all`、
@@ -70,9 +71,16 @@ INSERT INTO public.client_lead_sheet_routes (
     "budget_isn''t_a_concern": "预算不是问题",
     "budget_isnt_a_concern": "预算不是问题"
   }'::jsonb,
-  -- 判重：留资时间（到分钟）+ 电话。这张表**没有** lead id 列，只能靠看得见的
-  -- 东西判重 —— 好处是跟 PM 手工填进去的那几行也能对上，不会重复写。
+  -- 判重退路：留资时间（到分钟）+ 电话。只用在**表里已有的老行**上 ——
+  -- PM 手填的那几行没有第 11 列，只能靠看得见的东西认。
   ARRAY[0, 2],
+  -- 🔴 判重主键：第 11 列（下标 10）的线索编号。
+  --    PM 的表原本定的是 10 列，这里**多加了一列**放 Facebook 给的线索编号。
+  --    理由：只靠「时间+电话」判重，销售在表里把电话规整成 `+64 21 …`、或者
+  --    有人改了时间列的显示格式，键就变了 → 下一轮判成「表里没有」→ **再写一行**，
+  --    而销售的跟进记录会被劈到两行上。线索编号是机器写的、没人会去改，唯一真正稳。
+  --    这一列对销售没用，可以在表格里隐藏，不影响判重。
+  10,
   'Pacific/Auckland',
   -- 只补 v4 表单上线（2026-09-22）之后的。再往前没有带预算的线索。
   '2026-09-20T00:00:00+00:00',
@@ -87,6 +95,7 @@ ON CONFLICT (client_id, route_key) DO UPDATE SET
   columns = EXCLUDED.columns,
   value_labels = EXCLUDED.value_labels,
   dedup_columns = EXCLUDED.dedup_columns,
+  dedup_id_column = EXCLUDED.dedup_id_column,
   timezone = EXCLUDED.timezone,
   backfill_since = EXCLUDED.backfill_since,
   enabled = EXCLUDED.enabled,
@@ -117,7 +126,7 @@ ON CONFLICT (client_id, route_key) DO UPDATE SET
 INSERT INTO public.client_lead_sheet_routes (
   client_id, route_key, label, spreadsheet_id, tab_name,
   match_any_answer_fields, priority, columns, value_labels, dedup_columns,
-  timezone, backfill_since, enabled
+  dedup_id_column, timezone, backfill_since, enabled
 ) VALUES (
   'c0000000-0000-0000-0000-000000000000',
   'default',
@@ -164,7 +173,9 @@ INSERT INTO public.client_lead_sheet_routes (
   -- 中英混排反而让人以为是两种数据。要翻就整表一起翻，那是另一件事。
   '{}'::jsonb,
   -- 判重：第 1 列的 `l:<lead id>`。ME 和那条外部管道写出来的格式一样，对得上。
+  -- 这一列本来就是机器写的 lead id，所以主键和退路是同一列。
   ARRAY[0],
+  0,
   'Pacific/Auckland',
   -- 🔴 **只补今天以后的**。库里有 373 条这张表没有的历史线索（大多是 6–7 月
   --    CSV 导入那批），一次全倒进去会把人正在用的表冲烂。要补历史就把这个值
@@ -181,6 +192,7 @@ ON CONFLICT (client_id, route_key) DO UPDATE SET
   columns = EXCLUDED.columns,
   value_labels = EXCLUDED.value_labels,
   dedup_columns = EXCLUDED.dedup_columns,
+  dedup_id_column = EXCLUDED.dedup_id_column,
   timezone = EXCLUDED.timezone,
   backfill_since = EXCLUDED.backfill_since,
   enabled = EXCLUDED.enabled,

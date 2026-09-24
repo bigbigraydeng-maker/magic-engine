@@ -13,6 +13,7 @@ function route(over: Partial<LeadSheetRoute>): LeadSheetRoute {
     columns: [{ field: 'lead_id' }],
     valueLabels: {},
     dedupColumns: [0],
+  dedupIdColumn: null,
     timezone: 'Pacific/Auckland',
     backfillSince: null,
     enabled: true,

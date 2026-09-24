@@ -37,6 +37,12 @@ CREATE TABLE IF NOT EXISTS public.client_lead_sheet_routes (
    * 跟别的系统（Zapier / Make / 人手）往同一张表里写也不会互相写重。
    */
   dedup_columns        integer[] NOT NULL,
+  /**
+   * 机器键所在的列下标（0 起，可空）。指向 lead id 这种**机器自己写、人不会去改**
+   * 的列：这一列非空时判重只看它，销售在表里怎么编辑别的格子都不影响。
+   * 表里老行没有这一列（值是空的）时自动退回 dedup_columns。
+   */
+  dedup_id_column      integer,
   /** 时间列按哪个时区渲染。 */
   timezone             text NOT NULL DEFAULT 'Pacific/Auckland',
   /**
@@ -70,6 +76,8 @@ COMMENT ON COLUMN public.client_lead_sheet_routes.match_any_answer_fields IS
   '命中任一字段名就走这条路线；空数组 = 兜底路线。按问题判断而非 form_id，新版表单自动归位。';
 COMMENT ON COLUMN public.client_lead_sheet_routes.dedup_columns IS
   '判重列下标（0 起）。读表里已有行算同一把键，撞上就跳过 —— 重跑与外部管道并存都不会写重。';
+COMMENT ON COLUMN public.client_lead_sheet_routes.dedup_id_column IS
+  '机器键列下标（0 起，可空）。非空优先用它判重，人编辑其它列不影响；老行没有这一列时退回 dedup_columns。';
 COMMENT ON COLUMN public.client_lead_sheet_routes.backfill_since IS
   '只同步这个时刻之后的线索。防止首跑把库里几百条历史一次性倒进人在用的表。';
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { LeadSheetConfigError, parseRoute } from '../config'
+import { LeadSheetConfigError, loadClientRoutes, parseRoute } from '../config'
 
 function row(over: Record<string, unknown> = {}) {
   return {
@@ -12,6 +12,7 @@ function row(over: Record<string, unknown> = {}) {
     columns: [{ field: 'lead_id' }, { field: 'contact_phone' }],
     value_labels: { a: '甲' },
     dedup_columns: [0],
+    dedup_id_column: null,
     timezone: 'Pacific/Auckland',
     backfill_since: null,
     enabled: true,
@@ -62,5 +63,53 @@ describe('parseRoute', () => {
 
   it('空的 match_any_answer_fields 是合法的 —— 那是兜底路线', () => {
     expect(parseRoute(row({ match_any_answer_fields: [] })).matchAnyAnswerFields).toEqual([])
+  })
+})
+
+describe('loadClientRoutes — 跨路线校验', () => {
+  function fakeSupabase(rows: unknown[]) {
+    const q = {
+      select: () => q,
+      eq: () => q,
+      order: async () => ({ data: rows, error: null }),
+    }
+    return { from: () => q } as unknown as Parameters<typeof loadClientRoutes>[0]
+  }
+
+  it('两条路线指到同一张表同一个 tab → 后一条判坏并剔掉', async () => {
+    // 不拦的话：两边列定义不同，A 会去读 B 写的行的那几格来判重，
+    // 而那几格在 B 的列定义里语义完全不同 → 误判成「已存在」→ 静默丢线索。
+    const { routes, invalid } = await loadClientRoutes(
+      fakeSupabase([
+        { ...row(), route_key: 'a', priority: 1 },
+        { ...row(), route_key: 'b', priority: 2 },
+      ]),
+      'c1',
+    )
+    expect(routes.map((r) => r.routeKey)).toEqual(['a'])
+    expect(invalid).toHaveLength(1)
+    expect(invalid[0].reason).toContain('同一张表的同一个 tab')
+  })
+
+  it('指到不同 tab 就都留着', async () => {
+    const { routes, invalid } = await loadClientRoutes(
+      fakeSupabase([
+        { ...row(), route_key: 'a', tab_name: 'Tab1' },
+        { ...row(), route_key: 'b', tab_name: 'Tab2' },
+      ]),
+      'c1',
+    )
+    expect(routes).toHaveLength(2)
+    expect(invalid).toHaveLength(0)
+  })
+})
+
+describe('parseRoute — 机器键列', () => {
+  it('机器键列超出范围 → 报错', () => {
+    expect(() => parseRoute(row({ dedup_id_column: 9 }))).toThrow(/dedup_id_column/)
+  })
+
+  it('不填机器键列是合法的（老表没有那一列）', () => {
+    expect(parseRoute(row()).dedupIdColumn).toBeNull()
   })
 })

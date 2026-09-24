@@ -14,18 +14,29 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { appendSheetValues, readSheetValues } from '@/lib/google-sheets/client'
 import { loadClientRoutes } from './config'
 import { loadLeadsSince } from './leads'
-import { buildRow, dedupKey, emptyNotes, isUsableDedupKey } from './row'
+import { buildRow, dedupKeys, emptyNotes } from './row'
 import { isWithinBackfillWindow, pickRoute } from './route-match'
 import type { LeadRecord, LeadSheetClientReceipt, LeadSheetRoute, LeadSheetRouteReceipt } from './types'
 
+/**
+ * tab 名按 A1 记法转义。
+ *
+ * 🔴 名字里有空格（`FB 表单 2026`）或单引号时必须加引号，否则 Sheets 回 400，
+ *    这条路线**永远**失败 —— 而待办里给出的说法会是「表是不是被改名了」，
+ *    方向完全错。现在两个 tab 叫 Untitled / Sheet1 碰巧没事，配第三个就撞上。
+ */
+function quoteTab(tabName: string): string {
+  return `'${tabName.replace(/'/g, "''")}'`
+}
+
 /** 读整张表用的范围。列到 ZZ 够宽，行不设上限。 */
 function fullRange(tabName: string): string {
-  return `${tabName}!A:ZZ`
+  return `${quoteTab(tabName)}!A:ZZ`
 }
 
 /** 追加用的范围。同上 —— Sheets 会自己找到最后一行。 */
 function appendRange(tabName: string): string {
-  return `${tabName}!A:ZZ`
+  return `${quoteTab(tabName)}!A:ZZ`
 }
 
 export interface SyncDeps {
@@ -42,6 +53,8 @@ function emptyRouteReceipt(route: LeadSheetRoute): LeadSheetRouteReceipt {
     tabName: route.tabName,
     matched: 0,
     alreadyPresent: 0,
+    skippedNoIdentity: 0,
+    skippedLeadIds: [],
     appended: 0,
     appendedLeadIds: [],
     outsideWindow: 0,
@@ -84,10 +97,11 @@ export async function syncOneRoute(
     return receipt
   }
 
+  const idCol = route.dedupIdColumn ?? undefined
+  // 表里每一行贡献它**全部**能算出来的键：老行只有身份键，我们以前写的行两把都有。
   const present = new Set<string>()
   for (const row of existing) {
-    const key = dedupKey(row, route.dedupColumns)
-    if (isUsableDedupKey(key)) present.add(key)
+    for (const key of dedupKeys(row, route.dedupColumns, idCol)) present.add(key)
   }
 
   const notes = emptyNotes()
@@ -98,18 +112,27 @@ export async function syncOneRoute(
 
   for (const lead of inWindow) {
     const cells = buildRow(lead, route, notes)
-    const key = dedupKey(cells, route.dedupColumns)
-    if (!isUsableDedupKey(key)) {
-      // 判重键全空 = 这条线索连身份都拼不出来（没电话没邮箱没时间）。
-      // 写进去就再也去不掉了，宁可跳过并在回执里留痕。
-      receipt.blankedFields.push('dedup_key')
+    const keys = dedupKeys(cells, route.dedupColumns, idCol)
+    if (keys.length === 0) {
+      /**
+       * 判重键拼不出来 = 这条线索在这张表里没有可比的身份。写进去就再也认不出
+       * 是谁、也去不掉，所以跳过。
+       *
+       * 🔴 但**必须按条计数 + 记下 lead id**：这些是真的没进销售手里的线索。
+       *    早先只往 `blankedFields` 里塞一个词，会被去重成一个元素 —— 条数和
+       *    是哪几条全丢了，人工待办那边也读不到，等于又一次「死在日志里」。
+       */
+      receipt.skippedNoIdentity++
+      receipt.skippedLeadIds.push(lead.leadId)
       continue
     }
-    if (present.has(key) || seenThisRun.has(key)) {
+    // 🔴 **任一把键撞上就算已经有了**：机器键认我们自己写过的行，
+    //    身份键认人手填的 / 外部管道写的老行。少一边就会写重复。
+    if (keys.some((k) => present.has(k) || seenThisRun.has(k))) {
       receipt.alreadyPresent++
       continue
     }
-    seenThisRun.add(key)
+    for (const k of keys) seenThisRun.add(k)
     toAppend.push(cells)
     toAppendLeadIds.push(lead.leadId)
   }
@@ -129,9 +152,19 @@ export async function syncOneRoute(
   try {
     const written = await append(clientId, route.spreadsheetId, appendRange(route.tabName), toAppend)
     receipt.appended = written
-    receipt.appendedLeadIds = toAppendLeadIds
-    if (written !== toAppend.length) {
-      receipt.error = `打算写 ${toAppend.length} 行，Sheets 只认了 ${written} 行 —— 有一部分没写进去`
+    if (written === toAppend.length) {
+      receipt.appendedLeadIds = toAppendLeadIds
+    } else {
+      /**
+       * 🔴 只写进去一部分时**不能**把全部 lead id 都说成写了。
+       *    这个列表存在的理由就是「出事时能直接回查是哪几条」——
+       *    在最需要它的那一刻撒谎，比没有这个字段还糟。
+       *    Sheets 不告诉我们是哪几行成了，所以这里如实留空。
+       */
+      receipt.appendedLeadIds = []
+      receipt.error =
+        `打算写 ${toAppend.length} 行，Sheets 只认了 ${written} 行 —— 有一部分没写进去；` +
+        `Sheets 没说是哪几行成了，所以这次不报 lead id（下一轮判重会把漏的补上）`
     }
   } catch (err) {
     receipt.error = `写目标表格失败：${err instanceof Error ? err.message : String(err)}`
@@ -159,7 +192,21 @@ export async function syncClientLeadSheets(
     const loaded = await loadClientRoutes(supabase, client.id)
     routes = loaded.routes
     if (loaded.invalid.length > 0) {
-      receipt.error = loaded.invalid.map((i) => i.reason).join(' | ')
+      /**
+       * 🔴 **一条路线坏了，整个客户这轮停手，一行都不写。**
+       *
+       * 不能只跳过坏掉的那条继续跑 —— `pickRoute` 看不见被跳过的路线，
+       * 本该走它的线索会**掉进兜底路线**，被追加进错的那张表。追加不可逆；
+       * 等配置修好，这些线索又会被写进正确的表一遍 —— 同一个人两张表都有，
+       * 而两轮的回执都显示"成功"。
+       *
+       * 配置手误的正确代价是"今天没同步 + 待办里喊一声"，不是"写进错的表"。
+       */
+      receipt.error =
+        `路线配置有 ${loaded.invalid.length} 条读不出来，本轮整个客户停手、一行都没写（` +
+        `怕命中坏掉那条路线的线索掉进兜底表）：` +
+        loaded.invalid.map((i) => i.reason).join(' | ')
+      return receipt
     }
   } catch (err) {
     receipt.error = err instanceof Error ? err.message : String(err)
@@ -167,12 +214,18 @@ export async function syncClientLeadSheets(
   }
   if (routes.length === 0) return receipt
 
-  // 取数窗口 = 所有路线里最早的那个。某条路线没设窗口就等于要全部。
+  /**
+   * 取数窗口 = 所有路线里最早的那个。某条路线没设窗口就等于要全部。
+   *
+   * 🔴 **按时间比，不按字符串比**。`'2026-09-24T00:00:00+12:00'` 字典序排在
+   *    `'2026-09-20T12:00:00+00:00'` 后面，可偏移量不同的两个串比字典序会得出
+   *    跟真实先后相反的结论 —— 窗口算晚了就是静默漏线索。
+   */
   const since = routes.some((r) => !r.backfillSince)
     ? null
-    : routes
-        .map((r) => r.backfillSince as string)
-        .sort()[0]
+    : new Date(
+        Math.min(...routes.map((r) => Date.parse(r.backfillSince as string))),
+      ).toISOString()
 
   let leads: LeadRecord[]
   try {

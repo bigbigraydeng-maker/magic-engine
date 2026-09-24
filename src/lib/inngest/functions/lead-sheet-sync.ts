@@ -21,7 +21,7 @@
 
 import { inngest, CLOUD_FN_PREFIX } from '../client'
 import { supabaseAdmin } from '@/lib/supabase'
-import { cronRunHandle, startCronRunId } from '@/lib/cron/run-logger'
+import { cronRunHandle, failOpenCronRuns, startCronRunId } from '@/lib/cron/run-logger'
 import { loadRoutedClientIds } from '@/lib/lead-sheets/config'
 import { syncClientLeadSheets } from '@/lib/lead-sheets/sync'
 import { LEAD_SHEET_JOB } from '@/lib/pm-todo/lead-sheet-items'
@@ -61,7 +61,9 @@ export const leadSheetSyncFanOut = inngest.createFunction(
   },
   { cron: `TZ=${LEAD_SHEET_SYNC_TZ} ${LEAD_SHEET_SYNC_CRON}` },
   async ({ step }): Promise<LeadSheetFanOutReceipt> => {
-    const key = hourKey(new Date())
+    // 🔴 小时键必须在步骤**里**算：步骤外的代码每次重放都重跑一遍，跨小时的
+    //    重放会算出另一个键、重新派一批条子。
+    const key = await step.run('hour-key', async () => hourKey(new Date()))
 
     const roster = await step.run('load-roster', async () => {
       try {
@@ -72,6 +74,23 @@ export const leadSheetSyncFanOut = inngest.createFunction(
     })
 
     if (!roster.ok) {
+      /**
+       * 🔴 **派单失败必须自己留一行运行记录。**
+       *
+       * 上线第一天最可能出的错全都落在这里：配置表还没 apply、PostgREST 没
+       * reload schema、权限拦住 —— 而派单原先一行记录都不写，于是这些错的
+       * 表现跟「还没上线」一模一样，日报里也没有任何错误原因可读。
+       */
+      await step.run('log-roster-failed', async () => {
+        const runId = await startCronRunId(LEAD_SHEET_JOB)
+        await cronRunHandle(LEAD_SHEET_JOB, runId, Date.now()).finish({
+          processed: 0,
+          completed: 0,
+          failed: 1,
+          summary: { results: [] },
+          error: `派单失败，这一轮一个客户都没派出去：${roster.error}`,
+        })
+      })
       return {
         job: LEAD_SHEET_JOB,
         status: 'roster_failed',
@@ -117,6 +136,25 @@ export const leadSheetSyncOne = inngest.createFunction(
     //    然后各写一行。判重是「先读后写」，防不住并发，这道闸才防得住。
     concurrency: { limit: 1, key: 'event.data.client_id' },
     retries: 2,
+    /**
+     * 🔴 **没有这段，硬失败之后这条链路会「无声停摆 + 体检全绿」。**
+     *
+     * `start-run` 已经插了一行 status='running'。重试耗尽或步骤被网关强杀时，
+     * `finish-run` 永远跑不到，那一行就永远停在 running：`summary` 是 null →
+     * 人工待办读到空数组 → **一条待办都不下发**；而那行的 `started_at` 是新的 →
+     * 健康检查认为「最近跑过」。表格停止更新，没有任何地方报警。
+     *
+     * 2026-09-23 私信简报停产三天就是这个死法（见 messenger-brief-after-sync）。
+     */
+    onFailure: async ({ event, error }) => {
+      const message =
+        error?.message ||
+        (event.data as { error?: { message?: string } } | undefined)?.error?.message ||
+        '未知错误'
+      const ts = (event as { ts?: number }).ts
+      const startedBefore = new Date(typeof ts === 'number' ? ts : Date.now())
+      await failOpenCronRuns(LEAD_SHEET_JOB, `重试耗尽后仍失败：${message}`, { startedBefore })
+    },
   },
   { event: LEAD_SHEET_SYNC_DUE_EVENT },
   async ({ event, step }): Promise<LeadSheetClientReceipt> => {

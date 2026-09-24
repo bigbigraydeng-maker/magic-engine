@@ -44,6 +44,15 @@ interface ContactRow {
  */
 const IN_CHUNK = 150
 
+/**
+ * 回查广告组 / 系列名字时只看这段时间内的快照。
+ *
+ * 🔴 不加下界的话，为了取一个名字要把这些实体的**全部历史快照**分页拉回来 ——
+ *    150 个实体 × 每天一张快照，一年就是五万多行；到 `fetchAll` 的上限会直接抛，
+ *    于是这个客户每小时都一行写不进去。名字只需要最近的那一份。
+ */
+const ENTITY_NAME_LOOKBACK_MS = 60 * 24 * 60 * 60 * 1000
+
 function chunk<T>(items: readonly T[], size: number): T[][] {
   const out: T[][] = []
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size))
@@ -93,7 +102,14 @@ export async function loadEntityNames(
           .select('entity_id, entity_name, captured_at')
           .eq('client_id', clientId)
           .in('entity_id', ids)
+          // 🔴 分页排序必须带一个唯一键兜底。`ad_entity_snapshots` 是**批量**
+          //    快照，同一批写进去的几十个实体 captured_at 完全相同；只按它排，
+          //    翻页之间顺序不稳 → 某些实体最新那行被跳过 → 名字静默写成空格子，
+          //    而且每次跑结果还不一样（同文件下面那条分页注释是同一个坑）。
+          .order('entity_id', { ascending: true })
           .order('captured_at', { ascending: false })
+          .order('id', { ascending: true })
+          .gte('captured_at', new Date(Date.now() - ENTITY_NAME_LOOKBACK_MS).toISOString())
           .range(from, to),
     )
     // 已按 captured_at 倒序，第一次见到的就是最新的。

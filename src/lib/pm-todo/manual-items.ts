@@ -142,7 +142,7 @@ export async function loadManualItems(
   )
   // 线索没写进客户自己的 Google 表格 —— 销售看的就是那张表，缺一条就是少跟一个人，
   // 而 Facebook 的留资只保留 90 天，超期永久取不回
-  await pushLeadSheetItems(supabase, items).catch((e) =>
+  await pushLeadSheetItems(supabase, items, now).catch((e) =>
     console.warn('[manual-items] 线索表格同步待办检查失败（不阻塞其他待办）:', e),
   )
   // ME 产品动态自动发 LinkedIn —— 敏感内容待审 / 账号未连 / 发布失败三种卡点

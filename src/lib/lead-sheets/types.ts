@@ -65,6 +65,11 @@ export interface LeadSheetRoute {
   columns: readonly LeadSheetColumn[]
   valueLabels: Readonly<Record<string, string>>
   dedupColumns: readonly number[]
+  /**
+   * 机器键所在的列（0 起）。这一列非空时判重只看它，人怎么编辑其它列都不影响。
+   * 表里老行没有这一列（是空的）时自动退回 `dedupColumns`。
+   */
+  dedupIdColumn: number | null
   timezone: string
   backfillSince: string | null
   enabled: boolean
@@ -101,6 +106,15 @@ export interface LeadSheetRouteReceipt {
   matched: number
   /** 表里已经有了、这次跳过的。 */
   alreadyPresent: number
+  /**
+   * 拼不出判重身份、这次**没写也没算已存在**的条数。
+   *
+   * 🔴 单独一个数字，不是塞进 `blankedFields` 了事 —— 那个字段会被去重成一个词，
+   *    丢掉条数也丢掉是哪几条。这些是**真的没进销售手里**的线索，必须能被人看见。
+   */
+  skippedNoIdentity: number
+  /** 上面那些线索的 lead id，好直接回查。 */
+  skippedLeadIds: string[]
   /** 真写进去的行数。 */
   appended: number
   /** 写进去的 lead id —— 出事时能直接回查是哪几条。 */

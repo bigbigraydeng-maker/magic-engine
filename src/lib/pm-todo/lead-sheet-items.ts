@@ -13,7 +13,11 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-items'
 import { APP_BASE } from './binding-request-items'
 
-export type LeadSheetItemKind = 'lead_sheet_sync_failed' | 'lead_sheet_value_unmapped'
+export type LeadSheetItemKind =
+  | 'lead_sheet_sync_failed'
+  | 'lead_sheet_value_unmapped'
+  /** 有线索因为拼不出身份没写进表 —— 这些人是真的没到销售手里 */
+  | 'lead_sheet_lead_skipped'
 
 /** 回执在 `cron_run_logs.summary` 里的形状（只取我们要用的那几项）。 */
 interface RouteReceiptLike {
@@ -22,6 +26,8 @@ interface RouteReceiptLike {
   tabName?: string
   appended?: number
   unmappedValues?: string[]
+  skippedNoIdentity?: number
+  skippedLeadIds?: string[]
   error?: string | null
 }
 
@@ -40,6 +46,9 @@ interface RunRow {
 }
 
 export const LEAD_SHEET_JOB = 'lead-sheet-sync'
+
+/** 回看多久。任务每小时跑一次，2 小时够覆盖每个客户最近一轮。 */
+const LOOKBACK_MS = 2 * 60 * 60 * 1000
 
 function sheetHref(spreadsheetId: string | undefined): string {
   return spreadsheetId
@@ -66,19 +75,39 @@ function howFor(clientId: string, error: string): string {
 export async function pushLeadSheetItems(
   supabase: SupabaseClient,
   items: ManualItem[],
+  now: Date = new Date(),
 ): Promise<void> {
-  let latest: RunRow | null
+  let latest: ClientReceiptLike[]
   try {
-    // 只看最近一轮 —— 这条任务每小时跑，上一轮的错早就被这一轮覆盖或修正了，
-    // 翻历史只会把已经好了的问题重新摆到人面前。
+    /**
+     * 🔴 **按客户各取最新一条，不是全局只取最新一条。**
+     *
+     * 这条任务是 fan-out：**每个客户各写一行** `cron_run_logs`。全局
+     * `.limit(1)` 在只有一个客户时看着没问题，接进第二个客户的那一刻就变成
+     * 「每小时 N 行里只看见其中一个」—— 其余客户的写表失败和未映射选项
+     * **永远不下发**。而这条通道存在的唯一理由就是不让这些事死在日志里。
+     *
+     * 回看 2 小时：这条任务每小时跑一次，2 小时足够覆盖到每个客户最近一轮，
+     * 又不会把昨天已经好了的问题重新摆到人面前。
+     */
     const { data, error } = await supabase
       .from('cron_run_logs')
       .select('job_name, status, started_at, summary')
       .eq('job_name', LEAD_SHEET_JOB)
+      .gte('started_at', new Date(now.getTime() - LOOKBACK_MS).toISOString())
       .order('started_at', { ascending: false })
-      .limit(1)
     if (error) throw new Error(error.message)
-    latest = ((data ?? []) as RunRow[])[0] ?? null
+
+    // 已按时间倒序，每个客户第一次见到的就是它最近那一轮。
+    const newestPerClient = new Map<string, ClientReceiptLike>()
+    for (const run of (data ?? []) as RunRow[]) {
+      const summary = run.summary as { results?: ClientReceiptLike[] } | null
+      for (const client of summary?.results ?? []) {
+        const key = client.clientId ?? ''
+        if (!newestPerClient.has(key)) newestPerClient.set(key, client)
+      }
+    }
+    latest = [...newestPerClient.values()]
   } catch (err) {
     items.push({
       kind: 'lead_sheet_sync_failed',
@@ -91,10 +120,7 @@ export async function pushLeadSheetItems(
     return
   }
 
-  if (!latest) return
-
-  const summary = latest.summary as { results?: ClientReceiptLike[] } | null
-  for (const client of summary?.results ?? []) {
+  for (const client of latest) {
     const clientId = client.clientId ?? ''
     const clientName = client.clientName ?? clientId
 
@@ -117,6 +143,32 @@ export async function pushLeadSheetItems(
           client_id: clientId,
           what: `${clientName} 的线索写不进「${route.tabName ?? route.routeKey ?? '目标表格'}」：${route.error}。这张表上的新线索现在是缺的。`,
           how: howFor(clientId, route.error),
+          href: sheetHref(route.spreadsheetId),
+        })
+      }
+
+      /**
+       * 🔴 被跳过的线索必须单独下发。
+       *
+       * 它们既不算写成功、也不算「表里已经有了」——**是真的没进销售手里**。
+       * 而这条路径上 `error` 是 null、定时任务记的是 completed、日报是绿的，
+       * 不在这里喊一声就没有任何地方会喊。
+       */
+      const skipped = route.skippedNoIdentity ?? 0
+      if (skipped > 0) {
+        const ids = (route.skippedLeadIds ?? []).slice(0, 5)
+        items.push({
+          kind: 'lead_sheet_lead_skipped',
+          client_name: clientName,
+          client_id: clientId,
+          what:
+            `${clientName} 有 ${skipped} 条线索没写进「${route.tabName ?? route.routeKey ?? '目标表格'}」——` +
+            '这些人连姓名电话邮箱都没拿到，表里认不出是谁，所以没敢往里写。' +
+            '他们**没有**到销售手上。',
+          how:
+            '这多半是 Facebook 那条线索本身就没留下联系方式。' +
+            `去 Meta 后台按线索编号查原始提交${ids.length ? `（${ids.join('、')}${skipped > ids.length ? ' 等' : ''}）` : ''}，` +
+            '有电话或邮箱就手工补进表格；确实什么都没有就不用管，不是系统坏了。',
           href: sheetHref(route.spreadsheetId),
         })
       }

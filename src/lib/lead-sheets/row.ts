@@ -122,17 +122,61 @@ export function buildRow(lead: LeadRecord, route: LeadSheetRoute, notes: RowNote
 }
 
 /**
- * 一行的判重键。
+ * 判重用的单元格归一化。
  *
- * 用「渲染出来的单元格文本」而不是 lead id 本身，是为了能跟**别人写的行**对上 ——
- * 表里已经有的行我们只看得到文本，看不到它背后是哪条 lead。CTS 的旧表本来就有
- * 另一条管道（客户自己的 Zapier/Make）在写，判重必须建立在「表里看得见的东西」上。
+ * 只吃掉「同一个值的不同写法」：首尾空白、大小写、以及人顺手加的空格 / 连字符 /
+ * 括号（销售把 `+64211914575` 规整成 `+64 21 191 4575` 是每天都会发生的事）。
+ * **不做任何语义转换** —— 不把 `021…` 换算成 `+6421…`，那属于猜。
  */
-export function dedupKey(cells: readonly string[], dedupColumns: readonly number[]): string {
-  return dedupColumns.map((i) => (cells[i] ?? '').trim().toLowerCase()).join(KEY_SEP)
+function normaliseDedupCell(raw: string): string {
+  return raw.trim().toLowerCase().replace(/[\s\-()]/g, '')
 }
 
-/** 判重键全空 = 这行没有可比的身份，当成「不在表里」而不是「已存在」。 */
-export function isUsableDedupKey(key: string): boolean {
-  return key.split(KEY_SEP).some((part) => part !== '')
+/** 机器键的前缀段，跟「看得见的身份」那种键区分开。 */
+const ID_KEY_TAG = 'id'
+
+/**
+ * 一行的**全部**判重键（能用的那些）。
+ *
+ * 一行最多产生两把：
+ *   · 机器键 —— `idColumn` 那一列（lead id 这种机器写、人不会改的值）非空时才有。
+ *   · 身份键 —— `dedupColumns` 拼出来的「看得见的身份」（时间 + 电话这种）。
+ *
+ * 🔴 **两把都要算，判重时任一撞上就算「表里已经有了」**。
+ *
+ *    只留机器键不行：表里已有的老行（PM 手填的、外部管道写的）**根本没有那一列**，
+ *    算不出机器键 —— 我们算出机器键、它们算出身份键，两边永远对不上，
+ *    于是把人家手填好的行**整批重写一遍**。（这个回归是 2026-09-24 用生产数据
+ *    试算时当场撞出来的：改成只用机器键之后，「表里已有」从 3 掉到 0。）
+ *
+ *    只留身份键也不行：销售在表里把电话排版一下、或者有人改了时间列的显示格式，
+ *    键就变了 → 下一轮判成「表里没有」→ **再追加一行**，而销售的跟进记录
+ *    会被劈到两行上。
+ *
+ *    两把一起用，两种情况都盖住：老行靠身份键认出来，我们自己写过的行
+ *    以后靠机器键认出来（人怎么编辑都不影响）。
+ */
+export function dedupKeys(
+  cells: readonly string[],
+  dedupColumns: readonly number[],
+  idColumn?: number,
+): string[] {
+  const keys: string[] = []
+
+  if (idColumn !== undefined) {
+    const id = normaliseDedupCell(cells[idColumn] ?? '')
+    if (id !== '') keys.push(`${ID_KEY_TAG}${KEY_SEP}${id}`)
+  }
+
+  const identity = dedupColumns.map((i) => normaliseDedupCell(cells[i] ?? '')).join(KEY_SEP)
+  /**
+   * 🔴 身份键**要求每一段都非空**，不是「有一段非空就行」。
+   *    想清楚过的反例：判重列是「留资时间 + 电话」，两个人同一分钟填了同一张表单、
+   *    其中一个拿不到电话 —— 按「任一段非空」两条会算出同一把键，第二条被当成
+   *    「表里已经有了」**永远不会写**，而且它在回执里跟真正的重复行分不开。
+   *    线索就这么丢了，Facebook 90 天后还取不回来。
+   */
+  if (identity.split(KEY_SEP).every((part) => part !== '')) keys.push(identity)
+
+  return keys
 }

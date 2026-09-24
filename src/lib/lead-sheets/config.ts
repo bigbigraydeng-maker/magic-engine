@@ -19,6 +19,7 @@ interface RouteRow {
   columns: unknown
   value_labels: unknown
   dedup_columns: number[] | null
+  dedup_id_column: number | null
   timezone: string | null
   backfill_since: string | null
   enabled: boolean | null
@@ -103,6 +104,16 @@ export function parseRoute(row: RouteRow): LeadSheetRoute {
     }
   }
 
+  const idCol = row.dedup_id_column
+  if (idCol !== null && idCol !== undefined) {
+    if (!Number.isInteger(idCol) || idCol < 0 || idCol >= columns.length) {
+      throw new LeadSheetConfigError(
+        routeKey,
+        `dedup_id_column 的 ${idCol} 超出列范围（共 ${columns.length} 列，下标 0 起）`,
+      )
+    }
+  }
+
   const timezone = row.timezone ?? 'Pacific/Auckland'
   try {
     new Intl.DateTimeFormat('en-CA', { timeZone: timezone })
@@ -124,6 +135,7 @@ export function parseRoute(row: RouteRow): LeadSheetRoute {
     columns,
     valueLabels: parseValueLabels(routeKey, row.value_labels),
     dedupColumns,
+    dedupIdColumn: idCol ?? null,
     timezone,
     backfillSince: row.backfill_since,
     enabled: row.enabled !== false,
@@ -144,7 +156,7 @@ export async function loadClientRoutes(
   const { data, error } = await supabase
     .from('client_lead_sheet_routes')
     .select(
-      'route_key, label, spreadsheet_id, tab_name, match_any_answer_fields, priority, columns, value_labels, dedup_columns, timezone, backfill_since, enabled',
+      'route_key, label, spreadsheet_id, tab_name, match_any_answer_fields, priority, columns, value_labels, dedup_columns, dedup_id_column, timezone, backfill_since, enabled',
     )
     .eq('client_id', clientId)
     .eq('enabled', true)
@@ -161,6 +173,29 @@ export async function loadClientRoutes(
       invalid.push({ routeKey: row.route_key, reason: err instanceof Error ? err.message : String(err) })
     }
   }
+
+  /**
+   * 🔴 两条路线指到**同一张表的同一个 tab** 一律判坏。
+   *
+   * 它们的列定义多半不一样（比如一条 10 列一条 32 列），写进同一个 tab 之后
+   * 表会变成参差的；更糟的是 A 路线判重时会去读 B 路线写的行的那几格，
+   * 而那几格在 B 的列定义里语义完全不同 —— 于是误判成「已存在」，**静默丢线索**。
+   */
+  const seen = new Map<string, string>()
+  for (const r of [...routes]) {
+    const key = `${r.spreadsheetId}\u0000${r.tabName}`
+    const first = seen.get(key)
+    if (first) {
+      routes.splice(routes.indexOf(r), 1)
+      invalid.push({
+        routeKey: r.routeKey,
+        reason: `路线「${r.routeKey}」跟「${first}」指向同一张表的同一个 tab（${r.tabName}），两边列定义不同会互相误判成「已存在」而丢线索`,
+      })
+    } else {
+      seen.set(key, r.routeKey)
+    }
+  }
+
   return { routes, invalid }
 }
 
