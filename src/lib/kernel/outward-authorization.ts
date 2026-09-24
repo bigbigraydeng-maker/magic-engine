@@ -14,7 +14,9 @@
  *    拆掉任意一层，另一层仍然拦得住，且各有只有它能满足的测试。
  */
 
-import type { ActionDefinition, OutwardApproval } from './types'
+import type { ActionDefinition, ActionRun, OutwardApproval } from './types'
+import type { EnvelopeFactsResolver } from './deps'
+import { isWithinEnvelope } from './autonomy-envelope'
 
 /** 有限、非负的真实金额。NaN / ±Infinity / 负数 / 非数字一律不算。 */
 function isRealCeiling(value: unknown): value is number {
@@ -142,4 +144,48 @@ export function outwardBlockReason(definition: ActionDefinition): string | null 
   }
 
   return null
+}
+
+/**
+ * 「碰 provider 之前」用真实事实再算一次信封（spec 2026-09-24 §3 G5 第 3 道）。
+ *
+ * 授权层 `authorize.ts` ⑥c 已经算过一次；这里用**同一个**解析器再算一次，
+ * 传 `at: 'pre_provider'`，让域层用刚由 `snapshot_pre` 抓的 `kernel_pre` 快照
+ * 重读事实。两次判决之间可能相隔几秒，这段窗口里 PM 可能刚把日预算上限改低、
+ * 别的动作可能刚改了同一个单位。没有第二道核算就等于承认「授权那一刻算对了 =
+ * 现在还算对」，跟同一个文件自己的模块头注释「两处查声明+两处查实例」直接矛盾。
+ *
+ * 非 outward、非 bounded、当前是 `snapshot_pre` 步骤 → 返回 null（不检查）：
+ *   `snapshot_pre` 就是为了给这道闸供数据的一步，前置查它自相矛盾。
+ * 没有解析器 → 返回 unavailable 原因（等同越界）。
+ * 越界或事实读不到 → 返回带原因的字符串（调用方按 dead_letter 处理）。
+ */
+export async function preProviderEnvelopeBlockReason(args: {
+  definition: ActionDefinition
+  run: Pick<ActionRun, 'id' | 'client_id' | 'action_key' | 'input'>
+  stepKey: string
+  resolveFacts: EnvelopeFactsResolver | undefined
+}): Promise<string | null> {
+  const approval = args.definition.outwardAuthorization?.approval
+  if (args.definition.sideEffect !== 'outward') return null
+  if (approval?.mode !== 'bounded') return null
+  if (args.stepKey === 'snapshot_pre') return null
+  if (!args.resolveFacts) {
+    return '这个 Kernel 实例没装信封事实解析器，读不到真实预算 → 不敢碰 Meta'
+  }
+
+  const resolved = await args.resolveFacts({
+    clientId: args.run.client_id,
+    actionKey: args.run.action_key,
+    input: (args.run.input ?? {}) as Record<string, unknown>,
+    at: 'pre_provider',
+    runId: args.run.id,
+  })
+
+  if ('unavailable' in resolved) {
+    return `碰 Meta 之前重读信封事实失败：${resolved.unavailable}`
+  }
+  const verdict = isWithinEnvelope(resolved.request, resolved.facts, approval.envelope)
+  if (verdict.within) return null
+  return `碰 Meta 之前重算信封已越界：${verdict.reasons.join('；')}`
 }
