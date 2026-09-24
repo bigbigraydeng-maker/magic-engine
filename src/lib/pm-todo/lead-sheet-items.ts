@@ -188,12 +188,19 @@ export async function pushLeadSheetItems(
 
     for (const route of client.routes ?? []) {
       /**
-       * 🔴 优先用人话名字。汇总进一张表之后 `tabName` 就是 `Untitled`，
+       * 🔴 桶键必须是「真正写去哪张表」（spreadsheetId + tabName），不能是展示用的
+       *    `label`——同一张表配了两条路线、标签分别是「问了预算…」和「其余表单…」
+       *    时，按 label 分桶会把同一张表的读表失败拆成两条一模一样的待办，
+       *    跳过数和未映射值也按标签各算各的，白白违背「按表汇总，不按路线」的初衷。
+       */
+      const key = `${route.spreadsheetId ?? ''}\u0000${route.tabName ?? route.routeKey ?? ''}`
+      /**
+       * 🔴 展示名字才优先用人话。汇总进一张表之后 `tabName` 就是 `Untitled`，
        *    待办里写「线索写不进『Untitled』」= PM 还得再问一遍是哪张表。
-       *    `label` 是老回执里没有的字段，所以留着两层退路。
+       *    `label` 是老回执里没有的字段，所以留着两层退路。第一条路线的名字
+       *    赢——同一张表上标签不同也只需要说清「是哪张表」，不需要逐条都对。
        */
       const where = route.label ?? route.tabName ?? route.routeKey ?? '目标表格'
-      const key = `${route.spreadsheetId ?? ''}\u0000${where}`
       let b = buckets.get(key)
       if (!b) {
         b = {

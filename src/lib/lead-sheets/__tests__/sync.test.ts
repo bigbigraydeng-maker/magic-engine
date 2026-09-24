@@ -249,6 +249,27 @@ describe('syncOneRoute', () => {
     expect(readSheet).not.toHaveBeenCalled()
   })
 
+  it('🔴 取数查询本身已经截断掉的历史条数要算进 outsideWindow，不能从 0 起算', async () => {
+    // `loadLeadsSince` 按 backfillSince 截断查询之后，更早的线索根本不在 `leads`
+    // 参数里——几条路线共用同一个 backfillSince 时，逐条比对永远数不出这些人。
+    // 调用方（`syncClientLeadSheets`）用 `countLeadsBefore` 数出「查询截断掉多少条」，
+    // 当成起点传进来；这里连一条落在窗口内的线索都没有，起点原样透出。
+    const appendSheet = vi.fn<AppendMock>(async () => 0)
+    const readSheet = vi.fn<ReadMock>(async () => [HEADER])
+
+    const r = await syncOneRoute(
+      'c1',
+      { ...route, backfillSince: '2026-09-24T00:00:00Z' },
+      [lead({ occurredAt: '2026-09-24T01:00:00Z' })],
+      { readSheet, appendSheet },
+      newDestinationSnapshot(),
+      703,
+    )
+
+    expect(r.outsideWindow).toBe(703)
+    expect(r.matched).toBe(1)
+  })
+
   it('试算模式只算不写，且不把试算报成写成功了', async () => {
     const appendSheet = vi.fn<AppendMock>(async () => 1)
     const readSheet = vi.fn<ReadMock>(async () => [HEADER])
@@ -504,8 +525,10 @@ describe('describeHeaderProblem —— 开工前对一次表头', () => {
     ).toBeNull()
   })
 
-  it('空表不检查 —— 新配一条路线、表里还没有行是正常的，不能卡住第一次写入', () => {
-    expect(describeHeaderProblem(withHeader(['留资时间', '姓名', '电话']), [])).toBeNull()
+  it('🔴 配了表头签名但表整个是空的 → fail-closed，不能把第一条线索当表头写进第 1 行', () => {
+    const problem = describeHeaderProblem(withHeader(['留资时间', '姓名', '电话']), [])
+    expect(problem).toContain('还是空的')
+    expect(problem).toContain('留资时间、姓名、电话')
   })
 
   it('没配表头签名 → 完全不检查，行为跟以前一样', () => {
