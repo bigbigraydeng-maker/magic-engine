@@ -23,7 +23,7 @@ Codex 按任务说明承担规划、实现或审查；与 Claude Code、CMUX Dee
 | 鲁班 | `src/lib/luban/` | 执行：flywheel adapter + 落数据 |
 | 马良 | `src/lib/visual/` | 视觉学习：图片/视频质量 + 平台研究 |
 | 李白 | `src/lib/blog/` + `src/lib/geo/` | 文案质量 + 全系统提示词管理 |
-| 达芬奇 | `src/lib/davinci/` | PM：挑战设计方案（只读，无执行权）|
+| ~~达芬奇~~ | —（已撤 2026-09-24，`src/lib/davinci/` 不建） | 方案挑战改由子牙按 `10-ziya.md` §四b 清单自审 |
 | 魏征 | `src/lib/weicheng/` | 代码检查：CI关卡 + LLM审查 |
 
 ---

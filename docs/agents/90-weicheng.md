@@ -155,5 +155,5 @@ Codex → 产出代码变更
 
 - 总架构：`docs/agents/00-architecture.md`
 - 子牙手册（调用者）：`docs/agents/10-ziya.md`
-- 达芬奇手册（设计挑战，与魏征互补）：`docs/agents/80-davinci.md`
+- 达芬奇手册（已撤 2026-09-24，历史参考；设计挑战并入子牙 `10-ziya.md` §四b）：`docs/agents/80-davinci.md`
 - 测试套件：`TESTING.md`
