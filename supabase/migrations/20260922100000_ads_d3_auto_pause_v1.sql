@@ -23,8 +23,15 @@ ALTER TABLE ad_strategy_configs
   ADD COLUMN IF NOT EXISTS autopilot_dry_run BOOLEAN NOT NULL DEFAULT true;
 
 -- CTS：打开 D3 自动暂停建议，先跑 dry-run 观察（不真的调 Meta）。
+-- 🔴 WHERE EXISTS 而不是裸 INSERT：CTS 这一行客户不是由任何 migration 建的。
+--    从零重放全部 migration 的场景（本机沙盘/CI）里没有这一行，裸 INSERT 会撞
+--    外键约束报错退出——跟 20260913000001_client_meta_ad_accounts.sql 同一个坑，
+--    同一个写法。生产库上 CTS 这行本来就在，行为不变。
 INSERT INTO ad_strategy_configs (client_id, enabled, autopilot_enabled, autopilot_dry_run)
-VALUES ('c0000000-0000-0000-0000-000000000000', true, true, true)
+SELECT 'c0000000-0000-0000-0000-000000000000', true, true, true
+WHERE EXISTS (
+  SELECT 1 FROM public.clients WHERE id = 'c0000000-0000-0000-0000-000000000000'
+)
 ON CONFLICT (client_id) DO UPDATE SET
   autopilot_enabled = true,
   autopilot_dry_run = true,
@@ -37,11 +44,13 @@ ON CONFLICT (client_id) DO UPDATE SET
 INSERT INTO client_automation_policies (
   client_id, action_key, mode, decision_ttl_seconds, updated_by
 )
-VALUES (
+SELECT
   'c0000000-0000-0000-0000-000000000000',
   'ads.auto_pause_on_d3',
   'require_approval',
   604800,
   'migration:20260922100000_ads_d3_auto_pause_v1'
+WHERE EXISTS (
+  SELECT 1 FROM public.clients WHERE id = 'c0000000-0000-0000-0000-000000000000'
 )
 ON CONFLICT DO NOTHING;
