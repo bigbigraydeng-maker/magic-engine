@@ -19,8 +19,8 @@ import { loadClientRoutes, parseRoute } from '../src/lib/lead-sheets/config'
 import { loadLeadsSince } from '../src/lib/lead-sheets/leads'
 import { buildRow, emptyNotes } from '../src/lib/lead-sheets/row'
 import { pickRoute } from '../src/lib/lead-sheets/route-match'
-import { destinationKey, newDestinationSnapshot, syncOneRoute } from '../src/lib/lead-sheets/sync'
-import type { DestinationSnapshot } from '../src/lib/lead-sheets/sync'
+import { syncRoutes } from '../src/lib/lead-sheets/sync'
+import type { LeadSheetRouteReceipt } from '../src/lib/lead-sheets/types'
 
 async function main(): Promise<void> {
   const clientId = process.argv[2]
@@ -81,7 +81,7 @@ async function main(): Promise<void> {
   // 逐条路线把「这一轮会写什么」摆出来。
   const receipt = {
     clientId, clientName: client?.name ?? null, unrouted: 0, error: null as string | null,
-    routes: [] as Awaited<ReturnType<typeof syncOneRoute>>[],
+    routes: [] as LeadSheetRouteReceipt[],
   }
   const byRoute = new Map<string, typeof allLeads>()
   for (const lead of allLeads) {
@@ -90,20 +90,9 @@ async function main(): Promise<void> {
     const b = byRoute.get(r.routeKey)
     if (b) b.push(lead); else byRoute.set(r.routeKey, [lead])
   }
-  // 跟线上同一个写法：同一张表只读一次，判重键在几条路线之间共享 ——
-  // 否则试算会把「另一条路线已经收了这个人」重复报成还要写一行。
-  const snapshots = new Map<string, DestinationSnapshot>()
-  for (const route of routes) {
-    const dest = destinationKey(route)
-    let snapshot = snapshots.get(dest)
-    if (!snapshot) {
-      snapshot = newDestinationSnapshot()
-      snapshots.set(dest, snapshot)
-    }
-    receipt.routes.push(
-      await syncOneRoute(clientId, route, byRoute.get(route.routeKey) ?? [], { dryRun: !live }, snapshot),
-    )
-  }
+  // 调线上那一份，不手抄 —— 同一张表只读一次、判重键在几条路线之间共享的规矩
+  // 必须跟真跑完全一致，否则这张试算报告就不能拿来做开闸决定。
+  receipt.routes = await syncRoutes(clientId, routes, byRoute, { dryRun: !live })
 
   console.log(`\n${'='.repeat(70)}`)
   for (const r of receipt.routes) {

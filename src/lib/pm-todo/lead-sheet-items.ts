@@ -18,16 +18,24 @@ export type LeadSheetItemKind =
   | 'lead_sheet_value_unmapped'
   /** 有线索因为拼不出身份没写进表 —— 这些人是真的没到销售手里 */
   | 'lead_sheet_lead_skipped'
+  /** 还有历史线索落在补档窗口之外，一直没进表 */
+  | 'lead_sheet_backfill_pending'
+  /** 有线索一条路线都没匹配上 —— 配置缺兜底路线 */
+  | 'lead_sheet_unrouted'
 
 /** 回执在 `cron_run_logs.summary` 里的形状（只取我们要用的那几项）。 */
 interface RouteReceiptLike {
   routeKey?: string
+  /** 路线的人话名字。没有就退回 tabName / routeKey —— 老回执里没有这一项。 */
+  label?: string | null
   spreadsheetId?: string
   tabName?: string
   appended?: number
   unmappedValues?: string[]
   skippedNoIdentity?: number
   skippedLeadIds?: string[]
+  /** 落在 backfill_since 之前、这轮没碰的条数。 */
+  outsideWindow?: number
   error?: string | null
 }
 
@@ -35,6 +43,8 @@ interface ClientReceiptLike {
   clientId?: string
   clientName?: string | null
   routes?: RouteReceiptLike[]
+  /** 一条路线都没匹配上的线索数。 */
+  unrouted?: number
   error?: string | null
 }
 
@@ -136,6 +146,26 @@ export async function pushLeadSheetItems(
     }
 
     /**
+     * 🔴 一条路线都没匹配上的线索 = 配置缺兜底路线，这些人一行都没写进任何表。
+     *    这个数字原先也只在运行记录里躺着，没有任何读者。
+     */
+    const unrouted = client.unrouted ?? 0
+    if (unrouted > 0) {
+      items.push({
+        kind: 'lead_sheet_unrouted',
+        client_name: clientName,
+        client_id: clientId,
+        what:
+          `${clientName} 有 ${unrouted} 条线索没写进任何表格 —— 它们来自的表单不符合` +
+          '现有的任何一条归类规则，而且没有配「其余都走这里」的兜底规则。这些人没到销售手上。',
+        how:
+          '把这句话发到开发窗口，给这个客户补一条兜底规则就行（一次配置，以后自动）。' +
+          '线索本身没丢，还在系统里 —— 补完下一轮会自己写进去。',
+        href: sheetHref(undefined),
+      })
+    }
+
+    /**
      * 🔴 **按「目标表格」汇总下发，不按路线。**
      *
      * PM 2026-09-24 拍板所有表单汇总进一张表之后，几条路线指向同一张表是常态。
@@ -151,12 +181,18 @@ export async function pushLeadSheetItems(
         errors: Set<string>
         skipped: number
         skippedIds: string[]
+        outsideWindow: number
         unmapped: Set<string>
       }
     >()
 
     for (const route of client.routes ?? []) {
-      const where = route.tabName ?? route.routeKey ?? '目标表格'
+      /**
+       * 🔴 优先用人话名字。汇总进一张表之后 `tabName` 就是 `Untitled`，
+       *    待办里写「线索写不进『Untitled』」= PM 还得再问一遍是哪张表。
+       *    `label` 是老回执里没有的字段，所以留着两层退路。
+       */
+      const where = route.label ?? route.tabName ?? route.routeKey ?? '目标表格'
       const key = `${route.spreadsheetId ?? ''}\u0000${where}`
       let b = buckets.get(key)
       if (!b) {
@@ -166,6 +202,7 @@ export async function pushLeadSheetItems(
           errors: new Set(),
           skipped: 0,
           skippedIds: [],
+          outsideWindow: 0,
           unmapped: new Set(),
         }
         buckets.set(key, b)
@@ -174,6 +211,7 @@ export async function pushLeadSheetItems(
       if (route.error) b.errors.add(route.error)
       b.skipped += route.skippedNoIdentity ?? 0
       b.skippedIds.push(...(route.skippedLeadIds ?? []))
+      b.outsideWindow += route.outsideWindow ?? 0
       for (const v of route.unmappedValues ?? []) b.unmapped.add(v)
     }
 
@@ -210,6 +248,30 @@ export async function pushLeadSheetItems(
             '这多半是 Facebook 那条线索本身就没留下联系方式。' +
             `去 Meta 后台按线索编号查原始提交${ids.length ? `（${ids.join('、')}${b.skipped > ids.length ? ' 等' : ''}）` : ''}，` +
             '有电话或邮箱就手工补进表格；确实什么都没有就不用管，不是系统坏了。',
+          href: sheetHref(b.spreadsheetId),
+        })
+      }
+
+      /**
+       * 🔴 「还有历史没补」必须能被人看见。
+       *
+       * `outsideWindow` 每一轮都在算，写进运行记录，**但在这之前没有任何读者** ——
+       * 703 条历史线索每小时被数一遍、数字一直涨，而 PM 那边什么都看不到。
+       * 这正是「发现死在日志里」（铁律 3 下半）。这条待办会一直在，直到补档窗口
+       * 往前调完为止 —— 它本来就是一件没做完的事，本来就该一直在。
+       */
+      if (b.outsideWindow > 0) {
+        items.push({
+          kind: 'lead_sheet_backfill_pending',
+          client_name: clientName,
+          client_id: clientId,
+          what:
+            `${clientName} 还有 ${b.outsideWindow} 条更早的线索没进「${b.where}」——` +
+            '系统只同步了设定日期之后的，更早的那些还在系统里躺着，销售在表上看不到。',
+          how:
+            '这是有意卡住的，不是坏了：一次全倒进去会把人正在用的表冲烂。' +
+            '历史要分批补，或者从旧表整理好一次性搬过去。想开始补就跟开发窗口说一声，' +
+            '把日期往前挪一点，挪完看一眼表再挪下一段。',
           href: sheetHref(b.spreadsheetId),
         })
       }

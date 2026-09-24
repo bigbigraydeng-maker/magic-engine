@@ -142,6 +142,18 @@ describe('loadClientRoutes — 跨路线校验', () => {
     expect(invalid[0].reason).toContain('判重列不一样')
   })
 
+  it('🔴 两条路线写同一张表但补历史的窗口不同 → 判坏（会只补进来一半而两边都显示成功）', async () => {
+    const { routes, invalid } = await loadClientRoutes(
+      fakeSupabase([
+        { ...row(), route_key: 'a', priority: 1, backfill_since: '2026-09-20T00:00:00Z' },
+        { ...row(), route_key: 'b', priority: 2, backfill_since: '2026-06-01T00:00:00Z' },
+      ]),
+      'c1',
+    )
+    expect(routes.map((r) => r.routeKey)).toEqual(['a'])
+    expect(invalid[0].reason).toContain('补历史的时间窗口不一样')
+  })
+
   it('🔴 两条路线写同一张表但时区不同 → 判坏（时间列会写出两种读数，判重对不上）', async () => {
     const { routes, invalid } = await loadClientRoutes(
       fakeSupabase([
@@ -164,6 +176,58 @@ describe('loadClientRoutes — 跨路线校验', () => {
     )
     expect(routes).toHaveLength(2)
     expect(invalid).toHaveLength(0)
+  })
+})
+
+describe('parseRoute — 两位复审补上的几道闸', () => {
+  it('🔴 literal 没写 value → 当场判坏（seed 里 jsonb_set 下标打偏是静默的）', () => {
+    expect(() =>
+      parseRoute(row({ columns: [{ field: 'lead_id' }, { field: 'literal' }], dedup_columns: [0] })),
+    ).toThrow(/literal.*没写 value/)
+  })
+
+  it('literal 写了空字符串也算没写 —— 那一列会是一片空白，看着像有意为之', () => {
+    expect(() =>
+      parseRoute(
+        row({ columns: [{ field: 'lead_id' }, { field: 'literal', value: '' }], dedup_columns: [0] }),
+      ),
+    ).toThrow(/literal.*没写 value/)
+  })
+
+  it('🔴 判重列里一列能区分人的都没有 → 判坏（同一分钟留资的人会互相吞掉）', () => {
+    expect(() =>
+      parseRoute(
+        row({
+          columns: [{ field: 'occurred_at' }, { field: 'answer', key: 'tour' }],
+          dedup_columns: [0, 1],
+          dedup_id_column: null,
+        }),
+      ),
+    ).toThrow(/能区分人/)
+  })
+
+  it('🔴 机器键列没指到 lead_id → 判坏（判重会悄悄退化成只剩时间+电话）', () => {
+    expect(() =>
+      parseRoute(
+        row({
+          columns: [{ field: 'contact_phone' }, { field: 'contact_name' }],
+          dedup_columns: [0],
+          dedup_id_column: 1,
+        }),
+      ),
+    ).toThrow(/必须是 lead_id/)
+  })
+
+  it('表头签名格数跟列数对不上 → 判坏', () => {
+    expect(() => parseRoute(row({ header_row: ['只有一格'] }))).toThrow(/header_row/)
+  })
+
+  it('表头签名格数对得上 → 读得出来', () => {
+    expect(parseRoute(row({ header_row: ['线索编号', '电话'] })).headerRow).toEqual(['线索编号', '电话'])
+  })
+
+  it('不配表头签名是合法的 —— 老配置照常跑', () => {
+    expect(parseRoute(row()).headerRow).toBeNull()
   })
 })
 

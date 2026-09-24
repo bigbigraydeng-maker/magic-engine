@@ -18,7 +18,11 @@ import { loadClientRoutes } from './config'
 import { loadLeadsSince } from './leads'
 import { buildRow, dedupKeys, emptyNotes } from './row'
 import { isWithinBackfillWindow, pickRoute } from './route-match'
+import { destinationKey } from './types'
 import type { LeadRecord, LeadSheetClientReceipt, LeadSheetRoute, LeadSheetRouteReceipt } from './types'
+
+// 脚本和线上走同一个口径，从这里再导一次，省得调用方去记它住在哪。
+export { destinationKey }
 
 /**
  * tab 名按 A1 记法转义。
@@ -79,14 +83,50 @@ export function newDestinationSnapshot(): DestinationSnapshot {
   return { keys: new Set(), loaded: false, readError: null }
 }
 
-/** 同一个 key = 同一张表的同一个 tab。 */
-export function destinationKey(route: LeadSheetRoute): string {
-  return `${route.spreadsheetId}\u0000${route.tabName}`
+/**
+ * 开工前对一次表头。对得上返回 null，对不上返回一句人话（直接进人工待办）。
+ *
+ * 🔴 **为什么值得专门做这道闸**：改成「所有表单汇总进一张表」之后，上线多了一步
+ *    人工动作 —— 有人要照着约定把目标表格的表头排一遍。排错一列、或者以后有人在
+ *    表中间插一列，ME 照样按配置写满每一格：电话写进邮箱列、员工手打的跟进记录
+ *    被推到别的列，而 `appended` 正常、回执全绿、日报绿、一条待办都不出。
+ *    这张表是销售直接看的 —— **错位比不写更糟，而且追加不可逆**。
+ *    整张表本来就读回来了，第一行是白拿的。
+ *
+ * 🔴 空表不检查：新配一条路线、表里还一行都没有是正常的，不能因此卡住第一次写入。
+ *    没配 `header_row` 也不检查 —— 行为跟以前完全一样。
+ *
+ * 比对忽略首尾空白；表头右边多出来的空格子不算数（Sheets 会把尾部空单元格截掉，
+ * 人也常在右边留几列自己用的草稿，那不影响我们前 N 列的位置）。
+ */
+export function describeHeaderProblem(
+  route: LeadSheetRoute,
+  existing: readonly (readonly string[])[],
+): string | null {
+  const expected = route.headerRow
+  if (!expected || expected.length === 0) return null
+  if (existing.length === 0) return null
+
+  const actual = existing[0] ?? []
+  for (let i = 0; i < expected.length; i++) {
+    const want = expected[i].trim()
+    const got = (actual[i] ?? '').trim()
+    if (want !== got) {
+      return (
+        `目标表格的表头跟配置对不上，本轮一行都没写：第 ${i + 1} 列应该是「${want}」，` +
+        `实际是「${got || '（空）'}」。多半是有人在表里插了一列或改了表头 —— ` +
+        `照配置硬写会让之后每一行都错位（电话写进别的列、把员工写的跟进记录挤走），` +
+        `而错位是追加不回来的，所以这轮停手。`
+      )
+    }
+  }
+  return null
 }
 
 function emptyRouteReceipt(route: LeadSheetRoute): LeadSheetRouteReceipt {
   return {
     routeKey: route.routeKey,
+    label: route.label,
     spreadsheetId: route.spreadsheetId,
     tabName: route.tabName,
     matched: 0,
@@ -137,9 +177,14 @@ export async function syncOneRoute(
       const existing = await read(clientId, route.spreadsheetId, fullRange(route.tabName), {
         render: 'formatted',
       })
-      // 表里每一行贡献它**全部**能算出来的键：老行只有身份键，我们以前写的行两把都有。
-      for (const row of existing) {
-        for (const key of dedupKeys(row, route.dedupColumns, idCol)) snapshot.keys.add(key)
+      const headerProblem = describeHeaderProblem(route, existing)
+      if (headerProblem) {
+        snapshot.readError = headerProblem
+      } else {
+        // 表里每一行贡献它**全部**能算出来的键：老行只有身份键，我们以前写的行两把都有。
+        for (const row of existing) {
+          for (const key of dedupKeys(row, route.dedupColumns, idCol)) snapshot.keys.add(key)
+        }
       }
     } catch (err) {
       // 🔴 读不到已有行就**什么都不写**。看不见表里有什么却照写不误 = 写一堆重复行，
@@ -310,12 +355,28 @@ export async function syncClientLeadSheets(
     else byRoute.set(route.routeKey, [lead])
   }
 
-  /**
-   * 同一张表（同一个 tab）上的几条路线共用一份快照：读一次、判重键互通。
-   * `config.ts::describeLayoutMismatch` 已经保证同一张表上的路线判重配置一致，
-   * 所以这份键集合对它们是同一把尺子。
-   */
+  receipt.routes = await syncRoutes(client.id, routes, byRoute, deps)
+  return receipt
+}
+
+/**
+ * 逐条路线跑，同一张表（同一个 tab）上的几条共用一份快照：读一次、判重键互通。
+ *
+ * 🔴 **单独导出是为了让试算脚本调同一份**（`scripts/lead-sheet-sync-dryrun.ts`）。
+ *    脚本头注声称「跑的是线上同一套代码，不是另写一份仿真」—— 手抄一份循环过去，
+ *    那句话就只在抄完那一刻成立。而试算正是 PM 决定要不要开闸时看的那张报告。
+ *
+ * `config.ts::describeLayoutMismatch` 已经保证同一张表上的路线判重配置一致，
+ * 所以那份共享的键集合对它们是同一把尺子。
+ */
+export async function syncRoutes(
+  clientId: string,
+  routes: readonly LeadSheetRoute[],
+  byRoute: ReadonlyMap<string, LeadRecord[]>,
+  deps: SyncDeps = {},
+): Promise<LeadSheetRouteReceipt[]> {
   const snapshots = new Map<string, DestinationSnapshot>()
+  const receipts: LeadSheetRouteReceipt[] = []
 
   for (const route of routes) {
     const dest = destinationKey(route)
@@ -326,10 +387,10 @@ export async function syncClientLeadSheets(
     }
     // 没分到线索的路线也出一条回执 —— 「这条路线今天 0 条」和「这条路线没跑」
     // 必须分得开。
-    receipt.routes.push(
-      await syncOneRoute(client.id, route, byRoute.get(route.routeKey) ?? [], deps, snapshot),
+    receipts.push(
+      await syncOneRoute(clientId, route, byRoute.get(route.routeKey) ?? [], deps, snapshot),
     )
   }
 
-  return receipt
+  return receipts
 }

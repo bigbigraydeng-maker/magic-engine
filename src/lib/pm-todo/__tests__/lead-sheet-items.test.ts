@@ -29,12 +29,18 @@ function fakeSupabase(rows: unknown[], spy?: { gte?: string }) {
   return { from: () => q } as unknown as Parameters<typeof pushLeadSheetItems>[0]
 }
 
-function run(clientId: string, name: string, routes: unknown[], error: string | null = null) {
+function run(
+  clientId: string,
+  name: string,
+  routes: unknown[],
+  error: string | null = null,
+  unrouted = 0,
+) {
   return {
     job_name: 'lead-sheet-sync',
     status: 'completed',
     started_at: '2026-09-24T11:20:00Z',
-    summary: { results: [{ clientId, clientName: name, routes, error }] },
+    summary: { results: [{ clientId, clientName: name, routes, error, unrouted }] },
   }
 }
 
@@ -241,5 +247,98 @@ describe('几条路线写同一张表时的待办', () => {
       NOW,
     )
     expect(items.filter((i) => i.kind === 'lead_sheet_sync_failed')).toHaveLength(2)
+  })
+})
+
+describe('待办里说的是哪张表', () => {
+  it('🔴 有人话名字就用人话名字 —— 汇总进一张表之后 tabName 就是个 Untitled', async () => {
+    const items: ManualItem[] = []
+    await pushLeadSheetItems(
+      fakeSupabase([
+        run('c1', 'CTS', [
+          {
+            routeKey: 'v4',
+            label: 'CTS 留资汇总 · 问了预算与出发时间的表单',
+            spreadsheetId: 'sheet-1',
+            tabName: 'Untitled',
+            error: '写目标表格失败：500',
+          },
+        ]),
+      ]),
+      items,
+      NOW,
+    )
+    expect(items[0].what).toContain('CTS 留资汇总')
+    expect(items[0].what).not.toContain('Untitled')
+  })
+
+  it('老回执没有 label 时退回 tabName，不要因此炸掉', async () => {
+    const items: ManualItem[] = []
+    await pushLeadSheetItems(
+      fakeSupabase([
+        run('c1', 'CTS', [
+          { routeKey: 'v4', spreadsheetId: 'sheet-1', tabName: 'Sheet1', error: '写目标表格失败：500' },
+        ]),
+      ]),
+      items,
+      NOW,
+    )
+    expect(items[0].what).toContain('Sheet1')
+  })
+})
+
+/**
+ * 这两个数字以前只在运行记录里躺着涨，没有任何读者 —— 典型的「发现死在日志里」。
+ */
+describe('算出来但以前没人读的两个数字', () => {
+  it('🔴 还有历史线索没补 → 下发一条待办，别让 703 条只在日志里涨', async () => {
+    const items: ManualItem[] = []
+    await pushLeadSheetItems(
+      fakeSupabase([
+        run('c1', 'CTS', [
+          {
+            routeKey: 'v4',
+            label: 'CTS 留资汇总',
+            spreadsheetId: 'sheet-1',
+            tabName: 'Untitled',
+            outsideWindow: 400,
+          },
+          {
+            routeKey: 'default',
+            label: 'CTS 留资汇总',
+            spreadsheetId: 'sheet-1',
+            tabName: 'Untitled',
+            outsideWindow: 303,
+          },
+        ]),
+      ]),
+      items,
+      NOW,
+    )
+    const pending = items.filter((i) => i.kind === 'lead_sheet_backfill_pending')
+    expect(pending).toHaveLength(1)
+    expect(pending[0].what).toContain('703 条')
+  })
+
+  it('历史都补完了（0 条）就别再提醒', async () => {
+    const items: ManualItem[] = []
+    await pushLeadSheetItems(
+      fakeSupabase([
+        run('c1', 'CTS', [
+          { routeKey: 'v4', spreadsheetId: 'sheet-1', tabName: 'Untitled', outsideWindow: 0 },
+        ]),
+      ]),
+      items,
+      NOW,
+    )
+    expect(items.filter((i) => i.kind === 'lead_sheet_backfill_pending')).toHaveLength(0)
+  })
+
+  it('🔴 有线索一条路线都没匹配上 → 下发待办（这些人一行都没写进任何表）', async () => {
+    const items: ManualItem[] = []
+    await pushLeadSheetItems(fakeSupabase([run('c1', 'CTS', [], null, 12)]), items, NOW)
+    const unrouted = items.filter((i) => i.kind === 'lead_sheet_unrouted')
+    expect(unrouted).toHaveLength(1)
+    expect(unrouted[0].what).toContain('12 条')
   })
 })

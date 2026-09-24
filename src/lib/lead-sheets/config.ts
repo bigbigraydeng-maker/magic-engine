@@ -7,7 +7,13 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { LEAD_SHEET_FIELDS, type LeadSheetColumn, type LeadSheetField, type LeadSheetRoute } from './types'
+import {
+  LEAD_SHEET_FIELDS,
+  destinationKey,
+  type LeadSheetColumn,
+  type LeadSheetField,
+  type LeadSheetRoute,
+} from './types'
 
 interface RouteRow {
   route_key: string
@@ -20,6 +26,7 @@ interface RouteRow {
   value_labels: unknown
   dedup_columns: number[] | null
   dedup_id_column: number | null
+  header_row: string[] | null
   timezone: string | null
   backfill_since: string | null
   enabled: boolean | null
@@ -52,6 +59,23 @@ function parseColumns(routeKey: string, raw: unknown): LeadSheetColumn[] {
     }
     if (field === 'answer' && typeof col.key !== 'string') {
       throw new LeadSheetConfigError(routeKey, `第 ${i + 1} 列是 answer，但没写 key（问题名）`)
+    }
+    /**
+     * 🔴 literal 没写 value 一律判坏。
+     *
+     * 这一列现在扛着「来源表单」—— 而 seed SQL 是用 `jsonb_set(模板,'{11,value}',…)`
+     * 往固定下标塞标签的。下标打偏（有人在模板里加了一列忘了改那个 11）的三种结果
+     * 本机实测过，**全是静默**：挂到错的列上不报错、下标越界直接 no-op。
+     * 而 `buildRow` 对 literal 取不到值连 `blankedFields` 都不记一笔
+     * （row.ts 故意的：literal 留白通常是有意为之）。
+     * 结果就是整张表的「来源表单」列一片空白 / 全写着模板里的占位符，看着像有意为之。
+     * 在这里当场抛，打偏 = 配置报错 = 整个客户停手 + 出待办。
+     */
+    if (field === 'literal' && (typeof col.value !== 'string' || col.value === '')) {
+      throw new LeadSheetConfigError(
+        routeKey,
+        `第 ${i + 1} 列是 literal，但没写 value（要写进去的固定文本）`,
+      )
     }
     const format = col.format
     if (format !== undefined && format !== 'iso' && format !== 'local') {
@@ -104,12 +128,55 @@ export function parseRoute(row: RouteRow): LeadSheetRoute {
     }
   }
 
+  /**
+   * 🔴 判重列里至少要有一列能区分**人**。
+   *
+   * 想清楚过的反例：判重列配成只剩「留资时间」。`dedup_columns` 原来只校验
+   * 「非空 + 下标合法」，这个配置会被放行 —— 然后同一分钟内留资的人**互相吞掉**，
+   * 第二个起全部记进 `alreadyPresent`（那个数字没有任何出口），零报警。
+   * 团名、预算这种答案列也不算能区分人。
+   */
+  const PERSONAL_FIELDS = new Set(['lead_id', 'contact_phone', 'contact_email', 'contact_name'])
+  if (!dedupColumns.some((i) => PERSONAL_FIELDS.has(columns[i].field))) {
+    throw new LeadSheetConfigError(
+      routeKey,
+      `dedup_columns 里一列能区分人的都没有（要至少一个 ${[...PERSONAL_FIELDS].join(' / ')}）—— ` +
+        `不然同一分钟留资的人会互相吞掉，而且不会有任何地方报警`,
+    )
+  }
+
   const idCol = row.dedup_id_column
   if (idCol !== null && idCol !== undefined) {
     if (!Number.isInteger(idCol) || idCol < 0 || idCol >= columns.length) {
       throw new LeadSheetConfigError(
         routeKey,
         `dedup_id_column 的 ${idCol} 超出列范围（共 ${columns.length} 列，下标 0 起）`,
+      )
+    }
+    /**
+     * 🔴 机器键那一列必须真的是 lead id。
+     *
+     * 指错一列的后果是**判重悄悄退化**：那一列（比如姓名）人能编辑，改一下键就变了；
+     * 或者那一列本来就是空的，机器键永远算不出来，判重只剩「时间+电话」——
+     * 销售把电话规整成 `+64 21 …` 就会被再写一行。两种都不报错。
+     */
+    if (columns[idCol].field !== 'lead_id') {
+      throw new LeadSheetConfigError(
+        routeKey,
+        `dedup_id_column 指到第 ${idCol + 1} 列（${columns[idCol].field}），但机器键那一列必须是 lead_id`,
+      )
+    }
+  }
+
+  const headerRow = row.header_row ?? null
+  if (headerRow !== null) {
+    if (!Array.isArray(headerRow) || headerRow.some((h) => typeof h !== 'string')) {
+      throw new LeadSheetConfigError(routeKey, 'header_row 必须是字符串数组')
+    }
+    if (headerRow.length !== columns.length) {
+      throw new LeadSheetConfigError(
+        routeKey,
+        `header_row 有 ${headerRow.length} 格，columns 有 ${columns.length} 列 —— 对不上就没法拿它比对表头`,
       )
     }
   }
@@ -136,6 +203,7 @@ export function parseRoute(row: RouteRow): LeadSheetRoute {
     valueLabels: parseValueLabels(routeKey, row.value_labels),
     dedupColumns,
     dedupIdColumn: idCol ?? null,
+    headerRow,
     timezone,
     backfillSince: row.backfill_since,
     enabled: row.enabled !== false,
@@ -178,12 +246,36 @@ export function describeLayoutMismatch(
   if (a.timezone !== b.timezone) {
     return `时区不一样（${a.timezone} vs ${b.timezone}）—— 时间列会写出两种读数，判重对不上`
   }
+  /**
+   * 时间窗口也要一致。不一致不会丢线索，但会**悄悄割裂配置意图**：同一张表上
+   * 一种表单的历史全灌进来了、另一种一条没有，而两条路线的回执都显示成功，
+   * 没有任何地方会说「这张表只补了一半」。宁可当场判坏让人改配置。
+   */
+  if ((a.headerRow ?? []).join('\u0000') !== (b.headerRow ?? []).join('\u0000')) {
+    return '表头签名不一样 —— 同一张表不可能有两种表头，必有一条配错了'
+  }
+  if ((a.backfillSince ?? null) !== (b.backfillSince ?? null)) {
+    return (
+      `补历史的时间窗口不一样（${a.backfillSince ?? '不限'} vs ${b.backfillSince ?? '不限'}）` +
+      ` —— 同一张表会只补进来一半，而两边回执都显示成功`
+    )
+  }
   return null
 }
 
-/** 一列的可读说明，只用在上面那条错误原话里。 */
+/**
+ * 一列的可读说明，只用在上面那条错误原话里。
+ *
+ * 🔴 `prefix` / `format` / `mapped` 也要带上 —— 比对本来就比这三样，不带的话
+ *    两条路线只在 prefix 上不一致时，待办里会出现「第 3 列放的东西不一样
+ *    （「contact_phone」vs「contact_phone」）」，左右一字不差，PM 看了没法办。
+ */
 function describeColumn(col: LeadSheetColumn): string {
-  return col.field === 'answer' ? `answer:${col.key ?? ''}` : col.field
+  const bits = [col.field === 'answer' ? `answer:${col.key ?? ''}` : col.field]
+  if (col.prefix) bits.push(`前缀 ${col.prefix}`)
+  if (col.format) bits.push(`格式 ${col.format}`)
+  if (col.mapped) bits.push('翻中文')
+  return bits.join(' · ')
 }
 
 export interface LoadedRoutes {
@@ -200,7 +292,7 @@ export async function loadClientRoutes(
   const { data, error } = await supabase
     .from('client_lead_sheet_routes')
     .select(
-      'route_key, label, spreadsheet_id, tab_name, match_any_answer_fields, priority, columns, value_labels, dedup_columns, dedup_id_column, timezone, backfill_since, enabled',
+      'route_key, label, spreadsheet_id, tab_name, match_any_answer_fields, priority, columns, value_labels, dedup_columns, dedup_id_column, header_row, timezone, backfill_since, enabled',
     )
     .eq('client_id', clientId)
     .eq('enabled', true)
@@ -242,7 +334,7 @@ export async function loadClientRoutes(
    */
   const seen = new Map<string, LeadSheetRoute>()
   for (const r of [...routes]) {
-    const key = `${r.spreadsheetId}\u0000${r.tabName}`
+    const key = destinationKey(r)
     const first = seen.get(key)
     if (!first) {
       seen.set(key, r)

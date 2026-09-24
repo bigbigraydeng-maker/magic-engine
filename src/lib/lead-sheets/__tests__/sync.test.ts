@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { newDestinationSnapshot, syncOneRoute } from '../sync'
+import { describeHeaderProblem, newDestinationSnapshot, syncOneRoute, syncRoutes } from '../sync'
 import type { LeadRecord, LeadSheetRoute } from '../types'
 
 /**
@@ -35,6 +35,7 @@ const route: LeadSheetRoute = {
   valueLabels: {},
   dedupColumns: [0, 2],
   dedupIdColumn: null,
+  headerRow: null,
   timezone: 'Pacific/Auckland',
   backfillSince: null,
   enabled: true,
@@ -374,5 +375,153 @@ describe('同一张表上的几条路线共用一份快照', () => {
 
     await syncOneRoute('c1', routeB, [lead({ leadId: 'b' })], { readSheet, dryRun: true }, snapshot)
     expect(readSheet).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * 🔴 这一组盯的是**编排层**，不是 syncOneRoute。
+ *
+ * 上面那组测试是自己手工把 snapshot 传进去的 —— 把 `syncRoutes` 里的分组改成
+ * 「每条路线各建一个快照」，这个 PR 的全部立论当场失效，而上面那组一个都不会红。
+ * 所以必须有人直接调 `syncRoutes`。
+ */
+describe('syncRoutes —— 真正按目标表分组的那一层', () => {
+  function routeAt(routeKey: string, sheet: string, tab: string, label: string): LeadSheetRoute {
+    return {
+      ...route,
+      routeKey,
+      spreadsheetId: sheet,
+      tabName: tab,
+      columns: [
+        { field: 'occurred_at', format: 'local' },
+        { field: 'contact_name' },
+        { field: 'contact_phone' },
+        { field: 'literal', value: label },
+      ],
+    }
+  }
+
+  it('🔴 两条路线写同一张表 → 整个编排里这张表只读一次', async () => {
+    const readSheet = vi.fn<ReadMock>(async () => [HEADER])
+    const appendSheet = vi.fn<AppendMock>(async (_c, _s, _r, rows) => rows.length)
+    const a = routeAt('v4', 'sheet-1', 'Untitled', '含预算与出发时间')
+    const b = routeAt('fallback', 'sheet-1', 'Untitled', '基础表单')
+
+    const receipts = await syncRoutes(
+      'c1',
+      [a, b],
+      new Map([
+        ['v4', [lead({ leadId: 'a' })]],
+        ['fallback', [lead({ leadId: 'b', phone: '+64220000000' })]],
+      ]),
+      { readSheet, appendSheet },
+    )
+
+    expect(readSheet).toHaveBeenCalledTimes(1)
+    expect(receipts.map((r) => r.appended)).toEqual([1, 1])
+  })
+
+  it('两条路线写不同的表 → 各读各的', async () => {
+    const readSheet = vi.fn<ReadMock>(async () => [HEADER])
+    const appendSheet = vi.fn<AppendMock>(async (_c, _s, _r, rows) => rows.length)
+
+    await syncRoutes(
+      'c1',
+      [routeAt('a', 'sheet-1', 'T1', 'A'), routeAt('b', 'sheet-2', 'T2', 'B')],
+      new Map([
+        ['a', [lead({ leadId: 'a' })]],
+        ['b', [lead({ leadId: 'b' })]],
+      ]),
+      { readSheet, appendSheet },
+    )
+
+    expect(readSheet).toHaveBeenCalledTimes(2)
+  })
+
+  it('🔴 同一张表上，第二条路线看得见第一条刚排进队列的人（试算也算）', async () => {
+    const readSheet = vi.fn<ReadMock>(async () => [HEADER])
+    const same = { occurredAt: '2026-09-23T21:52:24Z', phone: '+64221543231' }
+
+    const receipts = await syncRoutes(
+      'c1',
+      [routeAt('v4', 'sheet-1', 'Untitled', 'A'), routeAt('fallback', 'sheet-1', 'Untitled', 'B')],
+      new Map([
+        ['v4', [lead({ leadId: 'a', ...same })]],
+        ['fallback', [lead({ leadId: 'b', ...same })]],
+      ]),
+      { readSheet, dryRun: true },
+    )
+
+    expect(receipts[0].appendedLeadIds).toEqual(['a'])
+    expect(receipts[1].appendedLeadIds).toEqual([])
+    expect(receipts[1].alreadyPresent).toBe(1)
+  })
+
+  it('没分到线索的路线也出一条回执 ——「今天 0 条」和「没跑」要分得开', async () => {
+    const readSheet = vi.fn<ReadMock>(async () => [HEADER])
+    const receipts = await syncRoutes(
+      'c1',
+      [routeAt('a', 'sheet-1', 'T1', 'A'), routeAt('b', 'sheet-1', 'T1', 'B')],
+      new Map([['a', [lead({ leadId: 'a' })]]]),
+      { readSheet, dryRun: true },
+    )
+    expect(receipts).toHaveLength(2)
+    expect(receipts[1].matched).toBe(0)
+  })
+})
+
+describe('describeHeaderProblem —— 开工前对一次表头', () => {
+  const withHeader = (header: string[] | null): LeadSheetRoute => ({
+    ...route,
+    columns: [{ field: 'occurred_at', format: 'local' }, { field: 'contact_name' }, { field: 'contact_phone' }],
+    headerRow: header,
+  })
+
+  it('表头对得上 → 放行', () => {
+    expect(describeHeaderProblem(withHeader(['留资时间', '姓名', '电话']), [['留资时间', '姓名', '电话']])).toBeNull()
+  })
+
+  it('🔴 有人在表中间插了一列 → 停手，并说清是第几列、应该是什么', () => {
+    const problem = describeHeaderProblem(withHeader(['留资时间', '姓名', '电话']), [
+      ['留资时间', '备注', '姓名', '电话'],
+    ])
+    expect(problem).toContain('第 2 列')
+    expect(problem).toContain('姓名')
+    expect(problem).toContain('备注')
+  })
+
+  it('表头右边多出人自己加的列 → 不管（不影响前几列的位置）', () => {
+    expect(
+      describeHeaderProblem(withHeader(['留资时间', '姓名', '电话']), [
+        ['留资时间', '姓名', '电话', '我自己的草稿列'],
+      ]),
+    ).toBeNull()
+  })
+
+  it('表头那一格被人加了空格 → 不算问题', () => {
+    expect(
+      describeHeaderProblem(withHeader(['留资时间', '姓名', '电话']), [[' 留资时间 ', '姓名', '电话']]),
+    ).toBeNull()
+  })
+
+  it('空表不检查 —— 新配一条路线、表里还没有行是正常的，不能卡住第一次写入', () => {
+    expect(describeHeaderProblem(withHeader(['留资时间', '姓名', '电话']), [])).toBeNull()
+  })
+
+  it('没配表头签名 → 完全不检查，行为跟以前一样', () => {
+    expect(describeHeaderProblem(withHeader(null), [['随便', '什么', '都行']])).toBeNull()
+  })
+
+  it('🔴 表头对不上时，这张表上一行都不写', async () => {
+    const readSheet = vi.fn<ReadMock>(async () => [['留资时间', '备注', '姓名']])
+    const appendSheet = vi.fn<AppendMock>(async () => 1)
+    const r = await syncOneRoute(
+      'c1',
+      { ...withHeader(['留资时间', '姓名', '电话']), dedupColumns: [0, 2] },
+      [lead({ leadId: 'a' })],
+      { readSheet, appendSheet },
+    )
+    expect(appendSheet).not.toHaveBeenCalled()
+    expect(r.error).toContain('表头跟配置对不上')
   })
 })

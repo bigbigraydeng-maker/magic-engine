@@ -71,8 +71,8 @@
 
 1. **CTS 的 Google 连接要重新授权一次** —— 现有令牌只有 `spreadsheets.readonly`，没有写权限。Google 不会自动升级 scope，必须有人重新走一次
    `https://app.magicengine.com.au/api/auth/google/connect?client_id=c0000000-0000-0000-0000-000000000000&flow=admin`，在同意页上勾「查看、修改 Google 表格」。
-2. **目标表格要先按 13 列重排**（前 12 列是 PM 定的表头，第 13 列是隐藏的线索编号，判重主键）。表里现有那 3 行 v4 数据跟着重排，或者直接删掉让系统自己重写。
-3. **migration + seed SQL 还没 apply**（`supabase/migrations/20260925000003_client_lead_sheet_routes.sql` · `scripts/seed-cts-lead-sheet-routes.sql`），按规矩等 PM 显式 go。
+2. **目标表格要先按 13 列重排**（前 12 列是 PM 定的表头，第 13 列是隐藏的线索编号，判重主键）。表里现有那 3 行 v4 数据跟着重排，或者直接删掉让系统自己重写。排错了不会闷声错位——配置里带了一份「表头签名」，系统开工前逐格比对，对不上就整轮停手并出待办。
+3. **两个 migration + seed SQL 还没 apply**（`supabase/migrations/20260925000003_client_lead_sheet_routes.sql` · `…000004_client_lead_sheet_routes_header.sql` · `scripts/seed-cts-lead-sheet-routes.sql`），按规矩等 PM 显式 go。
 4. **合并后去 Inngest 后台对 `/api/inngest` 点一次 Sync**，否则新函数安静地不跑。
 
 ### 待 PM 决定的两件事
@@ -92,7 +92,7 @@
 
 1. **`src/lib/lead-sheets/` 名字是「线索」，实际只吃 Meta 即时表单。** `leads.ts` 把 `.eq('channel','meta_lead_form')` 写死在共享层。第二个客户的线索如果来自官网表单或 GHL，这个模块要改代码。两条路二选一：目录改名点明 meta-lead；或给路线表加一列 `source_channel`（默认 `meta_lead_form`）由取数层读。
 2. ~~**`CLIENT_FOLLOWUP_SHEETS` 是同一件事的第二套配置**~~ —— 2026-09-24 改成「一张表」之后这条从「欠账」升级成**必做**，见上面「切表会连带打断的两条下游」。
-3. **列对齐没有任何校验。** 配置说 32 列就写 32 列，没人比对过表头或现有行宽；有人在表格中间插一列，之后每一行都错位而回执全绿。模块已经把整张表读回来了，第一行是白拿的——可以加一个可选的列数/表头签名断言，对不上就停手不写。这张表是销售直接看的，错位比不写更糟。
+3. ~~**列对齐没有任何校验。**~~ —— 2026-09-24 已做：路线配置加了可选的 `header_row`（表头签名），开工前逐格比对第一行，对不上整轮停手并出待办。CTS 的配置已经填上。
 
 另外两条小的：`registry.ts` 里这条的 `schedule` 是手抄的，`registry.test.ts` 没有对它做「跟函数定义一致」的断言（漂移了 CI 不会红）；`leads.ts` 回查广告组/系列名字时把 `ad_entity_snapshots` 的全部历史快照分页拉回来，只为取一个名字，每小时一次的无谓开销。
 
