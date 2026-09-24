@@ -102,6 +102,18 @@ ON CONFLICT (client_id, route_key) DO UPDATE SET
 -- 🔴 第 18 列起全是 CTS 员工手打的跟进记录，还有一片人工维护的名单区。
 --    这条链路**只 append 不覆盖**（见 google-sheets/client.ts），那些列
 --    在配置里用 blank 占位，写进去是空格子，不会碰到已有内容。
+--
+-- 🔴 **这张表的实际用法已经跟表头对不上了**，下面的列按**实测**配，不按表头配
+--    （2026-09-24 读生产表最后几行核实）：
+--      · 第 18 列（R，表头写 `员工跟进记录`）—— 实际放的是 Facebook 后台链接。
+--        第 506 行起换的，见 conversions/cts-crm-sheet-sync.ts 的
+--        `CTS_NOTE_COLUMN_SWITCH_ROW`。我们只追加新行（行号远在 506 之后），
+--        所以按现行用法写 `inbox_url`。
+--      · 第 19 列（S，表头写 `Many Chat`）—— 实际是员工手打的跟进记录，
+--        **必须留空**，写进去就是往人家的记录上盖。
+--      · 第 32 列（AF，表头写 `inbox_url`）—— 新行里实际是空的，跟着留空。
+--      · 第 17 列（Q，`lead_status`）—— 外部管道写 "CREATED"；ME 没有真取过
+--        这个字段，留空而不是照抄一个没验证过的值。
 INSERT INTO public.client_lead_sheet_routes (
   client_id, route_key, label, spreadsheet_id, tab_name,
   match_any_answer_fields, priority, columns, value_labels, dedup_columns,
@@ -132,6 +144,7 @@ INSERT INTO public.client_lead_sheet_routes (
     {"field": "contact_name"},
     {"field": "contact_phone", "prefix": "p:"},
     {"field": "blank"},
+    {"field": "answer", "key": "inbox_url"},
     {"field": "blank"},
     {"field": "blank"},
     {"field": "blank"},
@@ -145,8 +158,7 @@ INSERT INTO public.client_lead_sheet_routes (
     {"field": "blank"},
     {"field": "blank"},
     {"field": "blank"},
-    {"field": "blank"},
-    {"field": "answer", "key": "inbox_url"}
+    {"field": "blank"}
   ]'::jsonb,
   -- 第 13 列（想去哪个团）刻意**不翻中文**：这张表的历史行全是英文 slug，
   -- 中英混排反而让人以为是两种数据。要翻就整表一起翻，那是另一件事。
