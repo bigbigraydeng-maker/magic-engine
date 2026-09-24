@@ -21,4 +21,15 @@ Operating rule:
   controller may open the matching environment approval for Ray, but it must
   never infer authorization from “continue”, “candidate”, or “visual pass”.
 
+Exemption (PM decision 2026-09-25):
+
+- A PR whose only changed files live under `docs/ledger/` skips the environment
+  approval (`detect-ledger-only` job). The ledger checks in `ledger-check.yml`
+  still gate it, and repository auto-merge is enabled so the nightly
+  `claude/ledger-verify-*` PRs merge on their own once CI is green.
+- Rationale: requiring a human click for every status flip on a ledger card is
+  how ROADMAP died. Accepted cost: a human-authored ledger-only PR can edit a
+  card's frozen fields without review; the format and pointer checks are the
+  only guard.
+
 This gate never merges, deploys, publishes, or contacts a paid provider.
