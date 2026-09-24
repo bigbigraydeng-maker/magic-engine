@@ -67,11 +67,11 @@ export interface HeartbeatPolicy {
 export const HEARTBEAT_POLICY: Record<PlatformProvider, HeartbeatPolicy> = {
   [PLATFORM_PROVIDERS.MICROSOFT_MAIL]: {
     staleHours: 12,
-    why: '每小时跑的邮箱同步都会刷一次令牌；12 小时 = 连着 12 轮没通上话',
+    why: '邮箱同步挂在 messenger-hourly 里（render.yaml `10 * * * *`），每轮都会刷令牌；12 小时 = 连着 12 轮没通上话',
   },
   [PLATFORM_PROVIDERS.GOOGLE_GSC]: {
     staleHours: 48,
-    why: '每天一次的 Google 取数任务会刷令牌；给两轮余量，单日漏跑不报警',
+    why: 'google-data-pullback-daily 每天一次会刷令牌（render.yaml `0 17 * * *`）；给两轮余量，单日漏跑不报警',
   },
   [PLATFORM_PROVIDERS.GOOGLE_GA4]: {
     staleHours: 48,
