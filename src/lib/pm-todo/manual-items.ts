@@ -39,11 +39,11 @@ import {
   type NotIndexedRow,
 } from './manual-item-types'
 import { pushLinkedinProgressItems } from './manual-linkedin-items'
-import { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems } from './manual-crm-items'
+import { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems } from './manual-crm-items'
 
 export * from './manual-item-types'
 export { pushLinkedinProgressItems } from './manual-linkedin-items'
-export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems } from './manual-crm-items'
+export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems } from './manual-crm-items'
 import { pushVideoCreditsItem, pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
 import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems } from './manual-monitoring-items'
 import { pushLeadsSanityItems, pushDiagnosticItems, pushPrescriptionItems } from './manual-strategy-items'
@@ -221,6 +221,11 @@ export async function loadManualItems(
   // 刻意**不自动封渠道**，只提示 —— 理由见 lib/crm/messenger-stop-signal.ts 文件头。
   await pushMessengerStopItems(supabase, items, ids, now, nameOf).catch((e) =>
     console.warn('[manual-items] 私信拒联提示生成失败（不阻塞其他待办）:', e),
+  )
+
+  // 客人身上的「⭐重要标记」到期了 —— 到期日到了自动进待办，员工清 due 日期即消失
+  await pushImportantDueItems(supabase, items, ids, nameOf, now).catch((e) =>
+    console.warn('[manual-items] 重要标记到期读取失败（不阻塞其他待办）:', e),
   )
 
   // 客人来信超过一天没人回 + 公司邮箱同步哑了（后者会让前者假装成零条），见 email-reply-items.ts
