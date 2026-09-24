@@ -90,6 +90,12 @@ const DEV_OWNED_KINDS: ManualItemKind[] = [
   'platform_connection_pipeline_down',
   // 「授权体检自己读不出来了」→ 同上，是我们这边的欠账。
   'platform_connection_check_failed',
+  // 「连上了但这个客户不在取数名单里」→ 缺的是配置不是授权，重连也没用。
+  'platform_connection_not_enrolled',
+  // 「这个平台后台还没有让 PM 自助重连的按钮」→ 给他一件点不到按钮的活比不报还糟。
+  'platform_connection_no_reconnect_ui',
+  // 「连接挂在查不到的客户名下」→ 要核对该断还是该改挂，是我们的活。
+  'platform_connection_orphan',
 ]
 
 /** FDE focus clients: CTS + Oztop. */

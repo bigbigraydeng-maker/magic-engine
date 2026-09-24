@@ -37,6 +37,11 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   'facebook_page_binding_unverified',
   'ai_provider_exhausted',
   'ai_alerting_broken',
+  // 「授权体检自己读不出来了」「整条通道停了」跟 ai_alerting_broken 是同一类：
+  // 这套监控自己出问题的那条消息，绝不能因为链接问题被静默丢掉。
+  // （它们的 href 本来就是空的、不会被 fetch，这里是第二道保险。）
+  'platform_connection_check_failed',
+  'platform_connection_pipeline_down',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */

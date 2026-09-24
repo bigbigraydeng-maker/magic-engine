@@ -39,9 +39,13 @@
  *   没有一条有读写版 —— 写客户表格那条新功能对所有老客户都还没通。
  */
 
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { MICROSOFT_MAIL_SCOPES } from '@/lib/microsoft/mail-oauth'
-import { COMBINED_GOOGLE_SCOPES } from '@/lib/google-oauth/client'
+import { COMBINED_GOOGLE_SCOPES, GSC_SCOPES } from '@/lib/google-oauth/client'
+import { META_PAGE_SCOPES } from '@/lib/meta-oauth/client'
+import { TIKTOK_SCOPES } from '@/lib/tiktok-oauth/client'
 
 describe('授权权限清单变更闸门（改了就来读文件头注）', () => {
   it('微软邮箱的权限清单没有被悄悄改动', () => {
@@ -63,5 +67,72 @@ describe('授权权限清单变更闸门（改了就来读文件头注）', () =
       'https://www.googleapis.com/auth/spreadsheets',
       'email',
     ])
+  })
+
+  it('谷歌单独授权（只要搜索数据那条）的清单没有被悄悄改动', () => {
+    expect([...GSC_SCOPES]).toEqual([
+      'https://www.googleapis.com/auth/webmasters.readonly',
+      'email',
+    ])
+  })
+
+  it('Facebook 主页授权的清单没有被悄悄改动', () => {
+    expect([...META_PAGE_SCOPES]).toEqual([
+      'pages_show_list',
+      'pages_messaging',
+      'pages_read_engagement',
+      'pages_read_user_content',
+      'pages_manage_posts',
+      'leads_retrieval',
+      'pages_manage_ads',
+    ])
+  })
+
+  it('TikTok 授权的清单没有被悄悄改动', () => {
+    expect([...TIKTOK_SCOPES]).toEqual(['user.info.basic', 'video.publish', 'video.upload'])
+  })
+})
+
+/**
+ * 🔴 光钉住「现在这几个常量」不够 —— 新加一个 `XXX_SCOPES` 常量，上面那几条
+ * 断言一声不响。这道扫描保证**每一个** scope 常量都被钉在上面那份清单里。
+ *
+ * 新增了一个 scope 常量而这里挂了：先按文件头注把三件事做完，再把常量加进
+ * `PINNED_SCOPE_CONSTANTS` 并在上面补一条钉住内容的断言。
+ */
+const PINNED_SCOPE_CONSTANTS = [
+  'src/app/api/clients/[id]/comment-autoreply-probe/route.ts:REQUIRED_SCOPES',
+  'src/lib/google-oauth/client.ts:COMBINED_GOOGLE_SCOPES',
+  'src/lib/google-oauth/client.ts:GSC_SCOPES',
+  'src/lib/meta-oauth/client.ts:META_PAGE_SCOPES',
+  'src/lib/microsoft/mail-oauth.ts:MICROSOFT_MAIL_SCOPES',
+  'src/lib/tiktok-oauth/client.ts:TIKTOK_SCOPES',
+]
+
+function walk(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry)
+    if (statSync(full).isDirectory()) {
+      if (entry === '__tests__' || entry === 'node_modules') continue
+      walk(full, out)
+    } else if (entry.endsWith('.ts') || entry.endsWith('.tsx')) {
+      if (!entry.includes('.test.')) out.push(full)
+    }
+  }
+  return out
+}
+
+describe('新增的权限清单常量也必须被钉住', () => {
+  it('仓库里的每一个 *_SCOPES 常量都在钉住清单里', () => {
+    const root = join(process.cwd(), 'src')
+    const found: string[] = []
+    for (const file of walk(root)) {
+      const rel = file.slice(process.cwd().length + 1)
+      for (const line of readFileSync(file, 'utf8').split('\n')) {
+        const m = /^(?:export )?const ([A-Z][A-Z0-9_]*SCOPES)\s*=/.exec(line)
+        if (m) found.push(`${rel}:${m[1]}`)
+      }
+    }
+    expect(found.sort()).toEqual([...PINNED_SCOPE_CONSTANTS].sort())
   })
 })
