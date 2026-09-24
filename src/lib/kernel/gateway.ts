@@ -32,7 +32,7 @@ import type {
 import type { KernelDeps } from './deps'
 import { KernelError, humanReasonOf, isRetryable, reportedCostOf } from './errors'
 import { validateAgainstSchema } from './registry'
-import { outwardBlockReason } from './outward-authorization'
+import { outwardBlockReason, preProviderEnvelopeBlockReason } from './outward-authorization'
 import {
   beginAuthorizedRun,
   ensureSteps,
@@ -890,6 +890,28 @@ async function runSteps(
         return failRun(
           deps, args.run, steps, fence, blocked, makeRollbackContext(priorOutputs),
         )
+      }
+
+      // 🔴 实例闸的第二次核算 —— 判据见 `outward-authorization.ts` 的
+      //    `preProviderEnvelopeBlockReason`。这里只做「过不了就走 dead_letter」。
+      const envelopeBlock = await preProviderEnvelopeBlockReason({
+        definition,
+        run: args.run,
+        stepKey,
+        resolveFacts: deps.resolveEnvelopeFacts,
+      })
+      if (envelopeBlock) {
+        const blocked = new KernelError('INVALID_STATE', envelopeBlock, {
+          detail: { stepKey, phase: 'pre_provider_envelope' },
+        })
+        await writeStep(step.id, {
+          status: 'dead_letter',
+          attempt,
+          last_error: humanReasonOf(blocked),
+          finished_at: deps.now().toISOString(),
+        })
+        steps = await listSteps(deps.supabase, args.run.id)
+        return failRun(deps, args.run, steps, fence, blocked, makeRollbackContext(priorOutputs))
       }
 
       attempt += 1
