@@ -193,6 +193,8 @@
 | `ENABLE_REAL_GENERATION` | `.env.example` 有，代码 0 引用 | ⚠️ 待清理 |
 | `FACTORY_QUALITY_GUARD_DISABLED` | 内容工厂成片文案品控（竞品品牌/占位字幕/人称口吻）总闸，设 `true` 临时全局关停 Jev 调用（确定性的字幕重复检测不受影响，照常跑）。默认开 | Render-web |
 | `MESSENGER_VERIFIER_SEMANTIC_DISABLED` | CTS Messenger AI 客服 verifier 的 Jev 语义补充判断（brand_redline/number_claim 换措辞绕过）总闸，设 `true` 临时全局关停 Jev 调用（七道正则闸不受影响，照常跑）。默认开 | Render-web |
+| `META_ADS_AI_ENABLED` | 🔴 Meta 广告分析邀请测试总闸，**未配 = 关闭**（`src/lib/meta/ai/contract.ts` 的 `enabled()` 只认字符串 `'true'`）。关掉后新连接、新读取、新报告全部拒绝，但已有客户仍可进页面查看状态、断开连接、停止旧版外部访问（`requirePilotLifecycleAccess` 与 `requirePilotActive` 的区别）。开关在 web 进程里读，配到 cron 上不生效 | Render-web |
+| `META_ADS_AI_GRAPH_VERSION` | Meta Graph API 版本，默认 `v21.0`（`src/lib/meta/graph-read.ts` 的 `metaReadVersion()`）。OAuth 授权 URL、读取请求、游标绑定都用它 | Render-web（可不配） |
 
 ## 12. 只在脚本 / 测试里用 — **不需要配到任何平台**
 

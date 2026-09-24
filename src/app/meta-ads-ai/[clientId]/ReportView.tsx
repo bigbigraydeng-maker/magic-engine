@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { META_ADS_AI_MESSAGES } from '@/lib/meta/ai/error-messages'
 import ReportCharts from './ReportCharts'
 
@@ -100,7 +101,59 @@ function ReportState({ analysis }: { analysis: ReportAnalysis }) {
   </div>
 }
 
-export default function ReportView({ analysis }: { analysis: ReportAnalysis }) {
+export type FollowUpTurn = { role: 'user' | 'assistant'; content: string }
+
+export type FollowUpHandler = (question: string, history: FollowUpTurn[]) => Promise<string>
+
+/** Only the most recent turns are sent; the full transcript stays on the page. */
+export const FOLLOW_UP_HISTORY_TURNS = 6
+
+function FollowUpPanel({ onAsk }: { onAsk: FollowUpHandler }) {
+  const [turns, setTurns] = useState<FollowUpTurn[]>([])
+  const [question, setQuestion] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  async function submit() {
+    const trimmed = question.trim()
+    if (!trimmed || busy) return
+    const history = turns.slice(-FOLLOW_UP_HISTORY_TURNS)
+    setTurns(current => [...current, { role: 'user', content: trimmed }])
+    setQuestion('')
+    setBusy(true)
+    setError('')
+    try {
+      const answer = await onAsk(trimmed, history)
+      setTurns(current => [...current, { role: 'assistant', content: answer }])
+    } catch (e) {
+      const code = e instanceof Error ? e.message : ''
+      setError(META_ADS_AI_MESSAGES[code] ?? '暂时无法回答这个问题，请稍后重试。')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+    <p className="text-sm font-medium text-slate-900">追问这份报告</p>
+    <p className="text-xs text-slate-500">只针对上面这份报告提问。回答只保留在当前页面，刷新后不会保存。</p>
+    {turns.map((turn, index) => <div key={index} className={turn.role === 'user'
+      ? 'rounded-lg bg-slate-100 p-3 text-sm text-slate-900'
+      : 'rounded-lg bg-slate-50 p-3 text-sm text-slate-800'}>
+      <p className="mb-1 text-xs font-medium text-slate-500">{turn.role === 'user' ? '你' : '分析助手'}</p>
+      <p className="whitespace-pre-wrap break-words">{turn.content}</p>
+    </div>)}
+    {error && <p role="alert" className="rounded bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+    {busy && <p role="status" className="rounded bg-blue-50 p-3 text-sm text-blue-900">正在根据这份报告回答，请稍候…</p>}
+    <label className="block text-sm text-slate-700">你的问题
+      <textarea aria-label="追问这份报告" className="mt-1 w-full rounded border p-2 text-sm" rows={2}
+        maxLength={500} value={question} disabled={busy}
+        onChange={event => setQuestion(event.target.value)} />
+    </label>
+    <button type="button" disabled={busy || question.trim().length === 0}
+      className="rounded bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-40"
+      onClick={() => void submit()}>提问</button>
+  </div>
+}
+
+export default function ReportView({ analysis, onFollowUp }: { analysis: ReportAnalysis; onFollowUp?: FollowUpHandler }) {
   const generatedAt = analysis.completed_at ?? analysis.created_at
   return <article className="min-w-0 space-y-5 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 shadow-sm sm:p-5">
     <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
@@ -122,5 +175,7 @@ export default function ReportView({ analysis }: { analysis: ReportAnalysis }) {
       </div>
     </div>
     <ReportState analysis={analysis} />
+    {onFollowUp && analysis.status === 'completed' && analysis.report_markdown !== null
+      && <FollowUpPanel onAsk={onFollowUp} />}
   </article>
 }

@@ -13,7 +13,7 @@ vi.mock('../../graph-read',async()=>{
   return { ...actual,metaGraphGet:mocks.metaGraphGet }
 })
 
-import { generateAnalysis,listAnalyses } from '../analysis'
+import { followUp,generateAnalysis,listAnalyses } from '../analysis'
 
 const grant={ id:'10000000-0000-4000-8000-000000000001',connection_id:'20000000-0000-4000-8000-000000000001',
   ad_account_id:'act_1234567890',revision:'30000000-0000-4000-8000-000000000001',entitlement_revision:'40000000-0000-4000-8000-000000000001' }
@@ -185,6 +185,107 @@ describe('托管 Meta 广告分析',()=>{
       .rejects.toThrow('analysis_too_large')
     expect(mocks.callClaudeChat).not.toHaveBeenCalled()
     expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_finish_sponsored_analysis',expect.objectContaining({ final_status:'failed',charged_usd:0 }))
+  })
+})
+
+describe('报告追问',()=>{
+  const jobId='60000000-0000-4000-8000-000000000001'
+  const storedEvidence={ campaigns:[{ campaign_name:'A',spend:10 }],video_ads:[{ ad_id:'x' }] }
+
+  function withStoredReport(overrides:Record<string,unknown>={}) {
+    mocks.from.mockImplementation((table:string)=>{
+      if(table==='meta_ads_ai_analysis_jobs') {
+        const chain:Record<string,unknown>={}
+        for(const method of ['select','eq']) chain[method]=vi.fn(()=>chain)
+        chain.maybeSingle=vi.fn(async()=>({ data:{ id:jobId,status:'completed',ad_account_id:grant.ad_account_id,
+          report_markdown:'总体结果\n过去 7 天花费 NZD 100。',evidence:storedEvidence,...overrides },error:null }))
+        return chain
+      }
+      return query(table)
+    })
+  }
+
+  it('用已保存的报告和证据回答，不再调用 Meta API',async()=>{
+    sponsoredEnabled=false
+    withStoredReport()
+    mocks.callClaudeChat.mockResolvedValue({ text:'CTR 是 2%。',input_tokens:100,output_tokens:20,cost_usd:0.001,stop_reason:'end_turn' })
+    const result=await followUp('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',jobId,'CTR 是多少？',[])
+    expect(result).toEqual({ answer:'CTR 是 2%。' })
+    expect(mocks.metaGraphGet).not.toHaveBeenCalled()
+    expect(mocks.activeConnection).not.toHaveBeenCalled()
+    expect(mocks.reserveRead).not.toHaveBeenCalled()
+    expect(mocks.rpc).not.toHaveBeenCalledWith('meta_ads_reserve_sponsored_analysis',expect.anything())
+    expect(mocks.rpc).not.toHaveBeenCalledWith('meta_ads_finish_sponsored_analysis',expect.anything())
+  })
+
+  it('把保存的报告正文和证据一起发给模型',async()=>{
+    withStoredReport()
+    mocks.callClaudeChat.mockResolvedValue({ text:'答案',input_tokens:1,output_tokens:1,cost_usd:0,stop_reason:'end_turn' })
+    await followUp('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',jobId,'问题',[])
+    const payload=String(mocks.callClaudeChat.mock.calls[0]?.[0].messages[0]?.content)
+    expect(payload).toContain('过去 7 天花费 NZD 100。')
+    expect(payload).toContain('campaign_name')
+    // video_ads is part of the report slice the model needs to answer video
+    // questions — it is deliberately included, not stripped.
+    expect(payload).toContain('video_ads')
+  })
+
+  it('只接受属于当前客户和当前登录人的已完成报告',async()=>{
+    const chain:Record<string,unknown>={}
+    for(const method of ['select','eq']) chain[method]=vi.fn(()=>chain)
+    chain.maybeSingle=vi.fn(async()=>({ data:null,error:null }))
+    mocks.from.mockReturnValue(chain)
+    await expect(followUp('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',jobId,'问题',[]))
+      .rejects.toThrow('analysis_unavailable')
+    expect(chain.eq).toHaveBeenCalledWith('client_id','a1000000-0000-4000-8000-000000000001')
+    expect(chain.eq).toHaveBeenCalledWith('principal_id','50000000-0000-4000-8000-000000000001')
+    expect(mocks.callClaudeChat).not.toHaveBeenCalled()
+  })
+
+  it('未完成的报告不能追问',async()=>{
+    withStoredReport({ status:'running',report_markdown:null })
+    await expect(followUp('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',jobId,'问题',[]))
+      .rejects.toThrow('analysis_unavailable')
+    expect(mocks.callClaudeChat).not.toHaveBeenCalled()
+  })
+
+  it('把历史轮次和当前问题一起发给模型，并限制长度',async()=>{
+    withStoredReport()
+    mocks.callClaudeChat.mockResolvedValue({ text:'答案',input_tokens:1,output_tokens:1,cost_usd:0,stop_reason:'end_turn' })
+    await followUp('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',jobId,'那 CPL 呢？',
+      [{ role:'user',content:'CTR 是多少？' },{ role:'assistant',content:'CTR 是 2%。' }])
+    const messages=mocks.callClaudeChat.mock.calls[0]?.[0].messages as Array<{ role:string;content:string }>
+    expect(messages.at(-1)).toEqual({ role:'user',content:'那 CPL 呢？' })
+    expect(messages.some(m=>m.content==='CTR 是 2%。')).toBe(true)
+    expect(mocks.callClaudeChat.mock.calls[0]?.[0].systemPrompt).toContain('全文不超过 300 个中文字')
+  })
+
+  it('超过 6 轮时只发送最近 6 轮，不拒绝请求',async()=>{
+    withStoredReport()
+    mocks.callClaudeChat.mockResolvedValue({ text:'答案',input_tokens:1,output_tokens:1,cost_usd:0,stop_reason:'end_turn' })
+    const history=Array.from({ length:20 },(_,index)=>({ role:(index%2===0 ? 'user' : 'assistant') as 'user'|'assistant',
+      content:`第 ${index} 轮` }))
+    await followUp('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',jobId,'继续',history)
+    const messages=mocks.callClaudeChat.mock.calls[0]?.[0].messages as Array<{ role:string;content:string }>
+    expect(messages.some(m=>m.content==='第 19 轮')).toBe(true)
+    expect(messages.some(m=>m.content==='第 13 轮')).toBe(false)
+  })
+
+  it('空问题直接拒绝，不调用模型',async()=>{
+    withStoredReport()
+    await expect(followUp('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',jobId,'   ',[]))
+      .rejects.toThrow('invalid_arguments')
+    expect(mocks.callClaudeChat).not.toHaveBeenCalled()
+  })
+
+  it('模型失败只记录非敏感类别',async()=>{
+    withStoredReport()
+    const log=vi.spyOn(console,'error').mockImplementation(()=>undefined)
+    mocks.callClaudeChat.mockRejectedValue({ status:403,error:{ type:'permission_error',message:'secret upstream detail' } })
+    await expect(followUp('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',jobId,'问题',[]))
+      .rejects.toThrow('model_unavailable')
+    expect(log).toHaveBeenCalledWith('[meta-ads-ai] hosted follow-up call failed',{ category:'permission',model:'claude-haiku-test' })
+    expect(JSON.stringify(log.mock.calls)).not.toContain('secret upstream detail')
   })
 })
 

@@ -95,6 +95,98 @@ describe('nontechnical connection feedback',()=>{
     expect(screen.queryByText(/Bearer|MCP/)).not.toBeInTheDocument()
   })
 
+  it('answers a follow-up inside the current report card without leaving the page',async()=>{
+    vi.mocked(fetch).mockImplementation(async(_url:RequestInfo | URL,options?:RequestInit)=>{
+      if(!options?.method) return new Response(JSON.stringify({ ...status,connections:[connection],
+        grants:[{ id:'grant',ad_account_id:'act_1234567890',connection_id:connection.id }],
+        analyses:[{ id:'job',status:'completed',ad_account_id:'act_1234567890',window_since:'2026-09-13',window_until:'2026-09-19',
+          report_markdown:'总体结果\n过去 7 天花费 NZD 100。',error_code:null,created_at:'2026-09-20',completed_at:'2026-09-20' }] }))
+      const body=JSON.parse(String(options.body))
+      expect(body.action).toBe('follow_up')
+      expect(body.job_id).toBe('job')
+      return new Response(JSON.stringify({ answer:'CTR 是 2%。' }))
+    })
+    render(<MetaAdsScreen clientId="tenant" />)
+    const box=await screen.findByLabelText('追问这份报告')
+    fireEvent.change(box,{ target:{ value:'CTR 是多少？' } })
+    fireEvent.click(screen.getByRole('button',{ name:'提问' }))
+    expect(await screen.findByText('CTR 是 2%。')).toBeInTheDocument()
+    expect(screen.getByText('CTR 是多少？')).toBeInTheDocument()
+  })
+
+  it('keeps asking past seven questions and only sends the last six turns',async()=>{
+    const sent:Array<{ role:string;content:string }>[]=[]
+    vi.mocked(fetch).mockImplementation(async(_url:RequestInfo | URL,options?:RequestInit)=>{
+      if(!options?.method) return new Response(JSON.stringify({ ...status,connections:[connection],
+        grants:[{ id:'grant',ad_account_id:'act_1234567890',connection_id:connection.id }],
+        analyses:[{ id:'job',status:'completed',ad_account_id:'act_1234567890',window_since:'2026-09-13',window_until:'2026-09-19',
+          report_markdown:'总体结果',error_code:null,created_at:'2026-09-20',completed_at:'2026-09-20' }] }))
+      const body=JSON.parse(String(options.body))
+      sent.push(body.history)
+      return new Response(JSON.stringify({ answer:`回答 ${sent.length}` }))
+    })
+    render(<MetaAdsScreen clientId="tenant" />)
+    const box=await screen.findByLabelText('追问这份报告')
+    for(let index=1;index<=8;index++) {
+      fireEvent.change(box,{ target:{ value:`问题 ${index}` } })
+      fireEvent.click(screen.getByRole('button',{ name:'提问' }))
+      await screen.findByText(`回答 ${index}`)
+    }
+    expect(sent).toHaveLength(8)
+    expect(sent.every(history=>history.length<=6)).toBe(true)
+    // The current question travels in its own `question` field, so the history
+    // ends with the previous answer — not with the question being asked now.
+    expect(sent.at(-1)?.at(-1)).toEqual({ role:'assistant',content:'回答 7' })
+    expect(sent.at(-1)?.at(-2)).toEqual({ role:'user',content:'问题 7' })
+    expect(screen.getByText('问题 1')).toBeInTheDocument()
+    expect(screen.getByText('回答 8')).toBeInTheDocument()
+  })
+
+  it('shows the follow-up error next to the panel, not at the top of the page',async()=>{
+    vi.mocked(fetch).mockImplementation(async(_url:RequestInfo | URL,options?:RequestInit)=>{
+      if(!options?.method) return new Response(JSON.stringify({ ...status,connections:[connection],
+        grants:[{ id:'grant',ad_account_id:'act_1234567890',connection_id:connection.id }],
+        analyses:[{ id:'job',status:'completed',ad_account_id:'act_1234567890',window_since:'2026-09-13',window_until:'2026-09-19',
+          report_markdown:'总体结果',error_code:null,created_at:'2026-09-20',completed_at:'2026-09-20' }] }))
+      return new Response(JSON.stringify({ error:'model_unavailable' }),{ status:502 })
+    })
+    render(<MetaAdsScreen clientId="tenant" />)
+    const box=await screen.findByLabelText('追问这份报告')
+    fireEvent.change(box,{ target:{ value:'问题' } })
+    fireEvent.click(screen.getByRole('button',{ name:'提问' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('AI 模型暂时无法响应')
+  })
+
+  it('offers follow-up on a completed report even after the grant is gone',async()=>{
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ...status,connections:[],grants:[],
+      analyses:[{ id:'job',status:'completed',ad_account_id:'act_1234567890',window_since:'2026-09-13',window_until:'2026-09-19',
+        report_markdown:'总体结果',error_code:null,created_at:'2026-09-20',completed_at:'2026-09-20' }] })))
+    render(<MetaAdsScreen clientId="tenant" />)
+    await screen.findByText('总体结果')
+    expect(screen.getByLabelText('追问这份报告')).toBeInTheDocument()
+  })
+
+  it('does not offer follow-up on a report that is not completed',async()=>{
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ...status,connections:[connection],
+      grants:[{ id:'grant',ad_account_id:'act_1234567890',connection_id:connection.id }],
+      analyses:[{ id:'job',status:'failed',ad_account_id:'act_1234567890',window_since:'2026-09-13',window_until:'2026-09-19',
+        report_markdown:null,error_code:'analysis_failed',created_at:'2026-09-20',completed_at:'2026-09-20' }] })))
+    render(<MetaAdsScreen clientId="tenant" />)
+    await screen.findByRole('alert')
+    expect(screen.queryByLabelText('追问这份报告')).not.toBeInTheDocument()
+  })
+
+  it('shows one error at a time instead of repeating it in every step',async()=>{
+    vi.mocked(fetch).mockImplementation(async(_url:RequestInfo | URL,options?:RequestInit)=>{
+      if(!options?.method) return new Response(JSON.stringify(status))
+      return new Response(JSON.stringify({ error:'provider_unavailable' }),{ status:502 })
+    })
+    render(<MetaAdsScreen clientId="tenant" />)
+    fireEvent.click(await screen.findByRole('button',{ name:'查找广告账户（连接 1）' }))
+    await waitFor(()=>expect(screen.getAllByRole('alert')).toHaveLength(1))
+    expect(screen.getByRole('alert')).toHaveTextContent('暂时无法连接 Meta')
+  })
+
   it('keeps existing reports visible while hosted analysis is safely paused',async()=>{
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ...status,pilot:{ ...status.pilot,sponsored_analysis_enabled:false },connections:[connection],
       grants:[{ id:'grant',ad_account_id:'act_1234567890',connection_id:connection.id }],analyses:[{ id:'job',status:'completed',ad_account_id:'act_1234567890',window_since:'2026-09-13',window_until:'2026-09-19',report_markdown:'已生成的中文报告',error_code:null,created_at:'2026-09-20',completed_at:'2026-09-20' }] })))
