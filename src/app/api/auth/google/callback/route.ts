@@ -238,6 +238,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         display_name:      googleEmail ?? 'Google Analytics 4',
         scopes:            tokens.scope.split(' '),
         status:            'active',
+        // 跟上面 GSC 那份写法同理：这也是一次货真价实的「跟对方通上话」，必须盖
+        // 心跳并擦掉旧报错，否则重连一条已经修好的 GA4 连接之后，断线监控
+        // （platform-oauth/connection-health.ts）还会拿着 48 小时前的旧心跳继续报
+        // silent，一直报到第二天那条每日取数任务真跑到这个客户为止。
+        last_synced_at:    new Date().toISOString(),
+        error_message:     null,
         updated_at:        new Date().toISOString(),
       },
       { onConflict: 'client_id,provider,account_id' },

@@ -345,17 +345,37 @@ export function assessConnections(
 
     // 心跳判据只对声明了节奏的平台成立。没声明的平台到这里就只剩权限那一条。
     //
-    // `one_per_client`：刷令牌只认这个客户最新的那一条，老的那条永远不会被刷 ——
-    // 所以按客户合并，只要这个客户有任意一条是新鲜的，就算这条通道活着。
+    // `one_per_client`：运行时只会碰这个客户 created_at 最新的那一条 active 行
+    // （token-manager.ts::fetchConnectionRow 按 created_at DESC + limit(1) 选）。
+    // 心跳判据必须选**同一条**——不能挑这个客户名下心跳最新的那条来代表整个客户：
+    // 先连 A、再连 B、之后重新授权旧的 A，A 的心跳会变新，但运行时其实一直在用
+    // B，会把 B 真正的断线用 A 的新心跳盖过去、误判成健康。
     // `per_connection`：任务逐条遍历，必须按条判，合并会把死掉的那个邮箱盖过去。
     const groupKey = (r: ConnectionHealthRow) =>
       refreshScope === 'one_per_client' ? r.client_id : r.id
+    const runtimeRowOfGroup = new Map<string, ConnectionHealthRow>()
+    if (refreshScope === 'one_per_client') {
+      for (const row of enrolled) {
+        const key = groupKey(row)
+        const cur = runtimeRowOfGroup.get(key)
+        if (!cur || Date.parse(row.created_at) > Date.parse(cur.created_at)) {
+          runtimeRowOfGroup.set(key, row)
+        }
+      }
+    }
     const freshestOfGroup = new Map<string, { row: ConnectionHealthRow; age: number }>()
     if (staleHours !== null) {
       for (const row of enrolled) {
-        const age = heartbeatAgeHours(row, now) ?? 0
-        const cur = freshestOfGroup.get(groupKey(row))
-        if (!cur || age < cur.age) freshestOfGroup.set(groupKey(row), { row, age })
+        const key = groupKey(row)
+        if (refreshScope === 'one_per_client') {
+          // 只算运行时会选中的那一条——其它行心跳再新也代表不了这个客户。
+          if (runtimeRowOfGroup.get(key)?.id !== row.id) continue
+          freshestOfGroup.set(key, { row, age: heartbeatAgeHours(row, now) ?? 0 })
+        } else {
+          const age = heartbeatAgeHours(row, now) ?? 0
+          const cur = freshestOfGroup.get(key)
+          if (!cur || age < cur.age) freshestOfGroup.set(key, { row, age })
+        }
       }
     }
     const groups = Array.from(freshestOfGroup.values())

@@ -186,9 +186,11 @@ describe('assessConnections · 心跳', () => {
       row({ provider: PLATFORM_PROVIDERS.GOOGLE_GSC, scopes: [], ...o })
     const findings = assessConnections(
       [
-        // 客户换了谷歌账号重连 → 多出一行；老的那行永远不会被刷新
+        // 客户换了谷歌账号重连 → 多出一行，且这一行的 created_at 更晚
+        // （对应 token-manager.ts::fetchConnectionRow 按 created_at DESC 选中它）；
+        // 老的那行永远不会被刷新
         g({ id: 'old', last_synced_at: '2026-08-01T00:00:00Z' }),
-        g({ id: 'new', account_id: 'new@x', last_synced_at: '2026-09-23T17:00:00Z' }),
+        g({ id: 'new', account_id: 'new@x', created_at: '2026-09-01T00:00:00Z', last_synced_at: '2026-09-23T17:00:00Z' }),
       ],
       NOW,
     )
