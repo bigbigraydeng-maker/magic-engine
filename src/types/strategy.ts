@@ -353,8 +353,10 @@ export const PRIMARY_METRIC_CATALOG: MetricCandidate[] = [
     default_direction: 'decrease' },
 
   // ── Sales: product_launch (P32 NEW) ──────────────────────────────────────
+  // 2026-09-24：改成 hybrid —— 人在客户 CRM 表填「阶段=已订金」，系统读 me_sale_outcomes
+  // 的 purchase 行自动计数。人工那一半去不掉（订金到账只有客户知道），机器那一半已经自动。
   { key: 'signups_count', label_en: 'Sign-ups / bookings', label_zh: '报名/预订数',
-    unit: 'count', measurement: 'self_report',
+    unit: 'count', measurement: 'hybrid',
     recommended_for: ['sales'],
     recommended_for_sub_types: ['product_launch'],
     default_direction: 'increase',

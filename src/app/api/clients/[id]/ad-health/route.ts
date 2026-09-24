@@ -34,7 +34,7 @@ export async function GET(
   const rawHistory = req.nextUrl.searchParams.get('history')
   const historyDays = Math.min(parseInt(rawHistory ?? '30', 10) || 30, 90)
 
-  const [latestRes, historyRes, clientRes] = await Promise.all([
+  const [latestRes, historyRes, clientRes, growthRes] = await Promise.all([
     supabaseAdmin
       .from('ad_health_narratives')
       .select('insight_date, overall_verdict, headline, payload')
@@ -54,6 +54,15 @@ export async function GET(
       .select('industry')
       .eq('id', clientId)
       .maybeSingle(),
+    // 卫青巡察当天的经营状态（spec 2026-09-24 §4）：问题 + 机会 + 目标节奏。
+    // 读失败不挡整页——老的体检卡片仍要能显示，页面自己会说这一段读不到。
+    supabaseAdmin
+      .from('ads_growth_states')
+      .select('date, payload, problems_count, opportunities_count, goal_pace, data_completeness')
+      .eq('client_id', clientId)
+      .order('date', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ])
   if (clientRes.error) {
     console.warn('[api/ad-health] 读客户行业失败，页面改用中性词', { clientId, error: clientRes.error.message })
@@ -63,11 +72,17 @@ export async function GET(
     return NextResponse.json({ error: latestRes.error.message }, { status: 500 })
   }
 
+  if (growthRes.error) {
+    console.warn('[api/ad-health] 读经营状态失败，页面只显示体检部分', { clientId, error: growthRes.error.message })
+  }
+
   return NextResponse.json({
     success: true,
     latest: latestRes.data ?? null,
     // Oldest → newest for the trend strip.
     history: (historyRes.data ?? []).slice().reverse(),
     industry: (clientRes.data as { industry?: string | null } | null)?.industry ?? null,
+    // 🔴 读失败与「今天还没跑」必须分得开：前者页面要说「读不到」，后者说「今天还没巡察」。
+    growth: growthRes.error ? undefined : (growthRes.data ?? null),
   })
 }

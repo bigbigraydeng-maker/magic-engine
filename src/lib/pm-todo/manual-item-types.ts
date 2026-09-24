@@ -15,6 +15,7 @@ import type { EmailReplyItemKind } from './email-reply-items'
 import type { BindingRequestItemKind } from './binding-request-items'
 import type { PageBindingItemKind } from './page-binding-items'
 import type { CommentScopeTodoKind } from './comment-scope-items'
+import type { LeadSheetItemKind } from './lead-sheet-items'
 
 /**
  * 这些条目**链接坏了也照样下发**。
@@ -108,6 +109,8 @@ export type ManualItemKind =
   /** 客人像是说他付款了，但不是我们自己确认的 —— 只有人能核对到账，不许机器自己打 paid 标签 */
   | 'paid_signal_needs_review'
   | CommentScopeTodoKind
+  /** 线索没写进客户的 Google 表格 —— 销售看的那张表缺人，留资 90 天后永久取不回 */
+  | LeadSheetItemKind
   /** 执行内核停手 / 等审批 / 被规则挡下 —— 必须有人看见，不许死在日志里 */
   | 'kernel_needs_human'
   /** 有成交/咨询等着人核对要不要告诉广告平台 —— 撤不回，所以必须人点 */

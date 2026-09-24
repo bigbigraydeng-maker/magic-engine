@@ -75,8 +75,10 @@ export async function autoFetchMetricValue(
       const ga = await fetchFormSubmissions(supabase, clientId)
       return ga.ok ? ga : fetchAdsOutcome(supabase, clientId, 'lead')
     }
+    // 🔴 「报名/预订数」是真成交，不是广告留资。WP0 一度把它接到 fetchAdsOutcome('lead')
+    //    上——那会让「33 个报名」的目标拿留资数去填，数字看着漂亮但名不符实。
     case 'signups_count':
-      return fetchAdsOutcome(supabase, clientId, 'lead')
+      return fetchBookings(supabase, clientId)
     case 'messaging_started':
       return fetchAdsOutcome(supabase, clientId, 'messaging_started')
     case 'ai_visibility_score':
@@ -722,6 +724,45 @@ function sumOutcome(
     sum += count.value
   }
   return { ok: true, value: sum }
+}
+
+/**
+ * 真成交数（报名/预订）——读 `me_sale_outcomes` 的 purchase 行。
+ *
+ * 这些行由 CRM 表格同步流水线写入（`cts-crm-sheet-sync`），它的唯一输入是
+ * 客户 CRM 表「阶段Stage」那一列填了 `4-已订金` / `5-已出行归来`。
+ *
+ * 🔴 一条 purchase 都没有时返回 `unknown`，**绝不返回 0**：
+ *    「还没有人成交」和「没人填阶段那一列」在库里长得一模一样，
+ *    报 0 等于替客户断言生意没做成。2026-09-24 实测：613 条 lead、0 条 purchase，
+ *    而同期 CRM 表 1599 行里只有 1 行填了阶段——正是后者。
+ *    日报会显示「未判」并带上原因，这本身就是在催那一格被填上。
+ */
+async function fetchBookings(supabase: SupabaseClient, clientId: string): Promise<AutoFetchResult> {
+  const goal = await loadActiveGoalPeriod(supabase, clientId)
+  if (!goal.ok) return goal
+
+  // head:true → 不取行只取计数，计数在 `count` 里（`data` 是 null，别去读它的 length）。
+  const { count, error } = await supabase
+    .from('me_sale_outcomes')
+    .select('id', { count: 'exact', head: true })
+    .eq('client_id', clientId)
+    .eq('outcome_kind', 'purchase')
+    .is('redacted_at', null)
+    .neq('review_status', 'rejected')
+    .gte('occurred_at', `${goal.period.period_start}T00:00:00Z`)
+    .lte('occurred_at', `${goal.period.period_end}T23:59:59Z`)
+
+  if (error) return { ok: false, reason: error.message, unknown: true }
+
+  if (!count) {
+    return {
+      ok: false,
+      unknown: true,
+      reason: '成交数还没有任何记录 —— 可能是真的还没成交，也可能是 CRM「阶段」那一列没人填（两者在库里长得一样，不猜）',
+    }
+  }
+  return { ok: true, value: count, source: 'me_sale_outcomes', snapshot_date: goal.period.period_end, label: '报名/预订' }
 }
 
 async function fetchAdsOutcome(

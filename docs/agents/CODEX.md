@@ -1,14 +1,13 @@
 # Magic Engine — Codex Agent 参考手册
 
-> 本文件专为 Codex 设计，作为任务上下文注入。  
-> 简洁、机器友好、无废话。每次给 Codex 派活时，将本文件作为上下文。
+> 项目协作唯一入口：根目录 [CLAUDE.md 的 AI 协作流程](../../CLAUDE.md#ai-协作流程全项目共用)。本文件保留 Codex 技术参考和已采用 GitHub 流程时的补充要求，按需读取，不反复整份注入聊天。
 
 ---
 
 ## 系统定位
 
 Magic Engine 是 AU/NZ 营销执行平台（Next.js 14 + Supabase + Render）。
-Codex 负责**精准修复/补测试/死代码清理**，不做架构决策。
+Codex 按任务说明承担规划、实现或审查；与 Claude Code、CMUX DeepSeek 的写入分工遵循根指引 §5，用户可直接派活。
 
 ---
 
@@ -122,35 +121,25 @@ docs/agents/             → 所有 agent 手册（本目录）
 
 ## Codex 任务标准格式
 
-子牙给 Codex 派活时，任务 prompt 必须包含：
-
-```
-文件：[绝对路径 + 行号范围]
-任务：[具体改什么]
-验证：npx vitest run [测试文件路径]
-预期：[测试数量] 个测试通过
-Build：npm run build 必须通过
-禁止动：[不能碰的文件列表]
-交付：commit hash + 测试输出截图
-```
+使用根 [CLAUDE.md](../../CLAUDE.md) 内嵌的短任务说明，不另建一份 Codex 合同。代理自行核实文件路径、调用方及真实验证命令；交付未提交的 diff 时如实报告，不为凑 commit hash 或测试数量擅自提交或虚报。
 
 ---
 
-## GitHub Task Contract Protocol（所有 Codex 窗口强制）
+## GitHub Task Contract Protocol（已采用 Issue / PR 的工程任务）
 
-治理真相源见 GitHub Issue **#1100**：`[Build Control Governance] GitHub Task Contract Protocol — Issue = Contract, PR = Implementation`。
+历史协议见 GitHub Issue **#1100**：`[Build Control Governance] GitHub Task Contract Protocol — Issue = Contract, PR = Implementation`。
 
-### 1. 长工程任务禁止继续用聊天长提示词承载
+### 1. 长工程任务使用单一权威说明
 
-只要任务复杂到需要长工程提示词、跨多步实施、多个 runtime fact、安全边界或 STOP 条件，Codex 必须优先把完整合同落到 GitHub：
+对已有 GitHub 合同且获准使用该流程的工程任务，将根指引的短任务说明集中维护在 Issue 当前 BUILD CONTROL 说明中；正文和旧评论作背景，不维护重复合同：
 
 1. **Issue = Task Contract / Work Package Contract**
-2. **Issue 最新 `BUILD CONTROL — ...` comment = 当前授权边界**
+2. **Issue 当前 `BUILD CONTROL — ...` 说明 = 已确认范围；用户最新明确要求变化时同步更新，不以旧评论抵消新要求**
 3. **PR = Implementation Artifact / 实际 diff 与验证证据**
 4. **PR review threads = 实现 finding 与修复记录**
 5. Chat 只负责启动、澄清、PO 决策，不再作为长期工程合同
 
-如果当前任务还没有 Task Contract Issue，Codex 应先回 Build Control 要求建立 Issue；不要自己在聊天里继续堆几千字施工合同。
+没有 Issue 时先使用已有任务文档或当前会话的短说明，不因协议自动新建 Issue、Codex Project、独立 task、repo 或 worktree，也不阻塞已获授权的小任务。跨会话按根指引保存短检查点，不堆长聊天历史。
 
 ### 2. Codex 给另一个窗口/Claude 的交接输出
 
@@ -163,14 +152,14 @@ Issue: #XXXX
 启动词：
 你负责 Magic Engine Issue #XXXX。
 开工前：
-1. git fetch origin main
-2. 完整读取 CLAUDE.md / AGENTS.md / docs/agents/CODEX.md（按执行方适用）
-3. 完整读取 Issue #XXXX 及全部评论
-4. 最新 BUILD CONTROL 评论是唯一授权边界
+1. 按 CLAUDE.md §6 只读核实仓库/分支/HEAD/工作区，记录远端是否刷新
+2. 读取 AGENTS.md 指向的 CLAUDE.md，按需读 docs/agents/CODEX.md
+3. 读取 Issue #XXXX 当前任务说明与最新检查点，按需查阅旧评论
+4. 核对用户最新明确要求、授权边界和唯一写入者
 
-一窗口 / 一 worktree / 一 PR。
+沿用指定工作区，按文件分配唯一写入者。
 不扩大 scope。
-完成后开 Draft PR，回 Issue 汇报并停止。
+完成后按任务授权交付本地 diff 或 Draft PR；远端汇报也须在授权内。
 ```
 
 除非用户明确要求“把完整提示词贴出来”，否则不要再把 Issue 正文复制回聊天。
@@ -180,10 +169,12 @@ Issue: #XXXX
 每次阶段性或最终工程回报都按下面顺序，避免不同窗口各说各话：
 
 ```text
-remote fetched at: <timestamp> · exact main SHA: <full sha>
+repository / branch / HEAD: <path / branch / full sha>
+remote fetched at: <timestamp / 本次未刷新> · origin/main SHA: <本地快照 full sha / 不存在>
+working tree: <已有改动 / 本次未提交 diff 标识>
 
 ## Scope / Contract
-- Task Contract Issue: #XXXX
+- 权威任务说明：Issue #XXXX / 文档路径 / 本会话任务说明
 - 当前 BUILD CONTROL 决议：...
 - branch / worktree / PR: ...
 
@@ -206,7 +197,8 @@ remote fetched at: <timestamp> · exact main SHA: <full sha>
 - type-check
 - build
 - git diff --check
-- baseline failure 如有，明确 pre-existing 证据
+- 每条检查附命令、目录、时间、SHA/diff、退出码和输出摘要；未运行/阻塞单列
+- baseline failure 如有，明确同环境同命令的 pre-existing 证据；无证据写归因未确认
 
 ## Reuse Statement
 - reused what
@@ -220,7 +212,7 @@ remote fetched at: <timestamp> · exact main SHA: <full sha>
 - 下一步只写 Build Control 需要决策的一个 gate；不得自动开下一项施工
 ```
 
-没有 repository SHA 的工程回报视为无效。
+必须报告可核验的 repository SHA；无法读取或无提交时如实标记限制。不得借用另一分支/提交的验证结果。
 
 ### 4. Issue / PR 分工
 
@@ -245,9 +237,7 @@ PR 描述不得重新发明第二套架构 spec。
 
 ### 5. 一窗口纪律
 
-默认：
-
-**one Codex window = one Task Contract Issue = one worktree = one branch = one PR**
+按根指引 §5–6 执行：**每项代码变更一个写入者，复用一份任务说明**。已批准的并行工程隔离可继续使用既有 worktree；不把新建工作区作为只读审查或小任务的前置条件。
 
 发现新的真实 blocker 但不在 Issue scope：
 
@@ -255,7 +245,7 @@ PR 描述不得重新发明第二套架构 spec。
 DEFER — <real blocker>
 ```
 
-然后停止，回 Build Control。不要在当前窗口顺手解决，也不要把第二个 WP 塞进同一 PR。
+在权威说明记为后续事项；仅阻塞受影响步骤，继续不受影响的已授权工作。确与验收冲突时只向用户提出一个必要问题，不顺手解决或把第二个 WP 塞进同一 PR。
 
 ### 6. 木桶原则
 
@@ -272,7 +262,7 @@ DEFER — <real blocker>
 
 ### 7. 默认生产红线
 
-除非最新 Build Control GitHub comment 明确授权：
+除非用户明确授权，且适用的 Build Control / 合并审批已满足：
 
 - NO merge
 - NO deploy
@@ -282,7 +272,7 @@ DEFER — <real blocker>
 - NO secret changes
 - NO irreversible operation
 
-默认停在 Draft PR。
+有提交/推送/开 PR 授权时停在 Draft PR；否则停在已验证的本地 diff，不因本协议自动提交或推送。
 
 ---
 

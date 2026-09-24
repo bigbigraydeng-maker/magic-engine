@@ -59,6 +59,8 @@ import { startCronRun } from '@/lib/cron/run-logger'
 import { resolveMetaTokenDetailed, ownsKey, loadTokenOwnerPeers, type TokenOwnerRow } from '@/lib/meta/token-selection'
 import { findSharedAdAccounts, getClientAdAccountIds } from '@/lib/meta/client-ad-accounts'
 import { hasVideoColumns, syncAdDailyInsights, syncAdsetDailyInsights, syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
+import { buildGrowthState } from '@/lib/ads-strategy/agents/patrol'
+import { resolveClientEvaluationDate } from '@/lib/ads-strategy/account-timezone'
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
 import { sendAdHealthDigest } from '@/lib/ads-strategy/digest'
 import { runPortfolioDiagnostics } from '@/lib/ads-strategy/portfolio/run-daily'
@@ -104,6 +106,8 @@ interface ClientResult {
   ad_digest?: { sent: boolean; decision: string; error?: string }
   /** ads IMPACT 阶段 1：只读诊断 + 内部版日报 */
   ad_diagnostics?: { success: boolean; hits: number; not_comparable: number; excluded: number; digest_decision?: string; digest_sent?: boolean; recipients_dropped?: number; error?: string }
+  /** 卫青巡察：问题 + 机会 + 目标节奏 → ads_growth_states 一行（spec 2026-09-24 §4）。 */
+  ads_growth_state?: { success: boolean; date?: string; problems?: number; opportunities?: number; completeness?: string; error?: string }
   /**
    * 2026-09-13: `ad_daily`/`ad_level` above stay the PRIMARY account's result
    * (unchanged shape, unchanged tallying). Any additional registered accounts
@@ -415,16 +419,25 @@ export async function GET(req: NextRequest) {
             }
           }
 
+          // 评估日 = 这个客户名下每个广告账户「自己时区的昨天」里最早的那一天（2026-09-24）。
+          // 上游取数窗口已按账户时区算「昨天」（daily-insights.requestWindow），这一侧再按 UTC 算
+          // 就会用 `lte(insight_date, …)` 把当天刚存进来的最新一天滤掉——数据白存一天才被看到。
+          // 判定、原日报、只读诊断、经营状态**共用同一个日期**：数据到哪天、判定写哪天、
+          // 日报标题写哪天必须是同一天，否则 PM 看到的三处日期对不上。
+          // 取最早（而不是最新）的理由见 resolveClientEvaluationDate 的注释：跨时区客户上
+          // 取最新会把没跑完的半天当整天喂进自动收放回路。
+          const evaluationDate = await resolveClientEvaluationDate([
+            client.meta_ad_account_id,
+            ...allAccountIds,
+          ])
+
           // P21.K.2: judge each campaign against its own baseline and store the
           // day's account-health narrative. Reads the series just written above
           // PLUS any secondary accounts synced just above — evaluateClientAdHealth
           // queries ad_daily_insights by client_id only, no account filter.
           // Non-fatal — a judging failure must not affect data collection.
           if (result.ad_daily?.success) {
-            const insightDate = new Date()
-            insightDate.setUTCDate(insightDate.getUTCDate() - 1)
-            const insightDateStr = insightDate.toISOString().slice(0, 10)
-            result.ad_health = await evaluateClientAdHealth(client.client_id, insightDateStr)
+            result.ad_health = await evaluateClientAdHealth(client.client_id, evaluationDate)
 
             // P21.K.4: email the day's digest (best-effort). Green is
             // de-frequenced so the PM isn't trained to ignore a daily 🟢.
@@ -438,7 +451,7 @@ export async function GET(req: NextRequest) {
               const digest = await sendAdHealthDigest(
                 client.client_id,
                 client.client_name ?? 'Client',
-                insightDateStr,
+                evaluationDate,
                 resolveDigestRecipients(adStrategyConfig),
               )
               result.ad_digest = { sent: digest.sent, decision: digest.decision, error: digest.error }
@@ -467,17 +480,27 @@ export async function GET(req: NextRequest) {
           // 且**不依赖**当天拉数/体检成功——授权断了导致拉数失败时，D7「授权/数据体检」正是要报这件事（子牙复审）。
           // 诊断出错：计入 errors；当天原体检成功的话退回发原日报，保证 PM 当天仍收得到信（魏征复审）。
           if (snapshotsReady && adConfigSource !== 'fallback') {
-            const diagDate = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
             result.ad_diagnostics = await runPortfolioDiagnostics(
               client.client_id,
               client.client_name ?? 'Client',
-              diagDate,
+              evaluationDate,
               adStrategyConfig.digest_recipients,
             )
             if (!result.ad_diagnostics.success && result.ad_health?.success && result.ad_health.overall_verdict) {
-              const digest = await sendAdHealthDigest(client.client_id, client.client_name ?? 'Client', diagDate, resolveDigestRecipients(adStrategyConfig))
+              const digest = await sendAdHealthDigest(client.client_id, client.client_name ?? 'Client', evaluationDate, resolveDigestRecipients(adStrategyConfig))
               result.ad_digest = { sent: digest.sent, decision: `fallback:${digest.decision}`, error: digest.error }
             }
+
+            // 卫青巡察（spec 2026-09-24 §4）：问题 + 机会 + 目标节奏合成一行经营状态，
+            // 看板和日报从那一行读。放在诊断之后：两边都要广告组级数据，顺序一致好排错。
+            // 🔴 三层日数据的成败要**逐层**传进去——上面那个 `if (result.ad_daily?.success)`
+            //    只看广告系列级，而机会规则大多是广告组粒度（`resolveCompleteness` 的变异用例钉着这条）。
+            result.ads_growth_state = await buildGrowthState(client.client_id, evaluationDate, [
+              { campaign: result.ad_daily, adset: result.adset_level, ad: result.ad_level },
+              ...(result.ad_daily_secondary ?? []).map(s => ({
+                campaign: s.ad_daily, adset: s.adset_level, ad: s.ad_level,
+              })),
+            ])
           }
         }
       } else {
@@ -538,7 +561,7 @@ export async function GET(req: NextRequest) {
   // Collect per-client errors so postmortem is possible without Render logs.
   // Diagnostic only — no behavior change.
   const errors = results.flatMap(r => {
-    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ad_daily_secondary'; error: string }> = []
+    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ads_growth_state'|'ad_daily_secondary'; error: string }> = []
     if (r.gsc?.success === false && r.gsc.error)               out.push({ client_id: r.client_id, source: 'gsc',        error: r.gsc.error })
     if (r.ga4?.success === false && r.ga4.error)               out.push({ client_id: r.client_id, source: 'ga4',        error: r.ga4.error })
     if (r.meta?.success === false && r.meta.error)             out.push({ client_id: r.client_id, source: 'meta',       error: r.meta.error })
@@ -549,6 +572,7 @@ export async function GET(req: NextRequest) {
     if (r.ad_health?.success === false && r.ad_health.error)   out.push({ client_id: r.client_id, source: 'ad_health', error: r.ad_health.error })
     if (r.ad_digest && !r.ad_digest.sent && r.ad_digest.error)  out.push({ client_id: r.client_id, source: 'ad_digest', error: r.ad_digest.error })
     if (r.ad_diagnostics?.error) out.push({ client_id: r.client_id, source: 'ad_diagnostics', error: r.ad_diagnostics.error })
+    if (r.ads_growth_state?.error) out.push({ client_id: r.client_id, source: 'ads_growth_state', error: r.ads_growth_state.error })
     // 2026-09-13 (魏征 review): a secondary account's sync failure used to be
     // completely invisible — not in `failed`, not here, not console.error'd —
     // the exact "looks fine, actually never worked" shape this whole PR is
