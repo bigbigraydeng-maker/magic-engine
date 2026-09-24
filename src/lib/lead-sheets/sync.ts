@@ -308,6 +308,7 @@ export async function syncClientLeadSheets(
     routes: [],
     unrouted: 0,
     error: null,
+    warning: null,
   }
 
   let routes: LeadSheetRoute[]
@@ -374,12 +375,13 @@ export async function syncClientLeadSheets(
     try {
       outsideWindowBaseline = await countLeadsBefore(supabase, client.id, since)
     } catch (err) {
-      receipt.error = [
-        receipt.error,
-        `数窗口外线索失败（不影响本轮写入，只是「还有多少条没补」这个数字这轮不准）：${err instanceof Error ? err.message : String(err)}`,
-      ]
-        .filter(Boolean)
-        .join(' | ')
+      /**
+       * 🔴 **这是 warning，不是 error。** 分流和写表在这个 catch 之后照常跑、照常
+       *    成功 —— 塞进 `receipt.error` 的话，`pushLeadSheetItems` 会把它念成
+       *    「这轮没能写进 Google 表格」，而新线索其实已经写进去了。这条诊断失败
+       *    只影响「窗口外还剩多少条没补」这一个数字这轮不准，不该让人以为同步炸了。
+       */
+      receipt.warning = `数窗口外线索失败（不影响本轮写入，只是「还有多少条没补」这个数字这轮不准）：${err instanceof Error ? err.message : String(err)}`
     }
   }
 
@@ -420,7 +422,18 @@ export async function syncRoutes(
   const snapshots = new Map<string, DestinationSnapshot>()
   const receipts: LeadSheetRouteReceipt[] = []
 
-  for (const route of routes) {
+  /**
+   * 🔴 **这个基数只归第一条路线，不逐条路线都塞一遍。**
+   *
+   * `countLeadsBefore` 数的是**客户级**总数，不是按路线拆出来的——分流本身要
+   * 先把线索取回内存才能跑（见 `leads.ts::countLeadsBefore` 的注释），窗口外的
+   * 那些线索根本没取回来，没法知道它们各自会走哪条路线。如果照 `outsideWindowBaseline`
+   * 原样传给每一条路线，`pushLeadSheetItems` 按目标表汇总时会出两个事故：
+   *   · 同一张表配了两条路线 → 同一个数字被加两遍，报出来的缺口翻倍；
+   *   · 几条路线各写各的表 → 每张表都显示「缺客户的全部历史」，其实历史只有一份。
+   * 只让全部路线里的第一条背这个数字，保证客户级基数在下游汇总里只出现一次。
+   */
+  for (const [index, route] of routes.entries()) {
     const dest = destinationKey(route)
     let snapshot = snapshots.get(dest)
     if (!snapshot) {
@@ -436,7 +449,7 @@ export async function syncRoutes(
         byRoute.get(route.routeKey) ?? [],
         deps,
         snapshot,
-        outsideWindowBaseline,
+        index === 0 ? outsideWindowBaseline : 0,
       ),
     )
   }

@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { LeadSheetConfigError, describeLayoutMismatch, loadClientRoutes, parseRoute } from '../config'
+import {
+  LeadSheetConfigError,
+  describeLayoutMismatch,
+  loadClientRoutes,
+  parseRoute,
+  validateRouteLayouts,
+} from '../config'
 
 function row(over: Record<string, unknown> = {}) {
   return {
@@ -175,6 +181,46 @@ describe('loadClientRoutes — 跨路线校验', () => {
       'c1',
     )
     expect(routes).toHaveLength(2)
+    expect(invalid).toHaveLength(0)
+  })
+})
+
+/**
+ * 🔴 `scripts/lead-sheet-sync-dryrun.ts` 的 `--routes <file>` 模式绕开
+ *    `loadClientRoutes`（不读数据库），逐条只过 `parseRoute`——它必须额外调
+ *    `validateRouteLayouts` 才能补上这道跨路线校验，否则文件里两条同目标路线
+ *    只要有一处不一致，试算就会在错的共享快照上跑，跟生产加载的结果对不上。
+ */
+describe('validateRouteLayouts —— 文件配置模式（--routes）复用的那道闸', () => {
+  it('文件里两条路线指向同一张表但判重列不一样 → 剔掉后一条，理由跟 loadClientRoutes 一致', () => {
+    const routes = [
+      parseRoute(row({ route_key: 'a', priority: 1, dedup_columns: [0] })),
+      parseRoute(row({ route_key: 'b', priority: 2, dedup_columns: [1] })),
+    ]
+    const invalid: Array<{ routeKey: string; reason: string }> = []
+
+    validateRouteLayouts(routes, invalid)
+
+    expect(routes.map((r) => r.routeKey)).toEqual(['a'])
+    expect(invalid).toHaveLength(1)
+    expect(invalid[0].reason).toContain('判重列不一样')
+  })
+
+  it('文件里两条路线结构一模一样（只有来源标签不同）→ 都留着', () => {
+    const withLabel = (label: string) => [
+      { field: 'lead_id' as const },
+      { field: 'contact_phone' as const },
+      { field: 'literal' as const, value: label },
+    ]
+    const routes = [
+      parseRoute(row({ route_key: 'a', priority: 1, columns: withLabel('含预算与出发时间') })),
+      parseRoute(row({ route_key: 'b', priority: 2, columns: withLabel('基础表单') })),
+    ]
+    const invalid: Array<{ routeKey: string; reason: string }> = []
+
+    validateRouteLayouts(routes, invalid)
+
+    expect(routes.map((r) => r.routeKey)).toEqual(['a', 'b'])
     expect(invalid).toHaveLength(0)
   })
 })

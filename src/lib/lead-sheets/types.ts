@@ -162,5 +162,14 @@ export interface LeadSheetClientReceipt {
   routes: LeadSheetRouteReceipt[]
   /** 一条路线都没匹配上的线索（配置里没兜底路线时才可能出现）。 */
   unrouted: number
+  /**
+   * 阻断性错误：本轮该客户一行都没写。`pushLeadSheetItems` 把它当「同步失败」下发。
+   */
   error: string | null
+  /**
+   * 非阻断性问题：分流和写表照常成功，只是某个辅助诊断数字这轮不准（例如
+   * `countLeadsBefore` 查询失败）。**不能**塞进 `error` —— 那会让新线索明明已经
+   * 写进表了，还被 `pushLeadSheetItems` 报成「这轮没能写进 Google 表格」。
+   */
+  warning: string | null
 }

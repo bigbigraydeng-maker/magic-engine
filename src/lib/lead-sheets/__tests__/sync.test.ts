@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
-import { describeHeaderProblem, newDestinationSnapshot, syncOneRoute, syncRoutes } from '../sync'
+import { describeHeaderProblem, newDestinationSnapshot, syncClientLeadSheets, syncOneRoute, syncRoutes } from '../sync'
 import type { LeadRecord, LeadSheetRoute } from '../types'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
 /**
  * 显式声明形参签名 —— `vi.fn(async () => ...)` 推断出的 `mock.calls` 是空元组，
@@ -489,6 +490,50 @@ describe('syncRoutes —— 真正按目标表分组的那一层', () => {
     expect(receipts).toHaveLength(2)
     expect(receipts[1].matched).toBe(0)
   })
+
+  /**
+   * 🔴 `countLeadsBefore` 数出来的是**客户级**总数，不是按路线拆出来的。
+   *    如果原样传给每一条路线，`pushLeadSheetItems` 按目标表汇总 `outsideWindow`
+   *    时会翻倍（同一张表两条路线）或者每张表各报一遍全量历史（不同表）。
+   *    只让第一条路线背这个数字，保证它在下游汇总里只出现一次。
+   */
+  it('🔴 outsideWindow 基数只挂在第一条路线上 —— 同一张表两条路线不能被下游汇总翻倍', async () => {
+    const readSheet = vi.fn<ReadMock>(async () => [HEADER])
+    const a = routeAt('v4', 'sheet-1', 'Untitled', '含预算与出发时间')
+    const b = routeAt('fallback', 'sheet-1', 'Untitled', '基础表单')
+
+    const receipts = await syncRoutes(
+      'c1',
+      [a, b],
+      new Map([
+        ['v4', [lead({ leadId: 'a' })]],
+        ['fallback', [lead({ leadId: 'b', phone: '+64220000000' })]],
+      ]),
+      { readSheet, dryRun: true },
+      703,
+    )
+
+    expect(receipts[0].outsideWindow).toBe(703)
+    expect(receipts[1].outsideWindow).toBe(0)
+  })
+
+  it('🔴 outsideWindow 基数只挂一次 —— 几条路线各写各的表也不能每张表都报一遍全量历史', async () => {
+    const readSheet = vi.fn<ReadMock>(async () => [HEADER])
+
+    const receipts = await syncRoutes(
+      'c1',
+      [routeAt('a', 'sheet-1', 'T1', 'A'), routeAt('b', 'sheet-2', 'T2', 'B')],
+      new Map([
+        ['a', [lead({ leadId: 'a' })]],
+        ['b', [lead({ leadId: 'b' })]],
+      ]),
+      { readSheet, dryRun: true },
+      703,
+    )
+
+    expect(receipts[0].outsideWindow).toBe(703)
+    expect(receipts[1].outsideWindow).toBe(0)
+  })
 })
 
 describe('describeHeaderProblem —— 开工前对一次表头', () => {
@@ -546,5 +591,75 @@ describe('describeHeaderProblem —— 开工前对一次表头', () => {
     )
     expect(appendSheet).not.toHaveBeenCalled()
     expect(r.error).toContain('表头跟配置对不上')
+  })
+})
+
+/**
+ * 🔴 `countLeadsBefore` 是个辅助诊断查询——它失败不该让本来成功的这一轮被
+ *    `pushLeadSheetItems` 念成「这轮没能写进 Google 表格」。必须落进独立的
+ *    `warning` 字段，不能复用 `error`（那个字段的非空会被下游当成同步失败）。
+ */
+describe('syncClientLeadSheets —— countLeadsBefore 失败要报成 warning，不是 error', () => {
+  function fakeSupabase(): SupabaseClient {
+    const routeRow = {
+      route_key: 'v4',
+      label: null,
+      spreadsheet_id: 'sheet-1',
+      tab_name: 'Untitled',
+      match_any_answer_fields: ['q'],
+      priority: 10,
+      columns: [{ field: 'lead_id' }, { field: 'contact_phone' }],
+      value_labels: {},
+      dedup_columns: [0],
+      dedup_id_column: null,
+      header_row: null,
+      timezone: 'Pacific/Auckland',
+      // 必须设置 —— 只有所有路线都配了 backfillSince，`since` 才不是 null，
+      // `syncClientLeadSheets` 才会去调 countLeadsBefore。
+      backfill_since: '2026-09-01T00:00:00Z',
+      enabled: true,
+    }
+
+    function makeQuery(table: string) {
+      let countMode = false
+      const q: Record<string, unknown> = {
+        select: (_cols: string, opts?: { count?: string; head?: boolean }) => {
+          if (opts?.count) countMode = true
+          return q
+        },
+        eq: () => q,
+        not: () => q,
+        gte: () => q,
+        lt: () => q,
+        order: () => q,
+        range: () => q,
+        in: () => q,
+        maybeSingle: async () => ({ data: null, error: null }),
+        then: (resolve: (v: unknown) => void) => {
+          if (table === 'client_lead_sheet_routes') {
+            resolve({ data: [routeRow], error: null })
+          } else if (table === 'contact_touchpoints' && countMode) {
+            // 数窗口外线索这条辅助查询本身炸了。
+            resolve({ count: null, error: { message: 'count 查询失败：boom' } })
+          } else {
+            // 取数（fetchAll 分页）第一页就空 —— 这个客户这一轮没有新线索。
+            resolve({ data: [], error: null })
+          }
+        },
+      }
+      return q
+    }
+
+    return { from: (table: string) => makeQuery(table) } as unknown as SupabaseClient
+  }
+
+  it('countLeadsBefore 失败：receipt.error 保持 null，问题记进 receipt.warning', async () => {
+    const receipt = await syncClientLeadSheets(fakeSupabase(), { id: 'c1', name: '客户甲' })
+
+    expect(receipt.error).toBeNull()
+    expect(receipt.warning).toContain('boom')
+    // 路线本身照常跑完，没有因为这条辅助查询失败而停手。
+    expect(receipt.routes).toHaveLength(1)
+    expect(receipt.routes[0].error).toBeNull()
   })
 })
