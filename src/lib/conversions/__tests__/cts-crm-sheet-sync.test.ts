@@ -7,6 +7,8 @@ import {
   classifyCtsCrmPerson,
   ctsSourceRef,
   parseSheet1Row,
+  CTS_NOTE_COLUMN_SWITCH_ROW,
+  ctsNoteColumnIndex,
   parseCrmManagementRow,
   parseNzDdMmYyyy,
   parseSheetsSerialDate,
@@ -255,20 +257,49 @@ describe('ctsSourceRef — idempotency key', () => {
 })
 
 describe('parseSheet1Row / parseCrmManagementRow — real column layout', () => {
-  it('reads Sheet1 columns B/N/O/P/R by index', () => {
+  function sheet1Cells(): string[] {
     const cells = new Array(20).fill('')
     cells[1] = '2026-06-14T02:39:49-05:00' // B created_time
     cells[13] = 'jane@example.com' // N email
     cells[14] = 'Jane Doe' // O full_name
     cells[15] = 'p:+6421363598' // P phone_number
-    cells[17] = 'voice mail' // R 员工跟进记录
-    expect(parseSheet1Row(cells)).toEqual({
+    return cells
+  }
+
+  it('reads Sheet1 columns B/N/O/P by index', () => {
+    const cells = sheet1Cells()
+    cells[17] = 'voice mail' // R 员工跟进记录（505 行及以前）
+    expect(parseSheet1Row(cells, 100)).toEqual({
       createdTime: '2026-06-14T02:39:49-05:00',
       email: 'jane@example.com',
       fullName: 'Jane Doe',
       phoneRaw: 'p:+6421363598',
       followUpNotes: 'voice mail',
     })
+  })
+
+  it('🔴 505 行及以前的跟进记录读 R 列', () => {
+    const cells = sheet1Cells()
+    cells[17] = 'voice mail'
+    cells[18] = '不该读到这个'
+    expect(parseSheet1Row(cells, CTS_NOTE_COLUMN_SWITCH_ROW - 1).followUpNotes).toBe('voice mail')
+  })
+
+  it('🔴 506 行起改读 S 列 —— R 列那时候已经被拿去放 Facebook 链接了', () => {
+    const cells = sheet1Cells()
+    cells[17] = 'https://business.facebook.com/latest/28201068'
+    cells[18] = 'wrong number'
+    expect(parseSheet1Row(cells, CTS_NOTE_COLUMN_SWITCH_ROW).followUpNotes).toBe('wrong number')
+  })
+
+  it('🔴 读错列的后果：506 行之后的「wrong number」会漏判成「没写排除词」', () => {
+    const cells = sheet1Cells()
+    cells[17] = 'https://business.facebook.com/latest/28201068'
+    cells[18] = 'wrong number'
+    // 按旧写法（恒读 R）拿到的是链接 → notesExcludeLead 返回 false，这条脏线索
+    // 会被当成合格线索传给 Meta。按行号取才判得对。
+    expect(notesExcludeLead(cells[17])).toBe(false)
+    expect(notesExcludeLead(parseSheet1Row(cells, 600).followUpNotes)).toBe(true)
   })
 
   it('reads CRM管理 columns A/B/C/D/E/G/H by index', () => {
