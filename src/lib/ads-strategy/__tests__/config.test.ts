@@ -39,6 +39,31 @@ describe('loadAdStrategyConfigWithSource — asymmetric fail-open', () => {
     expect(config.digest_recipients).toEqual(['a@b.com'])
     expect(source).toBe('row')
   })
+
+  it('fail-closed on autonomy: a row missing the new columns reads as observe', async () => {
+    maybeSingle.mockResolvedValue({ data: { client_id: 'c1', enabled: true, digest_recipients: [] }, error: null })
+    const { config } = await loadAdStrategyConfigWithSource('c1')
+    expect(config.autonomy_mode).toBe('observe')
+    expect(config.daily_budget_cap_cents).toBeNull()
+    expect(config.creative_pool).toEqual([])
+  })
+
+  it('reads an explicit bounded_auto row through', async () => {
+    maybeSingle.mockResolvedValue({
+      data: { client_id: 'c1', enabled: true, digest_recipients: [], autonomy_mode: 'bounded_auto', daily_budget_cap_cents: 5000, creative_pool: [] },
+      error: null,
+    })
+    const { config } = await loadAdStrategyConfigWithSource('c1')
+    expect(config.autonomy_mode).toBe('bounded_auto')
+    expect(config.daily_budget_cap_cents).toBe(5000)
+  })
+
+  it('a read error falls back to observe — never silently grants autonomy on a DB hiccup', async () => {
+    maybeSingle.mockResolvedValue({ data: null, error: { message: 'timeout' } })
+    const { config } = await loadAdStrategyConfigWithSource('c1')
+    expect(config.autonomy_mode).toBe('observe')
+    expect(config.daily_budget_cap_cents).toBeNull()
+  })
 })
 
 describe('defaultConfig', () => {

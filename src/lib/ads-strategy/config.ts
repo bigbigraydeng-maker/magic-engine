@@ -26,6 +26,8 @@ export interface AdStrategyConfig {
   daily_budget_cap_cents: number | null
   autonomy_mode: AutonomyMode
   creative_pool: CreativePoolEntry[]
+  autopilot_enabled: boolean
+  autopilot_dry_run: boolean
 }
 
 /**
@@ -45,6 +47,8 @@ export function defaultConfig(clientId: string): AdStrategyConfig {
     daily_budget_cap_cents: null,
     autonomy_mode: 'observe',
     creative_pool: [],
+    autopilot_enabled: false,
+    autopilot_dry_run: true,
   }
 }
 
@@ -93,7 +97,7 @@ export async function loadAdStrategyConfigWithSource(
 ): Promise<{ config: AdStrategyConfig; source: ConfigSource }> {
   const { data, error } = await supabaseAdmin
     .from('ad_strategy_configs')
-    .select('client_id, enabled, digest_recipients, daily_budget_cap_cents, autonomy_mode, creative_pool')
+    .select('client_id, enabled, digest_recipients, daily_budget_cap_cents, autonomy_mode, creative_pool, autopilot_enabled, autopilot_dry_run')
     .eq('client_id', clientId)
     .maybeSingle()
 
@@ -116,6 +120,8 @@ export async function loadAdStrategyConfigWithSource(
           : null,
       autonomy_mode: data.autonomy_mode === 'bounded_auto' ? 'bounded_auto' : 'observe',
       creative_pool: parseCreativePool(data.creative_pool),
+      autopilot_enabled: data.autopilot_enabled === true,
+      autopilot_dry_run: data.autopilot_dry_run !== false,
     },
     source: 'row',
   }

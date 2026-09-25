@@ -41,6 +41,7 @@ import {
 } from './manual-item-types'
 import { pushLinkedinProgressItems } from './manual-linkedin-items'
 import { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems } from './manual-crm-items'
+import { pushAdsAutoPauseItems } from './ads-auto-pause-items'
 
 export * from './manual-item-types'
 export { pushLinkedinProgressItems } from './manual-linkedin-items'
@@ -176,6 +177,11 @@ export async function loadManualItems(
 
   const ids = Array.from(clients.keys())
   const nameOf = (id: string) => clients.get(id)?.name ?? '未知客户'
+
+  // 广告 D3（花钱没结果）自动暂停建议等人批准——点一下就执行，不用去 Meta 后台
+  await pushAdsAutoPauseItems(supabase, items, nameOf).catch((e) =>
+    console.warn('[manual-items] Ads D3 自动暂停待批准读取失败（不阻塞其他待办）:', e),
+  )
 
   // 新诊断结果 —— PM 2026-08-03 拍板要逐条看；没有消费方的自动化 = 再造一个没人看的数据源。
   // 必须放在 nameOf 定义之后：待办上显示 uuid 等于没显示。

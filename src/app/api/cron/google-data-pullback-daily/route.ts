@@ -65,6 +65,8 @@ import { resolveClientEvaluationDate } from '@/lib/ads-strategy/account-timezone
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
 import { sendAdHealthDigest } from '@/lib/ads-strategy/digest'
 import { runPortfolioDiagnostics } from '@/lib/ads-strategy/portfolio/run-daily'
+import { sendInngestEvent } from '@/lib/workflows/inngest-event'
+import { ADS_DIAGNOSTICS_COMPLETED_EVENT } from '@/lib/inngest/functions/ads-d3-auto-pause'
 import { snapshotTablesExist } from '@/lib/ads-strategy/portfolio/snapshot-sync'
 import { loadAdStrategyConfigWithSource, resolveDigestRecipients } from '@/lib/ads-strategy/config'
 
@@ -107,6 +109,8 @@ interface ClientResult {
   ad_digest?: { sent: boolean; decision: string; error?: string }
   /** ads IMPACT 阶段 1：只读诊断 + 内部版日报 */
   ad_diagnostics?: { success: boolean; hits: number; not_comparable: number; excluded: number; digest_decision?: string; digest_sent?: boolean; recipients_dropped?: number; error?: string }
+  /** Ads D3 自动暂停：诊断完成后发给 Inngest 的事件（consumer 自己判要不要出手）。 */
+  ad_auto_pause_event?: { sent: boolean; error?: string }
   /** 卫青巡察：问题 + 机会 + 目标节奏 → ads_growth_states 一行（spec 2026-09-24 §4）。 */
   ads_growth_state?: { success: boolean; date?: string; problems?: number; opportunities?: number; completeness?: string; error?: string }
   /** WP3.1a 每日 reconcile：给同步 worker 发一次叫醒铃（同一幂等 id，Inngest 24h 去重）。best-effort，不进 failed。 */
@@ -124,6 +128,40 @@ interface ClientResult {
     adset_level?: { success: boolean; rows_written?: number; error?: string }
   }>
   adset_level?: { success: boolean; rows_written?: number; error?: string }
+}
+
+/**
+ * Ads D3 自动暂停：诊断成功后发一条事件。事件只带三个字段——`client_id` /
+ * `insight_date` / `diagnostic_run_id`（`ad_health_narratives.id`）——不带
+ * 诊断明细、不带客户名、不带具体数字（子牙复审：防止客户事实混进 shared
+ * 事件契约）。consumer 拿这三个字段回库查开关和诊断结果。
+ *
+ * `diagnostic_run_id` 读不到（行还没写、或读取失败）就不发——没有稳定的
+ * run id，consumer 那边也没法把 flywheel_actions 记录挂对。
+ */
+async function fireAdsDiagnosticsCompletedEvent(
+  clientId: string,
+  insightDate: string,
+): Promise<{ sent: boolean; error?: string }> {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('ad_health_narratives')
+      .select('id')
+      .eq('client_id', clientId)
+      .eq('insight_date', insightDate)
+      .maybeSingle()
+    if (error || !data) {
+      return { sent: false, error: error?.message ?? 'ad_health_narratives 行未找到' }
+    }
+    await sendInngestEvent({
+      id: `ads-diagnostics-completed:${clientId}:${insightDate}`,
+      name: ADS_DIAGNOSTICS_COMPLETED_EVENT,
+      data: { client_id: clientId, insight_date: insightDate, diagnostic_run_id: (data as { id: string }).id },
+    })
+    return { sent: true }
+  } catch (e) {
+    return { sent: false, error: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 // ─── Route ───────────────────────────────────────────────────────────────────
@@ -492,6 +530,13 @@ export async function GET(req: NextRequest) {
             if (!result.ad_diagnostics.success && result.ad_health?.success && result.ad_health.overall_verdict) {
               const digest = await sendAdHealthDigest(client.client_id, client.client_name ?? 'Client', evaluationDate, resolveDigestRecipients(adStrategyConfig))
               result.ad_digest = { sent: digest.sent, decision: `fallback:${digest.decision}`, error: digest.error }
+            }
+            // Ads D3 自动暂停：诊断成功就发事件，consumer 自己重查开关（是否
+            // autonomy_mode）——事件只带 client_id/insight_date/diagnostic_run_id，
+            // 不带诊断明细/客户名/具体数字（子牙复审）。best-effort：这一步失败
+            // 不影响诊断和日报本身已经完成的事实，只丢一条 error 供排查。
+            if (result.ad_diagnostics.success) {
+              result.ad_auto_pause_event = await fireAdsDiagnosticsCompletedEvent(client.client_id, evaluationDate)
             }
 
             // 卫青巡察（spec 2026-09-24 §4）：问题 + 机会 + 目标节奏合成一行经营状态，

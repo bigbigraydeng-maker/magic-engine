@@ -19,6 +19,7 @@ import { seoMetaCycleFanOut, seoMetaCycleRunOne } from './seo-meta-cycle'
 import { competitorWatchWeeklyFanOut, competitorWatchRunOne } from './competitor-watch-weekly'
 import { aiVisibilityWeeklyFanOut, aiVisibilityTrackerRunOne } from './ai-visibility-weekly'
 import { reelBatchRender } from './reel-batch-render'
+import { adsD3AutoPause } from './ads-d3-auto-pause'
 import { leadSheetSyncFanOut, leadSheetSyncOne } from './lead-sheet-sync'
 import { crmLeadFollowupDigest } from './crm-lead-followup-digest'
 import { adsAutonomySyncFunction } from './ads-autonomy-sync'
@@ -51,6 +52,7 @@ export const cloudFunctions = [
   aiVisibilityWeeklyFanOut,
   aiVisibilityTrackerRunOne,
   reelBatchRender,
+  adsD3AutoPause,
   leadSheetSyncFanOut,
   leadSheetSyncOne,
   crmLeadFollowupDigest,
