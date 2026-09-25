@@ -27,6 +27,7 @@ import {
   isClientBrand,
   type ClientBrandIdentity,
 } from './client-brand-match'
+import { isRunConclusive } from './run-conclusive'
 import { supabaseAdmin } from '../supabase'
 import { fetchAll } from '../supabase-paginate'
 import {
@@ -519,11 +520,7 @@ async function aggregateSnapshot(
   const mentionsCount = ranks.length
   const avgRank =
     mentionsCount > 0 ? ranks.reduce((a, b) => a + b, 0) / mentionsCount : null
-  // Only models that actually answered count as covered. A model whose every
-  // call threw was attempted, not covered, and GeoComposerAdapter reads this
-  // list back as the engine-coverage metric.
   const modelsCovered = Array.from(new Set(conclusive.map(r => r.ai_model)))
-  // Distinct engines where brand appeared at least once
   const engineCoverage = new Set(
     conclusive.filter(r => r.client_brand_rank !== null).map(r => r.ai_engine)
   ).size

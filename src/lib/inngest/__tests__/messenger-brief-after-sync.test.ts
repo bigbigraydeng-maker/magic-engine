@@ -14,10 +14,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const startCronRunId = vi.fn(async (_jobName: string) => 'run-1' as string | null)
 const finish = vi.fn(async (_opts: Record<string, unknown>) => {})
+const failOpenCronRuns = vi.fn(async (..._a: unknown[]) => 0)
 vi.mock('@/lib/cron/run-logger', () => ({
   startCronRunId: (jobName: string) => startCronRunId(jobName),
   cronRunHandle: () => ({ finish }),
   startCronRun: vi.fn(),
+  failOpenCronRuns: (...a: unknown[]) => failOpenCronRuns(...a),
 }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 
@@ -38,6 +40,7 @@ function optsOf(fn: Fn) {
       triggers?: { event?: string; cron?: string }[]
       retries?: number
       concurrency?: { limit: number; key?: string }
+      onFailure?: (a: unknown) => Promise<void>
     }
   }).opts
 }
@@ -91,7 +94,10 @@ const RECEIPT = {
 
 interface RunOverrides {
   loadDue?: (now: Date) => Promise<DueBrief[]>
-  generate?: (d: readonly DueBrief[], now: Date) => Promise<{ generated: number; failed: number }>
+  generate?: (
+    d: readonly DueBrief[],
+    now: Date,
+  ) => Promise<{ generated: number; failed: number; aborted?: string | null }>
   sweeps?: (now: Date) => Promise<never>
   eventData?: unknown
 }
@@ -280,6 +286,93 @@ describe('没人要写卡的那一轮', () => {
     await run({ loadDue: async () => due(0) })
     expect(finish).toHaveBeenCalledWith(
       expect.objectContaining({ processed: 0, completed: 0, failed: 0 }),
+    )
+  })
+})
+
+/**
+ * 2026-09-23 事故：OpenAI 余额 9/20 19:11 用光 → 一条注定失败的调用烧 20 秒
+ * → 一段 12 条约 242 秒 → 撞穿网关约 125 秒 → 段永远不返回 → `log-finish` 一次没跑到
+ * → 运行记录永远停在「在跑」，攒了 50 行，体检报告全绿，客户需求卡停产 3 天。
+ */
+describe('某一段自己主动停下来（余额用光 / 时间预算用完）', () => {
+  const ABORT = 'AI 服务账户余额/额度用光了 —— 充值前这一轮剩下的都会同样失败，已当场停下'
+
+  it('🔴 第一段报了 aborted → 后面的段一个都不许再排（不然 242 秒 × 段数，再撞一次网关）', async () => {
+    const { generate, result } = await run({
+      loadDue: async () => due(BRIEFS_PER_CHUNK * 4),
+      generate: async () => ({ generated: 0, failed: 0, aborted: ABORT }),
+    })
+    expect(generate).toHaveBeenCalledTimes(1)
+    expect(result.status).toBe('aborted')
+  })
+
+  it('🔴 这一轮必须记成失败、而且带真实原因 —— 记成 completed 就等于这次事故再来一遍', async () => {
+    await run({
+      loadDue: async () => due(BRIEFS_PER_CHUNK * 2),
+      generate: async () => ({ generated: 3, failed: 1, aborted: ABORT }),
+    })
+    expect(finish).toHaveBeenCalledWith(
+      expect.objectContaining({ error: ABORT, completed: 3, failed: 1 }),
+    )
+  })
+
+  it('运行记录一定要落下来 —— 停在半路最怕的就是「什么痕迹都没有」', async () => {
+    const { harness, finishInsideStep } = await run({
+      loadDue: async () => due(2),
+      generate: async () => ({ generated: 0, failed: 0, aborted: ABORT }),
+    })
+    expect(harness.ranStepIds).toContain('log-finish-aborted')
+    // 写记录这件事仍然必须发生在 step 之内，否则重放会插出假记录
+    expect(finishInsideStep).toEqual([true])
+  })
+
+  it('这一轮不跑扫尾两遍 —— 它们要读刚写好的卡，而这一轮没写完', async () => {
+    const { sweeps, harness } = await run({
+      loadDue: async () => due(2),
+      generate: async () => ({ generated: 0, failed: 0, aborted: ABORT }),
+    })
+    expect(sweeps).not.toHaveBeenCalled()
+    expect(harness.ranStepIds).not.toContain('post-brief-sweeps')
+  })
+
+  it('🔴 aborted 是 null 的正常一轮，行为必须跟改动之前一模一样', async () => {
+    const { result, sweeps } = await run({
+      loadDue: async () => due(2),
+      generate: async () => ({ generated: 2, failed: 0, aborted: null }),
+    })
+    expect(result).toMatchObject({ status: 'written', generated: 2 })
+    expect(sweeps).toHaveBeenCalledTimes(1)
+    expect(finish).toHaveBeenCalledWith(expect.not.objectContaining({ error: expect.anything() }))
+  })
+})
+
+describe('重试耗尽之后的收口（这次「监控看不出坏」的直接原因）', () => {
+  it('🔴 必须配 onFailure —— 没有它，段被网关掐死那一轮会永远停在「在跑」', () => {
+    const fn = createMessengerBriefAfterSyncFunction({
+      loadDue: async () => due(0),
+      generate: async () => ({ generated: 0, failed: 0, aborted: null }),
+      sweeps: async () => ({}) as never,
+    })
+    expect(typeof optsOf(fn).onFailure).toBe('function')
+  })
+
+  it('onFailure 把这个任务停在「在跑」的记录收成失败，并带上失败事件自己的时刻', async () => {
+    const fn = createMessengerBriefAfterSyncFunction({
+      loadDue: async () => due(0),
+      generate: async () => ({ generated: 0, failed: 0, aborted: null }),
+      sweeps: async () => ({}) as never,
+    })
+    const ts = Date.parse('2026-09-23T04:14:00Z')
+    await optsOf(fn).onFailure?.({
+      event: { data: {}, ts },
+      error: new Error('gateway timeout'),
+    } as never)
+
+    expect(failOpenCronRuns).toHaveBeenCalledWith(
+      MESSENGER_BRIEF_JOB,
+      expect.stringContaining('gateway timeout'),
+      { startedBefore: new Date(ts) },
     )
   })
 })

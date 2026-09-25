@@ -17,6 +17,7 @@ import { ModelStats } from './_components/ModelStats';
 import { QueriesManager } from './_components/QueriesManager';
 import { isRunConclusive } from '@/lib/ai-tracker/run-conclusive';
 import type { AiVisibilityRun, AiVisibilitySnapshot, AiVisibilityQuery } from '@/types/magic-engine';
+import { isRunConclusive } from '@/lib/ai-tracker/run-conclusive';
 
 type Tab = 'rankings' | 'engines' | 'models' | 'queries';
 

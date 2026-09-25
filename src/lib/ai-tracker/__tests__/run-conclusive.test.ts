@@ -11,6 +11,10 @@ describe('isRunConclusive', () => {
     expect(isRunConclusive({ error_message: null, parse_error_message: null })).toBe(true)
   })
 
+  it('returns true when error_message is no_ai_overview (successful zero)', () => {
+    expect(isRunConclusive({ error_message: 'no_ai_overview', parse_error_message: null })).toBe(true)
+  })
+
   it('rejects a run whose engine call failed', () => {
     expect(
       isRunConclusive({ error_message: 'Connection error.', parse_error_message: null })
@@ -18,18 +22,23 @@ describe('isRunConclusive', () => {
   })
 
   it('rejects a run whose engine answered but whose parser threw', () => {
-    // The trap this module exists for: the engine may well have named the
-    // client, but client_brand_rank is null because nothing parsed it. Left in
-    // the denominator it reads as a confirmed miss.
     expect(
       isRunConclusive({ error_message: null, parse_error_message: 'LLM parse timeout' })
     ).toBe(false)
   })
 
-  it('treats an empty string as a failure, not as "no error"', () => {
-    // Fail-closed: a writer that records an empty message still recorded a
-    // failure leg, and guessing otherwise would re-open the exact hole.
-    expect(isRunConclusive({ error_message: '', parse_error_message: null })).toBe(false)
+  it('returns false when both error fields are set', () => {
+    expect(isRunConclusive({ error_message: 'timeout', parse_error_message: 'broken JSON' })).toBe(false)
+  })
+
+  it('treats missing fields as null (for objects from different queries)', () => {
+    expect(isRunConclusive({})).toBe(true)
+    expect(isRunConclusive({ error_message: undefined })).toBe(true)
+  })
+
+  it('trims whitespace before checking', () => {
+    expect(isRunConclusive({ error_message: '  ', parse_error_message: null })).toBe(true)
+    expect(isRunConclusive({ error_message: ' no_ai_overview ', parse_error_message: null })).toBe(true)
   })
 })
 

@@ -35,12 +35,16 @@ export function ModelStats({ runs, brandName }: Props) {
     const avgRank = ranks.length > 0
       ? ranks.reduce((a, b) => a + b, 0) / ranks.length
       : null;
-    const avgLatency = successful.length > 0
-      ? successful.reduce((a, r) => a + (r.latency_ms ?? 0), 0) / successful.length
+    // Cost/token/latency were incurred whenever the provider call itself succeeded,
+    // even if the downstream parser later failed — parse failures must not make
+    // real spend disappear from the totals. Ignore parse_error_message here.
+    const costed = modelRuns.filter(r => isRunConclusive({ error_message: r.error_message, parse_error_message: null }));
+    const avgLatency = costed.length > 0
+      ? costed.reduce((a, r) => a + (r.latency_ms ?? 0), 0) / costed.length
       : null;
-    const totalCost = successful.reduce((a, r) => a + (r.cost_usd ?? 0), 0);
-    const totalTokens = successful.reduce((a, r) => a + (r.tokens_used ?? 0), 0);
-    const avgTokens = successful.length > 0 ? totalTokens / successful.length : null;
+    const totalCost = costed.reduce((a, r) => a + (r.cost_usd ?? 0), 0);
+    const totalTokens = costed.reduce((a, r) => a + (r.tokens_used ?? 0), 0);
+    const avgTokens = costed.length > 0 ? totalTokens / costed.length : null;
     const engine = modelRuns[0]?.ai_engine ?? 'unknown';
     return {
       model,

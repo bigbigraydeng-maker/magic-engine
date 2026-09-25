@@ -324,7 +324,6 @@ export interface AiVisibilityRun {
   cost_usd: number | null
   latency_ms: number | null
   error_message: string | null
-  /** Parser leg failed. Null-vs-set is what tells a real miss from a lost probe — see lib/ai-tracker/run-conclusive.ts. */
   parse_error_message: string | null
   ran_at: string
 }

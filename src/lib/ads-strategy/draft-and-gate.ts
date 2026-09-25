@@ -22,7 +22,14 @@ import { fetchAdSetReadback, fetchAdCreativesReadback } from '@/lib/meta/readbac
 import { adaptMetaAdSet } from './meta-readback-adapter'
 import { checkLaunch, renderReadback, type LaunchFinding } from './launch-readback'
 
-/** 一条草案在账本里的状态。 */
+/**
+ * 一条广告动作在账本里的状态。
+ *
+ * 🔴 最初只为「起草新广告」（`ads.create_ad`）这条流水设计；`ads.auto_pause_on_d3`
+ *    （src/lib/inngest/functions/ads-d3-auto-pause.ts）复用同一份词表，而不是
+ *    自造一套平行状态——两条流水都是「flywheel_actions 记一件事的一生」，
+ *    只是这一件事具体是什么不同。
+ */
 export type DraftStatus =
   /** 建出来了、闸门过了、等人点头。**只有这个状态会出现在审批页。** */
   | 'awaiting_approval'
@@ -34,6 +41,13 @@ export type DraftStatus =
   | 'active'
   /** 人否了。 */
   | 'rejected'
+  /**
+   * `ads.auto_pause_on_d3` 专用：dry-run 模式下的记录——如果开启会做什么，
+   * 但没有调用任何 Meta 写接口。纯展示，不进等人点头的队列。
+   */
+  | 'dry_run_logged'
+  /** `ads.auto_pause_on_d3` 专用：人已批准并且 Kernel 执行成功，广告组已暂停。 */
+  | 'paused'
 
 export const ADS_CREATE_ACTION = 'ads.create_ad'
 

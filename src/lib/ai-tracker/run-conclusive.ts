@@ -7,42 +7,21 @@
  * exclude non-conclusive rows from BOTH numerator and denominator, and report
  * "not computable" when nothing conclusive remains.
  *
- * Why this exists as a module and not an inline `.is('error_message', null)`:
- * `orchestrator.processOne` deliberately INSERTS a row even when the runner
- * throws, so the failure is preserved as history (playbook-geo §8). The price
- * is that a failed row's empty fields — `brands_mentioned: []`,
- * `client_brand_rank: null` — are indistinguishable from a genuine "the AI
- * did not mention us" unless the reader checks the error columns. Keeping the
- * check in one place means a new consumer inherits it instead of re-deriving
- * it (and getting it wrong).
- *
  * TWO columns, not one. A run is only evidence when both legs completed:
  *   - `error_message`        → the engine call itself failed (or was disabled).
- *                              Nothing was asked, nothing was answered.
- *   - `parse_error_message`  → the engine answered, but the parser that turns
- *                              that answer into rankings blew up. The answer
- *                              may well have named the client; we simply do
- *                              not know. `client_brand_rank` stays null for
- *                              the same reason it stays null on a real miss,
- *                              which is exactly the trap.
+ *   - `parse_error_message`  → the engine answered, but the parser blew up.
  *
- * Why there is NO allowlist here, unlike `industry-ai-visibility/
- * snapshot-conclusive.ts`: that table stores an enumerated `error_code`, where
- * `no_ai_overview` means "collection succeeded, the emptiness is real" and has
- * to stay in the denominator. This table stores a free-text driver message
- * instead — `runners/*.ts` write it only from a catch block or the
- * disabled-engine guard — and free-text matching would be the wrong tool for
- * an allowlist anyway.
+ * `no_ai_overview`-style codes live in `error_message` but are NOT failures —
+ * they represent "the platform answered, but AI Overview wasn't displayed".
+ * Those are true zeroes and MUST stay in the denominator.
  *
- * ⚠️ That does NOT mean no "succeeded but empty" case exists. One does, and it
- * lives a layer down: a runner returns `content ?? ''` with
- * `error_message: null` when a model refuses or truncates, so an empty answer
- * reaches the parser looking like a successful call. `parser.ts` therefore
- * THROWS on a too-short response instead of returning an empty ranking, which
- * routes it to `parse_error_message` and lets this predicate reject it. If you
- * are adding a branch anywhere in that chain that means "we got nothing back",
- * it must end in one of these two columns — never in a quietly empty result.
+ * Pure function, zero external deps — safe for client components.
  */
+
+/** Error codes that represent a successful (conclusive) measurement, not a failure. */
+const CONCLUSIVE_ERROR_CODES = new Set<string>([
+  'no_ai_overview',
+])
 
 /**
  * The shape every caller needs — matches the `ai_visibility_runs` columns.
@@ -64,10 +43,17 @@ export const RUN_CONCLUSIVENESS_COLUMNS = 'error_message, parse_error_message'
  * True when this run completed end to end, so its (possibly empty) brand list
  * and (possibly null) rank may be counted as real evidence.
  *
- * Fail-closed: anything in either error column means "not measured".
+ * Accepts the broader `{ error_message?: string | null; ... }` shape so client
+ * components and objects from different queries can use it directly.
  */
-export function isRunConclusive(row: RunConclusiveness): boolean {
-  return row.error_message === null && row.parse_error_message === null
+export function isRunConclusive(
+  run: { error_message?: string | null; parse_error_message?: string | null },
+): boolean {
+  const err = run.error_message?.trim()
+  if (err && !CONCLUSIVE_ERROR_CODES.has(err)) return false
+  const parseErr = run.parse_error_message?.trim()
+  if (parseErr) return false
+  return true
 }
 
 /** Split rows into the ones we may score and the ones we must not. */
@@ -86,9 +72,6 @@ export function partitionConclusiveRuns<T extends RunConclusiveness>(
 /**
  * Human-readable breakdown of what failed — used verbatim in the skip reason
  * so FDE/PM can tell "AI 没提到我们" apart from "这次根本没探测成".
- *
- * Messages are free-text driver output, so they are bucketed by leg rather
- * than by exact string: an aggregate of 47 distinct timeout texts helps no one.
  */
 export function summariseRunFailures(rows: readonly RunConclusiveness[]): string {
   let engineFailures = 0
