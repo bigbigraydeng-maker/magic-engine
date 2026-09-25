@@ -106,6 +106,8 @@ function adStrategyConfig(overrides: Partial<AdStrategyConfig> = {}): AdStrategy
     daily_budget_cap_cents: null,
     autonomy_mode: 'observe',
     creative_pool: [],
+    autopilot_enabled: false,
+    autopilot_dry_run: true,
     ...overrides,
   }
 }

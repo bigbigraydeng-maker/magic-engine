@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
+import {
+  contactKindOf,
+  EMPTY_RULES,
+  readDomainRules,
+  type DomainRules,
+} from '@/lib/crm/contact-kind'
 
 type Context = { params: Promise<{ id: string }> }
 
@@ -30,12 +36,167 @@ interface IdentityRow {
   value: string | null
 }
 
+interface AgentCustomerPayload {
+  id: string
+  customerName: string | null
+  pax: number | null
+  tripType: string | null
+  travelDates: string | null
+  specificNeeds: string | null
+  stage: string
+  lastContactAt: string | null
+  lastContactSummary: string | null
+  conversationId: string | null
+  notes: string | null
+  updatedAt: string
+}
+
+interface AgentPayload {
+  contactId: string
+  displayName: string | null
+  primaryEmail: string | null
+  lastContactAt: string | null
+  customerCount: number
+  customers: AgentCustomerPayload[]
+}
+
+/** 读这个客户的域名规则。读不到就当没配 —— 一个坏配置不该让整页打不开。 */
+async function loadDomainRules(id: string): Promise<DomainRules> {
+  try {
+    const { data: clientRow } = await supabaseAdmin
+      .from('clients')
+      .select('leads_config')
+      .eq('id', id)
+      .maybeSingle()
+    return readDomainRules(clientRow?.leads_config ?? null)
+  } catch {
+    return EMPTY_RULES
+  }
+}
+
+/**
+ * 这个客户名下所有邮箱身份，按 contact_id 归堆。
+ *
+ * 一次查全量、不按 id 过滤：要先知道谁是谁，才能判谁是同行。
+ * 保持插入顺序（created_at 升序），所以每组第一个就是主邮箱。
+ */
+async function loadEmailsByContact(id: string): Promise<Map<string, string[]>> {
+  const byContact = new Map<string, string[]>()
+  const { data: identityRows } = await supabaseAdmin
+    .from('contact_identities')
+    .select('contact_id, value')
+    .eq('client_id', id)
+    .eq('kind', 'email')
+    .order('created_at', { ascending: true })
+
+  for (const row of (identityRows ?? []) as IdentityRow[]) {
+    const value = row.value?.trim()
+    if (!value) continue
+    const list = byContact.get(row.contact_id)
+    if (list) list.push(value)
+    else byContact.set(row.contact_id, [value])
+  }
+  return byContact
+}
+
+/** 按 agent_contact_id 把客户行归堆。 */
+function groupCustomers(rows: AgentCustomerRow[]): Map<string, AgentCustomerRow[]> {
+  const grouped = new Map<string, AgentCustomerRow[]>()
+  for (const row of rows) {
+    const list = grouped.get(row.agent_contact_id)
+    if (list) list.push(row)
+    else grouped.set(row.agent_contact_id, [row])
+  }
+  return grouped
+}
+
+/** 把一行 agent_customers 映射成前端用的 camelCase 形状。 */
+function toCustomerPayload(row: AgentCustomerRow): AgentCustomerPayload {
+  return {
+    id: row.id,
+    customerName: row.customer_name,
+    pax: row.pax,
+    tripType: row.trip_type,
+    travelDates: row.travel_dates,
+    specificNeeds: row.specific_needs,
+    stage: row.stage,
+    lastContactAt: row.last_contact_at,
+    lastContactSummary: row.last_contact_summary,
+    conversationId: row.conversation_id,
+    notes: row.notes,
+    updatedAt: row.updated_at,
+  }
+}
+
+/** 组装一个 agent：最后联系时间取名下客户里最新的那条。 */
+function buildAgent(
+  contactId: string,
+  rows: AgentCustomerRow[],
+  displayName: string | null,
+  primaryEmail: string | null,
+): AgentPayload {
+  const lastContactAt = rows.reduce<string | null>((acc, row) => {
+    if (!row.last_contact_at) return acc
+    if (!acc) return row.last_contact_at
+    return row.last_contact_at > acc ? row.last_contact_at : acc
+  }, null)
+  return {
+    contactId,
+    displayName,
+    primaryEmail,
+    lastContactAt,
+    customerCount: rows.length,
+    customers: rows.map(toCustomerPayload),
+  }
+}
+
+/** 一次查全量联系人名字，按 id 归堆。 */
+async function loadDisplayNames(
+  id: string,
+  agentIds: string[],
+): Promise<Map<string, string | null>> {
+  const { data: contactRows } = await supabaseAdmin
+    .from('contacts')
+    .select('id, display_name')
+    .eq('client_id', id)
+    .in('id', agentIds)
+
+  const contacts = (contactRows ?? []) as ContactRow[]
+  return new Map(contacts.map((row) => [row.id, row.display_name]))
+}
+
+/** 有客户的排前面（按最后联系倒序），没客户的按名字排，没名字的垫底。 */
+function sortAgents(agents: AgentPayload[]): AgentPayload[] {
+  return agents.sort((a, b) => {
+    const aHas = a.customerCount > 0
+    const bHas = b.customerCount > 0
+    if (aHas !== bHas) return aHas ? -1 : 1
+    if (aHas && bHas) {
+      if (!a.lastContactAt) return 1
+      if (!b.lastContactAt) return -1
+      return a.lastContactAt < b.lastContactAt ? 1 : -1
+    }
+    if (!a.displayName) return 1
+    if (!b.displayName) return -1
+    return a.displayName.localeCompare(b.displayName)
+  })
+}
+
 export async function GET(_req: Request, { params }: Context) {
   const { id } = await params
   const access = await requirePaidClientAccess(id)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
   try {
+    const rules = await loadDomainRules(id)
+    const emailsByContact = await loadEmailsByContact(id)
+
+    // 同行 = 邮箱域名命中同行清单的联系人。这是这一页的主干 ——
+    // 以前从 agent_customers 出发，没客户行就整页空白（生产事故）。
+    const tradeContactIds = Array.from(emailsByContact.entries())
+      .filter(([, emails]) => contactKindOf(emails, rules) === 'trade')
+      .map(([contactId]) => contactId)
+
     const { data: customerRows, error: customerError } = await supabaseAdmin
       .from('agent_customers')
       .select(
@@ -48,79 +209,28 @@ export async function GET(_req: Request, { params }: Context) {
       return NextResponse.json({ error: 'Could not load agent customers.' }, { status: 500 })
     }
 
-    const customers = (customerRows ?? []) as AgentCustomerRow[]
-    const agentContactIds = Array.from(new Set(customers.map((row) => row.agent_contact_id)))
+    const grouped = groupCustomers((customerRows ?? []) as AgentCustomerRow[])
 
-    if (agentContactIds.length === 0) {
+    // 并集：同行联系人 + 已有客户行的 agent。域名清单后来被删掉时，
+    // 已经落库的客户不会跟着消失。
+    const agentIds = Array.from(new Set([...tradeContactIds, ...grouped.keys()]))
+
+    if (agentIds.length === 0) {
       return NextResponse.json({ agents: [] })
     }
 
-    const { data: contactRows } = await supabaseAdmin
-      .from('contacts')
-      .select('id, display_name')
-      .in('id', agentContactIds)
+    const displayNameById = await loadDisplayNames(id, agentIds)
 
-    const contacts = (contactRows ?? []) as ContactRow[]
-    const displayNameById = new Map(contacts.map((row) => [row.id, row.display_name]))
-
-    const emailById = new Map<string, string | null>()
-    try {
-      const { data: identityRows } = await supabaseAdmin
-        .from('contact_identities')
-        .select('contact_id, value')
-        .in('contact_id', agentContactIds)
-        .eq('kind', 'email')
-        .order('created_at', { ascending: true })
-      for (const row of (identityRows ?? []) as IdentityRow[]) {
-        if (!emailById.has(row.contact_id)) emailById.set(row.contact_id, row.value)
-      }
-    } catch {
-      // contact_identities shape may differ; email is best-effort.
-    }
-
-    const grouped = new Map<string, AgentCustomerRow[]>()
-    for (const row of customers) {
-      const list = grouped.get(row.agent_contact_id)
-      if (list) list.push(row)
-      else grouped.set(row.agent_contact_id, [row])
-    }
-
-    const agents = Array.from(grouped.entries()).map(([contactId, rows]) => {
-      const lastContactAt = rows.reduce<string | null>((acc, row) => {
-        if (!row.last_contact_at) return acc
-        if (!acc) return row.last_contact_at
-        return row.last_contact_at > acc ? row.last_contact_at : acc
-      }, null)
-      return {
+    const agents: AgentPayload[] = agentIds.map((contactId) =>
+      buildAgent(
         contactId,
-        displayName: displayNameById.get(contactId) ?? null,
-        primaryEmail: emailById.get(contactId) ?? null,
-        lastContactAt,
-        customerCount: rows.length,
-        customers: rows.map((row) => ({
-          id: row.id,
-          customerName: row.customer_name,
-          pax: row.pax,
-          tripType: row.trip_type,
-          travelDates: row.travel_dates,
-          specificNeeds: row.specific_needs,
-          stage: row.stage,
-          lastContactAt: row.last_contact_at,
-          lastContactSummary: row.last_contact_summary,
-          conversationId: row.conversation_id,
-          notes: row.notes,
-          updatedAt: row.updated_at,
-        })),
-      }
-    })
+        grouped.get(contactId) ?? [],
+        displayNameById.get(contactId) ?? null,
+        emailsByContact.get(contactId)?.[0] ?? null,
+      ),
+    )
 
-    agents.sort((a, b) => {
-      if (!a.lastContactAt) return 1
-      if (!b.lastContactAt) return -1
-      return a.lastContactAt < b.lastContactAt ? 1 : -1
-    })
-
-    return NextResponse.json({ agents })
+    return NextResponse.json({ agents: sortAgents(agents) })
   } catch {
     return NextResponse.json({ error: 'Could not load agents. Try again.' }, { status: 500 })
   }
