@@ -36,6 +36,40 @@ function stripPrefix(reason: string): string {
   return body.length > 120 ? `${body.slice(0, 120)}…` : body
 }
 
+export type AdsAutonomyCircuitBreakerItemKind = 'ads_autonomy_circuit_breaker'
+
+export async function pushAdsAutonomyCircuitBreakerItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+  nameOf: (id: string) => string,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('client_automation_policies')
+    .select('client_id, mode, updated_by')
+    .eq('mode', 'deny')
+    .like('updated_by', 'circuit-breaker:%')
+  if (error) throw new Error(`client_automation_policies 读取失败：${error.message}`)
+
+  const seen = new Set<string>()
+  for (const row of (data ?? []) as Array<{ client_id: string; updated_by: string }>) {
+    if (seen.has(row.client_id)) continue
+    seen.add(row.client_id)
+    items.push({
+      kind: 'ads_autonomy_circuit_breaker',
+      client_id: row.client_id,
+      client_name: nameOf(row.client_id),
+      what:
+        '广告自治被熔断器自动停了 —— 当日预算合计超过 7 天中位数的 3 倍，' +
+        '系统已自动把全部广告动作切到「禁止」档位，不再动钱。',
+      how:
+        '先到 Meta Ads Manager 核实实际花费是否正常；' +
+        '确认没问题后在客户设置页把「自治档位」重新设为「受限自动」，系统会解除熔断。',
+      href: adsAutonomySettingsHref(row.client_id),
+    })
+  }
+}
+
 export async function pushAdsAutonomySyncItems(
   supabase: SupabaseClient,
   items: ManualItem[],

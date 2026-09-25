@@ -30,7 +30,7 @@ import { pushEmailReplyItems } from './email-reply-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
-import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
+import { pushAdsAutonomySyncItems, pushAdsAutonomyCircuitBreakerItems } from './ads-autonomy-items'
 import {
   buildNotIndexedItems,
   daysAgo,
@@ -225,6 +225,11 @@ export async function loadManualItems(
   // 自治开关没同步到执行内核 —— 面板档位跟内核实际档位对不上，必须有人看见（WP3.1a）
   await pushAdsAutonomySyncItems(supabase, items, now, nameOf).catch((e) =>
     console.warn('[manual-items] 自治开关同步待办生成失败（不阻塞其他待办）:', e),
+  )
+
+  // 广告自治被熔断器自动停了 —— 当日预算异常飙升，系统已自动禁止全部广告动作（WP3 验收 3）
+  await pushAdsAutonomyCircuitBreakerItems(supabase, items, now, nameOf).catch((e) =>
+    console.warn('[manual-items] 广告自治熔断器待办生成失败（不阻塞其他待办）:', e),
   )
 
   // 客户之间有没有串台 —— PM 2026-08-05：「坚决不能胡窜」。

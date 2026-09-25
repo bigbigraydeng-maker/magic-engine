@@ -33,6 +33,8 @@ export const PROVIDER_WRITE_MODULES = [
   '@/lib/gbp/publisher',
   '@/lib/gsc/indexing-client',
   '@/lib/gsc/sitemap-ping',
+  '@/lib/meta/adsets',
+  '@/lib/meta/client',
 ] as const
 
 /** 允许 import 上面这些模块的目录（新代码只能落在这里）。 */
@@ -74,6 +76,7 @@ export const PROVIDER_WRITE_GRANDFATHERED = [
   'src/lib/flywheel/social-post-publish.ts',
   'src/lib/luban/tools.ts',
   'src/lib/seo-meta/cts-meta-pr.ts',
+  'src/app/api/clients/[id]/ad-health/stop-loss/route.ts',
 ] as const
 
 /**

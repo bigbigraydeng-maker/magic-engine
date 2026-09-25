@@ -118,6 +118,7 @@ export function createKernelDeps(init: KernelDepsInit): KernelDeps {
     workerId: init.workerId ?? `kernel@${process.env.RENDER_INSTANCE_ID ?? 'local'}`,
     leaseSeconds: init.leaseSeconds ?? 300,
     ownerId: init.ownerId ?? `${init.workerId ?? 'kernel'}@${bootNonce()}`,
+    resolveEnvelopeFacts: init.resolveEnvelopeFacts,
     now: init.now ?? (() => new Date()),
     sleep: init.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms))),
     async requireRun(runId: string) {

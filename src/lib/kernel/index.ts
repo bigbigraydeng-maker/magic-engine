@@ -12,6 +12,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createCapabilities } from '@/lib/capabilities'
+import { createAdsEnvelopeFactsResolver } from '@/lib/capabilities/ads/envelope-facts'
 import { createKernelDeps, type KernelDeps, type KernelDepsInit } from './deps'
 import { ACTION_REGISTRY } from './registry'
 
@@ -19,15 +20,21 @@ export function createKernel(
   supabase: SupabaseClient,
   overrides: Partial<Omit<KernelDepsInit, 'supabase'>> = {},
 ): KernelDeps {
+  const capabilities = overrides.capabilities ?? createCapabilities(supabase)
   return createKernelDeps({
     supabase,
     registry: overrides.registry ?? ACTION_REGISTRY,
-    capabilities: overrides.capabilities ?? createCapabilities(supabase),
+    capabilities,
     workerId: overrides.workerId,
     // 🔴 这两项以前接了不转发 —— 公开 API 上写着能配，实际永远是 300 秒 + 随机 owner。
     //    「参数类型收了它」和「行为真的变了」是两件事，有测试盯着后者。
     leaseSeconds: overrides.leaseSeconds,
     ownerId: overrides.ownerId,
+    resolveEnvelopeFacts: overrides.resolveEnvelopeFacts ?? createAdsEnvelopeFactsResolver({
+      sb: supabase,
+      capabilities,
+      now: overrides.now,
+    }),
     now: overrides.now,
     sleep: overrides.sleep,
   })
