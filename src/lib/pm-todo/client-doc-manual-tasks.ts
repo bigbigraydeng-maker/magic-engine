@@ -46,7 +46,8 @@ export const CLIENT_DOC_MANUAL_TASKS: ClientDocManualTask[] = [
     what: 'NAL 的 WhatsApp 接入卡在第一步：生产数据库 clients 表还没有 whatsapp_phone_number_id 这一列，migration 代码半个月前已合并但从未对生产执行——这是纯新增字段（4 个 ADD COLUMN + 1 个唯一索引，不改 RLS），风险很低，但按铁律必须 PM 明确拍板才能对生产数据库执行',
     how: '点右边链接看一眼这个 migration 具体改了什么（很短，4 段加字段说明）；确认可以执行就回一句 `go apply`，这里就会去跑；暂时不想动就回 `暂不`，之后想清楚了再说',
     href: 'https://github.com/bigbigraydeng-maker/magic-engine/blob/main/supabase/migrations/20260902000002_whatsapp_phone_number_id.sql',
-    expiresAt: '2026-10-21T09:00:00+13:00',
+    // PM 2026-09-26 定「先不花」钱走 360dialog，WhatsApp 进 CRM 暂停；这三步做完也收不到消息（NAL 号码在 WhatsApp Business App 上，要走服务商托管的并存开户），提前撤下，恢复时再重发。
+    expiresAt: '2026-09-26T00:00:00+12:00',
   },
   {
     // 见 docs/ROADMAP.md「NAL 广告预算止血 + WhatsApp 对话接入排查」（2026-09-21）
@@ -64,7 +65,8 @@ export const CLIENT_DOC_MANUAL_TASKS: ClientDocManualTask[] = [
     what: 'NAL 的 WhatsApp 消息线卡住收不到消息——当前系统用户令牌缺 whatsapp_business_management 权限，查不到 NAL 那个 WhatsApp 号码的技术编号（phone_number_id）。注意这只是其中一个卡点：生产数据库 clients 表的 whatsapp_phone_number_id 这一列还没真正建（migration 代码已合并但从未对生产执行），这条待办做完也还接不通，两件事都要做完才行',
     how: '打开 Business Settings → 左侧「用户」→「系统用户」→ 选中给 Magic Engine 用的那个系统用户 → Generate New Token → 权限清单里额外勾上 whatsapp_business_management（其余已勾的权限保持不变）→ 生成后不要粘贴发给任何人或任何聊天/agent：自己有 Render 权限就直接登录 Render 后台把新 token 更新进这个服务 Environment 里的系统用户令牌那一项；没有 Render 权限就用 1Password 或 Bitwarden 建一条会自动过期的一次性安全分享链接，发给有 Render 权限的人去更新',
     href: 'https://business.facebook.com/settings/system-users',
-    expiresAt: '2026-10-21T09:00:00+13:00',
+    // PM 2026-09-26 定「先不花」钱走 360dialog，WhatsApp 进 CRM 暂停；这三步做完也收不到消息（NAL 号码在 WhatsApp Business App 上，要走服务商托管的并存开户），提前撤下，恢复时再重发。
+    expiresAt: '2026-09-26T00:00:00+12:00',
   },
   {
     // 卡点：即使权限和迁移都补上，Meta App 后台的 webhook 订阅没打开，Meta 照样不推送消息；
@@ -83,7 +85,8 @@ export const CLIENT_DOC_MANUAL_TASKS: ClientDocManualTask[] = [
     what: '就算权限和数据库字段都补上了，生产环境现在还没配 META_VERIFY_TOKEN 和 META_APP_SECRET 这两个变量，前者缺了订阅握手直接失败，后者缺了就算握手成功、消息也会被签名校验直接拒收返回 500（不是「没打开开关」，是这条线现在物理上收不到消息）；这一步只有能登 Meta App 后台+Render 后台的人能核实和操作，开发机验证不了',
     how: '① 想一个只用于这条 webhook 的随机验证字符串，记下来；② 登录 Render 后台，把这个服务 Environment 里新增变量 META_VERIFY_TOKEN，值填①那串字符串；③ 打开 Meta App 后台 → 选中给 NAL 用的那个 App → 左侧「设置」→「基本资料」→ App Secret 一栏点 Show 复制出来 → 回 Render 同一个 Environment 页面新增变量 META_APP_SECRET，值填这串密钥；两个变量都填完后保存生效；④ 回 Meta App 后台左侧「WhatsApp」→「Configuration」→ Callback URL 填 https://app.magicengine.com.au/api/webhooks/whatsapp，Verify Token 填跟②完全相同的字符串 → 点 Verify and Save；⑤ 确认订阅了 messages 事件，没订阅就勾 Subscribe',
     href: 'https://developers.facebook.com/apps/',
-    expiresAt: '2026-10-21T09:00:00+13:00',
+    // PM 2026-09-26 定「先不花」钱走 360dialog，WhatsApp 进 CRM 暂停；这三步做完也收不到消息（NAL 号码在 WhatsApp Business App 上，要走服务商托管的并存开户），提前撤下，恢复时再重发。
+    expiresAt: '2026-09-26T00:00:00+12:00',
   },
   {
     // 见 docs/ROADMAP.md「NAL 广告预算止血 + WhatsApp 对话接入排查」第一件事（2026-09-21）。
