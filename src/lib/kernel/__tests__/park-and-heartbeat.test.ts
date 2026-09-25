@@ -206,7 +206,7 @@ describe('P1-1 · 接管付费 running → 转人工必须真的落库', () => {
           //    不相关的闸盖住，测不出接管保护本身有没有失效）。
           outwardAuthorization: {
             declaredIn: 'park-and-heartbeat.test.ts（测试专用定义）',
-            requiresHumanApproval: true,
+            approval: { mode: 'human_only' },
             rollback: 'provider_native',
           },
           costModel: { kind: 'fixed', estimate: () => 0, stepCeilingUsd: { a: 0 } },

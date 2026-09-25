@@ -21,10 +21,20 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { meMailFrom, ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
 import { describeSendError } from '@/lib/ads-strategy/digest'
 import type { Diagnosis, DiagnosisRun } from './diagnostics/types'
+import type { GoalPace } from '../goal-pace'
 import type { FunnelRole } from './roles'
 import { bareAddress, isInternalEmail, splitAddresses } from './diagnostics/internal-email'
 
 export type InternalDigestDecision = 'alert' | 'uncertain' | 'recovery' | 'weekly' | 'skip'
+
+export interface DigestGoalContext {
+  title: string        // goals.title
+  label: string        // 指标人话名，如 '留资'
+  target: number       // goals.target_value
+  dayIndex: number     // 今天是目标期第几天（1-based）
+  totalDays: number
+  pace: GoalPace
+}
 
 const APP_BASE = 'https://app.magicengine.com.au'
 
@@ -118,6 +128,25 @@ export interface LegacyCampaign {
   headline: string
 }
 
+function goalSection(goal: DigestGoalContext | null | undefined): string {
+  if (!goal) {
+    return `<p style="font-size:13px;color:#64748b">目标进度：这个客户还没有生效中的目标。</p>`
+  }
+  const { title, label, target, dayIndex, totalDays, pace } = goal
+  if (pace.verdict === 'unknown') {
+    return `<p style="font-size:13px;color:#64748b">目标进度：${esc(title)} — 归属数据不足，未判（${esc(pace.reason)}）</p>`
+  }
+  const gap = pace.gapPct === null
+    ? '差距未判'
+    : (pace.gapPct >= 0 ? `超前 ${pace.gapPct}%` : `落后 ${Math.abs(pace.gapPct)}%`)
+  const projected = pace.projectedEnd === null ? '—' : String(pace.projectedEnd)
+  const base = `<b>目标进度</b>：${esc(title)} 目标 ${target} ${esc(label)}，第 ${dayIndex}/${totalDays} 天，已到 ${pace.actualToDate}（预计 ${projected}，${gap}）`
+  const tail = pace.verdict === 'unreachable_within_caps'
+    ? ` — <b style="color:#b91c1c">按当前预算上限到不了目标，需要 PM 决定：加预算 / 换素材 / 调目标</b>`
+    : ''
+  return `<p style="font-size:13px;margin:0 0 12px">${base}${tail}</p>`
+}
+
 function leadLine(decision: Exclude<InternalDigestDecision, 'skip'>, date: string, hits: number, nc: number): string {
   if (decision === 'alert') return `🔴 ${date} 发现 ${hits} 件要看的事`
   if (decision === 'recovery') return `🟢 ${date} 之前报的问题今天没再出现`
@@ -134,6 +163,7 @@ export function buildInternalDigest(opts: {
   decision: Exclude<InternalDigestDecision, 'skip'>
   legacyNeedsAction: LegacyCampaign[]
   droppedRecipients: number
+  goal?: DigestGoalContext | null
 }): { subject: string; html: string } {
   const hits = opts.run.diagnoses.filter(d => d.status === 'hit')
   const nc = opts.run.diagnoses.filter(d => d.status === 'not_comparable')
@@ -164,6 +194,7 @@ export function buildInternalDigest(opts: {
 
   const html = `
     <div style="font-family:sans-serif;max-width:640px;margin:0 auto;padding:24px;color:#0f172a">
+      ${goalSection(opts.goal)}
       <p style="font-size:16px;font-weight:600;margin:0 0 6px">${esc(lead)}</p>
       <p style="font-size:12px;color:#64748b;margin:0">只读诊断，没有改任何广告和预算。仅限内部。</p>
       ${groups}
@@ -193,6 +224,7 @@ export async function persistAndSendInternalDigest(opts: {
   date: string
   run: DiagnosisRun
   configuredRecipients: string[]
+  goal?: DigestGoalContext | null
 }): Promise<InternalDigestResult> {
   const hits = opts.run.diagnoses.filter(d => d.status === 'hit').length
   const notComparable = opts.run.diagnoses.length - hits
@@ -223,7 +255,7 @@ export async function persistAndSendInternalDigest(opts: {
     if (!apiKey) return { decision, sent: false, recipients_dropped: dropped, persisted, error: 'RESEND_API_KEY not configured' }
 
     const campaigns = ((payload?.campaigns ?? []) as LegacyCampaign[]).filter(c => c.verdict === 'alert' || c.verdict === 'watch')
-    const { subject, html } = buildInternalDigest({ clientName: opts.clientName, date: opts.date, run: opts.run, decision, legacyNeedsAction: campaigns, droppedRecipients: dropped })
+    const { subject, html } = buildInternalDigest({ clientName: opts.clientName, date: opts.date, run: opts.run, decision, legacyNeedsAction: campaigns, droppedRecipients: dropped, goal: opts.goal })
     const { error } = await new Resend(apiKey).emails.send({ from: meMailFrom('Magic Engine 广告诊断（内部）'), to, subject, html })
     const status = error ? 'failed' : 'sent'
     if (payload) {

@@ -12,7 +12,13 @@ import type { EntitySnapshotRow } from '../snapshot'
 import type { Confidence, FunnelRole } from '../roles'
 import type { OutcomeConfig } from '../outcome-ladder'
 
-export type DiagnosisCode = 'D1' | 'D2' | 'D3' | 'D4' | 'D5' | 'D6' | 'D7' | 'D8' | 'D9'
+/**
+ * D* = 问题（诊断，"哪里不对"）· O* = 机会（"哪里还有空间"，spec 2026-09-24 §3 G3）。
+ * 两者形状完全相同、走同一条日报和看板管道；区别只在 code 前缀和 clientVisible 默认值。
+ */
+export type DiagnosisCode =
+  | 'D1' | 'D2' | 'D3' | 'D4' | 'D5' | 'D6' | 'D7' | 'D8' | 'D9'
+  | 'O1' | 'O2' | 'O3' | 'O4'
 export type DiagnosisStatus = 'hit' | 'not_comparable'
 
 export type NotComparableReason =
@@ -33,6 +39,8 @@ export type NotComparableReason =
   | 'shared_account'
   | 'below_min_sample'
   | 'single_unit'
+  | 'insufficient_days'   // 窗口内可用天数不够，判不了趋势
+  | 'no_awareness_spend'  // 没有破冰花费，漏斗缺位这条无从谈起
 
 export interface DiagnosisUnit {
   level: 'account' | 'campaign' | 'adset'

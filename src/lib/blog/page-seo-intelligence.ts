@@ -135,7 +135,7 @@ async function fetchGeoGaps(
   if (!runs) return { gaps: [], avgRank }
 
   // Exclude failed probes — a parse-failed run with null rank is NOT "poor visibility"
-  const conclusiveRuns = runs.filter(r => isRunConclusive(r as { error_message: string | null; parse_error_message: string | null }))
+  const conclusiveRuns = runs.filter(r => isRunConclusive(r))
 
   // Deduplicate by question — keep worst (null > high rank)
   const seen = new Map<string, GeoGapSignal>()

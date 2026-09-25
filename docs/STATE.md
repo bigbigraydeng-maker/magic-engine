@@ -158,6 +158,12 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 | `baseline-domains-monthly.yml` | `0 3 1 * *` | `/api/cron/baseline-domains-monthly` |
 | `winner-reel-sync-daily.yml` | **仅 `workflow_dispatch`** | 定时已迁到 Render（见 DECISIONS 2026-07-12） |
 
+### 4.2b 本地 Claude scheduled task（不在 render.yaml / GitHub Actions 里，registry.ts 登记为 `scheduler: 'external'`）
+
+| 任务 | 调度（本地时区） | 端点 |
+|---|---|---|
+| `playbook-staleness-weekly`（`~/.claude/scheduled-tasks/playbook-staleness-weekly/`）| 每周一 08:30 | `POST /api/cron/playbook-staleness-weekly` —— 7 本经验手册（Claude 持久记忆，不在仓库）的代码引用过期巡检，结果全量替换进 `playbook_staleness_findings`，由 pm-daily-todo 读出来送进「🛠 系统欠账」栏 |
+
 ### 4.3 🔴 有路由但没有任何调度器 —— 这些功能永远不会自动跑
 
 2026-08-12 实读：`src/app/api/cron/` 共 **57 个**端点，被调度的有 **53 个**。剩下 **4 个**：

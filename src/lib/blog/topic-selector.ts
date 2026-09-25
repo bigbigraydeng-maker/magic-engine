@@ -94,7 +94,7 @@ export async function getWeakSpotOpportunities(
   if (rErr || !rawRuns) return []
 
   // Exclude failed probes — a failed run with null rank is not evidence of weakness
-  const runs = rawRuns.filter(r => isRunConclusive(r as { error_message: string | null; parse_error_message: string | null }))
+  const runs = rawRuns.filter(r => isRunConclusive(r))
 
   // ── Step 3: Aggregate per-query run summaries ─────────────────────────────
 
