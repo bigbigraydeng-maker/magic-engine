@@ -103,6 +103,15 @@ describe('consecutivelyFailing', () => {
     ]
     expect(consecutivelyFailing(runs, NOW).size).toBe(0)
   })
+
+  it('某一轮 summary 是 null（运行记录没写摘要）→ 不当成失败，也不报错', () => {
+    const runs: SyncRunRow[] = [
+      run(1, [{ clientId: NAL, clientName: 'New Asian Logistics', error: MSG_190 }]),
+      { finished_at: new Date(NOW.getTime() - 2 * 3_600_000).toISOString(), summary: null },
+      run(3, [{ clientId: NAL, clientName: 'New Asian Logistics', error: MSG_190 }]),
+    ]
+    expect(consecutivelyFailing(runs, NOW).size).toBe(0)
+  })
 })
 
 describe('pushFacebookSyncFailingItems', () => {

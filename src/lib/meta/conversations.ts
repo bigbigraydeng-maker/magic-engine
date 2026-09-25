@@ -203,6 +203,8 @@ export async function fetchPageConversations(
   const out: MessengerConversation[] = []
 
   for (let page = 0; page < MAX_PAGES && url; page++) {
+    // Known cost: a Graph error on a later page throws, so this client's whole run is dropped and retried next
+    // hour from the same watermark. If it keeps failing, pm-todo/facebook-sync-items.ts raises a to-do after 3 runs.
     const body: GraphList<RawConversation> = await getJson(url, 'fetchPageConversations')
 
     let reachedWatermark = false
