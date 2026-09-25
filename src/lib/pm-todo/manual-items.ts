@@ -230,10 +230,14 @@ export async function loadManualItems(
   // 检不了 / 出片 2 小时后没检进系统欠账栏。拉模式读工单 + 快照，事件丢了也照样出得来
   await pushMaliangRenderItems(supabase, items, now, nameOf).catch((e) =>
     console.warn('[manual-items] 马良出片自检待办读取失败（不阻塞其他待办）:', e),
+  )
+
   // 李白：文案里「官网和 brief 都找不到依据」的句子 / 溯源检不了 / 生成后没检；
   // 另有提示词库月检结果（只报告不改）。拉模式读库和回执，事件丢了也照样出得来
   await pushLibaiItems(supabase, items, now, nameOf).catch((e) =>
     console.warn('[manual-items] 李白待办读取失败（不阻塞其他待办）:', e),
+  )
+
   // 司马迁每周四起草的 Google 评价回复草稿（一律没发）—— 拉模式读它的回执，
   // 事件送达失败也照样出得来；巡不成的那条进系统欠账栏，不静默
   await pushSimaqianReviewItems(supabase, items, now, nameOf).catch((e) =>
