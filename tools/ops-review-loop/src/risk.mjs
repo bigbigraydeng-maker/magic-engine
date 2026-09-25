@@ -76,6 +76,8 @@ export const RISK_CATEGORY = {
   NETWORK_BOUNDARY: 'network-boundary',
   CREDENTIALS: 'credentials',
   SUPPLY_CHAIN: 'supply-chain',
+  /** Rules for how people and agents use the machine — not code, but the machine's rulebook. */
+  GOVERNANCE: 'governance',
   /** Not a kind of change — a kind of ignorance. The diff could not be read. */
   UNREADABLE: 'unreadable',
 }
@@ -106,6 +108,21 @@ export const A_RISK_RULES = [
   { prefix: 'tools/ops-review-loop/', why: '决定 PR 自身命运的评级与复审控制面', category: RISK_CATEGORY.CONTROL_PLANE },
   { prefix: 'tools/ai-orchestrator/', why: '编排控制面', category: RISK_CATEGORY.CONTROL_PLANE },
   { exact: 'render.yaml', why: '生产服务与 cron 调度', category: RISK_CATEGORY.PRODUCTION_SCHEDULE },
+
+  // --- Governance: the rulebook the machine and its operators follow ------
+  // 🔴 子牙 design review 2026-09-25: `C_SAFE_RULES` rates every `.md` as C, so
+  // once B/C PRs auto-merge, a PR that only rewrites CLAUDE.md (merge rules,
+  // client-data red lines) or the merge-authorization doc would land with zero
+  // human eyes on it. The machine's behaviour is set by code; these files set
+  // how people and agents are allowed to use the machine. Editing the rulebook
+  // unreviewed is the same hole as editing the gate unreviewed.
+  { exact: 'CLAUDE.md', why: '仓库总规则 —— 合并规则、客户数据红线', category: RISK_CATEGORY.GOVERNANCE },
+  { exact: 'AGENTS.md', why: 'agent 入口规则', category: RISK_CATEGORY.GOVERNANCE },
+  { prefix: '.github/', why: 'GitHub 配置与合并规则文档（workflows 之外的部分）', category: RISK_CATEGORY.GOVERNANCE },
+  { prefix: '.claude/', why: 'agent 规则、skill 与层级门定义', category: RISK_CATEGORY.GOVERNANCE },
+  { exact: 'docs/ENGINEERING_QUALITY_GATES.md', why: '风险定级与质量闸的规则书', category: RISK_CATEGORY.GOVERNANCE },
+  { exact: 'docs/ledger/README.md', why: '台账规则 —— 门卫怎么拦、夜巡怎么翻', category: RISK_CATEGORY.GOVERNANCE },
+  { prefix: 'scripts/ledger-', why: '台账检查与更新脚本', category: RISK_CATEGORY.GOVERNANCE },
 
   // --- Auth, permissions, tenant isolation --------------------------------
   { exact: 'src/middleware.ts', why: '请求级鉴权与路由边界', category: RISK_CATEGORY.AUTH_ISOLATION },

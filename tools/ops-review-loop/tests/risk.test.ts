@@ -43,6 +43,13 @@ const A_PATHS: Array<[string, string]> = [
   ['tools/ops-review-loop/src/plan.mjs', 'this control plane'],
   ['tools/ai-orchestrator/src/index.ts', 'orchestrator control plane'],
   ['render.yaml', 'production services and cron'],
+  ['CLAUDE.md', 'repository rulebook'],
+  ['AGENTS.md', 'agent entry rules'],
+  ['.github/merge-authorization.md', 'merge rules document'],
+  ['.claude/skills/me-platform-tier-gate/SKILL.md', 'agent skill and tier gate'],
+  ['docs/ENGINEERING_QUALITY_GATES.md', 'quality gate rulebook'],
+  ['docs/ledger/README.md', 'ledger rules'],
+  ['scripts/ledger-check-refs.sh', 'ledger check script'],
   ['src/middleware.ts', 'request-level auth boundary'],
   ['src/lib/auth/client-access.ts', 'client access boundary'],
   ['src/app/api/auth/callback/route.ts', 'auth endpoint'],
@@ -93,6 +100,45 @@ describe('every protected path rates A', () => {
       why: 'migration —— 数据库结构变更，不可逆',
       category: 'db-migration',
     })
+  })
+})
+
+describe('governance files are A even though they are markdown', () => {
+  it('rates CLAUDE.md A, not C', () => {
+    expect(classifyFile('CLAUDE.md')).toEqual({
+      risk: 'A',
+      why: '仓库总规则 —— 合并规则、客户数据红线',
+      category: 'governance',
+    })
+  })
+
+  it('keeps .github/workflows/ on the narrower control-plane rule', () => {
+    expect(classifyFile('.github/workflows/ledger-check.yml').category).toBe('control-plane')
+  })
+
+  it('rates the merge-authorization doc A', () => {
+    const result = classifyFile('.github/merge-authorization.md')
+    expect(result.risk).toBe('A')
+    expect(result.category).toBe('governance')
+  })
+
+  it('leaves an ordinary ledger card C, so ledger-only auto-merge still works', () => {
+    expect(classifyFile('docs/ledger/2026-09-25-some-card.md').risk).toBe('C')
+  })
+
+  it('leaves docs/agents/ C — deliberately not governance', () => {
+    expect(classifyFile('docs/agents/ziya.md').risk).toBe('C')
+  })
+
+  it('leaves docs/specs/ C', () => {
+    expect(classifyFile('docs/specs/anything.md').risk).toBe('C')
+  })
+
+  it('makes a CLAUDE.md-only PR A with the governance category', () => {
+    const result = classifyRisk({ files: [{ filename: 'CLAUDE.md' }] })
+    expect(result.risk).toBe('A')
+    expect(result.categories).toContain('governance')
+    expect(result.reasons[0]).toContain('CLAUDE.md')
   })
 })
 
