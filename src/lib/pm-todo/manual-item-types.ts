@@ -17,7 +17,7 @@ import type { PageBindingItemKind } from './page-binding-items'
 import type { CommentScopeTodoKind } from './comment-scope-items'
 import type { LeadSheetItemKind } from './lead-sheet-items'
 import type { PlatformConnectionItemKind } from './platform-connection-items'
-import type { AdsAutonomyItemKind } from './ads-autonomy-items'
+import type { AdsAutonomyItemKind, AdsAutonomyCircuitBreakerItemKind } from './ads-autonomy-items'
 
 /**
  * 这些条目**链接坏了也照样下发**。
@@ -134,6 +134,8 @@ export type ManualItemKind =
   | 'kernel_needs_human'
   /** 自治开关同步到执行内核失败 —— 面板档位和内核实际档位可能不一致（WP3.1a） */
   | AdsAutonomyItemKind
+  /** 广告自治被熔断器自动停了 —— 当日预算异常飙升（WP3 验收 3） */
+  | AdsAutonomyCircuitBreakerItemKind
   /** 有成交/咨询等着人核对要不要告诉广告平台 —— 撤不回，所以必须人点 */
   | 'conversion_needs_review'
   /** 发给广告平台时断线了，不知道对方收没收 —— 程序绝不自己重发，等人核对 */
