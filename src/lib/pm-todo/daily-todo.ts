@@ -96,6 +96,10 @@ const DEV_OWNED_KINDS: ManualItemKind[] = [
   'platform_connection_no_reconnect_ui',
   // 「连接挂在查不到的客户名下」→ 要核对该断还是该改挂，是我们的活。
   'platform_connection_orphan',
+  // 马良：自检检不了（模型钥匙没配 / 视频下载不了）、出片后没检（事件没发出去）——how 都是
+  // 「回我一句我去看/去补」。**过关等审片、不过关问返工还是放弃那两条不在这里**，那是 PM 的活。
+  'maliang_check_unverifiable',
+  'maliang_check_missing',
   // 李白：溯源检不了（官网网址没配 / 读不到）、生成后没检（事件没发出去）、提示词库月检
   // 疑似过期——三条 how 都是「回我一句我去看/去补/去改」。**真有「未证实」句要改的那条
   // （libai_copy_unverified）不在这里**，那是 PM/FDE 要动手改文案的活。

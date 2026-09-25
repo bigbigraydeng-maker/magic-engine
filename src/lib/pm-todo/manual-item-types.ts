@@ -18,6 +18,7 @@ import type { CommentScopeTodoKind } from './comment-scope-items'
 import type { LeadSheetItemKind } from './lead-sheet-items'
 import type { PlatformConnectionItemKind } from './platform-connection-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
+import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
 import type { SimaqianItemKind } from './simaqian-review-items'
 
@@ -175,6 +176,8 @@ export type ManualItemKind =
    * 只有人能重新走一次同意页，所以必须进人工车道，不许只躺在 error_message 里。
    */
   | PlatformConnectionItemKind
+  /** 马良 · 出片 9 宫格自检：过关等审片 / 不过关问返工还是放弃 / 检不了 / 出片后没检 */
+  | MaliangItemKind
   /** 李白 · 文案溯源：「未证实」句待改 / 检不了 / 没检；提示词库月检疑似过期（只报告不改） */
   | LibaiItemKind
   /** 司马迁 · 口碑周巡：每周四起草的 Google 评价回复草稿（一律没发）/ 本周没巡成 */

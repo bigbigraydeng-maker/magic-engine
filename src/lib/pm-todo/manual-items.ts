@@ -69,6 +69,7 @@ import { CLIENT_DOC_MANUAL_TASKS, type ClientDocManualTask } from './client-doc-
 import { pushPlaybookStalenessItems } from './playbook-staleness-items'
 import { pushPlatformConnectionItems } from './platform-connection-items'
 import { pushLedgerItems } from './ledger-items'
+import { pushMaliangRenderItems } from './maliang-render-items'
 import { pushLibaiItems } from './libai-items'
 import { pushSimaqianReviewItems } from './simaqian-review-items'
 
@@ -219,6 +220,10 @@ export async function loadManualItems(
     console.warn('[manual-items] 评论权限待办生成失败（不阻塞其他待办）:', e),
   )
 
+  // 马良：Creatomate 成片的 9 宫格自检结果——过关等审片（署名）、不过关问返工还是放弃、
+  // 检不了 / 出片 2 小时后没检进系统欠账栏。拉模式读工单 + 快照，事件丢了也照样出得来
+  await pushMaliangRenderItems(supabase, items, now, nameOf).catch((e) =>
+    console.warn('[manual-items] 马良出片自检待办读取失败（不阻塞其他待办）:', e),
   // 李白：文案里「官网和 brief 都找不到依据」的句子 / 溯源检不了 / 生成后没检；
   // 另有提示词库月检结果（只报告不改）。拉模式读库和回执，事件丢了也照样出得来
   await pushLibaiItems(supabase, items, now, nameOf).catch((e) =>
