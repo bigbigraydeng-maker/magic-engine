@@ -144,18 +144,41 @@ async function api(path, init = {}) {
 }
 
 /**
- * Paginated list of files changed by the PR (30 pages × 100).
+ * Cap on how many changed files this script will look at (30 pages × 100).
+ *
+ * A PR with more files than this cap cannot be rated safely: the last page is
+ * full but there may be more, and one file we did not read could be A. So this
+ * caller treats "hit the cap" as `unreadable` (see `PageCapReached` below),
+ * which `classifyRisk` rates A, rather than silently rating from a truncated
+ * list. `check-risk-gate.mjs` is the only file listing consumer in this
+ * control plane, so keeping the guard here rather than inside the paginator
+ * keeps each call explicit about what it does with the cap.
+ */
+const CHANGED_FILE_CAP = 3000
+
+/**
+ * Marker error: the paginator reached the cap and could not confirm the list
+ * is complete. Caller catches this specifically and hands `undefined` to
+ * `classifyRisk`, which rates A.
+ */
+class PageCapReached extends Error {}
+
+/**
+ * Paginated list of files changed by the PR, up to `CHANGED_FILE_CAP`.
  *
  * @returns {Promise<any[]>}
+ * @throws {PageCapReached} when a full last page is followed by no signal the
+ *   list has ended — a truncated list must not be handed back as "the diff".
  */
 async function listPullRequestFiles() {
   const files = []
-  for (let page = 1; page <= 30; page++) {
+  const maxPages = CHANGED_FILE_CAP / 100
+  for (let page = 1; page <= maxPages; page++) {
     const batch = await api(`/repos/${repository}/pulls/${pr}/files?per_page=100&page=${page}`)
     files.push(...batch)
-    if (batch.length < 100) break
+    if (batch.length < 100) return files
   }
-  return files
+  throw new PageCapReached(`改动文件超过 ${CHANGED_FILE_CAP} 上限，无法读全，按 A 处理`)
 }
 
 /**

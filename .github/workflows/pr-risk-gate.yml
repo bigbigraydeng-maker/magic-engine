@@ -77,4 +77,14 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          gh pr merge --disable-auto "$PR_NUMBER" || echo '- 自动合并：本来就未开启' >> "$GITHUB_STEP_SUMMARY"
+          # Distinguish "already off" from a real API failure (CONCERN-2 from
+          # the 2026-09-25 three-way review). The old form `|| echo …` swallowed
+          # both, so an API outage that left a stale enable in place would look
+          # identical to the idempotent no-op.
+          state=$(gh pr view "$PR_NUMBER" --json autoMergeRequest --jq '.autoMergeRequest')
+          if [ "$state" = "null" ] || [ -z "$state" ]; then
+            echo '- 自动合并：本来就未开启（无需操作）' >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh pr merge --disable-auto "$PR_NUMBER"
+            echo '- 自动合并：已关闭' >> "$GITHUB_STEP_SUMMARY"
+          fi

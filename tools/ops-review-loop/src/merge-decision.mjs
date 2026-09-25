@@ -133,14 +133,28 @@ function missingRolesFor(signoff) {
  * Rules are applied in order, and the first one that matches wins:
  *
  *   1. A draft is never merged, whatever its risk or sign-off state.
+ *   1b. A fork PR is never auto-merged, whatever its risk. `pull_request_target`
+ *       hands this workflow a write token; if a fork PR that rates B or C could
+ *       reach `enable`, an outside author who fork-and-changes README could
+ *       auto-merge into main. Documented in `.github/merge-authorization.md`
+ *       and asserted by the caller `check-risk-gate.mjs` — the guard must live
+ *       here or a caller that forgets to pass `fork` slips it past.
  *   2. B and C are auto-merged once the machine checks are green.
  *   3. A is merged by a human, and only once all three sign-offs are present.
  *   4. Anything else is treated as A, and says so in the reason.
  *
- * @param {{risk?: unknown, draft?: unknown, signoff?: unknown}} input
+ * 🔴 **`fork` uses the same fail-closed convention as `draft`.** Only an
+ * explicit `false` clears the fork check; `undefined`, `null` or `true` all
+ * block. Three-fold defence in depth: the caller reads
+ * `github.event.pull_request.head.repo.full_name != github.repository`, the
+ * signature here destructures `fork` (a rename that drops it fails
+ * `merge-decision.test.ts`'s property enumeration, not silently succeeds), and
+ * this rule fires before any risk-based rule can return `enable`.
+ *
+ * @param {{risk?: unknown, draft?: unknown, fork?: unknown, signoff?: unknown}} input
  * @returns {{pass: boolean, decision: 'enable'|'disable', tier: 'auto'|'signed'|'blocked', reason: string}}
  */
-export function decideMerge({ risk, draft, signoff } = {}) {
+export function decideMerge({ risk, draft, fork, signoff } = {}) {
   // Rule 1. `draft !== false` rather than `draft === true`: a missing or
   // non-boolean `draft` is not evidence that the PR is ready, so it fails
   // closed. Only an explicit `false` opens the gate.
@@ -150,6 +164,18 @@ export function decideMerge({ risk, draft, signoff } = {}) {
       decision: MERGE_DECISION.DISABLE_AUTO_MERGE,
       tier: TIER.BLOCKED,
       reason: '草稿 PR 不做合并判定',
+    }
+  }
+
+  // Rule 1b. Same fail-closed convention as draft. A fork PR that rates B or C
+  // would otherwise auto-merge on the fork author's word alone; the write token
+  // this workflow holds turns that into a real merge.
+  if (fork !== false) {
+    return {
+      pass: false,
+      decision: MERGE_DECISION.DISABLE_AUTO_MERGE,
+      tier: TIER.BLOCKED,
+      reason: 'fork PR 不自动合并（外部作者的改动一律需要人合）',
     }
   }
 
