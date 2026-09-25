@@ -5,6 +5,15 @@
 
 ---
 
+### 2026-09-25（外部平台授权断了会自动进今日待办，不再像 CTS 邮箱那样断 9 天没人知道）
+
+- **为什么**：CTS 的 `info@ctstours.co.nz` 和 `bdm@ctstours.co.nz` 邮箱同步断了 **9 天**，客人询价一封没进 CRM，而每小时的同步任务一直报成功——它只捞 `status = active` 的连接，断掉的那两条安静地从循环里消失。根因是 2026-09-15 给 `MICROSOFT_MAIL_SCOPES` 加了 `Mail.ReadWrite`：微软刷新令牌时重放整份 scope 清单，换不来客户从没同意过的新权限（`AADSTS65001`）。那次改动的提交说明里写了「已连的客户需要重连」，然后没有然后了。
+- **上线**（PR [#2012](https://github.com/bigbigraydeng-maker/magic-engine/pull/2012)，`23cd209f`）：`src/lib/platform-oauth/connection-health.ts` 五条判据（状态位说断了 / 心跳停了 / 长期令牌到期 / 权限清单不够用 / 连上了但不在取数名单里），每个 provider 在 `HEARTBEAT_POLICY` 里逐个表态（心跳节奏 · 刷令牌一次碰几条 · 能不能自动续期，有 CI 守卫，新增平台漏填会挂）；`src/lib/pm-todo/platform-connection-items.ts` 翻译成人话下发进今日待办，只有人能点同意页的进「🙋 需要你动手」，其余进「🛠 系统欠账」。
+- **判据要点**：`revoked` 是人主动断开、不当故障；「整条通道停了」按**不同客户数**算（按连接条数算的话 CTS 那次会被误判成取数任务的问题、踢出 PM 清单）；能自动续期的平台令牌过期是常态不报，Meta/TikTok 到期即真死；读到零行当故障报（PostgREST 权限被收掉时零行不报错）。
+- **顺带修三个会让监控说谎的写入侧 bug**：`upsertConnection` 把状态改回 active 却不擦 `error_message`；微软与谷歌回调重连成功后不盖 `last_synced_at`（人修好了监控还继续报）；微软回调存的是我们请求的权限清单而不是微软实际批准的那一份。
+- **闸门**：`scope-change-gate.test.ts` 钉住全部 6 份 `*_SCOPES` 清单并扫 `src/` 防漏网；`token-manager.test.ts` 另钉「谷歌刷新不许带 scope、微软刷新必须带」这条根因行为。事故与判据全文见 `docs/PITFALLS.md` F11 / F12，质量闸加 A 级专条。
+- 生产实况干跑（17 条连接）产出 5 条全真：Roman HU / NZCPE 的 Facebook 断了 17 天、CTS `bdm@` 断了 9 天、CTS `info@` 状态绿心跳停、NAL 谷歌搜索数据「连上了但一天没取过数」。子牙 + 魏征两轮复审的问题全部合并前收掉。
+
 ### 2026-09-25（台账 docs/ledger v0：窗口结论一条一卡、待办邮件每天读、改代码不写卡合并前拦、夜巡核实）
 
 - **为什么**：2026-09-24 三个 agent 全量审计——128 条教训记忆 73% 只在文字里没程序读过；7 簇重复踩坑全部"建了防护后再踩"；变成代码/CI 的防护起效、写成文字的没起效。ROADMAP/DECISIONS/PITFALLS/STATE 没有程序在读，"记了"无法被机器证伪。
