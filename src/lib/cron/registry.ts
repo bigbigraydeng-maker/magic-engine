@@ -328,6 +328,10 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   //    就分不出「Inngest 忘了重新 Sync 所以函数压根没注册」和「今天真的没人欠跟进」。
   //    这类登记的全部意义就是把「安静地不跑」喊出来。
   { service: 'inngest:cloud-crm-lead-followup-digest', jobName: 'crm-lead-followup-digest', schedule: '0 8 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-24' },
+  // 司马迁 · 口碑周巡（agent 自治计划 B2）：每周四新西兰 09:00 读本周新 Google 评价、起草回复，
+  // 一律不发，只写回执给今日待办拉。周期与 src/lib/inngest/functions/simaqian-reputation-weekly.ts
+  // 的 SIMAQIAN_CRON 一致（同目录测试断言两边相等）。避开周五周六。
+  { service: 'inngest:cloud-simaqian-reputation-weekly', jobName: 'simaqian-reputation-weekly', schedule: '0 9 * * 4', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-25' },
 ] as const
 
 /**

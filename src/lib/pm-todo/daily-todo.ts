@@ -83,6 +83,9 @@ const DEV_OWNED_KINDS: ManualItemKind[] = [
   // 「这句话要不要改」是技术判断，不是 PM 该做的业务决策，how 字段同样是
   // 「回我一句我去查」的话术。见 playbook-staleness-items.ts。
   'playbook_reference_stale',
+  // 司马迁本周没巡成（读评价表失败 / 起草全失败）→ how 写「回我一句「查一下司马迁」我去看」。
+  // 真有新评价要回的那条（simaqian_review_drafts）**不在这里**，那是 PM/FDE 要动手回评价的活。
+  'simaqian_patrol_failed',
 ]
 
 /** FDE focus clients: CTS + Oztop. */
