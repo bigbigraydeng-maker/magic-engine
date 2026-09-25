@@ -5,6 +5,57 @@
 
 ---
 
+### 2026-09-25（台账 docs/ledger v0：窗口结论一条一卡、待办邮件每天读、改代码不写卡合并前拦、夜巡核实）
+
+- **为什么**：2026-09-24 三个 agent 全量审计——128 条教训记忆 73% 只在文字里没程序读过；7 簇重复踩坑全部"建了防护后再踩"；变成代码/CI 的防护起效、写成文字的没起效。ROADMAP/DECISIONS/PITFALLS/STATE 没有程序在读，"记了"无法被机器证伪。
+- **上线**（PR #1984，`d643e9c5`）：`docs/ledger/` 一张卡一个文件（decided/done/verified/failed）；`src/lib/ledger/*` 解析/指向/判定/读取；待办邮件多一栏（决定了没做/做了没验/验了不成/夜巡没来）；`ledger-check.yml` 四道检查（格式永不豁免 · 改代码必写卡 · 指向真实且绑定本 PR · 夜巡分支只准翻状态）；`scripts/ledger-update.mjs` 改卡统一入口；CLAUDE.md §9 第 1/6 条。
+- **仓库外**：夜巡定时任务 `~/.claude/scheduled-tasks/ledger-nightly-verify/`（每晚 21:30）；关窗钩子对 A/B 级窗口没写卡拦一次。
+- **PM 2026-09-25 拍板**：三道台账检查进主干必过清单（已设）；只改 `docs/ledger/` 的 PR 免人工合并审批、CI 全绿自动合（仓库 auto-merge 已开；工作流改动见 `.github/merge-authorization.md`）。
+- 设计：`docs/specs/2026-09-24-harness-ledger-v0.md`（子牙 + 魏征设计审必改项全吸收）。DeepSeek 写代码、Fable 窗口出 spec 并复审。
+
+### 2026-09-25（广告 WP2 合并 + Kernel 恢复白名单补丁已 apply）
+
+PR [#1979](https://github.com/bigbigraydeng-maker/magic-engine/pull/1979)（2026-09-24 合并 `a6ddc6d5`）：Kernel `OutwardApproval` 加 `bounded` 信封（20% / 日上限三档缓冲 / 72h 冷却 / 学习期 / 对比测试 / 必有撤回）；六个 `ads.*` 动作注册（pause / cut / scale 真执行，budget_move / add_retargeting / swap_creative 先转人工）；`gateway.ts` 碰 provider 前第二道信封核算；`DELIVERING_STATUSES` 统一到诊断层；子牙 + 魏征 + 狄仁杰三审通过。migration `20260925000003_kernel_recovery_outside_autonomy_envelope` 于 2026-09-25 PM go 后 apply（`outside_autonomy_envelope` 进恢复白名单）。**没有任何客户开 `bounded_auto`**；WP2 遗留三处见 [#1994](https://github.com/bigbigraydeng-maker/magic-engine/issues/1994)，归 WP3.1b。
+
+### 2026-09-24（Agent 管理系统：旅行社送来的终端客户，从邮件自动提取进度）
+
+PR [#1983](https://github.com/bigbigraydeng-maker/magic-engine/pull/1983)（合并 `8d3d84f9`）：新页面 `/dashboard/clients/[id]/agents`（按 Agent / 按阶段两视角 + 抽屉回复邮件）；每小时邮件同步对 `trade` 联系人跑 AI 提取（`travel-agent-customer-extract.ts`，XML 包住正文防注入，pax > 30 双保险 `needs_review`）；新表 `agent_customers` + 唯一索引 `(client_id, agent_contact_id, conversation_id, customer_name)`（同名不同线程分开，刻意不跨线程去重）；阶段常量 `TRAVEL_AGENT_CUSTOMER_STAGES` 留在代码不进 CHECK；POST 三级清晰错误 + 范围校验。aider→DeepSeek 6+1+4 轮 $0.074，子牙两轮 + 魏征两轮 + 子牙第三轮通过。两张 migration `20260925001000` / `20260925001100` 于 2026-09-24 PM go 后 apply。
+
+### 2026-09-24（Meta 留资同步：同一条线索每轮重打一次 Mailchimp，办完的不再重跑）
+
+`getLeadWatermark` 每轮回看 24 小时（为补 Meta 延迟吐出来的 lead，这个窗口必须留着），但
+`ingestMetaLead` 没有「这条上轮已经办完」的判断，于是同一条 lead 每轮被完整重跑，每次真打
+Mailchimp 两下。生产实测（CTS，2026-09-05~09-23，按 clientId 全量求和）：**188 条真实线索被
+重复处理 4926 次**，其中 4697 次回 `already_member`。
+
+更糟的是回执被覆盖：Phase B 每轮把 `metadata.mailchimp_result` 写回 `pending`、Phase D 再写本轮
+结果，所以库里最终态只反映**最后一次尝试**。195 条 `already_member` : 1 条 `subscribed` 因此被
+误读成「留资的几乎都是老客户」——那不是业务事实，是重跑次数的影子。
+
+PR [#1973](https://github.com/bigbigraydeng-maker/magic-engine/pull/1973)：
+- 闸门装在编排层 `lib/meta/leads-sync.ts` 的 `readSettledLeadIds()`，**`lib/crm/meta-lead.ts` 的
+  Phase A→D 一个字没动**（那段带着合同 5425312107 / 5426843158 两份条款和两次静默事故的疤）
+- 判据 `isMailchimpSettled()` 住在 `lib/mailchimp/outlet-tally.ts`，跟 `isOutletGap` 同一套词汇表。
+  只认 `subscribed` 和「`already_member` 且标签确实落地」；`pending` / `skipped:*` / `failed:*` /
+  标签没打上一律照常重跑 —— 24 小时窗口的重试能力完整保住
+- `not_attempted` 不算办完（它只代表「压根没给标签名」）；本轮解析出明确 opt-out 的照常走完整
+  流程（那一位要写进 `do_not_contact`）；读回执失败或回执是垃圾形状一律当没办完
+- 切批 200 查（沿用 `knowledge/mining.ts` issue #1760 验证过的安全值）；读失败进
+  `MetaLeadsSyncResult.settledLookupFailures`，**不混进 `mailchimp` tally**（混进去会被日报和今日
+  待办误报成出口故障）
+- `already_synced` 进 `EXPECTED_SKIP_REASONS` 白名单。⚠️ **它是健康信号**：稳态下一轮的 tally 长成
+  `{'skipped:already_synced': 13}`，今后任何健康检查都不得拿「没有 subscribed」当故障判据
+- `leadsIngested` / `newContacts` 口径不变，PM 每天看的「今天进了几个人」不会无声变样
+
+⚠️ 188 条历史行的「第一次结果」已被覆盖、不可恢复，那个 195:1 的误读修不回来，只能从上线后
+重新积累。**不要回填。**
+
+附带查清（不在本 PR 范围，已进 ROADMAP）：CTS 名单里相当一部分人是**客户自己**的 Mailchimp 原生
+Meta Lead Ads / Zapier / Make 三条平行管道当天送进去的 —— 所以 `already_member` 也不等于
+「这是老客户」，很大一部分只是别人比我们快。
+
+---
+
 ### 2026-09-24（广告健康判定 / 日报的「评估日」也按广告账户时区算，跟取数窗口对齐）
 
 上一条修好了取数那一半：数据按账户时区的「昨天」存进 `ad_daily_insights`。但判定这一半还在用

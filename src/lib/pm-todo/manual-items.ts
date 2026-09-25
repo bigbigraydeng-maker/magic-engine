@@ -30,6 +30,7 @@ import { pushEmailReplyItems } from './email-reply-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
+import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import {
   buildNotIndexedItems,
   daysAgo,
@@ -39,11 +40,11 @@ import {
   type NotIndexedRow,
 } from './manual-item-types'
 import { pushLinkedinProgressItems } from './manual-linkedin-items'
-import { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems } from './manual-crm-items'
+import { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems } from './manual-crm-items'
 
 export * from './manual-item-types'
 export { pushLinkedinProgressItems } from './manual-linkedin-items'
-export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems } from './manual-crm-items'
+export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems } from './manual-crm-items'
 import { pushVideoCreditsItem, pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
 import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems } from './manual-monitoring-items'
 import { pushLeadsSanityItems, pushDiagnosticItems, pushPrescriptionItems } from './manual-strategy-items'
@@ -66,6 +67,7 @@ import {
 import { CLIENT_DOC_MANUAL_TASKS, type ClientDocManualTask } from './client-doc-manual-tasks'
 import { pushPlaybookStalenessItems } from './playbook-staleness-items'
 import { pushPlatformConnectionItems } from './platform-connection-items'
+import { pushLedgerItems } from './ledger-items'
 
 export async function loadManualItems(
   supabase: SupabaseClient,
@@ -107,6 +109,9 @@ export async function loadManualItems(
   )
   // 平台候选到了复查日期 —— 不落库、不查表，纯本地日期判断
   pushPlatformCandidateReviewItems(items, now)
+  // 台账（docs/ledger）：决定了没做 / 做了没验 / 验了不成 —— 读仓库里的文件，不查表，
+  // 目录读不出来会自己下发一条「读不出来」，不靠 catch
+  pushLedgerItems(items, now)
   // 客户方案文档里写的一次性人工动作 —— 同样不落库、纯本地日期判断，过期自动消失
   pushClientDocManualTaskItems(items, now)
   // 成交/咨询等着人核对要不要告诉广告平台 —— 撤不回的动作，只能人点（#1397）
@@ -211,6 +216,11 @@ export async function loadManualItems(
     console.warn('[manual-items] 执行内核待办生成失败（不阻塞其他待办）:', e),
   )
 
+  // 自治开关没同步到执行内核 —— 面板档位跟内核实际档位对不上，必须有人看见（WP3.1a）
+  await pushAdsAutonomySyncItems(supabase, items, now, nameOf).catch((e) =>
+    console.warn('[manual-items] 自治开关同步待办生成失败（不阻塞其他待办）:', e),
+  )
+
   // 客户之间有没有串台 —— PM 2026-08-05：「坚决不能胡窜」。
   // 实测查到 CTS 的发布通道指向 Oztop 的网站，填错两个多月没人发现。
   await pushCrossClientItems(supabase, items).catch((e) =>
@@ -226,6 +236,11 @@ export async function loadManualItems(
   // 刻意**不自动封渠道**，只提示 —— 理由见 lib/crm/messenger-stop-signal.ts 文件头。
   await pushMessengerStopItems(supabase, items, ids, now, nameOf).catch((e) =>
     console.warn('[manual-items] 私信拒联提示生成失败（不阻塞其他待办）:', e),
+  )
+
+  // 客人身上的「⭐重要标记」到期了 —— 到期日到了自动进待办，员工清 due 日期即消失
+  await pushImportantDueItems(supabase, items, ids, nameOf, now).catch((e) =>
+    console.warn('[manual-items] 重要标记到期读取失败（不阻塞其他待办）:', e),
   )
 
   // 客人来信超过一天没人回 + 公司邮箱同步哑了（后者会让前者假装成零条），见 email-reply-items.ts

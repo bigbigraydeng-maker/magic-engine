@@ -54,6 +54,19 @@ export interface LeadSheetColumn {
   mapped?: boolean
 }
 
+/**
+ * 「同一个输出目标」的唯一口径 —— 同一张表的同一个 tab。
+ *
+ * 🔴 **只能有这一份。** `config.ts` 用它判「这两条路线要不要比结构」，`sync.ts` 用它判
+ *    「这两条路线要不要共用判重键集合」。两处口径一旦不一致，就会出现 config 认为
+ *    「不是同一张表、不用比结构」而 sync 认为「是同一张表、共用键」的组合 ——
+ *    拿 A 的尺子量 B 的行，正是 `describeLayoutMismatch` 存在的唯一理由所防的
+ *    静默丢线索。而这种不一致**不会有任何测试红**：两边各自的单测都会过。
+ */
+export function destinationKey(target: { spreadsheetId: string; tabName: string }): string {
+  return `${target.spreadsheetId}\u0000${target.tabName}`
+}
+
 export interface LeadSheetRoute {
   routeKey: string
   label: string | null
@@ -70,6 +83,14 @@ export interface LeadSheetRoute {
    * 表里老行没有这一列（是空的）时自动退回 `dedupColumns`。
    */
   dedupIdColumn: number | null
+  /**
+   * 表头签名：目标表格第一行应该长什么样，逐格比对。null = 不检查。
+   *
+   * 🔴 防的是「人工排表头排错」。配置说 13 列就写 13 格，没人比对过表头 ——
+   *    有人在表中间插一列，之后每一行都错位（电话写进邮箱列、员工的跟进记录被
+   *    推走），而回执全绿、日报绿、一条待办都不出。这张表是销售直接看的。
+   */
+  headerRow: readonly string[] | null
   timezone: string
   backfillSince: string | null
   enabled: boolean
@@ -100,6 +121,13 @@ export interface LeadRecord {
 /** 一条路线跑完的机器可读回执。 */
 export interface LeadSheetRouteReceipt {
   routeKey: string
+  /**
+   * 路线的人话名字（配置里的 `label`）。
+   *
+   * 🔴 给人工待办用的。所有表单汇总进一张表之后，`tabName` 就是个 `Untitled` ——
+   *    待办里写「线索写不进『Untitled』」等于没说（铁律 3 下半：要让人不用问第二遍）。
+   */
+  label: string | null
   spreadsheetId: string
   tabName: string
   /** 分到这条路线的线索数（已过 backfill_since）。 */
@@ -134,5 +162,14 @@ export interface LeadSheetClientReceipt {
   routes: LeadSheetRouteReceipt[]
   /** 一条路线都没匹配上的线索（配置里没兜底路线时才可能出现）。 */
   unrouted: number
+  /**
+   * 阻断性错误：本轮该客户一行都没写。`pushLeadSheetItems` 把它当「同步失败」下发。
+   */
   error: string | null
+  /**
+   * 非阻断性问题：分流和写表照常成功，只是某个辅助诊断数字这轮不准（例如
+   * `countLeadsBefore` 查询失败）。**不能**塞进 `error` —— 那会让新线索明明已经
+   * 写进表了，还被 `pushLeadSheetItems` 报成「这轮没能写进 Google 表格」。
+   */
+  warning: string | null
 }

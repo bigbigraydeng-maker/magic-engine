@@ -243,7 +243,7 @@ Claude Code、Codex、CMUX DeepSeek 都可按任务能力承担规划、实现�
 
 先按“AI 协作流程”交付真实证据。以下登记只在适用且本任务授权时执行；纯本地文档任务不因此追加提交、上线记录或客户数据库写入。未获准的后续事项留在权威任务说明。
 
-1. 未完成任务回写 [docs/ROADMAP.md](./docs/ROADMAP.md)（禁止只留在 TodoWrite）
+1. 未完成任务写成台账卡（第 6 条）；只有需要排期、跨多窗口的大项才另写 [docs/ROADMAP.md](./docs/ROADMAP.md)（禁止只留在 TodoWrite）
 2. 已上线功能追加到 [docs/history/CHANGELOG.md](./docs/history/CHANGELOG.md)
 3. commit message 带 Phase ID：`feat(module): description [P21.J.M1]`
 4. **本次实际操作过的客户**各写一条工作日志（不写 = 会话结束协议不完整）：
@@ -255,6 +255,7 @@ Claude Code、Codex、CMUX DeepSeek 都可按任务能力承担规划、实现�
    客户 ID：CTS Tours NZ `c0000000-0000-0000-0000-000000000000` · Oztop `d5c98811-1c1d-4ded-bdf0-4cefec6afb84`
    纯对话 / 纯查询 / 未落地的讨论**不算**实际操作，不写。
 5. 有实质开发/审计交付时附 **Reuse Statement**；不能只写“完成了什么”，还要说明共享/行业/客户边界与是否复用了已有平台能力。
+6. **本窗口聊定的每条结论写进 [docs/ledger/](./docs/ledger/README.md)**（一条一文件，状态 decided/done/verified/failed）。只写记忆或 ROADMAP 不算——那两处没有程序在读；台账每个工作日会被今日待办邮件读一遍，改了 `src/` 没写台账的 PR 合并前会被拦。
 
 ---
 

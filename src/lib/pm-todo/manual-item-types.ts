@@ -17,6 +17,7 @@ import type { PageBindingItemKind } from './page-binding-items'
 import type { CommentScopeTodoKind } from './comment-scope-items'
 import type { LeadSheetItemKind } from './lead-sheet-items'
 import type { PlatformConnectionItemKind } from './platform-connection-items'
+import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 
 /**
  * 这些条目**链接坏了也照样下发**。
@@ -108,10 +109,22 @@ export type ManualItemKind =
   | 'dnc_maybe_wrong'
   /** 客人在 Facebook 私信里像是说了「别再联系」，而判据从来读不到私信 —— 只提示，不自动封 */
   | 'dm_maybe_stop'
+  /** 客人身上的「⭐重要标记」到期了 —— 员工手工设的"约好周三 3 点回电"这种事，到点该做了 */
+  | 'crm_important_due'
   /** 平台候选（docs/registry/platform-candidates.md）到了复查日期 —— 见 me-platform-tier-gate skill */
   | 'platform_candidate_review_due'
   /** 客户方案文档里写了一次性人工动作（如"明早 09:00 前扫一眼 xx"），只登记在文档里等于没下发 */
   | 'client_doc_manual_task'
+  /** 台账（docs/ledger）：决定了超过 7 天没动，或过了验收日还没做 */
+  | 'ledger_decided_stale'
+  /** 台账：做完了、到了该验的日子还没验 */
+  | 'ledger_done_unverified'
+  /** 台账：验过了，不成——一直出现直到有人处理 */
+  | 'ledger_verification_failed'
+  /** 台账目录读不出来或某条格式不合规——这一栏空着不等于没事 */
+  | 'ledger_unreadable'
+  /** 台账：到期的卡两天没被夜巡盖章——夜巡没来，不是没事 */
+  | 'ledger_patrol_missing'
   /** 客人像是说他付款了，但不是我们自己确认的 —— 只有人能核对到账，不许机器自己打 paid 标签 */
   | 'paid_signal_needs_review'
   | CommentScopeTodoKind
@@ -119,6 +132,8 @@ export type ManualItemKind =
   | LeadSheetItemKind
   /** 执行内核停手 / 等审批 / 被规则挡下 —— 必须有人看见，不许死在日志里 */
   | 'kernel_needs_human'
+  /** 自治开关同步到执行内核失败 —— 面板档位和内核实际档位可能不一致（WP3.1a） */
+  | AdsAutonomyItemKind
   /** 有成交/咨询等着人核对要不要告诉广告平台 —— 撤不回，所以必须人点 */
   | 'conversion_needs_review'
   /** 发给广告平台时断线了，不知道对方收没收 —— 程序绝不自己重发，等人核对 */

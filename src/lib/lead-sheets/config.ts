@@ -7,7 +7,13 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { LEAD_SHEET_FIELDS, type LeadSheetColumn, type LeadSheetField, type LeadSheetRoute } from './types'
+import {
+  LEAD_SHEET_FIELDS,
+  destinationKey,
+  type LeadSheetColumn,
+  type LeadSheetField,
+  type LeadSheetRoute,
+} from './types'
 
 interface RouteRow {
   route_key: string
@@ -20,6 +26,7 @@ interface RouteRow {
   value_labels: unknown
   dedup_columns: number[] | null
   dedup_id_column: number | null
+  header_row: string[] | null
   timezone: string | null
   backfill_since: string | null
   enabled: boolean | null
@@ -52,6 +59,23 @@ function parseColumns(routeKey: string, raw: unknown): LeadSheetColumn[] {
     }
     if (field === 'answer' && typeof col.key !== 'string') {
       throw new LeadSheetConfigError(routeKey, `第 ${i + 1} 列是 answer，但没写 key（问题名）`)
+    }
+    /**
+     * 🔴 literal 没写 value 一律判坏。
+     *
+     * 这一列现在扛着「来源表单」—— 而 seed SQL 是用 `jsonb_set(模板,'{11,value}',…)`
+     * 往固定下标塞标签的。下标打偏（有人在模板里加了一列忘了改那个 11）的三种结果
+     * 本机实测过，**全是静默**：挂到错的列上不报错、下标越界直接 no-op。
+     * 而 `buildRow` 对 literal 取不到值连 `blankedFields` 都不记一笔
+     * （row.ts 故意的：literal 留白通常是有意为之）。
+     * 结果就是整张表的「来源表单」列一片空白 / 全写着模板里的占位符，看着像有意为之。
+     * 在这里当场抛，打偏 = 配置报错 = 整个客户停手 + 出待办。
+     */
+    if (field === 'literal' && (typeof col.value !== 'string' || col.value === '')) {
+      throw new LeadSheetConfigError(
+        routeKey,
+        `第 ${i + 1} 列是 literal，但没写 value（要写进去的固定文本）`,
+      )
     }
     const format = col.format
     if (format !== undefined && format !== 'iso' && format !== 'local') {
@@ -104,12 +128,55 @@ export function parseRoute(row: RouteRow): LeadSheetRoute {
     }
   }
 
+  /**
+   * 🔴 判重列里至少要有一列能区分**人**。
+   *
+   * 想清楚过的反例：判重列配成只剩「留资时间」。`dedup_columns` 原来只校验
+   * 「非空 + 下标合法」，这个配置会被放行 —— 然后同一分钟内留资的人**互相吞掉**，
+   * 第二个起全部记进 `alreadyPresent`（那个数字没有任何出口），零报警。
+   * 团名、预算这种答案列也不算能区分人。
+   */
+  const PERSONAL_FIELDS = new Set(['lead_id', 'contact_phone', 'contact_email', 'contact_name'])
+  if (!dedupColumns.some((i) => PERSONAL_FIELDS.has(columns[i].field))) {
+    throw new LeadSheetConfigError(
+      routeKey,
+      `dedup_columns 里一列能区分人的都没有（要至少一个 ${[...PERSONAL_FIELDS].join(' / ')}）—— ` +
+        `不然同一分钟留资的人会互相吞掉，而且不会有任何地方报警`,
+    )
+  }
+
   const idCol = row.dedup_id_column
   if (idCol !== null && idCol !== undefined) {
     if (!Number.isInteger(idCol) || idCol < 0 || idCol >= columns.length) {
       throw new LeadSheetConfigError(
         routeKey,
         `dedup_id_column 的 ${idCol} 超出列范围（共 ${columns.length} 列，下标 0 起）`,
+      )
+    }
+    /**
+     * 🔴 机器键那一列必须真的是 lead id。
+     *
+     * 指错一列的后果是**判重悄悄退化**：那一列（比如姓名）人能编辑，改一下键就变了；
+     * 或者那一列本来就是空的，机器键永远算不出来，判重只剩「时间+电话」——
+     * 销售把电话规整成 `+64 21 …` 就会被再写一行。两种都不报错。
+     */
+    if (columns[idCol].field !== 'lead_id') {
+      throw new LeadSheetConfigError(
+        routeKey,
+        `dedup_id_column 指到第 ${idCol + 1} 列（${columns[idCol].field}），但机器键那一列必须是 lead_id`,
+      )
+    }
+  }
+
+  const headerRow = row.header_row ?? null
+  if (headerRow !== null) {
+    if (!Array.isArray(headerRow) || headerRow.some((h) => typeof h !== 'string')) {
+      throw new LeadSheetConfigError(routeKey, 'header_row 必须是字符串数组')
+    }
+    if (headerRow.length !== columns.length) {
+      throw new LeadSheetConfigError(
+        routeKey,
+        `header_row 有 ${headerRow.length} 格，columns 有 ${columns.length} 列 —— 对不上就没法拿它比对表头`,
       )
     }
   }
@@ -136,10 +203,79 @@ export function parseRoute(row: RouteRow): LeadSheetRoute {
     valueLabels: parseValueLabels(routeKey, row.value_labels),
     dedupColumns,
     dedupIdColumn: idCol ?? null,
+    headerRow,
     timezone,
     backfillSince: row.backfill_since,
     enabled: row.enabled !== false,
   }
+}
+
+/**
+ * 两条写同一张表同一个 tab 的路线，结构对不对得上。
+ * 对得上返回 null；对不上返回一句人话，直接拼进待办里给人看。
+ *
+ * 只比**会影响判重和列位**的东西。`value`（literal 的固定文本）故意不比 ——
+ * 「来源表单」那一列每条路线各写各的标签，正是这个能力的用途。
+ */
+export function describeLayoutMismatch(
+  a: LeadSheetRoute,
+  b: LeadSheetRoute,
+): string | null {
+  if (a.columns.length !== b.columns.length) {
+    return `列数不一样（${a.columns.length} 列 vs ${b.columns.length} 列）`
+  }
+  for (let i = 0; i < a.columns.length; i++) {
+    const x = a.columns[i]
+    const y = b.columns[i]
+    if (
+      x.field !== y.field ||
+      x.key !== y.key ||
+      x.prefix !== y.prefix ||
+      x.format !== y.format ||
+      x.mapped !== y.mapped
+    ) {
+      return `第 ${i + 1} 列放的东西不一样（「${describeColumn(x)}」vs「${describeColumn(y)}」）`
+    }
+  }
+  if (a.dedupColumns.join(',') !== b.dedupColumns.join(',')) {
+    return `判重列不一样（[${a.dedupColumns.join(', ')}] vs [${b.dedupColumns.join(', ')}]）`
+  }
+  if (a.dedupIdColumn !== b.dedupIdColumn) {
+    return `机器键列不一样（${a.dedupIdColumn ?? '没有'} vs ${b.dedupIdColumn ?? '没有'}）`
+  }
+  if (a.timezone !== b.timezone) {
+    return `时区不一样（${a.timezone} vs ${b.timezone}）—— 时间列会写出两种读数，判重对不上`
+  }
+  /**
+   * 时间窗口也要一致。不一致不会丢线索，但会**悄悄割裂配置意图**：同一张表上
+   * 一种表单的历史全灌进来了、另一种一条没有，而两条路线的回执都显示成功，
+   * 没有任何地方会说「这张表只补了一半」。宁可当场判坏让人改配置。
+   */
+  if ((a.headerRow ?? []).join('\u0000') !== (b.headerRow ?? []).join('\u0000')) {
+    return '表头签名不一样 —— 同一张表不可能有两种表头，必有一条配错了'
+  }
+  if ((a.backfillSince ?? null) !== (b.backfillSince ?? null)) {
+    return (
+      `补历史的时间窗口不一样（${a.backfillSince ?? '不限'} vs ${b.backfillSince ?? '不限'}）` +
+      ` —— 同一张表会只补进来一半，而两边回执都显示成功`
+    )
+  }
+  return null
+}
+
+/**
+ * 一列的可读说明，只用在上面那条错误原话里。
+ *
+ * 🔴 `prefix` / `format` / `mapped` 也要带上 —— 比对本来就比这三样，不带的话
+ *    两条路线只在 prefix 上不一致时，待办里会出现「第 3 列放的东西不一样
+ *    （「contact_phone」vs「contact_phone」）」，左右一字不差，PM 看了没法办。
+ */
+function describeColumn(col: LeadSheetColumn): string {
+  const bits = [col.field === 'answer' ? `answer:${col.key ?? ''}` : col.field]
+  if (col.prefix) bits.push(`前缀 ${col.prefix}`)
+  if (col.format) bits.push(`格式 ${col.format}`)
+  if (col.mapped) bits.push('翻中文')
+  return bits.join(' · ')
 }
 
 export interface LoadedRoutes {
@@ -156,7 +292,7 @@ export async function loadClientRoutes(
   const { data, error } = await supabase
     .from('client_lead_sheet_routes')
     .select(
-      'route_key, label, spreadsheet_id, tab_name, match_any_answer_fields, priority, columns, value_labels, dedup_columns, dedup_id_column, timezone, backfill_since, enabled',
+      'route_key, label, spreadsheet_id, tab_name, match_any_answer_fields, priority, columns, value_labels, dedup_columns, dedup_id_column, header_row, timezone, backfill_since, enabled',
     )
     .eq('client_id', clientId)
     .eq('enabled', true)
@@ -174,29 +310,66 @@ export async function loadClientRoutes(
     }
   }
 
-  /**
-   * 🔴 两条路线指到**同一张表的同一个 tab** 一律判坏。
-   *
-   * 它们的列定义多半不一样（比如一条 10 列一条 32 列），写进同一个 tab 之后
-   * 表会变成参差的；更糟的是 A 路线判重时会去读 B 路线写的行的那几格，
-   * 而那几格在 B 的列定义里语义完全不同 —— 于是误判成「已存在」，**静默丢线索**。
-   */
-  const seen = new Map<string, string>()
+  validateRouteLayouts(routes, invalid)
+
+  return { routes, invalid }
+}
+
+/**
+ * 几条路线写同一张表同一个 tab 时，结构必须「长得一模一样」，不合规的原地从
+ * `routes` 挪进 `invalid`（连同一句人话原因）。
+ *
+ * 🔴 **`loadClientRoutes` 和 `--routes <file>` 试算模式必须共用这一份**，不能
+ *    各写一套。`sync.ts::syncRoutes` 对同一张表只读一次、判重键在同组路线间
+ *    共享，用的是**第一条**路线的判重配置 —— 这个假设只有在两边都跑过这道
+ *    校验时才成立。试算脚本如果绕开数据库读取（`--routes` 直接吃配置文件）却
+ *    不跑这道校验，文件里两条同目标路线只要列位/判重列/表头/时区有一处不一致，
+ *    试算就会在错的共享快照上跑完（`--live` 时甚至可能按错误的共享判重状态
+ *    追加或跳过行），而生产加载本会当场拒绝这份配置 —— 试算跟真跑就对不上了，
+ *    试算存在的意义就没了。
+ *
+ * PM 2026-09-24 拍板：CTS 所有表单的线索汇总进**一张**表，用一列「来源表单」
+ * 区分。所以「多条路线 → 同一张表」从异常变成了**常态**：分流判据仍然只看
+ * 「这条线索的问答里出现了哪些字段名」，分流的结果从「写哪张表」变成
+ * 「那一列写哪个来源标签」。
+ *
+ * 但只有结构相同才安全。原先一律判坏防的是这个：列定义不一样时，A 路线判重
+ * 会去读 B 路线写的那几格，而那几格在 B 的列定义里语义完全不同 —— 误判成
+ * 「已存在」，**静默丢线索**。所以下面逐项比对，对不上照样判坏：
+ *
+ *   · 每一列的 field / key / prefix / format / mapped 必须一致。只有 `value`
+ *     （literal 的固定文本）可以不同 —— 那正是「来源表单」这一列存在的理由。
+ *   · dedup_columns / dedup_id_column / timezone 必须一致 —— `sync.ts` 对同一张表
+ *     只读一次，判重键在这一组路线之间共享，用的是**第一条**路线的判重配置；
+ *     不一致就等于后面那条路线拿别人的尺子量自己的行。
+ *
+ * 不比 value_labels：那顶多让同一个选项在同一列里出现两种写法（难看、销售按
+ * 那一列筛会漏），不会丢线索。而配置坏一条 = 整个客户这轮停手，为这个把线索
+ * 全停掉不划算。
+ */
+export function validateRouteLayouts(
+  routes: LeadSheetRoute[],
+  invalid: Array<{ routeKey: string; reason: string }>,
+): void {
+  const seen = new Map<string, LeadSheetRoute>()
   for (const r of [...routes]) {
-    const key = `${r.spreadsheetId}\u0000${r.tabName}`
+    const key = destinationKey(r)
     const first = seen.get(key)
-    if (first) {
+    if (!first) {
+      seen.set(key, r)
+      continue
+    }
+    const mismatch = describeLayoutMismatch(first, r)
+    if (mismatch) {
       routes.splice(routes.indexOf(r), 1)
       invalid.push({
         routeKey: r.routeKey,
-        reason: `路线「${r.routeKey}」跟「${first}」指向同一张表的同一个 tab（${r.tabName}），两边列定义不同会互相误判成「已存在」而丢线索`,
+        reason:
+          `路线「${r.routeKey}」跟「${first.routeKey}」指向同一张表的同一个 tab（${r.tabName}），` +
+          `但两边${mismatch} —— 写进同一个 tab 会互相误判成「已存在」而丢线索`,
       })
-    } else {
-      seen.set(key, r.routeKey)
     }
   }
-
-  return { routes, invalid }
 }
 
 /** 哪些客户配了路线 —— 派单用，不读配置正文。 */

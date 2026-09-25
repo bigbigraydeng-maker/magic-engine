@@ -43,6 +43,7 @@ const route: LeadSheetRoute = {
   valueLabels: { still_deciding_show_me_all: '还在决定', around_3000: '约$3000' },
   dedupColumns: [0, 2],
   dedupIdColumn: null,
+  headerRow: null,
   timezone: 'Pacific/Auckland',
   backfillSince: null,
   enabled: true,

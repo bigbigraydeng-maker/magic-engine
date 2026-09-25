@@ -38,7 +38,7 @@ import {
 /** 同 `src/lib/seo-meta/cts-meta-pr.ts` 里的 CTS_CLIENT_ID —— 同一个客户，不同域各自声明这个字面量是既有惯例。 */
 const CTS_CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
 const SPREADSHEET_ID = '1vISaVkVkcQMSaR6Jo7xdmym6Ed5eE-q9025snYWYDVA'
-const SHEET1_RANGE = 'Sheet1!A2:R'
+const SHEET1_RANGE = 'Sheet1!A2:S'
 const CRM_MANAGEMENT_RANGE = 'CRM管理!A2:H'
 const DEFAULT_MAX_INSERTS_PER_RUN = 50
 /** CTS 官网价格 feed（`first-party-tours.ts`）如果注册了，会用这个域名查——没注册就跳过这一步，不报错。 */
