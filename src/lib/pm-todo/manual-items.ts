@@ -23,6 +23,7 @@ import { pushAttributionItems } from './attribution-items'
 import { clientListUnreadableItem, loadActiveClients, type ClientRow } from './client-roster'
 import { pushConversionReviewItems } from './conversion-review-items'
 import { pushAiAutoReviewCircuitBreakerItems } from './ai-auto-review-circuit-breaker-items'
+import { pushMetaTokenHealthItems } from './meta-token-health-items'
 import { pushMessengerDraftItems } from './messenger-draft-items'
 import { pushKnowledgeFactExpiringItems } from './knowledge-fact-expiring-items'
 import { pushDailyPlanMeasurementItems } from './daily-plan-measurement-items'
@@ -111,6 +112,18 @@ export async function loadManualItems(
   await pushPlatformConnectionItems(supabase, items, now).catch((e) =>
     console.warn('[manual-items] 平台授权体检失败（不阻塞其他待办）:', e),
   )
+  // 写在 Render 里的 Meta 钥匙被 Meta 作废 —— 上面那条只查「连接 Meta」按钮存下的授权，
+  // 这条补的是环境变量里的钥匙（CTS 9/21·9/23·9/25 三次都是 PM 自己问才发现）
+  await pushMetaTokenHealthItems(supabase, items).catch((e: unknown) => {
+    items.push({
+      kind: 'meta_token_check_failed',
+      client_id: 'infra',
+      client_name: 'Magic Engine 后台',
+      what: `「Meta 钥匙是否失效」的每日检查自己没跑成（${(e instanceof Error ? e.message : String(e)).slice(0, 160)}）—— 今天不报警不等于钥匙都活着`,
+      how: '这条不用你动手 —— 是我们这边的欠账。回我一句「修一下 Meta 钥匙检查」我就去修',
+      href: '',
+    })
+  })
   // 平台候选到了复查日期 —— 不落库、不查表，纯本地日期判断
   pushPlatformCandidateReviewItems(items, now)
   // 台账（docs/ledger）：决定了没做 / 做了没验 / 验了不成 —— 读仓库里的文件，不查表，

@@ -109,6 +109,9 @@ const DEV_OWNED_KINDS: ManualItemKind[] = [
   // 司马迁本周没巡成（读评价表失败 / 起草全失败）→ how 写「回我一句「查一下司马迁」我去看」。
   // 真有新评价要回的那条（simaqian_review_drafts）**不在这里**，那是 PM/FDE 要动手回评价的活。
   'simaqian_patrol_failed',
+  // Meta 钥匙体检自己没跑成（客户表读不到 / 一把钥匙都问不到 Meta）→ how 写「回我一句我去修」。
+  // 真有钥匙死了的那条（meta_token_dead）**不在这里**，只有人能重新授权。
+  'meta_token_check_failed',
 ]
 
 /** FDE focus clients: CTS + Oztop. */
