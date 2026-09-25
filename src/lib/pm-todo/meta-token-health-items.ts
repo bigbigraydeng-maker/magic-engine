@@ -32,9 +32,10 @@ export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
 export const META_TOKEN_FIX_URL = 'https://developers.facebook.com/tools/explorer/'
 
 const HOW = (envVar: string) =>
-  '打开链接（Meta 的令牌工具）→ 右上角选 Magic Engine 应用 → 用能管这个客户广告账户的 Facebook 账号点 Generate Access Token，同意授权 → ' +
-  '复制生成的令牌，打开 https://developers.facebook.com/tools/debug/accesstoken/ 粘进去点 Debug，再点页面最下面的 Extend Access Token 换成长期版（不换一小时就过期）→ ' +
-  `打开 Render 后台 crazycontent 服务 → Environment → 把 ${envVar} 的值换成长期版 → Save。换完第二天这条待办会自己消失。`
+  '这类专属钥匙通常是某个人的 Facebook 授权，那个账号一改密码或被登出就会再失效；根治是把这个客户的广告账户接进 Magic Engine 企业、改用系统用户口令。先临时修：' +
+  '打开链接（Meta 的令牌工具）→ 右上角选 Magic Engine 应用 → 在 Permissions 里勾上 ads_management、ads_read、business_management、pages_read_engagement、leads_retrieval（不勾的话新钥匙能通过这项检查、但读不了广告）→ ' +
+  '用能管这个客户广告账户的 Facebook 账号点 Generate Access Token，同意授权 → 复制令牌，打开 https://developers.facebook.com/tools/debug/accesstoken/ 粘进去点 Debug，再点页面最下面的 Extend Access Token 换成长期版（不换一小时就过期）→ ' +
+  `打开 Render 后台 crazycontent 服务 → Environment → 把 ${envVar} 的值换成长期版 → 保存时选带 deploy 的那个选项（别选 Save only，否则不生效）。换完第二天这条待办会自己消失。`
 
 /** 问 Meta 一句「这个令牌还认吗」。只有明确的 code 190 才算死。故意不查权限：钥匙还活着但被收了广告权限时 /me 仍回 200，这里判 alive —— 那类问题由各功能自己的报错负责，这里只抓「整把钥匙作废」。 */
 export async function probeMetaToken(token: string, fetchImpl: FetchLike = fetch): Promise<MetaTokenProbe> {
@@ -152,6 +153,20 @@ export async function pushMetaTokenHealthItems(
     }),
   )
 
+  // 限流 / 超时 / 连不上时一把都问不到：不报 ≠ 钥匙都活着，交给上层下发「检查没跑成」
+  if (probes.size > 0 && Array.from(probes.values()).every((p) => p.status === 'unknown')) {
+    throw new Error('一把 Meta 钥匙都问不到（限流 / 超时 / 连不上 Meta），今天没法判断钥匙死没死')
+  }
+
+  pushDeadItems(items, targets, probes)
+  if (shared && probes.get(shared)?.status === 'dead') items.push(sharedTokenDeadItem())
+}
+
+function pushDeadItems(
+  items: ManualItem[],
+  targets: { row: TokenOwnerRow; envVar: string; token: string }[],
+  probes: Map<string, MetaTokenProbe>,
+): void {
   for (const target of targets) {
     if (probes.get(target.token)?.status !== 'dead') continue
     const name = target.row.name ?? '未知客户'
@@ -167,8 +182,6 @@ export async function pushMetaTokenHealthItems(
       href: META_TOKEN_FIX_URL,
     })
   }
-
-  if (shared && probes.get(shared)?.status === 'dead') items.push(sharedTokenDeadItem())
 }
 
 function sharedTokenDeadItem(): ManualItem {
@@ -183,7 +196,7 @@ function sharedTokenDeadItem(): ManualItem {
     how:
       '公共钥匙是 Magic Engine 企业下「系统用户」的口令，不是个人授权：打开链接 → 系统用户 → MagicEngine → ' +
       '生成新口令（选 Magic Engine 应用，勾上 ads_management、ads_read、business_management、pages_read_engagement、leads_retrieval）→ ' +
-      '打开 Render 后台 crazycontent 服务 → Environment → 把 META_SYSTEM_USER_TOKEN 的值换成新口令 → Save。换完第二天这条待办会自己消失。',
+      '打开 Render 后台 crazycontent 服务 → Environment → 把 META_SYSTEM_USER_TOKEN 的值换成新口令 → 保存时选带 deploy 的那个选项（别选 Save only，否则不生效）。换完第二天这条待办会自己消失。',
     href: 'https://business.facebook.com/settings/system-users',
   }
 }

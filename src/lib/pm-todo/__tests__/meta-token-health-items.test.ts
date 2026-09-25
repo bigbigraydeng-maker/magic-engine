@@ -81,13 +81,23 @@ describe('meta token health items', () => {
   })
 
   it('pushes nothing when rate limited or when the fetch throws', async () => {
-    const env = { META_SYSTEM_USER_TOKEN_CLIENT_ONE_EXAMPLE: 'tok-rate' }
-    const rateLimited = fakeFetch({ 'tok-rate': { status: 400, body: RATE_LIMITED } })
+    const env = {
+      META_SYSTEM_USER_TOKEN_CLIENT_ONE_EXAMPLE: 'tok-rate',
+      META_SYSTEM_USER_TOKEN: 'tok-alive',
+    }
+    const rateLimited = fakeFetch({
+      'tok-rate': { status: 400, body: RATE_LIMITED },
+      'tok-alive': { status: 200, body: ALIVE },
+    })
     const items: ManualItem[] = []
     await pushMetaTokenHealthItems(db([row({})]), items, env, rateLimited)
     expect(items).toEqual([])
 
-    const throwing: FetchLike = async () => {
+    const throwing: FetchLike = async (url, init) => {
+      const header = (init?.headers as Record<string, string> | undefined)?.Authorization ?? ''
+      if (header === 'Bearer tok-alive') {
+        return new Response(JSON.stringify(ALIVE), { status: 200 })
+      }
       throw new Error('network')
     }
     const afterThrow: ManualItem[] = []
@@ -253,7 +263,8 @@ describe('meta token health items', () => {
   })
 
   it('never caches an unknown probe result', async () => {
-    const env = { META_SYSTEM_USER_TOKEN_CLIENT_ONE_EXAMPLE: 'tok-rate' }
+    // An alive shared token keeps the all-unknown guard from firing, so this isolates caching.
+    const env = { META_SYSTEM_USER_TOKEN_CLIENT_ONE_EXAMPLE: 'tok-rate', META_SYSTEM_USER_TOKEN: 'tok-alive' }
     const fetchImpl = fakeFetch({ 'tok-rate': { status: 400, body: RATE_LIMITED } })
     const now = () => 1_000
 
@@ -262,7 +273,9 @@ describe('meta token health items', () => {
     const second: ManualItem[] = []
     await pushMetaTokenHealthItems(db([row({})]), second, env, fetchImpl, now)
 
-    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    const rateCalls = fetchImpl.mock.calls.filter((c) => tokenFrom(c) === 'tok-rate')
+    expect(rateCalls).toHaveLength(2)
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
     expect(first).toEqual([])
     expect(second).toEqual([])
   })
@@ -275,6 +288,67 @@ describe('meta token health items', () => {
 
     expect(items[0].what).not.toContain('session has been invalidated')
     expect(items[0].what).toContain('错误码 190')
+  })
+
+  it('rejects when every probe is unknown (single rate-limited scoped token)', async () => {
+    const env = { META_SYSTEM_USER_TOKEN_CLIENT_ONE_EXAMPLE: 'tok-rate' }
+    const fetchImpl = fakeFetch({ 'tok-rate': { status: 400, body: RATE_LIMITED } })
+    await expect(
+      pushMetaTokenHealthItems(db([row({})]), [], env, fetchImpl),
+    ).rejects.toThrow('问不到')
+  })
+
+  it('rejects when every probe is unknown because the fetch throws', async () => {
+    const env = {
+      META_SYSTEM_USER_TOKEN_CLIENT_ONE_EXAMPLE: 'tok-secret',
+      META_SYSTEM_USER_TOKEN: 'tok-shared',
+    }
+    const throwing: FetchLike = async () => {
+      throw new Error('network')
+    }
+    await expect(
+      pushMetaTokenHealthItems(db([row({})]), [], env, throwing),
+    ).rejects.toThrow('问不到')
+  })
+
+  it('resolves with no items when one probe is alive and one is unknown', async () => {
+    const env = {
+      META_SYSTEM_USER_TOKEN_CLIENT_ONE_EXAMPLE: 'tok-rate',
+      META_SYSTEM_USER_TOKEN: 'tok-alive',
+    }
+    const fetchImpl = fakeFetch({
+      'tok-rate': { status: 400, body: RATE_LIMITED },
+      'tok-alive': { status: 200, body: ALIVE },
+    })
+    const items: ManualItem[] = []
+    await pushMetaTokenHealthItems(db([row({})]), items, env, fetchImpl)
+    expect(items).toEqual([])
+  })
+
+  it('tells the PM to grant the ad permissions and to deploy on save', async () => {
+    const env = { META_SYSTEM_USER_TOKEN_CLIENT_ONE_EXAMPLE: 'tok-dead' }
+    const fetchImpl = fakeFetch({ 'tok-dead': { status: 400, body: DEAD } })
+    const items: ManualItem[] = []
+    await pushMetaTokenHealthItems(db([row({})]), items, env, fetchImpl)
+    expect(items[0].how).toContain('ads_management')
+    expect(items[0].how).toContain('Save only')
+  })
+
+  it('tells the PM to deploy on save for the shared token too', async () => {
+    const items: ManualItem[] = []
+    await pushMetaTokenHealthItems(
+      db([row({})]), items, { META_SYSTEM_USER_TOKEN: 'tok-shared' },
+      fakeFetch({ 'tok-shared': { status: 400, body: DEAD } }),
+    )
+    expect(items[0].how).toContain('Save only')
+  })
+
+  it('resolves with no items and never probes when no tokens are configured', async () => {
+    const fetchImpl = fakeFetch({})
+    const items: ManualItem[] = []
+    await pushMetaTokenHealthItems(db([row({})]), items, {}, fetchImpl)
+    expect(items).toEqual([])
+    expect(fetchImpl).not.toHaveBeenCalled()
   })
 
   it('never puts the token in the request URL', async () => {
