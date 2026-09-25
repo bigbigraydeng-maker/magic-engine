@@ -5,6 +5,31 @@
 
 ---
 
+### 2026-09-25（外部平台授权断了会自动进今日待办，不再像 CTS 邮箱那样断 9 天没人知道）
+
+- **为什么**：CTS 的 `info@ctstours.co.nz` 和 `bdm@ctstours.co.nz` 邮箱同步断了 **9 天**，客人询价一封没进 CRM，而每小时的同步任务一直报成功——它只捞 `status = active` 的连接，断掉的那两条安静地从循环里消失。根因是 2026-09-15 给 `MICROSOFT_MAIL_SCOPES` 加了 `Mail.ReadWrite`：微软刷新令牌时重放整份 scope 清单，换不来客户从没同意过的新权限（`AADSTS65001`）。那次改动的提交说明里写了「已连的客户需要重连」，然后没有然后了。
+- **上线**（PR [#2012](https://github.com/bigbigraydeng-maker/magic-engine/pull/2012)，`23cd209f`）：`src/lib/platform-oauth/connection-health.ts` 五条判据（状态位说断了 / 心跳停了 / 长期令牌到期 / 权限清单不够用 / 连上了但不在取数名单里），每个 provider 在 `HEARTBEAT_POLICY` 里逐个表态（心跳节奏 · 刷令牌一次碰几条 · 能不能自动续期，有 CI 守卫，新增平台漏填会挂）；`src/lib/pm-todo/platform-connection-items.ts` 翻译成人话下发进今日待办，只有人能点同意页的进「🙋 需要你动手」，其余进「🛠 系统欠账」。
+- **判据要点**：`revoked` 是人主动断开、不当故障；「整条通道停了」按**不同客户数**算（按连接条数算的话 CTS 那次会被误判成取数任务的问题、踢出 PM 清单）；能自动续期的平台令牌过期是常态不报，Meta/TikTok 到期即真死；读到零行当故障报（PostgREST 权限被收掉时零行不报错）。
+- **顺带修三个会让监控说谎的写入侧 bug**：`upsertConnection` 把状态改回 active 却不擦 `error_message`；微软与谷歌回调重连成功后不盖 `last_synced_at`（人修好了监控还继续报）；微软回调存的是我们请求的权限清单而不是微软实际批准的那一份。
+- **闸门**：`scope-change-gate.test.ts` 钉住全部 6 份 `*_SCOPES` 清单并扫 `src/` 防漏网；`token-manager.test.ts` 另钉「谷歌刷新不许带 scope、微软刷新必须带」这条根因行为。事故与判据全文见 `docs/PITFALLS.md` F11 / F12，质量闸加 A 级专条。
+- 生产实况干跑（17 条连接）产出 5 条全真：Roman HU / NZCPE 的 Facebook 断了 17 天、CTS `bdm@` 断了 9 天、CTS `info@` 状态绿心跳停、NAL 谷歌搜索数据「连上了但一天没取过数」。子牙 + 魏征两轮复审的问题全部合并前收掉。
+
+### 2026-09-25（台账 docs/ledger v0：窗口结论一条一卡、待办邮件每天读、改代码不写卡合并前拦、夜巡核实）
+
+- **为什么**：2026-09-24 三个 agent 全量审计——128 条教训记忆 73% 只在文字里没程序读过；7 簇重复踩坑全部"建了防护后再踩"；变成代码/CI 的防护起效、写成文字的没起效。ROADMAP/DECISIONS/PITFALLS/STATE 没有程序在读，"记了"无法被机器证伪。
+- **上线**（PR #1984，`d643e9c5`）：`docs/ledger/` 一张卡一个文件（decided/done/verified/failed）；`src/lib/ledger/*` 解析/指向/判定/读取；待办邮件多一栏（决定了没做/做了没验/验了不成/夜巡没来）；`ledger-check.yml` 四道检查（格式永不豁免 · 改代码必写卡 · 指向真实且绑定本 PR · 夜巡分支只准翻状态）；`scripts/ledger-update.mjs` 改卡统一入口；CLAUDE.md §9 第 1/6 条。
+- **仓库外**：夜巡定时任务 `~/.claude/scheduled-tasks/ledger-nightly-verify/`（每晚 21:30）；关窗钩子对 A/B 级窗口没写卡拦一次。
+- **PM 2026-09-25 拍板**：三道台账检查进主干必过清单（已设）；只改 `docs/ledger/` 的 PR 免人工合并审批、CI 全绿自动合（仓库 auto-merge 已开；工作流改动见 `.github/merge-authorization.md`）。
+- 设计：`docs/specs/2026-09-24-harness-ledger-v0.md`（子牙 + 魏征设计审必改项全吸收）。DeepSeek 写代码、Fable 窗口出 spec 并复审。
+
+### 2026-09-25（广告 WP2 合并 + Kernel 恢复白名单补丁已 apply）
+
+PR [#1979](https://github.com/bigbigraydeng-maker/magic-engine/pull/1979)（2026-09-24 合并 `a6ddc6d5`）：Kernel `OutwardApproval` 加 `bounded` 信封（20% / 日上限三档缓冲 / 72h 冷却 / 学习期 / 对比测试 / 必有撤回）；六个 `ads.*` 动作注册（pause / cut / scale 真执行，budget_move / add_retargeting / swap_creative 先转人工）；`gateway.ts` 碰 provider 前第二道信封核算；`DELIVERING_STATUSES` 统一到诊断层；子牙 + 魏征 + 狄仁杰三审通过。migration `20260925000003_kernel_recovery_outside_autonomy_envelope` 于 2026-09-25 PM go 后 apply（`outside_autonomy_envelope` 进恢复白名单）。**没有任何客户开 `bounded_auto`**；WP2 遗留三处见 [#1994](https://github.com/bigbigraydeng-maker/magic-engine/issues/1994)，归 WP3.1b。
+
+### 2026-09-24（Agent 管理系统：旅行社送来的终端客户，从邮件自动提取进度）
+
+PR [#1983](https://github.com/bigbigraydeng-maker/magic-engine/pull/1983)（合并 `8d3d84f9`）：新页面 `/dashboard/clients/[id]/agents`（按 Agent / 按阶段两视角 + 抽屉回复邮件）；每小时邮件同步对 `trade` 联系人跑 AI 提取（`travel-agent-customer-extract.ts`，XML 包住正文防注入，pax > 30 双保险 `needs_review`）；新表 `agent_customers` + 唯一索引 `(client_id, agent_contact_id, conversation_id, customer_name)`（同名不同线程分开，刻意不跨线程去重）；阶段常量 `TRAVEL_AGENT_CUSTOMER_STAGES` 留在代码不进 CHECK；POST 三级清晰错误 + 范围校验。aider→DeepSeek 6+1+4 轮 $0.074，子牙两轮 + 魏征两轮 + 子牙第三轮通过。两张 migration `20260925001000` / `20260925001100` 于 2026-09-24 PM go 后 apply。
+
 ### 2026-09-24（Meta 留资同步：同一条线索每轮重打一次 Mailchimp，办完的不再重跑）
 
 `getLeadWatermark` 每轮回看 24 小时（为补 Meta 延迟吐出来的 lead，这个窗口必须留着），但

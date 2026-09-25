@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { LeadSheetConfigError, loadClientRoutes, parseRoute } from '../config'
+import {
+  LeadSheetConfigError,
+  describeLayoutMismatch,
+  loadClientRoutes,
+  parseRoute,
+  validateRouteLayouts,
+} from '../config'
 
 function row(over: Record<string, unknown> = {}) {
   return {
@@ -76,19 +82,94 @@ describe('loadClientRoutes — 跨路线校验', () => {
     return { from: () => q } as unknown as Parameters<typeof loadClientRoutes>[0]
   }
 
-  it('两条路线指到同一张表同一个 tab → 后一条判坏并剔掉', async () => {
-    // 不拦的话：两边列定义不同，A 会去读 B 写的行的那几格来判重，
-    // 而那几格在 B 的列定义里语义完全不同 → 误判成「已存在」→ 静默丢线索。
+  /**
+   * PM 2026-09-24 拍板「所有表单汇总进一张表」之后，几条路线写同一张表是**常态**，
+   * 不再一律判坏 —— 但只有结构一样才放行。
+   */
+  it('两条路线写同一张表、列定义一模一样（只有来源标签不同）→ 都留着', async () => {
+    const withLabel = (label: string) => [
+      { field: 'lead_id' },
+      { field: 'contact_phone' },
+      { field: 'literal', value: label },
+    ]
+    const { routes, invalid } = await loadClientRoutes(
+      fakeSupabase([
+        { ...row(), route_key: 'a', priority: 1, columns: withLabel('含预算与出发时间') },
+        { ...row(), route_key: 'b', priority: 2, columns: withLabel('基础表单') },
+      ]),
+      'c1',
+    )
+    expect(routes.map((r) => r.routeKey)).toEqual(['a', 'b'])
+    expect(invalid).toHaveLength(0)
+  })
+
+  it('两条路线写同一张表但列数不一样 → 后一条判坏并剔掉', async () => {
+    // 不拦的话：A 会去读 B 写的行的那几格来判重，而那几格在 B 的列定义里语义
+    // 完全不同 → 误判成「已存在」→ 静默丢线索。
     const { routes, invalid } = await loadClientRoutes(
       fakeSupabase([
         { ...row(), route_key: 'a', priority: 1 },
-        { ...row(), route_key: 'b', priority: 2 },
+        { ...row(), route_key: 'b', priority: 2, columns: [{ field: 'lead_id' }] },
       ]),
       'c1',
     )
     expect(routes.map((r) => r.routeKey)).toEqual(['a'])
     expect(invalid).toHaveLength(1)
     expect(invalid[0].reason).toContain('同一张表的同一个 tab')
+    expect(invalid[0].reason).toContain('列数不一样')
+  })
+
+  it('两条路线写同一张表、列数一样但某一列放的东西不同 → 后一条判坏', async () => {
+    const { routes, invalid } = await loadClientRoutes(
+      fakeSupabase([
+        { ...row(), route_key: 'a', priority: 1 },
+        {
+          ...row(),
+          route_key: 'b',
+          priority: 2,
+          columns: [{ field: 'lead_id' }, { field: 'contact_email' }],
+        },
+      ]),
+      'c1',
+    )
+    expect(routes.map((r) => r.routeKey)).toEqual(['a'])
+    expect(invalid[0].reason).toContain('第 2 列放的东西不一样')
+  })
+
+  it('🔴 两条路线写同一张表但判重配置不同 → 判坏（sync 用第一条的尺子量所有行）', async () => {
+    const { routes, invalid } = await loadClientRoutes(
+      fakeSupabase([
+        { ...row(), route_key: 'a', priority: 1, dedup_columns: [0] },
+        { ...row(), route_key: 'b', priority: 2, dedup_columns: [1] },
+      ]),
+      'c1',
+    )
+    expect(routes.map((r) => r.routeKey)).toEqual(['a'])
+    expect(invalid[0].reason).toContain('判重列不一样')
+  })
+
+  it('🔴 两条路线写同一张表但补历史的窗口不同 → 判坏（会只补进来一半而两边都显示成功）', async () => {
+    const { routes, invalid } = await loadClientRoutes(
+      fakeSupabase([
+        { ...row(), route_key: 'a', priority: 1, backfill_since: '2026-09-20T00:00:00Z' },
+        { ...row(), route_key: 'b', priority: 2, backfill_since: '2026-06-01T00:00:00Z' },
+      ]),
+      'c1',
+    )
+    expect(routes.map((r) => r.routeKey)).toEqual(['a'])
+    expect(invalid[0].reason).toContain('补历史的时间窗口不一样')
+  })
+
+  it('🔴 两条路线写同一张表但时区不同 → 判坏（时间列会写出两种读数，判重对不上）', async () => {
+    const { routes, invalid } = await loadClientRoutes(
+      fakeSupabase([
+        { ...row(), route_key: 'a', priority: 1 },
+        { ...row(), route_key: 'b', priority: 2, timezone: 'Australia/Sydney' },
+      ]),
+      'c1',
+    )
+    expect(routes.map((r) => r.routeKey)).toEqual(['a'])
+    expect(invalid[0].reason).toContain('时区不一样')
   })
 
   it('指到不同 tab 就都留着', async () => {
@@ -101,6 +182,127 @@ describe('loadClientRoutes — 跨路线校验', () => {
     )
     expect(routes).toHaveLength(2)
     expect(invalid).toHaveLength(0)
+  })
+})
+
+/**
+ * 🔴 `scripts/lead-sheet-sync-dryrun.ts` 的 `--routes <file>` 模式绕开
+ *    `loadClientRoutes`（不读数据库），逐条只过 `parseRoute`——它必须额外调
+ *    `validateRouteLayouts` 才能补上这道跨路线校验，否则文件里两条同目标路线
+ *    只要有一处不一致，试算就会在错的共享快照上跑，跟生产加载的结果对不上。
+ */
+describe('validateRouteLayouts —— 文件配置模式（--routes）复用的那道闸', () => {
+  it('文件里两条路线指向同一张表但判重列不一样 → 剔掉后一条，理由跟 loadClientRoutes 一致', () => {
+    const routes = [
+      parseRoute(row({ route_key: 'a', priority: 1, dedup_columns: [0] })),
+      parseRoute(row({ route_key: 'b', priority: 2, dedup_columns: [1] })),
+    ]
+    const invalid: Array<{ routeKey: string; reason: string }> = []
+
+    validateRouteLayouts(routes, invalid)
+
+    expect(routes.map((r) => r.routeKey)).toEqual(['a'])
+    expect(invalid).toHaveLength(1)
+    expect(invalid[0].reason).toContain('判重列不一样')
+  })
+
+  it('文件里两条路线结构一模一样（只有来源标签不同）→ 都留着', () => {
+    const withLabel = (label: string) => [
+      { field: 'lead_id' as const },
+      { field: 'contact_phone' as const },
+      { field: 'literal' as const, value: label },
+    ]
+    const routes = [
+      parseRoute(row({ route_key: 'a', priority: 1, columns: withLabel('含预算与出发时间') })),
+      parseRoute(row({ route_key: 'b', priority: 2, columns: withLabel('基础表单') })),
+    ]
+    const invalid: Array<{ routeKey: string; reason: string }> = []
+
+    validateRouteLayouts(routes, invalid)
+
+    expect(routes.map((r) => r.routeKey)).toEqual(['a', 'b'])
+    expect(invalid).toHaveLength(0)
+  })
+})
+
+describe('parseRoute — 两位复审补上的几道闸', () => {
+  it('🔴 literal 没写 value → 当场判坏（seed 里 jsonb_set 下标打偏是静默的）', () => {
+    expect(() =>
+      parseRoute(row({ columns: [{ field: 'lead_id' }, { field: 'literal' }], dedup_columns: [0] })),
+    ).toThrow(/literal.*没写 value/)
+  })
+
+  it('literal 写了空字符串也算没写 —— 那一列会是一片空白，看着像有意为之', () => {
+    expect(() =>
+      parseRoute(
+        row({ columns: [{ field: 'lead_id' }, { field: 'literal', value: '' }], dedup_columns: [0] }),
+      ),
+    ).toThrow(/literal.*没写 value/)
+  })
+
+  it('🔴 判重列里一列能区分人的都没有 → 判坏（同一分钟留资的人会互相吞掉）', () => {
+    expect(() =>
+      parseRoute(
+        row({
+          columns: [{ field: 'occurred_at' }, { field: 'answer', key: 'tour' }],
+          dedup_columns: [0, 1],
+          dedup_id_column: null,
+        }),
+      ),
+    ).toThrow(/能区分人/)
+  })
+
+  it('🔴 机器键列没指到 lead_id → 判坏（判重会悄悄退化成只剩时间+电话）', () => {
+    expect(() =>
+      parseRoute(
+        row({
+          columns: [{ field: 'contact_phone' }, { field: 'contact_name' }],
+          dedup_columns: [0],
+          dedup_id_column: 1,
+        }),
+      ),
+    ).toThrow(/必须是 lead_id/)
+  })
+
+  it('表头签名格数跟列数对不上 → 判坏', () => {
+    expect(() => parseRoute(row({ header_row: ['只有一格'] }))).toThrow(/header_row/)
+  })
+
+  it('表头签名格数对得上 → 读得出来', () => {
+    expect(parseRoute(row({ header_row: ['线索编号', '电话'] })).headerRow).toEqual(['线索编号', '电话'])
+  })
+
+  it('不配表头签名是合法的 —— 老配置照常跑', () => {
+    expect(parseRoute(row()).headerRow).toBeNull()
+  })
+})
+
+describe('describeLayoutMismatch', () => {
+  const base = parseRoute(
+    row({ columns: [{ field: 'lead_id' }, { field: 'literal', value: 'A' }], dedup_columns: [0] }),
+  )
+
+  it('只有 literal 的固定文本不同 → 算一样（「来源表单」那一列就靠这个）', () => {
+    const other = parseRoute(
+      row({
+        route_key: 'r2',
+        columns: [{ field: 'lead_id' }, { field: 'literal', value: 'B' }],
+        dedup_columns: [0],
+      }),
+    )
+    expect(describeLayoutMismatch(base, other)).toBeNull()
+  })
+
+  it('机器键列不同 → 说出来', () => {
+    const other = parseRoute(
+      row({
+        route_key: 'r2',
+        columns: [{ field: 'lead_id' }, { field: 'literal', value: 'B' }],
+        dedup_columns: [0],
+        dedup_id_column: 0,
+      }),
+    )
+    expect(describeLayoutMismatch(base, other)).toContain('机器键列不一样')
   })
 })
 

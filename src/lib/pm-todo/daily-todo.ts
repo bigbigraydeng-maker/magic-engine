@@ -83,6 +83,32 @@ const DEV_OWNED_KINDS: ManualItemKind[] = [
   // 「这句话要不要改」是技术判断，不是 PM 该做的业务决策，how 字段同样是
   // 「回我一句我去查」的话术。见 playbook-staleness-items.ts。
   'playbook_reference_stale',
+  // 「这个平台所有客户一起没了心跳」→ how 写的是「回我一句我去查」。
+  // 全部一起停说明是我们这边的取数任务停了，PM 去重连一百次也不会好。
+  // 🔴 注意：单条断线（platform_connection_broken / _silent / _scope_gap）
+  //    **不在这里** —— 那几条只有人能去点一次同意页，必须留在动手栏。
+  'platform_connection_pipeline_down',
+  // 「授权体检自己读不出来了」→ 同上，是我们这边的欠账。
+  'platform_connection_check_failed',
+  // 「连上了但这个客户不在取数名单里」→ 缺的是配置不是授权，重连也没用。
+  'platform_connection_not_enrolled',
+  // 「这个平台后台还没有让 PM 自助重连的按钮」→ 给他一件点不到按钮的活比不报还糟。
+  'platform_connection_no_reconnect_ui',
+  // 「连接挂在查不到的客户名下」→ 要核对该断还是该改挂，是我们的活。
+  'platform_connection_orphan',
+  // 马良：自检检不了（模型钥匙没配 / 视频下载不了）、出片后没检（事件没发出去）——how 都是
+  // 「回我一句我去看/去补」。**过关等审片、不过关问返工还是放弃那两条不在这里**，那是 PM 的活。
+  'maliang_check_unverifiable',
+  'maliang_check_missing',
+  // 李白：溯源检不了（官网网址没配 / 读不到）、生成后没检（事件没发出去）、提示词库月检
+  // 疑似过期——三条 how 都是「回我一句我去看/去补/去改」。**真有「未证实」句要改的那条
+  // （libai_copy_unverified）不在这里**，那是 PM/FDE 要动手改文案的活。
+  'libai_check_unverifiable',
+  'libai_check_missing',
+  'libai_prompt_library_stale',
+  // 司马迁本周没巡成（读评价表失败 / 起草全失败）→ how 写「回我一句「查一下司马迁」我去看」。
+  // 真有新评价要回的那条（simaqian_review_drafts）**不在这里**，那是 PM/FDE 要动手回评价的活。
+  'simaqian_patrol_failed',
 ]
 
 /** FDE focus clients: CTS + Oztop. */

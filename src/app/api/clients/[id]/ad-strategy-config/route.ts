@@ -6,13 +6,17 @@
  * Settings panel (P21.K.5). Config edits go through this route — never raw SQL —
  * per the FDE-config red-line. Creative-pool *approval* is NOT done here; it has
  * its own endpoint (/creative-pool/approve).
+ *
+ * autonomy_mode / daily_budget_cap_cents changes also emit the Inngest wake-up
+ * events (WP3.1a); the Kernel policy table is never written here.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
-import { guardGlobalAdmin } from '@/lib/auth/require-admin'
+import { requireGlobalAdmin } from '@/lib/auth/require-admin'
 import { loadAdStrategyConfig, parseCreativePool, type CreativePoolEntry } from '@/lib/ads-strategy/config'
+import { notifyAutonomyModeChanged } from '@/lib/ads-strategy/autonomy/notify'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,8 +47,10 @@ export async function PATCH(
   // digest_recipients 决定内部摘要发给谁。客户成员能改 = 自己关掉自己的预警、
   // 把内部摘要改发到任意邮箱。与 #1649 / #1658 同一个坑；客户成员仍可 GET 查看。
   // 虽然只动单个客户，但属于内部控制项，所以用全局守卫（受限演示管理员也拒）。
-  const staffGuard = await guardGlobalAdmin()
-  if (staffGuard) return staffGuard
+  // 换成 requireGlobalAdmin：同一判据，多带回 user.email 记 autonomy_mode_updated_by（spec 2026-09-25 §4.9）。
+  const staff = await requireGlobalAdmin()
+  if (!staff.ok) return NextResponse.json({ error: staff.error }, { status: staff.status })
+  const actorEmail = staff.user.email ?? null
 
   let body: {
     enabled?: unknown
@@ -60,6 +66,8 @@ export async function PATCH(
   }
 
   const update: Record<string, unknown> = { client_id: clientId, updated_at: new Date().toISOString() }
+  const updatedAt = String(update.updated_at)
+  const before = await loadAdStrategyConfig(clientId)
 
   if (body.enabled !== undefined) {
     if (typeof body.enabled !== 'boolean') {
@@ -91,6 +99,7 @@ export async function PATCH(
       return NextResponse.json({ error: "autonomy_mode must be 'observe' or 'bounded_auto'" }, { status: 400 })
     }
     update.autonomy_mode = body.autonomy_mode
+    update.autonomy_mode_updated_by = actorEmail
   }
 
   if (body.creative_pool !== undefined) {
@@ -118,6 +127,14 @@ export async function PATCH(
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+  // 意向真的变了才发叫醒铃（spec §4.4）；发送失败不影响保存，每日 reconcile 会追上。
+  const envelopeChanged =
+    (update.autonomy_mode !== undefined && update.autonomy_mode !== before.autonomy_mode) ||
+    (update.daily_budget_cap_cents !== undefined && update.daily_budget_cap_cents !== before.daily_budget_cap_cents)
+  const syncEvents = envelopeChanged
+    ? await notifyAutonomyModeChanged(clientId, updatedAt, { relaxed: true })
+    : { sent: false, events: 0 }
+
   const config = await loadAdStrategyConfig(clientId)
-  return NextResponse.json({ success: true, config })
+  return NextResponse.json({ success: true, config, sync_events: syncEvents })
 }

@@ -145,6 +145,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           display_name:      googleEmail ?? 'Google Search Console',
           scopes:            tokens.scope.split(' '),
           status:            'active',
+          // 刚用授权码换到令牌 = 一次货真价实的「跟对方通上话」。不盖这个时间戳的话，
+          // 断线监控（platform-oauth/connection-health.ts）在人已经重连好之后还会
+          // 继续报，一直报到第二天那条每日取数任务真跑到这个客户为止。
+          last_synced_at:    new Date().toISOString(),
+          // 状态改回 active 就必须擦掉旧报错，否则一条健康连接永远挂着上次断线的原文，
+          // 任何「按报错找坏连接」的排查都会被它骗一次。
+          error_message:     null,
           updated_at:        new Date().toISOString(),
         },
         { onConflict: 'client_id,provider,account_id' },

@@ -169,6 +169,7 @@ describe('ad-strategy-config — PATCH 内部员工照常改', () => {
     expect(json.config).toEqual({
       client_id: CLIENT, enabled: false, digest_recipients: ['a@staff.test', 'b@staff.test'],
       daily_budget_cap_cents: null, autonomy_mode: 'observe', creative_pool: [],
+      autopilot_enabled: false, autopilot_dry_run: true,
     })
   })
 
@@ -195,6 +196,7 @@ describe('ad-strategy-config — GET 客户成员仍可查看', () => {
     expect(json.config).toEqual({
       client_id: CLIENT, enabled: false, digest_recipients: ['x@staff.test'],
       daily_budget_cap_cents: null, autonomy_mode: 'observe', creative_pool: [],
+      autopilot_enabled: false, autopilot_dry_run: true,
     })
   })
 })

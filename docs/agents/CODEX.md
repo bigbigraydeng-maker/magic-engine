@@ -11,7 +11,7 @@ Codex 按任务说明承担规划、实现或审查；与 Claude Code、CMUX Dee
 
 ---
 
-## 10 个 Agent 速查表
+## 9 个 Agent 速查表
 
 | Agent | 代码位置 | 职责一句话 |
 |-------|---------|-----------|
@@ -23,8 +23,9 @@ Codex 按任务说明承担规划、实现或审查；与 Claude Code、CMUX Dee
 | 鲁班 | `src/lib/luban/` | 执行：flywheel adapter + 落数据 |
 | 马良 | `src/lib/visual/` | 视觉学习：图片/视频质量 + 平台研究 |
 | 李白 | `src/lib/blog/` + `src/lib/geo/` | 文案质量 + 全系统提示词管理 |
-| 达芬奇 | `src/lib/davinci/` | PM：挑战设计方案（只读，无执行权）|
 | 魏征 | `src/lib/weicheng/` | 代码检查：CI关卡 + LLM审查 |
+
+> 达芬奇已撤（PM 2026-09-24 拍板）：其"方案挑战"审查清单并入子牙自审，见 [`10-ziya.md`](./10-ziya.md) §四b；不再作为独立 agent 调度，见 [`80-davinci.md`](./80-davinci.md)。
 
 ---
 

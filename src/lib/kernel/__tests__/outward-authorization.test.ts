@@ -11,7 +11,12 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import type { ActionDefinition, AuthorizedExecutionContext, OutwardAuthorization } from '../types'
+import type {
+  ActionDefinition,
+  AuthorizedExecutionContext,
+  OutwardApproval,
+  OutwardAuthorization,
+} from '../types'
 import { runAction, submitActionRun, approveAndRun } from '../runner'
 import { authorizeRun } from '../authorize'
 import { executeAuthorizedRun } from '../gateway'
@@ -28,7 +33,7 @@ const HASH = computeBlogContentHash(BLOG_DRAFT as unknown as BlogDraftRow)
 
 const GOOD_DECLARATION: OutwardAuthorization = {
   declaredIn: 'K-WP02 #882 (test-only definition)',
-  requiresHumanApproval: true,
+  approval: { mode: 'human_only' },
   rollback: 'snapshot_restore',
 }
 
@@ -108,13 +113,26 @@ describe('判据：对外动作缺一项都不放行', () => {
     }
   })
 
-  it('requiresHumanApproval 不是 true → 拒绝', () => {
+  it('approval.mode 是别的值 → 拒绝', () => {
     const reason = outwardBlockReason(
       outwardDefinition({
-        outwardAuthorization: { ...GOOD_DECLARATION, requiresHumanApproval: false as unknown as true },
+        outwardAuthorization: {
+          ...GOOD_DECLARATION,
+          approval: { mode: 'nope' } as unknown as OutwardApproval,
+        },
       }),
     )
-    expect(reason).toContain('必须要求人工批准')
+    expect(reason).not.toBeNull()
+  })
+
+  it('approval 整个缺失 → 拒绝', () => {
+    const { approval: _omitted, ...withoutApproval } = GOOD_DECLARATION
+    const reason = outwardBlockReason(
+      outwardDefinition({
+        outwardAuthorization: withoutApproval as unknown as OutwardAuthorization,
+      }),
+    )
+    expect(reason).not.toBeNull()
   })
 
   it('rollback 不是两个合法值之一 → 拒绝', () => {
@@ -292,9 +310,13 @@ describe('审计快照带上对外授权的依据', () => {
     for (const index of [0, f.tables.authorization_decisions.length - 1]) {
       const def = definitionSnapshot(f, index)
       expect(def.side_effect, `第 ${index} 条`).toBe('outward')
+      // 🔴 `approval_mode` 和 `autonomy_envelope` 必须进快照 —— 否则复盘时
+      //    只看到「没要人点头」，说不清当时是在什么范围内放行的。
       expect(def.outward_authorization, `第 ${index} 条`).toEqual({
         declared_in: 'K-WP02 #882 (test-only definition)',
         requires_human_approval: true,
+        approval_mode: 'human_only',
+        autonomy_envelope: null,
         rollback: 'snapshot_restore',
       })
       expect(def.provider_idempotency, `第 ${index} 条`).toBe('unsupported')
