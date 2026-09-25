@@ -21,6 +21,8 @@ export const ADS_RULE_STALE_DAYS = 3
 export const ADS_RULE_STREAK_GAP_DAYS = 3
 /** 一条待办的 how 里最多列几条 */
 export const ADS_RULE_MAX_LISTED = 3
+/** 连着这么多次巡察都命中才进待办：只命中一天的多半是波动（2026-09-26 回放：一次单日误报） */
+export const ADS_RULE_MIN_STREAK = 2
 
 export const ADS_RULE_CODES: ReadonlySet<string> = new Set(['D2', 'D10'])
 
@@ -31,6 +33,8 @@ export interface RuleFinding {
   units?: Array<{ level: string; id: string; name: string | null }>
   reasons?: string[]
   checkBack?: { after: string; condition: string; fallback: string }
+  notComparableReason?: string
+  manualTask?: { what: string; how: string; href: string | null }
 }
 
 export interface GrowthStateRow {
@@ -67,14 +71,14 @@ function dayGap(from: string, to: string): number {
  * 这个 key 连着命中几天，从该客户最新一行往回数。
  * `rowsNewestFirst` 是**一个客户**按日期倒序的行。逐行看：命中就 +1，
  * 前提是跟上一个计入的命中日期之间不超过 ADS_RULE_STREAK_GAP_DAYS 天；
- * 一旦超过就停。没命中的行直接跳过（它们本身不断连 —— 断连只看日期差）。
+ * 一旦超过就停。没命中的行直接断连（隔一天命中一次不算连着）。
  */
 export function streakFor(key: string, rowsNewestFirst: readonly GrowthStateRow[]): number {
   let streak = 0
   let lastHitDate: string | null = null
   for (const row of rowsNewestFirst) {
     const hit = ruleHits(row).some((f) => findingKey(f) === key)
-    if (!hit) continue
+    if (!hit) break
     if (lastHitDate !== null && dayGap(row.date, lastHitDate) > ADS_RULE_STREAK_GAP_DAYS) break
     streak += 1
     lastHitDate = row.date
@@ -119,9 +123,55 @@ function orderCandidates(findings: readonly RuleFinding[]): RuleFinding[] {
   return [...findings].sort((a, b) => rank(a) - rank(b))
 }
 
+/** 这个 notComparableReason 连着出现几次，从该客户最新一行往回数（同 streakFor 的断连规则）。 */
+function streakForReason(reason: string, rowsNewestFirst: readonly GrowthStateRow[]): number {
+  let streak = 0
+  let lastHitDate: string | null = null
+  for (const row of rowsNewestFirst) {
+    const hit = (row.payload?.problems ?? []).some((p) => p.notComparableReason === reason)
+    if (!hit) break
+    if (lastHitDate !== null && dayGap(row.date, lastHitDate) > ADS_RULE_STREAK_GAP_DAYS) break
+    streak += 1
+    lastHitDate = row.date
+  }
+  return streak
+}
+
+/** 客户级配置缺口（如没登记 Facebook 主页）：最新一行有带 manualTask 的该问题就出一条，不看命中连击。 */
+function configGapItem(
+  clientId: string,
+  clientRows: readonly GrowthStateRow[],
+  now: Date,
+  nameOf: (id: string) => string,
+): ManualItem | null {
+  const newest = clientRows[0]
+  const gap = (newest?.payload?.problems ?? []).find(
+    (p) => p.notComparableReason === 'client_page_unknown' && p.manualTask,
+  )
+  if (!gap?.manualTask) return null
+  if (!shouldRemindToday(streakForReason('client_page_unknown', clientRows), 0, now)) return null
+  return {
+    kind: 'ads_rule_finding',
+    client_id: clientId,
+    client_name: nameOf(clientId),
+    what: gap.manualTask.what,
+    how: gap.manualTask.how,
+    href: gap.manualTask.href ?? adsHealthHref(clientId),
+  }
+}
+
+function findingLines(f: RuleFinding): string[] {
+  const lines = [`• ${f.title}`]
+  const first = f.reasons?.[0]
+  if (first && !first.startsWith('止损：')) lines.push(`  怎么办：${first}`)
+  const stop = stopLossText(f)
+  if (stop) lines.push(`  ${stop}`)
+  return lines
+}
+
 function buildHow(kept: readonly RuleFinding[]): string {
   const listed = kept.slice(0, ADS_RULE_MAX_LISTED)
-  const lines = listed.map((f) => `• ${f.title}。${stopLossText(f)}`)
+  const lines = listed.flatMap(findingLines)
   const rest = kept.length - listed.length
   if (rest > 0) lines.push(`…另有 ${rest} 条，进广告健康页「要看的事」里看`)
   lines.push('这些系统不会自动改；打开广告健康页看证据和对照，要不要动由你定（一次只改一处）。')
@@ -146,20 +196,27 @@ export function buildAdsRuleFindingItems(
     if (!newest || !isUsableNewest(newest, now)) continue
 
     const candidates = orderCandidates(ruleHits(newest).filter((f) => findingKey(f) !== null))
+    // daysSinceLatest 恒传 0：候选只取最新一行，新鲜度由 ADS_RULE_STALE_DAYS 单独卡（巡察记录的日期本来就比今天晚一天）。
     const kept = candidates.filter((f) => {
       const key = findingKey(f)
-      return key !== null && shouldRemindToday(streakFor(key, clientRows), 0, now)
+      if (key === null) return false
+      const streak = streakFor(key, clientRows)
+      return streak >= ADS_RULE_MIN_STREAK && shouldRemindToday(streak - ADS_RULE_MIN_STREAK + 1, 0, now)
     })
-    if (kept.length === 0) continue
 
-    items.push({
-      kind: 'ads_rule_finding',
-      client_id: clientId,
-      client_name: nameOf(clientId),
-      what: `${kept.length} 条广告需要你看一眼：${kept[0].title}`,
-      how: buildHow(kept),
-      href: adsHealthHref(clientId),
-    })
+    if (kept.length > 0) {
+      items.push({
+        kind: 'ads_rule_finding',
+        client_id: clientId,
+        client_name: nameOf(clientId),
+        what: `${kept.length} 条广告需要你看一眼：${kept[0].title}`,
+        how: buildHow(kept),
+        href: adsHealthHref(clientId),
+      })
+    }
+
+    const gap = configGapItem(clientId, clientRows, now, nameOf)
+    if (gap) items.push(gap)
   }
   return items
 }

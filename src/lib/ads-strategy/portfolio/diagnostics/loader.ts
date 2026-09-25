@@ -37,6 +37,65 @@ export function hourlyRowsFromGraph(rows: GraphHourlySpendRow[]): HourlyRow[] {
   })).filter(r => Number.isInteger(r.hour))
 }
 
+/** 关键字段（不比 targeting_summary —— 它正是被加字段污染的那个）。 */
+const KEY_FIELDS = [
+  'status', 'daily_budget_minor', 'lifetime_budget_minor', 'bid_strategy', 'optimization_goal',
+  'destination_type', 'included_audience_ids', 'excluded_audience_ids', 'creative_video_ids', 'creative_page_id',
+] as const
+
+function keyFieldsChanged(prev: EntitySnapshotRow, row: EntitySnapshotRow): boolean {
+  return KEY_FIELDS.some(f => JSON.stringify(prev[f]) !== JSON.stringify(row[f]))
+}
+
+/** 窗口里找不到前一行时，只有 Meta 修改时间落在抓取时刻前 2 天内才认。 */
+function changedWithoutPrev(row: EntitySnapshotRow): boolean {
+  if (!row.source_updated_time) return false
+  return Date.parse(row.captured_at) - Date.parse(row.source_updated_time) <= 2 * 86_400_000
+}
+
+function isRealChange(prev: EntitySnapshotRow | null, row: EntitySnapshotRow): boolean {
+  if (!prev) return changedWithoutPrev(row)
+  if (prev.source_updated_time && row.source_updated_time) {
+    return prev.source_updated_time !== row.source_updated_time
+  }
+  return keyFieldsChanged(prev, row)
+}
+
+/**
+ * 从近 35 天快照里抽「真改过」的设置变更（D2/D10 的学习期剔除用）。
+ * 🔴 快照的 changed 不等于 Meta 那边真改了：我们自己加字段、两个写入程序序列化不一致都会记成 changed
+ *    （2026-09-26 魏征生产核实：9/15 后约一半 changed 行 Meta 修改时间没动）。所以：
+ *    - 前后两行都有 source_updated_time → 只认它变了（Meta 的修改时间是权威）；
+ *    - 任一缺 → 退回比关键字段（状态、预算、出价、优化目标、去向、受众 id、素材视频、创意主页），不比 targeting_summary（它正是被加字段污染的那个）；
+ *    - 窗口里找不到前一行 → 只有 source_updated_time 落在抓取时刻前 2 天内才认。
+ * 变更时刻优先用 source_updated_time，没有才用 captured_at。
+ */
+export function realSettingChanges(rows: readonly EntitySnapshotRow[]): SettingChange[] {
+  const byEntity = new Map<string, EntitySnapshotRow[]>()
+  for (const r of rows) {
+    const key = `${r.level}:${r.entity_id}`
+    const list = byEntity.get(key)
+    if (list) list.push(r)
+    else byEntity.set(key, [r])
+  }
+
+  const out: SettingChange[] = []
+  for (const list of byEntity.values()) {
+    list.sort((a, b) => (a.captured_at < b.captured_at ? -1 : a.captured_at > b.captured_at ? 1 : 0))
+    for (let i = 0; i < list.length; i++) {
+      const row = list[i]
+      if (row.capture_reason !== 'changed' && row.capture_reason !== 'kernel_post') continue
+      let prev: EntitySnapshotRow | null = null
+      for (let j = i - 1; j >= 0; j--) {
+        if (list[j].capture_reason !== 'disappeared') { prev = list[j]; break }
+      }
+      if (!isRealChange(prev, row)) continue
+      out.push({ level: row.level, entity_id: row.entity_id, captured_at: row.source_updated_time ?? row.captured_at })
+    }
+  }
+  return out
+}
+
 /** 截至某时刻，每个实体最新一行快照（去掉「消失」的实体）。 */
 export function latestSnapshotsAsOf(rows: EntitySnapshotRow[], asOfMs: number): EntitySnapshotRow[] {
   const latest = new Map<string, EntitySnapshotRow>()
@@ -108,9 +167,7 @@ async function loadAccount(clientId: string, adAccountId: string, shared: boolea
       .eq('client_id', clientId).eq('ad_account_id', adAccountId).order('captured_at', { ascending: false }).limit(5),
   ])
 
-  const settingChanges: SettingChange[] = snapshots
-    .filter(r => r.capture_reason === 'changed' || r.capture_reason === 'kernel_post')
-    .map(r => ({ level: r.level, entity_id: r.entity_id, captured_at: r.captured_at }))
+  const settingChanges = realSettingChanges(snapshots)
 
   const account: AccountInput = {
     adAccountId, shared, timezone, currency,

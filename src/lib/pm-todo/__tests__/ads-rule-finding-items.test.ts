@@ -19,7 +19,7 @@ function hit(code: 'D2' | 'D10' | 'D3', adId: string, title = `${code} ${adId}`)
       { level: 'ad', id: adId, name: adId },
       { level: 'adset', id: 'as1', name: 'as1' },
     ],
-    reasons: ['对照：…', '建议', '止损：7 天后（约 2026-10-01）回头看——条件，就退回'],
+    reasons: ['建议这样做', '止损：7 天后（约 2026-10-01）回头看——条件，就退回', '对照：…'],
   }
 }
 
@@ -110,19 +110,22 @@ describe('streakFor', () => {
     expect(streakFor('D10:ad1', rows)).toBe(3)
   })
 
-  it('does not break the streak on rows without the key', () => {
+  it('a row without the key breaks the streak', () => {
     const rows: GrowthStateRow[] = [
       row('c1', '2026-09-24', [hit('D10', 'ad1')]),
       row('c1', '2026-09-23', [hit('D2', 'other')]),
       row('c1', '2026-09-22', [hit('D10', 'ad1')]),
     ]
-    expect(streakFor('D10:ad1', rows)).toBe(2)
+    expect(streakFor('D10:ad1', rows)).toBe(1)
   })
 })
 
 describe('buildAdsRuleFindingItems', () => {
   it('produces one item for a fresh hit', () => {
-    const rows = [row('c1', '2026-09-24', [hit('D10', 'ad1')])]
+    const rows = [
+      row('c1', '2026-09-24', [hit('D10', 'ad1')]),
+      row('c1', '2026-09-23', [hit('D10', 'ad1')]),
+    ]
     const now = new Date('2026-09-25T19:00:00Z')
     const items = buildAdsRuleFindingItems(rows, now, nameOf)
 
@@ -134,8 +137,36 @@ describe('buildAdsRuleFindingItems', () => {
     expect(item.href.startsWith('https://')).toBe(true)
     expect(item.what).toContain('1 条广告')
     expect(item.what).toContain('D10 ad1')
+    expect(item.how).toContain('怎么办：建议这样做')
     expect(item.how).toContain('止损：')
     expect(item.how).toContain('系统不会自动改')
+  })
+
+  it('a hit present only on the newest row produces no item', () => {
+    const rows = [
+      row('c1', '2026-09-24', [hit('D10', 'ad1')]),
+      row('c1', '2026-09-23', []),
+    ]
+    const now = new Date('2026-09-25T19:00:00Z')
+    expect(buildAdsRuleFindingItems(rows, now, nameOf)).toEqual([])
+  })
+
+  it('a client_page_unknown problem with a manualTask produces its own item', () => {
+    const gap: RuleFinding = {
+      code: 'D10',
+      status: 'not_comparable',
+      title: 't',
+      notComparableReason: 'client_page_unknown',
+      manualTask: { what: 'W', how: 'H', href: 'https://example.test/settings' },
+    }
+    const rows = [row('c1', '2026-09-24', [gap])]
+    const now = new Date('2026-09-25T19:00:00Z')
+    const items = buildAdsRuleFindingItems(rows, now, nameOf)
+
+    expect(items).toHaveLength(1)
+    expect(items[0].what).toBe('W')
+    expect(items[0].how).toBe('H')
+    expect(items[0].href).toBe('https://example.test/settings')
   })
 
   it('ignores non-D2/D10 codes and non-hit statuses', () => {
@@ -165,7 +196,10 @@ describe('buildAdsRuleFindingItems', () => {
   })
 
   it('orders D10 before D2', () => {
-    const rows = [row('c1', '2026-09-24', [hit('D2', 'a'), hit('D10', 'b')])]
+    const rows = [
+      row('c1', '2026-09-24', [hit('D2', 'a'), hit('D10', 'b')]),
+      row('c1', '2026-09-23', [hit('D2', 'a'), hit('D10', 'b')]),
+    ]
     const now = new Date('2026-09-25T19:00:00Z')
     const items = buildAdsRuleFindingItems(rows, now, nameOf)
 
@@ -176,14 +210,16 @@ describe('buildAdsRuleFindingItems', () => {
   })
 
   it('lists at most 3 bullets and summarizes the rest', () => {
+    const hits = [
+      hit('D10', 'a1'),
+      hit('D10', 'a2'),
+      hit('D10', 'a3'),
+      hit('D10', 'a4'),
+      hit('D10', 'a5'),
+    ]
     const rows = [
-      row('c1', '2026-09-24', [
-        hit('D10', 'a1'),
-        hit('D10', 'a2'),
-        hit('D10', 'a3'),
-        hit('D10', 'a4'),
-        hit('D10', 'a5'),
-      ]),
+      row('c1', '2026-09-24', hits),
+      row('c1', '2026-09-23', hits),
     ]
     const now = new Date('2026-09-25T19:00:00Z')
     const items = buildAdsRuleFindingItems(rows, now, nameOf)
@@ -221,7 +257,9 @@ describe('buildAdsRuleFindingItems', () => {
   it('produces one item per client with its own href', () => {
     const rows = [
       row('c1', '2026-09-24', [hit('D10', 'ad1')]),
+      row('c1', '2026-09-23', [hit('D10', 'ad1')]),
       row('c2', '2026-09-24', [hit('D2', 'ad2')]),
+      row('c2', '2026-09-23', [hit('D2', 'ad2')]),
     ]
     const now = new Date('2026-09-25T19:00:00Z')
     const items = buildAdsRuleFindingItems(rows, now, nameOf)

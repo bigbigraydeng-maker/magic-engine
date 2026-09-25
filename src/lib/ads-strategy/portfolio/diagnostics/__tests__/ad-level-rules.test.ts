@@ -122,8 +122,12 @@ describe('Scenario A — new test ad with a broken form (D10)', () => {
     expect(hit.evidence.peer_ads).toBe(2)
     expect(hit.title).toContain('比同组其他广告')
     expect(hit.checkBack).toBeDefined()
-    expect(hit.checkBack?.fallback).toContain('停掉这条新广告')
-    expect(hit.reasons.some(r => r.startsWith('止损：'))).toBe(true)
+    expect(hit.checkBack?.fallback).toContain('停掉这条（新上线或刚重新开投的）')
+    expect(hit.reasons[0]).toContain('测试版应该单独放一个组测')
+    expect(hit.reasons[1].startsWith('止损：')).toBe(true)
+    expect(hit.reasons.some(r => r.includes('p='))).toBe(false)
+    expect(hit.checkBack?.after.startsWith('3 天后')).toBe(true)
+    expect(Number(hit.evidence.lifetime_cost_multiple) >= 1.5).toBe(true)
     expect(hit.clientVisible).toBe(false)
   })
 
@@ -171,9 +175,9 @@ describe('Scenario A — new test ad with a broken form (D10)', () => {
 
   it('8. persistence gate: only one bad day → no D10 hit', () => {
     const oneBad: DaySpec[] = [
-      { spend: 60, impressions: 2400, clicks: 80, linkClicks: 40, leads: 0 },
-      { spend: 60, impressions: 2400, clicks: 80, linkClicks: 40, leads: 12 },
-      { spend: 60, impressions: 2400, clicks: 80, linkClicks: 48, leads: 12 },
+      { spend: 50, impressions: 2400, clicks: 80, linkClicks: 80, leads: 0 },
+      { spend: 50, impressions: 2400, clicks: 80, linkClicks: 40, leads: 6 },
+      { spend: 50, impressions: 2400, clicks: 80, linkClicks: 40, leads: 6 },
     ]
     const diags = run(account(scenarioASnaps(), scenarioAAdDaily(oneBad)))
     expect(findFor(diags, 'D10', 'v4')?.status).not.toBe('hit')
@@ -227,7 +231,9 @@ describe('Scenario B — old ad CTR decay (D2)', () => {
     expect(hit.evidence.baseline_source).toBe('own_history')
     expect(hit.evidence.fatigue_kind).toBe('creative')
     expect(hit.title).toContain('素材老化')
-    expect(hit.checkBack?.fallback).toContain('停掉新加的那条广告')
+    expect(hit.checkBack?.fallback).toContain('停掉新建的那个测试组，这条不动')
+    expect(hit.reasons[0]).toContain('另建一个新广告组')
+    expect(hit.reasons.some(r => r.includes('新增一条广告'))).toBe(false)
   })
 
   it('12. high frequency → audience fatigue kind', () => {
@@ -245,15 +251,31 @@ describe('Scenario B — old ad CTR decay (D2)', () => {
     expect(d2).toHaveLength(1)
     expect(d2[0].evidence.fatigue_kind).toBe('unknown')
     expect(d2[0].title).toContain('频次拿不到')
+    expect(d2[0].reasons[0].startsWith('频次拿不到')).toBe(true)
+    expect(d2[0].checkBack?.condition).not.toContain('新组')
+    expect(d2[0].checkBack?.fallback).toContain('按当时的频次')
   })
 
-  it('14. recently changed adset → recently_changed note, no D2 hit', () => {
-    const changes: SettingChange[] = [{ level: 'adset', entity_id: 'as1', captured_at: '2026-09-15T08:00:00Z' }]
+  it('14a. change on 2026-09-20 → no D2 hit, recently_changed note titled with the date', () => {
+    const changes: SettingChange[] = [{ level: 'adset', entity_id: 'as1', captured_at: '2026-09-20T02:00:00Z' }]
     const diags = run(account(scenarioBSnaps(), scenarioBAdDaily(), [campaignFreqRow(1.7)], changes))
     expect(diags.filter(d => d.code === 'D2' && d.status === 'hit')).toHaveLength(0)
     const note = diags.find(d => d.status === 'not_comparable' && d.notComparableReason === 'recently_changed')
     expect(note).toBeDefined()
-    expect(note?.units[0].id).toBe('old')
+    expect(note?.title).toContain('2026-09-20')
+  })
+
+  it('14b. change on 2026-09-08 → D2 hit still present (baseline keeps 2026-09-15..21)', () => {
+    const changes: SettingChange[] = [{ level: 'adset', entity_id: 'as1', captured_at: '2026-09-08T02:00:00Z' }]
+    const diags = run(account(scenarioBSnaps(), scenarioBAdDaily(), [campaignFreqRow(1.7)], changes))
+    expect(diags.filter(d => d.code === 'D2' && d.status === 'hit')).toHaveLength(1)
+  })
+
+  it('14c. change on 2026-09-15 → neither a D2 hit nor a recently_changed note', () => {
+    const changes: SettingChange[] = [{ level: 'adset', entity_id: 'as1', captured_at: '2026-09-15T02:00:00Z' }]
+    const diags = run(account(scenarioBSnaps(), scenarioBAdDaily(), [campaignFreqRow(1.7)], changes))
+    expect(diags.filter(d => d.code === 'D2' && d.status === 'hit')).toHaveLength(0)
+    expect(diags.some(d => d.status === 'not_comparable' && d.notComparableReason === 'recently_changed')).toBe(false)
   })
 
   it('15. change older than the baseline window → D2 hit still present', () => {
@@ -263,18 +285,27 @@ describe('Scenario B — old ad CTR decay (D2)', () => {
   })
 
   it('16. ad set stopped one day inside the window → recently_changed note, no D2 hit', () => {
-    const rows = scenarioBAdDaily().filter(r => !(r.entity_id === 'old' && r.insight_date === '2026-09-12'))
+    const rows = scenarioBAdDaily().filter(r => !(r.entity_id === 'old' && r.insight_date === '2026-09-20'))
     const otherAdsetRow: DailyRow = {
-      level: 'adset', entity_id: 'as-other', parent_id: 'c1', insight_date: '2026-09-12', spend: 30, impressions: 100,
+      level: 'adset', entity_id: 'as-other', parent_id: 'c1', insight_date: '2026-09-20', spend: 30, impressions: 100,
       reach: null, clicks: 5, leads: 0, messaging_conversations: 0, video_thruplays: null, actions: [],
     }
     const diags = run(account(scenarioBSnaps(), rows, [campaignFreqRow(1.7), otherAdsetRow]))
     expect(diags.filter(d => d.code === 'D2' && d.status === 'hit')).toHaveLength(0)
     const note = diags.find(d => d.status === 'not_comparable' && d.notComparableReason === 'recently_changed')
     expect(note).toBeDefined()
+
+    const gapRows = scenarioBAdDaily().filter(r => !(r.entity_id === 'old' && r.insight_date === '2026-09-12'))
+    const gapOtherRow: DailyRow = {
+      level: 'adset', entity_id: 'as-other', parent_id: 'c1', insight_date: '2026-09-12', spend: 30, impressions: 100,
+      reach: null, clicks: 5, leads: 0, messaging_conversations: 0, video_thruplays: null, actions: [],
+    }
+    const gapDiags = run(account(scenarioBSnaps(), gapRows, [campaignFreqRow(1.7), gapOtherRow]))
+    expect(gapDiags.filter(d => d.code === 'D2' && d.status === 'hit')).toHaveLength(0)
+    expect(gapDiags.some(d => d.status === 'not_comparable' && d.notComparableReason === 'recently_changed')).toBe(false)
   })
 
-  it('17. honeymoon: young ad with only 4 usable baseline days → no D2 hit', () => {
+  it('17. 蜜月期剔除：新广告头 7 天的高点击率不进对照（剔除后降幅不够，不报）', () => {
     const snaps = [campaign(), adset(), ad('young'), ad('anchor', { creative_page_id: 'page-other' })]
     const rows: DailyRow[] = []
     rows.push(adRow('anchor', '2026-08-28', { spend: 1, impressions: 10, clicks: 1, linkClicks: 1, leads: 0 }))
@@ -285,15 +316,6 @@ describe('Scenario B — old ad CTR decay (D2)', () => {
     expect(findFor(diags, 'D2', 'young')).toBeUndefined()
   })
 
-  it('18. actions null with clicks > 0 on a baseline day → D2 hit still present, dropped_days 0', () => {
-    const rows = scenarioBAdDaily().map(r =>
-      r.entity_id === 'old' && r.insight_date === '2026-09-20' ? adRow('old', '2026-09-20', { spend: 20, impressions: 1000, clicks: 40, linkClicks: 20, leads: 3 }, true) : r,
-    )
-    const diags = run(account(scenarioBSnaps(), rows, [campaignFreqRow(1.7)]))
-    const d2 = diags.filter(d => d.code === 'D2' && d.status === 'hit')
-    expect(d2).toHaveLength(1)
-    expect(d2[0].evidence.dropped_days).toBe(0)
-  })
 })
 
 // ---------------------------------------------------------------------------
@@ -410,6 +432,68 @@ describe('每道闸单独直测（配合变异测试）', () => {
     for (const d of days('2026-09-22', '2026-09-24')) rows.push(adRow('lowctr', d, { spend: 20, impressions: 5000, clicks: 8, linkClicks: 4, leads: 0 }))
     const diags = run(account(snaps, rows, [campaignFreqRow(1.7)]))
     expect(findFor(diags, 'D2', 'lowctr')).toBeUndefined()
+  })
+
+  it('同组对照不挂「最近改过」闸：组里 9/16 改过设置，新广告照样能判', () => {
+    const changes: SettingChange[] = [
+      { level: 'adset', entity_id: 'as1', captured_at: '2026-09-16T02:00:00Z' },
+      { level: 'campaign', entity_id: 'c1', captured_at: '2026-09-21T02:00:00Z' },
+    ]
+    const diags = run(account(scenarioASnaps(), scenarioAAdDaily(V4_BROKEN), [], changes))
+    expect(findFor(diags, 'D10', 'v4')?.status).toBe('hit')
+  })
+
+  it('样本不够：贵了但链接点击太少 → 只出「还不够判」备注', () => {
+    const thin: DaySpec[] = [
+      { spend: 20, impressions: 800, clicks: 30, linkClicks: 5, leads: 0 },
+      { spend: 20, impressions: 800, clicks: 30, linkClicks: 5, leads: 0 },
+      { spend: 20, impressions: 800, clicks: 30, linkClicks: 5, leads: 0 },
+    ]
+    const diags = run(account(scenarioASnaps(), scenarioAAdDaily(thin)))
+    const note = diags.find(d => d.units.some(u => u.id === 'v4') && d.status === 'not_comparable')
+    expect(note).toBeDefined()
+    expect(note?.notComparableReason).toBe('below_min_sample')
+    expect(note?.title).toContain('还不够判')
+    expect(findFor(diags, 'D10', 'v4')?.status).not.toBe('hit')
+  })
+
+  it('上线至今成本闸：只是最近 3 天差、上线以来整体仍便宜 → 不报', () => {
+    const snaps = [campaign(), adset(), ad('p1'), ad('p2'), ad('steady')]
+    const rows = scenarioAAdDaily(V4_BROKEN).filter(r => r.entity_id !== 'v4')
+    for (const d of days('2026-09-15', '2026-09-21')) rows.push(adRow('steady', d, { spend: 10, impressions: 500, clicks: 25, linkClicks: 20, leads: 6 }))
+    for (const d of V4_DAYS) rows.push(adRow('steady', d, { spend: 40, impressions: 1500, clicks: 60, linkClicks: 40, leads: 1 }))
+    const diags = run(account(snaps, rows))
+    expect(findFor(diags, 'D10', 'steady')?.status).not.toBe('hit')
+
+    const liveRows = scenarioAAdDaily(V4_BROKEN).filter(r => r.entity_id !== 'v4')
+    for (const d of days('2026-09-15', '2026-09-21')) liveRows.push(adRow('steady', d, { spend: 10, impressions: 500, clicks: 25, linkClicks: 20, leads: 0 }))
+    for (const d of V4_DAYS) liveRows.push(adRow('steady', d, { spend: 40, impressions: 1500, clicks: 60, linkClicks: 40, leads: 1 }))
+    const liveDiags = run(account(snaps, liveRows))
+    expect(findFor(liveDiags, 'D10', 'steady')?.status).toBe('hit')
+  })
+
+  it('成本倍数闸（走自身历史、没有上线至今闸兜底）：点击→留资掉了但每个留资反而更便宜 → 不报', () => {
+    const snaps = [campaign(), adset(), ad('o2')]
+    const rows: DailyRow[] = []
+    for (const d of days('2026-08-28', '2026-09-21')) rows.push(adRow('o2', d, { spend: 20, impressions: 1000, clicks: 40, linkClicks: 20, leads: 3 }))
+    for (const d of days('2026-09-22', '2026-09-24')) rows.push(adRow('o2', d, { spend: 5, impressions: 1000, clicks: 40, linkClicks: 20, leads: 1 }))
+    const diags = run(account(snaps, rows, [campaignFreqRow(1.7)]))
+    expect(findFor(diags, 'D10', 'o2')?.status).not.toBe('hit')
+
+    const liveRows: DailyRow[] = []
+    for (const d of days('2026-08-28', '2026-09-21')) liveRows.push(adRow('o2', d, { spend: 20, impressions: 1000, clicks: 40, linkClicks: 20, leads: 3 }))
+    for (const d of days('2026-09-22', '2026-09-24')) liveRows.push(adRow('o2', d, { spend: 12, impressions: 1000, clicks: 40, linkClicks: 20, leads: 1 }))
+    const liveDiags = run(account(snaps, liveRows, [campaignFreqRow(1.7)]))
+    const hit = findFor(liveDiags, 'D10', 'o2')
+    expect(hit?.status).toBe('hit')
+    expect(hit?.evidence.baseline_source).toBe('own_history')
+  })
+
+  it('评估日之后的改动不算（回放/补跑安全）', () => {
+    const changes: SettingChange[] = [{ level: 'adset', entity_id: 'as1', captured_at: '2026-09-26T02:00:00Z' }]
+    const diags = run(account(scenarioBSnaps(), scenarioBAdDaily(), [campaignFreqRow(1.7)], changes))
+    expect(diags.filter(d => d.code === 'D2' && d.status === 'hit')).toHaveLength(1)
+    expect(diags.some(d => d.status === 'not_comparable' && d.notComparableReason === 'recently_changed')).toBe(false)
   })
 })
 

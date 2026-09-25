@@ -37,8 +37,10 @@ interface AdCase {
   dropped: number
   firstDelivery: string
   isNewAd: boolean
+  changeDate: string | null
+  learningNow: boolean
+  ownBaseRaw: FunnelDay[] | null
   ownBase: FunnelDay[] | null
-  changed: boolean
 }
 
 interface Candidate {
@@ -47,21 +49,17 @@ interface Candidate {
   build: (adjustedP: number) => Diagnosis
 }
 
-interface D2Result {
+interface RuleResult {
   candidate?: Candidate
   note?: Diagnosis
 }
 
-interface D10Result {
-  candidate?: Candidate
-  note?: Diagnosis
-}
+type BaselineChoice =
+  | { kind: 'base'; base: FunnelTotals; source: 'own_history' | 'same_adset_peers'; peerCount: number | null }
+  | { kind: 'learning' }
 
-interface BaselineChoice {
-  base: FunnelTotals
-  source: 'own_history' | 'same_adset_peers'
-  peerCount: number | null
-}
+/** 设置真改过之后，这么多天内的数据算学习期：不进自身对照；近期窗落在学习期里就先不判。 */
+export const RULE_LEARNING_DAYS = 7
 
 function pct(rate: number): string {
   return `${(rate * 100).toFixed(1)}%`
@@ -162,17 +160,25 @@ function isEligible(ctx: AccountContext, input: DiagnosisInput, ad: EntitySnapsh
   return isClickDrivenGoal(adset.optimization_goal)
 }
 
-function recentlyChanged(ctx: AccountContext, ad: EntitySnapshotRow, from: string, firstDelivery: string): boolean {
-  const ids = new Set([ad.entity_id, ad.adset_id, ad.campaign_id].filter((x): x is string => !!x))
-  const changes = ctx.account.settingChanges ?? []
-  for (const change of changes) {
-    if (ids.has(change.entity_id) && change.captured_at.slice(0, 10) >= from) return true
-  }
-  return adsetStopped(ctx, ad.adset_id, firstDelivery)
+function toLocalDate(iso: string, tz: string | null): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz ?? 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso))
 }
 
-function adsetStopped(ctx: AccountContext, adsetId: string | null, firstDelivery: string): boolean {
-  if (!adsetId) return false
+function lastSettingChange(ctx: AccountContext, ad: EntitySnapshotRow, from: string): string | null {
+  const ids = new Set([ad.entity_id, ad.adset_id, ad.campaign_id].filter((x): x is string => !!x))
+  const changes = ctx.account.settingChanges ?? []
+  let latest: string | null = null
+  for (const change of changes) {
+    if (!ids.has(change.entity_id)) continue
+    const day = toLocalDate(change.captured_at, ctx.account.timezone)
+    if (day < from || day > ctx.date) continue
+    if (latest === null || day > latest) latest = day
+  }
+  return latest
+}
+
+function lastAdsetStopDay(ctx: AccountContext, adsetId: string | null, firstDelivery: string): string | null {
+  if (!adsetId) return null
   const days = windowDays(ctx.date, RULE_BASELINE_DAYS + RULE_RECENT_DAYS)
   const adsetSpendByDay = new Map<string, number>()
   const accountSpendByDay = new Map<string, number>()
@@ -181,13 +187,24 @@ function adsetStopped(ctx: AccountContext, adsetId: string | null, firstDelivery
     if (row.entity_id === adsetId) adsetSpendByDay.set(row.insight_date, (adsetSpendByDay.get(row.insight_date) ?? 0) + row.spend)
     accountSpendByDay.set(row.insight_date, (accountSpendByDay.get(row.insight_date) ?? 0) + row.spend)
   }
+  let latest: string | null = null
   for (const day of days) {
     if (day < firstDelivery) continue
     const adsetSpend = adsetSpendByDay.get(day) ?? 0
     const accountSpend = accountSpendByDay.get(day) ?? 0
-    if (adsetSpend <= 0 && accountSpend > 0) return true
+    if (adsetSpend <= 0 && accountSpend > 0) {
+      if (latest === null || day > latest) latest = day
+    }
   }
-  return false
+  return latest
+}
+
+function lastChangeDate(ctx: AccountContext, ad: EntitySnapshotRow, from: string, firstDelivery: string): string | null {
+  const setting = lastSettingChange(ctx, ad, from)
+  const stopped = lastAdsetStopDay(ctx, ad.adset_id, firstDelivery)
+  if (setting === null) return stopped
+  if (stopped === null) return setting
+  return setting > stopped ? setting : stopped
 }
 
 function passesCostFloor(recentTotals: FunnelTotals, base: FunnelTotals): boolean {
@@ -209,8 +226,10 @@ function campaignFrequency(ctx: AccountContext, campaignId: string | null): numb
   return freq
 }
 
-function buildOwnBase(rows: readonly DailyRow[], baseline: readonly string[], metric: CoreMetric | null, opts: OutcomeOpts, firstDelivery: string, historyStart: string | null): FunnelDay[] | null {
-  const cut = firstDelivery === historyStart ? null : shiftDate(firstDelivery, RULE_HONEYMOON_DAYS)
+function buildOwnBase(rows: readonly DailyRow[], baseline: readonly string[], metric: CoreMetric | null, opts: OutcomeOpts, firstDelivery: string, historyStart: string | null, floor: string | null): FunnelDay[] | null {
+  const honeymoon = firstDelivery === historyStart ? null : shiftDate(firstDelivery, RULE_HONEYMOON_DAYS)
+  let cut = honeymoon
+  if (floor !== null && (cut === null || floor > cut)) cut = floor
   const usable = cut === null ? baseline : baseline.filter(d => d >= cut)
   const baseSeries = series(rows, usable, metric, opts)
   const totals = sumDays(baseSeries.days)
@@ -232,10 +251,13 @@ function buildAdCase(ctx: AccountContext, input: DiagnosisInput, ad: EntitySnaps
   if (adsetRecentSpend > 0 && recentTotals.spend < RULE_MIN_SHARE_OF_ADSET_SPEND * adsetRecentSpend) return null
   const firstDelivery = firstDeliveryOf(rows)
   if (firstDelivery === null) return null
-  const ownBase = buildOwnBase(rows, baseline, metric, opts, firstDelivery, historyStart)
+  const ownBaseRaw = buildOwnBase(rows, baseline, metric, opts, firstDelivery, historyStart, null)
+  const changeDate = lastChangeDate(ctx, ad, baseline[0] ?? ctx.date, firstDelivery)
+  const learningNow = changeDate !== null && shiftDate(changeDate, RULE_LEARNING_DAYS) > recent[0]
+  const floor = changeDate === null ? null : shiftDate(changeDate, RULE_LEARNING_DAYS)
+  const ownBase = buildOwnBase(rows, baseline, metric, opts, firstDelivery, historyStart, floor)
   const isNewAd = firstDelivery !== historyStart && firstDelivery >= shiftDate(ctx.date, -14)
-  const changed = recentlyChanged(ctx, ad, baseline[0] ?? ctx.date, firstDelivery)
-  return { ad, adset, metric, opts, recent: recentSeries.days, recentTotals, dropped: recentSeries.dropped, firstDelivery, isNewAd, ownBase, changed }
+  return { ad, adset, metric, opts, recent: recentSeries.days, recentTotals, dropped: recentSeries.dropped, firstDelivery, isNewAd, changeDate, learningNow, ownBaseRaw, ownBase }
 }
 
 function adUnit(ctx: AccountContext, ad: EntitySnapshotRow): DiagnosisUnit {
@@ -247,10 +269,10 @@ function unitsFor(ctx: AccountContext, c: AdCase): DiagnosisUnit[] {
   return [adUnit(ctx, c.ad), unitOf(ctx, 'adset', c.adset.entity_id)]
 }
 
-function checkBackDays(v: StepVerdict, recentTrials: number): number {
+function checkBackDays(v: StepVerdict, recentTrials: number, minDays: number): number {
   const perDayExpected = (recentTrials / RULE_RECENT_DAYS) * v.baseRate
   const need = perDayExpected > 0 ? Math.ceil(RULE_MIN_EXPECTED / perDayExpected) : 7
-  return Math.max(7, need)
+  return Math.max(minDays, need)
 }
 
 function afterText(ctx: AccountContext, days: number): string {
@@ -261,7 +283,11 @@ function sourceLabel(source: 'own_history' | 'same_adset_peers'): string {
   return source === 'own_history' ? '自身正常水平' : '同组其他广告'
 }
 
-function baseEvidence(ctx: AccountContext, c: AdCase, base: FunnelTotals, source: 'own_history' | 'same_adset_peers', peerCount: number | null, v: StepVerdict, adj: number, extra: Record<string, string | number | boolean | null>): Record<string, string | number | boolean | null> {
+function ctrOf(t: FunnelTotals): number {
+  return t.impressions > 0 ? round(t.clicks / t.impressions, 4) : 0
+}
+
+function baseEvidence(ctx: AccountContext, c: AdCase, base: FunnelTotals, source: 'own_history' | 'same_adset_peers', peerCount: number | null, v: StepVerdict, adj: number, rateKind: 'ctr' | 'link_click_to_result', extra: Record<string, string | number | boolean | null>): Record<string, string | number | boolean | null> {
   const baseCpr = costPerResult(base)
   const recentCpr = costPerResult(c.recentTotals)
   const costMultiple = baseCpr === null ? null : recentCpr === null ? null : round(recentCpr / baseCpr, 2)
@@ -270,8 +296,11 @@ function baseEvidence(ctx: AccountContext, c: AdCase, base: FunnelTotals, source
     window_end: ctx.date,
     baseline_source: source,
     core_metric: c.metric,
+    rate_kind: rateKind,
     base_rate: round(v.baseRate, 4),
     recent_rate: round(v.recentRate, 4),
+    base_ctr: ctrOf(base),
+    recent_ctr: ctrOf(c.recentTotals),
     relative_drop: round(v.relativeDrop, 3),
     expected: round(v.expected, 1),
     p_value: v.p,
@@ -288,16 +317,18 @@ function baseEvidence(ctx: AccountContext, c: AdCase, base: FunnelTotals, source
     peer_ads: peerCount,
     dropped_days: c.dropped,
     first_delivery: c.firstDelivery,
+    change_date: c.changeDate,
     ...extra,
   }
 }
 
-function sampleFor(c: AdCase, upstream: string, base: FunnelTotals): { label: string; value: number }[] {
-  const recentValue = upstream === '链接点击' ? c.recentTotals.linkClicks : c.recentTotals.impressions
-  const baseValue = upstream === '链接点击' ? base.linkClicks : base.impressions
+function sampleFor(c: AdCase, base: FunnelTotals, kind: 'link' | 'impressions'): { label: string; value: number }[] {
+  const noun = kind === 'link' ? '链接点击' : '曝光'
+  const recentValue = kind === 'link' ? c.recentTotals.linkClicks : c.recentTotals.impressions
+  const baseValue = kind === 'link' ? base.linkClicks : base.impressions
   return [
-    { label: `近 3 天${upstream}`, value: recentValue },
-    { label: `对照期${upstream}`, value: baseValue },
+    { label: `近 3 天${noun}`, value: recentValue },
+    { label: `对照期${noun}`, value: baseValue },
   ]
 }
 
@@ -308,8 +339,9 @@ function d2KindText(kind: FatigueKind, freq: number | null): string {
 }
 
 function d2Suggestion(kind: FatigueKind): string {
-  if (kind === 'audience') return '考虑扩受众，换素材治不了。'
-  return '在同组新增一条广告测新素材，别直接替换这条的素材（替换要重新审核、会重置学习）。'
+  if (kind === 'audience') return '同一批人看腻了：考虑扩受众，换素材治不了。'
+  if (kind === 'creative') return '素材老化：在同一个系列里另建一个新广告组测新素材（共享预算），这条先别动——往正在跑的组里加广告会让它重新学习。'
+  return `频次拿不到，先看所在系列近 7 天频次：高于 ${FATIGUE_FREQUENCY_HIGH} 就扩受众，不高就在同一系列另建新组测新素材；这条先别动。`
 }
 
 function d2CheckBack(ctx: AccountContext, base: FunnelTotals, kind: FatigueKind, days: number): CheckBack {
@@ -318,7 +350,10 @@ function d2CheckBack(ctx: AccountContext, base: FunnelTotals, kind: FatigueKind,
   if (kind === 'audience') {
     return { after, condition: `扩受众后到时点击率还没回到正常水平的 75%（${pct(baseRate * 0.75)}）`, fallback: '改回原来的受众' }
   }
-  return { after, condition: `到时新素材点击率不到这条正常水平的 75%（${pct(baseRate * 0.75)}）`, fallback: '停掉新加的那条广告，这条不动' }
+  if (kind === 'creative') {
+    return { after, condition: `到时新组的素材点击率不到这条正常水平的 75%（${pct(baseRate * 0.75)}）`, fallback: '停掉新建的那个测试组，这条不动' }
+  }
+  return { after, condition: `到时这条点击率仍低于正常水平的 75%（${pct(baseRate * 0.75)}）`, fallback: '按当时的频次再决定扩受众还是另建新组测新素材' }
 }
 
 function d2Hit(ctx: AccountContext, c: AdCase, base: FunnelTotals, v: StepVerdict, adj: number): Diagnosis {
@@ -328,12 +363,12 @@ function d2Hit(ctx: AccountContext, c: AdCase, base: FunnelTotals, v: StepVerdic
   const baseRate = base.impressions > 0 ? base.clicks / base.impressions : 0
   const recentRate = c.recentTotals.impressions > 0 ? c.recentTotals.clicks / c.recentTotals.impressions : 0
   const drop = baseRate > 0 ? 1 - recentRate / baseRate : 0
-  const days = checkBackDays(v, c.recentTotals.impressions)
+  const days = checkBackDays(v, c.recentTotals.impressions, 7)
   const after = afterText(ctx, days)
   const suggestion = d2Suggestion(kind)
   const checkBack = d2CheckBack(ctx, base, kind, days)
   const title = `素材疲劳：「${name}」点击率从自身正常的 ${pct(baseRate)} 掉到 ${pct(recentRate)}（降 ${Math.round(drop * 100)}%）——${d2KindText(kind, freq)}`
-  const basis = `对照：自身前 14 天（已剔除上线头 7 天）· 近 3 天曝光 ${c.recentTotals.impressions}、点击 ${c.recentTotals.clicks} · 按对照应有约 ${v.expected.toFixed(1)} 次点击 · 校正后 p=${Number(adj.toPrecision(2))}`
+  const basis = `对照：自身前 14 天（已剔除上线头 7 天）· 近 3 天曝光 ${c.recentTotals.impressions}、点击 ${c.recentTotals.clicks} · 按对照应有约 ${v.expected.toFixed(1)} 次点击`
   const caliber = `口径：点击率 = 全部点击 ÷ 曝光；频次取所在广告系列 7 天去重值，高于 ${FATIGUE_FREQUENCY_HIGH} 算看腻（广告健康页系列层那套用的是 2.5，口径不同）`
   const stopLoss = `止损：${after}回头看——${checkBack.condition}，就${checkBack.fallback}`
   const discipline = '一次只改一处；任何改动都会让系统重新学习，改完别再追着改'
@@ -342,22 +377,16 @@ function d2Hit(ctx: AccountContext, c: AdCase, base: FunnelTotals, v: StepVerdic
     status: 'hit',
     title,
     units: unitsFor(ctx, c),
-    evidence: baseEvidence(ctx, c, base, 'own_history', null, v, adj, { frequency_7d: freq, fatigue_kind: kind }),
-    sample: sampleFor(c, '曝光', base),
-    reasons: [basis, caliber, suggestion, stopLoss, discipline],
+    evidence: baseEvidence(ctx, c, base, 'own_history', null, v, adj, 'ctr', { frequency_7d: freq, fatigue_kind: kind }),
+    sample: sampleFor(c, base, 'impressions'),
+    reasons: [suggestion, stopLoss, basis, caliber, discipline],
     clientVisible: false,
     checkBack,
   }
 }
 
-function evaluateD2(ctx: AccountContext, c: AdCase): D2Result {
-  if (c.ownBase === null) return {}
-  const base = sumDays(c.ownBase)
-  if (base.impressions < D2_MIN_BASE_IMPRESSIONS) return {}
-  if (base.impressions <= 0 || base.clicks / base.impressions < D2_CTR_SIGNAL_FLOOR) return {}
-  if (c.recentTotals.impressions < D2_MIN_RECENT_IMPRESSIONS) return {}
-  if (!passesCostFloor(c.recentTotals, base)) return {}
-  const v = judgeStep({
+function d2Verdict(c: AdCase, base: FunnelTotals): StepVerdict {
+  return judgeStep({
     recentSuccess: c.recentTotals.clicks,
     recentTrials: c.recentTotals.impressions,
     baseSuccess: base.clicks,
@@ -365,8 +394,31 @@ function evaluateD2(ctx: AccountContext, c: AdCase): D2Result {
     recentDaily: c.recent.map(d => ({ success: d.clicks, trials: d.impressions })),
     minRelativeDrop: D2_MIN_CTR_DROP,
   })
+}
+
+function d2BaseUsable(base: FunnelTotals): boolean {
+  if (base.impressions < D2_MIN_BASE_IMPRESSIONS) return false
+  if (base.impressions <= 0 || base.clicks / base.impressions < D2_CTR_SIGNAL_FLOOR) return false
+  return true
+}
+
+function evaluateD2(ctx: AccountContext, c: AdCase): RuleResult {
+  if (c.learningNow) {
+    if (c.ownBaseRaw === null) return {}
+    const raw = sumDays(c.ownBaseRaw)
+    if (!d2BaseUsable(raw)) return {}
+    if (c.recentTotals.impressions < D2_MIN_RECENT_IMPRESSIONS) return {}
+    if (!passesCostFloor(c.recentTotals, raw)) return {}
+    if (d2Verdict(c, raw).reason !== 'ok') return {}
+    return { note: recentlyChangedNote(ctx, c, 'D2') }
+  }
+  if (c.ownBase === null) return {}
+  const base = sumDays(c.ownBase)
+  if (!d2BaseUsable(base)) return {}
+  if (c.recentTotals.impressions < D2_MIN_RECENT_IMPRESSIONS) return {}
+  if (!passesCostFloor(c.recentTotals, base)) return {}
+  const v = d2Verdict(c, base)
   if (v.reason !== 'ok') return {}
-  if (c.changed) return { note: recentlyChangedNote(ctx, c, 'D2') }
   return { candidate: { code: 'D2', p: v.p, build: adj => d2Hit(ctx, c, base, v, adj) } }
 }
 
@@ -374,7 +426,7 @@ function ownBaselineUsable(base: FunnelTotals): boolean {
   return base.results >= D10_MIN_BASE_RESULTS && base.linkClicks >= D10_MIN_BASE_LINK_CLICKS
 }
 
-function peerBaseline(ctx: AccountContext, input: DiagnosisInput, c: AdCase, rowsByAd: Map<string, DailyRow[]>, baseline: readonly string[], recent: readonly string[]): BaselineChoice | null {
+function peerBaseline(ctx: AccountContext, input: DiagnosisInput, c: AdCase, rowsByAd: Map<string, DailyRow[]>, baseline: readonly string[], recent: readonly string[]): { base: FunnelTotals; source: 'same_adset_peers'; peerCount: number } | null {
   const allDays = [...baseline, ...recent]
   const peerDays: FunnelDay[] = []
   let peerCount = 0
@@ -388,21 +440,37 @@ function peerBaseline(ctx: AccountContext, input: DiagnosisInput, c: AdCase, row
     peerDays.push(...s.days)
   }
   const base = sumDays(peerDays)
-  // 同组对照只用来抓「新广告抢了老广告的钱」（手册 §18）：这条广告在同一段时间里花得比同组其他广告合计还多，
+  // 同组对照只用来抓「新广告抢了老广告的钱」（手册 §18）：这条广告在这 17 天里花得比同组其他广告合计还多，
   // 它自己就是这个组的主力，拿组里被饿着的小广告当对照会把主力判成坏的（2026-09-26 生产回放：组里花费第一的广告被误报）。
+  // 🔴 不能只比「两边同时在花钱的日子」：新广告抢钱时那几天按定义就花得比老广告多，会把要抓的案例本身挡掉；
+  //    主力 vs 新测试的区分另由 evaluateD10 里「上线至今整体成本」那道闸兜。
   const own = sumDays(series(rowsByAd.get(c.ad.entity_id) ?? [], allDays, c.metric, c.opts).days)
   if (own.spend > base.spend) return null
   if (!ownBaselineUsable(base)) return null
   return { base, source: 'same_adset_peers', peerCount }
 }
 
+function learningWouldHit(c: AdCase): boolean {
+  if (c.ownBaseRaw === null) return false
+  const raw = sumDays(c.ownBaseRaw)
+  if (!ownBaselineUsable(raw)) return false
+  const v = d10Verdict(c, raw)
+  if (v.reason !== 'ok') return false
+  const costMultiple = costMultipleOf(raw, c.recentTotals)
+  if (costMultiple === null || costMultiple < D10_MIN_COST_MULTIPLE) return false
+  return impressionResultDrop(raw, c.recentTotals) >= D10_MIN_CVR_DROP
+}
+
 function chooseBaseline(ctx: AccountContext, input: DiagnosisInput, c: AdCase, rowsByAd: Map<string, DailyRow[]>, baseline: readonly string[], recent: readonly string[]): BaselineChoice | null {
-  if (c.ownBase !== null) {
+  if (!c.learningNow && c.ownBase !== null) {
     const base = sumDays(c.ownBase)
-    if (ownBaselineUsable(base)) return { base, source: 'own_history', peerCount: null }
+    if (ownBaselineUsable(base)) return { kind: 'base', base, source: 'own_history', peerCount: null }
   }
+  if (c.learningNow && learningWouldHit(c)) return { kind: 'learning' }
   // 自身历史不可用（天数不够或量不够）才退到同组对照。同期同组的结构改动对两边一样，所以不挂「最近改过」闸。
-  return peerBaseline(ctx, input, c, rowsByAd, baseline, recent)
+  const peers = peerBaseline(ctx, input, c, rowsByAd, baseline, recent)
+  if (peers === null) return null
+  return { kind: 'base', base: peers.base, source: peers.source, peerCount: peers.peerCount }
 }
 
 function d10Verdict(c: AdCase, base: FunnelTotals): StepVerdict {
@@ -435,18 +503,35 @@ function impressionResultDrop(base: FunnelTotals, recentTotals: FunnelTotals): n
   return 1 - recentRate / baseRate
 }
 
-function evaluateD10(ctx: AccountContext, input: DiagnosisInput, c: AdCase, rowsByAd: Map<string, DailyRow[]>, recent: readonly string[], baseline: readonly string[]): D10Result {
+function lifetimeCostMultiple(ctx: AccountContext, c: AdCase, rowsByAd: Map<string, DailyRow[]>, baseCpr: number | null): number | null {
+  if (baseCpr === null) return null
+  const days = windowDays(ctx.date, 28).filter(d => d >= c.firstDelivery)
+  const lifetime = sumDays(series(rowsByAd.get(c.ad.entity_id) ?? [], days, c.metric, c.opts).days)
+  const cpr = costPerResult(lifetime)
+  if (cpr === null) return Infinity
+  return cpr / baseCpr
+}
+
+function evaluateD10(ctx: AccountContext, input: DiagnosisInput, c: AdCase, rowsByAd: Map<string, DailyRow[]>, recent: readonly string[], baseline: readonly string[]): RuleResult {
   if (c.metric === null) return {}
   const choice = chooseBaseline(ctx, input, c, rowsByAd, baseline, recent)
   if (choice === null) return {}
+  if (choice.kind === 'learning') return { note: recentlyChangedNote(ctx, c, 'D10') }
   const { base, source, peerCount } = choice
   if (!passesCostFloor(c.recentTotals, base)) return {}
   const v = d10Verdict(c, base)
   const costMultiple = costMultipleOf(base, c.recentTotals)
   const perImpressionDrop = impressionResultDrop(base, c.recentTotals)
   if (v.reason === 'ok' && costMultiple !== null && costMultiple >= D10_MIN_COST_MULTIPLE && perImpressionDrop >= D10_MIN_CVR_DROP) {
-    if (source === 'own_history' && c.changed) return { note: recentlyChangedNote(ctx, c, 'D10') }
-    return { candidate: { code: 'D10', p: v.p, build: adj => d10Hit(ctx, c, base, v, adj, source, peerCount) } }
+    const baseCpr = costPerResult(base)
+    let lifetimeMultiple: number | null = null
+    if (source === 'same_adset_peers') {
+      // 同组对照时，这条从上线到现在的整体成本也要明显更贵——只是这 3 天运气差、整体仍划算的主力广告不报；2026-09-26 生产回放误报过一次。
+      lifetimeMultiple = lifetimeCostMultiple(ctx, c, rowsByAd, baseCpr)
+      if (lifetimeMultiple === null || lifetimeMultiple < D10_MIN_COST_MULTIPLE) return {}
+    }
+    const extra: Record<string, string | number | boolean | null> = lifetimeMultiple === null ? {} : { lifetime_cost_multiple: lifetimeMultiple === Infinity ? null : round(lifetimeMultiple, 2) }
+    return { candidate: { code: 'D10', p: v.p, build: adj => d10Hit(ctx, c, base, v, adj, source, peerCount, extra) } }
   }
   if (v.reason === 'thin' && costMultiple !== null && costMultiple >= SAMPLE_NOTE_COST_MULTIPLE) {
     return { note: thinSampleNote(ctx, c, v, costMultiple) }
@@ -470,21 +555,29 @@ function d10CheckBack(ctx: AccountContext, c: AdCase, base: FunnelTotals, source
   const noun = c.metric ? CORE_METRIC_NOUN[c.metric] : '结果'
   const baseRate = base.linkClicks > 0 ? base.results / base.linkClicks : 0
   const condition = `到时这条的点击→${noun}还低于${sourceLabel(source)}的一半（${pct(baseRate / 2)}）`
-  const fallback = c.isNewAd ? '停掉这条新广告，同组老广告不动' : '先查表单问题数、落地页、私信开场最近有没有改过，再决定要不要停；先别动预算'
+  const newAd = source === 'same_adset_peers' && c.isNewAd
+  const fallback = newAd ? '停掉这条（新上线或刚重新开投的），同组老广告不动' : '先查表单问题数、落地页、私信开场最近有没有改过，再决定要不要停；先别动预算'
   return { after, condition, fallback }
 }
 
-function d10Hit(ctx: AccountContext, c: AdCase, base: FunnelTotals, v: StepVerdict, adj: number, source: 'own_history' | 'same_adset_peers', peerCount: number | null): Diagnosis {
+function d10Suggestion(c: AdCase, source: 'own_history' | 'same_adset_peers'): string {
+  if (source === 'own_history') return '问题多半在点进去之后（表单问题数 / 落地页 / 私信开场），不是素材。先查这条最近有没有换过表单或开场白，先别动预算。'
+  if (c.isNewAd) return '这条新上线或刚重新开投，正在跟同组已验证的广告抢同一份预算，点进去之后却差很多——问题多半在表单 / 落地页 / 私信开场。按手册，测试版应该单独放一个组测，不跟老广告抢钱。'
+  return '比同组其他广告点进去之后差很多——问题多半在表单 / 落地页 / 私信开场。先查它跟同组其他广告的表单、开场有什么不同，先别动预算。'
+}
+
+function d10Hit(ctx: AccountContext, c: AdCase, base: FunnelTotals, v: StepVerdict, adj: number, source: 'own_history' | 'same_adset_peers', peerCount: number | null, extra: Record<string, string | number | boolean | null>): Diagnosis {
   const noun = c.metric ? CORE_METRIC_NOUN[c.metric] : '结果'
   const baseCpr = costPerResult(base)
   const recentCpr = costPerResult(c.recentTotals)
-  const days = checkBackDays(v, c.recentTotals.linkClicks)
+  const minDays = source === 'same_adset_peers' && c.isNewAd ? 3 : 7
+  const days = checkBackDays(v, c.recentTotals.linkClicks, minDays)
   const after = afterText(ctx, days)
   const checkBack = d10CheckBack(ctx, c, base, source, days)
   const title = d10Title(ctx, c, v, source, recentCpr, baseCpr)
   const own = source === 'own_history'
-  const basis = `对照：${sourceLabel(source)}（${own ? '前 14 天，已剔除上线头 7 天' : `同组其他 ${peerCount ?? 0} 条广告近 17 天合计`}）· 近 3 天链接点击 ${c.recentTotals.linkClicks}、${noun} ${c.recentTotals.results} · 按对照应有约 ${v.expected.toFixed(1)} 个 · 校正后 p=${Number(adj.toPrecision(2))}`
-  const suggestion = `问题在点进去之后（表单问题数 / 落地页 / 私信开场），不是素材。` + (c.isNewAd ? '这是新加的广告：测试版不该跟已验证的老广告放在同一个组里一起跑。' : '先查这条最近有没有换过表单或开场白。')
+  const basis = `对照：${sourceLabel(source)}（${own ? '前 14 天，已剔除上线头 7 天' : `同组其他 ${peerCount ?? 0} 条广告近 17 天合计`}）· 近 3 天链接点击 ${c.recentTotals.linkClicks}、${noun} ${c.recentTotals.results} · 按对照应有约 ${v.expected.toFixed(1)} 个`
+  const suggestion = d10Suggestion(c, source)
   const stopLoss = `止损：${after}回头看——${checkBack.condition}，就${checkBack.fallback}`
   const discipline = '一次只改一处；任何改动都会让系统重新学习，改完别再追着改'
   return {
@@ -492,9 +585,9 @@ function d10Hit(ctx: AccountContext, c: AdCase, base: FunnelTotals, v: StepVerdi
     status: 'hit',
     title,
     units: unitsFor(ctx, c),
-    evidence: baseEvidence(ctx, c, base, source, peerCount, v, adj, {}),
-    sample: sampleFor(c, '链接点击', base),
-    reasons: [basis, suggestion, stopLoss, discipline],
+    evidence: baseEvidence(ctx, c, base, source, peerCount, v, adj, 'link_click_to_result', extra),
+    sample: sampleFor(c, base, 'link'),
+    reasons: [suggestion, stopLoss, basis, discipline],
     clientVisible: false,
     checkBack,
   }
@@ -502,13 +595,14 @@ function d10Hit(ctx: AccountContext, c: AdCase, base: FunnelTotals, v: StepVerdi
 
 function recentlyChangedNote(ctx: AccountContext, c: AdCase, code: 'D2' | 'D10'): Diagnosis {
   const name = c.ad.entity_name ?? c.ad.entity_id
+  const changeDate = c.changeDate ?? ctx.date
   return {
     code,
     status: 'not_comparable',
     notComparableReason: 'recently_changed',
-    title: `「${name}」看着在变差，但这几天改过设置或整组停过，先等 7 天再判`,
+    title: `「${name}」看着在变差，但 ${changeDate} 改过设置或整组停过，还在重新学习，先等到 ${shiftDate(changeDate, RULE_LEARNING_DAYS)} 之后再判`,
     units: unitsFor(ctx, c),
-    evidence: { window_end: ctx.date, recent_spend: c.recentTotals.spend },
+    evidence: { window_end: ctx.date, recent_spend: c.recentTotals.spend, change_date: c.changeDate },
     sample: [{ label: '近 3 天花费', value: c.recentTotals.spend }],
     reasons: ['自身前后比对被改动打断了：改动会让系统重新学习，这时候再改只会更乱'],
     clientVisible: false,
@@ -518,13 +612,15 @@ function recentlyChangedNote(ctx: AccountContext, c: AdCase, code: 'D2' | 'D10')
 function thinSampleNote(ctx: AccountContext, c: AdCase, v: StepVerdict, costMultiple: number): Diagnosis {
   const name = c.ad.entity_name ?? c.ad.entity_id
   const noun = c.metric ? CORE_METRIC_NOUN[c.metric] : '结果'
-  const multipleText = costMultiple === Infinity ? '很多' : `${costMultiple.toFixed(1)} 倍`
   const need = v.baseRate > 0 ? Math.ceil(RULE_MIN_EXPECTED / v.baseRate) : 0
+  const title = costMultiple === Infinity
+    ? `「${name}」近 3 天花了 ${money(ctx, c.recentTotals.spend)} 还没有${noun}，但链接点击才 ${c.recentTotals.linkClicks} 次，还不够判`
+    : `「${name}」每个${noun}贵了 ${costMultiple.toFixed(1)} 倍，但链接点击才 ${c.recentTotals.linkClicks} 次，还不够判`
   return {
     code: 'D10',
     status: 'not_comparable',
     notComparableReason: 'below_min_sample',
-    title: `「${name}」每个${noun}贵了 ${multipleText}，但链接点击才 ${c.recentTotals.linkClicks} 次，还不够判`,
+    title,
     units: unitsFor(ctx, c),
     evidence: { window_end: ctx.date, recent_link_clicks: c.recentTotals.linkClicks, cost_multiple: costMultiple === Infinity ? null : round(costMultiple, 2) },
     sample: [{ label: '近 3 天链接点击', value: c.recentTotals.linkClicks }],
@@ -547,7 +643,7 @@ function clientPageUnknown(ctx: AccountContext, input: DiagnosisInput): Diagnosi
     manualTask: {
       what: '客户没登记 Facebook 主页，广告级检查（素材疲劳 / 点进去之后差了）整段没跑',
       how: '打开客户设置页，在 Facebook 主页一栏绑定这个客户自己的主页（系统会先向 Meta 核实）',
-      href: `https://app.magicengine.com.au/dashboard/clients/${input.clientId}/settings`,
+      href: `https://app.magicengine.com.au/dashboard/clients/${encodeURIComponent(input.clientId)}/settings`,
     },
   }
 }
