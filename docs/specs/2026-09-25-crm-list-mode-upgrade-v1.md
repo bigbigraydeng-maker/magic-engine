@@ -107,7 +107,8 @@ PM 原话：「还是要升级 CRM，不要卡片模式，回到传统 crm 列�
 
 **软锁**（子牙 Q3 + 魏征硬伤 4 合并）：
 - `advanceContactStage` 新增 `machineGuards?: {humanLock?: boolean, forwardOnly?: boolean}` 参数；人工 PATCH 一律传 `undefined`（不受方向限制、可以向后退）；deal-inference 传 `{humanLock:true, forwardOnly:true}`
-- `humanLock` 判据 = **最近 7 天有 phone/sheet_followup 触点** OR **最近 7 天有 changed_by 不以 `system:` 开头的 stage_event**——两个都算"最近有人碰过"，覆盖"员工不登录 ME 但每天在老表上工作"（魏征）与"员工在 ME 里改过阶段"（子牙）两种场景；靠现有 `contact_stage_events` + `contact_touchpoints` 查历史行，**不加 `contacts.stage_locked_until` 列**（子牙："加列是第二个真相源一定会漂"）
+- `humanLock` 判据 = **最近 7 天有 phone/sheet_followup 触点** OR **最近 7 天有 changed_by 含 `@` 的 stage_event**（人 = 登录邮箱；机器 = `system` / `system:*` / `ai:*` 都不含 `@`；全仓只用一个判据函数 `isHumanActor`，别处不另写）——两个都算"最近有人碰过"，覆盖"员工不登录 ME 但每天在老表上工作"（魏征）与"员工在 ME 里改过阶段"（子牙）两种场景；靠现有 `contact_stage_events` + `contact_touchpoints` 查历史行，**不加 `contacts.stage_locked_until` 列**（子牙："加列是第二个真相源一定会漂"）
+  - **v1.1 → v1.2 更正（2026-09-26，CRM 构建窗口）**：原判据「changed_by 不以 `system:` 开头」会把 AI 读对话判阶段写的 `ai:conversation-read` 当成人。生产只读实测：CTS 共 974 条 stage_event，其中 944 条 `ai:conversation-read`、18 条 `system`、12 条是员工邮箱——照原判据几乎全部 CTS 客人都会被判「最近有人碰过」而锁死，机器建议永远落不了地。
 
 **其他**：
 - `CONTACT_OUTCOMES` 新加 `quoted`/`deposit_paid`/`paid_full`
