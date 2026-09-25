@@ -35,8 +35,9 @@ const CLIENT = 'aaaaaaaa-0000-0000-0000-000000000001'
 
 beforeEach(() => {
   for (const k of ENV) { saved[k] = process.env[k]; delete process.env[k] }
-  process.env.ADMIN_EMAILS = 'fde@magiclab.test'
-  process.env.DEMO_ADMINS = `demo@x.test:${CLIENT}`
+  process.env.ADMIN_EMAILS = 'fde@magiclab.test,both@x.test'
+  process.env.ADMIN_EMAIL_DOMAIN = 'staff.magiclab.test'
+  process.env.DEMO_ADMINS = `demo@x.test:${CLIENT},both@x.test:${CLIENT}`
   process.env.CLIENT_VIEWERS = `viewer@x.test:${CLIENT}`
   h.loadTodoCounts.mockReset()
   h.loadTodoCounts.mockResolvedValue({ manualItems: [], cronFailures24h: 0 })
@@ -46,8 +47,12 @@ afterEach(() => {
 })
 
 describe('GET /api/workbench/today', () => {
-  it('scoped DEMO_ADMINS account → 403 and never loads the cross-client to-do list', async () => {
-    h.email = 'demo@x.test'
+  it.each([
+    ['scoped DEMO_ADMINS account', 'demo@x.test'],
+    ['same scoped account, different case/whitespace', '  Demo@X.test '],
+    ['listed in both DEMO_ADMINS and ADMIN_EMAILS (stricter wins)', 'both@x.test'],
+  ])('%s → 403 and never loads the cross-client to-do list', async (_label, email) => {
+    h.email = email
 
     const res = await GET()
 
@@ -68,8 +73,11 @@ describe('GET /api/workbench/today', () => {
     expect(h.loadTodoCounts).not.toHaveBeenCalled()
   })
 
-  it('global admin → 200 with the to-do counts', async () => {
-    h.email = 'fde@magiclab.test'
+  it.each([
+    ['ADMIN_EMAILS', 'fde@magiclab.test'],
+    ['ADMIN_EMAIL_DOMAIN', 'someone@staff.magiclab.test'],
+  ])('global admin via %s → 200 with the to-do counts', async (_label, email) => {
+    h.email = email
 
     const res = await GET()
 
