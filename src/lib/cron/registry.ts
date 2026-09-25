@@ -366,6 +366,11 @@ export const UNSCHEDULED_CRON_ROUTES: Readonly<Record<string, string>> = {
   // 'creatomate-render'，具体是哪条渲染由 summary.source_record_id 区分，不是按周期对账。
   'creatomate-render': '按需事件触发（内容确认时），非周期任务，不适用 CRON_REGISTRY 的排班对账',
 
+  // 马良 · 出片自检（src/lib/inngest/functions/maliang-render-check.ts）跟在上面那条渲染
+  // 之后：每有一条 Creatomate 成片落库就发一次事件，一天 0 到 N 次，不排班。回执
+  // job_name 恒为 'maliang-render-check'，哪条片由 summary.source_record_id 区分。
+  'maliang-render-check': '按需事件触发（Creatomate 成片落库后），非周期任务，不适用 CRON_REGISTRY 的排班对账',
+
   // cts-seo-optimizer 于 2026-09-20 退役（PM 拍板）：render.yaml 那条定时任务已删，
   // 换成 Inngest 原生的 cloud-seo-meta-cycle-fanout（同目录 seo-meta-cycle 的对账测试
   // 管它）。路由文件和 startCronRun 调用留着只为回滚，本条不该再被排班。

@@ -83,6 +83,10 @@ const DEV_OWNED_KINDS: ManualItemKind[] = [
   // 「这句话要不要改」是技术判断，不是 PM 该做的业务决策，how 字段同样是
   // 「回我一句我去查」的话术。见 playbook-staleness-items.ts。
   'playbook_reference_stale',
+  // 马良：自检检不了（模型钥匙没配 / 视频下载不了）、出片后没检（事件没发出去）——how 都是
+  // 「回我一句我去看/去补」。**过关等审片、不过关问返工还是放弃那两条不在这里**，那是 PM 的活。
+  'maliang_check_unverifiable',
+  'maliang_check_missing',
 ]
 
 /** FDE focus clients: CTS + Oztop. */
