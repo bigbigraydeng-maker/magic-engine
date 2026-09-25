@@ -31,7 +31,20 @@ const CONTACTS: Row[] = [
     primary_phone: '+6421000001',
     primary_email: 'bob@example.com',
     do_not_contact: false,
+    snooze_until: null,
     stage: 'quoted',
+    first_seen_at: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'a2',
+    display_name: 'Sue',
+    primary_phone: '+6421000002',
+    primary_email: 'sue@example.com',
+    do_not_contact: false,
+    // 未来 5 天：推迟中；segmentContact 认这个字段就会给 excluded。
+    // 老代码没把它喂给 model，Sue 会以默认无联系分段出现。
+    snooze_until: '2099-01-01T00:00:00.000Z',
+    stage: null,
     first_seen_at: '2026-01-01T00:00:00.000Z',
   },
 ]
@@ -149,6 +162,26 @@ describe('GET contacts — 参数校验', () => {
     const { status, body } = await get('client-a', '?q=Bob,evil')
     expect(status).toBe(400)
     expect(body.error).toMatch(/invalid characters/)
+  })
+})
+
+describe('GET contacts — 分段跟今天页共用形状（WP3 R3）', () => {
+  it('snooze_until 未来时间 → 该人的 segment=excluded；老 bug 里这条会显示原分段', async () => {
+    const { status, body } = await get('cts')
+    expect(status).toBe(200)
+    const list = (body.contacts ?? body.items) as Array<Record<string, unknown>>
+    const sue = list.find((r) => r.contactId === 'a2')
+    expect(sue).toBeTruthy()
+    expect(sue?.segment).toBe('excluded')
+  })
+
+  it('snooze_until=null → 分段照常走 segmentContact，不因新字段影响非推迟客人', async () => {
+    const { status, body } = await get('cts')
+    expect(status).toBe(200)
+    const list = (body.contacts ?? body.items) as Array<Record<string, unknown>>
+    const bob = list.find((r) => r.contactId === 'a1')
+    expect(bob).toBeTruthy()
+    expect(bob?.segment).not.toBe('excluded')
   })
 })
 
