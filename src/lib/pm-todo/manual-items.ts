@@ -66,6 +66,7 @@ import {
 } from './platform-candidate-reviews'
 import { CLIENT_DOC_MANUAL_TASKS, type ClientDocManualTask } from './client-doc-manual-tasks'
 import { pushPlaybookStalenessItems } from './playbook-staleness-items'
+import { pushPlatformConnectionItems } from './platform-connection-items'
 import { pushLedgerItems } from './ledger-items'
 
 export async function loadManualItems(
@@ -98,6 +99,14 @@ export async function loadManualItems(
   })
   // 按时没跑 / 查不出跑没跑 —— PM 2026-08-03 要求「不能完成需要有报错」
   await pushCronHealthItems(supabase, items, now)
+  // 外部平台的授权断了 —— 跟上面几条一样属于基础设施检查，跟「系统里有几个客户」
+  // 无关，所以放在客户名单那条提前返回之前。2026-09-24：CTS 邮箱断了 9 天没人知道，
+  // 全站没有任何一条路会把它端出来（模块自己会兜底，不抛给这里）。
+  // 模块内部已经把取数包进 try 并自报故障；这层 catch 防的是判据/造句本身抛异常 ——
+  // 不拦的话会掀掉整个 loadManualItems，当天整份待办邮件变空（比漏一条严重得多）。
+  await pushPlatformConnectionItems(supabase, items, now).catch((e) =>
+    console.warn('[manual-items] 平台授权体检失败（不阻塞其他待办）:', e),
+  )
   // 平台候选到了复查日期 —— 不落库、不查表，纯本地日期判断
   pushPlatformCandidateReviewItems(items, now)
   // 台账（docs/ledger）：决定了没做 / 做了没验 / 验了不成 —— 读仓库里的文件，不查表，

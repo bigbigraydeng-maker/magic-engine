@@ -16,6 +16,7 @@ import type { BindingRequestItemKind } from './binding-request-items'
 import type { PageBindingItemKind } from './page-binding-items'
 import type { CommentScopeTodoKind } from './comment-scope-items'
 import type { LeadSheetItemKind } from './lead-sheet-items'
+import type { PlatformConnectionItemKind } from './platform-connection-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 
 /**
@@ -37,6 +38,11 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   'facebook_page_binding_unverified',
   'ai_provider_exhausted',
   'ai_alerting_broken',
+  // 「授权体检自己读不出来了」「整条通道停了」跟 ai_alerting_broken 是同一类：
+  // 这套监控自己出问题的那条消息，绝不能因为链接问题被静默丢掉。
+  // （它们的 href 本来就是空的、不会被 fetch，这里是第二道保险。）
+  'platform_connection_check_failed',
+  'platform_connection_pipeline_down',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */
@@ -160,6 +166,11 @@ export type ManualItemKind =
   | 'conversation_health_alert'
   /** 经验手册（Claude 持久记忆，不在仓库）里点名的函数/路径/表名疑似过期，每周巡检自动发现 */
   | 'playbook_reference_stale'
+  /**
+   * 外部平台的授权断了 / 没了心跳 / 权限清单不够用（2026-09-24 CTS 邮箱断 9 天）。
+   * 只有人能重新走一次同意页，所以必须进人工车道，不许只躺在 error_message 里。
+   */
+  | PlatformConnectionItemKind
 
 export interface ManualItem {
   kind: ManualItemKind
