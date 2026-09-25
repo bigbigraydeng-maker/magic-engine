@@ -5,6 +5,16 @@
 
 ---
 
+### 2026-09-25（B2 三只闹钟上线：司马迁口碑周巡 / 李白文案溯源 / 马良出片自检）
+
+- **上线**（PR [#2013](https://github.com/bigbigraydeng-maker/magic-engine/pull/2013) 司马迁、[#2016](https://github.com/bigbigraydeng-maker/magic-engine/pull/2016) 李白、[#2017](https://github.com/bigbigraydeng-maker/magic-engine/pull/2017) 马良、[#2020](https://github.com/bigbigraydeng-maker/magic-engine/pull/2020) 语法修复）：agent 自治计划 §4.1/§5 B2 的三个定时/事件驱动闹钟，结果一律只进今日待办三件套（what/how/href），绝不自动发布。
+- **司马迁 · 口碑周巡**（Inngest cron 周四 09:00 NZ，避开周五六）：读各客户 `review_items.is_new`，Claude Haiku 起草回复 + 好评帖草稿，写回执到 `cron_run_logs`。负面评价排最前。读不到评价的客户进「系统欠账」栏。
+- **李白 · 文案溯源**（Inngest 事件触发 `me/libai.copy.generated`）：内容工厂生成候选后自动逐句标注来源（website / brief / no_claim / unverified），写入 `generation_context_snapshot.libai_provenance`。「官网和 brief 都找不到依据」的句子进 PM 待办。另有提示词库月检（每月第一个周二）只报告不改。
+- **马良 · 出片自检**（Inngest 事件触发 `me/maliang.render.ready`）：Creatomate 出片后 Gemini 2.5 Flash 看 9 个时间点截图，逐镜检查图片准确性、文字正确性、logo 完整性。通过 → PM 审片队列；不通过 → 标 `needs_rework`。视频下载走 SSRF 安全探测（`safeProbeRemoteFile` + 域名白名单）。
+- **共享接线**：三个闹钟的结果类型注册到 `ManualItemKind`；`manual-items.ts` 拉模式读取；`daily-todo.ts` DEV_OWNED 栏加 6 种系统欠账类型；`cron/registry.ts` 登记 4 条。
+- **合并事故**：#2016 合并入 main 时冲突解决丢了两个 `.catch()` 闭合括号（合并提交 76218533），导致 6 次 Render 部署失败、线上停留在 16:40 版本约 20 小时。#2020 修复后一并上线。
+- DeepSeek/aider 写代码 11 轮 ~$0.11，子牙架构审三 PR 全 APPROVE。风险 B 级。
+
 ### 2026-09-25（外部平台授权断了会自动进今日待办，不再像 CTS 邮箱那样断 9 天没人知道）
 
 - **为什么**：CTS 的 `info@ctstours.co.nz` 和 `bdm@ctstours.co.nz` 邮箱同步断了 **9 天**，客人询价一封没进 CRM，而每小时的同步任务一直报成功——它只捞 `status = active` 的连接，断掉的那两条安静地从循环里消失。根因是 2026-09-15 给 `MICROSOFT_MAIL_SCOPES` 加了 `Mail.ReadWrite`：微软刷新令牌时重放整份 scope 清单，换不来客户从没同意过的新权限（`AADSTS65001`）。那次改动的提交说明里写了「已连的客户需要重连」，然后没有然后了。
