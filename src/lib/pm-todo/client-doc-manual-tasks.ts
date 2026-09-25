@@ -106,4 +106,17 @@ export const CLIENT_DOC_MANUAL_TASKS: ClientDocManualTask[] = [
     href: 'https://adsmanager.facebook.com/adsmanager/manage/adsets',
     expiresAt: '2026-09-23T09:00:00+13:00',
   },
+  {
+    // 见 issue #1299（2026-09-01 查实 Meta 应用 business_verification_passes=false）。
+    // 它同时卡住三件事：WhatsApp 消息进 CRM、CTS Messenger 自动回复上线、给客户一键授权；
+    // 只能 PM 本人上传公司文件，开发做不了。可 25 天里它只躺在 issue 里，没进任何待办 ——
+    // 铁律 3 下半「管道不许断头」。2026-09-26 CRM 冲刺核实 WhatsApp 卡点时补发。
+    // 法定主体按 #1061 / #1049 冻结值：Magic Engine AI Technology Limited（新西兰注册）。
+    clientId: 'infra',
+    clientName: 'Magic Engine（平台）',
+    what: 'ME 在 Meta 的企业认证从 9 月 1 日查到就没通过，一直没人动。它同时卡着三件事：WhatsApp 消息进 CRM、CTS 的 Messenger 自动回复上线、以后给客户一键授权。这一步只能你本人上传公司文件，开发这边做不了',
+    how: '点链接打开 Meta 商务管理平台，先确认左上角选的是 Magic Engine 这个商务组合 → 「企业信息」里找到「企业验证」点开始 → 公司名称填 Magic Engine AI Technology Limited（Limited 不要写成 Ltd），地址按公司注册文件原样填，两处都要跟文件逐字一致 → 上传新西兰公司注册证书（Certificate of Incorporation，在新西兰 Companies Office 网站上能下载）→ 提交。Meta 一般几天到一周用邮件回复；被退回就把那封邮件转给 CRM 构建窗口',
+    href: 'https://business.facebook.com/settings/info',
+    expiresAt: '2026-10-26T09:00:00+13:00',
+  },
 ]
