@@ -66,6 +66,7 @@ import {
 import { CLIENT_DOC_MANUAL_TASKS, type ClientDocManualTask } from './client-doc-manual-tasks'
 import { pushPlaybookStalenessItems } from './playbook-staleness-items'
 import { pushLedgerItems } from './ledger-items'
+import { pushLibaiItems } from './libai-items'
 
 export async function loadManualItems(
   supabase: SupabaseClient,
@@ -199,6 +200,12 @@ export async function loadManualItems(
   // 评论读不到（缺权限 / 令牌被拒）—— 只有人能补，日志里那行 console.error 没人会看
   await pushCommentScopeItems(supabase, items, now, nameOf).catch((e) =>
     console.warn('[manual-items] 评论权限待办生成失败（不阻塞其他待办）:', e),
+  )
+
+  // 李白：文案里「官网和 brief 都找不到依据」的句子 / 溯源检不了 / 生成后没检；
+  // 另有提示词库月检结果（只报告不改）。拉模式读库和回执，事件丢了也照样出得来
+  await pushLibaiItems(supabase, items, now, nameOf).catch((e) =>
+    console.warn('[manual-items] 李白待办读取失败（不阻塞其他待办）:', e),
   )
 
   // 执行内核停手的 / 等你点头的 / 被规则挡下的 —— 死信不许只写进库里没人看

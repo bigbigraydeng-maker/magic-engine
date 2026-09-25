@@ -16,6 +16,7 @@ import type { BindingRequestItemKind } from './binding-request-items'
 import type { PageBindingItemKind } from './page-binding-items'
 import type { CommentScopeTodoKind } from './comment-scope-items'
 import type { LeadSheetItemKind } from './lead-sheet-items'
+import type { LibaiItemKind } from './libai-items'
 
 /**
  * 这些条目**链接坏了也照样下发**。
@@ -155,6 +156,8 @@ export type ManualItemKind =
   | 'conversation_health_alert'
   /** 经验手册（Claude 持久记忆，不在仓库）里点名的函数/路径/表名疑似过期，每周巡检自动发现 */
   | 'playbook_reference_stale'
+  /** 李白 · 文案溯源：「未证实」句待改 / 检不了 / 没检；提示词库月检疑似过期（只报告不改） */
+  | LibaiItemKind
 
 export interface ManualItem {
   kind: ManualItemKind

@@ -83,6 +83,12 @@ const DEV_OWNED_KINDS: ManualItemKind[] = [
   // 「这句话要不要改」是技术判断，不是 PM 该做的业务决策，how 字段同样是
   // 「回我一句我去查」的话术。见 playbook-staleness-items.ts。
   'playbook_reference_stale',
+  // 李白：溯源检不了（官网网址没配 / 读不到）、生成后没检（事件没发出去）、提示词库月检
+  // 疑似过期——三条 how 都是「回我一句我去看/去补/去改」。**真有「未证实」句要改的那条
+  // （libai_copy_unverified）不在这里**，那是 PM/FDE 要动手改文案的活。
+  'libai_check_unverifiable',
+  'libai_check_missing',
+  'libai_prompt_library_stale',
 ]
 
 /** FDE focus clients: CTS + Oztop. */
