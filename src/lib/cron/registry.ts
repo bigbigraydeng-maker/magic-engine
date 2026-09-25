@@ -328,6 +328,10 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   //    就分不出「Inngest 忘了重新 Sync 所以函数压根没注册」和「今天真的没人欠跟进」。
   //    这类登记的全部意义就是把「安静地不跑」喊出来。
   { service: 'inngest:cloud-crm-lead-followup-digest', jobName: 'crm-lead-followup-digest', schedule: '0 8 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-24' },
+  // 李白 · 提示词库月检（agent 自治计划 B2）：cron 每周二 NZ 09:00 醒，函数里只在当月 1–7 号
+  // 真跑（标准 cron 的日/周字段是「或」，写不出「第一个周二」），其余周二写一条 skipped 回执。
+  // 所以按「每周二」对账是对的：每周都有一行。周期与代码常量 LIBAI_PROMPT_AUDIT_CRON 一致。
+  { service: 'inngest:cloud-libai-prompt-library-monthly', jobName: 'libai-prompt-library-monthly', schedule: '0 9 * * 2', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-25' },
   // 司马迁 · 口碑周巡（agent 自治计划 B2）：每周四新西兰 09:00 读本周新 Google 评价、起草回复，
   // 一律不发，只写回执给今日待办拉。周期与 src/lib/inngest/functions/simaqian-reputation-weekly.ts
   // 的 SIMAQIAN_CRON 一致（同目录测试断言两边相等）。避开周五周六。
@@ -369,6 +373,11 @@ export const UNSCHEDULED_CRON_ROUTES: Readonly<Record<string, string>> = {
   // docs/specs/2026-09-09-creatomate-connector-spec-v1.md §4.4），job_name 恒为
   // 'creatomate-render'，具体是哪条渲染由 summary.source_record_id 区分，不是按周期对账。
   'creatomate-render': '按需事件触发（内容确认时），非周期任务，不适用 CRON_REGISTRY 的排班对账',
+
+  // 李白 · 文案溯源（src/lib/inngest/functions/libai-copy-provenance.ts）同理：由
+  // content-factory/generate 每写一条候选就发一次事件，一天 0 到 N 次，不排班。回执
+  // job_name 恒为 'libai-copy-provenance'，哪条文案由 summary.source_record_id 区分。
+  'libai-copy-provenance': '按需事件触发（每篇文案生成后），非周期任务，不适用 CRON_REGISTRY 的排班对账',
 
   // cts-seo-optimizer 于 2026-09-20 退役（PM 拍板）：render.yaml 那条定时任务已删，
   // 换成 Inngest 原生的 cloud-seo-meta-cycle-fanout（同目录 seo-meta-cycle 的对账测试

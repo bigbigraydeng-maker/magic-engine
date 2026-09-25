@@ -23,6 +23,8 @@ import { adsD3AutoPause } from './ads-d3-auto-pause'
 import { leadSheetSyncFanOut, leadSheetSyncOne } from './lead-sheet-sync'
 import { crmLeadFollowupDigest } from './crm-lead-followup-digest'
 import { adsAutonomySyncFunction } from './ads-autonomy-sync'
+import { libaiCopyProvenance } from './libai-copy-provenance'
+import { libaiPromptLibraryMonthly } from './libai-prompt-library-monthly'
 import { simaqianReputationWeekly } from './simaqian-reputation-weekly'
 
 export const cloudFunctions = [
@@ -58,6 +60,8 @@ export const cloudFunctions = [
   leadSheetSyncOne,
   crmLeadFollowupDigest,
   adsAutonomySyncFunction,
+  libaiCopyProvenance,
+  libaiPromptLibraryMonthly,
   simaqianReputationWeekly,
 ]
 
