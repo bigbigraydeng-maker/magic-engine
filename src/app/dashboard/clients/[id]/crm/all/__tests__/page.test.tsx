@@ -43,13 +43,17 @@ const contact = (id: string, name: string, over: Partial<Row> = {}) => ({
   ...over,
 })
 
-/** 列表 / 阶段 / 时间线三个接口都要有人应答，否则页面停在「加载中」。 */
+/**
+ * 列表 / 阶段 / 时间线三个接口都要有人应答，否则页面停在「加载中」。
+ * 列表接口的返回形状跟着 C1a 服务端分页（PR #2002）走：`items` / `total` / `page` / `perPage` / `columns`。
+ * 桩的形状一旦跟页面读的键对不上，5 个用例会一起静默变红——2026-09-26 就是这么发现的。
+ */
 function stubFetch(contacts: ReturnType<typeof contact>[]) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string) => {
       if (url.includes('/crm/contacts?') || url.endsWith('/crm/contacts')) {
-        return { ok: true, json: async () => ({ contacts, totalContacts: contacts.length, columns: [] }) }
+        return { ok: true, json: async () => ({ items: contacts, total: contacts.length, page: 1, perPage: 100, columns: [] }) }
       }
       if (url.includes('/timeline')) {
         return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
