@@ -102,6 +102,9 @@ const DEV_OWNED_KINDS: ManualItemKind[] = [
   'libai_check_unverifiable',
   'libai_check_missing',
   'libai_prompt_library_stale',
+  // 司马迁本周没巡成（读评价表失败 / 起草全失败）→ how 写「回我一句「查一下司马迁」我去看」。
+  // 真有新评价要回的那条（simaqian_review_drafts）**不在这里**，那是 PM/FDE 要动手回评价的活。
+  'simaqian_patrol_failed',
 ]
 
 /** FDE focus clients: CTS + Oztop. */

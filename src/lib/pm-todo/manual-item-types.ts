@@ -19,6 +19,7 @@ import type { LeadSheetItemKind } from './lead-sheet-items'
 import type { PlatformConnectionItemKind } from './platform-connection-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { LibaiItemKind } from './libai-items'
+import type { SimaqianItemKind } from './simaqian-review-items'
 
 /**
  * 这些条目**链接坏了也照样下发**。
@@ -176,6 +177,8 @@ export type ManualItemKind =
   | PlatformConnectionItemKind
   /** 李白 · 文案溯源：「未证实」句待改 / 检不了 / 没检；提示词库月检疑似过期（只报告不改） */
   | LibaiItemKind
+  /** 司马迁 · 口碑周巡：每周四起草的 Google 评价回复草稿（一律没发）/ 本周没巡成 */
+  | SimaqianItemKind
 
 export interface ManualItem {
   kind: ManualItemKind

@@ -332,6 +332,10 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 真跑（标准 cron 的日/周字段是「或」，写不出「第一个周二」），其余周二写一条 skipped 回执。
   // 所以按「每周二」对账是对的：每周都有一行。周期与代码常量 LIBAI_PROMPT_AUDIT_CRON 一致。
   { service: 'inngest:cloud-libai-prompt-library-monthly', jobName: 'libai-prompt-library-monthly', schedule: '0 9 * * 2', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-25' },
+  // 司马迁 · 口碑周巡（agent 自治计划 B2）：每周四新西兰 09:00 读本周新 Google 评价、起草回复，
+  // 一律不发，只写回执给今日待办拉。周期与 src/lib/inngest/functions/simaqian-reputation-weekly.ts
+  // 的 SIMAQIAN_CRON 一致（同目录测试断言两边相等）。避开周五周六。
+  { service: 'inngest:cloud-simaqian-reputation-weekly', jobName: 'simaqian-reputation-weekly', schedule: '0 9 * * 4', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-25' },
 ] as const
 
 /**
