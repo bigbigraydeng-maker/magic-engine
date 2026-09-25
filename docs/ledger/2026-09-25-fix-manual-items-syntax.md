@@ -12,6 +12,7 @@ verify_how: "type-check 通过 + 今日待办邮件正常发出"
 verify_by: 2026-09-26
 ---
 
-#2017 合并入 main 时冲突解决漏掉了 `pushMaliangRenderItems` 和 `pushLibaiItems`
-的 `.catch()` 关闭括号，导致 TypeScript 编译报错，今日待办邮件管道全挂。
+#2016（李白）合并入 main 时冲突解决漏掉了 `pushMaliangRenderItems` 和 `pushLibaiItems`
+的 `.catch()` 关闭括号（合并提交 76218533 起），导致 TypeScript 编译报错，
+Render 部署失败，今日待办邮件管道全挂。#2017 合并后问题延续。
 本修复只加 4 行纯语法修复。
