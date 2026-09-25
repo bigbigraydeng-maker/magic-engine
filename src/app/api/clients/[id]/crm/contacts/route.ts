@@ -17,14 +17,8 @@ import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { buildIdentities, resolveContact, AmbiguousIdentityError } from '@/lib/crm/identity'
 import { EMPTY_ATTRIBUTION } from '@/lib/crm/attribution'
-import {
-  segmentContact,
-  SEGMENT_ACTION_META,
-  type ContactLike,
-  engagementFromMetadata,
-} from '@/lib/crm/segments'
-import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
-import { isDoNotContact } from '@/lib/crm/dnc'
+import { segmentContact, SEGMENT_ACTION_META } from '@/lib/crm/segments'
+import { buildContactModel } from '@/lib/crm/contact-model'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import { fetchAll } from '@/lib/supabase-paginate'
 import {
@@ -40,6 +34,7 @@ interface ContactRow {
   primary_phone: string | null
   primary_email: string | null
   do_not_contact: boolean
+  snooze_until: string | null
   stage: string | null
   first_seen_at: string
   pinned_at: string | null
@@ -183,7 +178,7 @@ async function getPaged(clientId: string, query: ListQuery): Promise<NextRespons
 
     let pageBuilder = supabaseAdmin
       .from('contacts')
-      .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, first_seen_at, pinned_at, important_note, important_due_at')
+      .select('id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at')
       .eq('client_id', clientId)
     if (filters.stages !== null) pageBuilder = pageBuilder.in('stage', filters.stages)
     if (filters.orExpr !== null) pageBuilder = pageBuilder.or(filters.orExpr)
@@ -286,7 +281,7 @@ export async function GET(
       fetchAll<ContactRow>((from, to) =>
         supabaseAdmin
           .from('contacts')
-          .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, first_seen_at, pinned_at, important_note, important_due_at')
+          .select('id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at')
           .eq('client_id', clientId)
           .order('id', { ascending: true })
           .range(from, to),
@@ -369,47 +364,13 @@ function assembleRows(
     const tps = byContact.get(c.id) ?? []
     const stage = c.stage ? stageMeta.get(c.stage) : undefined
 
-    const model: ContactLike = {
-      id: c.id,
-      displayName: c.display_name,
-      // 「别再联系」真相源是不可变触点（contacts 列写失败过 / 历史导入只写 outcome）。
-      // 判据只有一份，见 lib/crm/dnc —— 它同时认「人明确纠正过这条判错了」。
-      doNotContact: isDoNotContact(
-        c.do_not_contact,
-        tps.map((t) => ({
-          outcome: (t.metadata?.outcome as string) ?? null,
-          flagged: t.metadata?.do_not_contact === true,
-          occurredAt: t.occurred_at,
-        })),
-      ),
-      stageSuppressed: stage?.suppressed ?? false,
-      stageLabel: stage?.label ?? null,
-      // 时间线按时间正序：最早的在最上，一条条往下读，跟人回忆一段关系的
-      // 顺序一致。原先是倒序（最新在最上），于是「填了表单」出现在它引发的
-      // 那条留言下面 —— 因果被倒过来，读起来是乱的。
-      // 查询本身仍是倒序（上面的 min/max 与分段逻辑与顺序无关），只在
-      // 输出时翻转，避免影响其它依赖该顺序的调用方。
-      touchpoints: [...tps].reverse().map((t) => ({
-        channel: t.channel,
-        direction: t.direction,
-        occurredAt: t.occurred_at,
-        // 存量记录读的时候顺手重判一次 —— 否则这次的软硬之分只对以后的
-        // 笔记生效，已经被埋掉的人永远回不来（见 reclassifyStoredOutcome）。
-        outcome: reclassifyStoredOutcome((t.metadata?.outcome as string) ?? null, t.raw) ?? null,
-        // 判「电话线通不通」要靠它分清真打通了和手打出来的 spoke（见 isPhoneVerdict）
-        source: t.source,
-        travelWindow: (t.metadata?.travel_window as string) ?? null,
-        callbackAt: (t.metadata?.callback_at as string) ?? null,
-        // 邮件被打开 / 链接被点 = 行为信号，不是真人消息。分段逻辑必须区分，
-        // 否则「打开了邮件」会冒充「客户回话了」挤进最高优先桶。
-        engagement: engagementFromMetadata(t.metadata),
-      })),
-      // 这个人实际能怎么被联系到 —— 决定「建议用哪个渠道」落在哪。
-      // 私信能力看他有没有 messenger 触点（有触点就说明那条线是通的）。
-      hasPhone: !!c.primary_phone,
-      hasEmail: !!c.primary_email,
-      hasMessenger: tps.some((t) => t.channel === 'messenger'),
-    }
+    // 装配形状收敛到共享 builder：全部客人 / 今天名单 / WP3 跟进表用同一个函数吃同一份数据，
+    // 分段模块只有一份，喂它的形状也只能有一份。原来在这里就地拼装漏掉了
+    // snoozeUntil / automated / action —— 于是推迟中的人在这一页仍显示原分段、
+    // 群发邮件也被当成「我们出手过」，跟今天页各说各话。见 lib/crm/contact-model 头注。
+    // 本地 ContactRow 和 stageMeta 的字段是 ContactRowLike / StageMetaLike 的超集，
+    // 结构类型直接匹配，不需要显式转换。
+    const model = buildContactModel(c, tps, stageMeta)
     const seg = segmentContact(model, now)
 
     // 进线时间 = 真实最早一条触点（不是导入日期）；没触点退回 first_seen_at。
