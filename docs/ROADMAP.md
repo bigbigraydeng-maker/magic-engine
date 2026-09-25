@@ -21,6 +21,44 @@
 
 ---
 
+## 发布前内容自检：改完文案后回执不失效（B 级，P2）
+
+**§11 打分**：频率中（每次编辑已审内容都会发生）· IMPACT 闭环关键度中（闸门在但能被绕过）· 收入关联度低（目前内容量不大、编辑后通常会重新审批）→ 一个低 → P2。
+
+- **问题**：回执里只有 `checked_at`，没有正文指纹（`content_sha256`）。「查过之后正文被改了」判不出来。
+- **禁止用 `checked_at` 对比 `updated_at`**——`content_posts` 的 `updated_at` 触发器对任何 UPDATE 都跳（含改 status），那样几乎所有内容都会被判成需复核，等于锁死全线。
+- **正解**：`contentGuardSnapshot` 里加 `content_sha256`，`readGuardFlag` 接可选的当前正文哈希，对不上就降级成 `check_unavailable`；老回执没这个字段 = 不知道，不影响现状。
+- 来源：#1936 子牙架构复审。
+
+## 发布前内容自检：博客/Reel 详情页有回执却不显红旗（C 级，P3）
+
+**§11 打分**：频率低（只在生产包详情页看）· IMPACT 闭环关键度低（不影响外发拦截，外发闸已补在 #1938）· 收入关联度低（纯界面展示）→ 三个低 → P3。
+
+- **问题**：`BlogPostCard` / `ReelCard` 不读 `readGuardFlag`，同一页社媒帖有红旗、博客没有，人会以为博客查过没问题。
+- `src/lib/blog/quality-audit.ts` 和 `src/lib/reels/quality-audit.ts` 写的是同一套回执，但 `src/app/api/clients/[id]/production/[packageId]/route.ts` 只对 `content_posts` 解读。
+- 来源：#1936 子牙架构复审。
+
+## 发布前内容自检：上游回执覆盖率低（B 级，P3）
+
+**§11 打分**：频率中（多条生产路径每天跑）· IMPACT 闭环关键度低（不影响外发拦截——没回执的放行是刻意的，不是漏洞）· 收入关联度低（闸门防的是已有回执的标红内容）→ 两个低 → P3。
+
+- **问题**：真正写回执的只有 `route-a/b/c` 和 `campaign/[campaignId]/batch-generate`。`content-factory/intake-runner.ts`、讲课式流水线、`ai-factory/fan-out` 插 `content_posts` 时都不写回执。
+- 产品排期问题：逐条路径补 `contentGuardSnapshot()`。
+- 来源：#1936 子牙架构复审。
+
+---
+
+## AI 可见度周快照聚合把失败的 API 调用也计入总数，客户分数被系统性腰斩（2026-09-23 两位复审确认，A 级，P0）
+
+**§11 打分**：频率高（每周每个客户都在发生，生产数据 CTS 9-14 那周 221/408 次失败混入分母）· IMPACT 闭环关键度高（分数直接喂进下一轮处方，算低等于给错建议）· 收入关联度高（影响客户可见诊断报告的核心维度分数）→ 零个低、两个以上高 → **P0**。
+
+- **背景**：`ai-tracker/orchestrator.ts` 的 `aggregateSnapshot` 拉本周 `ai_visibility_runs` 时不排除 `error_message` 有值的行，失败次数计入 `total_runs`，`mentionRate = mentions_count / total_runs` 的分母被撑大。CTS 9-14 那周落库 23.3%，真值 50.8%。
+- `ai-visibility-collector.ts:93` 看到 `mentions_count === 0` 就直出 critical「Brand Not Mentioned by AI」，不检查这些 run 是否真的测到过——这跟 PR #1919 修的实时探测是同一类 bug，走了快照这条管子。
+- **修法**：`aggregateSnapshot` 过滤 `error_message IS NULL`；给快照补 `failed_runs` 列；collector 的 `mentions_count === 0` 分支加 guard。
+- 见 PITFALLS D12 补充段。
+
+---
+
 ## 行业 AI 可见度采集 · 除奥克兰外所有城市的问题 100% 采不到数（2026-09-23 查实根因，P1）
 
 **§11 打分**：频率高（每天跑，每天所有非奥克兰城市的问题全军覆没，自 09-10 至今没有一天例外）· IMPACT 闭环关键度高（Measure 段给的是空数据，行业基线的城市维度整片缺失，下游 AI 可见度分数因此长期算不出来）· 收入关联度低（目前没有活着的客户目标在读这个分数，两个历史 goal 都已归档/过期，也没有客户投诉）→ 恰好一个低、两个高 → **P1**。
