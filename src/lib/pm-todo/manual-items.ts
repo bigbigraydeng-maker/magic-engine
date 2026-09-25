@@ -30,6 +30,7 @@ import { pushDailyPlanMeasurementItems } from './daily-plan-measurement-items'
 import { pushEmailReplyItems } from './email-reply-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
+import { pushFacebookSyncFailingItems } from './facebook-sync-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
@@ -171,6 +172,11 @@ export async function loadManualItems(
   // 这类失败从不设置 cron 结果的 error，cron 整体照样显示 completed，不单独捞出来就永远没人看见
   await pushMailchimpExportItems(supabase, items, now).catch((e) =>
     console.warn('[manual-items] Mailchimp 出口检查失败（不阻塞其他待办）:', e),
+  )
+  // Facebook 私信 / 表单留资同步连续失败 —— 报错原来只进运行记录，NAL 的主页授权
+  // 2026-09-16 失效后 9 天没人知道，新私信新留资全没进 CRM。授权失效只有主页管理员能修，必须下发。
+  await pushFacebookSyncFailingItems(supabase, items, now).catch((e) =>
+    console.warn('[manual-items] Facebook 同步失败检查读取失败（不阻塞其他待办）:', e),
   )
   // 线索没写进客户自己的 Google 表格 —— 销售看的就是那张表，缺一条就是少跟一个人，
   // 而 Facebook 的留资只保留 90 天，超期永久取不回

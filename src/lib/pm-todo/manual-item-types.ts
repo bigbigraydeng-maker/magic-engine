@@ -18,6 +18,7 @@ import type { CommentScopeTodoKind } from './comment-scope-items'
 import type { MetaTokenHealthKind } from './meta-token-health-items'
 import type { LeadSheetItemKind } from './lead-sheet-items'
 import type { PlatformConnectionItemKind } from './platform-connection-items'
+import type { FacebookSyncItemKind } from './facebook-sync-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
 import type { MaliangItemKind } from './maliang-render-items'
@@ -41,6 +42,9 @@ import type { SimaqianItemKind } from './simaqian-review-items'
 export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   'cross_client_leak',
   'facebook_page_binding_unverified',
+  // facebook_sync_failing：Facebook 私信/留资同步连续失败 = 新客人进不了 CRM（2026-09-16 NAL 断了 9 天没人知道）。
+  //   链接是需要登录的后台页，探活大概率判成坏链接 —— 宁可让人自己找入口，也不能让它静默消失。
+  'facebook_sync_failing',
   'ai_provider_exhausted',
   'ai_alerting_broken',
   // 「授权体检自己读不出来了」「整条通道停了」跟 ai_alerting_broken 是同一类：
@@ -193,6 +197,8 @@ export type ManualItemKind =
   | LibaiItemKind
   /** 司马迁 · 口碑周巡：每周四起草的 Google 评价回复草稿（一律没发）/ 本周没巡成 */
   | SimaqianItemKind
+  /** Facebook 私信 / 表单留资同步连续失败（授权失效时要有主页管理员重新「连接 Meta」） */
+  | FacebookSyncItemKind
 
 export interface ManualItem {
   kind: ManualItemKind
