@@ -34,7 +34,6 @@ WHERE EXISTS (
 )
 ON CONFLICT (client_id) DO UPDATE SET
   autopilot_enabled = true,
-  autopilot_dry_run = true,
   updated_at = now();
 
 -- CTS 的 ads.auto_pause_on_d3 自动化规则：要人批准才能执行。

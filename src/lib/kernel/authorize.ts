@@ -24,6 +24,7 @@ import type {
 } from './types'
 import type { KernelDeps } from './deps'
 import { validateAgainstSchema } from './registry'
+import { isWithinEnvelope } from './autonomy-envelope'
 import { outwardBlockReason } from './outward-authorization'
 import {
   getActivePolicy,
@@ -108,7 +109,14 @@ export function snapshotOf(
           outward_authorization: definition.outwardAuthorization
             ? {
                 declared_in: definition.outwardAuthorization.declaredIn,
-                requires_human_approval: definition.outwardAuthorization.requiresHumanApproval,
+                // 语义不变：human_only ↔ 原来的 requiresHumanApproval: true。
+                // bounded 时这一项是 false，同时把信封原样存下来 —— 否则复盘时
+                // 只看到「没要人点头」，说不清当时是在什么范围内放行的。
+                requires_human_approval: definition.outwardAuthorization.approval.mode === 'human_only',
+                approval_mode: definition.outwardAuthorization.approval.mode,
+                autonomy_envelope: definition.outwardAuthorization.approval.mode === 'bounded'
+                  ? { ...definition.outwardAuthorization.approval.envelope }
+                  : null,
                 rollback: definition.outwardAuthorization.rollback,
               }
             : null,
@@ -371,14 +379,64 @@ export async function preflight(deps: KernelDeps, run: ActionRun, now: Date): Pr
   //     幂等键会让同一件事命中旧的 denied run，而不可恢复的码连
   //     recoverDeniedRun 都救不回来，等于把这个动作**永久**锁死。
   if (definition.sideEffect === 'outward' && policy.mode === 'auto_approve') {
-    return bad(
-      'outward_requires_human_policy',
-      `「${definition.title}」会作用到客户自己的资产之外，这类动作一律要人点头 —— ` +
-        '这个客户的规则却配成了「自动执行」。先把规则改成「要审批」，在那之前一律不做',
-      definition,
-      policy,
-      costEstimate,
-    )
+    const approval = definition.outwardAuthorization?.approval
+
+    // 没声明、或声明成「只能人点头」→ 行为跟以前**完全一样**。
+    if (!approval || approval.mode === 'human_only') {
+      return bad(
+        'outward_requires_human_policy',
+        `「${definition.title}」会作用到客户自己的资产之外，这类动作一律要人点头 —— ` +
+          '这个客户的规则却配成了「自动执行」。先把规则改成「要审批」，在那之前一律不做',
+        definition,
+        policy,
+        costEstimate,
+      )
+    }
+
+    // ⑥c 🔴 声明成 bounded 的动作：查**这一次**的具体改动在不在信封内。
+    //     事实一律由域层解析器服务端读取（`deps.resolveEnvelopeFacts`），
+    //     绝不采信提交方在 input 里报的预算数字——让被约束者自报约束等于没有约束。
+    //     读不到解析器、读不到事实、越出信封，三种情况都 deny，且用可恢复码：
+    //     PM 调高上限 / 过了冷却 / 退出学习期之后同一件事理应能做。
+    if (!deps.resolveEnvelopeFacts) {
+      return bad(
+        'outside_autonomy_envelope',
+        `「${definition.title}」声明了信封内可自治，但这个 Kernel 实例没装信封事实解析器 —— ` +
+          '读不到真实预算就不自动动钱（缺解析器按拒绝处理，不是按跳过检查处理）',
+        definition,
+        policy,
+        costEstimate,
+      )
+    }
+
+    const resolved = await deps.resolveEnvelopeFacts({
+      clientId: run.client_id,
+      actionKey: run.action_key,
+      input: (run.input ?? {}) as Record<string, unknown>,
+      at: 'authorize',
+      runId: run.id,
+    })
+
+    if ('unavailable' in resolved) {
+      return bad(
+        'outside_autonomy_envelope',
+        `读不到信封要的事实，不自动动钱：${resolved.unavailable}`,
+        definition,
+        policy,
+        costEstimate,
+      )
+    }
+
+    const verdict = isWithinEnvelope(resolved.request, resolved.facts, approval.envelope)
+    if (!verdict.within) {
+      return bad(
+        'outside_autonomy_envelope',
+        `这一次的改动不在自治信封内：${verdict.reasons.join('；')}`,
+        definition,
+        policy,
+        costEstimate,
+      )
+    }
   }
 
   // ⑦ 钱。上限没写 = 0，不是「不限」。

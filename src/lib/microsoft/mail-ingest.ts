@@ -37,6 +37,8 @@ import { getValidTokenForConnection } from '@/lib/platform-oauth/token-manager'
 import { fetchMailSince, type MailFolder, type MailMessage } from '@/lib/microsoft/mail-graph'
 import { classifySender } from '@/lib/microsoft/mail-sender'
 import { resolveContact } from '@/lib/crm/identity'
+import { contactKindOf, readDomainRules, type DomainRules } from '@/lib/crm/contact-kind'
+import { extractAgentCustomers } from '@/lib/crm/travel-agent-customer-extract'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { CONVERSATION_MESSAGE_RECEIVED_EVENT } from '@/lib/conversations/events'
 
@@ -640,6 +642,23 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
     return { ...base, error: err instanceof Error ? err.message : String(err) }
   }
 
+  // 同行域名清单只读一次，整轮共用。读失败不管 —— readDomainRules 对 null
+  // 宽容，返回空清单，hook 自然不会触发。
+  let domainRules: DomainRules
+  try {
+    const { data: clientRow } = await supabaseAdmin
+      .from('clients')
+      .select('leads_config')
+      .eq('id', target.clientId)
+      .maybeSingle()
+    domainRules = readDomainRules(clientRow?.leads_config ?? null)
+  } catch (err) {
+    // 读不到就当没配置 —— 测试 mock 里没这张表也走这条路。
+    // agent-customer hook 会自然跳过，不影响主同步。
+    console.warn('[agent-customer-hook] leads_config 读失败，本轮跳过 trade 检测：', err)
+    domainRules = { own: [], trade: [] }
+  }
+
   const since = await getMailWatermark(target.clientId, target.mailbox)
 
   // 收件箱和已发送分开读 —— 方向由文件夹决定，不靠比对发件人猜（见 mail-graph）。
@@ -724,6 +743,7 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
 
       if (contactId) {
         touchpoints += await writeTouchpoints(target.clientId, contactId, thread)
+        await runAgentCustomerHook(target.clientId, contactId, thread, stored.conversationId, domainRules)
       }
       done += 1
     } catch (err) {
@@ -745,5 +765,83 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
     skipped: plan.skipped,
     truncated,
     stoppedEarly,
+  }
+}
+
+/**
+ * 如果这条线程的对手方是 trade 类（同行 Agent），跑 AI 提取，把新拿到的
+ * 终端客户 UPSERT 进 agent_customers。
+ *
+ * 提取失败一律吞：这是新加的旁路，绝不能让它把主同步搞挂。
+ * 同一个 (agent_contact_id, customer_name) 视为同一个终端客户；已经存在的
+ * 就更新 last_contact_at / last_contact_summary / 空字段补齐，stage 不动。
+ */
+async function runAgentCustomerHook(
+  clientId: string,
+  contactId: string,
+  thread: PlannedThread,
+  conversationId: string,
+  rules: DomainRules,
+): Promise<void> {
+  try {
+    if (contactKindOf([thread.counterparty.address], rules) !== 'trade') return
+
+    const inbound = thread.messages.filter((m) => m.direction === 'inbound').slice(-20)
+    if (inbound.length === 0) return
+
+    const latestInbound = inbound[inbound.length - 1]
+    const latestInboundAt = latestInbound.receivedAt
+    const latestInboundSummary = latestInbound.subject ?? latestInbound.preview.slice(0, 120) ?? null
+
+    const result = await extractAgentCustomers({
+      clientId,
+      agentContactId: contactId,
+      conversationId,
+      emails: inbound.map((m) => ({
+        subject: m.subject,
+        bodyPreview: m.preview,
+        direction: m.direction,
+        occurredAt: m.receivedAt,
+      })),
+    })
+    if (result.customers.length === 0) return
+
+    for (const customer of result.customers) {
+      if (!customer.customerName) continue
+
+      // 单次 upsert 走 ON CONFLICT —— 先 select 再 insert/update 在并发下会插两条。
+      // 幂等键跟 migration 里的 UNIQUE INDEX 列顺序一致。
+      //
+      // 「不覆盖已有非空字段」靠 payload 里**只在有值时才带这个键**实现：
+      // upsert 不会重写 payload 里没出现的列，所以 AI 这次没抽到的字段保持原样。
+      const payload: Record<string, unknown> = {
+        client_id: clientId,
+        agent_contact_id: contactId,
+        conversation_id: conversationId,
+        customer_name: customer.customerName,
+        last_contact_at: latestInboundAt,
+        last_contact_summary: latestInboundSummary,
+        updated_at: new Date().toISOString(),
+      }
+      if (customer.pax != null) payload.pax = customer.pax
+      if (customer.tripType != null) payload.trip_type = customer.tripType
+      if (customer.travelDates != null) payload.travel_dates = customer.travelDates
+      if (customer.specificNeeds != null) payload.specific_needs = customer.specificNeeds
+      // 只在这次触发 suspicious 时才写 true —— PM 过目后手动改成 false 的行，
+      // 只要新一批不再触发，就不会被拉回 true。
+      if (customer.suspicious === true) payload.needs_review = true
+
+      await supabaseAdmin
+        .from('agent_customers')
+        .upsert(payload, {
+          onConflict: 'client_id,agent_contact_id,conversation_id,customer_name',
+        })
+    }
+  } catch (err) {
+    console.warn('[agent-customer-hook] AI 提取或 UPSERT 失败（不影响主同步）：', {
+      clientId,
+      contactId,
+      err: err instanceof Error ? err.message : String(err),
+    })
   }
 }

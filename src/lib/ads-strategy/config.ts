@@ -9,21 +9,24 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
 
+export type AutonomyMode = 'observe' | 'bounded_auto'
+export type CreativePoolStatus = 'candidate' | 'approved'
+export interface CreativePoolEntry {
+  kind: 'meta_video' | 'work_order'
+  ref: string
+  status: CreativePoolStatus
+  approved_by?: string
+  approved_at?: string
+}
+
 export interface AdStrategyConfig {
   client_id: string
   enabled: boolean
   digest_recipients: string[]
-  /**
-   * D3（花钱没结果）自动出暂停建议的总开关。默认 false——只有 PM 显式为
-   * 某个客户打开才生效（2026-09-22 拍板：CTS 打开，别的客户默认不受影响）。
-   */
+  daily_budget_cap_cents: number | null
+  autonomy_mode: AutonomyMode
+  creative_pool: CreativePoolEntry[]
   autopilot_enabled: boolean
-  /**
-   * 双重开关的第二把锁。`autopilot_enabled` 打开后，先默认 `autopilot_dry_run:
-   * true`——只写 `flywheel_actions` 记录"如果开启会做什么"，不真的调 Meta
-   * API、不生成需要人点头的待办。两个开关都要是「活」的那一面（enabled=true
-   * 且 dry_run=false）才会真的提交到 Kernel 等人批准执行。
-   */
   autopilot_dry_run: boolean
 }
 
@@ -35,15 +38,49 @@ export interface AdStrategyConfig {
  */
 export type ConfigSource = 'row' | 'default' | 'fallback'
 
-/** Default when a client has no config row: on, digest to the global inbox, autopilot off. */
+/** 缺行默认：引擎开、日报到全局收件箱；autonomy_mode 一律 observe（spec 2026-09-24 §14 M4：缺行按锁定处理，绝不默认放开动钱）。 */
 export function defaultConfig(clientId: string): AdStrategyConfig {
   return {
     client_id: clientId,
     enabled: true,
     digest_recipients: [],
+    daily_budget_cap_cents: null,
+    autonomy_mode: 'observe',
+    creative_pool: [],
     autopilot_enabled: false,
     autopilot_dry_run: true,
   }
+}
+
+/** 素材池解析：只保留形状合法的条目，其余静默丢弃（坏数据不能让引擎投出没批准的素材）。 */
+export function parseCreativePool(raw: unknown): CreativePoolEntry[] {
+  if (!Array.isArray(raw)) return []
+
+  const entries: CreativePoolEntry[] = []
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue
+
+    const kind = 'kind' in item ? item.kind : undefined
+    if (kind !== 'meta_video' && kind !== 'work_order') continue
+
+    const ref = 'ref' in item ? item.ref : undefined
+    if (typeof ref !== 'string' || ref.length === 0) continue
+
+    const status = 'status' in item ? item.status : undefined
+    if (status !== 'candidate' && status !== 'approved') continue
+
+    const entry: CreativePoolEntry = { kind, ref, status }
+
+    const approvedBy = 'approved_by' in item ? item.approved_by : undefined
+    if (typeof approvedBy === 'string') entry.approved_by = approvedBy
+
+    const approvedAt = 'approved_at' in item ? item.approved_at : undefined
+    if (typeof approvedAt === 'string') entry.approved_at = approvedAt
+
+    entries.push(entry)
+  }
+
+  return entries
 }
 
 /**
@@ -60,7 +97,7 @@ export async function loadAdStrategyConfigWithSource(
 ): Promise<{ config: AdStrategyConfig; source: ConfigSource }> {
   const { data, error } = await supabaseAdmin
     .from('ad_strategy_configs')
-    .select('client_id, enabled, digest_recipients, autopilot_enabled, autopilot_dry_run')
+    .select('client_id, enabled, digest_recipients, daily_budget_cap_cents, autonomy_mode, creative_pool, autopilot_enabled, autopilot_dry_run')
     .eq('client_id', clientId)
     .maybeSingle()
 
@@ -75,8 +112,14 @@ export async function loadAdStrategyConfigWithSource(
       client_id: clientId,
       enabled: data.enabled ?? true,
       digest_recipients: Array.isArray(data.digest_recipients) ? data.digest_recipients : [],
-      // 🔴 fail closed，不是 fail open：读到旧行（列还没 migrate）或字段缺失
-      //    一律当「没打开」，绝不能让一次读取异常把自动暂停悄悄打开。
+      daily_budget_cap_cents:
+        typeof data.daily_budget_cap_cents === 'number' &&
+        Number.isFinite(data.daily_budget_cap_cents) &&
+        data.daily_budget_cap_cents > 0
+          ? data.daily_budget_cap_cents
+          : null,
+      autonomy_mode: data.autonomy_mode === 'bounded_auto' ? 'bounded_auto' : 'observe',
+      creative_pool: parseCreativePool(data.creative_pool),
       autopilot_enabled: data.autopilot_enabled === true,
       autopilot_dry_run: data.autopilot_dry_run !== false,
     },

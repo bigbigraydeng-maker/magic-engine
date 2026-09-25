@@ -168,6 +168,7 @@ describe('ad-strategy-config — PATCH 内部员工照常改', () => {
     })
     expect(json.config).toEqual({
       client_id: CLIENT, enabled: false, digest_recipients: ['a@staff.test', 'b@staff.test'],
+      daily_budget_cap_cents: null, autonomy_mode: 'observe', creative_pool: [],
       autopilot_enabled: false, autopilot_dry_run: true,
     })
   })
@@ -194,7 +195,102 @@ describe('ad-strategy-config — GET 客户成员仍可查看', () => {
     expect(res.status).toBe(200)
     expect(json.config).toEqual({
       client_id: CLIENT, enabled: false, digest_recipients: ['x@staff.test'],
+      daily_budget_cap_cents: null, autonomy_mode: 'observe', creative_pool: [],
       autopilot_enabled: false, autopilot_dry_run: true,
     })
+  })
+})
+
+describe('ad-strategy-config — 自治三列（spec 2026-09-24 G1）', () => {
+  it('内部员工设预算上限 + 自治模式 → 200，写库并读回', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [] }])
+
+    const res = await PATCH(
+      patchRequest({ daily_budget_cap_cents: 15000, autonomy_mode: 'bounded_auto' }),
+      params(),
+    )
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(upsert).toHaveBeenCalledTimes(1)
+    const [written] = upsert.mock.calls[0]
+    expect(written).toMatchObject({ daily_budget_cap_cents: 15000, autonomy_mode: 'bounded_auto' })
+    expect(json.config.daily_budget_cap_cents).toBe(15000)
+    expect(json.config.autonomy_mode).toBe('bounded_auto')
+  })
+
+  it('预算上限为负 → 400，不写库', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable()
+
+    const res = await PATCH(patchRequest({ daily_budget_cap_cents: -5 }), params())
+
+    expect(res.status).toBe(400)
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('自治模式非法 → 400，不写库', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable()
+
+    const res = await PATCH(patchRequest({ autonomy_mode: 'yolo' }), params())
+
+    expect(res.status).toBe(400)
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('creative_pool 带 status:approved → 400 指向 /creative-pool/approve，不写库', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable()
+
+    const res = await PATCH(
+      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'approved' }] }),
+      params(),
+    )
+    const json = await res.json()
+
+    expect(res.status).toBe(400)
+    expect(json.error).toContain('creative-pool/approve')
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('creative_pool 带 approved_by → 400，不写库', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable()
+
+    const res = await PATCH(
+      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate', approved_by: 'x' }] }),
+      params(),
+    )
+
+    expect(res.status).toBe(400)
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('内部员工加候选素材 → 200，读回 status=candidate 且无 approved_by', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [] }])
+
+    const res = await PATCH(
+      patchRequest({ creative_pool: [{ kind: 'work_order', ref: 'wo-1', status: 'candidate' }] }),
+      params(),
+    )
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(upsert).toHaveBeenCalledTimes(1)
+    expect(json.config.creative_pool[0].status).toBe('candidate')
+    expect(json.config.creative_pool[0]).not.toHaveProperty('approved_by')
+  })
+
+  it('付费客户门户成员改自治模式 → 403，不写库', async () => {
+    signedInAs(PORTAL_MEMBER)
+    const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [] }])
+
+    const res = await PATCH(patchRequest({ autonomy_mode: 'bounded_auto' }), params())
+
+    expect(res.status).toBe(403)
+    expect(upsert).not.toHaveBeenCalled()
   })
 })

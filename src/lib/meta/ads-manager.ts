@@ -5,7 +5,7 @@
  * create fresh Ads from Page posts, and pause fatigued Ads.
  */
 
-const GRAPH_BASE = 'https://graph.facebook.com/v20.0'
+import { GRAPH_BASE } from './graph-base'
 
 export interface AdSummary {
   adId: string

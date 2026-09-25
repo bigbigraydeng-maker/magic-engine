@@ -12,6 +12,7 @@
  */
 
 import type { ActionDefinition, ActionKey } from './types'
+import { ADS_ACTION_DEFINITIONS } from './registry-ads'
 
 /**
  * `seo.build_publish_package` —— Kernel v1 的 safe capability。
@@ -105,9 +106,11 @@ const SEO_BUILD_PUBLISH_PACKAGE: ActionDefinition<'seo.build_publish_package'> =
  * spec: docs/specs/2026-08-19-me2-page-optimization-apply-action-v1.0.md
  *
  * 🔴 `sideEffect: 'outward'` + `outwardAuthorization` 非 null + `reversible: true`
- *    这三条同时成立才被 outward-authorization 层放行；`requiresHumanApproval: true`
- *    是字面量 true，policy 层 `auto_approve` 也会被 kernel 反手落
- *    `outward_requires_human_policy` deny 码。
+ *    这三条同时成立才被 outward-authorization 层放行；它声明的是
+ *    `approval: { mode: 'human_only' }`，所以即便客户把政策配成 `auto_approve`，
+ *    授权层也会反手落一个 `outward_requires_human_policy` deny 码。
+ *    （2026-09-24 广告支柱新增了 `bounded` 模式，但**这个动作没有选它** ——
+ *    页面写入没有「信封」这个概念，它的边界是人点头。）
  *
  * 🔴 idempotency key = `(page_url, page_version_token, validated_diff_hash)`：
  *    snapshot 或 diff 一变 → 是另一件事，重新走 authorize；
@@ -154,7 +157,7 @@ const PAGE_APPLY_OPTIMIZATION_REQUEST: ActionDefinition<'page.apply_optimization
 
   outwardAuthorization: {
     declaredIn: 'docs/specs/2026-08-19-me2-page-optimization-apply-action-v1.0.md',
-    requiresHumanApproval: true,
+    approval: { mode: 'human_only' },
     // 🔴 v1 rollback 语义（复审 2026-08-19 两位 reviewer 一致挑出 P0，随此 commit 修正）：
     //
     //    本字段仅**标注 provider 支持该路径的存在**（Draft PR pre-merge 允许 close
@@ -270,7 +273,7 @@ const ADS_AUTO_PAUSE_ON_D3: ActionDefinition<'ads.auto_pause_on_d3'> = {
 
   outwardAuthorization: {
     declaredIn: 'docs/specs/2026-09-22-me2-ads-d3-auto-pause-v1.0.md',
-    requiresHumanApproval: true,
+    approval: { mode: 'human_only' },
     rollback: 'provider_native',
   },
 
@@ -311,6 +314,8 @@ const DEFINITIONS: Readonly<Record<ActionKey, ActionDefinition>> = {
   'seo.build_publish_package': SEO_BUILD_PUBLISH_PACKAGE,
   'page.apply_optimization_request': PAGE_APPLY_OPTIMIZATION_REQUEST,
   'ads.auto_pause_on_d3': ADS_AUTO_PAUSE_ON_D3,
+  // 广告支柱受限自治六件（spec 2026-09-24 §3 G4/G5）。定义在 registry-ads.ts，避免本文件继续膨胀。
+  ...ADS_ACTION_DEFINITIONS,
 }
 
 export interface ActionRegistry {

@@ -12,7 +12,7 @@
  * Kept out of `client.ts` deliberately: that file is at the 800-line ceiling.
  */
 
-const GRAPH_BASE = 'https://graph.facebook.com/v19.0'
+import { GRAPH_BASE } from './graph-base'
 
 export interface AdSetSummary {
   id: string

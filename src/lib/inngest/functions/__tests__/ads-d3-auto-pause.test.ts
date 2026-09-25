@@ -70,6 +70,9 @@ function makeConfig(overrides: Partial<AdStrategyConfig> = {}): AdStrategyConfig
     client_id: 'client-1',
     enabled: true,
     digest_recipients: [],
+    daily_budget_cap_cents: null,
+    autonomy_mode: 'observe',
+    creative_pool: [],
     autopilot_enabled: true,
     autopilot_dry_run: true,
     ...overrides,
@@ -166,9 +169,10 @@ describe('processD3Hit', () => {
       ok: true, outcome: 'pending_approval', runId: 'run-42', authorizationDecisionId: 'dec-42',
     }))
     const { supabase, inserted } = makeFakeFlywheelSupabase()
-    const deps = makeDeps({ supabase, submitCandidate })
+    const dryOffConfig = makeConfig({ autopilot_dry_run: false })
+    const deps = makeDeps({ supabase, submitCandidate, loadConfig: vi.fn(async () => dryOffConfig) })
     const result = await processD3Hit(deps, {
-      ...baseArgs, diagnosis: makeD3Diagnosis(), config: makeConfig({ autopilot_dry_run: false }),
+      ...baseArgs, diagnosis: makeD3Diagnosis(), config: dryOffConfig,
     })
     expect(result.outcome).toBe('awaiting_approval')
     expect(submitCandidate).toHaveBeenCalledTimes(1)
@@ -183,9 +187,10 @@ describe('processD3Hit', () => {
       ok: true, outcome: 'idempotent_hit', runId: 'run-42',
     }))
     const { supabase, inserted } = makeFakeFlywheelSupabase()
-    const deps = makeDeps({ supabase, submitCandidate })
+    const dryOffConfig = makeConfig({ autopilot_dry_run: false })
+    const deps = makeDeps({ supabase, submitCandidate, loadConfig: vi.fn(async () => dryOffConfig) })
     const result = await processD3Hit(deps, {
-      ...baseArgs, diagnosis: makeD3Diagnosis(), config: makeConfig({ autopilot_dry_run: false }),
+      ...baseArgs, diagnosis: makeD3Diagnosis(), config: dryOffConfig,
     })
     expect(result.outcome).toBe('idempotent_hit')
     expect(inserted).toHaveLength(0)
@@ -196,9 +201,10 @@ describe('processD3Hit', () => {
       ok: false, reason: 'kernel_denied', runId: 'run-9', humanReason: '这个客户还没配规则',
     }))
     const { supabase, inserted } = makeFakeFlywheelSupabase()
-    const deps = makeDeps({ supabase, submitCandidate })
+    const dryOffConfig = makeConfig({ autopilot_dry_run: false })
+    const deps = makeDeps({ supabase, submitCandidate, loadConfig: vi.fn(async () => dryOffConfig) })
     const result = await processD3Hit(deps, {
-      ...baseArgs, diagnosis: makeD3Diagnosis(), config: makeConfig({ autopilot_dry_run: false }),
+      ...baseArgs, diagnosis: makeD3Diagnosis(), config: dryOffConfig,
     })
     expect(result.outcome).toBe('kernel_denied')
     expect(inserted[0].payload).toMatchObject({ status: 'blocked' })

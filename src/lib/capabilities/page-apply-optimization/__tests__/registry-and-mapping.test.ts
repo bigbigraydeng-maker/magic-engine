@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest'
 import { ACTION_REGISTRY } from '@/lib/kernel/registry'
 import { outwardBlockReason } from '@/lib/kernel/outward-authorization'
 import { mapCandidateIdentity, MAPPING_TABLE } from '@/lib/action-bridge'
+import type { OutwardApproval } from '@/lib/kernel/types'
 
 const KEY = 'page.apply_optimization_request'
 
@@ -23,7 +24,7 @@ describe(`ActionDefinition · ${KEY}`, () => {
     expect(def.sideEffect).toBe('outward')
     expect(def.reversible).toBe(true)
     expect(def.outwardAuthorization).toBeTruthy()
-    expect(def.outwardAuthorization?.requiresHumanApproval).toBe(true)
+    expect(def.outwardAuthorization?.approval.mode).toBe('human_only')
     expect(def.outwardAuthorization?.rollback).toBe('provider_native')
     expect(def.outwardAuthorization?.declaredIn).toMatch(/docs\/specs\/.+\.md$/)
   })
@@ -75,10 +76,13 @@ describe(`Mutation guards on ${KEY}`, () => {
     expect(outwardBlockReason(mutated)).not.toBeNull()
   })
 
-  it('把 requiresHumanApproval 改成 false → 类型上不该编过；运行时 gate 也拒', () => {
+  it('声明 bounded 却不给 envelope → 类型上不该编过；运行时 gate 也拒', () => {
     const mutated = {
       ...base,
-      outwardAuthorization: { ...base.outwardAuthorization!, requiresHumanApproval: false as unknown as true },
+      outwardAuthorization: {
+        ...base.outwardAuthorization!,
+        approval: { mode: 'bounded' } as unknown as OutwardApproval,
+      },
     }
     expect(outwardBlockReason(mutated)).not.toBeNull()
   })

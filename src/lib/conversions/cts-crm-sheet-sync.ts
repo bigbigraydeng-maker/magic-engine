@@ -48,15 +48,42 @@ export interface CrmManagementRow {
   stageUpdatedDate: string | null
 }
 
-/** Sheet1 实测列下标（0-based）：B=1, N=13, O=14, P=15, R=17。 */
-export function parseSheet1Row(cells: string[]): Sheet1LeadRow {
+/**
+ * 🔴 **员工跟进记录换过列**（PM 2026-09-24 当面确认，已对生产表逐行核实）。
+ *
+ * 表格第 505 行（含）以前写在 **R 列**；第 506 行起 R 列被拿去放 Facebook 后台
+ * 链接了，跟进记录改写在 **S 列**。实测切换点干净：505 行是 R 的最后一条内容，
+ * 506 行起 R 全是 `https://business.facebook.com/...`，S 开始有内容；
+ * 按这条规则取，**没有任何一行的记录落在「另一列」里**（707 行全量核过）。
+ *
+ * 写死一个行号不好看，但它是这张表的真实历史，没有任何一列能推导出来。
+ * 以后再换列，改这一个常量。
+ */
+export const CTS_NOTE_COLUMN_SWITCH_ROW = 506
+/** 505 行及以前：R 列（0-based 17）。 */
+const NOTE_COL_LEGACY = 17
+/** 506 行及以后：S 列（0-based 18）。 */
+const NOTE_COL_CURRENT = 18
+
+/** 这一行的员工跟进记录在哪一列 —— 唯一判据，两个消费方都走它。 */
+export function ctsNoteColumnIndex(sheetRow: number): number {
+  return sheetRow >= CTS_NOTE_COLUMN_SWITCH_ROW ? NOTE_COL_CURRENT : NOTE_COL_LEGACY
+}
+
+/**
+ * Sheet1 实测列下标（0-based）：B=1, N=13, O=14, P=15，跟进记录见上面 R/S 那段。
+ *
+ * @param sheetRow 这一行在表格里的**真实行号**（表头是第 1 行，数据从第 2 行起）。
+ *                 必填、没有默认值 —— 给个默认值等于让调用方忘了 R/S 这回事。
+ */
+export function parseSheet1Row(cells: string[], sheetRow: number): Sheet1LeadRow {
   const at = (i: number) => (cells[i]?.trim() ? cells[i].trim() : null)
   return {
     createdTime: at(1),
     email: at(13),
     fullName: at(14),
     phoneRaw: at(15),
-    followUpNotes: at(17),
+    followUpNotes: at(ctsNoteColumnIndex(sheetRow)),
   }
 }
 

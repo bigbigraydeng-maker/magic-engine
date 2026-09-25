@@ -230,7 +230,8 @@ export async function processD3Hit(
     growth_candidate_valid: validation.ok,
   }
 
-  if (args.config.autopilot_dry_run) {
+  const freshConfig = await deps.loadConfig(args.clientId)
+  if (freshConfig.autopilot_dry_run) {
     await recordFlywheelAction(deps.supabase, args.clientId, {
       ...basePayload,
       status: 'dry_run_logged' satisfies string,

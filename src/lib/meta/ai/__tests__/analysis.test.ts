@@ -1,10 +1,11 @@
 import { beforeEach,describe,expect,it,vi } from 'vitest'
+import { APIConnectionError, APIConnectionTimeoutError } from '@anthropic-ai/sdk'
 
 const mocks=vi.hoisted(()=>({
   from:vi.fn(),rpc:vi.fn(),metaGraphGet:vi.fn(),callClaudeChat:vi.fn(),activeConnection:vi.fn(),reserveRead:vi.fn(),requirePilot:vi.fn(),
 }))
 vi.mock('@/lib/supabase',()=>({ supabaseAdmin:{ from:mocks.from,rpc:mocks.rpc } }))
-vi.mock('@/lib/anthropic/client',()=>({ MODEL_SONNET:'claude-sonnet-test',callClaudeChat:mocks.callClaudeChat }))
+vi.mock('@/lib/anthropic/client',()=>({ MODEL_HAIKU:'claude-haiku-test',callClaudeChat:mocks.callClaudeChat }))
 vi.mock('../store',()=>({ activeConnectionForPrincipal:mocks.activeConnection,reserveRead:mocks.reserveRead }))
 vi.mock('../entitlement',()=>({ requirePilotActive:mocks.requirePilot }))
 vi.mock('../../graph-read',async()=>{
@@ -12,7 +13,7 @@ vi.mock('../../graph-read',async()=>{
   return { ...actual,metaGraphGet:mocks.metaGraphGet }
 })
 
-import { generateAnalysis } from '../analysis'
+import { generateAnalysis,listAnalyses } from '../analysis'
 
 const grant={ id:'10000000-0000-4000-8000-000000000001',connection_id:'20000000-0000-4000-8000-000000000001',
   ad_account_id:'act_1234567890',revision:'30000000-0000-4000-8000-000000000001',entitlement_revision:'40000000-0000-4000-8000-000000000001' }
@@ -73,12 +74,87 @@ describe('托管 Meta 广告分析',()=>{
     mocks.callClaudeChat.mockResolvedValue({ text:'中文报告',input_tokens:500,output_tokens:200,cost_usd:0.0045,stop_reason:'end_turn' })
     const result=await generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id)
     expect(result.status).toBe('completed')
-    expect(mocks.callClaudeChat).toHaveBeenCalledWith(expect.objectContaining({ model:'claude-sonnet-test',singleAttempt:true,maxOutputTokens:2800 }))
+    expect(mocks.callClaudeChat).toHaveBeenCalledWith(expect.objectContaining({ model:'claude-haiku-test',singleAttempt:true,maxOutputTokens:2000 }))
+    expect(mocks.callClaudeChat.mock.calls[0]?.[0].systemPrompt).toContain('全文硬上限 700 个中文字')
     expect(mocks.activeConnection).toHaveBeenCalledTimes(4)
     expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_authorize_sponsored_analysis',{
       tenant:'a1000000-0000-4000-8000-000000000001',principal:'50000000-0000-4000-8000-000000000001',job:'job-1',
     })
     expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_finish_sponsored_analysis',expect.objectContaining({ final_status:'completed',charged_usd:0.0045 }))
+  })
+
+  it('真实 max_tokens 停止原因按截断失败处理，绝不保存或展示半份报告',async()=>{
+    mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
+      if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'NZD',timezone_name:'Pacific/Auckland' }
+      if(params.level==='account') return { data:[{ spend:'100',impressions:'1000',clicks:'20' }] }
+      return { data:[] }
+    })
+    const log=vi.spyOn(console,'error').mockImplementation(()=>undefined)
+    mocks.callClaudeChat.mockResolvedValue({ text:'只有前半份的报告',input_tokens:500,output_tokens:2000,cost_usd:0.02,stop_reason:'max_tokens' })
+
+    await expect(generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id))
+      .rejects.toThrow('analysis_incomplete')
+
+    expect(mocks.callClaudeChat).toHaveBeenCalledTimes(1)
+    expect(log).toHaveBeenCalledWith('[meta-ads-ai] hosted model response incomplete',{
+      category:'output_truncated',model:'claude-haiku-test',
+    })
+    expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_finish_sponsored_analysis',expect.objectContaining({
+      final_status:'failed',charged_usd:0.12,report_body:null,failure_code:'analysis_incomplete',
+    }))
+  })
+
+  it('报告被截断时按 analysis_incomplete 失败，且不保存半份报告',async()=>{
+    mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
+      if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'NZD',timezone_name:'Pacific/Auckland' }
+      if(params.level==='account') return { data:[{ spend:'100',impressions:'1000',clicks:'20' }] }
+      return { data:[] }
+    })
+    const log=vi.spyOn(console,'error').mockImplementation(()=>undefined)
+    mocks.callClaudeChat.mockResolvedValue({ text:'前半份报告',input_tokens:500,output_tokens:2000,cost_usd:0.02,stop_reason:'max_tokens' })
+    await expect(generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id))
+      .rejects.toThrow('analysis_incomplete')
+    expect(log).toHaveBeenCalledWith('[meta-ads-ai] hosted model response incomplete',{
+      category:'output_truncated',model:'claude-haiku-test',
+    })
+    expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_finish_sponsored_analysis',expect.objectContaining({
+      final_status:'failed',report_body:null,failure_code:'analysis_incomplete',
+    }))
+  })
+
+  it('模型失败只记录非敏感错误类别和模型名',async()=>{
+    mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
+      if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'NZD',timezone_name:'Pacific/Auckland' }
+      if(params.level==='account') return { data:[{ spend:'100',impressions:'1000',clicks:'20' }] }
+      return { data:[] }
+    })
+    const log=vi.spyOn(console,'error').mockImplementation(()=>undefined)
+    mocks.callClaudeChat.mockRejectedValue({ status:403,error:{ type:'permission_error',message:'secret upstream detail' } })
+    await expect(generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id))
+      .rejects.toThrow('model_unavailable')
+    expect(log).toHaveBeenCalledWith('[meta-ads-ai] hosted model call failed',{
+      category:'permission',model:'claude-haiku-test',
+    })
+    expect(JSON.stringify(log.mock.calls)).not.toContain('secret upstream detail')
+  })
+
+  it.each([
+    ['network',new APIConnectionError({ message:'secret connection detail' })],
+    ['timeout',new APIConnectionTimeoutError({ message:'secret timeout detail' })],
+  ])('按真实 Anthropic SDK 实例识别 %s 错误',async(category,error)=>{
+    mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
+      if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'NZD',timezone_name:'Pacific/Auckland' }
+      if(params.level==='account') return { data:[{ spend:'100',impressions:'1000',clicks:'20' }] }
+      return { data:[] }
+    })
+    const log=vi.spyOn(console,'error').mockImplementation(()=>undefined)
+    mocks.callClaudeChat.mockRejectedValue(error)
+    await expect(generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id))
+      .rejects.toThrow('model_unavailable')
+    expect(log).toHaveBeenCalledWith('[meta-ads-ai] hosted model call failed',{
+      category,model:'claude-haiku-test',
+    })
+    expect(JSON.stringify(log.mock.calls)).not.toContain(error.message)
   })
 
   it('模型外发原子授权门拒绝时不发送证据',async()=>{
@@ -101,7 +177,7 @@ describe('托管 Meta 广告分析',()=>{
 
   it('按 UTF-8 字节限制多语言证据，超限时不会调用付费模型',async()=>{
     mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
-      if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'元'.repeat(7_000),timezone_name:'Pacific/Auckland' }
+      if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'元'.repeat(12_000),timezone_name:'Pacific/Auckland' }
       if(params.level==='account') return { data:[{ spend:'100',impressions:'1000',clicks:'20' }] }
       return { data:[] }
     })
@@ -109,5 +185,71 @@ describe('托管 Meta 广告分析',()=>{
       .rejects.toThrow('analysis_too_large')
     expect(mocks.callClaudeChat).not.toHaveBeenCalled()
     expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_finish_sponsored_analysis',expect.objectContaining({ final_status:'failed',charged_usd:0 }))
+  })
+})
+
+describe('listAnalyses 只把图表用得到的证据字段发给浏览器',()=>{
+  it('透传图表需要的 7 个字段，裁掉 video_ads/fatigue_candidates 等逐条广告 ID',async()=>{
+    const fullEvidence={
+      campaigns:[{ campaign_name:'A',spend:1 }],
+      comparison:{ spend:{ current:1,previous:2,percent_change:-50 } },
+      daily_campaigns:[{ date_start:'2026-09-15',spend:10 }],
+      placements:[{ publisher_platform:'facebook',spend:5 }],
+      age_gender:[{ age:'18-24',gender:'male',spend:3 }],
+      devices:[{ device_platform:'mobile',spend:8 }],
+      regions:[{ country:'NZ',spend:6 }],
+      video_ads:[{ ad_id:'x' }],fatigue_candidates:[{ ad_id:'y' }],
+    }
+    const chain:Record<string,unknown>={}
+    for(const method of ['select','eq','order','limit']) chain[method]=vi.fn(()=>chain)
+    chain.then=(resolve:(value:unknown)=>unknown)=>Promise.resolve({ data:[{ id:'job-1',status:'completed',ad_account_id:'act_1',
+      window_since:'2026-09-15',window_until:'2026-09-21',report_markdown:'x',error_code:null,created_at:'t',completed_at:'t',
+      evidence:fullEvidence }],error:null }).then(resolve)
+    mocks.from.mockReturnValue(chain)
+    const [result]=await listAnalyses('client','principal')
+    expect(result.evidence).toEqual({
+      campaigns:fullEvidence.campaigns,comparison:fullEvidence.comparison,
+      daily_campaigns:fullEvidence.daily_campaigns,placements:fullEvidence.placements,
+      age_gender:fullEvidence.age_gender,devices:fullEvidence.devices,regions:fullEvidence.regions,
+    })
+    expect(result.evidence).not.toHaveProperty('video_ads')
+    expect(result.evidence).not.toHaveProperty('fatigue_candidates')
+  })
+
+  it('evidence 为 null 时不报错，直接透传 null',async()=>{
+    const chain:Record<string,unknown>={}
+    for(const method of ['select','eq','order','limit']) chain[method]=vi.fn(()=>chain)
+    chain.then=(resolve:(value:unknown)=>unknown)=>Promise.resolve({ data:[{ id:'job-1',status:'failed',ad_account_id:'act_1',
+      window_since:'2026-09-15',window_until:'2026-09-21',report_markdown:null,error_code:'analysis_too_large',created_at:'t',completed_at:'t',
+      evidence:null }],error:null }).then(resolve)
+    mocks.from.mockReturnValue(chain)
+    const [result]=await listAnalyses('client','principal')
+    expect(result.evidence).toBeNull()
+  })
+})
+
+describe('历史报告隔离',()=>{
+  it('listAnalyses 同时按 client_id 与 principal_id 过滤，新 owner 查不到原 owner 的报告',async()=>{
+    const chain:Record<string,unknown>={}
+    for(const method of ['select','eq','order','limit']) chain[method]=vi.fn(()=>chain)
+    chain.then=(resolve:(value:unknown)=>unknown)=>Promise.resolve({ data:[],error:null }).then(resolve)
+    mocks.from.mockReturnValue(chain)
+    await listAnalyses('client','new-principal')
+    expect(mocks.from).toHaveBeenCalledWith('meta_ads_ai_analysis_jobs')
+    expect(chain.eq).toHaveBeenCalledWith('client_id','client')
+    expect(chain.eq).toHaveBeenCalledWith('principal_id','new-principal')
+    expect(chain.order).toHaveBeenCalledWith('created_at',{ ascending:false })
+    expect(chain.limit).toHaveBeenCalledWith(10)
+  })
+
+  it('listAnalyses 返回原 owner 自己的报告',async()=>{
+    const chain:Record<string,unknown>={}
+    for(const method of ['select','eq','order','limit']) chain[method]=vi.fn(()=>chain)
+    chain.then=(resolve:(value:unknown)=>unknown)=>Promise.resolve({ data:[{ id:'job-1',status:'completed',ad_account_id:'act_1',
+      window_since:'2026-09-15',window_until:'2026-09-21',report_markdown:'报告',error_code:null,created_at:'t',completed_at:'t',
+      evidence:null }],error:null }).then(resolve)
+    mocks.from.mockReturnValue(chain)
+    const result=await listAnalyses('client','principal')
+    expect(result).toEqual([expect.objectContaining({ id:'job-1',report_markdown:'报告' })])
   })
 })

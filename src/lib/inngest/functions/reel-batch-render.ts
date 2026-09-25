@@ -152,10 +152,20 @@ export function createReelBatchRender() {
       // ── 第一步：提交小样渲染 ───────────────────────────────────────
       const previewIds = await step.run('submit-previews', async () => {
         const results: Array<{ tag: string; renderId: string }> = []
-        for (const reel of reels) {
-          const source = buildReelSource(reel as ReelSpec, template as ReelTemplate)
-          const { renderId } = await submitInlineRender({ source, width: PREVIEW_W, height: PREVIEW_H })
-          results.push({ tag: reel.tag, renderId })
+        try {
+          for (const reel of reels) {
+            const source = buildReelSource(reel as ReelSpec, template as ReelTemplate)
+            const { renderId } = await submitInlineRender({ source, width: PREVIEW_W, height: PREVIEW_H })
+            results.push({ tag: reel.tag, renderId })
+          }
+        } catch (err) {
+          // 把 Creatomate 报错写进 cron_run_logs，方便排查（不影响 Inngest 的失败语义）
+          const errMsg = err instanceof Error ? err.message : String(err)
+          console.error(`[reel-batch-render] submit-previews 失败: ${errMsg}`)
+          await cronRunHandle('reel-batch-render', runId, startedAt).finish({
+            error: `submit-previews: ${errMsg}`,
+          })
+          throw err
         }
         return results
       })
@@ -166,21 +176,30 @@ export function createReelBatchRender() {
       type PreviewResult = { tag: string; renderId: string; url: string }
       const previews: PreviewResult[] = []
 
-      for (const { tag, renderId } of previewIds) {
-        let previewUrl: string | null = null
-        for (let attempt = 0; attempt < 20 && previewUrl === null; attempt++) {
-          const render = await step.run(`check-preview-${tag}-${attempt}`, () => getRender(renderId))
-          if (render.status === 'succeeded' && render.url) {
-            previewUrl = render.url
-          } else if (render.status === 'failed' || render.status === 'cancelled') {
-            throw new Error(`小样渲染失败 ${tag}: ${render.status} ${render.errorMessage ?? ''}`)
-          } else if (attempt < 19) {
-            await step.sleep(`sleep-preview-${tag}-${attempt}`, '15s')
-          } else {
-            throw new Error(`小样渲染超时 ${tag}（已等5分钟）`)
+      try {
+        for (const { tag, renderId } of previewIds) {
+          let previewUrl: string | null = null
+          for (let attempt = 0; attempt < 20 && previewUrl === null; attempt++) {
+            const render = await step.run(`check-preview-${tag}-${attempt}`, () => getRender(renderId))
+            if (render.status === 'succeeded' && render.url) {
+              previewUrl = render.url
+            } else if (render.status === 'failed' || render.status === 'cancelled') {
+              throw new Error(`小样渲染失败 ${tag}: ${render.status} ${render.errorMessage ?? ''}`)
+            } else if (attempt < 19) {
+              await step.sleep(`sleep-preview-${tag}-${attempt}`, '15s')
+            } else {
+              throw new Error(`小样渲染超时 ${tag}（已等5分钟）`)
+            }
           }
+          if (previewUrl) previews.push({ tag, renderId, url: previewUrl })
         }
-        if (previewUrl) previews.push({ tag, renderId, url: previewUrl })
+      } catch (pollErr) {
+        const errMsg = pollErr instanceof Error ? pollErr.message : String(pollErr)
+        console.error(`[reel-batch-render] 小样轮询失败: ${errMsg}`)
+        await cronRunHandle('reel-batch-render', runId, startedAt).finish({
+          error: `poll-previews: ${errMsg}`,
+        })
+        throw pollErr
       }
 
       // 记录小样 URL——Claude Code 会把这些发给 PM 看

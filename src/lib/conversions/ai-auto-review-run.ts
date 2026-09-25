@@ -81,7 +81,35 @@ export type RunItemResult = {
 
 export type RunSummary =
   | { ran: false; reason: 'disabled' | 'circuit_breaker_tripped' | 'error'; detail?: string }
-  | { ran: true; processed: number; approved: number; rejected: number; uncertain: number; expired: number; items: RunItemResult[] }
+  | {
+      ran: true
+      processed: number
+      approved: number
+      /** 本次批准的金额合计（分）——给下一块当硬顶起点用，见 `RunOptions.carried`。 */
+      approvedAmountMinor: number
+      rejected: number
+      uncertain: number
+      expired: number
+      items: RunItemResult[]
+    }
+
+/**
+ * 分块调用参数（2026-09-22，`conversion-daily-pipeline` 拆块）。
+ *
+ * 一批 50 条 × (一次 AI 判断 + 一次发送) 最坏要几分钟，会被网关 ~125 秒超时强杀
+ * （PITFALLS F10）。Inngest 那边改成每块几条、循环调本函数；为了让「拆成几块」跟
+ * 「一块 50 条」的安全行为**完全一致**，两处要跟着走：
+ *   · `carried`：上几块累计批准的条数/金额，作为本块「单次运行硬顶」的起点——
+ *     否则硬顶被拆块清零，等于绕过。
+ *   · `carried` 存在（非首块）时**跳过开工前的熔断预检**：那个预检按
+ *     `ai_last_reviewed_at` 查近 24 小时，会把本次运行前几块刚批的行当成「异常激增」，
+ *     第一次跑就把客户开关关掉（子牙/魏征 2026-09-22 设计复审 BLOCKER）。原来一批只
+ *     预检一次，拆块后也只在首块预检一次。块内的单笔金额异常检查照旧每条都查。
+ */
+export type RunOptions = {
+  maxBatchSize?: number
+  carried?: { approvedCount: number; approvedAmountMinor: number }
+}
 
 export type AiAutoReviewRunDeps = {
   supabase: SupabaseClient
@@ -97,9 +125,11 @@ export type AiAutoReviewRunDeps = {
 export async function runAiAutoReviewForClient(
   clientId: string,
   deps: AiAutoReviewRunDeps,
+  opts: RunOptions = {},
 ): Promise<RunSummary> {
   const { supabase } = deps
   const now = deps.now ?? new Date()
+  const batchSize = opts.maxBatchSize ?? MAX_BATCH_SIZE
 
   const { data: clientRow, error: clientErr } = await supabase
     .from('clients')
@@ -114,13 +144,16 @@ export async function runAiAutoReviewForClient(
   }
 
   // ── 开工前先查熔断：命中就整批不处理，只暂停+通知 ─────────────────────
-  const breaker = await checkCircuitBreaker(supabase, clientId, now)
-  if (breaker.tripped) {
-    await tripCircuitBreaker(supabase, clientId, breaker.rule, breaker.detail)
-    if (deps.onCircuitBreakerTripped) {
-      await deps.onCircuitBreakerTripped({ clientId, rule: breaker.rule, detail: breaker.detail })
+  // 非首块（opts.carried 存在）跳过——理由见 RunOptions 的注释。
+  if (!opts.carried) {
+    const breaker = await checkCircuitBreaker(supabase, clientId, now)
+    if (breaker.tripped) {
+      await tripCircuitBreaker(supabase, clientId, breaker.rule, breaker.detail)
+      if (deps.onCircuitBreakerTripped) {
+        await deps.onCircuitBreakerTripped({ clientId, rule: breaker.rule, detail: breaker.detail })
+      }
+      return { ran: false, reason: 'circuit_breaker_tripped', detail: breaker.detail }
     }
-    return { ran: false, reason: 'circuit_breaker_tripped', detail: breaker.detail }
   }
 
   const baseline = await fetchBaselineDailyAverage(supabase, clientId, now)
@@ -138,7 +171,7 @@ export async function runAiAutoReviewForClient(
     .lt('ai_review_attempts', MAX_UNCERTAIN_ATTEMPTS)
     .or(`ai_last_reviewed_at.is.null,ai_last_reviewed_at.lt.${cooldownCutoff}`)
     .order('occurred_at', { ascending: true })
-    .limit(MAX_BATCH_SIZE)
+    .limit(batchSize)
 
   if (pendingErr) throw new Error(`读取待审核记录失败：${pendingErr.message}`)
 
@@ -153,8 +186,11 @@ export async function runAiAutoReviewForClient(
   let expired = 0
 
   // 这一轮内部的运行中汇总——见文件头 `BATCH_HARD_STOP_COUNT`/`_AMOUNT_MINOR` 的说明。
-  let batchApprovedCount = 0
-  let batchApprovedAmountMinor = 0
+  // 分块调用时从上几块的累计起算（`opts.carried`），硬顶不因拆块而清零。
+  let batchApprovedCount = opts.carried?.approvedCount ?? 0
+  let batchApprovedAmountMinor = opts.carried?.approvedAmountMinor ?? 0
+  /** 本块自己批了多少（返回值里报的是本块的数，不含 carried）。 */
+  let approvedAmountMinorThisCall = 0
 
   for (const row of rows) {
     if (batchApprovedCount >= BATCH_HARD_STOP_COUNT || batchApprovedAmountMinor >= BATCH_HARD_STOP_AMOUNT_MINOR) {
@@ -162,7 +198,8 @@ export async function runAiAutoReviewForClient(
         supabase,
         clientId,
         'volume_spike',
-        `本次批处理内已批准 ${batchApprovedCount} 笔、合计 ${(batchApprovedAmountMinor / 100).toFixed(2)}，达到单次运行硬顶，提前停止本轮剩余记录`,
+        `本次运行内已批准 ${batchApprovedCount} 笔、合计 ${(batchApprovedAmountMinor / 100).toFixed(2)}` +
+          `${opts.carried ? `（含前几块累计 ${opts.carried.approvedCount} 笔）` : ''}，达到单次运行硬顶，提前停止本轮剩余记录`,
       )
       if (deps.onCircuitBreakerTripped) {
         await deps.onCircuitBreakerTripped({
@@ -231,10 +268,13 @@ export async function runAiAutoReviewForClient(
     const verdict = await judgeOutcome(judgeInput)
 
     // 不管判成什么，都打上"AI 刚看过这条"的时间戳——熔断规则的"批准占比"要靠这个查数。
-    await supabase
+    // 🔴 写失败要抛：这个时间戳同时是分块调用的冷却依据（6 小时内不再捞这条），
+    //    写丢了下一块会再判一次、再烧一次 AI 调用（魏征 2026-09-22 复审 m3）。
+    const { error: stampErr } = await supabase
       .from('me_sale_outcomes')
       .update({ ai_last_reviewed_at: now.toISOString() })
       .eq('id', row.id)
+    if (stampErr) throw new Error(`写入 AI 审核时间戳失败：${stampErr.message}`)
 
     if (verdict.verdict === 'approve') {
       const ok = await approveOutcome(supabase, row.id, now)
@@ -253,7 +293,11 @@ export async function runAiAutoReviewForClient(
 
       let sendMessage = '已批准，发送时出错，可以稍后在页面上重试'
       try {
-        const sendResult = await sendApprovedOutcome(row.id, { supabase, ...deps.sendDeps, now })
+        // 🔴 不把判断用的 `now` 透传给发送：分块调用时 `now` 是流水线开跑时刻，可能已落后
+        //    十几分钟；发送状态机拿它写 `last_attempt_at`、再用它判「卡在 sending 超过 5 分钟」，
+        //    过去时的 `last_attempt_at` 会让看板那边把在途发送误判成断线 → in_doubt → 双发
+        //    （子牙 2026-09-22 实施后复审 MAJOR）。发送一律用真实时间。
+        const sendResult = await sendApprovedOutcome(row.id, { supabase, ...deps.sendDeps })
         sendMessage = sendResult.message
         await writeAudit(supabase, row.id, 'sent', { status: sendResult.status })
       } catch (e) {
@@ -263,6 +307,7 @@ export async function runAiAutoReviewForClient(
       approved++
       batchApprovedCount++
       batchApprovedAmountMinor += row.amount_minor ?? 0
+      approvedAmountMinorThisCall += row.amount_minor ?? 0
       items.push({ outcomeId: row.id, verdict: 'approve', message: sendMessage })
     } else if (verdict.verdict === 'reject') {
       const didReject = await rejectOutcome(supabase, row.id, 'other', verdict.reason, now)
@@ -298,7 +343,16 @@ export async function runAiAutoReviewForClient(
     }
   }
 
-  return { ran: true, processed: items.length, approved, rejected, uncertain, expired, items }
+  return {
+    ran: true,
+    processed: items.length,
+    approved,
+    approvedAmountMinor: approvedAmountMinorThisCall,
+    rejected,
+    uncertain,
+    expired,
+    items,
+  }
 }
 
 /** CAS：只在 pending_review 时才批准，返回是否真的改到了（防跟人工页面并发抢跑）。 */

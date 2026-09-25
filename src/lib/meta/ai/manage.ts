@@ -74,12 +74,23 @@ export async function bind(clientId: string,principalId: string,connectionId: st
   const pilot=await requirePilotActive(clientId)
   const finalConnection=await activeConnectionForPrincipal(clientId,connectionId,principalId)
   if(finalConnection.version!==connection.version || pilot.revision!==connection.entitlementRevision) throw new MetaReadError('authorization_changed',403)
-  const { data,error } = await supabaseAdmin.from('meta_ads_read_grants').upsert({ client_id:clientId,connection_id:connectionId,
-    ad_account_id:accountId,principal_id:principalId,entitlement_revision:pilot.revision,revoked_at:null },{ onConflict:'client_id,ad_account_id' }).select('id,ad_account_id').single()
+  const { data,error } = await supabaseAdmin.from('meta_ads_read_grants').insert({ client_id:clientId,connection_id:connectionId,
+    ad_account_id:accountId,principal_id:principalId,entitlement_revision:pilot.revision,revoked_at:null }).select('id,ad_account_id').single()
   if (error || !data) {
+    // A unique violation here is either a repeat bind by the same owner or a
+    // cross-client active conflict. Never trust the error text for ownership:
+    // re-read and only treat it as an idempotent repeat when every identity
+    // field matches an existing active grant.
+    if (error?.code === '23505') {
+      const { data:existing,error:readError } = await supabaseAdmin.from('meta_ads_read_grants')
+        .select('id,ad_account_id').eq('client_id',clientId).eq('ad_account_id',accountId)
+        .eq('principal_id',principalId).eq('connection_id',connectionId)
+        .eq('entitlement_revision',pilot.revision).is('revoked_at',null).maybeSingle()
+      if (!readError && existing) return existing
+    }
     // No client/token data here — client_id and the write outcome only — so this is safe to log
     // while a real account_unavailable cause (2026-09-22, CTS/act_953025114498626) is unconfirmed.
-    console.warn('[meta-ads-ai] grant upsert failed',{ clientId,code:error?.code,message:error?.message,details:error?.details,hint:error?.hint })
+    console.warn('[meta-ads-ai] grant insert failed',{ clientId,code:error?.code,message:error?.message,details:error?.details,hint:error?.hint })
     throw new MetaReadError('account_unavailable',409)
   }
   return data
@@ -109,7 +120,11 @@ export async function issueKey(clientId: string,principalId: string,grantId: str
 export async function revoke(clientId: string,principalId:string,type:'key'|'grant'|'connection',id: string) {
   let result: { data: Array<{ id:string }> | null; error: { message:string } | null }
   if (type === 'connection') {
-    result=await supabaseAdmin.from('platform_oauth_connections').update({ status:'revoked',updated_at:new Date().toISOString() })
+    // Clearing the owner in the same UPDATE is what lets a different ME member
+    // later complete their own Meta OAuth: the existing guard only permits
+    // NULL -> new owner on an active row with a fresh token. The AFTER UPDATE
+    // trigger revokes this connection's grants in the same transaction.
+    result=await supabaseAdmin.from('platform_oauth_connections').update({ status:'revoked',authorizing_principal_id:null,updated_at:new Date().toISOString() })
       .eq('client_id',clientId).eq('id',id).eq('purpose','meta_ads_read').eq('authorizing_principal_id',principalId).select('id')
   } else if(type === 'grant') {
     result=await supabaseAdmin.from('meta_ads_read_grants').update({ revoked_at:new Date().toISOString() })
