@@ -3,43 +3,29 @@
 import { useEffect, useState } from 'react'
 import { createBrowserClient } from '@supabase/ssr'
 
-/**
- * 登录方式说明（见 issue #674）
- *
- * magic link 在 Microsoft 365 租户上不可靠：信被 EOP 收下后在内部过滤/改道，
- * Resend 显示「已投递」但用户收不到，隔离区也查不到。ME 五个客户域名里四个在
- * M365，所以这不是个例而是结构性问题。
- *
- * 因此默认登录方式改为**密码** —— 把邮件从「每次登录」的路径上彻底移除。
- * magic link 保留为兜底，Google OAuth 保留（只有 workvisas.work 一家在用）。
- */
-
-type Mode = 'password' | 'magic'
 type Locale = 'en' | 'zh-CN'
 
 const loginCopy = {
   en: {
-    magicExpired: 'Magic link has expired. Please request a new one.', authFailed: 'Authentication failed. Please try again.',
-    invalidCredentials: 'Email or password is incorrect.', signInFailed: 'Sign in failed. Please try again.', sendFailed: 'Unable to send link. Please try again.',
-    checkEmail: 'Check your email', linkSent: 'Magic link sent to', expires: 'Expires in 15 minutes.', redirecting: 'Redirecting…', google: 'Continue with Google',
-    or: 'or', email: 'Email address', password: 'Password', signingIn: 'Signing in…', sending: 'Sending…', signIn: 'Sign in →', sendLink: 'Send magic link →',
-    emailLink: 'Email me a link instead', passwordLogin: 'Sign in with password',
+    authFailed: 'Authentication failed. Please try again.',
+    invalidCredentials: 'Email or password is incorrect.', signInFailed: 'Sign in failed. Please try again.',
+    redirecting: 'Redirecting…', google: 'Continue with Google',
+    or: 'or', email: 'Email address', password: 'Password', signingIn: 'Signing in…', signIn: 'Sign in →',
+    resetHelp: 'Need a password? Ask your Magic Engine administrator to set or reset it.',
   },
   'zh-CN': {
-    magicExpired: '登录链接已过期，请重新申请。', authFailed: '身份验证失败，请重试。',
-    invalidCredentials: '邮箱或密码不正确。', signInFailed: '登录失败，请重试。', sendFailed: '无法发送登录链接，请重试。',
-    checkEmail: '请检查邮箱', linkSent: '登录链接已发送至', expires: '链接将在 15 分钟后失效。', redirecting: '正在跳转…', google: '使用 Google 账号继续',
-    or: '或', email: '邮箱地址', password: '密码', signingIn: '正在登录…', sending: '正在发送…', signIn: '登录 →', sendLink: '发送登录链接 →',
-    emailLink: '改用邮箱登录链接', passwordLogin: '改用密码登录',
+    authFailed: '身份验证失败，请重试。',
+    invalidCredentials: '邮箱或密码不正确。', signInFailed: '登录失败，请重试。',
+    redirecting: '正在跳转…', google: '使用 Google 账号继续',
+    or: '或', email: '邮箱地址', password: '密码', signingIn: '正在登录…', signIn: '登录 →',
+    resetHelp: '还没有密码？请联系 Magic Engine 管理员设置或重置。',
   },
 } as const
 
 export default function LoginForm({ next, authFailed, locale = 'en' }: { next: string; authFailed?: boolean; locale?: Locale }) {
   const copy = loginCopy[locale]
-  const [mode, setMode]             = useState<Mode>('password')
   const [email, setEmail]           = useState('')
   const [password, setPassword]     = useState('')
-  const [sent, setSent]             = useState(false)
   const [error, setError]           = useState('')
   const [loading, setLoading]       = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
@@ -48,14 +34,11 @@ export default function LoginForm({ next, authFailed, locale = 'en' }: { next: s
     const hash = window.location.hash
     if (!hash) return
     const params = new URLSearchParams(hash.slice(1))
-    const code = params.get('error_code')
-    if (code === 'otp_expired') {
-      setError(copy.magicExpired)
-    } else if (code) {
+    if (params.has('error') || params.has('error_code')) {
       setError(copy.authFailed)
     }
     window.history.replaceState(null, '', window.location.pathname + window.location.search)
-  }, [copy.authFailed, copy.magicExpired])
+  }, [copy.authFailed])
 
   function handleGoogleLogin() {
     setGoogleLoading(true)
@@ -90,60 +73,19 @@ export default function LoginForm({ next, authFailed, locale = 'en' }: { next: s
 
       const res = await fetch(`/api/auth/session-route?next=${encodeURIComponent(next)}`, {
         credentials: 'include',
+        cache: 'no-store',
       })
-      window.location.href = res.redirected ? res.url : next
+      if (!res.ok) throw new Error('Session could not be started')
+      const data = await res.json() as { redirect?: unknown }
+      if (typeof data.redirect !== 'string' || !data.redirect.startsWith('/') || data.redirect.startsWith('//')) {
+        throw new Error('Invalid sign-in destination')
+      }
+      window.location.href = data.redirect
     } catch {
       setError(copy.signInFailed)
     } finally {
       setLoading(false)
     }
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setLoading(true)
-    setError('')
-    try {
-      const redirectTo = `${window.location.origin}/auth/implicit-callback?next=${encodeURIComponent(next)}`
-      const res = await fetch('/api/auth/magic-link', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim().toLowerCase(), redirectTo }),
-      })
-      if (!res.ok) {
-        setError(copy.sendFailed)
-      } else {
-        setSent(true)
-      }
-    } catch {
-      setError(copy.sendFailed)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  if (sent) {
-    return (
-      <div className="py-2">
-        <div
-          className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg text-sm font-black"
-          style={{ background: '#EAF3EE', color: '#1F7A55' }}
-        >
-          ✓
-        </div>
-        <h3
-          className="text-xl font-black"
-          style={{ fontFamily: "'Fraunces', Georgia, serif", color: '#16181D', letterSpacing: '-.02em' }}
-        >
-          {copy.checkEmail}
-        </h3>
-        <p className="mt-2 text-sm leading-6" style={{ color: 'rgba(22,24,29,.60)' }}>
-          {copy.linkSent}{' '}
-          <span className="font-semibold" style={{ color: '#16181D' }}>{email}</span>{locale === 'zh-CN' ? '。' : '.'}
-          {' '}{copy.expires}
-        </p>
-      </div>
-    )
   }
 
   return (
@@ -177,7 +119,7 @@ export default function LoginForm({ next, authFailed, locale = 'en' }: { next: s
       </div>
 
       {/* Email form */}
-      <form onSubmit={mode === 'password' ? handlePasswordLogin : handleSubmit} className="flex flex-col gap-3">
+      <form onSubmit={handlePasswordLogin} className="flex flex-col gap-3">
         <div>
           <label
             htmlFor="email"
@@ -203,8 +145,7 @@ export default function LoginForm({ next, authFailed, locale = 'en' }: { next: s
           />
         </div>
 
-        {mode === 'password' && (
-          <div>
+        <div>
             <label
               htmlFor="password"
               className="block text-xs font-bold uppercase tracking-[0.12em] mb-1.5"
@@ -225,8 +166,7 @@ export default function LoginForm({ next, authFailed, locale = 'en' }: { next: s
               onFocus={e => { e.currentTarget.style.borderColor = '#BE8A2E'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(190,138,46,.12)' }}
               onBlur={e  => { e.currentTarget.style.borderColor = 'rgba(22,24,29,.14)'; e.currentTarget.style.boxShadow = 'none' }}
             />
-          </div>
-        )}
+        </div>
 
         {(error || authFailed) && (
           <p
@@ -247,26 +187,12 @@ export default function LoginForm({ next, authFailed, locale = 'en' }: { next: s
             cursor: loading ? 'wait' : 'pointer',
           }}
         >
-          {loading
-            ? (mode === 'password' ? copy.signingIn : copy.sending)
-            : (mode === 'password' ? copy.signIn : copy.sendLink)}
+          {loading ? copy.signingIn : copy.signIn}
         </button>
 
-        <div className="flex items-center justify-between pt-1 text-xs font-semibold">
-          <button
-            type="button"
-            onClick={() => { setMode(mode === 'password' ? 'magic' : 'password'); setError('') }}
-            style={{ color: 'rgba(22,24,29,.55)' }}
-            className="underline underline-offset-2 hover:opacity-70"
-          >
-            {mode === 'password' ? copy.emailLink : copy.passwordLogin}
-          </button>
-          {/*
-            暂不放「忘记密码」入口：/api/auth/forgot-password 有接口但没有页面，
-            链过去是 404。而且重置链接同样走邮件，在 M365 上有一样的投递问题
-            （issue #674）。初始密码由管理员在 Supabase 后台设置并直接交给本人。
-          */}
-        </div>
+        <p className="pt-1 text-xs leading-5" style={{ color: 'rgba(22,24,29,.55)' }}>
+          {copy.resetHelp}
+        </p>
       </form>
     </div>
   )

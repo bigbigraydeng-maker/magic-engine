@@ -12,7 +12,7 @@
  * Business Suite inbox / Business AI.
  */
 
-const GRAPH_BASE = 'https://graph.facebook.com/v20.0'
+import { GRAPH_BASE } from './graph-base'
 
 /** How many Graph pages we will walk before giving up, per call. */
 const MAX_PAGES = 20

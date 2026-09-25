@@ -126,6 +126,19 @@ const mockRunPortfolioDiagnostics = vi.fn().mockResolvedValue({ success: true, h
 vi.mock('@/lib/ads-strategy/portfolio/snapshot-sync', () => ({ snapshotTablesExist: () => mockSnapshotTablesExist() }))
 vi.mock('@/lib/ads-strategy/portfolio/run-daily', () => ({ runPortfolioDiagnostics: (...a: unknown[]) => mockRunPortfolioDiagnostics(...a) }))
 
+// ── Mock 评估日解析（2026-09-24）────────────────────────────────────────────
+// 「昨天是哪一天」现在按广告账户自己的时区算（时区口径本身在
+// ads-strategy/__tests__/account-timezone.test.ts 里单独钉）。这里只验接线：
+// 谁被查、结果有没有被判定 / 日报 / 诊断 / 经营状态**同一个**用上。
+const mockResolveClientEvaluationDate = vi.fn().mockResolvedValue('2026-09-23')
+vi.mock('@/lib/ads-strategy/account-timezone', () => ({
+  resolveClientEvaluationDate: (...args: unknown[]) => mockResolveClientEvaluationDate(...args),
+}))
+const mockBuildGrowthState = vi.fn().mockResolvedValue({ ok: true })
+vi.mock('@/lib/ads-strategy/agents/patrol', () => ({
+  buildGrowthState: (...args: unknown[]) => mockBuildGrowthState(...args),
+}))
+
 // ── Mock multi-account lookup (2026-09-13) ───────────────────────────────────
 // Defaults to just the primary account — every existing test above this line
 // keeps its original single-account behavior untouched.
@@ -824,5 +837,108 @@ describe('GET /api/cron/google-data-pullback-daily — 多账户 ad_daily_insigh
         }),
       }),
     )
+  })
+})
+
+// ── 2026-09-24: 评估日按广告账户时区，四处共用同一天 ─────────────────────────
+// 上游取数窗口（PR #1964）已经按账户时区要「昨天」的数据。判定 / 日报这一侧原本还在
+// 按 UTC 算昨天（`new Date()` 在 Render 上就是 UTC），于是 `lte(insight_date, …)`
+// 每天把刚存进来的最新一天滤掉——数据白存一天才被看到。PM 2026-09-24 已授权广告全自动
+// 收放，决策输入晚一天值得修。
+describe('GET /api/cron/google-data-pullback-daily — 评估日按广告账户时区', () => {
+  const SECONDARY_ACCOUNT = 'act_987654321'
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    process.env.CRON_SECRET            = CRON_SECRET
+    process.env.META_SYSTEM_USER_TOKEN = META_TOKEN
+
+    mockConnectorsResult.mockResolvedValue({ data: [], error: null })
+    mockMetaClientsResult.mockResolvedValue({
+      data: [{ id: CLIENT_ID, name: 'CTS Tours NZ', meta_ad_account_id: AD_ACCOUNT }],
+      error: null,
+    })
+    mockGetAdAccountInsights.mockResolvedValue(MOCK_INSIGHTS)
+    mockGetAdCampaignInsights.mockResolvedValue([])
+    mockSnapshotSingle.mockResolvedValue({ data: { id: 'snap-001' }, error: null })
+
+    mockLoadAdStrategyConfigWithSource.mockResolvedValue({
+      config: { enabled: true, digest_recipients: [] }, source: 'client',
+    })
+    mockSyncCampaignDailyInsights.mockResolvedValue({ success: true, rows_written: 5 })
+    mockSyncAdDailyInsights.mockResolvedValue({ success: true, rows_written: 12 })
+    mockSyncAdsetDailyInsights.mockResolvedValue({ success: true, rows_written: 7 })
+    mockHasVideoColumns.mockResolvedValue(false)
+    mockFindSharedAdAccounts.mockResolvedValue({ shared: new Set<string>() })
+    mockGetClientAdAccountIds.mockResolvedValue([AD_ACCOUNT, SECONDARY_ACCOUNT])
+    mockResolveMetaTokenDetailed.mockImplementation(async () =>
+      process.env.META_SYSTEM_USER_TOKEN
+        ? { token: process.env.META_SYSTEM_USER_TOKEN, source: 'shared_fallback' as const }
+        : null,
+    )
+    mockLoadTokenOwnerPeers.mockResolvedValue(null)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('评估日按客户名下**每一个**广告账户算，主账户和次账户都要参与', async () => {
+    const { GET } = await import('./route')
+    await GET(makeRequest(CRON_SECRET))
+
+    expect(mockResolveClientEvaluationDate).toHaveBeenCalledTimes(1)
+    const accountIds = mockResolveClientEvaluationDate.mock.calls[0][0] as string[]
+    expect(accountIds).toEqual(expect.arrayContaining([AD_ACCOUNT, SECONDARY_ACCOUNT]))
+  })
+
+  it('🔴 判定 / 原日报 / 只读诊断 / 经营状态用的是同一天（日报标题日期 = 判定日期）', async () => {
+    const { evaluateClientAdHealth } = await import('@/lib/ads-strategy/evaluate')
+    const { sendAdHealthDigest } = await import('@/lib/ads-strategy/digest')
+    vi.mocked(evaluateClientAdHealth).mockResolvedValue({ success: true, overall_verdict: 'watch' } as never)
+    vi.mocked(sendAdHealthDigest).mockResolvedValue({ decision: 'watch', sent: true } as never)
+    mockSnapshotTablesExist.mockResolvedValue(true)
+    // 诊断失败 → 退回发原日报，这样一次运行里四个消费方都被调到。
+    mockRunPortfolioDiagnostics.mockResolvedValue({ success: false, hits: 0, not_comparable: 0, excluded: 0, error: 'load failed' })
+
+    const { GET } = await import('./route')
+    await GET(makeRequest(CRON_SECRET))
+
+    expect(vi.mocked(evaluateClientAdHealth).mock.calls[0][1]).toBe('2026-09-23')
+    expect(mockRunPortfolioDiagnostics.mock.calls[0][2]).toBe('2026-09-23')
+    expect(vi.mocked(sendAdHealthDigest).mock.calls[0][2]).toBe('2026-09-23')
+    expect(mockBuildGrowthState.mock.calls[0][1]).toBe('2026-09-23')
+
+    vi.mocked(evaluateClientAdHealth).mockReset()
+    vi.mocked(sendAdHealthDigest).mockReset()
+    mockSnapshotTablesExist.mockResolvedValue(false)
+    mockRunPortfolioDiagnostics.mockResolvedValue({ success: true, hits: 1, not_comparable: 0, excluded: 0, digest_decision: 'alert', digest_sent: true, recipients_dropped: 0 })
+  })
+
+  it('不再按 UTC 算昨天：评估日只来自账户时区解析，不是服务器时钟', async () => {
+    // 服务器时钟的「昨天」跟账户时区的「昨天」故意不同：cron 17:00 UTC 触发时
+    // UTC 是 09-22、奥克兰是 09-23。路由必须原样用解析出来的那一天。
+    // 系统时间固定到这个事故时刻，否则测试在 UTC 09-24 运行时
+    // `utcYesterday` 也会算成 2026-09-23，`not.toBe` 就会误判失败。
+    vi.setSystemTime(new Date('2026-09-22T17:00:00Z'))
+    mockResolveClientEvaluationDate.mockResolvedValueOnce('2026-09-23')
+    const { evaluateClientAdHealth } = await import('@/lib/ads-strategy/evaluate')
+    const { sendAdHealthDigest } = await import('@/lib/ads-strategy/digest')
+    vi.mocked(evaluateClientAdHealth).mockResolvedValue({ success: true, overall_verdict: 'healthy' } as never)
+    vi.mocked(sendAdHealthDigest).mockResolvedValue({ decision: 'skip', sent: false } as never)
+
+    const { GET } = await import('./route')
+    await GET(makeRequest(CRON_SECRET))
+
+    const usedDate = vi.mocked(evaluateClientAdHealth).mock.calls[0][1]
+    const utcYesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
+    // 先确认时钟真的被钉住了：`vi.setSystemTime` 要是哪天不再生效（版本升级 / 少了
+    // useFakeTimers），下面两条断言会退化成「碰巧今天成立」，这一条让它当场红。
+    expect(utcYesterday).toBe('2026-09-21')
+    expect(usedDate).toBe('2026-09-23')
+    expect(usedDate).not.toBe(utcYesterday)
+
+    vi.mocked(evaluateClientAdHealth).mockReset()
+    vi.mocked(sendAdHealthDigest).mockReset()
   })
 })

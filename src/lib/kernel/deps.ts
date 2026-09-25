@@ -18,6 +18,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ActionRun, CapabilityImplementation } from './types'
+import type { EnvelopeFacts, EnvelopeRequest } from './autonomy-envelope'
 import type { ActionRegistry } from './registry'
 import { getRun } from './store'
 
@@ -53,6 +54,18 @@ export interface KernelDeps {
    *    我们分不清「旧进程崩了」和「旧进程还活着只是慢」。
    */
   readonly ownerId: string
+  /**
+   * 受限自治信封的**事实来源**（spec 2026-09-24 §3 G5）。
+   *
+   * 🔴 Kernel 刻意不认识广告表。信封要的六项事实（改动前预算、账户合计、
+   *    日上限、距上次变动小时数、学习期、实验数）全部由域层实现去读
+   *    （`capabilities/ads/envelope-facts.ts`），Kernel 只认这个接口。
+   *
+   * 🔴 **缺这个解析器 = 拒绝**，不是「跳过信封检查」。声明成 bounded 的动作
+   *    没人能告诉 Kernel 真实预算是多少时，唯一诚实的答案是不做。
+   *    所以它是可选字段，但 authorize / gateway 在 bounded 路径上缺它就 deny。
+   */
+  readonly resolveEnvelopeFacts?: EnvelopeFactsResolver
   now(): Date
   /** 重试之间的等待。测试里换成不等，生产里就是真等。 */
   sleep(ms: number): Promise<void>
@@ -69,7 +82,28 @@ export interface KernelDepsInit {
   ownerId?: string
   now?: () => Date
   sleep?: (ms: number) => Promise<void>
+  /** 见 `KernelDeps.resolveEnvelopeFacts`。不给 = bounded 动作一律拒。 */
+  resolveEnvelopeFacts?: EnvelopeFactsResolver
 }
+
+/**
+ * 解析某一次 run 的信封事实。
+ *
+ * `at` 说明这是哪一层在问：授权层用当下最新快照，执行层用 `kernel_pre`
+ * （碰 provider 之前刚抓的那一份）。两层各算一次，事实来源不同，都必须过。
+ *
+ * 返回 `{ unavailable }` = 读不到 → 调用方 deny，**不得当作通过**。
+ */
+export type EnvelopeFactsResolver = (ctx: {
+  clientId: string
+  actionKey: string
+  input: Record<string, unknown>
+  at: 'authorize' | 'pre_provider'
+  runId: string
+}) => Promise<
+  | { readonly request: EnvelopeRequest; readonly facts: EnvelopeFacts }
+  | { readonly unavailable: string }
+>
 
 /** 进程内一次性的随机后缀 —— 重启之后不会跟崩溃前那份租约撞上。 */
 function bootNonce(): string {

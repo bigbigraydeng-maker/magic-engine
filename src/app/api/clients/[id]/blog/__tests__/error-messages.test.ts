@@ -101,6 +101,7 @@ const mockCommitCharge        = vi.mocked(commitCharge)
 const mockRefundOnFail        = vi.mocked(refundOnFail)
 const mockChargeForGeneration = vi.mocked(chargeForGeneration)
 import { getWeakSpotOpportunities } from '@/lib/blog/topic-selector'
+import { DEFAULT_CONTENT_GUARD_CONFIG } from '@/lib/content/content-guard-config'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -179,7 +180,15 @@ beforeEach(() => {
   mockFrom.mockReturnValue(mockChain as any)
   mockFetchRelatedPages.mockResolvedValue([])
   mockBuildPagesContextBlock.mockReturnValue('')
-  mockAuditBlogPost.mockResolvedValue(null)
+  mockAuditBlogPost.mockResolvedValue({
+    rubricResult: { overallScore: 8, pass: true, dimensions: [] },
+    contextSnapshot: {},
+    contentGuard: {
+      status: 'pass', needsHumanReview: false, targetLanguage: 'en', languageFindings: [],
+      clicheProbability: 0.1, judgeError: null, dimensions: [], config: DEFAULT_CONTENT_GUARD_CONFIG,
+    },
+    retryable: false,
+  })
   mockGetActiveBrief.mockResolvedValue(null)
   mockGetActiveCampaigns.mockResolvedValue([])
   mockSeoContentAdapter.mockImplementation(() => ({

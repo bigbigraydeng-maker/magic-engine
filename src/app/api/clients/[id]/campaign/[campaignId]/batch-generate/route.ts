@@ -269,12 +269,12 @@ Output ONLY valid JSON:
           const primaryKeyword = route === 'route_a' ? inputText : null
 
           const audit = await auditSocialPost(contentForAudit, safePlatforms, contentType, auditMeta, primaryKeyword)
-          if (!audit) break
 
           qualityScore = audit.rubricResult.overallScore
           contextSnapshot = { ...audit.contextSnapshot, attempts: attempt }
 
-          if (audit.rubricResult.pass || attempt === MAX_ATTEMPTS) {
+          // retryable=false: only the content-guard judge was unavailable — a rewrite cannot fix that.
+          if (audit.rubricResult.pass || attempt === MAX_ATTEMPTS || !audit.retryable) {
             if (!audit.rubricResult.pass) {
               console.warn(
                 `[social quality] Post failed quality threshold after ${attempt} attempt(s)` +

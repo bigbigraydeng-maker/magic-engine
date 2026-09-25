@@ -22,7 +22,7 @@
  * （id / created_time / field_data）重试 —— 宁可丢归因，不丢人。
  */
 
-const GRAPH_BASE = 'https://graph.facebook.com/v20.0'
+import { GRAPH_BASE } from './graph-base'
 
 /** 翻页上限，防跑飞用，不是真实业务上限。 */
 const MAX_PAGES = 20

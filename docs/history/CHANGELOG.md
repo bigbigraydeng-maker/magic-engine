@@ -5,6 +5,258 @@
 
 ---
 
+### 2026-09-25（外部平台授权断了会自动进今日待办，不再像 CTS 邮箱那样断 9 天没人知道）
+
+- **为什么**：CTS 的 `info@ctstours.co.nz` 和 `bdm@ctstours.co.nz` 邮箱同步断了 **9 天**，客人询价一封没进 CRM，而每小时的同步任务一直报成功——它只捞 `status = active` 的连接，断掉的那两条安静地从循环里消失。根因是 2026-09-15 给 `MICROSOFT_MAIL_SCOPES` 加了 `Mail.ReadWrite`：微软刷新令牌时重放整份 scope 清单，换不来客户从没同意过的新权限（`AADSTS65001`）。那次改动的提交说明里写了「已连的客户需要重连」，然后没有然后了。
+- **上线**（PR [#2012](https://github.com/bigbigraydeng-maker/magic-engine/pull/2012)，`23cd209f`）：`src/lib/platform-oauth/connection-health.ts` 五条判据（状态位说断了 / 心跳停了 / 长期令牌到期 / 权限清单不够用 / 连上了但不在取数名单里），每个 provider 在 `HEARTBEAT_POLICY` 里逐个表态（心跳节奏 · 刷令牌一次碰几条 · 能不能自动续期，有 CI 守卫，新增平台漏填会挂）；`src/lib/pm-todo/platform-connection-items.ts` 翻译成人话下发进今日待办，只有人能点同意页的进「🙋 需要你动手」，其余进「🛠 系统欠账」。
+- **判据要点**：`revoked` 是人主动断开、不当故障；「整条通道停了」按**不同客户数**算（按连接条数算的话 CTS 那次会被误判成取数任务的问题、踢出 PM 清单）；能自动续期的平台令牌过期是常态不报，Meta/TikTok 到期即真死；读到零行当故障报（PostgREST 权限被收掉时零行不报错）。
+- **顺带修三个会让监控说谎的写入侧 bug**：`upsertConnection` 把状态改回 active 却不擦 `error_message`；微软与谷歌回调重连成功后不盖 `last_synced_at`（人修好了监控还继续报）；微软回调存的是我们请求的权限清单而不是微软实际批准的那一份。
+- **闸门**：`scope-change-gate.test.ts` 钉住全部 6 份 `*_SCOPES` 清单并扫 `src/` 防漏网；`token-manager.test.ts` 另钉「谷歌刷新不许带 scope、微软刷新必须带」这条根因行为。事故与判据全文见 `docs/PITFALLS.md` F11 / F12，质量闸加 A 级专条。
+- 生产实况干跑（17 条连接）产出 5 条全真：Roman HU / NZCPE 的 Facebook 断了 17 天、CTS `bdm@` 断了 9 天、CTS `info@` 状态绿心跳停、NAL 谷歌搜索数据「连上了但一天没取过数」。子牙 + 魏征两轮复审的问题全部合并前收掉。
+
+### 2026-09-25（台账 docs/ledger v0：窗口结论一条一卡、待办邮件每天读、改代码不写卡合并前拦、夜巡核实）
+
+- **为什么**：2026-09-24 三个 agent 全量审计——128 条教训记忆 73% 只在文字里没程序读过；7 簇重复踩坑全部"建了防护后再踩"；变成代码/CI 的防护起效、写成文字的没起效。ROADMAP/DECISIONS/PITFALLS/STATE 没有程序在读，"记了"无法被机器证伪。
+- **上线**（PR #1984，`d643e9c5`）：`docs/ledger/` 一张卡一个文件（decided/done/verified/failed）；`src/lib/ledger/*` 解析/指向/判定/读取；待办邮件多一栏（决定了没做/做了没验/验了不成/夜巡没来）；`ledger-check.yml` 四道检查（格式永不豁免 · 改代码必写卡 · 指向真实且绑定本 PR · 夜巡分支只准翻状态）；`scripts/ledger-update.mjs` 改卡统一入口；CLAUDE.md §9 第 1/6 条。
+- **仓库外**：夜巡定时任务 `~/.claude/scheduled-tasks/ledger-nightly-verify/`（每晚 21:30）；关窗钩子对 A/B 级窗口没写卡拦一次。
+- **PM 2026-09-25 拍板**：三道台账检查进主干必过清单（已设）；只改 `docs/ledger/` 的 PR 免人工合并审批、CI 全绿自动合（仓库 auto-merge 已开；工作流改动见 `.github/merge-authorization.md`）。
+- 设计：`docs/specs/2026-09-24-harness-ledger-v0.md`（子牙 + 魏征设计审必改项全吸收）。DeepSeek 写代码、Fable 窗口出 spec 并复审。
+
+### 2026-09-25（广告 WP2 合并 + Kernel 恢复白名单补丁已 apply）
+
+PR [#1979](https://github.com/bigbigraydeng-maker/magic-engine/pull/1979)（2026-09-24 合并 `a6ddc6d5`）：Kernel `OutwardApproval` 加 `bounded` 信封（20% / 日上限三档缓冲 / 72h 冷却 / 学习期 / 对比测试 / 必有撤回）；六个 `ads.*` 动作注册（pause / cut / scale 真执行，budget_move / add_retargeting / swap_creative 先转人工）；`gateway.ts` 碰 provider 前第二道信封核算；`DELIVERING_STATUSES` 统一到诊断层；子牙 + 魏征 + 狄仁杰三审通过。migration `20260925000003_kernel_recovery_outside_autonomy_envelope` 于 2026-09-25 PM go 后 apply（`outside_autonomy_envelope` 进恢复白名单）。**没有任何客户开 `bounded_auto`**；WP2 遗留三处见 [#1994](https://github.com/bigbigraydeng-maker/magic-engine/issues/1994)，归 WP3.1b。
+
+### 2026-09-24（Agent 管理系统：旅行社送来的终端客户，从邮件自动提取进度）
+
+PR [#1983](https://github.com/bigbigraydeng-maker/magic-engine/pull/1983)（合并 `8d3d84f9`）：新页面 `/dashboard/clients/[id]/agents`（按 Agent / 按阶段两视角 + 抽屉回复邮件）；每小时邮件同步对 `trade` 联系人跑 AI 提取（`travel-agent-customer-extract.ts`，XML 包住正文防注入，pax > 30 双保险 `needs_review`）；新表 `agent_customers` + 唯一索引 `(client_id, agent_contact_id, conversation_id, customer_name)`（同名不同线程分开，刻意不跨线程去重）；阶段常量 `TRAVEL_AGENT_CUSTOMER_STAGES` 留在代码不进 CHECK；POST 三级清晰错误 + 范围校验。aider→DeepSeek 6+1+4 轮 $0.074，子牙两轮 + 魏征两轮 + 子牙第三轮通过。两张 migration `20260925001000` / `20260925001100` 于 2026-09-24 PM go 后 apply。
+
+### 2026-09-24（Meta 留资同步：同一条线索每轮重打一次 Mailchimp，办完的不再重跑）
+
+`getLeadWatermark` 每轮回看 24 小时（为补 Meta 延迟吐出来的 lead，这个窗口必须留着），但
+`ingestMetaLead` 没有「这条上轮已经办完」的判断，于是同一条 lead 每轮被完整重跑，每次真打
+Mailchimp 两下。生产实测（CTS，2026-09-05~09-23，按 clientId 全量求和）：**188 条真实线索被
+重复处理 4926 次**，其中 4697 次回 `already_member`。
+
+更糟的是回执被覆盖：Phase B 每轮把 `metadata.mailchimp_result` 写回 `pending`、Phase D 再写本轮
+结果，所以库里最终态只反映**最后一次尝试**。195 条 `already_member` : 1 条 `subscribed` 因此被
+误读成「留资的几乎都是老客户」——那不是业务事实，是重跑次数的影子。
+
+PR [#1973](https://github.com/bigbigraydeng-maker/magic-engine/pull/1973)：
+- 闸门装在编排层 `lib/meta/leads-sync.ts` 的 `readSettledLeadIds()`，**`lib/crm/meta-lead.ts` 的
+  Phase A→D 一个字没动**（那段带着合同 5425312107 / 5426843158 两份条款和两次静默事故的疤）
+- 判据 `isMailchimpSettled()` 住在 `lib/mailchimp/outlet-tally.ts`，跟 `isOutletGap` 同一套词汇表。
+  只认 `subscribed` 和「`already_member` 且标签确实落地」；`pending` / `skipped:*` / `failed:*` /
+  标签没打上一律照常重跑 —— 24 小时窗口的重试能力完整保住
+- `not_attempted` 不算办完（它只代表「压根没给标签名」）；本轮解析出明确 opt-out 的照常走完整
+  流程（那一位要写进 `do_not_contact`）；读回执失败或回执是垃圾形状一律当没办完
+- 切批 200 查（沿用 `knowledge/mining.ts` issue #1760 验证过的安全值）；读失败进
+  `MetaLeadsSyncResult.settledLookupFailures`，**不混进 `mailchimp` tally**（混进去会被日报和今日
+  待办误报成出口故障）
+- `already_synced` 进 `EXPECTED_SKIP_REASONS` 白名单。⚠️ **它是健康信号**：稳态下一轮的 tally 长成
+  `{'skipped:already_synced': 13}`，今后任何健康检查都不得拿「没有 subscribed」当故障判据
+- `leadsIngested` / `newContacts` 口径不变，PM 每天看的「今天进了几个人」不会无声变样
+
+⚠️ 188 条历史行的「第一次结果」已被覆盖、不可恢复，那个 195:1 的误读修不回来，只能从上线后
+重新积累。**不要回填。**
+
+附带查清（不在本 PR 范围，已进 ROADMAP）：CTS 名单里相当一部分人是**客户自己**的 Mailchimp 原生
+Meta Lead Ads / Zapier / Make 三条平行管道当天送进去的 —— 所以 `already_member` 也不等于
+「这是老客户」，很大一部分只是别人比我们快。
+
+---
+
+### 2026-09-24（广告健康判定 / 日报的「评估日」也按广告账户时区算，跟取数窗口对齐）
+
+上一条修好了取数那一半：数据按账户时区的「昨天」存进 `ad_daily_insights`。但判定这一半还在用
+`new Date()`（Render 跑在 UTC），`evaluateClientAdHealth` 的 `.lte('insight_date', 评估日)` 于是每天
+把刚存进来的最新一天滤掉——数据存对了，但要等一天才被看到。不报错、上下游各自的单测都绿。
+PM 2026-09-24 已授权广告全自动收放，决策输入晚一天不该留。
+
+PR [#1966](https://github.com/bigbigraydeng-maker/magic-engine/pull/1966)：
+- 新增 `src/lib/ads-strategy/account-timezone.ts`：`accountDayKey` / `resolveAccountTimezone` 从
+  `daily-insights.ts` **搬**过来（全仓只留一套时区解析），新增 `accountYesterday` 和
+  `resolveClientEvaluationDate`
+- 评估日 = 该客户名下每个广告账户「自己时区的昨天」里**最早**的那一天。体检和只读诊断都按
+  client_id 聚合、不分账户，取最新会把落后时区那个账户没跑完的半天当整天喂进相对基线——
+  在自动收放回路上是**误停在投广告**的方向。现网 7 个账户（6 × `Pacific/Auckland` +
+  1 × `Australia/Brisbane`）在 17:00 UTC 触发时算出来是同一天，这条取舍目前不产生损失
+- 判定 / 原日报 / 只读诊断 / 经营状态四处共用同一个 `evaluationDate`（原先 `insightDateStr` 与
+  `diagDate` 是两次独立的 UTC 计算），不会再出现「数据到 9/24、判定写 9/24、日报标题写 9/23」
+- `evaluate.ts` 未改：`PAUSED_AFTER_DAYS = 3` 的取值和比较都没动；数据和评估日一起前移一天，
+  偏移量不变，边界原地不动（新增用例钉住落后 1/2 天不算停投、第 3 天才算）
+- `portfolio/diagnostics/` 未改：`localDayEndUtc(date, timezone)` 本来就按账户时区把日期换算成
+  时刻边界，缺的只是传进去的日期串是 UTC 的
+- 验证：`vitest` ads-strategy 507 通过 / cron 路由 57 通过；`tsc --noEmit` 13 条错误与改前逐行一致
+  （既有基线，0 条在 ads-strategy）；`npm run build` 通过
+
+**卫青复审（2026-09-24，合并后）查出两件事**，后续 PR 处理：
+- 🔴 已修：只要有**一个**广告账户读不到时区，它按 UTC 算出来的「昨天」必然早于任何 UTC+7 以东的
+  账户，会稳赢 min 把整个客户静默拖回修复前口径。改成「读不到时区的账户排除在取最早之外，
+  全都读不到才回落 UTC」，并加变异验证过的回归用例
+- 🟡 记入 ROADMAP（P3）：D1「投放卡住」的报表滞后守卫在 UTC+7/+8 账户上会把跨午夜的零投放段
+  判成「判不了」且永不复评。现网没有这类账户，暂不动
+
+**过渡期的一个洞**：旧口径最后写的是 `insight_date = 2026-09-22`（2026-09-23 17:00 UTC 那轮），
+新口径下一轮（2026-09-24 17:00 UTC）写 `2026-09-24`，**`2026-09-23` 这一天不会有
+`ad_health_narratives` / `ads_growth_states` 行，也不会发那天的日报**，系统没有自动补写机制。
+（不是"多发一封"——那只会在同一个 UTC 日里先跑旧代码又手工重跑新代码时出现。）
+影响限于看板 30 天历史条上缺一格；断更告警看的是行的写入时间不是 `insight_date`，不会误报。
+要不要手工补跑那一天的体检由 PM 决定。
+
+---
+
+### 2026-09-24（广告每日数据取数窗口按 UTC 算「昨天」，AU/NZ 客户每天少拿一天数据）
+
+`daily-insights.ts` 的 `requestWindow()` 用 `new Date()` 取「今天」，Render 跑在 UTC，而 Meta 是按
+广告账户自己的时区切天。cron 17:00 UTC 触发时新西兰已是次日 05:00，当地的昨天是完整的一天，却因为
+UTC 的昨天早一天而从未被请求。实测：2026-09-23 那次跑完后，CTS 两个账户 campaign/adset/ad 三个层级
+的最新数据日期全停在 09-22，09-23 一行没有，而当天两个广告组仍是 ACTIVE（约 NZ$135 花费对引擎不可见）。
+不是客户特例——库里 7 个广告账户 6 个 `Pacific/Auckland` + 1 个 `Australia/Brisbane`，一个 UTC 的都没有。
+
+PR [#1964](https://github.com/bigbigraydeng-maker/magic-engine/pull/1964)：
+- 账户时区从 `ad_entity_snapshots`（`level='account'`）最新一条读，不硬编码、不额外打 Graph API
+  （时区几乎不变，Meta 按次计配额）；查不到回落 UTC，跟改之前行为一致
+- 时区查询只按 `ad_account_id` 不带 `client_id`——时区是账户的属性，共用/次账户挂在别的客户名下也要能查到
+- `since` 与 `until` 同一时区基准，不留半 UTC 半本地的窗口；`requestWindow` 导出以便直接钉住时区算术
+- campaign / adset / ad 三个入口一起改；新增 9 条回归测试（含 `America/Los_Angeles` 反向用例，
+  确认不会请求当地还没跑完的一天），并做变异验证：把时区写死回 UTC 时 6 条当场失败
+- 09-23 缺的那天由既有 7 天回溯窗口在下一次 cron 自然补回，未跑补数脚本
+- 未改 `evaluate.ts` 的 `PAUSED_AFTER_DAYS`：已验证 cron 里的 `insightDate` 同样是 UTC 昨天，两边同步
+  偏移，3 天阈值没被吃掉（09-22 判「已停投」的 2 条最后花钱都是 09-16，是真停投）。把评估日也对齐
+  时区已另开任务
+
+---
+
+### 2026-09-24（7 本经验手册每周过期巡检：读手册 + grep 仓库核实代码引用，接入今日待办）
+
+7 本跨客户经验手册（Claude 持久记忆，不在仓库）经常点名具体代码路径/函数名/表名，代码重构后这些
+引用会悄悄失效，此前没有任何机制回头核对。
+
+PR [#1952](https://github.com/bigbigraydeng-maker/magic-engine/pull/1952)：
+- 新增 `playbook_staleness_findings` 表（全量替换设计：每周先清空整表再写入本周结果，一条引用
+  被改好后自然从表里消失，不需要人工标记「已处理」）
+- 新增 `POST /api/cron/playbook-staleness-weekly` 接口，`CRON_SECRET` 鉴权（复用既有密钥）
+- 新增本地 Claude scheduled task `playbook-staleness-weekly`（每周一 08:30，仓库外触发，
+  `CRON_REGISTRY` 登记为 `scheduler: 'external'`）：读 7 本手册、grep 仓库核实引用是否还在
+- `pushPlaybookStalenessItems` 接入 `pm-daily-todo`，归进 `DEV_OWNED_KINDS`（不计入 PM 今日待办数量）
+- 经子牙（架构）+ 魏征（挑刺）两轮独立复审：设计阶段改掉「部分唯一索引配合 PostgREST upsert
+  跑不通」和「无人值守任务直接用生产库密钥」两处硬伤；实施后复审又抓出一个 Next.js App Router
+  导出限制的真实类型错误，已修
+
+---
+
+### 2026-09-23（AI 可见度探测失败被当成「零提及」发给客户：数据结构分离 + 回执 finding + 过度矫正守卫）
+
+OpenAI 9-20 余额耗尽后，诊断里的 AI 探测全部 429 失败，系统把"没测到"写成了"AI 里一次都没提到你的品牌"
+（critical 级、优先级 95），5 家客户拿到假结论。根因是失败和真实零提及共用同一个 `null`，下游分不开。
+
+PR [#1919](https://github.com/bigbigraydeng-maker/magic-engine/pull/1919)：
+- `LiveProbeResult` 新增 `measured_runs` / `failed_runs`，`LiveProbeQuestionResult` 新增 `error` 字段
+- `isProbeConclusive()` 函数：每个问题都真测到了才允许出结论，否则退 `score: null`
+- 探测失败时产出 `ai_visibility_probe_failed` finding（不再静默），带失败详情和耗时
+- 过度矫正守卫测试：真实零提及仍报 critical、真实退步仍报 high
+- 经子牙（架构）+ 魏征（挑刺）两轮独立复审
+
+⚠️ 同一类 bug 在周度快照聚合那条路还没修（`aggregateSnapshot` 不过滤失败行），已开 P0 卡跟踪。
+
+---
+
+### 2026-09-23（AI 账户断电 / 任务卡死 / 长期故障，当天就有人看得见）
+
+**这条不修任何具体功能的 bug，只修「坏了没人知道」。** 触发它的是一次真实的三天静默故障：
+2026-09-20 18:01~19:11 (UTC) ME 全站唯一那把 `OPENAI_API_KEY` 背后的账户余额耗尽，约 35 个调用点
+一起死，**三天没人知道**。近 7 天的运行记录里，错误信息提到 OpenAI 的只有 `market-intel-daily`
+一条 —— 因为 `src/lib/market-intel/pipeline.ts` 是全仓唯一一条没写 `catch {}` 的 AI 链路。
+
+**根因中的根因**：几乎每个模块的「优雅降级」判据写的都是 `if (!process.env.OPENAI_API_KEY)`，
+只挡**钥匙丢了**。钥匙在、但账户没钱走的是 HTTP 429 这条完全不同的分支，而那条分支上大部分是
+`catch {}`。设计者以为的「AI 不可用就降级」，在真实故障形态下一次都没触发。
+
+改了什么（PR [#1926](https://github.com/bigbigraydeng-maker/magic-engine/pull/1926)，风险级 A）：
+
+- **钥匙那一层统一识别账户级失效**。新增 `src/lib/ai/provider-failure.ts`，核心是分清
+  **429-没钱** 和 **429-太快**：两者状态码相同、处置完全相反，分不清就只能二选一 ——
+  要么天天误报，要么三天不报。顺带把 Cloudflare 网关回的 401 跟 OpenAI 说「钥匙不对」分开，
+  否则 PM 会被支去 OpenAI 后台查一把好钥匙。`openai-client.ts` 给 SDK 传自定义 `fetch`：
+  只在失败时 `clone()` 读体，绝不向调用方抛，原样返回第一手响应。
+- **新表 `provider_outages`**（按天一行，service_role RLS，无 `client_id`）。刻意**不做「检测恢复」**
+  —— 拦截点在网关之后，一次 200 可能只是缓存命中，证明不了账户真的恢复；按天一行则自动自愈。
+  也刻意**不加计数列**：写入带节流、生产多进程，任何计数都必然偏低。
+- **收编 7 个绕开封装的调用点**，但传 `bypassGateway: true`：这 7 处用的 `responses.create`
+  **从来没有一次经过 CF 网关**（核对：与 40+ 个走网关的 `chat.completions` 调用方零交集），
+  顺手切过去等于用一条没验证过的路由换掉七条在跑的链路 —— 其中 6 处的失败是被 `catch` 吞掉的。
+- **卡在 running 的任务终于进得了失败邮件**。原筛选 `failed_count>0 || status='failed'`
+  两边都接不住 `running`（容器被杀时路由的 `catch` 根本没机会跑），这封邮件**在设计上不可能报卡死**。
+  邮件还补渲染了 `summary` 里的客户级明细（`questions_failed: 47` 这类以前一个字看不到）。
+- **`health.ts` 从 2026-09-06 就算出的 `failing` 第一次真正下发**，此前算完只去了一个没人天天开的看板页。
+- **拆掉「只看最后一条」的盲点**：卡死判定改成按任务查 48 小时窗口（后一轮成功不再掩埋前一轮），
+  但 `failing` 判据一个字没动 —— 它「只看最后一次」是故意的，防的是把已修好的东西天天摆出来。
+  结果按服务聚合，否则一个任务 4 条孤儿行会被报成「4 个任务卡死」。
+- **降噪**：同原因的 N 次收成一行（9-22 那封邮件 80 行里 `prospecting-sweep` 一家占 25 行），
+  收敛**复用已有的** `todo-reconciliation/reconcile.ts`（这是它第一个真实调用方）。
+  但平台错误码 `(#10)/(#100)` 和 HTTP 状态码是白名单必须保留 —— 抹光了会把三个各自致命的根因合并。
+- **告警管道自己坏了也要有人知道**：读不出断电记录、或任务体检整体挂掉时，各下发一条明说
+  「不报警**不等于**没事」的条目。
+
+两轮复审（子牙 + 魏征，设计阶段与实施后各一轮）救回两个会让这套东西白做的坑：
+① 提醒节奏原打算「每 7 天一次」—— 7 的倍数**永远落在同一个星期几**，而今日待办周五周六不跑，
+撞上就一次都不会再响；② 降噪的长 id 正则会把 `insufficient_quota` 和 `rate_limit_exceeded`
+双双抹成 `#` 合并成一行，把刚建立的区分又抹平。
+
+验证：端到端失败注入（真 SDK → 真拦截器 → 真分类器 → 真落库 → 真待办文案）；建表语句在本机
+PostgreSQL 17 沙盘真跑过并用 `SET ROLE` 验了匿名与登录用户读写全部 `permission denied`；
+上线后在生产库真写真读真删走了一遍。全仓测试零新增失败（45 failed / 16923 passed，失败文件与基线同一批）。
+
+---
+
+### 2026-09-23（AI 可见度：探测失败不再被当成「测出来是零」报给客户）
+
+客户的 AI 可见度分数原来是这么算的：拿当天所有测量记录，数一数有多少个问题里 AI 提到了这个客户。
+问题在于**采集失败的那些记录也被算进去了**——调用挂掉时品牌列表是空的，于是永远进不了「提到了」
+那一边、却总是占着分母，**把客户分数系统性地压低**；而且「样本够不够」那道闸只数记录条数、不数
+成功条数，**整批 78 条全部失败也能过闸**，照样给出一个自信的低分。这是 2026-09-23 在诊断模块修掉的
+同一个病（`docs/PITFALLS.md` D12）的第二处，链路不同：行业快照 → 策略自动取数。
+
+判据没法简单写成「有没有报错码」：全量 12,979 条记录里 `error_code` 只有 4 个取值，其中
+`no_ai_overview`（Google 本次没展示 AI 概览）**是采集成功的，而且是一次真实的零**，必须留在分母里。
+按「有报错码就排除」算分会把真实的零全删光、分数偏高；按「有报错码就算失败」去数，会把一个健康的
+平台报成 100% 故障——任务卡里「google_ai_overview 每天 100% 失败」这个结论就是这么来的，实测
+9-22 是 47 条真失败 + 31 条正常的「没有 AI 概览」。
+
+改了什么（PR [#1928](https://github.com/bigbigraydeng-maker/magic-engine/pull/1928)）：
+- 新增一个共享判据模块 `src/lib/industry-ai-visibility/snapshot-conclusive.ts`（零依赖纯函数，任何
+  读这张表的地方都能用）：维护一张「成功但为空」的允许清单，清单之外一律当失败（fail-closed）。
+  今天代码里就有 4 个从未在生产出现过的报错码靠这个默认值落到失败侧；
+- 算分改成**只给每个平台都测成功的问题算**。一个问句同时问 3 个平台，只扔掉挂掉的那一行不够——
+  复审实测，把「只测成一半」的问题留在分母里仍然低估最多约 46%；而反过来只留命中、扔掉部分测成的
+  未命中，某天所有问题都是部分测成时分数会直接变成 100%。两个方向现在都有测试钉死；
+- 加了一道 **60% 覆盖率下限**：失败不是随机的（城市维度的问句在数据商那边 100% 报错，全国维度的
+  正常），所以残存样本是**偏的**不只是少的。单靠「至少 5 道题」会拿 18 道题里幸存的 3 道全国题出分；
+- 算不出来时的理由**点名真因**（「78 题里 47 题证据不完整，94 次平台调用失败，都是数据商报错」），
+  不让 FDE/PM 把「没测成」读成「AI 从来不提我们」；
+- 采集失败的记录**继续入库**（审计留痕，见 GEO 手册第八条）。代价是成功标志不是数据库字段、下游必须
+  靠报错码重建，所以写入侧加了一道漂移守卫：采集器的判断和允许清单不一致时报错（按批次去重，一次
+  坏批不刷 18 条日志）。
+
+验证：`src/lib/industry-ai-visibility` + `src/lib/strategy` 共 14 个文件 211 个测试全绿；3 个变异体逐个
+验证测试真能抓回归（旧的行级分母 → 2 红，部分测量当完整测量 → 4 红，覆盖率闸关掉 → 2 红）；
+type-check 三个改动文件零新增错误；`npm run build` 通过。**拿 8-25 到 9-22 的生产数据整个回放了一遍**：
+系统健康的那段时间 65 个「行业×天」里 62 个照常出分（只有 3 个被拦），故障期才大面积返回「算不出来」
+——真信号没有被误杀。子牙（架构）+ 魏征（对抗）两个 agent 独立复审，两边**各自撞上同一个**问题
+（按问题算分那一层的残余偏差），已全部采纳修掉。
+
+已知遗留（都已登记，不是漏掉）：
+- 采集侧有个真故障还没修：**除奥克兰外所有城市的问句 100% 采不到数**，报错 `Invalid Field: 'location_name'`，
+  自 9-10 起 390 条。根因在城市名发给数据商的写法，但当时的工作目录拿不到数据商账号密码、验证不了，
+  按「没真跑过不许说成功」只登记不猜，排查三步已写进 [ROADMAP](../ROADMAP.md)（PR [#1924](https://github.com/bigbigraydeng-maker/magic-engine/pull/1924)）。
+  **修好之前 AI 可见度分数会经常正确地返回「算不出来」而不是一个数，这是预期行为不是新 bug**；
+- 同一个病还有两处在**另一张表**（客户级 AI Tracker 的提及率分母、策略分析把「没调通」当「排名差」），
+  失败标记的字段都不一样，需要各自的判据和验证，已各开独立卡片，不在本次范围内；
+- 历史上已入库的 2,101 条失败记录**一条没动**（已冻结的测量批次是历史事实）。影响面实测为零：
+  历史上只有 2 个客户目标用过这个分数，两个都已归档过期，当前没有任何活着的客户数字在读它。
+
+---
+
 ### 2026-09-22（成交回传每日流水线 6 天没跑完：拆成小步骤 + 失败留痕 + 授权失效不再永久作废）
 
 每天早上 6 点（新西兰时间）自动跑的「成交/咨询回传」流水线（`conversion-daily-pipeline`）自 9/16 起

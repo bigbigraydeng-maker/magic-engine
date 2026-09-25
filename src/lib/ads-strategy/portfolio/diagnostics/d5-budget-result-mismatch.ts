@@ -57,7 +57,8 @@ export function benjaminiHochberg(ps: number[]): number[] {
   return adj
 }
 
-function toUnit(ctx: AccountContext, u: BudgetUnit): DiagnosisUnit {
+/** 预算单位 → 诊断单位。O3 也用（同一套口径，复制一份会随时间走样）。 */
+export function toUnit(ctx: AccountContext, u: BudgetUnit): DiagnosisUnit {
   return { level: u.level, id: u.id, name: u.name, adAccountId: ctx.account.adAccountId, role: u.role, roleConfidence: u.confidence }
 }
 

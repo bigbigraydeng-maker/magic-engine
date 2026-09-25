@@ -8,6 +8,7 @@
  */
 
 import { supabaseAdmin } from '../supabase'
+import { isRunConclusive } from '../ai-tracker/run-conclusive'
 import type { BrandMention } from '@/types/magic-engine'
 
 // ── Output types ──────────────────────────────────────────────────────────────
@@ -45,6 +46,8 @@ export interface CompetitiveRow {
   competitors: Array<{ brand: string; rank: number }>
   engine: string
   run_at: string
+  /** false when no conclusive measurement exists (provider/parser failure). */
+  measured: boolean
 }
 
 // ── Phase 8 data types ────────────────────────────────────────────────────────
@@ -246,13 +249,15 @@ export async function buildMonthlyReport(clientId: string): Promise<MonthlyRepor
       queries.map((q: { id: string; question: string }) => [q.id, q.question])
     )
 
+    // Widen limit: ~41% of runs are failures, so fetch more to find
+    // conclusive ones.  8× per query gives plenty of headroom.
     const { data: runs } = await supabaseAdmin
       .from('ai_visibility_runs')
-      .select('query_id, ai_engine, client_brand_rank, brands_mentioned, ran_at')
+      .select('query_id, ai_engine, client_brand_rank, brands_mentioned, ran_at, error_message, parse_error_message')
       .eq('client_id', clientId)
       .in('query_id', queryIds)
       .order('ran_at', { ascending: false })
-      .limit(queryIds.length * 4)
+      .limit(queryIds.length * 8)
 
     const seenQueries = new Set<string>()
 
@@ -262,8 +267,12 @@ export async function buildMonthlyReport(clientId: string): Promise<MonthlyRepor
       client_brand_rank: number | null
       brands_mentioned: BrandMention[] | null
       ran_at: string
+      error_message: string | null
+      parse_error_message: string | null
     }>) {
       if (seenQueries.has(run.query_id)) continue
+      // Skip inconclusive (failed) runs — look for the next conclusive one
+      if (!isRunConclusive(run)) continue
       seenQueries.add(run.query_id)
 
       const competitors = (run.brands_mentioned ?? [])
@@ -279,10 +288,11 @@ export async function buildMonthlyReport(clientId: string): Promise<MonthlyRepor
         competitors,
         engine:      run.ai_engine,
         run_at:      run.ran_at,
+        measured:    true,
       })
     }
 
-    // Fill in queries with no runs (show as unknown)
+    // Fill in queries with no conclusive run → "not measured" (grey, not red)
     for (const q of queries as Array<{ id: string; question: string }>) {
       if (!seenQueries.has(q.id)) {
         competitive.push({
@@ -292,6 +302,7 @@ export async function buildMonthlyReport(clientId: string): Promise<MonthlyRepor
           competitors: [],
           engine:      '—',
           run_at:      '',
+          measured:    false,
         })
       }
     }
