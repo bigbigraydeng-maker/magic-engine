@@ -182,3 +182,35 @@ B3 做签字写入时必须解决的事（先记下，不在本合同里解决�
 ## 11. 审核记录
 
 - 2026-09-25 子牙第一轮（设计）：BLOCKER 1 治理文件判 A（已纳入 §2 / 第 0 轮）；CONCERN 1 auto-merge 失败必须可见（§3.3 第 7 条、§7 缺口 4）；CONCERN 2 bypass 关闭条件写死 + 身份现状如实（§6）；CONCERN 3 结构测试三条（§5）；QUESTION fork 立场（§3.3 表）、旧台账卡补 check_note（§7 第 3 条）。结论：BLOCKER 1 补进后可进实施，两轮上限。魏征、狄仁杰意见待汇总。
+
+## 12. 实施状态（2026-09-26 更新）
+
+**已落地（本 PR）**：
+- 第 0 轮（治理类别）：`risk.mjs` 新增 `RISK_CATEGORY.GOVERNANCE` 与 7 条规则；`quality.mjs` 补 `governance-evidence`；`risk.test.ts` 加 7 条真实探针 + 「治理文件是 A 但 markdown 里其它 .md 是 C」小节。
+- 第 1 轮（签字标记）：`signoff-marker.mjs` 与其测试（builder 转义 + round-trip 自检；`selectTrustedSignoffMarkers` 硬排除 `github-actions[bot]` 与 PR 作者；`evaluateSignoffs` 绑 base+head，head 一动全废）。
+- 第 2 轮（合并决策）：`merge-decision.mjs` 与其测试（`decideMerge` 纯函数：草稿 / fork / B/C→auto / A+签字齐→signed/人合 / 其余→blocked）。
+- 第 3 轮（接线脚本）：`check-risk-gate.mjs`——`pull_request_target` 下的 fail-closed 入口；`decision=enable` 只在 `pass && tier==='auto'` 时写。
+- 第 4 轮（两个 workflow）：`.github/workflows/pr-risk-gate.yml`（`pull_request_target` + `checkout ref: main` + PR 数据只走 env + `gh pr merge --auto/--disable-auto`；`continue-on-error` 禁；`--admin` 禁）· `.github/workflows/ops-review-loop-ci.yml`（把 `ops-review-loop-tests` 变成必过检查）。
+- 第 5 轮（结构测试）：`risk-gate-workflow.test.ts`（10 条对 pr-risk-gate.yml + 6 条对 ops-review-loop-ci.yml + 1 条 cross-file）。
+- 删：`.github/workflows/pr-merge-authorization.yml` · `tools/ops-review-loop/tests/merge-authorization.test.ts`。
+- 规则文档：`.github/merge-authorization.md` 重写；`CLAUDE.md`、`docs/ENGINEERING_QUALITY_GATES.md` §10、`tools/ops-review-loop/README.md` 待接线 PR 说明处理（下面 §13）。
+
+**本地测试证据（2026-09-26 00:19）**：`npx vitest run tools/ops-review-loop` → **435 全绿**，含新增的 signoff/decision/risk-gate-workflow 三套。
+
+**BLOCKER 2 沙盒结果（狄仁杰第一轮）**：验证工作在私有一次性仓库 `bigbigraydeng-maker/me-merge-gate-sandbox` 里进行，零客户数据。规则集 `Risk gate` 单独建成，main 上 `pull_request_target` 判官报红。夹带 PR 因 `gh` GraphQL 内部错误没能开出（`EFC9:2182DC:...`），实测最终结果**未拿到**。选择的处理：
+1. 本合同 A 级签字身份 `ME_SIGNOFF_TRUSTED_LOGINS` 变量今天不设 = 谁都不信 = A 级全红。这是"接线前仍问 PM 一句"的机器落点，独立于 job-name spoof 是否成立。
+2. `Protect main` 的四道台账/测试检查 + 新加的 `ops-review-loop-tests` 保持 bypass_actors 为空——就算 spoof 成立，那五道也没人能绕。
+3. 专属 GitHub App 身份方案（子牙 CONCERN 3 的最终形态）挂到 §13 后续事项，B3 阶段做，不阻塞本 PR。沙盒仓库先留着；PM 说删我再删。
+
+## 13. 后续事项（本合同不做）
+
+- **B3 后半：签字自动写入**。写签字标记必须用一个既不是 `github-actions[bot]`、也不是 PM 登录名的独立机器身份（GitHub App 或独立账号）。届时把 `ME_SIGNOFF_TRUSTED_LOGINS` 指向该身份，才能真让"A 级三方签齐→绿"这条通路走通。
+- **job-name spoof 实测**：沙盒仓库里再试一次开 PR（`gh` 那次是 GraphQL 内部错），或走另一条路径（专属 GitHub App 身份，从 `integration_id` 层面区分真判官）。若实测确认能 spoof，接下来的接线 PR（B3 或另开）就得走 App 路线，不留同名 job 抢绿的口子。
+- **auto-merge 挂死监控**：pm-daily-todo 加"auto-merge 已开超过 N 天没合的 PR"一栏。
+- **CLAUDE.md §2 / §6 与 `docs/ENGINEERING_QUALITY_GATES.md` §10 状态句、`tools/ops-review-loop/README.md` 的 NOT-YET-WIRED 段**：接线 PR 合入后一次性改。本 PR 不动 CLAUDE.md（PM 规则："当用户明确要求项目流程变更时可直接最小修订现有指引"——PM 已授权这次修订，但为避免与在飞的其它 PR 冲突，规则同步单独另开台账卡 `decided`，在本 PR 合入后追随处理）。
+
+## 11. 审核记录
+
+- 2026-09-25 子牙第一轮（设计）：BLOCKER 1 治理文件判 A（已纳入 §2 / 第 0 轮）；CONCERN 1 auto-merge 失败必须可见（§3.3 第 7 条、§7 缺口 4）；CONCERN 2 bypass 关闭条件写死 + 身份现状如实（§6）；CONCERN 3 结构测试三条（§5）；QUESTION fork 立场（§3.3 表）、旧台账卡补 check_note（§7 第 3 条）。结论：BLOCKER 1 补进后可进实施，两轮上限。
+- 2026-09-25 狄仁杰第一轮（设计）：BLOCKER 2 job-name spoof（同名 job + GitHub Actions 内置 integration_id），要求沙盒实测；边界 4 条站得住（`pull_request_target`、评论区伪造、规则集互不连带 bypass、auto-merge race）。沙盒验证结果见 §12，处理策略见 §12 第 2 条。
+- 2026-09-26 实施完成，进第二轮审核：本 PR 送子牙 + 魏征 + 狄仁杰 二审 diff。
