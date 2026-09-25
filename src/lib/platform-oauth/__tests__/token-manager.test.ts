@@ -30,6 +30,7 @@ import {
   PlatformConnectionNotFoundError,
   PlatformTokenRefreshError,
 } from '../token-manager'
+import { MICROSOFT_MAIL_SCOPES } from '@/lib/microsoft/mail-oauth'
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -248,5 +249,54 @@ describe('getValidToken — error cases', () => {
     // Should resolve, not reject
     const token = await getValidToken('client-1', 'google_gbp')
     expect(token).toBe('new-tok')
+  })
+})
+
+// ─── 刷新请求里带不带 scope：这是 2026-09-24 那次 9 天事故的真正根因 ──────────
+
+/**
+ * 🔴 **改这两条断言之前，先读 `docs/PITFALLS.md` F11。**
+ *
+ * 微软刷新时**必须重放**整份 scope 清单（漏掉会悄悄降权，读信时才 403）；
+ * 谷歌刷新时**必须不带** scope（带上客户没同意过的新权限会直接被拒，
+ * 已有连接当场死 —— 这正是 `MICROSOFT_MAIL_SCOPES` 那次改动弄死 CTS 两个邮箱的
+ * 机制）。谁哪天觉得「两边写法统一一下更规范」，就会原样复制一次那场事故。
+ *
+ * 钉住 `*_SCOPES` 清单的那道闸（`scope-change-gate.test.ts`）挡的是「改清单」，
+ * 这两条挡的是「改行为」—— 后者更接近根因。
+ */
+describe('刷新请求的形状（根因闸门，改之前先读 PITFALLS F11）', () => {
+  beforeEach(() => {
+    process.env.MICROSOFT_CLIENT_ID = 'ms-client'
+    process.env.MICROSOFT_CLIENT_SECRET = 'ms-secret'
+  })
+
+  async function refreshBodyFor(provider: string): Promise<URLSearchParams> {
+    // 上一个 describe 里留下的 mockReturnValueOnce 队列不会被 clearAllMocks 清掉，
+    // 不 reset 的话第一次调用会拿到别人排好的那个返回值。
+    mocks.from.mockReset()
+    mocks.isTokenExpired.mockReturnValue(true)
+    mocks.from.mockReturnValue(chainResolving({ data: { ...VALID_ROW, provider }, error: null }))
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ access_token: 'new-token', expires_in: 3600 }),
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    await getValidToken('client-1', provider as never)
+    vi.unstubAllGlobals()
+    return new URLSearchParams(fetchSpy.mock.calls[0][1].body as string)
+  }
+
+  it('谷歌：刷新请求里绝不能带 scope（带了 = 加新权限会弄死已有连接）', async () => {
+    const body = await refreshBodyFor('google_gsc')
+    expect(body.get('scope')).toBeNull()
+    expect(body.get('grant_type')).toBe('refresh_token')
+  })
+
+  it('微软：刷新请求里必须带完整 scope（漏了 = 悄悄降权，读信时才 403）', async () => {
+    const body = await refreshBodyFor('microsoft_mail')
+    expect(body.get('scope')).toBe(MICROSOFT_MAIL_SCOPES.join(' '))
+    // offline_access 少了就换不回刷新能力，下一小时安静地断
+    expect(body.get('scope')).toContain('offline_access')
   })
 })

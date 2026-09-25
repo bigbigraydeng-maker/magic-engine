@@ -349,3 +349,48 @@ export async function pushMessengerStopItems(
     })
   }
 }
+
+/** 一行 `contacts`（只声明这条待办用得到的列）。 */
+interface ImportantDueRow {
+  id: string
+  client_id: string
+  display_name: string | null
+  important_note: string
+  important_due_at: string
+}
+
+/**
+ * 客人身上的「⭐重要标记」到期了 —— 员工手工设的「约好周三 3 点回电」这种事。
+ *
+ * 到期日到了就出现在待办里；员工处理完把 due 日期清掉，明天就不再出现。
+ * 判据只看 `important_due_at ≤ 今天` 且 `important_note` 非空 —— 没写原因的
+ * 空标记不催（催了也没人知道该做什么）。每人每天最多一条：同 contact_id 只查一行。
+ */
+export async function pushImportantDueItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  ids: string[],
+  nameOf: (id: string) => string,
+  now: Date = new Date(),
+): Promise<void> {
+  if (ids.length === 0) return
+
+  const { data } = await supabase
+    .from('contacts')
+    .select('id, client_id, display_name, important_note, important_due_at')
+    .in('client_id', ids)
+    .not('important_note', 'is', null)
+    .lte('important_due_at', now.toISOString())
+
+  for (const c of (data ?? []) as ImportantDueRow[]) {
+    const note = c.important_note.length > 60 ? `${c.important_note.slice(0, 60)}…` : c.important_note
+    items.push({
+      kind: 'crm_important_due',
+      client_id: c.client_id,
+      client_name: nameOf(c.client_id),
+      what: `${c.display_name ?? '一位客人'} 上的重要标记到期了：${note}`,
+      how: '点链接进去看，处理完把「重要标记」的到期日清掉，明天就不会再出现；不想再看直接把整条标记删了',
+      href: `https://app.magicengine.com.au/dashboard/clients/${c.client_id}/crm/all?contact=${c.id}`,
+    })
+  }
+}

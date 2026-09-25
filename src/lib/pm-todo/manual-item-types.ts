@@ -16,6 +16,8 @@ import type { BindingRequestItemKind } from './binding-request-items'
 import type { PageBindingItemKind } from './page-binding-items'
 import type { CommentScopeTodoKind } from './comment-scope-items'
 import type { LeadSheetItemKind } from './lead-sheet-items'
+import type { PlatformConnectionItemKind } from './platform-connection-items'
+import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { LibaiItemKind } from './libai-items'
 
 /**
@@ -37,6 +39,11 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   'facebook_page_binding_unverified',
   'ai_provider_exhausted',
   'ai_alerting_broken',
+  // 「授权体检自己读不出来了」「整条通道停了」跟 ai_alerting_broken 是同一类：
+  // 这套监控自己出问题的那条消息，绝不能因为链接问题被静默丢掉。
+  // （它们的 href 本来就是空的、不会被 fetch，这里是第二道保险。）
+  'platform_connection_check_failed',
+  'platform_connection_pipeline_down',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */
@@ -103,6 +110,8 @@ export type ManualItemKind =
   | 'dnc_maybe_wrong'
   /** 客人在 Facebook 私信里像是说了「别再联系」，而判据从来读不到私信 —— 只提示，不自动封 */
   | 'dm_maybe_stop'
+  /** 客人身上的「⭐重要标记」到期了 —— 员工手工设的"约好周三 3 点回电"这种事，到点该做了 */
+  | 'crm_important_due'
   /** 平台候选（docs/registry/platform-candidates.md）到了复查日期 —— 见 me-platform-tier-gate skill */
   | 'platform_candidate_review_due'
   /** 客户方案文档里写了一次性人工动作（如"明早 09:00 前扫一眼 xx"），只登记在文档里等于没下发 */
@@ -124,12 +133,16 @@ export type ManualItemKind =
   | LeadSheetItemKind
   /** 执行内核停手 / 等审批 / 被规则挡下 —— 必须有人看见，不许死在日志里 */
   | 'kernel_needs_human'
+  /** 自治开关同步到执行内核失败 —— 面板档位和内核实际档位可能不一致（WP3.1a） */
+  | AdsAutonomyItemKind
   /** 有成交/咨询等着人核对要不要告诉广告平台 —— 撤不回，所以必须人点 */
   | 'conversion_needs_review'
   /** 发给广告平台时断线了，不知道对方收没收 —— 程序绝不自己重发，等人核对 */
   | 'conversion_send_in_doubt'
   /** 已批准的成交/咨询因为连接广告平台的授权失效发不出去，7 天内不修就永久丢（2026-09-22） */
   | 'conversion_capi_token_dead'
+  /** D3 诊断建议暂停广告组，Kernel 待批准——PM 不点头不暂停 */
+  | 'ads_auto_pause_pending'
   /** AI 全自动审核发现异常，已经自动暂停发送（PM 拍板 2026-09-15："要有异常刹车"） */
   | 'ai_auto_review_circuit_breaker'
   /** AI 客服回复草稿写好了，等人批准发送（issue #1589） */
@@ -156,6 +169,11 @@ export type ManualItemKind =
   | 'conversation_health_alert'
   /** 经验手册（Claude 持久记忆，不在仓库）里点名的函数/路径/表名疑似过期，每周巡检自动发现 */
   | 'playbook_reference_stale'
+  /**
+   * 外部平台的授权断了 / 没了心跳 / 权限清单不够用（2026-09-24 CTS 邮箱断 9 天）。
+   * 只有人能重新走一次同意页，所以必须进人工车道，不许只躺在 error_message 里。
+   */
+  | PlatformConnectionItemKind
   /** 李白 · 文案溯源：「未证实」句待改 / 检不了 / 没检；提示词库月检疑似过期（只报告不改） */
   | LibaiItemKind
 

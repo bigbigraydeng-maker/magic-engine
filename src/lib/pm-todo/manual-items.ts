@@ -30,6 +30,7 @@ import { pushEmailReplyItems } from './email-reply-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
+import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import {
   buildNotIndexedItems,
   daysAgo,
@@ -39,11 +40,12 @@ import {
   type NotIndexedRow,
 } from './manual-item-types'
 import { pushLinkedinProgressItems } from './manual-linkedin-items'
-import { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems } from './manual-crm-items'
+import { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems } from './manual-crm-items'
+import { pushAdsAutoPauseItems } from './ads-auto-pause-items'
 
 export * from './manual-item-types'
 export { pushLinkedinProgressItems } from './manual-linkedin-items'
-export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems } from './manual-crm-items'
+export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems } from './manual-crm-items'
 import { pushVideoCreditsItem, pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
 import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems } from './manual-monitoring-items'
 import { pushLeadsSanityItems, pushDiagnosticItems, pushPrescriptionItems } from './manual-strategy-items'
@@ -65,6 +67,7 @@ import {
 } from './platform-candidate-reviews'
 import { CLIENT_DOC_MANUAL_TASKS, type ClientDocManualTask } from './client-doc-manual-tasks'
 import { pushPlaybookStalenessItems } from './playbook-staleness-items'
+import { pushPlatformConnectionItems } from './platform-connection-items'
 import { pushLedgerItems } from './ledger-items'
 import { pushLibaiItems } from './libai-items'
 
@@ -98,6 +101,14 @@ export async function loadManualItems(
   })
   // 按时没跑 / 查不出跑没跑 —— PM 2026-08-03 要求「不能完成需要有报错」
   await pushCronHealthItems(supabase, items, now)
+  // 外部平台的授权断了 —— 跟上面几条一样属于基础设施检查，跟「系统里有几个客户」
+  // 无关，所以放在客户名单那条提前返回之前。2026-09-24：CTS 邮箱断了 9 天没人知道，
+  // 全站没有任何一条路会把它端出来（模块自己会兜底，不抛给这里）。
+  // 模块内部已经把取数包进 try 并自报故障；这层 catch 防的是判据/造句本身抛异常 ——
+  // 不拦的话会掀掉整个 loadManualItems，当天整份待办邮件变空（比漏一条严重得多）。
+  await pushPlatformConnectionItems(supabase, items, now).catch((e) =>
+    console.warn('[manual-items] 平台授权体检失败（不阻塞其他待办）:', e),
+  )
   // 平台候选到了复查日期 —— 不落库、不查表，纯本地日期判断
   pushPlatformCandidateReviewItems(items, now)
   // 台账（docs/ledger）：决定了没做 / 做了没验 / 验了不成 —— 读仓库里的文件，不查表，
@@ -168,6 +179,11 @@ export async function loadManualItems(
   const ids = Array.from(clients.keys())
   const nameOf = (id: string) => clients.get(id)?.name ?? '未知客户'
 
+  // 广告 D3（花钱没结果）自动暂停建议等人批准——点一下就执行，不用去 Meta 后台
+  await pushAdsAutoPauseItems(supabase, items, nameOf).catch((e) =>
+    console.warn('[manual-items] Ads D3 自动暂停待批准读取失败（不阻塞其他待办）:', e),
+  )
+
   // 新诊断结果 —— PM 2026-08-03 拍板要逐条看；没有消费方的自动化 = 再造一个没人看的数据源。
   // 必须放在 nameOf 定义之后：待办上显示 uuid 等于没显示。
   await pushDiagnosticItems(supabase, items, now, nameOf)
@@ -213,6 +229,11 @@ export async function loadManualItems(
     console.warn('[manual-items] 执行内核待办生成失败（不阻塞其他待办）:', e),
   )
 
+  // 自治开关没同步到执行内核 —— 面板档位跟内核实际档位对不上，必须有人看见（WP3.1a）
+  await pushAdsAutonomySyncItems(supabase, items, now, nameOf).catch((e) =>
+    console.warn('[manual-items] 自治开关同步待办生成失败（不阻塞其他待办）:', e),
+  )
+
   // 客户之间有没有串台 —— PM 2026-08-05：「坚决不能胡窜」。
   // 实测查到 CTS 的发布通道指向 Oztop 的网站，填错两个多月没人发现。
   await pushCrossClientItems(supabase, items).catch((e) =>
@@ -228,6 +249,11 @@ export async function loadManualItems(
   // 刻意**不自动封渠道**，只提示 —— 理由见 lib/crm/messenger-stop-signal.ts 文件头。
   await pushMessengerStopItems(supabase, items, ids, now, nameOf).catch((e) =>
     console.warn('[manual-items] 私信拒联提示生成失败（不阻塞其他待办）:', e),
+  )
+
+  // 客人身上的「⭐重要标记」到期了 —— 到期日到了自动进待办，员工清 due 日期即消失
+  await pushImportantDueItems(supabase, items, ids, nameOf, now).catch((e) =>
+    console.warn('[manual-items] 重要标记到期读取失败（不阻塞其他待办）:', e),
   )
 
   // 客人来信超过一天没人回 + 公司邮箱同步哑了（后者会让前者假装成零条），见 email-reply-items.ts

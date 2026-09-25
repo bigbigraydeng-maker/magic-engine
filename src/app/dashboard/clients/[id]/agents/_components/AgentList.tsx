@@ -36,7 +36,7 @@ export function AgentList({
 
           {agent.customers.length === 0 ? (
             <p className="rounded-xl border border-dashed border-me-charcoal/10 py-4 text-center text-[13px] text-me-charcoal/30">
-              这个 Agent 还没有客户记录
+              还没有客户 — 等下一次邮件同步（每小时一次），AI 会把这位同行邮件里谈到的客户自动落进来
             </p>
           ) : (
             <div className="space-y-2">

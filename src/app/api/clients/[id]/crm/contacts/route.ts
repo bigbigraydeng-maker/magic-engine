@@ -42,6 +42,9 @@ interface ContactRow {
   do_not_contact: boolean
   stage: string | null
   first_seen_at: string
+  pinned_at: string | null
+  important_note: string | null
+  important_due_at: string | null
 }
 
 interface TouchRow {
@@ -70,6 +73,182 @@ function ts(v: string | null | undefined): number {
   return Number.isNaN(t) ? 0 : t
 }
 
+/** 分页 / 筛选 / 搜索的解析结果。见 `parseListQuery`。 */
+interface ListQuery {
+  /** 任一参数出现即为 true —— 老调用方不带参数，走老路径、拿老形状。 */
+  paged: boolean
+  /** 1-based。 */
+  page: number
+  /** 已 clamp 到 [1, 500]。 */
+  perPage: number
+  /** 空数组 = 不筛。 */
+  stages: string[]
+  /** 已 trim；空串当 null。 */
+  q: string | null
+}
+
+const DEFAULT_PER_PAGE = 100
+const MAX_PER_PAGE = 500
+
+/**
+ * 解析列表查询参数。
+ *
+ * `paged` 的判据是「参数**出现过**」，不是「值非默认」—— 前端显式传
+ * `?page=1&perPage=100` 时它要的是新形状（`items` / `total`），不是老形状。
+ * 老调用方一个参数都不带，于是天然走老路径，形状不变。
+ *
+ * 返回 `{ error }` 表示参数非法（400），调用方直接回。
+ */
+function parseListQuery(url: URL): ListQuery | { error: string } {
+  const sp = url.searchParams
+  const paged =
+    sp.has('page') || sp.has('perPage') || sp.has('stage') || sp.has('stages') || sp.has('q')
+
+  const rawPage = sp.get('page')
+  const rawPerPage = sp.get('perPage')
+
+  let page = 1
+  if (rawPage !== null) {
+    const n = Number(rawPage)
+    if (!Number.isInteger(n) || n <= 0) return { error: 'invalid page/perPage' }
+    page = n
+  }
+
+  let perPage = DEFAULT_PER_PAGE
+  if (rawPerPage !== null) {
+    const n = Number(rawPerPage)
+    if (!Number.isInteger(n) || n <= 0) return { error: 'invalid page/perPage' }
+    perPage = Math.min(n, MAX_PER_PAGE)
+  }
+
+  // 两种写法都收：?stage=a&stage=b（重复键）和 ?stages=a,b（逗号分隔）。
+  const stages = [
+    ...sp.getAll('stage'),
+    ...(sp.get('stages') ?? '').split(','),
+  ]
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+
+  const rawQ = sp.get('q')
+  const q = rawQ === null ? null : rawQ.trim() || null
+
+  // PostgREST 的 `or(...)` 语法用逗号和括号分隔条件，q 里带这些字符会把
+  // 语法拆坏（甚至注入别的条件）。不尝试转义 —— 直接拒绝，让调用方自己清。
+  if (q !== null && /[,()]/.test(q)) return { error: 'invalid characters in q' }
+
+  return { paged, page, perPage, stages, q }
+}
+
+/**
+ * 分页路径要跑两次同样过滤的查询（一次 count、一次取页），两次过滤条件必须
+ * 逐字一致。抽出"过滤参数"（不是"builder 装饰函数"）—— 装饰函数会把 supabase
+ * 的泛型链一路带上来撞递归深度上限；这里只吐三个值让两个调用方各自 apply。
+ */
+function contactFilterParams(query: ListQuery): {
+  stages: string[] | null
+  orExpr: string | null
+} {
+  return {
+    stages: query.stages.length > 0 ? query.stages : null,
+    orExpr:
+      query.q === null
+        ? null
+        : `display_name.ilike.%${query.q}%,primary_phone.ilike.%${query.q}%,primary_email.ilike.%${query.q}%`,
+  }
+}
+
+/**
+ * 分页路径：只拉当前页的人 + 这些人的触点。
+ *
+ * 跟老路径的区别只有「拉谁」—— 逐人组装（segmentContact / extractCustomColumns /
+ * 输出字段）逐字复用，两个形状里同一个人长得一模一样。
+ *
+ * 触点必须按 `contact_id in (当前页)` 收窄：CTS 量级下全量触点 1271 条，
+ * 分页的意义就是别为了 100 个人把全库读一遍。
+ */
+async function getPaged(clientId: string, query: ListQuery): Promise<NextResponse> {
+  let total: number
+  let pageContacts: ContactRow[]
+  let stageRows: StageRow[]
+  try {
+    // 两次查询的过滤条件必须逐字一致 —— 共享一份过滤参数后各自 apply。
+    const filters = contactFilterParams(query)
+
+    let countBuilder = supabaseAdmin
+      .from('contacts')
+      .select('id', { count: 'exact', head: true })
+      .eq('client_id', clientId)
+    if (filters.stages !== null) countBuilder = countBuilder.in('stage', filters.stages)
+    if (filters.orExpr !== null) countBuilder = countBuilder.or(filters.orExpr)
+
+    let pageBuilder = supabaseAdmin
+      .from('contacts')
+      .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, first_seen_at, pinned_at, important_note, important_due_at')
+      .eq('client_id', clientId)
+    if (filters.stages !== null) pageBuilder = pageBuilder.in('stage', filters.stages)
+    if (filters.orExpr !== null) pageBuilder = pageBuilder.or(filters.orExpr)
+
+    const [countRes, pageRes, stages] = await Promise.all([
+      countBuilder,
+      pageBuilder
+        .order('id', { ascending: true })
+        .range((query.page - 1) * query.perPage, query.page * query.perPage - 1),
+      fetchAll<StageRow>((from, to) =>
+        supabaseAdmin
+          .from('client_pipeline_stages')
+          .select('stage_key, label, marketing_action, is_terminal')
+          .eq('client_id', clientId)
+          .order('sort_order', { ascending: true })
+          .range(from, to),
+      ),
+    ])
+
+    if (countRes.error) throw new Error(countRes.error.message)
+    if (pageRes.error) throw new Error(pageRes.error.message)
+    total = countRes.count ?? 0
+    pageContacts = (pageRes.data ?? []) as ContactRow[]
+    stageRows = stages
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : '读取失败' },
+      { status: 500 },
+    )
+  }
+
+  const pageIds = pageContacts.map((c) => c.id)
+  let touches: TouchRow[]
+  try {
+    touches =
+      pageIds.length === 0
+        ? []
+        : await fetchAll<TouchRow>((from, to) =>
+            supabaseAdmin
+              .from('contact_touchpoints')
+              .select('id, contact_id, channel, direction, occurred_at, summary, raw, metadata, source')
+              .eq('client_id', clientId)
+              .in('contact_id', pageIds)
+              .order('occurred_at', { ascending: false })
+              .order('id', { ascending: false })
+              .range(from, to),
+          )
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : '读取失败' },
+      { status: 500 },
+    )
+  }
+
+  const { out, customPerContact } = assembleRows(pageContacts, touches, stageRows)
+
+  return NextResponse.json({
+    total,
+    page: query.page,
+    perPage: query.perPage,
+    columns: visibleCustomColumns(customPerContact),
+    items: out,
+  })
+}
+
 /**
  * GET /api/clients/[id]/crm/contacts
  *
@@ -81,7 +260,7 @@ function ts(v: string | null | undefined): number {
  * 隔离：requirePaidClientAccess + 所有读按 client_id 收口。admin 也从 URL 收口。
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
   const clientId = params.id
@@ -89,6 +268,12 @@ export async function GET(
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
+
+  const parsed = parseListQuery(new URL(req.url))
+  if ('error' in parsed) {
+    return NextResponse.json({ error: parsed.error }, { status: 400 })
+  }
+  if (parsed.paged) return getPaged(clientId, parsed)
 
   // 必须分页拉全 —— Supabase 单次查询硬顶 1000 行，`.limit(20000)` 会被静默
   // 砍掉且不报错。实测 CTS：库里 1271 条触点只回 1000 条；配合 order desc，
@@ -101,7 +286,7 @@ export async function GET(
       fetchAll<ContactRow>((from, to) =>
         supabaseAdmin
           .from('contacts')
-          .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, first_seen_at')
+          .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, first_seen_at, pinned_at, important_note, important_due_at')
           .eq('client_id', clientId)
           .order('id', { ascending: true })
           .range(from, to),
@@ -133,6 +318,29 @@ export async function GET(
     )
   }
 
+  const { out, customPerContact } = assembleRows(contacts, touches, stageRows)
+
+  return NextResponse.json({
+    totalContacts: out.length,
+    columns: visibleCustomColumns(customPerContact),
+    contacts: out,
+  })
+}
+
+/**
+ * 逐人组装输出行 —— 分页路径和老路径共用，保证同一个人在两个形状里长得一样。
+ *
+ * 返回 `out`（给响应）和 `customPerContact`（给 `visibleCustomColumns` 判
+ * 「这个客户该显示哪些自定义列」）。
+ */
+function assembleRows(
+  contacts: ContactRow[],
+  touches: TouchRow[],
+  stageRows: StageRow[],
+): {
+  out: Array<Record<string, unknown>>
+  customPerContact: Array<Record<CustomColumnKey, string | null>>
+} {
   const byContact = new Map<string, TouchRow[]>()
   for (const t of touches) {
     const list = byContact.get(t.contact_id) ?? []
@@ -253,6 +461,12 @@ export async function GET(
       stage: c.stage,
       // 认不出的 stage_key（配置里删了）显示原值，别留空白。
       stageLabel: c.stage ? (stageMeta.get(c.stage)?.label ?? c.stage) : null,
+      // 人工置顶（contacts.pinned_at）。这一轮只读出来给页面显示 / 切换，
+      // 排序仍是系统算的 —— 置顶优先排序是下一轮的事。
+      pinnedAt: c.pinned_at,
+      // 「⭐置顶」附带的原因和到期日（contacts.important_note / important_due_at）。
+      // 这一轮只读出来给页面显示，编辑走 PATCH .../important，UI 是下一轮的事。
+      important: { note: c.important_note, dueAt: c.important_due_at },
       segment: seg.segment,
       segmentLabel: SEGMENT_ACTION_META[seg.segment].label,
       temperature: seg.temperature,
@@ -260,11 +474,7 @@ export async function GET(
     }
   })
 
-  return NextResponse.json({
-    totalContacts: out.length,
-    columns: visibleCustomColumns(customPerContact),
-    contacts: out,
-  })
+  return { out, customPerContact }
 }
 
 interface Body {

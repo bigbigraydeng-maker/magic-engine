@@ -49,6 +49,11 @@ export async function upsertConnection(input: UpsertConnectionInput): Promise<vo
         display_name:      input.displayName,
         scopes:            input.scopes,
         status:            CONNECTION_STATUS.ACTIVE,
+        // 🔴 状态改回 active 就必须把旧报错擦掉，否则一条健康的连接会永远
+        //    挂着上次断线的原文。2026-09-24 实测：CTS 的 info@ 重连之后
+        //    status=active、error_message 还是 9 天前那条 AADSTS65001 ——
+        //    任何"按报错找坏连接"的排查都会被它骗一次。
+        error_message:     null,
         // Only touch last_synced_at when the caller just re-verified the grant.
         // Omitting the key entirely (rather than writing null) keeps an
         // existing value intact on an upsert that is not a fresh sync.
