@@ -32,6 +32,7 @@ import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
+import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
 import {
   buildNotIndexedItems,
   daysAgo,
@@ -259,6 +260,11 @@ export async function loadManualItems(
   // 自治开关没同步到执行内核 —— 面板档位跟内核实际档位对不上，必须有人看见（WP3.1a）
   await pushAdsAutonomySyncItems(supabase, items, now, nameOf).catch((e) =>
     console.warn('[manual-items] 自治开关同步待办生成失败（不阻塞其他待办）:', e),
+  )
+
+  // 每日广告巡检的广告级规则（D2 / D10）—— 只读，要不要改由人定；同一件事按 remind-cadence 节奏提醒
+  await pushAdsRuleFindingItems(supabase, items, now, nameOf).catch((e) =>
+    console.warn('[manual-items] 广告级规则待办生成失败（不阻塞其他待办）:', e),
   )
 
   // 客户之间有没有串台 —— PM 2026-08-05：「坚决不能胡窜」。

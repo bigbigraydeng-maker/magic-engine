@@ -3,6 +3,7 @@
  *
  * 🔴 共用账户（§14 M9）：快照里本来就只有账户级；日数据即使老同步写了两份，这里也不喂给实体级诊断
  *    （run.ts 对 shared 账户只跑 D1/D7，D1 用的是账户合计）。
+ * 非共用账户额外加载广告层日数据（D2/D10）；广告层 `parent_id` 是**广告系列** id，不是广告组 id。
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
@@ -14,7 +15,7 @@ import type { EntitySnapshotRow } from '../snapshot'
 import { loadOutcomeConfig } from '../outcome-config'
 import { buildAccountContext, localDayEndUtc, shiftDate } from './context'
 import { d1NeedsHourly } from './d1-delivery-stall'
-import type { AccountInput, CaptureCoverage, DailyRow, DiagnosisInput, HourlyRow } from './types'
+import type { AccountInput, CaptureCoverage, DailyRow, DiagnosisInput, HourlyRow, SettingChange } from './types'
 import { D1_REPEAT_LOOKBACK_DAYS } from './thresholds'
 
 const PAGE = 1000
@@ -60,6 +61,27 @@ async function readAll<T>(build: (from: number, to: number) => PromiseLike<{ dat
   return out
 }
 
+/** 广告层近 28 天日数据（D2/D10）。二级排序 + 按 (entity_id, insight_date) 去重：跨页顺序不唯一时既不重也不漏。 */
+async function loadAdDaily(clientId: string, adAccountId: string, date: string): Promise<DailyRow[]> {
+  const rows = await readAll<DailyRow>((a, b) => supabaseAdmin.from('ad_daily_insights')
+    .select('level, entity_id, parent_id, insight_date, spend, impressions, reach, clicks, leads, messaging_conversations, video_thruplays, actions, frequency_7d')
+    .eq('client_id', clientId).eq('ad_account_id', adAccountId).eq('level', 'ad')
+    .gte('insight_date', shiftDate(date, -HISTORY_DAYS + 1)).lte('insight_date', date)
+    .order('insight_date', { ascending: true }).order('entity_id', { ascending: true }).range(a, b))
+
+  const byKey = new Map<string, DailyRow>()
+  for (const r of rows) {
+    byKey.set(`${r.entity_id}|${r.insight_date}`, {
+      ...r,
+      spend: Number(r.spend),
+      impressions: Number(r.impressions),
+      clicks: Number(r.clicks),
+      frequency_7d: r.frequency_7d === null || r.frequency_7d === undefined ? null : Number(r.frequency_7d),
+    })
+  }
+  return Array.from(byKey.values())
+}
+
 async function loadAccount(clientId: string, adAccountId: string, shared: boolean, date: string): Promise<AccountInput> {
   const tzRow = await supabaseAdmin.from('ad_entity_snapshots').select('timezone_name, currency')
     .eq('client_id', clientId).eq('ad_account_id', adAccountId).eq('level', 'account')
@@ -74,7 +96,7 @@ async function loadAccount(clientId: string, adAccountId: string, shared: boolea
     .order('captured_at', { ascending: false }).range(a, b))
 
   const daily = await readAll<DailyRow>((a, b) => supabaseAdmin.from('ad_daily_insights')
-    .select('level, entity_id, parent_id, insight_date, spend, impressions, reach, clicks, leads, messaging_conversations, video_thruplays, actions')
+    .select('level, entity_id, parent_id, insight_date, spend, impressions, reach, clicks, leads, messaging_conversations, video_thruplays, actions, frequency_7d')
     .eq('client_id', clientId).eq('ad_account_id', adAccountId).in('level', ['campaign', 'adset'])
     .gte('insight_date', shiftDate(date, -HISTORY_DAYS + 1)).lte('insight_date', date)
     .order('insight_date', { ascending: true }).range(a, b))
@@ -86,14 +108,26 @@ async function loadAccount(clientId: string, adAccountId: string, shared: boolea
       .eq('client_id', clientId).eq('ad_account_id', adAccountId).order('captured_at', { ascending: false }).limit(5),
   ])
 
+  const settingChanges: SettingChange[] = snapshots
+    .filter(r => r.capture_reason === 'changed' || r.capture_reason === 'kernel_post')
+    .map(r => ({ level: r.level, entity_id: r.entity_id, captured_at: r.captured_at }))
+
   const account: AccountInput = {
     adAccountId, shared, timezone, currency,
     snapshots: latestSnapshotsAsOf(snapshots, endMs),
-    daily: daily.map(r => ({ ...r, spend: Number(r.spend), impressions: Number(r.impressions), clicks: Number(r.clicks) })),
+    daily: daily.map(r => ({
+      ...r,
+      spend: Number(r.spend),
+      impressions: Number(r.impressions),
+      clicks: Number(r.clicks),
+      frequency_7d: r.frequency_7d === null || r.frequency_7d === undefined ? null : Number(r.frequency_7d),
+    })),
     hourly: {},
     hourlyError: null,
     latestCaptures: (captures.data ?? []) as CaptureCoverage[],
     lastInsightDate: (lastRow.data as { insight_date: string } | null)?.insight_date ?? null,
+    adDaily: shared ? undefined : await loadAdDaily(clientId, adAccountId, date),
+    settingChanges,
   }
 
   if (d1NeedsHourly(buildAccountContext(account, date))) {
@@ -112,6 +146,13 @@ async function loadAccount(clientId: string, adAccountId: string, shared: boolea
   return account
 }
 
+/** 客户登记的 Facebook 主页。读失败要抛（跟本文件其它读一样）——不能塌成「没登记」，那会报一条假的配置缺口。 */
+async function loadClientPageId(clientId: string): Promise<string | null> {
+  const { data, error } = await supabaseAdmin.from('clients').select('facebook_page_id').eq('id', clientId).maybeSingle()
+  if (error) throw new Error(error.message)
+  return (data as { facebook_page_id: string | null } | null)?.facebook_page_id ?? null
+}
+
 export async function loadDiagnosisInput(clientId: string, date: string, evaluatedAt: string): Promise<DiagnosisInput> {
   const accountIds = await getClientAdAccountIds(clientId)
   const { shared } = await findSharedAdAccounts(clientId, accountIds)
@@ -119,13 +160,18 @@ export async function loadDiagnosisInput(clientId: string, date: string, evaluat
   for (const id of accountIds) {
     accounts.push(await loadAccount(clientId, id, shared.has(id.replace(/^act_/, '')), date))
   }
-  const [outcome, strategy] = await Promise.all([loadOutcomeConfig(clientId), loadAdStrategyConfig(clientId)])
+  const [outcome, strategy, clientPageId] = await Promise.all([
+    loadOutcomeConfig(clientId),
+    loadAdStrategyConfig(clientId),
+    loadClientPageId(clientId),
+  ])
   return {
     clientId, date, evaluatedAt,
     outcome: outcome.config,
     outcomeConfigured: outcome.source === 'row' && outcome.config.primary !== null,
     messagingReferralAvailable: MESSAGING_REFERRAL_AVAILABLE,
     digestRecipients: strategy.digest_recipients,
+    clientPageId,
     accounts,
   }
 }
