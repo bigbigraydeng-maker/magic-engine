@@ -1,8 +1,12 @@
 /**
  * Meta Graph API — Page Messenger inbox (read-only).
  *
- * Mirrors the style of meta/comments.ts: thin fetch wrappers, graceful failure
- * (return [] / null and log rather than throw), Page access token passed in.
+ * Thin fetch wrappers, Page access token passed in. A failed Graph read THROWS
+ * `MetaGraphReadError` instead of returning an empty list: on 2026-09-16 a
+ * client's Page authorization broke and the old `return []` made the hourly
+ * sync report "0 new conversations" with no error for 9 days. The only
+ * degrade-gracefully path left is one long thread's full-history re-fetch
+ * (see buildConversation), which falls back to the messages already in hand.
  *
  * Requires a Page Access Token with pages_messaging + pages_read_engagement.
  * The same token already powers sendPrivateReply() in meta/comments.ts, so a
@@ -70,17 +74,62 @@ interface GraphList<T> {
   paging?: { next?: string }
 }
 
-async function getJson<T>(url: string, label: string): Promise<T | null> {
+/** A Graph read that failed. Thrown so a broken token can never look like an empty inbox. */
+export class MetaGraphReadError extends Error {
+  readonly httpStatus: number | null
+  readonly graphCode: number | null
+  readonly graphSubcode: number | null
+
+  constructor(
+    label: string,
+    httpStatus: number | null,
+    detail: string,
+    graphCode: number | null = null,
+    graphSubcode: number | null = null,
+  ) {
+    const where = httpStatus === null ? 'network error' : `HTTP ${httpStatus}`
+    const code = graphCode === null ? '' : ` code=${graphCode}`
+    const subcode = graphSubcode === null ? '' : ` subcode=${graphSubcode}`
+    super(`${label} failed: ${where}${code}${subcode} ${redactToken(detail)}`.trim())
+    this.name = 'MetaGraphReadError'
+    this.httpStatus = httpStatus
+    this.graphCode = graphCode
+    this.graphSubcode = graphSubcode
+  }
+}
+
+/** Never let an access token reach a log line or a cron summary. */
+function redactToken(text: string): string {
+  return text.replace(/access_token=[^&\s"']+/g, 'access_token=REDACTED').slice(0, 300)
+}
+
+interface GraphErrorBody {
+  error?: { message?: string; code?: number; error_subcode?: number }
+}
+
+function parseGraphError(text: string): { message: string; code: number | null; subcode: number | null } {
+  try {
+    const body = JSON.parse(text) as GraphErrorBody
+    return {
+      message: body.error?.message ?? text,
+      code: typeof body.error?.code === 'number' ? body.error.code : null,
+      subcode: typeof body.error?.error_subcode === 'number' ? body.error.error_subcode : null,
+    }
+  } catch {
+    return { message: text, code: null, subcode: null }
+  }
+}
+
+async function getJson<T>(url: string, label: string): Promise<T> {
   let res: Response
   try {
     res = await fetch(url)
   } catch (err) {
-    console.error(`[meta/conversations] ${label} network error:`, err)
-    return null
+    throw new MetaGraphReadError(label, null, err instanceof Error ? err.message : String(err))
   }
   if (!res.ok) {
-    console.error(`[meta/conversations] ${label} HTTP ${res.status}:`, await res.text())
-    return null
+    const parsed = parseGraphError(await res.text())
+    throw new MetaGraphReadError(label, res.status, parsed.message, parsed.code, parsed.subcode)
   }
   return (await res.json()) as T
 }
@@ -119,8 +168,7 @@ export async function fetchConversationMessages(
   const out: MessengerMessage[] = []
 
   for (let page = 0; page < MAX_PAGES && url; page++) {
-    const body: GraphList<RawMessage> | null = await getJson(url, 'fetchConversationMessages')
-    if (!body) break
+    const body: GraphList<RawMessage> = await getJson(url, 'fetchConversationMessages')
     for (const raw of body.data ?? []) {
       const msg = toMessage(raw, pageId)
       if (msg) out.push(msg)
@@ -155,8 +203,7 @@ export async function fetchPageConversations(
   const out: MessengerConversation[] = []
 
   for (let page = 0; page < MAX_PAGES && url; page++) {
-    const body: GraphList<RawConversation> | null = await getJson(url, 'fetchPageConversations')
-    if (!body) break
+    const body: GraphList<RawConversation> = await getJson(url, 'fetchPageConversations')
 
     let reachedWatermark = false
     for (const raw of body.data ?? []) {
@@ -187,10 +234,23 @@ async function buildConversation(
 
   const total = raw.message_count ?? nested.length
   // The nested field is capped, so re-fetch the thread when it truncated history.
-  const messages =
-    total > nested.length
-      ? await fetchConversationMessages(raw.id!, pageId, pageAccessToken)
-      : nested.sort((a, b) => a.sentAt.localeCompare(b.sentAt))
+  const byTime = (a: MessengerMessage, b: MessengerMessage) => a.sentAt.localeCompare(b.sentAt)
+  let messages: MessengerMessage[]
+  if (total > nested.length) {
+    try {
+      messages = await fetchConversationMessages(raw.id!, pageId, pageAccessToken)
+    } catch (err) {
+      // One long thread's history failing must not abort the whole inbox, and must not
+      // store the thread with zero messages either: keep the newest messages already in hand.
+      console.warn(
+        `[meta/conversations] full history re-fetch failed for ${raw.id}; keeping ${nested.length} nested messages:`,
+        err instanceof Error ? err.message : String(err),
+      )
+      messages = nested.sort(byTime)
+    }
+  } else {
+    messages = nested.sort(byTime)
+  }
 
   return {
     conversationId: raw.id!,

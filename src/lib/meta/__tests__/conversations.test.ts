@@ -6,11 +6,11 @@
  *   - the participant is the one who is NOT the Page (Meta includes the Page itself)
  *   - the nested messages field is capped, so a long thread must be re-fetched
  *   - the incremental watermark must stop paging, not just filter the current page
- *   - Graph failures must degrade to [] rather than throw inside a cron
+ *   - a failed Graph read must throw MetaGraphReadError: an empty inbox and a broken token must never look the same
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { fetchPageConversations, fetchConversationMessages } from '../conversations'
+import { fetchPageConversations, fetchConversationMessages, MetaGraphReadError } from '../conversations'
 
 const PAGE = '1616575215312482'
 const TOKEN = 'page-tok'
@@ -30,6 +30,15 @@ function errorResponse(status: number): Response {
     status,
     json: async () => ({}),
     text: async () => 'boom',
+  } as unknown as Response
+}
+
+function graphErrorResponse(status: number, body: unknown): Response {
+  return {
+    ok: false,
+    status,
+    json: async () => ({}),
+    text: async () => JSON.stringify(body),
   } as unknown as Response
 }
 
@@ -71,6 +80,7 @@ beforeEach(() => {
   fetchMock = vi.fn()
   vi.stubGlobal('fetch', fetchMock)
   vi.spyOn(console, 'error').mockImplementation(() => {})
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
 
 afterEach(() => {
@@ -178,16 +188,46 @@ describe('fetchPageConversations', () => {
     expect(convo.messages[0].body).toBe('[non-text message]')
   })
 
-  it('returns [] instead of throwing when Graph errors', async () => {
-    fetchMock.mockResolvedValueOnce(errorResponse(400))
+  it('throws MetaGraphReadError carrying the Graph error code when Graph errors', async () => {
+    fetchMock.mockResolvedValueOnce(
+      graphErrorResponse(400, {
+        error: { message: 'Any of the pages_messaging permission(s) must be granted', type: 'OAuthException', code: 190 },
+      }),
+    )
 
-    await expect(fetchPageConversations(PAGE, TOKEN)).resolves.toEqual([])
+    const err = await fetchPageConversations(PAGE, TOKEN).catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(MetaGraphReadError)
+    expect((err as MetaGraphReadError).graphCode).toBe(190)
+    expect((err as MetaGraphReadError).httpStatus).toBe(400)
+    expect((err as MetaGraphReadError).message).toContain('HTTP 400 code=190')
   })
 
-  it('returns [] instead of throwing when the network fails', async () => {
+  it('throws MetaGraphReadError when the network fails', async () => {
     fetchMock.mockRejectedValueOnce(new Error('ECONNRESET'))
 
-    await expect(fetchPageConversations(PAGE, TOKEN)).resolves.toEqual([])
+    await expect(fetchPageConversations(PAGE, TOKEN)).rejects.toBeInstanceOf(MetaGraphReadError)
+  })
+
+  it('never puts the access token in the error message', async () => {
+    fetchMock.mockRejectedValueOnce(
+      new Error(`request to https://graph.facebook.com/x?access_token=${TOKEN}&limit=25 failed`),
+    )
+
+    const err = await fetchPageConversations(PAGE, TOKEN).catch((e: unknown) => e)
+
+    expect((err as Error).message).not.toContain(TOKEN)
+    expect((err as Error).message).toContain('access_token=REDACTED')
+  })
+
+  it('keeps the nested messages when the full-history re-fetch fails', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ data: [thread({ message_count: 120 })] }))
+      .mockResolvedValueOnce(errorResponse(500))
+
+    const [convo] = await fetchPageConversations(PAGE, TOKEN)
+
+    expect(convo.messages.map((m) => m.messageId)).toEqual(['mid.1', 'mid.2'])
   })
 })
 
@@ -233,5 +273,11 @@ describe('fetchConversationMessages', () => {
     )
 
     await expect(fetchConversationMessages('t_100', PAGE, TOKEN)).resolves.toEqual([])
+  })
+
+  it('throws MetaGraphReadError instead of returning a partial history', async () => {
+    fetchMock.mockResolvedValueOnce(errorResponse(500))
+
+    await expect(fetchConversationMessages('t_100', PAGE, TOKEN)).rejects.toBeInstanceOf(MetaGraphReadError)
   })
 })
