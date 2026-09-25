@@ -24,6 +24,9 @@ import { leadSheetSyncFanOut, leadSheetSyncOne } from './lead-sheet-sync'
 import { crmLeadFollowupDigest } from './crm-lead-followup-digest'
 import { adsAutonomySyncFunction } from './ads-autonomy-sync'
 import { maliangRenderCheck } from './maliang-render-check'
+import { libaiCopyProvenance } from './libai-copy-provenance'
+import { libaiPromptLibraryMonthly } from './libai-prompt-library-monthly'
+import { simaqianReputationWeekly } from './simaqian-reputation-weekly'
 
 export const cloudFunctions = [
   webIntelligenceCapture,
@@ -59,6 +62,9 @@ export const cloudFunctions = [
   crmLeadFollowupDigest,
   adsAutonomySyncFunction,
   maliangRenderCheck,
+  libaiCopyProvenance,
+  libaiPromptLibraryMonthly,
+  simaqianReputationWeekly,
 ]
 
 /** 命名空间自检：所有注册函数 id 必须以 cloud- 开头（契约测试 + 运行期双保险）。 */

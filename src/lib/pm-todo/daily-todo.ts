@@ -100,6 +100,15 @@ const DEV_OWNED_KINDS: ManualItemKind[] = [
   // 「回我一句我去看/去补」。**过关等审片、不过关问返工还是放弃那两条不在这里**，那是 PM 的活。
   'maliang_check_unverifiable',
   'maliang_check_missing',
+  // 李白：溯源检不了（官网网址没配 / 读不到）、生成后没检（事件没发出去）、提示词库月检
+  // 疑似过期——三条 how 都是「回我一句我去看/去补/去改」。**真有「未证实」句要改的那条
+  // （libai_copy_unverified）不在这里**，那是 PM/FDE 要动手改文案的活。
+  'libai_check_unverifiable',
+  'libai_check_missing',
+  'libai_prompt_library_stale',
+  // 司马迁本周没巡成（读评价表失败 / 起草全失败）→ how 写「回我一句「查一下司马迁」我去看」。
+  // 真有新评价要回的那条（simaqian_review_drafts）**不在这里**，那是 PM/FDE 要动手回评价的活。
+  'simaqian_patrol_failed',
 ]
 
 /** FDE focus clients: CTS + Oztop. */
