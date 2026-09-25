@@ -29,7 +29,7 @@
 |---|---|---|---|---|
 | B1 广告 WP3 | Inngest 链、孔明预检 + denied 恢复点、韩信、Check/Tune、Jev、五段日报、`autonomy_mode`↔`client_automation_policies.mode` 同步设计、G11 熔断落点确认 | 高/高/高 → P0 | A | 已派 ME 广告构建控制（合同待开）；设计与实施各一次 子牙+魏征，狄仁杰看同步开关 |
 | B2 三只闹钟 | 马良出片自动 9 宫格自检 · 李白逐句溯源 + 月度提示词体检 · 司马迁周四读评价起草不发 | 中/中/中 → P2 | B | 已派 ME 2.0 构建控制；只写 pm-todo 三件套，避开周五六 |
-| B3 审查自动被叫 | 接线 `tools/ops-review-loop/src/risk.mjs` → PR 事件 → 自动分派魏征/狄仁杰/板桥 | 高/中/低 → P2 | A（碰 workflows） | 待广告跑稳两周、且 B1 稳定后再开 |
+| B3 审查自动被叫 | 接线 `tools/ops-review-loop/src/risk.mjs` → PR 事件 → 自动分派魏征/狄仁杰/板桥 | 高/中/低 → P2 | A（碰 workflows） | PM 2026-09-25「分两档」插队：定级接线 + B/C 自动合 + A 级签字闸已派 ME 2.0（合同 A 级，DeepSeek 执行）；三人签字的自动写入仍待广告跑稳两周后开 |
 | B4 板桥待办人话闸 | 今日待办条目先过板桥改人话 | 高/中/中 → P2 | B | 待广告跑稳两周、且 B2 后再开 |
 | B5 孔子 SEO 笼子 | 给 SEO 改文案划「不问就能做」范围 | 广告跑稳两周后再打分 | A | 未开工 |
 
@@ -155,6 +155,18 @@ PR #1973 给 Meta 留资同步加了「上一轮已办完就别重跑」的闸�
 3. **347 条历史线索的 `source_ref` 不是真线索编号**（见上）。修它才能补 2026-07-24 之前的历史。
 
 另外两条小的：`registry.ts` 里这条的 `schedule` 是手抄的，`registry.test.ts` 没有对它做「跟函数定义一致」的断言（漂移了 CI 不会红）；`leads.ts` 回查广告组/系列名字时把 `ad_entity_snapshots` 的全部历史快照分页拉回来，只为取一个名字，每小时一次的无谓开销。
+
+## Meta / TikTok / 商家页的授权只能靠状态位判断，没有心跳（2026-09-24 断线监控上线时留下的口子，P1）
+
+**§11 打分**：频率低（目前没有「状态位是绿的、实际却不通」的 Meta 实例证据；已知那几次断线状态位都变了，新上的监控抓得到）· IMPACT 闭环关键度高（广告的 Act 和 Measure 都靠它）· 收入关联度高（客户投诉/续费直接相关）→ 恰好一个低、两个高 → **P1**。
+
+**现状**：2026-09-24 上线的断线监控（`src/lib/platform-oauth/connection-health.ts`）对每个平台分两种判法 —— 微软邮箱和谷歌取数有「心跳」（每次成功刷新令牌会盖 `last_synced_at`，有固定节奏的定时任务在调），Meta / TikTok / 商家页 / 谷歌广告 / GTM **没有**：`token-manager` 里压根没有 Meta 和 TikTok 的刷新实现（用的是长期令牌），商家页只在有人发帖读评价时才刷。所以这几个平台目前只有「状态位不是 active」这一条判据。
+
+**口子在哪**：如果一条 Meta 授权实际已经不能用、而平台又没让我们撞到那个会改状态位的报错，监控看不出来。
+
+**要做的**：给这几个平台找一条真正的「最近一次成功调用」的证据 —— 要么在调用方成功后主动盖 `last_synced_at`（最小改动），要么按平台各自的数据落地表定义新鲜度探针。做之前先确认节奏：没有固定节奏的平台加了心跳只会天天误报，那比没有更糟。
+
+---
 
 ## AI 可见度周快照聚合把失败的 API 调用也计入总数，客户分数被系统性腰斩（2026-09-23 两位复审确认，A 级，P0）
 
@@ -285,6 +297,23 @@ PM 要求把 parkhomes.nz 整体检查一遍还有什么可以升级。首页网
   - 频率：低（不是每天会撞上的故障，是"有人转发链接时"才体现）· IMPACT：中（影响转发链接后的点击欲望，偏 Act 前一步）· 收入：低（间接）→ 两低 → P3。
 
 ---
+
+## 广告 WP3 · Impact loop 接线 — 设计稿 v2.1 等 PM 认，实施按四小步（2026-09-25，A 级，P0）
+
+**§11 打分**：频率高（每日跑）· IMPACT 高（Check/Tune 段决定闭环通不通电）· 收入高（客户续费看广告效果）→ 三高 → **P0**。合同 [#1986](https://github.com/bigbigraydeng-maker/magic-engine/issues/1986)；设计稿 `docs/specs/2026-09-25-ads-impact-wp3-design-v1.md`（三方设计复审两轮：子牙 / 魏征 / 狄仁杰，21+27 条全部并入）。执行走 DeepSeek，本窗口统筹复审。
+
+- [ ] **WP3.1a 同步 worker**：`ad_strategy_configs.autonomy_mode` → `client_automation_policies.mode`（按 `(client_id, action_key)` 逐键条件 UPDATE，registry 动态取 `ads.*` 键；Kernel 一行不动；同步 SQL 函数 SECURITY DEFINER + REVOKE/GRANT；审计列 + receipts 表；架构测试 grep 禁令）。狄仁杰判「可进」。
+- [ ] **WP3.1b 熔断**：append-only `ads_circuit_events`（按账户，派生态：无 release 且 sticky/未过 24h = 熔断中）；resolver 钩子返回 unavailable → Kernel 两层拒；admin 解除接口 `guardGlobalAdmin`；**收编止损旁路** `ad-health/stop-loss/route.ts`（付费客户成员可直调 Meta 改预算/状态，不经 Kernel）；**账户级日预算上限**（`client_meta_ad_accounts.daily_budget_cap_cents` + envelope-facts 按账户取 + 绑定面板 UI；CTS 主 100 / 个人 50，客户级 150 为总闸）；**同 PR 修 WP2 遗留 [#1994](https://github.com/bigbigraydeng-maker/magic-engine/issues/1994)**（resolver 没接进生产 Kernel、pre_provider 不读 kernel_pre 快照、4000 行窗口）。migration 先 apply 再合并代码。
+- [ ] **WP3.2 链条**：`google-data-pullback-daily` 末尾发 `ads.impact_cycle.due`（不新开 cron）；韩信（新 agent `docs/agents/12-hanxin.md`）编排：熔断检查 → 孔明 `isWithinEnvelope` 预检 → denied 恢复入批 → 去冲突 → Kernel；批次表 + 成员表；pm-todo 四个拉取函数 + 活性项。
+- [ ] **WP3.3 Check + Tune + Jev + 日报两段**：韩信在 `runAction` 成功后写 `flywheel_actions`（加 `action_run_id` 列）；attribution 加 `ads_check` 评估器（扩 `flywheel_outcomes_evaluator_key_check`、`OUTCOME_EVALUATOR` 登记、`ads.` owner）；Tune 复用 `memory-extractor`（`pattern_type` CHECK 扩 `budget|pause|creative`）；`prescription_evaluations`；日报 Check/Tune 段。
+- **不在 WP3**：任何客户开 `bounded_auto`（单独授权）；三个 stub capability 的真实实现；`deny` 写入口（v1 不提供，管理员的「关」= `observe`）。
+- **PM 需知**：翻 `autonomy_mode` 触发 `policy_version +1`，当天在途授权作废、下一轮重提（正常，日报提示）。
+
+## Agent 管理系统（旅行社送来的终端客户）· 上线后两条小尾巴（2026-09-24 上线，P3）
+
+PR [#1983](https://github.com/bigbigraydeng-maker/magic-engine/pull/1983) 已合并，两张 migration 已 apply。按 §11：频率低（CTS 一家在用）· IMPACT 低 · 收入中 → 两低 → **P3**，待认领。
+- [ ] 页面顶栏「最后同步时间」硬编码「每小时一次」+ TODO，改从 `mailbox-sync` 心跳读。
+- [ ] 大团客户（pax > 30 常态）会被 `needs_review` 淹掉看板；判据升级成「同 Agent 30 天内见过一次即默认信任」。CTS 短期不撞。
 
 ## 广告支柱 IMPACT 闭环升级 · 阶段 0 止血 + 阶段 1 只读诊断（2026-09-14 已开 PR，PM go 已完成，验证与收尾进行中）
 
