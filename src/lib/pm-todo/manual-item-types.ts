@@ -18,6 +18,7 @@ import type { CommentScopeTodoKind } from './comment-scope-items'
 import type { LeadSheetItemKind } from './lead-sheet-items'
 import type { PlatformConnectionItemKind } from './platform-connection-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
+import type { SimaqianItemKind } from './simaqian-review-items'
 
 /**
  * 这些条目**链接坏了也照样下发**。
@@ -173,6 +174,8 @@ export type ManualItemKind =
    * 只有人能重新走一次同意页，所以必须进人工车道，不许只躺在 error_message 里。
    */
   | PlatformConnectionItemKind
+  /** 司马迁 · 口碑周巡：每周四起草的 Google 评价回复草稿（一律没发）/ 本周没巡成 */
+  | SimaqianItemKind
 
 export interface ManualItem {
   kind: ManualItemKind

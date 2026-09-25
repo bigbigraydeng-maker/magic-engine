@@ -23,6 +23,7 @@ import { adsD3AutoPause } from './ads-d3-auto-pause'
 import { leadSheetSyncFanOut, leadSheetSyncOne } from './lead-sheet-sync'
 import { crmLeadFollowupDigest } from './crm-lead-followup-digest'
 import { adsAutonomySyncFunction } from './ads-autonomy-sync'
+import { simaqianReputationWeekly } from './simaqian-reputation-weekly'
 
 export const cloudFunctions = [
   webIntelligenceCapture,
@@ -57,6 +58,7 @@ export const cloudFunctions = [
   leadSheetSyncOne,
   crmLeadFollowupDigest,
   adsAutonomySyncFunction,
+  simaqianReputationWeekly,
 ]
 
 /** 命名空间自检：所有注册函数 id 必须以 cloud- 开头（契约测试 + 运行期双保险）。 */
