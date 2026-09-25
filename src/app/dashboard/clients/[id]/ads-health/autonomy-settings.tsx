@@ -88,6 +88,7 @@ function ModeField({
             name="autonomy_mode"
             checked={draftMode === 'observe'}
             onChange={() => onChange('observe')}
+            className="accent-me-ochre"
           />
           只巡察不动钱
         </label>
@@ -98,6 +99,7 @@ function ModeField({
             disabled={capUnset}
             checked={draftMode === 'bounded_auto'}
             onChange={() => onChange('bounded_auto')}
+            className="accent-me-ochre"
           />
           信封内自动执行 — 需要日预算上限已设
         </label>
