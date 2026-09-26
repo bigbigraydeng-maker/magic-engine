@@ -7,8 +7,9 @@
  *     position join, covered flag)
  *   - findingsToActions: findings → ranked PriorityAction[] capped at 3
  *
- * DB-touching functions (loadSeoPatrolInput, runSeoPatrol) are not unit-tested
- * here — they are thin Supabase wrappers verified at build + integration time.
+ * loadCardSuppression is tested here against the table-modelled fake, so its
+ * filters really run; the per-client wiring of runSeoPatrolForClient is tested in
+ * job-wiring.test.ts. loadSeoPatrolInput and runSeoPatrol are not unit-tested.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -351,6 +352,54 @@ describe('buildCardSuppression', () => {
     )
     expect(blockedKeys.has(executionItemDedupKey('seo.refresh_blog', null, 'https://x.com/p'))).toBe(true)
   })
+
+  it('counts distinct targets, so duplicate cards of one target count once', () => {
+    const { openedLast7Days } = buildCardSuppression(
+      [
+        cardRow({ status: 'pending', steps_json: { keyword: 'dup', rule_id: 'stale_content' } }),
+        cardRow({ status: 'superseded', steps_json: { keyword: 'dup', rule_id: 'stale_content' } }),
+        cardRow({ status: 'completed', steps_json: { keyword: 'dup', rule_id: 'stale_content' } }),
+        cardRow({ steps_json: { keyword: 'other', rule_id: 'stale_content' } }),
+      ],
+      NOW,
+    )
+    expect(openedLast7Days).toBe(2)
+  })
+
+  it('looks back 7 days minus 1 hour', () => {
+    // Opened during the same daily run one week ago (6 days 23.5 hours back): trimmed out.
+    const sameRunLastWeek = new Date(NOW.getTime() - 7 * 86_400_000 + 30 * 60_000).toISOString()
+    // 6 days 22 hours back: still inside the window.
+    const withinWindow = new Date(NOW.getTime() - 7 * 86_400_000 + 2 * 3_600_000).toISOString()
+    const trimmed = buildCardSuppression(
+      [cardRow({ created_at: sameRunLastWeek, steps_json: { keyword: 'edge', rule_id: 'stale_content' } })],
+      NOW,
+    )
+    const counted = buildCardSuppression(
+      [cardRow({ created_at: withinWindow, steps_json: { keyword: 'edge', rule_id: 'stale_content' } })],
+      NOW,
+    )
+    expect(trimmed.openedLast7Days).toBe(0)
+    expect(counted.openedLast7Days).toBe(1)
+  })
+
+  it('holds a completed new-article card for 90 days and other closed cards for 14', () => {
+    const sixtyDaysAgo = new Date(NOW.getTime() - 60 * 86_400_000).toISOString()
+    const ninetyOneDaysAgo = new Date(NOW.getTime() - 91 * 86_400_000).toISOString()
+    const { blockedKeys } = buildCardSuppression(
+      [
+        cardRow({ action_type: 'seo.publish_blog', status: 'completed', updated_at: sixtyDaysAgo, steps_json: { keyword: 'published' } }),
+        cardRow({ action_type: 'seo.publish_blog', status: 'skipped', updated_at: sixtyDaysAgo, steps_json: { keyword: 'skipped article' } }),
+        cardRow({ action_type: 'seo.refresh_blog', status: 'completed', updated_at: sixtyDaysAgo, steps_json: { keyword: 'refreshed' } }),
+        cardRow({ action_type: 'seo.publish_blog', status: 'completed', updated_at: ninetyOneDaysAgo, steps_json: { keyword: 'old article' } }),
+      ],
+      NOW,
+    )
+    expect(blockedKeys.has(executionItemDedupKey('seo.publish_blog', 'published', undefined))).toBe(true)
+    expect(blockedKeys.has(executionItemDedupKey('seo.publish_blog', 'skipped article', undefined))).toBe(false)
+    expect(blockedKeys.has(executionItemDedupKey('seo.refresh_blog', 'refreshed', undefined))).toBe(false)
+    expect(blockedKeys.has(executionItemDedupKey('seo.publish_blog', 'old article', undefined))).toBe(false)
+  })
 })
 
 // ── planPatrolCards ──────────────────────────────────────────────────────────────
@@ -378,6 +427,33 @@ describe('planPatrolCards', () => {
     ]
     const plan = planPatrolCards(findings, { blockedKeys: new Set(), openedLast7Days: 2 })
     expect(plan.actions).toHaveLength(1)
+    expect(plan.withheldReason).toBe('weekly_cap')
+  })
+
+  it('does not report the weekly cap when every finding already has a card', () => {
+    const findings = [
+      finding({ ruleId: 'low_ctr_title', keyword: 'a' }),
+      finding({ ruleId: 'stale_content', keyword: 'b' }),
+    ]
+    const plan = planPatrolCards(findings, {
+      blockedKeys: new Set([
+        executionItemDedupKey('seo.publish_blog', 'a', null),
+        executionItemDedupKey('seo.publish_blog', 'b', null),
+      ]),
+      openedLast7Days: WEEKLY_CARD_CAP_PER_CLIENT,
+    })
+    expect(plan.actions).toEqual([])
+    expect(plan.withheldReason).toBeNull()
+    expect(plan.heldExistingCard).toBe(2)
+  })
+
+  it('does not report the weekly cap when the remaining slots cover every new target', () => {
+    const findings = [
+      finding({ ruleId: 'low_ctr_title', keyword: 'a' }),
+      finding({ ruleId: 'stale_content', keyword: 'b' }),
+    ]
+    const plan = planPatrolCards(findings, { blockedKeys: new Set(), openedLast7Days: 1 })
+    expect(plan.actions).toHaveLength(2)
     expect(plan.withheldReason).toBeNull()
   })
 })
@@ -386,6 +462,23 @@ describe('planPatrolCards', () => {
 
 describe('loadCardSuppression', () => {
   const NOW = new Date('2026-09-26T00:00:00Z')
+
+  let rowSeq = 0
+  function seoRow(partial: Record<string, unknown>): Record<string, unknown> {
+    rowSeq++
+    return {
+      id: `seo-row-${rowSeq}`,
+      client_id: 'c1',
+      dimension: 'seo',
+      action_type: 'seo.refresh_blog',
+      status: 'pending',
+      source: 'zhuge',
+      steps_json: { keyword: 'kw' },
+      created_at: NOW.toISOString(),
+      updated_at: NOW.toISOString(),
+      ...partial,
+    }
+  }
 
   it('ignores rows for another client and for other dimensions', async () => {
     const supabase = makeFakeSupabase({
@@ -456,5 +549,109 @@ describe('loadCardSuppression', () => {
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.error).toContain('row limit')
+  })
+
+  it('holds a card created 120 days ago and skipped 3 days ago', async () => {
+    const supabase = makeFakeSupabase({
+      execution_items: [
+        seoRow({
+          status: 'skipped',
+          created_at: new Date(NOW.getTime() - 120 * 86_400_000).toISOString(),
+          updated_at: new Date(NOW.getTime() - 3 * 86_400_000).toISOString(),
+          steps_json: { keyword: 'late skip' },
+        }),
+      ],
+    })
+    const result = await loadCardSuppression(supabase, 'c1', NOW)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.blockedKeys.has(executionItemDedupKey('seo.refresh_blog', 'late skip', undefined))).toBe(true)
+  })
+
+  it('holds an open card however old, including one a person made by hand', async () => {
+    const thirtyDaysAgo = new Date(NOW.getTime() - 30 * 86_400_000).toISOString()
+    const supabase = makeFakeSupabase({
+      execution_items: [
+        seoRow({
+          status: 'pending',
+          source: 'fde',
+          created_at: thirtyDaysAgo,
+          updated_at: thirtyDaysAgo,
+          steps_json: { keyword: 'manual' },
+        }),
+        seoRow({
+          status: 'in_progress',
+          source: 'zhuge',
+          created_at: thirtyDaysAgo,
+          updated_at: thirtyDaysAgo,
+          steps_json: { keyword: 'working', rule_id: 'stale_content' },
+        }),
+      ],
+    })
+    const result = await loadCardSuppression(supabase, 'c1', NOW)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.blockedKeys.has(executionItemDedupKey('seo.refresh_blog', 'manual', undefined))).toBe(true)
+    expect(result.value.blockedKeys.has(executionItemDedupKey('seo.refresh_blog', 'working', undefined))).toBe(true)
+    expect(result.value.openedLast7Days).toBe(0)
+  })
+
+  it('holds a new-article card completed 60 days ago but not a card skipped 20 days ago', async () => {
+    const supabase = makeFakeSupabase({
+      execution_items: [
+        seoRow({
+          action_type: 'seo.publish_blog',
+          status: 'completed',
+          updated_at: new Date(NOW.getTime() - 60 * 86_400_000).toISOString(),
+          steps_json: { keyword: 'article' },
+        }),
+        seoRow({
+          status: 'skipped',
+          updated_at: new Date(NOW.getTime() - 20 * 86_400_000).toISOString(),
+          steps_json: { keyword: 'passed' },
+        }),
+      ],
+    })
+    const result = await loadCardSuppression(supabase, 'c1', NOW)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.blockedKeys.has(executionItemDedupKey('seo.publish_blog', 'article', undefined))).toBe(true)
+    expect(result.value.blockedKeys.has(executionItemDedupKey('seo.refresh_blog', 'passed', undefined))).toBe(false)
+  })
+
+  it('counts a superseded patrol card created 2 days ago toward the weekly cap', async () => {
+    const twoDaysAgo = new Date(NOW.getTime() - 2 * 86_400_000).toISOString()
+    const supabase = makeFakeSupabase({
+      execution_items: [
+        seoRow({
+          status: 'superseded',
+          created_at: twoDaysAgo,
+          updated_at: twoDaysAgo,
+          steps_json: { keyword: 'replaced', rule_id: 'stale_content' },
+        }),
+      ],
+    })
+    const result = await loadCardSuppression(supabase, 'c1', NOW)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.openedLast7Days).toBe(1)
+    expect(result.value.blockedKeys.has(executionItemDedupKey('seo.refresh_blog', 'replaced', undefined))).toBe(false)
+  })
+
+  it('does not count a patrol card created 8 days ago even if it was updated today', async () => {
+    const supabase = makeFakeSupabase({
+      execution_items: [
+        seoRow({
+          status: 'superseded',
+          created_at: new Date(NOW.getTime() - 8 * 86_400_000).toISOString(),
+          updated_at: NOW.toISOString(),
+          steps_json: { keyword: 'old', rule_id: 'stale_content' },
+        }),
+      ],
+    })
+    const result = await loadCardSuppression(supabase, 'c1', NOW)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.openedLast7Days).toBe(0)
   })
 })

@@ -7,6 +7,11 @@
  *
  * Moved here from `seo-patrol/page-signals.ts` so shared modules (the kanban card
  * persister) can use the same rule without depending on the patrol.
+ *
+ * Use it only to compare and de-duplicate. It deliberately merges `www.`/bare hosts
+ * and http/https and drops the query string, so it is NOT a page identity: the page
+ * ledger uses `site-audit/canonical-inventory/url-rules.ts` (exact and versioned), and
+ * per-page Search Console storage keeps its own key.
  */
 export function canonicalUrl(raw: string): string | null {
   try {
