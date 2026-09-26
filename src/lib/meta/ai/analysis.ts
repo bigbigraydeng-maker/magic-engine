@@ -460,7 +460,8 @@ async function runAnalysis(clientId: string, principalId: string, grant: GrantRo
     const withSlot = ruleSection ? placeRuleSection(result.text.trim(), PLACEHOLDER) : normaliseHeadings(result.text.trim())
     const cleaned = stripFatigueSentences(withSlot)
     if (cleaned.removed > 0) console.warn('[meta-ads-ai] removed model fatigue sentences', { removed: cleaned.removed })
-    const report = ruleSection ? cleaned.text.replace(PLACEHOLDER, renderRuleSection(ruleSection)) : cleaned.text
+    // 用函数作替换值：广告名里的 $&、$'、$$ 等不会被当成替换指令（子牙/魏征 2026-09-27）
+    const report = ruleSection ? cleaned.text.replace(PLACEHOLDER, () => renderRuleSection(ruleSection)) : cleaned.text
     await requireSnapshot(clientId, principalId, grant, connectionVersion)
     await finish(clientId, principalId, jobId, 'completed', safeCharge(result.cost_usd, reserveUsd), evidence, report, MODEL_HAIKU,
       result.input_tokens, result.output_tokens, null)

@@ -103,7 +103,9 @@ function headlineOf(f: ValidFinding): string {
   if (h.startsWith(prefix)) h = h.slice(prefix.length)
   h = h.replace(DATE_SUFFIX_RE, '')
   if (h.startsWith('，')) h = h.slice(1)
-  return h.trim()
+  h = h.trim()
+  if (!/[。！？]$/.test(h)) h += '。'
+  return h
 }
 
 function countOccurrences(haystack: string, needle: string): number {
@@ -140,7 +142,7 @@ function buildCards(section: ValidSection, today: string): RuleCards {
   const promise =
     today <= review
       ? `我们的广告团队已经看到${n === 1 ? '这条' : '这几条'}，会在${formatDay(review)}前后复查并处理，你不用动手。`
-      : `这是${formatDay(section.dataDate)}的数据，我们原定${formatDay(review)}前后复查，最新进展可以直接问我们的团队。`
+      : `这是${formatDay(section.dataDate)}的数据，我们原定${formatDay(review)}前后复查，你不用动手；想知道最新进展可以直接问我们的团队。`
   return {
     title: `我们正在跟进的广告（${n} 条）`,
     intro,
@@ -161,7 +163,7 @@ function replaceBody(
     return { report, bodyReplaced: false }
   }
   const which = n === 1 ? '这条' : `这 ${n} 条`
-  const replacement = `${RULE_SECTION_TITLE}\n${which}已经放在页面最上方，这里不再重复。`
+  const replacement = `${RULE_SECTION_TITLE}\n${which}已经放在上面「我们正在跟进的广告」里，这里不再重复。`
   const at = report.indexOf(original)
   return { report: report.slice(0, at) + replacement + report.slice(at + original.length), bodyReplaced: true }
 }

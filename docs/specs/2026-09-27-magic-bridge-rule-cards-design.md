@@ -49,7 +49,7 @@
 ## 3. 改动清单
 | 文件 | 改什么 | 谁写 |
 |---|---|---|
-| `src/lib/ads-strategy/rules/client-copy.ts` | `ClientRuleFinding.cardHeadline`；导出第三部分标题常量、承诺句、点击率解释句给服务器端用 | DeepSeek |
+| `src/lib/ads-strategy/rules/client-copy.ts` | ~~`ClientRuleFinding.cardHeadline`~~（已被 §5 取代：读的时候现截短标题）；导出第三部分标题常量、承诺句、点击率解释句给服务器端用 | DeepSeek |
 | `src/lib/meta/ai/rule-cards.ts`（新） | `buildRuleCards`：校验、组字符串、服务器端正文替换 | DeepSeek |
 | `src/lib/meta/ai/analysis.ts` | `listAnalyses` / `job` 调 `buildRuleCards`，返回替换后正文 + `evidence.rule_cards` | DeepSeek |
 | `src/app/meta-ads-ai/[clientId]/RuleCards.tsx`（新）、`ReportView.tsx` | 卡片区 + 挂载 | DeepSeek |
@@ -63,3 +63,6 @@
 - 与 v2 的一处简化：卡片短标题不在生成时另存，而是读的时候从原句里去掉开头「「广告名」」和末尾「（数据截至 X）」——旧报告、新报告都能用，生成步骤零改动。
 - 当场试跑（本机，不点生成、不扣额度）：用 9/25 CTS 巡检真实结论（第一个广告账户上那条 v4 表单广告的 D10）→ `toClientFinding` → `buildRuleCards` → 渲染 `ReportView`：卡片 1 张、正文第三部分换成一句、后面用阿拉伯数字写的「4.」段完整保留；把「今天」设成 10/5 时承诺句换成过期说法。
 - 变异探针 14 个全部被测试抓住（其中「日期格式不查」一开始没抓住：非法日期先被 Date.parse 挡掉，补了一个能被 Date.parse 读懂但不是 YYYY-MM-DD 的扩展年份写法）。
+- 实施后审（子牙 / 魏征 / 板桥，2026-09-27）：三人都无 BLOCKER。已修：生成报告时把第三部分换进正文用字符串替换，广告名里的 `$&`、`$'`、`$$` 会被当成替换指令、写坏报告并让去重永远对不上（包 B 留下的问题，子牙、魏征都查到）→ 改成函数替换值，补一条「生成 → 读回」逐字一致的测试（广告名带 `$`）；过期承诺句补回「你不用动手」；正文那句改成「已经放在上面「我们正在跟进的广告」里」；卡片标题补句号。
+- 没改、记为后续：板桥建议把包 B 已上线文案里的「表单」换成「留联系方式的那一页」、「同一组」换成「同一批投放的（按最近两周多算）」——要跟报告正文一起改，不在包 C 范围。「今天」按 UTC 算，复查日第二天新西兰上午仍显示未过期说法（最多晚半天，句子里有「前后」）。
+- 变异探针 15 个全部被测试抓住（含「把 `$` 替换改回字符串」）。

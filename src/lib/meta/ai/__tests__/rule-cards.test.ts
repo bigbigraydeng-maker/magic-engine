@@ -62,7 +62,7 @@ describe('buildRuleCards', () => {
     const sec = section([finding({ adName: 'Ad A' })])
     const result = buildRuleCards(sec, null, TODAY)
     expect(result.cards!.cards[0].headline).toBe(
-      '最近 3 天，点击率从之前两周的 3.0% 降到了 1.0%',
+      '最近 3 天，点击率从之前两周的 3.0% 降到了 1.0%。',
     )
   })
 
@@ -75,7 +75,7 @@ describe('buildRuleCards', () => {
     ])
     const result = buildRuleCards(sec, null, TODAY)
     expect(result.cards!.cards[0].headline).toBe(
-      '最近 3 天，点击率从之前两周的 3.0% 降到了 1.0%',
+      '最近 3 天，点击率从之前两周的 3.0% 降到了 1.0%。',
     )
   })
 
@@ -97,7 +97,7 @@ describe('buildRuleCards', () => {
     const result = buildRuleCards(sec, report, TODAY)
     expect(result.cards!.intro).toContain('下面这条有变化')
     expect(result.cards!.promise).toContain('已经看到这条')
-    expect(result.report).toContain('这条已经放在页面最上方')
+    expect(result.report).toContain('这条已经放在上面「我们正在跟进的广告」里，这里不再重复。')
   })
 
   it('promise on review day uses the scheduled wording', () => {
@@ -112,7 +112,7 @@ describe('buildRuleCards', () => {
     const sec = section([finding()])
     const result = buildRuleCards(sec, null, '2026-10-03')
     expect(result.cards!.promise).toBe(
-      '这是9月25日的数据，我们原定10月2日前后复查，最新进展可以直接问我们的团队。',
+      '这是9月25日的数据，我们原定10月2日前后复查，你不用动手；想知道最新进展可以直接问我们的团队。',
     )
   })
 
@@ -126,7 +126,7 @@ describe('buildRuleCards', () => {
     const result = buildRuleCards(sec, report, TODAY)
     expect(result.cards!.bodyReplaced).toBe(true)
     expect(result.report).toContain(
-      '三、需要留意的广告\n这 3 条已经放在页面最上方，这里不再重复。',
+      '三、需要留意的广告\n这 3 条已经放在上面「我们正在跟进的广告」里，这里不再重复。',
     )
     expect(result.report).toContain('四、广告出现的位置\nFacebook 动态最多。')
     expect(result.report).toContain('八、三条可以考虑的方向\n1. 方向一')
