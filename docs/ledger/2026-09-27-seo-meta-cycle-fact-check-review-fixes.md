@@ -4,7 +4,7 @@ title: SEO Meta-Cycle 事实核对闸门 5 条审查缺陷修复（反向检查 
 status: done
 owner: agent
 decided_on: 2026-09-27
-source: pr:1948
+source: session:a67d9f1c pr:1948
 done_on: 2026-09-27
 done_ref: pr:1948 commit:61ddc2ca
 verify_by: 2026-10-04
