@@ -6,7 +6,8 @@
  */
 
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
-import { getAdSetStatus, setAdSetStatus } from '@/lib/meta/adsets'
+import { getAdSetStatus } from '@/lib/meta/adsets'
+import { setAdSetStatus } from '@/lib/meta/adset-writes'
 import type { AdSetSummary } from '@/lib/meta/adsets'
 
 export interface AdsAutoPauseDeps {

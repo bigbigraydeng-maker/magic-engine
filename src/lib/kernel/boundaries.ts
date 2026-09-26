@@ -33,6 +33,24 @@ export const PROVIDER_WRITE_MODULES = [
   '@/lib/gbp/publisher',
   '@/lib/gsc/indexing-client',
   '@/lib/gsc/sitemap-ping',
+  /**
+   * 🔴 2026-09-27（WP3.1b）新增：Meta 广告组级写入。
+   *
+   *    在此之前这道闸**根本没覆盖 Meta 广告写入面** —— 止损路由
+   *    (`api/clients/[id]/ad-health/stop-loss`) 直接 import 广告组写函数打 Meta，
+   *    既没有 action_run、也没有幂等键、也没有撤回处理函数，而它从来没撞上任何
+   *    规则：不是被 grandfather 放行，是闸没盖到。同一轮把那条路径收编成
+   *    提交 `ads.pause_unit` / `ads.cut_unit_budget`，所以这条**不需要任何豁免**。
+   *
+   *    为什么是 `adset-writes` 而不是 `adsets`：`adsets.ts` 读写混在一起，整个挂闸
+   *    会连「只读一下广告组列表」一起挡掉。写的那一半已单独拆成 `adset-writes.ts`。
+   *
+   *    ⚠️ 还没盖到的：广告系列级写入（`setCampaignStatus` / `setCampaignDailyBudget`）
+   *    与 `boostPagePost`。它们各自还有未收编的调用方（`api/clients/[id]/meta-ads/execute`、
+   *    `api/clients/[id]/meta-ads/boost-post`），挂闸就得给 ads 开豁免条目 ——
+   *    那等于开一个本清单至今没有的先例。收编它们是下一轮的活，不在本轮硬塞。
+   */
+  '@/lib/meta/adset-writes',
 ] as const
 
 /** 允许 import 上面这些模块的目录（新代码只能落在这里）。 */
@@ -204,6 +222,22 @@ export const KERNEL_RUNNER_ALLOWED_CALLER_DIRS = [
   'src/lib/kernel/',
   'src/lib/action-submission/',
   'src/lib/kernel-approval/',
+  /**
+   * 🔴 2026-09-27（WP3.1b）新增：广告支柱的提交适配器
+   *    （spec `docs/specs/2026-09-24-ads-goal-driven-autonomous-impact-loop-v1.md` §3 G11
+   *    原文要求「`src/lib/ads-strategy/**` 与 `src/lib/capabilities/ads/**` 之外禁止
+   *    import `submitActionRun` / `recoverDeniedRun`」）。
+   *
+   *    为什么**不**放进 `src/lib/action-submission/`：那一层的定位是**域无关**的共享
+   *    submission runtime —— 它的禁止清单 (`ACTION_SUBMISSION_FORBIDDEN_IMPORTS`) 明文
+   *    禁 `@/lib/growth` / `@/lib/geo-module`，理由写在那段注释里：「把 GEO 语义写进
+   *    shared submission runtime 就把它绑死在首个域了」。广告的提交适配器必须认识广告
+   *    语义（暂停走哪个 ActionKey、input 要 `adset_id`/`ad_account_id`/`cycle_date`、
+   *    广告系列怎么落到广告组），放进去正是那段注释要防的事。
+   *
+   *    代价：白名单多一条。它仍然是**穷举白名单**，ESLint 与架构测试同时盯着。
+   */
+  'src/lib/ads-strategy/',
 ] as const
 
 /**

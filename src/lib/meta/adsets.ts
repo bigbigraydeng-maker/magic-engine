@@ -10,6 +10,10 @@
  * campaign's spend ourselves.
  *
  * Kept out of `client.ts` deliberately: that file is at the 800-line ceiling.
+ *
+ * 🔴 2026-09-27（WP3.1b）：**写**的那两个（`setAdSetDailyBudget` / `setAdSetStatus`）
+ *    已搬到 `./adset-writes`，因为它们要挂上「对外写只能由 capability 层调用」那道闸，
+ *    而这个文件里读的部分不该被一起挡掉。**不要在这里 re-export 它们** —— 那是给闸开绕路。
  */
 
 import { GRAPH_BASE } from './graph-base'
@@ -60,37 +64,6 @@ export async function listAdSetsInCampaign(
   return json.data ?? []
 }
 
-/** Update one ad set's daily budget. Cents. Returns true only on confirmed success. */
-export async function setAdSetDailyBudget(
-  adSetId: string,
-  accessToken: string,
-  dailyBudgetCents: number,
-): Promise<boolean> {
-  let res: Response
-  try {
-    res = await fetch(`${GRAPH_BASE}/${adSetId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        daily_budget: String(Math.round(dailyBudgetCents)),
-        access_token: accessToken,
-      }).toString(),
-    })
-  } catch (err) {
-    console.error('[meta/adsets] setAdSetDailyBudget fetch error:', err)
-    return false
-  }
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    console.error(`[meta/adsets] setAdSetDailyBudget HTTP ${res.status}:`, body.slice(0, 300))
-    return false
-  }
-
-  const json = await res.json() as { success?: boolean }
-  return json.success === true
-}
-
 /** Read one ad set's status back — used to verify Meta's silent force-pause. */
 export async function getAdSetStatus(
   adSetId: string,
@@ -111,31 +84,4 @@ export async function getAdSetStatus(
   if (!res.ok) return null
 
   return res.json() as Promise<AdSetSummary>
-}
-
-/** Set one ad set ACTIVE/PAUSED — the other half of the force-pause guard. */
-export async function setAdSetStatus(
-  adSetId: string,
-  accessToken: string,
-  status: 'ACTIVE' | 'PAUSED',
-): Promise<boolean> {
-  let res: Response
-  try {
-    res = await fetch(`${GRAPH_BASE}/${adSetId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ status, access_token: accessToken }).toString(),
-    })
-  } catch (err) {
-    console.error('[meta/adsets] setAdSetStatus fetch error:', err)
-    return false
-  }
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    console.error(`[meta/adsets] setAdSetStatus HTTP ${res.status}:`, body.slice(0, 300))
-    return false
-  }
-
-  const json = await res.json() as { success?: boolean }
-  return json.success === true
 }

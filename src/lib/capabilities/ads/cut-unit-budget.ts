@@ -19,7 +19,8 @@ import type {
   OutwardRollbackResult,
 } from '@/lib/kernel/types'
 import { RetryableCapabilityError } from '@/lib/kernel/errors'
-import { getAdSetStatus, setAdSetDailyBudget } from '@/lib/meta/adsets'
+import { getAdSetStatus } from '@/lib/meta/adsets'
+import { setAdSetDailyBudget } from '@/lib/meta/adset-writes'
 import { makeReadbackVerification, makeSnapshotPreStep, requireMetaToken } from './common'
 
 function adsetId(step: CapabilityStepContext): string {

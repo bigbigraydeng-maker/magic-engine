@@ -1,6 +1,7 @@
 /**
  * 日报"目标进度"段的取数（spec 2026-09-24 §3 G1/G2/G10）。尽力而为，任何一步拿不到 → null（日报写"没有生效中的目标"或"未判"），绝不抛、绝不把缺数当 0。
  */
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
 import { listActiveGoals } from '@/lib/strategy/goals'
 import { autoFetchMetricValue } from '@/lib/strategy/auto-fetch'
@@ -29,6 +30,39 @@ export const ADS_ATTRIBUTABLE_METRIC_KEYS: ReadonlySet<string> = new Set(['leads
  */
 export function pickDigestGoal(goals: readonly GoalRow[]): GoalRow | null {
   return goals.find(g => ADS_ATTRIBUTABLE_METRIC_KEYS.has(g.primary_metric_key)) ?? goals[0] ?? null
+}
+
+/**
+ * 「这次要动钱的动作挂哪个目标」—— **fail closed** 版本（WP3.1b）。
+ *
+ * 跟 `listActiveGoals` 的区别就一条，但是关键的一条：`listActiveGoals` 读失败时
+ * `console.error` 之后返回 `[]`，也就是把「查不到」和「没有目标」压成同一个答案。
+ * 日报里这么做没关系（写一句「没有生效中的目标」），但**会动客户钱**的路径上不行：
+ * 一次数据库抖动会被读成「这个客户没有目标」，进而被读成某个确定的结论。
+ *
+ * 所以这里三种情况分开回答：
+ *   · `{ goal }`            —— 找到了该挂的目标
+ *   · `{ none: true }`      —— 确实没有生效中的目标（spec §6 第 5 条：不出动作）
+ *   · `{ unreadable: msg }` —— 读不出来，调用方必须当成「不知道」，不许当成「没有」
+ */
+export async function resolveAdsGoalOrFail(
+  supabase: SupabaseClient,
+  clientId: string,
+): Promise<
+  | { readonly goal: GoalRow }
+  | { readonly none: true }
+  | { readonly unreadable: string }
+> {
+  const { data, error } = await supabase
+    .from('goals')
+    .select('*')
+    .eq('client_id', clientId)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+
+  if (error) return { unreadable: error.message }
+  const goal = pickDigestGoal((data ?? []) as GoalRow[])
+  return goal ? { goal } : { none: true }
 }
 
 interface AdDailyInsightRow {

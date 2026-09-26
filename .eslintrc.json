@@ -16,7 +16,8 @@
               "**/lib/cms/meta-patcher",
               "**/lib/gbp/publisher",
               "**/lib/gsc/indexing-client",
-              "**/lib/gsc/sitemap-ping"
+              "**/lib/gsc/sitemap-ping",
+              "**/lib/meta/adset-writes"
             ],
             "message": "对外写能力只能由 src/lib/capabilities/** 调用。请提交一个 action_run，让执行内核去跑（见 src/lib/kernel/boundaries.ts）。"
           }
