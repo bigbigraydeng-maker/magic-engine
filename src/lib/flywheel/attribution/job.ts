@@ -20,6 +20,7 @@ import {
   OUTCOME_CONFLICT_TARGET,
   OUTCOME_EVALUATOR,
   foreignMetricPrefixes,
+  isSiteLevelUnattributable,
   resolveAttributionRouting,
 } from './outcome-identity'
 
@@ -364,7 +365,7 @@ async function processAction(
 
   const delta = afterValue - baseline
   const deltaPct = baseline !== 0 ? (delta / Math.abs(baseline)) * 100 : null
-  const { verdict, confidence } = computeVerdict(delta, deltaPct, expected_delta)
+  const { verdict, confidence } = computeOutcomeVerdict(expected_metric, delta, deltaPct, expected_delta)
 
   await upsertOutcome({
     action_id: id,
@@ -533,6 +534,25 @@ async function retireExtraWindows(
 }
 
 // ── Verdict computation ───────────────────────────────────────────────────────
+
+/**
+ * The verdict to store for one measured metric of one action.
+ *
+ * A site-level metric (`isSiteLevelUnattributable`) is always `inconclusive` with
+ * confidence 0: a whole-site before/after difference moves with seasonality and
+ * every other action in the window, so it cannot say whether THIS action worked.
+ * The caller still stores baseline / after / delta. Everything else goes through
+ * `computeVerdict`. Both evaluators (this file and gsc-bridge.ts) call this.
+ */
+export function computeOutcomeVerdict(
+  metricKey: string,
+  delta: number,
+  deltaPct: number | null,
+  expectedDelta: number | null,
+): { verdict: OutcomeVerdict; confidence: number } {
+  if (isSiteLevelUnattributable(metricKey)) return { verdict: 'inconclusive', confidence: 0 }
+  return computeVerdict(delta, deltaPct, expectedDelta)
+}
 
 /**
  * Classify the outcome of an attribution window.

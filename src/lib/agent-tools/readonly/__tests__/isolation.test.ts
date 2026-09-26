@@ -110,7 +110,7 @@ describe('query_analytics — propertyId + clientId 越权轴锁死', () => {
 
 describe('query_flywheel_history — clientId 越权轴锁死', () => {
   it('伪造 client_id 入参被忽略，只用 ctx.clientId + ctx.supabase', async () => {
-    mockOutcome.mockResolvedValue({ 'seo.publish_blog': { successRate: 0.5, sampleSize: 4 } })
+    mockOutcome.mockResolvedValue({ 'seo.publish_blog': { successRate: 0.5, sampleSize: 4, totalCases: 4 } })
     await queryFlywheelHistory.handler({ ...FORGED, flywheel: 'seo' }, REAL)
     // 🔴 clientId + supabase 都必须是 ctx 的；filters 里绝不含 client_id
     expect(mockOutcome).toHaveBeenCalledWith(REAL.supabase, 'client-REAL', { flywheel: 'seo' })
