@@ -1,10 +1,12 @@
 ---
 id: 2026-09-26-magic-bridge-billing-fix
 title: Magic Bridge（Meta 广告 AI 客户页）报告不再因写超长失败，失败时按真实用量扣免费额度而不是一律扣 12 美分
-status: decided
+status: done
 owner: agent
 decided_on: 2026-09-26
 source: session:4bb834a6
+done_on: 2026-09-26
+done_ref: pr:2043
 verify_by: 2026-10-10
 verify_how: 合并后下一次有客户点生成报告时，看报告是否生成成功；若失败，该任务的扣费应等于模型真实成本（几美分）而不是 0.12。样本 1 次生成即可判；10/10 前没人生成则记「判不了·没人用」
 ---
