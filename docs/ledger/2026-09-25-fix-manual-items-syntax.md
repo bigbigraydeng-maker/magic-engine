@@ -10,6 +10,8 @@ done_on: 2026-09-25
 done_ref: pr:2020
 verify_how: "type-check 通过 + 今日待办邮件正常发出"
 verify_by: 2026-09-26
+last_checked: 2026-09-27
+check_note: 判不了：修复 9-25 12:27 UTC 合并后今日待办邮件还没跑过一次（最近一次 9-24 19:01 UTC，在修复之前）；type-check 本次未跑（主干基线已知红，单跑不能证明这条）
 ---
 
 #2016（李白）合并入 main 时冲突解决漏掉了 `pushMaliangRenderItems` 和 `pushLibaiItems`
