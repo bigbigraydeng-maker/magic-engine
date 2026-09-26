@@ -1,0 +1,104 @@
+-- ===========================================================================
+-- gsc_page_daily / gsc_page_fetch_receipts
+-- ===========================================================================
+--
+-- This file ships with the PR but is NOT applied by the PR. Applying it needs
+-- the PM's explicit go in chat.
+--
+-- Purpose: store Google Search Console (GSC) clicks / impressions / CTR /
+-- position for every page for every day. Until now only a 28-day top-50 page
+-- summary was kept, so page-level judgements (did a title change help, does an
+-- orphan page get impressions) had no numbers.
+--
+-- Two tables:
+--   * gsc_page_daily          — one row per page per day.
+--   * gsc_page_fetch_receipts — one receipt per pull order.
+--
+-- `day` is Google's own date (US Pacific time), not the NZ date.
+--
+-- Access: both tables are service_role only; table-level grants for anon /
+-- authenticated are revoked explicitly.
+-- ===========================================================================
+
+-- The primary key is (client, day, raw URL exactly as Google returned it).
+-- `page_key` is the normalised key (gscPageKey in src/lib/url/page-key.ts) used
+-- to match a page across days and data sources. Rows whose URL or key is longer
+-- than 2000 bytes are not written by the application (btree index entry limit)
+-- and are only counted on the receipt.
+CREATE TABLE IF NOT EXISTS public.gsc_page_daily (
+  client_id    uuid    NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  day          date    NOT NULL,
+  page_url     text    NOT NULL,
+  page_key     text    NOT NULL,
+  clicks       integer NOT NULL,
+  impressions  integer NOT NULL,
+  ctr          numeric NOT NULL,
+  position     numeric NOT NULL,
+  PRIMARY KEY (client_id, day, page_url)
+);
+
+CREATE INDEX IF NOT EXISTS gsc_page_daily_client_key_day_idx
+  ON public.gsc_page_daily (client_id, page_key, day);
+
+-- One receipt per pull order (daily = "the last 5 days", backfill = "one
+-- calendar month"). `id` is also the id of this order's row in cron_run_logs
+-- (guaranteed by the application), which lets the failure handler close exactly
+-- this order. `data_from_day` / `data_through_day` are the first / last day
+-- inside the requested range for which Google actually has finalised data.
+CREATE TABLE IF NOT EXISTS public.gsc_page_fetch_receipts (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id          uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  site_url           text NOT NULL,
+  kind               text NOT NULL CHECK (kind IN ('daily', 'backfill')),
+  request_start_day  date NOT NULL,
+  request_end_day    date NOT NULL,
+  data_from_day      date,
+  data_through_day   date,
+  status             text NOT NULL DEFAULT 'running'
+                       CHECK (status IN ('running', 'complete', 'truncated', 'failed')),
+  failure_kind       text CHECK (failure_kind IN ('auth', 'quota', 'other')),
+  row_count          integer NOT NULL DEFAULT 0,
+  request_count      integer NOT NULL DEFAULT 0,
+  skipped_long_urls  integer NOT NULL DEFAULT 0,
+  inngest_run_id     text,
+  inngest_event_id   text,
+  error              text,
+  started_at         timestamptz NOT NULL DEFAULT now(),
+  finished_at        timestamptz,
+  CONSTRAINT gsc_page_fetch_receipts_range_chk CHECK (request_end_day >= request_start_day)
+);
+
+CREATE INDEX IF NOT EXISTS gsc_page_fetch_receipts_client_status_finished_idx
+  ON public.gsc_page_fetch_receipts (client_id, status, finished_at DESC);
+
+ALTER TABLE public.gsc_page_daily ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.gsc_page_fetch_receipts ENABLE ROW LEVEL SECURITY;
+
+-- Policies must say `TO service_role`; leaving it out opens the table to
+-- anonymous visitors (docs/DECISIONS.md, 2026-08-03).
+DO $do$
+BEGIN
+  CREATE POLICY gsc_page_daily_service_role ON public.gsc_page_daily
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+  CREATE POLICY gsc_page_fetch_receipts_service_role ON public.gsc_page_fetch_receipts
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $do$;
+
+REVOKE ALL ON public.gsc_page_daily FROM anon, authenticated;
+REVOKE ALL ON public.gsc_page_fetch_receipts FROM anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.gsc_page_daily TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.gsc_page_fetch_receipts TO service_role;
+
+COMMENT ON TABLE public.gsc_page_daily IS 'Google Search Console per-page daily metrics: one row per page per day; day is Google''s date (US Pacific). Written by service_role only.';
+COMMENT ON COLUMN public.gsc_page_daily.page_key IS 'gscPageKey: host lower-cased without www, http/https not distinguished, fragment dropped, percent-escapes upper-cased, trailing slash removed except root, path case kept, only tracking params removed and the rest sorted.';
+COMMENT ON TABLE public.gsc_page_fetch_receipts IS 'Pull receipts for gsc_page_daily: one per order. id is also the id of the matching cron_run_logs row.';
+COMMENT ON COLUMN public.gsc_page_fetch_receipts.status IS 'running / complete (whole range pulled) / truncated (some day hit the 4-page cap) / failed.';
+COMMENT ON COLUMN public.gsc_page_fetch_receipts.failure_kind IS 'Only set when failed: auth / quota / other.';
