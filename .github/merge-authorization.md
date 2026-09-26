@@ -62,11 +62,15 @@ agent 不得自行对 A 级 PR 执行 `--admin`。
 ## 主干规则集（仓库设置，PM 合并接线 PR 时一并授权）
 
 - `Protect main`：必过检查 `ai-orchestrator-tests` · `Ledger entries valid` ·
-  `Code change has ledger entry` · `Ledger refs exist` · **`ops-review-loop-tests`**（新增）。
-  没有 bypass actor：这五道红了，管理员也合不进。
+  `Code change has ledger entry` · `Ledger refs exist` · **`ops-review-loop-tests`** ·
+  **`Kernel architecture test`**（2026-09-27 新增，`.github/workflows/kernel-architecture.yml`）。
+  没有 bypass actor：这六道红了，管理员也合不进。
+- `Kernel architecture test` 测的是「主干 + 本 PR」合并后的代码，只在推送时按当时的主干算一次，
+  主干后来变了不会自己重跑（规则集不要求分支先跟上主干）。所以 A 级 PR 手动 `--admin` 合并前，
+  先 `gh pr update-branch`，等这道检查在最新主干上重新变绿再合。
 - **`Risk gate`**（新建的独立规则集）：只含必过检查 `Risk gate`；bypass actor =
   Repository admin。之所以单列：`--admin` 只绕过把你列为 bypass 的那个规则集，
-  `Protect main` 的五道照样拦。
+  `Protect main` 的六道照样拦。
 - **关闭条件（写死）**：B3 签字自动写入上线、`ME_SIGNOFF_TRUSTED_LOGINS` 指向独立机器身份后，
   撤掉 `Risk gate` 规则集的 bypass（或把它并入 `Protect main`）。不撤，这个口子永久存在。
 - 环境 `merge-authorization` 已无 workflow 引用，可删。
