@@ -7,8 +7,8 @@
  * ticket.
  *
  * It is intentionally NOT the same as `canonicalUrl` in
- * `src/lib/seo-patrol/page-signals.ts` (drops the whole query string, used by
- * the patrol) — different purpose, do not merge.
+ * `src/lib/url/canonical-url.ts` (drops the whole query string, used by the
+ * patrol and the card persister to compare) — different purpose, do not merge.
  *
  * It is also not `src/lib/site-audit/canonical-inventory/url-rules.ts`
  * (inventory identity: https only, www not merged), which is why the
