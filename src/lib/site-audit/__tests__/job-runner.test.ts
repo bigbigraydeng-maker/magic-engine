@@ -497,6 +497,64 @@ describe('JobRunner', () => {
       expect(result.completed_at).toBeTruthy()
     })
 
+    it('stores failed_urls when a normal run had page failures', async () => {
+      const mockSelect = vi.fn().mockResolvedValue({
+        data: null,
+        error: null,
+      })
+
+      const mockEq = vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          single: mockSelect,
+        }),
+      })
+
+      const mockUpdate = vi.fn().mockReturnValue({
+        eq: mockEq,
+      })
+
+      vi.mocked(mockSupabase.from).mockReturnValue({
+        update: mockUpdate,
+      } as any)
+
+      await jobRunner.completeJob('job-123', ['https://example.com/blocked'])
+
+      expect(mockUpdate).toHaveBeenCalledOnce()
+      expect(mockUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'completed',
+          failed_urls: ['https://example.com/blocked'],
+        })
+      )
+    })
+
+    it('defaults failed_urls to an empty list', async () => {
+      const mockSelect = vi.fn().mockResolvedValue({
+        data: null,
+        error: null,
+      })
+
+      const mockEq = vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          single: mockSelect,
+        }),
+      })
+
+      const mockUpdate = vi.fn().mockReturnValue({
+        eq: mockEq,
+      })
+
+      vi.mocked(mockSupabase.from).mockReturnValue({
+        update: mockUpdate,
+      } as any)
+
+      await jobRunner.completeJob('job-123')
+
+      expect(mockUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ failed_urls: [] })
+      )
+    })
+
     it('should throw error when job_id is missing', async () => {
       await expect(jobRunner.completeJob('')).rejects.toThrow(
         'Job ID is required'

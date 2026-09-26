@@ -136,7 +136,13 @@ export class JobRunner {
     return data as SiteAuditJob
   }
 
-  async completeJob(jobId: string): Promise<SiteAuditJob> {
+  /**
+   * Mark a job completed. `failedUrls` are the pages that could not be crawled
+   * or stored in this run (a normal completion can still have some) — they are
+   * saved to `failed_urls` so the audit panel's error count reflects reality
+   * instead of always showing 0 on completed jobs.
+   */
+  async completeJob(jobId: string, failedUrls: string[] = []): Promise<SiteAuditJob> {
     if (!jobId) throw new Error('Job ID is required')
 
     const { data, error } = await this.supabase
@@ -144,6 +150,7 @@ export class JobRunner {
       .update({
         status: 'completed' as JobStatus,
         completed_at: new Date().toISOString(),
+        failed_urls: failedUrls,
       })
       .eq('id', jobId)
       .select()

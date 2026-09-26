@@ -22,6 +22,11 @@ import {
   type NotIndexedRow,
   type ManualItem,
 } from '../manual-items'
+import {
+  buildCrawlHealthItems,
+  SITE_FIREWALL_ALLOWLIST_SOP_URL,
+  type CrawlHealthRow,
+} from '../manual-item-types'
 import { buildTodoEmail, type TodoCounts } from '../daily-todo'
 
 describe('gscInspectUrl', () => {
@@ -462,12 +467,16 @@ describe('buildNotIndexedItems — 谷歌没收录的页面按客户汇总，别
     index_verdict: 'Crawled - currently not indexed',
     first_not_indexed_at: '2026-08-01T00:00:00Z',
     word_count: 800,
+    crawl_status: null,
+    crawled_at: null,
     ...over,
   })
 
+  const CLEAN = { crawl_status: 'crawled', crawled_at: '2026-09-01T00:00:00Z' } as const
+
   it('🔴 116 + 6 个未收录页面 → 只出 2 条（每客户一条），不是 122 条', () => {
     const oztop: NotIndexedRow[] = [
-      ...Array.from({ length: 55 }, (_, i) => page('oztop', i, { word_count: 120 })), // 内容太薄
+      ...Array.from({ length: 55 }, (_, i) => page('oztop', i, { word_count: 120, ...CLEAN })), // 内容太薄
       ...Array.from({ length: 6 }, (_, i) => page('oztop', 100 + i, { index_verdict: 'URL is unknown to Google' })),
       ...Array.from({ length: 55 }, (_, i) => page('oztop', 200 + i)), // 爬过没收录
     ]
@@ -478,13 +487,14 @@ describe('buildNotIndexedItems — 谷歌没收录的页面按客户汇总，别
     const oz = items.find((i) => i.client_name === 'oztop')!
     expect(oz.kind).toBe('not_indexed')
     expect(oz.what).toContain('116 个页面')
-    expect(oz.what).toContain('55 个内容太薄')
-    expect(oz.what).toContain('6 个谷歌还不认识')
-    expect(oz.what).toContain('55 个谷歌爬过却没收录')
+    expect(oz.what).toContain('55 个谷歌爬过没收且正文可能偏薄')
+    expect(oz.what).toContain('6 个谷歌还不认识这个网址')
+    expect(oz.what).toContain('55 个谷歌爬过但暂不收')
+    expect(oz.what).not.toContain('爬过却没收录')
     // 🔴 链接落到 ME 站内页面清单（已带 ?filter=not-indexed 直达未收录）——
     //    GSC 网页报告不显示本地「内容太薄」分类、「谷歌还不认识」的页面也可能不在其清单里（Codex #1375）
     expect(oz.href).toBe('https://app.magicengine.com.au/dashboard/clients/oztop/site-audit/pages?filter=not-indexed')
-    expect(oz.how).toContain('索引')
+    expect(oz.how).toContain('别反复点请求收录')
   })
 
   it('资产文件（图片/PDF）不算页面，不计进去', () => {
@@ -505,6 +515,65 @@ describe('buildNotIndexedItems — 谷歌没收录的页面按客户汇总，别
 
   it('空输入 → 一条都不出', () => {
     expect(buildNotIndexedItems([], siteUrls, nameOf, NOW)).toEqual([])
+  })
+
+  it('跳转页 / 备用页只报一句「不用管」，不算进待办；只剩它们的客户不出待办', () => {
+    const onlyRedirects: NotIndexedRow[] = [
+      page('cts', 1, { index_verdict: 'Page with redirect' }),
+      page('cts', 2, { index_verdict: 'Alternate page with proper canonical tag' }),
+    ]
+    expect(buildNotIndexedItems(onlyRedirects, siteUrls, nameOf, NOW)).toEqual([])
+
+    const mixed: NotIndexedRow[] = [
+      page('cts', 1, { index_verdict: 'Page with redirect', first_not_indexed_at: '2026-06-01T00:00:00Z' }),
+      page('cts', 2, { index_verdict: 'Duplicate without user-selected canonical' }),
+    ]
+    const [item] = buildNotIndexedItems(mixed, siteUrls, nameOf, NOW)
+    expect(item.what).toContain('1 个页面')
+    expect(item.what).toContain('1 个谷歌判成了重复页')
+    expect(item.what).toContain('另 1 个是正常跳转或备用页，不用管')
+    // the redirect row's older date must not drive "最久的已 N 天"
+    expect(item.what).toContain('最久的已 34 天')
+  })
+
+  it('没拿到谷歌结论（ME 兜底 UNKNOWN）的行不算进总数，单独一句', () => {
+    const rows: NotIndexedRow[] = [
+      page('oztop', 1, { index_verdict: 'UNKNOWN' }),
+      page('oztop', 2, { index_verdict: 'Crawled - currently not indexed' }),
+    ]
+    const [item] = buildNotIndexedItems(rows, siteUrls, nameOf, NOW)
+    expect(item.what).toContain('1 个页面没被谷歌收录')
+    expect(item.what).toContain('1 个还没拿到谷歌的结论，下一轮会重查')
+  })
+
+  it('🔴 被防火墙挡住的行（字数是假的）不判「正文可能偏薄」', () => {
+    const rows: NotIndexedRow[] = [
+      page('oztop', 1, { word_count: 59, crawl_status: 'antibot_challenged', crawled_at: '2026-09-01T00:00:00Z' }),
+    ]
+    const [item] = buildNotIndexedItems(rows, siteUrls, nameOf, NOW)
+    expect(item.what).toContain('1 个谷歌爬过但暂不收')
+    expect(item.what).not.toContain('偏薄')
+  })
+
+  it('🔴 谷歌还没爬的（Discovered）不许说成「爬过」', () => {
+    const rows: NotIndexedRow[] = [
+      page('oztop', 1, { index_verdict: 'Discovered - currently not indexed', word_count: 59, ...CLEAN }),
+    ]
+    const [item] = buildNotIndexedItems(rows, siteUrls, nameOf, NOW)
+    expect(item.what).toContain('1 个谷歌发现了但还没来爬')
+    expect(item.what).not.toContain('爬过')
+  })
+
+  it('报数顺序：先报改了就能好的（打不开 / 写了别收录），再报谷歌排队的', () => {
+    const rows: NotIndexedRow[] = [
+      page('oztop', 1, { index_verdict: 'Discovered - currently not indexed' }),
+      page('oztop', 2, { index_verdict: "Excluded by ‘noindex’ tag" }),
+      page('oztop', 3, { index_verdict: 'Not found (404)' }),
+    ]
+    const [item] = buildNotIndexedItems(rows, siteUrls, nameOf, NOW)
+    const w = item.what
+    expect(w.indexOf('页面打不开或被挡')).toBeLessThan(w.indexOf('页面自己写了「别收录」'))
+    expect(w.indexOf('页面自己写了「别收录」')).toBeLessThan(w.indexOf('谷歌发现了但还没来爬'))
   })
 })
 
@@ -546,6 +615,49 @@ describe('loadManualItems — 未收录读失败被隔离，不清空整条人�
     const all = await loadManualItems(stub, NOW)
     expect(Array.isArray(all)).toBe(true)
     expect(all.some((i) => i.kind === 'not_indexed')).toBe(false)
+  })
+
+  it('🔴 未收录取数必须带上 crawl_status 和 crawled_at（漏列会让「偏薄」悄悄全变成别的类）', async () => {
+    const NOW = new Date('2026-09-04T00:00:00Z')
+    const empty = new Proxy({} as Record<string, unknown>, {
+      get(_t, prop) {
+        if (prop === 'then')
+          return (res: (v: unknown) => unknown) =>
+            Promise.resolve({ data: [], error: null }).then(res)
+        if (prop === 'single' || prop === 'maybeSingle') return async () => ({ data: null, error: null })
+        return () => empty
+      },
+    })
+    const clientsQuery = {
+      select: () => clientsQuery,
+      eq: () => clientsQuery,
+      order: () => clientsQuery,
+      range: async () => ({ data: [{ id: 'c1', name: 'CTS Tours NZ', domain: 'x' }], error: null }),
+    }
+    const selects: string[] = []
+    const csp: Record<string, unknown> = {}
+    for (const m of ['not', 'in', 'order']) csp[m] = () => csp
+    csp.select = (cols: string) => {
+      selects.push(cols)
+      return csp
+    }
+    csp.limit = async () => ({ data: [], error: null })
+    csp.range = async () => ({ data: [], error: null })
+    const stub = {
+      from: (table: string) => {
+        if (table === 'clients') return clientsQuery
+        if (table === 'client_site_pages') return csp
+        return empty
+      },
+    } as unknown as SupabaseClient
+
+    await loadManualItems(stub, NOW)
+
+    expect(
+      selects.some(
+        (s) => s.includes('first_not_indexed_at') && s.includes('crawl_status') && s.includes('crawled_at'),
+      ),
+    ).toBe(true)
   })
 })
 
@@ -1176,5 +1288,75 @@ describe('assertAbsoluteHref (fail-fast on relative href)', () => {
     const { kept, dropped } = await dropBrokenLinks([item])
     expect(dropped).toEqual([])
     expect(kept.map((i) => i.href)).toEqual([item.href])
+  })
+})
+
+describe('buildCrawlHealthItems — 站点数据健康：只认真抓到的，被挡单独下发', () => {
+  const NOW = new Date('2026-09-26T00:00:00Z')
+  const nameOf = (id: string) => id
+
+  const row = (
+    client_id: string,
+    over: Partial<CrawlHealthRow> = {},
+  ): CrawlHealthRow => ({
+    client_id,
+    crawled_at: null,
+    crawl_status: null,
+    ...over,
+  })
+
+  it('🔴 被挡页刷新了抓取时间也不许把「数据过期」告警静音', () => {
+    const items = buildCrawlHealthItems(
+      [
+        row('oztop', { crawl_status: 'crawled', crawled_at: '2026-09-01T00:00:00Z' }),
+        row('oztop', { crawl_status: 'antibot_challenged', crawled_at: '2026-09-25T00:00:00Z' }),
+      ],
+      nameOf,
+      NOW,
+    )
+
+    const stale = items.find((i) => i.kind === 'crawl_stale')
+    expect(stale?.client_id).toBe('oztop')
+    expect(stale?.what).toContain('25 天没更新')
+
+    const blocked = items.find((i) => i.kind === 'crawl_blocked')
+    expect(blocked?.what.startsWith('1 个页面被客户网站的防火墙挡住')).toBe(true)
+    expect(blocked?.href).toBe(SITE_FIREWALL_ALLOWLIST_SOP_URL)
+  })
+
+  it('fresh real crawl and nothing blocked → no items', () => {
+    const items = buildCrawlHealthItems(
+      [row('cts', { crawl_status: 'crawled', crawled_at: '2026-09-24T00:00:00Z' })],
+      nameOf,
+      NOW,
+    )
+    expect(items).toEqual([])
+  })
+
+  it('only blocked rows (never a real crawl) → crawl_blocked only, no crawl_stale', () => {
+    const items = buildCrawlHealthItems(
+      [
+        row('x', { crawl_status: 'antibot_challenged', crawled_at: '2026-09-25T00:00:00Z' }),
+        row('x', { crawl_status: 'antibot_challenged', crawled_at: '2026-09-24T00:00:00Z' }),
+      ],
+      nameOf,
+      NOW,
+    )
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('crawl_blocked')
+    expect(items[0].what.startsWith('2 个页面')).toBe(true)
+  })
+
+  it('rows with crawl_status pending / failed do not count as fresh', () => {
+    const items = buildCrawlHealthItems(
+      [
+        row('y', { crawl_status: 'crawled', crawled_at: '2026-09-01T00:00:00Z' }),
+        row('y', { crawl_status: 'failed', crawled_at: '2026-09-25T00:00:00Z' }),
+      ],
+      nameOf,
+      NOW,
+    )
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('crawl_stale')
   })
 })

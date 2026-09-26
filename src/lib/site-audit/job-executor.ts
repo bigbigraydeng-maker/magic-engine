@@ -102,7 +102,8 @@ export async function crawlAndClassifyPages(
     // stored as `title="Robot Challenge Screen"` because we trusted Jina's
     // output even when it relayed the WAF interstitial verbatim.
     if (crawl.antibot) {
-      failed.push({ url: crawl.url, error: crawl.error ?? `antibot_${crawl.antibot.kind}` })
+      const failure = { url: crawl.url, error: crawl.error ?? `antibot_${crawl.antibot.kind}` }
+      failed.push(failure)
       crawledCount++
       let pagePath = '/'
       try { pagePath = new URL(crawl.url).pathname } catch { /* keep default */ }
@@ -112,7 +113,7 @@ export async function crawlAndClassifyPages(
       // — Supabase upsert with onConflict only overwrites the columns we
       // include, so previously-captured real data on this URL stays put.
       try {
-        await supabase
+        const { error: markError } = await supabase
           .from('client_site_pages')
           .upsert(
             {
@@ -126,8 +127,17 @@ export async function crawlAndClassifyPages(
             },
             { onConflict: 'client_id,url' },
           )
-      } catch {
-        // Don't block the batch on a single upsert failure
+        if (markError) {
+          // supabase-js returns write errors instead of throwing. Until 2026-09-26
+          // this branch ignored them, and a DB constraint rejected every mark.
+          console.error('[site-audit] could not mark anti-bot page', crawl.url, markError.message)
+          failure.error = `${failure.error}; mark failed: ${markError.message}`
+        }
+      } catch (err) {
+        // Don't block the batch on a single upsert failure — but record it.
+        const message = err instanceof Error ? err.message : String(err)
+        console.error('[site-audit] could not mark anti-bot page', crawl.url, message)
+        failure.error = `${failure.error}; mark failed: ${message}`
       }
       if ((i + 1) % PROGRESS_UPDATE_INTERVAL === 0) {
         await runner.updateProgress(jobId, {
@@ -299,7 +309,7 @@ export async function executeJob(
       totalUrlsCrawled: successful.length + failed.length,
       totalPagesClassified: successful.length,
     })
-    await runner.completeJob(jobId)
+    await runner.completeJob(jobId, failed.map((f) => f.url))
   } catch (err) {
     // 5b. Fail on unrecoverable error
     const message = err instanceof Error ? err.message : String(err)
