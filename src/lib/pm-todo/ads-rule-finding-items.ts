@@ -1,5 +1,5 @@
 /**
- * 每日广告巡检的广告级规则（D2 素材疲劳 / D10 点进去之后差了）→ 下发到「需要你动手」。
+ * 每日广告巡检的广告级规则（D2 素材疲劳 / D10 点进去之后差了 / D11 再营销受众池断供）→ 下发到「需要你动手」。
  *
  * 只读：只读 `ads_growth_states`、生成待办；系统不会自动改广告。
  * 同一条广告同一个问题按 remind-cadence 节奏提醒（前 3 天每天、之后只周日），不天天刷屏。
@@ -70,9 +70,14 @@ function groupByClient(rows: readonly GrowthStateRow[]): Map<string, GrowthState
   return byClient
 }
 
-/** D10 在前、D2 在后，组内保持原顺序。 */
+/** D10 在前、D2 次之、D11 再次，其余最后；同 rank 内保持原顺序（sort 稳定）。 */
 function orderCandidates(findings: readonly RuleFinding[]): RuleFinding[] {
-  const rank = (f: RuleFinding): number => (f.code === 'D10' ? 0 : 1)
+  const rank = (f: RuleFinding): number => {
+    if (f.code === 'D10') return 0
+    if (f.code === 'D2') return 1
+    if (f.code === 'D11') return 2
+    return 3
+  }
   return [...findings].sort((a, b) => rank(a) - rank(b))
 }
 
@@ -122,7 +127,7 @@ function buildHow(kept: readonly RuleFinding[]): string {
  * 每个客户：按日期倒序；最新一行必须在 ADS_RULE_STALE_DAYS 天内（拿 YYYY-MM-DD 跟 now 的 UTC 日期比）
  * 且 payload.dataCompleteness 不是 'partial'，否则跳过。
  * 候选 = 最新一行里 ruleHits 且有 findingKey 的，保留 shouldRemindToday(streakFor(key, rows), 0, now) 为真的。
- * 顺序：D10 在前、D2 在后，组内保持原顺序。
+ * 顺序：D10 → D2 → D11，组内保持原顺序。
  */
 export function buildAdsRuleFindingItems(
   rows: readonly GrowthStateRow[],
@@ -148,7 +153,7 @@ export function buildAdsRuleFindingItems(
         kind: 'ads_rule_finding',
         client_id: clientId,
         client_name: nameOf(clientId),
-        what: `${kept.length} 条广告需要你看一眼：${kept[0].title}`,
+        what: `${kept.length} 件广告的事需要你看一眼：${kept[0].title}`,
         how: buildHow(kept),
         href: adsHealthHref(clientId),
       })

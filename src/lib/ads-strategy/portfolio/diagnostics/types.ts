@@ -18,7 +18,7 @@ import type { OutcomeConfig } from '../outcome-ladder'
  * 两者形状完全相同、走同一条日报和看板管道；区别只在 code 前缀和 clientVisible 默认值。
  */
 export type DiagnosisCode =
-  | 'D1' | 'D2' | 'D3' | 'D4' | 'D5' | 'D6' | 'D7' | 'D8' | 'D9' | 'D10'
+  | 'D1' | 'D2' | 'D3' | 'D4' | 'D5' | 'D6' | 'D7' | 'D8' | 'D9' | 'D10' | 'D11'
   | 'O1' | 'O2' | 'O3' | 'O4'
 export type DiagnosisStatus = 'hit' | 'not_comparable'
 
@@ -122,6 +122,13 @@ export interface SettingChange {
   captured_at: string
 }
 
+/** 某个受众某次抓取时的人数下限（Meta 显示值，按百取整；≤1000 = 显示下限，判不了）。 */
+export interface AudienceCountPoint {
+  entity_id: string
+  captured_at: string
+  audience_count_lower: number | null
+}
+
 /** 某天某小时（账户时区）某广告组的花费。不入库，只在 D1 预筛命中后按需拉。 */
 export interface HourlyRow {
   adset_id: string | null
@@ -163,6 +170,11 @@ export interface AccountInput {
   adDaily?: DailyRow[]
   /** 近 35 天的设置变更（D2/D10「最近改过」闸）。缺省 = 没加载。 */
   settingChanges?: SettingChange[]
+  /**
+   * 近 35 天受众人数快照（D11 受众池断供用）：从已读的快照里抽 level='audience'、非「消失」行，不加查询。
+   * 缺省 = 没加载 → D11 不跑。
+   */
+  audienceHistory?: AudienceCountPoint[]
 }
 
 export interface DiagnosisInput {

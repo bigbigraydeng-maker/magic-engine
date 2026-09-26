@@ -15,7 +15,7 @@ import type { EntitySnapshotRow } from '../snapshot'
 import { loadOutcomeConfig } from '../outcome-config'
 import { buildAccountContext, localDayEndUtc, shiftDate } from './context'
 import { d1NeedsHourly } from './d1-delivery-stall'
-import type { AccountInput, CaptureCoverage, DailyRow, DiagnosisInput, HourlyRow, SettingChange } from './types'
+import type { AccountInput, AudienceCountPoint, CaptureCoverage, DailyRow, DiagnosisInput, HourlyRow, SettingChange } from './types'
 import { D1_REPEAT_LOOKBACK_DAYS } from './thresholds'
 
 const PAGE = 1000
@@ -168,6 +168,9 @@ async function loadAccount(clientId: string, adAccountId: string, shared: boolea
   ])
 
   const settingChanges = realSettingChanges(snapshots)
+  const audienceHistory: AudienceCountPoint[] = snapshots
+    .filter(r => r.level === 'audience' && r.capture_reason !== 'disappeared')
+    .map(r => ({ entity_id: r.entity_id, captured_at: r.captured_at, audience_count_lower: r.audience_count_lower }))
 
   const account: AccountInput = {
     adAccountId, shared, timezone, currency,
@@ -185,6 +188,7 @@ async function loadAccount(clientId: string, adAccountId: string, shared: boolea
     lastInsightDate: (lastRow.data as { insight_date: string } | null)?.insight_date ?? null,
     adDaily: shared ? undefined : await loadAdDaily(clientId, adAccountId, date),
     settingChanges,
+    audienceHistory,
   }
 
   if (d1NeedsHourly(buildAccountContext(account, date))) {

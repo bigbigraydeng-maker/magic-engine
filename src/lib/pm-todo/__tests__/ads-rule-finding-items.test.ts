@@ -23,6 +23,21 @@ function hit(code: 'D2' | 'D10' | 'D3', adId: string, title = `${code} ${adId}`)
   }
 }
 
+function d11(audienceId: string, title = `D11 ${audienceId}`): RuleFinding {
+  return {
+    code: 'D11',
+    status: 'hit',
+    title,
+    units: [{ level: 'adset', id: 'rt1', name: 'rt1' }],
+    evidence: { audience_id: audienceId },
+    reasons: [
+      '开顶层视频广告给这个池子补新人（新增花费，要你点头才开，系统不会自动开）。',
+      '止损：14 天后（约 2026-10-09）回头看——池子有没有开始长',
+    ],
+    clientVisible: false,
+  }
+}
+
 function row(
   clientId: string,
   date: string,
@@ -135,7 +150,7 @@ describe('buildAdsRuleFindingItems', () => {
     expect(item.client_name).toBe('name-c1')
     expect(item.href).toBe('https://app.magicengine.com.au/dashboard/clients/c1/ads-health')
     expect(item.href.startsWith('https://')).toBe(true)
-    expect(item.what).toContain('1 条广告')
+    expect(item.what).toContain('1 件广告的事')
     expect(item.what).toContain('D10 ad1')
     expect(item.how).toContain('怎么办：建议这样做')
     expect(item.how).toContain('止损：')
@@ -272,5 +287,79 @@ describe('buildAdsRuleFindingItems', () => {
     expect(byClient.get('c2')?.href).toBe(
       'https://app.magicengine.com.au/dashboard/clients/c2/ads-health',
     )
+  })
+})
+
+describe('D11 audience pool starved', () => {
+  it('keys on the audience id, not on units', () => {
+    expect(findingKey(d11('aud1'))).toBe('D11:aud1')
+
+    const reversed: RuleFinding = {
+      ...d11('aud1'),
+      units: [
+        { level: 'adset', id: 'rt1', name: 'rt1' },
+        { level: 'campaign', id: 'c_rt', name: 'c_rt' },
+      ],
+    }
+    expect(findingKey(reversed)).toBe('D11:aud1')
+
+    const noUnits: RuleFinding = { ...d11('aud1'), units: undefined }
+    expect(findingKey(noUnits)).toBe('D11:aud1')
+
+    const noEvidence: RuleFinding = { ...d11('aud1'), evidence: undefined }
+    expect(findingKey(noEvidence)).toBeNull()
+
+    expect(findingKey(hit('D2', 'ad2'))).toBe('D2:ad2')
+  })
+
+  it('produces one item for a two-day D11 streak', () => {
+    const rows = [
+      row('c1', '2026-09-24', [d11('aud1')]),
+      row('c1', '2026-09-23', [d11('aud1')]),
+    ]
+    const now = new Date('2026-09-25T19:00:00Z')
+    const items = buildAdsRuleFindingItems(rows, now, nameOf)
+
+    expect(items).toHaveLength(1)
+    expect(items[0].what.startsWith('1 件广告的事需要你看一眼')).toBe(true)
+    expect(items[0].how).toContain('要你点头才开')
+    expect(items[0].how).toContain('止损：14 天后')
+  })
+
+  it('a D11 present only on the newest row produces no item', () => {
+    const rows = [
+      row('c1', '2026-09-24', [d11('aud1')]),
+      row('c1', '2026-09-23', []),
+    ]
+    const now = new Date('2026-09-25T19:00:00Z')
+    expect(buildAdsRuleFindingItems(rows, now, nameOf)).toEqual([])
+  })
+
+  it('two pools on the same adset do not collide', () => {
+    const rows = [
+      row('c1', '2026-09-24', [d11('aud1'), d11('aud2')]),
+      row('c1', '2026-09-23', [d11('aud1'), d11('aud2')]),
+    ]
+    const now = new Date('2026-09-25T19:00:00Z')
+    const items = buildAdsRuleFindingItems(rows, now, nameOf)
+
+    expect(items).toHaveLength(1)
+    expect(items[0].how).toContain('D11 aud1')
+    expect(items[0].how).toContain('D11 aud2')
+  })
+
+  it('orders D10 before D2 before D11', () => {
+    const rows = [
+      row('c1', '2026-09-24', [d11('aud1'), hit('D2', 'a'), hit('D10', 'b')]),
+      row('c1', '2026-09-23', [d11('aud1'), hit('D2', 'a'), hit('D10', 'b')]),
+    ]
+    const now = new Date('2026-09-25T19:00:00Z')
+    const items = buildAdsRuleFindingItems(rows, now, nameOf)
+
+    expect(items).toHaveLength(1)
+    const bullets = items[0].how.split('\n').filter((l) => l.startsWith('• '))
+    expect(bullets[0]).toContain('D10 b')
+    expect(bullets[1]).toContain('D2 a')
+    expect(bullets[2]).toContain('D11 aud1')
   })
 })
