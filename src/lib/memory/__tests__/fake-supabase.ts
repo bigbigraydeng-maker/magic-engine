@@ -100,8 +100,15 @@ export function makeFakeSupabase(db: FakeDb, options: FakeOptions = {}): Supabas
       if (orderBy) {
         const { col, ascending } = orderBy
         rows.sort((a, b) => {
-          const av = String(a[col] ?? '')
-          const bv = String(b[col] ?? '')
+          // Postgres default: NULLS LAST when ascending, NULLS FIRST when descending.
+          const aNull = a[col] === null || a[col] === undefined
+          const bNull = b[col] === null || b[col] === undefined
+          if (aNull || bNull) {
+            if (aNull && bNull) return 0
+            return (aNull ? 1 : -1) * (ascending ? 1 : -1)
+          }
+          const av = String(a[col])
+          const bv = String(b[col])
           return ascending ? (av < bv ? -1 : av > bv ? 1 : 0) : (av > bv ? -1 : av < bv ? 1 : 0)
         })
       }
