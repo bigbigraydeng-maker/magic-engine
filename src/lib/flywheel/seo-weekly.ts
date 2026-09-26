@@ -48,6 +48,16 @@ export const FLYWHEEL_SEO_WEEKLY_JOB = 'flywheel-seo-weekly'
  */
 export const PROVIDER_CALLS_PER_CLIENT = 2
 
+/**
+ * 每周快照**付费写入**的那几行在 `flywheel_metrics.source` 里的标记。
+ *
+ * 标记名 'semrush' 是历史遗留（数据其实来自 DataForSEO 的 domain_rank_overview +
+ * backlinks/summary），为了跟已有的行和读方对得上而保留。写入方
+ * （`SeoContentAdapter.pullMetrics`）和防重复扣费闸（`recentlySnapshotted`）都读这一个常量，
+ * 两边永远一致。
+ */
+export const SEO_WEEKLY_PAID_SOURCE = 'semrush'
+
 /** 派单名单里的一条。 */
 export interface SnapshotRosterEntry {
   readonly clientId: string
@@ -137,6 +147,11 @@ export function isoWeekKey(date: Date): string {
  * 新建表要走 migration（不可逆、要 PM 拍板），而这张表本来就是这条链路的产物，
  * 「有没有本周的数据」跟「要不要再花一次钱」问的是同一件事。
  *
+ * 🔴 **只看本快照自己付费写的那几行**（`source = SEO_WEEKLY_PAID_SOURCE`）。
+ *    每天的 GSC / GA4 回拉也往这张表写 `flywheel = 'seo'` 的行；旧判据把它们当成
+ *    「这周扫过了」，2026-09 的 W37–W39 三周两个客户全部 skipped、一行没写（生产实查）。
+ *    博客篇数那一行（`source = 'blog_posts'`）不花钱，也不算。
+ *
  * 🔴 **查不出来一律当成「扫过了」**（fail-closed 往不花钱的方向倒）。
  *    反过来写就是：数据库一抽风，全体客户当场多付一轮。宁可这周少一次数据。
  */
@@ -151,6 +166,7 @@ export async function recentlySnapshotted(
     .select('measured_at')
     .eq('client_id', clientId)
     .eq('flywheel', 'seo')
+    .eq('source', SEO_WEEKLY_PAID_SOURCE)
     .gte('measured_at', cutoff)
     .order('measured_at', { ascending: false })
     .limit(1)
