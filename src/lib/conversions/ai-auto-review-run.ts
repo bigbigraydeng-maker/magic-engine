@@ -82,6 +82,11 @@ export type RunSummary =
   | { ran: false; reason: 'disabled' | 'circuit_breaker_tripped' | 'error'; detail?: string }
   | {
       ran: true
+      /**
+       * 本块处理的总条数 = 直接判过期清掉的（`expired`）+ 交给 AI 判的。两者共用单轮上限，
+       * 流水线拿它跟块大小比来决定还要不要跑下一块；想看「AI 真判了几条」请用
+       * approved + rejected + uncertain，别直接看这个数。
+       */
       processed: number
       approved: number
       /** 本次批准的金额合计（分）——给下一块当硬顶起点用，见 `RunOptions.carried`。 */
