@@ -199,6 +199,18 @@ describe('失败时的扣费',()=>{
     expect(safeCharge(undefined,0.12)).toBe(0.12)
   })
 
+  it('成功但用量缺失（NaN）时按预留扣，不把 NaN 写进额度表（NaN 发到库里会变成空值，把已花额度加成空）',async()=>{
+    mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
+      if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'NZD',timezone_name:'Pacific/Auckland' }
+      if(params.level==='account') return { data:[{ spend:'100',impressions:'1000',clicks:'20' }] }
+      return { data:[] }
+    })
+    mocks.callClaudeChat.mockResolvedValue({ text:'中文报告',input_tokens:500,output_tokens:200,cost_usd:Number.NaN,stop_reason:'end_turn' })
+    const result=await generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id)
+    expect(result.status).toBe('completed')
+    expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_finish_sponsored_analysis',expect.objectContaining({ final_status:'completed',charged_usd:0.12 }))
+  })
+
   it('截断且用量为 NaN 时按预留扣，不把 NaN 写进额度表',async()=>{
     mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
       if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'NZD',timezone_name:'Pacific/Auckland' }
