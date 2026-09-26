@@ -47,14 +47,16 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      # 用 A 级路径里的专用配置跑，不走根目录的 vitest.config.ts / vitest.setup.ts：那两个是 B 级文件，
+      # 改它们就能把这个测试排除掉、换成路径相似的诱饵文件、或在 setup 里把断言改成空操作。
       - name: Run kernel architecture test
         env:
           RESULTS: ${{ runner.temp }}/kernel-architecture-results.json
         run: >-
-          npx vitest run src/lib/kernel/__tests__/architecture.test.ts
+          npx vitest run --config src/lib/kernel/__tests__/vitest.architecture.config.ts
           --reporter=verbose --reporter=json --outputFile.json="$RESULTS"
-      # 光看退出码不够：vitest.config.ts / vitest.setup.ts 不在 A 级路径里，一个 B 级 PR 加一条
-      # exclude + passWithNoTests（或 testNamePattern）就能「一条都没跑也是绿」。所以再数一遍真跑了多少条。
+      # 光看退出码还不够，再核一遍：只跑了那一个真文件、零失败、零跳过、通过数不低于下限。
+      # 下限写成 !(passed >= min)：结果里字段缺了，同样判红，不会因为「比较不成立」被放过。
       - name: Confirm the tests really ran
         env:
           RESULTS: ${{ runner.temp }}/kernel-architecture-results.json
@@ -62,12 +64,18 @@ jobs:
           MIN_PASSED: '181'
         run: |
           node -e '
+            const path = require("path")
             const r = require(process.env.RESULTS)
             const min = Number(process.env.MIN_PASSED)
+            const expected = path.join(process.env.GITHUB_WORKSPACE || process.cwd(), "src/lib/kernel/__tests__/architecture.test.ts")
+            const files = (r.testResults || []).map((t) => t.name)
             const skipped = r.numPendingTests + r.numTodoTests
-            console.log(`passed=${r.numPassedTests} failed=${r.numFailedTests} skipped=${skipped} floor=${min}`)
-            if (r.numFailedTests !== 0 || r.numPassedTests < min) {
-              console.log(`::error::架构测试只跑通了 ${r.numPassedTests} 条（下限 ${min}）：有测试失败、没跑或被跳过。`)
-              process.exit(1)
-            }
+            console.log(`files=${JSON.stringify(files)} passed=${r.numPassedTests} failed=${r.numFailedTests} skipped=${skipped} floor=${min}`)
+            const problems = []
+            if (files.length !== 1 || files[0] !== expected) problems.push(`跑的不是那一个真文件（应当只有 ${expected}）`)
+            if (r.numFailedTests !== 0) problems.push(`有 ${r.numFailedTests} 条失败`)
+            if (skipped !== 0) problems.push(`有 ${skipped} 条被跳过（skip / todo / 名字过滤）`)
+            if (!(r.numPassedTests >= min)) problems.push(`只跑通了 ${r.numPassedTests} 条（下限 ${min}）`)
+            for (const p of problems) console.log(`::error::架构测试没有完整跑过：${p}`)
+            if (problems.length > 0) process.exit(1)
           '

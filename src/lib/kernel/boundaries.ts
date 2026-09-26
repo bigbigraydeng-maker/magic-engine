@@ -76,9 +76,10 @@ export const PROVIDER_WRITE_GRANDFATHERED = [
   'src/lib/flywheel/social-post-publish.ts',
   'src/lib/luban/tools.ts',
   'src/lib/seo-meta/cts-meta-pr.ts',
-  // ⏳ 临时豁免，不是历史存量（2026-09-27 子牙拍板）。CTS 标题周循环 v1（9ea7af58，2026-09-20）
+  // ⏳ 临时豁免，不是历史存量（2026-09-27 子牙拍板）。SEO 标题周循环 v1（9ea7af58，2026-09-20）
   //    进主干时没有任何 CI 跑这个测试，于是这三个文件绕过执行内核直接用 github-client，
-  //    能在客户网站仓库里建分支、开 PR、合并，全程不经 Kernel 授权、不留回执。
+  //    能在客户网站仓库里建分支、开 PR、合并，不经 Kernel 授权、不留 Kernel 回执
+  //    （周循环自己的步骤回执 cycle/receipts.ts 不能替代 Kernel 的授权与回执）。
   //    🔴 type-only 不等于无害：apply-adapter 只 `import type`，却用注入进来的 client 真的在写客户仓库。
   //    退出条件：SEO 第 3 条 3b 的 B7 把 seo-meta 的对外写挪到 Kernel 后面（src/lib/capabilities/ +
   //    Kernel 授权 + 回执）。挪完这三条连同 .eslintrc.json、测试冻结清单里的同名三行一起删。
@@ -266,7 +267,7 @@ export const KERNEL_RUNNER_SYMBOLS = [
  *
  * ⚠️ 往这个清单里加版本号 = 又放进一次撞车。加之前先把自己的文件改个号。
  *
- * 版本号集合与这些版本号下的文件总数由 `__tests__/architecture.test.ts` 钉住。
+ * 版本号集合与每个版本号下的文件数由 `__tests__/architecture.test.ts` 钉住。
  */
 export const MIGRATION_VERSION_COLLISIONS_GRANDFATHERED = [
   '20260501000008',
