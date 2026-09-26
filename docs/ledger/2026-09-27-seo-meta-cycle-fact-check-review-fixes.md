@@ -4,9 +4,9 @@ title: SEO Meta-Cycle 事实核对闸门 5+4 条审查缺陷修复（反向检�
 status: done
 owner: agent
 decided_on: 2026-09-27
-source: session:a67d9f1c pr:1948
+source: pr:1948
 done_on: 2026-09-27
-done_ref: pr:1948 commit:8b64ec80 merge:33e72579
+done_ref: pr:1948
 verify_by: 2026-10-04
 verify_how: 周一 cron 正常跑完无回归；/china-tours 被正确拦截（反向 + 正向事实检查均触发）
 ---
