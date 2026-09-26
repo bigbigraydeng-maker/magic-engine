@@ -224,9 +224,18 @@ export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCoun
       .map(([id, v]) => ({ name: v.name, id, [key]: v.count }))
       .sort((a, b) => a.name.localeCompare(b.name))
 
-  const rawManualItems = await loadManualItems(supabase).catch((err: unknown) => {
-    console.error('[pm-todo] manual items load failed:', err instanceof Error ? err.message : String(err))
-    return [] as ManualItem[]
+  const rawManualItems = await loadManualItems(supabase).catch((err: unknown): ManualItem[] => {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[pm-todo] manual items load failed:', message)
+    // 读挂了不能变成一张空清单 —— 空清单会写成「今天没事」（子牙 2026-09-26 实施后复审）
+    return [{
+      kind: 'todo_items_unreadable',
+      client_id: 'infra',
+      client_name: 'Magic Engine 后台',
+      what: `今日待办的人工待办这一大块整个没读出来（${message.slice(0, 160)}）`,
+      how: '这条不用你动手 —— 是我们这边的欠账，转给开发窗口查',
+      href: '',
+    }]
   })
   // 链接打不开的不下发（PM 2026-08-03：「点过去就是 404，徒增我和 fde 的工作时间」）。
   // 闸本身出问题时原样放行 —— 少过滤好过整栏消失。
@@ -392,7 +401,7 @@ export function collapseManualItems(
     clientName: m.client_name,
     rootCauseKey: laneOf(m) === 'truth'
       ? `single:${i}`
-      : JSON.stringify([m.kind, m.client_id, m.client_name, m.how, hrefPage(m.href)]),
+      : JSON.stringify([laneOf(m), m.kind, m.client_id, m.client_name, m.how, hrefPage(m.href)]),
     label: m.what,
   }))
   const result = reconcile(raw, new Date(0).toISOString())
@@ -426,7 +435,7 @@ const MERGED_SAMPLES = 3
 const SAMPLE_CHARS = 60
 
 function mergedWhat(what: string, count: number): string {
-  return count > 1 ? `共 ${count} 条同类，最早的一条：${what}` : what
+  return count > 1 ? `共 ${count} 条同类，其中一条：${what}` : what
 }
 
 function sampleWhats(items: ManualItem[]): string[] {
@@ -574,7 +583,10 @@ export function buildTodoEmail(weekday: number, counts: TodoCounts, nzDateLabel:
 
   const body = view.sections.length > 0
     ? view.sections.map((sec) => sectionCard(sec.emoji, sec.title, sec.rows.map(rowHtml))).join('')
-    : `<p style="margin:0 0 14px;font-size:14px;color:#059669">今天没有待办 ✅ 没有要你做的事。</p>`
+    : view.blindSpots.length > 0
+      // 有检查没跑成时不许说「没事」—— 列不出来 ≠ 没有
+      ? `<p style="margin:0 0 14px;font-size:14px;color:#92400e">下面没有列出要你做的事，但上面那几项今天没查成，不等于没事。</p>`
+      : `<p style="margin:0 0 14px;font-size:14px;color:#059669">今天没有待办 ✅ 没有要你做的事。</p>`
 
   const note = routedElsewhereNote(view)
   const noteLink = view.routedToDev > 0 || view.cronFailures24h > 0
@@ -599,7 +611,9 @@ export function buildTodoEmail(weekday: number, counts: TodoCounts, nzDateLabel:
   const totalItems = view.totalItems
   const subject = totalItems > 0
     ? `📋 今日待办 · ${ZH_DAYS[weekday]} · ${totalItems} 件`
-    : `📋 今日待办 · ${ZH_DAYS[weekday]} · 无事 ✅`
+    : view.blindSpots.length > 0
+      ? `📋 今日待办 · ${ZH_DAYS[weekday]} · 有检查没跑成 ⚠️`
+      : `📋 今日待办 · ${ZH_DAYS[weekday]} · 无事 ✅`
 
   return { subject, html, totalItems }
 }

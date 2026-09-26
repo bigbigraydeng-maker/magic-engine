@@ -17,6 +17,8 @@ export type LeadSheetItemKind =
   | 'lead_sheet_sync_failed'
   /** 写表被 Google 判 403 —— 授权不够，要人重新走一次「连接 Google」（跟上一条的开发活分开） */
   | 'lead_sheet_reauth_needed'
+  /** 「线索同步到表格」的运行记录整个读不出来 —— 这项检查今天没跑成 */
+  | 'lead_sheet_check_failed'
   | 'lead_sheet_value_unmapped'
   /** 有线索因为拼不出身份没写进表 —— 这些人是真的没到销售手里 */
   | 'lead_sheet_lead_skipped'
@@ -135,7 +137,7 @@ export async function pushLeadSheetItems(
     latest = [...newestPerClient.values()]
   } catch (err) {
     items.push({
-      kind: 'lead_sheet_sync_failed',
+      kind: 'lead_sheet_check_failed',
       client_name: '全系统',
       client_id: '',
       what: `查不到「线索同步到表格」最近跑得怎么样（${err instanceof Error ? err.message : String(err)}），所以现在没法确认线索有没有进客户的表。`,
@@ -262,7 +264,7 @@ export async function pushLeadSheetItems(
     for (const b of buckets.values()) {
       for (const err of b.errors) {
         items.push({
-          kind: 'lead_sheet_sync_failed',
+          kind: isReauthError(err) ? 'lead_sheet_reauth_needed' : 'lead_sheet_sync_failed',
           client_name: clientName,
           client_id: clientId,
           what: `${clientName} 的线索写不进「${b.where}」：${err}。这张表上的新线索现在是缺的。`,

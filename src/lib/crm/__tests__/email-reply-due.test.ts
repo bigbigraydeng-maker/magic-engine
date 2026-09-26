@@ -549,6 +549,12 @@ describe('pickReplyDue —— 陌生来信与 ME 自己的信箱', () => {
     expect(platformOwnDomains()).toContain('magicengine.cloud')
   })
 
+  it('🔴 发信地址被配成公共邮箱时不算自己人 —— 否则全世界的 gmail 客人都会静默消失', () => {
+    expect(platformOwnDomains('someone@gmail.com')).toEqual([])
+    expect(platformOwnDomains('ops@outlook.com')).toEqual([])
+    expect(platformOwnDomains('hello@magicengine.cloud')).toEqual(['magicengine.cloud'])
+  })
+
   it('isEnquiryTouch：手记和机器回执不算，写过信 / 邮件名单 / 别的渠道算', () => {
     const t = (over: Record<string, unknown>) => ({ channel: 'email', direction: 'inbound', source: 'microsoft_mail', metadata: {}, ...over })
     expect(isEnquiryTouch(t({}))).toBe(false)

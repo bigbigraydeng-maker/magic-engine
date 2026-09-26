@@ -56,7 +56,7 @@ import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
 import { contactKindOf, readDomainRules, EMPTY_RULES, type DomainRules } from '@/lib/crm/contact-kind'
 import { isAutoReply } from '@/lib/microsoft/mail-ingest'
 import { fetchAll } from '@/lib/supabase-paginate'
-import { ME_MAIL_FROM_ADDRESS, ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
+import { ME_MAIL_FROM_ADDRESS } from '@/lib/email/sender'
 
 /** 客人来信之后多少小时还没回，就算欠着。PM 2026-09-03 拍板 24 小时。 */
 export const REPLY_SLA_HOURS = 24
@@ -326,15 +326,24 @@ export function isEnquiryTouch(t: {
   return t.direction === 'outbound' && (t.metadata ?? {}).automated !== true
 }
 
-/** ME 自己的信箱域名 —— 对每个客户来说都是「自己人」。 */
-export function platformOwnDomains(): string[] {
-  return Array.from(
-    new Set(
-      [ME_MAIL_FROM_ADDRESS, ME_MAIL_TO_ADDRESS]
-        .map((a) => a.split('@')[1]?.trim().toLowerCase() ?? '')
-        .filter(Boolean),
-    ),
-  )
+/**
+ * 公共邮箱域名 —— 绝不能被当成「ME 自己的域名」。
+ * 发信地址被配成一个 gmail 的话，全世界的 gmail 客人都会被当成自己人、从名单里静默消失
+ * （子牙 2026-09-26 实施后复审）。
+ */
+const FREE_MAIL_DOMAINS: ReadonlySet<string> = new Set([
+  'gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+  'yahoo.com', 'yahoo.com.au', 'yahoo.co.nz', 'icloud.com', 'me.com', 'xtra.co.nz',
+  'qq.com', '163.com', '126.com', 'proton.me', 'protonmail.com', 'aol.com',
+])
+
+/**
+ * ME 自己的信箱域名 —— 对每个客户来说都是「自己人」。
+ * 只认发信地址（`ME_MAIL_FROM`，必须是验证过的发信域名）的域名；公共邮箱域名一律不算。
+ */
+export function platformOwnDomains(from: string = ME_MAIL_FROM_ADDRESS): string[] {
+  const domain = from.split('@')[1]?.trim().toLowerCase() ?? ''
+  return domain && !FREE_MAIL_DOMAINS.has(domain) ? [domain] : []
 }
 
 // ─── 取数 ────────────────────────────────────────────────────────────────────

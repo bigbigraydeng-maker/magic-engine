@@ -14,41 +14,15 @@
 
 import { useState, useEffect, useCallback } from 'react'
 
-/**
- * 跟 `src/lib/pm-todo/daily-todo.ts` 的 TodoView 同形状。这里是客户端组件，
- * 不能直接 import 那个文件（它会把服务端的取数模块一起拖进浏览器，整页会崩），
- * 所以在这里照抄一份类型。
- */
-interface TodoRow {
-  pm_kind: string
-  kind: string
-  client_id: string
-  client_name: string
-  what: string
-  how: string
-  href: string
-  action_label: string
-  count: number
-  samples: string[]
-}
-
-interface TodoSection {
-  pm_kind: string
-  emoji: string
-  title: string
-  rows: TodoRow[]
-}
+// 只 import 类型（编译后会被擦掉），不会把服务端取数模块拖进浏览器
+import type { TodoView } from '@/lib/pm-todo/daily-todo'
 
 interface TodayPayload {
   weekday: number
   weekday_label: string
   theme: { title: string; hint: string } | null
   nz_date: string
-  view: {
-    sections: TodoSection[]
-    totalItems: number
-    blindSpots: string[]
-  }
+  view: TodoView
   routed_note: string
   /** 有开发欠账时给链接，没有时是 null。 */
   dev_debt_url: string | null
@@ -313,7 +287,7 @@ export default function TodayPage() {
       ) : null}
 
       <p className="mt-6 text-xs text-slate-400">
-        每个工作日早上这份清单也会发到你的邮箱，内容跟这里一模一样。只列五类要你做的事：拍板、点一次、转给客户、发前看一眼、认真假。办完自动消失。
+        每个工作日早上这份清单也会发到你的邮箱，用的是同一套规则；这一页是打开时实时算的，所以跟早上那封信可能差几条（期间有人办掉了、或新冒出来的）。只列五类要你做的事：拍板、点一次、转给客户、发前看一眼、认真假。办完自动消失。
       </p>
     </div>
   )

@@ -56,11 +56,20 @@ describe('车道表', () => {
     expect(LANE_OF_KIND.creatomate_render_failed).toBe('one_click')
     expect(LANE_OF_KIND.creatomate_render_error).toBe('dev')
     expect(LANE_OF_KIND.lead_sheet_reauth_needed).toBe('one_click')
-    expect(LANE_OF_KIND.lead_sheet_sync_failed).toBe('dev')
+    expect(LANE_OF_KIND.lead_sheet_sync_failed).toBe('client_side')
+    expect(LANE_OF_KIND.lead_sheet_check_failed).toBe('dev')
     expect(LANE_OF_KIND.conversation_health_alert).toBe('truth')
     expect(LANE_OF_KIND.conversation_health_check_error).toBe('dev')
     expect(LANE_OF_KIND.blog_draft_waiting).toBe('review')
     expect(LANE_OF_KIND.blog_publish_channel_broken).toBe('one_click')
+  })
+
+  it('🔴 人工待办整个读挂了：不许写「无事」，标题和正文都说有检查没跑成', () => {
+    const email = buildTodoEmail(3, { ...EMPTY, manualItems: [item({ kind: 'todo_items_unreadable', href: '' })] }, 'x')
+    expect(email.subject).toContain('有检查没跑成')
+    expect(email.subject).not.toContain('无事')
+    expect(email.html).toContain('人工待办今天整个没读出来')
+    expect(email.html).not.toContain('没有要你做的事。')
   })
 
   it('开发欠账里会让 PM 某一栏变成「假的没有」的，要在清单顶上说「今天没查成」', () => {

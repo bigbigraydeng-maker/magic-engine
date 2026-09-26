@@ -196,7 +196,8 @@ describe('buildTodoEmail', () => {
     expect(email.html).toContain('/dashboard/admin/cron-health#dev-debt')
     expect(email.html).not.toContain('（dev 该看的）')
     expect(email.totalItems).toBe(0)
-    expect(email.subject).toContain('无事')
+    // 客户名单读不出来 = 大部分检查没跑，不许说「无事」
+    expect(email.subject).toContain(kind === 'client_list_unreadable' ? '有检查没跑成' : '无事')
   })
 
   it('🛠 开发欠账与 PM 的事共存时，只有 PM 的事算进总数', () => {

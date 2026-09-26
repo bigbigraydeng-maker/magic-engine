@@ -13,7 +13,8 @@
  * 不属于这五类的也**不许消失**（铁律 3 下半：发现不许死在日志里），只是换一条
  * 有人读的管道：
  *
- *   dev     → 每天的「系统故障日报」（daily-cron-digest，开发看的那封）
+ *   dev     → 后台「自动任务健康」页的「开发欠账」栏（/dashboard/admin/cron-health#dev-debt，
+ *             接口 /api/admin/dev-debt）；PM 邮件里只留一行「N 件开发欠账」+ 链接
  *   weekly  → 周一周报（weekly-seo-report）的「这周系统替你做了什么」
  *
  * ## 为什么是一张穷举表
@@ -94,6 +95,8 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   email_reply_due: 'client_side', // 客人来信没回
   email_first_contact: 'client_side', // 陌生地址第一次来信：扫一眼主题，真询价就回
   lead_sheet_lead_skipped: 'client_side', // 线索没联系方式，去 Meta 后台查原始提交再补进客户的表
+  // 线索写不进客户的表（不是授权问题）：先确认客户那张表还在、账号能编辑 —— 新线索没到销售手上
+  lead_sheet_sync_failed: 'client_side',
   meta_stuck: 'client_side', // 客户网站上的 ME 插件停了
   leads_metric_untrusted: 'client_side', // 客户统计后台的「关键事件」设置
   knowledge_fact_expiring_soon: 'client_side', // 团期 / 价格要跟客户确认
@@ -155,11 +158,12 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   ads_autonomy_sync_failed: 'dev',
   crawl_stale: 'dev', // 重扫本该系统自己跑；还不好就是要换读取通道
   crawl_blocked: 'dev', // how 原文：「先别找客户…回一句『换通道』」
-  lead_sheet_sync_failed: 'dev',
   lead_sheet_value_unmapped: 'dev', // 「发到开发窗口加进对照表」
   lead_sheet_unrouted: 'dev', // 「发到开发窗口补一条兜底规则」
   lead_sheet_backfill_pending: 'dev', // 「跟开发窗口说一声跑一次试算」
   lead_sheet_backfill_count_unreliable: 'dev',
+  lead_sheet_check_failed: 'dev',
+  todo_items_unreadable: 'dev',
   // 平台治理：复查候选有没有新证据不是撤不回 / 花钱 / 对外，是开发窗口的日常活
   // （me-platform-tier-gate：L1 候选由子牙 / 魏征扫）。真要晋升时是商业决定，会作为
   // 一件新的拍板事再来找 PM。
@@ -203,6 +207,13 @@ export const BLIND_SPOT_NOTE: Partial<Record<ManualItemKind, string>> = {
   meta_token_check_failed: 'Meta 钥匙检查今天没跑成 —— 钥匙死了可能没报出来',
   ledger_unreadable: '台账今天读不出来，「决定了没动 / 验了不成」可能没列出来',
   simaqian_patrol_failed: '口碑周巡没跑成，这周的评价回复草稿可能没出来',
+  todo_items_unreadable: '人工待办今天整个没读出来 —— 下面的清单不全',
+  lead_sheet_check_failed: '「线索进客户表格」的检查今天没跑成，表格缺没缺人看不出来',
+  maliang_check_missing: '有成片出来后没做自检，「等你审片」可能没列全',
+  ai_gateway_broken: 'AI 调用卡在网关，今天写稿 / 起草类的东西可能都没出来',
+  cron_not_running: '有自动任务没按时跑，它负责的那一栏今天可能不全',
+  cron_silent_success: '有自动任务显示跑完了但一行没写，它负责的那一栏今天可能不全',
+  libai_check_missing: '有文案生成后没做溯源检查，「未证实的句子」可能没列全',
 }
 
 export function blindSpotNotes(items: readonly ManualItem[]): string[] {

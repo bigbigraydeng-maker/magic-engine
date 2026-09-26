@@ -80,6 +80,8 @@ export type ManualItemKind =
    *  docs/specs/2026-09-09-creatomate-connector-spec-v1.md §4.4，旧管线的 reapStale() 已死，
    *  这条是它的替代 */
   | 'creatomate_render_failed'
+  /** 人工待办整个没读出来（loadManualItems 抛了）—— 清单不全，不许显示成「今天没事」 */
+  | 'todo_items_unreadable'
   /** Creatomate 做片失败但不是额度问题 —— 要我们查是哪一步卡了（开发的活） */
   | 'creatomate_render_error'
   | 'dataforseo_credits_out'
