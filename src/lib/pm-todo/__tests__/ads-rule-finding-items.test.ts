@@ -348,6 +348,37 @@ describe('D11 audience pool starved', () => {
     expect(items[0].how).toContain('D11 aud2')
   })
 
+  it('prints the shared reason once and uses 同上一条 for the second pool', () => {
+    const rows = [
+      row('c1', '2026-09-24', [d11('aud1'), d11('aud2')]),
+      row('c1', '2026-09-23', [d11('aud1'), d11('aud2')]),
+    ]
+    const now = new Date('2026-09-25T19:00:00Z')
+    const items = buildAdsRuleFindingItems(rows, now, nameOf)
+
+    expect(items).toHaveLength(1)
+    const how = items[0].how
+    expect(how.split('要你点头才开').length - 1).toBe(1)
+    expect(how.split('怎么办：同上一条').length - 1).toBe(1)
+  })
+
+  it('prints both D2 and D10 in full when their reasons differ', () => {
+    const d2: RuleFinding = { ...hit('D2', 'a'), reasons: ['D2 专属建议', '止损：…'] }
+    const d10: RuleFinding = { ...hit('D10', 'b'), reasons: ['D10 专属建议', '止损：…'] }
+    const rows = [
+      row('c1', '2026-09-24', [d2, d10]),
+      row('c1', '2026-09-23', [d2, d10]),
+    ]
+    const now = new Date('2026-09-25T19:00:00Z')
+    const items = buildAdsRuleFindingItems(rows, now, nameOf)
+
+    expect(items).toHaveLength(1)
+    const how = items[0].how
+    expect(how).toContain('怎么办：D10 专属建议')
+    expect(how).toContain('怎么办：D2 专属建议')
+    expect(how.split('怎么办：同上一条').length - 1).toBe(0)
+  })
+
   it('orders D10 before D2 before D11', () => {
     const rows = [
       row('c1', '2026-09-24', [d11('aud1'), hit('D2', 'a'), hit('D10', 'b')]),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { diagnoseAudiencePoolStarved } from '../d11-audience-pool-starved'
+import { realSettingChanges } from '../loader'
 import { runDiagnostics } from '../run'
 import { buildAccountContext, shiftDate } from '../context'
 import type { AccountInput, AudienceCountPoint, DailyRow, Diagnosis, DiagnosisInput, SettingChange } from '../types'
@@ -97,6 +98,7 @@ interface BuildOverrides {
   clientPageId?: string | null
   dropHistory?: boolean
   dropAdDaily?: boolean
+  recentAds?: EntitySnapshotRow[]
 }
 
 function makeInputs(overrides: BuildOverrides = {}): { acc: AccountInput; input: DiagnosisInput } {
@@ -108,6 +110,7 @@ function makeInputs(overrides: BuildOverrides = {}): { acc: AccountInput; input:
     adDaily: overrides.dropAdDaily ? undefined : (overrides.adDaily ?? baseAdDaily()),
     settingChanges: overrides.settingChanges ?? [],
     audienceHistory: overrides.dropHistory ? undefined : (overrides.history ?? historyFrom(DEFAULT_HISTORY)),
+    recentAds: overrides.recentAds,
   }
   const input: DiagnosisInput = {
     clientId: 'c', date: DATE, evaluatedAt: '2026-09-26T03:00:00Z',
@@ -325,5 +328,143 @@ describe('D11 · 编排（runDiagnostics）', () => {
     const sharedInput: DiagnosisInput = { ...input, accounts: [{ ...acc, shared: true }] }
     const run = runDiagnostics(sharedInput)
     expect(run.diagnoses.filter(d => d.code === 'D11')).toEqual([])
+  })
+})
+
+describe('D11 · 实施后审补测（子牙/魏征 2026-09-27）', () => {
+  /** 池子收人规则变更的两行快照（source_updated_time 都缺，退回比关键字段）。 */
+  function ruleChangeRows(secondRuleObjects: string[]): EntitySnapshotRow[] {
+    return [
+      audienceSnap({ captured_at: '2026-09-20T01:00:00Z', capture_reason: 'daily', audience_rule_object_ids: ['v1', 'v2'] }),
+      audienceSnap({ captured_at: '2026-09-22T01:00:00Z', capture_reason: 'changed', audience_rule_object_ids: secondRuleObjects }),
+    ]
+  }
+
+  it('1. 收人规则真改了 → realSettingChanges 认出来，D11 不报', () => {
+    const changes = realSettingChanges(ruleChangeRows(['v1']))
+    expect(changes.some(c => c.entity_id === 'aud_video')).toBe(true)
+    expect(build({ settingChanges: changes })).toEqual([])
+  })
+
+  it('2. 只是人数跨过显示下限 → 不算规则变更，D11 照报', () => {
+    const rows = ruleChangeRows(['v1', 'v2'])
+    rows[1] = { ...rows[1], audience_count_lower: 1400 }
+    expect(realSettingChanges(rows)).toEqual([])
+    const diags = build({ settingChanges: realSettingChanges(rows) })
+    expect(diags).toHaveLength(1)
+    expect(diags[0].status).toBe('hit')
+  })
+
+  it('3. 已归档的供血广告也算供血（窗口内花过的钱要算上）', () => {
+    const recentAds = [
+      snap({ level: 'ad', entity_id: 'f_old', campaign_id: 'c_cold', adset_id: 'cold_gone', creative_page_id: PAGE, creative_video_ids: ['v1'] }),
+    ]
+    const adDaily = baseAdDaily().concat(days('2026-09-19', '2026-09-22').map(d => adRow('f_old', 'cold_gone', d, 30)))
+    expect(build({ recentAds, adDaily })).toEqual([])
+    // 同一份 adDaily，但不喂 recentAds：归档广告看不见 → 照报（证明拦住它的正是那条归档广告）
+    const diags = build({ adDaily })
+    expect(diags).toHaveLength(1)
+    expect(diags[0].status).toBe('hit')
+  })
+
+  it('4. Meta 显示下限的点不算真实天数', () => {
+    const history = historyFrom([22200, 22200, 22200, 22200, 22200, 22200, 1000, 1000, 1000, 1400, 1400, 1400, 1400])
+    const snaps = baseSnaps().map(s => (s.entity_id === 'aud_video' ? audienceSnap({ audience_count_lower: 1400 }) : s))
+    expect(build({ snaps, history })).toEqual([])
+  })
+
+  it('5. 一周缩一成以上不开药；缩得少照报', () => {
+    const bigShrink = historyFrom([24200, 24200, 24200, 24200, 24200, 24200, 24200, 24200, 24200, 23000, 22000, 21500, 21500]) // 窗口 = 末 7 个值
+    const bigSnaps = baseSnaps().map(s => (s.entity_id === 'aud_video' ? audienceSnap({ audience_count_lower: 21500 }) : s))
+    expect(build({ snaps: bigSnaps, history: bigShrink })).toEqual([])
+
+    const smallShrink = historyFrom([24200, 24200, 24200, 24200, 24200, 24200, 24200, 24200, 24200, 23800, 23500, 23000, 23000])
+    const smallSnaps = baseSnaps().map(s => (s.entity_id === 'aud_video' ? audienceSnap({ audience_count_lower: 23000 }) : s))
+    const diags = build({ snaps: smallSnaps, history: smallShrink })
+    expect(diags).toHaveLength(1)
+    expect(diags[0].status).toBe('hit')
+  })
+
+  it('6. 点击率降但拿不到频次 → impact unknown，措辞按断供处理', () => {
+    const daily = days('2026-09-09', '2026-09-25').map(d =>
+      adsetRow('rt1', 'c_rt', d, 36, 1000, d >= '2026-09-23' ? 30 : 50),
+    )
+    const diags = build({ daily })
+    expect(diags).toHaveLength(1)
+    expect(diags[0].evidence.impact).toBe('unknown')
+    expect(diags[0].title).toContain('影响判不了')
+  })
+
+  it('7. 同一天取最早一条快照', () => {
+    // 末 3 天各多一条当天较晚（NZ 22:00）的 30000：取最晚的话末 3 天中位数会变成 30000、判成涨了
+    const history = historyFrom(DEFAULT_HISTORY).concat(['2026-09-23', '2026-09-24', '2026-09-25'].map(d => (
+      { entity_id: 'aud_video', captured_at: `${d}T10:00:00Z`, audience_count_lower: 30000 }
+    )))
+    const diags = build({ history })
+    expect(diags).toHaveLength(1)
+    expect(diags[0].status).toBe('hit')
+    expect(diags[0].evidence.pool_last_median as number).toBeLessThan(23000)
+  })
+
+  it('7b. 最新快照在 Meta 显示下限 → 不判（历史再大也不行）', () => {
+    const snaps = baseSnaps().map(s => (s.entity_id === 'aud_video' ? audienceSnap({ audience_count_lower: 1000 }) : s))
+    expect(build({ snaps })).toEqual([])
+  })
+
+  it('8. 按账户本地日分组（UTC 分组会少一天）', () => {
+    const history: AudienceCountPoint[] = days('2026-09-18', '2026-09-22').map(day => ({
+      entity_id: 'aud_video', captured_at: `${day}T12:30:00Z`, audience_count_lower: 22200,
+    }))
+    const diags = build({ history })
+    expect(diags).toHaveLength(1)
+    expect(diags[0].status).toBe('hit')
+  })
+
+  it('9. 窗口外的花费不算供血，但决定「最后一次像样供血」的措辞', () => {
+    const adDaily = baseAdDaily().concat(days('2026-09-12', '2026-09-18').map(d => adRow('f1', 'c_cold', d, 100)))
+    const diags = build({ adDaily })
+    expect(diags).toHaveLength(1)
+    expect(diags[0].evidence.feed_spend).toBe(21)
+    expect(diags[0].evidence.last_strong_feed_date).toBe('2026-09-18')
+    expect(diags[0].title).toContain('像样的供血最后一次在 2026-09-18（7 天前）')
+  })
+
+  it('10. 默认夹具近 28 天都没有像样供血', () => {
+    const diags = build()
+    expect(diags).toHaveLength(1)
+    expect(diags[0].evidence.last_strong_feed_date).toBeNull()
+    expect(diags[0].title).toContain('近 28 天都没有像样的供血')
+  })
+
+  it('11. 窗口内没花钱的消耗组不进 units', () => {
+    const snaps = baseSnaps().concat([
+      snap({ level: 'adset', entity_id: 'rt2', campaign_id: 'c_rt', included_audience_ids: ['aud_video'] }),
+      snap({ level: 'ad', entity_id: 'rt2_ad', campaign_id: 'c_rt', adset_id: 'rt2', creative_page_id: PAGE }),
+    ])
+    const diags = build({ snaps })
+    expect(diags).toHaveLength(1)
+    expect(diags[0].units.map(u => u.id)).toEqual(['rt1'])
+  })
+
+  it('12. 建议固定三条，措辞齐全；两个池子共用同一条建议', () => {
+    const diags = build()
+    expect(diags).toHaveLength(1)
+    const reasons = diags[0].reasons
+    expect(reasons).toHaveLength(3)
+    expect(reasons[0]).toContain('要你点头才开')
+    expect(reasons[0]).toContain('正在跑的再营销组本身不动')
+    expect(reasons[0]).toContain('先补人、再判素材')
+    expect(reasons[0]).toContain('未证实')
+    expect(reasons[1].startsWith('止损：')).toBe(true)
+    expect(reasons[1]).toContain('点击率只作辅助参考')
+
+    const snaps = baseSnaps().concat([audienceSnap({ entity_id: 'aud_thru', entity_name: 'Thruplay viewers 365d' })])
+    const withBoth = snaps.map(s =>
+      s.entity_id === 'rt1' ? snap({ ...s, included_audience_ids: ['aud_video', 'aud_thru', 'lal1'] }) : s,
+    )
+    const history = historyFrom(DEFAULT_HISTORY, ['aud_video', 'aud_thru'])
+    const two = build({ snaps: withBoth, history })
+    expect(two).toHaveLength(2)
+    expect(two[0].reasons[0]).toBe(two[1].reasons[0])
   })
 })

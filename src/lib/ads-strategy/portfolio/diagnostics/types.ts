@@ -175,6 +175,11 @@ export interface AccountInput {
    * 缺省 = 没加载 → D11 不跑。
    */
   audienceHistory?: AudienceCountPoint[]
+  /**
+   * 近 35 天出现过的广告（每条取最后一行非「消失」快照，含后来被归档/删除的）。
+   * D11 算供血花费用：被归档的供血广告窗口内花过的钱也要算上（2026-09-27 魏征）。缺省 = 只看当前在的广告。
+   */
+  recentAds?: EntitySnapshotRow[]
 }
 
 export interface DiagnosisInput {

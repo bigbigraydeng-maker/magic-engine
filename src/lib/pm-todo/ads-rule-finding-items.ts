@@ -104,10 +104,12 @@ function configGapItem(
   }
 }
 
-function findingLines(f: RuleFinding): string[] {
+function findingLines(f: RuleFinding, prevFirst?: string): string[] {
   const lines = [`• ${f.title}`]
   const first = f.reasons?.[0]
-  if (first && !first.startsWith('止损：')) lines.push(`  怎么办：${first}`)
+  if (first && !first.startsWith('止损：')) {
+    lines.push(first === prevFirst ? '  怎么办：同上一条' : `  怎么办：${first}`)
+  }
   const stop = stopLossText(f)
   if (stop) lines.push(`  ${stop}`)
   return lines
@@ -115,7 +117,7 @@ function findingLines(f: RuleFinding): string[] {
 
 function buildHow(kept: readonly RuleFinding[]): string {
   const listed = kept.slice(0, ADS_RULE_MAX_LISTED)
-  const lines = listed.flatMap(findingLines)
+  const lines = listed.flatMap((f, i) => findingLines(f, listed[i - 1]?.reasons?.[0]))
   const rest = kept.length - listed.length
   if (rest > 0) lines.push(`…另有 ${rest} 条，进广告健康页「要看的事」里看`)
   lines.push('这些系统不会自动改；打开广告健康页看证据和对照，要不要动由你定（一次只改一处）。')
