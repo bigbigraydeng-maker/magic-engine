@@ -46,15 +46,35 @@ function fakeRuns(byJob: Record<string, SyncRunRow[]>, queryError?: string): Sup
   return { from: () => chain() } as unknown as SupabaseClient
 }
 
+/**
+ * 生产 2026-09-26 02:11 UTC 真实报错，逐字照抄：Roman HU 与 East International
+ * 的私信同步就是这一条。当场试跑时它被判成「不是授权问题」，这条断言钉住修法。
+ */
+const MSG_200 =
+  'fetchPageConversations failed: HTTP 403 code=200 (#200) Requires permission: pages_messaging or User associated with the Page access token does not have an approved role'
+
 describe('isFacebookAuthError', () => {
   it('认 code 190 的两种写法和 OAuthException', () => {
     expect(isFacebookAuthError(LEADS_190)).toBe(true)
     expect(isFacebookAuthError(MSG_190)).toBe(true)
   })
 
-  it('不把普通 5xx 和 code=1900 当授权失效', () => {
+  it('认 code 200「缺权限 / 没有被批准的角色」—— 生产两个客户撞的就是这条', () => {
+    expect(isFacebookAuthError(MSG_200)).toBe(true)
+  })
+
+  it('认 (#200) 这种括号井号写法，也认 code 10', () => {
+    expect(isFacebookAuthError('Graph error (#200) Requires permission')).toBe(true)
+    expect(isFacebookAuthError('{"error":{"code":10,"message":"Permission denied"}}')).toBe(true)
+  })
+
+  it('不把普通 5xx 和形似的长数字当授权失效', () => {
     expect(isFacebookAuthError('fetchPageConversations failed: HTTP 500 boom')).toBe(false)
     expect(isFacebookAuthError('code=1900')).toBe(false)
+    expect(isFacebookAuthError('code=2000')).toBe(false)
+    expect(isFacebookAuthError('code=100')).toBe(false)
+    // HTTP 200 不是 Graph 的 code=200：必须有 `code` 前缀或 `(#200)` 才算
+    expect(isFacebookAuthError('HTTP 200 OK but empty body')).toBe(false)
   })
 })
 
