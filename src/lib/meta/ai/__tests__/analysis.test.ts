@@ -13,7 +13,7 @@ vi.mock('../../graph-read',async()=>{
   return { ...actual,metaGraphGet:mocks.metaGraphGet }
 })
 
-import { generateAnalysis,listAnalyses } from '../analysis'
+import { generateAnalysis,listAnalyses,safeCharge } from '../analysis'
 
 const grant={ id:'10000000-0000-4000-8000-000000000001',connection_id:'20000000-0000-4000-8000-000000000001',
   ad_account_id:'act_1234567890',revision:'30000000-0000-4000-8000-000000000001',entitlement_revision:'40000000-0000-4000-8000-000000000001' }
@@ -74,7 +74,7 @@ describe('托管 Meta 广告分析',()=>{
     mocks.callClaudeChat.mockResolvedValue({ text:'中文报告',input_tokens:500,output_tokens:200,cost_usd:0.0045,stop_reason:'end_turn' })
     const result=await generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id)
     expect(result.status).toBe('completed')
-    expect(mocks.callClaudeChat).toHaveBeenCalledWith(expect.objectContaining({ model:'claude-haiku-test',singleAttempt:true,maxOutputTokens:2000 }))
+    expect(mocks.callClaudeChat).toHaveBeenCalledWith(expect.objectContaining({ model:'claude-haiku-test',singleAttempt:true,maxOutputTokens:4000 }))
     expect(mocks.callClaudeChat.mock.calls[0]?.[0].systemPrompt).toContain('全文硬上限 700 个中文字')
     expect(mocks.activeConnection).toHaveBeenCalledTimes(4)
     expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_authorize_sponsored_analysis',{
@@ -100,7 +100,7 @@ describe('托管 Meta 广告分析',()=>{
       category:'output_truncated',model:'claude-haiku-test',
     })
     expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_finish_sponsored_analysis',expect.objectContaining({
-      final_status:'failed',charged_usd:0.12,report_body:null,failure_code:'analysis_incomplete',
+      final_status:'failed',charged_usd:0.02,report_body:null,failure_code:'analysis_incomplete',
     }))
   })
 
@@ -185,6 +185,85 @@ describe('托管 Meta 广告分析',()=>{
       .rejects.toThrow('analysis_too_large')
     expect(mocks.callClaudeChat).not.toHaveBeenCalled()
     expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_finish_sponsored_analysis',expect.objectContaining({ final_status:'failed',charged_usd:0 }))
+  })
+})
+
+describe('失败时的扣费',()=>{
+  it('safeCharge 只在拿到正常正数用量时按真实成本扣，并截到预留以内',()=>{
+    expect(safeCharge(0.02,0.12)).toBe(0.02)
+    expect(safeCharge(0.5,0.12)).toBe(0.12)
+    expect(safeCharge(Number.NaN,0.12)).toBe(0.12)
+    expect(safeCharge(-1,0.12)).toBe(0.12)
+    expect(safeCharge(0,0.12)).toBe(0.12)
+    expect(safeCharge(null,0.12)).toBe(0.12)
+    expect(safeCharge(undefined,0.12)).toBe(0.12)
+  })
+
+  it('成功但用量缺失（NaN）时按预留扣，不把 NaN 写进额度表（NaN 发到库里会变成空值，把已花额度加成空）',async()=>{
+    mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
+      if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'NZD',timezone_name:'Pacific/Auckland' }
+      if(params.level==='account') return { data:[{ spend:'100',impressions:'1000',clicks:'20' }] }
+      return { data:[] }
+    })
+    mocks.callClaudeChat.mockResolvedValue({ text:'中文报告',input_tokens:500,output_tokens:200,cost_usd:Number.NaN,stop_reason:'end_turn' })
+    const result=await generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id)
+    expect(result.status).toBe('completed')
+    expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_finish_sponsored_analysis',expect.objectContaining({ final_status:'completed',charged_usd:0.12 }))
+  })
+
+  it('截断且用量为 NaN 时按预留扣，不把 NaN 写进额度表',async()=>{
+    mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
+      if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'NZD',timezone_name:'Pacific/Auckland' }
+      if(params.level==='account') return { data:[{ spend:'100',impressions:'1000',clicks:'20' }] }
+      return { data:[] }
+    })
+    const log=vi.spyOn(console,'error').mockImplementation(()=>undefined)
+    mocks.callClaudeChat.mockResolvedValue({ text:'前半份报告',input_tokens:500,output_tokens:4000,cost_usd:Number.NaN,stop_reason:'max_tokens' })
+    await expect(generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id))
+      .rejects.toThrow('analysis_incomplete')
+    expect(log).toHaveBeenCalledWith('[meta-ads-ai] hosted model response incomplete',{
+      category:'output_truncated',model:'claude-haiku-test',
+    })
+    expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_finish_sponsored_analysis',expect.objectContaining({
+      final_status:'failed',charged_usd:0.12,report_body:null,failure_code:'analysis_incomplete',
+    }))
+  })
+
+  it('空文本失败时按真实成本扣，并按 4000 输出上限调用模型',async()=>{
+    mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
+      if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'NZD',timezone_name:'Pacific/Auckland' }
+      if(params.level==='account') return { data:[{ spend:'100',impressions:'1000',clicks:'20' }] }
+      return { data:[] }
+    })
+    const log=vi.spyOn(console,'error').mockImplementation(()=>undefined)
+    mocks.callClaudeChat.mockResolvedValue({ text:'   ',input_tokens:500,output_tokens:10,cost_usd:0.013,stop_reason:'end_turn' })
+    await expect(generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id))
+      .rejects.toThrow('analysis_incomplete')
+    expect(mocks.callClaudeChat).toHaveBeenCalledWith(expect.objectContaining({ maxOutputTokens:4000 }))
+    expect(log).toHaveBeenCalledWith('[meta-ads-ai] hosted model response incomplete',{
+      category:'empty_response',model:'claude-haiku-test',
+    })
+    expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_finish_sponsored_analysis',expect.objectContaining({
+      final_status:'failed',charged_usd:0.013,report_body:null,failure_code:'analysis_incomplete',
+    }))
+  })
+
+  it('模型调用本身抛错时拿不到用量，按预留扣',async()=>{
+    mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
+      if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'NZD',timezone_name:'Pacific/Auckland' }
+      if(params.level==='account') return { data:[{ spend:'100',impressions:'1000',clicks:'20' }] }
+      return { data:[] }
+    })
+    const log=vi.spyOn(console,'error').mockImplementation(()=>undefined)
+    mocks.callClaudeChat.mockRejectedValue(new Error('boom'))
+    await expect(generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id))
+      .rejects.toThrow('model_unavailable')
+    expect(log).toHaveBeenCalledWith('[meta-ads-ai] hosted model call failed',{
+      category:'upstream',model:'claude-haiku-test',
+    })
+    expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_finish_sponsored_analysis',expect.objectContaining({
+      final_status:'failed',charged_usd:0.12,report_body:null,failure_code:'model_unavailable',
+    }))
   })
 })
 
