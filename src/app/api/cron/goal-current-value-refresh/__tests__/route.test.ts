@@ -12,9 +12,11 @@ vi.mock('@/lib/strategy/auto-fetch', () => ({
   autoFetchMetricValue: vi.fn(),
 }))
 
-// startCronRun writes to cron_run_logs via supabaseAdmin — out of scope here
+// startCronRun writes to cron_run_logs via supabaseAdmin — replaced by a spy so
+// tests can assert what lands in the run log.
+const finishMock = vi.hoisted(() => vi.fn(async () => {}))
 vi.mock('@/lib/cron/run-logger', () => ({
-  startCronRun: vi.fn(async () => ({ finish: vi.fn(async () => {}) })),
+  startCronRun: vi.fn(async () => ({ finish: finishMock })),
 }))
 
 import { GET } from '../route'
@@ -128,5 +130,78 @@ describe('GET /api/cron/goal-current-value-refresh', () => {
     const body = await res.json()
     expect(body.failed).toBe(1)
     expect(body.succeeded).toBe(0)
+  })
+
+  it('same client with 2 active goals → each refreshed with its own period', async () => {
+    const goals = [
+      { id: 'g-signups', client_id: 'c1', primary_metric_key: 'signups_count', period_start: '2026-09-24', period_end: '2026-11-30' },
+      { id: 'g-leads', client_id: 'c1', primary_metric_key: 'leads_count', period_start: '2026-10-01', period_end: '2026-12-31' },
+    ]
+    const updatedIds: string[] = []
+    ;(supabaseAdmin.from as any).mockImplementation((table: string) => {
+      if (table === 'clients') {
+        return {
+          select: () => ({ in: () => ({ eq: () => Promise.resolve({ data: [{ id: 'c1' }], error: null }) }) }),
+        }
+      }
+      return {
+        select: () => ({ eq: () => Promise.resolve({ data: goals, error: null }) }),
+        update: () => ({
+          eq: (_col: string, id: string) => {
+            updatedIds.push(id)
+            return Promise.resolve({ error: null })
+          },
+        }),
+      }
+    })
+    ;(autoFetchMetricValue as any).mockImplementation(async (_db: unknown, _c: string, key: string) =>
+      ({ ok: true, value: key === 'leads_count' ? 23 : 2, source: 'x', snapshot_date: '2026-09-26', label: key }))
+
+    const res = await GET(makeReq('Bearer test-secret-123'))
+    const body = await res.json()
+
+    expect(body).toMatchObject({ processed: 2, succeeded: 2, failed: 0 })
+    expect(updatedIds.sort()).toEqual(['g-leads', 'g-signups'])
+    expect(autoFetchMetricValue).toHaveBeenCalledWith(expect.anything(), 'c1', 'signups_count', {
+      goalPeriod: { period_start: '2026-09-24', period_end: '2026-11-30' },
+    })
+    expect(autoFetchMetricValue).toHaveBeenCalledWith(expect.anything(), 'c1', 'leads_count', {
+      goalPeriod: { period_start: '2026-10-01', period_end: '2026-12-31' },
+    })
+    expect(finishMock).toHaveBeenCalledWith(expect.objectContaining({ processed: 2, completed: 2, failed: 0, error: undefined }))
+  })
+
+  it('failures are written to the run log (error + summary), not recorded as clean', async () => {
+    const goals = [
+      { id: 'g1', client_id: 'c1', primary_metric_key: 'signups_count', period_start: '2026-09-24', period_end: '2026-11-30' },
+      { id: 'g2', client_id: 'c1', primary_metric_key: 'leads_count', period_start: '2026-09-24', period_end: '2026-11-30' },
+    ]
+    ;(supabaseAdmin.from as any).mockImplementation((table: string) => {
+      if (table === 'clients') {
+        return {
+          select: () => ({ in: () => ({ eq: () => Promise.resolve({ data: [{ id: 'c1' }], error: null }) }) }),
+        }
+      }
+      return {
+        select: () => ({ eq: () => Promise.resolve({ data: goals, error: null }) }),
+        update: () => ({ eq: () => Promise.resolve({ error: null }) }),
+      }
+    })
+    ;(autoFetchMetricValue as any)
+      .mockResolvedValueOnce({ ok: false, unknown: true, reason: 'no bookings yet' })
+      .mockResolvedValueOnce({ ok: false, reason: 'ads query failed' })
+
+    await GET(makeReq('Bearer test-secret-123'))
+
+    expect(finishMock).toHaveBeenCalledTimes(1)
+    const [arg] = finishMock.mock.calls[0] as unknown as [
+      { failed: number; error?: string; summary?: { errors: Array<{ goal_id: string; reason: string }> } },
+    ]
+    expect(arg.failed).toBe(2)
+    expect(arg.error).toBe('goal g1: no bookings yet (+1 more)')
+    expect(arg.summary?.errors).toEqual([
+      { goal_id: 'g1', reason: 'no bookings yet' },
+      { goal_id: 'g2', reason: 'ads query failed' },
+    ])
   })
 })

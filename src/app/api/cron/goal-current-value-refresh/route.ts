@@ -26,6 +26,8 @@ interface GoalRow {
   id: string
   client_id: string
   primary_metric_key: string
+  period_start: string
+  period_end: string
 }
 
 interface CronResult {
@@ -34,6 +36,12 @@ interface CronResult {
   failed: number
   errors: Array<{ goal_id: string; reason: string }>
   duration_ms: number
+}
+
+function summarizeErrors(errors: CronResult['errors']): string {
+  const [first] = errors
+  const more = errors.length > 1 ? ` (+${errors.length - 1} more)` : ''
+  return `goal ${first.goal_id}: ${first.reason}${more}`
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -53,7 +61,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // ── Load active goals ───────────────────────────────────────────────────
   const goalsRes = await supabaseAdmin
     .from('goals')
-    .select('id, client_id, primary_metric_key')
+    .select('id, client_id, primary_metric_key, period_start, period_end')
     .eq('status', 'active')
 
   const allGoals = (goalsRes as { data: GoalRow[] | null }).data ?? []
@@ -101,10 +109,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   for (const goal of goals) {
     try {
+      // 传这个目标自己的时间段：一个客户可以同时有多个 active 目标（CTS 2026-09-24 起两个）。
       const result = await autoFetchMetricValue(
         supabaseAdmin as any,
         goal.client_id,
         goal.primary_metric_key,
+        { goalPeriod: { period_start: goal.period_start, period_end: goal.period_end } },
       )
 
       if (!result.ok) {
@@ -148,6 +158,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     duration_ms: Date.now() - startedAt,
   }
   console.log('[goal-current-value-refresh]', JSON.stringify(result))
-  await cronRun.finish({ processed: goals.length, completed: succeeded, failed })
+  // 有目标没刷成 → 这次运行记 failed 并带上原因。2026-09-24/25 两次全失败却记成
+  // completed、原因为空，健康页一片绿，CTS 两个目标连续两天没有当前值没人发现。
+  await cronRun.finish({
+    processed: goals.length,
+    completed: succeeded,
+    failed,
+    summary: { errors },
+    error: failed > 0 ? summarizeErrors(errors) : undefined,
+  })
   return NextResponse.json(result)
 }

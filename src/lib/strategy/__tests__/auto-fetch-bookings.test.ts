@@ -24,19 +24,18 @@ interface FakeDbOpts {
  * 手搓的 SupabaseClient 替身。`autoFetchMetricValue` 把 client 当第一个参数收，
  * 所以直接传 stub 即可，不需要 vi.mock 整个 supabase 模块。
  *
- * 要支持两条链：
- *   1. from('goals').select(...).eq(...).eq(...).maybeSingle()
+ * 要支持两条链，两条都是被 **直接 await** 的：
+ *   1. from('goals').select(...).eq(...).eq(...).limit(2) → { data: rows[], error }
  *   2. from('me_sale_outcomes').select(...).eq(...).eq(...).is(...).neq(...).gte(...).lte(...)
- *      —— 这条链是被 **直接 await** 的（没有 .maybeSingle()），所以最后一个 .lte(...)
- *      返回的对象必须可 await，并 resolve 成 { count, error }。
+ *      → { count, error }
  *
- * 做法：一个可链式调用的对象，select/eq/is/neq/gte/lte 都返回它自己；
- * 它带一个 then 实现「按表返回结果」的 promise，外加 maybeSingle() 返回 goals 结果。
+ * 做法：一个可链式调用的对象，select/eq/is/neq/gte/lte/limit 都返回它自己；
+ * 它的 then 按**表**返回结果（不按调用次序）。
  */
 function fakeDb(opts: FakeDbOpts): Client {
   const goalResult = opts.goalError
     ? { data: null, error: { message: opts.goalError } }
-    : { data: opts.goal ?? null, error: null }
+    : { data: opts.goal ? [opts.goal] : [], error: null }
 
   const countResult = opts.countError
     ? { count: null, error: { message: opts.countError } }
@@ -50,11 +49,11 @@ function fakeDb(opts: FakeDbOpts): Client {
       neq: () => chain,
       gte: () => chain,
       lte: () => chain,
-      maybeSingle: () => Promise.resolve(goalResult),
+      limit: () => chain,
       then: (
         onFulfilled: (value: unknown) => unknown,
         onRejected?: (reason: unknown) => unknown,
-      ) => Promise.resolve(countResult).then(onFulfilled, onRejected),
+      ) => Promise.resolve(table === 'goals' ? goalResult : countResult).then(onFulfilled, onRejected),
     }
     return chain
   }
