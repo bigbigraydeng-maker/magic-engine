@@ -5,7 +5,7 @@ status: decided
 owner: agent
 decided_on: 2026-09-27
 source: pr:2076
-verify_by: 2026-09-28
+verify_by: 2026-10-10
 verify_how: 探测用，不需要真的验；PR 关闭后本卡随分支作废
 ---
 探测 PR #2076 专用，勿合。
