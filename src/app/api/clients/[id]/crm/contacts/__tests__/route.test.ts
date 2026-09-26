@@ -204,3 +204,98 @@ describe('GET contacts — 筛选落到 SQL', () => {
     }
   })
 })
+
+describe('GET contacts — view=priority（WP3 R5 接线）', () => {
+  it('?view=priority → 新形状 {view, focus, columns, sections}，四段顺序固定', async () => {
+    const { status, body } = await get('cts', '?view=priority')
+    expect(status).toBe(200)
+    expect(body.view).toBe('priority')
+    expect(body).toHaveProperty('focus')
+    expect(body).toHaveProperty('columns')
+    expect((body.sections as Array<{ key: string }>).map((s) => s.key)).toEqual([
+      'waiting',
+      'acted',
+      'queued',
+      'off_list',
+    ])
+  })
+
+  it('不带 view → 形状不变（老调用方不受影响）', async () => {
+    const { body } = await get('cts')
+    expect(body.view).toBeUndefined()
+    expect(body).toHaveProperty('contacts')
+    expect(body).toHaveProperty('totalContacts')
+  })
+
+  it('每段带 total；推迟中的 Sue 落 off_list，没触点的 Bob 落 acted', async () => {
+    const { body } = await get('cts', '?view=priority')
+    const byKey = Object.fromEntries(
+      (body.sections as Array<{ key: string; total: number }>).map((s) => [s.key, s]),
+    )
+    expect(byKey.off_list.total).toBe(1)
+    expect(byKey.acted.total).toBe(1)
+    expect(byKey.waiting.total).toBe(0)
+  })
+
+  it('默认前两段展开（items 是数组）、后两段收起（items=null）', async () => {
+    const { body } = await get('cts', '?view=priority')
+    const byKey = Object.fromEntries(
+      (body.sections as Array<{ key: string; items: unknown[] | null }>).map((s) => [s.key, s]),
+    )
+    expect(Array.isArray(byKey.waiting.items)).toBe(true)
+    expect(Array.isArray(byKey.acted.items)).toBe(true)
+    expect(byKey.queued.items).toBeNull()
+    expect(byKey.off_list.items).toBeNull()
+  })
+
+  it('?open=off_list → 只有 off_list 展开，默认展开的两段被显式收起', async () => {
+    const { body } = await get('cts', '?view=priority&open=off_list')
+    const byKey = Object.fromEntries(
+      (body.sections as Array<{ key: string; open: boolean; items: unknown[] | null }>).map((s) => [s.key, s]),
+    )
+    expect(byKey.off_list.open).toBe(true)
+    expect(Array.isArray(byKey.off_list.items)).toBe(true)
+    expect(byKey.waiting.open).toBe(false)
+    expect(byKey.waiting.items).toBeNull()
+  })
+
+  it('?contact=a2 → focus 报出 Sue 落在 off_list 第 1 页（直达链接不再落空）', async () => {
+    const { body } = await get('cts', '?view=priority&contact=a2')
+    expect(body.focus).toMatchObject({ found: true, section: 'off_list', page: 1 })
+  })
+
+  it('?contact=ghost → focus.found=false，不 500', async () => {
+    const { status, body } = await get('cts', '?view=priority&contact=ghost')
+    expect(status).toBe(200)
+    expect(body.focus).toMatchObject({ found: false })
+  })
+
+  it('?view=junk → 400', async () => {
+    const { status, body } = await get('cts', '?view=junk')
+    expect(status).toBe(400)
+    expect(String(body.error)).toContain('view')
+  })
+
+  it('?open=nope → 400，错误提到那个段名', async () => {
+    const { status, body } = await get('cts', '?view=priority&open=nope')
+    expect(status).toBe(400)
+    expect(String(body.error)).toContain('nope')
+  })
+
+  it('?p_waiting=0 → 400', async () => {
+    const { status } = await get('cts', '?view=priority&p_waiting=0')
+    expect(status).toBe(400)
+  })
+
+  it('client_id 收口：view=priority 也只按 URL 里那个客户查', async () => {
+    await get('client-y', '?view=priority')
+    const contactQ = recorded.find((r) => r.table === 'contacts')
+    expect(contactQ?.eqs).toContainEqual(['client_id', 'client-y'])
+  })
+
+  it('?view=priority&stage=quoted → stage 筛选仍落在 SQL（不是内存里过）', async () => {
+    await get('cts', '?view=priority&stage=quoted')
+    const contactQ = recorded.find((r) => r.table === 'contacts')
+    expect(contactQ?.ins).toContainEqual(['stage', ['quoted']])
+  })
+})
