@@ -10,7 +10,7 @@
  *
  * Query params:
  *   top        — number of top entries to return, default 5 (max 20)
- *   min        — minimum DECIDED cases (confirmed + reversed) per entry, default 3
+ *   min        — minimum DECIDED cases (confirmed + reversed) per entry; default and floor MIN_DECIDED_FOR_RATE (3)
  *   client_id  — optional; when provided, scopes results to that client only
  *   flywheel   — optional; filter by flywheel ("seo" | "geo" | "ads" | "social")
  *
@@ -117,7 +117,12 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url)
   const top       = Math.min(Math.max(parseInt(searchParams.get('top')  ?? '5', 10), 1), 20)
-  const min       = Math.max(parseInt(searchParams.get('min')  ?? String(MIN_DECIDED_FOR_RATE), 10), 1)
+  // Never below MIN_DECIDED_FOR_RATE: no other reader shows a rate on fewer decided
+  // cases, and "1 of 1" must not rank as a 100% move here either.
+  const min       = Math.max(
+    parseInt(searchParams.get('min') ?? '', 10) || MIN_DECIDED_FOR_RATE,
+    MIN_DECIDED_FOR_RATE,
+  )
   const clientId  = searchParams.get('client_id') ?? null
   const flywheel  = searchParams.get('flywheel')  ?? null
 

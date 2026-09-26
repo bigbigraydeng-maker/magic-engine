@@ -21,7 +21,7 @@ export const queryFlywheelHistory: ReadonlyToolModule = {
     description:
       'Look up THIS client\'s own historical action outcomes: for each action_type the client ' +
       'has tried before, its success rate over DECIDED cases (confirmed vs reversed; null when ' +
-      'fewer than 3 were decided) and how many cases were decided out of all cases (from the ' +
+      `fewer than ${MIN_DECIDED_FOR_RATE} were decided) and how many cases were decided out of all cases (from the ` +
       'flywheel attribution library). Use this to prefer moves that already worked for THIS client and ' +
       'avoid re-proposing ones that failed. Scoped to the current client only.',
     input_schema: {

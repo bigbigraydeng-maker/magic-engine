@@ -26,9 +26,9 @@ function verdictBar(entry: AggregateEntry) {
   const reversed = pct(entry.reversed)
   return (
     <div className="flex h-2 w-full overflow-hidden rounded-full bg-me-ivory">
-      <div className="bg-[#5C8A4A]" style={{ width: `${confirmed}%` }} title={`成功 ${confirmed}%`} />
-      <div className="bg-me-gold" style={{ width: `${inconclusive}%` }} title={`待定 ${inconclusive}%`} />
-      <div className="bg-[#C2453A]/70" style={{ width: `${reversed}%` }} title={`无效 ${reversed}%`} />
+      <div className="bg-[#5C8A4A]" style={{ width: `${confirmed}%` }} title={`成功 ${entry.confirmed} 个`} />
+      <div className="bg-me-gold" style={{ width: `${inconclusive}%` }} title={`判不了 ${entry.inconclusive} 个`} />
+      <div className="bg-[#C2453A]/70" style={{ width: `${reversed}%` }} title={`无效 ${entry.reversed} 个`} />
     </div>
   )
 }
@@ -45,7 +45,7 @@ export default function FlywheelAggregateAdminPage() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    fetch('/api/admin/flywheel/aggregate?top=5&min=3')
+    fetch('/api/admin/flywheel/aggregate?top=5')
       .then(r => r.json())
       .then((d: AggregateResponse) => { setData(d); setLoading(false) })
       .catch(err => { setError(String(err)); setLoading(false) })
@@ -93,7 +93,7 @@ export default function FlywheelAggregateAdminPage() {
               </div>
               {data.top.length === 0 ? (
                 <div className="p-8 text-center text-sm text-me-charcoal/45">
-                  暂无足够的可判定案例（每类需 ≥ 3 个）
+                  暂无足够的可判定案例
                 </div>
               ) : (
                 <ul className="divide-y divide-black/10">

@@ -93,9 +93,13 @@ function outcome(
 const OUTCOMES_WITH_ACTIONS = [
   outcome('a1', 'confirmed',    'ads.pause_campaign', 'ads', 'c1'),
   outcome('a2', 'confirmed',    'ads.pause_campaign', 'ads', 'c1'),
-  outcome('a3', 'inconclusive', 'ads.pause_campaign', 'ads', 'c2'),
-  outcome('a4', 'confirmed',    'seo.publish_blog',   'seo', 'c1'),
-  outcome('a5', 'reversed',     'seo.publish_blog',   'seo', 'c2'),
+  outcome('a3', 'confirmed',    'ads.pause_campaign', 'ads', 'c2'),
+  outcome('a4', 'inconclusive', 'ads.pause_campaign', 'ads', 'c2'),
+  outcome('a5', 'confirmed',    'seo.publish_blog',   'seo', 'c1'),
+  outcome('a6', 'reversed',     'seo.publish_blog',   'seo', 'c2'),
+  outcome('a7', 'reversed',     'seo.publish_blog',   'seo', 'c2'),
+  outcome('a8', 'confirmed',    'geo.small_sample',   'geo', 'c1'),
+  outcome('a9', 'confirmed',    'geo.small_sample',   'geo', 'c1'),
 ]
 
 function makeRequest(params: Record<string, string> = {}) {
@@ -140,37 +144,38 @@ describe('GET /api/admin/flywheel/aggregate', () => {
     expect(json.total_outcomes).toBe(OUTCOMES_WITH_ACTIONS.length)
   })
 
-  it('ranks ads.pause_campaign higher than seo.publish_blog (2 confirmed vs 1)', async () => {
-    const res = await GET(makeRequest({ min: '1' }))
-    const json = await res.json()
-    const firstId = json.top[0].action_type
-    expect(firstId).toBe('ads.pause_campaign')
-    // Rates are over decided cases: ads 2/2, seo 1/2.
-    expect(json.top[0].decided).toBe(2)
+  it('ranks ads.pause_campaign (3 of 3) above seo.publish_blog (1 of 3)', async () => {
+    const json = await (await GET(makeRequest())).json()
+    expect(json.top.map((e: { action_type: string }) => e.action_type)).toEqual([
+      'ads.pause_campaign',
+      'seo.publish_blog',
+    ])
+    expect(json.top[0].decided).toBe(3)
     expect(json.top[0].confirmed_rate).toBe(1)
   })
 
-  it('min counts decided cases, not all cases', async () => {
-    // ads.pause_campaign has 3 cases but only 2 decided (one is inconclusive).
-    const strict = await (await GET(makeRequest({ min: '3' }))).json()
-    expect(strict.top).toEqual([])
-
-    const loose = await (await GET(makeRequest({ min: '2' }))).json()
+  it('min cannot go below three decided cases, and counts decided cases only', async () => {
+    // Asking for min=1 still leaves out geo.small_sample: it has only 2 decided cases.
+    const loose = await (await GET(makeRequest({ min: '1' }))).json()
     expect(loose.top.map((e: { action_type: string }) => e.action_type).sort()).toEqual([
       'ads.pause_campaign',
       'seo.publish_blog',
     ])
+
+    // ads.pause_campaign has 4 cases but only 3 decided, so min=4 leaves it out.
+    const strict = await (await GET(makeRequest({ min: '4' }))).json()
+    expect(strict.top).toEqual([])
   })
 
   it('respects top param — limits number of entries returned', async () => {
-    const res = await GET(makeRequest({ top: '1', min: '1' }))
+    const res = await GET(makeRequest({ top: '1' }))
     const json = await res.json()
-    expect(json.top.length).toBeLessThanOrEqual(1)
+    expect(json.top.length).toBe(1)
   })
 
   it('clamps top to max 20', async () => {
     // We can't directly test the DB call limit, but ensure no crash with large top
-    const res = await GET(makeRequest({ top: '999', min: '1' }))
+    const res = await GET(makeRequest({ top: '999' }))
     expect(res.status).toBe(200)
   })
 
@@ -245,37 +250,34 @@ describe('counting by action, not by row', () => {
       data: [
         outcome('a1', 'confirmed', 'seo.publish_blog', 'seo', 'c1', { window_days: 28 }),
         outcome('a1', 'reversed',  'seo.publish_blog', 'seo', 'c1', { window_days: 14 }),
+        outcome('a2', 'confirmed', 'seo.publish_blog', 'seo', 'c1'),
+        outcome('a3', 'confirmed', 'seo.publish_blog', 'seo', 'c1'),
       ],
       error: null,
     })
 
-    const res = await GET(makeRequest({ min: '1' }))
+    const res = await GET(makeRequest())
     const body = await res.json()
 
-    expect(body.total_outcomes).toBe(1)
-    // The mature window is the one that represents the action.
-    expect(body.top[0].confirmed).toBe(1)
+    expect(body.total_outcomes).toBe(3)
+    // The mature window represents a1, so all three actions read as confirmed.
+    expect(body.top[0].confirmed).toBe(3)
+    expect(body.top[0].reversed).toBe(0)
   })
 
   it('reads old site-level SEO verdicts as inconclusive', async () => {
-    mockQuery.mockResolvedValue({
-      data: [
-        outcome('a1', 'confirmed', 'seo.publish_blog', 'seo', 'c1', {
-          metric_key: 'seo.gsc.clicks',
-          flywheel_actions: { action_type: 'seo.publish_blog', flywheel: 'seo', client_id: 'c1', expected_metric: 'seo.gsc.clicks' },
-        }),
-        outcome('a2', 'reversed', 'seo.publish_blog', 'seo', 'c1', {
-          metric_key: 'seo.domain.organic_traffic',
-          flywheel_actions: { action_type: 'seo.publish_blog', flywheel: 'seo', client_id: 'c1', expected_metric: 'seo.domain.organic_traffic' },
-        }),
-      ],
-      error: null,
-    })
+    // Three stored "confirmed" rows on whole-site clicks: without effectiveVerdict
+    // they would be 3 decided cases and rank at 100%.
+    const siteLevel = (id: string) =>
+      outcome(id, 'confirmed', 'seo.publish_blog', 'seo', 'c1', {
+        metric_key: 'seo.gsc.clicks',
+        flywheel_actions: { action_type: 'seo.publish_blog', flywheel: 'seo', client_id: 'c1', expected_metric: 'seo.gsc.clicks' },
+      })
+    mockQuery.mockResolvedValue({ data: [siteLevel('a1'), siteLevel('a2'), siteLevel('a3')], error: null })
 
-    const body = await (await GET(makeRequest({ min: '1' }))).json()
+    const body = await (await GET(makeRequest())).json()
 
-    // Two cases, none decided: nothing can rank.
-    expect(body.total_outcomes).toBe(2)
+    expect(body.total_outcomes).toBe(3)
     expect(body.top).toEqual([])
   })
 })
@@ -287,15 +289,20 @@ describe('paging', () => {
     const filler = Array.from({ length: 1000 }, (_, i) =>
       outcome(`n${i}`, 'confirmed', 'ads.pause_campaign', 'ads', 'c1'))
     mockQuery.mockResolvedValue({
-      data: [...filler, outcome('late', 'confirmed', 'late.action', 'seo', 'c1')],
+      data: [
+        ...filler,
+        outcome('late1', 'confirmed', 'late.action', 'seo', 'c1'),
+        outcome('late2', 'confirmed', 'late.action', 'seo', 'c1'),
+        outcome('late3', 'confirmed', 'late.action', 'seo', 'c1'),
+      ],
       error: null,
     })
 
-    const res = await GET(makeRequest({ min: '1' }))
+    const res = await GET(makeRequest())
     const body = await res.json()
 
     expect(rangesAsked.length).toBeGreaterThan(1)
-    expect(body.total_outcomes).toBe(1001)
+    expect(body.total_outcomes).toBe(1003)
     expect(body.top.some((t: { action_type: string }) => t.action_type === 'late.action')).toBe(true)
   })
 })

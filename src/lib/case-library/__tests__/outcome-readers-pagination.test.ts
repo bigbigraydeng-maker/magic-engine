@@ -122,3 +122,22 @@ describe('the per-client readers page too', () => {
     expect(byMode.unified.sampleSize).toBe(PAGE + 1)
   })
 })
+
+describe('the global reader counts old site-level verdicts as undecided', () => {
+  it('a stored confirmed on seo.gsc.clicks is not a decided case', async () => {
+    const rows = [
+      row({
+        id: 's1',
+        action_id: 's1',
+        metric_key: 'seo.gsc.clicks',
+        verdict: 'confirmed',
+        flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.gsc.clicks' },
+      }),
+    ]
+    const { supabase } = pagedSupabase(rows)
+
+    const map = await fetchOutcomeConfidenceMap(supabase)
+
+    expect(map['seo.publish_blog']).toEqual({ successRate: 0, sampleSize: 0, totalCases: 1 })
+  })
+})

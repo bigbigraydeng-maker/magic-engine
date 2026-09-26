@@ -105,8 +105,8 @@ export function formatConfidenceForPrompt(map: OutcomeConfidenceMap): string {
     '**使用方式**：为每个推荐行动附上置信度标签，帮助 FDE 优先执行高效行动。',
     '**不要跳过低成功率行动**：它们可能对特定客户仍有价值，只需透明标注。',
     '',
-    '| action_type | 历史成功率 | 可判定 / 共 |',
-    '|-------------|-----------|-----------|',
+    '| action_type | 历史成功率 | 可判定 / 共 | 置信度标签（照抄） |',
+    '|-------------|-----------|-----------|------------------|',
   ]
 
   const sorted = entries.sort((a, b) => {
@@ -120,14 +120,14 @@ export function formatConfidenceForPrompt(map: OutcomeConfidenceMap): string {
     const rate = entry.sampleSize >= MIN_DECIDED_FOR_RATE
       ? `${Math.round(entry.successRate * 100)}%`
       : '—'
-    lines.push(`| \`${actionType}\` | ${rate} | ${entry.sampleSize} / ${entry.totalCases} |`)
+    lines.push(`| \`${actionType}\` | ${rate} | ${entry.sampleSize} / ${entry.totalCases} | ${getConfidenceLabel(map, actionType)} |`)
   }
 
   lines.push(
     '',
-    '**输出约束**：每个 action 的 `description` 末尾必须附上对应 action_type 的置信度标签，',
-    '格式：`（${getConfidenceLabel(map, actionType)}）`。',
-    '若该 action 无历史数据，附：`（新策略，尚无验证数据）`。',
+    '**输出约束**：每个 action 的 `description` 末尾必须附上对应 action_type 的置信度标签：',
+    '照抄上表「置信度标签」一列的文字，用全角括号括起来；不要改数字，也不要自己算百分比。',
+    '若该 action_type 不在表中，附：`（新策略，尚无验证数据）`。',
   )
 
   return lines.join('\n')

@@ -119,6 +119,17 @@ describe('formatConfidenceForPrompt', () => {
     expect(result).toContain('| `seo.publish_blog` | — | 1 / 6 |')
     expect(result).not.toContain('100%')
   })
+
+  it('prints the ready-made label in the table so the model can copy it', () => {
+    const result = formatConfidenceForPrompt({
+      'seo.publish_blog': { successRate: 0, sampleSize: 0, totalCases: 136 },
+      'geo.deploy_directive': { successRate: 0.8, sampleSize: 10, totalCases: 12 },
+    })
+    expect(result).toContain('尚无可判定案例（共 136 个，结果都判不了）')
+    expect(result).toContain('历史成功率 80%（可判定 10 / 共 12 个客户案例）')
+    expect(result).toContain('照抄上表「置信度标签」一列')
+    expect(result).not.toContain('${')
+  })
 })
 
 describe('getModeBoost', () => {
