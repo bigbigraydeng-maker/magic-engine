@@ -6,8 +6,9 @@ vi.mock('@/lib/supabase', async () => ({ supabaseAdmin: (await import('./fake-db
 import { NonRetriableError, RetryAfterError } from 'inngest'
 import { supabaseAdmin } from '@/lib/supabase'
 import { fakeDb, type Row } from './fake-db'
+import { cronRunIdFromInngestRun } from '@/lib/cron/run-logger'
 import { GscApiError, type GscAnalyticsRow, type GscDayRange, type GscRowsQuery } from '../client'
-import type { PullOrder } from '../page-daily-plan'
+import { GSC_PAGE_DAILY_PULL_JOB, type PullOrder } from '../page-daily-plan'
 import { MAX_URL_BYTES } from '../page-daily-store'
 import {
   daysToPull,
@@ -53,6 +54,20 @@ function harness(): { ids: string[]; thrown: Array<{ id: string; error: unknown 
     },
   }
   return { ids, thrown, step }
+}
+
+/** A step runner that executes every step TWICE and keeps the second result — like a step whose first attempt
+ *  committed but whose response was lost, so Inngest ran it again with the same run id. */
+function doubleRunHarness(): { ids: string[]; step: PullStep } {
+  const ids: string[] = []
+  const step: PullStep = {
+    async run<T>(id: string, fn: () => Promise<T>): Promise<T> {
+      ids.push(id)
+      await fn()
+      return fn()
+    },
+  }
+  return { ids, step }
 }
 
 interface DepsOverrides {
@@ -156,6 +171,8 @@ describe('runPageDailyPull', () => {
     expect(logs).toHaveLength(1)
     expect(receipt.id).toBe(out.receipt_id)
     expect(logs[0].id).toBe(out.receipt_id)
+    expect(out.receipt_id).toBe(cronRunIdFromInngestRun(CTX.runId))
+    expect(logs[0].job_name).toBe(GSC_PAGE_DAILY_PULL_JOB)
     expect(logs[0].status).toBe('completed')
     expect(logs[0].processed).toBe(1)
     expect(logs[0].failed_count).toBe(0)
@@ -180,7 +197,7 @@ describe('runPageDailyPull', () => {
     expect(out.request_count).toBe(3)
   })
 
-  it('🔴 still full after 4 pages → the day is truncated and the order counts as failed in the run log', async () => {
+  it("🔴 page 2 still full → the day reached Google's 50,000-row cap: truncated, and the order counts as failed in the run log", async () => {
     const h = harness()
     const d = deps({
       range: { firstDay: '2026-09-21', lastDay: '2026-09-21' },
@@ -188,19 +205,15 @@ describe('runPageDailyPull', () => {
     })
     const out = await runPageDailyPull(h.step, d.deps, DAILY, CTX)
 
-    expect(d.fetchRows.mock.calls.map((c) => (c[2] as GscRowsQuery).startRow)).toEqual([
-      0,
-      PAGE_ROW_LIMIT,
-      PAGE_ROW_LIMIT * 2,
-      PAGE_ROW_LIMIT * 3,
-    ])
-    expect(MAX_PAGES_PER_DAY).toBe(4)
-    expect(h.ids).not.toContain('pull-2026-09-21-p5')
+    expect(d.fetchRows.mock.calls.map((c) => (c[2] as GscRowsQuery).startRow)).toEqual([0, PAGE_ROW_LIMIT])
+    expect(MAX_PAGES_PER_DAY).toBe(2)
+    expect(h.ids).not.toContain('pull-2026-09-21-p3')
     expect(out.status).toBe('truncated')
     expect(out.truncated_days).toEqual(['2026-09-21'])
 
     const receipt = receiptRows()[0]
     expect(receipt.status).toBe('truncated')
+    expect(String(receipt.error)).toContain('50,000')
     expect(String(receipt.error)).toContain('2026-09-21')
 
     const log = runLogRows()[0]
@@ -347,6 +360,28 @@ describe('runPageDailyPull', () => {
     expect(out.request_count).toBe(1)
     expect(receiptRows()[0].data_from_day).toBeNull()
   })
+
+  it("🔴 retried steps reuse the run's fixed id: one run-log row, one receipt, no duplicate data", async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const h = doubleRunHarness()
+    const d = deps({})
+    const out = await runPageDailyPull(h.step, d.deps, DAILY, CTX)
+
+    expect(out.status).toBe('complete')
+
+    const logs = runLogRows()
+    expect(logs).toHaveLength(1)
+    expect(logs[0].id).toBe(cronRunIdFromInngestRun(CTX.runId))
+    expect(logs[0].status).toBe('completed')
+
+    const receipts = receiptRows()
+    expect(receipts).toHaveLength(1)
+    expect(receipts[0].id).toBe(cronRunIdFromInngestRun(CTX.runId))
+    expect(receipts[0].status).toBe('complete')
+
+    expect(fakeDb.tables.gsc_page_daily).toHaveLength(9)
+    expect(errors).not.toHaveBeenCalled()
+  })
 })
 
 describe('toStepError / failureKindOf / daysToPull', () => {
@@ -380,84 +415,102 @@ describe('toStepError / failureKindOf / daysToPull', () => {
 })
 
 describe('handlePullFailure', () => {
-  it("🔴 closes only this run's running receipt and its run-log row", async () => {
-    fakeDb.tables.gsc_page_fetch_receipts = [
-      {
-        id: 'r-1',
-        client_id: A,
-        site_url: SITE,
-        kind: 'daily',
-        request_start_day: '2026-09-21',
-        request_end_day: '2026-09-25',
-        status: 'running',
-        inngest_run_id: 'run-9',
-        started_at: '2026-09-26T18:30:00Z',
-        finished_at: null,
-      },
-    ]
-    fakeDb.tables.cron_run_logs = [
-      { id: 'r-1', job_name: 'gsc-page-daily', status: 'running', started_at: '2026-09-26T18:30:00Z' },
-      { id: 'sibling', job_name: 'gsc-page-daily', status: 'running', started_at: '2026-09-26T18:29:00Z' },
-    ]
+  const ID = cronRunIdFromInngestRun('run-9')
+  const FAILED_AT = new Date('2026-09-26T19:00:00Z')
+  function receiptRow(id: string, status: string): Row {
+    return {
+      id, client_id: A, site_url: SITE, kind: 'daily', request_start_day: '2026-09-21', request_end_day: '2026-09-25',
+      status, inngest_run_id: id === ID ? 'run-9' : 'run-other', started_at: '2026-09-26T18:30:00Z', finished_at: null,
+    }
+  }
+  function logRow(id: string, status: string): Row {
+    return { id, job_name: GSC_PAGE_DAILY_PULL_JOB, status, started_at: '2026-09-26T18:30:00Z' }
+  }
+
+  it('🔴 closes only its own order: the receipt and run-log row with its fixed id, not a sibling running at the same time', async () => {
+    fakeDb.tables.gsc_page_fetch_receipts = [receiptRow(ID, 'running'), receiptRow('sibling', 'running')]
+    fakeDb.tables.cron_run_logs = [logRow(ID, 'running'), logRow('sibling', 'running')]
 
     const result = await handlePullFailure(supabaseAdmin, {
       runId: 'run-9',
       message: '[gsc:quota] 429 Quota exceeded',
-      failedAt: new Date('2026-09-26T19:00:00Z'),
+      failedAt: FAILED_AT,
     })
 
-    expect(result).toEqual({ closedReceipts: 1, fallback: false })
-    expect(receiptRows()[0].status).toBe('failed')
-    expect(receiptRows()[0].failure_kind).toBe('quota')
+    expect(result).toEqual({ receiptClosed: true, runLog: 'closed' })
+    const receipt = receiptRows().find((r) => r.id === ID)
+    expect(receipt?.status).toBe('failed')
+    expect(receipt?.failure_kind).toBe('quota')
+    expect(receiptRows().find((r) => r.id === 'sibling')?.status).toBe('running')
 
     const logs = runLogRows()
-    expect(logs.find((r) => r.id === 'r-1')?.status).toBe('failed')
+    const own = logs.find((r) => r.id === ID)
+    expect(own?.status).toBe('failed')
+    expect(own?.started_at).toBe('2026-09-26T18:30:00.000Z')
     expect(logs.find((r) => r.id === 'sibling')?.status).toBe('running')
   })
 
   it('an auth failure closes the receipt but not as a run failure', async () => {
-    fakeDb.tables.gsc_page_fetch_receipts = [
-      {
-        id: 'r-1',
-        client_id: A,
-        site_url: SITE,
-        kind: 'daily',
-        request_start_day: '2026-09-21',
-        request_end_day: '2026-09-25',
-        status: 'running',
-        inngest_run_id: 'run-9',
-        started_at: '2026-09-26T18:30:00Z',
-        finished_at: null,
-      },
-    ]
-    fakeDb.tables.cron_run_logs = [
-      { id: 'r-1', job_name: 'gsc-page-daily', status: 'running', started_at: '2026-09-26T18:30:00Z' },
-    ]
+    fakeDb.tables.gsc_page_fetch_receipts = [receiptRow(ID, 'running'), receiptRow('sibling', 'running')]
+    fakeDb.tables.cron_run_logs = [logRow(ID, 'running'), logRow('sibling', 'running')]
 
     await handlePullFailure(supabaseAdmin, {
       runId: 'run-9',
       message: '[gsc:auth] 403 forbidden',
-      failedAt: new Date('2026-09-26T19:00:00Z'),
+      failedAt: FAILED_AT,
     })
 
-    expect(receiptRows()[0].failure_kind).toBe('auth')
-    const log = runLogRows().find((r) => r.id === 'r-1')
+    expect(receiptRows().find((r) => r.id === ID)?.failure_kind).toBe('auth')
+    const log = runLogRows().find((r) => r.id === ID)
     expect(log?.status).toBe('completed')
     expect(log?.failed_count).toBe(0)
   })
 
-  it("no running receipt for the run → falls back to closing the job's running run-log rows", async () => {
-    fakeDb.tables.cron_run_logs = [
-      { id: 'orphan', job_name: 'gsc-page-daily', status: 'running', started_at: '2026-09-26T18:30:00Z' },
-    ]
+  it('🔴 the run died before opening its receipt → only its own run-log row is written', async () => {
+    fakeDb.tables.cron_run_logs = [logRow('sibling', 'running')]
 
     const result = await handlePullFailure(supabaseAdmin, {
       runId: 'run-9',
       message: 'Error: step timed out',
-      failedAt: new Date('2026-09-26T19:00:00Z'),
+      failedAt: FAILED_AT,
     })
 
-    expect(result).toEqual({ closedReceipts: 0, fallback: true })
-    expect(runLogRows().find((r) => r.id === 'orphan')?.status).toBe('failed')
+    expect(result).toEqual({ receiptClosed: false, runLog: 'closed' })
+    const own = runLogRows().find((r) => r.id === ID)
+    expect(own?.status).toBe('failed')
+    expect(own?.job_name).toBe(GSC_PAGE_DAILY_PULL_JOB)
+    expect(own?.started_at).toBe('2026-09-26T19:00:00.000Z')
+    expect(runLogRows().find((r) => r.id === 'sibling')?.status).toBe('running')
+    expect(runLogRows()).toHaveLength(2)
+  })
+
+  it('a run-log row that is already terminal is not overwritten', async () => {
+    fakeDb.tables.gsc_page_fetch_receipts = [receiptRow(ID, 'complete')]
+    fakeDb.tables.cron_run_logs = [logRow(ID, 'completed')]
+
+    const result = await handlePullFailure(supabaseAdmin, {
+      runId: 'run-9',
+      message: '[gsc:quota] 429 Quota exceeded',
+      failedAt: FAILED_AT,
+    })
+
+    expect(result).toEqual({ receiptClosed: false, runLog: 'already_terminal' })
+    expect(receiptRows().find((r) => r.id === ID)?.status).toBe('complete')
+    expect(runLogRows().find((r) => r.id === ID)?.status).toBe('completed')
+  })
+
+  it('no run id → nothing is touched', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    fakeDb.tables.cron_run_logs = [logRow('sibling', 'running')]
+
+    const result = await handlePullFailure(supabaseAdmin, {
+      runId: null,
+      message: 'x',
+      failedAt: FAILED_AT,
+    })
+
+    expect(result).toEqual({ receiptClosed: false, runLog: 'no_run_id' })
+    expect(runLogRows()).toHaveLength(1)
+    expect(runLogRows()[0].status).toBe('running')
   })
 })

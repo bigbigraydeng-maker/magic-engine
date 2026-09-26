@@ -7,7 +7,7 @@
  * internals.
  *
  * Step layout: `log-start` → `open-receipt` → `finalized-range` → `pull-<day>`
- * (plus `pull-<day>-p2..p4` only when the previous page came back full) →
+ * (plus `pull-<day>-p2` only when page 1 came back full) →
  * `close-receipt` → `log-finish`. One Google request per step, so no step can run
  * into the ~125 s gateway limit (docs/PITFALLS.md F8/F10). No step sleeps. Step
  * results carry counts only, never data rows.
@@ -28,18 +28,25 @@
  * authorisation errors, so an auth failure is only written on the receipt
  * (one alarm, not two).
  *
- * The receipt id IS the order's cron_run_logs id, so `handlePullFailure` (the
- * function-level onFailure) closes exactly this order's rows and nobody else's.
+ * The receipt id IS the order's cron_run_logs id, and both are derived from the
+ * Inngest run id (cronRunIdFromInngestRun). `handlePullFailure` (the
+ * function-level onFailure) recomputes that id from `event.data.run_id` and
+ * closes exactly this order's two rows — never other orders of the same job,
+ * which may be running at the same moment. Retried steps get the same id, so
+ * opening the run log and the receipt are both idempotent.
+ *
+ * Pull orders log under their own job name (GSC_PAGE_DAILY_PULL_JOB), apart
+ * from the daily dispatch row.
  */
 
 import { NonRetriableError, RetryAfterError } from 'inngest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { cronRunHandle, failOpenCronRuns, startCronRunId } from '@/lib/cron/run-logger'
+import { cronRunHandle, cronRunIdFromInngestRun, finishCronRunIfOpen, startCronRunWithId } from '@/lib/cron/run-logger'
 import { GscApiError, type GscAnalyticsRow, type GscDayRange, type GscRowsQuery } from './client'
-import { addDays, GSC_PAGE_DAILY_JOB, type PullOrder } from './page-daily-plan'
+import { addDays, GSC_PAGE_DAILY_PULL_JOB, type PullOrder } from './page-daily-plan'
 import {
   closeReceipt,
-  closeRunningReceiptsForRun,
+  closeReceiptIfRunning,
   openReceipt,
   recordFinalizedRange,
   upsertPageDayRows,
@@ -48,8 +55,12 @@ import {
 
 /** Google's per-request maximum; a page this full means there may be more. */
 export const PAGE_ROW_LIMIT = 25_000
-/** Pages per day before the day is recorded as truncated (4 × 25,000 rows). */
-export const MAX_PAGES_PER_DAY = 4
+/**
+ * Pages per day. Google's Search Analytics API exposes at most 50,000 rows per day per search type
+ * (2 × 25,000 — developers.google.com/webmaster-tools/v1/how-tos/all-your-data). When page 2 also comes back
+ * full, the day reached that cap: Google only gives its top rows, so the day is recorded as truncated.
+ */
+export const MAX_PAGES_PER_DAY = 2
 /** Wait used when Google returns 429 without a usable Retry-After. */
 export const DEFAULT_RETRY_AFTER_MS = 60_000
 
@@ -269,7 +280,7 @@ function statusOf(r: RangeResult): { status: 'complete' | 'truncated' | 'failed'
   if (r.truncatedDays.length > 0) {
     return {
       status: 'truncated',
-      error: `${r.truncatedDays.length} day(s) hit the ${MAX_PAGES_PER_DAY}-page cap: ${r.truncatedDays.join(', ')}`,
+      error: `${r.truncatedDays.length} day(s) reached Google's 50,000-rows-per-day cap (only Google's top rows are stored): ${r.truncatedDays.join(', ')}`,
     }
   }
   return { status: 'complete', error: null }
@@ -397,16 +408,18 @@ export async function runPageDailyPull(
   order: PullOrder,
   ctx: PullContext,
 ): Promise<PullOutcome> {
-  const started = await step.run('log-start', async () => ({
-    runLogId: await startCronRunId(GSC_PAGE_DAILY_JOB),
-    startedAt: Date.now(),
-  }))
+  // The id is derived from the Inngest run id, so onFailure can find this exact row (and receipt) again.
+  const started = await step.run('log-start', async () => {
+    const runLogId = cronRunIdFromInngestRun(ctx.runId)
+    await startCronRunWithId(GSC_PAGE_DAILY_PULL_JOB, runLogId)
+    return { runLogId, startedAt: Date.now() }
+  })
 
   const opened = await openReceiptStep(step, deps, order, ctx, started)
 
   const finish = async (outcome: PullOutcome): Promise<PullOutcome> => {
     await step.run('log-finish', async () => {
-      await cronRunHandle(GSC_PAGE_DAILY_JOB, started.runLogId, started.startedAt).finish(
+      await cronRunHandle(GSC_PAGE_DAILY_PULL_JOB, started.runLogId, started.startedAt).finish(
         runLogFinishOpts(outcome),
       )
       return null
@@ -424,39 +437,36 @@ export async function runPageDailyPull(
   return finish(outcome)
 }
 
-/** Function-level onFailure: close this run's receipts and run-log rows, never throw. */
+/**
+ * Function-level onFailure: close exactly this run's receipt and run-log row — both carry the id derived from
+ * the Inngest run id — and nothing else. Other orders of the same job may be running at the same moment, so
+ * nothing here closes rows by job name. Never throws.
+ */
 export async function handlePullFailure(
   supabase: SupabaseClient,
   input: { runId: string | null; message: string; failedAt: Date },
-): Promise<{ closedReceipts: number; fallback: boolean }> {
+): Promise<{ receiptClosed: boolean; runLog: 'closed' | 'already_terminal' | 'no_run_id' }> {
+  if (!input.runId) {
+    console.error('[gsc/page-daily-pull] onFailure without a run id — nothing closed:', input.message)
+    return { receiptClosed: false, runLog: 'no_run_id' }
+  }
+  const id = cronRunIdFromInngestRun(input.runId)
   const kind = failureKindOf(input.message)
   const error = `retries exhausted: ${input.message}`
-
-  const closed = input.runId
-    ? await closeRunningReceiptsForRun(supabase, input.runId, { failure_kind: kind, error })
-    : []
-
-  for (const r of closed) {
-    const startedMs = Date.parse(r.started_at)
-    const failed = kind !== 'auth'
-    await cronRunHandle(
-      GSC_PAGE_DAILY_JOB,
-      r.id,
-      Number.isNaN(startedMs) ? input.failedAt.getTime() : startedMs,
-    ).finish({
+  const receipt = await closeReceiptIfRunning(supabase, id, { failure_kind: kind, error })
+  const receiptStartMs = receipt ? Date.parse(receipt.started_at) : Number.NaN
+  const failed = kind !== 'auth'
+  const runLog = await finishCronRunIfOpen(
+    GSC_PAGE_DAILY_PULL_JOB,
+    id,
+    {
       processed: 1,
       completed: failed ? 0 : 1,
       failed: failed ? 1 : 0,
-      summary: { receipt_id: r.id, status: 'failed', failure_kind: kind, closed_by: 'onFailure', no_publish: true },
+      summary: { receipt_id: receipt ? id : null, status: 'failed', failure_kind: kind, closed_by: 'onFailure', no_publish: true },
       error: failed ? error : undefined,
-    })
-  }
-
-  if (closed.length > 0) return { closedReceipts: closed.length, fallback: false }
-
-  // The run died before its receipt existed, or after the receipt was already
-  // closed, so only its own `running` run-log row can be left. Other orders'
-  // rows closed here are overwritten again by their own finish, which upserts by id.
-  await failOpenCronRuns(GSC_PAGE_DAILY_JOB, error, { startedBefore: input.failedAt })
-  return { closedReceipts: 0, fallback: true }
+    },
+    Number.isNaN(receiptStartMs) ? input.failedAt : new Date(receiptStartMs),
+  )
+  return { receiptClosed: receipt !== null, runLog }
 }
