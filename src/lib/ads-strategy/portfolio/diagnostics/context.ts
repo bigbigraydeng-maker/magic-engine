@@ -31,7 +31,27 @@ export function windowDays(date: string, days = WINDOW_DAYS): string[] {
   return Array.from({ length: days }, (_, i) => shiftDate(date, i - days + 1))
 }
 
-const DELIVERING = new Set(['ACTIVE', 'IN_PROCESS', 'WITH_ISSUES', 'PENDING_BILLING_INFO'])
+/**
+ * Meta 的 `effective_status` 里哪几个值算「在花钱」。
+ *
+ * 🔴 明确**不**在里面的：
+ *   · `PAUSED` / `CAMPAIGN_PAUSED` / `ADSET_PAUSED` —— 卫青 2026-09-24：
+ *     `CAMPAIGN_PAUSED` 出现在广告组/广告身上，意思是「这条本身 active，
+ *     但它所属的系列被人工暂停了」—— 是「没在投放」，不是「在投放」。
+ *   · `PENDING_REVIEW` —— 审核中还没开始花钱。放开会让「账户合计」偏保守（虚高）。
+ *   · 各种 `DISAPPROVED`/`DELETED`/`ARCHIVED` —— 花不了钱。
+ *
+ * 🔴 在这里 export：信封（`capabilities/ads/envelope-facts.ts`）也要用这套判据算
+ *    「账户当日预算合计」。两处各写一份必然分家 —— 分家的那天，诊断和信封会对
+ *    同一个账户报出两个不同的花费数字。
+ */
+export const DELIVERING_STATUSES: ReadonlySet<string> = new Set([
+  'ACTIVE',
+  'IN_PROCESS',
+  'WITH_ISSUES',
+  'PENDING_BILLING_INFO',
+])
+const DELIVERING = DELIVERING_STATUSES
 
 export interface BudgetUnit {
   level: 'campaign' | 'adset'

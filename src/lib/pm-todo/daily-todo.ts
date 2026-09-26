@@ -21,6 +21,7 @@ import {
   type ManualItem,
   type ManualItemKind,
 } from './manual-items'
+import { sharedLinkVerdictCache } from './action-link'
 
 /**
  * 这些是**知会**，不是待办 —— 单独一栏，也不计进「今天有几件事」。
@@ -79,6 +80,39 @@ const DEV_OWNED_KINDS: ManualItemKind[] = [
   // 跟真断电（ai_provider_exhausted）分成两个 kind 就是为了这一刻：
   // 那条要 PM 去充钱 / 换钥匙，这条只有我们能换令牌。
   'ai_gateway_broken',
+  // 经验手册（Claude 持久记忆，不在仓库）里点名的代码引用疑似过期——
+  // 「这句话要不要改」是技术判断，不是 PM 该做的业务决策，how 字段同样是
+  // 「回我一句我去查」的话术。见 playbook-staleness-items.ts。
+  'playbook_reference_stale',
+  // 「这个平台所有客户一起没了心跳」→ how 写的是「回我一句我去查」。
+  // 全部一起停说明是我们这边的取数任务停了，PM 去重连一百次也不会好。
+  // 🔴 注意：单条断线（platform_connection_broken / _silent / _scope_gap）
+  //    **不在这里** —— 那几条只有人能去点一次同意页，必须留在动手栏。
+  'platform_connection_pipeline_down',
+  // 「授权体检自己读不出来了」→ 同上，是我们这边的欠账。
+  'platform_connection_check_failed',
+  // 「连上了但这个客户不在取数名单里」→ 缺的是配置不是授权，重连也没用。
+  'platform_connection_not_enrolled',
+  // 「这个平台后台还没有让 PM 自助重连的按钮」→ 给他一件点不到按钮的活比不报还糟。
+  'platform_connection_no_reconnect_ui',
+  // 「连接挂在查不到的客户名下」→ 要核对该断还是该改挂，是我们的活。
+  'platform_connection_orphan',
+  // 马良：自检检不了（模型钥匙没配 / 视频下载不了）、出片后没检（事件没发出去）——how 都是
+  // 「回我一句我去看/去补」。**过关等审片、不过关问返工还是放弃那两条不在这里**，那是 PM 的活。
+  'maliang_check_unverifiable',
+  'maliang_check_missing',
+  // 李白：溯源检不了（官网网址没配 / 读不到）、生成后没检（事件没发出去）、提示词库月检
+  // 疑似过期——三条 how 都是「回我一句我去看/去补/去改」。**真有「未证实」句要改的那条
+  // （libai_copy_unverified）不在这里**，那是 PM/FDE 要动手改文案的活。
+  'libai_check_unverifiable',
+  'libai_check_missing',
+  'libai_prompt_library_stale',
+  // 司马迁本周没巡成（读评价表失败 / 起草全失败）→ how 写「回我一句「查一下司马迁」我去看」。
+  // 真有新评价要回的那条（simaqian_review_drafts）**不在这里**，那是 PM/FDE 要动手回评价的活。
+  'simaqian_patrol_failed',
+  // Meta 钥匙体检自己没跑成（客户表读不到 / 一把钥匙都问不到 Meta）→ how 写「回我一句我去修」。
+  // 真有钥匙死了的那条（meta_token_dead）**不在这里**，只有人能重新授权。
+  'meta_token_check_failed',
 ]
 
 /** FDE focus clients: CTS + Oztop. */
@@ -215,7 +249,23 @@ export async function loadGbpSetupTasks(
 
 // ── Data loading ────────────────────────────────────────────────────────────────
 
-export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCounts> {
+export interface LoadTodoCountsOptions {
+  /**
+   * 链接闸整批最多等多久（毫秒），只给有人盯着转圈的 /dashboard/today 用。
+   * 每日邮件不传，照旧等每条链接验完。见 dropBrokenLinks 的 budgetMs。
+   */
+  linkCheckBudgetMs?: number
+}
+
+export async function loadTodoCounts(
+  supabase: SupabaseClient,
+  opts: LoadTodoCountsOptions = {},
+): Promise<TodoCounts> {
+  // 人工待办跟下面的计数互不依赖，先开跑、跟计数同时进行（2026-09-26「loading 非常慢」）
+  const rawManualItemsPromise = loadManualItems(supabase).catch((err: unknown) => {
+    console.error('[pm-todo] manual items load failed:', err instanceof Error ? err.message : String(err))
+    return [] as ManualItem[]
+  })
   const cardCutoff = new Date()
   cardCutoff.setDate(cardCutoff.getDate() - RECENT_CARD_DAYS)
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
@@ -280,13 +330,15 @@ export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCoun
       .map(([id, v]) => ({ name: v.name, id, [key]: v.count }))
       .sort((a, b) => a.name.localeCompare(b.name))
 
-  const rawManualItems = await loadManualItems(supabase).catch((err: unknown) => {
-    console.error('[pm-todo] manual items load failed:', err instanceof Error ? err.message : String(err))
-    return [] as ManualItem[]
-  })
+  const rawManualItems = await rawManualItemsPromise
   // 链接打不开的不下发（PM 2026-08-03：「点过去就是 404，徒增我和 fde 的工作时间」）。
   // 闸本身出问题时原样放行 —— 少过滤好过整栏消失。
-  const manualItems = await dropBrokenLinks(rawManualItems)
+  // 页面读缓存 + 限时；没给时限的调用方（每日邮件）照旧每条现场验，结果写回缓存给页面用。
+  const manualItems = await dropBrokenLinks(rawManualItems, undefined, {
+    cache: sharedLinkVerdictCache,
+    refreshCache: opts.linkCheckBudgetMs === undefined,
+    budgetMs: opts.linkCheckBudgetMs,
+  })
     .then((r) => r.kept)
     .catch(() => rawManualItems)
 

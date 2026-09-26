@@ -25,6 +25,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
 import { actionSourceForSourceKind, type SourceKind } from './intake'
+import { eventAgeMs, isPastEventWindow, DAY_MS } from './event-window'
 import type {
   ClientSendConfig,
   DestinationWriter,
@@ -285,8 +286,8 @@ export async function sendApprovedOutcome(
   }
 
   // ── 5. 超过平台时间窗口就别发了 ────────────────────────────────────
-  const ageDays = (now.getTime() - new Date(outcome.occurred_at).getTime()) / 86_400_000
-  if (ageDays > writer.maxEventAgeDays) {
+  const ageDays = eventAgeMs(outcome.occurred_at, now) / DAY_MS
+  if (isPastEventWindow(outcome.occurred_at, now, writer.maxEventAgeDays)) {
     await casUpdate(supabase, wb.id, ['queued', 'failed'], {
       status: 'expired_no_send',
       last_error: `事件已过去 ${Math.floor(ageDays)} 天，超过 ${writer.maxEventAgeDays} 天窗口`,

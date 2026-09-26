@@ -298,6 +298,12 @@ export const PRIMARY_METRIC_CATALOG: MetricCandidate[] = [
     recommended_for_sub_types: ['ongoing', 'event_driven'],
     default_direction: 'increase',
     note: 'GA4 form + 客户自报电话/微信咨询' },
+  { key: 'messaging_started', label_en: 'Messaging conversations started', label_zh: '私信/WhatsApp 对话开启数',
+    unit: 'count/mo', measurement: 'auto',
+    recommended_for: ['acquisition'],
+    recommended_for_sub_types: ['ongoing', 'event_driven'],
+    default_direction: 'increase',
+    note: 'Meta 广告 messaging_conversation_started 动作，按 outcome-ladder messaging_started 口径自动取数' },
   { key: 'form_submissions', label_en: 'GA4 form submissions', label_zh: 'GA4 表单提交',
     unit: 'count/mo', measurement: 'auto',
     recommended_for: ['acquisition'],
@@ -347,8 +353,10 @@ export const PRIMARY_METRIC_CATALOG: MetricCandidate[] = [
     default_direction: 'decrease' },
 
   // ── Sales: product_launch (P32 NEW) ──────────────────────────────────────
+  // 2026-09-24：改成 hybrid —— 人在客户 CRM 表填「阶段=已订金」，系统读 me_sale_outcomes
+  // 的 purchase 行自动计数。人工那一半去不掉（订金到账只有客户知道），机器那一半已经自动。
   { key: 'signups_count', label_en: 'Sign-ups / bookings', label_zh: '报名/预订数',
-    unit: 'count', measurement: 'self_report',
+    unit: 'count', measurement: 'hybrid',
     recommended_for: ['sales'],
     recommended_for_sub_types: ['product_launch'],
     default_direction: 'increase',

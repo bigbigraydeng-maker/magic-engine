@@ -12,6 +12,7 @@
  */
 
 import type { ActionDefinition, ActionKey } from './types'
+import { ADS_ACTION_DEFINITIONS } from './registry-ads'
 
 /**
  * `seo.build_publish_package` —— Kernel v1 的 safe capability。
@@ -105,9 +106,11 @@ const SEO_BUILD_PUBLISH_PACKAGE: ActionDefinition<'seo.build_publish_package'> =
  * spec: docs/specs/2026-08-19-me2-page-optimization-apply-action-v1.0.md
  *
  * 🔴 `sideEffect: 'outward'` + `outwardAuthorization` 非 null + `reversible: true`
- *    这三条同时成立才被 outward-authorization 层放行；`requiresHumanApproval: true`
- *    是字面量 true，policy 层 `auto_approve` 也会被 kernel 反手落
- *    `outward_requires_human_policy` deny 码。
+ *    这三条同时成立才被 outward-authorization 层放行；它声明的是
+ *    `approval: { mode: 'human_only' }`，所以即便客户把政策配成 `auto_approve`，
+ *    授权层也会反手落一个 `outward_requires_human_policy` deny 码。
+ *    （2026-09-24 广告支柱新增了 `bounded` 模式，但**这个动作没有选它** ——
+ *    页面写入没有「信封」这个概念，它的边界是人点头。）
  *
  * 🔴 idempotency key = `(page_url, page_version_token, validated_diff_hash)`：
  *    snapshot 或 diff 一变 → 是另一件事，重新走 authorize；
@@ -154,7 +157,7 @@ const PAGE_APPLY_OPTIMIZATION_REQUEST: ActionDefinition<'page.apply_optimization
 
   outwardAuthorization: {
     declaredIn: 'docs/specs/2026-08-19-me2-page-optimization-apply-action-v1.0.md',
-    requiresHumanApproval: true,
+    approval: { mode: 'human_only' },
     // 🔴 v1 rollback 语义（复审 2026-08-19 两位 reviewer 一致挑出 P0，随此 commit 修正）：
     //
     //    本字段仅**标注 provider 支持该路径的存在**（Draft PR pre-merge 允许 close
@@ -204,9 +207,115 @@ const PAGE_APPLY_OPTIMIZATION_REQUEST: ActionDefinition<'page.apply_optimization
   allowedPurposes: ['growth'],
 }
 
+/**
+ * `ads.auto_pause_on_d3` —— 把「花钱没结果」的广告组暂停（诊断层 D3 命中）。
+ *
+ * 做什么：D1-D9 只读诊断（`src/lib/ads-strategy/portfolio/diagnostics/`）里
+ * D3（近 7 天花费 ≥ 2× 目标单次成本、且单次成本 ≥ 2× 目标）命中某个广告组时，
+ * 把**那一个**广告组暂停（`setAdSetStatus`）。D3 只在 adset 级命中，
+ * 所以这个动作从不碰 campaign 级接口，也不需要「是否所有 adset 都命中」
+ * 这种升级判断——那个问题只有复用 campaign 级 `executeStopLoss` 时才存在。
+ *
+ * 🔴 **为什么是 `outward` + 必须人工批准**（2026-09-22 三轮方案定稿）：
+ *    这是一次真实的 Meta API 写入（会立刻停止一条正在花钱的广告组投放），
+ *    完全符合本仓 `outward` 的判据（"对客户线上资产的真实写入"，
+ *    参照 `page.apply_optimization_request` 同样写客户自己的资产也是 outward）。
+ *    `outwardBlockReason` / `authorize.ts` 的对外闸门是硬性不可绕过的
+ *    （`requiresHumanApproval` 只能是字面量 `true`，`auto_approve` 策略下
+ *    outward 动作永远被拒）——PM 2026-09-22 最初要的"零点击全自动"在这道闸下
+ *    做不到，PM 确认后改为"一键批准"：`ad_strategy_configs.autopilot_enabled`
+ *    控制要不要为这个客户生成待批准的暂停建议，但真正执行仍然要 FDE/PM
+ *    在待办卡片上点一下"批准"（`src/lib/action-submission/ads-auto-pause.ts`
+ *    的 `approveAndExecuteAdsAutoPause`，一次调用签批准+执行）。
+ *
+ * 🔴 **`providerIdempotency: 'supported'`**：暂停是纯状态置位（等价于 PUT
+ *    status=PAUSED），reput 不会产生第二次副作用、不会重复扣费——跟
+ *    `page.apply_optimization_request` 那种"重放可能第二次真的发生"的创建型
+ *    操作不是一回事。这让 Gateway 在结果未知的失败上可以安全自动重试，
+ *    不必每次瞬时故障都转人工。
+ *
+ * 🔴 **`reversible: true` + `rollback: 'provider_native'`**：撤回 = 把广告组
+ *    状态设回 `ACTIVE`（同样是幂等的状态置位）。
+ */
+const ADS_AUTO_PAUSE_ON_D3: ActionDefinition<'ads.auto_pause_on_d3'> = {
+  actionKey: 'ads.auto_pause_on_d3',
+  version: 1,
+  title: '把花钱没结果的广告组暂停（D3 命中，需人工批准）',
+
+  inputSchema: {
+    type: 'object',
+    required: ['ad_account_id', 'adset_id', 'diagnosis_code', 'insight_date'],
+    properties: {
+      ad_account_id: { type: 'string' },
+      adset_id: { type: 'string' },
+      // 目前只有 D3，字段仍然显式声明——将来别的诊断码想复用这个动作，
+      // 幂等键天然按诊断码分开，不需要改契约。
+      diagnosis_code: { type: 'string' },
+      insight_date: { type: 'string' },
+    },
+    additionalProperties: false,
+  },
+  outputSchema: {
+    type: 'object',
+    required: ['adset_id', 'paused', 'verified_status'],
+    properties: {
+      adset_id: { type: 'string' },
+      paused: { type: 'boolean' },
+      verified_status: { type: 'string' },
+    },
+    additionalProperties: true,
+  },
+
+  capability: 'ads.auto_pause_on_d3',
+  risk: 'medium',
+  sideEffect: 'outward',
+  reversible: true,
+
+  outwardAuthorization: {
+    declaredIn: 'docs/specs/2026-09-22-me2-ads-d3-auto-pause-v1.0.md',
+    approval: { mode: 'human_only' },
+    rollback: 'provider_native',
+  },
+
+  // 同一个广告账户 + 同一个广告组 + 同一个诊断码 + 同一个诊断日 → 同一件事。
+  // insight_date 进键是刻意的：诊断每天只跑一次，这把键天然做到
+  // 「24 小时内同一条广告不重复出手」，不需要另外维护一张去重表。
+  idempotency: {
+    keyFields: ['ad_account_id', 'adset_id', 'diagnosis_code', 'insight_date'],
+    scope: 'client',
+  },
+
+  // 暂停不花钱（它只会让花费停下来）。
+  costModel: {
+    kind: 'fixed',
+    estimate: () => 0,
+    stepCeilingUsd: { pause: 0, verify: 0 },
+  },
+
+  providerIdempotency: 'supported',
+
+  retryPolicy: { maxAttempts: 3, backoff: 'exponential', baseMs: 1000 },
+
+  verification: { method: 'ads_pause_integrity', delayMs: 0 },
+
+  requiredCapabilityTier: 'paid_client',
+
+  steps: ['pause', 'verify'],
+
+  // 🔴 不是 'growth'：`submitActionRun` 要求 purpose='growth' 的提交必须挂
+  //    goal_id，而 Goal/Initiative/Plan 层目前多数客户是空的（见
+  //    project-goal-initiative-plan-layer-underused 记忆）——挂一个不存在
+  //    或硬凑的目标，比不挂更危险。「花钱没结果就停」是保护账户基线不被
+  //    继续烧钱，不是在追求某个具体增长目标，归类成 maintenance 更诚实。
+  allowedPurposes: ['maintenance'],
+}
+
 const DEFINITIONS: Readonly<Record<ActionKey, ActionDefinition>> = {
   'seo.build_publish_package': SEO_BUILD_PUBLISH_PACKAGE,
   'page.apply_optimization_request': PAGE_APPLY_OPTIMIZATION_REQUEST,
+  'ads.auto_pause_on_d3': ADS_AUTO_PAUSE_ON_D3,
+  // 广告支柱受限自治六件（spec 2026-09-24 §3 G4/G5）。定义在 registry-ads.ts，避免本文件继续膨胀。
+  ...ADS_ACTION_DEFINITIONS,
 }
 
 export interface ActionRegistry {
