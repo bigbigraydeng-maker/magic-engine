@@ -44,8 +44,13 @@ import { countOutcome, type OutcomeStep } from '@/lib/ads-strategy/portfolio/out
 export type AutoFetchResult =
   | { ok: true;  value: number; source: string; snapshot_date: string; label: string }
   | { ok: false; reason: string }
-  /** 归属数据不足，不是 0 —— callers must never display 0 for this variant. */
-  | { ok: false; reason: string; unknown: true }
+  /**
+   * 归属数据不足，不是 0 —— callers must never display 0 for this variant.
+   * `noData`: the source answered fine and simply has no records yet (e.g. no
+   * bookings logged). Not a system fault — schedulers must not count it as a
+   * failed run. Every other unknown (query error, ambiguous goal) stays a fault.
+   */
+  | { ok: false; reason: string; unknown: true; noData?: true }
 
 export interface AutoFetchOptions {
   /**
@@ -53,7 +58,7 @@ export interface AutoFetchOptions {
    * (leads_count via ads, messaging_started, signups_count) count inside it.
    *
    * 🔴 Pass it whenever you have the goal row: a client may run several active
-   *    goals at once (2026-09-24 CTS: signups_count + leads_count), and without
+   *    goals at once (seen 2026-09-24: signups_count + leads_count), and without
    *    it we can only fall back to "the client's single active goal" — which
    *    fails for every goal of that client.
    */
@@ -791,6 +796,7 @@ async function fetchBookings(
     return {
       ok: false,
       unknown: true,
+      noData: true,
       reason: '成交数还没有任何记录 —— 可能是真的还没成交，也可能是 CRM「阶段」那一列没人填（两者在库里长得一样，不猜）',
     }
   }

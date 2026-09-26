@@ -88,7 +88,8 @@ describe('autoFetchMetricValue — signups_count (报名/预订数)', () => {
     const result = await autoFetchMetricValue(db, 'client-1', 'signups_count')
 
     expect(result.ok).toBe(false)
-    expect(result).toMatchObject({ unknown: true })
+    // noData：数据源正常只是没记录 —— 定时任务据此不把整次运行判成失败
+    expect(result).toMatchObject({ unknown: true, noData: true })
     if (result.ok) throw new Error('expected failure result')
     expect(result.reason).toContain('还没成交')
     expect(result.reason).toContain('阶段')
@@ -127,6 +128,8 @@ describe('autoFetchMetricValue — signups_count (报名/预订数)', () => {
 
     expect(result.ok).toBe(false)
     expect(result).toMatchObject({ unknown: true })
+    // 查询报错是故障，不能被当成「只是没数据」
+    expect(result).not.toHaveProperty('noData')
     if (result.ok) throw new Error('expected failure result')
     expect(result.reason).toBe('permission denied for table me_sale_outcomes')
   })

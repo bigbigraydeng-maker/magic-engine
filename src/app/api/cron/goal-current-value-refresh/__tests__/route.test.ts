@@ -171,7 +171,7 @@ describe('GET /api/cron/goal-current-value-refresh', () => {
     expect(finishMock).toHaveBeenCalledWith(expect.objectContaining({ processed: 2, completed: 2, failed: 0, error: undefined }))
   })
 
-  it('failures are written to the run log (error + summary), not recorded as clean', async () => {
+  it('real failures are written to the run log (error + summary); "no records yet" is logged but not a failure', async () => {
     const goals = [
       { id: 'g1', client_id: 'c1', primary_metric_key: 'signups_count', period_start: '2026-09-24', period_end: '2026-11-30' },
       { id: 'g2', client_id: 'c1', primary_metric_key: 'leads_count', period_start: '2026-09-24', period_end: '2026-11-30' },
@@ -188,20 +188,56 @@ describe('GET /api/cron/goal-current-value-refresh', () => {
       }
     })
     ;(autoFetchMetricValue as any)
-      .mockResolvedValueOnce({ ok: false, unknown: true, reason: 'no bookings yet' })
-      .mockResolvedValueOnce({ ok: false, reason: 'ads query failed' })
+      .mockResolvedValueOnce({ ok: false, unknown: true, noData: true, reason: 'no bookings yet' })
+      // unknown WITHOUT noData (ambiguous goal / query error) is still a fault
+      .mockResolvedValueOnce({ ok: false, unknown: true, reason: 'client has several active goals' })
+
+    const res = await GET(makeReq('Bearer test-secret-123'))
+    const body = await res.json()
+
+    expect(body).toMatchObject({ processed: 2, succeeded: 0, failed: 1 })
+    expect(finishMock).toHaveBeenCalledTimes(1)
+    type Entry = { goal_id: string; reason: string }
+    const [arg] = finishMock.mock.calls[0] as unknown as [
+      { failed: number; error?: string; summary?: { errors: Entry[]; no_data: Entry[] } },
+    ]
+    expect(arg.failed).toBe(1)
+    expect(arg.error).toBe('goal g2: client has several active goals')
+    expect(arg.summary?.errors).toEqual([{ goal_id: 'g2', reason: 'client has several active goals' }])
+    expect(arg.summary?.no_data).toEqual([{ goal_id: 'g1', reason: 'no bookings yet' }])
+  })
+
+  it('only "no records yet" → run is not failed (no error), but the reason is kept in summary', async () => {
+    const goals = [
+      { id: 'g1', client_id: 'c1', primary_metric_key: 'signups_count', period_start: '2026-09-24', period_end: '2026-11-30' },
+    ]
+    ;(supabaseAdmin.from as any).mockImplementation((table: string) => {
+      if (table === 'clients') {
+        return {
+          select: () => ({ in: () => ({ eq: () => Promise.resolve({ data: [{ id: 'c1' }], error: null }) }) }),
+        }
+      }
+      return { select: () => ({ eq: () => Promise.resolve({ data: goals, error: null }) }) }
+    })
+    ;(autoFetchMetricValue as any).mockResolvedValueOnce({ ok: false, unknown: true, noData: true, reason: 'no bookings yet' })
 
     await GET(makeReq('Bearer test-secret-123'))
 
-    expect(finishMock).toHaveBeenCalledTimes(1)
-    const [arg] = finishMock.mock.calls[0] as unknown as [
-      { failed: number; error?: string; summary?: { errors: Array<{ goal_id: string; reason: string }> } },
-    ]
-    expect(arg.failed).toBe(2)
-    expect(arg.error).toBe('goal g1: no bookings yet (+1 more)')
-    expect(arg.summary?.errors).toEqual([
-      { goal_id: 'g1', reason: 'no bookings yet' },
-      { goal_id: 'g2', reason: 'ads query failed' },
-    ])
+    expect(finishMock).toHaveBeenCalledWith(expect.objectContaining({
+      failed: 0,
+      error: undefined,
+      summary: { errors: [], no_data: [{ goal_id: 'g1', reason: 'no bookings yet' }] },
+    }))
+  })
+
+  it('goals query error → 500 and a failed run with the reason (not "0 goals, clean")', async () => {
+    ;(supabaseAdmin.from as any).mockReturnValue({
+      select: () => ({ eq: () => Promise.resolve({ data: null, error: { message: 'db down' } }) }),
+    })
+
+    const res = await GET(makeReq('Bearer test-secret-123'))
+
+    expect(res.status).toBe(500)
+    expect(finishMock).toHaveBeenCalledWith({ failed: 1, error: 'Failed to load active goals: db down' })
   })
 })

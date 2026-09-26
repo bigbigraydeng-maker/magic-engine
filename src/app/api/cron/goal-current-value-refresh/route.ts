@@ -35,6 +35,8 @@ interface CronResult {
   succeeded: number
   failed: number
   errors: Array<{ goal_id: string; reason: string }>
+  /** Source answered but has no records yet — shown, but not a failed run. */
+  no_data: Array<{ goal_id: string; reason: string }>
   duration_ms: number
 }
 
@@ -64,6 +66,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     .select('id, client_id, primary_metric_key, period_start, period_end')
     .eq('status', 'active')
 
+  const goalsErr = (goalsRes as { error: { message: string } | null }).error
+  if (goalsErr) {
+    await cronRun.finish({ failed: 1, error: `Failed to load active goals: ${goalsErr.message}` })
+    return NextResponse.json({ error: `Failed to load active goals: ${goalsErr.message}` }, { status: 500 })
+  }
   const allGoals = (goalsRes as { data: GoalRow[] | null }).data ?? []
 
   // 真客户闸门：周期性监测只对 active 客户跑（DataForSEO 计划 阶段 0）。
@@ -95,6 +102,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       succeeded: 0,
       failed: 0,
       errors: [],
+      no_data: [],
       duration_ms: Date.now() - startedAt,
     }
     console.log('[goal-current-value-refresh]', result)
@@ -106,10 +114,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   let succeeded = 0
   let failed = 0
   const errors: Array<{ goal_id: string; reason: string }> = []
+  const noData: Array<{ goal_id: string; reason: string }> = []
 
   for (const goal of goals) {
     try {
-      // 传这个目标自己的时间段：一个客户可以同时有多个 active 目标（CTS 2026-09-24 起两个）。
+      // 传这个目标自己的时间段：一个客户可以同时有多个 active 目标（2026-09-24 起已出现）。
       const result = await autoFetchMetricValue(
         supabaseAdmin as any,
         goal.client_id,
@@ -118,8 +127,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       )
 
       if (!result.ok) {
-        failed++
-        errors.push({ goal_id: goal.id, reason: result.reason })
+        // 「数据源正常、只是还没有记录」不是故障：记下来，但不把整次运行判成失败，
+        // 否则它会天天把健康页和今日待办刷红，真故障反而被当噪音。
+        // 其它 unknown（多目标歧义、查询报错）仍然算失败。
+        if ('noData' in result && result.noData) {
+          noData.push({ goal_id: goal.id, reason: result.reason })
+        } else {
+          failed++
+          errors.push({ goal_id: goal.id, reason: result.reason })
+        }
         continue
       }
 
@@ -155,16 +171,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     succeeded,
     failed,
     errors,
+    no_data: noData,
     duration_ms: Date.now() - startedAt,
   }
   console.log('[goal-current-value-refresh]', JSON.stringify(result))
   // 有目标没刷成 → 这次运行记 failed 并带上原因。2026-09-24/25 两次全失败却记成
-  // completed、原因为空，健康页一片绿，CTS 两个目标连续两天没有当前值没人发现。
+  // completed、原因为空，健康页一片绿，某客户两个目标连续两天没有当前值没人发现。
   await cronRun.finish({
     processed: goals.length,
     completed: succeeded,
     failed,
-    summary: { errors },
+    summary: { errors, no_data: noData },
     error: failed > 0 ? summarizeErrors(errors) : undefined,
   })
   return NextResponse.json(result)

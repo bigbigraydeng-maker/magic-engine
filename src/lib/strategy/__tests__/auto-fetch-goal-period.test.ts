@@ -137,6 +137,8 @@ describe('autoFetchMetricValue — 同一客户多个 active 目标', () => {
     expect(result).toMatchObject({ unknown: true })
     if (result.ok) throw new Error('expected failure result')
     expect(result.reason).toContain('several active goals')
+    // 歧义不是「没数据」，定时任务必须仍把它算成失败
+    expect(result).not.toHaveProperty('noData')
   })
 
   it('没传时间段且只有 1 个 active 目标 → 照旧用它的时间段', async () => {
