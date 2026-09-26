@@ -74,6 +74,22 @@ const A_PATHS: Array<[string, string]> = [
   ['src/lib/google-ads/creds-loader.ts', 'credential loading'],
   ['package.json', 'dependency manifest'],
   ['package-lock.json', 'dependency lock'],
+  // Config and secret files that rated B until 2026-09-27 — see the block below.
+  ['.env.production', 'root credentials variant'],
+  ['.gitignore', 'ignore list guarding secret files'],
+  ['tsconfig.json', 'type-check config'],
+  ['vitest.config.ts', 'test runner config'],
+  ['playwright.config.ts', 'e2e config'],
+  ['.eslintrc.json', 'lint config'],
+  ['.husky/pre-commit', 'pre-commit hook'],
+  ['next.config.js', 'Next.js build/runtime config'],
+  ['instrumentation.ts', 'Next.js startup hook'],
+  ['scripts/render-worker/Dockerfile', 'container image'],
+  ['supabase/config.toml', 'Supabase project config'],
+  ['.nvmrc', 'Node version pin'],
+  ['middleware.ts', 'root middleware'],
+  ['tools/local-executor-bridge/bridge.py', 'signed local executor'],
+  ['.npmrc', 'npm install config'],
 ]
 
 describe('every protected path rates A', () => {
@@ -139,6 +155,86 @@ describe('governance files are A even though they are markdown', () => {
     expect(result.risk).toBe('A')
     expect(result.categories).toContain('governance')
     expect(result.reasons[0]).toContain('CLAUDE.md')
+  })
+})
+
+/**
+ * Verified on main 33672dbe (2026-09-27) with exactly this call shape: every
+ * path below rated B, and B auto-merges with no human since 2026-09-25. One
+ * test per path, so deleting any single rule turns at least one of these red —
+ * the mutation run in the PR shows it rule by rule.
+ */
+describe('config and secret files rate A, not B', () => {
+  const rate = (filename: string) => classifyRisk({ files: [{ filename, status: 'modified' }] })
+
+  it.each([
+    // credentials / secret exposure
+    ['.env.production', 'credentials'],
+    ['.env.local', 'credentials'],
+    ['.env.staging', 'credentials'],
+    ['.gitignore', 'credentials'],
+    ['docs/clients/parkhomes/web/.gitignore', 'credentials'],
+    // build / runtime execution
+    ['next.config.js', 'build-runtime'],
+    ['next.config.mjs', 'build-runtime'],
+    ['middleware.ts', 'auth-isolation'],
+    ['instrumentation.ts', 'build-runtime'],
+    ['src/instrumentation.ts', 'build-runtime'],
+    ['instrumentation-client.ts', 'build-runtime'],
+    ['Dockerfile', 'build-runtime'],
+    ['scripts/render-worker/Dockerfile', 'build-runtime'],
+    ['supabase/config.toml', 'build-runtime'],
+    ['.nvmrc', 'build-runtime'],
+    ['tools/local-executor-bridge/bridge.py', 'kernel-execution'],
+    ['tools/local-executor-bridge/policy.v1.json', 'kernel-execution'],
+    // what the checks themselves do
+    ['tsconfig.json', 'control-plane'],
+    ['tsconfig.base.json', 'control-plane'],
+    ['vitest.config.ts', 'control-plane'],
+    ['vitest.setup.ts', 'control-plane'],
+    ['playwright.config.ts', 'control-plane'],
+    ['eslint.config.mjs', 'control-plane'],
+    ['.eslintrc.json', 'control-plane'],
+    ['.eslintrc.js', 'control-plane'],
+    ['.husky/pre-commit', 'control-plane'],
+    ['.npmrc', 'supply-chain'],
+  ])('%s is A (%s)', (path, category) => {
+    const result = rate(path)
+    expect(result.risk).toBe('A')
+    expect(result.categories).toEqual([category])
+    expect(result.reasons[0]).toContain(path)
+  })
+
+  it('keeps the root .env.example template B — the one exemption', () => {
+    expect(rate('.env.example').risk).toBe('B')
+  })
+
+  it('keeps a nested .env.example A, as it already was — the exemption is root-only', () => {
+    expect(rate('scripts/factory-worker/.env.example').risk).toBe('A')
+  })
+
+  it('does not exempt a variant that merely starts with the template name', () => {
+    expect(rate('.env.example.local').risk).toBe('A')
+  })
+
+  it('keeps root .env and config/.env.production A, as they already were', () => {
+    expect(rate('.env').risk).toBe('A')
+    expect(rate('config/.env.production').risk).toBe('A')
+  })
+
+  it('keeps docs markdown C', () => {
+    expect(rate('docs/STATE.md').risk).toBe('C')
+  })
+
+  it('keeps a plain string array A — an entry with no filename is unreadable', () => {
+    const result = classifyRisk({ files: ['.env.example', 'docs/a.md'] })
+    expect(result.risk).toBe('A')
+    expect(result.readable).toBe(false)
+  })
+
+  it('does not treat a file that merely mentions env as a secret file', () => {
+    expect(classifyFile('src/lib/config/env.ts').risk).toBe('B')
+    expect(classifyFile('docs/ENV.md').risk).toBe('C')
   })
 })
 

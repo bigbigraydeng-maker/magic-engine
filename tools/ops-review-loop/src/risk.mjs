@@ -78,6 +78,8 @@ export const RISK_CATEGORY = {
   SUPPLY_CHAIN: 'supply-chain',
   /** Rules for how people and agents use the machine — not code, but the machine's rulebook. */
   GOVERNANCE: 'governance',
+  /** How the app is built and what the production runtime actually runs. */
+  BUILD_RUNTIME: 'build-runtime',
   /** Not a kind of change — a kind of ignorance. The diff could not be read. */
   UNREADABLE: 'unreadable',
 }
@@ -97,6 +99,10 @@ export const RISK_CATEGORY = {
  *   `basenameIncludes` — substring of the final path segment
  *   `basenameWord`     — the final segment contains this as a whole word
  *                        (so `rls` matches `rls-policy.ts` but not `urls.ts`)
+ *   `basename`         — the final segment equals (any directory)
+ *   `pattern`          — RegExp tested against the whole path; used only where
+ *                        a family of names (`tsconfig*.json`, `.env*`) cannot
+ *                        be written as one of the plain kinds above
  */
 export const A_RISK_RULES = [
   // --- Database structure and production data shape -----------------------
@@ -108,6 +114,25 @@ export const A_RISK_RULES = [
   { prefix: 'tools/ops-review-loop/', why: '决定 PR 自身命运的评级与复审控制面', category: RISK_CATEGORY.CONTROL_PLANE },
   { prefix: 'tools/ai-orchestrator/', why: '编排控制面', category: RISK_CATEGORY.CONTROL_PLANE },
   { exact: 'render.yaml', why: '生产服务与 cron 调度', category: RISK_CATEGORY.PRODUCTION_SCHEDULE },
+
+  // --- Config that changes what the checks themselves do ------------------
+  // 🔴 Verified 2026-09-27 on main 33672dbe: every one of these rated B, and B
+  // auto-merges with no human since 2026-09-25. One line in any of them turns
+  // a check off (strict mode, a lint rule, which tests run, the pre-commit
+  // hook) while every check still reports green.
+  { pattern: /(^|\/)tsconfig[^/]*\.json$/, why: 'TypeScript 检查配置 —— 一行就能关掉严格检查', category: RISK_CATEGORY.CONTROL_PLANE },
+  { pattern: /(^|\/)vitest\.(config|setup)\.[^/]+$/, why: '测试运行配置 —— 决定哪些测试跑、怎么跑', category: RISK_CATEGORY.CONTROL_PLANE },
+  { pattern: /(^|\/)playwright\.config\.[^/]+$/, why: '端到端测试配置 —— 决定哪些页面测试跑', category: RISK_CATEGORY.CONTROL_PLANE },
+  { pattern: /(^|\/)(eslint\.config\.[^/]+|\.eslintrc[^/]*)$/, why: 'lint 规则配置 —— 一行就能关掉规则', category: RISK_CATEGORY.CONTROL_PLANE },
+  { prefix: '.husky/', why: '提交前自动检查钩子', category: RISK_CATEGORY.CONTROL_PLANE },
+
+  // --- Build and production runtime --------------------------------------
+  // Same finding: these decide what production builds and runs, and rated B.
+  { pattern: /(^|\/)next\.config\.[^/]+$/, why: 'Next.js 构建与运行配置 —— 响应头、重定向、构建时跳过哪些检查', category: RISK_CATEGORY.BUILD_RUNTIME },
+  { pattern: /^(src\/)?instrumentation[^/]*\.[cm]?[jt]s$/, why: 'Next.js 启动钩子 —— 服务一启动就执行的代码', category: RISK_CATEGORY.BUILD_RUNTIME },
+  { pattern: /(^|\/)Dockerfile[^/]*$/, why: '容器镜像定义 —— 生产 worker 实际跑什么', category: RISK_CATEGORY.BUILD_RUNTIME },
+  { exact: 'supabase/config.toml', why: 'Supabase 项目配置 —— 鉴权与函数设置', category: RISK_CATEGORY.BUILD_RUNTIME },
+  { basename: '.nvmrc', why: 'Node 版本锁定 —— 构建与运行用哪个 Node', category: RISK_CATEGORY.BUILD_RUNTIME },
 
   // --- Governance: the rulebook the machine and its operators follow ------
   // 🔴 子牙 design review 2026-09-25: `C_SAFE_RULES` rates every `.md` as C, so
@@ -126,6 +151,7 @@ export const A_RISK_RULES = [
 
   // --- Auth, permissions, tenant isolation --------------------------------
   { exact: 'src/middleware.ts', why: '请求级鉴权与路由边界', category: RISK_CATEGORY.AUTH_ISOLATION },
+  { exact: 'middleware.ts', why: '根目录 middleware —— 请求级鉴权与路由边界', category: RISK_CATEGORY.AUTH_ISOLATION },
   { prefix: 'src/lib/auth/', why: '鉴权与客户访问边界', category: RISK_CATEGORY.AUTH_ISOLATION },
   { prefix: 'src/app/api/auth/', why: '鉴权端点', category: RISK_CATEGORY.AUTH_ISOLATION },
   { prefix: 'src/app/api/webhooks/', why: '外部入站 webhook —— 签名校验即安全边界', category: RISK_CATEGORY.AUTH_ISOLATION },
@@ -136,6 +162,7 @@ export const A_RISK_RULES = [
   { prefix: 'src/lib/kernel/', why: 'Kernel —— 执行授权、审批、幂等、状态机', category: RISK_CATEGORY.KERNEL_EXECUTION },
   { prefix: 'src/app/api/kernel/', why: 'Kernel 端点', category: RISK_CATEGORY.KERNEL_EXECUTION },
   { prefix: 'src/lib/execution/', why: '自动执行策略与背书 —— 决定系统自己会做什么', category: RISK_CATEGORY.KERNEL_EXECUTION },
+  { prefix: 'tools/local-executor-bridge/', why: '签名本地执行器 —— 决定本机能被远程叫去执行什么', category: RISK_CATEGORY.KERNEL_EXECUTION },
 
   // --- Money -------------------------------------------------------------
   { prefix: 'src/lib/billing/', why: '计费与用量', category: RISK_CATEGORY.MONEY },
@@ -154,7 +181,13 @@ export const A_RISK_RULES = [
 
   // --- Credentials --------------------------------------------------------
   { suffix: '.env', why: '凭证文件', category: RISK_CATEGORY.CREDENTIALS },
-  { includes: '/.env.', why: '凭证文件（带后缀变体）', category: RISK_CATEGORY.CREDENTIALS },
+  // 🔴 Replaces `includes: '/.env.'`, which needed a leading slash and so let
+  // root `.env.production` / `.env.local` rate B. Any path segment starting
+  // with `.env`, at any depth. The single exemption is the committed root
+  // template `.env.example`, which rated B before this rule and still does;
+  // nested `*/.env.example` stays A exactly as it was — nothing drops a level.
+  { pattern: /^(?!\.env\.example$)(.*\/)?\.env/, why: '凭证文件（.env 及各种后缀变体；只放过根目录模板 .env.example）', category: RISK_CATEGORY.CREDENTIALS },
+  { basename: '.gitignore', why: '忽略清单 —— 删一行就能把 .env.local 这类密钥文件放进仓库', category: RISK_CATEGORY.CREDENTIALS },
   // `cred` rather than `credential`: this repo names them `creds-loader.ts`.
   // It also catches `credit-*`, which is money and belongs at A anyway.
   { basenameIncludes: 'cred', why: '凭证装载 / 额度', category: RISK_CATEGORY.CREDENTIALS },
@@ -162,6 +195,7 @@ export const A_RISK_RULES = [
   // --- Supply chain (CLAUDE.md §4 counts a new dependency as a big task) ---
   { exact: 'package.json', why: '依赖清单 —— 引入新依赖即供应链面', category: RISK_CATEGORY.SUPPLY_CHAIN },
   { exact: 'package-lock.json', why: '依赖锁 —— 引入新依赖即供应链面', category: RISK_CATEGORY.SUPPLY_CHAIN },
+  { basename: '.npmrc', why: 'npm 安装配置 —— 能换依赖下载源、能放凭证', category: RISK_CATEGORY.SUPPLY_CHAIN },
 ]
 
 /**
@@ -191,7 +225,7 @@ export const C_SAFE_RULES = [
 ]
 
 /**
- * @param {{exact?: string, prefix?: string, suffix?: string, includes?: string, basenameIncludes?: string, basenameWord?: string}} rule
+ * @param {{exact?: string, prefix?: string, suffix?: string, includes?: string, basenameIncludes?: string, basenameWord?: string, basename?: string, pattern?: RegExp}} rule
  * @param {string} path
  */
 function ruleMatches(rule, path) {
@@ -201,6 +235,8 @@ function ruleMatches(rule, path) {
   if (rule.suffix !== undefined) return path.endsWith(rule.suffix)
   if (rule.includes !== undefined) return path.includes(rule.includes)
   if (rule.basenameIncludes !== undefined) return basename.toLowerCase().includes(rule.basenameIncludes)
+  if (rule.basename !== undefined) return basename === rule.basename
+  if (rule.pattern !== undefined) return rule.pattern.test(path)
   if (rule.basenameWord !== undefined) {
     return new RegExp(`(^|[^a-z0-9])${rule.basenameWord}([^a-z0-9]|$)`, 'i').test(basename)
   }
