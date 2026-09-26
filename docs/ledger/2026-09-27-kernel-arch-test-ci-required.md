@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-09-27
 source: session:d1add426
 verify_by: 2026-09-30
-verify_how: ①gh api repos/bigbigraydeng-maker/magic-engine/rulesets/20550157 的必过清单里有 Kernel architecture test，且原来的 5 道必过、防删除、防强推、PR 规则都还在，bypass 仍为空；②这个 PR 合并后新开的任意一个 PR，gh pr checks <号> --required 里出现 Kernel architecture test 且是绿的。两条都成才算成
+verify_how: 两条都成才算成。①gh api repos/bigbigraydeng-maker/magic-engine/rulesets/20550157（要用有规则集写权限的身份查，否则不返回 bypass_actors）：required_status_checks 里有 context 为 Kernel architecture test、integration_id 为 15368 的一条；原来 5 道 ai-orchestrator-tests、Ledger entries valid、Code change has ledger entry、Ledger refs exist、ops-review-loop-tests 都还在；deletion、non_fast_forward、pull_request 三条规则都还在；bypass_actors 字段存在且为 []（字段缺失不算）。②至少找到一个这个 PR 合并后新开的 PR：gh pr checks <号> --required 里出现 Kernel architecture test 并且有结论（绿或红都算接上了，红说明闸在拦；找到的都一直 Expected 或 pending 才算没接上）
 done_on: 2026-09-27
 done_ref: pr:2079
 ---

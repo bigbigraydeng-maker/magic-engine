@@ -249,9 +249,12 @@ const eslintConfig = (): EslintConfig => JSON.parse(read('.eslintrc.json')) as E
 /**
  * CI 测的是「主干 + 本 PR」合并后的代码，而主干不要求 PR 先跟上最新。两个 PR 各自是绿的、
  * 先后合进去才红（两个 migration 撞号最典型）—— 那之后每个 PR 都会红在别人的文件上。
+ * 但「不是我改的文件」不一定就是主干红：往 PROVIDER_WRITE_MODULES 新加模块时，
+ * 它的存量调用方也会列在这里，那是这个 PR 自己要补登的。
  */
 const MAIN_ALREADY_RED_HINT =
-  '⚠️ 下面列出来的如果不是你这个 PR 改的，说明主干本身已经红了：先修主干（找子牙），别在自己的 PR 里凑。\n'
+  '⚠️ 下面列出来的，如果既不是你这个 PR 改的、也不是你这次新纳入对外写模块的存量调用方，才说明主干本身已经红了：' +
+  '先修主干（找子牙），别在自己的 PR 里凑；主干修好后对你的 PR 跑 gh pr update-branch —— 这道检查不会自己重跑。\n'
 
 describe('L1 边界：对外写能力只能由 capability 层调用', () => {
   it('没有 capability 层之外的新 importer（历史清单只准变短）', () => {
@@ -275,7 +278,8 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
       violations,
       `这些文件绕过了执行内核直接 import 对外写能力。\n` +
         `正确做法是提交一个 action_run，让 Kernel 去执行；\n` +
-        `确实要豁免就把路径加进 boundaries.ts 的 PROVIDER_WRITE_GRANDFATHERED（那是一次要过 review 的 diff）。\n` +
+        `确实要豁免：先问子牙，同意后三处同加 —— boundaries.ts 的 PROVIDER_WRITE_GRANDFATHERED、` +
+        `.eslintrc.json 的 warn 豁免（路径里的方括号要转义）、本文件的 PROVIDER_WRITE_GRANDFATHERED_FROZEN。\n` +
         MAIN_ALREADY_RED_HINT +
         violations.join('\n'),
     ).toEqual([])
@@ -285,8 +289,8 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
     const missing = PROVIDER_WRITE_GRANDFATHERED.filter((p) => !ALL_FILES.includes(p))
     expect(
       missing,
-      '这些豁免路径对应的文件已经不存在了，把它们从 boundaries.ts 里删掉 —— ' +
-        '留着会让清单看起来比实际更长，也会掩盖真实的收口进度。',
+      '这些豁免路径对应的文件已经不存在了，三处同删：boundaries.ts、.eslintrc.json 的 warn 豁免、' +
+        '本文件的 PROVIDER_WRITE_GRANDFATHERED_FROZEN —— 留着会让清单看起来比实际更长，也会掩盖真实的收口进度。',
     ).toEqual([])
   })
 
@@ -300,7 +304,8 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
    *
    * 比的是集合，不是条数：同一个 PR 里迁走一条旧的、再加一条新的，条数不变，集合变了。
    * 另外两个开关一起钉：删掉一个对外写模块，它的调用方全部「合法」，比加豁免还省事；
-   * 多放一个允许目录，整个目录都能直接对外写。
+   * 多放一个允许目录，整个目录都能直接对外写。模块清单两个方向都冻：新加模块是好事，
+   * 但要同步进冻结清单，下限才会跟着涨——不涨的话，以后有人再把它删掉，这里看不出来。
    *
    * 2026-09-27：历史 26 条 + seo-meta 三条临时豁免（子牙拍板，SEO 3b · B7 迁走后删）。
    */
@@ -335,7 +340,7 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
     'src/lib/seo-meta/cycle/apply-adapter.ts',
     'src/lib/seo-meta/cycle/pr-guard.ts',
   ]
-  const PROVIDER_WRITE_MODULES_FLOOR: readonly string[] = [
+  const PROVIDER_WRITE_MODULES_FROZEN: readonly string[] = [
     '@/lib/publer/client',
     '@/lib/cms/wordpress-client',
     '@/lib/cms/shopify-client',
@@ -353,16 +358,13 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
     const current = new Set<string>(PROVIDER_WRITE_GRANDFATHERED)
     const added = Array.from(current).filter((p) => !frozen.has(p))
     const removed = Array.from(frozen).filter((p) => !current.has(p))
-    const floor = new Set(PROVIDER_WRITE_MODULES_FLOOR)
-    const newModules = PROVIDER_WRITE_MODULES.filter((m) => !floor.has(m))
 
     expect(
       added,
-      (newModules.length > 0
-        ? `你新纳入了对外写模块（${newModules.join('、')}），给它们的存量调用方补登豁免是正常的 ——\n` +
-          '仍然先问子牙过目，同意后把这些路径同时加进本文件的 PROVIDER_WRITE_GRANDFATHERED_FROZEN。\n'
-        : '豁免清单变长了 = 又开了一个绕过执行内核的口子。先问子牙（架构）：这段代码能不能改成提交一个 action_run？\n' +
-          '子牙同意了，才把这些路径同时加进本文件的 PROVIDER_WRITE_GRANDFATHERED_FROZEN。\n') +
+      '豁免清单变长了。先问子牙（架构）：\n' +
+        '  · 这些如果是你这次新纳入对外写模块的存量调用方，补登是正常的；\n' +
+        '  · 否则就是又开了一个绕过执行内核的口子 —— 这段代码能不能改成提交一个 action_run？\n' +
+        '子牙同意了，才把这些路径同时加进本文件的 PROVIDER_WRITE_GRANDFATHERED_FROZEN。\n' +
         added.join('\n'),
     ).toEqual([])
     expect(
@@ -375,12 +377,20 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
 
   it('🔴 对外写模块清单只准变长（删一个模块 = 它的调用方全部变「合法」）', () => {
     const modules = new Set<string>(PROVIDER_WRITE_MODULES)
-    const dropped = PROVIDER_WRITE_MODULES_FLOOR.filter((m) => !modules.has(m))
+    const frozen = new Set(PROVIDER_WRITE_MODULES_FROZEN)
+    const dropped = PROVIDER_WRITE_MODULES_FROZEN.filter((m) => !modules.has(m))
+    const added = PROVIDER_WRITE_MODULES.filter((m) => !frozen.has(m))
     expect(
       dropped,
       '这些模块从 PROVIDER_WRITE_MODULES 里删掉了，它们的调用方从此不受这道闸管。先问子牙；' +
-        '确实不再对外写（模块删了或改成只读），子牙同意后再从本文件的 PROVIDER_WRITE_MODULES_FLOOR 里删。\n' +
+        '确实不再对外写（模块删了或改成只读），子牙同意后再从本文件的 PROVIDER_WRITE_MODULES_FROZEN 里删。\n' +
         dropped.join('\n'),
+    ).toEqual([])
+    expect(
+      added,
+      '新纳入了对外写模块 —— 好事。同步加进本文件的 PROVIDER_WRITE_MODULES_FROZEN，让下限跟着涨' +
+        '（不涨的话，以后有人再把它删掉，上面那条看不出来）。\n' +
+        added.join('\n'),
     ).toEqual([])
   })
 
@@ -2054,9 +2064,10 @@ describe('migration 版本不许撞车（P1-4）', () => {
   /**
    * 🔴 撞车豁免清单同样只准变短，要钉两样：
    *   · 版本号集合 —— 多一个版本号 = 又放进一次撞车；
-   *   · 这些版本号下的文件总数 —— 清单按版本号豁免，同一个版本号再冒出第 3 个文件，
-   *     上面的撞车检查照样放行，只有这个数会变。
-   * 2026-09-27：原 23 组（51 个文件）+ 补登 3 组（6 个文件）= 26 组、57 个文件。
+   *   · 每个版本号下的文件数 —— 清单按版本号豁免，同一个版本号再冒出一个文件，
+   *     上面的撞车检查照样放行。逐个版本钉，不钉总数：总数挡不住「这组少一个、那组多一个」。
+   * 2026-09-27：原 23 组（51 个文件）+ 补登 3 组（6 个文件）= 26 组、57 个文件；
+   * 其中下面 5 组各 3 个文件，其余 21 组各 2 个。
    */
   const MIGRATION_COLLISIONS_FROZEN: readonly string[] = [
     '20260501000008',
@@ -2086,9 +2097,15 @@ describe('migration 版本不许撞车（P1-4）', () => {
     '20260924000000',
     '20260925000003',
   ]
-  const MIGRATION_COLLISION_FILES_PINNED = 57
+  const MIGRATION_COLLISION_THREE_FILE_GROUPS: readonly string[] = [
+    '20260522000001',
+    '20260601000002',
+    '20260603000001',
+    '20260617000001',
+    '20260623000001',
+  ]
 
-  it('🔴 撞车豁免清单只准变短：版本号跟冻结清单比集合，文件总数钉死', () => {
+  it('🔴 撞车豁免清单只准变短：版本号跟冻结清单比集合，每个版本号下的文件数钉死', () => {
     const frozen = new Set(MIGRATION_COLLISIONS_FROZEN)
     const current = new Set<string>(MIGRATION_VERSION_COLLISIONS_GRANDFATHERED)
     const added = Array.from(current).filter((v) => !frozen.has(v))
@@ -2105,15 +2122,24 @@ describe('migration 版本不许撞车（P1-4）', () => {
         removed.join('\n'),
     ).toEqual([])
 
-    const files = readdirSync(join(ROOT, 'supabase/migrations')).filter(
-      (f) => f.endsWith('.sql') && current.has(f.slice(0, 14)),
-    )
+    const count = new Map<string, number>()
+    for (const f of readdirSync(join(ROOT, 'supabase/migrations'))) {
+      const v = f.slice(0, 14)
+      if (f.endsWith('.sql') && current.has(v)) count.set(v, (count.get(v) ?? 0) + 1)
+    }
+    const threes = new Set(MIGRATION_COLLISION_THREE_FILE_GROUPS)
+    const drifted = Array.from(current)
+      .map((v) => ({ v, want: threes.has(v) ? 3 : 2, got: count.get(v) ?? 0 }))
+      .filter(({ want, got }) => want !== got)
+      .map(({ v, want, got }) => `${v}：钉住 ${want} 个文件，现在 ${got} 个`)
     expect(
-      files.length,
-      `豁免版本号下的 migration 文件现在是 ${files.length} 个，钉住的是 ${MIGRATION_COLLISION_FILES_PINNED} 个。\n` +
-        '变多了 = 某个已豁免的版本号下又冒出新文件（按版本号豁免会放行它）：把新文件改个号。\n' +
-        '变少了 = 有撞车被解决了：同步改小本文件的 MIGRATION_COLLISION_FILES_PINNED。',
-    ).toBe(MIGRATION_COLLISION_FILES_PINNED)
+      drifted,
+      '已豁免的版本号下，文件数跟钉住的对不上。\n' +
+        '变多了 = 已豁免的版本号下又冒出新文件（按版本号豁免会放行它）：把新文件改个号。\n' +
+        '变少了 = 有撞车被解决了：3 个变 2 个就从本文件的 MIGRATION_COLLISION_THREE_FILE_GROUPS 里删掉这个版本号；' +
+        '只剩 1 个的按上面幽灵条目那条的提示删。\n' +
+        drifted.join('\n'),
+    ).toEqual([])
   })
 })
 
