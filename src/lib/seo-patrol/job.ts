@@ -553,6 +553,12 @@ export interface SeoPatrolBatchResult {
   failed: number
   /** Clients whose R2 page-signal feed was missing or errored this run. */
   page_data_problems: number
+  /** Clients that had findings but got no card today because of the rolling weekly cap. */
+  clients_withheld_weekly_cap: number
+  /** Clients that got no card today because the existing-card lookup failed (fail closed). */
+  clients_withheld_lookup_failed: number
+  /** Findings held back across all clients because their target already has a card. */
+  findings_held_existing_card: number
   results: SeoPatrolClientResult[]
 }
 
@@ -588,6 +594,9 @@ export async function runSeoPatrol(
     page_data_problems: results.filter(
       (r) => r.page_data_status && r.page_data_status !== 'ok',
     ).length,
+    clients_withheld_weekly_cap: results.filter((r) => r.cards_withheld_reason === 'weekly_cap').length,
+    clients_withheld_lookup_failed: results.filter((r) => r.cards_withheld_reason === 'card_lookup_failed').length,
+    findings_held_existing_card: results.reduce((s, r) => s + (r.findings_held_existing_card ?? 0), 0),
     results,
   }
 }
