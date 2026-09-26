@@ -14,6 +14,7 @@ vi.mock('../../graph-read',async()=>{
 })
 
 import { generateAnalysis,listAnalyses,normaliseHeadings,placeRuleSection,safeCharge,stripFatigueSentences } from '../analysis'
+import { renderRuleSection,type RuleSectionInput } from '@/lib/ads-strategy/rules/client-copy'
 
 const grant={ id:'10000000-0000-4000-8000-000000000001',connection_id:'20000000-0000-4000-8000-000000000001',
   ad_account_id:'act_1234567890',revision:'30000000-0000-4000-8000-000000000001',entitlement_revision:'40000000-0000-4000-8000-000000000001' }
@@ -672,9 +673,34 @@ describe('listAnalyses 只把图表用得到的证据字段发给浏览器',()=>
       campaigns:fullEvidence.campaigns,comparison:fullEvidence.comparison,
       daily_campaigns:fullEvidence.daily_campaigns,placements:fullEvidence.placements,
       age_gender:fullEvidence.age_gender,devices:fullEvidence.devices,regions:fullEvidence.regions,
+      rule_cards:null,
     })
     expect(result.evidence).not.toHaveProperty('video_ads')
     expect(result.evidence).not.toHaveProperty('fatigue_candidates')
+  })
+
+  it('有巡检结论时拼出卡片，正文第三部分换成一句话，且不把逐条广告花费发给浏览器',async()=>{
+    const sec={ source:'patrol',dataDate:'2026-09-25',adsChecked:12,findings:[{
+      kind:'fatigue',adName:'Ad A',
+      headline:'「Ad A」最近 3 天，看到广告后点进来的人变少了：点击率从之前两周的 3.0% 降到了 1.0%（数据截至 9月25日）',
+      detail:'说明文字',action:'如果你最近自己改过这条广告的图片或视频，请告诉我们。',spend:12.5,explainsCtr:true,
+    }] }
+    const report=`一、总体结果\n花费。\n\n${renderRuleSection(sec as RuleSectionInput)}\n\n四、广告出现的位置\n文字。`
+    const chain:Record<string,unknown>={}
+    for(const method of ['select','eq','order','limit']) chain[method]=vi.fn(()=>chain)
+    chain.then=(resolve:(value:unknown)=>unknown)=>Promise.resolve({ data:[{ id:'job-1',status:'completed',ad_account_id:'act_1',
+      window_since:'2026-09-15',window_until:'2026-09-21',report_markdown:report,error_code:null,created_at:'t',completed_at:'t',
+      evidence:{ campaigns:[],rule_section:sec } }],error:null }).then(resolve)
+    mocks.from.mockReturnValue(chain)
+    const [result]=await listAnalyses('client','principal')
+    const evidence=result.evidence as { rule_cards:{ title:string;cards:{ headline:string }[] } }
+    expect(evidence.rule_cards.title).toBe('我们正在跟进的广告（1 条）')
+    expect(evidence.rule_cards.cards[0].headline).toBe('最近 3 天，看到广告后点进来的人变少了：点击率从之前两周的 3.0% 降到了 1.0%')
+    expect(result.evidence).not.toHaveProperty('rule_section')
+    expect(JSON.stringify(result.evidence)).not.toContain('12.5')
+    expect(result.report_markdown).toContain('这条已经放在页面最上方，这里不再重复。')
+    expect(result.report_markdown).toContain('四、广告出现的位置\n文字。')
+    expect(result.report_markdown).not.toContain('说明文字')
   })
 
   it('evidence 为 null 时不报错，直接透传 null',async()=>{

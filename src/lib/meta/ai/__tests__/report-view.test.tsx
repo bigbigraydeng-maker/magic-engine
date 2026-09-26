@@ -149,3 +149,66 @@ describe('Meta Ads AI report view',()=>{
     expect(screen.queryByTestId('report-charts')).not.toBeInTheDocument()
   })
 })
+
+describe('我们正在跟进的广告（卡片）',()=>{
+  const cardsEvidence=(n:number)=>({
+    rule_cards:{
+      title:`我们正在跟进的广告（${n} 条）`,
+      intro:'这次检查了 40 条正在投放的广告，下面这 3 条有变化，其余没发现明显变差。',
+      promise:'我们的广告团队已经看到这几条，会在10月2日前后复查并处理，你不用动手。',
+      bodyReplaced:true,
+      cards:Array.from({ length:n },(_,i)=>({
+        adLabel:`Ad ${i+1}`,headline:`标题 ${i+1}`,detail:`说明 ${i+1}`,action:`处理 ${i+1}`,
+      })),
+    },
+  })
+
+  it('shows the cards before the report body for a completed report',()=>{
+    render(<ReportView analysis={{ ...base,report_markdown:'一、总体结果\n数据充足。',evidence:cardsEvidence(3) }} />)
+    const cards=screen.getByTestId('rule-cards')
+    expect(cards).toBeInTheDocument()
+    expect(screen.getByText('我们正在跟进的广告（3 条）')).toBeInTheDocument()
+    expect(screen.getByText(/这次检查了 40 条正在投放的广告/)).toBeInTheDocument()
+    expect(screen.getByText(/我们的广告团队已经看到这几条/)).toBeInTheDocument()
+    expect(screen.getByText('广告：Ad 1')).toBeInTheDocument()
+    expect(screen.getByText('标题 3')).toBeInTheDocument()
+    const body=screen.getByTestId('report-body')
+    expect(cards.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('collapses cards beyond the first five into a details element',()=>{
+    render(<ReportView analysis={{ ...base,report_markdown:'一、总体结果\n数据充足。',evidence:cardsEvidence(7) }} />)
+    expect(screen.getByText('另外还有 2 条花费较少的，点开查看')).toBeInTheDocument()
+    expect(screen.getByText('标题 6').closest('details')).not.toBeNull()
+    expect(screen.getByText('标题 5').closest('details')).toBeNull()
+  })
+
+  it('shows the cards alongside the failure message',()=>{
+    render(<ReportView analysis={{ ...base,status:'failed',report_markdown:null,error_code:'model_unavailable',evidence:cardsEvidence(3) }} />)
+    expect(screen.getByTestId('rule-cards')).toBeInTheDocument()
+    expect(screen.getByText('标题 1')).toBeInTheDocument()
+    expect(screen.getByText(/AI 模型暂时无法响应/)).toBeInTheDocument()
+  })
+
+  it.each([
+    ['missing',{}],
+    ['null',{ rule_cards:null }],
+    ['malformed',{ rule_cards:{ title:'t',intro:'i',promise:'p',bodyReplaced:true,cards:[{ adLabel:1 }] } }],
+  ] as const)('renders no cards for %s rule_cards and still shows the report body',(_label,evidence)=>{
+    render(<ReportView analysis={{ ...base,report_markdown:'一、总体结果\n数据充足。',evidence }} />)
+    expect(screen.queryByTestId('rule-cards')).not.toBeInTheDocument()
+    expect(screen.getByTestId('report-body')).toBeInTheDocument()
+  })
+
+  it('renders a script-like adLabel as literal text',()=>{
+    const evidence={
+      rule_cards:{
+        title:'我们正在跟进的广告（1 条）',intro:'说明',promise:'承诺',bodyReplaced:true,
+        cards:[{ adLabel:'<script>alert(1)</script>',headline:'标题',detail:'说明',action:'处理' }],
+      },
+    }
+    const { container }=render(<ReportView analysis={{ ...base,report_markdown:'一、总体结果\n数据充足。',evidence }} />)
+    expect(screen.getByText('广告：<script>alert(1)</script>')).toBeInTheDocument()
+    expect(container.querySelector('script')).toBeNull()
+  })
+})
