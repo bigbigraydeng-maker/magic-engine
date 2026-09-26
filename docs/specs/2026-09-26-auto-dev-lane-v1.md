@@ -186,7 +186,7 @@ Tier：内部工程流程，不是 ME 产品能力；不进 6 支柱，不登记
 - 开单与贴标签：必须用 PM 账号（即任何本机窗口）；外部协作者开的单车道不捡。
 - 首批：子牙从 ROADMAP 现有 P2/P3 挑 3–5 条改写试跑（如「`settledLookupFailures` 没有消费者」→ `src/lib/pm-todo/manual-monitoring-items.ts`）。进不进车道以捡活闸为准。
 
-## 9. 实施合同（写入者：ME 2.0 构建控制窗口，DeepSeek 执行，一个 A 级 PR）
+## 9. 实施合同（写入者：构建控制派出的实施窗口，分支 `feat/auto-dev-lane`，DeepSeek 执行，一个 A 级 PR；统筹窗口不写代码）
 
 | 轮 | 文件 | 谁写 |
 |---|---|---|
@@ -195,7 +195,7 @@ Tier：内部工程流程，不是 ME 产品能力；不进 6 支柱，不登记
 | R3 | `scripts/auto-dev/brake.mjs` + 测试：§3 第 0 步判定 + §7 四条（输入为 `gh` JSON） | DeepSeek |
 | R4 | `scripts/auto-dev/sandbox.sb` + `lane-prompt.md`（定时会话操作手册，§3 逐步命令与失败分支）+ 拦截钩子脚本 | Claude Code 自写（CLAUDE.md §5 例外②：合并闸 / 不可逆副作用） |
 | R5 | `tools/ops-review-loop/src/risk.mjs`：只加一条 `scripts/auto-dev/` → A（CONTROL_PLANE）+ 测试。**开工前提**：合并闸窗口的判级缺口 PR（DR-4/5 及其扩展清单：根 `.env*`、`.gitignore`、`middleware.ts`、`instrumentation.ts`、`Dockerfile`、各类 config、`.husky/**` 等）已合进主干，本分支先 merge 主干再写，不重复带那些规则 | Claude Code 自写（例外②） |
-| R6 | 合并后：本机定时任务 `auto-dev-lane`（工作目录 `~/.claude/scheduled-tasks/auto-dev-lane/`；SKILL.md 一句话：刷新该目录下的主干只读副本、读其中 `scripts/auto-dev/lane-prompt.md` 照做）；挂 R4 钩子；建三个标签；夜巡 SKILL 加心跳检查一项 | 构建控制 |
+| R6 | 合并后：本机定时任务 `auto-dev-lane`（工作目录 `~/.claude/scheduled-tasks/auto-dev-lane/`；SKILL.md 一句话：刷新该目录下的主干只读副本、读其中 `scripts/auto-dev/lane-prompt.md` 照做）；挂 R4 钩子；建三个标签；夜巡 SKILL 加心跳检查一项 | 实施窗口 |
 
 验收（每条带真实证据）：
 1. `npm test -- scripts/auto-dev tools/ops-review-loop` 全过；测试断言 `scripts/auto-dev/pick.mjs` 在加 R5 规则前判 B、加后判 A（WL-1）。
