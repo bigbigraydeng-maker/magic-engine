@@ -268,6 +268,16 @@ PR #1973 给 Meta 留资同步加了「上一轮已办完就别重跑」的闸�
 
 ---
 
+## Magic Bridge 客户报告 · 页面「需要留意的广告」卡片（包 C，PM 2026-09-26 定暂不做）
+
+**§11 打分**：频率低（只有 CTS 在用，授权账户当前全部暂停，短期没有提醒可显示）· IMPACT 中（内容已在报告第三部分，卡片只改展示位置）· 收入中 → 中中低 → **P2**，排队。
+
+- **是什么**：客户「Meta 广告 → AI」页面报告顶部加一个提醒框，每条广告一张卡（问题 / 原因 / 我们会怎么处理、哪天复查）。内容与报告第三部分同源（`src/lib/ads-strategy/rules/client-copy.ts`），卡片完整讲、正文第三部分改成一句指向卡片（板桥设计审 #8）。
+- **要做的**：`src/app/meta-ads-ai/[clientId]/ReportView.tsx` 加卡片区；`src/lib/meta/ai/analysis.ts` 的 `chartEvidence` 按字段名单逐条重挑 `rule_findings`（最多 5 条，不整块透传，子牙 C4）；报告失败时卡片照常显示。客户可见 → 需板桥审。
+- **什么时候再做**：有提醒真实出现在客户报告里、或第二个客户开始用 Magic Bridge 时。设计：`docs/specs/2026-09-26-magic-bridge-rule-findings-design.md`（C 节）。
+
+---
+
 ## SEO 标题周循环 v1 · 上线后跟进（2026-09-20 上线，CTS 开关已关；清单来源 Issue [#1807](https://github.com/bigbigraydeng-maker/magic-engine/issues/1807) 评论）
 
 - [ ] **重新打开 CTS 的开关**：先用 `POST /api/cron/seo-meta-cycle-trigger` 带 `{"dry_run": true, "client_id": "<CTS>"}` 跑一次演练，把「这一轮会改哪些页、改成什么字、依据的搜索量/难度/前 3 标题」给 PM 看；PM 批准后才把 `clients.seo_config.meta_cycle_enabled` 改回 true（见 PITFALLS D10）
