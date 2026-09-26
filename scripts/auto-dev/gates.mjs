@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { argv } from 'node:process';
+
 const LEDGER_CARD_RE = /^docs\/ledger\/.*-auto-dev-.*\.md$/;
 const NEW_ROUTE_BASENAMES = ['route.ts', 'page.tsx', 'layout.tsx'];
 const MAX_ADDED_LINES = 400;
@@ -117,6 +120,9 @@ export const CONTENT_BANS = [
   { pattern: 'https.get', label: 'https.get' },
   { pattern: 'child_process', label: 'child_process' },
   { pattern: 'execSync', label: 'execSync' },
+  { pattern: 'writeFileSync', label: 'writeFileSync' },
+  { pattern: /\bexec\s*\(/, label: 'exec(' },
+  { pattern: /\bspawn\s*\(/, label: 'spawn(' },
   { pattern: 'fs.write', label: 'fs.write' },
   { pattern: '.insert(', label: '.insert(' },
   { pattern: '.update(', label: '.update(' },
@@ -127,6 +133,8 @@ export const CONTENT_BANS = [
   { pattern: '@ts-nocheck', label: '@ts-nocheck' },
   { pattern: /\bas\s+unknown\s+as\b/, label: FORCED_CAST_LABEL },
   { pattern: /:\s*any\b/, label: 'typescript any' },
+  { pattern: /\bas\s+any\b/, label: 'as any' },
+  { pattern: /\bfetch\s+\(/, label: 'fetch (' },
 ];
 
 /**
@@ -257,4 +265,13 @@ export function runAllGates(input) {
   }
 
   return { pass: true };
+}
+
+// ── CLI entry point: node gates.mjs <input.json> ──
+if (argv[1] && argv[1].endsWith('gates.mjs') && argv[2]) {
+  const raw = readFileSync(argv[2], 'utf8');
+  const input = JSON.parse(raw);
+  const result = runAllGates(input);
+  process.stdout.write(JSON.stringify(result) + '\n');
+  process.exit(result.pass ? 0 : 1);
 }

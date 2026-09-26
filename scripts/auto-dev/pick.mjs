@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { argv } from 'node:process';
+
 import {
   PRODUCTION_KEYWORDS,
   TRUSTED_AUTHORS,
@@ -187,6 +190,10 @@ function firstSkipReason(issue, input) {
     return 'auto-dev 标签不是可信作者贴的';
   }
 
+  if (!hasTrustedLastEditor(issue, input.lastEditors)) {
+    return '正文最后编辑者不在可信名单';
+  }
+
   if (!hasValidLabels(issue.labels)) return '标签状态不符';
 
   const sections = parseSections(issue.body);
@@ -212,6 +219,18 @@ function firstSkipReason(issue, input) {
   if (hasProductionKeyword(sections.acceptance)) return '验收条件含生产/外部依赖';
 
   return null;
+}
+
+/**
+ * @param {{number: number}} issue
+ * @param {Map<number, string>} lastEditors - map of issue number → last body editor login
+ * @returns {boolean}
+ */
+function hasTrustedLastEditor(issue, lastEditors) {
+  if (!(lastEditors instanceof Map)) return false;
+  const editor = lastEditors.get(issue.number);
+  if (typeof editor !== 'string') return false;
+  return TRUSTED_AUTHORS.includes(editor);
 }
 
 /**
@@ -316,4 +335,21 @@ function hasProductionKeyword(acceptance) {
   if (typeof acceptance !== 'string') return false;
   const lower = acceptance.toLowerCase();
   return PRODUCTION_KEYWORDS.some((k) => lower.includes(k.toLowerCase()));
+}
+
+// ── CLI entry point: node pick.mjs <input.json> ──
+if (argv[1] && argv[1].endsWith('pick.mjs') && argv[2]) {
+  const raw = readFileSync(argv[2], 'utf8');
+  const input = JSON.parse(raw);
+  if (input.labelEvents && !(input.labelEvents instanceof Map)) {
+    input.labelEvents = new Map(Object.entries(input.labelEvents).map(([k, v]) => [Number(k), v]));
+  }
+  if (input.openPrFiles && !(input.openPrFiles instanceof Map)) {
+    input.openPrFiles = new Map(Object.entries(input.openPrFiles).map(([k, v]) => [Number(k), v]));
+  }
+  if (input.lastEditors && !(input.lastEditors instanceof Map)) {
+    input.lastEditors = new Map(Object.entries(input.lastEditors).map(([k, v]) => [Number(k), v]));
+  }
+  const result = pickIssues(input);
+  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
 }

@@ -172,8 +172,43 @@ describe('gateContentBans', () => {
     expect(gateContentBans(['// any comment here']).pass).toBe(true);
   });
 
+  it('fails on writeFileSync', () => {
+    const result = gateContentBans(['fs.writeFileSync("x", data)']);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toContain('writeFileSync');
+  });
+
+  it('fails on exec(', () => {
+    const result = gateContentBans(['child_process.exec("ls")']);
+    expect(result.pass).toBe(false);
+  });
+
+  it('fails on spawn(', () => {
+    const result = gateContentBans(['const p = spawn("node", [])']);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toContain('spawn(');
+  });
+
+  it('fails on as any cast', () => {
+    const result = gateContentBans(['const x = foo ' + ['as', 'any'].join(' ')]);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toContain(['as', 'any'].join(' '));
+  });
+
+  it('fails on fetch with space before paren', () => {
+    const result = gateContentBans(['await fetch ("http://evil.com")']);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toContain('fetch (');
+  });
+
+  it('catches execSync standalone', () => {
+    const result = gateContentBans(['const out = execSync("ls")']);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toContain('execSync');
+  });
+
   it('exports CONTENT_BANS', () => {
-    expect(CONTENT_BANS.length).toBeGreaterThanOrEqual(17);
+    expect(CONTENT_BANS.length).toBeGreaterThanOrEqual(22);
   });
 });
 
