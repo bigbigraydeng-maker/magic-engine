@@ -282,6 +282,7 @@ describe('renderRuleSection', () => {
       detail: 'd',
       action: 'a',
       spend: 10,
+      explainsCtr: true,
     }
     const high: ClientRuleFinding = {
       kind: 'fatigue',
@@ -290,6 +291,7 @@ describe('renderRuleSection', () => {
       detail: 'd',
       action: 'a',
       spend: 100,
+      explainsCtr: true,
     }
     const out = renderRuleSection({
       source: 'patrol',
