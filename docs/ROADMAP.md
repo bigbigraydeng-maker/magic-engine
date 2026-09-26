@@ -60,6 +60,16 @@ PR #1973 给 Meta 留资同步加了「上一轮已办完就别重跑」的闸�
 
 ---
 
+## 台账证据文件没有任何格式或敏感信息检查（2026-09-26 查实，P3）
+
+`src/lib/ledger/load.ts:15` 用 `readdirSync(dir)`（不递归）再只留 `.md`，`docs/ledger/evidence/` 子目录整个被跳过，所以 `parse.ts:137` 那条「10 位以上连续数字」之类的检查对证据文件完全不生效；证据文件目前只有 `ledger-check-refs.sh` 查它存不存在。证据文件由夜巡和各窗口核验时写入，内容来自生产取数，是最可能混进账户号 / 客户私有数据的地方。
+
+- **要做什么**：给 `docs/ledger/evidence/**` 单独加一道检查（至少：长连续数字、邮箱 / 电话形态、令牌前缀），不要把证据文件塞进台账卡的完整格式解析（格式不同）。主页 ID 这类公开标识要不要豁免，实现时再定。
+- **§11 打分**：频率低（证据文件只在夜巡与偶发核验时写）· IMPACT 低（不在客户闭环内）· 收入低（迄今未发现客户数据入库）→ 三个低 → **P3**，待认领。
+- 来源：CRM 窗口 2026-09-26 准备 NAL 止血快照时查实。
+
+---
+
 ## Facebook 表单勾的「我不要收邮件」走不到 Mailchimp 的抑制标签（2026-09-24 查实，潜在，迄今 0 次，P3）
 
 一个人被订阅进 Mailchimp 之后**才**被判成 opt-out 时，`crm/meta-lead.ts` 会把触点回执从 `subscribed` 覆盖成 `skipped:explicit_opt_out`、并写上 `do_not_contact: true`；结果本地证据被改写成「没进名单」。**这不是 `src/lib/mailchimp/` 缺能力**——`api/cron/mailchimp-suppression-sync` 每天跑一次，职责就是把 CRM 判过的「别再联系」同步成 Mailchimp 的 `suppressed_do_not_email` 标签，`lib/mailchimp/suppression-sync.ts` 复用的正是 `crm/dnc.ts` 的 `isDoNotContact()`。真正的缺口在这条管道自己的取数：`api/cron/mailchimp-suppression-sync/route.ts` 的 `loadContactsForClient()` 查 `contact_touchpoints` 时只把 `metadata.outcome` 映射进 `DncTouch.outcome`，从没把同一条触点的 `metadata.do_not_contact` 映射进 `DncTouch.flagged`——所以 `crm/meta-lead.ts` 写下的这条 opt-out 触点，`isDoNotContact()` 永远看不到，人也就不会被这条每日 cron 打上抑制标签。
