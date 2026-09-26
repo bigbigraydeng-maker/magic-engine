@@ -1,0 +1,68 @@
+(version 1)
+(deny default)
+
+;; ── network: completely denied ──
+(deny network*)
+
+;; ── keychain / security services: denied ──
+(deny mach-lookup (global-name "com.apple.SecurityServer"))
+(deny mach-lookup (global-name "com.apple.securityd.xpc"))
+(deny mach-lookup (global-name "com.apple.security.agent"))
+
+;; ── process: allow fork/exec for node/vitest workers ──
+(allow process-fork)
+(allow process-exec)
+
+;; ── signals ──
+(allow signal)
+
+;; ── sysctl read (node needs this) ──
+(allow sysctl-read)
+
+;; ── IPC: allow mach-lookup for system services node/vitest need ──
+(allow mach-lookup (global-name "com.apple.system.logger"))
+(allow mach-lookup (global-name "com.apple.system.notification_center"))
+(allow mach-lookup (global-name "com.apple.CoreServices.coreservicesd"))
+(allow mach-lookup (global-name "com.apple.lsd.mapdb"))
+(allow mach-lookup (global-name "com.apple.coreservices.launchservicesd"))
+
+;; ── read: allow system paths, deny user home ──
+(allow file-read*
+  (subpath "/usr")
+  (subpath "/bin")
+  (subpath "/sbin")
+  (subpath "/opt/homebrew")
+  (subpath "/Library")
+  (subpath "/System")
+  (subpath "/dev")
+  (subpath "/private/etc")
+  (subpath "/private/var")
+  (subpath "/var")
+  (subpath "/etc")
+  (subpath "/tmp")
+  (subpath "/private/tmp"))
+
+;; deny reading the entire user home directory (secrets, configs, keys)
+(deny file-read* (subpath (param "USER_HOME")))
+
+;; but allow reading the work repo (under /private/tmp/auto-dev/<n>/repo/)
+(allow file-read* (subpath (param "WORK_REPO")))
+
+;; allow reading node_modules inside the work repo
+;; (already covered by WORK_REPO subpath above)
+
+;; ── write: default deny, only allow specific paths ──
+(deny file-write*)
+
+;; allow writing to the work repo (but not .git pointer to avoid tampering)
+(allow file-write*
+  (subpath (param "WORK_REPO")))
+
+;; allow writing to the dedicated tmp home
+(allow file-write*
+  (subpath (param "SANDBOX_HOME")))
+
+;; allow /dev/null and /dev/tty
+(allow file-write*
+  (literal "/dev/null")
+  (literal "/dev/tty"))
