@@ -66,6 +66,8 @@ const NOT_COMPARABLE_LABEL: Record<string, string> = {
   shared_account: '共用账户',
   below_min_sample: '数量太少',
   single_unit: '只有一个单位',
+  recently_changed: '最近改过设置，还在重新学习',
+  client_page_unknown: '客户没登记 Facebook 主页',
 }
 
 /** 只留内部收件人（环境变量兜底地址也要过内部核对）。返回裸地址。 */

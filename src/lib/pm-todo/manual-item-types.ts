@@ -15,9 +15,12 @@ import type { EmailReplyItemKind } from './email-reply-items'
 import type { BindingRequestItemKind } from './binding-request-items'
 import type { PageBindingItemKind } from './page-binding-items'
 import type { CommentScopeTodoKind } from './comment-scope-items'
+import type { MetaTokenHealthKind } from './meta-token-health-items'
 import type { LeadSheetItemKind } from './lead-sheet-items'
 import type { PlatformConnectionItemKind } from './platform-connection-items'
+import type { FacebookSyncItemKind } from './facebook-sync-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
+import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
 import type { SimaqianItemKind } from './simaqian-review-items'
@@ -39,6 +42,9 @@ import type { SimaqianItemKind } from './simaqian-review-items'
 export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   'cross_client_leak',
   'facebook_page_binding_unverified',
+  // facebook_sync_failing：Facebook 私信/留资同步连续失败 = 新客人进不了 CRM（2026-09-16 NAL 断了 9 天没人知道）。
+  //   链接是需要登录的后台页，探活大概率判成坏链接 —— 宁可让人自己找入口，也不能让它静默消失。
+  'facebook_sync_failing',
   'ai_provider_exhausted',
   'ai_alerting_broken',
   // 「授权体检自己读不出来了」「整条通道停了」跟 ai_alerting_broken 是同一类：
@@ -46,6 +52,9 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // （它们的 href 本来就是空的、不会被 fetch，这里是第二道保险。）
   'platform_connection_check_failed',
   'platform_connection_pipeline_down',
+  // 钥匙死了 = 这个客户整条 Meta 链路在静默失败（CTS 9/21·9/23·9/25 三次都是 PM 自己问才发现）
+  'meta_token_dead',
+  'meta_token_check_failed',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */
@@ -131,12 +140,18 @@ export type ManualItemKind =
   /** 客人像是说他付款了，但不是我们自己确认的 —— 只有人能核对到账，不许机器自己打 paid 标签 */
   | 'paid_signal_needs_review'
   | CommentScopeTodoKind
+  /** 写在 Render 里的 Meta 钥匙被 Meta 作废（错误码 190）—— 只有人能重新授权 */
+  | MetaTokenHealthKind
+  /** 上面那项检查自己没跑成 —— 不报 ≠ 钥匙都活着 */
+  | 'meta_token_check_failed'
   /** 线索没写进客户的 Google 表格 —— 销售看的那张表缺人，留资 90 天后永久取不回 */
   | LeadSheetItemKind
   /** 执行内核停手 / 等审批 / 被规则挡下 —— 必须有人看见，不许死在日志里 */
   | 'kernel_needs_human'
   /** 自治开关同步到执行内核失败 —— 面板档位和内核实际档位可能不一致（WP3.1a） */
   | AdsAutonomyItemKind
+  /** 每日广告巡检的广告级规则（D2 素材疲劳 / D10 点进去之后差了）：要人拍板改不改，系统不会自动改 */
+  | AdsRuleFindingItemKind
   /** 有成交/咨询等着人核对要不要告诉广告平台 —— 撤不回，所以必须人点 */
   | 'conversion_needs_review'
   /** 发给广告平台时断线了，不知道对方收没收 —— 程序绝不自己重发，等人核对 */
@@ -182,6 +197,8 @@ export type ManualItemKind =
   | LibaiItemKind
   /** 司马迁 · 口碑周巡：每周四起草的 Google 评价回复草稿（一律没发）/ 本周没巡成 */
   | SimaqianItemKind
+  /** Facebook 私信 / 表单留资同步连续失败（授权失效时要有主页管理员重新「连接 Meta」） */
+  | FacebookSyncItemKind
 
 export interface ManualItem {
   kind: ManualItemKind
