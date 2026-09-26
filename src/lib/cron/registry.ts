@@ -336,6 +336,19 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 一律不发，只写回执给今日待办拉。周期与 src/lib/inngest/functions/simaqian-reputation-weekly.ts
   // 的 SIMAQIAN_CRON 一致（同目录测试断言两边相等）。避开周五周六。
   { service: 'inngest:cloud-simaqian-reputation-weekly', jobName: 'simaqian-reputation-weekly', schedule: '0 9 * * 4', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-25' },
+  // Per-page daily Google Search Console store (item 4, PR-A): a daily 18:30 UTC fan-out sends one
+  // pull order per GSC-connected client (the last 5 days) plus up to 3 backfill months per client.
+  // Its output is the receipts table: no new receipt for 26 h means the chain did not run (for
+  // example Inngest was not re-synced after deploy) or dispatched nothing.
+  //
+  // 🔴 timestampColumn is `started_at`, NOT `finished_at`: `finished_at` is NULL while an order runs,
+  //    and the freshness prober sorts DESC, where Postgres puts NULLs first — a running or stuck
+  //    receipt would read as "table never written", a false alarm every evening. A stuck order is
+  //    still reported: its cron_run_logs row stays `running` and the stuck check catches it.
+  // 🔴 schedule must not be hand-copied: the only definition is GSC_PAGE_DAILY_CRON in
+  //    src/lib/gsc/page-daily-plan.ts, and registry.test.ts asserts they are equal.
+  { service: 'inngest:cloud-gsc-page-daily-fanout', jobName: 'gsc-page-daily', schedule: '30 18 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-26',
+    outputTables: [{ table: 'gsc_page_fetch_receipts', freshnessHours: 26, timestampColumn: 'started_at' }] },
 ] as const
 
 /**

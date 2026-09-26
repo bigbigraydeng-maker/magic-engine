@@ -7,6 +7,7 @@ import { expectedIntervalHours } from './schedule'
 import { FLYWHEEL_SEO_WEEKLY_CRON, FLYWHEEL_SEO_WEEKLY_JOB } from '../flywheel/seo-weekly'
 import { COMPETITOR_WATCH_CRON, COMPETITOR_WATCH_JOB } from '../competitors/watch'
 import { AI_VISIBILITY_WEEKLY_CRON, AI_VISIBILITY_WEEKLY_JOB } from '../ai-tracker/weekly-fanout'
+import { GSC_PAGE_DAILY_CRON, GSC_PAGE_DAILY_JOB } from '../gsc/page-daily-plan'
 
 const ROOT = path.resolve(__dirname, '../../..')
 const CRON_ROUTES_DIR = path.join(ROOT, 'src/app/api/cron')
@@ -411,6 +412,20 @@ describe('每个写运行记录的地方，都必须有人认领', () => {
       entry!.schedule,
       '清单里的周期跟 src/lib/ai-tracker/weekly-fanout.ts 的 AI_VISIBILITY_WEEKLY_CRON 不一致',
     ).toBe(AI_VISIBILITY_WEEKLY_CRON)
+  })
+
+  it('🔴 GSC per-page daily: the schedule is not hand-copied and the output table is the receipts table', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === GSC_PAGE_DAILY_JOB)
+    expect(entry, `CRON_REGISTRY has no ${GSC_PAGE_DAILY_JOB} entry`).toBeDefined()
+    expect(entry!.scheduler).toBe('inngest')
+    expect(
+      entry!.schedule,
+      'the registry schedule differs from GSC_PAGE_DAILY_CRON in src/lib/gsc/page-daily-plan.ts',
+    ).toBe(GSC_PAGE_DAILY_CRON)
+    // started_at, not finished_at: finished_at is NULL while an order runs (see the registry comment).
+    expect(entry!.outputTables).toEqual([
+      { table: 'gsc_page_fetch_receipts', freshnessHours: 26, timestampColumn: 'started_at' },
+    ])
   })
 
   it('🔴 白名单不许过期：排上班了就该从白名单删掉', () => {
