@@ -106,3 +106,32 @@ describe('createCtsRepoApplyAdapter.apply — merge-state correctness (fixed bug
     expect(github.createPullRequest).not.toHaveBeenCalled()
   })
 })
+
+describe('PR 正文开在客户的公开仓库里：不许出现真实供应商名', () => {
+  const bodyOf = (github: ReturnType<typeof fakeGithub>): string => github.createPullRequest.mock.calls[0][2].body
+
+  it('市场数据那种来源说明换成封装名，标题原文不变', async () => {
+    const github = fakeGithub({ mergeResult: true })
+    const adapter = createCtsRepoApplyAdapter(github, CONN)
+    await adapter.apply({ candidate: candidate(), newTitle: 'New Title', newDesc: 'New desc', weekKey: '2026-W38', dryRun: false, evidence: EVIDENCE })
+    const body = bodyOf(github)
+    expect(body).not.toMatch(/dataforseo/i)
+    expect(body).toContain('搜索量/难度来自 NZ 市场的 Keyword Intelligence 数据')
+    expect(body).toContain('**New Title**')
+    expect(body).toContain('- 标题: Old Title')
+  })
+
+  it('谷歌曝光估算那种来源说明也换', async () => {
+    const github = fakeGithub({ mergeResult: true })
+    const adapter = createCtsRepoApplyAdapter(github, CONN)
+    const evidence: MetaCycleGateEvidence = {
+      ...EVIDENCE,
+      keywordDataSource: 'gsc_serp',
+      keywordDataNote: '需求来自谷歌后台真实曝光 214 次；难度按谷歌前三名网站强度估算为 12（非 DataForSEO 难度分）',
+    }
+    await adapter.apply({ candidate: candidate(), newTitle: 'New Title', newDesc: 'New desc', weekKey: '2026-W38', dryRun: false, evidence })
+    const body = bodyOf(github)
+    expect(body).not.toMatch(/dataforseo/i)
+    expect(body).toContain('（非 Keyword Intelligence 难度分）')
+  })
+})
