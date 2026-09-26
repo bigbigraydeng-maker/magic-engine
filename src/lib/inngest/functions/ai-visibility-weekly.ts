@@ -1,3 +1,4 @@
+// probe: trial-run gate check — do not merge
 /**
  * Magic Engine 2.0 · Inngest 云端消费者：每周 AI 可见度追踪（GEO）
  *
