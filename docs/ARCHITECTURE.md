@@ -270,7 +270,7 @@ client_site_pages
 ├── geo_block_version (TEXT)        ← 已嵌入的 GEO Directive ID（如有）
 │
 ├── ── 采集元数据 ──
-├── crawl_status: 'pending' | 'crawled' | 'failed'
+├── crawl_status: 'pending' | 'crawled' | 'failed' | 'antibot_challenged'  ← 最后一个 = 被网站防火墙挡住、读不到正文（2026-09-26 migration 起才写得进）
 ├── last_crawled_at (TIMESTAMPTZ)
 ├── crawl_error (TEXT)              ← 失败原因（如有）
 └── created_at, updated_at (TIMESTAMPTZ)

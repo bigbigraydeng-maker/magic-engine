@@ -35,10 +35,11 @@ import { pushLeadSheetItems } from './lead-sheet-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
 import {
+  buildCrawlHealthItems,
   buildNotIndexedItems,
   daysAgo,
   META_PENDING_STALE_DAYS,
-  CRAWL_STALE_DAYS,
+  type CrawlHealthRow,
   type ManualItem,
   type NotIndexedRow,
 } from './manual-item-types'
@@ -75,6 +76,32 @@ import { pushLedgerItems } from './ledger-items'
 import { pushMaliangRenderItems } from './maliang-render-items'
 import { pushLibaiItems } from './libai-items'
 import { pushSimaqianReviewItems } from './simaqian-review-items'
+
+/**
+ * 每周自动重扫名单里的客户 id —— 与 site-audit-weekly 同一判据：在用 + seo_config.weekly_blog + 有域名。
+ * 读失败返回空集合并打一条警告：宁可当天少一条「数据过期」提醒，也不给名单外的客户天天发噪音。
+ */
+async function loadWeeklyRecrawlClientIds(
+  supabase: SupabaseClient,
+  ids: string[],
+): Promise<Set<string>> {
+  try {
+    const { data, error } = await supabase
+      .from('clients')
+      .select('id')
+      .in('id', ids)
+      .contains('seo_config', { weekly_blog: true })
+      .not('domain', 'is', null)
+    if (error) throw new Error(error.message)
+    return new Set(((data ?? []) as Array<{ id: string }>).map((r) => r.id))
+  } catch (e) {
+    console.warn(
+      '[manual-items] 每周重扫名单读取失败（今天不发「数据过期」提醒）:',
+      e instanceof Error ? e.message : String(e),
+    )
+    return new Set<string>()
+  }
+}
 
 export async function loadManualItems(
   supabase: SupabaseClient,
@@ -349,7 +376,7 @@ export async function loadManualItems(
     fetchAll<NotIndexedRow>((from, to) =>
       supabase
         .from('client_site_pages')
-        .select('client_id, url, index_verdict, first_not_indexed_at, word_count')
+        .select('client_id, url, index_verdict, first_not_indexed_at, word_count, crawl_status, crawled_at')
         .not('first_not_indexed_at', 'is', null)
         .in('client_id', ids)
         .order('client_id', { ascending: true })
@@ -367,13 +394,23 @@ export async function loadManualItems(
       .select('client_id, page_slug, created_at, applied_channel')
       .eq('wp_updated', false)
       .in('client_id', ids),
-    supabase
-      .from('client_site_pages')
-      .select('client_id, crawled_at')
-      .not('crawled_at', 'is', null)
-      .in('client_id', ids)
-      .order('crawled_at', { ascending: false })
-      .limit(500),
+    // 站点数据健康：分页读全（按新到旧 .limit(500) 截掉的恰恰是数据最旧的客户），
+    // 读失败只丢这一路，不拖垮别的待办（同上面未收录那一路的 .catch 隔离纪律）。
+    fetchAll<CrawlHealthRow>((from, to) =>
+      supabase
+        .from('client_site_pages')
+        .select('client_id, crawled_at, crawl_status')
+        .in('client_id', ids)
+        .order('client_id', { ascending: true })
+        .order('url', { ascending: true })
+        .range(from, to),
+    ).catch((e: unknown) => {
+      console.warn(
+        '[manual-items] 站点数据健康读取失败（不阻塞其他待办）:',
+        e instanceof Error ? e.message : String(e),
+      )
+      return [] as CrawlHealthRow[]
+    }),
   ])
 
   // 1. Blog PRs waiting on a human merge — the article is written and tested,
@@ -437,29 +474,10 @@ export async function loadManualItems(
     })
   }
 
-  // 4. Site page data gone stale — the weekly recrawl isn't landing (Oztop's
-  //    host blocks our server IP). Without fresh pages, the orphan-page and
-  //    internal-link checks quietly run on months-old data.
-  const newestCrawl = new Map<string, string>()
-  for (const row of (crawlRows.data ?? []) as Array<{ client_id: string; crawled_at: string }>) {
-    if (!newestCrawl.has(row.client_id)) newestCrawl.set(row.client_id, row.crawled_at)
-  }
-  for (const [clientId, iso] of Array.from(newestCrawl.entries())) {
-    const days = daysAgo(iso, now)
-    if (days === null || days < CRAWL_STALE_DAYS) continue
-    items.push({
-      kind: 'crawl_stale',
-      client_id: clientId,
-      client_name: nameOf(clientId),
-      what: `网站页面数据 ${days} 天没更新了，内链和孤儿页检查还在用旧数据`,
-      // 🔴 落地路径必须落到 /site-audit/pages —— /site-audit 本身没有 page.tsx，
-      //    Next.js 直接 404（2026-09-07 每日待办 href 落地页审计 PR #1467 实测）。
-      //    /site-audit/pages 是「页面清单」页，右上就有「Start New Audit」按钮，
-      //    功能刚好对上「重新扫描网站」这句 how。
-      how: '打开链接（是「页面清单」页），右上点「Start New Audit」重扫；如果还是不行说明对方主机挡了我们，回一句我来换通道',
-      href: `https://app.magicengine.com.au/dashboard/clients/${clientId}/site-audit/pages`,
-    })
-  }
+  // 4. Site page data health — stale real crawls + firewall-blocked pages.
+  //    Built in manual-item-types.ts (pure, testable); see buildCrawlHealthItems.
+  const weeklyRecrawlIds = await loadWeeklyRecrawlClientIds(supabase, ids)
+  items.push(...buildCrawlHealthItems(crawlRows, nameOf, now, weeklyRecrawlIds))
 
   // 经验手册疑似过期——每周巡检写进 playbook_staleness_findings，这里拉模式读出来
   await pushPlaybookStalenessItems(supabase, items).catch((e) =>

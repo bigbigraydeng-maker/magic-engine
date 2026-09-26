@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { CrawlButton, type JobStatus } from '../_components/CrawlButton'
+import { INDEX_CLASS_META, type IndexClass } from '@/lib/seo/index-status'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -12,9 +13,6 @@ type PageType = 'blog' | 'product' | 'service' | 'landing' | 'about' | 'contact'
 type FilterType = PageType | 'all'
 /** Orthogonal to page type: filter by whether Google has indexed the page. */
 type IndexFilter = 'all' | 'not-indexed'
-/** Local reason a not-indexed page isn't indexed (derived server-side). */
-type IndexClass = 'unknown' | 'thin' | 'declined'
-
 interface ClientSitePage {
   id: string
   url: string
@@ -28,6 +26,7 @@ interface ClientSitePage {
   first_not_indexed_at: string | null
   not_indexed: boolean
   index_class: IndexClass | null
+  crawl_status: string | null
 }
 
 interface PagesResponse {
@@ -71,22 +70,20 @@ const TYPE_COLORS: Record<PageType, string> = {
   other:   'bg-slate-100 text-slate-600',
 }
 
-// Per-class label / action hint / color for the 收录状态 column.
-// Labels mirror the 今日待办 not_indexed 汇总项 so FDE sees the same wording.
-const INDEX_CLASS_LABEL: Record<IndexClass, string> = {
-  thin:     '内容太薄',
-  declined: '爬过没收录',
-  unknown:  '谷歌不认识',
-}
-const INDEX_CLASS_ACTION: Record<IndexClass, string> = {
-  thin:     '补内容 · 加内链',
-  declined: '去 GSC 请求编入索引',
-  unknown:  '去 GSC 请求编入索引',
-}
+// Per-class badge colour for the 收录状态 column. Wording (label / hint /
+// action) comes from seo/index-status INDEX_CLASS_META — the same text the
+// 今日待办 not_indexed item uses, so FDE sees one vocabulary everywhere.
 const INDEX_CLASS_COLORS: Record<IndexClass, string> = {
-  thin:     'bg-amber-100 text-amber-700',
-  declined: 'bg-red-100 text-red-700',
-  unknown:  'bg-orange-100 text-orange-700',
+  error:         'bg-red-100 text-red-700',
+  noindex:       'bg-red-100 text-red-700',
+  unknown:       'bg-orange-100 text-orange-700',
+  thin:          'bg-amber-100 text-amber-700',
+  duplicate:     'bg-amber-100 text-amber-700',
+  crawled:       'bg-yellow-100 text-yellow-700',
+  discovered:    'bg-sky-100 text-sky-700',
+  not_a_problem: 'bg-gray-100 text-gray-500',
+  no_verdict:    'bg-gray-100 text-gray-500',
+  other:         'bg-slate-100 text-slate-600',
 }
 
 // ---------------------------------------------------------------------------
@@ -118,7 +115,7 @@ function GeoIcon({ hasGeo }: { hasGeo: boolean }) {
 }
 
 /**
- * 收录状态列：未收录页面显示本地分类 + 该做的动作；已收录 / 未检查各一态。
+ * 收录状态列：未收录页面显示谷歌给的原因（人话）+ 简短动作，悬停看完整说明。已收录 / 未检查各一态。
  * 三态判据与后端一致：not_indexed（first_not_indexed_at 非空）优先，其次看
  * index_verdict 有没有验过。
  */
@@ -129,11 +126,11 @@ function IndexStatusCell({ page }: { page: ClientSitePage }) {
       <div className="flex flex-col items-start gap-0.5">
         <span
           className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${INDEX_CLASS_COLORS[cls]}`}
-          title={page.index_verdict ?? undefined}
+          title={`${page.index_verdict ?? ''}${page.index_verdict ? ' — ' : ''}${INDEX_CLASS_META[cls].action}`}
         >
-          {INDEX_CLASS_LABEL[cls]}
+          {INDEX_CLASS_META[cls].label}
         </span>
-        <span className="text-xs text-gray-400">{INDEX_CLASS_ACTION[cls]}</span>
+        <span className="text-xs text-gray-400">{INDEX_CLASS_META[cls].hint}</span>
       </div>
     )
   }
@@ -466,7 +463,18 @@ export default function SiteAuditPagesPage() {
                       <TypeBadge type={page.page_type} />
                     </td>
                     <td className="px-4 py-3 text-right text-gray-600">
-                      {page.word_count != null ? page.word_count.toLocaleString() : '—'}
+                      {page.crawl_status === 'antibot_challenged' ? (
+                        <span
+                          className="text-xs text-amber-600"
+                          title="我们读这一页时被网站防火墙挡住，读到的是拦截页，字数不可信"
+                        >
+                          被防火墙挡住
+                        </span>
+                      ) : page.word_count != null ? (
+                        page.word_count.toLocaleString()
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <IndexStatusCell page={page} />
