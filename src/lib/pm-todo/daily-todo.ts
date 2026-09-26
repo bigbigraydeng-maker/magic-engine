@@ -333,9 +333,10 @@ export async function loadTodoCounts(
   const rawManualItems = await rawManualItemsPromise
   // 链接打不开的不下发（PM 2026-08-03：「点过去就是 404，徒增我和 fde 的工作时间」）。
   // 闸本身出问题时原样放行 —— 少过滤好过整栏消失。
-  // 页面和邮件共用同一份实测缓存，同一条链接两边结论一致。
+  // 页面读缓存 + 限时；没给时限的调用方（每日邮件）照旧每条现场验，结果写回缓存给页面用。
   const manualItems = await dropBrokenLinks(rawManualItems, undefined, {
     cache: sharedLinkVerdictCache,
+    refreshCache: opts.linkCheckBudgetMs === undefined,
     budgetMs: opts.linkCheckBudgetMs,
   })
     .then((r) => r.kept)

@@ -101,6 +101,26 @@ describe('verifyActionLinkCached', () => {
     expect(fetchOk).toHaveBeenCalledTimes(2)
   })
 
+  it('refresh=true（每日邮件）不读缓存、现场实测，并用新结论覆盖旧的', async () => {
+    const cache: LinkVerdictCache = new Map([
+      ['https://flaky.example.com', { at: Date.now(), verdict: { kind: 'broken', status: null } }],
+    ])
+    const fetchOk = vi.fn(async () => new Response('', { status: 200 }))
+    const v = await verifyActionLinkCached('https://flaky.example.com', fetchOk as typeof fetch, cache, Date.now, true)
+    expect(v.kind).toBe('ok')
+    expect(fetchOk).toHaveBeenCalledTimes(1)
+    expect(cache.get('https://flaky.example.com')?.verdict.kind).toBe('ok')
+  })
+
+  it('写入时顺手清掉过期条目，缓存不会一直长', async () => {
+    const cache: LinkVerdictCache = new Map([
+      ['https://old.example.com', { at: 0, verdict: { kind: 'ok' } }],
+    ])
+    const fetchOk = vi.fn(async () => new Response('', { status: 200 }))
+    await verifyActionLinkCached('https://new.example.com', fetchOk as typeof fetch, cache, () => 20 * 60 * 1000)
+    expect(Array.from(cache.keys())).toEqual(['https://new.example.com'])
+  })
+
   it('登录类站点不发请求，也不写缓存', async () => {
     const cache: LinkVerdictCache = new Map()
     const fetchOk = vi.fn(async () => new Response('', { status: 200 }))
@@ -114,19 +134,20 @@ describe('verifyActionLinkCached', () => {
 describe('runPushers', () => {
   it('同时跑，但按列出的顺序拼回（后列出的先跑完也排在后面）', async () => {
     const items: ManualItem[] = []
-    const started: string[] = []
+    const finished: string[] = []
     await runPushers(items, [
       async (b) => {
-        started.push('a')
         await new Promise((r) => setTimeout(r, 40))
+        finished.push('a')
         b.push(item('https://a.example.com'))
       },
       async (b) => {
-        started.push('b')
+        finished.push('b')
         b.push(item('https://b.example.com'))
       },
     ])
-    expect(started).toEqual(['a', 'b'])
+    // 一条接一条地跑的话 a 一定先完成；b 先完成 = 真的同时在跑
+    expect(finished).toEqual(['b', 'a'])
     expect(items.map((i) => i.href)).toEqual(['https://a.example.com', 'https://b.example.com'])
   })
 

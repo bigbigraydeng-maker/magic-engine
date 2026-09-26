@@ -137,16 +137,24 @@ export const LINK_VERDICT_TTL_MS = 10 * 60 * 1000
 
 export const sharedLinkVerdictCache: LinkVerdictCache = new Map()
 
+/** refresh=true：不读缓存、每条现场实测，结果照样写回（每日邮件用，保持它原来的判断方式）。 */
 export function verifyActionLinkCached(
   href: string,
   fetchImpl: typeof fetch,
   cache: LinkVerdictCache,
   now: () => number = Date.now,
+  refresh = false,
 ): Promise<LinkVerdict> {
-  const hit = cache.get(href)
+  const hit = refresh ? undefined : cache.get(href)
   if (hit && now() - hit.at < LINK_VERDICT_TTL_MS) return Promise.resolve(hit.verdict)
   return verifyActionLink(href, fetchImpl).then((verdict) => {
-    if (verdict.kind !== 'unverifiable') cache.set(href, { at: now(), verdict })
+    if (verdict.kind !== 'unverifiable') {
+      const t = now()
+      for (const [k, v] of Array.from(cache.entries())) {
+        if (t - v.at >= LINK_VERDICT_TTL_MS) cache.delete(k)
+      }
+      cache.set(href, { at: t, verdict })
+    }
     return verdict
   })
 }

@@ -279,7 +279,7 @@ export function assertAbsoluteHref(item: ManualItem): void {
 function linkVerdictFor(
   it: ManualItem,
   fetchImpl: typeof fetch,
-  cache: LinkVerdictCache | undefined,
+  opts: DropBrokenLinksOptions,
 ): Promise<LinkVerdict> {
   try {
     // 相对路径是代码 bug（写死的 href 字符串），要比「这条链接今天恰好
@@ -301,8 +301,8 @@ function linkVerdictFor(
   //    于是「如实告诉人这件事现在做不了」变成了「人什么都看不到」——
   //    发现死在 console.warn 里，正是铁律 3 下半句禁止的那件事。
   if (it.href.trim() === '') return Promise.resolve({ kind: 'unverifiable' })
-  const check = cache
-    ? verifyActionLinkCached(it.href, fetchImpl, cache)
+  const check = opts.cache
+    ? verifyActionLinkCached(it.href, fetchImpl, opts.cache, undefined, opts.refreshCache)
     : verifyActionLink(it.href, fetchImpl)
   return check.catch((): LinkVerdict => ({ kind: 'unverifiable' }))
 }
@@ -310,6 +310,8 @@ function linkVerdictFor(
 export interface DropBrokenLinksOptions {
   /** 进程内的实测结论缓存；不给就每条都现场验（旧行为）。 */
   cache?: LinkVerdictCache
+  /** true：不读缓存、每条现场验，结果写回缓存（每日邮件用，不吃页面留下的旧结论）。 */
+  refreshCache?: boolean
   /**
    * 整批最多等多久（毫秒）。只给有人盯着转圈的页面用：到点还没验完的那条
    * 按「验不了」放行（少过滤好过整页卡住），后台那次实测照常跑完、写进缓存，
@@ -335,7 +337,7 @@ export async function dropBrokenLinks(
   try {
     verdicts = await Promise.all(
       items.map((it) => {
-        const check = linkVerdictFor(it, fetchImpl, opts.cache)
+        const check = linkVerdictFor(it, fetchImpl, opts)
         return deadline ? Promise.race([check, deadline]) : check
       }),
     )
