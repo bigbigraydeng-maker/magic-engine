@@ -90,6 +90,13 @@ const A_PATHS: Array<[string, string]> = [
   ['middleware.ts', 'root middleware'],
   ['tools/local-executor-bridge/bridge.py', 'signed local executor'],
   ['.npmrc', 'npm install config'],
+  ['vitest.workspace.ts', 'vitest workspace'],
+  ['scripts/check-policy-to-clause.mjs', 'RLS red-line check'],
+  ['scripts/db-replay-and-verify.sh', 'db red-line replay'],
+  ['.node-version', 'Node version pin read first by Render'],
+  ['.tool-versions', 'asdf / mise runtime pin'],
+  ['.dockerignore', 'keeps .env out of images'],
+  ['yarn.lock', 'other lockfiles'],
 ]
 
 describe('every protected path rates A', () => {
@@ -198,6 +205,22 @@ describe('config and secret files rate A, not B', () => {
     ['.eslintrc.js', 'control-plane'],
     ['.husky/pre-commit', 'control-plane'],
     ['.npmrc', 'supply-chain'],
+    // second review round on #2071 (子牙 / 魏征 / 狄仁杰)
+    ['vitest.workspace.ts', 'control-plane'],
+    ['vitest.projects.ts', 'control-plane'],
+    ['scripts/check-policy-to-clause.mjs', 'control-plane'],
+    ['scripts/db-replay-and-verify.sh', 'control-plane'],
+    ['.dockerignore', 'credentials'],
+    ['.ENV.production', 'credentials'],
+    ['.node-version', 'build-runtime'],
+    ['.tool-versions', 'build-runtime'],
+    ['middleware.js', 'auth-isolation'],
+    ['src/middleware.js', 'auth-isolation'],
+    ['scripts/factory-worker/package.json', 'supply-chain'],
+    ['docs/clients/parkhomes/web/package-lock.json', 'supply-chain'],
+    ['yarn.lock', 'supply-chain'],
+    ['pnpm-lock.yaml', 'supply-chain'],
+    ['npm-shrinkwrap.json', 'supply-chain'],
   ])('%s is A (%s)', (path, category) => {
     const result = rate(path)
     expect(result.risk).toBe('A')
@@ -450,6 +473,26 @@ describe('risk categories drive which evidence is owed', () => {
 
   it('reports no category for a diff with no A-level surface', () => {
     expect(classifyRisk({ files: [{ filename: 'src/lib/geo/score.ts' }] }).categories).toEqual([])
+  })
+
+  // A misspelt kind (`basenme: '.gitignore'`) matches nothing and the rule
+  // silently dies (魏征 W71-4, #2071). So every rule must use exactly one kind
+  // this module knows, and a `pattern` must be stateless: a `g` / `y` flag
+  // makes `.test()` remember `lastIndex`, so the same path would rate A on one
+  // call and B on the next.
+  it('every A rule uses exactly one known kind, and no pattern is stateful', () => {
+    const KINDS = ['exact', 'prefix', 'suffix', 'includes', 'basenameIncludes', 'basenameWord', 'basename', 'pattern']
+    for (const rule of A_RISK_RULES as Array<Record<string, unknown>>) {
+      const keys = Object.keys(rule).filter((k) => k !== 'why' && k !== 'category')
+      expect(keys, `${String(rule.why)} has kinds ${keys.join(',')}`).toHaveLength(1)
+      expect(KINDS, `${String(rule.why)} uses unknown kind ${keys[0]}`).toContain(keys[0])
+      if (rule.pattern !== undefined) {
+        expect(rule.pattern).toBeInstanceOf(RegExp)
+        expect((rule.pattern as RegExp).flags).not.toMatch(/[gy]/)
+      } else {
+        expect(typeof rule[keys[0]], String(rule.why)).toBe('string')
+      }
+    }
   })
 
   it('gives every A rule a category', () => {
