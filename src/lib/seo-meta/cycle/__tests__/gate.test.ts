@@ -43,6 +43,7 @@ const CONFIG: MetaCycleClientConfig = {
   cooldownDays: 30,
   brandVoice: 'factual AU/NZ English',
   keywordFallbackLocations: [],
+  protectedSlugs: [],
 }
 
 beforeEach(() => {
@@ -182,6 +183,23 @@ describe('runStep3Gate — editable-slug check runs BEFORE any DataForSEO/GSC sp
     expect(result.failures[0].reason).toBe('slug_not_in_any_data_file')
     expect(mockFetchGscQueriesForPage).not.toHaveBeenCalled()
     expect(mockGetSerpPage).not.toHaveBeenCalled()
+  })
+
+  it('skips a protected conversion-page slug before even checking canEditSlug (PM 2026-09-23 incident follow-up: /china-tours must never reach the gate)', async () => {
+    const { runStep3Gate } = await import('../runner')
+    const supabase = fakeSupabase({ snapshotRow: { config: { site_url: 'https://ctstours.co.nz/' } } })
+    const canEditSlug = vi.fn(async () => true)
+    const adapter: ApplyAdapter = { channel: 'pr', canEditSlug, apply: vi.fn() }
+    const candidates = [candidate({ slug: 'china-tours', pageUrl: 'https://ctstours.co.nz/china-tours' })]
+    const config = { ...CONFIG, protectedSlugs: ['china-tours'] }
+
+    const result = await runStep3Gate(supabase, adapter, config, candidates)
+
+    expect(result.passed).toHaveLength(0)
+    expect(result.failures).toHaveLength(1)
+    expect(result.failures[0].reason).toBe('protected_conversion_page')
+    expect(canEditSlug).not.toHaveBeenCalled()
+    expect(mockFetchGscQueriesForPage).not.toHaveBeenCalled()
   })
 })
 

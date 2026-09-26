@@ -4,15 +4,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
-vi.mock('@/lib/strategy/goals', () => ({ getActiveGoal: vi.fn() }))
+vi.mock('@/lib/strategy/goals', () => ({ listActiveGoals: vi.fn() }))
 vi.mock('@/lib/strategy/auto-fetch', () => ({ autoFetchMetricValue: vi.fn() }))
 vi.mock('../../config', () => ({ loadAdStrategyConfig: vi.fn() }))
 
 import { supabaseAdmin } from '@/lib/supabase'
-import { getActiveGoal } from '@/lib/strategy/goals'
+import { listActiveGoals } from '@/lib/strategy/goals'
 import { autoFetchMetricValue } from '@/lib/strategy/auto-fetch'
 import { loadAdStrategyConfig } from '../../config'
-import { medianCostPerResultCents, buildDigestGoalContext, MIN_MEDIAN_DAYS } from '../goal-context'
+import { medianCostPerResultCents, buildDigestGoalContext, pickDigestGoal, MIN_MEDIAN_DAYS } from '../goal-context'
 import type { GoalRow } from '@/types/strategy'
 import type { AdStrategyConfig } from '../../config'
 
@@ -190,13 +190,13 @@ describe('medianCostPerResultCents — 薄样本闸', () => {
 
 describe('buildDigestGoalContext', () => {
   it('没有 active goal → null，且 autoFetchMetricValue 没被调用', async () => {
-    vi.mocked(getActiveGoal).mockResolvedValue(null)
+    vi.mocked(listActiveGoals).mockResolvedValue([])
     expect(await buildDigestGoalContext('client-1', '2026-09-15')).toBeNull()
     expect(vi.mocked(autoFetchMetricValue)).not.toHaveBeenCalled()
   })
 
   it('autoFetch 返回 unknown → verdict unknown 且 reason 含归属数据不足', async () => {
-    vi.mocked(getActiveGoal).mockResolvedValue(goalRow())
+    vi.mocked(listActiveGoals).mockResolvedValue([goalRow()])
     vi.mocked(autoFetchMetricValue).mockResolvedValue({
       ok: false,
       reason: '主结果归不到广告（§14 M2）',
@@ -211,13 +211,13 @@ describe('buildDigestGoalContext', () => {
     expect(ctx?.pace.reason).toContain('归属数据不足')
   })
 
-  it('getActiveGoal 抛错 → resolves 为 null（不抛）', async () => {
-    vi.mocked(getActiveGoal).mockRejectedValue(new Error('db down'))
+  it('listActiveGoals 抛错 → resolves 为 null（不抛）', async () => {
+    vi.mocked(listActiveGoals).mockRejectedValue(new Error('db down'))
     await expect(buildDigestGoalContext('client-1', '2026-09-15')).resolves.toBeNull()
   })
 
   it('正常路径：dayIndex / totalDays 与字段透传', async () => {
-    vi.mocked(getActiveGoal).mockResolvedValue(goalRow())
+    vi.mocked(listActiveGoals).mockResolvedValue([goalRow()])
     vi.mocked(autoFetchMetricValue).mockResolvedValue({
       ok: true,
       value: 35,
@@ -235,5 +235,65 @@ describe('buildDigestGoalContext', () => {
     expect(ctx?.title).toBe('Oztop Brisbane 月询盘')
     expect(ctx?.label).toBe('新增线索/询盘')
     expect(ctx?.target).toBe(50)
+  })
+
+  it('多个目标时用广告能量的那个取数，并把它的期间传给 autoFetch', async () => {
+    vi.mocked(listActiveGoals).mockResolvedValue([
+      goalRow({ id: 'g-signups', title: '报名', primary_metric_key: 'signups_count', period_start: '2026-09-24', period_end: '2026-12-31' }),
+      goalRow({ id: 'g-leads', title: '留资', primary_metric_key: 'leads_count', period_start: '2026-09-01', period_end: '2026-09-30' }),
+    ])
+    vi.mocked(autoFetchMetricValue).mockResolvedValue({
+      ok: true,
+      value: 12,
+      source: 'ad_daily_insights',
+      snapshot_date: '2026-09-30',
+      label: 'lead',
+    })
+    vi.mocked(loadAdStrategyConfig).mockResolvedValue(adStrategyConfig())
+    insightsTable([])
+
+    const ctx = await buildDigestGoalContext('client-1', '2026-09-15')
+    expect(ctx?.title).toBe('留资')
+    expect(vi.mocked(autoFetchMetricValue)).toHaveBeenCalledWith(supabaseAdmin, 'client-1', 'leads_count', {
+      goalPeriod: { period_start: '2026-09-01', period_end: '2026-09-30' },
+    })
+  })
+})
+
+describe('pickDigestGoal — 多个进行中目标', () => {
+  it('空列表 → null', () => {
+    expect(pickDigestGoal([])).toBeNull()
+  })
+
+  it('最新是 signups_count、较旧是 leads_count → 选 leads_count', () => {
+    const picked = pickDigestGoal([
+      goalRow({ id: 'g-signups', primary_metric_key: 'signups_count', created_at: '2026-09-24T00:00:00Z' }),
+      goalRow({ id: 'g-leads', primary_metric_key: 'leads_count' }),
+    ])
+    expect(picked?.id).toBe('g-leads')
+  })
+
+  it('messaging_started 也算广告能量的', () => {
+    const picked = pickDigestGoal([
+      goalRow({ id: 'g-signups', primary_metric_key: 'signups_count' }),
+      goalRow({ id: 'g-msg', primary_metric_key: 'messaging_started' }),
+    ])
+    expect(picked?.id).toBe('g-msg')
+  })
+
+  it('两个都广告能量 → 取最新（列表第一个）', () => {
+    const picked = pickDigestGoal([
+      goalRow({ id: 'g-new', primary_metric_key: 'messaging_started' }),
+      goalRow({ id: 'g-old', primary_metric_key: 'leads_count' }),
+    ])
+    expect(picked?.id).toBe('g-new')
+  })
+
+  it('都不是广告指标 → 回落最新', () => {
+    const picked = pickDigestGoal([
+      goalRow({ id: 'g-signups', primary_metric_key: 'signups_count' }),
+      goalRow({ id: 'g-organic', primary_metric_key: 'organic_traffic' }),
+    ])
+    expect(picked?.id).toBe('g-signups')
   })
 })

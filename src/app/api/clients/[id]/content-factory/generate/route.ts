@@ -2,6 +2,8 @@ import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { generateCandidate, type ViralRef } from '@/lib/content-factory/topic-agent'
+import { sendInngestEvent } from '@/lib/workflows/inngest-event'
+import { LIBAI_COPY_GENERATED_EVENT } from '@/lib/content/libai-provenance'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120  // 走一次 Claude 改写，给足时间
@@ -50,6 +52,17 @@ export async function POST(
       .single()
 
     if (error) throw error
+
+    // 李白 · 文案逐句溯源（agent 自治计划 B2）：候选写完就叫李白去核每一句有没有依据。
+    // 发不出去不拖垮生成——但也不能静默：待办那边有「生成 2 小时后仍没溯源记录」的兜底
+    // （src/lib/pm-todo/libai-items.ts），事件丢了也会被报成「李白还没检」。
+    await sendInngestEvent({
+      id: `libai-copy:${data.id}`,
+      name: LIBAI_COPY_GENERATED_EVENT,
+      data: { client_id: params.id, post_id: data.id },
+    }).catch((e: unknown) =>
+      console.warn('[content-factory/generate] 李白溯源事件没发出去（待办会按「没检」补报）:', e instanceof Error ? e.message : String(e)),
+    )
 
     return NextResponse.json({ post: data, candidate })
   } catch (err: unknown) {

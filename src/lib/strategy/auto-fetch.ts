@@ -44,8 +44,26 @@ import { countOutcome, type OutcomeStep } from '@/lib/ads-strategy/portfolio/out
 export type AutoFetchResult =
   | { ok: true;  value: number; source: string; snapshot_date: string; label: string }
   | { ok: false; reason: string }
-  /** 归属数据不足，不是 0 —— callers must never display 0 for this variant. */
-  | { ok: false; reason: string; unknown: true }
+  /**
+   * 归属数据不足，不是 0 —— callers must never display 0 for this variant.
+   * `noData`: the source answered fine and simply has no records yet (e.g. no
+   * bookings logged). Not a system fault — schedulers must not count it as a
+   * failed run. Every other unknown (query error, ambiguous goal) stays a fault.
+   */
+  | { ok: false; reason: string; unknown: true; noData?: true }
+
+export interface AutoFetchOptions {
+  /**
+   * The period of the goal this value is for. Period-scoped metrics
+   * (leads_count via ads, messaging_started, signups_count) count inside it.
+   *
+   * 🔴 Pass it whenever you have the goal row: a client may run several active
+   *    goals at once (seen 2026-09-24: signups_count + leads_count), and without
+   *    it we can only fall back to "the client's single active goal" — which
+   *    fails for every goal of that client.
+   */
+  goalPeriod?: GoalPeriod
+}
 
 /**
  * Attempt to auto-fetch a current value for the given metric key.
@@ -53,12 +71,15 @@ export type AutoFetchResult =
  * @param supabase  Admin client
  * @param clientId  Client UUID
  * @param metricKey e.g. 'organic_traffic'
+ * @param options   goalPeriod — see AutoFetchOptions
  */
 export async function autoFetchMetricValue(
   supabase: SupabaseClient,
   clientId: string,
   metricKey: string,
+  options: AutoFetchOptions = {},
 ): Promise<AutoFetchResult> {
+  const { goalPeriod } = options
   switch (metricKey) {
     case 'organic_traffic':
       return fetchOrganicTraffic(supabase, clientId)
@@ -73,14 +94,14 @@ export async function autoFetchMetricValue(
       // tells FDE to top up the rest. When GA4 has nothing, fall back to the
       // ads outcome ladder (spec 2026-09-24 ads IMPACT §3 G1).
       const ga = await fetchFormSubmissions(supabase, clientId)
-      return ga.ok ? ga : fetchAdsOutcome(supabase, clientId, 'lead')
+      return ga.ok ? ga : fetchAdsOutcome(supabase, clientId, 'lead', goalPeriod)
     }
     // 🔴 「报名/预订数」是真成交，不是广告留资。WP0 一度把它接到 fetchAdsOutcome('lead')
     //    上——那会让「33 个报名」的目标拿留资数去填，数字看着漂亮但名不符实。
     case 'signups_count':
-      return fetchBookings(supabase, clientId)
+      return fetchBookings(supabase, clientId, goalPeriod)
     case 'messaging_started':
-      return fetchAdsOutcome(supabase, clientId, 'messaging_started')
+      return fetchAdsOutcome(supabase, clientId, 'messaging_started', goalPeriod)
     case 'ai_visibility_score':
       return fetchAiVisibilityScore(supabase, clientId)
     default:
@@ -647,7 +668,7 @@ function formatDate(iso: string): string {
 // ── ads outcomes（spec 2026-09-24 ads IMPACT §3 G1）────────────────────────────
 // 广告结果从 ad_daily_insights 按 outcome-ladder 口径累计；任何一行归不上（M2）→ unknown，绝不当 0。
 
-interface ActiveGoalPeriod {
+export interface GoalPeriod {
   period_start: string
   period_end: string
 }
@@ -662,20 +683,32 @@ interface AdsetInsightRow {
 const ADSET_INSIGHT_COLUMNS = 'reach, video_thruplays, actions'
 const ADSET_PAGE_SIZE = 1000
 
-async function loadActiveGoalPeriod(
+/**
+ * Use the caller's goal period; only when none was passed, fall back to the
+ * client's single active goal. With 2+ active goals the fallback cannot know
+ * which one is meant, so it says so instead of guessing.
+ */
+async function resolveGoalPeriod(
   supabase: SupabaseClient,
   clientId: string,
-): Promise<{ ok: true; period: ActiveGoalPeriod } | { ok: false; reason: string; unknown: true }> {
+  goalPeriod: GoalPeriod | undefined,
+): Promise<{ ok: true; period: GoalPeriod } | { ok: false; reason: string; unknown: true }> {
+  if (goalPeriod) return { ok: true, period: goalPeriod }
+
   const { data, error } = await supabase
     .from('goals')
     .select('period_start, period_end')
     .eq('client_id', clientId)
     .eq('status', 'active')
-    .maybeSingle<ActiveGoalPeriod>()
+    .limit(2)
 
   if (error) return { ok: false, reason: error.message, unknown: true }
-  if (!data) return { ok: false, reason: 'no active goal', unknown: true }
-  return { ok: true, period: data }
+  const rows = (data ?? []) as GoalPeriod[]
+  if (rows.length === 0) return { ok: false, reason: 'no active goal', unknown: true }
+  if (rows.length > 1) {
+    return { ok: false, reason: 'client has several active goals — caller must pass goalPeriod', unknown: true }
+  }
+  return { ok: true, period: rows[0] }
 }
 
 /**
@@ -686,7 +719,7 @@ async function loadActiveGoalPeriod(
 async function loadAdsetRowsPaged(
   supabase: SupabaseClient,
   clientId: string,
-  period: ActiveGoalPeriod,
+  period: GoalPeriod,
 ): Promise<{ ok: true; rows: AdsetInsightRow[] } | { ok: false; reason: string; unknown: true }> {
   const rows: AdsetInsightRow[] = []
   for (let from = 0; ; from += ADSET_PAGE_SIZE) {
@@ -738,8 +771,12 @@ function sumOutcome(
  *    而同期 CRM 表 1599 行里只有 1 行填了阶段——正是后者。
  *    日报会显示「未判」并带上原因，这本身就是在催那一格被填上。
  */
-async function fetchBookings(supabase: SupabaseClient, clientId: string): Promise<AutoFetchResult> {
-  const goal = await loadActiveGoalPeriod(supabase, clientId)
+async function fetchBookings(
+  supabase: SupabaseClient,
+  clientId: string,
+  goalPeriod: GoalPeriod | undefined,
+): Promise<AutoFetchResult> {
+  const goal = await resolveGoalPeriod(supabase, clientId, goalPeriod)
   if (!goal.ok) return goal
 
   // head:true → 不取行只取计数，计数在 `count` 里（`data` 是 null，别去读它的 length）。
@@ -759,6 +796,7 @@ async function fetchBookings(supabase: SupabaseClient, clientId: string): Promis
     return {
       ok: false,
       unknown: true,
+      noData: true,
       reason: '成交数还没有任何记录 —— 可能是真的还没成交，也可能是 CRM「阶段」那一列没人填（两者在库里长得一样，不猜）',
     }
   }
@@ -769,8 +807,9 @@ async function fetchAdsOutcome(
   supabase: SupabaseClient,
   clientId: string,
   step: OutcomeStep,
+  goalPeriod: GoalPeriod | undefined,
 ): Promise<AutoFetchResult> {
-  const goal = await loadActiveGoalPeriod(supabase, clientId)
+  const goal = await resolveGoalPeriod(supabase, clientId, goalPeriod)
   if (!goal.ok) return goal
 
   const loaded = await loadAdsetRowsPaged(supabase, clientId, goal.period)

@@ -60,11 +60,35 @@ PR #1973 给 Meta 留资同步加了「上一轮已办完就别重跑」的闸�
 
 ---
 
-## CTS 有人被判 opt-out 之后，系统改写了本地证据却没把人从 Mailchimp 名单里摘掉（2026-09-24 复审顺带查实，2026-09-24 复审二轮改写描述）
+## 台账证据文件没有任何格式或敏感信息检查（2026-09-26 查实，P3）
+
+`src/lib/ledger/load.ts:15` 用 `readdirSync(dir)`（不递归）再只留 `.md`，`docs/ledger/evidence/` 子目录整个被跳过，所以 `parse.ts:137` 那条「10 位以上连续数字」之类的检查对证据文件完全不生效；证据文件目前只有 `ledger-check-refs.sh` 查它存不存在。证据文件由夜巡和各窗口核验时写入，内容来自生产取数，是最可能混进账户号 / 客户私有数据的地方。
+
+- **要做什么**：给 `docs/ledger/evidence/**` 单独加一道检查（至少：长连续数字、邮箱 / 电话形态、令牌前缀），不要把证据文件塞进台账卡的完整格式解析（格式不同）。主页 ID 这类公开标识要不要豁免，实现时再定。
+- **§11 打分**：频率低（证据文件只在夜巡与偶发核验时写）· IMPACT 低（不在客户闭环内）· 收入低（迄今未发现客户数据入库）→ 三个低 → **P3**，待认领。
+- 来源：CRM 窗口 2026-09-26 准备 NAL 止血快照时查实。
+
+---
+
+## Facebook 表单勾的「我不要收邮件」走不到 Mailchimp 的抑制标签（2026-09-24 查实，潜在，迄今 0 次，P3）
 
 一个人被订阅进 Mailchimp 之后**才**被判成 opt-out 时，`crm/meta-lead.ts` 会把触点回执从 `subscribed` 覆盖成 `skipped:explicit_opt_out`、并写上 `do_not_contact: true`；结果本地证据被改写成「没进名单」。**这不是 `src/lib/mailchimp/` 缺能力**——`api/cron/mailchimp-suppression-sync` 每天跑一次，职责就是把 CRM 判过的「别再联系」同步成 Mailchimp 的 `suppressed_do_not_email` 标签，`lib/mailchimp/suppression-sync.ts` 复用的正是 `crm/dnc.ts` 的 `isDoNotContact()`。真正的缺口在这条管道自己的取数：`api/cron/mailchimp-suppression-sync/route.ts` 的 `loadContactsForClient()` 查 `contact_touchpoints` 时只把 `metadata.outcome` 映射进 `DncTouch.outcome`，从没把同一条触点的 `metadata.do_not_contact` 映射进 `DncTouch.flagged`——所以 `crm/meta-lead.ts` 写下的这条 opt-out 触点，`isDoNotContact()` 永远看不到，人也就不会被这条每日 cron 打上抑制标签。
 - **要做什么**：修 `loadContactsForClient()`，把 `metadata.do_not_contact === true` 一起映射进 `flagged`，复用并扩展这条已有的每日抑制管道——**不要**另起一套退订 / 归档写路径，否则会跟这条管道形成两个不一致的 DNC 出口。
-- 涉及合同 5426843158。来源：魏征复审 PR #1973。
+- **§11 打分**：频率低（生产核对 `metadata->>'do_not_contact' = 'true'` 命中 **0 条** —— CTS 现在的表单根本没有这个勾选项，要先有客户加上才可能发生）· IMPACT 闭环关键度中（不卡 Act，是合规口子）· 收入关联度低 → 两个低 → **P3**。埋着的雷，不是正在漏水的管子。
+- **不要据此以为「说过别联系的人在继续收信」** —— 那条链是通的：抑制管道每天正常跑（2026-09-23 扫 CTS 947 人、26 人已带 `suppressed_do_not_email`），**且 PM 2026-09-24 确认 CTS 发群发时已经把这个标签排除掉了**。电话 / 邮件笔记那条路进来的拒联，标签打得上、群发也确实躲开了。断的只有表单勾选这一条支路。
+- 涉及合同 5426843158。来源：魏征复审 PR #1973；口径经 PM 2026-09-24 确认后收窄。
+
+---
+
+## 26 个带抑制标签的人不被打扰，只靠 Mailchimp 后台一个人工排除设置顶着（2026-09-24 记，P2）
+
+`suppressed_do_not_email` 是个**标签**，标签本身不拦邮件 —— 只有在建群发、挑收件人那一步把它排除掉才生效。那一步是 Mailchimp 后台的手工设置，**代码层面没有任何东西能拦住**：谁哪天新建一封群发忘了加排除，26 个带这个标签的人当场全收到，而且没有任何告警。
+
+- **26 人不是清一色「明确说过别联系」**：`suppression-sync.ts:13-15` 打这个标签的口径是 `not_interested`（终结性销售拒绝——`note-parser.ts:28` 判的是「聊过了，明确不要了」，跟只是暂缓的 `not_interested_now` 不是一回事，且 `suppression-sync.ts:22-24` 明确写了它没有撤销机制——但不等于明确禁止联系）∪ `do_not_contact`（真正说过别再联系）的并集，而 `note-parser.ts:306,322` 会把 `not_interested` 显式记成 `do_not_contact: false`——两者语义不同。26 人里各占多少目前没有分开统计过，本条先按「带抑制标签」记账；后续如果要按拒联严重程度调整优先级或推「永久移出名单」的方案，必须先分别查出两类人数，且永久移除只能基于真正的 `do_not_contact` / 退订信号，不能把「明确不要了」当成「明确禁止联系」处理。
+- 现状：PM 2026-09-24 确认当前的群发已经排除了。所以这不是一个正在发生的故障，是一个**单点人工依赖**。
+- **§11 打分**：频率中（每建一封新群发就赌一次）· IMPACT 闭环关键度中（不卡闭环，但会让一次外发变成合规事故）· 收入关联度中（NZ 反垃圾邮件法 + 客户信誉）→ 零个低、零个高 → **P2**。
+- **可能的修法**（未拍板）：发信前用 Mailchimp 接口把这封群发的目标收件人核一遍，发现里面有带抑制标签的就拦下并下发待办；或者把真正 `do_not_contact` 的人从名单里移出去（但那要先想清楚「移出去之后怎么恢复」，`lib/mailchimp/client.ts` 开头那条「只 POST 不改会员状态」的红线是有理由的；`not_interested` 不适用「移出名单」，那类人是终结性销售拒绝，不等于明确要求别联系）。
+- 来源：PM 2026-09-24 确认排除设置存在时，顺带发现这条链依赖的是人不是代码。
 
 ---
 

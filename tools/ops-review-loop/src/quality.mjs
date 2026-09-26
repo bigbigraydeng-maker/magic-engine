@@ -109,6 +109,10 @@ export const SPECIALIZED_EVIDENCE = {
     id: 'dependency-evidence',
     label: '新增依赖的必要性、来源与锁文件变更已说明',
   },
+  [RISK_CATEGORY.GOVERNANCE]: {
+    id: 'governance-evidence',
+    label: '规则改动已由人读过：改的是哪条规矩、谁拍板、旧规矩为什么作废，已写明',
+  },
   [RISK_CATEGORY.UNREADABLE]: {
     id: 'manual-rating-evidence',
     label: '改动清单读不到，改动范围必须由人确认过',

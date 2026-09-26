@@ -60,3 +60,15 @@ export const D7_STALE_DATA_DAYS = 2
  * 另认环境变量 ADMIN_EMAIL_DOMAIN / ADMIN_EMAILS（见 internal-email.ts）。
  */
 export const INTERNAL_EMAIL_DOMAINS = ['magicengine.cloud', 'magicengine.com.au', 'magiclab.com', 'magiclab.com.au'] as const
+
+// ── D11 再营销受众池断供（设计 docs/specs/2026-09-27-ads-d11-audience-pool-starved-design.md）──
+// 🔴 以下数值只有 CTS 一家的证据（2026-09-27），是候选值，换客户观察后再调。
+/** 看最近几天（账户时区日）池子长没长 */
+export const D11_POOL_WINDOW_DAYS = 7
+/** 窗口内至少几天有快照才判 */
+export const D11_MIN_SNAPSHOT_DAYS = 5
+/** 末 3 天中位数 − 首 3 天中位数 ≤ max(这个人数, 这个比例 × 人数) 算没长（Meta 人数按百取整，日间噪声约 ±400） */
+export const D11_POOL_FLAT_ABS = 500
+export const D11_POOL_FLAT_PCT = 0.02
+/** 供血广告近 7 天花费 ≤ 消耗这个池子的广告组花费 × 这个比例，算供血太少 */
+export const D11_MAX_FEED_SHARE = 0.1

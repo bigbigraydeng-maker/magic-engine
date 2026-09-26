@@ -412,8 +412,8 @@ describe('retry idempotency', () => {
   })
 
   it('an updated recomputation overwrites in place rather than adding a row', async () => {
-    seedSeoAction({ expected_metric: 'seo.domain.organic_traffic' })
-    seedFlywheelMetrics('seo.domain.organic_traffic')
+    seedSeoAction({ expected_metric: 'seo.content.published_posts' })
+    seedFlywheelMetrics('seo.content.published_posts')
 
     await runJob(14)
     const id = db.outcomes()[0].id
@@ -423,7 +423,7 @@ describe('retry idempotency', () => {
     db.rowsOf('flywheel_metrics').push({
       id: 'm-3',
       client_id: CLIENT_ID,
-      metric_key: 'seo.domain.organic_traffic',
+      metric_key: 'seo.content.published_posts',
       metric_value: 50,
       measured_at: '2026-06-10T00:00:00.000Z',
     })
@@ -531,7 +531,8 @@ describe('historical duplicate rows', () => {
         client_id: CLIENT_ID,
         metric_key: GSC_CLICKS,
         window_days: 28,
-        verdict: 'inconclusive',
+        verdict: 'confirmed',
+        confidence: 0.9,
         evaluator_key: OUTCOME_EVALUATOR.GSC_SNAPSHOTS,
       },
     ])
@@ -541,7 +542,9 @@ describe('historical duplicate rows', () => {
     const clicks = db.outcomes().filter(r => r.metric_key === GSC_CLICKS)
     expect(clicks).toHaveLength(1)
     expect(clicks[0].id).toBe('legacy-1') // identity survives the recomputation
-    expect(clicks[0].verdict).toBe('confirmed')
+    // Recomputed in place: a whole-site metric can no longer claim the action worked.
+    expect(clicks[0].verdict).toBe('inconclusive')
+    expect(clicks[0].confidence).toBe(0)
   })
 })
 
@@ -595,5 +598,59 @@ describe('a zero-write action\'s cleanup failure is not forgiven', () => {
 
     expect(result.outcomes_written).toBeGreaterThan(0)
     expect(result.cleanup_errors).toBe(1)               // rows landed → debt
+  })
+})
+
+// ── Whole-site metrics cannot judge one action ──────────────────────────────
+
+describe('site-level metrics are stored as inconclusive', () => {
+  it('pass 1: a domain organic-traffic jump is inconclusive, numbers kept', async () => {
+    seedSeoAction({ expected_metric: 'seo.domain.organic_traffic' })
+    seedFlywheelMetrics('seo.domain.organic_traffic') // 100 → 140, a 40% jump
+
+    await runJob(14)
+
+    const [row] = db.outcomes()
+    expect(row.verdict).toBe('inconclusive')
+    expect(row.confidence).toBe(0)
+    expect(row.baseline).toBe(100)
+    expect(row.after_value).toBe(140)
+    expect(row.delta).toBe(40)
+  })
+
+  it('GSC bridge: the three domain rows are inconclusive, numbers kept', async () => {
+    seedSeoAction()
+    seedGscSnapshots() // clicks 100 → 150, impressions 1000 → 1600, position 20 → 12
+
+    await runBridge(28)
+
+    const rows = db.outcomes()
+    expect(rows).toHaveLength(3)
+    for (const row of rows) {
+      expect(row.verdict).toBe('inconclusive')
+      expect(row.confidence).toBe(0)
+    }
+    const clicks = rows.find((r) => r.metric_key === GSC_CLICKS)
+    expect(clicks?.baseline).toBe(100)
+    expect(clicks?.after_value).toBe(150)
+    expect(clicks?.delta).toBe(50)
+  })
+
+  it('GSC bridge: page-scope rows still get a real verdict', async () => {
+    seedSeoAction({
+      action_type: 'cms_update_existing',
+      payload: { status: 'live', page_url: 'https://example.com/guide' },
+    })
+    seedGscSnapshots([{ page: 'https://example.com/guide', clicks: 40, impressions: 400, position: 18 }])
+    // The page doubles its clicks in the "after" snapshot (the second seeded row).
+    db.rowsOf('gsc_performance_snapshots')[1].top_pages = [
+      { page: 'https://example.com/guide', clicks: 80, impressions: 600, position: 10 },
+    ]
+
+    await runBridge(28)
+
+    const pageClicks = db.outcomes().find((r) => r.metric_key === 'seo.gsc.page_clicks')
+    expect(pageClicks?.verdict).toBe('confirmed')
+    expect(pageClicks?.confidence).toBeGreaterThan(0)
   })
 })
