@@ -5,7 +5,12 @@
  * 未收录页面的汇总构造。具体某条通道的取数逻辑留在各自的子模块里。
  */
 
-import { verifyActionLink } from './action-link'
+import {
+  verifyActionLink,
+  verifyActionLinkCached,
+  type LinkVerdict,
+  type LinkVerdictCache,
+} from './action-link'
 import { isHtmlPageUrl } from '@/lib/seo/url-kind'
 import {
   classifyNotIndexed,
@@ -285,36 +290,75 @@ export function assertAbsoluteHref(item: ManualItem): void {
   }
 }
 
+/** 单条链接的结论：相对路径按坏链接、空链接不验、其余实测（给了缓存就先查缓存）。 */
+function linkVerdictFor(
+  it: ManualItem,
+  fetchImpl: typeof fetch,
+  opts: DropBrokenLinksOptions,
+): Promise<LinkVerdict> {
+  try {
+    // 相对路径是代码 bug（写死的 href 字符串），要比「这条链接今天恰好
+    // 打不开」响得多 —— 但唯一的生产调用方 daily-todo.ts 在 dropBrokenLinks
+    // 整体失败时会兜底放行 rawManualItems（未过滤），如果这里对着整批
+    // items 同步 throw，一条相对路径就会让所有链接（含真正打不开的）
+    // 原样下发且不留日志，比「静默丢一条」更糟。所以逐条隔离：只有这一条
+    // 按坏链接处理，其余条目照常验证，且用 console.error 而不是
+    // console.warn，跟普通坏链接分开，方便回头当 bug 追。
+    assertAbsoluteHref(it)
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e))
+    return Promise.resolve({ kind: 'broken', status: null })
+  }
+  // 🔴 **没有链接 ≠ 链接坏了。**
+  //    有些待办本来就没有可点的地方（比如那件事的入口还没上线），
+  //    它的价值全在 what / how 上。空 href 交给 verifyActionLink 会走
+  //    `new URL('')` / `fetch('')` 抛错 → 判成 broken → 整条被丢掉，
+  //    于是「如实告诉人这件事现在做不了」变成了「人什么都看不到」——
+  //    发现死在 console.warn 里，正是铁律 3 下半句禁止的那件事。
+  if (it.href.trim() === '') return Promise.resolve({ kind: 'unverifiable' })
+  const check = opts.cache
+    ? verifyActionLinkCached(it.href, fetchImpl, opts.cache, undefined, opts.refreshCache)
+    : verifyActionLink(it.href, fetchImpl)
+  return check.catch((): LinkVerdict => ({ kind: 'unverifiable' }))
+}
+
+export interface DropBrokenLinksOptions {
+  /** 进程内的实测结论缓存；不给就每条都现场验（旧行为）。 */
+  cache?: LinkVerdictCache
+  /** true：不读缓存、每条现场验，结果写回缓存（每日邮件用，不吃页面留下的旧结论）。 */
+  refreshCache?: boolean
+  /**
+   * 整批最多等多久（毫秒）。只给有人盯着转圈的页面用：到点还没验完的那条
+   * 按「验不了」放行（少过滤好过整页卡住），后台那次实测照常跑完、写进缓存，
+   * 下一次打开就按实测结论处理。每日邮件不给这个参数，照旧等每条验完。
+   */
+  budgetMs?: number
+}
+
 export async function dropBrokenLinks(
   items: ManualItem[],
   fetchImpl: typeof fetch = fetch,
+  opts: DropBrokenLinksOptions = {},
 ): Promise<{ kept: ManualItem[]; dropped: ManualItem[] }> {
-  const verdicts = await Promise.all(
-    items.map((it) => {
-      try {
-        // 相对路径是代码 bug（写死的 href 字符串），要比「这条链接今天恰好
-        // 打不开」响得多 —— 但唯一的生产调用方 daily-todo.ts 在 dropBrokenLinks
-        // 整体失败时会兜底放行 rawManualItems（未过滤），如果这里对着整批
-        // items 同步 throw，一条相对路径就会让所有链接（含真正打不开的）
-        // 原样下发且不留日志，比「静默丢一条」更糟。所以逐条隔离：只有这一条
-        // 按坏链接处理，其余条目照常验证，且用 console.error 而不是
-        // console.warn，跟普通坏链接分开，方便回头当 bug 追。
-        assertAbsoluteHref(it)
-      } catch (e) {
-        console.error(e instanceof Error ? e.message : String(e))
-        return Promise.resolve({ kind: 'broken' as const, status: null })
-      }
-      // 🔴 **没有链接 ≠ 链接坏了。**
-      //    有些待办本来就没有可点的地方（比如那件事的入口还没上线），
-      //    它的价值全在 what / how 上。空 href 交给 verifyActionLink 会走
-      //    `new URL('')` / `fetch('')` 抛错 → 判成 broken → 整条被丢掉，
-      //    于是「如实告诉人这件事现在做不了」变成了「人什么都看不到」——
-      //    发现死在 console.warn 里，正是铁律 3 下半句禁止的那件事。
-      return it.href.trim() === ''
-        ? Promise.resolve({ kind: 'unverifiable' as const })
-        : verifyActionLink(it.href, fetchImpl).catch(() => ({ kind: 'unverifiable' as const }))
-    }),
-  )
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const { budgetMs } = opts
+  const deadline =
+    budgetMs === undefined
+      ? null
+      : new Promise<LinkVerdict>((resolve) => {
+          timer = setTimeout(() => resolve({ kind: 'unverifiable' }), budgetMs)
+        })
+  let verdicts: LinkVerdict[]
+  try {
+    verdicts = await Promise.all(
+      items.map((it) => {
+        const check = linkVerdictFor(it, fetchImpl, opts)
+        return deadline ? Promise.race([check, deadline]) : check
+      }),
+    )
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
   const kept: ManualItem[] = []
   const dropped: ManualItem[] = []
   items.forEach((it, i) => {
@@ -519,4 +563,22 @@ export function buildCrawlHealthItems(
   }
 
   return items
+}
+
+/** 一条待办通道：往自己的格子里放条目。 */
+export type ManualItemPusher = (bucket: ManualItem[]) => Promise<void>
+
+/**
+ * 各条通道同时取数，结果按**列出的先后顺序**拼回 `items`（2026-09-26）。
+ *
+ * 之前四十多条通道一条接一条地 await，实测（本地假库，每次查库 40ms）排队 73 轮、
+ * 光等数据库就 3 秒，每次查库 100ms 时 7.4 秒 —— PM 报的「loading 非常慢」主要就是这个。
+ * 各通道只读库、只往自己的格子里放，互不读别人的条目，所以可以并行；
+ * 每条一个格子、最后按顺序拼，保证待办的先后跟原来一模一样。
+ * 某条通道没自己 catch 就抛错时，整体照旧抛出（调用方兜底行为不变）。
+ */
+export async function runPushers(items: ManualItem[], pushers: ManualItemPusher[]): Promise<void> {
+  const buckets = pushers.map(() => [] as ManualItem[])
+  await Promise.all(pushers.map((push, i) => push(buckets[i])))
+  for (const bucket of buckets) items.push(...bucket)
 }

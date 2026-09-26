@@ -28,6 +28,7 @@ import { judgeOutcome } from '../ai-auto-review'
 import { checkCircuitBreaker, isSingleRecordAmountAnomalous } from '../ai-auto-review-circuit-breaker'
 import { sendApprovedOutcome } from '../writeback-service'
 import { runAiAutoReviewForClient, MAX_UNCERTAIN_ATTEMPTS, BATCH_HARD_STOP_COUNT } from '../ai-auto-review-run'
+import { DAY_MS } from '../event-window'
 
 type Row = Record<string, unknown>
 
@@ -48,7 +49,12 @@ function fakeDb(table: string) {
       filters.every(([op, col, val]) => {
         if (op === 'eq') return r[col] === val
         if (op === 'is') return val === null ? r[col] == null : r[col] === val
-        if (op === 'lt') return typeof r[col] === 'number' && (r[col] as number) < (val as number)
+        if (op === 'lt') {
+          if (typeof r[col] === 'number') return (r[col] as number) < (val as number)
+          // 时间列按真实时刻比，不按字符串比（'…00Z' 和 '…00.000Z' 是同一刻）。
+          if (typeof r[col] === 'string' && typeof val === 'string') return Date.parse(r[col] as string) < Date.parse(val)
+          return false
+        }
         return true
       }),
     )
@@ -171,6 +177,100 @@ describe('runAiAutoReviewForClient', () => {
     expect(judgeOutcome).not.toHaveBeenCalled()
     expect(summary).toMatchObject({ ran: true, expired: 1 })
     expect((outcomes[0] as { review_status: string }).review_status).toBe('rejected')
+  })
+
+  describe('🔴 第 7 天边界：来不及发的一律不问 AI（2026-09-19 CTS 被 uncertain_backlog 熔断的回归测试）', () => {
+    const ago = (days: number) => new Date(NOW.getTime() - days * DAY_MS).toISOString()
+    const approveVerdict = {
+      verdict: 'approve' as const,
+      reason: '数据完整',
+      model: 'm',
+      promptVersion: 'v1',
+      inputSnapshot: {},
+      rawOutput: '{}',
+    }
+
+    it.each([
+      ['6.99 天（离过期不到 1 小时余量）', 6.99],
+      ['正好 7.0 天', 7.0],
+      ['7.01 天（旧口径取整成 7、会交给 AI）', 7.01],
+      ['7.5 天', 7.5],
+    ])('%s → 直接判过期，不调用 AI、不发送', async (_label, days) => {
+      outcomes.push(pendingRow({ occurred_at: ago(days) }))
+      const summary = await run()
+      expect(judgeOutcome).not.toHaveBeenCalled()
+      expect(sendApprovedOutcome).not.toHaveBeenCalled()
+      expect(summary).toMatchObject({ ran: true, expired: 1, uncertain: 0 })
+      expect(outcomes[0]).toMatchObject({ review_status: 'rejected', reviewed_by: 'ai-auto-review@system' })
+      expect(audits).toContainEqual(
+        expect.objectContaining({ action: 'ai_auto_rejected', detail: expect.objectContaining({ reason: 'expired' }) }),
+      )
+    })
+
+    it('6.95 天（离过期还有 1 小时 12 分）→ 照常交给 AI 判', async () => {
+      outcomes.push(pendingRow({ occurred_at: ago(6.95) }))
+      vi.mocked(judgeOutcome).mockResolvedValue(approveVerdict)
+      const summary = await run()
+      expect(judgeOutcome).toHaveBeenCalledTimes(1)
+      expect(summary).toMatchObject({ ran: true, approved: 1, expired: 0 })
+    })
+
+    it('🔴 判满 3 次 uncertain、之后过期的行 → 也被清掉（以前永远停在待审核，只能人手批量拒绝）', async () => {
+      outcomes.push(pendingRow({ occurred_at: ago(7.2), ai_review_attempts: MAX_UNCERTAIN_ATTEMPTS }))
+      const summary = await run()
+      expect(judgeOutcome).not.toHaveBeenCalled()
+      expect(summary).toMatchObject({ ran: true, expired: 1 })
+      expect(outcomes[0]).toMatchObject({ review_status: 'rejected' })
+    })
+
+    it('刚判过 uncertain、还在 6 小时冷却里的过期行 → 也被清掉（清理不看冷却）', async () => {
+      outcomes.push(
+        pendingRow({ occurred_at: ago(7.2), ai_review_attempts: 1, ai_last_reviewed_at: NOW.toISOString() }),
+      )
+      const summary = await run()
+      expect(summary).toMatchObject({ ran: true, expired: 1 })
+    })
+
+    it('判满 3 次 uncertain 但还没过期的行 → 不动，等人看', async () => {
+      outcomes.push(pendingRow({ occurred_at: ago(3), ai_review_attempts: MAX_UNCERTAIN_ATTEMPTS }))
+      const summary = await run()
+      expect(summary).toMatchObject({ ran: true, processed: 0 })
+      expect(outcomes[0]).toMatchObject({ review_status: 'pending_review' })
+    })
+
+    it('已脱敏的过期行、别的客户的过期行、已经处理过的过期行 → 都不动', async () => {
+      outcomes.push(
+        pendingRow({ id: 'redacted', occurred_at: ago(8), redacted_at: '2026-09-10T00:00:00Z' }),
+        pendingRow({ id: 'other-client', client_id: 'c2', occurred_at: ago(8) }),
+        pendingRow({ id: 'approved', occurred_at: ago(8), review_status: 'approved' }),
+      )
+      const summary = await run()
+      expect(summary).toMatchObject({ ran: true, processed: 0, expired: 0 })
+      expect(outcomes.map((o) => o.review_status)).toEqual(['pending_review', 'pending_review', 'approved'])
+    })
+
+    it('清理跟 AI 判断共用单轮上限：上限 2、1 条过期 + 2 条新的 → 清 1 条、判 1 条', async () => {
+      outcomes.push(
+        pendingRow({ id: 'old', occurred_at: ago(7.5) }),
+        pendingRow({ id: 'new1', occurred_at: ago(1) }),
+        pendingRow({ id: 'new2', occurred_at: ago(1) }),
+      )
+      vi.mocked(judgeOutcome).mockResolvedValue(approveVerdict)
+      const summary = await runAiAutoReviewForClient(
+        'c1',
+        { supabase: supabaseHolder as never, sendDeps: { writer: {} as never, fetcher: fetch }, now: NOW },
+        { maxBatchSize: 2 },
+      )
+      expect(summary).toMatchObject({ ran: true, processed: 2, expired: 1, approved: 1 })
+      expect(judgeOutcome).toHaveBeenCalledTimes(1)
+    })
+
+    it('客户开关关着 → 过期行也不动（开关是 PM 的停止按钮，清理同样受它管）', async () => {
+      clients = [{ id: 'c1', ai_auto_review_enabled: false }]
+      outcomes.push(pendingRow({ occurred_at: ago(8) }))
+      await run()
+      expect(outcomes[0]).toMatchObject({ review_status: 'pending_review' })
+    })
   })
 
   it('AI 判 approve → 批准、写审计、同一轮内立即调用发送', async () => {

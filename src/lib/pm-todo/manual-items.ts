@@ -39,8 +39,10 @@ import {
   buildNotIndexedItems,
   daysAgo,
   META_PENDING_STALE_DAYS,
+  runPushers,
   type CrawlHealthRow,
   type ManualItem,
+  type ManualItemPusher,
   type NotIndexedRow,
 } from './manual-item-types'
 import { pushLinkedinProgressItems } from './manual-linkedin-items'
@@ -112,238 +114,239 @@ export async function loadManualItems(
   const { clients, error: clientsError } = await loadActiveClients(supabase)
   // 基础设施类检查要放在这条提前返回**之前**：定时任务健康跟系统里有几个客户
   // 毫无关系。放在后面的话，客户表一空它就被跳过了。
-  // 出片余额用完 —— 只有人能充值，必须当天摆到眼前，不能烂在工单的 error 字段里
-  await pushVideoCreditsItem(supabase, items, now)
-  // 关键词数据供应商余额用完 —— 同样只有人能充值；仅 40210 进入人工车道。
-  await pushDataForSeoCreditsItem(supabase, items, now).catch((e) =>
-    console.warn('[manual-items] Keyword Intelligence 余额检查失败（不阻塞其他待办）:', e),
-  )
-  // AI 文字账户断电（没钱 / 钥匙失效 / 卡在网关）—— 2026-09-20 那次全站三天没人知道。
-  // 跟上面两条余额待办同一条纪律：只有人能充钱，必须当天摆到眼前。
-  await pushProviderOutageItems(supabase, items, now).catch((e: unknown) => {
-    // 只打日志就等于这只眼睛瞎了也没人知道 —— 照样下发一条
-    items.push({
-      kind: 'ai_alerting_broken',
-      client_id: 'infra',
-      client_name: 'Magic Engine 后台',
-      what: `「AI 账户断电」的告警自己挂了（${(e instanceof Error ? e.message : String(e)).slice(0, 160)}）—— 今天没有这项检查的结果，不报警不等于没事`,
-      how: '这条不用你动手 —— 是我们这边的欠账。回我一句「修一下断电告警」我就去修',
-      href: '',
-    })
-  })
-  // 按时没跑 / 查不出跑没跑 —— PM 2026-08-03 要求「不能完成需要有报错」
-  await pushCronHealthItems(supabase, items, now)
-  // 外部平台的授权断了 —— 跟上面几条一样属于基础设施检查，跟「系统里有几个客户」
-  // 无关，所以放在客户名单那条提前返回之前。2026-09-24：CTS 邮箱断了 9 天没人知道，
-  // 全站没有任何一条路会把它端出来（模块自己会兜底，不抛给这里）。
-  // 模块内部已经把取数包进 try 并自报故障；这层 catch 防的是判据/造句本身抛异常 ——
-  // 不拦的话会掀掉整个 loadManualItems，当天整份待办邮件变空（比漏一条严重得多）。
-  await pushPlatformConnectionItems(supabase, items, now).catch((e) =>
-    console.warn('[manual-items] 平台授权体检失败（不阻塞其他待办）:', e),
-  )
-  // 写在 Render 里的 Meta 钥匙被 Meta 作废 —— 上面那条只查「连接 Meta」按钮存下的授权，
-  // 这条补的是环境变量里的钥匙（CTS 9/21·9/23·9/25 三次都是 PM 自己问才发现）
-  await pushMetaTokenHealthItems(supabase, items).catch((e: unknown) => {
-    items.push({
-      kind: 'meta_token_check_failed',
-      client_id: 'infra',
-      client_name: 'Magic Engine 后台',
-      what: `「Meta 钥匙是否失效」的每日检查自己没跑成（${(e instanceof Error ? e.message : String(e)).slice(0, 160)}）—— 今天不报警不等于钥匙都活着`,
-      how: '这条不用你动手 —— 是我们这边的欠账。回我一句「修一下 Meta 钥匙检查」我就去修',
-      href: '',
-    })
-  })
-  // 平台候选到了复查日期 —— 不落库、不查表，纯本地日期判断
-  pushPlatformCandidateReviewItems(items, now)
-  // 台账（docs/ledger）：决定了没做 / 做了没验 / 验了不成 —— 读仓库里的文件，不查表，
-  // 目录读不出来会自己下发一条「读不出来」，不靠 catch
-  pushLedgerItems(items, now)
-  // 客户方案文档里写的一次性人工动作 —— 同样不落库、纯本地日期判断，过期自动消失
-  pushClientDocManualTaskItems(items, now)
-  // 成交/咨询等着人核对要不要告诉广告平台 —— 撤不回的动作，只能人点（#1397）
-  await pushConversionReviewItems(supabase, items, clients, now).catch((e) =>
-    console.warn('[manual-items] 成交待核对读取失败（不阻塞其他待办）:', e),
-  )
-  // AI 全自动审核被异常刹车暂停了 —— 拉模式，事件送达失败也照样出得来
-  await pushAiAutoReviewCircuitBreakerItems(supabase, items).catch((e) =>
-    console.warn('[manual-items] AI 自动审核熔断状态读取失败（不阻塞其他待办）:', e),
-  )
-  // AI 客服回复：待批准 / 已批但发送失败 / 超时升级三档（#1589）——拉模式，
-  // 不依赖 Inngest 事件送达
-  await pushMessengerDraftItems(supabase, items, clients, now).catch((e) =>
-    console.warn('[manual-items] AI 客服草稿待办读取失败（不阻塞其他待办）:', e),
-  )
-  // 客户资料库信息快到期了，过期后 AI 客服不能再用这条信息回复客户（#1589）
-  await pushKnowledgeFactExpiringItems(supabase, items, clients, now).catch((e) =>
-    console.warn('[manual-items] 客户资料库到期检查失败（不阻塞其他待办）:', e),
-  )
-  // 目标数字口径对不上 —— 错的方向感比没数字更危险(2026-08-03 差点据此给出反向建议)
-  await pushBaselineItems(supabase, items)
-  // 出片工单排队但没人干活 —— 装配跑在一台 Mac 上，不开机就没人做，而队列里看不出来
-  await pushFactoryWorkerItems(supabase, items, now, clients).catch((e) =>
-    console.warn('[manual-items] 出片工人在岗检查失败（不阻塞其他待办）:', e),
-  )
-  // Creatomate 渲染失败/超时 —— 旧路径的卡死回收已死透，这是它的替代（spec §4.4 B4）
-  await pushCreatomateRenderItems(supabase, items, now, clients).catch((e) =>
-    console.warn('[manual-items] Creatomate 渲染检查失败（不阻塞其他待办）:', e),
-  )
-  // 排期帖发出去了但拿不到帖子编号 —— 成绩收不回来，只写运行记录等于没人知道
-  await pushDailyPlanMeasurementItems(supabase, items, now, clients).catch((e) =>
-    console.warn('[manual-items] 帖子成绩回收失败检查读取失败（不阻塞其他待办）:', e),
-  )
-  // 正在花钱的广告撞上了已知的坑 —— 每天扫一遍的结果，不下发就等于没扫
-  await pushAdReadbackItems(supabase, items, now).catch((e) =>
-    console.warn('[manual-items] 广告闸门结果读取失败（不阻塞其他待办）:', e),
-  )
-  // Mailchimp 出口在 tally 里非预期失败（配置读不出来 / API key 失效 / 被限流 / 5xx）——
-  // 这类失败从不设置 cron 结果的 error，cron 整体照样显示 completed，不单独捞出来就永远没人看见
-  await pushMailchimpExportItems(supabase, items, now).catch((e) =>
-    console.warn('[manual-items] Mailchimp 出口检查失败（不阻塞其他待办）:', e),
-  )
-  // Facebook 私信 / 表单留资同步连续失败 —— 报错原来只进运行记录，NAL 的主页授权
-  // 2026-09-16 失效后 9 天没人知道，新私信新留资全没进 CRM。授权失效只有主页管理员能修，必须下发。
-  await pushFacebookSyncFailingItems(supabase, items, now).catch((e) =>
-    console.warn('[manual-items] Facebook 同步失败检查读取失败（不阻塞其他待办）:', e),
-  )
-  // 线索没写进客户自己的 Google 表格 —— 销售看的就是那张表，缺一条就是少跟一个人，
-  // 而 Facebook 的留资只保留 90 天，超期永久取不回
-  await pushLeadSheetItems(supabase, items, now).catch((e) =>
-    console.warn('[manual-items] 线索表格同步待办检查失败（不阻塞其他待办）:', e),
-  )
-  // ME 产品动态自动发 LinkedIn —— 敏感内容待审 / 账号未连 / 发布失败三种卡点
-  await pushLinkedinProgressItems(supabase, items, now).catch((e) =>
-    console.warn('[manual-items] LinkedIn 进度贴待办检查失败（不阻塞其他待办）:', e),
-  )
-  // 客人说他付款了但没法自动确认 —— 只有人能对银行流水，不许机器自己打 paid 标签
-  await pushPaidSignalReviewItems(supabase, items, now).catch((e) =>
-    console.warn('[manual-items] 待确认付款读取失败（不阻塞其他待办）:', e),
-  )
-  if (clientsError) {
-    items.push(clientListUnreadableItem(clientsError.message))
+  const infra = infraPushers(supabase, clients, now)
+  if (clientsError || clients.size === 0) {
+    await runPushers(items, infra)
+    if (clientsError) items.push(clientListUnreadableItem(clientsError.message))
     return items
   }
+  // 两组同时跑，拼回时仍是「基础设施在前、客户通道在后」的原顺序（见 runPushers 头注）
+  await runPushers(items, [...infra, ...clientPushers(supabase, clients, now)])
+  return items
+}
 
-  if (clients.size === 0) return items
+/** 跟客户名单无关的检查（余额、断电、定时任务、授权、钥匙……），客户表读挂了也照跑。 */
+function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>, now: Date): ManualItemPusher[] {
+  return [
+    // 出片余额用完 —— 只有人能充值，必须当天摆到眼前，不能烂在工单的 error 字段里
+    (b) => pushVideoCreditsItem(supabase, b, now),
+    // 关键词数据供应商余额用完 —— 同样只有人能充值；仅 40210 进入人工车道。
+    (b) => pushDataForSeoCreditsItem(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] Keyword Intelligence 余额检查失败（不阻塞其他待办）:', e),
+    ),
+    // AI 文字账户断电（没钱 / 钥匙失效 / 卡在网关）—— 2026-09-20 那次全站三天没人知道。
+    // 跟上面两条余额待办同一条纪律：只有人能充钱，必须当天摆到眼前。
+    (b) => pushProviderOutageItems(supabase, b, now).catch((e: unknown) => {
+      // 只打日志就等于这只眼睛瞎了也没人知道 —— 照样下发一条
+      b.push({
+        kind: 'ai_alerting_broken',
+        client_id: 'infra',
+        client_name: 'Magic Engine 后台',
+        what: `「AI 账户断电」的告警自己挂了（${(e instanceof Error ? e.message : String(e)).slice(0, 160)}）—— 今天没有这项检查的结果，不报警不等于没事`,
+        how: '这条不用你动手 —— 是我们这边的欠账。回我一句「修一下断电告警」我就去修',
+        href: '',
+      })
+    }),
+    // 按时没跑 / 查不出跑没跑 —— PM 2026-08-03 要求「不能完成需要有报错」
+    (b) => pushCronHealthItems(supabase, b, now),
+    // 外部平台的授权断了 —— 跟上面几条一样属于基础设施检查，跟「系统里有几个客户」
+    // 无关，所以放在客户名单那条提前返回之前。2026-09-24：CTS 邮箱断了 9 天没人知道，
+    // 全站没有任何一条路会把它端出来（模块自己会兜底，不抛给这里）。
+    // 模块内部已经把取数包进 try 并自报故障；这层 catch 防的是判据/造句本身抛异常 ——
+    // 不拦的话会掀掉整个 loadManualItems，当天整份待办邮件变空（比漏一条严重得多）。
+    (b) => pushPlatformConnectionItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 平台授权体检失败（不阻塞其他待办）:', e),
+    ),
+    // 写在 Render 里的 Meta 钥匙被 Meta 作废 —— 上面那条只查「连接 Meta」按钮存下的授权，
+    // 这条补的是环境变量里的钥匙（CTS 9/21·9/23·9/25 三次都是 PM 自己问才发现）
+    (b) => pushMetaTokenHealthItems(supabase, b).catch((e: unknown) => {
+      b.push({
+        kind: 'meta_token_check_failed',
+        client_id: 'infra',
+        client_name: 'Magic Engine 后台',
+        what: `「Meta 钥匙是否失效」的每日检查自己没跑成（${(e instanceof Error ? e.message : String(e)).slice(0, 160)}）—— 今天不报警不等于钥匙都活着`,
+        how: '这条不用你动手 —— 是我们这边的欠账。回我一句「修一下 Meta 钥匙检查」我就去修',
+        href: '',
+      })
+    }),
+    // 平台候选到了复查日期 —— 不落库、不查表，纯本地日期判断
+    async (b) => pushPlatformCandidateReviewItems(b, now),
+    // 台账（docs/ledger）：决定了没做 / 做了没验 / 验了不成 —— 读仓库里的文件，不查表，
+    // 目录读不出来会自己下发一条「读不出来」，不靠 catch
+    async (b) => pushLedgerItems(b, now),
+    // 客户方案文档里写的一次性人工动作 —— 同样不落库、纯本地日期判断，过期自动消失
+    async (b) => pushClientDocManualTaskItems(b, now),
+    // 成交/咨询等着人核对要不要告诉广告平台 —— 撤不回的动作，只能人点（#1397）
+    (b) => pushConversionReviewItems(supabase, b, clients, now).catch((e) =>
+      console.warn('[manual-items] 成交待核对读取失败（不阻塞其他待办）:', e),
+    ),
+    // AI 全自动审核被异常刹车暂停了 —— 拉模式，事件送达失败也照样出得来
+    (b) => pushAiAutoReviewCircuitBreakerItems(supabase, b).catch((e) =>
+      console.warn('[manual-items] AI 自动审核熔断状态读取失败（不阻塞其他待办）:', e),
+    ),
+    // AI 客服回复：待批准 / 已批但发送失败 / 超时升级三档（#1589）——拉模式，
+    // 不依赖 Inngest 事件送达
+    (b) => pushMessengerDraftItems(supabase, b, clients, now).catch((e) =>
+      console.warn('[manual-items] AI 客服草稿待办读取失败（不阻塞其他待办）:', e),
+    ),
+    // 客户资料库信息快到期了，过期后 AI 客服不能再用这条信息回复客户（#1589）
+    (b) => pushKnowledgeFactExpiringItems(supabase, b, clients, now).catch((e) =>
+      console.warn('[manual-items] 客户资料库到期检查失败（不阻塞其他待办）:', e),
+    ),
+    // 目标数字口径对不上 —— 错的方向感比没数字更危险(2026-08-03 差点据此给出反向建议)
+    (b) => pushBaselineItems(supabase, b),
+    // 出片工单排队但没人干活 —— 装配跑在一台 Mac 上，不开机就没人做，而队列里看不出来
+    (b) => pushFactoryWorkerItems(supabase, b, now, clients).catch((e) =>
+      console.warn('[manual-items] 出片工人在岗检查失败（不阻塞其他待办）:', e),
+    ),
+    // Creatomate 渲染失败/超时 —— 旧路径的卡死回收已死透，这是它的替代（spec §4.4 B4）
+    (b) => pushCreatomateRenderItems(supabase, b, now, clients).catch((e) =>
+      console.warn('[manual-items] Creatomate 渲染检查失败（不阻塞其他待办）:', e),
+    ),
+    // 排期帖发出去了但拿不到帖子编号 —— 成绩收不回来，只写运行记录等于没人知道
+    (b) => pushDailyPlanMeasurementItems(supabase, b, now, clients).catch((e) =>
+      console.warn('[manual-items] 帖子成绩回收失败检查读取失败（不阻塞其他待办）:', e),
+    ),
+    // 正在花钱的广告撞上了已知的坑 —— 每天扫一遍的结果，不下发就等于没扫
+    (b) => pushAdReadbackItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 广告闸门结果读取失败（不阻塞其他待办）:', e),
+    ),
+    // Mailchimp 出口在 tally 里非预期失败（配置读不出来 / API key 失效 / 被限流 / 5xx）——
+    // 这类失败从不设置 cron 结果的 error，cron 整体照样显示 completed，不单独捞出来就永远没人看见
+    (b) => pushMailchimpExportItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] Mailchimp 出口检查失败（不阻塞其他待办）:', e),
+    ),
+    // Facebook 私信 / 表单留资同步连续失败 —— 报错原来只进运行记录，NAL 的主页授权
+    // 2026-09-16 失效后 9 天没人知道，新私信新留资全没进 CRM。授权失效只有主页管理员能修，必须下发。
+    (b) => pushFacebookSyncFailingItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] Facebook 同步失败检查读取失败（不阻塞其他待办）:', e),
+    ),
+    // 线索没写进客户自己的 Google 表格 —— 销售看的就是那张表，缺一条就是少跟一个人，
+    // 而 Facebook 的留资只保留 90 天，超期永久取不回
+    (b) => pushLeadSheetItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 线索表格同步待办检查失败（不阻塞其他待办）:', e),
+    ),
+    // ME 产品动态自动发 LinkedIn —— 敏感内容待审 / 账号未连 / 发布失败三种卡点
+    (b) => pushLinkedinProgressItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] LinkedIn 进度贴待办检查失败（不阻塞其他待办）:', e),
+    ),
+    // 客人说他付款了但没法自动确认 —— 只有人能对银行流水，不许机器自己打 paid 标签
+    (b) => pushPaidSignalReviewItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 待确认付款读取失败（不阻塞其他待办）:', e),
+    ),
+  ]
+}
 
+/** 按客户逐个查的通道 —— 只在客户名单读到且非空时跑。 */
+function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>, now: Date): ManualItemPusher[] {
   const ids = Array.from(clients.keys())
   const nameOf = (id: string) => clients.get(id)?.name ?? '未知客户'
+  return [
+    // 广告 D3（花钱没结果）自动暂停建议等人批准——点一下就执行，不用去 Meta 后台
+    (b) => pushAdsAutoPauseItems(supabase, b, nameOf).catch((e) =>
+      console.warn('[manual-items] Ads D3 自动暂停待批准读取失败（不阻塞其他待办）:', e),
+    ),
+    // 新诊断结果 —— PM 2026-08-03 拍板要逐条看；没有消费方的自动化 = 再造一个没人看的数据源。
+    // 必须放在 nameOf 定义之后：待办上显示 uuid 等于没显示。
+    (b) => pushDiagnosticItems(supabase, b, now, nameOf),
+    // 审批过但被价格闸拦住的帖子 —— 自动发布那条路人不在场,不捞出来就没人知道
+    (b) => pushPriceGateItems(supabase, b, nameOf).catch((e) =>
+      console.warn('[manual-items] 价格闸待办检查失败（不阻塞其他待办）:', e),
+    ),
+    // 本周方案已自动落地 —— 只通知，不要求 PM 操作（PM 2026-08-04 拍板）
+    (b) => pushPrescriptionItems(supabase, b, now, nameOf),
+    // 客资数值不值得信 —— 值不值得信只有查了统计后台才知道，别让人自己去翻
+    (b) => pushLeadsSanityItems(supabase, b, nameOf).catch((e) =>
+      console.warn('[manual-items] 客资口径检查失败（不阻塞其他待办）:', e),
+    ),
+    // 写好但没人看过的草稿 —— 这条待办以前只捞 pr_open，于是周更 cron 写出来的
+    // 草稿一直沉在库里（实测 3 篇，最老的躺了 5 天，而上一篇真正上线的文章在 47 天前）。
+    (b) => pushBlogDraftItems(supabase, b, ids, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 草稿待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 机器本来能自己做、今天却没做的动作 —— 拦下来的原因必须有人看见。
+    // 只写进 cron 的运行记录 = 发现死在日志里（管道断头那条铁律的反面教材）。
+    (b) => pushAutoRunItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 自动执行待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 评论读不到（缺权限 / 令牌被拒）—— 只有人能补，日志里那行 console.error 没人会看
+    (b) => pushCommentScopeItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 评论权限待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 马良：Creatomate 成片的 9 宫格自检结果——过关等审片（署名）、不过关问返工还是放弃、
+    // 检不了 / 出片 2 小时后没检进系统欠账栏。拉模式读工单 + 快照，事件丢了也照样出得来
+    (b) => pushMaliangRenderItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 马良出片自检待办读取失败（不阻塞其他待办）:', e),
+    ),
+    // 李白：文案里「官网和 brief 都找不到依据」的句子 / 溯源检不了 / 生成后没检；
+    // 另有提示词库月检结果（只报告不改）。拉模式读库和回执，事件丢了也照样出得来
+    (b) => pushLibaiItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 李白待办读取失败（不阻塞其他待办）:', e),
+    ),
+    // 司马迁每周四起草的 Google 评价回复草稿（一律没发）—— 拉模式读它的回执，
+    // 事件送达失败也照样出得来；巡不成的那条进系统欠账栏，不静默
+    (b) => pushSimaqianReviewItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 司马迁口碑周巡待办读取失败（不阻塞其他待办）:', e),
+    ),
+    // 执行内核停手的 / 等你点头的 / 被规则挡下的 —— 死信不许只写进库里没人看
+    (b) => pushKernelItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 执行内核待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 自治开关没同步到执行内核 —— 面板档位跟内核实际档位对不上，必须有人看见（WP3.1a）
+    (b) => pushAdsAutonomySyncItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 自治开关同步待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 每日广告巡检的广告级规则（D2 / D10）—— 只读，要不要改由人定；同一件事按 remind-cadence 节奏提醒
+    (b) => pushAdsRuleFindingItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 广告级规则待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 客户之间有没有串台 —— PM 2026-08-05：「坚决不能胡窜」。
+    // 实测查到 CTS 的发布通道指向 Oztop 的网站，填错两个多月没人发现。
+    (b) => pushCrossClientItems(supabase, b).catch((e) =>
+      console.warn('[manual-items] 串台检查失败（不阻塞其他待办）:', e),
+    ),
+    // 可能被一句「不打算去」误判成永久拒联的人 —— 刻意不自动解除，交给人看一眼。
+    (b) => pushDncReviewItems(supabase, b, ids, nameOf).catch((e) =>
+      console.warn('[manual-items] 拒联复核待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 反向的那一半：客人在私信里像是说了「别再联系」，而判据从来读不到私信（#1025）。
+    // 刻意**不自动封渠道**，只提示 —— 理由见 lib/crm/messenger-stop-signal.ts 文件头。
+    (b) => pushMessengerStopItems(supabase, b, ids, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 私信拒联提示生成失败（不阻塞其他待办）:', e),
+    ),
+    // 客人身上的「⭐重要标记」到期了 —— 到期日到了自动进待办，员工清 due 日期即消失
+    (b) => pushImportantDueItems(supabase, b, ids, nameOf, now).catch((e) =>
+      console.warn('[manual-items] 重要标记到期读取失败（不阻塞其他待办）:', e),
+    ),
+    // 客人来信超过一天没人回 + 公司邮箱同步哑了（后者会让前者假装成零条），见 email-reply-items.ts
+    (b) => pushEmailReplyItems(supabase, b, ids, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 客人来信没回待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 客户交了广告账户号等核实 —— 客户以为交上去了，不下发就没人知道（AD-SEC-3）
+    (b) => pushBindingRequestItems(supabase, b, ids, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 广告账户号待核实读取失败（不阻塞其他待办）:', e),
+    ),
+    // 主页绑定没核实 → 私信/线索同步被暂停（AD-SEC-4）。读失败时自己生成一条待办，不靠 catch。
+    (b) => pushPageBindingItems(supabase, b, process.env),
+    // 归因侧两条通道（黑洞 / 孤儿数据），理由见 attribution-items.ts
+    (b) => pushAttributionItems(supabase, b, ids, nameOf, now),
+    // 私信客服健康心跳查出的异常（issue #1587）——拉模式，直接查
+    // conversation_health_alerts，事件送达失败也照样出得来
+    (b) => pushConversationHealthAlertItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 私信客服健康告警读取失败（不阻塞其他待办）:', e),
+    ),
+    (b) => pushSiteHealthItems(supabase, b, ids, nameOf, now),
+    // 经验手册疑似过期——每周巡检写进 playbook_staleness_findings，这里拉模式读出来
+    (b) => pushPlaybookStalenessItems(supabase, b).catch((e) =>
+      console.warn('[manual-items] 经验手册过期检查读取失败（不阻塞其他待办）:', e),
+    ),
+  ]
+}
 
-  // 广告 D3（花钱没结果）自动暂停建议等人批准——点一下就执行，不用去 Meta 后台
-  await pushAdsAutoPauseItems(supabase, items, nameOf).catch((e) =>
-    console.warn('[manual-items] Ads D3 自动暂停待批准读取失败（不阻塞其他待办）:', e),
-  )
-
-  // 新诊断结果 —— PM 2026-08-03 拍板要逐条看；没有消费方的自动化 = 再造一个没人看的数据源。
-  // 必须放在 nameOf 定义之后：待办上显示 uuid 等于没显示。
-  await pushDiagnosticItems(supabase, items, now, nameOf)
-
-  // 审批过但被价格闸拦住的帖子 —— 自动发布那条路人不在场,不捞出来就没人知道
-  await pushPriceGateItems(supabase, items, nameOf).catch((e) =>
-    console.warn('[manual-items] 价格闸待办检查失败（不阻塞其他待办）:', e),
-  )
-
-  // 本周方案已自动落地 —— 只通知，不要求 PM 操作（PM 2026-08-04 拍板）
-  await pushPrescriptionItems(supabase, items, now, nameOf)
-
-  // 客资数值不值得信 —— 值不值得信只有查了统计后台才知道，别让人自己去翻
-  await pushLeadsSanityItems(supabase, items, nameOf).catch((e) =>
-    console.warn('[manual-items] 客资口径检查失败（不阻塞其他待办）:', e),
-  )
-
-  // 写好但没人看过的草稿 —— 这条待办以前只捞 pr_open，于是周更 cron 写出来的
-  // 草稿一直沉在库里（实测 3 篇，最老的躺了 5 天，而上一篇真正上线的文章在 47 天前）。
-  await pushBlogDraftItems(supabase, items, ids, now, nameOf).catch((e) =>
-    console.warn('[manual-items] 草稿待办生成失败（不阻塞其他待办）:', e),
-  )
-
-  // 机器本来能自己做、今天却没做的动作 —— 拦下来的原因必须有人看见。
-  // 只写进 cron 的运行记录 = 发现死在日志里（管道断头那条铁律的反面教材）。
-  await pushAutoRunItems(supabase, items, now, nameOf).catch((e) =>
-    console.warn('[manual-items] 自动执行待办生成失败（不阻塞其他待办）:', e),
-  )
-
-  // 评论读不到（缺权限 / 令牌被拒）—— 只有人能补，日志里那行 console.error 没人会看
-  await pushCommentScopeItems(supabase, items, now, nameOf).catch((e) =>
-    console.warn('[manual-items] 评论权限待办生成失败（不阻塞其他待办）:', e),
-  )
-
-  // 马良：Creatomate 成片的 9 宫格自检结果——过关等审片（署名）、不过关问返工还是放弃、
-  // 检不了 / 出片 2 小时后没检进系统欠账栏。拉模式读工单 + 快照，事件丢了也照样出得来
-  await pushMaliangRenderItems(supabase, items, now, nameOf).catch((e) =>
-    console.warn('[manual-items] 马良出片自检待办读取失败（不阻塞其他待办）:', e),
-  )
-
-  // 李白：文案里「官网和 brief 都找不到依据」的句子 / 溯源检不了 / 生成后没检；
-  // 另有提示词库月检结果（只报告不改）。拉模式读库和回执，事件丢了也照样出得来
-  await pushLibaiItems(supabase, items, now, nameOf).catch((e) =>
-    console.warn('[manual-items] 李白待办读取失败（不阻塞其他待办）:', e),
-  )
-
-  // 司马迁每周四起草的 Google 评价回复草稿（一律没发）—— 拉模式读它的回执，
-  // 事件送达失败也照样出得来；巡不成的那条进系统欠账栏，不静默
-  await pushSimaqianReviewItems(supabase, items, now, nameOf).catch((e) =>
-    console.warn('[manual-items] 司马迁口碑周巡待办读取失败（不阻塞其他待办）:', e),
-  )
-
-  // 执行内核停手的 / 等你点头的 / 被规则挡下的 —— 死信不许只写进库里没人看
-  await pushKernelItems(supabase, items, now, nameOf).catch((e) =>
-    console.warn('[manual-items] 执行内核待办生成失败（不阻塞其他待办）:', e),
-  )
-
-  // 自治开关没同步到执行内核 —— 面板档位跟内核实际档位对不上，必须有人看见（WP3.1a）
-  await pushAdsAutonomySyncItems(supabase, items, now, nameOf).catch((e) =>
-    console.warn('[manual-items] 自治开关同步待办生成失败（不阻塞其他待办）:', e),
-  )
-
-  // 每日广告巡检的广告级规则（D2 / D10）—— 只读，要不要改由人定；同一件事按 remind-cadence 节奏提醒
-  await pushAdsRuleFindingItems(supabase, items, now, nameOf).catch((e) =>
-    console.warn('[manual-items] 广告级规则待办生成失败（不阻塞其他待办）:', e),
-  )
-
-  // 客户之间有没有串台 —— PM 2026-08-05：「坚决不能胡窜」。
-  // 实测查到 CTS 的发布通道指向 Oztop 的网站，填错两个多月没人发现。
-  await pushCrossClientItems(supabase, items).catch((e) =>
-    console.warn('[manual-items] 串台检查失败（不阻塞其他待办）:', e),
-  )
-
-  // 可能被一句「不打算去」误判成永久拒联的人 —— 刻意不自动解除，交给人看一眼。
-  await pushDncReviewItems(supabase, items, ids, nameOf).catch((e) =>
-    console.warn('[manual-items] 拒联复核待办生成失败（不阻塞其他待办）:', e),
-  )
-
-  // 反向的那一半：客人在私信里像是说了「别再联系」，而判据从来读不到私信（#1025）。
-  // 刻意**不自动封渠道**，只提示 —— 理由见 lib/crm/messenger-stop-signal.ts 文件头。
-  await pushMessengerStopItems(supabase, items, ids, now, nameOf).catch((e) =>
-    console.warn('[manual-items] 私信拒联提示生成失败（不阻塞其他待办）:', e),
-  )
-
-  // 客人身上的「⭐重要标记」到期了 —— 到期日到了自动进待办，员工清 due 日期即消失
-  await pushImportantDueItems(supabase, items, ids, nameOf, now).catch((e) =>
-    console.warn('[manual-items] 重要标记到期读取失败（不阻塞其他待办）:', e),
-  )
-
-  // 客人来信超过一天没人回 + 公司邮箱同步哑了（后者会让前者假装成零条），见 email-reply-items.ts
-  await pushEmailReplyItems(supabase, items, ids, now, nameOf).catch((e) =>
-    console.warn('[manual-items] 客人来信没回待办生成失败（不阻塞其他待办）:', e),
-  )
-
-  // 客户交了广告账户号等核实 —— 客户以为交上去了，不下发就没人知道（AD-SEC-3）
-  await pushBindingRequestItems(supabase, items, ids, now, nameOf).catch((e) =>
-    console.warn('[manual-items] 广告账户号待核实读取失败（不阻塞其他待办）:', e),
-  )
-
-  // 主页绑定没核实 → 私信/线索同步被暂停（AD-SEC-4）。读失败时自己生成一条待办，不靠 catch。
-  await pushPageBindingItems(supabase, items, process.env)
-
-  // 归因侧两条通道（黑洞 / 孤儿数据），理由见 attribution-items.ts
-  await pushAttributionItems(supabase, items, ids, nameOf, now)
-
-  // 私信客服健康心跳查出的异常（issue #1587）——拉模式，直接查
-  // conversation_health_alerts，事件送达失败也照样出得来
-  await pushConversationHealthAlertItems(supabase, items, now, nameOf).catch((e) =>
-    console.warn('[manual-items] 私信客服健康告警读取失败（不阻塞其他待办）:', e),
-  )
-
+/** 待合并的博客 PR / 未收录页面 / 标题描述改动卡住 / 站点数据健康 —— 原来末尾那一段，内部顺序不变。 */
+async function pushSiteHealthItems(
+  supabase: SupabaseClient, items: ManualItem[], ids: string[], nameOf: (id: string) => string, now: Date,
+): Promise<void> {
   // GSC property per client —— 汇总后的「未收录页面」待办链到这里。谷歌自己的
   // 「索引 → 网页」报告才是权威的「哪些页面没被收录、为什么」清单；ME 后台没有
   // 任何展示收录状态的页面（实测 /site-audit/pages 只有网址/字数，无收录状态）。
@@ -478,13 +481,6 @@ export async function loadManualItems(
   //    Built in manual-item-types.ts (pure, testable); see buildCrawlHealthItems.
   const weeklyRecrawlIds = await loadWeeklyRecrawlClientIds(supabase, ids)
   items.push(...buildCrawlHealthItems(crawlRows, nameOf, now, weeklyRecrawlIds))
-
-  // 经验手册疑似过期——每周巡检写进 playbook_staleness_findings，这里拉模式读出来
-  await pushPlaybookStalenessItems(supabase, items).catch((e) =>
-    console.warn('[manual-items] 经验手册过期检查读取失败（不阻塞其他待办）:', e),
-  )
-
-  return items
 }
 
 

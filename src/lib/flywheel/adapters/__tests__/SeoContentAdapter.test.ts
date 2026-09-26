@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SEO_ACTION_TYPE, SEO_METRIC_KEY } from '../../vocabulary'
+import { SEO_WEEKLY_PAID_SOURCE } from '../../seo-weekly'
 import { clearRegistry } from '../registry'
 
 // ── Mock supabaseAdmin ────────────────────────────────────────────────────────
@@ -213,5 +214,27 @@ describe('SeoContentAdapter', () => {
     const { SeoContentAdapter } = await import('../SeoContentAdapter')
     await expect(new SeoContentAdapter().pullMetrics('client-cts'))
       .rejects.toThrow('metrics insert error: database unavailable')
+  })
+
+  it('pullMetrics writes the paid domain rows with the source the weekly gate checks', async () => {
+    mockClientSingle.mockResolvedValueOnce({ data: { domain: 'cts.com.au' }, error: null })
+    mockCountResolve.mockResolvedValueOnce({ count: 2, error: null })
+    mockInsertMetricsResult.mockClear()
+
+    const { SeoContentAdapter } = await import('../SeoContentAdapter')
+    await new SeoContentAdapter().pullMetrics('client-cts')
+
+    expect(mockInsertMetricsResult).toHaveBeenCalledTimes(1)
+    const inserted = mockInsertMetricsResult.mock.calls[0][0] as Array<{ metric_key: string; source: string }>
+    const paidKeys: string[] = [
+      SEO_METRIC_KEY.ORGANIC_KEYWORDS,
+      SEO_METRIC_KEY.ORGANIC_TRAFFIC,
+      SEO_METRIC_KEY.AUTHORITY_SCORE,
+    ]
+    const paid = inserted.filter(r => paidKeys.includes(r.metric_key))
+    expect(paid).toHaveLength(3)
+    expect(paid.every(r => r.source === SEO_WEEKLY_PAID_SOURCE)).toBe(true)
+    const posts = inserted.find(r => r.metric_key === SEO_METRIC_KEY.PUBLISHED_POSTS)
+    expect(posts?.source).toBe('blog_posts')
   })
 })
