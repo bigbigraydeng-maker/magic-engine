@@ -5,6 +5,21 @@
 
 ---
 
+### 2026-09-27（SEO 自动改标题的「事实核对闸门」加固——防止丢价格/日期/城市/认证，也防止凭空编价格）
+
+- **为什么**：9/23 CTS dry run 发现 AI 改写 /china-tours 页面时把 $6,188、22 Dec 2026、Christchurch、TAANZ 这些具体事实全丢了，AI 判官只查"有没有反着说"没查"有没有漏掉"，放行了。子牙 + 魏征审查后提出 5 条缺陷 + 4 条追加必改。
+- **上线**（PR [#1948](https://github.com/bigbigraydeng-maker/magic-engine/pull/1948)，合并 `b80d2954`，14:12 UTC）：
+  - 硬规则闸门（不经 AI、纯正则）新增**反向检查**：AI 改写里凭空出现的价格/日期/城市/认证同样拦截——防竞品价格被抄进客户标题。
+  - 多币种支持（€¥£ + NZD/AUD/USD/EUR/GBP 货币代码 + "3990 dollars" 文字写法 + "from 3990" 上下文写法）。
+  - 促销（save 20% / 2-for-1）和数量（14 days / 12-day）检测。
+  - 出发点上下文检测（"from Beijing" / "Shanghai departures"）+ 地名别名归一（NZ↔New Zealand / AU↔Australia / ChCh↔Christchurch 互换不误报）。
+  - 日期格式扩展：ISO (2026-12-22)、DD/MM/YYYY、序数词 (22nd)、无年日期 (Dec 22)、月份全称缩写归一。
+  - AI 判官提示词补充"凭空引入的事实视为矛盾"，增加 destination/itinerary city、trip duration、discount/promotion 作为举例。
+  - 格式归一化：地名大小写不敏感、全角半角 ＄→$、价格只比数字。
+  - slug 解析加固：剥离域名/斜线、非数组配置 malformed 只跳过该客户不影响全局。
+- **当场试跑**：CTS 真实数据 dry_run，9 个候选页 → 3 个方案 → 全部被硬规则拦截 → 0 放行。/china-tours（事故原页）丢 $7,188/$6,188/22 Dec 2026/TAANZ/Christchurch/25 years + 凭空加 Auckland，被正确拦截。
+- **验证**：42 条硬规则测试 + 5 条 AI 判官提示词测试 + 变异测试 6 处全命中 + 44 条攻击样例全拦住。子牙最终复核通过。风险 A 级，PM 授权后 `--admin` 合并。台账卡 `2026-09-27-seo-meta-cycle-fact-check-review-fixes`，10/4 前验证周一 cron 正常跑完无回归。
+
 ### 2026-09-27（Magic Bridge 客户页加「我们正在跟进的广告」卡片，报告正文第三部分改一句话）
 
 - **为什么**：包 B 已经把巡检查出变差的广告写进客户报告第三部分，但夹在长报告中间不显眼。PM 9/26 定做包 C：放到报告最上面，一条一张卡讲清楚。
