@@ -1,3 +1,4 @@
+# probe: trial-run gate check — do not merge
 name: ai-orchestrator CI
 
 # Ordinary read-only CI for tools/ai-orchestrator. It runs the module's tests and

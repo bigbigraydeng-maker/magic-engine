@@ -1,3 +1,4 @@
+# probe: trial-run gate check — do not merge
 name: Demo client refresh (Daily)
 
 # 演示客户 Harbourline Physio 的数据每天前滚一天，
