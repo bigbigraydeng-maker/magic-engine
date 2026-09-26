@@ -68,7 +68,7 @@ export function formatPct(rate: number): string {
 }
 
 /** 在 YYYY-MM-DD 上加 n 天（UTC）。 */
-function shiftDay(day: string, n: number): string {
+export function shiftDay(day: string, n: number): string {
   const t = Date.parse(`${day}T00:00:00Z`) + n * 86_400_000
   return new Date(t).toISOString().slice(0, 10)
 }
@@ -210,7 +210,9 @@ const NONE_REASON_TEXT: Record<
   incomplete_findings: '有几条广告这次的数据不完整，我们不想在数据不全时下结论',
 }
 
-const CTR_EXPLAINER = '点击率就是看到广告的人里点进来的比例。'
+export const CTR_EXPLAINER = '点击率就是看到广告的人里点进来的比例。'
+
+export const RULE_SECTION_TITLE = '三、需要留意的广告'
 
 function findingBlock(x: ClientRuleFinding, explainCtr: boolean): string {
   const detail = explainCtr ? CTR_EXPLAINER + x.detail : x.detail
@@ -218,7 +220,7 @@ function findingBlock(x: ClientRuleFinding, explainCtr: boolean): string {
 }
 
 export function renderRuleSection(input: RuleSectionInput): string {
-  const title = '三、需要留意的广告'
+  const title = RULE_SECTION_TITLE
   if (input.source === 'none') {
     return `${title}\n这个广告账户这次没有做单条广告检查：${NONE_REASON_TEXT[input.reason]}。报告里其它部分的分析不受影响。`
   }

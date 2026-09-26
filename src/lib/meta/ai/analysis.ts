@@ -6,6 +6,7 @@ import { AI_ENTITY_FIELDS } from '../entity-settings'
 import { graphAfter, graphRows, metaGraphGet, MetaReadError } from '../graph-read'
 import { compareMetrics, coreResultsByCampaign, normaliseInsight, previousWindow, resolveWindow, summariseCoreResults, type AdsetMeta, type CoreResultSummary, type Window } from './metrics'
 import { loadRuleFindings } from './rule-findings'
+import { buildRuleCards } from './rule-cards'
 import { renderRuleSection, type RuleSectionInput } from '@/lib/ads-strategy/rules/client-copy'
 import { loadOutcomeConfig } from '@/lib/ads-strategy/portfolio/outcome-config'
 import type { OutcomeStep } from '@/lib/ads-strategy/portfolio/outcome-ladder'
@@ -355,7 +356,8 @@ async function authorizeModelDispatch(clientId: string, principalId: string, job
 }
 
 /** Only forward the evidence fields ReportCharts.tsx actually renders — not per-ad IDs,
- * video retention curves, or fatigue candidates that only the model report consumes. */
+ * video retention curves, or fatigue candidates that only the model report consumes.
+ * rule_cards is added on top by presentRow (strings only, no per-ad IDs). */
 function chartEvidence(evidence: unknown): Record<string, unknown> | null {
   if (evidence === null || typeof evidence !== 'object' || Array.isArray(evidence)) return null
   const record = evidence as Record<string, unknown>
@@ -366,12 +368,21 @@ function chartEvidence(evidence: unknown): Record<string, unknown> | null {
   }
 }
 
+/** 发给浏览器的一行报告：图表字段 + 服务器拼好的「我们正在跟进的广告」卡片；正文第三部分能精确找到才换成一句话（设计 2026-09-27 包 C v2）。 */
+function presentRow(row: JobRow, today: string): JobRow {
+  const raw = row.evidence !== null && typeof row.evidence === 'object' && !Array.isArray(row.evidence)
+    ? (row.evidence as Record<string, unknown>).rule_section : undefined
+  const { cards, report } = buildRuleCards(raw, row.report_markdown, today)
+  const charts = chartEvidence(row.evidence)
+  return { ...row, report_markdown: report, evidence: charts === null ? null : { ...charts, rule_cards: cards } }
+}
+
 async function job(clientId: string, principalId: string, jobId: string): Promise<JobRow> {
   const { data, error } = await supabaseAdmin.from('meta_ads_ai_analysis_jobs')
     .select('id,status,ad_account_id,window_since,window_until,report_markdown,error_code,created_at,completed_at,evidence')
     .eq('id', jobId).eq('client_id', clientId).eq('principal_id', principalId).single()
   if (error || !data) throw new MetaReadError('analysis_unavailable', 503)
-  return { ...data, evidence: chartEvidence(data.evidence) } as JobRow
+  return presentRow(data as JobRow, new Date().toISOString().slice(0, 10))
 }
 
 export async function listAnalyses(clientId: string, principalId: string) {
@@ -379,7 +390,8 @@ export async function listAnalyses(clientId: string, principalId: string) {
     .select('id,status,ad_account_id,window_since,window_until,report_markdown,error_code,created_at,completed_at,evidence')
     .eq('client_id', clientId).eq('principal_id', principalId).order('created_at', { ascending: false }).limit(10)
   if (error) throw new MetaReadError('authorization_unavailable', 503)
-  return (data as JobRow[]).map(row => ({ ...row, evidence: chartEvidence(row.evidence) }))
+  const today = new Date().toISOString().slice(0, 10)
+  return (data as JobRow[]).map(row => presentRow(row, today))
 }
 
 export async function generateAnalysis(clientId: string, principalId: string, grantId: string) {
@@ -448,7 +460,8 @@ async function runAnalysis(clientId: string, principalId: string, grant: GrantRo
     const withSlot = ruleSection ? placeRuleSection(result.text.trim(), PLACEHOLDER) : normaliseHeadings(result.text.trim())
     const cleaned = stripFatigueSentences(withSlot)
     if (cleaned.removed > 0) console.warn('[meta-ads-ai] removed model fatigue sentences', { removed: cleaned.removed })
-    const report = ruleSection ? cleaned.text.replace(PLACEHOLDER, renderRuleSection(ruleSection)) : cleaned.text
+    // 用函数作替换值：广告名里的 $&、$'、$$ 等不会被当成替换指令（子牙/魏征 2026-09-27）
+    const report = ruleSection ? cleaned.text.replace(PLACEHOLDER, () => renderRuleSection(ruleSection)) : cleaned.text
     await requireSnapshot(clientId, principalId, grant, connectionVersion)
     await finish(clientId, principalId, jobId, 'completed', safeCharge(result.cost_usd, reserveUsd), evidence, report, MODEL_HAIKU,
       result.input_tokens, result.output_tokens, null)
