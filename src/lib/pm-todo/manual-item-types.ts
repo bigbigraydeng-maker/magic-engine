@@ -7,7 +7,13 @@
 
 import { verifyActionLink } from './action-link'
 import { isHtmlPageUrl } from '@/lib/seo/url-kind'
-import { classifyNotIndexed, THIN_WORD_COUNT_THRESHOLD } from '@/lib/seo/index-status'
+import {
+  classifyNotIndexed,
+  isActionableNotIndexed,
+  INDEX_CLASS_META,
+  CRAWL_FRESH_DAYS,
+  type IndexClass,
+} from '@/lib/seo/index-status'
 import type { AttributionItemKind } from './attribution-items'
 import type { ClientRosterItemKind } from './client-roster'
 import type { DailyPlanMeasurementItemKind } from './daily-plan-measurement-items'
@@ -59,14 +65,15 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
 
 /** Meta queued this long without being applied = the applier is stuck. */
 export const META_PENDING_STALE_DAYS = 3
-/** Crawl data older than this = the weekly recrawl isn't landing. */
-export const CRAWL_STALE_DAYS = 14
+/** Crawl data older than this = the weekly recrawl isn't landing. Same value as seo/index-status CRAWL_FRESH_DAYS (one source of truth). */
+export const CRAWL_STALE_DAYS = CRAWL_FRESH_DAYS
 
 export type ManualItemKind =
   | 'blog_pr_open'
   | 'not_indexed'
   | 'meta_stuck'
   | 'crawl_stale'
+  | 'crawl_blocked'
   | 'video_credits_out'
   /** Creatomate 渲染失败或超时未完成（额度用完 / 渲染卡死超过 15+20 分钟兜底轮询）—— 见
    *  docs/specs/2026-09-09-creatomate-connector-spec-v1.md §4.4，旧管线的 reapStale() 已死，
@@ -316,7 +323,16 @@ export interface NotIndexedRow {
   index_verdict: string | null
   first_not_indexed_at: string | null
   word_count: number | null
+  /** 我们自己抓这一页的状态；只有 'crawled' 时正文字数才可信（被防火墙挡住的行字数是假的）。 */
+  crawl_status: string | null
+  /** 我们最后一次抓这一页的时间；太久没抓的字数也不作数。 */
+  crawled_at: string | null
 }
+
+/** 待办里各类的报数顺序：先报改了就能好的，再报谷歌自己排队 / 判断的。 */
+export const NOT_INDEXED_REPORT_ORDER: readonly IndexClass[] = [
+  'error', 'noindex', 'unknown', 'thin', 'duplicate', 'crawled', 'discovered', 'other',
+]
 
 /**
  * 谷歌没收录的页面 —— **一个客户汇总成一条，不是一页一条**。
@@ -325,8 +341,13 @@ export interface NotIndexedRow {
  * 今日待办正文淹掉 122 行 —— 跟 pushDiagnosticItems / pushLinkedinProgressItems
  * 早就立下的「别把待办刷屏」是同一条纪律，唯独这条线之前漏了。逐条的网址和单独
  * 深链没意义（谁也不会点 116 个链接），价值全在「哪个客户、几个、什么原因、去哪
- * 看全部」。三类页面处理方式不同（内容太薄 / 爬过没收录 / 谷歌还不认识），在 what
- * 里分别报数、在 how 里一句话说清，别让人以为一律去 GSC 点提交。
+ * 看全部」。
+ *
+ * 分类顺着谷歌自己给的原因走 `classifyNotIndexed`（seo/index-status），跟站点清单页
+ * 共用同一份判据。跳转页 / 备用页本来就不该被收录，不是要干的活，只在 what 里报个
+ * 数、说一句「不用管」。`thin` 只在「我们自己爬干净了且爬取够新」时才成立 ——
+ * 2026-09-26 生产上某客户 46/46 行被判 thin，全是防火墙挑战页；另有 49 行标着
+ * 「crawled」其实谷歌压根没爬过。
  */
 export function buildNotIndexedItems(
   rows: NotIndexedRow[],
@@ -337,23 +358,34 @@ export function buildNotIndexedItems(
 ): ManualItem[] {
   const byClient = new Map<
     string,
-    { total: number; unknown: number; thin: number; declined: number; oldest: string | null }
+    {
+      total: number
+      counts: Partial<Record<IndexClass, number>>
+      notAProblem: number
+      noVerdict: number
+      oldest: string | null
+    }
   >()
   for (const row of rows) {
     // Assets (images/PDFs) are not pages — "not indexed as a page" is normal
     // for them and flagging it burns the whole list's credibility.
     if (!isHtmlPageUrl(row.url)) continue
+    const cls = classifyNotIndexed(row, now)
     const cur = byClient.get(row.client_id) ?? {
       total: 0,
-      unknown: 0,
-      thin: 0,
-      declined: 0,
+      counts: {} as Partial<Record<IndexClass, number>>,
+      notAProblem: 0,
+      noVerdict: 0,
       oldest: null as string | null,
     }
+    if (!isActionableNotIndexed(cls)) {
+      if (cls === 'not_a_problem') cur.notAProblem += 1
+      else if (cls === 'no_verdict') cur.noVerdict += 1
+      byClient.set(row.client_id, cur)
+      continue
+    }
     cur.total += 1
-    // 判据顺序与站点清单页共用同一份 classifyNotIndexed（seo/index-status）——
-    // 「300 词」和 unknown 文案只此一处定义，两边永远同口径。
-    cur[classifyNotIndexed(row)] += 1
+    cur.counts[cls] = (cur.counts[cls] ?? 0) + 1
     if (row.first_not_indexed_at && (!cur.oldest || row.first_not_indexed_at < cur.oldest)) {
       cur.oldest = row.first_not_indexed_at
     }
@@ -362,33 +394,114 @@ export function buildNotIndexedItems(
 
   const items: ManualItem[] = []
   for (const [clientId, agg] of Array.from(byClient.entries())) {
-    // 未收录数据（first_not_indexed_at）只由每日收录轮检写入，而轮检只跑连了
-    // GSC 的客户 —— 所以没连 GSC 的客户本就不会有未收录行。这道闸是双保险：
-    // 而且「谷歌爬过没收录 / 还不认识」两类的处理动作仍要去 GSC 点「请求编入索引」，
-    // 没连 GSC 这动作做不了，下发也白搭（与原逐页版一致，跳过不下发）。
+    if (agg.total === 0) continue
+    // 没连 GSC 的客户：我们拿不到谷歌给这些页面的原因，也没有一份读者能照着做的清单，
+    // 下发也白搭（与原逐页版一致，跳过不下发）。
     if (!siteUrlOf.get(clientId)) continue
 
-    const parts = [
-      agg.thin > 0 ? `${agg.thin} 个内容太薄` : null,
-      agg.declined > 0 ? `${agg.declined} 个谷歌爬过却没收录` : null,
-      agg.unknown > 0 ? `${agg.unknown} 个谷歌还不认识这网址` : null,
-    ]
-      .filter(Boolean)
+    const parts = NOT_INDEXED_REPORT_ORDER.filter((cls) => (agg.counts[cls] ?? 0) > 0)
+      .map((cls) => `${agg.counts[cls]} 个${INDEX_CLASS_META[cls].label}`)
       .join('、')
+    const extra =
+      (agg.notAProblem > 0 ? `；另 ${agg.notAProblem} 个是正常跳转或备用页，不用管` : '') +
+      (agg.noVerdict > 0 ? `；${agg.noVerdict} 个还没拿到谷歌的结论，排队等重查` : '')
     const days = daysAgo(agg.oldest, now)
     const age = days !== null && days > 0 ? `，最久的已 ${days} 天` : ''
     items.push({
       kind: 'not_indexed',
       client_id: clientId,
       client_name: nameOf(clientId),
-      what: `${agg.total} 个页面没被谷歌收录（${parts}）${age}，这些页面现在拿不到任何谷歌流量`,
+      what: `${agg.total} 个页面没被谷歌收录（${parts}）${age}，这些网址本身不会出现在谷歌搜索结果里${extra}`,
       // 落到 ME 后台的站点页面清单（已带 ?filter=not-indexed 直达未收录）：每页都标了
       // 本地分类和该做什么。这解决 GSC「网页(Pages)」报告的两个盲区 —— 它不显示我们本地
       // 推导的「内容太薄」，「谷歌还不认识」的页面也可能压根不在它清单里（Codex #1375）。
-      how: `打开这份站内清单（已只筛未收录），每页都标了原因和该做的动作：「内容太薄」的，去把正文补到 ${THIN_WORD_COUNT_THRESHOLD} 词以上、加内链；「爬过没收录 / 谷歌还不认识」的，去 Search Console 在最上方搜索框粘上这个网址、点「请求编入索引」。一次弄不完就先挑最想被搜到的几页`,
+      how:
+        `打开这份站内清单（已只筛未收录），每页都标了谷歌给的原因和该做的动作。先修「${INDEX_CLASS_META.error.label}」这类，改好了谷歌才可能收；` +
+        `「${INDEX_CLASS_META.noindex.label}」的先确认是不是故意的（购物车、账户页本来就不该收），要被搜到再去掉这个设置；` +
+        `「${INDEX_CLASS_META.unknown.label}」的，最想被搜到的几页可以去 Search Console 点「请求编入索引」（每天限量，不保证收）；` +
+        `「${INDEX_CLASS_META.discovered.label}」和「${INDEX_CLASS_META.crawled.label}」是谷歌自己在排队和判断，别反复点请求收录，靠加内链、补有用的内容慢慢来`,
       // app.magicengine.com.au 是登录类站点，链接闸判 unverifiable 会保留（见 action-link）。
       href: `https://app.magicengine.com.au/dashboard/clients/${clientId}/site-audit/pages?filter=not-indexed`,
     })
   }
+  return items
+}
+
+/** 一行 `client_site_pages`（只声明站点数据健康检查用得到的列）。 */
+export interface CrawlHealthRow {
+  client_id: string
+  crawled_at: string | null
+  crawl_status: string | null
+}
+
+/** 客户网站防火墙挡住我们读页面时的处理说明：先由我们换读取通道，再请客户放行 ME 服务器（SiteGround 步骤）。 */
+export const SITE_FIREWALL_ALLOWLIST_SOP_URL =
+  'https://github.com/bigbigraydeng-maker/magic-engine/blob/main/docs/sops/client-site-siteground-allowlist.md'
+
+/**
+ * 站点页面数据健康：两件事，各出一条待办。
+ *
+ * - crawl_stale：只有真抓到正文的行（crawl_status='crawled'）才算「新鲜」。被防火墙
+ *   挡住的行（antibot_challenged）每次重爬都会刷新 crawled_at，拿它算新鲜会把
+ *   「每次都被挡」的客户误判成数据很新，把告警静音。只对每周自动重扫名单里的客户报：
+ *   不在名单里的客户数据旧是常态，天天提醒是噪音。
+ * - crawl_blocked：最近 CRAWL_FRESH_DAYS 天里有页面被网站防火墙挡住 —— 我们读不到正文。
+ *   只数最近被挡的：每周重扫最多 150 页，碰不到的旧行会永远停在被挡状态，全数会让这条
+ *   永远消不掉。我们读网页经第三方阅读服务转手，客户白名单只放行 ME 服务器没用，
+ *   所以先由我们换读取通道，再请客户放行。
+ */
+export function buildCrawlHealthItems(
+  rows: CrawlHealthRow[],
+  nameOf: (id: string) => string,
+  now: Date,
+  /** 在每周自动重扫名单里的客户（与 site-audit-weekly 同一判据）。只有它们的「数据过期」才值得提醒。 */
+  weeklyRecrawlClientIds: ReadonlySet<string>,
+): ManualItem[] {
+  const newestReal = new Map<string, string>()
+  const blocked = new Map<string, number>()
+  for (const row of rows) {
+    if (row.crawl_status === 'crawled' && row.crawled_at) {
+      const cur = newestReal.get(row.client_id)
+      if (!cur || row.crawled_at > cur) newestReal.set(row.client_id, row.crawled_at)
+    }
+    if (row.crawl_status === 'antibot_challenged') {
+      const days = daysAgo(row.crawled_at, now)
+      if (days !== null && days < CRAWL_FRESH_DAYS) {
+        blocked.set(row.client_id, (blocked.get(row.client_id) ?? 0) + 1)
+      }
+    }
+  }
+
+  const items: ManualItem[] = []
+
+  for (const [clientId, iso] of Array.from(newestReal.entries())) {
+    if (!weeklyRecrawlClientIds.has(clientId)) continue
+    const days = daysAgo(iso, now)
+    if (days === null || days < CRAWL_STALE_DAYS) continue
+    items.push({
+      kind: 'crawl_stale',
+      client_id: clientId,
+      client_name: nameOf(clientId),
+      what: `网站页面数据 ${days} 天没更新了，内链和孤儿页检查还在用旧数据`,
+      // 🔴 落地路径必须落到 /site-audit/pages —— /site-audit 本身没有 page.tsx，
+      //    Next.js 直接 404（2026-09-07 每日待办 href 落地页审计 PR #1467 实测）。
+      //    /site-audit/pages 是「页面清单」页，右上就有「Start New Audit」按钮，
+      //    功能刚好对上「重新扫描网站」这句 how。
+      how: '打开链接（是「页面清单」页），右上点「Start New Audit」重扫；如果还是不行说明对方主机挡了我们，回一句我来换通道',
+      href: `https://app.magicengine.com.au/dashboard/clients/${clientId}/site-audit/pages`,
+    })
+  }
+
+  for (const [clientId, count] of Array.from(blocked.entries())) {
+    items.push({
+      kind: 'crawl_blocked',
+      client_id: clientId,
+      client_name: nameOf(clientId),
+      what: `最近 ${CRAWL_FRESH_DAYS} 天里有 ${count} 个页面被客户网站的防火墙挡住，我们读不到正文 —— 这些页「正文偏薄」「内链」这类要看正文的判断都用不上真数据`,
+      how: `先别找客户：我们读网页是经第三方阅读服务转手的，客户的防火墙挡的是它，只把 ME 服务器加进客户白名单，这一路照样被挡。回一句「换通道」，我来把这个站改成由 ME 服务器直接读；改好后才需要客户按链接里的步骤放行 ME 服务器。最近 ${CRAWL_FRESH_DAYS} 天没有页面再被挡时，这条会自动消失`,
+      href: SITE_FIREWALL_ALLOWLIST_SOP_URL,
+    })
+  }
+
   return items
 }

@@ -128,7 +128,8 @@ describe('Scenario A — new test ad with a broken form (D10)', () => {
     expect(hit.reasons.some(r => r.includes('p='))).toBe(false)
     expect(hit.checkBack?.after.startsWith('3 天后')).toBe(true)
     expect(Number(hit.evidence.lifetime_cost_multiple) >= 1.5).toBe(true)
-    expect(hit.clientVisible).toBe(false)
+    // 命中结论可给客户看（Magic Bridge 经客户文案模板转写）；判不了的备注仍只内部
+    expect(hit.clientVisible).toBe(true)
   })
 
   it('2. no D2 for v4 (fatigue never compares with siblings)', () => {
@@ -234,6 +235,7 @@ describe('Scenario B — old ad CTR decay (D2)', () => {
     expect(hit.checkBack?.fallback).toContain('停掉新建的那个测试组，这条不动')
     expect(hit.reasons[0]).toContain('另建一个新广告组')
     expect(hit.reasons.some(r => r.includes('新增一条广告'))).toBe(false)
+    expect(hit.clientVisible).toBe(true)
   })
 
   it('12. high frequency → audience fatigue kind', () => {
@@ -518,5 +520,20 @@ describe('runDiagnostics wiring', () => {
     const wired = runDiagnostics({ ...input({ clientPageId: null }), accounts: [accA, accB] })
     const notes = wired.diagnoses.filter(d => d.notComparableReason === 'client_page_unknown')
     expect(notes).toHaveLength(1)
+  })
+
+  it('按账户记录广告级规则跑没跑', () => {
+    const acc = account(scenarioASnaps(), scenarioAAdDaily(V4_BROKEN))
+    const wired = runDiagnostics({ ...input(), accounts: [acc] })
+    expect(wired.adLevelCoverage).toEqual([{ adAccountId: 'act_1', ran: true, reason: 'ok', adsChecked: 3 }])
+
+    const sharedWired = runDiagnostics({ ...input(), accounts: [{ ...acc, shared: true }] })
+    expect(sharedWired.adLevelCoverage).toEqual([{ adAccountId: 'act_1', ran: false, reason: 'shared_account', adsChecked: 0 }])
+
+    const noPageWired = runDiagnostics({ ...input({ clientPageId: null }), accounts: [acc] })
+    expect(noPageWired.adLevelCoverage).toEqual([{ adAccountId: 'act_1', ran: false, reason: 'client_page_unknown', adsChecked: 0 }])
+
+    const noAdDailyWired = runDiagnostics({ ...input(), accounts: [{ ...acc, adDaily: undefined }] })
+    expect(noAdDailyWired.adLevelCoverage).toEqual([{ adAccountId: 'act_1', ran: false, reason: 'not_loaded', adsChecked: 0 }])
   })
 })

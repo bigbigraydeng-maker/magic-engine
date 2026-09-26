@@ -19,6 +19,8 @@ import { buildIdentities, resolveContact, AmbiguousIdentityError } from '@/lib/c
 import { EMPTY_ATTRIBUTION } from '@/lib/crm/attribution'
 import { segmentContact, SEGMENT_ACTION_META } from '@/lib/crm/segments'
 import { buildContactModel } from '@/lib/crm/contact-model'
+import { buildPriorityView } from '@/lib/crm/contact-list-view'
+import type { SectionKey } from '@/lib/crm/list-sections'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import { fetchAll } from '@/lib/supabase-paginate'
 import {
@@ -80,6 +82,14 @@ interface ListQuery {
   stages: string[]
   /** 已 trim；空串当 null。 */
   q: string | null
+  /** `?view=priority` → 4 段视图。null = 老的平铺列表。 */
+  view: 'priority' | null
+  /** 段展开状态：`?open=waiting,acted`。缺省 undefined = 用 list-sections 的默认（前两段展开）。 */
+  open?: Partial<Record<SectionKey, boolean>>
+  /** 段内翻页：`?p_waiting=2&p_off_list=1`，1-based。 */
+  sectionPage?: Partial<Record<SectionKey, number>>
+  /** `?contact=<id>` —— 今日待办的直达链接；服务端定位它落在哪段哪页。 */
+  focusContactId?: string
 }
 
 const DEFAULT_PER_PAGE = 100
@@ -131,7 +141,41 @@ function parseListQuery(url: URL): ListQuery | { error: string } {
   // 语法拆坏（甚至注入别的条件）。不尝试转义 —— 直接拒绝，让调用方自己清。
   if (q !== null && /[,()]/.test(q)) return { error: 'invalid characters in q' }
 
-  return { paged, page, perPage, stages, q }
+  const SECTION_KEYS: SectionKey[] = ['waiting', 'acted', 'queued', 'off_list']
+  const rawView = sp.get('view')
+  if (rawView !== null && rawView !== 'priority') return { error: 'invalid view' }
+  const view = rawView === 'priority' ? ('priority' as const) : null
+
+  let open: Partial<Record<SectionKey, boolean>> | undefined
+  if (sp.has('open')) {
+    const wanted = new Set(
+      (sp.get('open') ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0),
+    )
+    for (const k of wanted) {
+      if (!SECTION_KEYS.includes(k as SectionKey)) return { error: `invalid section in open: ${k}` }
+    }
+    // 显式传 open 就是完整声明：列出来的展开，没列出的收起。半声明会让
+    // 「收起 waiting」这个动作做不到（缺省会把它重新展开）。
+    open = Object.fromEntries(SECTION_KEYS.map((k) => [k, wanted.has(k)])) as Partial<Record<SectionKey, boolean>>
+  }
+
+  let sectionPage: Partial<Record<SectionKey, number>> | undefined
+  for (const k of SECTION_KEYS) {
+    const raw = sp.get(`p_${k}`)
+    if (raw === null) continue
+    const n = Number(raw)
+    if (!Number.isInteger(n) || n <= 0) return { error: `invalid p_${k}` }
+    sectionPage = { ...(sectionPage ?? {}), [k]: n }
+  }
+
+  const rawFocus = sp.get('contact')
+  const focusContactId = rawFocus === null ? undefined : rawFocus.trim() || undefined
+
+  // view=priority 不走分页路径：它自己一次拉全（筛选后的）子集再在内存里分段。
+  return { paged: view === null && paged, page, perPage, stages, q, view, open, sectionPage, focusContactId }
 }
 
 /**
@@ -245,6 +289,95 @@ async function getPaged(clientId: string, query: ListQuery): Promise<NextRespons
 }
 
 /**
+ * `?view=priority` —— 4 段跟进视图。
+ *
+ * 跟 getPaged 的区别：**不分页拉人**。分段依赖「现在几点」（约好的回电到点没到、
+ * 打不通满 3 天转交、推迟到没到期），不能在 SQL 里算，所以必须把筛选后的子集
+ * 整批拉进内存。stage / q 的筛选照旧落在 SQL（跟 getPaged 共用 contactFilterParams），
+ * 这是 BLOCKER-1（三方设计审）的架构解：断崖从「总人数」推到「筛选后的子集」。
+ *
+ * 已知代价：触点仍按 client_id 整批拉（跟老路径一样），没有按筛选后的人收窄。
+ * CTS 量级约 5k 行 / 1.4MB，跟今天页每次打开读的量相同。真要收窄得按 100 个
+ * contact_id 一批走 `.in()`（PostgREST URL 长度限制），留作后续一轮。
+ */
+async function getPriority(clientId: string, query: ListQuery): Promise<NextResponse> {
+  let contacts: ContactRow[]
+  let touches: TouchRow[]
+  let stageRows: StageRow[]
+  try {
+    const filters = contactFilterParams(query)
+    ;[contacts, touches, stageRows] = await Promise.all([
+      fetchAll<ContactRow>((from, to) => {
+        let b = supabaseAdmin
+          .from('contacts')
+          .select('id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at')
+          .eq('client_id', clientId)
+        if (filters.stages !== null) b = b.in('stage', filters.stages)
+        if (filters.orExpr !== null) b = b.or(filters.orExpr)
+        return b.order('id', { ascending: true }).range(from, to)
+      }),
+      fetchAll<TouchRow>((from, to) =>
+        supabaseAdmin
+          .from('contact_touchpoints')
+          .select('id, contact_id, channel, direction, occurred_at, summary, raw, metadata, source')
+          .eq('client_id', clientId)
+          .order('occurred_at', { ascending: false })
+          .order('id', { ascending: false })
+          .range(from, to),
+      ),
+      fetchAll<StageRow>((from, to) =>
+        supabaseAdmin
+          .from('client_pipeline_stages')
+          .select('stage_key, label, marketing_action, is_terminal')
+          .eq('client_id', clientId)
+          .order('sort_order', { ascending: true })
+          .range(from, to),
+      ),
+    ])
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : '读取失败' },
+      { status: 500 },
+    )
+  }
+
+  const stageMeta = stageMetaOf(stageRows)
+  const byContact = new Map<string, TouchRow[]>()
+  for (const t of touches) {
+    const list = byContact.get(t.contact_id) ?? []
+    list.push(t)
+    byContact.set(t.contact_id, list)
+  }
+
+  const customPerContact: Array<Record<CustomColumnKey, string | null>> = []
+  const { sections, focus } = buildPriorityView(
+    {
+      contacts,
+      touchpoints: touches,
+      stageMeta,
+      now: new Date(),
+      perPage: query.perPage,
+      open: query.open,
+      page: query.sectionPage,
+      focusContactId: query.focusContactId,
+    },
+    (row, ranked) => {
+      const tps = byContact.get(row.id) ?? []
+      const built = responseRowFor(row as ContactRow, tps, stageMeta, buildContactModel(row, tps, stageMeta), ranked.seg)
+      customPerContact.push(built.custom)
+      return built.row
+    },
+  )
+
+  return NextResponse.json({
+    view: 'priority',
+    focus,
+    columns: visibleCustomColumns(customPerContact),
+    sections,
+  })
+}
+
+/**
  * GET /api/clients/[id]/crm/contacts
  *
  * 「全部客人」横表的读模型。一次拉这个客户的人 + 触点 + 阶段模型，在内存里
@@ -269,6 +402,7 @@ export async function GET(
     return NextResponse.json({ error: parsed.error }, { status: 400 })
   }
   if (parsed.paged) return getPaged(clientId, parsed)
+  if (parsed.view === 'priority') return getPriority(clientId, parsed)
 
   // 必须分页拉全 —— Supabase 单次查询硬顶 1000 行，`.limit(20000)` 会被静默
   // 砍掉且不报错。实测 CTS：库里 1271 条触点只回 1000 条；配合 order desc，
@@ -322,6 +456,93 @@ export async function GET(
   })
 }
 
+/** 阶段 map：label 给「跟进到哪步」列，suppressed 决定这个人算不算已结论（影响冷热）。 */
+function stageMetaOf(stageRows: StageRow[]): Map<string, { label: string; suppressed: boolean }> {
+  const stageMeta = new Map<string, { label: string; suppressed: boolean }>()
+  for (const s of stageRows) {
+    stageMeta.set(s.stage_key, {
+      label: s.label,
+      suppressed: stageSuppressesWorklist(
+        isMarketingAction(s.marketing_action) ? s.marketing_action : 'suppress',
+        s.is_terminal,
+      ),
+    })
+  }
+  return stageMeta
+}
+
+/** 每人一行的响应形状 —— 平铺列表与 view=priority 共用，两个形状里同一个人长得一模一样。 */
+function responseRowFor(
+  c: ContactRow,
+  tps: TouchRow[],
+  stageMeta: Map<string, { label: string; suppressed: boolean }>,
+  model: ReturnType<typeof buildContactModel>,
+  seg: ReturnType<typeof segmentContact>,
+): { row: Record<string, unknown>; custom: Record<CustomColumnKey, string | null> } {
+  // 进线时间 = 真实最早一条触点（不是导入日期）；没触点退回 first_seen_at。
+  // 最近联系 = 最晚一条触点；0 触点显式 null —— 绝不 fallback last_seen_at
+  // （它默认 = 建档时的 NOW()，会假装有过一次根本没发生的沟通）。
+  let firstTouch = 0
+  let lastTouch = 0
+  for (const t of tps) {
+    const v = ts(t.occurred_at)
+    if (v > 0) {
+      if (firstTouch === 0 || v < firstTouch) firstTouch = v
+      if (v > lastTouch) lastTouch = v
+    }
+  }
+
+  const forColumns: TouchpointForColumn[] = tps.map((t) => ({
+    channel: t.channel,
+    occurredAt: t.occurred_at,
+    metadata: t.metadata,
+  }))
+  const custom = extractCustomColumns(forColumns)
+
+  return {
+    custom,
+    row: {
+      contactId: c.id,
+      name: c.display_name || '未留姓名',
+      firstSeenAt: firstTouch > 0 ? new Date(firstTouch).toISOString() : c.first_seen_at,
+      lastTouchAt: lastTouch > 0 ? new Date(lastTouch).toISOString() : null,
+      phone: c.primary_phone,
+      /**
+       * 号码在库里但打不通 —— **两个 CRM 入口必须说同一件事**（Codex 复审 2026-08-16）。
+       *
+       * 不带的话，同一个已判坏的号在「今天该联系谁」被禁用，切到「全部客人」
+       * 展开却照旧能一点就拨。销售会以为其中一边是过时的，而两边他都不再信。
+       */
+      phoneUnusable: seg.phoneUnusable ?? false,
+      /**
+       * 被标成「别再联系」—— 页面据此给出**取消**那条路。
+       *
+       * 今日待办下发的「可能被误判成永久拒联」人工任务，href 指向的正是
+       * 「全部客人」这一页（Codex 复审 2026-08-16）。不带这个字段，FDE 照着
+       * 任务点进来会发现根本没有任务里说的那个按钮 —— 照着做也做不成
+       * 的人工任务，比不下发更糟。用上面 model 已经算好的那份，不重算。
+       */
+      doNotContact: model.doNotContact,
+      email: c.primary_email,
+      // 电话邮箱都没有时，页面据此显示「仅 FB 私信」而不是「没留联系方式」。
+      hasMessenger: tps.some((t) => t.channel === 'messenger'),
+      stage: c.stage,
+      // 认不出的 stage_key（配置里删了）显示原值，别留空白。
+      stageLabel: c.stage ? (stageMeta.get(c.stage)?.label ?? c.stage) : null,
+      // 人工置顶（contacts.pinned_at）。这一轮只读出来给页面显示 / 切换，
+      // 排序仍是系统算的 —— 置顶优先排序是下一轮的事。
+      pinnedAt: c.pinned_at,
+      // 「⭐置顶」附带的原因和到期日（contacts.important_note / important_due_at）。
+      // 这一轮只读出来给页面显示，编辑走 PATCH .../important，UI 是下一轮的事。
+      important: { note: c.important_note, dueAt: c.important_due_at },
+      segment: seg.segment,
+      segmentLabel: SEGMENT_ACTION_META[seg.segment].label,
+      temperature: seg.temperature,
+      custom,
+    },
+  }
+}
+
 /**
  * 逐人组装输出行 —— 分页路径和老路径共用，保证同一个人在两个形状里长得一样。
  *
@@ -343,17 +564,7 @@ function assembleRows(
     byContact.set(t.contact_id, list)
   }
 
-  // 阶段 map：label 给「跟进到哪步」列，suppressed 决定这个人算不算已结论（影响冷热）。
-  const stageMeta = new Map<string, { label: string; suppressed: boolean }>()
-  for (const s of stageRows) {
-    stageMeta.set(s.stage_key, {
-      label: s.label,
-      suppressed: stageSuppressesWorklist(
-        isMarketingAction(s.marketing_action) ? s.marketing_action : 'suppress',
-        s.is_terminal,
-      ),
-    })
-  }
+  const stageMeta = stageMetaOf(stageRows)
 
   const now = new Date()
   const rows = contacts
@@ -362,77 +573,15 @@ function assembleRows(
   const customPerContact: Array<Record<CustomColumnKey, string | null>> = []
   const out = rows.map((c) => {
     const tps = byContact.get(c.id) ?? []
-    const stage = c.stage ? stageMeta.get(c.stage) : undefined
-
     // 装配形状收敛到共享 builder：全部客人 / 今天名单 / WP3 跟进表用同一个函数吃同一份数据，
-    // 分段模块只有一份，喂它的形状也只能有一份。原来在这里就地拼装漏掉了
-    // snoozeUntil / automated / action —— 于是推迟中的人在这一页仍显示原分段、
-    // 群发邮件也被当成「我们出手过」，跟今天页各说各话。见 lib/crm/contact-model 头注。
-    // 本地 ContactRow 和 stageMeta 的字段是 ContactRowLike / StageMetaLike 的超集，
-    // 结构类型直接匹配，不需要显式转换。
+    // 分段模块只有一份，喂它的形状也只能有一份。见 lib/crm/contact-model 头注。
     const model = buildContactModel(c, tps, stageMeta)
     const seg = segmentContact(model, now)
-
-    // 进线时间 = 真实最早一条触点（不是导入日期）；没触点退回 first_seen_at。
-    // 最近联系 = 最晚一条触点；0 触点显式 null —— 绝不 fallback last_seen_at
-    // （它默认 = 建档时的 NOW()，会假装有过一次根本没发生的沟通）。
-    let firstTouch = 0
-    let lastTouch = 0
-    for (const t of tps) {
-      const v = ts(t.occurred_at)
-      if (v > 0) {
-        if (firstTouch === 0 || v < firstTouch) firstTouch = v
-        if (v > lastTouch) lastTouch = v
-      }
-    }
-
-    const forColumns: TouchpointForColumn[] = tps.map((t) => ({
-      channel: t.channel,
-      occurredAt: t.occurred_at,
-      metadata: t.metadata,
-    }))
-    const custom = extractCustomColumns(forColumns)
-    customPerContact.push(custom)
-
-    return {
-      contactId: c.id,
-      name: c.display_name || '未留姓名',
-      firstSeenAt: firstTouch > 0 ? new Date(firstTouch).toISOString() : c.first_seen_at,
-      lastTouchAt: lastTouch > 0 ? new Date(lastTouch).toISOString() : null,
-      phone: c.primary_phone,
-      /**
-       * 号码在库里但打不通 —— **两个 CRM 入口必须说同一件事**（Codex 复审 2026-08-16）。
-       *
-       * 不带的话，同一个已判坏的号在「今天该联系谁」被禁用，切到「全部客人」
-       * 展开却照旧能一点就拨。销售会以为其中一边是过时的，而两边他都不再信。
-       */
-      phoneUnusable: seg.phoneUnusable ?? false,
-      /**
-       * 被标成「别再联系」—— 页面据此给出**取消**那条路。
-       *
-       * 今日待办下发的「可能被误判成永久拒联」人工任务，href 指向的正是
-       * 「全部客人」这一页（Codex 复审 2026-08-16）。不带这个字段，FDE 照着
-       * 任务点进来会发现根本没有任务里说的那个按钮 —— 照着做也做不成的
-       * 人工任务，比不下发更糟。用上面 model 已经算好的那份，不重算。
-       */
-      doNotContact: model.doNotContact,
-      email: c.primary_email,
-      // 电话邮箱都没有时，页面据此显示「仅 FB 私信」而不是「没留联系方式」。
-      hasMessenger: tps.some((t) => t.channel === 'messenger'),
-      stage: c.stage,
-      // 认不出的 stage_key（配置里删了）显示原值，别留空白。
-      stageLabel: c.stage ? (stageMeta.get(c.stage)?.label ?? c.stage) : null,
-      // 人工置顶（contacts.pinned_at）。这一轮只读出来给页面显示 / 切换，
-      // 排序仍是系统算的 —— 置顶优先排序是下一轮的事。
-      pinnedAt: c.pinned_at,
-      // 「⭐置顶」附带的原因和到期日（contacts.important_note / important_due_at）。
-      // 这一轮只读出来给页面显示，编辑走 PATCH .../important，UI 是下一轮的事。
-      important: { note: c.important_note, dueAt: c.important_due_at },
-      segment: seg.segment,
-      segmentLabel: SEGMENT_ACTION_META[seg.segment].label,
-      temperature: seg.temperature,
-      custom,
-    }
+    // 响应行也只有一份 —— view=priority 与本路径共用 responseRowFor，
+    // 否则两个入口会各自长出一套字段（2026-09-26 R5b：就是在这里发现它已经被抄了第二份）。
+    const built = responseRowFor(c, tps, stageMeta, model, seg)
+    customPerContact.push(built.custom)
+    return built.row
   })
 
   return { out, customPerContact }
