@@ -7,10 +7,10 @@ decided_on: 2026-09-26
 source: session:3b976bb5
 done_on: 2026-09-26
 done_ref: pr:2068
-verify_by: 2026-10-03
-verify_how: 迁移 apply、部署、Inngest 重新 Sync 并跑过第一次派单后查四件事：①gsc_page_fetch_receipts 里 CTS 与 Oztop 都有 status=complete 的日更回执，data_from_day / data_through_day 都有值；②gsc_page_daily 里这两个客户各自的行数都大于 50（以前只存前 50 页）；③补历史回执逐日往更早的月份推进（每客户每天最多 3 个月，failed 的月份第二天会被重派）；④定时任务健康检查里 gsc-page-daily 是绿的（没有逾期、没有卡死、没有「回执表 26 小时没新行」）。四项都对算成；任何一项不对，先看那张回执的 status / failure_kind / error
+verify_by: 2026-09-28
+verify_how: 迁移 apply、部署、Inngest 重新 Sync 后，第一次 18:30 UTC 自动运行完当天查五件事：①gsc_page_fetch_receipts 里 CTS 与 Oztop 都有 status=complete 的日更回执，data_from_day / data_through_day 都有值，没有停在 running 的；②CTS 某个已定稿日：gsc_page_daily 逐页 clicks 加总 ≈ 同日谷歌全站 clicks（差距在谷歌隐私过滤范围内），逐页 impressions 加总 ≥ 全站 impressions（同一次搜索出现两个页面算两次）——这一条才证明数据是全的；③两个客户各自的行数都大于 50（以前只存前 50 页），只作辅助，不能单独算成；④cron_run_logs 里派单（gsc-page-daily）和执行单（gsc-page-daily-pull）都有记录、没有卡在 running，派单行 summary 带 stopped_backfill_months；⑤定时任务健康检查里这两个任务都是绿的（没有逾期、没有「回执表 26 小时没新行」）。都对算成；不对先看那张回执的 status / failure_kind / error
 ---
-PM 2026-09-26 回「全开工」（第 4 条，A 级：新表 + 迁移）；设计稿 v3 经子牙、魏征设计审。本卡只管 PR-A（写入），PR-B（读方切换）另开卡。
+PM 2026-09-26 回「全开工」（第 4 条，A 级：新表 + 迁移）；设计稿 v3 经子牙、魏征设计审；实施审（子牙 + 魏征 + 狄仁杰）后按 5 条改完。本卡只管 PR-A（写入），PR-B（读方切换）另开卡。
+verify_by 先填 2026-09-28（按「当天合并、当天部署」估的首跑日），合并前由孔子按实际首跑日改。
 迁移未 apply：apply 前要 PM 在对话里点头；建议先 apply 再部署，部署后去 Inngest 后台重新 Sync。
-已当场试跑（本机、替身谷歌接口、按表建模假库）：两天派单、翻页、截断、429、403、写库失败、超长网址、onFailure 收口都走通；真实拉取要等生产授权和迁移上线。
-跟设计稿不一样的地方写在 PR 描述里（健康检查看 started_at、每页一步、回执 id = 运行记录 id）。
+已当场试跑（本机、替身谷歌接口、按表建模假库）：多天派单、翻页、撞谷歌 5 万行上限、429、403、写库失败、超长网址、停派报红一次、onFailure 只收自己那一单都走通；真实拉取和第②条的逐页对账要等生产授权。
