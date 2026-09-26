@@ -92,7 +92,9 @@ export async function buildDigestGoalContext(
     const goal = await getActiveGoal(supabaseAdmin, clientId)
     if (!goal) return null
 
-    const fetched = await autoFetchMetricValue(supabaseAdmin, clientId, goal.primary_metric_key)
+    const fetched = await autoFetchMetricValue(supabaseAdmin, clientId, goal.primary_metric_key, {
+      goalPeriod: { period_start: goal.period_start, period_end: goal.period_end },
+    })
     // unknown / 任何失败 → null（不是 0）。
     const actualToDate = fetched.ok ? fetched.value : null
 
