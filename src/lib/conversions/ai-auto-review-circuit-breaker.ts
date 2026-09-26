@@ -13,6 +13,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { approvalCutoffIso } from './event-window'
 
 export type CircuitBreakerRule =
   | 'volume_spike'
@@ -89,10 +90,16 @@ async function fetchBaselineDailyAverage(
   }
 }
 
+/**
+ * 只数「还来得及发」的 uncertain——已过期或离过期不到余量的，本轮会被
+ * `ai-auto-review-run.ts` 直接判过期清掉，不代表 AI 判不了这个客户的数据。
+ * 不排除的话，过期行会先把熔断顶开，清理那一步根本轮不到跑（2026-09-19 CTS 就是这样被暂停的）。
+ */
 async function fetchUncertainBacklogCount(
   supabase: SupabaseClient,
   clientId: string,
   minAttempts: number,
+  now: Date,
 ): Promise<number> {
   const { count, error } = await supabase
     .from('me_sale_outcomes')
@@ -100,6 +107,7 @@ async function fetchUncertainBacklogCount(
     .eq('client_id', clientId)
     .eq('review_status', 'pending_review')
     .gte('ai_review_attempts', minAttempts)
+    .gte('occurred_at', approvalCutoffIso(now))
 
   if (error) throw new Error(`查 uncertain 堆积数失败：${error.message}`)
   return count ?? 0
@@ -148,7 +156,7 @@ export async function checkCircuitBreaker(
   const [recent, baseline, uncertainBacklog, judged] = await Promise.all([
     fetchApprovedLast24h(supabase, clientId, now),
     fetchBaselineDailyAverage(supabase, clientId, now),
-    fetchUncertainBacklogCount(supabase, clientId, 1),
+    fetchUncertainBacklogCount(supabase, clientId, 1, now),
     fetchLast24hJudgedCounts(supabase, clientId, now),
   ])
 
