@@ -49,6 +49,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchGscSnapshot } from '@/lib/gsc/client'
+import { gscSiteUrlFromConfig } from '@/lib/gsc/connected-clients'
 import { fetchGa4Snapshot, fetchGa4PaidSearchMetrics } from '@/lib/ga4/client'
 import { getAdAccountInsights, getAdCampaignInsights, MetaAdsInsights } from '@/lib/meta/client'
 import { fetchAccountInsights, loadGoogleAdsCreds } from '@/lib/google-ads/client'
@@ -236,10 +237,9 @@ export async function GET(req: NextRequest) {
     const entry = workMap.get(row.client_id) ?? { client_id: row.client_id }
 
     if (row.anchor === 'gsc') {
-      const siteUrl = row.config?.site_url
-      if (typeof siteUrl === 'string' && siteUrl.trim()) {
-        entry.site_url = siteUrl.trim()
-      }
+      // Same "usable GSC property" rule as the per-page daily fan-out roster.
+      const siteUrl = gscSiteUrlFromConfig(row.config)
+      if (siteUrl) entry.site_url = siteUrl
     } else if (row.anchor === 'ga4') {
       const propertyId = row.config?.property_id
       if (typeof propertyId === 'string' && propertyId.trim()) {
