@@ -450,6 +450,25 @@ export default function CrmAllContactsPage() {
   const [sections, setSections] = useState<PrioritySectionData[]>([])
   /** 展开哪些段。null = 还没动过，用服务端默认（前两段展开）。 */
   const [openSections, setOpenSections] = useState<SectionKey[] | null>(null)
+  /**
+   * 每段看到第几页。服务端一段只下发 100 行（`?p_<段>=2` 取下一页）。
+   *
+   * 🔴 没有这个的那一版：段头写「217 人」、表里只有 100 行、**没有任何入口能看到
+   * 剩下 117 个人**。子牙和魏征两边独立判为 BLOCKER，形状跟 2026-08-02
+   * 「33 个人从名单上凭空消失」完全一样 —— 人数对、人不在。
+   * 服务端 `?p_<段>` 早就收了，只是前端一次都没发过。
+   */
+  const [sectionPages, setSectionPages] = useState<Partial<Record<SectionKey, number>>>({})
+  /** 分段那次请求正在飞 —— 点开一段到数据回来之间要有话说，不能白茫茫一片（魏征 C2）。 */
+  const [sectionsLoading, setSectionsLoading] = useState(false)
+  /**
+   * `?contact=` 只认第一次。
+   *
+   * 不锁的那一版：每次分段请求都重新读 URL，于是服务端每次都回 focus、
+   * 页面每次都把那一段弹回展开 —— 用户**关不掉它**，还每次白跑一遍
+   * 「整批拉 1010 人 + 5k 条触点」（魏征 C1 实测）。
+   */
+  const focusUsedRef = useRef(false)
 
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [timeline, setTimeline] = useState<TimelineEntry[] | null>(null)
@@ -463,12 +482,18 @@ export default function CrmAllContactsPage() {
     try {
       const params = new URLSearchParams()
       if (grouped) {
+        setSectionsLoading(true)
         params.set('view', 'priority')
         if (qDebounced.trim()) params.set('q', qDebounced.trim())
         for (const s of stageFilter) params.append('stage', s)
         if (openSections !== null) params.set('open', openSections.join(','))
-        const focusContactId = new URLSearchParams(window.location.search).get('contact')
-        if (focusContactId) params.set('contact', focusContactId)
+        for (const [key, p] of Object.entries(sectionPages)) {
+          if (typeof p === 'number' && p > 1) params.set(`p_${key}`, String(p))
+        }
+        if (!focusUsedRef.current) {
+          const focusContactId = new URLSearchParams(window.location.search).get('contact')
+          if (focusContactId) params.set('contact', focusContactId)
+        }
       } else {
         params.set('page', String(page))
         params.set('perPage', String(perPage))
@@ -507,6 +532,7 @@ export default function CrmAllContactsPage() {
         setRows(secs.flatMap((s) => s.items ?? []))
         // 直达链接落在收起来的段里时，把那一段打开 —— 否则点进来什么都看不到。
         if (json.focus?.found && json.focus.section) {
+          focusUsedRef.current = true
           const target = json.focus.section
           setOpenSections((prev) => {
             const base = prev ?? secs.filter((s) => s.open).map((s) => s.key)
@@ -530,8 +556,9 @@ export default function CrmAllContactsPage() {
       setError('加载失败，检查网络后再试。')
     } finally {
       setLoading(false)
+      setSectionsLoading(false)
     }
-  }, [clientId, page, perPage, qDebounced, stageFilter, grouped, openSections])
+  }, [clientId, page, perPage, qDebounced, stageFilter, grouped, openSections, sectionPages])
 
   useEffect(() => {
     void loadList()
@@ -642,13 +669,26 @@ export default function CrmAllContactsPage() {
    */
   const togglePin = async (row: ContactRow) => {
     const next = row.pinnedAt === null
-    setRows((prev) =>
-      prev.map((r) =>
-        r.contactId === row.contactId
-          ? { ...r, pinnedAt: next ? new Date().toISOString() : null }
-          : r,
-      ),
-    )
+    /**
+     * 🔴 两处都要写。
+     *
+     * 平铺模式的行来自 `rows`，分段模式的行来自 `sections[].items` —— 只写 `rows`
+     * 的那一版，在分段模式下点⭐星星永远不亮（PATCH 发出去了、库也改了，页面零反馈）。
+     * 星星是即时反馈的控件，不亮就等于「我点了但没成功」。魏征 B3 / 子牙 P0-1 实测。
+     */
+    const paint = (pinnedAt: string | null) => {
+      setRows((prev) =>
+        prev.map((r) => (r.contactId === row.contactId ? { ...r, pinnedAt } : r)),
+      )
+      setSections((prev) =>
+        prev.map((sec) => ({
+          ...sec,
+          items:
+            sec.items?.map((r) => (r.contactId === row.contactId ? { ...r, pinnedAt } : r)) ?? null,
+        })),
+      )
+    }
+    paint(next ? new Date().toISOString() : null)
     try {
       const res = await fetch(`/api/clients/${clientId}/crm/contacts/${row.contactId}/pin`, {
         method: 'PATCH',
@@ -657,9 +697,7 @@ export default function CrmAllContactsPage() {
       })
       if (!res.ok) throw new Error()
     } catch {
-      setRows((prev) =>
-        prev.map((r) => (r.contactId === row.contactId ? { ...r, pinnedAt: row.pinnedAt } : r)),
-      )
+      paint(row.pinnedAt)
       setToast('置顶失败，请重试')
       window.setTimeout(() => setToast(null), 2400)
     }
@@ -684,6 +722,25 @@ export default function CrmAllContactsPage() {
   const colCount = 7 + columns.length
   const sortArrow = (key: 'firstSeenAt' | 'lastTouchAt') =>
     sortKey === key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
+
+  /**
+   * 这一段现在显示的是第几个到第几个。
+   *
+   * ⚠️ 服务端是**翻页不是累加**：`list-sections.ts` 用 `bucket.slice(start, start + perPage)`，
+   * 所以 `p_<段>=2` 拿到的是第 101–200 个、**第 1–100 个会消失**。
+   * 第一版我按「累加」写，按钮叫「再看 100 个」——那会让前 100 个人凭空不见，
+   * 正是这一轮要修的那个毛病换个方向再犯一次。查了 slice 才改成老实的翻页。
+   */
+  const sectionRange = (s: PrioritySectionData): { from: number; to: number; pages: number } => {
+    const page = sectionPages[s.key] ?? 1
+    const from = s.total === 0 ? 0 : (page - 1) * perPage + 1
+    return { from, to: (page - 1) * perPage + (s.items?.length ?? 0), pages: Math.max(1, Math.ceil(s.total / perPage)) }
+  }
+
+  /** 这一段翻到第 n 页。改了 sectionPages 会触发 loadList 重新拉。 */
+  const goSectionPage = (key: SectionKey, n: number) => {
+    setSectionPages((prev) => ({ ...prev, [key]: Math.max(1, n) }))
+  }
 
   const toggleSection = (key: SectionKey) => {
     setOpenSections((prev) => {
@@ -860,7 +917,7 @@ export default function CrmAllContactsPage() {
             </button>
             {grouped && (
               <span className="text-xs text-me-charcoal/45">
-                分段是系统按联系记录算的，跟「今天要联系」那一页同一套口径
+                分段是系统按联系记录算的，跟「今天要联系」那一页同一套口径；段内按「该先联系谁」排，点表头不改顺序
               </span>
             )}
           </div>
@@ -873,7 +930,10 @@ export default function CrmAllContactsPage() {
           </div>
 
           {/* 刚搬过来时安抚一句，别让「全空的跟进阶段」像没做完的作业 */}
-          {total > 0 && rows.every((r) => !r.stage) && (
+          {/* `rows.length > 0`：分段模式把所有段收起来时 rows 是空数组，
+              而 `[].every()` 恒为 true —— 少了这一条，对一个人人都标好阶段的客户
+              也会弹出「大家的跟进到哪步都还空着」（魏征 C3 / 子牙 P1-4 实测）。 */}
+          {total > 0 && rows.length > 0 && rows.every((r) => !r.stage) && (
             <p className="rounded-lg bg-me-ivory px-3 py-2 text-xs leading-relaxed text-me-charcoal/55">
               刚搬过来，大家的「跟进到哪步」都还空着 —— 聊完顺手标一下就行，不用一次标完。右边「现在冷热」是系统自动算的，现在就能用。
             </p>
@@ -885,11 +945,23 @@ export default function CrmAllContactsPage() {
                 <tr className="border-b border-me-charcoal/10 text-left text-xs text-me-charcoal/50">
                   <th className="px-2 py-3">⭐</th>
                   <th className="px-4 py-3">客人</th>
-                  <th className="cursor-pointer select-none px-4 py-3" onClick={() => toggleSort('firstSeenAt')}>
-                    进线时间{sortArrow('firstSeenAt')}
+                  {/*
+                    分段模式下**不给**排序入口：行来自服务端各段的顺序，点了也不会重排。
+                    留着一个点了会变箭头、却一行都不动的按钮，等于告诉人「你排过了」。
+                    魏征 B2 实测：箭头会变、顺序一字不动，而平铺那句「排序只对当前页生效」
+                    的提示在分段下反而被藏起来了。
+                  */}
+                  <th
+                    className={grouped ? 'px-4 py-3' : 'cursor-pointer select-none px-4 py-3'}
+                    onClick={grouped ? undefined : () => toggleSort('firstSeenAt')}
+                  >
+                    进线时间{grouped ? '' : sortArrow('firstSeenAt')}
                   </th>
-                  <th className="cursor-pointer select-none px-4 py-3" onClick={() => toggleSort('lastTouchAt')}>
-                    最近联系{sortArrow('lastTouchAt')}
+                  <th
+                    className={grouped ? 'px-4 py-3' : 'cursor-pointer select-none px-4 py-3'}
+                    onClick={grouped ? undefined : () => toggleSort('lastTouchAt')}
+                  >
+                    最近联系{grouped ? '' : sortArrow('lastTouchAt')}
                   </th>
                   <th className="px-4 py-3">联系方式</th>
                   {columns.map((c) => (
@@ -929,6 +1001,50 @@ export default function CrmAllContactsPage() {
                           </td>
                         </tr>
                       ),
+                      // 展开了但数据还在路上：白茫茫一片会让「在加载」「真的空了」「页面坏了」
+                      // 三件事长得一模一样（魏征 C2）。CTS 那段 643 人要拉 ~1.4MB，这个窗口是秒级的。
+                      open && s.items === null && (
+                        <tr key={`section-${s.key}-loading`}>
+                          <td colSpan={colCount} className="px-4 py-4 text-center text-xs text-me-charcoal/35">
+                            {sectionsLoading ? '正在拿这一段的人…' : '这一段还没取回来，点一下段头重试。'}
+                          </td>
+                        </tr>
+                      ),
+                      /*
+                       * 🔴 段里还有人没显示出来，必须说出来 + 给得出下一步。
+                       *
+                       * 服务端一段只下发 100 行。少了这一块的那一版：段头写「217 人」、
+                       * 表里 100 行、**剩下 117 个人没有任何入口**。两个复审都判 BLOCKER，
+                       * 形状就是 2026-08-02「33 个人凭空消失」——人数对、人不在。
+                       */
+                      open &&
+                        s.items !== null &&
+                        s.total > perPage && (
+                          <tr key={`section-${s.key}-more`}>
+                            <td colSpan={colCount} className="px-4 py-3 text-center text-xs">
+                              <span className="text-me-charcoal/45">
+                                这一段共 {s.total} 人，正在看第 {sectionRange(s).from}–{sectionRange(s).to} 个
+                                （第 {sectionPages[s.key] ?? 1} / {sectionRange(s).pages} 页）
+                              </span>
+                              <button
+                                type="button"
+                                disabled={(sectionPages[s.key] ?? 1) <= 1}
+                                onClick={() => goSectionPage(s.key, (sectionPages[s.key] ?? 1) - 1)}
+                                className="ml-3 rounded-lg border border-me-charcoal/15 px-2.5 py-1 font-bold text-me-charcoal hover:bg-me-ivory disabled:opacity-40"
+                              >
+                                上一页
+                              </button>
+                              <button
+                                type="button"
+                                disabled={(sectionPages[s.key] ?? 1) >= sectionRange(s).pages}
+                                onClick={() => goSectionPage(s.key, (sectionPages[s.key] ?? 1) + 1)}
+                                className="ml-2 rounded-lg border border-me-charcoal/15 px-2.5 py-1 font-bold text-me-charcoal hover:bg-me-ivory disabled:opacity-40"
+                              >
+                                下一页
+                              </button>
+                            </td>
+                          </tr>
+                        ),
                     ]
                   })}
               </tbody>

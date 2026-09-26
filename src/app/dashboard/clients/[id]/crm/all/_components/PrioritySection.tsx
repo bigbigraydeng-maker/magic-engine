@@ -13,7 +13,7 @@ export interface PrioritySectionHeaderProps {
   hint: string
   total: number
   open: boolean
-  /** 这一段一个人都没有。仍然显示段头（让人知道这段是空的，不是漏了）。 */
+  /** 跨满整行 —— 段头是插在同一张表 <tbody> 里的一个 <tr>，不是独立表格。 */
   colSpan: number
   onToggle: () => void
 }

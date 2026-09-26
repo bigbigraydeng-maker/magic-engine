@@ -13,9 +13,15 @@
  *
  * 列表接口整条路径在 `requirePaidClientAccess` 后面，脚本没有登录态进不去，
  * 而替它登录不是脚本该做的事。所以这里走 **Node 里起 jsdom + 渲染真组件**：
- * 页面代码是线上那一份，行装配用的 `responseRowFor` / `buildPriorityView` 也是
- * 线上那两个函数（正因为要验真路径，才在同一轮把 `responseRowFor` 从路由文件
- * 搬进 `lib/crm/contact-response-row.ts`）。唯一没覆盖到的是 HTTP 那一跳和登录闸。
+ * 页面代码是线上那一份，行装配和分段用的 `responseRowFor` / `buildPriorityView`
+ * 也是线上那两个函数。
+ *
+ * ⚠️ **没覆盖到的**（魏征复审 2026-09-27 指出，别再把话说大）：HTTP 那一跳、登录闸，
+ * 以及**路由层自己那一段** —— 下面的 `loadPriorityResponse` 把 `getPriority` 的三条
+ * 查询重写了一遍，没走 `contactFilterParams`，也没验它的错误处理。想真正盖住那一层，
+ * 得把 `getPriority` 里的装配抽成 `buildPriorityPayload` 让两边共用；这一轮没做。
+ * 所以「搬 responseRowFor 是为了能验真路径」这句话只对一半：它确实让行装配用上了
+ * 线上那个函数，但路由层依旧是平行的一份。
  *
  * 🔴 **别再把「邻近那条路成了」当成「这条路成了」**：2026-09-26 NAL 止血就是
  * 验了「Meta 会放行」，没验「我们自己的代码会放行」，中间隔着一道闸，改完当场
@@ -24,17 +30,34 @@
  * ## 怎么跑
  *
  * ```bash
- * npx tsx --env-file=/path/to/.env.local scripts/probe-crm-priority-ui.ts [clientId]
+ * npx tsx --tsconfig scripts/tsconfig.probe-ui.json --env-file=/path/to/.env.local \
+ *   scripts/probe-crm-priority-ui.ts [clientId]
  * ```
  *
  * 密钥由 `node --env-file` 加载进 `process.env`，脚本自己不读、不打印任何密钥。
+ *
+ * ## 两个「看着不对其实是对的」
+ *
+ * · **`@types/jsdom` 是 `^30`，装的 `jsdom` 是 `29.1.1`** —— 大版本号对不上，但
+ *   DefinitelyTyped **压根没有发过 29.x**（实测 `npm view @types/jsdom versions`：
+ *   …27.0.0 / 28.0.0–28.0.3 / 30.0.0，中间是空的），`^29` 装不上会直接报 notarget。
+ *   `^30` 对 29.1.1 跑得通、`tsc --noEmit` 干净。别「顺手修」成 `^29`。
+ * · **为什么不写成 vitest 用例白拿已配好的 jsdom** —— 仓库 `vitest.config.ts` 没有限定
+ *   `include`，用的是 vitest 默认那条 `test`/`spec` 文件名通配。写成测试文件就会被
+ *   `npm test` 收进去，
+ *   于是**每跑一次测试就读一次生产库**。所以宁可自己搭 jsdom。
  *
  * ## 它检查什么
  *
  * 1. 4 段的**段头全都画出来了** —— 包括收起来的那两段（收起来 ≠ 不显示）。
  * 2. 段头上的人数 = 接口给的 `total`，不是「这一页拿到几行」。
  * 3. 展开的段，画出来的行数 = 该段 `items` 条数；收起来的段一行都没画。
- * 4. 点一下收起来的段 → 页面确实拿它的 key 重新去要数据。
+ * 4. 点一下收起来的段 → 页面确实拿它的 key 重新去要数据，**而且那一段的人真的画出来了**。
+ * 5. 🔴 **接口只下发了一部分人时，页面必须说出来**。这一条是第一版最该有却没有的：
+ *    CTS「客人在等你」段真实 217 人、一次只下发 100 行，第一版拿 `items.length` 当分母
+ *    比对，于是「少 117 个人」被盖章成 13/13 全绿 —— 而它自己那行日志
+ *    （`217 人 … 这次下发 100 行`）已经把证据打出来了，只是没有一条断言去拦。
+ *    形状正是本文件头注引用的 2026-08-02「人数对、人不在」。
  *
  * ## 全程只有 SELECT
  *
@@ -175,6 +198,11 @@ function check(ok: boolean, label: string, detail: string): void {
 async function main(): Promise<void> {
   console.log(`\n【分段视图页面 · 当场试跑】客户 ${CLIENT_ID}\n`)
 
+  // 一次性把四段全展开拿回来，下面的假服务端再按请求里的 `open=` 切 —— 桩必须比真服务端
+  // 严，不能对任何 URL 都回同一份（第一版就是那样，于是「点开一段」只验到 URL 对不对）。
+  const full = await loadPriorityResponse(CLIENT_ID, {
+    waiting: true, acted: true, queued: true, off_list: true,
+  })
   const payload = await loadPriorityResponse(CLIENT_ID)
   const urls: string[] = []
 
@@ -194,7 +222,25 @@ async function main(): Promise<void> {
       const u = String(url)
       if (u.includes('/crm/contacts')) {
         urls.push(u)
-        return { ok: true, json: async () => payload }
+        const q = new URL(u, 'https://x.test').searchParams
+        const openParam = q.get('open')
+        const openSet = openParam === null ? null : new Set(openParam.split(','))
+        const sections = full.sections.map((sec) => {
+          // ⚠️ 没带 `open=` 时要用**服务端默认**的展开状态（payload），不能用 full 的 ——
+          // full 是我为了拿全量数据特意四段全开抓的，拿它当默认会让页面以为四段都开着，
+          // 于是「点一下收起的段」反而变成了把它关掉（实测：open=waiting,acted,off_list）。
+          const dflt = payload.sections.find((x) => x.key === sec.key)?.open ?? sec.open
+          const isOpen = openSet === null ? dflt : openSet.has(sec.key)
+          if (!isOpen) return { ...sec, open: false, items: null }
+          const page = Number(q.get(`p_${sec.key}`) ?? '1')
+          const start = (Math.max(1, page) - 1) * 100
+          return { ...sec, open: true, page, items: (sec.items ?? []).slice(start, start + 100) }
+        })
+        const asked = q.get('contact')
+        return {
+          ok: true,
+          json: async () => ({ ...full, sections, focus: asked ? full.focus : { found: false } }),
+        }
       }
       if (u.includes('/timeline')) {
         return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
@@ -255,14 +301,36 @@ async function main(): Promise<void> {
       continue
     }
     const names = s.items.map((r) => String(r.name))
+    if (names.length === 0) {
+      // 空数组上 `missing.length === 0` 天然成立 —— 这一项对空段是废的，别当成通过。
+      check(
+        screen.queryAllByText('这一段现在没有人。').length > 0,
+        `「${s.title}」展开且真的没人 → 明说出来`,
+        '不是渲染成一片空白',
+      )
+      continue
+    }
     const missing = names.filter((n) => screen.queryAllByText(norm(n)).length === 0)
     check(
       missing.length === 0,
       `「${s.title}」展开 → ${names.length} 个人都画出来了`,
       missing.length === 0
-        ? `前 3 个：${names.slice(0, 3).join('、') || '（空段）'}`
+        ? `前 3 个：${names.slice(0, 3).join('、')}`
         : `少了 ${missing.length} 个：${missing.slice(0, 5).map((n) => JSON.stringify(n)).join('、')}`,
     )
+
+    // 🔴 检查 5：分母认 total，不认 items.length。这一条就是第一版漏掉的那个事故。
+    if (s.total > names.length) {
+      const said = screen.queryAllByText(new RegExp(`共 ${s.total} 人`)).length > 0
+      const canPage = screen.queryAllByText('下一页').length > 0
+      check(
+        said && canPage,
+        `「${s.title}」只下发了 ${names.length}/${s.total} 人 → 页面必须说出来 + 翻得过去`,
+        said
+          ? canPage ? '写了「共 N 人」也给了翻页' : '说了人数但没有翻页入口'
+          : `页面上找不到「共 ${s.total} 人」—— 少的那 ${s.total - names.length} 个人无声无息`,
+      )
+    }
   }
 
   // 4：点收起来的段 → 真的拿它的 key 重新要数据
@@ -279,6 +347,14 @@ async function main(): Promise<void> {
       `点「${collapsed.title}」→ 带着它重新要数据`,
       last.slice(last.indexOf('?')),
     )
+    // 光看 URL 不够：这一段的人得真的出现在页面上（第一版只验到 URL）。
+    const opened = full.sections.find((x) => x.key === collapsed.key)
+    const first = (opened?.items ?? [])[0]
+    if (first) {
+      const nm = norm(String(first.name))
+      await waitFor(() => screen.getByText(nm))
+      check(screen.queryAllByText(nm).length > 0, `点开「${collapsed.title}」→ 人真的画出来了`, `抽查：${nm}`)
+    }
   }
 
   cleanup()

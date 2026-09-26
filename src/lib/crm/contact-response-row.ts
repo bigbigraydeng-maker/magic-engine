@@ -80,8 +80,8 @@ export function stageMetaOf(stageRows: StageRow[]): Map<string, { label: string;
   return stageMeta
 }
 
-export /** 每人一行的响应形状 —— 平铺列表与 view=priority 共用，两个形状里同一个人长得一模一样。 */
-function responseRowFor(
+/** 每人一行的响应形状 —— 平铺列表与 view=priority 共用，两个形状里同一个人长得一模一样。 */
+export function responseRowFor(
   c: ContactRow,
   tps: TouchRow[],
   stageMeta: Map<string, { label: string; suppressed: boolean }>,
