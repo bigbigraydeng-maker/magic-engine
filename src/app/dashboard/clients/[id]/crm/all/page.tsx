@@ -19,6 +19,19 @@ import Link from 'next/link'
 import { CrmTabs } from '../_components/CrmTabs'
 import { ComposeNote, type StageOption } from '../_components/ComposeNote'
 import { DncBanner } from '../_components/DncBanner'
+import { TimelineItem } from './_components/TimelineItem'
+import {
+  CHANNEL_LABEL,
+  DIRECTION_LABEL,
+  OUTCOME_LABEL,
+  TEMP_CLS,
+  fmtDate,
+  relTime,
+  ts,
+  type ContactRow,
+  type CustomColumnMeta,
+  type TimelineEntry,
+} from './_components/contact-table-types'
 
 /**
  * New Asian Logistics——同一个字面量在 `nal-messenger-lead-sync-run.ts`/
@@ -119,186 +132,6 @@ function MarkWonPanel({
         </button>
       </div>
     </div>
-  )
-}
-
-interface ContactRow {
-  contactId: string
-  name: string
-  firstSeenAt: string
-  lastTouchAt: string | null
-  phone: string | null
-  /** 号码在库里但打不通 —— 跟「今天该联系谁」那一页说同一件事。 */
-  phoneUnusable?: boolean
-  /** 被标成「别再联系」—— 展开里给一条取消的路（见 DncBanner）。 */
-  doNotContact?: boolean
-  email: string | null
-  hasMessenger: boolean
-  stage: string | null
-  stageLabel: string | null
-  /** 人工置顶时间（contacts.pinned_at）。非 null = 被钉在名单最前面。 */
-  pinnedAt: string | null
-  /** 「⭐置顶」附带的原因和到期日（contacts.important_note / important_due_at）。 */
-  important: { note: string | null; dueAt: string | null }
-  segment: string
-  segmentLabel: string
-  temperature: 'hot' | 'warm' | 'cold' | 'off'
-  custom: Record<string, string | null>
-}
-
-interface CustomColumnMeta {
-  key: string
-  label: string
-}
-
-type TimelineEntry =
-  | {
-      kind: 'touch'
-      at: string
-      channel: string
-      direction: 'inbound' | 'outbound'
-      summary: string | null
-      tour: string | null
-      outcome: string | null
-      travelWindow: string | null
-      callbackAt: string | null
-      competitor: string | null
-    }
-  | {
-      kind: 'message'
-      at: string
-      direction: 'inbound' | 'outbound'
-      senderName: string | null
-      body: string
-    }
-  | {
-      kind: 'stage'
-      at: string
-      fromStage: string | null
-      toStage: string | null
-      fromLabel: string | null
-      toLabel: string | null
-      changedBy: string | null
-      note: string | null
-    }
-
-// 渠道 / 方向标签一律带 fallback：DB 先加第 7 个渠道、前端没跟上时显示原值，不炸。
-const CHANNEL_LABEL: Record<string, string> = {
-  meta_lead_form: 'FB 表单',
-  phone: '电话',
-  email: '邮件',
-  messenger: '私信',
-  web_form: '官网表单',
-  whatsapp: 'WhatsApp',
-}
-const DIRECTION_LABEL: Record<string, string> = {
-  inbound: '客户来找的',
-  outbound: '我联系的',
-}
-const OUTCOME_LABEL: Record<string, string> = {
-  no_answer: '没接通',
-  bad_number: '号码不通',
-  do_not_contact: '别再联系',
-  not_interested: '没兴趣',
-  // 少了这一条，「暂时不考虑」这个结论在时间线上完全不显示 ——
-  // 软硬拒绝分开这件事，在最主要的翻查视图里就等于没做。
-  not_interested_now: '暂时不考虑',
-  spoke: '聊上了',
-  callback_set: '约了回电',
-}
-
-// 冷热上色：烫的标红、温的标赭、冷的中性、已结论的灰。
-const TEMP_CLS: Record<ContactRow['temperature'], string> = {
-  hot: 'bg-[#C2453A]/12 text-[#C2453A]',
-  warm: 'bg-me-ochre/12 text-me-ochre',
-  cold: 'bg-me-ivory text-me-charcoal/55',
-  off: 'bg-me-charcoal/5 text-me-charcoal/45',
-}
-
-function ts(v: string | null | undefined): number {
-  if (!v) return 0
-  const t = new Date(v).getTime()
-  return Number.isNaN(t) ? 0 : t
-}
-
-function fmtDate(iso: string | null): string {
-  if (!iso) return ''
-  return new Date(iso).toLocaleDateString('zh-CN', { year: 'numeric', month: 'numeric', day: 'numeric' })
-}
-
-/** 「今天 / 昨天 / 3天前 / 7/2」—— 最近联系用相对时间，不是干日期。 */
-function relTime(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  const now = new Date()
-  if (d.toDateString() === now.toDateString()) return '今天'
-  const days = Math.floor((now.getTime() - d.getTime()) / 86_400_000)
-  if (days === 1) return '昨天'
-  if (days >= 2 && days < 30) return `${days}天前`
-  return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
-}
-
-/** 一条时间线条目（触点 / 阶段流转）。 */
-function TimelineItem({ e }: { e: TimelineEntry }) {
-  if (e.kind === 'stage') {
-    return (
-      <li className="flex gap-3">
-        <span className="mt-0.5 shrink-0 text-xs text-me-charcoal/35">{relTime(e.at)}</span>
-        <div className="min-w-0 text-sm text-me-charcoal/70">
-          <span className="rounded bg-me-ochre/12 px-1.5 py-0.5 text-xs font-bold text-me-ochre">改了跟进阶段</span>
-          <span className="ml-2">
-            {e.fromLabel ?? '还没标'} → <span className="font-semibold text-me-charcoal">{e.toLabel ?? '—'}</span>
-          </span>
-          {e.note && <span className="ml-2 text-me-charcoal/45">· {e.note}</span>}
-        </div>
-      </li>
-    )
-  }
-  if (e.kind === 'message') {
-    // 私信 / 邮件原文。方向决定气泡:入站=客人(白底),出站=我们(灰底)。
-    // sender 名放前面,一眼知道谁说的,系统自动回复(出站)也不会被当成客人的话。
-    const inbound = e.direction === 'inbound'
-    return (
-      <li className="flex gap-3">
-        <span className="mt-1 shrink-0 text-xs text-me-charcoal/35">{relTime(e.at)}</span>
-        <div className={`min-w-0 flex-1 ${inbound ? '' : 'flex justify-end'}`}>
-          <div
-            className={`inline-block max-w-[85%] rounded-2xl px-3 py-1.5 text-sm leading-relaxed ${
-              inbound ? 'bg-white text-me-charcoal ring-1 ring-black/5' : 'bg-me-charcoal/5 text-me-charcoal/80'
-            }`}
-          >
-            <span className="mr-1.5 text-[11px] font-bold text-me-charcoal/45">
-              {inbound ? e.senderName || '客户' : e.senderName || '我们'}
-            </span>
-            <span className="whitespace-pre-wrap break-words">{e.body}</span>
-          </div>
-        </div>
-      </li>
-    )
-  }
-  const badge = (text: string) => (
-    <span className="rounded bg-white px-1.5 py-0.5 text-[11px] font-semibold text-me-charcoal/60 ring-1 ring-black/5">
-      {text}
-    </span>
-  )
-  const outcomeLabel = e.outcome ? OUTCOME_LABEL[e.outcome] : null
-  return (
-    <li className="flex gap-3">
-      <span className="mt-0.5 shrink-0 text-xs text-me-charcoal/35">{relTime(e.at)}</span>
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs font-bold text-me-charcoal/70">{DIRECTION_LABEL[e.direction] ?? e.direction}</span>
-          <span className="text-xs text-me-charcoal/40">·</span>
-          <span className="text-xs text-me-charcoal/50">{CHANNEL_LABEL[e.channel] ?? e.channel}</span>
-          {outcomeLabel && badge(outcomeLabel)}
-          {e.tour && badge(`团：${e.tour}`)}
-          {e.travelWindow && badge(`想去：${e.travelWindow}`)}
-          {e.callbackAt && badge(`约回电：${fmtDate(e.callbackAt)}`)}
-          {e.competitor && badge(`提到：${e.competitor}`)}
-        </div>
-        {e.summary && <p className="mt-0.5 text-sm leading-relaxed text-me-charcoal/75">{e.summary}</p>}
-      </div>
-    </li>
   )
 }
 
