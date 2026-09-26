@@ -31,6 +31,16 @@ function modelFailureCategory(error: unknown): string {
   return 'upstream'
 }
 
+/**
+ * 失败时按多少扣赞助额度。模型已经返回过用量时按真实成本扣（它是正常的正数才用，并截到预留以内）；
+ * 用量缺失 / 不是数字 / 不是正数时按预留扣——空值或 NaN 写进额度表会让额度闸失效或写库失败。
+ * 2026-09-26：截断失败以前一律按预留 $0.12 扣，CTS 9 月 $1.04 里 $0.96 是这样被白扣的。
+ */
+export function safeCharge(knownCost: number | null | undefined, reserveUsd: number): number {
+  if (typeof knownCost !== 'number' || !Number.isFinite(knownCost) || knownCost <= 0) return reserveUsd
+  return Math.min(knownCost, reserveUsd)
+}
+
 interface GrantRow {
   id: string
   connection_id: string
@@ -284,6 +294,7 @@ export async function generateAnalysis(clientId: string, principalId: string, gr
 async function runAnalysis(clientId: string, principalId: string, grant: GrantRow, connectionVersion: string,
   jobId: string, reserveUsd: number, window: Window, timezone: string, currency: string) {
   let modelAttempted = false
+  let knownCost: number | null = null
   let loadedEvidence: unknown = null
   try {
     const evidence = await loadEvidence(clientId, principalId, grant, window, timezone, currency)
@@ -301,7 +312,8 @@ async function runAnalysis(clientId: string, principalId: string, grant: GrantRo
     let result
     try {
       result = await callClaudeChat({ systemPrompt: systemPrompt(), messages: [{ role: 'user', content: `以下是只读汇总证据：\n${payload}` }],
-        model: MODEL_HAIKU, maxOutputTokens: 2000, singleAttempt: true })
+        model: MODEL_HAIKU, maxOutputTokens: 4000, singleAttempt: true })
+      knownCost = result.cost_usd
     } catch (error) {
       console.error('[meta-ads-ai] hosted model call failed', {
         category: modelFailureCategory(error), model: MODEL_HAIKU,
@@ -315,14 +327,16 @@ async function runAnalysis(clientId: string, principalId: string, grant: GrantRo
       throw new MetaReadError('analysis_incomplete', 502)
     }
     await requireSnapshot(clientId, principalId, grant, connectionVersion)
-    await finish(clientId, principalId, jobId, 'completed', result.cost_usd, evidence, result.text.trim(), MODEL_HAIKU,
+    await finish(clientId, principalId, jobId, 'completed', safeCharge(result.cost_usd, reserveUsd), evidence, result.text.trim(), MODEL_HAIKU,
       result.input_tokens, result.output_tokens, null)
     return job(clientId, principalId, jobId)
   } catch (error) {
     const code = error instanceof MetaReadError ? error.code : 'analysis_failed'
     // The persistence call must never replace the real failure code: the UI
     // needs to show why the report failed, not that bookkeeping also failed.
-    await finish(clientId, principalId, jobId, 'failed', modelAttempted ? reserveUsd : 0, loadedEvidence, null,
+    // 模型调用本身抛错（拿不到用量）仍按预留扣；拿到用量之后的任何失败（截断、空文本、授权刚好变了、写库失败）按真实成本扣。
+    const charged = !modelAttempted ? 0 : knownCost === null ? reserveUsd : safeCharge(knownCost, reserveUsd)
+    await finish(clientId, principalId, jobId, 'failed', charged, loadedEvidence, null,
       modelAttempted ? MODEL_HAIKU : null, null, null, code).catch(() => undefined)
     throw error instanceof MetaReadError ? error : new MetaReadError('analysis_failed', 502)
   }
