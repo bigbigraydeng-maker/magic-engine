@@ -1,7 +1,7 @@
 ---
 id: 2026-09-27-magic-bridge-demo-page
 title: Magic Bridge 示例报告演示页上线：销售直接发链接给潜在客户看完整报告和卡片，全部虚构数据、不用登录也不用连 Facebook；顺带修好真实报告趋势图缺的点击率线和图上的英文代号
-status: done
+status: verified
 owner: agent
 decided_on: 2026-09-27
 source: session:4bb834a6
@@ -13,3 +13,4 @@ verify_how: 合并上线后打开 https://app.magicengine.com.au/meta-ads-ai/dem
 PM 经小秘书回「2」（B2 演示页）。设计稿：docs/specs/2026-09-27-magic-bridge-demo-page-design.md（v2）。
 审查：设计审 板桥；实施后审 子牙 + 魏征 + 板桥（图表共用部分子牙单独复查），建议已修。
 示例商家「奥克兰一家美容护肤店」，全部虚构；测试断言不含任何真实客户名 / 账户号。
+2026-09-27 15:00 UTC 生产核验：未登录打开 https://app.magicengine.com.au/meta-ads-ai/demo ，横幅、「我们正在跟进的广告（2 条）」卡片、图表、八段正文都在；分析期间 2026-09-20 至 2026-09-26（新西兰日期）；页面带 noindex, nofollow；控制台零报错；页面文字不含 facebook · feed / audience_network / mobile_app。
