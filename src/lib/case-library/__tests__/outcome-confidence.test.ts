@@ -7,6 +7,7 @@ import {
   computeConfidenceMap,
   formatConfidenceForPrompt,
   getConfidenceLabel,
+  getModeBoost,
 } from '../outcome-confidence'
 import type { RawOutcomeConfidenceRow } from '../outcome-confidence'
 
@@ -17,7 +18,7 @@ describe('computeConfidenceMap', () => {
     expect(computeConfidenceMap([])).toEqual({})
   })
 
-  it('calculates success rate correctly', () => {
+  it('success rate counts decided cases only', () => {
     const rows: RawOutcomeConfidenceRow[] = [
       { action_type: 'geo.deploy_directive', verdict: 'confirmed' },
       { action_type: 'geo.deploy_directive', verdict: 'confirmed' },
@@ -26,10 +27,12 @@ describe('computeConfidenceMap', () => {
       { action_type: 'seo.publish_blog', verdict: 'reversed' },
     ]
     const map = computeConfidenceMap(rows)
-    expect(map['geo.deploy_directive'].successRate).toBeCloseTo(2 / 3)
-    expect(map['geo.deploy_directive'].sampleSize).toBe(3)
+    expect(map['geo.deploy_directive'].successRate).toBe(1)
+    expect(map['geo.deploy_directive'].sampleSize).toBe(2)
+    expect(map['geo.deploy_directive'].totalCases).toBe(3)
     expect(map['seo.publish_blog'].successRate).toBeCloseTo(0.5)
     expect(map['seo.publish_blog'].sampleSize).toBe(2)
+    expect(map['seo.publish_blog'].totalCases).toBe(2)
   })
 
   it('handles all-confirmed case', () => {
@@ -41,6 +44,16 @@ describe('computeConfidenceMap', () => {
     const map = computeConfidenceMap(rows)
     expect(map['ads.pause_campaign'].successRate).toBe(1)
     expect(map['ads.pause_campaign'].sampleSize).toBe(3)
+    expect(map['ads.pause_campaign'].totalCases).toBe(3)
+  })
+
+  it('all-inconclusive action type has no decided case', () => {
+    const rows: RawOutcomeConfidenceRow[] = [
+      { action_type: 'seo.publish_blog', verdict: 'inconclusive' },
+      { action_type: 'seo.publish_blog', verdict: 'inconclusive' },
+    ]
+    const map = computeConfidenceMap(rows)
+    expect(map['seo.publish_blog']).toEqual({ successRate: 0, sampleSize: 0, totalCases: 2 })
   })
 })
 
@@ -53,15 +66,28 @@ describe('getConfidenceLabel', () => {
   })
 
   it('returns success rate label when data exists', () => {
-    const map = { 'geo.deploy_directive': { successRate: 0.73, sampleSize: 12 } }
+    const map = { 'geo.deploy_directive': { successRate: 0.73, sampleSize: 12, totalCases: 20 } }
     const label = getConfidenceLabel(map, 'geo.deploy_directive')
-    expect(label).toBe('历史成功率 73%，基于 12 个客户案例')
+    expect(label).toBe('历史成功率 73%（可判定 12 / 共 20 个客户案例）')
   })
 
   it('rounds percentage correctly', () => {
-    const map = { 'seo.publish_blog': { successRate: 0.6666, sampleSize: 3 } }
+    const map = { 'seo.publish_blog': { successRate: 0.6666, sampleSize: 3, totalCases: 3 } }
     const label = getConfidenceLabel(map, 'seo.publish_blog')
     expect(label).toContain('67%')
+  })
+
+  it('says nothing was decidable when no case was decided', () => {
+    const map = { 'seo.publish_blog': { successRate: 0, sampleSize: 0, totalCases: 5 } }
+    const label = getConfidenceLabel(map, 'seo.publish_blog')
+    expect(label).toBe('尚无可判定案例（共 5 个，结果都判不了）')
+  })
+
+  it('withholds a rate below the decided-case minimum', () => {
+    const map = { 'seo.publish_blog': { successRate: 1, sampleSize: 2, totalCases: 9 } }
+    const label = getConfidenceLabel(map, 'seo.publish_blog')
+    expect(label).toContain('可判定案例太少')
+    expect(label).not.toContain('%')
   })
 })
 
@@ -74,8 +100,8 @@ describe('formatConfidenceForPrompt', () => {
 
   it('formats confidence map as prompt section', () => {
     const map = {
-      'geo.deploy_directive': { successRate: 0.8, sampleSize: 10 },
-      'seo.publish_blog': { successRate: 0.5, sampleSize: 4 },
+      'geo.deploy_directive': { successRate: 0.8, sampleSize: 10, totalCases: 10 },
+      'seo.publish_blog': { successRate: 0.5, sampleSize: 4, totalCases: 4 },
     }
     const result = formatConfidenceForPrompt(map)
     expect(result).toContain('历史成效数据')
@@ -83,5 +109,25 @@ describe('formatConfidenceForPrompt', () => {
     expect(result).toContain('80%')
     expect(result).toContain('seo.publish_blog')
     expect(result).toContain('50%')
+  })
+
+  it('shows no rate for an action below the decided-case minimum', () => {
+    const map = {
+      'seo.publish_blog': { successRate: 1, sampleSize: 1, totalCases: 6 },
+    }
+    const result = formatConfidenceForPrompt(map)
+    expect(result).toContain('| `seo.publish_blog` | — | 1 / 6 |')
+    expect(result).not.toContain('100%')
+  })
+})
+
+describe('getModeBoost', () => {
+  it('gives no boost below three decided cases, however good the rate', () => {
+    expect(getModeBoost({ successRate: 1, sampleSize: 2, totalCases: 40 })).toBe(0)
+  })
+
+  it('boosts on decided cases only', () => {
+    expect(getModeBoost({ successRate: 0.7, sampleSize: 3, totalCases: 3 })).toBe(10)
+    expect(getModeBoost({ successRate: 0.5, sampleSize: 4, totalCases: 10 })).toBe(6)
   })
 })

@@ -145,14 +145,21 @@ describe('GET /api/admin/flywheel/aggregate', () => {
     const json = await res.json()
     const firstId = json.top[0].action_type
     expect(firstId).toBe('ads.pause_campaign')
+    // Rates are over decided cases: ads 2/2, seo 1/2.
+    expect(json.top[0].decided).toBe(2)
+    expect(json.top[0].confirmed_rate).toBe(1)
   })
 
-  it('respects min param — excludes action_types with fewer outcomes', async () => {
-    // seo.publish_blog has 2 outcomes; ads.pause_campaign has 3
-    const res = await GET(makeRequest({ min: '3' }))
-    const json = await res.json()
-    // Only ads.pause_campaign (3 outcomes) qualifies
-    expect(json.top.every((e: { action_type: string }) => e.action_type === 'ads.pause_campaign')).toBe(true)
+  it('min counts decided cases, not all cases', async () => {
+    // ads.pause_campaign has 3 cases but only 2 decided (one is inconclusive).
+    const strict = await (await GET(makeRequest({ min: '3' }))).json()
+    expect(strict.top).toEqual([])
+
+    const loose = await (await GET(makeRequest({ min: '2' }))).json()
+    expect(loose.top.map((e: { action_type: string }) => e.action_type).sort()).toEqual([
+      'ads.pause_campaign',
+      'seo.publish_blog',
+    ])
   })
 
   it('respects top param — limits number of entries returned', async () => {
@@ -248,6 +255,28 @@ describe('counting by action, not by row', () => {
     expect(body.total_outcomes).toBe(1)
     // The mature window is the one that represents the action.
     expect(body.top[0].confirmed).toBe(1)
+  })
+
+  it('reads old site-level SEO verdicts as inconclusive', async () => {
+    mockQuery.mockResolvedValue({
+      data: [
+        outcome('a1', 'confirmed', 'seo.publish_blog', 'seo', 'c1', {
+          metric_key: 'seo.gsc.clicks',
+          flywheel_actions: { action_type: 'seo.publish_blog', flywheel: 'seo', client_id: 'c1', expected_metric: 'seo.gsc.clicks' },
+        }),
+        outcome('a2', 'reversed', 'seo.publish_blog', 'seo', 'c1', {
+          metric_key: 'seo.domain.organic_traffic',
+          flywheel_actions: { action_type: 'seo.publish_blog', flywheel: 'seo', client_id: 'c1', expected_metric: 'seo.domain.organic_traffic' },
+        }),
+      ],
+      error: null,
+    })
+
+    const body = await (await GET(makeRequest({ min: '1' }))).json()
+
+    // Two cases, none decided: nothing can rank.
+    expect(body.total_outcomes).toBe(2)
+    expect(body.top).toEqual([])
   })
 })
 

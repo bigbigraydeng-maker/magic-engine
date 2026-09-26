@@ -83,6 +83,56 @@ export const GSC_PAGE_METRIC_KEYS: readonly string[] = [
 ]
 
 /**
+ * Metric-key prefixes that measure the whole site, not anything one action touched:
+ * domain-level organic numbers and Google Analytics site totals.
+ */
+const SITE_LEVEL_METRIC_PREFIXES: readonly string[] = ['seo.domain.', 'seo.ga4.']
+
+/**
+ * Whether a before/after difference on this metric can say anything about ONE action.
+ *
+ * Site-level metrics — the three domain-scope Search Console totals
+ * (`GSC_DOMAIN_METRIC_KEYS`) and every `seo.domain.*` / `seo.ga4.*` key — move with
+ * seasonality, algorithm updates and every other action in the same window. A
+ * change on them is not evidence about the action that happens to be measured, so
+ * both evaluators store such a row as `inconclusive` with confidence 0 (the raw
+ * numbers are still kept), and every reader counts it through `effectiveVerdict`,
+ * which also covers rows stored before this rule existed.
+ *
+ * Page-scope Search Console keys (`seo.gsc.page_*`) are NOT site-level: they are
+ * measured on the one page the action changed. Other pillars register their own
+ * site-level metrics here only when their owner decides to; none are listed today.
+ */
+export function isSiteLevelUnattributable(metricKey: string): boolean {
+  return (
+    GSC_DOMAIN_METRIC_KEYS.includes(metricKey) ||
+    SITE_LEVEL_METRIC_PREFIXES.some((prefix) => metricKey.startsWith(prefix))
+  )
+}
+
+/**
+ * The verdict a reader must count for an outcome row: a site-level row is always
+ * `inconclusive`, whatever an older run stored in it.
+ */
+export function effectiveVerdict(row: { metric_key: string; verdict: string }): string {
+  return isSiteLevelUnattributable(row.metric_key) ? 'inconclusive' : row.verdict
+}
+
+/**
+ * A verdict that actually decided something. `inconclusive` (site-level metric,
+ * change inside the noise floor, too-weak signal) is not a case either way.
+ */
+export function isDecidedVerdict(verdict: string): boolean {
+  return verdict === 'confirmed' || verdict === 'reversed'
+}
+
+/**
+ * Fewer decided cases than this and no success rate is shown or used: one
+ * confirmed case out of one is not a 100% success rate.
+ */
+export const MIN_DECIDED_FOR_RATE = 3
+
+/**
  * The metric keys the GSC evaluator will actually produce for this action.
  *
  * Loading an action is not the same as answering its question: the bridge's

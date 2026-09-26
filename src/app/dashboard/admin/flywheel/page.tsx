@@ -9,6 +9,7 @@ interface AggregateEntry {
   inconclusive: number
   reversed: number
   total: number
+  decided: number
   confirmed_rate: number
 }
 
@@ -44,7 +45,7 @@ export default function FlywheelAggregateAdminPage() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    fetch('/api/admin/flywheel/aggregate?top=5&min=1')
+    fetch('/api/admin/flywheel/aggregate?top=5&min=3')
       .then(r => r.json())
       .then((d: AggregateResponse) => { setData(d); setLoading(false) })
       .catch(err => { setError(String(err)); setLoading(false) })
@@ -56,7 +57,7 @@ export default function FlywheelAggregateAdminPage() {
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-me-charcoal/90">飞轮成效</h1>
-            <p className="text-sm text-me-charcoal/55 mt-0.5">跨客户 outcome 聚合 · action_type × verdict</p>
+            <p className="text-sm text-me-charcoal/55 mt-0.5">跨客户 outcome 聚合 · 成功率只算能判定的案例（整站流量涨跌、变化太小的算判不了）</p>
           </div>
           <Link href="/dashboard/admin" className="text-sm text-me-charcoal/55 hover:text-me-charcoal/75">← Admin</Link>
         </div>
@@ -92,7 +93,7 @@ export default function FlywheelAggregateAdminPage() {
               </div>
               {data.top.length === 0 ? (
                 <div className="p-8 text-center text-sm text-me-charcoal/45">
-                  暂无足够数据（outcome 记录需 ≥ 1 条）
+                  暂无足够的可判定案例（每类需 ≥ 3 个）
                 </div>
               ) : (
                 <ul className="divide-y divide-black/10">
@@ -104,7 +105,7 @@ export default function FlywheelAggregateAdminPage() {
                           <span className="font-mono text-sm text-me-charcoal/75">{entry.action_type}</span>
                         </div>
                         <div className="flex items-center gap-3">
-                          <span className="text-xs text-me-charcoal/45">{entry.total} 个案例</span>
+                          <span className="text-xs text-me-charcoal/45">可判定 {entry.decided} / 共 {entry.total} 个案例</span>
                           <ConfidenceBadge rate={entry.confirmed_rate} />
                         </div>
                       </div>
