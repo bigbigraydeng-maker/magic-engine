@@ -30,6 +30,7 @@ import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
 import type { SimaqianItemKind } from './simaqian-review-items'
+import type { PmKind } from './five-kinds'
 
 /**
  * 这些条目**链接坏了也照样下发**。
@@ -79,6 +80,8 @@ export type ManualItemKind =
    *  docs/specs/2026-09-09-creatomate-connector-spec-v1.md §4.4，旧管线的 reapStale() 已死，
    *  这条是它的替代 */
   | 'creatomate_render_failed'
+  /** Creatomate 做片失败但不是额度问题 —— 要我们查是哪一步卡了（开发的活） */
+  | 'creatomate_render_error'
   | 'dataforseo_credits_out'
   | 'cron_not_running'
   | 'cron_blind'
@@ -120,6 +123,8 @@ export type ManualItemKind =
   /** Mailchimp 出口 tally 里出现非预期失败（配置读不出来 / API key 失效 / 被限流 / provider 5xx） */
   | 'mailchimp_export_broken'
   | 'blog_draft_waiting'
+  /** 文章写好了，但这个客户的网站发布通道是断的 —— 要人去设置里接通一次 */
+  | 'blog_publish_channel_broken'
   | 'cross_client_leak'
   | 'price_claim_unbacked'
   | 'auto_run_blocked'
@@ -189,8 +194,10 @@ export type ManualItemKind =
   | PageBindingItemKind
   /** 排期发的 Facebook 帖子发出去了，但一直拿不到帖子编号 —— 成绩收不回来 */
   | DailyPlanMeasurementItemKind
-  /** 私信客服健康心跳查出问题（issue #1587）：消息量骤降 / 验证器拦截率或出错率过高 / 退订登记写入失败 */
+  /** 私信客服健康心跳查出问题（issue #1587）：消息量骤降 / 验证器拦截率过高 / 退订登记写入失败 */
   | 'conversation_health_alert'
+  /** 同一个心跳查出「AI 起草回复一直报错」—— 这条只有我们能修（开发的活） */
+  | 'conversation_health_check_error'
   /** 经验手册（Claude 持久记忆，不在仓库）里点名的函数/路径/表名疑似过期，每周巡检自动发现 */
   | 'playbook_reference_stale'
   /**
@@ -217,6 +224,12 @@ export interface ManualItem {
   how: string
   /** Direct link to the place the action happens. */
   href: string
+  /**
+   * 在 PM 五类里换一类（见 five-kinds.ts `laneOf`）。**只能在五类之间换，挪不出 PM 的清单** ——
+   * 一个写错的覆盖不许让一条待办悄悄消失。要把活挪给开发就拆一个新 kind。
+   * 目前只有方案文档里的一次性人工动作（client-doc-manual-tasks.ts）会写它。
+   */
+  pm_kind?: PmKind
 }
 
 /** GSC URL-inspection deep link — the exact screen with the resubmit button. */

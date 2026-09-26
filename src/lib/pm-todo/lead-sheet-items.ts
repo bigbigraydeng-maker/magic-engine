@@ -15,6 +15,8 @@ import { APP_BASE } from './binding-request-items'
 
 export type LeadSheetItemKind =
   | 'lead_sheet_sync_failed'
+  /** 写表被 Google 判 403 —— 授权不够，要人重新走一次「连接 Google」（跟上一条的开发活分开） */
+  | 'lead_sheet_reauth_needed'
   | 'lead_sheet_value_unmapped'
   /** 有线索因为拼不出身份没写进表 —— 这些人是真的没到销售手里 */
   | 'lead_sheet_lead_skipped'
@@ -74,9 +76,14 @@ function sheetHref(spreadsheetId: string | undefined): string {
     : `${APP_BASE}/dashboard`
 }
 
+/** Google 判 403 / 没有可用连接 = 授权不够，要人重新点一次同意页（不是开发的活）。 */
+function isReauthError(error: string): boolean {
+  return /\b403\b|insufficient|PERMISSION_DENIED|没有可用的 Google 连接/.test(error)
+}
+
 /** 授权不够（Google 判 403）时，要人做的事跟「表格没权限」完全不同，得分开说。 */
 function howFor(clientId: string, error: string): string {
-  if (/\b403\b|insufficient|PERMISSION_DENIED|没有可用的 Google 连接/.test(error)) {
+  if (isReauthError(error)) {
     return (
       '这是授权不够，不是表格坏了：ME 以前只要到了「看表格」的权限，写表格要重新授权一次。' +
       `点链接走一遍「连接 Google」（${APP_BASE}/api/auth/google/connect?client_id=${encodeURIComponent(clientId)}&flow=admin），` +
@@ -144,7 +151,8 @@ export async function pushLeadSheetItems(
 
     if (client.error) {
       items.push({
-        kind: 'lead_sheet_sync_failed',
+        // 授权不够的那种只有人能点同意页；其余的要开发先查（today 待办按 kind 分车道）
+        kind: isReauthError(client.error) ? 'lead_sheet_reauth_needed' : 'lead_sheet_sync_failed',
         client_name: clientName,
         client_id: clientId,
         what: `${clientName} 的线索这轮没能写进 Google 表格：${client.error}。销售看的那张表现在是缺的，新留资的人没人跟。`,

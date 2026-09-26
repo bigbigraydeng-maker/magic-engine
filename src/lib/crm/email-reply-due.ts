@@ -25,6 +25,21 @@
  *   4. 已经算拒联了（`isDoNotContact`）→ 不该再联系，谈不上欠他一封信
  *   5. 那封信**之后**有人手工记过一笔（`source = 'me_manual'`）→ 有人处理过了
  *
+ * 3 里的「自己人」除了客户登记的域名，还包括 **ME 自己的发信 / 收信域名**
+ * （`platformOwnDomains`）：2026-09-25 CTS 的待回名单里有一封 `[PREVIEW]` —— 是 ME
+ * 自己发给 CTS 信箱的测试邮件，不是客人。
+ *
+ * ## 陌生地址第一次来信（`separateFirstContacts`，今日待办用）
+ *
+ * 2026-09-25 CTS 待回 42 人里 10 个是推销（支付公司、地接社、外包、展会邀请）。
+ * 它们有一个共同点：**这个人跟客户之间除了这一封来信，什么记录都没有** —— 我们没给
+ * 他写过信、他没从广告表单 / 私信 / 网站表单来过、也不在客户的邮件名单上。
+ * 真客人（生产库逐个核对）每一个都至少有一条这样的记录。
+ *
+ * 但陌生地址里也会有真客人的第一封询价 —— 那恰恰是最值钱的一封信。所以这类人**不丢**，
+ * 从 `items` 挪进单独的 `firstContacts`，由消费方合成一行「N 封陌生来信，扫一眼主题」。
+ * 判据全是库里的事实，不让模型猜；主题里带网站表单通知字样（`Contact form`）的算真询价。
+ *
  * 时间窗（默认 30 天）兜底，免得一条谁都不打算处理的旧线程天天冒出来。
  * ⚠️ 代价要认：**窗口外的线程不会再被提起**。要做到「一条都不漏」得加一列
  * 「已复核」，那是另一件事。
@@ -41,6 +56,7 @@ import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
 import { contactKindOf, readDomainRules, EMPTY_RULES, type DomainRules } from '@/lib/crm/contact-kind'
 import { isAutoReply } from '@/lib/microsoft/mail-ingest'
 import { fetchAll } from '@/lib/supabase-paginate'
+import { ME_MAIL_FROM_ADDRESS, ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
 
 /** 客人来信之后多少小时还没回，就算欠着。PM 2026-09-03 拍板 24 小时。 */
 export const REPLY_SLA_HOURS = 24
@@ -129,6 +145,13 @@ export interface ReplyDueInput {
   names: Map<string, string | null>
   /** clientId → 这个客户登记的域名清单。查不到按「没登记」处理。 */
   rules: Map<string, DomainRules>
+  /** 所有客户都算「自己人」的域名（ME 自己的信箱）。不传 = 没有。 */
+  platformOwnDomains?: readonly string[]
+  /**
+   * 传了 = 把「陌生地址第一次来信」单独分出来（见文件头）：不在这个集合里的人进
+   * `firstContacts`，不进 `items`。不传 = 旧行为，全部进 `items`。
+   */
+  enquiryOrigin?: ReadonlySet<string>
   now: Date
   slaHours?: number
   windowDays?: number
@@ -147,6 +170,11 @@ export interface ReplyDueResult {
    * 说不出是谁的就只能写进日志，等于没说（铁律 3：发现不许死在日志里）。
    */
   droppedByClient: Record<string, number>
+  /**
+   * 陌生地址第一次来信（只在传了 `enquiryOrigin` 时有）。**不封顶** —— 消费方合成一行，
+   * 不存在「一页放不下」的问题；等最久的在前。
+   */
+  firstContacts?: ReplyDueItem[]
 }
 
 interface Ctx {
@@ -173,8 +201,11 @@ function isDue(t: EmailThread, ctx: Ctx): boolean {
   // 2) 自动回执不是客人在等回信。词表复用 mail-ingest，不另起一份。
   if (isAutoReply(t.subject)) return false
 
-  // 3) 自己人 / 同行不算「客人在等」
-  const rules = ctx.input.rules.get(t.clientId) ?? EMPTY_RULES
+  // 3) 自己人 / 同行不算「客人在等」。ME 自己的信箱对每个客户都算自己人。
+  const own = ctx.input.rules.get(t.clientId) ?? EMPTY_RULES
+  const rules: DomainRules = ctx.input.platformOwnDomains?.length
+    ? { ...own, own: [...own.own, ...ctx.input.platformOwnDomains] }
+    : own
   if (contactKindOf(ctx.input.emails.get(t.contactId) ?? [], rules) !== 'retail') return false
 
   // 4) 已经算拒联了。查不到材料就按「没被标过」办。
@@ -243,7 +274,67 @@ export function pickReplyDue(input: ReplyDueInput): ReplyDueResult {
   // 等最久的排前面：真被上限压掉，压掉的该是等得最短的那些。
   // 不传上限 = 不封顶。封顶是消费方各自的渲染预算，见 `MAX_PER_CLIENT`。
   const all = Array.from(oldest.values()).sort((a, b) => b.waitingHours - a.waitingHours)
-  return capPerClient(all, input.maxPerClient ?? Number.POSITIVE_INFINITY)
+  const origin = input.enquiryOrigin
+  if (!origin) return capPerClient(all, input.maxPerClient ?? Number.POSITIVE_INFINITY)
+
+  const known = all.filter((d) => origin.has(d.contactId) || isFormEnquirySubject(d.subject))
+  const firstContacts = all.filter((d) => !origin.has(d.contactId) && !isFormEnquirySubject(d.subject))
+  return { ...capPerClient(known, input.maxPerClient ?? Number.POSITIVE_INFINITY), firstContacts }
+}
+
+/**
+ * 网站表单发到信箱的通知（「Contact form: General Inquiry — 某某」）。这种人在库里只有
+ * 一个邮箱身份（first_source='email'），跟推销长得一样，但他是从客户网站上主动来问的。
+ * 2026-09-25 魏征复审在生产库里抓到过一例。
+ */
+export function isFormEnquirySubject(subject: string | null): boolean {
+  return /contact form/i.test(subject ?? '')
+}
+
+// ─── 「这个人跟客户打过交道吗」—— 陌生来信的判据材料 ─────────────────────────────
+
+/**
+ * 这些渠道来的身份说明这个人是**主动**找上门的客人（广告表单、私信、网站表单、员工手工录入）。
+ *
+ * 🔴 列「算数的」，不列「不算数的」：生产库里还有 `outlook`（7 月从邮箱批量导入）这类来源，
+ *    用排除法会让那批推销地址全部算成「打过交道」（魏征 2026-09-26 复审）。
+ */
+export const ENQUIRY_IDENTITY_SOURCES: ReadonlySet<string> = new Set([
+  'meta_lead_form',
+  'messenger',
+  'messenger_lead_intro',
+  'whatsapp',
+  'web_form',
+  'manual',
+  'voice',
+])
+
+/** 一条触点算不算「打过交道」的证据。 */
+export function isEnquiryTouch(t: {
+  channel: string | null
+  direction: string | null
+  source: string | null
+  metadata: Record<string, unknown> | null
+}): boolean {
+  // 员工手记（me_manual）不算：「不用回：不是客人」也是一条手记
+  if (t.source === 'me_manual') return false
+  // 在客户的邮件名单上（打开 / 点过群发）
+  if (t.source === 'mailchimp') return true
+  // 从邮件以外的渠道来过（私信、广告表单、电话跟进…）
+  if (t.channel && t.channel !== 'email') return true
+  // 我们给他写过信（机器自动回执不算）
+  return t.direction === 'outbound' && (t.metadata ?? {}).automated !== true
+}
+
+/** ME 自己的信箱域名 —— 对每个客户来说都是「自己人」。 */
+export function platformOwnDomains(): string[] {
+  return Array.from(
+    new Set(
+      [ME_MAIL_FROM_ADDRESS, ME_MAIL_TO_ADDRESS]
+        .map((a) => a.split('@')[1]?.trim().toLowerCase() ?? '')
+        .filter(Boolean),
+    ),
+  )
 }
 
 // ─── 取数 ────────────────────────────────────────────────────────────────────
@@ -260,6 +351,8 @@ interface ConversationRow {
 interface TouchRow {
   contact_id: string
   occurred_at: string
+  channel: string | null
+  direction: string | null
   source: string | null
   metadata: Record<string, unknown> | null
 }
@@ -319,15 +412,18 @@ async function loadTouchMaps(
 ): Promise<{
   dnc: Map<string, { flag: boolean; touches: DncTouch[] }>
   lastHumanTouchAt: Map<string, string>
+  /** 触点上看得出「打过交道」的人（见 `isEnquiryTouch`）。 */
+  enquiryByTouch: Set<string>
 }> {
   const dnc = new Map<string, { flag: boolean; touches: DncTouch[] }>()
   const lastHumanTouchAt = new Map<string, string>()
+  const enquiryByTouch = new Set<string>()
 
   for (const part of chunk(contactIds, IN_CHUNK)) {
     const rows = await fetchAll<TouchRow>((from, to) =>
       supabase
         .from('contact_touchpoints')
-        .select('contact_id, occurred_at, source, metadata')
+        .select('contact_id, occurred_at, channel, direction, source, metadata')
         .in('contact_id', part)
         .order('id', { ascending: true })
         .range(from, to),
@@ -346,9 +442,32 @@ async function loadTouchMaps(
         const prev = lastHumanTouchAt.get(t.contact_id)
         if (!prev || ts(t.occurred_at) > ts(prev)) lastHumanTouchAt.set(t.contact_id, t.occurred_at)
       }
+      if (isEnquiryTouch(t)) enquiryByTouch.add(t.contact_id)
     }
   }
-  return { dnc, lastHumanTouchAt }
+  return { dnc, lastHumanTouchAt, enquiryByTouch }
+}
+
+/** 身份来源上看得出是主动找上门的人（见 `ENQUIRY_IDENTITY_SOURCES`）。 */
+async function loadEnquiryIdentityContacts(
+  supabase: SupabaseClient,
+  contactIds: string[],
+): Promise<Set<string>> {
+  const out = new Set<string>()
+  for (const part of chunk(contactIds, IN_CHUNK)) {
+    const rows = await fetchAll<{ contact_id: string; first_source: string | null }>((from, to) =>
+      supabase
+        .from('contact_identities')
+        .select('contact_id, first_source')
+        .in('contact_id', part)
+        .order('id', { ascending: true })
+        .range(from, to),
+    )
+    for (const r of rows) {
+      if (r.first_source && ENQUIRY_IDENTITY_SOURCES.has(r.first_source)) out.add(r.contact_id)
+    }
+  }
+  return out
 }
 
 /**
@@ -422,6 +541,8 @@ export interface ReplyDuePolicy {
   slaHours?: number
   windowDays?: number
   maxPerClient?: number
+  /** 把陌生地址第一次来信单独分进 `firstContacts`（见文件头）。 */
+  separateFirstContacts?: boolean
 }
 
 /**
@@ -457,7 +578,7 @@ export async function findEmailRepliesDue(
   if (threads.length === 0) return empty
 
   const contactIds = Array.from(new Set(threads.map((t) => t.contactId)))
-  const { dnc, lastHumanTouchAt } = await loadTouchMaps(supabase, contactIds)
+  const { dnc, lastHumanTouchAt, enquiryByTouch } = await loadTouchMaps(supabase, contactIds)
   const contacts = await loadContacts(supabase, contactIds)
   const names = new Map<string, string | null>()
   for (const c of contacts) {
@@ -474,6 +595,10 @@ export async function findEmailRepliesDue(
     emails: await loadEmails(supabase, contactIds),
     names,
     rules: await loadRules(supabase, clientIds),
+    platformOwnDomains: platformOwnDomains(),
+    enquiryOrigin: policy.separateFirstContacts
+      ? new Set([...enquiryByTouch, ...(await loadEnquiryIdentityContacts(supabase, contactIds))])
+      : undefined,
     now,
     slaHours: policy.slaHours,
     windowDays,

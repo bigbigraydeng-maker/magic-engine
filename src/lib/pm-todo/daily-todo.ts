@@ -2,10 +2,11 @@
  * PM daily to-do email (22.E.S18 前置 · 滚动排班).
  *
  * One short email every NZ weekday morning: today's pillar theme (rolling
- * Mon-Fri schedule the PM signed off 2026-07-31) plus LIVE counts of things
- * actually awaiting him — blog drafts to review, fresh patrol findings,
- * recent pending kanban cards, cron failures. Sections with zero items are
- * omitted; a quiet day sends a one-line all-clear so the rhythm stays daily.
+ * Mon-Fri schedule the PM signed off 2026-07-31) plus the things actually
+ * awaiting him, grouped into the five kinds the PM signed off 2026-09-26
+ * (see five-kinds.ts; built by `buildTodoView`, which the /dashboard/today
+ * page renders too). Sections with zero items are omitted; a quiet day sends
+ * a one-line all-clear so the rhythm stays daily.
  *
  * Deliberately narrow: counts only cover the FDE focus clients (CTS/Oztop)
  * and only recent items — the kanban holds 400+ historical pending cards
@@ -19,100 +20,10 @@ import {
   loadManualItems,
   dropBrokenLinks,
   type ManualItem,
-  type ManualItemKind,
 } from './manual-items'
-
-/**
- * 这些是**知会**，不是待办 —— 单独一栏，也不计进「今天有几件事」。
- * 判断标准：PM 不动手也不会出事。会出事的一律留在「需要你动手」那栏。
- *
- * 2026-09-07 `diagnostic_findings` 挪进来：跟 SEO 巡逻发现是同一条纪律 ——
- * 本周体检查到的严重问题**已经**由每周方案自动排成了执行看板的建议卡
- * （见 manual-items.ts:1741-1758 how 原文「不用你挑」），本就不是要 PM
- * 单独动手处理的事，之前算进「今天有几件事」是口径 bug（跟 91 那次
- * 「巡逻发现被数两遍」是同一类错，PM 2026-08-04 拍板）。
- */
-const INFORMATIONAL_KINDS: ManualItemKind[] = ['prescription_updated', 'diagnostic_findings']
-
-/**
- * 这些条目的 how 字段自己都写着「回我一句我去改」/「回我一句我去查」——
- * 本质是**我们代码 / 基础设施的欠账**，不是 PM 该动手的活，之前塞进
- * 「🙋 需要你动手」栏是把 dev 的活假装成 PM 的活（每天骚扰 PM 一遍，
- * PM 也没法真的做，只能转给 Ray/dev）。挪进单独一栏「🛠 系统欠账」：
- *
- *   - 不进 `totalItems`（不算 PM 的活）
- *   - 单独渲染成一节，标题写清「不影响你 · Ray 转给 dev 就好」
- *   - 保留可见性 —— 铁律 3 下半「发现不许死在日志里」照样满足，
- *     只是这栏不再算作要 PM 处理的待办
- *
- * 后续正确形态是自动开 GitHub issue / spawn dev-task，但那需要另立项
- * （所有权分配 / 去重 / 关闭跟踪）；本次先做管道分流，别让"应该由 dev
- * 修的 bug"每天早上都到 PM 的动手栏里刷屏。
- */
-const DEV_OWNED_KINDS: ManualItemKind[] = [
-  // auto-run cron 三次都失败停手 → how 自己写「回我一句「查一下这条」我去看」
-  'auto_run_stuck',
-  // 归因黑洞三个子情况（cross_flywheel / scope_mismatch / scope_skip）→
-  // how 全是「这条不用你动手 —— 是我们这边把指标配到了错的战线... 回我一句我去改」
-  'action_unattributable',
-  // 归因 audit 查询挂了 → how 写「这条不用你动手 —— 是我们这边查询挂了」
-  'attribution_audit_failed',
-  // 读客户表失败 → how 写「这条不用你动手 —— 是我们这边读客户表失败了」
-  'client_list_unreadable',
-  // cron 接口没接 startCronRun → how 写「这条不用你动手 —— 是我们代码里的欠账」
-  // 当前 registry 里全部 logsRuns=true，这条实际为空；新增 CI 守卫
-  // （cron-registry-logs-runs.test.ts）阻止未来回归。留在 DEV_OWNED_KINDS 作为
-  // 双保险：万一 CI 漏了，运行时也不再往 PM 邮件的「需要你动手」里塞。
-  'cron_blind',
-  // 自动任务跑到一半卡死 → how 写的是「回我一句『查一下卡死的那几个』」。
-  // 孤儿行没有任何代码会回头改好，PM 做什么都不会让它消失（它只会在 48 小时后
-  // 滑出窗口）—— 放在 PM 的动手栏里等于每天给他一件做不了的事。
-  'cron_stuck',
-  // 自动任务最近一次报错 → how 写的是「回我一句『查一下报错的那几个』」。
-  // 「某任务抛了个异常」PM 没法直接动手，得先有人诊断是代码问题还是账号问题。
-  'cron_failing',
-  // 「AI 断电告警自己读不出来了」→ how 写的是「回我一句『修一下断电告警』」。
-  // 🔴 注意：真的断电那条（ai_provider_exhausted）**不在这里** ——
-  //    那条只有 PM 能处理（去充钱 / 换钥匙），必须留在动手栏。
-  'ai_alerting_broken',
-  // 「AI 卡在 Cloudflare 网关那一层」→ how 写的是「回我一句『换网关令牌』」。
-  // 跟真断电（ai_provider_exhausted）分成两个 kind 就是为了这一刻：
-  // 那条要 PM 去充钱 / 换钥匙，这条只有我们能换令牌。
-  'ai_gateway_broken',
-  // 经验手册（Claude 持久记忆，不在仓库）里点名的代码引用疑似过期——
-  // 「这句话要不要改」是技术判断，不是 PM 该做的业务决策，how 字段同样是
-  // 「回我一句我去查」的话术。见 playbook-staleness-items.ts。
-  'playbook_reference_stale',
-  // 「这个平台所有客户一起没了心跳」→ how 写的是「回我一句我去查」。
-  // 全部一起停说明是我们这边的取数任务停了，PM 去重连一百次也不会好。
-  // 🔴 注意：单条断线（platform_connection_broken / _silent / _scope_gap）
-  //    **不在这里** —— 那几条只有人能去点一次同意页，必须留在动手栏。
-  'platform_connection_pipeline_down',
-  // 「授权体检自己读不出来了」→ 同上，是我们这边的欠账。
-  'platform_connection_check_failed',
-  // 「连上了但这个客户不在取数名单里」→ 缺的是配置不是授权，重连也没用。
-  'platform_connection_not_enrolled',
-  // 「这个平台后台还没有让 PM 自助重连的按钮」→ 给他一件点不到按钮的活比不报还糟。
-  'platform_connection_no_reconnect_ui',
-  // 「连接挂在查不到的客户名下」→ 要核对该断还是该改挂，是我们的活。
-  'platform_connection_orphan',
-  // 马良：自检检不了（模型钥匙没配 / 视频下载不了）、出片后没检（事件没发出去）——how 都是
-  // 「回我一句我去看/去补」。**过关等审片、不过关问返工还是放弃那两条不在这里**，那是 PM 的活。
-  'maliang_check_unverifiable',
-  'maliang_check_missing',
-  // 李白：溯源检不了（官网网址没配 / 读不到）、生成后没检（事件没发出去）、提示词库月检
-  // 疑似过期——三条 how 都是「回我一句我去看/去补/去改」。**真有「未证实」句要改的那条
-  // （libai_copy_unverified）不在这里**，那是 PM/FDE 要动手改文案的活。
-  'libai_check_unverifiable',
-  'libai_check_missing',
-  'libai_prompt_library_stale',
-  // 司马迁本周没巡成（读评价表失败 / 起草全失败）→ how 写「回我一句「查一下司马迁」我去看」。
-  // 真有新评价要回的那条（simaqian_review_drafts）**不在这里**，那是 PM/FDE 要动手回评价的活。
-  'simaqian_patrol_failed',
-  // Meta 钥匙体检自己没跑成（客户表读不到 / 一把钥匙都问不到 Meta）→ how 写「回我一句我去修」。
-  // 真有钥匙死了的那条（meta_token_dead）**不在这里**，只有人能重新授权。
-  'meta_token_check_failed',
-]
+import { reconcile } from '@/lib/todo-reconciliation/reconcile'
+import type { RawWorkItem } from '@/lib/todo-reconciliation/types'
+import { blindSpotNotes, isPmKind, laneOf, PM_KIND_ORDER, PM_KIND_TITLE, type PmKind } from './five-kinds'
 
 /** FDE focus clients: CTS + Oztop. */
 export const FOCUS_CLIENT_IDS = [
@@ -377,10 +288,261 @@ export function esc(v: string): string {
     .replace(/'/g, '&#39;')
 }
 
+// ── The five-kinds view (pure) ───────────────────────────────────────────────────
+//
+// 🔴 邮件和 /dashboard/today 页面**都只渲染这一个函数的结果**。以前两边各数各的：
+//    页面把巡逻发现、开发欠账、知会全算进总数，邮件不算 —— 同一天两个数字对不上。
+//    现在「今天有几件事」只有一个出处。
+
+/** 一行 = PM 要做的一件事。同一件事的 N 条原始记录已经合成这一行，`count` 记着合了几条。 */
+export interface TodoRow {
+  pm_kind: PmKind
+  /** 来源：人工待办的 kind，或 'gbp_setup' / 'blog_drafts' / 'reels'。 */
+  kind: string
+  client_id: string
+  client_name: string
+  what: string
+  /** 空字符串 = 这一行没有额外的做法说明（比如连接授权，说明就在 what 里）。 */
+  how: string
+  href: string
+  action_label: string
+  count: number
+  /** 合并时除了第一条之外另外几条的 what（截短），让人不点开也知道合了些什么。 */
+  samples: string[]
+}
+
+export interface TodoSection {
+  pm_kind: PmKind
+  emoji: string
+  title: string
+  rows: TodoRow[]
+}
+
+export interface TodoView {
+  /** 只含非空的栏，按五类的固定顺序。 */
+  sections: TodoSection[]
+  /** 行数 = 今天要 PM 做几件事。主题行就用它。 */
+  totalItems: number
+  /**
+   * 今天没查成的栏（不计数）—— 对应的检查挪给了开发，但它一坏，PM 那一栏的「没有」
+   * 就是假的，必须说出来。见 five-kinds.ts `BLIND_SPOT_NOTE`。
+   */
+  blindSpots: string[]
+  /** 转给开发的件数（按合并后算，跟开发欠账清单上的行数一致；不算 PM 的事）。 */
+  routedToDev: number
+  /** 挪到周一周报的件数（合并后）。 */
+  routedToWeekly: number
+  /** 过去 24 小时自动任务失败次数 —— 同样只进系统故障日报。 */
+  cronFailures24h: number
+}
+
+/**
+ * 合并后的几行共用一个链接：只留每一行都一样的参数。
+ *
+ * 例：20 条待核对成交各带 `focus=<那一条>`，合成一行后落到「这个客户的全部待核对」
+ * （`?client=<id>`）—— 落到其中某一条上会让人以为只有那一条。
+ * 路径不一样的（本来就不是同一个页面）就用第一条的链接，不去拼一个不存在的页面。
+ */
+export function commonHref(hrefs: string[]): string {
+  const first = hrefs[0] ?? ''
+  if (hrefs.every((h) => h === first)) return first
+  let urls: URL[]
+  try {
+    urls = hrefs.map((h) => new URL(h))
+  } catch {
+    return first
+  }
+  const base = urls[0]
+  if (urls.some((u) => u.origin !== base.origin || u.pathname !== base.pathname)) return first
+  const kept = new URLSearchParams()
+  base.searchParams.forEach((value, key) => {
+    if (urls.every((u) => u.searchParams.getAll(key).length === 1 && u.searchParams.get(key) === value)) {
+      kept.append(key, value)
+    }
+  })
+  const query = kept.toString()
+  return `${base.origin}${base.pathname}${query ? `?${query}` : ''}`
+}
+
+/**
+ * 同一件事的多条记录合成一条（比如 20 条「要不要告诉广告平台」）。
+ *
+ * 合并用的是仓库里现成的 `reconcile()`（todo-reconciliation，#1169）—— 它本来就是
+ * 「同一个根因的 N 次出现合成一行、带次数」，不另写一套口径。根因 = 同一种事 +
+ * 同一个客户（id 和名字都一样）+ 同一种做法 + 同一个落地页面：人就是去同一个
+ * 地方做同一个动作。落地页面不同的不合，否则合并后的链接只能指到其中一个。
+ *
+ * 🔴 「认真假」那一栏（串台、共用账户…）**一条都不合**：两件串台就是两件不同的事，
+ *    合成一条只剩第一对客户的名字（魏征 2026-09-26 设计复审）。同一件串台的重复记录
+ *    在源头就按涉及的网址 / 账号合掉了（manual-items.ts `pushCrossClientItems`）。
+ *
+ * 🔴 `reconcile()` 会把它认得的几类记录「压下去」（比如谷歌故意不收录的网址）。
+ *    这里给的 category 带前缀，不会命中那些规则；万一以后命中了，压下去的也照样
+ *    各出一行 —— 在 PM 的清单里，宁可多一行，也不许一条待办悄悄没了。
+ */
+export function collapseManualItems(
+  items: ManualItem[],
+): Array<{ item: ManualItem; count: number; hrefs: string[]; samples: string[] }> {
+  if (items.length === 0) return []
+  const raw: RawWorkItem[] = items.map((m, i) => ({
+    id: String(i),
+    source: 'manual_item',
+    category: `pm-todo:${m.kind}`,
+    clientId: m.client_id,
+    clientName: m.client_name,
+    rootCauseKey: laneOf(m) === 'truth'
+      ? `single:${i}`
+      : JSON.stringify([m.kind, m.client_id, m.client_name, m.how, hrefPage(m.href)]),
+    label: m.what,
+  }))
+  const result = reconcile(raw, new Date(0).toISOString())
+  const groups: number[][] = [
+    ...result.unresolvedClusters.map((c) => c.itemIds.map(Number)),
+    ...result.suppressed.flatMap((g) => g.itemIds.map((id) => [Number(id)])),
+  ]
+  return groups
+    .map((ids) => ids.slice().sort((a, b) => a - b))
+    .sort((a, b) => a[0] - b[0])
+    .map((ids) => ({
+      item: items[ids[0]],
+      count: ids.length,
+      hrefs: ids.map((i) => items[i].href),
+      samples: sampleWhats(ids.map((i) => items[i])),
+    }))
+}
+
+/** 链接落在哪个页面（不含参数）。解析不了的原样当页面，不去猜。 */
+function hrefPage(href: string): string {
+  try {
+    const u = new URL(href)
+    return `${u.origin}${u.pathname}`
+  } catch {
+    return href
+  }
+}
+
+/** 合并行里另外几条最多点名几条。 */
+const MERGED_SAMPLES = 3
+const SAMPLE_CHARS = 60
+
+function mergedWhat(what: string, count: number): string {
+  return count > 1 ? `共 ${count} 条同类，最早的一条：${what}` : what
+}
+
+function sampleWhats(items: ManualItem[]): string[] {
+  return items
+    .slice(1, 1 + MERGED_SAMPLES)
+    .map((m) => (m.what.length > SAMPLE_CHARS ? `${m.what.slice(0, SAMPLE_CHARS)}…` : m.what))
+}
+
+export function buildTodoView(counts: TodoCounts): TodoView {
+  const byKind = new Map<PmKind, TodoRow[]>()
+  const push = (row: TodoRow) => {
+    const list = byKind.get(row.pm_kind) ?? []
+    list.push(row)
+    byKind.set(row.pm_kind, list)
+  }
+
+  // 授权连接：系统进不去，要人点一次同意页
+  for (const t of counts.setupTasks ?? []) {
+    push({
+      pm_kind: 'one_click', kind: 'gbp_setup', client_id: t.id, client_name: t.name,
+      what: t.label, how: '', href: t.href, action_label: '去连接', count: 1, samples: [],
+    })
+  }
+
+  const manualItems = counts.manualItems ?? []
+  const pmItems = manualItems.filter((m) => isPmKind(laneOf(m)))
+  for (const { item, count, hrefs, samples } of collapseManualItems(pmItems)) {
+    const href = count > 1 ? commonHref(hrefs) : item.href
+    push({
+      pm_kind: laneOf(item) as PmKind,
+      kind: item.kind,
+      client_id: item.client_id,
+      client_name: item.client_name,
+      what: mergedWhat(item.what, count),
+      // 合并后链接落到这一类的总列表，不再是某一条 —— 做法里「直接展开到这位客人」
+      // 这种话就不对了，得说清楚（魏征 2026-09-26 设计复审）
+      how: href !== item.href
+        ? `${item.how}（这是 ${count} 条合成的一行：链接打开的是总列表，按上面点到的条目逐个找）`
+        : item.how,
+      href,
+      action_label: '去做这件事',
+      count,
+      samples,
+    })
+  }
+
+  // 草稿：人工待办里已经有这个客户的「写好没人看 / 写好没地方发」那条（它带着更多
+  // 信息），就不再另起一行 —— 同一批草稿以前在两栏各数一遍。
+  const draftClientsInManual = new Set(
+    pmItems
+      .filter((m) => m.kind === 'blog_draft_waiting' || m.kind === 'blog_publish_channel_broken')
+      .map((m) => m.client_id),
+  )
+  for (const c of counts.draftsByClient) {
+    if (c.drafts <= 0 || draftClientsInManual.has(c.id)) continue
+    push({
+      pm_kind: 'review', kind: 'blog_drafts', client_id: c.id, client_name: c.name,
+      what: `${c.drafts} 篇 Blog 草稿写好了，等你审`,
+      how: '打开看一眼，觉得可以就点发布',
+      href: `${DASHBOARD_BASE}/${c.id}/blog`, action_label: '去审', count: 1, samples: [],
+    })
+  }
+
+  for (const c of counts.reelsByClient) {
+    if (c.reels <= 0) continue
+    push({
+      pm_kind: 'review', kind: 'reels', client_id: c.id, client_name: c.name,
+      what: `${c.reels} 条社媒成片等你审`,
+      how: '看一遍，没问题就批准发布',
+      href: `${APP_BASE}/dashboard/factory`, action_label: '去看片', count: 1, samples: [],
+    })
+  }
+
+  // 🔴 这两样**刻意不进**每日待办：
+  //    · SEO 巡逻发现 —— 周报里已经有「巡逻员本周抓到 N 个新发现」
+  //    · 看板上的新建议卡 —— 系统和 FDE 在推，周报里报「本周新排了几张」
+  //    不是 PM 五类里的任何一类，放在这里只会把真正要他动手的那几条淹掉。
+
+  const sections: TodoSection[] = PM_KIND_ORDER
+    .filter((k) => (byKind.get(k) ?? []).length > 0)
+    .map((k) => ({ pm_kind: k, ...PM_KIND_TITLE[k], rows: byKind.get(k) ?? [] }))
+
+  return {
+    sections,
+    totalItems: sections.reduce((s, sec) => s + sec.rows.length, 0),
+    blindSpots: blindSpotNotes(manualItems),
+    routedToDev: collapseManualItems(manualItems.filter((m) => laneOf(m) === 'dev')).length,
+    routedToWeekly: collapseManualItems(manualItems.filter((m) => laneOf(m) === 'weekly')).length,
+    cronFailures24h: counts.cronFailures24h,
+  }
+}
+
+/** 「挪走了什么」那一行小字。邮件和页面共用，所以两边说的是同一句话。 */
+export function routedElsewhereNote(view: TodoView): string {
+  const parts: string[] = []
+  if (view.routedToDev > 0) parts.push(`${view.routedToDev} 件开发欠账`)
+  if (view.cronFailures24h > 0) parts.push(`过去 24 小时 ${view.cronFailures24h} 次自动任务失败`)
+  const dev = parts.length > 0 ? `${parts.join('、')}在后台「开发欠账」清单里，转给开发窗口就行` : ''
+  const weekly = view.routedToWeekly > 0 ? `${view.routedToWeekly} 件系统知会挪到周一周报` : ''
+  const moved = [dev, weekly].filter(Boolean).join('；')
+  return moved ? `另外：${moved} —— 都不算你的事。` : ''
+}
+
+/**
+ * 开发欠账清单在哪（后台「自动任务健康」页下面那一栏）。
+ *
+ * 🔴 以前这些在 PM 邮件里占一整栏；挪走以后必须有一个开发打开就能看到全部的地方，
+ *    邮件里只留一行小字 + 这个链接（铁律 3 下半：发现不许死在日志里）。
+ *    原计划挪进每天的「系统故障日报」—— 但那封信仓库里自己写着「每天没人细看」，
+ *    挪过去等于换个地方埋掉（魏征 2026-09-26 设计复审）。
+ */
+export const DEV_DEBT_URL = `${APP_BASE}/dashboard/admin/cron-health#dev-debt`
+
 export function buildTodoEmail(weekday: number, counts: TodoCounts, nzDateLabel: string): TodoEmail {
   const theme = DAY_THEMES[weekday] ?? { title: '日常', hint: '' }
-
-  const sections: string[] = []
+  const view = buildTodoView(counts)
 
   const sectionCard = (emoji: string, title: string, rows: string[]) => `
     <div style="margin:0 0 14px;padding:14px 16px;border:1px solid #e2e8f0;border-radius:10px">
@@ -388,123 +550,36 @@ export function buildTodoEmail(weekday: number, counts: TodoCounts, nzDateLabel:
       ${rows.join('')}
     </div>`
 
-  const linkRow = (label: string, href: string, count: number, unit: string) => `
-    <p style="margin:0 0 4px;font-size:14px;color:#334155">
-      ${label}：<b>${count}</b> ${unit} · <a href="${href}" style="color:#0891b2">去处理</a>
-    </p>`
-
-  // Setup first: these are one-off consent clicks that block a whole pillar
-  // until done, so they outrank the day's routine review queue.
-  const setupTasks = counts.setupTasks ?? []
-  if (setupTasks.length > 0) {
-    sections.push(sectionCard('🔌', '要你点一次的连接（做一次，以后不再出现）',
-      setupTasks.map((t) => `
-        <p style="margin:0 0 8px;font-size:14px;color:#334155">
-          <b>${t.name}</b> · <a href="${t.href}" style="color:#0891b2">去连接</a><br/>
-          <span style="font-size:12px;color:#64748b">${t.label}</span>
-        </p>`),
-    ))
-  }
-
-  // Then the manual lane: work the system genuinely cannot finish. Routine
-  // sections below move on their own; these stay frozen until a human acts.
-  const manualItems = counts.manualItems ?? []
-  // 🔴 「需要你动手」这一栏的全部价值，在于**里面每一条不动就不会好**。
-  //    往里塞不用动手的通知，等于每周每个客户往里加一行噪音；栏目一被稀释，
-  //    真正等他动手的那条（比如"出片余额用完了"）会被一起划过去。
-  //    所以纯知会型的单独一栏，且不计进"要你办的事"。
-  const actionItems = manualItems.filter(
-    (m) => !INFORMATIONAL_KINDS.includes(m.kind) && !DEV_OWNED_KINDS.includes(m.kind),
-  )
-  const infoItems = manualItems.filter((m) => INFORMATIONAL_KINDS.includes(m.kind))
-  const devOwnedItems = manualItems.filter((m) => DEV_OWNED_KINDS.includes(m.kind))
-
-  if (actionItems.length > 0) {
-    const rows = actionItems.map((m) => `
+  const rowHtml = (r: TodoRow) => {
+    const link = r.href
+      ? `<a href="${esc(r.href)}" style="color:#0891b2">${esc(r.action_label)}</a>`
+      : ''
+    const tail = [r.how ? `→ ${esc(r.how)}` : '', link].filter(Boolean).join(' · ')
+    const samples = r.samples.length > 0
+      ? `<p style="margin:0 0 2px;font-size:12px;color:#64748b">另外几条：${r.samples.map(esc).join('；')}${r.count - 1 > r.samples.length ? ' …' : ''}</p>`
+      : ''
+    return `
       <div style="margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid #f1f5f9">
-        <p style="margin:0 0 2px;font-size:14px;color:#0f172a"><b>${esc(m.client_name)}</b>：${esc(m.what)}</p>
-        <p style="margin:0;font-size:13px;color:#475569">→ ${esc(m.how)} · <a href="${esc(m.href)}" style="color:#0891b2">去做这件事</a></p>
-      </div>`)
-    sections.push(sectionCard('🙋', '需要你动手（系统做不了的）', rows))
+        <p style="margin:0 0 2px;font-size:14px;color:#0f172a"><b>${esc(r.client_name)}</b>：${esc(r.what)}</p>
+        ${samples}
+        ${tail ? `<p style="margin:0;font-size:13px;color:#475569">${tail}</p>` : ''}
+      </div>`
   }
 
-  if (infoItems.length > 0) {
-    const rows = infoItems.map((m) => `
-      <div style="margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid #f1f5f9">
-        <p style="margin:0 0 2px;font-size:14px;color:#0f172a"><b>${esc(m.client_name)}</b>：${esc(m.what)}</p>
-        <p style="margin:0;font-size:13px;color:#475569">→ ${esc(m.how)} · <a href="${esc(m.href)}" style="color:#0891b2">去看看</a></p>
-      </div>`)
-    // 「不用动手」字面上等于「可以跳过」，但这条通知存在的全部理由，
-    // 就是让 PM 知道客户的方向被自动改成了什么 —— 他不用干活，但必须过目。
-    // 「看一眼就行」两件事一起说清楚。
-    sections.push(sectionCard('📣', '这周系统替你做了什么（看一眼就行）', rows))
-  }
+  const blind = view.blindSpots.length > 0
+    ? `<div style="margin:0 0 14px;padding:10px 14px;border:1px solid #fcd34d;background:#fffbeb;border-radius:10px">
+        ${view.blindSpots.map((b) => `<p style="margin:0 0 2px;font-size:13px;color:#92400e">⚠️ 今天没查成：${esc(b)}</p>`).join('')}
+      </div>`
+    : ''
 
-  if (devOwnedItems.length > 0) {
-    const rows = devOwnedItems.map((m) => `
-      <div style="margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid #f1f5f9">
-        <p style="margin:0 0 2px;font-size:14px;color:#0f172a"><b>${esc(m.client_name)}</b>：${esc(m.what)}</p>
-        <p style="margin:0;font-size:13px;color:#475569">→ ${esc(m.how)}${m.href ? ` · <a href="${esc(m.href)}" style="color:#0891b2">去看看</a>` : ''}</p>
-      </div>`)
-    // 🛠 这栏是**我们代码 / infra 欠账**的清单，转给 Ray/dev 就好 —— 不算你要办的事。
-    //    见 DEV_OWNED_KINDS 头注：这几个 kind 的 how 字段自己都写「回我一句我去改」，
-    //    本就不是 PM 能动手解决的，塞到「🙋 需要你动手」栏是把 dev 的活假装成 PM 的活。
-    sections.push(sectionCard('🛠', '系统欠账（不影响你 · Ray 转给 dev 就好）', rows))
-  }
+  const body = view.sections.length > 0
+    ? view.sections.map((sec) => sectionCard(sec.emoji, sec.title, sec.rows.map(rowHtml))).join('')
+    : `<p style="margin:0 0 14px;font-size:14px;color:#059669">今天没有待办 ✅ 没有要你做的事。</p>`
 
-  const totalDrafts = counts.draftsByClient.reduce((s, c) => s + c.drafts, 0)
-  if (totalDrafts > 0) {
-    sections.push(sectionCard('📝', 'Blog 草稿待审', counts.draftsByClient.map((c) =>
-      linkRow(c.name, `${DASHBOARD_BASE}/${c.id}/blog`, c.drafts, '篇'),
-    )))
-  }
-
-  // 🔴 巡逻发现**不是一批独立的活儿** —— 它当天就被自动排成了下面那栏的建议卡。
-  //    原来两栏各数一遍，同一件事在「今天有几件」里被算了两次，
-  //    这是 91 那个数字虚高的第二个原因（第一个是没按客户过滤）。
-  //    所以这一栏只报「查到什么、已经变成什么」，不进总数。
-  const totalFindings = counts.findingsByClient.reduce((s, c) => s + c.findings, 0)
-  if (totalFindings > 0) {
-    sections.push(sectionCard('🔎', 'SEO 巡逻查到的（已自动排成下面的建议卡，不用单独处理）',
-      counts.findingsByClient.map((c) =>
-        linkRow(c.name, `${DASHBOARD_BASE}/${c.id}/execution`, c.findings, '条'),
-      )))
-  }
-
-  const totalCards = counts.recentCardsByClient.reduce((s, c) => s + c.cards, 0)
-  if (totalCards > 0) {
-    sections.push(sectionCard('🗂', '本周新建议卡待处理', counts.recentCardsByClient.map((c) =>
-      linkRow(c.name, `${DASHBOARD_BASE}/${c.id}/execution`, c.cards, '张'),
-    )))
-  }
-
-  const totalReels = counts.reelsByClient.reduce((s, c) => s + c.reels, 0)
-  if (totalReels > 0) {
-    sections.push(sectionCard('🎬', '社媒成片待审', counts.reelsByClient.map((c) =>
-      linkRow(c.name, 'https://app.magicengine.com.au/dashboard/factory', c.reels, '条'),
-    )))
-  }
-
-  if (counts.cronFailures24h > 0) {
-    sections.push(sectionCard('⚠️', '系统有活儿没跑成', [
-      linkRow('过去 24 小时', 'https://app.magicengine.com.au/dashboard/admin/cron-health', counts.cronFailures24h, '次失败'),
-    ]))
-  }
-
-  // 只知会、不用他动手的那些不计进「今天有几件事」—— 否则数字会虚高，
-  // 他以为有 5 件要办，点进去 3 件写着「不用你操作」，这个数字就不可信了
-  // 🔴 「今天有几件」只数**真的要人处理**的：
-  //    巡逻发现不进（它已经是下面的建议卡，数两遍就是虚高）；
-  //    纯知会型的也不进（见上面 INFORMATIONAL_KINDS）。
-  //    PM 2026-08-04：「91 件，很多按钮点了并不能顺利办理」——
-  //    一个数不准的数字比没有数字更糟，他会连带不信这封信里的其他数。
-  const totalItems =
-    setupTasks.length + actionItems.length +
-    totalDrafts + totalCards + totalReels + counts.cronFailures24h
-
-  const body = sections.length > 0
-    ? sections.join('')
-    : `<p style="margin:0 0 14px;font-size:14px;color:#059669">今天没有待办 ✅ 系统都在正常跑。</p>`
+  const note = routedElsewhereNote(view)
+  const noteLink = view.routedToDev > 0 || view.cronFailures24h > 0
+    ? ` <a href="${esc(DEV_DEBT_URL)}" style="color:#0891b2">开发欠账清单</a>`
+    : ''
 
   const html = `
     <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
@@ -512,13 +587,16 @@ export function buildTodoEmail(weekday: number, counts: TodoCounts, nzDateLabel:
       <p style="margin:0 0 18px;font-size:14px;color:#64748b">
         <b>${theme.title}</b>${theme.hint ? ` — ${theme.hint}` : ''}
       </p>
+      ${blind}
       ${body}
+      ${note ? `<p style="margin:12px 0 0;font-size:12px;color:#64748b">${esc(note)}${noteLink}</p>` : ''}
       <p style="margin-top:18px;font-size:12px;color:#94a3b8">
-        这封信每个工作日早上自动发，数字实时统计，办完的第二天自动消失。
+        这封信每个工作日早上自动发，只列五类要你做的事：拍板、点一次、转给客户、发前看一眼、认真假。办完的第二天自动消失。
         随时可在后台 <a href="https://app.magicengine.com.au/dashboard/today" style="color:#0891b2">今日待办</a> 页查看同一份清单。
       </p>
     </div>`
 
+  const totalItems = view.totalItems
   const subject = totalItems > 0
     ? `📋 今日待办 · ${ZH_DAYS[weekday]} · ${totalItems} 件`
     : `📋 今日待办 · ${ZH_DAYS[weekday]} · 无事 ✅`
