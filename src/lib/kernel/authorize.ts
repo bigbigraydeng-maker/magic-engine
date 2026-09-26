@@ -24,7 +24,7 @@ import type {
 } from './types'
 import type { KernelDeps } from './deps'
 import { validateAgainstSchema } from './registry'
-import { isWithinEnvelope } from './autonomy-envelope'
+import { selectEnvelopeVerdict } from './autonomy-envelope'
 import { outwardBlockReason } from './outward-authorization'
 import {
   getActivePolicy,
@@ -427,11 +427,27 @@ export async function preflight(deps: KernelDeps, run: ActionRun, now: Date): Pr
       )
     }
 
-    const verdict = isWithinEnvelope(resolved.request, resolved.facts, approval.envelope)
+    // 🔴 人按的「收」类动作走另一套信封（`HUMAN_STOP_ENVELOPE`），不走 AI 自治信封。
+    //    `triggered_by` 取的是 `action_runs` 那一列 —— 提交时由 Kernel 自己写，**不经请求体**，
+    //    所以「人按的」这个身份不是调用方自报的（同 §6.4 对解除接口 actor 的要求）。
+    //    为什么必须分家：AI 信封里「学习期未知就不动」「72h 冷却」「在 A/B 测试里不动」
+    //    这几条防的是 AI 反复折腾学习期，而人按紧急停车是为了**少花钱** ——
+    //    2026-09-27 实测拿 AI 信封拦人按的刹车，CTS + NAL 46 个广告组因 `learning_stage`
+    //    全是 NULL 被 100% 拒掉（详见 autonomy-envelope.ts 里 HUMAN_STOP_ENVELOPE 的注释）。
+    const verdict = selectEnvelopeVerdict({
+      triggeredBy: run.triggered_by,
+      actionKey: run.action_key,
+      request: resolved.request,
+      facts: resolved.facts,
+      envelope: approval.envelope,
+    })
     if (!verdict.within) {
+      // 🔴 理由里带上走的是哪套信封 —— 否则排查时分不清「人工信封拒了」还是
+      //    「AI 信封拒了」，而这两种该做的处置完全不同。
+      const which = verdict.envelopeUsed === 'human_stop' ? '人工止损信封' : '自治信封'
       return bad(
         'outside_autonomy_envelope',
-        `这一次的改动不在自治信封内：${verdict.reasons.join('；')}`,
+        `这一次的改动不在${which}内：${verdict.reasons.join('；')}`,
         definition,
         policy,
         costEstimate,

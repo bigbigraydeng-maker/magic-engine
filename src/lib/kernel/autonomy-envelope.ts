@@ -182,3 +182,123 @@ export function isWithinEnvelope(
 
   return { within: reasons.length === 0, reasons }
 }
+
+// ── 人按的「收」类动作：另一套信封 ─────────────────────────────────────────
+
+/**
+ * 🔴 **人按的紧急止损专用信封 —— 跟 `AutonomyEnvelope` 是两种不同的东西，不是它的降级版。**
+ *
+ * ## 为什么必须另立一套（生产数据证明，不是偏好）
+ *
+ * `isWithinEnvelope` 在 kind 分流**之前**有 7 条拒绝条件，全部是为「防 AI 反复折腾」设计的。
+ * 用它去拦**人按的刹车**，2026-09-27 实测的后果是刹车 100% 拧不动：
+ *
+ * | 客户 | 广告组 | `learning_stage` 为 NULL | 预算挂在系列上（CBO） |
+ * |---|---|---|---|
+ * | CTS Tours NZ | 36 | **36** | 20 |
+ * | New Asian Logistics | 10 | **10** | 10 |
+ *
+ * · 46 个广告组的 `learning_stage` **全部是 NULL** → `inLearningPhase(null) === true`
+ *   → 第 ⑦ 条「读不到学习期状态，按还在学习期处理」拒掉**每一个**
+ * · CBO 广告组没有自己的日预算 → `beforeCents === null` → 第 ① 条拒
+ *   （按账户级统计更狠：NAL 126/126 全 CBO、CTS 269/514）
+ * · CTS 还在跑留资表单 A/B → 第 ⑥ 条 `excludeAdStudies` 再拒一层
+ *
+ * ## 判据差异的实质
+ *
+ * 那些条件防的是「AI 反复折腾学习期、把预算越调越离谱」。
+ * **人按紧急停车是为了少花钱** —— 学习期和 72h 冷却保护的是**学习进度**，不是**钱**。
+ * 把两件不同的事塞进同一个判据，结果就是上面那张表。
+ *
+ * ## 类型层面为什么不能「把字段改成 false」
+ *
+ * `AutonomyEnvelope` 的 `respectDailyCapCents` / `excludeLearningPhase` / `excludeAdStudies` /
+ * `requiresRollbackHandler` 四项的类型是**字面量 `true`**（见 `types.ts`），
+ * 所以「拿 AI 信封把字段置 false」**编译期就不成立** —— 这是好事：
+ * 它保证 `AutonomyEnvelope` 永远是那套严格的 AI 信封，想放宽只能显式另立一套（就是这里）。
+ *
+ * ## 只保留三条判据
+ *
+ * 1. **撤回处理函数存在** —— 在本函数里查（`facts.hasRollbackHandler`）
+ * 2. **归属校验通过** —— 由 `authorize.ts` 的客户/目标归属段落 + 路由层
+ *    `assertCampaignOwnedByClient` 保证，**不在这里重复**
+ * 3. **实体存在** —— 由 `envelope-facts.ts` 保证：读不到实体它返回 `unavailable`，
+ *    调用方在进本函数**之前**就已经 deny 了
+ *
+ * 🔴 第 2、3 条不在本函数里不等于没做。改这里之前先确认那两处还在，
+ *    别因为「这里只剩一条」就以为人工路径没有归属校验。
+ */
+export interface HumanStopEnvelope {
+  /** 判别标记 —— 让「拿错信封」在类型层就露出来，不是靠字段长得像。 */
+  readonly kind: 'human_stop'
+  /** 唯一保留的硬判据：撤不回来的事，人按也不做。 */
+  readonly requiresRollbackHandler: true
+}
+
+export const HUMAN_STOP_ENVELOPE: HumanStopEnvelope = {
+  kind: 'human_stop',
+  requiresRollbackHandler: true,
+}
+
+/**
+ * 🔴 **能走人工信封的 ActionKey —— 穷举白名单，不是黑名单。**
+ *
+ * 为什么必须白名单：以后新增 ActionKey 时，
+ * · 黑名单会让新 key **默认落进人工信封（默认放宽）**
+ * · 白名单会让新 key **默认走 AI 信封（默认收紧）**
+ *
+ * 同 `boundaries.ts` 那句「穷举白名单而不是黑名单否定」。这个仓库反复踩过「默认放宽」。
+ *
+ * 🔴 **只收类**（只会让花费变少）。放类 / 建类（`scale_unit_budget` /
+ *    `add_retargeting_adset` / `swap_creative` / `create_reel_ad` 等）即使人触发也走 AI 信封 ——
+ *    人手动加预算没有「只会变少」这个安全性。
+ */
+export const HUMAN_STOP_ACTION_KEYS: readonly string[] = [
+  'ads.pause_unit',
+  'ads.cut_unit_budget',
+]
+
+/** 人按的收类动作在不在人工信封内。纯函数。 */
+export function isWithinHumanStopEnvelope(facts: EnvelopeFacts): EnvelopeVerdict {
+  const reasons: string[] = []
+  if (!facts.hasRollbackHandler) {
+    reasons.push('这个动作没有注册撤回处理函数，撤不回来的事就算是人按的也不做')
+  }
+  return { within: reasons.length === 0, reasons }
+}
+
+/** 这一次该用哪套信封判。`'human_stop'` = 人按的收类动作。 */
+export type EnvelopeChoice = 'human_stop' | 'ads_autonomy'
+
+/**
+ * 分派：人按的收类动作走人工信封，其余一律走 AI 自治信封。
+ *
+ * 🔴 **两条必须同时成立**，缺一条就走 AI 信封：
+ *   1. `triggeredBy === 'human'` —— 调用方必须从**服务端授权上下文**取，
+ *      **不许从请求体读**（body 里给 triggeredBy 等于让调用方自报身份，
+ *      同 spec §6.4 对解除接口 `actor` 的要求）。本函数只是纯判定，
+ *      「这个值从哪来」由调用方保证 —— `authorize.ts` 传的是 `run.triggered_by`，
+ *      那一列在提交时由 Kernel 自己写，不经请求体。
+ *   2. `actionKey` 在 `HUMAN_STOP_ACTION_KEYS` 白名单里。
+ *
+ * 返回值带上 `envelopeUsed`，让调用方能把「走了哪套」写进 deny 理由与回执 ——
+ * 否则排查时分不清「人工信封拒了」和「AI 信封拒了」，两者该做的处置完全不同。
+ */
+export function selectEnvelopeVerdict(args: {
+  readonly triggeredBy: string
+  readonly actionKey: string
+  readonly request: EnvelopeRequest
+  readonly facts: EnvelopeFacts
+  readonly envelope: AutonomyEnvelope
+}): EnvelopeVerdict & { readonly envelopeUsed: EnvelopeChoice } {
+  const human =
+    args.triggeredBy === 'human' && HUMAN_STOP_ACTION_KEYS.includes(args.actionKey)
+
+  if (human) {
+    return { ...isWithinHumanStopEnvelope(args.facts), envelopeUsed: 'human_stop' }
+  }
+  return {
+    ...isWithinEnvelope(args.request, args.facts, args.envelope),
+    envelopeUsed: 'ads_autonomy',
+  }
+}

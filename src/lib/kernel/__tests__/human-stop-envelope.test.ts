@@ -1,0 +1,206 @@
+/**
+ * 人按的「收」类动作专用信封（WP3.1b BLOCKER 4）。
+ *
+ * ## 这份用例要钉住什么
+ *
+ * 这不是覆盖率练习。它钉的是**一条已经被生产数据证伪过的假设**：
+ * 「人按的紧急止损可以跟 AI 自动调预算共用一套信封」。
+ *
+ * 2026-09-27 实测（`ad_entity_snapshots` 最新快照）：
+ *
+ * | 客户 | 广告组 | `learning_stage` 为 NULL | CBO（`daily_budget_minor` 为 NULL） |
+ * |---|---|---|---|
+ * | CTS Tours NZ | 36 | **36** | 20 |
+ * | New Asian Logistics | 10 | **10** | 10 |
+ *
+ * 按账户级统计更狠：**NAL 126/126 全 CBO、CTS 269/514**。
+ * 拿 AI 信封拦人按的刹车 → 这两家客户**一个广告组都停不下来**。
+ *
+ * 所以下面每一条用例的事实底座都刻意用**生产上的真实形状**
+ * （`learningStage: null` + `beforeCents: null`），而不是「一切正常」的理想值 ——
+ * 用理想值写的测试会全绿，然后在真客户身上 100% 失败。
+ */
+
+import { describe, expect, it } from 'vitest'
+import {
+  HUMAN_STOP_ACTION_KEYS,
+  HUMAN_STOP_ENVELOPE,
+  isWithinHumanStopEnvelope,
+  selectEnvelopeVerdict,
+  type EnvelopeFacts,
+  type EnvelopeRequest,
+} from '../autonomy-envelope'
+import type { AutonomyEnvelope } from '../types'
+
+const AI_ENVELOPE: AutonomyEnvelope = {
+  maxBudgetDeltaRatio: 0.2,
+  respectDailyCapCents: true,
+  minHoursSinceLastChange: 72,
+  excludeLearningPhase: true,
+  excludeAdStudies: true,
+  requiresRollbackHandler: true,
+}
+
+/**
+ * 🔴 **生产真实形状**，不是理想值：CBO 广告组没有自己的预算（`beforeCents: null`），
+ *    学习期读不到（`learningStage: null`）—— 这两条是 CTS/NAL 46 个广告组的实际情况。
+ */
+function prodFacts(over: Partial<EnvelopeFacts> = {}): EnvelopeFacts {
+  return {
+    beforeCents: null,
+    accountDailyTotalBeforeCents: null,
+    dailyCapCents: null,
+    hoursSinceLastChange: null,
+    learningPhaseApplicable: true,
+    learningStage: null,
+    adStudyCount: 0,
+    hasRollbackHandler: true,
+    ...over,
+  }
+}
+
+function req(over: Partial<EnvelopeRequest> = {}): EnvelopeRequest {
+  return { kind: 'pause', afterCents: 0, ...over }
+}
+
+const HUMAN = 'human'
+
+describe('人工止损信封 · 判据只剩撤回处理函数', () => {
+  it('生产真实形状（CBO + 学习期读不到 + 冷却读不到 + 没设上限）→ 仍然放行', () => {
+    const v = isWithinHumanStopEnvelope(prodFacts())
+    expect(v.within).toBe(true)
+    expect(v.reasons).toEqual([])
+  })
+
+  it('🔴 没注册撤回处理函数 → 拒（撤不回来的事就算人按也不做）', () => {
+    const v = isWithinHumanStopEnvelope(prodFacts({ hasRollbackHandler: false }))
+    expect(v.within).toBe(false)
+    expect(v.reasons.join('')).toContain('撤回处理函数')
+  })
+
+  it('信封常量只保留 requiresRollbackHandler，不含那三条防 AI 的判据', () => {
+    // 🔴 这一条防的是「未来有人把 excludeLearningPhase / minHoursSinceLastChange /
+    //    maxBudgetDeltaRatio 悄悄塞回人工信封」——那会让上面 46/46 那个失败原地复活。
+    expect(HUMAN_STOP_ENVELOPE).toEqual({ kind: 'human_stop', requiresRollbackHandler: true })
+    expect(Object.keys(HUMAN_STOP_ENVELOPE).sort()).toEqual(['kind', 'requiresRollbackHandler'])
+  })
+})
+
+describe('人工止损信封 · 白名单是穷举的，不是黑名单', () => {
+  it('白名单只有两个收类动作', () => {
+    expect([...HUMAN_STOP_ACTION_KEYS].sort()).toEqual(['ads.cut_unit_budget', 'ads.pause_unit'])
+  })
+
+  it.each(['ads.pause_unit', 'ads.cut_unit_budget'])(
+    '%s + 人触发 → 走人工信封，生产真实形状也放行',
+    (actionKey) => {
+      const v = selectEnvelopeVerdict({
+        triggeredBy: HUMAN,
+        actionKey,
+        request: req(),
+        facts: prodFacts(),
+        envelope: AI_ENVELOPE,
+      })
+      expect(v.envelopeUsed).toBe('human_stop')
+      expect(v.within).toBe(true)
+    },
+  )
+
+  it.each([
+    'ads.scale_unit_budget',
+    'ads.add_retargeting_adset',
+    'ads.swap_creative',
+    'ads.budget_move_plan',
+    'ads.pause_campaign',
+    'ads.cut_campaign_budget',
+    'ads.boost_page_post',
+    'ads.create_reel_ad',
+  ])('🔴 %s 即使人触发也走 AI 信封（放类/建类没有「只会变少」这个安全性）', (actionKey) => {
+    const v = selectEnvelopeVerdict({
+      triggeredBy: HUMAN,
+      actionKey,
+      request: req(),
+      facts: prodFacts(),
+      envelope: AI_ENVELOPE,
+    })
+    expect(v.envelopeUsed).toBe('ads_autonomy')
+    // 生产真实形状在 AI 信封下必被拒（读不到事实 + 学习期未知）
+    expect(v.within).toBe(false)
+  })
+
+  it('🔴 未来新增的 ActionKey 默认走 AI 信封（白名单 = 默认收紧）', () => {
+    const v = selectEnvelopeVerdict({
+      triggeredBy: HUMAN,
+      actionKey: 'ads.some_future_action_nobody_whitelisted',
+      request: req(),
+      facts: prodFacts(),
+      envelope: AI_ENVELOPE,
+    })
+    expect(v.envelopeUsed).toBe('ads_autonomy')
+  })
+})
+
+describe('人工止损信封 · triggeredBy 必须是 human，其余一律走 AI 信封', () => {
+  it.each(['schedule', 'agent', 'signal', 'run'])(
+    '%s 触发的暂停走 AI 信封（不是人按的就不给这个宽度）',
+    (triggeredBy) => {
+      const v = selectEnvelopeVerdict({
+        triggeredBy,
+        actionKey: 'ads.pause_unit',
+        request: req(),
+        facts: prodFacts(),
+        envelope: AI_ENVELOPE,
+      })
+      expect(v.envelopeUsed).toBe('ads_autonomy')
+    },
+  )
+
+  it('空字符串 / 乱值也走 AI 信封（默认收紧）', () => {
+    for (const triggeredBy of ['', 'HUMAN', 'Human', 'human ', 'user']) {
+      const v = selectEnvelopeVerdict({
+        triggeredBy,
+        actionKey: 'ads.pause_unit',
+        request: req(),
+        facts: prodFacts(),
+        envelope: AI_ENVELOPE,
+      })
+      expect(v.envelopeUsed, `triggeredBy=${JSON.stringify(triggeredBy)} 不该被当成人按的`).toBe(
+        'ads_autonomy',
+      )
+    }
+  })
+})
+
+describe('人工止损信封 · AI 信封那条路没被改坏（回归）', () => {
+  it('AI 信封下的生产真实形状必被拒，且理由里点名学习期读不到', () => {
+    const v = selectEnvelopeVerdict({
+      triggeredBy: 'agent',
+      actionKey: 'ads.pause_unit',
+      request: req(),
+      facts: prodFacts(),
+      envelope: AI_ENVELOPE,
+    })
+    expect(v.within).toBe(false)
+    expect(v.reasons.join('；')).toContain('学习期')
+  })
+
+  it('AI 信封下一切正常的事实仍然放行（分派没把好路也堵了）', () => {
+    const v = selectEnvelopeVerdict({
+      triggeredBy: 'agent',
+      actionKey: 'ads.pause_unit',
+      request: req(),
+      facts: {
+        beforeCents: 1000,
+        accountDailyTotalBeforeCents: 5000,
+        dailyCapCents: 10_000,
+        hoursSinceLastChange: 100,
+        learningPhaseApplicable: true,
+        learningStage: 'SUCCESS',
+        adStudyCount: 0,
+        hasRollbackHandler: true,
+      },
+      envelope: AI_ENVELOPE,
+    })
+    expect(v.within).toBe(true)
+  })
+})
