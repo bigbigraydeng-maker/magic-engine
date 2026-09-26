@@ -113,6 +113,9 @@ const DEV_OWNED_KINDS: ManualItemKind[] = [
   // Meta 钥匙体检自己没跑成（客户表读不到 / 一把钥匙都问不到 Meta）→ how 写「回我一句我去修」。
   // 真有钥匙死了的那条（meta_token_dead）**不在这里**，只有人能重新授权。
   'meta_token_check_failed',
+  // 「合进去的代码有没有上线」的检查自己没跑成 → how 写「回我一句我去修」。
+  // 真没上线的那条（deploy_not_live）**不在这里**：修复要合，PM 得知道各窗口的「已上线」不算数。
+  'deploy_check_failed',
 ]
 
 /** FDE focus clients: CTS + Oztop. */
