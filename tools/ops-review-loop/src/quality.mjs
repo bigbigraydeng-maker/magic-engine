@@ -48,6 +48,7 @@ import {
   extractTrialRunSection,
   findCannotRunExit,
   parseLedgerVerifyBy,
+  scheduledCodeInPatch,
   workflowHasSchedule,
 } from './trial-run.mjs'
 
@@ -497,8 +498,14 @@ export const TRIAL_RUN_PATH_RULES = [
   { exact: 'render.yaml', why: '生产服务与 cron 调度' },
   { prefix: 'src/app/api/cron/', why: '生产定时任务路由' },
   { prefix: 'src/lib/cron/', why: '生产定时任务注册与调度' },
-  { prefix: 'src/lib/inngest/functions/', why: 'Inngest 后台 / 定时函数' },
+  // Whole directory, not just `functions/`: the client, serve guard and
+  // registry decide what runs too (狄仁杰 DR78-1, #2078).
+  { prefix: 'src/lib/inngest/', why: 'Inngest 后台 / 定时函数与注册' },
+  { prefix: 'src/app/api/inngest/', why: 'Inngest 注册入口' },
+  { prefix: 'scripts/factory-worker/inngest-', why: '工厂 worker 的 Inngest 函数' },
   { prefix: 'scripts/auto-dev/', why: '自动开发通道脚本' },
+  // Called daily by a scheduled job; its output is the PM's 今日待办 (子牙, #2078).
+  { prefix: 'src/lib/pm-todo/', why: '每天定时生成的今日待办' },
   { workflowSchedule: true, why: '带 schedule 的 GitHub 工作流' },
 ]
 
@@ -507,6 +514,9 @@ export const WORKFLOW_FILE = /^\.github\/workflows\/[^/]+\.ya?ml$/
 
 /** Test-only files never run on a schedule; changing them owes no trial run. */
 const TEST_FILE = /(^|\/)__tests__\/|\.(test|spec)\.[cm]?[jt]sx?$/
+
+/** Files whose added lines are scanned for scheduled-work markers. */
+const CODE_FILE = /\.([cm]?[jt]sx?|sh|py)$/
 
 /** How far ahead a "当场跑不了" card may promise its check. */
 export const CANNOT_RUN_MAX_DAYS = 7
@@ -557,8 +567,33 @@ function trialRunHits(files, contents) {
       if (scheduled === true) hits.push(`${filename}（带 schedule 的 GitHub 工作流）`)
       if (scheduled === null) hits.push(`${filename}（工作流内容读不到或判不了有没有 schedule —— 按需要试跑处理）`)
     }
+    const scan = scanAddedCode(entry, filename)
+    if (scan) hits.push(scan)
   }
   return hits
+}
+
+/**
+ * A job can be scheduled from anywhere: a new `createFunction(` or a changed
+ * `*_CRON =` outside the path table rated B and owed no record (DR78-1 /
+ * DR78-2, #2078). So the lines a diff adds are scanned too. A code file under
+ * `src/` or `scripts/` whose patch GitHub left out (large diffs) cannot be
+ * scanned and counts as a hit; one with zero changed lines (a pure rename)
+ * has nothing to scan.
+ *
+ * @param {Record<string, unknown>} entry
+ * @param {string} filename
+ * @returns {string|null}
+ */
+function scanAddedCode(entry, filename) {
+  if (!CODE_FILE.test(filename) || TEST_FILE.test(filename)) return null
+  const found = scheduledCodeInPatch(entry.patch)
+  if (found === null) {
+    if (Number(entry.changes) === 0) return null
+    if (!/^(src|scripts)\//.test(filename)) return null
+    return `${filename}（GitHub 没给出这份改动的内容，查不了有没有新增定时 / 后台任务 —— 按需要试跑处理）`
+  }
+  return found.length > 0 ? `${filename}（新增行里有定时 / 后台任务写法：${found.join('、')}）` : null
 }
 
 /**
@@ -691,11 +726,35 @@ export function applyTrialRunToDecision({ decision, trialRun } = {}) {
     trialRun && Array.isArray(trialRun.problems) && trialRun.problems.length > 0
       ? trialRun.problems.map(String)
       : ['试跑检查结果读不到']
+  const trialReason = `当场试跑不合格 —— ${problems.join('；')}`
+  // Already blocked for another reason (draft, fork, A without sign-off):
+  // keep that reason first — it is the one to act on (魏征 W78-1, #2078).
+  const earlier =
+    decision && typeof decision === 'object' && decision.pass === false && typeof decision.reason === 'string'
+      ? decision.reason
+      : null
   return {
     pass: false,
     decision: 'disable',
     tier: 'blocked',
-    reason: `当场试跑不合格 —— ${problems.join('；')}`,
+    reason: earlier ? `${earlier}；另：${trialReason}` : trialReason,
+  }
+}
+
+/**
+ * The whole trial-run evaluation, with the file reader injected. Never
+ * throws: a failing reader or unexpected input becomes a blocking result that
+ * says what went wrong (子牙 PR2 design review, item 1; 魏征 W78-5).
+ *
+ * @param {{files?: unknown, body?: unknown, today?: string, readFiles?: (paths: string[]) => Promise<Record<string, string|null>>}} input
+ */
+export async function evaluateTrialRunSafely({ files, body, today, readFiles } = {}) {
+  try {
+    // A missing `readFiles` throws here and lands in the catch like any other failure.
+    const contents = await /** @type {Function} */ (readFiles)(planTrialRunReads({ files }))
+    return evaluateTrialRun({ files, body, contents, today })
+  } catch (err) {
+    return trialRunCheckFailed(err instanceof Error ? err.message : String(err))
   }
 }
 
@@ -724,5 +783,6 @@ export function describeTrialRun(trialRun) {
     )
   }
   lines.push('  - 注意：机器只查段落在不在、格式对不对，试跑真假由审查人核对')
+  lines.push('  - 范围：只看直接改到的定时 / 后台任务文件和新增的定时写法，不追踪它们调用的代码')
   return lines
 }

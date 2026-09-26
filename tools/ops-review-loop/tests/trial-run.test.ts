@@ -19,6 +19,7 @@ import {
   applyTrialRunToDecision,
   describeTrialRun,
   evaluateTrialRun,
+  evaluateTrialRunSafely,
   planTrialRunReads,
   trialRunCheckFailed,
 } from '../src/quality.mjs'
@@ -27,12 +28,17 @@ import {
   extractTrialRunSection,
   findCannotRunExit,
   parseLedgerVerifyBy,
+  scheduledCodeInPatch,
   workflowHasSchedule,
 } from '../src/trial-run.mjs'
+import { shouldPostGateComment } from '../src/gate-marker.mjs'
 
 const TODAY = '2026-09-27'
-const mod = (filename: string) => ({ filename, status: 'modified' })
-const added = (filename: string) => ({ filename, status: 'added' })
+// Real files-API entries carry a `patch`; an entry without one is the
+// "GitHub left the diff out" case, tested on its own below.
+const PLAIN_PATCH = '@@ -1 +1 @@\n-const a = 1\n+const a = 2'
+const mod = (filename: string, patch: string = PLAIN_PATCH) => ({ filename, status: 'modified', patch })
+const added = (filename: string, patch: string = PLAIN_PATCH) => ({ filename, status: 'added', patch })
 
 const RECORD = [
   '## 当场试跑',
@@ -49,7 +55,11 @@ describe('which changes owe a trial run', () => {
     ['render.yaml', '生产服务与 cron 调度'],
     ['src/app/api/cron/daily/route.ts', '生产定时任务路由'],
     ['src/lib/cron/registry.ts', '生产定时任务注册与调度'],
-    ['src/lib/inngest/functions/daily-plan.ts', 'Inngest 后台 / 定时函数'],
+    ['src/lib/inngest/functions/daily-plan.ts', 'Inngest 后台 / 定时函数与注册'],
+    ['src/lib/inngest/client.ts', 'Inngest 后台 / 定时函数与注册'],
+    ['src/app/api/inngest/route.ts', 'Inngest 注册入口'],
+    ['scripts/factory-worker/inngest-pilot.mjs', '工厂 worker 的 Inngest 函数'],
+    ['src/lib/pm-todo/daily-todo.ts', '每天定时生成的今日待办'],
     ['scripts/auto-dev/run.mjs', '自动开发通道脚本'],
   ])('%s owes one (%s)', (path, why) => {
     const result = evaluate([mod(path)], '')
@@ -93,7 +103,7 @@ describe('which changes owe a trial run', () => {
   })
 
   it('every path rule is exercised above', () => {
-    expect(TRIAL_RUN_PATH_RULES).toHaveLength(6)
+    expect(TRIAL_RUN_PATH_RULES).toHaveLength(9)
   })
 })
 
@@ -304,6 +314,9 @@ describe('workflowHasSchedule — a narrow hand parser that fails towards "yes"'
     ['not a string', 42],
     ['no on key', 'name: x\njobs: {}\n'],
     ['on is an alias', 'on: *triggers\n'],
+    ['flow collection continued on the next line (DR78-4)', 'on: {\n  schedule: [{ cron: x }] }\n'],
+    ['list flow continued on the next line', 'on: [push,\n  schedule]\n'],
+    ['two on keys (DR78-4)', 'on:\n  push:\n"on":\n  schedule:\n    - cron: x\n'],
     ['merge key under on', 'on:\n  <<: *triggers\n'],
     ['empty on block', 'on:\njobs: {}\n'],
   ])('%s → null (caller treats as scheduled)', (_label, text) => {
@@ -412,5 +425,188 @@ describe('describeTrialRun — the summary says the machine does not verify trut
 
   it('does not throw on garbage', () => {
     expect(describeTrialRun(undefined)[0]).toContain('读不到')
+  })
+})
+
+// --- #2078 review round 1 (子牙 / 魏征 / 狄仁杰) ------------------------------
+
+describe('DR78-1 / DR78-2: scheduled work added outside the path table is still caught', () => {
+  it('a new createFunction( in an ordinary lib file owes a trial run', () => {
+    const patch = '@@ -0,0 +1,3 @@\n+import { inngest } from "../inngest/client"\n+export const job = inngest.createFunction(\n+  { id: "x" },'
+    const result = evaluate([mod('src/lib/growth/x.ts', patch)], '')
+    expect(result.required).toBe(true)
+    expect(result.hits.join('\n')).toContain('createFunction(')
+  })
+
+  // The real constants that set when these jobs run, as they stand on main.
+  it.each([
+    ['src/lib/ai-tracker/weekly-fanout.ts', "export const AI_VISIBILITY_WEEKLY_CRON = '0 6 * * 1'"],
+    ['src/lib/competitors/watch.ts', "export const COMPETITOR_WATCH_CRON = '45 5 * * 1'"],
+    ['src/lib/flywheel/seo-weekly.ts', "export const FLYWHEEL_SEO_WEEKLY_CRON = '15 5 * * 1'"],
+    ['src/lib/seo-meta/cycle/roster.ts', "export const META_CYCLE_CRON = '30 5 * * 1'"],
+  ])('changing the schedule constant in %s owes a trial run', (path, line) => {
+    const patch = `@@ -1 +1 @@\n-${line.replace(/'[^']*'/, "'0 0 * * 1'")}\n+${line}`
+    const result = evaluate([mod(path, patch)], '')
+    expect(result.required).toBe(true)
+    expect(result.hits.join('\n')).toContain('_CRON =')
+  })
+
+  it('a cron: key in an added line owes a trial run', () => {
+    expect(evaluate([mod('src/lib/jobs/x.ts', '@@ -1 +1 @@\n+  { cron: "0 5 * * *" },')], '').required).toBe(true)
+  })
+
+  it('only ADDED lines count — removing a createFunction or the diff header does not', () => {
+    const patch = '--- a/src/lib/x.ts\n+++ b/src/lib/x.ts createFunction(\n@@ -1,2 +1 @@\n-export const job = inngest.createFunction(\n const a = 1'
+    expect(evaluate([mod('src/lib/x.ts', patch)], '').required).toBe(false)
+  })
+
+  it('does not scan documents or test files', () => {
+    const patch = '@@ -0,0 +1 @@\n+createFunction( cron: X_CRON = 1'
+    expect(evaluate([mod('docs/guide.md', patch)], '').required).toBe(false)
+    expect(evaluate([mod('src/lib/x/__tests__/job.ts', patch)], '').required).toBe(false)
+    expect(evaluate([mod('src/lib/x/job.test.ts', patch)], '').required).toBe(false)
+  })
+
+  it('a code file under src/ or scripts/ whose patch GitHub left out owes a trial run', () => {
+    for (const path of ['src/lib/huge.ts', 'scripts/big-job.mjs']) {
+      const result = evaluate([{ filename: path, status: 'modified', changes: 4000 }], '')
+      expect(result.required, path).toBe(true)
+      expect(result.hits.join('\n')).toContain('GitHub 没给出这份改动的内容')
+    }
+  })
+
+  it('but a pure rename (zero changed lines, no patch) and files outside src/scripts do not', () => {
+    const rename = { filename: 'src/lib/b.ts', previous_filename: 'src/lib/a.ts', status: 'renamed', changes: 0 }
+    expect(evaluate([rename], '').required).toBe(false)
+    expect(evaluate([{ filename: 'tools/x/y.mjs', status: 'modified', changes: 3 }], '').required).toBe(false)
+  })
+
+  it('scheduledCodeInPatch reports null for a missing patch, [] for a clean one', () => {
+    expect(scheduledCodeInPatch(undefined)).toBeNull()
+    expect(scheduledCodeInPatch('@@ -1 +1 @@\n+const a = 1')).toEqual([])
+  })
+})
+
+describe('W78-1: a blocked decision keeps its own reason first', () => {
+  const files = [mod('src/lib/inngest/functions/daily-plan.ts')]
+
+  it.each([
+    ['draft', { pass: false, decision: 'disable', tier: 'blocked', reason: '草稿 PR 不做合并判定' }],
+    ['A without sign-off', { pass: false, decision: 'disable', tier: 'blocked', reason: 'A 级：缺签字 ziya/weizheng/direnjie' }],
+  ])('%s', (_label, decision) => {
+    const result = applyTrialRunToDecision({ decision, trialRun: evaluate(files, '') })
+    expect(result.reason).toBe(`${decision.reason}；另：当场试跑不合格 —— PR 正文没有「## 当场试跑」段`)
+    expect(result.decision).toBe('disable')
+  })
+
+  it('a decision that was passing gets the trial-run reason alone', () => {
+    const enable = { pass: true, decision: 'enable', tier: 'auto', reason: 'B 级：机器检查全绿后自动合并' }
+    expect(applyTrialRunToDecision({ decision: enable, trialRun: evaluate(files, '') }).reason).toBe(
+      '当场试跑不合格 —— PR 正文没有「## 当场试跑」段',
+    )
+  })
+})
+
+describe('DR78-3: an honest "did not run" or a loose label does not pass', () => {
+  const files = [mod('src/lib/inngest/functions/daily-plan.ts')]
+
+  it.each(['n/a', 'N/A', '?', '？', '未跑', '没跑', '未运行', '0'])('状态：%s is not an answer', (value) => {
+    expect(evaluate(files, RECORD.replace(/(- 状态：).*$/, `$1${value}`)).satisfied).toBe(false)
+  })
+
+  it('but 退出码：0 is a real answer', () => {
+    expect(evaluate(files, RECORD.replace(/- 状态：.*$/, '- 退出码：0')).satisfied).toBe(true)
+  })
+
+  // One label swapped at a time, so each case isolates exactly one whitelist.
+  it.each([
+    ['时间', '预计时间'],
+    ['时间', '计划时间'],
+    ['状态', '未跑状态'],
+    ['状态', '期望状态'],
+  ])('%s label replaced by %s is not on the whitelist', (original, label) => {
+    const body = RECORD.replace(`- ${original}：`, `- ${label}：`)
+    expect(evaluate(files, body).satisfied).toBe(false)
+  })
+
+  it.each(['2026年', 'today 3pm', '上周', '第 3 次'])('time %j names no checkable moment', (value) => {
+    expect(evaluate(files, RECORD.replace(/(- 时间：).*\n/, `$1${value}\n`)).satisfied).toBe(false)
+  })
+
+  it.each(['2026-09-27', '9/27', '9月27日', '01:10'])('time %j is checkable', (value) => {
+    expect(evaluate(files, RECORD.replace(/(- 时间：).*\n/, `$1${value}\n`)).satisfied).toBe(true)
+  })
+})
+
+describe('the summary states the design boundary', () => {
+  it('says it does not follow the code a job calls', () => {
+    const text = describeTrialRun(evaluate([mod('src/lib/cron/x.ts')], '')).join('\n')
+    expect(text).toContain('不追踪它们调用的代码')
+  })
+})
+
+describe('W78-5: evaluateTrialRunSafely never throws', () => {
+  const files = [mod('src/lib/inngest/functions/daily-plan.ts')]
+
+  it('passes a good record through', async () => {
+    const result = await evaluateTrialRunSafely({ files, body: RECORD, today: TODAY, readFiles: async () => ({}) })
+    expect(result.satisfied).toBe(true)
+  })
+
+  it('turns a failing reader into a blocking result with the error', async () => {
+    const result = await evaluateTrialRunSafely({
+      files,
+      body: RECORD,
+      today: TODAY,
+      readFiles: async () => {
+        throw new Error('GitHub API 502')
+      },
+    })
+    expect(result).toMatchObject({ required: true, satisfied: false })
+    expect(result.problems[0]).toBe('试跑检查自身出错：GitHub API 502')
+    expect(applyTrialRunToDecision({ decision: { pass: true, decision: 'enable', tier: 'auto' }, trialRun: result }).decision).toBe('disable')
+  })
+
+  it('blocks when no reader is supplied', async () => {
+    const result = await evaluateTrialRunSafely({ files, body: RECORD, today: TODAY })
+    expect(result.satisfied).toBe(false)
+    expect(result.problems[0]).toContain('试跑检查自身出错')
+  })
+
+  it('survives a malformed file list that throws on access', async () => {
+    const hostile = [
+      {
+        get filename(): string {
+          throw new Error('boom')
+        },
+      },
+    ]
+    const result = await evaluateTrialRunSafely({ files: hostile, body: '', today: TODAY, readFiles: async () => ({}) })
+    expect(result.satisfied).toBe(false)
+    expect(result.problems[0]).toContain('boom')
+  })
+})
+
+describe('W78-2: the rating comment is re-posted when the decision flips', () => {
+  const on = (risk: string, decision?: string) => ({ v: 1, base: 'b', head: 'h', risk, reasons: [], decision })
+
+  it('posts when nothing is on record', () => {
+    expect(shouldPostGateComment({ existing: null, risk: 'B', decision: 'disable' })).toBe(true)
+  })
+
+  it('posts when the 当场试跑 section was filled in and the decision went disable → enable', () => {
+    expect(shouldPostGateComment({ existing: on('B', 'disable'), risk: 'B', decision: 'enable' })).toBe(true)
+  })
+
+  it('posts when the risk changed', () => {
+    expect(shouldPostGateComment({ existing: on('B', 'disable'), risk: 'A', decision: 'disable' })).toBe(true)
+  })
+
+  it('posts once for an old marker that predates the decision field', () => {
+    expect(shouldPostGateComment({ existing: on('B'), risk: 'B', decision: 'disable' })).toBe(true)
+  })
+
+  it('stays quiet when nothing changed', () => {
+    expect(shouldPostGateComment({ existing: on('B', 'enable'), risk: 'B', decision: 'enable' })).toBe(false)
   })
 })

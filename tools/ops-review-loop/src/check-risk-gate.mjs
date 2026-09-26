@@ -27,16 +27,16 @@
 import { appendFileSync } from 'node:fs'
 
 import { classifyRisk, parseDeclaredRisk } from './risk.mjs'
-import { buildGateMarker, findGateFor, parseGateMarkers, selectTrustedGateMarkers } from './gate-marker.mjs'
+import {
+  buildGateMarker,
+  findGateFor,
+  parseGateMarkers,
+  selectTrustedGateMarkers,
+  shouldPostGateComment,
+} from './gate-marker.mjs'
 import { evaluateSignoffs, parseSignoffMarkers, selectTrustedSignoffMarkers } from './signoff-marker.mjs'
 import { decideMerge, summariseDecision } from './merge-decision.mjs'
-import {
-  applyTrialRunToDecision,
-  describeTrialRun,
-  evaluateTrialRun,
-  planTrialRunReads,
-  trialRunCheckFailed,
-} from './quality.mjs'
+import { applyTrialRunToDecision, describeTrialRun, evaluateTrialRunSafely } from './quality.mjs'
 
 /**
  * The identity this workflow's `GITHUB_TOKEN` posts as, and the ONLY author
@@ -261,23 +261,6 @@ async function readHeadFiles(paths) {
 }
 
 /**
- * Evaluate the 当场试跑 gate. Never throws: an error becomes a blocking result
- * that says what went wrong, so the gate reports it instead of crashing.
- *
- * @param {unknown} files
- * @param {string} body
- */
-async function evaluateTrialRunSafely(files, body) {
-  try {
-    const contents = await readHeadFiles(planTrialRunReads({ files }))
-    const today = new Date().toISOString().slice(0, 10)
-    return evaluateTrialRun({ files, body, contents, today })
-  } catch (err) {
-    return trialRunCheckFailed(err instanceof Error ? err.message : String(err))
-  }
-}
-
-/**
  * Build the human summary text for the step summary and the posted comment.
  *
  * @param {{rating: any, decision: any, signoff: any, ignoredMarkers: number, filesError: string|null, trialRun: any}} input
@@ -353,7 +336,12 @@ try {
   const signoff = evaluateSignoffs({ markers: signoffMarkers, base: baseSha, head: headSha })
 
   // 当场试跑 can only make the decision stricter — it never yields `enable`.
-  const trialRun = await evaluateTrialRunSafely(files, body)
+  const trialRun = await evaluateTrialRunSafely({
+    files,
+    body,
+    today: new Date().toISOString().slice(0, 10),
+    readFiles: readHeadFiles,
+  })
   const decision = applyTrialRunToDecision({
     decision: decideMerge({
       risk: rating.risk,
@@ -374,22 +362,27 @@ try {
   })
   summary(summaryText)
 
+  // Invariant: `enable` only when pass && tier === 'auto'. Every other path
+  // writes `disable`, so a stale `enable` cannot survive a later evaluation.
+  const outputDecision =
+    decision.pass === true && decision.tier === 'auto' ? decision.decision : 'disable'
+
   // Post the rating only when there is no current marker for this exact pair,
-  // or the one on record disagrees with what we just computed.
-  if (!existing || existing.risk !== rating.risk) {
+  // or the one on record disagrees with what we just computed. The decision is
+  // compared too: an `edited` run that fills in 当场试跑 changes the decision
+  // without changing the head, and a stale "❌" comment would mislead the PM
+  // (魏征 W78-2, #2078).
+  if (shouldPostGateComment({ existing, risk: rating.risk, decision: outputDecision })) {
     const marker = buildGateMarker({
       base: baseSha,
       head: headSha,
       risk: rating.risk,
       reasons: rating.reasons,
+      decision: outputDecision,
     })
     await postIssueComment(`${summaryText}\n\n${marker}`)
   }
 
-  // Invariant: `enable` only when pass && tier === 'auto'. Every other path
-  // writes `disable`, so a stale `enable` cannot survive a later evaluation.
-  const outputDecision =
-    decision.pass === true && decision.tier === 'auto' ? decision.decision : 'disable'
   writeOutputs({ risk: rating.risk, decision: outputDecision, tier: decision.tier })
 
   process.exit(decision.pass ? 0 : 1)

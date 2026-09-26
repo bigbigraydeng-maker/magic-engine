@@ -28,17 +28,23 @@ const SECTION_HEADING = /^##[ \t]*当场试跑(?=[\s（(：:]|$)/
 const SECTION_END = /^#{1,2}[ \t]/
 
 /**
- * The three elements the rule asks for, each with the labels accepted for it.
- * `时间` also matches `触发时间` / `运行时间`; `状态` also matches `运行状态`.
+ * The three elements the rule asks for. Labels are a closed whitelist
+ * (狄仁杰 DR78-3): a free-form `…时间` pattern let `预计时间` or `未跑状态` count.
  */
 export const TRIAL_RUN_ELEMENTS = [
   { key: 'trigger', label: '触发方式', pattern: /^触发方式$/ },
-  { key: 'time', label: '时间', pattern: /^[一-龥]{0,4}时间$/ },
-  { key: 'status', label: '状态 / 退出码', pattern: /^([一-龥]{0,4}状态|退出码)$/ },
+  { key: 'time', label: '时间', pattern: /^(时间|触发时间|运行时间)$/ },
+  { key: 'status', label: '状态 / 退出码', pattern: /^(状态|运行状态|退出码)$/ },
 ]
 
-/** Values that are placeholders, not answers. Compared after trimming. */
-const PLACEHOLDER = /^(|-+|—+|…+|\.{2,}|todo|tbd|xxx+|待填|待补|待定|无|略|<[^>]*>)$/i
+/**
+ * Values that are placeholders — or an honest "did not run" — not answers.
+ * Compared after trimming. `0` is handled separately: it is a real exit code.
+ */
+const PLACEHOLDER = /^(|-+|—+|…+|\.{2,}|\?+|？+|todo|tbd|n\/a|xxx+|待填|待补|待定|无|略|未跑|没跑|未运行|没运行|<[^>]*>)$/i
+
+/** A time must name a checkable moment: a date or an hh:mm. */
+const CHECKABLE_TIME = /\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/.月]\d{1,2}|\d{1,2}:\d{2}/
 
 /**
  * Strip HTML comments, so a template's placeholder text inside `<!-- -->`
@@ -103,10 +109,12 @@ export function checkTrialRunElements(sectionLines) {
     if (!pair) continue
     const [label, value] = pair
     if (PLACEHOLDER.test(value)) continue
+    // `0` is a real answer only as an exit code; as a status or time it is filler.
+    if (value === '0' && label !== '退出码') continue
     for (const element of TRIAL_RUN_ELEMENTS) {
       if (!element.pattern.test(label)) continue
-      // A time with no digit in it ("刚才", "今天") names no moment anyone can check.
-      if (element.key === 'time' && !/\d/.test(value)) continue
+      // A time with no date or hh:mm in it ("刚才", "今天") names no moment anyone can check.
+      if (element.key === 'time' && !CHECKABLE_TIME.test(value)) continue
       filled.add(element.key)
     }
   }
@@ -187,11 +195,17 @@ const ON_KEY = /^(on|"on"|'on')[ \t]*:(.*)$/
 export function workflowHasSchedule(text) {
   if (typeof text !== 'string') return null
   const lines = text.replace(/\r\n/g, '\n').split('\n').map(stripYamlComment)
-  const start = lines.findIndex((line) => ON_KEY.test(line))
-  if (start === -1) return null
+  const onLines = lines.flatMap((line, i) => (ON_KEY.test(line) ? [i] : []))
+  // Two `on:` keys: which one GitHub honours is not something to guess (DR78-4).
+  if (onLines.length !== 1) return null
+  const start = onLines[0]
   const inline = lines[start].match(ON_KEY)[2].trim()
   if (inline !== '') {
     if (inline.startsWith('*') || inline.startsWith('&')) return null
+    // A flow collection continued on later lines is beyond this parser (DR78-4).
+    if ((inline.startsWith('{') && !inline.endsWith('}')) || (inline.startsWith('[') && !inline.endsWith(']'))) {
+      return null
+    }
     return /\bschedule\b/.test(inline)
   }
   let childIndent = -1
@@ -206,4 +220,28 @@ export function workflowHasSchedule(text) {
     if (/^(schedule|"schedule"|'schedule')[ \t]*:/.test(key)) return true
   }
   return childIndent === -1 ? null : false
+}
+
+/** What in an added line marks scheduled or background work (DR78-1 / DR78-2). */
+const SCHEDULED_CODE = [
+  { re: /createFunction\s*\(/, what: 'createFunction(' },
+  { re: /\bcron\s*:/, what: 'cron:' },
+  { re: /_CRON\b\s*=/, what: '_CRON =' },
+]
+
+/**
+ * Scheduled / background-work markers in the lines a diff ADDS. Reads the
+ * `patch` the files API already returns — no extra fetch.
+ *
+ * @param {unknown} patch
+ * @returns {string[]|null} matched markers, or `null` when there is no patch to read
+ */
+export function scheduledCodeInPatch(patch) {
+  if (typeof patch !== 'string') return null
+  const found = new Set()
+  for (const line of patch.split('\n')) {
+    if (!line.startsWith('+') || line.startsWith('+++')) continue
+    for (const { re, what } of SCHEDULED_CODE) if (re.test(line)) found.add(what)
+  }
+  return [...found]
 }
