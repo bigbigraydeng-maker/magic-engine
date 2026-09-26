@@ -44,11 +44,19 @@ export const META_PAGE_SCOPES = [
   'pages_read_user_content',
   // 以主页身份发/回复/隐藏评论必须有这一条 —— 读评论的两条只够「看」,不够「写」。
   // ⚠ 目前没有功能会用到这项权限(2026-09-15):加它只是先让「连接 Meta」申请到它。
-  //   - 评论自动回复读的是环境变量 token(`comment-autoreply-engine.ts:95-98` 与
+  //   - 评论自动回复读的是环境变量 token(`comment-autoreply-engine.ts:140` 与
   //     `comment-autoreply-probe` 路由都走 getMetaTokenForClient),不读这里存下的
   //     授权;要改成读已存授权(getStoredPageToken)才会受益。
   //   - Reel 发布后的第一条 CTA 评论尚未实现(见 #1695)。
-  // 写评论的封装在 `src/lib/meta/comments.ts`。应用对这条是标准访问权,无需再提交审核(2026-09-15 核实)。
+  // 写评论的封装在 `src/lib/meta/comments.ts`。
+  // 🔴 应用后台对这条是「标准访问权(Standard Access)」——**只对在 Meta 应用里有
+  //    角色的账号有效**(Meta 官方原文:Permissions with Standard Access can only be
+  //    requested from app users who have a role on the requesting app,
+  //    https://developers.facebook.com/docs/graph-api/overview/access-levels/)。
+  //    现有 CTS/Oztop/NAL/Roman 全是有应用角色的内部账号(PM 亲手点)点的连接,
+  //    所以能拿到。**如果未来改成"客户自己人点连接"(比如 NM Medspa 那种自助
+  //    接入),这一项(以及清单里其他标准权限)全都会拿不到——那时需要单独提交
+  //    Meta 审核,把该 scope 升级为 Advanced Access,才能给应用外账号使用。**
   // 用户在同意页不勾它也照常连接成功 —— callback 只存 Meta 实际授予的权限。
   // 已经连过的客户要重新点一次「连接 Meta」才能拿到它。
   'pages_manage_engagement',
