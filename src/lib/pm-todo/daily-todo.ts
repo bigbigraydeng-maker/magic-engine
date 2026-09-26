@@ -21,6 +21,7 @@ import {
   type ManualItem,
   type ManualItemKind,
 } from './manual-items'
+import { sharedLinkVerdictCache } from './action-link'
 
 /**
  * 这些是**知会**，不是待办 —— 单独一栏，也不计进「今天有几件事」。
@@ -248,7 +249,23 @@ export async function loadGbpSetupTasks(
 
 // ── Data loading ────────────────────────────────────────────────────────────────
 
-export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCounts> {
+export interface LoadTodoCountsOptions {
+  /**
+   * 链接闸整批最多等多久（毫秒），只给有人盯着转圈的 /dashboard/today 用。
+   * 每日邮件不传，照旧等每条链接验完。见 dropBrokenLinks 的 budgetMs。
+   */
+  linkCheckBudgetMs?: number
+}
+
+export async function loadTodoCounts(
+  supabase: SupabaseClient,
+  opts: LoadTodoCountsOptions = {},
+): Promise<TodoCounts> {
+  // 人工待办跟下面的计数互不依赖，先开跑、跟计数同时进行（2026-09-26「loading 非常慢」）
+  const rawManualItemsPromise = loadManualItems(supabase).catch((err: unknown) => {
+    console.error('[pm-todo] manual items load failed:', err instanceof Error ? err.message : String(err))
+    return [] as ManualItem[]
+  })
   const cardCutoff = new Date()
   cardCutoff.setDate(cardCutoff.getDate() - RECENT_CARD_DAYS)
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
@@ -313,13 +330,14 @@ export async function loadTodoCounts(supabase: SupabaseClient): Promise<TodoCoun
       .map(([id, v]) => ({ name: v.name, id, [key]: v.count }))
       .sort((a, b) => a.name.localeCompare(b.name))
 
-  const rawManualItems = await loadManualItems(supabase).catch((err: unknown) => {
-    console.error('[pm-todo] manual items load failed:', err instanceof Error ? err.message : String(err))
-    return [] as ManualItem[]
-  })
+  const rawManualItems = await rawManualItemsPromise
   // 链接打不开的不下发（PM 2026-08-03：「点过去就是 404，徒增我和 fde 的工作时间」）。
   // 闸本身出问题时原样放行 —— 少过滤好过整栏消失。
-  const manualItems = await dropBrokenLinks(rawManualItems)
+  // 页面和邮件共用同一份实测缓存，同一条链接两边结论一致。
+  const manualItems = await dropBrokenLinks(rawManualItems, undefined, {
+    cache: sharedLinkVerdictCache,
+    budgetMs: opts.linkCheckBudgetMs,
+  })
     .then((r) => r.kept)
     .catch(() => rawManualItems)
 

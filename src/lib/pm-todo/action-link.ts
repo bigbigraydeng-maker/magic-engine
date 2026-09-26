@@ -124,6 +124,34 @@ export async function verifyActionLink(
 }
 
 /**
+ * 链接实测结论的进程内缓存（2026-09-26，PM 报 /dashboard/today「loading 非常慢」）。
+ *
+ * 之前每打开一次今日待办页，每条公开链接都现场 HEAD（不通再 GET）一遍，
+ * 各 8 秒超时 —— 一个慢站就能让整页多等十几秒。同一条链接十分钟内的结论
+ * 不会变，所以只存实测过的 ok / broken（含超时），unverifiable 本来就不发请求。
+ * 页面和每日邮件共用这一份，同一条链接两边结论一致。
+ */
+export type LinkVerdictCache = Map<string, { at: number; verdict: LinkVerdict }>
+
+export const LINK_VERDICT_TTL_MS = 10 * 60 * 1000
+
+export const sharedLinkVerdictCache: LinkVerdictCache = new Map()
+
+export function verifyActionLinkCached(
+  href: string,
+  fetchImpl: typeof fetch,
+  cache: LinkVerdictCache,
+  now: () => number = Date.now,
+): Promise<LinkVerdict> {
+  const hit = cache.get(href)
+  if (hit && now() - hit.at < LINK_VERDICT_TTL_MS) return Promise.resolve(hit.verdict)
+  return verifyActionLink(href, fetchImpl).then((verdict) => {
+    if (verdict.kind !== 'unverifiable') cache.set(href, { at: now(), verdict })
+    return verdict
+  })
+}
+
+/**
  * GSC 属性首页 —— 稳定入口，不是深链。
  *
  * 深链 `/inspect?resource_id=…&id=…` 在实际使用中会 404（多账号、属性未选中等），
