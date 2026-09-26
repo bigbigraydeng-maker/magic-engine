@@ -21,39 +21,49 @@
 
 ---
 
-## §零 · ⚠️ 一条范围争议未决（两个窗口口径对立，写代码前必须先合）
+## §零 · 范围已裁定（原争议已关闭）
 
-| 来源 | 主张 | 依据 |
-|---|---|---|
-| **统筹窗口** 2026-09-27 审方案必改 1 | `meta-ads/execute` + `boost-post` **本轮不在范围**，只在 `PROVIDER_WRITE_GRANDFATHERED` 加两条精确路径登记欠账，**路由本身一行不改**；收编进 Kernel 走另一次 tier gate | v2.1 §12 分批表 3.1b 那行「关旁路」原文**只点名** `src/app/api/clients/[id]/ad-health/stop-loss/route.ts:48-50,124` 一条，那两条路由一个字没提。**我核实过，统筹引的原文准确** |
-| **PM** 2026-09-27 经小秘书 DR87-2 | `execute` / `boost-post` / **`winner-reel-sync` 三条都等 WP3 重做一起收编进 Kernel**，不单独提前停；**winner-reel-sync 保留自动建广告功能，收编 = 保留 + 套上预算保护，不停不删** | PM 直接拍板（范围归 PM，CLAUDE.md §2） |
+**PM 2026-09-27 在统筹窗口亲口定：`三个一起`。** 三条绕过 Kernel 的旁路本轮一起收编，不留到下一轮。统筹原先那句「本轮不在范围」（引 v2.1 §12）**被 PM 的范围决定取代，作废**。
 
-**统筹 2026-09-27 复核后把这个"冲突"拆成两半，只有一半是真冲突：**
+**spec 已同步升 v2.2**（`docs/specs/2026-09-25-ads-impact-wp3-design-v1.md`）：§0 的「不新增 ActionKey」与 §12 的 3.1b 旁路范围据此放宽，两处都就地标注了「已由 v2.2 放宽，见顶部」。
+🔴 **为什么必须改 spec**：这一轮已经因为「实施跟权威稿对不上」翻车两次。第三次绝不能是「PM 口头改了范围，spec 还写着不许，下一个审查员照 spec 打回」。
 
-- **架构那半：不冲突，两边说的是同一件事。** 统筹否掉的是「在路由里自己加 `isCircuitTripped` 判断」（= 在 Kernel 之外造第二条授权路径）；PM 说的是「**收编进 Kernel**」。**PM 要的正是统筹要的** —— 闸装在 Kernel 那一刻，不是装在路由里读个状态。🔴 **所以无论范围怎么裁，「路由自 gating」都不许排回来**，别因为"PM 说要收编"就把它写回去。
-- **范围那半：归 PM，不归统筹。** 「这三条本轮收编还是下一轮收编」是范围和优先级，CLAUDE.md §2 写死归 PM。统筹原先那句「本轮不在范围」是引 v2.1 §12 推出来的，但 **spec 的范围本身也是 PM 能改的东西**；PM 改范围 ≠ PM 干预架构。统筹不跟 PM 争这条，去问。
+### 架构那半从头到尾没变（再钉一遍）
 
-**代价差别很大**：按 PM 版要**新增 3 个 ActionKey**（`ads.pause_campaign` / `ads.cut_campaign_budget` / `ads.boost_page_post`）+ 3 份 capability handler + `registry-ads.ts` 注册 + 各自的信封声明与撤回处理函数 —— 而 v2.1 §0 明文写「本 WP 不新增 capability、不新增 ActionKey」。也就是说 PM 版同时覆盖了 §0 和 §12 两处。
+**收编 = 提交 action_run 进 Kernel。「路由自 gating」（在路由里自己读熔断状态判断）永远不许排回来** —— 那是在 Kernel 之外造第二条授权路径（memory `feedback-status-field-as-authorization-leaks-gates` + ADR-001 只留一个入口）。PM 说的「收编进 Kernel」跟统筹否掉的「路由自 gating」是**对立的两件事**，PM 要的正是统筹要的。
 
-### 🔴 三条旁路不是同一种东西（统筹 2026-09-27 查证，PM 做范围决定前必须看到）
+### 三条旁路不是同一种东西（统筹查证）
 
-| 旁路 | 触发方式 | 干什么 | 挂闸状态 |
+| 旁路 | 触发 | 干什么 | 原挂闸状态 |
 |---|---|---|---|
-| `meta-ads/execute` | **人点** | 改系列状态 / 预算 | 未挂（有路由鉴权） |
+| `meta-ads/execute` | **人点** | 改系列状态 / 预算。卫青实证 9/21 七次里 **+48% / +100% 两次走 Kernel 会被 20% 上限拒** → 绕闸是已发生事实 | 未挂（有路由鉴权） |
 | `meta-ads/boost-post` | **人点** | 花钱推帖 | 未挂（有路由鉴权） |
-| **`winner-reel-sync`** | **每天 15:00 UTC cron 自己跑**（`render.yaml:341-347` `winner-reel-sync-daily`，生产在跑） | **在 Meta 上新建广告**（`engine.ts:14-19` import `createAdFromPost` / `pauseAd`） | 🔴 **`@/lib/meta/ads-manager` 连 `PROVIDER_WRITE_GRANDFATHERED` 都没进** —— 全仓任何文件现在都能 import 它建广告，比另两条敞得更开 |
+| **`winner-reel-sync`** | **每天 15:00 UTC cron 无人值守**（`render.yaml:341-347`） | **在 Meta 新建广告**（`engine.ts:14-19` `createAdFromPost`） | 🔴 **`@/lib/meta/ads-manager` 连 `GRANDFATHERED` 都没进** —— 全仓任何文件都能 import 它建广告 |
 
-**只有第三条会在没人看着的时候动手。** 而且：**就算 WP3.1b 做得完美，这条 cron 也照样不受熔断保护** —— 它不经 Kernel，没有信封、没有熔断检查、没有 `action_runs` 回执。PM 担心的「熔断期间旁路照样加预算」，三条里**只有这条能在熔断期间无人值守地触发**。
+### 🔴 winner-reel-sync 的保护判据是「学习期」，不是「预算」
 
-统筹给 PM 的问法是业务口径而不是技术选择题：**三个后门里有一个是每天自己动手的、另两个要人点，要不要先只把自动那个堵上。**统筹自己的倾向：**按「会不会无人值守动手」分优先级，不按「一起做省事」分**。
+DR87-2 原话是「套上**预算保护**」。**照字面做会把真问题留在原地。** 统筹核过手册、我自己又逐条验了行号，四处都成立：
 
-⚠️ **DR87-2 那句「套上预算保护」还没落成判据** —— 是「不超账户日上限」？是「熔断期间不建」？还是「建了必须有回执可撤回」？统筹明说：真到收编那一轮要先跟 PM 对清楚，**现在原样记着、不自己解释**。
+| 手册位置 | 原文要点 |
+|---|---|
+| `playbook-ads-meta-general` :249 | 「素材测试另建**新广告组**…别往正在跑的广告组里加新广告——Meta 把『广告组里新增广告』算重大改动，**会重置那个组的学习期**」 |
+| :333 | 9/26 复盘教训 ③「疲劳处方是『同系列另建新组测新素材』，**不是往正在跑的组里加广告**」 |
+| :367 | 「**另建独立系列**，别往再营销系列里加（往正在跑的系列里加会重置它的学习期）」 |
+| :127–131 | 「每结果成本暴涨但点击率正常」**第一嫌疑人就是学习期被反复重置**；「学习期问题要做的恰恰是**什么都别改**」 |
 
-🔴 **这一条不合口径就动手 = 无论照哪版写都会被另一个审查员打回。统筹正在拿 PM 的话。争议解决前，这三条旁路在 §五 不排工。**
+**决定性的实例（:131 NAL）**：前 22 天 $470 收 24 个留资（$19.6/个）→ 后 7 天 $276 只收 2 个（**$138/个，7 倍恶化**）。素材一次没换，根因是 9 天里有 5 天有人在改它。
+🔴 **花的钱是正常的，坏掉的是钱买到的结果 —— 任何预算上限都拦不住这种失败。** 卫青也查实 winner-reel-sync 累计只花了 $38.99、**从来没超支**。所以「预算保护」这个词本身指错了方向。
 
-**我的建议**（不是决定）：分两步 —— 本轮先做统筹版（grandfather 精确路径登记，零风险、立即可交付），同一个 PR 里把 ROADMAP 那条欠账写清；三条旁路的真收编 + 3 个新 ActionKey 开 WP3.1c 单独走 tier gate。理由：本 PR 已经是 32 个文件 + 4 条 BLOCKER + 三处真变异，再加 3 个 ActionKey 会让它大到没人审得动，而 PM 真正担心的「熔断期间旁路照样能加预算」这个红线，靠 3.1c 尽快跟上比塞进一个审不动的大 PR 更快落地。
+**收编判据写死（不接受「靠调用方自觉」）**：
+1. `createAdFromPost` 的目标**必须是新建的独立广告组**
+2. 往 `effective_status` 在投的既有组加广告 → **在 capability 层就拒**，不是在调用方那里劝
+3. **变异测试**：把「另建独立组」改成「加进在投组」→ 必红
+4. 预算保护仍然做（不超账户日上限 / 熔断期间不建 / 建了可撤回），但**不能只做预算**
 
----
+### 层级门（统筹以 Inline 模式过，我不重跑，PR 描述引这段）
+
+4 个新 ActionKey（系列级暂停 / 系列级砍预算 / 推帖 / 建广告）**全部挂在既有广告 L1 支柱下**：不新增能力线、不新增支柱、不新增 capability 域，**不进 `platform-candidates`**。红线逐条过：红线 1 —— 方向相反，是把执行手**收进**闸门，不是包装成智能层；红线 2 —— 判据全读 `ad_strategy_configs` / `client_meta_ad_accounts`，无客户名与行业硬编码；红线 4/5 —— 换客户 CTS→NAL、换行业旅游→物流，默认行为不变。
+🔴 **每个新 ActionKey 的撤回处理函数必填**（K1）—— 少一个 `authorize.ts` 会直接拒，这条不许省。
 
 ## 一、11 条差距 · 逐条对齐 v2.1
 
@@ -155,14 +165,58 @@
 
 | 输入 | 交付点 | 谁写 |
 |----|-------|-----|
-| 1. 旁路处置 **⚠️ 范围争议未决，先读 §零**。下面记的是 **PM DR87-2 版**（三条旁路本轮全收编）；统筹版是只 grandfather 登记、路由不改。**争议解决前这一格不排工** —— PM 那条硬约束无论哪版都成立：**`winner-reel-sync` 保留自动建广告功能，收编 = 保留 + 套上预算保护，不停不删** | ① `src/lib/meta/campaign-writes.ts` 拆出 `setCampaignStatus`/`setCampaignDailyBudget`/`boostPagePost`，挂进 `PROVIDER_WRITE_MODULES`；② **新增三个 ActionKey**（`registry-ads.ts` + 三份新 capability handler `src/lib/capabilities/ads/`）：`ads.pause_campaign`（系列级暂停）、`ads.cut_campaign_budget`（系列级砍预算）、`ads.boost_page_post`（推广帖）；③ **`execute` 路由**改成按请求体动作提交对应 ActionKey —— 🔴 **卫青 DR87-2 实证这条口子真被用过**：9/21 那 7 次改动结果是救火有效，但走的正是不过 Kernel 的路，其中 **+48% / +100% 两次走 Kernel 会被 20% 上限拒**。所以「绕 20% 上限」不是理论风险、是已发生事实，收编优先级不变；④ **`boost-post` 路由**改成提交 `ads.boost_page_post`；⑤ **`winner-reel-sync`** —— PM 明说"走 Kernel 或至少读日上限+熔断"，本 PR 走**轻量方案**（不新建 `ads.create_reel_ad` capability，工作量太大）：sync 内部在真调 Meta 建广告前调 `envelope-facts.resolveCircuit(clientId, adAccountId)` 检查熔断 + 查 `daily_budget_cap_cents` 检查今天已花+计划新增是否超上限；命中 → fail closed + 三件套 + 打人工任务；这是"保留自动建广告 + 套上预算保护"两条都满足的最小实现，走 Kernel 收编留到 3.1c；🔴 **卫青 DR87-2 回查加的第三条约束：还要让它「新建独立广告组」而不是塞进在投组** —— 卫青查实它**没造成超支**（累计才 $38.99，因为它把广告加进已有组共享预算），**真问题是每次往在投组加广告会重置该组的 Meta 学习期**（最近一次 9/23）。所以这一条**不是预算问题、是学习期问题**，只加预算保护解决不了；收编时必须改成建独立组；⑥ ~~`PROVIDER_WRITE_GRANDFATHERED` 精确路径~~ 不需要了——三个路由都走 Kernel、winner-reel-sync 因 PM 授权的轻量方案单独走 envelope-facts 只读接口，不 import `campaign-writes` | 我自己写（A 级安全核心；新增 ActionKey 是 Kernel 权限表变更）；capability handler 部分可派 DeepSeek |
+| 1. **三条旁路收编进 Kernel**（PM `三个一起` 已定，spec 升 v2.2）。PM 硬约束：**`winner-reel-sync` 保留自动建广告功能，不停不删**；🔴 但保护判据是**学习期**不是预算（见 §零） | ① `src/lib/meta/campaign-writes.ts` 拆出 `setCampaignStatus`/`setCampaignDailyBudget`/`boostPagePost`，挂进 `PROVIDER_WRITE_MODULES`；② **新增三个 ActionKey**（`registry-ads.ts` + 三份新 capability handler `src/lib/capabilities/ads/`）：`ads.pause_campaign`（系列级暂停）、`ads.cut_campaign_budget`（系列级砍预算）、`ads.boost_page_post`（推广帖）；③ **`execute` 路由**改成按请求体动作提交对应 ActionKey —— 🔴 **卫青 DR87-2 实证这条口子真被用过**：9/21 那 7 次改动结果是救火有效，但走的正是不过 Kernel 的路，其中 **+48% / +100% 两次走 Kernel 会被 20% 上限拒**。所以「绕 20% 上限」不是理论风险、是已发生事实，收编优先级不变；④ **`boost-post` 路由**改成提交 `ads.boost_page_post`；⑤ **`winner-reel-sync`** —— PM 明说"走 Kernel 或至少读日上限+熔断"，本 PR 走**轻量方案**（不新建 `ads.create_reel_ad` capability，工作量太大）：sync 内部在真调 Meta 建广告前调 `envelope-facts.resolveCircuit(clientId, adAccountId)` 检查熔断 + 查 `daily_budget_cap_cents` 检查今天已花+计划新增是否超上限；命中 → fail closed + 三件套 + 打人工任务；这是"保留自动建广告 + 套上预算保护"两条都满足的最小实现，走 Kernel 收编留到 3.1c；🔴 **卫青 DR87-2 回查加的第三条约束：还要让它「新建独立广告组」而不是塞进在投组** —— 卫青查实它**没造成超支**（累计才 $38.99，因为它把广告加进已有组共享预算），**真问题是每次往在投组加广告会重置该组的 Meta 学习期**（最近一次 9/23）。所以这一条**不是预算问题、是学习期问题**，只加预算保护解决不了；收编时必须改成建独立组；⑥ ~~`PROVIDER_WRITE_GRANDFATHERED` 精确路径~~ 不需要了——三个路由都走 Kernel、winner-reel-sync 因 PM 授权的轻量方案单独走 envelope-facts 只读接口，不 import `campaign-writes` | 我自己写（A 级安全核心；新增 ActionKey 是 Kernel 权限表变更）；capability handler 部分可派 DeepSeek |
 | 2. append-only 表触发器（三方定级 **CONCERN**，小秘书 2026-09-27 复核后更正；魏征 NOTE、狄仁杰+子牙 CONCERN；仍**本轮同 PR 加**） | 新 migration 建表就带 `BEFORE UPDATE OR DELETE ... RAISE EXCEPTION` 触发器，**模板从 `me_conversion_audit` 抄**（不是 `authorization_decisions_append_only()`）——理由：`me_conversion_audit` 那份带 `pg_trigger_depth()>1` 放行连带删除，狄仁杰沙盘验过 clients 级联 CASCADE 时可用。触发器跟 DROP+CREATE 进同一个迁移。PR 描述写明「这是对 v2.1 §6.2 DDL 的**增强**（v2.1 原文只写了 RLS 没写触发器），不是偏离」；架构测试断言表上有 append-only 触发器 | 我自己写（DB DDL 安全核心） |
 | 3. 生产库那张错 schema `ads_circuit_events` 复用/迁移 | 新 migration **DROP + CREATE**：`DROP TABLE IF EXISTS public.ads_circuit_events`（旧的、零数据）；然后按 v2.1 §11.4 建新表 | 我自己写 |
 | 4. 账户级日预算 + 面板 UI（CTS 主 100 / 个人 50）<br><br>⚠️ **跟卫青 DR87-2 第三条发现有重叠面，边界必须说清**：卫青挖出「**客户级日上限跨账户没生效** —— CTS 两个账户各花各的、合计 10 天超限」。小秘书 2026-09-27 明说这条**先不归我**，PM 在定要不要单独立项。<br>**重叠在哪**：我这一格做的是 ① 加账户级上限列 ② `envelope-facts` **按账户**取上限 ③ PATCH **配置时**校验 `sum(账户上限) ≤ 客户总闸`。<br>🔴 **我没做、也不该被假设覆盖的**：**运行时**的跨账户合计强制 —— 即「这个客户今天全部账户加起来花了多少、还能不能再动」。v2.1 §3.9 只说客户级是「总闸」，没规定 `envelope-facts` 在单账户动作时要去查**其它账户今天花了多少**。所以我这一格落地之后，**卫青那个洞仍然开着**，只是配置层多了一道 `sum ≤ 总闸` 的纸面约束。<br>**给 PM / 统筹的话**：别因为我做了 §3.9 就认为跨账户超限被修好了。要真修得在 `envelope-facts` 里加一次跨账户合计查询，那是卫青那条立项的活。 | ① migration `client_meta_ad_accounts.daily_budget_cap_cents` 列；② `envelope-facts.ts` 按账户取；③ `api/clients/[id]/ad-accounts/[id]/route.ts` PATCH 加合计校验；④ `dashboard/clients/[id]/ad-accounts/page.tsx` 加输入表格 | migration + envelope-facts 我写；PATCH 路由 + 面板 UI 派 DeepSeek |
 | 5. WP2 遗留 [#1994] 顺手修 | `envelope-facts.ts:119` 解构加 `at`；`limit(4000)` 冷却单独查询 | 派 DeepSeek |
 | 6. resolver 挂进生产 Kernel v2.1 §6.1 三硬交付 | `deps.ts` 一行、`createKernel` 默认装、架构断言 | 我自己写（Kernel 核心，`project-me2-deepseek-split-trial` 例外条款） |
 
-## 五、分文件改动清单（估 32 个文件、含新建 9 个）
+## 四半、交付结构 · 三个叠着的 PR（统筹 2026-09-27 拍的技术决定）
+
+**PM 定的是范围**（三条一起收编、不留下一轮），**不是「一个 PR」**。怎么切 PR 是技术决定，归统筹。
+
+**为什么切**：上一轮翻车的直接原因就是东西多到审不过来、最要命的三处全漏了（55 个单测 + 10 处变异都测不到）。现在再塞 4 个 ActionKey + 3 份 handler + winner-reel-sync 的独立组逻辑，一个 PR 一定重演。
+
+| PR | 内容 | 为什么这么切 |
+|---|---|---|
+| **A** | v2.1 §6 熔断全部（新表 + 派生态 + 五条判据 + admin 解除接口）+ resolver 生产挂载三件套 + **人工信封** + 止损收编 + WP2 遗留 #1994 两处 + 前端契约修（B2）+ 账户级日预算 + 面板 UI | 这就是原 3.1b，**自成闭环**，先落地先受保护 |
+| **B** | 4 个新 ActionKey（`ads.pause_campaign` / `ads.cut_campaign_budget` / `ads.boost_page_post` / `ads.create_reel_ad`）+ 对应 capability handler + `registry-ads.ts` 注册 + 信封声明 + **撤回处理函数（K1 必填）** + `campaign-writes.ts` / `ads-manager` 挂闸 | **纯新增能力面**，不动 A 的判据，审查视角独立 |
+| **C** | 三条旁路路由改成提交 Kernel（`execute` / `boost-post` / `winner-reel-sync` 含**独立广告组**逻辑）+ 退役 `executeStopLoss` | 依赖 B 的 ActionKey，最后落 |
+
+**顺序 A → B → C。🔴 三个都合了才算 WP3.1b 完成** —— ROADMAP 里记成**一个工作包三段**，不许 C 掉队变成「下一轮」。
+
+**每个 PR 的共同要求**：
+- 保持**草稿** + 正文第一行 `风险级别：A` + **不合并等 PM**
+- 各自过子牙 + 魏征；**C 必须加狄仁杰**（碰旁路收编 = 安全核心）
+- A 的 migration 按 v2.1 §12 硬门**先 apply 再合并代码**，**apply 回执进 PR 描述**
+
+**§五 的清单按这个归属读**：下面每一行末尾标了 `[A]` / `[B]` / `[C]`。
+
+### B 的新增文件（原 §五 未列，本次补）
+
+| 文件 | 内容 | 谁写 |
+|---|---|---|
+| `src/lib/kernel/registry-ads.ts`（改） | 注册 4 个新 ActionKey；各自 `outwardAuthorization`（含 `rollback: 'provider_native'`）、`idempotency.keyFields`、`costModel.stepCeilingUsd` 逐 step 给值、`allowedPurposes` | 我（Kernel 权限表 = A 级） |
+| `src/lib/kernel/types.ts`（改） | 封闭 union 加 4 个 ActionKey 字面量 | 我 |
+| `src/lib/capabilities/ads/pause-campaign.ts` | 系列级暂停 + **撤回处理函数**（改前状态写回） | DeepSeek + 我审 |
+| `src/lib/capabilities/ads/cut-campaign-budget.ts` | 系列级砍预算 + **撤回处理函数**（改前预算写回） | DeepSeek + 我审 |
+| `src/lib/capabilities/ads/boost-page-post.ts` | 推帖 + **撤回处理函数**（🔴 推帖花的钱撤不回，撤回 = 把推广停掉；这一条的 `reversible` 声明要跟 handler 行为一致，不许声明成能撤而实际撤不了） | 我（撤回语义要小心） |
+| `src/lib/capabilities/ads/create-reel-ad.ts` | 建广告 + **撤回处理函数**（删/停新建的广告）+ 🔴 **独立广告组判据**（目标必须是新建组；往在投组加 → 在这一层拒） | 我（§零 那条学习期判据 = 本轮最容易被做错的地方） |
+| `src/lib/meta/campaign-writes.ts` | 拆出 `setCampaignStatus` / `setCampaignDailyBudget` / `boostPagePost` | 我（A 级） |
+| 4 份 capability 测试 + 1 份 registry 对齐测试 | 含「撤回处理函数存在」断言、`create-reel-ad` 的独立组变异 | DeepSeek |
+
+### C 的改动文件（原 §五 未列，本次补）
+
+| 文件 | 改什么 | 谁写 |
+|---|---|---|
+| `src/app/api/clients/[id]/meta-ads/execute/route.ts` | 按请求体动作提交 `ads.pause_campaign` / `ads.cut_campaign_budget`；**不再 import 任何 Meta 写函数** | 我（A 级） |
+| `src/app/api/clients/[id]/meta-ads/boost-post/route.ts` | 提交 `ads.boost_page_post` | 我（A 级） |
+| `src/lib/winner-reel-sync/engine.ts` | 改成提交 `ads.create_reel_ad`；**不再 import `createAdFromPost` / `pauseAd`** | 我（A 级 + 无人值守路径） |
+| `src/lib/ads-strategy/stop-loss.ts` | 删 `executeStopLoss` + `StopLossDeps`，保留 4 个纯函数 | DeepSeek |
+| 三条旁路各自的测试 | 含「熔断中提交 → 拿到 denied」、「`create_reel_ad` 目标是在投组 → 被拒」 | DeepSeek |
+
+## 五、分文件改动清单（**PR A 部分**；B / C 的新增见上方 §四半）
 
 ### 新建（9）
 | 文件 | 内容 | 谁写 |
@@ -190,7 +244,7 @@
 | `src/app/api/clients/[id]/ad-health/stop-loss/route.ts` | 暂停完回读系列级、报"停了 N 停不了 M"；`cycleDate` 走账户时区 | 我 |
 | `src/app/dashboard/clients/[id]/ads-health/page.tsx` | 前端契约修（B2）：按 status 分派、渲染三件套 | DeepSeek |
 | `src/app/dashboard/clients/[id]/ads-health/__tests__/page.test.tsx` | stub 契约对齐 + 补 409 三件套用例 + 补 200 不被 catch 吞的用例 | DeepSeek |
-| `src/lib/kernel/boundaries.ts`（旁路登记部分）| **⚠️ 范围争议未决，见 §零**。统筹方案 = 只在 `PROVIDER_WRITE_GRANDFATHERED` 加两条**精确路径**（`src/app/api/clients/[id]/meta-ads/execute/route.ts`、`.../boost-post/route.ts`），**路由本身本轮不改一行**。PM DR87-2 方案 = 三条旁路本轮收编进 Kernel（要新增 ActionKey）。**争议解决前这两条路由不排工。** 🔴 无论哪版，**都不做「旁路自 gating」**（§四 输入 1 已论证：状态字段当授权 = 闸必漏 + ADR-001 只留一个入口）| 我（A 级） |
+| `src/lib/kernel/boundaries.ts`（旁路挂闸部分）| `PROVIDER_WRITE_MODULES` 加 `@/lib/meta/campaign-writes` + **`@/lib/meta/ads-manager`**（后者连 `GRANDFATHERED` 都没进过，全仓任何文件都能 import 它建广告 —— 本轮第一次盖住）。三条路由都收编进 Kernel，**所以不需要 grandfather 条目**。🔴 **不做「旁路自 gating」**（§零 已论证）| 我（A 级） |
 | `src/lib/kernel/boundaries.ts` | ⚠️ **对 v2.1 §12 字面的一处偏离，必须在 PR 描述里显式声明（统筹 C1）**：§12 原文要求「`PROVIDER_WRITE_MODULES` 加 `@/lib/meta/adsets`」（整个模块），上一轮改成拆出 `adset-writes.ts` 只挂写的那一半 —— 理由是 `adsets.ts` 读写混在一起、整挂会误伤 7 个只读 importer，**子牙已核过 `adsets.ts` 全文并接受这个判断**。本轮沿用同一处理并同样声明。`PROVIDER_WRITE_MODULES` 加 `@/lib/meta/campaign-writes`；~~`PROVIDER_WRITE_GRANDFATHERED` 加两个旁路~~（**这一项归 §零 争议，解决后再定**）；`KERNEL_RUNNER_ALLOWED_CALLER_DIRS` 从 `src/lib/ads-strategy/` 收窄到 `src/lib/ads-strategy/submission/`（**配套必做 `git mv`，见上方 `stop-loss-submission.ts` 那行**）；改注释里那段假理由（点明 `action-submission/ads-auto-pause.ts` 已在承载 ads 域，boundary 判据是「不 import 域模块」不是「不认识域字符串」） | 我 |
 | `.eslintrc.json` | 跟 `boundaries.ts` 同步 | 我 |
 | **`docs/ROADMAP.md`** 🔴 **必改 3（统筹）** | 子牙 B3 的核心指控：CLAUDE.md §9.1 要求未完成任务回写 ROADMAP，上一轮一个字没改、ledger 卡还写着 done。**散文里提一句不等于排了工**，所以这次它进文件清单。本轮要回写这几条：① 系列级 / 自动化三条旁路真收编进 Kernel（需新 ActionKey + 一次 tier gate，视 §零 争议结果定是否留在本轮）② 熔断 #4 Jev 数据源等 WP3.3 `prescription_evaluations` 就绪后接线 ③ admin 看板页若延后到 3.1c ④ 其余本轮标 stub / 打桩 / 未接线的每一条 | 我 |
@@ -266,16 +320,17 @@
 - **不合并、不用 `--admin`、不 force push**
 - 顺序：migration 先 apply 再合并代码（v2.1 §12 硬门）
 
-## 十、需要 PM 拍板的 4 件事（统筹已 flag，等 PM）
+## 十、还在等 PM 的 3 件事（不挡开工）
 
-（B4 与系列级旁路两条统筹已裁，见上；下面这 4 条**PM 回话之前我不动**）
+范围那条已由 PM 亲口 `三个一起` 定掉；Jev 那条统筹已撤回（v2.1 §9.3 + §11.8 + §12 自己就回答了是 WP3.3 才建）。剩下 3 件：
 
-1. **DROP 生产库那张错 schema 的 `ads_circuit_events`**：不可逆操作，虽然表里 0 行、零调用方，仍必须 PM 明确一句。方案里的 migration 我可以先写好（同一份 `20260927000002` 里 `DROP + CREATE`），apply 等 PM。
-2. **CTS 100 / 50 分别给哪个 `act_` 号**：生产库实测 CTS 绑了两个账户 —— `act_2775766642787274`（主）和 `act_2202695063810470`（ThruPlay 官方账户），**没有叫"个人账户"的行**，`daily_budget_cap_cents=100/50` 到底填哪个 `act_` 号 PM 定，别按 label 猜。
-3. **NAL 的目标**：NAL 目前没有生效目标（会被路由的 `no_active_goal` 分支 409 fail closed）。要在 CTS/NAL 上真按一次止损做验证，NAL 这条得先建目标；或者只在 CTS 上验。
-4. **`真按一次` 用哪个客户 / 哪条广告**：CTS 一条 CBO 广告组能验人工信封 + resolver 三链路（推荐）；NAL 100% CBO 更狠但受 #3 阻挡。请 PM 直接指定一条 `campaign_id` 或"随便挑一条 CBO"。
+| # | 等什么 | 挡不挡开工 |
+|---|---|---|
+| 1 | **DROP 生产库那张错 schema 的 `ads_circuit_events`** —— 不可逆，表里 0 行、零调用方，仍须 PM 明确一句 | **不挡**。migration 可以写成文件，**但不许 apply、不许 DROP** |
+| 2 | **CTS 的 100 / 50 分别给哪个 `act_` 号** —— 库里没有叫"个人账户"的行，只有 `act_2775766642787274`（主）和 `act_2202695063810470`（ThruPlay 官方），别按 label 猜 | **不挡** PR A 的代码；挡的是「面板里把数填进去」这一步 |
+| 3 | **NAL 的目标怎么写库** —— NAL 目前没有生效目标，会被 `no_active_goal` 分支 409 fail closed；`真按一次` 到底在 CTS 还是 NAL 上做也取决于这条 | **不挡**写代码；**挡最终验收**（PM 2026-09-26 硬规矩那条「真按一次」） |
 
-**Jev #4 数据源那条**（见差距 #6）：统筹说超授权我不许自己建表；本方案已选**打桩恒返回 `null`（undeterminable）** + ROADMAP 欠账。**统筹已把此项 flag 给 PM 复审**，PM 若要求本轮建表另说；不然按打桩走。
+🔴 **这三件按新汇报口径（PM 2026-09-27 回「行」）由统筹去问**，我不直接找 PM —— **唯一例外是第 1 件**（DROP 生产表属撤不回的动作，按 CLAUDE.md §2 必须由动手的人直接问 PM，转述不算数）。
 
 ## 十一、还有一份要看的辅助材料
 
