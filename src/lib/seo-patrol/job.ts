@@ -23,7 +23,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
-import { persistZhugeActions } from '@/lib/zhuge/action-persister'
+import { persistZhugeActions, executionItemDedupKey } from '@/lib/zhuge/action-persister'
 import type { PriorityAction, ZhugeOutput } from '@/lib/zhuge/types'
 import { runSeoPatrolRules } from './rules'
 import { buildPageSignals } from './page-signals'
@@ -35,6 +35,15 @@ import type {
 
 // Max actions to surface per client per day. Iris SOP: "max 3, ranked by impact".
 const MAX_ACTIONS_PER_CLIENT = 3
+
+/** At most this many NEW patrol cards per client in any rolling 7 days (PM: 每周只出几条最值得做的). */
+export const WEEKLY_CARD_CAP_PER_CLIENT = 3
+
+/** A card a human closed (completed / skipped) holds its target back this many days. */
+export const DECIDED_CARD_HOLD_DAYS = 14
+
+/** PostgREST returns at most this many rows per request — a full page may be a partial list. */
+const CARD_READ_LIMIT = 1000
 
 // Finding type → priority rank (1 = highest). Drives the "today's 3 things" order.
 const RULE_RANK: Record<SeoPatrolFinding['ruleId'], number> = {
@@ -77,6 +86,10 @@ export interface SeoPatrolClientResult {
   actions_created: number
   /** R2 page-signal feed health — 'missing'/'error' means R2 was off this run. */
   page_data_status?: PageDataStatus
+  /** Why no card was opened today although there were findings. */
+  cards_withheld_reason?: 'card_lookup_failed' | 'weekly_cap'
+  /** Findings held back because their target already has a card. */
+  findings_held_existing_card?: number
   error?: string
 }
 
@@ -242,7 +255,10 @@ async function fetchKeywordRows(
  * NOTE: rank here is the *priority order* (1..N). persistZhugeActions writes
  * it to execution_items.sort_order so the card surfaces in the right slot.
  */
-export function findingsToActions(findings: SeoPatrolFinding[]): PriorityAction[] {
+export function findingsToActions(
+  findings: SeoPatrolFinding[],
+  opts: { blockedKeys?: ReadonlySet<string>; limit?: number } = {},
+): PriorityAction[] {
   const sorted = [...findings].sort(
     (a, b) => RULE_RANK[a.ruleId] - RULE_RANK[b.ruleId],
   )
@@ -255,7 +271,19 @@ export function findingsToActions(findings: SeoPatrolFinding[]): PriorityAction[
     seen.add(key)
     return true
   })
-  const top = deduped.slice(0, MAX_ACTIONS_PER_CLIENT)
+  // Drop targets that already have a card (see buildCardSuppression) and keep one card
+  // per card key — the key the persister de-duplicates on — so the daily slots are spent
+  // on targets that are new. This runs BEFORE the daily cut on purpose.
+  const cardKeys = new Set<string>()
+  const fresh = deduped.filter((f) => {
+    const key = executionItemDedupKey(f.suggestedActionType, f.keyword, f.url)
+    if (opts.blockedKeys?.has(key)) return false
+    if (cardKeys.has(key)) return false
+    cardKeys.add(key)
+    return true
+  })
+  const limit = Math.max(0, Math.min(MAX_ACTIONS_PER_CLIENT, opts.limit ?? MAX_ACTIONS_PER_CLIENT))
+  const top = fresh.slice(0, limit)
 
   return top.map((f, idx) => {
     const subject = f.keyword ?? f.url ?? 'site'
@@ -295,6 +323,94 @@ export function findingsToActions(findings: SeoPatrolFinding[]): PriorityAction[
       executable_by: null,
     }
   })
+}
+
+/** A kanban card row as far as patrol suppression cares. */
+export interface PatrolCardRow {
+  action_type: string
+  status: string
+  source: string | null
+  steps_json: Record<string, unknown> | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface CardSuppression {
+  /** Card keys (executionItemDedupKey) the patrol must not open a new card for today. */
+  blockedKeys: Set<string>
+  /** Patrol cards opened for this client in the last 7 days, whatever their status now. */
+  openedLast7Days: number
+}
+
+/** Pure: which targets are held back, and how many patrol cards the last 7 days already opened. */
+export function buildCardSuppression(rows: readonly PatrolCardRow[], now: Date): CardSuppression {
+  const holdSince = now.getTime() - DECIDED_CARD_HOLD_DAYS * 86_400_000
+  const weekSince = now.getTime() - 7 * 86_400_000
+  const blockedKeys = new Set<string>()
+  let openedLast7Days = 0
+  for (const row of rows) {
+    const meta = row.steps_json ?? {}
+    const key = executionItemDedupKey(row.action_type, meta.keyword, meta.url ?? meta.page_url)
+    if (row.status === 'pending' || row.status === 'in_progress') {
+      blockedKeys.add(key)
+    } else if (
+      (row.status === 'completed' || row.status === 'skipped') &&
+      row.updated_at !== null &&
+      Date.parse(row.updated_at) >= holdSince
+    ) {
+      blockedKeys.add(key)
+    }
+    const isPatrolCard = row.source === 'zhuge' && typeof meta.rule_id === 'string'
+    if (isPatrolCard && row.created_at !== null && Date.parse(row.created_at) >= weekSince) {
+      openedLast7Days++
+    }
+  }
+  return { blockedKeys, openedLast7Days }
+}
+
+/**
+ * Read this client's SEO cards that can still hold a target back: open ones, and ones
+ * updated or created within the hold window. Fails closed: an error, or a full page at
+ * the row limit (possibly partial), is reported instead of guessed at.
+ */
+export async function loadCardSuppression(
+  supabase: SupabaseClient,
+  clientId: string,
+  now: Date,
+): Promise<{ ok: true; value: CardSuppression } | { ok: false; error: string }> {
+  const since = new Date(now.getTime() - DECIDED_CARD_HOLD_DAYS * 86_400_000).toISOString()
+  const { data, error } = await supabase
+    .from('execution_items')
+    .select('action_type, status, source, steps_json, created_at, updated_at')
+    .eq('client_id', clientId)
+    .eq('dimension', 'seo')
+    .or(`status.in.(pending,in_progress),updated_at.gte.${since},created_at.gte.${since}`)
+    .limit(CARD_READ_LIMIT)
+  if (error) return { ok: false, error: error.message }
+  const rows = (data ?? []) as PatrolCardRow[]
+  if (rows.length >= CARD_READ_LIMIT) {
+    return { ok: false, error: `card read hit the ${CARD_READ_LIMIT}-row limit; refusing to decide on a partial list` }
+  }
+  return { ok: true, value: buildCardSuppression(rows, now) }
+}
+
+export interface PatrolCardPlan {
+  actions: PriorityAction[]
+  /** Why no card was opened although there were findings, if that is the case. */
+  withheldReason: 'weekly_cap' | null
+  /** Findings whose target already has a card (open, or closed by a human recently). */
+  heldExistingCard: number
+}
+
+/** Pure: today's cards after the existing-card hold and the rolling weekly cap. */
+export function planPatrolCards(findings: SeoPatrolFinding[], suppression: CardSuppression): PatrolCardPlan {
+  const heldExistingCard = findings.filter((f) =>
+    suppression.blockedKeys.has(executionItemDedupKey(f.suggestedActionType, f.keyword, f.url)),
+  ).length
+  const remaining = Math.max(0, WEEKLY_CARD_CAP_PER_CLIENT - suppression.openedLast7Days)
+  if (remaining === 0) return { actions: [], withheldReason: 'weekly_cap', heldExistingCard }
+  const actions = findingsToActions(findings, { blockedKeys: suppression.blockedKeys, limit: remaining })
+  return { actions, withheldReason: null, heldExistingCard }
 }
 
 // ── Persistence ──────────────────────────────────────────────────────────────────
@@ -365,6 +481,7 @@ async function persistFindings(
 export async function runSeoPatrolForClient(
   client: SeoPatrolClient,
   supabase: SupabaseClient = supabaseAdmin,
+  now: Date = new Date(),
 ): Promise<SeoPatrolClientResult> {
   const base: SeoPatrolClientResult = {
     client_id: client.id,
@@ -385,7 +502,18 @@ export async function runSeoPatrolForClient(
 
     if (findings.length === 0) return base
 
-    const actions = findingsToActions(findings)
+    const suppression = await loadCardSuppression(supabase, client.id, now)
+    if (!suppression.ok) {
+      // Fail closed: without the list of existing cards a repeat cannot be told from a
+      // new target, so no card today. The findings are already saved above.
+      base.cards_withheld_reason = 'card_lookup_failed'
+      base.error = `card lookup failed: ${suppression.error}`
+      return base
+    }
+    const plan = planPatrolCards(findings, suppression.value)
+    base.findings_held_existing_card = plan.heldExistingCard
+    if (plan.withheldReason) base.cards_withheld_reason = plan.withheldReason
+    const actions = plan.actions
     if (actions.length === 0) return base
 
     const output: ZhugeOutput = {

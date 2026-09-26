@@ -12,7 +12,17 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { assembleSeoPatrolInput, findingsToActions } from '../job'
+import {
+  assembleSeoPatrolInput,
+  findingsToActions,
+  buildCardSuppression,
+  planPatrolCards,
+  loadCardSuppression,
+  WEEKLY_CARD_CAP_PER_CLIENT,
+  type PatrolCardRow,
+} from '../job'
+import { executionItemDedupKey } from '@/lib/zhuge/action-persister'
+import { makeFakeSupabase } from '@/lib/memory/__tests__/fake-supabase'
 import type { SeoPatrolFinding } from '../types'
 
 function finding(partial: Partial<SeoPatrolFinding>): SeoPatrolFinding {
@@ -237,5 +247,214 @@ describe('findingsToActions', () => {
     const meta = actions[0].metadata as Record<string, unknown> | undefined
     expect(meta?.ctr).toBeCloseTo(0.02, 4)
     expect(meta?.ctr_benchmark).toBeCloseTo(0.11, 4)
+  })
+
+  it('skips a target whose card key is blocked and fills the slot with the next finding', () => {
+    const first = finding({ ruleId: 'low_ctr_title', keyword: 'blocked kw', suggestedActionType: 'seo.refresh_blog' })
+    const second = finding({ ruleId: 'stale_content', keyword: 'second kw', suggestedActionType: 'seo.refresh_blog' })
+    const third = finding({ ruleId: 'keyword_opportunity', keyword: 'third kw', suggestedActionType: 'seo.publish_blog' })
+    const blockedKeys = new Set([
+      executionItemDedupKey(first.suggestedActionType, first.keyword, first.url),
+    ])
+    const actions = findingsToActions([first, second, third], { blockedKeys })
+    const keywords = actions.map((a) => (a.metadata as { keyword: string }).keyword)
+    expect(keywords).not.toContain('blocked kw')
+    expect(keywords).toContain('second kw')
+    expect(keywords).toContain('third kw')
+  })
+
+  it('respects a limit below the daily cap, and a limit of 0 gives no card', () => {
+    const findings = [
+      finding({ ruleId: 'low_ctr_title', keyword: 'a' }),
+      finding({ ruleId: 'stale_content', keyword: 'b' }),
+      finding({ ruleId: 'keyword_opportunity', keyword: 'c' }),
+      finding({ ruleId: 'missing_internal_link', url: 'd' }),
+      finding({ ruleId: 'not_indexed', url: 'e' }),
+    ]
+    expect(findingsToActions(findings, { limit: 1 })).toHaveLength(1)
+    expect(findingsToActions(findings, { limit: 0 })).toEqual([])
+  })
+
+  it('keeps one card per card key even across different rules', () => {
+    const actions = findingsToActions([
+      finding({ ruleId: 'low_ctr_title', keyword: null, url: 'https://x.com/p', suggestedActionType: 'seo.refresh_blog' }),
+      finding({ ruleId: 'stale_content', keyword: null, url: 'https://x.com/p', suggestedActionType: 'seo.refresh_blog' }),
+    ])
+    expect(actions).toHaveLength(1)
+  })
+})
+
+// ── buildCardSuppression ─────────────────────────────────────────────────────────
+
+describe('buildCardSuppression', () => {
+  const NOW = new Date('2026-09-26T00:00:00Z')
+
+  function cardRow(partial: Partial<PatrolCardRow>): PatrolCardRow {
+    return {
+      action_type: 'seo.refresh_blog',
+      status: 'pending',
+      source: 'zhuge',
+      steps_json: { keyword: 'kw', rule_id: 'stale_content' },
+      created_at: NOW.toISOString(),
+      updated_at: NOW.toISOString(),
+      ...partial,
+    }
+  }
+
+  it('blocks the keys of pending and in_progress rows', () => {
+    const { blockedKeys } = buildCardSuppression(
+      [
+        cardRow({ status: 'pending', steps_json: { keyword: 'pending kw' } }),
+        cardRow({ status: 'in_progress', steps_json: { keyword: 'in progress kw' } }),
+      ],
+      NOW,
+    )
+    expect(blockedKeys.has(executionItemDedupKey('seo.refresh_blog', 'pending kw', undefined))).toBe(true)
+    expect(blockedKeys.has(executionItemDedupKey('seo.refresh_blog', 'in progress kw', undefined))).toBe(true)
+  })
+
+  it('holds a recently completed/skipped target back, but not an old or superseded one', () => {
+    const threeDaysAgo = new Date(NOW.getTime() - 3 * 86_400_000).toISOString()
+    const twentyDaysAgo = new Date(NOW.getTime() - 20 * 86_400_000).toISOString()
+    const { blockedKeys } = buildCardSuppression(
+      [
+        cardRow({ status: 'completed', updated_at: threeDaysAgo, steps_json: { keyword: 'recent done' } }),
+        cardRow({ status: 'skipped', updated_at: twentyDaysAgo, steps_json: { keyword: 'old skipped' } }),
+        cardRow({ status: 'superseded', updated_at: threeDaysAgo, steps_json: { keyword: 'superseded kw' } }),
+      ],
+      NOW,
+    )
+    expect(blockedKeys.has(executionItemDedupKey('seo.refresh_blog', 'recent done', undefined))).toBe(true)
+    expect(blockedKeys.has(executionItemDedupKey('seo.refresh_blog', 'old skipped', undefined))).toBe(false)
+    expect(blockedKeys.has(executionItemDedupKey('seo.refresh_blog', 'superseded kw', undefined))).toBe(false)
+  })
+
+  it('counts only zhuge patrol cards created within 7 days', () => {
+    const eightDaysAgo = new Date(NOW.getTime() - 8 * 86_400_000).toISOString()
+    const { openedLast7Days } = buildCardSuppression(
+      [
+        cardRow({ steps_json: { keyword: 'counted 1', rule_id: 'stale_content' } }),
+        cardRow({ steps_json: { keyword: 'counted 2', rule_id: 'low_ctr_title' } }),
+        cardRow({ source: 'fde', steps_json: { keyword: 'fde card', rule_id: 'stale_content' } }),
+        cardRow({ steps_json: { keyword: 'no rule id' } }),
+        cardRow({ created_at: eightDaysAgo, steps_json: { keyword: 'old card', rule_id: 'stale_content' } }),
+      ],
+      NOW,
+    )
+    expect(openedLast7Days).toBe(2)
+  })
+
+  it('blocks the same key for a row carrying steps_json.page_url as for a finding with that url', () => {
+    const { blockedKeys } = buildCardSuppression(
+      [cardRow({ steps_json: { page_url: 'https://x.com/p' } })],
+      NOW,
+    )
+    expect(blockedKeys.has(executionItemDedupKey('seo.refresh_blog', null, 'https://x.com/p'))).toBe(true)
+  })
+})
+
+// ── planPatrolCards ──────────────────────────────────────────────────────────────
+
+describe('planPatrolCards', () => {
+  it('withholds everything when the rolling weekly cap is already reached', () => {
+    const findings = [
+      finding({ ruleId: 'low_ctr_title', keyword: 'a' }),
+      finding({ ruleId: 'stale_content', keyword: 'b' }),
+    ]
+    const plan = planPatrolCards(findings, {
+      blockedKeys: new Set([executionItemDedupKey('seo.publish_blog', 'b', null)]),
+      openedLast7Days: WEEKLY_CARD_CAP_PER_CLIENT,
+    })
+    expect(plan.actions).toEqual([])
+    expect(plan.withheldReason).toBe('weekly_cap')
+    expect(plan.heldExistingCard).toBe(1)
+  })
+
+  it('opens at most the remaining weekly slots', () => {
+    const findings = [
+      finding({ ruleId: 'low_ctr_title', keyword: 'a' }),
+      finding({ ruleId: 'stale_content', keyword: 'b' }),
+      finding({ ruleId: 'keyword_opportunity', keyword: 'c' }),
+    ]
+    const plan = planPatrolCards(findings, { blockedKeys: new Set(), openedLast7Days: 2 })
+    expect(plan.actions).toHaveLength(1)
+    expect(plan.withheldReason).toBeNull()
+  })
+})
+
+// ── loadCardSuppression ──────────────────────────────────────────────────────────
+
+describe('loadCardSuppression', () => {
+  const NOW = new Date('2026-09-26T00:00:00Z')
+
+  it('ignores rows for another client and for other dimensions', async () => {
+    const supabase = makeFakeSupabase({
+      execution_items: [
+        {
+          id: 'r1',
+          client_id: 'c1',
+          dimension: 'seo',
+          action_type: 'seo.refresh_blog',
+          status: 'pending',
+          source: 'zhuge',
+          steps_json: { keyword: 'mine' },
+          created_at: NOW.toISOString(),
+          updated_at: NOW.toISOString(),
+        },
+        {
+          id: 'r2',
+          client_id: 'other',
+          dimension: 'seo',
+          action_type: 'seo.refresh_blog',
+          status: 'pending',
+          source: 'zhuge',
+          steps_json: { keyword: 'theirs' },
+          created_at: NOW.toISOString(),
+          updated_at: NOW.toISOString(),
+        },
+        {
+          id: 'r3',
+          client_id: 'c1',
+          dimension: 'ads',
+          action_type: 'seo.refresh_blog',
+          status: 'pending',
+          source: 'zhuge',
+          steps_json: { keyword: 'ads row' },
+          created_at: NOW.toISOString(),
+          updated_at: NOW.toISOString(),
+        },
+      ],
+    })
+    const result = await loadCardSuppression(supabase, 'c1', NOW)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.blockedKeys.has(executionItemDedupKey('seo.refresh_blog', 'mine', undefined))).toBe(true)
+    expect(result.value.blockedKeys.has(executionItemDedupKey('seo.refresh_blog', 'theirs', undefined))).toBe(false)
+    expect(result.value.blockedKeys.has(executionItemDedupKey('seo.refresh_blog', 'ads row', undefined))).toBe(false)
+  })
+
+  it('fails closed when the read errors', async () => {
+    const supabase = makeFakeSupabase({ execution_items: [] }, { failSelectOn: ['execution_items'] })
+    const result = await loadCardSuppression(supabase, 'c1', NOW)
+    expect(result.ok).toBe(false)
+  })
+
+  it('fails closed when the read comes back full at the row limit', async () => {
+    const rows = Array.from({ length: 1000 }, (_, i) => ({
+      id: `r${i}`,
+      client_id: 'c1',
+      dimension: 'seo',
+      action_type: 'seo.refresh_blog',
+      status: 'pending',
+      source: 'zhuge',
+      steps_json: { keyword: `kw-${i}` },
+      created_at: NOW.toISOString(),
+      updated_at: NOW.toISOString(),
+    }))
+    const supabase = makeFakeSupabase({ execution_items: rows })
+    const result = await loadCardSuppression(supabase, 'c1', NOW)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error).toContain('row limit')
   })
 })
