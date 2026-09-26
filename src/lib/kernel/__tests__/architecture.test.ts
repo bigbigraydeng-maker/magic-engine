@@ -36,6 +36,7 @@ import { createKernelDeps, type KernelDeps } from '../deps'
 import { createKernel } from '../index'
 import { ACTION_REGISTRY } from '../registry'
 import { createFakeSupabase } from './fake-supabase'
+import { HUMAN_STOP_ACTION_KEYS } from '../autonomy-envelope'
 
 const ROOT = process.cwd()
 const SRC = join(ROOT, 'src')
@@ -408,6 +409,38 @@ describe('🔴 Kernel 依赖工厂：声明了的字段必须真的转发（防�
     const marker: NonNullable<KernelDeps['resolveEnvelopeFacts']> = async () => ({ unavailable: '合成解析器' })
     const deps = createKernel(probeClient(), { resolveEnvelopeFacts: marker })
     expect(deps.resolveEnvelopeFacts).toBe(marker)
+  })
+})
+
+describe('🔴 人工止损信封的白名单必须真存在于注册表', () => {
+  /**
+   * 🔴 `HUMAN_STOP_ACTION_KEYS` 已经是 `readonly ActionKey[]`，所以**拼错一个字符
+   *    编译就不过**。但类型系统管不了另一种失败：
+   *    **一个 key 在闭合 union 里、却没有真的注册进 `ACTION_REGISTRY`**。
+   *    那样它会拿到人工信封的宽度，而 `authorize.ts` 在更前面就已经
+   *    因为查不到定义而拒了 —— 于是白名单里躺着一条永远不生效的条目，
+   *    而下一个人会以为它生效。统筹 2026-09-27 点名要这一条。
+   */
+  it('白名单里每个 ActionKey 都在 ACTION_REGISTRY 里', () => {
+    const missing = HUMAN_STOP_ACTION_KEYS.filter((key) => !ACTION_REGISTRY.has(key))
+    expect(
+      missing,
+      '这些 key 在人工止损信封的白名单里，但没有注册进 ACTION_REGISTRY。\n' +
+        'authorize.ts 会在更前面因为“查不到动作定义”就拒掉它，\n' +
+        '所以这条白名单条目永远不会生效 —— 而下一个读到它的人会以为它生效。',
+    ).toEqual([])
+  })
+
+  it('🔴 白名单里没有放类 / 建类动作（只允许“只会让花费变少”的）', () => {
+    // 判据用注册表里的信封分类，不是看名字里有没有 pause/cut 字样。
+    const forbidden = ['ads.scale_unit_budget', 'ads.add_retargeting_adset', 'ads.swap_creative'] as const
+    for (const key of forbidden) {
+      expect(
+        HUMAN_STOP_ACTION_KEYS.some((k) => k === key),
+        `${key} 是放类/建类动作，不该在人工止损信封白名单里 —— ` +
+          '人手动加预算没有“只会变少”这个安全性。',
+      ).toBe(false)
+    }
   })
 })
 

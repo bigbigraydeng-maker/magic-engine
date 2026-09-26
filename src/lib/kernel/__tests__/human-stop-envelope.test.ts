@@ -128,20 +128,15 @@ describe('人工止损信封 · 白名单是穷举的，不是黑名单', () => 
     expect(v.within).toBe(false)
   })
 
-  it('🔴 未来新增的 ActionKey 默认走 AI 信封（白名单 = 默认收紧）', () => {
-    const v = selectEnvelopeVerdict({
-      triggeredBy: HUMAN,
-      actionKey: 'ads.some_future_action_nobody_whitelisted',
-      request: req(),
-      facts: prodFacts(),
-      envelope: AI_ENVELOPE,
-    })
-    expect(v.envelopeUsed).toBe('ads_autonomy')
-  })
 })
 
 describe('人工止损信封 · triggeredBy 必须是 human，其余一律走 AI 信封', () => {
-  it.each(['schedule', 'agent', 'signal', 'run'])(
+  // 🔴 `'Human'` / `'user'` / `''` 这类乱值的用例已删掉——不是不重要，是
+  //    `triggeredBy` 收紧成 `TriggeredBy`（闭合 union）之后，它们**编译期就不成立**，
+  //    写成运行时断言只能靠类型强转绕过去——而那一下恰好把想要的保障亲手关掉。
+  //    类型系统能证明的事不要拿测试再证一遍（拿强转证的更是假证据）。
+  //    下面只留合法取值里那几个“不是人按的”。
+  it.each(['schedule', 'agent', 'signal', 'run'] as const)(
     '%s 触发的暂停走 AI 信封（不是人按的就不给这个宽度）',
     (triggeredBy) => {
       const v = selectEnvelopeVerdict({
@@ -155,19 +150,17 @@ describe('人工止损信封 · triggeredBy 必须是 human，其余一律走 AI
     },
   )
 
-  it('空字符串 / 乱值也走 AI 信封（默认收紧）', () => {
-    for (const triggeredBy of ['', 'HUMAN', 'Human', 'human ', 'user']) {
-      const v = selectEnvelopeVerdict({
-        triggeredBy,
-        actionKey: 'ads.pause_unit',
-        request: req(),
-        facts: prodFacts(),
-        envelope: AI_ENVELOPE,
-      })
-      expect(v.envelopeUsed, `triggeredBy=${JSON.stringify(triggeredBy)} 不该被当成人按的`).toBe(
-        'ads_autonomy',
-      )
-    }
+  it('🔴 数据库里出现一个不在白名单里的 action_key → 默认走 AI 信封', () => {
+    // action_key 那一列的类型是 string（从数据库来），所以这条是真存在的运行时路径，
+    // 不是类型系统能拿掉的——所以这条用例留着。
+    const v = selectEnvelopeVerdict({
+      triggeredBy: 'human',
+      actionKey: 'ads.some_future_action_nobody_whitelisted',
+      request: req(),
+      facts: prodFacts(),
+      envelope: AI_ENVELOPE,
+    })
+    expect(v.envelopeUsed).toBe('ads_autonomy')
   })
 })
 

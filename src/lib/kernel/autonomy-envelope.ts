@@ -18,7 +18,7 @@
  *    就等于一次静默放行。同 `§14 M4`「缺行按锁定处理」。
  */
 
-import type { AutonomyEnvelope } from './types'
+import type { ActionKey, AutonomyEnvelope, TriggeredBy } from './types'
 
 /**
  * 这次动作对花费的性质。不同性质走不同判据——把暂停也套上「变动不超过 20%」
@@ -253,7 +253,7 @@ export const HUMAN_STOP_ENVELOPE: HumanStopEnvelope = {
  *    `add_retargeting_adset` / `swap_creative` / `create_reel_ad` 等）即使人触发也走 AI 信封 ——
  *    人手动加预算没有「只会变少」这个安全性。
  */
-export const HUMAN_STOP_ACTION_KEYS: readonly string[] = [
+export const HUMAN_STOP_ACTION_KEYS: readonly ActionKey[] = [
   'ads.pause_unit',
   'ads.cut_unit_budget',
 ]
@@ -285,14 +285,25 @@ export type EnvelopeChoice = 'human_stop' | 'ads_autonomy'
  * 否则排查时分不清「人工信封拒了」和「AI 信封拒了」，两者该做的处置完全不同。
  */
 export function selectEnvelopeVerdict(args: {
-  readonly triggeredBy: string
+  /** 从 `action_runs.triggered_by` 来 —— 那一列的类型**就是** `TriggeredBy`，所以这里收紧。 */
+  readonly triggeredBy: TriggeredBy
+  /**
+   * 🔴 这里**如实用 `string`，不是 `ActionKey`** —— 不是偷懒，是实况：
+   *    `action_runs.action_key` 那一列的类型是 `string`（`types.ts:380`），值从数据库来。
+   *    硬标成 `ActionKey` 会逼调用点加一个类型强转，那等于把想要的检查亲手关掉。
+   *    **不对称是对的**：进来的值如实是 `string`，而下面那张白名单是我自己写的代码、
+   *    必须是 `readonly ActionKey[]`（拼错一个字符就编译不过）。
+   */
   readonly actionKey: string
   readonly request: EnvelopeRequest
   readonly facts: EnvelopeFacts
   readonly envelope: AutonomyEnvelope
 }): EnvelopeVerdict & { readonly envelopeUsed: EnvelopeChoice } {
   const human =
-    args.triggeredBy === 'human' && HUMAN_STOP_ACTION_KEYS.includes(args.actionKey)
+    args.triggeredBy === 'human' &&
+    // 用 some 逐个比而不是 includes：白名单是 readonly ActionKey[]、进来的是 string，
+    // includes 会要求两边同型 → 逼出一个类型强转。some 里的 === 不需要。
+    HUMAN_STOP_ACTION_KEYS.some((key) => key === args.actionKey)
 
   if (human) {
     return { ...isWithinHumanStopEnvelope(args.facts), envelopeUsed: 'human_stop' }
