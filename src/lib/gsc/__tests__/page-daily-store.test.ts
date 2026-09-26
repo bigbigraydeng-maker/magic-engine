@@ -9,11 +9,12 @@ import type { GscAnalyticsRow } from '../client'
 import {
   buildPageDailyPlan,
   closeReceipt,
-  closeRunningReceiptsForRun,
-  loadCoverageReceipts,
+  closeReceiptIfRunning,
+  loadPlanReceipts,
   openReceipt,
   recordFinalizedRange,
   toPageDailyRows,
+  toPlanReceipt,
   upsertPageDayRows,
   MAX_URL_BYTES,
 } from '../page-daily-store'
@@ -169,21 +170,21 @@ describe('receipts', () => {
     expect(r2?.finished_at).toBeNull()
   })
 
-  it('🔴 closeRunningReceiptsForRun closes only the running receipts of that run', async () => {
+  it('🔴 closeReceiptIfRunning closes only that receipt, and only while it is running', async () => {
     fakeDb.tables.gsc_page_fetch_receipts = [
-      receiptRow({ id: 'x1', inngest_run_id: 'run-1', status: 'running', finished_at: null, started_at: '2026-09-26T18:30:00Z' }),
-      receiptRow({ id: 'x2', inngest_run_id: 'run-1', status: 'complete' }),
-      receiptRow({ id: 'x3', inngest_run_id: 'run-2', status: 'running', finished_at: null }),
+      receiptRow({ id: 'x1', status: 'running', finished_at: null, started_at: '2026-09-26T18:30:00Z' }),
+      receiptRow({ id: 'x2', status: 'running', finished_at: null }),
+      receiptRow({ id: 'x3', status: 'complete' }),
     ]
 
-    const closed = await closeRunningReceiptsForRun(
+    const closed = await closeReceiptIfRunning(
       supabaseAdmin,
-      'run-1',
+      'x1',
       { failure_kind: 'quota', error: 'retries exhausted' },
       new Date('2026-09-26T19:00:00Z'),
     )
 
-    expect(closed).toEqual([{ id: 'x1', started_at: '2026-09-26T18:30:00Z' }])
+    expect(closed).toEqual({ started_at: '2026-09-26T18:30:00Z' })
     const stored = fakeDb.tables.gsc_page_fetch_receipts
     const x1 = stored.find((r) => r.id === 'x1')
     const x2 = stored.find((r) => r.id === 'x2')
@@ -192,20 +193,23 @@ describe('receipts', () => {
     expect(x1?.failure_kind).toBe('quota')
     expect(x1?.error).toBe('retries exhausted')
     expect(x1?.finished_at).toBe('2026-09-26T19:00:00.000Z')
-    expect(x2?.status).toBe('complete')
-    expect(x3?.status).toBe('running')
+    expect(x2?.status).toBe('running')
+
+    const alreadyClosed = await closeReceiptIfRunning(supabaseAdmin, 'x3', { failure_kind: 'other', error: 'x' })
+    expect(alreadyClosed).toBeNull()
+    expect(x3?.status).toBe('complete')
   })
 
-  it('closeRunningReceiptsForRun never throws on a database error', async () => {
+  it('closeReceiptIfRunning never throws on a database error', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     fakeDb.fail({ table: 'gsc_page_fetch_receipts', op: 'update', message: 'db down' })
 
-    await expect(closeRunningReceiptsForRun(supabaseAdmin, 'run-1', { failure_kind: 'other', error: 'x' })).resolves.toEqual([])
+    await expect(closeReceiptIfRunning(supabaseAdmin, 'x1', { failure_kind: 'other', error: 'x' })).resolves.toBeNull()
   })
 })
 
-describe('loadCoverageReceipts', () => {
-  it('reads only complete receipts of the listed clients inside the window, across pages', async () => {
+describe('loadPlanReceipts', () => {
+  it('reads every status of the listed clients inside the window, across pages', async () => {
     const seeded: Record<string, unknown>[] = []
     for (let i = 0; i < 1500; i += 1) {
       seeded.push(receiptRow({ id: `c-${String(i).padStart(4, '0')}` }))
@@ -213,13 +217,25 @@ describe('loadCoverageReceipts', () => {
     seeded.push(receiptRow({ id: 'r-running', status: 'running' }))
     seeded.push(receiptRow({ id: 'r-other', client_id: B }))
     seeded.push(receiptRow({ id: 'r-old', request_start_day: '2025-01-01', request_end_day: '2025-01-31' }))
+    seeded.push(receiptRow({ id: 'r-failed', status: 'failed', failure_kind: 'quota' }))
     fakeDb.tables.gsc_page_fetch_receipts = seeded
 
-    const receipts = await loadCoverageReceipts(supabaseAdmin, [A], '2025-06-01')
+    const receipts = await loadPlanReceipts(supabaseAdmin, [A], '2025-06-01')
 
-    expect(receipts).toHaveLength(1500)
+    expect(receipts).toHaveLength(1502)
     expect(receipts.every((r) => r.client_id === A)).toBe(true)
+    const failed = receipts.find((r) => r.status === 'failed')
+    expect(failed?.failure_kind).toBe('quota')
+    expect(failed?.kind).toBe('backfill')
     expect(fakeDb.calls.filter((c) => c.startsWith('select gsc_page_fetch_receipts'))).toHaveLength(2)
+  })
+
+  it('toPlanReceipt skips rows with an unexpected shape', () => {
+    expect(toPlanReceipt(receiptRow({}))).not.toBeNull()
+    expect(toPlanReceipt(receiptRow({ status: 'weird' }))).toBeNull()
+    expect(toPlanReceipt(receiptRow({ kind: 'weekly' }))).toBeNull()
+    expect(toPlanReceipt(receiptRow({ started_at: null }))).toBeNull()
+    expect(toPlanReceipt(receiptRow({ status: 'failed', failure_kind: 'nonsense' }))?.failure_kind).toBeNull()
   })
 })
 
@@ -237,6 +253,8 @@ describe('buildPageDailyPlan', () => {
     expect(plan.ok).toBe(true)
     if (!plan.ok) throw new Error('expected ok plan')
     expect(plan.clients).toBe(1)
+    expect(plan.stopped).toEqual([])
+    expect(plan.newlyStopped).toEqual([])
     expect(plan.orders).toContainEqual({
       client_id: A,
       kind: 'daily',
@@ -255,5 +273,49 @@ describe('buildPageDailyPlan', () => {
     expect(receiptFailure.ok).toBe(false)
     if (receiptFailure.ok) throw new Error('expected failed plan')
     expect(receiptFailure.reason).toBe('receipts: boom2')
+  })
+
+  it('🔴 a month with three consecutive failures is listed as stopped and not dispatched', async () => {
+    fakeDb.tables.client_connectors = [
+      { client_id: A, anchor: 'gsc', status: 'connected', config: { site_url: SITE } },
+    ]
+    fakeDb.tables.gsc_page_fetch_receipts = [
+      receiptRow({ request_start_day: '2026-09-01', request_end_day: '2026-09-20', data_through_day: '2026-09-20' }),
+      receiptRow({ request_start_day: '2026-08-01', request_end_day: '2026-08-31', data_through_day: '2026-08-31' }),
+      receiptRow({
+        request_start_day: '2026-07-01',
+        request_end_day: '2026-07-31',
+        status: 'failed',
+        failure_kind: 'other',
+        data_through_day: null,
+        started_at: '2026-09-23T18:31:00Z',
+      }),
+      receiptRow({
+        request_start_day: '2026-07-01',
+        request_end_day: '2026-07-31',
+        status: 'failed',
+        failure_kind: 'other',
+        data_through_day: null,
+        started_at: '2026-09-24T18:31:00Z',
+      }),
+      receiptRow({
+        request_start_day: '2026-07-01',
+        request_end_day: '2026-07-31',
+        status: 'failed',
+        failure_kind: 'other',
+        data_through_day: null,
+        started_at: '2026-09-25T18:31:00Z',
+      }),
+    ]
+
+    const plan = await buildPageDailyPlan(supabaseAdmin, '2026-09-26')
+
+    expect(plan.ok).toBe(true)
+    if (!plan.ok) throw new Error('expected ok plan')
+    expect(plan.stopped).toEqual([{ client_id: A, month: '2026-07', stopped_on: '2026-09-25' }])
+    expect(plan.newlyStopped).toEqual([{ client_id: A, month: '2026-07', stopped_on: '2026-09-25' }])
+    expect(plan.orders.some((o) => o.kind === 'backfill' && o.start_day === '2026-07-01')).toBe(false)
+    const backfillStarts = plan.orders.filter((o) => o.kind === 'backfill').map((o) => o.start_day)
+    expect(backfillStarts).toEqual(['2026-06-01', '2026-05-01', '2026-04-01'])
   })
 })

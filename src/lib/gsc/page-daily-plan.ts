@@ -9,8 +9,11 @@
  *   connected client, every day. Each day is requested on several consecutive
  *   days, so it gets fetched once Google has finalised it (usually 2-3 days).
  * - `backfill`: one calendar month of the last BACKFILL_MONTHS months that is
- *   not yet covered by a complete receipt, at most
+ *   not yet covered by a complete or truncated receipt, at most
  *   MAX_BACKFILL_SEGMENTS_PER_DISPATCH per client per dispatch, newest first.
+ *   A month whose latest BACKFILL_STOP_AFTER_FAILURES receipts are all
+ *   non-auth failures is no longer dispatched ("stopped"); it is reported in
+ *   every dispatch's run log instead (see planPageDailyPulls).
  *
  * De-duplication is by receipts in the database, NOT by Inngest event ids:
  * Inngest only de-duplicates event ids for 24 hours. All days are Google's
@@ -22,8 +25,14 @@ import type { GscConnectedClient } from './connected-clients'
 
 /** Cloud-only event name; the local factory-worker does not consume it (one event, one owner). */
 export const GSC_PAGE_DAILY_PULL_EVENT = 'gsc/page-daily.pull.due'
-/** cron_run_logs.job_name for the fan-out and for every pull order. Must equal the CRON_REGISTRY jobName. */
+/** cron_run_logs.job_name for the fan-out (the daily dispatch row). Must equal its CRON_REGISTRY jobName. */
 export const GSC_PAGE_DAILY_JOB = 'gsc-page-daily'
+/**
+ * cron_run_logs.job_name for each pull order. Kept apart from the dispatch row: the health check only reads a
+ * job's newest row, so sharing one name let the last order hide an earlier failure (and the dispatch's own report).
+ * Must equal its CRON_REGISTRY jobName.
+ */
+export const GSC_PAGE_DAILY_PULL_JOB = 'gsc-page-daily-pull'
 /**
  * The ONLY definition of the fan-out schedule: the Inngest cron trigger and CRON_REGISTRY both read it
  * (the registry test asserts they are equal). 18:30 UTC daily = after google-data-pullback-daily (17:00 UTC).
@@ -38,6 +47,8 @@ export const DAILY_WINDOW_DAYS = 5
 export const BACKFILL_MONTHS = 16
 /** Backfill orders per client per dispatch: the history fills in a few months per day, not all at once. */
 export const MAX_BACKFILL_SEGMENTS_PER_DISPATCH = 3
+/** A backfill month whose latest this-many receipts are all failed (failure_kind other than auth) is no longer dispatched. */
+export const BACKFILL_STOP_AFTER_FAILURES = 3
 /** A day at least this many days older than the pull that asked for it counts as settled even if Google returned no data for it. */
 export const SETTLED_AFTER_DAYS = 5
 /** Longest range one order may ask for (a calendar month) — bounds the number of steps per run. */
@@ -52,14 +63,39 @@ export interface PullOrder {
   readonly end_day: string
 }
 
-/** A `status = 'complete'` receipt, reduced to what coverage needs. */
-export interface CoverageReceipt {
+export type PlanReceiptStatus = 'running' | 'complete' | 'truncated' | 'failed'
+export type PlanFailureKind = 'auth' | 'quota' | 'other'
+
+/** A receipt as the planner needs it (any status). */
+export interface PlanReceipt {
   readonly client_id: string
   readonly site_url: string
+  readonly kind: PullKind
+  readonly status: PlanReceiptStatus
+  readonly failure_kind: PlanFailureKind | null
   readonly request_start_day: string
   readonly request_end_day: string
   readonly data_through_day: string | null
   readonly started_at: string
+}
+
+/**
+ * A backfill month that is no longer dispatched. `month` is 'YYYY-MM'; `stopped_on` is the Pacific date of the
+ * receipt that brought the streak of consecutive non-auth failures to BACKFILL_STOP_AFTER_FAILURES.
+ */
+export interface StoppedMonth {
+  readonly client_id: string
+  readonly month: string
+  readonly stopped_on: string
+}
+
+/** One dispatch's plan. */
+export interface PagePlan {
+  readonly orders: readonly PullOrder[]
+  /** Every month that is currently stopped — reported in every dispatch's run-log summary. */
+  readonly stopped: readonly StoppedMonth[]
+  /** The stopped months this dispatch is the first to see — the dispatch reports failed for these, once. */
+  readonly newlyStopped: readonly StoppedMonth[]
 }
 
 export interface DaySegment {
@@ -135,13 +171,15 @@ export function backfillSegments(today: string): DaySegment[] {
 }
 
 /**
- * The last day this complete receipt vouches for, or null when it vouches for
- * nothing. Days after Google's last finalised day are only vouched for once
+ * The last day this receipt vouches for, or null when it vouches for nothing. Only complete and truncated
+ * receipts vouch: truncated means Google's own 50,000-rows-per-day export cap was reached, so re-pulling that
+ * range cannot return more rows. Days after Google's last finalised day are only vouched for once
  * they are SETTLED_AFTER_DAYS old at the time of the pull (then "no data"
  * really means zero), so a pull that ran before a day was finalised never
  * counts as covering it.
  */
-export function coveredThrough(r: CoverageReceipt): string | null {
+export function coveredThrough(r: PlanReceipt): string | null {
+  if (r.status !== 'complete' && r.status !== 'truncated') return null
   const startedMs = Date.parse(r.started_at)
   const settled = Number.isNaN(startedMs) ? null : addDays(pacificDay(new Date(startedMs)), -SETTLED_AFTER_DAYS)
   const vouched =
@@ -158,7 +196,7 @@ export function coveredThrough(r: CoverageReceipt): string | null {
 }
 
 /** True when every day of the segment is inside some receipt's covered interval. */
-export function isSegmentCovered(segment: DaySegment, receipts: readonly CoverageReceipt[]): boolean {
+export function isSegmentCovered(segment: DaySegment, receipts: readonly PlanReceipt[]): boolean {
   const intervals = receipts.flatMap((r) => {
     const e = coveredThrough(r)
     return e ? [{ start: r.request_start_day, end: e }] : []
@@ -169,30 +207,111 @@ export function isSegmentCovered(segment: DaySegment, receipts: readonly Coverag
   return true
 }
 
-/** The pull orders for one dispatch: one daily order per client plus the uncovered backfill months. */
+/** One backfill month's receipts (same client + GSC property), newest first; in-flight and undated ones skipped. */
+export function monthHistory(
+  receipts: readonly PlanReceipt[],
+  clientId: string,
+  siteUrl: string,
+  monthStartDay: string,
+): PlanReceipt[] {
+  return receipts
+    .filter(
+      (r) =>
+        r.client_id === clientId &&
+        r.site_url === siteUrl &&
+        r.kind === 'backfill' &&
+        r.request_start_day === monthStartDay &&
+        r.status !== 'running' &&
+        !Number.isNaN(Date.parse(r.started_at)),
+    )
+    .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at))
+}
+
+/**
+ * When the newest receipts of a month (newest first) are at least BACKFILL_STOP_AFTER_FAILURES consecutive
+ * failures whose failure_kind is not auth: the Pacific date of the receipt that brought that streak to
+ * BACKFILL_STOP_AFTER_FAILURES. Otherwise null.
+ *
+ * An auth failure, a complete or a truncated receipt ends the streak: auth problems are fixed by reconnecting
+ * (and are already reported by the daily Google data pullback), and a month that got data is not stuck.
+ */
+export function stoppedOnFor(history: readonly PlanReceipt[]): string | null {
+  let streak = 0
+  for (const r of history) {
+    if (r.status === 'failed' && r.failure_kind !== 'auth') streak += 1
+    else break
+  }
+  if (streak < BACKFILL_STOP_AFTER_FAILURES) return null
+  const trigger = history[streak - BACKFILL_STOP_AFTER_FAILURES]
+  return pacificDay(new Date(Date.parse(trigger.started_at)))
+}
+
+/**
+ * The Pacific date of the most recent dispatch seen in the receipts (every dispatch pulls each connected
+ * client's daily window, so every dispatch leaves receipts), or null when there are none.
+ */
+export function lastDispatchDay(receipts: readonly PlanReceipt[]): string | null {
+  let last: string | null = null
+  for (const r of receipts) {
+    const ms = Date.parse(r.started_at)
+    if (Number.isNaN(ms)) continue
+    const day = pacificDay(new Date(ms))
+    if (last === null || day > last) last = day
+  }
+  return last
+}
+
+/** One client's orders: its daily window, then up to MAX_BACKFILL_SEGMENTS_PER_DISPATCH uncovered, unstopped months. */
+function planClient(
+  c: GscConnectedClient,
+  own: readonly PlanReceipt[],
+  segments: readonly DaySegment[],
+  today: string,
+): { orders: PullOrder[]; stopped: StoppedMonth[] } {
+  const orders: PullOrder[] = [
+    { client_id: c.clientId, kind: 'daily', start_day: addDays(today, -DAILY_WINDOW_DAYS), end_day: addDays(today, -1) },
+  ]
+  const stopped: StoppedMonth[] = []
+  const candidates: DaySegment[] = []
+  for (const s of segments) {
+    if (isSegmentCovered(s, own)) continue
+    const stoppedOn = stoppedOnFor(monthHistory(own, c.clientId, c.siteUrl, s.start_day))
+    if (stoppedOn) stopped.push({ client_id: c.clientId, month: s.start_day.slice(0, 7), stopped_on: stoppedOn })
+    else candidates.push(s)
+  }
+  for (const s of candidates.slice(0, MAX_BACKFILL_SEGMENTS_PER_DISPATCH)) {
+    orders.push({ client_id: c.clientId, kind: 'backfill', start_day: s.start_day, end_day: s.end_day })
+  }
+  return { orders, stopped }
+}
+
+/**
+ * One dispatch's plan: every client's daily window plus its uncovered, unstopped backfill months, and the list
+ * of stopped months.
+ *
+ * "Newly stopped" timing: a dispatch runs BEFORE the pulls it sends, so the pull that makes a month's third
+ * failure is only visible to the NEXT dispatch. A stopped month is new when its stopped_on is on or after the
+ * most recent dispatch seen in the receipts (normally yesterday). Comparing with the last dispatch — not with
+ * "yesterday" — means a skipped dispatch day does not lose the report. Everything is derived from receipts;
+ * nothing is stored.
+ */
 export function planPageDailyPulls(
   clients: readonly GscConnectedClient[],
-  receipts: readonly CoverageReceipt[],
+  receipts: readonly PlanReceipt[],
   today: string,
-): PullOrder[] {
-  const orders: PullOrder[] = []
+): PagePlan {
   const segments = backfillSegments(today)
+  const orders: PullOrder[] = []
+  const stopped: StoppedMonth[] = []
   for (const c of clients) {
-    orders.push({
-      client_id: c.clientId,
-      kind: 'daily',
-      start_day: addDays(today, -DAILY_WINDOW_DAYS),
-      end_day: addDays(today, -1),
-    })
     const own = receipts.filter((r) => r.client_id === c.clientId && r.site_url === c.siteUrl)
-    const uncovered = segments
-      .filter((s) => !isSegmentCovered(s, own))
-      .slice(0, MAX_BACKFILL_SEGMENTS_PER_DISPATCH)
-    for (const s of uncovered) {
-      orders.push({ client_id: c.clientId, kind: 'backfill', start_day: s.start_day, end_day: s.end_day })
-    }
+    const planned = planClient(c, own, segments, today)
+    orders.push(...planned.orders)
+    stopped.push(...planned.stopped)
   }
-  return orders
+  const last = lastDispatchDay(receipts)
+  const newlyStopped = last === null ? [] : stopped.filter((s) => s.stopped_on >= last)
+  return { orders, stopped, newlyStopped }
 }
 
 /** Only a 24-hour de-dup key inside Inngest; the real de-dup is the receipt coverage above. */

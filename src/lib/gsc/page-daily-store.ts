@@ -7,8 +7,9 @@
  *   and is never counted as written.
  * - URLs or keys longer than MAX_URL_BYTES bytes are not written (btree index
  *   entry limit) and are counted instead.
- * - A receipt's id is the id of the same order's cron_run_logs row, so the two
- *   can be joined without a second lookup.
+ * - A receipt's id is the id of the same order's cron_run_logs row. Both are
+ *   derived from the Inngest run id (cronRunIdFromInngestRun), so a failure
+ *   handler can close exactly its own order's receipt and run log.
  *
  * No client names or ids live here.
  */
@@ -21,9 +22,9 @@ import { loadGscConnectedClients } from './connected-clients'
 import {
   backfillWindowStart,
   planPageDailyPulls,
-  type CoverageReceipt,
+  type PagePlan,
+  type PlanReceipt,
   type PullKind,
-  type PullOrder,
 } from './page-daily-plan'
 
 export const PAGE_DAILY_TABLE = 'gsc_page_daily'
@@ -67,7 +68,7 @@ export interface CloseReceiptInput {
 }
 
 export type PlanResult =
-  | { readonly ok: true; readonly orders: readonly PullOrder[]; readonly clients: number }
+  | ({ readonly ok: true; readonly clients: number } & PagePlan)
   | { readonly ok: false; readonly reason: string }
 
 /** Byte length of a string in UTF-8 (what a btree index entry limit counts). */
@@ -172,87 +173,85 @@ export async function closeReceipt(
   }
 }
 
-/** Fail every still-running receipt of a run; never throws (runs in a failure handler). */
-export async function closeRunningReceiptsForRun(
+/**
+ * Fail ONE receipt if it is still running — the failure handler's half of "close exactly my own order".
+ * Never throws (it runs inside a failure handler). Returns the receipt's started_at when it was closed here,
+ * null when it was not running (already closed, or never opened) or the write failed.
+ */
+export async function closeReceiptIfRunning(
   supabase: SupabaseClient,
-  inngestRunId: string,
+  receiptId: string,
   input: { failure_kind: FailureKind; error: string },
   now: Date = new Date(),
-): Promise<Array<{ id: string; started_at: string }>> {
+): Promise<{ started_at: string } | null> {
   const { data, error } = await supabase
     .from(PAGE_FETCH_RECEIPTS_TABLE)
-    .update({
-      status: 'failed',
-      failure_kind: input.failure_kind,
-      error: input.error,
-      finished_at: now.toISOString(),
-    })
-    .eq('inngest_run_id', inngestRunId)
+    .update({ status: 'failed', failure_kind: input.failure_kind, error: input.error, finished_at: now.toISOString() })
+    .eq('id', receiptId)
     .eq('status', 'running')
-    .select('id, started_at')
-
+    .select('started_at')
   if (error) {
-    console.error('[gsc/page-daily-store] closing running receipts failed:', error.message)
-    return []
+    console.error('[gsc/page-daily-store] closing the running receipt failed:', error.message)
+    return null
   }
-
-  return (data ?? []).flatMap((row) => {
-    const id = row.id
-    const startedAt = row.started_at
-    if (typeof id !== 'string' || typeof startedAt !== 'string') return []
-    return [{ id, started_at: startedAt }]
-  })
+  const startedAt = (data ?? [])[0]?.started_at
+  return typeof startedAt === 'string' ? { started_at: startedAt } : null
 }
 
-/** Load the complete receipts that can vouch for coverage, across all pages. */
-export async function loadCoverageReceipts(
+/** Validate one receipt row; a row with an unexpected shape is skipped, never guessed. */
+export function toPlanReceipt(row: Record<string, unknown>): PlanReceipt | null {
+  const { client_id, site_url, kind, status, failure_kind, request_start_day, request_end_day, data_through_day, started_at } = row
+  if (
+    typeof client_id !== 'string' ||
+    typeof site_url !== 'string' ||
+    typeof request_start_day !== 'string' ||
+    typeof request_end_day !== 'string' ||
+    typeof started_at !== 'string'
+  ) {
+    return null
+  }
+  if (kind !== 'daily' && kind !== 'backfill') return null
+  if (status !== 'running' && status !== 'complete' && status !== 'truncated' && status !== 'failed') return null
+  return {
+    client_id,
+    site_url,
+    kind,
+    status,
+    failure_kind: failure_kind === 'auth' || failure_kind === 'quota' || failure_kind === 'other' ? failure_kind : null,
+    request_start_day,
+    request_end_day,
+    data_through_day: typeof data_through_day === 'string' ? data_through_day : null,
+    started_at,
+  }
+}
+
+/**
+ * Every receipt (any status) of the listed clients whose range ends inside the planning window, across pages.
+ * The planner needs all of them: complete / truncated ones for coverage, failed ones for the stop rule, and
+ * all of them for "when was the last dispatch".
+ */
+export async function loadPlanReceipts(
   supabase: SupabaseClient,
   clientIds: readonly string[],
   sinceDay: string,
-): Promise<CoverageReceipt[]> {
+): Promise<PlanReceipt[]> {
   if (clientIds.length === 0) return []
-
   const rows = await fetchAll<Record<string, unknown>>((from, to) =>
     supabase
       .from(PAGE_FETCH_RECEIPTS_TABLE)
-      .select('client_id, site_url, request_start_day, request_end_day, data_through_day, started_at')
+      .select('client_id, site_url, kind, status, failure_kind, request_start_day, request_end_day, data_through_day, started_at')
       .in('client_id', [...clientIds])
-      .eq('status', 'complete')
       .gte('request_end_day', sinceDay)
       .order('id', { ascending: true })
       .range(from, to),
   )
-
-  return rows.flatMap((row): CoverageReceipt[] => {
-    const clientId = row.client_id
-    const siteUrl = row.site_url
-    const startDay = row.request_start_day
-    const endDay = row.request_end_day
-    const startedAt = row.started_at
-    if (
-      typeof clientId !== 'string' ||
-      typeof siteUrl !== 'string' ||
-      typeof startDay !== 'string' ||
-      typeof endDay !== 'string' ||
-      typeof startedAt !== 'string'
-    ) {
-      return []
-    }
-    const through = row.data_through_day
-    return [
-      {
-        client_id: clientId,
-        site_url: siteUrl,
-        request_start_day: startDay,
-        request_end_day: endDay,
-        data_through_day: typeof through === 'string' ? through : null,
-        started_at: startedAt,
-      },
-    ]
+  return rows.flatMap((row) => {
+    const r = toPlanReceipt(row)
+    return r ? [r] : []
   })
 }
 
-/** Build one dispatch's pull orders, or report why the plan could not be built. */
+/** Build one dispatch's plan (orders + stopped months), or report why it could not be built. */
 export async function buildPageDailyPlan(
   supabase: SupabaseClient,
   today: string,
@@ -260,9 +259,9 @@ export async function buildPageDailyPlan(
   const roster = await loadGscConnectedClients(supabase)
   if (!roster.ok) return { ok: false, reason: `roster: ${roster.reason}` }
 
-  let receipts: CoverageReceipt[]
+  let receipts: PlanReceipt[]
   try {
-    receipts = await loadCoverageReceipts(
+    receipts = await loadPlanReceipts(
       supabase,
       roster.clients.map((c) => c.clientId),
       backfillWindowStart(today),
@@ -271,9 +270,5 @@ export async function buildPageDailyPlan(
     return { ok: false, reason: `receipts: ${err instanceof Error ? err.message : String(err)}` }
   }
 
-  return {
-    ok: true,
-    orders: planPageDailyPulls(roster.clients, receipts, today),
-    clients: roster.clients.length,
-  }
+  return { ok: true, clients: roster.clients.length, ...planPageDailyPulls(roster.clients, receipts, today) }
 }
