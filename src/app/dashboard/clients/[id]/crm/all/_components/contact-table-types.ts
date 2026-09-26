@@ -1,0 +1,126 @@
+/**
+ * 「全部客人」横表的共享类型、标签表和小格式化函数。
+ *
+ * 从 page.tsx 搬出来（2026-09-26，WP3 R6 纯搬家）：那个文件 1034 行，超了本仓
+ * 800 行上限，而 R7 还要往里加分段组件。这里只装**没有状态、没有 JSX** 的东西 ——
+ * 表格主体、时间线条目、详情块都要读它们，放在一处才不会各写一份标签表。
+ *
+ * 搬家规则：一个字都没改，只在每条顶层声明前面加了 export。谁想改标签文案
+ * 或加一个渠道，改这一处。
+ */
+
+export interface ContactRow {
+  contactId: string
+  name: string
+  firstSeenAt: string
+  lastTouchAt: string | null
+  phone: string | null
+  /** 号码在库里但打不通 —— 跟「今天该联系谁」那一页说同一件事。 */
+  phoneUnusable?: boolean
+  /** 被标成「别再联系」—— 展开里给一条取消的路（见 DncBanner）。 */
+  doNotContact?: boolean
+  email: string | null
+  hasMessenger: boolean
+  stage: string | null
+  stageLabel: string | null
+  /** 人工置顶时间（contacts.pinned_at）。非 null = 被钉在名单最前面。 */
+  pinnedAt: string | null
+  /** 「⭐置顶」附带的原因和到期日（contacts.important_note / important_due_at）。 */
+  important: { note: string | null; dueAt: string | null }
+  segment: string
+  segmentLabel: string
+  temperature: 'hot' | 'warm' | 'cold' | 'off'
+  custom: Record<string, string | null>
+}
+
+export interface CustomColumnMeta {
+  key: string
+  label: string
+}
+
+export type TimelineEntry =
+  | {
+      kind: 'touch'
+      at: string
+      channel: string
+      direction: 'inbound' | 'outbound'
+      summary: string | null
+      tour: string | null
+      outcome: string | null
+      travelWindow: string | null
+      callbackAt: string | null
+      competitor: string | null
+    }
+  | {
+      kind: 'message'
+      at: string
+      direction: 'inbound' | 'outbound'
+      senderName: string | null
+      body: string
+    }
+  | {
+      kind: 'stage'
+      at: string
+      fromStage: string | null
+      toStage: string | null
+      fromLabel: string | null
+      toLabel: string | null
+      changedBy: string | null
+      note: string | null
+    }
+
+// 渠道 / 方向标签一律带 fallback：DB 先加第 7 个渠道、前端没跟上时显示原值，不炸。
+export const CHANNEL_LABEL: Record<string, string> = {
+  meta_lead_form: 'FB 表单',
+  phone: '电话',
+  email: '邮件',
+  messenger: '私信',
+  web_form: '官网表单',
+  whatsapp: 'WhatsApp',
+}
+export const DIRECTION_LABEL: Record<string, string> = {
+  inbound: '客户来找的',
+  outbound: '我联系的',
+}
+export const OUTCOME_LABEL: Record<string, string> = {
+  no_answer: '没接通',
+  bad_number: '号码不通',
+  do_not_contact: '别再联系',
+  not_interested: '没兴趣',
+  // 少了这一条，「暂时不考虑」这个结论在时间线上完全不显示 ——
+  // 软硬拒绝分开这件事，在最主要的翻查视图里就等于没做。
+  not_interested_now: '暂时不考虑',
+  spoke: '聊上了',
+  callback_set: '约了回电',
+}
+
+// 冷热上色：烫的标红、温的标赭、冷的中性、已结论的灰。
+export const TEMP_CLS: Record<ContactRow['temperature'], string> = {
+  hot: 'bg-[#C2453A]/12 text-[#C2453A]',
+  warm: 'bg-me-ochre/12 text-me-ochre',
+  cold: 'bg-me-ivory text-me-charcoal/55',
+  off: 'bg-me-charcoal/5 text-me-charcoal/45',
+}
+
+export function ts(v: string | null | undefined): number {
+  if (!v) return 0
+  const t = new Date(v).getTime()
+  return Number.isNaN(t) ? 0 : t
+}
+
+export function fmtDate(iso: string | null): string {
+  if (!iso) return ''
+  return new Date(iso).toLocaleDateString('zh-CN', { year: 'numeric', month: 'numeric', day: 'numeric' })
+}
+
+/** 「今天 / 昨天 / 3天前 / 7/2」—— 最近联系用相对时间，不是干日期。 */
+export function relTime(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const now = new Date()
+  if (d.toDateString() === now.toDateString()) return '今天'
+  const days = Math.floor((now.getTime() - d.getTime()) / 86_400_000)
+  if (days === 1) return '昨天'
+  if (days >= 2 && days < 30) return `${days}天前`
+  return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
+}
