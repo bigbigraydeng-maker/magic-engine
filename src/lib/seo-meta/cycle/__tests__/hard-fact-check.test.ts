@@ -138,6 +138,30 @@ describe('checkHardFactsPreserved — reverse direction: new facts introduced', 
     expect(result.addedFacts.length).toBeGreaterThan(0)
   })
 
+  it('🔴 BLOCKER test: competitor price copied into CTS title — AI sees "$2,999" in a competitor SERP title and puts it in CTS new title', () => {
+    const result = checkHardFactsPreserved(
+      'China Tours from New Zealand 2026-27 | CTS Tours',
+      'Featured China tours from NZ. Backed by CTS — global travel brand founded in 1928. TAANZ-bonded.',
+      'China Tours from $2,999 — NZ Deals | CTS Tours',
+      'Featured China tours from NZ. Backed by CTS — global travel brand founded in 1928. TAANZ-bonded.',
+    )
+    expect(result.consistent).toBe(false)
+    expect(result.addedFacts).toContain('$2,999')
+    expect(result.droppedFacts).toContain('New Zealand')
+  })
+
+  it('🔴 BLOCKER mutation: if reverse check is removed (addedFacts always []), competitor price slips through', () => {
+    const result = checkHardFactsPreserved(
+      'Auckland City Tour',
+      'Half-day guided tour of Auckland.',
+      'Auckland City Tour from $499',
+      'Half-day guided tour of Auckland.',
+    )
+    expect(result.consistent).toBe(false)
+    expect(result.addedFacts).toContain('$499')
+    expect(result.addedFacts.length).toBeGreaterThan(0)
+  })
+
   it('a rewrite that keeps every fact returns addedFacts: []', () => {
     const result = checkHardFactsPreserved(
       'Auckland City Tour — $199',
