@@ -30,10 +30,13 @@ export interface HardFactCheckResult {
   consistent: boolean
   reason: string
   droppedFacts: string[]
+  addedFacts: string[]
 }
 
 const PRICE_RE = /\$\s?\d[\d,]*(?:\.\d+)?/g
-const DATE_RE = /\b(?:\d{1,2}\s+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(?:\d{1,2},?\s+)?\d{4}\b/gi
+const DATE_NAMED_RE = /\b(?:\d{1,2}\s+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(?:\d{1,2},?\s+)?\d{4}\b/gi
+const DATE_NUMERIC_RE = /\b\d{1,2}\/\d{1,2}\/\d{4}\b/g
+const DATE_NO_YEAR_RE = /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}\b(?!\s*,?\s*\d{4})/gi
 const ACRONYM_RE = /\b[A-Z]{3,}\b/g
 /**
  * "NZ"/"AU" as standalone words — 魏征 复审 2026-09-23: the exact incident
@@ -70,6 +73,11 @@ const AU_NZ_PLACE_NAMES = [
   'Sydney', 'Darwin', 'Hobart', 'Cairns', 'Perth', 'Australia',
 ].sort((a, b) => b.length - a.length)
 
+/** Normalize full-width ASCII variants (＄, ０-９, Ａ-Ｚ etc.) to half-width before extraction. */
+function normalizeWidth(text: string): string {
+  return text.replace(/[！-～]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
+}
+
 // Each extractor returns the fact as it actually reads in the source text
 // (for a human-legible reason string) — comparison against the NEW text
 // uses a separate `normalize` so formatting differences ($6,188 vs $6188,
@@ -82,19 +90,27 @@ function extractPrices(text: string): string[] {
 const normalizePrice = (s: string): string => s.replace(/[\s,]/g, '')
 
 function extractDates(text: string): string[] {
-  return [...text.matchAll(DATE_RE)].map((m) => m[0])
+  return [
+    ...text.matchAll(DATE_NAMED_RE),
+    ...text.matchAll(DATE_NUMERIC_RE),
+    ...text.matchAll(DATE_NO_YEAR_RE),
+  ].map((m) => m[0])
 }
 const normalizeDate = (s: string): string => s.toLowerCase().replace(/\s+/g, ' ').trim()
 
+const PLACE_NAMES_UPPER = new Set(AU_NZ_PLACE_NAMES.map((n) => n.toUpperCase()))
+
 function extractAcronyms(text: string): string[] {
-  return [...text.matchAll(ACRONYM_RE)].map((m) => m[0]).filter((a) => !ACRONYM_ALLOWLIST.has(a))
+  return [...text.matchAll(ACRONYM_RE)].map((m) => m[0]).filter((a) => !ACRONYM_ALLOWLIST.has(a) && !PLACE_NAMES_UPPER.has(a))
 }
 
 function extractPlaceNames(text: string): string[] {
-  const fullNames = AU_NZ_PLACE_NAMES.filter((name) => text.includes(name))
+  const lowerText = text.toLowerCase()
+  const fullNames = AU_NZ_PLACE_NAMES.filter((name) => lowerText.includes(name.toLowerCase()))
   const abbreviations = [...new Set([...text.matchAll(PLACE_ABBREVIATION_RE)].map((m) => m[0]))]
   return [...fullNames, ...abbreviations]
 }
+const normalizePlaceName = (s: string): string => s.toLowerCase()
 
 /** Facts present in oldText (by `extract`) that are no longer anywhere in newText, compared via `normalize` but reported in their original raw form. */
 function findDropped(oldText: string, newText: string, extract: (t: string) => string[], normalize: (s: string) => string = NO_OP_NORMALIZE): string[] {
@@ -115,22 +131,33 @@ export function checkHardFactsPreserved(
   newTitle: string,
   newDesc: string,
 ): HardFactCheckResult {
-  const oldText = `${oldTitle} ${oldDesc}`
-  const newText = `${newTitle} ${newDesc}`
+  const oldText = normalizeWidth(`${oldTitle} ${oldDesc}`)
+  const newText = normalizeWidth(`${newTitle} ${newDesc}`)
 
   const droppedFacts = [
     ...findDropped(oldText, newText, extractPrices, normalizePrice),
     ...findDropped(oldText, newText, extractDates, normalizeDate),
     ...findDropped(oldText, newText, extractAcronyms),
-    ...findDropped(oldText, newText, extractPlaceNames),
+    ...findDropped(oldText, newText, extractPlaceNames, normalizePlaceName),
   ]
 
-  if (droppedFacts.length === 0) {
-    return { consistent: true, reason: 'no price/date/accreditation/AU-NZ place name dropped', droppedFacts: [] }
+  const addedFacts = [
+    ...findDropped(newText, oldText, extractPrices, normalizePrice),
+    ...findDropped(newText, oldText, extractDates, normalizeDate),
+    ...findDropped(newText, oldText, extractAcronyms),
+    ...findDropped(newText, oldText, extractPlaceNames, normalizePlaceName),
+  ]
+
+  if (droppedFacts.length === 0 && addedFacts.length === 0) {
+    return { consistent: true, reason: 'no price/date/accreditation/AU-NZ place name dropped or added', droppedFacts: [], addedFacts: [] }
   }
+  const parts: string[] = []
+  if (droppedFacts.length > 0) parts.push(`drops fact(s) from the original — ${droppedFacts.join(', ')}`)
+  if (addedFacts.length > 0) parts.push(`introduces fact(s) not in the original — ${addedFacts.join(', ')}`)
   return {
     consistent: false,
-    reason: `hard rule (no AI involved): new text drops concrete fact(s) present in the original — ${droppedFacts.join(', ')}`,
+    reason: `hard rule (no AI involved): new text ${parts.join('; also ')}`,
     droppedFacts,
+    addedFacts,
   }
 }

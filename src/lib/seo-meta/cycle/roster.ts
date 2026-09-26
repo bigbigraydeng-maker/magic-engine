@@ -72,17 +72,33 @@ function parseKeywordFallbackLocations(raw: unknown): number[] {
     .slice(0, MAX_KEYWORD_FALLBACK_LOCATIONS)
 }
 
-// Case-insensitive: 魏征 复审 2026-09-23 — a slug typed with different
-// casing than what GSC/the candidate pipeline actually produces (both
-// lowercase in every real case seen so far, but never guaranteed) would
-// otherwise silently fail to match in runner.ts's protectedSlugs check,
-// with no error — "configured but not actually protected".
-function parseProtectedSlugs(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return []
-  return raw
+/**
+ * Parse and normalize protected slugs from client config.
+ * Returns { slugs, malformed } — malformed:true when the field exists but
+ * is not an array, which means "someone configured protection but it's
+ * broken" and the client must be skipped (silently returning [] would mean
+ * "protect nothing", the opposite of intent).
+ */
+export function parseProtectedSlugs(raw: unknown): { slugs: string[]; malformed: boolean } {
+  if (raw === undefined || raw === null) return { slugs: [], malformed: false }
+  if (!Array.isArray(raw)) return { slugs: [], malformed: true }
+  const slugs = raw
     .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
-    .map((v) => v.trim().toLowerCase())
+    .map((v) => normalizeSlug(v))
+    .filter((v) => v.length > 0)
     .slice(0, MAX_PROTECTED_SLUGS)
+  return { slugs, malformed: false }
+}
+
+export function normalizeSlug(v: string): string {
+  let s = v.trim()
+  try {
+    const url = new URL(s)
+    s = url.pathname
+  } catch {
+    // not a full URL — continue with raw value
+  }
+  return s.replace(/^\/+|\/+$/g, '').toLowerCase()
 }
 
 /**
@@ -112,6 +128,11 @@ function rowToEntry(row: { id?: unknown; domain?: unknown; semrush_db?: unknown;
   if (typeof row.id !== 'string' || row.id.length === 0) return null
   if (typeof row.domain !== 'string' || row.domain.trim().length === 0) return null
   const cfg = (row.seo_config ?? {}) as Record<string, unknown>
+  const protectedResult = parseProtectedSlugs(cfg.meta_cycle_protected_slugs)
+  if (protectedResult.malformed) {
+    console.error(`[seo-meta-cycle] client ${row.id}: meta_cycle_protected_slugs exists but is not an array — skipping client (treating as empty would mean "protect nothing", the opposite of intent)`)
+    return null
+  }
   return {
     clientId: row.id,
     domain: row.domain.trim(),
@@ -123,7 +144,7 @@ function rowToEntry(row: { id?: unknown; domain?: unknown; semrush_db?: unknown;
     cooldownDays: typeof cfg.meta_cycle_cooldown_days === 'number' && cfg.meta_cycle_cooldown_days > 0 ? cfg.meta_cycle_cooldown_days : DEFAULT_COOLDOWN_DAYS,
     brandVoice: typeof cfg.meta_cycle_brand_voice === 'string' && cfg.meta_cycle_brand_voice.trim().length > 0 ? cfg.meta_cycle_brand_voice : DEFAULT_BRAND_VOICE,
     keywordFallbackLocations: parseKeywordFallbackLocations(cfg.meta_cycle_keyword_fallback_locations),
-    protectedSlugs: parseProtectedSlugs(cfg.meta_cycle_protected_slugs),
+    protectedSlugs: protectedResult.slugs,
   }
 }
 

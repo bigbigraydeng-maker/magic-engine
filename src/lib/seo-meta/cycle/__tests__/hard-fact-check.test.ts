@@ -87,3 +87,132 @@ describe('checkHardFactsPreserved — regex-only fact preservation, no AI involv
     expect(result.consistent).toBe(true)
   })
 })
+
+describe('checkHardFactsPreserved — reverse direction: new facts introduced', () => {
+  it('🔴 BLOCKER test: "Guided tours" → "from $3,990" — a price the original never stated is caught', () => {
+    const result = checkHardFactsPreserved(
+      'Guided Tours of China',
+      'Explore China with expert guides.',
+      'Guided Tours of China from $3,990',
+      'Explore China with expert guides.',
+    )
+    expect(result.consistent).toBe(false)
+    expect(result.addedFacts).toContain('$3,990')
+    expect(result.droppedFacts).toEqual([])
+  })
+
+  it('🔴 BLOCKER test: "from Auckland" → "Auckland & Wellington" — Wellington was not in the original', () => {
+    const result = checkHardFactsPreserved(
+      'China Tours from Auckland',
+      'Depart from Auckland.',
+      'China Tours from Auckland & Wellington',
+      'Depart from Auckland & Wellington.',
+    )
+    expect(result.consistent).toBe(false)
+    expect(result.addedFacts).toContain('Wellington')
+    expect(result.droppedFacts).toEqual([])
+  })
+
+  it('🔴 BLOCKER test: "from New Zealand" → "from Auckland, New Zealand" — Auckland is added', () => {
+    const result = checkHardFactsPreserved(
+      'China Tours from New Zealand',
+      'Tours departing from New Zealand.',
+      'China Tours from Auckland, New Zealand',
+      'Tours departing from Auckland, New Zealand.',
+    )
+    expect(result.consistent).toBe(false)
+    expect(result.addedFacts).toContain('Auckland')
+  })
+
+  it('reason string distinguishes "dropped" from "added" facts', () => {
+    const result = checkHardFactsPreserved(
+      'Auckland City Tour — $199',
+      'From Christchurch.',
+      'Wellington City Tour — $299',
+      'From Hamilton.',
+    )
+    expect(result.consistent).toBe(false)
+    expect(result.reason).toContain('drops fact(s) from the original')
+    expect(result.reason).toContain('introduces fact(s) not in the original')
+    expect(result.droppedFacts.length).toBeGreaterThan(0)
+    expect(result.addedFacts.length).toBeGreaterThan(0)
+  })
+
+  it('a rewrite that keeps every fact returns addedFacts: []', () => {
+    const result = checkHardFactsPreserved(
+      'Auckland City Tour — $199',
+      'Half-day guided tour.',
+      'Auckland City Tour: Best Value — $199',
+      'Half-day guided tour of Auckland.',
+    )
+    expect(result.consistent).toBe(true)
+    expect(result.addedFacts).toEqual([])
+    expect(result.droppedFacts).toEqual([])
+  })
+})
+
+describe('checkHardFactsPreserved — format normalization', () => {
+  it('place name comparison is case-insensitive (e.g. "auckland" matches "Auckland")', () => {
+    const result = checkHardFactsPreserved(
+      'Tours from AUCKLAND',
+      'Depart from auckland city.',
+      'Tours from Auckland',
+      'Depart from Auckland city.',
+    )
+    expect(result.consistent).toBe(true)
+  })
+
+  it('full-width dollar sign ＄ is normalized to half-width $', () => {
+    const result = checkHardFactsPreserved(
+      'Tour — ＄199',
+      'Book now.',
+      'Tour — $199',
+      'Book now.',
+    )
+    expect(result.consistent).toBe(true)
+  })
+
+  it('DD/MM/YYYY date format is detected', () => {
+    const result = checkHardFactsPreserved(
+      'Tour starts 22/12/2026',
+      'Book early.',
+      'Tour starts soon',
+      'Book early.',
+    )
+    expect(result.consistent).toBe(false)
+    expect(result.droppedFacts).toContain('22/12/2026')
+  })
+
+  it('month-day without year is detected (e.g. "December 22")', () => {
+    const result = checkHardFactsPreserved(
+      'Tour starts December 22',
+      'Book early.',
+      'Tour starts soon',
+      'Book early.',
+    )
+    expect(result.consistent).toBe(false)
+    expect(result.droppedFacts).toContain('December 22')
+  })
+
+  it('"Dec 22" without a year is also detected', () => {
+    const result = checkHardFactsPreserved(
+      'Available from Dec 22',
+      'Limited spots.',
+      'Available soon',
+      'Limited spots.',
+    )
+    expect(result.consistent).toBe(false)
+    expect(result.droppedFacts).toContain('Dec 22')
+  })
+
+  it('"22 Dec 2026" still works (existing format, not broken by new patterns)', () => {
+    const result = checkHardFactsPreserved(
+      'Tour on 22 Dec 2026',
+      'Book now.',
+      'Tour coming soon',
+      'Book now.',
+    )
+    expect(result.consistent).toBe(false)
+    expect(result.droppedFacts).toContain('22 Dec 2026')
+  })
+})
