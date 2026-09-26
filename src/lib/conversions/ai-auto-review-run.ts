@@ -35,6 +35,7 @@ import {
   type CircuitBreakerRule,
 } from './ai-auto-review-circuit-breaker'
 import { sendApprovedOutcome, type SendDeps } from './writeback-service'
+import { approvalCutoffIso, eventAgeMs, isTooLateToApprove, DAY_MS, META_EVENT_WINDOW_DAYS } from './event-window'
 
 /** 一次批处理最多处理这么多条——限制单次运行的最坏影响范围，跟熔断是两道独立的闸。 */
 export const MAX_BATCH_SIZE = 50
@@ -42,8 +43,6 @@ export const MAX_BATCH_SIZE = 50
 export const MAX_UNCERTAIN_ATTEMPTS = 3
 /** 判过 uncertain 之后，多久才允许下一次批处理再判一次——避免几分钟内被连续两次批处理重复判断。 */
 const UNCERTAIN_RETRY_COOLDOWN_MS = 6 * 60 * 60 * 1000
-/** 广告平台只收这么多天内的事件——比这更老的直接判过期，省一次 AI 调用。 */
-const META_WINDOW_DAYS = 7
 /**
  * 单次批处理内部的运行中止损硬顶——独立于历史基线的熔断（那个只在开工前查一次）。
  * 防的是"这一次批处理本身，因为 AI 判断链路当场出了问题，在几十条之内就把大量
@@ -158,8 +157,18 @@ export async function runAiAutoReviewForClient(
 
   const baseline = await fetchBaselineDailyAverage(supabase, clientId, now)
 
+  // ── 先清掉已经来不及发的：不看判过几次、不看冷却，一律直接判过期 ────────────
+  // 原来只有「判过不到 3 次、且过了冷却」的行才会被捞出来判过期；判满 3 次 uncertain
+  // 的行永远停在待审核，过期后只能人手批量拒绝（2026-09-20、09-26 各清过一次）。
+  const sweep = await sweepExpiredPending(supabase, clientId, now, batchSize)
+  const items: RunItemResult[] = [...sweep.items]
+  let expired = sweep.expired
+  const remaining = batchSize - sweep.items.length
+
   const cooldownCutoff = new Date(now.getTime() - UNCERTAIN_RETRY_COOLDOWN_MS).toISOString()
-  const { data: pending, error: pendingErr } = await supabase
+  const { data: pending, error: pendingErr } = remaining <= 0
+    ? { data: [], error: null }
+    : await supabase
     .from('me_sale_outcomes')
     .select(
       'id, client_id, contact_id, outcome_kind, customer_first, customer_last, ' +
@@ -171,7 +180,7 @@ export async function runAiAutoReviewForClient(
     .lt('ai_review_attempts', MAX_UNCERTAIN_ATTEMPTS)
     .or(`ai_last_reviewed_at.is.null,ai_last_reviewed_at.lt.${cooldownCutoff}`)
     .order('occurred_at', { ascending: true })
-    .limit(batchSize)
+    .limit(remaining)
 
   if (pendingErr) throw new Error(`读取待审核记录失败：${pendingErr.message}`)
 
@@ -179,11 +188,9 @@ export async function runAiAutoReviewForClient(
   // （不是从任意形状猜的），跟 writeback-service.ts 里 OutcomeRow 的同款断言一致
   // ——这里是唯一一处需要断言 Supabase 泛型返回值形状的地方。
   const rows = (pending ?? []) as unknown as PendingOutcomeRow[]
-  const items: RunItemResult[] = []
   let approved = 0
   let rejected = 0
   let uncertain = 0
-  let expired = 0
 
   // 这一轮内部的运行中汇总——见文件头 `BATCH_HARD_STOP_COUNT`/`_AMOUNT_MINOR` 的说明。
   // 分块调用时从上几块的累计起算（`opts.carried`），硬顶不因拆块而清零。
@@ -211,30 +218,12 @@ export async function runAiAutoReviewForClient(
       break
     }
 
-    const ageDays = Math.floor((now.getTime() - new Date(row.occurred_at).getTime()) / 86_400_000)
-
-    // 明显过期的不浪费一次 AI 调用，直接判过期不发送。
-    if (ageDays > META_WINDOW_DAYS) {
-      const didReject = await rejectOutcome(
-        supabase,
-        row.id,
-        'other',
-        `已超过广告平台 ${META_WINDOW_DAYS} 天时间窗口，系统自动标记不发送`,
-        now,
-      )
-      if (!didReject) {
-        // 已经被人工页面抢先处理过了，不写一条跟事实不符的"AI 已拒绝"审计。
-        items.push({ outcomeId: row.id, verdict: 'uncertain', message: '已被抢先处理，本轮跳过' })
-        continue
-      }
-      await writeAudit(supabase, row.id, 'ai_auto_rejected', {
-        reason: 'expired',
-        ageDays,
-        model: null,
-        promptVersion: null,
-      })
-      expired++
-      items.push({ outcomeId: row.id, verdict: 'expired', message: '已过期，自动标记不发送' })
+    // 兜底：上面的清理已经按同一口径处理过，这里正常不会命中；留着防查询条件以后被改漂。
+    // 来不及发的绝不交给 AI——模型对「第 7 天算不算」会犹豫，判 uncertain 堆积触发熔断。
+    if (isTooLateToApprove(row.occurred_at, now)) {
+      const item = await expireOutcome(supabase, row, now)
+      if (item.verdict === 'expired') expired++
+      items.push(item)
       continue
     }
 
@@ -353,6 +342,64 @@ export async function runAiAutoReviewForClient(
     expired,
     items,
   }
+}
+
+/**
+ * 把「已过期或离过期不到余量」的待审核行直接判不发送，不调 AI。
+ * 只挑这一个客户、未脱敏、仍在待审核的行；最多 `limit` 条，跟单轮上限共用一个额度。
+ * 不查客户开关——调用方负责（本文件只在开关打开时调用）。
+ */
+export async function sweepExpiredPending(
+  supabase: SupabaseClient,
+  clientId: string,
+  now: Date,
+  limit: number = MAX_BATCH_SIZE,
+): Promise<{ expired: number; items: RunItemResult[] }> {
+  const { data, error } = await supabase
+    .from('me_sale_outcomes')
+    .select('id, occurred_at')
+    .eq('client_id', clientId)
+    .eq('review_status', 'pending_review')
+    .is('redacted_at', null)
+    .lt('occurred_at', approvalCutoffIso(now))
+    .order('occurred_at', { ascending: true })
+    .limit(limit)
+  if (error) throw new Error(`读取已过期待审核记录失败：${error.message}`)
+
+  const items: RunItemResult[] = []
+  let expired = 0
+  for (const row of (data ?? []) as { id: string; occurred_at: string }[]) {
+    const item = await expireOutcome(supabase, row, now)
+    if (item.verdict === 'expired') expired++
+    items.push(item)
+  }
+  return { expired, items }
+}
+
+async function expireOutcome(
+  supabase: SupabaseClient,
+  row: { id: string; occurred_at: string },
+  now: Date,
+): Promise<RunItemResult> {
+  const ageDays = eventAgeMs(row.occurred_at, now) / DAY_MS
+  const didReject = await rejectOutcome(
+    supabase,
+    row.id,
+    'other',
+    `已过去 ${ageDays.toFixed(1)} 天，超过或即将超过广告平台 ${META_EVENT_WINDOW_DAYS} 天时间窗口，系统自动标记不发送`,
+    now,
+  )
+  if (!didReject) {
+    // 已经被人工页面抢先处理过了，不写一条跟事实不符的"AI 已拒绝"审计。
+    return { outcomeId: row.id, verdict: 'uncertain', message: '已被抢先处理，本轮跳过' }
+  }
+  await writeAudit(supabase, row.id, 'ai_auto_rejected', {
+    reason: 'expired',
+    ageDays: Math.round(ageDays * 100) / 100,
+    model: null,
+    promptVersion: null,
+  })
+  return { outcomeId: row.id, verdict: 'expired', message: '已过期，自动标记不发送' }
 }
 
 /** CAS：只在 pending_review 时才批准，返回是否真的改到了（防跟人工页面并发抢跑）。 */

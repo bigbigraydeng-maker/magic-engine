@@ -567,7 +567,9 @@ describe('授权失效 → 令牌修好后可以再发（2026-09-22，CTS 19 条
   })
 
   it('授权失败的行超过 7 天窗口后再来 → 判过期不发，不会永远重试', async () => {
-    seed(db)
+    // 事件时间要跟 NOW 同一个时钟：默认 seed 用真实时钟的「两天前」，真实日期走过 9-23 后
+    // 「NOW + 8 天」离事件就不到 7 天了，这条测试从那天起一直是红的（2026-09-26 发现）。
+    seed(db, { outcome: { occurred_at: new Date(NOW.getTime() - 2 * 86_400_000).toISOString() } })
     const w = makeWriter({ accept: () => ({ kind: 'auth', detail: '令牌失效' }) })
     await sendApprovedOutcome(OUTCOME, { ...deps(db, w), now: NOW })
     const later = new Date(NOW.getTime() + 8 * 86_400_000)

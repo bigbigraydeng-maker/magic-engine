@@ -118,11 +118,33 @@ describe('checkCircuitBreaker', () => {
         review_status: 'pending_review',
         ai_review_attempts: 2,
         amount_minor: null,
+        occurred_at: new Date(NOW.getTime() - 2 * 86_400_000).toISOString(),
       })
     }
     const v = await callCheck(NOW)
     expect(v.tripped).toBe(true)
     if (v.tripped) expect(v.rule).toBe('uncertain_backlog')
+  })
+
+  it('🔴 已过期（或离过期不到 1 小时）的 uncertain 不算堆积——它们本轮会被直接判过期清掉（2026-09-19 CTS 误熔断回归测试）', async () => {
+    const pendingUncertain = (ageDays: number) => ({
+      client_id: 'c1',
+      review_status: 'pending_review',
+      ai_review_attempts: 3,
+      amount_minor: null,
+      occurred_at: new Date(NOW.getTime() - ageDays * 86_400_000).toISOString(),
+    })
+    // 15 条都在第 7 天附近（事故当天的真实形状）+ 9 条还来得及发的
+    for (const d of [6.99, 7.0, 7.01, 7.2, 7.5, 7.9, 8, 9, 10, 11, 12, 13, 14, 6.99, 7.0]) outcomes.push(pendingUncertain(d))
+    for (let i = 0; i < 9; i++) outcomes.push(pendingUncertain(6.9))
+    const v = await callCheck(NOW)
+    expect(v.tripped).toBe(false)
+
+    // 再多 1 条还来得及发的 → 到阈值 10，照样触发
+    outcomes.push(pendingUncertain(1))
+    const v2 = await callCheck(NOW)
+    expect(v2.tripped).toBe(true)
+    if (v2.tripped) expect(v2.rule).toBe('uncertain_backlog')
   })
 
   it('批准占比异常：总量没涨，但该拒的都放行了 → 触发 approval_rate_spike', async () => {
