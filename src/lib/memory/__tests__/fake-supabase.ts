@@ -24,6 +24,13 @@ interface Filter {
 export interface FakeOptions {
   /** 让这些表的 SELECT 报错，用来测「读不到存量时的行为」。 */
   failSelectOn?: string[]
+  /**
+   * Per-table column lists. For a table listed here, `select(cols)` projects each row to
+   * exactly those columns (supporting `alias:col`, `col->>key` and `alias:col->>key`) and
+   * rejects any column not in the list — like PostgREST does. Tables not listed keep the
+   * old behaviour of returning whole rows.
+   */
+  schema?: Record<string, readonly string[]>
 }
 
 function matches(row: Row, f: Filter): boolean {
@@ -50,6 +57,9 @@ export function makeFakeSupabase(db: FakeDb, options: FakeOptions = {}): Supabas
     const filters: Filter[] = []
     let orderBy: { col: string; ascending: boolean } | null = null
     let limitN: number | null = null
+    let projection: string | null = null
+    let rangeFrom: number | null = null
+    let rangeTo: number | null = null
 
     const rowsOf = (): Row[] => (db[table] ??= [])
     const hits = (): Row[] => rowsOf().filter(r => filters.every(f => matches(r, f)))
@@ -88,11 +98,62 @@ export function makeFakeSupabase(db: FakeDb, options: FakeOptions = {}): Supabas
         })
       }
       if (limitN != null) rows = rows.slice(0, limitN)
+      if (rangeFrom != null && rangeTo != null) rows = rows.slice(rangeFrom, rangeTo + 1)
+
+      const columns = options.schema?.[table]
+      if (columns && projection && projection !== '*') {
+        const items = projection
+          .split(',')
+          .map(s => s.trim())
+          .filter(s => s.length > 0)
+
+        // Like PostgREST, an unknown column is an error even when no row matches.
+        for (const item of items) {
+          const source = item.includes(':') ? item.slice(item.indexOf(':') + 1).trim() : item
+          const col = source.includes('->>') ? source.slice(0, source.indexOf('->>')).trim() : source
+          if (!columns.includes(col)) {
+            return { data: null, error: { message: `column ${table}.${col} does not exist` } }
+          }
+        }
+
+        const projected: Row[] = []
+        for (const row of rows) {
+          const out: Row = {}
+          for (const item of items) {
+            const colon = item.indexOf(':')
+            const alias = colon === -1 ? null : item.slice(0, colon).trim()
+            const source = colon === -1 ? item : item.slice(colon + 1).trim()
+
+            const arrow = source.indexOf('->>')
+            if (arrow !== -1) {
+              const col = source.slice(0, arrow).trim()
+              const key = source.slice(arrow + 3).trim()
+              if (!columns.includes(col)) {
+                return { data: null, error: { message: `column ${table}.${col} does not exist` } }
+              }
+              const raw = (row[col] as Record<string, unknown> | null | undefined)?.[key]
+              out[alias ?? key] = raw === null || raw === undefined ? null : String(raw)
+            } else {
+              const col = source
+              if (!columns.includes(col)) {
+                return { data: null, error: { message: `column ${table}.${col} does not exist` } }
+              }
+              out[alias ?? col] = row[col] ?? null
+            }
+          }
+          projected.push(out)
+        }
+        return { data: projected, error: null }
+      }
+
       return { data: rows, error: null }
     }
 
     const builder: Record<string, unknown> = {
-      select() { return builder },
+      select(cols?: string) {
+        if (mode === 'select' && typeof cols === 'string') projection = cols
+        return builder
+      },
       insert(p: Row) { mode = 'insert'; payload = p; return builder },
       update(p: Row) { mode = 'update'; payload = p; return builder },
       eq(col: string, val: unknown)  { filters.push({ op: 'eq', col, val });  return builder },
@@ -110,6 +171,9 @@ export function makeFakeSupabase(db: FakeDb, options: FakeOptions = {}): Supabas
         return builder
       },
       limit(n: number) { limitN = n; return builder },
+      range(from: number, to: number) { rangeFrom = from; rangeTo = to; return builder },
+      // Type-only helper on the real builder (returns itself at runtime).
+      overrideTypes() { return builder },
       single() {
         const { data, error } = run()
         return Promise.resolve({ data: data?.[0] ?? null, error })
@@ -126,4 +190,17 @@ export function makeFakeSupabase(db: FakeDb, options: FakeOptions = {}): Supabas
   }
 
   return { from } as unknown as SupabaseClient
+}
+
+/** A completed attribution run one hour before `now`, with no GSC errors. */
+export function healthyAttributionRun(now: Date): Row {
+  const finished = new Date(now.getTime() - 3_600_000).toISOString()
+  return {
+    id: 'attribution-run-1',
+    job_name: 'attribution-cron',
+    status: 'completed',
+    started_at: finished,
+    finished_at: finished,
+    summary: { gsc: { errors: [] } },
+  }
 }
