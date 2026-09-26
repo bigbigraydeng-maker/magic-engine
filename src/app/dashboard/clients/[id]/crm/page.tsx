@@ -115,6 +115,8 @@ interface Bucket {
 interface Payload {
   buckets: Bucket[]
   offList: OffRow[]
+  /** 名单外联系人超过 300 人时为 true，列表不完整。 */
+  offListTruncated?: boolean
   counts: Record<Segment, number>
   totalContacts: number
   todoTotal: number
@@ -214,7 +216,7 @@ function dueText(iso: string): string {
 function ReachAction({ row }: { row: Row }) {
   const base = 'block border-t border-me-charcoal/8 px-3 py-2.5 text-[14px] font-bold'
 
-  if ((row.suggestedChannel === 'phone' || row.suggestedChannel === 'sms') && row.phone) {
+  if ((row.suggestedChannel === 'phone' || row.suggestedChannel === 'sms') && row.phone && !row.phoneUnusable) {
     return (
       <a
         href={`tel:${row.phone}`}
@@ -226,13 +228,7 @@ function ReachAction({ row }: { row: Row }) {
     )
   }
 
-  /**
-   * 🔴 号码在库里、但那个号打不通 —— **不能说成「没留电话」**。
-   *
-   * 抽屉里明明存着号码，卡上却写「没留电话」，销售一眼就能戳穿，
-   * 而这一页最贵的资产是「它说的话可信」。顺带把该做的事说出来：
-   * 用别的渠道回，**顺手问他要个新号**，否则这个号永远是坏的。
-   */
+  // 坏号：提示换渠道顺带补号（不说「没留电话」，号码存在但打不通）
   if (row.phoneUnusable) {
     const how = row.suggestedChannel === 'messenger' ? '先在 Messenger 回他' : '先发邮件'
     return (
@@ -242,15 +238,21 @@ function ReachAction({ row }: { row: Row }) {
     )
   }
 
-  if (row.suggestedChannel === 'messenger') {
-    return <p className={`${base} bg-me-ivory/40 text-me-charcoal/60`}>💬 没留电话 —— 只能在 Messenger 回他</p>
+  // 非电话渠道：只显示渠道标签，不解释"没留电话"
+  const CHANNEL_BADGE: Record<string, string> = {
+    messenger: '💬 Messenger',
+    email: '✉️ 邮件',
+    sms: '📱 短信',
   }
-
-  if (row.suggestedChannel === 'email') {
-    return <p className={`${base} bg-me-ivory/40 text-me-charcoal/60`}>✉️ 没留电话 —— 只能发邮件</p>
-  }
-
-  return null
+  const badge = CHANNEL_BADGE[row.suggestedChannel]
+  if (!badge) return null
+  return (
+    <div className="border-t border-me-charcoal/8 px-3 py-2">
+      <span className="inline-flex items-center rounded-full bg-me-charcoal/8 px-2.5 py-0.5 text-[12px] font-bold text-me-charcoal/55">
+        {badge}
+      </span>
+    </div>
+  )
 }
 
 /**
@@ -270,18 +272,11 @@ function FollowUpMarks({ row }: { row: Row }) {
   if (typeof row.openedDaysAgo === 'number') {
     bits.push(row.openedDaysAgo <= 0 ? '今天打开过邮件' : `${row.openedDaysAgo} 天前打开过邮件`)
   }
-  if (bits.length === 0 && !row.lastNote) return null
+  if (bits.length === 0) return null
 
   return (
     <div className="border-t border-me-charcoal/8 px-3 py-2">
-      {row.lastNote && (
-        <p className="line-clamp-2 text-[13px] leading-snug text-me-charcoal/60">
-          上次：{row.lastNote}
-        </p>
-      )}
-      {bits.length > 0 && (
-        <p className="mt-1 text-[12px] text-me-charcoal/40">{bits.join(' · ')}</p>
-      )}
+      <p className="text-[12px] text-me-charcoal/40">{bits.join(' · ')}</p>
     </div>
   )
 }
@@ -311,8 +306,6 @@ function Card({
   // 今天已经跟过的整张卡变浅 —— 销售扫一眼就知道还剩哪些没动，
   // 不用靠脑子记。鼠标移上去恢复，因为还是要能点进去看。
   const done = row.doneToday === true
-  // 卡上那个「打电话时顺手记一行」的输入框，默认收着（14 张卡全开是一片噪音）。
-  const [noting, setNoting] = useState(false)
   return (
     <div
       className={`relative rounded-xl border bg-white shadow-sm transition ${
@@ -380,38 +373,6 @@ function Card({
           其中 106 人只有 Facebook 身份。让销售去打一个打不了的人，这一页就废了。 */}
       <ReachAction row={row} />
 
-      {/**
-       * 打完电话顺手记一行 —— **卡上直接记，不用点进抽屉**。
-       *
-       * 板桥（销售视角）说这是他最想要的一个功能，比三段式改版还重要：
-       * 一手拿电话时，「点开抽屉 → 点记一笔 → 打字 → 点存」这一串做不了。
-       * 这里是：点一下 → 打字 → 回车。
-       *
-       * 说了时间（「周五给报价」）会自动排上，到那天把人放回名单 ——
-       * 存完那句确认会告诉他排在哪天，没读懂也会明说（见 lib/crm/next-step）。
-       */}
-      {noting ? (
-        <QuickNote
-          clientId={clientId}
-          contactId={row.contactId}
-          onCancel={() => setNoting(false)}
-          onDone={(msg) => {
-            setNoting(false)
-            onLogged(msg)
-          }}
-        />
-      ) : (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            setNoting(true)
-          }}
-          className="block w-full border-t border-me-charcoal/8 px-3 py-2 text-left text-[13px] font-bold text-me-charcoal/45 hover:bg-me-ivory/60 hover:text-me-charcoal"
-        >
-          ✎ 记一笔
-        </button>
-      )}
 
       {/* 早上要一眼看懂的三件事：谁跟的、聊到哪了、他有没有打开过邮件 */}
       <FollowUpMarks row={row} />
@@ -463,6 +424,7 @@ function CardExits({
   row: Row
   onLogged: (msg: string, reload?: boolean) => void
 }) {
+  const [open, setOpen] = useState(false)
   const [menu, setMenu] = useState<null | 'snooze' | 'wrong' | 'drop'>(null)
   const [busy, setBusy] = useState(false)
 
@@ -493,20 +455,30 @@ function CardExits({
 
   return (
     <div className="border-t border-me-charcoal/8 px-2 py-1.5">
-      {menu === null && (
+      {menu === null && !open && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className={`${base} text-me-charcoal/30 hover:bg-me-ivory hover:text-me-charcoal/60`}
+          title="推迟 / 他不买了 / 分错了"
+        >
+          …
+        </button>
+      )}
+
+      {menu === null && open && (
         <div className="flex flex-wrap items-center gap-0.5">
           <button type="button" disabled={busy} onClick={() => setMenu('snooze')} className={quiet}>
             推迟
           </button>
-          {/* 🔴 **不可逆的动作不能一点就生效**（板桥 2026-08-06）。
-              原先这三个键同样的灰字同样的大小，而「推迟」点了会展开二次选择、
-              「他不买了」一点就落库 —— 手滑一下，一个还有戏的客人当天就被
-              排出群发名单，而且他不会发现。所以跟「推迟」一样做成两步。 */}
           <button type="button" disabled={busy} onClick={() => setMenu('drop')} className={quiet}>
             他不买了
           </button>
           <button type="button" disabled={busy} onClick={() => setMenu('wrong')} className={quiet}>
             分错了
+          </button>
+          <button type="button" onClick={() => setOpen(false)} className={`${base} text-me-charcoal/25 hover:text-me-charcoal/50`}>
+            ✕
           </button>
         </div>
       )}
@@ -1184,6 +1156,126 @@ function NewContact({ clientId, onDone }: { clientId: string; onDone: () => void
   )
 }
 
+const REACH_LABEL: Record<string, string> = {
+  phone: '电话',
+  sms: '短信',
+  email: '邮件',
+  messenger: 'Messenger',
+  none: '—',
+}
+
+const LAYER_LABEL: Record<Layer, string> = {
+  // 「客人在等你」= 主动去联系，「等回复」让人误解成我们在等他回 —— 两个方向相反。
+  waiting: '客人在等你',
+  acted: '有动作',
+  queued: '放着',
+}
+
+type RowWithLayer = Row & { layer: Layer }
+
+const TD = 'px-3 py-2.5 text-[13px] align-top'
+
+function ListRowActive({ r, onOpen }: { r: RowWithLayer; onOpen: (r: RowWithLayer) => void }) {
+  // 按 suggestedChannel 决定展示方式，与看板 ReachAction 保持一致：
+  // 只有建议渠道是电话、号码存在且没有标坏时才给拨号链接，其余情况只显示渠道文字。
+  const showTelLink = r.suggestedChannel === 'phone' && !!r.phone && !r.phoneUnusable
+  const reachCell = showTelLink
+    ? <a href={`tel:${r.phone}`} onClick={(e) => e.stopPropagation()} className="font-bold text-me-ochre hover:underline">{r.phone}</a>
+    : <span className="text-me-charcoal/40">{REACH_LABEL[r.suggestedChannel] ?? '—'}</span>
+
+  return (
+    <tr
+      onClick={() => onOpen(r)}
+      className={`cursor-pointer border-b border-me-charcoal/5 transition hover:bg-me-ivory/50 ${r.doneToday ? 'opacity-50' : ''}`}
+    >
+      <td className={TD}>
+        {r.doneToday && <span className="mr-1 text-me-ochre">✓</span>}
+        <span className="font-bold text-me-charcoal">{r.name}</span>
+        {r.kind && r.kind !== 'retail' && (
+          <span className="ml-1.5 rounded-full bg-me-charcoal/8 px-1.5 py-0.5 text-[11px] text-me-charcoal/55">
+            {CONTACT_KIND_LABEL[r.kind]}
+          </span>
+        )}
+      </td>
+      <td className={TD}>
+        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${
+          r.layer === 'waiting' ? 'bg-[#C2453A]/10 text-[#C2453A]'
+          : r.layer === 'acted' ? 'bg-me-ochre/10 text-me-ochre'
+          : 'bg-me-charcoal/8 text-me-charcoal/55'
+        }`}>
+          {LAYER_LABEL[r.layer]}
+        </span>
+      </td>
+      <td className={`${TD} text-me-charcoal/60`}>{reachCell}</td>
+      <td className={`${TD} text-me-charcoal/55`}>{r.stageLabel ?? '—'}</td>
+      <td className={`${TD} max-w-[240px] truncate text-me-charcoal/45`}>
+        {r.lastNote ?? <span className="italic text-me-charcoal/25">有什么要记的…</span>}
+      </td>
+    </tr>
+  )
+}
+
+function ListRowOff({ r, onOpen }: { r: OffRow; onOpen: (r: OffRow) => void }) {
+  return (
+    <tr
+      onClick={() => onOpen(r)}
+      className="cursor-pointer border-b border-me-charcoal/5 opacity-40 transition hover:opacity-70"
+    >
+      <td className={TD}><span className="font-bold text-me-charcoal">{r.name}</span></td>
+      <td className={TD}>
+        <span className="rounded-full bg-me-charcoal/8 px-2 py-0.5 text-[11px] font-bold text-me-charcoal/45">
+          {OFF_GROUP_LABEL[r.group]}
+        </span>
+      </td>
+      <td className={`${TD} text-me-charcoal/45`}>{r.phone ?? r.email ?? '—'}</td>
+      <td className={`${TD} text-me-charcoal/45`}>{r.stageLabel ?? '—'}</td>
+      <td className={`${TD} max-w-[240px] truncate text-me-charcoal/30`}>{r.lastNote ?? '—'}</td>
+    </tr>
+  )
+}
+
+/** 所有人平铺成一张表 —— 看板的补充视图，看「这个客户的人都是谁」。 */
+function ContactListView({
+  rows,
+  offRows,
+  truncated,
+  onOpen,
+  onOpenOff,
+}: {
+  rows: RowWithLayer[]
+  offRows: OffRow[]
+  /** 后端每批最多返回 300 人，超过时列表是不完整的 —— 必须说清楚。 */
+  truncated: boolean
+  onOpen: (r: RowWithLayer) => void
+  onOpenOff: (r: OffRow) => void
+}) {
+  const th = 'px-3 py-2 text-left text-[11px] font-bold text-me-charcoal/45 whitespace-nowrap'
+  return (
+    <div className="overflow-x-auto rounded-xl border border-me-charcoal/10 bg-white">
+      {truncated && (
+        <p className="border-b border-me-charcoal/8 bg-amber-50 px-4 py-2 text-[12px] font-bold text-amber-700">
+          ⚠ 联系人太多，这里只显示了部分记录，完整列表暂不支持，请让研发支持分页功能
+        </p>
+      )}
+      <table className="w-full border-collapse">
+        <thead className="border-b border-me-charcoal/8 bg-me-ivory/60">
+          <tr>
+            <th className={th}>姓名</th>
+            <th className={th}>状态</th>
+            <th className={th}>联系方式</th>
+            <th className={th}>阶段</th>
+            <th className={th}>上次备注</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => <ListRowActive key={r.contactId} r={r} onOpen={onOpen} />)}
+          {offRows.map((r) => <ListRowOff key={r.contactId} r={r} onOpen={onOpenOff} />)}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 /**
  * 不在今天名单上的人。
  *
@@ -1319,6 +1411,7 @@ export default function CrmTodayPage() {
    * 但绝不把同行藏掉：他们是真业务，只是跟进方式不同。切一下就全在。
    */
   const [kindView, setKindView] = useState<KindView>('retail')
+  const [view, setView] = useState<'board' | 'list'>('board')
   /** 点开的那个人（看板卡片 / 搜索结果 / 名单外的人 都用同一个抽屉）。 */
   const [picked, setPicked] = useState<DrawerRow | null>(null)
 
@@ -1480,6 +1573,8 @@ export default function CrmTodayPage() {
    * 拉回来就清零（见 afterWrite）。
    */
   const shown = buckets.flatMap((b) => b.people)
+  // 列表视图需要知道每个人属于哪一层（等回复/有动作/放着）
+  const shownWithLayer = buckets.flatMap((b) => b.people.map((p) => ({ ...p, layer: b.layer })))
   const base = dayProgress(shown.map((p) => ({ handled: p.doneToday === true })))
   const progress = {
     total: base.total,
@@ -1594,9 +1689,37 @@ export default function CrmTodayPage() {
               </div>
             )}
             <DayProgressBar total={progress.total} done={progress.done} left={progress.left} />
+            {/* 看板 / 列表切换 */}
+            <div className="flex overflow-hidden rounded-xl border border-me-charcoal/15 bg-white">
+              {([
+                { k: 'board' as const, label: '看板' },
+                { k: 'list' as const, label: '列表' },
+              ]).map((o) => (
+                <button
+                  key={o.k}
+                  type="button"
+                  onClick={() => setView(o.k)}
+                  className={`px-3 py-2 text-sm font-bold transition ${
+                    view === o.k
+                      ? 'bg-me-charcoal text-white'
+                      : 'text-me-charcoal/55 hover:bg-me-ivory'
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {searching ? (
+          {view === 'list' && !searching ? (
+            <ContactListView
+              rows={shownWithLayer}
+              offRows={(data.offList ?? []).filter((r) => keepKind(r.kind))}
+              truncated={buckets.some((b) => b.truncated) || !!data.offListTruncated}
+              onOpen={(r) => setPicked(r)}
+              onOpenOff={(r) => setPicked(r)}
+            />
+          ) : searching ? (
             <section>
               <p className="mb-2 text-xs font-bold text-me-charcoal/45">找到 {found.length} 人</p>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">

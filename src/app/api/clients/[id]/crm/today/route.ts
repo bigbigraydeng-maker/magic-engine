@@ -765,11 +765,13 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   //    搜索时两组直接拼起来，还会撞出重复的 React key。
   //    今天以冻结的那份为准，明天冻结失效他自然落到这一栏。
   const rankedIds = new Set(ranked.map((c) => c.id))
-  const off = models
+  const offAll = models
     .filter((c) => !rankedIds.has(c.id))
     .map((c) => ({ c, seg: segmentContact(c, now) }))
     .filter((x) => x.seg.temperature === 'cold' || x.seg.temperature === 'off')
-    .slice(0, 300)
+  const offSliced = offAll.slice(0, 300)
+  const offListTruncated = offAll.length > offSliced.length
+  const off = offSliced
     .map(({ c, seg }) => {
       const row = contactById.get(c.id)
       const meta = row?.stage ? stageMeta.get(row.stage) : undefined
@@ -851,6 +853,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   return NextResponse.json({
     buckets,
     offList: off,
+    offListTruncated,
     // 在这一页直接回私信时，发出去的话是挂在谁名下的 —— 两个 CTS 邮箱共用
     // 这块屏，发送框要当面说清楚现在是谁在说话（跟私信页同一口径）。
     viewerEmail: access.user.email ?? null,

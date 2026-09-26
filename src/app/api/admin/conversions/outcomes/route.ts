@@ -167,7 +167,7 @@ export async function GET(request: Request) {
     // 新增泄露面，只是省一次跳转。
     'id, outcome_kind, order_ref, amount_minor, currency, occurred_at, ' +
     'review_status, reject_reason, redacted_at, source_kind, created_at, contact_id, customer_first, ' +
-    'me_conversion_writebacks(id, status, last_error, next_attempt_at)'
+    'me_conversion_writebacks(id, status, last_error, last_error_code, next_attempt_at)'
 
   // 深链目标查询：今日待办邮件里的 ?focus=<id> 指向的记录可能比列表的
   // limit/排序窗口更老（积压超过 limit 条时会被挤出默认列表）。

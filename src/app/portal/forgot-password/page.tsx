@@ -1,10 +1,9 @@
 import Link from 'next/link'
 import { MeMark, MeMarkDefs } from '@/components/ui/me-mark'
-import ForgotPasswordForm from './_components/ForgotPasswordForm'
 
 export const metadata = {
   title: 'Forgot Password',
-  description: 'Reset your Magic Engine account password.',
+  description: 'Contact a Magic Engine administrator to reset your password.',
 }
 
 export default function ForgotPasswordPage() {
@@ -26,7 +25,7 @@ export default function ForgotPasswordPage() {
             Back in the loop<br />in 60 seconds.
           </h1>
           <p className="mt-4 text-sm leading-[1.75] text-white/60">
-            Enter your email and we'll send a reset link. Click it, set a new password, and you're straight back into your workspace.
+            Your Magic Engine administrator can set a new password for your account.
           </p>
         </div>
         <Link href="https://magicengine.com.au" className="text-xs text-white/35 no-underline transition-colors hover:text-white/55">
@@ -44,14 +43,12 @@ export default function ForgotPasswordPage() {
         <div className="w-full max-w-[360px]">
           <div className="mb-7">
             <h2 className="font-display text-[2rem] font-bold leading-tight tracking-tight text-me-charcoal">
-              Reset your password.
+              Ask an administrator to reset it.
             </h2>
             <p className="mt-2 text-sm leading-6 text-me-charcoal/60">
-              Enter the email address on your account and we'll send a reset link.
+              For account security, password changes are handled by a Magic Engine administrator in the User Console.
             </p>
           </div>
-
-          <ForgotPasswordForm />
 
           <p className="mt-7 text-center text-xs text-me-charcoal/45">
             Remember it?{' '}

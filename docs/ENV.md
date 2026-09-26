@@ -55,6 +55,11 @@
 | `PERPLEXITY_API_KEY` | AI 可见度追踪引擎之一 | Render-web | ✅ |
 | `GEMINI_API_KEY` | Google Gemini（AI 可见度追踪第 4 引擎） | Render-web | ❌ |
 | `AI_TRACKER_ENABLE_CLAUDE` | 开关：AI Tracker 是否跑 Claude 引擎 | Render-web | ❌ |
+| `TYPESAFE_API_KEY` | TypeSafe Jev 判断模型（`src/lib/jev/client.ts`，对外封装名「Compliance Engine」）。三个判断点在用：① SEO 事实核对（`fact-check.ts`，PR #1826）；② 内容工厂成片文案品控——判断竞品品牌/占位字幕/人称口吻（`content-quality-guard.ts` / `scanContentQualityFlags`，PR #1825/#1832）；③ CTS Messenger AI 客服 verifier 的品牌红线/数字核实语义补充判断（`verifier/policies/cts.ts` / `verifyCtsReplyWithSemanticChecks`，2026-09-20，PM 已确认可发客户对话内容给 Jev）。`callJev` 缺这个变量会直接抛错：①处 `checkFactPreservation` fail-closed 恒定返回「有矛盾」；②处 `scanContentQualityFlags` 把每个带文案的工单标成 `quality_check_unavailable`；③处 fail-open 退回七道正则闸原结果（不阻塞发送，见 `MESSENGER_VERIFIER_SEMANTIC_DISABLED`）。**2026-09-20 晚间已在 `crazycontent`（Render-web）配上真实值，并现场拿 CTS 真实候选页验证过——拿到真实 `consistent:true`（score 0.08–0.10）而不是报错兜底，①处已确认生效。②③两处尚未单独验证，合并/复用前建议再跑一次确认。** | Render-web | ✅ |
+| `CONTENT_GUARD_CLICHE_THRESHOLD` | 发布前内容守卫：套话概率阈值（0–1，默认 0.8），≥ 即标记需人工复核 | 可选 | ✅ (仅 example) |
+| `CONTENT_GUARD_MAX_EMBEDDED_LATIN_WORDS` | 中文句子里允许夹的连续英文词数（默认 3，品牌名用） | 可选 | ✅ (仅 example) |
+| `CONTENT_GUARD_MAX_EMBEDDED_CJK_CHARS` | 英文句子里允许夹的汉字数（默认 0） | 可选 | ✅ (仅 example) |
+| `CONTENT_GUARD_CLICHE_DISABLED` | 开关：设 true 只关停套话判断——这是「主动不查」，不会把内容标成需复核；中英混杂检测照常跑、照常拦 | 可选 | ✅ (仅 example) |
 
 ## 3. 视觉 / 视频 / 素材
 
@@ -182,9 +187,12 @@
 | `ATTRIBUTION_DUAL_WINDOW_ENABLED` | 归因双窗口总闸（默认 **关**）。开了之后被转交的动作会同时按 GSC 的 28 天节奏和 pass 1 的窗口各算一次。**在 `src/lib/memory/` 的消费方（extractor / learning-rollup）改成按动作计样本、并且分页读全之前不许开**（那 5 条查询也没分页，光去重不分页等于没修） —— 这是唯一还没改的一类；本 PR 已经把其余读取方（行业基准、三个信心读取、后台聚合页 `/api/admin/flywheel/aggregate`、执行看板 `/api/clients/[id]/execution`）**既改成按动作折叠、也改成分页读全**（只折叠不分页照样错：折叠是在读到的行里挑代表，带目标指标那行被截掉就会挑错代表，那不是少算是算错） —— 现在开会让同一个动作在学习和行业基准里被重复计数（Issue #859）。关着的时候两个写入方还会顺手清掉自己在非权威窗口上的旧行（老版本留下的），因为只拒绝新写入挡不住已经存在的第二个窗口；这一步只在权威窗口真的写进去之后才做，所以还算不出结果的动作会暂时保留那一行，等算得出来那一轮再清。⚠️ 配在 **web service** 上：`attribution-cron` 只是 `curl` 打这个接口，读 env 的是接请求的 web 进程；配到 cron 上开关不会生效，而且是静默不生效 | Render-web |
 | `SOCIAL_COMMENT_AUTOREPLY_KILL` | 社媒评论自动回复紧急关停 | Render-web |
 | `EMAIL_REPLY_DIGEST_ENABLED` | 🔴「客人来信没人回」汇总信总闸，默认 **关**（未配 = 不发，安全态）。开关在 `/api/cron/email-reply-digest` 路由里读 —— 是 web 进程，配到 cron job 自己身上不生效。2026-09-03 上线当天即由 PM 拍板暂停：现有排除只挡「自己人域名」和「同行域名」，挡不住陌生公司群发的推销，CTS 当天 32 条候选里噪音占七成，而排序按「等最久」，前 10 条有 8 条是营销邮件。**加好噪音过滤并用生产数据验证准确率之后才可开**；开的时候 `render.yaml` 里那段调度也要一起取消注释（两道闸） | Render-web |
+| `LEAD_FOLLOWUP_DIGEST_ENABLED` | 🔴「客人填了表还没人回」每日汇总信总闸，默认 **关**（未配 = 只挑名单不发信，安全态）。开关在 Inngest 云端函数 `cloud-crm-lead-followup-digest` 里读 —— **不是** Render cron 路由，配在 Inngest 跑得到的那份环境里。关着的时候名单照挑、回执照记（`sent:false` + `reason:'未启用'`），可以先看名单准不准再打开。**收件人没有环境变量，也不许有**：写死成函数文件里的字面量 `DIGEST_RECIPIENT = 'hello@magicengine.cloud'`（PM 2026-09-24 拍板第一步只发给 ME 自己），要改成发给客户的销售必须走一次代码改动 + 复审。🔴 **刻意不用 `ME_MAIL_TO_ADDRESS`** —— 那个常量读 `ME_MAIL_TO` 这个**全站共用**的环境变量（联系表单、cron 摘要、今日待办都读它），用它就等于「改一行配置就能把每个客户的客人名单发到任意地址」 | Render-web |
 | `LINKEDIN_PROGRESS_POST_ENABLED` | 🔴 ME 产品动态自动发 LinkedIn 总闸，默认关（未配 = 禁用，不用配才是安全态）。开关在 `/api/cron/linkedin-progress-post-{mon,thu}` 路由里读——那是 web 进程，两条 cron 只负责 `curl`；配到 cron job 自己的环境变量上不会生效。上线前提：PM 已在 Publer 连好个人 LinkedIn 账号，并在 Magic Lab Class 客户的 connectors 设置页把账号 ID 填进 Publer 绑定 | Render-web |
 | `SWEEP_CITIES` / `SWEEP_INDUSTRIES` | 线索扫描城市 / 行业范围。`src/lib/prospecting/sweep.ts` 里读（走 `envList('SWEEP_CITIES', …)`，变量名是字符串传进去的），调用方是 web 路由 `/api/cron/prospecting-sweep` | Render-web |
 | `ENABLE_REAL_GENERATION` | `.env.example` 有，代码 0 引用 | ⚠️ 待清理 |
+| `FACTORY_QUALITY_GUARD_DISABLED` | 内容工厂成片文案品控（竞品品牌/占位字幕/人称口吻）总闸，设 `true` 临时全局关停 Jev 调用（确定性的字幕重复检测不受影响，照常跑）。默认开 | Render-web |
+| `MESSENGER_VERIFIER_SEMANTIC_DISABLED` | CTS Messenger AI 客服 verifier 的 Jev 语义补充判断（brand_redline/number_claim 换措辞绕过）总闸，设 `true` 临时全局关停 Jev 调用（七道正则闸不受影响，照常跑）。默认开 | Render-web |
 
 ## 12. 只在脚本 / 测试里用 — **不需要配到任何平台**
 
@@ -204,6 +212,26 @@
 | `BASELINE_CRON_URL` | 可选覆盖，`.github/workflows/baseline-domains-monthly.yml` |
 | `GOALS_EXPIRY_CRON_URL` | 可选覆盖，`.github/workflows/goals-expiry-check.yml` |
 | `WINNER_REEL_SYNC_URL` | 可选覆盖，`.github/workflows/winner-reel-sync-daily.yml` |
+
+## 14. 2026-09-21 补登记（对照 `src/` 全量扫描，main `41d47685`）
+
+此前代码在读、但本表没有的变量。搬服务器的给法见 [sops/server-migration-secrets-handover.md](./sops/server-migration-secrets-handover.md)。
+
+| 变量 | 用途 | 配在哪 |
+|---|---|---|
+| `JINA_API_KEY` | Site Analyzer 抓取客户官网（`src/lib/brief/jina.ts`） | Render-web |
+| `MAILCHIMP_API_KEY` | 营销计划生成读 Mailchimp + `/api/cron/mailchimp-suppression-sync` 同步退订名单 | Render-web |
+| `DEMO_ADMINS` | 演示管理员白名单，格式 `邮箱:客户ID`，限定只能看指定客户（`src/lib/auth/whitelist.ts`） | Render-web |
+| `NEXT_PUBLIC_GA_MEASUREMENT_ID` / `NEXT_PUBLIC_META_PIXEL_ID` | ME 自家营销页的 GA4 / Meta 像素 | Render-web |
+| `META_CAPI_VERSION` | Meta 转化回传用的 Graph 版本，默认 `v19.0` | Render-web（可不配） |
+| `META_SYSTEM_USER_TOKEN_<域名>` | 🔴 **每客户一把的 Meta 广告令牌，名字运行时拼出来**（`domainToEnvKey`，`src/lib/meta/token-selection.ts`），静态扫描扫不到，完整清单只在 Render 面板上 | Render-web |
+| `META_PIXEL_ID_<域名>` | 每客户像素 ID，同样是运行时拼名（`src/lib/meta/capi/config.ts`） | Render-web |
+| `CRM_NOTE_MODEL` / `CRM_STAGE_INFER_MODEL` / `MESSENGER_BRIEF_MODEL` / `MARKET_INTEL_MODEL` | 各功能的模型名覆盖，默认都是 `gpt-4o-mini` | Render-web（可不配） |
+| `WEB_INTELLIGENCE_ALLOWED_CLIENT_IDS` | Web Intelligence 客户白名单，未配 = 谁都不跑 | Render-web |
+| `WEB_INTELLIGENCE_TRAFFIC_ENABLED` | Web Intelligence 流量检查总闸，默认 **关** | Render-web |
+| `WEB_INTELLIGENCE_FIRST_PARTY_TOUR_SOURCES` | 第一方行程数据源配置（JSON） | Render-web |
+| `FACTORY_STOCK_REFILL_ENABLED` | 内容工厂素材库自动补货总闸，默认 **关** | Render-web |
+| `BASELINE_CRON_ENABLED` | 设 `false` 可临时停掉每月域名基线任务，默认开 | Render-web |
 
 ---
 

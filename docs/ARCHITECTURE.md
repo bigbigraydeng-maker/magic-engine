@@ -270,7 +270,7 @@ client_site_pages
 ├── geo_block_version (TEXT)        ← 已嵌入的 GEO Directive ID（如有）
 │
 ├── ── 采集元数据 ──
-├── crawl_status: 'pending' | 'crawled' | 'failed'
+├── crawl_status: 'pending' | 'crawled' | 'failed' | 'antibot_challenged'  ← 最后一个 = 被网站防火墙挡住、读不到正文（2026-09-26 migration 起才写得进）
 ├── last_crawled_at (TIMESTAMPTZ)
 ├── crawl_error (TEXT)              ← 失败原因（如有）
 └── created_at, updated_at (TIMESTAMPTZ)
@@ -707,6 +707,7 @@ Step 6: 发布 + 追踪
 | **Airtable** | Content Workspace | 内容数据库（双向同步底座） | 按行数/功能 |
 | **Publer** | Publishing Hub | 社媒排期发布 | 按订阅 |
 | **Perplexity API** ⭐ | （AI Visibility Tracker 内部） | AI 引擎排名查询 | Per query |
+| **TypeSafe Jev** | Compliance Engine | 内容工厂成片文案品控判断（竞品品牌/占位字幕/人称口吻） | Per query |
 | **Supabase** | （内部，不暴露） | 数据库 + 文件存储 | 按用量 |
 | **Render** | （内部，不暴露） | 生产部署 | 按实例 |
 

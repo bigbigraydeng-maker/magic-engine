@@ -11,6 +11,7 @@ import {
   buildState,
   verifyState,
   buildAuthUrl,
+  exchangeMetaTokenFields,
   listGrantedScopes,
   META_PAGE_SCOPES,
   META_PUBLISH_SCOPE,
@@ -187,5 +188,68 @@ describe('listGrantedScopes — the provider-authoritative record of what was ac
     const calledUrl = String(spy.mock.calls[0]?.[0])
     expect(calledUrl).toContain('/me/permissions')
     expect(calledUrl).toContain(encodeURIComponent('secret-user-token'))
+  })
+})
+
+describe('exchangeMetaTokenFields — expires_in parsing', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('passes an explicit expires_in:0 through as 0, not null — Meta uses 0 to mean "does not expire" (2026-09-21 production: real long-lived exchange came back 0, which the old ">0" check collapsed into "unknown" and failed the whole connect)', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ access_token: 'tok', expires_in: 0 })),
+    )
+    expect(await exchangeMetaTokenFields({ code: 'c', redirect_uri: 'https://me.test/cb' })).toEqual({
+      token: 'tok',
+      seconds: 0,
+    })
+  })
+
+  it('still returns null when expires_in is genuinely missing', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify({ access_token: 'tok' })))
+    expect(await exchangeMetaTokenFields({ code: 'c', redirect_uri: 'https://me.test/cb' })).toEqual({
+      token: 'tok',
+      seconds: null,
+    })
+  })
+
+  it('returns a positive expires_in unchanged', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ access_token: 'tok', expires_in: 5184000 })),
+    )
+    expect(await exchangeMetaTokenFields({ code: 'c', redirect_uri: 'https://me.test/cb' })).toEqual({
+      token: 'tok',
+      seconds: 5184000,
+    })
+  })
+
+  it('logs the response shape (never the token/secret) when expires_in is unusable — the only way to see what Meta actually sent back on the next production failure', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ access_token: 'super-secret-token-xyz' })),
+    )
+    await exchangeMetaTokenFields({ code: 'c', redirect_uri: 'https://me.test/cb' })
+    expect(warn).toHaveBeenCalledWith(
+      '[meta-oauth] token exchange expires_in unusable',
+      expect.objectContaining({ hasExpiresInKey: false, responseKeys: ['access_token'] }),
+    )
+    const loggedArgs = warn.mock.calls[0]?.[1]
+    expect(JSON.stringify(loggedArgs)).not.toContain('super-secret-token-xyz')
+  })
+
+  it('returns null and logs (without the query/secret) on a non-OK response', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response('nope', { status: 400 }))
+    expect(await exchangeMetaTokenFields({ code: 'c', redirect_uri: 'https://me.test/cb' })).toBeNull()
+    expect(warn).toHaveBeenCalledWith('[meta-oauth] token exchange non-OK response', expect.objectContaining({ status: 400 }))
+    expect(JSON.stringify(warn.mock.calls[0])).not.toContain('app-secret-456')
+  })
+
+  it('returns null and logs when access_token is missing from an OK response', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify({ error: 'nope' })))
+    expect(await exchangeMetaTokenFields({ code: 'c', redirect_uri: 'https://me.test/cb' })).toBeNull()
+    expect(warn).toHaveBeenCalledWith('[meta-oauth] token exchange missing access_token', expect.objectContaining({ responseKeys: ['error'] }))
   })
 })

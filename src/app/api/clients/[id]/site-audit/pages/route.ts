@@ -90,6 +90,8 @@ interface SitePageRow {
   index_verdict: string | null
   /** Non-null ⟺ currently not indexed (cleared when it flips back to indexed). */
   first_not_indexed_at: string | null
+  /** Our own crawl outcome ('crawled' | 'antibot_challenged' | 'pending' | 'failed'). Only 'crawled' rows have a trustworthy word_count. */
+  crawl_status: string | null
 }
 
 export interface ClientSitePage extends SitePageRow {
@@ -217,7 +219,7 @@ export async function GET(
     let query = supabaseAdmin
       .from('client_site_pages')
       .select(
-        'id, url, title, page_type, topics, primary_keyword, word_count, has_geo_block, status_code, crawled_at, created_at, updated_at, index_verdict, first_not_indexed_at',
+        'id, url, title, page_type, topics, primary_keyword, word_count, has_geo_block, status_code, crawled_at, created_at, updated_at, index_verdict, first_not_indexed_at, crawl_status',
         { count: 'exact' }
       )
       .eq('client_id', clientId)
@@ -272,14 +274,14 @@ export async function GET(
       throw new Error(`Failed to fetch pages: ${pagesError.message}`)
     }
 
-    // Derive index status per row so the frontend renders the badge/action
-    // without re-deriving the 300-word rule — one source of truth for it.
+    // Derive index status per row (Google's own reason + whether our crawl was clean and recent) so the frontend never re-derives it — one source of truth in seo/index-status.
+    const now = new Date()
     const rows = ((pages ?? []) as SitePageRow[]).map<ClientSitePage>((p) => {
       const notIndexed = isNotIndexed(p.first_not_indexed_at)
       return {
         ...p,
         not_indexed: notIndexed,
-        index_class: notIndexed ? classifyNotIndexed(p) : null,
+        index_class: notIndexed ? classifyNotIndexed(p, now) : null,
       }
     })
 

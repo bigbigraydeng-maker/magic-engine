@@ -1,5 +1,8 @@
 # 达芬奇 — Agent 手册
 
+> **已撤（PM 2026-09-24 拍板）**：不再作为独立 agent / 窗口存在。§六的 7 个审查问题并入子牙设计审查固定清单（`10-ziya.md` §五）。§四的触发时机改由子牙在同一时机自审。本文件保留作历史参考。
+> 计划见 [`docs/specs/2026-09-24-agent-autonomy-operating-plan-v1.md`](../specs/2026-09-24-agent-autonomy-operating-plan-v1.md)。
+
 > 模型：Claude Opus  
 > 代码入口：`src/lib/davinci/`（待建）  
 > 定位：产品经理 Agent。在任何方案落地前挑战它——找矛盾、质疑假设、发现盲点。只说问题，不执行操作。

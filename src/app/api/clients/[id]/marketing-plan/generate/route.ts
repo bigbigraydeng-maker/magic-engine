@@ -9,6 +9,8 @@
  *   1. 读 Master Brief（active）
  *   2. 读 Campaign Brief（如指定）
  *   3. 读 Strategy 建议主题（content_strategy_items 表，最新 12 条 pending）
+ *   3b. 读 Viral Reference Library（爆款风格参考）
+ *   3c. 读 Email 渠道历史表现（仅已开通 Mailchimp 邮件渠道的客户，见 readAudienceId gate）
  *   4. 调 Claude Strategy Engine 生成 plan_data
  *   5. 写入 marketing_plans 表（status=draft）
  */
@@ -21,17 +23,20 @@ import {
   generatePlanData,
   formatStrategySuggestions,
   formatViralReferences,
+  formatEmailPerformance,
 } from '@/lib/marketing-plan/generator'
 import type { ClaudeDocInput } from '@/lib/anthropic/client'
 import type { GeneratePlanRequest } from '@/lib/marketing-plan/types'
 import type { MasterBrief } from '@/types/magic-engine'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { detectKind, docxToText, plainToText } from '@/lib/tailor-made/read-source'
+import { readAudienceId } from '@/lib/mailchimp/audience-config'
+import { listSentCampaigns } from '@/lib/mailchimp/client'
 
 const CAMPAIGN_BUCKET = 'campaign-uploads'
 const MAX_CAMPAIGN_FILE_CHARS = 50_000
 
-export const maxDuration = 90  // Plan 生成耗时较长（Claude 大 token 输出）
+export const maxDuration = 180  // Plan 生成耗时较长（2026-09-08 maxOutputTokens 8000→16000 后同步调大，见 generator.ts）
 
 export async function POST(
   req: NextRequest,
@@ -165,6 +170,40 @@ export async function POST(
       console.warn('[marketing-plan generate] viral references fetch failed (non-blocking):', viralErr)
     }
 
+    // ── 3c. Email 渠道历史表现（可选，仅已开通 Mailchimp 邮件渠道的客户）───────
+    //
+    // 只有 readAudienceId 读到非空 audienceId 才认为这个客户有邮件渠道——
+    // Roman/Oztop 现在都没配，这里会直接跳过，不会让它们陪跑邮件规划推理
+    // （子牙 + 魏征复审要求：换客户测试必须通过，无关客户不该多算一段邮件推理）。
+    let emailPerformance: string | null = null
+    try {
+      const audience = await readAudienceId(clientId)
+      const apiKey = process.env.MAILCHIMP_API_KEY
+      if (audience.ok && audience.audienceId && apiKey) {
+        const since = new Date(Date.now() - 60 * 86_400_000).toISOString()
+        const campaigns = await listSentCampaigns(apiKey, { sinceSentAt: since, count: 50 })
+
+        // 粗粒度碰撞提示：过去 7 天内收到过自动欢迎序列邮件的人数（见 generator.ts
+        // formatEmailPerformance 注释——现有系统没有"某联系人当前处于欢迎序列
+        // 第几步"的读取路径，这是能拿到的最接近的信号，如实标注口径不精确）。
+        const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000).toISOString()
+        const { data: recentAutoTouches } = await supabaseAdmin
+          .from('contact_touchpoints')
+          .select('contact_id')
+          .eq('client_id', clientId)
+          .eq('source', 'mailchimp')
+          .gte('occurred_at', sevenDaysAgo)
+          .ilike('metadata->>email_campaign_title', 'auto_%')
+        const recentAutoSequenceTouches = new Set(
+          (recentAutoTouches ?? []).map((r) => r.contact_id as string),
+        ).size
+
+        emailPerformance = formatEmailPerformance(campaigns, recentAutoSequenceTouches)
+      }
+    } catch (emailErr) {
+      console.warn('[marketing-plan generate] email performance fetch failed (non-blocking):', emailErr)
+    }
+
     // ── 4. AI 生成 plan_data ─────────────────────────────────────────────────
     const { plan_data, meta } = await generatePlanData({
       briefText,
@@ -172,6 +211,7 @@ export async function POST(
       campaignDocs: campaignDocs.length > 0 ? campaignDocs : undefined,
       strategySuggestions,
       viralReferences,
+      emailPerformance,
       request: body as GeneratePlanRequest,
     })
 

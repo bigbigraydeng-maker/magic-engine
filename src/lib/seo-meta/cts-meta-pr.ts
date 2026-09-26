@@ -24,6 +24,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from '@/lib/supabase'
+import { parseJsonResponse } from '@/lib/anthropic/client'
 import { getConnection } from '@/lib/cms/connection-store'
 import { GithubClient } from '@/lib/cms/github-client'
 
@@ -60,12 +61,17 @@ export interface MetaReplacement {
  * so an export-only boundary would let an entry missing its own excerpt
  * silently overwrite the next post's (魏征-style neighbour corruption).
  */
-export function replaceMetaForSlug(
-  source: string,
-  slug: string,
-  newTitle: string,
-  newDesc: string,
-): MetaReplacement | null {
+interface MetaWindow {
+  slugIdx: number
+  windowEnd: number
+  window: string
+  titleRe: RegExp
+  descRe: RegExp
+  title: string
+  desc: string
+}
+
+function findMetaWindow(source: string, slug: string): MetaWindow | null {
   const slugIdx = source.indexOf(`slug: '${slug}'`)
   if (slugIdx === -1) return null
 
@@ -89,8 +95,38 @@ export function replaceMetaForSlug(
   const unquote = (m: string): string =>
     m.replace(/^[^']*'/, '').replace(/'$/, '').replace(/\\'/g, "'").replace(/\\\\/g, '\\')
 
-  const oldTitle = unquote(titleMatch[0].slice(titleMatch[1].length))
-  const oldDesc = unquote(descMatch[0].slice(descMatch[1].length))
+  return {
+    slugIdx,
+    windowEnd,
+    window,
+    titleRe,
+    descRe,
+    title: unquote(titleMatch[0].slice(titleMatch[1].length)),
+    desc: unquote(descMatch[0].slice(descMatch[1].length)),
+  }
+}
+
+/**
+ * Read-only lookup of the title/description currently in the source for
+ * `slug`, without writing anything. Used by the meta-cycle's true-revert
+ * step (魏征 finding #7) to detect whether a human has hand-edited the slug
+ * in GitHub since Magic Engine's last write, before deciding it's safe to
+ * revert.
+ */
+export function readMetaForSlug(source: string, slug: string): { title: string; desc: string } | null {
+  const found = findMetaWindow(source, slug)
+  return found ? { title: found.title, desc: found.desc } : null
+}
+
+export function replaceMetaForSlug(
+  source: string,
+  slug: string,
+  newTitle: string,
+  newDesc: string,
+): MetaReplacement | null {
+  const found = findMetaWindow(source, slug)
+  if (!found) return null
+  const { slugIdx, windowEnd, window, titleRe, descRe, title: oldTitle, desc: oldDesc } = found
 
   let newWindow = window.replace(titleRe, `$1'${escapeSingle(newTitle)}'`)
   newWindow = newWindow.replace(descRe, `$1'${escapeSingle(newDesc)}'`)
@@ -208,7 +244,10 @@ async function generateCtsMeta(
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
   const msg = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 200,
+    // 300 gives headroom for title (≤60 chars) + desc (≤155 chars) + JSON
+    // wrapper tokens. 200 was occasionally truncating the response mid-JSON,
+    // causing JSON.parse to throw and silently returning desc:''.
+    max_tokens: 300,
     messages: [
       {
         role: 'user',
@@ -229,7 +268,11 @@ Respond ONLY with valid JSON: {"title":"...","desc":"..."}`,
   })
   const text = msg.content[0].type === 'text' ? msg.content[0].text.trim() : '{}'
   try {
-    const p = JSON.parse(text) as { title?: string; desc?: string }
+    // parseJsonResponse handles markdown code-fence wrapping (```json...```)
+    // and LLM quirks (trailing commas, unescaped quotes) via jsonrepair —
+    // plain JSON.parse was the root cause of consistent ai_generation_failed
+    // when the model wrapped its output in code fences (#1792).
+    const p = parseJsonResponse<{ title?: string; desc?: string }>(text)
     return {
       title: (p.title ?? keyword).slice(0, 60),
       desc: (p.desc ?? '').slice(0, 155),
@@ -242,7 +285,7 @@ Respond ONLY with valid JSON: {"title":"...","desc":"..."}`,
 // ── Runner ──────────────────────────────────────────────────────────────────────
 
 export interface CtsMetaPrResult {
-  outcome: 'pr_opened' | 'no_candidates' | 'no_connection' | 'nothing_editable' | 'error'
+  outcome: 'pr_merged' | 'pr_opened' | 'no_candidates' | 'no_connection' | 'nothing_editable' | 'error'
   pr_url?: string
   pages?: Array<{ slug: string; keyword: string }>
   /** Per-candidate audit trail (slug → which step it stopped at). */
@@ -394,10 +437,14 @@ export async function runCtsMetaPr(
 
     const pr = await github.createPullRequest(repoOwner, repoName, {
       title: `[Magic Engine] SEO 标题优化 ×${applied.length}`,
-      body: `${body}\n\n> 巡逻发现这些页面排名在 4-20 名但标题点击力不足。只改了 meta 数据文件里的标题/摘要字符串（blog 的标题和摘要同时是页面可见文案，正是点击力要改的东西）。构建检查通过后合并即生效。`,
+      body: `${body}\n\n> 巡逻发现这些页面排名在 4-20 名但标题点击力不足。只改了 meta 数据文件里的标题/摘要字符串（blog 的标题和摘要同时是页面可见文案，正是点击力要改的东西）。`,
       head: prBranch,
       base: defaultBranch,
     })
+
+    // Auto-merge immediately — only changes meta title/desc, no review needed.
+    // If blocked by pending CI the PR stays open; next week's run is independent.
+    const merged = await github.mergePullRequest(repoOwner, repoName, pr.number)
 
     // 5. Audit log (drives cooldown + weekly report 自动改动 column)
     const rows = applied.map((a) => ({
@@ -411,13 +458,14 @@ export async function runCtsMetaPr(
       new_title: a.newTitle,
       new_desc: a.newDesc,
       wp_updated: false,
+      applied_channel: 'pr',
       optimised_at: new Date().toISOString(),
     }))
     const { error: logErr } = await supabase.from('seo_meta_log').insert(rows)
     if (logErr) console.error('[cts-meta-pr] log insert failed:', logErr.message)
 
     return {
-      outcome: 'pr_opened',
+      outcome: merged ? 'pr_merged' : 'pr_opened',
       pr_url: pr.html_url ?? undefined,
       pages: applied.map((a) => ({ slug: a.candidate.slug, keyword: a.candidate.keyword })),
       attempts,

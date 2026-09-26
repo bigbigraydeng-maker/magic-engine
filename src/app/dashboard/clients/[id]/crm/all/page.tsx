@@ -20,6 +20,108 @@ import { CrmTabs } from '../_components/CrmTabs'
 import { ComposeNote, type StageOption } from '../_components/ComposeNote'
 import { DncBanner } from '../_components/DncBanner'
 
+/**
+ * New Asian Logistics——同一个字面量在 `nal-messenger-lead-sync-run.ts`/
+ * `nal-mark-won/route.ts` 各自声明一份是既有惯例（跟 CTS_CLIENT_ID 一样）。
+ * 只有这一个客户在工作台里把联系人标"已成交"会顺带触发回传 Meta 广告转化 API——
+ * 见 `nal-crm-won-to-capi-design-v1.md`：CTS 的成交回传走的是另一条独立通道
+ * （Google 表格同步），不能让这里的改动波及它。
+ */
+const NAL_CLIENT_ID = '4ae76381-cd45-43bd-85cd-98cfd7604007'
+
+/**
+ * NAL 专属：标已成交时弹出的金额/到账日期录入。
+ *
+ * 幂等键在挂载时生成一次、整个提交生命周期复用（照抄 `ComposeNote` 同一个理由：
+ * 双击/网络重试要复用同一个键，在点击那一刻才生成的话每次点击都是新键，
+ * 重复提交就挡不住了）。
+ */
+function MarkWonPanel({
+  contactId,
+  onDone,
+  onCancel,
+}: {
+  contactId: string
+  /** 第二个参数 = 要不要顺手重拉列表；失败时传 false。 */
+  onDone: (msg: string, reload?: boolean) => void
+  onCancel: () => void
+}) {
+  const [amount, setAmount] = useState('')
+  const [occurredAt, setOccurredAt] = useState(() => new Date().toISOString().slice(0, 10))
+  const [busy, setBusy] = useState(false)
+  const [idempotencyKey] = useState(() => crypto.randomUUID())
+
+  const submit = async () => {
+    const amountMajor = Number(amount)
+    if (!amountMajor || amountMajor <= 0) {
+      onDone('请填一个大于 0 的金额', false)
+      return
+    }
+    setBusy(true)
+    try {
+      const res = await fetch('/api/admin/conversions/nal-mark-won', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contactId,
+          amountMajor,
+          occurredAt: new Date(occurredAt).toISOString(),
+          idempotencyKey,
+        }),
+      })
+      const body = (await res.json()) as { message?: string; error?: string }
+      if (!res.ok) {
+        onDone(`没记上：${body.error ?? '出错了'}`, false)
+        return
+      }
+      onDone(body.message ?? '记好了', true)
+    } catch {
+      onDone('没记上，再试一次', false)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-me-ochre/25 bg-me-gold/10 p-3" onClick={(e) => e.stopPropagation()}>
+      <div className="text-xs font-bold text-me-charcoal">这笔生意多少钱？（到账后再回传给广告平台）</div>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-me-charcoal/50">NZD $</span>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="金额"
+            className="w-28 rounded-lg border border-me-stone bg-white px-2 py-1.5 text-sm text-me-charcoal focus:border-me-ochre focus:outline-none"
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-me-charcoal/50">到账日期</span>
+          <input
+            type="date"
+            value={occurredAt}
+            onChange={(e) => setOccurredAt(e.target.value)}
+            className="rounded-lg border border-me-stone bg-white px-2 py-1.5 text-sm text-me-charcoal focus:border-me-ochre focus:outline-none"
+          />
+        </div>
+        <button
+          disabled={busy}
+          onClick={() => void submit()}
+          className="rounded-lg bg-me-charcoal px-3 py-1.5 text-xs font-black text-white disabled:opacity-50"
+        >
+          {busy ? '记录中…' : '确认已成交'}
+        </button>
+        <button onClick={onCancel} className="rounded-lg border border-me-stone px-3 py-1.5 text-xs font-semibold text-me-charcoal">
+          取消
+        </button>
+      </div>
+    </div>
+  )
+}
+
 interface ContactRow {
   contactId: string
   name: string
@@ -34,6 +136,10 @@ interface ContactRow {
   hasMessenger: boolean
   stage: string | null
   stageLabel: string | null
+  /** 人工置顶时间（contacts.pinned_at）。非 null = 被钉在名单最前面。 */
+  pinnedAt: string | null
+  /** 「⭐置顶」附带的原因和到期日（contacts.important_note / important_due_at）。 */
+  important: { note: string | null; dueAt: string | null }
   segment: string
   segmentLabel: string
   temperature: 'hot' | 'warm' | 'cold' | 'off'
@@ -196,6 +302,90 @@ function TimelineItem({ e }: { e: TimelineEntry }) {
   )
 }
 
+/**
+ * 「⭐置顶」附带的原因 + 到期日编辑。
+ *
+ * 星本身（pinned_at）在表格那一列直接点，这里只管"标了什么"和"到什么时候"——
+ * 对应员工老表 R/S 列的红字。受控 state，按「保存」才落库，不是每敲一个字发一次。
+ */
+function ImportantMarkerEditor({
+  clientId,
+  row,
+  onSaved,
+}: {
+  clientId: string
+  row: ContactRow
+  onSaved: (msg: string) => void
+}) {
+  const [note, setNote] = useState(row.important?.note ?? '')
+  const [dueDate, setDueDate] = useState(row.important?.dueAt ? row.important.dueAt.slice(0, 10) : '')
+  const [busy, setBusy] = useState(false)
+
+  const save = async () => {
+    setBusy(true)
+    try {
+      const body: { note: string | null; dueAt: string | null } = {
+        note: note.trim() === '' ? null : note.trim(),
+        // 空 = 清空；非空 date → 当天 12:00 本地时区当作截止时刻（员工只想标一天，不写具体时间）
+        dueAt: dueDate === '' ? null : new Date(`${dueDate}T12:00:00`).toISOString(),
+      }
+      const res = await fetch(`/api/clients/${clientId}/crm/contacts/${row.contactId}/important`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error()
+      onSaved('✓ 存好了')
+    } catch {
+      onSaved('没存上，再试一次')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-me-charcoal/10 bg-me-ivory p-3">
+      <div className="text-xs font-bold text-me-charcoal/60">
+        ⭐ 重要标记（选填）—— 员工老表 R/S 列的红字放这里
+      </div>
+      <textarea
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="约好周三 3 点回电 / 只发邮件不打电话 / ..."
+        maxLength={500}
+        rows={2}
+        className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm focus:border-me-charcoal focus:outline-none"
+      />
+      <div className="flex items-center gap-2 text-sm">
+        <span className="text-xs text-me-charcoal/50">到期：</span>
+        <input
+          type="date"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
+          className="rounded-lg border border-black/10 bg-white px-2 py-1 text-sm"
+        />
+        {dueDate && (
+          <button
+            type="button"
+            onClick={() => setDueDate('')}
+            className="text-xs text-me-charcoal/40 hover:text-me-charcoal"
+          >
+            清除日期
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void save()}
+          className="ml-auto rounded-lg bg-me-charcoal px-3 py-1 text-xs font-black text-white disabled:opacity-40"
+        >
+          {busy ? '存中…' : '保存'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 /** 展开区：往来时间线 + 记一笔 + 改状态。一次只有一行展开。 */
 function ContactDetail({
   clientId,
@@ -218,6 +408,7 @@ function ContactDetail({
   const [composing, setComposing] = useState(false)
   const [changingStage, setChangingStage] = useState(false)
   const [showAll, setShowAll] = useState(false)
+  const [markingWon, setMarkingWon] = useState(false)
 
   const changeStage = async (toStage: string, label: string) => {
     if (!window.confirm(`现在：${row.stageLabel ?? '还没标到哪一步'} → 改成「${label}」？`)) return
@@ -240,6 +431,9 @@ function ContactDetail({
 
   return (
     <div className="space-y-4">
+      {/* 重要标记放最上面 —— 员工打开抽屉第一眼就该看到"红字"，跟老表习惯一致。 */}
+      <ImportantMarkerEditor clientId={clientId} row={row} onSaved={(msg) => onWrote(msg, true)} />
+
       {/* 联系方式 —— 展开里再给一次，方便直接拨号/发信 */}
       <div className="flex flex-wrap gap-2">
         {/* 号码打不通就不给拨号链接 —— 号码照旧显示（要改号得先看得见），
@@ -332,13 +526,35 @@ function ContactDetail({
             .map((s) => (
               <button
                 key={s.stageKey}
-                onClick={() => void changeStage(s.stageKey, s.label)}
+                onClick={() => {
+                  // NAL + "已成交"档：不是简单改个状态字，还要录金额、顺带回传
+                  // 广告平台——弹金额面板，不走普通的"改到哪步"确认框。
+                  // 见 nal-crm-won-to-capi-design-v1.md：只对 NAL 生效，CTS 走
+                  // 另一条独立的成交回传通道（Google 表格同步），不能碰这里。
+                  if (clientId === NAL_CLIENT_ID && s.marketingAction === 'won') {
+                    setChangingStage(false)
+                    setMarkingWon(true)
+                    return
+                  }
+                  void changeStage(s.stageKey, s.label)
+                }}
                 className="rounded-full bg-me-ivory px-3 py-1.5 text-xs font-bold text-me-charcoal"
               >
                 {s.label}
               </button>
             ))}
         </div>
+      )}
+
+      {markingWon && (
+        <MarkWonPanel
+          contactId={row.contactId}
+          onCancel={() => setMarkingWon(false)}
+          onDone={(msg, reload) => {
+            setMarkingWon(false)
+            onWrote(msg, reload)
+          }}
+        />
       )}
 
       {composing && (
@@ -370,6 +586,14 @@ export default function CrmAllContactsPage() {
   const [toast, setToast] = useState<string | null>(null)
 
   const [q, setQ] = useState('')
+  // 只有防抖后的值进 API —— 否则每敲一个字都打一次请求。
+  const [qDebounced, setQDebounced] = useState('')
+  // 服务端拒绝 q 里的逗号/括号（PostgREST or() 语法），单独一条提示，不覆盖整页错误。
+  const [qError, setQError] = useState<string | null>(null)
+  const [stageFilter, setStageFilter] = useState<string[]>([])
+  const [page, setPage] = useState(1)
+  // C1a 固定 100，先不给改每页条数的入口。
+  const [perPage] = useState(100)
   const [sortKey, setSortKey] = useState<'firstSeenAt' | 'lastTouchAt'>('lastTouchAt')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
@@ -383,37 +607,64 @@ export default function CrmAllContactsPage() {
   const loadList = useCallback(async () => {
     setError(null)
     try {
+      const params = new URLSearchParams()
+      params.set('page', String(page))
+      params.set('perPage', String(perPage))
+      if (qDebounced.trim()) params.set('q', qDebounced.trim())
+      for (const s of stageFilter) params.append('stage', s)
+
       const [res, stageRes] = await Promise.all([
-        fetch(`/api/clients/${clientId}/crm/contacts`),
+        fetch(`/api/clients/${clientId}/crm/contacts?${params.toString()}`),
         fetch(`/api/clients/${clientId}/pipeline-stages`),
       ])
       const json = (await res.json()) as {
-        contacts?: ContactRow[]
+        total?: number
         columns?: CustomColumnMeta[]
-        totalContacts?: number
+        items?: ContactRow[]
         error?: string
       }
       if (!res.ok) {
+        // 400 是搜索词非法（逗号/括号）—— 只提示搜索框，别把已有名单清空。
+        if (res.status === 400) {
+          setQError('搜索里不能有逗号或括号')
+          return
+        }
         setError(json.error ?? '加载失败')
         return
       }
-      setRows(json.contacts ?? [])
+      setQError(null)
+      setRows(json.items ?? [])
       setColumns(json.columns ?? [])
-      setTotal(json.totalContacts ?? 0)
+      setTotal(json.total ?? 0)
       if (stageRes.ok) {
         const s = (await stageRes.json()) as { stages?: StageOption[] }
-        setStages((s.stages ?? []).map((x) => ({ stageKey: x.stageKey, label: x.label })))
+        // marketingAction 之前被这里的映射漏掉了——NAL"标已成交"要靠它判断该弹
+        // 金额面板还是走普通改状态，没有它这条判断永远是 false（2026-09-15 修）。
+        setStages(
+          (s.stages ?? []).map((x) => ({ stageKey: x.stageKey, label: x.label, marketingAction: x.marketingAction })),
+        )
       }
     } catch {
       setError('加载失败，检查网络后再试。')
     } finally {
       setLoading(false)
     }
-  }, [clientId])
+  }, [clientId, page, perPage, qDebounced, stageFilter])
 
   useEffect(() => {
     void loadList()
   }, [loadList])
+
+  // 搜索词防抖：300ms 内还在敲就不发请求。
+  useEffect(() => {
+    const t = window.setTimeout(() => setQDebounced(q), 300)
+    return () => window.clearTimeout(t)
+  }, [q])
+
+  // 换了搜索词或筛选条件就回第一页 —— 否则会停在一个可能不存在的页码上。
+  useEffect(() => {
+    setPage(1)
+  }, [qDebounced, stageFilter])
 
   const loadTimeline = useCallback(
     async (contactId: string) => {
@@ -501,6 +752,37 @@ export default function CrmAllContactsPage() {
     window.setTimeout(() => setToast(null), 2400)
   }
 
+  /**
+   * 点星星：置顶 / 取消置顶。
+   *
+   * 先本地改（乐观更新），失败再翻回来并说一句 —— 星星是即时反馈的控件，
+   * 等一个来回才变色会让人以为没点上、连点两下。
+   */
+  const togglePin = async (row: ContactRow) => {
+    const next = row.pinnedAt === null
+    setRows((prev) =>
+      prev.map((r) =>
+        r.contactId === row.contactId
+          ? { ...r, pinnedAt: next ? new Date().toISOString() : null }
+          : r,
+      ),
+    )
+    try {
+      const res = await fetch(`/api/clients/${clientId}/crm/contacts/${row.contactId}/pin`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pinned: next }),
+      })
+      if (!res.ok) throw new Error()
+    } catch {
+      setRows((prev) =>
+        prev.map((r) => (r.contactId === row.contactId ? { ...r, pinnedAt: row.pinnedAt } : r)),
+      )
+      setToast('置顶失败，请重试')
+      window.setTimeout(() => setToast(null), 2400)
+    }
+  }
+
   const toggleSort = (key: 'firstSeenAt' | 'lastTouchAt') => {
     if (sortKey === key) {
       setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))
@@ -510,22 +792,14 @@ export default function CrmAllContactsPage() {
     }
   }
 
-  const kw = q.trim().toLowerCase()
-  const filtered = kw
-    ? rows.filter(
-        (r) =>
-          r.name.toLowerCase().includes(kw) ||
-          (r.phone ?? '').replace(/\s/g, '').includes(kw.replace(/\s/g, '')) ||
-          (r.email ?? '').toLowerCase().includes(kw),
-      )
-    : rows
-  const sorted = [...filtered].sort((a, b) => {
+  // 搜索交给服务端了，这里只排当前页。
+  const sorted = [...rows].sort((a, b) => {
     const av = sortKey === 'firstSeenAt' ? ts(a.firstSeenAt) : ts(a.lastTouchAt)
     const bv = sortKey === 'firstSeenAt' ? ts(b.firstSeenAt) : ts(b.lastTouchAt)
     return sortDir === 'desc' ? bv - av : av - bv
   })
 
-  const colCount = 6 + columns.length
+  const colCount = 7 + columns.length
   const sortArrow = (key: 'firstSeenAt' | 'lastTouchAt') =>
     sortKey === key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
 
@@ -570,10 +844,37 @@ export default function CrmAllContactsPage() {
             className="w-full rounded-xl border border-black/10 bg-white px-4 py-2.5 text-sm focus:border-me-charcoal focus:outline-none"
           />
 
+          {qError && <p className="text-xs font-semibold text-[#C2453A]">{qError}</p>}
+
+          {stages.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs text-me-charcoal/45">跟进到哪步：</span>
+              {stages.map((s) => {
+                const on = stageFilter.includes(s.stageKey)
+                return (
+                  <button
+                    key={s.stageKey}
+                    onClick={() =>
+                      setStageFilter((prev) =>
+                        on ? prev.filter((k) => k !== s.stageKey) : [...prev, s.stageKey],
+                      )
+                    }
+                    className={`rounded-full border border-black/10 px-3 py-1 text-xs font-semibold ${
+                      on ? 'bg-me-charcoal text-white' : 'text-me-charcoal/60'
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
           <div className="flex items-center justify-between">
             <p className="text-xs font-bold text-me-charcoal/50">
-              {kw ? `找到 ${sorted.length} 人` : `共 ${total} 位客人`}
+              第 {page} 页，共 {total} 位客人
             </p>
+            <p className="text-xs text-me-charcoal/40">排序只对当前页生效</p>
           </div>
 
           {/* 刚搬过来时安抚一句，别让「全空的跟进阶段」像没做完的作业 */}
@@ -587,6 +888,7 @@ export default function CrmAllContactsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-me-charcoal/10 text-left text-xs text-me-charcoal/50">
+                  <th className="px-2 py-3">⭐</th>
                   <th className="px-4 py-3">客人</th>
                   <th className="cursor-pointer select-none px-4 py-3" onClick={() => toggleSort('firstSeenAt')}>
                     进线时间{sortArrow('firstSeenAt')}
@@ -606,7 +908,7 @@ export default function CrmAllContactsPage() {
                 {sorted.length === 0 && (
                   <tr>
                     <td colSpan={colCount} className="px-4 py-10 text-center text-me-charcoal/40">
-                      {kw ? '没找到这个人。' : '还没有客人。'}
+                      {qDebounced.trim() || stageFilter.length > 0 ? '没找到这个人。' : '还没有客人。'}
                     </td>
                   </tr>
                 )}
@@ -628,7 +930,38 @@ export default function CrmAllContactsPage() {
                       onClick={() => toggleDetail(r.contactId)}
                       className={`border-b border-me-charcoal/5 cursor-pointer hover:bg-me-ivory/40 ${expanded ? 'bg-me-ivory/50' : ''}`}
                     >
-                      <td className="px-4 py-3 font-medium text-me-charcoal">{r.name}</td>
+                      <td className="px-2 py-3">
+                        {/* 点星星不能顺带展开抽屉 —— 两个动作是分开的。 */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void togglePin(r)
+                          }}
+                          title={r.pinnedAt ? '取消置顶' : '置顶'}
+                          aria-label={r.pinnedAt ? '取消置顶' : '置顶'}
+                          className={`p-1 text-base leading-none ${
+                            r.pinnedAt ? 'text-yellow-500' : 'text-me-charcoal/40 hover:text-me-charcoal'
+                          }`}
+                        >
+                          {r.pinnedAt ? '⭐' : '☆'}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3 font-medium text-me-charcoal">
+                        {r.name}
+                        {r.important?.note && (
+                          <span
+                            title={r.important.note}
+                            className="ml-2 rounded bg-me-gold/20 px-1.5 py-0.5 text-[10px] font-bold text-me-charcoal/70"
+                          >
+                            ⭐ {r.important.note.length > 12 ? `${r.important.note.slice(0, 12)}…` : r.important.note}
+                          </span>
+                        )}
+                        {r.important?.dueAt && new Date(r.important.dueAt) < new Date() && (
+                          <span className="ml-1 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-bold text-red-600">
+                            到期
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-me-charcoal/60">{fmtDate(r.firstSeenAt)}</td>
                       <td className="px-4 py-3 text-me-charcoal/60">
                         {r.lastTouchAt ? relTime(r.lastTouchAt) : <span className="text-me-charcoal/35">还没联系过</span>}
@@ -671,6 +1004,28 @@ export default function CrmAllContactsPage() {
                 })}
               </tbody>
             </table>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between text-sm">
+            <span className="text-me-charcoal/50">
+              共 {total} 人 · 第 {page} / {Math.max(1, Math.ceil(total / perPage))} 页
+            </span>
+            <div className="flex gap-2">
+              <button
+                disabled={page <= 1}
+                onClick={() => setPage((p) => p - 1)}
+                className="rounded-lg border border-black/10 px-3 py-1.5 disabled:opacity-40"
+              >
+                上一页
+              </button>
+              <button
+                disabled={page >= Math.ceil(total / perPage)}
+                onClick={() => setPage((p) => p + 1)}
+                className="rounded-lg border border-black/10 px-3 py-1.5 disabled:opacity-40"
+              >
+                下一页
+              </button>
+            </div>
           </div>
         </>
       )}

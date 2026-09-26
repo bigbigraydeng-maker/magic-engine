@@ -13,34 +13,112 @@ export const projects = [
     cardLine: '104 homes along a river corridor, Park Estate Road, Rosehill.',
     listLine: '104 homes along a river corridor, Park Estate Road, Rosehill. Two to five bedrooms.',
     price: 'From $650k',
-    metaDescription: '104 new homes from $650k in a masterplanned riverside community, Park Estate Road, Rosehill. Two to five bedrooms — now selling.',
+    metaDescription: 'Riverside is a 104-home masterplanned community on Park Estate Road, Rosehill, Auckland — delivered in stages, with a selection of homes currently listed and further releases to come.',
     heading: 'A masterplanned community on Park Estate Road',
-    // Official copy — from parkhomes.nz/projects
+    // Official copy — from parkhomes.nz/projects (kept for reference; the page
+    // now renders from `story` below).
     intro: [
       'Park Homes Riverside is a masterplanned residential community centred around a landscaped river corridor that weaves through the heart of the neighbourhood.',
       'Thoughtfully designed streetscapes, open green areas, and riverside walkways create a connected living environment where nature and contemporary homes coexist seamlessly.',
       'Built with disciplined project coordination and rigorous quality supervision, Riverside reflects our capability to deliver large-scale communities with both vision and precision — shaping not just homes, but an enduring neighbourhood.',
     ],
+    // V2 brief (client, 2026-09-16): 104 is the whole-development figure, not
+    // current availability. Listing-level facts (bedrooms, prices, completion)
+    // belong on individual listings, not the project overview.
     facts: [
-      ['Homes', '104'],
-      ['Bedrooms', '2 – 5'],
-      ['Homes from', '$650k'],
-      ['Completion', '2026 – 28'],
+      ['Homes across the development', '104'],
+      ['Location', 'Rosehill'],
+      ['Delivery', 'Staged'],
     ],
     footerAddress: 'Riverside · 115 Park Estate Road, Rosehill, Auckland',
     group: 'available',
-    // 2026-08-21: replacement aerials supplied by the client, cropped to the
-    // completed section of this multi-stage site and colour-corrected (no
-    // structures removed/altered) — the wider originals also show other
-    // stages still under construction, which is why the crop is tight.
-    hero: '/img/riverside/rv-aerial-finished-1.webp',
-    card: '/img/riverside/rv-aerial-finished-1.webp',
-    imageNote: 'Site photography supplied by the developer, cropped to the completed section of this multi-stage development.',
-    images: [
-      { src: '/img/riverside/rv-aerial-finished-1.webp', alt: 'Riverside — completed homes, aerial view', wide: true },
-      { src: '/img/riverside/rv-aerial-finished-2.webp', alt: 'Riverside — completed homes, aerial view' },
-      { src: '/img/riverside/rv-aerial-finished-3.webp', alt: 'Riverside — completed homes, aerial view' },
-    ],
+    // V2 package (client, 2026-09-16). 01 represents the whole development on
+    // the homepage / projects cards per the brief.
+    hero: '/img/riverside/v2/01-riverside-community-panorama.webp',
+    card: '/img/riverside/v2/01-riverside-community-panorama.webp',
+    // Whole-development page layout — rendered by ProjectStory.astro. Copy is
+    // the client's ready-to-use text from START_HERE_AI_INSTRUCTIONS.txt.
+    // 07 is an existing developer-supplied rendering (revision not verified):
+    // it must stay captioned as indicative and never be presented as an
+    // approved masterplan or used to infer stages, lots or completion.
+    story: {
+      subtitle: 'A 104-home community, taking shape.',
+      body: 'A masterplanned residential development on Park Estate Road, bringing together contemporary homes and a long-term vision for a connected neighbourhood.',
+      hero: {
+        src: '/img/riverside/v2/01-riverside-community-panorama.webp', width: 2560, height: 1440,
+        alt: 'Aerial view of Riverside homes and the surrounding Rosehill neighbourhood',
+        caption: 'Site photography — Riverside and the surrounding neighbourhood. Aerial views include neighbouring properties.',
+      },
+      overview: {
+        heading: 'One community. A long-term vision.',
+        copy: 'Riverside is a 104-home residential development in Rosehill, Auckland. Delivered in stages, the project brings individual homes together within a wider neighbourhood plan. The homes currently on the market form part of this larger development, with further releases to be introduced as the project progresses.',
+      },
+      vision: {
+        heading: 'See the bigger picture.',
+        copy: 'The wider vision brings together homes, internal streets and a landscaped river corridor. The overall layout helps show how individual releases sit within the larger community.',
+        img: {
+          src: '/img/riverside/v2/07-riverside-whole-community-vision.webp', width: 2560, height: 1570,
+          alt: 'Artist’s impression of the Riverside development layout',
+          caption: 'Artist’s impression — indicative development vision. Layout and landscaping are subject to change.',
+        },
+      },
+      setting: {
+        heading: 'Riverside in context.',
+        copy: 'Explore the development from above, with views of its homes, surrounding streets and wider Rosehill setting.',
+        img: {
+          src: '/img/riverside/v2/08-riverside-site-and-surroundings.webp', width: 2560, height: 1440,
+          alt: 'Aerial view of Riverside housing, construction areas and surrounding roads and neighbourhood',
+          caption: 'Site photography — including surrounding properties and areas under construction.',
+        },
+      },
+      progress: {
+        heading: 'A community taking shape.',
+        copy: 'Site photography records the development as it progresses, showing homes alongside areas still under construction. This section will be updated as work moves forward across the project.',
+        img: {
+          src: '/img/riverside/v2/09-riverside-development-progress.webp', width: 2560, height: 1440,
+          alt: 'Aerial view of homes, framing and earthworks beside the watercourse',
+          caption: 'Site photography — homes and construction activity within the developing community.',
+        },
+      },
+      homes: {
+        heading: 'A closer look at the homes.',
+        copy: 'Explore a selection of exterior and interior photographs from homes within Riverside. These images offer a closer look at living spaces and finishes; individual layouts and specifications vary.',
+        lead: { src: '/img/riverside/v2/02-riverside-architecture.webp', width: 2500, height: 1875, alt: 'Contemporary Riverside homes with balconies and contrasting exterior cladding', caption: 'Contemporary architecture' },
+        pair: [
+          { src: '/img/riverside/v2/03-riverside-living.webp', width: 1707, height: 1280, alt: 'Furnished living room with glazing and light timber-look flooring', caption: 'Light-filled living' },
+          { src: '/img/riverside/v2/04-riverside-dining-kitchen.webp', width: 1707, height: 1280, alt: 'Furnished dining area beside a contemporary kitchen', caption: 'Dining and kitchen' },
+        ],
+        more: [
+          { src: '/img/riverside/v2/05-riverside-bathroom.webp', width: 2500, height: 1875, alt: 'Bathroom with a wide vanity, illuminated mirror and glass shower', caption: 'Bathroom finishes' },
+          { src: '/img/riverside/v2/06-riverside-living-detail.webp', width: 1707, height: 1280, alt: 'Styled coffee table and sofa in a furnished living room', caption: 'A closer detail' },
+        ],
+        note: 'Selected homes shown. Furnishings, layouts and finishes vary; refer to the individual listing for details.',
+      },
+      availability: {
+        heading: 'Find your place at Riverside.',
+        copy: 'Current listings are a selection of homes within the wider 104-home development. Contact our appointed sales agent for the latest availability and details of individual properties.',
+      },
+      releases: {
+        heading: 'Stay informed about future releases.',
+        copy: 'Register your interest to hear about future homes and new releases at Riverside as details become available.',
+      },
+    },
+    // CURRENT AVAILABILITY — independently editable. Add one object per
+    // verified listing (agent/owner-supplied or live portal data only); omit
+    // unknown fields. Remove sold/withdrawn entries here without touching the
+    // story above. While empty, the page shows an "Enquire about current
+    // availability" button plus the verified Ray White link below.
+    //   { id: 'lot-45', title: 'Lot 45', address: 'Aratuhia Lane, Rosehill',
+    //     beds: 3, baths: 2, parking: 1, floorArea: '132 m²', landArea: '179 m²',
+    //     price: '$789,000', status: 'For sale', image: '/img/riverside/listings/lot-45.webp',
+    //     listingUrl: 'https://www.raywhite.co.nz/...' }
+    listings: [],
+    // FUTURE RELEASES — independently editable. Add one object per release
+    // when details are confirmed; nothing is invented while empty.
+    //   { id: 'stage-2', title: 'Stage 2', status: 'Coming soon', summary: 'Details to be announced.' }
+    releases: [],
+    // Supplied by the client (Jason, 2026-09-15) via email — YouTube walkthrough of 115 Park Estate Road.
+    video: { youtubeId: 'VqKlqhGUJEQ', title: 'Riverside — 115 Park Estate Road' },
     // Riverside is a masterplanned community — individual lots list under their
     // own internal street names (Aratuhia Lane, Longview Oak Lane), not "Park
     // Estate Road" itself, and suburb tagging is inconsistent between listings
@@ -232,6 +310,21 @@ export const projects = [
     images: [
       { src: '/img/greenview/gv-render-1.webp', alt: 'Greenview — artist’s impression', wide: true },
       { src: '/img/greenview/gv-render-2.webp', alt: 'Greenview — artist’s impression' },
+    ],
+    // PROGRESS LOG — newest first. One entry per batch of site photography the
+    // client sends; `date` is when the photos were received (never a guessed
+    // capture or stage date). Adding an update = adding an entry here.
+    progress: [
+      {
+        date: 'September 2026',
+        title: 'Earthworks under way',
+        body: 'Site photography received in September 2026 shows earthworks and retaining across the Reynolds Road site, with the established neighbourhood around it. The two artist’s impressions above show the homes this work is preparing for.',
+        images: [
+          { src: '/img/greenview/progress/gv-progress-context.webp', width: 2000, height: 1125, alt: 'Aerial view of the Greenview site within its surrounding neighbourhood', caption: 'Site photography — the site and surrounding streets' },
+          { src: '/img/greenview/progress/gv-progress-site.webp',    width: 2000, height: 1125, alt: 'Aerial view of the Greenview site with earthworks and machinery', caption: 'Site photography — earthworks across the site' },
+          { src: '/img/greenview/progress/gv-progress-earthworks.webp', width: 2000, height: 1125, alt: 'Close aerial view of excavation and retaining at Greenview', caption: 'Site photography — excavation and retaining' },
+        ],
+      },
     ],
   },
 ];

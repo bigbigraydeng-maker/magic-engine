@@ -1,11 +1,19 @@
 /**
- * 渠道查表分发 —— CTS Governed Reply Agent（issue #1578）。
+ * 渠道查表分发 —— CTS Governed Reply Agent（issue #1578，issue #1745 加邮件）。
  *
- * F1（Messenger）/ F2（WhatsApp）/ F3 / F4 四个 Inngest 函数共用同一套「起草 →
- * 验证 → 发送 → 收尾」骨架，唯一的区别是渠道本身：调哪个发送函数、怎么判定
- * 发送窗口关没关、查哪一列 kill switch、发送结果里消息 id 叫什么字段。这个
- * 文件把这四件"渠道差异"收进三张查表 + 两个归一化函数，业务逻辑里不需要再
- * 散落 `if (channel === 'whatsapp')`。
+ * F1（Messenger/WhatsApp 安抚）/ F2（AI 起草→发送主链路，现含邮件）/ F3 / F4
+ * 四个 Inngest 函数共用同一套「起草 → 验证 → 发送 → 收尾」骨架，唯一的区别是
+ * 渠道本身：调哪个发送函数、怎么判定发送窗口关没关、查哪一列 kill switch、
+ * 发送结果里消息 id 叫什么字段。这个文件把这几件"渠道差异"收进三张查表 + 两个
+ * 归一化函数，业务逻辑里不需要再散落 `if (channel === 'whatsapp')`。
+ *
+ * ## 邮件没有 F1（自动安抚）——这是刻意的业务判断，不是漏做
+ *
+ * issue #1745 调研结论明确留白：F1 那种"客户消息进来几秒内自动回一句安抚话术"
+ * 对邮件（靠每小时同步，不是 webhook 实时）价值存疑，这属于业务判断，不是本次
+ * 改动能替 PM 拍板的事——所以邮件只接入 F2（AI 起草→人审→发送），不接入 F1。
+ * 见 `conversation-inbound-autoack.ts` 的 `isKnownAutoAckChannel`（消费方），
+ * 和 `conversation-inbound-draft.ts` 用同一个函数判断"这个渠道要不要等 F1"。
  *
  * ## 不是 `lib/messaging/channels.ts` 的 `MessagingChannelAdapter`
  *
@@ -38,29 +46,36 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendReply, messagingWindow, type SendReplyResult } from '@/lib/messenger/send'
 import { sendWhatsApp, whatsappWindow, type SendWhatsAppResult } from '@/lib/whatsapp/send'
+import { sendMailReply, mailReplyWindow, type SendMailReplyResult } from '@/lib/microsoft/mail-send'
 
-export type MessengerAgentChannel = 'messenger' | 'whatsapp'
+export type MessengerAgentChannel = 'messenger' | 'whatsapp' | 'email'
 
-/** 渠道 → 实际发送函数。两个函数的入参形状相同（`clientId`/`conversationId`/`body`/`sentByEmail`/`usedAiDraft`）。 */
+/** 三个渠道结果的合并类型——`getSentMessageId` 按渠道分别取字段时要用到。 */
+export type ChannelSendResult = SendReplyResult | SendWhatsAppResult | SendMailReplyResult
+
+/** 渠道 → 实际发送函数。三个函数的入参形状相同（`clientId`/`conversationId`/`body`/`sentByEmail`/`usedAiDraft`）。 */
 export const CHANNEL_SEND = {
   messenger: sendReply,
   whatsapp: sendWhatsApp,
+  email: sendMailReply,
 } as const
 
-/** 渠道 → 判定发送窗口的纯函数。两个函数的入参形状相同（`lastInboundAt`/可选 `now`）。 */
+/** 渠道 → 判定发送窗口的纯函数。入参形状相同（`lastInboundAt`/可选 `now`，邮件不认 `now`——见 `mailReplyWindow` 头注释）。 */
 export const CHANNEL_WINDOW = {
   messenger: messagingWindow,
   whatsapp: whatsappWindow,
+  email: mailReplyWindow,
 } as const
 
-/** 渠道 → `clients` 表里对应的 kill switch 列名（issue #1574 新增，两列，默认 false）。 */
+/** 渠道 → `clients` 表里对应的 kill switch 列名（issue #1574/#1745 新增，三列，默认 false）。 */
 const CHANNEL_KILL_SWITCH_COLUMN = {
   messenger: 'messenger_agent_enabled_messenger',
   whatsapp: 'messenger_agent_enabled_whatsapp',
+  email: 'messenger_agent_enabled_email',
 } as const
 
 function isKnownChannel(channel: string): channel is MessengerAgentChannel {
-  return channel === 'messenger' || channel === 'whatsapp'
+  return channel === 'messenger' || channel === 'whatsapp' || channel === 'email'
 }
 
 /**
@@ -103,28 +118,29 @@ export async function isChannelEnabled(
 }
 
 /**
- * 从发送结果里取出 provider 那边的消息 id，两个渠道字段名不同
- * （Messenger 是 `metaMessageId`，WhatsApp 是 `whatsappMessageId`）。
+ * 从发送结果里取出 provider 那边的消息 id，三个渠道字段名不同
+ * （Messenger 是 `metaMessageId`，WhatsApp 是 `whatsappMessageId`，
+ * 邮件是 `messageId`——见 `mail-send.ts::SendMailReplyResult`）。
  * 发送失败（`ok: false`）或渠道跟结果形状对不上时返回 `null`。
  */
-export function getSentMessageId(
-  channel: MessengerAgentChannel,
-  result: SendReplyResult | SendWhatsAppResult,
-): string | null {
+export function getSentMessageId(channel: MessengerAgentChannel, result: ChannelSendResult): string | null {
   if (!result.ok) return null
   if (channel === 'messenger' && 'metaMessageId' in result) return result.metaMessageId
   if (channel === 'whatsapp' && 'whatsappMessageId' in result) return result.whatsappMessageId
+  if (channel === 'email' && 'messageId' in result) return result.messageId
   return null
 }
 
 /**
- * 这个窗口状态算不算"关了，不能自由发消息"。两个渠道的"关闭"取值不同
- * （Messenger 是 `'closed'`，WhatsApp 是 `'template_only'`）。未识别的渠道按
+ * 这个窗口状态算不算"关了，不能自由发消息"。三个渠道的"关闭"取值不同
+ * （Messenger 是 `'closed'`，WhatsApp 是 `'template_only'`，邮件也是 `'closed'`
+ * ——见 `mailReplyWindow`，客人没来过信才会是这个态）。未识别的渠道按
  * "已关闭"处理（fail-closed 的同一个方向：宁可判成关了拦下，不误判成开着放行）。
  */
 export function isWindowClosed(channel: MessengerAgentChannel, windowKind: string): boolean {
   if (channel === 'messenger') return windowKind === 'closed'
   if (channel === 'whatsapp') return windowKind === 'template_only'
+  if (channel === 'email') return windowKind === 'closed'
   console.error(`[messenger-agent/channel-dispatch] 未识别的渠道 channel=${channel}，按窗口已关闭处理`)
   return true
 }

@@ -51,6 +51,15 @@ export interface FakeWriteOptions {
   rpcErrors?: ReadonlySet<string>
   /** Turn off constraint emulation for a test that deliberately seeds "impossible" data. */
   enforceConstraints?: boolean
+  /**
+   * Clock used to stamp `created_at` on rows inserted without one. Defaults to the
+   * real system clock. A test that also freezes `now()` for the module under test
+   * (e.g. `now: () => NOW`) must pass the same clock here — otherwise an expiry-style
+   * CHECK constraint compares a caller-supplied `expires_at` (relative to the frozen
+   * clock) against a `created_at` stamped from the real wall clock, which drifts out
+   * of sync as real time moves past the frozen date.
+   */
+  now?: () => Date
 }
 
 const SHA256_HEX = /^[0-9a-f]{64}$/
@@ -97,11 +106,55 @@ function checkConstraints(table: string, row: Row): string | null {
     }
   }
 
+  if (table === 'client_knowledge_rollout_advance_requests') {
+    const tokenHash = row.token_hash
+    if (typeof tokenHash !== 'string' || !SHA256_HEX.test(tokenHash)) {
+      return 'new row for relation "client_knowledge_rollout_advance_requests" violates check constraint "rollout_advance_token_hash_is_sha256_hex"'
+    }
+    if (lowerTrim(row.created_by_email) === lowerTrim(row.confirmer_email)) {
+      return 'violates check constraint "rollout_advance_sender_is_not_confirmer"'
+    }
+    const expires = typeof row.expires_at === 'string' ? Date.parse(row.expires_at) : NaN
+    const created = typeof row.created_at === 'string' ? Date.parse(row.created_at) : Date.now()
+    if (!(expires > created)) {
+      return 'violates check constraint "rollout_advance_expiry_in_future"'
+    }
+    const fromStage = row.from_stage
+    const toStage = row.to_stage
+    if (
+      typeof fromStage === 'string' &&
+      typeof toStage === 'string' &&
+      Number(toStage) !== Number(fromStage) + 1
+    ) {
+      return 'violates check constraint "rollout_advance_is_one_step_forward"'
+    }
+    const leavingStage1 = fromStage === '1'
+    const hasSampleCheck = row.sample_check !== null && row.sample_check !== undefined
+    if (leavingStage1 !== hasSampleCheck) {
+      return 'violates check constraint "rollout_advance_sample_check_required_leaving_stage_1"'
+    }
+  }
+
   return null
 }
 
 /** The append-only trigger on the confirmation-request table. */
 function checkUpdateTrigger(table: string, oldRow: Row, newRow: Row): string | null {
+  if (table === 'client_knowledge_rollout_advance_requests') {
+    if (oldRow.status !== 'pending' && newRow.status !== oldRow.status) {
+      return `client_knowledge_rollout_advance_requests: request ${String(oldRow.id)} is already ${String(oldRow.status)} and cannot change state again`
+    }
+    for (const immutable of ['token_hash', 'client_id', 'confirmer_email', 'from_stage', 'to_stage']) {
+      if (immutable in newRow && JSON.stringify(newRow[immutable]) !== JSON.stringify(oldRow[immutable])) {
+        return 'client_knowledge_rollout_advance_requests: token/stage/recipient are immutable after the link is issued'
+      }
+    }
+    return null
+  }
+  if (table === 'client_knowledge_events') {
+    // 🔴 照抄真实迁移的 append-only 触发器：没有任何例外，任何 UPDATE 一律拒绝。
+    return `client_knowledge_events is append-only: rows cannot be updated (insert a new event instead)`
+  }
   if (table !== 'client_knowledge_confirmation_requests') return null
   if (oldRow.status !== 'pending' && newRow.status !== oldRow.status) {
     return `client_knowledge_confirmation_requests: request ${String(oldRow.id)} is already ${String(oldRow.status)} and cannot change state again`
@@ -125,6 +178,7 @@ const COLUMN_DEFAULTS: Record<string, Row> = {
   client_knowledge_facts: { status: 'candidate', scope: {}, evidence: {} },
   client_knowledge_confirmers: { revoked_at: null, revoked_by_email: null, registered_at: new Date().toISOString() },
   client_knowledge_events: { payload: {}, reason: null },
+  client_knowledge_rollout_advance_requests: { status: 'pending', confirmed_at: null, sample_check: null },
 }
 
 type Predicate = (row: Row) => boolean
@@ -205,7 +259,7 @@ class Builder implements KnowledgeSelectBuilder, KnowledgeUpdateBuilder, Knowled
     if (this.mode === 'insert') {
       const row: Row = {
         id: `${this.table}-${rows.length + 1}`,
-        created_at: new Date().toISOString(),
+        created_at: this.db.stampCreatedAt(),
         ...(COLUMN_DEFAULTS[this.table] ?? {}),
         ...this.payload,
       }
@@ -240,6 +294,9 @@ class Builder implements KnowledgeSelectBuilder, KnowledgeUpdateBuilder, Knowled
 }
 
 export class FakeWriteSupabase implements KnowledgeWriteClient {
+  /** Ticks forward on every stamped row so insertion order always matches `created_at` order, even when `options.now` is frozen to a fixed instant across a whole test. */
+  private stampCounterMs = 0
+
   constructor(
     private readonly tables: Record<string, Row[]>,
     readonly options: FakeWriteOptions = {},
@@ -249,6 +306,19 @@ export class FakeWriteSupabase implements KnowledgeWriteClient {
     const rows = this.tables[table]
     if (!rows) throw new Error(`fake supabase: unmodelled table "${table}"`)
     return rows
+  }
+
+  /**
+   * `created_at` for a row inserted without one. Base clock is `options.now()` (or the
+   * real clock) evaluated fresh each call, plus a strictly-increasing offset — so two
+   * rows inserted back-to-back never tie even when `options.now` is a frozen constant,
+   * regardless of which insert path (`.insert()` vs an RPC) wrote them.
+   */
+  stampCreatedAt(): string {
+    const base = this.options.now?.() ?? new Date()
+    const stamped = new Date(base.getTime() + this.stampCounterMs)
+    this.stampCounterMs += 1
+    return stamped.toISOString()
   }
 
   /** Only the unique indexes that actually exist on these tables. */
@@ -265,6 +335,10 @@ export class FakeWriteSupabase implements KnowledgeWriteClient {
           (existing.revoked_at ?? null) === null,
       )
       return clash ? 'uq_client_knowledge_confirmers_active' : null
+    }
+    if (table === 'client_knowledge_rollout_advance_requests') {
+      const clash = this.tables[table].some((existing) => existing.token_hash === row.token_hash)
+      return clash ? 'uq_client_knowledge_rollout_advance_requests_token' : null
     }
     return null
   }
@@ -291,6 +365,9 @@ export class FakeWriteSupabase implements KnowledgeWriteClient {
   }
 
   private runRpc(fn: string, args: Record<string, unknown>): KnowledgeWriteResult {
+    if (fn === 'consume_knowledge_rollout_advance_request') {
+      return this.runConsumeRolloutAdvanceRpc(args)
+    }
     if (fn !== 'consume_knowledge_confirmation_request') {
       throw new Error(`fake supabase: unmodelled rpc "${fn}"`)
     }
@@ -335,6 +412,83 @@ export class FakeWriteSupabase implements KnowledgeWriteClient {
     }
 
     return { data: [{ claimed: true }], error: null }
+  }
+
+  /**
+   * Models `consume_knowledge_rollout_advance_request` (issue #1648) — claim
+   * the advance-request row AND insert the `client_knowledge_events` phase
+   * event, atomically. `rpcErrors` simulates the function raising mid-
+   * transaction: nothing is touched, same "all or nothing" property the
+   * real migration's SECURITY DEFINER function guarantees.
+   *
+   * 🔴 2026-09-15 子牙+魏征联合复审：this fake used to only check
+   * `status !== 'pending'` before writing the phase event — exactly the gap
+   * the real RPC had (see the migration's own header comment for the attack
+   * scenario: rollback supersedes a still-pending advance link). A fake more
+   * lenient than the corrected real function would hide this exact class of
+   * bug again, so this re-derives the client's ACTUAL current stage from
+   * `client_knowledge_events` (same "latest row by created_at where
+   * dimension='phase', no row = '0'" logic as `getCurrentRolloutStage`) and
+   * refuses — WITHOUT writing anything, and WITHOUT flipping the request's
+   * status — when it no longer matches the request's frozen `from_stage`.
+   */
+  private runConsumeRolloutAdvanceRpc(args: Record<string, unknown>): KnowledgeWriteResult {
+    if (this.options.rpcErrors?.has('consume_knowledge_rollout_advance_request')) {
+      return { data: null, error: { message: 'simulated failure inside rpc "consume_knowledge_rollout_advance_request" — no table touched' } }
+    }
+
+    const requests = this.rowsFor('client_knowledge_rollout_advance_requests')
+    const events = this.rowsFor('client_knowledge_events')
+    const request = requests.find((row) => row.id === args.p_request_id)
+    if (!request || request.status !== 'pending') {
+      return { data: [{ claimed: false, event_id: null, stale: false }], error: null }
+    }
+
+    const actualStage = this.actualPhaseValue(request.client_id)
+    if (actualStage !== request.from_stage) {
+      // 阶段已经被别的东西（典型：一键回退）改到跟这条请求冻死的 from_stage
+      // 不一样了——拒绝，不写事件，也不把请求标记成终态（跟真实 RPC 一致）。
+      return { data: [{ claimed: false, event_id: null, stale: true }], error: null }
+    }
+
+    request.status = 'confirmed'
+    request.confirmed_at = args.p_confirmed_at
+
+    const eventId = `client_knowledge_events-${events.length + 1}`
+    events.push({
+      id: eventId,
+      client_id: request.client_id,
+      dimension: 'phase',
+      value: request.to_stage,
+      reason: 'knowledge.rollout.stage_advanced',
+      actor_email: request.created_by_email,
+      payload: {
+        clientId: request.client_id,
+        fromStage: request.from_stage,
+        toStage: request.to_stage,
+        meSignerEmail: request.created_by_email,
+        customerSignerEmail: request.confirmer_email,
+        sampleCheck: request.sample_check ?? null,
+        confirmedAt: args.p_confirmed_at,
+        requestId: request.id,
+      },
+      created_at: this.stampCreatedAt(),
+    })
+
+    return { data: [{ claimed: true, event_id: eventId, stale: false }], error: null }
+  }
+
+  /** Same query shape as `getCurrentRolloutStage`: latest `dimension='phase'` row by `created_at`, no row = '0'. */
+  private actualPhaseValue(clientId: unknown): string {
+    const events = this.rowsFor('client_knowledge_events')
+    const phaseEvents = events.filter((row) => row.client_id === clientId && row.dimension === 'phase')
+    if (phaseEvents.length === 0) return '0'
+    const latest = [...phaseEvents].sort((a, b) => {
+      const at = typeof a.created_at === 'string' ? Date.parse(a.created_at) : 0
+      const bt = typeof b.created_at === 'string' ? Date.parse(b.created_at) : 0
+      return bt - at
+    })[0]
+    return typeof latest.value === 'string' ? latest.value : '0'
   }
 }
 

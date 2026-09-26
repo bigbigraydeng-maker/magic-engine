@@ -74,7 +74,7 @@ describe('prepareSceneAssets — 真实照片优先', () => {
       'great wall at sunrise',
       expect.anything(),
       1,
-      { requireVerified: true },
+      { requireVerified: true, requireConfidentMatch: true },
     )
   })
 

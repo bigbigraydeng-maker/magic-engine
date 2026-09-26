@@ -83,6 +83,14 @@ export async function assertCampaignOwnedByClient(
   clientId: string,
   accessToken: string,
 ): Promise<OwnershipCheckResult> {
+  // campaign_id 来自请求体/查询串，下面会原样拼进 Graph 地址并带着令牌发出去。
+  // 不是纯数字就先拒：`123?method=post&status=PAUSED` 这类值会在归属判定**之前**
+  // 就把一次「读」变成别的请求（狄仁杰 2026-09-13 发现，未对真 Meta 实测）。
+  // Meta 的 campaign id 一直是纯数字。
+  if (!/^\d{1,32}$/.test(campaignId)) {
+    return { ok: false, error: 'campaign_id 格式不对（只能是数字），已拒绝执行。' }
+  }
+
   const { ids: registeredAccountIds, error: registryError } = await getRegisteredAccountIds(clientId)
   if (registryError) {
     return { ok: false, error: registryError }

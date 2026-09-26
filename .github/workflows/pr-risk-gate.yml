@@ -1,0 +1,90 @@
+name: PR risk gate
+
+# This replaces the former "Merge authorization (Ray)" check. That check
+# auto-passed in about five seconds and was never wired up as a required status
+# check, so it authorized nothing — it was a green light that could not stop a
+# merge. This one is meant to be required.
+#
+# It uses `pull_request_target`, not `pull_request`, on purpose: with
+# `pull_request_target` the workflow DEFINITION and the SCRIPT both come from
+# `main`, so a PR cannot edit the judge that judges it. The PR's own code is
+# never checked out and never executed — the PR enters only as data (the
+# changed-file list, the body, the comments) handed to the script through env
+# vars, never interpolated into a `run:` block.
+#
+# Two tiers. A computed risk of B or C enables auto-merge, and GitHub performs
+# the merge itself once every required check is green. A computed risk of A
+# passes only when three trusted sign-off markers exist for this exact
+# base+head pair; otherwise the check goes red.
+#
+# It never merges directly, never pushes, never deploys. Its only writes are the
+# rating comment and the auto-merge toggle.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+
+permissions:
+  contents: write        # enable / disable auto-merge
+  pull-requests: write   # post the rating comment; enable / disable auto-merge
+
+concurrency:
+  group: pr-risk-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  risk-gate:
+    name: Risk gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Checked out from `main`, never the PR head: the script that rates the PR
+      # must not be editable by the PR it rates. Credentials are not persisted
+      # because nothing here pushes.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Rate this PR and decide the merge tier
+        id: gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+          PR_IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          SIGNOFF_TRUSTED_LOGINS: ${{ vars.ME_SIGNOFF_TRUSTED_LOGINS }}
+        run: node tools/ops-review-loop/src/check-risk-gate.mjs
+
+      - name: Enable auto-merge (B/C only)
+        if: steps.gate.outputs.decision == 'enable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh pr merge --auto --merge "$PR_NUMBER"
+          echo '- 自动合并：已开启（必过检查全绿后由 GitHub 合并）' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Disable auto-merge (A / draft / fork / undecided)
+        if: always() && steps.gate.outputs.decision != 'enable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # Distinguish "already off" from a real API failure (CONCERN-2 from
+          # the 2026-09-25 three-way review). The old form `|| echo …` swallowed
+          # both, so an API outage that left a stale enable in place would look
+          # identical to the idempotent no-op.
+          state=$(gh pr view "$PR_NUMBER" --json autoMergeRequest --jq '.autoMergeRequest')
+          if [ "$state" = "null" ] || [ -z "$state" ]; then
+            echo '- 自动合并：本来就未开启（无需操作）' >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh pr merge --disable-auto "$PR_NUMBER"
+            echo '- 自动合并：已关闭' >> "$GITHUB_STEP_SUMMARY"
+          fi

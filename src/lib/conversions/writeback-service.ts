@@ -53,6 +53,8 @@ export type WritebackStatus =
  * 太长会让真断线的条目迟迟不进人工核对。5 分钟远大于一次 CAPI 往返（~1 秒）。
  */
 const STUCK_SENDING_MS = 5 * 60_000
+/** 授权失效后多久允许自动补发再来看一眼（流水线一天一次，这个值只要 < 24h 就行）。 */
+const AUTH_RETRY_DELAY_MS = 60 * 60_000
 
 export type SendOutcomeResult = {
   status: WritebackStatus
@@ -417,12 +419,24 @@ export async function sendApprovedOutcome(
       )
 
     case 'auth':
+      // 🔴 2026-09-22 起不再判 `failed_permanent`：授权失效是**我们这边**的令牌问题，
+      //    令牌修好之后这条完全可以再发。之前一次授权失败就永久作废，CTS 19 条已批准
+      //    的成交在令牌修好前就过了 7 天窗口，白白丢掉。
+      //    可重发的前提：`accept()` 只在 Meta 用 401/403 或 code 190/102/200 拒了请求、
+      //    响应体里没有 `events_received` 时才回 `auth` —— 事件根本没入账，重发不会双发。
+      //    这跟 `in_doubt`（不知道收没收）是两回事，那一档一个字不动。
+      //    `next_attempt_at` 是给自动补发（`writeback-resend-run.ts`）看的：每天流水线
+      //    先探活令牌，活了才真发；没修好就跳过，不白烧尝试次数。
       return await settle(
-        'failed_permanent',
-        { last_error: verdict.detail, last_error_code: 'auth' },
+        'failed',
         {
-          status: 'failed_permanent',
-          message: '连接广告平台的授权失效了 —— 需要重新连接一次才能继续',
+          last_error: verdict.detail,
+          last_error_code: 'auth',
+          next_attempt_at: new Date(now.getTime() + AUTH_RETRY_DELAY_MS).toISOString(),
+        },
+        {
+          status: 'failed',
+          message: '连接广告平台的授权失效了 —— 授权修好后会自动补发，7 天内有效',
           writebackId: wb.id,
         },
       )

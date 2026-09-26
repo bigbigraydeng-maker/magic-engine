@@ -323,3 +323,29 @@ function mountWithFocus(focusId: string) {
   window.history.pushState({}, '', `/dashboard/conversions?client=${CLIENT}&focus=${focusId}`)
   return render(<ConversionsPage />)
 }
+
+describe('授权失效的失败行说清「会自动补发」（2026-09-22 起授权失败不再永久作废）', () => {
+  it('last_error_code=auth → 显示自动补发文案，不再是「上次发送没成功」', async () => {
+    mountWith([
+      outcome({
+        id: 'auth-1',
+        review_status: 'approved',
+        me_conversion_writebacks: [{ id: 'wb-1', status: 'failed', last_error: '令牌失效', last_error_code: 'auth', next_attempt_at: null }],
+      }),
+    ])
+    expect(await screen.findByText(/自动补发/)).toBeTruthy()
+    expect(screen.queryByText(/上次发送没成功/)).toBeNull()
+  })
+
+  it('其它失败码 → 仍是「上次发送没成功：<原因>。可以再试一次。」', async () => {
+    mountWith([
+      outcome({
+        id: 'retry-1',
+        review_status: 'approved',
+        me_conversion_writebacks: [{ id: 'wb-2', status: 'failed', last_error: '平台忙', last_error_code: 'retry', next_attempt_at: null }],
+      }),
+    ])
+    expect(await screen.findByText(/上次发送没成功：平台忙/)).toBeTruthy()
+    expect(screen.queryByText(/自动补发/)).toBeNull()
+  })
+})

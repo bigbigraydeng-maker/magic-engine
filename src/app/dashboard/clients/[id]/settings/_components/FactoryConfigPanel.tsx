@@ -138,9 +138,13 @@ interface Draft {
   offers: OfferDraft[]
 }
 
-const toDraft = (c: Config): Draft => ({
+const toDraft = (c: Config, activeGoals: Goal[] = []): Draft => ({
   pageId: c.publish_target?.page_id ?? '',
-  goalId: c.factory_goal_id ?? '',
+  // 存量数据可能指向一个已经不再活跃（或已被删除）的 Goal —— 下拉框里找不到这个选项，
+  // 只能显示占位文字，但如果这里原样把这个失效 ID 塞进 draft，保存时后端会拒收整份表单
+  // （包括这次真正要改的其它字段），且没有任何 UI 途径能清掉它（下拉框在零活跃目标时是
+  // disabled 的）。所以只信一个「当前确实在活跃列表里」的 factory_goal_id，否则当空处理。
+  goalId: c.factory_goal_id && activeGoals.some((g) => g.id === c.factory_goal_id) ? c.factory_goal_id : '',
   priceFrom: c.verified_offer?.price_from ?? '',
   offerExpiry: c.verified_offer?.offer_expiry ?? '',
   verifiedServices: (c.verified_offer?.verified_services ?? []).join('\n'),
@@ -204,7 +208,7 @@ export function FactoryConfigPanel({ clientId }: Props) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = (await res.json()) as Payload
       setState({ phase: 'ready', data })
-      setDraft(toDraft(data.config))
+      setDraft(toDraft(data.config, data.active_goals))
     } catch (err) {
       setState({ phase: 'error', message: err instanceof Error ? err.message : String(err) })
     }
@@ -320,7 +324,7 @@ export function FactoryConfigPanel({ clientId }: Props) {
       const json = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
       setState((s) => (s.phase === 'ready' ? { phase: 'ready', data: { ...s.data, config: json.config } } : s))
-      setDraft(toDraft(json.config as Config))
+      setDraft(toDraft(json.config as Config, state.phase === 'ready' ? state.data.active_goals : []))
       setSavedAt(new Date().toLocaleTimeString('zh-CN'))
     } catch (err) {
       setErrMsg(err instanceof Error ? err.message : String(err))
@@ -349,7 +353,7 @@ export function FactoryConfigPanel({ clientId }: Props) {
   }
 
   const { data } = state
-  const isDirty = !eqDraft(draft, toDraft(data.config))
+  const isDirty = !eqDraft(draft, toDraft(data.config, data.active_goals))
   const publishReady = Boolean(data.config.publish_target)
 
   return (

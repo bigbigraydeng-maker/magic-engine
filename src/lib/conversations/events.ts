@@ -13,6 +13,24 @@ import { z } from 'zod'
 
 export const CONVERSATION_MESSAGE_RECEIVED_EVENT = 'conversation/message.received' as const
 
+/**
+ * F1（issue #1584）安抚话术发出后的收尾事件，F2（issue #1585）用它做纯 UX 排序
+ * （等它先送达，不是拿它判断"要不要继续"）。跟 `CONVERSATION_MESSAGE_RECEIVED_EVENT`
+ * 放在同一个文件的理由一样：字符串必须跨 issue 原样一致，这里是唯一真相源。
+ * 🔴 F1 的 `conversation-inbound-autoack.ts`（PR #1739，动笔时未合并）目前在自己
+ * 文件里本地声明了同名同值的常量——那份实现落地/下次改动时应该改成从这里 import，
+ * 不要两处各留一份。
+ */
+export const CONVERSATION_AUTOACK_SENT_EVENT = 'conversation/autoack.sent' as const
+
+/**
+ * F3（issue #1586）人工在门户点批准/改后发送后 emit，F2 的
+ * `step.waitForEvent('conversation/reply.approved', { if: 'async.data.draft_id == "..."' })`
+ * 消费。同上，F3 的 `conversation-approval-emit.ts`（PR #1741，动笔时未合并）目前
+ * 本地声明了同名同值的常量，落地/下次改动时应改成从这里 import。
+ */
+export const CONVERSATION_REPLY_APPROVED_EVENT = 'conversation/reply.approved' as const
+
 /** `conversations.channel` 的取值——跟 `lib/messaging/channels.ts` 的 CHANNELS 保持一致。 */
 export const ConversationChannelSchema = z.enum(['messenger', 'whatsapp', 'email', 'voice'])
 export type ConversationChannel = z.infer<typeof ConversationChannelSchema>

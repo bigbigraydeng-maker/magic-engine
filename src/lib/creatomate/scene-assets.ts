@@ -53,7 +53,13 @@ async function pickRealPhoto(
   pool: RealPhotoPool,
 ): Promise<{ url: string; costUsd: number } | null> {
   if (pool.length === 0) return null
-  const [pick] = await rankAssetsByPrompt(scene.imagePrompt, pool, 1, { requireVerified: true })
+  // requireConfidentMatch：选不准（跟 prompt 一个关键词都对不上）宁可返回没有匹配,
+  // 走回下面的 AI 现画兜底,也不要把猜错的真实照片当"匹配成功"直接发布
+  // （2026-09-14 实测：素材库有对的故宫/兵马俑照片,排序器还是选了文不对题的）。
+  const [pick] = await rankAssetsByPrompt(scene.imagePrompt, pool, 1, {
+    requireVerified: true,
+    requireConfidentMatch: true,
+  })
   if (!pick || !pick.storageUrl) return null
   return { url: pick.storageUrl, costUsd: 0 }
 }

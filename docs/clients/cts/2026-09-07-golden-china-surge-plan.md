@@ -28,7 +28,7 @@
 **广告成本基线**:$60/天,5-6 lead/天,$11-12/lead
 
 **技术能力已现成(2026-09-05~07 陆续上线)**
-- ✅ 名单一键 CSV 导出:`GET /api/admin/conversions/audience-export?client_id=<CTS>&format=csv&source=combined`
+- ✅ 名单一键 CSV 导出:`GET /api/admin/conversions/audience-export?client_id=<CTS>&format=csv`(默认且**仅** `source=fbleads` 可用;🔴 `source=combined`/`newsletter` 已于 2026-09-07 当天下线,请求一律返回 HTTP 410——见下方「PM 30 分钟」段的更正说明,以及 Issue #1397)
 - ✅ PM 成交/咨询核对页:`/dashboard/conversions`(键盘 Y/N 批,三闸防重发)
 - ✅ Meta CAPI Writer:`src/lib/meta/capi/writer.ts`(等 CRM 上线自动跑;此前 PM 页面手工批也能用)
 - ✅ Reel 发布→表现回流 Inngest 链:`factoryReelMeasurementAdapter` 已上线
@@ -80,7 +80,10 @@
 3. 激活 4 个 INACTIVE Lookalike(Ads Manager 一键)
 
 ### 👤 PM(30 分钟 · 建 leads+newsletter 合并名单 Custom Audience + Lookalike 新种子)
-1. 下载合并名单 CSV:`GET /api/admin/conversions/audience-export?client_id=c0000000-0000-0000-0000-000000000000&format=csv&source=combined`(约 537 人:193 fbleads + 526 newsletter 去重。**注意**:这条口径只合并"广告来源联系人"和"当前 Mailchimp 订阅者",接口不检查付款状态,不能当成"付过费的客户"——是一般潜客种子,不是成交种子)
+
+🔴 **更正(2026-09-07 当天)**:下面第 1 步原写的 `source=combined` 下载入口,**在同一天已下线**——接口现在对 `source=combined`/`newsletter` 一律返回 HTTP 410,只保留 `source=fbleads`(见 Issue #1397)。这份 537 人 leads+newsletter 合并名单**当晚实际改走了别的方式建成上传**,过程和结果见下方「v2 补」段「隔壁窗口交付」;下面 1-4 步留档保留原始设想供追溯,**今天起不能再用这条 URL 重新导出合并名单**。需要新的 Custom Audience/Lookalike 种子,只能走仍可用的 fbleads-only 导出(`format=csv`,默认 `source=fbleads`,约 193 人,只含广告来源联系人、不含 newsletter 订阅者)。
+
+1. ~~下载合并名单 CSV:`GET /api/admin/conversions/audience-export?client_id=c0000000-0000-0000-0000-000000000000&format=csv&source=combined`~~(已下线;约 537 人:193 fbleads + 526 newsletter 去重。**注意**:这条口径只合并"广告来源联系人"和"当前 Mailchimp 订阅者",接口不检查付款状态,不能当成"付过费的客户"——是一般潜客种子,不是成交种子)
 2. Meta Ads Manager → Audiences → Create → Customer List → 上传
 3. 基于它建 1% Lookalike (NZ)
 4. **这个 Lookalike 就是今日中层新种子**——种子来自 leads+newsletter 合并名单(一般潜客,未核实付费),效果好不好要看匹配率和实际转化数据,不能预设它比视频观众种子更值钱
@@ -143,7 +146,8 @@
 **卡在最后一步(Meta 网页上传)**:
 - 🔴 **纠正**:隔壁写了完整脚本、把生成的 CSV(`CTS_Meta_Audience_530.csv`,约 530 人邮箱/电话明文)发到了 PM 手机——这是脱离系统访问控制、审计和删除策略的明文 PII 副本,绕开了 `/api/admin/conversions/audience-export` 本该"生产库直接下载到授权管理员浏览器、不落中间文件"的安全边界。**PM 请先删除手机上这份 CSV**。
 - 但**能写这个 audience 的令牌只在 Meta MCP 连接器里、agent 取不出来**,Meta 网页上传又不许 agent 代操作
-- 因此**收尾靠授权管理员手工 30 秒**:用授权管理员账号在自己电脑浏览器直接访问 `GET /api/admin/conversions/audience-export?client_id=c0000000-0000-0000-0000-000000000000&format=csv&source=combined` 下载(走审计过的下载端点,不经手机、不经中间转发)→ 登录 → https://business.facebook.com/adsmanager/audiences?act=2202695063810470 → 找 `CTS · LIST · fb+newsletter · 20260907` → 编辑客户名单 → 上传 CSV → 对列(email→Email · phone→Phone · fn→First Name · ln→Last Name · country→Country)→ 上传 → 30-60 分钟 Meta 出匹配率
+- 因此**收尾靠授权管理员手工 30 秒**:用授权管理员账号在自己电脑浏览器直接访问审计过的下载端点(不经手机、不经中间转发)下载 → 登录 → https://business.facebook.com/adsmanager/audiences?act=2202695063810470 → 找 `CTS · LIST · fb+newsletter · 20260907` → 编辑客户名单 → 上传 CSV → 对列(email→Email · phone→Phone · fn→First Name · ln→Last Name · country→Country)→ 上传 → 30-60 分钟 Meta 出匹配率
+  - 🔴 **更正**:这一步原写的下载地址是 `GET /api/admin/conversions/audience-export?client_id=c0000000-0000-0000-0000-000000000000&format=csv&source=combined`——**该 `source=combined` 入口已于 2026-09-07 当天下线,现在请求会返回 HTTP 410**,拿不到这份 530 人合并 CSV(见 Issue #1397)。当晚这份名单是在下线前完成的下载/上传,记录留档;**今天起若要重新走这一步,审计端点只剩 `format=csv`(默认 `source=fbleads`,只含 193 人 fbleads 名单)**,合并 newsletter 订阅者的名单需另行找子牙/华佗评估是否恢复合并导出,不能直接照抄这条已下线的 URL
 
 **PM 传完必做**:把匹配率告诉两个窗口——决定明天中层要不要往这个 Lookalike 加钱;传完后清理手机上已外发的 CSV 副本。
 

@@ -43,7 +43,27 @@ const LOGIN_REQUIRED_HOSTS = [
   'mailchimp.com',
 ]
 
+// 本仓库是私有仓库（2026-09-21 实测 `gh repo view --json visibility`）——未登录
+// 直接 curl 任意 blob 深链一律 404（跟登录墙同一个信号，不是链接本身有问题）。
+// 不加这条，`client-doc-manual-tasks.ts` 里指向本仓库文件的 GitHub 深链会被
+// `dropBrokenLinks` 当成「打不开」静默丢掉——待办本身消失，人根本看不到。
+// 只挡这一个私有仓库的路径，不把整个 github.com 当登录墙——公开仓库/PR 链接
+// （比如 client-doc-manual-tasks.ts 之外别处用到的公开 issue/PR 深链）应该照常
+// 能被 verifyActionLink 实测，一刀切封掉整个域名会让那些链接也变成「验不了」。
+const PRIVATE_REPO_PATH_PREFIX = '/bigbigraydeng-maker/magic-engine'
+
+function isPrivateRepoPath(href: string): boolean {
+  try {
+    const url = new URL(href)
+    const host = url.hostname.replace(/^www\./, '')
+    return host === 'github.com' && url.pathname.startsWith(PRIVATE_REPO_PATH_PREFIX)
+  } catch {
+    return false
+  }
+}
+
 export function isLoginRequiredHost(href: string): boolean {
+  if (isPrivateRepoPath(href)) return true
   try {
     const host = new URL(href).hostname.replace(/^www\./, '')
     return LOGIN_REQUIRED_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))
@@ -60,6 +80,17 @@ export type LinkVerdict =
   /** 登录类站点，机器验不了 —— 必须用稳定入口 + 文字步骤 */
   | { kind: 'unverifiable' }
 
+// 🔴（2026-09-15，PM 报生产 /dashboard/today 打开转圈转不出来，排查该页面时
+// 顺手发现的隐患，不是这次故障已确认的根因——本文件已有的 `LOGIN_REQUIRED_HOSTS`
+// 排除了 app.magicengine.com.au 自身，所以这次疑似受影响的两类新待办
+// (messenger-draft-items.ts / knowledge-fact-expiring-items.ts) 的链接其实
+// 从不会走到下面这次真正的 fetch。但这两次 `fetchImpl` 调用本身此前完全没有
+// 超时——任何一个不在 LOGIN_REQUIRED_HOSTS 里、又恰好响应慢/卡住的公开网址
+// （GSC/客户官网等），都会让调用方 `dropBrokenLinks` 的 `Promise.all` 永远
+// 不 resolve，进而让 `/dashboard/today` 整个接口挂起且不报错——跟这次症状
+// （转圈、不报错）完全吻合，属于同一类风险，先补上防止真正撞上时更难查。
+const LINK_VERIFY_TIMEOUT_MS = 8_000
+
 /**
  * 验证一条待办链接。
  *
@@ -72,12 +103,22 @@ export async function verifyActionLink(
 ): Promise<LinkVerdict> {
   if (isLoginRequiredHost(href)) return { kind: 'unverifiable' }
   try {
-    const res = await fetchImpl(href, { method: 'HEAD', redirect: 'follow' })
+    const res = await fetchImpl(href, {
+      method: 'HEAD',
+      redirect: 'follow',
+      signal: AbortSignal.timeout(LINK_VERIFY_TIMEOUT_MS),
+    })
     if (res.ok) return { kind: 'ok' }
     // 有些站不认 HEAD，退一次 GET 再判
-    const res2 = await fetchImpl(href, { method: 'GET', redirect: 'follow' })
+    const res2 = await fetchImpl(href, {
+      method: 'GET',
+      redirect: 'follow',
+      signal: AbortSignal.timeout(LINK_VERIFY_TIMEOUT_MS),
+    })
     return res2.ok ? { kind: 'ok' } : { kind: 'broken', status: res2.status }
   } catch {
+    // 超时(AbortSignal 抛的 TimeoutError)跟其它网络异常同一个归宿——
+    // 判 broken，不下发，不让调用方无限期等下去。
     return { kind: 'broken', status: null }
   }
 }

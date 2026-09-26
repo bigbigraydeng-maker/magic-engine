@@ -46,6 +46,8 @@ const DB_ROW: PlatformOAuthConnectionRow = {
   id:                'conn-1',
   client_id:         'client-xyz',
   provider:          PLATFORM_PROVIDERS.GOOGLE_GBP,
+  authorizing_principal_id: null,
+  entitlement_revision: null,
   access_token_enc:  'enc:plain-access',
   refresh_token_enc: 'enc:plain-refresh',
   token_expiry:      EXPIRES_AT.toISOString(),
@@ -86,6 +88,24 @@ beforeEach(() => {
 // ─── upsertConnection ─────────────────────────────────────────────────────────
 
 describe('upsertConnection', () => {
+  /**
+   * 🔴 状态改回 active 就必须擦掉旧报错。
+   *
+   * 2026-09-24 实测：CTS 的 info@ 重新授权之后 `status` 是 `active`、
+   * `error_message` 还挂着 9 天前那条 AADSTS65001。任何「按报错找坏连接」的
+   * 排查都会被它骗一次，断线监控也会对着一条健康连接说它有病。
+   */
+  it('把状态写回 active 的同时清掉上次断线的报错', async () => {
+    const chain = chainResolving({ error: null })
+    mocks.from.mockReturnValue(chain)
+
+    await upsertConnection(UPSERT_INPUT)
+
+    const payload = (chain['upsert'] as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(payload.status).toBe(CONNECTION_STATUS.ACTIVE)
+    expect(payload.error_message).toBeNull()
+  })
+
   it('encrypts both tokens before calling DB upsert', async () => {
     mocks.from.mockReturnValue(chainResolving({ error: null }))
 

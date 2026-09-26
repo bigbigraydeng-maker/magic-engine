@@ -216,6 +216,11 @@ const GOLD_GRAD = 'linear-gradient(135deg, #EBCB8B 0%, #C4912E 55%, #A6781F 100%
 const DISPLAY = 'var(--font-display, "Space Grotesk"), sans-serif'
 
 export default async function HomePage() {
+  const metaAdsStagingClientId = process.env.META_ADS_AI_STAGING_CLIENT_ID?.trim()
+  if (metaAdsStagingClientId) {
+    redirect(`/meta-ads-ai/${encodeURIComponent(metaAdsStagingClientId)}`)
+  }
+
   if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
     const supabase = createServerSupabaseClient()
     const {

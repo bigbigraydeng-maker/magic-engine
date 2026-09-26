@@ -21,7 +21,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { fetchAll } from '@/lib/supabase-paginate'
 import { SEO_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import { dualWindowEnabled } from './dual-window-gate'
-import { computeVerdict } from './job'
+import { computeOutcomeVerdict } from './job'
 import {
   GSC_DOMAIN_METRIC_KEYS,
   GSC_EVALUATOR_METRIC_KEYS,
@@ -628,7 +628,7 @@ function buildOutcomeRows(
     const deltaPct =
       dim.baselineVal !== 0 ? round2((delta / Math.abs(dim.baselineVal)) * 100) : null
 
-    const { verdict, confidence } = computeVerdict(delta, deltaPct, dim.expectedDelta)
+    const { verdict, confidence } = computeOutcomeVerdict(dim.metricKey, delta, deltaPct, dim.expectedDelta)
 
     return {
       action_id:   action.id,
@@ -690,7 +690,7 @@ function buildPageOutcomeRows(
     )
     const deltaPct =
       dim.baselineVal !== 0 ? round2((delta / Math.abs(dim.baselineVal)) * 100) : null
-    const { verdict, confidence } = computeVerdict(delta, deltaPct, 1)
+    const { verdict, confidence } = computeOutcomeVerdict(dim.metricKey, delta, deltaPct, 1)
 
     return {
       action_id: action.id,

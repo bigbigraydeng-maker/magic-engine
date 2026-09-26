@@ -220,6 +220,23 @@ const CTS_ENTITLED_KNOWLEDGE_SUPABASE = createFakeSupabase({
     },
   ],
   client_knowledge_confirmers: [],
+  // 🔴 issue #1648（rollout stage + channel gate）合并后 getClientKnowledge(customer_reply)
+  // 新增了这一道闸：没有 phase=2 事件 + messenger 开关 = 默认落 stage 0（最不放行的默认值），
+  // 这个 fixture 建于 #1648 之前，本就没设过这两张表。这里显式设成"已上线"，让本文件继续
+  // 只测它原来要测的东西（dual-sign / 事实渲染），不被这道正交的新闸挡住——跟 read.test.ts
+  // 里 LIVE_PHASE_EVENT / MESSENGER_ENABLED_CLIENT 默认值的处理方式一致。
+  client_knowledge_events: [
+    {
+      client_id: CTS_CLIENT_ID,
+      dimension: 'phase',
+      value: '2',
+      actor_email: 'ray@magicengine.cloud',
+      reason: null,
+      payload: {},
+      created_at: '2026-03-01T00:00:00.000Z',
+    },
+  ],
+  clients: [{ id: CTS_CLIENT_ID, messenger_agent_enabled_messenger: true }],
 })
 const CTS_ENTITLED_DEPS = { knowledge: { supabase: CTS_ENTITLED_KNOWLEDGE_SUPABASE } }
 

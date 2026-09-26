@@ -32,14 +32,14 @@ import { fetchLatestOutcomesByAction } from '../execution-outcomes'
 function row(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     action_id: 'a1',
-    metric_key: 'seo.gsc.clicks',
+    metric_key: 'seo.gsc.page_clicks',
     window_days: 28,
     delta: 10,
     delta_pct: 10,
     confidence: 0.5,
     verdict: 'confirmed',
     computed_at: '2026-08-01T00:00:00.000Z',
-    flywheel_actions: { expected_metric: 'seo.gsc.clicks' },
+    flywheel_actions: { expected_metric: 'seo.gsc.page_clicks' },
     ...over,
   }
 }
@@ -56,14 +56,14 @@ describe('fetchLatestOutcomesByAction', () => {
   it('shows the metric the action actually promised, not whichever row came back first', async () => {
     // All three share a computed_at, because they land in one upsert.
     rows = [
-      row({ metric_key: 'seo.gsc.avg_position', verdict: 'reversed' }),
-      row({ metric_key: 'seo.gsc.impressions', verdict: 'reversed' }),
-      row({ metric_key: 'seo.gsc.clicks', verdict: 'confirmed' }),
+      row({ metric_key: 'seo.gsc.page_avg_position', verdict: 'reversed' }),
+      row({ metric_key: 'seo.gsc.page_impressions', verdict: 'reversed' }),
+      row({ metric_key: 'seo.gsc.page_clicks', verdict: 'confirmed' }),
     ]
 
     const byAction = await fetchLatestOutcomesByAction(['a1'])
 
-    expect(byAction.a1.metric_key).toBe('seo.gsc.clicks')
+    expect(byAction.a1.metric_key).toBe('seo.gsc.page_clicks')
     expect(byAction.a1.verdict).toBe('confirmed')
   })
 
@@ -96,8 +96,8 @@ describe('fetchLatestOutcomesByAction', () => {
     // No row matches expected_metric — the fold falls back to the most mature
     // window rather than dropping the action off the board entirely.
     rows = [
-      row({ metric_key: 'seo.gsc.impressions', window_days: 14, verdict: 'reversed' }),
-      row({ metric_key: 'seo.gsc.impressions', window_days: 28, verdict: 'confirmed' }),
+      row({ metric_key: 'seo.gsc.page_impressions', window_days: 14, verdict: 'reversed' }),
+      row({ metric_key: 'seo.gsc.page_impressions', window_days: 28, verdict: 'confirmed' }),
     ]
     rows = rows.map(r => ({ ...r, flywheel_actions: { expected_metric: 'seo.gsc.page_clicks' } }))
 
@@ -120,5 +120,34 @@ describe('fetchLatestOutcomesByAction', () => {
 
     expect(byAction.old).toBeDefined()
     expect(byAction.old.verdict).toBe('reversed')
+  })
+
+  it('shows an old site-level verdict as undecided with no confidence, numbers kept', async () => {
+    rows = [
+      row({
+        metric_key: 'seo.gsc.clicks',
+        verdict: 'confirmed',
+        confidence: 0.95,
+        delta: 40,
+        delta_pct: 40,
+        flywheel_actions: { expected_metric: 'seo.gsc.clicks' },
+      }),
+    ]
+
+    const byAction = await fetchLatestOutcomesByAction(['a1'])
+
+    expect(byAction.a1.verdict).toBe('inconclusive')
+    expect(byAction.a1.confidence).toBe(0)
+    expect(byAction.a1.metric_key).toBe('seo.gsc.clicks')
+    expect(byAction.a1.delta).toBe(40)
+  })
+
+  it('leaves page-level verdicts and confidence untouched', async () => {
+    rows = [row({ verdict: 'reversed', confidence: 0.8 })]
+
+    const byAction = await fetchLatestOutcomesByAction(['a1'])
+
+    expect(byAction.a1.verdict).toBe('reversed')
+    expect(byAction.a1.confidence).toBe(0.8)
   })
 })

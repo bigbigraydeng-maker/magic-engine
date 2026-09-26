@@ -41,6 +41,21 @@
  *           no longer counts.
  *      `sensitivity = 'general'` skips (a)-(e) entirely — `approved` is
  *      enough.
+ *   6. Rollout stage + channel switch, `customer_reply` only (Issue #1648,
+ *      design doc §9.14 A) — regardless of sensitivity, `visibility`, or the
+ *      dual-sign outcome above: the client's rollout stage
+ *      (`client_knowledge_events`, `dimension='phase'`) must currently be
+ *      `LIVE_STAGE` (2, "上线") AND `clients.messenger_agent_enabled_messenger`
+ *      must be `true`. This is decided by `isKnowledgeLiveForCustomerReply`
+ *      (`rollout.ts`), called exactly ONCE per `getClientKnowledge` call,
+ *      right here — never re-derived by a caller. Any read failure on either
+ *      underlying query resolves this to `false` (fail-closed as "not live"),
+ *      the one deliberate exception to this file's "never swallow a DB
+ *      error" rule: an AI inventing facts from silence is the risk gate 1-5
+ *      exist to prevent, but here the fail-closed direction is unambiguous
+ *      (staying off is always safe), so collapsing the error to `false`
+ *      instead of throwing is the correct, documented choice — not an
+ *      oversight.
  *
  * 🔴 **Never return an empty array on a read failure.** An empty result is
  * indistinguishable from "this client has no facts" and a downstream AI will
@@ -56,6 +71,7 @@ import type { KnowledgeSupabaseClient } from './db-client'
 import { computeContentFingerprint } from './fingerprint'
 import { getKnowledgeEntitlement } from './entitlement'
 import { KnowledgeNotEntitledError, KnowledgeReadError } from './errors'
+import { isKnowledgeLiveForCustomerReply } from './rollout'
 import type { Sensitivity } from './sensitivity'
 import type {
   FactStatus,
@@ -273,6 +289,12 @@ export async function getClientKnowledge(
   const registeredConfirmerEmails =
     options.purpose === 'customer_reply' ? await getRegisteredConfirmerEmails(clientId, sb) : new Set<string>()
 
+  // 🔴 Gate 6, computed exactly once per call — see file header §6. Never
+  // throws (see `isKnowledgeLiveForCustomerReply`'s own doc): a DB failure
+  // on either underlying query collapses to `false` here, not an exception.
+  const liveForCustomerReply =
+    options.purpose === 'customer_reply' ? await isKnowledgeLiveForCustomerReply(clientId, sb) : true
+
   const forbiddenFactKeys = new Set<string>()
   const entries: KnowledgeEntry[] = []
 
@@ -292,6 +314,7 @@ export async function getClientKnowledge(
     if (!visibilityAllowedFor(options.purpose, row.visibility)) continue
     if (options.purpose === 'customer_reply' && !isCustomerReplyEligible(row, registeredConfirmerEmails, nowDate))
       continue
+    if (options.purpose === 'customer_reply' && !liveForCustomerReply) continue
     if (options.scope && !scopeMatches(row.scope, options.scope)) continue
 
     entries.push(toKnowledgeEntry(row))

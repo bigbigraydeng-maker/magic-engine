@@ -10,8 +10,16 @@
  */
 
 import React, { useCallback, useState } from 'react'
-import type { Conversation, ContactDetails, ThreadResponse, TripDetails } from '../types'
+import type {
+  Conversation,
+  ContactDetails,
+  DraftsResponse,
+  PendingDraft,
+  ThreadResponse,
+  TripDetails,
+} from '../types'
 import { BulletBlock, FollowUpChip, IntentBadge, WindowNotice, formatMoment } from './bits'
+import { DraftApprovalPanel } from './DraftApprovalPanel'
 import { ReplyBox } from './ReplyBox'
 import { Transcript } from './Transcript'
 
@@ -77,8 +85,11 @@ export function ConversationCard({
 }) {
   const [replyOpen, setReplyOpen] = useState(false)
   const [transcriptOpen, setTranscriptOpen] = useState(false)
+  const [draftsOpen, setDraftsOpen] = useState(false)
   const [thread, setThread] = useState<ThreadResponse | null>(null)
   const [threadError, setThreadError] = useState<string | null>(null)
+  const [drafts, setDrafts] = useState<PendingDraft[] | null>(null)
+  const [draftsError, setDraftsError] = useState<string | null>(null)
   const [replied, setReplied] = useState(false)
 
   const brief = conversation.brief
@@ -103,9 +114,48 @@ export function ConversationCard({
     }
   }, [clientId, conversation.id, thread])
 
-  const open = (which: 'reply' | 'transcript') => {
+  const loadDrafts = useCallback(async () => {
+    if (drafts) return
+    try {
+      const res = await fetch(
+        `/api/clients/${clientId}/messenger/conversations/${conversation.id}/drafts`,
+      )
+      const json = (await res.json()) as DraftsResponse
+      if (!res.ok) {
+        setDraftsError(json.error ?? '草稿读不出来')
+        return
+      }
+      setDrafts(json.drafts)
+    } catch {
+      setDraftsError('草稿读不出来，检查网络后再试。')
+    }
+  }, [clientId, conversation.id, drafts])
+
+  const open = (which: 'reply' | 'transcript' | 'drafts') => {
     if (which === 'reply') setReplyOpen((v) => !v)
-    else setTranscriptOpen((v) => !v)
+    else if (which === 'transcript') setTranscriptOpen((v) => !v)
+    else {
+      setDraftsOpen((v) => !v)
+      void loadDrafts()
+    }
+    void loadThread()
+  }
+
+  // 客户最后一条消息 —— 待批准面板"客户原消息"上半区用的就是它。
+  const lastCustomerMessage = thread
+    ? [...thread.messages].reverse().find((m) => m.direction === 'inbound') ?? null
+    : null
+
+  const removeDraft = (draftId: string) => {
+    setDrafts((cur) => (cur ? cur.filter((d) => d.id !== draftId) : cur))
+  }
+
+  const onDraftDecided = (draftId: string) => removeDraft(draftId)
+
+  const onDraftRejected = (draftId: string) => {
+    removeDraft(draftId)
+    // 拒绝＝人工接管——直接把写回复框打开，不用再多点一次。
+    setReplyOpen(true)
     void loadThread()
   }
 
@@ -193,9 +243,31 @@ export function ConversationCard({
         >
           {transcriptOpen ? '收起对话' : '看完整对话'}
         </button>
+        <button
+          type="button"
+          onClick={() => open('drafts')}
+          className="rounded-lg border border-me-stone px-4 py-2 text-sm font-semibold text-me-charcoal/70"
+        >
+          {draftsOpen ? '收起草稿' : 'AI 草稿 · 待批准'}
+        </button>
       </div>
 
       {threadError && <p className="mt-2 text-sm text-[#C2453A]">{threadError}</p>}
+
+      {draftsOpen && (
+        <div className="mt-3">
+          <DraftApprovalPanel
+            clientId={clientId}
+            conversationId={conversation.id}
+            customerName={name}
+            drafts={drafts}
+            draftsError={draftsError}
+            lastCustomerMessage={lastCustomerMessage}
+            onDecided={onDraftDecided}
+            onRejected={onDraftRejected}
+          />
+        </div>
+      )}
 
       {replyOpen && (
         <div className="mt-3">

@@ -61,6 +61,15 @@ describe('要哪些权限 —— 这是一份契约，不是一个随手改的�
   })
 
   /**
+   * `createReply` 在 Graph 眼里是「新建一个邮件对象」（一份草稿），不是
+   * 「发信」——只给 `Mail.Send` 不够，真邮箱一测会在建草稿这一步收到 403。
+   * 2026-09-15 PR #1714 复审抓到，写代码时漏查了 Graph 的权限表。
+   */
+  it('要 Mail.ReadWrite —— createReply 建草稿这个动作需要它，Mail.Send 只管发', () => {
+    expect(MICROSOFT_MAIL_SCOPES).toContain('https://graph.microsoft.com/Mail.ReadWrite')
+  })
+
+  /**
    * Graph 的 `/me` 认 User.Read，不认 Mail.Read。少了它，换令牌会成功、读地址
    * 却 403 —— 连接卡在「连上了但读不到邮箱地址」，而信明明已经能读了。
    * 2026-08-02 CTS 实测踩到。
@@ -69,18 +78,13 @@ describe('要哪些权限 —— 这是一份契约，不是一个随手改的�
     expect(MICROSOFT_MAIL_SCOPES).toContain('https://graph.microsoft.com/User.Read')
   })
 
-  /** 读信不需要改客户的邮箱。多要的每一分权限都是以后出事时说不清楚的地方。 */
-  it('绝不要 Mail.ReadWrite —— 我们没有任何理由改客户的邮箱', () => {
-    expect(MICROSOFT_MAIL_SCOPES.join(' ')).not.toContain('Mail.ReadWrite')
-  })
-
   /**
    * 权限只该往「刚好够用」的方向走。读通讯录 / 读日历 / 读文件都跟这条管道
    * 无关，而客户老板在同意页上看到它们只会当场停下来。
    */
-  it('不夹带跟收信无关的权限', () => {
+  it('不夹带跟收发信无关的权限', () => {
     const s = MICROSOFT_MAIL_SCOPES.join(' ')
-    for (const forbidden of ['Contacts.', 'Calendars.', 'Files.', 'Directory.', 'Mail.ReadWrite']) {
+    for (const forbidden of ['Contacts.', 'Calendars.', 'Files.', 'Directory.']) {
       expect(s).not.toContain(forbidden)
     }
   })

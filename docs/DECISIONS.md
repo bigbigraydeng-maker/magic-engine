@@ -7,6 +7,75 @@
 
 ---
 
+## 2026-09-25 · 写代码默认交给 DeepSeek，Claude Code 出指令和审
+
+**决策**（PM 2026-09-25）：所有开发窗口写代码默认由 DeepSeek 执行（Claude Code 用 aider 直接驱动），Claude Code 负责出指令、审 diff、验证、提 PR、查库。例外两类：要同时看懂多个文件的核心改动、A 级安全核心。替代 2026-09-23「只管新窗口的试行」。
+
+**为什么**：试行两批实测都一次写对且便宜——广告 WP0 8 轮 $0.037、B2 三只闹钟 11 轮 $0.11；贵的模型只花在判断和审查上。
+
+**影响什么**：`CLAUDE.md` §5 改写；每个 PR 写明 DeepSeek 轮数与花费，例外部分写原因。
+
+## 2026-09-21 · Campaign 作为所有增长类营销活动的唯一组织单元
+
+**决策**：ME 所有面向增长的营销执行，统一以 **Campaign** 为组织单元，不再允许"散单内容"并行运转。原 `content_posts` 直写路线、`social_plans` 独立写入路线，全部归并到 Campaign 之下。
+
+**PM 拍板（2026-09-21）**：
+
+1. **Campaign 是增长执行的入口**：Campaign 对应一个有明确目的的销售/推广周期（例如：Signature Escape 十月推广、圣诞团预售、品牌暖场），而不是"今天发一条"这种松散模式。Campaign 下可包含：社媒内容（FB/IG Post、Reel、Story）、广告计划、Newsletter。
+
+2. **Campaign 创建走对话，不走表单**：用户（客户或 FDE）用自然语言多轮对话完成 Campaign 设置——说清楚"推什么、给谁看、在哪段时间、目标是什么"，系统自动建 Campaign、拉 Master Brief、生成内容框架。传统表单 / 多级菜单 UI 退为应急兜底，不是主路径。
+
+3. **内容工厂保留，但定位收窄为"下载用内容"**：小红书推文、用于人工转发的素材、非发布用的生成内容继续走内容工厂；不与 Campaign 发布管道混用。
+
+4. **`content_posts` 降级为 Campaign 写入的存储层**：用户不直接接触 `content_posts` 这个概念；Campaign Bundle 批准后写入 `content_posts` 再流向发布，是内部实现细节。
+
+**为什么**：
+
+- ME 的核心命题是增长智能（Digital Marketing Growth Intelligence）。增长不是"每天发内容"，而是"围绕一个目标，设计一段时间窗口里的动作序列"——这就是 Campaign 的语义。散单内容无法追踪 Outcome，Campaign 有完整的 Check/Tune 闭环。
+- 当前后台存在 `content_posts`（直写）、`social_plans`（Campaign Daily Plan）、视频工厂等多套并行路径，FDE 和客户不知道从哪里进、从哪里发，发出去的内容也无法归因到某个增长目标。
+- 对话式创建是 ME 区别于传统营销 SaaS 的核心差异点：客户不需要学软件，只需要说清楚"我想做什么"。
+
+**影响**：
+
+- 新客户（含 NM Medspa）的社媒内容，后续统一先建 Campaign，再从 Campaign 出内容，不再直写 `content_posts`。
+- 现有无 Campaign 归属的 `content_posts` 记录（历史散单内容），在 UI 上标"散单 / 待归入"，不迁移但也不继续新增。
+- Campaign 创建界面：v1 实现多轮对话补全（`campaign_id`、时间窗、目标受众、核心诉求、关联 Master Brief），表单填写降为备用。
+- Newsletter 纳入 Campaign 作为一路输出，与社媒内容共享 Campaign 目的和受众定义，单独管理发送时间和内容格式。
+- 发布管道：Campaign Bundle 批准 → 写 `content_posts`（`status=approved`）→ 发布 → 回写 `content_posts.publer_post_id` / `published_at`。
+
+---
+
+## 2026-09-21 · 数组列一律存空数组不存 NULL；订正 `clients.brand_aliases`「schema 漂移」误判
+
+**决策（技术决策，两条）**：
+1. **接口清空别名时写 `[]`，不再写 NULL。** `clients.brand_aliases` 自 `20260625000001_a21_goal_current_value.sql`
+   起就是 `NOT NULL DEFAULT '{}'`（该 migration 已回填存量 NULL 并 `SET DEFAULT` / `SET NOT NULL`），仓库和线上
+   本就一致，**没有漂移，不需要新增对齐 migration**——最初排查时只看了引入该列的 `20260624010000`，漏看了同一列
+   后续还被 `20260625000001` 加固过，误判成「线上手工改动、仓库未记录」。
+2. **往后数组列一律存 `[]`，除非确有读取方靠 NULL 和 `[]` 区分行为。** NULL 在这里没有任何含义，
+   只多出一个能把写操作打挂的状态。这条判断本身不受上面订正影响。
+
+**为什么**：真正的 bug 只在接口代码——`clients.brand_aliases` 早就是 NOT NULL，但 PATCH 清空时仍写 NULL，
+数据库拒绝（23502），接口 500，品牌别名设置面板能加不能清空。2026-09-21 在本机 Postgres 沙盘复现确认。
+现有全部读取方（`isBrandedKeywordWithAliases`、`auto-fetch`、`rankings`、`crm/touchpoints`、`serp-capture`）
+本来就把 NULL 和 `[]` 当同一件事，所以存 `[]` 是零行为变化的那一侧。
+
+**影响**：[PITFALLS B5](./PITFALLS.md) 记录的教训改为「判断 schema 漂移前必须 grep 该列全部历史 migration，
+不能只看引入它的那一条」，而不是「线上被手工改过仓库不知道」。兄弟接口 `primary-keywords` / `competitor-domains` /
+`products` / `excluded-topics` 仍在写 `? null :`，2026-09-21 实测这四列线上确实是可空所以没炸，已记入 B5 待清理，
+本次不动以保持改动范围最小。
+
+## 2026-09-20 · SEO 标题周循环 v1：新自动化一律上 Inngest、按真实用量定规模、自动改文案必过信息完整闸门
+
+**决策（PM 2026-09-20 拍板，三条）**：
+1. **往后所有新的跨步骤自动化流程，一律跑在 Inngest 上，每一步留机器可读回执。** 旧的 `cts-seo-optimizer`（Render 定时盲改标题）已退役，换成 Inngest 两段式 `cloud-seo-meta-cycle-fanout` + `cloud-seo-meta-cycle-run-one`，六步各写一条 `cron_run_logs`。
+2. **按真实用量定设计规模。** 实际用量是一个客户每周 ≤3 个页面，所以自动撤回、来回改封顶、学习记忆写入、跨客户预算熔断这套机器全部砍掉——复审两轮找到的 bug 全出在自动撤回这块。改坏了（14 天回查判定变差）只下发一条人工看板待办，指向那条已合并 PR 自带的 GitHub Revert 按钮，不写任何新的撤回代码。
+3. **SEO 文案只在信息完整时才改。** 必须同时有 DataForSEO 搜索量 + 难度、实时搜索结果前 3、且关键词确实属于这个页面（这个页面自己的 GSC 搜索词），才许改；缺任何一样 = 跳过并记原因，**绝不默认填值**。给客户打开开关前，先跑一次演练（`dry_run`）给 PM 看。
+
+**为什么**：第一次真跑（W38）自动合并了 2 条错误改动（见 [PITFALLS D10](./PITFALLS.md)），六步回执全绿却改错了字——缺数据时默认填 0、关键词跨页借用，是直接原因。
+
+**影响**：信息完整闸门见 `src/lib/seo-meta/cycle/gate.ts`（PR #1816）；CTS 开关 `clients.seo_config.meta_cycle_enabled` 目前关闭，等 PM 看过下一次演练再开。设计文档 [`docs/specs/2026-09-20-seo-meta-cycle-v1-spec.md`](./specs/2026-09-20-seo-meta-cycle-v1-spec.md)，跟进清单见 Issue [#1807](https://github.com/bigbigraydeng-maker/magic-engine/issues/1807)。
+
 ## 2026-09-13 · 客户知识库作为 Governed Lead-Reply Agent 的事实层，替代 offerings.yaml 路线
 
 **决策**：AI 对终端客人说出口的业务事实（价格、时效、承诺、退改政策、在售/停售产品等），统一存放在**逐条治理的客户知识表**里，而不是按客户放 `config/clients/<client>/offerings.yaml` 文件。该知识表是已登记 L1 候选「Governed Lead-Reply Agent」（`docs/registry/platform-candidates.md`）的**事实层子能力**，不另立 L1。原方案"3 个客户后再抽 `client_offerings` 表"作废。
@@ -27,6 +96,24 @@
 - 回复草稿在显示和发送前各做一次输出检查，草稿里的数字对不上生效条目即撤回转人工。
 - 上线发送走 Governed Reply 的"草稿 → 人工点发"链路，不经执行内核（内核 v1 拒绝撤不回的对外动作）。
 - 设计与两轮复审记录：本机 plan `client-knowledge-base-capability.md` §9–§9.14。实施按 A 级分 6 个 PR，每个实施后复审。
+
+## 2026-09-09 · ME ↔ Creatomate 视频生产职责边界冻结
+
+**决策**：PM 拍板，Magic Engine 视频生产系统里 ME 与 Creatomate 的分工边界正式冻结为后续架构依据（PM 原话，逐字保留）：
+
+1. Magic Engine 负责导演和决策，包括目标理解、叙事结构、脚本、镜头表、素材选择、节奏、字幕、音乐情绪、CTA 和审片。
+2. Creatomate 负责执行已经制作好的模板，只能填充模板中已声明的槽位，不能动态创建新的镜头结构、页面或时间线。
+3. 每一种新的视频形态，都必须先在 Creatomate 可视化工具中制作新模板。
+4. ME 需要维护模板注册表，记录模板版本、可用槽位、字段类型、约束、画幅、时长和预览信息。
+5. Creatomate 不提供低成本分镜预览，也不支持局部重渲染；修改一个镜头通常需要重新渲染整片。
+6. 模板槽位映射是持续维护的隐性工作，模板变化时必须同步更新。
+7. 外部通知不能作为唯一状态依据，ME 必须通过任务状态查询、轮询和补偿机制确认渲染结果。
+
+**为什么**：第 2/3 条纠正了一个容易高估系统灵活性的误区——结构化数据只能"填槽"，不能"造槽"；新增镜头数量/顺序/风格仍然需要人在 Creatomate 编辑器里画新模板，这条边界呼应了更早「旅游 vlog 剪辑买不做」的拍板，没有因为接了 Creatomate 就等于 ME 有了任意编排视频的自由度。第 5/6/7 条是本次接入 Creatomate（PR #1513）过程中两轮复审揪出的真实运维约束（付费步骤不可重放、webhook 无签名机制不可信、模板槽位表需要人工维护且没有自动同步手段），不是设计偏好，是 Creatomate 官方 API 的真实能力边界。
+
+**来源**：[PR #1520](https://github.com/bigbigraydeng-maker/magic-engine/pull/1520)（[`docs/specs/2026-09-09-me-creatomate-responsibility-boundary.md`](./specs/2026-09-09-me-creatomate-responsibility-boundary.md) 完整分析，含每条结论的验证依据标注）。
+
+**影响**：后续任何"能不能让 Creatomate 做 X"的讨论，先查这条决策和源文档的验证依据，不用重新论证一遍；新增视频形态（新镜头数/新结构）默认走"先人工画模板"路径，不应假设可以纯代码实现。`src/lib/creatomate/` 的模板契约（`factory_config.render.creatomate`）是第 4 条"模板注册表"的雏形，尚未做到版本化/约束校验/预览，后续加强时对齐这条决策的字段清单。
 
 ## 2026-08-22 · 产品定位与 IMPACT v1.0 冻结：Digital Marketing Growth Intelligence System
 

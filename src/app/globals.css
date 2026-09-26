@@ -15,7 +15,7 @@ body {
 }
 
 /* Force readable text inside ALL form controls, regardless of OS theme. */
-input,
+input:not([type="radio"]):not([type="checkbox"]),
 textarea,
 select {
   color: #111827;

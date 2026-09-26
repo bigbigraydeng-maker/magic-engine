@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { runKnowledgeMining, estimateWorstCaseExtractionCostUsd } from '../mining'
+import { runKnowledgeMining, estimateWorstCaseExtractionCostUsd, fetchMessagesSince } from '../mining'
 import { KNOWLEDGE_READ_ACTION_KEY } from '../entitlement'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
@@ -725,3 +725,108 @@ describe('runKnowledgeMining — conflict_group_id backfill covers approved fact
     expect(approvedRow?.conflict_group_id).toBe(newRow?.conflict_group_id)
   })
 })
+
+describe(
+  '🔴 fetchMessagesSince — chunks the conversationId `.in()` filter (issue #1760, real CTS 722-' +
+  'conversation run hit a genuine "400 Bad Request" — one .in() with all 722 UUIDs overflows ' +
+  "PostgREST's request-size limit; this affects the already-shipped runKnowledgeMining too, not " +
+  'just the new style-mining caller)',
+  () => {
+    it('splits >1 chunk of conversationIds into multiple .in() queries and merges the results', async () => {
+      const CHUNK_SIZE = 200 // must match mining.ts's CONVERSATION_ID_CHUNK_SIZE
+      const conversationIds = Array.from({ length: CHUNK_SIZE + 5 }, (_, i) => `conv-${i}`)
+
+      // One real message per conversation, deliberately shuffled so the
+      // per-conversation-id ordering does NOT already happen to be
+      // chronological — only a correct global sort after merging chunks
+      // would catch a bug that returned chunk-local order instead.
+      const messagesByConvo = new Map(
+        conversationIds.map((id, i) => [
+          id,
+          { conversation_id: id, direction: 'inbound', body: `msg-${i}`, sent_at: `2026-01-01T00:00:${String(i % 60).padStart(2, '0')}.${String(Math.floor(i / 60)).padStart(3, '0')}Z` },
+        ]),
+      )
+      // Force a real, verifiable chronological order independent of insertion/id order.
+      const sortedByTime = [...messagesByConvo.values()].sort(() => Math.random() - 0.5)
+      const chronological = [...sortedByTime].sort((a, b) => a.sent_at.localeCompare(b.sent_at))
+
+      const inCalls: string[][] = []
+      vi.mocked(supabaseAdmin.from).mockImplementation((table: string) => {
+        if (table !== 'conversation_messages') throw new Error(`unexpected table ${table}`)
+        let idsForThisCall: string[] = []
+        const chain: Record<string, unknown> = {
+          select: () => chain,
+          in: (_col: string, ids: string[]) => {
+            idsForThisCall = ids
+            inCalls.push(ids)
+            return chain
+          },
+          order: () => chain,
+          range: (from: number, to: number) => {
+            const matched = sortedByTime.filter((m) => idsForThisCall.includes(m.conversation_id))
+            const sortedMatched = [...matched].sort((a, b) => a.sent_at.localeCompare(b.sent_at))
+            return { then: (resolve: (v: { data: unknown; error: null }) => unknown) => Promise.resolve({ data: sortedMatched.slice(from, to + 1), error: null }).then(resolve) }
+          },
+        }
+        return chain as never
+      })
+
+      const result = await fetchMessagesSince(conversationIds, null, 10_000)
+
+      // 🔴 变异守卫：必须真的分了不止一批——如果实现"忘了分块"，这条断言会失败
+      // 而不是安静地通过（防止这条测试本身在没测到分块行为的情况下也能通过）。
+      expect(inCalls.length).toBeGreaterThan(1)
+      expect(inCalls.every((ids) => ids.length <= CHUNK_SIZE)).toBe(true)
+
+      // 结果必须是全局按时间排序（不是"按分块各自排序后拼接"），且一条不漏。
+      expect(result).toHaveLength(chronological.length)
+      expect(result.map((m) => m.sentAt)).toEqual(chronological.map((m) => m.sent_at))
+    })
+
+    it(
+      '🔴 子牙复审 BLOCKER: each chunk still honours maxMessages as an early-stop, not just a final ' +
+      'slice — a chunk with far more messages than maxMessages must NOT be paginated to exhaustion ' +
+      '(a client whose history vastly exceeds maxMessages must not be read in full)',
+      async () => {
+        // A single chunk (well under CHUNK_SIZE conversationIds) but with far
+        // more than one page's worth of messages in it, and far more than
+        // maxMessages — if the early-stop were silently dropped (as it was
+        // before this fix), this chunk alone would need MULTIPLE .range()
+        // calls to page through everything before the final slice trims it.
+        const PAGE_SIZE = 1000
+        const conversationIds = ['conv-a', 'conv-b']
+        const hugeChunkMessages = Array.from({ length: PAGE_SIZE + 500 }, (_, i) => ({
+          conversation_id: i % 2 === 0 ? 'conv-a' : 'conv-b',
+          direction: 'inbound',
+          body: `msg-${i}`,
+          sent_at: `2026-01-01T00:00:${String(i % 60).padStart(2, '0')}.${String(Math.floor(i / 60)).padStart(3, '0')}Z`,
+        }))
+
+        let rangeCallCount = 0
+        vi.mocked(supabaseAdmin.from).mockImplementation((table: string) => {
+          if (table !== 'conversation_messages') throw new Error(`unexpected table ${table}`)
+          const sorted = [...hugeChunkMessages].sort((a, b) => a.sent_at.localeCompare(b.sent_at))
+          const chain: Record<string, unknown> = {
+            select: () => chain,
+            in: () => chain,
+            order: () => chain,
+            range: (from: number, to: number) => {
+              rangeCallCount += 1
+              return { then: (resolve: (v: { data: unknown; error: null }) => unknown) => Promise.resolve({ data: sorted.slice(from, to + 1), error: null }).then(resolve) }
+            },
+          }
+          return chain as never
+        })
+
+        const maxMessages = 50
+        const result = await fetchMessagesSince(conversationIds, null, maxMessages)
+
+        // Only ONE page should ever have been requested for this chunk — the
+        // first page alone (1000 rows) already exceeds maxMessages (50), so
+        // the inner loop must stop before requesting a second page.
+        expect(rangeCallCount).toBe(1)
+        expect(result).toHaveLength(maxMessages)
+      },
+    )
+  },
+)

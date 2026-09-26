@@ -203,6 +203,8 @@ export function normalizeAdset(ctx: Ctx, s: GraphAdsetSettings): RowWithoutHash 
       geo_locations: t.geo_locations ?? null,
       age_min: t.age_min ?? null,
       age_max: t.age_max ?? null,
+      // 未设置(null) = 留给 Meta"自动版位"；D9 用这个字段判纯播放广告有没有排除 Audience Network。
+      publisher_platforms: t.publisher_platforms ?? null,
     },
     learning_stage: s.learning_stage_info?.status ?? null,
     ad_studies: studies(s.ad_studies),

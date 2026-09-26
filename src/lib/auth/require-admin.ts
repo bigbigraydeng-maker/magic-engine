@@ -63,20 +63,34 @@ export async function guardAdmin(): Promise<NextResponse | null> {
  * 只动单个客户数据的接口继续用 `guardAdmin`。
  */
 export async function guardGlobalAdmin(): Promise<NextResponse | null> {
-  const session = await requireSession()
-  if (!session.ok) {
-    return NextResponse.json({ error: session.error }, { status: session.status })
+  const result = await requireGlobalAdmin()
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: result.status })
   }
+  return null
+}
+
+/**
+ * 同 guardGlobalAdmin 的判据，但把 user 带回来（需要记审计 actor 的接口用）。
+ *
+ * 这是「内部员工」的唯一判据：ADMIN_EMAILS / ADMIN_EMAIL_DOMAIN。
+ * `client_portal_users.access_type='fde'` **不算** —— 那是按客户发放的成员行，
+ * 付费客户自己就能给任意邮箱发（clients/[id]/users），不能当内部身份用。
+ */
+export async function requireGlobalAdmin(): Promise<AdminResult> {
+  const session = await requireSession()
+  if (!session.ok) return session
 
   const perms = getUserPermissions(session.user.email ?? '')
   if (!perms || perms.role !== 'admin') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    return { ok: false, status: 403, error: 'Forbidden' }
   }
   if (perms.allowedClientId) {
-    return NextResponse.json(
-      { error: 'Forbidden — this endpoint affects every client, scoped admins cannot use it' },
-      { status: 403 },
-    )
+    return {
+      ok: false,
+      status: 403,
+      error: 'Forbidden — this endpoint affects every client, scoped admins cannot use it',
+    }
   }
-  return null
+  return { ok: true, user: session.user }
 }

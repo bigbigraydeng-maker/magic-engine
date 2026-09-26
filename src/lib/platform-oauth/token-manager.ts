@@ -218,6 +218,7 @@ export async function fetchConnectionRow(
     .eq('client_id', clientId)
     .eq('provider', provider)
     .eq('status', CONNECTION_STATUS.ACTIVE)
+    .eq('purpose', 'legacy')
     .order('created_at', { ascending: false })
     .limit(1)
     .single()
@@ -329,6 +330,7 @@ export async function getValidTokenForConnection(
     .select('*')
     .eq('id', connectionId)
     .eq('status', CONNECTION_STATUS.ACTIVE)
+    .eq('purpose', 'legacy')
     .maybeSingle()
 
   if (error || !data) {

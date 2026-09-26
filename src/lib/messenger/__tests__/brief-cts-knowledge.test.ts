@@ -131,11 +131,38 @@ const CTS_FACT_ROWS: Row[] = [
   },
 ]
 
+/**
+ * 🔴 issue #1648（阶段门）合并进来之后补的两张表：`getClientKnowledge`
+ * 的 `customer_reply` 用途现在还要过 `isKnowledgeLiveForCustomerReply`
+ * 这道闸（阶段=2 且 Governed Reply Agent 的 Messenger 开关打开），这个
+ * fixture 写在阶段门功能存在之前，缺了这两张表会被 `createFakeSupabase`
+ * 的"未建模表直接抛错"规则打回、`isKnowledgeLiveForCustomerReply` 吞掉那个
+ * 错误变成 false，四条事实全被静默滤空——不是这份 fixture 本身错了，是
+ * CTS 在这个回归测试要证明的场景（真实、已上线）现在必须显式声明成"阶段
+ * 2 + Messenger 开关已开"，跟生产环境实际状态一致。
+ */
 function makeSb() {
   return createFakeSupabase({
     client_automation_policies: [ENTITLEMENT_GRANT],
     client_knowledge_facts: CTS_FACT_ROWS,
     client_knowledge_confirmers: [],
+    // 🔴 issue #1648（rollout stage + channel gate）合并后 getClientKnowledge(customer_reply)
+    // 新增了这一道闸：没有 phase=2 事件 + messenger 开关 = 默认落 stage 0（最不放行的默认值），
+    // 这个 fixture 建于 #1648 之前，本就没设过这两张表。这里显式设成"已上线"，让本文件继续
+    // 只测它原来要测的东西（宽限期/事实渲染），不被这道正交的新闸挡住——跟 read.test.ts 里
+    // LIVE_PHASE_EVENT / MESSENGER_ENABLED_CLIENT 默认值的处理方式一致。
+    client_knowledge_events: [
+      {
+        client_id: CTS_CLIENT_ID,
+        dimension: 'phase',
+        value: '2',
+        actor_email: 'ray@magicengine.cloud',
+        reason: null,
+        payload: {},
+        created_at: '2026-03-01T00:00:00.000Z',
+      },
+    ],
+    clients: [{ id: CTS_CLIENT_ID, messenger_agent_enabled_messenger: true }],
   })
 }
 
