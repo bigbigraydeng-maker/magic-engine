@@ -160,7 +160,7 @@ function isEligible(ctx: AccountContext, input: DiagnosisInput, ad: EntitySnapsh
   return isClickDrivenGoal(adset.optimization_goal)
 }
 
-function toLocalDate(iso: string, tz: string | null): string {
+export function toLocalDate(iso: string, tz: string | null): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz ?? 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso))
 }
 
@@ -213,7 +213,7 @@ function passesCostFloor(recentTotals: FunnelTotals, base: FunnelTotals): boolea
   return recentTotals.spend >= cpr
 }
 
-function campaignFrequency(ctx: AccountContext, campaignId: string | null): number | null {
+export function campaignFrequency(ctx: AccountContext, campaignId: string | null): number | null {
   if (!campaignId) return null
   const wanted = new Set([ctx.date, shiftDate(ctx.date, -1)])
   let freq: number | null = null
