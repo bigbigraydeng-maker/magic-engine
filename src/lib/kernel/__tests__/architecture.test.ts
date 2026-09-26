@@ -32,6 +32,10 @@ import {
   MIGRATION_VERSION_COLLISIONS_GRANDFATHERED,
 } from '../boundaries'
 import { outwardBlockReason } from '../outward-authorization'
+import { createKernelDeps, type KernelDeps } from '../deps'
+import { createKernel } from '../index'
+import { ACTION_REGISTRY } from '../registry'
+import { createFakeSupabase } from './fake-supabase'
 
 const ROOT = process.cwd()
 const SRC = join(ROOT, 'src')
@@ -332,6 +336,79 @@ describe('L1 边界：Kernel 不许自己抓 service-role 客户端', () => {
         violations.join('\n'),
     ).toEqual([])
   }, SCAN_TIMEOUT_MS)
+})
+
+/**
+ * 🔴 **「接了不转发」这一类 bug 的专用闸**（WP3.1b，spec v2.2 §6.1 三大交付项之三）。
+ *
+ *    这个仓库已经踩过两次同一个形状：
+ *      · `createKernel` 收了 `leaseSeconds` / `ownerId` 但不转发 —— 公开 API 上写着
+ *        能配，实际永远是 300 秒 + 随机 owner（见 `kernel/index.ts` 那句注释）
+ *      · `createKernelDeps` 收了 `resolveEnvelopeFacts` 但不转发（子牙 2026-09-27
+ *        审 WP3.1b 实测抓到）—— 六个广告 ActionKey 全是 `bounded`，而 `authorize.ts`
+ *        在 bounded 路径上**缺解析器 = 一律拒**，于是每条广告动作都静默 denied
+ *
+ *    共同点：**类型签名收了它，行为没变**。类型检查永远绿，因为可选字段少给一个
+ *    完全合法。只有「造一个出来、看它在不在」这种行为断言才咬得住。
+ *
+ *    🔴 所以这一组断言的判据一律是**行为**：调真工厂 → 检查产物字段。
+ *       不许改成「grep 源码里有没有这个字段名」—— 那又退回类型层了。
+ *       变异验证：把 `deps.ts` 里 `resolveEnvelopeFacts: init.resolveEnvelopeFacts`
+ *       那一行删掉 → 本组第 1 条与第 3 条必红（已实测）。
+ */
+describe('🔴 Kernel 依赖工厂：声明了的字段必须真的转发（防「接了不转发」）', () => {
+  // 复用仓库既有的假件工厂（它自己在内部做那一次类型收口），这一组断言不发任何查询。
+  const probeClient = () => createFakeSupabase({})
+
+  it('createKernelDeps 转发 resolveEnvelopeFacts（不转发 = 全部 bounded 动作被拒）', () => {
+    const marker: NonNullable<KernelDeps['resolveEnvelopeFacts']> = async () => ({ unavailable: '合成解析器' })
+    const deps = createKernelDeps({
+      supabase: probeClient(),
+      registry: ACTION_REGISTRY,
+      capabilities: {},
+      resolveEnvelopeFacts: marker,
+    })
+    expect(
+      deps.resolveEnvelopeFacts,
+      'createKernelDeps 把传进来的 resolveEnvelopeFacts 丢掉了。\n' +
+        'authorize.ts 在 bounded 路径上缺这个解析器就一律 deny —— 不是「跳过检查」。\n' +
+        '后果：六个广告 ActionKey 每一条都拿回 denied/outside_autonomy_envelope，Meta 一个字节都不动。',
+    ).toBe(marker)
+  })
+
+  it('createKernelDeps 也转发 leaseSeconds / ownerId / now / sleep（同一类 bug 的其余字段）', () => {
+    const now = () => new Date('2026-09-27T00:00:00Z')
+    const sleep = async () => {}
+    const deps = createKernelDeps({
+      supabase: probeClient(),
+      registry: ACTION_REGISTRY,
+      capabilities: {},
+      leaseSeconds: 77,
+      ownerId: 'owner-probe',
+      now,
+      sleep,
+    })
+    expect(deps.leaseSeconds).toBe(77)
+    expect(deps.ownerId).toBe('owner-probe')
+    expect(deps.now).toBe(now)
+    expect(deps.sleep).toBe(sleep)
+  })
+
+  it('🔴 生产 Kernel 工厂（createKernel）产出的 deps.resolveEnvelopeFacts 非空', () => {
+    const deps = createKernel(probeClient())
+    expect(
+      typeof deps.resolveEnvelopeFacts,
+      '生产 Kernel 默认没装信封事实解析器。\n' +
+        'spec 2026-09-25-ads-impact-wp3-design-v1 v2.2 §6.1 把「createKernel 默认装」列为 3.1b 硬交付，\n' +
+        '因为忘了传的调用点会让该客户全部广告动作静默变成 denied —— 一个「看着上线了其实是死的」功能。',
+    ).toBe('function')
+  })
+
+  it('createKernel 的 overrides 能换掉默认解析器（测试要用这条路）', () => {
+    const marker: NonNullable<KernelDeps['resolveEnvelopeFacts']> = async () => ({ unavailable: '合成解析器' })
+    const deps = createKernel(probeClient(), { resolveEnvelopeFacts: marker })
+    expect(deps.resolveEnvelopeFacts).toBe(marker)
+  })
 })
 
 describe('依赖方向：Kernel 不许挂在被它治理的那些层上', () => {
