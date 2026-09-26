@@ -114,9 +114,15 @@ export function planDerivedMemoryDeactivations(
 /** Keep each `.in('id', …)` short enough for PostgREST's URL limit. */
 const DEACTIVATE_BATCH = 150
 
-/** Switch the planned rows off, in batches. Only rows whose batch succeeded are returned as done. */
+/**
+ * Switch the planned rows off, in batches, scoped to the client. Only rows whose batch
+ * succeeded are returned as done. Never throws: a batch that fails — by error result or
+ * by exception — is reported and the rest carry on, so the caller always gets back the
+ * list of what was actually switched off (it is the rollback list).
+ */
 export async function applyDeactivations(
   supabase: SupabaseClient,
+  clientId: string,
   planned: readonly DeactivatedMemory[],
 ): Promise<{ done: DeactivatedMemory[]; errors: string[] }> {
   const done: DeactivatedMemory[] = []
@@ -127,12 +133,17 @@ export async function applyDeactivations(
     const items = planned.filter((p) => p.table === table)
     for (let i = 0; i < items.length; i += DEACTIVATE_BATCH) {
       const batch = items.slice(i, i + DEACTIVATE_BATCH)
-      const { error } = await supabase
-        .from(table)
-        .update({ is_active: false })
-        .in('id', batch.map((b) => b.id))
-      if (error) errors.push(`deactivate ${table}: ${error.message}`)
-      else done.push(...batch)
+      try {
+        const { error } = await supabase
+          .from(table)
+          .update({ is_active: false })
+          .eq('client_id', clientId)
+          .in('id', batch.map((b) => b.id))
+        if (error) errors.push(`deactivate ${table}: ${error.message}`)
+        else done.push(...batch)
+      } catch (err) {
+        errors.push(`deactivate ${table}: ${err instanceof Error ? err.message : String(err)}`)
+      }
     }
   }
 
@@ -149,8 +160,13 @@ export interface AttributionHealth {
 
 /**
  * Is attribution running normally? Healthy = the last `attribution-cron` run that
- * completed finished within ATTRIBUTION_STALL_HOURS and its GSC pass reported no errors.
- * A read failure counts as stalled — the safe side is to switch fewer memories off.
+ * completed finished within ATTRIBUTION_STALL_HOURS and its GSC pass did not fail as a
+ * whole. A read failure counts as stalled — the safe side is to switch fewer memories off.
+ *
+ * "Failed as a whole" = it reported errors AND wrote no outcome at all. A sporadic
+ * per-action error is not a stall: production 2026-09-19..26 had 1 such run in 25
+ * (one `fetch failed`, with 630 outcomes written), and a stale verdict needs 7 days
+ * without any recompute anyway.
  *
  * Known gap: a manual single-client attribution run (`?client_id=`) also records a
  * completed run, and the run summary does not say which client it covered, so it can mask
@@ -175,19 +191,23 @@ export async function loadAttributionHealth(supabase: SupabaseClient, now: Date)
     return { healthy: false, detail: `last completed attribution run finished ${last.finished_at}` }
   }
 
-  const gscErrors = gscErrorCount(last.summary)
-  if (gscErrors > 0) {
-    return { healthy: false, detail: `last attribution run finished with ${gscErrors} GSC error(s)` }
+  const gsc = gscPass(last.summary)
+  if (gsc.errors > 0 && gsc.outcomesWritten === 0) {
+    return { healthy: false, detail: `last attribution run's GSC pass wrote nothing and reported ${gsc.errors} error(s)` }
   }
   return { healthy: true, detail: 'ok' }
 }
 
-function gscErrorCount(summary: unknown): number {
-  if (typeof summary !== 'object' || summary === null) return 0
+function gscPass(summary: unknown): { errors: number; outcomesWritten: number } {
+  const none = { errors: 0, outcomesWritten: 0 }
+  if (typeof summary !== 'object' || summary === null) return none
   const gsc = (summary as Record<string, unknown>).gsc
-  if (typeof gsc !== 'object' || gsc === null) return 0
-  const errors = (gsc as Record<string, unknown>).errors
-  return Array.isArray(errors) ? errors.length : 0
+  if (typeof gsc !== 'object' || gsc === null) return none
+  const record = gsc as Record<string, unknown>
+  return {
+    errors: Array.isArray(record.errors) ? record.errors.length : 0,
+    outcomesWritten: typeof record.outcomes_written === 'number' ? record.outcomes_written : 0,
+  }
 }
 
 /** An auto-extracted preference row, as far as reconciliation cares. */
@@ -211,21 +231,32 @@ export function preferenceActionType(content: string): string | null {
  * enough valid confirmed actions behind it. `support` is keyed `${flywheel}::${actionType}`
  * and must be the SAME count the extractor uses to write preferences — otherwise a
  * preference would be written and switched off on alternate days.
+ *
+ * `holdKeys` (same key format) are action types whose low support may only be a symptom
+ * of a stalled attribution pipeline — the caller passes them while attribution is stalled,
+ * and they are held back instead of switched off. A type whose every action is invalid for
+ * a rule-based reason (e.g. whole-site metric, never executed) is never held.
  */
 export function planPreferenceDeactivations(
   rows: readonly PreferenceRow[],
   support: ReadonlyMap<string, number>,
   minSupport: number,
-): DeactivatedMemory[] {
-  const out: DeactivatedMemory[] = []
+  holdKeys: ReadonlySet<string> = new Set(),
+): { planned: DeactivatedMemory[]; held: number } {
+  const planned: DeactivatedMemory[] = []
+  let held = 0
   for (const row of rows) {
     if (!row.is_active || row.extracted_from_table !== 'flywheel_outcomes') continue
     if (!isGatedFlywheel(row.flywheel)) continue
     const actionType = preferenceActionType(row.content)
     if (actionType === null) continue
-    if ((support.get(`${row.flywheel}::${actionType}`) ?? 0) < minSupport) {
-      out.push({ table: 'client_learned_preferences', id: row.id, reason: 'preference_no_support' })
+    const key = `${row.flywheel}::${actionType}`
+    if ((support.get(key) ?? 0) >= minSupport) continue
+    if (holdKeys.has(key)) {
+      held++
+      continue
     }
+    planned.push({ table: 'client_learned_preferences', id: row.id, reason: 'preference_no_support' })
   }
-  return out
+  return { planned, held }
 }

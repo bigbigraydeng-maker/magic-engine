@@ -24,6 +24,10 @@ interface Filter {
 export interface FakeOptions {
   /** 让这些表的 SELECT 报错，用来测「读不到存量时的行为」。 */
   failSelectOn?: string[]
+  /** UPDATEs on these tables return an error result and change nothing. */
+  failUpdateOn?: string[]
+  /** UPDATEs on these tables throw (the awaited query rejects) and change nothing. */
+  throwUpdateOn?: string[]
   /**
    * Per-table column lists. For a table listed here, `select(cols)` projects each row to
    * exactly those columns (supporting `alias:col`, `col->>key` and `alias:col->>key`) and
@@ -50,6 +54,8 @@ function matches(row: Row, f: Filter): boolean {
 export function makeFakeSupabase(db: FakeDb, options: FakeOptions = {}): SupabaseClient {
   let seq = 0
   const failSelect = new Set(options.failSelectOn ?? [])
+  const failUpdate = new Set(options.failUpdateOn ?? [])
+  const throwUpdate = new Set(options.throwUpdateOn ?? [])
 
   function from(table: string) {
     let mode: 'select' | 'insert' | 'update' = 'select'
@@ -79,6 +85,8 @@ export function makeFakeSupabase(db: FakeDb, options: FakeOptions = {}): Supabas
       }
 
       if (mode === 'update') {
+        if (throwUpdate.has(table)) throw new Error(`simulated update exception on ${table}`)
+        if (failUpdate.has(table)) return { data: null, error: { message: `simulated update failure on ${table}` } }
         const hit = hits()
         for (const r of hit) Object.assign(r, payload)
         return { data: hit.map(r => ({ ...r })), error: null }

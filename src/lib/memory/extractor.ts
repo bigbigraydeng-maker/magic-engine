@@ -53,6 +53,7 @@ import {
 import {
   MIN_OUTCOME_CONFIDENCE,
   OUTCOME_FRESH_DAYS,
+  RULE_BASED_REASONS,
   classifyActionCase,
   isGatedFlywheel,
   type CaseAction,
@@ -233,8 +234,9 @@ export async function runExtractorForClient(
   }
 
   // 6. 聚合 action_type 频次 → preferences（同样按动作计数）；名单内支柱同时对账下架
+  const holdKeys = healthy ? new Set<string>() : stallSensitiveActionTypes(evidence.actions, classify)
   try {
-    await reconcilePreferences(supabase, clientId, cases, result, { reconcile, healthy })
+    await reconcilePreferences(supabase, clientId, cases, result, { reconcile, holdKeys })
   } catch (err) {
     result.errors.push(`extract preferences: ${msgOf(err)}`)
   }
@@ -249,7 +251,7 @@ export async function runExtractorForClient(
     result.skipped_attribution_stalled += plan.skippedStalled
     result.skipped_immature += plan.skippedImmature
     result.skipped_unknown_pillar += plan.skippedUnknownPillar
-    await applyAndRecord(supabase, plan.deactivate, result)
+    await applyAndRecord(supabase, clientId, plan.deactivate, result)
   }
 
   // （已退役 2026-09-06）这里原本还有一步「回填 client_decision_history.outcome_verdict」。
@@ -368,11 +370,12 @@ function mergeInto(into: ExtractorResult, r: ExtractorResult): void {
 
 async function applyAndRecord(
   supabase: SupabaseClient,
+  clientId: string,
   planned: DeactivatedMemory[],
   result: ExtractorResult,
 ): Promise<void> {
   if (planned.length === 0) return
-  const { done, errors } = await applyDeactivations(supabase, planned)
+  const { done, errors } = await applyDeactivations(supabase, clientId, planned)
   result.errors.push(...errors)
   for (const d of done) {
     result.deactivated.push(d)
@@ -678,7 +681,8 @@ async function adoptAndDeactivate(
  * 就能自己凑够阈值，凭一次事件写出「持续跑赢」。
  *
  * 名单内支柱（1b）：写入与下架共用同一个支撑数（这里的 grouped，只数有效案例）；
- * 证据回来时重新打开同内容的旧行、不新增行；支撑不足 3 的在用行下架（归因停摆时按住）。
+ * 证据回来时重新打开同内容的旧行、不新增行；支撑不足 3 的在用行下架（归因停摆时，
+ * 支撑可能只是被停摆拉低的类型按住不动；动作全都因规则失效的类型照样下架）。
  * 读偏好失败直接报错 —— 当成「没有」会写出重复、还会漏掉所有下架。
  */
 async function reconcilePreferences(
@@ -686,7 +690,7 @@ async function reconcilePreferences(
   clientId: string,
   cases: OutcomeJoinRow[],
   result: ExtractorResult,
-  opts: { reconcile: boolean; healthy: boolean },
+  opts: { reconcile: boolean; holdKeys: ReadonlySet<string> },
 ): Promise<void> {
   const grouped = groupConfirmedByActionType(cases)
 
@@ -745,12 +749,35 @@ async function reconcilePreferences(
 
   if (!opts.reconcile) return
   const support = new Map(Array.from(grouped.values()).map((e) => [`${e.flywheel}::${e.actionType}`, e.count]))
-  const planned = planPreferenceDeactivations(existingRows, support, MIN_OCCURRENCES_FOR_PREFERENCE)
-  if (!opts.healthy) {
-    result.skipped_attribution_stalled += planned.length
-    return
+  const { planned, held } = planPreferenceDeactivations(
+    existingRows,
+    support,
+    MIN_OCCURRENCES_FOR_PREFERENCE,
+    opts.holdKeys,
+  )
+  result.skipped_attribution_stalled += held
+  await applyAndRecord(supabase, clientId, planned, result)
+}
+
+/**
+ * Gated action types whose low support may only be a symptom of stalled attribution:
+ * at least one of their actions is valid, or invalid for a freshness reason. A type whose
+ * every action fails a rule-based check (whole-site metric, never executed, …) is not
+ * included — its preference comes off even while attribution is stalled.
+ */
+function stallSensitiveActionTypes(
+  actions: readonly ActionRow[],
+  classify: (actionId: string) => CaseStatus,
+): Set<string> {
+  const keys = new Set<string>()
+  for (const a of actions) {
+    if (!isGatedFlywheel(a.flywheel)) continue
+    const status = classify(a.id)
+    if (status.kind === 'valid' || !RULE_BASED_REASONS.has(status.reason)) {
+      keys.add(`${a.flywheel}::${a.action_type}`)
+    }
   }
-  await applyAndRecord(supabase, planned, result)
+  return keys
 }
 
 function prefKey(flywheel: string, preferenceType: string, content: string): string {

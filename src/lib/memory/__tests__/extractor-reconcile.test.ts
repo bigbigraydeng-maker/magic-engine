@@ -86,6 +86,41 @@ function failedRow(id: string, over: Row = {}): Row {
   }
 }
 
+function prefRow(id: string, actionType: string, over: Row = {}): Row {
+  return {
+    id,
+    client_id: CLIENT,
+    preference_type: 'format',
+    content: `3 个动作 confirmed: action_type='${actionType}' 在 seo 飞轮持续跑赢`,
+    source: 'auto_extracted',
+    extracted_from_table: 'flywheel_outcomes',
+    extracted_from_id: null,
+    confidence_score: 0.5,
+    flywheel: 'seo',
+    is_active: true,
+    created_at: '2026-08-10T00:00:00Z',
+    ...over,
+  }
+}
+
+/** Three executed page-level actions whose outcomes stopped being recomputed (stale, not rule-invalid). */
+function staleTrio(): { actions: Row[]; outcomes: Row[] } {
+  const ids = ['a1', 'a2', 'a3']
+  return {
+    actions: ids.map((id) => action(id)),
+    outcomes: ids.map((id) => outcome(`o-${id}`, id, { computed_at: '2026-09-01T00:00:00Z' })),
+  }
+}
+
+/** Three executed actions judged only on a whole-site metric (invalid by rule). */
+function siteLevelTrio(): { actions: Row[]; outcomes: Row[] } {
+  const ids = ['s1', 's2', 's3']
+  return {
+    actions: ids.map((id) => action(id, { action_type: 'seo.refresh_blog', expected_metric: 'seo.gsc.clicks' })),
+    outcomes: ids.map((id) => outcome(`o-${id}`, id, { metric_key: 'seo.gsc.clicks' })),
+  }
+}
+
 function db(parts: { actions?: Row[]; outcomes?: Row[]; proven?: Row[]; failed?: Row[]; prefs?: Row[]; healthy?: boolean }): FakeDb {
   return {
     flywheel_actions: parts.actions ?? [],
@@ -373,5 +408,95 @@ describe('1b · 名单内支柱：有效案例才留得住记忆', () => {
       id: 'p-ghost',
       reason: 'action_missing',
     })
+  })
+
+  it('FDE 手写的记忆（来源不是归因结论）一条都不碰', async () => {
+    const fake = db({
+      proven: [
+        provenRow('p-fde', { source_table: 'execution_items', source_id: 'card-9' }),
+        provenRow('p-null', { source_table: null }),
+      ],
+      failed: [failedRow('f-fde', { source_table: 'execution_items' })],
+    })
+
+    const result = await runExtractorForClient(client(fake), CLIENT, NOW)
+
+    expect(result.deactivated).toEqual([])
+    expect(activeIds(fake.client_proven_patterns)).toEqual(['p-fde', 'p-null'])
+    expect(activeIds(fake.client_failed_experiments)).toEqual(['f-fde'])
+  })
+
+  it('周报汇总写的偏好不碰', async () => {
+    const fake = db({
+      prefs: [prefRow('pref-rollup', 'cms_update_existing', { extracted_from_table: 'learning_rollup_weekly' })],
+    })
+
+    const result = await runExtractorForClient(client(fake), CLIENT, NOW)
+
+    expect(activeIds(fake.client_learned_preferences)).toEqual(['pref-rollup'])
+    expect(result.deactivated).toEqual([])
+  })
+
+  it('归因停摆：偏好的支撑可能只是被拉低，按住不下架', async () => {
+    const fake = db({
+      healthy: false,
+      ...staleTrio(),
+      prefs: [prefRow('pref-stale', 'cms_update_existing')],
+    })
+
+    const result = await runExtractorForClient(client(fake), CLIENT, NOW)
+
+    expect(activeIds(fake.client_learned_preferences)).toEqual(['pref-stale'])
+    expect(result.deactivated_by_reason.preference_no_support).toBeUndefined()
+    expect(result.skipped_attribution_stalled).toBeGreaterThanOrEqual(1)
+  })
+
+  it('同一批数据，归因正常时偏好照样下架', async () => {
+    const fake = db({
+      ...staleTrio(),
+      prefs: [prefRow('pref-stale', 'cms_update_existing')],
+    })
+
+    const result = await runExtractorForClient(client(fake), CLIENT, NOW)
+
+    expect(activeIds(fake.client_learned_preferences)).toEqual([])
+    expect(result.deactivated_by_reason.preference_no_support).toBe(1)
+    expect(result.deactivated).toContainEqual({
+      table: 'client_learned_preferences',
+      id: 'pref-stale',
+      reason: 'preference_no_support',
+    })
+  })
+
+  it('归因停摆也照样下架：这类动作全是整站指标', async () => {
+    const fake = db({
+      healthy: false,
+      ...siteLevelTrio(),
+      prefs: [prefRow('pref-site', 'seo.refresh_blog')],
+    })
+
+    const result = await runExtractorForClient(client(fake), CLIENT, NOW)
+
+    expect(activeIds(fake.client_learned_preferences)).toEqual([])
+    expect(result.deactivated).toContainEqual({
+      table: 'client_learned_preferences',
+      id: 'pref-site',
+      reason: 'preference_no_support',
+    })
+  })
+
+  it('停摆时同一个客户两类偏好分开处理', async () => {
+    const stale = staleTrio()
+    const site = siteLevelTrio()
+    const fake = db({
+      healthy: false,
+      actions: [...stale.actions, ...site.actions],
+      outcomes: [...stale.outcomes, ...site.outcomes],
+      prefs: [prefRow('pref-stale', 'cms_update_existing'), prefRow('pref-site', 'seo.refresh_blog')],
+    })
+
+    await runExtractorForClient(client(fake), CLIENT, NOW)
+
+    expect(activeIds(fake.client_learned_preferences)).toEqual(['pref-stale'])
   })
 })
