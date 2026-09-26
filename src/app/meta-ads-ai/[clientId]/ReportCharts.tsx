@@ -175,13 +175,23 @@ type PlacementRow = { name: string; spend: number; ctr: number }
 
 function readPlacements(evidence: Evidence): PlacementRow[] {
   if (!Array.isArray(evidence.placements)) return []
-  return evidence.placements
-    .map(raw => asRecord(raw))
-    .filter((row): row is Record<string, unknown> => row !== null && num(row.spend) > 0)
-    .map(row => ({
-      name: placementLabel(str(row.publisher_platform, '?'), str(row.platform_position, '?')),
-      spend: num(row.spend),
-      ctr: num(row.impressions) > 0 ? Math.round(num(row.clicks) / num(row.impressions) * 10000) / 100 : 0,
+  // 不同版位可能换成同一个中文名（例如 Messenger 收件箱与快拍），按名字合并，图上不出现同名柱子
+  const byName = new Map<string, { spend: number; impressions: number; clicks: number }>()
+  for (const raw of evidence.placements) {
+    const row = asRecord(raw)
+    if (!row || num(row.spend) <= 0) continue
+    const name = placementLabel(str(row.publisher_platform, '?'), str(row.platform_position, '?'))
+    const cur = byName.get(name) ?? { spend: 0, impressions: 0, clicks: 0 }
+    cur.spend += num(row.spend)
+    cur.impressions += num(row.impressions)
+    cur.clicks += num(row.clicks)
+    byName.set(name, cur)
+  }
+  return [...byName.entries()]
+    .map(([name, v]) => ({
+      name,
+      spend: v.spend,
+      ctr: v.impressions > 0 ? Math.round(v.clicks / v.impressions * 10000) / 100 : 0,
     }))
     .sort((a, b) => b.spend - a.spend)
     .slice(0, 8)

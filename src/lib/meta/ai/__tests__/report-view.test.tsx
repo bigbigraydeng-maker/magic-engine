@@ -152,6 +152,8 @@ describe('Meta Ads AI report view',()=>{
     expect(placementLabel('instagram','story')).toBe('Instagram 快拍')
     expect(placementLabel('instagram','reels')).toBe('Instagram 短视频')
     expect(placementLabel('threads','feed')).toBe('threads · feed')
+    expect(placementLabel('facebook','marketplace')).toBe('Facebook 市场')
+    expect(placementLabel('messenger','story')).toBe(placementLabel('messenger','messenger_inbox'))
   })
 
   it('renders no chart section when there is no usable evidence — must not crash on an older job or a no_data/failed status carrying null evidence',()=>{

@@ -9,12 +9,19 @@ export function placementLabel(platform: string, position: string): string {
     if (pos === 'feed') return 'Facebook 动态'
     if (pos === 'story') return 'Facebook 快拍'
     if (pos === 'facebook_reels' || pos === 'reels') return 'Facebook 短视频'
+    if (pos === 'marketplace') return 'Facebook 市场'
+    if (pos === 'video_feeds') return 'Facebook 视频'
+    if (pos === 'right_hand_column') return 'Facebook 右侧栏'
+    if (pos === 'profile_feed') return 'Facebook 主页动态'
+    if (pos === 'search') return 'Facebook 搜索'
   }
   if (p === 'instagram') {
     if (pos === 'stream' || pos === 'feed') return 'Instagram 动态'
     if (pos === 'story') return 'Instagram 快拍'
     if (pos === 'reels') return 'Instagram 短视频'
-    if (pos === 'explore') return 'Instagram 发现页'
+    if (pos === 'explore' || pos === 'explore_home') return 'Instagram 发现页'
+    if (pos === 'ig_search') return 'Instagram 搜索'
+    if (pos === 'profile_feed') return 'Instagram 主页动态'
   }
   return `${platform} · ${position}`
 }
