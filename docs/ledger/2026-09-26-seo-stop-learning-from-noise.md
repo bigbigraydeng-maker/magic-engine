@@ -4,7 +4,7 @@ title: 没有强结论和执行凭证撑着的旧 SEO / 广告经验下架，不
 status: decided
 owner: agent
 decided_on: 2026-09-26
-source: session:3b976bb5
+source: pr:2052
 verify_by: 2026-10-10
 verify_how: 1b 上线后记忆提取器跑过一轮再查生产库三件事：①client_proven_patterns 与 client_failed_experiments 里来自 flywheel_outcomes、属 SEO 与广告、且动作不是「已执行 + 强结论」的行 is_active 为 false（「没执行」只认诸葛亮建议行且两个关联字段都空；止损、投放、页面改写、kernel run 算执行过）；②AI 可见度与社媒的行一条没动；③那次运行记录列出了被下架行的 id 和表名，能按清单恢复。三项全对算成
 ---
