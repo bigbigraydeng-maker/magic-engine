@@ -14,6 +14,8 @@ import { loadTodoCounts, nzWeekday, DAY_THEMES, ZH_DAYS } from '@/lib/pm-todo/da
 
 export const dynamic = 'force-dynamic'
 
+const LINK_CHECK_BUDGET_MS = 2_500
+
 export async function GET() {
   const guard = await guardAdmin()
   if (guard) return guard
@@ -21,7 +23,8 @@ export async function GET() {
   const now = new Date()
   const weekday = nzWeekday(now)
 
-  const counts = await loadTodoCounts(supabaseAdmin)
+  // 有人在盯着转圈：外网链接检查最多等这么久，没验完的先放行（见 dropBrokenLinks）
+  const counts = await loadTodoCounts(supabaseAdmin, { linkCheckBudgetMs: LINK_CHECK_BUDGET_MS })
 
   return NextResponse.json({
     weekday,

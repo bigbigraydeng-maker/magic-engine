@@ -13,6 +13,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-items'
 import { formatMoney } from '@/lib/conversions/money'
+import { isPastEventWindow } from '@/lib/conversions/event-window'
 
 /** 一次最多列这么多，免得某天灌进来几百条把今日待办淹掉。 */
 const MAX_ITEMS = 20
@@ -72,7 +73,8 @@ export async function pushConversionReviewItems(
     const who = shortName(row.customer_first, row.customer_last)
     const age = daysAgo(row.occurred_at, now)
     // 广告平台只收 7 天内的 —— 快到期的要显眼，过期的别再催人做无用功。
-    const expired = age > 7
+    // 按精确时间判（不按取整后的天数）：距今 7.3 天也已经发不出去了。
+    const expired = isPastEventWindow(row.occurred_at, now)
 
     let what: string
     if (row.outcome_kind === 'lead') {
@@ -177,7 +179,7 @@ async function pushTokenDeadItems(
     const o = row.me_sale_outcomes
     if (!o || o.review_status !== 'approved' || o.redacted_at) continue
     // 已经过了 7 天的补发步骤会自己判过期，这里只催还救得回来的。
-    if (daysAgo(o.occurred_at, now) > 7) continue
+    if (isPastEventWindow(o.occurred_at, now)) continue
     const cur = byClient.get(o.client_id)
     if (!cur) byClient.set(o.client_id, { count: 1, oldestOccurredAt: o.occurred_at })
     else {
