@@ -71,7 +71,8 @@ export interface AdsetMeta { destination_type: string | null; optimization_goal:
  * （Messenger 里填表的人会同时记一次留资、一次开聊——手册 §13）。去向为空（播放/互动/网站转化）或读不到的组不进结果口径。
  */
 export interface CoreResultSummary {
-  core_metric: CoreMetric | 'mixed' | null
+  /** unavailable = 有花费的组去向读不到，结果口径算不出来（不是「目标不是收集客户」） */
+  core_metric: CoreMetric | 'mixed' | 'unavailable' | null
   leads: number | null
   conversations: number | null
   results: number | null
@@ -131,7 +132,8 @@ export function summariseCoreResults(rows: readonly Record<string, unknown>[], m
       otherSpend += spend
     }
   }
-  const core_metric: CoreMetric | 'mixed' | null = hasLead && hasConv ? 'mixed' : hasLead ? 'lead' : hasConv ? 'messaging_started' : null
+  const core_metric: CoreMetric | 'mixed' | 'unavailable' | null = hasLead && hasConv ? 'mixed' : hasLead ? 'lead'
+    : hasConv ? 'messaging_started' : unknownSpend > 0 ? 'unavailable' : null
   const finalLeads = hasLead ? leads : null
   const finalConversations = hasConv ? conversations : null
   const cost_per_lead = hasLead && leads > 0 ? round2(leadSpend / leads) : null

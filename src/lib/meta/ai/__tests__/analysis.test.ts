@@ -13,7 +13,7 @@ vi.mock('../../graph-read',async()=>{
   return { ...actual,metaGraphGet:mocks.metaGraphGet }
 })
 
-import { generateAnalysis,listAnalyses,placeRuleSection,safeCharge,stripFatigueSentences } from '../analysis'
+import { generateAnalysis,listAnalyses,normaliseHeadings,placeRuleSection,safeCharge,stripFatigueSentences } from '../analysis'
 
 const grant={ id:'10000000-0000-4000-8000-000000000001',connection_id:'20000000-0000-4000-8000-000000000001',
   ad_account_id:'act_1234567890',revision:'30000000-0000-4000-8000-000000000001',entitlement_revision:'40000000-0000-4000-8000-000000000001' }
@@ -75,7 +75,7 @@ describe('托管 Meta 广告分析',()=>{
     const result=await generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id)
     expect(result.status).toBe('completed')
     expect(mocks.callClaudeChat).toHaveBeenCalledWith(expect.objectContaining({ model:'claude-haiku-test',singleAttempt:true,maxOutputTokens:4000 }))
-    expect(mocks.callClaudeChat.mock.calls[0]?.[0].systemPrompt).toContain('第三部分由系统另外写好')
+    expect(mocks.callClaudeChat.mock.calls[0]?.[0].systemPrompt).toContain('这一部分由系统另外写好')
     expect(mocks.activeConnection).toHaveBeenCalledTimes(4)
     expect(mocks.rpc).toHaveBeenCalledWith('meta_ads_authorize_sponsored_analysis',{
       tenant:'a1000000-0000-4000-8000-000000000001',principal:'50000000-0000-4000-8000-000000000001',job:'job-1',
@@ -291,6 +291,38 @@ describe('报告口径与第三部分',()=>{
     expect(appended.endsWith('SECTION')).toBe(true)
   })
 
+  it('placeRuleSection 认加粗标题',()=>{
+    const out=placeRuleSection('一、总体\n内容\n**三、素材疲劳诊断**\n广告A点击率降了。\n**四、版位**\n内容四','S')
+    expect(out).toContain('S')
+    expect(out).not.toContain('广告A')
+    expect(out).toContain('四、版位')
+    expect(out).toContain('内容四')
+  })
+
+  it('placeRuleSection 认数字编号标题',()=>{
+    const out=placeRuleSection('一、总体\n内容\n3. 素材\n广告A降了\n4. 版位\n内容四','S')
+    expect(out).toContain('S')
+    expect(out).not.toContain('广告A')
+    expect(out).toContain('内容四')
+  })
+
+  it('placeRuleSection 没有下一个标题时不截断到文末',()=>{
+    const out=placeRuleSection('一、总体\n内容\n三、素材\n广告A降了。\n\n后面还有很多内容','S')
+    expect(out).toContain('后面还有很多内容')
+    expect(out).not.toContain('广告A降了')
+  })
+
+  it('stripFatigueSentences 保留标题行，只删疲劳句',()=>{
+    const cleaned=stripFatigueSentences('一、总体结果：花费 100，受众可能饱和。\n二、排行')
+    expect(cleaned.text.startsWith('一、总体结果')).toBe(true)
+    expect(cleaned.text).not.toContain('饱和')
+    expect(stripFatigueSentences('新鲜感下降了。花费稳定。').text).toBe('花费稳定。')
+  })
+
+  it('normaliseHeadings 去掉 # 与 ** 前缀',()=>{
+    expect(normaliseHeadings('## 三、素材\n**四、版位**')).toBe('三、素材\n四、版位')
+  })
+
   it('按广告组去向算结果口径，并把系统第三部分放进报告',async()=>{
     mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
       if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'NZD',timezone_name:'Pacific/Auckland' }
@@ -380,7 +412,7 @@ describe('报告口径与第三部分',()=>{
     }
     expect(typeof modelInput.coverage.core_results_note).toBe('string')
     expect(String(modelInput.coverage.core_results_note).length).toBeGreaterThan(0)
-    expect(modelInput.totals.core_metric).toBeUndefined()
+    expect(modelInput.totals.core_metric).toBe('unavailable')
   })
 
   it('AI 自己写的疲劳句被删掉，报告其余内容保留',async()=>{
@@ -441,7 +473,7 @@ describe('报告口径与第三部分',()=>{
     }
     expect(typeof modelInput.coverage.core_results_note).toBe('string')
     expect(String(modelInput.coverage.core_results_note).length).toBeGreaterThan(0)
-    expect(modelInput.totals.core_metric).toBeUndefined()
+    expect(modelInput.totals.core_metric).toBe('unavailable')
   })
 
   it('有巡检结论时，第三部分由程序按模板写进报告',async()=>{
@@ -512,6 +544,108 @@ describe('报告口径与第三部分',()=>{
     const raw=String(mocks.callClaudeChat.mock.calls[0]?.[0].messages[0].content)
     const modelInput=JSON.parse(raw.replace('以下是只读汇总证据：\n','')) as Record<string,unknown>
     expect(JSON.stringify(modelInput)).not.toContain('降到了')
+  })
+
+  it('AI 自己写的第三部分被整段替换，且不残留广告名',async()=>{
+    mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
+      if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'NZD',timezone_name:'Pacific/Auckland' }
+      if(path===`${grant.ad_account_id}/adsets`) return { data:[
+        { id:'as-msg',destination_type:'MESSENGER',optimization_goal:'CONVERSATIONS' },
+        { id:'as-lead',destination_type:'ON_AD',optimization_goal:'LEAD_GENERATION' },
+        { id:'as-video',destination_type:'ON_VIDEO',optimization_goal:'THRUPLAY' },
+      ] }
+      if(params.level==='adset') return { data:[
+        { campaign_id:'c1',adset_id:'as-msg',spend:'60',actions:[
+          { action_type:'onsite_conversion.messaging_conversation_started_7d',value:'6' },
+          { action_type:'lead',value:'5' },
+        ] },
+        { campaign_id:'c2',adset_id:'as-lead',spend:'40',actions:[
+          { action_type:'lead',value:'4' },
+          { action_type:'onsite_conversion.messaging_conversation_started_7d',value:'3' },
+        ] },
+        { campaign_id:'c3',adset_id:'as-video',spend:'10',actions:[] },
+      ] }
+      if(params.level==='account') return { data:[{ spend:'110',impressions:'5000',clicks:'100' }] }
+      if(params.level==='campaign') return { data:[
+        { campaign_id:'c1',campaign_name:'私信',spend:'60',impressions:'3000',clicks:'60' },
+        { campaign_id:'c2',campaign_name:'表单',spend:'40',impressions:'1500',clicks:'30' },
+      ] }
+      return { data:[] }
+    })
+    mocks.callClaudeChat.mockResolvedValue({ text:'一、总体结果\n花费 110。\n三、素材疲劳诊断\n广告A点击率降了40%，建议换素材。\n四、版位\n数据不足。',
+      input_tokens:500,output_tokens:200,cost_usd:0.004,stop_reason:'end_turn' })
+
+    const result=await generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id)
+    expect(result.status).toBe('completed')
+
+    const finishCall=mocks.rpc.mock.calls.find(call=>call[0]==='meta_ads_finish_sponsored_analysis')
+    const reportBody=String((finishCall?.[1] as Record<string,unknown>).report_body)
+    expect(reportBody).toContain('三、需要留意的广告')
+    expect(reportBody).not.toContain('广告A')
+    expect(reportBody).toContain('四、版位')
+  })
+
+  it('有 D2 巡检结论时，系统文案不会被疲劳词清洗删掉',async()=>{
+    const d=(n:number)=>new Date(Date.now()-n*86_400_000).toISOString().slice(0,10)
+    const row=(date:string)=>({
+      client_id:'a1000000-0000-4000-8000-000000000001',date,
+      payload:{
+        dataCompleteness:'complete',
+        adLevelCoverage:[{ adAccountId:grant.ad_account_id,ran:true,reason:'ok',adsChecked:3 }],
+        problems:[{
+          code:'D2',status:'hit',title:'内部标题',clientVisible:true,
+          units:[{ level:'ad',id:'ad1',name:'广告A',adAccountId:grant.ad_account_id }],
+          reasons:['止损：内部'],
+          evidence:{ baseline_source:'own_history',base_rate:0.04,recent_rate:0.02,
+            frequency_7d:1.7,fatigue_kind:'creative',recent_spend:90,campaign_id:'c1' },
+        }],
+      },
+    })
+    const rows=[row(d(1)),row(d(2))]
+    const growthChain:Record<string,unknown>={}
+    growthChain.select=vi.fn(()=>growthChain)
+    growthChain.eq=vi.fn(()=>growthChain)
+    growthChain.gte=vi.fn(()=>growthChain)
+    growthChain.order=vi.fn(async()=>({ data:rows,error:null }))
+    mocks.from.mockImplementation((table:string)=>table==='ads_growth_states' ? growthChain : query(table))
+
+    mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
+      if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'NZD',timezone_name:'Pacific/Auckland' }
+      if(path===`${grant.ad_account_id}/adsets`) return { data:[
+        { id:'as-msg',destination_type:'MESSENGER',optimization_goal:'CONVERSATIONS' },
+        { id:'as-lead',destination_type:'ON_AD',optimization_goal:'LEAD_GENERATION' },
+        { id:'as-video',destination_type:'ON_VIDEO',optimization_goal:'THRUPLAY' },
+      ] }
+      if(params.level==='adset') return { data:[
+        { campaign_id:'c1',adset_id:'as-msg',spend:'60',actions:[
+          { action_type:'onsite_conversion.messaging_conversation_started_7d',value:'6' },
+          { action_type:'lead',value:'5' },
+        ] },
+        { campaign_id:'c2',adset_id:'as-lead',spend:'40',actions:[
+          { action_type:'lead',value:'4' },
+          { action_type:'onsite_conversion.messaging_conversation_started_7d',value:'3' },
+        ] },
+        { campaign_id:'c3',adset_id:'as-video',spend:'10',actions:[] },
+      ] }
+      if(params.level==='account') return { data:[{ spend:'110',impressions:'5000',clicks:'100' }] }
+      if(params.level==='campaign') return { data:[
+        { campaign_id:'c1',campaign_name:'私信',spend:'60',impressions:'3000',clicks:'60' },
+        { campaign_id:'c2',campaign_name:'表单',spend:'40',impressions:'1500',clicks:'30' },
+      ] }
+      if(params.level==='ad') return { data:[
+        { ad_id:'ad1',ad_name:'广告A',spend:'50',impressions:'1000',clicks:'20' },
+      ] }
+      return { data:[] }
+    })
+    mocks.callClaudeChat.mockResolvedValue({ text:'一、总体结果\n花费 110。\n四、版位\n数据不足。',
+      input_tokens:500,output_tokens:200,cost_usd:0.004,stop_reason:'end_turn' })
+
+    const result=await generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id)
+    expect(result.status).toBe('completed')
+
+    const finishCall=mocks.rpc.mock.calls.find(call=>call[0]==='meta_ads_finish_sponsored_analysis')
+    const reportBody=String((finishCall?.[1] as Record<string,unknown>).report_body)
+    expect(reportBody).toContain('应该不是大家看腻了')
   })
 })
 

@@ -56,6 +56,7 @@ const BANNED = [
   '留资',
   '开聊',
   '平时',
+  '客户的成本',
 ]
 
 function expectNoBanned(text: string): void {
@@ -90,11 +91,9 @@ describe('toClientFinding — D10', () => {
     expect(finding.spend).toBe(167.48)
     expect(finding.headline).toContain('留下联系方式的比例从之前两周的 16.0% 降到了 3.9%')
     expect(finding.headline).toContain('（数据截至 9月24日）')
-    expect(finding.detail).toContain('NZ$7.05')
-    expect(finding.detail).toContain('NZ$33.50')
-    expect(finding.detail).toContain('表单')
-    expect(finding.action).toContain('10月1日')
-    expect(finding.action).toContain('你不用动手')
+    expect(finding.detail).toContain('平均每带来一位留下联系方式的人，花费从 NZ$7.05 涨到了 NZ$33.50。')
+    expect(finding.action).toContain('如果你最近自己改过这条广告的表单，请告诉我们。')
+    expect(finding.action).not.toContain('你不用动手')
     expectFindingClean(finding)
   })
 
@@ -114,9 +113,9 @@ describe('toClientFinding — D10', () => {
     expect(f).not.toBeNull()
     const finding = f as ClientRuleFinding
     expect(finding.headline).toContain('发私信咨询的比例只有 5.0%，同一组里其它广告是 20.0%')
-    expect(finding.detail).toContain('NZ$20.00')
-    expect(finding.detail).toContain('NZ$6.00')
-    expect(finding.action).toContain('欢迎语或快捷问题')
+    expect(finding.detail).toContain('平均每带来一位发私信咨询的人要花 NZ$20.00')
+    expect(finding.detail).toContain('同一组里其它广告最近两周多平均每位只要 NZ$6.00')
+    expect(finding.action).toContain('如果你最近自己改过这条广告的欢迎语或快捷问题，请告诉我们。')
     expectFindingClean(finding)
   })
 
@@ -136,7 +135,48 @@ describe('toClientFinding — D10', () => {
     expect(f).not.toBeNull()
     const finding = f as ClientRuleFinding
     expect(finding.headline).toContain('还没有人留下联系方式')
-    expect(finding.detail).toContain('还没有带来留下联系方式的客户')
+    expect(finding.headline).toContain('之前两周点进来的人里有 16.0% 会留下联系方式')
+    expect(finding.detail).toContain('还没有带来留下联系方式的人')
+    expectFindingClean(finding)
+  })
+
+  it('same_adset_peers with recent_rate 0 never shows 0.0%', () => {
+    const f = toClientFinding(
+      hit('D10', {
+        core_metric: 'lead',
+        baseline_source: 'same_adset_peers',
+        base_rate: 0.16,
+        recent_rate: 0,
+        base_cost_per_result: 7.05,
+        recent_cost_per_result: null,
+        recent_spend: 167.48,
+      }),
+      opts(),
+    )
+    expect(f).not.toBeNull()
+    const finding = f as ClientRuleFinding
+    expect(finding.headline).toContain('还没有人留下联系方式；同一组里其它广告')
+    expect(finding.headline).not.toContain('0.0%')
+    expectFindingClean(finding)
+  })
+
+  it('own_history with null base_cost_per_result and recent 0.03 cost 20', () => {
+    const f = toClientFinding(
+      hit('D10', {
+        core_metric: 'lead',
+        baseline_source: 'own_history',
+        base_rate: 0.16,
+        recent_rate: 0.03,
+        base_cost_per_result: null,
+        recent_cost_per_result: 20,
+        recent_spend: 60,
+      }),
+      opts(),
+    )
+    expect(f).not.toBeNull()
+    const finding = f as ClientRuleFinding
+    expect(finding.detail).toContain('现在平均每带来一位留下联系方式的人要花 NZ$20.00')
+    expect(finding.detail).not.toContain('—')
     expectFindingClean(finding)
   })
 
@@ -166,6 +206,7 @@ describe('toClientFinding — D2', () => {
     expect(f).not.toBeNull()
     const finding = f as ClientRuleFinding
     expect(finding.kind).toBe('fatigue')
+    expect(finding.detail).toContain('和它一起投放的这批广告')
     expect(finding.detail).toContain('1.7 次')
     expect(finding.detail).toContain('图片或视频不够吸引人')
     expectFindingClean(finding)
@@ -267,10 +308,44 @@ describe('renderRuleSection', () => {
       adsChecked: 12,
       findings: [],
     })
-    expect(out).toContain('这次没有发现哪条广告明显变差')
-    expect(out).toContain('看了 12 条正在投放的广告')
+    expect(out).toContain('这次没有发现连续两天以上明显变差的广告')
+    expect(out).toContain('检查了 12 条正在投放的广告')
     expect(out).toContain('9月24日')
     expect(out.startsWith('三、需要留意的广告')).toBe(true)
+    expectNoBanned(out)
+  })
+
+  it('promise sentence appears once, ask sentence in both blocks, CTR explainer once', () => {
+    const d10: ClientRuleFinding = {
+      kind: 'post_click_drop',
+      adName: 'A',
+      headline: 'HEADLINE_ONE',
+      detail: 'DETAIL_ONE',
+      action: '如果你最近自己改过这条广告的表单，请告诉我们。',
+      spend: 100,
+      explainsCtr: false,
+    }
+    const d2: ClientRuleFinding = {
+      kind: 'fatigue',
+      adName: 'B',
+      headline: 'HEADLINE_TWO',
+      detail: 'DETAIL_TWO',
+      action: '如果你最近自己改过这条广告的图片或视频，请告诉我们。',
+      spend: 50,
+      explainsCtr: true,
+    }
+    const out = renderRuleSection({
+      source: 'patrol',
+      dataDate: '2026-09-24',
+      adsChecked: 12,
+      findings: [d10, d2],
+    })
+    const promise = '下面这几条我们的广告团队已经看到，会在10月1日前后复查并处理，你不用动手。'
+    expect(out.split(promise)).toHaveLength(2)
+    expect(out.split('如果你最近自己改过这条广告的').length - 1).toBe(2)
+    const explainer = '点击率就是看到广告的人里点进来的比例。'
+    expect(out.split(explainer)).toHaveLength(2)
+    expect(out.indexOf(explainer)).toBeLessThan(out.indexOf('DETAIL_TWO'))
     expectNoBanned(out)
   })
 
@@ -283,10 +358,13 @@ describe('renderRuleSection', () => {
       'client_page_unknown',
       'not_loaded',
       'no_delivering_ads',
+      'preparing',
+      'incomplete_findings',
     ]
     for (const reason of reasons) {
       const out = renderRuleSection({ source: 'none', reason })
       expect(out).toContain('这个广告账户这次没有做单条广告检查')
+      expect(out).toContain('报告里其它部分的分析不受影响')
       expect(out.startsWith('三、需要留意的广告')).toBe(true)
       expectNoBanned(out)
     }
@@ -295,6 +373,12 @@ describe('renderRuleSection', () => {
     )
     expect(renderRuleSection({ source: 'none', reason: 'no_delivering_ads' })).toContain(
       '没有正在投放的广告',
+    )
+    expect(renderRuleSection({ source: 'none', reason: 'preparing' })).toContain(
+      '单条广告检查还在准备中',
+    )
+    expect(renderRuleSection({ source: 'none', reason: 'incomplete_findings' })).toContain(
+      '数据不完整',
     )
   })
 })

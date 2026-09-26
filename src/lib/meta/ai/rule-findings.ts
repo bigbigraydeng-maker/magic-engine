@@ -73,7 +73,7 @@ function isEligibleHit(
   if (f.clientVisible !== true) return false
   const ad = adUnitOf(f)
   if (ad === null) return false
-  if (ad.adAccountId !== undefined && norm(ad.adAccountId) !== norm(args.adAccountId)) return false
+  if (ad.adAccountId === undefined || norm(ad.adAccountId) !== norm(args.adAccountId)) return false
   const key = findingKey(f)
   if (key === null || streakFor(key, sortedRows) < ADS_RULE_MIN_STREAK) return false
   return args.deliveringAdIds === null || args.deliveringAdIds.has(ad.id)
@@ -89,6 +89,8 @@ export function selectRuleFindings(
   const newest = sortedRows[0]
   if (newest.payload?.dataCompleteness === 'partial') return none('partial')
   if (!isUsableNewest(newest, args.now)) return none('stale')
+
+  if (newest.payload?.adLevelCoverage === undefined) return none('preparing')
 
   const coverage = newest.payload?.adLevelCoverage?.find(
     (c) => norm(c.adAccountId) === norm(args.adAccountId),
@@ -107,6 +109,8 @@ export function selectRuleFindings(
       }),
     )
     .filter((x): x is ClientRuleFinding => x !== null)
+
+  if (hits.length > 0 && findings.length === 0) return none('incomplete_findings')
 
   return {
     section: {

@@ -97,6 +97,36 @@ describe('selectRuleFindings — none reasons', () => {
     )
     expect(res.section).toEqual({ source: 'none', reason: 'no_delivering_ads' })
   })
+
+  it('payload without adLevelCoverage → preparing', () => {
+    const noCoverage: GrowthStateRow = {
+      client_id: 'c',
+      date: '2026-09-24',
+      payload: { dataCompleteness: 'complete', problems: [d10()] },
+    }
+    const res = selectRuleFindings([noCoverage], args())
+    expect(res.section).toEqual({ source: 'none', reason: 'preparing' })
+  })
+
+  it('hit present but not renderable → incomplete_findings', () => {
+    const unrenderable = (): RuleFinding => ({
+      ...d10(),
+      evidence: {
+        core_metric: null,
+        baseline_source: 'own_history',
+        base_rate: 0.16,
+        recent_rate: 0.04,
+        base_cost_per_result: 7,
+        recent_cost_per_result: 30,
+        recent_spend: 100,
+      },
+    })
+    const res = selectRuleFindings(
+      [row('2026-09-24', [unrenderable()]), row('2026-09-23', [unrenderable()])],
+      args(),
+    )
+    expect(res.section).toEqual({ source: 'none', reason: 'incomplete_findings' })
+  })
 })
 
 describe('selectRuleFindings — patrol', () => {
@@ -133,6 +163,18 @@ describe('selectRuleFindings — patrol', () => {
   it('ad unit on another account → zero findings', () => {
     const res = selectRuleFindings(
       [row('2026-09-24', [d10('ad1', 'act_2')]), row('2026-09-23', [d10('ad1', 'act_2')])],
+      args(),
+    )
+    expect(res.findings).toEqual([])
+  })
+
+  it('ad unit without adAccountId → zero findings', () => {
+    const noAccount = (): RuleFinding => ({
+      ...d10(),
+      units: [{ level: 'ad', id: 'ad1', name: 'ad1' }],
+    })
+    const res = selectRuleFindings(
+      [row('2026-09-24', [noAccount()]), row('2026-09-23', [noAccount()])],
       args(),
     )
     expect(res.findings).toEqual([])
