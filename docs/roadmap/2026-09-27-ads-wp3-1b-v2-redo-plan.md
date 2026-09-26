@@ -15,9 +15,26 @@
 
 **统筹 2026-09-27 已裁决两件事（本方案照着写，不再是"待 PM 判决"）**：
 - **B4 走人工信封**（不走 kind 分派）：生产库实测——CTS + NAL 共 46 个广告组的 `learning_stage` **全部是 NULL**，`isWithinEnvelope` 第 ⑦ 条会拒掉每一个；kind 分派只解 ① 号阻断（`beforeCents=null`），剩 ②③④⑥⑦ 五条继续拒。见 §二 B4。
-- **系列级两个旁路走 grandfather + ROADMAP 欠账**（**不新增 ActionKey**——v2.1 §0 明禁）：拆 `campaign-writes.ts` 挂 `PROVIDER_WRITE_MODULES`，两条路由用**精确路径**进 `PROVIDER_WRITE_GRANDFATHERED`，收编进 Kernel 走另一次 tier gate。见 §四 输入 1。
+- ~~系列级旁路~~ **⚠️ 这一条现在是未决争议，不是裁决**：统筹说走 grandfather + ROADMAP 欠账（v2.1 §12 只点名止损一条路由）；PM 经小秘书 DR87-2 说三条旁路本轮全收编进 Kernel。**两版代价差一个量级，写代码前必须合口径 —— 详见 §零。**
 
 **PM 待拍板 3 件（收到后再动）**：① 生产库那张错 schema `ads_circuit_events` 的 DROP 授权；② CTS 100/50 分别给哪个 `act_` 号（库里没有叫"个人账户"的行）；③ NAL 目标怎么写库（NAL 目前没有生效目标，验证时会 fail closed）。
+
+---
+
+## §零 · ⚠️ 一条范围争议未决（两个窗口口径对立，写代码前必须先合）
+
+| 来源 | 主张 | 依据 |
+|---|---|---|
+| **统筹窗口** 2026-09-27 审方案必改 1 | `meta-ads/execute` + `boost-post` **本轮不在范围**，只在 `PROVIDER_WRITE_GRANDFATHERED` 加两条精确路径登记欠账，**路由本身一行不改**；收编进 Kernel 走另一次 tier gate | v2.1 §12 分批表 3.1b 那行「关旁路」原文**只点名** `src/app/api/clients/[id]/ad-health/stop-loss/route.ts:48-50,124` 一条，那两条路由一个字没提。**我核实过，统筹引的原文准确** |
+| **PM** 2026-09-27 经小秘书 DR87-2 | `execute` / `boost-post` / **`winner-reel-sync` 三条都等 WP3 重做一起收编进 Kernel**，不单独提前停；**winner-reel-sync 保留自动建广告功能，收编 = 保留 + 套上预算保护，不停不删** | PM 直接拍板（范围归 PM，CLAUDE.md §2） |
+
+**冲突的实质**：PM 主动把范围扩到 v2.1 §12 之外。按 CLAUDE.md §2，范围是 PM 的决定权，PM 的话盖过统筹的范围判断 —— **但统筹很可能还没看到 DR87-2**（那条走的是小秘书通道）。
+
+**代价差别很大**：按 PM 版要**新增 3 个 ActionKey**（`ads.pause_campaign` / `ads.cut_campaign_budget` / `ads.boost_page_post`）+ 3 份 capability handler + `registry-ads.ts` 注册 + 各自的信封声明与撤回处理函数 —— 而 v2.1 §0 明文写「本 WP 不新增 capability、不新增 ActionKey」。也就是说 PM 版同时覆盖了 §0 和 §12 两处。
+
+🔴 **这一条不合口径就动手 = 无论照哪版写都会被另一个审查员打回。已同时发统筹与小秘书要一句统一裁决。争议解决前，这三条旁路在 §五 不排工。**
+
+**我的建议**（不是决定）：分两步 —— 本轮先做统筹版（grandfather 精确路径登记，零风险、立即可交付），同一个 PR 里把 ROADMAP 那条欠账写清；三条旁路的真收编 + 3 个新 ActionKey 开 WP3.1c 单独走 tier gate。理由：本 PR 已经是 32 个文件 + 4 条 BLOCKER + 三处真变异，再加 3 个 ActionKey 会让它大到没人审得动，而 PM 真正担心的「熔断期间旁路照样能加预算」这个红线，靠 3.1c 尽快跟上比塞进一个审不动的大 PR 更快落地。
 
 ---
 
@@ -25,12 +42,12 @@
 
 |  # | 项 | 上一轮实现 | v2.1 要求 | 本轮怎么改 |
 |----|----|----------|----------|----------|
-| 1 | `ads_circuit_events` schema | `(client_id, occurred_on, trigger_code, outcome)` 每条判据一行、按客户 | `(client_id, ad_account_id, seq bigserial, kind ('trip'\|'release'), trip_event_id, sticky, reason, actor, evidence)` **按账户**，两条 CHECK：`ads_circuit_events_release_shape` + `ads_circuit_events_release_by_human`（v2.1 §11.3 + §6.9 第 3 条） | 生产库表 **DROP + CREATE**（差异太大，不 ALTER；那张表现在零数据、零调用方，删掉零影响）；新 migration 用 `20260927000002_ads_circuit_events_v2.sql`，同 PR 内 apply 再合并代码（v2.1 §12 硬门） |
+| 1 | `ads_circuit_events` schema | `(client_id, occurred_on, trigger_code, outcome)` 每条判据一行、按客户 | `(client_id, ad_account_id, seq bigserial, kind ('trip'\|'release'), trip_event_id, sticky, reason, actor, evidence)` **按账户**，两条 CHECK：`ads_circuit_events_release_shape` + `ads_circuit_events_release_by_human`（v2.1 §11.3 + §6.9 第 3 条） | 生产库表 **DROP + CREATE**（差异太大，不 ALTER；那张表现在零数据、零调用方，删掉零影响）；新 migration 用 `20260927000002_ads_circuit_events_v2.sql`；顺序照 v2.1 §12 硬门原文：**migration 先 apply 再合并代码，PR 描述附 apply 回执** |
 | 2 | 熔断状态 | 直接写 `ad_strategy_configs.autonomy_mode='observe'` | **不写** `ad_strategy_configs`，状态是**派生态**：存在任一 `kind='trip'` 且没有对应 `release` 且（`sticky` 或 `created_at > now()-24h`）→ 该 `(client_id, ad_account_id)` 处于熔断中（v2.1 §6.2） | 删掉 `circuit-breaker-apply.ts` 里的 `switchToObserve`；派生态查询写成 `isCircuitTripped(sb, clientId, adAccountId)` 纯 SQL |
 | 3 | 落点 | 写 autonomy_mode → WP3.1a sync worker → Kernel policy | `createAdsEnvelopeFactsResolver` 检查派生态，处于熔断中返回 `unavailable('circuit:<reason>')` → Kernel authorize 层 deny (`outside_autonomy_envelope`) + pre_provider 层 `dead_letter+needs_human`（v2.1 §6.1） | 在 `envelope-facts.ts` 加熔断查询；`reason` 带机器可读前缀（`circuit:` / `facts:` / `manual_only:`） |
 | 4 | 恢复 | 需要 PM 拨回 bounded_auto | 非 sticky **24h 自动过期**（没有 release 写入者）；sticky 由 admin 通过 `guardGlobalAdmin` 保护的 admin 解除接口写 `kind='release'`，`actor='human:<email>'`（v2.1 §6.4） | 新 admin 解除接口 `POST /api/admin/ads/circuit/release`；`actor` 从 `requireGlobalAdmin` 的 email 取，**不从 body 读**；一次解除该账户全部未解 sticky 但**逐条写 release**行（v2.1 §6.9 第 1 条） |
 | 5 | 触发 #3 回滚失败 | 入参 `kernelRollbackFailures` | 韩信跑完 `runAction` 后**读 `action_run_steps`**、`step_key='rollback' AND status='failed'` → 立即写 sticky trip（`reason='rollback_failed:<run_id>'`）并中止本批剩余成员（v2.1 §6.3） | 韩信在 3.2 落地时接线；3.1b 只交付「判据函数」`detectRollbackFailure(runId, sb): 'trip' \| null`，配单测；等 3.2 里的批次 orchestrator 接线 |
-| 6 | 触发 #4 Jev 低分 | 入参 `consecutiveJevLowScores` | 读 `prescription_evaluations`，按 `cycle_id` 分组连续 3 轮 `total_score<60` → sticky；另加「连续 3 轮 ≥50% reversed/inconclusive」（v2.1 §6.3） | **数据源不存在**（生产库实测 `prescription_evaluations` 表 0 行、也不在 schema，v2.1 §11.8 是 3.3 才建）；**v2.1 §0 明禁本轮新增表**。所以本轮：判据函数 `detectJevLowStreak` **打桩恒返回 `null`（undeterminable，不熔不放）**，行为等同于「数据源未就绪」；欠账写进 ROADMAP 第 3.3 表就绪后接线。**不自己建表**（超授权）——统筹已把这条 flag 给 PM 复审 |
+| 6 | 触发 #4 Jev 低分 | 入参 `consecutiveJevLowScores` | 读 `prescription_evaluations`，按 `cycle_id` 分组连续 3 轮 `total_score<60` → sticky；另加「连续 3 轮 ≥50% reversed/inconclusive」（v2.1 §6.3） | **数据源不存在**（生产库实测 `prescription_evaluations` 不在 schema）。**打桩恒返回 `null`（undeterminable，不熔不放）是 v2.1 自己的既定分步安排，不是「缺东西凑合」**：v2.1 §9.3 标题原文「落库：新建表 `prescription_evaluations`」、§11.8 是这张表的 DDL、§12 分批表「WP3.3 Check + Tune + Jev + 日报两段」那行的内容列包含 §9 —— 所以这张表按 spec 就是 WP3.3 才建。欠账进 ROADMAP，3.3 表就绪后接线。**不自己建表**（v2.1 §0 明禁 + 超 3.1b 授权）。统筹 2026-09-27 已**撤回**原先「flag 给 PM 复审」那条，不必问 PM |
 | 7 | 第 5 条数据不全 | 冻结当天 / 切档位分档 | **不存在这一条**；改成第 1 条「≥5 个非零花费天，否则 `undeterminable`（按 data-partial 处理，不熔不放）」（v2.1 §6.3） | 删掉「data_incomplete」概念；`detectSpendSpike` 判据加 sample-size gate |
 | 8 | resolver 挂进生产 Kernel | ❌ 未做（只在自建 `ads-kernel-deps.ts` 挂了，生产 `createKernelDeps` 默认 deps 没转发；子牙 BLOCKER 1） | v2.1 §6.1 三大硬交付：`createKernelDeps` 转发 `resolveEnvelopeFacts`、`createKernel` 默认装 `createAdsEnvelopeFactsResolver`、架构测试断言「生产 Kernel 工厂产出的 `deps.resolveEnvelopeFacts` 非空」 | `src/lib/kernel/deps.ts:113-130` 的对象字面量加 `resolveEnvelopeFacts: init.resolveEnvelopeFacts` 一行；`src/lib/kernel/index.ts` 的 `createKernel` 默认装；`src/lib/kernel/__tests__/architecture.test.ts` 加断言 |
 | 9 | 账户级日预算 + 面板 UI | ❌ 未做 | v2.1 §3.9 + §11.11：`client_meta_ad_accounts.daily_budget_cap_cents` 列；`envelope-facts.ts` 按账户取 `dailyCapCents`；多账户缺配置 → `unavailable('facts:账户级日上限未配置')`；PATCH 校验 `sum(账户上限) ≤ 客户总闸`；绑定面板 UI；CTS 主 100 / 个人 50 由 PM 在面板填 | migration 加列 `ADD COLUMN IF NOT EXISTS`；`envelope-facts.ts` 逐个动作按 `input.ad_account_id` 查该账户上限；`api/clients/[id]/ad-accounts/[accountId]` PATCH 路由加合计校验；`src/app/dashboard/clients/[id]/ad-accounts/page.tsx` 加输入 UI（简单表格，两列 name + cap） |
@@ -113,14 +130,16 @@
 2. **熔断状态派生态 + 提交 → 拿到 denied**：`ads_circuit_events` 里塞一条 `kind='trip'` 未 release 且 `created_at=now()-1h`；同上真链路提交；断言 `outcome='deny'` 且 `deny_code='outside_autonomy_envelope'`、`reason` 含 `circuit:`。变异「resolver 忽略 circuit 状态」→ 必须变回 allow。
 3. **`learning_stage=NULL` fixture + 人按暂停 → 仍须 `allow`**（生产真实形状，46/46）：`ad_entity_snapshots.learning_stage=null`；提交 `ads.pause_unit` `triggeredBy:'human'`；断言 `outcome='allow'`。**变异「把 `excludeLearningPhase` 塞回人工信封」→ 必须变回 denied**——钉住"未来别人把 ⑦ 悄悄塞回人工信封"这个失败模式。
 
+**变异范式照 v2.1 §14.1 原文（统筹 C4）**：仓里没有 stryker、也没有 `@inngest/test`，所以用 `scripts/kernel_mutations` 那套**手动变异脚本**范式，目录锁定 `src/lib/ads-strategy/autonomy/` + `src/lib/capabilities/ads/envelope-facts.ts`，**在冻结 head 上跑一次**（不是每次 commit 都跑）。上一轮我自己写的那个 `mutate.py` 临时脚本要换成这个范式。
+
 **其它现有 10 处变异保留但重新对齐**（M2 M3 已经跟着删掉的第 5 条一起消失；M1 观察 vs deny 保留；M4 boundary 保留但要按违规文件清单比对不看退出码；M5-M10 移植到新代码）
 
 ## 四、v2.1 六条输入 · 交付点表
 
 | 输入 | 交付点 | 谁写 |
 |----|-------|-----|
-| 1. 系列级两个旁路（`meta-ads/execute` + `boost-post`）**统筹 2026-09-27 已裁：走 grandfather 精确路径 + ROADMAP 欠账，不新增 ActionKey（v2.1 §0 明禁）** | ① `src/lib/meta/campaign-writes.ts` 拆出 `setCampaignStatus`/`setCampaignDailyBudget`/`boostPagePost`，挂进 `PROVIDER_WRITE_MODULES`；② `boundaries.ts` `PROVIDER_WRITE_GRANDFATHERED` 用**精确路径**加两条路由（`src/app/api/clients/[id]/meta-ads/execute/route.ts` 和 `.../boost-post/route.ts`）；③ **不加旁路自 gating**——那是"状态字段当授权 = 闸必漏"（memory `feedback-status-field-as-authorization-leaks-gates`）+ ADR-001 只留一个入口，方向性错误。改在 PR 描述里明确回答 `boundaries.ts:47-48` 那句注释「加之前先问：这段代码能不能改成提交一个 action_run？」：**能，但需要新 ActionKey，v2.1 §0 禁止本轮新增，已登记 ROADMAP**；④ `docs/ROADMAP.md` 加一条：系列级写入面收编进 Kernel（新 ActionKey），依赖一次 tier gate，不在 3.1b | 我自己写（A 级安全核心） |
-| 2. append-only 表触发器（本轮 **BLOCKER**，统筹 2026-09-27 定级；魏征提出 + 上一轮翻车事实） | 新 migration 建表就带 `BEFORE UPDATE OR DELETE ... RAISE EXCEPTION` 触发器，照抄 `supabase/migrations/20260808000003_me2_execution_kernel_v1.sql:209-212` 的 `authorization_decisions_append_only()`；PR 描述明确写「这是对 v2.1 §6.2 DDL 的**增强**（v2.1 原文只写了 RLS 没写触发器），不是偏离」；架构测试断言表上有 append-only 触发器 | 我自己写（DB DDL 安全核心） |
+| 1. 旁路处置 **⚠️ 范围争议未决，先读 §零**。下面记的是 **PM DR87-2 版**（三条旁路本轮全收编）；统筹版是只 grandfather 登记、路由不改。**争议解决前这一格不排工** —— PM 那条硬约束无论哪版都成立：**`winner-reel-sync` 保留自动建广告功能，收编 = 保留 + 套上预算保护，不停不删** | ① `src/lib/meta/campaign-writes.ts` 拆出 `setCampaignStatus`/`setCampaignDailyBudget`/`boostPagePost`，挂进 `PROVIDER_WRITE_MODULES`；② **新增三个 ActionKey**（`registry-ads.ts` + 三份新 capability handler `src/lib/capabilities/ads/`）：`ads.pause_campaign`（系列级暂停）、`ads.cut_campaign_budget`（系列级砍预算）、`ads.boost_page_post`（推广帖）；③ **`execute` 路由**改成按请求体动作提交对应 ActionKey；④ **`boost-post` 路由**改成提交 `ads.boost_page_post`；⑤ **`winner-reel-sync`** —— PM 明说"走 Kernel 或至少读日上限+熔断"，本 PR 走**轻量方案**（不新建 `ads.create_reel_ad` capability，工作量太大）：sync 内部在真调 Meta 建广告前调 `envelope-facts.resolveCircuit(clientId, adAccountId)` 检查熔断 + 查 `daily_budget_cap_cents` 检查今天已花+计划新增是否超上限；命中 → fail closed + 三件套 + 打人工任务；这是"保留自动建广告 + 套上预算保护"两条都满足的最小实现，走 Kernel 收编留到 3.1c；⑥ ~~`PROVIDER_WRITE_GRANDFATHERED` 精确路径~~ 不需要了——三个路由都走 Kernel、winner-reel-sync 因 PM 授权的轻量方案单独走 envelope-facts 只读接口，不 import `campaign-writes` | 我自己写（A 级安全核心；新增 ActionKey 是 Kernel 权限表变更）；capability handler 部分可派 DeepSeek |
+| 2. append-only 表触发器（三方定级 **CONCERN**，小秘书 2026-09-27 复核后更正；魏征 NOTE、狄仁杰+子牙 CONCERN；仍**本轮同 PR 加**） | 新 migration 建表就带 `BEFORE UPDATE OR DELETE ... RAISE EXCEPTION` 触发器，**模板从 `me_conversion_audit` 抄**（不是 `authorization_decisions_append_only()`）——理由：`me_conversion_audit` 那份带 `pg_trigger_depth()>1` 放行连带删除，狄仁杰沙盘验过 clients 级联 CASCADE 时可用。触发器跟 DROP+CREATE 进同一个迁移。PR 描述写明「这是对 v2.1 §6.2 DDL 的**增强**（v2.1 原文只写了 RLS 没写触发器），不是偏离」；架构测试断言表上有 append-only 触发器 | 我自己写（DB DDL 安全核心） |
 | 3. 生产库那张错 schema `ads_circuit_events` 复用/迁移 | 新 migration **DROP + CREATE**：`DROP TABLE IF EXISTS public.ads_circuit_events`（旧的、零数据）；然后按 v2.1 §11.4 建新表 | 我自己写 |
 | 4. 账户级日预算 + 面板 UI（CTS 主 100 / 个人 50） | ① migration `client_meta_ad_accounts.daily_budget_cap_cents` 列；② `envelope-facts.ts` 按账户取；③ `api/clients/[id]/ad-accounts/[id]/route.ts` PATCH 加合计校验；④ `dashboard/clients/[id]/ad-accounts/page.tsx` 加输入表格 | migration + envelope-facts 我写；PATCH 路由 + 面板 UI 派 DeepSeek |
 | 5. WP2 遗留 [#1994] 顺手修 | `envelope-facts.ts:119` 解构加 `at`；`limit(4000)` 冷却单独查询 | 派 DeepSeek |
@@ -146,18 +165,18 @@
 |----|-----|----|
 | `src/lib/kernel/deps.ts` | `createKernelDeps` 对象字面量加 `resolveEnvelopeFacts: init.resolveEnvelopeFacts` 一行 | 我（一行，A 级安全核心） |
 | `src/lib/kernel/index.ts` | `createKernel` 默认装 `createAdsEnvelopeFactsResolver` | 我 |
-| `src/lib/kernel/autonomy-envelope.ts` | 加 `humanEnvelope` + `isWithinEnvelope` 按 `triggeredBy` 分派（B4 路 A） | 我（A 级安全核心） |
+| `src/lib/kernel/autonomy-envelope.ts` | 加独立常量 **`HUMAN_STOP_ENVELOPE`**（名字全文统一用这个，统筹 C5）+ `isWithinEnvelope` 按 `triggeredBy` + `actionKey` 分派 | 我（A 级安全核心） |
 | `src/lib/kernel/authorize.ts` | 传 `triggeredBy` 进 envelope 判定 | 我 |
-| `src/lib/capabilities/ads/envelope-facts.ts` | ① 解构加 `at`；② `at==='pre_provider'` 读 `kernel_pre` 快照；③ `limit(4000)` 冷却单独查；④ 按账户取 `dailyCapCents`；⑤ 检查熔断派生态返回 `unavailable('circuit:...')` | DeepSeek + 我细审 |
+| `src/lib/capabilities/ads/envelope-facts.ts` | ① 解构加 `at`；② `at==='pre_provider'` 读 `kernel_pre` 快照；③ `limit(4000)` 冷却单独查；④ 按账户取 `dailyCapCents`；⑤ 检查熔断派生态返回 `unavailable('circuit:<reason>')`；⑥ 🔴 **熔断查询自身报错时用区别于 `circuit:` 的前缀 `facts:circuit_query_failed` + 出一张 pm-todo（统筹 C2）**——v2.1 §6.2 说「读不到 / 解析失败 = 视为熔断中」，fail closed 方向对，但「真熔断了」和「查熔断这件事自己炸了」在下游长得一模一样；哪天这条 SQL 挂了，广告自治整个哑掉、PM 只看到一堆「熔断中」没人知道根因。正好接上已有的三前缀分派 | DeepSeek + 我细审 |
 | `src/lib/meta/adsets.ts` | `listAdSetsInCampaign` 走 `paging.next` 翻页；只拿到一页且 next 存在 → 返回 null | DeepSeek |
-| `src/lib/ads-strategy/stop-loss-submission.ts` | `cycleDate` 走 `accountDayKey`；`triggeredBy:'human'` 显式传 | 我 |
+| `src/lib/ads-strategy/stop-loss-submission.ts` → **`git mv` 到 `src/lib/ads-strategy/submission/stop-loss-submission.ts`** | 🔴 **必须搬家**：白名单收窄到 `src/lib/ads-strategy/submission/` 之后，文件留在 `ads-strategy/` 根下就不在允许目录里、架构测试直接红（统筹 2026-09-27 必改 2）。搬完 `grep -rn "stop-loss-submission"` 扫一遍改全部 import 点（已知至少 `ad-health/stop-loss/route.ts` 和它的测试）。同时改：`cycleDate` 走 `accountDayKey`；`triggeredBy:'human'` 显式传 | 我 |
 | `src/app/api/clients/[id]/ad-health/stop-loss/route.ts` | 暂停完回读系列级、报"停了 N 停不了 M"；`cycleDate` 走账户时区 | 我 |
 | `src/app/dashboard/clients/[id]/ads-health/page.tsx` | 前端契约修（B2）：按 status 分派、渲染三件套 | DeepSeek |
 | `src/app/dashboard/clients/[id]/ads-health/__tests__/page.test.tsx` | stub 契约对齐 + 补 409 三件套用例 + 补 200 不被 catch 吞的用例 | DeepSeek |
-| `src/app/api/clients/[id]/meta-ads/execute/route.ts` | 加旁路自 gating：`isCircuitTripped` 拒 + 三件套 | 我（A 级红线路径） |
-| `src/app/api/clients/[id]/meta-ads/boost-post/route.ts` | 同上 | 我 |
-| `src/lib/kernel/boundaries.ts` | `PROVIDER_WRITE_MODULES` 加 `@/lib/meta/campaign-writes`；`PROVIDER_WRITE_GRANDFATHERED` 用精确路径加两个旁路；`KERNEL_RUNNER_ALLOWED_CALLER_DIRS` 从 `src/lib/ads-strategy/` 收窄到 `src/lib/ads-strategy/submission/`；改注释里那段假理由（点明 `action-submission/ads-auto-pause.ts` 已在承载 ads 域，boundary 判据是「不 import 域模块」不是「不认识域字符串」） | 我 |
+| `src/lib/kernel/boundaries.ts`（旁路登记部分）| **⚠️ 范围争议未决，见 §零**。统筹方案 = 只在 `PROVIDER_WRITE_GRANDFATHERED` 加两条**精确路径**（`src/app/api/clients/[id]/meta-ads/execute/route.ts`、`.../boost-post/route.ts`），**路由本身本轮不改一行**。PM DR87-2 方案 = 三条旁路本轮收编进 Kernel（要新增 ActionKey）。**争议解决前这两条路由不排工。** 🔴 无论哪版，**都不做「旁路自 gating」**（§四 输入 1 已论证：状态字段当授权 = 闸必漏 + ADR-001 只留一个入口）| 我（A 级） |
+| `src/lib/kernel/boundaries.ts` | ⚠️ **对 v2.1 §12 字面的一处偏离，必须在 PR 描述里显式声明（统筹 C1）**：§12 原文要求「`PROVIDER_WRITE_MODULES` 加 `@/lib/meta/adsets`」（整个模块），上一轮改成拆出 `adset-writes.ts` 只挂写的那一半 —— 理由是 `adsets.ts` 读写混在一起、整挂会误伤 7 个只读 importer，**子牙已核过 `adsets.ts` 全文并接受这个判断**。本轮沿用同一处理并同样声明。`PROVIDER_WRITE_MODULES` 加 `@/lib/meta/campaign-writes`；~~`PROVIDER_WRITE_GRANDFATHERED` 加两个旁路~~（**这一项归 §零 争议，解决后再定**）；`KERNEL_RUNNER_ALLOWED_CALLER_DIRS` 从 `src/lib/ads-strategy/` 收窄到 `src/lib/ads-strategy/submission/`（**配套必做 `git mv`，见上方 `stop-loss-submission.ts` 那行**）；改注释里那段假理由（点明 `action-submission/ads-auto-pause.ts` 已在承载 ads 域，boundary 判据是「不 import 域模块」不是「不认识域字符串」） | 我 |
 | `.eslintrc.json` | 跟 `boundaries.ts` 同步 | 我 |
+| **`docs/ROADMAP.md`** 🔴 **必改 3（统筹）** | 子牙 B3 的核心指控：CLAUDE.md §9.1 要求未完成任务回写 ROADMAP，上一轮一个字没改、ledger 卡还写着 done。**散文里提一句不等于排了工**，所以这次它进文件清单。本轮要回写这几条：① 系列级 / 自动化三条旁路真收编进 Kernel（需新 ActionKey + 一次 tier gate，视 §零 争议结果定是否留在本轮）② 熔断 #4 Jev 数据源等 WP3.3 `prescription_evaluations` 就绪后接线 ③ admin 看板页若延后到 3.1c ④ 其余本轮标 stub / 打桩 / 未接线的每一条 | 我 |
 | `src/lib/kernel/__tests__/architecture.test.ts` | 加断言：生产 `createKernelDeps()` 产出 `.resolveEnvelopeFacts` 非空；append-only 表有触发器；`src/lib/ads-strategy/**` 之外禁 import `submitActionRun`；`ads_circuit_events` release 只能由过 `guardGlobalAdmin` 的路由写；变异测试 2 处见 §三 | 我 |
 | `src/lib/pm-todo/ads-circuit-items.ts` | 判据改：`isCircuitTripped` 派生态；`reasonsOf` 按 `occurred_on = 最新那天` 全取（去掉 `.limit(5)`）；处理熔断中/dead_letter+needs_human 三种前缀分三种话（`circuit:` / `facts:` / `manual_only:`） | DeepSeek + 我审 |
 | `src/lib/pm-todo/__tests__/ads-circuit-items.test.ts` | 假件按表 + 按过滤（`eq()` 推 `(col,val)` 进数组，用例断言过滤集合） | DeepSeek |
@@ -192,8 +211,7 @@
   - `action_runs` 那 N 行（每广告组一行）status=succeeded
   - `authorization_decisions` 那 N 行 outcome=allow
   - Meta 后台截图证明真停了
-  - `flywheel_actions` 那 N 行 action_type=`ads.pause_adset`
-- 系列级两个旁路自 gating：写 e2e 测试模拟熔断状态存在时提交 boost-post/execute → 应返回三件套 409
+  - `flywheel_actions` **那一行**（统筹 C3 二选一，我选①：**一次决策只投一行**，`action_type='ads.pause_adset'`，被停的 adset 列表放 `payload.adset_ids`）—— 只改名不解决魏征的顾虑（N 行共享同一个系列级 outcome → `admin/flywheel/aggregate` 按 `action_type` 聚合时样本量和权重虚高），改名只是把虚高搬到新 key 上
 
 ### 类型检查 + Lint
 - `npm run type-check` 记基线 diff 逐字一致
@@ -205,7 +223,7 @@
 - `boundaries.ts` 三处 + `.eslintrc.json` + 架构测试断言（4 处新增）
 - `deps.ts` + `index.ts` resolver 挂载
 - `autonomy-envelope.ts` + `authorize.ts` 人工信封分派
-- `meta/campaign-writes.ts` 拆分 + 两个旁路自 gating
+- `meta/campaign-writes.ts` 拆分（旁路那三条路由怎么处置见 §零 争议）
 - `stop-loss-submission.ts` + `stop-loss/route.ts` cycleDate / triggeredBy / 系列回读
 - admin 解除接口路由
 - 三份 migration
