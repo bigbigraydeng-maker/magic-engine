@@ -349,6 +349,14 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   //    src/lib/gsc/page-daily-plan.ts, and registry.test.ts asserts they are equal.
   { service: 'inngest:cloud-gsc-page-daily-fanout', jobName: 'gsc-page-daily', schedule: '30 18 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-26',
     outputTables: [{ table: 'gsc_page_fetch_receipts', freshnessHours: 26, timestampColumn: 'started_at' }] },
+  // The pull orders of the same chain, under their own job name. Event-triggered: the fan-out above sends one
+  // event per order, so this runs on the fan-out's daily schedule — registered the way messenger-brief-hourly
+  // (an event consumer of a scheduled upstream) is. A separate job name keeps one client's failed order from
+  // hiding behind the next order's row, and keeps the dispatch row's own report visible.
+  // No outputTables: the receipts table is declared once, on the fan-out entry. If no client is GSC-connected,
+  // no order is sent and this entry will look overdue — the only legitimate silence.
+  // 🔴 schedule must not be hand-copied: it is the upstream fan-out's GSC_PAGE_DAILY_CRON (registry.test.ts).
+  { service: 'inngest:cloud-gsc-page-daily-pull', jobName: 'gsc-page-daily-pull', schedule: '30 18 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-26' },
 ] as const
 
 /**

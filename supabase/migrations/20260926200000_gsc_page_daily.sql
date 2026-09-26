@@ -41,10 +41,11 @@ CREATE INDEX IF NOT EXISTS gsc_page_daily_client_key_day_idx
   ON public.gsc_page_daily (client_id, page_key, day);
 
 -- One receipt per pull order (daily = "the last 5 days", backfill = "one
--- calendar month"). `id` is also the id of this order's row in cron_run_logs
--- (guaranteed by the application), which lets the failure handler close exactly
--- this order. `data_from_day` / `data_through_day` are the first / last day
--- inside the requested range for which Google actually has finalised data.
+-- calendar month"). `id` is also the id of this order's row in cron_run_logs;
+-- both are derived from the Inngest run id by the application, which lets the
+-- failure handler close exactly this order. `data_from_day` / `data_through_day`
+-- are the first / last day inside the requested range for which Google actually
+-- has finalised data.
 CREATE TABLE IF NOT EXISTS public.gsc_page_fetch_receipts (
   id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   client_id          uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
@@ -97,8 +98,9 @@ REVOKE ALL ON public.gsc_page_fetch_receipts FROM anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.gsc_page_daily TO service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.gsc_page_fetch_receipts TO service_role;
 
-COMMENT ON TABLE public.gsc_page_daily IS 'Google Search Console per-page daily metrics: one row per page per day; day is Google''s date (US Pacific). Written by service_role only.';
+COMMENT ON TABLE public.gsc_page_daily IS 'Google Search Console per-page daily metrics: one row per page per day; day is Google''s date (US Pacific). Written by service_role only. page_url is kept exactly as Google returns it, query string included, so it can carry personal data (for example a form confirmation page with an email in the query). Retention: at most 16 months (Google''s own window); pruning is not automated yet.';
 COMMENT ON COLUMN public.gsc_page_daily.page_key IS 'gscPageKey: host lower-cased without www, http/https not distinguished, fragment dropped, percent-escapes upper-cased, trailing slash removed except root, path case kept, only tracking params removed and the rest sorted.';
-COMMENT ON TABLE public.gsc_page_fetch_receipts IS 'Pull receipts for gsc_page_daily: one per order. id is also the id of the matching cron_run_logs row.';
-COMMENT ON COLUMN public.gsc_page_fetch_receipts.status IS 'running / complete (whole range pulled) / truncated (some day hit the 4-page cap) / failed.';
+COMMENT ON COLUMN public.gsc_page_daily.page_url IS 'The page URL exactly as Google returned it, query string included (may contain personal data — see the table comment). Part of the primary key.';
+COMMENT ON TABLE public.gsc_page_fetch_receipts IS 'Pull receipts for gsc_page_daily: one per order. id is also the id of the matching cron_run_logs row; both are derived from the Inngest run id.';
+COMMENT ON COLUMN public.gsc_page_fetch_receipts.status IS 'running / complete (whole range pulled) / truncated (some day reached Google''s 50,000-rows-per-day export cap, so only Google''s top rows exist for it; counts as covered and is never re-pulled) / failed.';
 COMMENT ON COLUMN public.gsc_page_fetch_receipts.failure_kind IS 'Only set when failed: auth / quota / other.';

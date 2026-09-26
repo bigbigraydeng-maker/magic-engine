@@ -7,7 +7,7 @@ import { expectedIntervalHours } from './schedule'
 import { FLYWHEEL_SEO_WEEKLY_CRON, FLYWHEEL_SEO_WEEKLY_JOB } from '../flywheel/seo-weekly'
 import { COMPETITOR_WATCH_CRON, COMPETITOR_WATCH_JOB } from '../competitors/watch'
 import { AI_VISIBILITY_WEEKLY_CRON, AI_VISIBILITY_WEEKLY_JOB } from '../ai-tracker/weekly-fanout'
-import { GSC_PAGE_DAILY_CRON, GSC_PAGE_DAILY_JOB } from '../gsc/page-daily-plan'
+import { GSC_PAGE_DAILY_CRON, GSC_PAGE_DAILY_JOB, GSC_PAGE_DAILY_PULL_JOB } from '../gsc/page-daily-plan'
 
 const ROOT = path.resolve(__dirname, '../../..')
 const CRON_ROUTES_DIR = path.join(ROOT, 'src/app/api/cron')
@@ -86,7 +86,9 @@ function jobNamesInFile(file: string): string[] {
   // 🔴 `startCronRunId` 也算（2026-09-07 补）。跨步骤跑的任务（Inngest 那批）开记录用的是
   //    它 —— 只认 `startCronRun` 的话，每周 SEO 快照和私信简报这两条**写着运行记录、
   //    却扫不出来**，跟「这个任务不存在」长得一模一样，正是这份对账要防的东西。
-  const ORIGINALS = ['startCronRun', 'startCronRunId']
+  // 🔴 `startCronRunWithId` 也算（2026-09-26 补）：Inngest 函数改成用「由 run id 算出的固定 id」开记录后，
+  //    只认前两个的话，谷歌逐页每日那两条就会写着运行记录却扫不出来——跟「这个任务不存在」一个样。
+  const ORIGINALS = ['startCronRun', 'startCronRunId', 'startCronRunWithId']
   const aliases = new Set<string>(ORIGINALS)
   for (const stmt of src.statements) {
     if (!ts.isImportDeclaration(stmt)) continue
@@ -426,6 +428,15 @@ describe('每个写运行记录的地方，都必须有人认领', () => {
     expect(entry!.outputTables).toEqual([
       { table: 'gsc_page_fetch_receipts', freshnessHours: 26, timestampColumn: 'started_at' },
     ])
+  })
+
+  it('🔴 GSC per-page daily pull orders: own job name, same schedule as the fan-out that triggers them', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === GSC_PAGE_DAILY_PULL_JOB)
+    expect(entry, `CRON_REGISTRY has no ${GSC_PAGE_DAILY_PULL_JOB} entry`).toBeDefined()
+    expect(GSC_PAGE_DAILY_PULL_JOB).not.toBe(GSC_PAGE_DAILY_JOB)
+    expect(entry!.scheduler).toBe('inngest')
+    expect(entry!.schedule, 'the pull entry must follow GSC_PAGE_DAILY_CRON (its upstream fan-out)').toBe(GSC_PAGE_DAILY_CRON)
+    expect(entry!.outputTables).toBeUndefined()
   })
 
   it('🔴 白名单不许过期：排上班了就该从白名单删掉', () => {
