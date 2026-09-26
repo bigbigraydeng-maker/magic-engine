@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-09-27
 source: session:fd4b0edd
 done_on: 2026-09-27
-done_ref: pr:pending
+done_ref: pr:2085
 verify_by: 2026-10-01
 verify_how: npm test -- scripts/auto-dev 全绿（110 tests）；sandbox 实测 .git/config 写入被拒、/usr/bin/security 被拒、网络被拒、home 读被拒；intercept hook 实测 --admin/gh pr merge/push main 被拦、非 auto-dev 会话放行；CLI 入口 gates/pick/brake 实测输入输出正确
 ---
