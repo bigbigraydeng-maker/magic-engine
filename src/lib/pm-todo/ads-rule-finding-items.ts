@@ -10,80 +10,40 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-item-types'
 import { APP_BASE } from './binding-request-items'
 import { shouldRemindToday } from './remind-cadence'
+import {
+  ADS_RULE_STALE_DAYS,
+  ADS_RULE_MIN_STREAK,
+  ADS_RULE_CODES,
+  findingKey,
+  ruleHits,
+  streakFor,
+  streakForReason,
+  isUsableNewest,
+  type RuleFinding,
+  type GrowthStateRow,
+} from '@/lib/ads-strategy/rules/patrol-findings'
+
+export {
+  ADS_RULE_STALE_DAYS,
+  ADS_RULE_STREAK_GAP_DAYS,
+  ADS_RULE_MIN_STREAK,
+  ADS_RULE_CODES,
+  findingKey,
+  ruleHits,
+  streakFor,
+  type RuleFinding,
+  type GrowthStateRow,
+} from '@/lib/ads-strategy/rules/patrol-findings'
 
 export type AdsRuleFindingItemKind = 'ads_rule_finding'
 
 /** 回看多少天的巡察记录来算「连着几天」 */
 export const ADS_RULE_LOOKBACK_DAYS = 14
-/** 最新一行巡察记录超过这么多天 → 巡察自己停了，这里不拿旧结论说事 */
-export const ADS_RULE_STALE_DAYS = 3
-/** 同一件事两次命中之间隔几天以内还算「连着」（周五周六待办不跑、巡察偶尔缺一天） */
-export const ADS_RULE_STREAK_GAP_DAYS = 3
 /** 一条待办的 how 里最多列几条 */
 export const ADS_RULE_MAX_LISTED = 3
-/** 连着这么多次巡察都命中才进待办：只命中一天的多半是波动（2026-09-26 回放：一次单日误报） */
-export const ADS_RULE_MIN_STREAK = 2
-
-export const ADS_RULE_CODES: ReadonlySet<string> = new Set(['D2', 'D10'])
-
-export interface RuleFinding {
-  code: string
-  status: string
-  title: string
-  units?: Array<{ level: string; id: string; name: string | null }>
-  reasons?: string[]
-  checkBack?: { after: string; condition: string; fallback: string }
-  notComparableReason?: string
-  manualTask?: { what: string; how: string; href: string | null }
-}
-
-export interface GrowthStateRow {
-  client_id: string
-  date: string // YYYY-MM-DD
-  payload: { dataCompleteness?: string; problems?: RuleFinding[] } | null
-}
 
 export function adsHealthHref(clientId: string): string {
   return `${APP_BASE}/dashboard/clients/${encodeURIComponent(clientId)}/ads-health`
-}
-
-/** `${code}:${ad unit id}`，取第一个 level 为 'ad' 的 unit；没有就 null。 */
-export function findingKey(f: RuleFinding): string | null {
-  const ad = f.units?.find((u) => u.level === 'ad')
-  return ad ? `${f.code}:${ad.id}` : null
-}
-
-/** 一行 payload.problems 里 status 为 'hit' 的 D2/D10（payload/problems 缺失时为空）。 */
-export function ruleHits(row: GrowthStateRow): RuleFinding[] {
-  const problems = row.payload?.problems
-  if (!problems) return []
-  return problems.filter((p) => ADS_RULE_CODES.has(p.code) && p.status === 'hit')
-}
-
-/** 两个 YYYY-MM-DD 之间差几天（UTC 零点起算，四舍五入）。 */
-function dayGap(from: string, to: string): number {
-  const a = Date.parse(`${from}T00:00:00Z`)
-  const b = Date.parse(`${to}T00:00:00Z`)
-  return Math.round((b - a) / 86_400_000)
-}
-
-/**
- * 这个 key 连着命中几天，从该客户最新一行往回数。
- * `rowsNewestFirst` 是**一个客户**按日期倒序的行。逐行看：命中就 +1，
- * 前提是跟上一个计入的命中日期之间不超过 ADS_RULE_STREAK_GAP_DAYS 天；
- * 一旦超过就停。没命中的行直接断连（隔一天命中一次不算连着）。
- */
-export function streakFor(key: string, rowsNewestFirst: readonly GrowthStateRow[]): number {
-  let streak = 0
-  let lastHitDate: string | null = null
-  for (const row of rowsNewestFirst) {
-    const hit = ruleHits(row).some((f) => findingKey(f) === key)
-    if (!hit) break
-    if (lastHitDate !== null && dayGap(row.date, lastHitDate) > ADS_RULE_STREAK_GAP_DAYS) break
-    streak += 1
-    lastHitDate = row.date
-  }
-  return streak
 }
 
 /** 一行止损文案：reasons 里以 '止损：' 开头的，否则用 checkBack 拼，再否则空串。 */
@@ -110,31 +70,10 @@ function groupByClient(rows: readonly GrowthStateRow[]): Map<string, GrowthState
   return byClient
 }
 
-/** 最新一行是否够新、且不是 partial。 */
-function isUsableNewest(newest: GrowthStateRow, now: Date): boolean {
-  if (newest.payload?.dataCompleteness === 'partial') return false
-  const today = now.toISOString().slice(0, 10)
-  return dayGap(newest.date, today) <= ADS_RULE_STALE_DAYS
-}
-
 /** D10 在前、D2 在后，组内保持原顺序。 */
 function orderCandidates(findings: readonly RuleFinding[]): RuleFinding[] {
   const rank = (f: RuleFinding): number => (f.code === 'D10' ? 0 : 1)
   return [...findings].sort((a, b) => rank(a) - rank(b))
-}
-
-/** 这个 notComparableReason 连着出现几次，从该客户最新一行往回数（同 streakFor 的断连规则）。 */
-function streakForReason(reason: string, rowsNewestFirst: readonly GrowthStateRow[]): number {
-  let streak = 0
-  let lastHitDate: string | null = null
-  for (const row of rowsNewestFirst) {
-    const hit = (row.payload?.problems ?? []).some((p) => p.notComparableReason === reason)
-    if (!hit) break
-    if (lastHitDate !== null && dayGap(row.date, lastHitDate) > ADS_RULE_STREAK_GAP_DAYS) break
-    streak += 1
-    lastHitDate = row.date
-  }
-  return streak
 }
 
 /** 客户级配置缺口（如没登记 Facebook 主页）：最新一行有带 manualTask 的该问题就出一条，不看命中连击。 */

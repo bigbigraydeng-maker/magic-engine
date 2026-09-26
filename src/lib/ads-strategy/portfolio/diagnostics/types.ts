@@ -194,10 +194,24 @@ export interface ExcludedEntity {
   detail: string
 }
 
+/**
+ * 广告级规则（D2/D10）在某个广告账户上到底跑没跑。给客户看的报告据此区分「检查过、没发现」和「根本没检查」——
+ * 后者绝不能说成前者（2026-09-26 子牙/魏征 Magic Bridge 设计审）。
+ */
+export interface AdLevelCoverage {
+  adAccountId: string
+  ran: boolean
+  /** ok = 跑了；shared_account = 共用账户只做账户级；not_loaded = 没加载广告层数据；client_page_unknown = 客户没登记主页 */
+  reason: 'ok' | 'shared_account' | 'not_loaded' | 'client_page_unknown'
+  /** 跑了时：进入规则的正在投放、挂客户主页、以点击/结果为目标的广告条数 */
+  adsChecked: number
+}
+
 export interface DiagnosisRun {
   clientId: string
   date: string
   evaluatedAt: string
   diagnoses: Diagnosis[]
   excluded: ExcludedEntity[]
+  adLevelCoverage?: AdLevelCoverage[]
 }
