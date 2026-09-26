@@ -20,6 +20,7 @@ import { CrmTabs } from '../_components/CrmTabs'
 import { ComposeNote, type StageOption } from '../_components/ComposeNote'
 import { DncBanner } from '../_components/DncBanner'
 import { TimelineItem } from './_components/TimelineItem'
+import { PrioritySectionHeader } from './_components/PrioritySection'
 import {
   CHANNEL_LABEL,
   DIRECTION_LABEL,
@@ -406,6 +407,17 @@ function ContactDetail({
   )
 }
 
+type SectionKey = 'waiting' | 'acted' | 'queued' | 'off_list'
+interface PrioritySectionData {
+  key: SectionKey
+  title: string
+  hint: string
+  total: number
+  open: boolean
+  page: number
+  items: ContactRow[] | null
+}
+
 export default function CrmAllContactsPage() {
   const params = useParams()
   const clientId = params.id as string
@@ -430,6 +442,15 @@ export default function CrmAllContactsPage() {
   const [sortKey, setSortKey] = useState<'firstSeenAt' | 'lastTouchAt'>('lastTouchAt')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
+  /**
+   * 平铺 / 按优先级分段。默认平铺 —— 这一轮先把分段做出来给人看，
+   * 不动任何老用户打开这一页时看到的东西。
+   */
+  const [grouped, setGrouped] = useState(false)
+  const [sections, setSections] = useState<PrioritySectionData[]>([])
+  /** 展开哪些段。null = 还没动过，用服务端默认（前两段展开）。 */
+  const [openSections, setOpenSections] = useState<SectionKey[] | null>(null)
+
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [timeline, setTimeline] = useState<TimelineEntry[] | null>(null)
   const [timelineOmitted, setTimelineOmitted] = useState(0)
@@ -441,10 +462,19 @@ export default function CrmAllContactsPage() {
     setError(null)
     try {
       const params = new URLSearchParams()
-      params.set('page', String(page))
-      params.set('perPage', String(perPage))
-      if (qDebounced.trim()) params.set('q', qDebounced.trim())
-      for (const s of stageFilter) params.append('stage', s)
+      if (grouped) {
+        params.set('view', 'priority')
+        if (qDebounced.trim()) params.set('q', qDebounced.trim())
+        for (const s of stageFilter) params.append('stage', s)
+        if (openSections !== null) params.set('open', openSections.join(','))
+        const focusContactId = new URLSearchParams(window.location.search).get('contact')
+        if (focusContactId) params.set('contact', focusContactId)
+      } else {
+        params.set('page', String(page))
+        params.set('perPage', String(perPage))
+        if (qDebounced.trim()) params.set('q', qDebounced.trim())
+        for (const s of stageFilter) params.append('stage', s)
+      }
 
       const [res, stageRes] = await Promise.all([
         fetch(`/api/clients/${clientId}/crm/contacts?${params.toString()}`),
@@ -454,6 +484,9 @@ export default function CrmAllContactsPage() {
         total?: number
         columns?: CustomColumnMeta[]
         items?: ContactRow[]
+        view?: string
+        sections?: PrioritySectionData[]
+        focus?: { found: boolean; section?: SectionKey; page?: number }
         error?: string
       }
       if (!res.ok) {
@@ -466,9 +499,25 @@ export default function CrmAllContactsPage() {
         return
       }
       setQError(null)
-      setRows(json.items ?? [])
-      setColumns(json.columns ?? [])
-      setTotal(json.total ?? 0)
+      if (json.view === 'priority') {
+        const secs = json.sections ?? []
+        setSections(secs)
+        setColumns(json.columns ?? [])
+        setTotal(secs.reduce((n, s) => n + s.total, 0))
+        setRows(secs.flatMap((s) => s.items ?? []))
+        // 直达链接落在收起来的段里时，把那一段打开 —— 否则点进来什么都看不到。
+        if (json.focus?.found && json.focus.section) {
+          const target = json.focus.section
+          setOpenSections((prev) => {
+            const base = prev ?? secs.filter((s) => s.open).map((s) => s.key)
+            return base.includes(target) ? base : [...base, target]
+          })
+        }
+      } else {
+        setRows(json.items ?? [])
+        setColumns(json.columns ?? [])
+        setTotal(json.total ?? 0)
+      }
       if (stageRes.ok) {
         const s = (await stageRes.json()) as { stages?: StageOption[] }
         // marketingAction 之前被这里的映射漏掉了——NAL"标已成交"要靠它判断该弹
@@ -482,7 +531,7 @@ export default function CrmAllContactsPage() {
     } finally {
       setLoading(false)
     }
-  }, [clientId, page, perPage, qDebounced, stageFilter])
+  }, [clientId, page, perPage, qDebounced, stageFilter, grouped, openSections])
 
   useEffect(() => {
     void loadList()
@@ -636,6 +685,104 @@ export default function CrmAllContactsPage() {
   const sortArrow = (key: 'firstSeenAt' | 'lastTouchAt') =>
     sortKey === key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
 
+  const toggleSection = (key: SectionKey) => {
+    setOpenSections((prev) => {
+      const base = prev ?? sections.filter((s) => s.open).map((s) => s.key)
+      return base.includes(key) ? base.filter((k) => k !== key) : [...base, key]
+    })
+  }
+
+  const renderRow = (r: ContactRow) => {
+    const expanded = expandedId === r.contactId
+    const contactCell =
+      r.phone || r.email ? (
+        <span className="text-me-charcoal/70">{r.phone ?? r.email}</span>
+      ) : r.hasMessenger ? (
+        <span className="text-me-charcoal/45">仅 FB 私信</span>
+      ) : (
+        <span className="text-me-charcoal/35">没留联系方式</span>
+      )
+    return [
+      <tr
+        key={r.contactId}
+        // 直达链接靠它定位（?contact=<id> 展开后滚到这一行）
+        id={`contact-${r.contactId}`}
+        onClick={() => toggleDetail(r.contactId)}
+        className={`border-b border-me-charcoal/5 cursor-pointer hover:bg-me-ivory/40 ${expanded ? 'bg-me-ivory/50' : ''}`}
+      >
+        <td className="px-2 py-3">
+          {/* 点星星不能顺带展开抽屉 —— 两个动作是分开的。 */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              void togglePin(r)
+            }}
+            title={r.pinnedAt ? '取消置顶' : '置顶'}
+            aria-label={r.pinnedAt ? '取消置顶' : '置顶'}
+            className={`p-1 text-base leading-none ${
+              r.pinnedAt ? 'text-yellow-500' : 'text-me-charcoal/40 hover:text-me-charcoal'
+            }`}
+          >
+            {r.pinnedAt ? '⭐' : '☆'}
+          </button>
+        </td>
+        <td className="px-4 py-3 font-medium text-me-charcoal">
+          {r.name}
+          {r.important?.note && (
+            <span
+              title={r.important.note}
+              className="ml-2 rounded bg-me-gold/20 px-1.5 py-0.5 text-[10px] font-bold text-me-charcoal/70"
+            >
+              ⭐ {r.important.note.length > 12 ? `${r.important.note.slice(0, 12)}…` : r.important.note}
+            </span>
+          )}
+          {r.important?.dueAt && new Date(r.important.dueAt) < new Date() && (
+            <span className="ml-1 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-bold text-red-600">
+              到期
+            </span>
+          )}
+        </td>
+        <td className="px-4 py-3 text-me-charcoal/60">{fmtDate(r.firstSeenAt)}</td>
+        <td className="px-4 py-3 text-me-charcoal/60">
+          {r.lastTouchAt ? relTime(r.lastTouchAt) : <span className="text-me-charcoal/35">还没联系过</span>}
+        </td>
+        <td className="px-4 py-3">{contactCell}</td>
+        {columns.map((c) => (
+          <td key={c.key} className="px-4 py-3 text-me-charcoal/60">
+            {r.custom[c.key] ?? <span className="text-me-charcoal/35">还没聊到</span>}
+          </td>
+        ))}
+        <td className="px-4 py-3">
+          {r.stageLabel ? (
+            <span className="text-me-charcoal/70">{r.stageLabel}</span>
+          ) : (
+            <span className="text-me-charcoal/35">还没标</span>
+          )}
+        </td>
+        <td className="px-4 py-3">
+          <span className={`rounded-full px-2 py-0.5 text-xs ${TEMP_CLS[r.temperature]}`}>
+            {r.segmentLabel}
+          </span>
+        </td>
+      </tr>,
+      expanded && (
+        <tr key={`${r.contactId}-detail`} className="border-b border-me-charcoal/5 bg-me-ivory/30">
+          <td colSpan={colCount} className="px-6 py-4">
+            <ContactDetail
+              clientId={clientId}
+              row={r}
+              stages={stages}
+              timeline={timeline}
+              omitted={timelineOmitted}
+              loading={timelineLoading}
+              onWrote={afterWrite}
+            />
+          </td>
+        </tr>
+      ),
+    ]
+  }
+
   return (
     <div className="mx-auto max-w-6xl space-y-5 p-6">
       <div>
@@ -703,11 +850,26 @@ export default function CrmAllContactsPage() {
             </div>
           )}
 
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setGrouped((v) => !v)}
+              className="rounded-lg border border-me-charcoal/15 px-3 py-1.5 text-xs font-bold text-me-charcoal hover:bg-me-ivory"
+            >
+              {grouped ? '← 回到平铺名单' : '按「先联系谁」分段'}
+            </button>
+            {grouped && (
+              <span className="text-xs text-me-charcoal/45">
+                分段是系统按联系记录算的，跟「今天要联系」那一页同一套口径
+              </span>
+            )}
+          </div>
+
           <div className="flex items-center justify-between">
             <p className="text-xs font-bold text-me-charcoal/50">
-              第 {page} 页，共 {total} 位客人
+              {grouped ? `共 ${total} 位客人` : `第 ${page} 页，共 ${total} 位客人`}
             </p>
-            <p className="text-xs text-me-charcoal/40">排序只对当前页生效</p>
+            {!grouped && <p className="text-xs text-me-charcoal/40">排序只对当前页生效</p>}
           </div>
 
           {/* 刚搬过来时安抚一句，别让「全空的跟进阶段」像没做完的作业 */}
@@ -738,128 +900,64 @@ export default function CrmAllContactsPage() {
                 </tr>
               </thead>
               <tbody>
-                {sorted.length === 0 && (
+                {!grouped && sorted.length === 0 && (
                   <tr>
                     <td colSpan={colCount} className="px-4 py-10 text-center text-me-charcoal/40">
                       {qDebounced.trim() || stageFilter.length > 0 ? '没找到这个人。' : '还没有客人。'}
                     </td>
                   </tr>
                 )}
-                {sorted.map((r) => {
-                  const expanded = expandedId === r.contactId
-                  const contactCell =
-                    r.phone || r.email ? (
-                      <span className="text-me-charcoal/70">{r.phone ?? r.email}</span>
-                    ) : r.hasMessenger ? (
-                      <span className="text-me-charcoal/45">仅 FB 私信</span>
-                    ) : (
-                      <span className="text-me-charcoal/35">没留联系方式</span>
-                    )
-                  return [
-                    <tr
-                      key={r.contactId}
-                      // 直达链接靠它定位（?contact=<id> 展开后滚到这一行）
-                      id={`contact-${r.contactId}`}
-                      onClick={() => toggleDetail(r.contactId)}
-                      className={`border-b border-me-charcoal/5 cursor-pointer hover:bg-me-ivory/40 ${expanded ? 'bg-me-ivory/50' : ''}`}
-                    >
-                      <td className="px-2 py-3">
-                        {/* 点星星不能顺带展开抽屉 —— 两个动作是分开的。 */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            void togglePin(r)
-                          }}
-                          title={r.pinnedAt ? '取消置顶' : '置顶'}
-                          aria-label={r.pinnedAt ? '取消置顶' : '置顶'}
-                          className={`p-1 text-base leading-none ${
-                            r.pinnedAt ? 'text-yellow-500' : 'text-me-charcoal/40 hover:text-me-charcoal'
-                          }`}
-                        >
-                          {r.pinnedAt ? '⭐' : '☆'}
-                        </button>
-                      </td>
-                      <td className="px-4 py-3 font-medium text-me-charcoal">
-                        {r.name}
-                        {r.important?.note && (
-                          <span
-                            title={r.important.note}
-                            className="ml-2 rounded bg-me-gold/20 px-1.5 py-0.5 text-[10px] font-bold text-me-charcoal/70"
-                          >
-                            ⭐ {r.important.note.length > 12 ? `${r.important.note.slice(0, 12)}…` : r.important.note}
-                          </span>
-                        )}
-                        {r.important?.dueAt && new Date(r.important.dueAt) < new Date() && (
-                          <span className="ml-1 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-bold text-red-600">
-                            到期
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-me-charcoal/60">{fmtDate(r.firstSeenAt)}</td>
-                      <td className="px-4 py-3 text-me-charcoal/60">
-                        {r.lastTouchAt ? relTime(r.lastTouchAt) : <span className="text-me-charcoal/35">还没联系过</span>}
-                      </td>
-                      <td className="px-4 py-3">{contactCell}</td>
-                      {columns.map((c) => (
-                        <td key={c.key} className="px-4 py-3 text-me-charcoal/60">
-                          {r.custom[c.key] ?? <span className="text-me-charcoal/35">还没聊到</span>}
-                        </td>
-                      ))}
-                      <td className="px-4 py-3">
-                        {r.stageLabel ? (
-                          <span className="text-me-charcoal/70">{r.stageLabel}</span>
-                        ) : (
-                          <span className="text-me-charcoal/35">还没标</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`rounded-full px-2 py-0.5 text-xs ${TEMP_CLS[r.temperature]}`}>
-                          {r.segmentLabel}
-                        </span>
-                      </td>
-                    </tr>,
-                    expanded && (
-                      <tr key={`${r.contactId}-detail`} className="border-b border-me-charcoal/5 bg-me-ivory/30">
-                        <td colSpan={colCount} className="px-6 py-4">
-                          <ContactDetail
-                            clientId={clientId}
-                            row={r}
-                            stages={stages}
-                            timeline={timeline}
-                            omitted={timelineOmitted}
-                            loading={timelineLoading}
-                            onWrote={afterWrite}
-                          />
-                        </td>
-                      </tr>
-                    ),
-                  ]
-                })}
+                {!grouped && sorted.map((r) => renderRow(r))}
+                {grouped &&
+                  sections.map((s) => {
+                    const open = openSections === null ? s.open : openSections.includes(s.key)
+                    return [
+                      <PrioritySectionHeader
+                        key={`section-${s.key}`}
+                        title={s.title}
+                        hint={s.hint}
+                        total={s.total}
+                        open={open}
+                        colSpan={colCount}
+                        onToggle={() => toggleSection(s.key)}
+                      />,
+                      open && s.items !== null && s.items.map((r) => renderRow(r)),
+                      open && s.items !== null && s.items.length === 0 && (
+                        <tr key={`section-${s.key}-empty`}>
+                          <td colSpan={colCount} className="px-4 py-4 text-center text-xs text-me-charcoal/35">
+                            这一段现在没有人。
+                          </td>
+                        </tr>
+                      ),
+                    ]
+                  })}
               </tbody>
             </table>
           </div>
 
-          <div className="mt-4 flex items-center justify-between text-sm">
-            <span className="text-me-charcoal/50">
-              共 {total} 人 · 第 {page} / {Math.max(1, Math.ceil(total / perPage))} 页
-            </span>
-            <div className="flex gap-2">
-              <button
-                disabled={page <= 1}
-                onClick={() => setPage((p) => p - 1)}
-                className="rounded-lg border border-black/10 px-3 py-1.5 disabled:opacity-40"
-              >
-                上一页
-              </button>
-              <button
-                disabled={page >= Math.ceil(total / perPage)}
-                onClick={() => setPage((p) => p + 1)}
-                className="rounded-lg border border-black/10 px-3 py-1.5 disabled:opacity-40"
-              >
-                下一页
-              </button>
+          {!grouped && (
+            <div className="mt-4 flex items-center justify-between text-sm">
+              <span className="text-me-charcoal/50">
+                共 {total} 人 · 第 {page} / {Math.max(1, Math.ceil(total / perPage))} 页
+              </span>
+              <div className="flex gap-2">
+                <button
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => p - 1)}
+                  className="rounded-lg border border-black/10 px-3 py-1.5 disabled:opacity-40"
+                >
+                  上一页
+                </button>
+                <button
+                  disabled={page >= Math.ceil(total / perPage)}
+                  onClick={() => setPage((p) => p + 1)}
+                  className="rounded-lg border border-black/10 px-3 py-1.5 disabled:opacity-40"
+                >
+                  下一页
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </>
       )}
     </div>

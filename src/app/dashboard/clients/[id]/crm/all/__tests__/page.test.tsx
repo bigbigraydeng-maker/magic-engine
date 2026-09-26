@@ -13,7 +13,7 @@
 
 import React from 'react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import CrmAllContactsPage from '../page'
 
 vi.mock('next/navigation', () => ({
@@ -121,5 +121,183 @@ describe('被误判成「别再联系」的人，这一页要给得出取消入�
 
     await waitFor(() => expect(screen.getByText('往来记录')).toBeTruthy())
     expect(screen.queryByText(/判错了？点这里放回名单/)).toBeNull()
+  })
+})
+
+/**
+ * 分段视图（WP3 R7）。
+ *
+ * 这一页原本是一张平铺的大表，按「最近联系时间」排——**谁该先被联系看不出来**。
+ * 分段视图把同一份名单按「先联系谁」切成 4 段，口径跟「今天要联系」那一页共用
+ * 同一套 segmentContact，不是这一页自己另算一遍。
+ *
+ * 🔴 这里钉死的是「看得见」这件事本身：2026-08-02 出过一次段没登记导致 33 个人
+ * 从名单上凭空消失、谁都没发现的事故。所以**收起来的段也必须显示段头和人数**——
+ * 人数是服务端给的 total，不是当前拿到几行；段是空的要明说「这一段现在没有人」，
+ * 不能渲染成一片空白让人以为加载坏了。
+ */
+describe('按「先联系谁」分段视图', () => {
+  interface StubSection {
+    key: string
+    title: string
+    hint: string
+    total: number
+    open: boolean
+    items: ReturnType<typeof contact>[] | null
+  }
+
+  /** 分段接口的假返回。收起来的段 items=null（跟服务端一致，不下发那一段的行）。 */
+  function stubPriority(
+    sections: StubSection[],
+    focus: { found: boolean; section?: string; page?: number } = { found: false },
+  ) {
+    const calls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/crm/contacts')) {
+          calls.push(url)
+          if (url.includes('view=priority')) {
+            return {
+              ok: true,
+              json: async () => ({ view: 'priority', focus, columns: [], sections }),
+            }
+          }
+          return {
+            ok: true,
+            json: async () => ({ items: [], total: 0, page: 1, perPage: 100, columns: [] }),
+          }
+        }
+        if (url.includes('/timeline')) {
+          return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
+        }
+        return { ok: true, json: async () => ({ stages: [] }) }
+      }),
+    )
+    return calls
+  }
+
+  const SECTIONS = (): StubSection[] => [
+    {
+      key: 'waiting',
+      title: '客人在等你',
+      hint: '今天必须有人回',
+      total: 2,
+      open: true,
+      items: [contact('w1', 'Sue Masson'), contact('w2', 'Bob Other')],
+    },
+    {
+      key: 'acted',
+      title: '还没搭上话',
+      hint: '要你主动出击',
+      total: 1,
+      open: true,
+      items: [contact('a1', 'Ann New')],
+    },
+    {
+      key: 'queued',
+      title: '先放着，系统盯着',
+      hint: '他一开口会自己跳回来',
+      total: 7,
+      open: false,
+      items: null,
+    },
+    {
+      key: 'off_list',
+      title: '不在今天名单',
+      hint: '以后才走 / 已成交',
+      total: 3,
+      open: false,
+      items: null,
+    },
+  ]
+
+  it('点「按先联系谁分段」→ 改成问分段接口要数据', async () => {
+    const calls = stubPriority(SECTIONS())
+    render(<CrmAllContactsPage />)
+
+    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+
+    await waitFor(() => expect(calls.some((u) => u.includes('view=priority'))).toBe(true))
+  })
+
+  it('四段的段名和人数都露出来 —— 收起来的段也要露，不然又是「人凭空消失」', async () => {
+    stubPriority(SECTIONS())
+    render(<CrmAllContactsPage />)
+
+    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+
+    await waitFor(() => expect(screen.getByText('客人在等你')).toBeTruthy())
+    expect(screen.getByText('还没搭上话')).toBeTruthy()
+    expect(screen.getByText('先放着，系统盯着')).toBeTruthy()
+    expect(screen.getByText('不在今天名单')).toBeTruthy()
+    // 人数认服务端的 total，不是当前这一页拿到几行 —— 收起来的段一行都没拿到。
+    expect(screen.getByText('7 人')).toBeTruthy()
+    expect(screen.getByText('3 人')).toBeTruthy()
+  })
+
+  it('展开的段显示它的人；收起来的段一行都不显示', async () => {
+    stubPriority(SECTIONS())
+    render(<CrmAllContactsPage />)
+
+    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+
+    await waitFor(() => expect(screen.getByText('Sue Masson')).toBeTruthy())
+    expect(screen.getByText('Ann New')).toBeTruthy()
+    // queued / off_list 是 items=null：没有行，也不该冒出「这一段现在没有人」
+    expect(screen.queryByText('这一段现在没有人。')).toBeNull()
+  })
+
+  it('点段头 → 把那一段加进 open 重新要数据', async () => {
+    const calls = stubPriority(SECTIONS())
+    render(<CrmAllContactsPage />)
+
+    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+    await waitFor(() => expect(screen.getByText('先放着，系统盯着')).toBeTruthy())
+    fireEvent.click(screen.getByText('先放着，系统盯着'))
+
+    await waitFor(() =>
+      expect(calls.some((u) => u.includes('open=') && u.includes('queued'))).toBe(true),
+    )
+  })
+
+  it('展开了但这一段没人 → 明说「这一段现在没有人」，不是一片空白', async () => {
+    stubPriority([
+      { key: 'waiting', title: '客人在等你', hint: 'h1', total: 0, open: true, items: [] },
+      { key: 'acted', title: '还没搭上话', hint: 'h2', total: 0, open: false, items: null },
+      { key: 'queued', title: '先放着，系统盯着', hint: 'h3', total: 0, open: false, items: null },
+      { key: 'off_list', title: '不在今天名单', hint: 'h4', total: 0, open: false, items: null },
+    ])
+    render(<CrmAllContactsPage />)
+
+    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+
+    await waitFor(() => expect(screen.getByText('这一段现在没有人。')).toBeTruthy())
+  })
+
+  it('直达链接落在收起来的段里 → 自动把那一段打开，别让人点进来什么都看不到', async () => {
+    const calls = stubPriority(SECTIONS(), { found: true, section: 'off_list', page: 1 })
+    setUrl('?contact=z9')
+    render(<CrmAllContactsPage />)
+
+    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+
+    await waitFor(() =>
+      expect(calls.some((u) => u.includes('open=') && u.includes('off_list'))).toBe(true),
+    )
+  })
+
+  it('再点一次 → 回平铺，不再问分段接口', async () => {
+    const calls = stubPriority(SECTIONS())
+    render(<CrmAllContactsPage />)
+
+    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+    await waitFor(() => expect(screen.getByText('客人在等你')).toBeTruthy())
+    const before = calls.length
+
+    fireEvent.click(screen.getByText(/回到平铺名单/))
+
+    await waitFor(() => expect(calls.length).toBeGreaterThan(before))
+    expect(calls[calls.length - 1]).not.toContain('view=priority')
   })
 })

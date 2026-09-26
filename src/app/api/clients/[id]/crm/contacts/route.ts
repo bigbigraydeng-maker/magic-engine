@@ -17,58 +17,23 @@ import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { buildIdentities, resolveContact, AmbiguousIdentityError } from '@/lib/crm/identity'
 import { EMPTY_ATTRIBUTION } from '@/lib/crm/attribution'
-import { segmentContact, SEGMENT_ACTION_META } from '@/lib/crm/segments'
+import { segmentContact } from '@/lib/crm/segments'
 import { buildContactModel } from '@/lib/crm/contact-model'
+import {
+  responseRowFor,
+  stageMetaOf,
+  type ContactRow,
+  type TouchRow,
+  type StageRow,
+} from '@/lib/crm/contact-response-row'
 import { buildPriorityView } from '@/lib/crm/contact-list-view'
 import type { SectionKey } from '@/lib/crm/list-sections'
-import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import { fetchAll } from '@/lib/supabase-paginate'
 import {
   extractCustomColumns,
   visibleCustomColumns,
   type CustomColumnKey,
-  type TouchpointForColumn,
 } from '@/lib/crm/table-columns'
-
-interface ContactRow {
-  id: string
-  display_name: string | null
-  primary_phone: string | null
-  primary_email: string | null
-  do_not_contact: boolean
-  snooze_until: string | null
-  stage: string | null
-  first_seen_at: string
-  pinned_at: string | null
-  important_note: string | null
-  important_due_at: string | null
-}
-
-interface TouchRow {
-  id: string
-  contact_id: string
-  channel: string
-  direction: 'inbound' | 'outbound'
-  occurred_at: string
-  summary: string | null
-  /** 原话。存量结果值读的时候要靠它重判一次（见 reclassifyStoredOutcome）。 */
-  raw: string | null
-  metadata: Record<string, unknown> | null
-  source: string | null
-}
-
-interface StageRow {
-  stage_key: string
-  label: string
-  marketing_action: string
-  is_terminal: boolean
-}
-
-function ts(v: string | null | undefined): number {
-  if (!v) return 0
-  const t = new Date(v).getTime()
-  return Number.isNaN(t) ? 0 : t
-}
 
 /** 分页 / 筛选 / 搜索的解析结果。见 `parseListQuery`。 */
 interface ListQuery {
@@ -457,92 +422,6 @@ export async function GET(
 }
 
 /** 阶段 map：label 给「跟进到哪步」列，suppressed 决定这个人算不算已结论（影响冷热）。 */
-function stageMetaOf(stageRows: StageRow[]): Map<string, { label: string; suppressed: boolean }> {
-  const stageMeta = new Map<string, { label: string; suppressed: boolean }>()
-  for (const s of stageRows) {
-    stageMeta.set(s.stage_key, {
-      label: s.label,
-      suppressed: stageSuppressesWorklist(
-        isMarketingAction(s.marketing_action) ? s.marketing_action : 'suppress',
-        s.is_terminal,
-      ),
-    })
-  }
-  return stageMeta
-}
-
-/** 每人一行的响应形状 —— 平铺列表与 view=priority 共用，两个形状里同一个人长得一模一样。 */
-function responseRowFor(
-  c: ContactRow,
-  tps: TouchRow[],
-  stageMeta: Map<string, { label: string; suppressed: boolean }>,
-  model: ReturnType<typeof buildContactModel>,
-  seg: ReturnType<typeof segmentContact>,
-): { row: Record<string, unknown>; custom: Record<CustomColumnKey, string | null> } {
-  // 进线时间 = 真实最早一条触点（不是导入日期）；没触点退回 first_seen_at。
-  // 最近联系 = 最晚一条触点；0 触点显式 null —— 绝不 fallback last_seen_at
-  // （它默认 = 建档时的 NOW()，会假装有过一次根本没发生的沟通）。
-  let firstTouch = 0
-  let lastTouch = 0
-  for (const t of tps) {
-    const v = ts(t.occurred_at)
-    if (v > 0) {
-      if (firstTouch === 0 || v < firstTouch) firstTouch = v
-      if (v > lastTouch) lastTouch = v
-    }
-  }
-
-  const forColumns: TouchpointForColumn[] = tps.map((t) => ({
-    channel: t.channel,
-    occurredAt: t.occurred_at,
-    metadata: t.metadata,
-  }))
-  const custom = extractCustomColumns(forColumns)
-
-  return {
-    custom,
-    row: {
-      contactId: c.id,
-      name: c.display_name || '未留姓名',
-      firstSeenAt: firstTouch > 0 ? new Date(firstTouch).toISOString() : c.first_seen_at,
-      lastTouchAt: lastTouch > 0 ? new Date(lastTouch).toISOString() : null,
-      phone: c.primary_phone,
-      /**
-       * 号码在库里但打不通 —— **两个 CRM 入口必须说同一件事**（Codex 复审 2026-08-16）。
-       *
-       * 不带的话，同一个已判坏的号在「今天该联系谁」被禁用，切到「全部客人」
-       * 展开却照旧能一点就拨。销售会以为其中一边是过时的，而两边他都不再信。
-       */
-      phoneUnusable: seg.phoneUnusable ?? false,
-      /**
-       * 被标成「别再联系」—— 页面据此给出**取消**那条路。
-       *
-       * 今日待办下发的「可能被误判成永久拒联」人工任务，href 指向的正是
-       * 「全部客人」这一页（Codex 复审 2026-08-16）。不带这个字段，FDE 照着
-       * 任务点进来会发现根本没有任务里说的那个按钮 —— 照着做也做不成
-       * 的人工任务，比不下发更糟。用上面 model 已经算好的那份，不重算。
-       */
-      doNotContact: model.doNotContact,
-      email: c.primary_email,
-      // 电话邮箱都没有时，页面据此显示「仅 FB 私信」而不是「没留联系方式」。
-      hasMessenger: tps.some((t) => t.channel === 'messenger'),
-      stage: c.stage,
-      // 认不出的 stage_key（配置里删了）显示原值，别留空白。
-      stageLabel: c.stage ? (stageMeta.get(c.stage)?.label ?? c.stage) : null,
-      // 人工置顶（contacts.pinned_at）。这一轮只读出来给页面显示 / 切换，
-      // 排序仍是系统算的 —— 置顶优先排序是下一轮的事。
-      pinnedAt: c.pinned_at,
-      // 「⭐置顶」附带的原因和到期日（contacts.important_note / important_due_at）。
-      // 这一轮只读出来给页面显示，编辑走 PATCH .../important，UI 是下一轮的事。
-      important: { note: c.important_note, dueAt: c.important_due_at },
-      segment: seg.segment,
-      segmentLabel: SEGMENT_ACTION_META[seg.segment].label,
-      temperature: seg.temperature,
-      custom,
-    },
-  }
-}
-
 /**
  * 逐人组装输出行 —— 分页路径和老路径共用，保证同一个人在两个形状里长得一样。
  *
