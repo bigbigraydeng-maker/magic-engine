@@ -169,12 +169,12 @@ Magic Engine 不采用“一切改动都用最高强度验证”，也不回到�
 ### 10.1 定级：`risk.mjs`
 
 - 输入是 PR 的**实际改动文件清单**，不是 PR 描述。
-- 命中受保护路径清单中任意一条即为 **A**（migration / `.sql`、`.github/workflows/`、`tools/ops-review-loop/`、`tools/ai-orchestrator/`、`render.yaml`、`src/middleware.ts`、`src/lib/auth/`、`src/app/api/auth/`、`src/app/api/webhooks/`、RLS、隔离判定、`src/lib/kernel/`、`src/app/api/kernel/`、`src/lib/execution/`、计费 / 支付 / 额度、cron 注册与路由、对外发布器、对外发信、花费与发布 guardrail、SSRF 边界、凭证、`package.json` / `package-lock.json`）。
+- 命中受保护路径清单中任意一条即为 **A**（migration / `.sql`、`.github/workflows/`、`tools/ops-review-loop/`、`tools/ai-orchestrator/`、`render.yaml`、`src/middleware.ts`、`src/lib/auth/`、`src/app/api/auth/`、`src/app/api/webhooks/`、RLS、隔离判定、`src/lib/kernel/`、`src/app/api/kernel/`、`src/lib/execution/`、计费 / 支付 / 额度、cron 注册与路由、对外发布器、对外发信、花费与发布 guardrail、SSRF 边界、凭证、`package.json` / `package-lock.json`；2026-09-27 补：任意目录的 `.env*`（只放过根目录模板 `.env.example`）与 `.gitignore`、`next.config.*`、根目录 `middleware.ts`、`instrumentation*`、`Dockerfile*`、`supabase/config.toml`、`.nvmrc`、`tools/local-executor-bridge/`、`tsconfig*.json`、`vitest.config.*` / `vitest.setup.*`、`playwright.config.*`、`eslint.config.*` / `.eslintrc*`、`.husky/`、`.npmrc` —— 这些以前判 B、会无人自动合，一行就能泄密钥、关检查或改生产运行方式）。
 - **C 是白名单，不是兜底**：只有文档、样式、图片、纯测试文件命中低风险清单；一个 diff 里**每一个**文件都命中才算 C。没认出来的一律 **B**。
 - **读不到就是 A**：清单拿不到、为空、某一项没有文件名 —— 全部按 A 处理并注明「读不到」。「我们没看」和「我们看了没问题」不许长得一样。「读不到」这条理由永远排在原因列表最前面，不会被条数上限截掉。
 - **rename 两头都算**：GitHub 把 `git mv .github/workflows/guard.yml docs/guard.yml` 报成一条记录 —— 新路径在 `filename`，受保护的旧路径在 `previous_filename`。只看 `filename` 会把「悄悄停用控制面」判成改文档，所以新旧路径都定级、取更高的一档。标成 `renamed` / `copied` 却说不出原路径的记录按读不到处理。
 - 自报级别只作下限（见 §2 的提示）。
-- 每条 A 规则还带一个**风险类别**（migration / 控制面 / 生产调度 / 鉴权隔离 / Kernel 执行 / 钱 / 对外副作用 / 出网边界 / 凭证 / 供应链 / 读不到），这是 §10.4 决定「要哪种专项证据」的依据。
+- 每条 A 规则还带一个**风险类别**（migration / 控制面 / 生产调度 / 鉴权隔离 / Kernel 执行 / 钱 / 对外副作用 / 出网边界 / 凭证 / 供应链 / 治理 / 构建与运行配置 / 读不到），这是 §10.4 决定「要哪种专项证据」的依据。
 
 ### 10.2 抽样：`sampling.mjs`
 
