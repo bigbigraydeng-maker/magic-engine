@@ -77,6 +77,32 @@ import { pushMaliangRenderItems } from './maliang-render-items'
 import { pushLibaiItems } from './libai-items'
 import { pushSimaqianReviewItems } from './simaqian-review-items'
 
+/**
+ * 每周自动重扫名单里的客户 id —— 与 site-audit-weekly 同一判据：在用 + seo_config.weekly_blog + 有域名。
+ * 读失败返回空集合并打一条警告：宁可当天少一条「数据过期」提醒，也不给名单外的客户天天发噪音。
+ */
+async function loadWeeklyRecrawlClientIds(
+  supabase: SupabaseClient,
+  ids: string[],
+): Promise<Set<string>> {
+  try {
+    const { data, error } = await supabase
+      .from('clients')
+      .select('id')
+      .in('id', ids)
+      .contains('seo_config', { weekly_blog: true })
+      .not('domain', 'is', null)
+    if (error) throw new Error(error.message)
+    return new Set(((data ?? []) as Array<{ id: string }>).map((r) => r.id))
+  } catch (e) {
+    console.warn(
+      '[manual-items] 每周重扫名单读取失败（今天不发「数据过期」提醒）:',
+      e instanceof Error ? e.message : String(e),
+    )
+    return new Set<string>()
+  }
+}
+
 export async function loadManualItems(
   supabase: SupabaseClient,
   now: Date = new Date(),
@@ -450,7 +476,8 @@ export async function loadManualItems(
 
   // 4. Site page data health — stale real crawls + firewall-blocked pages.
   //    Built in manual-item-types.ts (pure, testable); see buildCrawlHealthItems.
-  items.push(...buildCrawlHealthItems(crawlRows, nameOf, now))
+  const weeklyRecrawlIds = await loadWeeklyRecrawlClientIds(supabase, ids)
+  items.push(...buildCrawlHealthItems(crawlRows, nameOf, now, weeklyRecrawlIds))
 
   // 经验手册疑似过期——每周巡检写进 playbook_staleness_findings，这里拉模式读出来
   await pushPlaybookStalenessItems(supabase, items).catch((e) =>

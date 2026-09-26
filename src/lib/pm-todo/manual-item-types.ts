@@ -330,7 +330,7 @@ export interface NotIndexedRow {
 }
 
 /** 待办里各类的报数顺序：先报改了就能好的，再报谷歌自己排队 / 判断的。 */
-const NOT_INDEXED_REPORT_ORDER: readonly IndexClass[] = [
+export const NOT_INDEXED_REPORT_ORDER: readonly IndexClass[] = [
   'error', 'noindex', 'unknown', 'thin', 'duplicate', 'crawled', 'discovered', 'other',
 ]
 
@@ -404,7 +404,7 @@ export function buildNotIndexedItems(
       .join('、')
     const extra =
       (agg.notAProblem > 0 ? `；另 ${agg.notAProblem} 个是正常跳转或备用页，不用管` : '') +
-      (agg.noVerdict > 0 ? `；${agg.noVerdict} 个还没拿到谷歌的结论，下一轮会重查` : '')
+      (agg.noVerdict > 0 ? `；${agg.noVerdict} 个还没拿到谷歌的结论，排队等重查` : '')
     const days = daysAgo(agg.oldest, now)
     const age = days !== null && days > 0 ? `，最久的已 ${days} 天` : ''
     items.push({
@@ -415,7 +415,11 @@ export function buildNotIndexedItems(
       // 落到 ME 后台的站点页面清单（已带 ?filter=not-indexed 直达未收录）：每页都标了
       // 本地分类和该做什么。这解决 GSC「网页(Pages)」报告的两个盲区 —— 它不显示我们本地
       // 推导的「内容太薄」，「谷歌还不认识」的页面也可能压根不在它清单里（Codex #1375）。
-      how: '打开这份站内清单（已只筛未收录），每页都标了谷歌给的原因和该做的动作。先修「页面打不开或被挡」和「页面自己写了「别收录」」这两类，改好了谷歌才可能收；「谷歌还不认识这个网址」的，最想被搜到的几页可以去 Search Console 点「请求编入索引」（每天限量，不保证收）；「谷歌发现了但还没来爬」和「谷歌爬过但暂不收」是谷歌自己在排队和判断，别反复点请求收录，靠加内链、补有用的内容慢慢来',
+      how:
+        `打开这份站内清单（已只筛未收录），每页都标了谷歌给的原因和该做的动作。先修「${INDEX_CLASS_META.error.label}」这类，改好了谷歌才可能收；` +
+        `「${INDEX_CLASS_META.noindex.label}」的先确认是不是故意的（购物车、账户页本来就不该收），要被搜到再去掉这个设置；` +
+        `「${INDEX_CLASS_META.unknown.label}」的，最想被搜到的几页可以去 Search Console 点「请求编入索引」（每天限量，不保证收）；` +
+        `「${INDEX_CLASS_META.discovered.label}」和「${INDEX_CLASS_META.crawled.label}」是谷歌自己在排队和判断，别反复点请求收录，靠加内链、补有用的内容慢慢来`,
       // app.magicengine.com.au 是登录类站点，链接闸判 unverifiable 会保留（见 action-link）。
       href: `https://app.magicengine.com.au/dashboard/clients/${clientId}/site-audit/pages?filter=not-indexed`,
     })
@@ -430,7 +434,7 @@ export interface CrawlHealthRow {
   crawl_status: string | null
 }
 
-/** 客户网站被防火墙挡住时让客户放行 ME 的步骤（SiteGround 5 分钟）。 */
+/** 客户网站防火墙挡住我们读页面时的处理说明：先由我们换读取通道，再请客户放行 ME 服务器（SiteGround 步骤）。 */
 export const SITE_FIREWALL_ALLOWLIST_SOP_URL =
   'https://github.com/bigbigraydeng-maker/magic-engine/blob/main/docs/sops/client-site-siteground-allowlist.md'
 
@@ -439,14 +443,19 @@ export const SITE_FIREWALL_ALLOWLIST_SOP_URL =
  *
  * - crawl_stale：只有真抓到正文的行（crawl_status='crawled'）才算「新鲜」。被防火墙
  *   挡住的行（antibot_challenged）每次重爬都会刷新 crawled_at，拿它算新鲜会把
- *   「每次都被挡」的客户误判成数据很新，把告警静音。
- * - crawl_blocked：有页面被网站防火墙挡住 —— 我们读不到正文，内容类判断已跳过它们；
- *   要客户网站那边放行 ME，这是第三方后台的事，只能下发给人。
+ *   「每次都被挡」的客户误判成数据很新，把告警静音。只对每周自动重扫名单里的客户报：
+ *   不在名单里的客户数据旧是常态，天天提醒是噪音。
+ * - crawl_blocked：最近 CRAWL_FRESH_DAYS 天里有页面被网站防火墙挡住 —— 我们读不到正文。
+ *   只数最近被挡的：每周重扫最多 150 页，碰不到的旧行会永远停在被挡状态，全数会让这条
+ *   永远消不掉。我们读网页经第三方阅读服务转手，客户白名单只放行 ME 服务器没用，
+ *   所以先由我们换读取通道，再请客户放行。
  */
 export function buildCrawlHealthItems(
   rows: CrawlHealthRow[],
   nameOf: (id: string) => string,
   now: Date,
+  /** 在每周自动重扫名单里的客户（与 site-audit-weekly 同一判据）。只有它们的「数据过期」才值得提醒。 */
+  weeklyRecrawlClientIds: ReadonlySet<string>,
 ): ManualItem[] {
   const newestReal = new Map<string, string>()
   const blocked = new Map<string, number>()
@@ -456,13 +465,17 @@ export function buildCrawlHealthItems(
       if (!cur || row.crawled_at > cur) newestReal.set(row.client_id, row.crawled_at)
     }
     if (row.crawl_status === 'antibot_challenged') {
-      blocked.set(row.client_id, (blocked.get(row.client_id) ?? 0) + 1)
+      const days = daysAgo(row.crawled_at, now)
+      if (days !== null && days < CRAWL_FRESH_DAYS) {
+        blocked.set(row.client_id, (blocked.get(row.client_id) ?? 0) + 1)
+      }
     }
   }
 
   const items: ManualItem[] = []
 
   for (const [clientId, iso] of Array.from(newestReal.entries())) {
+    if (!weeklyRecrawlClientIds.has(clientId)) continue
     const days = daysAgo(iso, now)
     if (days === null || days < CRAWL_STALE_DAYS) continue
     items.push({
@@ -484,8 +497,8 @@ export function buildCrawlHealthItems(
       kind: 'crawl_blocked',
       client_id: clientId,
       client_name: nameOf(clientId),
-      what: `${count} 个页面被客户网站的防火墙挡住，我们读不到正文 —— 这些页「正文偏薄」「内链」这类要看正文的判断都用不上真数据`,
-      how: '让有客户网站主机后台权限的人按这份步骤把 ME 服务器加进白名单（SiteGround 后台约 5 分钟）；加好后打开 ME 后台这个客户的「页面清单」右上点「Start New Audit」重扫，被挡的页数应降到 0。如果客户网站不在 SiteGround，回一句我来换通道',
+      what: `最近 ${CRAWL_FRESH_DAYS} 天里有 ${count} 个页面被客户网站的防火墙挡住，我们读不到正文 —— 这些页「正文偏薄」「内链」这类要看正文的判断都用不上真数据`,
+      how: `先别找客户：我们读网页是经第三方阅读服务转手的，客户的防火墙挡的是它，只把 ME 服务器加进客户白名单，这一路照样被挡。回一句「换通道」，我来把这个站改成由 ME 服务器直接读；改好后才需要客户按链接里的步骤放行 ME 服务器。最近 ${CRAWL_FRESH_DAYS} 天没有页面再被挡时，这条会自动消失`,
       href: SITE_FIREWALL_ALLOWLIST_SOP_URL,
     })
   }

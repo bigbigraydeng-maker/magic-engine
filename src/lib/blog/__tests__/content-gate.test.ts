@@ -178,6 +178,13 @@ describe('checkContentDuplicate — firewall-blocked site pages still count (202
       primary_keyword: null,
       crawl_status: 'crawled',
     },
+    {
+      client_id: 'client-1',
+      url: 'https://example.com/product-category/spc-flooring/',
+      title: 'example.com',
+      primary_keyword: null,
+      crawl_status: 'antibot_challenged',
+    },
   ]
 
   const blogPosts: FakeBlogPostRow[] = []
@@ -202,6 +209,20 @@ describe('checkContentDuplicate — firewall-blocked site pages still count (202
       source: 'site_page',
       existing_title: 'Hybrid Flooring',
       existing_ref: 'https://example.com/product-category/hybrid-flooring/',
+    })
+  })
+
+  it('catches a blocked page whose stored title is only the domain, via its URL path', async () => {
+    const verdict = await checkContentDuplicate(
+      'client-1',
+      { topic: 'SPC Flooring', primary_keyword: null, slug: null },
+      fakeClient(),
+    )
+    expect(verdict).toEqual({
+      verdict: 'duplicate',
+      source: 'site_page',
+      existing_title: 'example.com',
+      existing_ref: 'https://example.com/product-category/spc-flooring/',
     })
   })
 

@@ -34,6 +34,7 @@ import {
   executeJob,
   discoverSitemapUrls,
   crawlAndClassifyPages,
+  summarizeMarkFailures,
   type ExecuteJobOptions,
 } from '../job-executor'
 import { JobRunner } from '../job-runner'
@@ -304,6 +305,35 @@ describe('executeJob', () => {
     expect(mockRunner.completeJob).toHaveBeenCalledWith('job-123', [urls[1]])
   })
 
+  it('saves a summary on the job when a blocked-page mark fails', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    mockSupabase = makeSupabaseMock({ message: 'check constraint violated' })
+
+    vi.mocked(crawlerDiscoverUrls).mockResolvedValue(['https://example.com/blocked'])
+    vi.mocked(crawlPages).mockResolvedValue([
+      makeCrawlResult('https://example.com/blocked', {
+        markdown: '',
+        title: '',
+        antibot: {
+          kind: 'siteground',
+          evidence: 'body contains "Robot Challenge Screen"',
+        },
+        error: 'antibot_siteground: body contains "Robot Challenge Screen"',
+      }),
+    ])
+
+    await executeJob(mockSupabase, 'job-123')
+
+    expect(mockRunner.completeJob).toHaveBeenCalledWith(
+      'job-123',
+      ['https://example.com/blocked'],
+      expect.stringContaining('1 个被防火墙挡住的页面没能标记上')
+    )
+
+    spy.mockRestore()
+  })
+
   // ── Classification fallback ──────────────────────────────────────────────
 
   it('falls back to "other" page type when classifyPage throws', async () => {
@@ -512,6 +542,7 @@ describe('crawlAndClassifyPages — database writes', () => {
       has_geo_block: false,
       status_code: 200,
     })
+    expect(upsertArg.crawl_error).toBeNull()
     // job_id is not a column on client_site_pages (removed in 40d43a86)
     expect(upsertArg).not.toHaveProperty('job_id')
   })
@@ -1013,5 +1044,20 @@ describe('crawlAndClassifyPages — anti-bot mark write is checked (2026-09-26)'
 
     expect(result.failed).toHaveLength(1)
     expect(result.failed[0].error).not.toContain('mark failed')
+  })
+})
+
+describe('summarizeMarkFailures', () => {
+  it('returns null when no blocked-page mark failed', () => {
+    expect(summarizeMarkFailures([{ url: 'https://example.com/a', error: 'Timeout' }])).toBeNull()
+  })
+
+  it('counts the failed marks and keeps the first reason', () => {
+    const summary = summarizeMarkFailures([
+      { url: 'https://example.com/a', error: 'antibot_siteground; mark failed: check constraint violated' },
+      { url: 'https://example.com/b', error: 'Timeout' },
+      { url: 'https://example.com/c', error: 'antibot_siteground; mark failed: other' },
+    ])
+    expect(summary).toBe('2 个被防火墙挡住的页面没能标记上（第一个原因：check constraint violated）')
   })
 })

@@ -2,6 +2,23 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { JobRunner, type SiteAuditJob } from '../job-runner'
 
+/** One-step cast from a plain fake to the client type — no `any`, no double assertion. */
+function asClient(x: object): SupabaseClient {
+  return x as SupabaseClient
+}
+
+/** A fake whose `.from(...).update(...).eq(...).select().single()` resolves to `result`. */
+function updateFake(result: { data: unknown; error: unknown }) {
+  const update = vi.fn().mockReturnValue({
+    eq: vi.fn().mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        single: vi.fn().mockResolvedValue(result),
+      }),
+    }),
+  })
+  return { client: asClient({ from: vi.fn().mockReturnValue({ update }) }), update }
+}
+
 describe('JobRunner', () => {
   let mockSupabase: SupabaseClient
   let jobRunner: JobRunner
@@ -498,29 +515,13 @@ describe('JobRunner', () => {
     })
 
     it('stores failed_urls when a normal run had page failures', async () => {
-      const mockSelect = vi.fn().mockResolvedValue({
-        data: null,
-        error: null,
-      })
+      const { client, update } = updateFake({ data: null, error: null })
+      const runner = new JobRunner(client)
 
-      const mockEq = vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          single: mockSelect,
-        }),
-      })
+      await runner.completeJob('job-123', ['https://example.com/blocked'])
 
-      const mockUpdate = vi.fn().mockReturnValue({
-        eq: mockEq,
-      })
-
-      vi.mocked(mockSupabase.from).mockReturnValue({
-        update: mockUpdate,
-      } as any)
-
-      await jobRunner.completeJob('job-123', ['https://example.com/blocked'])
-
-      expect(mockUpdate).toHaveBeenCalledOnce()
-      expect(mockUpdate).toHaveBeenCalledWith(
+      expect(update).toHaveBeenCalledOnce()
+      expect(update).toHaveBeenCalledWith(
         expect.objectContaining({
           status: 'completed',
           failed_urls: ['https://example.com/blocked'],
@@ -529,30 +530,42 @@ describe('JobRunner', () => {
     })
 
     it('defaults failed_urls to an empty list', async () => {
-      const mockSelect = vi.fn().mockResolvedValue({
-        data: null,
-        error: null,
-      })
+      const { client, update } = updateFake({ data: null, error: null })
+      const runner = new JobRunner(client)
 
-      const mockEq = vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          single: mockSelect,
-        }),
-      })
+      await runner.completeJob('job-123')
 
-      const mockUpdate = vi.fn().mockReturnValue({
-        eq: mockEq,
-      })
-
-      vi.mocked(mockSupabase.from).mockReturnValue({
-        update: mockUpdate,
-      } as any)
-
-      await jobRunner.completeJob('job-123')
-
-      expect(mockUpdate).toHaveBeenCalledWith(
+      expect(update).toHaveBeenCalledWith(
         expect.objectContaining({ failed_urls: [] })
       )
+    })
+
+    it('saves an error summary on a completed job when one is given', async () => {
+      const { client, update } = updateFake({ data: null, error: null })
+      const runner = new JobRunner(client)
+
+      await runner.completeJob(
+        'job-123',
+        ['https://example.com/blocked'],
+        '1 个被防火墙挡住的页面没能标记上'
+      )
+
+      expect(update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'completed',
+          error_message: '1 个被防火墙挡住的页面没能标记上',
+        })
+      )
+    })
+
+    it('does not touch error_message when there is nothing to report', async () => {
+      const { client, update } = updateFake({ data: null, error: null })
+      const runner = new JobRunner(client)
+
+      await runner.completeJob('job-123', [])
+
+      const payload = update.mock.calls[0][0] as Record<string, unknown>
+      expect(payload).not.toHaveProperty('error_message')
     })
 
     it('should throw error when job_id is missing', async () => {

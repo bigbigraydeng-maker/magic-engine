@@ -17,7 +17,10 @@
 -- 2. client_site_pages_crawl_status_check 多允许一个值 'antibot_challenged'。
 --    已有取值不变。不改任何数据。不动 RLS。
 -- 3. 部署顺序写死：先 apply 本文件，再合并/部署依赖它的代码（否则被挡页的标记
---    仍写不进去，而失败只留在服务器日志里）。
+--    仍写不进去；同 PR 的代码会把「没能标记上」的原因写进那次任务的 error_message）。
+-- 4. 2026-09-26 生产只读核过：本表「不允许为空且没有默认值」的列只有
+--    client_id、url、path，被挡分支三列都写；page_type / topics / has_geo_block
+--    有默认值（'other' / '{}' / false），放开约束后被挡标记不会再被拒。
 -- ============================================================================
 
 -- 这三列在生产库里存在，但从未进过仓库的 migration，所以本块在生产是 no-op，
@@ -40,9 +43,17 @@ NOTIFY pgrst, 'reload schema';
 -- 1. SELECT pg_get_constraintdef(oid) FROM pg_constraint
 --      WHERE conname = 'client_site_pages_crawl_status_check';
 --    → 输出含 'antibot_challenged'。
--- 2. 下一次某客户每周重爬成功后：
---      SELECT crawl_status, count(*) FROM client_site_pages GROUP BY 1;
---    被挡的页出现 antibot_challenged；若网站没有挡，则为 0 也正常。
+-- 2. apply 之后第一次每周重爬结束（任务 status='completed'）时，两条都要看：
+--      SELECT client_id, completed_at, error_message
+--        FROM site_audit_jobs
+--       WHERE completed_at > '<APPLY_TIME>'
+--       ORDER BY completed_at DESC;
+--    → error_message 为空 = 被挡页都标上了；不为空 = 标记又失败了，里面写着第一个原因。
+--      SELECT client_id, crawl_status, count(*)
+--        FROM client_site_pages
+--       WHERE crawled_at > '<APPLY_TIME>'
+--       GROUP BY 1, 2;
+--    → 已知会被挡的客户，这次重爬碰到的页里应出现 antibot_challenged（> 0）。
 -- 3. 回滚：把约束改回三值之前，先
 --      UPDATE client_site_pages SET crawl_status='crawled'
 --        WHERE crawl_status='antibot_challenged';

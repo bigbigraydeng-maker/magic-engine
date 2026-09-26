@@ -16,7 +16,13 @@
 >
 > ⚠️ **2026-09-26 更正**:生产约束 `client_site_pages_crawl_status_check` 当时只允许 pending/crawled/failed,`antibot_challenged` **一次都没写进去过**(代码没查写入错误,静默吞掉);而且 SiteGround 新版挑战页的标题在我们这边是裸域名,检测器也认不出。所以 2026-09-26 之前按 `crawl_status = 'antibot_challenged'` 数出来的 0 是假的。修复见 migration `20260926140000_client_site_pages_crawl_status_antibot.sql` 和同 PR 的检测器指纹。下面的自检查询已改成**同时按正文特征数**。
 >
-> 但这两层只是**让 ME 知道"被拦了"** — 真正让爬虫**通过**还是要客户站这边加白名单。这份 SOP 就是这一步。
+> 但这两层只是**让 ME 知道"被拦了"**,不会让爬虫通过。
+>
+> 🔴 **2026-09-26 再更正:读页面这一路,只加本 SOP 的白名单没用。**
+> - site-audit 读每一页正文都经第三方阅读服务(Site Analyzer,代码 `src/lib/brief/jina.ts` → `r.jina.ai`)转手,客户防火墙看到的是这个服务的地址,不是 ME 服务器(Render)的地址。只按代码路径确认,还没有在客户站实测过。
+> - 本 SOP 的白名单只对 **ME 服务器直连客户站**的几路有效:读站点地图(`crawler.ts` 直连那几级)、改 Yoast / 发博客(`wpFetch`)。
+> - 要让读页面也通过,得先由开发把被挡的站改成由 ME 服务器直接读(或走固定出口的代理),**改好之后**再按本 SOP 请客户放行。今日待办「页面被防火墙挡住」那条就是这么写的:先回一句「换通道」,别先找客户。
+> - 这份文档含内部步骤(Render 后台、带内部 key 的调用),**不要直接转给客户**;要客户动手时,把 IP 和第 2 步单独整理给对方。
 
 ---
 
@@ -98,11 +104,12 @@ WHERE client_id = '{CLIENT_UUID}';
 
 （`{ALLOWLIST_TIME}` = 你在 Step 2 保存白名单的时间，UTC。只看这之后重爬过的行 —— 每周自动重爬一次最多 150 页，没被这轮碰到的旧行不算数。）
 
-**期望**:
+**期望**(前提:读页面已改成由 ME 服务器直连,见文首「再更正」;还没改的话这一步不会降到 0,不是白名单没加好):
 - `still_blocked_after_fix` → **0** ✅
 - `crawled_after_fix` ↑ 大幅上升
 
 如还有 still_blocked_after_fix > 0:
+- 先排除最常见的一条:读页面还在走第三方阅读服务(见文首「再更正」),白名单对它无效 —— 回一句「换通道」
 - 可能 SiteGround Allowlist 没保存(回 Step 2 重做一遍)
 - 可能 Render egress IP 多过 SiteGround 加的(回 Step 1 再补)
 - 可能 SiteGround 还有其他 anti-bot 层(Cloudflare 上层等)— 看 `crawl_error` 列具体 evidence
@@ -151,6 +158,6 @@ WHERE client_id = '{CLIENT_UUID}'
 - [ ] Step 0 自检 SQL 跑过, `antibot_pages > 0` 确认要做
 - [ ] Step 1 ME egress IP 列表 拿全(2-5 个 IP)
 - [ ] Step 2 SiteGround Defensive Mode → IP Allowlist 全部加上
-- [ ] Step 3 Re-crawl 跑通,`still_blocked_after_fix` → 0
+- [ ] Step 3 Re-crawl 跑通,`still_blocked_after_fix` → 0(读页面改直连之后才可能)
 - [ ] Step 4 旧 "Robot Challenge Screen" 脏数据清理(可选)
 - [ ] 在客户 onboarding 笔记里记 "SiteGround Allowlist 已配 + {date}",防止后人重复踩坑

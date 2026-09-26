@@ -115,7 +115,7 @@ function GeoIcon({ hasGeo }: { hasGeo: boolean }) {
 }
 
 /**
- * 收录状态列：未收录页面显示谷歌给的原因（人话）+ 简短动作，悬停看完整说明；正文被防火墙挡住的另标一行。已收录 / 未检查各一态。
+ * 收录状态列：未收录页面显示谷歌给的原因（人话）+ 简短动作，悬停看完整说明。已收录 / 未检查各一态。
  * 三态判据与后端一致：not_indexed（first_not_indexed_at 非空）优先，其次看
  * index_verdict 有没有验过。
  */
@@ -131,9 +131,6 @@ function IndexStatusCell({ page }: { page: ClientSitePage }) {
           {INDEX_CLASS_META[cls].label}
         </span>
         <span className="text-xs text-gray-400">{INDEX_CLASS_META[cls].hint}</span>
-        {page.crawl_status === 'antibot_challenged' && (
-          <span className="text-xs text-amber-600">正文被网站防火墙挡住，字数不可信</span>
-        )}
       </div>
     )
   }
@@ -466,7 +463,18 @@ export default function SiteAuditPagesPage() {
                       <TypeBadge type={page.page_type} />
                     </td>
                     <td className="px-4 py-3 text-right text-gray-600">
-                      {page.word_count != null ? page.word_count.toLocaleString() : '—'}
+                      {page.crawl_status === 'antibot_challenged' ? (
+                        <span
+                          className="text-xs text-amber-600"
+                          title="我们读这一页时被网站防火墙挡住，读到的是拦截页，字数不可信"
+                        >
+                          被防火墙挡住
+                        </span>
+                      ) : page.word_count != null ? (
+                        page.word_count.toLocaleString()
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <IndexStatusCell page={page} />

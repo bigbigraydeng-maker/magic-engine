@@ -131,13 +131,13 @@ export async function crawlAndClassifyPages(
           // supabase-js returns write errors instead of throwing. Until 2026-09-26
           // this branch ignored them, and a DB constraint rejected every mark.
           console.error('[site-audit] could not mark anti-bot page', crawl.url, markError.message)
-          failure.error = `${failure.error}; mark failed: ${markError.message}`
+          failure.error = `${failure.error}${MARK_FAILED_MARKER}${markError.message}`
         }
       } catch (err) {
         // Don't block the batch on a single upsert failure — but record it.
         const message = err instanceof Error ? err.message : String(err)
         console.error('[site-audit] could not mark anti-bot page', crawl.url, message)
-        failure.error = `${failure.error}; mark failed: ${message}`
+        failure.error = `${failure.error}${MARK_FAILED_MARKER}${message}`
       }
       if ((i + 1) % PROGRESS_UPDATE_INTERVAL === 0) {
         await runner.updateProgress(jobId, {
@@ -206,6 +206,8 @@ export async function crawlAndClassifyPages(
             status_code: crawl.statusCode,
             crawled_at: crawl.crawledAt.toISOString(),
             crawl_status: 'crawled',
+            // 以前被挡、这次读到了：清掉旧的拦截原因，排查指南让人看的就是这一列。
+            crawl_error: null,
           },
           { onConflict: 'client_id,url' }
         )
@@ -241,6 +243,20 @@ export async function crawlAndClassifyPages(
 // ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
+
+/** Marker `crawlAndClassifyPages` appends to a blocked page's failure when its DB mark failed. */
+const MARK_FAILED_MARKER = '; mark failed: '
+
+/**
+ * One-line summary of blocked pages whose database mark failed, or null when none did.
+ * Saved on the completed job so the reason is not left only in server logs.
+ */
+export function summarizeMarkFailures(failed: Array<{ url: string; error: string }>): string | null {
+  const marks = failed.filter((f) => f.error.includes(MARK_FAILED_MARKER))
+  if (marks.length === 0) return null
+  const reason = marks[0].error.split(MARK_FAILED_MARKER)[1] ?? ''
+  return `${marks.length} 个被防火墙挡住的页面没能标记上（第一个原因：${reason.slice(0, 200)}）`
+}
 
 /**
  * Execute a single site-audit job identified by `jobId`.
@@ -309,7 +325,13 @@ export async function executeJob(
       totalUrlsCrawled: successful.length + failed.length,
       totalPagesClassified: successful.length,
     })
-    await runner.completeJob(jobId, failed.map((f) => f.url))
+    const failedUrls = failed.map((f) => f.url)
+    const markSummary = summarizeMarkFailures(failed)
+    if (markSummary) {
+      await runner.completeJob(jobId, failedUrls, markSummary)
+    } else {
+      await runner.completeJob(jobId, failedUrls)
+    }
   } catch (err) {
     // 5b. Fail on unrecoverable error
     const message = err instanceof Error ? err.message : String(err)

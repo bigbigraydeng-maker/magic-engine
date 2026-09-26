@@ -153,7 +153,7 @@ export const INDEX_CLASS_META: Record<IndexClass, { label: string; action: strin
     action: '谷歌只收了内容相同的另一页，流量在那一页上；要这一页单独被搜到就把内容做出区别，否则不用处理',
   },
   error: {
-    label: '页面打不开或被挡',
+    label: '谷歌打不开或被挡',
     hint: '先修好',
     action: '先修好：打不开、报错、被网站设置挡住的页面谷歌收不了；报 403 常见是网站防火墙把谷歌也挡了',
   },
@@ -164,9 +164,9 @@ export const INDEX_CLASS_META: Record<IndexClass, { label: string; action: strin
   },
   no_verdict: {
     label: '还没拿到谷歌的结论',
-    hint: '等下一轮检查',
+    hint: '排队等重查',
     action:
-      '每天的收录检查这次没从谷歌拿到明确结论，下一轮会重查；连续多天都这样，再去 Search Console 用网址检查看',
+      '每天的收录检查这次没从谷歌拿到明确结论。检查按「最久没查的先查」轮流进行，轮到它会再查一次（页面多的站要一两周）；急的话去 Search Console 用网址检查看',
   },
   other: {
     label: '谷歌给了少见的原因',

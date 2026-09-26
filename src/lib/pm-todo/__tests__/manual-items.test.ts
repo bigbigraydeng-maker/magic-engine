@@ -24,9 +24,11 @@ import {
 } from '../manual-items'
 import {
   buildCrawlHealthItems,
+  NOT_INDEXED_REPORT_ORDER,
   SITE_FIREWALL_ALLOWLIST_SOP_URL,
   type CrawlHealthRow,
 } from '../manual-item-types'
+import { INDEX_CLASS_META, isActionableNotIndexed, type IndexClass } from '@/lib/seo/index-status'
 import { buildTodoEmail, type TodoCounts } from '../daily-todo'
 
 describe('gscInspectUrl', () => {
@@ -543,7 +545,15 @@ describe('buildNotIndexedItems — 谷歌没收录的页面按客户汇总，别
     ]
     const [item] = buildNotIndexedItems(rows, siteUrls, nameOf, NOW)
     expect(item.what).toContain('1 个页面没被谷歌收录')
-    expect(item.what).toContain('1 个还没拿到谷歌的结论，下一轮会重查')
+    expect(item.what).toContain('1 个还没拿到谷歌的结论，排队等重查')
+  })
+
+  it('how is built from the shared labels', () => {
+    const rows: NotIndexedRow[] = [page('oztop', 1, { index_verdict: 'Crawled - currently not indexed' })]
+    const [item] = buildNotIndexedItems(rows, siteUrls, nameOf, NOW)
+    expect(item.how).toContain(`「${INDEX_CLASS_META.error.label}」`)
+    expect(item.how).toContain(`「${INDEX_CLASS_META.noindex.label}」的先确认是不是故意的`)
+    expect(item.how).toContain(`「${INDEX_CLASS_META.discovered.label}」`)
   })
 
   it('🔴 被防火墙挡住的行（字数是假的）不判「正文可能偏薄」', () => {
@@ -572,12 +582,83 @@ describe('buildNotIndexedItems — 谷歌没收录的页面按客户汇总，别
     ]
     const [item] = buildNotIndexedItems(rows, siteUrls, nameOf, NOW)
     const w = item.what
-    expect(w.indexOf('页面打不开或被挡')).toBeLessThan(w.indexOf('页面自己写了「别收录」'))
+    expect(w.indexOf('谷歌打不开或被挡')).toBeLessThan(w.indexOf('页面自己写了「别收录」'))
     expect(w.indexOf('页面自己写了「别收录」')).toBeLessThan(w.indexOf('谷歌发现了但还没来爬'))
   })
 })
 
 describe('loadManualItems — 未收录读失败被隔离，不清空整条人工车道（Codex P1）', () => {
+  function asClient(x: object): SupabaseClient {
+    return x as SupabaseClient
+  }
+
+  function loaderStub(opts: { weeklyIds: string[]; crawlRows: CrawlHealthRow[] }) {
+    const selects: string[] = []
+    const empty = new Proxy({} as Record<string, unknown>, {
+      get(_t, prop) {
+        if (prop === 'then')
+          return (res: (v: unknown) => unknown) =>
+            Promise.resolve({ data: [], error: null }).then(res)
+        if (prop === 'single' || prop === 'maybeSingle') return async () => ({ data: null, error: null })
+        return () => empty
+      },
+    })
+    const weeklyQuery: Record<string, unknown> = {}
+    weeklyQuery.not = () => weeklyQuery
+    weeklyQuery.then = (res: (v: unknown) => unknown) =>
+      Promise.resolve({ data: opts.weeklyIds.map((id) => ({ id })), error: null }).then(res)
+    const clientsQuery: Record<string, unknown> = {}
+    for (const m of ['select', 'eq', 'order', 'in']) clientsQuery[m] = () => clientsQuery
+    clientsQuery.contains = () => weeklyQuery
+    clientsQuery.range = async () => ({ data: [{ id: 'c1', name: 'Client One', domain: 'x' }], error: null })
+    let lastSelect = ''
+    const csp: Record<string, unknown> = {}
+    for (const m of ['not', 'in', 'order']) csp[m] = () => csp
+    csp.select = (cols: string) => {
+      selects.push(cols)
+      lastSelect = cols
+      return csp
+    }
+    csp.limit = async () => ({ data: [], error: null })
+    csp.range = async () => ({
+      data: lastSelect.includes('first_not_indexed_at') ? [] : opts.crawlRows,
+      error: null,
+    })
+    const stub = asClient({
+      from: (table: string) => {
+        if (table === 'clients') return clientsQuery
+        if (table === 'client_site_pages') return csp
+        return empty
+      },
+    })
+    return { stub, selects }
+  }
+
+  it('🔴 站点数据健康取数必须带上 crawl_status（漏列会让「数据过期」和「被挡」两条一起悄悄消失）', async () => {
+    const { stub, selects } = loaderStub({ weeklyIds: [], crawlRows: [] })
+
+    await loadManualItems(stub, new Date('2026-09-04T00:00:00Z'))
+
+    expect(
+      selects.some(
+        (s) => s.includes('crawl_status') && s.includes('crawled_at') && !s.includes('first_not_indexed_at'),
+      ),
+    ).toBe(true)
+  })
+
+  it('数据过期只提醒每周重扫名单里的客户', async () => {
+    const crawlRows: CrawlHealthRow[] = [
+      { client_id: 'c1', crawled_at: '2026-08-01T00:00:00Z', crawl_status: 'crawled' },
+    ]
+    const NOW = new Date('2026-09-04T00:00:00Z')
+
+    const withClient = await loadManualItems(loaderStub({ weeklyIds: ['c1'], crawlRows }).stub, NOW)
+    expect(withClient.some((i) => i.kind === 'crawl_stale' && i.client_id === 'c1')).toBe(true)
+
+    const withoutClient = await loadManualItems(loaderStub({ weeklyIds: [], crawlRows }).stub, NOW)
+    expect(withoutClient.some((i) => i.kind === 'crawl_stale')).toBe(false)
+  })
+
   it('client_site_pages 分页读失败 → loadManualItems 不抛、not_indexed 缺席但其他不受牵连', async () => {
     const NOW = new Date('2026-09-04T00:00:00Z')
     const empty = new Proxy({} as Record<string, unknown>, {
@@ -1313,6 +1394,7 @@ describe('buildCrawlHealthItems — 站点数据健康：只认真抓到的，�
       ],
       nameOf,
       NOW,
+      new Set(['oztop']),
     )
 
     const stale = items.find((i) => i.kind === 'crawl_stale')
@@ -1320,7 +1402,7 @@ describe('buildCrawlHealthItems — 站点数据健康：只认真抓到的，�
     expect(stale?.what).toContain('25 天没更新')
 
     const blocked = items.find((i) => i.kind === 'crawl_blocked')
-    expect(blocked?.what.startsWith('1 个页面被客户网站的防火墙挡住')).toBe(true)
+    expect(blocked?.what.startsWith('最近 14 天里有 1 个页面被客户网站的防火墙挡住')).toBe(true)
     expect(blocked?.href).toBe(SITE_FIREWALL_ALLOWLIST_SOP_URL)
   })
 
@@ -1329,6 +1411,7 @@ describe('buildCrawlHealthItems — 站点数据健康：只认真抓到的，�
       [row('cts', { crawl_status: 'crawled', crawled_at: '2026-09-24T00:00:00Z' })],
       nameOf,
       NOW,
+      new Set(['cts']),
     )
     expect(items).toEqual([])
   })
@@ -1341,10 +1424,11 @@ describe('buildCrawlHealthItems — 站点数据健康：只认真抓到的，�
       ],
       nameOf,
       NOW,
+      new Set(['x']),
     )
     expect(items).toHaveLength(1)
     expect(items[0].kind).toBe('crawl_blocked')
-    expect(items[0].what.startsWith('2 个页面')).toBe(true)
+    expect(items[0].what.startsWith('最近 14 天里有 2 个页面')).toBe(true)
   })
 
   it('rows with crawl_status pending / failed do not count as fresh', () => {
@@ -1355,8 +1439,60 @@ describe('buildCrawlHealthItems — 站点数据健康：只认真抓到的，�
       ],
       nameOf,
       NOW,
+      new Set(['y']),
     )
     expect(items).toHaveLength(1)
     expect(items[0].kind).toBe('crawl_stale')
+  })
+
+  it('stale data only nags clients on the weekly recrawl list', () => {
+    const rows = [row('roman', { crawl_status: 'crawled', crawled_at: '2026-08-17T00:00:00Z' })]
+
+    expect(buildCrawlHealthItems(rows, nameOf, NOW, new Set<string>())).toEqual([])
+
+    const items = buildCrawlHealthItems(rows, nameOf, NOW, new Set(['roman']))
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('crawl_stale')
+  })
+
+  it('blocked rows older than 14 days no longer count', () => {
+    const items = buildCrawlHealthItems(
+      [
+        row('z', { crawl_status: 'antibot_challenged', crawled_at: '2026-09-01T00:00:00Z' }),
+        row('z', { crawl_status: 'antibot_challenged', crawled_at: '2026-09-24T00:00:00Z' }),
+        row('w', { crawl_status: 'antibot_challenged', crawled_at: '2026-08-20T00:00:00Z' }),
+        row('v', { crawl_status: 'antibot_challenged', crawled_at: null }),
+      ],
+      nameOf,
+      NOW,
+      new Set<string>(),
+    )
+
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('crawl_blocked')
+    expect(items[0].client_id).toBe('z')
+    expect(items[0].what.startsWith('最近 14 天里有 1 个页面')).toBe(true)
+  })
+
+  it('crawl_blocked does not send the reader to the client first', () => {
+    const items = buildCrawlHealthItems(
+      [row('q', { crawl_status: 'antibot_challenged', crawled_at: '2026-09-25T00:00:00Z' })],
+      nameOf,
+      NOW,
+      new Set<string>(),
+    )
+
+    expect(items).toHaveLength(1)
+    expect(items[0].how).toContain('先别找客户')
+    expect(items[0].how).toContain('换通道')
+    expect(items[0].how).not.toContain('Start New Audit')
+    expect(items[0].href).toBe(SITE_FIREWALL_ALLOWLIST_SOP_URL)
+  })
+})
+
+describe('NOT_INDEXED_REPORT_ORDER — every class that is real work is reported', () => {
+  it('lists exactly the actionable classes', () => {
+    const actionable = (Object.keys(INDEX_CLASS_META) as IndexClass[]).filter(isActionableNotIndexed)
+    expect([...NOT_INDEXED_REPORT_ORDER].sort()).toEqual([...actionable].sort())
   })
 })
