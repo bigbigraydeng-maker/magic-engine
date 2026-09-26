@@ -51,9 +51,20 @@ describe('demoAnalysis', () => {
     expect(evidence.campaigns.reduce((sum, row) => sum + row.spend, 0)).toBe(700)
   })
 
+  it('stores the click rate as a fraction and describes the audience share', () => {
+    const analysis = demoAnalysis(TODAY)
+    const evidence = analysis.evidence as { comparison: { ctr: { current: number } } }
+    expect(evidence.comparison.ctr.current).toBe(0.0143)
+    const report = analysis.report_markdown ?? ''
+    expect(report).toContain('约 47%')
+    expect(report).not.toContain('六成')
+  })
+
   it('does not use the stale promise wording', () => {
-    const report = demoAnalysis(TODAY).report_markdown ?? ''
-    expect(report).not.toContain('原定')
+    // 承诺句在卡片里，不在正文（魏征：原来查正文永远会过）
+    const cards = (demoAnalysis(TODAY).evidence as { rule_cards: { promise: string } }).rule_cards
+    expect(cards.promise).toContain('你不用动手')
+    expect(cards.promise).not.toContain('原定')
   })
 
   it('contains no real client names or account ids', () => {
@@ -61,7 +72,7 @@ describe('demoAnalysis', () => {
     for (const forbidden of [
       'CTS', 'China Tours', 'Oztop', 'oztop', 'NAL', 'New Asian', 'Roman',
       'East International', 'Magic Picks', 'Medspa', 'Kiteroa', 'act_',
-      '1616575215312482', 'Grand Tour',
+      '1616575215312482', 'Grand Tour', 'Carrington', 'Park Homes', 'Bamwave', 'NZCPE', 'Rothesay',
     ]) {
       expect(json).not.toContain(forbidden)
     }

@@ -1,6 +1,7 @@
 import { cleanup,render,screen } from '@testing-library/react'
 import { afterEach,beforeAll,describe,expect,it,vi } from 'vitest'
 import ReportView, { splitReportSections,type ReportAnalysis } from '@/app/meta-ads-ai/[clientId]/ReportView'
+import { placementLabel } from '@/app/meta-ads-ai/[clientId]/chart-labels'
 
 // recharts' ResponsiveContainer only renders its children once it measures a non-zero size,
 // which jsdom never reports on its own.
@@ -87,7 +88,7 @@ describe('Meta Ads AI report view',()=>{
     }
     render(<ReportView analysis={{ ...base,status:'failed',report_markdown:null,error_code:'model_unavailable',evidence }} />)
     expect(screen.getByTestId('report-charts')).toBeInTheDocument()
-    expect(screen.getByText(/广告系列花费排行/)).toBeInTheDocument()
+    expect(screen.getByText(/各广告系列花了多少钱/)).toBeInTheDocument()
     expect(screen.getByText(/AI 模型暂时无法响应/)).toBeInTheDocument()
   })
 
@@ -134,14 +135,23 @@ describe('Meta Ads AI report view',()=>{
     render(<ReportView analysis={{ ...base,report_markdown:'一、总体结果\n数据充足。',evidence }} />)
     const charts=screen.getByTestId('report-charts')
     expect(charts).toBeInTheDocument()
-    expect(charts.textContent).toContain('广告系列花费排行')
+    expect(charts.textContent).toContain('各广告系列花了多少钱')
     expect(charts.textContent).toContain('基督城')
     expect(charts.textContent).toContain('739.0%')
     expect(charts.textContent).toContain('每日花费与点击率趋势')
-    expect(charts.textContent).toContain('版位花费分布')
+    expect(charts.textContent).toContain('广告出现在哪里')
     expect(charts.textContent).toContain('受众画像')
     expect(charts.textContent).toContain('设备分布')
     expect(charts.textContent).toContain('地区花费分布')
+  })
+
+  it('labels placements in plain Chinese and never leaks raw platform codes',()=>{
+    // jsdom 不画坐标轴文字，所以直接测换名函数
+    expect(placementLabel('audience_network','classic')).toBe('Meta 合作的其它 App')
+    expect(placementLabel('facebook','feed')).toBe('Facebook 动态')
+    expect(placementLabel('instagram','story')).toBe('Instagram 快拍')
+    expect(placementLabel('instagram','reels')).toBe('Instagram 短视频')
+    expect(placementLabel('threads','feed')).toBe('threads · feed')
   })
 
   it('renders no chart section when there is no usable evidence — must not crash on an older job or a no_data/failed status carrying null evidence',()=>{

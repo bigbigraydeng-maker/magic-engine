@@ -2,16 +2,16 @@ import type { ReportAnalysis } from '../[clientId]/ReportView'
 import {
   toClientFinding,
   renderRuleSection,
+  shiftDay,
   type ClientRuleFinding,
   type RuleSectionInput,
 } from '@/lib/ads-strategy/rules/client-copy'
 import type { RuleFinding } from '@/lib/ads-strategy/rules/patrol-findings'
 import { buildRuleCards } from '@/lib/meta/ai/rule-cards'
 
-/** 在 YYYY-MM-DD 上加 n 天（UTC）。 */
+/** 在 YYYY-MM-DD 上加 n 天（复用 client-copy 的 shiftDay）。 */
 export function localDayOffset(today: string, n: number): string {
-  const t = Date.parse(`${today}T00:00:00Z`) + n * 86_400_000
-  return new Date(t).toISOString().slice(0, 10)
+  return shiftDay(today, n)
 }
 
 const CAMPAIGNS = [
@@ -24,7 +24,7 @@ const COMPARISON = {
   spend: { current: 700, previous: 680, percent_change: 2.9 },
   impressions: { current: 42000, previous: 40000, percent_change: 5 },
   clicks: { current: 600, previous: 540, percent_change: 11.1 },
-  ctr: { current: 1.43, previous: 1.35, percent_change: 5.9 },
+  ctr: { current: 0.0143, previous: 0.0135, percent_change: 5.9 },
   reach: { current: 15000, previous: 14500, percent_change: 3.4 },
   frequency: { current: 2.8, previous: 2.76, percent_change: 1.4 },
 }
@@ -108,14 +108,14 @@ function demoFindings(dataDate: string): ClientRuleFinding[] {
 
 function reportSections(section: RuleSectionInput): string[] {
   return [
-    '一、总体结果\n这 7 天一共花了 NZ$700，广告被看到约 42,000 次，看到的人约 15,000 位，平均每人看到接近 3 次。一共被点击 600 次，点击率约 1.4%，比前 7 天略高。30 人留下联系方式，20 人发来私信，平均每位咨询花 NZ$14，比前 7 天便宜 NZ$2。',
+    '一、总体结果\n这 7 天一共花了 NZ$700，广告被看到约 42,000 次，看到的人约 15,000 位，平均每人看到接近 3 次。一共被点击 600 次，点击率约 1.4%，比前 7 天略高。30 人留下联系方式，20 人发来私信，平均每位咨询花 NZ$13，比前 7 天便宜 NZ$2。',
     '二、广告系列效率排行\n私信咨询系列每带来一位咨询只要 NZ$10，是这周效率最高的；预约表单系列花得最多（NZ$450），每位 NZ$15；短视频系列这周主要是让更多人看到，花了 NZ$50，不算咨询成本。',
     renderRuleSection(section),
     '四、广告出现的位置\nFacebook 动态花了一半多一点，点击率约 1.8%，是效果最好的位置；Instagram 快拍的点击率只有它的一半左右；Meta 合作的其它 App 只占不到一成花费，影响不大。',
     '五、视频表现\n看过短视频的人里，约四成看到了一半，约一成半看完了整条。开头几秒留住人的效果还可以。',
-    '六、受众\n六成花费落在 45 岁以上的女性身上，但留下联系方式和发私信的人大多在 25 到 44 岁之间。',
-    '七、每日趋势\n每天花费比较平稳，在 NZ$95 到 NZ$110 之间；点击率前几天稍高，后面略有回落。',
-    '八、三条可以考虑的方向\n1. 私信咨询系列每位只要 NZ$10，比预约表单便宜三分之一，可以和团队商量往它多放一些预算。\n2. Instagram 快拍的点击率只有 Facebook 动态的一半，可以考虑专门做一版竖屏的图片或视频。\n3. 六成花费落在 45 岁以上女性身上，但咨询大多来自 25 到 44 岁，可以把重点人群往年轻一些调。',
+    '六、受众\n近一半花费（约 47%）落在 45 岁以上的女性身上，但留下联系方式和发私信的人大多在 25 到 44 岁之间。',
+    '七、每日趋势\n每天花费比较平稳，在 NZ$95 到 NZ$110 之间；点击率每天都在 1.4% 左右，很稳定。',
+    '八、三条可以考虑的方向\n1. 私信咨询系列每位只要 NZ$10，比预约表单便宜三分之一，可以和团队商量往它多放一些预算。\n2. Instagram 快拍的点击率只有 Facebook 动态的一半，可以考虑专门做一版竖屏的图片或视频。\n3. 近一半花费落在 45 岁以上女性身上，但咨询大多来自 25 到 44 岁，可以把重点人群往年轻一些调。',
   ]
 }
 
