@@ -27,7 +27,7 @@ export const META_CYCLE_JOB = 'seo-meta-cycle'
  * PR (removed, not just disabled) — both flows writing to the same repo/table
  * at once was the risk, so they were never allowed to coexist past this PR.
  */
-export const META_CYCLE_CRON = '30 5 * * 1'
+export const META_CYCLE_CRON = '35 5 * * 1'
 
 /** Same rationale as flywheel-seo-weekly's MIN_HOURS_BETWEEN_SNAPSHOTS: Inngest's
  *  event dedup window is 24h, not "once this ISO week" — a manual re-trigger the
