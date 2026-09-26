@@ -147,7 +147,6 @@ describe('checkHardFactsPreserved — reverse direction: new facts introduced', 
     )
     expect(result.consistent).toBe(false)
     expect(result.addedFacts).toContain('$2,999')
-    expect(result.droppedFacts).toContain('New Zealand')
   })
 
   it('🔴 BLOCKER mutation: if reverse check is removed (addedFacts always []), competitor price slips through', () => {
@@ -238,5 +237,182 @@ describe('checkHardFactsPreserved — format normalization', () => {
     )
     expect(result.consistent).toBe(false)
     expect(result.droppedFacts).toContain('22 Dec 2026')
+  })
+})
+
+describe('checkHardFactsPreserved — DR48-1: multi-currency, promotions, quantities', () => {
+  it('catches €2,999 added by rewrite', () => {
+    const result = checkHardFactsPreserved(
+      'China Tours', 'Explore China.',
+      'China Tours from €2,999', 'Explore China.',
+    )
+    expect(result.consistent).toBe(false)
+    expect(result.addedFacts).toEqual(expect.arrayContaining(['€2,999']))
+  })
+
+  it('catches ¥19,999 added by rewrite', () => {
+    const result = checkHardFactsPreserved(
+      'China Tours', 'Explore China.',
+      'China Tours — ¥19,999', 'Explore China.',
+    )
+    expect(result.consistent).toBe(false)
+    expect(result.addedFacts).toEqual(expect.arrayContaining(['¥19,999']))
+  })
+
+  it('catches "3,990 dollars" (currency word) added by rewrite', () => {
+    const result = checkHardFactsPreserved(
+      'China Tours', 'Explore China.',
+      'China Tours', 'Explore China from 3,990 dollars.',
+    )
+    expect(result.consistent).toBe(false)
+  })
+
+  it('catches bare "from 3990" (no currency symbol, ≥3 digits)', () => {
+    const result = checkHardFactsPreserved(
+      'China Tours', 'Explore China.',
+      'China Tours from 3990', 'Explore China.',
+    )
+    expect(result.consistent).toBe(false)
+  })
+
+  it('catches "save 20%" promotion added by rewrite', () => {
+    const result = checkHardFactsPreserved(
+      'China Tours — Best Value', 'Explore China.',
+      'China Tours — save 20%', 'Explore China.',
+    )
+    expect(result.consistent).toBe(false)
+  })
+
+  it('catches "2-for-1" promotion added by rewrite', () => {
+    const result = checkHardFactsPreserved(
+      'China Tours', 'Explore China.',
+      'China Tours — 2-for-1 Deal', 'Explore China.',
+    )
+    expect(result.consistent).toBe(false)
+  })
+
+  it('catches "14 days" quantity added by rewrite', () => {
+    const result = checkHardFactsPreserved(
+      'China Discovery Tour', 'Explore China.',
+      'China Discovery Tour in 14 days', 'Explore China.',
+    )
+    expect(result.consistent).toBe(false)
+  })
+
+  it('catches "12-day" quantity added by rewrite', () => {
+    const result = checkHardFactsPreserved(
+      'China Discovery Tour', 'Explore China.',
+      '12-day China Discovery Tour', 'Explore China.',
+    )
+    expect(result.consistent).toBe(false)
+  })
+
+  it('NZD currency code is detected: "NZD 2999" added', () => {
+    const result = checkHardFactsPreserved(
+      'China Tours', 'Explore China.',
+      'China Tours', 'Explore China. NZD 2999 per person.',
+    )
+    expect(result.consistent).toBe(false)
+  })
+
+  it('price format equivalence: $3,990 = NZD 3990 = 3990 dollars', () => {
+    const result = checkHardFactsPreserved(
+      'Tour — $3,990', 'Book now.',
+      'Tour — NZD 3990', 'Book now.',
+    )
+    expect(result.consistent).toBe(true)
+  })
+})
+
+describe('checkHardFactsPreserved — DR48-2: departure points and place aliases', () => {
+  it('catches "from Beijing" departure point added by rewrite', () => {
+    const result = checkHardFactsPreserved(
+      'China Icons Tour', 'Visit the highlights.',
+      'China Icons Tour from Beijing', 'Visit the highlights.',
+    )
+    expect(result.consistent).toBe(false)
+  })
+
+  it('"Shanghai departures" triggers departure detection', () => {
+    const result = checkHardFactsPreserved(
+      'China Tour — Daily Departures', 'Book now.',
+      'China Tour — Shanghai Departures', 'Book now.',
+    )
+    expect(result.consistent).toBe(false)
+  })
+
+  it('"New Zealand" ↔ "NZ" does NOT false-flag as drop+add (W48b-5 fix)', () => {
+    const result = checkHardFactsPreserved(
+      'China Tours from New Zealand', 'Departures from New Zealand.',
+      'China Tours from NZ', 'Departures from NZ.',
+    )
+    expect(result.consistent).toBe(true)
+  })
+
+  it('"Australia" ↔ "AU" does NOT false-flag', () => {
+    const result = checkHardFactsPreserved(
+      'Tours from Australia', 'Departures from Australia.',
+      'Tours from AU', 'Departures from AU.',
+    )
+    expect(result.consistent).toBe(true)
+  })
+
+  it('"Christchurch" ↔ "ChCh" does NOT false-flag', () => {
+    const result = checkHardFactsPreserved(
+      'Tours from Christchurch', 'Depart Christchurch.',
+      'Tours from ChCh', 'Depart ChCh.',
+    )
+    expect(result.consistent).toBe(true)
+  })
+})
+
+describe('checkHardFactsPreserved — DR48-4: expanded date formats', () => {
+  it('catches ISO date 2026-12-22 dropped by rewrite', () => {
+    const result = checkHardFactsPreserved(
+      'Tour departing 2026-12-22', 'Book now.',
+      'Tour departing soon', 'Book now.',
+    )
+    expect(result.consistent).toBe(false)
+    expect(result.droppedFacts).toContain('2026-12-22')
+  })
+
+  it('catches "22 Dec" (day-first, no year) dropped by rewrite', () => {
+    const result = checkHardFactsPreserved(
+      'Tour departing 22 Dec', 'Book now.',
+      'Tour departing soon', 'Book now.',
+    )
+    expect(result.consistent).toBe(false)
+  })
+
+  it('catches "Dec 22nd" (ordinal) dropped by rewrite', () => {
+    const result = checkHardFactsPreserved(
+      'Available Dec 22nd', 'Limited spots.',
+      'Available soon', 'Limited spots.',
+    )
+    expect(result.consistent).toBe(false)
+  })
+
+  it('catches "22nd December" (ordinal + full month, day-first) dropped', () => {
+    const result = checkHardFactsPreserved(
+      'Tour on 22nd December', 'Book now.',
+      'Tour coming soon', 'Book now.',
+    )
+    expect(result.consistent).toBe(false)
+  })
+
+  it('"December 22" and "Dec 22" normalize to the same (no false flag)', () => {
+    const result = checkHardFactsPreserved(
+      'Available December 22', 'Book early.',
+      'Available Dec 22', 'Book early.',
+    )
+    expect(result.consistent).toBe(true)
+  })
+
+  it('ordinal "22nd Dec 2026" matches "22 Dec 2026" (no false flag)', () => {
+    const result = checkHardFactsPreserved(
+      'Tour on 22nd Dec 2026', 'Book now.',
+      'Tour on 22 Dec 2026', 'Book now.',
+    )
+    expect(result.consistent).toBe(true)
   })
 })
