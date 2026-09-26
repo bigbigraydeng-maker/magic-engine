@@ -484,6 +484,19 @@ export function parseRetryAfterMs(header: string | null, now: Date = new Date())
   return Math.max(0, parsed - now.getTime())
 }
 
+/** Map a Search Analytics JSON body to typed rows, tolerating missing / odd fields. */
+function toAnalyticsRows(data: {
+  rows?: Array<{ keys?: unknown; clicks?: unknown; impressions?: unknown; ctr?: unknown; position?: unknown }>
+}): GscAnalyticsRow[] {
+  return (data.rows ?? []).map((r) => ({
+    keys:        Array.isArray(r.keys) ? r.keys.map((k) => String(k)) : [],
+    clicks:      Number(r.clicks) || 0,
+    impressions: Number(r.impressions) || 0,
+    ctr:         Number(r.ctr) || 0,
+    position:    Number(r.position) || 0,
+  }))
+}
+
 /**
  * Multi-dimension Search Analytics query used by the per-page daily store.
  *
@@ -524,17 +537,8 @@ export async function querySearchAnalyticsRows(
       throw new GscApiError(res.status, googleStatus, googleReason, message, rawBody.slice(0, 500), retryAfterMs)
     }
 
-    const data = await res.json() as {
-      rows?: Array<{ keys?: unknown; clicks?: unknown; impressions?: unknown; ctr?: unknown; position?: unknown }>
-    }
-
-    return (data.rows ?? []).map((r) => ({
-      keys:        Array.isArray(r.keys) ? r.keys.map((k) => String(k)) : [],
-      clicks:      Number(r.clicks) || 0,
-      impressions: Number(r.impressions) || 0,
-      ctr:         Number(r.ctr) || 0,
-      position:    Number(r.position) || 0,
-    }))
+    const data = await res.json() as Parameters<typeof toAnalyticsRows>[0]
+    return toAnalyticsRows(data)
   } catch (err) {
     if (err instanceof GscApiError) throw err
     const msg = err instanceof Error ? err.message : String(err)

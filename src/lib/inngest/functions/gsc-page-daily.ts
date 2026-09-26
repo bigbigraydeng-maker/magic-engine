@@ -103,6 +103,27 @@ export function buildPullEvents(orders: readonly PullOrder[]): PullEvent[] {
   }))
 }
 
+/** Close the fan-out's run log inside its own step (a step, so a replay never writes it twice). */
+function finishFanOutLog(
+  step: FanOutStep,
+  stepId: 'log-finish-plan-failed' | 'log-finish-empty' | 'log-finish-dispatched',
+  run: ReturnType<typeof cronRunHandle>,
+  opts: Parameters<ReturnType<typeof cronRunHandle>['finish']>[0],
+): Promise<null> {
+  return step.run(stepId, async () => {
+    await run.finish(opts)
+    return null
+  })
+}
+
+/** One FanOutReceipt from the shared fields plus this run's outcome. */
+function fanOutReceipt(
+  started: { today: string; createdAt: string },
+  outcome: Pick<FanOutReceipt, 'status' | 'clients' | 'orders_dispatched' | 'daily_orders' | 'backfill_orders' | 'error'>,
+): FanOutReceipt {
+  return { job: GSC_PAGE_DAILY_JOB, today: started.today, no_publish: true, created_at: started.createdAt, ...outcome }
+}
+
 /** Run one dispatch: plan, send one event per order, write one run log. */
 export async function runGscPageDailyFanOut(step: FanOutStep, deps: FanOutDeps): Promise<FanOutReceipt> {
   // "today" must be computed inside a step: a replay after midnight Pacific
@@ -114,84 +135,42 @@ export async function runGscPageDailyFanOut(step: FanOutStep, deps: FanOutDeps):
     createdAt: new Date().toISOString(),
   }))
   const run = cronRunHandle(GSC_PAGE_DAILY_JOB, started.runLogId, started.startedAt)
-  const base = {
-    job: GSC_PAGE_DAILY_JOB,
-    today: started.today,
-    no_publish: true as const,
-    created_at: started.createdAt,
-  }
+  const none = { orders_dispatched: 0, daily_orders: 0, backfill_orders: 0 }
 
   const plan = await step.run('plan', async () => deps.buildPlan(started.today))
-
   if (!plan.ok) {
-    await step.run('log-finish-plan-failed', async () => {
-      await run.finish({ processed: 0, completed: 0, failed: 1, error: `plan failed: ${plan.reason}` })
-      return null
-    })
-    return {
-      ...base,
-      status: 'plan_failed',
-      clients: 0,
-      orders_dispatched: 0,
-      daily_orders: 0,
-      backfill_orders: 0,
-      error: plan.reason,
-    }
+    const error = `plan failed: ${plan.reason}`
+    await finishFanOutLog(step, 'log-finish-plan-failed', run, { processed: 0, completed: 0, failed: 1, error })
+    return fanOutReceipt(started, { status: 'plan_failed', clients: 0, ...none, error: plan.reason })
   }
 
   const events = buildPullEvents(plan.orders)
   const dailyOrders = plan.orders.filter((o) => o.kind === 'daily').length
   const backfillOrders = events.length - dailyOrders
-
   if (events.length === 0) {
-    await step.run('log-finish-empty', async () => {
-      await run.finish({
-        processed: 0,
-        completed: 0,
-        failed: 0,
-        summary: { today: started.today, clients: plan.clients },
-      })
-      return null
-    })
-    return {
-      ...base,
-      status: 'nothing_to_do',
-      clients: plan.clients,
-      orders_dispatched: 0,
-      daily_orders: 0,
-      backfill_orders: 0,
-      error: null,
-    }
+    const summary = { today: started.today, clients: plan.clients }
+    await finishFanOutLog(step, 'log-finish-empty', run, { processed: 0, completed: 0, failed: 0, summary })
+    return fanOutReceipt(started, { status: 'nothing_to_do', clients: plan.clients, ...none, error: null })
   }
 
   await step.sendEvent('dispatch-pulls', events)
 
   // These are dispatch counts, not pull results: each order writes its own
   // receipt and its own run log when it actually runs.
-  await step.run('log-finish-dispatched', async () => {
-    await run.finish({
-      processed: events.length,
-      completed: events.length,
-      failed: 0,
-      summary: {
-        today: started.today,
-        counts_are: 'dispatched_not_pulled',
-        clients: plan.clients,
-        daily_orders: dailyOrders,
-        backfill_orders: backfillOrders,
-      },
-    })
-    return null
+  const counts = { daily_orders: dailyOrders, backfill_orders: backfillOrders }
+  await finishFanOutLog(step, 'log-finish-dispatched', run, {
+    processed: events.length,
+    completed: events.length,
+    failed: 0,
+    summary: { today: started.today, counts_are: 'dispatched_not_pulled', clients: plan.clients, ...counts },
   })
-  return {
-    ...base,
+  return fanOutReceipt(started, {
     status: 'dispatched',
     clients: plan.clients,
     orders_dispatched: events.length,
-    daily_orders: dailyOrders,
-    backfill_orders: backfillOrders,
+    ...counts,
     error: null,
-  }
+  })
 }
 
 /** Dependency-injected fan-out, so tests can inject a fake plan and a fake step. */

@@ -317,7 +317,11 @@ function skippedOutcome(order: PullOrder): PullOutcome {
 }
 
 /** Build the outcome for an order that ran (or failed) against a connected client. */
-function pulledOutcome(order: PullOrder, receiptId: string, r: RangeResult): PullOutcome {
+function pulledOutcome(
+  order: PullOrder,
+  receiptId: string,
+  r: RangeResult,
+): PullOutcome & { readonly status: 'complete' | 'truncated' | 'failed' } {
   const { status, error } = statusOf(r)
   return {
     receipt_id: receiptId,
@@ -340,19 +344,15 @@ function pulledOutcome(order: PullOrder, receiptId: string, r: RangeResult): Pul
   }
 }
 
-/** Run one pull order end to end; never throws once a step has failed. */
-export async function runPageDailyPull(
+/** The `open-receipt` step: resolve the client's GSC property and open this order's receipt. */
+function openReceiptStep(
   step: PullStep,
   deps: PullDeps,
   order: PullOrder,
   ctx: PullContext,
-): Promise<PullOutcome> {
-  const started = await step.run('log-start', async () => ({
-    runLogId: await startCronRunId(GSC_PAGE_DAILY_JOB),
-    startedAt: Date.now(),
-  }))
-
-  const opened = await step.run('open-receipt', async (): Promise<{ siteUrl: string | null }> => {
+  started: { runLogId: string; startedAt: number },
+): Promise<{ siteUrl: string | null }> {
+  return step.run('open-receipt', async (): Promise<{ siteUrl: string | null }> => {
     const siteUrl = await deps.loadSiteUrl(order.client_id)
     if (!siteUrl) return { siteUrl: null }
     await openReceipt(deps.supabase, {
@@ -368,6 +368,41 @@ export async function runPageDailyPull(
     })
     return { siteUrl }
   })
+}
+
+/** The `close-receipt` step: write the final status and counters onto the receipt. */
+function closeReceiptStep(
+  step: PullStep,
+  deps: PullDeps,
+  receiptId: string,
+  outcome: PullOutcome & { readonly status: 'complete' | 'truncated' | 'failed' },
+): Promise<null> {
+  return step.run('close-receipt', async () => {
+    await closeReceipt(deps.supabase, receiptId, {
+      status: outcome.status,
+      failure_kind: outcome.failure_kind,
+      row_count: outcome.row_count,
+      request_count: outcome.request_count,
+      skipped_long_urls: outcome.skipped_long_urls,
+      error: outcome.error,
+    })
+    return null
+  })
+}
+
+/** Run one pull order end to end; never throws once a step has failed. */
+export async function runPageDailyPull(
+  step: PullStep,
+  deps: PullDeps,
+  order: PullOrder,
+  ctx: PullContext,
+): Promise<PullOutcome> {
+  const started = await step.run('log-start', async () => ({
+    runLogId: await startCronRunId(GSC_PAGE_DAILY_JOB),
+    startedAt: Date.now(),
+  }))
+
+  const opened = await openReceiptStep(step, deps, order, ctx, started)
 
   const finish = async (outcome: PullOutcome): Promise<PullOutcome> => {
     await step.run('log-finish', async () => {
@@ -384,17 +419,7 @@ export async function runPageDailyPull(
   const r = await pullRange(step, deps, order, opened.siteUrl, started.runLogId)
   const outcome = pulledOutcome(order, started.runLogId, r)
 
-  await step.run('close-receipt', async () => {
-    await closeReceipt(deps.supabase, started.runLogId, {
-      status: outcome.status === 'skipped' ? 'failed' : outcome.status,
-      failure_kind: outcome.failure_kind,
-      row_count: outcome.row_count,
-      request_count: outcome.request_count,
-      skipped_long_urls: outcome.skipped_long_urls,
-      error: outcome.error,
-    })
-    return null
-  })
+  await closeReceiptStep(step, deps, started.runLogId, outcome)
 
   return finish(outcome)
 }
