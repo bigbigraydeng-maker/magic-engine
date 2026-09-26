@@ -143,8 +143,8 @@ describe('the auto-fix denylist never falls out of step with the A rating', () =
 
   it('every protected-path rule is exercised by a sample above', () => {
     const hit = new Set(SAMPLES.map((path) => protectionFor(path)))
-    const unhit = PROTECTED_PATHS.filter((rule: unknown) => !hit.has(rule))
-    expect(unhit.map((rule: { why: string }) => rule.why)).toEqual([])
+    const unhit = PROTECTED_PATHS.filter((rule) => !hit.has(rule))
+    expect(unhit.map((rule) => rule.why)).toEqual([])
   })
 
   it('keeps the root .env.example template and env-looking source files out', () => {
