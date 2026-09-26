@@ -36,12 +36,8 @@
  *
  * 密钥由 `node --env-file` 加载进 `process.env`，脚本自己不读、不打印任何密钥。
  *
- * ## 两个「看着不对其实是对的」
+ * ## 一个「看着不对其实是对的」
  *
- * · **`@types/jsdom` 是 `^30`，装的 `jsdom` 是 `29.1.1`** —— 大版本号对不上，但
- *   DefinitelyTyped **压根没有发过 29.x**（实测 `npm view @types/jsdom versions`：
- *   …27.0.0 / 28.0.0–28.0.3 / 30.0.0，中间是空的），`^29` 装不上会直接报 notarget。
- *   `^30` 对 29.1.1 跑得通、`tsc --noEmit` 干净。别「顺手修」成 `^29`。
  * · **为什么不写成 vitest 用例白拿已配好的 jsdom** —— 仓库 `vitest.config.ts` 没有限定
  *   `include`，用的是 vitest 默认那条 `test`/`spec` 文件名通配。写成测试文件就会被
  *   `npm test` 收进去，
@@ -63,6 +59,7 @@
  *
  * 三条 `select`，无写操作。安全地对生产跑。
  */
+// jsdom 的类型在 scripts/types/jsdom.d.ts（手写最小声明，那里写了为什么不装类型包）
 import { JSDOM } from 'jsdom'
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchAll } from '@/lib/supabase-paginate'
