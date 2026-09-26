@@ -602,6 +602,7 @@ describe('loadCardSuppression', () => {
         seoRow({
           action_type: 'seo.publish_blog',
           status: 'completed',
+          created_at: new Date(NOW.getTime() - 70 * 86_400_000).toISOString(),
           updated_at: new Date(NOW.getTime() - 60 * 86_400_000).toISOString(),
           steps_json: { keyword: 'article' },
         }),
