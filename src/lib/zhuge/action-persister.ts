@@ -30,6 +30,7 @@ import type { FlywheelName, ExecutionMode } from '@/lib/flywheel/adapters/types'
 import { saveDecisionHistory } from '@/lib/memory/service'
 import { assertAdsExpectedMetric } from '@/lib/flywheel/metric-registry'
 import { resolveClientAdsExpectedMetric } from '@/lib/flywheel/ads-expected-metric'
+import { canonicalUrl } from '@/lib/url/canonical-url'
 
 // ── Dimension mappings ────────────────────────────────────────────────────────
 
@@ -327,13 +328,20 @@ export function actionTypeToTitle(actionType: string): string {
  * metadata/steps_json is part of the identity. Actions without a keyword fall
  * back to action_type-only, preserving the original behaviour for
  * conduct-sourced actions.
+ *
+ * When the card also carries a page URL (`url` or `page_url`), the canonical URL
+ * is part of the identity too: the patrol's "not indexed" / "missing internal
+ * link" cards have a URL but no keyword, and without it two cards for different
+ * pages collided — only one survived a batch and they superseded each other day
+ * after day. Cards without a URL (ads, GEO, social, conduct) keep the old key.
  */
-export function executionItemDedupKey(actionType: string, keyword: unknown): string {
+export function executionItemDedupKey(actionType: string, keyword: unknown, url?: unknown): string {
   const kw =
     typeof keyword === 'string' && keyword.trim().length > 0
       ? keyword.trim().toLowerCase()
       : ''
-  return `${actionType}::${kw}`
+  const page = typeof url === 'string' && url.trim().length > 0 ? canonicalUrl(url.trim()) : null
+  return page ? `${actionType}::${page}::${kw}` : `${actionType}::${kw}`
 }
 
 // ── writeExecutionItems ────────────────────────────────────────────────────────
@@ -344,7 +352,7 @@ export function executionItemDedupKey(actionType: string, keyword: unknown): str
  * Writes ALL dimensions (including reputation + competitor) unlike
  * flywheel_actions which skips those two.
  *
- * Deduplication logic — keyed by (action_type, keyword) via executionItemDedupKey,
+ * Deduplication logic — keyed by (action_type, canonical page URL when present, keyword) via executionItemDedupKey,
  * NOT action_type alone (the patrol emits several cards of one action_type for
  * different keywords; keying on action_type alone let duplicates of the same
  * keyword accumulate +1 per run — Sungenix/IB 2026-08-01 incident):
@@ -394,7 +402,7 @@ export async function writeExecutionItems(
   // be superseded, not just whichever the Map kept last.
   const byDedupKey = new Map<string, ExistingRow[]>()
   for (const row of (existingRows as ExistingRow[] | null) ?? []) {
-    const key = executionItemDedupKey(row.action_type, row.steps_json?.keyword)
+    const key = executionItemDedupKey(row.action_type, row.steps_json?.keyword, row.steps_json?.url ?? row.steps_json?.page_url)
     const group = byDedupKey.get(key)
     if (group) group.push(row)
     else byDedupKey.set(key, [row])
@@ -405,7 +413,7 @@ export async function writeExecutionItems(
   const batchKeys = new Set<string>()
 
   for (const action of actions) {
-    const key = executionItemDedupKey(action.action_type, action.metadata?.keyword)
+    const key = executionItemDedupKey(action.action_type, action.metadata?.keyword, action.metadata?.url ?? action.metadata?.page_url)
     // Same finding appearing twice in one batch: insert only the first
     if (batchKeys.has(key)) continue
     batchKeys.add(key)
