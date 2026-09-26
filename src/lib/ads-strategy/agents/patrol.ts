@@ -18,7 +18,7 @@ import { loadDiagnosisInput } from '../portfolio/diagnostics/loader'
 import { runDiagnostics } from '../portfolio/diagnostics/run'
 import { runOpportunities, type DataCompleteness } from '../portfolio/opportunities/run'
 import { buildDigestGoalContext } from '../portfolio/goal-context'
-import type { AccountInput, Diagnosis, ExcludedEntity } from '../portfolio/diagnostics/types'
+import type { AccountInput, AdLevelCoverage, Diagnosis, ExcludedEntity } from '../portfolio/diagnostics/types'
 import type { DigestGoalContext } from '../portfolio/internal-digest'
 
 /** 一个账户某一层日数据的同步结果——只关心成没成。 */
@@ -133,6 +133,8 @@ export interface GrowthStatePayload {
   /** 因为同一单位已在「可以加力的地方」出现而没在「要看的事」里重复显示的条数（D5 ⊇ O3）。 */
   problemsSupersededByOpportunities: number
   excluded: ExcludedEntity[]
+  /** 每个广告账户上广告级规则（D2/D10）跑没跑（Magic Bridge 据此区分「没发现」和「没检查」） */
+  adLevelCoverage: AdLevelCoverage[]
   goal: DigestGoalContext | null
   evaluatedAt: string
 }
@@ -213,6 +215,7 @@ export async function buildGrowthState(
       opportunitiesSkippedReason: opportunityRun.skippedReason,
       problemsSupersededByOpportunities: supersededCount,
       excluded: diagnosisRun.excluded,
+      adLevelCoverage: diagnosisRun.adLevelCoverage ?? [],
       goal,
       evaluatedAt,
     }

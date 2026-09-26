@@ -15,12 +15,13 @@ import { diagnoseUnharvestedAudience } from './d4-unharvested-audience'
 import { diagnoseBudgetResultMismatch } from './d5-budget-result-mismatch'
 import { diagnoseAccountHealth, diagnoseClientConfigHealth, diagnoseOutcomeTruthGap } from './d7-d8-health'
 import { diagnosePlacementLeak } from './d9-placement-leak'
-import { diagnoseAdLevelRules } from './d2-d10-ad-rules'
-import type { Diagnosis, DiagnosisInput, DiagnosisRun, ExcludedEntity } from './types'
+import { adLevelCoverage, diagnoseAdLevelRules } from './d2-d10-ad-rules'
+import type { AdLevelCoverage, Diagnosis, DiagnosisInput, DiagnosisRun, ExcludedEntity } from './types'
 
 export function runDiagnostics(input: DiagnosisInput): DiagnosisRun {
   const diagnoses: Diagnosis[] = []
   const excluded: ExcludedEntity[] = []
+  const coverage: AdLevelCoverage[] = []
 
   for (const account of input.accounts) {
     const ctx = buildAccountContext(account, input.date)
@@ -43,6 +44,7 @@ export function runDiagnostics(input: DiagnosisInput): DiagnosisRun {
         adAccountId: account.adAccountId, level: 'account', id: account.adAccountId, name: ctx.accountRow?.entity_name ?? null,
         reason: 'shared_account', detail: '这个广告账户同时登记给了别的客户，只做账户级诊断（投放卡住、授权/数据体检）',
       })
+      coverage.push({ adAccountId: account.adAccountId, ran: false, reason: 'shared_account', adsChecked: 0 })
       continue
     }
 
@@ -51,6 +53,7 @@ export function runDiagnostics(input: DiagnosisInput): DiagnosisRun {
     if (d4) diagnoses.push(d4)
     diagnoses.push(...diagnoseBudgetResultMismatch(ctx, input))
     diagnoses.push(...diagnoseAdLevelRules(ctx, input))
+    coverage.push(adLevelCoverage(ctx, input))
     const d8 = diagnoseOutcomeTruthGap(ctx, input)
     if (d8) diagnoses.push(d8)
   }
@@ -71,5 +74,5 @@ export function runDiagnostics(input: DiagnosisInput): DiagnosisRun {
   diagnoses.push(...diagnoseClientConfigHealth(input))
   const rank = (d: Diagnosis) => (d.status === 'hit' ? 0 : 1)
   diagnoses.sort((a, b) => rank(a) - rank(b) || a.code.localeCompare(b.code))
-  return { clientId: input.clientId, date: input.date, evaluatedAt: input.evaluatedAt, diagnoses, excluded }
+  return { clientId: input.clientId, date: input.date, evaluatedAt: input.evaluatedAt, diagnoses, excluded, adLevelCoverage: coverage }
 }
