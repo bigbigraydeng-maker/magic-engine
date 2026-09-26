@@ -217,7 +217,7 @@ export async function runAiAutoReviewForClient(
         await deps.onCircuitBreakerTripped({
           clientId,
           rule: 'volume_spike',
-          detail: `单次批处理内硬顶触发，已处理 ${items.length}/${rows.length} 条后停止`,
+          detail: `单次批处理内硬顶触发，已处理 ${items.length - sweep.items.length}/${rows.length} 条后停止`,
         })
       }
       break
@@ -243,7 +243,7 @@ export async function runAiAutoReviewForClient(
         await deps.onCircuitBreakerTripped({
           clientId,
           rule: 'single_record_amount',
-          detail: `单条记录金额异常，已处理 ${items.length}/${rows.length} 条后停止`,
+          detail: `单条记录金额异常，已处理 ${items.length - sweep.items.length}/${rows.length} 条后停止`,
         })
       }
       break

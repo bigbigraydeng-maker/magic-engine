@@ -409,6 +409,20 @@ describe('不该发的都不发', () => {
     expect(r.message).toContain('35 天')
   })
 
+  it('窗口天数跟着目标平台走，不写死 7 天：窗口 3 天的平台，4 天前的不发、2 天前的照发', async () => {
+    seed(db, { outcome: { occurred_at: new Date(Date.now() - 4 * 86_400_000).toISOString() } })
+    const w3 = makeWriter({ maxEventAgeDays: 3 })
+    const r = await sendApprovedOutcome(OUTCOME, deps(db, w3))
+    expect(r.status).toBe('expired_no_send')
+    expect(w3.sendSpy).not.toHaveBeenCalled()
+
+    const db2 = new FakeDb()
+    seed(db2, { outcome: { occurred_at: new Date(Date.now() - 2 * 86_400_000).toISOString() } })
+    const w3b = makeWriter({ maxEventAgeDays: 3 })
+    const r2 = await sendApprovedOutcome(OUTCOME, deps(db2, w3b))
+    expect(r2.status).toBe('confirmed')
+  })
+
   it('组装不出来的不发（例如不认识的币种）', async () => {
     seed(db)
     const w = makeWriter({
