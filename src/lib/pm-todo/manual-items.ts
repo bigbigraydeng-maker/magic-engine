@@ -24,6 +24,7 @@ import { clientListUnreadableItem, loadActiveClients, type ClientRow } from './c
 import { pushConversionReviewItems } from './conversion-review-items'
 import { pushAiAutoReviewCircuitBreakerItems } from './ai-auto-review-circuit-breaker-items'
 import { pushMetaTokenHealthItems } from './meta-token-health-items'
+import { deployCheckFailedItem, pushDeployHealthItems } from './deploy-health-items'
 import { pushMessengerDraftItems } from './messenger-draft-items'
 import { pushKnowledgeFactExpiringItems } from './knowledge-fact-expiring-items'
 import { pushDailyPlanMeasurementItems } from './daily-plan-measurement-items'
@@ -169,6 +170,8 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
         href: '',
       })
     }),
+    // 主干合进去的东西超过 30 分钟没上线正式网站（2026-09-25 编译坏了 7 小时没人知道）
+    (b) => pushDeployHealthItems(b, process.env, fetch, now).catch((e: unknown) => { b.push(deployCheckFailedItem(e)) }),
     // 平台候选到了复查日期 —— 不落库、不查表，纯本地日期判断
     async (b) => pushPlatformCandidateReviewItems(b, now),
     // 台账（docs/ledger）：决定了没做 / 做了没验 / 验了不成 —— 读仓库里的文件，不查表，
