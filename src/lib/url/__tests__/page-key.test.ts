@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from 'vitest'
 import { gscPageKey, GSC_PAGE_KEY_TRACKING_KEYS, GSC_PAGE_KEY_TRACKING_PREFIXES } from '../page-key'
 

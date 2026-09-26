@@ -80,6 +80,8 @@ export const PRIMARY_KEYS: Readonly<Record<string, readonly string[]>> = {
 /** Internal view: the failure queue is shared with the queries but not part of the public API. */
 interface FakeDbState extends FakeDb {
   readonly failures: FakeFailure[]
+  /** Upsert lookup indexes per `${table}|${conflict columns}`, kept like a real unique index. */
+  readonly indexes: Map<string, { rows: Row[]; index: Map<string, Row> }>
 }
 
 type Filter = (row: Row) => boolean
@@ -338,21 +340,34 @@ class FakeQueryImpl implements FakeQuery {
       }
       seen.add(key)
     }
+    const index = this.upsertIndex(rows, conflict)
     const affected: Row[] = []
     for (const [i, row] of prepared.entries()) {
       const key = keyOf(row, conflict)
-      const existing = rows.find((r) => keyOf(r, conflict) === key)
+      const existing = index.get(key)
       if (existing) {
         // ON CONFLICT DO UPDATE sets only the columns that were sent — no defaults.
         Object.assign(existing, this.writeValues[i])
         affected.push(existing)
       } else {
         rows.push(row)
+        index.set(key, row)
         affected.push(row)
       }
     }
     this.db.calls.push(`upsert ${this.table} ${prepared.length}`)
     return { data: this.returnRows ? affected.map((r) => ({ ...r })) : null, error: null }
+  }
+
+  /** The persistent lookup index for this table + conflict columns (built on first use). */
+  private upsertIndex(rows: Row[], conflict: readonly string[]): Map<string, Row> {
+    const name = `${this.table}|${conflict.join(',')}`
+    const cached = this.db.indexes.get(name)
+    // Reuse only while it still describes this exact array (tests may replace a table wholesale).
+    if (cached && cached.rows === rows && cached.index.size === rows.length) return cached.index
+    const built = new Map(rows.map((r) => [keyOf(r, conflict), r] as const))
+    this.db.indexes.set(name, { rows, index: built })
+    return built
   }
 
   private executeUpdate(): DbResult {
@@ -381,11 +396,13 @@ export function createFakeDb(): FakeDb {
   const tables: Record<string, Row[]> = {}
   const calls: string[] = []
   const failures: FakeFailure[] = []
+  const indexes = new Map<string, { rows: Row[]; index: Map<string, Row> }>()
 
   const db: FakeDbState = {
     tables,
     calls,
     failures,
+    indexes,
     client: {
       from(table: string): FakeQuery {
         return new FakeQueryImpl(db, table)
@@ -398,6 +415,7 @@ export function createFakeDb(): FakeDb {
       for (const key of Object.keys(tables)) delete tables[key]
       calls.length = 0
       failures.length = 0
+      indexes.clear()
     },
   }
 
