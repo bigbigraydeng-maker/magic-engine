@@ -87,7 +87,7 @@ export default function RegisterForm({ next, fromProspect, zh = false, authFaile
       case 'code_cooldown':
         return '验证码刚发过，请一分钟后再试。'
       case 'account_exists':
-        return '这个邮箱已经注册过。请直接用 Google 登录，或联系 hello@magicengine.cloud。'
+        return '这个邮箱已经注册过。请用注册时的邮箱收验证码登录，或写信给 hello@magicengine.cloud。'
       case 'business_exists':
         return '这个公司名称已经被注册过，请换一个写法（比如加上城市）。'
       case 'staff_account':
@@ -231,7 +231,7 @@ export default function RegisterForm({ next, fromProspect, zh = false, authFaile
           {zh ? (
             signIn ? (
               <>这个邮箱已经注册过，登录验证码已发到{' '}
-                <span className="font-semibold text-me-charcoal">{pending.email}</span>。</>
+                <span className="font-semibold text-me-charcoal">{pending.email}</span>。没收到的话看看垃圾邮件箱。</>
             ) : (
               <>验证码已发到{' '}
                 <span className="font-semibold text-me-charcoal">{pending.email}</span>。
@@ -327,6 +327,9 @@ export default function RegisterForm({ next, fromProspect, zh = false, authFaile
         next={next}
         label={zh ? '用 Google 账号继续' : 'Continue with Google'}
       />
+      {zh && (
+        <p className="text-center text-xs text-me-charcoal/45">国内网络打不开 Google 的话，用下面的邮箱验证码注册。</p>
+      )}
 
       <div className="flex items-center gap-3">
         <div className="h-px flex-1 bg-me-charcoal/10" />

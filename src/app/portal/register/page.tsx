@@ -150,7 +150,7 @@ export default function RegisterPage({ searchParams }: Props) {
 
           <p className="mt-7 text-center text-xs text-me-charcoal/45">
             {zh ? (
-              '已经注册过？直接填邮箱，我们发登录验证码给你'
+              '已经注册过？照常填公司名和邮箱，我们会改发登录验证码给你'
             ) : (
               <>
                 Already have an account?{' '}

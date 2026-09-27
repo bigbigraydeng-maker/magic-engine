@@ -35,6 +35,12 @@ describe('Tools Lab ad check-up entry', () => {
     expect(mocks.from).not.toHaveBeenCalled()
   })
 
+  it('a returning customer coming back through the entry (not a first sign-in) is not counted again', async () => {
+    onboarding(true)
+    await expect(resolveSelfServeLanding(CLIENT, ADS_CHECK_ENTRY, false)).resolves.toBe(`/meta-ads-ai/${CLIENT}`)
+    expect(mocks.record).not.toHaveBeenCalled()
+  })
+
   it('an explicit own check-up link also skips the wizard but is not counted as a Tools Lab lead', async () => {
     onboarding(false)
     await expect(resolveSelfServeLanding(CLIENT, `/meta-ads-ai/${CLIENT}`, false)).resolves.toBe(`/meta-ads-ai/${CLIENT}`)

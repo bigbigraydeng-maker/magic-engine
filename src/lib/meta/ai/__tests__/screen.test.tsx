@@ -62,7 +62,7 @@ describe('nontechnical connection feedback',()=>{
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ...status,pilot:{ invited:true,new_actions_allowed:false,sponsored_analysis_enabled:false,reason:'service_paused',source:'ops' } })))
     render(<MetaAdsScreen clientId="tenant" />)
     expect(await screen.findByRole('status')).toHaveTextContent('服务目前已暂停')
-    expect(screen.getAllByRole('button',{ name:'断开 Meta 连接' })[0]).toBeEnabled()
+    expect(screen.getAllByRole('button',{ name:'断开 Facebook 连接' })[0]).toBeEnabled()
   })
 
   it('shows a Chinese hosted report without asking for an AI key',async()=>{
@@ -155,7 +155,8 @@ describe('nontechnical connection feedback',()=>{
   it('uses the Magic Engine brand header (no internal code name) and drops invitation-test wording',async()=>{
     render(<MetaAdsScreen clientId="tenant" />)
     expect(screen.getByRole('heading',{ name:'Facebook / Instagram 广告体检' })).toBeInTheDocument()
-    expect(screen.getByText('Magic Engine · Facebook 广告体检')).toBeInTheDocument()
+    expect(screen.getByText(/Magic Engine · Facebook 广告体检/)).toBeInTheDocument()
+    expect(screen.getByRole('link',{ name:'回到工作台' })).toHaveAttribute('href','/dashboard/clients/tenant')
     expect(screen.queryByText(/Magic Bridge/)).not.toBeInTheDocument()
     expect(screen.queryByText(/邀请测试/)).not.toBeInTheDocument()
     expect(screen.queryByText(/TikTok/)).not.toBeInTheDocument()

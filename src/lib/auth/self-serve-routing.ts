@@ -91,7 +91,9 @@ export async function resolveSelfServeLanding(
   // Someone who came for the ad check-up goes straight to it: the check-up needs nothing from the onboarding
   // wizard, and the wizard in front of it lost most of these sign-ups (Tools Lab step 1 design §1.4).
   if (nextPath === adsCheckPath(clientId)) {
-    if (requestedPath === ADS_CHECK_ENTRY) await recordToolSignupOnce(clientId, 'ads-check')
+    // A Tools Lab lead is a first verified sign-in through the entry (`welcome` = the welcome grant was just made),
+    // not a returning customer re-entering the check-up.
+    if (welcome && requestedPath === ADS_CHECK_ENTRY) await recordToolSignupOnce(clientId, 'ads-check')
     return nextPath
   }
   const { data } = await supabaseAdmin
