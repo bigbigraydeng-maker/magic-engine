@@ -231,6 +231,8 @@ describe('config and secret files rate A, not B', () => {
     ['.babelrc', 'build-runtime'],
     ['babel.config.js', 'build-runtime'],
     ['.swcrc', 'build-runtime'],
+    ['.postcssrc', 'build-runtime'],
+    ['.postcssrc.json', 'build-runtime'],
     ['jest.config.ts', 'control-plane'],
   ])('%s is A (%s)', (path, category) => {
     const result = rate(path)
@@ -642,6 +644,21 @@ describe('readDeclaredRisk — the spellings real PR bodies use', () => {
     ['## 风险级：A（…）', 'short label as a heading'],
     ['| 风险级别 | A |', 'table row'],
     ['- 风险等级：A 级', 'list item with 级'],
+    // #2121 review round 1 — W121-1: no colon, natural joining words
+    ['风险级别为 A', 'W121-1 为'],
+    ['风险级别是 A 级', 'W121-1 是'],
+    ['风险级别 = A', 'W121-1 ='],
+    ['风险级别 → A', 'W121-1 →'],
+    ['Risk level is A', 'W121-1 English is'],
+    ['## 风险级别（自报）\nA（控制面）', 'W121-1 heading with a tail, level on the next line'],
+    ['## 风险级说明\n\n**A 级**', 'W121-1 heading 风险级说明'],
+    // DR121-1: weak labels with a standalone capital level
+    ['风险分级：A 级', 'DR121-1 #1730 / #1734'],
+    ['风险 **A 级**', 'DR121-1 #1979 / #1843'],
+    // DR121-2: brackets and punctuation around the declaration (old parser read these)
+    ['（风险级别：A）', 'DR121-2 full-width brackets'],
+    ['「风险级别：A」', 'DR121-2 corner quotes'],
+    ['风险级别：A、控制面', 'DR121-2 enumeration comma'],
   ])('%j reads as A (%s)', (body) => {
     expect(readDeclaredRisk(body)).toEqual({ risk: 'A', unreadable: null })
   })
@@ -665,6 +682,11 @@ describe('readDeclaredRisk — the spellings real PR bodies use', () => {
     'Risk: low, docs only',
     'high-risk area touched? no',
     'asterisk: A marks the footnotes',
+    // DR121-5: bare risk / 风险 needs a standalone CAPITAL level
+    'Risk: a stale cache',
+    'this reduces the risk a lot',
+    '风险评估：A 方案更稳',
+    '风险：A/B 两种都有',
     '<!-- 风险级别：C -->',
   ])('%j is not a declaration', (body) => {
     expect(readDeclaredRisk(body)).toEqual({ risk: null, unreadable: null })
@@ -686,6 +708,10 @@ describe('readDeclaredRisk — the spellings real PR bodies use', () => {
     expect(parseDeclaredRisk('Risk: B\n## 风险级\nC')).toBe('A')
   })
 
+  it('a strong label with a lower-case letter still rates A — as unreadable', () => {
+    expect(readDeclaredRisk('Risk Level: a')).toEqual({ risk: 'A', unreadable: 'Risk Level: a' })
+  })
+
   it('treats non-strings as no declaration', () => {
     expect(readDeclaredRisk(undefined)).toEqual({ risk: null, unreadable: null })
     expect(readDeclaredRisk(null)).toEqual({ risk: null, unreadable: null })
@@ -702,7 +728,9 @@ describe('an unreadable declaration is reported as such, not as "自报 A"', () 
     })
     expect(result.risk).toBe('A')
     expect(result.computedRisk).toBe('B')
-    expect(result.reasons[0]).toBe('PR 正文写了风险级但读不懂（「风险级别：见下表」）—— 按 A 处理；请改成「风险级别：A」这一种写法')
+    expect(result.reasons[0]).toBe(
+      'PR 正文写了风险级但读不懂（`风险级别：见下表`）—— 按 A 处理；本意是 B/C 就写 `风险级别：B`（或 C），改完会自动重判',
+    )
   })
 
   it('keeps the plain wording for a readable declaration', () => {
@@ -713,5 +741,47 @@ describe('an unreadable declaration is reported as such, not as "自报 A"', () 
   it('the #2075 body now rates its scripts/auto-dev diff A', () => {
     const declared = readDeclaredRisk('## 目标\n自动开发车道\n\n## 风险级\n\n**A 级**（车道本身是控制面）\n')
     expect(classifyRisk({ files: [file('scripts/auto-dev/pick.mjs')], declaredRisk: declared.risk }).risk).toBe('A')
+  })
+})
+
+describe('the unreadable-line quote is safe to post (W121-2)', () => {
+  it('wraps the line in a code span, so @mentions and <!-- stay inert', () => {
+    const declared = readDeclaredRisk('风险级别：@ziya 看一下 <!-- 然后')
+    const result = classifyRisk({
+      files: [file('src/lib/geo/score.ts')],
+      declaredRisk: declared.risk,
+      declaredUnreadable: declared.unreadable,
+    })
+    expect(result.reasons[0]).toContain('（`风险级别：@ziya 看一下`）')
+  })
+
+  it('drops backticks from the quoted line so the code span cannot be closed early', () => {
+    const result = classifyRisk({ files: [file('src/lib/geo/score.ts')], declaredRisk: 'A', declaredUnreadable: 'a`b' })
+    expect(result.reasons[0]).toContain('（`ab`）')
+  })
+})
+
+/**
+ * DR121-3: `\s*[:：|]?\s*` after a label backtracked quadratically — a 64 KB
+ * body took 4–8 s inside a required check. Every hostile shape below must
+ * stay well under the budget.
+ */
+describe('readDeclaredRisk stays linear on hostile 64 KB bodies (DR121-3)', () => {
+  const KB64 = 64 * 1024
+  it.each([
+    ['label then blanks', `风险级别${' '.repeat(KB64)}x`],
+    ['label then colons and blanks', `风险级别${' ：'.repeat(KB64 / 2)}x`],
+    ['many label lines', '风险级别\n'.repeat(KB64 / 5)],
+    ['many headings', '## 风险级\n\n'.repeat(KB64 / 8)],
+    ['blanks inside a line', `a${' '.repeat(KB64)}b`],
+    ['pipes and blanks', `| ${' |'.repeat(KB64 / 2)} x`],
+    ['unclosed comments', '<!--'.repeat(KB64 / 4)],
+    ['bold marks', '*'.repeat(KB64)],
+    ['weak labels', '风险 '.repeat(KB64 / 3)],
+    ['is is is', `Risk level${' is'.repeat(KB64 / 3)} x`],
+  ])('%s', (_label, body) => {
+    const start = performance.now()
+    readDeclaredRisk(body)
+    expect(performance.now() - start).toBeLessThan(200)
   })
 })
