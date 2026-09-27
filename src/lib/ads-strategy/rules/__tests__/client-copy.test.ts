@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  SELF_SERVE_FOOTER,
+  SELF_SERVE_INTRO,
   formatDay,
   formatMoney,
   formatPct,
@@ -401,5 +403,158 @@ describe('formatters', () => {
 
   it('formatPct', () => {
     expect(formatPct(0.0391)).toBe('3.9%')
+  })
+})
+
+const selfServeOpts = (freq: number | null = null) => ({
+  currency: 'NZD',
+  dataDate: '2026-09-24',
+  campaignFrequency: () => freq,
+  voice: 'self_serve' as const,
+})
+
+describe('toClientFinding — self_serve voice', () => {
+  it('D10 lead suggests editing the form', () => {
+    const f = toClientFinding(
+      hit('D10', {
+        core_metric: 'lead',
+        baseline_source: 'own_history',
+        base_rate: 0.16,
+        recent_rate: 0.039,
+        base_cost_per_result: 7.05,
+        recent_cost_per_result: 33.5,
+        recent_spend: 167.48,
+      }),
+      selfServeOpts(),
+    )
+    expect(f).not.toBeNull()
+    expect((f as ClientRuleFinding).action).toBe(
+      '表单发布后不能直接改：给这条广告换一个新表单（可以复制原来的），只留非问不可的问题，再看两三天。',
+    )
+  })
+
+  it('D10 messaging suggests editing the welcome message', () => {
+    const f = toClientFinding(
+      hit('D10', {
+        core_metric: 'messaging_started',
+        baseline_source: 'own_history',
+        base_rate: 0.2,
+        recent_rate: 0.05,
+        base_cost_per_result: 6,
+        recent_cost_per_result: 20,
+        recent_spend: 60,
+      }),
+      selfServeOpts(),
+    )
+    expect(f).not.toBeNull()
+    expect((f as ClientRuleFinding).action).toBe(
+      '把私信欢迎语的第一句改成直接回答顾客最常问的（价格、地址、怎么约），再看两三天。',
+    )
+  })
+
+  it('D2 creative suggests swapping the image or video', () => {
+    const f = toClientFinding(
+      hit('D2', { base_rate: 0.02, recent_rate: 0.01, frequency_7d: 1.7, fatigue_kind: 'creative' }),
+      selfServeOpts(),
+    )
+    expect(f).not.toBeNull()
+    expect((f as ClientRuleFinding).action).toBe('换一张新图或新视频试试，文字和受众先不动。')
+  })
+
+  it('D2 audience suggests swapping the audience', () => {
+    const f = toClientFinding(
+      hit('D2', { base_rate: 0.02, recent_rate: 0.01, frequency_7d: 3.6, fatigue_kind: 'audience' }),
+      selfServeOpts(),
+    )
+    expect(f).not.toBeNull()
+    expect((f as ClientRuleFinding).action).toBe(
+      '先换一版新图或新视频；过几天还不行，再把这组广告的地区或年龄放宽一点。',
+    )
+  })
+
+  it('D2 unknown kind suggests swapping the image or video', () => {
+    const f = toClientFinding(
+      hit('D2', { base_rate: 0.02, recent_rate: 0.01, frequency_7d: null }),
+      selfServeOpts(null),
+    )
+    expect(f).not.toBeNull()
+    expect((f as ClientRuleFinding).action).toBe('先换一张新图或新视频试试，文字和受众先不动。')
+  })
+
+  it('managed voice keeps the ask sentence', () => {
+    const f = toClientFinding(
+      hit('D10', {
+        core_metric: 'lead',
+        baseline_source: 'own_history',
+        base_rate: 0.16,
+        recent_rate: 0.039,
+        base_cost_per_result: 7.05,
+        recent_cost_per_result: 33.5,
+        recent_spend: 167.48,
+      }),
+      opts(),
+    )
+    expect(f).not.toBeNull()
+    expect((f as ClientRuleFinding).action).toContain('如果你最近自己改过这条广告的表单，请告诉我们。')
+  })
+})
+
+describe('renderRuleSection — live', () => {
+  const liveFinding: ClientRuleFinding = {
+    kind: 'fatigue',
+    adName: 'A',
+    headline: 'HEADLINE_ONE',
+    detail: 'DETAIL_ONE',
+    action: '换一张新图或新视频试试，文字和受众先不动。',
+    spend: 100,
+    explainsCtr: true,
+  }
+
+  it('with findings shows intro and footer exactly once and no managed wording', () => {
+    const out = renderRuleSection({
+      source: 'live',
+      dataDate: '2026-09-24',
+      adsChecked: 12,
+      findings: [liveFinding],
+    })
+    expect(out.startsWith('三、需要留意的广告')).toBe(true)
+    expect(out.split(SELF_SERVE_INTRO)).toHaveLength(2)
+    expect(out.split(SELF_SERVE_FOOTER)).toHaveLength(2)
+    expect(out).not.toContain('你不用动手')
+    expect(out).not.toContain('请告诉我们')
+    expect(out).toContain('HEADLINE_ONE')
+    expect(out).toContain('DETAIL_ONE')
+  })
+
+  it('without findings shows the self-serve empty text', () => {
+    const out = renderRuleSection({
+      source: 'live',
+      dataDate: '2026-09-24',
+      adsChecked: 12,
+      findings: [],
+    })
+    expect(out).toBe(
+      '三、需要留意的广告\n这次没发现需要你动的广告（看了 12 条在花钱的广告，数据截至 9月24日）。',
+    )
+  })
+})
+
+describe('renderRuleSection — new none reasons', () => {
+  it('mixed_pages', () => {
+    expect(renderRuleSection({ source: 'none', reason: 'mixed_pages' })).toContain(
+      '你的账户同时给好几个主页投广告，这次没法判断哪个是你的主页',
+    )
+  })
+
+  it('too_many_ads', () => {
+    expect(renderRuleSection({ source: 'none', reason: 'too_many_ads' })).toContain(
+      '在花钱的广告太多，一次看不完',
+    )
+  })
+
+  it('live_unavailable', () => {
+    expect(renderRuleSection({ source: 'none', reason: 'live_unavailable' })).toContain(
+      '这次没拿到每条广告的数据',
+    )
   })
 })

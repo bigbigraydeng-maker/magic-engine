@@ -9,7 +9,7 @@ export const ADS_RULE_STREAK_GAP_DAYS = 3
 /** 连着这么多次巡察都命中才进待办：只命中一天的多半是波动（2026-09-26 回放：一次单日误报） */
 export const ADS_RULE_MIN_STREAK = 2
 
-export const ADS_RULE_CODES: ReadonlySet<string> = new Set(['D2', 'D10'])
+export const ADS_RULE_CODES: ReadonlySet<string> = new Set(['D2', 'D10', 'D11'])
 
 export interface RuleFinding {
   code: string
@@ -34,10 +34,15 @@ export interface GrowthStateRow {
   } | null
 }
 
-/** `${code}:${ad unit id}`，取第一个 level 为 'ad' 的 unit；没有就 null。 */
+/**
+ * 连续命中计数用的钥匙。有广告单位 → `${code}:${广告 id}`；D11（受众池断供，没有广告单位）→ `D11:${evidence.audience_id}`；
+ * 其它 → null。不对所有码退回「第一个单位」：单位顺序会变，而且两个池子共用一个组时会撞钥匙（2026-09-27 子牙/魏征）。
+ */
 export function findingKey(f: RuleFinding): string | null {
   const ad = f.units?.find((u) => u.level === 'ad')
-  return ad ? `${f.code}:${ad.id}` : null
+  if (ad) return `${f.code}:${ad.id}`
+  if (f.code === 'D11' && typeof f.evidence?.audience_id === 'string') return `D11:${f.evidence.audience_id}`
+  return null
 }
 
 /** 一行 payload.problems 里 status 为 'hit' 的 D2/D10（payload/problems 缺失时为空）。 */

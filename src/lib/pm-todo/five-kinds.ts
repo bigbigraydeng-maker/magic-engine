@@ -66,6 +66,11 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // 优先级决定（CLAUDE.md §2），而且 CLAUDE.md §9.6 承诺台账每个工作日被今日待办读一遍
   ledger_decided_stale: 'decide',
   ledger_verification_failed: 'decide',
+  // 依法要求删数据我们答应了却没做到 —— 对外 / 合规义务。how 虽是「让开发查」，但主干明确
+  // 要它留在 PM 可见栏（不许只写日志、进了 NEVER_DROP_KINDS），风险归 PM 拍板一栏。
+  meta_data_deletion_failure: 'decide',
+  // Magic Bridge 免费名额快满：加不加额度、加到多少美元由 PM 定（花钱）；不加则新客户到月底出不了报告
+  magic_bridge_quota: 'decide',
 
   // ── 2 · 系统进不去、要人点一次的 ─────────────────────────────────────
   ai_provider_exhausted: 'one_click', // 充值
@@ -90,6 +95,9 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   factory_worker_idle: 'one_click', // 出片机器没开机，只有人能开
   email_sync_stale: 'one_click', // 邮箱授权掉了 / 一个都没连上
   client_doc_manual_task: 'one_click', // 方案文档里的一次性人工动作；条目可用 pmKind 换一类
+  // 主干合进去的代码没上线（各窗口说的「已上线」不算数）：看上线记录，催修复 PR 尽快合、或回一句
+  // 「修上线」。主干明确要它留在 PM 可见栏（进了 NEVER_DROP_KINDS），不进开发欠账被埋掉。
+  deploy_not_live: 'one_click',
 
   // ── 3 · 要转给客户那边的 ─────────────────────────────────────────────
   email_reply_due: 'client_side', // 客人来信没回
@@ -155,6 +163,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   libai_prompt_library_stale: 'dev',
   simaqian_patrol_failed: 'dev',
   meta_token_check_failed: 'dev',
+  deploy_check_failed: 'dev', // 「合了没上线」这个检查自己没跑成 —— how 写「不用你动手 / 回我一句我去修」
   ads_autonomy_sync_failed: 'dev',
   crawl_stale: 'dev', // 重扫本该系统自己跑；还不好就是要换读取通道
   crawl_blocked: 'dev', // how 原文：「先别找客户…回一句『换通道』」
@@ -205,6 +214,7 @@ export const BLIND_SPOT_NOTE: Partial<Record<ManualItemKind, string>> = {
   platform_connection_pipeline_down: '有个平台所有客户一起没了心跳，那边断没断今天看不出来',
   ai_alerting_broken: 'AI 账户断电告警今天自己没读出来 —— 没报不等于没事',
   meta_token_check_failed: 'Meta 钥匙检查今天没跑成 —— 钥匙死了可能没报出来',
+  deploy_check_failed: '上线检查今天没跑成 —— 合进去的代码没上线也可能没报出来',
   ledger_unreadable: '台账今天读不出来，「决定了没动 / 验了不成」可能没列出来',
   simaqian_patrol_failed: '口碑周巡没跑成，这周的评价回复草稿可能没出来',
   todo_items_unreadable: '人工待办今天整个没读出来 —— 下面的清单不全',

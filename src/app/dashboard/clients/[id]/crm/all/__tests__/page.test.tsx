@@ -13,7 +13,7 @@
 
 import React from 'react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import CrmAllContactsPage from '../page'
 
 vi.mock('next/navigation', () => ({
@@ -39,6 +39,10 @@ const contact = (id: string, name: string, over: Partial<Row> = {}) => ({
   segment: 'nurture',
   segmentLabel: '慢慢养',
   temperature: 'cold',
+  // 真实响应里这个键**永远存在**（`responseRowFor` 无条件返回 `pinnedAt: c.pinned_at`）。
+  // 漏了它，`row.pinnedAt === null` 会是 false（因为是 undefined），点⭐变成「取消置顶」——
+  // fixture 比真接口少一个键，测的就不是线上那条路了。
+  pinnedAt: null,
   custom: {},
   ...over,
 })
@@ -121,5 +125,492 @@ describe('被误判成「别再联系」的人，这一页要给得出取消入�
 
     await waitFor(() => expect(screen.getByText('往来记录')).toBeTruthy())
     expect(screen.queryByText(/判错了？点这里放回名单/)).toBeNull()
+  })
+})
+
+/**
+ * 分段视图（WP3 R7）。
+ *
+ * 这一页原本是一张平铺的大表，按「最近联系时间」排——**谁该先被联系看不出来**。
+ * 分段视图把同一份名单按「先联系谁」切成 4 段，口径跟「今天要联系」那一页共用
+ * 同一套 segmentContact，不是这一页自己另算一遍。
+ *
+ * 🔴 这里钉死的是「看得见」这件事本身：2026-08-02 出过一次段没登记导致 33 个人
+ * 从名单上凭空消失、谁都没发现的事故。所以**收起来的段也必须显示段头和人数**——
+ * 人数是服务端给的 total，不是当前拿到几行；段是空的要明说「这一段现在没有人」，
+ * 不能渲染成一片空白让人以为加载坏了。
+ */
+describe('按「先联系谁」分段视图', () => {
+  interface StubSection {
+    key: string
+    title: string
+    hint: string
+    total: number
+    open: boolean
+    items: ReturnType<typeof contact>[] | null
+  }
+
+  /** 分段接口的假返回。收起来的段 items=null（跟服务端一致，不下发那一段的行）。 */
+  function stubPriority(
+    sections: StubSection[],
+    focus: { found: boolean; section?: string; page?: number } = { found: false },
+  ) {
+    const calls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/crm/contacts')) {
+          calls.push(url)
+          if (url.includes('view=priority')) {
+            /**
+             * 🔴 只有请求里**真的带了** `contact=` 才回 focus。
+             *
+             * 第一版无条件回 focus，于是把页面转发 `?contact=` 那两行整块删掉，
+             * 「直达链接落在收起来的段里 → 自动展开」那条测试**照旧绿**（魏征变异 M11
+             * 实测存活）：页面是从一个它压根没请求过的 focus 响应里把段打开的。
+             * 假服务端比真服务端宽松，测试就会在真链路断掉时保持绿色。
+             */
+            const asked = new URL(url, 'https://x.test').searchParams.get('contact')
+            return {
+              ok: true,
+              json: async () => ({
+                view: 'priority',
+                focus: asked ? focus : { found: false },
+                columns: [],
+                sections,
+              }),
+            }
+          }
+          return {
+            ok: true,
+            json: async () => ({ items: [], total: 0, page: 1, perPage: 100, columns: [] }),
+          }
+        }
+        if (url.includes('/timeline')) {
+          return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
+        }
+        return { ok: true, json: async () => ({ stages: [] }) }
+      }),
+    )
+    return calls
+  }
+
+  const SECTIONS = (): StubSection[] => [
+    {
+      key: 'waiting',
+      title: '客人在等你',
+      hint: '今天必须有人回',
+      total: 2,
+      open: true,
+      items: [contact('w1', 'Sue Masson'), contact('w2', 'Bob Other')],
+    },
+    {
+      key: 'acted',
+      title: '还没搭上话',
+      hint: '要你主动出击',
+      total: 1,
+      open: true,
+      items: [contact('a1', 'Ann New')],
+    },
+    {
+      key: 'queued',
+      title: '先放着，系统盯着',
+      hint: '他一开口会自己跳回来',
+      total: 7,
+      open: false,
+      items: null,
+    },
+    {
+      key: 'off_list',
+      title: '不在今天名单',
+      hint: '以后才走 / 已成交',
+      total: 3,
+      open: false,
+      items: null,
+    },
+  ]
+
+  it('点「按先联系谁分段」→ 改成问分段接口要数据', async () => {
+    const calls = stubPriority(SECTIONS())
+    render(<CrmAllContactsPage />)
+
+    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+
+    await waitFor(() => expect(calls.some((u) => u.includes('view=priority'))).toBe(true))
+  })
+
+  it('四段的段名和人数都露出来 —— 收起来的段也要露，不然又是「人凭空消失」', async () => {
+    stubPriority(SECTIONS())
+    render(<CrmAllContactsPage />)
+
+    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+
+    await waitFor(() => expect(screen.getByText('客人在等你')).toBeTruthy())
+    expect(screen.getByText('还没搭上话')).toBeTruthy()
+    expect(screen.getByText('先放着，系统盯着')).toBeTruthy()
+    expect(screen.getByText('不在今天名单')).toBeTruthy()
+    // 人数认服务端的 total，不是当前这一页拿到几行 —— 收起来的段一行都没拿到。
+    expect(screen.getByText('7 人')).toBeTruthy()
+    expect(screen.getByText('3 人')).toBeTruthy()
+  })
+
+  it('展开的段显示它的人；收起来的段一行都不显示', async () => {
+    stubPriority(SECTIONS())
+    render(<CrmAllContactsPage />)
+
+    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+
+    await waitFor(() => expect(screen.getByText('Sue Masson')).toBeTruthy())
+    expect(screen.getByText('Ann New')).toBeTruthy()
+    // queued / off_list 是 items=null：没有行，也不该冒出「这一段现在没有人」
+    expect(screen.queryByText('这一段现在没有人。')).toBeNull()
+  })
+
+  it('点段头 → 把那一段加进 open 重新要数据', async () => {
+    const calls = stubPriority(SECTIONS())
+    render(<CrmAllContactsPage />)
+
+    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+    await waitFor(() => expect(screen.getByText('先放着，系统盯着')).toBeTruthy())
+    fireEvent.click(screen.getByText('先放着，系统盯着'))
+
+    await waitFor(() =>
+      expect(calls.some((u) => u.includes('open=') && u.includes('queued'))).toBe(true),
+    )
+  })
+
+  it('展开了但这一段没人 → 明说「这一段现在没有人」，不是一片空白', async () => {
+    stubPriority([
+      { key: 'waiting', title: '客人在等你', hint: 'h1', total: 0, open: true, items: [] },
+      { key: 'acted', title: '还没搭上话', hint: 'h2', total: 0, open: false, items: null },
+      { key: 'queued', title: '先放着，系统盯着', hint: 'h3', total: 0, open: false, items: null },
+      { key: 'off_list', title: '不在今天名单', hint: 'h4', total: 0, open: false, items: null },
+    ])
+    render(<CrmAllContactsPage />)
+
+    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+
+    await waitFor(() => expect(screen.getByText('这一段现在没有人。')).toBeTruthy())
+  })
+
+  it('直达链接落在收起来的段里 → 自动把那一段打开，别让人点进来什么都看不到', async () => {
+    const calls = stubPriority(SECTIONS(), { found: true, section: 'off_list', page: 1 })
+    setUrl('?contact=z9')
+    render(<CrmAllContactsPage />)
+
+    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+
+    await waitFor(() =>
+      expect(calls.some((u) => u.includes('open=') && u.includes('off_list'))).toBe(true),
+    )
+  })
+
+  it('再点一次 → 回平铺，不再问分段接口', async () => {
+    const calls = stubPriority(SECTIONS())
+    render(<CrmAllContactsPage />)
+
+    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+    await waitFor(() => expect(screen.getByText('客人在等你')).toBeTruthy())
+    const before = calls.length
+
+    fireEvent.click(screen.getByText(/回到平铺名单/))
+
+    await waitFor(() => expect(calls.length).toBeGreaterThan(before))
+    expect(calls[calls.length - 1]).not.toContain('view=priority')
+  })
+})
+
+/**
+ * 魏征复审（2026-09-27）重做变异时存活下来的那几条，逐个补上。
+ *
+ * 存活 = 把对应功能改坏，原有 7 条测试全都不变红。它们当时只验了「页面忠实地画出
+ * 接口给的东西」，没验「接口给的东西就是人该看到的全部」——两个复审都指出这正是
+ * 2026-08-02「人数对、人不在」那次事故没被拦住的原因。
+ */
+describe('分段视图 · 复审补测', () => {
+  interface StubSection {
+    key: string
+    title: string
+    hint: string
+    total: number
+    open: boolean
+    items: ReturnType<typeof contact>[] | null
+  }
+
+  function stubSections(sections: StubSection[], focus: { found: boolean; section?: string } = { found: false }) {
+    const calls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: { method?: string }) => {
+        if (url.includes('/pin')) return { ok: true, json: async () => ({ ok: true }) }
+        if (url.includes('/crm/contacts')) {
+          calls.push(`${init?.method ?? 'GET'} ${url}`)
+          if (url.includes('view=priority')) {
+            const asked = new URL(url, 'https://x.test').searchParams.get('contact')
+            return { ok: true, json: async () => ({ view: 'priority', focus: asked ? focus : { found: false }, columns: [], sections }) }
+          }
+          return { ok: true, json: async () => ({ items: [], total: 0, page: 1, perPage: 100, columns: [] }) }
+        }
+        if (url.includes('/timeline')) return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
+        return { ok: true, json: async () => ({ stages: [] }) }
+      }),
+    )
+    return calls
+  }
+
+  const goGrouped = async () => fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+
+  /** M6：每段的人一个都不能少画。原来只比「画出来的 vs items 条数」，两边一起少就发现不了。 */
+  it('M6 · 这一段下发了几个人，就必须画出几个人', async () => {
+    stubSections([
+      { key: 'waiting', title: '客人在等你', hint: 'h', total: 3, open: true,
+        items: [contact('w1', 'Aaa One'), contact('w2', 'Bbb Two'), contact('w3', 'Ccc Three')] },
+      { key: 'acted', title: '还没搭上话', hint: 'h', total: 0, open: false, items: null },
+      { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 0, open: false, items: null },
+      { key: 'off_list', title: '不在今天名单', hint: 'h', total: 0, open: false, items: null },
+    ])
+    render(<CrmAllContactsPage />)
+    await goGrouped()
+    await waitFor(() => expect(screen.getByText('Aaa One')).toBeTruthy())
+    expect(screen.getByText('Bbb Two')).toBeTruthy()
+    expect(screen.getByText('Ccc Three')).toBeTruthy()
+  })
+
+  /**
+   * B1（两个复审都判 BLOCKER）：段头写 217 人、表里只有 100 行时，
+   * 页面必须**说出来**还有多少人没显示，并且给得出翻页入口。
+   */
+  it('B1 · 段里的人没显示完，必须说清还有多少 + 给得出翻页', async () => {
+    const many = Array.from({ length: 100 }, (_, i) => contact(`w${i}`, `Person ${i}`))
+    const calls = stubSections([
+      { key: 'waiting', title: '客人在等你', hint: 'h', total: 217, open: true, items: many },
+      { key: 'acted', title: '还没搭上话', hint: 'h', total: 0, open: false, items: null },
+      { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 0, open: false, items: null },
+      { key: 'off_list', title: '不在今天名单', hint: 'h', total: 0, open: false, items: null },
+    ])
+    render(<CrmAllContactsPage />)
+    await goGrouped()
+    await waitFor(() => expect(screen.getByText('客人在等你')).toBeTruthy())
+
+    // 必须显式说出「共 217 人、现在看的是第几到第几」，不能只写 217 然后画 100 行。
+    expect(screen.getByText(/共 217 人/)).toBeTruthy()
+    expect(screen.getByText(/第 1–100 个/)).toBeTruthy()
+    expect(screen.getByText(/第 1 \/ 3 页/)).toBeTruthy()
+
+    // 而且翻得过去 —— 点下一页要真的把 p_waiting=2 发出去。
+    fireEvent.click(screen.getByText('下一页'))
+    await waitFor(() => expect(calls.some((c) => c.includes('p_waiting=2'))).toBe(true))
+  })
+
+  /** 人数不超过一页时不该冒出翻页控件 —— 多一个没用的控件就多一次误解。 */
+  it('B1 · 一页装得下就不显示翻页', async () => {
+    stubSections([
+      { key: 'waiting', title: '客人在等你', hint: 'h', total: 2, open: true,
+        items: [contact('w1', 'Aaa One'), contact('w2', 'Bbb Two')] },
+      { key: 'acted', title: '还没搭上话', hint: 'h', total: 0, open: false, items: null },
+      { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 0, open: false, items: null },
+      { key: 'off_list', title: '不在今天名单', hint: 'h', total: 0, open: false, items: null },
+    ])
+    render(<CrmAllContactsPage />)
+    await goGrouped()
+    await waitFor(() => expect(screen.getByText('Aaa One')).toBeTruthy())
+    expect(screen.queryByText('下一页')).toBeNull()
+  })
+
+  /**
+   * M7：「收起来的段一行都不显示」原来是 fixture 的 items:null 撑出来的绿，
+   * 不是代码里那道 open 守卫撑出来的。这里给一个**收起但带 items** 的段，
+   * 只有真的看 open 才会通过。
+   */
+  it('M7 · 段是收起的，就算数据在手上也不许画出来', async () => {
+    stubSections([
+      { key: 'waiting', title: '客人在等你', hint: 'h', total: 1, open: true, items: [contact('w1', 'Shown Person')] },
+      { key: 'acted', title: '还没搭上话', hint: 'h', total: 1, open: false, items: [contact('a1', 'Hidden Person')] },
+      { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 0, open: false, items: null },
+      { key: 'off_list', title: '不在今天名单', hint: 'h', total: 0, open: false, items: null },
+    ])
+    render(<CrmAllContactsPage />)
+    await goGrouped()
+    await waitFor(() => expect(screen.getByText('Shown Person')).toBeTruthy())
+    expect(screen.queryByText('Hidden Person')).toBeNull()
+  })
+
+  /** M8 / M12：▾▸、aria-expanded、那句说明文字，原来一处都没被断言。 */
+  it('M8 · 展开和收起的段头，箭头和 aria-expanded 要分得开', async () => {
+    stubSections([
+      { key: 'waiting', title: '客人在等你', hint: '今天必须有人回', total: 1, open: true, items: [contact('w1', 'Aaa One')] },
+      { key: 'acted', title: '还没搭上话', hint: '要你主动出击', total: 0, open: false, items: null },
+      { key: 'queued', title: '先放着，系统盯着', hint: 'h3', total: 0, open: false, items: null },
+      { key: 'off_list', title: '不在今天名单', hint: 'h4', total: 0, open: false, items: null },
+    ])
+    render(<CrmAllContactsPage />)
+    await goGrouped()
+    await waitFor(() => expect(screen.getByText('客人在等你')).toBeTruthy())
+
+    const openHead = screen.getByText('客人在等你').closest('button')
+    const shutHead = screen.getByText('还没搭上话').closest('button')
+    expect(openHead?.getAttribute('aria-expanded')).toBe('true')
+    expect(shutHead?.getAttribute('aria-expanded')).toBe('false')
+    expect(openHead?.textContent).toContain('▾')
+    expect(shutHead?.textContent).toContain('▸')
+    // M12：段头那句人话说明不能悄悄消失
+    expect(openHead?.textContent).toContain('今天必须有人回')
+    expect(shutHead?.textContent).toContain('要你主动出击')
+  })
+
+  /** B3：分段模式下点⭐，星星必须当场亮 —— 只更新 rows 的那一版永远不亮。 */
+  it('B3 · 分段模式下点⭐，星星当场就要变', async () => {
+    stubSections([
+      { key: 'waiting', title: '客人在等你', hint: 'h', total: 1, open: true, items: [contact('w1', 'Aaa One')] },
+      { key: 'acted', title: '还没搭上话', hint: 'h', total: 0, open: false, items: null },
+      { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 0, open: false, items: null },
+      { key: 'off_list', title: '不在今天名单', hint: 'h', total: 0, open: false, items: null },
+    ])
+    render(<CrmAllContactsPage />)
+    await goGrouped()
+    await waitFor(() => expect(screen.getByText('Aaa One')).toBeTruthy())
+
+    /**
+     * 🔴 认 aria-label，不认 ⭐ 这个字符。
+     *
+     * 第一版写的是 `getAllByText('⭐').length > 0` —— 表头那一列的标题**本身就是「⭐」**，
+     * 所以这个断言恒真：把 togglePin 里更新 sections 那段删掉，测试照旧绿（实测存活）。
+     * 星星的 aria-label 会在「置顶 / 取消置顶」之间翻，那才是真的状态。
+     */
+    const row = document.getElementById('contact-w1')
+    expect(row).toBeTruthy()
+    const star = row!.querySelector('button[aria-label="置顶"]')
+    expect(star).toBeTruthy()
+    fireEvent.click(star!)
+    await waitFor(() =>
+      expect(
+        document.getElementById('contact-w1')!.querySelector('button[aria-label="取消置顶"]'),
+      ).toBeTruthy(),
+    )
+  })
+
+  /** C3：四段全收起时不许冒出「大家的跟进到哪步都还空着」。 */
+  it('C3 · 全部收起时不许说「大家阶段都空着」这种假话', async () => {
+    stubSections([
+      { key: 'waiting', title: '客人在等你', hint: 'h', total: 5, open: false, items: null },
+      { key: 'acted', title: '还没搭上话', hint: 'h', total: 5, open: false, items: null },
+      { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 5, open: false, items: null },
+      { key: 'off_list', title: '不在今天名单', hint: 'h', total: 5, open: false, items: null },
+    ])
+    render(<CrmAllContactsPage />)
+    await goGrouped()
+    await waitFor(() => expect(screen.getByText('客人在等你')).toBeTruthy())
+    expect(screen.queryByText(/都还空着/)).toBeNull()
+  })
+
+  /** B2：分段模式下表头不许假装能排序。 */
+  it('B2 · 分段模式下表头没有排序箭头、点了也不该有排序入口', async () => {
+    stubSections([
+      { key: 'waiting', title: '客人在等你', hint: 'h', total: 1, open: true, items: [contact('w1', 'Aaa One')] },
+      { key: 'acted', title: '还没搭上话', hint: 'h', total: 0, open: false, items: null },
+      { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 0, open: false, items: null },
+      { key: 'off_list', title: '不在今天名单', hint: 'h', total: 0, open: false, items: null },
+    ])
+    render(<CrmAllContactsPage />)
+    await goGrouped()
+    await waitFor(() => expect(screen.getByText('Aaa One')).toBeTruthy())
+    const th = screen.getByText(/最近联系/).closest('th')
+    expect(th?.className).not.toContain('cursor-pointer')
+    // 而且要有一句话说明段内按什么排，别让人以为能自己排
+    expect(screen.getByText(/点表头不改顺序/)).toBeTruthy()
+  })
+})
+
+/**
+ * 阶段变更那一行：员工必须看得出「是谁判的」+「凭什么判的」。
+ *
+ * 🔴 改之前这一行只显示理由、不显示是谁判的；另一页反过来（显示是谁判的、
+ * 却把 `ai:conversation-read` 这串内部字符串原样给销售看，还把理由丢了）。
+ * 生产上 972 次阶段变更里 972 次是 AI 判的、972 次都写了理由和客人原话 ——
+ * 员工一次都看不到完整的一条。
+ *
+ * PM 2026-09-27 的方向是「让大模型根据互动痕迹判断并给建议」。判得再准，
+ * 看不到凭据就不会有人信 —— 记忆里那条更狠：「不给凭据的一键执行，按两次就没人敢按」。
+ */
+describe('阶段变更那一行 · 谁判的 + 凭什么', () => {
+  /** 一条真实形状的 AI 判断（文案照抄生产库里那 972 条的格式）。 */
+  const aiStageEntry = {
+    kind: 'stage' as const,
+    at: '2026-09-24T02:00:00Z',
+    fromStage: null,
+    toStage: 'contacted',
+    fromLabel: null,
+    toLabel: '已联系',
+    changedBy: 'ai:conversation-read',
+    note: '读往来记录判的：客户对旅游信息感兴趣，已经联系。｜原话：「Hello! I filled out your form」',
+  }
+  const humanStageEntry = {
+    kind: 'stage' as const,
+    at: '2026-09-25T02:00:00Z',
+    fromStage: 'contacted',
+    toStage: 'quoted',
+    fromLabel: '已联系',
+    toLabel: '已报价',
+    changedBy: 'info@ctstours.co.nz',
+    note: null,
+  }
+
+  function stubWithTimeline(timeline: unknown[]) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/timeline')) {
+          return { ok: true, json: async () => ({ timeline, omittedMessages: 0 }) }
+        }
+        if (url.includes('/crm/contacts')) {
+          return {
+            ok: true,
+            json: async () => ({
+              items: [contact('c1', 'Sue Masson')],
+              total: 1,
+              page: 1,
+              perPage: 100,
+              columns: [],
+            }),
+          }
+        }
+        return { ok: true, json: async () => ({ stages: [] }) }
+      }),
+    )
+  }
+
+  it('AI 判的那一条：说人话说出是谁判的，绝不把内部代号给员工看', async () => {
+    stubWithTimeline([aiStageEntry])
+    setUrl('?contact=c1')
+    render(<CrmAllContactsPage />)
+
+    await waitFor(() => expect(screen.getByText(/系统读往来记录判的/)).toBeTruthy())
+    // 🔴 这一条是重点：`ai:conversation-read` 一个字都不许出现在屏幕上
+    expect(screen.queryByText(/ai:conversation-read/)).toBeNull()
+    expect(document.body.textContent).not.toContain('ai:conversation-read')
+  })
+
+  it('凭据要显示出来，而且客人原话不能被吃掉', async () => {
+    stubWithTimeline([aiStageEntry])
+    setUrl('?contact=c1')
+    render(<CrmAllContactsPage />)
+
+    await waitFor(() => expect(screen.getByText(/客户对旅游信息感兴趣/)).toBeTruthy())
+    // 客人自己说的那句话是最硬的凭据，必须留着
+    expect(document.body.textContent).toContain('Hello! I filled out your form')
+    // 「谁判的」那一格已经说过一遍了，理由里的同一句开头要剥掉，别说两遍
+    expect(document.body.textContent).not.toContain('读往来记录判的：客户对旅游信息')
+  })
+
+  it('真人改的那一条：显示是谁改的，不假装有凭据', async () => {
+    stubWithTimeline([humanStageEntry])
+    setUrl('?contact=c1')
+    render(<CrmAllContactsPage />)
+
+    await waitFor(() => expect(screen.getByText(/info 改的/)).toBeTruthy())
+    // 生产上真人改的那 12 条 note 全是空的 —— 人不解释自己，界面也别编一个理由出来
+    expect(document.body.textContent).not.toContain('系统读往来记录判的')
+    // 整个邮箱太长，只显示前缀
+    expect(document.body.textContent).not.toContain('info@ctstours.co.nz')
   })
 })

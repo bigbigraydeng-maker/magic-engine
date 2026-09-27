@@ -27,6 +27,7 @@ import type { BindingRequestItemKind } from './binding-request-items'
 import type { PageBindingItemKind } from './page-binding-items'
 import type { CommentScopeTodoKind } from './comment-scope-items'
 import type { MetaTokenHealthKind } from './meta-token-health-items'
+import type { DeployHealthItemKind } from './deploy-health-items'
 import type { LeadSheetItemKind } from './lead-sheet-items'
 import type { PlatformConnectionItemKind } from './platform-connection-items'
 import type { FacebookSyncItemKind } from './facebook-sync-items'
@@ -67,6 +68,10 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // 钥匙死了 = 这个客户整条 Meta 链路在静默失败（CTS 9/21·9/23·9/25 三次都是 PM 自己问才发现）
   'meta_token_dead',
   'meta_token_check_failed',
+  // 主干合进去的东西没上线（2026-09-25 断了 7 小时没人知道）。链接是 Render 后台，要登录，
+  // 探活多半判成坏链接 —— 宁可让人自己找入口，也不能让它静默消失。
+  'deploy_not_live',
+  'deploy_check_failed',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */
@@ -163,6 +168,10 @@ export type ManualItemKind =
   | MetaTokenHealthKind
   /** 上面那项检查自己没跑成 —— 不报 ≠ 钥匙都活着 */
   | 'meta_token_check_failed'
+  /** 主干上的合并超过 30 分钟还没上线正式网站 —— 上线失败或卡住，各窗口说的「已上线」都不算数 */
+  | DeployHealthItemKind
+  /** 上面那项检查自己没跑成 —— 不报 ≠ 上线都正常 */
+  | 'deploy_check_failed'
   /** 线索没写进客户的 Google 表格 —— 销售看的那张表缺人，留资 90 天后永久取不回 */
   | LeadSheetItemKind
   /** 执行内核停手 / 等审批 / 被规则挡下 —— 必须有人看见，不许死在日志里 */
@@ -171,6 +180,8 @@ export type ManualItemKind =
   | AdsAutonomyItemKind
   /** 每日广告巡检的广告级规则（D2 素材疲劳 / D10 点进去之后差了）：要人拍板改不改，系统不会自动改 */
   | AdsRuleFindingItemKind
+  /** Facebook 删除数据请求处理失败 —— 用户在 Facebook 里要求删数据，我们答应了却没做到，不许只写日志 */
+  | 'meta_data_deletion_failure'
   /** 有成交/咨询等着人核对要不要告诉广告平台 —— 撤不回，所以必须人点 */
   | 'conversion_needs_review'
   /** 发给广告平台时断线了，不知道对方收没收 —— 程序绝不自己重发，等人核对 */
@@ -220,6 +231,8 @@ export type ManualItemKind =
   | SimaqianItemKind
   /** Facebook 私信 / 表单留资同步连续失败（授权失效时要有主页管理员重新「连接 Meta」） */
   | FacebookSyncItemKind
+  /** Magic Bridge 全平台免费额度用到 80% 以上 —— 要不要加额度由 PM 定 */
+  | 'magic_bridge_quota'
 
 export interface ManualItem {
   kind: ManualItemKind

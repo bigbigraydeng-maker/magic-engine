@@ -18,7 +18,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { runExtractorForClient } from '../extractor'
-import { makeFakeSupabase, type FakeDb, type Row } from './fake-supabase'
+import { healthyAttributionRun, makeFakeSupabase, type FakeDb, type Row } from './fake-supabase'
 
 const CLIENT = 'client-a'
 /** 夹具都是 2026-06 的数据；新鲜度闸按 now 算截止时间，所以测试必须自己给钟。 */
@@ -34,7 +34,7 @@ function outcomeRow(id: string, actionId: string, verdict: 'confirmed' | 'revers
 
 function actionRow(id: string): Row {
   return {
-    id, client_id: CLIENT, action_type: 'publish_blog', flywheel: 'seo',
+    id, client_id: CLIENT, action_type: 'publish_blog', flywheel: 'geo',
     vendor: null, executed_at: '2026-06-01T00:00:00Z', expected_metric: 'seo.gsc.clicks',
   }
 }
@@ -57,6 +57,7 @@ function db(outcomes: Row[], actions: Row[], decisions: Row[]): FakeDb {
     client_failed_experiments: [],
     client_learned_preferences: [],
     client_decision_history: decisions,
+    cron_run_logs: [healthyAttributionRun(NOW)],
   }
 }
 
