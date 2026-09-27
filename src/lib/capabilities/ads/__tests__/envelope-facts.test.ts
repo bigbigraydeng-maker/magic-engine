@@ -49,6 +49,8 @@ interface Tables {
   ad_entity_snapshots: Row[]
   ad_strategy_configs: Row | null
   ads_circuit_events: Row[]
+  /** 账户级日上限（v2.1 §3.9）。默认空数组 = 客户没在这张表建过行，回落客户级总闸。 */
+  client_meta_ad_accounts: Row[]
 }
 
 interface Log {
@@ -91,6 +93,13 @@ function makeSb(t: Tables, log: Log): SupabaseClient {
             const err = log.errors[key]
             if (err) return { data: null, error: { message: err } }
             if (key === 'ad_strategy_configs') return { data: t.ad_strategy_configs, error: null }
+            if (key === 'client_meta_ad_accounts') {
+              // 真过滤 client_id —— 判据要在「这个账户有没有自己的行」和
+              // 「客户绑了几个账户」之间分清楚，无条件返回会把两者混在一起。
+              let rows = t.client_meta_ad_accounts
+              if (typeof f.client_id === 'string') rows = rows.filter((r) => r.client_id === f.client_id)
+              return { data: rows, error: null }
+            }
             if (key === 'ads_circuit_events') {
               let rows = t.ads_circuit_events
               for (const [c, v] of Object.entries(f)) {
@@ -142,6 +151,9 @@ function resolve(t: Partial<Tables>, log: Log, at: 'authorize' | 'pre_provider' 
     ad_entity_snapshots: [],
     ad_strategy_configs: { daily_budget_cap_cents: 10_000 },
     ads_circuit_events: [],
+    // 默认空数组：客户没在这张表建过行 → 回落客户级总闸（跟这个函数改动前的行为一致，
+    // 已有用例不用逐个加账户级配置才能继续通过）。
+    client_meta_ad_accounts: [],
     ...t,
   }
   const resolver = createAdsEnvelopeFactsResolver({
@@ -301,6 +313,111 @@ describe('机器可读前缀 · 每种 unavailable 都带前缀', () => {
 
   it('快照里查不到这个实体 → facts:', async () => {
     const r = await resolve({ ad_entity_snapshots: [snap({ entity_id: 'other' })] }, log())
+    expect('unavailable' in r).toBe(true)
+    if (!('unavailable' in r)) return
+    expect(r.unavailable.startsWith('facts:')).toBe(true)
+  })
+})
+
+describe('日上限改按账户取（v2.1 §3.9，本轮交付）', () => {
+  it('这个账户自己配了上限 → 用账户级的值，不用客户总闸', async () => {
+    const r = await resolve(
+      {
+        ad_entity_snapshots: [snap()],
+        ad_strategy_configs: { daily_budget_cap_cents: 999_999 },
+        client_meta_ad_accounts: [{ client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: 5_000 }],
+      },
+      log(),
+    )
+    expect('facts' in r).toBe(true)
+    if (!('facts' in r)) return
+    expect(r.facts.dailyCapCents).toBe(5_000)
+  })
+
+  it('客户只绑了这一个账户、这个账户没配自己的上限 → 回落客户总闸', async () => {
+    const r = await resolve(
+      {
+        ad_entity_snapshots: [snap()],
+        ad_strategy_configs: { daily_budget_cap_cents: 8_000 },
+        client_meta_ad_accounts: [{ client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: null }],
+      },
+      log(),
+    )
+    expect('facts' in r).toBe(true)
+    if (!('facts' in r)) return
+    expect(r.facts.dailyCapCents).toBe(8_000)
+  })
+
+  it('客户在 client_meta_ad_accounts 里压根没有行（老单账户客户）→ 回落客户总闸', async () => {
+    const r = await resolve(
+      {
+        ad_entity_snapshots: [snap()],
+        ad_strategy_configs: { daily_budget_cap_cents: 8_000 },
+        client_meta_ad_accounts: [],
+      },
+      log(),
+    )
+    expect('facts' in r).toBe(true)
+    if (!('facts' in r)) return
+    expect(r.facts.dailyCapCents).toBe(8_000)
+  })
+
+  it('🔴 客户绑了 ≥2 个账户、这个账户没配自己的上限 → 拒，不回落客户总闸', async () => {
+    const r = await resolve(
+      {
+        ad_entity_snapshots: [snap()],
+        ad_strategy_configs: { daily_budget_cap_cents: 8_000 },
+        client_meta_ad_accounts: [
+          { client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: null },
+          { client_id: CLIENT, ad_account_id: 'act_2', daily_budget_cap_cents: 3_000 },
+        ],
+      },
+      log(),
+    )
+    expect('unavailable' in r).toBe(true)
+    if (!('unavailable' in r)) return
+    expect(r.unavailable).toBe('facts:账户级日上限未配置')
+  })
+
+  it('客户绑了 ≥2 个账户、这个账户**配了**自己的上限 → 正常放行，不因为「多账户」被误拒', async () => {
+    const r = await resolve(
+      {
+        ad_entity_snapshots: [snap()],
+        ad_strategy_configs: { daily_budget_cap_cents: 8_000 },
+        client_meta_ad_accounts: [
+          { client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: 4_000 },
+          { client_id: CLIENT, ad_account_id: 'act_2', daily_budget_cap_cents: 3_000 },
+        ],
+      },
+      log(),
+    )
+    expect('facts' in r).toBe(true)
+    if (!('facts' in r)) return
+    expect(r.facts.dailyCapCents).toBe(4_000)
+  })
+
+  it('🔴 混进别的客户账户的行，不算进「这个客户绑了几个账户」', async () => {
+    const r = await resolve(
+      {
+        ad_entity_snapshots: [snap()],
+        ad_strategy_configs: { daily_budget_cap_cents: 8_000 },
+        client_meta_ad_accounts: [
+          { client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: null },
+          { client_id: 'other-client', ad_account_id: 'act_9', daily_budget_cap_cents: 1_000 },
+        ],
+      },
+      log(),
+    )
+    // 只有 1 个属于本客户的行 → 回落总闸，不因为混进来的另一客户的行被当成「多账户」误拒
+    expect('facts' in r).toBe(true)
+    if (!('facts' in r)) return
+    expect(r.facts.dailyCapCents).toBe(8_000)
+  })
+
+  it('查账户级上限失败 → 拒，且前缀是 facts:', async () => {
+    const l = log()
+    l.errors.client_meta_ad_accounts = 'boom'
+    const r = await resolve({ ad_entity_snapshots: [snap()] }, l)
     expect('unavailable' in r).toBe(true)
     if (!('unavailable' in r)) return
     expect(r.unavailable.startsWith('facts:')).toBe(true)

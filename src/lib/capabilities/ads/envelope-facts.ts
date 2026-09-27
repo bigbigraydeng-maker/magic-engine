@@ -289,6 +289,43 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
       .maybeSingle<{ daily_budget_cap_cents: number | null }>()
     if (cfgErr) return cantRead(`读客户广告配置失败：${cfgErr.message}`)
 
+    /**
+     * 🔴 **日上限改成按账户取**（v2.1 §3.9 / §11.11，本轮交付）。
+     *
+     * 上面 `cfg.daily_budget_cap_cents` 是**客户级**的总闸（配置时校验
+     * `sum(账户上限) ≤ 客户总闸`，见 PATCH 路由）；单账户动作要比的是
+     * **这个账户自己**的日上限，不是客户总闸——CTS 两个账户各花各的，
+     * 拿总闸去比单账户等于把另一账户的额度也算给了它，会晚很久才拦下超支。
+     *
+     * 判据（migration `20260927000003` 的表注释原文）：
+     *   · 这个账户有自己的上限 → 用它
+     *   · 没有，但客户绑了 **≥2 个**账户 → `unavailable('facts:账户级日上限未配置')`——
+     *     多账户下不配就动，等于没有账户级保护，必须拒
+     *   · 没有，且客户就这一个账户（或用老的 `clients.meta_ad_account_id` 单账户
+     *     字段，压根没在 `client_meta_ad_accounts` 建过行）→ 回落客户级总闸——
+     *     单账户时总闸跟账户上限本来就是同一个数，不强制每个老客户都去面板重填一遍
+     */
+    const { data: accountRows, error: accountRowsErr } = await deps.sb
+      .from('client_meta_ad_accounts')
+      .select('ad_account_id, daily_budget_cap_cents')
+      .eq('client_id', clientId)
+    if (accountRowsErr) return cantRead(`读账户级日上限配置失败：${accountRowsErr.message}`)
+
+    const registeredAccounts = (accountRows ?? []) as Array<{
+      ad_account_id: string
+      daily_budget_cap_cents: number | null
+    }>
+    const thisAccountCap = registeredAccounts.find((r) => r.ad_account_id === adAccountId)?.daily_budget_cap_cents
+
+    let dailyCapCents: number | null
+    if (typeof thisAccountCap === 'number') {
+      dailyCapCents = thisAccountCap
+    } else if (registeredAccounts.length >= 2) {
+      return unavailable('facts:账户级日上限未配置')
+    } else {
+      dailyCapCents = typeof cfg?.daily_budget_cap_cents === 'number' ? cfg.daily_budget_cap_cents : null
+    }
+
     // 🔴 **冷却期单独查，不受上面那个 4000 行账户窗口限制**（#1994 缺陷 2，本轮修）。
     //
     //    原来 `hoursSinceLastChange` 是从 `subjectRows`（账户窗口里筛出来的）算的。
@@ -327,7 +364,7 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
     const facts: EnvelopeFacts = {
       beforeCents,
       accountDailyTotalBeforeCents: accountTotal,
-      dailyCapCents: typeof cfg?.daily_budget_cap_cents === 'number' ? cfg.daily_budget_cap_cents : null,
+      dailyCapCents,
       hoursSinceLastChange: cooldownHours,
       learningPhaseApplicable: subject.learningApplicable,
       learningStage: target.learning_stage,
