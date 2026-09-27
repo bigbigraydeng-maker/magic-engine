@@ -162,8 +162,7 @@ export default function RegisterForm({ next, fromProspect }: RegisterFormProps) 
         <p className="mt-2 text-sm leading-6 text-me-charcoal/60">
           We emailed a verification code to{' '}
           <span className="font-semibold text-me-charcoal">{pending.email}</span>.
-          {' '}Enter it below to activate your account and receive your{' '}
-          <strong>500 MTC</strong> welcome bonus.
+          {' '}Enter it below to activate your account.
         </p>
 
         <input

@@ -24,7 +24,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { useParams, useSearchParams } from 'next/navigation'
+import { useParams } from 'next/navigation'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface StatusResponse {
@@ -77,11 +77,6 @@ function HelpLink({ label, active, onClick }: { label: string; active: boolean; 
 export default function OnboardingWizardPage() {
   const params = useParams<{ id: string }>()
   const clientId = params.id
-  // ?welcome=1 is set once, by resolveSelfServeLanding right after OTP
-  // verification (the register form promises "500 MTC welcome bonus" — 板桥
-  // PR6 复审: the wizard never confirmed it landed, so the promise looked
-  // broken even though the credit was applied).
-  const welcome = useSearchParams().get('welcome') === '1'
 
   const [status, setStatus] = useState<StatusResponse | null>(null)
   const [help, setHelp] = useState<Record<HelpKey, boolean>>({ profile: false, gbp: false, ga4gsc: false, meta: false, website: false, assets: false })
@@ -139,11 +134,6 @@ export default function OnboardingWizardPage() {
 
   return (
     <main className="mx-auto max-w-2xl px-5 py-8">
-      {welcome && (
-        <div className="mb-4 rounded-xl border border-[#5C8A4A]/25 bg-[#5C8A4A]/8 px-4 py-3 text-sm font-semibold text-[#3F6134]">
-          🎉 Welcome! We&apos;ve added 500 MTC to your account to get you started.
-        </div>
-      )}
       <div className="mb-2">
         <h1 className="font-display text-2xl font-bold text-me-charcoal">Let&apos;s get you set up</h1>
         <p className="mt-1 text-sm text-me-charcoal/60">

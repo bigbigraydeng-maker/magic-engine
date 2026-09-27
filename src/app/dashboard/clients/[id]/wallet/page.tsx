@@ -41,7 +41,6 @@ export default async function WalletPage({ params, searchParams }: Props) {
   const { id: clientId } = params
   const balance = await getMtcBalance(clientId)
 
-  const isWelcome   = searchParams.welcome === '1'
   const isSuccess   = searchParams.success === '1'
   const isCancelled = searchParams.cancelled === '1'
   const purchasedKey = typeof searchParams.package === 'string' ? searchParams.package : undefined
@@ -52,15 +51,6 @@ export default async function WalletPage({ params, searchParams }: Props) {
   return (
     <div className="space-y-6 font-sans">
       {/* Flash banners */}
-      {isWelcome && (
-        <div className="rounded-2xl border border-[#5C8A4A]/30 bg-[#5C8A4A]/10 px-5 py-4">
-          <p className="font-display text-sm font-bold text-[#3F6C30]">Welcome to Magic Engine!</p>
-          <p className="mt-1 text-sm text-[#3F6C30]/85">
-            We have added <strong>500 MTC</strong> to your wallet as a welcome bonus.
-            Use them to generate content, reports, and more.
-          </p>
-        </div>
-      )}
       {isSuccess && purchasedPackage && (
         <div className="rounded-2xl border border-[#5C8A4A]/30 bg-[#5C8A4A]/10 px-5 py-4">
           <p className="font-display text-sm font-bold text-[#3F6C30]">Payment successful</p>

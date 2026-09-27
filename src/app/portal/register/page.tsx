@@ -4,9 +4,9 @@ import RegisterForm from './register-form'
 
 const benefits = [
   {
-    icon: '🎯',
-    label: 'Free tokens included',
-    body: 'Start with 500 MTC — enough to generate blog posts, social content, and SEO reports.',
+    icon: '🌐',
+    label: 'A real website, free forever',
+    body: 'A live page on your own subdomain, ready to share with customers — no credit card, no expiry.',
   },
   {
     icon: '🔧',
@@ -55,13 +55,13 @@ export default function RegisterPage({ searchParams }: Props) {
             {fromProspect ? (
               <>Save your report.<br />Open your workspace.</>
             ) : (
-              <>500 MTC.<br />On us.</>
+              <>Your website.<br />Free forever.</>
             )}
           </h1>
           <p className="mt-4 text-sm leading-[1.75] text-white/60">
             {fromProspect
               ? 'We will carry your latest Discovery Report into a new workspace, then guide you through a short brand brief before you unlock the tools.'
-              : 'Magic Token Coins power every content, SEO, and AI visibility action on the platform. Start free, top up when you need more.'}
+              : 'A live website, a monthly traffic report, and inbox visibility — free, no card required. Upgrade any time to unlock the growth tools.'}
           </p>
 
           <div className="mt-8 flex flex-col gap-3">
