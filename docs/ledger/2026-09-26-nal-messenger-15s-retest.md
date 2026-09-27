@@ -1,7 +1,7 @@
 ---
 id: 2026-09-26-nal-messenger-15s-retest
 title: NAL Messenger 15 秒实拍视频重测——单独新广告组跑 3 天，跟 82 秒原广告比每次开聊成本，再决定留哪个
-status: failed
+status: verified
 owner: agent
 decided_on: 2026-09-26
 source: doc:docs/PITFALLS.md
