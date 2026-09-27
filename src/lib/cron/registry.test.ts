@@ -439,6 +439,24 @@ describe('每个写运行记录的地方，都必须有人认领', () => {
     expect(entry!.outputTables).toBeUndefined()
   })
 
+  it('🔴 广告巡察：三张产出表都登记、阈值钉死 24h（9/25 整天零行零告警的防复发）', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === 'google-data-pullback-daily')
+    expect(entry, 'CRON_REGISTRY 里没有 google-data-pullback-daily').toBeDefined()
+    // ads_growth_states 曾经漏登记 → 2026-09-25 整天零行、六客户全缺却零告警躺了一整天
+    // （沉默死检测只查声明过的表）。根因见
+    // docs/ledger/2026-09-27-growth-states-missing-0925-root-cause.md。
+    expect(entry!.outputTables).toEqual([
+      { table: 'ad_daily_insights', freshnessHours: 24 },
+      { table: 'ad_health_narratives', freshnessHours: 24 },
+      { table: 'ads_growth_states', freshnessHours: 24 },
+    ])
+    // 26h 会漏掉整批缺失：上一批 17:0X 写入、当天 19:00 检查只隔约 25.92h，够不到严格的
+    // `> 26h`。阈值被人改回 26 或往上飘，这条就该红。
+    for (const t of entry!.outputTables ?? []) {
+      expect(t.freshnessHours, `${t.table} 的阈值不能 ≥26h，会漏掉单日整批缺失`).toBeLessThan(26)
+    }
+  })
+
   it('🔴 白名单不许过期：排上班了就该从白名单删掉', () => {
     const registered = new Set(CRON_REGISTRY.map((e) => e.jobName))
     const stale = Object.keys(UNSCHEDULED_CRON_ROUTES).filter((n) => registered.has(n))
