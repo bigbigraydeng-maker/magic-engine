@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-09-27
 source: session:5b9407a2
 done_on: 2026-09-27
-done_ref: pr:pending
+done_ref: pr:2127
 verify_by: 2026-10-01
 verify_how: 在「今天要联系」页点开任一客人，抽屉里要看得见「要记住的事」那一格（有提醒的人要把提醒和到期日带出来，不是空白）。NAL 的客人点「现在：…」再点「已成交」，要先弹录金额面板、不直接改阶段；点「已联系」不许弹。CTS 的客人点「已成交」也不许弹（CTS 走 Google 表格那条通道）
 ---
