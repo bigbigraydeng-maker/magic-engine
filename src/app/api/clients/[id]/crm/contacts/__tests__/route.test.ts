@@ -336,3 +336,204 @@ describe('GET contacts — view=priority（WP3 R5 接线）', () => {
     expect(contactQ?.ins).toContainEqual(['stage', ['quoted']])
   })
 })
+
+/**
+ * ?kind=retail|trade（2026-09-28 WP-B3）。
+ *
+ * 独立的 fixture + 假库，不跟上面共用 CONTACTS——那份数组的长度被别的测试
+ * 直接拿来断言 total，往里加同行/员工联系人会把那些测试一起带红。
+ *
+ * 判据跟 `crm/today/route.ts` 同一份 `contactKindOf`/`readDomainRules`：
+ * trade_domains 命中算同行，own_email_domains 命中算员工，都不命中算终端客户。
+ */
+describe('GET contacts — kind 筛选（WP-B3）', () => {
+  const KIND_CONTACTS: Row[] = [
+    {
+      id: 'r1',
+      display_name: 'Retail Rita',
+      primary_phone: null,
+      primary_email: 'rita@gmail.com',
+      do_not_contact: false,
+      snooze_until: null,
+      stage: null,
+      first_seen_at: '2026-01-01T00:00:00.000Z',
+    },
+    {
+      id: 't1',
+      display_name: 'Trade Tom',
+      primary_phone: null,
+      primary_email: 'tom@hot.co.nz',
+      do_not_contact: false,
+      snooze_until: null,
+      stage: null,
+      first_seen_at: '2026-01-01T00:00:00.000Z',
+    },
+    {
+      id: 's1',
+      display_name: 'Staff Sam',
+      primary_phone: null,
+      primary_email: 'sam@ctstours.co.nz',
+      do_not_contact: false,
+      snooze_until: null,
+      stage: null,
+      first_seen_at: '2026-01-01T00:00:00.000Z',
+    },
+  ]
+  let kindIdentities: Row[] = [
+    { contact_id: 'r1', value: 'rita@gmail.com' },
+    { contact_id: 't1', value: 'tom@hot.co.nz' },
+    { contact_id: 's1', value: 'sam@ctstours.co.nz' },
+  ]
+  const LEADS_CONFIG = { own_email_domains: ['ctstours.co.nz'], trade_domains: ['hot.co.nz'] }
+
+  function kindFakeDb(table: string) {
+    const rec: Recorded = { table, eqs: [], ins: [], ors: [], countHead: false, range: null, orders: [] }
+    recorded.push(rec)
+    const notIns: Array<[string, string, string]> = []
+    const builder: Record<string, unknown> = {
+      select: (_cols?: string, opts?: { count?: string; head?: boolean }) => {
+        if (opts?.head) rec.countHead = true
+        return builder
+      },
+      eq: (col: string, val: unknown) => {
+        rec.eqs.push([col, val])
+        return builder
+      },
+      in: (col: string, vals: unknown[]) => {
+        rec.ins.push([col, vals])
+        return builder
+      },
+      not: (col: string, op: string, val: string) => {
+        notIns.push([col, op, val])
+        return builder
+      },
+      or: (expr: string) => {
+        rec.ors.push(expr)
+        return builder
+      },
+      order: (col: string, opts?: { ascending?: boolean }) => {
+        rec.orders.push([col, opts])
+        return builder
+      },
+      range: () => builder,
+      maybeSingle: () => Promise.resolve({ data: { leads_config: LEADS_CONFIG }, error: null }),
+      then: (resolve: (v: unknown) => unknown) => {
+        if (table === 'contacts') {
+          let rows = KIND_CONTACTS
+          const inFilter = rec.ins.find(([c]) => c === 'id')
+          if (inFilter) {
+            const wanted = inFilter[1] as string[]
+            rows = rows.filter((r) => wanted.includes(r.id as string))
+          }
+          const notInEntry = notIns.find(([c]) => c === 'id')
+          if (notInEntry) {
+            const excluded = notInEntry[2].replace(/^\(|\)$/g, '').split(',').filter(Boolean)
+            rows = rows.filter((r) => !excluded.includes(r.id as string))
+          }
+          if (rec.countHead) return resolve({ data: null, count: rows.length, error: null })
+          return resolve({ data: rows, count: null, error: null })
+        }
+        if (table === 'client_pipeline_stages') return resolve({ data: [], error: null })
+        if (table === 'contact_identities') return resolve({ data: kindIdentities, error: null })
+        return resolve({ data: [], error: null })
+      },
+    }
+    return builder
+  }
+
+  beforeEach(() => {
+    recorded = []
+    kindIdentities = [
+      { contact_id: 'r1', value: 'rita@gmail.com' },
+      { contact_id: 't1', value: 'tom@hot.co.nz' },
+      { contact_id: 's1', value: 'sam@ctstours.co.nz' },
+    ]
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation(kindFakeDb)
+  })
+
+  it('?kind=trade → 只回同行那一个人', async () => {
+    const { status, body } = await get('client-a', '?page=1&perPage=100&kind=trade')
+    expect(status).toBe(200)
+    expect(body.total).toBe(1)
+    expect((body.items as Array<{ name: string }>).map((r) => r.name)).toEqual(['Trade Tom'])
+  })
+
+  it('?kind=retail → 排掉同行和员工，只剩终端客户', async () => {
+    const { status, body } = await get('client-a', '?page=1&perPage=100&kind=retail')
+    expect(status).toBe(200)
+    expect(body.total).toBe(1)
+    expect((body.items as Array<{ name: string }>).map((r) => r.name)).toEqual(['Retail Rita'])
+  })
+
+  it('不传 kind → 三个人都在，老行为逐字不变（不因为加了这功能就悄悄把员工筛掉）', async () => {
+    const { status, body } = await get('client-a', '?page=1&perPage=100')
+    expect(status).toBe(200)
+    expect(body.total).toBe(3)
+  })
+
+  /**
+   * 🔴 魏征 2026-09-28 复审查出：`loadTradeAndStaffIds` 的两条分页查询原来漏配
+   * `.order(...)`——`range()` 分页没有确定顺序时页之间可能漏行/重复行，同行
+   * 或身份超过 1000 条（一页）就会算错「谁是同行」。钉住两条都配了 order。
+   */
+  it('算同行/员工用的两条查询都配了 order（range 分页没有确定顺序会漏行/重复行）', async () => {
+    await get('client-a', '?kind=trade')
+    const identitiesQ = recorded.find((r) => r.table === 'contact_identities')
+    const contactsLiteQ = recorded.filter((r) => r.table === 'contacts')
+    expect(identitiesQ?.orders).toContainEqual(['contact_id', { ascending: true }])
+    // 三条 contacts 查询（轻量 id+email、count、分页取行）里至少有一条按 id 排——
+    // 只要那条轻量查询配了就够，不用逐条都断言。
+    expect(contactsLiteQ.some((r) => r.orders.some(([col]) => col === 'id'))).toBe(true)
+  })
+
+  it('?kind=bad-value → 400', async () => {
+    const { status, body } = await get('client-a', '?kind=bad-value')
+    expect(status).toBe(400)
+    expect(body.error).toMatch(/invalid kind/)
+  })
+
+  it('这个客户一个同行都没有 → ?kind=trade 直接回空列表，不报错', async () => {
+    // 独立的最小假库：contacts 表（不管是轻量身份查询还是主查询）只有一个
+    // 终端客户，primary_email 和身份表都不命中任何 trade_domains。
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const builder: Record<string, unknown> = {
+        select: (_c?: string, opts?: { count?: string; head?: boolean }) => {
+          ;(builder as { _head?: boolean })._head = opts?.head
+          return builder
+        },
+        eq: () => builder,
+        in: () => builder,
+        not: () => builder,
+        order: () => builder,
+        range: () => builder,
+        maybeSingle: () => Promise.resolve({ data: { leads_config: LEADS_CONFIG }, error: null }),
+        then: (resolve: (v: unknown) => unknown) => {
+          if (table === 'contacts') {
+            const rows = [
+              {
+                id: 'r1',
+                display_name: 'Retail Rita',
+                primary_phone: null,
+                primary_email: 'rita@gmail.com',
+                do_not_contact: false,
+                snooze_until: null,
+                stage: null,
+                first_seen_at: '2026-01-01T00:00:00.000Z',
+              },
+            ]
+            if ((builder as { _head?: boolean })._head) return resolve({ data: null, count: rows.length, error: null })
+            return resolve({ data: rows, count: null, error: null })
+          }
+          if (table === 'contact_identities') return resolve({ data: [{ contact_id: 'r1', value: 'rita@gmail.com' }], error: null })
+          return resolve({ data: [], error: null })
+        },
+      }
+      return builder
+    })
+
+    const { status, body } = await get('client-a', '?kind=trade')
+    expect(status).toBe(200)
+    expect(body.total).toBe(0)
+    expect(body.items).toEqual([])
+  })
+})
