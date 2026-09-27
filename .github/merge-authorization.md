@@ -93,7 +93,7 @@ agent 不得自行对 A 级 PR 执行 `--admin`。
 - auto-merge 已开启却因 review 线程未解决等原因一直合不进，本检查看不见。后续事项：
   今日待办加一栏"auto-merge 开了超过 N 天没合的 PR"。
 - `Application build`、`Kernel architecture test`（以及 `ai-orchestrator-tests` /
-  `ops-review-loop-tests` / 两道 Ledger 检查）都用 `on: pull_request` 触发，执行的是
+  `ops-review-loop-tests` / 三道 Ledger 检查 `Ledger entries valid`、`Code change has ledger entry`、`Ledger refs exist`）都用 `on: pull_request` 触发，执行的是
   **PR 分支自己那份** workflow 定义。一个 PR 只要同时把构建步骤换成必然成功的空壳、保留检查名
   不变，产出的绿勾仍来自同一个 GitHub Actions `integration_id`，`Protect main` 分不出真假。
   这类改动碰了 `.github/`，会被判 A 级、要 PM 在聊天里点头才合；所以今天「这几道检查绿了 =
