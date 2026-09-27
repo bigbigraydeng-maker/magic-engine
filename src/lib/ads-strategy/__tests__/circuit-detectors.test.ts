@@ -4,6 +4,9 @@ import {
   detectDataCompleteness,
   type DailySpendPoint,
   type DetectorVerdict,
+  detectClientSpendOverCap,
+  type AccountSpendFact,
+  type DetectorConfigSource,
 } from '../circuit-detectors'
 
 /** 造一个非零花费点，日期只是占位，判据不看日期。 */
@@ -251,5 +254,307 @@ describe('detectDataCompleteness', () => {
     for (const verdict of verdicts) {
       expect(verdict.kind).not.toBe('trip')
     }
+  })
+})
+
+/** 客户时区下的「完整前一天」，所有账户都跟它比。 */
+const REF = '2026-09-26'
+
+/**
+ * 造一个账户花费事实。默认是「数据就是参考日当天、还在投、NZD」——
+ * 也就是最普通的健康账户；每条用例只覆盖它要验的那一两个字段。
+ */
+function account(over: Partial<AccountSpendFact> & { adAccountId: string }): AccountSpendFact {
+  return {
+    lastCompleteDate: REF,
+    spendCents: 0,
+    hasDeliveringEntity: true,
+    currency: 'NZD',
+    ...over,
+  }
+}
+
+describe('detectClientSpendOverCap - 配置来源', () => {
+  it('fallback → facts:config_read_failed', () => {
+    const verdict = detectClientSpendOverCap({
+      clientReferenceDate: REF,
+      accounts: [account({ adAccountId: 'a1', spendCents: 100 })],
+      capCents: 1000,
+      configSource: 'fallback',
+    })
+    expect(verdict.kind).toBe('undeterminable')
+    if (verdict.kind === 'undeterminable') {
+      expect(verdict.reason).toBe('facts:config_read_failed')
+    }
+  })
+
+  it('default → facts:no_strategy_config', () => {
+    const verdict = detectClientSpendOverCap({
+      clientReferenceDate: REF,
+      accounts: [account({ adAccountId: 'a1', spendCents: 100 })],
+      capCents: 1000,
+      configSource: 'default',
+    })
+    expect(verdict.kind).toBe('undeterminable')
+    if (verdict.kind === 'undeterminable') {
+      expect(verdict.reason).toBe('facts:no_strategy_config')
+    }
+  })
+
+  it('capCents 为 null → facts:cap_not_configured', () => {
+    const verdict = detectClientSpendOverCap({
+      clientReferenceDate: REF,
+      accounts: [account({ adAccountId: 'a1', spendCents: 100 })],
+      capCents: null,
+      configSource: 'row',
+    })
+    expect(verdict.kind).toBe('undeterminable')
+    if (verdict.kind === 'undeterminable') {
+      expect(verdict.reason).toBe('facts:cap_not_configured')
+    }
+  })
+
+  it('三种配置来源的 reason 互不相同', () => {
+    const reasons = new Set<string>()
+    const sources: DetectorConfigSource[] = ['fallback', 'default', 'row']
+    for (const source of sources) {
+      const verdict = detectClientSpendOverCap({
+        clientReferenceDate: REF,
+        accounts: [account({ adAccountId: 'a1', spendCents: 100 })],
+        capCents: source === 'row' ? null : 1000,
+        configSource: source,
+      })
+      expect(verdict.kind).toBe('undeterminable')
+      if (verdict.kind === 'undeterminable') {
+        reasons.add(verdict.reason)
+      }
+    }
+    expect(reasons.size).toBe(3)
+  })
+})
+
+describe('detectClientSpendOverCap - 无账户', () => {
+  it('没有账户 → no_trip', () => {
+    const verdict = detectClientSpendOverCap({
+      clientReferenceDate: REF,
+      accounts: [],
+      capCents: 1000,
+      configSource: 'row',
+    })
+    expect(verdict.kind).toBe('no_trip')
+  })
+})
+
+describe('detectClientSpendOverCap - 逐账户贡献', () => {
+  it('数据是参考日 → 用当天花费', () => {
+    const verdict = detectClientSpendOverCap({
+      clientReferenceDate: REF,
+      accounts: [account({ adAccountId: 'a1', lastCompleteDate: REF, spendCents: 500 })],
+      capCents: 1000,
+      configSource: 'row',
+    })
+    expect(verdict.kind).toBe('no_trip')
+    expect(verdict.evidence.totalCents).toBe(500)
+  })
+
+  it('没数据 + 没在投 → 贡献 0', () => {
+    const verdict = detectClientSpendOverCap({
+      clientReferenceDate: REF,
+      accounts: [
+        account({ adAccountId: 'a1', lastCompleteDate: null, spendCents: null, hasDeliveringEntity: false }),
+      ],
+      capCents: 1000,
+      configSource: 'row',
+    })
+    expect(verdict.kind).toBe('no_trip')
+    expect(verdict.evidence.totalCents).toBe(0)
+  })
+
+  it('没数据 + 不知道在不在投 → facts:account_data_missing', () => {
+    const verdict = detectClientSpendOverCap({
+      clientReferenceDate: REF,
+      accounts: [
+        account({ adAccountId: 'a1', lastCompleteDate: null, spendCents: null, hasDeliveringEntity: null }),
+      ],
+      capCents: 1000,
+      configSource: 'row',
+    })
+    expect(verdict.kind).toBe('undeterminable')
+    if (verdict.kind === 'undeterminable') {
+      expect(verdict.reason).toBe('facts:account_data_missing')
+      expect(verdict.evidence.blockedByAccountId).toBe('a1')
+    }
+  })
+
+  it('数据落后 + 没在投 → 贡献 0，仍然能判出结论', () => {
+    const verdict = detectClientSpendOverCap({
+      clientReferenceDate: REF,
+      accounts: [
+        account({ adAccountId: 'a1', lastCompleteDate: REF, spendCents: 500 }),
+        account({
+          adAccountId: 'a2',
+          lastCompleteDate: '2026-09-20',
+          spendCents: 999,
+          hasDeliveringEntity: false,
+        }),
+      ],
+      capCents: 1000,
+      configSource: 'row',
+    })
+    expect(verdict.kind).toBe('no_trip')
+    expect(verdict.evidence.totalCents).toBe(500)
+    const perAccount = verdict.evidence.perAccount as { adAccountId: string; contributedCents: number }[]
+    expect(perAccount.find((p) => p.adAccountId === 'a2')?.contributedCents).toBe(0)
+  })
+
+  it('数据落后 + 在投 → facts:account_data_stale，blockedByAccountId 是它', () => {
+    const verdict = detectClientSpendOverCap({
+      clientReferenceDate: REF,
+      accounts: [
+        account({ adAccountId: 'a1', lastCompleteDate: REF, spendCents: 500 }),
+        account({
+          adAccountId: 'a2',
+          lastCompleteDate: '2026-09-20',
+          spendCents: 999,
+          hasDeliveringEntity: true,
+        }),
+      ],
+      capCents: 1000,
+      configSource: 'row',
+    })
+    expect(verdict.kind).toBe('undeterminable')
+    if (verdict.kind === 'undeterminable') {
+      expect(verdict.reason).toBe('facts:account_data_stale')
+      expect(verdict.evidence.blockedByAccountId).toBe('a2')
+    }
+  })
+
+  it('数据落后 + 快照拿不到 → facts:snapshot_unavailable', () => {
+    const verdict = detectClientSpendOverCap({
+      clientReferenceDate: REF,
+      accounts: [
+        account({
+          adAccountId: 'a1',
+          lastCompleteDate: '2026-09-20',
+          spendCents: 999,
+          hasDeliveringEntity: null,
+        }),
+      ],
+      capCents: 1000,
+      configSource: 'row',
+    })
+    expect(verdict.kind).toBe('undeterminable')
+    if (verdict.kind === 'undeterminable') {
+      expect(verdict.reason).toBe('facts:snapshot_unavailable')
+    }
+  })
+
+  it('数据比参考日还新 → facts:account_date_ahead', () => {
+    const verdict = detectClientSpendOverCap({
+      clientReferenceDate: REF,
+      accounts: [account({ adAccountId: 'a1', lastCompleteDate: '2026-09-27', spendCents: 100 })],
+      capCents: 1000,
+      configSource: 'row',
+    })
+    expect(verdict.kind).toBe('undeterminable')
+    if (verdict.kind === 'undeterminable') {
+      expect(verdict.reason).toBe('facts:account_date_ahead')
+    }
+  })
+})
+
+describe('detectClientSpendOverCap - 币种闸', () => {
+  it('贡献 0 的账户 currency 为 null → 不触发币种闸', () => {
+    const verdict = detectClientSpendOverCap({
+      clientReferenceDate: REF,
+      accounts: [
+        account({ adAccountId: 'a1', lastCompleteDate: REF, spendCents: 500, currency: 'NZD' }),
+        account({
+          adAccountId: 'a2',
+          lastCompleteDate: '2026-09-20',
+          spendCents: 999,
+          hasDeliveringEntity: false,
+          currency: null,
+        }),
+      ],
+      capCents: 1000,
+      configSource: 'row',
+    })
+    expect(verdict.kind).toBe('no_trip')
+  })
+
+  it('贡献 > 0 的两个账户币种不同 → facts:currency_mismatch', () => {
+    const verdict = detectClientSpendOverCap({
+      clientReferenceDate: REF,
+      accounts: [
+        account({ adAccountId: 'a1', lastCompleteDate: REF, spendCents: 500, currency: 'NZD' }),
+        account({ adAccountId: 'a2', lastCompleteDate: REF, spendCents: 500, currency: 'AUD' }),
+      ],
+      capCents: 1000,
+      configSource: 'row',
+    })
+    expect(verdict.kind).toBe('undeterminable')
+    if (verdict.kind === 'undeterminable') {
+      expect(verdict.reason).toBe('facts:currency_mismatch')
+    }
+  })
+
+  it('贡献 > 0 的账户 currency 为 null → facts:currency_unknown', () => {
+    const verdict = detectClientSpendOverCap({
+      clientReferenceDate: REF,
+      accounts: [account({ adAccountId: 'a1', lastCompleteDate: REF, spendCents: 500, currency: null })],
+      capCents: 1000,
+      configSource: 'row',
+    })
+    expect(verdict.kind).toBe('undeterminable')
+    if (verdict.kind === 'undeterminable') {
+      expect(verdict.reason).toBe('facts:currency_unknown')
+    }
+  })
+})
+
+describe('detectClientSpendOverCap - 比上限', () => {
+  it('合计恰好等于 capCents × 1.2 → 不熔断（严格大于）', () => {
+    // capCents = 1000 → 阈值 1200，合计 1200 不熔断
+    const verdict = detectClientSpendOverCap({
+      clientReferenceDate: REF,
+      accounts: [account({ adAccountId: 'a1', lastCompleteDate: REF, spendCents: 1200 })],
+      capCents: 1000,
+      configSource: 'row',
+    })
+    expect(verdict.kind).toBe('no_trip')
+  })
+
+  it('合计比 capCents × 1.2 多 1 分 → 熔断', () => {
+    const verdict = detectClientSpendOverCap({
+      clientReferenceDate: REF,
+      accounts: [account({ adAccountId: 'a1', lastCompleteDate: REF, spendCents: 1201 })],
+      capCents: 1000,
+      configSource: 'row',
+    })
+    expect(verdict.kind).toBe('trip')
+    if (verdict.kind === 'trip') {
+      expect(verdict.reason).toBe('circuit:client_daily_cap_exceeded')
+      expect(verdict.sticky).toBe(false)
+    }
+  })
+
+  it('capCents 取会产生浮点误差的值（10007）时判据不误判', () => {
+    // 10007 * 1.2 = 12008.4（浮点），阈值应严格为 12008.4，合计 12008 不熔断、12009 熔断
+    const below = detectClientSpendOverCap({
+      clientReferenceDate: REF,
+      accounts: [account({ adAccountId: 'a1', lastCompleteDate: REF, spendCents: 12008 })],
+      capCents: 10007,
+      configSource: 'row',
+    })
+    expect(below.kind).toBe('no_trip')
+
+    const above = detectClientSpendOverCap({
+      clientReferenceDate: REF,
+      accounts: [account({ adAccountId: 'a1', lastCompleteDate: REF, spendCents: 12009 })],
+      capCents: 10007,
+      configSource: 'row',
+    })
+    expect(above.kind).toBe('trip')
   })
 })
