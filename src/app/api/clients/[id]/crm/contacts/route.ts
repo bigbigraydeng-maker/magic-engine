@@ -195,7 +195,19 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
     const [countRes, pageRes, stages] = await Promise.all([
       countBuilder,
       pageBuilder
-        .order('id', { ascending: true })
+        // 🔴 2026-09-28 修：原来是 `.order('id', ...)`——`contacts.id` 是 UUID，
+        // 按它排等于按随机字符串排。第 1 页选出来的 20 个人跟"谁最近有动静"没有
+        // 任何关系，而页面上「最近联系 ↓」那个箭头只对**已经选出的这一页**做
+        // 客户端排序（page.tsx 注释自己写着「排序只对当前页生效」）——两层叠加，
+        // 效果是"挑 20 个近乎随机的人，把这 20 个人按最近联系排一下"，
+        // 今晚刚建档的 WhatsApp 测试联系人因此在 1026 人里怎么翻都翻不到。
+        // 改成按 `first_seen_at` 倒序：真正的"按最后一次接触排"要在每人身上先
+        // 算出跨渠道最新触点时间再排序，这份 SQL 目前是查完整批触点后在内存里
+        // 组装（见本文件头注），做不到"先排序再分页"——那是一次更大的改动
+        // （物化视图 / 缓存列），记进台账，不在这次一起做。`first_seen_at` 是
+        // 唯一已经在这次查询里、单调、不为空的时间列，至少让"今天刚进来的人"
+        // 能在默认视图里被看见，比随机排序找不到强。
+        .order('first_seen_at', { ascending: false })
         .range((query.page - 1) * query.perPage, query.page * query.perPage - 1),
       fetchAll<StageRow>((from, to) =>
         supabaseAdmin
