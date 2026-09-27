@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { nextNavStep, type NavInput } from '../drawer-nav'
+import { currentPositionLabel, nextNavStep, type NavInput } from '../drawer-nav'
 
 describe('分段模式', () => {
   const base = (over: Partial<Extract<NavInput, { mode: 'segment' }>> = {}): NavInput => ({
@@ -118,5 +118,49 @@ describe('平铺模式 —— 不出全局序号', () => {
   it('currentIndex=-1 → not_in_list', () => {
     const step = nextNavStep(base({ currentIndex: -1 }))
     expect(step.kind).toBe('not_in_list')
+  })
+})
+
+describe('currentPositionLabel —— 抽屉打开那一刻就要有值，不等点了一次上一位/下一位', () => {
+  it('分段模式：给全局序号（段内页码换算过）', () => {
+    const label = currentPositionLabel({
+      mode: 'segment',
+      direction: 'next',
+      loadedIds: ['a', 'b', 'c'],
+      currentIndex: 1,
+      sectionKey: 'waiting',
+      sectionTitle: '客人在等你',
+      sectionPage: 2,
+      perPage: 100,
+      sectionTotal: 217,
+      nextSection: null,
+    })
+    // 第 2 页第 1 个（0-based）= 全局第 102 位
+    expect(label).toBe('客人在等你 · 第 102 位 / 共 217 位')
+  })
+
+  it('平铺模式：只给本页序号，不出现"共"字', () => {
+    const label = currentPositionLabel({
+      mode: 'flat',
+      direction: 'next',
+      loadedIds: ['a', 'b', 'c'],
+      currentIndex: 0,
+      page: 1,
+      totalPages: 3,
+    })
+    expect(label).toBe('第 1 位 / 本页 3 位')
+    expect(label).not.toContain('共')
+  })
+
+  it('currentIndex=-1（人不在已加载列表里）→ null', () => {
+    const label = currentPositionLabel({
+      mode: 'flat',
+      direction: 'next',
+      loadedIds: ['a', 'b', 'c'],
+      currentIndex: -1,
+      page: 1,
+      totalPages: 3,
+    })
+    expect(label).toBeNull()
   })
 })
