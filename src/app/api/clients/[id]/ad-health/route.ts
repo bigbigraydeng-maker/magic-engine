@@ -10,7 +10,12 @@
  *   history — days of overall-verdict history to include (default 30, max 90)
  *
  * Returns: { success, latest: { insight_date, overall_verdict, headline, payload } | null,
- *            history: [{ insight_date, overall_verdict }], industry: string | null }
+ *            history: [{ insight_date, overall_verdict }], industry: string | null, growth }
+ *
+ * `growth`: only staff who can see every client get the raw ads_growth_states row. Everyone
+ * else — paid clients, demo/scoped admins (tier 'admin' but pinned to one client), and any
+ * tier added later — gets the whitelisted client view (toClientGrowthView). Internal
+ * findings such as D11 never reach a client browser.
  *
  * Reference: docs/superpowers/specs/2026-07-13-ad-strategy-engine.md §8.1
  */
@@ -18,6 +23,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import {
+  CLIENT_GROWTH_LOOKBACK_ROWS,
+  toClientGrowthView,
+  type GrowthRowForClient,
+} from '@/lib/ads-strategy/agents/growth-client-view'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,6 +40,9 @@ export async function GET(
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
+
+  // Fail-closed: anything that is not an unscoped admin sees the client view.
+  const fullView = access.tier === 'admin' && access.allowedClientId === null
 
   const rawHistory = req.nextUrl.searchParams.get('history')
   const historyDays = Math.min(parseInt(rawHistory ?? '30', 10) || 30, 90)
@@ -56,13 +69,13 @@ export async function GET(
       .maybeSingle(),
     // 卫青巡察当天的经营状态（spec 2026-09-24 §4）：问题 + 机会 + 目标节奏。
     // 读失败不挡整页——老的体检卡片仍要能显示，页面自己会说这一段读不到。
+    // 客户版要往回看几天（连续命中门槛），员工版只要最新一行。
     supabaseAdmin
       .from('ads_growth_states')
-      .select('date, payload, problems_count, opportunities_count, goal_pace, data_completeness')
+      .select('client_id, date, payload, problems_count, opportunities_count, goal_pace, data_completeness')
       .eq('client_id', clientId)
       .order('date', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+      .limit(fullView ? 1 : CLIENT_GROWTH_LOOKBACK_ROWS),
   ])
   if (clientRes.error) {
     console.warn('[api/ad-health] 读客户行业失败，页面改用中性词', { clientId, error: clientRes.error.message })
@@ -76,6 +89,13 @@ export async function GET(
     console.warn('[api/ad-health] 读经营状态失败，页面只显示体检部分', { clientId, error: growthRes.error.message })
   }
 
+  const growthRows = (growthRes.data ?? []) as GrowthRowForClient[]
+  const growth = growthRes.error
+    ? undefined
+    : fullView
+      ? (growthRows[0] ?? null)
+      : toClientGrowthView(growthRows, new Date())
+
   return NextResponse.json({
     success: true,
     latest: latestRes.data ?? null,
@@ -83,6 +103,6 @@ export async function GET(
     history: (historyRes.data ?? []).slice().reverse(),
     industry: (clientRes.data as { industry?: string | null } | null)?.industry ?? null,
     // 🔴 读失败与「今天还没跑」必须分得开：前者页面要说「读不到」，后者说「今天还没巡察」。
-    growth: growthRes.error ? undefined : (growthRes.data ?? null),
+    growth,
   })
 }

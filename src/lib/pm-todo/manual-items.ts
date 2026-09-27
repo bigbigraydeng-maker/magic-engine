@@ -35,6 +35,8 @@ import { pushFacebookSyncFailingItems } from './facebook-sync-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
+import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
+import { pushDataDeletionFailureItems } from './data-deletion-items'
 import {
   buildCrawlHealthItems,
   buildNotIndexedItems,
@@ -242,6 +244,10 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     (b) => pushPaidSignalReviewItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 待确认付款读取失败（不阻塞其他待办）:', e),
     ),
+    // Magic Bridge 免费名额快用完 —— 用满后新客户这个月就生成不了报告（PM 定的全平台上限）
+    (b) => pushMagicBridgeQuotaItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] Magic Bridge 免费额度待办生成失败（不阻塞其他待办）:', e),
+    ),
   ]
 }
 
@@ -307,6 +313,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 每日广告巡检的广告级规则（D2 / D10）—— 只读，要不要改由人定；同一件事按 remind-cadence 节奏提醒
     (b) => pushAdsRuleFindingItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 广告级规则待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // Facebook 删除数据请求处理失败 —— 失败不许只写日志（铁律 3）
+    (b) => pushDataDeletionFailureItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 删除数据请求失败待办生成失败（不阻塞其他待办）:', e),
     ),
     // 客户之间有没有串台 —— PM 2026-08-05：「坚决不能胡窜」。
     // 实测查到 CTS 的发布通道指向 Oztop 的网站，填错两个多月没人发现。
@@ -559,6 +569,7 @@ export function pushClientDocManualTaskItems(
       what: t.what,
       how: t.how,
       href: t.href,
+      ...(t.pmKind ? { pm_kind: t.pmKind } : {}),
     })
   }
 }
@@ -661,7 +672,8 @@ async function pushConversationHealthAlertItems(
           : `，已经持续 ${Math.floor(hoursOngoing / 24)} 天没恢复`
 
     items.push({
-      kind: 'conversation_health_alert',
+      // 「AI 起草一直报错」只有我们能修，拆成单独一种，今日待办按 kind 把它转给开发
+      kind: row.check_type === 'verifier_error_rate_high' ? 'conversation_health_check_error' : 'conversation_health_alert',
       client_id: row.client_id,
       client_name: nameOf(row.client_id),
       what: `${channelLabel} 私信客服：${conversationHealthProblemLabel(row.check_type)}${durationText}（${row.detail}）`,
@@ -671,9 +683,21 @@ async function pushConversationHealthAlertItems(
   }
 }
 
-async function pushCrossClientItems(supabase: SupabaseClient, items: ManualItem[]): Promise<void> {
+export async function pushCrossClientItems(supabase: SupabaseClient, items: ManualItem[]): Promise<void> {
   const findings = await auditCrossClientLeaks(supabase)
+  // 同一个网址 / 账号查出的几条是**同一件串台**的不同侧面（2026-09-25：「CTS 名下存着
+  // oztop 的网址」和「CTS 与 oztop 的发布通道指向同一网址」是一件事）—— 合成一条，
+  // 所有涉及的客户和说法都留着。不同网址的不合：两件串台就是两件事。
+  const groups = new Map<string, { severity: 'critical' | 'warning'; value: string; clients: string[]; whats: string[] }>()
   for (const f of findings) {
+    const key = `${f.severity}|${f.value.trim().toLowerCase().replace(/\/+$/, '')}`
+    const g = groups.get(key) ?? { severity: f.severity, value: f.value, clients: [], whats: [] }
+    for (const c of f.clients) if (!g.clients.includes(c)) g.clients.push(c)
+    g.whats.push(f.what)
+    groups.set(key, g)
+  }
+  for (const f of Array.from(groups.values())) {
+    const what = f.whats.join('；')
     items.push({
       kind: 'cross_client_leak',
       // 串台涉及多个客户，名字里全列出来，别只挂一个
@@ -681,8 +705,8 @@ async function pushCrossClientItems(supabase: SupabaseClient, items: ManualItem[
       client_name: f.clients.join(' / '),
       what:
         f.severity === 'critical'
-          ? `🔴 客户资料串台：${f.what}`
-          : `⚠️ ${f.what}`,
+          ? `🔴 客户资料串台：${what}`
+          : `⚠️ ${what}`,
       how:
         f.severity === 'critical'
           ? '进客户设置页核对这条配置填的是不是本人的。在纠正之前，系统已经拒绝用它发布任何东西'
@@ -714,7 +738,8 @@ async function pushBlogDraftItems(
   const todos = await fetchBlogDraftTodos(supabase, ids, now)
   for (const t of todos) {
     items.push({
-      kind: 'blog_draft_waiting',
+      // 发布通道断了的那种，人要做的是去设置里接通（点一次），不是审稿
+      kind: t.channelBroken ? 'blog_publish_channel_broken' : 'blog_draft_waiting',
       client_id: t.client_id,
       client_name: nameOf(t.client_id),
       what: t.what,

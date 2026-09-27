@@ -2,22 +2,22 @@
  * 断线待办**落在哪一栏**的回归测试。
  *
  * 分栏错了不会有任何报错，但后果很具体：
- *  · 该 PM 动手的落进「系统欠账」→ 那件只有邮箱本人能做的事从他的清单上消失，
+ *  · 该 PM 动手的被当成开发欠账 → 那件只有邮箱本人能做的事从他的清单上消失，
  *    也不计进「今天有几件事」，于是**没人会去重连** —— 正是 9 天事故的重演。
- *  · PM 做不了的落进「需要你动手」→ 每天给他一件点了也没用的活，
+ *  · PM 做不了的落进「系统进不去、要你点一次的」→ 每天给他一件点了也没用的活，
  *    栏目一被稀释，真正等他动手的那条会被一起划过去。
  *
- * 所以这两个方向都钉死。`daily-todo.ts` 的 `DEV_OWNED_KINDS` 是私有常量，
- * 这里不去读它，直接看**渲染出来的邮件里这条落在哪一节**——测行为，不测存在。
+ * 所以这两个方向都钉死，直接看**渲染出来的邮件**——测行为，不测存在。
+ * 2026-09-26 起开发欠账不再在 PM 邮件里占一栏，只剩一行「N 件开发欠账」+ 清单链接。
  */
 
 import { describe, expect, it } from 'vitest'
 import { buildTodoEmail, type TodoCounts } from '../daily-todo'
+import { LANE_OF_KIND } from '../five-kinds'
 import { DEV_LANE_CONNECTION_KINDS, type PlatformConnectionItemKind } from '../platform-connection-items'
 import type { ManualItem } from '../manual-item-types'
 
-const ACTION_SECTION = '需要你动手'
-const DEV_SECTION = '系统欠账'
+const ACTION_SECTION = '系统进不去、要你点一次的'
 
 const ALL_KINDS: PlatformConnectionItemKind[] = [
   'platform_connection_broken',
@@ -52,24 +52,28 @@ function emailWith(kind: PlatformConnectionItemKind) {
   return buildTodoEmail(1, counts, '9月24日')
 }
 
-/** 这条内容出现在哪一节的标题之后。 */
-function sectionOf(html: string, needle: string): string {
-  const idx = html.indexOf(needle)
-  const before = html.slice(0, idx)
-  const action = before.lastIndexOf(ACTION_SECTION)
-  const dev = before.lastIndexOf(DEV_SECTION)
-  if (action < 0 && dev < 0) return '(没出现在任何一节)'
-  return action > dev ? ACTION_SECTION : DEV_SECTION
-}
-
 describe('断线待办的分栏', () => {
-  it.each(ALL_KINDS)('%s 落在正确的那一栏，且计不计数也对', (kind) => {
+  it.each(ALL_KINDS)('%s 落在正确的地方，且计不计数也对', (kind) => {
     const { html, totalItems } = emailWith(kind)
     const isDev = DEV_LANE_CONNECTION_KINDS.includes(kind)
-    expect(html).toContain(`这是 ${kind} 的内容`)
-    expect(sectionOf(html, `这是 ${kind} 的内容`)).toBe(isDev ? DEV_SECTION : ACTION_SECTION)
-    // dev 车道的不算 PM 的活，不进「今天有几件事」
-    expect(totalItems).toBe(isDev ? 0 : 1)
+    if (isDev) {
+      // 开发的活：PM 邮件里看不到正文，也不算他的事，只剩一行「开发欠账」+ 链接
+      expect(html).not.toContain(`这是 ${kind} 的内容`)
+      expect(html).toContain('1 件开发欠账')
+      expect(html).toContain('/dashboard/admin/cron-health#dev-debt')
+      expect(totalItems).toBe(0)
+    } else {
+      const at = html.indexOf(`这是 ${kind} 的内容`)
+      expect(at).toBeGreaterThan(html.indexOf(ACTION_SECTION))
+      expect(html.indexOf(ACTION_SECTION)).toBeGreaterThan(-1)
+      expect(totalItems).toBe(1)
+    }
+  })
+
+  it('DEV_LANE_CONNECTION_KINDS 跟车道表（five-kinds.ts）说的是同一件事', () => {
+    for (const kind of ALL_KINDS) {
+      expect(LANE_OF_KIND[kind] === 'dev').toBe(DEV_LANE_CONNECTION_KINDS.includes(kind))
+    }
   })
 
   it('🔴 需要人去点一次同意页的那四条，一条都不许滑进 dev 栏', () => {
