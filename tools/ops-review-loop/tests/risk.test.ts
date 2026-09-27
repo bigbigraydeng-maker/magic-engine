@@ -131,6 +131,122 @@ describe('every protected path rates A', () => {
   })
 })
 
+describe('A rules match case-insensitively — macOS core.ignorecase bypass (狄仁杰 PR #2153 attack)', () => {
+  /**
+   * Swap the case of the first alphabetic character in each path segment.
+   * Produces the kind of path an attacker would use on a case-insensitive FS:
+   *   CLAUDE.md → cLAUDE.md
+   *   .github/workflows/x.yml → .Github/Workflows/X.yml
+   */
+  function mixCase(path: string): string {
+    return path
+      .split('/')
+      .map((seg) => {
+        for (let i = 0; i < seg.length; i++) {
+          const c = seg[i]
+          if (/[a-zA-Z]/.test(c)) {
+            const swapped = c === c.toLowerCase() ? c.toUpperCase() : c.toLowerCase()
+            return seg.slice(0, i) + swapped + seg.slice(i + 1)
+          }
+        }
+        return seg
+      })
+      .join('/')
+  }
+
+  it('mixCase actually changes every A_PATHS entry (the test is not vacuous)', () => {
+    const unchanged = A_PATHS.filter(([path]) => mixCase(path) === path)
+    expect(unchanged.map(([p]) => p)).toEqual([])
+  })
+
+  it.each(A_PATHS.map(([path, label]) => [mixCase(path), path, label] as const))(
+    '%s (from %s, %s) still rates A',
+    (mixed) => {
+      expect(classifyFile(mixed).risk).toBe('A')
+    },
+  )
+
+  it('the specific attack paths from 狄仁杰 all rate A', () => {
+    const attacks = [
+      'claude.md',
+      '.Claude/skills/x/SKILL.md',
+      '.GitHub/merge-authorization.md',
+      'docs/ENGINEERING_quality_gates.md',
+      'docs/Agents/13-kongzi.md', // .claude/ prefix won't match, but docs/ + .md → C, not A; this tests the next block
+    ]
+    // The first four are governance files that must rate A
+    for (const p of attacks.slice(0, 4)) {
+      expect(classifyFile(p).risk).toBe('A')
+    }
+  })
+
+  it('a case-variant rename of a protected path still rates A', () => {
+    const result = classifyRisk({
+      files: [
+        {
+          filename: 'docs/old.md',
+          previous_filename: '.Github/Workflows/guard.yml',
+          status: 'renamed',
+        },
+      ],
+    })
+    expect(result.risk).toBe('A')
+    expect(result.categories).toContain('control-plane')
+  })
+
+  it('a full-PR classifyRisk with attack paths rates A', () => {
+    const result = classifyRisk({
+      files: [
+        { filename: 'claude.md' },
+        { filename: '.Claude/skills/x/SKILL.md' },
+        { filename: '.GitHub/merge-authorization.md' },
+        { filename: 'docs/ENGINEERING_quality_gates.md' },
+      ],
+    })
+    expect(result.risk).toBe('A')
+    expect(result.categories).toContain('governance')
+  })
+})
+
+describe('case-insensitive A matching does not change B/C classifications', () => {
+  it.each([
+    'docs/STATE.md',
+    'README.md',
+    'src/app/globals.css',
+    'public/logo.svg',
+    'src/lib/foo/bar.test.ts',
+    'src/lib/foo/__tests__/bar.ts',
+    'docs/anything',
+    'notes.txt',
+    'src/styles/theme.scss',
+    'public/hero.png',
+    'public/hero.jpg',
+    'src/app/favicon.ico',
+    'docs/agents/ziya.md',
+    'docs/specs/anything.md',
+    'docs/ledger/2026-09-25-some-card.md',
+  ])('%s stays C', (path) => {
+    expect(classifyFile(path).risk).toBe('C')
+  })
+
+  it.each([
+    'src/lib/reports/build-summary.ts',
+    'src/app/(dashboard)/page.tsx',
+    'scripts/one-off.mjs',
+    'src/lib/geo/score.ts',
+    'src/lib/config/env.ts',
+    'src/lib/utils/urls.ts',
+    'src/components/controls.ts',
+    '.env.example',
+  ])('%s stays B', (path) => {
+    expect(classifyFile(path).risk).toBe('B')
+  })
+
+  it('README.MD (uppercase extension) stays B, not C — C rules are case-sensitive', () => {
+    expect(classifyFile('README.MD').risk).toBe('B')
+  })
+})
+
 describe('governance files are A even though they are markdown', () => {
   it('rates CLAUDE.md A, not C', () => {
     expect(classifyFile('CLAUDE.md')).toEqual({
