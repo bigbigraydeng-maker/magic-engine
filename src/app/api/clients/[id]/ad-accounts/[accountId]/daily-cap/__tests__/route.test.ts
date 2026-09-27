@@ -17,12 +17,59 @@ interface AccountRow {
   daily_budget_cap_cents: number | null
 }
 
+interface SnapshotRow {
+  client_id: string
+  ad_account_id: string
+  level: string
+  currency: string | null
+  captured_at: string
+}
+
 const CLIENT = '11111111-1111-1111-1111-111111111111'
 const OTHER_CLIENT = '22222222-2222-2222-2222-222222222222'
 
 let accounts: AccountRow[] = []
+let snapshots: SnapshotRow[] = []
 let configCap: number | null = null
-let failStep: 'accounts' | 'siblings' | 'config' | 'update' | null = null
+let failStep: 'accounts' | 'siblings' | 'config' | 'update' | 'currency' | null = null
+
+/** 造一条账户级快照行，默认 NZD、刚拍的。 */
+function accountSnapshot(adAccountId: string, over: Partial<SnapshotRow> = {}): SnapshotRow {
+  return {
+    client_id: CLIENT,
+    ad_account_id: adAccountId,
+    level: 'account',
+    currency: 'NZD',
+    captured_at: new Date().toISOString(),
+    ...over,
+  }
+}
+
+function makeSnapshotQuery() {
+  const filters: Array<(r: SnapshotRow) => boolean> = []
+  const q = {
+    select: () => q,
+    eq(col: keyof SnapshotRow, value: unknown) {
+      filters.push((r) => r[col] === value)
+      return q
+    },
+    in(col: keyof SnapshotRow, values: readonly unknown[]) {
+      filters.push((r) => values.includes(r[col]))
+      return q
+    },
+    order() {
+      return q
+    },
+    then(resolve: (v: { data: SnapshotRow[] | null; error: { message: string } | null }) => unknown) {
+      if (failStep === 'currency') {
+        return Promise.resolve({ data: null, error: { message: '查币种故意失败' } }).then(resolve)
+      }
+      const rows = snapshots.filter((r) => filters.every((f) => f(r)))
+      return Promise.resolve({ data: rows, error: null }).then(resolve)
+    },
+  }
+  return q
+}
 
 function makeAccountsQuery() {
   const filters: Array<(r: AccountRow) => boolean> = []
@@ -78,6 +125,7 @@ vi.mock('@/lib/supabase', () => ({
     from: (table: string) => {
       if (table === 'client_meta_ad_accounts') return makeAccountsQuery()
       if (table === 'ad_strategy_configs') return makeConfigQuery()
+      if (table === 'ad_entity_snapshots') return makeSnapshotQuery()
       throw new Error('unexpected table: ' + table)
     },
   },
@@ -98,6 +146,7 @@ function params(accountId: string) {
 
 beforeEach(() => {
   accounts = []
+  snapshots = []
   configCap = null
   failStep = null
   vi.clearAllMocks()
@@ -186,6 +235,7 @@ describe('sum(账户上限) ≤ 客户总闸', () => {
 
   it('单账户、新值 ≤ 总闸 → 放行', async () => {
     accounts = [{ id: 'r1', client_id: CLIENT, ad_account_id: 'act_1', daily_budget_cap_cents: null }]
+    snapshots = [accountSnapshot('act_1')]
     configCap = 10_000
 
     const res = await PATCH(req({ daily_budget_cap_cents: 10_000 }), params('act_1'))
@@ -195,6 +245,7 @@ describe('sum(账户上限) ≤ 客户总闸', () => {
 
   it('🔴 单账户、新值超总闸 1 分 → 拒，不写库', async () => {
     accounts = [{ id: 'r1', client_id: CLIENT, ad_account_id: 'act_1', daily_budget_cap_cents: null }]
+    snapshots = [accountSnapshot('act_1')]
     configCap = 10_000
 
     const res = await PATCH(req({ daily_budget_cap_cents: 10_001 }), params('act_1'))
@@ -208,6 +259,7 @@ describe('sum(账户上限) ≤ 客户总闸', () => {
       { id: 'r1', client_id: CLIENT, ad_account_id: 'act_1', daily_budget_cap_cents: 6_000 },
       { id: 'r2', client_id: CLIENT, ad_account_id: 'act_2', daily_budget_cap_cents: 4_000 },
     ]
+    snapshots = [accountSnapshot('act_1'), accountSnapshot('act_2')]
     configCap = 10_000
 
     // 把 act_1 从 6000 改到 6001 → 合计变成 10001，超了
@@ -222,6 +274,7 @@ describe('sum(账户上限) ≤ 客户总闸', () => {
       { id: 'r1', client_id: CLIENT, ad_account_id: 'act_1', daily_budget_cap_cents: 6_000 },
       { id: 'r2', client_id: CLIENT, ad_account_id: 'act_2', daily_budget_cap_cents: 4_000 },
     ]
+    snapshots = [accountSnapshot('act_1'), accountSnapshot('act_2')]
     configCap = 10_000
 
     const res = await PATCH(req({ daily_budget_cap_cents: 6_000 }), params('act_1'))
@@ -235,6 +288,7 @@ describe('sum(账户上限) ≤ 客户总闸', () => {
       // 同一个 act_ 号，但挂在别的客户下（不该发生，但假件要证明"就算发生也不串账"）
       { id: 'r2', client_id: OTHER_CLIENT, ad_account_id: 'act_2', daily_budget_cap_cents: 999_999 },
     ]
+    snapshots = [accountSnapshot('act_1')]
     configCap = 10_000
 
     const res = await PATCH(req({ daily_budget_cap_cents: 4_000 }), params('act_1'))
@@ -248,6 +302,8 @@ describe('sum(账户上限) ≤ 客户总闸', () => {
       { id: 'r1', client_id: CLIENT, ad_account_id: 'act_1', daily_budget_cap_cents: 6_000 },
       { id: 'r2', client_id: CLIENT, ad_account_id: 'act_2', daily_budget_cap_cents: 4_000 },
     ]
+    // act_1 被清空，不再参与合计，不需要给它币种；act_2 仍参与，要给
+    snapshots = [accountSnapshot('act_2')]
     configCap = 10_000
 
     const res = await PATCH(req({ daily_budget_cap_cents: null }), params('act_1'))
@@ -277,6 +333,123 @@ describe('sum(账户上限) ≤ 客户总闸', () => {
     // 另一个客户名下那一行必须原封不动——按主键 id 写，不能按 ad_account_id 写
     // （两行的 ad_account_id 一样，按它写会两行一起改，或者改错那一行）。
     expect(accounts.find((a) => a.client_id === OTHER_CLIENT)!.daily_budget_cap_cents).toBe(200)
+  })
+})
+
+describe('币种闸（子牙+魏征审出的 BLOCKER：读不到/不一致就不能相加）', () => {
+  it('参与合计的账户全都是 NZD → 放行', async () => {
+    accounts = [
+      { id: 'r1', client_id: CLIENT, ad_account_id: 'act_1', daily_budget_cap_cents: 6_000 },
+      { id: 'r2', client_id: CLIENT, ad_account_id: 'act_2', daily_budget_cap_cents: 4_000 },
+    ]
+    snapshots = [accountSnapshot('act_1', { currency: 'NZD' }), accountSnapshot('act_2', { currency: 'NZD' })]
+    configCap = 10_000
+
+    const res = await PATCH(req({ daily_budget_cap_cents: 6_000 }), params('act_1'))
+
+    expect(res.status).toBe(200)
+  })
+
+  it('🔴 一个账户是 NZD、另一个是 AUD → 拒（409），不写库，不默默相加', async () => {
+    accounts = [
+      { id: 'r1', client_id: CLIENT, ad_account_id: 'act_1', daily_budget_cap_cents: 6_000 },
+      { id: 'r2', client_id: CLIENT, ad_account_id: 'act_2', daily_budget_cap_cents: 4_000 },
+    ]
+    snapshots = [accountSnapshot('act_1', { currency: 'NZD' }), accountSnapshot('act_2', { currency: 'AUD' })]
+    configCap = 10_000
+
+    const res = await PATCH(req({ daily_budget_cap_cents: 6_000 }), params('act_1'))
+
+    expect(res.status).toBe(409)
+    expect(accounts[0].daily_budget_cap_cents).toBe(6_000) // 没被改动
+  })
+
+  it('🔴 参与合计的账户没有任何快照（读不到币种）→ 拒（409），不猜', async () => {
+    accounts = [
+      { id: 'r1', client_id: CLIENT, ad_account_id: 'act_1', daily_budget_cap_cents: 6_000 },
+      { id: 'r2', client_id: CLIENT, ad_account_id: 'act_2', daily_budget_cap_cents: 4_000 },
+    ]
+    // act_2 没有任何快照
+    snapshots = [accountSnapshot('act_1', { currency: 'NZD' })]
+    configCap = 10_000
+
+    const res = await PATCH(req({ daily_budget_cap_cents: 6_000 }), params('act_1'))
+
+    expect(res.status).toBe(409)
+  })
+
+  it('🔴 快照存在但 currency 字段是 null → 当成读不到，拒', async () => {
+    accounts = [{ id: 'r1', client_id: CLIENT, ad_account_id: 'act_1', daily_budget_cap_cents: null }]
+    snapshots = [accountSnapshot('act_1', { currency: null })]
+    configCap = 10_000
+
+    const res = await PATCH(req({ daily_budget_cap_cents: 5_000 }), params('act_1'))
+
+    expect(res.status).toBe(409)
+  })
+
+  it('清空上限的账户（新值是 null）不参与合计，不需要它的币种', async () => {
+    accounts = [{ id: 'r1', client_id: CLIENT, ad_account_id: 'act_1', daily_budget_cap_cents: 6_000 }]
+    // act_1 完全没有快照，但这次请求是清空上限——act_1 不再参与合计，币种闸不该拦它
+    snapshots = []
+    configCap = 10_000
+
+    const res = await PATCH(req({ daily_budget_cap_cents: null }), params('act_1'))
+
+    expect(res.status).toBe(200)
+  })
+
+  it('没有配置客户总闸时 → 币种闸整个不触发（没有基准就不用管币种）', async () => {
+    accounts = [{ id: 'r1', client_id: CLIENT, ad_account_id: 'act_1', daily_budget_cap_cents: null }]
+    snapshots = [] // 没有任何快照，如果币种闸误触发就会 409
+    configCap = null
+
+    const res = await PATCH(req({ daily_budget_cap_cents: 999_999 }), params('act_1'))
+
+    expect(res.status).toBe(200)
+  })
+
+  it('🔴 只取每个账户最新那条快照——旧快照说 NZD、最新说 AUD，结果按最新（不误判成一致）', async () => {
+    accounts = [
+      { id: 'r1', client_id: CLIENT, ad_account_id: 'act_1', daily_budget_cap_cents: null },
+      { id: 'r2', client_id: CLIENT, ad_account_id: 'act_2', daily_budget_cap_cents: 4_000 },
+    ]
+    // 🔴 假件的 .order() 是空操作（同本仓其它假件的约定）：fixture 顺序就是
+    //    "数据库已经按 captured_at DESC 排好"这件事的替身，最新的必须排在前面。
+    snapshots = [
+      accountSnapshot('act_1', { currency: 'AUD', captured_at: new Date().toISOString() }),
+      accountSnapshot('act_1', { currency: 'NZD', captured_at: new Date(Date.now() - 3600_000).toISOString() }),
+      accountSnapshot('act_2', { currency: 'AUD' }),
+    ]
+    configCap = 10_000
+
+    const res = await PATCH(req({ daily_budget_cap_cents: 5_000 }), params('act_1'))
+
+    // act_1 最新是 AUD、act_2 是 AUD —— 一致，应该放行（比总闸：5000+4000=9000 ≤ 10000）
+    expect(res.status).toBe(200)
+  })
+
+  it('🔴 混进别的客户同名账户号的快照 → 不能拿它的币种顶替这个客户的账户', async () => {
+    accounts = [{ id: 'r1', client_id: CLIENT, ad_account_id: 'act_1', daily_budget_cap_cents: null }]
+    // 本客户的 act_1 没有任何快照；另一个客户名下同样叫 act_1 的账户有快照——
+    // 如果币种查询漏了 client_id 过滤，会误用这条不属于本客户的快照当成"读到了"。
+    snapshots = [accountSnapshot('act_1', { client_id: OTHER_CLIENT, currency: 'NZD' })]
+    configCap = 10_000
+
+    const res = await PATCH(req({ daily_budget_cap_cents: 5_000 }), params('act_1'))
+
+    expect(res.status).toBe(409)
+  })
+
+  it('查币种失败 → 500，不写库', async () => {
+    accounts = [{ id: 'r1', client_id: CLIENT, ad_account_id: 'act_1', daily_budget_cap_cents: null }]
+    configCap = 10_000
+    failStep = 'currency'
+
+    const res = await PATCH(req({ daily_budget_cap_cents: 5_000 }), params('act_1'))
+
+    expect(res.status).toBe(500)
+    expect(accounts[0].daily_budget_cap_cents).toBeNull()
   })
 })
 

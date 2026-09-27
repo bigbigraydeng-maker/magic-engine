@@ -24,6 +24,19 @@
  * 没有总闸可比时不拒——没有基准就没法说"超没超"。但这不等于没有保护：
  * `envelope-facts.ts` 的规则是"客户绑了 ≥2 个账户、这个账户没配自己的上限
  * → 拒"，账户上限本身仍然必填才能让该账户的自治动起来。
+ *
+ * ── 币种闸（子牙+魏征审出的 BLOCKER，2026-09-28 补）─────────────────────
+ * `client_meta_ad_accounts` 本身没有 `currency` 列——migration
+ * `20260927000003` 的表注释早就写明"这一列 PATCH 校验必须做币种检查"，
+ * 但第一版实现漏了，会把不同币种的账户上限直接相加去比总闸。
+ * 今天不出事纯因为 CTS/NAL 全是纽币；下一个接澳币账户的客户会拿到一个假的
+ * "没超"结论。判据（跟熔断 #2 币种闸同源，migration 注释 §3.9 原文）：
+ *   ① 参与合计的账户里任一个读不到币种（`ad_entity_snapshots` 没有账户级
+ *      快照，或读取本身失败）→ 拒，不猜
+ *   ② 参与合计的账户币种不一致 → 拒，不默默相加
+ * "参与合计"＝这次改动后 `daily_budget_cap_cents` 非 null 的那些账户
+ *   （包括本账户，如果这次写的是非 null 的值）。清空上限（写 null）的账户
+ *   不再贡献金额，币种跟它无关。
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -122,6 +135,55 @@ export async function PATCH(
       .filter((r) => r.ad_account_id !== accountId)
       .reduce((sum, r) => sum + (typeof r.daily_budget_cap_cents === 'number' ? r.daily_budget_cap_cents : 0), 0)
     const sumWithThis = sumOthers + (nextCents ?? 0)
+
+    // 币种闸：只看这次改动后会"参与合计"的账户——上限非 null 的那些
+    // （含本账户，如果这次写的是非 null 值）。清空上限的账户不再贡献金额，
+    // 币种跟它无关，不需要拉进来判。
+    const contributingIds = rows
+      .filter((r) => r.ad_account_id !== accountId && typeof r.daily_budget_cap_cents === 'number')
+      .map((r) => r.ad_account_id)
+    if (typeof nextCents === 'number') contributingIds.push(accountId)
+
+    if (contributingIds.length > 0) {
+      const { data: snapRows, error: snapErr } = await supabaseAdmin
+        .from('ad_entity_snapshots')
+        .select('ad_account_id, currency, captured_at')
+        .eq('client_id', clientId)
+        .eq('level', 'account')
+        .in('ad_account_id', contributingIds)
+        .order('captured_at', { ascending: false })
+      if (snapErr) {
+        return NextResponse.json({ error: `查账户币种失败：${snapErr.message}` }, { status: 500 })
+      }
+
+      // 按 captured_at 倒序，每个账户第一次出现就是它最新那条。
+      const latestCurrency = new Map<string, string | null>()
+      for (const row of (snapRows ?? []) as Array<{ ad_account_id: string; currency: string | null }>) {
+        if (!latestCurrency.has(row.ad_account_id)) latestCurrency.set(row.ad_account_id, row.currency)
+      }
+
+      const missing = contributingIds.filter(
+        (id) => !latestCurrency.has(id) || latestCurrency.get(id) === null,
+      )
+      if (missing.length > 0) {
+        return NextResponse.json(
+          { error: `账户 ${missing.join('、')} 读不到币种，判不了能不能跨账户相加，没有写入` },
+          { status: 409 },
+        )
+      }
+
+      const distinctCurrencies = new Set(latestCurrency.values())
+      if (distinctCurrencies.size > 1) {
+        return NextResponse.json(
+          {
+            error:
+              `参与合计的账户币种不一致（${[...distinctCurrencies].join('、')}），` +
+              '不能直接相加去比客户总闸，没有写入',
+          },
+          { status: 409 },
+        )
+      }
+    }
 
     if (sumWithThis > totalCapCents) {
       return NextResponse.json(
