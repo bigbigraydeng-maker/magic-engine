@@ -7,6 +7,7 @@
 import {
   CTR_EXPLAINER,
   RULE_SECTION_TITLE,
+  SELF_SERVE_FOOTER,
   formatDay,
   renderRuleSection,
   shiftDay,
@@ -26,6 +27,7 @@ export interface RuleCards {
   promise: string
   cards: RuleCard[]
   bodyReplaced: boolean
+  footer?: string
 }
 
 interface ValidFinding {
@@ -39,6 +41,7 @@ interface ValidFinding {
 }
 
 interface ValidSection {
+  source: 'patrol' | 'live'
   dataDate: string
   adsChecked: number
   findings: ValidFinding[]
@@ -79,7 +82,7 @@ function validFinding(v: unknown): ValidFinding | null {
 function validSection(ruleSection: unknown): ValidSection | null {
   if (typeof ruleSection !== 'object' || ruleSection === null) return null
   const s = ruleSection as Record<string, unknown>
-  if (s.source !== 'patrol') return null
+  if (s.source !== 'patrol' && s.source !== 'live') return null
   if (typeof s.dataDate !== 'string' || !DATE_RE.test(s.dataDate)) return null
   if (!Number.isFinite(Date.parse(`${s.dataDate}T00:00:00Z`))) return null
   if (!isFiniteNumber(s.adsChecked) || s.adsChecked < 0) return null
@@ -90,7 +93,7 @@ function validSection(ruleSection: unknown): ValidSection | null {
     if (f === null) return null
     findings.push(f)
   }
-  return { dataDate: s.dataDate, adsChecked: s.adsChecked, findings }
+  return { source: s.source, dataDate: s.dataDate, adsChecked: s.adsChecked, findings }
 }
 
 function adLabelOf(adName: string): string {
@@ -119,11 +122,10 @@ function countOccurrences(haystack: string, needle: string): number {
   return count
 }
 
-function buildCards(section: ValidSection, today: string): RuleCards {
+function buildCardList(section: ValidSection): RuleCard[] {
   const sorted = [...section.findings].sort((a, b) => b.spend - a.spend)
-  const n = sorted.length
   let explained = false
-  const cards: RuleCard[] = sorted.map((f) => {
+  return sorted.map((f) => {
     const explainCtr = f.explainsCtr && !explained
     if (explainCtr) explained = true
     return {
@@ -133,20 +135,46 @@ function buildCards(section: ValidSection, today: string): RuleCards {
       action: f.action,
     }
   })
-  const which = n === 1 ? '这条' : `这 ${n} 条`
-  const intro =
-    section.adsChecked >= n
-      ? `这次检查了 ${section.adsChecked} 条正在投放的广告，下面${which}有变化，其余没发现明显变差。`
-      : `下面${which}有变化。`
+}
+
+function managedIntro(section: ValidSection, which: string): string {
+  return section.adsChecked >= section.findings.length
+    ? `这次检查了 ${section.adsChecked} 条正在投放的广告，下面${which}有变化，其余没发现明显变差。`
+    : `下面${which}有变化。`
+}
+
+function managedPromise(section: ValidSection, today: string): string {
+  const n = section.findings.length
   const review = shiftDay(section.dataDate, 7)
-  const promise =
-    today <= review
-      ? `我们的广告团队已经看到${n === 1 ? '这条' : '这几条'}，会在${formatDay(review)}前后复查并处理，你不用动手。`
-      : `这是${formatDay(section.dataDate)}的数据，我们原定${formatDay(review)}前后复查，你不用动手；想知道最新进展可以直接问我们的团队。`
+  return today <= review
+    ? `我们的广告团队已经看到${n === 1 ? '这条' : '这几条'}，会在${formatDay(review)}前后复查并处理，你不用动手。`
+    : `这是${formatDay(section.dataDate)}的数据，我们原定${formatDay(review)}前后复查，你不用动手；想知道最新进展可以直接问我们的团队。`
+}
+
+function selfServeIntro(section: ValidSection, which: string): string {
+  return section.adsChecked >= section.findings.length
+    ? `这次看了 ${section.adsChecked} 条在花钱的广告，下面${which}有变化。改不改由你决定，我们不会动你的广告。`
+    : `下面${which}有变化。改不改由你决定，我们不会动你的广告。`
+}
+
+function buildCards(section: ValidSection, today: string): RuleCards {
+  const n = section.findings.length
+  const which = n === 1 ? '这条' : `这 ${n} 条`
+  const cards = buildCardList(section)
+  if (section.source === 'live') {
+    return {
+      title: `值得你看一眼的广告（${n} 条）`,
+      intro: selfServeIntro(section, which),
+      promise: '',
+      cards,
+      bodyReplaced: false,
+      footer: SELF_SERVE_FOOTER,
+    }
+  }
   return {
     title: `我们正在跟进的广告（${n} 条）`,
-    intro,
-    promise,
+    intro: managedIntro(section, which),
+    promise: managedPromise(section, today),
     cards,
     bodyReplaced: false,
   }
@@ -157,13 +185,14 @@ function replaceBody(
   section: ValidSection,
   n: number,
 ): { report: string; bodyReplaced: boolean } {
-  const input: RuleSectionInput = { source: 'patrol', ...section }
+  const input: RuleSectionInput = { ...section }
   const original = renderRuleSection(input)
   if (countOccurrences(report, original) !== 1) {
     return { report, bodyReplaced: false }
   }
   const which = n === 1 ? '这条' : `这 ${n} 条`
-  const replacement = `${RULE_SECTION_TITLE}\n${which}已经放在上面「我们正在跟进的广告」里，这里不再重复。`
+  const cardTitle = section.source === 'live' ? '值得你看一眼的广告' : '我们正在跟进的广告'
+  const replacement = `${RULE_SECTION_TITLE}\n${which}已经放在上面「${cardTitle}」里，这里不再重复。`
   const at = report.indexOf(original)
   return { report: report.slice(0, at) + replacement + report.slice(at + original.length), bodyReplaced: true }
 }

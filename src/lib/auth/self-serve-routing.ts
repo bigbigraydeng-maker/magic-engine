@@ -26,6 +26,9 @@ export function normalizeSelfServeTarget(clientId: string, requestedPath: string
     return clientHome
   }
 
+  // Magic Bridge page of this same client (exact match only; any other client id falls through to home).
+  if (requestedPath === `/meta-ads-ai/${clientId}`) return requestedPath
+
   // /portal/{x}/... — strip the prefix and remap onto our own dashboard home.
   if (requestedPath.startsWith('/portal/')) {
     const suffix = requestedPath.replace(/^\/portal\/[^/]+/, '')
