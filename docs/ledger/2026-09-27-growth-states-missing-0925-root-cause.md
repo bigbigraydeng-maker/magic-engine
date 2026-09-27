@@ -8,7 +8,7 @@ source: doc:docs/ledger/2026-09-26-ads-d3-migration-applied-to-prod.md
 done_on: 2026-09-27
 done_ref: doc:docs/ledger/2026-09-27-growth-states-missing-0925-root-cause.md
 verify_by: 2026-10-04
-verify_how: 查两件。①防复发有没有落地：cron registry 里 google-data-pullback-daily 的 outputTables 有没有加上 ads_growth_states（加了 → 以后这张表零行会被沉默死检测自动报出来）。②顺手查最近 7 天 ads_growth_states 每天是不是都有 6 行（缺任一天 = 又出现同类静默，立刻交回 PM）。①没做 → 这个静默缺口仍然敞着，把本卡结论重新交回 PM，不要因为 9/25 那次已修好就当问题解决
+verify_how: 防复发已在本卡同一改动里落地（`src/lib/cron/registry.ts` 的 google-data-pullback-daily outputTables 已含 ads_growth_states，见 commit 938cd01），查它没被后续改动移除即可。再查最近 7 天 ads_growth_states 每天是不是都有 6 行（缺任一天 = 又出现同类静默，立刻交回 PM）
 ---
 统筹 2026-09-27 派查：`ads_growth_states`（广告每日巡察结论表，是广告刹车第 5 条判据「数据不全 → 当天冻结」的输入）2026-09-25 整天零行、六客户全缺，而 9/24、9/26 都正常。要判是①没触发 ②跑了报错 ③跑完写库失败。
 
@@ -37,8 +37,8 @@ verify_how: 查两件。①防复发有没有落地：cron registry 里 google-d
 （我自己今晚也差点因为算错这个 job 的运行时间误报「今早巡察没跑」——核了 render.yaml 才发现还没到点。人和机器踩的是同一个坑。）
 另有一条同族基线红：`inngest/functions/reel-batch-render.ts` 设计上要定时跑，却不在任何名单里 = 没人监控它跑没跑。
 
-## 对熔断实现的提醒（已转统筹）
-第 5 条判据「数据不全 → 冻结」这次会**正确 fail-closed**（表零行 → 冻结），方向没问题。但它依赖「有人看得出数据不全」，而这次「数据不全」本身零告警。**熔断要能区分「有输入但判定不冻结」和「压根没有输入」，后者必须喊出来**，否则就是静默 fail-closed——安全，但没人知道，跟这次一样躺一整天。
+## 对熔断实现的提醒（已转统筹，含一处需要改口的结论）
+第 5 条判据「数据不全 → 冻结」只处理**已经写出行**、`data_completeness='partial'` 的情况；`buildGrowthState` 只有跑到底并成功 upsert 才会写这个字段。9/25 这种「整段被前置闸门跳过、行压根没写」的场景，不落在这条判据的判定范围内——**没有行就没有 `partial` 值可读，既不是「判定为冻结」也不是「判定为放行」，是压根没有可供下游消费的判据或回执**。上一版把这次结果记成「正确 fail-closed」是错的：那句话默认了「零行」等价于「判定冻结」，但实际上下游（看板、日报、`ads-rule-finding-items.ts` 那类只读消费者）拿到的是「查不到今天这行」，跟「查到了、判定 partial」是两种不同状态，前者目前没有专门处理，读的人分不清是「今天没数据所以没判」还是「压根没跑」。**熔断要能区分「有输入但判定不冻结」「有输入且判定 partial」「压根没有输入行」三种，第三种目前无信号**，必须让消费方把「当日行不存在」单独当 fail-closed 处理，不能默认已经安全。
 
 ## 一个反复出现的模式（2026-09-26/27 两天内第三次）
 「**一个前置闸门 return/skip 掉一整块副作用，且不留痕**」：
