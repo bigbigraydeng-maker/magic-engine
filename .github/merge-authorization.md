@@ -105,9 +105,10 @@ agent 不得自行对 A 级 PR 执行 `--admin`。
   §3.1）；构建/测试检查恰恰需要跑 `npm ci` 和 PR 自己的代码，若在 `pull_request_target` 里
   `checkout` PR head 来跑，等于把 PR 可控的依赖安装脚本和测试代码放进能拿到 base 分支
   token/cache 的受信上下文执行，反而开出一个供应链攻击面，比现状更危险。可行方向是换一个
-  **不执行 PR 代码**的独立身份出状态（例如用无写权限的 GitHub App/机器人身份跑同样的
-  `pull_request` 构建，再由该身份把结果转发成一个 PR 改不了的 check run），这需要改
-  `.github/workflows/`，不在本次改动范围内，先如实记录缺口。
+  **不执行 PR 代码**的独立身份出状态（用同样跑 `pull_request` 构建的 GitHub App/机器人身份，
+  把结果转发成一个 PR 改不了的 check run）；该身份只能授予 `Checks: write` 这一项仓库权限，
+  不给 contents / pull-requests / actions 等写权限——没有 `Checks: write` 它连规则集要认的
+  check run 都创建不了，这需要改 `.github/workflows/`，不在本次改动范围内，先如实记录缺口。
 
 ## 这道闸不做的事
 
