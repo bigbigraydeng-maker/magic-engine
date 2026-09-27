@@ -247,16 +247,36 @@ export const C_SAFE_RULES = [
 /**
  * @param {{exact?: string, prefix?: string, suffix?: string, includes?: string, basenameIncludes?: string, basenameWord?: string, basename?: string, pattern?: RegExp}} rule
  * @param {string} path
+ * @param {boolean} [caseInsensitive] — when true, string comparisons use
+ *   lowercased values and pattern rules gain the `i` flag. Used for A rules
+ *   only, so a case-variant path like `claude.md` cannot evade `CLAUDE.md` on
+ *   a macOS checkout where `core.ignorecase=true`.
  */
-function ruleMatches(rule, path) {
-  const basename = path.slice(path.lastIndexOf('/') + 1)
-  if (rule.exact !== undefined) return path === rule.exact
-  if (rule.prefix !== undefined) return path.startsWith(rule.prefix)
-  if (rule.suffix !== undefined) return path.endsWith(rule.suffix)
-  if (rule.includes !== undefined) return path.includes(rule.includes)
+function ruleMatches(rule, path, caseInsensitive = false) {
+  const p = caseInsensitive ? path.toLowerCase() : path
+  const basename = p.slice(p.lastIndexOf('/') + 1)
+  if (rule.exact !== undefined) {
+    return caseInsensitive ? p === rule.exact.toLowerCase() : p === rule.exact
+  }
+  if (rule.prefix !== undefined) {
+    return caseInsensitive ? p.startsWith(rule.prefix.toLowerCase()) : p.startsWith(rule.prefix)
+  }
+  if (rule.suffix !== undefined) {
+    return caseInsensitive ? p.endsWith(rule.suffix.toLowerCase()) : p.endsWith(rule.suffix)
+  }
+  if (rule.includes !== undefined) {
+    return caseInsensitive ? p.includes(rule.includes.toLowerCase()) : p.includes(rule.includes)
+  }
   if (rule.basenameIncludes !== undefined) return basename.toLowerCase().includes(rule.basenameIncludes)
-  if (rule.basename !== undefined) return basename === rule.basename
-  if (rule.pattern !== undefined) return rule.pattern.test(path)
+  if (rule.basename !== undefined) {
+    return caseInsensitive ? basename === rule.basename.toLowerCase() : basename === rule.basename
+  }
+  if (rule.pattern !== undefined) {
+    if (caseInsensitive && !rule.pattern.flags.includes('i')) {
+      return new RegExp(rule.pattern.source, rule.pattern.flags + 'i').test(path)
+    }
+    return rule.pattern.test(path)
+  }
   if (rule.basenameWord !== undefined) {
     return new RegExp(`(^|[^a-z0-9])${rule.basenameWord}([^a-z0-9]|$)`, 'i').test(basename)
   }
@@ -270,7 +290,7 @@ function ruleMatches(rule, path) {
  * @returns {{risk: 'A'|'B'|'C', why: string, category: string|null}}
  */
 export function classifyFile(path) {
-  const aRule = A_RISK_RULES.find((rule) => ruleMatches(rule, path))
+  const aRule = A_RISK_RULES.find((rule) => ruleMatches(rule, path, true))
   if (aRule) return { risk: 'A', why: aRule.why, category: aRule.category }
 
   const cRule = C_SAFE_RULES.find((rule) => ruleMatches(rule, path))
