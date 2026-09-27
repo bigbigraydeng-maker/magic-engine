@@ -168,7 +168,7 @@ async function loadAdDaily(clientId: string, adAccountId: string, date: string):
   return Array.from(byKey.values())
 }
 
-async function loadAccount(clientId: string, adAccountId: string, shared: boolean, date: string, clientPageId: string | null): Promise<AccountInput> {
+async function loadAccount(clientId: string, adAccountId: string, shared: boolean, date: string, clientPageId: string | null, evaluatedAt: string): Promise<AccountInput> {
   const tzRow = await supabaseAdmin.from('ad_entity_snapshots').select('timezone_name, currency')
     .eq('client_id', clientId).eq('ad_account_id', adAccountId).eq('level', 'account')
     .order('captured_at', { ascending: false }).limit(1).maybeSingle()
@@ -176,10 +176,14 @@ async function loadAccount(clientId: string, adAccountId: string, shared: boolea
   const currency = (tzRow.data as { currency: string | null } | null)?.currency ?? null
   const endMs = localDayEndUtc(date, timezone)
 
+  // 🔴 单键排序（只按 captured_at）分页会漏数据：一轮抓取写入的所有实体共享同一个 captured_at，
+  //    超过一页（1000 行）时同一时间戳内谁在前谁在后没保证，翻页边界可能落在同一时间戳里，导致
+  //    range 查询重复或漏掉行——`adPageHistory` 直接决定归属，漏一条别家历史就会把 mixed_pages 判成 own
+  //    （Codex 2026-09-27）。加 level/entity_id 兜底排序，形成稳定顺序。
   const snapshots = await readAll<EntitySnapshotRow>((a, b) => supabaseAdmin.from('ad_entity_snapshots').select('*')
     .eq('client_id', clientId).eq('ad_account_id', adAccountId)
     .gte('captured_at', new Date(endMs - 35 * 86_400_000).toISOString()).lte('captured_at', new Date(endMs).toISOString())
-    .order('captured_at', { ascending: false }).range(a, b))
+    .order('captured_at', { ascending: false }).order('level', { ascending: true }).order('entity_id', { ascending: true }).range(a, b))
 
   const daily = await readAll<DailyRow>((a, b) => supabaseAdmin.from('ad_daily_insights')
     .select('level, entity_id, parent_id, insight_date, spend, impressions, reach, clicks, leads, messaging_conversations, video_thruplays, actions, frequency_7d')
@@ -221,7 +225,7 @@ async function loadAccount(clientId: string, adAccountId: string, shared: boolea
   }
 
   // 预筛跟 D1 用同一口径（只看客户自己的广告组）：别人的花费掩盖客户掉量时也要拉小时数据
-  if (d1NeedsHourly(buildAccountContext(scopeAccountToClient(account, clientPageId, date).account, date))) {
+  if (d1NeedsHourly(buildAccountContext(scopeAccountToClient(account, clientPageId, date, evaluatedAt).account, date))) {
     const token = await getMetaTokenForClient(clientId)
     if (!token) {
       account.hourlyError = 'no Meta token'
@@ -250,7 +254,7 @@ export async function loadDiagnosisInput(clientId: string, date: string, evaluat
   const clientPageId = await loadClientPageId(clientId)
   const accounts: AccountInput[] = []
   for (const id of accountIds) {
-    accounts.push(await loadAccount(clientId, id, shared.has(id.replace(/^act_/, '')), date, clientPageId))
+    accounts.push(await loadAccount(clientId, id, shared.has(id.replace(/^act_/, '')), date, clientPageId, evaluatedAt))
   }
   const [outcome, strategy] = await Promise.all([
     loadOutcomeConfig(clientId),

@@ -220,8 +220,9 @@ export interface ExcludedEntity {
   name: string | null
   /**
    * other_page / mixed_pages / page_unknown：按创意主页判不是（或确认不了是）这个客户的广告组/系列（ownership.ts）。
+   * capture_stale：广告层快照最近一轮没抓全或太旧，归属核实不到，整个账户降级只做账户级（Codex 2026-09-27）。
    */
-  reason: 'meta_experiment' | 'shared_account' | 'other_page' | 'mixed_pages' | 'page_unknown'
+  reason: 'meta_experiment' | 'shared_account' | 'other_page' | 'mixed_pages' | 'page_unknown' | 'capture_stale'
   detail: string
 }
 

@@ -30,7 +30,7 @@ export function runDiagnostics(input: DiagnosisInput): DiagnosisRun {
     // 🔴 「登记表只登记给一个客户」不等于「账户里只有这个客户的广告」——2026-09-26 生产核实，有账户只登记给一个客户、
     //    五层快照照常抓，里面却在投别的客户主页的广告。客户没登记主页时不切（归属未核实，自动暂停另有一道闸拦），
     //    但账户里出现 ≥2 个主页就降级成只做账户级。
-    const scoped = scopeAccountToClient(raw, input.clientPageId, input.date)
+    const scoped = scopeAccountToClient(raw, input.clientPageId, input.date, input.evaluatedAt)
     const account = scoped.account
     const ctx = buildAccountContext(account, input.date)
     // 广告级 D2/D10/D11 在没切的上下文上跑：它们自己逐条按创意主页过滤；切掉「混着别的主页」的广告组会让

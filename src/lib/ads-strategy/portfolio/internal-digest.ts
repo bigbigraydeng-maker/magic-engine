@@ -44,6 +44,7 @@ const EXCLUDED_REASON_LABEL: Record<ExcludedEntity['reason'], string> = {
   other_page: '广告挂在别的 Facebook 主页上，不是这个客户的',
   mixed_pages: '里面混着别的 Facebook 主页的广告，分不开，不判',
   page_unknown: '读不到广告挂在哪个 Facebook 主页，确认不了是不是这个客户的',
+  capture_stale: '广告层快照最近一轮没抓全或太旧，归属核实不到，这几天只看账户层面',
 }
 
 const ROLE_ORDER: Array<{ key: FunnelRole | 'account'; label: string }> = [

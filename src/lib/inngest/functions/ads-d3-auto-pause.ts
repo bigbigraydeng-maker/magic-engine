@@ -46,6 +46,7 @@ import { submitAdsAutoPauseCandidate } from '@/lib/action-submission/ads-auto-pa
 import { buildD3GrowthCandidate } from '@/lib/ads-strategy/portfolio/d3-growth-candidate'
 import { validateGrowthActionCandidate } from '@/lib/growth'
 import { ownershipOfAds, type AdsetOwnership } from '@/lib/ads-strategy/portfolio/diagnostics/ownership'
+import { OWNERSHIP_MAX_AD_CAPTURE_AGE_HOURS } from '@/lib/ads-strategy/portfolio/diagnostics/thresholds'
 
 /** 云端专属事件——本机 worker 不监听（见 client.ts 的 WORKER_OWNED_EVENTS）。 */
 export const ADS_DIAGNOSTICS_COMPLETED_EVENT = 'ads.diagnostics.completed_for_client'
@@ -124,8 +125,8 @@ const OWNERSHIP_LOOKBACK_DAYS = 35
 /** 分页读广告快照：每页 1000 行，最多 10 页；读满 10 页视为可能截断，判不了（fail closed）。 */
 const OWNERSHIP_PAGE_SIZE = 1000
 const OWNERSHIP_MAX_PAGES = 10
-/** 广告层快照最近一轮必须抓全、且不早于这么多小时前（快照每 3 小时一轮）——否则新加进组的别家广告看不到。 */
-const OWNERSHIP_MAX_CAPTURE_AGE_HOURS = 24
+// 「广告层快照最近一轮必须抓全、且不早于多少小时前」用 OWNERSHIP_MAX_AD_CAPTURE_AGE_HOURS（跟诊断层
+// scopeAccountToClient 同一把尺子，两处各写一份必然分家——见 context.ts DELIVERING_STATUSES 的教训）。
 
 type AdPageRow = { entity_id: string; creative_page_id: string | null; capture_reason: string }
 
@@ -174,7 +175,7 @@ export async function verifyAdsetOwnership(
   if (capture.error) return { owned: false, verdict: 'read_failed', detail: `读广告层快照抓取记录失败：${capture.error.message}` }
   const last = capture.data as { complete: boolean; captured_at: string } | null
   const ageHours = last ? (now.getTime() - Date.parse(last.captured_at)) / 3_600_000 : Infinity
-  if (!last || !last.complete || !(ageHours <= OWNERSHIP_MAX_CAPTURE_AGE_HOURS)) {
+  if (!last || !last.complete || !(ageHours <= OWNERSHIP_MAX_AD_CAPTURE_AGE_HOURS)) {
     return { owned: false, verdict: 'capture_stale', detail: `广告层快照最近一轮${last ? (last.complete ? `是 ${Math.round(ageHours)} 小时前` : '没抓全') : '找不到'}，看不到这个广告组里最新的广告` }
   }
 

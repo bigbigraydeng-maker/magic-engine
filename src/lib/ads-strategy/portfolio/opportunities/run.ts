@@ -42,7 +42,7 @@ export function runOpportunities(input: DiagnosisInput, completeness: DataComple
 
   for (const raw of input.accounts) {
     // 跟诊断同一道切分：别的主页的系列/广告组不算这个客户的机会（被排除的实体由诊断那边的 excluded 列出）
-    const scoped = scopeAccountToClient(raw, input.clientPageId, input.date)
+    const scoped = scopeAccountToClient(raw, input.clientPageId, input.date, input.evaluatedAt)
     const account = scoped.account
     const ctx = buildAccountContext(account, input.date)
 

@@ -15,9 +15,11 @@
  *    把花费占 ≥60% 的主页当客户主页，没有主页过这条线就不跑。
  */
 
+import { pageIdMatches } from '@/lib/meta/page-binding'
 import type { EntitySnapshotRow } from '../snapshot'
 import type { AccountInput, DailyRow, Diagnosis, ExcludedEntity, HourlyRow } from './types'
 import { isDelivering, windowDays } from './context'
+import { OWNERSHIP_MAX_AD_CAPTURE_AGE_HOURS } from './thresholds'
 
 export type AdsetOwnership = 'own' | 'other_page' | 'mixed_pages' | 'page_unknown'
 type NotOwn = Exclude<AdsetOwnership, 'own'>
@@ -34,8 +36,10 @@ export function ownershipOfAds(ads: ReadonlyArray<{ creative_page_id: string | n
   let other = false
   let unknown = false
   for (const ad of ads) {
+    // 主页 id 比较要走跟绑定检查同一把尺子（page-binding.ts pageIdMatches）：`clients.facebook_page_id`
+    // 可能是老 SQL 手填的脏数据（全角数字、零宽字符、前导零），严格 === 会把客户自己的广告全判成别家（Codex 2026-09-27）。
     if (!ad.creative_page_id) unknown = true
-    else if (ad.creative_page_id === clientPageId) own = true
+    else if (pageIdMatches(clientPageId, ad.creative_page_id)) own = true
     else other = true
   }
   if (own && other) return 'mixed_pages'
@@ -69,15 +73,19 @@ function collectAdPages(account: AccountInput): Map<string, AdPages> {
 }
 
 /**
- * 广告组 id → 名下算数的广告（每个挂过的主页一行）。已经不在的广告只有在广告层日数据里花过钱才算
- * （删掉前一分钱没花的别家广告不该把客户的组判成混的）；没加载广告层日数据时一律算（宁严）。
+ * 广告组 id → 名下算数的广告（每个挂过的主页一行）。已经不在的广告只有在广告层日数据里**见过、且每天都是零花费**
+ * 才不算（删掉前一分钱没花的别家广告不该把客户的组判成混的）；没加载广告层日数据、或这条广告在广告层日数据里
+ * 一行都没出现过，都算它可能花过钱（宁严）——广告层日数据同步允许写侧分页中断只写部分行（`syncAdDailyInsights`
+ * 「page walk stopped early」），一条广告一行都没有 ≠ 它没花过钱，只代表读不到，不能当零花费处理（Codex 2026-09-27）。
  */
 function adsByAdset(account: AccountInput): Map<string, Array<{ adId: string; creative_page_id: string | null }>> {
   const spent = account.adDaily ? new Set(account.adDaily.filter(r => r.spend > 0).map(r => r.entity_id)) : null
+  const everSeen = account.adDaily ? new Set(account.adDaily.map(r => r.entity_id)) : null
+  const provenZeroSpend = (adId: string) => !!spent && !!everSeen && everSeen.has(adId) && !spent.has(adId)
   const out = new Map<string, Array<{ adId: string; creative_page_id: string | null }>>()
   for (const [adId, ad] of Array.from(collectAdPages(account))) {
     if (!ad.adsetId) continue
-    if (!ad.current && spent && !spent.has(adId)) continue
+    if (!ad.current && provenZeroSpend(adId)) continue
     const list = out.get(ad.adsetId) ?? []
     for (const page of Array.from(ad.pages)) list.push({ adId, creative_page_id: page })
     out.set(ad.adsetId, list)
@@ -92,7 +100,7 @@ function spentInDays(daily: readonly DailyRow[], level: 'campaign' | 'adset', id
 }
 
 function otherPages(ads: ReadonlyArray<{ creative_page_id: string | null }>, clientPageId: string): string {
-  const pages = Array.from(new Set(ads.map(a => a.creative_page_id).filter((p): p is string => !!p && p !== clientPageId)))
+  const pages = Array.from(new Set(ads.map(a => a.creative_page_id).filter((p): p is string => !!p && !pageIdMatches(clientPageId, p))))
   return pages.length === 0 ? '—' : pages.slice(0, 3).join('、')
 }
 
@@ -108,6 +116,8 @@ interface Drop {
   row: EntitySnapshotRow | null
   reason: NotOwn
   detail: string
+  /** 广告组自己就不是客户的（不是靠 CBO 兄弟连坐）——只有这种才该说「这条广告组混着别家」（Codex 2026-09-27） */
+  selfNotOwn: boolean
 }
 
 interface Judge {
@@ -134,19 +144,21 @@ function findDrops(account: AccountInput, judge: Judge): Drop[] {
       const allBad = bad.length === children.filter(s => judge.verdict(s.entity_id) !== 'empty').length
       const reason: NotOwn = allBad ? notOwn(bad[0].entity_id) : 'mixed_pages'
       const detail = `系列统一分预算，名下有 ${bad.length} 个广告组不是这个客户主页的广告（${bad.map(s => judge.pages(s.entity_id)).join('、')}），整个系列不判`
-      drops.push({ level: 'campaign', id: c.entity_id, row: c, reason, detail })
+      drops.push({ level: 'campaign', id: c.entity_id, row: c, reason, detail, selfNotOwn: true })
       for (const s of children) {
-        drops.push({ level: 'adset', id: s.entity_id, row: s, reason, detail })
+        // 组自己是不是不算客户的：跟系列层这次连坐的判定分开算，不然「组自己没问题、只是系列里有别的组混主页」
+        // 会被误标成「这条广告组本身混着别家」（Codex 2026-09-27）
+        drops.push({ level: 'adset', id: s.entity_id, row: s, reason, detail, selfNotOwn: isBad(s.entity_id) })
         handled.add(s.entity_id)
       }
     } else if (bad.length === children.length) {
-      drops.push({ level: 'campaign', id: c.entity_id, row: c, reason: notOwn(bad[0].entity_id), detail: '名下广告组都不是这个客户主页的广告，不判' })
+      drops.push({ level: 'campaign', id: c.entity_id, row: c, reason: notOwn(bad[0].entity_id), detail: '名下广告组都不是这个客户主页的广告，不判', selfNotOwn: true })
     }
   }
   for (const s of adsets) {
     if (handled.has(s.entity_id) || !isBad(s.entity_id)) continue
     const v = notOwn(s.entity_id)
-    drops.push({ level: 'adset', id: s.entity_id, row: s, reason: v, detail: adsetDetail(v, judge.pages(s.entity_id)) })
+    drops.push({ level: 'adset', id: s.entity_id, row: s, reason: v, detail: adsetDetail(v, judge.pages(s.entity_id)), selfNotOwn: true })
   }
   // 日数据里有、快照里已经没有的广告组（被删掉的）：按名下广告判，不是客户的也要切
   const inSnapshots = new Set(adsets.map(s => s.entity_id))
@@ -154,7 +166,7 @@ function findDrops(account: AccountInput, judge: Judge): Drop[] {
   for (const id of Array.from(orphanIds)) {
     if (!isBad(id)) continue
     const v = notOwn(id)
-    drops.push({ level: 'adset', id, row: null, reason: v, detail: `（已删除）${adsetDetail(v, judge.pages(id))}` })
+    drops.push({ level: 'adset', id, row: null, reason: v, detail: `（已删除）${adsetDetail(v, judge.pages(id))}`, selfNotOwn: true })
   }
   return drops
 }
@@ -174,14 +186,31 @@ export interface ScopedAccount {
    */
   ownWindowSpend: number
   otherPageWindowSpend: number
-  /** 被切掉的广告组 / 系列 id（全部，不只排除清单里列出的）——给广告级规则的命中标「所在组混主页」用 */
+  /** 被切掉的广告组 / 系列 id（全部，不只排除清单里列出的）——判「有没有被切」用 */
   droppedAdsetIds: ReadonlySet<string>
+  /**
+   * 被切掉的广告组里，广告组自己就不是客户的那些（不含只因 CBO 兄弟连坐才被切、自己其实是客户的）。
+   * 给广告级规则的命中标「所在组混主页」只认这个集合（Codex 2026-09-27：CBO 连坐不能说成「这条广告组本身混主页」）。
+   */
+  selfNotOwnAdsetIds: ReadonlySet<string>
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100
 
 function unscoped(account: AccountInput): ScopedAccount {
-  return { account, excluded: [], accountLevelOnly: false, ownWindowSpend: 0, otherPageWindowSpend: 0, droppedAdsetIds: new Set() }
+  return { account, excluded: [], accountLevelOnly: false, ownWindowSpend: 0, otherPageWindowSpend: 0, droppedAdsetIds: new Set(), selfNotOwnAdsetIds: new Set() }
+}
+
+function accountLevelOnlyResult(account: AccountInput, reason: ExcludedEntity['reason'], detail: string): ScopedAccount {
+  return {
+    account,
+    accountLevelOnly: true,
+    ownWindowSpend: 0,
+    otherPageWindowSpend: 0,
+    droppedAdsetIds: new Set(),
+    selfNotOwnAdsetIds: new Set(),
+    excluded: [{ adAccountId: account.adAccountId, level: 'account', id: account.adAccountId, name: null, reason, detail }],
+  }
 }
 
 /** 客户没登记主页：单一主页（或没广告）照原样跑，归属未核实；≥2 个主页 → 只做账户级。 */
@@ -191,26 +220,37 @@ function scopeWithoutClientPage(account: AccountInput): ScopedAccount {
     for (const a of list) if (a.creative_page_id) pages.add(a.creative_page_id)
   }
   if (pages.size < 2) return unscoped(account)
-  return {
-    account,
-    accountLevelOnly: true,
-    ownWindowSpend: 0,
-    otherPageWindowSpend: 0,
-    droppedAdsetIds: new Set(),
-    excluded: [{
-      adAccountId: account.adAccountId, level: 'account', id: account.adAccountId, name: null, reason: 'page_unknown',
-      detail: `客户没登记 Facebook 主页，这个账户里的广告挂在 ${pages.size} 个不同的主页上，分不清哪些是这个客户的，只做账户级诊断`,
-    }],
-  }
+  return accountLevelOnlyResult(account, 'page_unknown',
+    `客户没登记 Facebook 主页，这个账户里的广告挂在 ${pages.size} 个不同的主页上，分不清哪些是这个客户的，只做账户级诊断`)
+}
+
+/**
+ * 广告层快照最近一轮是不是新鲜、抓全了——不新鲜就没法确认这一轮有没有新加进别家的广告，归属核实不到
+ * （Codex 2026-09-27：`snapshot-sync.ts` 抓取不完整/过期时不写入部分结果，这里会继续用上一轮旧快照判 `own`）。
+ * 跟自动暂停闸（`ads-d3-auto-pause.ts` `verifyAdsetOwnership`）同一把尺子：不早于 evaluatedAt 前
+ * `OWNERSHIP_MAX_AD_CAPTURE_AGE_HOURS` 小时、且这一轮 `complete`。
+ */
+function adCaptureStale(account: AccountInput, evaluatedAt: string): boolean {
+  const adCaptures = account.latestCaptures.filter(c => c.level === 'ad')
+  if (adCaptures.length === 0) return false // 共用账户/老 fixture 本来就没有这层快照记录，不在这里拦（各自的闸负责）
+  const latest = adCaptures.reduce((a, b) => (a.captured_at > b.captured_at ? a : b))
+  if (!latest.complete) return true
+  const ageMs = Date.parse(evaluatedAt) - Date.parse(latest.captured_at)
+  return !(Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= OWNERSHIP_MAX_AD_CAPTURE_AGE_HOURS * 3_600_000)
 }
 
 /**
  * 把账户切成「只剩客户自己的」系列 / 广告组（快照、广告组/系列日数据、按小时花费）。幂等：切过的再切一次结果不变。
- * 不切：clientPageId 缺省（没加载）/ 共用账户（本来就只做账户级）；clientPageId 为 null 见 scopeWithoutClientPage。
+ * 不切：clientPageId 缺省（没加载）/ 共用账户（本来就只做账户级）；clientPageId 为 null 见 scopeWithoutClientPage；
+ * 广告层快照最近一轮没抓全或太旧见 adCaptureStale——这两种都降级成只做账户级，不是「原样跑」。
  */
-export function scopeAccountToClient(account: AccountInput, clientPageId: string | null | undefined, date: string): ScopedAccount {
+export function scopeAccountToClient(account: AccountInput, clientPageId: string | null | undefined, date: string, evaluatedAt: string): ScopedAccount {
   if (clientPageId === undefined || account.shared) return unscoped(account)
   if (clientPageId === null) return scopeWithoutClientPage(account)
+  if (adCaptureStale(account, evaluatedAt)) {
+    return accountLevelOnlyResult(account, 'capture_stale',
+      '广告层快照最近一轮没抓全或太旧，这一轮有没有新加进别家的广告核实不到，只做账户级诊断')
+  }
 
   const ads = adsByAdset(account)
   const everSpent = (id: string) => spentInDays(account.daily, 'adset', id, null) > 0
@@ -254,9 +294,11 @@ export function scopeAccountToClient(account: AccountInput, clientPageId: string
   const windowSpendWhere = (verdict: AdsetOwnership) => round2(account.daily
     .filter(r => r.level === 'adset' && days.has(r.insight_date) && judge.verdict(r.entity_id) === verdict)
     .reduce((s, r) => s + r.spend, 0))
+  const selfNotOwnAdsetIds = new Set(drops.filter(d => d.level === 'adset' && d.selfNotOwn).map(d => d.id))
   return {
     account: { ...account, snapshots, daily, hourly }, excluded, accountLevelOnly: false,
-    ownWindowSpend: windowSpendWhere('own'), otherPageWindowSpend: windowSpendWhere('other_page'), droppedAdsetIds: dropAdsets,
+    ownWindowSpend: windowSpendWhere('own'), otherPageWindowSpend: windowSpendWhere('other_page'),
+    droppedAdsetIds: dropAdsets, selfNotOwnAdsetIds,
   }
 }
 
@@ -282,9 +324,9 @@ function listExcluded(account: AccountInput, drops: Drop[], days: ReadonlySet<st
  * 不提示的话，客户所有广告组都会被静默切掉，日报只剩一串排除清单。
  */
 export function diagnosePageMismatch(account: AccountInput, scoped: ScopedAccount, clientId: string, date: string): Diagnosis | null {
+  // 广告层快照最近一轮没抓全/太旧时 scopeAccountToClient 已经把 accountLevelOnly 置 true（adCaptureStale），
+  // 这里第一条判断已经覆盖「多半是没抓到广告才判不出主页，不是登记错了」（魏征第二轮 + Codex 2026-09-27 合并）
   if (scoped.accountLevelOnly || scoped.ownWindowSpend > 0 || scoped.otherPageWindowSpend <= 0) return null
-  // 广告层快照最近一轮没抓全：多半是没抓到广告才判不出主页，不是登记错了（魏征第二轮）；D7 抓取体检另报
-  if (account.latestCaptures.some(c => c.level === 'ad' && !c.complete)) return null
   return {
     code: 'D7', status: 'hit', clientVisible: false,
     units: [{ level: 'account', id: account.adAccountId, name: null, adAccountId: account.adAccountId }],
@@ -305,9 +347,11 @@ export function diagnosePageMismatch(account: AccountInput, scoped: ScopedAccoun
  * （组花费、频次、受众池使用花费）含别家，只看广告自己的数（子牙第二轮：否则日报里同一个组既「没参与诊断」又被报）。
  */
 export function flagDroppedAdsetUnits(diagnoses: Diagnosis[], scoped: ScopedAccount): Diagnosis[] {
-  if (scoped.droppedAdsetIds.size === 0) return diagnoses
+  if (scoped.selfNotOwnAdsetIds.size === 0) return diagnoses
   return diagnoses.map(d => {
-    const hit = d.units.filter(u => u.level === 'adset' && scoped.droppedAdsetIds.has(u.id))
+    // 只标广告组自己就不是客户的（selfNotOwnAdsetIds）；纯因 CBO 兄弟连坐被切、自己其实是客户的组不标——
+    // 那条命中本身是干净的（Codex 2026-09-27）
+    const hit = d.units.filter(u => u.level === 'adset' && scoped.selfNotOwnAdsetIds.has(u.id))
     if (hit.length === 0) return d
     return {
       ...d,

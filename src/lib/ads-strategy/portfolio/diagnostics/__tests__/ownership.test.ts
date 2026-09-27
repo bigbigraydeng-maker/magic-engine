@@ -12,8 +12,9 @@ import type { AccountInput, DailyRow, DiagnosisInput, HourlyRow } from '../types
 import type { EntitySnapshotRow } from '../../snapshot'
 
 const DATE = '2026-09-24'
-const OWN = 'page-own'
-const OTHER = 'page-other'
+const EVAL = '2026-09-25T03:00:00Z'
+const OWN = '1616575215312482'
+const OTHER = '748077268383005'
 
 function snap(p: Partial<EntitySnapshotRow> & Pick<EntitySnapshotRow, 'level' | 'entity_id'>): EntitySnapshotRow {
   return {
@@ -91,7 +92,7 @@ function mixedAccount(): AccountInput {
 
 describe('scopeAccountToClient', () => {
   it('切掉别家主页的系列/广告组/广告，连同它们的日数据和小时数据；排除清单写明原因', () => {
-    const scoped = scopeAccountToClient(mixedAccount(), OWN, DATE)
+    const scoped = scopeAccountToClient(mixedAccount(), OWN, DATE, EVAL)
     const ids = scoped.account.snapshots.map(r => r.entity_id)
     expect(ids).toEqual(expect.arrayContaining(['c-own', 'as-own-1', 'as-own-2', 'ad-own-1', 'ad-own-2']))
     expect(ids).not.toEqual(expect.arrayContaining(['c-other']))
@@ -107,7 +108,7 @@ describe('scopeAccountToClient', () => {
   it('只在小时数据里出现、快照和日数据都没有的广告组：归属判不了，小时花费不算客户的（狄仁杰）', () => {
     const acc = mixedAccount()
     acc.hourly[DATE] = [...acc.hourly[DATE], { adset_id: 'as-brand-new', campaign_id: 'c-new', hour: 10, spend: 40 }]
-    const scoped = scopeAccountToClient(acc, OWN, DATE)
+    const scoped = scopeAccountToClient(acc, OWN, DATE, EVAL)
     expect(scoped.account.hourly[DATE]).toEqual([{ adset_id: 'as-own-1', campaign_id: 'c-own', hour: 9, spend: 5 }])
   })
 
@@ -115,14 +116,14 @@ describe('scopeAccountToClient', () => {
     const acc = mixedAccount()
     acc.snapshots = [...acc.snapshots, adset('as-empty', 'c-own')]
     acc.hourly[DATE] = [...acc.hourly[DATE], { adset_id: 'as-empty', campaign_id: 'c-own', hour: 11, spend: 25 }]
-    const scoped = scopeAccountToClient(acc, OWN, DATE)
+    const scoped = scopeAccountToClient(acc, OWN, DATE, EVAL)
     expect(scoped.account.snapshots.some(r => r.entity_id === 'as-empty')).toBe(true)
     expect(scoped.account.hourly[DATE]).toEqual([{ adset_id: 'as-own-1', campaign_id: 'c-own', hour: 9, spend: 5 }])
   })
 
   it('幂等：切过的再切一次，账户内容不变（loader 预筛切一次、run 再切一次）', () => {
-    const once = scopeAccountToClient(mixedAccount(), OWN, DATE).account
-    const twice = scopeAccountToClient(once, OWN, DATE).account
+    const once = scopeAccountToClient(mixedAccount(), OWN, DATE, EVAL).account
+    const twice = scopeAccountToClient(once, OWN, DATE, EVAL).account
     expect(twice.snapshots).toEqual(once.snapshots)
     expect(twice.daily).toEqual(once.daily)
     expect(twice.hourly).toEqual(once.hourly)
@@ -134,7 +135,7 @@ describe('scopeAccountToClient', () => {
       ad('ad-a', 'as-a', 'c-cbo', OWN), ad('ad-b', 'as-b', 'c-cbo', OTHER),
     ]
     const daily = days(7).flatMap(d => [adsetRow('as-a', 'c-cbo', d, 10), adsetRow('as-b', 'c-cbo', d, 10)])
-    const scoped = scopeAccountToClient(account(snaps, daily), OWN, DATE)
+    const scoped = scopeAccountToClient(account(snaps, daily), OWN, DATE, EVAL)
     expect(scoped.account.snapshots).toEqual([])
     expect(scoped.account.daily).toEqual([])
     expect(scoped.excluded).toEqual([expect.objectContaining({ level: 'campaign', id: 'c-cbo', reason: 'mixed_pages' })])
@@ -146,7 +147,7 @@ describe('scopeAccountToClient', () => {
       ad('ad-mine', 'as-mine', 'c-abo', OWN), ad('ad-theirs', 'as-theirs', 'c-abo', OTHER),
     ]
     const daily = [...days(7).flatMap(d => [adsetRow('as-mine', 'c-abo', d, 10), adsetRow('as-theirs', 'c-abo', d, 10)]), campaignRow('c-abo', DATE, 20, 3.4)]
-    const scoped = scopeAccountToClient(account(snaps, daily), OWN, DATE)
+    const scoped = scopeAccountToClient(account(snaps, daily), OWN, DATE, EVAL)
     expect(scoped.account.snapshots.map(r => r.entity_id)).toEqual(['c-abo', 'as-mine', 'ad-mine'])
     expect(scoped.account.daily.some(r => r.level === 'campaign')).toBe(false)
     expect(scoped.account.daily.every(r => r.entity_id === 'as-mine')).toBe(true)
@@ -160,7 +161,7 @@ describe('scopeAccountToClient', () => {
         { entity_id: 'ad1', adset_id: 'as1', creative_page_id: OWN },
       ],
     })
-    const scoped = scopeAccountToClient(acc, OWN, DATE)
+    const scoped = scopeAccountToClient(acc, OWN, DATE, EVAL)
     expect(scoped.account.snapshots.some(r => r.entity_id === 'as1')).toBe(false)
     expect(scoped.excluded).toEqual([expect.objectContaining({ id: 'as1', reason: 'mixed_pages' })])
   })
@@ -172,7 +173,7 @@ describe('scopeAccountToClient', () => {
       recentAds: [gone],
       adDaily: [{ ...adsetRow('ad-gone', 'c-gone', DATE, 13.16), level: 'ad' }],
     })
-    const scoped = scopeAccountToClient(acc, OWN, DATE)
+    const scoped = scopeAccountToClient(acc, OWN, DATE, EVAL)
     expect(scoped.account.daily.map(r => r.entity_id)).toEqual(['as1'])
     expect(scoped.excluded).toEqual([expect.objectContaining({ level: 'adset', id: 'as-gone', reason: 'other_page' })])
   })
@@ -184,7 +185,7 @@ describe('scopeAccountToClient', () => {
       campaign('c2'), adset('as-noads', 'c2'),
     ]
     const daily = [adsetRow('as-live', 'c-cbo', DATE, 10), adsetRow('as-noads', 'c2', DATE, 5)]
-    const scoped = scopeAccountToClient(account(snaps, daily), OWN, DATE)
+    const scoped = scopeAccountToClient(account(snaps, daily), OWN, DATE, EVAL)
     const kept = scoped.account.snapshots.map(r => r.entity_id)
     expect(kept).toEqual(expect.arrayContaining(['c-cbo', 'as-live', 'as-empty', 'ad-live']))
     expect(kept).not.toContain('as-noads')
@@ -194,24 +195,110 @@ describe('scopeAccountToClient', () => {
   it('暂停且近 7 天没花钱的别家广告组照切，但不进排除清单（免得日报一长串）', () => {
     const snaps = [campaign('c1'), adset('as1', 'c1'), ad('ad1', 'as1', 'c1', OWN),
       campaign('c-old', 'abo', { effective_status: 'PAUSED' }), adset('as-old', 'c-old', { effective_status: 'CAMPAIGN_PAUSED' }), ad('ad-old', 'as-old', 'c-old', OTHER)]
-    const scoped = scopeAccountToClient(account(snaps, [adsetRow('as1', 'c1', DATE, 10)]), OWN, DATE)
+    const scoped = scopeAccountToClient(account(snaps, [adsetRow('as1', 'c1', DATE, 10)]), OWN, DATE, EVAL)
     expect(scoped.account.snapshots.some(r => r.entity_id.includes('old'))).toBe(false)
     expect(scoped.excluded).toEqual([])
   })
 
   it('不切：clientPageId 没加载 / 共用账户', () => {
     const acc = mixedAccount()
-    expect(scopeAccountToClient(acc, undefined, DATE).account).toBe(acc)
+    expect(scopeAccountToClient(acc, undefined, DATE, EVAL).account).toBe(acc)
     const shared = { ...acc, shared: true }
-    expect(scopeAccountToClient(shared, OWN, DATE).account).toBe(shared)
+    expect(scopeAccountToClient(shared, OWN, DATE, EVAL).account).toBe(shared)
   })
 
   it('客户没登记主页：账户里只有一个主页 → 原样跑；≥2 个主页 → 只做账户级', () => {
     const single = account([campaign('c1'), adset('as1', 'c1'), ad('ad1', 'as1', 'c1', OTHER)], [])
-    expect(scopeAccountToClient(single, null, DATE)).toMatchObject({ accountLevelOnly: false, excluded: [] })
-    const multi = scopeAccountToClient(mixedAccount(), null, DATE)
+    expect(scopeAccountToClient(single, null, DATE, EVAL)).toMatchObject({ accountLevelOnly: false, excluded: [] })
+    const multi = scopeAccountToClient(mixedAccount(), null, DATE, EVAL)
     expect(multi.accountLevelOnly).toBe(true)
     expect(multi.excluded).toEqual([expect.objectContaining({ level: 'account', reason: 'page_unknown' })])
+  })
+
+  it('主页 id 是脏数据（全角数字、零宽字符、前导零）也要认得出，不能把客户自己的广告判成别家（Codex 2026-09-27）', () => {
+    const dirtyClientPageId = '​００​1616575215312482 ' // 零宽字符 + 全角数字 + 前导零 + 尾随空格
+    const snaps = [campaign('c1'), adset('as1', 'c1'), ad('ad1', 'as1', 'c1', OWN)]
+    const scoped = scopeAccountToClient(account(snaps, [adsetRow('as1', 'c1', DATE, 10)]), dirtyClientPageId, DATE, EVAL)
+    expect(scoped.account.snapshots.some(r => r.entity_id === 'as1')).toBe(true)
+    expect(scoped.excluded).toEqual([])
+  })
+
+  it('广告层快照最近一轮没抓全或超过 24 小时 → 只做账户级（归属核实不到，Codex 2026-09-27）', () => {
+    const stale = [{ level: 'ad' as const, complete: true, skipped_shared: false, error: null, captured_at: '2026-09-22T00:00:00Z' }] // 早于 evaluatedAt 3 天
+    const incomplete = [{ level: 'ad' as const, complete: false, skipped_shared: false, error: 'timeout', captured_at: '2026-09-25T02:00:00Z' }] // 新鲜但没抓全
+    for (const latestCaptures of [stale, incomplete]) {
+      const acc = { ...mixedAccount(), latestCaptures }
+      const s = scopeAccountToClient(acc, OWN, DATE, EVAL)
+      expect(s.accountLevelOnly).toBe(true)
+      expect(s.excluded).toEqual([expect.objectContaining({ level: 'account', reason: 'capture_stale' })])
+    }
+  })
+
+  it('广告层快照最近一轮抓全且新鲜（24 小时内）→ 照常按主页切分，不降级账户级', () => {
+    const fresh = [{ level: 'ad' as const, complete: true, skipped_shared: false, error: null, captured_at: '2026-09-25T02:00:00Z' }] // evaluatedAt 前 1 小时
+    const acc = { ...mixedAccount(), latestCaptures: fresh }
+    const scoped = scopeAccountToClient(acc, OWN, DATE, EVAL)
+    expect(scoped.accountLevelOnly).toBe(false)
+    expect(scoped.account.snapshots.some(r => r.entity_id === 'c-other')).toBe(false)
+  })
+
+  it('CBO 兄弟连坐 vs 广告组自己混主页：分开记，不能把「组自己没问题」标成「组本身混主页」（Codex 2026-09-27）', () => {
+    const snaps = [
+      campaign('c-cbo', 'cbo'),
+      adset('as-clean', 'c-cbo'), ad('ad-clean', 'as-clean', 'c-cbo', OWN), // 自己 100% own，只是系列里有坏兄弟
+      adset('as-bad', 'c-cbo'), ad('ad-bad', 'as-bad', 'c-cbo', OTHER), // 自己就不是客户的
+    ]
+    const daily = days(7).flatMap(d => [adsetRow('as-clean', 'c-cbo', d, 10), adsetRow('as-bad', 'c-cbo', d, 10)])
+    const scoped = scopeAccountToClient(account(snaps, daily), OWN, DATE, EVAL)
+    expect(scoped.droppedAdsetIds.has('as-clean')).toBe(true)
+    expect(scoped.droppedAdsetIds.has('as-bad')).toBe(true)
+    expect(scoped.selfNotOwnAdsetIds.has('as-clean')).toBe(false)
+    expect(scoped.selfNotOwnAdsetIds.has('as-bad')).toBe(true)
+  })
+
+  it('广告级命中挂在纯 CBO 连坐（组自己是 own）的组上 → 不标「组混主页」；挂在组自己就混的组上才标', () => {
+    const snaps = [
+      campaign('c-cbo', 'cbo'),
+      adset('as-clean', 'c-cbo'), ad('ad-clean', 'as-clean', 'c-cbo', OWN),
+      adset('as-bad', 'c-cbo'), ad('ad-bad', 'as-bad', 'c-cbo', OTHER),
+    ]
+    const daily = days(7).flatMap(d => [adsetRow('as-clean', 'c-cbo', d, 10), adsetRow('as-bad', 'c-cbo', d, 10)])
+    const scoped = scopeAccountToClient(account(snaps, daily), OWN, DATE, EVAL)
+    const hitOn = (adsetId: string) => ({
+      code: 'D10' as const, status: 'hit' as const, title: 't',
+      units: [{ level: 'adset' as const, id: adsetId, name: adsetId, adAccountId: 'act_1' }],
+      evidence: {}, sample: [], reasons: [], clientVisible: true,
+    })
+    const [cleanFlagged, badFlagged] = flagDroppedAdsetUnits([hitOn('as-clean'), hitOn('as-bad')], scoped)
+    expect(cleanFlagged.evidence.adset_mixed_pages).toBeUndefined()
+    expect(badFlagged.evidence.adset_mixed_pages).toBe('as-bad')
+  })
+
+  it('已归档的别家广告如果在广告层日数据里一行都没出现过（可能是写侧分页中断丢的），不能当零花费忽略——照样判混主页', () => {
+    const snaps = [campaign('c1'), adset('as1', 'c1'), ad('ad1', 'as1', 'c1', OWN)]
+    const gone = ad('ad-gone', 'as1', 'c1', OTHER, { effective_status: 'DELETED' })
+    // adDaily 里只有 ad1 的行，ad-gone 一行都没有（既不是零花费、也不是有花费——就是没同步到）
+    const acc = account(snaps, [adsetRow('as1', 'c1', DATE, 10)], {
+      recentAds: [gone],
+      adDaily: [{ level: 'ad', entity_id: 'ad1', parent_id: 'c1', insight_date: DATE, spend: 5, impressions: 100, reach: null, clicks: 1, leads: 0, messaging_conversations: 0, video_thruplays: null, actions: [] }],
+    })
+    const scoped = scopeAccountToClient(acc, OWN, DATE, EVAL)
+    expect(scoped.account.snapshots.some(r => r.entity_id === 'as1')).toBe(false)
+    expect(scoped.excluded).toEqual([expect.objectContaining({ id: 'as1', reason: 'mixed_pages' })])
+  })
+
+  it('对照：已归档的别家广告在广告层日数据里出现过、且每天都是零花费 → 照旧不连累这个组（行为不变）', () => {
+    const snaps = [campaign('c1'), adset('as1', 'c1'), ad('ad1', 'as1', 'c1', OWN)]
+    const gone = ad('ad-gone', 'as1', 'c1', OTHER, { effective_status: 'DELETED' })
+    const acc = account(snaps, [adsetRow('as1', 'c1', DATE, 10)], {
+      recentAds: [gone],
+      adDaily: [
+        { level: 'ad', entity_id: 'ad1', parent_id: 'c1', insight_date: DATE, spend: 5, impressions: 100, reach: null, clicks: 1, leads: 0, messaging_conversations: 0, video_thruplays: null, actions: [] },
+        { level: 'ad', entity_id: 'ad-gone', parent_id: 'c1', insight_date: DATE, spend: 0, impressions: 0, reach: null, clicks: 0, leads: 0, messaging_conversations: 0, video_thruplays: null, actions: [] },
+      ],
+    })
+    const scoped = scopeAccountToClient(acc, OWN, DATE, EVAL)
+    expect(scoped.account.snapshots.some(r => r.entity_id === 'as1')).toBe(true)
   })
 })
 
@@ -248,7 +335,7 @@ describe('接进巡检 / 机会之后', () => {
 
   it('广告级命中挂在被切掉的混主页广告组上 → 标明组层数字含别家（子牙第二轮）', () => {
     const scoped = scopeAccountToClient(account([campaign('c1'), adset('as-mixed', 'c1'), ad('a1', 'as-mixed', 'c1', OWN), ad('a2', 'as-mixed', 'c1', OTHER)],
-      [adsetRow('as-mixed', 'c1', DATE, 10)]), OWN, DATE)
+      [adsetRow('as-mixed', 'c1', DATE, 10)]), OWN, DATE, EVAL)
     const d = { code: 'D10' as const, status: 'hit' as const, title: 't', units: [{ level: 'ad' as const, id: 'a1', name: null, adAccountId: 'act_1' }, { level: 'adset' as const, id: 'as-mixed', name: 'X', adAccountId: 'act_1' }], evidence: {}, sample: [], reasons: [], clientVisible: true }
     const [flagged] = flagDroppedAdsetUnits([d], scoped)
     expect(flagged.evidence).toMatchObject({ adset_mixed_pages: 'as-mixed' })
