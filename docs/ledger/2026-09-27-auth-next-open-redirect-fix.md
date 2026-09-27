@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-09-27
 source: session:e3087553
 verify_by: 2026-10-04
-verify_how: 合并上线后打开 https://app.magicengine.com.au/api/auth/session-route?next=/%5Cevil.com 和 ?next=/%255Cevil.com（未登录也行），返回的 redirect 必须是 /dashboard 而不是 /\evil.com；再用正常 next=/meta-ads-ai/mine 登录一次，确认仍落到该页
+verify_how: 合并上线后打开 https://app.magicengine.com.au/api/auth/session-route?next=/%5Cevil.com 和 ?next=/%255Cevil.com（未登录也行），返回的 redirect 必须是 /dashboard 而不是 /\evil.com；再用一个没有任何客户关系的自助注册账号，带正常 next=/meta-ads-ai/mine 登录一次，确认仍落到该页（管理员或有客户关系的账号会被送去自己的首页，不能用来验）
 done_on: 2026-09-27
 done_ref: pr:2129
 ---

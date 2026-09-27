@@ -12,6 +12,10 @@
  * of percent-decoding, so `/%5Cevil.com` and `/%2F/evil.com` are rejected
  * too. Malformed percent-encoding is rejected rather than guessed at.
  *
+ * `.` / `..` path segments are rejected as well: `/dashboard/../x` would slip
+ * past a caller's `startsWith('/dashboard/')` check, and `/..//evil.com`
+ * collapses to a `//`-prefixed path once the browser resolves it.
+ *
  * Pure function with no server imports — safe in client components.
  */
 
@@ -23,6 +27,8 @@ function passesRawRules(value: string): boolean {
   if (value.startsWith('//')) return false
   if (value.includes('\\')) return false
   if (CONTROL_CHARS.test(value)) return false
+  const pathPart = value.split(/[?#]/, 1)[0]
+  if (pathPart.split('/').some(segment => segment === '.' || segment === '..')) return false
   return true
 }
 

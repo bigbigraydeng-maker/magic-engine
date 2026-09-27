@@ -61,7 +61,7 @@ export default function ImplicitCallbackPage() {
         cache: 'no-store',
       })
       const route = await res.json() as SessionRouteResponse
-      router.replace(route.redirect ?? next)
+      router.replace(safeInternalPath(route.redirect, next))
     }
 
     void finishLogin()

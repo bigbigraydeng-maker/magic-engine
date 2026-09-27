@@ -29,6 +29,12 @@ describe('safeInternalPath — rejects off-site redirects', () => {
     ['/%0A/evil.com'],
     ['/dashboard\\..\\evil'],
     ['/%E0%A4%A'],
+    ['/..//evil.com'],
+    ['/.//evil.com'],
+    ['/%2e%2e//evil.com'],
+    ['/dashboard/../admin'],
+    ['/dashboard/%2E%2E/admin'],
+    ['/dashboard/..'],
     [''],
   ])('%j → fallback', (input) => {
     expect(safeInternalPath(input, FALLBACK)).toBe(FALLBACK)
@@ -53,9 +59,19 @@ describe('safeInternalPath — keeps normal internal paths', () => {
     ['/'],
     ['/meta-ads-ai/mine?tab=report&from=%2Fdashboard'],
     ['/dashboard/clients/abc#section'],
+    ['/dashboard/clients/abc/report.pdf'],
+    ['/meta-ads-ai/mine?back=../x'],
   ])('%j is kept', (input) => {
     expect(safeInternalPath(input, FALLBACK)).toBe(input)
     expect(isSafeInternalPath(input)).toBe(true)
+  })
+
+  // Decode exactly once: a double-encoded backslash stays a literal `%5C` path
+  // segment on our own origin. Pinned so nobody "fixes" it into decoding twice
+  // at the call site, which is where it would turn into a real `\`.
+  it('decodes once only — double-encoded input stays an on-site path', () => {
+    expect(safeInternalPath('/%255Cevil.com', FALLBACK)).toBe('/%255Cevil.com')
+    expect(new URL('/%255Cevil.com', 'https://app.example.com').origin).toBe('https://app.example.com')
   })
 
   it('uses the caller-supplied fallback', () => {
