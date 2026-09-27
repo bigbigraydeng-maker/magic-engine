@@ -74,6 +74,29 @@ const A_PATHS: Array<[string, string]> = [
   ['src/lib/google-ads/creds-loader.ts', 'credential loading'],
   ['package.json', 'dependency manifest'],
   ['package-lock.json', 'dependency lock'],
+  // Config and secret files that rated B until 2026-09-27 — see the block below.
+  ['.env.production', 'root credentials variant'],
+  ['.gitignore', 'ignore list guarding secret files'],
+  ['tsconfig.json', 'type-check config'],
+  ['vitest.config.ts', 'test runner config'],
+  ['playwright.config.ts', 'e2e config'],
+  ['.eslintrc.json', 'lint config'],
+  ['.husky/pre-commit', 'pre-commit hook'],
+  ['next.config.js', 'Next.js build/runtime config'],
+  ['instrumentation.ts', 'Next.js startup hook'],
+  ['scripts/render-worker/Dockerfile', 'container image'],
+  ['supabase/config.toml', 'Supabase project config'],
+  ['.nvmrc', 'Node version pin'],
+  ['middleware.ts', 'root middleware'],
+  ['tools/local-executor-bridge/bridge.py', 'signed local executor'],
+  ['.npmrc', 'npm install config'],
+  ['vitest.workspace.ts', 'vitest workspace'],
+  ['scripts/check-policy-to-clause.mjs', 'RLS red-line check'],
+  ['scripts/db-replay-and-verify.sh', 'db red-line replay'],
+  ['.node-version', 'Node version pin read first by Render'],
+  ['.tool-versions', 'asdf / mise runtime pin'],
+  ['.dockerignore', 'keeps .env out of images'],
+  ['yarn.lock', 'other lockfiles'],
 ]
 
 describe('every protected path rates A', () => {
@@ -139,6 +162,102 @@ describe('governance files are A even though they are markdown', () => {
     expect(result.risk).toBe('A')
     expect(result.categories).toContain('governance')
     expect(result.reasons[0]).toContain('CLAUDE.md')
+  })
+})
+
+/**
+ * Verified on main 33672dbe (2026-09-27) with exactly this call shape: every
+ * path below rated B, and B auto-merges with no human since 2026-09-25. One
+ * test per path, so deleting any single rule turns at least one of these red —
+ * the mutation run in the PR shows it rule by rule.
+ */
+describe('config and secret files rate A, not B', () => {
+  const rate = (filename: string) => classifyRisk({ files: [{ filename, status: 'modified' }] })
+
+  it.each([
+    // credentials / secret exposure
+    ['.env.production', 'credentials'],
+    ['.env.local', 'credentials'],
+    ['.env.staging', 'credentials'],
+    ['.gitignore', 'credentials'],
+    ['docs/clients/parkhomes/web/.gitignore', 'credentials'],
+    // build / runtime execution
+    ['next.config.js', 'build-runtime'],
+    ['next.config.mjs', 'build-runtime'],
+    ['middleware.ts', 'auth-isolation'],
+    ['instrumentation.ts', 'build-runtime'],
+    ['src/instrumentation.ts', 'build-runtime'],
+    ['instrumentation-client.ts', 'build-runtime'],
+    ['Dockerfile', 'build-runtime'],
+    ['scripts/render-worker/Dockerfile', 'build-runtime'],
+    ['supabase/config.toml', 'build-runtime'],
+    ['.nvmrc', 'build-runtime'],
+    ['tools/local-executor-bridge/bridge.py', 'kernel-execution'],
+    ['tools/local-executor-bridge/policy.v1.json', 'kernel-execution'],
+    // what the checks themselves do
+    ['tsconfig.json', 'control-plane'],
+    ['tsconfig.base.json', 'control-plane'],
+    ['vitest.config.ts', 'control-plane'],
+    ['vitest.setup.ts', 'control-plane'],
+    ['playwright.config.ts', 'control-plane'],
+    ['eslint.config.mjs', 'control-plane'],
+    ['.eslintrc.json', 'control-plane'],
+    ['.eslintrc.js', 'control-plane'],
+    ['.husky/pre-commit', 'control-plane'],
+    ['.npmrc', 'supply-chain'],
+    // second review round on #2071 (子牙 / 魏征 / 狄仁杰)
+    ['vitest.workspace.ts', 'control-plane'],
+    ['vitest.projects.ts', 'control-plane'],
+    ['scripts/check-policy-to-clause.mjs', 'control-plane'],
+    ['scripts/db-replay-and-verify.sh', 'control-plane'],
+    ['.dockerignore', 'credentials'],
+    ['.ENV.production', 'credentials'],
+    ['.node-version', 'build-runtime'],
+    ['.tool-versions', 'build-runtime'],
+    ['middleware.js', 'auth-isolation'],
+    ['src/middleware.js', 'auth-isolation'],
+    ['scripts/factory-worker/package.json', 'supply-chain'],
+    ['docs/clients/parkhomes/web/package-lock.json', 'supply-chain'],
+    ['yarn.lock', 'supply-chain'],
+    ['pnpm-lock.yaml', 'supply-chain'],
+    ['npm-shrinkwrap.json', 'supply-chain'],
+  ])('%s is A (%s)', (path, category) => {
+    const result = rate(path)
+    expect(result.risk).toBe('A')
+    expect(result.categories).toEqual([category])
+    expect(result.reasons[0]).toContain(path)
+  })
+
+  it('keeps the root .env.example template B — the one exemption', () => {
+    expect(rate('.env.example').risk).toBe('B')
+  })
+
+  it('keeps a nested .env.example A, as it already was — the exemption is root-only', () => {
+    expect(rate('scripts/factory-worker/.env.example').risk).toBe('A')
+  })
+
+  it('does not exempt a variant that merely starts with the template name', () => {
+    expect(rate('.env.example.local').risk).toBe('A')
+  })
+
+  it('keeps root .env and config/.env.production A, as they already were', () => {
+    expect(rate('.env').risk).toBe('A')
+    expect(rate('config/.env.production').risk).toBe('A')
+  })
+
+  it('keeps docs markdown C', () => {
+    expect(rate('docs/STATE.md').risk).toBe('C')
+  })
+
+  it('keeps a plain string array A — an entry with no filename is unreadable', () => {
+    const result = classifyRisk({ files: ['.env.example', 'docs/a.md'] })
+    expect(result.risk).toBe('A')
+    expect(result.readable).toBe(false)
+  })
+
+  it('does not treat a file that merely mentions env as a secret file', () => {
+    expect(classifyFile('src/lib/config/env.ts').risk).toBe('B')
+    expect(classifyFile('docs/ENV.md').risk).toBe('C')
   })
 })
 
@@ -354,6 +473,26 @@ describe('risk categories drive which evidence is owed', () => {
 
   it('reports no category for a diff with no A-level surface', () => {
     expect(classifyRisk({ files: [{ filename: 'src/lib/geo/score.ts' }] }).categories).toEqual([])
+  })
+
+  // A misspelt kind (`basenme: '.gitignore'`) matches nothing and the rule
+  // silently dies (魏征 W71-4, #2071). So every rule must use exactly one kind
+  // this module knows, and a `pattern` must be stateless: a `g` / `y` flag
+  // makes `.test()` remember `lastIndex`, so the same path would rate A on one
+  // call and B on the next.
+  it('every A rule uses exactly one known kind, and no pattern is stateful', () => {
+    const KINDS = ['exact', 'prefix', 'suffix', 'includes', 'basenameIncludes', 'basenameWord', 'basename', 'pattern']
+    for (const rule of A_RISK_RULES as Array<Record<string, unknown>>) {
+      const keys = Object.keys(rule).filter((k) => k !== 'why' && k !== 'category')
+      expect(keys, `${String(rule.why)} has kinds ${keys.join(',')}`).toHaveLength(1)
+      expect(KINDS, `${String(rule.why)} uses unknown kind ${keys[0]}`).toContain(keys[0])
+      if (rule.pattern !== undefined) {
+        expect(rule.pattern).toBeInstanceOf(RegExp)
+        expect((rule.pattern as RegExp).flags).not.toMatch(/[gy]/)
+      } else {
+        expect(typeof rule[keys[0]], String(rule.why)).toBe('string')
+      }
+    }
   })
 
   it('gives every A rule a category', () => {

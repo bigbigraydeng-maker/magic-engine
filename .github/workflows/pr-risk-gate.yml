@@ -22,7 +22,10 @@ name: PR risk gate
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+    # `edited`: the 当场试跑 check reads the PR body, so filling in that section
+    # must re-run the gate without pushing a commit. Title / base edits re-run
+    # it too; the per-PR concurrency group below cancels the superseded run.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited]
 
 permissions:
   contents: write        # enable / disable auto-merge
