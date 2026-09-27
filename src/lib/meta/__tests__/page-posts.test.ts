@@ -9,6 +9,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { publishPagePhotoPost, deletePagePost, readPageStoryId } from '../page-posts'
+import { GRAPH_BASE } from '../graph-base'
 
 const PAGE = '1616575215312482'
 const TOKEN = 'page-access-token'
@@ -71,7 +72,7 @@ describe('publishPagePhotoPost — immediate vs scheduled', () => {
       message: 'hi', imageUrl: 'https://x/img.jpg', fetcher,
     })
     expect(calls).toHaveLength(1)
-    expect(calls[0].url).toBe(`https://graph.facebook.com/v20.0/${PAGE}/photos`)
+    expect(calls[0].url).toBe(`${GRAPH_BASE}/${PAGE}/photos`)
     expect(r).toEqual({
       postId: `${PAGE}_1750835520181969`,
       postIdSource: 'post_id',
@@ -152,7 +153,7 @@ describe('deletePagePost — idempotency and error surfacing', () => {
     const { fetcher, calls } = fakeFetch({ ok: true, body: { success: true } })
     await deletePagePost({ postId: '1750835520181969', pageAccessToken: TOKEN, fetcher })
     expect(calls[0].init?.method).toBe('DELETE')
-    expect(calls[0].url).toBe(`https://graph.facebook.com/v20.0/1750835520181969?access_token=${TOKEN}`)
+    expect(calls[0].url).toBe(`${GRAPH_BASE}/1750835520181969?access_token=${TOKEN}`)
   })
 
   it('url-encodes the post id — a raw underscore-heavy id must not break the request line', async () => {
@@ -190,7 +191,7 @@ describe('readPageStoryId — read-back after the photo is public', () => {
 
     expect(r).toEqual({ ok: true, postId: `${PAGE}_${PHOTO}` })
     expect(calls).toHaveLength(1)
-    expect(calls[0].url).toBe(`https://graph.facebook.com/v20.0/${PHOTO}?fields=page_story_id&access_token=${TOKEN}`)
+    expect(calls[0].url).toBe(`${GRAPH_BASE}/${PHOTO}?fields=page_story_id&access_token=${TOKEN}`)
     expect(calls[0].init?.method ?? 'GET').toBe('GET')
     expect(calls[0].init?.signal).toBeInstanceOf(AbortSignal)
   })
@@ -230,5 +231,28 @@ describe('readPageStoryId — read-back after the photo is public', () => {
     }))
     const r = await readPageStoryId({ photoId: PHOTO, pageId: PAGE, pageAccessToken: TOKEN, fetcher, timeoutMs: 20 })
     expect(r).toEqual({ ok: false, reason: 'timeout' })
+  })
+})
+
+/**
+ * Regression (2026-09-27): PR 1942 moved every Meta module to the shared
+ * GRAPH_BASE (v20.0 → v21.0) but these tests pinned the old version literal,
+ * so three went red on main. Asserting against the shared constant keeps the
+ * path contract locked while letting the version move in one place — and this
+ * block fails if page-posts ever pins its own version again.
+ */
+describe('Graph version — page-posts follows the shared GRAPH_BASE', () => {
+  it('publish, delete and story read-back all target the shared GRAPH_BASE', async () => {
+    const pub = fakeFetch({ ok: true, body: { post_id: `${PAGE}_1`, id: '1' } })
+    await publishPagePhotoPost({ pageId: PAGE, pageAccessToken: TOKEN, message: 'hi', imageUrl: 'https://x/img.jpg', fetcher: pub.fetcher })
+    const del = fakeFetch({ ok: true, body: { success: true } })
+    await deletePagePost({ postId: '1', pageAccessToken: TOKEN, fetcher: del.fetcher })
+    const read = fakeFetch({ ok: true, body: { page_story_id: `${PAGE}_1`, id: '1' } })
+    await readPageStoryId({ photoId: '1', pageId: PAGE, pageAccessToken: TOKEN, fetcher: read.fetcher })
+
+    expect(GRAPH_BASE).toMatch(/^https:\/\/graph\.facebook\.com\/v\d+\.0$/)
+    for (const url of [pub.calls[0].url, del.calls[0].url, read.calls[0].url]) {
+      expect(url.startsWith(`${GRAPH_BASE}/`)).toBe(true)
+    }
   })
 })
