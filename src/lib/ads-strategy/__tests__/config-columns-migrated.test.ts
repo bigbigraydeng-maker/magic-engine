@@ -37,11 +37,10 @@ function selectedColumns(): string[] {
  * CREATE TABLE 里的列 + ADD COLUMN，再扣掉 DROP COLUMN、按 RENAME COLUMN 改名（魏征复审：
  * 只认加不认删，删了列测试照样绿、上线照样 400）。
  */
-function migratedColumns(): Set<string> {
+function columnsAfterReplay(files: Array<{ name: string; sql: string }>): Set<string> {
   const cols = new Set<string>()
-  const files = readdirSync(MIGRATIONS_DIR).filter((n) => n.endsWith('.sql')).sort()
-  for (const f of files) {
-    const sql = stripSqlComments(readFileSync(join(MIGRATIONS_DIR, f), 'utf8'))
+  for (const { sql: raw } of [...files].sort((a, b) => a.name.localeCompare(b.name))) {
+    const sql = stripSqlComments(raw)
     if (!/ad_strategy_configs/i.test(sql)) continue
 
     // 建表块只截到**这张表自己**的收尾括号（行首的 `)`），不会越界吃进后面别的表
@@ -66,6 +65,14 @@ function migratedColumns(): Set<string> {
   return cols
 }
 
+function migratedColumns(): Set<string> {
+  return columnsAfterReplay(
+    readdirSync(MIGRATIONS_DIR)
+      .filter((n) => n.endsWith('.sql'))
+      .map((name) => ({ name, sql: readFileSync(join(MIGRATIONS_DIR, name), 'utf8') })),
+  )
+}
+
 describe('ad_strategy_configs：config.ts 读的列都有 migration 建过', () => {
   it('解析器自己没瞎：至少认出建表那几列和后来加的列', () => {
     const cols = migratedColumns()
@@ -73,6 +80,16 @@ describe('ad_strategy_configs：config.ts 读的列都有 migration 建过', () 
     for (const c of ['client_id', 'enabled', 'digest_recipients', 'autonomy_mode', 'autopilot_dry_run']) {
       expect(cols.has(c), `解析器没认出 ${c}`).toBe(true)
     }
+  })
+
+  // 子牙复审 W116-5：删列 / 改名要有样例钉住，不能只靠真仓库里恰好没有这种 migration
+  it('重放认删列和改名，而且按文件名顺序', () => {
+    const cols = columnsAfterReplay([
+      { name: '003_rename.sql', sql: 'ALTER TABLE public.ad_strategy_configs RENAME COLUMN old_name TO new_name;' },
+      { name: '001_create.sql', sql: 'CREATE TABLE IF NOT EXISTS ad_strategy_configs (\n  client_id UUID PRIMARY KEY,\n  enabled BOOLEAN,\n  old_name TEXT\n);\nCREATE TABLE other (\n  stray_col TEXT\n);' },
+      { name: '002_alter.sql', sql: 'ALTER TABLE ad_strategy_configs\n  ADD COLUMN IF NOT EXISTS added_col integer,\n  DROP COLUMN IF EXISTS enabled;\n-- ADD COLUMN in_comment text' },
+    ])
+    expect([...cols].sort()).toEqual(['added_col', 'client_id', 'new_name'])
   })
 
   it('每一列都能在 migration 里找到', () => {

@@ -2,9 +2,13 @@
  * 「广告回拉读不出广告配置」→ 今日待办系统欠账栏（2026-09-25 事故）。
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
+
+vi.mock('@/lib/seo/url-kind', () => ({ isHtmlPageUrl: () => true }))
+
 import { pushAdsConfigReadItems } from '../manual-monitoring-items'
+import { loadManualItems } from '../manual-items'
 import type { ManualItem } from '../manual-item-types'
 
 const NOW = new Date('2026-09-26T09:00:00Z')
@@ -18,7 +22,8 @@ function fakeLastRun(row: { finished_at: string; summary: unknown } | Array<{ fi
     not: (...a: unknown[]) => { calls.push(['not', a]); return chain },
     in: (...a: unknown[]) => { calls.push(['in', a]); return chain },
     order: (...a: unknown[]) => { calls.push(['order', a]); return chain },
-    limit: async () => ({ data: row === null ? [] : Array.isArray(row) ? row : [row], error: queryError ? { message: queryError } : null }),
+    // 按参数截断，「拿几轮」才真的被测到（子牙复审：假库不管 limit，只拿 1 轮的变异没被抓）
+    limit: async (n: number) => ({ data: (row === null ? [] : Array.isArray(row) ? row : [row]).slice(0, n), error: queryError ? { message: queryError } : null }),
   }
   const client = { from: (t: string) => { calls.push(['from', [t]]); return chain } } as unknown as SupabaseClient
   return { client, calls }
@@ -102,5 +107,58 @@ describe('pushAdsConfigReadItems', () => {
   it('查询本身出错 → 抛出，由调用方记录（不能当成「没问题」）', async () => {
     const { client } = fakeLastRun(null, 'permission denied')
     await expect(pushAdsConfigReadItems(client, [], NOW)).rejects.toThrow('permission denied')
+  })
+})
+
+/**
+ * 接线：走完整的今日待办构建，这一条必须出现。
+ * 🔴 子牙 / 魏征复审：把 manual-items.ts 里调用新检查那一行换成空操作，pm-todo 全部测试照样绿 ——
+ *    「声明了没接上」。这条钉住接线本身。
+ */
+describe('loadManualItems 接上了 pushAdsConfigReadItems', () => {
+  function wholeDbFake() {
+    const from = (table: string) => {
+      const filters: Record<string, unknown> = {}
+      const chain: Record<string, unknown> = {}
+      const rec = (k: unknown, v: unknown) => { filters[String(k)] = v; return chain }
+      chain.select = () => chain
+      chain.eq = (k: unknown, v: unknown) => rec(k, v)
+      chain.in = (k: unknown, v: unknown) => rec(k, v)
+      chain.not = () => chain
+      chain.is = () => chain
+      chain.gte = () => chain
+      chain.lte = () => chain
+      chain.lt = () => chain
+      chain.contains = () => chain
+      chain.order = () => chain
+      chain.range = () => chain
+      chain.limit = () => chain
+      chain.maybeSingle = () => Promise.resolve({ data: null, error: null })
+      chain.single = () => Promise.resolve({ data: null, error: null })
+      chain.then = (res: (v: { data: unknown; error: null }) => unknown) => {
+        if (table === 'cron_run_logs' && filters.job_name === 'google-data-pullback-daily') {
+          return res({
+            data: [{
+              finished_at: '2026-09-25T17:30:00Z',
+              summary: { errors: [{ client_id: 'c1', source: 'ad_config', error: 'column ad_strategy_configs.autopilot_enabled does not exist' }] },
+            }],
+            error: null,
+          })
+        }
+        return res({ data: [], error: null })
+      }
+      return chain
+    }
+    return { from } as unknown as SupabaseClient
+  }
+
+  it('一轮带配置读失败的运行记录 → 完整构建出来的今日待办里有这一条', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const items = await loadManualItems(wholeDbFake(), NOW)
+    const hit = items.filter((i) => i.kind === 'ads_config_unreadable')
+    expect(hit).toHaveLength(1)
+    expect(hit[0].what).toContain('1 个客户')
+    vi.restoreAllMocks()
   })
 })
