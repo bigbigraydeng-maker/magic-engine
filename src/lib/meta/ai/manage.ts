@@ -4,7 +4,8 @@ import { activeConnectionForPrincipal,requireDiscoveryAuthorization,requireRelea
 import { MetaReadError,metaGraphGet,graphRows,graphAfter } from '../graph-read'
 import { AI_ENTITY_FIELDS } from '../entity-settings'
 import { META_ADS_SCOPE,toolNames } from './contract'
-import { pilotState,requirePilotActive } from './entitlement'
+import { isSelfServeClient,pilotState,publicConnectOpen,requirePilotActive } from './entitlement'
+import { requireNotBlocked } from './blocklist'
 import { listAnalyses } from './analysis'
 
 type LastRead={ tool:string;account_id:string|null;at:string }
@@ -26,6 +27,7 @@ export async function status(clientId: string, principalId: string) {
     pilotState(clientId),
     listAnalyses(clientId,principalId),
   ])
+  const selfServe=await isSelfServeClient(clientId)
   if (connections.error || grants.error || keys.error) throw new MetaReadError('authorization_unavailable',503)
   const ownedConnections=connections.data.filter(connection=>connection.authorizing_principal_id===principalId)
   const ownedGrants=grants.data.filter(grant=>grant.principal_id===principalId)
@@ -47,7 +49,7 @@ export async function status(clientId: string, principalId: string) {
         && connection?.status==='active' && Date.parse(connection.token_expiry)>Date.now()) }]
   })
   const safeKeys=await Promise.all(visibleKeys.map(async key=>({ ...key,last_successful_read:await lastSuccessfulRead(clientId,key.id) })))
-  return { pilot,connections:safeConnections,grants:safeGrants,keys:safeKeys,analyses }
+  return { pilot,self_serve:selfServe,public_connect:publicConnectOpen(),connections:safeConnections,grants:safeGrants,keys:safeKeys,analyses }
 }
 export async function discover(clientId: string,principalId: string,connectionId: string) {
   await reserveRead(clientId)
@@ -68,6 +70,7 @@ export async function discover(clientId: string,principalId: string,connectionId
 }
 export async function bind(clientId: string,principalId: string,connectionId: string,accountId: string) {
   await reserveRead(clientId)
+  await requireNotBlocked('ad_account',accountId)
   const connection = await activeConnectionForPrincipal(clientId,connectionId,principalId)
   const account = await metaGraphGet(accountId,connection.token,{ fields:AI_ENTITY_FIELDS.account })
   if (account.id !== accountId) throw new MetaReadError('account_not_accessible',403)
@@ -103,6 +106,8 @@ export async function issueKey(clientId: string,principalId: string,grantId: str
   await activeConnectionForPrincipal(clientId,grant.connection_id,principalId)
   await reserveRead(clientId)
   const pilot=await requirePilotActive(clientId)
+  // Self-serve customers get the report only; external API keys stay an ops-opened capability.
+  if(pilot.source==='self_serve') throw new MetaReadError('not_available',403)
   const finalConnection=await activeConnectionForPrincipal(clientId,grant.connection_id,principalId)
   if(grant.entitlement_revision!==pilot.revision || finalConnection.entitlementRevision!==pilot.revision) throw new MetaReadError('invitation_changed',403)
   const key = generateApiKey()
