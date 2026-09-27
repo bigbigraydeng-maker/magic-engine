@@ -224,6 +224,8 @@ export type ManualItemKind =
   | SimaqianItemKind
   /** Facebook 私信 / 表单留资同步连续失败（授权失效时要有主页管理员重新「连接 Meta」） */
   | FacebookSyncItemKind
+  /** Magic Bridge 全平台免费额度用到 80% 以上 —— 要不要加额度由 PM 定 */
+  | 'magic_bridge_quota'
 
 export interface ManualItem {
   kind: ManualItemKind

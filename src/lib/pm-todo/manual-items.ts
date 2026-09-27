@@ -19,6 +19,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { pushAdsAutonomyCircuitBreakerItems } from './ads-autonomy-items'
 import { pushAttributionItems } from './attribution-items'
 import { clientListUnreadableItem, loadActiveClients, type ClientRow } from './client-roster'
 import { pushConversionReviewItems } from './conversion-review-items'
@@ -33,8 +34,9 @@ import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushFacebookSyncFailingItems } from './facebook-sync-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
-import { pushAdsAutonomySyncItems, pushAdsAutonomyCircuitBreakerItems } from './ads-autonomy-items'
+import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
+import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
 import { pushDataDeletionFailureItems } from './data-deletion-items'
 import {
   buildCrawlHealthItems,
@@ -238,6 +240,10 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     (b) => pushPaidSignalReviewItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 待确认付款读取失败（不阻塞其他待办）:', e),
     ),
+    // Magic Bridge 免费名额快用完 —— 用满后新客户这个月就生成不了报告（PM 定的全平台上限）
+    (b) => pushMagicBridgeQuotaItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] Magic Bridge 免费额度待办生成失败（不阻塞其他待办）:', e),
+    ),
   ]
 }
 
@@ -308,14 +314,14 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     (b) => pushDataDeletionFailureItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 删除数据请求失败待办生成失败（不阻塞其他待办）:', e),
     ),
-    // 广告自治被熔断器自动停了 —— 当日预算异常飙升，系统已自动禁止全部广告动作（WP3 验收 3）
-    (b) => pushAdsAutonomyCircuitBreakerItems(supabase, b, now, nameOf, ids).catch((e) =>
-      console.warn('[manual-items] 广告自治熔断器待办生成失败（不阻塞其他待办）:', e),
-    ),
     // 客户之间有没有串台 —— PM 2026-08-05：「坚决不能胡窜」。
     // 实测查到 CTS 的发布通道指向 Oztop 的网站，填错两个多月没人发现。
     (b) => pushCrossClientItems(supabase, b).catch((e) =>
       console.warn('[manual-items] 串台检查失败（不阻塞其他待办）:', e),
+    ),
+    // 广告自治被熔断器自动停了 —— 当日预算异常飙升，系统已自动禁止全部广告动作（WP3 验收 3）
+    (b) => pushAdsAutonomyCircuitBreakerItems(supabase, b, now, nameOf, ids).catch((e) =>
+      console.warn('[manual-items] 广告自治熔断器待办生成失败（不阻塞其他待办）:', e),
     ),
     // 可能被一句「不打算去」误判成永久拒联的人 —— 刻意不自动解除，交给人看一眼。
     (b) => pushDncReviewItems(supabase, b, ids, nameOf).catch((e) =>
