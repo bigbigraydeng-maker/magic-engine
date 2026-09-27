@@ -104,6 +104,13 @@ describe('scopeAccountToClient', () => {
     expect(scoped.otherPageWindowSpend).toBe(210)
   })
 
+  it('只在小时数据里出现、快照和日数据都没有的广告组：归属判不了，小时花费不算客户的（狄仁杰）', () => {
+    const acc = mixedAccount()
+    acc.hourly[DATE] = [...acc.hourly[DATE], { adset_id: 'as-brand-new', campaign_id: 'c-new', hour: 10, spend: 40 }]
+    const scoped = scopeAccountToClient(acc, OWN, DATE)
+    expect(scoped.account.hourly[DATE]).toEqual([{ adset_id: 'as-own-1', campaign_id: 'c-own', hour: 9, spend: 5 }])
+  })
+
   it('幂等：切过的再切一次，账户内容不变（loader 预筛切一次、run 再切一次）', () => {
     const once = scopeAccountToClient(mixedAccount(), OWN, DATE).account
     const twice = scopeAccountToClient(once, OWN, DATE).account
