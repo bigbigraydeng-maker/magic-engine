@@ -157,6 +157,12 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
     outputTables: [
       { table: 'ad_daily_insights', freshnessHours: 26 },
       { table: 'ad_health_narratives', freshnessHours: 26 },
+      // 🔴 2026-09-25 事故补登记：这张表（广告巡察结论，也是广告刹车「数据不全就冻结」那条判据的输入）
+      //    整天零行、六客户全缺，却**零告警躺了一整天**——因为它当时没登记在这里，沉默死检测
+      //    只查声明过的表；而已声明的 ad_health_narratives 那天**反而有行**（写它的代码在闸门之前），
+      //    新鲜度检查于是显示健康。两边都不报。根因与全过程见
+      //    docs/ledger/2026-09-27-growth-states-missing-0925-root-cause.md。
+      { table: 'ads_growth_states', freshnessHours: 26 },
     ] },
   { service: 'industry-ai-visibility-daily', jobName: 'industry-ai-visibility-daily', schedule: '30 2 * * *', logsRuns: true },
   { service: 'job-boards-weekly', jobName: 'job-boards-weekly', schedule: '0 2 * * 1', logsRuns: true },

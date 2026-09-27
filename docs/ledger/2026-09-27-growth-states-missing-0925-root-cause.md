@@ -25,7 +25,17 @@ verify_how: 查两件。①防复发有没有落地：cron registry 里 google-d
 `cron/registry.ts` 里该 job 声明的产出表只有 `ad_daily_insights`、`ad_health_narratives`（各 26 小时），**`ads_growth_states` 没登记**；而 `cron/health.ts` 的「沉默死」检测**只查声明了 outputTables 的表，未声明 = 不查**。
 9/25 于是出现双重巧合：**没登记的表零行 → 检测照不到；已登记的 `ad_health_narratives` 那天反而有行**（体检部分写在闸门之前）→ 新鲜度检查通过、显示健康。两边都不报。
 
-**修法：一行配置** —— 把 `ads_growth_states`（freshnessHours: 26）加进该 job 的 `outputTables`。B 级、极小。卫青未擅自改，等统筹/PM 点头（本卡 verify_by 即查这条有没有落地）。
+**修法：一行配置** —— 把 `ads_growth_states`（freshnessHours: 26）加进该 job 的 `outputTables`。B 级、极小。
+**✅ 2026-09-27 已做**（统筹授权）：本卡同一个改动里已加上，并在 registry 里就地写了注释说明为什么补登记。以后这张表零行会被沉默死检测自己报出来。
+验证：`src/lib/cron` 全部测试跑过，**2 个失败经对比 origin/main 原版确认是既有基线红**（registry 与 render.yaml 调度对账、reel-batch-render 无人认领），我的改动只 +6 行、未引入新失败。
+
+**顺手挖出的第三个监控问题（不在本次修复范围，建议独立修）**：那条基线红的详情显示 **8 个定时任务在 registry 里登记的调度时间跟 render.yaml 实际不一致**，普遍早 10–14 小时，疑似 NZ/UTC 时区混淆：
+- `google-data-pullback-daily`：登记 `0 3 * * *` vs 实际 `0 17 * * *`（**就是广告巡察这个**）
+- `ad-entity-snapshot`：登记 `30 */3` vs 实际 `30 */6`（**频率差一倍**）
+- 另有 `ai-tracker-weekly`、`goal-current-value-refresh`、`industry-ai-visibility-daily` 等，共 8 个
+**影响**：健康检测用 registry 的 schedule 判「该跑没跑」（overdue）。时间错 14 小时 → 这 8 个任务的逾期判定全部失准，可能误报逾期、也可能在真没跑时漏报。
+（我自己今晚也差点因为算错这个 job 的运行时间误报「今早巡察没跑」——核了 render.yaml 才发现还没到点。人和机器踩的是同一个坑。）
+另有一条同族基线红：`inngest/functions/reel-batch-render.ts` 设计上要定时跑，却不在任何名单里 = 没人监控它跑没跑。
 
 ## 对熔断实现的提醒（已转统筹）
 第 5 条判据「数据不全 → 冻结」这次会**正确 fail-closed**（表零行 → 冻结），方向没问题。但它依赖「有人看得出数据不全」，而这次「数据不全」本身零告警。**熔断要能区分「有输入但判定不冻结」和「压根没有输入」，后者必须喊出来**，否则就是静默 fail-closed——安全，但没人知道，跟这次一样躺一整天。
