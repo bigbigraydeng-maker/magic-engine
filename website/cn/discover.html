@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>开始你的免费诊断 | Magic Engine</title>
-  <meta name="description" content="魔力引擎 免费探查 GEO 培训 关于 中文 创建免费账户 打开报告 免费 · 无需注册 开始你的免费诊断 输入你的网址，我们会扫描你在 Google、AI 助手、社媒、广告信号和评价中的表现，并返回一份清晰的报告。">
+  <meta name="description" content="免费网站诊断：填你的网站首页，用大白话告诉你客人为什么进了网站却不联系你。">
   <meta property="og:title" content="开始你的免费诊断 | Magic Engine">
-  <meta property="og:description" content="魔力引擎 免费探查 GEO 培训 关于 中文 创建免费账户 打开报告 免费 · 无需注册 开始你的免费诊断 输入你的网址，我们会扫描你在 Google、AI 助手、社媒、广告信号和评价中的表现，并返回一份清晰的报告。">
+  <meta property="og:description" content="免费网站诊断：填你的网站首页，用大白话告诉你客人为什么进了网站却不联系你。">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="开始你的免费诊断 | Magic Engine">
-  <meta name="twitter:description" content="魔力引擎 免费探查 GEO 培训 关于 中文 创建免费账户 打开报告 免费 · 无需注册 开始你的免费诊断 输入你的网址，我们会扫描你在 Google、AI 助手、社媒、广告信号和评价中的表现，并返回一份清晰的报告。">
+  <meta name="twitter:description" content="免费网站诊断：填你的网站首页，用大白话告诉你客人为什么进了网站却不联系你。">
   <link rel="canonical" href="https://magicengine.com.au/cn/discover">
   <meta property="og:url" content="https://magicengine.com.au/cn/discover">
   <meta property="og:image" content="https://magicengine.com.au/assets/og-card.svg">
@@ -58,8 +58,7 @@
       </ul>
       <div class="nav-actions">
         <button class="btn-lang" id="lang-toggle" onclick="toggleLang()" aria-label="Switch language">中文</button>
-        <a href="https://app.magicengine.com.au/portal/register" class="btn-register" data-en="Create free account" data-zh="创建免费账户">创建免费账户</a>
-        <a href="https://app.magicengine.com.au/portal/login?next=/prospect" class="btn-portal" data-en="Open report" data-zh="打开报告">打开报告</a>
+        <a href="https://magicengine.com.au/cn/lab/" class="btn-register" data-en="Free tools" data-zh="免费工具">免费工具</a>
       </div>
     </div>
   </div>
@@ -73,7 +72,7 @@
     <div class="disc-hero">
       <div class="section-label" data-en="Free · No sign-up required" data-zh="免费 · 无需注册">免费 · 无需注册</div>
       <h1 class="serif" data-en="Run your free diagnosis" data-zh="开始你的免费诊断">开始你的免费诊断</h1>
-      <p data-en="Enter your website URL. We will scan your Google presence, AI mentions, social footprint, ad signals and reviews — and return with a plain-English report." data-zh="输入你的网址，我们会扫描你在 Google、AI 助手、社媒、广告信号和评价中的表现，并返回一份清晰的报告。">输入你的网址，我们会扫描你在 Google、AI 助手、社媒、广告信号和评价中的表现，并返回一份清晰的报告。</p>
+      <p data-en="Enter your homepage address. We read the page and tell you, in plain language, what stops visitors from understanding, trusting or contacting you." data-zh="填你的网站首页网址。我们会读这一页，用大白话告诉你：客人是不是看得懂、信得过、找得到联系方式。">填你的网站首页网址。我们会读这一页，用大白话告诉你：客人是不是看得懂、信得过、找得到联系方式。</p>
 
       <div class="disc-form-wrap">
         <form id="discover-form" novalidate>
@@ -81,19 +80,19 @@
             <input
               type="text"
               id="url-input"
-              placeholder="yourwebsite.com.au"
+              placeholder="yourcompany.com"
               autocomplete="off"
               autocorrect="off"
               autocapitalize="none"
               spellcheck="false"
               aria-label="Your website URL"
-              data-en="yourwebsite.com.au"
-              data-zh="yourwebsite.com.au"
+              data-en="yourcompany.com"
+              data-zh="yourcompany.com"
             >
           </div>
 
           <!-- No website toggle -->
-          <button type="button" class="nw-toggle">↓ I don't have a website</button>
+          <button type="button" class="nw-toggle" data-en="↓ I don't have a website" data-zh="↓ 我没有网站">↓ 我没有网站</button>
 
           <!-- No-website panel (hidden by default) -->
           <div class="nw-panel" id="nw-panel">
@@ -109,14 +108,11 @@
               <label for="nw-who" data-en="Who are your target customers?" data-zh="你的目标客户是谁？">你的目标客户是谁？</label>
               <textarea id="nw-who" rows="2" placeholder="e.g. Small businesses, homeowners, parents…" data-en="e.g. Small businesses, homeowners, parents…" data-zh="例：小企业、房主、家长…"></textarea>
             </div>
-            <p style="margin-top:14px;margin-bottom:0;text-align:center;font-size:.8rem;color:rgba(22,24,29,.45);" data-en="Want to skip the scan? " data-zh="想跳过扫描直接开始？">
-              Want to skip the scan?
-              <a href="https://app.magicengine.com.au/portal/register" style="color:var(--gold-dark);font-weight:600;text-decoration:underline;text-underline-offset:2px;" data-en="Create your free account →" data-zh="创建免费账户 →">创建免费账户 →</a>
-            </p>
           </div>
 
           <!-- Submit — always visible below whichever mode is active -->
-          <button type="submit" id="discover-btn" class="btn-primary disc-submit-btn" data-en="Start discovery →" data-zh="开始探查 →">开始探查 →</button>
+          <button type="submit" id="discover-btn" class="btn-primary disc-submit-btn" data-en="Check my website →" data-zh="开始诊断 →">开始诊断 →</button>
+          <p id="discover-error" role="alert" hidden style="margin-top:12px;color:#B45309;font-size:.9rem;"></p>
         </form>
 
         <p class="url-hint" style="text-align:center;margin-top:14px;" data-en="Takes about 2 minutes · Results appear on-screen · Full report sent by email" data-zh="约 2 分钟 · 结果直接显示 · 完整报告发送到邮箱">约 2 分钟 · 结果直接显示 · 完整报告发送到邮箱</p>
@@ -128,8 +124,8 @@
   <div style="background:var(--paper-dim);border-top:1px solid rgba(22,24,29,.07);padding:20px 0;margin-top:32px;">
     <div class="container" style="display:flex;justify-content:center;gap:32px;flex-wrap:wrap;">
       <span class="tiny muted" data-en="🔒 We only read public data — no passwords required" data-zh="🔒 我们只读取公开数据——无需密码">🔒 我们只读取公开数据——无需密码</span>
-      <span class="tiny muted" data-en="🇦🇺 Built for AU/NZ business" data-zh="🇦🇺 专为澳新业务打造">🇦🇺 专为澳新业务打造</span>
-      <span class="tiny muted" data-en="✉ Full report delivered within 24 hours" data-zh="✉ 完整报告 24 小时内送达">✉ 完整报告 24 小时内送达</span>
+      <span class="tiny muted" data-en="🌏 For businesses selling locally or overseas" data-zh="🌏 适合本地生意，也适合出海企业">🌏 适合本地生意，也适合出海企业</span>
+      <span class="tiny muted" data-en="✉ Full report emailed within minutes" data-zh="✉ 完整报告几分钟内发到你邮箱">✉ 完整报告几分钟内发到你邮箱</span>
     </div>
   </div>
 </div>
@@ -141,28 +137,20 @@
   <div class="container">
     <div class="progress-wrap">
       <div class="spinner" aria-hidden="true"></div>
-      <h2 class="serif" data-en="张骞 is on the road…" data-zh="张骞正在路上…">张骞正在路上…</h2>
-      <p class="sub" data-en="Scouting every corner of your digital presence." data-zh="正在探查你数字存在的每个角落。">正在探查你数字存在的每个角落。</p>
+      <h2 class="serif" data-en="Checking your website…" data-zh="正在查看你的网站…">正在查看你的网站…</h2>
+      <p class="sub" data-en="Reading your homepage — this usually takes under a minute." data-zh="正在读你的网站首页，一般不到一分钟。">正在读你的网站首页，一般不到一分钟。</p>
       <ul class="progress-steps" role="list" aria-live="polite">
         <li class="ps active">
           <span class="ps-dot" aria-hidden="true"></span>
-          <span data-en="Scanning your online footprint…" data-zh="扫描你的网络足迹…">扫描你的网络足迹…</span>
+          <span data-en="Reading your homepage…" data-zh="正在读取你的网站首页…">正在读取你的网站首页…</span>
         </li>
         <li class="ps">
           <span class="ps-dot" aria-hidden="true"></span>
-          <span data-en="Checking Google search visibility…" data-zh="检查 Google 搜索可见度…">检查 Google 搜索可见度…</span>
+          <span data-en="Checking what visitors can understand, trust and act on…" data-zh="正在看客人能不能看懂、信任、联系到你…">正在看客人能不能看懂、信任、联系到你…</span>
         </li>
         <li class="ps">
           <span class="ps-dot" aria-hidden="true"></span>
-          <span data-en="Analysing AI assistant mentions…" data-zh="分析 AI 助手提及…">分析 AI 助手提及…</span>
-        </li>
-        <li class="ps">
-          <span class="ps-dot" aria-hidden="true"></span>
-          <span data-en="Reviewing social & ad signals…" data-zh="审查社媒与广告信号…">审查社媒与广告信号…</span>
-        </li>
-        <li class="ps">
-          <span class="ps-dot" aria-hidden="true"></span>
-          <span data-en="Writing your discovery report…" data-zh="撰写探查报告…">撰写探查报告…</span>
+          <span data-en="Writing your findings…" data-zh="正在写诊断结果…">正在写诊断结果…</span>
         </li>
       </ul>
     </div>
@@ -182,19 +170,18 @@
       <!-- Portal bridge -->
       <div class="portal-bridge">
         <div>
-          <strong id="opportunity-title" data-en="Save this report into your workspace" data-zh="把这份报告保存到你的工作台">把这份报告保存到你的工作台</strong>
-          <p data-en="Create your free account to save this Discovery Report, complete a short brief, and unlock the tools behind it." data-zh="创建免费账户，把这份探查报告保存到你的工作台，完成一个简短 brief，然后解锁后续工具。">创建免费账户，把这份探查报告保存到你的工作台，完成一个简短 brief，然后解锁后续工具。</p>
+          <strong id="opportunity-title" data-en="Want to try more free tools?" data-zh="想再试试别的免费工具？">想再试试别的免费工具？</strong>
+          <p data-en="The Magic Engine Tools Lab also has a free Facebook ad check-up." data-zh="Magic Engine 工具实验室里还有免费的 Facebook 广告体检。">Magic Engine 工具实验室里还有免费的 Facebook 广告体检。</p>
         </div>
         <div style="display:flex;flex-direction:column;gap:10px;align-items:center;">
-          <a href="https://app.magicengine.com.au/portal/register?next=/prospect" class="btn-primary portal-register-link" data-en="Create free account →" data-zh="创建免费账户 →">创建免费账户 →</a>
-          <a href="https://app.magicengine.com.au/portal/login?next=/prospect" class="portal-signin-link portal-link" data-en="Already started? Open my report" data-zh="已经开始了？打开我的报告">已经开始了？打开我的报告</a>
+          <a href="https://magicengine.com.au/cn/lab/" class="btn-primary" data-en="See more free tools →" data-zh="看看更多免费工具 →">看看更多免费工具 →</a>
         </div>
       </div>
 
       <!-- Email capture -->
       <div class="email-capture">
-        <h2 class="serif" data-en="Get your full report — within 24 hours" data-zh="获取完整报告——24小时内">获取完整报告——24小时内</h2>
-        <p class="sub" data-en="We'll email you all findings, prioritised fixes, and your local opportunity window." data-zh="我们将通过邮件发送所有发现、优先修复项，以及你的本地机会窗口。">我们将通过邮件发送所有发现、优先修复项，以及你的本地机会窗口。</p>
+        <h2 class="serif" data-en="Get your full report by email" data-zh="把完整报告发到你邮箱">把完整报告发到你邮箱</h2>
+        <p class="sub" data-en="We will email you every finding with what to change first." data-zh="我们会把所有建议和先改哪条，一起发到你邮箱。">我们会把所有建议和先改哪条，一起发到你邮箱。</p>
 
         <div class="email-form-wrap">
           <form id="email-form" novalidate>
@@ -202,11 +189,11 @@
               <input
                 type="email"
                 id="email-input"
-                placeholder="your@email.com.au"
+                placeholder="you@company.com"
                 autocomplete="email"
                 aria-label="Email address"
-                data-en="your@email.com.au"
-                data-zh="your@email.com.au"
+                data-en="you@company.com"
+                data-zh="你的邮箱"
               >
               <button type="submit" id="email-btn" class="btn-primary" data-en="Send my full report →" data-zh="发送完整报告 →">发送完整报告 →</button>
             </div>
@@ -221,14 +208,14 @@
              report email actually sent, or "pending" when the scan hasn't finished
              (no honest report to send yet). CSS below shows the matching copy. -->
         <div class="email-sent" data-state="pending" role="status" aria-live="polite">
-          <div style="font-size:1.5rem;margin-bottom:8px;">✅</div>
+          
           <span class="es-delivered">
             <strong data-en="Report on its way!" data-zh="报告已发出！">报告已发出！</strong>
-            <p style="margin-top:6px;font-size:.88rem;color:#1F7A55;" data-en="Check your inbox within 24 hours. Check spam if you don't see it." data-zh="请在 24 小时内查看收件箱，如未收到请检查垃圾邮件。">请在 24 小时内查看收件箱，如未收到请检查垃圾邮件。</p>
+            <p style="margin-top:6px;font-size:.88rem;color:#1F7A55;" data-en="It should arrive in a few minutes. Check spam if you don't see it." data-zh="几分钟内就到，没收到的话看看垃圾邮件箱。">几分钟内就到，没收到的话看看垃圾邮件箱。</p>
           </span>
           <span class="es-pending">
-            <strong data-en="You're on the list!" data-zh="已为您登记！">已为您登记！</strong>
-            <p style="margin-top:6px;font-size:.88rem;color:#1F7A55;" data-en="Your scan is still finishing. We'll email your full report the moment it's ready — usually within 24 hours." data-zh="您的扫描仍在进行中，报告准备就绪后我们会立即发送到您的邮箱，通常在 24 小时内。">您的扫描仍在进行中，报告准备就绪后我们会立即发送到您的邮箱，通常在 24 小时内。</p>
+            <strong data-en="Not sent yet" data-zh="还没发出去">还没发出去</strong>
+            <p style="margin-top:6px;font-size:.88rem;color:#1F7A55;" data-en="We could not send the report this time. Please try again, or email hello@magicengine.cloud." data-zh="这次没能发出报告，请再试一次，或写信到 hello@magicengine.cloud。">这次没能发出报告，请再试一次，或写信到 hello@magicengine.cloud。</p>
           </span>
         </div>
         <style>
@@ -278,7 +265,7 @@
         </svg>
           <span style="color:rgba(255,255,255,.8);">Magic Engine</span>
         </a>
-        <p data-en="AI upgrade, GEO, and training for ambitious Australian and New Zealand businesses." data-zh="为有野心的澳新企业提供 AI 升级、GEO 和培训。">为有野心的澳新企业提供 AI 升级、GEO 和培训。</p>
+        <p data-en="Magic Engine — free tools and marketing help for growing businesses." data-zh="Magic Engine——给成长中的企业用的免费工具和营销帮助。">Magic Engine——给成长中的企业用的免费工具和营销帮助。</p>
       </div>
       <div class="footer-col">
         <h4 data-en="Product" data-zh="产品">产品</h4>
@@ -298,7 +285,7 @@
       <div class="footer-col">
         <h4 data-en="Legal" data-zh="法律">法律</h4>
         <ul>
-          <li><a href="/cn/privacy" data-en="Privacy Policy" data-zh="隐私政策">隐私政策</a></li>
+          <li><a href="/cn/meta-ads-ai/privacy/" data-en="Privacy Policy" data-zh="隐私说明">隐私说明</a></li>
           <li><a href="/cn/terms" data-en="Terms of Service" data-zh="服务条款">服务条款</a></li>
         </ul>
       </div>
