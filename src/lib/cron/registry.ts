@@ -152,17 +152,24 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 2026-09-23 事故防御：这个任务负责每天写 ad_daily_insights + ad_health_narratives，
   // 但 9/20-9/23 三天 status='completed' 却一行没写（上游数据源断了，写下游被跳过），
   // 现有 judgeJob 只看 cron_run_logs 状态放行——outputTables 声明就是补这个缝：
-  // 26h 没新行就算 silent_success，红灯喊出来。日 cron × 2.5 宽限 ≈ 26h（同 overdue 逻辑）。
+  //
+  // 🔴 阈值 24h（不是 26h）：Codex 复审 2026-09-27 P1 指出 26h 盖不住单日整批缺失——
+  //    该任务实际 17:00 UTC 跑（render.yaml），唯一自动调用 checkCronHealth 报警的
+  //    pm-daily-todo 在 19:00 UTC 跑（两者只差 2h）。若某天 17:00 那批整批没写，
+  //    上一批约 17:0X 写入的行到当天 19:00 检查时只有约 25h55m～26h，够不到严格的
+  //    `> 26h`；次日 17:00 恢复后，19:00 再查又只有约 2h，全程零告警——9/25 那类
+  //    单日整批缺失能完全躲过去。24h 在「单日缺失≈26h」和「正常在跑≈2h」之间
+  //    留出至少 2h 缺失侧余量、22h 正常侧余量，两头都不会因为几分钟抖动误判。
   { service: 'google-data-pullback-daily', jobName: 'google-data-pullback-daily', schedule: '0 3 * * *', logsRuns: true,
     outputTables: [
-      { table: 'ad_daily_insights', freshnessHours: 26 },
-      { table: 'ad_health_narratives', freshnessHours: 26 },
+      { table: 'ad_daily_insights', freshnessHours: 24 },
+      { table: 'ad_health_narratives', freshnessHours: 24 },
       // 🔴 2026-09-25 事故补登记：这张表（广告巡察结论，也是广告刹车「数据不全就冻结」那条判据的输入）
       //    整天零行、六客户全缺，却**零告警躺了一整天**——因为它当时没登记在这里，沉默死检测
       //    只查声明过的表；而已声明的 ad_health_narratives 那天**反而有行**（写它的代码在闸门之前），
       //    新鲜度检查于是显示健康。两边都不报。根因与全过程见
       //    docs/ledger/2026-09-27-growth-states-missing-0925-root-cause.md。
-      { table: 'ads_growth_states', freshnessHours: 26 },
+      { table: 'ads_growth_states', freshnessHours: 24 },
     ] },
   { service: 'industry-ai-visibility-daily', jobName: 'industry-ai-visibility-daily', schedule: '30 2 * * *', logsRuns: true },
   { service: 'job-boards-weekly', jobName: 'job-boards-weekly', schedule: '0 2 * * 1', logsRuns: true },
