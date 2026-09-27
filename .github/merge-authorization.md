@@ -92,23 +92,12 @@ agent 不得自行对 A 级 PR 执行 `--admin`。
   今日待办加一栏"auto-merge 开了超过 N 天没合的 PR"。
 - `Application build`、`Kernel architecture test`（以及 `ai-orchestrator-tests` /
   `ops-review-loop-tests` / 两道 Ledger 检查）都用 `on: pull_request` 触发，执行的是
-  **PR 分支自己那份** workflow 定义，不是 `Risk gate` 那种从 `main` 取尺子的
-  `pull_request_target`。一个 PR 只要顺手把 `.github/workflows/pr-application-validation.yml`
-  的构建步骤换成必然成功的空壳、同时保留检查名 `Application build` 不变，产出的绿勾仍来自
-  同一个 GitHub Actions `integration_id`，`Protect main` 规则集分不出真假。这类改动会因为碰了
-  `.github/` 被判 A 级，但今天 A 级仍是"构建控制在聊天里问 PM 一句 → PM 说 go → agent 用 PM 的
-  `gh pr merge --admin` 合"——机器判不出"PM 真的看穿了这份 diff 里悄悄改的 workflow"，所以
-  "这几道检查绿了 = 真的编译/测试通过了"目前是流程上的信任，不是机制上的保证。真正堵住需要让
-  这几道检查从 PR 改不了的地方产生——**但不能简单仿照 `Risk gate` 改成 `pull_request_target`**：
-  `pull_request_target` 的信任模型是"判官的定义和代码都来自 main，PR 只以数据身份进入，绝不
-  检出或执行 PR head"（见 `pr-risk-gate.yml` 顶部注释、`docs/specs/2026-09-25-merge-gate-two-tiers-design.md`
-  §3.1）；构建/测试检查恰恰需要跑 `npm ci` 和 PR 自己的代码，若在 `pull_request_target` 里
-  `checkout` PR head 来跑，等于把 PR 可控的依赖安装脚本和测试代码放进能拿到 base 分支
-  token/cache 的受信上下文执行，反而开出一个供应链攻击面，比现状更危险。可行方向是换一个
-  **不执行 PR 代码**的独立身份出状态（用同样跑 `pull_request` 构建的 GitHub App/机器人身份，
-  把结果转发成一个 PR 改不了的 check run）；该身份只能授予 `Checks: write` 这一项仓库权限，
-  不给 contents / pull-requests / actions 等写权限——没有 `Checks: write` 它连规则集要认的
-  check run 都创建不了，这需要改 `.github/workflows/`，不在本次改动范围内，先如实记录缺口。
+  **PR 分支自己那份** workflow 定义。一个 PR 只要同时把构建步骤换成必然成功的空壳、保留检查名
+  不变，产出的绿勾仍来自同一个 GitHub Actions `integration_id`，`Protect main` 分不出真假。
+  这类改动碰了 `.github/`，会被判 A 级、要 PM 在聊天里点头才合；所以今天「这几道检查绿了 =
+  真的编译/测试通过了」是流程上的信任，不是机制上的保证。修法另开任务设计并两审，这里不预设方案；
+  注意**不能**简单改成 `pull_request_target` 检出 PR head 来构建（见 `pr-risk-gate.yml` 顶部注释），
+  也不能只把现有可伪造的结果原样转发成另一个检查。台账：`docs/ledger/2026-09-27-application-build-check-not-tamper-proof.md`。
 
 ## 这道闸不做的事
 
