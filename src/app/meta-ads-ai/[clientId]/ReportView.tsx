@@ -84,6 +84,9 @@ function ReportBody({ report }: { report: string }) {
 
 function ReportState({ analysis }: { analysis: ReportAnalysis }) {
   const cards = ruleCardsOf(analysis.evidence)
+  if (analysis.error_code === 'deleted_by_user_request') {
+    return <p role="status" className="rounded-xl bg-slate-50 p-4 text-slate-700">{META_ADS_AI_MESSAGES.deleted_by_user_request}</p>
+  }
   if (analysis.status === 'completed') {
     return analysis.report_markdown === null
       ? <p role="status" className="rounded-xl bg-slate-50 p-4 text-slate-700">报告内容暂不可用，请稍后刷新页面。</p>

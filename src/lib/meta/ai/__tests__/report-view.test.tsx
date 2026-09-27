@@ -75,6 +75,12 @@ describe('Meta Ads AI report view',()=>{
     expect(screen.queryByText(/本次分析没有完成/)).not.toBeInTheDocument()
   })
 
+  it('shows the deletion notice instead of the refresh hint when the report was cleared by a Facebook data deletion request',()=>{
+    render(<ReportView analysis={{ ...base,status:'completed',report_markdown:null,error_code:'deleted_by_user_request' }} />)
+    expect(screen.getByText('这份报告已按你在 Facebook 提交的删除数据申请清除。')).toBeInTheDocument()
+    expect(screen.queryByText(/请稍后刷新页面/)).not.toBeInTheDocument()
+  })
+
   it('shows model_unavailable message when AI model fails but data was saved',()=>{
     render(<ReportView analysis={{ ...base,status:'failed',report_markdown:null,error_code:'model_unavailable' }} />)
     expect(screen.getByText(/AI 模型暂时无法响应/)).toBeInTheDocument()
@@ -222,5 +228,36 @@ describe('我们正在跟进的广告（卡片）',()=>{
     const { container }=render(<ReportView analysis={{ ...base,report_markdown:'一、总体结果\n数据充足。',evidence }} />)
     expect(screen.getByText('广告：<script>alert(1)</script>')).toBeInTheDocument()
     expect(container.querySelector('script')).toBeNull()
+  })
+})
+
+describe('值得你看一眼的广告（自助客户卡片）',()=>{
+  const footer='想省心的话，可以让我们帮你盯着，你同意后我们才动手——发邮件到 hello@magicengine.cloud 聊聊。'
+
+  it('renders the footer after the cards',()=>{
+    const evidence={
+      rule_cards:{
+        title:'值得你看一眼的广告（1 条）',intro:'说明',promise:'',bodyReplaced:true,footer,
+        cards:[{ adLabel:'Ad 1',headline:'标题 1',detail:'说明 1',action:'处理 1' }],
+      },
+    }
+    render(<ReportView analysis={{ ...base,report_markdown:'一、总体结果\n数据充足。',evidence }} />)
+    const cards=screen.getByTestId('rule-cards')
+    const footerEl=screen.getByText(footer)
+    expect(cards).toContainElement(footerEl)
+    expect(screen.getByText('标题 1').compareDocumentPosition(footerEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('renders no empty promise paragraph when promise is empty',()=>{
+    const evidence={
+      rule_cards:{
+        title:'值得你看一眼的广告（1 条）',intro:'说明',promise:'',bodyReplaced:true,footer,
+        cards:[{ adLabel:'Ad 1',headline:'标题 1',detail:'说明 1',action:'处理 1' }],
+      },
+    }
+    render(<ReportView analysis={{ ...base,report_markdown:'一、总体结果\n数据充足。',evidence }} />)
+    const cards=screen.getByTestId('rule-cards')
+    // intro + 1 card (4 <p>) + footer = 6 paragraphs; no empty promise paragraph
+    expect(cards.querySelectorAll('p')).toHaveLength(6)
   })
 })

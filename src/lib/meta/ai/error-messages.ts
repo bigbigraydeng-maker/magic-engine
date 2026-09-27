@@ -21,4 +21,5 @@ export const META_ADS_AI_MESSAGES: Record<string,string> = {
   analysis_incomplete:'本次报告生成时被截断，未保存半份报告。广告数据已保存，请稍后重试。',model_unavailable:'AI 模型暂时无法响应，广告数据已保存。请稍后重试以生成中文报告。',
   authorization_changed:'Facebook 授权或广告账户权限已经变化，请刷新后重试。',
   budget_state_invalid:'这次没能开始生成，请过几分钟再试；如果一直这样，请联系 hello@magicengine.cloud。',
+  deleted_by_user_request:'这份报告已按你在 Facebook 提交的删除数据申请清除。',
 }
