@@ -109,6 +109,25 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: bash scripts/ledger-check-refs.sh
 
+  ledger-frozen-fields:
+    # 检查已在 base 上的台账卡的冻结字段有没有被改写。
+    # dependabot 豁免。夜巡分支有自己的 shape check 管冻结字段，不重复。
+    if: ${{ !startsWith(github.head_ref, 'dependabot/') && !startsWith(github.head_ref, 'claude/ledger-verify-') }}
+    name: Ledger frozen fields
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check frozen fields
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/ledger-check-frozen.sh
+
   ledger-verify-branch-shape:
     # 只在夜巡分支上跑：确保它只翻状态，不碰别的。
     if: ${{ startsWith(github.head_ref, 'claude/ledger-verify-') }}
