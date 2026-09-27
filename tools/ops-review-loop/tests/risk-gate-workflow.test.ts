@@ -73,7 +73,8 @@ describe('Risk gate workflow: the judge lives on main', () => {
       'paths-ignore'?: unknown
       branches?: unknown
     }
-    for (const type of ['opened', 'synchronize', 'reopened', 'ready_for_review', 'converted_to_draft']) {
+    // `edited` re-runs the gate when the PR body's 当场试跑 section is filled in.
+    for (const type of ['opened', 'synchronize', 'reopened', 'ready_for_review', 'converted_to_draft', 'edited']) {
       expect(trigger.types, `pull_request_target must include ${type}`).toContain(type)
     }
     // A path or branch filter would turn this into a check that never reports
