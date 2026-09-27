@@ -39,26 +39,39 @@ export interface AtomicConsumeResult {
   postCount: number
 }
 
+export interface AtomicConsumeFailure {
+  error: string
+  /**
+   * 'rpc_error': the call itself failed (network/PostgREST/permission — the store is genuinely down).
+   * 'malformed_response': the call succeeded but returned a shape with no usable decision (a store-side
+   * contract bug, not an availability problem). Callers may treat these differently — see
+   * `consumeScanRateLimits` below, which blocks on 'malformed_response' rather than falling back to its
+   * legacy fail-open path, matching this function's behavior before it was centralised here.
+   */
+  kind: 'rpc_error' | 'malformed_response'
+}
+
 /**
  * The bare RPC call: one atomic check+increment against `zhangqian_rate_limit_consume` for a single
  * bucket. No failure policy of its own — callers decide fail-open vs fail-closed on error (see
- * `consumeQuota`, fail-closed, and `consumeScanRateLimits` below, fail-open with a legacy fallback).
+ * `consumeQuota`, fail-closed on either failure kind, and `consumeScanRateLimits` below, fail-open with
+ * a legacy fallback only for 'rpc_error').
  */
 export async function consumeQuotaBucket(
   bucketType: string,
   bucketKey: string,
   windowStart: string,
   cap: number,
-): Promise<AtomicConsumeResult | { error: string }> {
+): Promise<AtomicConsumeResult | AtomicConsumeFailure> {
   const { data, error } = await supabaseAdmin.rpc('zhangqian_rate_limit_consume', {
     p_bucket_type: bucketType,
     p_bucket_key: bucketKey,
     p_window_start: windowStart,
     p_cap: cap,
   })
-  if (error) return { error: error.message }
+  if (error) return { error: error.message, kind: 'rpc_error' }
   const row = (Array.isArray(data) ? data[0] : data) as { allowed?: unknown; post_count?: unknown } | null
-  if (!row || typeof row.allowed !== 'boolean') return { error: 'quota store returned no decision' }
+  if (!row || typeof row.allowed !== 'boolean') return { error: 'quota store returned no decision', kind: 'malformed_response' }
   return { allowed: row.allowed, postCount: typeof row.post_count === 'number' ? row.post_count : 0 }
 }
 
@@ -76,7 +89,7 @@ export async function consumeQuota(
   windowStart: string,
   cap: number,
 ): Promise<boolean> {
-  let result: AtomicConsumeResult | { error: string }
+  let result: AtomicConsumeResult | AtomicConsumeFailure
   try {
     result = await consumeQuotaBucket(bucketType, bucketKey, windowStart, cap)
   } catch (err) {
@@ -84,6 +97,20 @@ export async function consumeQuota(
   }
   if ('error' in result) throw new QuotaUnavailable(result.error)
   return result.allowed
+}
+
+/**
+ * UTC day/month window starts for `consumeQuota` bucket keys. Moved here (not left in site-check's own
+ * guards.ts, which they were previously defined in) because this is the neutral, tool-agnostic home for
+ * atomic-quota plumbing — a non-site-check caller (e.g. ads-check's spend cap) importing a date helper
+ * from a file whose own header says "for the free website check" would be a new, backwards coupling.
+ */
+export function dayStartUtc(now: Date = new Date()): string {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString()
+}
+
+export function monthStartUtc(now: Date = new Date()): string {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
 }
 
 const DEFAULT_DAILY_CAP = 3
@@ -215,6 +242,16 @@ export async function consumeScanRateLimits(
 
   for (const [type, key] of keys) {
     const result = await consumeQuotaBucket(type, key, ws, cap)
+    if ('error' in result && result.kind === 'malformed_response') {
+      // The RPC itself is reachable and answered — it just didn't return a usable decision (a store-side
+      // contract bug, not an availability problem). Block this dimension rather than falling through to
+      // the "RPC unreachable" fallback below — matches this function's behavior before the atomic call
+      // was centralised into `consumeQuotaBucket` (魏征 review, PR #2163).
+      console.warn('[rate-limiter] atomic RPC returned no usable decision, blocking this dimension', { type, key, error: result.error })
+      counts[type] = { count: 0, cap, key }
+      if (!blockedBy) blockedBy = type
+      continue
+    }
     if ('error' in result) {
       // Defensive: fall back to legacy non-atomic upsert + treat as allowed
       // (loud warning so we notice if the RPC starts failing in prod).

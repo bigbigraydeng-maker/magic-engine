@@ -236,6 +236,8 @@ export type ManualItemKind =
   | FacebookSyncItemKind
   /** Magic Bridge 全平台免费额度用到 80% 以上 —— 要不要加额度由 PM 定 */
   | 'magic_bridge_quota'
+  /** Tools Lab 全站每月合计花费/次数上限用到 80% 以上（网站诊断+广告体检共用）—— 要不要加名额由 PM 定 */
+  | 'tools_wide_budget_warning'
 
 export interface ManualItem {
   kind: ManualItemKind

@@ -6,8 +6,9 @@
 // (via the platform's safe fetch) in ./homepage.ts.
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { dayStartUtc } from '@/lib/zhangqian/rate-limiter'
 
-export { consumeQuota, QuotaUnavailable } from '@/lib/zhangqian/rate-limiter'
+export { consumeQuota, QuotaUnavailable, dayStartUtc, monthStartUtc } from '@/lib/zhangqian/rate-limiter'
 
 export const LIMITS = {
   requestsPerVisitorPerDay: 20, // every check request, before any fetch (reuse and unreadable sites included)
@@ -35,13 +36,6 @@ export function isAllowedOrigin(origin: string | null): boolean {
   return ALLOWED_ORIGINS.some((re) => re.test(value))
 }
 
-export function dayStartUtc(now: Date = new Date()): string {
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString()
-}
-
-export function monthStartUtc(now: Date = new Date()): string {
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
-}
 
 /** Best-effort removal of visitor / recipient key rows from before yesterday (privacy: kept at most 2 days). */
 export async function pruneOldVisitorKeys(now: Date = new Date()): Promise<void> {

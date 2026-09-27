@@ -80,6 +80,17 @@ describe('recordToolLead', () => {
     expect(mocks.contains).toHaveBeenCalledWith('metadata', { lead_id: 'lead-42' })
   })
 
+  it('a dedupeKey field never loses to a same-named extraMetadata field — the stored value must still match what the next duplicate check compares against', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    await recordToolLead({
+      tool: 'ads-check', pagePath: '/x', targetHref: '/x',
+      dedupeKey: { client_id: 'c-1' }, extraMetadata: { client_id: 'WRONG-VALUE-FROM-CALLER-BUG' },
+    })
+    expect(mocks.insert).toHaveBeenCalledWith(expect.objectContaining({ metadata: { client_id: 'c-1' } }))
+    expect(warn).toHaveBeenCalledWith('[tools-lab] extraMetadata field collides with dedupeKey, dedupeKey wins', { tool: 'ads-check', collision: 'client_id' })
+    warn.mockRestore()
+  })
+
   it('does not write when the duplicate check itself fails (never double-counts)', async () => {
     mocks.readError = { message: 'down' }
     await recordToolLead({ tool: 'ads-check', pagePath: '/x', targetHref: '/x', dedupeKey: { client_id: 'c-1' } })

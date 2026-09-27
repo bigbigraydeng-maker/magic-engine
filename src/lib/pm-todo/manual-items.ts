@@ -34,6 +34,7 @@ import { pushPageBindingItems } from './page-binding-items'
 import { pushFacebookSyncFailingItems } from './facebook-sync-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
 import { pushToolLeadItems } from './tool-lead-items'
+import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
@@ -247,6 +248,10 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     // 工具实验室有人留资（自助开通广告体检 / 网站诊断留邮箱）—— 这张表以前写完没人读
     (b) => pushToolLeadItems(supabase, b, clients, now).catch((e) =>
       console.warn('[manual-items] 工具实验室留资待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 工具实验室全站每月合计上限（网站诊断+广告体检赞助分析共用）快用完
+    (b) => pushToolsWideBudgetItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 工具实验室全站上限待办生成失败（不阻塞其他待办）:', e),
     ),
   ]
 }

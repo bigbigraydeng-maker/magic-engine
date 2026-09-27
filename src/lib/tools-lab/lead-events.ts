@@ -35,9 +35,15 @@ export interface RecordToolLeadInput {
 
 export async function recordToolLead(input: RecordToolLeadInput): Promise<void> {
   const { tool, pagePath, targetHref, dedupeKey, extraMetadata, email } = input
+  // dedupeKey is spread LAST so it can never be overwritten by extraMetadata: the duplicate check below
+  // queries by the caller's own dedupeKey object, so if a same-named extraMetadata field silently won
+  // the merge, the stored value would drift from what the next call's duplicate check compares against
+  // — the same real-world event would then look "new" every time and double-record.
+  const collision = Object.keys(extraMetadata ?? {}).find((k) => k in dedupeKey)
+  if (collision) console.warn('[tools-lab] extraMetadata field collides with dedupeKey, dedupeKey wins', { tool, collision })
   // `email` is stored too (not just used for the Inngest payload) — the pm-todo item needs it to tell
   // a human who to actually follow up with.
-  const metadata = { ...dedupeKey, ...extraMetadata, ...(email ? { email } : {}) }
+  const metadata = { ...extraMetadata, ...dedupeKey, ...(email ? { email } : {}) }
   try {
     const { data: existing, error: readError } = await supabaseAdmin
       .from('website_lead_events')
