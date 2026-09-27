@@ -237,22 +237,37 @@ describe('readPageStoryId — read-back after the photo is public', () => {
 /**
  * Regression (2026-09-27): PR 1942 moved every Meta module to the shared
  * GRAPH_BASE (v20.0 → v21.0) but these tests pinned the old version literal,
- * so three went red on main. Asserting against the shared constant keeps the
- * path contract locked while letting the version move in one place — and this
- * block fails if page-posts ever pins its own version again.
+ * so three went red on main. The fix asserts against the shared constant —
+ * but comparing the produced URL to the *current value* of GRAPH_BASE proves
+ * nothing on its own: a local `const GRAPH_BASE = 'https://graph.facebook.com/v21.0'`
+ * copy-pasted into page-posts.ts would match today's value and pass here too,
+ * then silently stop tracking the shared constant on the next version bump.
+ * Mocking `../graph-base` to a sentinel value neither module would produce by
+ * coincidence is what actually proves page-posts.ts *imports* the shared
+ * constant rather than owning its own copy of it.
  */
 describe('Graph version — page-posts follows the shared GRAPH_BASE', () => {
-  it('publish, delete and story read-back all target the shared GRAPH_BASE', async () => {
-    const pub = fakeFetch({ ok: true, body: { post_id: `${PAGE}_1`, id: '1' } })
-    await publishPagePhotoPost({ pageId: PAGE, pageAccessToken: TOKEN, message: 'hi', imageUrl: 'https://x/img.jpg', fetcher: pub.fetcher })
-    const del = fakeFetch({ ok: true, body: { success: true } })
-    await deletePagePost({ postId: '1', pageAccessToken: TOKEN, fetcher: del.fetcher })
-    const read = fakeFetch({ ok: true, body: { page_story_id: `${PAGE}_1`, id: '1' } })
-    await readPageStoryId({ photoId: '1', pageId: PAGE, pageAccessToken: TOKEN, fetcher: read.fetcher })
+  it('publish, delete and story read-back use the mocked GRAPH_BASE import, not a local copy', async () => {
+    const SENTINEL_BASE = 'https://graph.facebook.com/vSENTINEL-TEST-ONLY'
+    vi.resetModules()
+    vi.doMock('../graph-base', () => ({ GRAPH_BASE: SENTINEL_BASE }))
 
-    expect(GRAPH_BASE).toMatch(/^https:\/\/graph\.facebook\.com\/v\d+\.0$/)
-    for (const url of [pub.calls[0].url, del.calls[0].url, read.calls[0].url]) {
-      expect(url.startsWith(`${GRAPH_BASE}/`)).toBe(true)
+    try {
+      const mod = await import('../page-posts')
+
+      const pub = fakeFetch({ ok: true, body: { post_id: `${PAGE}_1`, id: '1' } })
+      await mod.publishPagePhotoPost({ pageId: PAGE, pageAccessToken: TOKEN, message: 'hi', imageUrl: 'https://x/img.jpg', fetcher: pub.fetcher })
+      const del = fakeFetch({ ok: true, body: { success: true } })
+      await mod.deletePagePost({ postId: '1', pageAccessToken: TOKEN, fetcher: del.fetcher })
+      const read = fakeFetch({ ok: true, body: { page_story_id: `${PAGE}_1`, id: '1' } })
+      await mod.readPageStoryId({ photoId: '1', pageId: PAGE, pageAccessToken: TOKEN, fetcher: read.fetcher })
+
+      for (const url of [pub.calls[0].url, del.calls[0].url, read.calls[0].url]) {
+        expect(url.startsWith(`${SENTINEL_BASE}/`)).toBe(true)
+      }
+    } finally {
+      vi.doUnmock('../graph-base')
+      vi.resetModules()
     }
   })
 })
