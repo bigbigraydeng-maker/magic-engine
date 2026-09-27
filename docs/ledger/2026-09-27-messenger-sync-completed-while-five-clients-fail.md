@@ -6,7 +6,7 @@ owner: pm
 decided_on: 2026-09-27
 source: session:5b9407a2
 verify_by: 2026-10-06
-verify_how: `select status, failed_count from cron_run_logs where job_name='messenger-sync-hourly' order by started_at desc limit 5` —— 只要 `failed_count > 0` 而 `status='completed'` 还同时出现，这个盲区就还在；修好之后应该是「部分失败」这类能被告警认出来的状态
+verify_how: "查 `cron_run_logs` 里 `messenger-sync-hourly` 最近 5 次的 status 和 failed_count —— 只要 failed_count > 0 而 status='completed' 还同时出现，这个盲区就还在；修好之后应该是「部分失败」这类能被告警认出来的状态"
 ---
 小秘书 2026-09-27 要求把这条从 CRM 接入那轮里拆出来单独立卡。
 

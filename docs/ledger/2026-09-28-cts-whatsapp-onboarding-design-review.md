@@ -11,7 +11,7 @@ verify_how: ① 实现 PR 里逐条对账这 6 条（改了 / 没改 + 原因）
 
 ## 方案（PM 2026-09-28 拍板过程）
 
-CTS Tours NZ（`c0000000-0000-0000-0000-000000000000`）接 WhatsApp。
+CTS Tours NZ 接 WhatsApp。
 
 **号码：买一个全新 NZ 号，不动现役号 `027 752 0888`。**
 
@@ -29,9 +29,9 @@ CTS 这条线代价特别低：WhatsApp 对 CTS 是**全新渠道**（现在走 
 | | |
 |---|---|
 | 代码 | 已写完有测试（webhook 573 行 + send + adapter + 设置面板） |
-| **生产库** | **缺 4 个列** —— 迁移 `20260902000002_whatsapp_phone_number_id.sql` 在仓库里但从未 apply |
+| **生产库** | **缺 4 个列** —— 迁移 `whatsapp_phone_number_id.sql`（2026-09-02 那条）在仓库里但从未 apply |
 | 环境钥匙 | 5 个一个都没配 |
-| Meta 应用 `1752513682785923` | 系统用户令牌、永不过期，但**没有任何 whatsapp 权限**；App Review 提交不了；企业验证未过 |
+| Meta 应用 `1752513…`（原来那个应用） | 系统用户令牌、永不过期，但**没有任何 whatsapp 权限**；App Review 提交不了；企业验证未过 |
 | 先例 | `pages_messaging` 同样「在审未批」却在生产正常工作 → Standard Access + 应用管理员的系统用户令牌这条路有生产先例 |
 | CTS 现有数据 | 1024 客人 / 邮件 2378 / Messenger 1307 / 表单 774 / 通话 642；**WhatsApp 0 条** |
 | 沙盘 | 本机重放全部 287 个迁移 + 4 条数据库安全不变量，全绿；4 个列和那条 partial unique index 都如期建出 |

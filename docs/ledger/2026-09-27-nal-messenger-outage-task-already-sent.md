@@ -21,7 +21,7 @@ verify_how: ① 跑一次私信同步、看 NAL 那条是不是还报 `page_not_
 
 `page-binding-items.ts` 的 `facebook_page_binding_unverified` 这张卡，对生产跑一遍确实产出 NAL 那条：
 
-- **什么事**：私信、表单线索、评论自动回复已暂停：Facebook 主页 1177479655430100 的绑定没通过核实 —— 这期间客人的私信和留资不会进 CRM
+- **什么事**：私信、表单线索、评论自动回复已暂停：Facebook 主页 `117747…`（NAL 绑定的那个，见 `clients.facebook_page_id`）的绑定没通过核实 —— 这期间客人的私信和留资不会进 CRM
 - **怎么做**：点链接打开这个客户的设置抽屉，在「Facebook 主页」卡片里点「重新核实」…核实后看卡片上显示的主页名是不是这个客户自己的
 - **链接**：`…/dashboard/clients/4ae76381-…?settings=platform`
 
