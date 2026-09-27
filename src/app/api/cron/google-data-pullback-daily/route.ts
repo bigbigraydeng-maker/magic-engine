@@ -659,12 +659,31 @@ export async function GET(req: NextRequest) {
     ? `${headlineError.source}: ${headlineError.error}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ''}`
     : undefined
 
+  // 2026-09-27 (Codex review round 3, docs/ledger/2026-09-27-cts-secondary-
+  // account-idle-not-blind.md): `errors` above only records a secondary
+  // account's FAILURE. A run where the account was never reached at all
+  // (deregistered from client_meta_ad_accounts, meta token missing, ad
+  // strategy disabled) also produces no entry there — identical to a run
+  // that queried it and got zero rows back for a genuine zero-spend day.
+  // One receipt per secondary account per run, success or not, closes that
+  // gap: an account's absence from this array (not just an error entry) is
+  // now itself the signal that it was never queried that day.
+  const adDailySecondaryReceipts = results.flatMap(r =>
+    (r.ad_daily_secondary ?? []).map(s => ({
+      client_id:           r.client_id,
+      ad_account_id:        s.ad_account_id,
+      ad_daily_success:    s.ad_daily?.success ?? false,
+      ad_level_success:    s.ad_level?.success ?? false,
+      adset_level_success: s.adset_level?.success ?? false,
+    })),
+  )
+
   await cronRun.finish({
     processed: results.length,
     completed: results.length - failed,
     error: errorMessage,
     failed,
-    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors },
+    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors, ad_daily_secondary_receipts: adDailySecondaryReceipts },
   })
   return NextResponse.json({
     success:           true,
