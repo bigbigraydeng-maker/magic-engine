@@ -14,6 +14,28 @@ export interface FrozenFieldResult {
   baseParseError: LedgerParseError | null
 }
 
+const FM_RE = /^---\r?\n([\s\S]*?)\r?\n---/
+
+function extractRawField(text: string, field: string): string | null {
+  const fmMatch = text.match(FM_RE)
+  if (!fmMatch) return null
+  const lines = fmMatch[1].split(/\r?\n/)
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith(field + ':')) {
+      let raw = lines[i]
+      for (let j = i + 1; j < lines.length; j++) {
+        if (/^\s/.test(lines[j])) {
+          raw += '\n' + lines[j]
+        } else {
+          break
+        }
+      }
+      return raw
+    }
+  }
+  return null
+}
+
 export function checkFrozenFields(
   file: string,
   headText: string,
@@ -22,29 +44,39 @@ export function checkFrozenFields(
   if (baseText === null) return { violations: [], parseError: null, baseParseError: null }
 
   const baseResult = parseLedgerFile(file, baseText)
-  if (!baseResult.ok) return { violations: [], parseError: null, baseParseError: baseResult.error }
-
   const headResult = parseLedgerFile(file, headText)
-  if (!headResult.ok) return { violations: [], parseError: headResult.error, baseParseError: null }
 
-  const violations: FrozenFieldViolation[] = []
-  const fieldMap: Record<FrozenField, keyof typeof baseResult.entry> = {
-    id: 'id',
-    title: 'title',
-    decided_on: 'decidedOn',
-    source: 'source',
-    verify_by: 'verifyBy',
-    verify_how: 'verifyHow',
-  }
+  const baseFm = FM_RE.test(baseText)
+  const headFm = FM_RE.test(headText)
 
-  for (const field of FROZEN_FIELDS) {
-    const entryKey = fieldMap[field]
-    const baseVal = String(baseResult.entry[entryKey] ?? '')
-    const headVal = String(headResult.entry[entryKey] ?? '')
-    if (baseVal !== headVal) {
-      violations.push({ file, field, baseValue: baseVal, headValue: headVal })
+  if (!baseFm || !headFm) {
+    return {
+      violations: [],
+      parseError: headResult.ok ? null : headResult.error,
+      baseParseError: baseResult.ok ? null : baseResult.error,
     }
   }
 
-  return { violations, parseError: null, baseParseError: null }
+  const violations: FrozenFieldViolation[] = []
+  for (const field of FROZEN_FIELDS) {
+    const baseRaw = extractRawField(baseText, field)
+    const headRaw = extractRawField(headText, field)
+    if (baseRaw === null) continue
+    if (baseRaw !== headRaw) {
+      const valPart = (s: string | null) =>
+        s === null ? '（已删除）' : s.slice(s.indexOf(':') + 1).trimStart()
+      violations.push({
+        file,
+        field,
+        baseValue: valPart(baseRaw),
+        headValue: valPart(headRaw),
+      })
+    }
+  }
+
+  return {
+    violations,
+    parseError: headResult.ok ? null : headResult.error,
+    baseParseError: baseResult.ok ? null : baseResult.error,
+  }
 }

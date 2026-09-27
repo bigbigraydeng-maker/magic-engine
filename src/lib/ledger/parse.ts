@@ -159,7 +159,7 @@ export function parseLedgerFile(file: string, text: string): LedgerParseResult {
   const body = split.body.trim()
   const warnings: LedgerWarning[] = []
 
-  const bodyLines = body === '' ? 0 : body.split('\n').length
+  const bodyLines = body === '' ? 0 : body.split('\n').filter((l) => l.trim() !== '').length
   const decidedOn = str(raw, 'decided_on') as string
   if (bodyLines > MAX_BODY_LINES) {
     if (decidedOn >= BODY_RULE_ROLLOUT) {

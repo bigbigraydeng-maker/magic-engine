@@ -51,6 +51,7 @@ const A_PATHS: Array<[string, string]> = [
   ['docs/ENGINEERING_QUALITY_GATES.md', 'quality gate rulebook'],
   ['docs/ledger/README.md', 'ledger rules'],
   ['scripts/ledger-check-refs.sh', 'ledger check script'],
+  ['src/lib/ledger/parse.ts', 'ledger parser/validator'],
   ['src/middleware.ts', 'request-level auth boundary'],
   ['src/lib/auth/client-access.ts', 'client access boundary'],
   ['src/app/api/auth/callback/route.ts', 'auth endpoint'],

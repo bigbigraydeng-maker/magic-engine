@@ -103,6 +103,22 @@ describe('checkFrozenFields', () => {
     expect(parseError).not.toBeNull()
   })
 
+  it('YAML 空格# 截断 → 原始文本比对仍能检测到差异', () => {
+    const baseFields = BASE_FIELDS.replace(
+      'verify_how: 跑一遍抓取脚本看还报不报错',
+      'verify_how: 查 PR #2010 结果',
+    )
+    const baseText = fm(baseFields)
+    const headFields = BASE_FIELDS.replace(
+      'verify_how: 跑一遍抓取脚本看还报不报错',
+      'verify_how: 查 PR #9999 不用查了',
+    )
+    const headText = fm(headFields)
+    const { violations } = checkFrozenFields('2026-09-24-foo.md', headText, baseText)
+    expect(violations).toHaveLength(1)
+    expect(violations[0].field).toBe('verify_how')
+  })
+
   it('base 解析失败 → 跳过检查但返回 baseParseError', () => {
     const baseText = '这不是合法的台账文件'
     const headText = fm(BASE_FIELDS)
