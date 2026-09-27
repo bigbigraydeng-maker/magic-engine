@@ -44,11 +44,14 @@ export async function pushAdsAutonomyCircuitBreakerItems(
   now: Date,
   nameOf: (id: string) => string,
 ): Promise<void> {
+  const nowIso = now.toISOString()
   const { data, error } = await supabase
     .from('client_automation_policies')
     .select('client_id, mode, updated_by')
     .eq('mode', 'deny')
     .like('updated_by', 'circuit-breaker:%')
+    .lte('effective_from', nowIso)
+    .or(`effective_to.is.null,effective_to.gt.${nowIso}`)
   if (error) throw new Error(`client_automation_policies 读取失败：${error.message}`)
 
   const seen = new Set<string>()
