@@ -65,7 +65,8 @@ agent 不得自行对 A 级 PR 执行 `--admin`。
   `Code change has ledger entry` · `Ledger refs exist` · **`ops-review-loop-tests`** ·
   **`Kernel architecture test`**（2026-09-27 新增，`.github/workflows/kernel-architecture.yml`） ·
   **`Application build`**（2026-09-27 新增，`.github/workflows/pr-application-validation.yml`）。
-  没有 bypass actor：这七道红了，管理员也合不进。
+  没有 bypass actor：这七道红了，管理员也合不进——**前提是检查产生的状态本身没被同一个 PR
+  伪造**，见下面「已知缺口」里 `Application build` / `Kernel architecture test` 的可信度边界。
 - `Application build` 为什么必过：2026-09-25 PR #2016 开着 auto-merge，编译还在跑时就被合进主干
   （04:46:20 合，35 秒后编译报失败），之后约 7 小时每次上线都失败。它编的是 PR 自己的最新提交，
   不是「主干 + 本 PR」，两个各自编得过的 PR 叠在一起仍可能编不过 —— 那种情况由今日待办的
@@ -89,6 +90,18 @@ agent 不得自行对 A 级 PR 执行 `--admin`。
   `workflow_dispatch`。补法是给 `Risk gate` 一个独立的细粒度 PAT；那是新凭证，由 PM 决定。
 - auto-merge 已开启却因 review 线程未解决等原因一直合不进，本检查看不见。后续事项：
   今日待办加一栏"auto-merge 开了超过 N 天没合的 PR"。
+- `Application build`、`Kernel architecture test`（以及 `ai-orchestrator-tests` /
+  `ops-review-loop-tests` / 两道 Ledger 检查）都用 `on: pull_request` 触发，执行的是
+  **PR 分支自己那份** workflow 定义，不是 `Risk gate` 那种从 `main` 取尺子的
+  `pull_request_target`。一个 PR 只要顺手把 `.github/workflows/pr-application-validation.yml`
+  的构建步骤换成必然成功的空壳、同时保留检查名 `Application build` 不变，产出的绿勾仍来自
+  同一个 GitHub Actions `integration_id`，`Protect main` 规则集分不出真假。这类改动会因为碰了
+  `.github/` 被判 A 级，但今天 A 级仍是"构建控制在聊天里问 PM 一句 → PM 说 go → agent 用 PM 的
+  `gh pr merge --admin` 合"——机器判不出"PM 真的看穿了这份 diff 里悄悄改的 workflow"，所以
+  "这几道检查绿了 = 真的编译/测试通过了"目前是流程上的信任，不是机制上的保证。真正堵住需要让
+  这几道检查从 PR 改不了的地方产生（例如仿照 `Risk gate` 改成 `pull_request_target` 并显式
+  `checkout` PR head SHA 来构建，或换一个独立 GitHub App 身份出状态），这需要改
+  `.github/workflows/`，不在本次改动范围内，先如实记录缺口。
 
 ## 这道闸不做的事
 
