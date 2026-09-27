@@ -48,6 +48,44 @@ CTS 这条线代价特别低：WhatsApp 对 CTS 是**全新渠道**（现在走 
 
 **顺手（不阻塞）**：`route.ts:27` 和 `send.ts` 把迁移号写成 `...000001`（实际是 `...000002`）；`entry_referral` 列注释要写明「读前先判 `channel='whatsapp'`」；`send.ts:41` 的 Graph 版本 v20.0 与 `meta/graph-base.ts:9` 自称唯一真相源的 v21.0 不一致 —— 既有欠账，不在这个 PR 里顺手统一。
 
+## 板桥（客户视角）——查出最要紧的一条：**顾问没法在 ME 里回 WhatsApp**
+
+这不是界面问题，是整个方案的前提不成立。我逐条核实过：
+
+| | 状态 | 依据 |
+|---|---|---|
+| 客人消息进 CRM | ✅ | webhook 完整 |
+| 自动问候回一句（还能点名客人看的是哪条广告） | ✅ | `conversation-inbound-autoack.ts:143` 认 `whatsapp`；广告入口存在 `entry_referral` |
+| **顾问自己回** | ❌ **没有接口也没有按钮** | `find src/app/api -path '*reply*'` 只有 `messenger/` 和 `email/` 两条；`drawer-actions.ts` 和 `segments.ts` **grep 不到 `whatsapp`** |
+| 客人发的图片 | ❌ 只存编号，显示成一行 `[image message]` | `route.ts:156-158` 自己写着「下载是以后的 PR」 |
+| 新消息实时提醒 | ❌ 只进第二天那封待办邮件 | |
+
+`sendWhatsApp` 的生产调用方只有 `channel-dispatch.ts:59`（自动回复那条）和 `messaging/adapters/whatsapp.ts:73`（子牙查明该总线无生产调用方）。
+
+**后果（板桥的判断，我认同）**：顾问回不了就会用自己手机回 → 那条线 ME 看不见 → 系统天天误报「这个客人没人跟进」→ 假警报一出现，「今天该联系谁」这一页就没人信了。客人那侧更糟：问一句 → 收到一句自动问候 → 然后没人理；旅游是大额消费，这比不上线还差。
+
+**照抄 Messenger 的 ReplyBox 会当场出洋相**（板桥挑出，都在 `messenger/_components/ReplyBox.tsx`）：`:53-78` 的错误翻译没有 WhatsApp 分支，WhatsApp 失败会显示「**Facebook** 已经不让回这条了」；`:30` 的确认框写死「这条会以 CTS 的 **Facebook 主页**发出去」；`:98` 判「窗口关了」只认 `'closed'`，而 WhatsApp 的关闭值是 `'template_only'`（`send.ts:59`）→ 按钮不会置灰，顾问打完一整段才被拒。
+
+**六句报错文案全是黑话**，板桥逐句改写了（例：`send.ts:208`「WhatsApp 免费回复窗口已关闭…只能发送已审核的模板消息」→「他超过 24 小时没说话了，WhatsApp 不让我们主动发。请打电话或发邮件找他。」）。另外 `send.ts:294` 的「Meta 拒绝了这条消息」**把供应商真名露给客户员工了**，违反 CLAUDE.md 的第三方封装名规矩。
+
+**ME 现在是在主动教顾问别回 WhatsApp**：客人从 WhatsApp 进来时 ME 拿 `wa_id` 当电话号建联系人（`route.ts:236`），于是卡片直接给拨号按钮、抽屉给「打通了／没打通」两个按钮（`drawer-actions.ts:70-86`）—— 根子是那两份渠道清单里没有 `whatsapp`。
+
+**上线第一天必备三件**：当场试跑给顾问看（私人手机发一条 → 落进「今天该联系谁」→ 在 ME 里回 → 手机收到）；一张带真实截图的一页纸；指定第一周随时能问的人，且上线前先把自动问候打开。
+
+## 子牙第二轮追加（我把设计改成「新号」之后重审）
+
+7. **共存模式一开就撞线程键。** `conversations` 唯一键是 `(client_id, conversation_id)`，而 WhatsApp 把 `conversation_id` 写成客人的 `wa_id` —— CTS 同时跑新号 + 现役号时，同一个客人发给两个号会并进同一行，回复可能从客人没联系过的那个号发出去。**现在花一行就能避掉**：webhook 手上已经有 `phoneNumberId`（`route.ts:513`）却丢了，写进本来就是「我们哪个端点收到的」那一列 `conversations.page_id` 即可 —— 不加列、不改唯一键、不改任何读取方。不写的话历史行以后补不回来。
+8. **共存会把员工在手机 App 上发的消息镜像进 webhook**，而全仓没有「这个 `from` 是我们自己的号」的判断：`route.ts:350` 无条件取 `msg.from`、`:372` 硬编码 `direction:'inbound'`、`:267` 写 `last_message_from:'customer'` → 会给自家号码建一个 contact、记一条入站触点、并让 CRM 认为「客人最后说话、我们欠回复」。切共存前必补。
+9. **共存的 6 个月回灌会被当成 6 个月的实时新消息**：每条历史消息都 emit 一次 `conversation/message.received`，而自动问候和 AI 起草两个消费者**都没有消息年龄判断**（>24h 现在是靠 `whatsappWindow` 返 `template_only` 意外挡住的，那是巧合不是设计）。落在最近 24h 的那批会真给客人发「我们的顾问会联系您」，而员工在手机上早就回过了。另：`last_message_at`（`route.ts:266`）无方向保护，回灌会把它写回旧时间，收件箱排序全乱。回灌不该走这个 handler（POST 里所有消息串行 await，大批量会撞超时 → 返 503 → Meta 整批重投）。
+
+## 反驳子牙一条（核实后不成立）
+
+子牙提醒「`src/lib/voice/config.ts:43` 也声明了 `WHATSAPP_PHONE_NUMBER_ID`，且 `:90-98` 生产缺值 fail fast，动这个 env 前先确认语音不受影响」。
+
+**实测：这条不成立，而且牵连方向是反的。** `config.ts:43` 把它声明成 `.optional()`，`:90` 的就绪判断只看 `WHATSAPP_ACCESS_TOKEN && META_APP_SECRET`，**不看号码 ID**。所以第 1 条改发件号取值方式不影响语音。
+
+真正牵连的是另外两把钥匙：配上 `WHATSAPP_ACCESS_TOKEN` + `META_APP_SECRET` 之后，语音那条线的 whatsapp provider 会从「模拟」翻成「真实」—— 但只在 `MOCK_EXTERNAL_SERVICES` 为假时才有差别，而若它今天为假，生产早就该抛错了（那两把钥匙现在一个都没配）。**结论：上线前确认 `MOCK_EXTERNAL_SERVICES` 的实际取值，在 PR 里写一句，不需要改代码。**
+
 ## 还在跑 / 待定
 
 - 魏征（挑刺）、板桥（客户视角）两审在跑，回来一并对账。
