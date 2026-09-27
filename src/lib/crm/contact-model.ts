@@ -1,3 +1,4 @@
+// probe: declared-risk parse check — do not merge
 /**
  * `buildContactModel(row, touchpoints, stageMeta)` — 全部 CRM 读路径共用的
  * ContactLike 装配器（今天名单 / 全部客人 / WP3 跟进表 / 未来的员工全表视图）。
