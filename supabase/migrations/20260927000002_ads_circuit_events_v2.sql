@@ -22,6 +22,31 @@
 -- 为什么 DROP 和 CREATE 必须同一份 migration：分两次跑会留一个「表不存在」的空档，
 --   而那个空档正好命中上面横幅里那条「读不到 = 全拒」。一个回执，一次跑完。
 -- ────────────────────────────────────────────────────────────────────────────
+-- 🔴 **先设一道闸再删**（我自己沙盘重跑第二遍时发现的洞，2026-09-27）：
+--    这份 migration 以 `DROP TABLE` 开头，而 `DROP TABLE` **不受下面那个
+--    append-only 触发器管**（触发器只管 UPDATE / DELETE / TRUNCATE）。
+--    也就是说：将来任何人第二次跑这份文件，整张只增账本会被无声清空 ——
+--    而账本被清空 = 所有未解除的 sticky 熔断一起消失 = 熔断状态被静默解除。
+--    「改历史 = 解熔断」这句话对 DROP 同样成立，触发器却拦不住它。
+--
+--    所以：**表里有行就拒绝跑**，让它响一声而不是悄悄抹掉。
+--    这不妨碍本次 apply —— 那张按错设计建的表实测 0 行（apply 前会现场再核一次）。
+DO $guard$
+DECLARE
+  n bigint;
+BEGIN
+  IF to_regclass('public.ads_circuit_events') IS NOT NULL THEN
+    EXECUTE 'SELECT count(*) FROM public.ads_circuit_events' INTO n;
+    IF n > 0 THEN
+      RAISE EXCEPTION
+        'ads_circuit_events 已有 % 行，拒绝 DROP：这份 migration 只应跑一次。'
+        '账本被清空 = 未解除的 sticky 熔断一起消失 = 熔断被静默解除。'
+        '真要重建，先人工导出并在对话里拿到 PM 明确授权。', n;
+    END IF;
+  END IF;
+END
+$guard$;
+
 DROP TABLE IF EXISTS public.ads_circuit_events;
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -62,8 +87,25 @@ CREATE TABLE IF NOT EXISTS public.ads_circuit_events (
 
   -- 🔴 狄仁杰 v2.1 复核：sticky「必须人解」落到**表**上，不只靠路由代码和 grep。
   --    路由代码会被绕过（有人写第二个入口），CHECK 不会。
+  --
+  -- 🔴 判据用**正则**而不是 `LIKE 'human:%'`（统筹 2026-09-27 审出，我原来写的有洞）：
+  --
+  --    `LIKE 'human:%'` 对 `'human:'` 是**通过**的 —— 前缀对了、人没了。
+  --    而这不是理论边界：`requireGlobalAdmin()` 成功分支是 `{ ok: true; user: User }`，
+  --    而 `User.email` **可空** —— `require-admin.ts:27` 和 `:84` 自己就写着
+  --    `session.user.email ?? ''`。所以路由里顺手写
+  --    ``actor = `human:${user.email ?? ''}` `` 就会得到 `'human:'`，
+  --    穿过 CHECK、落一条**没有身份的「人解除过」**的账。
+  --
+  --    而这条 CHECK 是 v2.2 §6.9 第 3 条**唯一的数据库级保证**
+  --    （「sticky 必须人解由数据库保证，不只靠路由代码和 grep」）——
+  --    它放过空身份，那条保证就只剩个形状。
+  --
+  --    正则也比 `LIKE 'human:%@%'` 严：后者挡不住 `'human:@'`。
+  --    路由那一侧另有一道：email 取不到 → 直接拒绝写入，**不许 `?? ''` 兜底**
+  --    （取不到管理员身份就不该记一条「人解除过」的账）。两层各咬一次。
   CONSTRAINT ads_circuit_events_release_by_human CHECK (
-    kind <> 'release' OR actor LIKE 'human:%'
+    kind <> 'release' OR actor ~ '^human:[^@[:space:]]+@[^@[:space:]]+'
   )
 );
 
