@@ -22,9 +22,12 @@ import Link from 'next/link'
 import { CrmTabs } from '../_components/CrmTabs'
 import { type StageOption } from '../_components/ComposeNote'
 import { PersonDrawer, type DrawerRow } from '../_components/PersonDrawer'
+import { BatchEmail, type BatchEmailBucket } from '../_components/BatchEmail'
 import { PrioritySectionHeader } from './_components/PrioritySection'
 import { currentPositionLabel, nextNavStep, type NavInput, type SectionKey } from '@/lib/crm/drawer-nav'
 import type { Segment } from '@/lib/crm/segments'
+import { type KindView } from '@/lib/crm/kind-filter'
+import { dayProgress } from '@/lib/crm/day-list'
 import {
   TEMP_CLS,
   fmtDate,
@@ -50,6 +53,18 @@ interface PrioritySectionData {
 type PendingNav =
   | { mode: 'segment'; sectionKey: SectionKey; openFirst: boolean }
   | { mode: 'flat'; openFirst: boolean }
+
+/**
+ * 今天有没有碰过这个人——"全部客人"的 ContactRow 没有「今天要联系」那页专属的
+ * `doneToday` 标记（那边是按日重置的行动队列，这页不是），用「最近联系是不是今天」
+ * 当替代信号，跟 contact-table-types.ts 的 `relTime()`「今天/昨天」判断同一个口径
+ * （2026-09-28 WP-B5）。
+ */
+function isToday(iso: string | null): boolean {
+  if (!iso) return false
+  const d = new Date(iso)
+  return d.toDateString() === new Date().toDateString()
+}
 
 function toDrawerRow(r: ContactRow): DrawerRow {
   return {
@@ -88,6 +103,13 @@ export default function CrmAllContactsPage() {
   // 服务端拒绝 q 里的逗号/括号（PostgREST or() 语法），单独一条提示，不覆盖整页错误。
   const [qError, setQError] = useState<string | null>(null)
   const [stageFilter, setStageFilter] = useState<string[]>([])
+  /**
+   * 终端客户 / 同行 / 全部（2026-09-28 WP-B3）。只在平铺模式生效——服务端
+   * `?kind=` 只接了分页路径（getPaged），分段视图（今天要联系同款四段）
+   * 这一轮没接，切到分段时这个筛选会被忽略（下面 grouped 切换那里会重置它，
+   * 不留一个"选了但看起来没生效"的筛选条件)。
+   */
+  const [kindFilter, setKindFilter] = useState<KindView>('all')
   const [page, setPage] = useState(1)
   // C1a 固定 100，先不给改每页条数的入口。
   const [perPage] = useState(100)
@@ -169,6 +191,7 @@ export default function CrmAllContactsPage() {
         params.set('perPage', String(perPage))
         if (qDebounced.trim()) params.set('q', qDebounced.trim())
         for (const s of stageFilter) params.append('stage', s)
+        if (kindFilter !== 'all') params.set('kind', kindFilter)
       }
 
       const [res, stageRes] = await Promise.all([
@@ -232,7 +255,7 @@ export default function CrmAllContactsPage() {
       setSectionsLoading(false)
       fetchInFlightRef.current = false
     }
-  }, [clientId, page, perPage, qDebounced, stageFilter, grouped, openSections, sectionPages])
+  }, [clientId, page, perPage, qDebounced, stageFilter, kindFilter, grouped, openSections, sectionPages])
 
   useEffect(() => {
     void loadList()
@@ -247,7 +270,7 @@ export default function CrmAllContactsPage() {
   // 换了搜索词或筛选条件就回第一页 —— 否则会停在一个可能不存在的页码上。
   useEffect(() => {
     setPage(1)
-  }, [qDebounced, stageFilter])
+  }, [qDebounced, stageFilter, kindFilter])
 
   /**
    * 直达链接 `?contact=<id>` —— 列表加载完自动打开那个人的抽屉。
@@ -692,10 +715,15 @@ export default function CrmAllContactsPage() {
             </div>
           )}
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => setGrouped((v) => !v)}
+              onClick={() => {
+                setGrouped((v) => !v)
+                // 分段视图的服务端还没接 ?kind=（B3 只接了平铺路径）——切过去时把筛选
+                // 收回「全部」，不留一个选了但悄悄不生效的筛选条件（见上面状态定义处的注）。
+                setKindFilter('all')
+              }}
               className="rounded-lg border border-me-charcoal/15 px-3 py-1.5 text-xs font-bold text-me-charcoal hover:bg-me-ivory"
             >
               {grouped ? '← 回到平铺名单' : '按「先联系谁」分段'}
@@ -705,7 +733,61 @@ export default function CrmAllContactsPage() {
                 分段是系统按联系记录算的，跟「今天要联系」那一页同一套口径；段内按「该先联系谁」排，点表头不改顺序
               </span>
             )}
+            {/* 终端客户 / 同行 筛选（2026-09-28 WP-B3）——分段模式下不显示，服务端还没接。 */}
+            {!grouped && (
+              <div className="inline-flex rounded-lg border border-me-charcoal/15 p-0.5">
+                {(
+                  [
+                    ['all', '全部'],
+                    ['retail', '终端客户'],
+                    ['trade', '🤝 同行'],
+                  ] as const
+                ).map(([k, label]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setKindFilter(k)}
+                    className={`rounded-md px-3 py-1 text-xs font-bold transition ${
+                      kindFilter === k ? 'bg-me-charcoal text-white' : 'text-me-charcoal/60 hover:text-me-charcoal'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
+
+          {/* 批量发邮件——只在「🤝 同行」筛选下出现。人从当前已加载的 rows 来：
+              同行通常是一小撮人（CTS 约 20 人），一页（100）装得下，不需要额外拉全量。
+              doneToday 恒 false——"全部客人"没有"今天处理过"这个每日重置的概念，
+              跟"今天要联系"那页的批次语义不是一回事，批量发送面向的是"这批同行"
+              整体，不是"今天还没联系过的同行"。
+              🔴 魏征 2026-09-28 复审 B3 查出：同行超过一页（100 人）时，这个面板只会
+              发给当前这一页，且原来没有任何提示——容易被当成"已经是全部同行"。
+              生产唯一客户 CTS 目前约 20 人不会触发，但这是结构性缺口，先在这里挡一句、
+              不让人无声漏发；真要支持大批量同行客户，需要另开一条不分页的批量取数接口。 */}
+          {!grouped && kindFilter === 'trade' && rows.length > 0 && (
+            <>
+              {total > rows.length && (
+                <p className="rounded-lg border border-[#C2453A]/30 bg-[#C2453A]/8 px-3 py-2 text-xs font-semibold text-[#C2453A]">
+                  ⚠️ 同行一共 {total} 人，这一页只装得下 {rows.length} 人——批量发邮件现在只会发给这一页看到的人，翻页分批发，别当成已经发给了全部同行。
+                </p>
+              )}
+              <BatchEmail
+                clientId={clientId}
+                bucket={
+                  {
+                    batch: 'send_email',
+                    people: rows.map((r) => ({ contactId: r.contactId, email: r.email, kind: 'trade', doneToday: false })),
+                    batchEmails: [],
+                    total: rows.length,
+                  } satisfies BatchEmailBucket
+                }
+                onLogged={(msg) => afterWrite(msg)}
+              />
+            </>
+          )}
 
           <div className="flex items-center justify-between">
             <p className="text-xs font-bold text-me-charcoal/50">
@@ -774,6 +856,9 @@ export default function CrmAllContactsPage() {
                         title={s.title}
                         hint={s.hint}
                         total={s.total}
+                        // 段收起时 items=null——没数据就不算「今天进度」，等展开了再算，
+                        // 不能拿 0 冒充「今天一个都没处理」。
+                        progress={s.items ? dayProgress(s.items.map((r) => ({ handled: isToday(r.lastTouchAt) }))) : undefined}
                         open={open}
                         colSpan={colCount}
                         onToggle={() => toggleSection(s.key)}

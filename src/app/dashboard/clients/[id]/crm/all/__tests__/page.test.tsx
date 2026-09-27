@@ -24,6 +24,8 @@ interface Row {
   contactId: string
   name: string
   doNotContact?: boolean
+  email?: string | null
+  lastTouchAt?: string | null
 }
 
 const contact = (id: string, name: string, over: Partial<Row> = {}) => ({
@@ -378,6 +380,66 @@ describe('分段视图 · 复审补测', () => {
     expect(screen.getByText('Ccc Three')).toBeTruthy()
   })
 
+  /** B5（2026-09-28）：段头旁边显示"今天进度"——今天联系过的人 vs 还没碰的人。 */
+  describe('B5 · 段头「今天进度」', () => {
+    it('段里有人今天联系过、有人没有 → 显示"今天动过 X · 还剩 Y"', async () => {
+      const today = new Date().toISOString()
+      stubSections([
+        {
+          key: 'waiting',
+          title: '客人在等你',
+          hint: 'h',
+          total: 2,
+          open: true,
+          items: [
+            contact('w1', 'Aaa One', { lastTouchAt: today }),
+            contact('w2', 'Bbb Two', { lastTouchAt: '2020-01-01T00:00:00Z' }),
+          ],
+        },
+        { key: 'acted', title: '还没搭上话', hint: 'h', total: 0, open: false, items: null },
+        { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 0, open: false, items: null },
+        { key: 'off_list', title: '不在今天名单', hint: 'h', total: 0, open: false, items: null },
+      ])
+      render(<CrmAllContactsPage />)
+      await goGrouped()
+      await waitFor(() => expect(screen.getByText(/今天动过 1 · 还剩 1/)).toBeTruthy())
+    })
+
+    it('段里今天全处理过了 → 显示"今天都过了一遍 ✓"', async () => {
+      const today = new Date().toISOString()
+      stubSections([
+        {
+          key: 'waiting',
+          title: '客人在等你',
+          hint: 'h',
+          total: 1,
+          open: true,
+          items: [contact('w1', 'Aaa One', { lastTouchAt: today })],
+        },
+        { key: 'acted', title: '还没搭上话', hint: 'h', total: 0, open: false, items: null },
+        { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 0, open: false, items: null },
+        { key: 'off_list', title: '不在今天名单', hint: 'h', total: 0, open: false, items: null },
+      ])
+      render(<CrmAllContactsPage />)
+      await goGrouped()
+      await waitFor(() => expect(screen.getByText(/今天都过了一遍/)).toBeTruthy())
+    })
+
+    it('段是收起的（items=null）→ 不显示进度，不能拿 0 冒充"今天一个都没处理"', async () => {
+      stubSections([
+        { key: 'waiting', title: '客人在等你', hint: 'h', total: 5, open: false, items: null },
+        { key: 'acted', title: '还没搭上话', hint: 'h', total: 5, open: false, items: null },
+        { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 0, open: false, items: null },
+        { key: 'off_list', title: '不在今天名单', hint: 'h', total: 0, open: false, items: null },
+      ])
+      render(<CrmAllContactsPage />)
+      await goGrouped()
+      await waitFor(() => expect(screen.getByText('客人在等你')).toBeTruthy())
+      expect(screen.queryByText(/今天动过/)).toBeNull()
+      expect(screen.queryByText(/今天都过了一遍/)).toBeNull()
+    })
+  })
+
   /**
    * B1（两个复审都判 BLOCKER）：段头写 217 人、表里只有 100 行时，
    * 页面必须**说出来**还有多少人没显示，并且给得出翻页入口。
@@ -677,5 +739,139 @@ describe('B2 · 抽屉「下一位」跨页翻页（平铺模式）', () => {
     // 这里测不稳（PersonDrawer.test.tsx 的 nav.busy 单测已经单独锁住这一档），
     // 这条测试锁住的是最终结果：新一页拉回来之后自动打开第一个人。
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Page Two Person' })).toBeTruthy())
+  })
+})
+
+/**
+ * B3（2026-09-28）：终端客户 / 同行筛选 + 批量发邮件。
+ */
+describe('B3 · 终端客户/同行筛选 + 批量发邮件', () => {
+  function stubKind() {
+    const calls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/crm/contacts')) {
+          calls.push(url)
+          const kind = new URL(url, 'https://x.test').searchParams.get('kind')
+          if (kind === 'trade') {
+            return {
+              ok: true,
+              json: async () => ({
+                items: [contact('t1', 'Trade Tom', { email: 'tom@hot.co.nz' })],
+                total: 1,
+                page: 1,
+                perPage: 100,
+                columns: [],
+              }),
+            }
+          }
+          return {
+            ok: true,
+            json: async () => ({ items: [contact('r1', 'Retail Rita')], total: 1, page: 1, perPage: 100, columns: [] }),
+          }
+        }
+        if (url.includes('/timeline')) return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
+        return { ok: true, json: async () => ({ stages: [] }) }
+      }),
+    )
+    return calls
+  }
+
+  it('点「🤝 同行」→ 请求带 ?kind=trade，列表换成同行那批人', async () => {
+    const calls = stubKind()
+    render(<CrmAllContactsPage />)
+    await screen.findByText('Retail Rita')
+
+    fireEvent.click(screen.getByText('🤝 同行'))
+
+    await waitFor(() => expect(screen.getByText('Trade Tom')).toBeTruthy())
+    expect(calls.some((u) => u.includes('kind=trade'))).toBe(true)
+  })
+
+  it('点「终端客户」→ 请求带 ?kind=retail', async () => {
+    const calls = stubKind()
+    render(<CrmAllContactsPage />)
+    await screen.findByText('Retail Rita')
+
+    fireEvent.click(screen.getByText('终端客户'))
+
+    await waitFor(() => expect(calls.some((u) => u.includes('kind=retail'))).toBe(true))
+  })
+
+  it('筛到「🤝 同行」之后出现批量发邮件面板', async () => {
+    stubKind()
+    render(<CrmAllContactsPage />)
+    await screen.findByText('Retail Rita')
+
+    fireEvent.click(screen.getByText('🤝 同行'))
+
+    await waitFor(() => expect(screen.getByText(/给这批发邮件/)).toBeTruthy())
+  })
+
+  /**
+   * 🔴 魏征 2026-09-28 复审查出：同行超过一页时批量发邮件面板原来悄悄只发当前页，
+   * 没有任何提示。钉住警示文案在这种情况下会出现。
+   */
+  it('同行人数超过一页 → 批量面板上方出现"只发这一页"的警示', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/crm/contacts')) {
+          const kind = new URL(url, 'https://x.test').searchParams.get('kind')
+          if (kind === 'trade') {
+            return {
+              ok: true,
+              json: async () => ({
+                items: [contact('t1', 'Trade Tom', { email: 'tom@hot.co.nz' })],
+                total: 150, // 总数比这一页（1 条，为了测试简化）多，触发警示
+                page: 1,
+                perPage: 100,
+                columns: [],
+              }),
+            }
+          }
+          return { ok: true, json: async () => ({ items: [contact('r1', 'Retail Rita')], total: 1, page: 1, perPage: 100, columns: [] }) }
+        }
+        if (url.includes('/timeline')) return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
+        return { ok: true, json: async () => ({ stages: [] }) }
+      }),
+    )
+    render(<CrmAllContactsPage />)
+    await screen.findByText('Retail Rita')
+
+    fireEvent.click(screen.getByText('🤝 同行'))
+
+    await waitFor(() => expect(screen.getByText(/只会发给这一页看到的人/)).toBeTruthy())
+  })
+
+  it('同行一页装得下 → 不出现"只发这一页"的警示', async () => {
+    stubKind()
+    render(<CrmAllContactsPage />)
+    await screen.findByText('Retail Rita')
+
+    fireEvent.click(screen.getByText('🤝 同行'))
+
+    await waitFor(() => expect(screen.getByText(/给这批发邮件/)).toBeTruthy())
+    expect(screen.queryByText(/只会发给这一页看到的人/)).toBeNull()
+  })
+
+  it('默认「全部」不出现批量发邮件面板', async () => {
+    stubKind()
+    render(<CrmAllContactsPage />)
+    await screen.findByText('Retail Rita')
+
+    expect(screen.queryByText(/给这批发邮件/)).toBeNull()
+  })
+
+  it('切到分段视图 → kind 筛选按钮不再显示（服务端分段路径没接 kind）', async () => {
+    stubKind()
+    render(<CrmAllContactsPage />)
+    await screen.findByText('Retail Rita')
+    expect(screen.getByText('🤝 同行')).toBeTruthy()
+
+    fireEvent.click(screen.getByText(/按「先联系谁」分段/))
+
+    await waitFor(() => expect(screen.queryByText('🤝 同行')).toBeNull())
   })
 })

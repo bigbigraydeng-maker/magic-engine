@@ -22,12 +22,13 @@ import { type StageOption } from './_components/ComposeNote'
 import { CrmTabs } from './_components/CrmTabs'
 import { PersonDrawer, type DrawerRow } from './_components/PersonDrawer'
 import { QuickNote } from './_components/QuickNote'
+import { BatchEmail } from './_components/BatchEmail'
 // 从唯一那份定义引，**不要在这里再抄一遍**。
 // 2026-08-03 就是抄的那份走散了：lib 里删掉了一个段，页面这份还留着，
 // 两边对不上，tsc 才把它顶出来 —— 而它本可以一直静静地错下去。
 import type { Segment } from '@/lib/crm/segments'
 import { CONTACT_KIND_LABEL, type ContactKind } from '@/lib/crm/contact-kind'
-import { batchRecipients, countTrade, filterBucketByKind, type KindView } from '@/lib/crm/kind-filter'
+import { countTrade, filterBucketByKind, type KindView } from '@/lib/crm/kind-filter'
 import { dayProgress } from '@/lib/crm/day-list'
 
 interface Row {
@@ -925,143 +926,6 @@ function LayerSection({
         </div>
       )}
     </section>
-  )
-}
-
-/**
- * 整批一起发邮件（只有「打过没人接」这一批有）。
- *
- * 🔴 密送是红线：地址粘进「收件人」栏，这一批客人就互相看到了彼此的邮箱 ——
- * 属于未经同意披露个人信息，而且客人一眼看出是群发。所以按钮上不写「群发」
- * 二字（那会诱导他粘进收件人栏），警告常驻、不折叠。
- */
-function BatchEmail({
-  clientId,
-  bucket,
-  onLogged,
-}: {
-  clientId: string
-  bucket: Bucket
-  onLogged: (msg: string) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const [failed, setFailed] = useState(false)
-  const [logging, setLogging] = useState(false)
-  const [clientRef] = useState(() => globalThis.crypto.randomUUID())
-
-  /**
-   * 收信人只算一次 —— 地址、「记一笔」的名单、「另有几人没邮箱」全从这里出。
-   *
-   * 上一版地址和 contactIds 各推各的：复制出 17 个地址，却给 20 个人各记了
-   * 一笔「群发了一封邮件」，其中 3 位今天刚说过「不买了」。实际收件人和
-   * CRM 记录对不上 —— 那是这套东西最不能犯的错（见 kind-filter 开头）。
-   */
-  const recipients = batchRecipients(bucket)
-  const emails = recipients.map((p) => p.email)
-  if (emails.length === 0) return null
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(emails.join('; '))
-      setCopied(true)
-      setFailed(false)
-      window.setTimeout(() => setCopied(false), 4000)
-    } catch {
-      setFailed(true)
-    }
-  }
-
-  const logSent = async () => {
-    if (logging) return
-    setLogging(true)
-    try {
-      const res = await fetch(`/api/clients/${clientId}/crm/touchpoints/batch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          // 跟 emails 同一批人 —— 分开推必然分叉（上一版就是这么错的）
-          contactIds: recipients.map((p) => p.contactId),
-          note: '群发了一封邮件',
-          clientRef,
-        }),
-      })
-      const json = (await res.json()) as { recorded?: number; error?: string }
-      if (!res.ok) throw new Error(json.error ?? '记不上')
-      onLogged(`✓ 已经给 ${json.recorded ?? 0} 人各记了一笔`)
-    } catch {
-      onLogged('没记上，再点一下试试')
-    } finally {
-      setLogging(false)
-    }
-  }
-
-  // 「另有 N 人没留邮箱」：只数**本该收信但没邮箱**的。
-  // 用 total - emails 会把今天已处理的人也算成「没留邮箱」—— 那是另一件事。
-  const missing = bucket.people.filter((p) => !p.doneToday && !p.email).length
-
-  if (!open) {
-    return (
-      <button
-        onClick={() => setOpen(true)}
-        className="mb-2 w-full rounded-lg border border-me-charcoal/15 bg-white py-2 text-[13px] font-bold text-me-charcoal/70"
-      >
-        ✉️ 给这批发邮件（{emails.length}）
-      </button>
-    )
-  }
-
-  return (
-    <div className="mb-2 rounded-xl border border-me-charcoal/10 bg-white p-2.5">
-      <button
-        onClick={() => void copy()}
-        className="w-full rounded-lg bg-me-charcoal py-2 text-[13px] font-black text-white"
-      >
-        {copied ? '✓ 已复制 —— 记得粘到「密送」' : `复制这 ${emails.length} 个邮箱`}
-      </button>
-
-      <div className="mt-2 rounded-lg border border-[#C2453A]/30 bg-[#C2453A]/8 px-2 py-1.5">
-        <p className="text-[12px] font-black leading-snug text-[#C2453A]">
-          ⚠️ 一定要粘进「密送 / BCC」那一栏
-        </p>
-        <p className="mt-0.5 text-[12px] leading-snug text-me-charcoal/65">
-          粘到「收件人」栏的话，这 {emails.length} 位客人会互相看到对方的邮箱。
-        </p>
-      </div>
-
-      <ol className="mt-1.5 space-y-0.5 text-[12px] leading-snug text-me-charcoal/50">
-        <li>① 点上面按钮复制</li>
-        <li>② 新建邮件，收件人填你自己</li>
-        <li>③ 地址粘到「密送 / BCC」</li>
-      </ol>
-
-      {failed && (
-        <textarea
-          readOnly
-          value={emails.join('; ')}
-          rows={3}
-          className="mt-1.5 w-full rounded-lg border border-me-charcoal/10 bg-me-ivory px-2 py-1 text-[12px]"
-        />
-      )}
-
-      {missing > 0 && (
-        <p className="mt-1.5 text-[12px] text-me-charcoal/45">另有 {missing} 人没留邮箱。</p>
-      )}
-
-      <button
-        onClick={() => void logSent()}
-        disabled={logging}
-        className="mt-2 w-full rounded-lg border border-me-stone py-1.5 text-[13px] font-bold text-me-charcoal disabled:opacity-40"
-      >
-        {logging ? '记着…' : '都发出去了，帮我记一笔'}
-      </button>
-      <button
-        onClick={() => setOpen(false)}
-        className="mt-1 w-full text-[12px] text-me-charcoal/35"
-      >
-        收起
-      </button>
-    </div>
   )
 }
 
