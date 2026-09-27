@@ -4,7 +4,7 @@ import { status,discover,bind,issueKey,revoke } from '@/lib/meta/ai/manage'
 import { auditedControl } from '@/lib/meta/ai/audit'
 import { MetaReadError } from '@/lib/meta/graph-read'
 import { generateAnalysis } from '@/lib/meta/ai/analysis'
-import { selfServeActivate } from '@/lib/meta/ai/entitlement'
+import { publicConnectOpen,selfServeActivate } from '@/lib/meta/ai/entitlement'
 const uuid=z.string().uuid()
 const actionSchema=z.discriminatedUnion('action',[
   z.object({ action:z.literal('activate') }).strict(),
@@ -32,6 +32,8 @@ export async function POST(request: Request,{ params }: Context) {
     if(action.action==='activate') {
       // Only a self-serve member; the database function re-checks client source and membership.
       if(access.tier!=='self_serve') throw new MetaReadError('activation_not_allowed',403)
+      // Opening before Facebook can be connected would start the 90 days for nothing (魏征 2026-09-27).
+      if(!publicConnectOpen()) throw new MetaReadError('connect_waiting_review',403)
       const result=await audit('self_serve_activate',null,()=>selfServeActivate(params.id,access.user.email ?? ''))
       return json({ ok:true,result })
     }

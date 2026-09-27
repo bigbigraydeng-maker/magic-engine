@@ -18,6 +18,9 @@ import type { ManualItem } from './manual-item-types'
 /** 用到这个百分比（含）就提醒 —— 留出加额度的时间，别等用满才说。 */
 export const QUOTA_WARN_PCT = 80
 
+/** 生成一份报告大约要花的美元数 —— 判断「还能不能再开一份」时要把它算进去。 */
+export const QUOTA_RESERVE_USD = 0.12
+
 export interface QuotaAlert {
   /** none：还早，不提醒；warn：快满了；full：已用满。 */
   level: 'none' | 'warn' | 'full'
@@ -30,14 +33,15 @@ export interface QuotaAlert {
  *
  * - 上限 <= 0：没有可用额度，直接算用满（pct=100）—— 免得除零，也免得
  *   一个配错的上限把这条提醒静音。
- * - 已用 >= 上限：full。
+ * - 已用 + 预留 > 上限：full —— 剩下的钱不够再开一份报告，新客户这个月
+ *   已经生成不了了，所以不能等到「已用 >= 上限」才说。
  * - 百分比 >= 80：warn。
  * - 其余：none。
  */
-export function quotaAlert(usedUsd: number, capUsd: number): QuotaAlert {
+export function quotaAlert(usedUsd: number, capUsd: number, reserveUsd: number = QUOTA_RESERVE_USD): QuotaAlert {
   if (!(capUsd > 0)) return { level: 'full', pct: 100 }
   const pct = Math.round((usedUsd / capUsd) * 100)
-  if (usedUsd >= capUsd) return { level: 'full', pct }
+  if (usedUsd + reserveUsd > capUsd) return { level: 'full', pct }
   if (pct >= QUOTA_WARN_PCT) return { level: 'warn', pct }
   return { level: 'none', pct }
 }
@@ -93,9 +97,9 @@ export async function pushMagicBridgeQuotaItems(
     client_name: 'Magic Engine 后台',
     what:
       level === 'full'
-        ? `Magic Bridge 本月免费名额已用满（${pct}%）：新客户这个月生成不了报告，要不要加额度？`
-        : `Magic Bridge 本月免费名额已用 ${pct}%：快满了，要不要提前加额度？`,
-    how: '加额度：告诉开发窗口「把 Magic Bridge 全平台每月上限改成 X 美元」（改的是后台设置表 meta_ads_ai_quota_config 里 platform 那一行，不用发版）。不加的话，下个月 1 号自动恢复。',
+        ? `Magic Bridge 本月免费名额已用满：US$${usedUsd.toFixed(2)} / ${capUsd}（${pct}%），新客户这个月生成不了报告，加不加？`
+        : `Magic Bridge 本月免费名额已用 US$${usedUsd.toFixed(2)} / ${capUsd}（${pct}%），快满了，加不加？`,
+    how: '要加：回开发窗口「Magic Bridge 月上限改成 60 美元」（数字你定），当天生效，不用发版。不加：用满后到月底新客户生成不了报告，下个月初自动恢复。',
     href: 'https://app.magicengine.com.au/meta-ads-ai/demo',
   })
 }

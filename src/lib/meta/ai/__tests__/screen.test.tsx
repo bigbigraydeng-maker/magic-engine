@@ -91,7 +91,7 @@ describe('nontechnical connection feedback',()=>{
     expect(await screen.findByText('广告账户已连接')).toBeInTheDocument()
     expect(screen.queryByRole('button',{ name:'查找广告账户' })).not.toBeInTheDocument()
     expect(screen.getByRole('button',{ name:'生成近 7 天广告分析' })).toBeEnabled()
-    expect(screen.getByText(/最小广告汇总数据/)).toHaveTextContent('分析费用由 Magic Engine 承担')
+    expect(screen.getByText(/最近 7 天的广告数据/)).toHaveTextContent('费用我们出，不会改你的广告')
     expect(screen.queryByText(/Bearer|MCP/)).not.toBeInTheDocument()
   })
 
@@ -102,6 +102,35 @@ describe('nontechnical connection feedback',()=>{
     expect(screen.getByRole('link',{ name:'先看看示例报告长什么样 →' })).toHaveAttribute('href','/meta-ads-ai/demo')
     expect(screen.queryByRole('button',{ name:'免费开通，连接我的广告账户' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button',{ name:'连接 Facebook' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading',{ name:'1. 连接 Facebook' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading',{ name:'2. 选择广告账户' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading',{ name:'3. 生成广告分析' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading',{ name:'断开连接与数据处理' })).toBeInTheDocument()
+  })
+
+  it('hides the three step sections while a self-serve customer can still activate',async()=>{
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ...status,self_serve:true,public_connect:true,pilot:{ invited:false,new_actions_allowed:false,sponsored_analysis_enabled:false,reason:'invitation_required',source:null } })))
+    render(<MetaAdsScreen clientId="tenant" />)
+    expect(await screen.findByRole('button',{ name:'免费开通，连接我的广告账户' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading',{ name:'1. 连接 Facebook' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading',{ name:'3. 生成广告分析' })).not.toBeInTheDocument()
+  })
+
+  it('offers a 90-day renewal to a self-serve customer whose free period expired',async()=>{
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ...status,self_serve:true,public_connect:true,pilot:{ invited:false,new_actions_allowed:false,sponsored_analysis_enabled:false,reason:'invitation_expired',source:null } })))
+    render(<MetaAdsScreen clientId="tenant" />)
+    expect(await screen.findByRole('heading',{ name:'90 天免费期到了' })).toBeInTheDocument()
+    expect(screen.getByText('点下面免费再开 90 天，需要重新连一次 Facebook。')).toBeInTheDocument()
+    expect(screen.getByRole('button',{ name:'免费再开 90 天' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading',{ name:'1. 连接 Facebook' })).not.toBeInTheDocument()
+  })
+
+  it('tells an ops-opened expired customer to email instead of offering self-serve renewal',async()=>{
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ...status,self_serve:false,public_connect:true,pilot:{ invited:true,new_actions_allowed:false,sponsored_analysis_enabled:false,reason:'invitation_expired',source:'ops' } })))
+    render(<MetaAdsScreen clientId="tenant" />)
+    expect(await screen.findByText('免费期到了，请联系 hello@magicengine.cloud 续开。')).toBeInTheDocument()
+    expect(screen.queryByRole('button',{ name:'免费再开 90 天' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button',{ name:'免费开通，连接我的广告账户' })).not.toBeInTheDocument()
   })
 
   it('activates Magic Bridge for self-serve customers once public connect is open',async()=>{

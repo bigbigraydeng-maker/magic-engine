@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import pg from 'pg'
 
 const bin = process.env.META_ADS_TEST_PG_BIN
@@ -61,6 +62,11 @@ try {
   await db.query(`UPDATE meta_ads_ai_pilot_entitlements SET starts_at = now() - interval '100 days', expires_at = now() - interval '1 day' WHERE client_id=$1`, [S1])
   eq(await activate(S1, 'one@x.test'), { ok: true, result: 'renewed' }, 'expired self-serve renews')
   ok((await db.query('SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$1', [S1])).rows[0].revision !== revBefore, 'renewal rotates the revision (old OAuth cannot return)')
+  // renewal must not re-enable a client ops switched off
+  await db.query(`UPDATE meta_ads_ai_pilot_entitlements SET sponsored_analysis_enabled=false, starts_at = now() - interval '100 days', expires_at = now() - interval '1 day' WHERE client_id=$1`, [S1])
+  eq(await activate(S1, 'one@x.test'), { ok: true, result: 'renewed' }, 'renews again')
+  eq((await db.query('SELECT sponsored_analysis_enabled AS e FROM meta_ads_ai_pilot_entitlements WHERE client_id=$1', [S1])).rows[0].e, false, 'renewal keeps sponsored analysis switched off')
+  await db.query('UPDATE meta_ads_ai_pilot_entitlements SET sponsored_analysis_enabled=true WHERE client_id=$1', [S1])
   eq(await activate(S2, 'two@x.test'), { ok: true, result: 'activated' }, 'S2 activates')
   await db.query(`UPDATE meta_ads_ai_pilot_entitlements SET status='paused' WHERE client_id=$1`, [S2])
   eq(await activate(S2, 'two@x.test'), { ok: false, reason: 'not_allowed' }, 'paused cannot be reopened by the customer')
@@ -90,14 +96,43 @@ try {
   const r1 = await reserve(S1, gS1, 'a')
   eq([r1.reserved, r1.idempotent], [true, false], 'first reservation for Facebook user 111')
   const fbKey = (await db.query(`SELECT meta_ads_facebook_user_key('ads_user:111') AS k`)).rows[0].k
-  eq((await db.query('SELECT facebook_user_key FROM meta_ads_ai_analysis_jobs WHERE id=$1', [r1.job_id])).rows[0].facebook_user_key, fbKey, 'job remembers the one-way Facebook user key')
+  eq(fbKey, createHash('sha256').update('meta-ads-user:ads_user:111').digest('hex'), 'database key equals the Node blocklist key')
+  const led = (await db.query('SELECT facebook_user_key, ad_account_id, amount_usd::text AS a FROM meta_ads_ai_quota_usage WHERE job_id=$1', [r1.job_id])).rows[0]
+  eq([led.facebook_user_key, led.ad_account_id, led.a], [fbKey, 'act_1000000001', '0.120000'], 'ledger row written at reserve')
   ok(!fbKey.includes('111') && /^[0-9a-f]{64}$/.test(fbKey), 'key is a hash, not the id')
   const gS2 = await grant(S2, await connect_(S2, '111'), 'act_1000000002')
   eq((await reserve(S2, gS2, 'b')).reason, 'facebook_user_quota_reached', 'same person under a new sign-up is capped')
-  // finished job counts actual cost, not reservation
-  eq(await finish(S1, r1.job_id, 0.01), true, 'finish still works with the new column')
-  eq((await reserve(S2, gS2, 'c')).reserved, true, 'after the first job settled at 0.01, the same person can run one more')
+  eq(await finish(S1, r1.job_id, 0.01), true, 'finish still works')
+  eq((await reserve(S2, gS2, 'c')).reason, 'facebook_user_quota_reached', 'usage counts the reservation, not the smaller actual cost')
+  // Deleting the first client or flipping its source must not give the allowance back.
+  await db.query(`UPDATE meta_ads_ai_pilot_entitlements SET source='ops' WHERE client_id=$1`, [S1])
+  eq((await reserve(S2, gS2, 'c2')).reason, 'facebook_user_quota_reached', 'changing the source does not reset usage')
+  await db.query(`UPDATE meta_ads_ai_pilot_entitlements SET source='self_serve' WHERE client_id=$1`, [S1])
+  await db.query('DELETE FROM meta_ads_ai_analysis_jobs WHERE id=$1', [r1.job_id])
+  eq((await reserve(S2, gS2, 'c3')).reason, 'facebook_user_quota_reached', 'deleting the job/client rows does not reset usage (ledger has no FK)')
   await db.query(`UPDATE meta_ads_ai_quota_config SET cap_usd = 1.0 WHERE scope = 'facebook_user'`)
+
+  // Two sessions racing for the last slot: exactly one wins.
+  await db.query(`UPDATE meta_ads_ai_quota_config SET cap_usd = 0.36 WHERE scope = 'facebook_user'`)
+  const c1 = await connect(), c2 = await connect()
+  const gRaceA = await grant(S1, await connect_(S1, '999'), 'act_1000000009')
+  const gRaceB = await grant(S3, await connect_(S3, '999'), 'act_1000000008')
+  await reserve(S1, gRaceA, 'q'); await reserve(S3, gRaceB, 'r')
+  await c1.query('BEGIN'); await c2.query('BEGIN')
+  const ra = (await c1.query(`SELECT meta_ads_reserve_sponsored_analysis($1,$1,$2,$3,'2026-09-01','2026-09-07') AS r`, [S1, gRaceA, 's'.repeat(64)])).rows[0].r
+  const pb = c2.query(`SELECT meta_ads_reserve_sponsored_analysis($1,$1,$2,$3,'2026-09-01','2026-09-07') AS r`, [S3, gRaceB, 't'.repeat(64)])
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  await c1.query('COMMIT')
+  const rb = (await pb).rows[0].r
+  await c2.query('COMMIT')
+  eq([ra.reserved, rb.reason], [true, 'facebook_user_quota_reached'], 'concurrent reservations: the second waits for the lock and sees the first')
+  await db.query(`UPDATE meta_ads_ai_quota_config SET cap_usd = 1.0 WHERE scope = 'facebook_user'`)
+
+  // Snapshot isolation is refused (the locks would not serialise).
+  const c3 = await connect()
+  await c3.query('BEGIN ISOLATION LEVEL REPEATABLE READ')
+  await denied(c3, `SELECT meta_ads_quota_check('2026-09','act_1000000001',$1,0.12)`, [fbKey], '25001')
+  await c3.query('ROLLBACK')
 
   // 3. Same ad account, moved to another self-serve client, shares its monthly allowance.
   await db.query(`UPDATE meta_ads_ai_quota_config SET cap_usd = 0.2 WHERE scope = 'ad_account'`)
@@ -110,6 +145,7 @@ try {
 
   // 4. Platform cap across all self-serve clients; ops clients are not counted nor capped.
   const used = Number((await db.query(`SELECT meta_ads_quota_used(to_char(now() AT TIME ZONE 'UTC','YYYY-MM'),'platform','') AS u`)).rows[0].u)
+  ok(used > 0, 'platform usage is counted from the ledger')
   await db.query(`UPDATE meta_ads_ai_quota_config SET cap_usd = $1 WHERE scope = 'platform'`, [used + 0.05])
   eq((await reserve(S4, gS4, 'f')).reason, 'platform_quota_reached', 'platform cap reached (reported as its own reason)')
   const gM = await grant(M, await connect_(M, '555'), 'act_1000000005')

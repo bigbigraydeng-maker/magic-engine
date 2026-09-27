@@ -4,9 +4,12 @@
 --
 -- 1. Entitlements get a `source`: 'ops' (opened by us — existing rows, and the testers who may
 --    connect Facebook while Meta review is pending) or 'self_serve' (opened by the customer).
--- 2. Jobs remember a one-way key of the Facebook user who ran them (sha256 of the connection's
---    account id at reserve time), so per-person monthly usage survives data deletion (which
---    replaces the account id on the connection) and client deletion does not matter for new rows.
+-- 2. Self-serve usage is written to its own ledger at reserve time (one row per job: the one-way
+--    Facebook user key, the ad account, the reserved amount). It has no foreign key to clients or
+--    jobs, so deleting or blocking a client, changing its entitlement source, or deleting Facebook
+--    data never gives the allowance back (狄仁杰 / 子牙 2026-09-27). Usage counts the reservation
+--    (US$0.12 per report), not the smaller actual cost — conservative and simple (≈8 reports per
+--    person per month under the US$1 cap).
 -- 3. Monthly caps per Facebook user, per ad account and for the whole platform (self-serve only)
 --    live in a small config table so ops can change them without a release.
 -- 4. A blocklist (Facebook user key / ad account id) checked when reserving an analysis
@@ -22,13 +25,16 @@ ALTER TABLE public.meta_ads_ai_pilot_entitlements
   ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'ops'
   CHECK (source IN ('ops', 'self_serve'));
 
-ALTER TABLE public.meta_ads_ai_analysis_jobs
-  ADD COLUMN IF NOT EXISTS facebook_user_key text
-  CHECK (facebook_user_key IS NULL OR facebook_user_key ~ '^[0-9a-f]{64}$');
-CREATE INDEX IF NOT EXISTS meta_ads_ai_analysis_jobs_fb_user_period_idx
-  ON public.meta_ads_ai_analysis_jobs (facebook_user_key, period_key);
-CREATE INDEX IF NOT EXISTS meta_ads_ai_analysis_jobs_account_period_idx
-  ON public.meta_ads_ai_analysis_jobs (ad_account_id, period_key);
+CREATE TABLE IF NOT EXISTS public.meta_ads_ai_quota_usage (
+  job_id uuid PRIMARY KEY,
+  period_key text NOT NULL CHECK (period_key ~ '^\d{4}-\d{2}$'),
+  facebook_user_key text NOT NULL CHECK (facebook_user_key ~ '^[0-9a-f]{64}$'),
+  ad_account_id text NOT NULL CHECK (ad_account_id ~ '^act_[1-9][0-9]{9,24}$'),
+  amount_usd numeric(10,6) NOT NULL CHECK (amount_usd > 0),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS meta_ads_ai_quota_usage_fb_idx ON public.meta_ads_ai_quota_usage (period_key, facebook_user_key);
+CREATE INDEX IF NOT EXISTS meta_ads_ai_quota_usage_account_idx ON public.meta_ads_ai_quota_usage (period_key, ad_account_id);
 
 CREATE TABLE IF NOT EXISTS public.meta_ads_ai_quota_config (
   scope text PRIMARY KEY CHECK (scope IN ('facebook_user', 'ad_account', 'platform')),
@@ -51,6 +57,12 @@ CREATE TABLE IF NOT EXISTS public.meta_ads_ai_blocklist (
   PRIMARY KEY (kind, key)
 );
 
+ALTER TABLE public.meta_ads_ai_quota_usage ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS service_role_full ON public.meta_ads_ai_quota_usage;
+CREATE POLICY service_role_full ON public.meta_ads_ai_quota_usage
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
+REVOKE ALL ON public.meta_ads_ai_quota_usage FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.meta_ads_ai_quota_usage TO service_role;
 ALTER TABLE public.meta_ads_ai_quota_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.meta_ads_ai_blocklist ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS service_role_full ON public.meta_ads_ai_quota_config;
@@ -107,8 +119,9 @@ BEGIN
   END IF;
   IF v_entitlement.expires_at IS NOT NULL AND v_entitlement.expires_at <= now() THEN
     -- Renewal: the revision trigger rotates the revision, so old OAuth/grants never come back.
+    -- sponsored_analysis_enabled is left as ops set it (renewal must not re-enable a switched-off client).
     UPDATE public.meta_ads_ai_pilot_entitlements
-       SET starts_at = now(), expires_at = now() + interval '90 days', sponsored_analysis_enabled = true
+       SET starts_at = now(), expires_at = now() + interval '90 days'
      WHERE client_id = tenant;
     RETURN jsonb_build_object('ok', true, 'result', 'renewed');
   END IF;
@@ -116,20 +129,17 @@ BEGIN
 END;
 $$;
 
--- Sum of money a set of jobs holds this period: running jobs hold their reservation,
--- finished jobs their actual cost.
+-- Self-serve usage this period for one scope, from the ledger (reserved amounts).
 CREATE OR REPLACE FUNCTION public.meta_ads_quota_used(p_period text, p_scope text, p_key text)
 RETURNS numeric
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
-  SELECT coalesce(sum(CASE WHEN j.status = 'running' THEN j.reserved_usd ELSE coalesce(j.actual_cost_usd, 0) END), 0)
-    FROM public.meta_ads_ai_analysis_jobs j
-    JOIN public.meta_ads_ai_pilot_entitlements e ON e.client_id = j.client_id
-   WHERE j.period_key = p_period
-     AND e.source = 'self_serve'
+  SELECT coalesce(sum(u.amount_usd), 0)
+    FROM public.meta_ads_ai_quota_usage u
+   WHERE u.period_key = p_period
      AND CASE p_scope
            WHEN 'platform' THEN true
-           WHEN 'ad_account' THEN j.ad_account_id = p_key
-           WHEN 'facebook_user' THEN j.facebook_user_key = p_key
+           WHEN 'ad_account' THEN u.ad_account_id = p_key
+           WHEN 'facebook_user' THEN u.facebook_user_key = p_key
            ELSE false
          END;
 $$;
@@ -140,6 +150,11 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE
   v_cap numeric;
 BEGIN
+  -- The locks only serialise correctly when each check reads rows committed after the lock
+  -- (READ COMMITTED, the Supabase default); refuse to run under a snapshot isolation (狄仁杰).
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'meta_ads_quota_check requires READ COMMITTED' USING ERRCODE = '25001';
+  END IF;
   -- Fixed lock order: platform → ad account → Facebook user.
   PERFORM pg_advisory_xact_lock(hashtextextended('meta_ads_quota:platform:' || p_period, 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('meta_ads_quota:ad_account:' || p_period || ':' || p_account, 0));
@@ -285,11 +300,15 @@ BEGIN
    WHERE client_id = tenant AND period_key = v_period;
   INSERT INTO public.meta_ads_ai_analysis_jobs (
     client_id, principal_id, grant_id, grant_revision, connection_version, entitlement_revision, ad_account_id,
-    idempotency_key, period_key, window_since, window_until, status, reserved_usd, facebook_user_key
+    idempotency_key, period_key, window_since, window_until, status, reserved_usd
   ) VALUES (
     tenant, principal, grant_id, v_grant.revision, v_connection_version, v_entitlement.revision, v_grant.ad_account_id,
-    request_key, v_period, since_day, until_day, 'running', v_entitlement.sponsored_analysis_reserve_usd, v_fb_key
+    request_key, v_period, since_day, until_day, 'running', v_entitlement.sponsored_analysis_reserve_usd
   ) RETURNING * INTO v_job;
+  IF v_entitlement.source = 'self_serve' THEN
+    INSERT INTO public.meta_ads_ai_quota_usage (job_id, period_key, facebook_user_key, ad_account_id, amount_usd)
+    VALUES (v_job.id, v_period, v_fb_key, v_grant.ad_account_id, v_entitlement.sponsored_analysis_reserve_usd);
+  END IF;
   RETURN jsonb_build_object('reserved', true, 'idempotent', false, 'job_id', v_job.id,
     'status', v_job.status, 'reserve_usd', v_job.reserved_usd);
 END;
