@@ -228,6 +228,12 @@ describe('runLiveRules — reads and failure handling', () => {
     expect(await runLiveRules(ARGS)).toEqual({ source: 'none', reason: 'live_unavailable' })
   })
 
+  it('no time left → live_unavailable without starting any read', async () => {
+    expect(await runLiveRules(ARGS, 0)).toEqual({ source: 'none', reason: 'live_unavailable' })
+    expect(graph.findSharedAdAccounts).not.toHaveBeenCalled()
+    expect(graph.fetchAdSettings).not.toHaveBeenCalled()
+  })
+
   it('reads slower than the budget → live_unavailable', async () => {
     graph.fetchAdSettings.mockReturnValue(new Promise(() => undefined))
     expect(await runLiveRules(ARGS, 20)).toEqual({ source: 'none', reason: 'live_unavailable' })
@@ -243,11 +249,11 @@ describe('runLiveRules — reads and failure handling', () => {
     const changed = await runLiveRules(ARGS)
     expect(changed.source === 'live' && changed.findings).toEqual([])
   })
-  it('account also registered to another client (or the check fails) → not judged, no Graph reads', async () => {
+  it('account also registered to another client → shared_account; the check fails → live_unavailable; no Graph reads either way', async () => {
     graph.findSharedAdAccounts.mockResolvedValue({ shared: new Set(['1']) })
     expect(await runLiveRules(ARGS)).toEqual({ source: 'none', reason: 'shared_account' })
     graph.findSharedAdAccounts.mockResolvedValue({ shared: new Set(['1']), error: 'down' })
-    expect(await runLiveRules(ARGS)).toEqual({ source: 'none', reason: 'shared_account' })
+    expect(await runLiveRules(ARGS)).toEqual({ source: 'none', reason: 'live_unavailable' })
     expect(graph.fetchAdSettings).not.toHaveBeenCalled()
     expect(graph.findSharedAdAccounts).toHaveBeenCalledWith('c', ['act_1'])
   })

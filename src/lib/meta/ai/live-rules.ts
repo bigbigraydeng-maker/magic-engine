@@ -201,8 +201,10 @@ export function liveSection(args: LiveRulesArgs, data: LiveData): RuleSectionInp
 /** Never throws: any failure becomes a 'none' section with an honest reason. */
 export async function runLiveRules(args: LiveRulesArgs, budgetMs = LIVE_RULES_BUDGET_MS): Promise<RuleSectionInput> {
   try {
+    if (budgetMs <= 0) return { source: 'none', reason: 'live_unavailable' }
     const { shared, error } = await findSharedAdAccounts(args.clientId, [args.adAccountId])
-    if (error || shared.size > 0) return { source: 'none', reason: 'shared_account' }
+    if (error) return { source: 'none', reason: 'live_unavailable' }
+    if (shared.size > 0) return { source: 'none', reason: 'shared_account' }
     const data = await withBudget(readLive(args), budgetMs)
     return liveSection(args, data)
   } catch (error) {
