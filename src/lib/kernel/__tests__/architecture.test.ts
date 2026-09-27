@@ -310,6 +310,10 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
    * 2026-09-27：历史 26 条 + seo-meta 三条临时豁免（子牙拍板，SEO 3b · B7 迁走后删）。
    */
   const PROVIDER_WRITE_GRANDFATHERED_FROZEN: readonly string[] = [
+    'src/app/api/clients/[id]/ad-health/stop-loss/route.ts',
+    'src/app/api/clients/[id]/meta-ads/boost-post/route.ts',
+    'src/app/api/clients/[id]/meta-ads/execute/route.ts',
+    'src/app/api/clients/[id]/meta-ads/sync/route.ts',
     'src/app/api/clients/[id]/cms/github/update-page/route.ts',
     'src/app/api/clients/[id]/cms/publish-blog/route.ts',
     'src/app/api/clients/[id]/cms/publish-geo-snippet/route.ts',
@@ -327,6 +331,7 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
     'src/app/api/clients/[id]/reels/[draftId]/publish/route.ts',
     'src/app/api/cms/github/webhook/route.ts',
     'src/app/api/cron/cms-connection-retest/route.ts',
+    'src/app/api/cron/google-data-pullback-daily/route.ts',
     'src/app/api/publer/accounts/route.ts',
     'src/app/api/publer/create-post/route.ts',
     'src/app/api/publer/draft/[assetId]/route.ts',
@@ -335,6 +340,8 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
     'src/lib/cms/page-upgrade-pr-sync.ts',
     'src/lib/flywheel/social-post-publish.ts',
     'src/lib/luban/tools.ts',
+    'src/lib/ads-strategy/daily-insights.ts',
+    'src/lib/ads-strategy/stop-loss.ts',
     'src/lib/seo-meta/cts-meta-pr.ts',
     'src/lib/inngest/functions/seo-meta-cycle.ts',
     'src/lib/seo-meta/cycle/apply-adapter.ts',
@@ -351,6 +358,8 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
     '@/lib/gbp/publisher',
     '@/lib/gsc/indexing-client',
     '@/lib/gsc/sitemap-ping',
+    '@/lib/meta/adsets',
+    '@/lib/meta/client',
   ]
 
   it('🔴 历史清单只准变短：跟冻结清单比集合，多出来的先问子牙', () => {

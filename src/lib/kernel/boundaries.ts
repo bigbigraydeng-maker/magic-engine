@@ -79,6 +79,12 @@ export const PROVIDER_WRITE_GRANDFATHERED = [
   'src/lib/luban/tools.ts',
   'src/lib/seo-meta/cts-meta-pr.ts',
   'src/app/api/clients/[id]/ad-health/stop-loss/route.ts',
+  'src/app/api/clients/[id]/meta-ads/boost-post/route.ts',
+  'src/app/api/clients/[id]/meta-ads/execute/route.ts',
+  'src/app/api/clients/[id]/meta-ads/sync/route.ts',
+  'src/app/api/cron/google-data-pullback-daily/route.ts',
+  'src/lib/ads-strategy/daily-insights.ts',
+  'src/lib/ads-strategy/stop-loss.ts',
   // ⏳ 临时豁免，不是历史存量（2026-09-27 子牙拍板）。SEO 标题周循环 v1（9ea7af58，2026-09-20）
   //    进主干时没有任何 CI 跑这个测试，于是这三个文件绕过执行内核直接用 github-client，
   //    能在客户网站仓库里建分支、开 PR、合并，不经 Kernel 授权、不留 Kernel 回执
