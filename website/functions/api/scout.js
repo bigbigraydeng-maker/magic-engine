@@ -1,298 +1,280 @@
-/* POST /api/scout
-   Receives: { url: string, noWebsite?: { what, where, who } }
-   Returns:  { leadId, market, teaser, totalCount, summary, topOpportunity }
+/* POST /api/scout — the free website check (Magic Engine Tools Lab).
+   Receives: { url?: string, noWebsite?: { what, where, who }, lang?: 'en' | 'zh', attribution? }
+   Returns:  { leadId, market, context, lang, source, reused, teaser, totalCount, summary, topOpportunity }
+   Errors:   { error, code } with code in
+             forbidden | bad_request | no_visitor | invalid_url | unreachable | not_html | challenge |
+             too_little_text | redirected_away | daily_limit | monthly_limit | unavailable | analysis_failed
+   Design: docs/specs/2026-09-27-tools-lab-step2-site-diagnosis-design.md §6.
+   Never returns a diagnosis that is not based on the real homepage or on the visitor's own answers.
 */
+
+import {
+  LIMITS, MAX_FIELD_CHARS, QuotaUnavailable, consumeQuota, dayStartUtc, fetchRealHomepage, isAllowedOrigin,
+  monthStartUtc, pruneOldVisitorKeys, siteHost, vetUrl, visitorKey,
+} from '../_shared/site-check.js';
 
 const LOCALES = {
   AU: {
     name: 'Australia', fyEnd: '30 June', gst: '10%',
     platforms: ['Gumtree', 'Facebook Marketplace', 'Seek', 'Google Maps', 'Yellow Pages'],
-    moments: ['EOFY (30 Jun)', 'Australia Day', 'ANZAC Day', 'Melbourne Cup', 'Christmas in July'],
   },
   NZ: {
     name: 'New Zealand', fyEnd: '31 March', gst: '15%',
     platforms: ['TradeMe', 'Facebook Marketplace', 'Seek', 'Google Maps', 'Neighbourly'],
-    moments: ['EOFY (31 Mar)', 'Waitangi Day', 'ANZAC Day', 'Matariki', 'NZ Christmas summer'],
   },
 };
 
-const ATTRIBUTION_KEYS = [
-  'utm_source',
-  'utm_medium',
-  'utm_campaign',
-  'utm_term',
-  'utm_content',
-  'entry_offer',
-  'entry_page',
-  'referrer',
-];
+const ATTRIBUTION_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'entry_offer', 'entry_page', 'referrer'];
+
+const CORS = { 'Access-Control-Allow-Origin': 'https://magicengine.com.au', 'Content-Type': 'application/json' };
+
+function reply(status, payload) {
+  return new Response(JSON.stringify(payload), { status, headers: CORS });
+}
+
+function fail(status, code) {
+  return reply(status, { error: code, code });
+}
 
 function normaliseAttribution(input) {
   if (!input || typeof input !== 'object') return null;
-
   const out = {};
-  ATTRIBUTION_KEYS.forEach(key => {
+  ATTRIBUTION_KEYS.forEach((key) => {
     const value = typeof input[key] === 'string' ? input[key].trim().slice(0, 300) : '';
     if (value) out[key] = value;
   });
-
   return Object.keys(out).length > 0 ? out : null;
 }
 
 function detectMarket(hostname) {
   const h = (hostname || '').toLowerCase();
-  if (h.endsWith('.nz') || h.includes('.co.nz')) return 'NZ';
+  if (h.endsWith('.nz')) return 'NZ';
   return 'AU';
 }
 
-function extractText(html) {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+function cleanAnswers(noWebsite) {
+  if (!noWebsite || typeof noWebsite !== 'object') return null;
+  const pick = (v) => (typeof v === 'string' ? v.trim().slice(0, MAX_FIELD_CHARS) : '');
+  const answers = { what: pick(noWebsite.what), where: pick(noWebsite.where), who: pick(noWebsite.who) };
+  return answers.what || answers.where || answers.who ? answers : null;
 }
 
-function buildPrompt(locale, pageText, hostname) {
-  return `You are 张骞, a local business reconnaissance analyst for ${locale.name}.
+/** 'anz' = Australian / New Zealand local business context; 'export' = selling overseas, no country rules. */
+function pickContext(lang, hostname) {
+  if (lang !== 'zh') return 'anz';
+  const h = (hostname || '').toLowerCase();
+  return h.endsWith('.au') || h.endsWith('.nz') ? 'anz' : 'export';
+}
 
-Analyse the business from its homepage. Be specific and locally accurate.
-
-Locale rules:
-- Market: ${locale.name}
-- Financial year ends: ${locale.fyEnd} (CRITICAL: use this, not another country's date)
-- GST rate: ${locale.gst}
-- Key local platforms: ${locale.platforms.join(', ')}
-- Key local seasonal moments: ${locale.moments.join(', ')}
-- Use AU/NZ English spelling (colour, optimise, analyse, etc.)
-
-Business domain: ${hostname || 'unknown'}
-Homepage text (first 8000 chars):
----
-${pageText}
----
-
-Return ONLY valid JSON, no markdown, no explanation:
-{
-  "summary": "2-sentence honest summary of business digital visibility",
-  "market": "${locale.name === 'Australia' ? 'AU' : 'NZ'}",
+const JSON_SHAPE = `{
+  "summary": "…",
   "findings": [
-    {
-      "severity": "NOW|GAP|GOOD",
-      "title": "short title (max 8 words)",
-      "desc": "specific observation with local context (2-3 sentences)",
-      "fix": "concrete actionable recommendation"
-    }
+    { "severity": "NOW|GAP|GOOD", "title": "…", "desc": "…", "fix": "…", "where": "…" }
   ],
-  "top_opportunity": {
-    "title": "headline opportunity",
-    "draft_cta": "CTA button text"
+  "top_opportunity": { "title": "…" }
+}`;
+
+function buildPrompt({ lang, context, market, text, hostname, source }) {
+  const locale = LOCALES[market];
+  const evidence = source === 'answers'
+    ? `The visitor has no website. Their own answers:\n${text}`
+    : `Homepage of ${hostname} (visible text, first 8000 characters):\n---\n${text}\n---`;
+  const common = [
+    'Only describe what is actually present in the material above, and say where you saw it (e.g. "homepage header", "footer").',
+    'If something is not present, say it was not found; never guess.',
+    'Do not claim anything about Google rankings, AI assistants, social media, reviews or traffic: none of that was checked.',
+    '5–7 findings, most important first (NOW, then GAP, then GOOD). NOW = hurting enquiries today; GAP = missed opportunity; GOOD = strength.',
+    `Return ONLY valid JSON in this shape, no markdown:\n${JSON_SHAPE}`,
+  ];
+  if (lang === 'zh' && context === 'export') {
+    return [
+      '你是一位懂外贸的老朋友，帮一家往海外卖货的企业看它的网站首页。用简体中文、大白话写，不用术语；遇到 SEO 这类词当场用一句话解释。',
+      '重点看三件事：海外买家看不看得懂（英文是否清楚、有没有产品参数）、信不信得过（认证、工厂或团队实拍、公司信息）、能不能马上联系上（WhatsApp、邮箱、询盘表单是否好找，手机上是否好用）。',
+      '每条按「问题 → 会让你少什么询盘 → 今天能怎么改」来写。不要写任何国家的税率、财年或本地平台。',
+      evidence,
+      ...common,
+      'summary、title、desc、fix、where、top_opportunity.title 全部用简体中文。',
+    ].join('\n\n');
   }
+  if (lang === 'zh') {
+    return [
+      `你帮一家在${locale.name === 'Australia' ? '澳大利亚' : '新西兰'}做生意的华人企业看它的网站首页。用简体中文、大白话写，不用术语。`,
+      '重点看：本地客人能不能一眼看懂你做什么、在哪里、怎么预约或联系；有没有让人信任的信息。只有首页真的提到时才谈本地节日、平台或税务。',
+      evidence,
+      ...common,
+      'summary、title、desc、fix、where、top_opportunity.title 全部用简体中文。',
+    ].join('\n\n');
+  }
+  return [
+    `You are a local business analyst for ${locale.name}. Use AU/NZ English spelling.`,
+    `Local context you may use only when the material is relevant to it: financial year ends ${locale.fyEnd}, GST ${locale.gst}, local platforms ${locale.platforms.join(', ')}.`,
+    evidence,
+    ...common,
+  ].join('\n\n');
 }
 
-Rules:
-- 5–7 findings, ordered priority (NOW first, then GAP, then GOOD)
-- At least one finding references ${locale.name}-specific context (${locale.fyEnd} EOFY, GST ${locale.gst}, or local platforms)
-- Do NOT invent facts not supported by homepage; note uncertainty in desc
-- severity NOW = urgent issue harming them today; GAP = missed opportunity; GOOD = strength to build on`;
-}
-
-function getDemoFindings(market) {
+function validFindings(parsed) {
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.findings)) return null;
+  const findings = parsed.findings
+    .filter((f) => f && typeof f.title === 'string' && typeof f.desc === 'string')
+    .slice(0, 8)
+    .map((f) => ({
+      severity: ['NOW', 'GAP', 'GOOD'].includes(f.severity) ? f.severity : 'GAP',
+      title: f.title.slice(0, 200),
+      desc: f.desc.slice(0, 1200),
+      fix: typeof f.fix === 'string' ? f.fix.slice(0, 800) : '',
+      where: typeof f.where === 'string' ? f.where.slice(0, 200) : '',
+    }));
+  if (findings.length === 0) return null;
   return {
-    summary: 'We could not fetch the homepage — here is a general analysis based on common patterns.',
-    market,
-    findings: [
-      {
-        severity: 'NOW',
-        title: 'Not appearing in AI assistant answers',
-        desc: `When customers ask ChatGPT or Google's AI Overview for services like yours in ${market === 'NZ' ? 'New Zealand' : 'Australia'}, businesses with structured content appear. Without it, you're invisible at the moment of intent.`,
-        fix: 'Add FAQ content and structured data so AI assistants can cite your business.',
-      },
-      {
-        severity: 'GAP',
-        title: `${market === 'NZ' ? 'EOFY (31 March NZ)' : 'EOFY (30 June AU)'} window approaching`,
-        desc: `End-of-financial-year is a peak buying period. Businesses that build visibility before the ${market === 'NZ' ? 'March' : 'June'} deadline capture a disproportionate share of decision-ready customers.`,
-        fix: 'Start EOFY content and ad campaigns at least 6 weeks before the financial year ends.',
-      },
-      {
-        severity: 'GAP',
-        title: 'Google Business Profile incomplete',
-        desc: "'Near me' and local searches are the highest-converting search type. An incomplete Google Business Profile suppresses local rankings across Google Search and Maps.",
-        fix: 'Add photos, complete all service fields, post weekly updates, and respond to recent reviews.',
-      },
-    ],
-    top_opportunity: { title: 'AI + EOFY visibility sprint', draft_cta: 'Draft my campaign →' },
+    summary: typeof parsed.summary === 'string' ? parsed.summary.slice(0, 800) : '',
+    findings,
+    top_opportunity: parsed.top_opportunity && typeof parsed.top_opportunity.title === 'string'
+      ? { title: parsed.top_opportunity.title.slice(0, 200) } : null,
   };
 }
 
-async function storeLead(env, { url, market, findings, noWebsite, attribution }) {
-  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
-    // Return a stub ID when Supabase isn't configured
-    return { id: `demo-${Date.now()}` };
-  }
-
-  const cleanAttribution = normaliseAttribution(attribution);
-  const body = JSON.stringify({
-    url: url || '',
-    market,
-    findings,
-    no_website_answers: noWebsite || null,
-    status: 'scouted',
-    ...(cleanAttribution || {}),
-    attribution: cleanAttribution,
-    referrer: cleanAttribution?.referrer || null,
+async function callModel(env, prompt) {
+  const base = env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
+  const r = await fetch(`${base}/v1/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1500, messages: [{ role: 'user', content: prompt }] }),
+    signal: AbortSignal.timeout(55000),
   });
+  if (!r.ok) throw new Error(`model ${r.status}`);
+  const d = await r.json();
+  const raw = d.content?.[0]?.text || '';
+  const m = raw.match(/\{[\s\S]*\}/);
+  return validFindings(JSON.parse(m ? m[0] : raw));
+}
 
+function restHeaders(env, extra = {}) {
+  return { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, ...extra };
+}
+
+/** A result for the same site, language and context in the last 24 hours (never returns someone else's lead id). */
+async function recentResult(env, siteKey) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return null;
+  const since = new Date(Date.now() - 86_400_000).toISOString();
+  const q = `select=findings,market,url&attribution->>site_key=eq.${encodeURIComponent(siteKey)}&created_at=gt.${encodeURIComponent(since)}&findings=not.is.null&order=created_at.desc&limit=1`;
+  try {
+    const res = await fetch(`${env.SUPABASE_URL}/rest/v1/discovery_leads?${q}`, { headers: restHeaders(env) });
+    if (!res.ok) return null;
+    const rows = await res.json();
+    const row = rows?.[0];
+    return row && validFindings(row.findings) ? row : null;
+  } catch {
+    return null;
+  }
+}
+
+async function storeLead(env, { url, market, findings, answers, attribution }) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return null;
+  const clean = normaliseAttribution(attribution) || {};
   const res = await fetch(`${env.SUPABASE_URL}/rest/v1/discovery_leads`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': env.SUPABASE_SERVICE_KEY,
-      'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-      'Prefer': 'return=representation',
-    },
-    body,
-  });
-
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    console.error('Supabase insert error:', res.status, txt);
-    return { id: `fallback-${Date.now()}` };
+    headers: restHeaders(env, { 'Content-Type': 'application/json', Prefer: 'return=representation' }),
+    body: JSON.stringify({
+      url: url || '',
+      market,
+      findings,
+      no_website_answers: answers,
+      status: 'scouted',
+      ...clean,
+      referrer: clean.referrer || null,
+      attribution: { ...clean, ...findings.meta },
+    }),
+  }).catch(() => null);
+  if (!res || !res.ok) {
+    console.error('site-check lead insert failed', res ? res.status : 'network');
+    return null;
   }
+  const rows = await res.json().catch(() => []);
+  return rows?.[0]?.id || null;
+}
 
-  const rows = await res.json();
-  return rows[0] || { id: `unknown-${Date.now()}` };
+function publicResult({ leadId, market, findings, reused }) {
+  return {
+    leadId,
+    market,
+    context: findings.context,
+    lang: findings.lang,
+    source: findings.source,
+    reused,
+    teaser: findings.findings.slice(0, 3),
+    totalCount: findings.findings.length,
+    summary: findings.summary,
+    topOpportunity: findings.top_opportunity,
+  };
 }
 
 export async function onRequestPost(context) {
   const { request, env } = context;
-
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Content-Type': 'application/json',
-  };
-
+  if (!isAllowedOrigin(request)) return fail(403, 'forbidden');
   try {
-    const body = await request.json();
-    const { url, noWebsite } = body;
-    const attribution = normaliseAttribution(body.attribution);
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object') return fail(400, 'bad_request');
+    const lang = body.lang === 'zh' ? 'zh' : 'en';
+    const answers = body.url ? null : cleanAnswers(body.noWebsite);
+    const url = body.url ? vetUrl(body.url) : null;
+    if (body.url && !url) return fail(400, 'invalid_url');
+    if (!url && !answers) return fail(400, 'bad_request');
 
-    if (!url && !noWebsite) {
-      return new Response(JSON.stringify({ error: 'url or noWebsite required' }), {
-        status: 400, headers: corsHeaders,
-      });
-    }
+    const key = await visitorKey(request, env);
+    if (!key) return fail(400, 'no_visitor');
 
-    // Parse hostname and detect market
-    let hostname = '';
-    let market = 'AU';
-    if (url) {
-      try {
-        const parsed = new URL(url.startsWith('http') ? url : `https://${url}`);
-        hostname = parsed.hostname;
-        market = detectMarket(hostname);
-      } catch { /* ignore bad URL */ }
-    }
-    const locale = LOCALES[market];
+    const hostname = url ? url.hostname : '';
+    const market = detectMarket(hostname);
+    const ctx = pickContext(lang, hostname);
+    const siteKey = url ? `${siteHost(hostname)}|${lang}|${ctx}` : null;
 
-    // Fetch homepage text
-    let pageText = '';
-    if (url) {
-      try {
-        const fetchUrl = url.startsWith('http') ? url : `https://${url}`;
-        const pageRes = await fetch(fetchUrl, {
-          signal: AbortSignal.timeout(12000),
-          headers: { 'User-Agent': 'MagicEngineScout/1.0 (+https://magicengine.com.au)' },
-        });
-        const html = await pageRes.text();
-        pageText = extractText(html).slice(0, 8000);
-      } catch (fetchErr) {
-        console.warn('Page fetch failed:', fetchErr.message);
+    // Same site checked in the last 24h: reuse the result in a NEW lead row. Costs nothing, uses no quota.
+    if (siteKey) {
+      const recent = await recentResult(env, siteKey);
+      if (recent) {
+        const copy = { ...recent.findings, reused: true };
+        const leadId = await storeLead(env, { url: url.toString(), market, findings: copy, answers: null, attribution: body.attribution });
+        return reply(200, publicResult({ leadId, market, findings: copy, reused: true }));
       }
     }
 
-    if (!pageText && noWebsite) {
-      pageText = [
-        noWebsite.what  ? `Business type: ${noWebsite.what}` : '',
-        noWebsite.where ? `Service area: ${noWebsite.where}` : '',
-        noWebsite.who   ? `Target customers: ${noWebsite.who}` : '',
-      ].filter(Boolean).join('. ');
+    // Only a real, readable homepage (or the visitor's own answers) goes to the model.
+    let text;
+    let source;
+    if (url) {
+      const page = await fetchRealHomepage(url.toString());
+      if (!page.ok) return fail(422, page.reason);
+      text = page.text;
+      source = 'homepage';
+    } else {
+      text = [`Business: ${answers.what}`, `Where: ${answers.where}`, `Customers: ${answers.who}`].join('\n');
+      source = 'answers';
     }
 
-    if (!pageText) {
-      pageText = `Domain: ${hostname || url}. No homepage text available.`;
-    }
-
-    // Call Anthropic (via CF AI Gateway if configured)
-    const anthropicBase = env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
-    const prompt = buildPrompt(locale, pageText, hostname);
-
-    let findings;
-    let retried = false;
-
-    async function callClaude() {
-      const r = await fetch(`${anthropicBase}/v1/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': env.ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 1500,
-          messages: [{ role: 'user', content: prompt }],
-        }),
-        signal: AbortSignal.timeout(55000),
-      });
-      if (!r.ok) throw new Error(`Anthropic ${r.status}`);
-      const d = await r.json();
-      return d.content?.[0]?.text || '';
-    }
-
+    // Charge the quota BEFORE the paid call; if the counter cannot be read, refuse.
     try {
-      const raw = await callClaude();
-      const jsonMatch = raw.match(/\{[\s\S]*\}/);
-      findings = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
-    } catch (e1) {
-      if (!retried) {
-        retried = true;
-        try {
-          const raw2 = await callClaude();
-          const m = raw2.match(/\{[\s\S]*\}/);
-          findings = JSON.parse(m ? m[0] : raw2);
-        } catch {
-          findings = getDemoFindings(market);
-        }
-      } else {
-        findings = getDemoFindings(market);
-      }
+      if (!(await consumeQuota(env, 'site_check_ip', key, dayStartUtc(), LIMITS.checkPerVisitorPerDay))) return fail(429, 'daily_limit');
+      if (!(await consumeQuota(env, 'site_check_month', 'all', monthStartUtc(), LIMITS.checkPerMonth))) return fail(429, 'monthly_limit');
+    } catch (err) {
+      if (err instanceof QuotaUnavailable) return fail(503, 'unavailable');
+      throw err;
     }
+    context.waitUntil?.(pruneOldVisitorKeys(env));
 
-    // Store lead
-    const lead = await storeLead(env, { url, market, findings, noWebsite, attribution });
+    const prompt = buildPrompt({ lang, context: ctx, market, text, hostname, source });
+    let result = null;
+    for (let attempt = 0; attempt < 2 && !result; attempt += 1) {
+      try { result = await callModel(env, prompt); } catch { result = null; }
+    }
+    if (!result) return fail(502, 'analysis_failed');
 
-    const teaser = (findings.findings || []).slice(0, 3);
-
-    return new Response(
-      JSON.stringify({
-        leadId: lead.id,
-        market,
-        teaser,
-        totalCount: (findings.findings || []).length,
-        summary: findings.summary || '',
-        topOpportunity: findings.top_opportunity || null,
-      }),
-      { status: 200, headers: corsHeaders }
-    );
-
+    const findings = { ...result, lang, context: ctx, source, reused: false, meta: { tool: 'site-check', site_key: siteKey, lang, context: ctx } };
+    const leadId = await storeLead(env, { url: url ? url.toString() : '', market, findings, answers, attribution: body.attribution });
+    return reply(200, publicResult({ leadId, market, findings, reused: false }));
   } catch (err) {
-    console.error('Scout fatal error:', err);
-    return new Response(
-      JSON.stringify({ error: 'Scout failed — try again', demo: true }),
-      { status: 502, headers: corsHeaders }
-    );
+    console.error('site-check fatal error:', err instanceof Error ? err.message : String(err));
+    return fail(500, 'analysis_failed');
   }
 }
 
@@ -300,7 +282,7 @@ export async function onRequestOptions() {
   return new Response(null, {
     status: 204,
     headers: {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': 'https://magicengine.com.au',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     },

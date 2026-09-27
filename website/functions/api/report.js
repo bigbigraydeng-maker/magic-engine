@@ -1,239 +1,181 @@
-/* POST /api/report
+/* POST /api/report — email the full free website check to the visitor.
    Receives: { leadId: string, email: string, consent: boolean }
-   Returns:  { ok: true }
-   Flow: fetch lead → render HTML email → send via Resend → update Supabase
+   Returns:  { ok: true } | { error, code } with code in
+             forbidden | bad_request | invalid_email | consent_required | no_visitor | report_not_ready |
+             already_sent | daily_limit | unavailable | send_failed
+   Guards (docs/specs/2026-09-27-tools-lab-step2-site-diagnosis-design.md §6 C):
+   one email per lead (claimed atomically before sending), at most 5 per visitor per day, official site only,
+   every value from the address or the model is escaped, and the email never carries links taken from site content.
 */
 
-const LOCALE_LABEL = { AU: 'Australia', NZ: 'New Zealand' };
+import { LIMITS, QuotaUnavailable, consumeQuota, dayStartUtc, escapeHtml, isAllowedOrigin, visitorKey } from '../_shared/site-check.js';
+
+const CORS = { 'Access-Control-Allow-Origin': 'https://magicengine.com.au', 'Content-Type': 'application/json' };
+const LAB_URL = 'https://magicengine.com.au/cn/lab/';
+
+function reply(status, payload) {
+  return new Response(JSON.stringify(payload), { status, headers: CORS });
+}
+function fail(status, code) {
+  return reply(status, { error: code, code });
+}
 
 function isValidEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  return typeof email === 'string' && email.length <= 200 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function restHeaders(env, extra = {}) {
+  return { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, ...extra };
 }
 
 async function getLead(env, leadId) {
-  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return null;
-  const res = await fetch(
-    `${env.SUPABASE_URL}/rest/v1/discovery_leads?id=eq.${encodeURIComponent(leadId)}&select=*`,
-    {
-      headers: {
-        'apikey': env.SUPABASE_SERVICE_KEY,
-        'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-      },
-    }
-  );
+  const res = await fetch(`${env.SUPABASE_URL}/rest/v1/discovery_leads?id=eq.${encodeURIComponent(leadId)}&select=id,url,market,status,findings`, { headers: restHeaders(env) });
   if (!res.ok) return null;
   const rows = await res.json();
   return rows?.[0] || null;
 }
 
-async function updateLead(env, leadId, email) {
-  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return;
-  await fetch(
-    `${env.SUPABASE_URL}/rest/v1/discovery_leads?id=eq.${encodeURIComponent(leadId)}`,
-    {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': env.SUPABASE_SERVICE_KEY,
-        'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-      },
-      body: JSON.stringify({ email, status: 'report_sent', consent_at: new Date().toISOString() }),
+/** Atomically move scouted → report_sent for this lead. Returns true only for the one caller that wins. */
+async function claimLead(env, leadId, email) {
+  const res = await fetch(`${env.SUPABASE_URL}/rest/v1/discovery_leads?id=eq.${encodeURIComponent(leadId)}&status=eq.scouted`, {
+    method: 'PATCH',
+    headers: restHeaders(env, { 'Content-Type': 'application/json', Prefer: 'return=representation' }),
+    body: JSON.stringify({ email, status: 'report_sent', consent_at: new Date().toISOString() }),
+  });
+  if (!res.ok) return false;
+  const rows = await res.json().catch(() => []);
+  return Array.isArray(rows) && rows.length === 1;
+}
+
+async function releaseLead(env, leadId) {
+  await fetch(`${env.SUPABASE_URL}/rest/v1/discovery_leads?id=eq.${encodeURIComponent(leadId)}&status=eq.report_sent`, {
+    method: 'PATCH',
+    headers: restHeaders(env, { 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
+    body: JSON.stringify({ email: null, status: 'scouted', consent_at: null }),
+  }).catch(() => undefined);
+}
+
+const SEVERITY = {
+  en: { NOW: ['#E07B39', 'Act now'], GAP: ['#BE8A2E', 'Gap found'], GOOD: ['#1F7A55', 'Looking good'] },
+  zh: { NOW: ['#E07B39', '先改这条'], GAP: ['#BE8A2E', '可以补上'], GOOD: ['#1F7A55', '做得好'] },
+};
+
+function siteLabel(url) {
+  try { return new URL(url).hostname; } catch { return ''; }
+}
+
+/** Exported for tests. Every interpolated value goes through escapeHtml; no links come from site content. */
+export function buildEmail(lead) {
+  const f = lead.findings || {};
+  const lang = f.lang === 'zh' ? 'zh' : 'en';
+  const findings = Array.isArray(f.findings) ? f.findings : [];
+  const site = siteLabel(lead.url) || (lang === 'zh' ? '你的业务' : 'your business');
+  const sev = SEVERITY[lang];
+  const items = findings.map((x) => {
+    const [colour, label] = sev[x.severity] || sev.GAP;
+    const where = x.where ? `<div style="font-size:12px;color:#888;margin-top:6px;">${lang === 'zh' ? '在哪里看到：' : 'Seen on: '}${escapeHtml(x.where)}</div>` : '';
+    return `<div style="border:1px solid rgba(22,24,29,.08);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
+      <div style="font-size:12px;font-weight:700;color:${colour};margin-bottom:6px;">${escapeHtml(label)}</div>
+      <div style="font-size:15px;font-weight:700;color:#16181D;margin-bottom:6px;">${escapeHtml(x.title)}</div>
+      <div style="font-size:14px;color:#555;line-height:1.65;">${escapeHtml(x.desc)}</div>
+      ${x.fix ? `<div style="font-size:14px;color:#16181D;line-height:1.65;margin-top:8px;"><strong>${lang === 'zh' ? '怎么改：' : 'What to do: '}</strong>${escapeHtml(x.fix)}</div>` : ''}
+      ${where}
+    </div>`;
+  }).join('');
+  const fromAnswers = f.source === 'answers';
+  const t = lang === 'zh'
+    ? {
+      subject: `你的网站诊断结果：${site}，共 ${findings.length} 条建议`,
+      hello: '你好，',
+      intro: fromAnswers
+        ? `这是 Magic Engine 根据你填写的业务介绍写的免费建议（我们没有看过网站），按重要程度排好了。`
+        : `这是 Magic Engine 对 ${escapeHtml(site)} 首页的免费诊断，按「最影响客户联系你」的顺序排好了。`,
+      heading: '诊断结果',
+      outro: '看完不知道先改哪条？直接回复这封邮件跟我们聊，可以用中文。',
+      footer: `你收到这封邮件，是因为你在 Magic Engine 工具实验室（${LAB_URL}）用了免费网站诊断。`,
+      html: 'zh-CN',
     }
-  );
-}
-
-function severityColour(sev) {
-  if (sev === 'NOW')  return '#E07B39';
-  if (sev === 'GAP')  return '#BE8A2E';
-  if (sev === 'GOOD') return '#1F7A55';
-  return '#BE8A2E';
-}
-
-function severityLabel(sev) {
-  if (sev === 'NOW')  return '⚡ Act now';
-  if (sev === 'GAP')  return '⚠ Gap found';
-  if (sev === 'GOOD') return '✓ Looking good';
-  return sev;
-}
-
-function buildEmail({ lead, email }) {
-  const findings = lead?.findings?.findings || [];
-  const market = lead?.market || 'AU';
-  const url = lead?.url || '';
-  const marketName = LOCALE_LABEL[market] || market;
-  const fyEnd = market === 'NZ' ? '31 March' : '30 June';
-  const gst = market === 'NZ' ? '15%' : '10%';
-  const summary = lead?.findings?.summary || '';
-  const topOpp = lead?.findings?.top_opportunity;
-
-  const findingsHtml = findings.map(f => `
-    <div style="background:#fff;border-radius:12px;padding:20px 24px;border-left:4px solid ${severityColour(f.severity)};margin-bottom:14px;">
-      <div style="font-size:11px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:${severityColour(f.severity)};margin-bottom:6px;">${severityLabel(f.severity)}</div>
-      <div style="font-size:16px;font-weight:600;color:#16181D;margin-bottom:6px;">${f.title || ''}</div>
-      <div style="font-size:14px;color:#555;line-height:1.65;">${f.desc || ''}</div>
-      ${f.fix ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #eee;font-size:13px;color:#1F7A55;font-weight:500;">→ ${f.fix}</div>` : ''}
-    </div>`).join('');
-
-  const subject = topOpp?.title
-    ? `${topOpp.title} — your Magic Engine report is here`
-    : `Your ${marketName} visibility report is ready — Magic Engine`;
-
+    : {
+      subject: `Your website check for ${site} — ${findings.length} findings`,
+      hello: 'Hi there,',
+      intro: fromAnswers
+        ? 'Here is Magic Engine\'s free advice based on the business details you entered (we did not look at a website).'
+        : `Here is Magic Engine's free check of the ${escapeHtml(site)} homepage, most important first.`,
+      heading: 'Your findings',
+      outro: 'Not sure where to start? Just reply to this email.',
+      footer: 'You received this because you ran the free website check at magicengine.com.au.',
+      html: 'en',
+    };
+  const summary = f.summary ? `<div style="background:#FBF5E8;border-radius:12px;padding:16px 20px;margin-bottom:24px;font-size:14px;color:#9A6F1E;line-height:1.65;">${escapeHtml(f.summary)}</div>` : '';
   const body = `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your Magic Engine Report</title></head>
-<body style="margin:0;padding:0;background:#F0EFE9;font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#F0EFE9;padding:40px 20px;">
-    <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
-
-        <!-- Header -->
-        <tr><td style="background:#16181D;border-radius:18px 18px 0 0;padding:32px 40px;">
-          <div style="font-size:22px;font-weight:700;color:#FBFAF7;margin-bottom:4px;">Magic Engine</div>
-          <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.35);">张骞 Discovery Report</div>
-        </td></tr>
-
-        <!-- Body -->
-        <tr><td style="background:#FBFAF7;padding:36px 40px;border-radius:0 0 18px 18px;">
-
-          <p style="font-size:15px;color:#16181D;margin:0 0 8px;">Hi there,</p>
-          <p style="font-size:15px;color:#555;line-height:1.7;margin:0 0 28px;">
-            Here is your personalised 张骞 Discovery report for
-            <strong style="color:#16181D;">${url || 'your business'}</strong>
-            — analysed for the <strong>${marketName}</strong> market
-            (EOFY: <strong>${fyEnd}</strong>, GST: <strong>${gst}</strong>).
-          </p>
-
-          ${summary ? `<div style="background:#FBF5E8;border-radius:12px;padding:18px 22px;margin-bottom:28px;font-size:14px;color:#9A6F1E;line-height:1.65;">${summary}</div>` : ''}
-
-          <h2 style="font-size:18px;font-weight:700;color:#16181D;margin:0 0 16px;">Your findings</h2>
-          ${findingsHtml || '<p style="color:#888;">No findings available.</p>'}
-
-          ${topOpp ? `
-          <div style="background:#16181D;border-radius:14px;padding:28px 32px;margin:28px 0;text-align:center;">
-            <div style="font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,.4);margin-bottom:8px;">Top opportunity</div>
-            <div style="font-size:18px;font-weight:700;color:#FBFAF7;margin-bottom:20px;">${topOpp.title}</div>
-            <a href="https://app.magicengine.com.au/portal/login?next=/prospect" style="display:inline-block;padding:13px 28px;background:#BE8A2E;color:#fff;font-weight:600;font-size:15px;border-radius:10px;text-decoration:none;">Open your report →</a>
-          </div>` : ''}
-
-          <hr style="border:none;border-top:1px solid rgba(22,24,29,.08);margin:28px 0;">
-
-          <p style="font-size:13px;color:#888;line-height:1.65;margin:0;">
-            Magic Engine — AI-era visibility for ${marketName} businesses.<br>
-            <a href="https://magicengine.com.au/privacy" style="color:#BE8A2E;">Privacy Policy</a> ·
-            <a href="https://magicengine.com.au/terms" style="color:#BE8A2E;">Terms</a> ·
-            You received this because you ran a free discovery at magicengine.com.au.
-          </p>
-
-        </td></tr>
-
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`;
-
-  return { subject, body };
+<html lang="${t.html}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Magic Engine</title></head>
+<body style="margin:0;padding:0;background:#F0EFE9;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei','Inter',sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F0EFE9;padding:32px 16px;"><tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+<tr><td style="background:#16181D;border-radius:18px 18px 0 0;padding:28px 36px;"><div style="font-size:22px;font-weight:700;color:#FBFAF7;">Magic Engine</div></td></tr>
+<tr><td style="background:#FBFAF7;padding:32px 36px;border-radius:0 0 18px 18px;">
+<p style="font-size:15px;color:#16181D;margin:0 0 8px;">${t.hello}</p>
+<p style="font-size:15px;color:#555;line-height:1.7;margin:0 0 24px;">${t.intro}</p>
+${summary}
+<h2 style="font-size:18px;font-weight:700;color:#16181D;margin:0 0 14px;">${t.heading}</h2>
+${items}
+<p style="font-size:15px;color:#16181D;line-height:1.7;margin:24px 0 0;">${t.outro}</p>
+<hr style="border:none;border-top:1px solid rgba(22,24,29,.08);margin:24px 0;">
+<p style="font-size:12px;color:#888;line-height:1.6;margin:0;">${escapeHtml(t.footer)}</p>
+</td></tr></table></td></tr></table></body></html>`;
+  return { subject: t.subject, body };
 }
 
-async function sendEmail(env, { to, subject, htmlBody }) {
-  if (!env.RESEND_API_KEY) {
-    console.warn('RESEND_API_KEY not configured — skipping email send');
-    return;
-  }
-
+async function sendEmail(env, { to, subject, html }) {
+  if (!env.RESEND_API_KEY) throw new Error('email not configured');
   const from = env.RESEND_FROM || 'Magic Engine <hello@magicengine.cloud>';
-
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${env.RESEND_API_KEY}`,
-    },
-    body: JSON.stringify({ from, to, subject, html: htmlBody }),
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.RESEND_API_KEY}` },
+    body: JSON.stringify({ from, to, subject, html, reply_to: 'hello@magicengine.cloud' }),
   });
-
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    console.error('Resend error:', res.status, txt);
-    throw new Error(`Resend ${res.status}`);
-  }
+  if (!res.ok) throw new Error(`email ${res.status}`);
 }
 
 export async function onRequestPost(context) {
   const { request, env } = context;
-
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Content-Type': 'application/json',
-  };
-
+  if (!isAllowedOrigin(request)) return fail(403, 'forbidden');
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return fail(503, 'unavailable');
   try {
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object') return fail(400, 'bad_request');
     const { leadId, email, consent } = body;
+    if (!isValidEmail(email)) return fail(400, 'invalid_email');
+    if (consent !== true) return fail(400, 'consent_required');
+    if (typeof leadId !== 'string' || !/^[0-9a-f-]{36}$/i.test(leadId)) return fail(400, 'report_not_ready');
 
-    // Validate
-    if (!email || !isValidEmail(email)) {
-      return new Response(JSON.stringify({ error: 'Valid email required' }), { status: 400, headers: corsHeaders });
-    }
-    if (consent !== true) {
-      return new Response(JSON.stringify({ error: 'Consent required' }), { status: 400, headers: corsHeaders });
-    }
-
-    // Synthetic lead IDs (demo-/fallback-/unknown-) are emitted by scout.js when
-    // DataForSEO or Supabase is unavailable — there is NO persisted lead row
-    // behind them, so getLead() returns null and the email would render the
-    // "No findings available." placeholder. Sending that is worse than not
-    // sending at all (it tells the user their report is ready when it never
-    // ran). Refuse here so the frontend can show an honest "still processing"
-    // message instead. P0-A fix.
-    const isSyntheticLead =
-      !leadId ||
-      leadId.startsWith('demo-') ||
-      leadId.startsWith('fallback-') ||
-      leadId.startsWith('unknown-');
-
-    if (isSyntheticLead) {
-      return new Response(
-        JSON.stringify({
-          error: 'report_not_ready',
-          message:
-            'Your scan is still processing. We will email your full report once it completes — typically within 24 hours.',
-        }),
-        { status: 400, headers: corsHeaders },
-      );
-    }
-
-    // Fetch lead
     const lead = await getLead(env, leadId);
+    if (!lead || !Array.isArray(lead.findings?.findings) || lead.findings.findings.length === 0) return fail(400, 'report_not_ready');
+    if (lead.status !== 'scouted') return fail(409, 'already_sent');
 
-    // No persisted lead behind a real-looking ID (deleted / wrong id / RLS).
-    // Same rule: never email an empty-findings report.
-    if (!lead) {
-      return new Response(
-        JSON.stringify({
-          error: 'report_not_ready',
-          message:
-            'Your scan is still processing. We will email your full report once it completes — typically within 24 hours.',
-        }),
-        { status: 400, headers: corsHeaders },
-      );
+    const key = await visitorKey(request, env);
+    if (!key) return fail(400, 'no_visitor');
+    try {
+      if (!(await consumeQuota(env, 'site_report_ip', key, dayStartUtc(), LIMITS.reportPerVisitorPerDay))) return fail(429, 'daily_limit');
+    } catch (err) {
+      if (err instanceof QuotaUnavailable) return fail(503, 'unavailable');
+      throw err;
     }
 
-    // Build and send email
-    const { subject, body: htmlBody } = buildEmail({ lead, email });
-    await sendEmail(env, { to: email, subject, htmlBody });
-
-    // Update lead record
-    await updateLead(env, lead.id, email);
-
-    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
-
+    const cleanEmail = email.trim().toLowerCase();
+    if (!(await claimLead(env, lead.id, cleanEmail))) return fail(409, 'already_sent');
+    const { subject, body: html } = buildEmail(lead);
+    try {
+      await sendEmail(env, { to: cleanEmail, subject, html });
+    } catch (err) {
+      console.error('site-check report email failed:', err instanceof Error ? err.message : String(err));
+      await releaseLead(env, lead.id);
+      return fail(502, 'send_failed');
+    }
+    return reply(200, { ok: true });
   } catch (err) {
-    console.error('Report fatal error:', err);
-    return new Response(
-      JSON.stringify({ error: 'Failed to send report — please try again' }),
-      { status: 500, headers: corsHeaders }
-    );
+    console.error('site-check report fatal error:', err instanceof Error ? err.message : String(err));
+    return fail(500, 'send_failed');
   }
 }
 
@@ -241,7 +183,7 @@ export async function onRequestOptions() {
   return new Response(null, {
     status: 204,
     headers: {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': 'https://magicengine.com.au',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     },
