@@ -17,7 +17,7 @@ import { diagnoseAccountHealth, diagnoseClientConfigHealth, diagnoseOutcomeTruth
 import { diagnosePlacementLeak } from './d9-placement-leak'
 import { adLevelCoverage, diagnoseAdLevelRules } from './d2-d10-ad-rules'
 import { diagnoseAudiencePoolStarved } from './d11-audience-pool-starved'
-import { diagnosePageMismatch, scopeAccountToClient } from './ownership'
+import { diagnosePageMismatch, flagDroppedAdsetUnits, scopeAccountToClient } from './ownership'
 import type { AdLevelCoverage, Diagnosis, DiagnosisInput, DiagnosisRun, ExcludedEntity } from './types'
 
 export function runDiagnostics(input: DiagnosisInput): DiagnosisRun {
@@ -67,9 +67,9 @@ export function runDiagnostics(input: DiagnosisInput): DiagnosisRun {
     const d4 = diagnoseUnharvestedAudience(ctx)
     if (d4) diagnoses.push(d4)
     diagnoses.push(...diagnoseBudgetResultMismatch(ctx, input))
-    diagnoses.push(...diagnoseAdLevelRules(rawCtx, input))
+    diagnoses.push(...flagDroppedAdsetUnits(diagnoseAdLevelRules(rawCtx, input), scoped))
     // D11 再营销受众池断供：只读发现 + 建议进待办，开顶层广告必须人点（手册 §二十八）
-    diagnoses.push(...diagnoseAudiencePoolStarved(rawCtx, input))
+    diagnoses.push(...flagDroppedAdsetUnits(diagnoseAudiencePoolStarved(rawCtx, input), scoped))
     coverage.push(adLevelCoverage(rawCtx, input))
     const d8 = diagnoseOutcomeTruthGap(ctx, input)
     if (d8) diagnoses.push(d8)

@@ -121,10 +121,35 @@ async function isSharedAccount(
 
 /** 近多少天的广告快照算「这个广告组名下的广告」——跟诊断 loader 读快照的窗口一致。 */
 const OWNERSHIP_LOOKBACK_DAYS = 35
-/** 单个广告组近 35 天广告快照行数上限；读满视为可能截断，判不了（fail closed）。 */
-const OWNERSHIP_ROW_LIMIT = 1000
+/** 分页读广告快照：每页 1000 行，最多 10 页；读满 10 页视为可能截断，判不了（fail closed）。 */
+const OWNERSHIP_PAGE_SIZE = 1000
+const OWNERSHIP_MAX_PAGES = 10
 /** 广告层快照最近一轮必须抓全、且不早于这么多小时前（快照每 3 小时一轮）——否则新加进组的别家广告看不到。 */
 const OWNERSHIP_MAX_CAPTURE_AGE_HOURS = 24
+
+type AdPageRow = { entity_id: string; creative_page_id: string | null; capture_reason: string }
+
+/** 这个广告组近 35 天的广告快照（按页读完；读满上限 = 可能截断 → 报错，调用方按判不了处理）。 */
+async function readAdsetAdRows(
+  supabase: SupabaseClient, clientId: string, adAccountId: string, adsetId: string, now: Date,
+): Promise<{ rows: AdPageRow[] } | { error: string }> {
+  const since = new Date(now.getTime() - OWNERSHIP_LOOKBACK_DAYS * 86_400_000).toISOString()
+  const rows: AdPageRow[] = []
+  for (let page = 0; page < OWNERSHIP_MAX_PAGES; page++) {
+    const from = page * OWNERSHIP_PAGE_SIZE
+    const res = await supabase.from('ad_entity_snapshots')
+      .select('entity_id, creative_page_id, capture_reason')
+      .eq('client_id', clientId).eq('ad_account_id', adAccountId).eq('level', 'ad').eq('adset_id', adsetId)
+      .gte('captured_at', since)
+      .order('captured_at', { ascending: false }).order('entity_id', { ascending: true })
+      .range(from, from + OWNERSHIP_PAGE_SIZE - 1)
+    if (res.error) return { error: `读广告快照失败：${res.error.message}` }
+    const batch = (res.data ?? []) as AdPageRow[]
+    rows.push(...batch)
+    if (batch.length < OWNERSHIP_PAGE_SIZE) return { rows }
+  }
+  return { error: `广告快照超过 ${OWNERSHIP_PAGE_SIZE * OWNERSHIP_MAX_PAGES} 行，可能没读全` }
+}
 
 /**
  * 回库核实：这个广告组是不是这个客户的（名下广告在近 35 天每一行快照里挂的都是客户登记主页）。
@@ -153,15 +178,9 @@ export async function verifyAdsetOwnership(
     return { owned: false, verdict: 'capture_stale', detail: `广告层快照最近一轮${last ? (last.complete ? `是 ${Math.round(ageHours)} 小时前` : '没抓全') : '找不到'}，看不到这个广告组里最新的广告` }
   }
 
-  const since = new Date(now.getTime() - OWNERSHIP_LOOKBACK_DAYS * 86_400_000).toISOString()
-  const ads = await supabase.from('ad_entity_snapshots')
-    .select('entity_id, creative_page_id, capture_reason')
-    .eq('client_id', clientId).eq('ad_account_id', adAccountId).eq('level', 'ad').eq('adset_id', adsetId)
-    .gte('captured_at', since)
-    .order('captured_at', { ascending: false }).limit(OWNERSHIP_ROW_LIMIT)
-  if (ads.error) return { owned: false, verdict: 'read_failed', detail: `读广告快照失败：${ads.error.message}` }
-  const rows = (ads.data ?? []) as Array<{ entity_id: string; creative_page_id: string | null; capture_reason: string }>
-  if (rows.length >= OWNERSHIP_ROW_LIMIT) return { owned: false, verdict: 'read_failed', detail: '广告快照行数读满上限，可能没读全' }
+  const ads = await readAdsetAdRows(supabase, clientId, adAccountId, adsetId, now)
+  if ('error' in ads) return { owned: false, verdict: 'read_failed', detail: ads.error }
+  const rows = ads.rows
 
   const seen = rows.filter(r => r.capture_reason !== 'disappeared')
   const verdict = ownershipOfAds(seen, pageId)
@@ -243,6 +262,29 @@ async function recordFlywheelAction(
   if (error) throw new Error(`[ads-d3-auto-pause] 写 flywheel_actions 失败：${error.message}`)
 }
 
+/** 归属闸拦下：核实过不是 / 没登记主页记 blocked；系统没法核实记 failed（别让人以为「查过了、是别人的」，子牙）。 */
+async function recordOwnershipBlock(
+  supabase: SupabaseClient,
+  args: { clientId: string; insightDate: string; diagnosisRunId: string },
+  unit: Diagnosis['units'][number],
+  idempotencyKey: string,
+  ownership: Extract<AdsetOwnershipCheck, { owned: false }>,
+): Promise<void> {
+  const systemCouldNotVerify = ownership.verdict === 'read_failed' || ownership.verdict === 'capture_stale'
+  await recordFlywheelAction(supabase, args.clientId, {
+    status: systemCouldNotVerify ? 'failed' : 'blocked',
+    idempotency_key: idempotencyKey,
+    diagnosis_code: 'D3',
+    diagnostic_run_id: args.diagnosisRunId,
+    insight_date: args.insightDate,
+    ad_account_id: unit.adAccountId,
+    adset_id: unit.id,
+    adset_name: unit.name,
+    ownership_verdict: ownership.verdict,
+    reason: `确认不了这个广告组是这个客户的，不自动出手：${ownership.detail}`,
+  })
+}
+
 /** 处理一条 D3 命中。纯粹按顺序过闸，任何一步拦下都记一条对应状态的账。 */
 export async function processD3Hit(
   deps: D3AutoPauseDeps,
@@ -284,20 +326,7 @@ export async function processD3Hit(
   // （dry-run 记账写「会提交 Kernel」必须是真的会）。
   const ownership = await deps.verifyAdsetOwnership(args.clientId, unit.adAccountId, unit.id)
   if (!ownership.owned) {
-    // 系统没法核实 ≠ 核实过不是：前者记 failed，别让人以为「查过了、是别人的」（子牙 2026-09-27）
-    const systemCouldNotVerify = ownership.verdict === 'read_failed' || ownership.verdict === 'capture_stale'
-    await recordFlywheelAction(deps.supabase, args.clientId, {
-      status: systemCouldNotVerify ? 'failed' : 'blocked',
-      idempotency_key: idempotencyKey,
-      diagnosis_code: 'D3',
-      diagnostic_run_id: args.diagnosisRunId,
-      insight_date: args.insightDate,
-      ad_account_id: unit.adAccountId,
-      adset_id: unit.id,
-      adset_name: unit.name,
-      ownership_verdict: ownership.verdict,
-      reason: `确认不了这个广告组是这个客户的，不自动出手：${ownership.detail}`,
-    })
+    await recordOwnershipBlock(deps.supabase, args, unit, idempotencyKey, ownership)
     return { adset_id: unit.id, outcome: 'skipped_not_client_owned' }
   }
 

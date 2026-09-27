@@ -9,7 +9,10 @@
  *    一条广告在窗口里挂过的**每一个**主页都算（广告换过主页，前半段花的可能是别家的钱）。
  * 🔴 只留客户自己的（白名单）：日数据 / 小时数据里快照已经没有的广告组（被删掉的）也按名下广告判。
  * 🔴 广告层数据（adDaily / recentAds / adPageHistory）不切：广告级 D2/D10/D11 在未切的上下文上跑，
- *    它们自己逐条按创意主页过滤，且 D2/D10 用 adDaily 最早日期当「历史从哪天开始」。
+ *    它们自己逐条按创意主页过滤，且 D2/D10 用 adDaily 最早日期当「历史从哪天开始」。命中挂在被切的（混主页）广告组上时，
+ *    run.ts 用 `flagDroppedAdsetUnits` 标明「组层数字含别家」。
+ * 🔴 豁免：`meta/ai/live-rules.ts`（Magic Bridge 当场检查）不经这里——它只跑 D2/D10（逐条按主页过滤），
+ *    把花费占 ≥60% 的主页当客户主页，没有主页过这条线就不跑。
  */
 
 import type { EntitySnapshotRow } from '../snapshot'
@@ -165,15 +168,20 @@ export interface ScopedAccount {
    * 此时 `account` 是原样的（账户级判断用整个账户）。
    */
   accountLevelOnly: boolean
-  /** 近 7 天：留下来的广告组花费 / 被切掉的广告组花费（「登记主页可能不对」提示用） */
+  /**
+   * 近 7 天：名下广告全挂客户主页的广告组花费（含因 CBO 连坐被切的）/ 名下广告全挂别的主页的广告组花费。
+   * 「登记主页可能不对」提示用；混主页、读不到主页的不算进任何一边（子牙第二轮：CBO 连坐不能说成「全花在别家」）。
+   */
   ownWindowSpend: number
-  excludedWindowSpend: number
+  otherPageWindowSpend: number
+  /** 被切掉的广告组 / 系列 id（全部，不只排除清单里列出的）——给广告级规则的命中标「所在组混主页」用 */
+  droppedAdsetIds: ReadonlySet<string>
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100
 
 function unscoped(account: AccountInput): ScopedAccount {
-  return { account, excluded: [], accountLevelOnly: false, ownWindowSpend: 0, excludedWindowSpend: 0 }
+  return { account, excluded: [], accountLevelOnly: false, ownWindowSpend: 0, otherPageWindowSpend: 0, droppedAdsetIds: new Set() }
 }
 
 /** 客户没登记主页：单一主页（或没广告）照原样跑，归属未核实；≥2 个主页 → 只做账户级。 */
@@ -187,7 +195,8 @@ function scopeWithoutClientPage(account: AccountInput): ScopedAccount {
     account,
     accountLevelOnly: true,
     ownWindowSpend: 0,
-    excludedWindowSpend: 0,
+    otherPageWindowSpend: 0,
+    droppedAdsetIds: new Set(),
     excluded: [{
       adAccountId: account.adAccountId, level: 'account', id: account.adAccountId, name: null, reason: 'page_unknown',
       detail: `客户没登记 Facebook 主页，这个账户里的广告挂在 ${pages.size} 个不同的主页上，分不清哪些是这个客户的，只做账户级诊断`,
@@ -238,9 +247,13 @@ export function scopeAccountToClient(account: AccountInput, clientPageId: string
 
   const days = new Set(windowDays(date))
   const excluded = listExcluded(account, drops, days)
-  const ownWindowSpend = round2(daily.filter(r => r.level === 'adset' && days.has(r.insight_date)).reduce((s, r) => s + r.spend, 0))
-  const excludedWindowSpend = round2(account.daily.filter(r => r.level === 'adset' && days.has(r.insight_date) && !keepAdset(r.entity_id)).reduce((s, r) => s + r.spend, 0))
-  return { account: { ...account, snapshots, daily, hourly }, excluded, accountLevelOnly: false, ownWindowSpend, excludedWindowSpend }
+  const windowSpendWhere = (verdict: AdsetOwnership) => round2(account.daily
+    .filter(r => r.level === 'adset' && days.has(r.insight_date) && judge.verdict(r.entity_id) === verdict)
+    .reduce((s, r) => s + r.spend, 0))
+  return {
+    account: { ...account, snapshots, daily, hourly }, excluded, accountLevelOnly: false,
+    ownWindowSpend: windowSpendWhere('own'), otherPageWindowSpend: windowSpendWhere('other_page'), droppedAdsetIds: dropAdsets,
+  }
 }
 
 /** 只列评估日在投、或近 7 天有花费的；CBO 整系列排除只列系列一条。 */
@@ -265,12 +278,14 @@ function listExcluded(account: AccountInput, drops: Drop[], days: ReadonlySet<st
  * 不提示的话，客户所有广告组都会被静默切掉，日报只剩一串排除清单。
  */
 export function diagnosePageMismatch(account: AccountInput, scoped: ScopedAccount, clientId: string, date: string): Diagnosis | null {
-  if (scoped.accountLevelOnly || scoped.ownWindowSpend > 0 || scoped.excludedWindowSpend <= 0) return null
+  if (scoped.accountLevelOnly || scoped.ownWindowSpend > 0 || scoped.otherPageWindowSpend <= 0) return null
+  // 广告层快照最近一轮没抓全：多半是没抓到广告才判不出主页，不是登记错了（魏征第二轮）；D7 抓取体检另报
+  if (account.latestCaptures.some(c => c.level === 'ad' && !c.complete)) return null
   return {
     code: 'D7', status: 'hit', clientVisible: false,
     units: [{ level: 'account', id: account.adAccountId, name: null, adAccountId: account.adAccountId }],
     title: '这个账户近 7 天的花费全在别的 Facebook 主页的广告上：客户登记的主页可能不对',
-    evidence: { window_end: date, own_spend: scoped.ownWindowSpend, other_page_spend: scoped.excludedWindowSpend, excluded_units: scoped.excluded.length },
+    evidence: { window_end: date, own_spend: scoped.ownWindowSpend, other_page_spend: scoped.otherPageWindowSpend, excluded_units: scoped.excluded.length },
     sample: [{ label: '被排除的在投/有花费单位', value: scoped.excluded.length }],
     reasons: ['广告组层诊断只判挂客户登记主页的广告；登记错了，客户自己的广告组会全部被当成别人的'],
     manualTask: {
@@ -279,4 +294,21 @@ export function diagnosePageMismatch(account: AccountInput, scoped: ScopedAccoun
       href: `https://app.magicengine.com.au/dashboard/clients/${encodeURIComponent(clientId)}/settings`,
     },
   }
+}
+
+/**
+ * 广告级命中（D2/D10/D11 在未切的上下文上跑）挂在被切掉的广告组上时——组里混着别的主页——标明组层数字
+ * （组花费、频次、受众池使用花费）含别家，只看广告自己的数（子牙第二轮：否则日报里同一个组既「没参与诊断」又被报）。
+ */
+export function flagDroppedAdsetUnits(diagnoses: Diagnosis[], scoped: ScopedAccount): Diagnosis[] {
+  if (scoped.droppedAdsetIds.size === 0) return diagnoses
+  return diagnoses.map(d => {
+    const hit = d.units.filter(u => u.level === 'adset' && scoped.droppedAdsetIds.has(u.id))
+    if (hit.length === 0) return d
+    return {
+      ...d,
+      evidence: { ...d.evidence, adset_mixed_pages: hit.map(u => u.id).join(',') },
+      reasons: [...d.reasons, `所在广告组（${hit.map(u => u.name ?? u.id).join('、')}）混着别的 Facebook 主页的广告：组层数字（组花费、频次）含别家，只看这条广告自己的数`],
+    }
+  })
 }

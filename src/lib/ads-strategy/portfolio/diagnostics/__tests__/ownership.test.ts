@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { ownershipOfAds, scopeAccountToClient } from '../ownership'
+import { flagDroppedAdsetUnits, ownershipOfAds, scopeAccountToClient } from '../ownership'
 import { runDiagnostics } from '../run'
 import { runOpportunities } from '../../opportunities/run'
 import { shiftDate } from '../context'
@@ -101,7 +101,7 @@ describe('scopeAccountToClient', () => {
     expect(scoped.excluded).toEqual([expect.objectContaining({ level: 'adset', id: 'as-other', reason: 'other_page' })])
     expect(scoped.excluded[0].detail).toContain(OTHER)
     expect(scoped.ownWindowSpend).toBe(140)
-    expect(scoped.excludedWindowSpend).toBe(210)
+    expect(scoped.otherPageWindowSpend).toBe(210)
   })
 
   it('幂等：切过的再切一次，账户内容不变（loader 预筛切一次、run 再切一次）', () => {
@@ -220,11 +220,46 @@ describe('接进巡检 / 机会之后', () => {
     expect(run.adLevelCoverage).toEqual([expect.objectContaining({ ran: false, reason: 'client_page_unknown' })])
   })
 
+  it('🔴 混着别家主页的广告组被切掉，但组里挂客户主页的广告仍进广告级检查（覆盖率照常计数，魏征第二轮）', () => {
+    const snaps = [
+      campaign('c1'), adset('as-mixed', 'c1'),
+      ad('ad-mine', 'as-mixed', 'c1', OWN), ad('ad-theirs', 'as-mixed', 'c1', OTHER),
+    ]
+    const run = runDiagnostics(input(account(snaps, [adsetRow('as-mixed', 'c1', DATE, 10)], { adDaily: [] })))
+    expect(run.excluded).toEqual([expect.objectContaining({ id: 'as-mixed', reason: 'mixed_pages' })])
+    expect(run.adLevelCoverage).toEqual([expect.objectContaining({ ran: true, reason: 'ok', adsChecked: 1 })])
+  })
+
+  it('广告级命中挂在被切掉的混主页广告组上 → 标明组层数字含别家（子牙第二轮）', () => {
+    const scoped = scopeAccountToClient(account([campaign('c1'), adset('as-mixed', 'c1'), ad('a1', 'as-mixed', 'c1', OWN), ad('a2', 'as-mixed', 'c1', OTHER)],
+      [adsetRow('as-mixed', 'c1', DATE, 10)]), OWN, DATE)
+    const d = { code: 'D10' as const, status: 'hit' as const, title: 't', units: [{ level: 'ad' as const, id: 'a1', name: null, adAccountId: 'act_1' }, { level: 'adset' as const, id: 'as-mixed', name: 'X', adAccountId: 'act_1' }], evidence: {}, sample: [], reasons: [], clientVisible: true }
+    const [flagged] = flagDroppedAdsetUnits([d], scoped)
+    expect(flagged.evidence).toMatchObject({ adset_mixed_pages: 'as-mixed' })
+    expect(flagged.reasons.join('')).toContain('组层数字')
+  })
+
+  it('CBO 系列里混进一个别家组、整系列被切：客户自己的钱不能说成「全花在别家」（子牙第二轮）', () => {
+    const snaps = [campaign('c-cbo', 'cbo'), adset('as-a', 'c-cbo'), adset('as-b', 'c-cbo'), ad('ad-a', 'as-a', 'c-cbo', OWN), ad('ad-b', 'as-b', 'c-cbo', OTHER)]
+    const daily = days(7).flatMap(d => [adsetRow('as-a', 'c-cbo', d, 30), adsetRow('as-b', 'c-cbo', d, 2)])
+    const run = runDiagnostics(input(account(snaps, daily)))
+    expect(run.diagnoses.some(d => d.title.includes('登记的主页可能不对'))).toBe(false)
+    expect(run.excluded).toEqual([expect.objectContaining({ level: 'campaign', id: 'c-cbo' })])
+  })
+
   it('账户近 7 天的钱全花在别的主页上 → D7「登记主页可能不对」', () => {
     const acc = mixedAccount()
     acc.snapshots = acc.snapshots.map(r => (r.entity_id.startsWith('ad-own') ? { ...r, creative_page_id: OTHER } : r))
     const run = runDiagnostics(input(acc))
     expect(run.diagnoses).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'D7', status: 'hit', title: expect.stringContaining('登记的主页可能不对') })]))
+  })
+
+  it('广告层快照最近一轮没抓全时，不把「全被切掉」说成「登记主页不对」（原因是没抓到，魏征第二轮）', () => {
+    const acc = mixedAccount()
+    acc.snapshots = acc.snapshots.map(r => (r.entity_id.startsWith('ad-own') ? { ...r, creative_page_id: OTHER } : r))
+    acc.latestCaptures = [{ level: 'ad', complete: false, skipped_shared: false, error: 'timeout', captured_at: '2026-09-24T09:00:00Z' }]
+    const run = runDiagnostics(input(acc))
+    expect(run.diagnoses.some(d => d.title.includes('登记的主页可能不对'))).toBe(false)
   })
 
   it('机会发现也不算别家的：别家广告组点击率再高也不出 O1', () => {

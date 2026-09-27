@@ -304,10 +304,13 @@ describe('verifyAdsetOwnership —— 回库核实', () => {
     const from = (table: string) => {
       const err = t.fail === table ? { message: `${table} down` } : null
       const b: Record<string, unknown> = {}
+      let from0 = 0
+      let to0 = Infinity
       for (const m of ['select', 'eq', 'gte', 'order', 'limit']) b[m] = () => b
+      b.range = (a: number, z: number) => { from0 = a; to0 = z; return b }
       if (table === 'clients') b.maybeSingle = async () => ({ data: err ? null : { facebook_page_id: t.page ?? null }, error: err })
       else if (table === 'ad_snapshot_captures') b.maybeSingle = async () => ({ data: err ? null : t.capture ?? null, error: err })
-      else if (table === 'ad_entity_snapshots') b.then = (res: (v: unknown) => unknown) => res({ data: err ? null : t.ads ?? [], error: err })
+      else if (table === 'ad_entity_snapshots') b.then = (res: (v: unknown) => unknown) => res({ data: err ? null : (t.ads ?? []).slice(from0, to0 + 1), error: err })
       else throw new Error(`fake supabase: 表 '${table}' 没建模`)
       return b
     }
@@ -349,6 +352,19 @@ describe('verifyAdsetOwnership —— 回库核实', () => {
     expect(await verify({ page: 'P', capture: { complete: false, captured_at: '2026-09-26T21:00:00Z' }, ads })).toMatchObject({ verdict: 'capture_stale' })
     expect(await verify({ page: 'P', capture: { complete: true, captured_at: '2026-09-25T00:00:00Z' }, ads })).toMatchObject({ verdict: 'capture_stale' })
     expect(await verify({ page: 'P', capture: null, ads })).toMatchObject({ verdict: 'capture_stale' })
+  })
+
+  it('大广告组分页读完：第二页里的别家主页行照样判出来（不因为读满一页就放行或永远判不了）', async () => {
+    const own = Array.from({ length: 1500 }, (_, i) => ({ entity_id: `a${i % 30}`, creative_page_id: 'P', capture_reason: 'daily' }))
+    expect(await verify({ page: 'P', capture: fresh, ads: own })).toMatchObject({ owned: true, adsChecked: 30 })
+    const olderOther = [...own, { entity_id: 'a0', creative_page_id: 'OTHER', capture_reason: 'daily' }]
+    expect(await verify({ page: 'P', capture: fresh, ads: olderOther })).toMatchObject({ owned: false, verdict: 'mixed_pages' })
+  })
+
+  it('🔴 读满 10 页（可能截断、更老的别家行没读到）→ read_failed，不放行（魏征第二轮）', async () => {
+    const ads = Array.from({ length: 10_000 }, (_, i) => ({ entity_id: `a${i % 3}`, creative_page_id: 'P', capture_reason: 'daily' }))
+    expect(await verify({ page: 'P', capture: fresh, ads })).toMatchObject({ owned: false, verdict: 'read_failed', detail: expect.stringContaining('可能没读全') })
+    expect(await verify({ page: 'P', capture: fresh, ads: ads.slice(1) })).toMatchObject({ owned: true })
   })
 
   it('任何一张表读失败 → read_failed', async () => {
