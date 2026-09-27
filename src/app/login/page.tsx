@@ -81,7 +81,7 @@ export default function LoginPage({ searchParams }: Props) {
             className="text-xs font-bold uppercase tracking-[0.16em] mb-5"
             style={{ color: '#BE8A2E' }}
           >
-            {isMetaAdsAi ? 'Meta 广告 AI 分析' : 'Client portal'}
+            {isMetaAdsAi ? 'Facebook 广告体检' : 'Client portal'}
           </div>
           <h1
             className="text-[2.6rem] font-black leading-[1.08] text-white"

@@ -1,8 +1,15 @@
 import { supabaseAdmin } from '@/lib/supabase'
+import { recordToolSignupOnce } from '@/lib/tools-lab/lead-events'
 
 const DASHBOARD_ROOT = '/dashboard'
 const PROSPECT_ROOT = '/prospect'
 const PORTAL_ROOT = '/portal'
+/** Public, identity-free entry to the Facebook ad check-up (Tools Lab). Always resolves to the caller's own client. */
+export const ADS_CHECK_ENTRY = '/meta-ads-ai/mine'
+
+function adsCheckPath(clientId: string): string {
+  return `/meta-ads-ai/${clientId}`
+}
 
 function clientHomePath(clientId: string): string {
   return `/dashboard/clients/${clientId}`
@@ -26,8 +33,9 @@ export function normalizeSelfServeTarget(clientId: string, requestedPath: string
     return clientHome
   }
 
-  // Magic Bridge page of this same client (exact match only; any other client id falls through to home).
-  if (requestedPath === `/meta-ads-ai/${clientId}`) return requestedPath
+  // Ad check-up page of this same client (exact match only; any other client id falls through to home).
+  // The Tools Lab entry never carries a client id: it is rewritten to the caller's own client.
+  if (requestedPath === ADS_CHECK_ENTRY || requestedPath === adsCheckPath(clientId)) return adsCheckPath(clientId)
 
   // /portal/{x}/... — strip the prefix and remap onto our own dashboard home.
   if (requestedPath.startsWith('/portal/')) {
@@ -80,6 +88,14 @@ export async function resolveSelfServeLanding(
   welcome = false,
 ): Promise<string> {
   const nextPath = normalizeSelfServeTarget(clientId, requestedPath)
+  // Someone who came for the ad check-up goes straight to it: the check-up needs nothing from the onboarding
+  // wizard, and the wizard in front of it lost most of these sign-ups (Tools Lab step 1 design §1.4).
+  if (nextPath === adsCheckPath(clientId)) {
+    // A Tools Lab lead is a first verified sign-in through the entry (`welcome` = the welcome grant was just made),
+    // not a returning customer re-entering the check-up.
+    if (welcome && requestedPath === ADS_CHECK_ENTRY) await recordToolSignupOnce(clientId, 'ads-check')
+    return nextPath
+  }
   const { data } = await supabaseAdmin
     .from('clients')
     .select('onboarding_completed_at')
