@@ -7,6 +7,9 @@ import {
   detectClientSpendOverCap,
   type AccountSpendFact,
   type DetectorConfigSource,
+  detectRollbackFailure,
+  detectJevLowScoreStreak,
+  type RollbackStepRow,
 } from '../circuit-detectors'
 
 /** 造一个非零花费点，日期只是占位，判据不看日期。 */
@@ -556,5 +559,99 @@ describe('detectClientSpendOverCap - 比上限', () => {
       configSource: 'row',
     })
     expect(above.kind).toBe('trip')
+  })
+})
+
+/** 造一条撤回步骤行。默认 succeeded，测试里按需覆盖。 */
+function makeStep(overrides: Partial<RollbackStepRow> & { runId: string }): RollbackStepRow {
+  return {
+    runId: overrides.runId,
+    status: overrides.status ?? 'succeeded',
+    lastError: overrides.lastError ?? null,
+  }
+}
+
+/** evidence 里允许出现的键，恰好这三个——多一个都说明原始行漏进来了。 */
+const EXPECTED_EVIDENCE_KEYS = ['failedRunIds', 'totalStepCount', 'firstFailedError']
+
+describe('detectRollbackFailure', () => {
+  it('空数组 → no_trip（这批没有撤回步骤是正常状态）', () => {
+    const verdict = detectRollbackFailure({ rollbackSteps: [] })
+    expect(verdict.kind).toBe('no_trip')
+  })
+
+  it('全是 succeeded → no_trip', () => {
+    const verdict = detectRollbackFailure({
+      rollbackSteps: [
+        makeStep({ runId: 'run-1', status: 'succeeded' }),
+        makeStep({ runId: 'run-2', status: 'succeeded' }),
+      ],
+    })
+    expect(verdict.kind).toBe('no_trip')
+  })
+
+  it('一条 failed → trip 且 sticky 为 true', () => {
+    const verdict = detectRollbackFailure({
+      rollbackSteps: [makeStep({ runId: 'run-1', status: 'failed', lastError: 'boom' })],
+    })
+    expect(verdict.kind).toBe('trip')
+    if (verdict.kind !== 'trip') {
+      throw new Error('expected trip')
+    }
+    // 撤回失败是 v1 里唯一不可逆的信号，必须 sticky，否则一天后系统自己接着动手。
+    expect(verdict.sticky).toBe(true)
+  })
+
+  it('多条 failed → reason 用第一条的 runId，evidence.failedRunIds 含全部', () => {
+    const verdict = detectRollbackFailure({
+      rollbackSteps: [
+        makeStep({ runId: 'run-1', status: 'succeeded' }),
+        makeStep({ runId: 'run-2', status: 'failed', lastError: 'first' }),
+        makeStep({ runId: 'run-3', status: 'failed', lastError: 'second' }),
+      ],
+    })
+    expect(verdict.kind).toBe('trip')
+    if (verdict.kind !== 'trip') {
+      throw new Error('expected trip')
+    }
+    expect(verdict.reason).toBe('circuit:rollback_failed:run-2')
+    expect(verdict.evidence.failedRunIds).toEqual(['run-2', 'run-3'])
+  })
+
+  it('status 是 dead_letter / pending 这些非 failed 的值 → no_trip', () => {
+    const verdict = detectRollbackFailure({
+      rollbackSteps: [
+        makeStep({ runId: 'run-1', status: 'dead_letter' }),
+        makeStep({ runId: 'run-2', status: 'pending' }),
+      ],
+    })
+    expect(verdict.kind).toBe('no_trip')
+  })
+
+  it('lastError 为 null 时 evidence.firstFailedError 是 null', () => {
+    const verdict = detectRollbackFailure({
+      rollbackSteps: [makeStep({ runId: 'run-1', status: 'failed', lastError: null })],
+    })
+    expect(verdict.kind).toBe('trip')
+    expect(verdict.evidence.firstFailedError).toBeNull()
+  })
+
+  it('evidence 里不含原始步骤数组，键恰好是那三个', () => {
+    const verdict = detectRollbackFailure({
+      rollbackSteps: [
+        makeStep({ runId: 'run-1', status: 'failed', lastError: 'boom' }),
+        makeStep({ runId: 'run-2', status: 'succeeded' }),
+      ],
+    })
+    expect(Object.keys(verdict.evidence).sort()).toEqual([...EXPECTED_EVIDENCE_KEYS].sort())
+  })
+})
+
+describe('detectJevLowScoreStreak', () => {
+  it('打桩返回 undeterminable，且明确不是 no_trip', () => {
+    const verdict = detectJevLowScoreStreak()
+    expect(verdict.kind).toBe('undeterminable')
+    // no_trip 是在说"查过了、没问题"，而真实情况是"压根没查"，两者意思相反。
+    expect(verdict.kind).not.toBe('no_trip')
   })
 })

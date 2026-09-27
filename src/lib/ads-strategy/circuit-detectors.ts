@@ -251,3 +251,70 @@ export function detectClientSpendOverCap(args: {
 
   return { kind: 'no_trip', evidence }
 }
+
+/** `action_run_steps` 里一条撤回步骤的结果（调用方只取 `step_key = 'rollback'` 的行）。 */
+export interface RollbackStepRow {
+  readonly runId: string
+  /** `action_run_steps.status`。关心的只有 'failed' */
+  readonly status: string
+  /** `action_run_steps.last_error`，可空 */
+  readonly lastError: string | null
+}
+
+/**
+ * 判本批撤回步骤里有没有失败的。
+ *
+ * 这是 v1 里**唯一**必须 sticky 的判据：撤回失败意味着我们动了客户的广告、而且收不回来。
+ * 非 sticky 的熔断 24 小时后自己失效，但"收不回来"不会因为过了一天就变好，
+ * 所以必须由人确认处理完了才解除——写成 sticky: false 等于一天之后系统自己接着动手，
+ * 而上一次的烂摊子还在。
+ */
+export function detectRollbackFailure(args: {
+  /** 本批刚跑完的那些撤回步骤。**空数组 = 这批没有任何撤回步骤**（正常，不是异常） */
+  readonly rollbackSteps: readonly RollbackStepRow[]
+}): DetectorVerdict {
+  const { rollbackSteps } = args
+
+  const failedSteps = rollbackSteps.filter((step) => step.status === 'failed')
+  const failedRunIds = failedSteps.map((step) => step.runId)
+  const firstFailedError = failedSteps.length > 0 ? failedSteps[0].lastError : null
+
+  // evidence 会落进数据库的账本表，所以只放判据真正用到的字段：
+  // 塞整批原始行会让账本被无关内容撑大，而且以后 action_run_steps 加字段时会一起漏进来。
+  const evidence: Record<string, unknown> = {
+    failedRunIds,
+    totalStepCount: rollbackSteps.length,
+    firstFailedError,
+  }
+
+  // 空数组 = 这批没有撤回步骤，是正常状态，不是异常。
+  if (failedSteps.length === 0) {
+    return { kind: 'no_trip', evidence }
+  }
+
+  // reason 里带第一条失败的 runId，方便人直接定位到具体那一次运行。
+  return {
+    kind: 'trip',
+    reason: `circuit:rollback_failed:${failedSteps[0].runId}`,
+    sticky: true,
+    evidence,
+  }
+}
+
+/**
+ * 判 JEV 低分连击（本轮**打桩**，不实现）。
+ *
+ * 判据本身（本轮不实现）：
+ * - 按 `cycle_id` 分组，连续 3 轮总分 < 60 → sticky 熔断；
+ * - 另加「连续 3 轮 ≥50% 被推翻或结论不明」。
+ *
+ * 不实现的原因：它读的 `prescription_evaluations` 表**全仓不存在**，
+ * 是后一个工作包的交付项。
+ *
+ * 打桩返回 `undeterminable` 而不是 `no_trip`：`no_trip` 是在说"查过了、没问题"，
+ * 而真实情况是"压根没查"。这两个在下游长得一样但意思相反，
+ * 返回 `no_trip` 会让一条根本没接上的判据看起来一直在正常工作。
+ */
+export function detectJevLowScoreStreak(): DetectorVerdict {
+  return { kind: 'undeterminable', reason: 'facts:prescription_evaluations_not_built', evidence: {} }
+}
