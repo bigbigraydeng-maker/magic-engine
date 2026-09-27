@@ -239,9 +239,9 @@ DR87-2 原话是「套上**预算保护**」。**照字面做会把真问题留�
 
 | PR | 内容 | 为什么这么切 |
 |---|---|---|
-| **A** | v2.1 §6 熔断全部（新表 + 派生态 + 五条判据 + admin 解除接口）+ resolver 生产挂载三件套 + **人工信封** + 止损收编 + WP2 遗留 #1994 两处 + 前端契约修（B2）+ 账户级日预算 + 面板 UI | 这就是原 3.1b，**自成闭环**，先落地先受保护 |
+| **A** | v2.1 §6 熔断全部（新表 + 派生态 + 五条判据 + admin 解除接口）+ resolver 生产挂载三件套 + **人工信封** + WP2 遗留 #1994 两处 + 账户级日预算 + PATCH 路由 | 这就是原 3.1b 的核心，**自成闭环**（不含止损接线），先落地先受保护 |
 | **B** | 4 个新 ActionKey（`ads.pause_campaign` / `ads.cut_campaign_budget` / `ads.boost_page_post` / `ads.create_reel_ad`）+ 对应 capability handler + `registry-ads.ts` 注册 + 信封声明 + **撤回处理函数（K1 必填）** + `campaign-writes.ts` / `ads-manager` 挂闸 | **纯新增能力面**，不动 A 的判据，审查视角独立 |
-| **C** | 三条旁路路由改成提交 Kernel（`execute` / `boost-post` / `winner-reel-sync` 含**独立广告组**逻辑）+ 退役 `executeStopLoss` | 依赖 B 的 ActionKey，最后落 |
+| **C** | 三条旁路路由改成提交 Kernel（`execute` / `boost-post` / `winner-reel-sync` 含**独立广告组**逻辑）+ **止损收编接线**（`stop-loss-submission.ts` 已写好挂进 `route.ts`）+ 退役 `executeStopLoss` + **B2 前端契约修** | 依赖 B 的 ActionKey，最后落；**统筹 2026-09-28 把止损接线 + B2 从 A 挪到这里**——B2 改的是路由返回值的解析方式，而返回值要等接线做完才会变，原计划把 B2 放 A 是没预见到这个依赖关系；止损接线跟这里的三条旁路本质是同一个模式（"路由直连 Meta，改成走 Kernel"），放一起审比拆开更容易看清楚。**🔴 A 合并后到 C 合并前，止损按钮完全绕过熔断器和 Kernel**，见 [docs/ledger/2026-09-28-stop-loss-bypasses-circuit-breaker-until-pr-c.md](../ledger/2026-09-28-stop-loss-bypasses-circuit-breaker-until-pr-c.md) |
 
 **顺序 A → B → C。🔴 三个都合了才算 WP3.1b 完成** —— ROADMAP 里记成**一个工作包三段**，不许 C 掉队变成「下一轮」。
 
