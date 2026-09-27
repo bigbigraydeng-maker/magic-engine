@@ -41,7 +41,7 @@
 | Google Search Console | 只读 | 整站与逐页逐天数据（`gsc_page_daily`，#2068） |
 | 客户网站 GitHub 仓库 / CMS | 写（**目标：只经 Kernel**） | 改标题 / 描述、开内容修复 PR |
 | Supabase `seo_meta_log` / `seo_patrol_findings` / `gsc_*` | 读写 | 本 agent 的数据资产 |
-| 经验手册 `docs/playbooks/seo/`（迁移前在开发侧记忆 `playbook-seo-general.md`） | 读；学习任务只写候选区 | 规则先验 |
+| 经验手册 `docs/playbooks/seo/*.md`（`inbox.md` 除外，候选区不当规则） | 读；学习任务只写候选区 | 规则先验 |
 
 ## 四、Fix vs Talk to Us 边界（强制）
 
