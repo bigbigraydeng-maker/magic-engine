@@ -89,3 +89,4 @@
 - 影响：①第二步依赖数据库计数，照现在上线会对所有人返回「暂时用不了」；②第一步官网按钮的点击打点（`lab_*`）一直没记下来，「每周四个数」里的访问 / 点击缺数据。
 - 决定（技术，Claude Code 拍板）：**不把数据库总钥匙再放一份到 Cloudflare**（钥匙散落越多越危险）。改为把诊断和发报告的服务端逻辑搬进应用（`app.magicengine.com.au`，钥匙本来就在），官网页面直接跨域调用应用的公开接口；访问者地址用 Render 转发的地址。官网打点同样改为发到应用。现有 JS 守卫逻辑原样移植成 TypeScript，测试一并迁移。
 - 下一步：在同一分支上改；PR 2126 保持草稿，改完重新请 子牙 + 魏征 复核与狄仁杰补测。
+- **搬迁完成（同日）**：服务端逻辑在 `src/lib/tools-lab/site-check/`（guards / diagnose / leads / report-email）+ `src/app/api/public/site-check/route.ts`、`report/route.ts`；官网 `app.js` 改调 `https://app.magicengine.com.au/api/public/site-check`；`website/functions/api/scout.js`、`report.js` 改为 410，`_shared/site-check.js` 删除。全站日 / 月上限返回「本月免费名额已满」而不是「明天再来」。测试 54 条，故意改坏 30 处关键判断全部被抓住。

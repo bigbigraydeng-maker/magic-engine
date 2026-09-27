@@ -2,11 +2,13 @@
    Responsibilities:
    1. English / Chinese page routing
    2. Discover state machine (form → progress → result)
-   3. API calls to /api/scout and /api/report
+   3. API calls to the app's public website-check endpoints (SITE_CHECK_API)
    4. Hero URL form redirect
 */
 
 const CN_PREFIX = '/cn';
+// The website check runs in the app (it holds the database and AI keys); this site calls it cross-origin.
+const SITE_CHECK_API = 'https://app.magicengine.com.au/api/public/site-check';
 
 /* ── Language routing ── */
 function isChinesePath(pathname = window.location.pathname) {
@@ -617,7 +619,7 @@ async function handleDiscoverSubmit(e) {
   startProgress();
 
   try {
-    const res = await fetch('/api/scout', {
+    const res = await fetch(SITE_CHECK_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, noWebsite, attribution, lang: currentLang }),
@@ -639,7 +641,7 @@ async function handleDiscoverSubmit(e) {
     });
     logMarketingLeadEvent(MARKETING_EVENT.DISCOVER_SUBMIT, {
       destination: 'discover',
-      href: '/api/scout',
+      href: SITE_CHECK_API,
       attribution,
       metadata: {
         lead_id: data.leadId || null,
@@ -689,7 +691,7 @@ async function handleEmailSubmit(e) {
   let delivered = false;
   try {
     if (leadId) {
-      const res = await fetch('/api/report', {
+      const res = await fetch(`${SITE_CHECK_API}/report`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ leadId, email, consent }),
