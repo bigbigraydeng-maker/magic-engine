@@ -335,6 +335,49 @@ describe('rolloverMonthlyGoals — dry_run', () => {
   })
 })
 
+describe('rolloverMonthlyGoals — catch-up after missed months', () => {
+  it('generates every missed month in one call, only the current one is active', async () => {
+    // Sept goal, but the cron hasn't run since — today is December. Must not
+    // leave an 'active' goal whose period already ended.
+    const septGoal = makeGoal({
+      id: 'sept',
+      status: 'expired',
+      period_start: '2026-09-01',
+      period_end: '2026-09-30',
+    })
+    const { client, insertLog } = fakeSupabase([septGoal])
+
+    const result = await rolloverMonthlyGoals(client, { today: '2026-12-15' })
+
+    expect(result.error).toBeUndefined()
+    expect(insertLog).toHaveLength(3) // Oct, Nov, Dec
+    expect(insertLog.map(g => g.period_start)).toEqual([
+      '2026-10-01', '2026-11-01', '2026-12-01',
+    ])
+    expect(insertLog.map(g => g.status)).toEqual(['expired', 'expired', 'active'])
+    expect(result.rolled).toHaveLength(3)
+  })
+
+  it('second run with the same today does not duplicate the catch-up chain', async () => {
+    const septGoal = makeGoal({
+      id: 'sept',
+      status: 'expired',
+      period_start: '2026-09-01',
+      period_end: '2026-09-30',
+    })
+    const { client, insertLog } = fakeSupabase([septGoal])
+
+    await rolloverMonthlyGoals(client, { today: '2026-12-15' })
+    const r2 = await rolloverMonthlyGoals(client, { today: '2026-12-15' })
+
+    expect(insertLog).toHaveLength(3)
+    // r2 re-scans: Sept is still 'expired' with recurrence='monthly', so its
+    // whole catch-up chain (Oct/Nov/Dec) is re-planned and found to already exist.
+    expect(r2.rolled).toHaveLength(0)
+    expect(r2.skipped_existing.length).toBeGreaterThan(0)
+  })
+})
+
 describe('rolloverMonthlyGoals — month boundaries', () => {
   it('December goal rolls into January of the next year', async () => {
     const decGoal = makeGoal({

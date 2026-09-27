@@ -102,6 +102,30 @@ export function GoalDetailClient() {
     }
   }
 
+  async function toggleRecurrence() {
+    const next = goal?.recurrence === 'monthly' ? null : 'monthly'
+    const msg = next === 'monthly'
+      ? 'Mark this goal as monthly recurring? Every month the system will auto-create the next month\'s goal with the same target.'
+      : 'Stop auto-rollover for this goal? No further monthly successor will be created.'
+    if (!confirm(msg)) return
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/goals/${goalId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recurrence: next }),
+      })
+      if (!res.ok) {
+        const j = await res.json()
+        alert(`Update failed: ${j.error}`)
+        return
+      }
+      await load()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function deleteDraft() {
     if (!confirm('Delete this draft goal permanently?')) return
     setBusy(true)
@@ -179,6 +203,19 @@ export function GoalDetailClient() {
                   Delete
                 </button>
               </>
+            )}
+            {(goal.status === 'active' || goal.status === 'expired') && (
+              <button
+                onClick={toggleRecurrence}
+                disabled={busy}
+                className={`rounded-lg border px-4 py-2 text-sm font-black transition-colors disabled:opacity-50 ${
+                  goal.recurrence === 'monthly'
+                    ? 'border-status-track/30 bg-status-track/10 text-status-track hover:bg-status-track/15'
+                    : 'border-black/10 bg-white text-me-charcoal/75 hover:border-black/15 hover:text-me-charcoal'
+                }`}
+              >
+                {goal.recurrence === 'monthly' ? '🔁 Monthly recurring' : 'Make monthly recurring'}
+              </button>
             )}
             {goal.status === 'active' && (
               <button

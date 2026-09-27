@@ -9,6 +9,7 @@ import type {
   GoalRow,
   CreateGoalInput,
   GoalStatus,
+  GoalRecurrence,
 } from '@/types/strategy'
 
 /**
@@ -184,6 +185,7 @@ export async function createGoal(
       budget_amount: input.budget_amount ?? null,
       budget_currency: input.budget_currency ?? 'AUD',
       status: 'draft',
+      recurrence: input.recurrence ?? null,
       fde_reasoning: input.fde_reasoning ?? null,
       is_beta: true,
     })
@@ -222,7 +224,16 @@ export async function activateGoal(
 }
 
 /**
- * Archive an active or expired Goal (does not delete it).
+ * Archive an active or expired Goal early (does not delete it).
+ *
+ * This is the manual/UI "Archive" action — the FDE is deliberately cancelling
+ * the goal before its natural verdict. It must NOT be confused with
+ * judgeGoalAndArchive() (src/lib/strategy/verdict.ts), which archives a goal
+ * as the outcome of its normal period-end settlement. If this goal was
+ * recurrence='monthly', clear it here so rolloverMonthlyGoals never uses a
+ * cancelled goal as a template to resurrect next month — the UI tells the
+ * FDE this action "can no longer be activated", so a follow-up month must
+ * not reappear on its own.
  */
 export async function archiveGoal(
   supabase: SupabaseClient,
@@ -230,7 +241,35 @@ export async function archiveGoal(
 ): Promise<{ ok: boolean; error?: string }> {
   const { error } = await supabase
     .from('goals')
-    .update({ status: 'archived' })
+    .update({ status: 'archived', recurrence: null })
+    .eq('id', goalId)
+
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+/**
+ * Set (or clear) a goal's auto-rollover cadence. This is the only write path
+ * for `recurrence` on an already-created goal — needed because a goal is
+ * usually confirmed as "this repeats every month" only after it has run at
+ * least once, not at creation time. Draft/active/expired only: an archived
+ * goal is a closed chapter (see archiveGoal, which clears recurrence itself
+ * on manual cancellation) and must not be re-armed through this path.
+ */
+export async function setGoalRecurrence(
+  supabase: SupabaseClient,
+  goalId: string,
+  recurrence: GoalRecurrence,
+): Promise<{ ok: boolean; error?: string }> {
+  const goal = await getGoalById(supabase, goalId)
+  if (!goal) return { ok: false, error: 'Goal not found' }
+  if (goal.status === 'archived') {
+    return { ok: false, error: 'Cannot change recurrence on an archived goal' }
+  }
+
+  const { error } = await supabase
+    .from('goals')
+    .update({ recurrence })
     .eq('id', goalId)
 
   if (error) return { ok: false, error: error.message }

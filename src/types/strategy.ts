@@ -466,6 +466,8 @@ export interface CreateGoalInput {
   budget_amount?: number
   budget_currency?: string
   fde_reasoning?: string
+  /** Auto-rollover cadence. Omit/undefined = one-shot (default). */
+  recurrence?: GoalRecurrence
 }
 
 export interface CreateInitiativeInput {
