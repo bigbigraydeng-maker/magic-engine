@@ -181,6 +181,19 @@ export default function PrivacyPage() {
           </p>
         </Section>
 
+        <Section title="Facebook (Meta) data">
+          <p className="text-gray-700">
+            If you connect Facebook for the free ad report, we store a read-only connection to the
+            ad accounts you choose and the reports we generate. We never change your ads. You can
+            disconnect in Magic Engine at any time, or remove Magic Engine in your Facebook settings
+            to delete this data — see{' '}
+            <a href="/data-deletion" className="text-indigo-600 underline">
+              Data deletion
+            </a>
+            .
+          </p>
+        </Section>
+
         <Section title="6. Your Rights">
           <p className="mb-4 text-gray-700">
             Under the Australian Privacy Act 1988 and the New Zealand Privacy Act 2020, you have
