@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-09-27
 source: session:4bb834a6
 done_on: 2026-09-27
-done_ref: doc:docs/specs/2026-09-27-tools-lab-step1-ads-check-design.md
+done_ref: pr:2124
 verify_by: 2026-10-04
 verify_how: 上线后打开 magicengine.com.au/cn/lab/ 和 /cn/meta-ads-ai/：① 页面上没有「内测 / 候补 / 招募 / Magic Bridge」；② 「免费体检我的广告」点过去是中文注册页；③ 轻表单提交一次测试（用自己的邮箱），hello@ 收到邮件；④ website_lead_events 里有 lab_ 开头的点击记录。不成：先看 Cloudflare Pages 这次部署是否成功。
 ---
