@@ -13,7 +13,7 @@ export default function DataDeletionPage() {
 
         <Section title="What we store from Facebook">
           <p>
-            When you connect Facebook for the free ad report (Magic Bridge), we keep a read-only
+            When you connect Facebook for the free Facebook ad check-up, we keep a read-only
             connection to the ad accounts you choose (an encrypted access token) and the reports we
             generated for you. We never change, pause or delete your ads.
           </p>
@@ -70,7 +70,7 @@ export default function DataDeletionPage() {
 
         <Section title="我们从 Facebook 保存了什么">
           <p>
-            你为了免费广告报告（Magic Bridge）连接 Facebook 后，我们保存你选择的广告账户的只读连接（加密保存的访问凭证），以及为你生成的报告。我们从不修改、暂停或删除你的广告。
+            你为了免费 Facebook 广告体检连接 Facebook 后，我们保存你选择的广告账户的只读连接（加密保存的访问凭证），以及为你生成的报告。我们从不修改、暂停或删除你的广告。
           </p>
         </Section>
 

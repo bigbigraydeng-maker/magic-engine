@@ -120,7 +120,7 @@ describe('nontechnical connection feedback',()=>{
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ...status,self_serve:true,public_connect:true,pilot:{ invited:false,new_actions_allowed:false,sponsored_analysis_enabled:false,reason:'invitation_expired',source:null } })))
     render(<MetaAdsScreen clientId="tenant" />)
     expect(await screen.findByRole('heading',{ name:'90 天免费期到了' })).toBeInTheDocument()
-    expect(screen.getByText('点下面免费再开 90 天，需要重新连一次 Facebook。')).toBeInTheDocument()
+    expect(screen.getByText('点下面免费再开 90 天，到期同样不会自动扣费；需要重新连一次 Facebook。')).toBeInTheDocument()
     expect(screen.getByRole('button',{ name:'免费再开 90 天' })).toBeInTheDocument()
     expect(screen.queryByRole('heading',{ name:'1. 连接 Facebook' })).not.toBeInTheDocument()
   })
@@ -133,7 +133,7 @@ describe('nontechnical connection feedback',()=>{
     expect(screen.queryByRole('button',{ name:'免费开通，连接我的广告账户' })).not.toBeInTheDocument()
   })
 
-  it('activates Magic Bridge for self-serve customers once public connect is open',async()=>{
+  it('activates the ad check-up for self-serve customers once public connect is open',async()=>{
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ...status,self_serve:true,public_connect:true,pilot:{ invited:false,new_actions_allowed:false,sponsored_analysis_enabled:false,reason:'invitation_required',source:null } })))
     render(<MetaAdsScreen clientId="tenant" />)
     const activate=await screen.findByRole('button',{ name:'免费开通，连接我的广告账户' })
@@ -152,10 +152,11 @@ describe('nontechnical connection feedback',()=>{
     expect(screen.queryByText(/正在等 Meta 官方审核/)).not.toBeInTheDocument()
   })
 
-  it('uses the Magic Bridge header and drops invitation-test wording',async()=>{
+  it('uses the Magic Engine brand header (no internal code name) and drops invitation-test wording',async()=>{
     render(<MetaAdsScreen clientId="tenant" />)
     expect(screen.getByRole('heading',{ name:'Facebook / Instagram 广告体检' })).toBeInTheDocument()
-    expect(screen.getByText('Magic Bridge · Magic Engine 出品')).toBeInTheDocument()
+    expect(screen.getByText('Magic Engine · Facebook 广告体检')).toBeInTheDocument()
+    expect(screen.queryByText(/Magic Bridge/)).not.toBeInTheDocument()
     expect(screen.queryByText(/邀请测试/)).not.toBeInTheDocument()
     expect(screen.queryByText(/TikTok/)).not.toBeInTheDocument()
   })

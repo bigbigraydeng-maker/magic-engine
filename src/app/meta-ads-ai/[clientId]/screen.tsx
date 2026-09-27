@@ -11,7 +11,7 @@ type Pilot={ invited:boolean;new_actions_allowed:boolean;sponsored_analysis_enab
 type Status={ pilot:Pilot;self_serve:boolean;public_connect:boolean;connections:Connection[];grants:Grant[];keys:LegacyConnection[];analyses:Analysis[] }
 const initial: Status={ pilot:{ invited:false,new_actions_allowed:false,sponsored_analysis_enabled:false,reason:'invitation_required',source:null },self_serve:false,public_connect:false,connections:[],grants:[],keys:[],analyses:[] }
 const pilotMessages: Record<Pilot['reason'],string>={ ready:'',service_paused:'服务目前已暂停。你仍可查看状态和断开连接。',
-  invitation_required:'这个账户还没有开通 Magic Bridge。',invitation_inactive:'Magic Bridge 目前没有启用。',invitation_expired:'免费期到了，请联系 hello@magicengine.cloud 续开。' }
+  invitation_required:'这个账户还没有开通广告体检。',invitation_inactive:'广告体检目前没有启用。',invitation_expired:'免费期到了，请联系 hello@magicengine.cloud 续开。' }
 function useConnector({ clientId,outcome }: { clientId:string;outcome?:string }) {
   const initialError=outcome && outcome!=='authorised' ? (messages[outcome] ?? (outcome==='reconnect_required' ? 'Facebook 授权已取消或未能完成，请重新连接 Facebook。' : '授权流程未能完成，请返回当前页面检查连接状态。')) : ''
   const [state,setState]=useState(initial),[busy,setBusy]=useState(false),[busyMessage,setBusyMessage]=useState(''),[error,setError]=useState(initialError)
@@ -61,8 +61,8 @@ function WaitingReviewBox() {
 
 function ActivationBox({ busy,expired,onActivate }: { busy:boolean;expired:boolean;onActivate:()=>void }) {
   return <div className="space-y-3 rounded border border-slate-300 p-4">
-    <h2 className="text-xl font-semibold">{expired ? '90 天免费期到了' : '免费开通 Magic Bridge'}</h2>
-    <p>{expired ? '点下面免费再开 90 天，需要重新连一次 Facebook。' : '免费期 90 天。约 2 分钟：连 Facebook → 选账户 → 看报告。'}</p>
+    <h2 className="text-xl font-semibold">{expired ? '90 天免费期到了' : '免费开通广告体检'}</h2>
+    <p>{expired ? '点下面免费再开 90 天，到期同样不会自动扣费；需要重新连一次 Facebook。' : '免费期 90 天，到期不会自动扣费。约 2 分钟：连 Facebook → 选账户 → 看报告。'}</p>
     <button disabled={busy} className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-40" onClick={onActivate}>{expired ? '免费再开 90 天' : '免费开通，连接我的广告账户'}</button>
   </div>
 }
@@ -77,7 +77,7 @@ export default function MetaAdsScreen(props: { clientId:string;outcome?:string }
   const canActivate=state.self_serve && (state.pilot.reason==='invitation_required' || state.pilot.reason==='invitation_expired')
   const showSteps=!waitingReview && !canActivate
   return <main className="mx-auto max-w-3xl space-y-8 p-6">
-    <header><p className="text-sm text-slate-500">Magic Bridge · Magic Engine 出品</p><h1 className="text-3xl font-semibold">Facebook / Instagram 广告体检</h1>
+    <header><p className="text-sm text-slate-500">Magic Engine · Facebook 广告体检</p><h1 className="text-3xl font-semibold">Facebook / Instagram 广告体检</h1>
       <p className="mt-3">免费 · 只看不改：我们读不到你的钱包，也不能修改、暂停或删除任何广告。连接 Facebook 广告账户后，点一下就能生成中文体检报告。</p></header>
     {error && <p role="alert" className="rounded bg-red-50 p-4 text-red-800">{error}</p>}
     {busy && busyMessage && <p role="status" className="rounded bg-blue-50 p-4 text-blue-900">{busyMessage}</p>}
