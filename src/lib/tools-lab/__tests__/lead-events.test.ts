@@ -6,13 +6,18 @@ const mocks = vi.hoisted(() => ({
   insertError: null as null | { message: string },
   insertedId: 'lead-event-1',
   insert: vi.fn(),
+  contains: vi.fn(),
   send: vi.fn(),
 }))
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
     from: () => {
       const chain: Record<string, unknown> = {}
-      for (const m of ['select', 'eq', 'contains']) chain[m] = vi.fn(() => chain)
+      for (const m of ['select', 'eq']) chain[m] = vi.fn(() => chain)
+      chain.contains = vi.fn((...args: unknown[]) => {
+        mocks.contains(...args)
+        return chain
+      })
       chain.limit = vi.fn(async () => ({ data: mocks.existing, error: mocks.readError }))
       chain.insert = vi.fn((row: unknown) => {
         mocks.insert(row)
@@ -68,6 +73,11 @@ describe('recordToolLead', () => {
     mocks.existing = [{ id: 'x' }]
     await recordToolLead({ tool: 'ads-check', pagePath: '/x', targetHref: '/x', dedupeKey: { client_id: 'c-1' } })
     expect(mocks.insert).not.toHaveBeenCalled()
+  })
+
+  it('the duplicate check filters by THIS lead\'s own dedupe key, not an unfiltered read of the whole table', async () => {
+    await recordToolLead({ tool: 'site-check', pagePath: '/cn/discover', targetHref: '/cn/discover', dedupeKey: { lead_id: 'lead-42' } })
+    expect(mocks.contains).toHaveBeenCalledWith('metadata', { lead_id: 'lead-42' })
   })
 
   it('does not write when the duplicate check itself fails (never double-counts)', async () => {
