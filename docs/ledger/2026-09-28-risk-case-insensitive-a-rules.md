@@ -5,6 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-09-28
 source: session:679ea2bf
+verify_how: 用 A_PATHS 每条路径的大小写混合变体跑 classifyFile，全部仍判 A；跑 vitest run tools/ops-review-loop/tests/risk.test.ts 全绿
 done_on: 2026-09-28
 done_ref: pr:2156
 ---
