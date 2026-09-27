@@ -23,7 +23,7 @@ reviewer 的 GitHub 环境，5 秒自动通过，也从未进过主干必过清�
 - 命中受保护路径任一条 → **A**（数据库结构、CI 与本闸门、鉴权与隔离、Kernel、钱、
   生产调度、对外发布、凭证、依赖清单，以及 **治理文件**：`CLAUDE.md`、`AGENTS.md`、
   整个 `.github/`、`.claude/`、`docs/ENGINEERING_QUALITY_GATES.md`、`docs/ledger/README.md`、
-  `scripts/ledger-*`）。
+  `scripts/ledger-*`、`docs/playbooks/` 正文（`inbox.md` 除外））。
 - 每一个文件都命中严格低风险清单（文档、样式、图片、纯测试）→ **C**。
 - 其余 → **B**。
 - 改动清单读不到、为空、rename 说不出原路径 → **A**。PR 正文自报的级别只作下限。
