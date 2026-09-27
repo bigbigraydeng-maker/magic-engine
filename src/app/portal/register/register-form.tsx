@@ -395,7 +395,7 @@ export default function RegisterForm({ next, fromProspect, zh = false, authFaile
         <p className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-sm font-semibold text-[#B91C1C]">
           {zh && errorCode === 'staff_account' ? (
             <>
-              员工账号请从员工入口登录：
+              这个邮箱请从登录页登录：
               <Link
                 href={`/login?next=${encodeURIComponent(next)}`}
                 className="font-semibold text-me-ochre no-underline hover:underline"

@@ -24,6 +24,23 @@ const RESEND_WINDOW_MS = 60 * 60 * 1000
 const RESEND_MAX_PER_WINDOW = 10
 const resendHits = new Map<string, number[]>()
 
+// Login codes to an existing, verified customer are also capped per email: the per-IP window above reads a
+// client-supplied header, so this is what stops one inbox being flooded with codes (狄仁杰 2026-09-27).
+const LOGIN_CODE_MAX_PER_EMAIL = 3
+const loginCodeHits = new Map<string, number[]>()
+
+function consumeLoginCodeQuota(email: string): boolean {
+  if (loginCodeHits.size > 10_000) loginCodeHits.clear()
+  const now = Date.now()
+  const hits = (loginCodeHits.get(email) ?? []).filter(t => now - t < RESEND_WINDOW_MS)
+  if (hits.length >= LOGIN_CODE_MAX_PER_EMAIL) {
+    loginCodeHits.set(email, hits)
+    return false
+  }
+  loginCodeHits.set(email, [...hits, now])
+  return true
+}
+
 function consumeResendQuota(ip: string): boolean {
   if (resendHits.size > 10_000) resendHits.clear()
   const now = Date.now()
@@ -74,11 +91,12 @@ export async function POST(request: NextRequest) {
 
   const emailLower = email.toLowerCase().trim()
 
-  // Staff sign in through the staff login. Without this, a staff member typing their email into the
-  // Tools Lab sign-up page (which staff reach when their session expires) would get a customer workspace.
-  if (getUserPermissions(emailLower)?.role === 'admin') {
+  // Anyone on the env access lists (staff, scoped demo admins, client viewers) signs in through the
+  // login page. Without this, typing that email into the Tools Lab sign-up page (reached when a session
+  // expires) would create a self-serve workspace that then shadows their real access (狄仁杰 2026-09-27).
+  if (getUserPermissions(emailLower) !== null) {
     return NextResponse.json(
-      { error: 'Staff accounts sign in through the staff login.', code: 'staff_account' },
+      { error: 'This email signs in through the login page.', code: 'staff_account' },
       { status: 409 },
     )
   }
@@ -152,7 +170,7 @@ export async function POST(request: NextRequest) {
     // gets a login code instead of a dead end (they have no password; the portal login is password / Google only).
     if (existingClient?.email_verified_at && safeNext === ADS_CHECK_ENTRY) {
       const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
-      if (!consumeResendQuota(ip)) {
+      if (!consumeLoginCodeQuota(emailLower) || !consumeResendQuota(ip)) {
         return NextResponse.json(
           { error: 'Too many attempts — please try again later.', code: 'rate_limited' },
           { status: 429 },

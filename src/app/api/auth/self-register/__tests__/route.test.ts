@@ -182,6 +182,31 @@ describe('POST /api/auth/self-register', () => {
     expect(dbCalls.some(c => c.method === 'insert')).toBe(false)
   })
 
+  it('caps login codes per email (3 an hour) even when the IP header changes every time', async () => {
+    const results: number[] = []
+    for (let i = 0; i < 4; i++) {
+      queueResult('client_portal_users', { data: { id: 'pu-1', client_id: 'c-1' }, error: null })
+      queueResult('clients', { data: { email_verified_at: '2026-06-01T00:00:00Z' }, error: null })
+      const res = await POST(request({ email: 'flood@example.com', businessName: 'X', next: '/meta-ads-ai/mine' }, { 'x-forwarded-for': `10.77.0.${i}` }))
+      results.push(res.status)
+    }
+    expect(results).toEqual([200, 200, 200, 429])
+    expect(mocks.signInWithOtp).toHaveBeenCalledTimes(3)
+  })
+
+  it('refuses client-viewer emails on the env list too (they sign in through the login page)', async () => {
+    const before = process.env.CLIENT_VIEWERS
+    process.env.CLIENT_VIEWERS = 'viewer@paid.example:22222222-2222-2222-2222-222222222222'
+    try {
+      const res = await POST(request({ email: 'viewer@paid.example', businessName: 'X', next: '/meta-ads-ai/mine' }))
+      expect(res.status).toBe(409)
+      expect((await res.json()).code).toBe('staff_account')
+      expect(mocks.from).not.toHaveBeenCalled()
+    } finally {
+      process.env.CLIENT_VIEWERS = before
+    }
+  })
+
   it('outside the ad check-up path a verified email still gets 409 with code account_exists', async () => {
     queueResult('client_portal_users', { data: { id: 'pu-1', client_id: 'c-1' }, error: null })
     queueResult('clients', { data: { email_verified_at: '2026-06-01T00:00:00Z' }, error: null })
