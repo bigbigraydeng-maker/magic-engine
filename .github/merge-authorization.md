@@ -71,13 +71,15 @@ agent 不得自行对 A 级 PR 执行 `--admin`。
   （04:46:20 合，35 秒后编译报失败），之后约 7 小时每次上线都失败。它编的是 PR 自己的最新提交，
   不是「主干 + 本 PR」，两个各自编得过的 PR 叠在一起仍可能编不过 —— 那种情况由今日待办的
   「正式网站没换上新代码」兜底（`src/lib/pm-todo/deploy-health-items.ts`）。
-  同一个 workflow 里的 `Type-check` 暂不设必过：主干本地类型检查仍有旧错误，设了会误拦。
+  同一个 workflow 里的 `Type-check` 这次没设必过，只因为 PM 这次授权的是编译这一道。它在 CI 里是
+  基线感知的（只拦相对主干**新增**的类型错误，旧错误不拦），近 40 个合并 PR 里 39 个绿；类型错误
+  不会让上线失败（`next.config.js` 构建时忽略类型错误），要不要也设成必过另由 PM 定。
 - `Kernel architecture test` 测的是「主干 + 本 PR」合并后的代码，只在推送时按当时的主干算一次，
   主干后来变了不会自己重跑（规则集不要求分支先跟上主干）。所以 A 级 PR 手动 `--admin` 合并前，
   先 `gh pr update-branch`，等这道检查在最新主干上重新变绿再合。
 - **`Risk gate`**（新建的独立规则集）：只含必过检查 `Risk gate`；bypass actor =
   Repository admin。之所以单列：`--admin` 只绕过把你列为 bypass 的那个规则集，
-  `Protect main` 的六道照样拦。
+  `Protect main` 的七道照样拦。
 - **关闭条件（写死）**：B3 签字自动写入上线、`ME_SIGNOFF_TRUSTED_LOGINS` 指向独立机器身份后，
   撤掉 `Risk gate` 规则集的 bypass（或把它并入 `Protect main`）。不撤，这个口子永久存在。
 - 环境 `merge-authorization` 已无 workflow 引用，可删。
