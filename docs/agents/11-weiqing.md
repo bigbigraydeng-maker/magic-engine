@@ -247,7 +247,7 @@ Messenger 留资广告（在聊天里填表那种）会给**同一个人**同时
 - 总架构：`docs/agents/00-architecture.md`
 - 诸葛亮手册（上游业务大脑）：`docs/agents/20-zhuge.md`
 - 鲁班手册（下游执行）：`docs/agents/50-luban.md`
-- 苏东坡手册（上游内容供给）：`docs/agents/14-sudongpo.md`（待建）
+- 苏东坡手册（上游内容供给）：`docs/agents/14-sudongpo.md`
 - Ad Strategy Engine Spec：`docs/specs/2026-07-13-ad-strategy-engine.md`
 - Meta 广告经验手册：`~/.claude/projects/-Users-raydeng-Projects-magic-engine/memory/playbook-ads-meta-general.md`
 - 广告健康度看板：`src/app/dashboard/clients/[id]/ads-health/page.tsx`
