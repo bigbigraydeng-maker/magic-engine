@@ -35,6 +35,7 @@ import { pushFacebookSyncFailingItems } from './facebook-sync-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
 import { pushAdsAutonomySyncItems, pushAdsAutonomyCircuitBreakerItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
+import { pushDataDeletionFailureItems } from './data-deletion-items'
 import {
   buildCrawlHealthItems,
   buildNotIndexedItems,
@@ -302,6 +303,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 每日广告巡检的广告级规则（D2 / D10）—— 只读，要不要改由人定；同一件事按 remind-cadence 节奏提醒
     (b) => pushAdsRuleFindingItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 广告级规则待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // Facebook 删除数据请求处理失败 —— 失败不许只写日志（铁律 3）
+    (b) => pushDataDeletionFailureItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 删除数据请求失败待办生成失败（不阻塞其他待办）:', e),
     ),
     // 广告自治被熔断器自动停了 —— 当日预算异常飙升，系统已自动禁止全部广告动作（WP3 验收 3）
     (b) => pushAdsAutonomyCircuitBreakerItems(supabase, b, now, nameOf, ids).catch((e) =>
