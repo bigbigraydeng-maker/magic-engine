@@ -4,7 +4,7 @@ title: 堵住登录后跳转的外站漏洞（/\evil.com 能把刚登录的人�
 status: done
 owner: agent
 decided_on: 2026-09-27
-source: pr:2123
+source: session:e3087553
 verify_by: 2026-10-04
 verify_how: 合并上线后打开 https://app.magicengine.com.au/api/auth/session-route?next=/%5Cevil.com 和 ?next=/%255Cevil.com（未登录也行），返回的 redirect 必须是 /dashboard 而不是 /\evil.com；再用正常 next=/meta-ads-ai/mine 登录一次，确认仍落到该页
 done_on: 2026-09-27
