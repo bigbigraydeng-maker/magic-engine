@@ -1,6 +1,11 @@
-# 广告 WP3 · Impact loop 接线 设计稿 v2.4
+# 广告 WP3 · Impact loop 接线 设计稿 v2.5
 
 状态：**accepted**，PM 2026-09-27 经小秘书窗口（`local_2bc4fba6-9a3f-426e-ac87-11458f9591d3`）口头认。原话「按新版重做」，同时等于对本设计稿的正式认可。作为本轮 3.1b 重做（分支 `feat/ads-wp3-1b-v2`）的权威实施依据；上一轮 PR #2087（分支 `feat/ads-wp3-1b-circuit-breaker`）照总纲 spec §3 G11 实施，跟本文件不一致，作废。
+v2.5 · 2026-09-27 · **§6.4 解除接口契约里那条架构测试判据本身写错了，就地修正**（规则缺陷，不是实现偏离）。
+原文要求「写 `ads_circuit_events` 且 `kind='release'` 的路由文件**必命中 `guardGlobalAdmin`**」——把判据钉在一个**函数名**上。但同一条契约的上一行又要求 `actor` 从 `requireGlobalAdmin` 的 email 取。
+查 `src/lib/auth/require-admin.ts`：`guardGlobalAdmin()` 的实现就是 `requireGlobalAdmin()` 再把失败包成 `NextResponse`，判据完全相同。所以按原文写，这条路由要么两个都调（**查会话两遍**，第二遍纯属为了让 grep 命中），要么就违反自己的架构测试。
+**修正见 §6.4 就地补注**：架构测试判据改成「必命中 `guardGlobalAdmin` **或** `requireGlobalAdmin`」，理由写在测试里。这跟 v2.3 那次是同一类错：**把「必须满足某个判据」写成了「必须出现某个字面量」**，而字面量可以在判据成立时缺席、也可以在判据不成立时出现。
+
 v2.4 · 2026-09-27 · **§6.3 第 5 条漏定义了一个状态，而它已经真实发生过一次、影响全部 6 个客户。**
 统筹查生产库：`ads_growth_states` 这张表活了 3 天、**缺了 1 天** —— 09-24 六个客户 `complete`、**09-25 整天零行**、09-26 六个客户 `complete`（两次都在 17:01 UTC 写，定时任务时间稳定）。
 §6.3 第 5 条只定义了 `data_completeness` 的**值**（`complete` 放行 / `partial` 当轮冻结），🔴 **没定义「这一天根本没有行」**。这是第三个状态：不是「数据不全」，是「完全不知道数据齐不齐」。
@@ -488,7 +493,10 @@ END $do$;
 
 - 路由过 `guardGlobalAdmin`；
 - `actor` 从 `requireGlobalAdmin` 的 email 取，**不从 body 读**（body 里给 actor 等于让调用方自报身份）；
-- 架构测试：写 `ads_circuit_events` 且 `kind = 'release'` 的路由文件**必命中 `guardGlobalAdmin`**；
+- 架构测试：写 `ads_circuit_events` 且 `kind = 'release'` 的路由文件**必命中 `guardGlobalAdmin` 或 `requireGlobalAdmin`**（v2.5 就地修正）。
+  🔴 **为什么接受两个名字**：`guardGlobalAdmin()` 的实现（`require-admin.ts:65-71`）就是 `requireGlobalAdmin()` 再把失败包成 `NextResponse`，**判据一模一样**。
+  而本条契约的上一行要求 `actor` 从 email 取 —— 那只有 `requireGlobalAdmin` 能给（`guardGlobalAdmin` 只返回响应或 null）。
+  两个都调 = 查会话两遍，第二遍纯属为了让 grep 命中一个字面量。**判据是「过全局 admin 闸」，不是「出现某个函数名」。**
 - 架构测试：`src/lib/**` 里**不存在**任何写 release 的路径（因为非 sticky 是派生态，不需要写入者）；
 - v1 单 PM，翻开关与解 sticky 同一人可接受，写明。
 

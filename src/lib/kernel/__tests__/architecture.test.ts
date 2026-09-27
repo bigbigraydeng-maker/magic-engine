@@ -2575,3 +2575,96 @@ describe('注册表的封闭性', () => {
     }
   })
 })
+
+/**
+ * 解除熔断这件事，只允许有一个入口，而且必须是人。
+ *
+ * 判据来自设计稿 `2026-09-25-ads-impact-wp3-design-v1.md` v2.5 §6.4。
+ *
+ * 为什么值得一道架构测试：`sticky` 的熔断**只能靠一行 release 解除**，时间过期对它无效。
+ * 所以「谁能写 release 行」＝「谁能让被冻住的自治重新动手」。这不是代码整洁问题，
+ * 是一条授权边界 —— 而授权边界靠人自觉记得是守不住的（今天已经撞过三次
+ * 「机制在、新东西没登记进去」）。
+ */
+describe('熔断解除：写 release 行的唯一入口（v2.5 §6.4）', () => {
+  /**
+   * 「这个文件会不会写一行 release」的判据。
+   *
+   * 🔴 三个条件同时满足才算，缺一个都不算：
+   *    · 提到这张表（`ads_circuit_events`）
+   *    · 真的在插入（`.insert(`）
+   *    · 插的内容里出现 `release`
+   *
+   * 为什么不能只看前两条：`circuit-state.ts` 读派生态时要 `.eq('kind', 'release')`，
+   * 它提到了表、提到了 release，但**只读不写**。只看「提到」会把只读模块也算成写入者，
+   * 于是这条测试要么被迫加白名单、要么被人当成噪音关掉 —— 两种都等于没有这道闸。
+   *
+   * 🔴 这个判据本身会过时：将来有人用别的写法（存储过程、RPC、批量脚本）写 release，
+   *    它就抓不到。所以下面那条「库层零写入者」是主闸，这条是「路由层必须过 admin」的
+   *    附加闸；真正兜底的是数据库那条 CHECK（`actor` 必须是 `human:<email>` 形状）。
+   *    三层各咬一次，不指望任何单独一层是完整的。
+   */
+  function writesReleaseRow(source: string): boolean {
+    return (
+      source.includes('ads_circuit_events') &&
+      source.includes('.insert(') &&
+      source.includes('release')
+    )
+  }
+
+  /**
+   * 🔴 **判据只看代码，不看注释**（这条是自己变异测出来的，2026-09-27）。
+   *
+   * 第一版写的是 `source.includes('guardGlobalAdmin')`。变异「把路由里的
+   * `requireGlobalAdmin` 换成普通 `requireAdmin`」——**测试是绿的**。
+   * 原因：那个路由的文件头注释里解释了「为什么不叠一个 `guardGlobalAdmin`」，
+   * 于是这个名字在注释里出现过，`includes` 就命中了。
+   *
+   * 也就是说：**一条注释里提到某个闸的名字，就能让这条架构测试放行一个没过闸的路由。**
+   * 这跟设计稿 v2.5 刚修掉的那个错是同一个 —— 把「必须满足某个判据」写成
+   * 「必须出现某个字面量」。我在修它的同一小时里又犯了一次。
+   *
+   * 所以：先 `stripComments`，再要求它是**调用形式**（`xxx(`）——
+   * import 了却从不调用同样不算过闸。
+   */
+  const codeOf = (f: string) => stripComments(readFileSync(join(ROOT, f), 'utf8'), f)
+
+  const candidates = ALL_FILES.filter((f) => !isTest(f)).filter((f) =>
+    writesReleaseRow(codeOf(f)),
+  )
+
+  it('🔴 `src/lib/**` 里不许存在任何写 release 行的路径', () => {
+    // 非 sticky 的 24 小时过期是**读取时现算**的派生态，不需要任何写入者
+    // （`circuit-state.ts` 文件头写了为什么）。所以库层需要这个能力的场景不存在；
+    // 一旦库层有了它，任何 cron / worker / 别的路由都能 import 去自动解除，
+    // 而「必须人解」就只剩一句说法。
+    expect(
+      candidates.filter((f) => f.startsWith('src/lib/')),
+      '库层出现写 release 的代码 = 熔断可以被程序自动解除，sticky 失去意义',
+    ).toEqual([])
+  })
+
+  it('🔴 写 release 行的路由必须过全局 admin 闸', () => {
+    const offenders = candidates.filter((f) => {
+      const code = codeOf(f)
+      // v2.5 就地修正：两个名字都接受。`guardGlobalAdmin()` 的实现就是
+      // `requireGlobalAdmin()` 外面包一层 NextResponse，判据完全相同；
+      // 而要拿 email 记 actor 只能用后者。判据是「过全局 admin 闸」，不是「出现某个函数名」。
+      //
+      // 🔴 要求**调用形式**且已剥注释（见 codeOf 上面那段）：
+      //    注释里提到名字不算、import 了不调用也不算。
+      return !/\bguardGlobalAdmin\s*\(/.test(code) && !/\brequireGlobalAdmin\s*\(/.test(code)
+    })
+    expect(offenders, '这些文件能写 release 行却没过全局 admin 闸').toEqual([])
+  })
+
+  it('这条闸真的在盯着东西（判据没有因为写法变化而扫空）', () => {
+    // 🔴 上面两条都是「列表应为空」，而**判据失效时它们也是空的** ——
+    //    这正是今天反复吃到的「绿有两种来路」。所以钉一条：
+    //    解除路由必须被这个判据抓到。它要是改了写法，这条先红，而不是静默放空。
+    expect(
+      candidates,
+      '解除路由应当被 writesReleaseRow 判据识别为写入者；扫不到说明判据已失效',
+    ).toContain('src/app/api/admin/ads/circuit/release/route.ts')
+  })
+})
