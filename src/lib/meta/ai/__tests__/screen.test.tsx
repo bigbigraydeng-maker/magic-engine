@@ -41,7 +41,7 @@ describe('nontechnical connection feedback',()=>{
   })
   it('renders the invited-customer connector journey in Chinese',async()=>{
     render(<MetaAdsScreen clientId="tenant" />)
-    expect(screen.getByRole('heading',{ name:'Meta 广告 → AI' })).toBeInTheDocument()
+    expect(screen.getByRole('heading',{ name:'Facebook / Instagram 广告体检' })).toBeInTheDocument()
     expect(screen.getByRole('heading',{ name:'1. 连接 Facebook' })).toBeInTheDocument()
     expect(screen.getByRole('heading',{ name:'2. 选择广告账户' })).toBeInTheDocument()
     expect(screen.getByRole('heading',{ name:'3. 生成广告分析' })).toBeInTheDocument()
@@ -59,9 +59,9 @@ describe('nontechnical connection feedback',()=>{
     expect(screen.getByRole('button',{ name:'刷新报告状态' })).toBeInTheDocument()
   })
   it('keeps disconnect controls available while the pilot is paused',async()=>{
-    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ...status,pilot:{ invited:true,new_actions_allowed:false,sponsored_analysis_enabled:false,reason:'service_paused' } })))
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ...status,pilot:{ invited:true,new_actions_allowed:false,sponsored_analysis_enabled:false,reason:'service_paused',source:'ops' } })))
     render(<MetaAdsScreen clientId="tenant" />)
-    expect(await screen.findByRole('status')).toHaveTextContent('测试服务目前已暂停')
+    expect(await screen.findByRole('status')).toHaveTextContent('服务目前已暂停')
     expect(screen.getAllByRole('button',{ name:'断开 Meta 连接' })[0]).toBeEnabled()
   })
 
@@ -95,13 +95,49 @@ describe('nontechnical connection feedback',()=>{
     expect(screen.queryByText(/Bearer|MCP/)).not.toBeInTheDocument()
   })
 
+  it('shows the Meta review waiting state for self-serve customers before public connect opens',async()=>{
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ...status,self_serve:true,public_connect:false,pilot:{ invited:false,new_actions_allowed:false,sponsored_analysis_enabled:false,reason:'invitation_required',source:null } })))
+    render(<MetaAdsScreen clientId="tenant" />)
+    expect(await screen.findByText(/正在等 Meta 官方审核/)).toBeInTheDocument()
+    expect(screen.getByRole('link',{ name:'先看看示例报告长什么样 →' })).toHaveAttribute('href','/meta-ads-ai/demo')
+    expect(screen.queryByRole('button',{ name:'免费开通，连接我的广告账户' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button',{ name:'连接 Facebook' })).not.toBeInTheDocument()
+  })
+
+  it('activates Magic Bridge for self-serve customers once public connect is open',async()=>{
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ...status,self_serve:true,public_connect:true,pilot:{ invited:false,new_actions_allowed:false,sponsored_analysis_enabled:false,reason:'invitation_required',source:null } })))
+    render(<MetaAdsScreen clientId="tenant" />)
+    const activate=await screen.findByRole('button',{ name:'免费开通，连接我的广告账户' })
+    fireEvent.click(activate)
+    await waitFor(()=>{
+      const call=vi.mocked(fetch).mock.calls.find(([url,options])=>String(url).includes('/meta-ads-ai') && options?.method==='POST')
+      expect(call).toBeDefined()
+      expect(JSON.parse(String(call?.[1]?.body))).toEqual({ action:'activate' })
+    })
+  })
+
+  it('lets ops testers connect without the waiting box',async()=>{
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ...status,connections:[],self_serve:true,public_connect:false,pilot:{ invited:true,new_actions_allowed:true,sponsored_analysis_enabled:true,reason:'ready',source:'ops' } })))
+    render(<MetaAdsScreen clientId="tenant" />)
+    expect(await screen.findByRole('button',{ name:'连接 Facebook' })).toBeInTheDocument()
+    expect(screen.queryByText(/正在等 Meta 官方审核/)).not.toBeInTheDocument()
+  })
+
+  it('uses the Magic Bridge header and drops invitation-test wording',async()=>{
+    render(<MetaAdsScreen clientId="tenant" />)
+    expect(screen.getByRole('heading',{ name:'Facebook / Instagram 广告体检' })).toBeInTheDocument()
+    expect(screen.getByText('Magic Bridge · Magic Engine 出品')).toBeInTheDocument()
+    expect(screen.queryByText(/邀请测试/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/TikTok/)).not.toBeInTheDocument()
+  })
+
   it('keeps existing reports visible while hosted analysis is safely paused',async()=>{
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ...status,pilot:{ ...status.pilot,sponsored_analysis_enabled:false },connections:[connection],
       grants:[{ id:'grant',ad_account_id:'act_1234567890',connection_id:connection.id }],analyses:[{ id:'job',status:'completed',ad_account_id:'act_1234567890',window_since:'2026-09-13',window_until:'2026-09-19',report_markdown:'已生成的中文报告',error_code:null,created_at:'2026-09-20',completed_at:'2026-09-20' }] })))
     render(<MetaAdsScreen clientId="tenant" />)
     const generate=await screen.findByRole('button',{ name:'生成近 7 天广告分析' })
     expect(generate).toBeDisabled()
-    expect(screen.getByRole('status')).toHaveTextContent('安全暂停')
+    expect(screen.getByRole('status')).toHaveTextContent('中文报告生成暂时关闭')
     expect(screen.getByText('已生成的中文报告')).toBeInTheDocument()
   })
 })

@@ -71,7 +71,7 @@ describe('Meta Ads AI report view',()=>{
 
   it('shows the real reason for a failed report instead of the generic fallback — 2026-09-22 production: a real CTS analysis_too_large failure was hidden behind the same generic text as every other failure',()=>{
     render(<ReportView analysis={{ ...base,status:'failed',report_markdown:null,error_code:'analysis_too_large' }} />)
-    expect(screen.getByText('当前广告数据量超过邀请测试版上限，请联系 Magic Engine 支持。')).toBeInTheDocument()
+    expect(screen.getByText('你的账户广告太多，这次没能生成，我们会联系你。')).toBeInTheDocument()
     expect(screen.queryByText(/本次分析没有完成/)).not.toBeInTheDocument()
   })
 

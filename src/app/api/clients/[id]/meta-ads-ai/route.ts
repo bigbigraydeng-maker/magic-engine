@@ -4,8 +4,10 @@ import { status,discover,bind,issueKey,revoke } from '@/lib/meta/ai/manage'
 import { auditedControl } from '@/lib/meta/ai/audit'
 import { MetaReadError } from '@/lib/meta/graph-read'
 import { generateAnalysis } from '@/lib/meta/ai/analysis'
+import { selfServeActivate } from '@/lib/meta/ai/entitlement'
 const uuid=z.string().uuid()
 const actionSchema=z.discriminatedUnion('action',[
+  z.object({ action:z.literal('activate') }).strict(),
   z.object({ action:z.literal('discover'),connection_id:uuid }).strict(),
   z.object({ action:z.literal('bind'),connection_id:uuid,account_id:z.string().regex(/^act_[1-9]\d{9,24}$/) }).strict(),
   z.object({ action:z.literal('issue_key'),grant_id:uuid }).strict(),
@@ -27,6 +29,12 @@ export async function POST(request: Request,{ params }: Context) {
     if (!parsed.success) throw new MetaReadError('invalid_arguments')
     const action=parsed.data
     const audit=<T,>(event:string,target:string|null,run:()=>Promise<T>)=>auditedControl(params.id,access.user.email ?? '',event,target,run)
+    if(action.action==='activate') {
+      // Only a self-serve member; the database function re-checks client source and membership.
+      if(access.tier!=='self_serve') throw new MetaReadError('activation_not_allowed',403)
+      const result=await audit('self_serve_activate',null,()=>selfServeActivate(params.id,access.user.email ?? ''))
+      return json({ ok:true,result })
+    }
     if(action.action==='revoke') {
       await audit(`revoke_${action.type}`,action.id,()=>revoke(params.id,access.user.id,action.type,action.id))
       return json({ ok:true })
