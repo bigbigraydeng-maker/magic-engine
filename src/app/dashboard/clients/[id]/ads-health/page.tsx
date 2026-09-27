@@ -17,6 +17,7 @@ import Link from 'next/link'
 import { resolveAdsPlaybook, type AdsPlaybook } from '@/lib/ads-strategy/playbooks'
 import AutonomySettings from './autonomy-settings'
 import GrowthPanel, { type GrowthStateView } from './growth-panel'
+import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
 
 type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history' | 'paused'
 
@@ -71,7 +72,7 @@ interface AdHealthResponse {
   /** clients.industry — picks the result words; absent → neutral words. */
   industry?: string | null
   /** 卫青巡察当天的经营状态。null = 今天还没跑；缺字段 = 这一段读不到（接口出错）。 */
-  growth?: GrowthStateView | null
+  growth?: GrowthStateView | ClientGrowthView | null
 }
 
 // ─── Verdict styling (colour = conclusion, per 板桥) ───────────────────────────
