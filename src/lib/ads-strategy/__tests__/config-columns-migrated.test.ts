@@ -32,14 +32,20 @@ function selectedColumns(): string[] {
   return m[1].split(',').map((c) => c.trim()).filter(Boolean)
 }
 
-/** 所有 migration 里给 ad_strategy_configs 建过的列：CREATE TABLE 里的列 + ADD COLUMN。 */
+/**
+ * 按文件名顺序重放所有 migration 后，ad_strategy_configs 现有的列：
+ * CREATE TABLE 里的列 + ADD COLUMN，再扣掉 DROP COLUMN、按 RENAME COLUMN 改名（魏征复审：
+ * 只认加不认删，删了列测试照样绿、上线照样 400）。
+ */
 function migratedColumns(): Set<string> {
   const cols = new Set<string>()
-  for (const f of readdirSync(MIGRATIONS_DIR).filter((n) => n.endsWith('.sql'))) {
+  const files = readdirSync(MIGRATIONS_DIR).filter((n) => n.endsWith('.sql')).sort()
+  for (const f of files) {
     const sql = stripSqlComments(readFileSync(join(MIGRATIONS_DIR, f), 'utf8'))
     if (!/ad_strategy_configs/i.test(sql)) continue
 
-    const create = sql.match(/CREATE TABLE(?: IF NOT EXISTS)?\s+(?:public\.)?ad_strategy_configs\s*\(([\s\S]*?)\n\);/i)
+    // 建表块只截到**这张表自己**的收尾括号（行首的 `)`），不会越界吃进后面别的表
+    const create = sql.match(/CREATE TABLE(?: IF NOT EXISTS)?\s+(?:public\.)?ad_strategy_configs\s*\(([\s\S]*?)\n\s*\)\s*;/i)
     if (create) {
       for (const line of create[1].split('\n')) {
         const col = line.trim().match(/^([a-z_][a-z0-9_]*)\s+[A-Za-z]/)
@@ -47,10 +53,13 @@ function migratedColumns(): Set<string> {
       }
     }
 
-    // ALTER TABLE … ad_strategy_configs 后面紧跟的 ADD COLUMN 子句（可能一条语句加多列）
-    for (const stmt of sql.matchAll(/ALTER TABLE\s+(?:IF EXISTS\s+)?(?:public\.)?ad_strategy_configs\b([\s\S]*?);/gi)) {
-      for (const add of stmt[1].matchAll(/ADD COLUMN(?: IF NOT EXISTS)?\s+([a-z_][a-z0-9_]*)/gi)) {
-        cols.add(add[1].toLowerCase())
+    // ALTER TABLE … ad_strategy_configs 这一条语句里的子句（可能一条语句加 / 删多列）
+    for (const stmt of sql.matchAll(/ALTER TABLE\s+(?:IF EXISTS\s+)?(?:ONLY\s+)?(?:public\.)?ad_strategy_configs\b([\s\S]*?);/gi)) {
+      const body = stmt[1]
+      for (const m of body.matchAll(/ADD COLUMN(?: IF NOT EXISTS)?\s+([a-z_][a-z0-9_]*)/gi)) cols.add(m[1].toLowerCase())
+      for (const m of body.matchAll(/DROP COLUMN(?: IF EXISTS)?\s+([a-z_][a-z0-9_]*)/gi)) cols.delete(m[1].toLowerCase())
+      for (const m of body.matchAll(/RENAME COLUMN\s+([a-z_][a-z0-9_]*)\s+TO\s+([a-z_][a-z0-9_]*)/gi)) {
+        if (cols.delete(m[1].toLowerCase())) cols.add(m[2].toLowerCase())
       }
     }
   }

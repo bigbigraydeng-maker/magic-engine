@@ -160,6 +160,8 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
       // 2026-09-25 事故：读广告配置 400 → 所有客户的诊断 / 经营状态静默跳过，
       // 但账户级体检照写 ad_health_narratives，上面两条都是绿的。经营状态每个
       // 有 Meta 账户的客户每天必写一行，它停了就是整条诊断链停了。
+      // 只看全表最新一行，所以只抓「所有客户一起停」；个别客户停由 summary.errors 的
+      // ad_config / ads_growth_state 兜。所有广告客户都被人手暂停时它会误报一条（子牙 / 魏征复审，可接受）。
       { table: 'ads_growth_states', freshnessHours: 26 },
     ] },
   { service: 'industry-ai-visibility-daily', jobName: 'industry-ai-visibility-daily', schedule: '30 2 * * *', logsRuns: true },

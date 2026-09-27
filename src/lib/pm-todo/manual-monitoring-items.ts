@@ -506,29 +506,36 @@ export async function pushAdsConfigReadItems(
     .not('finished_at', 'is', null)
     .in('status', ['completed', 'failed'])
     .order('finished_at', { ascending: false })
-    .limit(1)
+    // 多拿几轮：提前结束的那种运行（没客户 / 读客户表失败）summary 里没有 errors，
+    // 只看最新一条会让前一轮的配置读失败被它盖掉（魏征复审）。
+    .limit(3)
 
   if (error) throw new Error(`cron_run_logs query failed: ${error.message}`)
 
-  const run = (data ?? [])[0] as
-    | { finished_at: string | null; summary: { errors?: Array<{ client_id?: string; source?: string }> } | null }
-    | undefined
-  if (!run?.summary) return
+  type Run = { finished_at: string | null; summary: { errors?: Array<{ client_id?: string; source?: string; error?: string }> } | null }
+  const run = ((data ?? []) as Run[]).find((r) => Array.isArray(r.summary?.errors))
+  if (!run?.summary?.errors) return
 
   const hoursOld = run.finished_at ? (now.getTime() - Date.parse(run.finished_at)) / 3_600_000 : null
   if (hoursOld !== null && hoursOld > ADS_CONFIG_READ_STALE_HOURS) return
 
-  const affected = new Set(
-    (run.summary.errors ?? []).filter((e) => e.source === 'ad_config').map((e) => e.client_id ?? '?'),
-  )
+  const configErrors = run.summary.errors.filter((e) => e.source === 'ad_config')
+  const affected = new Set(configErrors.map((e) => e.client_id ?? '?'))
   if (affected.size === 0) return
+
+  // 原始报错摘一段：「字段没加上」不会自己好，「一次超时」明天自己消失 —— 只有看报错才分得清
+  //（子牙 / 魏征复审）。去掉路由拼的前缀和任何 uuid，不把客户 id 带进 PM 邮件。
+  const detail = (configErrors[0]?.error ?? '')
+    .replace(/^.*?for this client:\s*/, '')
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<id>')
+    .slice(0, 120)
 
   items.push({
     kind: 'ads_config_unreadable',
     client_id: 'infra',
     client_name: 'Magic Engine 后台',
-    what: `广告每日回拉读不出 ${affected.size} 个客户的广告设置 —— 这些客户今天的广告诊断、经营状态和内部日报全部跳过了（广告数据本身照常在拉）。不会自己好，多半是代码上线了、数据库那边对应的字段还没加上`,
-    how: '这条不用你动手 —— 是我们这边代码和数据库没对齐。回我一句「查一下广告配置」我就去对齐，并把这几天漏掉的诊断补跑',
-    href: 'https://app.magicengine.com.au/dashboard/admin/cron-health',
+    what: `广告每日回拉读不出 ${affected.size} 个客户的广告设置 —— 这些客户今天的广告诊断、经营状态、内部日报**和坏广告自动暂停**全部跳过了（广告数据本身照常在拉，钱照常在花）${detail ? `。报错原话：${detail}` : ''}。如果是数据库字段没加上，不会自己好；如果只是一次临时读取失败，明天这条会自己消失`,
+    how: '这条不用你动手 —— 是我们这边的欠账。回我一句「查一下广告配置」我就去看是字段没对齐还是临时故障，并把漏掉的诊断补跑',
+    href:'https://app.magicengine.com.au/dashboard/admin/cron-health',
   })
 }
