@@ -8,6 +8,6 @@ source: pr:2137
 verify_by: 2026-10-05
 verify_how: 造两张故意违规的卡跑 `npx vitest run src/lib/ledger`：①正文 8 行超过上限，新卡必须红；②用 checkFrozenFields 喂一份改写了 verify_how 的卡，必须返回违规。两张都还能通过 = 没做
 done_on: 2026-09-28
-done_ref: pr:2151
+done_ref: pr:2155
 ---
 实现卡 2026-09-28-ledger-rules-not-enforced-by-parse 的修法。
