@@ -111,6 +111,15 @@ describe('scopeAccountToClient', () => {
     expect(scoped.account.hourly[DATE]).toEqual([{ adset_id: 'as-own-1', campaign_id: 'c-own', hour: 9, spend: 5 }])
   })
 
+  it('快照里有、但名下还没广告也没花过钱的「空组」：快照留着，小时花费不算客户的（狄仁杰第二次复核）', () => {
+    const acc = mixedAccount()
+    acc.snapshots = [...acc.snapshots, adset('as-empty', 'c-own')]
+    acc.hourly[DATE] = [...acc.hourly[DATE], { adset_id: 'as-empty', campaign_id: 'c-own', hour: 11, spend: 25 }]
+    const scoped = scopeAccountToClient(acc, OWN, DATE)
+    expect(scoped.account.snapshots.some(r => r.entity_id === 'as-empty')).toBe(true)
+    expect(scoped.account.hourly[DATE]).toEqual([{ adset_id: 'as-own-1', campaign_id: 'c-own', hour: 9, spend: 5 }])
+  })
+
   it('幂等：切过的再切一次，账户内容不变（loader 预筛切一次、run 再切一次）', () => {
     const once = scopeAccountToClient(mixedAccount(), OWN, DATE).account
     const twice = scopeAccountToClient(once, OWN, DATE).account

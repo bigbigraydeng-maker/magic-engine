@@ -242,10 +242,12 @@ export function scopeAccountToClient(account: AccountInput, clientPageId: string
     return true
   })
   const daily = account.daily.filter(r => (r.level === 'adset' ? keepAdset(r.entity_id) : r.level === 'campaign' ? !tainted.has(r.entity_id) : true))
-  // 只在小时数据里出现（快照、日数据都还没有，比如上一轮快照之后才建的）的广告组归属判不了，不算客户的（狄仁杰）
-  const knownAdsets = new Set([...account.snapshots.filter(r => r.level === 'adset').map(r => r.entity_id), ...account.daily.filter(r => r.level === 'adset').map(r => r.entity_id)])
+  // 小时数据只留名下广告全挂客户主页的组（狄仁杰两轮）：只在小时数据里出现的组、快照里还没广告的「空组」
+  // 都可能是上一轮快照之后才塞进别家广告的，它们的小时花费不能算进客户的 D1
   const hourly: Record<string, HourlyRow[]> = {}
-  for (const [day, rows] of Object.entries(account.hourly)) hourly[day] = rows.filter(r => keepAdset(r.adset_id) && knownAdsets.has(r.adset_id ?? ''))
+  for (const [day, rows] of Object.entries(account.hourly)) {
+    hourly[day] = rows.filter(r => !!r.adset_id && !dropAdsets.has(r.adset_id) && judge.verdict(r.adset_id) === 'own')
+  }
 
   const days = new Set(windowDays(date))
   const excluded = listExcluded(account, drops, days)
