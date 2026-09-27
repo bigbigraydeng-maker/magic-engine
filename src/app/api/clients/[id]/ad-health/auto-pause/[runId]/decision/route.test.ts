@@ -144,18 +144,20 @@ describe('③ 批准过注册表定的档次闸', () => {
 
 describe('账表只记确定的结果', () => {
   it.each([
-    ['succeeded', 'paused'],
-    ['dead_letter', 'failed'],
-  ])('%s → 记 %s', async (kind, status) => {
-    m.approve.mockResolvedValueOnce({ runId: RUN_ID, kind, humanReason: null })
-    await post({ resolution: 'approve', expectedDecisionId: SEEN })
-    expect(ledgerWrites).toEqual([status])
-  })
-
-  it.each(['in_progress', 'idempotent_hit'])('🔴 %s（别人刚批了、正在执行）→ 不记「失败」，账一个字不动', async (kind) => {
+    ['succeeded', 'paused', true],
+    ['idempotent_hit', 'paused', true],
+    ['dead_letter', 'failed', false],
+  ])('%s → 记 %s', async (kind, status, ok) => {
     m.approve.mockResolvedValueOnce({ runId: RUN_ID, kind, humanReason: null })
     const res = await post({ resolution: 'approve', expectedDecisionId: SEEN })
-    expect((await res.json()).kind).toBe(kind)
+    expect(ledgerWrites).toEqual([status])
+    expect((await res.json()).ok).toBe(ok)
+  })
+
+  it('🔴 in_progress（别人刚批了、正在执行）→ 不记「失败」，账一个字不动', async () => {
+    m.approve.mockResolvedValueOnce({ runId: RUN_ID, kind: 'in_progress', humanReason: null })
+    const res = await post({ resolution: 'approve', expectedDecisionId: SEEN })
+    expect((await res.json()).kind).toBe('in_progress')
     expect(ledgerWrites).toEqual([])
   })
 })

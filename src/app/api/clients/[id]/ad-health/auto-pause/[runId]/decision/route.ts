@@ -118,11 +118,15 @@ async function decide(kernel: Kernel, params: RouteParams['params'], body: Decis
       return NextResponse.json({ ok: true, kind: outcome.kind })
     }
     const outcome = await approveAndExecuteAdsAutoPause(kernel, params.runId, actorEmail, body.expectedDecisionId)
-    // 🔴 只有确定的结果才记账：in_progress / idempotent_hit = 别人刚批了、正在执行，
-    //    这时记「失败」是假账（广告马上就会停）。结果未定就不动账，由真正执行的那一方记。
-    const status = outcome.kind === 'succeeded' ? 'paused' : outcome.kind === 'dead_letter' || outcome.kind === 'denied' ? 'failed' : null
+    // 🔴 只有确定的结果才记账：idempotent_hit 跟 succeeded 一样是**已经做完**
+    //    （outcomeForSettledRun 只在 run.status === 'succeeded' 时才答 idempotent_hit，
+    //    见 src/lib/kernel/runner.ts），必须同样记 paused、同样报成功，
+    //    否则账表会永远停在 awaiting_approval、页面一直说「正在暂停」。
+    //    真正未定的只有 in_progress（另一个执行者还没跑完）——结果未定就不动账，
+    //    由真正执行的那一方记，这里记「失败」会是假账（广告马上就会停）。
+    const status = outcome.kind === 'succeeded' || outcome.kind === 'idempotent_hit' ? 'paused' : outcome.kind === 'dead_letter' || outcome.kind === 'denied' ? 'failed' : null
     if (status) await updateLedgerStatus(params.id, params.runId, status, { reason: outcome.humanReason })
-    return NextResponse.json({ ok: outcome.kind === 'succeeded', kind: outcome.kind, humanReason: outcome.humanReason })
+    return NextResponse.json({ ok: outcome.kind === 'succeeded' || outcome.kind === 'idempotent_hit', kind: outcome.kind, humanReason: outcome.humanReason })
   } catch (e) {
     if (e instanceof KernelError) {
       return NextResponse.json({ error: e.humanReason, code: e.code }, { status: 409 })
