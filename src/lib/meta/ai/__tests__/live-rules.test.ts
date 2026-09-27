@@ -6,7 +6,9 @@ const graph = vi.hoisted(() => ({
   fetchAdSettings: vi.fn(),
   getAdDailyInsights: vi.fn(),
   getAdsetDailyInsights: vi.fn(),
-  getCampaignWindowFrequency: vi.fn(),
+  walkCampaignWindowFrequency: vi.fn(),
+  findSharedAdAccounts: vi.fn(),
+  breakCopy: false,
 }))
 vi.mock('@/lib/meta/entity-settings', () => ({
   fetchCampaignSettings: graph.fetchCampaignSettings,
@@ -15,10 +17,15 @@ vi.mock('@/lib/meta/entity-settings', () => ({
 }))
 vi.mock('@/lib/meta/ad-insights', () => ({ getAdDailyInsights: graph.getAdDailyInsights }))
 vi.mock('@/lib/meta/adset-insights', () => ({ getAdsetDailyInsights: graph.getAdsetDailyInsights }))
-vi.mock('@/lib/meta/campaign-insights', () => ({ getCampaignWindowFrequency: graph.getCampaignWindowFrequency }))
+vi.mock('@/lib/meta/campaign-insights', () => ({ walkCampaignWindowFrequency: graph.walkCampaignWindowFrequency }))
+vi.mock('@/lib/meta/client-ad-accounts', () => ({ findSharedAdAccounts: graph.findSharedAdAccounts }))
+vi.mock('@/lib/ads-strategy/rules/client-copy', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/ads-strategy/rules/client-copy')>()
+  return { ...actual, toClientFinding: (...a: Parameters<typeof actual.toClientFinding>) => (graph.breakCopy ? null : actual.toClientFinding(...a)) }
+})
 
 import {
-  dominantPage, judgeAsOf, LIVE_MAX_AD_ROWS, liveSection, runLiveRules, toDailyRow, type LiveData, type LiveRulesArgs,
+  clampChangesTo, dominantPage, historyStartMarker, judgeAsOf, LIVE_MAX_AD_ROWS, liveSection, runLiveRules, toDailyRow, type LiveData, type LiveRulesArgs,
 } from '../live-rules'
 import { renderRuleSection } from '@/lib/ads-strategy/rules/client-copy'
 import { shiftDate } from '@/lib/ads-strategy/portfolio/diagnostics/context'
@@ -132,7 +139,7 @@ describe('liveSection — the patrol\'s two-in-a-row rule, judged from one read'
     const section = liveSection(ARGS, liveData(ad))
     expect(section).toEqual({ source: 'live', dataDate: UNTIL, adsChecked: 0, findings: [] })
     const text = renderRuleSection(section)
-    expect(text).toContain('没有适合逐条检查的广告')
+    expect(text).toContain('没有能逐条判断的广告')
     expect(text).not.toContain('没有正在投放')
   })
 })
@@ -184,16 +191,17 @@ describe('runLiveRules — reads and failure handling', () => {
     const adsetRowsMeta: MetaAdsetDailyRow[] = adRows.map(({ ad_id: _a, ad_name: _n, ...r }) => ({ ...r, adset_id: 'as1', adset_name: 'S' }))
     graph.getAdDailyInsights.mockResolvedValue({ rows: adRows, complete: true })
     graph.getAdsetDailyInsights.mockResolvedValue({ rows: adsetRowsMeta, complete: true })
-    graph.getCampaignWindowFrequency.mockResolvedValue(new Map([['c1', 1.5]]))
+    graph.walkCampaignWindowFrequency.mockResolvedValue({ frequency: new Map([['c1', 1.5]]), complete: true })
+    graph.findSharedAdAccounts.mockResolvedValue({ shared: new Set() })
   }
-  beforeEach(() => { vi.clearAllMocks(); mockHealthyReads() })
+  beforeEach(() => { vi.clearAllMocks(); graph.breakCopy = false; mockHealthyReads() })
 
   it('healthy reads → a live section built from the customer\'s own page, over 28 days ending at the window end', async () => {
     const section = await runLiveRules(ARGS)
     expect(section).toMatchObject({ source: 'live', dataDate: UNTIL, adsChecked: 1, findings: [] })
     expect(graph.getAdDailyInsights).toHaveBeenCalledWith('act_1', 't', '2026-08-28', UNTIL)
     expect(graph.getAdsetDailyInsights).toHaveBeenCalledWith('act_1', 't', '2026-08-28', UNTIL)
-    expect(graph.getCampaignWindowFrequency).toHaveBeenCalledWith('act_1', 't', '2026-09-18', UNTIL)
+    expect(graph.walkCampaignWindowFrequency).toHaveBeenCalledWith('act_1', 't', '2026-09-18', UNTIL)
   })
 
   it.each([
@@ -201,20 +209,22 @@ describe('runLiveRules — reads and failure handling', () => {
     ['ad set settings', () => graph.fetchAdsetSettings.mockResolvedValue({ rows: [], complete: false, error: null })],
     ['ad settings', () => graph.fetchAdSettings.mockResolvedValue({ rows: [], complete: false, error: null })],
     ['ad set daily rows', () => graph.getAdsetDailyInsights.mockResolvedValue({ rows: [], complete: false })],
+    ['ad daily rows (under the cap)', () => graph.getAdDailyInsights.mockResolvedValue({ rows: [metaRow(UNTIL, 1)], complete: false })],
+    ['campaign 7-day frequency', () => graph.walkCampaignWindowFrequency.mockResolvedValue({ frequency: new Map(), complete: false })],
   ])('incomplete %s → no check, live_unavailable', async (_label, breakIt) => {
     breakIt()
     expect(await runLiveRules(ARGS)).toEqual({ source: 'none', reason: 'live_unavailable' })
   })
 
-  it('ad daily rows incomplete or over the cap → whole section dropped as too_many_ads (never truncated)', async () => {
-    graph.getAdDailyInsights.mockResolvedValue({ rows: [metaRow(UNTIL, 1)], complete: false })
+  it('ad daily rows over the cap (complete or cut off by the page cap) → whole section dropped as too_many_ads (never truncated)', async () => {
+    graph.getAdDailyInsights.mockResolvedValue({ rows: Array.from({ length: LIVE_MAX_AD_ROWS + 1 }, () => metaRow(UNTIL, 1)), complete: false })
     expect(await runLiveRules(ARGS)).toEqual({ source: 'none', reason: 'too_many_ads' })
     graph.getAdDailyInsights.mockResolvedValue({ rows: Array.from({ length: LIVE_MAX_AD_ROWS + 1 }, () => metaRow(UNTIL, 1)), complete: true })
     expect(await runLiveRules(ARGS)).toEqual({ source: 'none', reason: 'too_many_ads' })
   })
 
   it('a read that throws → live_unavailable, never throws to the report', async () => {
-    graph.getCampaignWindowFrequency.mockRejectedValue(new Error('boom'))
+    graph.walkCampaignWindowFrequency.mockRejectedValue(new Error('boom'))
     expect(await runLiveRules(ARGS)).toEqual({ source: 'none', reason: 'live_unavailable' })
   })
 
@@ -232,5 +242,68 @@ describe('runLiveRules — reads and failure handling', () => {
     graph.fetchAdSettings.mockResolvedValue(full([{ id: 'old', name: 'old', adset_id: 'as1', campaign_id: 'c1', effective_status: 'ACTIVE', updated_time: '2026-09-21T01:00:00+0000', creative: { object_story_spec: { page_id: PAGE } } }]))
     const changed = await runLiveRules(ARGS)
     expect(changed.source === 'live' && changed.findings).toEqual([])
+  })
+  it('account also registered to another client (or the check fails) → not judged, no Graph reads', async () => {
+    graph.findSharedAdAccounts.mockResolvedValue({ shared: new Set(['1']) })
+    expect(await runLiveRules(ARGS)).toEqual({ source: 'none', reason: 'shared_account' })
+    graph.findSharedAdAccounts.mockResolvedValue({ shared: new Set(['1']), error: 'down' })
+    expect(await runLiveRules(ARGS)).toEqual({ source: 'none', reason: 'shared_account' })
+    expect(graph.fetchAdSettings).not.toHaveBeenCalled()
+    expect(graph.findSharedAdAccounts).toHaveBeenCalledWith('c', ['act_1'])
+  })
+
+  it('a later change hides an earlier one: ad set changed 3 days before, then again after the window → no card (子牙 B1)', async () => {
+    const decaying = days('2026-08-28', UNTIL).map(d => (d < '2026-09-22' ? metaRow(d, 20, 40, 20, 3) : metaRow(d, 20, 20, 10, 1)))
+    mockHealthyReads(decaying)
+    graph.fetchAdsetSettings.mockResolvedValue(full([{ id: 'as1', campaign_id: 'c1', optimization_goal: 'LEAD_GENERATION', destination_type: 'ON_AD', effective_status: 'ACTIVE', updated_time: '2026-09-25T01:00:00+0000' }]))
+    const section = await runLiveRules(ARGS)
+    expect(section.source === 'live' && section.findings).toEqual([])
+  })
+
+  it('new account read from Meta (first delivery inside the window): launch-week click rate is not judged as wear-out', async () => {
+    mockHealthyReads(days('2026-09-06', UNTIL).map(d => (d < '2026-09-13' ? metaRow(d, 20, 60, 30, 3) : metaRow(d, 20, 20, 10, 1))))
+    const section = await runLiveRules(ARGS)
+    expect(section.source === 'live' && section.findings).toEqual([])
+  })
+
+  it('hit but the customer wording cannot be built → incomplete_findings, never "nothing found"', async () => {
+    const decaying = days('2026-08-28', UNTIL).map(d => (d < '2026-09-22' ? metaRow(d, 20, 40, 20, 3) : metaRow(d, 20, 20, 10, 1)))
+    mockHealthyReads(decaying)
+    graph.breakCopy = true
+    expect(await runLiveRules(ARGS)).toEqual({ source: 'none', reason: 'incomplete_findings' })
+  })
+})
+
+describe('clampChangesTo', () => {
+  it('moves changes after the judged day (account timezone) to that day, keeps earlier ones', () => {
+    const out = clampChangesTo([
+      { level: 'adset', entity_id: 'a', captured_at: '2026-09-24T10:00:00Z' }, // 22:00 NZST on the 24th → same day, kept
+      { level: 'adset', entity_id: 'b', captured_at: '2026-09-24T13:00:00Z' }, // 01:00 on the 25th NZ → clamped
+    ], UNTIL, 'Pacific/Auckland')
+    expect(out[0].captured_at).toBe('2026-09-24T10:00:00Z')
+    expect(new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland' }).format(new Date(out[1].captured_at))).toBe(UNTIL)
+  })
+})
+
+describe('魏征 2026-09-27 follow-ups', () => {
+  it('"looked at N ads" only counts ads the rules could judge (a 2-day-old ad is not counted)', () => {
+    const snaps = [...SNAPS, snap({ level: 'ad', entity_id: 'fresh', campaign_id: 'c1', adset_id: 'as1', creative_page_id: PAGE })]
+    const ad = [...decayingAd('2026-09-23'), adRow('fresh', '2026-09-24', 20, 40, 20, 3)]
+    const section = liveSection(ARGS, liveData(ad, { snapshots: snaps }))
+    expect(section.source === 'live' && section.adsChecked).toBe(1)
+  })
+
+  it('new account: an ad whose launch week had a high click rate is not called "worn out" once the marker says history starts earlier', () => {
+    // account started delivering on 09-06; first week 6% click rate, then a steady 2%
+    const ad = days('2026-09-06', UNTIL).map(d => (d < '2026-09-13' ? adRow('old', d, 20, 60, 30, 3) : adRow('old', d, 20, 20, 10, 1)))
+    const without = liveData(ad)
+    const withMarker = liveData([historyStartMarker('2026-08-28'), ...ad])
+    expect(judgeAsOf(ARGS, without, UNTIL, PAGE).hits.map(h => h.code)).toEqual(['D2'])
+    expect(judgeAsOf(ARGS, withMarker, UNTIL, PAGE).hits).toEqual([])
+  })
+
+  it('the marker adds no spend, page or ad', () => {
+    expect(dominantPage([historyStartMarker('2026-08-28'), adRow('old', UNTIL, 20, 1, 1, 0)], SNAPS)).toBe(PAGE)
+    expect(dominantPage([historyStartMarker('2026-08-28')], SNAPS)).toBe('no_spend')
   })
 })

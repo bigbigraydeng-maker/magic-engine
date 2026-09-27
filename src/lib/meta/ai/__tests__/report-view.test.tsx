@@ -226,7 +226,7 @@ describe('我们正在跟进的广告（卡片）',()=>{
 })
 
 describe('值得你看一眼的广告（自助客户卡片）',()=>{
-  const footer='不想每天自己盯？我们可以帮你看着，发现问题直接处理——发邮件到 hello@magicengine.cloud 跟我们聊聊。'
+  const footer='想省心的话，可以让我们帮你盯着，你同意后我们才动手——发邮件到 hello@magicengine.cloud 聊聊。'
 
   it('renders the footer after the cards',()=>{
     const evidence={

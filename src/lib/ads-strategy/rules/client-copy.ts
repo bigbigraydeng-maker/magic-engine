@@ -91,11 +91,11 @@ function askSentence(changed: string): string {
 function selfServeAction(kind: 'post_click_drop' | 'fatigue', metric: unknown, fatigueKind: FatigueKind): string {
   if (kind === 'post_click_drop') {
     return metric === 'lead'
-      ? '打开这条广告用的表单，把不是非问不可的问题删掉，再看两三天。'
-      : '看看这条广告点进来后的欢迎语和快捷问题，改得更直接一点，再看两三天。'
+      ? '表单发布后不能直接改：给这条广告换一个新表单（可以复制原来的），只留非问不可的问题，再看两三天。'
+      : '把私信欢迎语的第一句改成直接回答顾客最常问的（价格、地址、怎么约），再看两三天。'
   }
   if (fatigueKind === 'audience') {
-    return '同一批人已经看了很多次，可以换一批新的受众，或者先换一版图片。'
+    return '先换一版新图或新视频；过几天还不行，再把这组广告的地区或年龄放宽一点。'
   }
   if (fatigueKind === 'unknown') return '先换一张新图或新视频试试，文字和受众先不动。'
   return '换一张新图或新视频试试，文字和受众先不动。'
@@ -235,9 +235,9 @@ const NONE_REASON_TEXT: Record<
   not_loaded: '这次没有拿到每条广告的数据，我们不想在数据不全时下结论',
   no_delivering_ads: '它现在没有正在投放的广告，没有需要检查的',
   incomplete_findings: '有几条广告这次的数据不完整，我们不想在数据不全时下结论',
-  mixed_pages: '你的账户同时给好几个主页投广告，这次没法判断哪个是你的主页，所以没出建议',
-  too_many_ads: '你的账户广告太多，这次没有逐条检查',
-  live_unavailable: '这次没拿到每条广告的数据，没有逐条检查',
+  mixed_pages: '你的账户同时给好几个主页投广告，这次没法判断哪个是你的主页',
+  too_many_ads: '在花钱的广告太多，一次看不完',
+  live_unavailable: '这次没拿到每条广告的数据',
 }
 
 export const CTR_EXPLAINER = '点击率就是看到广告的人里点进来的比例。'
@@ -246,7 +246,7 @@ export const RULE_SECTION_TITLE = '三、需要留意的广告'
 
 export const SELF_SERVE_INTRO = '下面是从你账户数据看到的变化，改不改由你决定，我们不会动你的广告。'
 
-export const SELF_SERVE_FOOTER = '不想每天自己盯？我们可以帮你看着，发现问题直接处理——发邮件到 hello@magicengine.cloud 跟我们聊聊。'
+export const SELF_SERVE_FOOTER = '想省心的话，可以让我们帮你盯着，你同意后我们才动手——发邮件到 hello@magicengine.cloud 聊聊。'
 
 function findingBlock(x: ClientRuleFinding, explainCtr: boolean): string {
   const detail = explainCtr ? CTR_EXPLAINER + x.detail : x.detail
@@ -272,7 +272,7 @@ export function renderRuleSection(input: RuleSectionInput): string {
   }
   if (input.source === 'live') {
     if (input.adsChecked === 0) {
-      return `${title}\n这次没有适合逐条检查的广告：单条检查只看以点击、留资或私信为目标、最近在花钱的广告（数据截至 ${formatDay(input.dataDate)}）。`
+      return `${title}\n这次没有能逐条判断的广告：逐条检查只看最近在花钱、目标是让人点进来、留联系方式或发私信，并且投放时间够长、能和之前比较的广告（数据截至 ${formatDay(input.dataDate)}）。`
     }
     if (input.findings.length === 0) {
       return `${title}\n这次没发现需要你动的广告（看了 ${input.adsChecked} 条在花钱的广告，数据截至 ${formatDay(input.dataDate)}）。`

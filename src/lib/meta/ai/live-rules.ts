@@ -7,20 +7,24 @@
  * Differences from the patrol, all leaning towards reporting less (never more):
  *  - "hit on two consecutive patrols" becomes "hit when judged as of the last day AND as of the day before", from
  *    one read (today's settings, Meta's current numbers);
- *  - setting changes come from Meta's updated_time only (a rename also counts → more "recently changed" skips);
+ *  - setting changes come from Meta's updated_time only (a rename also counts → more "recently changed" skips). Meta only
+ *    keeps the LAST change, so a change after the judged day may hide an earlier one inside the rule window: any change
+ *    later than the judged day is treated as made on that day (the rule then skips the ad as recently changed);
  *  - the client's own Facebook page is the page with ≥ 60% of the last 28 days' ad spend; otherwise we do not judge.
+ * Accounts also registered to another client are not judged (whose page is whose is unknowable).
  * Separate 15 s budget; too many ads or any incomplete read → no ad-by-ad check, the rest of the report is unaffected.
  */
 
 import { fetchAdSettings, fetchAdsetSettings, fetchCampaignSettings } from '@/lib/meta/entity-settings'
 import { getAdDailyInsights } from '@/lib/meta/ad-insights'
 import { getAdsetDailyInsights } from '@/lib/meta/adset-insights'
-import { getCampaignWindowFrequency, type MetaCampaignDailyRow } from '@/lib/meta/campaign-insights'
+import { walkCampaignWindowFrequency, type MetaCampaignDailyRow } from '@/lib/meta/campaign-insights'
+import { findSharedAdAccounts } from '@/lib/meta/client-ad-accounts'
 import {
   normalizeAd, normalizeAdset, normalizeCampaign, type EntitySnapshotRow, type SnapshotRowDraft,
 } from '@/lib/ads-strategy/portfolio/snapshot'
-import { buildAccountContext, shiftDate } from '@/lib/ads-strategy/portfolio/diagnostics/context'
-import { adLevelCoverage, diagnoseAdLevelRules } from '@/lib/ads-strategy/portfolio/diagnostics/d2-d10-ad-rules'
+import { buildAccountContext, localDayEndUtc, shiftDate } from '@/lib/ads-strategy/portfolio/diagnostics/context'
+import { adLevelJudgeableCount, diagnoseAdLevelRules } from '@/lib/ads-strategy/portfolio/diagnostics/d2-d10-ad-rules'
 import type {
   AccountInput, DailyRow, Diagnosis, DiagnosisInput, SettingChange,
 } from '@/lib/ads-strategy/portfolio/diagnostics/types'
@@ -43,7 +47,7 @@ export interface LiveRulesArgs {
   windowUntil: string
 }
 
-type SkipReason = 'mixed_pages' | 'too_many_ads' | 'live_unavailable'
+type SkipReason = 'mixed_pages' | 'too_many_ads' | 'live_unavailable' | 'shared_account'
 class LiveSkip extends Error {
   constructor(readonly reason: SkipReason) { super(reason) }
 }
@@ -73,6 +77,19 @@ export function toDailyRow(level: 'ad' | 'adset', entityId: string, row: MetaCam
   }
 }
 
+/**
+ * Zero row on the first day we read. The rules treat the earliest row as "history starts here" and cannot tell whether an
+ * ad first seen that day is new; with this marker, an account that started delivering inside the window gets the
+ * new-ad protection (first 7 days not used as a baseline) instead of being judged as old (魏征 2026-09-27).
+ * The entity id matches no ad, so it adds no spend, page or ad to anything.
+ */
+export function historyStartMarker(since: string): DailyRow {
+  return {
+    level: 'ad', entity_id: '__history_start__', parent_id: null, insight_date: since, spend: 0, impressions: 0, reach: 0,
+    clicks: 0, leads: 0, messaging_conversations: 0, video_thruplays: null, actions: [],
+  }
+}
+
 function stamp(draft: SnapshotRowDraft, capturedAt: string): EntitySnapshotRow {
   return { ...draft, settings_hash: 'live', capture_reason: 'daily', captured_at: capturedAt }
 }
@@ -85,10 +102,12 @@ async function readLive(args: LiveRulesArgs): Promise<LiveData> {
     fetchAdSettings(args.adAccountId, args.token),
     getAdDailyInsights(args.adAccountId, args.token, since, args.windowUntil),
     getAdsetDailyInsights(args.adAccountId, args.token, since, args.windowUntil),
-    getCampaignWindowFrequency(args.adAccountId, args.token, shiftDate(args.windowUntil, -6), args.windowUntil),
+    walkCampaignWindowFrequency(args.adAccountId, args.token, shiftDate(args.windowUntil, -6), args.windowUntil),
   ])
-  if (!campaigns.complete || !adsets.complete || !ads.complete || !adsetRows.complete) throw new LiveSkip('live_unavailable')
-  if (!adRows.complete || adRows.rows.length > LIVE_MAX_AD_ROWS) throw new LiveSkip('too_many_ads')
+  if (adRows.rows.length > LIVE_MAX_AD_ROWS) throw new LiveSkip('too_many_ads')
+  if (!campaigns.complete || !adsets.complete || !ads.complete || !adsetRows.complete || !adRows.complete || !frequency.complete) {
+    throw new LiveSkip('live_unavailable')
+  }
   const ctx = { clientId: args.clientId, adAccountId: args.adAccountId, currency: args.currency, sharedAccount: false }
   const now = new Date().toISOString()
   const snapshots = [
@@ -101,8 +120,8 @@ async function readLive(args: LiveRulesArgs): Promise<LiveData> {
     if (s.source_updated_time) settingChanges.push({ level: s.level, entity_id: s.entity_id, captured_at: s.source_updated_time })
   }
   return {
-    snapshots, settingChanges, frequency,
-    adDaily: adRows.rows.map((r) => toDailyRow('ad', r.ad_id, r)),
+    snapshots, settingChanges, frequency: frequency.frequency,
+    adDaily: [historyStartMarker(since), ...adRows.rows.map((r) => toDailyRow('ad', r.ad_id, r))],
     daily: adsetRows.rows.map((r) => toDailyRow('adset', r.adset_id, r)),
   }
 }
@@ -135,6 +154,12 @@ function frequencyRows(frequency: Map<string, number>, day: string): DailyRow[] 
   }))
 }
 
+/** A change stamped after `day` ends (account timezone) is moved to the last second of `day`: it may hide an earlier change. */
+export function clampChangesTo(changes: readonly SettingChange[], day: string, timezone: string | null): SettingChange[] {
+  const end = localDayEndUtc(day, timezone)
+  return changes.map((c) => (Date.parse(c.captured_at) > end ? { ...c, captured_at: new Date(end).toISOString() } : c))
+}
+
 /** Judge D2/D10 as of `day` using only data up to that day. Exported for tests. */
 export function judgeAsOf(args: LiveRulesArgs, data: LiveData, day: string, pageId: string): { hits: Diagnosis[]; adsChecked: number } {
   const account: AccountInput = {
@@ -142,7 +167,8 @@ export function judgeAsOf(args: LiveRulesArgs, data: LiveData, day: string, page
     snapshots: data.snapshots,
     daily: [...data.daily.filter((r) => r.insight_date <= day), ...frequencyRows(data.frequency, day)],
     adDaily: data.adDaily.filter((r) => r.insight_date <= day),
-    hourly: {}, hourlyError: null, latestCaptures: [], lastInsightDate: day, settingChanges: data.settingChanges,
+    hourly: {}, hourlyError: null, latestCaptures: [], lastInsightDate: day,
+    settingChanges: clampChangesTo(data.settingChanges, day, args.timezone),
   }
   const input: DiagnosisInput = {
     clientId: args.clientId, date: day, evaluatedAt: new Date().toISOString(), outcome: emptyOutcomeConfig(),
@@ -151,7 +177,7 @@ export function judgeAsOf(args: LiveRulesArgs, data: LiveData, day: string, page
   }
   const ctx = buildAccountContext(account, day)
   const hits = diagnoseAdLevelRules(ctx, input).filter((d) => d.status === 'hit' && d.clientVisible)
-  return { hits, adsChecked: adLevelCoverage(ctx, input).adsChecked }
+  return { hits, adsChecked: adLevelJudgeableCount(ctx, input) }
 }
 
 /** Keep only findings hit both as of the last day and as of the day before (the patrol's two-in-a-row rule). */
@@ -163,16 +189,20 @@ export function liveSection(args: LiveRulesArgs, data: LiveData): RuleSectionInp
   const before = judgeAsOf(args, data, shiftDate(args.windowUntil, -1), page)
   const beforeKeys = new Set(before.hits.map(findingKey).filter((k): k is string => k !== null))
   const campaignFrequency = (id: string | null) => (id === null ? null : data.frequency.get(id) ?? null)
-  const findings = last.hits
-    .filter((f) => { const k = findingKey(f); return k !== null && beforeKeys.has(k) })
+  const confirmed = last.hits.filter((f) => { const k = findingKey(f); return k !== null && beforeKeys.has(k) })
+  const findings = confirmed
     .map((f) => toClientFinding(f, { currency: args.currency, dataDate: args.windowUntil, campaignFrequency, voice: 'self_serve' }))
     .filter((f): f is ClientRuleFinding => f !== null)
+  // Hit but not writable for the customer ≠ "nothing found" (same as the patrol path).
+  if (confirmed.length > 0 && findings.length === 0) return { source: 'none', reason: 'incomplete_findings' }
   return { source: 'live', dataDate: args.windowUntil, adsChecked: last.adsChecked, findings }
 }
 
 /** Never throws: any failure becomes a 'none' section with an honest reason. */
 export async function runLiveRules(args: LiveRulesArgs, budgetMs = LIVE_RULES_BUDGET_MS): Promise<RuleSectionInput> {
   try {
+    const { shared, error } = await findSharedAdAccounts(args.clientId, [args.adAccountId])
+    if (error || shared.size > 0) return { source: 'none', reason: 'shared_account' }
     const data = await withBudget(readLive(args), budgetMs)
     return liveSection(args, data)
   } catch (error) {

@@ -429,7 +429,7 @@ describe('toClientFinding — self_serve voice', () => {
     )
     expect(f).not.toBeNull()
     expect((f as ClientRuleFinding).action).toBe(
-      '打开这条广告用的表单，把不是非问不可的问题删掉，再看两三天。',
+      '表单发布后不能直接改：给这条广告换一个新表单（可以复制原来的），只留非问不可的问题，再看两三天。',
     )
   })
 
@@ -448,7 +448,7 @@ describe('toClientFinding — self_serve voice', () => {
     )
     expect(f).not.toBeNull()
     expect((f as ClientRuleFinding).action).toBe(
-      '看看这条广告点进来后的欢迎语和快捷问题，改得更直接一点，再看两三天。',
+      '把私信欢迎语的第一句改成直接回答顾客最常问的（价格、地址、怎么约），再看两三天。',
     )
   })
 
@@ -468,7 +468,7 @@ describe('toClientFinding — self_serve voice', () => {
     )
     expect(f).not.toBeNull()
     expect((f as ClientRuleFinding).action).toBe(
-      '同一批人已经看了很多次，可以换一批新的受众，或者先换一版图片。',
+      '先换一版新图或新视频；过几天还不行，再把这组广告的地区或年龄放宽一点。',
     )
   })
 
@@ -542,19 +542,19 @@ describe('renderRuleSection — live', () => {
 describe('renderRuleSection — new none reasons', () => {
   it('mixed_pages', () => {
     expect(renderRuleSection({ source: 'none', reason: 'mixed_pages' })).toContain(
-      '你的账户同时给好几个主页投广告，这次没法判断哪个是你的主页，所以没出建议',
+      '你的账户同时给好几个主页投广告，这次没法判断哪个是你的主页',
     )
   })
 
   it('too_many_ads', () => {
     expect(renderRuleSection({ source: 'none', reason: 'too_many_ads' })).toContain(
-      '你的账户广告太多，这次没有逐条检查',
+      '在花钱的广告太多，一次看不完',
     )
   })
 
   it('live_unavailable', () => {
     expect(renderRuleSection({ source: 'none', reason: 'live_unavailable' })).toContain(
-      '这次没拿到每条广告的数据，没有逐条检查',
+      '这次没拿到每条广告的数据',
     )
   })
 })
