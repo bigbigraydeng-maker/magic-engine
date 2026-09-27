@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-09-27
 source: pr:2104
 verify_by: 2026-10-04
-verify_how: 检查 pr-application-validation.yml、kernel-architecture.yml 等必过检查的 workflow 是否已换成独立身份出状态方案；该身份必须只有 `Checks: write` 这一项仓库权限（不授予 contents / pull-requests / actions 等写权限），否则它连创建规则集要认的 check run 都做不到，方案无法真正生效；不得用 pull_request_target 直接 checkout PR head 构建——那会把 PR 可控的依赖脚本和测试代码放进拿到 base 分支 token/cache 的受信上下文执行，是新的供应链风险，不是修复；未改则维持 decided
+verify_how: 检查 pr-application-validation.yml、kernel-architecture.yml 等必过检查的 workflow 是否已换成独立身份出状态方案；该身份必须只有 Checks 写权限 这一项仓库权限（不授予 contents / pull-requests / actions 等写权限），否则它连创建规则集要认的 check run 都做不到，方案无法真正生效；不得用 pull_request_target 直接 checkout PR head 构建——那会把 PR 可控的依赖脚本和测试代码放进拿到 base 分支 token/cache 的受信上下文执行，是新的供应链风险，不是修复；未改则维持 decided
 ---
 Codex 审查发现：这几道 Protect main 必过检查用 `on: pull_request`，执行的是 PR 分支自己
 那份 workflow 定义。PR 只要在同一次改动里把构建步骤换成必然成功的空壳、保留检查名不变，
