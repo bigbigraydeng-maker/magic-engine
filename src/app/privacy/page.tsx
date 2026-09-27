@@ -181,7 +181,7 @@ export default function PrivacyPage() {
           </p>
         </Section>
 
-        <Section title="Facebook (Meta) data">
+        <Section title="5A. Facebook (Meta) Data">
           <p className="text-gray-700">
             If you connect Facebook for the free ad report, we store a read-only connection to the
             ad accounts you choose and the reports we generate. We never change your ads. You can
@@ -190,7 +190,7 @@ export default function PrivacyPage() {
             <a href="/data-deletion" className="text-indigo-600 underline">
               Data deletion
             </a>
-            .
+            . Stored tokens are encrypted; data is deleted as described on the Data deletion page.
           </p>
         </Section>
 

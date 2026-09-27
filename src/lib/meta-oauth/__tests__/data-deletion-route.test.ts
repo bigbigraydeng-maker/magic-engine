@@ -3,13 +3,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   processDeletion: vi.fn(),
+  recordDeletionFailure: vi.fn(),
 }))
 
 vi.mock('@/lib/meta-oauth/data-deletion', async () => {
   const actual = await vi.importActual<typeof import('@/lib/meta-oauth/data-deletion')>(
     '@/lib/meta-oauth/data-deletion'
   )
-  return { ...actual, processDeletion: mocks.processDeletion }
+  return {
+    ...actual,
+    processDeletion: mocks.processDeletion,
+    recordDeletionFailure: mocks.recordDeletionFailure,
+  }
 })
 
 import { POST } from '@/app/api/meta/data-deletion/route'
@@ -56,6 +61,18 @@ describe('POST /api/meta/data-deletion', () => {
     })
     expect(mocks.processDeletion).toHaveBeenCalledTimes(1)
     expect(mocks.processDeletion.mock.calls[0][0].userId).toBe(USER_ID)
+    expect(mocks.processDeletion.mock.calls[0][1]).toBe(SECRET)
+  })
+
+  it('rejects a body larger than the limit before reading it', async () => {
+    const request = new Request('https://app.example.test/api/meta/data-deletion', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', 'content-length': '9000' },
+      body: 'signed_request=x',
+    })
+    const response = await POST(request)
+    expect(response.status).toBe(413)
+    expect(mocks.processDeletion).not.toHaveBeenCalled()
   })
 
   it('rejects a bad signature', async () => {
@@ -84,6 +101,17 @@ describe('POST /api/meta/data-deletion', () => {
     expect(response.status).toBe(500)
     const logged = errorSpy.mock.calls.flat().join(' ')
     expect(logged).not.toContain(USER_ID)
+    errorSpy.mockRestore()
+  })
+
+  it('records the failure once when processing fails', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    mocks.processDeletion.mockRejectedValue(new Error('boom'))
+    mocks.recordDeletionFailure.mockResolvedValue(undefined)
+    const response = await POST(buildRequest(signedRequest(USER_ID, SECRET)))
+    expect(response.status).toBe(500)
+    expect(mocks.recordDeletionFailure).toHaveBeenCalledTimes(1)
+    expect(mocks.recordDeletionFailure.mock.calls[0][1]).toBe(SECRET)
     errorSpy.mockRestore()
   })
 })

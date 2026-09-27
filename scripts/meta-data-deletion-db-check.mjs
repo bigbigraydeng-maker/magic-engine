@@ -50,8 +50,9 @@ try {
   await db.query('INSERT INTO clients(id) VALUES($1),($2)', [A, B])
   await db.query(`INSERT INTO meta_ads_ai_pilot_entitlements(client_id,status,approved_by_email) VALUES($1,'active','ops@example.test'),($2,'active','ops@example.test')`, [A, B])
   const rev = async (c) => (await db.query('SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$1', [c])).rows[0].revision
-  const conn = async (id, client, fbUser) => db.query(`INSERT INTO platform_oauth_connections(id,client_id,provider,access_token_enc,refresh_token_enc,token_expiry,account_id,display_name,scopes,purpose,authorizing_principal_id,entitlement_revision)
-    VALUES($1,$2,'meta','cipher-token','cipher-refresh',now()+interval '30 day',$3,'test',ARRAY['ads_read'],'meta_ads_read',$2,$4)`, [id, client, `ads_user:${fbUser}`, await rev(client)])
+  // last_synced_at is what a real Facebook authorisation writes (ads-read.ts upsertConnection); default: authorised an hour ago
+  const conn = async (id, client, fbUser, syncedAt = new Date(Date.now() - 3600_000).toISOString()) => db.query(`INSERT INTO platform_oauth_connections(id,client_id,provider,access_token_enc,refresh_token_enc,token_expiry,account_id,display_name,scopes,purpose,authorizing_principal_id,entitlement_revision,last_synced_at)
+    VALUES($1,$2,'meta','cipher-token','cipher-refresh',now()+interval '30 day',$3,'test',ARRAY['ads_read'],'meta_ads_read',$2,$4,$5)`, [id, client, `ads_user:${fbUser}`, await rev(client), syncedAt])
   await conn(connA1, A, '111'); await conn(connB1, B, '111'); await conn(connA2, A, '222')
   const grant = async (client, connection, account) => (await db.query(`INSERT INTO meta_ads_read_grants(client_id,connection_id,ad_account_id,principal_id,entitlement_revision)
     VALUES($1,$2,$3,$1,$4) RETURNING id, revision, entitlement_revision`, [client, connection, account, await rev(client)])).rows[0]
@@ -94,6 +95,13 @@ try {
   eq(stored.length, 1, 'one request row')
   ok(stored[0].app_user_hash === hash('111') && !JSON.stringify(stored[0]).includes('"111"'), 'only the hashed user id is stored')
 
+  // 1b. The plain Facebook id is gone from every connection row (only a stand-in 'ads_user:0…' is left).
+  const leftovers = (await db.query(`SELECT account_id FROM platform_oauth_connections WHERE account_id = 'ads_user:111'`)).rows
+  eq(leftovers.length, 0, 'plain Facebook id no longer stored on connections')
+  const standIns = (await db.query(`SELECT account_id FROM platform_oauth_connections WHERE id = ANY($1)`, [[connA1, connB1]])).rows
+  ok(standIns.every((r) => /^ads_user:0[0-9]+$/.test(r.account_id)), 'revoked rows carry a stand-in id that no real Meta id can match')
+  ok(new Set(standIns.map((r) => r.account_id)).size === 2, 'stand-in ids stay unique')
+
   // 2. Replay of the same request returns the stored result and writes nothing new.
   const r2 = (await del('111', issued1, code(2))).rows[0]
   eq([r2.confirmation_code, r2.status, r2.connections_revoked], [code(1), 'completed', 2], 'replay returns the first confirmation')
@@ -101,11 +109,42 @@ try {
 
   // 3. The person reconnects afterwards; an old request (issued before the reconnect) must not wipe the new connection.
   const reconnect = '20000000-0000-0000-0000-0000000000a3'
-  await conn(reconnect, A, '999')
+  await conn(reconnect, A, '999', new Date().toISOString())
   const oldIssued = new Date(Date.now() - 3600_000).toISOString()
   const r3 = (await del('999', oldIssued, code(3))).rows[0]
   eq([r3.status, r3.connections_revoked], ['no_data', 0], 'old request skips a connection created later')
   eq((await db.query('SELECT status FROM platform_oauth_connections WHERE id=$1', [reconnect])).rows[0].status, 'active', 'reconnected connection stays active')
+
+  // 3b. A row touched after the request (e.g. an unrelated write bumping updated_at) is still deleted.
+  const touched = '20000000-0000-0000-0000-0000000000a4'
+  await conn(touched, B, '777')
+  const tIssued = new Date(Date.now() - 60_000).toISOString()
+  await db.query(`UPDATE platform_oauth_connections SET updated_at = now() + interval '1 minute' WHERE id = $1`, [touched])
+  const r3b = (await del('777', tIssued, code(9))).rows[0]
+  eq([r3b.status, r3b.connections_revoked], ['completed', 1], 'unrelated later write does not shield the connection')
+
+  // 3c. Re-authorised after the request (active + last_synced_at later) is skipped.
+  const reauth = '20000000-0000-0000-0000-0000000000a5'
+  await conn(reauth, B, '888')
+  await db.query(`UPDATE platform_oauth_connections SET last_synced_at = now() + interval '1 minute' WHERE id = $1`, [reauth])
+  const r3c = (await del('888', new Date(Date.now() - 60_000).toISOString(), code(10))).rows[0]
+  eq([r3c.status, r3c.connections_revoked], ['no_data', 0], 're-authorised connection is left alone')
+
+  // 3d. A report still being generated is closed as failed so its finish cannot write it back.
+  const runner = '20000000-0000-0000-0000-0000000000a6'
+  await conn(runner, B, '666')
+  const gR = await grant(B, runner, 'act_4444444444')
+  const jR = (await db.query(`INSERT INTO meta_ads_ai_analysis_jobs(client_id,principal_id,grant_id,grant_revision,connection_version,entitlement_revision,ad_account_id,idempotency_key,period_key,window_since,window_until,status,reserved_usd)
+    VALUES($1,$1,$2,$3,now(),$4,'act_4444444444',$5,'2026-09','2026-09-01','2026-09-07','running',0.12) RETURNING id`, [B, gR.id, gR.revision, gR.entitlement_revision, 'r'.repeat(64)])).rows[0].id
+  await del('666', new Date(Date.now() + 1000).toISOString(), code(11))
+  const jr = (await db.query('SELECT status, error_code FROM meta_ads_ai_analysis_jobs WHERE id=$1', [jR])).rows[0]
+  eq([jr.status, jr.error_code], ['failed', 'deleted_by_user_request'], 'running report closed as failed')
+
+  // 3e. A recorded failure does not block the later real processing of the same request.
+  const fIssued = new Date(Date.now() - 30_000).toISOString()
+  await db.query(`INSERT INTO meta_data_deletion_requests(confirmation_code,app_user_hash,issued_at,status) VALUES($1,$2,$3,'failed')`, [code(12), hash('111'), fIssued])
+  const r3e = (await del('111', fIssued, code(13))).rows[0]
+  eq(r3e.confirmation_code, code(13), 'failed attempt is not replayed as the answer')
 
   // 4. Unknown person → no_data, still gets a confirmation code.
   const r4 = (await del('55555', new Date().toISOString(), code(4))).rows[0]
@@ -117,7 +156,10 @@ try {
   await denied(db, 'SELECT * FROM meta_process_data_deletion($1,$2,$3,$4)', ['123', hash('123'), new Date(Date.now() + 3600_000).toISOString(), code(7)], '22023')
   await denied(db, 'SELECT * FROM meta_process_data_deletion($1,$2,$3,$4)', ['123', hash('123'), new Date().toISOString(), 'short'], '23514')
 
-  // 6. Nobody but service_role may call the function or read the table.
+  // 6. service_role can read the status; nobody else may call the function or read the table.
+  const svc = await connect()
+  await svc.query('SET ROLE service_role')
+  eq((await svc.query('SELECT status FROM meta_data_deletion_requests WHERE confirmation_code=$1', [code(1)])).rows[0].status, 'completed', 'service_role reads status')
   for (const role of ['anon', 'authenticated']) {
     const c = await connect()
     await c.query(`SET ROLE ${role}`)

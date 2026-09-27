@@ -13,8 +13,12 @@
 --      rows are kept and emptied instead of hard-deleted,
 --   4. revokes API keys minted on those grants,
 --   5. records the request (hashed user id only) for status lookup and replay protection.
--- Only connections not touched since the request was issued are affected, so replaying an
--- old request cannot wipe a connection the person re-created afterwards.
+-- A connection the person re-authorised after the request was issued (still active, and
+-- last_synced_at — written only on a fresh Facebook authorisation — is later than issued_at)
+-- is skipped, so replaying an old request cannot wipe a connection they re-created. Any other
+-- write to the row (a disconnect, a trigger) does not shield it from deletion.
+-- The plain Facebook user id is not kept anywhere afterwards: revoked rows get a stand-in
+-- account id ('ads_user:0…' — real Meta ids never start with 0, so it can never match anyone).
 
 CREATE TABLE IF NOT EXISTS public.meta_data_deletion_requests (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -22,18 +26,24 @@ CREATE TABLE IF NOT EXISTS public.meta_data_deletion_requests (
   app_user_hash text NOT NULL CHECK (app_user_hash ~ '^[0-9a-f]{64}$'),
   issued_at timestamptz NOT NULL,
   received_at timestamptz NOT NULL DEFAULT now(),
-  status text NOT NULL CHECK (status IN ('completed', 'no_data')),
+  status text NOT NULL CHECK (status IN ('completed', 'no_data', 'failed')),
   connections_revoked integer NOT NULL DEFAULT 0 CHECK (connections_revoked >= 0),
   reports_cleared integer NOT NULL DEFAULT 0 CHECK (reports_cleared >= 0),
-  keys_revoked integer NOT NULL DEFAULT 0 CHECK (keys_revoked >= 0),
-  UNIQUE (app_user_hash, issued_at)
+  keys_revoked integer NOT NULL DEFAULT 0 CHECK (keys_revoked >= 0)
 );
+-- One processed answer per request; failed attempts (recorded by the route for the PM daily
+-- to-do list) may repeat.
+CREATE UNIQUE INDEX IF NOT EXISTS meta_data_deletion_requests_processed_uniq
+  ON public.meta_data_deletion_requests (app_user_hash, issued_at) WHERE status <> 'failed';
+CREATE INDEX IF NOT EXISTS meta_data_deletion_requests_received_idx
+  ON public.meta_data_deletion_requests (received_at DESC);
 
 ALTER TABLE public.meta_data_deletion_requests ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS service_role_full ON public.meta_data_deletion_requests;
 CREATE POLICY service_role_full ON public.meta_data_deletion_requests
   FOR ALL TO service_role USING (true) WITH CHECK (true);
 REVOKE ALL ON public.meta_data_deletion_requests FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT ON public.meta_data_deletion_requests TO service_role;
 
 CREATE OR REPLACE FUNCTION public.meta_process_data_deletion(
   p_app_user_id text,
@@ -72,7 +82,7 @@ BEGIN
   RETURN QUERY
     SELECT r.confirmation_code, r.status, r.connections_revoked, r.reports_cleared, r.keys_revoked
       FROM public.meta_data_deletion_requests r
-     WHERE r.app_user_hash = p_app_user_hash AND r.issued_at = p_issued_at;
+     WHERE r.app_user_hash = p_app_user_hash AND r.issued_at = p_issued_at AND r.status <> 'failed';
   IF FOUND THEN
     RETURN;
   END IF;
@@ -82,7 +92,7 @@ BEGIN
       SELECT pc.id FROM public.platform_oauth_connections pc
        WHERE pc.purpose = 'meta_ads_read'
          AND pc.account_id = 'ads_user:' || p_app_user_id
-         AND pc.updated_at <= p_issued_at
+         AND NOT (pc.status = 'active' AND pc.last_synced_at IS NOT NULL AND pc.last_synced_at > p_issued_at)
        FOR UPDATE
     ) c;
 
@@ -96,15 +106,21 @@ BEGIN
    WHERE id = ANY (conn_ids)
      AND (status <> 'revoked' OR authorizing_principal_id IS NOT NULL);
 
-  -- 2. Blank the encrypted tokens (owner is already NULL, status revoked).
+  -- 2. Blank the encrypted tokens and replace the Facebook user id with a stand-in
+  --    (owner is already NULL, status revoked, so the connection guard does not fire).
   UPDATE public.platform_oauth_connections
-     SET access_token_enc = '', refresh_token_enc = '', updated_at = now()
+     SET access_token_enc = '', refresh_token_enc = '',
+         account_id = 'ads_user:0' || abs(hashtextextended(id::text, 0))::text,
+         updated_at = now()
    WHERE id = ANY (conn_ids);
   GET DIAGNOSTICS n_conn = ROW_COUNT;
 
   -- 3. Empty report contents made through those grants.
+  --    A job still running is closed as failed so its later finish cannot write a report back.
   UPDATE public.meta_ads_ai_analysis_jobs
-     SET evidence = NULL, report_markdown = NULL, error_code = 'deleted_by_user_request'
+     SET evidence = NULL, report_markdown = NULL, error_code = 'deleted_by_user_request',
+         status = CASE WHEN status = 'running' THEN 'failed' ELSE status END,
+         completed_at = coalesce(completed_at, now())
    WHERE grant_id = ANY (grant_ids)
      AND (evidence IS NOT NULL OR report_markdown IS NOT NULL OR error_code IS DISTINCT FROM 'deleted_by_user_request');
   GET DIAGNOSTICS n_reports = ROW_COUNT;

@@ -2,7 +2,7 @@ import { deletionStatus } from '@/lib/meta-oauth/data-deletion'
 
 export const dynamic = 'force-dynamic'
 
-const NOT_FOUND = 'We could not find this confirmation code. / 没有找到这个确认码。'
+const NOT_FOUND = 'We could not find this confirmation code. Please check the link was copied in full, or email hello@magicengine.cloud. / 没有找到这个确认码。请检查链接是否复制完整；有疑问请发邮件到 hello@magicengine.cloud。'
 const ERROR = 'We could not check the status right now. Please try again later. / 暂时查不到进度，请稍后再试。'
 
 function formatDate(iso: string): string {
@@ -32,7 +32,7 @@ export default async function DataDeletionStatusPage({
         message =
           result.status === 'completed'
             ? `Your data deletion request was completed on ${date}. / 你的删除数据申请已于 ${date} 完成。`
-            : `We received your request on ${date}. We found no Magic Engine data connected to this Facebook account. / 我们已于 ${date} 收到你的申请，没有找到与这个 Facebook 账号相关的 Magic Engine 数据。`
+            : `We received and processed your request on ${date}. We held no data linked to this Facebook account, so nothing needed deleting and nothing remains. / 我们已于 ${date} 收到并处理了你的申请。我们这边本来就没有存这个 Facebook 账号的数据，所以不用删，也没有留下任何东西。`
       }
     } catch {
       message = ERROR

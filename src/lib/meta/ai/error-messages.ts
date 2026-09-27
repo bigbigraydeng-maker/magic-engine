@@ -13,4 +13,5 @@ export const META_ADS_AI_MESSAGES: Record<string,string> = {
   analysis_too_large:'当前广告数据量超过邀请测试版上限，请联系 Magic Engine 支持。',analysis_failed:'分析暂时失败，请稍后重试。',
   analysis_incomplete:'本次报告生成时被截断，未保存半份报告。广告数据已保存，请稍后重试。',model_unavailable:'AI 模型暂时无法响应，广告数据已保存。请稍后重试以生成中文报告。',
   authorization_changed:'Facebook 授权或广告账户权限已经变化，请刷新后重试。',
+  deleted_by_user_request:'这份报告已按你在 Facebook 提交的删除数据申请清除。',
 }

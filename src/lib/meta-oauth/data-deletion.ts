@@ -10,7 +10,7 @@
  * Only the hashed app-scoped user id is stored.
  */
 
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { supabaseAdmin } from '@/lib/supabase'
 
 export interface DeletionRequest {
@@ -25,6 +25,8 @@ export interface DeletionResult {
 
 /** Meta may deliver a request a little ahead of our clock; anything further in the future is refused. */
 const MAX_CLOCK_SKEW_SECONDS = 300
+/** A deletion request is delivered right after the person removes the app; older signed payloads are refused (狄仁杰 2026-09-27). */
+const MAX_REQUEST_AGE_SECONDS = 86_400
 
 function base64UrlDecode(part: string): Buffer | null {
   if (!/^[A-Za-z0-9_-]+$/.test(part)) return null
@@ -59,21 +61,27 @@ export function parseSignedRequest(signedRequest: string, appSecret: string, now
   if (typeof userId !== 'string' || !/^[0-9]{1,32}$/.test(userId)) return null
   if (typeof issuedAt !== 'number' || !Number.isInteger(issuedAt) || issuedAt <= 0) return null
   if (issuedAt > nowSeconds + MAX_CLOCK_SKEW_SECONDS) return null
+  if (issuedAt < nowSeconds - MAX_REQUEST_AGE_SECONDS) return null
+  // Other signed payloads of the same app (e.g. a login signed_request carries `code`) are not deletion requests.
+  if ('code' in payload || 'oauth_token' in payload) return null
+  if (payload.expires !== undefined && (typeof payload.expires !== 'number' || payload.expires < nowSeconds)) return null
   return { userId, issuedAt: new Date(issuedAt * 1000) }
 }
 
-export function appUserHash(userId: string): string {
-  return createHash('sha256').update(`meta-app-user:${userId}`).digest('hex')
+/** Keyed hash (server secret) so someone who can read the table cannot confirm a guessed Facebook id (狄仁杰 2026-09-27). */
+export function appUserHash(userId: string, appSecret: string): string {
+  const key = createHmac('sha256', appSecret).update('me-data-deletion-hash-v1').digest()
+  return createHmac('sha256', key).update(`meta-app-user:${userId}`).digest('hex')
 }
 
 export function newConfirmationCode(): string {
   return randomBytes(24).toString('base64url')
 }
 
-export async function processDeletion(request: DeletionRequest): Promise<DeletionResult> {
+export async function processDeletion(request: DeletionRequest, appSecret: string): Promise<DeletionResult> {
   const { data, error } = await supabaseAdmin.rpc('meta_process_data_deletion', {
     p_app_user_id: request.userId,
-    p_app_user_hash: appUserHash(request.userId),
+    p_app_user_hash: appUserHash(request.userId, appSecret),
     p_issued_at: request.issuedAt.toISOString(),
     p_confirmation: newConfirmationCode(),
   })
@@ -85,6 +93,23 @@ export async function processDeletion(request: DeletionRequest): Promise<Deletio
   return { confirmationCode: row.confirmation_code, status: row.status }
 }
 
+/**
+ * Records a failed attempt (hashed id only) so the PM daily to-do list can raise it — a failure must not
+ * live only in the log (CLAUDE.md 铁律 3). Best effort: never throws.
+ */
+export async function recordDeletionFailure(request: DeletionRequest, appSecret: string): Promise<void> {
+  try {
+    await supabaseAdmin.from('meta_data_deletion_requests').insert({
+      confirmation_code: newConfirmationCode(),
+      app_user_hash: appUserHash(request.userId, appSecret),
+      issued_at: request.issuedAt.toISOString(),
+      status: 'failed',
+    })
+  } catch {
+    // swallow: the route already answers 500 and logs a generic line
+  }
+}
+
 /** Public status lookup by confirmation code (unguessable, 32 chars). Returns no personal data. */
 export async function deletionStatus(code: string): Promise<{ status: 'completed' | 'no_data'; receivedAt: string } | null> {
   if (!/^[A-Za-z0-9_-]{24,64}$/.test(code)) return null
@@ -92,6 +117,7 @@ export async function deletionStatus(code: string): Promise<{ status: 'completed
     .from('meta_data_deletion_requests')
     .select('status, received_at')
     .eq('confirmation_code', code)
+    .in('status', ['completed', 'no_data'])
     .maybeSingle()
   if (error) throw new Error('data_deletion_status_failed')
   if (!data) return null
