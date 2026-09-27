@@ -1,8 +1,18 @@
 /**
- * 捞出「标着已联系、但找不到任何真人动作」的客人，做成销售能直接补跟的清单。
+ * 捞出「客人开过口、却没有任何真人动作」的人，做成销售能直接补跟的清单。
  *
- * PM 2026-09-27 要的：这批人可能是**漏掉的生意** —— 系统说联系过了，于是他们从
- * 「今天该联系谁」名单上消失，而实际上没有人碰过他们。
+ * PM 2026-09-27 要的：这批人可能是**漏掉的生意**。
+ *
+ * ## 入口判据为什么是「客人开过口」，不是「标着已联系」
+ *
+ * 第一版只捞 `stage = 'contacted'` 的人 —— 对 CTS 成立（460 人标着已联系），
+ * 但拿去跑 NAL 会返回 **0 人**：NAL 197 个人里 168 个**压根没标过任何阶段**
+ * （25 个「新线索」、4 个「已报价」、1 个「已成交」，**一个都不在「已联系」**）。
+ * 那样跑出来技术上对、业务上没用。
+ *
+ * 所以入口改成**对两家都成立**的那个：**客人主动开过口（有任何一条 inbound）**。
+ * 「标着已联系却查无真人动作」变成里面一个单独标出来的子集 —— 那一组最刺眼，
+ * 因为系统明确说过「联系过了」，这些人已经从「今天该联系谁」名单上消失了。
  *
  * ## 判据（跟生产同一套，不另造）
  *
@@ -56,6 +66,8 @@ interface C {
   do_not_contact: boolean
   snooze_until: string | null
   first_seen_at: string
+  /** 现在标在哪一档 —— 用来标出「系统说联系过了」那个最刺眼的子集。 */
+  stage: string | null
 }
 interface Tp {
   contact_id: string
@@ -96,14 +108,15 @@ function freshness(firstSeenAt: string): { band: string; order: number } {
 }
 
 async function main(): Promise<void> {
-  const cs = await supabaseAdmin
-    .from('contacts')
-    .select('id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, first_seen_at')
-    .eq('client_id', CLIENT_ID)
-    .eq('stage', 'contacted')
-  if (cs.error) throw new Error(cs.error.message)
-  const all = (cs.data ?? []) as C[]
-  const byId = new Map(all.map((c) => [c.id, c]))
+  const everyone = await fetchAll<C>((f, t) =>
+    supabaseAdmin
+      .from('contacts')
+      .select('id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, first_seen_at, stage')
+      .eq('client_id', CLIENT_ID)
+      .order('id', { ascending: true })
+      .range(f, t),
+  )
+  const byId = new Map(everyone.map((c) => [c.id, c]))
 
   const tps = await fetchAll<Tp>((f, t) =>
     supabaseAdmin
@@ -116,12 +129,15 @@ async function main(): Promise<void> {
 
   // ── 谁有真人动作 ──────────────────────────────────────────────
   const humanTouch = new Set<string>()
+  /** 客人主动开过口的人 —— 这才是「可能漏掉的生意」的入口。 */
+  const spokeFirst = new Set<string>()
   const lastAny = new Map<string, string>()
   const sourceOf = new Map<string, string>()
   const whyAuto = new Map<string, string>()
   for (const t of tps) {
     if (!byId.has(t.contact_id)) continue
     if (!lastAny.has(t.contact_id)) lastAny.set(t.contact_id, t.occurred_at)
+    if (t.direction === 'inbound') spokeFirst.add(t.contact_id)
     if (t.direction === 'outbound' && !isAutomatedTouch(t.source, t.metadata)) humanTouch.add(t.contact_id)
     // 来源线索：优先广告名，其次表单
     if (!sourceOf.has(t.contact_id)) {
@@ -176,10 +192,11 @@ async function main(): Promise<void> {
     threads.set(m.conversation_id, list)
   }
   for (const [cid, list] of threads) {
-    if (lastHumanPageReplyAt(list) !== null) {
-      const p = convOf.get(cid)
-      if (p) humanTouch.add(p)
-    }
+    const p = convOf.get(cid)
+    if (!p) continue
+    if (lastHumanPageReplyAt(list) !== null) humanTouch.add(p)
+    // 私信里客人自己发过话，同样算「开过口」（NAL 的人几乎全是这一类）
+    if (list.some((m) => m.direction === 'inbound')) spokeFirst.add(p)
   }
 
   // ── AI 当时给的理由（最值钱的一列：凭哪句话判的） ──────────────
@@ -196,7 +213,7 @@ async function main(): Promise<void> {
   for (const e of evs) if (!verdict.has(e.contact_id)) verdict.set(e.contact_id, e)
 
   // ── 分组 ───────────────────────────────────────────────────────
-  const untouched = all.filter((c) => !humanTouch.has(c.id))
+  const untouched = everyone.filter((c) => spokeFirst.has(c.id) && !humanTouch.has(c.id))
   const now = Date.now()
   const dnc = untouched.filter((c) => c.do_not_contact)
   const snoozed = untouched.filter(
@@ -209,14 +226,63 @@ async function main(): Promise<void> {
   const link = (id: string) =>
     `https://app.magicengine.com.au/dashboard/clients/${CLIENT_ID}/crm/all?contact=${id}`
 
+  /**
+   * 🔴 这份名单只可能包含**已经进到 ME 里**的往来。
+   *
+   * 如果这个客户的进线同步断了（NAL 2026-09-16 起 Messenger 断流 11 天），或者某个
+   * 渠道压根没接（NAL 的主渠道是 WhatsApp，一条都没接进来），那么名单会**少算**，
+   * 而少算的恰恰是最新的那批 —— 也就是最烫的那批。
+   *
+   * 不把这句话写在最上面，PM 和销售会以为「打完这 N 个就清完了」。
+   */
+  /**
+   * 🔴 必须**按渠道分别看**，不能看整体最新那一条。
+   *
+   * 实测 NAL：它的邮件到 2026-09-25 还在进，而**私信 9-16 就断了 11 天**。
+   * 只看整体最新一条 → 「看起来是通的」→ 警告不触发 → 而断掉的恰恰是它的主渠道。
+   * **一个活着的渠道会把一个死掉的渠道盖住。**
+   */
+  const perChannel = new Map<string, { count: number; newest: string }>()
+  for (const t of tps) {
+    if (t.direction !== 'inbound') continue
+    const cur = perChannel.get(t.channel)
+    if (!cur) perChannel.set(t.channel, { count: 1, newest: t.occurred_at })
+    else {
+      cur.count += 1
+      if (t.occurred_at > cur.newest) cur.newest = t.occurred_at
+    }
+  }
+  const daysAgo = (iso: string): number => Math.floor((Date.now() - Date.parse(iso)) / 86_400_000)
+  /** 历史上有量、最近却安静太久的渠道 —— 有量才说明它本该在进，安静才是异常。 */
+  const quiet = [...perChannel.entries()]
+    .filter(([, v]) => v.count >= 10 && daysAgo(v.newest) >= 7)
+    .map(([ch, v]) => ({ ch, days: daysAgo(v.newest), newest: v.newest, count: v.count }))
+    .sort((a, b) => b.days - a.days)
+
   const lines: string[] = []
-  lines.push(`# 标着「已联系」但查不到任何真人动作的客人`)
+  lines.push(`# 客人开过口、但查不到任何真人动作`)
   lines.push(``)
   lines.push(`生成于 ${new Date().toISOString().slice(0, 16).replace('T', ' ')} · 客户 ${CLIENT_ID}`)
   lines.push(``)
-  lines.push(`**怎么来的**：这些人在系统里标着「已联系」，但逐个查下来**找不到任何真人做过的动作** —— 没有人打过电话、没有人发过非群发的邮件、私信里也没有真人回过。机器是读了「客人自己发来的消息」或「系统自动发出的东西」就把他们标成已联系的，于是他们从「今天该联系谁」名单上消失了。`)
+  lines.push(`**怎么来的**：这些人**自己主动开过口**（发过私信、填过表单、来过邮件），但逐个查下来**找不到任何真人做过的动作** —— 没有人打过电话、没有人发过非群发的邮件、私信里也没有真人回过。`)
   lines.push(``)
   lines.push(`**怎么用**：每一条后面有直达链接，点进去就是这个人在 ME 里的记录，可以直接记一笔、改跟进阶段。`)
+  lines.push(``)
+  if (quiet.length > 0) {
+    lines.push(`> 🔴 **这份名单少算了，别当成全部。**`)
+    lines.push(`>`)
+    for (const q of quiet) {
+      lines.push(
+        `> 这个客户的**${q.ch}**历史上进过 ${q.count} 条，但**最新的一条是 ${q.days} 天前**（${day(q.newest)}）—— 要么同步断了，要么那个渠道压根没接进来。`,
+      )
+    }
+    lines.push(`>`)
+    lines.push(
+      `> **漏掉的恰恰是最新最烫的那批。** 先把进线修通再重跑这份名单，否则打完这几个会以为清完了。`,
+    )
+    lines.push(``)
+  }
+  lines.push(`各渠道最新一条客人来信：${[...perChannel.entries()].map(([ch, v]) => `${ch} ${daysAgo(v.newest)} 天前`).join(' · ')}`)
   lines.push(``)
   lines.push(`| 组 | 人数 |`)
   lines.push(`|---|---|`)
@@ -224,7 +290,12 @@ async function main(): Promise<void> {
   lines.push(`| ⚠️ 没有任何联系方式（只有私信） | ${noWay.length} |`)
   lines.push(`| ⛔ 说过「别再联系」——**不要跟** | ${dnc.length} |`)
   lines.push(`| 💤 推迟中，到点再说——**现在不用跟** | ${snoozed.length} |`)
-  lines.push(`| 标着「已联系」的总人数 | ${all.length} |`)
+  lines.push(`| 客人主动开过口的总人数 | ${everyone.filter((c) => spokeFirst.has(c.id)).length} |`)
+  lines.push(`| 这个客户的联系人总数 | ${everyone.length} |`)
+  lines.push(``)
+  lines.push(
+    `其中**最刺眼的一组**：系统已经把他标成「已联系」、实际却没人碰过 —— **${untouched.filter((c) => c.stage === 'contacted').length} 人**。他们因为被标了，已经从「今天该联系谁」名单上消失。`,
+  )
   lines.push(``)
   lines.push(`**先打谁**（只统可以直接补跟那 ${reachable.length} 人）：`)
   lines.push(``)
@@ -269,6 +340,9 @@ async function main(): Promise<void> {
       )
       lines.push(`- **他从哪来**：${sourceOf.get(c.id) ?? '不清楚'}`)
       lines.push(`- **最近一次任何往来**：${day(lastAny.get(c.id) ?? null)}`)
+      if (c.stage === 'contacted') {
+        lines.push(`- 🔴 **系统已经把他标成「已联系」** —— 所以他已经从「今天该联系谁」名单上消失了`)
+      }
       lines.push(`- **为什么被标成「已联系」**：${whyAuto.get(c.id) ?? '没找到触发它的那条往来'}`)
       if (v) {
         const why = stageReasonForDisplay(v.note)
@@ -288,12 +362,16 @@ async function main(): Promise<void> {
 
   writeFileSync(OUT, lines.join('\n') + '\n', 'utf8')
   // 只打印计数，不打印任何客人信息
-  console.log(`标着「已联系」共 ${all.length} 人`)
+  console.log(`联系人总数 ${everyone.length} · 客人主动开过口 ${everyone.filter((c) => spokeFirst.has(c.id)).length} 人`)
+  console.log(`  其中「系统已标已联系、实际没人碰过」：${untouched.filter((c) => c.stage === 'contacted').length}`)
   console.log(`  找不到真人动作：${untouched.length}`)
   console.log(`    ✅ 可以直接补跟：${reachable.length}`)
   console.log(`    ⚠️ 没有联系方式：${noWay.length}`)
   console.log(`    ⛔ 别再联系（已挡）：${dnc.length}`)
   console.log(`    💤 推迟中（已挡）：${snoozed.length}`)
+  for (const q of quiet) {
+    console.log(`  🔴 少算警告：${q.ch} 历史 ${q.count} 条，最新一条 ${q.days} 天前 —— 同步断了或没接进来`)
+  }
   console.log(`\n名单写到：${OUT}（含客人信息，不进仓库）`)
 }
 
