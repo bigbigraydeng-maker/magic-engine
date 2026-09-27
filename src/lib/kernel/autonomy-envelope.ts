@@ -102,10 +102,13 @@ export function isWithinEnvelope(
   const reasons: string[] = []
 
   // ── 先拒「读不到」──────────────────────────────────────────────────────
-  if (facts.beforeCents === null) reasons.push('读不到这个单位改动前的日预算')
-  if (facts.accountDailyTotalBeforeCents === null) reasons.push('读不到这个账户当前的日预算合计')
+  // 暂停 / 换素材不参与预算变动比例和日上限计算（只会减少或不变花费），
+  // 不需要 beforeCents / accountTotal / dailyCap 三项事实。
+  const needsBudgetFacts = request.kind !== 'pause' && request.kind !== 'creative_only'
+  if (needsBudgetFacts && facts.beforeCents === null) reasons.push('读不到这个单位改动前的日预算')
+  if (needsBudgetFacts && facts.accountDailyTotalBeforeCents === null) reasons.push('读不到这个账户当前的日预算合计')
   if (facts.hoursSinceLastChange === null) reasons.push('读不到这个单位上次设置变动的时间')
-  if (envelope.respectDailyCapCents && facts.dailyCapCents === null) {
+  if (needsBudgetFacts && envelope.respectDailyCapCents && facts.dailyCapCents === null) {
     reasons.push('这个客户还没设日预算上限，没有上限就不自动动钱')
   }
 

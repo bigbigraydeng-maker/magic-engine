@@ -230,6 +230,36 @@ describe('信封 · 日预算上限（PM 2026-09-24：20% 缓冲 + 超缓冲时�
   })
 })
 
+describe('信封 · CBO / lifetime budget 广告组（日预算 null）', () => {
+  it('🔴 暂停 CBO 广告组 → beforeCents null 不应阻止暂停', () => {
+    const v = isWithinEnvelope(
+      { kind: 'pause', afterCents: 0 },
+      facts({ beforeCents: null, accountDailyTotalBeforeCents: null }),
+      ENVELOPE,
+    )
+    expect(v.within).toBe(true)
+  })
+
+  it('🔴 换素材 CBO 广告组 → beforeCents null 不应阻止换素材', () => {
+    const v = isWithinEnvelope(
+      { kind: 'creative_only', afterCents: 1000 },
+      facts({ beforeCents: null, accountDailyTotalBeforeCents: null }),
+      ENVELOPE,
+    )
+    expect(v.within).toBe(true)
+  })
+
+  it('改预算 CBO 广告组 → beforeCents null 仍然拒绝（改钱必须知道改前多少）', () => {
+    const v = isWithinEnvelope(
+      req({ afterCents: 500 }),
+      facts({ beforeCents: null }),
+      ENVELOPE,
+    )
+    expect(v.within).toBe(false)
+    expect(v.reasons.some(r => r.includes('日预算'))).toBe(true)
+  })
+})
+
 describe('信封 · 学习期判据适不适用', () => {
   it('🔴 新建还不存在的广告组：学习期判据不适用，读不到状态也不该被拦', () => {
     const v = isWithinEnvelope(
