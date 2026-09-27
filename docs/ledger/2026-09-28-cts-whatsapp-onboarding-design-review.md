@@ -86,8 +86,36 @@ CTS 这条线代价特别低：WhatsApp 对 CTS 是**全新渠道**（现在走 
 
 真正牵连的是另外两把钥匙：配上 `WHATSAPP_ACCESS_TOKEN` + `META_APP_SECRET` 之后，语音那条线的 whatsapp provider 会从「模拟」翻成「真实」—— 但只在 `MOCK_EXTERNAL_SERVICES` 为假时才有差别，而若它今天为假，生产早就该抛错了（那两把钥匙现在一个都没配）。**结论：上线前确认 `MOCK_EXTERNAL_SERVICES` 的实际取值，在 PR 里写一句，不需要改代码。**
 
+## 魏征（挑刺）——按「客人能感知到的伤害」排序，我逐条核实过的在下面标了 ✅实测
+
+**① 顾问没法在 ME 里回**（跟板桥独立撞同一条，见上）。补充证据：`whatsappAdapter`（`messaging/adapters/whatsapp.ts:45`）**从未被注册** —— 全仓 `registerChannel` 只有定义处 `messaging/channels.ts:73`，零调用方。`business-inbox/conversations/route.ts` 写死 `.eq('channel','email')`，`messenger/conversations/route.ts:72` 写死 `.eq('channel','messenger')`。唯一能看到 WhatsApp 正文的是 CRM 时间线（`crm/contacts/[cid]/timeline/route.ts:192` 拉全渠道），**只读，没有输入框**。
+
+**② ✅实测 每条 WhatsApp 消息都会把客人的真名改成他自设的 WhatsApp 昵称。**
+`identity.ts:249` `const renameOk = input.overwriteDisplayName !== false` → 默认 true；`route.ts:238` 那次 `resolveContact` 传了 `displayName: participantName ?? null` 但**没传 `overwriteDisplayName: false`**。CTS 库里 1024 个客人、774 条表单留资 + 642 通电话，这些人的电话已经在库里 —— 第一条 WhatsApp 消息就会把报名时填的真名覆盖成表情/小名，**静默发生**。
+**一行修：webhook 那次调用加 `overwriteDisplayName: false`。**
+
+**③ 客人发一张图 = 整批投递失败 + Meta 无限重投，而纯文字消息看起来一切正常。**
+4 个列没 apply 时，`route.ts:369-384` 把 `media_type`/`media_id` 写进 upsert，失败即 throw；`:565-570` 一条失败就整个返 503。文字走不到那个分支 → 表现成「大部分能用、偶尔莫名失败」，最难查的一类。`entry_referral` 缺列更隐蔽：`:284-291` 失败只打日志，消息照常入库，**广告归因静默丢掉**。
+
+**④ ✅实测 一个开关同时管三个渠道，没法只开或只关 WhatsApp。**
+`knowledge/kill-switch.ts:125-127` 的 resume 一次把三列全设 true，`:70-72` 的 stop 全设 false。魏征标明「CTS 那三列的真实值我没生产读权限」—— **我查了：CTS 私信=开、WhatsApp=关、邮件=关；NAL 三个全关。** 所以爆炸半径是真的：CTS 的 Messenger 开着，任何人为恢复它按一次 `RESUME-ALL`，全新零信誉号立刻开始对每个来信客人自动发话（F1 是唯一不经人工审核直接发的路径，`conversation-inbound-autoack.ts:305`）。同形状见 PITFALLS D7。
+
+**⑤ ✅实测 AI 起草的 WhatsApp 回复没人能批准，而今日待办还会把 FDE 指到看不到这条对话的页面 —— 跟本分支上一个提交 `42d82d0b` 刚修过的形状一模一样。**
+唯一的批准接口 `messenger/conversations/[conversationId]/drafts/route.ts:89` 写死 `.eq('channel','messenger')` → WhatsApp 会话 404。而 `pm-todo/messenger-draft-items.ts` 读草稿**不筛渠道**，`hrefFor()`（`:55-56`）恒定指向 `/dashboard/clients/<id>/messenger`，那个页面的数据源筛 messenger。
+→ 回复界面做好前，F2 侧干脆不落 WhatsApp 的 pending 草稿，别生成一条办不了的待办。
+
+**⑥ 号码填错一位，员工看到的是「授权掉线了，请找 Magic Lab 重连」** —— 去重连 Meta 解决不了。`send.ts` 把四种不同原因全归到 `reason:'no_token'`（`:216` env 没配 / `:232` 归属查询报错 / `:244-247` 没绑号 / 绑的号跟配置号不一致），而 `messaging/adapters/whatsapp.ts:90-92` 把 `no_token` 一律翻成那句话，**send.ts 已经写好的人话文案在适配器层被丢掉**。→ 拆出 `number_mismatch` / `no_number_bound` 两个 reason，适配器直接透传 `res.error`。
+
+**⑦ 超过 24 小时一个字都发不出去，而「投广告→客人点进来」这条线恰恰经常隔夜才有人回。**
+`send.ts:204-211` 过 24 小时只返回「只能发送已审核的模板消息」，而 ME **一个模板都没接**（`postToGraph` 固定 `type:'text'`，`:138-143`）。所以这不是漏收费，是把回复彻底堵死 —— 客人只会觉得这家公司不理人。
+**并纠正 `send.ts:25-36` 那段注释**：它说「只实现 24h 是安全方向，最多是该免费时说要模板」。魏征查外部资料后判定 **72 小时是计费概念、不是发自由文本的许可**；过 24 小时的自由文本会被 Meta 以 `131047` 拒掉。谁照那段注释把窗口从 24 改成 72，换来的是 131047 + 永久重试。**那段注释是下一次事故的种子，要改。**
+
+**⑧ 同一个人会变成两个人，而且退订会漏。** Messenger 侧身份是 `fb_psid`，WhatsApp 侧只传 `phone`（`route.ts:236`），没交集就不合并。后果：「今天该联系谁」同一人两条；更重的是客人在 WhatsApp 说 STOP 时 `optout.ts` 只挂在 phone 那个联系人上，Messenger 那个联系人是干净的，**F1/F2 会继续对他自动发消息** —— `optout.ts` 文件头声称的「跨渠道」只在两边合成同一个联系人时才成立。
+
+魏征自报未验证项：Meta 对持续 503 的 webhook 多久会停订阅，没找到权威口径（③ 只敢说「会一直重投」）。
+
 ## 还在跑 / 待定
 
-- 魏征（挑刺）、板桥（客户视角）两审在跑，回来一并对账。
+- 三审已全部回来（子牙两轮 · 魏征 · 板桥），结论一致：不能按「配钥匙就上线」做。
 - PM 待回：① 买不买新号；② 生产库加那 4 个列（纯加列，已沙盘验证）。
 - 未来：ME 自己的企业验证停在 `pending_submission`，共存模式和更高发送量都要它，建议提交。
