@@ -1,106 +1,76 @@
-// Next.js route handler: POST /api/public/site-check/report
-// Port of website/functions/api/report.js (onRequestPost) using the app modules in
-// src/lib/tools-lab/site-check/{guards,leads,report-email}.ts. Same order of steps, same error codes.
+// POST /api/public/site-check/report — email the full free website check to the visitor.
+// Design: docs/specs/2026-09-27-tools-lab-step2-site-diagnosis-design.md §6 C.
+// Our sender must not become a mailer: consent, one email per lead (atomic claim, released on failure),
+// per-visitor / per-mailbox / whole-site daily caps, and every value from the site or the model escaped and defanged.
 
 import { NextRequest, NextResponse } from 'next/server'
-import {
-  LIMITS,
-  QuotaUnavailable,
-  consumeQuota,
-  dayStartUtc,
-  isAllowedOrigin,
-  recipientKey,
-  visitorKey,
-} from '@/lib/tools-lab/site-check/guards'
-import { claimLead, getLead, releaseLead } from '@/lib/tools-lab/site-check/leads'
+import { LIMITS, dayStartUtc, isAllowedOrigin, pruneOldVisitorKeys } from '@/lib/tools-lab/site-check/guards'
+import { recipientKey, visitorKey } from '@/lib/tools-lab/site-check/visitor'
+import { consumeSteps, fail, json, preflight, readSmallJson } from '@/lib/tools-lab/site-check/http'
+import { claimLead, getLead, releaseLead, type LeadRow, type StoredFindings } from '@/lib/tools-lab/site-check/leads'
 import { buildEmail, sendReportEmail } from '@/lib/tools-lab/site-check/report-email'
 
+export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-function corsHeaders(origin: string | null): Record<string, string> {
-  if (isAllowedOrigin(origin)) {
-    return {
-      'Access-Control-Allow-Origin': origin as string,
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-      Vary: 'Origin',
-    }
-  }
-  return { Vary: 'Origin' }
-}
-
-function json(status: number, payload: unknown, origin: string | null): NextResponse {
-  return NextResponse.json(payload, { status, headers: corsHeaders(origin) })
-}
-
-function fail(status: number, code: string, origin: string | null): NextResponse {
-  return json(status, { error: code, code }, origin)
-}
-
-export async function OPTIONS(req: NextRequest): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: corsHeaders(req.headers.get('origin')) })
+export function OPTIONS(req: NextRequest): NextResponse {
+  return preflight(req)
 }
 
 function isValidEmail(email: unknown): email is string {
   return typeof email === 'string' && email.length <= 200 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 }
 
-interface BodyShape {
-  leadId?: unknown
-  email?: unknown
-  consent?: unknown
-}
+type Checked = { lead: LeadRow; findings: StoredFindings; email: string; visitor: string; recipient: string } | NextResponse
 
-async function consumeOrFail(
-  bucketType: string,
-  bucketKey: string,
-  windowStart: string,
-  cap: number,
-  origin: string | null,
-): Promise<NextResponse | null> {
-  try {
-    const allowed = await consumeQuota(bucketType, bucketKey, windowStart, cap)
-    if (!allowed) return fail(429, 'daily_limit', origin)
-    return null
-  } catch (err) {
-    if (err instanceof QuotaUnavailable) return fail(503, 'unavailable', origin)
-    throw err
+async function checkRequest(req: NextRequest, origin: string | null): Promise<Checked> {
+  const body = await readSmallJson(req)
+  if (!body) return fail(400, 'bad_request', origin)
+  const { leadId, email, consent } = body
+  if (!isValidEmail(email)) return fail(400, 'invalid_email', origin)
+  if (consent !== true) return fail(400, 'consent_required', origin)
+  if (typeof leadId !== 'string' || !/^[0-9a-f-]{36}$/i.test(leadId)) return fail(400, 'report_not_ready', origin)
+  const lead = await getLead(leadId)
+  const findings = lead?.findings
+  if (!lead || !findings || !Array.isArray(findings.findings) || findings.findings.length === 0) {
+    return fail(400, 'report_not_ready', origin)
   }
+  if (lead.status !== 'scouted') return fail(409, 'already_sent', origin)
+  const visitor = visitorKey(req.headers)
+  if (!visitor) return fail(400, 'no_visitor', origin)
+  const recipient = recipientKey(email)
+  if (!recipient) return fail(503, 'unavailable', origin)
+  return { lead, findings, email: email.trim().toLowerCase(), visitor, recipient }
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const origin = req.headers.get('origin')
   if (!isAllowedOrigin(origin)) return fail(403, 'forbidden', origin)
   try {
-    const body = (await req.json().catch(() => null)) as BodyShape | null
-    if (!body || typeof body !== 'object') return fail(400, 'bad_request', origin)
-    const { leadId, email, consent } = body
-    if (!isValidEmail(email)) return fail(400, 'invalid_email', origin)
-    if (consent !== true) return fail(400, 'consent_required', origin)
-    if (typeof leadId !== 'string' || !/^[0-9a-f-]{36}$/i.test(leadId)) return fail(400, 'report_not_ready', origin)
+    const checked = await checkRequest(req, origin)
+    if (checked instanceof NextResponse) return checked
+    const { lead, findings, email, visitor, recipient } = checked
 
-    const lead = await getLead(leadId)
-    if (!lead || !Array.isArray(lead.findings?.findings) || lead.findings.findings.length === 0) {
-      return fail(400, 'report_not_ready', origin)
-    }
-    if (lead.status !== 'scouted') return fail(409, 'already_sent', origin)
+    const capped = await consumeSteps(
+      [
+        { bucket: 'site_report_ip', key: visitor, windowStart: dayStartUtc(), cap: LIMITS.reportPerVisitorPerDay, code: 'daily_limit' },
+        { bucket: 'site_report_to', key: recipient, windowStart: dayStartUtc(), cap: LIMITS.reportPerRecipientPerDay, code: 'recipient_limit' },
+        { bucket: 'site_report_day', key: 'all', windowStart: dayStartUtc(), cap: LIMITS.reportPerDay, code: 'site_busy' },
+      ],
+      origin,
+    )
+    if (capped) return capped
+    void pruneOldVisitorKeys().catch(() => undefined)
 
-    const key = visitorKey(req.headers)
-    if (!key) return fail(400, 'no_visitor', origin)
+    const claim = await claimLead(lead.id, email)
+    if (claim === 'error') return fail(503, 'unavailable', origin)
+    if (claim === 'taken') return fail(409, 'already_sent', origin)
 
-    const ipFail = await consumeOrFail('site_report_ip', key, dayStartUtc(), LIMITS.reportPerVisitorPerDay, origin)
-    if (ipFail) return ipFail
-    const toFail = await consumeOrFail('site_report_to', recipientKey(email), dayStartUtc(), LIMITS.reportPerRecipientPerDay, origin)
-    if (toFail) return toFail
-    const dayFail = await consumeOrFail('site_report_day', 'all', dayStartUtc(), LIMITS.reportPerDay, origin)
-    if (dayFail) return dayFail
-
-    const cleanEmail = email.trim().toLowerCase()
-    if (!(await claimLead(lead.id, cleanEmail))) return fail(409, 'already_sent', origin)
-
-    const { subject, body: html } = buildEmail({ url: lead.url, findings: lead.findings })
+    const { subject, body: html } = buildEmail({ url: lead.url, findings })
     try {
-      await sendReportEmail({ to: cleanEmail, subject, html, idempotencyKey: lead.id })
+      // Keyed by lead and mailbox: a retry to the same address is de-duplicated by the provider,
+      // while a corrected address after a failure is a different message.
+      await sendReportEmail({ to: email, subject, html, idempotencyKey: `${lead.id}-${recipient.slice(0, 16)}` })
     } catch (err) {
       console.error('site-check report email failed:', err instanceof Error ? err.message : String(err))
       await releaseLead(lead.id)

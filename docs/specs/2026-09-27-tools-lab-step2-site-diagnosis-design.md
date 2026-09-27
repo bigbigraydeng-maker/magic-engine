@@ -90,3 +90,13 @@
 - 决定（技术，Claude Code 拍板）：**不把数据库总钥匙再放一份到 Cloudflare**（钥匙散落越多越危险）。改为把诊断和发报告的服务端逻辑搬进应用（`app.magicengine.com.au`，钥匙本来就在），官网页面直接跨域调用应用的公开接口；访问者地址用 Render 转发的地址。官网打点同样改为发到应用。现有 JS 守卫逻辑原样移植成 TypeScript，测试一并迁移。
 - 下一步：在同一分支上改；PR 2126 保持草稿，改完重新请 子牙 + 魏征 复核与狄仁杰补测。
 - **搬迁完成（同日）**：服务端逻辑在 `src/lib/tools-lab/site-check/`（guards / diagnose / leads / report-email）+ `src/app/api/public/site-check/route.ts`、`report/route.ts`；官网 `app.js` 改调 `https://app.magicengine.com.au/api/public/site-check`；`website/functions/api/scout.js`、`report.js` 改为 410，`_shared/site-check.js` 删除。全站日 / 月上限返回「本月免费名额已满」而不是「明天再来」。测试 54 条，故意改坏 30 处关键判断全部被抓住。
+- **搬迁后复审（子牙 2 BLOCKER、魏征 1 BLOCKER、狄仁杰 1 高 5 中）全部已修**（同日）：
+  1. 恶意网页能卡死应用（抽正文的正则随页面长度平方变慢）→ 改成线性扫描，1MB 特制页面 15 毫秒内处理完。
+  2. 访问者地址可伪造 → 只在「转发地址最右边那个非内网地址是 Cloudflare 的地址」时才信 `cf-connecting-ip`，否则拒绝（`visitor.ts`）；IPv6 按前 48 位算一个人；日志记下转发链形状（不含原地址），上线后据此确认。
+  3. 抓网页改用平台现成的 `safeFetchText`（`src/lib/net/safe-fetch.ts`：连接锁定到检查过的地址、每跳重新检查、DNS 超时、按网段判断），自写的抓取循环删掉（`homepage.ts`）。
+  4. 24 小时复用只认真诊断出来的那一行（复用出来的副本不再被复用），并加全站每天 300 次的复用上限。
+  5. 邮件：收件人先归一化（去掉 + 后缀、Gmail 去掉点号）再算「每个邮箱每天 1 封」；全站每天发信上限 100 → 30；任何「x.y」形状的片段一律拆断（含 bit.ly、t.me、中文域名）；防重复标识按「线索 + 邮箱」；认领出错回「暂时用不了」而不是「已发过」；释放失败写日志。
+  6. 错误码说实话：网址不对 `invalid_url`、三句话太短 `answers_too_short`、请求太多 `too_many_requests`、全站当天用完 `site_busy`（明天恢复）、本月用完 `monthly_limit`、邮箱当天已收过 `recipient_limit`；官网按错误码给中文说法，存不下线索时不显示发不出去的邮箱表单。
+  7. 总时限：抓网页 25 秒封顶，第二次调 AI 只在请求开始 25 秒内才发起；每次诊断把花费、调用次数、模型记进线索（`findings.meta`）。
+  8. 没网站的访客不再被套上澳洲税率 / 财年。
+  - 风险级别按子牙意见升为 **A**：合并须 PM 在对话里回「合」。

@@ -1,22 +1,13 @@
-// Next.js route handler: POST /api/public/site-check
-// Port of website/functions/api/scout.js (onRequestPost) using the app modules in
-// src/lib/tools-lab/site-check/{guards,diagnose,leads}.ts. Same order of steps, same error codes.
+// POST /api/public/site-check — the free website check behind magicengine.com.au/discover and /cn/discover.
+// Design: docs/specs/2026-09-27-tools-lab-step2-site-diagnosis-design.md (§6, §7).
+// Order: origin → body → trusted visitor → request cap → 24h reuse (capped) → read homepage (no charge if
+// unreadable) → paid caps → model (never canned findings) → store lead with a cost receipt.
 
 import { NextRequest, NextResponse } from 'next/server'
-import {
-  LIMITS,
-  QuotaUnavailable,
-  consumeQuota,
-  dayStartUtc,
-  fetchRealHomepage,
-  isAllowedOrigin,
-  monthStartUtc,
-  pruneOldVisitorKeys,
-  siteHost,
-  vetUrl,
-  visitorAddress,
-  visitorKey,
-} from '@/lib/tools-lab/site-check/guards'
+import { LIMITS, dayStartUtc, isAllowedOrigin, monthStartUtc, pruneOldVisitorKeys, siteHost, vetUrl } from '@/lib/tools-lab/site-check/guards'
+import { visitorDiagnostic, visitorKey } from '@/lib/tools-lab/site-check/visitor'
+import { fetchRealHomepage } from '@/lib/tools-lab/site-check/homepage'
+import { consumeSteps, fail, json, preflight, readSmallJson } from '@/lib/tools-lab/site-check/http'
 import {
   buildPrompt,
   cleanAnswers,
@@ -26,43 +17,39 @@ import {
   type CheckContext,
   type CheckLang,
   type CheckSource,
+  type NoWebsiteAnswers,
 } from '@/lib/tools-lab/site-check/diagnose'
 import { recentResult, storeLead, type StoredFindings } from '@/lib/tools-lab/site-check/leads'
 
+export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-function corsHeaders(origin: string | null): Record<string, string> {
-  if (isAllowedOrigin(origin)) {
-    return {
-      'Access-Control-Allow-Origin': origin as string,
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-      Vary: 'Origin',
-    }
+/** The browser gives up at 90 s; a second model attempt only starts before this point in the request. */
+const RETRY_CUTOFF_MS = 25_000
+
+export function OPTIONS(req: NextRequest): NextResponse {
+  return preflight(req)
+}
+
+interface ParsedInput {
+  lang: CheckLang
+  url: URL | null
+  answers: NoWebsiteAnswers | null
+  attribution: unknown
+}
+
+/** The visitor's input, or the error code that tells them what to change. */
+function parseInput(body: Record<string, unknown>): ParsedInput | { code: 'invalid_url' | 'answers_too_short' } {
+  const lang: CheckLang = body.lang === 'zh' ? 'zh' : 'en'
+  if (body.url) {
+    const url = vetUrl(body.url)
+    return url ? { lang, url, answers: null, attribution: body.attribution } : { code: 'invalid_url' }
   }
-  return { Vary: 'Origin' }
+  const answers = cleanAnswers(body.noWebsite)
+  return answers ? { lang, url: null, answers, attribution: body.attribution } : { code: 'answers_too_short' }
 }
 
-function json(status: number, payload: unknown, origin: string | null): NextResponse {
-  return NextResponse.json(payload, { status, headers: corsHeaders(origin) })
-}
-
-function fail(status: number, code: string, origin: string | null): NextResponse {
-  return json(status, { error: code, code }, origin)
-}
-
-export async function OPTIONS(req: NextRequest): Promise<NextResponse> {
-  return new NextResponse(null, { status: 204, headers: corsHeaders(req.headers.get('origin')) })
-}
-
-interface PublicResultInput {
-  leadId: string | null
-  market: string
-  findings: StoredFindings
-  reused: boolean
-}
-
-function publicResult({ leadId, market, findings, reused }: PublicResultInput): Record<string, unknown> {
+function publicResult(leadId: string | null, market: string, findings: StoredFindings, reused: boolean): Record<string, unknown> {
   return {
     leadId,
     market,
@@ -77,151 +64,99 @@ function publicResult({ leadId, market, findings, reused }: PublicResultInput): 
   }
 }
 
-interface BodyShape {
-  url?: unknown
-  noWebsite?: unknown
-  lang?: unknown
-  attribution?: unknown
+interface CheckPlan extends ParsedInput {
+  key: string
+  market: string
+  ctx: CheckContext
+  siteKey: string | null
+  origin: string | null
+  startedAt: number
 }
 
-interface ParsedInput {
-  lang: CheckLang
-  url: URL | null
-  answers: { what: string; where: string; who: string } | null
-  attribution: unknown
-}
-
-function parseInput(body: BodyShape): ParsedInput | null {
-  const lang: CheckLang = body.lang === 'zh' ? 'zh' : 'en'
-  const answers = body.url ? null : cleanAnswers(body.noWebsite)
-  const url = body.url ? vetUrl(body.url) : null
-  if (body.url && !url) return null
-  if (!url && !answers) return null
-  return { lang, url, answers, attribution: body.attribution }
-}
-
-async function consumeOrFail(
-  bucketType: string,
-  bucketKey: string,
-  windowStart: string,
-  cap: number,
-  origin: string | null,
-  limitCode: 'daily_limit' | 'monthly_limit' = 'daily_limit',
-): Promise<NextResponse | null> {
-  try {
-    const allowed = await consumeQuota(bucketType, bucketKey, windowStart, cap)
-    if (!allowed) return fail(429, limitCode, origin)
-    return null
-  } catch (err) {
-    if (err instanceof QuotaUnavailable) return fail(503, 'unavailable', origin)
-    throw err
-  }
-}
-
-async function handleReuse(
-  siteKey: string,
-  url: URL,
-  market: string,
-  attribution: unknown,
-  origin: string | null,
-): Promise<NextResponse | null> {
-  const recent = await recentResult(siteKey)
+/** Same site in the last 24 h: a new lead row with a copy of the original result, within a site-wide cap. */
+async function tryReuse(plan: CheckPlan): Promise<NextResponse | null> {
+  if (!plan.siteKey || !plan.url) return null
+  const recent = await recentResult(plan.siteKey)
   if (!recent) return null
-  const copy: StoredFindings = { ...recent.findings, reused: true }
-  const leadId = await storeLead({
-    url: `${url.origin}/`,
-    market,
-    findings: copy,
-    answers: null,
-    attribution,
-  })
-  return json(200, publicResult({ leadId, market, findings: copy, reused: true }), origin)
+  const capped = await consumeSteps(
+    [{ bucket: 'site_check_reuse_day', key: 'all', windowStart: dayStartUtc(), cap: LIMITS.reusePerDay, code: 'site_busy' }],
+    plan.origin,
+  )
+  if (capped) return capped
+  // The copy carries no cost receipt: no model was called for it.
+  const meta = { tool: 'site-check', site_key: plan.siteKey, lang: plan.lang, context: plan.ctx }
+  const copy: StoredFindings = { ...recent.findings, reused: true, meta }
+  const leadId = await storeLead({ url: `${plan.url.origin}/`, market: plan.market, findings: copy, answers: null, attribution: plan.attribution })
+  return json(200, publicResult(leadId, plan.market, copy, true), plan.origin)
 }
 
-interface Evidence {
-  text: string
-  source: CheckSource
-}
-
-async function gatherEvidence(
-  url: URL | null,
-  answers: { what: string; where: string; who: string } | null,
-  origin: string | null,
-): Promise<Evidence | NextResponse> {
-  if (url) {
-    const page = await fetchRealHomepage(url.toString())
-    if (!page.ok) {
-      const code = page.reason === 'blocked_address' ? 'invalid_url' : page.reason
-      return fail(422, code, origin)
-    }
+async function gatherEvidence(plan: CheckPlan): Promise<{ text: string; source: CheckSource } | NextResponse> {
+  if (plan.url) {
+    const page = await fetchRealHomepage(plan.url.toString())
+    if (!page.ok) return fail(422, page.reason === 'blocked_address' ? 'invalid_url' : page.reason, plan.origin)
     return { text: page.text, source: 'homepage' }
   }
-  const a = answers as { what: string; where: string; who: string }
-  return {
-    text: [`Business: ${a.what}`, `Where: ${a.where}`, `Customers: ${a.who}`].join('\n'),
-    source: 'answers',
+  const a = plan.answers as NoWebsiteAnswers
+  return { text: [`Business: ${a.what}`, `Where: ${a.where}`, `Customers: ${a.who}`].join('\n'), source: 'answers' }
+}
+
+function paidCaps(key: string): Parameters<typeof consumeSteps>[0] {
+  return [
+    { bucket: 'site_check_ip', key, windowStart: dayStartUtc(), cap: LIMITS.checkPerVisitorPerDay, code: 'daily_limit' },
+    { bucket: 'site_check_day', key: 'all', windowStart: dayStartUtc(), cap: LIMITS.checkPerDay, code: 'site_busy' },
+    { bucket: 'site_check_month', key: 'all', windowStart: monthStartUtc(), cap: LIMITS.checkPerMonth, code: 'monthly_limit' },
+  ]
+}
+
+async function diagnose(plan: CheckPlan): Promise<NextResponse> {
+  const evidence = await gatherEvidence(plan)
+  if (evidence instanceof NextResponse) return evidence
+  const capped = await consumeSteps(paidCaps(plan.key), plan.origin)
+  if (capped) return capped
+  void pruneOldVisitorKeys().catch(() => undefined)
+
+  const hostname = plan.url ? plan.url.hostname : ''
+  const prompt = buildPrompt({ lang: plan.lang, context: plan.ctx, market: plan.market as 'AU' | 'NZ', text: evidence.text, hostname, source: evidence.source })
+  const run = await runCheck(prompt, plan.startedAt + RETRY_CUTOFF_MS)
+  console.info('[site-check] model receipt', { attempts: run.attempts, cost_usd: run.costUsd, ok: !!run.result })
+  if (!run.result) return fail(502, 'analysis_failed', plan.origin)
+
+  const findings: StoredFindings = {
+    ...run.result,
+    lang: plan.lang,
+    context: plan.ctx,
+    source: evidence.source,
+    reused: false,
+    meta: { tool: 'site-check', site_key: plan.siteKey, lang: plan.lang, context: plan.ctx, model: run.model, attempts: run.attempts, cost_usd: run.costUsd },
   }
+  const leadId = await storeLead({ url: plan.url ? `${plan.url.origin}/` : '', market: plan.market, findings, answers: plan.answers, attribution: plan.attribution })
+  return json(200, publicResult(leadId, plan.market, findings, false), plan.origin)
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  const startedAt = Date.now()
   const origin = req.headers.get('origin')
   if (!isAllowedOrigin(origin)) return fail(403, 'forbidden', origin)
   try {
-    const body = (await req.json().catch(() => null)) as BodyShape | null
-    if (!body || typeof body !== 'object') return fail(400, 'bad_request', origin)
+    const body = await readSmallJson(req)
+    if (!body) return fail(400, 'bad_request', origin)
     const parsed = parseInput(body)
-    if (!parsed) return fail(400, 'bad_request', origin)
-    const { lang, url, answers, attribution } = parsed
+    if ('code' in parsed) return fail(400, parsed.code, origin)
 
     const key = visitorKey(req.headers)
+    console.info('[site-check] visitor', visitorDiagnostic(req.headers))
     if (!key) return fail(400, 'no_visitor', origin)
-    console.info('[site-check] visitor address source', visitorAddress(req.headers)?.source)
+    const tooMany = await consumeSteps(
+      [{ bucket: 'site_check_any', key, windowStart: dayStartUtc(), cap: LIMITS.requestsPerVisitorPerDay, code: 'too_many_requests' }],
+      origin,
+    )
+    if (tooMany) return tooMany
 
-    const anyFail = await consumeOrFail('site_check_any', key, dayStartUtc(), LIMITS.requestsPerVisitorPerDay, origin)
-    if (anyFail) return anyFail
-
-    const hostname = url ? url.hostname : ''
-    const market = detectMarket(hostname)
-    const ctx: CheckContext = pickContext(lang, hostname)
-    const siteKey = url ? `${siteHost(hostname)}|${lang}|${ctx}` : null
-
-    if (siteKey && url) {
-      const reused = await handleReuse(siteKey, url, market, attribution, origin)
-      if (reused) return reused
-    }
-
-    const evidence = await gatherEvidence(url, answers, origin)
-    if (evidence instanceof NextResponse) return evidence
-
-    const ipFail = await consumeOrFail('site_check_ip', key, dayStartUtc(), LIMITS.checkPerVisitorPerDay, origin)
-    if (ipFail) return ipFail
-    const dayFail = await consumeOrFail('site_check_day', 'all', dayStartUtc(), LIMITS.checkPerDay, origin, 'monthly_limit')
-    if (dayFail) return dayFail
-    const monthFail = await consumeOrFail('site_check_month', 'all', monthStartUtc(), LIMITS.checkPerMonth, origin, 'monthly_limit')
-    if (monthFail) return monthFail
-
-    void pruneOldVisitorKeys().catch(() => undefined)
-
-    const prompt = buildPrompt({ lang, context: ctx, market, text: evidence.text, hostname, source: evidence.source })
-    const result = await runCheck(prompt)
-    if (!result) return fail(502, 'analysis_failed', origin)
-
-    const findings: StoredFindings = {
-      ...result,
-      lang,
-      context: ctx,
-      source: evidence.source,
-      reused: false,
-      meta: { tool: 'site-check', site_key: siteKey, lang, context: ctx },
-    }
-    const leadId = await storeLead({
-      url: url ? `${url.origin}/` : '',
-      market,
-      findings,
-      answers,
-      attribution,
-    })
-    return json(200, publicResult({ leadId, market, findings, reused: false }), origin)
+    const hostname = parsed.url ? parsed.url.hostname : ''
+    const ctx = pickContext(parsed.lang, hostname)
+    const siteKey = parsed.url ? `${siteHost(hostname)}|${parsed.lang}|${ctx}` : null
+    const plan: CheckPlan = { ...parsed, key, market: detectMarket(hostname), ctx, siteKey, origin, startedAt }
+    return (await tryReuse(plan)) ?? (await diagnose(plan))
   } catch (err) {
     console.error('site-check fatal error:', err instanceof Error ? err.message : String(err))
     return fail(500, 'analysis_failed', origin)

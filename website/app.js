@@ -510,9 +510,38 @@ const SCOUT_ERRORS = {
   redirected_away: ['That address sends visitors to a different website, so we stopped. Please enter your own site\'s address.', '这个网址会跳到别的网站，我们就停下了。请填你自己网站的网址。'],
   daily_limit: ['You have used today\'s 3 free checks. Please come back tomorrow.', '今天的 3 次免费诊断已经用完了，明天再来。着急的话写信到 hello@magicengine.cloud。'],
   monthly_limit: ['This month\'s free checks have all been used. They reset on the 1st.', '本月的免费名额已经送完，下个月 1 号恢复。'],
+  answers_too_short: ['Please write a little more in each of the three boxes so we have something real to go on.', '三个框每个多写几个字，我们才有真实信息可以分析。'],
+  too_many_requests: ['Too many attempts from your network today. Please come back tomorrow.', '你这边今天提交次数太多了，明天再来。着急的话写信到 hello@magicengine.cloud。'],
+  site_busy: ['Today\'s free checks have all been used. Please come back tomorrow.', '今天的免费名额已经送完了，明天再来。'],
+  no_visitor: ['We could not verify this request. Please refresh the page and try again.', '这次请求没法确认来源，请刷新页面再试。'],
   analysis_failed: ['This check did not complete — not your fault. Please try again in a few minutes.', '这次没诊断成功，不是你的问题。请过几分钟再点一次；还不行，写信到 hello@magicengine.cloud，我们人工帮你看。'],
   unavailable: ['The free check is temporarily unavailable. Please try again later.', '免费诊断暂时用不了，请稍后再试。'],
 };
+
+const REPORT_ERRORS = {
+  already_sent: ['Already sent', 'The report for this check has already been emailed. Please check your inbox (and spam).', '已经发过了', '这次诊断的报告已经发过了，请查收邮箱（也看看垃圾邮件箱）。'],
+  recipient_limit: ['Already sent today', 'This email address has already received a report today. Please try again tomorrow.', '今天已经发过', '这个邮箱今天已经收过一份报告了，明天再试。'],
+  daily_limit: ['Limit reached', 'You have reached today\'s email limit. Please try again tomorrow.', '今天发不了了', '你今天发报告的次数已经用完，明天再试。'],
+  site_busy: ['Limit reached', 'Today\'s report emails have all been sent. Please try again tomorrow.', '今天发不了了', '今天的报告邮件名额已经用完，明天再试。'],
+  invalid_email: ['Check your email', 'That email address does not look right. Please check it.', '邮箱不对', '这个邮箱地址看起来不对，请检查一下。'],
+  report_not_ready: ['Not available', 'The full report for this check is not available. Please run the check again.', '报告不可用', '这次诊断的完整报告拿不到了，请重新诊断一次。'],
+  not_saved: ['Email not available', 'We could not save the full report this time, so it cannot be emailed. The findings above are real.', '暂时发不了邮件', '完整报告这次没保存下来，所以发不了邮件；上面这几条结果是真实的。'],
+  send_failed: ['Not sent yet', 'We could not send the report this time. Please try again later, or email hello@magicengine.cloud.', '还没发出去', '这次没能发出报告，请过一会儿再试，或写信到 hello@magicengine.cloud。'],
+};
+
+function showReportState(delivered, code) {
+  const sentEl = document.querySelector('.email-sent');
+  if (!sentEl) return;
+  sentEl.setAttribute('data-state', delivered ? 'delivered' : 'pending');
+  if (!delivered) {
+    const row = REPORT_ERRORS[code] || REPORT_ERRORS.send_failed;
+    const strong = sentEl.querySelector('.es-pending strong');
+    const p = sentEl.querySelector('.es-pending p');
+    if (strong) strong.textContent = t(row[0], row[2]);
+    if (p) p.textContent = t(row[1], row[3]);
+  }
+  sentEl.classList.add('show');
+}
 
 function scoutErrorText(code) {
   const pair = SCOUT_ERRORS[code] || SCOUT_ERRORS.analysis_failed;
@@ -555,7 +584,7 @@ function renderResult(data) {
 
   // The remaining findings are in the full report, which is emailed (there is no account view of it).
   const hidden = Math.max(0, (totalCount || 0) - list.length);
-  if (hidden > 0) {
+  if (hidden > 0 && data.leadId) {
     html += `
       <div class="unlock-overlay" style="position:static">
         <strong>${escHtml(t(`+ ${hidden} more findings in your full report`, `还有 ${hidden} 条建议在完整报告里`))}</strong>
@@ -564,6 +593,12 @@ function renderResult(data) {
   }
 
   container.innerHTML = html;
+
+  // No saved lead → no report can be sent: say so instead of offering an email form that can never work.
+  if (!data.leadId) {
+    document.querySelector('.email-form-wrap')?.classList.add('hidden');
+    showReportState(false, 'not_saved');
+  }
 
   // Portal bridge CTA
   const base = 'https://app.magicengine.com.au/portal/login?next=/prospect';
@@ -622,7 +657,8 @@ async function handleDiscoverSubmit(e) {
     const res = await fetch(SITE_CHECK_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, noWebsite, attribution, lang: currentLang }),
+      // Exactly one of the two: an open "no website" panel wins over a leftover address.
+      body: JSON.stringify(noWebsite ? { noWebsite, attribution, lang: currentLang } : { url, attribution, lang: currentLang }),
       signal: AbortSignal.timeout(90000),
     });
 
@@ -689,6 +725,7 @@ async function handleEmailSubmit(e) {
   //             /api/report returned report_not_ready). We must NOT claim the
   //             report is on its way in that case. P0-A fix.
   let delivered = false;
+  let code = leadId ? 'send_failed' : 'report_not_ready';
   try {
     if (leadId) {
       const res = await fetch(`${SITE_CHECK_API}/report`, {
@@ -697,20 +734,17 @@ async function handleEmailSubmit(e) {
         body: JSON.stringify({ leadId, email, consent }),
       });
       delivered = res.ok;
+      if (!res.ok) code = (await res.json().catch(() => ({}))).code || 'send_failed';
     }
   } catch (err) {
     console.warn('Report API error (non-fatal):', err.message);
   }
 
-  // Only hide the form when the report really went out; otherwise the visitor must be able to try again.
-  if (delivered) document.querySelector('.email-form-wrap')?.classList.add('hidden');
+  // Hide the form once the report went out, or when retrying cannot help; otherwise let the visitor try again.
+  if (delivered || code === 'already_sent') document.querySelector('.email-form-wrap')?.classList.add('hidden');
 
-  // Toggle the success copy honestly: only show "on its way" when delivered.
-  const sentEl = document.querySelector('.email-sent');
-  if (sentEl) {
-    sentEl.setAttribute('data-state', delivered ? 'delivered' : 'pending');
-    sentEl.classList.add('show');
-  }
+  // Honest status: "on its way" only when delivered; otherwise say exactly why.
+  showReportState(delivered, code);
 
   if (btn) { btn.textContent = t('Send my full report →', '把完整报告发给我 →'); btn.disabled = false; }
 }

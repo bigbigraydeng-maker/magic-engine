@@ -1,5 +1,4 @@
 // Supabase access for the free website check (table discovery_leads).
-// Same semantics as website/functions/api/scout.js and report.js.
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { validFindings, type CheckContext, type CheckLang, type CheckResult, type CheckSource } from './diagnose'
@@ -14,6 +13,10 @@ export interface StoredFindings extends CheckResult {
     site_key: string | null
     lang: CheckLang
     context: CheckContext
+    /** Cost receipt for the model call(s) behind this result (absent on reused copies). */
+    model?: string
+    attempts?: number
+    cost_usd?: number
   }
 }
 
@@ -43,7 +46,11 @@ function normaliseAttribution(input: unknown): Record<string, string> | null {
   return Object.keys(out).length > 0 ? out : null
 }
 
-/** A result for the same site, language and context in the last 24 hours (never returns someone else's lead id). */
+/**
+ * An original (not reused) result for the same site, language and context from the last 24 hours.
+ * Reused copies never seed another reuse, so a result expires 24 hours after the real check.
+ * Never returns someone else's lead id.
+ */
 export async function recentResult(siteKey: string): Promise<RecentResult | null> {
   const since = new Date(Date.now() - 86_400_000).toISOString()
   try {
@@ -51,6 +58,7 @@ export async function recentResult(siteKey: string): Promise<RecentResult | null
       .from('discovery_leads')
       .select('findings,market,url')
       .filter('attribution->>site_key', 'eq', siteKey)
+      .filter('findings->>reused', 'eq', 'false')
       .gt('created_at', since)
       .not('findings', 'is', null)
       .order('created_at', { ascending: false })
@@ -113,26 +121,33 @@ export async function getLead(id: string): Promise<LeadRow | null> {
   return (data?.[0] as LeadRow | undefined) ?? null
 }
 
-/** Atomically move scouted → report_sent for this lead. Returns true only for the one caller that wins. */
-export async function claimLead(id: string, email: string): Promise<boolean> {
+export type ClaimOutcome = 'claimed' | 'taken' | 'error'
+
+/** Atomically move scouted → report_sent for this lead. Only one caller can get 'claimed'. */
+export async function claimLead(id: string, email: string): Promise<ClaimOutcome> {
   const { data, error } = await supabaseAdmin
     .from('discovery_leads')
     .update({ email, status: 'report_sent', consent_at: new Date().toISOString() })
     .eq('id', id)
     .eq('status', 'scouted')
     .select('id')
-  if (error) return false
-  return Array.isArray(data) && data.length === 1
+  if (error) {
+    console.error('site-check claim failed', error.message)
+    return 'error'
+  }
+  return Array.isArray(data) && data.length === 1 ? 'claimed' : 'taken'
 }
 
+/** Put a lead back to scouted after a failed send, so the visitor can try again. */
 export async function releaseLead(id: string): Promise<void> {
   try {
-    await supabaseAdmin
+    const { error } = await supabaseAdmin
       .from('discovery_leads')
       .update({ email: null, status: 'scouted', consent_at: null })
       .eq('id', id)
       .eq('status', 'report_sent')
-  } catch {
-    /* best effort */
+    if (error) console.error('site-check release failed (lead stays report_sent without an email sent)', id, error.message)
+  } catch (err) {
+    console.error('site-check release failed (lead stays report_sent without an email sent)', id, err instanceof Error ? err.message : String(err))
   }
 }

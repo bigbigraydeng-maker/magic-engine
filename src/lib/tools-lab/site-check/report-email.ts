@@ -1,4 +1,4 @@
-// Port of website/functions/api/report.js email parts.
+// Report email for the free website check.
 // Every interpolated value goes through safe()/escapeHtml; no links come from site content.
 
 import { meMailFrom } from '@/lib/email/sender'

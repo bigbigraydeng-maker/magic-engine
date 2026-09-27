@@ -1,4 +1,4 @@
-// Port of website/functions/api/scout.js prompt + model parts.
+// Prompt and model call for the free website check (never returns canned findings).
 // Builds the same prompt (identical wording), validates the same JSON shape, and
 // runs the paid model call with up to two attempts.
 
@@ -124,9 +124,16 @@ export function buildPrompt({ lang, context, market, text, hostname, source }: B
       'summary、title、desc、fix、where、top_opportunity.title 全部用简体中文。',
     ].join('\n\n')
   }
+  // Country tax / year-end / platform facts only when we are reading a real .au/.nz-style homepage;
+  // a visitor without a website may be anywhere (e.g. "Where: Auckland" on the English page).
+  const localContext = source === 'homepage'
+    ? [`Local context you may use only when the material is relevant to it: financial year ends ${locale.fyEnd}, GST ${locale.gst}, local platforms ${locale.platforms.join(', ')}.`]
+    : ['Do not assume a country; do not mention tax rates, financial years or country-specific platforms.']
   return [
-    `You are a local business analyst for ${locale.name}. Use AU/NZ English spelling.`,
-    `Local context you may use only when the material is relevant to it: financial year ends ${locale.fyEnd}, GST ${locale.gst}, local platforms ${locale.platforms.join(', ')}.`,
+    source === 'homepage'
+      ? `You are a local business analyst for ${locale.name}. Use AU/NZ English spelling.`
+      : 'You are a small-business marketing analyst. Use plain English.',
+    ...localContext,
     evidence,
     ...common,
   ].join('\n\n')
@@ -169,9 +176,22 @@ function parseModelText(raw: string): CheckResult | null {
   }
 }
 
-/** Up to two attempts; a thrown error or invalid result moves to the next attempt. */
-export async function runCheck(prompt: string): Promise<CheckResult | null> {
+export interface CheckRun {
+  result: CheckResult | null
+  attempts: number
+  costUsd: number
+  model: string
+}
+
+/**
+ * Up to two attempts; a thrown error or invalid result moves to the next attempt — but only while
+ * there is time left for a full attempt before the browser gives up (`retryDeadline`, epoch ms).
+ */
+export async function runCheck(prompt: string, retryDeadline: number = Number.POSITIVE_INFINITY): Promise<CheckRun> {
+  const run: CheckRun = { result: null, attempts: 0, costUsd: 0, model: MODEL_HAIKU }
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt > 0 && Date.now() > retryDeadline) break
+    run.attempts += 1
     try {
       const res = await callClaudeChat({
         systemPrompt: 'You write website checks. Reply with JSON only.',
@@ -180,11 +200,12 @@ export async function runCheck(prompt: string): Promise<CheckResult | null> {
         maxOutputTokens: 1500,
         singleAttempt: true,
       })
+      run.costUsd += res.cost_usd
       const parsed = parseModelText(res.text)
-      if (parsed) return parsed
+      if (parsed) return { ...run, result: parsed }
     } catch {
       /* try again */
     }
   }
-  return null
+  return run
 }
