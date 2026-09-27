@@ -63,8 +63,14 @@ agent 不得自行对 A 级 PR 执行 `--admin`。
 
 - `Protect main`：必过检查 `ai-orchestrator-tests` · `Ledger entries valid` ·
   `Code change has ledger entry` · `Ledger refs exist` · **`ops-review-loop-tests`** ·
-  **`Kernel architecture test`**（2026-09-27 新增，`.github/workflows/kernel-architecture.yml`）。
-  没有 bypass actor：这六道红了，管理员也合不进。
+  **`Kernel architecture test`**（2026-09-27 新增，`.github/workflows/kernel-architecture.yml`） ·
+  **`Application build`**（2026-09-27 新增，`.github/workflows/pr-application-validation.yml`）。
+  没有 bypass actor：这七道红了，管理员也合不进。
+- `Application build` 为什么必过：2026-09-25 PR #2016 开着 auto-merge，编译还在跑时就被合进主干
+  （04:46:20 合，35 秒后编译报失败），之后约 7 小时每次上线都失败。它编的是 PR 自己的最新提交，
+  不是「主干 + 本 PR」，两个各自编得过的 PR 叠在一起仍可能编不过 —— 那种情况由今日待办的
+  「正式网站没换上新代码」兜底（`src/lib/pm-todo/deploy-health-items.ts`）。
+  同一个 workflow 里的 `Type-check` 暂不设必过：主干本地类型检查仍有旧错误，设了会误拦。
 - `Kernel architecture test` 测的是「主干 + 本 PR」合并后的代码，只在推送时按当时的主干算一次，
   主干后来变了不会自己重跑（规则集不要求分支先跟上主干）。所以 A 级 PR 手动 `--admin` 合并前，
   先 `gh pr update-branch`，等这道检查在最新主干上重新变绿再合。
