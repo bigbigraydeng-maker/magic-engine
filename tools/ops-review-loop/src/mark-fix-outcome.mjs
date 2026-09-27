@@ -18,7 +18,7 @@
  * round number rather than either silently stalling or skipping ahead.
  */
 import { readFileSync } from 'node:fs'
-import { createIssueComment, getPullRequest } from './github.mjs'
+import { compareCommits, createIssueComment, getPullRequest } from './github.mjs'
 import { buildMarker } from './markers.mjs'
 
 const token = process.env.GITHUB_TOKEN
@@ -52,6 +52,10 @@ const outcome = process.env.OUTCOME
 // so this comparison brackets exactly this round. If it is missing — the step
 // was skipped, or a future edit dropped it — fall back to reporting no push
 // rather than guessing: over-reporting is the failure this file exists to stop.
+const findingsSummary = process.env.FINDINGS_SUMMARY ?? ''
+const reviewId = process.env.REVIEW_ID ?? ''
+const riskGrade = process.env.RISK_GRADE ?? ''
+
 const headBefore = process.env.HEAD_BEFORE
 const headNow = (await getPullRequest(token, owner, repo, pr))?.head?.sha
 const pushedSomething =
@@ -77,12 +81,34 @@ if (pushedSomething) {
     outcome === 'success'
       ? `Codex will review the new head next.`
       : `⚠️ The action then reported \`${outcome}\`, so the fix may be incomplete — but the commit is real, so this round **is** counted. Codex will review the new head next.`
+
+  // Build the detail block: which files were changed by this push, and which
+  // Codex finding it addresses. Fetched via the compare API so the list
+  // reflects exactly what this round pushed, not the entire PR diff.
+  let detailBlock = ''
+  try {
+    const compare = await compareCommits(token, owner, repo, headBefore, headNow)
+    const changedFiles = (compare?.files ?? []).map((f) => `- \`${f.filename}\` (${f.status})`).join('\n')
+    if (changedFiles) {
+      detailBlock += `\n\n**本轮改动文件：**\n${changedFiles}`
+    }
+  } catch { /* detail is best-effort, not load-bearing */ }
+  if (findingsSummary) {
+    const reviewLink = reviewId
+      ? `https://github.com/${owner}/${repo}/pull/${pr}#pullrequestreview-${reviewId}`
+      : ''
+    detailBlock += `\n\n**处理的审查意见：** ${findingsSummary}${reviewLink ? ` ([查看审查](${reviewLink}))` : ''}`
+  }
+  if (riskGrade) {
+    detailBlock += `\n\n**风险级别：** ${riskGrade}`
+  }
+
   await createIssueComment(
     token,
     owner,
     repo,
     pr,
-    `Completed automated fix round ${round} for Codex findings and pushed \`${headNow.slice(0, 10)}\`. ${note}\n\n${marker}`
+    `Completed automated fix round ${round} for Codex findings and pushed \`${headNow.slice(0, 10)}\`. ${note}${detailBlock}\n\n${marker}`
   )
 } else if (outcome === 'success') {
   // Green step, unchanged head. Deliberately writes NO fix-dispatched marker:

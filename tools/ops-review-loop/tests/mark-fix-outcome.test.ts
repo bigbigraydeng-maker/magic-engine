@@ -5,9 +5,11 @@ import { join } from 'node:path'
 
 const createIssueComment = vi.fn().mockResolvedValue({})
 const getPullRequest = vi.fn()
+const compareCommits = vi.fn().mockResolvedValue({ files: [] })
 vi.mock('../src/github.mjs', () => ({
   createIssueComment: (...args: unknown[]) => createIssueComment(...args),
   getPullRequest: (...args: unknown[]) => getPullRequest(...args),
+  compareCommits: (...args: unknown[]) => compareCommits(...args),
 }))
 
 function withEnv(overrides: Record<string, string>, run: () => Promise<unknown>) {

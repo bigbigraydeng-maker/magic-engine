@@ -186,4 +186,10 @@ jobs:
           # Taken one step before the action ran, so "the head moved" means
           # this round moved it — see the `baseline` step above.
           HEAD_BEFORE: ${{ steps.baseline.outputs.head_before }}
+          # Context for the post-push comment: which findings this round
+          # addressed, and which risk grade was computed. Best-effort — a
+          # missing value omits the detail line, not the whole comment.
+          FINDINGS_SUMMARY: ${{ steps.plan.outputs.findings_summary }}
+          REVIEW_ID: ${{ steps.plan.outputs.review_id }}
+          RISK_GRADE: ${{ steps.plan.outputs.risk_grade }}
         run: node tools/ops-review-loop/src/mark-fix-outcome.mjs

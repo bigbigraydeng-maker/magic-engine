@@ -46,3 +46,17 @@ export async function listCheckRunsForRef(token, owner, repo, ref) {
   const data = await request(token, `/repos/${owner}/${repo}/commits/${ref}/check-runs?per_page=100`)
   return data.check_runs ?? []
 }
+
+export async function compareCommits(token, owner, repo, base, head) {
+  return request(token, `/repos/${owner}/${repo}/compare/${base}...${head}`)
+}
+
+export async function listPullRequestFiles(token, owner, repo, pullNumber) {
+  const files = []
+  for (let page = 1; page <= 30; page++) {
+    const batch = await request(token, `/repos/${owner}/${repo}/pulls/${pullNumber}/files?per_page=100&page=${page}`)
+    files.push(...batch)
+    if (batch.length < 100) return files
+  }
+  return files
+}
