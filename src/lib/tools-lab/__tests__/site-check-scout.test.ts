@@ -113,6 +113,7 @@ function fakeNet(over: Partial<Net> = {}): Net {
       site_report_ip: true,
       site_report_to: true,
       site_report_day: true,
+      tools_ai_calls_month: true,
     },
     model: () => ({
       text: JSON.stringify({
@@ -287,6 +288,18 @@ describe('scout', () => {
     expect(res.status).toBe(429)
     expect((await res.json()).code).toBe('monthly_limit')
     expect(net.calls).not.toContain('model')
+  })
+
+  it('the combined Tools Lab backstop (shared with ads-check) also stops a diagnosis, with the same honest message', async () => {
+    const net = fakeNet()
+    net.quota.tools_ai_calls_month = false
+    const res = await scout(req('/api/public/site-check', { url: 'acme.com' }))
+    expect(res.status).toBe(429)
+    expect((await res.json()).code).toBe('monthly_limit')
+    expect(net.calls).not.toContain('model')
+    // Its own 1500/month cap was already spent before reaching the shared backstop.
+    expect(net.calls).toContain('quota:site_check_month')
+    expect(net.calls).toContain('quota:tools_ai_calls_month')
   })
 
   it('an invalid address → invalid_url', async () => {

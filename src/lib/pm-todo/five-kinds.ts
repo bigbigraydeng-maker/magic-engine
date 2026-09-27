@@ -110,6 +110,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   knowledge_fact_expiring_soon: 'client_side', // 团期 / 价格要跟客户确认
   crm_important_due: 'client_side', // 客户员工约好的回电
   messenger_draft_send_failed: 'client_side', // 回复没发出去，要人工发给客人
+  tool_lead_needs_followup: 'client_side', // 工具实验室有人留资，值得联系一下
 
   // ── 4 · 发出去前要看一眼的 ───────────────────────────────────────────
   blog_draft_waiting: 'review',

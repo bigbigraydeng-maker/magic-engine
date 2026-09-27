@@ -33,6 +33,7 @@ import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushFacebookSyncFailingItems } from './facebook-sync-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
+import { pushToolLeadItems } from './tool-lead-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
@@ -242,6 +243,10 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     // Magic Bridge 免费名额快用完 —— 用满后新客户这个月就生成不了报告（PM 定的全平台上限）
     (b) => pushMagicBridgeQuotaItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] Magic Bridge 免费额度待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 工具实验室有人留资（自助开通广告体检 / 网站诊断留邮箱）—— 这张表以前写完没人读
+    (b) => pushToolLeadItems(supabase, b, clients, now).catch((e) =>
+      console.warn('[manual-items] 工具实验室留资待办生成失败（不阻塞其他待办）:', e),
     ),
   ]
 }

@@ -13,6 +13,9 @@ import { loadOutcomeConfig } from '@/lib/ads-strategy/portfolio/outcome-config'
 import type { OutcomeStep } from '@/lib/ads-strategy/portfolio/outcome-ladder'
 import { activeConnectionForPrincipal, reserveRead } from './store'
 import { requirePilotActive } from './entitlement'
+import { consumeQuota, QuotaUnavailable } from '@/lib/zhangqian/rate-limiter'
+import { monthStartUtc } from '@/lib/tools-lab/site-check/guards'
+import { TOOLS_AI_CALLS_MONTHLY_BUCKET, TOOLS_AI_CALLS_MONTHLY_CAP } from '@/lib/tools-lab/spend-cap'
 
 const BASE_FIELDS = 'account_id,campaign_id,campaign_name,ad_id,ad_name,date_start,date_stop,spend,impressions,reach,frequency,clicks,actions'
 const VIDEO_FIELDS = 'video_play_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p95_watched_actions,video_p100_watched_actions,video_thruplay_watched_actions'
@@ -95,6 +98,18 @@ async function requireSponsoredPreflight(clientId: string) {
     + Number(data.sponsored_analysis_reserve_usd) > Number(budget.data.cap_usd)) {
     throw new MetaReadError('sponsored_budget_exhausted', 429)
   }
+  // Combined backstop shared with site-check (src/lib/tools-lab/spend-cap.ts): this client's own cap
+  // above is per-client and stays authoritative — this only catches sponsored spend piling up in
+  // aggregate across every sponsored client, which nothing bounded before this. Reuses the existing
+  // (previously unwired) 'platform_quota_reached' code/copy — a whole-platform "come back next month".
+  let toolsWideAllowed: boolean
+  try {
+    toolsWideAllowed = await consumeQuota(TOOLS_AI_CALLS_MONTHLY_BUCKET, 'all', monthStartUtc(), TOOLS_AI_CALLS_MONTHLY_CAP)
+  } catch (err) {
+    if (err instanceof QuotaUnavailable) throw new MetaReadError('analysis_unavailable', 503)
+    throw err
+  }
+  if (!toolsWideAllowed) throw new MetaReadError('platform_quota_reached', 429)
 }
 
 async function requireSnapshot(clientId: string, principalId: string, grant: GrantRow, connectionVersion: string) {

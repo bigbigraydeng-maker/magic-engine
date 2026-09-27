@@ -36,6 +36,7 @@ import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
 import type { SimaqianItemKind } from './simaqian-review-items'
+import type { ToolLeadItemKind } from './tool-lead-items'
 import type { PmKind } from './five-kinds'
 
 /**
@@ -163,6 +164,8 @@ export type ManualItemKind =
   | 'ledger_patrol_missing'
   /** 客人像是说他付款了，但不是我们自己确认的 —— 只有人能核对到账，不许机器自己打 paid 标签 */
   | 'paid_signal_needs_review'
+  /** 工具实验室有人留资（自助开通 / 网站诊断留邮箱）—— 这张表以前写完没人读，见 tool-lead-items.ts */
+  | ToolLeadItemKind
   | CommentScopeTodoKind
   /** 写在 Render 里的 Meta 钥匙被 Meta 作废（错误码 190）—— 只有人能重新授权 */
   | MetaTokenHealthKind

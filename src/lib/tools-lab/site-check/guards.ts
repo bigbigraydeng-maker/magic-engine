@@ -1,7 +1,13 @@
-// Shared guards for the free website check: limits, the atomic quota, origin check, escaping and URL vetting.
-// Visitor identity lives in ./visitor.ts; homepage fetching (via the platform's safe fetch) in ./homepage.ts.
+// Shared guards for the free website check: limits, origin check, escaping and URL vetting.
+// The atomic quota (consumeQuota/QuotaUnavailable) now lives in @/lib/zhangqian/rate-limiter — the one
+// place in the codebase that calls the zhangqian_rate_limit_consume RPC — and is re-exported here so
+// every existing import from this module keeps working unchanged.
+// Visitor identity lives in @/lib/tools-lab/visitor (shared by every Tools Lab tool); homepage fetching
+// (via the platform's safe fetch) in ./homepage.ts.
 
 import { supabaseAdmin } from '@/lib/supabase'
+
+export { consumeQuota, QuotaUnavailable } from '@/lib/zhangqian/rate-limiter'
 
 export const LIMITS = {
   requestsPerVisitorPerDay: 20, // every check request, before any fetch (reuse and unreadable sites included)
@@ -23,8 +29,6 @@ const ALLOWED_ORIGINS: readonly RegExp[] = [
   /^https:\/\/[a-z0-9-]+\.magic-engine\.pages\.dev$/,
 ]
 
-export class QuotaUnavailable extends Error {}
-
 /** Only the official site and its Cloudflare previews may call the paid endpoints. */
 export function isAllowedOrigin(origin: string | null): boolean {
   const value = origin ?? ''
@@ -37,37 +41,6 @@ export function dayStartUtc(now: Date = new Date()): string {
 
 export function monthStartUtc(now: Date = new Date()): string {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
-}
-
-/**
- * Atomic check-and-consume through the existing database function (zhangqian_rate_limit_consume).
- * Returns true when allowed. Any failure throws QuotaUnavailable: callers refuse rather than allow.
- */
-export async function consumeQuota(
-  bucketType: string,
-  bucketKey: string,
-  windowStart: string,
-  cap: number,
-): Promise<boolean> {
-  let data: unknown
-  try {
-    const res = await supabaseAdmin.rpc('zhangqian_rate_limit_consume', {
-      p_bucket_type: bucketType,
-      p_bucket_key: bucketKey,
-      p_window_start: windowStart,
-      p_cap: cap,
-    })
-    if (res.error) throw new QuotaUnavailable(res.error.message)
-    data = res.data
-  } catch (err) {
-    if (err instanceof QuotaUnavailable) throw err
-    throw new QuotaUnavailable(err instanceof Error ? err.message : String(err))
-  }
-  const row = Array.isArray(data) ? data[0] : data
-  if (!row || typeof (row as { allowed?: unknown }).allowed !== 'boolean') {
-    throw new QuotaUnavailable('quota store returned no decision')
-  }
-  return (row as { allowed: boolean }).allowed
 }
 
 /** Best-effort removal of visitor / recipient key rows from before yesterday (privacy: kept at most 2 days). */
