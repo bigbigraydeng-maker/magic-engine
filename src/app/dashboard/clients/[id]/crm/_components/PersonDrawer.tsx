@@ -13,6 +13,8 @@ import { ContactTimeline, type TimelineSummary } from './ContactTimeline'
 import { MessengerReply } from './MessengerReply'
 import { EmailReply } from './EmailReply'
 import { DncBanner } from './DncBanner'
+import { MarkWonPanel } from './MarkWonPanel'
+import { ImportantMarkerEditor } from './ImportantMarkerEditor'
 import { drawerActions, nextStageChoices, type Channel } from '@/lib/crm/drawer-actions'
 import type { Segment } from '@/lib/crm/segments'
 
@@ -27,6 +29,14 @@ export interface DrawerRow {
   dueAt?: string | null
   /** 他现在在哪一批 —— 决定给哪几个按钮。 */
   segment?: Segment
+  /**
+   * 「要记住的事」（⭐ 重要标记）—— 员工手填的提醒 + 到期日。
+   *
+   * 2026-09-27 R1 加：这一格原来只长在「全部客人」那一页，抽屉这边没有，
+   * 于是同一个客人在两页上能做的事不一样。今日待办还有一条 `crm_important_due`
+   * 依赖它。取数侧见 `today/route.ts`。
+   */
+  important?: { note: string | null; dueAt: string | null } | null
   /** 他实际能被联系到的渠道 —— 决定按钮的措辞（没电话的人不给「没打通」）。 */
   suggestedChannel?: Channel
   /**
@@ -48,6 +58,13 @@ export interface DrawerRow {
   doNotContact?: boolean
 }
 
+/**
+ * New Asian Logistics —— 只有这一个客户把人标「已成交」时要先录金额并回传 Meta 广告。
+ * 同一个字面量在 `all/_components/ContactDetail.tsx` / `nal-mark-won/route.ts` 各有一份，
+ * 是既有惯例；按设计稿 R3 要统一改成读 `leads_config.crm.onWon` 配置、不认客户 id。
+ */
+const NAL_CLIENT_ID = '4ae76381-cd45-43bd-85cd-98cfd7604007'
+
 export function PersonDrawer({
   clientId,
   row,
@@ -66,6 +83,8 @@ export function PersonDrawer({
 }) {
   const [composing, setComposing] = useState(false)
   const [changingStage, setChangingStage] = useState(false)
+  /** NAL 专属：标「已成交」前先录金额。 */
+  const [markingWon, setMarkingWon] = useState(false)
   /** 阶段的「其他」展开没有 —— 默认只给下一步 + 一个出口。 */
   const [allStages, setAllStages] = useState(false)
   /** 一键动作正在写 —— 防双击记成两笔。 */
@@ -238,6 +257,16 @@ export function PersonDrawer({
           </div>
 
           {/* 现在到哪一步了（点一下可改，改前二次确认） */}
+          {/* 「要记住的事」：打开就看得见，不用滚。跟「全部客人」那页同一个组件。 */}
+          <div className="mt-3">
+            <ImportantMarkerEditor
+              clientId={clientId}
+              row={{ contactId: row.contactId, important: row.important ?? null }}
+              // 不重拉整块看板 —— 抽屉还开着，脚下的列表跳动会让人失去位置（同 ComposeNote）。
+              onSaved={(msg) => onSaved(msg, false)}
+            />
+          </div>
+
           {stages.length > 0 && (
             <div className="mt-3">
               <button
@@ -257,7 +286,18 @@ export function PersonDrawer({
                   ).map((s) => (
                     <button
                       key={s.stageKey}
-                      onClick={() => void changeStage(s.stageKey, s.label)}
+                      onClick={() => {
+                        // 🔴 判据照抄「全部客人」那一页（ContactDetail），一个字没改：
+                        // 只有 NAL 把人标成「已成交」时要先录金额、再回传广告转化。
+                        // 两页必须说同一件事，否则销售在一页能标、另一页标不了。
+                        // 那个客户 id 按设计稿要在后续轮改成读配置，这一轮先保持一致。
+                        if (clientId === NAL_CLIENT_ID && s.marketingAction === 'won') {
+                          setChangingStage(false)
+                          setMarkingWon(true)
+                          return
+                        }
+                        void changeStage(s.stageKey, s.label)
+                      }}
                       className="rounded-full bg-white px-3 py-1.5 text-[13px] font-bold text-me-charcoal shadow-sm"
                     >
                       {s.label}
@@ -280,7 +320,22 @@ export function PersonDrawer({
               一个从没被联系过的人只有两种结果：打通了，或者没打通。
               其余控件在这一刻都是噪音，而噪音的代价是销售不用这一页。 */}
           <div className="mt-3">
-            {!composing ? (
+            {/*
+              🔴 `markingWon` 必须判在最前面。第一版把它写在 `!composing` 的 else 分支里，
+              于是只有「正在记一笔」时才可能出现 —— 而点「已成交」只设 markingWon、
+              不设 composing，所以那个面板永远不出现。是新加的测试抓到的。
+            */}
+            {markingWon ? (
+              <MarkWonPanel
+                contactId={row.contactId}
+                onCancel={() => setMarkingWon(false)}
+                onDone={(msg, reload) => {
+                  setMarkingWon(false)
+                  setTimelineKey((k) => k + 1)
+                  onSaved(msg, reload)
+                }}
+              />
+            ) : !composing ? (
               <div className="flex gap-2">
                 {actions.map((a) =>
                   a.kind === 'log' ? (
