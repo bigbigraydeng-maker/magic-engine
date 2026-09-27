@@ -421,7 +421,8 @@ function applyLanguage(lang) {
   document.querySelectorAll('[data-en]').forEach(el => {
     const val = el.getAttribute(`data-${currentLang}`) || el.getAttribute('data-en');
     if (!val) return;
-    if (el.tagName === 'INPUT' && el.getAttribute('placeholder')) {
+    // Inputs and text areas only get a placeholder — never a value that would be submitted as the visitor's answer.
+    if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && el.hasAttribute('placeholder')) {
       el.placeholder = val;
     } else {
       el.textContent = val;
@@ -501,6 +502,7 @@ const SCOUT_ERRORS = {
   invalid_url: ['That web address does not look right. Please check it and try again.', '这个网址看起来不对，请检查一下再试。'],
   unreachable: ['We could not open this website (it may block visitors from overseas or be down). Try another address, or tell us about your business instead.', '我们打不开这个网站，可能被防火墙挡住了，或者只有国内能打开。请换一个海外能打开的网址，或者点「我没有网站」填三句话。'],
   not_html: ['That address is not a web page. Please enter your homepage address.', '这个地址不是网页，请填你网站首页的网址。'],
+  encoding: ['Your homepage uses an older text encoding we cannot read reliably, so we did not guess. Tell us about your business instead.', '你的网站首页用的是旧的中文编码（比如 GBK），我们读不准，所以不硬猜。请点「我没有网站」填三句话，或写信给我们。'],
   challenge: ['Your website showed us a security check instead of the page, so we could not read it. Try another address, or tell us about your business instead.', '你的网站给我们看的是安全验证页，不是网页内容，所以没法诊断。请换一个网址，或者点「我没有网站」填三句话。'],
   too_little_text: ['We could read almost no text on that page, so we cannot give an honest check. Try another page of your site.', '这个页面上几乎没有能读到的文字，没法给出靠谱的诊断。请换一个网址试试。'],
   redirected_away: ['That address sends visitors to a different website, so we stopped. Please enter your own site\'s address.', '这个网址会跳到别的网站，我们就停下了。请填你自己网站的网址。'],
@@ -517,7 +519,7 @@ function scoutErrorText(code) {
 
 /* ── Render result ── */
 function renderResult(data) {
-  const { teaser, totalCount, topOpportunity, source, reused } = data;
+  const { teaser, totalCount, source, reused } = data;
   const container = document.getElementById('teaser-container');
   if (!container) return;
 
@@ -571,11 +573,6 @@ function renderResult(data) {
     a.href = registerBase;
   });
 
-  // Show top opportunity in portal bridge if present
-  if (topOpportunity) {
-    const opp = document.getElementById('opportunity-title');
-    if (opp) opp.textContent = topOpportunity.title;
-  }
 
   showState('result');
 }
@@ -703,7 +700,8 @@ async function handleEmailSubmit(e) {
     console.warn('Report API error (non-fatal):', err.message);
   }
 
-  document.querySelector('.email-form-wrap')?.classList.add('hidden');
+  // Only hide the form when the report really went out; otherwise the visitor must be able to try again.
+  if (delivered) document.querySelector('.email-form-wrap')?.classList.add('hidden');
 
   // Toggle the success copy honestly: only show "on its way" when delivered.
   const sentEl = document.querySelector('.email-sent');

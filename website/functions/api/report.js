@@ -8,7 +8,7 @@
    every value from the address or the model is escaped, and the email never carries links taken from site content.
 */
 
-import { LIMITS, QuotaUnavailable, consumeQuota, dayStartUtc, escapeHtml, isAllowedOrigin, visitorKey } from '../_shared/site-check.js';
+import { LIMITS, QuotaUnavailable, consumeQuota, dayStartUtc, defangLinks, escapeHtml, isAllowedOrigin, recipientKey, visitorKey } from '../_shared/site-check.js';
 
 const CORS = { 'Access-Control-Allow-Origin': 'https://magicengine.com.au', 'Content-Type': 'application/json' };
 const LAB_URL = 'https://magicengine.com.au/cn/lab/';
@@ -64,7 +64,12 @@ function siteLabel(url) {
   try { return new URL(url).hostname; } catch { return ''; }
 }
 
-/** Exported for tests. Every interpolated value goes through escapeHtml; no links come from site content. */
+/** Text from the site or the model: links defanged (mail clients auto-link bare domains), then HTML-escaped. */
+function safe(value) {
+  return escapeHtml(defangLinks(value));
+}
+
+/** Exported for tests. Every interpolated value goes through safe()/escapeHtml; no links come from site content. */
 export function buildEmail(lead) {
   const f = lead.findings || {};
   const lang = f.lang === 'zh' ? 'zh' : 'en';
@@ -73,40 +78,40 @@ export function buildEmail(lead) {
   const sev = SEVERITY[lang];
   const items = findings.map((x) => {
     const [colour, label] = sev[x.severity] || sev.GAP;
-    const where = x.where ? `<div style="font-size:12px;color:#888;margin-top:6px;">${lang === 'zh' ? '在哪里看到：' : 'Seen on: '}${escapeHtml(x.where)}</div>` : '';
+    const where = x.where ? `<div style="font-size:12px;color:#888;margin-top:6px;">${lang === 'zh' ? '在哪里看到：' : 'Seen on: '}${safe(x.where)}</div>` : '';
     return `<div style="border:1px solid rgba(22,24,29,.08);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
       <div style="font-size:12px;font-weight:700;color:${colour};margin-bottom:6px;">${escapeHtml(label)}</div>
-      <div style="font-size:15px;font-weight:700;color:#16181D;margin-bottom:6px;">${escapeHtml(x.title)}</div>
-      <div style="font-size:14px;color:#555;line-height:1.65;">${escapeHtml(x.desc)}</div>
-      ${x.fix ? `<div style="font-size:14px;color:#16181D;line-height:1.65;margin-top:8px;"><strong>${lang === 'zh' ? '怎么改：' : 'What to do: '}</strong>${escapeHtml(x.fix)}</div>` : ''}
+      <div style="font-size:15px;font-weight:700;color:#16181D;margin-bottom:6px;">${safe(x.title)}</div>
+      <div style="font-size:14px;color:#555;line-height:1.65;">${safe(x.desc)}</div>
+      ${x.fix ? `<div style="font-size:14px;color:#16181D;line-height:1.65;margin-top:8px;"><strong>${lang === 'zh' ? '怎么改：' : 'What to do: '}</strong>${safe(x.fix)}</div>` : ''}
       ${where}
     </div>`;
   }).join('');
   const fromAnswers = f.source === 'answers';
   const t = lang === 'zh'
     ? {
-      subject: `你的网站诊断结果：${site}，共 ${findings.length} 条建议`,
+      subject: `你的网站诊断结果：共 ${findings.length} 条建议 · Magic Engine`,
       hello: '你好，',
       intro: fromAnswers
         ? `这是 Magic Engine 根据你填写的业务介绍写的免费建议（我们没有看过网站），按重要程度排好了。`
-        : `这是 Magic Engine 对 ${escapeHtml(site)} 首页的免费诊断，按「最影响客户联系你」的顺序排好了。`,
+        : `这是 Magic Engine 对 ${safe(site)} 首页的免费诊断，按「最影响客户联系你」的顺序排好了。`,
       heading: '诊断结果',
       outro: '看完不知道先改哪条？直接回复这封邮件跟我们聊，可以用中文。',
       footer: `你收到这封邮件，是因为你在 Magic Engine 工具实验室（${LAB_URL}）用了免费网站诊断。`,
       html: 'zh-CN',
     }
     : {
-      subject: `Your website check for ${site} — ${findings.length} findings`,
+      subject: `Your website check — ${findings.length} findings · Magic Engine`,
       hello: 'Hi there,',
       intro: fromAnswers
         ? 'Here is Magic Engine\'s free advice based on the business details you entered (we did not look at a website).'
-        : `Here is Magic Engine's free check of the ${escapeHtml(site)} homepage, most important first.`,
+        : `Here is Magic Engine's free check of the ${safe(site)} homepage, most important first.`,
       heading: 'Your findings',
       outro: 'Not sure where to start? Just reply to this email.',
       footer: 'You received this because you ran the free website check at magicengine.com.au.',
       html: 'en',
     };
-  const summary = f.summary ? `<div style="background:#FBF5E8;border-radius:12px;padding:16px 20px;margin-bottom:24px;font-size:14px;color:#9A6F1E;line-height:1.65;">${escapeHtml(f.summary)}</div>` : '';
+  const summary = f.summary ? `<div style="background:#FBF5E8;border-radius:12px;padding:16px 20px;margin-bottom:24px;font-size:14px;color:#9A6F1E;line-height:1.65;">${safe(f.summary)}</div>` : '';
   const body = `<!DOCTYPE html>
 <html lang="${t.html}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Magic Engine</title></head>
 <body style="margin:0;padding:0;background:#F0EFE9;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei','Inter',sans-serif;">
@@ -126,13 +131,15 @@ ${items}
   return { subject: t.subject, body };
 }
 
-async function sendEmail(env, { to, subject, html }) {
+async function sendEmail(env, { to, subject, html, idempotencyKey }) {
   if (!env.RESEND_API_KEY) throw new Error('email not configured');
   const from = env.RESEND_FROM || 'Magic Engine <hello@magicengine.cloud>';
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.RESEND_API_KEY}` },
+    // One email per lead even if we retry after an ambiguous failure (provider-side de-duplication).
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Idempotency-Key': `site-check-report-${idempotencyKey}` },
     body: JSON.stringify({ from, to, subject, html, reply_to: 'hello@magicengine.cloud' }),
+    signal: AbortSignal.timeout(15000),
   });
   if (!res.ok) throw new Error(`email ${res.status}`);
 }
@@ -157,6 +164,9 @@ export async function onRequestPost(context) {
     if (!key) return fail(400, 'no_visitor');
     try {
       if (!(await consumeQuota(env, 'site_report_ip', key, dayStartUtc(), LIMITS.reportPerVisitorPerDay))) return fail(429, 'daily_limit');
+      // Our sender must not become a mailer: one report per recipient per day, and a whole-site daily ceiling.
+      if (!(await consumeQuota(env, 'site_report_to', await recipientKey(email, env), dayStartUtc(), LIMITS.reportPerRecipientPerDay))) return fail(429, 'daily_limit');
+      if (!(await consumeQuota(env, 'site_report_day', 'all', dayStartUtc(), LIMITS.reportPerDay))) return fail(429, 'daily_limit');
     } catch (err) {
       if (err instanceof QuotaUnavailable) return fail(503, 'unavailable');
       throw err;
@@ -166,7 +176,7 @@ export async function onRequestPost(context) {
     if (!(await claimLead(env, lead.id, cleanEmail))) return fail(409, 'already_sent');
     const { subject, body: html } = buildEmail(lead);
     try {
-      await sendEmail(env, { to: cleanEmail, subject, html });
+      await sendEmail(env, { to: cleanEmail, subject, html, idempotencyKey: lead.id });
     } catch (err) {
       console.error('site-check report email failed:', err instanceof Error ? err.message : String(err));
       await releaseLead(env, lead.id);

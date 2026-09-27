@@ -4,9 +4,13 @@
 // No route handlers are exported, so Cloudflare Pages does not serve this file as an endpoint.
 
 export const LIMITS = {
-  checkPerVisitorPerDay: 3,
+  requestsPerVisitorPerDay: 20, // every check request, before any fetch (reuse and unreadable sites included)
+  checkPerVisitorPerDay: 3,     // paid model calls
+  checkPerDay: 100,             // paid model calls, whole site: one person cannot drain the month in minutes
   checkPerMonth: 1500,
   reportPerVisitorPerDay: 5,
+  reportPerRecipientPerDay: 1,
+  reportPerDay: 100,            // emails from our sender, whole site
 };
 
 export const MAX_URL_CHARS = 500;
@@ -55,10 +59,17 @@ async function hmacHex(keyMaterial, message) {
 export async function visitorKey(request, env, now = new Date()) {
   const ip = (request.headers.get('cf-connecting-ip') || '').trim();
   if (!ip || !env.SUPABASE_SERVICE_KEY) return null;
-  const subject = ip.includes(':') ? `v6:${ipv6Prefix64(ip)}` : `v4:${ip}`;
+  const mapped = ip.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i);
+  const subject = mapped ? `v4:${mapped[1]}` : ip.includes(':') ? `v6:${ipv6Prefix64(ip)}` : `v4:${ip}`;
   // Key material derived from an existing server secret with a fixed label (no new environment variable).
   const material = await hmacHex(env.SUPABASE_SERVICE_KEY, 'site-check-visitor-key-v1');
   return hmacHex(material, `${dayStartUtc(now).slice(0, 10)}|${subject}`);
+}
+
+/** One-way, day-scoped key for an email recipient (per-recipient send cap without storing the address twice). */
+export async function recipientKey(email, env, now = new Date()) {
+  const material = await hmacHex(env.SUPABASE_SERVICE_KEY, 'site-check-recipient-key-v1');
+  return hmacHex(material, `${dayStartUtc(now).slice(0, 10)}|${String(email).trim().toLowerCase()}`);
 }
 
 /**
@@ -88,12 +99,12 @@ export async function consumeQuota(env, bucketType, bucketKey, windowStart, cap)
   return row.allowed;
 }
 
-/** Best-effort removal of visitor-key rows older than two days (privacy: keys are kept at most 2 days). */
+/** Best-effort removal of visitor / recipient key rows from before yesterday (privacy: kept at most 2 days). */
 export async function pruneOldVisitorKeys(env, now = new Date()) {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return;
-  const cutoff = new Date(Date.parse(dayStartUtc(now)) - 2 * 86_400_000).toISOString();
+  const cutoff = new Date(Date.parse(dayStartUtc(now)) - 86_400_000).toISOString();
   try {
-    await fetch(`${env.SUPABASE_URL}/rest/v1/zhangqian_scan_rate_limits?bucket_type=in.(site_check_ip,site_report_ip)&window_start=lt.${encodeURIComponent(cutoff)}`, {
+    await fetch(`${env.SUPABASE_URL}/rest/v1/zhangqian_scan_rate_limits?bucket_type=in.(site_check_any,site_check_ip,site_report_ip,site_report_to)&window_start=lt.${encodeURIComponent(cutoff)}`, {
       method: 'DELETE',
       headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, Prefer: 'return=minimal' },
     });
@@ -107,6 +118,13 @@ export function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+const LINKISH = /\b((?:https?:\/\/|www\.)[^\s<>"']+|[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|info|biz|io|co|xyz|top|site|online|shop|app|au|nz|cn|uk|us)\b[^\s<>"']*)/gi;
+
+/** Make links and domains in email text non-clickable (mail clients auto-link bare addresses). */
+export function defangLinks(value) {
+  return String(value ?? '').replace(LINKISH, (m) => m.replace(/^http/i, 'hxxp').replace(/\./g, '[.]'));
 }
 
 /** Registrable-ish site identity: hostname without a leading www. */
@@ -189,11 +207,14 @@ async function readCapped(res) {
 /**
  * Fetch the homepage only if it is a real, readable page of the same site.
  * Returns { ok: true, text, title, finalUrl } or { ok: false, reason } where reason is one of
- * 'invalid_url' | 'unreachable' | 'not_html' | 'challenge' | 'too_little_text' | 'redirected_away'.
+ * 'invalid_url' | 'unreachable' | 'not_html' | 'encoding' | 'challenge' | 'too_little_text' | 'redirected_away'.
  */
 export async function fetchRealHomepage(input, { fetchImpl = fetch, timeoutMs = 12000 } = {}) {
-  let url = vetUrl(input);
-  if (!url) return { ok: false, reason: 'invalid_url' };
+  const given = vetUrl(input);
+  if (!given) return { ok: false, reason: 'invalid_url' };
+  // Homepage only: a path or query could point at a page whose text the visitor controls (search results, comments),
+  // and the result is reused for the whole site (狄仁杰 / 子牙 2026-09-27).
+  let url = new URL(`${given.origin}/`);
   const startHost = siteHost(url.hostname);
   let res;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
@@ -219,10 +240,26 @@ export async function fetchRealHomepage(input, { fetchImpl = fetch, timeoutMs = 
   if (!res || res.status < 200 || res.status >= 300) return { ok: false, reason: 'unreachable' };
   const type = res.headers.get('content-type') || '';
   if (!/text\/html|application\/xhtml\+xml/i.test(type)) return { ok: false, reason: 'not_html' };
-  const html = await readCapped(res);
+  const declared = (type.match(/charset=([^;]+)/i) || [])[1];
+  if (declared && !/^\s*utf-?8\s*$/i.test(declared)) return { ok: false, reason: 'encoding' };
+  let html;
+  try {
+    html = await readCapped(res);
+  } catch {
+    return { ok: false, reason: 'unreachable' };
+  }
+  if (/<meta[^>]+charset=["']?\s*(gb2312|gbk|gb18030|big5|shift_jis|euc-[a-z]+|iso-8859-\d+|windows-\d+)/i.test(html.slice(0, 4096))) {
+    return { ok: false, reason: 'encoding' };
+  }
   const title = extractTitle(html);
   const text = extractText(html);
   if (looksLikeChallenge(title, text, html)) return { ok: false, reason: 'challenge' };
   if (text.length < MIN_TEXT_CHARS) return { ok: false, reason: 'too_little_text' };
   return { ok: true, text: text.slice(0, 8000), title, finalUrl: url.toString() };
+}
+
+/** Test helper: the address that will actually be fetched for a visitor-supplied URL. */
+export function homepageOf(input) {
+  const given = vetUrl(input);
+  return given ? `${given.origin}/` : null;
 }
