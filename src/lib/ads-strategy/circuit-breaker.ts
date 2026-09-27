@@ -1,7 +1,10 @@
 /**
  * 广告自治熔断器（WP3 验收条件 3）。
  *
- * 判据：当日账户实际花费合计超过前 7 天中位数的 3 倍 → 触发熔断。
+ * 判据：当日账户**实际花费**合计超过前 7 天**实际花费**中位数的 3 倍 → 触发熔断。
+ * 调用方必须从 `ad_daily_insights` 取实际花费（而不是预算）喂给本模块——
+ * 预算不变、花费突增到中位数 3 倍以上时用预算算不出这个信号；反过来仅调整
+ * 预算但花费未异常时用预算算又会误触发。
  * 触发后把该客户全部 `ads.*` 动作的 `client_automation_policies.mode` 写成
  * `deny`（sync-policy.ts 刻意为此预留的值），同时下发 pm-todo 三件套。
  *
@@ -66,8 +69,8 @@ export function evaluateCircuitBreaker(input: CircuitBreakerInput): CircuitBreak
       medianCents: Math.round(medianCents),
       multiplier: Math.round(multiplier * 100) / 100,
       reason:
-        `当日账户花费 $${(input.todayTotalSpendCents / 100).toFixed(2)} ` +
-        `超过 7 天中位数 $${(medianCents / 100).toFixed(2)} 的 ${multiplier.toFixed(1)} 倍` +
+        `当日账户实际花费 $${(input.todayTotalSpendCents / 100).toFixed(2)} ` +
+        `超过 7 天实际花费中位数 $${(medianCents / 100).toFixed(2)} 的 ${multiplier.toFixed(1)} 倍` +
         `（阈值 ${CIRCUIT_BREAKER_MULTIPLIER} 倍）`,
     }
   }
