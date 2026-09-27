@@ -9,7 +9,7 @@ import {
 function makeHistory(cents: number[], startDate = '2026-09-18'): DailySpendEntry[] {
   return cents.map((c, i) => ({
     date: `2026-09-${18 + i}`,
-    totalBudgetCents: c,
+    totalSpendCents: c,
   }))
 }
 
@@ -17,8 +17,8 @@ describe('evaluateCircuitBreaker', () => {
   it('does not trip when today is within 3x median', () => {
     const input: CircuitBreakerInput = {
       clientId: 'test',
-      todayTotalBudgetCents: 10000,
-      recentDailyBudgets: makeHistory([5000, 5000, 5000, 4000, 4000, 5000, 6000]),
+      todayTotalSpendCents: 10000,
+      recentDailySpend: makeHistory([5000, 5000, 5000, 4000, 4000, 5000, 6000]),
     }
     const result = evaluateCircuitBreaker(input)
     expect(result.tripped).toBe(false)
@@ -27,8 +27,8 @@ describe('evaluateCircuitBreaker', () => {
   it('trips when today exceeds 3x median', () => {
     const input: CircuitBreakerInput = {
       clientId: 'test',
-      todayTotalBudgetCents: 20000,
-      recentDailyBudgets: makeHistory([5000, 5000, 5000, 4000, 4000, 5000, 6000]),
+      todayTotalSpendCents: 20000,
+      recentDailySpend: makeHistory([5000, 5000, 5000, 4000, 4000, 5000, 6000]),
     }
     const result = evaluateCircuitBreaker(input)
     expect(result.tripped).toBe(true)
@@ -42,8 +42,8 @@ describe('evaluateCircuitBreaker', () => {
   it('does not trip with insufficient history (< 3 days)', () => {
     const input: CircuitBreakerInput = {
       clientId: 'test',
-      todayTotalBudgetCents: 99999,
-      recentDailyBudgets: makeHistory([1000, 1000]),
+      todayTotalSpendCents: 99999,
+      recentDailySpend: makeHistory([1000, 1000]),
     }
     expect(evaluateCircuitBreaker(input).tripped).toBe(false)
   })
@@ -51,8 +51,8 @@ describe('evaluateCircuitBreaker', () => {
   it('does not trip when median is zero', () => {
     const input: CircuitBreakerInput = {
       clientId: 'test',
-      todayTotalBudgetCents: 5000,
-      recentDailyBudgets: makeHistory([0, 0, 0, 0, 0, 0, 0]),
+      todayTotalSpendCents: 5000,
+      recentDailySpend: makeHistory([0, 0, 0, 0, 0, 0, 0]),
     }
     expect(evaluateCircuitBreaker(input).tripped).toBe(false)
   })
@@ -60,8 +60,8 @@ describe('evaluateCircuitBreaker', () => {
   it('correctly handles odd-length median', () => {
     const input: CircuitBreakerInput = {
       clientId: 'test',
-      todayTotalBudgetCents: 3100,
-      recentDailyBudgets: makeHistory([1000, 1000, 1000]),
+      todayTotalSpendCents: 3100,
+      recentDailySpend: makeHistory([1000, 1000, 1000]),
     }
     const result = evaluateCircuitBreaker(input)
     expect(result.tripped).toBe(true)
@@ -73,8 +73,8 @@ describe('evaluateCircuitBreaker', () => {
   it('correctly handles even-length median', () => {
     const input: CircuitBreakerInput = {
       clientId: 'test',
-      todayTotalBudgetCents: 4600,
-      recentDailyBudgets: makeHistory([1000, 2000, 1000, 2000]),
+      todayTotalSpendCents: 4600,
+      recentDailySpend: makeHistory([1000, 2000, 1000, 2000]),
     }
     const result = evaluateCircuitBreaker(input)
     expect(result.tripped).toBe(true)
@@ -86,8 +86,8 @@ describe('evaluateCircuitBreaker', () => {
   it('exactly at 3x does not trip (must exceed)', () => {
     const input: CircuitBreakerInput = {
       clientId: 'test',
-      todayTotalBudgetCents: 15000,
-      recentDailyBudgets: makeHistory([5000, 5000, 5000, 5000, 5000]),
+      todayTotalSpendCents: 15000,
+      recentDailySpend: makeHistory([5000, 5000, 5000, 5000, 5000]),
     }
     expect(evaluateCircuitBreaker(input).tripped).toBe(false)
   })
