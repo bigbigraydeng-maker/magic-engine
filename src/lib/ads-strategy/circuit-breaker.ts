@@ -17,6 +17,9 @@ export const CIRCUIT_BREAKER_MULTIPLIER = 3
 /** 回看天数。 */
 export const CIRCUIT_BREAKER_LOOKBACK_DAYS = 7
 
+/** 非零花费天数最低要求（spec §6.3 #1）。 */
+export const CIRCUIT_BREAKER_MIN_NONZERO_DAYS = 5
+
 export interface DailySpendEntry {
   readonly date: string
   readonly totalSpendCents: number
@@ -30,6 +33,7 @@ export interface CircuitBreakerInput {
 
 export type CircuitBreakerVerdict =
   | { readonly tripped: false }
+  | { readonly tripped: 'undeterminable'; readonly reason: string }
   | {
       readonly tripped: true
       readonly todayCents: number
@@ -49,12 +53,18 @@ function median(values: number[]): number {
 
 export function evaluateCircuitBreaker(input: CircuitBreakerInput): CircuitBreakerVerdict {
   const history = input.recentDailySpend
+  const nonZeroDays = history.filter(e => e.totalSpendCents > 0)
 
-  if (history.length < 3) {
-    return { tripped: false }
+  if (nonZeroDays.length < CIRCUIT_BREAKER_MIN_NONZERO_DAYS) {
+    return {
+      tripped: 'undeterminable',
+      reason:
+        `非零花费天数 ${nonZeroDays.length} 不足 ${CIRCUIT_BREAKER_MIN_NONZERO_DAYS} 天，` +
+        '数据不充分，按 data-partial 处理（不熔不放）',
+    }
   }
 
-  const medianCents = median(history.map(e => e.totalSpendCents))
+  const medianCents = median(nonZeroDays.map(e => e.totalSpendCents))
 
   if (medianCents <= 0) {
     return { tripped: false }

@@ -60,7 +60,7 @@ export async function pushAdsAutonomyCircuitBreakerItems(
       client_id: row.client_id,
       client_name: nameOf(row.client_id),
       what:
-        '广告自治被熔断器自动停了 —— 当日预算合计超过 7 天中位数的 3 倍，' +
+        '广告自治被熔断器自动停了 —— 当日实际花费合计超过 7 天中位数的 3 倍，' +
         '系统已自动把全部广告动作切到「禁止」档位，不再动钱。',
       how:
         '先到 Meta Ads Manager 核实实际花费是否正常；' +
