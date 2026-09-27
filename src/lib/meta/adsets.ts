@@ -17,7 +17,25 @@ import { GRAPH_BASE } from './graph-base'
 export interface AdSetSummary {
   id: string
   name: string
+  /**
+   * 🔴 **这一列不能单独用来判「在不在投」**（手册 §二十九 防复发 + PR #2110 生产实证）。
+   *
+   *    `status` 是这个广告组**自己**的开关。真实投放状态还要看它上面那一层：
+   *    **「系列 ACTIVE + 组 PAUSED」是最常见的「假在投」** —— 2026-09-27 实测 CTS
+   *    二号账户 3 条系列显示 ACTIVE，旗下广告组**全是 PAUSED**（每天 12/12/34 纽币），
+   *    广告全是 `ADSET_PAUSED`；直接问 Meta 拿逐日花费确认 9/23 起一分钱没花。
+   *    只看系列层就会把这 3 条当成在投的。
+   *
+   *    判「在不在投」一律用下面的 `effective_status` 配
+   *    `DELIVERING_STATUSES`（`diagnostics/context.ts`），或者以有没有花费为准。
+   */
   status: 'ACTIVE' | 'PAUSED' | 'DELETED' | 'ARCHIVED'
+  /**
+   * Meta 算出来的**实际**投放状态（已把上层暂停、审核、账单问题都算进去）。
+   * 判「在不在投」用这一列 + `DELIVERING_STATUSES`，不要用上面那个 `status`。
+   * 可能缺（老代码请求时没要这个字段）—— 缺就当**读不到**，不要当「没在投」。
+   */
+  effective_status?: string
   /** Minor units (cents) as a string, exactly as Meta returns it. Absent on CBO. */
   daily_budget?: string
   /** 裸数字(无 "act_" 前缀)——归属校验用,见 winner-reel-sync/engine.ts。 */
@@ -36,7 +54,7 @@ export async function listAdSetsInCampaign(
   accessToken: string,
 ): Promise<AdSetSummary[] | null> {
   const params = new URLSearchParams({
-    fields: 'id,name,status,daily_budget',
+    fields: 'id,name,status,effective_status,daily_budget',
     limit: '50',
     access_token: accessToken,
   })
@@ -97,7 +115,7 @@ export async function getAdSetStatus(
   accessToken: string,
 ): Promise<AdSetSummary | null> {
   const params = new URLSearchParams({
-    fields: 'id,name,status,daily_budget,account_id',
+    fields: 'id,name,status,effective_status,daily_budget,account_id',
     access_token: accessToken,
   })
 

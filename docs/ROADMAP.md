@@ -334,6 +334,7 @@ PM 要求把 parkhomes.nz 整体检查一遍还有什么可以升级。首页网
   - [ ] **`client_meta_ad_accounts` 缺 `currency` 列** —— 账户级 `daily_budget_cap_cents` 的币种是隐含的、靠 `ad_entity_snapshots.currency` 反查。今天不出问题纯因 CTS/NAL 实测全 NZD。多币种客户接入前必须补；在那之前 PATCH 校验对「取不到币种」和「币种不一致」一律拒、不许相加
   - [ ] **熔断 #4 Jev 连续低分接线** —— 数据源 `prescription_evaluations` 按 v2.2 §9.3/§11.8/§12 是 WP3.3 才建；3.1b 判据打桩恒返回 undeterminable（不熔不放），表就绪后接线
   - [ ] **admin 熔断解除看板页** —— 3.1b 只交付 API（`guardGlobalAdmin` 保护），UI 延后
+  - [ ] **`ads.pause_unit` 缺专属审批入口 → 批准没有绑定保护** —— 人按的止损在 `observe` 客户上落成 `pending_approval` 后走通用审批页，而通用页的 `expectedDecisionId` 是可选参数（默认 `{}`），所以「批准的人看到的就是他批的那份」这条保护对它不生效。修它要给 `ads.pause_unit` 建专属入口 + 登记进 PR #2063 那张登记表；两边同时改那张表会撞，所以等 #2063 合并后做
   - [ ] **provider-write 闸的 AST 化** —— 狄仁杰实测那道闸能被 barrel 转发 + 同目录相对 import 绕过（9 种写法里架构测试只认得 1 种）。修法在 `architecture.test.ts` 同文件里已有（341 行起的 AST 版 `moduleRefsIn`），存量弱点非本轮引入
 - [ ] **WP3.2 链条**：`google-data-pullback-daily` 末尾发 `ads.impact_cycle.due`（不新开 cron）；韩信（新 agent `docs/agents/12-hanxin.md`）编排：熔断检查 → 孔明 `isWithinEnvelope` 预检 → denied 恢复入批 → 去冲突 → Kernel；批次表 + 成员表；pm-todo 四个拉取函数 + 活性项。
 - [ ] **WP3.3 Check + Tune + Jev + 日报两段**：韩信在 `runAction` 成功后写 `flywheel_actions`（加 `action_run_id` 列）；attribution 加 `ads_check` 评估器（扩 `flywheel_outcomes_evaluator_key_check`、`OUTCOME_EVALUATOR` 登记、`ads.` owner）；Tune 复用 `memory-extractor`（`pattern_type` CHECK 扩 `budget|pause|creative`）；`prescription_evaluations`；日报 Check/Tune 段。
