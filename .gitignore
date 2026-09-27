@@ -73,3 +73,5 @@ scripts/factory-worker/node_modules/
 # Python 编译产物（scripts/video-pipeline）
 __pycache__/
 *.py[cod]
+
+# probe: 2071 risk rating check — do not merge
