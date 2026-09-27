@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { isSafeInternalPath } from '@/lib/auth/safe-internal-path'
 
 const BRAND_VOICE_OPTIONS = ['Professional', 'Friendly', 'Bold', 'Witty'] as const
 const INDUSTRY_OPTIONS = [
@@ -45,7 +46,7 @@ export default function BriefPage() {
   const cameFromProspect = searchParams.get('from') === 'prospect'
   const hasWelcome = searchParams.get('welcome') === '1'
   const requestedNext = searchParams.get('next')
-  const nextPath = requestedNext && requestedNext.startsWith('/dashboard/') && !requestedNext.startsWith('//')
+  const nextPath = isSafeInternalPath(requestedNext) && requestedNext.startsWith('/dashboard/')
     ? requestedNext
     : `/dashboard/clients/${id}`
 

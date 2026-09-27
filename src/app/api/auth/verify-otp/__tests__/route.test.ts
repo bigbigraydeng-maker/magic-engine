@@ -111,4 +111,27 @@ describe('POST /api/auth/verify-otp', () => {
 
     expect(mocks.resolveRedirectForSession.mock.calls[0][1]).toBe('/dashboard')
   })
+
+  // 狄仁杰 review of PR 2123: `/\evil.com` passed the old
+  // startsWith('/') && !startsWith('//') check; browsers normalise `\` to `/`.
+  it.each(['/\\evil.com', '/%5Cevil.com', '//evil.com', 'https://evil.com'])(
+    'never hands an off-site next (%j) to the redirect resolver',
+    async (next) => {
+      mocks.verifyOtp.mockResolvedValue({ data: {}, error: null })
+      mocks.resolveRedirectForSession.mockResolvedValue('/dashboard')
+
+      await POST(request({ email: 'user@example.com', token: '123456', next }))
+
+      expect(mocks.resolveRedirectForSession.mock.calls[0][1]).toBe('/dashboard')
+    },
+  )
+
+  it('keeps a normal internal next path', async () => {
+    mocks.verifyOtp.mockResolvedValue({ data: {}, error: null })
+    mocks.resolveRedirectForSession.mockResolvedValue('/meta-ads-ai/mine')
+
+    await POST(request({ email: 'user@example.com', token: '123456', next: '/meta-ads-ai/mine' }))
+
+    expect(mocks.resolveRedirectForSession.mock.calls[0][1]).toBe('/meta-ads-ai/mine')
+  })
 })

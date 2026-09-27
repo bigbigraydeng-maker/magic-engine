@@ -13,11 +13,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { resolveRedirectForSession } from '@/lib/auth/resolve-redirect'
+import { safeInternalPath } from '@/lib/auth/safe-internal-path'
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
-  const next = searchParams.get('next') ?? '/dashboard'
-  const safePath = next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard'
+  const safePath = safeInternalPath(searchParams.get('next'), '/dashboard')
 
   const supabase = createServerSupabaseClient()
   const redirect = await resolveRedirectForSession(supabase, safePath)

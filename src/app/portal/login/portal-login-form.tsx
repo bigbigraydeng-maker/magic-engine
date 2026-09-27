@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { createBrowserClient } from '@supabase/ssr'
 import { GoogleSelfServeButton } from '@/components/auth/GoogleSelfServeButton'
+import { isSafeInternalPath } from '@/lib/auth/safe-internal-path'
 
 interface Props {
   next: string
@@ -30,7 +31,7 @@ export default function PortalLoginForm({ next, authFailed }: Props) {
     })
     if (!res.ok) throw new Error('Session could not be started')
     const data = await res.json() as { redirect?: unknown }
-    if (typeof data.redirect !== 'string' || !data.redirect.startsWith('/') || data.redirect.startsWith('//')) {
+    if (!isSafeInternalPath(data.redirect)) {
       throw new Error('Invalid sign-in destination')
     }
     window.location.href = data.redirect

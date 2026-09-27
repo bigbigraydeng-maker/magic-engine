@@ -4,6 +4,7 @@ import { cookies } from 'next/headers'
 import { randomUUID, timingSafeEqual } from 'crypto'
 import { getPublicOrigin } from '@/lib/auth/public-origin'
 import { resolveRedirectForSession } from '@/lib/auth/resolve-redirect'
+import { safeInternalPath } from '@/lib/auth/safe-internal-path'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,9 +12,7 @@ const ALLOWED_TYPES = new Set(['magiclink', 'signup', 'email'])
 const NONCE_COOKIE = 'me-magic-login-nonce'
 
 function safeNext(value: unknown): string {
-  return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//')
-    ? value
-    : '/dashboard'
+  return safeInternalPath(value, '/dashboard')
 }
 
 function equal(a: string, b: string): boolean {
