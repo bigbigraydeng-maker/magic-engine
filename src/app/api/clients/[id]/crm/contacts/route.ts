@@ -170,7 +170,7 @@ function contactFilterParams(query: ListQuery): {
  * 触点必须按 `contact_id in (当前页)` 收窄：CTS 量级下全量触点 1271 条，
  * 分页的意义就是别为了 100 个人把全库读一遍。
  */
-async function getPaged(clientId: string, query: ListQuery): Promise<NextResponse> {
+async function getPaged(clientId: string, query: ListQuery, viewerEmail: string | null): Promise<NextResponse> {
   let total: number
   let pageContacts: ContactRow[]
   let stageRows: StageRow[]
@@ -250,6 +250,10 @@ async function getPaged(clientId: string, query: ListQuery): Promise<NextRespons
     perPage: query.perPage,
     columns: visibleCustomColumns(customPerContact),
     items: out,
+    // 「全部客人」页展开一个联系人时要显示「发出去会记在谁名下」，
+    // 而这个响应是该页唯一读到当前登录身份的地方（跟「今天要联系」页
+    // 从自己的 data.viewerEmail 拿是同一个模式，不新起一个接口）。
+    viewerEmail,
   })
 }
 
@@ -265,7 +269,7 @@ async function getPaged(clientId: string, query: ListQuery): Promise<NextRespons
  * CTS 量级约 5k 行 / 1.4MB，跟今天页每次打开读的量相同。真要收窄得按 100 个
  * contact_id 一批走 `.in()`（PostgREST URL 长度限制），留作后续一轮。
  */
-async function getPriority(clientId: string, query: ListQuery): Promise<NextResponse> {
+async function getPriority(clientId: string, query: ListQuery, viewerEmail: string | null): Promise<NextResponse> {
   let contacts: ContactRow[]
   let touches: TouchRow[]
   let stageRows: StageRow[]
@@ -339,6 +343,7 @@ async function getPriority(clientId: string, query: ListQuery): Promise<NextResp
     focus,
     columns: visibleCustomColumns(customPerContact),
     sections,
+    viewerEmail,
   })
 }
 
@@ -361,13 +366,14 @@ export async function GET(
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
+  const viewerEmail = access.user.email?.toLowerCase().trim() ?? null
 
   const parsed = parseListQuery(new URL(req.url))
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 })
   }
-  if (parsed.paged) return getPaged(clientId, parsed)
-  if (parsed.view === 'priority') return getPriority(clientId, parsed)
+  if (parsed.paged) return getPaged(clientId, parsed, viewerEmail)
+  if (parsed.view === 'priority') return getPriority(clientId, parsed, viewerEmail)
 
   // 必须分页拉全 —— Supabase 单次查询硬顶 1000 行，`.limit(20000)` 会被静默
   // 砍掉且不报错。实测 CTS：库里 1271 条触点只回 1000 条；配合 order desc，
@@ -418,6 +424,7 @@ export async function GET(
     totalContacts: out.length,
     columns: visibleCustomColumns(customPerContact),
     contacts: out,
+    viewerEmail,
   })
 }
 

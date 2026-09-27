@@ -23,6 +23,7 @@ import { ComposeNote, type StageOption } from '../../_components/ComposeNote'
 import { DncBanner } from '../../_components/DncBanner'
 import { MarkWonPanel } from '../../_components/MarkWonPanel'
 import { ImportantMarkerEditor } from '../../_components/ImportantMarkerEditor'
+import { WhatsAppReply } from '../../_components/WhatsAppReply'
 import { TimelineItem } from './TimelineItem'
 import {
   CHANNEL_LABEL,
@@ -51,6 +52,7 @@ export function ContactDetail({
   omitted,
   loading,
   onWrote,
+  viewerEmail,
 }: {
   clientId: string
   row: ContactRow
@@ -60,6 +62,9 @@ export function ContactDetail({
   loading: boolean
   /** 第二个参数 = 要不要顺手重拉列表；失败时传 false。 */
   onWrote: (msg: string, reload?: boolean) => void
+  /** 「发出去会记在谁名下」——WhatsAppReply 需要。缺省 null 时那句提示不出现，
+   *  不影响能不能发（不是权限判断，权限仍在发送那个接口里判）。 */
+  viewerEmail?: string | null
 }) {
   const [composing, setComposing] = useState(false)
   const [changingStage, setChangingStage] = useState(false)
@@ -225,6 +230,20 @@ export function ContactDetail({
           }}
         />
       )}
+
+      {/* WhatsApp 那条线（2026-09-28）。这一页原来连 Messenger / 邮件的回复框都没有——
+          「记一笔」只是补录，不是真的发消息给客人。「今天要联系」那边已经有回复框了
+          （见 PersonDrawer.tsx 的 MessengerReply/EmailReply/WhatsAppReply），这一页是
+          独立组件、没跟着长。先把 WhatsApp 这一条补齐；Messenger / 邮件的同款缺口
+          记进台账，不在这次一起改（范围之外）。
+          跟抽屉那边一样自判断：没有 WhatsApp 会话就什么都不渲染。 */}
+      <WhatsAppReply
+        clientId={clientId}
+        contactId={row.contactId}
+        customerName={row.name}
+        viewerEmail={viewerEmail ?? null}
+        onSent={() => onWrote('✓ WhatsApp 已发出', true)}
+      />
     </div>
   )
 }
