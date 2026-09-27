@@ -9,6 +9,7 @@
 
 import { useCallback, useState } from 'react'
 import { ComposeNote, type StageOption } from './ComposeNote'
+import { WhatsAppReply } from './WhatsAppReply'
 import { ContactTimeline, type TimelineSummary } from './ContactTimeline'
 import { MessengerReply } from './MessengerReply'
 import { EmailReply } from './EmailReply'
@@ -386,6 +387,22 @@ export function PersonDrawer({
             onSent={() => {
               setTimelineKey((k) => k + 1)
               onSaved('✓ 私信已发出', false)
+            }}
+          />
+
+          {/* WhatsApp 那条线（2026-09-28）。整个 WhatsApp 方案的前提是「客人在
+              WhatsApp 说话、顾问在 ME 里回」，而在这一块之前 ME 里根本没有能回
+              WhatsApp 的地方 —— 顾问只能用自己手机回，那条线系统完全看不见，
+              于是天天误报「这个客人没人跟进」。跟上下两块一样自判断：
+              没有 WhatsApp 会话就什么都不渲染。 */}
+          <WhatsAppReply
+            clientId={clientId}
+            contactId={row.contactId}
+            customerName={row.name}
+            viewerEmail={viewerEmail}
+            onSent={() => {
+              setTimelineKey((k) => k + 1)
+              onSaved('✓ WhatsApp 已发出', false)
             }}
           />
 
