@@ -224,3 +224,34 @@ describe('我们正在跟进的广告（卡片）',()=>{
     expect(container.querySelector('script')).toBeNull()
   })
 })
+
+describe('值得你看一眼的广告（自助客户卡片）',()=>{
+  const footer='想省心的话，可以让我们帮你盯着，你同意后我们才动手——发邮件到 hello@magicengine.cloud 聊聊。'
+
+  it('renders the footer after the cards',()=>{
+    const evidence={
+      rule_cards:{
+        title:'值得你看一眼的广告（1 条）',intro:'说明',promise:'',bodyReplaced:true,footer,
+        cards:[{ adLabel:'Ad 1',headline:'标题 1',detail:'说明 1',action:'处理 1' }],
+      },
+    }
+    render(<ReportView analysis={{ ...base,report_markdown:'一、总体结果\n数据充足。',evidence }} />)
+    const cards=screen.getByTestId('rule-cards')
+    const footerEl=screen.getByText(footer)
+    expect(cards).toContainElement(footerEl)
+    expect(screen.getByText('标题 1').compareDocumentPosition(footerEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('renders no empty promise paragraph when promise is empty',()=>{
+    const evidence={
+      rule_cards:{
+        title:'值得你看一眼的广告（1 条）',intro:'说明',promise:'',bodyReplaced:true,footer,
+        cards:[{ adLabel:'Ad 1',headline:'标题 1',detail:'说明 1',action:'处理 1' }],
+      },
+    }
+    render(<ReportView analysis={{ ...base,report_markdown:'一、总体结果\n数据充足。',evidence }} />)
+    const cards=screen.getByTestId('rule-cards')
+    // intro + 1 card (4 <p>) + footer = 6 paragraphs; no empty promise paragraph
+    expect(cards.querySelectorAll('p')).toHaveLength(6)
+  })
+})

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   CTR_EXPLAINER,
+  SELF_SERVE_FOOTER,
   renderRuleSection,
   type ClientRuleFinding,
   type RuleSectionInput,
@@ -197,5 +198,31 @@ describe('buildRuleCards', () => {
     const label = result.cards!.cards[0].adLabel
     expect(label.length).toBe(121)
     expect(label.endsWith('…')).toBe(true)
+  })
+})
+
+function liveSection(
+  findings: ClientRuleFinding[],
+  overrides: Partial<Extract<RuleSectionInput, { source: 'live' }>> = {},
+): Extract<RuleSectionInput, { source: 'live' }> {
+  return { source: 'live', dataDate: '2026-09-25', adsChecked: 40, findings, ...overrides }
+}
+
+describe('buildRuleCards — live source', () => {
+  it('builds self-serve title, empty promise, footer and live body replacement', () => {
+    const sec = liveSection([finding({ adName: 'Ad A' })])
+    const report = `一、总体结果\n花费 NZ$100。\n\n${renderRuleSection(sec)}\n\n四、广告出现的位置\nFacebook 动态最多。`
+    const result = buildRuleCards(sec, report, TODAY)
+    expect(result.cards).not.toBeNull()
+    const cards = result.cards!
+    expect(cards.title).toBe('值得你看一眼的广告（1 条）')
+    expect(cards.promise).toBe('')
+    expect(cards.footer).toBe(SELF_SERVE_FOOTER)
+    expect(cards.bodyReplaced).toBe(true)
+    expect(result.report).toContain(
+      '三、需要留意的广告\n这条已经放在上面「值得你看一眼的广告」里，这里不再重复。',
+    )
+    expect(result.report).toContain('四、广告出现的位置\nFacebook 动态最多。')
+    expect(JSON.stringify(cards)).not.toContain('你不用动手')
   })
 })
