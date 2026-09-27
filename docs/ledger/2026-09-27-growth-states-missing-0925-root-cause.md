@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-09-27
 source: doc:docs/ledger/2026-09-26-ads-d3-migration-applied-to-prod.md
 done_on: 2026-09-27
-done_ref: doc:docs/ledger/2026-09-27-growth-states-missing-0925-root-cause.md
+done_ref: pr:2131
 verify_by: 2026-10-04
 verify_how: 防复发已在本卡同一改动里落地（`src/lib/cron/registry.ts` 的 google-data-pullback-daily outputTables 已含 ads_growth_states，见 commit 938cd01），查它没被后续改动移除即可。再查最近 7 天 ads_growth_states 每天是不是都有 6 行（缺任一天 = 又出现同类静默，立刻交回 PM）
 ---
