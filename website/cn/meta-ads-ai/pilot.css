@@ -44,6 +44,7 @@
 .pilot-strip-inner strong { color: var(--nm-ink); }
 .pilot-strip-inner span { display: inline-flex; align-items: center; gap: 8px; }
 .pilot-strip-inner span::before { content: '✓'; color: var(--nm-gold-dark); font-weight: 800; }
+.pilot-strip-inner span.pilot-strip-plain::before { content: none; }
 .pilot-heading { max-width: 760px; margin-bottom: 46px; }
 .pilot-heading p,.pilot-copy { font-size: 1.04rem; line-height: 1.84; }
 .pilot-card-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 18px; }

@@ -105,6 +105,8 @@ async function sendMetaCapiEvent(env, ctaKey, body, request) {
   }
 }
 
+const RESERVED_CTA_KEYS = new Set(['tool_signup']);
+
 function normaliseString(value, max = 500) {
   if (typeof value !== 'string') return '';
   return value.trim().slice(0, max);
@@ -160,6 +162,12 @@ export async function onRequestPost(context) {
     const attribution = normaliseAttribution(body.metadata?.attribution || body.attribution);
     const referrer = normaliseString(body.referrer || attribution?.referrer || request.headers.get('referer') || '', 1000) || null;
     const metadata = body.metadata && typeof body.metadata === 'object' ? { ...body.metadata } : {};
+
+    // Server-written funnel events (the app records a Tools Lab sign-up only after a verified session).
+    // The public endpoint must not accept them, or anyone could post fake sign-ups.
+    if (RESERVED_CTA_KEYS.has(ctaKey)) {
+      return new Response(JSON.stringify({ error: 'Reserved event.' }), { status: 400, headers });
+    }
 
     if (!ctaKey || !destination || !href) {
       return new Response(JSON.stringify({ error: 'Missing tracking fields.' }), {
