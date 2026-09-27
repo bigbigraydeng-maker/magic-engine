@@ -27,10 +27,13 @@ export interface ClientCopyOptions {
   dataDate: string
   /** 所在广告系列近 7 天去重频次（Magic Bridge 现读），巡检频次缺失时补 */
   campaignFrequency: (campaignId: string | null) => number | null
+  /** 客户口吻：代管客户（默认）还是自助客户 */
+  voice?: 'managed' | 'self_serve'
 }
 
 export type RuleSectionInput =
   | { source: 'patrol'; dataDate: string; adsChecked: number; findings: ClientRuleFinding[] }
+  | { source: 'live'; dataDate: string; adsChecked: number; findings: ClientRuleFinding[] }
   | {
       source: 'none'
       reason:
@@ -43,6 +46,9 @@ export type RuleSectionInput =
         | 'not_loaded'
         | 'no_delivering_ads'
         | 'incomplete_findings'
+        | 'mixed_pages'
+        | 'too_many_ads'
+        | 'live_unavailable'
     }
 
 /** YYYY-MM-DD → 「9月24日」 */
@@ -80,6 +86,19 @@ function num(v: string | number | boolean | null | undefined): number | null {
 
 function askSentence(changed: string): string {
   return `如果你最近自己改过这条广告的${changed}，请告诉我们。`
+}
+
+function selfServeAction(kind: 'post_click_drop' | 'fatigue', metric: unknown, fatigueKind: FatigueKind): string {
+  if (kind === 'post_click_drop') {
+    return metric === 'lead'
+      ? '打开这条广告用的表单，把不是非问不可的问题删掉，再看两三天。'
+      : '看看这条广告点进来后的欢迎语和快捷问题，改得更直接一点，再看两三天。'
+  }
+  if (fatigueKind === 'audience') {
+    return '同一批人已经看了很多次，可以换一批新的受众，或者先换一版图片。'
+  }
+  if (fatigueKind === 'unknown') return '先换一张新图或新视频试试，文字和受众先不动。'
+  return '换一张新图或新视频试试，文字和受众先不动。'
 }
 
 function promiseSentence(dataDate: string): string {
@@ -148,12 +167,16 @@ function d10Finding(
       ? `它最近 3 天花了 ${money(spend)}，还没有带来${who}${peerTail}`
       : `它最近 3 天平均每带来一位${who}要花 ${money(recentCpr)}${peerTail}`
     : costLine + cause
+  const action =
+    opts.voice === 'self_serve'
+      ? selfServeAction('post_click_drop', metric, 'creative')
+      : askSentence(metric === 'lead' ? '表单' : '欢迎语或快捷问题')
   return {
     kind: 'post_click_drop',
     adName,
     headline: headline + suffix,
     detail,
-    action: askSentence(metric === 'lead' ? '表单' : '欢迎语或快捷问题'),
+    action,
     spend,
     explainsCtr: false,
   }
@@ -184,12 +207,16 @@ function d2Finding(
       : kind === 'audience'
         ? `和它一起投放的这批广告，同一批人一周平均已经看到约 ${f7.toFixed(1)} 次，看多了就不太会再点了。`
         : '这次拿不到每个人看了几次，所以分不清是图片或视频不够吸引人，还是同一批人看腻了。'
+  const action =
+    opts.voice === 'self_serve'
+      ? selfServeAction('fatigue', null, kind)
+      : askSentence('图片或视频')
   return {
     kind: 'fatigue',
     adName,
     headline: headline + suffix,
     detail: body,
-    action: askSentence('图片或视频'),
+    action,
     spend,
     explainsCtr: true,
   }
@@ -208,15 +235,34 @@ const NONE_REASON_TEXT: Record<
   not_loaded: '这次没有拿到每条广告的数据，我们不想在数据不全时下结论',
   no_delivering_ads: '它现在没有正在投放的广告，没有需要检查的',
   incomplete_findings: '有几条广告这次的数据不完整，我们不想在数据不全时下结论',
+  mixed_pages: '你的账户同时给好几个主页投广告，这次没法判断哪个是你的主页，所以没出建议',
+  too_many_ads: '你的账户广告太多，这次没有逐条检查',
+  live_unavailable: '这次没拿到每条广告的数据，没有逐条检查',
 }
 
 export const CTR_EXPLAINER = '点击率就是看到广告的人里点进来的比例。'
 
 export const RULE_SECTION_TITLE = '三、需要留意的广告'
 
+export const SELF_SERVE_INTRO = '下面是从你账户数据看到的变化，改不改由你决定，我们不会动你的广告。'
+
+export const SELF_SERVE_FOOTER = '不想每天自己盯？我们可以帮你看着，发现问题直接处理——发邮件到 hello@magicengine.cloud 跟我们聊聊。'
+
 function findingBlock(x: ClientRuleFinding, explainCtr: boolean): string {
   const detail = explainCtr ? CTR_EXPLAINER + x.detail : x.detail
   return [x.headline, detail, x.action].filter((line) => line !== '').join('\n')
+}
+
+function renderFindingBlocks(findings: ClientRuleFinding[]): string {
+  const sorted = [...findings].sort((a, b) => b.spend - a.spend)
+  let explained = false
+  return sorted
+    .map((x) => {
+      const explainCtr = x.explainsCtr && !explained
+      if (explainCtr) explained = true
+      return findingBlock(x, explainCtr)
+    })
+    .join('\n\n')
 }
 
 export function renderRuleSection(input: RuleSectionInput): string {
@@ -224,15 +270,17 @@ export function renderRuleSection(input: RuleSectionInput): string {
   if (input.source === 'none') {
     return `${title}\n这个广告账户这次没有做单条广告检查：${NONE_REASON_TEXT[input.reason]}。报告里其它部分的分析不受影响。`
   }
+  if (input.source === 'live') {
+    if (input.adsChecked === 0) {
+      return `${title}\n这次没有适合逐条检查的广告：单条检查只看以点击、留资或私信为目标、最近在花钱的广告（数据截至 ${formatDay(input.dataDate)}）。`
+    }
+    if (input.findings.length === 0) {
+      return `${title}\n这次没发现需要你动的广告（看了 ${input.adsChecked} 条在花钱的广告，数据截至 ${formatDay(input.dataDate)}）。`
+    }
+    return `${title}\n${SELF_SERVE_INTRO}\n\n${renderFindingBlocks(input.findings)}\n\n${SELF_SERVE_FOOTER}`
+  }
   if (input.findings.length === 0) {
     return `${title}\n这次没有发现连续两天以上明显变差的广告（检查了 ${input.adsChecked} 条正在投放的广告，数据截至 ${formatDay(input.dataDate)}）。`
   }
-  const sorted = [...input.findings].sort((a, b) => b.spend - a.spend)
-  let explained = false
-  const blocks = sorted.map((x) => {
-    const explainCtr = x.explainsCtr && !explained
-    if (explainCtr) explained = true
-    return findingBlock(x, explainCtr)
-  })
-  return `${title}\n${promiseSentence(input.dataDate)}\n\n${blocks.join('\n\n')}`
+  return `${title}\n${promiseSentence(input.dataDate)}\n\n${renderFindingBlocks(input.findings)}`
 }

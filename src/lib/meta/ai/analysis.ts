@@ -5,7 +5,8 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { AI_ENTITY_FIELDS } from '../entity-settings'
 import { graphAfter, graphRows, metaGraphGet, MetaReadError } from '../graph-read'
 import { compareMetrics, coreResultsByCampaign, normaliseInsight, previousWindow, resolveWindow, summariseCoreResults, type AdsetMeta, type CoreResultSummary, type Window } from './metrics'
-import { loadRuleFindings } from './rule-findings'
+import { liveRulesEligible, loadRuleFindings } from './rule-findings'
+import { runLiveRules } from './live-rules'
 import { buildRuleCards } from './rule-cards'
 import { renderRuleSection, type RuleSectionInput } from '@/lib/ads-strategy/rules/client-copy'
 import { loadOutcomeConfig } from '@/lib/ads-strategy/portfolio/outcome-config'
@@ -271,7 +272,11 @@ async function loadEvidence(clientId: string, principalId: string, grant: GrantR
     return Number.isFinite(f) && f > 0 ? f : null
   }
   const deliveringAdIds = new Set(videos.filter(r => typeof r.ad_id === 'string' && Number(r.spend ?? 0) > 0).map(r => String(r.ad_id)))
-  const rules = await loadRuleFindings(clientId, { adAccountId: grant.ad_account_id, now: new Date(), currency, deliveringAdIds, campaignFrequency })
+  const patrol = await loadRuleFindings(clientId, { adAccountId: grant.ad_account_id, now: new Date(), currency, deliveringAdIds, campaignFrequency })
+  const live = patrol.section.source === 'none' && patrol.section.reason === 'not_connected' && await liveRulesEligible(clientId)
+  const ruleSection: RuleSectionInput = live
+    ? await runLiveRules({ clientId, adAccountId: grant.ad_account_id, token: connection.token, currency, timezone, windowUntil: window.until })
+    : patrol.section
   return { account: { id: grant.ad_account_id, currency, timezone }, current_window: window, previous_window: previous,
     coverage: { campaign_rows_read: campaigns.length, campaign_rows_sent: Math.min(campaigns.length, 20),
       note: '广告系列、视频和年龄性别明细只发送按花费排序的有限候选；结论不得外推到未列出的行。',
@@ -289,7 +294,8 @@ async function loadEvidence(clientId: string, principalId: string, grant: GrantR
       String(a.date_start).localeCompare(String(b.date_start))).slice(0, 100),
     devices: topSpend(devices, 10),
     regions: topSpend(regions, 20),
-    rule_section: rules.section }
+    rule_section: ruleSection,
+    report_voice: live ? 'self_serve' as const : 'managed' as const }
 }
 
 /** 环比里原来那几项是写死只认「留资」的口径，对私信广告是错的——拿掉，结果环比改看 core_results。 */
@@ -313,7 +319,11 @@ function reportSlice(evidence: Record<string, unknown>): Record<string, unknown>
   return Object.fromEntries(Object.entries(evidence).filter(([k]) => REPORT_KEYS.has(k)))
 }
 
-function systemPrompt() {
+const DIRECTION_MANAGED = '八、三条可以考虑的方向：每条一句话写清“方向 + 数据依据”，写成可以和广告团队商量的建议，不要写成让老板自己去后台操作的步骤，也不要针对某一条广告；只有证据足够时才给具体建议。'
+/** 自助客户没有广告团队：建议写成老板自己能试的一小步（设计 §8.4，魏征 S5）。 */
+const DIRECTION_SELF_SERVE = '八、三条可以考虑的方向：每条一句话写清“方向 + 数据依据”，写成老板自己可以试的一小步（例如“把预算往平均每位咨询花得少的系列挪一点，再看三四天”），不要写成一长串后台操作步骤，也不要针对某一条广告；只有证据足够时才给具体建议；改不改由老板决定。'
+
+export function systemPrompt(voice: 'managed' | 'self_serve' = 'managed') {
   return [
     '你是 Magic Engine 的广告分析师，基于只读汇总证据，给不懂广告术语的商家老板写中文分析报告。',
     '',
@@ -333,7 +343,7 @@ function systemPrompt() {
     '五、视频表现：如有视频数据，说看完四分之一、一半、四分之三和整条视频的人各占多少；数据不足就写“数据不足”。',
     '六、受众：年龄性别分布与花费分布是否匹配。',
     '七、每日趋势：如有 daily_campaigns 数据，说花费和点击率是平稳还是前高后低。',
-    '八、三条可以考虑的方向：每条一句话写清“方向 + 数据依据”，写成可以和广告团队商量的建议，不要写成让老板自己去后台操作的步骤，也不要针对某一条广告；只有证据足够时才给具体建议。',
+    voice === 'self_serve' ? DIRECTION_SELF_SERVE : DIRECTION_MANAGED,
   ].join('\n')
 }
 
@@ -440,7 +450,7 @@ async function runAnalysis(clientId: string, principalId: string, grant: GrantRo
     modelAttempted = true
     let result
     try {
-      result = await callClaudeChat({ systemPrompt: systemPrompt(), messages: [{ role: 'user', content: `以下是只读汇总证据：\n${payload}` }],
+      result = await callClaudeChat({ systemPrompt: systemPrompt(evidence.report_voice), messages: [{ role: 'user', content: `以下是只读汇总证据：\n${payload}` }],
         model: MODEL_HAIKU, maxOutputTokens: 4000, singleAttempt: true })
       knownCost = result.cost_usd
     } catch (error) {

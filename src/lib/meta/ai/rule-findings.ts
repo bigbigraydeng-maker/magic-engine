@@ -150,3 +150,27 @@ export async function loadRuleFindings(
     return none('not_loaded')
   }
 }
+
+/**
+ * 现场算（live-rules.ts）只给「不在巡检名单」的客户：没登记广告账户，或者登记了但巡检一次都还没跑过
+ * （自助转代管后，以第一条巡检记录为切换点）。巡检跑过但现在过期 / 拒判的代管客户照旧显示原因，不现场覆盖。
+ * 读库失败 → false（不现场算，第三部分照旧写「没有接入」）。
+ */
+export async function liveRulesEligible(clientId: string): Promise<boolean> {
+  try {
+    const { data: client, error } = await supabaseAdmin
+      .from('clients')
+      .select('meta_ad_account_id')
+      .eq('id', clientId)
+      .maybeSingle()
+    if (error || !client) return false
+    if (client.meta_ad_account_id === null) return true
+    const { count, error: countError } = await supabaseAdmin
+      .from('ads_growth_states')
+      .select('client_id', { count: 'exact', head: true })
+      .eq('client_id', clientId)
+    return !countError && count === 0
+  } catch {
+    return false
+  }
+}
