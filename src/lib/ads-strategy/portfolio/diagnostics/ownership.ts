@@ -15,11 +15,28 @@
  *    把花费占 ≥60% 的主页当客户主页，没有主页过这条线就不跑。
  */
 
-import { pageIdMatches } from '@/lib/meta/page-binding'
 import type { EntitySnapshotRow } from '../snapshot'
 import type { AccountInput, DailyRow, Diagnosis, ExcludedEntity, HourlyRow } from './types'
 import { isDelivering, windowDays } from './context'
 import { OWNERSHIP_MAX_AD_CAPTURE_AGE_HOURS } from './thresholds'
+
+/**
+ * 严格版主页 id 相等：两边各自规范化（NFKC、去零宽字符/空白、按非数字切段、去每段前导零）后，
+ * 都必须只有一段数字，且这一段完全相等。
+ *
+ * 🔴 不能直接用 `page-binding.ts` 的 `pageIdMatches`——那是"stored 里任意一段等于 target 就算命中"，
+ *    专给"重复绑定检查"设计（`stored` 可能是历史脏数据，宁可多认出一个重复也不能漏）。用在这里会开一个
+ *    新口子：`clients.facebook_page_id` 万一被错误拼接进两段数字（如「111222-333444」），其中一段
+ *    只要凑巧等于某条别家广告的主页 id，那条广告就会被判成 own（狄仁杰 2026-09-28：生产今天没有这种
+ *    脏数据，但这是本 PR 新引入的、划分客户边界的核心比较，不能继承一个更松的匹配口径）。
+ */
+function strictPageIdEquals(a: string, b: string): boolean {
+  const canon = (v: string) =>
+    v.normalize('NFKC').replace(/[\s\p{Cf}]/gu, '').split(/\D+/).filter(run => run.length > 0).map(run => run.replace(/^0+/, ''))
+  const ca = canon(a)
+  const cb = canon(b)
+  return ca.length === 1 && cb.length === 1 && ca[0] !== '' && ca[0] === cb[0]
+}
 
 export type AdsetOwnership = 'own' | 'other_page' | 'mixed_pages' | 'page_unknown'
 type NotOwn = Exclude<AdsetOwnership, 'own'>
@@ -36,10 +53,11 @@ export function ownershipOfAds(ads: ReadonlyArray<{ creative_page_id: string | n
   let other = false
   let unknown = false
   for (const ad of ads) {
-    // 主页 id 比较要走跟绑定检查同一把尺子（page-binding.ts pageIdMatches）：`clients.facebook_page_id`
-    // 可能是老 SQL 手填的脏数据（全角数字、零宽字符、前导零），严格 === 会把客户自己的广告全判成别家（Codex 2026-09-27）。
+    // `clients.facebook_page_id` 可能是老 SQL 手填的脏数据（全角数字、零宽字符、前导零），严格 ===
+    // 会把客户自己的广告全判成别家（Codex 2026-09-27）；但不能直接借用绑定检查那套更松的匹配（见
+    // strictPageIdEquals 顶部说明），这里要两边都规范成单段数字再比相等。
     if (!ad.creative_page_id) unknown = true
-    else if (pageIdMatches(clientPageId, ad.creative_page_id)) own = true
+    else if (strictPageIdEquals(clientPageId, ad.creative_page_id)) own = true
     else other = true
   }
   if (own && other) return 'mixed_pages'
@@ -100,7 +118,7 @@ function spentInDays(daily: readonly DailyRow[], level: 'campaign' | 'adset', id
 }
 
 function otherPages(ads: ReadonlyArray<{ creative_page_id: string | null }>, clientPageId: string): string {
-  const pages = Array.from(new Set(ads.map(a => a.creative_page_id).filter((p): p is string => !!p && !pageIdMatches(clientPageId, p))))
+  const pages = Array.from(new Set(ads.map(a => a.creative_page_id).filter((p): p is string => !!p && !strictPageIdEquals(clientPageId, p))))
   return pages.length === 0 ? '—' : pages.slice(0, 3).join('、')
 }
 

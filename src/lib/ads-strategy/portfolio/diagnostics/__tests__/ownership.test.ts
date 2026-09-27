@@ -223,6 +223,14 @@ describe('scopeAccountToClient', () => {
     expect(scoped.excluded).toEqual([])
   })
 
+  it('🔴 脏数据规范化不能变成「包含即算」——两段拼在一起的 clientPageId 不能只凭其中一段数字凑巧等于别家主页 id 就放行（狄仁杰 2026-09-28）', () => {
+    const spliced = `${OTHER}-${OWN}` // 模拟一次拼接出错的脏数据：两段数字粘在一起
+    const snaps = [campaign('c1'), adset('as1', 'c1'), ad('ad1', 'as1', 'c1', OWN)] // 广告挂的是「真正」的 OWN
+    const scoped = scopeAccountToClient(account(snaps, [adsetRow('as1', 'c1', DATE, 10)]), spliced, DATE, EVAL)
+    // 拼接串不是「单段数字」，不能宽松到「包含 OWN 这一段就算相等」——判不出，广告组不判为 own
+    expect(scoped.account.snapshots.some(r => r.entity_id === 'as1')).toBe(false)
+  })
+
   it('广告层快照最近一轮没抓全或超过 24 小时 → 只做账户级（归属核实不到，Codex 2026-09-27）', () => {
     const stale = [{ level: 'ad' as const, complete: true, skipped_shared: false, error: null, captured_at: '2026-09-22T00:00:00Z' }] // 早于 evaluatedAt 3 天
     const incomplete = [{ level: 'ad' as const, complete: false, skipped_shared: false, error: 'timeout', captured_at: '2026-09-25T02:00:00Z' }] // 新鲜但没抓全
