@@ -46,6 +46,8 @@ export const PROVIDER_WRITE_ALLOWED_DIRS = ['src/lib/capabilities/'] as const
  *
  * 🔴 往这个数组里加路径 = 又开了一个绕过执行内核的口子。加之前先问：
  *    这段代码能不能改成提交一个 action_run？
+ *
+ * 条目本身由 `__tests__/architecture.test.ts` 里的冻结清单钉住：只改这里、不改那边 = 测试红。
  */
 export const PROVIDER_WRITE_GRANDFATHERED = [
   'src/app/api/clients/[id]/cms/github/update-page/route.ts',
@@ -74,6 +76,17 @@ export const PROVIDER_WRITE_GRANDFATHERED = [
   'src/lib/flywheel/social-post-publish.ts',
   'src/lib/luban/tools.ts',
   'src/lib/seo-meta/cts-meta-pr.ts',
+  // ⏳ 临时豁免，不是历史存量（2026-09-27 子牙拍板）。SEO 标题周循环 v1（9ea7af58，2026-09-20）
+  //    进主干时没有任何 CI 跑这个测试，于是这三个文件绕过执行内核直接用 github-client，
+  //    能在客户网站仓库里建分支、开 PR、合并，不经 Kernel 授权、不留 Kernel 回执
+  //    （周循环自己的步骤回执 cycle/receipts.ts 不能替代 Kernel 的授权与回执）。
+  //    🔴 type-only 不等于无害：apply-adapter 只 `import type`，却用注入进来的 client 真的在写客户仓库。
+  //    退出条件：SEO 第 3 条 3b 的 B7 把 seo-meta 的对外写挪到 Kernel 后面（src/lib/capabilities/ +
+  //    Kernel 授权 + 回执）。挪完这三条连同 .eslintrc.json、测试冻结清单里的同名三行一起删。
+  //    台账：docs/ledger/2026-09-27-kernel-arch-test-ci-seo-meta-exempt.md（到期 2026-10-11）
+  'src/lib/inngest/functions/seo-meta-cycle.ts', // 3b·B7：自己 new GithubClient（客户仓库 token），交给 apply adapter
+  'src/lib/seo-meta/cycle/apply-adapter.ts', // 3b·B7：用注入的 client 建分支、提交、开 PR、合并 PR
+  'src/lib/seo-meta/cycle/pr-guard.ts', // 3b·B7：type-only，只读查已有 PR；随 adapter 挪进 capabilities 或改用本地结构类型
 ] as const
 
 /**
@@ -243,8 +256,8 @@ export const KERNEL_RUNNER_SYMBOLS = [
 /**
  * `supabase/migrations` 里**已经存在**的重复版本号 —— 同样只准变短。
  *
- * 🔴 这不是新问题，是查出来的旧账：`origin/main` 上已经有 **23 组**不同文件
- *    共用同一个 14 位版本号（多的一组有 3 个文件）。成因就是并行开发 ——
+ * 🔴 这不是新问题，是查出来的旧账：`origin/main` 上当时已经有 **23 组**不同文件
+ *    共用同一个 14 位版本号（其中 5 组各有 3 个文件，共 51 个文件）。成因就是并行开发 ——
  *    两个窗口各自起了一个 migration，各自分支上都看不出撞车，合并后才重复。
  *    这次 Kernel 自己也差点撞上（原本用 20260808000001，而 PR #862 已经占了
  *    000001 / 000002），所以把这条查重做成 CI 门槛。
@@ -253,6 +266,8 @@ export const KERNEL_RUNNER_SYMBOLS = [
  * 那是一次需要单独评估的运维动作）。这里只保证**不再新增**。
  *
  * ⚠️ 往这个清单里加版本号 = 又放进一次撞车。加之前先把自己的文件改个号。
+ *
+ * 版本号集合与每个版本号下的文件数由 `__tests__/architecture.test.ts` 钉住。
  */
 export const MIGRATION_VERSION_COLLISIONS_GRANDFATHERED = [
   '20260501000008',
@@ -278,4 +293,11 @@ export const MIGRATION_VERSION_COLLISIONS_GRANDFATHERED = [
   '20260801120000',
   '20260801150000',
   '20260803140000',
+  // ⏳ 2026-09-27 补登（子牙拍板，例外）：这三组在 2026-09-20 ~ 09-24 进主干时没有任何 CI 跑这个测试，
+  //    进来时就已经撞了。没有给后进的那个改号：architecture.test.ts 按文件名引用了其中的
+  //    kernel_recovery_outside_autonomy_envelope.sql；改号会改变 db-security-invariants 从零重放的顺序；
+  //    对生产 migration 账本有没有影响未核实。改号另议，不在这里做。现在 26 组、57 个文件。
+  '20260920100000', // messenger_agent_email_kill_switch / seo_meta_cycle_v1
+  '20260924000000', // fix_seo_patrol_findings_grants / playbook_staleness_findings
+  '20260925000003', // client_lead_sheet_routes / kernel_recovery_outside_autonomy_envelope
 ] as const

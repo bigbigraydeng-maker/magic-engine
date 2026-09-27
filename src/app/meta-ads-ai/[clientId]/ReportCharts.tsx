@@ -1,8 +1,9 @@
 'use client'
 import {
-  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend,
-  Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Area, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend,
+  Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
+import { deviceLabel, placementLabel, regionLabel } from './chart-labels'
 
 type MetricComparison = { current: number | null; previous: number | null; percent_change: number | null }
 type Evidence = {
@@ -59,7 +60,7 @@ function ChartCard({ title, children, className = '' }: { title: string; childre
 
 function CampaignSpendChart({ campaigns }: { campaigns: { name: string; spend: number }[] }) {
   const height = Math.max(160, campaigns.length * 40)
-  return <ChartCard title="广告系列花费排行（所列候选，按花费排序）">
+  return <ChartCard title="各广告系列花了多少钱">
     <div style={{ width: '100%', height }}>
       <ResponsiveContainer>
         <BarChart data={campaigns} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}>
@@ -78,7 +79,7 @@ function CampaignSpendChart({ campaigns }: { campaigns: { name: string; spend: n
 const COMPARISON_METRICS: { key: string; label: string; format: (value: number) => string }[] = [
   { key: 'spend', label: '花费', format: value => value.toFixed(2) },
   { key: 'clicks', label: '点击', format: value => value.toFixed(0) },
-  { key: 'ctr', label: 'CTR', format: value => `${(value * 100).toFixed(2)}%` },
+  { key: 'ctr', label: '点击率', format: value => `${(value * 100).toFixed(2)}%` },
   { key: 'reach', label: '覆盖人数', format: value => value.toFixed(0) },
 ]
 
@@ -141,7 +142,7 @@ function DailyTrendChart({ data }: { data: DailyRow[] }) {
   return <ChartCard title="每日花费与点击率趋势">
     <div style={{ width: '100%', height: 240 }}>
       <ResponsiveContainer>
-        <AreaChart data={data} margin={{ left: 0, right: 16, top: 8, bottom: 4 }}>
+        <ComposedChart data={data} margin={{ left: 0, right: 16, top: 8, bottom: 4 }}>
           <defs>
             <linearGradient id="spendGradient" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={CURRENT_COLOR} stopOpacity={0.3} />
@@ -151,6 +152,7 @@ function DailyTrendChart({ data }: { data: DailyRow[] }) {
           <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
           <XAxis dataKey="date_start" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={{ stroke: '#e2e8f0' }} tickLine={false} />
           <YAxis yAxisId="spend" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+          <YAxis yAxisId="ctr" orientation="right" tickFormatter={v => `${v}%`} tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
           <Tooltip
             contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
             formatter={(value: number, name: string) => [name === '花费' ? value.toFixed(2) : `${value.toFixed(2)}%`, name]}
@@ -158,9 +160,9 @@ function DailyTrendChart({ data }: { data: DailyRow[] }) {
           <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
           <Area yAxisId="spend" type="monotone" dataKey="spend" name="花费" stroke={CURRENT_COLOR}
             fill="url(#spendGradient)" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-          <Line yAxisId="spend" type="monotone" dataKey="ctr" name="CTR %" stroke="#d97706"
+          <Line yAxisId="ctr" type="monotone" dataKey="ctr" name="点击率 %" stroke="#d97706"
             strokeWidth={2} dot={{ r: 3, fill: '#d97706' }} activeDot={{ r: 5 }} />
-        </AreaChart>
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   </ChartCard>
@@ -170,15 +172,26 @@ function DailyTrendChart({ data }: { data: DailyRow[] }) {
 
 type PlacementRow = { name: string; spend: number; ctr: number }
 
+
 function readPlacements(evidence: Evidence): PlacementRow[] {
   if (!Array.isArray(evidence.placements)) return []
-  return evidence.placements
-    .map(raw => asRecord(raw))
-    .filter((row): row is Record<string, unknown> => row !== null && num(row.spend) > 0)
-    .map(row => ({
-      name: `${str(row.publisher_platform, '?')} · ${str(row.platform_position, '?')}`,
-      spend: num(row.spend),
-      ctr: num(row.impressions) > 0 ? Math.round(num(row.clicks) / num(row.impressions) * 10000) / 100 : 0,
+  // 不同版位可能换成同一个中文名（例如 Messenger 收件箱与快拍），按名字合并，图上不出现同名柱子
+  const byName = new Map<string, { spend: number; impressions: number; clicks: number }>()
+  for (const raw of evidence.placements) {
+    const row = asRecord(raw)
+    if (!row || num(row.spend) <= 0) continue
+    const name = placementLabel(str(row.publisher_platform, '?'), str(row.platform_position, '?'))
+    const cur = byName.get(name) ?? { spend: 0, impressions: 0, clicks: 0 }
+    cur.spend += num(row.spend)
+    cur.impressions += num(row.impressions)
+    cur.clicks += num(row.clicks)
+    byName.set(name, cur)
+  }
+  return [...byName.entries()]
+    .map(([name, v]) => ({
+      name,
+      spend: v.spend,
+      ctr: v.impressions > 0 ? Math.round(v.clicks / v.impressions * 10000) / 100 : 0,
     }))
     .sort((a, b) => b.spend - a.spend)
     .slice(0, 8)
@@ -186,7 +199,7 @@ function readPlacements(evidence: Evidence): PlacementRow[] {
 
 function PlacementChart({ data }: { data: PlacementRow[] }) {
   const height = Math.max(160, data.length * 36)
-  return <ChartCard title="版位花费分布">
+  return <ChartCard title="广告出现在哪里">
     <div style={{ width: '100%', height }}>
       <ResponsiveContainer>
         <BarChart data={data} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}>
@@ -196,7 +209,7 @@ function PlacementChart({ data }: { data: PlacementRow[] }) {
             tickFormatter={value => truncate(String(value), 18)} axisLine={false} tickLine={false} />
           <Tooltip
             contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
-            formatter={(value: number, name: string) => [name === 'CTR' ? `${value.toFixed(2)}%` : value.toFixed(2), name]}
+            formatter={(value: number, name: string) => [name === '点击率' ? `${value.toFixed(2)}%` : value.toFixed(2), name]}
           />
           <Bar dataKey="spend" name="花费" fill="#7c3aed" radius={[0, 4, 4, 0]} barSize={14} />
         </BarChart>
@@ -256,12 +269,13 @@ function AgeGenderChart({ data }: { data: AgeGenderRow[] }) {
 
 type DeviceRow = { name: string; spend: number }
 
+
 function readDevices(evidence: Evidence): DeviceRow[] {
   if (!Array.isArray(evidence.devices)) return []
   return evidence.devices
     .map(raw => asRecord(raw))
     .filter((row): row is Record<string, unknown> => row !== null && num(row.spend) > 0)
-    .map(row => ({ name: str(row.device_platform, '其他'), spend: Math.round(num(row.spend) * 100) / 100 }))
+    .map(row => ({ name: deviceLabel(str(row.device_platform, '其他')), spend: Math.round(num(row.spend) * 100) / 100 }))
     .sort((a, b) => b.spend - a.spend)
 }
 
@@ -290,12 +304,13 @@ function DeviceChart({ data }: { data: DeviceRow[] }) {
 
 type RegionRow = { name: string; spend: number }
 
+
 function readRegions(evidence: Evidence): RegionRow[] {
   if (!Array.isArray(evidence.regions)) return []
   return evidence.regions
     .map(raw => asRecord(raw))
     .filter((row): row is Record<string, unknown> => row !== null && num(row.spend) > 0)
-    .map(row => ({ name: str(row.country, '其他'), spend: Math.round(num(row.spend) * 100) / 100 }))
+    .map(row => ({ name: regionLabel(str(row.country, '其他')), spend: Math.round(num(row.spend) * 100) / 100 }))
     .sort((a, b) => b.spend - a.spend)
     .slice(0, 10)
 }

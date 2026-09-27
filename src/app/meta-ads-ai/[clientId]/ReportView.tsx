@@ -1,5 +1,6 @@
 import { META_ADS_AI_MESSAGES } from '@/lib/meta/ai/error-messages'
 import ReportCharts from './ReportCharts'
+import RuleCards, { ruleCardsOf } from './RuleCards'
 
 type ReportStatus = 'running' | 'completed' | 'no_data' | 'failed'
 
@@ -82,10 +83,12 @@ function ReportBody({ report }: { report: string }) {
 }
 
 function ReportState({ analysis }: { analysis: ReportAnalysis }) {
+  const cards = ruleCardsOf(analysis.evidence)
   if (analysis.status === 'completed') {
     return analysis.report_markdown === null
       ? <p role="status" className="rounded-xl bg-slate-50 p-4 text-slate-700">报告内容暂不可用，请稍后刷新页面。</p>
       : <div className="space-y-4">
+          {cards && <RuleCards data={cards} />}
           <ReportCharts evidence={analysis.evidence} />
           <ReportBody report={analysis.report_markdown} />
         </div>
@@ -95,6 +98,7 @@ function ReportState({ analysis }: { analysis: ReportAnalysis }) {
   const message=(analysis.error_code && META_ADS_AI_MESSAGES[analysis.error_code])
     ?? '本次分析没有完成。请稍后重试；如持续失败，请联系 Magic Engine 支持。'
   return <div className="space-y-4">
+    {cards && <RuleCards data={cards} />}
     {analysis.evidence != null ? <ReportCharts evidence={analysis.evidence} /> : null}
     <p role="alert" className="rounded-xl bg-red-50 p-4 text-red-800">{message}</p>
   </div>

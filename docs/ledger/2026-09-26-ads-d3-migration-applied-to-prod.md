@@ -9,6 +9,8 @@ done_on: 2026-09-26
 done_ref: doc:docs/ledger/2026-09-25-ads-d3-auto-pause-review-fixes.md
 verify_by: 2026-09-27
 verify_how: 9/27 05:00 NZ 后查 cron_run_logs job_name=google-data-pullback-daily 最近一次：不再有「column ad_strategy_configs.autopilot_enabled does not exist」、巡察不再被跳过；再查 ad_health_narratives insight_date 2026-09-26 两客户 email_status 应为 sent（非 pending），CTS 那条应带广告级新规则命中（v4 表单）。任一未满足 = 没修好
+last_checked: 2026-09-27
+check_note: 判不了：判据要 9-27 05:00 NZ 之后的广告巡察，夜巡跑时（NZ 03:50）还没到那一轮
 ---
 PM 2026-09-26 在卫青窗口亲自「上」。
 
