@@ -30,6 +30,7 @@ import { readPageMetrics } from '@/lib/seo/post-publish-monitor-store'
 import { persistZhugeActions } from '@/lib/zhuge/action-persister'
 import type { PriorityAction, ZhugeOutput } from '@/lib/zhuge/types'
 import { checkFactPreservation } from './fact-check'
+import { checkHardFactsPreserved } from './hard-fact-check'
 import { GATE_REASON, resolveGscSiteUrl, runGateForCandidate } from './gate'
 import { fromGscPages, mergeCandidates, type RawGscPage } from './candidates'
 import { classifyMetaChangeOutcome } from './outcome-classifier'
@@ -269,6 +270,19 @@ export async function runStep3Gate(
   for (const candidate of candidates) {
     if (passed.length >= config.maxPagesPerRun) break // enough good candidates found — stop spending on SERP/GSC calls for the rest of the wide pool
 
+    // PM 2026-09-23 (incident follow-up): checked FIRST, before even
+    // canEditSlug — a protected conversion page (e.g. CTS's /china-tours)
+    // must never be auto-edited, no matter what the rest of the gate or the
+    // fact-check would otherwise allow. Zero cost: no network call.
+    if (candidate.slug && config.protectedSlugs.includes(candidate.slug.toLowerCase())) {
+      failures.push({
+        candidate,
+        reason: GATE_REASON.PROTECTED_PAGE,
+        detail: `slug "${candidate.slug}" is on this client's protected conversion-page list (clients.seo_config.meta_cycle_protected_slugs) — meta-cycle never touches it automatically, regardless of gate/fact-check outcome`,
+      })
+      continue
+    }
+
     // PM 2026-09-20 (data-completeness follow-up): check this FIRST, before
     // any GSC/DataForSEO/SERP spend — a page with no matching editable data
     // file (e.g. forbidden-city-travel-guide) used to only be discovered in
@@ -374,7 +388,19 @@ async function applyOnePrescription(
     }
   }
 
-  const factCheck = await checkFactPreservation(preview.oldTitle, preview.oldDesc, newTitle, newDesc)
+  // PM 2026-09-23 incident follow-up: the hard, non-AI rule runs FIRST and
+  // is a hard block on its own — if it fails, the AI judge (Jev) is never
+  // even called, both to save the call and because a dropped price/date/
+  // place-name is unambiguous, unlike "does this contradict" which needs
+  // judgment. Only a candidate that clears the hard rule reaches the AI
+  // judge, which still runs so it stays what it was — the primary defence
+  // against semantic reversals (visa-free -> visa-required) the regex can't
+  // see. Both are fail-closed; the caller doesn't need to know which one
+  // blocked.
+  const hardCheck = checkHardFactsPreserved(preview.oldTitle, preview.oldDesc, newTitle, newDesc)
+  const factCheck = hardCheck.consistent
+    ? await checkFactPreservation(preview.oldTitle, preview.oldDesc, newTitle, newDesc)
+    : { consistent: false, reason: hardCheck.reason }
   const base: MetaCycleProposal = {
     slug: candidate.slug, pageUrl: candidate.pageUrl, keyword: evidence.keyword,
     searchVolume: evidence.searchVolume, keywordDifficulty: evidence.keywordDifficulty, snapshotDate: evidence.snapshotDate,
@@ -387,7 +413,7 @@ async function applyOnePrescription(
   if (!factCheck.consistent) {
     return {
       proposal: { ...base, skipReason: 'fact_contradiction_detected' },
-      manualAction: buildManualAction(`meta_cycle:${weekKey}:${candidate.slug}`, evidenceMeta, `AI 判官认为 /${candidate.slug} 的新文案跟原文事实矛盾：${factCheck.reason}`, '需要人工重写', undefined),
+      manualAction: buildManualAction(`meta_cycle:${weekKey}:${candidate.slug}`, evidenceMeta, `/${candidate.slug} 的新文案跟原文事实有出入，没有通过：${factCheck.reason}`, '需要人工重写', undefined),
     }
   }
 

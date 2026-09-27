@@ -113,6 +113,8 @@ export const GATE_REASON = {
   SERP_SELF_CANNIBALIZATION: 'serp_shows_different_own_page_ranking',
   DIFFICULTY_TOO_HIGH: 'difficulty_above_floor',
   SLUG_NOT_EDITABLE: 'slug_not_in_any_data_file',
+  /** PM 2026-09-23 incident follow-up: this client has flagged the slug as a protected conversion page (clients.seo_config.meta_cycle_protected_slugs) — checked before any other gate step, before any spend. */
+  PROTECTED_PAGE: 'protected_conversion_page',
 } as const
 
 /** Difficulty floor — only enforced when a difficulty number is actually known (see checkKeywordSnapshot's live-fallback path, which can legitimately return keywordDifficulty: null). */
