@@ -38,7 +38,12 @@ const draw = (over: Partial<DrawerRow> = {}) =>
     />,
   )
 
-beforeEach(() => vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) })))
+// timeline: [] —— PersonDrawer 内嵌的 ContactTimeline 会拿同一个 fetch 桩去请求往来记录，
+// 不给这个字段它会在 data.timeline.length 上抛出（魏征 2026-09-28 复审 B2 时点出：
+// 不影响断言通过，但会在每条用例后面留一串无关的 Uncaught Exception 噪音）。
+beforeEach(() =>
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) })),
+)
 afterEach(() => vi.unstubAllGlobals())
 
 /** 号码是不是被做成了可以点的拨号链接。 */
@@ -172,5 +177,118 @@ describe('R1 · 抽屉补齐「全部客人」那边独有的两样', () => {
     fireEvent.click(btn('现在')!)
     fireEvent.click(btn('已成交')!)
     expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
+  })
+})
+
+/**
+ * B2（2026-09-28）：「全部客人」页换用 PersonDrawer 之后加的「上一位/下一位」。
+ * `nav` 不传就不渲染 —— 「今天要联系」页暂不需要这个（魏征复审：不能含糊带过，
+ * 这里锁住两种状态各自的行为）。
+ */
+describe('B2 · 上一位/下一位（nav 可选）', () => {
+  it('不传 nav → 不渲染上一位/下一位这一行', () => {
+    draw()
+    expect(btn('上一位')).toBeUndefined()
+    expect(btn('下一位')).toBeUndefined()
+  })
+
+  it('传了 nav → 渲染 positionLabel，点按钮调用对应的回调', () => {
+    const onPrev = vi.fn()
+    const onNext = vi.fn()
+    render(
+      <PersonDrawer
+        clientId="cts"
+        row={row()}
+        stages={[]}
+        viewerEmail="fde@example.com"
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+        nav={{ positionLabel: '客人在等你 · 第 3 位 / 共 20 位', onPrev, onNext, busy: false }}
+      />,
+    )
+    expect(screen.getByText('客人在等你 · 第 3 位 / 共 20 位')).toBeTruthy()
+    fireEvent.click(btn('上一位')!)
+    expect(onPrev).toHaveBeenCalledOnce()
+    fireEvent.click(btn('下一位')!)
+    expect(onNext).toHaveBeenCalledOnce()
+  })
+
+  it('busy:true → 两个按钮都禁用，显示"正在拿下一位"而不是位置文案', () => {
+    render(
+      <PersonDrawer
+        clientId="cts"
+        row={row()}
+        stages={[]}
+        viewerEmail="fde@example.com"
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+        nav={{ positionLabel: '客人在等你 · 第 3 位 / 共 20 位', onPrev: vi.fn(), onNext: vi.fn(), busy: true }}
+      />,
+    )
+    expect(screen.getByText('正在拿下一位…')).toBeTruthy()
+    expect(btn('上一位')?.disabled).toBe(true)
+    expect(btn('下一位')?.disabled).toBe(true)
+  })
+})
+
+/**
+ * B2（2026-09-28）：改阶段时带上 `expectedFromStage`，并发覆盖返回 409 时要说人话、
+ * 让父级重拉（不能留着已经过时的数据装作没事）。
+ */
+describe('B2 · 改阶段的并发保护', () => {
+  it('PATCH body 带上 expectedFromStage: row.stage', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    render(
+      <PersonDrawer
+        clientId="cts"
+        row={row({ stage: 'new', stageLabel: '新线索' })}
+        stages={[{ stageKey: 'contacted', label: '已联系' }]}
+        viewerEmail="fde@example.com"
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    )
+    fireEvent.click(btn('新线索')!)
+    fireEvent.click(btn('已联系')!)
+    await Promise.resolve()
+    await Promise.resolve()
+    const call = fetchMock.mock.calls.find((c) => String(c[0]).includes('/stage'))
+    expect(call).toBeTruthy()
+    const body = JSON.parse((call![1] as RequestInit).body as string)
+    expect(body).toEqual({ toStage: 'contacted', expectedFromStage: 'new' })
+  })
+
+  it('🔴 409 → onSaved 收到带阶段名字的话，reload=true，不当成一般失败', async () => {
+    const onSaved = vi.fn()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: async () => ({ actualStage: 'won' }),
+      }),
+    )
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    render(
+      <PersonDrawer
+        clientId="cts"
+        row={row({ stage: 'new', stageLabel: '新线索' })}
+        stages={[
+          { stageKey: 'contacted', label: '已联系' },
+          { stageKey: 'won', label: '已成交' },
+        ]}
+        viewerEmail="fde@example.com"
+        onClose={vi.fn()}
+        onSaved={onSaved}
+      />,
+    )
+    fireEvent.click(btn('新线索')!)
+    fireEvent.click(btn('已联系')!)
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(onSaved).toHaveBeenCalledWith(expect.stringContaining('已成交'), true)
   })
 })

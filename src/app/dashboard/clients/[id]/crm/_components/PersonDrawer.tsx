@@ -61,10 +61,21 @@ export interface DrawerRow {
 
 /**
  * New Asian Logistics —— 只有这一个客户把人标「已成交」时要先录金额并回传 Meta 广告。
- * 同一个字面量在 `all/_components/ContactDetail.tsx` / `nal-mark-won/route.ts` 各有一份，
- * 是既有惯例；按设计稿 R3 要统一改成读 `leads_config.crm.onWon` 配置、不认客户 id。
+ * 同一个字面量在 `nal-mark-won/route.ts` 另有一份，是既有惯例（`ContactDetail.tsx` 那份已在
+ * 2026-09-28 CRM 重整 B2 随「全部客人」换用本组件一起删掉，不再有第三份）；按设计稿 R3
+ * 要统一改成读 `leads_config.crm.onWon` 配置、不认客户 id。
  */
 const NAL_CLIENT_ID = '4ae76381-cd45-43bd-85cd-98cfd7604007'
+
+export interface DrawerNav {
+  /** 「客人在等你 · 第 12 位 / 共 217 位」这类文案，drawer-nav.ts 的 positionLabel 原样传入。 */
+  positionLabel: string
+  /** 上一位 / 下一位——调用方负责算下一步该做什么（留在原地换人 / 去问服务端要下一页 / 报到头了）。 */
+  onPrev: () => void
+  onNext: () => void
+  /** 正在拉下一页——按钮先禁掉，不许连点叠多次请求（跟 all/page.tsx 现有 sectionsLoading 同款防抖）。 */
+  busy: boolean
+}
 
 export function PersonDrawer({
   clientId,
@@ -73,6 +84,7 @@ export function PersonDrawer({
   viewerEmail,
   onClose,
   onSaved,
+  nav,
 }: {
   clientId: string
   row: DrawerRow
@@ -81,6 +93,12 @@ export function PersonDrawer({
   viewerEmail: string | null
   onClose: () => void
   onSaved: (msg: string, reload?: boolean) => void
+  /**
+   * 上一位 / 下一位——不传就不渲染这一行（今天要联系那页的看板式交互暂不需要）。
+   * 2026-09-28 CRM 重整 B2 给「全部客人」加：调用方（crm/all/page.tsx）负责用
+   * `lib/crm/drawer-nav.ts` 算出下一步该做什么，这里只管画按钮、转发点击。
+   */
+  nav?: DrawerNav
 }) {
   const [composing, setComposing] = useState(false)
   const [changingStage, setChangingStage] = useState(false)
@@ -107,8 +125,18 @@ export function PersonDrawer({
       const res = await fetch(`/api/clients/${clientId}/crm/contacts/${row.contactId}/stage`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ toStage }),
+        // 🔴 expectedFromStage: row.stage —— 跟进团队一起翻同一份名单（PM 2026-09-27
+        // 确认），带上「我看到的是哪一档」，库里跟这个不一致就说明中间被别人先改过了，
+        // 不能盲写覆盖（见 lib/crm/advance-contact-stage.ts 头注）。
+        body: JSON.stringify({ toStage, expectedFromStage: row.stage }),
       })
+      if (res.status === 409) {
+        const json = (await res.json().catch(() => null)) as { actualStage?: string | null } | null
+        const actualLabel = stages.find((s) => s.stageKey === json?.actualStage)?.label ?? json?.actualStage ?? '未知'
+        // reload:true —— 得让父级重拉，不然这个抽屉还留着我们这边已经过时的那份数据。
+        onSaved(`这位客人的跟进阶段被别人改过了（现在是「${actualLabel}」），刷新后再改`, true)
+        return
+      }
       if (!res.ok) throw new Error()
       setTimelineKey((k) => k + 1)
       onSaved('✓ 改好了')
@@ -176,6 +204,30 @@ export function PersonDrawer({
             关闭
           </button>
         </header>
+
+        {nav && (
+          <div className="flex items-center gap-2 border-b border-me-charcoal/10 bg-white px-4 py-2">
+            <button
+              type="button"
+              onClick={nav.onPrev}
+              disabled={nav.busy}
+              className="rounded-lg border border-me-charcoal/15 px-2.5 py-1 text-xs font-bold text-me-charcoal hover:bg-me-ivory disabled:opacity-40"
+            >
+              ← 上一位
+            </button>
+            <span className="flex-1 truncate text-center text-[11px] font-semibold text-me-charcoal/45">
+              {nav.busy ? '正在拿下一位…' : nav.positionLabel}
+            </span>
+            <button
+              type="button"
+              onClick={nav.onNext}
+              disabled={nav.busy}
+              className="rounded-lg border border-me-charcoal/15 px-2.5 py-1 text-xs font-bold text-me-charcoal hover:bg-me-ivory disabled:opacity-40"
+            >
+              下一位 →
+            </button>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto px-4 py-3">
           {/*

@@ -30,6 +30,10 @@ export interface ContactRow {
   segment: string
   segmentLabel: string
   temperature: 'hot' | 'warm' | 'cold' | 'off'
+  /** 他实际能被联系到的渠道 —— PersonDrawer 靠它决定给哪几个按钮（不要兜底成 'phone'）。 */
+  suggestedChannel?: 'phone' | 'sms' | 'email' | 'messenger' | 'none'
+  /** 为什么排到这一批 —— 抽屉顶部「上次说到这」那一档用。 */
+  reason?: string
   custom: Record<string, string | null>
 }
 

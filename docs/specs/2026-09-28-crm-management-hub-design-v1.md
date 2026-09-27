@@ -1,6 +1,6 @@
 # 「CRM 管理」底座设计稿 v1（WP-B）
 
-**状态**：草稿，待子牙（架构）+ 魏征（挑刺）复审；面向 FDE/销售的内部工具改版，板桥复审 B1/B7 的 UX 部分。
+**状态**：B1 已实现、已送两轮复审、已提审（PR #2161）。B2 已实现（详情换 PersonDrawer + suggestedChannel 字段修复 + expectedFromStage 并发保护 + drawer-nav 接线），过了子牙+魏征两轮设计复审、正在做实现复审。B3 起未开始。面向 FDE/销售的内部工具改版，板桥复审 B1/B7 的 UX 部分。
 **权威说明**：本文件 + `docs/specs/2026-09-28-crm-rebuild-plan.md` WP-B 节。后者定验收，本文件定怎么做。
 **写入者**：本会话（feat/crm-priority-section-ui），唯一。
 

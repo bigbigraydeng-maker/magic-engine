@@ -86,9 +86,11 @@ describe('?contact=<id> 直达链接', () => {
     setUrl('?contact=c1')
     render(<CrmAllContactsPage />)
 
-    // 展开区独有的小标题：没展开就不该出现。
+    // 抽屉独有的小标题：没打开就不该出现。
     await waitFor(() => expect(screen.getByText('往来记录')).toBeTruthy())
-    expect(screen.getByText(/还没有任何往来记录/)).toBeTruthy()
+    // 2026-09-28 B2：详情换成 PersonDrawer 之后，空状态文案是 ContactTimeline 那份
+    // （"还没有往来记录。"），不再是已删除的 ContactDetail 那份（"还没有任何往来记录"）。
+    await waitFor(() => expect(screen.getByText(/还没有往来记录/)).toBeTruthy())
   })
 
   it('没带参数就谁都不展开 —— 别打扰只想翻表的人', async () => {
@@ -612,5 +614,68 @@ describe('阶段变更那一行 · 谁判的 + 凭什么', () => {
     expect(document.body.textContent).not.toContain('系统读往来记录判的')
     // 整个邮箱太长，只显示前缀
     expect(document.body.textContent).not.toContain('info@ctstours.co.nz')
+  })
+})
+
+/**
+ * B2（2026-09-28）：抽屉的「上一位/下一位」跨页翻页那条路——魏征复审点名这一段
+ * 状态机（buildNavInput/goNav/pendingNav）没有集成测试锁住，纯函数测试 + 组件渲染
+ * 测试只能间接兜底，`loadList` 的 setState 顺序以后改起来容易无声撞坏。
+ * 这里锁住最核心的一条：平铺模式翻到下一页后，自动打开新一页的第一个人。
+ */
+describe('B2 · 抽屉「下一位」跨页翻页（平铺模式）', () => {
+  function stubTwoPages() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        // 🔴 /timeline 的网址本身就含 "/crm/contacts"（.../crm/contacts/<id>/timeline）——
+        // 这个分支必须排在前面，否则往来记录请求会被当成列表请求接住，
+        // ContactTimeline 拿到一份没有 `timeline` 字段的响应，直接抛异常炸掉整棵树。
+        if (url.includes('/timeline')) {
+          return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
+        }
+        if (url.includes('/crm/contacts?') || url.endsWith('/crm/contacts')) {
+          const page = new URL(url, 'https://x.test').searchParams.get('page')
+          if (page === '2') {
+            return {
+              ok: true,
+              json: async () => ({
+                items: [contact('p2c1', 'Page Two Person')],
+                total: 101,
+                page: 2,
+                perPage: 100,
+                columns: [],
+              }),
+            }
+          }
+          return {
+            ok: true,
+            json: async () => ({
+              items: [contact('p1last', 'Page One Last')],
+              total: 101,
+              page: 1,
+              perPage: 100,
+              columns: [],
+            }),
+          }
+        }
+        return { ok: true, json: async () => ({ stages: [] }) }
+      }),
+    )
+  }
+
+  it('本页最后一个人点「下一位」→ 翻页 → 自动打开新一页第一个人', async () => {
+    stubTwoPages()
+    render(<CrmAllContactsPage />)
+
+    fireEvent.click(await screen.findByText('Page One Last'))
+    await screen.findByText('往来记录')
+
+    fireEvent.click(screen.getByText('下一位 →'))
+
+    // 翻页期间是异步的——mock fetch 几乎同步 resolve，"按钮先禁用" 这个中间态在
+    // 这里测不稳（PersonDrawer.test.tsx 的 nav.busy 单测已经单独锁住这一档），
+    // 这条测试锁住的是最终结果：新一页拉回来之后自动打开第一个人。
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Page Two Person' })).toBeTruthy())
   })
 })

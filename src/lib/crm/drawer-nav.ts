@@ -155,3 +155,22 @@ function flatNav(input: FlatNavInput): NavStep {
 export function nextNavStep(input: NavInput): NavStep {
   return input.mode === 'segment' ? segmentNav(input) : flatNav(input)
 }
+
+/**
+ * 现在显示的位置文案——不是「下一步该显示什么」，是「我现在在哪」。
+ *
+ * 抽屉一打开就要看到这句话，不能等用户点了一次上一位/下一位才第一次算出来
+ * （`nextNavStep` 只算移动之后的位置，没有算「原地不动」的这一档）。跟
+ * `nextNavStep` 共用同一套判据：分段模式给全局序号，平铺模式只给本页序号
+ * （文件头注解释过为什么）。
+ *
+ * `currentIndex < 0`（人不在已加载列表里）返回 null——调用方决定这时候怎么显示。
+ */
+export function currentPositionLabel(input: NavInput): string | null {
+  if (input.currentIndex < 0) return null
+  if (input.mode === 'segment') {
+    const pos = globalPosition(input.sectionPage, input.perPage, input.currentIndex)
+    return `${input.sectionTitle} · 第 ${pos} 位 / 共 ${input.sectionTotal} 位`
+  }
+  return `第 ${input.currentIndex + 1} 位 / 本页 ${input.loadedIds.length} 位`
+}

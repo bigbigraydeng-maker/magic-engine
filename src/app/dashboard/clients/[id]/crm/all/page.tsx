@@ -1,41 +1,41 @@
 'use client'
 
 /**
- * 全部客人 —— 一张横表，一行一个客人，点一行就地展开这个人的全渠道往来记录，
- * 能顺手记一笔、改跟进到哪一步。区别于「今天要联系」（只显示今天该打的人）：
- * 这页是「翻看所有人 / 客户打回来了要查这是谁」用的。
+ * 全部客人 —— 一张横表，一行一个客人，点一行从右侧滑出这个人的全渠道往来记录，
+ * 能顺手记一笔、改跟进到哪一步、回私信/邮件/WhatsApp。区别于「今天要联系」
+ * （只显示今天该打的人）：这页是「翻看所有人 / 客户打回来了要查这是谁」用的。
  *
- * 交互照抄 admin/prospecting：<table> + expandedId + 点行 toggleDetail 展开一块
- * 详情行。文案照 crm/page.tsx（今天那页）的大白话口径，记一笔直接复用 ComposeNote。
+ * 2026-09-28（CRM 重整 B2）：详情从「点行就地展开一块 ContactDetail」换成
+ * 「PersonDrawer 抽屉」——原本是「今天要联系」页专用的组件，已经有私信/邮件回复、
+ * 一键动作、置顶备注等 ContactDetail 没有的功能。换用它，不用把这些功能再抄一遍，
+ * 也顺带解决了「两份重复逻辑」的老毛病（原来 ContactDetail 和 PersonDrawer 各判一次
+ * NAL、各接一份 WhatsApp 回复框）。删除的 ContactDetail.tsx 见这次改动的 diff。
  *
  * 板桥定的几条落地：进线时间显示真实首条触点（后端已算）不是导入日期；状态拆成
  * 「跟进到哪步」+「现在冷热」两列；每个空格填人话绝不留白；顶部搜索 + 表头排序 +
  * 总数；渠道/方向标签带 fallback（DB 加新枚举前端不炸）。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { CrmTabs } from '../_components/CrmTabs'
-import { ComposeNote, type StageOption } from '../_components/ComposeNote'
-import { DncBanner } from '../_components/DncBanner'
-import { TimelineItem } from './_components/TimelineItem'
+import { type StageOption } from '../_components/ComposeNote'
+import { PersonDrawer, type DrawerRow } from '../_components/PersonDrawer'
 import { PrioritySectionHeader } from './_components/PrioritySection'
-import { ContactDetail } from './_components/ContactDetail'
+import { currentPositionLabel, nextNavStep, type NavInput, type SectionKey } from '@/lib/crm/drawer-nav'
+import type { Segment } from '@/lib/crm/segments'
 import {
-  CHANNEL_LABEL,
-  DIRECTION_LABEL,
-  OUTCOME_LABEL,
   TEMP_CLS,
   fmtDate,
   relTime,
   ts,
   type ContactRow,
   type CustomColumnMeta,
-  type TimelineEntry,
 } from './_components/contact-table-types'
 
-type SectionKey = 'waiting' | 'acted' | 'queued' | 'off_list'
+// SectionKey 从 drawer-nav.ts 引，不在本文件另声明一份同样的字面量联合类型——
+// 只有一处定义，谁改了 lib/crm/list-sections.ts 的四段名字，这里跟着变，不用记得改两处。
 interface PrioritySectionData {
   key: SectionKey
   title: string
@@ -44,6 +44,30 @@ interface PrioritySectionData {
   open: boolean
   page: number
   items: ContactRow[] | null
+}
+
+/** 抽屉打开时正在等下一页数据 —— 拿到之后打开这一页的首个/末个。 */
+type PendingNav =
+  | { mode: 'segment'; sectionKey: SectionKey; openFirst: boolean }
+  | { mode: 'flat'; openFirst: boolean }
+
+function toDrawerRow(r: ContactRow): DrawerRow {
+  return {
+    contactId: r.contactId,
+    name: r.name,
+    phone: r.phone,
+    email: r.email,
+    stage: r.stage,
+    stageLabel: r.stageLabel,
+    reason: r.reason,
+    // 后端 segmentContact() 的枚举值原样传下来，这里的 ContactRow.segment 类型是
+    // string（跨接口共用的宽类型），值域跟 Segment 一致，不重新校验。
+    segment: r.segment as Segment,
+    important: r.important,
+    suggestedChannel: r.suggestedChannel,
+    phoneUnusable: r.phoneUnusable,
+    doNotContact: r.doNotContact,
+  }
 }
 
 export default function CrmAllContactsPage() {
@@ -98,16 +122,29 @@ export default function CrmAllContactsPage() {
    */
   const focusUsedRef = useRef(false)
 
-  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [viewerEmail, setViewerEmail] = useState<string | null>(null)
-  const [timeline, setTimeline] = useState<TimelineEntry[] | null>(null)
-  const [timelineOmitted, setTimelineOmitted] = useState(0)
-  const [timelineLoading, setTimelineLoading] = useState(false)
-  // 防乱序：快速点开 A 又点开 B 时，A 的时间线不能盖到 B 底下。
-  const timelineReqRef = useRef<string | null>(null)
+
+  // ── 抽屉状态（2026-09-28 B2，取代原来的 expandedId + 就地展开） ──────────────
+  const [drawerContactId, setDrawerContactId] = useState<string | null>(null)
+  /** 抽屉里这个人属于分段模式的哪一段 —— 只在 grouped=true 时有意义，决定上一位/下一位怎么算。 */
+  const [drawerSectionKey, setDrawerSectionKey] = useState<SectionKey | null>(null)
+  const [pendingNav, setPendingNav] = useState<PendingNav | null>(null)
+  /**
+   * 🔴 pendingNav 消费用的「这一轮到底有没有在飞」信号，必须是 ref 不是 state
+   * （魏征 2026-09-28 复审 B2 实现查出的真实 bug，`loading`/`sectionsLoading` 这两个
+   * state 不够用）：翻页点击触发 `setPage` 之后，`loadList` 是在**同一次 effect 处理**
+   * 里同步跑到 `setLoading(true)` 那一行的——但那只是"排了一次状态更新"，跟它同一批
+   * 处理的其它 effect（包括 pendingNav 那条）读到的还是**这一轮渲染开始时**的旧值
+   * （React 不会在同一批 effect 处理中途把新状态回灌给还没跑到的 effect）。于是 pendingNav
+   * 那条 effect 会拿着上一页的旧数据把自己提前消费掉，真正的新数据到达时已经没人认领。
+   * ref 读写不受这层批处理影响，`loadList` 一开始就同步置 true，其它 effect 无论在
+   * 哪一批跑到都能读到当下最新的值。
+   */
+  const fetchInFlightRef = useRef(false)
 
   const loadList = useCallback(async () => {
     setError(null)
+    fetchInFlightRef.current = true
     try {
       const params = new URLSearchParams()
       if (grouped) {
@@ -124,6 +161,10 @@ export default function CrmAllContactsPage() {
           if (focusContactId) params.set('contact', focusContactId)
         }
       } else {
+        // 平铺模式翻页也标一下「正在飞」（跟 grouped 分支的 setSectionsLoading(true) 同理）——
+        // 之前这里从来不重置，翻页时页面不会有任何加载中的迹象。真正防住 pendingNav
+        // 提前消费旧数据的是 fetchInFlightRef（见该 ref 定义处的头注），这一行只管 UI。
+        setLoading(true)
         params.set('page', String(page))
         params.set('perPage', String(perPage))
         if (qDebounced.trim()) params.set('q', qDebounced.trim())
@@ -154,7 +195,7 @@ export default function CrmAllContactsPage() {
         return
       }
       setQError(null)
-      // 两条路径都带 —— 展开的联系人要显示「发出去会记在谁名下」（WhatsApp 回复框）。
+      // 展开的联系人要显示「发出去会记在谁名下」（Messenger/邮件/WhatsApp 回复框）。
       setViewerEmail(json.viewerEmail ?? null)
       if (json.view === 'priority') {
         const secs = json.sections ?? []
@@ -189,6 +230,7 @@ export default function CrmAllContactsPage() {
     } finally {
       setLoading(false)
       setSectionsLoading(false)
+      fetchInFlightRef.current = false
     }
   }, [clientId, page, perPage, qDebounced, stageFilter, grouped, openSections, sectionPages])
 
@@ -207,33 +249,16 @@ export default function CrmAllContactsPage() {
     setPage(1)
   }, [qDebounced, stageFilter])
 
-  const loadTimeline = useCallback(
-    async (contactId: string) => {
-      setTimeline(null)
-      setTimelineOmitted(0)
-      setTimelineLoading(true)
-      timelineReqRef.current = contactId
-      try {
-        const res = await fetch(`/api/clients/${clientId}/crm/contacts/${contactId}/timeline`)
-        const json = (await res.json()) as { timeline?: TimelineEntry[]; omittedMessages?: number }
-        if (timelineReqRef.current !== contactId) return
-        setTimeline(res.ok ? (json.timeline ?? []) : [])
-        setTimelineOmitted(res.ok ? (json.omittedMessages ?? 0) : 0)
-      } catch {
-        if (timelineReqRef.current === contactId) setTimeline([])
-      } finally {
-        if (timelineReqRef.current === contactId) setTimelineLoading(false)
-      }
-    },
-    [clientId],
-  )
-
   /**
-   * 直达链接 `?contact=<id>` —— 列表加载完自动展开那个人并滚过去。
+   * 直达链接 `?contact=<id>` —— 列表加载完自动打开那个人的抽屉。
    *
    * 🔴 今日待办的人工任务靠这个才算「直达」（Codex 复审 2026-08-16）。原先这页
    * 根本不读这个参数，点进来只是打开整张 583 行的表，FDE 还得自己搜名字 ——
    * 那不叫直达，那叫「我给了你一个入口，剩下你自己找」。
+   *
+   * 2026-09-28（魏征复审 B2）：换用抽屉之后，详情不再撑开表格行——滚到一行
+   * 普通表格行、旁边再弹出半屏抽屉是两件割裂的事，不如直接触发「打开抽屉」，
+   * 跟点这一行是同一个动作。
    *
    * 只认一次：认完就清掉，之后同事点谁就是谁，不会被链接拽回去。
    * 用 `window.location.search` 而不是 `useSearchParams`，免得为一个可选参数
@@ -254,42 +279,192 @@ export default function CrmAllContactsPage() {
       window.setTimeout(() => setToast(null), 4000)
       return
     }
-    setExpandedId(deepLinkId)
-    void loadTimeline(deepLinkId)
-    // 展开那一行渲染完再滚 —— 直接滚会停在旧位置。
-    window.setTimeout(() => {
-      document.getElementById(`contact-${deepLinkId}`)?.scrollIntoView({ block: 'center' })
-    }, 120)
-  }, [deepLinkId, rows, loadTimeline])
+    openDrawer(deepLinkId)
+    // openDrawer 依赖 sections，但只在 deepLinkId/rows 变化时触发一次就够——
+    // 加进依赖数组会在每次 sections 更新时重复触发，反而打断用户手动切换。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkId, rows])
 
   const toggleDetail = (contactId: string) => {
-    if (expandedId === contactId) {
-      setExpandedId(null)
-      setTimeline(null)
-      timelineReqRef.current = null
+    if (drawerContactId === contactId) {
+      closeDrawer()
       return
     }
-    setExpandedId(contactId)
-    void loadTimeline(contactId)
+    openDrawer(contactId)
   }
 
-  // 写完（记一笔 / 改阶段）后：刷新列表拿到最新冷热/阶段/最近联系，并重拉这个人的
-  // 时间线；保持展开不收起，同事不丢位置。
-  /**
-   * 写完（记一笔 / 改阶段 / 取消别再联系）之后。
-   *
-   * 🔴 `reload` 必须一路传到这里（Codex 复审 2026-08-16）。取消「别再联系」
-   * 那一步是**两步写**：触点先写、镜像列后放。第二步失败时接口回 500，
-   * 但触点已经落库了 —— 这时候若照旧重拉列表，判据会算出「他不是拒联了」，
-   * 黄条和重试按钮当场消失，而镜像列还是 true。人看到一句「没改上」，
-   * 却连再点一次的地方都没有了。失败就别刷新，把按钮留在原地。
-   */
+  function findRowInSections(contactId: string): { row: ContactRow; sectionKey: SectionKey } | null {
+    for (const s of sections) {
+      const found = s.items?.find((r) => r.contactId === contactId)
+      if (found) return { row: found, sectionKey: s.key }
+    }
+    return null
+  }
+
+  function openDrawer(contactId: string) {
+    setDrawerContactId(contactId)
+    if (grouped) {
+      setDrawerSectionKey(findRowInSections(contactId)?.sectionKey ?? null)
+    } else {
+      setDrawerSectionKey(null)
+    }
+  }
+
+  function closeDrawer() {
+    setDrawerContactId(null)
+    setDrawerSectionKey(null)
+    setPendingNav(null)
+  }
+
+  // 当前抽屉里这个人的完整行数据——从 rows（平铺）或 sections（分段）里找，
+  // 两边共用同一份 rows（loadList 里两条路径都会 setRows）。
+  const drawerContactRow = useMemo(
+    () => (drawerContactId ? (rows.find((r) => r.contactId === drawerContactId) ?? null) : null),
+    [drawerContactId, rows],
+  )
+
+  // 数据重新加载完之后，抽屉打开的这个人如果已经不在名单里了（被筛选/搜索掉出，
+  // 或者被删除）——必须说出来 + 关掉抽屉，不能让它继续显示一份过时数据。
+  //
+  // 🔴 `pendingNav` truthy 时必须跳过（魏征 2026-09-28 复审 B2 实现查出的真实 bug，
+  // 实测：翻到下一页时这条 effect 会抢先跑——此刻新数据刚到、`rows` 换成了新一页的人，
+  // 而抽屉里还挂着上一页最后那个人的 id，天然「不在这份新名单里」，被这条 effect
+  // 当成「人被筛掉了」直接关掉抽屉，把 pendingNav 想打开新一页首个人的意图连带清空。
+  // 翻页本来就是主动换页，不是「这个人消失了」，这段时间该由 pendingNav 那条 effect
+  // 接管，不该被这条误判。
+  useEffect(() => {
+    if (!drawerContactId || loading || sectionsLoading || pendingNav) return
+    if (!rows.some((r) => r.contactId === drawerContactId)) {
+      setToast('他不在这份名单里了 —— 用上面的搜索框找找看')
+      window.setTimeout(() => setToast(null), 4000)
+      closeDrawer()
+    }
+  }, [drawerContactId, rows, loading, sectionsLoading, pendingNav])
+
+  // 搜索交给服务端了，这里只排当前页。放在 buildNavInput 前面——它的闭包引用 sorted，
+  // 声明顺序倒过来会在渲染时踩 TDZ（"Cannot access 'sorted' before initialization"）。
+  const sorted = [...rows].sort((a, b) => {
+    const av = sortKey === 'firstSeenAt' ? ts(a.firstSeenAt) : ts(a.lastTouchAt)
+    const bv = sortKey === 'firstSeenAt' ? ts(b.firstSeenAt) : ts(b.lastTouchAt)
+    return sortDir === 'desc' ? bv - av : av - bv
+  })
+
+  /** 组装 nextNavStep 的输入——分段模式用 sections 里那一段，平铺模式用 sorted 那份已排序的行。 */
+  function buildNavInput(direction: 'prev' | 'next'): NavInput | null {
+    if (!drawerContactId) return null
+    if (grouped && drawerSectionKey) {
+      const secIdx = sections.findIndex((s) => s.key === drawerSectionKey)
+      const sec = sections[secIdx]
+      if (!sec || sec.items === null) return null
+      const nextSec = sections[secIdx + 1] ?? null
+      return {
+        mode: 'segment',
+        direction,
+        loadedIds: sec.items.map((r) => r.contactId),
+        currentIndex: sec.items.findIndex((r) => r.contactId === drawerContactId),
+        sectionKey: drawerSectionKey,
+        sectionTitle: sec.title,
+        sectionPage: sectionPages[drawerSectionKey] ?? 1,
+        perPage,
+        sectionTotal: sec.total,
+        nextSection: nextSec ? { key: nextSec.key, title: nextSec.title, total: nextSec.total } : null,
+      }
+    }
+    const ids = sorted.map((r) => r.contactId)
+    return {
+      mode: 'flat',
+      direction,
+      loadedIds: ids,
+      currentIndex: ids.indexOf(drawerContactId),
+      page,
+      totalPages: Math.max(1, Math.ceil(total / perPage)),
+    }
+  }
+
+  const navInputNow = drawerContactId ? buildNavInput('next') : null
+  const navPositionLabel = navInputNow ? currentPositionLabel(navInputNow) : null
+  const navBusy = pendingNav !== null
+
+  function goNav(direction: 'prev' | 'next') {
+    const input = buildNavInput(direction)
+    if (!input) return
+    const step = nextNavStep(input)
+    if (step.kind === 'move') {
+      setDrawerContactId(step.contactId)
+      return
+    }
+    if (step.kind === 'need_more') {
+      if (input.mode === 'segment') {
+        setPendingNav({ mode: 'segment', sectionKey: input.sectionKey, openFirst: step.openFirst })
+        const cur = sectionPages[input.sectionKey] ?? 1
+        goSectionPage(input.sectionKey, direction === 'next' ? cur + 1 : cur - 1)
+      } else {
+        setPendingNav({ mode: 'flat', openFirst: step.openFirst })
+        setPage((p) => (direction === 'next' ? p + 1 : p - 1))
+      }
+      return
+    }
+    // end_of_section / end_of_list / not_in_list —— 都只是一句话，不是错误。
+    setToast(step.message)
+    window.setTimeout(() => setToast(null), 4000)
+  }
+
+  // pendingNav 等的那一页数据到了（fetchInFlightRef 转 false）—— 打开首个/末个，
+  // 清掉 pendingNav。出错时也要清掉，否则按钮会一直卡在禁用状态。
+  //
+  // 🔴 判据用 `fetchInFlightRef.current`，不用 `loading`/`sectionsLoading` 这两个
+  // state（魏征 2026-09-28 复审 B2 实现查出的真实 bug，见 fetchInFlightRef 定义处的
+  // 头注）：翻页点击那一刻，`setPendingNav` 触发的这批 effect 里，"负责发起请求的
+  // effect" 和"这条负责消费 pendingNav 的 effect" 是在同一批处理里前后执行的——
+  // 后者读到的 `loading`/`sectionsLoading` 还是这一轮渲染开始时的旧值（React 不会在
+  // 同一批 effect 处理中途把新状态回灌进去），于是它会拿着上一页的旧 `rows` 把
+  // pendingNav 提前消费掉。ref 读写没有这层批处理延迟，`loadList` 一开始就同步
+  // 置 true，这条 effect 无论在哪一批跑到都能读到当下最新的值。
+  //
+  // 🔴 依赖数组里的 `loading`/`sectionsLoading` 不是摆设，虽然函数体不读它们——
+  // `loadList` 里 `await Promise.all(...)` 之后还有一个 `await stageRes.json()`，
+  // 中间那一刻 `rows` 已经 setRows 过了、但 `fetchInFlightRef.current` 要等到
+  // 最后的 `finally` 才真正翻回 false。少了这两个依赖，`rows` 变化触发的这一次
+  // 检查会因为 ref 还是 true 而跳过，而之后 `fetchInFlightRef` 真正翻 false 那一刻
+  // 没有任何一个依赖跟着变，这条 effect 就再也没有机会重新检查一遍——实测过的坑，
+  // 不是理论推演。
+  useEffect(() => {
+    if (!pendingNav) return
+    if (fetchInFlightRef.current) return
+    if (error) {
+      setPendingNav(null)
+      return
+    }
+    if (pendingNav.mode === 'segment') {
+      const sec = sections.find((s) => s.key === pendingNav.sectionKey)
+      if (!sec || sec.items === null) return
+      if (sec.items.length === 0) {
+        setPendingNav(null)
+        return
+      }
+      const target = pendingNav.openFirst ? sec.items[0] : sec.items[sec.items.length - 1]
+      setDrawerContactId(target.contactId)
+      setDrawerSectionKey(pendingNav.sectionKey)
+      setPendingNav(null)
+    } else {
+      const ids = sorted.map((r) => r.contactId)
+      if (ids.length === 0) {
+        setPendingNav(null)
+        return
+      }
+      const target = pendingNav.openFirst ? ids[0] : ids[ids.length - 1]
+      setDrawerContactId(target)
+      setPendingNav(null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingNav, sections, rows, loading, sectionsLoading, error])
+
+  // 写完（记一笔 / 改阶段 / 一键动作）之后：刷新列表拿到最新冷热/阶段/最近联系。
+  // PersonDrawer 自己的往来时间线是独立组件（ContactTimeline），有写就自己重拉，
+  // 不需要父级管——这也是换用抽屉之后能整块删掉 timeline 相关 state 的原因。
   const afterWrite = (msg: string, reload = true) => {
     setToast(msg)
-    if (reload) {
-      void loadList()
-      if (expandedId) void loadTimeline(expandedId)
-    }
+    if (reload) void loadList()
     window.setTimeout(() => setToast(null), 2400)
   }
 
@@ -344,13 +519,6 @@ export default function CrmAllContactsPage() {
     }
   }
 
-  // 搜索交给服务端了，这里只排当前页。
-  const sorted = [...rows].sort((a, b) => {
-    const av = sortKey === 'firstSeenAt' ? ts(a.firstSeenAt) : ts(a.lastTouchAt)
-    const bv = sortKey === 'firstSeenAt' ? ts(b.firstSeenAt) : ts(b.lastTouchAt)
-    return sortDir === 'desc' ? bv - av : av - bv
-  })
-
   const colCount = 7 + columns.length
   const sortArrow = (key: 'firstSeenAt' | 'lastTouchAt') =>
     sortKey === key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
@@ -382,7 +550,7 @@ export default function CrmAllContactsPage() {
   }
 
   const renderRow = (r: ContactRow) => {
-    const expanded = expandedId === r.contactId
+    const active = drawerContactId === r.contactId
     const contactCell =
       r.phone || r.email ? (
         <span className="text-me-charcoal/70">{r.phone ?? r.email}</span>
@@ -391,16 +559,16 @@ export default function CrmAllContactsPage() {
       ) : (
         <span className="text-me-charcoal/35">没留联系方式</span>
       )
-    return [
+    return (
       <tr
         key={r.contactId}
-        // 直达链接靠它定位（?contact=<id> 展开后滚到这一行）
+        // 直达链接靠它定位（?contact=<id> 打开对应抽屉）
         id={`contact-${r.contactId}`}
         onClick={() => toggleDetail(r.contactId)}
-        className={`border-b border-me-charcoal/5 cursor-pointer hover:bg-me-ivory/40 ${expanded ? 'bg-me-ivory/50' : ''}`}
+        className={`border-b border-me-charcoal/5 cursor-pointer hover:bg-me-ivory/40 ${active ? 'bg-me-ivory/50' : ''}`}
       >
         <td className="px-2 py-3">
-          {/* 点星星不能顺带展开抽屉 —— 两个动作是分开的。 */}
+          {/* 点星星不能顺带打开抽屉 —— 两个动作是分开的。 */}
           <button
             onClick={(e) => {
               e.stopPropagation()
@@ -453,24 +621,8 @@ export default function CrmAllContactsPage() {
             {r.segmentLabel}
           </span>
         </td>
-      </tr>,
-      expanded && (
-        <tr key={`${r.contactId}-detail`} className="border-b border-me-charcoal/5 bg-me-ivory/30">
-          <td colSpan={colCount} className="px-6 py-4">
-            <ContactDetail
-              clientId={clientId}
-              row={r}
-              stages={stages}
-              timeline={timeline}
-              omitted={timelineOmitted}
-              loading={timelineLoading}
-              onWrote={afterWrite}
-              viewerEmail={viewerEmail}
-            />
-          </td>
-        </tr>
-      ),
-    ]
+      </tr>
+    )
   }
 
   return (
@@ -708,6 +860,26 @@ export default function CrmAllContactsPage() {
             </div>
           )}
         </>
+      )}
+
+      {drawerContactRow && (
+        <PersonDrawer
+          // 🔴 换人必须重新挂载——见 docs/specs/2026-09-28-crm-management-hub-design-v1.md
+          // 已知坑第 1 条：没有 key 时连续点两个人，子组件（如 ComposeNote）的防重复键
+          // 不会跟着重置，A 记的笔记可能被记到 B 头上。
+          key={drawerContactRow.contactId}
+          clientId={clientId}
+          row={toDrawerRow(drawerContactRow)}
+          stages={stages}
+          viewerEmail={viewerEmail}
+          onClose={closeDrawer}
+          onSaved={afterWrite}
+          nav={
+            navPositionLabel
+              ? { positionLabel: navPositionLabel, busy: navBusy, onPrev: () => goNav('prev'), onNext: () => goNav('next') }
+              : undefined
+          }
+        />
       )}
     </div>
   )

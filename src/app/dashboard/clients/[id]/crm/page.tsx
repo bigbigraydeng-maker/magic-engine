@@ -1778,6 +1778,11 @@ export default function CrmTodayPage() {
 
       {picked && (
         <PersonDrawer
+          // 🔴 换人必须重新挂载——没有 key 时点开 A 再点开 B，PersonDrawer 复用同一个
+          // 实例，内部子组件（如 ComposeNote）的防重复键不会跟着重置，A 的笔记可能被
+          // 记到 B 头上（2026-09-28 CRM 重整 B2 设计复审查出的已知坑，见
+          // docs/specs/2026-09-28-crm-management-hub-design-v1.md 已知坑第 1 条）。
+          key={picked.contactId}
           clientId={clientId}
           row={picked}
           stages={stages}

@@ -205,6 +205,21 @@ describe('GET contacts — 分段跟今天页共用形状（WP3 R3）', () => {
     expect(bob).toBeTruthy()
     expect(bob?.segment).not.toBe('excluded')
   })
+
+  /**
+   * 🔴 2026-09-28 CRM 重整 B2（子牙复审查出）：`segmentContact()` 早就算出了
+   * `suggestedChannel`/`reason`，`responseRowFor()` 之前没往响应行里塞。
+   * 「全部客人」换用 PersonDrawer 之后靠这个字段决定给哪几个按钮——缺了它会
+   * 兜底成 'phone'，对一个只有私信、没有电话的客人也会渲染电话话术的按钮。
+   */
+  it('响应行带 suggestedChannel 和 reason，不是 undefined', async () => {
+    const { status, body } = await get('cts')
+    expect(status).toBe(200)
+    const list = (body.contacts ?? body.items) as Array<Record<string, unknown>>
+    const bob = list.find((r) => r.contactId === 'a1')
+    expect(bob?.suggestedChannel).toBeDefined()
+    expect(typeof bob?.reason).toBe('string')
+  })
 })
 
 describe('GET contacts — 筛选落到 SQL', () => {
