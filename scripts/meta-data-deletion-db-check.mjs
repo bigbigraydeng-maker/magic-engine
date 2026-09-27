@@ -136,7 +136,11 @@ try {
   const gR = await grant(B, runner, 'act_4444444444')
   const jR = (await db.query(`INSERT INTO meta_ads_ai_analysis_jobs(client_id,principal_id,grant_id,grant_revision,connection_version,entitlement_revision,ad_account_id,idempotency_key,period_key,window_since,window_until,status,reserved_usd)
     VALUES($1,$1,$2,$3,now(),$4,'act_4444444444',$5,'2026-09','2026-09-01','2026-09-07','running',0.12) RETURNING id`, [B, gR.id, gR.revision, gR.entitlement_revision, 'r'.repeat(64)])).rows[0].id
+  await db.query(`INSERT INTO meta_ads_ai_sponsored_budgets(client_id,period_key,cap_usd,reserved_usd,spent_usd) VALUES($1,'2026-09',1,0.12,0)
+    ON CONFLICT (client_id, period_key) DO UPDATE SET reserved_usd = 0.12, spent_usd = 0`, [B])
   await del('666', new Date(Date.now() + 1000).toISOString(), code(11))
+  const bud = (await db.query(`SELECT reserved_usd::text AS r, spent_usd::text AS s FROM meta_ads_ai_sponsored_budgets WHERE client_id=$1 AND period_key='2026-09'`, [B])).rows[0]
+  eq([bud.r, bud.s], ['0.000000', '0.120000'], 'running reservation settled, not left reserved forever')
   const jr = (await db.query('SELECT status, error_code FROM meta_ads_ai_analysis_jobs WHERE id=$1', [jR])).rows[0]
   eq([jr.status, jr.error_code], ['failed', 'deleted_by_user_request'], 'running report closed as failed')
 

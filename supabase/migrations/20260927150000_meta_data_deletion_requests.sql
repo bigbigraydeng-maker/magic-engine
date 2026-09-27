@@ -116,9 +116,21 @@ BEGIN
   GET DIAGNOSTICS n_conn = ROW_COUNT;
 
   -- 3. Empty report contents made through those grants.
-  --    A job still running is closed as failed so its later finish cannot write a report back.
+  --    A job still running is closed as failed so its later finish cannot write a report back;
+  --    its reservation is settled the same way the stale-job path does (reserved -> spent),
+  --    otherwise the finish function (which skips non-running jobs) would leave it reserved forever.
+  UPDATE public.meta_ads_ai_sponsored_budgets b
+     SET reserved_usd = b.reserved_usd - j.total, spent_usd = b.spent_usd + j.total, updated_at = now()
+    FROM (
+      SELECT client_id, period_key, sum(reserved_usd) AS total
+        FROM public.meta_ads_ai_analysis_jobs
+       WHERE grant_id = ANY (grant_ids) AND status = 'running'
+       GROUP BY client_id, period_key
+    ) j
+   WHERE b.client_id = j.client_id AND b.period_key = j.period_key AND b.reserved_usd >= j.total;
   UPDATE public.meta_ads_ai_analysis_jobs
      SET evidence = NULL, report_markdown = NULL, error_code = 'deleted_by_user_request',
+         actual_cost_usd = CASE WHEN status = 'running' THEN reserved_usd ELSE actual_cost_usd END,
          status = CASE WHEN status = 'running' THEN 'failed' ELSE status END,
          completed_at = coalesce(completed_at, now())
    WHERE grant_id = ANY (grant_ids)
