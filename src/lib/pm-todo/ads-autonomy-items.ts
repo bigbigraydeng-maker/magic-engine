@@ -43,7 +43,9 @@ export async function pushAdsAutonomyCircuitBreakerItems(
   items: ManualItem[],
   now: Date,
   nameOf: (id: string) => string,
+  activeClientIds: readonly string[],
 ): Promise<void> {
+  if (activeClientIds.length === 0) return
   const nowIso = now.toISOString()
   const { data, error } = await supabase
     .from('client_automation_policies')
@@ -52,6 +54,7 @@ export async function pushAdsAutonomyCircuitBreakerItems(
     .like('updated_by', 'circuit-breaker:%')
     .lte('effective_from', nowIso)
     .or(`effective_to.is.null,effective_to.gt.${nowIso}`)
+    .in('client_id', activeClientIds)
   if (error) throw new Error(`client_automation_policies 读取失败：${error.message}`)
 
   const seen = new Set<string>()

@@ -304,7 +304,7 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
       console.warn('[manual-items] 广告级规则待办生成失败（不阻塞其他待办）:', e),
     ),
     // 广告自治被熔断器自动停了 —— 当日预算异常飙升，系统已自动禁止全部广告动作（WP3 验收 3）
-    (b) => pushAdsAutonomyCircuitBreakerItems(supabase, b, now, nameOf).catch((e) =>
+    (b) => pushAdsAutonomyCircuitBreakerItems(supabase, b, now, nameOf, ids).catch((e) =>
       console.warn('[manual-items] 广告自治熔断器待办生成失败（不阻塞其他待办）:', e),
     ),
     // 客户之间有没有串台 —— PM 2026-08-05：「坚决不能胡窜」。

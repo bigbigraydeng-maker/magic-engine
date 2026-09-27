@@ -51,8 +51,25 @@ function median(values: number[]): number {
     : sorted[mid]
 }
 
+/**
+ * 按 `date` 取最近 `CIRCUIT_BREAKER_LOOKBACK_DAYS` 个日历日（去重、降序取前 N 个）。
+ *
+ * 调用方可能传入超过 7 天的回填数据或未排序数据 —— 不按日期先选窗口，
+ * 直接把所有行喂进中位数，混进去的更早高花费日会把中位数顶高，
+ * 该触发的异常花费反而被放过。
+ */
+function selectLookbackWindow(history: readonly DailySpendEntry[]): DailySpendEntry[] {
+  const latestPerDate = new Map<string, DailySpendEntry>()
+  for (const entry of history) {
+    latestPerDate.set(entry.date, entry)
+  }
+  return [...latestPerDate.values()]
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+    .slice(0, CIRCUIT_BREAKER_LOOKBACK_DAYS)
+}
+
 export function evaluateCircuitBreaker(input: CircuitBreakerInput): CircuitBreakerVerdict {
-  const history = input.recentDailySpend
+  const history = selectLookbackWindow(input.recentDailySpend)
   const nonZeroDays = history.filter(e => e.totalSpendCents > 0)
 
   if (nonZeroDays.length < CIRCUIT_BREAKER_MIN_NONZERO_DAYS) {

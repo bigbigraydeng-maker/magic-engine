@@ -116,7 +116,7 @@ export interface AdsEnvelopeFactsDeps {
 export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): EnvelopeFactsResolver {
   const now = deps.now ?? (() => new Date())
 
-  return async ({ clientId, actionKey, input }) => {
+  return async ({ clientId, actionKey, input, at }) => {
     const unavailable = (why: string) => ({ unavailable: why } as const)
 
     const kind = CHANGE_KIND[actionKey]
@@ -141,6 +141,14 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
     if (error) return unavailable(`读广告设置快照失败：${error.message}`)
     const rows = (data ?? []) as SnapRow[]
 
+    // 🔴 `pre_provider` 只能看 `snapshot_pre` 刚抓的那一轮 `kernel_pre` 快照，
+    //    不能跟 `daily` / `changed` 等别的抓取轮次混在一起——否则并发或部分
+    //    完成的另一轮抓取插入更新行时，这道资金闸会核对到不是「即将执行动作
+    //    改前那一刻」的数据。`hoursSinceLastRealChange` 例外：它问的是「距上次
+    //    真实设置变化过了多久」，本来就要看全部历史里的 `changed` 行，不受这一轮
+    //    快照范围限制。
+    const snapshotRows = at === 'pre_provider' ? rows.filter(r => r.capture_reason === 'kernel_pre') : rows
+
     // ── 解析这次动作真正该看的实体 ──────────────────────────────────────────
     let subject: Subject
     switch (actionKey) {
@@ -156,7 +164,7 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
         const adId = str('ad_id')
         if (!adId) return unavailable('input 里没有 ad_id')
         // 换素材会重置**所属广告组**的学习期，所以判据落在那个组上，不是这条广告上。
-        const adRow = latestOf(rows.filter(r => r.level === 'ad' && r.entity_id === adId))
+        const adRow = latestOf(snapshotRows.filter(r => r.level === 'ad' && r.entity_id === adId))
         if (!adRow) return unavailable(`快照里查不到广告 ${adId}，读不到它属于哪个广告组`)
         if (!adRow.adset_id) return unavailable(`广告 ${adId} 的快照里没有所属广告组，判不了学习期`)
         subject = { entityId: adRow.adset_id, level: 'adset', learningApplicable: true }
@@ -177,9 +185,11 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
         return unavailable(`「${actionKey}」没有实体解析规则`)
     }
 
-    const subjectRows = rows.filter(r => r.level === subject.level && r.entity_id === subject.entityId)
+    const subjectRows = snapshotRows.filter(r => r.level === subject.level && r.entity_id === subject.entityId)
     const target = latestOf(subjectRows)
     if (!target) return unavailable(`快照里查不到 ${subject.level} ${subject.entityId}`)
+    // `hoursSinceLastRealChange` 要看全部历史里的 `changed` 行，不受这一轮快照范围限制。
+    const subjectRowsAllHistory = rows.filter(r => r.level === subject.level && r.entity_id === subject.entityId)
 
     // ── 账户当日预算合计 ────────────────────────────────────────────────────
     // 🔴 Meta 有两种预算位，只加广告组级会**系统性少算**，让日上限这道闸偏松：
@@ -190,7 +200,7 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
     //    两边算出不同的「账户花多少」会让诊断和信封各说一套。
     const latest = (level: string): Map<string, SnapRow> => {
       const m = new Map<string, SnapRow>()
-      for (const r of rows) {
+      for (const r of snapshotRows) {
         if (r.level !== level) continue
         const cur = m.get(r.entity_id)
         if (!cur || Date.parse(r.captured_at) > Date.parse(cur.captured_at)) m.set(r.entity_id, r)
@@ -242,7 +252,7 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
       beforeCents,
       accountDailyTotalBeforeCents: accountTotal,
       dailyCapCents: typeof cfg?.daily_budget_cap_cents === 'number' ? cfg.daily_budget_cap_cents : null,
-      hoursSinceLastChange: hoursSinceLastRealChange(subjectRows, now()),
+      hoursSinceLastChange: hoursSinceLastRealChange(subjectRowsAllHistory, now()),
       learningPhaseApplicable: subject.learningApplicable,
       learningStage: target.learning_stage,
       adStudyCount: studyCount(target.ad_studies),
