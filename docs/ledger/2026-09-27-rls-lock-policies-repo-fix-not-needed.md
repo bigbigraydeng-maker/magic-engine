@@ -6,7 +6,7 @@ owner: pm
 decided_on: 2026-09-27
 source: session:0d044cab
 verify_by: 2026-10-04
-verify_how: 跑 `bash scripts/db-replay-and-verify.sh`（起干净 postgres 重放全部 migration）应通过；再跑 `node scripts/check-policy-to-clause.mjs --all` 确认存量清单里不包含 `client_projects` / `ad_strategy_configs`（这两张已由后续迁移修复，若再出现即回归）。CI 里对应检查名是 `.github/workflows/db-security-invariants.yml` 的「DB security invariants」job，PR 里应为绿。
+verify_how: 跑 `bash scripts/db-replay-and-verify.sh`（起干净 postgres 重放全部 migration）应通过——这一步会跑 `scripts/db-invariants.sql`，其不变量 1/2 直接断言重放后 `pg_policies` 里不存在 `roles={public}` 或 `roles={authenticated}` 的无条件放行策略，`client_projects` / `ad_strategy_configs` 是否仍缺 `TO service_role` 以这个末态断言为准。**不要**用 `node scripts/check-policy-to-clause.mjs --all` 判断这两张表是否已修复：该命令按每个历史文件独立扫描 `CREATE POLICY`，不会结合同一张表后续的 `ALTER/DROP POLICY` 合并判断末态，`client_projects`（20260803140000）和 `ad_strategy_configs`（20260722000001）各自的建表迁移仍会各计 1 条漏 `TO`；且该命令只打印数量最多的 10 个文件，这两张表各只 1 条不会出现在打印列表里，容易被误读成「未出现 = 已验证通过」。CI 里对应检查名是 `.github/workflows/db-security-invariants.yml` 的「DB security invariants」job，PR 里应为绿。
 ---
 
 原假设：生产是被人手工修好的，重建新环境会重造敞开策略，得加一条纠正迁移。
