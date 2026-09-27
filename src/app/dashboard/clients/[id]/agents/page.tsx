@@ -108,7 +108,7 @@ export default function AgentsPage() {
 
       <div className="mb-4 flex overflow-hidden rounded-xl border border-me-charcoal/15 bg-white">
         {([
-          { k: 'agent' as const, label: '按 Agent 看' },
+          { k: 'agent' as const, label: '客户总表' },
           { k: 'stage' as const, label: '按阶段看' },
         ]).map((o) => (
           <button
@@ -135,7 +135,7 @@ export default function AgentsPage() {
 
       {!loading && !error && agents.length === 0 && (
         <p className="rounded-xl border border-dashed border-me-charcoal/15 py-16 text-center text-sm text-me-charcoal/40">
-          还没有同行联系人 —— 先在设置页 → 客户资料 → 同行域名（trade_domains）里添加同行公司的邮箱域名，下一次邮件同步后这里会出现 Agent 卡
+          暂无同行渠道客户 —— 只要有 kind=trade 的联系人发邮件谈客户，AI 就会自动落进这里
         </p>
       )}
 
