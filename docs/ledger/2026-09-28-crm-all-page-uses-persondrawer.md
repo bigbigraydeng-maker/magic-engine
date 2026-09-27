@@ -6,7 +6,7 @@ owner: pm
 decided_on: 2026-09-28
 source: session:5b9407a2
 done_on: 2026-09-28
-done_ref: pr:2162
+done_ref: pr:2165
 verify_by: 2026-10-05
 verify_how: "登录生产 ME，打开 CTS 或 NAL 的「全部客人」，点开任意一个人：能看到私信/邮件/WhatsApp 回复框、一键动作按钮；点「上一位/下一位」能正常切换、翻到下一页会自动打开新一页第一个人；两个人同时改同一个联系人的跟进阶段，后手那个应该看到"已经被别人改过"的提示而不是静默覆盖"
 ---
