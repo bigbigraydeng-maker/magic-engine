@@ -6,6 +6,7 @@
  * 从 page.tsx 搬出来（2026-09-26，WP3 R6 纯搬家），函数体一个字没改。
  */
 
+import { describeStageActor, stageReasonForDisplay } from '@/lib/crm/actors'
 import { CHANNEL_LABEL, DIRECTION_LABEL, OUTCOME_LABEL, fmtDate, relTime, type TimelineEntry } from './contact-table-types'
 
 /** 一条时间线条目（触点 / 阶段流转）。 */
@@ -19,7 +20,15 @@ export function TimelineItem({ e }: { e: TimelineEntry }) {
           <span className="ml-2">
             {e.fromLabel ?? '还没标'} → <span className="font-semibold text-me-charcoal">{e.toLabel ?? '—'}</span>
           </span>
-          {e.note && <span className="ml-2 text-me-charcoal/45">· {e.note}</span>}
+          {/*
+            谁判的 —— 原来这一行只显示理由、不显示是谁判的，员工看不出这是
+            AI 判的还是同事改的。生产上 971 次里 971 次是 AI 判的（带理由），
+            12 次是真人改的（没理由，人不解释自己），两者必须分得开。
+          */}
+          <span className="ml-2 text-xs text-me-charcoal/40">· {describeStageActor(e.changedBy)}</span>
+          {stageReasonForDisplay(e.note) && (
+            <span className="ml-2 text-me-charcoal/45">· {stageReasonForDisplay(e.note)}</span>
+          )}
         </div>
       </li>
     )
