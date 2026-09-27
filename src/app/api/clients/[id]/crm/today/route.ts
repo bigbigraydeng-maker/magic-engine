@@ -53,6 +53,8 @@ interface ContactRow {
   do_not_contact: boolean
   stage: string | null
   pinned_at: string | null
+  important_note: string | null
+  important_due_at: string | null
   snooze_until: string | null
 }
 
@@ -132,7 +134,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       fetchAll<ContactRow>((from, to) =>
         supabaseAdmin
           .from('contacts')
-          .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, pinned_at, snooze_until')
+          .select(
+            'id, display_name, primary_phone, primary_email, do_not_contact, stage, pinned_at, snooze_until, important_note, important_due_at',
+          )
           .eq('client_id', clientId)
           .order('id', { ascending: true })
           .range(from, to),
@@ -693,6 +697,14 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       lastNote: last?.summary ?? null,
       pinned: Boolean(row?.pinned_at),
       pinnedAt: row?.pinned_at ?? null,
+      /**
+       * 「要记住的事」—— 抽屉里那一格靠它。
+       *
+       * 🔴 这个文件里拼行的地方有**两处**，两处都要带。少带一处，抽屉在那一组人
+       * 身上就又没有这一格 —— 而这正是 `contact-model.ts` 头注记的那种漂移：
+       * 两个地方各自拼同一个形状，于是一处有的字段另一处没有。
+       */
+      important: { note: row?.important_note ?? null, dueAt: row?.important_due_at ?? null },
       /** 被推迟到什么时候。今天名单上的人这里恒为 null —— 推迟的人已经被挡在外面了。 */
       snoozeUntil: row?.snooze_until ?? null,
       suggestedStage:
@@ -792,6 +804,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
          * 点开它就能拨那个已知打不通的号，是这一组里最不该出现的事。
          */
         phoneUnusable: seg.phoneUnusable ?? false,
+        /** 「要记住的事」—— 见上面那一处同名字段的注释，两处必须一致。 */
+        important: { note: row?.important_note ?? null, dueAt: row?.important_due_at ?? null },
         /** 被标成「别再联系」—— 抽屉靠它给出取消入口。 */
         doNotContact: isDoNotContact(
           row?.do_not_contact ?? false,
