@@ -86,17 +86,61 @@ for f in "${FILES[@]}"; do
   fi
 
   # --- Forbidden: 10+ consecutive digits ---
-  # Exclude date patterns (YYYY-MM-DD) and code paths
-  if grep -Pn '(?<!\d)(\d{10,})(?!\d)' "$f" 2>/dev/null | grep -v -E '^\d+:.*```' | grep -q .; then
+  # Exclude date patterns (YYYY-MM-DD) and code fences
+  if grep -En '[0-9]{10,}' "$f" | grep -v -E '^\d+:.*```' | grep -q .; then
     fail "$relpath" "contains 10+ consecutive digits (potential client data leak)"
   fi
 
-  # --- pr: and issue: pointers require GH_TOKEN ---
-  if grep -qE '(pr:|issue:)\d+' "$f"; then
+  # --- pr: and issue: pointers require GH_TOKEN and must exist ---
+  while IFS= read -r pr_line; do
+    [[ -z "$pr_line" ]] && continue
+    pr_num="${pr_line##*pr:}"
+    pr_num="${pr_num%%[^0-9]*}"
     if [[ -z "${GH_TOKEN:-}" ]]; then
-      fail "$relpath" "contains pr:/issue: pointers but GH_TOKEN is not set (cannot verify)"
+      fail "$relpath" "contains pr:$pr_num but GH_TOKEN is not set (cannot verify)"
+    else
+      if ! gh api "repos/{owner}/{repo}/pulls/$pr_num" --silent 2>/dev/null; then
+        fail "$relpath" "pr:$pr_num does not exist or is inaccessible"
+      fi
     fi
-  fi
+  done < <(grep -oE 'pr:[0-9]+' "$f" | sort -u)
+
+  while IFS= read -r issue_line; do
+    [[ -z "$issue_line" ]] && continue
+    issue_num="${issue_line##*issue:}"
+    issue_num="${issue_num%%[^0-9]*}"
+    if [[ -z "${GH_TOKEN:-}" ]]; then
+      fail "$relpath" "contains issue:$issue_num but GH_TOKEN is not set (cannot verify)"
+    else
+      if ! gh api "repos/{owner}/{repo}/issues/$issue_num" --silent 2>/dev/null; then
+        fail "$relpath" "issue:$issue_num does not exist or is inaccessible"
+      fi
+    fi
+  done < <(grep -oE 'issue:[0-9]+' "$f" | sort -u)
+
+  # --- doc: pointers must point to existing files (with optional anchor) ---
+  while IFS= read -r doc_ptr; do
+    [[ -z "$doc_ptr" ]] && continue
+    doc_path="${doc_ptr#doc:}"
+    doc_file="${doc_path%%#*}"
+    if [[ ! -f "$doc_file" ]]; then
+      fail "$relpath" "doc:$doc_path — file does not exist"
+    elif [[ "$doc_path" == *"#"* ]]; then
+      anchor="${doc_path##*#}"
+      if ! grep -qi "^#.*$anchor" "$doc_file" 2>/dev/null; then
+        fail "$relpath" "doc:$doc_path — anchor '#$anchor' not found in file"
+      fi
+    fi
+  done < <(grep -oE 'doc:[^ ,)]+' "$f" | sort -u)
+
+  # --- commit: pointers must exist in git ---
+  while IFS= read -r commit_ptr; do
+    [[ -z "$commit_ptr" ]] && continue
+    sha="${commit_ptr#commit:}"
+    if ! git cat-file -t "$sha" >/dev/null 2>&1; then
+      fail "$relpath" "commit:$sha does not exist in repository"
+    fi
+  done < <(grep -oE 'commit:[a-f0-9]+' "$f" | sort -u)
 
   # --- Evidence pointer format check ---
   # Each "为什么" line should have · 证据：<pointer>
