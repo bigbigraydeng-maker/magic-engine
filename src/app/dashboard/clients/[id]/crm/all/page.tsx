@@ -99,6 +99,7 @@ export default function CrmAllContactsPage() {
   const focusUsedRef = useRef(false)
 
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [viewerEmail, setViewerEmail] = useState<string | null>(null)
   const [timeline, setTimeline] = useState<TimelineEntry[] | null>(null)
   const [timelineOmitted, setTimelineOmitted] = useState(0)
   const [timelineLoading, setTimelineLoading] = useState(false)
@@ -141,6 +142,7 @@ export default function CrmAllContactsPage() {
         sections?: PrioritySectionData[]
         focus?: { found: boolean; section?: SectionKey; page?: number }
         error?: string
+        viewerEmail?: string | null
       }
       if (!res.ok) {
         // 400 是搜索词非法（逗号/括号）—— 只提示搜索框，别把已有名单清空。
@@ -152,6 +154,8 @@ export default function CrmAllContactsPage() {
         return
       }
       setQError(null)
+      // 两条路径都带 —— 展开的联系人要显示「发出去会记在谁名下」（WhatsApp 回复框）。
+      setViewerEmail(json.viewerEmail ?? null)
       if (json.view === 'priority') {
         const secs = json.sections ?? []
         setSections(secs)
@@ -461,6 +465,7 @@ export default function CrmAllContactsPage() {
               omitted={timelineOmitted}
               loading={timelineLoading}
               onWrote={afterWrite}
+              viewerEmail={viewerEmail}
             />
           </td>
         </tr>

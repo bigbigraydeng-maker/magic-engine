@@ -170,7 +170,7 @@ function contactFilterParams(query: ListQuery): {
  * 触点必须按 `contact_id in (当前页)` 收窄：CTS 量级下全量触点 1271 条，
  * 分页的意义就是别为了 100 个人把全库读一遍。
  */
-async function getPaged(clientId: string, query: ListQuery): Promise<NextResponse> {
+async function getPaged(clientId: string, query: ListQuery, viewerEmail: string | null): Promise<NextResponse> {
   let total: number
   let pageContacts: ContactRow[]
   let stageRows: StageRow[]
@@ -195,7 +195,19 @@ async function getPaged(clientId: string, query: ListQuery): Promise<NextRespons
     const [countRes, pageRes, stages] = await Promise.all([
       countBuilder,
       pageBuilder
-        .order('id', { ascending: true })
+        // 🔴 2026-09-28 修：原来是 `.order('id', ...)`——`contacts.id` 是 UUID，
+        // 按它排等于按随机字符串排。第 1 页选出来的 20 个人跟"谁最近有动静"没有
+        // 任何关系，而页面上「最近联系 ↓」那个箭头只对**已经选出的这一页**做
+        // 客户端排序（page.tsx 注释自己写着「排序只对当前页生效」）——两层叠加，
+        // 效果是"挑 20 个近乎随机的人，把这 20 个人按最近联系排一下"，
+        // 今晚刚建档的 WhatsApp 测试联系人因此在 1026 人里怎么翻都翻不到。
+        // 改成按 `first_seen_at` 倒序：真正的"按最后一次接触排"要在每人身上先
+        // 算出跨渠道最新触点时间再排序，这份 SQL 目前是查完整批触点后在内存里
+        // 组装（见本文件头注），做不到"先排序再分页"——那是一次更大的改动
+        // （物化视图 / 缓存列），记进台账，不在这次一起做。`first_seen_at` 是
+        // 唯一已经在这次查询里、单调、不为空的时间列，至少让"今天刚进来的人"
+        // 能在默认视图里被看见，比随机排序找不到强。
+        .order('first_seen_at', { ascending: false })
         .range((query.page - 1) * query.perPage, query.page * query.perPage - 1),
       fetchAll<StageRow>((from, to) =>
         supabaseAdmin
@@ -250,6 +262,10 @@ async function getPaged(clientId: string, query: ListQuery): Promise<NextRespons
     perPage: query.perPage,
     columns: visibleCustomColumns(customPerContact),
     items: out,
+    // 「全部客人」页展开一个联系人时要显示「发出去会记在谁名下」，
+    // 而这个响应是该页唯一读到当前登录身份的地方（跟「今天要联系」页
+    // 从自己的 data.viewerEmail 拿是同一个模式，不新起一个接口）。
+    viewerEmail,
   })
 }
 
@@ -265,7 +281,7 @@ async function getPaged(clientId: string, query: ListQuery): Promise<NextRespons
  * CTS 量级约 5k 行 / 1.4MB，跟今天页每次打开读的量相同。真要收窄得按 100 个
  * contact_id 一批走 `.in()`（PostgREST URL 长度限制），留作后续一轮。
  */
-async function getPriority(clientId: string, query: ListQuery): Promise<NextResponse> {
+async function getPriority(clientId: string, query: ListQuery, viewerEmail: string | null): Promise<NextResponse> {
   let contacts: ContactRow[]
   let touches: TouchRow[]
   let stageRows: StageRow[]
@@ -339,6 +355,7 @@ async function getPriority(clientId: string, query: ListQuery): Promise<NextResp
     focus,
     columns: visibleCustomColumns(customPerContact),
     sections,
+    viewerEmail,
   })
 }
 
@@ -361,13 +378,14 @@ export async function GET(
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
+  const viewerEmail = access.user.email?.toLowerCase().trim() ?? null
 
   const parsed = parseListQuery(new URL(req.url))
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 })
   }
-  if (parsed.paged) return getPaged(clientId, parsed)
-  if (parsed.view === 'priority') return getPriority(clientId, parsed)
+  if (parsed.paged) return getPaged(clientId, parsed, viewerEmail)
+  if (parsed.view === 'priority') return getPriority(clientId, parsed, viewerEmail)
 
   // 必须分页拉全 —— Supabase 单次查询硬顶 1000 行，`.limit(20000)` 会被静默
   // 砍掉且不报错。实测 CTS：库里 1271 条触点只回 1000 条；配合 order desc，
@@ -418,6 +436,7 @@ export async function GET(
     totalContacts: out.length,
     columns: visibleCustomColumns(customPerContact),
     contacts: out,
+    viewerEmail,
   })
 }
 

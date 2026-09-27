@@ -150,3 +150,37 @@ export async function loadRuleFindings(
     return none('not_loaded')
   }
 }
+
+/**
+ * 现场算（live-rules.ts）只给「自助注册、且巡检从没跑过」的客户：clients.source = 'self_serve'，并且 ads_growth_states
+ * 里一条记录都没有（自助转代管后，以第一条巡检记录为切换点）。
+ * - 不按「没登记广告账户」判：巡检名单是主账户列 + client_meta_ad_accounts 两处合起来的（子牙 2026-09-27）；
+ * - 不只按「没有巡检记录」判：广告引擎开关关着的代管客户也永远没有记录，会拿到自助口吻（魏征 2026-09-27）。
+ * 巡检跑过但现在过期 / 拒判的客户照旧显示原因，不现场覆盖。
+ * 读库失败 → 不现场算，第三部分写「没拿到数据」；读得到来源就按来源定口吻，来源都读不到按代管口吻
+ * （对付费代管客户说「我们不会动你的广告」是假话，比自助客户看到「和团队商量」更糟）。
+ */
+export type LiveRulesDecision =
+  | { kind: 'live' }
+  | { kind: 'patrol' }
+  | { kind: 'unavailable'; voice: 'managed' | 'self_serve' }
+
+export async function liveRulesDecision(clientId: string): Promise<LiveRulesDecision> {
+  try {
+    const { data: client, error } = await supabaseAdmin
+      .from('clients')
+      .select('source')
+      .eq('id', clientId)
+      .maybeSingle()
+    if (error || !client) return { kind: 'unavailable', voice: 'managed' }
+    if (client.source !== 'self_serve') return { kind: 'patrol' }
+    const { count, error: countError } = await supabaseAdmin
+      .from('ads_growth_states')
+      .select('client_id', { count: 'exact', head: true })
+      .eq('client_id', clientId)
+    if (countError || count === null) return { kind: 'unavailable', voice: 'self_serve' }
+    return count === 0 ? { kind: 'live' } : { kind: 'patrol' }
+  } catch {
+    return { kind: 'unavailable', voice: 'managed' }
+  }
+}

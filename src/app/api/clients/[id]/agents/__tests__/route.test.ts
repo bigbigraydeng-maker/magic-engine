@@ -10,6 +10,7 @@ let tradeDomains: string[] = ['hot.co.nz']
 let identityRows: Array<{ contact_id: string; value: string }> = []
 let customerRows: Array<Record<string, unknown>> = []
 let contactRows: Array<{ id: string; display_name: string | null }> = []
+let clientIndustry: string | null = 'travel'
 
 /** 可链式调用、也可 await 的 mock：select/eq/in/order 都返回自身。 */
 function chain(result: { data: unknown; error: null }) {
@@ -29,7 +30,10 @@ vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
     from: (table: string) => {
       if (table === 'clients') {
-        return chain({ data: { leads_config: { trade_domains: tradeDomains } }, error: null })
+        // industry: 'travel' —— 这条路由现在也走 clientHasIndustryFeature(id, 'agents') 闸
+        // （2026-09-28，堵 NAL 能看到 CTS 专属同行渠道数据那个漏洞），不给这个字段闸会
+        // 直接判 false、所有 happy path 测试都会先被 403 挡掉。
+        return chain({ data: { leads_config: { trade_domains: tradeDomains }, industry: clientIndustry }, error: null })
       }
       if (table === 'contact_identities') {
         return chain({ data: identityRows, error: null })
@@ -67,6 +71,13 @@ describe('GET /api/clients/[id]/agents', () => {
     identityRows = []
     customerRows = []
     contactRows = []
+    clientIndustry = 'travel'
+  })
+
+  it('🔴 非旅游客户（如 NAL 物流）敲这条 API → 403，不是只藏页面按钮（2026-09-28）', async () => {
+    clientIndustry = 'logistics'
+    const res = await GET(makeReq(), { params: Promise.resolve({ id: 'clientA' }) })
+    expect(res.status).toBe(403)
   })
 
   it('0 条 agent_customers + 2 个 trade 联系人 + 1 个散客 → 2 个 agent、各 customers: []、散客不出现', async () => {

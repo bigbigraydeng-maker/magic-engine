@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { clientHasIndustryFeature } from '@/lib/clients/industry-guard'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendMailReply } from '@/lib/microsoft/mail-send'
 
@@ -16,6 +17,9 @@ export async function POST(req: Request, { params }: Context) {
   const { id } = await params
   const access = await requirePaidClientAccess(id)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
+  if (!(await clientHasIndustryFeature(id, 'agents'))) {
+    return NextResponse.json({ error: '这个功能不适用于你的业务' }, { status: 403 })
+  }
 
   const sentByEmail = access.user?.email
   if (!sentByEmail) {

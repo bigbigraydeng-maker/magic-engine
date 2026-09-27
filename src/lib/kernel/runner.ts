@@ -20,7 +20,7 @@ import type { KernelDeps } from './deps'
 import type { ExecutionResult } from './gateway'
 import { KernelError } from './errors'
 import { authorizeRun, reuseLiveAuthorization } from './authorize'
-import { approveRun, rejectRun } from './human-approval'
+import { approveRun, rejectRun, type HumanDecisionOptions } from './human-approval'
 import { executeAuthorizedRun, rehydrateSucceededRun, type ExecutionFence } from './gateway'
 import { computeIdempotencyKey, computeUnknownActionKey } from './idempotency'
 import {
@@ -543,8 +543,9 @@ export async function approveAndRun(
   deps: KernelDeps,
   runId: string,
   approvedByUser: string,
+  options: HumanDecisionOptions = {}, // 🔴 expectedDecisionId 原样透传——批的必须是人看到的那份
 ): Promise<ActionRunOutcome> {
-  const auth = await approveRun(deps, runId, approvedByUser)
+  const auth = await approveRun(deps, runId, approvedByUser, options)
   if (auth.verdict !== 'allow' || !auth.ctx) {
     return {
       kind: 'denied',
@@ -803,8 +804,9 @@ export async function rejectPendingRun(
   runId: string,
   rejectedByUser: string,
   reason: string,
+  options: HumanDecisionOptions = {}, // 🔴 同上：拒的也必须是人看到的那份
 ): Promise<ActionRunOutcome> {
-  const auth = await rejectRun(deps, runId, rejectedByUser, reason)
+  const auth = await rejectRun(deps, runId, rejectedByUser, reason, options)
   return {
     kind: 'denied',
     run: auth.run,

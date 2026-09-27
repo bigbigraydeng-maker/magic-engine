@@ -520,3 +520,97 @@ describe('分段视图 · 复审补测', () => {
     expect(screen.getByText(/点表头不改顺序/)).toBeTruthy()
   })
 })
+
+/**
+ * 阶段变更那一行：员工必须看得出「是谁判的」+「凭什么判的」。
+ *
+ * 🔴 改之前这一行只显示理由、不显示是谁判的；另一页反过来（显示是谁判的、
+ * 却把 `ai:conversation-read` 这串内部字符串原样给销售看，还把理由丢了）。
+ * 生产上 972 次阶段变更里 972 次是 AI 判的、972 次都写了理由和客人原话 ——
+ * 员工一次都看不到完整的一条。
+ *
+ * PM 2026-09-27 的方向是「让大模型根据互动痕迹判断并给建议」。判得再准，
+ * 看不到凭据就不会有人信 —— 记忆里那条更狠：「不给凭据的一键执行，按两次就没人敢按」。
+ */
+describe('阶段变更那一行 · 谁判的 + 凭什么', () => {
+  /** 一条真实形状的 AI 判断（文案照抄生产库里那 972 条的格式）。 */
+  const aiStageEntry = {
+    kind: 'stage' as const,
+    at: '2026-09-24T02:00:00Z',
+    fromStage: null,
+    toStage: 'contacted',
+    fromLabel: null,
+    toLabel: '已联系',
+    changedBy: 'ai:conversation-read',
+    note: '读往来记录判的：客户对旅游信息感兴趣，已经联系。｜原话：「Hello! I filled out your form」',
+  }
+  const humanStageEntry = {
+    kind: 'stage' as const,
+    at: '2026-09-25T02:00:00Z',
+    fromStage: 'contacted',
+    toStage: 'quoted',
+    fromLabel: '已联系',
+    toLabel: '已报价',
+    changedBy: 'info@ctstours.co.nz',
+    note: null,
+  }
+
+  function stubWithTimeline(timeline: unknown[]) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/timeline')) {
+          return { ok: true, json: async () => ({ timeline, omittedMessages: 0 }) }
+        }
+        if (url.includes('/crm/contacts')) {
+          return {
+            ok: true,
+            json: async () => ({
+              items: [contact('c1', 'Sue Masson')],
+              total: 1,
+              page: 1,
+              perPage: 100,
+              columns: [],
+            }),
+          }
+        }
+        return { ok: true, json: async () => ({ stages: [] }) }
+      }),
+    )
+  }
+
+  it('AI 判的那一条：说人话说出是谁判的，绝不把内部代号给员工看', async () => {
+    stubWithTimeline([aiStageEntry])
+    setUrl('?contact=c1')
+    render(<CrmAllContactsPage />)
+
+    await waitFor(() => expect(screen.getByText(/系统读往来记录判的/)).toBeTruthy())
+    // 🔴 这一条是重点：`ai:conversation-read` 一个字都不许出现在屏幕上
+    expect(screen.queryByText(/ai:conversation-read/)).toBeNull()
+    expect(document.body.textContent).not.toContain('ai:conversation-read')
+  })
+
+  it('凭据要显示出来，而且客人原话不能被吃掉', async () => {
+    stubWithTimeline([aiStageEntry])
+    setUrl('?contact=c1')
+    render(<CrmAllContactsPage />)
+
+    await waitFor(() => expect(screen.getByText(/客户对旅游信息感兴趣/)).toBeTruthy())
+    // 客人自己说的那句话是最硬的凭据，必须留着
+    expect(document.body.textContent).toContain('Hello! I filled out your form')
+    // 「谁判的」那一格已经说过一遍了，理由里的同一句开头要剥掉，别说两遍
+    expect(document.body.textContent).not.toContain('读往来记录判的：客户对旅游信息')
+  })
+
+  it('真人改的那一条：显示是谁改的，不假装有凭据', async () => {
+    stubWithTimeline([humanStageEntry])
+    setUrl('?contact=c1')
+    render(<CrmAllContactsPage />)
+
+    await waitFor(() => expect(screen.getByText(/info 改的/)).toBeTruthy())
+    // 生产上真人改的那 12 条 note 全是空的 —— 人不解释自己，界面也别编一个理由出来
+    expect(document.body.textContent).not.toContain('系统读往来记录判的')
+    // 整个邮箱太长，只显示前缀
+    expect(document.body.textContent).not.toContain('info@ctstours.co.nz')
+  })
+})

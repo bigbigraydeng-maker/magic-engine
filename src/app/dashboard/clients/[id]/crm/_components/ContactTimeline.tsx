@@ -15,16 +15,17 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { AUTO_TAG_ACTOR } from '@/lib/crm/qualified-buyer'
+import { describeStageActor, stageReasonForDisplay } from '@/lib/crm/actors'
 
 /**
  * 「谁改的」的显示名。系统自动打标写的是一个英文标记（审计要机器可读），
  * 中介看到的必须是人话 —— 而且必须看得出这一档不是同事标的。
  */
-function changedByLabel(raw: string): string {
-  if (raw === AUTO_TAG_ACTOR) return '系统自动'
-  return raw.split('@')[0]
-}
+/**
+ * 原来这里自己实现了一份翻译，只认 `AUTO_TAG_ACTOR`，其余一律 `raw.split('@')[0]`
+ * —— 于是 `ai:conversation-read`（生产上 971 次，占了 96%）被**原样丢给销售看**。
+ * 翻译现在只留一份，在 `lib/crm/actors.ts`，两个时间线渲染器共用。
+ */
 
 export interface TimelineEntry {
   kind: 'touch' | 'stage' | 'message'
@@ -258,8 +259,16 @@ function StageRow({ e }: { e: TimelineEntry }) {
       <span>🔀</span>
       <span>
         {e.fromLabel ?? '还没标'} → <span className="font-bold text-me-charcoal/70">{e.toLabel}</span>
-        {e.changedBy ? ` · ${changedByLabel(e.changedBy)}` : ''} · {when(e.at)}
+        {` · ${describeStageActor(e.changedBy)}`} · {when(e.at)}
       </span>
+      {/*
+        凭什么判的 —— 原来这一行把 note 整个丢掉了，而 AI 每一次判断都写了理由
+        和客人原话（生产 971/971）。看不到凭据，销售就不会信这个判断。
+        真人改的那 12 条没有 note，这里自然不显示。
+      */}
+      {stageReasonForDisplay(e.note) && (
+        <span className="text-me-charcoal/40">· {stageReasonForDisplay(e.note)}</span>
+      )}
     </div>
   )
 }

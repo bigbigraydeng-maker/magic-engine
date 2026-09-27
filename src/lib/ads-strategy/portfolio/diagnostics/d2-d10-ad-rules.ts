@@ -665,6 +665,22 @@ export function adLevelCoverage(ctx: AccountContext, input: DiagnosisInput): AdL
   return { ...base, ran: true, reason: 'ok', adsChecked }
 }
 
+/**
+ * How many eligible ads had enough recent delivery and history to be judged at all (buildAdCase non-null).
+ * Read-only companion for Magic Bridge's on-the-spot check: its "looked at N ads" must not count ads the rules
+ * could not judge (魏征 2026-09-27). Does not change what diagnoseAdLevelRules reports.
+ */
+export function adLevelJudgeableCount(ctx: AccountContext, input: DiagnosisInput): number {
+  const adDaily = ctx.account.adDaily
+  if (input.clientPageId === undefined || input.clientPageId === null || adDaily === undefined) return 0
+  const recent = windowDays(ctx.date, RULE_RECENT_DAYS)
+  const baseline = windowDays(shiftDate(ctx.date, -RULE_RECENT_DAYS), RULE_BASELINE_DAYS)
+  const rowsByAd = dedupeByAd(adDaily)
+  const historyStart = historyStartOf(adDaily)
+  return ctx.ads.filter(ad => isEligible(ctx, input, ad)
+    && buildAdCase(ctx, input, ad, rowsByAd.get(ad.entity_id) ?? [], recent, baseline, historyStart) !== null).length
+}
+
 export function diagnoseAdLevelRules(ctx: AccountContext, input: DiagnosisInput): Diagnosis[] {
   if (input.clientPageId === undefined) return []
   const adDaily = ctx.account.adDaily

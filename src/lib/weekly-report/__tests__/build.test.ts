@@ -68,6 +68,29 @@ describe('renderWeeklyReport — 断流 rule', () => {
     },
   }
 
+  it('知会栏：从今日待办挪过来的「系统替你做了什么」出现在周报里，客人写的字要转义', () => {
+    const { html } = renderWeeklyReport([base], '3 Aug 2026', {
+      rows: [{ client_name: 'NM Medspa', what: '本周体检查出 2 个严重 <b>x</b>', how: '不用你挑', href: 'https://app.magicengine.com.au/x' }],
+    })
+    expect(html).toContain('这周系统替你做了什么')
+    expect(html).toContain('NM Medspa')
+    expect(html).not.toContain('<b>x</b>')
+  })
+
+  it('知会栏读挂了要说「没读出来」，不许当成这周没事', () => {
+    const { html } = renderWeeklyReport([base], '3 Aug 2026', { error: 'timeout' })
+    expect(html).toContain('没读出来')
+    expect(html).toContain('不等于这周没事')
+  })
+
+  it('没传知会 / 知会为空 → 不出这一栏；看板新卡数有才报', () => {
+    expect(renderWeeklyReport([base], '3 Aug 2026').html).not.toContain('这周系统替你做了什么')
+    expect(renderWeeklyReport([base], '3 Aug 2026', { rows: [] }).html).not.toContain('这周系统替你做了什么')
+    const withCards = { ...base, auto_changes: { ...base.auto_changes, cards_new_week: 6 } }
+    expect(renderWeeklyReport([withCards], '3 Aug 2026').html).toContain('本周新排了 6 张建议卡')
+    expect(renderWeeklyReport([base], '3 Aug 2026').html).not.toContain('建议卡')
+  })
+
   it('stale social section renders 断流 instead of numbers', () => {
     const { html } = renderWeeklyReport([base], '3 Aug 2026')
     expect(html).toContain('数据断流')
