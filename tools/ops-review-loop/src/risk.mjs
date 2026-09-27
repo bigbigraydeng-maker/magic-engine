@@ -125,6 +125,8 @@ export const A_RISK_RULES = [
   // they can swap which tests run and what runs first (狄仁杰 DR71-1, #2071).
   { pattern: /(^|\/)vitest\.(config|setup|workspace|projects)\.[^/]+$/, why: '测试运行配置 —— 决定哪些测试跑、怎么跑', category: RISK_CATEGORY.CONTROL_PLANE },
   { pattern: /(^|\/)playwright\.config\.[^/]+$/, why: '端到端测试配置 —— 决定哪些页面测试跑', category: RISK_CATEGORY.CONTROL_PLANE },
+  // Not in the repo today; adding one would hand a second runner the tests.
+  { pattern: /(^|\/)jest\.config\.[^/]+$/, why: 'jest 测试配置 —— 新加一个就换了跑测试的方式', category: RISK_CATEGORY.CONTROL_PLANE },
   { pattern: /(^|\/)(eslint\.config\.[^/]+|\.eslintrc[^/]*)$/, why: 'lint 规则配置 —— 一行就能关掉规则', category: RISK_CATEGORY.CONTROL_PLANE },
   { prefix: '.husky/', why: '提交前自动检查钩子', category: RISK_CATEGORY.CONTROL_PLANE },
   // The db-security-invariants red-line scripts: a B PR turning either into
@@ -143,6 +145,11 @@ export const A_RISK_RULES = [
   // Render reads `.node-version` ahead of `.nvmrc`; asdf/mise read `.tool-versions`.
   { basename: '.node-version', why: 'Node 版本锁定（Render 优先读这个）', category: RISK_CATEGORY.BUILD_RUNTIME },
   { basename: '.tool-versions', why: '运行时版本锁定（asdf / mise）', category: RISK_CATEGORY.BUILD_RUNTIME },
+  // Executed as code during `next build`, where production env vars are
+  // present (构建控制 2026-09-27). Babel / SWC config do not exist here; adding
+  // one silently swaps the compiler for every file.
+  { pattern: /(^|\/)(postcss|tailwind)\.config\.[^/]+$/, why: '构建时执行的样式配置 —— 生产构建里跑的代码', category: RISK_CATEGORY.BUILD_RUNTIME },
+  { pattern: /(^|\/)(\.babelrc[^/]*|babel\.config\.[^/]+|\.swcrc)$/, why: '编译器配置 —— 新加一个就换了整站的编译方式', category: RISK_CATEGORY.BUILD_RUNTIME },
 
   // --- Governance: the rulebook the machine and its operators follow ------
   // 🔴 子牙 design review 2026-09-25: `C_SAFE_RULES` rates every `.md` as C, so
@@ -318,26 +325,95 @@ function pathsForEntry(entry) {
 }
 
 /**
- * Read the level the PR author declared, if any. Accepted only as a floor —
- * see `classifyRisk`. Matches the shape the quality-gate template asks for
- * ("风险级别：A"), plus the plain English equivalent.
+ * Labels that introduce a declared level. `STRONG` is this repo's own
+ * convention: a line that opens with one of them is a declaration, so a value
+ * that cannot be read is treated as "declared, unreadable" rather than as
+ * silence. Bare `risk` is common in prose ("Risk: low"), so it only counts
+ * when a level actually follows it.
+ */
+const STRONG_LABEL = '风险级别|风险等级|风险级|risk\\s*level'
+const ANY_LABEL = `${STRONG_LABEL}|risk`
+
+/** A level letter, optionally followed by 级, then a clean boundary. `/` is not one: "A/B/C" is a list, not a level. */
+const LEVEL = '([ABC])(?:\\s*级)?(?=$|[\\s（(,，。;；:：|—-])'
+
+/** Same line: label, optional separator, level. Case-insensitive like before (`Risk Level: a`). */
+const INLINE_RE = new RegExp(`(?:^|[^a-z])(?:${ANY_LABEL})\\s*[:：|]?\\s*${LEVEL}`, 'gi')
+
+/** A line that opens with a strong label (after markdown is stripped): the separator, and what follows it. */
+const STRONG_LINE_RE = new RegExp(`^(?:${STRONG_LABEL})\\s*([:：|]?)\\s*(.*)$`, 'i')
+
+/** A line that opens with the level itself — the line under a `## 风险级` heading. */
+const LEVEL_LINE_RE = new RegExp(`^${LEVEL}`, 'i')
+
+/**
+ * Strip the markdown that authors wrap declarations in: bold, code, heading
+ * marks, list bullets, quote marks and table pipes. `**风险级：A**`,
+ * `风险级：**A**` and `## 风险级别：A` all reduce to `风险级…：A`.
  *
- * A body declaring more than one distinct level is ambiguous, and ambiguity in
- * this direction is a way to smuggle a downgrade past a reader, so it resolves
- * to A rather than to whichever appeared first.
+ * @param {string} line
+ */
+function plainLine(line) {
+  return line
+    .replace(/\*\*|__|`/g, '')
+    .replace(/^[\s>#*+|-]+/, '')
+    .replace(/[\s|]+$/, '')
+}
+
+/**
+ * Read the level the PR author declared. Accepted only as a floor — see
+ * `classifyRisk`.
+ *
+ * 🔴 Incident 2026-09-26 (#2061, #2075): the old parser read only
+ * `风险级别|风险等级|risk level` + colon + letter. #2075 wrote `## 风险级` with
+ * `**A 级**` on the next line, #2061 wrote `风险级：A`; both declared A, neither
+ * was read, both rated B from their files and auto-merged with no review.
+ * So: more labels, colon optional, markdown stripped, and the heading-then-
+ * next-line form. And a line that opens with a strong label but whose level
+ * cannot be read now means "declared, unreadable" → A, not silence: the next
+ * unforeseen spelling must fail closed instead of repeating the incident.
+ *
+ * Still resolves several distinct levels to A — ambiguity is how a downgrade
+ * gets smuggled past a reader. "非 A 级", "不是 A 级", "A/B/C 分级说明" and
+ * "风险分级：见下表" carry no label (or no level) and are not declarations.
+ *
+ * @param {string|null|undefined} body
+ * @returns {{risk: 'A'|'B'|'C'|null, unreadable: string|null}} `unreadable` quotes the line that could not be read
+ */
+export function readDeclaredRisk(body) {
+  if (typeof body !== 'string') return { risk: null, unreadable: null }
+  const lines = body.replace(/<!--[\s\S]*?(-->|$)/g, '').replace(/\r\n/g, '\n').split('\n').map(plainLine)
+  const found = new Set()
+  let unreadable = null
+  lines.forEach((line, i) => {
+    for (const match of line.matchAll(INLINE_RE)) found.add(match[1].toUpperCase())
+    const strong = line.match(STRONG_LINE_RE)
+    if (!strong) return
+    const [, separator, tail] = strong
+    const rest = tail.trim()
+    if (rest !== '' && LEVEL_LINE_RE.test(rest)) return
+    // "风险级别只作下限" is prose about the label, not a declaration: no separator, text follows.
+    if (separator === '' && rest !== '') return
+    // Heading / label with nothing after it: the level is on the next non-empty line.
+    const next = rest === '' ? lines.slice(i + 1).find((l) => l.trim() !== '') : undefined
+    const level = next?.match(LEVEL_LINE_RE)
+    if (level) found.add(level[1].toUpperCase())
+    else unreadable ??= line.slice(0, 60)
+  })
+  if (unreadable !== null) return { risk: 'A', unreadable }
+  if (found.size === 0) return { risk: null, unreadable: null }
+  if (found.size > 1) return { risk: 'A', unreadable: null }
+  return { risk: /** @type {'A'|'B'|'C'} */ ([...found][0]), unreadable: null }
+}
+
+/**
+ * The declared level only. Kept for callers that do not report *why*.
  *
  * @param {string|null|undefined} body
  * @returns {'A'|'B'|'C'|null}
  */
 export function parseDeclaredRisk(body) {
-  if (typeof body !== 'string') return null
-  const found = new Set()
-  for (const match of body.matchAll(/(?:风险级别|风险等级|risk\s*level)\s*[:：]\s*([ABC])\b/gi)) {
-    found.add(match[1].toUpperCase())
-  }
-  if (found.size === 0) return null
-  if (found.size > 1) return 'A'
-  return /** @type {'A'|'B'|'C'} */ ([...found][0])
+  return readDeclaredRisk(body).risk
 }
 
 /** Cap on how many reasons are carried into the marker, so it stays readable. */
@@ -346,10 +422,10 @@ export const MAX_REASONS = 12
 /**
  * Rate a whole PR.
  *
- * @param {{files?: unknown, declaredRisk?: string|null}} input
+ * @param {{files?: unknown, declaredRisk?: string|null, declaredUnreadable?: string|null}} input
  * @returns {{risk: 'A'|'B'|'C', computedRisk: 'A'|'B'|'C', declaredRisk: string|null, readable: boolean, reasons: string[], categories: string[]}}
  */
-export function classifyRisk({ files, declaredRisk = null } = {}) {
+export function classifyRisk({ files, declaredRisk = null, declaredUnreadable = null } = {}) {
   const unreadable = (reason) => ({
     risk: /** @type {'A'} */ ('A'),
     computedRisk: /** @type {'A'} */ ('A'),
@@ -402,7 +478,11 @@ export function classifyRisk({ files, declaredRisk = null } = {}) {
   const declared = typeof declaredRisk === 'string' && RISK_ORDER.includes(declaredRisk) ? declaredRisk : null
   const risk = declared ? higherRisk(computed, declared) : computed
   if (declared && risk !== computed) {
-    reasons.unshift(`PR 自报 ${declared} 级，高于 diff 算出的 ${computed} 级 —— 取更高的一档`)
+    reasons.unshift(
+      typeof declaredUnreadable === 'string'
+        ? `PR 正文写了风险级但读不懂（「${declaredUnreadable}」）—— 按 A 处理；请改成「风险级别：A」这一种写法`
+        : `PR 自报 ${declared} 级，高于 diff 算出的 ${computed} 级 —— 取更高的一档`,
+    )
   }
 
   // Unreadable entries lead, always. They are the reason the rating cannot be

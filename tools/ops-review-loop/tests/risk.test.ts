@@ -26,6 +26,7 @@ import {
   higherRisk,
   maxRoundsForRisk,
   parseDeclaredRisk,
+  readDeclaredRisk,
 } from '../src/risk.mjs'
 
 const file = (filename: string) => ({ filename })
@@ -97,6 +98,9 @@ const A_PATHS: Array<[string, string]> = [
   ['.tool-versions', 'asdf / mise runtime pin'],
   ['.dockerignore', 'keeps .env out of images'],
   ['yarn.lock', 'other lockfiles'],
+  ['jest.config.ts', 'jest config'],
+  ['postcss.config.js', 'build-time style config'],
+  ['.babelrc', 'compiler config'],
 ]
 
 describe('every protected path rates A', () => {
@@ -221,6 +225,13 @@ describe('config and secret files rate A, not B', () => {
     ['yarn.lock', 'supply-chain'],
     ['pnpm-lock.yaml', 'supply-chain'],
     ['npm-shrinkwrap.json', 'supply-chain'],
+    // 构建控制 2026-09-27, folded into the declared-risk PR
+    ['postcss.config.js', 'build-runtime'],
+    ['tailwind.config.ts', 'build-runtime'],
+    ['.babelrc', 'build-runtime'],
+    ['babel.config.js', 'build-runtime'],
+    ['.swcrc', 'build-runtime'],
+    ['jest.config.ts', 'control-plane'],
   ])('%s is A (%s)', (path, category) => {
     const result = rate(path)
     expect(result.risk).toBe('A')
@@ -608,5 +619,99 @@ describe('automated fix-round budget by level', () => {
 
   it('gives an unrecognised level the smallest budget, not the largest', () => {
     expect(maxRoundsForRisk('nonsense')).toBe(1)
+  })
+})
+
+/**
+ * Incident 2026-09-26: #2061 and #2075 declared A in their bodies, the old
+ * parser could not read either spelling, both rated B from their files and
+ * auto-merged unreviewed. Every spelling below is copied from a real PR body
+ * (小秘书 swept 60 open PRs; 子牙 checked; 构建控制 swept 39 merged ones).
+ */
+describe('readDeclaredRisk — the spellings real PR bodies use', () => {
+  it.each([
+    ['风险级：A', '#2061 — 少了「别」'],
+    ['## 风险级\n\n**A 级**（车道本身）', '#2075 — heading, blank line, bold level'],
+    ['## 风险级\nA（自动开发车道）', 'heading, level on the next line'],
+    ['**风险级：A**', '#1703 / #1932 — whole line bold'],
+    ['风险级：**A**', '#1934 — bold after the colon'],
+    ['Risk: A (auth)', '#2027 — no "level"'],
+    ['风险级别：A（控制面）', 'bracketed note'],
+    ['## 风险级别：A（自报，Risk gate 以机器为准）', 'as a heading'],
+    ['**风险级：A（Risk gate 判定）**', 'bold with a note that mentions Risk'],
+    ['## 风险级：A（…）', 'short label as a heading'],
+    ['| 风险级别 | A |', 'table row'],
+    ['- 风险等级：A 级', 'list item with 级'],
+  ])('%j reads as A (%s)', (body) => {
+    expect(readDeclaredRisk(body)).toEqual({ risk: 'A', unreadable: null })
+  })
+
+  it.each([
+    ['**风险级别：A**', 'A'],
+    ['风险级别：A', 'A'],
+    ['风险级别：B\n判定理由：普通读路径', 'B'],
+    ['风险等级: C', 'C'],
+    ['Risk Level: a', 'A'],
+  ])('%j — already readable before the fix, still %s', (body, level) => {
+    expect(parseDeclaredRisk(body)).toBe(level)
+  })
+
+  it.each([
+    '本 PR 非 A 级改动',
+    '这不是 A 级',
+    'A/B/C 分级说明见 docs/ENGINEERING_QUALITY_GATES.md',
+    '风险分级：见下表',
+    '风险级别只作下限，不作上限',
+    'Risk: low, docs only',
+    'high-risk area touched? no',
+    'asterisk: A marks the footnotes',
+    '<!-- 风险级别：C -->',
+  ])('%j is not a declaration', (body) => {
+    expect(readDeclaredRisk(body)).toEqual({ risk: null, unreadable: null })
+  })
+
+  // Fail closed on the NEXT unforeseen spelling instead of repeating the incident.
+  it.each([
+    ['风险级别：见下表', '风险级别：见下表'],
+    ['风险级：B/C 之间', '风险级：B/C 之间'],
+    ['## 风险级\n本 PR 属于 B 级', '风险级'],
+    ['## 风险级别', '风险级别'],
+    ['风险等级：高', '风险等级：高'],
+  ])('%j is a declaration that cannot be read → A, and says which line', (body, quoted) => {
+    expect(readDeclaredRisk(body)).toEqual({ risk: 'A', unreadable: quoted })
+  })
+
+  it('still resolves two different levels to A', () => {
+    expect(parseDeclaredRisk('风险级：C\n…\n**风险级别：A**')).toBe('A')
+    expect(parseDeclaredRisk('Risk: B\n## 风险级\nC')).toBe('A')
+  })
+
+  it('treats non-strings as no declaration', () => {
+    expect(readDeclaredRisk(undefined)).toEqual({ risk: null, unreadable: null })
+    expect(readDeclaredRisk(null)).toEqual({ risk: null, unreadable: null })
+  })
+})
+
+describe('an unreadable declaration is reported as such, not as "自报 A"', () => {
+  it('names the unreadable line and the fix', () => {
+    const declared = readDeclaredRisk('风险级别：见下表')
+    const result = classifyRisk({
+      files: [file('src/lib/geo/score.ts')],
+      declaredRisk: declared.risk,
+      declaredUnreadable: declared.unreadable,
+    })
+    expect(result.risk).toBe('A')
+    expect(result.computedRisk).toBe('B')
+    expect(result.reasons[0]).toBe('PR 正文写了风险级但读不懂（「风险级别：见下表」）—— 按 A 处理；请改成「风险级别：A」这一种写法')
+  })
+
+  it('keeps the plain wording for a readable declaration', () => {
+    const result = classifyRisk({ files: [file('src/lib/geo/score.ts')], declaredRisk: 'A' })
+    expect(result.reasons[0]).toContain('PR 自报 A 级')
+  })
+
+  it('the #2075 body now rates its scripts/auto-dev diff A', () => {
+    const declared = readDeclaredRisk('## 目标\n自动开发车道\n\n## 风险级\n\n**A 级**（车道本身是控制面）\n')
+    expect(classifyRisk({ files: [file('scripts/auto-dev/pick.mjs')], declaredRisk: declared.risk }).risk).toBe('A')
   })
 })
