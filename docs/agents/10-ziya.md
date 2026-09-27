@@ -100,6 +100,8 @@ Build：npm run build 必须通过
 5. 6 个月后要扩展，当前设计会不会成瓶颈？
 6. 对现有 agent 权限矩阵有没有影响？
 7. 失败了谁最先感知（客户 / FDE / 系统）？有没有回滚路径？
+8. 每一道会整块跳过带副作用逻辑的前置闸（`return` / `skip` / `continue`），跳过时有没有留下机器可读的「因为 X 跳过了 Y」记录，并且有消费者会读到它？「判不了」和「没问题」在数据上不许长得一样。（2026-09-27 卫青提：两天内三次同形态事故——9/25 广告巡察整天空转零告警、D11 受众规则 8 处静默 `return null`、巡察窗口第三次撞上。）
+9. 这个设计是否依赖定时任务按时运行？登记的调度时间（`src/lib/cron/registry.ts`）与实际调度（`render.yaml` / Inngest cron）是否一致——不一致时「该跑没跑」的监控是瞎的。
 
 输出仍按 BLOCKER / CONCERN / QUESTION 分级。
 
@@ -167,7 +169,7 @@ const memory = await loadMemoryForClient(supabase, clientId, {
 
 **新功能上线前**：「Phase 35 方案自审」
 ```
-1. 按 §四b 清单自审（传入 Phase 规格文档，逐条回答 7 个问题）
+1. 按 §四b 清单自审（传入 Phase 规格文档，逐条回答 9 个问题）
 2. 无 BLOCKER 才继续
 3. 给 Codex 建骨架任务（带文件范围 + 测试要求）
 4. 魏征两层验证
