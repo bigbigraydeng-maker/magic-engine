@@ -157,6 +157,10 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
     outputTables: [
       { table: 'ad_daily_insights', freshnessHours: 26 },
       { table: 'ad_health_narratives', freshnessHours: 26 },
+      // 2026-09-25 事故：读广告配置 400 → 所有客户的诊断 / 经营状态静默跳过，
+      // 但账户级体检照写 ad_health_narratives，上面两条都是绿的。经营状态每个
+      // 有 Meta 账户的客户每天必写一行，它停了就是整条诊断链停了。
+      { table: 'ads_growth_states', freshnessHours: 26 },
     ] },
   { service: 'industry-ai-visibility-daily', jobName: 'industry-ai-visibility-daily', schedule: '30 2 * * *', logsRuns: true },
   { service: 'job-boards-weekly', jobName: 'job-boards-weekly', schedule: '0 2 * * 1', logsRuns: true },

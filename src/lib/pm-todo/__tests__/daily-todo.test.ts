@@ -180,6 +180,7 @@ describe('buildTodoEmail', () => {
     'attribution_audit_failed',
     'client_list_unreadable',
     'cron_blind',
+    'ads_config_unreadable',
   ] as const)('🛠 %s 走「系统欠账」栏，不进「需要你动手」，不抬高总数', (kind) => {
     const email = buildTodoEmail(3, {
       ...EMPTY,

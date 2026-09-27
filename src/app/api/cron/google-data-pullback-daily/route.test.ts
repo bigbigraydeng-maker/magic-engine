@@ -789,6 +789,63 @@ describe('GET /api/cron/google-data-pullback-daily — 多账户 ad_daily_insigh
     expect(finishArg.error?.startsWith('ad_health')).toBe(true)
   })
 
+  // 2026-09-25 事故：读配置每次 400 → source 'fallback' → 诊断 / 经营状态对所有客户静默跳过，
+  // 运行记录只剩几条不相干的 meta 报错。这一组钉住「读失败必须喊出来」。
+  it('🔴 广告配置读失败 → 计入 failed、进 errors、写进失败原因；诊断和经营状态照旧不跑', async () => {
+    mockGetClientAdAccountIds.mockResolvedValue([AD_ACCOUNT])
+    mockSnapshotTablesExist.mockResolvedValueOnce(true)
+    mockRunPortfolioDiagnostics.mockClear()
+    mockLoadAdStrategyConfigWithSource.mockResolvedValueOnce({
+      config: { enabled: true, digest_recipients: [] },
+      source: 'fallback',
+      error: 'column ad_strategy_configs.autopilot_enabled does not exist',
+    })
+
+    const { GET } = await import('./route')
+    const json = await (await GET(makeRequest(CRON_SECRET))).json()
+
+    expect(mockRunPortfolioDiagnostics).not.toHaveBeenCalled()
+    expect(json.results[0].ad_config).toMatchObject({ success: false })
+    expect(json.results[0].ad_config.error).toContain('autopilot_enabled does not exist')
+    // 这一轮别的都成功 —— failed=1 只能来自配置读失败
+    expect(json.failed).toBe(1)
+    const finishArg = mockCronFinish.mock.calls.at(-1)?.[0] as { error?: string; summary: { errors: Array<{ source: string; error: string }> } }
+    expect(finishArg.error?.startsWith('ad_config:')).toBe(true)
+    expect(finishArg.summary.errors.filter(e => e.source === 'ad_config')).toHaveLength(1)
+  })
+
+  it('🔴 同一轮还有别的计数报错（排在前面）→ 失败邮件头条仍然让给配置读失败', async () => {
+    mockGetClientAdAccountIds.mockResolvedValue([AD_ACCOUNT])
+    const { evaluateClientAdHealth } = await import('@/lib/ads-strategy/evaluate')
+    vi.mocked(evaluateClientAdHealth).mockResolvedValueOnce({ success: false, error: 'judge failed' } as never)
+    mockLoadAdStrategyConfigWithSource.mockResolvedValueOnce({
+      config: { enabled: true, digest_recipients: [] },
+      source: 'fallback',
+      error: 'column ad_strategy_configs.autopilot_enabled does not exist',
+    })
+
+    const { GET } = await import('./route')
+    await GET(makeRequest(CRON_SECRET))
+
+    const finishArg = mockCronFinish.mock.calls.at(-1)?.[0] as { error?: string }
+    expect(finishArg.error?.startsWith('ad_config:')).toBe(true)
+  })
+
+  it('没有配置行（新客户，source default）不算读失败：不进 errors、不计 failed', async () => {
+    mockGetClientAdAccountIds.mockResolvedValue([AD_ACCOUNT])
+    mockLoadAdStrategyConfigWithSource.mockResolvedValueOnce({
+      config: { enabled: true, digest_recipients: [] }, source: 'default',
+    })
+
+    const { GET } = await import('./route')
+    const json = await (await GET(makeRequest(CRON_SECRET))).json()
+
+    expect(json.results[0].ad_config).toBeUndefined()
+    expect(json.failed).toBe(0)
+    const finishArg = mockCronFinish.mock.calls.at(-1)?.[0] as { summary: { errors: Array<{ source: string }> } }
+    expect(finishArg.summary.errors.some(e => e.source === 'ad_config')).toBe(false)
+  })
+
   it('广告组级同步失败不计入 failed（best-effort，同 ad_level）', async () => {
     mockGetClientAdAccountIds.mockResolvedValue([AD_ACCOUNT])
     mockSyncAdsetDailyInsights.mockResolvedValue({ success: false, error: 'adset walk failed' })

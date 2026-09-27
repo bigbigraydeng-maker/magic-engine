@@ -481,3 +481,54 @@ export async function pushMailchimpExportItems(
     })
   }
 }
+
+/** google-data-pullback-daily 每天一轮；超过这个窗口的记录算旧账，不再报。 */
+const ADS_CONFIG_READ_STALE_HOURS = 30
+
+/**
+ * 广告每日回拉读不出广告配置 → 下发到「系统欠账」。
+ *
+ * 为什么单独一条、不靠 `cron_failing`：这个任务常年挂着几条客户 Meta 报错，
+ * 在 `cron_failing` 里永远是「报错」状态 —— 2026-09-25 读配置每次 400、所有客户的
+ * 诊断和经营状态一起停了一天，混在老报错里没人看出来。这条只认 `ad_config` 这一种来源。
+ *
+ * 跟 `pushMailchimpExportItems` 同理：不只挑 completed —— 这类错误本身就会把那一轮标成 failed。
+ */
+export async function pushAdsConfigReadItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('cron_run_logs')
+    .select('finished_at, summary')
+    .eq('job_name', 'google-data-pullback-daily')
+    .not('finished_at', 'is', null)
+    .in('status', ['completed', 'failed'])
+    .order('finished_at', { ascending: false })
+    .limit(1)
+
+  if (error) throw new Error(`cron_run_logs query failed: ${error.message}`)
+
+  const run = (data ?? [])[0] as
+    | { finished_at: string | null; summary: { errors?: Array<{ client_id?: string; source?: string }> } | null }
+    | undefined
+  if (!run?.summary) return
+
+  const hoursOld = run.finished_at ? (now.getTime() - Date.parse(run.finished_at)) / 3_600_000 : null
+  if (hoursOld !== null && hoursOld > ADS_CONFIG_READ_STALE_HOURS) return
+
+  const affected = new Set(
+    (run.summary.errors ?? []).filter((e) => e.source === 'ad_config').map((e) => e.client_id ?? '?'),
+  )
+  if (affected.size === 0) return
+
+  items.push({
+    kind: 'ads_config_unreadable',
+    client_id: 'infra',
+    client_name: 'Magic Engine 后台',
+    what: `广告每日回拉读不出 ${affected.size} 个客户的广告设置 —— 这些客户今天的广告诊断、经营状态和内部日报全部跳过了（广告数据本身照常在拉）。不会自己好，多半是代码上线了、数据库那边对应的字段还没加上`,
+    how: '这条不用你动手 —— 是我们这边代码和数据库没对齐。回我一句「查一下广告配置」我就去对齐，并把这几天漏掉的诊断补跑',
+    href: 'https://app.magicengine.com.au/dashboard/admin/cron-health',
+  })
+}
