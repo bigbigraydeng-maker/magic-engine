@@ -1,8 +1,8 @@
 # 「CRM 管理」底座设计稿 v1（WP-B）
 
-**状态**：B1 已合并（[PR #2161](https://github.com/bigbigraydeng-maker/magic-engine/pull/2161)）。B2 已实现、过子牙+魏征设计复审 + 魏征实现复审（含集成测试抓出的两个真实翻页 bug，均已修），已提审（[PR #2165](https://github.com/bigbigraydeng-maker/magic-engine/pull/2165)）。B3 起未开始，下一个认领窗口从 B3（同行/终端客户筛选 + 批量发送）开始，B2 合并后再动手（B3 的批量发送面板要挂在 PersonDrawer 旁边）。面向 FDE/销售的内部工具改版，板桥复审 B1/B7 的 UX 部分。
+**状态**：B1 已合并（[PR #2161](https://github.com/bigbigraydeng-maker/magic-engine/pull/2161)）。B2 已合并（[PR #2165](https://github.com/bigbigraydeng-maker/magic-engine/pull/2165)）。B4（并发改档保护）已在 B2 一起做完，不再单独算。B3+B5（同行/终端客户筛选 + 批量发邮件 + 分段"今天进度"）已实现、过魏征实现复审（两处真实缺口均已修），已提审（[PR #2166](https://github.com/bigbigraydeng-maker/magic-engine/pull/2166)）。B6 起未开始。面向 FDE/销售的内部工具改版，板桥复审 B1/B7 的 UX 部分。
 **权威说明**：本文件 + `docs/specs/2026-09-28-crm-rebuild-plan.md` WP-B 节。后者定验收，本文件定怎么做。
-**写入者**：本会话（feat/crm-priority-section-ui），唯一。
+**写入者**：本会话（当前分支 feat/crm-kind-filter-b3，前序分支 feat/crm-priority-section-ui → feat/crm-all-contact-drawer-b2，每个工作包独立分支、B1/B2 均已合并），唯一。
 
 ## 背景
 
