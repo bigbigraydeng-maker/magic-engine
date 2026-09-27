@@ -73,8 +73,12 @@ export default function AdsAutoPausePage() {
         return
       }
       // 🔴 批准签了、但暂停没成（执行失败 / 被挡）时接口回 200 + ok:false —— 必须说出来，
-      //    不然卡片一消失，人会以为广告已经停了
-      if (json.ok === false) setError(`没暂停成：${json.humanReason ?? '原因未知'}——广告还在投`)
+      //    不然卡片一消失，人会以为广告已经停了。但「别人刚批了、正在执行」不是没成，不能说广告还在投
+      if (json.kind === 'in_progress' || json.kind === 'idempotent_hit') {
+        setError('这条刚被别人批了，正在暂停——过一会儿刷新看结果，不用再点')
+      } else if (json.ok === false) {
+        setError(`没暂停成：${json.humanReason ?? '原因未知'}——广告还在投`)
+      }
       await load()
     } finally {
       setBusyRunId(null)

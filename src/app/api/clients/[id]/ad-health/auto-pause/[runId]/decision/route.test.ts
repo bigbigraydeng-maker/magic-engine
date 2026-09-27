@@ -17,6 +17,8 @@ const CLIENT = 'c0000000-0000-0000-0000-000000000000'
 const RUN_ID = 'aaaaaaaa-0000-4000-8000-000000000001'
 const SEEN = '11111111-2222-4333-8444-555555555555'
 
+const ledgerWrites: string[] = vi.hoisted(() => [])
+
 const m = vi.hoisted(() => ({
   access: vi.fn(),
   createKernel: vi.fn(),
@@ -33,10 +35,14 @@ vi.mock('@/lib/action-submission/ads-auto-pause', () => ({
   rejectAdsAutoPause: m.reject,
 }))
 vi.mock('@/lib/supabase', () => {
-  // 账表回写：一律「没有这一行」，回写直接跳过
+  // 账表回写：有一行账；update 收到的 payload 记进 ledgerWrites，好断言记了什么
   const chain: Record<string, unknown> = {}
-  for (const k of ['select', 'eq', 'update']) chain[k] = () => chain
-  chain.maybeSingle = async () => ({ data: null, error: null })
+  for (const k of ['select', 'eq']) chain[k] = () => chain
+  chain.update = (patch: { payload: { status: string } }) => {
+    ledgerWrites.push(patch.payload.status)
+    return chain
+  }
+  chain.maybeSingle = async () => ({ data: { id: 'fa-1', payload: {} }, error: null })
   return { supabaseAdmin: { from: () => chain } }
 })
 
@@ -66,6 +72,7 @@ beforeEach(() => {
   })
   m.approve.mockResolvedValue({ runId: RUN_ID, kind: 'succeeded', humanReason: null })
   m.reject.mockResolvedValue({ runId: RUN_ID, kind: 'denied', humanReason: '不批准' })
+  ledgerWrites.length = 0
 })
 
 describe('① 没带看到的那份 → 400，连 Kernel 都不建', () => {
@@ -132,5 +139,23 @@ describe('③ 批准过注册表定的档次闸', () => {
     const res = await post({ resolution: 'approve', expectedDecisionId: SEEN })
     expect(res.status).toBe(200)
     expect(m.approve).toHaveBeenCalled()
+  })
+})
+
+describe('账表只记确定的结果', () => {
+  it.each([
+    ['succeeded', 'paused'],
+    ['dead_letter', 'failed'],
+  ])('%s → 记 %s', async (kind, status) => {
+    m.approve.mockResolvedValueOnce({ runId: RUN_ID, kind, humanReason: null })
+    await post({ resolution: 'approve', expectedDecisionId: SEEN })
+    expect(ledgerWrites).toEqual([status])
+  })
+
+  it.each(['in_progress', 'idempotent_hit'])('🔴 %s（别人刚批了、正在执行）→ 不记「失败」，账一个字不动', async (kind) => {
+    m.approve.mockResolvedValueOnce({ runId: RUN_ID, kind, humanReason: null })
+    const res = await post({ resolution: 'approve', expectedDecisionId: SEEN })
+    expect((await res.json()).kind).toBe(kind)
+    expect(ledgerWrites).toEqual([])
   })
 })

@@ -118,8 +118,10 @@ async function decide(kernel: Kernel, params: RouteParams['params'], body: Decis
       return NextResponse.json({ ok: true, kind: outcome.kind })
     }
     const outcome = await approveAndExecuteAdsAutoPause(kernel, params.runId, actorEmail, body.expectedDecisionId)
-    const status = outcome.kind === 'succeeded' ? 'paused' : 'failed'
-    await updateLedgerStatus(params.id, params.runId, status, { reason: outcome.humanReason })
+    // 🔴 只有确定的结果才记账：in_progress / idempotent_hit = 别人刚批了、正在执行，
+    //    这时记「失败」是假账（广告马上就会停）。结果未定就不动账，由真正执行的那一方记。
+    const status = outcome.kind === 'succeeded' ? 'paused' : outcome.kind === 'dead_letter' || outcome.kind === 'denied' ? 'failed' : null
+    if (status) await updateLedgerStatus(params.id, params.runId, status, { reason: outcome.humanReason })
     return NextResponse.json({ ok: outcome.kind === 'succeeded', kind: outcome.kind, humanReason: outcome.humanReason })
   } catch (e) {
     if (e instanceof KernelError) {
