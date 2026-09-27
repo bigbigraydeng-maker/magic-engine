@@ -14,6 +14,7 @@ const CONFIG: MetaCycleClientConfig = {
   cooldownDays: 30,
   brandVoice: 'factual AU/NZ English',
   keywordFallbackLocations: [],
+  protectedSlugs: [],
 }
 
 function candidate(overrides: Partial<MetaCycleCandidate> = {}): MetaCycleCandidate {
@@ -62,20 +63,20 @@ function fakeSupabase(insertSpy: (row: InsertedRow) => void) {
 }
 
 /** Honors the real adapter's contract: dryRun:true is always a preview (applied:false, skipReason:'dry_run'); dryRun:false returns the configured outcome. */
-function fakeAdapter(realApplyResult: { applied: boolean; skipReason?: string }): ApplyAdapter {
+function fakeAdapter(realApplyResult: { applied: boolean; skipReason?: string }, old: { title: string; desc: string } = { title: 'Old Title', desc: 'Old desc' }): ApplyAdapter {
   return {
     channel: 'pr',
     canEditSlug: async () => true,
     apply: async ({ dryRun, newTitle, newDesc }): Promise<ApplyAdapterResult> => {
       if (dryRun) {
-        return { applied: false, newTitle, newDesc, oldTitle: 'Old Title', oldDesc: 'Old desc', skipReason: 'dry_run' }
+        return { applied: false, newTitle, newDesc, oldTitle: old.title, oldDesc: old.desc, skipReason: 'dry_run' }
       }
       return {
         applied: realApplyResult.applied,
         prUrl: 'https://github.com/x/y/pull/1',
         prNumber: 1,
         branch: 'feat/x',
-        newTitle, newDesc, oldTitle: 'Old Title', oldDesc: 'Old desc',
+        newTitle, newDesc, oldTitle: old.title, oldDesc: old.desc,
         skipReason: realApplyResult.skipReason,
       }
     },
@@ -243,5 +244,66 @@ describe('runStep4Applied — baseline_ctr reaches the seo_meta_log insert (fixe
     expect(result.proposals).toHaveLength(1)
     expect(result.proposals[0].newTitle).toBe('New Title')
     expect(applySpy).toHaveBeenCalledTimes(1) // only the preview call — dry run never calls apply again for real
+  })
+})
+
+// ── Hard, non-AI fact-preservation rule (PM 2026-09-23 incident follow-up) ──
+// Real incident this covers: 2026-09-23 CTS dry run, /china-tours — Jev
+// scored the rewrite "no contradiction" (0.17) even though the new copy
+// silently dropped the departure city Christchurch, the price $6,188, the
+// date 22 Dec 2026, and the TAANZ accreditation. The hard rule must catch
+// this on its own, WITHOUT depending on the AI judge agreeing, and it must
+// not fire on an ordinary reword that keeps every concrete fact.
+
+describe('runStep4Applied — hard fact-preservation rule runs before the AI judge', () => {
+  it('blocks and never calls the AI judge when the new copy drops the old copy\'s price/date/city/accreditation (the real /china-tours incident shape)', async () => {
+    const { runStep4Applied } = await import('../runner')
+    mockCheckFactPreservation.mockClear() // earlier tests in this file call it too; only THIS test's calls matter here
+    let seoMetaLogInsertCount = 0
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const supabase = fakeSupabase(() => { seoMetaLogInsertCount += 1 }) as any
+    const adapter = fakeAdapter(
+      { applied: true },
+      { title: 'China Tours from New Zealand | CTS', desc: 'Auckland & Christchurch departures, from $6,188pp, 22 Dec 2026. TAANZ accredited, backed by our 1928 parent company.' },
+    )
+    const generateMeta = vi.fn().mockResolvedValue({
+      title: 'China Tours from Auckland | CTS',
+      desc: 'Discover authentic China tours with expert local guides. Book your trip with CTS today.',
+    })
+
+    const result = await runStep4Applied(supabase, adapter, CONFIG, '2026-W39', [{ candidate: candidate({ slug: 'china-tours' }), evidence: EVIDENCE }], generateMeta, false)
+
+    expect(mockCheckFactPreservation).not.toHaveBeenCalled()
+    expect(seoMetaLogInsertCount).toBe(0) // never written as a live change
+    expect(result.applied).toHaveLength(0)
+    expect(result.routedManual).toBe(1)
+    expect(result.proposals[0].skipReason).toBe('fact_contradiction_detected')
+    expect(result.proposals[0].factCheckReason).toContain('hard rule')
+    expect(result.proposals[0].factCheckReason).toContain('Christchurch')
+    expect(result.proposals[0].factCheckReason).toContain('$6,188')
+    expect(result.proposals[0].factCheckReason).toContain('TAANZ')
+  })
+
+  it('passes a benign reword that keeps every price/date/city/accreditation and still reaches the AI judge', async () => {
+    const { runStep4Applied } = await import('../runner')
+    mockCheckFactPreservation.mockReset()
+    mockCheckFactPreservation.mockResolvedValue({ consistent: true, reason: 'no contradiction (score 0.10)' })
+    const captured: InsertedRow[] = []
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const supabase = fakeSupabase((row) => { captured.push(row) }) as any
+    const adapter = fakeAdapter(
+      { applied: true },
+      { title: 'Leshan Giant Buddha Day Trip Guide', desc: 'Everything you need to know about visiting the Leshan Giant Buddha near Chengdu.' },
+    )
+    const generateMeta = vi.fn().mockResolvedValue({
+      title: 'Leshan Giant Buddha Day Trip: Complete 2026 Guide',
+      desc: 'Plan your Leshan Giant Buddha visit near Chengdu with this complete guide.',
+    })
+
+    const result = await runStep4Applied(supabase, adapter, CONFIG, '2026-W39', [{ candidate: candidate({ slug: 'leshan-giant-buddha-guide' }), evidence: EVIDENCE }], generateMeta, false)
+
+    expect(mockCheckFactPreservation).toHaveBeenCalledTimes(1)
+    expect(result.applied).toHaveLength(1)
+    expect(captured).toHaveLength(1)
   })
 })

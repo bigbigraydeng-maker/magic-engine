@@ -317,6 +317,16 @@ export async function getCampaignWindowFrequency(
   since: string,
   until: string,
 ): Promise<Map<string, number>> {
+  return (await walkCampaignWindowFrequency(adAccountId, accessToken, since, until)).frequency
+}
+
+/** Same read, but says whether every page came back (Magic Bridge live rules must not judge on a partial map). */
+export async function walkCampaignWindowFrequency(
+  adAccountId: string,
+  accessToken: string,
+  since: string,
+  until: string,
+): Promise<{ frequency: Map<string, number>; complete: boolean }> {
   const params = new URLSearchParams({
     fields: 'campaign_id,frequency',
     time_range: JSON.stringify({ since, until }),
@@ -334,13 +344,13 @@ export async function getCampaignWindowFrequency(
       res = await fetch(url)
     } catch (err) {
       console.error('[meta/client] window frequency fetch error:', err)
-      return out
+      return { frequency: out, complete: false }
     }
 
     if (!res.ok) {
       const body = await res.text().catch(() => '')
       console.error(`[meta/client] window frequency HTTP ${res.status}:`, body.slice(0, 300))
-      return out
+      return { frequency: out, complete: false }
     }
 
     const json = await res.json() as {
@@ -357,5 +367,5 @@ export async function getCampaignWindowFrequency(
     url = json.paging?.next
   }
 
-  return out
+  return { frequency: out, complete: url === undefined }
 }

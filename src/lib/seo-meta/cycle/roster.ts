@@ -44,6 +44,8 @@ export interface MetaCycleRosterEntry {
   brandVoice: string
   /** See MetaCycleClientConfig.keywordFallbackLocations — validated here so a malformed config value can never reach the gate as garbage location_codes. */
   keywordFallbackLocations: number[]
+  /** See MetaCycleClientConfig.protectedSlugs — validated here so a malformed config value can never silently become "protect nothing". */
+  protectedSlugs: string[]
 }
 
 export type RosterResult =
@@ -60,12 +62,43 @@ const DEFAULT_COOLDOWN_DAYS = 30
 const DEFAULT_BRAND_VOICE = 'Professional, factual AU/NZ English. No invented prices, dates, or itinerary details.'
 /** PM 2026-09-20 (fourth pass): at most 2 fallback locations — this is a small, deliberate escape hatch (CTS configures [2036]/AU today), not a general multi-market crawl. */
 const MAX_KEYWORD_FALLBACK_LOCATIONS = 2
+/** Generous cap — a client should only ever need a handful of protected slugs (quote pages, homepage), not a full site list; a cap stops a malformed config from silently disabling the whole cycle. */
+const MAX_PROTECTED_SLUGS = 50
 
 function parseKeywordFallbackLocations(raw: unknown): number[] {
   if (!Array.isArray(raw)) return []
   return raw
     .filter((v): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0)
     .slice(0, MAX_KEYWORD_FALLBACK_LOCATIONS)
+}
+
+/**
+ * Parse and normalize protected slugs from client config.
+ * Returns { slugs, malformed } — malformed:true when the field exists but
+ * is not an array, which means "someone configured protection but it's
+ * broken" and the client must be skipped (silently returning [] would mean
+ * "protect nothing", the opposite of intent).
+ */
+export function parseProtectedSlugs(raw: unknown): { slugs: string[]; malformed: boolean } {
+  if (raw === undefined || raw === null) return { slugs: [], malformed: false }
+  if (!Array.isArray(raw)) return { slugs: [], malformed: true }
+  const slugs = raw
+    .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+    .map((v) => normalizeSlug(v))
+    .filter((v) => v.length > 0)
+    .slice(0, MAX_PROTECTED_SLUGS)
+  return { slugs, malformed: false }
+}
+
+export function normalizeSlug(v: string): string {
+  let s = v.trim()
+  try {
+    const url = new URL(s)
+    s = url.pathname
+  } catch {
+    // not a full URL — continue with raw value
+  }
+  return s.replace(/^\/+|\/+$/g, '').toLowerCase()
 }
 
 /**
@@ -95,6 +128,11 @@ function rowToEntry(row: { id?: unknown; domain?: unknown; semrush_db?: unknown;
   if (typeof row.id !== 'string' || row.id.length === 0) return null
   if (typeof row.domain !== 'string' || row.domain.trim().length === 0) return null
   const cfg = (row.seo_config ?? {}) as Record<string, unknown>
+  const protectedResult = parseProtectedSlugs(cfg.meta_cycle_protected_slugs)
+  if (protectedResult.malformed) {
+    console.error(`[seo-meta-cycle] client ${row.id}: meta_cycle_protected_slugs exists but is not an array — skipping client (treating as empty would mean "protect nothing", the opposite of intent)`)
+    return null
+  }
   return {
     clientId: row.id,
     domain: row.domain.trim(),
@@ -106,6 +144,7 @@ function rowToEntry(row: { id?: unknown; domain?: unknown; semrush_db?: unknown;
     cooldownDays: typeof cfg.meta_cycle_cooldown_days === 'number' && cfg.meta_cycle_cooldown_days > 0 ? cfg.meta_cycle_cooldown_days : DEFAULT_COOLDOWN_DAYS,
     brandVoice: typeof cfg.meta_cycle_brand_voice === 'string' && cfg.meta_cycle_brand_voice.trim().length > 0 ? cfg.meta_cycle_brand_voice : DEFAULT_BRAND_VOICE,
     keywordFallbackLocations: parseKeywordFallbackLocations(cfg.meta_cycle_keyword_fallback_locations),
+    protectedSlugs: protectedResult.slugs,
   }
 }
 
@@ -136,6 +175,7 @@ export function toClientConfig(entry: MetaCycleRosterEntry): MetaCycleClientConf
     cooldownDays: entry.cooldownDays,
     brandVoice: entry.brandVoice,
     keywordFallbackLocations: entry.keywordFallbackLocations,
+    protectedSlugs: entry.protectedSlugs,
   }
 }
 
