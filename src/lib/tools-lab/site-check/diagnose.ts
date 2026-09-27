@@ -124,7 +124,7 @@ export function buildPrompt({ lang, context, market, text, hostname, source }: B
       'summary、title、desc、fix、where、top_opportunity.title 全部用简体中文。',
     ].join('\n\n')
   }
-  // Country tax / year-end / platform facts only when we are reading a real .au/.nz-style homepage;
+  // Country tax / year-end / platform facts only when we read a homepage (the English page targets AU/NZ sites);
   // a visitor without a website may be anywhere (e.g. "Where: Auckland" on the English page).
   const localContext = source === 'homepage'
     ? [`Local context you may use only when the material is relevant to it: financial year ends ${locale.fyEnd}, GST ${locale.gst}, local platforms ${locale.platforms.join(', ')}.`]

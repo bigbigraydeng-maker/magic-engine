@@ -99,7 +99,10 @@ const LINKISH = /(?:https?:\/\/)?(?:[\p{L}\p{N}-]+\.)+\p{L}[\p{L}\p{N}-]*(?:[/?#
 
 /** Make links and domains in email text non-clickable (mail clients auto-link bare addresses). */
 export function defangLinks(value: unknown): string {
-  return String(value ?? '').replace(LINKISH, (m) => m.replace(/^http/i, 'hxxp').replace(/\./g, '[.]'))
+  return String(value ?? '')
+    .replace(LINKISH, (m) => m.replace(/\./g, '[.]'))
+    // Any remaining scheme (IP or localhost links such as http://45.12.3.4/login) is broken too.
+    .replace(/\bhttp(s?):\/\//gi, 'hxxp$1://')
 }
 
 /** Registrable-ish site identity: hostname without a leading www. */

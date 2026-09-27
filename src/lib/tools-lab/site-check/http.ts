@@ -31,12 +31,35 @@ export function preflight(req: NextRequest): NextResponse {
   return new NextResponse(null, { status: 204, headers: corsHeaders(req.headers.get('origin')) })
 }
 
+/** Read at most `cap` bytes of the body, stopping early (no declared length needed); null when larger. */
+async function readCapped(req: NextRequest, cap: number): Promise<string | null> {
+  const reader = req.body?.getReader()
+  if (!reader) return null
+  const chunks: Uint8Array[] = []
+  let size = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      size += value.byteLength
+      if (size > cap) {
+        await reader.cancel().catch(() => undefined)
+        return null
+      }
+      chunks.push(value)
+    }
+  } catch {
+    return null
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks))
+}
+
 /** Parse a small JSON object body; null for anything oversized, malformed or not an object. */
 export async function readSmallJson(req: NextRequest): Promise<Record<string, unknown> | null> {
   const declared = Number(req.headers.get('content-length') || '0')
   if (declared > MAX_BODY_BYTES) return null
-  const raw = await req.text().catch(() => '')
-  if (!raw || raw.length > MAX_BODY_BYTES) return null
+  const raw = await readCapped(req, MAX_BODY_BYTES)
+  if (!raw) return null
   try {
     const parsed: unknown = JSON.parse(raw)
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null

@@ -520,13 +520,13 @@ const SCOUT_ERRORS = {
 
 const REPORT_ERRORS = {
   already_sent: ['Already sent', 'The report for this check has already been emailed. Please check your inbox (and spam).', '已经发过了', '这次诊断的报告已经发过了，请查收邮箱（也看看垃圾邮件箱）。'],
-  recipient_limit: ['Already sent today', 'This email address has already received a report today. Please try again tomorrow.', '今天已经发过', '这个邮箱今天已经收过一份报告了，明天再试。'],
+  recipient_limit: ['Already requested today', 'This email address has already requested a report today. Please try again tomorrow; if nothing arrived, email hello@magicengine.cloud.', '今天已经申请过', '这个邮箱今天已经申请过一次报告，明天再试；如果没收到，写信到 hello@magicengine.cloud。'],
   daily_limit: ['Limit reached', 'You have reached today\'s email limit. Please try again tomorrow.', '今天发不了了', '你今天发报告的次数已经用完，明天再试。'],
   site_busy: ['Limit reached', 'Today\'s report emails have all been sent. Please try again tomorrow.', '今天发不了了', '今天的报告邮件名额已经用完，明天再试。'],
   invalid_email: ['Check your email', 'That email address does not look right. Please check it.', '邮箱不对', '这个邮箱地址看起来不对，请检查一下。'],
   report_not_ready: ['Not available', 'The full report for this check is not available. Please run the check again.', '报告不可用', '这次诊断的完整报告拿不到了，请重新诊断一次。'],
   not_saved: ['Email not available', 'We could not save the full report this time, so it cannot be emailed. The findings above are real.', '暂时发不了邮件', '完整报告这次没保存下来，所以发不了邮件；上面这几条结果是真实的。'],
-  send_failed: ['Not sent yet', 'We could not send the report this time. Please try again later, or email hello@magicengine.cloud.', '还没发出去', '这次没能发出报告，请过一会儿再试，或写信到 hello@magicengine.cloud。'],
+  send_failed: ['Not sent yet', 'We could not send the report this time. Please use another email address, try again tomorrow, or email hello@magicengine.cloud.', '还没发出去', '这次没能发出报告。请换一个邮箱，或明天再试，或写信到 hello@magicengine.cloud。'],
 };
 
 function showReportState(delivered, code) {
@@ -593,6 +593,11 @@ function renderResult(data) {
   }
 
   container.innerHTML = html;
+
+  // Each result starts with a fresh email area (a previous check's "sent" state must not linger).
+  document.querySelector('.email-form-wrap')?.classList.remove('hidden');
+  const sentEl = document.querySelector('.email-sent');
+  if (sentEl) { sentEl.classList.remove('show'); sentEl.setAttribute('data-state', 'pending'); }
 
   // No saved lead → no report can be sent: say so instead of offering an email form that can never work.
   if (!data.leadId) {
