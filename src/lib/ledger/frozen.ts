@@ -8,22 +8,24 @@ export interface FrozenFieldViolation {
   headValue: string
 }
 
-/**
- * 比对一张已在 base 上的台账卡，检查冻结字段是否被改写。
- * baseText = null 表示新卡（base 上不存在），跳过检查。
- */
+export interface FrozenFieldResult {
+  violations: FrozenFieldViolation[]
+  parseError: LedgerParseError | null
+  baseParseError: LedgerParseError | null
+}
+
 export function checkFrozenFields(
   file: string,
   headText: string,
   baseText: string | null,
-): { violations: FrozenFieldViolation[]; parseError: LedgerParseError | null } {
-  if (baseText === null) return { violations: [], parseError: null }
+): FrozenFieldResult {
+  if (baseText === null) return { violations: [], parseError: null, baseParseError: null }
 
   const baseResult = parseLedgerFile(file, baseText)
-  if (!baseResult.ok) return { violations: [], parseError: null }
+  if (!baseResult.ok) return { violations: [], parseError: null, baseParseError: baseResult.error }
 
   const headResult = parseLedgerFile(file, headText)
-  if (!headResult.ok) return { violations: [], parseError: headResult.error }
+  if (!headResult.ok) return { violations: [], parseError: headResult.error, baseParseError: null }
 
   const violations: FrozenFieldViolation[] = []
   const fieldMap: Record<FrozenField, keyof typeof baseResult.entry> = {
@@ -44,5 +46,5 @@ export function checkFrozenFields(
     }
   }
 
-  return { violations, parseError: null }
+  return { violations, parseError: null, baseParseError: null }
 }

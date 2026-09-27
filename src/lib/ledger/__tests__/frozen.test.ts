@@ -103,11 +103,12 @@ describe('checkFrozenFields', () => {
     expect(parseError).not.toBeNull()
   })
 
-  it('base 解析失败 → 跳过检查（老卡不合法不拦新改动）', () => {
+  it('base 解析失败 → 跳过检查但返回 baseParseError', () => {
     const baseText = '这不是合法的台账文件'
     const headText = fm(BASE_FIELDS)
-    const { violations, parseError } = checkFrozenFields('2026-09-24-foo.md', headText, baseText)
+    const { violations, parseError, baseParseError } = checkFrozenFields('2026-09-24-foo.md', headText, baseText)
     expect(violations).toEqual([])
     expect(parseError).toBeNull()
+    expect(baseParseError).not.toBeNull()
   })
 })
