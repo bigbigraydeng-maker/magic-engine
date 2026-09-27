@@ -21,10 +21,17 @@
  *     period whose end is already in the past — see rolloverMonthlyGoals) —
  *     this is a continuation of an approved monthly commitment, not a fresh
  *     draft that needs FDE activation.
+ *   - Stopping recurrence (archiveGoal / setGoalRecurrence in goals.ts) only
+ *     ever clears the *current* row. Older ancestor rows in the same chain
+ *     keep recurrence='monthly' forever, so the scan below still selects
+ *     them on every run. rolloverMonthlyGoals must detect a stop by finding
+ *     that a later period already exists with recurrence no longer 'monthly'
+ *     and stop walking forward right there — otherwise an ancestor row keeps
+ *     resurrecting the chain past the point where an FDE explicitly ended it.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { GoalRow } from '@/types/strategy'
+import type { GoalRow, GoalRecurrence } from '@/types/strategy'
 
 /**
  * Given the previous period's end ISO date, return the first and last day of
@@ -98,13 +105,25 @@ export async function rolloverMonthlyGoals(
 
   // Include both 'expired' (just flagged by flagExpiredGoals) and 'archived'
   // (verdict already written) — either is a valid template for the next month.
-  // Skip 'draft' (never active) and 'active' (period must have ended).
+  // Skip 'draft' (never active).
+  //
+  // 'active' is normally excluded too (period must have ended), EXCEPT in
+  // dry-run: the caller (cron route) skips step 1 (flagExpiredGoals) entirely
+  // when dry-run, so a goal that just crossed period_end is still 'active'
+  // here even though the very next real run would flip it to 'expired' before
+  // this scan runs. Without this, dry-run would report "nothing to roll over"
+  // for a goal the real run rolls over moments later — a false negative for
+  // whoever is reading the dry-run output to sanity-check the real run.
+  const statusesToScan: string[] = dryRun
+    ? ['expired', 'archived', 'active']
+    : ['expired', 'archived']
+
   const { data: expiredGoals, error: fetchError } = await supabase
     .from('goals')
     .select('*')
     .eq('recurrence', 'monthly')
     .lt('period_end', todayIso)
-    .in('status', ['expired', 'archived'])
+    .in('status', statusesToScan)
 
   if (fetchError) {
     return { planned: [], rolled: [], skipped_existing: [], error: fetchError.message }
@@ -136,13 +155,16 @@ export async function rolloverMonthlyGoals(
       // Pre-check keeps output clean: without it every steady-state run would
       // log an insert attempt that the unique index then rejected. Index is
       // still the source of truth on race.
+      //
+      // Not filtered to recurrence='monthly' — we need to see a row for this
+      // period regardless of its current recurrence, so a stopped chain (see
+      // note atop this file) is detected instead of silently re-created.
       const { data: existing, error: checkError } = await supabase
         .from('goals')
-        .select('id')
+        .select('id, recurrence')
         .eq('client_id', goal.client_id)
         .eq('primary_metric_key', goal.primary_metric_key)
         .eq('period_start', nextStart)
-        .eq('recurrence', 'monthly')
         .limit(1)
 
       if (checkError) {
@@ -151,6 +173,14 @@ export async function rolloverMonthlyGoals(
 
       if (existing && existing.length > 0) {
         skippedExisting.push(plan)
+        const existingRecurrence = (existing[0] as { recurrence?: GoalRecurrence }).recurrence
+        if (existingRecurrence !== 'monthly') {
+          // This period already exists but recurrence was cleared on it — an
+          // FDE stopped the chain here. `goal` is an older ancestor row whose
+          // own recurrence flag was never touched by that stop action; do not
+          // keep walking forward and resurrecting months past the stop point.
+          break
+        }
       } else if (dryRun) {
         // no-op: dry run never writes
       } else {

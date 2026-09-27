@@ -378,6 +378,69 @@ describe('rolloverMonthlyGoals — catch-up after missed months', () => {
   })
 })
 
+describe('rolloverMonthlyGoals — stopped chain must not resurrect', () => {
+  it('stops at the period where recurrence was cleared, even though an older ancestor row is still monthly', async () => {
+    const septGoal = makeGoal({
+      id: 'sept',
+      status: 'expired',
+      period_start: '2026-09-01',
+      period_end: '2026-09-30',
+    })
+    // Oct was created by an earlier rollover run, then the FDE stopped the
+    // chain on it. archiveGoal/setGoalRecurrence (goals.ts) only ever clear
+    // recurrence on the row being acted on — Sept is untouched and still
+    // says 'monthly'.
+    const octGoal = makeGoal({
+      id: 'oct',
+      status: 'archived',
+      period_start: '2026-10-01',
+      period_end: '2026-10-31',
+      recurrence: null,
+    })
+    const { client, insertLog } = fakeSupabase([septGoal, octGoal])
+
+    const result = await rolloverMonthlyGoals(client, { today: '2026-11-15' })
+
+    expect(result.error).toBeUndefined()
+    expect(insertLog).toHaveLength(0) // must NOT recreate November
+    expect(result.rolled).toHaveLength(0)
+    expect(result.skipped_existing).toHaveLength(1) // found Oct, chain stopped there
+  })
+})
+
+describe('rolloverMonthlyGoals — dry_run simulates the expiry flip', () => {
+  it('includes an active goal whose period already ended, as flagExpiredGoals would flag it in the real run', async () => {
+    const activeButEnded = makeGoal({
+      id: 'active-ended',
+      status: 'active',
+      period_start: '2026-09-01',
+      period_end: '2026-09-30',
+    })
+    const { client, insertLog } = fakeSupabase([activeButEnded])
+
+    const result = await rolloverMonthlyGoals(client, { today: '2026-10-01', dryRun: true })
+
+    expect(result.planned).toHaveLength(1)
+    expect(result.planned[0].next_period_start).toBe('2026-10-01')
+    expect(insertLog).toHaveLength(0) // dry run never writes
+  })
+
+  it('a real (non-dry-run) call ignores that same active-but-ended goal — step 1 must flip it first', async () => {
+    const activeButEnded = makeGoal({
+      id: 'active-ended-2',
+      status: 'active',
+      period_start: '2026-09-01',
+      period_end: '2026-09-30',
+    })
+    const { client, insertLog } = fakeSupabase([activeButEnded])
+
+    const result = await rolloverMonthlyGoals(client, { today: '2026-10-01' })
+
+    expect(result.planned).toHaveLength(0)
+    expect(insertLog).toHaveLength(0)
+  })
+})
+
 describe('rolloverMonthlyGoals — month boundaries', () => {
   it('December goal rolls into January of the next year', async () => {
     const decGoal = makeGoal({
