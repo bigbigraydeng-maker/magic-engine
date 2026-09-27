@@ -8,7 +8,7 @@ source: doc:docs/ledger/2026-09-26-ads-d3-migration-applied-to-prod.md
 done_on: 2026-09-27
 done_ref: doc:docs/ledger/2026-09-27-growth-states-missing-0925-root-cause.md
 verify_by: 2026-10-04
-verify_how: 查最近 7 天 ads_growth_states 每天是不是都有 6 行（缺任一天 = 又出现同类静默，立刻交回 PM）。防复发（把 ads_growth_states 加进 cron registry 的 outputTables）尚未落地、单独开卡见 doc:docs/ledger/2026-09-27-ads-growth-states-outputtables-registry.md，本卡验的只是「这次根因是否复发」，不要把那张卡的完成状态并进本卡
+verify_how: 防复发已在本卡同一改动里落地（`src/lib/cron/registry.ts` 的 google-data-pullback-daily outputTables 已含 ads_growth_states，见 commit 938cd01），查它没被后续改动移除即可。再查最近 7 天 ads_growth_states 每天是不是都有 6 行（缺任一天 = 又出现同类静默，立刻交回 PM）
 ---
 统筹 2026-09-27 派查：`ads_growth_states`（广告每日巡察结论表，是广告刹车第 5 条判据「数据不全 → 当天冻结」的输入）2026-09-25 整天零行、六客户全缺，而 9/24、9/26 都正常。要判是①没触发 ②跑了报错 ③跑完写库失败。
 
@@ -25,7 +25,17 @@ verify_how: 查最近 7 天 ads_growth_states 每天是不是都有 6 行（缺�
 `cron/registry.ts` 里该 job 声明的产出表只有 `ad_daily_insights`、`ad_health_narratives`（各 26 小时），**`ads_growth_states` 没登记**；而 `cron/health.ts` 的「沉默死」检测**只查声明了 outputTables 的表，未声明 = 不查**。
 9/25 于是出现双重巧合：**没登记的表零行 → 检测照不到；已登记的 `ad_health_narratives` 那天反而有行**（体检部分写在闸门之前）→ 新鲜度检查通过、显示健康。两边都不报。
 
-**修法：一行配置** —— 把 `ads_growth_states`（freshnessHours: 26）加进该 job 的 `outputTables`。B 级、极小。卫青未擅自改，等统筹/PM 点头——**这条还没做**，单独开卡追踪：doc:docs/ledger/2026-09-27-ads-growth-states-outputtables-registry.md。
+**修法：一行配置** —— 把 `ads_growth_states`（freshnessHours: 26）加进该 job 的 `outputTables`。B 级、极小。
+**✅ 2026-09-27 已做**（统筹授权）：本卡同一个改动里已加上，并在 registry 里就地写了注释说明为什么补登记。以后这张表零行会被沉默死检测自己报出来。
+验证：`src/lib/cron` 全部测试跑过，**2 个失败经对比 origin/main 原版确认是既有基线红**（registry 与 render.yaml 调度对账、reel-batch-render 无人认领），我的改动只 +6 行、未引入新失败。
+
+**顺手挖出的第三个监控问题（不在本次修复范围，建议独立修）**：那条基线红的详情显示 **8 个定时任务在 registry 里登记的调度时间跟 render.yaml 实际不一致**，普遍早 10–14 小时，疑似 NZ/UTC 时区混淆：
+- `google-data-pullback-daily`：登记 `0 3 * * *` vs 实际 `0 17 * * *`（**就是广告巡察这个**）
+- `ad-entity-snapshot`：登记 `30 */3` vs 实际 `30 */6`（**频率差一倍**）
+- 另有 `ai-tracker-weekly`、`goal-current-value-refresh`、`industry-ai-visibility-daily` 等，共 8 个
+**影响**：健康检测用 registry 的 schedule 判「该跑没跑」（overdue）。时间错 14 小时 → 这 8 个任务的逾期判定全部失准，可能误报逾期、也可能在真没跑时漏报。
+（我自己今晚也差点因为算错这个 job 的运行时间误报「今早巡察没跑」——核了 render.yaml 才发现还没到点。人和机器踩的是同一个坑。）
+另有一条同族基线红：`inngest/functions/reel-batch-render.ts` 设计上要定时跑，却不在任何名单里 = 没人监控它跑没跑。
 
 ## 对熔断实现的提醒（已转统筹，含一处需要改口的结论）
 第 5 条判据「数据不全 → 冻结」只处理**已经写出行**、`data_completeness='partial'` 的情况；`buildGrowthState` 只有跑到底并成功 upsert 才会写这个字段。9/25 这种「整段被前置闸门跳过、行压根没写」的场景，不落在这条判据的判定范围内——**没有行就没有 `partial` 值可读，既不是「判定为冻结」也不是「判定为放行」，是压根没有可供下游消费的判据或回执**。上一版把这次结果记成「正确 fail-closed」是错的：那句话默认了「零行」等价于「判定冻结」，但实际上下游（看板、日报、`ads-rule-finding-items.ts` 那类只读消费者）拿到的是「查不到今天这行」，跟「查到了、判定 partial」是两种不同状态，前者目前没有专门处理，读的人分不清是「今天没数据所以没判」还是「压根没跑」。**熔断要能区分「有输入但判定不冻结」「有输入且判定 partial」「压根没有输入行」三种，第三种目前无信号**，必须让消费方把「当日行不存在」单独当 fail-closed 处理，不能默认已经安全。
