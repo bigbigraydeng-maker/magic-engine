@@ -1,6 +1,6 @@
 # 「CRM 管理」底座设计稿 v1（WP-B）
 
-**状态**：B1 已实现、已送两轮复审、已提审（PR #2161）。B2 已实现（详情换 PersonDrawer + suggestedChannel 字段修复 + expectedFromStage 并发保护 + drawer-nav 接线），过了子牙+魏征两轮设计复审、正在做实现复审。B3 起未开始。面向 FDE/销售的内部工具改版，板桥复审 B1/B7 的 UX 部分。
+**状态**：B1 已合并（[PR #2161](https://github.com/bigbigraydeng-maker/magic-engine/pull/2161)）。B2 已实现、过子牙+魏征设计复审 + 魏征实现复审（含集成测试抓出的两个真实翻页 bug，均已修），已提审（[PR #2165](https://github.com/bigbigraydeng-maker/magic-engine/pull/2165)）。B3 起未开始，下一个认领窗口从 B3（同行/终端客户筛选 + 批量发送）开始，B2 合并后再动手（B3 的批量发送面板要挂在 PersonDrawer 旁边）。面向 FDE/销售的内部工具改版，板桥复审 B1/B7 的 UX 部分。
 **权威说明**：本文件 + `docs/specs/2026-09-28-crm-rebuild-plan.md` WP-B 节。后者定验收，本文件定怎么做。
 **写入者**：本会话（feat/crm-priority-section-ui），唯一。
 
