@@ -1,12 +1,10 @@
 ---
 id: 2026-09-28-autofix-risk-gate
 title: 自动修复机器人推代码前先查风险级别——A 级不推送，B/C 推送后留改动记录评论
-status: done
+status: decided
 owner: agent
 decided_on: 2026-09-28
 source: session:d973200f
-done_on: 2026-09-28
-done_ref: pr:2157
 verify_by: 2026-10-05
 verify_how: 让一个 A 级 PR 触发 Codex 审查→机器人不推送、只留中文评论；再让一个 B/C 级 PR 触发→机器人正常推送并留改动文件+审查链接评论。两个场景各观察一次即可。
 ---

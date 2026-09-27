@@ -222,8 +222,11 @@ switch (plan.action) {
     // the grade is A or unreadable.
     let riskGrade = 'A'
     let riskError = null
+    let riskReasons = []
+    let gradedHead = null
     try {
       const prData = await getPullRequest(token, owner, repo, pr)
+      gradedHead = prData?.head?.sha ?? null
       const prBody = typeof prData?.body === 'string' ? prData.body : ''
       const declared = readDeclaredRisk(prBody)
       const files = await listPullRequestFiles(token, owner, repo, pr)
@@ -237,21 +240,34 @@ switch (plan.action) {
         declaredUnreadable: declared.unreadable,
       })
       riskGrade = rating.risk
+      riskReasons = rating.reasons ?? []
     } catch (err) {
       riskError = err instanceof Error ? err.message : String(err)
     }
 
     if (riskGrade === 'A' || riskError) {
+      // Dedup: one "A-level blocked" comment per head sha is enough.
+      // Without this, every Codex review on the same A-level sha posts
+      // another identical comment.
+      const alreadyBlocked = markers.some((m) => m.stage === 'a-level-blocked' && m.sha === sha)
+      if (alreadyBlocked) {
+        console.log(`A-level PR #${pr} already has a-level-blocked marker for ${sha} — not posting again`)
+        setOutput('action', 'a-level-blocked')
+        break
+      }
       const reason = riskError
         ? `风险判定失败（${riskError}），按 A 处理`
-        : '改动文件命中 A 级规则'
+        : riskReasons.length
+          ? riskReasons.join('；')
+          : '改动文件命中 A 级规则'
       const reviewLink = `https://github.com/${owner}/${repo}/pull/${pr}#pullrequestreview-${review.id}`
+      const marker = buildMarker({ stage: 'a-level-blocked', pr, sha })
       await createIssueComment(
         token,
         owner,
         repo,
         pr,
-        `**这是 A 级改动，自动修复不推送**\n\n${reason}。请作者自己处理这条审查意见：${reviewLink}`,
+        `**这是 A 级改动，自动修复不推送**\n\n${reason}。请作者自己处理这条审查意见：${reviewLink}\n\n${marker}`,
       )
       console.log(`A-level PR #${pr} — skipping auto-fix dispatch (${reason})`)
       setOutput('action', 'a-level-blocked')
@@ -274,6 +290,7 @@ switch (plan.action) {
     setOutput('risk_grade', riskGrade)
     setOutput('findings_summary', actionableFindings.map((f) => f.source).join(', '))
     setOutput('review_id', String(review.id))
+    if (gradedHead) setOutput('graded_head', gradedHead)
     break
   }
   default:

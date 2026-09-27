@@ -52,11 +52,12 @@ export async function compareCommits(token, owner, repo, base, head) {
 }
 
 export async function listPullRequestFiles(token, owner, repo, pullNumber) {
+  const PAGE_CAP = 30
   const files = []
-  for (let page = 1; page <= 30; page++) {
+  for (let page = 1; page <= PAGE_CAP; page++) {
     const batch = await request(token, `/repos/${owner}/${repo}/pulls/${pullNumber}/files?per_page=100&page=${page}`)
     files.push(...batch)
     if (batch.length < 100) return files
   }
-  return files
+  throw new Error(`改动文件超过 ${PAGE_CAP * 100} 上限，无法读全`)
 }
