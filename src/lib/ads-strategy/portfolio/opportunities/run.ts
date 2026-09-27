@@ -12,6 +12,7 @@
  */
 
 import { buildAccountContext } from '../diagnostics/context'
+import { scopeAccountToClient } from '../diagnostics/ownership'
 import { findHotCreatives } from './o1-hot-creative'
 import { findFunnelGap } from './o2-funnel-gap'
 import { findBudgetMismatch } from './o3-budget-mismatch'
@@ -39,8 +40,26 @@ export function runOpportunities(input: DiagnosisInput, completeness: DataComple
 
   const opportunities: Diagnosis[] = []
 
-  for (const account of input.accounts) {
+  for (const raw of input.accounts) {
+    // 跟诊断同一道切分：别的主页的系列/广告组不算这个客户的机会（被排除的实体由诊断那边的 excluded 列出）
+    const scoped = scopeAccountToClient(raw, input.clientPageId, input.date)
+    const account = scoped.account
     const ctx = buildAccountContext(account, input.date)
+
+    if (scoped.accountLevelOnly) {
+      opportunities.push({
+        code: 'O1',
+        status: 'not_comparable',
+        notComparableReason: 'client_page_unknown',
+        title: '客户没登记 Facebook 主页、账户里又有多个主页的广告，不做机会发现',
+        units: [],
+        evidence: { ad_account_id: account.adAccountId },
+        sample: [],
+        reasons: ['分不清哪些广告组是这个客户的，机会判断会把别人的实体算进来'],
+        clientVisible: false,
+      })
+      continue
+    }
 
     if (account.shared) {
       // §14 M9：同一账户登记给多个客户，机会判断会把别人的实体算进来，整段不做

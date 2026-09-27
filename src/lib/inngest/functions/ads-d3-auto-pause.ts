@@ -15,7 +15,9 @@
  *      不带具体数字，只有 `client_id / insight_date / diagnostic_run_id`
  *      （子牙复审：防止客户事实混进事件契约本身）。
  *   3. 每一条 D3 命中：共用账户再查一次（诊断层已经在共用账户上跳过 D3，
- *      这里是第二道防线）→ 算幂等键 → dry-run 就只记账，否则提交 Kernel
+ *      这里是第二道防线）→ 回库核实这个广告组名下广告全挂客户登记的主页
+ *      （诊断层已按主页切过，这里是第二道防线；客户没登记主页 / 读失败一律拦）
+ *      → 算幂等键 → dry-run 就只记账，否则提交 Kernel
  *      → 等人批准（本函数只提交，不执行；执行发生在 PM/FDE 点「批准」时，
  *      见 `src/lib/action-submission/ads-auto-pause.ts`）。
  *
@@ -43,6 +45,7 @@ import type { Diagnosis, DiagnosisRun } from '@/lib/ads-strategy/portfolio/diagn
 import { submitAdsAutoPauseCandidate } from '@/lib/action-submission/ads-auto-pause'
 import { buildD3GrowthCandidate } from '@/lib/ads-strategy/portfolio/d3-growth-candidate'
 import { validateGrowthActionCandidate } from '@/lib/growth'
+import { ownershipOfAds, type AdsetOwnership } from '@/lib/ads-strategy/portfolio/diagnostics/ownership'
 
 /** 云端专属事件——本机 worker 不监听（见 client.ts 的 WORKER_OWNED_EVENTS）。 */
 export const ADS_DIAGNOSTICS_COMPLETED_EVENT = 'ads.diagnostics.completed_for_client'
@@ -75,8 +78,19 @@ export interface D3AutoPauseDeps {
   loadConfig: (clientId: string) => Promise<AdStrategyConfig>
   loadDiagnosisRun: (clientId: string, insightDate: string) => Promise<DiagnosisRun | null>
   isSharedAccount: (clientId: string, adAccountId: string) => Promise<boolean>
+  /** 这个广告组是不是这个客户的（名下广告全挂客户登记的主页）。读失败 / 判不了必须返回非 own。 */
+  verifyAdsetOwnership: (clientId: string, adAccountId: string, adsetId: string) => Promise<AdsetOwnershipCheck>
   submitCandidate: typeof submitAdsAutoPauseCandidate
 }
+
+export type AdsetOwnershipCheck =
+  | { readonly owned: true; readonly adsChecked: number; readonly clientPageId: string }
+  | {
+    readonly owned: false
+    /** read_failed / capture_stale = 系统没法核实（记 failed）；其余 = 核实过不是 / 客户没登记主页（记 blocked） */
+    readonly verdict: Exclude<AdsetOwnership, 'own'> | 'client_page_unknown' | 'read_failed' | 'capture_stale'
+    readonly detail: string
+  }
 
 async function loadDiagnosisRun(
   supabase: SupabaseClient,
@@ -105,12 +119,74 @@ async function isSharedAccount(
   return shared.has(adAccountId.startsWith('act_') ? adAccountId.slice(4) : adAccountId)
 }
 
+/** 近多少天的广告快照算「这个广告组名下的广告」——跟诊断 loader 读快照的窗口一致。 */
+const OWNERSHIP_LOOKBACK_DAYS = 35
+/** 单个广告组近 35 天广告快照行数上限；读满视为可能截断，判不了（fail closed）。 */
+const OWNERSHIP_ROW_LIMIT = 1000
+/** 广告层快照最近一轮必须抓全、且不早于这么多小时前（快照每 3 小时一轮）——否则新加进组的别家广告看不到。 */
+const OWNERSHIP_MAX_CAPTURE_AGE_HOURS = 24
+
+/**
+ * 回库核实：这个广告组是不是这个客户的（名下广告在近 35 天每一行快照里挂的都是客户登记主页）。
+ * 🔴 看每一行而不是每条广告最后一行：广告换过主页，前半段的花费可能是别家的（魏征 2026-09-27）。
+ * 🔴 广告层快照最近一轮没抓全 / 太旧 → 判不了（快照看不到新加进组的别家广告）。
+ */
+export async function verifyAdsetOwnership(
+  supabase: SupabaseClient,
+  clientId: string,
+  adAccountId: string,
+  adsetId: string,
+  now: Date = new Date(),
+): Promise<AdsetOwnershipCheck> {
+  const client = await supabase.from('clients').select('facebook_page_id').eq('id', clientId).maybeSingle()
+  if (client.error) return { owned: false, verdict: 'read_failed', detail: `读客户登记主页失败：${client.error.message}` }
+  const pageId = (client.data as { facebook_page_id: string | null } | null)?.facebook_page_id ?? null
+  if (!pageId) return { owned: false, verdict: 'client_page_unknown', detail: '客户没登记 Facebook 主页，确认不了这个广告组是不是这个客户的' }
+
+  const capture = await supabase.from('ad_snapshot_captures').select('complete, captured_at')
+    .eq('client_id', clientId).eq('ad_account_id', adAccountId).eq('level', 'ad')
+    .order('captured_at', { ascending: false }).limit(1).maybeSingle()
+  if (capture.error) return { owned: false, verdict: 'read_failed', detail: `读广告层快照抓取记录失败：${capture.error.message}` }
+  const last = capture.data as { complete: boolean; captured_at: string } | null
+  const ageHours = last ? (now.getTime() - Date.parse(last.captured_at)) / 3_600_000 : Infinity
+  if (!last || !last.complete || !(ageHours <= OWNERSHIP_MAX_CAPTURE_AGE_HOURS)) {
+    return { owned: false, verdict: 'capture_stale', detail: `广告层快照最近一轮${last ? (last.complete ? `是 ${Math.round(ageHours)} 小时前` : '没抓全') : '找不到'}，看不到这个广告组里最新的广告` }
+  }
+
+  const since = new Date(now.getTime() - OWNERSHIP_LOOKBACK_DAYS * 86_400_000).toISOString()
+  const ads = await supabase.from('ad_entity_snapshots')
+    .select('entity_id, creative_page_id, capture_reason')
+    .eq('client_id', clientId).eq('ad_account_id', adAccountId).eq('level', 'ad').eq('adset_id', adsetId)
+    .gte('captured_at', since)
+    .order('captured_at', { ascending: false }).limit(OWNERSHIP_ROW_LIMIT)
+  if (ads.error) return { owned: false, verdict: 'read_failed', detail: `读广告快照失败：${ads.error.message}` }
+  const rows = (ads.data ?? []) as Array<{ entity_id: string; creative_page_id: string | null; capture_reason: string }>
+  if (rows.length >= OWNERSHIP_ROW_LIMIT) return { owned: false, verdict: 'read_failed', detail: '广告快照行数读满上限，可能没读全' }
+
+  const seen = rows.filter(r => r.capture_reason !== 'disappeared')
+  const verdict = ownershipOfAds(seen, pageId)
+  if (verdict === 'own') return { owned: true, adsChecked: new Set(seen.map(r => r.entity_id)).size, clientPageId: pageId }
+  const detail = verdict === 'other_page'
+    ? '这个广告组名下的广告挂在别的 Facebook 主页上，不是这个客户的'
+    : verdict === 'mixed_pages'
+      ? '这个广告组名下混着别的 Facebook 主页的广告（或有广告换过主页）'
+      : '读不到这个广告组名下广告挂在哪个 Facebook 主页'
+  return { owned: false, verdict, detail }
+}
+
 export function createD3AutoPauseDeps(): D3AutoPauseDeps {
   return {
     supabase: supabaseAdmin,
     loadConfig: (clientId) => loadAdStrategyConfigWithSource(clientId).then((r) => r.config),
     loadDiagnosisRun: (clientId, insightDate) => loadDiagnosisRun(supabaseAdmin, clientId, insightDate),
     isSharedAccount: (clientId, adAccountId) => isSharedAccount(supabaseAdmin, clientId, adAccountId),
+    verifyAdsetOwnership: async (clientId, adAccountId, adsetId) => {
+      try {
+        return await verifyAdsetOwnership(supabaseAdmin, clientId, adAccountId, adsetId)
+      } catch (err) {
+        return { owned: false, verdict: 'read_failed', detail: `核实归属出错：${err instanceof Error ? err.message : String(err)}` }
+      }
+    },
     submitCandidate: submitAdsAutoPauseCandidate,
   }
 }
@@ -122,6 +198,7 @@ export interface D3HitOutcome {
     | 'awaiting_approval'
     | 'idempotent_hit'
     | 'skipped_shared_account'
+    | 'skipped_not_client_owned'
     | 'skipped_already_recorded'
     | 'kernel_denied'
     | 'kernel_dead_letter'
@@ -203,6 +280,27 @@ export async function processD3Hit(
     return { adset_id: unit.id, outcome: 'skipped_shared_account' }
   }
 
+  // 第二道防线：诊断层已按创意主页切掉别人的广告组；这里出手前回库再核一次，dry-run 也要过
+  // （dry-run 记账写「会提交 Kernel」必须是真的会）。
+  const ownership = await deps.verifyAdsetOwnership(args.clientId, unit.adAccountId, unit.id)
+  if (!ownership.owned) {
+    // 系统没法核实 ≠ 核实过不是：前者记 failed，别让人以为「查过了、是别人的」（子牙 2026-09-27）
+    const systemCouldNotVerify = ownership.verdict === 'read_failed' || ownership.verdict === 'capture_stale'
+    await recordFlywheelAction(deps.supabase, args.clientId, {
+      status: systemCouldNotVerify ? 'failed' : 'blocked',
+      idempotency_key: idempotencyKey,
+      diagnosis_code: 'D3',
+      diagnostic_run_id: args.diagnosisRunId,
+      insight_date: args.insightDate,
+      ad_account_id: unit.adAccountId,
+      adset_id: unit.id,
+      adset_name: unit.name,
+      ownership_verdict: ownership.verdict,
+      reason: `确认不了这个广告组是这个客户的，不自动出手：${ownership.detail}`,
+    })
+    return { adset_id: unit.id, outcome: 'skipped_not_client_owned' }
+  }
+
   const candidate = buildD3GrowthCandidate({
     clientId: args.clientId,
     insightDate: args.insightDate,
@@ -228,6 +326,8 @@ export async function processD3Hit(
     diagnosis_title: args.diagnosis.title,
     diagnosis_evidence: args.diagnosis.evidence,
     growth_candidate_valid: validation.ok,
+    // 批准的人要看得见：提交时核过归属、依据几条广告（子牙 2026-09-27）
+    ownership: { verdict: 'own', ads_checked: ownership.adsChecked, client_page_id: ownership.clientPageId },
   }
 
   const freshConfig = await deps.loadConfig(args.clientId)
@@ -249,7 +349,11 @@ export async function processD3Hit(
     insightDate: args.insightDate,
     triggeredByRef: args.diagnosisRunId,
     rationale: args.diagnosis.title,
-    evidence: { diagnosis: args.diagnosis.evidence, sample: args.diagnosis.sample },
+    evidence: {
+      diagnosis: args.diagnosis.evidence,
+      sample: args.diagnosis.sample,
+      ownership: { verdict: 'own', ads_checked: ownership.adsChecked, client_page_id: ownership.clientPageId },
+    },
   })
 
   if (result.ok && result.outcome === 'pending_approval') {

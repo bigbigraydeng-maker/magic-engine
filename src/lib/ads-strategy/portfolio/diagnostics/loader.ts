@@ -14,8 +14,9 @@ import { loadAdStrategyConfig } from '@/lib/ads-strategy/config'
 import type { EntitySnapshotRow } from '../snapshot'
 import { loadOutcomeConfig } from '../outcome-config'
 import { buildAccountContext, localDayEndUtc, shiftDate } from './context'
+import { scopeAccountToClient } from './ownership'
 import { d1NeedsHourly } from './d1-delivery-stall'
-import type { AccountInput, AudienceCountPoint, CaptureCoverage, DailyRow, DiagnosisInput, HourlyRow, SettingChange } from './types'
+import type { AccountInput, AdPageSighting, AudienceCountPoint, CaptureCoverage, DailyRow, DiagnosisInput, HourlyRow, SettingChange } from './types'
 import { D1_REPEAT_LOOKBACK_DAYS } from './thresholds'
 
 const PAGE = 1000
@@ -123,6 +124,17 @@ export function latestAdRowsEver(rows: readonly EntitySnapshotRow[]): EntitySnap
   return Array.from(latest.values())
 }
 
+/** 近 35 天每条广告挂过的每个创意主页（非「消失」行，按 广告×广告组×主页 去重）。 */
+export function adPageSightings(rows: readonly EntitySnapshotRow[]): AdPageSighting[] {
+  const seen = new Map<string, AdPageSighting>()
+  for (const r of rows) {
+    if (r.level !== 'ad' || r.capture_reason === 'disappeared') continue
+    const key = `${r.entity_id}|${r.adset_id ?? ''}|${r.creative_page_id ?? ''}`
+    if (!seen.has(key)) seen.set(key, { entity_id: r.entity_id, adset_id: r.adset_id, creative_page_id: r.creative_page_id })
+  }
+  return Array.from(seen.values())
+}
+
 async function readAll<T>(build: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>): Promise<T[]> {
   const out: T[] = []
   for (let from = 0; ; from += PAGE) {
@@ -156,7 +168,7 @@ async function loadAdDaily(clientId: string, adAccountId: string, date: string):
   return Array.from(byKey.values())
 }
 
-async function loadAccount(clientId: string, adAccountId: string, shared: boolean, date: string): Promise<AccountInput> {
+async function loadAccount(clientId: string, adAccountId: string, shared: boolean, date: string, clientPageId: string | null): Promise<AccountInput> {
   const tzRow = await supabaseAdmin.from('ad_entity_snapshots').select('timezone_name, currency')
     .eq('client_id', clientId).eq('ad_account_id', adAccountId).eq('level', 'account')
     .order('captured_at', { ascending: false }).limit(1).maybeSingle()
@@ -205,9 +217,11 @@ async function loadAccount(clientId: string, adAccountId: string, shared: boolea
     settingChanges,
     audienceHistory,
     recentAds: latestAdRowsEver(snapshots),
+    adPageHistory: adPageSightings(snapshots),
   }
 
-  if (d1NeedsHourly(buildAccountContext(account, date))) {
+  // 预筛跟 D1 用同一口径（只看客户自己的广告组）：别人的花费掩盖客户掉量时也要拉小时数据
+  if (d1NeedsHourly(buildAccountContext(scopeAccountToClient(account, clientPageId, date).account, date))) {
     const token = await getMetaTokenForClient(clientId)
     if (!token) {
       account.hourlyError = 'no Meta token'
@@ -233,14 +247,14 @@ async function loadClientPageId(clientId: string): Promise<string | null> {
 export async function loadDiagnosisInput(clientId: string, date: string, evaluatedAt: string): Promise<DiagnosisInput> {
   const accountIds = await getClientAdAccountIds(clientId)
   const { shared } = await findSharedAdAccounts(clientId, accountIds)
+  const clientPageId = await loadClientPageId(clientId)
   const accounts: AccountInput[] = []
   for (const id of accountIds) {
-    accounts.push(await loadAccount(clientId, id, shared.has(id.replace(/^act_/, '')), date))
+    accounts.push(await loadAccount(clientId, id, shared.has(id.replace(/^act_/, '')), date, clientPageId))
   }
-  const [outcome, strategy, clientPageId] = await Promise.all([
+  const [outcome, strategy] = await Promise.all([
     loadOutcomeConfig(clientId),
     loadAdStrategyConfig(clientId),
-    loadClientPageId(clientId),
   ])
   return {
     clientId, date, evaluatedAt,

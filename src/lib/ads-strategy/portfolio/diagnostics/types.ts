@@ -180,6 +180,17 @@ export interface AccountInput {
    * D11 算供血花费用：被归档的供血广告窗口内花过的钱也要算上（2026-09-27 魏征）。缺省 = 只看当前在的广告。
    */
   recentAds?: EntitySnapshotRow[]
+  /**
+   * 近 35 天每条广告挂过的每个创意主页（非「消失」行去重）。归属判定用（ownership.ts）：广告换过主页，
+   * 只看最后一行会把前半段别家花的钱算给客户（2026-09-27 魏征）。缺省 = 只看当前快照 + recentAds。
+   */
+  adPageHistory?: AdPageSighting[]
+}
+
+export interface AdPageSighting {
+  entity_id: string
+  adset_id: string | null
+  creative_page_id: string | null
 }
 
 export interface DiagnosisInput {
@@ -207,7 +218,10 @@ export interface ExcludedEntity {
   level: 'campaign' | 'adset' | 'account'
   id: string
   name: string | null
-  reason: 'meta_experiment' | 'shared_account'
+  /**
+   * other_page / mixed_pages / page_unknown：按创意主页判不是（或确认不了是）这个客户的广告组/系列（ownership.ts）。
+   */
+  reason: 'meta_experiment' | 'shared_account' | 'other_page' | 'mixed_pages' | 'page_unknown'
   detail: string
 }
 
