@@ -35,6 +35,8 @@ import { pushFacebookSyncFailingItems } from './facebook-sync-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
+import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
+import { pushDataDeletionFailureItems } from './data-deletion-items'
 import {
   buildCrawlHealthItems,
   buildNotIndexedItems,
@@ -237,6 +239,10 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     (b) => pushPaidSignalReviewItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 待确认付款读取失败（不阻塞其他待办）:', e),
     ),
+    // Magic Bridge 免费名额快用完 —— 用满后新客户这个月就生成不了报告（PM 定的全平台上限）
+    (b) => pushMagicBridgeQuotaItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] Magic Bridge 免费额度待办生成失败（不阻塞其他待办）:', e),
+    ),
   ]
 }
 
@@ -302,6 +308,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 每日广告巡检的广告级规则（D2 / D10）—— 只读，要不要改由人定；同一件事按 remind-cadence 节奏提醒
     (b) => pushAdsRuleFindingItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 广告级规则待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // Facebook 删除数据请求处理失败 —— 失败不许只写日志（铁律 3）
+    (b) => pushDataDeletionFailureItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 删除数据请求失败待办生成失败（不阻塞其他待办）:', e),
     ),
     // 客户之间有没有串台 —— PM 2026-08-05：「坚决不能胡窜」。
     // 实测查到 CTS 的发布通道指向 Oztop 的网站，填错两个多月没人发现。

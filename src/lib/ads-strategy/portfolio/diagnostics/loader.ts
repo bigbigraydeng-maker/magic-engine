@@ -15,7 +15,7 @@ import type { EntitySnapshotRow } from '../snapshot'
 import { loadOutcomeConfig } from '../outcome-config'
 import { buildAccountContext, localDayEndUtc, shiftDate } from './context'
 import { d1NeedsHourly } from './d1-delivery-stall'
-import type { AccountInput, CaptureCoverage, DailyRow, DiagnosisInput, HourlyRow, SettingChange } from './types'
+import type { AccountInput, AudienceCountPoint, CaptureCoverage, DailyRow, DiagnosisInput, HourlyRow, SettingChange } from './types'
 import { D1_REPEAT_LOOKBACK_DAYS } from './thresholds'
 
 const PAGE = 1000
@@ -41,6 +41,7 @@ export function hourlyRowsFromGraph(rows: GraphHourlySpendRow[]): HourlyRow[] {
 const KEY_FIELDS = [
   'status', 'daily_budget_minor', 'lifetime_budget_minor', 'bid_strategy', 'optimization_goal',
   'destination_type', 'included_audience_ids', 'excluded_audience_ids', 'creative_video_ids', 'creative_page_id',
+  'audience_rule_object_ids', 'audience_rule_events', 'audience_retention_days',
 ] as const
 
 function keyFieldsChanged(prev: EntitySnapshotRow, row: EntitySnapshotRow): boolean {
@@ -66,7 +67,7 @@ function isRealChange(prev: EntitySnapshotRow | null, row: EntitySnapshotRow): b
  * 🔴 快照的 changed 不等于 Meta 那边真改了：我们自己加字段、两个写入程序序列化不一致都会记成 changed
  *    （2026-09-26 魏征生产核实：9/15 后约一半 changed 行 Meta 修改时间没动）。所以：
  *    - 前后两行都有 source_updated_time → 只认它变了（Meta 的修改时间是权威）；
- *    - 任一缺 → 退回比关键字段（状态、预算、出价、优化目标、去向、受众 id、素材视频、创意主页），不比 targeting_summary（它正是被加字段污染的那个）；
+ *    - 任一缺 → 退回比关键字段（状态、预算、出价、优化目标、去向、受众 id、素材视频、创意主页、受众收人规则与保留期），不比 targeting_summary（它正是被加字段污染的那个）；
  *    - 窗口里找不到前一行 → 只有 source_updated_time 落在抓取时刻前 2 天内才认。
  * 变更时刻优先用 source_updated_time，没有才用 captured_at。
  */
@@ -106,6 +107,20 @@ export function latestSnapshotsAsOf(rows: EntitySnapshotRow[], asOfMs: number): 
     if (!prev || r.captured_at > prev.captured_at) latest.set(key, r)
   }
   return Array.from(latest.values()).filter(r => r.capture_reason !== 'disappeared')
+}
+
+/**
+ * 窗口内出现过的广告，每条取最后一行非「消失」快照（含后来被归档/删除的）。
+ * D11 算供血花费用：被归档的供血广告窗口内花过的钱也要算上（2026-09-27 魏征）。
+ */
+export function latestAdRowsEver(rows: readonly EntitySnapshotRow[]): EntitySnapshotRow[] {
+  const latest = new Map<string, EntitySnapshotRow>()
+  for (const r of rows) {
+    if (r.level !== 'ad' || r.capture_reason === 'disappeared') continue
+    const prev = latest.get(r.entity_id)
+    if (!prev || r.captured_at > prev.captured_at) latest.set(r.entity_id, r)
+  }
+  return Array.from(latest.values())
 }
 
 async function readAll<T>(build: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>): Promise<T[]> {
@@ -168,6 +183,9 @@ async function loadAccount(clientId: string, adAccountId: string, shared: boolea
   ])
 
   const settingChanges = realSettingChanges(snapshots)
+  const audienceHistory: AudienceCountPoint[] = snapshots
+    .filter(r => r.level === 'audience' && r.capture_reason !== 'disappeared')
+    .map(r => ({ entity_id: r.entity_id, captured_at: r.captured_at, audience_count_lower: r.audience_count_lower }))
 
   const account: AccountInput = {
     adAccountId, shared, timezone, currency,
@@ -185,6 +203,8 @@ async function loadAccount(clientId: string, adAccountId: string, shared: boolea
     lastInsightDate: (lastRow.data as { insight_date: string } | null)?.insight_date ?? null,
     adDaily: shared ? undefined : await loadAdDaily(clientId, adAccountId, date),
     settingChanges,
+    audienceHistory,
+    recentAds: latestAdRowsEver(snapshots),
   }
 
   if (d1NeedsHourly(buildAccountContext(account, date))) {
