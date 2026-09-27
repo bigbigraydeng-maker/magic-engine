@@ -2707,22 +2707,33 @@ describe('人工触发身份：不许随便自报（两层闸）', () => {
   const readCode = (f: string) => stripComments(readFileSync(join(ROOT, f), 'utf8'), f)
   const runtimeFiles = ALL_FILES.filter((f) => !isTest(f))
 
-  it('🔴 第一层：只有白名单目录能传 triggeredBy: \'human\'', () => {
-    expect(
-      offendersIn(runtimeFiles, readCode).outsideAllowedDirs,
-      '这些文件声称「人按的」却不在 HUMAN_TRIGGER_ALLOWED_DIRS 里 —— ' +
-        '传它 = 跳过 AI 信封的学习期 / 冷却 / 20% / 日上限四条闸',
-    ).toEqual([])
-  })
+  it(
+    '🔴 第一层：只有白名单目录能传 triggeredBy: \'human\'',
+    () => {
+      expect(
+        offendersIn(runtimeFiles, readCode).outsideAllowedDirs,
+        '这些文件声称「人按的」却不在 HUMAN_TRIGGER_ALLOWED_DIRS 里 —— ' +
+          '传它 = 跳过 AI 信封的学习期 / 冷却 / 20% / 日上限四条闸',
+      ).toEqual([])
+    },
+    // 🔴 扫描整仓运行时文件（剥注释 + 正则）。CI 上实测跑到 6.3s，触发
+    //    Vitest 默认 5s 超时——不是判据坏了，是这两条本来就该比默认值慢。
+    //    15s 留出约 2.4 倍余量，本地/CI 都验过在这个上限内。
+    15_000,
+  )
 
-  it('🔴 第二层：白名单目录里传它，也必须过鉴权', () => {
-    // 白名单只管「哪个目录」，管不了「目录里那个文件是不是不需要登录就能打到」。
-    // 一条在允许目录里、匿名可达的路由照样能硬写 'human'，第一层抓不到它。
-    expect(
-      offendersIn(runtimeFiles, readCode).withoutAuth,
-      '这些文件声称「人按的」却没有任何鉴权调用 —— 没有东西证明真有人在',
-    ).toEqual([])
-  })
+  it(
+    '🔴 第二层：白名单目录里传它，也必须过鉴权',
+    () => {
+      // 白名单只管「哪个目录」，管不了「目录里那个文件是不是不需要登录就能打到」。
+      // 一条在允许目录里、匿名可达的路由照样能硬写 'human'，第一层抓不到它。
+      expect(
+        offendersIn(runtimeFiles, readCode).withoutAuth,
+        '这些文件声称「人按的」却没有任何鉴权调用 —— 没有东西证明真有人在',
+      ).toEqual([])
+    },
+    15_000,
+  )
 
   it('🔴 这两条闸真的能抓到东西（真实磁盘探针，因为现在生产代码里是零个）', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'human-trigger-gate-'))
