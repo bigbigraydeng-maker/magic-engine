@@ -30,6 +30,8 @@ import {
   KERNEL_RUNNER_SOURCE_MODULES,
   KERNEL_RUNNER_SYMBOLS,
   MIGRATION_VERSION_COLLISIONS_GRANDFATHERED,
+  HUMAN_TRIGGER_ALLOWED_DIRS,
+  HUMAN_TRIGGER_REQUIRED_AUTH_CALLS,
 } from '../boundaries'
 import { outwardBlockReason } from '../outward-authorization'
 import { createKernelDeps, type KernelDeps } from '../deps'
@@ -2666,5 +2668,100 @@ describe('熔断解除：写 release 行的唯一入口（v2.5 §6.4）', () => 
       candidates,
       '解除路由应当被 writesReleaseRow 判据识别为写入者；扫不到说明判据已失效',
     ).toContain('src/app/api/admin/ads/circuit/release/route.ts')
+  })
+})
+
+/**
+ * 「这是人按的」不许随便自报 —— 两层闸。
+ *
+ * 判据与理由见 `boundaries.ts` 的 `HUMAN_TRIGGER_ALLOWED_DIRS` 注释。一句话：
+ * `triggeredBy: 'human'` 让动作走人工止损信封，而那套信封刻意不看学习期 /
+ * 72h 冷却 / 变动 ≤20% / 日预算上限。**谁能填它，谁就能跳过 AI 信封那五条闸。**
+ * 而 `runner.ts` 对这个字段零校验。
+ *
+ * 🔴 **这两条闸现在盯着的是"零个文件"**（生产代码里还没人传 `'human'`，
+ *    止损路由接上时才会有第一个）。所以下面第三条用**真实磁盘探针**证明判据本身有效 ——
+ *    否则前两条会在判据失效时同样是绿的（今天反复吃到的「绿有两种来路」）。
+ */
+describe('人工触发身份：不许随便自报（两层闸）', () => {
+  const AUTH_CALL_RE = new RegExp(
+    `\\b(${HUMAN_TRIGGER_REQUIRED_AUTH_CALLS.join('|')})\\s*\\(`,
+  )
+
+  /** 判「这个文件会不会声称人按的」。剥注释后按字面量判 —— 注释里提到不算。 */
+  function claimsHumanTrigger(code: string): boolean {
+    return /triggeredBy:\s*'human'/.test(code) || /triggered_by:\s*'human'/.test(code)
+  }
+
+  function offendersIn(files: readonly string[], readCode: (f: string) => string) {
+    const claimers = files.filter((f) => claimsHumanTrigger(readCode(f)))
+    return {
+      claimers,
+      outsideAllowedDirs: claimers.filter(
+        (f) => !HUMAN_TRIGGER_ALLOWED_DIRS.some((dir) => f.startsWith(dir)),
+      ),
+      withoutAuth: claimers.filter((f) => !AUTH_CALL_RE.test(readCode(f))),
+    }
+  }
+
+  const readCode = (f: string) => stripComments(readFileSync(join(ROOT, f), 'utf8'), f)
+  const runtimeFiles = ALL_FILES.filter((f) => !isTest(f))
+
+  it('🔴 第一层：只有白名单目录能传 triggeredBy: \'human\'', () => {
+    expect(
+      offendersIn(runtimeFiles, readCode).outsideAllowedDirs,
+      '这些文件声称「人按的」却不在 HUMAN_TRIGGER_ALLOWED_DIRS 里 —— ' +
+        '传它 = 跳过 AI 信封的学习期 / 冷却 / 20% / 日上限四条闸',
+    ).toEqual([])
+  })
+
+  it('🔴 第二层：白名单目录里传它，也必须过鉴权', () => {
+    // 白名单只管「哪个目录」，管不了「目录里那个文件是不是不需要登录就能打到」。
+    // 一条在允许目录里、匿名可达的路由照样能硬写 'human'，第一层抓不到它。
+    expect(
+      offendersIn(runtimeFiles, readCode).withoutAuth,
+      '这些文件声称「人按的」却没有任何鉴权调用 —— 没有东西证明真有人在',
+    ).toEqual([])
+  })
+
+  it('🔴 这两条闸真的能抓到东西（真实磁盘探针，因为现在生产代码里是零个）', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'human-trigger-gate-'))
+    try {
+      // ① 白名单目录**外**、且有鉴权 —— 只该被第一层抓到
+      const outside = 'src/app/api/whatever/route.ts'
+      // ② 白名单目录**内**、但没有鉴权 —— 只该被第二层抓到
+      const inside = 'src/lib/ads-strategy/submission/rogue.ts'
+      // ③ 白名单目录内 + 有鉴权 —— 两层都该放行（这是合法形态）
+      const legit = 'src/lib/ads-strategy/submission/stop-loss-submission.ts'
+      // ④ 只在**注释**里提到 'human' —— 不该被当成 claimer
+      const commentOnly = 'src/lib/ads-strategy/submission/notes.ts'
+
+      const sources: Record<string, string> = {
+        [outside]: `await requireGlobalAdmin()
+submitActionRun({ triggeredBy: 'human' })`,
+        [inside]: `submitActionRun({ triggeredBy: 'human' })`,
+        [legit]: `await requireDashboardClientAccess(id)
+submitActionRun({ triggeredBy: 'human' })`,
+        [commentOnly]: `// 这里**不**传 triggeredBy: 'human'，理由见 boundaries.ts
+export const x = 1`,
+      }
+      const files = Object.keys(sources)
+      for (const f of files) {
+        const full = join(tmp, f.split('/').pop() as string)
+        writeFileSync(full, sources[f], 'utf8')
+      }
+      const read = (f: string) => stripComments(sources[f], f)
+      const result = offendersIn(files, read)
+
+      expect(result.outsideAllowedDirs, '第一层应当只抓到白名单目录外那一个').toEqual([outside])
+      expect(result.withoutAuth, '第二层应当只抓到没鉴权那一个').toEqual([inside])
+      expect(result.claimers, '合法形态不该被抓；只在注释里提到的更不该被抓').toEqual([
+        outside,
+        inside,
+        legit,
+      ])
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
   })
 })

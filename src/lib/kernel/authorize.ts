@@ -428,8 +428,18 @@ export async function preflight(deps: KernelDeps, run: ActionRun, now: Date): Pr
     }
 
     // 🔴 人按的「收」类动作走另一套信封（`HUMAN_STOP_ENVELOPE`），不走 AI 自治信封。
-    //    `triggered_by` 取的是 `action_runs` 那一列 —— 提交时由 Kernel 自己写，**不经请求体**，
-    //    所以「人按的」这个身份不是调用方自报的（同 §6.4 对解除接口 actor 的要求）。
+    //    `triggered_by` 取的是 `action_runs` 那一列。
+    //
+    // 🔴 **这里原来写着「提交时由 Kernel 自己写、不经请求体，所以不是调用方自报的」——
+    //    那句话是误导性的，我自己写的，2026-09-27 改掉。**
+    //    Kernel 确实是写那一列的人，但值来自 `SubmitActionInput.triggeredBy`
+    //    （`runner.ts:47` 必填 → `runner.ts:194` 原样写入），**没有任何校验**。
+    //    也就是说「人按的」这个身份**就是调用方自报的** —— 原注释让读代码的人
+    //    以为这里有一道不存在的保证，而这条判据正是人工信封绕过 AI 五条闸的唯一凭据。
+    //
+    //    真正的约束在 `boundaries.ts` 的 `HUMAN_TRIGGER_ALLOWED_DIRS`（哪个目录能传）
+    //    + `HUMAN_TRIGGER_REQUIRED_AUTH_CALLS`（传它的文件必须过鉴权），两条都由
+    //    架构测试强制。彻底的修法（让 `'human'` 不可自报）是欠账，见那两条的注释。
     //    为什么必须分家：AI 信封里「学习期未知就不动」「72h 冷却」「在 A/B 测试里不动」
     //    这几条防的是 AI 反复折腾学习期，而人按紧急停车是为了**少花钱** ——
     //    2026-09-27 实测拿 AI 信封拦人按的刹车，CTS + NAL 46 个广告组因 `learning_stage`
