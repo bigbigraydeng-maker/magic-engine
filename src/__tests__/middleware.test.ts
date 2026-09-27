@@ -78,7 +78,7 @@ function buildRequest(pathname: string): NextRequest {
   return new NextRequestCtor(new URL(`http://localhost:3001${pathname}`))
 }
 
-const KEYS = ['ADMIN_EMAILS', 'ADMIN_EMAIL_DOMAIN', 'CLIENT_VIEWERS'] as const
+const KEYS = ['ADMIN_EMAILS', 'ADMIN_EMAIL_DOMAIN', 'CLIENT_VIEWERS', 'DEMO_ADMINS'] as const
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
@@ -336,6 +336,22 @@ describe('dashboard auth middleware', () => {
     // Forwarded header lives on the request, exposed via x-middleware-request-*
     // headers on the response. Assert via the documented mechanism:
     expect(res.headers.get('x-middleware-request-x-user-role')).toBe('admin')
+  })
+
+  it('bounces a scoped DEMO_ADMINS account off /dashboard/today to its own client', async () => {
+    // /dashboard/today renders every client's to-do list; its API is
+    // global-admin only, and the page must not open for scoped admins either.
+    process.env.DEMO_ADMINS = 'demo@x.com:client-x-uuid'
+    getUserMock.mockResolvedValue({
+      data: { user: { email: 'demo@x.com' } },
+    })
+
+    const res = await middleware(buildRequest('/dashboard/today'))
+
+    expect(res.status).toBe(307)
+    expect(new URL(res.headers.get('location')!).pathname).toBe(
+      '/dashboard/clients/client-x-uuid',
+    )
   })
 
   it('lets a client-viewer through when accessing their scope', async () => {
