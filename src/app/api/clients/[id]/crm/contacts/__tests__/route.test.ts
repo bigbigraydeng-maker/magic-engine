@@ -61,6 +61,8 @@ interface Recorded {
   ors: string[]
   countHead: boolean
   range: [number, number] | null
+  /** `.order(col, opts)` 每次调用 —— 2026-09-28 加，钉住分页排序列（见下方 describe）。 */
+  orders: Array<[string, { ascending?: boolean } | undefined]>
 }
 
 let recorded: Recorded[]
@@ -71,7 +73,7 @@ let recorded: Recorded[]
  * 返回什么行由 `table` 决定 —— 够测路由的组装逻辑，不模拟过滤。
  */
 function fakeDb(table: string) {
-  const rec: Recorded = { table, eqs: [], ins: [], ors: [], countHead: false, range: null }
+  const rec: Recorded = { table, eqs: [], ins: [], ors: [], countHead: false, range: null, orders: [] }
   recorded.push(rec)
 
   const builder: Record<string, unknown> = {
@@ -91,7 +93,10 @@ function fakeDb(table: string) {
       rec.ors.push(expr)
       return builder
     },
-    order: () => builder,
+    order: (col: string, opts?: { ascending?: boolean }) => {
+      rec.orders.push([col, opts])
+      return builder
+    },
     range: (from: number, to: number) => {
       rec.range = [from, to]
       return builder
@@ -142,6 +147,23 @@ describe('GET contacts — 分页形状', () => {
     expect(body).toHaveProperty('columns')
     expect(body).not.toHaveProperty('totalContacts')
     expect(body).not.toHaveProperty('contacts')
+  })
+
+  /**
+   * 🔴 2026-09-28 · PM 当场撞到的真实事故：`contacts.id` 是 UUID，按它排等于按
+   * 随机字符串排——第 1 页选出来的 20 个人跟「谁最近有动静」没有任何关系，
+   * 当晚刚建档的 WhatsApp 测试联系人在 1026 人里怎么翻都翻不到。改成按
+   * `first_seen_at` 倒序：不是真正的「按最后一次接触排」（那需要跨渠道触点
+   * 聚合，记了台账），但至少让刚进来的人能被看见。
+   *
+   * 钉的是「排的是哪一列、朝哪个方向」——不是随便一个 `.order()` 调用就算过，
+   * 按 `id` 升序、按 `first_seen_at` 升序都会让这条测试露出来。
+   */
+  it('分页查询按 first_seen_at 倒序，不是按 id（UUID 排等于随机排）', async () => {
+    await get('client-a', '?page=1&perPage=20')
+    const contactsQuery = recorded.find((r) => r.table === 'contacts' && !r.countHead)
+    expect(contactsQuery?.orders).toContainEqual(['first_seen_at', { ascending: false }])
+    expect(contactsQuery?.orders.map((o) => o[0])).not.toContain('id')
   })
 
   it('?perPage=10000 → clamp 到 500', async () => {
