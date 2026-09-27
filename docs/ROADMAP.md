@@ -328,6 +328,13 @@ PM 要求把 parkhomes.nz 整体检查一遍还有什么可以升级。首页网
 
 - [ ] **WP3.1a 同步 worker**：`ad_strategy_configs.autonomy_mode` → `client_automation_policies.mode`（按 `(client_id, action_key)` 逐键条件 UPDATE，registry 动态取 `ads.*` 键；Kernel 一行不动；同步 SQL 函数 SECURITY DEFINER + REVOKE/GRANT；审计列 + receipts 表；架构测试 grep 禁令）。狄仁杰判「可进」。
 - [ ] **WP3.1b 熔断**：append-only `ads_circuit_events`（按账户，派生态：无 release 且 sticky/未过 24h = 熔断中）；resolver 钩子返回 unavailable → Kernel 两层拒；admin 解除接口 `guardGlobalAdmin`；**收编止损旁路** `ad-health/stop-loss/route.ts`（付费客户成员可直调 Meta 改预算/状态，不经 Kernel）；**账户级日预算上限**（`client_meta_ad_accounts.daily_budget_cap_cents` + envelope-facts 按账户取 + 绑定面板 UI；CTS 主 100 / 个人 50，客户级 150 为总闸）；**同 PR 修 WP2 遗留 [#1994](https://github.com/bigbigraydeng-maker/magic-engine/issues/1994)**（resolver 没接进生产 Kernel、pre_provider 不读 kernel_pre 快照、4000 行窗口）。migration 先 apply 再合并代码。
+- [ ] **WP3.1b 欠账（本轮明确没做，逐条登记，不许只留在台账里）**：
+  - [ ] **系列级 / 自动化三条旁路真收编**（`meta-ads/execute`、`meta-ads/boost-post`、`winner-reel-sync`）—— 需新增 4 个 ActionKey + capability handler，PR B / C 承载；`winner-reel-sync` 的保护判据是**学习期**不是预算（必须另建独立广告组，往在投组加广告会重置该组学习期；手册 `playbook-ads-meta-general` :249/:333/:367/:127-131 记了四处，NAL 实例每留资 $19.6→$138 七倍恶化）
+  - [ ] **运行时跨账户日上限强制** —— 卫青 2026-09-27 查实 CTS 两账户各花各的、合计 10 天超客户总闸。WP3.1b 只做了「配置时校验 sum ≤ 总闸」+「按账户取上限」，**运行时没人查「这个客户今天全部账户加起来花了多少」**，洞仍开着。不许因为 §3.9 做了就认为这条修好了
+  - [ ] **`client_meta_ad_accounts` 缺 `currency` 列** —— 账户级 `daily_budget_cap_cents` 的币种是隐含的、靠 `ad_entity_snapshots.currency` 反查。今天不出问题纯因 CTS/NAL 实测全 NZD。多币种客户接入前必须补；在那之前 PATCH 校验对「取不到币种」和「币种不一致」一律拒、不许相加
+  - [ ] **熔断 #4 Jev 连续低分接线** —— 数据源 `prescription_evaluations` 按 v2.2 §9.3/§11.8/§12 是 WP3.3 才建；3.1b 判据打桩恒返回 undeterminable（不熔不放），表就绪后接线
+  - [ ] **admin 熔断解除看板页** —— 3.1b 只交付 API（`guardGlobalAdmin` 保护），UI 延后
+  - [ ] **provider-write 闸的 AST 化** —— 狄仁杰实测那道闸能被 barrel 转发 + 同目录相对 import 绕过（9 种写法里架构测试只认得 1 种）。修法在 `architecture.test.ts` 同文件里已有（341 行起的 AST 版 `moduleRefsIn`），存量弱点非本轮引入
 - [ ] **WP3.2 链条**：`google-data-pullback-daily` 末尾发 `ads.impact_cycle.due`（不新开 cron）；韩信（新 agent `docs/agents/12-hanxin.md`）编排：熔断检查 → 孔明 `isWithinEnvelope` 预检 → denied 恢复入批 → 去冲突 → Kernel；批次表 + 成员表；pm-todo 四个拉取函数 + 活性项。
 - [ ] **WP3.3 Check + Tune + Jev + 日报两段**：韩信在 `runAction` 成功后写 `flywheel_actions`（加 `action_run_id` 列）；attribution 加 `ads_check` 评估器（扩 `flywheel_outcomes_evaluator_key_check`、`OUTCOME_EVALUATOR` 登记、`ads.` owner）；Tune 复用 `memory-extractor`（`pattern_type` CHECK 扩 `budget|pause|creative`）；`prescription_evaluations`；日报 Check/Tune 段。
 - **不在 WP3**：任何客户开 `bounded_auto`（单独授权）；三个 stub capability 的真实实现；`deny` 写入口（v1 不提供，管理员的「关」= `observe`）。
