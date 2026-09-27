@@ -17,7 +17,7 @@
 
 import { describe, it, expect } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { readCircuitState, CIRCUIT_NON_STICKY_TTL_MS } from '../circuit-state'
+import { readCircuitState, listActiveCircuitTrips, CIRCUIT_NON_STICKY_TTL_MS } from '../circuit-state'
 
 const NOW = new Date('2026-09-27T12:00:00Z')
 const CLIENT = 'c-1'
@@ -231,5 +231,112 @@ describe('派生态 · 时间以传入的 now 为准，不看真实挂钟', () =
       new Date('2026-09-01T01:00:00.000Z'),
     )
     expect(v.tripped).toBe(true)
+  })
+})
+
+describe('listActiveCircuitTrips · 全表列出现在熔断中的 (客户, 账户)', () => {
+  async function list(s: FakeState, now?: Date) {
+    return listActiveCircuitTrips(makeFake(s), now)
+  }
+
+  it('没有任何 trip → 空数组', async () => {
+    expect(await list(state({ rows: [] }))).toEqual([])
+  })
+
+  it('一条未解的 trip → 出现在结果里', async () => {
+    const rows = await list(state({ rows: [trip()] }))
+    expect(rows).toEqual([
+      { clientId: CLIENT, adAccountId: ACCOUNT, reason: 'circuit:spend_spike', sticky: false, openTripCount: 1 },
+    ])
+  })
+
+  it('已解除的 trip → 不出现', async () => {
+    const rows = await list(state({ rows: [trip({ id: 't1' }), release('t1')] }))
+    expect(rows).toEqual([])
+  })
+
+  it('🔴 两个不同账户各有一条 trip → 分成两组，互不混淆', async () => {
+    const rows = await list(
+      state({
+        rows: [
+          trip({ id: 't1', ad_account_id: 'act_1' }),
+          trip({ id: 't2', ad_account_id: 'act_2', reason: 'circuit:client_daily_cap_exceeded' }),
+        ],
+      }),
+    )
+    expect(rows).toHaveLength(2)
+    expect(rows.find((r) => r.adAccountId === 'act_1')?.reason).toBe('circuit:spend_spike')
+    expect(rows.find((r) => r.adAccountId === 'act_2')?.reason).toBe('circuit:client_daily_cap_exceeded')
+  })
+
+  it('🔴 两个不同客户共用同一个 ad_account_id → 仍然分成两组（分组键必须带 client_id）', async () => {
+    const rows = await list(
+      state({
+        rows: [
+          trip({ id: 't1', client_id: 'c-1', ad_account_id: 'act_shared' }),
+          trip({ id: 't2', client_id: 'c-2', ad_account_id: 'act_shared' }),
+        ],
+      }),
+    )
+    expect(rows).toHaveLength(2)
+    expect(rows.map((r) => r.clientId).sort()).toEqual(['c-1', 'c-2'])
+  })
+
+  it('同一账户多条未解 trip → 合并成一组，reason 取最新那条、sticky 取任一为真', async () => {
+    // 🔴 假件的 .order() 是空操作（同 readCircuitState 那组测试的约定），
+    //    fixture 必须自己按 created_at DESC 排好——数组顺序就是"数据库已经排好序"
+    //    这件事的替身，不是随便传。
+    const rows = await list(
+      state({
+        rows: [
+          trip({ id: 't2', sticky: true, reason: 'circuit:rollback_failed:run-1', created_at: '2026-09-27T11:00:00.000Z', seq: 2 }),
+          trip({ id: 't1', sticky: false, created_at: '2026-09-27T10:00:00.000Z', seq: 1 }),
+        ],
+      }),
+    )
+    expect(rows).toHaveLength(1)
+    expect(rows[0].reason).toBe('circuit:rollback_failed:run-1')
+    expect(rows[0].sticky).toBe(true)
+    expect(rows[0].openTripCount).toBe(2)
+  })
+
+  it('查第一段（trip）失败 → throw，不当成「没有熔断」', async () => {
+    await expect(list(state({ rows: [], error: 'boom' }))).rejects.toThrow('boom')
+  })
+
+  it('查第二段（release）失败 → throw', async () => {
+    // 让第一段有候选、但第二段查询本身要报错——用一个专门的假件変体
+    let callCount = 0
+    const fake = {
+      from(table: string) {
+        if (table !== 'ads_circuit_events') throw new Error('unexpected table: ' + table)
+        return {
+          select() {
+            const chain = {
+              eq() { return chain },
+              or() { return chain },
+              in() { return chain },
+              order() { return chain },
+              then<T>(res: (v: { data: unknown; error: { message: string } | null }) => T) {
+                callCount += 1
+                if (callCount === 1) return Promise.resolve({ data: [trip()], error: null }).then(res)
+                return Promise.resolve({ data: null, error: { message: 'release 查询故意失败' } }).then(res)
+              },
+            }
+            return chain
+          },
+        }
+      },
+    } as unknown as SupabaseClient
+    await expect(listActiveCircuitTrips(fake)).rejects.toThrow('release 查询故意失败')
+  })
+
+  it('不按 client_id / ad_account_id 过滤 —— 一次查出全表候选', async () => {
+    const s = state({ rows: [trip()] })
+    await list(s)
+    // 第一段查询不应该带 client_id / ad_account_id 这两个过滤键
+    const firstCallCols = s.calls[0].eq.map(([col]) => col)
+    expect(firstCallCols).not.toContain('client_id')
+    expect(firstCallCols).not.toContain('ad_account_id')
   })
 })

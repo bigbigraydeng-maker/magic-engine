@@ -33,6 +33,7 @@ import type { PlatformConnectionItemKind } from './platform-connection-items'
 import type { FacebookSyncItemKind } from './facebook-sync-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
+import type { AdsCircuitItemKind } from './ads-circuit-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
 import type { SimaqianItemKind } from './simaqian-review-items'
@@ -173,6 +174,7 @@ export type ManualItemKind =
   | AdsAutonomyItemKind
   /** 每日广告巡检的广告级规则（D2 素材疲劳 / D10 点进去之后差了）：要人拍板改不改，系统不会自动改 */
   | AdsRuleFindingItemKind
+  | AdsCircuitItemKind
   /** 有成交/咨询等着人核对要不要告诉广告平台 —— 撤不回，所以必须人点 */
   | 'conversion_needs_review'
   /** 发给广告平台时断线了，不知道对方收没收 —— 程序绝不自己重发，等人核对 */
