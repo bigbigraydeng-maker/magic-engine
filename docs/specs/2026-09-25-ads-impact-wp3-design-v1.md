@@ -1,6 +1,11 @@
-# 广告 WP3 · Impact loop 接线 设计稿 v2.3
+# 广告 WP3 · Impact loop 接线 设计稿 v2.4
 
 状态：**accepted**，PM 2026-09-27 经小秘书窗口（`local_2bc4fba6-9a3f-426e-ac87-11458f9591d3`）口头认。原话「按新版重做」，同时等于对本设计稿的正式认可。作为本轮 3.1b 重做（分支 `feat/ads-wp3-1b-v2`）的权威实施依据；上一轮 PR #2087（分支 `feat/ads-wp3-1b-circuit-breaker`）照总纲 spec §3 G11 实施，跟本文件不一致，作废。
+v2.4 · 2026-09-27 · **§6.3 第 5 条漏定义了一个状态，而它已经真实发生过一次、影响全部 6 个客户。**
+统筹查生产库：`ads_growth_states` 这张表活了 3 天、**缺了 1 天** —— 09-24 六个客户 `complete`、**09-25 整天零行**、09-26 六个客户 `complete`（两次都在 17:01 UTC 写，定时任务时间稳定）。
+§6.3 第 5 条只定义了 `data_completeness` 的**值**（`complete` 放行 / `partial` 当轮冻结），🔴 **没定义「这一天根本没有行」**。这是第三个状态：不是「数据不全」，是「完全不知道数据齐不齐」。
+如果实现成「查不到行 → 不是 partial → 放行」，那么像 09-25 那样的日子，**系统会在完全没有完整性信号的情况下动手** —— 正是这道闸存在的意义所在。
+**修正见 §6.3 第 5 条就地补注**：按 §6.2 自己那条「读不到 / 解析失败 = 视为熔断中」的同一个 fail-closed 方向，「当天没有行」按 `partial` **同档**处理，但回执里**必须区分开**（`partial` → `reason: data_partial`；没有行 → `reason: growth_state_missing`）—— 「数据不全」和「根本没算过这一天」在下游长得一模一样，但**根因不同、处置不同**（前者等补拉，后者要查定时任务为什么没跑）。
 v2.3 · 2026-09-27 · **实测数据暴露 §6.9 第 2 条本身有缺陷，就地修正**（不是实现偏离，是规则缺陷）。统筹查生产库发现 CTS 两个广告账户的日数据拉取节奏已分家 4 天（主账户 `act_2775766642787274` 最后一天 09-26、二号账户 `act_2202695063810470` 最后一天 09-22，而二号账户快照拍到 09-26、7 条系列里 3 条仍 `effective_status=ACTIVE` —— 不是"广告结束了"）。按 §6.9 第 2 条原文「按各账户各自**最后一个完整** `insight_date` 合计」，CTS 现在会把**主账户 09-26 的花费 + 二号账户 09-22 的花费**加起来、当成「客户今天花的钱」去比上限 —— 🔴 **两个不同日期的数字相加，然后叫它「当日」**。这条规则在各账户拉取节奏一致时才成立，一分家就错。**修正见 §6.9 第 2 条就地补注（已二次修正）**：第一版写「各账户日期差超过 1 天就一律作废」，但卫青随后查实 CTS 二号账户是 **PM 主动停投**（系列 ACTIVE 而广告组全 PAUSED），数据会**一直**落后 —— 照第一版 CTS 的 #2 就永远判不了，等于一个静默不生效的闸，**那本身是 fail-open**。第二版改成按「快照里有没有在投实体」分流：主动停投的按 0 计入并继续判；有在投实体却数据落后的才作废。 另外 §6.3 第 1 条的 `undeterminable` 要走一个 PM 看得见的通道（实测 CTS 二号账户最近 7 天只有 3 个非零花费天 < §6.3 要求的 ≥5，所以 #1 对它**判不了**；「没触发熔断」和「根本没判」长得一模一样，不说出来 PM 分不清）。
 v2.2 · 2026-09-27 · **PM 在统筹窗口（`local_0a9daab4-9fc9-4838-9781-45641d2c4bcf`）亲口决定「三个一起」** —— 三条绕过 Kernel 的旁路（`meta-ads/execute`、`meta-ads/boost-post`、`winner-reel-sync`）**本轮（3.1b）一起收编进 Kernel，不留到下一轮**。据此放宽两处：**§0 的「本 WP 不新增 capability、不新增 ActionKey」** 与 **§12 分批表 3.1b 那行的旁路范围**（原先只点名止损一条）。放宽后本轮新增 4 个 ActionKey（系列级暂停 / 系列级砍预算 / 推帖 / 建广告），层级门由统筹窗口以 Inline 模式过：**全部挂在既有广告 L1 支柱下，不新增能力线 / 支柱 / capability 域，不进 `platform-candidates`**。每个新 ActionKey 的**撤回处理函数必填**（K1，少一个 `authorize.ts` 直接拒）。🔴 **`winner-reel-sync` 的保护判据是「学习期」不是「预算」**，见 §12 那行的补注。
 v2.1 · 2026-09-25 · 第二轮三方复审 21 条（子牙 4 / 魏征 6 / 狄仁杰 4 + 建议）全部并入；复核：狄仁杰判 3.1a / 3.1b 均可进（§6.9 三条实施必带已入）；子牙闭合确认后剩 2 条必改 + 1 处矛盾 + R15/R20 一句话改法已由统筹窗口直接落稿（§7.2 `action_run_id` 列已存在改加部分唯一索引、韩信提交时即写 `flywheel_actions`、§5.3.2 过滤按 `deny_code` + 前缀）。
@@ -470,7 +475,7 @@ END $do$;
 | 2 | **客户所有账户**当日花费合计 > `daily_budget_cap_cents` × 1.2 | `ad_daily_insights` + `ad_strategy_configs.daily_budget_cap_cents` | 对该客户**全部账户**各写一行 trip（cap 是客户级的，所以熔断也按客户级铺开）。原「单次变动 > 日上限」因快照 6h 一次 + adset 级比客户级永不触发，**删** |
 | 3 | 回滚失败（v1 唯一不可逆信号） | `action_run_steps`（`step_key = 'rollback'`） | `status = 'failed'` → `sticky = true`，只能 PM 在 admin 解除。**发现者 = 韩信**：每跑完一条 `runAction` 看 rollback step 结果，`failed` → 立即写 sticky trip（`reason = 'rollback_failed:<run_id>'`）并**中止本批剩余成员**（标 `deferred_kind = 'circuit_tripped'`） |
 | 4 | Jev 连续低分 | `prescription_evaluations` | 按 `cycle_id` 分组连续 3 轮（不是最近 3 行）`total_score < 60` → `sticky = true`；另加「连续 3 轮 ≥50% reversed/inconclusive」 |
-| 5 | 数据不全 | `ads_growth_states` | **不是熔断**，是当轮闸：`data_completeness = 'partial'` 时卫青本就不出机会、孔明无输入；当天补拉成功即自然解除。**不写 circuit event** |
+| 5 | 数据不全 | `ads_growth_states` | **不是熔断**，是当轮闸：`data_completeness = 'partial'` 时卫青本就不出机会、孔明无输入；当天补拉成功即自然解除。**不写 circuit event**<br><br>🔴 **v2.4 补注：这一行原来只定义了「值」，漏了第三个状态「当天根本没有行」。** 实测 `ads_growth_states` 09-25 整天零行、6 个客户全缺（表活 3 天缺 1 天），而这个状态没人定义过。<br>**判据（按 §6.2 那条「读不到 / 解析失败 = 视为熔断中」的同一个 fail-closed 方向推）**：当天没有 `ads_growth_states` 行 → **按 `partial` 同档处理**（当轮冻结、#1/#2 答 `unknown`、不写 circuit event、次日补上自然恢复）。<br>🔴 **但回执里必须跟真的 `partial` 区分开**：`partial` → `reason: 'data_partial'`；没有行 → `reason: 'growth_state_missing'`。理由同 `facts:circuit_query_failed` 那条 —— **「数据不全」和「根本没算过这一天」在下游长得一模一样，但根因不同、处置不同**：前者等补拉，后者要查定时任务为什么没跑。<br>**变异测试必带一条**：把「没有行」改成走 `complete` 分支 → 必红。 |
 
 **建议 N=3, 阈值=60**（第 4 条）。
 
