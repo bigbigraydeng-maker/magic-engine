@@ -101,6 +101,7 @@ const A_PATHS: Array<[string, string]> = [
   ['jest.config.ts', 'jest config'],
   ['postcss.config.js', 'build-time style config'],
   ['.babelrc', 'compiler config'],
+  ['docs/playbooks/seo/general.md', 'playbook body'],
 ]
 
 describe('every protected path rates A', () => {
@@ -166,6 +167,52 @@ describe('governance files are A even though they are markdown', () => {
     expect(result.risk).toBe('A')
     expect(result.categories).toContain('governance')
     expect(result.reasons[0]).toContain('CLAUDE.md')
+  })
+})
+
+describe('playbook governance rules', () => {
+  it('rates playbook body files A', () => {
+    expect(classifyFile('docs/playbooks/seo/general.md').risk).toBe('A')
+    expect(classifyFile('docs/playbooks/ads/industry-travel.md').risk).toBe('A')
+    expect(classifyFile('docs/playbooks/geo/industry-realestate.md').risk).toBe('A')
+    expect(classifyFile('docs/playbooks/reputation/general.md').risk).toBe('A')
+    expect(classifyFile('docs/playbooks/social/general.md').risk).toBe('A')
+  })
+
+  it('rates the bare docs/playbooks path A (symlink defence)', () => {
+    expect(classifyFile('docs/playbooks').risk).toBe('A')
+  })
+
+  it('is case-insensitive (macOS defence)', () => {
+    expect(classifyFile('docs/Playbooks/seo/general.md').risk).toBe('A')
+  })
+
+  it('excludes one-level-deep inbox.md from A (falls to C via docs/ prefix)', () => {
+    expect(classifyFile('docs/playbooks/seo/inbox.md').risk).toBe('C')
+    expect(classifyFile('docs/playbooks/ads/inbox.md').risk).toBe('C')
+  })
+
+  it('catches deeper inbox.md as A (only pillar/inbox.md is excluded)', () => {
+    expect(classifyFile('docs/playbooks/seo/sub/inbox.md').risk).toBe('A')
+  })
+
+  it('rates a rename from general.md to inbox.md as A (original path is protected)', () => {
+    const result = classifyRisk({
+      files: [{ filename: 'docs/playbooks/seo/inbox.md', status: 'renamed', previous_filename: 'docs/playbooks/seo/general.md' }],
+    })
+    expect(result.risk).toBe('A')
+  })
+
+  it('rates an inbox-only PR as C (auto-merge)', () => {
+    const result = classifyRisk({
+      files: [{ filename: 'docs/playbooks/seo/inbox.md', status: 'modified' }],
+    })
+    expect(result.risk).toBe('C')
+  })
+
+  it('does not affect docs/specs/ or docs/agents/ (still C)', () => {
+    expect(classifyFile('docs/specs/2026-09-28-design.md').risk).toBe('C')
+    expect(classifyFile('docs/agents/13-kongzi.md').risk).toBe('C')
   })
 })
 
