@@ -75,6 +75,12 @@ describe('Meta Ads AI report view',()=>{
     expect(screen.queryByText(/本次分析没有完成/)).not.toBeInTheDocument()
   })
 
+  it('shows the deletion notice instead of the refresh hint when the report was cleared by a Facebook data deletion request',()=>{
+    render(<ReportView analysis={{ ...base,status:'completed',report_markdown:null,error_code:'deleted_by_user_request' }} />)
+    expect(screen.getByText('这份报告已按你在 Facebook 提交的删除数据申请清除。')).toBeInTheDocument()
+    expect(screen.queryByText(/请稍后刷新页面/)).not.toBeInTheDocument()
+  })
+
   it('shows model_unavailable message when AI model fails but data was saved',()=>{
     render(<ReportView analysis={{ ...base,status:'failed',report_markdown:null,error_code:'model_unavailable' }} />)
     expect(screen.getByText(/AI 模型暂时无法响应/)).toBeInTheDocument()
