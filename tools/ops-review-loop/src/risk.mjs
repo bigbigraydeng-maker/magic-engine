@@ -356,6 +356,9 @@ const LEVEL = '([ABC])(?:\\s?级)?(?![A-Za-z0-9/])'
 const STRONG_INLINE_RE = new RegExp(`(?:^|[^A-Za-z])(?:${STRONG_LABEL})${JOIN}${LEVEL}`, 'g')
 const WEAK_INLINE_RE = new RegExp(`(?:^|[^A-Za-z])(?:${WEAK_LABEL})${JOIN}${LEVEL}`, 'g')
 
+/** Non-global twins for `.test()` — a `g` regex remembers `lastIndex` between calls. */
+const LABELLED_LEVEL_RES = [new RegExp(STRONG_INLINE_RE.source), new RegExp(WEAK_INLINE_RE.source)]
+
 /** A line that opens with a strong label: what joins it to the rest, and the rest. */
 const STRONG_LINE_RE = new RegExp(`^(?:${STRONG_LABEL})(${JOIN})(.*)$`)
 
@@ -436,8 +439,13 @@ function strongLineLevel(line, heading, next) {
   // A heading with any tail ("## 风险级别（自报）", "## 风险级说明") or a bare
   // label: the level is on the next non-empty line.
   if (heading || rest.trim() === '') {
-    const level = next()?.match(LEVEL_LINE_RE)
-    return level ? /** @type {'A'|'B'|'C'} */ (level[1]) : 'unreadable'
+    const following = next()
+    const level = following?.match(LEVEL_LINE_RE)
+    if (level) return /** @type {'A'|'B'|'C'} */ (level[1])
+    // "## 风险级别 / 优先级" then "- 风险：**B**（…）" (#2032 / #2033 / #2043): the
+    // next line declares with its own label, and is read as its own line.
+    if (following !== undefined && LABELLED_LEVEL_RES.some((re) => re.test(following))) return null
+    return 'unreadable'
   }
   // "风险级别：见下表" joins the label to something that is not a level;
   // "风险级别只作下限" does not join at all — that is prose.

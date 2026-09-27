@@ -708,6 +708,24 @@ describe('readDeclaredRisk — the spellings real PR bodies use', () => {
     expect(parseDeclaredRisk('Risk: B\n## 风险级\nC')).toBe('A')
   })
 
+  // #2121 round 2 (子牙): the ads windows' heading carries a tail and the next
+  // line declares with its own label. Verbatim from #2043 / #2033 / #2032 —
+  // all declared B and must not be pushed to A.
+  it.each([
+    ['#2043', '## 风险级 / 优先级\n- 风险 **B**（改扣费记账逻辑，不改表结构、不改额度上限与预留金额）\n- 按 §11：频率 中'],
+    ['#2033', '## 风险级别 / 优先级\n- 风险：**B**（只读规则、不碰钱、不写 Meta；不进 D3 自动暂停）\n- 按 §11：频率 高'],
+    ['#2032', '## 风险级别 / 优先级\n\n- 风险：**B**（只读规则、不碰钱、不写 Meta）'],
+  ])('%s: a tailed heading whose next line declares B reads as B', (_pr, body) => {
+    expect(readDeclaredRisk(body)).toEqual({ risk: 'B', unreadable: null })
+  })
+
+  it('a tailed heading followed by prose with no level is still unreadable → A', () => {
+    expect(readDeclaredRisk('## 风险级别 / 优先级\n- 按 §11：频率 高 → P0')).toEqual({
+      risk: 'A',
+      unreadable: '风险级别 / 优先级',
+    })
+  })
+
   it('a strong label with a lower-case letter still rates A — as unreadable', () => {
     expect(readDeclaredRisk('Risk Level: a')).toEqual({ risk: 'A', unreadable: 'Risk Level: a' })
   })
