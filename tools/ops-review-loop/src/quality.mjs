@@ -113,6 +113,10 @@ export const SPECIALIZED_EVIDENCE = {
     id: 'governance-evidence',
     label: '规则改动已由人读过：改的是哪条规矩、谁拍板、旧规矩为什么作废，已写明',
   },
+  [RISK_CATEGORY.BUILD_RUNTIME]: {
+    id: 'build-runtime-evidence',
+    label: '构建 / 运行时配置改了哪一项、影响哪些环境、怎么回退，已写明',
+  },
   [RISK_CATEGORY.UNREADABLE]: {
     id: 'manual-rating-evidence',
     label: '改动清单读不到，改动范围必须由人确认过',
