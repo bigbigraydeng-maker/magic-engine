@@ -33,6 +33,8 @@ interface Row {
 let rows: Row[] = []
 /** `social_comment_config.lookback_days`——缺省时路由退回 DEFAULT_LOOKBACK_DAYS=7。 */
 let configLookbackDays: number | null = null
+/** `social_comment_config` 查询本身失败时用——Codex round 14 复审 P2 新增分支。 */
+let configError: { message: string } | null = null
 
 // 2099 远到不可能被任何真实回看窗口越过——用来标"肯定还在窗口内"，跟文件
 // 里既有的 2020-01-01（"肯定已经过期/卡死"）配对，不依赖测试跑的时候真实
@@ -56,7 +58,14 @@ function row(over: Partial<Row>): Row {
   }
 }
 
-/** 每次 `.from()` 都开一条独立的假查询链，按已挂的过滤器真的筛一遍 `rows`。 */
+/**
+ * 每次 `.from()` 都开一条独立的假查询链，按已挂的过滤器真的筛一遍 `rows`。
+ * `.range()` 直接忽略 from/to、一次性把筛完的结果全部返回——假数据集永远
+ * 远小于 `fetchAll` 的单页上限（1000 行），第一页就会不满页提前返回，等价
+ * 于真实分页跑到底（Codex round 14 复审 P2：路由改用 `fetchAll` 而不是
+ * `.limit(200)` 后，没有 `.range()` 这个方法会直接抛错，所有 stuck 测试都
+ * 会失败——这本身就是"确实换成了 fetchAll，不是嘴上说说"的回归覆盖）。
+ */
 function makeEngagementsChain() {
   const filters: Array<(r: Row) => boolean> = []
   const chain = {
@@ -78,7 +87,7 @@ function makeEngagementsChain() {
       return chain
     },
     order: () => chain,
-    limit: () => chain,
+    range: () => chain,
     then: (resolve: (v: { data: Row[] | null; error: { message: string } | null }) => void) => {
       resolve({ data: rows.filter((r) => filters.every((f) => f(r))), error: null })
     },
@@ -94,8 +103,8 @@ vi.mock('@/lib/supabase', () => ({
           select: () => ({
             eq: () => ({
               maybeSingle: async () => ({
-                data: configLookbackDays === null ? null : { lookback_days: configLookbackDays },
-                error: null,
+                data: configError ? null : configLookbackDays === null ? null : { lookback_days: configLookbackDays },
+                error: configError,
               }),
             }),
           }),
@@ -221,6 +230,20 @@ describe('GET .../comment-engagements?stuck=1', () => {
       ]
       const { engagements } = await GET_stuck('cts')
       expect(engagements.map((r) => r.id).sort()).toEqual(['e1', 'e2', 'e3', 'e4'])
+    })
+  })
+
+  // Codex round 14 复审 P2：配置查询本身失败（不是"没配置这一行"）时，之前的
+  // 实现会忽略 config.error、照样按默认 7 天分类——客户实际配了更长的窗口时，
+  // 一条还在窗口内、本该下一轮正常重试的行会被误判成越窗、显示"标记已阅"，
+  // 点了就写死 reviewed_at，之后这行真耗尽重试或真越窗时会被检测器永久滤掉。
+  describe('social_comment_config 查询失败（不是没配置）', () => {
+    it('config 查询报错 → 整个请求失败，不能静默退回默认 7 天', async () => {
+      configLookbackDays = null
+      configError = { message: 'social_comment_config read failed' }
+      rows = [row({ id: 'e13', reply_status: 'failed', attempts: 1, comment_created_at: FAR_PAST })]
+      await expect(GET_stuck('cts')).rejects.toThrow('social_comment_config read failed')
+      configError = null
     })
   })
 })
