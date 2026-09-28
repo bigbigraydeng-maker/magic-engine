@@ -222,7 +222,7 @@ function d2Finding(
   }
 }
 
-const NONE_REASON_TEXT: Record<
+export const NONE_REASON_TEXT: Record<
   Extract<RuleSectionInput, { source: 'none' }>['reason'],
   string
 > = {

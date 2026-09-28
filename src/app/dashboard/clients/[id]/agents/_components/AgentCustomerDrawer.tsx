@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { formatRelative, type AgentCustomerRow, type AgentRow } from '../page'
+import { formatRelative, type AgentCustomerRow, type AgentRow } from './AgentsClient'
 import { stageLabelOf } from './StageBoard'
 import { TRAVEL_AGENT_CUSTOMER_STAGES } from '@/lib/crm/agent-customer-stages'
 

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { readBoundedJson } from '@/lib/http/bounded-body'
 import { extractBearer, verifyApiKey } from '@/lib/auth/api-key-access'
 import { requireOnboardingClientAccess } from '@/lib/auth/client-access'
 import { MetaReadError } from '../graph-read'
@@ -42,17 +43,8 @@ export async function apiPrincipal(request: Request) {
   return result.auth
 }
 export async function boundedBody(request: Request): Promise<unknown> {
-  const reader = request.body?.getReader()
-  if (!reader) throw new MetaReadError('invalid_json')
-  const decoder = new TextDecoder()
-  let text = '', bytes = 0
-  while (true) {
-    const chunk = await reader.read()
-    if (chunk.done) break
-    bytes += chunk.value.byteLength
-    if (bytes > 24000) { await reader.cancel(); throw new MetaReadError('request_too_large',413) }
-    text += decoder.decode(chunk.value,{ stream:true })
-  }
-  text += decoder.decode()
-  try { return JSON.parse(text) as unknown } catch { throw new MetaReadError('invalid_json') }
+  const result = await readBoundedJson(request, 24000)
+  if (result.ok) return result.value
+  if (result.reason === 'too_large') throw new MetaReadError('request_too_large', 413)
+  throw new MetaReadError('invalid_json')
 }

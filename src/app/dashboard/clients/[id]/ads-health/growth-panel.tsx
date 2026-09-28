@@ -8,9 +8,12 @@
  *
  * 🔴 三种「没有数字」必须分开显示，不能都渲染成 0 或空白：
  *    读不到（接口出错）· 今天还没巡察（没有行）· 判不了（数据不全 / 归属缺失）。
+ * 🔴 客户账号拿到的是服务端裁剪过的客户版（viewer: 'client'，见 growth-client-view.ts），
+ *    只有目标进度和已转成客户话术的单条广告卡片；内部结论（D11、机会等）根本不在响应里。
  */
 
 import React from 'react'
+import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
 
 export type GrowthVerdict = 'on_track' | 'behind' | 'unreachable_within_caps' | 'unknown'
 
@@ -54,17 +57,28 @@ const PACE_TONE: Record<GrowthVerdict, { dot: string; text: string; tint: string
   unknown:                 { dot: 'bg-gray-300',    text: 'text-gray-600',    tint: 'border-gray-200 bg-gray-50',       label: '未判' },
 }
 
-function GoalBar({ state }: { state: GrowthStateView }) {
-  const goal = state.payload?.goal ?? null
-  const pace = state.goal_pace
+/** 客户版：「按现在的预算到不了」带加钱暗示，换成中性说法。 */
+const CLIENT_PACE_LABEL: Record<GrowthVerdict, string> = {
+  on_track: '按节奏走',
+  behind: '进度落后',
+  unreachable_within_caps: '按现在的速度可能到不了',
+  unknown: '暂时判断不了',
+}
+
+type GoalView = { title: string; label: string; target: number; dayIndex: number; totalDays: number }
+
+function GoalBar({ goal, pace, clientView = false }: { goal: GoalView | null; pace: GoalPaceView | null; clientView?: boolean }) {
   if (!goal || !pace) {
     return (
       <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
-        这个客户还没有生效中的目标 —— 设了目标之后，这里会显示「还差多少、来不来得及」。
+        {clientView
+          ? '这段时间还没有设定广告目标，设好后这里会显示进度。'
+          : '这个客户还没有生效中的目标 —— 设了目标之后，这里会显示「还差多少、来不来得及」。'}
       </div>
     )
   }
   const tone = PACE_TONE[pace.verdict]
+  const label = clientView ? CLIENT_PACE_LABEL[pace.verdict] : tone.label
   // 未判时进度条不画：画一条 0% 的条会被读成「一个都没有」。
   const pct = pace.verdict === 'unknown' || pace.actualToDate === null
     ? null
@@ -74,7 +88,7 @@ function GoalBar({ state }: { state: GrowthStateView }) {
     <div className={`rounded-xl border p-5 ${tone.tint}`}>
       <div className="flex items-center gap-2.5">
         <span className={`inline-block w-3 h-3 rounded-full ${tone.dot}`} />
-        <span className={`text-base font-semibold ${tone.text}`}>{goal.title} · {tone.label}</span>
+        <span className={`text-base font-semibold ${tone.text}`}>{goal.title} · {label}</span>
       </div>
 
       {pct === null ? (
@@ -119,10 +133,50 @@ function FindingCard({ f, kind }: { f: GrowthFinding; kind: 'problem' | 'opportu
   )
 }
 
+function isClientView(state: GrowthStateView | ClientGrowthView): state is ClientGrowthView {
+  return 'viewer' in state && state.viewer === 'client'
+}
+
+function ClientGrowthPanel({ view }: { view: ClientGrowthView }) {
+  const cards = view.adCards
+  return (
+    <div className="space-y-4">
+      <GoalBar goal={view.goal} pace={view.goal_pace} clientView />
+
+      <section>
+        {cards ? (
+          <>
+            <h3 className="mb-1 text-sm font-semibold text-gray-700">{cards.title}</h3>
+            <p className="mb-2 text-xs text-gray-500">{cards.intro}</p>
+            <div className="space-y-2">
+              {cards.cards.map((c, i) => (
+                <div key={`${c.adLabel}-${i}`} className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                  <p className="text-xs text-gray-500">{c.adLabel}</p>
+                  <p className="mt-1 text-sm text-gray-800">{c.headline}</p>
+                  <p className="mt-1 text-xs text-gray-600">{c.detail}</p>
+                  <p className="mt-1 text-xs text-gray-600">{c.action}</p>
+                </div>
+              ))}
+            </div>
+            {cards.promise && <p className="mt-2 text-xs text-gray-500">{cards.promise}</p>}
+          </>
+        ) : (
+          <h3 className="mb-1 text-sm font-semibold text-gray-700">需要留意的广告</h3>
+        )}
+        {view.adNote && <p className="mt-1 text-xs text-gray-500">{view.adNote}</p>}
+      </section>
+
+      <p className="text-xs text-gray-300 text-center">
+        数据日期 {view.date}
+      </p>
+    </div>
+  )
+}
+
 /**
  * @param state  null = 今天还没巡察过；undefined = 这一段读不到（接口出错）
  */
-export default function GrowthPanel({ state }: { state: GrowthStateView | null | undefined }) {
+export default function GrowthPanel({ state }: { state: GrowthStateView | ClientGrowthView | null | undefined }) {
   if (state === undefined) {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -133,10 +187,12 @@ export default function GrowthPanel({ state }: { state: GrowthStateView | null |
   if (state === null) {
     return (
       <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
-        今天还没有巡察记录 —— 系统每天自动跑一次，跑完这里会出现目标进度和机会。
+        今天的广告检查还没跑完，跑完后这里会显示结果。
       </div>
     )
   }
+
+  if (isClientView(state)) return <ClientGrowthPanel view={state} />
 
   const problems = (state.payload?.problems ?? []).filter(f => f.status === 'hit')
   const opportunities = (state.payload?.opportunities ?? []).filter(f => f.status === 'hit')
@@ -144,7 +200,7 @@ export default function GrowthPanel({ state }: { state: GrowthStateView | null |
 
   return (
     <div className="space-y-4">
-      <GoalBar state={state} />
+      <GoalBar goal={state.payload?.goal ?? null} pace={state.goal_pace} />
 
       {partial && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">

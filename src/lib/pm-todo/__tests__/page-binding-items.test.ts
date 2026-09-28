@@ -93,6 +93,38 @@ describe('pushPageBindingItems', () => {
     expect(items[0].what).toContain('评论自动回复已停')
   })
 
+  /**
+   * 🔴 2026-09-27：这一档原来教人先点「重新核实」——**那条修法治不了私信**。
+   *
+   * 「重新核实」只补一条核实记录，让同步改用**公用令牌**去读；而公用令牌那个账号在
+   * 客户主页上的角色是「看数据 / 投广告 / 发内容」，没有「消息」。生产实测（2026-09-27
+   * 06:10 那次同步）：Roman HU 和 East International 已经过了这道闸，私信照样 403
+   * `Requires permission: pages_messaging`；而同一把令牌**读表单线索是好的**。
+   *
+   * 所以照旧文案点下去 = 卡片变绿、表单恢复、私信一条不进。两条都钉住：
+   * 该档必须先说「连接 Meta」，别的档不许被这句话污染。
+   */
+  it('shared-token-only → the fix must lead with 「连接 Meta」 and warn that 「重新核实」 alone leaves the inbox dead', async () => {
+    db.clients.push(client('a'))
+    const how = (await run({ META_SYSTEM_USER_TOKEN: 'shared' }))[0].how
+
+    expect(how).toContain('连接 Meta')
+    expect(how).toContain('『消息』权限')
+    // 先说对的那个 —— 顺序就是这条修正的全部内容
+    expect(how.indexOf('连接 Meta')).toBeLessThan(how.indexOf('重新核实'))
+    // 而且必须明说另一个按钮只修一半，否则看到卡片变绿的人会以为好了
+    expect(how).toContain('私信仍然一条都进不来')
+  })
+
+  it('a different refusal (audit mismatch) keeps the re-save wording — the new text must not leak across reasons', async () => {
+    db.clients.push(client('a'))
+    db.client_binding_audit.push({ client_id: 'a', binding_kind: 'facebook_page', action: 'bind', outcome: 'applied', requested_value: '9999999999999', created_at: '2026-09-17T00:00:00Z' })
+    const how = (await run({ META_SYSTEM_USER_TOKEN: 'shared' }))[0].how
+
+    expect(how).toContain('重新核实')
+    expect(how).not.toContain('私信仍然一条都进不来')
+  })
+
   it('cannot read the client list → one item saying the check did not run (not just a log line)', async () => {
     failures = { select: new Set(['clients']) }
     const items = await run({ META_SYSTEM_USER_TOKEN: 'shared' })

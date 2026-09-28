@@ -101,6 +101,7 @@ const A_PATHS: Array<[string, string]> = [
   ['jest.config.ts', 'jest config'],
   ['postcss.config.js', 'build-time style config'],
   ['.babelrc', 'compiler config'],
+  ['docs/playbooks/seo/general.md', 'playbook body'],
 ]
 
 describe('every protected path rates A', () => {
@@ -127,6 +128,122 @@ describe('every protected path rates A', () => {
       why: 'migration —— 数据库结构变更，不可逆',
       category: 'db-migration',
     })
+  })
+})
+
+describe('A rules match case-insensitively — macOS core.ignorecase bypass (狄仁杰 PR #2153 attack)', () => {
+  /**
+   * Swap the case of the first alphabetic character in each path segment.
+   * Produces the kind of path an attacker would use on a case-insensitive FS:
+   *   CLAUDE.md → cLAUDE.md
+   *   .github/workflows/x.yml → .Github/Workflows/X.yml
+   */
+  function mixCase(path: string): string {
+    return path
+      .split('/')
+      .map((seg) => {
+        for (let i = 0; i < seg.length; i++) {
+          const c = seg[i]
+          if (/[a-zA-Z]/.test(c)) {
+            const swapped = c === c.toLowerCase() ? c.toUpperCase() : c.toLowerCase()
+            return seg.slice(0, i) + swapped + seg.slice(i + 1)
+          }
+        }
+        return seg
+      })
+      .join('/')
+  }
+
+  it('mixCase actually changes every A_PATHS entry (the test is not vacuous)', () => {
+    const unchanged = A_PATHS.filter(([path]) => mixCase(path) === path)
+    expect(unchanged.map(([p]) => p)).toEqual([])
+  })
+
+  it.each(A_PATHS.map(([path, label]) => [mixCase(path), path, label] as const))(
+    '%s (from %s, %s) still rates A',
+    (mixed) => {
+      expect(classifyFile(mixed).risk).toBe('A')
+    },
+  )
+
+  it('the specific attack paths from 狄仁杰 all rate A', () => {
+    const attacks = [
+      'claude.md',
+      '.Claude/skills/x/SKILL.md',
+      '.GitHub/merge-authorization.md',
+      'docs/ENGINEERING_quality_gates.md',
+      'docs/Agents/13-kongzi.md', // .claude/ prefix won't match, but docs/ + .md → C, not A; this tests the next block
+    ]
+    // The first four are governance files that must rate A
+    for (const p of attacks.slice(0, 4)) {
+      expect(classifyFile(p).risk).toBe('A')
+    }
+  })
+
+  it('a case-variant rename of a protected path still rates A', () => {
+    const result = classifyRisk({
+      files: [
+        {
+          filename: 'docs/old.md',
+          previous_filename: '.Github/Workflows/guard.yml',
+          status: 'renamed',
+        },
+      ],
+    })
+    expect(result.risk).toBe('A')
+    expect(result.categories).toContain('control-plane')
+  })
+
+  it('a full-PR classifyRisk with attack paths rates A', () => {
+    const result = classifyRisk({
+      files: [
+        { filename: 'claude.md' },
+        { filename: '.Claude/skills/x/SKILL.md' },
+        { filename: '.GitHub/merge-authorization.md' },
+        { filename: 'docs/ENGINEERING_quality_gates.md' },
+      ],
+    })
+    expect(result.risk).toBe('A')
+    expect(result.categories).toContain('governance')
+  })
+})
+
+describe('case-insensitive A matching does not change B/C classifications', () => {
+  it.each([
+    'docs/STATE.md',
+    'README.md',
+    'src/app/globals.css',
+    'public/logo.svg',
+    'src/lib/foo/bar.test.ts',
+    'src/lib/foo/__tests__/bar.ts',
+    'docs/anything',
+    'notes.txt',
+    'src/styles/theme.scss',
+    'public/hero.png',
+    'public/hero.jpg',
+    'src/app/favicon.ico',
+    'docs/agents/ziya.md',
+    'docs/specs/anything.md',
+    'docs/ledger/2026-09-25-some-card.md',
+  ])('%s stays C', (path) => {
+    expect(classifyFile(path).risk).toBe('C')
+  })
+
+  it.each([
+    'src/lib/reports/build-summary.ts',
+    'src/app/(dashboard)/page.tsx',
+    'scripts/one-off.mjs',
+    'src/lib/geo/score.ts',
+    'src/lib/config/env.ts',
+    'src/lib/utils/urls.ts',
+    'src/components/controls.ts',
+    '.env.example',
+  ])('%s stays B', (path) => {
+    expect(classifyFile(path).risk).toBe('B')
+  })
+
+  it('README.MD (uppercase extension) stays B, not C — C rules are case-sensitive', () => {
+    expect(classifyFile('README.MD').risk).toBe('B')
   })
 })
 
@@ -166,6 +283,52 @@ describe('governance files are A even though they are markdown', () => {
     expect(result.risk).toBe('A')
     expect(result.categories).toContain('governance')
     expect(result.reasons[0]).toContain('CLAUDE.md')
+  })
+})
+
+describe('playbook governance rules', () => {
+  it('rates playbook body files A', () => {
+    expect(classifyFile('docs/playbooks/seo/general.md').risk).toBe('A')
+    expect(classifyFile('docs/playbooks/ads/industry-travel.md').risk).toBe('A')
+    expect(classifyFile('docs/playbooks/geo/industry-realestate.md').risk).toBe('A')
+    expect(classifyFile('docs/playbooks/reputation/general.md').risk).toBe('A')
+    expect(classifyFile('docs/playbooks/social/general.md').risk).toBe('A')
+  })
+
+  it('rates the bare docs/playbooks path A (symlink defence)', () => {
+    expect(classifyFile('docs/playbooks').risk).toBe('A')
+  })
+
+  it('is case-insensitive (macOS defence)', () => {
+    expect(classifyFile('docs/Playbooks/seo/general.md').risk).toBe('A')
+  })
+
+  it('excludes one-level-deep inbox.md from A (falls to C via docs/ prefix)', () => {
+    expect(classifyFile('docs/playbooks/seo/inbox.md').risk).toBe('C')
+    expect(classifyFile('docs/playbooks/ads/inbox.md').risk).toBe('C')
+  })
+
+  it('catches deeper inbox.md as A (only pillar/inbox.md is excluded)', () => {
+    expect(classifyFile('docs/playbooks/seo/sub/inbox.md').risk).toBe('A')
+  })
+
+  it('rates a rename from general.md to inbox.md as A (original path is protected)', () => {
+    const result = classifyRisk({
+      files: [{ filename: 'docs/playbooks/seo/inbox.md', status: 'renamed', previous_filename: 'docs/playbooks/seo/general.md' }],
+    })
+    expect(result.risk).toBe('A')
+  })
+
+  it('rates an inbox-only PR as C (auto-merge)', () => {
+    const result = classifyRisk({
+      files: [{ filename: 'docs/playbooks/seo/inbox.md', status: 'modified' }],
+    })
+    expect(result.risk).toBe('C')
+  })
+
+  it('does not affect docs/specs/ or docs/agents/ (still C)', () => {
+    expect(classifyFile('docs/specs/2026-09-28-design.md').risk).toBe('C')
+    expect(classifyFile('docs/agents/13-kongzi.md').risk).toBe('C')
   })
 })
 

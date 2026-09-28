@@ -235,6 +235,17 @@ async function upsertConversation(
       // the first client's market into shared runtime (张良 红线 2 / 换客户测试).
       identities: buildIdentities({ phone: `+${waId}` }),
       displayName: participantName ?? null,
+      // 🔴 **绝不用 WhatsApp 昵称盖掉库里已有的名字**（魏征复审 2026-09-28，实测确认）。
+      //
+      // `resolveContact` 的 `renameOk` 默认是 true（lib/crm/identity.ts:249），所以
+      // 不显式关掉的话，**每一条** WhatsApp 消息都会把 `contacts.display_name` 改写成
+      // 客人自设的 WhatsApp 昵称。而这里传进来的 identity 只有电话号，命中的往往是
+      // 早就存在的老联系人：CTS 库里 774 条表单留资 + 642 通电话的人，报名时填的
+      // 真名会被表情 / 小名静默覆盖 —— 顾问再也认不出这是谁，而且原名不可恢复。
+      //
+      // 首次建人不受影响：新建那条路径直接用 `displayName` 建，跟这个开关无关。
+      // 所以效果正是「没名字时用昵称，有名字时不动」。
+      overwriteDisplayName: false,
       source: 'whatsapp',
       seenAt: sentAt,
     })
