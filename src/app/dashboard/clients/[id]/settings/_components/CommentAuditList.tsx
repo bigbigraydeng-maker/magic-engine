@@ -61,6 +61,18 @@ export function isStuck(it: Engagement, now: number = Date.now()): boolean {
   return it.reply_status === 'dm_sent' && !it.public_reply_id
 }
 
+/**
+ * Union of the recency-windowed page and the always-complete stuck set, by
+ * id, newest first (Codex round 7 复审 P1: a stuck row older than the recency
+ * window would otherwise never load, so its only closing action — the
+ * "标记已阅" button below — becomes permanently unreachable).
+ */
+export function mergeEngagements(recent: Engagement[], stuck: Engagement[]): Engagement[] {
+  const byId = new Map<string, Engagement>()
+  for (const it of [...recent, ...stuck]) byId.set(it.id, it)
+  return Array.from(byId.values()).sort((a, b) => b.created_at.localeCompare(a.created_at))
+}
+
 const CATEGORY_META: Record<string, { label: string; cls: string }> = {
   praise:    { label: '夸赞', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   question:  { label: '提问', cls: 'bg-sky-50 text-sky-700 border-sky-200' },
@@ -79,13 +91,26 @@ export function CommentAuditList({ clientId }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
 
+  /**
+   * Fetches recent rows AND stuck rows separately, then merges (Codex round 7
+   * 复审 P1): the API's default page is a recency window (`?limit=25`), so a
+   * stuck row older than that never loads here — its only closing action
+   * ("标记已阅" below) becomes permanently unreachable even after an FDE has
+   * manually handled it. `?stuck=1` returns every currently-stuck row for
+   * this client regardless of age; merging guarantees one is always visible.
+   */
   const load = useCallback(async () => {
     setError(null)
     try {
-      const res = await fetch(`/api/clients/${clientId}/comment-engagements?limit=25`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const { engagements } = (await res.json()) as { engagements: Engagement[] }
-      setItems(engagements)
+      const [recentRes, stuckRes] = await Promise.all([
+        fetch(`/api/clients/${clientId}/comment-engagements?limit=25`),
+        fetch(`/api/clients/${clientId}/comment-engagements?stuck=1`),
+      ])
+      if (!recentRes.ok) throw new Error(`HTTP ${recentRes.status}`)
+      if (!stuckRes.ok) throw new Error(`HTTP ${stuckRes.status}`)
+      const { engagements: recent } = (await recentRes.json()) as { engagements: Engagement[] }
+      const { engagements: stuck } = (await stuckRes.json()) as { engagements: Engagement[] }
+      setItems(mergeEngagements(recent, stuck))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }

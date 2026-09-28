@@ -78,15 +78,14 @@ function daysAgo(iso: string, now: Date): number {
  * 这条待办 `href` 指向的独立 `/settings` 页；就算找对了地方，它的可见性判据
  * （`reachable && verified && via !== 'legacy_client_token'`）只看"读得到吗"，
  * 读没问题、只是缺发评论回复这一项权限的客户会被判定"同步正常"，两个按钮
- * 都不显示。直接给 `/api/auth/facebook/connect?client_id=` 这条路由——它是
- * 发起 Meta 同意页的真正入口，不经过任何按钮可见性判断，登录后有这个客户
- * 权限就能直接触发。
+ * 都不显示。`tokenSourceGuidance` 把这条路由放进 `href`（今日待办页面只把
+ * `href` 渲染成可点按钮，`how` 只是纯文本 `<span>`——Codex round 7 复审 P2：
+ * round 6 只把 URL 写进了 `how` 文案里，从来没有真的可点）。
  */
-function oauthHow(clientId: string): string {
+function oauthHow(): string {
   return (
     '这个客户的 Facebook 主页令牌是通过"连接 Meta"存的 OAuth 授权，不是 Render 环境变量——' +
-    `打开 ${APP_BASE}/api/auth/facebook/connect?client_id=${clientId} 直接起一次 Meta 授权` +
-    '（不用在页面上找按钮，这个客户设置页里的"连接 Meta"按钮在权限只缺一项时可能不会显示），' +
+    '点这条待办的按钮直接起一次 Meta 授权（不用在页面上找"连接 Meta"按钮，它在权限只缺一项时可能不会显示），' +
     '用对这个主页有管理权限的 Facebook 账号走完同意页，确认 pages_manage_engagement 权限打开；' +
     '改 Render 环境变量对这个客户不会生效，别浪费时间改错地方。'
   )
@@ -102,6 +101,11 @@ const ENV_VAR_HOW =
   'pages_manage_engagement（发评论回复要用，最容易被漏勾）；换好在 Render 后台 crazycontent 服务的 ' +
   'Environment 更新这个客户专属的令牌变量，保存时选带 deploy 的那个选项（别选 Save only）。'
 
+interface TokenSourceGuidance {
+  how: string
+  href: string
+}
+
 /**
  * 判不出令牌来源（读失败/未核实）就退回默认的专属令牌指引——不让一次额外查询
  * 失败拖垮整条待办。
@@ -111,26 +115,35 @@ const ENV_VAR_HOW =
  * `resolveMetaTokenDetailed` 兜底出的共享 `META_SYSTEM_USER_TOKEN`
  * （`shared_fallback`）——原来无条件当成"这个客户专属变量"，对共享令牌客户
  * 会指错地方，改了一把不存在的"专属变量"根本不影响实际在用的那把钥匙。
+ *
+ * 返回值带 `href` 而不是只返回文案（Codex round 7 复审 P2）：三档里只有
+ * `client_oauth` 需要一条不一样的落地页，其余两档仍然落设置页——href 跟着
+ * 令牌来源走，不是固定值。
  */
-async function tokenSourceHow(
+async function tokenSourceGuidance(
   supabase: SupabaseClient,
   clientId: string,
   pageId: string,
   env: Record<string, string | undefined>,
-): Promise<string> {
+): Promise<TokenSourceGuidance> {
+  const settingsHref = `${APP_BASE}/dashboard/clients/${clientId}/settings`
   try {
     const assessment = await assessConfiguredPage(supabase, clientId, pageId, env)
-    if (assessment.verified && assessment.via === 'client_oauth') return oauthHow(clientId)
+    if (assessment.verified && assessment.via === 'client_oauth') {
+      return { how: oauthHow(), href: `${APP_BASE}/api/auth/facebook/connect?client_id=${clientId}` }
+    }
   } catch {
     // fall through — 用下面的令牌来源查询兜底判断
   }
   try {
     const resolved = await resolveMetaTokenDetailed(supabase, clientId, env)
-    if (resolved && resolved !== 'ownership_unknown' && resolved.source === 'shared_fallback') return SHARED_TOKEN_HOW
+    if (resolved && resolved !== 'ownership_unknown' && resolved.source === 'shared_fallback') {
+      return { how: SHARED_TOKEN_HOW, href: settingsHref }
+    }
   } catch {
     // fall through to the default
   }
-  return ENV_VAR_HOW
+  return { how: ENV_VAR_HOW, href: settingsHref }
 }
 
 async function fetchStuckRows(
@@ -203,7 +216,7 @@ export async function pushCommentAutoreplyStuckItems(
 
   for (const [clientId, agg] of Array.from(byClient.entries())) {
     const days = daysAgo(agg.oldest, now)
-    const how = await tokenSourceHow(supabase, clientId, agg.pageId, env)
+    const guidance = await tokenSourceGuidance(supabase, clientId, agg.pageId, env)
     items.push({
       kind: 'comment_autoreply_stuck',
       client_id: clientId,
@@ -213,12 +226,12 @@ export async function pushCommentAutoreplyStuckItems(
         `处理中途中断卡住，三种情况都有可能），最早一条已经卡了 ${days} 天。具体原因系统存的是引擎写死的通用文案，` +
         '看不出是哪一种——常见是 Facebook Page 令牌缺了发评论回复需要的权限，也可能是限流或 Meta 接口的其他问题，需要人工核实。',
       how:
-        '先打开客户设置页的"评论审计"列表核对这几条评论的内容（默认只显示最近 25 条、不分状态，卡住的评论如果是旧的可能要往前翻）；' +
+        '先打开客户设置页的"评论审计"列表核对这几条评论的内容（卡住的评论不管多旧都会显示，不受"最近 25 条"限制）；' +
         '再去 Facebook 主页对应评论下面看一眼是不是已经有回复了（个别卡住的是系统其实发出去了、只是没能把"发成功"这件事存回数据库，不是真的没回，' +
         '直接补发会变成重复回复客户）——没有回复的才手动回一下（系统不会补发）；' +
-        `${how} ` +
+        `${guidance.how} ` +
         '确认修好、该回的都回完之后，回到"评论审计"列表给这几条点"已读"，这条待办会自动消失，不会一直卡在这里重复出现。',
-      href: `${APP_BASE}/dashboard/clients/${clientId}/settings`,
+      href: guidance.href,
     })
   }
 }

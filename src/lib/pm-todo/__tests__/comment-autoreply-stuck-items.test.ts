@@ -178,8 +178,8 @@ describe('pushCommentAutoreplyStuckItems', () => {
     await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
     expect(items[0].how).toContain('连接 Meta')
     expect(items[0].how).toContain('改 Render 环境变量对这个客户不会生效')
-    // Codex round 6 P1：不能只说"去找按钮"——按钮在另一个页面，且权限只缺一项时可能压根不显示；直接给可用链接
-    expect(items[0].how).toContain('/api/auth/facebook/connect?client_id=cts')
+    // Codex round 7 P2：待办页面只把 href 渲成可点按钮，how 只是纯文本——URL 必须在 href 里，不能只写进 how 文案
+    expect(items[0].href).toBe('https://app.magicengine.com.au/api/auth/facebook/connect?client_id=cts')
     expect(assessConfiguredPageMock).toHaveBeenCalledWith(sb, 'cts', PAGE_ID, expect.anything())
   })
 

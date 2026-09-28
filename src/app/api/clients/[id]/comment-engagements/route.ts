@@ -2,13 +2,24 @@
  * Social comment engagements — FDE audit view.
  *
  * GET   → recent auto-reply decisions for the client (what was replied / DM'd /
- *         hidden / flagged for human). Supports ?status=, ?needs_human=1, ?limit=.
+ *         hidden / flagged for human). Supports ?status=, ?needs_human=1, ?limit=,
+ *         ?stuck=1.
  * PATCH → intervene on one engagement:
  *           action 'revert'        — delete our public reply on FB, mark reverted
  *           action 'mark_reviewed' — FDE acknowledged (clears needs_human)
  *
  * Read-only surface over a full-auto system: the cron does the work, humans
  * only inspect + occasionally undo.
+ *
+ * `?stuck=1` mirrors comment-autoreply-stuck-items.ts's own "permanently
+ * stuck" predicate (failed+retries exhausted / dm_sent with no public reply /
+ * processing past the stale window) instead of the default recency window
+ * (Codex round 7 复审 P1): the default `?limit=` page only covers the most
+ * recent rows, so a stuck row older than that never loads client-side — its
+ * only closing action ("标记已阅" in CommentAuditList.tsx) becomes permanently
+ * unreachable even after an FDE has manually handled it. `stuck=1` ignores
+ * `limit`/`status`/`needs_human` and returns every currently-stuck row for
+ * this client regardless of age.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -17,6 +28,7 @@ import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { getPageAccessToken } from '@/lib/meta/page-posts'
 import { deleteComment } from '@/lib/meta/comments'
+import { MAX_ATTEMPTS, STALE_PROCESSING_MS } from '@/lib/social/comment-autoreply-constants'
 
 export async function GET(
   req: NextRequest,
@@ -27,6 +39,13 @@ export async function GET(
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
   const url = new URL(req.url)
+  const stuck = url.searchParams.get('stuck') === '1'
+
+  if (stuck) {
+    const data = await fetchStuckEngagements(clientId)
+    return NextResponse.json({ engagements: data })
+  }
+
   const status = url.searchParams.get('status')
   const needsHuman = url.searchParams.get('needs_human') === '1'
   const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') ?? '50', 10) || 50))
@@ -45,6 +64,41 @@ export async function GET(
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   return NextResponse.json({ engagements: data ?? [] })
+}
+
+/**
+ * Mirrors comment-autoreply-stuck-items.ts's own "permanently stuck" query
+ * shape (three separate branches, unioned) rather than one raw PostgREST
+ * `.or()` filter string — same predicate logic in two different query
+ * styles would drift out of sync over time, and the three-branch shape is
+ * already the proven, tested pattern for this exact definition of "stuck".
+ * Capped at 200/branch defensively; a single client with more permanently-
+ * stuck comments than that is its own emergency, visible elsewhere.
+ */
+async function fetchStuckEngagements(clientId: string) {
+  const staleBefore = new Date(Date.now() - STALE_PROCESSING_MS).toISOString()
+  const base = () =>
+    supabaseAdmin
+      .from('social_comment_engagements')
+      .select('*')
+      .eq('client_id', clientId)
+      .is('reviewed_at', null)
+      .order('created_at', { ascending: false })
+      .limit(200)
+
+  const [failed, dmOnly, stuckProcessing] = await Promise.all([
+    base().eq('reply_status', 'failed').gte('attempts', MAX_ATTEMPTS),
+    base().eq('reply_status', 'dm_sent').is('public_reply_id', null),
+    base().eq('reply_status', 'processing').lt('updated_at', staleBefore),
+  ])
+  for (const r of [failed, dmOnly, stuckProcessing]) {
+    if (r.error) throw new Error(r.error.message)
+  }
+  const byId = new Map<string, NonNullable<typeof failed.data>[number]>()
+  for (const row of [...(failed.data ?? []), ...(dmOnly.data ?? []), ...(stuckProcessing.data ?? [])]) {
+    byId.set((row as { id: string }).id, row)
+  }
+  return Array.from(byId.values())
 }
 
 interface PatchBody {

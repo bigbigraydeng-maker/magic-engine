@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isStuck, type Engagement } from '../CommentAuditList'
+import { isStuck, mergeEngagements, type Engagement } from '../CommentAuditList'
 import { MAX_ATTEMPTS, STALE_PROCESSING_MS } from '@/lib/social/comment-autoreply-constants'
 
 /**
@@ -74,5 +74,36 @@ describe('isStuck', () => {
     for (const status of ['pending', 'skipped', 'hidden', 'reverted']) {
       expect(isStuck({ ...base, reply_status: status }, NOW)).toBe(false)
     }
+  })
+})
+
+/**
+ * `mergeEngagements`（Codex round 7 复审 P1）：默认 `?limit=25` 只是一个按
+ * `created_at` 倒序的近期窗口，卡死很久的行永远翻不到、按钮点不到；这里验证
+ * 合并后卡死行一定在，且不会因为同一行同时出现在两边而重复。
+ */
+describe('mergeEngagements', () => {
+  it('stuck 里独有的旧行会被并进来，不受 recent 窗口限制', () => {
+    const recentRow = { ...base, id: 'r1', created_at: '2026-09-27T00:00:00Z' }
+    const oldStuckRow = { ...base, id: 's1', created_at: '2026-08-01T00:00:00Z', reply_status: 'failed', attempts: MAX_ATTEMPTS }
+    const merged = mergeEngagements([recentRow], [oldStuckRow])
+    expect(merged.map((it) => it.id)).toEqual(['r1', 's1'])
+  })
+
+  it('同一行两边都有 → 按 id 去重，只保留一份', () => {
+    const row = { ...base, id: 'x1', created_at: '2026-09-20T00:00:00Z' }
+    const merged = mergeEngagements([row], [row])
+    expect(merged).toHaveLength(1)
+  })
+
+  it('按 created_at 倒序排列', () => {
+    const older = { ...base, id: 'a', created_at: '2026-09-01T00:00:00Z' }
+    const newer = { ...base, id: 'b', created_at: '2026-09-20T00:00:00Z' }
+    const merged = mergeEngagements([older], [newer])
+    expect(merged.map((it) => it.id)).toEqual(['b', 'a'])
+  })
+
+  it('两边都空 → 空数组', () => {
+    expect(mergeEngagements([], [])).toEqual([])
   })
 })
