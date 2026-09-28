@@ -40,10 +40,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
-  // `intent=publishing` marks the "Reauthorize Meta Publishing" action so the
-  // callback can fail closed with a publishing-specific message. Any other
-  // value is ignored — the flow itself, scopes and guards are identical.
-  const intent = req.nextUrl.searchParams.get('intent') === 'publishing' ? 'publishing' : undefined
+  // `intent=publishing` marks the "Reauthorize Meta Publishing" action, and
+  // `intent=comment_reply` the comment-autoreply reconnect action, so the
+  // callback can fail closed / target the right Page. Any other value is
+  // ignored — the flow itself, scopes and guards are identical.
+  const rawIntent = req.nextUrl.searchParams.get('intent')
+  const intent = rawIntent === 'publishing' ? 'publishing' : rawIntent === 'comment_reply' ? 'comment_reply' : undefined
 
   // Publishing reauth authorises the Facebook Reel adapter's target Page
   // (factory_config.publish_target), NOT the inbox Page. Resolve it server-side
@@ -64,12 +66,28 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // Comment-reply reauth authorises the comment-autoreply engine's configured
+  // Page (social_comment_config.fb_page_id), which is not always the same Page
+  // as clients.facebook_page_id (Codex round 8 复审 P1) — same fail-closed
+  // shape as publishing above, for the same reason: starting consent with
+  // nothing to target would store a token for the wrong (or no) Page.
+  if (intent === 'comment_reply') {
+    const { data } = await supabaseAdmin
+      .from('social_comment_config')
+      .select('fb_page_id')
+      .eq('client_id', clientId)
+      .maybeSingle()
+    const pageId = (data as { fb_page_id?: string | null } | null)?.fb_page_id
+    if (!pageId) return backToPanel(clientId, 'no_comment_page')
+  }
+
   let authUrl: string
   try {
     const redirectUri = `${appUrl()}/api/auth/facebook/callback`
-    // Publishing reauth uses auth_type=rerequest so a previously declined
-    // pages_manage_posts is actually shown again (Meta hides it otherwise).
-    authUrl = buildAuthUrl(buildState(clientId, intent), redirectUri, intent === 'publishing')
+    // Publishing / comment-reply reauth use auth_type=rerequest so a
+    // previously declined scope is actually shown again (Meta hides it
+    // otherwise) — the ordinary inbox connect never needs this.
+    authUrl = buildAuthUrl(buildState(clientId, intent), redirectUri, intent !== undefined)
   } catch (err) {
     // Missing app credentials — say which knob is missing rather than 500ing.
     return NextResponse.json(

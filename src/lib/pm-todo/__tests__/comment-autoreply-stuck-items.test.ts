@@ -57,7 +57,9 @@ function engagementsChain(rowsByBranch: Partial<Record<Branch, EngagementRow[]>>
     range: async () => {
       if (errorMessage) return { data: null, error: { message: errorMessage } }
       const rows = (branch && rowsByBranch[branch]) || []
-      return { data: rows.filter((r) => chain._ids.includes(r.client_id)), error: null }
+      // reply_status 就是查询本身的过滤条件（每条分支查询只会命中同一个
+      // reply_status），直接从 branch 推，不用要求每条测试夹具都手写这一列。
+      return { data: rows.filter((r) => chain._ids.includes(r.client_id)).map((r) => ({ ...r, reply_status: branch })), error: null }
     },
   }
   return chain
@@ -165,8 +167,24 @@ describe('pushCommentAutoreplyStuckItems', () => {
     const items: ManualItem[] = []
     await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
     expect(items).toHaveLength(1)
-    expect(items[0].what).toContain('3 条')
+    // Codex round 8 P1：failed/dm_sent（确定该回复）跟 processing 卡死（不确定，见下面专门的测试）分开计数描述，不再合并成一个笼统的总数
+    expect(items[0].what).toContain('2 条确定该有公开回复')
+    expect(items[0].what).toContain('1 条处理到一半中断')
     expect(items[0].what).toContain('36 天')
+  })
+
+  it('processing 卡死不确定原本该不该回，跟 failed/dm_sent 分开描述、how 里提示先判断再动手（Codex round 8 P1）', async () => {
+    assessConfiguredPageMock.mockResolvedValue({ verified: false, reason: 'check_failed' })
+    resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_page' })
+    const { sb } = fakeDb({
+      processingRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-01T00:00:00Z' }],
+    })
+    const items: ManualItem[] = []
+    await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
+    expect(items[0].what).toContain('1 条处理到一半中断')
+    expect(items[0].what).not.toContain('确定该有公开回复')
+    expect(items[0].how).toContain('先自己判断该怎么处理')
+    expect(items[0].how).not.toContain('没有回复的才手动回一下')
   })
 
   it('令牌是存量 OAuth（client_oauth）→ how 指向重新连接 Meta，不指向 Render 环境变量', async () => {
@@ -179,7 +197,8 @@ describe('pushCommentAutoreplyStuckItems', () => {
     expect(items[0].how).toContain('连接 Meta')
     expect(items[0].how).toContain('改 Render 环境变量对这个客户不会生效')
     // Codex round 7 P2：待办页面只把 href 渲成可点按钮，how 只是纯文本——URL 必须在 href 里，不能只写进 how 文案
-    expect(items[0].href).toBe('https://app.magicengine.com.au/api/auth/facebook/connect?client_id=cts')
+    // Codex round 8 P1：intent=comment_reply 让回调把新令牌存去评论引擎实际用的主页，不是 clients.facebook_page_id
+    expect(items[0].href).toBe('https://app.magicengine.com.au/api/auth/facebook/connect?client_id=cts&intent=comment_reply')
     expect(assessConfiguredPageMock).toHaveBeenCalledWith(sb, 'cts', PAGE_ID, expect.anything())
   })
 

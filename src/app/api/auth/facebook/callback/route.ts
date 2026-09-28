@@ -33,6 +33,7 @@ type Outcome =
   | 'publish_not_granted'
   | 'verify_failed'
   | 'no_publish_target'
+  | 'no_comment_page'
   | 'no_pages'
   | 'page_not_granted'
   | 'no_page_bound'
@@ -80,19 +81,25 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const pages = await listPagesWithTokens(longToken)
   if (pages.length === 0) return back(clientId, 'no_pages')
 
-  // Which Page do we need a token for? These are two independent fields:
-  //   • inbox connect  → clients.facebook_page_id (the Messenger sync target)
-  //   • publishing      → factory_config.publish_target.page_id (what the
+  // Which Page do we need a token for? These are three independent fields:
+  //   • inbox connect    → clients.facebook_page_id (the Messenger sync target)
+  //   • publishing       → factory_config.publish_target.page_id (what the
   //                        Facebook Reel adapter actually posts to)
-  // Storing the inbox Page's token while claiming the publishing Page is ready
-  // is exactly the failure this reauth exists to end, so publishing resolves its
-  // own target — re-read here server-side (never from a client-supplied id or
-  // the signed state) so a config change mid-flow fails closed below.
-  const { data } = await supabaseAdmin
-    .from('clients')
-    .select('facebook_page_id, factory_config')
-    .eq('id', clientId)
-    .maybeSingle()
+  //   • comment_reply    → social_comment_config.fb_page_id (what the comment
+  //                        auto-reply engine actually replies on — not always
+  //                        the same Page as clients.facebook_page_id; Codex
+  //                        round 8 复审 P1: a plain reconnect silently stored
+  //                        the new token for the wrong Page when they diverge)
+  // Storing one Page's token while claiming a DIFFERENT one is ready is exactly
+  // the failure this reauth exists to end, so each intent resolves its own
+  // target — re-read here server-side (never from a client-supplied id or the
+  // signed state) so a config change mid-flow fails closed below.
+  const [{ data }, { data: commentConfig }] = await Promise.all([
+    supabaseAdmin.from('clients').select('facebook_page_id, factory_config').eq('id', clientId).maybeSingle(),
+    intent === 'comment_reply'
+      ? supabaseAdmin.from('social_comment_config').select('fb_page_id').eq('client_id', clientId).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ])
 
   let targetPageId: string | null
   if (intent === 'publishing') {
@@ -103,6 +110,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       return back(clientId, 'no_publish_target')
     }
     targetPageId = target.page_id
+  } else if (intent === 'comment_reply') {
+    targetPageId = (commentConfig as { fb_page_id?: string | null } | null)?.fb_page_id ?? null
+    if (!targetPageId) return back(clientId, 'no_comment_page')
   } else {
     targetPageId = (data as { facebook_page_id?: string | null } | null)?.facebook_page_id ?? null
     if (!targetPageId) return back(clientId, 'no_page_bound')

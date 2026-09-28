@@ -13,18 +13,27 @@
  * 直接信号：一条评论该有公开回复、系统也真的试了，但连续 `MAX_ATTEMPTS` 次都
  * 没发出去。这样不管以后失败原因是不是还是权限问题，这条待办都不会失效。
  *
- * 三类行都算「该有公开回复但永远不会有」（Codex round 1/2 复审 P1）：
- *   1. `reply_status='failed' && attempts>=MAX_ATTEMPTS`——送失败，重试也耗尽。
+ * 三类行都算「系统不会再自动处理」，但确定性不同（Codex round 1/2 复审 P1，
+ * round 8 复审 P1 修正确定性表述）：
+ *   1. `reply_status='failed' && attempts>=MAX_ATTEMPTS`——分类已经完成、分类
+ *      结果允许回复、也真的试着发了，只是发送本身失败、重试也耗尽——**确定**
+ *      该有公开回复。
  *   2. `reply_status='dm_sent' && public_reply_id is null`——`processClaimedComment`
  *      的状态判定只要私信发成功就写 `dm_sent`，哪怕公开回复同时失败；`dm_sent`
- *      在 `TERMINAL_OR_INFLIGHT` 里，永远不会再重试公开回复这一半。
+ *      在 `TERMINAL_OR_INFLIGHT` 里，永远不会再重试公开回复这一半——同样**确定**
+ *      该有公开回复（这一半没发出去）。
  *   3. `reply_status='processing'` 且卡住超过 `STALE_PROCESSING_MS`——`claimComment`
  *      先把行改成 `processing` 再调 `processClaimedComment`；如果这中间那次调用
  *      抛错/整个 cron 调用超时，行会永远停在 `processing`（`filterProcessable`
  *      只接纳"没有行"或"`failed` 且 attempts 未耗尽"两种，`processing` 两种都不是），
  *      既不会被重试，也不会被判定为失败——静默失踪，比 `failed` 更隐蔽。
  *      `STALE_PROCESSING_MS` 给了一个远超单次处理耗时的宽限期，避免把正在跑的
- *      同一轮 cron 误判成卡死。
+ *      同一轮 cron 误判成卡死。**这一类不确定**——中断可能发生在
+ *      `classifyComment` 完成之前，这时连分类结果都没有，不能断言"该回复"：
+ *      也可能本该判成垃圾隐藏、或者该分类本来就关闭自动回复。`what`/`how` 把
+ *      这一类跟前两类分开描述，不对它断言"该回复"（Codex round 8 复审 P1：
+ *      原版本三类一起说"该有公开回复"，会让 FDE 对垃圾评论或本该跳过的评论
+ *      也去手动公开回复）。
  *
  * 闭环（Codex round 1 复审 P1「没有能让这条待办消失的动作」，round 3 复审 P1
  * 补丁）：FDE 在设置页「评论审计」列表对某一行点「已读」（PATCH
@@ -66,6 +75,8 @@ interface StuckRow {
   client_id: string
   page_id: string
   comment_created_at: string
+  /** `processing` = stale-processing (Codex round 8 复审 P1: unlike the other two, this one is NOT confirmed "should reply" — see the module docstring). */
+  reply_status: 'failed' | 'dm_sent' | 'processing'
 }
 
 function daysAgo(iso: string, now: Date): number {
@@ -81,6 +92,12 @@ function daysAgo(iso: string, now: Date): number {
  * 都不显示。`tokenSourceGuidance` 把这条路由放进 `href`（今日待办页面只把
  * `href` 渲染成可点按钮，`how` 只是纯文本 `<span>`——Codex round 7 复审 P2：
  * round 6 只把 URL 写进了 `how` 文案里，从来没有真的可点）。
+ */
+/**
+ * `intent=comment_reply`（Codex round 8 复审 P1）：评论引擎实际用的主页是
+ * `social_comment_config.fb_page_id`，不一定等于 `clients.facebook_page_id`
+ * ——不带这个 intent，回调会把新令牌存去 `clients.facebook_page_id`，评论
+ * 引擎真正在用的那个主页令牌还是没换，问题原样复发。
  */
 function oauthHow(): string {
   return (
@@ -130,7 +147,7 @@ async function tokenSourceGuidance(
   try {
     const assessment = await assessConfiguredPage(supabase, clientId, pageId, env)
     if (assessment.verified && assessment.via === 'client_oauth') {
-      return { how: oauthHow(), href: `${APP_BASE}/api/auth/facebook/connect?client_id=${clientId}` }
+      return { how: oauthHow(), href: `${APP_BASE}/api/auth/facebook/connect?client_id=${clientId}&intent=comment_reply` }
     }
   } catch {
     // fall through — 用下面的令牌来源查询兜底判断
@@ -157,7 +174,7 @@ async function fetchStuckRows(
     fetchAll<StuckRow>((from, to) =>
       supabase
         .from('social_comment_engagements')
-        .select('client_id, page_id, comment_created_at')
+        .select('client_id, page_id, comment_created_at, reply_status')
         .eq('reply_status', 'failed')
         .gte('attempts', MAX_ATTEMPTS)
         .is('reviewed_at', null)
@@ -168,7 +185,7 @@ async function fetchStuckRows(
     fetchAll<StuckRow>((from, to) =>
       supabase
         .from('social_comment_engagements')
-        .select('client_id, page_id, comment_created_at')
+        .select('client_id, page_id, comment_created_at, reply_status')
         .eq('reply_status', 'dm_sent')
         .is('public_reply_id', null)
         .is('reviewed_at', null)
@@ -179,7 +196,7 @@ async function fetchStuckRows(
     fetchAll<StuckRow>((from, to) =>
       supabase
         .from('social_comment_engagements')
-        .select('client_id, page_id, comment_created_at')
+        .select('client_id, page_id, comment_created_at, reply_status')
         .eq('reply_status', 'processing')
         .lt('updated_at', staleBefore)
         .is('reviewed_at', null)
@@ -203,13 +220,15 @@ export async function pushCommentAutoreplyStuckItems(
 
   const rows = await fetchStuckRows(supabase, activeClientIds, now)
 
-  const byClient = new Map<string, { count: number; oldest: string; pageId: string }>()
+  const byClient = new Map<string, { count: number; oldest: string; pageId: string; stale: number }>()
   for (const row of rows) {
+    const stale = row.reply_status === 'processing' ? 1 : 0
     const cur = byClient.get(row.client_id)
     if (!cur) {
-      byClient.set(row.client_id, { count: 1, oldest: row.comment_created_at, pageId: row.page_id })
+      byClient.set(row.client_id, { count: 1, oldest: row.comment_created_at, pageId: row.page_id, stale })
     } else {
       cur.count += 1
+      cur.stale += stale
       if (row.comment_created_at < cur.oldest) cur.oldest = row.comment_created_at
     }
   }
@@ -217,20 +236,38 @@ export async function pushCommentAutoreplyStuckItems(
   for (const [clientId, agg] of Array.from(byClient.entries())) {
     const days = daysAgo(agg.oldest, now)
     const guidance = await tokenSourceGuidance(supabase, clientId, agg.pageId, env)
+    const confirmed = agg.count - agg.stale
+
+    // 确定该回复的（failed / dm_sent 半失败）跟处理到一半中断、不确定原本该
+    // 怎么处理的（processing 卡死）分开描述，不对后者断言"该回复"——中断可能
+    // 发生在分类完成之前，那种情况下也可能本该隐藏成垃圾或本来就不回复
+    // （Codex round 8 复审 P1）。
+    const whatParts: string[] = []
+    if (confirmed > 0) {
+      whatParts.push(`${confirmed} 条确定该有公开回复但发不出去了（发送重试耗尽 / 私信发了但公开回复没发）`)
+    }
+    if (agg.stale > 0) {
+      whatParts.push(`${agg.stale} 条处理到一半中断，原本该怎么处理还不确定（可能该回复、可能该隐藏成垃圾、也可能本该跳过不回，中断导致分类没能走完）`)
+    }
+
     items.push({
       kind: 'comment_autoreply_stuck',
       client_id: clientId,
       client_name: nameOf(clientId),
       what:
-        `${agg.count} 条粉丝评论该有公开回复，但系统已经不会再自动处理了（发送重试耗尽 / 私信发了但公开回复没发 / ` +
-        `处理中途中断卡住，三种情况都有可能），最早一条已经卡了 ${days} 天。具体原因系统存的是引擎写死的通用文案，` +
-        '看不出是哪一种——常见是 Facebook Page 令牌缺了发评论回复需要的权限，也可能是限流或 Meta 接口的其他问题，需要人工核实。',
+        `${whatParts.join('，另外 ')}，系统都已经不会再自动处理了，最早一条已经卡了 ${days} 天。` +
+        '具体原因系统存的是引擎写死的通用文案，看不出细节——常见是 Facebook Page 令牌缺了发评论回复需要的权限，' +
+        '也可能是限流或 Meta 接口的其他问题，需要人工核实。',
       how:
         '先打开客户设置页的"评论审计"列表核对这几条评论的内容（卡住的评论不管多旧都会显示，不受"最近 25 条"限制）；' +
         '再去 Facebook 主页对应评论下面看一眼是不是已经有回复了（个别卡住的是系统其实发出去了、只是没能把"发成功"这件事存回数据库，不是真的没回，' +
-        '直接补发会变成重复回复客户）——没有回复的才手动回一下（系统不会补发）；' +
+        '直接补发会变成重复回复客户）——' +
+        (confirmed > 0 ? '确定该回复的这些，没有回复的才手动回一下（系统不会补发）；' : '') +
+        (agg.stale > 0
+          ? '处理到一半中断的这些先自己判断该怎么处理，不要不分青红皂白照单全回——明显是垃圾广告就去 Facebook 手动隐藏，不确定要不要回、或者本来就不该回（比如这类评论客户设置里关了自动回复）就不用勉强回，跳过即可；'
+          : '') +
         `${guidance.how} ` +
-        '确认修好、该回的都回完之后，回到"评论审计"列表给这几条点"已读"，这条待办会自动消失，不会一直卡在这里重复出现。',
+        '确认处理完之后，回到"评论审计"列表给这几条点"已读"，这条待办会自动消失，不会一直卡在这里重复出现。',
       href: guidance.href,
     })
   }

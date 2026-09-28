@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   upsertCalls:                [] as Array<Record<string, unknown>>,
   boundPageId:                '1616575215312482' as string | null,
   factoryConfig:              { publish_target: { platform: 'facebook', page_id: '1616575215312482' } } as unknown,
+  commentPageId:               '1616575215312482' as string | null,
 }))
 
 vi.mock('@/lib/meta-oauth/client', async (importOriginal) => {
@@ -45,14 +46,16 @@ vi.mock('@/lib/platform-oauth/connection-store', () => ({
 
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
-    from: vi.fn(() => ({
+    from: vi.fn((table: string) => ({
       select: vi.fn(() => ({
         eq: vi.fn(() => ({
           maybeSingle: vi.fn(() =>
-            Promise.resolve({
-              data: { facebook_page_id: mocks.boundPageId, factory_config: mocks.factoryConfig },
-              error: null,
-            }),
+            table === 'social_comment_config'
+              ? Promise.resolve({ data: { fb_page_id: mocks.commentPageId }, error: null })
+              : Promise.resolve({
+                  data: { facebook_page_id: mocks.boundPageId, factory_config: mocks.factoryConfig },
+                  error: null,
+                }),
           ),
         })),
       })),
@@ -101,6 +104,7 @@ beforeEach(() => {
   mocks.upsertCalls.length = 0
   mocks.boundPageId = PAGE_ID
   mocks.factoryConfig = { publish_target: { platform: 'facebook', page_id: PAGE_ID } }
+  mocks.commentPageId = PAGE_ID
   process.env.NEXT_PUBLIC_APP_URL = 'https://app.magic-engine.com'
   process.env.FACEBOOK_APP_SECRET = 'app-secret-456'
   mocks.verifyState.mockReturnValue({ clientId: CLIENT_ID })
@@ -278,6 +282,67 @@ describe('publishing reauth binds to factory_config.publish_target, not the inbo
   it('fails closed (page_not_granted, no write) when the granted Meta Pages do not include the publish target', async () => {
     mocks.factoryConfig = { publish_target: { platform: 'facebook', page_id: PUBLISH_PAGE } }
     // Meta hands back only some OTHER page — not the configured publish target.
+    mocks.listPagesWithTokens.mockResolvedValue([
+      { pageId: PAGE_ID, pageName: 'Inbox Page', pageToken: 'inbox-token' },
+    ])
+
+    const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+
+    expect(outcomeOf(res)).toBe('page_not_granted')
+    expect(mocks.upsertCalls).toHaveLength(0)
+  })
+})
+
+describe('comment_reply reauth binds to social_comment_config.fb_page_id, not the inbox Page (Codex round 8 复审 P1)', () => {
+  const COMMENT_PAGE = '444555666'
+
+  beforeEach(() => {
+    mocks.verifyState.mockReturnValue({ clientId: CLIENT_ID, intent: 'comment_reply' })
+  })
+
+  it('stores the token for the comment-reply Page when it differs from the inbox Page', async () => {
+    mocks.boundPageId = PAGE_ID // inbox Page
+    mocks.commentPageId = COMMENT_PAGE
+    mocks.listPagesWithTokens.mockResolvedValue([
+      { pageId: PAGE_ID, pageName: 'Inbox Page', pageToken: 'inbox-token' },
+      { pageId: COMMENT_PAGE, pageName: 'Comment Page', pageToken: 'comment-token' },
+    ])
+
+    const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+
+    expect(outcomeOf(res)).toBe('connected')
+    // The persisted account_id + token must be the COMMENT-REPLY Page, never the inbox one —
+    // this is exactly the bug: a plain reconnect used to always bind clients.facebook_page_id.
+    expect(mocks.upsertCalls).toHaveLength(1)
+    expect(mocks.upsertCalls[0].accountId).toBe(COMMENT_PAGE)
+    expect(mocks.upsertCalls[0].accessToken).toBe('comment-token')
+  })
+
+  it('works when only a comment-reply Page exists and the inbox binding is absent', async () => {
+    mocks.boundPageId = null // no inbox binding
+    mocks.commentPageId = COMMENT_PAGE
+    mocks.listPagesWithTokens.mockResolvedValue([
+      { pageId: COMMENT_PAGE, pageName: 'Comment Page', pageToken: 'comment-token' },
+    ])
+
+    const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+
+    expect(outcomeOf(res)).toBe('connected')
+    expect(mocks.upsertCalls[0].accountId).toBe(COMMENT_PAGE)
+  })
+
+  it('fails closed with no_comment_page and writes nothing when social_comment_config has no fb_page_id', async () => {
+    mocks.commentPageId = null
+
+    const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+
+    expect(outcomeOf(res)).toBe('no_comment_page')
+    expect(mocks.upsertCalls).toHaveLength(0)
+  })
+
+  it('fails closed (page_not_granted, no write) when the granted Meta Pages do not include the comment-reply Page', async () => {
+    mocks.commentPageId = COMMENT_PAGE
+    // Meta hands back only some OTHER page — not the configured comment-reply Page.
     mocks.listPagesWithTokens.mockResolvedValue([
       { pageId: PAGE_ID, pageName: 'Inbox Page', pageToken: 'inbox-token' },
     ])

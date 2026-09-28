@@ -79,10 +79,15 @@ export const META_PUBLISH_SCOPE = 'pages_manage_posts'
 /**
  * Why a connect flow was started. `publishing` marks the "Reauthorize Meta
  * Publishing" path so the callback can fail closed with a publishing-specific,
- * actionable message when Meta declines `pages_manage_posts`. Absent = the
+ * actionable message when Meta declines `pages_manage_posts`. `comment_reply`
+ * marks the comment-autoreply reconnect path (Codex round 8 复审 P1): the
+ * comment engine's configured Page (`social_comment_config.fb_page_id`) is not
+ * always the same Page as `clients.facebook_page_id` — a plain reconnect would
+ * silently store the new token for the wrong Page, leaving the Page comments
+ * actually get replied on still without the missing scope. Absent = the
  * existing inbox-sync connect, whose outcomes are unchanged.
  */
-export type MetaConnectIntent = 'publishing'
+export type MetaConnectIntent = 'publishing' | 'comment_reply'
 
 export interface VerifiedState {
   clientId: string
@@ -136,7 +141,10 @@ export function verifyState(state: string): VerifiedState | null {
     }
     if (typeof data.clientId !== 'string' || typeof data.exp !== 'number') return null
     if (Date.now() > data.exp) return null
-    const intent = data.intent === 'publishing' ? 'publishing' : undefined
+    const intent =
+      data.intent === 'publishing' ? 'publishing' :
+      data.intent === 'comment_reply' ? 'comment_reply' :
+      undefined
     return intent ? { clientId: data.clientId, intent } : { clientId: data.clientId }
   } catch {
     return null
@@ -148,9 +156,10 @@ export function verifyState(state: string): VerifiedState | null {
 /**
  * @param rerequest When true, adds `auth_type=rerequest`. Meta suppresses a
  *   permission the user already declined once — the consent screen simply omits
- *   it — so a plain re-consent can never recover `pages_manage_posts`. Only
- *   `rerequest` forces Meta to show the declined permission again. Reserved for
- *   the publishing reauthorisation path; the ordinary connect never sets it.
+ *   it — so a plain re-consent can never recover a missing scope. Only
+ *   `rerequest` forces Meta to show a declined permission again. Reserved for
+ *   the publishing and comment-reply reauthorisation paths; the ordinary
+ *   connect never sets it.
  */
 export function buildAuthUrl(state: string, redirectUri: string, rerequest = false): string {
   const params = new URLSearchParams({
