@@ -38,6 +38,7 @@ import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
 import { pushAdsCircuitItems } from './ads-circuit-items'
+import { pushCommentAutoreplyStuckItems } from './comment-autoreply-stuck-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
 import { pushDataDeletionFailureItems } from './data-deletion-items'
 import {
@@ -320,6 +321,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 自治开关没同步到执行内核 —— 面板档位跟内核实际档位对不上，必须有人看见（WP3.1a）
     (b) => pushAdsAutonomySyncItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 自治开关同步待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 评论自动回复卡在失败、系统已放弃重试——2026-09-28 CTS 卡了 39 天没人知道
+    (b) => pushCommentAutoreplyStuckItems(supabase, b, now, nameOf, ids).catch((e) =>
+      console.warn('[manual-items] 评论自动回复卡死待办生成失败（不阻塞其他待办）:', e),
     ),
     // 每日广告巡检的广告级规则（D2 / D10）—— 只读，要不要改由人定；同一件事按 remind-cadence 节奏提醒
     (b) => pushAdsRuleFindingItems(supabase, b, now, nameOf).catch((e) =>

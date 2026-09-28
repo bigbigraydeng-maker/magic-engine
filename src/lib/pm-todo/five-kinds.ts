@@ -89,6 +89,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   facebook_sync_failing: 'one_click', // 主页管理员重新「连接 Meta」
   comment_scope_missing: 'one_click',
   comment_token_invalid: 'one_click',
+  comment_autoreply_stuck: 'one_click', // 同 facebook_sync_failing：症状客户能看见，根治是重新走一次 Meta 授权
   conversion_capi_token_dead: 'one_click',
   linkedin_progress_needs_setup: 'one_click',
   linkedin_progress_failed: 'one_click', // 先看 Publer 里 LinkedIn 账号掉没掉线
