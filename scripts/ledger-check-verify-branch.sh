@@ -4,6 +4,8 @@
 # 为什么要有这个：
 #   夜巡（claude/ledger-verify-*）是机器自动翻台账状态的通道。它一旦能顺手改代码、
 #   改标题、改 decided_on，就等于机器可以悄悄重写「当初决定了什么」——台账就废了。
+#   on_hold 同理：README 规定它只能由 PM 主动重提后人工解除，机器把 decided 卡
+#   悄悄标成 on_hold: true 就等于让该事项永久从待办消失，所以也必须冻结。
 #   所以这条分支只准动 status / done_on / done_ref / verified_ref / last_checked /
 #   check_note，只准动 docs/ledger/ 下的卡和 evidence/ 里的证据，且不准新建卡。
 set -euo pipefail
@@ -40,7 +42,7 @@ while IFS= read -r f; do
 done <<<"$changed"
 
 # ---- 2. 已存在的卡：冻结字段不准变 ----
-frozen_keys=(id title decided_on source verify_by verify_how owner)
+frozen_keys=(id title decided_on source verify_by verify_how owner on_hold)
 while IFS= read -r f; do
   [[ -z "$f" ]] && continue
   # 只处理顶层卡
