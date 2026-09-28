@@ -206,6 +206,11 @@ export interface ScopedAccount {
    */
   ownWindowSpend: number
   otherPageWindowSpend: number
+  /**
+   * 近 7 天：归属判不了（混主页 / 读不到主页）的广告组花费。`diagnosePageMismatch` 必须确认窗口总花费
+   * 都在 other_page 才能说「登记的主页可能不对」——这部分花费里可能混着客户自己的钱（Codex 2026-09-29）。
+   */
+  ambiguousWindowSpend: number
   /** 被切掉的广告组 / 系列 id（全部，不只排除清单里列出的）——判「有没有被切」用 */
   droppedAdsetIds: ReadonlySet<string>
   /**
@@ -218,7 +223,7 @@ export interface ScopedAccount {
 const round2 = (n: number) => Math.round(n * 100) / 100
 
 function unscoped(account: AccountInput): ScopedAccount {
-  return { account, excluded: [], accountLevelOnly: false, accountLevelOnlyReason: null, ownWindowSpend: 0, otherPageWindowSpend: 0, droppedAdsetIds: new Set(), selfNotOwnAdsetIds: new Set() }
+  return { account, excluded: [], accountLevelOnly: false, accountLevelOnlyReason: null, ownWindowSpend: 0, otherPageWindowSpend: 0, ambiguousWindowSpend: 0, droppedAdsetIds: new Set(), selfNotOwnAdsetIds: new Set() }
 }
 
 function accountLevelOnlyResult(account: AccountInput, reason: 'page_unknown' | 'capture_stale', detail: string): ScopedAccount {
@@ -228,6 +233,7 @@ function accountLevelOnlyResult(account: AccountInput, reason: 'page_unknown' | 
     accountLevelOnlyReason: reason,
     ownWindowSpend: 0,
     otherPageWindowSpend: 0,
+    ambiguousWindowSpend: 0,
     droppedAdsetIds: new Set(),
     selfNotOwnAdsetIds: new Set(),
     excluded: [{ adAccountId: account.adAccountId, level: 'account', id: account.adAccountId, name: null, reason, detail }],
@@ -326,6 +332,7 @@ export function scopeAccountToClient(account: AccountInput, clientPageId: string
   return {
     account: { ...account, snapshots, daily, hourly }, excluded, accountLevelOnly: false, accountLevelOnlyReason: null,
     ownWindowSpend: windowSpendWhere('own'), otherPageWindowSpend: windowSpendWhere('other_page'),
+    ambiguousWindowSpend: round2(windowSpendWhere('mixed_pages') + windowSpendWhere('page_unknown')),
     droppedAdsetIds: dropAdsets, selfNotOwnAdsetIds,
   }
 }
@@ -354,7 +361,9 @@ function listExcluded(account: AccountInput, drops: Drop[], days: ReadonlySet<st
 export function diagnosePageMismatch(account: AccountInput, scoped: ScopedAccount, clientId: string, date: string): Diagnosis | null {
   // 广告层快照最近一轮没抓全/太旧时 scopeAccountToClient 已经把 accountLevelOnly 置 true（adCaptureStale），
   // 这里第一条判断已经覆盖「多半是没抓到广告才判不出主页，不是登记错了」（魏征第二轮 + Codex 2026-09-27 合并）
-  if (scoped.accountLevelOnly || scoped.ownWindowSpend > 0 || scoped.otherPageWindowSpend <= 0) return null
+  // ambiguousWindowSpend > 0：还有混主页/读不到主页的广告组在窗口里花了钱，这部分可能就是客户自己的钱——
+  // 只有窗口总花费全部确认在别的主页上，才能说「登记的主页可能不对」（Codex 2026-09-29）
+  if (scoped.accountLevelOnly || scoped.ownWindowSpend > 0 || scoped.otherPageWindowSpend <= 0 || scoped.ambiguousWindowSpend > 0) return null
   return {
     code: 'D7', status: 'hit', clientVisible: false,
     units: [{ level: 'account', id: account.adAccountId, name: null, adAccountId: account.adAccountId }],
@@ -365,6 +374,30 @@ export function diagnosePageMismatch(account: AccountInput, scoped: ScopedAccoun
     manualTask: {
       what: `广告账户 ${account.adAccountId} 近 7 天花的钱全在别的 Facebook 主页的广告上，这个客户自己的广告组一个都没判。`,
       how: '先在广告后台看这些广告挂的是哪个主页：是这个客户的（换了主页或登记错了）就到客户设置页改登记主页；不是就确认这个账户是不是登记错了客户。',
+      href: `https://app.magicengine.com.au/dashboard/clients/${encodeURIComponent(clientId)}/settings`,
+    },
+  }
+}
+
+/**
+ * 广告层快照最近一轮没抓全或超过 `OWNERSHIP_MAX_AD_CAPTURE_AGE_HOURS`：广告组/广告级诊断（D3/D4/D5/D9/D2/D10/D11）
+ * 这一轮整段被 `scopeAccountToClient` 挡住不跑，只留 D1/D7 账户级判断。
+ *
+ * 🔴 必须出一条 D7：`agents/patrol.ts` 的 `capturesComplete()` 只看 `latestCaptures` 的 `complete` 位——
+ *    一轮抓全但已经过期的快照仍判「完整」。不出这条命中，当天要是没撞上别的诊断，`buildHeadline()` 会直接说
+ *    「今天没发现要紧的事」，把这条数据管线停摆报成健康（Codex 2026-09-29）。
+ */
+export function diagnoseCaptureStale(account: AccountInput, clientId: string): Diagnosis {
+  return {
+    code: 'D7', status: 'hit', clientVisible: false,
+    units: [{ level: 'account', id: account.adAccountId, name: null, adAccountId: account.adAccountId }],
+    title: `广告账户 ${account.adAccountId}：广告层设置快照最近一轮没抓全或超过 24 小时，广告组/广告级检查这一轮全部跳过`,
+    evidence: { ad_account_id: account.adAccountId },
+    sample: [],
+    reasons: ['这一轮有没有新加进别家的广告核实不到，只读诊断宁可不判也不拿过期快照判归属'],
+    manualTask: {
+      what: `广告账户 ${account.adAccountId} 的广告层设置快照最近一轮没抓全或超过 24 小时，广告组/广告级诊断（投放异常、预算错配、素材疲劳等）这一轮全部跳过。`,
+      how: '看每 3 小时的广告层快照抓取任务有没有报错或超时（运行记录里按账户号搜，重点看 level=ad 那几行）；是授权问题就按「读不到这个广告账户」处理，是连续多轮抓不全就报数据管线故障。',
       href: `https://app.magicengine.com.au/dashboard/clients/${encodeURIComponent(clientId)}/settings`,
     },
   }

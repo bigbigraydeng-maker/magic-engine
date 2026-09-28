@@ -365,6 +365,23 @@ describe('接进巡检 / 机会之后', () => {
     expect(run.diagnoses).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'D7', status: 'hit', title: expect.stringContaining('登记的主页可能不对') })]))
   })
 
+  it('没有纯客户主页组，但归属不明（混主页）的组也有花费时，不能说「全花在别家」——那部分可能是客户自己的钱（Codex 2026-09-29）', () => {
+    const acc = mixedAccount()
+    // as-own-1 / as-own-2 各混进一条别家主页的广告：两组都判不了 own，只算 mixed_pages（归属不明），
+    // 不再是唯一有花费的「other_page」——不能再说客户的钱「全在别家」
+    acc.snapshots = [
+      ...acc.snapshots,
+      ad('ad-own-1-other', 'as-own-1', 'c-own', OTHER),
+      ad('ad-own-2-other', 'as-own-2', 'c-own', OTHER),
+    ]
+    const scoped = scopeAccountToClient(acc, OWN, DATE, EVAL)
+    expect(scoped.ownWindowSpend).toBe(0)
+    expect(scoped.otherPageWindowSpend).toBeGreaterThan(0)
+    expect(scoped.ambiguousWindowSpend).toBeGreaterThan(0)
+    const run = runDiagnostics(input(acc))
+    expect(run.diagnoses.some(d => d.title.includes('登记的主页可能不对'))).toBe(false)
+  })
+
   it('广告层快照最近一轮没抓全时，不把「全被切掉」说成「登记主页不对」（原因是没抓到，魏征第二轮）', () => {
     const acc = mixedAccount()
     acc.snapshots = acc.snapshots.map(r => (r.entity_id.startsWith('ad-own') ? { ...r, creative_page_id: OTHER } : r))
@@ -380,6 +397,24 @@ describe('接进巡检 / 机会之后', () => {
     expect(run.adLevelCoverage).toEqual([expect.objectContaining({ ran: false, reason: 'capture_stale', adsChecked: 0 })])
     // D2/D10 完全没跑——不能有任何挂在这个账户广告上的命中
     expect(run.diagnoses.some(d => (d.code === 'D2' || d.code === 'D10') && d.status === 'hit')).toBe(false)
+  })
+
+  it('🔴 快照过期降级必须出一条 D7 命中，不能让当天诊断悄悄跳过（Codex 2026-09-29）', () => {
+    const stale = [{ level: 'ad' as const, complete: false, skipped_shared: false, error: 'timeout', captured_at: '2026-09-25T02:00:00Z' }]
+    const acc = { ...mixedAccount(), latestCaptures: stale }
+    const run = runDiagnostics(input(acc))
+    expect(run.diagnoses).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'D7', status: 'hit', title: expect.stringContaining('快照') }),
+    ]))
+  })
+
+  it('设置显示为最新一轮但已过期（complete=true 超过 24 小时）也要出 D7，不能被 capturesComplete() 判成完整', () => {
+    const oldButComplete = [{ level: 'ad' as const, complete: true, skipped_shared: false, error: null, captured_at: '2026-09-22T00:00:00Z' }]
+    const acc = { ...mixedAccount(), latestCaptures: oldButComplete }
+    const run = runDiagnostics(input(acc))
+    expect(run.diagnoses).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'D7', status: 'hit', title: expect.stringContaining('快照') }),
+    ]))
   })
 
   it('对照：客户没登记主页（page_unknown）时，D2/D10 仍然照跑——它们自己会短路成「客户没登记主页」提醒，不是被这里拦下', () => {
