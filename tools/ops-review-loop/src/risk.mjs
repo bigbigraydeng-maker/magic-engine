@@ -169,6 +169,7 @@ export const A_RISK_RULES = [
   { exact: 'docs/ENGINEERING_QUALITY_GATES.md', why: '风险定级与质量闸的规则书', category: RISK_CATEGORY.GOVERNANCE },
   { exact: 'docs/ledger/README.md', why: '台账规则 —— 门卫怎么拦、夜巡怎么翻', category: RISK_CATEGORY.GOVERNANCE },
   { prefix: 'scripts/ledger-', why: '台账检查与更新脚本', category: RISK_CATEGORY.GOVERNANCE },
+  { prefix: 'src/lib/ledger/', why: '台账解析与校验逻辑 —— 改了等于改门卫的判断标准', category: RISK_CATEGORY.GOVERNANCE },
   { pattern: /^docs\/playbooks(?:$|\/(?![^/]+\/inbox\.md$))/i, why: '经验手册正文 —— 所有窗口的必读规则书（inbox.md 除外，判 B/C）', category: RISK_CATEGORY.GOVERNANCE },
 
   // --- Auth, permissions, tenant isolation --------------------------------
