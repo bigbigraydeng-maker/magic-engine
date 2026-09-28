@@ -5,6 +5,7 @@ status: decided
 owner: agent
 decided_on: 2026-09-29
 source: session:d6062488
+verify_how: PM 回复后检查 Publer 后台该 5 条排期是否已创建（FB/IG 各一条，09:00 NZDT），并确认首评链接已带对应 UTM 参数；Oct 4/Oct 5 两条等 PM 拍板后再排，此前不算完成
 ---
 
 ## 开工前读过的东西（对齐 CLAUDE.md 要求）
@@ -17,7 +18,7 @@ source: session:d6062488
 
 ## 先查现状：Daily Plan 排到哪了
 
-`content_work_orders`（工厂自动线）最近一条 published 是 **9/6**（`/reel/2259550698170048/`），之后 8/28–8/31 好几条全部 `review_rejected`/`dead_letter`，9/16 有一条「December Departures」还卡在 `queued` 没跑。**结论：自动发布链已经空转 3 周多，Sep 29–Oct 5 这一周确实是空的**，没有重复排产风险。
+`content_work_orders`（工厂自动线）最近一条 published 是 **9/6**（查表方式：`content_work_orders` 按 `client_id = CTS` 且 `status = 'published'` 排序取最新一条，不在台账里抄 Reel ID），之后 8/28–8/31 好几条全部 `review_rejected`/`dead_letter`，9/16 有一条「December Departures」还卡在 `queued` 没跑。**结论：自动发布链已经空转 3 周多，Sep 29–Oct 5 这一周确实是空的**，没有重复排产风险。
 
 同时发现 `content-factory` 存储桶里有 **5 条已经做好、逐镜对过官网、但从没在主页自然发布过**的 Golden China Reel（2026-09-07 渲染，此前只当 PAUSED 广告素材用，零花费）——这是本轮排产的主要素材来源，不用重新出片。
 
@@ -35,7 +36,7 @@ WebFetch `ctstours.co.nz/tours/china/discovery/golden-china`（今天现查，�
 | 日期 | 星期 | 素材 | 支柱 | 钩子/文案摘要 |
 |---|---|---|---|---|
 | Sep 29 | 周二 | `gc_grandtour.mp4` | Offers & Departure Alerts | "3城12天，11/16 那团已经有人在问位置了" |
-| Sep 30 | 周三 | `gc_beijing.mp4` | Destination Inspiration | "居庸关长城日出，是客人回来后最常提的一段" |
+| Sep 30 | 周三 | `gc_beijing.mp4` | Destination Inspiration | "Day 4 带你去居庸关长城，12天行程里的一站"（原稿"日出/避开人群/客人最常提"这几处细节官网未证实，已删除，不上未核实说法） |
 | Oct 1 | 周四 | `gc_xian.mp4` | Destination Inspiration | "8000个兵马俑没有两张脸一样" |
 | Oct 2 | 周五 | `gc_shanghai.mp4` | Destination Inspiration | "老外滩和新陆家嘴同框" |
 | Oct 3 | 周六 | `gc_food.mp4` | Expertise & Heritage（美食角度） | "团上到底吃什么——26顿里两顿最出圈" |
@@ -57,7 +58,7 @@ WebFetch `ctstours.co.nz/tours/china/discovery/golden-china`（今天现查，�
 `👉 Full 12-day itinerary & seat availability: https://www.ctstours.co.nz/tours/china/discovery/golden-china?utm_source=facebook&utm_medium=reel&utm_campaign=goldenchina-grandtour-sep29`
 
 **Sep 30 · gc_beijing**
-> Day 4 of our Golden China trip, and this is still the moment guests talk about afterwards: sunrise at the Juyongguan section of the Great Wall, before the crowds arrive.
+> Day 4 of our Golden China trip takes you to the Juyongguan section of the Great Wall — one of the most iconic stops on this 12-day route.
 >
 > Beijing gets 4 full days on this route — Tiananmen and the Forbidden City, the Wall, a hutong ride with a local family, the Summer Palace's Long Corridor. It's the side of Beijing that a rushed day-trip never gets to.
 >
