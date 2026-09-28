@@ -8,14 +8,19 @@ const PAGE_ID = '1616575215312482'
 const nameOf = (id: string) => (id === 'cts' ? 'CTS Tours NZ' : '未知客户')
 
 /**
- * `page-sync-authorization.ts` 有自己的测试文件（覆盖 evaluate() 的存量令牌 /
- * 员工核实 / 共享令牌等全部分支，含解密），这里直接假掉 `assessConfiguredPage`
- * 的返回值，只测本文件自己的分支逻辑（令牌来源判定结果 → 挑哪段 how 文案），
- * 不重新过一遍它内部的 DB 链路。
+ * `page-sync-authorization.ts` / `token-selection.ts` 各有自己的测试文件（覆盖
+ * evaluate() 的存量令牌 / 员工核实 / 共享令牌等全部分支，含解密），这里直接假掉
+ * 两个函数的返回值，只测本文件自己的分支逻辑（令牌来源判定结果 → 挑哪段 how
+ * 文案），不重新过一遍它们内部的 DB 链路。
  */
 const assessConfiguredPageMock = vi.fn()
 vi.mock('@/lib/meta/page-sync-authorization', () => ({
   assessConfiguredPage: (...args: unknown[]) => assessConfiguredPageMock(...args),
+}))
+
+const resolveMetaTokenDetailedMock = vi.fn()
+vi.mock('@/lib/meta/token-selection', () => ({
+  resolveMetaTokenDetailed: (...args: unknown[]) => resolveMetaTokenDetailedMock(...args),
 }))
 
 interface EngagementRow {
@@ -103,6 +108,7 @@ describe('pushCommentAutoreplyStuckItems', () => {
 
   it('一个客户有多条卡死评论 → 合并成一条，数量和最早天数都对', async () => {
     assessConfiguredPageMock.mockResolvedValue({ verified: false, reason: 'check_failed' })
+    resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_page' })
     const { sb } = fakeDb({
       failedRows: [
         { client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-21T00:00:00Z' },
@@ -120,10 +126,13 @@ describe('pushCommentAutoreplyStuckItems', () => {
     expect(items[0].what).toContain('3 条')
     expect(items[0].what).toContain('36 天') // 2026-08-23T00:00Z → 2026-09-28T00:00Z（NOW）整 36 天
     expect(items[0].href).toBe('https://app.magicengine.com.au/dashboard/clients/cts/settings')
+    // Codex round 3 P1：卡在 processing 的行可能其实已经发出去了，how 必须先讲"看一眼再回"，不能无条件让人去补发
+    expect(items[0].how).toContain('是不是已经有回复了')
   })
 
   it('dm_sent 但公开回复为空的行也算卡死（Codex round 1 P1）', async () => {
     assessConfiguredPageMock.mockResolvedValue({ verified: false, reason: 'check_failed' })
+    resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_page' })
     const { sb } = fakeDb({
       dmRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-01T00:00:00Z' }],
     })
@@ -135,6 +144,7 @@ describe('pushCommentAutoreplyStuckItems', () => {
 
   it('卡在 processing 超过宽限期的行也算卡死（Codex round 2 P1）', async () => {
     assessConfiguredPageMock.mockResolvedValue({ verified: false, reason: 'check_failed' })
+    resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_page' })
     const { sb } = fakeDb({
       processingRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-01T00:00:00Z' }],
     })
@@ -146,6 +156,7 @@ describe('pushCommentAutoreplyStuckItems', () => {
 
   it('三类同一客户会合并计数', async () => {
     assessConfiguredPageMock.mockResolvedValue({ verified: false, reason: 'check_failed' })
+    resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_page' })
     const { sb } = fakeDb({
       failedRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-08T00:00:00Z' }],
       dmRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-10T00:00:00Z' }],
@@ -170,8 +181,9 @@ describe('pushCommentAutoreplyStuckItems', () => {
     expect(assessConfiguredPageMock).toHaveBeenCalledWith(sb, 'cts', PAGE_ID, expect.anything())
   })
 
-  it('令牌走的是环境变量（legacy_client_token）→ how 走 Render 环境变量指引', async () => {
+  it('令牌走的是专属环境变量（legacy_client_token）→ how 走专属变量指引', async () => {
     assessConfiguredPageMock.mockResolvedValue({ verified: true, via: 'legacy_client_token' })
+    resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_page' })
     const { sb } = fakeDb({
       failedRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-01T00:00:00Z' }],
     })
@@ -179,10 +191,24 @@ describe('pushCommentAutoreplyStuckItems', () => {
     await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
     expect(items[0].how).toContain('pages_manage_engagement')
     expect(items[0].how).toContain('Render 后台')
+    expect(items[0].how).toContain('这个客户专属的令牌变量')
   })
 
-  it('令牌来源判不出来（读失败）→ how 退回默认的环境变量指引，不整条待办失败', async () => {
+  it('令牌走的是公共钥匙（shared_fallback）→ how 说清是公共钥匙，不是这个客户专属变量（Codex round 3 P1）', async () => {
+    assessConfiguredPageMock.mockResolvedValue({ verified: true, via: 'staff_verified' })
+    resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'shared_fallback' })
+    const { sb } = fakeDb({
+      failedRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-01T00:00:00Z' }],
+    })
+    const items: ManualItem[] = []
+    await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
+    expect(items[0].how).toContain('META_SYSTEM_USER_TOKEN')
+    expect(items[0].how).toContain('没有专属 Meta 令牌')
+  })
+
+  it('令牌来源判不出来（两处都读失败）→ how 退回默认的专属变量指引，不整条待办失败', async () => {
     assessConfiguredPageMock.mockRejectedValue(new Error('boom'))
+    resolveMetaTokenDetailedMock.mockRejectedValue(new Error('boom'))
     const { sb } = fakeDb({
       failedRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-01T00:00:00Z' }],
     })

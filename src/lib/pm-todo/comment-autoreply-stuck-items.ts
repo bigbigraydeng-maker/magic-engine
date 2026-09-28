@@ -26,15 +26,22 @@
  *      `STALE_PROCESSING_MS` 给了一个远超单次处理耗时的宽限期，避免把正在跑的
  *      同一轮 cron 误判成卡死。
  *
- * 闭环（Codex round 1 复审 P1「没有能让这条待办消失的动作」）：FDE 在设置页
- * 「评论审计」列表对某一行点「已读」（PATCH .../comment-engagements action=
- * mark_reviewed）会写 `reviewed_at`，本查询排除已读行——不需要新建任何 UI/API，
- * 复用已有的审核动作就是关闭这条待办的方式。
+ * 闭环（Codex round 1 复审 P1「没有能让这条待办消失的动作」，round 3 复审 P1
+ * 补丁）：FDE 在设置页「评论审计」列表对某一行点「已读」（PATCH
+ * .../comment-engagements action=mark_reviewed）会写 `reviewed_at`，本查询
+ * 排除已读行。这个按钮原来只在 `needs_human` 的行上出现——大多数卡死评论是
+ * 简单夸赞，分类器不会判成需要人工，round 1 的"点已读就能关掉待办"因此对
+ * 大多数行其实点不到；已同 PR 把 `CommentAuditList.tsx` 的按钮条件也扩到
+ * 卡死状态（见该组件的 `isStuck()`），不需要新建任何新 API，复用同一个动作。
  *
- * `how` 按令牌来源分支（Codex round 1 复审 P1）：`page-sync-authorization.ts`
- * 的 `evaluate()` 优先用数据库里存的 OAuth 主页令牌（`client_oauth`），Render
- * 环境变量只在没有存量令牌时才会被用到——对 OAuth 客户，改环境变量不会生效，
- * 必须走"重新连接 Meta"。
+ * `how` 按令牌来源分三档（Codex round 1 + round 3 复审两轮 P1）：
+ *   1. `client_oauth`——数据库里存的 OAuth 主页令牌，改 Render 环境变量不会
+ *      生效，必须走"重新连接 Meta"（`META_PAGE_SCOPES` 已经带上
+ *      `pages_manage_engagement`，重新连一次就能拿到）。
+ *   2. `shared_fallback`——`resolveMetaTokenDetailed` 兜底给的公共钥匙
+ *      `META_SYSTEM_USER_TOKEN`，不是这个客户专属的变量，改错变量不会影响
+ *      实际在用的那把钥匙（round 1 的版本把这档也当成"专属变量"处理，是错的）。
+ *   3. 其余——这个客户专属的 env 变量。
  *
  * 三条查询都走 `fetchAll` 分页（Codex round 2 复审 P2）：PostgREST 单次查询硬顶
  * 1000 行、超过静默截断（见 supabase-paginate.ts 头注 2026-07-29 CTS 实测事故），
@@ -48,6 +55,7 @@ import type { ManualItem } from './manual-item-types'
 import { MAX_ATTEMPTS } from '@/lib/social/comment-autoreply-engine'
 import { APP_BASE } from './binding-request-items'
 import { assessConfiguredPage } from '@/lib/meta/page-sync-authorization'
+import { resolveMetaTokenDetailed } from '@/lib/meta/token-selection'
 import { fetchAll } from '@/lib/supabase-paginate'
 
 export type CommentAutoreplyStuckItemKind = 'comment_autoreply_stuck'
@@ -74,12 +82,26 @@ const OAUTH_HOW =
   '去客户设置页找"连接 Meta"（或"重新连接"）按钮，用对这个主页有管理权限的 Facebook 账号重新授权一次，' +
   '同意页上要确认 pages_manage_engagement 权限打开；改 Render 环境变量对这个客户不会生效，别浪费时间改错地方。'
 
+const SHARED_TOKEN_HOW =
+  '这个客户没有专属 Meta 令牌，实际用的是公共钥匙 META_SYSTEM_USER_TOKEN（Render 后台 crazycontent 服务的 Environment 里）——' +
+  '这把钥匙同时给好几个客户用，改之前先确认真的要动公共钥匙（改错了会影响其他客户），' +
+  '权限要勾上 pages_manage_engagement，保存时选带 deploy 的那个选项。'
+
 const ENV_VAR_HOW =
   '重新走一遍 Meta 授权换一把新令牌（developers.facebook.com/tools/explorer/），这次生成时权限要勾上 ' +
   'pages_manage_engagement（发评论回复要用，最容易被漏勾）；换好在 Render 后台 crazycontent 服务的 ' +
-  'Environment 更新这个客户对应的令牌变量，保存时选带 deploy 的那个选项（别选 Save only）。'
+  'Environment 更新这个客户专属的令牌变量，保存时选带 deploy 的那个选项（别选 Save only）。'
 
-/** 判不出令牌来源（读失败/未核实）就退回默认的环境变量指引——不让一次额外查询失败拖垮整条待办。 */
+/**
+ * 判不出令牌来源（读失败/未核实）就退回默认的专属令牌指引——不让一次额外查询
+ * 失败拖垮整条待办。
+ *
+ * 三档而不是两档（Codex round 3 复审 P1）：`assessConfiguredPage` 判定
+ * `staff_verified`（非 OAuth）时，实际用的令牌可能是这个客户专属的，也可能是
+ * `resolveMetaTokenDetailed` 兜底出的共享 `META_SYSTEM_USER_TOKEN`
+ * （`shared_fallback`）——原来无条件当成"这个客户专属变量"，对共享令牌客户
+ * 会指错地方，改了一把不存在的"专属变量"根本不影响实际在用的那把钥匙。
+ */
 async function tokenSourceHow(
   supabase: SupabaseClient,
   clientId: string,
@@ -89,6 +111,12 @@ async function tokenSourceHow(
   try {
     const assessment = await assessConfiguredPage(supabase, clientId, pageId, env)
     if (assessment.verified && assessment.via === 'client_oauth') return OAUTH_HOW
+  } catch {
+    // fall through — 用下面的令牌来源查询兜底判断
+  }
+  try {
+    const resolved = await resolveMetaTokenDetailed(supabase, clientId, env)
+    if (resolved && resolved !== 'ownership_unknown' && resolved.source === 'shared_fallback') return SHARED_TOKEN_HOW
   } catch {
     // fall through to the default
   }
@@ -176,9 +204,10 @@ export async function pushCommentAutoreplyStuckItems(
         '看不出是哪一种——常见是 Facebook Page 令牌缺了发评论回复需要的权限，也可能是限流或 Meta 接口的其他问题，需要人工核实。',
       how:
         '先打开客户设置页的"评论审计"列表核对这几条评论的内容（默认只显示最近 25 条、不分状态，卡住的评论如果是旧的可能要往前翻）；' +
-        '手动去 Facebook 主页把这几条回复掉（系统不会补发）；' +
+        '再去 Facebook 主页对应评论下面看一眼是不是已经有回复了（个别卡住的是系统其实发出去了、只是没能把"发成功"这件事存回数据库，不是真的没回，' +
+        '直接补发会变成重复回复客户）——没有回复的才手动回一下（系统不会补发）；' +
         `${how} ` +
-        '确认修好、回复完之后，回到"评论审计"列表给这几条点"已读"，这条待办会自动消失，不会一直卡在这里重复出现。',
+        '确认修好、该回的都回完之后，回到"评论审计"列表给这几条点"已读"，这条待办会自动消失，不会一直卡在这里重复出现。',
       href: `${APP_BASE}/dashboard/clients/${clientId}/settings`,
     })
   }
