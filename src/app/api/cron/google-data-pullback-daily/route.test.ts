@@ -148,9 +148,15 @@ const mockFindSharedAdAccounts = vi.fn().mockResolvedValue({ shared: new Set<str
 // ids with complete:true — every existing test above keeps driving the ids
 // through mockGetClientAdAccountIds unchanged; only the circuit-breaker-check
 // tests below override this adapter directly to exercise complete:false.
+interface MockClientAdAccount {
+  adAccountId: string
+  label: string | null
+  isPrimary: boolean
+}
 const mockGetClientAdAccountsWithStatus = vi.fn(async (...args: unknown[]) => {
   const ids = (await mockGetClientAdAccountIds(...args)) as string[]
-  return { accounts: ids.map((id) => ({ adAccountId: id, label: null, isPrimary: false })), complete: true }
+  const accounts: MockClientAdAccount[] = ids.map((id) => ({ adAccountId: id, label: null, isPrimary: false }))
+  return { accounts, complete: true }
 })
 vi.mock('@/lib/meta/client-ad-accounts', () => ({
   getClientAdAccountIds: (...args: unknown[]) => mockGetClientAdAccountIds(...args),
