@@ -300,7 +300,8 @@ describe('createD3AutoPauseFunction —— 装配契约', () => {
 
   it('开关读失败 → 单独报 config_read_failed（带原始报错），不混进 autopilot_disabled、不查诊断结果', async () => {
     const loadDiagnosisRun = vi.fn()
-    const fn = createD3AutoPauseFunction(makeDeps({ loadConfig: vi.fn(async () => readFailed()), loadDiagnosisRun }))
+    const { supabase, inserted } = makeFakeFlywheelSupabase()
+    const fn = createD3AutoPauseFunction(makeDeps({ supabase, loadConfig: vi.fn(async () => readFailed()), loadDiagnosisRun }))
     const result = await handlerOf(fn)({
       event: { data: { client_id: 'client-1', insight_date: '2026-09-21', diagnostic_run_id: 'n-1' } },
       step: fakeStep(),
@@ -312,6 +313,12 @@ describe('createD3AutoPauseFunction —— 装配契约', () => {
       processed: 0,
     })
     expect(loadDiagnosisRun).not.toHaveBeenCalled()
+    // 不能只留日志：记一条今日待办捞得到的回执
+    expect(inserted).toHaveLength(1)
+    expect(inserted[0]).toMatchObject({ client_id: 'client-1', action_type: 'ads.auto_pause_on_d3' })
+    expect(inserted[0].payload).toMatchObject({
+      status: 'blocked', insight_date: '2026-09-21', config_read_error: 'column "autopilot_enabled" does not exist',
+    })
   })
 
   it('只处理 D3 且 status=hit 的诊断，跳过 not_comparable 和别的诊断码', async () => {

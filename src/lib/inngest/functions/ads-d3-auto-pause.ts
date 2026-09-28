@@ -328,8 +328,20 @@ export function createD3AutoPauseFunction(deps: D3AutoPauseDeps) {
       if (loaded.source === 'fallback') {
         // 读失败时 loaded.config 是默认值（autopilot_enabled=false），照读会被记成
         // 「客户没开自动化」——方向安全但原因是错的。单独报出来，别跟 autopilot_disabled 混。
+        // 回执跟单条读失败同一种（blocked + config_read_error），今日待办从这里捞；
+        // 只写日志的话诊断完成事件只发一次，当天这个客户的 D3 就没人知道被跳过了。
         const error = loaded.error ?? 'unknown error'
         console.error(`[ads-d3-auto-pause] ad_strategy_configs 读失败，整条跳过：${d.client_id}: ${error}`)
+        await step.run('record-config-read-failure', () =>
+          recordFlywheelAction(deps.supabase, d.client_id, {
+            status: 'blocked' satisfies string,
+            diagnosis_code: 'D3',
+            diagnostic_run_id: d.diagnostic_run_id,
+            insight_date: d.insight_date,
+            reason: '读不出这个客户的广告自动化开关，今天的「花钱没结果」一条都没判（等下一次诊断日报再判）',
+            config_read_error: error,
+          }),
+        )
         return { ok: false, reason: 'config_read_failed' as const, error, processed: 0 }
       }
       const config = loaded.config

@@ -173,6 +173,23 @@ describe('ad-strategy-config — PATCH 内部员工照常改', () => {
     })
   })
 
+  it('🔴 改之前的设置读不出 → 503，不写库、不拿默认值当「改之前」', async () => {
+    signedInAs(STAFF)
+    const upsert = vi.fn()
+    mockFrom.mockImplementation(((table: string) => {
+      if (table !== 'ad_strategy_configs') throw new Error(`unexpected table ${table}`)
+      return {
+        select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: { message: 'timeout' } }) }) }),
+        upsert,
+      }
+    }) as never)
+
+    const res = await PATCH(patchRequest({ autonomy_mode: 'observe' }), params())
+
+    expect(res.status).toBe(503)
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
   it('内部员工填错邮箱 → 400，不写库（守卫不吞掉原有校验）', async () => {
     signedInAs(STAFF)
     const { upsert } = fakeTable()

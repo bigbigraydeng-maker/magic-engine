@@ -15,7 +15,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
-import { loadAdStrategyConfig, parseCreativePool, type CreativePoolEntry } from '@/lib/ads-strategy/config'
+import { loadAdStrategyConfig, loadAdStrategyConfigWithSource, parseCreativePool, type CreativePoolEntry } from '@/lib/ads-strategy/config'
 import { notifyAutonomyModeChanged } from '@/lib/ads-strategy/autonomy/notify'
 
 export const dynamic = 'force-dynamic'
@@ -67,7 +67,16 @@ export async function PATCH(
 
   const update: Record<string, unknown> = { client_id: clientId, updated_at: new Date().toISOString() }
   const updatedAt = String(update.updated_at)
-  const before = await loadAdStrategyConfig(clientId)
+  // 🔴 读不出改之前的设置就不保存：拿默认值（observe）当「改之前」，把自动模式改回 observe
+  //    会被判成「没变」、不发收紧事件，Kernel 那边继续按自动模式跑到每日对账（魏征复审）。
+  const loadedBefore = await loadAdStrategyConfigWithSource(clientId)
+  if (loadedBefore.source === 'fallback') {
+    return NextResponse.json(
+      { error: '读不出这个客户当前的广告设置，这次没有保存，请稍后再试' },
+      { status: 503 },
+    )
+  }
+  const before = loadedBefore.config
 
   if (body.enabled !== undefined) {
     if (typeof body.enabled !== 'boolean') {
