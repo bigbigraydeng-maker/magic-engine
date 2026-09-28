@@ -365,14 +365,19 @@ describe('接进巡检 / 机会之后', () => {
     expect(run.diagnoses).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'D7', status: 'hit', title: expect.stringContaining('登记的主页可能不对') })]))
   })
 
-  it('🔴 有混主页/读不到主页的花费没算清楚时，不能断言「全花在别家」——那笔钱可能一部分是客户自己的（Codex 2026-09-28 第四轮）', () => {
+  it('没有纯客户主页组，但归属不明（混主页）的组也有花费时，不能说「全花在别家」——那部分可能是客户自己的钱（Codex 2026-09-29）', () => {
     const acc = mixedAccount()
-    // 客户自己的组零花费（触发条件之一），但另外混进一个「读不到主页」的广告组，近 7 天也有花费（没算进 own/other 任何一边）
+    // as-own-1 / as-own-2 各混进一条别家主页的广告：两组都判不了 own，只算 mixed_pages（归属不明），
+    // 不再是唯一有花费的「other_page」——不能再说客户的钱「全在别家」
     acc.snapshots = [
-      ...acc.snapshots.map(r => (r.entity_id.startsWith('ad-own') ? { ...r, creative_page_id: OTHER } : r)),
-      campaign('c-unknown'), adset('as-unknown', 'c-unknown'), // 名下没有广告 → page_unknown（有花费时）
+      ...acc.snapshots,
+      ad('ad-own-1-other', 'as-own-1', 'c-own', OTHER),
+      ad('ad-own-2-other', 'as-own-2', 'c-own', OTHER),
     ]
-    acc.daily = [...acc.daily, ...days(7).map(d => adsetRow('as-unknown', 'c-unknown', d, 5))]
+    const scoped = scopeAccountToClient(acc, OWN, DATE, EVAL)
+    expect(scoped.ownWindowSpend).toBe(0)
+    expect(scoped.otherPageWindowSpend).toBeGreaterThan(0)
+    expect(scoped.ambiguousWindowSpend).toBeGreaterThan(0)
     const run = runDiagnostics(input(acc))
     expect(run.diagnoses.some(d => d.title.includes('登记的主页可能不对'))).toBe(false)
   })
@@ -394,20 +399,22 @@ describe('接进巡检 / 机会之后', () => {
     expect(run.diagnoses.some(d => (d.code === 'D2' || d.code === 'D10') && d.status === 'hit')).toBe(false)
   })
 
-  it('🔴 快照过期降级时必须留一条看得见的诊断，不能整段静默跳过（Codex 2026-09-28 第四轮）', () => {
+  it('🔴 快照过期降级必须出一条 D7 命中，不能让当天诊断悄悄跳过（Codex 2026-09-29）', () => {
     const stale = [{ level: 'ad' as const, complete: false, skipped_shared: false, error: 'timeout', captured_at: '2026-09-25T02:00:00Z' }]
     const acc = { ...mixedAccount(), latestCaptures: stale }
     const run = runDiagnostics(input(acc))
     expect(run.diagnoses).toEqual(expect.arrayContaining([
-      expect.objectContaining({ code: 'D7', status: 'hit', title: expect.stringContaining('整段跳过') }),
+      expect.objectContaining({ code: 'D7', status: 'hit', title: expect.stringContaining('快照') }),
     ]))
   })
 
-  it('对照：快照新鲜时不产生「整段跳过」提醒', () => {
-    const fresh = [{ level: 'ad' as const, complete: true, skipped_shared: false, error: null, captured_at: '2026-09-25T02:00:00Z' }]
-    const acc = { ...mixedAccount(), latestCaptures: fresh }
+  it('设置显示为最新一轮但已过期（complete=true 超过 24 小时）也要出 D7，不能被 capturesComplete() 判成完整', () => {
+    const oldButComplete = [{ level: 'ad' as const, complete: true, skipped_shared: false, error: null, captured_at: '2026-09-22T00:00:00Z' }]
+    const acc = { ...mixedAccount(), latestCaptures: oldButComplete }
     const run = runDiagnostics(input(acc))
-    expect(run.diagnoses.some(d => d.title.includes('整段跳过'))).toBe(false)
+    expect(run.diagnoses).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'D7', status: 'hit', title: expect.stringContaining('快照') }),
+    ]))
   })
 
   it('对照：客户没登记主页（page_unknown）时，D2/D10 仍然照跑——它们自己会短路成「客户没登记主页」提醒，不是被这里拦下', () => {
