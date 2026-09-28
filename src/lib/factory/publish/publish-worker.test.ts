@@ -23,6 +23,7 @@ vi.mock('./facebook-reel-adapter', () => ({
 import { runPublishWorker } from './publish-worker'
 import { supabaseAdmin } from '@/lib/supabase'
 import { facebookReelAdapter } from './facebook-reel-adapter'
+import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS } from '@/lib/social/content-review'
 
 const mockFrom = vi.mocked(supabaseAdmin.from)
 const mockPublish = vi.mocked(facebookReelAdapter.publish)
@@ -37,6 +38,7 @@ interface Scenario {
   endcard: Record<string, unknown>
   /** 模拟红线查询失败(fail-closed 用例) */
   redlineQueryError?: boolean
+  checklistReady?: boolean
 }
 
 /** 记录所有对 content_work_orders 的 update payload,用来断言最终状态 */
@@ -63,8 +65,17 @@ function installMocks(s: Scenario) {
                 client_id: CLIENT_ID,
                 master_brief_id: 'mb-1',
                 publish_attempts: 0,
-                published_ref: null,
-                output: { video_path: 'renders/c/wo/final.mp4' },
+              published_ref: null,
+                review_ref: s.checklistReady === false ? {} : { checklist_human: REEL_HUMAN_CHECK_KEYS.map(key => ({
+                  key, judge: 'HUMAN', outcome: 'PASS', detail: null,
+                  source_ref: key.startsWith('factual_') ? 'https://example.test/source' : null,
+                })) },
+                output: {
+                  video_path: 'renders/c/wo/final.mp4',
+                  ...(s.checklistReady === false ? {} : {
+                    quality_checklist_auto: REEL_AUTO_CHECK_KEYS.map(key => ({ key, judge: 'AUTO', outcome: 'PASS', detail: 'measured', source_ref: null })),
+                  }),
+                },
                 brief: { angle: 'X', copy: { endcard: s.endcard } },
               },
               error: null,
@@ -172,6 +183,15 @@ describe('发布正文红线闸', () => {
     expect(mockPublish).toHaveBeenCalledTimes(1)
     expect(r.result).toBe('published')
     expect(finalStatus()!.status).toBe('published')
+  })
+
+  it('legacy approved row without checklist is quarantined before provider access', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' }, checklistReady: false })
+    const r = await run()
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(r.detail).toBe('approval_checklist_incomplete')
+    expect(finalStatus()).toMatchObject({ status: 'publish_failed', next_retry_at: null })
   })
 
   it('发布正文由 cta + offer + url 拼成(确认扫的就是真发出去的那串)', async () => {

@@ -11,6 +11,7 @@ import { scanRedlineHits } from '../worker-guard'
 import { facebookReelAdapter } from './facebook-reel-adapter'
 import { buildReelPublishedEvent } from './reel-published-event'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
+import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS, checklistPasses, validateContentChecklist } from '@/lib/social/content-review'
 
 const MAX_PUBLISH_ATTEMPTS = 3
 const RETRY_BACKOFF_MIN = 10 // 失败退避基数(分钟)· 指数
@@ -179,6 +180,17 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   const attempts = Number(wo['publish_attempts'] ?? 0)
   const brief = (wo['brief'] ?? {}) as Record<string, unknown>
   const output = (wo['output'] ?? {}) as Record<string, unknown>
+
+  // Re-check the approval receipt at the last server boundary before any
+  // provider lookup/upload. This also quarantines legacy `approved` rows that
+  // predate structured review checklists.
+  const reviewRef = (wo['review_ref'] ?? {}) as Record<string, unknown>
+  const humanChecklist = validateContentChecklist(reviewRef['checklist_human'], REEL_HUMAN_CHECK_KEYS, 'HUMAN')
+  const autoChecklist = validateContentChecklist(output['quality_checklist_auto'], REEL_AUTO_CHECK_KEYS, 'AUTO')
+  if (!humanChecklist.ok || !autoChecklist.ok || !checklistPasses(humanChecklist.items) || !checklistPasses(autoChecklist.items)) {
+    await markFailed(id, attempts, 'approval checklist missing, incomplete, failed, or not measured', true)
+    return { order_id: id, result: 'failed', detail: 'approval_checklist_incomplete' }
+  }
 
   const target = await resolveTarget(clientId)
   if (!target) {

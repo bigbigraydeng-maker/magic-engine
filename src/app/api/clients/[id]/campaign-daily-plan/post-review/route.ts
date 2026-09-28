@@ -18,6 +18,15 @@ import {
   type CampaignDailyPlanData,
   type CampaignDailyPostReviewMeta,
 } from '@/lib/campaign/daily-plan'
+import {
+  POST_AUTO_CHECK_KEYS,
+  POST_HUMAN_CHECK_KEYS,
+  checklistPasses,
+  hasChecklistFailure,
+  isValidContentSourceRef,
+  unmeasuredAutoChecks,
+  validateContentChecklist,
+} from '@/lib/social/content-review'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error
@@ -60,6 +69,38 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     )
   }
   const command = parsed.data
+  if (command.verdict === 'PASS' && access.role !== 'admin') {
+    return NextResponse.json({ success: false, error: 'ADMIN_REVIEW_REQUIRED' }, { status: 403 })
+  }
+  const humanChecklist = validateContentChecklist(command.checklist_human, POST_HUMAN_CHECK_KEYS, 'HUMAN')
+  if (!humanChecklist.ok) {
+    return NextResponse.json({ success: false, error: 'INVALID_CHECKLIST', detail: humanChecklist.error }, { status: 400 })
+  }
+  if (command.verdict === 'PASS' && !checklistPasses(humanChecklist.items)) {
+    return NextResponse.json({ success: false, error: 'HUMAN_CHECKLIST_INCOMPLETE' }, { status: 422 })
+  }
+  if (command.verdict === 'NEEDS_REVISION' && !hasChecklistFailure(humanChecklist.items)) {
+    return NextResponse.json({ success: false, error: 'REVISION_REQUIRES_FAILED_CHECK' }, { status: 400 })
+  }
+  const sourceRefs = humanChecklist.items
+    .map(item => item.source_ref)
+    .filter((sourceRef): sourceRef is string => Boolean(sourceRef))
+  if (sourceRefs.some(sourceRef => !isValidContentSourceRef(sourceRef))) {
+    return NextResponse.json({ success: false, error: 'INVALID_CHECKLIST_SOURCE_REF' }, { status: 400 })
+  }
+  const assetRefs = sourceRefs.filter(sourceRef => sourceRef.startsWith('client_asset:'))
+  if (assetRefs.length > 0) {
+    const assetIds = Array.from(new Set(assetRefs.map(sourceRef => sourceRef.slice('client_asset:'.length))))
+    const { data: sourceAssets, error: sourceError } = await supabaseAdmin
+      .from('client_assets')
+      .select('id')
+      .eq('client_id', clientId)
+      .in('id', assetIds)
+    if (sourceError) return NextResponse.json({ success: false, error: 'CHECKLIST_SOURCE_LOOKUP_FAILED' }, { status: 500 })
+    if ((sourceAssets ?? []).length !== assetIds.length) {
+      return NextResponse.json({ success: false, error: 'CHECKLIST_SOURCE_NOT_OWNED_BY_CLIENT' }, { status: 400 })
+    }
+  }
 
   try {
     // Select the latest plan under this client + campaign. The body plan_id
@@ -124,7 +165,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (
       command.verdict === 'NEEDS_REVISION' &&
       previous?.verdict === command.verdict &&
-      previous.reason === reason
+      previous?.reason === reason
     ) {
       return NextResponse.json({ success: true, changed: false, review_revision: currentReview?.revision ?? null })
     }
@@ -164,11 +205,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         return NextResponse.json({ success: false, error: 'POST_IMAGE_NOT_READY' }, { status: 422 })
       }
 
-      // Identical PASS retries are idempotent only after current copy and
-      // current client-owned image have been revalidated.
-      if (previous?.verdict === command.verdict && previous.reason === reason) {
-        return NextResponse.json({ success: true, changed: false, review_revision: currentReview?.revision ?? null })
-      }
+      // Daily Plan has no first-comment field or publisher support. The
+      // server-owned D checks therefore remain NOT_MEASURED and block PASS.
+      return NextResponse.json({
+        success: false,
+        error: 'AUTO_CHECKS_UNAVAILABLE',
+        blocked_checks: POST_AUTO_CHECK_KEYS,
+      }, { status: 422 })
+
     }
 
     const now = new Date().toISOString()
@@ -184,6 +228,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
           reason,
           reviewed_at: now,
           reviewed_by_user_id: access.user.id,
+          reviewer_role: access.role,
+          checklist: [
+            ...humanChecklist.items,
+            ...unmeasuredAutoChecks(POST_AUTO_CHECK_KEYS, '首评发布能力未实现；该项未测，不能通过。'),
+          ],
         },
       },
     }

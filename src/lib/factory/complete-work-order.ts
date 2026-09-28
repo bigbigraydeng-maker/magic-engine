@@ -12,6 +12,7 @@ import { FACTORY_B_TRACK_SCENE_TAGS, FACTORY_CLIENT_DERIVED_SCENE_TAG } from './
 import { scanContentQualityFlags, type QualityFlag } from './content-quality-guard'
 import { scanRedlineHits, validateClipPath } from './worker-guard'
 import { assertRecipeReceipt, winnerRecipeFromBrief, type WinnerRecipe } from './recipe'
+import { REEL_AUTO_CHECK_KEYS, unmeasuredAutoChecks } from '@/lib/social/content-review'
 
 const ACTIVE_STATUSES = ['claimed', 'producing']
 
@@ -288,6 +289,12 @@ export async function completeWorkOrder(
     caption,
     redline_hits: redlineHits,
     quality_flags: qualityFlags,
+    // v0.2 does not include the media-detector engine. Record that each
+    // server-owned check was not measured; approve rejects this state.
+    quality_checklist_auto: unmeasuredAutoChecks(
+      REEL_AUTO_CHECK_KEYS,
+      'Automatic media detector is not implemented; this check was not measured and blocks approval.',
+    ),
     new_clip_ids: insertedClipIds,
   }
 
