@@ -99,6 +99,12 @@ interface AccountVerdict {
  * 多账户里最严重的那个代表整个客户：tripped > undeterminable > not_tripped
  * （宁可保守）。触发动作本身仍是客户级（`client_automation_policies` 没有
  * 账户维度），但判定必须按账户分别算，见本文件顶部说明。
+ *
+ * 🔴 Codex P2 复审（round 9）：`tripped` 分支必须收全同一轮里全部触发的
+ * 账户，不能只取第一个——两个账户同轮都超阈值时，只报第一个会让 PM 查完
+ * 那一个就解除熔断，另一个账户的异常完全没人知道。`adAccountId` 变成逗号
+ * 连接的账户列表（`extractTriggeringAccount` 的正则 `[^\]]+` 本来就不挑
+ * 逗号，不用改那边的解析），`reason` 把每个账户自己的原因都带上。
  */
 function worstVerdict(
   perAccount: readonly AccountVerdict[],
@@ -106,12 +112,16 @@ function worstVerdict(
   | { kind: 'tripped'; adAccountId: string; reason: string }
   | { kind: 'undeterminable'; adAccountId: string; reason: string }
   | { kind: 'not_tripped' } {
-  const tripped = perAccount.find(
+  const tripped = perAccount.filter(
     (a): a is AccountVerdict & { verdict: Extract<CircuitBreakerVerdict, { tripped: true }> } =>
       a.verdict.tripped === true,
   )
-  if (tripped) {
-    return { kind: 'tripped', adAccountId: tripped.adAccountId, reason: tripped.verdict.reason }
+  if (tripped.length > 0) {
+    return {
+      kind: 'tripped',
+      adAccountId: tripped.map((a) => a.adAccountId).join(','),
+      reason: tripped.map((a) => `${a.adAccountId}: ${a.verdict.reason}`).join(' | '),
+    }
   }
   const undeterminable = perAccount.find(
     (a): a is AccountVerdict & { verdict: Extract<CircuitBreakerVerdict, { tripped: 'undeterminable' }> } =>

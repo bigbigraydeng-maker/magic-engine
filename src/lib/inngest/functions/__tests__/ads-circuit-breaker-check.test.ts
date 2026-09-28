@@ -263,6 +263,25 @@ describe('ads-circuit-breaker-check handler', () => {
     expect(rpc).toHaveBeenCalled() // 客户级动作仍然触发——账户 B 正常不代表客户整体放行
   })
 
+  it('🔴 Codex P2（round 9）：同一轮两个账户都触发 → 两个账户都要出现在 reason 里，不能只报第一个', async () => {
+    // 账户 A、B 都稳定 7 天 $100/天，今天都冲到 $500（5x，都该触发）。
+    const { sb, rpc } = fakeSupabase({
+      config: { autonomy_mode: 'bounded_auto' },
+      insights: [
+        ...historyRows(DATE, [100, 100, 100, 100, 100, 100, 100], 'act_a'),
+        { insight_date: DATE, ad_account_id: 'act_a', spend: 500 },
+        ...historyRows(DATE, [100, 100, 100, 100, 100, 100, 100], 'act_b'),
+        { insight_date: DATE, ad_account_id: 'act_b', spend: 500 },
+      ],
+      rpcOutcome: () => 'tripped',
+    })
+    const result = (await run(sb)) as { ok: true; verdict: string; reason?: string }
+    expect(result.verdict).toBe('tripped')
+    expect(result.reason).toContain('a') // 两个账户各自的原因都要能在 reason 里找到
+    expect(result.reason).toContain('b')
+    expect(rpc).toHaveBeenCalled()
+  })
+
   it('多账户都正常 → not_tripped，不调 rpc', async () => {
     const { sb, rpc } = fakeSupabase({
       config: { autonomy_mode: 'bounded_auto' },

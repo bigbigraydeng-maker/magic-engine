@@ -57,6 +57,29 @@ function fakeConfigFrom(
   return { chain, updateCalls }
 }
 
+/**
+ * `client_automation_policies` 的假 `.from()` 链——round 9 新增的终检用：
+ * `.select().eq().in().is()`，最后一环 `.is()` 直接 await 出 `{data, error}`。
+ */
+function fakePoliciesFrom(rows: Array<{ action_key: string; mode: string }>, errorMessage?: string) {
+  const chain = {
+    select: () => chain,
+    eq: () => chain,
+    in: () => chain,
+    is: async () => (errorMessage ? { data: null, error: { message: errorMessage } } : { data: rows, error: null }),
+  }
+  return chain
+}
+
+/** 按表名把 `ad_strategy_configs` / `client_automation_policies` 路由到各自的假链。 */
+function wireFrom(configChain: unknown, policiesChain: unknown) {
+  mockFrom.mockImplementation((table: string) => {
+    if (table === 'ad_strategy_configs') return configChain as never
+    if (table === 'client_automation_policies') return policiesChain as never
+    throw new Error('unexpected table ' + table)
+  })
+}
+
 const CLIENT = 'client-uuid-release-circuit-breaker-test'
 const STAFF = 'fde@staff.test'
 const VIEWER = 'bdm@client.test'
@@ -85,7 +108,7 @@ beforeEach(() => {
   vi.stubEnv('DEMO_ADMINS', `${DEMO}:${CLIENT}`)
   vi.stubEnv('INNGEST_EVENT_KEY', '') // 不真的发事件；notifyAutonomyModeChanged 内部 catch，不影响响应
   mockRpc.mockResolvedValue({ data: 'released', error: null } as never)
-  mockFrom.mockReturnValue(fakeConfigFrom('bounded_auto').chain as never)
+  wireFrom(fakeConfigFrom('bounded_auto').chain, fakePoliciesFrom([])) // 终检默认查不到任何 auto_approve 行
 })
 
 afterEach(() => {
@@ -180,7 +203,7 @@ describe('release-circuit-breaker — 内部员工可以解', () => {
     // released 计数是 0，但 autonomy_mode 还没降，必须照样处理，不能靠 released 判断。
     mockRpc.mockResolvedValue({ data: 'not_circuit_tripped', error: null } as never)
     const { chain, updateCalls } = fakeConfigFrom('bounded_auto')
-    mockFrom.mockReturnValue(chain as never)
+    wireFrom(chain, fakePoliciesFrom([]))
 
     const res = await POST(postRequest(), params())
     const json = (await res.json()) as { released: number; intent_downgraded_to_observe: boolean }
@@ -194,7 +217,7 @@ describe('release-circuit-breaker — 内部员工可以解', () => {
     signedInAs(STAFF)
     mockRpc.mockResolvedValue({ data: 'not_circuit_tripped', error: null } as never)
     const { chain, updateCalls } = fakeConfigFrom('observe')
-    mockFrom.mockReturnValue(chain as never)
+    wireFrom(chain, fakePoliciesFrom([]))
 
     const res = await POST(postRequest(), params())
     const json = (await res.json()) as { released: number; intent_downgraded_to_observe: boolean }
@@ -208,7 +231,7 @@ describe('release-circuit-breaker — 🔴 Codex P1：解除后必须同步收�
   it('意向仍是 bounded_auto + 真的解了 → 降到 observe，intent_downgraded_to_observe: true', async () => {
     signedInAs(STAFF)
     const { chain, updateCalls } = fakeConfigFrom('bounded_auto')
-    mockFrom.mockReturnValue(chain as never)
+    wireFrom(chain, fakePoliciesFrom([]))
 
     const res = await POST(postRequest(), params())
     const json = (await res.json()) as { intent_downgraded_to_observe: boolean }
@@ -224,7 +247,7 @@ describe('release-circuit-breaker — 🔴 Codex P1：解除后必须同步收�
   it('意向已经是 observe（PM 已手动关过）→ 不再多写一次，intent_downgraded_to_observe: false', async () => {
     signedInAs(STAFF)
     const { chain, updateCalls } = fakeConfigFrom('observe')
-    mockFrom.mockReturnValue(chain as never)
+    wireFrom(chain, fakePoliciesFrom([]))
 
     const res = await POST(postRequest(), params())
     const json = (await res.json()) as { intent_downgraded_to_observe: boolean }
@@ -237,7 +260,7 @@ describe('release-circuit-breaker — 🔴 Codex P1：解除后必须同步收�
   it('读 autonomy_mode 失败 → 500，不假装降级成功', async () => {
     signedInAs(STAFF)
     const { chain } = fakeConfigFrom('bounded_auto', { readError: 'read boom' })
-    mockFrom.mockReturnValue(chain as never)
+    wireFrom(chain, fakePoliciesFrom([]))
 
     const res = await POST(postRequest(), params())
     expect(res.status).toBe(500)
@@ -248,11 +271,53 @@ describe('release-circuit-breaker — 🔴 Codex P1：解除后必须同步收�
   it('写 autonomy_mode 失败 → 500，不假装降级成功（策略表已经解开，但意向没跟上必须让人看见）', async () => {
     signedInAs(STAFF)
     const { chain } = fakeConfigFrom('bounded_auto', { updateError: 'update boom' })
-    mockFrom.mockReturnValue(chain as never)
+    wireFrom(chain, fakePoliciesFrom([]))
 
     const res = await POST(postRequest(), params())
     expect(res.status).toBe(500)
     const json = (await res.json()) as { error: string }
     expect(json.error).toContain('update boom')
+  })
+})
+
+describe('release-circuit-breaker — 🔴 Codex P1（round 9）：not_circuit_tripped 不区分 require_approval 和危险的 auto_approve，返回成功前必须终检', () => {
+  it('终检发现某个键其实是 auto_approve（旧的 bounded_auto 同步抢跑）→ 500，不谎报成功', async () => {
+    signedInAs(STAFF)
+    mockRpc.mockResolvedValue({ data: 'not_circuit_tripped', error: null } as never)
+    const keys = listAdsActionKeys()
+    const { chain } = fakeConfigFrom('bounded_auto')
+    wireFrom(
+      chain,
+      fakePoliciesFrom([{ action_key: keys[0], mode: 'auto_approve' }, { action_key: keys[1] ?? keys[0], mode: 'require_approval' }]),
+    )
+
+    const res = await POST(postRequest(), params())
+    expect(res.status).toBe(500)
+    const json = (await res.json()) as { error: string }
+    expect(json.error).toContain('auto_approve')
+    expect(json.error).toContain(keys[0])
+  })
+
+  it('终检全部键都不是 auto_approve → 200，正常报成功', async () => {
+    signedInAs(STAFF)
+    const keys = listAdsActionKeys()
+    const { chain } = fakeConfigFrom('bounded_auto')
+    wireFrom(chain, fakePoliciesFrom(keys.map(k => ({ action_key: k, mode: 'require_approval' }))))
+
+    const res = await POST(postRequest(), params())
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as { success: boolean }
+    expect(json.success).toBe(true)
+  })
+
+  it('终检读取失败 → 500，不假装通过', async () => {
+    signedInAs(STAFF)
+    const { chain } = fakeConfigFrom('bounded_auto')
+    wireFrom(chain, fakePoliciesFrom([], 'final read boom'))
+
+    const res = await POST(postRequest(), params())
+    expect(res.status).toBe(500)
+    const json = (await res.json()) as { error: string }
+    expect(json.error).toContain('final read boom')
   })
 })

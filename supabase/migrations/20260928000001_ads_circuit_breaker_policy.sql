@@ -36,7 +36,10 @@
 --    circuit-breaker:）→ 该键记 already_tripped，mode 不重复 UPDATE，但
 --    updated_by 会刷新成这次评估的最新原因/触发账户（round 8 修正：只改
 --    updated_by 不会碰 policy_version——见下方函数体注释，之前完全不刷新
---    是对 version_guard 触发器范围的误判）。
+--    是对 version_guard 触发器范围的误判）。这条刷新本身也要防 TOCTOU
+--    竞态（round 9 修正）：UPDATE 没命中（并发被解除）就整批回滚，不能
+--    无条件报 already_tripped——那样会把"这个键其实刚被解除"误报成
+--    "已确认在 deny"。
 --
 -- 🔴 不覆盖管理员的判断：当前是 deny 但不是本函数写的（人工设的）→
 --    该键记 locked_by_other_deny，原样让路。熔断器只负责"我判定要熔断"，
@@ -84,16 +87,24 @@ BEGIN
       v_outcome := 'tripped';
 
     ELSIF v_current_mode = 'deny' AND v_current_by LIKE 'circuit-breaker:%' THEN
-      -- 🔴 Codex P2 复审（round 8）：已经是 deny 也要刷新 updated_by 到这次的
-      -- 最新原因/账户，不能让第一次触发的账户信息冻结不变——账户 A 先触发、
-      -- 账户 B 后来才出问题时，pm-todo 从 updated_by 里抠触发账户给 PM 看
-      -- （见 pm-todo/ads-autonomy-items.ts 的 extractTriggeringAccount），旧值
-      -- 冻结会一直让 PM 只查 A、不知道要看 B。之前不刷新是怕重复触发
-      -- policy_version+1（原注释），但 version_guard 触发器明确把 updated_by
-      -- 排除在"授权相关字段"之外（20260808000003_me2_execution_kernel_v1.sql:
-      -- 118-132），只改这一列不会 bump 版本，这层顾虑本来就是可以避开的。
-      -- WHERE 重申 SELECT 确认过的条件——刷新是纯展示信息，并发丢了这次刷新
-      -- 不影响任何判定，不用回滚整批，下一轮评估会再刷新一次。
+      -- 已经是 deny 也要刷新 updated_by 到这次的最新原因/账户，不能让第一次
+      -- 触发的账户信息冻结不变——账户 A 先触发、账户 B 后来才出问题时，
+      -- pm-todo 从 updated_by 里抠触发账户给 PM 看（见 ads-autonomy-items.ts
+      -- 的 extractTriggeringAccount），旧值冻结会一直让 PM 只查 A、不知道要
+      -- 看 B。之前不刷新是怕重复触发 policy_version+1（原注释），但
+      -- version_guard 触发器明确把 updated_by 排除在"授权相关字段"之外
+      -- （20260808000003_me2_execution_kernel_v1.sql:118-132），只改这一列
+      -- 不会 bump 版本，这层顾虑本来就是可以避开的。
+      --
+      -- 🔴 Codex P1 复审（round 9）：不能无条件报 already_tripped——SELECT 到
+      -- deny 之后、这条 UPDATE 真正执行之前，如果管理员并发调用解除 RPC 把
+      -- 这一行改成了 require_approval，WHERE 里的 mode = 'deny' 就不再成立，
+      -- UPDATE 0 行，但当时无条件赋值 v_outcome 会照样报 already_tripped——
+      -- 调用方把这当成"deny 已确认生效"结束，而这个键其实已经被解除、今天
+      -- 判定的异常花费没有真的重新把它摁回 deny。跟下面 ELSE 分支的
+      -- race_lost 同一类竞态，同样处理：UPDATE 未命中就整批回滚，调用方
+      -- 重试时 SELECT 会读到最新的 require_approval，走 ELSE 分支正确重新
+      -- 摁回 deny。
       UPDATE public.client_automation_policies
          SET updated_by = v_updated_by
        WHERE client_id = p_client_id
@@ -101,7 +112,12 @@ BEGIN
          AND effective_to IS NULL
          AND mode = 'deny'
          AND updated_by LIKE 'circuit-breaker:%';
-      v_outcome := 'already_tripped';
+
+      IF FOUND THEN
+        v_outcome := 'already_tripped';
+      ELSE
+        RAISE EXCEPTION 'ads_trip_circuit_breaker_policy_batch: race_lost (already_tripped refresh) on action_key % for client %', v_action_key, p_client_id;
+      END IF;
 
     ELSIF v_current_mode = 'deny' THEN
       v_outcome := 'locked_by_other_deny';

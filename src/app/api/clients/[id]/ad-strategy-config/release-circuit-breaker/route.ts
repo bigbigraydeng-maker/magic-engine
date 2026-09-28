@@ -47,6 +47,21 @@
  *    解除也算成功"的假象；FDE 重新点一次按钮即可——已经解开的键在
  *    `ads_release_circuit_breaker_policy` 里会因为不再是 deny 而幂等报
  *    `not_circuit_tripped`，只有真正卡住的那个键会再试一次。
+ *
+ * 🔴 Codex P1 复审（round 9）：`not_circuit_tripped` 不区分安全的
+ *    `require_approval` 和危险的 `auto_approve`。重现路径——第一次调用把
+ *    全部策略解成 `require_approval`，随后意向降级失败、接口 500；这时
+ *    `autonomy_mode` 还没来得及降到 `observe`，如果这段间隙里旧的
+ *    `bounded_auto` 每日 reconcile 恰好跑了一轮，`ads_sync_autonomy_policy`
+ *    只挡 `mode='deny'`、不挡 `require_approval`，会把这些键悄悄同步成
+ *    `auto_approve`。FDE 重试时，release RPC 对这些已经不是 deny 的键只会
+ *    报 `not_circuit_tripped`（当成"已处理"），如果只看这个字段就返回
+ *    成功，客户其实正在 `auto_approve` 状态下继续自动花钱，而 API 调用方
+ *    以为已经安全解除。修法：返回成功前一定读一次 `client_automation_policies`
+ *    的最终状态，只要有任何键是 `auto_approve` 就返回 500 而不是谎报成功——
+ *    不去同步"抢救"（那是 `ads-autonomy-sync` worker 的唯一职责，见架构锁
+ *    ②），而是老实说"还没解除干净，请重试"；意向这时已经降到 `observe`
+ *    并且已经叫醒过同步 worker，重试间隔内基本会自愈。
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -136,6 +151,33 @@ export async function POST(
     // 立即叫醒同步 worker 核对一遍策略表，不等明天的每日 reconcile——跟 PATCH
     // 路由同一惯例。方向是收紧（bounded_auto → observe），不传 relaxed。
     await notifyAutonomyModeChanged(clientId, nowIso).catch(() => undefined)
+  }
+
+  // 终检（round 9）：见本文件顶部说明——not_circuit_tripped 不能区分
+  // require_approval 和 auto_approve，返回成功前必须确认真的没有任何键
+  // 停在 auto_approve。
+  const { data: finalPolicies, error: finalReadError } = await supabaseAdmin
+    .from('client_automation_policies')
+    .select('action_key, mode')
+    .eq('client_id', clientId)
+    .in('action_key', listAdsActionKeys())
+    .is('effective_to', null)
+  if (finalReadError) {
+    return NextResponse.json({ error: `final policy verification failed: ${finalReadError.message}` }, { status: 500 })
+  }
+  const stillAuto = (finalPolicies ?? [])
+    .filter((p): p is { action_key: string; mode: string } => p.mode === 'auto_approve')
+    .map(p => p.action_key)
+  if (stillAuto.length > 0) {
+    return NextResponse.json(
+      {
+        error: `release not safely complete — these keys are still auto_approve, retry: ${stillAuto.join(', ')}`,
+        released,
+        results,
+        intent_downgraded_to_observe: intentDowngraded,
+      },
+      { status: 500 },
+    )
   }
 
   return NextResponse.json({ success: true, released, results, intent_downgraded_to_observe: intentDowngraded })

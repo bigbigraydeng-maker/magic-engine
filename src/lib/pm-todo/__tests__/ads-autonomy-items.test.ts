@@ -104,6 +104,22 @@ describe('pushAdsAutonomyCircuitBreakerItems', () => {
     expect(item.how).toContain('逐个核对')
   })
 
+  it('🔴 Codex P2（round 9）：updated_by 带多个逗号连接的账户 id → 都要出现在 what/how，不是只显示第一个', async () => {
+    const sb = fakePolicyRows([
+      { client_id: CLIENT, updated_by: 'circuit-breaker:[111111111,222222222] a: r1 | b: r2:2026-09-28T00:00:00.000Z' },
+    ])
+    const items: ManualItem[] = []
+    await pushAdsAutonomyCircuitBreakerItems(sb, items, NOW, nameOf, [CLIENT])
+
+    expect(items).toHaveLength(1)
+    const item = items[0] as unknown as { what: string; how: string }
+    expect(item.what).toContain('111111111')
+    expect(item.what).toContain('222222222')
+    expect(item.how).toContain('111111111')
+    expect(item.how).toContain('222222222')
+    expect(item.how).toContain('、') // 中文顿号列表，不是裸逗号
+  })
+
   it('同一客户多个 ads.* 键都命中 → 只生成一条待办（按 client_id 去重）', async () => {
     const sb = fakePolicyRows([
       { client_id: CLIENT, updated_by: 'circuit-breaker:[act_1] r:2026-09-28T00:00:00.000Z' },
