@@ -80,6 +80,39 @@
 
 ---
 
+## envelope-facts.ts 多账户预算总闸没求和——CTS Tours NZ 现在就是 2 账户 + bounded_auto（2026-09-28 PR #2019 复审查实，P0）
+
+**§11 打分**：IMPACT 闭环关键度高（日预算总闸是 bounded_auto 唯一的资金硬约束之一）· 收入关联度高（真出现是对 CTS 的超预算风险）· 频率不确定/不低（CTS 现在就满足全部前提条件，只差 Kernel 真的执行一次加预算动作）→ 零个低、两个以上高 → **P0**，跟冷却期那条同构。详细推演见 [ledger 卡](./ledger/2026-09-28-envelope-facts-multi-account-budget-cap-not-summed.md)。
+
+- **现象**：账户预算合计查询精确过滤到当前这一个广告账户，但拿去比较的 `dailyCapCents` 是客户级总闸（不分账户）——多账户客户的每个账户各自都只跟"客户总闸"比，两个账户各自看起来没超，合计早就超了。
+- **已核实**：CTS Tours NZ 名下登记了 2 个 Meta 广告账户，现在就是 bounded_auto——不是假设场景。
+- **为什么没在这个 PR 里现在就修**：`envelope-facts.ts` 是 WP2 既有代码；修对需要先确认 CTS 两账户是否同币种（Codex 指出不同币种直接相加会是错误数字），是需要先做产品/技术判断的设计问题；且这个文件目前零测试覆盖（见下方姊妹卡），裸改资金判据风险高。
+- 来源：PR [#2019](https://github.com/bigbigraydeng-maker/magic-engine/pull/2019) 复审查实（Codex round 16）。
+
+---
+
+## envelope-facts.ts 快照查询硬顶 4000 行，可能把目标实体的变更记录挤出窗口误判成"从未变化"（2026-09-28 PR #2019 复审查实，P1）
+
+**§11 打分**：频率低偏中（当前 CTS/NAL 账户快照行数还没到临界点，但持续累积中）· IMPACT 闭环关键度高 · 收入关联度高 → 恰好一个低、两个高 → **P1**。详细推演（含当前实际行数核查）见 [ledger 卡](./ledger/2026-09-28-envelope-facts-truncated-history-misread-as-never-changed.md)。
+
+- **现象**：`hoursSinceLastRealChange` 用的历史行来自一次硬顶 4000 行、按时间倒序的账户级查询；账户内实体多、抓取轮次多时，目标实体自己的旧 `changed` 行可能被挤出窗口，被误判成"从未变化"（返回 `MAX_SAFE_INTEGER`），冷却判据直接放行。
+- **已核实当前数据量**：CTS 最大账户快照约 2000 行，NAL 约 500 行，还有余量，但只会持续增长。
+- **要做什么**（思路已想清楚）：给目标实体单独查一次它自己最近一条 `changed` 记录，不受账户级行数上限影响。
+- **为什么没在这个 PR 里现在就修**：同上，`envelope-facts.ts` 零测试覆盖，应先建测试再改。
+- 来源：PR [#2019](https://github.com/bigbigraydeng-maker/magic-engine/pull/2019) 复审查实（Codex round 16）。
+
+---
+
+## envelope-facts.ts（bounded_auto 全部资金安全判据的唯一来源）没有任何测试文件
+
+4 轮独立复审在这一个不到 150 行的文件里各自挑出 4 个真 bug（本文档另外三条 + P2 的 pre_provider 批次缺口），全部不是这个 PR 写的既有代码，全部靠人肉读代码发现，不是测试跑出来的。这不是运气问题，是这个文件从写出来就没有任何自动化手段在盯它，而它现在是 CTS Tours NZ、New Asian Logistics 两个真实客户全部自治动作的资金安全闸门。建议当作跟 P0 同等优先级对待，性质是"补基础设施"不是"修一个 bug"。详细推演见 [ledger 卡](./ledger/2026-09-28-envelope-facts-zero-test-coverage.md)。
+
+- **要做什么**：给 `createAdsEnvelopeFactsResolver` 建测试文件，覆盖五种动作类型的实体解析、CBO/ABO 预算合计、`pre_provider` 过滤、`hoursSinceLastRealChange` 边界、读失败 fail-closed；测试打好后顺带把已发现的几个 bug 用红→绿的方式修掉，不要测试和修复分两次做。
+- **为什么没在这个 PR 里现在就做**：独立的测试基础设施建设任务，本 PR 已经因改动过大被 `fix-scope` 标红，不适合继续扩大范围。
+- 来源：PR [#2019](https://github.com/bigbigraydeng-maker/magic-engine/pull/2019) 复审过程中查实（session 自查，非 Codex 直接指出）。
+
+---
+
 ## circuit-breaker-spend.ts 账户级花费汇总没做系列归属过滤（2026-09-28 PR #2019 复审查实，P1）
 
 **§11 打分**：频率低（需要"账户内混有别的客户的系列"且"那些系列产生真实异常花费"同时成立；唯一有记录的实例——CTS 账户里的 4 条 Oztop 系列——写下时是休眠状态，近 7 天零花费）· IMPACT 闭环关键度高（一旦触发，后果跟 round 11 修的"跨客户共用账户"问题同构：别的客户花费被算进本客户名下）· 收入关联度高（真出现，直接是客户广告被误停或该拦的异常没拦下）→ 恰好一个低、两个高 → **P1**。详细推演见 [ledger 卡](./ledger/2026-09-28-circuit-breaker-account-level-campaign-attribution.md)。
