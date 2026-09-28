@@ -1842,10 +1842,14 @@ Gate B 定的 `minSampleSize=3`，页面目前只会显示「数据还不够说�
       它写「**最近一次**挂着 running」，而现在 `startedAt` 是 48 小时窗口内**最早**那一轮；
       而且新加的 `rounds`（卡了几轮）没渲染出来，看板比待办少一条信息。
 
-## AI 可见度全挂告警 · 上线后跟进（PR [#1943](https://github.com/bigbigraydeng-maker/magic-engine/pull/1943)，2026-09-28 合并；本体已做完，以下是三轮复审点出、**刻意没做**的部分）
+## AI 可见度全挂告警 · 上线后跟进（PR [#1943](https://github.com/bigbigraydeng-maker/magic-engine/pull/1943)，2026-09-28 合并；代码已上线、单测全过，以下是三轮复审点出、**刻意没做**的部分）
 
 主体改动：某客户 AI 可见度体检整周全挂时自动进今日待办，分供应商给修复指引，不用 PM 操心的原因单独
-归开发栏。台账卡：[`docs/ledger/2026-09-23-ai-tracker-100pct-failure-pm-todo-alert.md`](./ledger/2026-09-23-ai-tracker-100pct-failure-pm-todo-alert.md)。
+归开发栏。**代码上线 ≠ 完整链路当场试跑过**：当场没法真跑「周检写入失败 → 今日待办读出告警」这条
+链路——现在系统里没有一个客户真的处在全挂状态，要看到效果得先伪造一个客户的真实数据，不值得为了
+试跑动客户真实数据（PR 正文「当场试跑」段已写明这个理由）。真正的验证入口是台账卡的 `verify_by`：
+[`docs/ledger/2026-09-23-ai-tracker-100pct-failure-pm-todo-alert.md`](./ledger/2026-09-23-ai-tracker-100pct-failure-pm-todo-alert.md)，
+2026-09-30 到期核实，那之前**不能当成"已验证生效"**，只能算"代码上线，效果待验"。
 以下按 §11：三条频率都低（都要撞上特定的低概率数据库/时序状态才会触发）、IMPACT 前两条中（真撞上
 会让检测彻底失效）后一条低（会自愈）、收入都低（没有证据显示已经影响过真实客户）→ 三条都是 P3。
 
