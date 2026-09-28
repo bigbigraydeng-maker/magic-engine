@@ -13,7 +13,9 @@
  * Query params:
  *   dry_run=1  compute what would happen, write nothing (used for trial run)
  *
- *调度：render.yaml — 每天 03:00 UTC。
+ * 调度：GitHub Actions（.github/workflows/goals-expiry-check.yml），声明 03:30 UTC
+ * 触发（`30 3 * * *`）——实测触发时刻会飘，见该 workflow 文件和 src/lib/cron/registry.ts
+ * 里的登记，不要拿 03:30 UTC 当"没跑就是坏了"的判据。
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -73,7 +75,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const processed = flagResult.flagged_count + rolloverResult.rolled.length
-  await cronRun.finish({ processed, completed: processed, failed: 0 })
+  await cronRun.finish({
+    processed,
+    completed: processed,
+    failed: 0,
+    // Rollover detail so a successful run's audit trail lives in cron_run_logs,
+    // not only in this response body (which nothing else persists).
+    summary: {
+      flagged_expired: flagResult.flagged_count,
+      rollover_rolled: rolloverResult.rolled.map(r => ({ client_id: r.client_id, metric: r.primary_metric_key, period_start: r.next_period_start })),
+      rollover_skipped_existing: rolloverResult.skipped_existing.length,
+    },
+  })
 
   return NextResponse.json({
     success: true,

@@ -19,6 +19,15 @@
  *     current_value_source, verdict, verdict_at, verdict_summary.
  *   - New goal goes straight to status='active' — this is a continuation of an
  *     approved monthly commitment, not a fresh draft that needs FDE activation.
+ *
+ * Known gap (子牙 review, PR #2194): if a client churns mid-period and their
+ * monthly goal is archived early, nothing here distinguishes that from a
+ * normal end-of-period archive — the chain still rolls forward next month.
+ * There is currently no product surface that sets recurrence='monthly' in the
+ * first place (enrollment is a manual SQL UPDATE, see PR follow-up), so the
+ * only way to stop a chain today is the same manual UPDATE, clearing
+ * recurrence back to NULL when a client's goal is archived for churn rather
+ * than period completion. Revisit once enrollment gets a real UI/API.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -88,6 +97,14 @@ export async function rolloverMonthlyGoals(
   // Include both 'expired' (just flagged by flagExpiredGoals) and 'archived'
   // (verdict already written) — either is a valid template for the next month.
   // Skip 'draft' (never active) and 'active' (period must have ended).
+  //
+  // No .limit()/pagination: this candidate pool is bounded by "how many goals
+  // are currently enrolled in monthly recurrence AND not yet rolled over" —
+  // unlike an ever-growing log table, a goal leaves this pool the moment it
+  // rolls (its successor's period_end is in the future). Enrollment today is
+  // manual-SQL-only (see module doc), so the pool is single digits. Revisit
+  // if/when self-serve enrollment ships and this could approach the PostgREST
+  // 1000-row default page size.
   const { data: expiredGoals, error: fetchError } = await supabase
     .from('goals')
     .select('*')
@@ -105,7 +122,20 @@ export async function rolloverMonthlyGoals(
 
   for (const raw of expiredGoals ?? []) {
     const goal = raw as GoalRow
-    const { start: nextStart, end: nextEnd } = nextNaturalMonth(goal.period_end)
+
+    // period_end is a DB `date` column so a malformed value shouldn't occur,
+    // but nextNaturalMonth throws on one — catch it here so a single bad row
+    // degrades to the same {error} shape every other failure path in this
+    // function returns, instead of an uncaught exception that would blow past
+    // the cron route's own try/catch-free call site and leave cron_run_logs
+    // stuck in 'running' instead of cleanly marked 'failed'.
+    let nextStart: string, nextEnd: string
+    try {
+      ({ start: nextStart, end: nextEnd } = nextNaturalMonth(goal.period_end))
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { planned, rolled, skipped_existing: skippedExisting, error: `goal ${goal.id}: ${message}` }
+    }
 
     const plan: PlannedRollover = {
       source_goal_id: goal.id,
