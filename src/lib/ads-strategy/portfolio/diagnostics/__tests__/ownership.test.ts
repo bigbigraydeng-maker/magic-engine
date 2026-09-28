@@ -217,6 +217,21 @@ describe('scopeAccountToClient', () => {
     expect(multi.excluded).toEqual([expect.objectContaining({ level: 'account', reason: 'page_unknown' })])
   })
 
+  it('🔴 客户没登记主页时，读不到主页的广告也要算进「归属不明」——不能因为只看到一个已知主页就原样放行（Codex 2026-09-28 第六轮）', () => {
+    const single = account([
+      campaign('c1'), adset('as1', 'c1'), ad('ad1', 'as1', 'c1', OTHER),
+      campaign('c2'), adset('as2', 'c2'), ad('ad2', 'as2', 'c2', null), // 主页读不到，之前会被跳过不计入主页数
+    ], [adsetRow('as1', 'c1', DATE, 10), adsetRow('as2', 'c2', DATE, 10)])
+    const scoped = scopeAccountToClient(single, null, DATE, EVAL)
+    expect(scoped.accountLevelOnly).toBe(true)
+    expect(scoped.excluded).toEqual([expect.objectContaining({ level: 'account', reason: 'page_unknown' })])
+  })
+
+  it('对照：客户没登记主页、只有一个已知主页、没有读不到主页的广告 → 照旧原样放行', () => {
+    const single = account([campaign('c1'), adset('as1', 'c1'), ad('ad1', 'as1', 'c1', OTHER)], [])
+    expect(scopeAccountToClient(single, null, DATE, EVAL)).toMatchObject({ accountLevelOnly: false })
+  })
+
   it('🔴 客户没登记主页时，也要先查快照新不新鲜——「只看到一个主页」可能是过期数据算出来的（Codex 2026-09-28 第五轮）', () => {
     const single = account([campaign('c1'), adset('as1', 'c1'), ad('ad1', 'as1', 'c1', OTHER)], [])
     const stale = { ...single, latestCaptures: [{ level: 'ad' as const, complete: false, skipped_shared: false, error: 'timeout', captured_at: '2026-09-25T02:00:00Z' }] }

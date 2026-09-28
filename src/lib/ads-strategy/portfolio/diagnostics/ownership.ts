@@ -240,15 +240,24 @@ function accountLevelOnlyResult(account: AccountInput, reason: 'page_unknown' | 
   }
 }
 
-/** 客户没登记主页：单一主页（或没广告）照原样跑，归属未核实；≥2 个主页 → 只做账户级。 */
+/** 客户没登记主页：单一主页、没有主页读不到的广告（或没广告）照原样跑，归属未核实；否则只做账户级。 */
 function scopeWithoutClientPage(account: AccountInput): ScopedAccount {
   const pages = new Set<string>()
+  let hasUnknownPageAd = false
   for (const list of Array.from(adsByAdset(account).values())) {
-    for (const a of list) if (a.creative_page_id) pages.add(a.creative_page_id)
+    for (const a of list) {
+      if (a.creative_page_id) pages.add(a.creative_page_id)
+      else hasUnknownPageAd = true
+    }
   }
-  if (pages.size < 2) return unscoped(account)
-  return accountLevelOnlyResult(account, 'page_unknown',
-    `客户没登记 Facebook 主页，这个账户里的广告挂在 ${pages.size} 个不同的主页上，分不清哪些是这个客户的，只做账户级诊断`)
+  // 主页读不到的广告（creative_page_id=null）之前直接被数主页时跳过了：账户里哪怕只看到一个已知主页，
+  // 只要还混着读不到主页的广告，也不能说「只有一个主页、原样放行」——那条广告到底是谁的一样确认不了
+  // （Codex 2026-09-28 第六轮）
+  if (pages.size < 2 && !hasUnknownPageAd) return unscoped(account)
+  const detail = pages.size >= 2
+    ? `客户没登记 Facebook 主页，这个账户里的广告挂在 ${pages.size} 个不同的主页上，分不清哪些是这个客户的，只做账户级诊断`
+    : '客户没登记 Facebook 主页，账户里有广告读不到挂在哪个 Facebook 主页，分不清是不是这个客户的，只做账户级诊断'
+  return accountLevelOnlyResult(account, 'page_unknown', detail)
 }
 
 /**
