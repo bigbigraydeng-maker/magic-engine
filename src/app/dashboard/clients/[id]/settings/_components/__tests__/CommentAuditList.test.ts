@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isStuck, mergeEngagements, shouldShowMarkReviewed, type Engagement } from '../CommentAuditList'
+import { facebookCommentUrl, isStuck, mergeEngagements, shouldShowMarkReviewed, type Engagement } from '../CommentAuditList'
 import { MAX_ATTEMPTS, STALE_PROCESSING_MS } from '@/lib/social/comment-autoreply-constants'
 
 /**
@@ -31,6 +31,8 @@ const base: Engagement = {
   reply_source: null,
   created_at: '2026-09-01T00:00:00Z',
   updated_at: '2026-09-01T00:00:00Z',
+  post_id: 'page123_post456',
+  comment_id: 'page123_post456_comment789',
 }
 
 describe('isStuck', () => {
@@ -138,5 +140,17 @@ describe('shouldShowMarkReviewed', () => {
   it('已经标记已阅（reviewed_at 有值）且不在 stuckIds 里 → 不显示', () => {
     const engagement = { ...base, reply_status: 'failed', attempts: MAX_ATTEMPTS, reviewed_at: '2026-09-27T00:00:00Z' }
     expect(shouldShowMarkReviewed(engagement, new Set(), NOW)).toBe(false)
+  })
+})
+
+/**
+ * `facebookCommentUrl`（Codex round 18 复审 P2）：post_id/comment_id 是
+ * claimComment 插入时原样存的 Graph API 返回值，不需要再调一次 API 或多存
+ * 一个字段——直接拼 Facebook 自己的评论深链格式。
+ */
+describe('facebookCommentUrl', () => {
+  it('拼出 post 链接 + comment_id 查询参数', () => {
+    expect(facebookCommentUrl('page123_post456', 'page123_post456_comment789'))
+      .toBe('https://www.facebook.com/page123_post456?comment_id=page123_post456_comment789')
   })
 })

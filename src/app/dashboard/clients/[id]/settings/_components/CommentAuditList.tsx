@@ -42,6 +42,22 @@ export interface Engagement {
   reply_source: string | null
   created_at: string
   updated_at: string
+  post_id: string
+  comment_id: string
+}
+
+/**
+ * Facebook's own permalink shape for a comment: post URL + `?comment_id=`
+ * deep-links to that comment on the post, scrolled to and highlighted.
+ * `post_id`/`comment_id` are stored exactly as Graph API returned them
+ * (claimComment's insert), so no extra API call or field is needed to build
+ * this (Codex round 18 复审 P2: FDE had no way to open the specific stuck
+ * comment on Facebook to check whether it already has a reply there — the
+ * audit list only shows author/text/time, not enough to locate a 39-day-old
+ * comment on a busy page by hand).
+ */
+export function facebookCommentUrl(postId: string, commentId: string): string {
+  return `https://www.facebook.com/${postId}?comment_id=${commentId}`
 }
 
 /**
@@ -231,6 +247,10 @@ export function CommentAuditList({ clientId }: Props) {
             )}
 
             <div className="mt-2 flex items-center gap-3">
+              <a href={facebookCommentUrl(it.post_id, it.comment_id)} target="_blank" rel="noopener noreferrer"
+                className="text-xs font-semibold text-blue-600 hover:underline">
+                去 Facebook 看原评论 →
+              </a>
               {(it.reply_status === 'replied' || it.reply_status === 'dm_sent') && (
                 <button onClick={() => act(it.id, 'revert')} disabled={busyId === it.id}
                   className="text-xs font-semibold text-red-600 hover:underline disabled:opacity-50">
