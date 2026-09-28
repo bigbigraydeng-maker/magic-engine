@@ -71,8 +71,14 @@ describe('Meta Ads AI report view',()=>{
 
   it('shows the real reason for a failed report instead of the generic fallback — 2026-09-22 production: a real CTS analysis_too_large failure was hidden behind the same generic text as every other failure',()=>{
     render(<ReportView analysis={{ ...base,status:'failed',report_markdown:null,error_code:'analysis_too_large' }} />)
-    expect(screen.getByText('当前广告数据量超过邀请测试版上限，请联系 Magic Engine 支持。')).toBeInTheDocument()
+    expect(screen.getByText('你的账户广告太多，这次没能生成，请发邮件到 hello@magicengine.cloud，我们人工帮你看。')).toBeInTheDocument()
     expect(screen.queryByText(/本次分析没有完成/)).not.toBeInTheDocument()
+  })
+
+  it('shows the deletion notice instead of the refresh hint when the report was cleared by a Facebook data deletion request',()=>{
+    render(<ReportView analysis={{ ...base,status:'completed',report_markdown:null,error_code:'deleted_by_user_request' }} />)
+    expect(screen.getByText('这份报告已按你在 Facebook 提交的删除数据申请清除。')).toBeInTheDocument()
+    expect(screen.queryByText(/请稍后刷新页面/)).not.toBeInTheDocument()
   })
 
   it('shows model_unavailable message when AI model fails but data was saved',()=>{

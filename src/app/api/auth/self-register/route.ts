@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
+import { getUserPermissions } from '@/lib/auth/whitelist'
+import { ADS_CHECK_ENTRY } from '@/lib/auth/self-serve-routing'
 
 function sanitizeNext(next: unknown): string {
   if (typeof next !== 'string') {
@@ -21,6 +23,23 @@ function sanitizeNext(next: unknown): string {
 const RESEND_WINDOW_MS = 60 * 60 * 1000
 const RESEND_MAX_PER_WINDOW = 10
 const resendHits = new Map<string, number[]>()
+
+// Login codes to an existing, verified customer are also capped per email: the per-IP window above reads a
+// client-supplied header, so this is what stops one inbox being flooded with codes (狄仁杰 2026-09-27).
+const LOGIN_CODE_MAX_PER_EMAIL = 3
+const loginCodeHits = new Map<string, number[]>()
+
+function consumeLoginCodeQuota(email: string): boolean {
+  if (loginCodeHits.size > 10_000) loginCodeHits.clear()
+  const now = Date.now()
+  const hits = (loginCodeHits.get(email) ?? []).filter(t => now - t < RESEND_WINDOW_MS)
+  if (hits.length >= LOGIN_CODE_MAX_PER_EMAIL) {
+    loginCodeHits.set(email, hits)
+    return false
+  }
+  loginCodeHits.set(email, [...hits, now])
+  return true
+}
 
 function consumeResendQuota(ip: string): boolean {
   if (resendHits.size > 10_000) resendHits.clear()
@@ -61,16 +80,26 @@ export async function POST(request: NextRequest) {
 
   if (!email || !businessName) {
     return NextResponse.json(
-      { error: 'email and businessName are required' },
+      { error: 'email and businessName are required', code: 'missing_fields' },
       { status: 400 },
     )
   }
 
   if (typeof email !== 'string' || !email.includes('@')) {
-    return NextResponse.json({ error: 'Invalid email' }, { status: 400 })
+    return NextResponse.json({ error: 'Invalid email', code: 'invalid_email' }, { status: 400 })
   }
 
   const emailLower = email.toLowerCase().trim()
+
+  // Anyone on the env access lists (staff, scoped demo admins, client viewers) signs in through the
+  // login page. Without this, typing that email into the Tools Lab sign-up page (reached when a session
+  // expires) would create a self-serve workspace that then shadows their real access (狄仁杰 2026-09-27).
+  if (getUserPermissions(emailLower) !== null) {
+    return NextResponse.json(
+      { error: 'This email signs in through the login page.', code: 'staff_account' },
+      { status: 409 },
+    )
+  }
 
   // signInWithOtp creates the auth.users row (shouldCreateUser: true) AND emits
   // a 6-digit OTP via the Magic Link / Email OTP template ({{ .Token }}).
@@ -114,7 +143,7 @@ export async function POST(request: NextRequest) {
       const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
       if (!consumeResendQuota(ip)) {
         return NextResponse.json(
-          { error: 'Too many attempts — please try again later.' },
+          { error: 'Too many attempts — please try again later.', code: 'rate_limited' },
           { status: 429 },
         )
       }
@@ -123,7 +152,7 @@ export async function POST(request: NextRequest) {
         // Most likely Supabase's built-in 60s email cooldown.
         console.error('[self-register] OTP resend failed:', resendError)
         return NextResponse.json(
-          { error: 'We just sent you a code — wait a minute before requesting another.' },
+          { error: 'We just sent you a code — wait a minute before requesting another.', code: 'code_cooldown' },
           { status: 429 },
         )
       }
@@ -137,12 +166,41 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    // Tools Lab: the ad check-up page is one combined sign-up / sign-in. A returning, verified customer
+    // gets a login code instead of a dead end (they have no password; the portal login is password / Google only).
+    if (existingClient?.email_verified_at && safeNext === ADS_CHECK_ENTRY) {
+      const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
+      if (!consumeLoginCodeQuota(emailLower) || !consumeResendQuota(ip)) {
+        return NextResponse.json(
+          { error: 'Too many attempts — please try again later.', code: 'rate_limited' },
+          { status: 429 },
+        )
+      }
+      const { error: loginCodeError } = await sendOtp()
+      if (loginCodeError) {
+        console.error('[self-register] login code send failed:', loginCodeError)
+        return NextResponse.json(
+          { error: 'We just sent you a code — wait a minute before requesting another.', code: 'code_cooldown' },
+          { status: 429 },
+        )
+      }
+      return NextResponse.json({
+        ok: true,
+        resent: true,
+        signIn: true,
+        email: emailLower,
+        next: safeNext,
+        needsVerification: true,
+        message: 'A sign-in code is on its way.',
+      })
+    }
+
     // Verified accounts land here — and so does a dangling portal row whose
     // clients record is gone (DB integrity anomaly): refusing with "log in"
     // is deliberate; re-sending a code there would verify into a workspace
     // that no longer exists. Admin cleanup is the fix for that state.
     return NextResponse.json(
-      { error: 'An account with this email already exists. Please log in.' },
+      { error: 'An account with this email already exists. Please log in.', code: 'account_exists' },
       { status: 409 },
     )
   }
@@ -158,7 +216,7 @@ export async function POST(request: NextRequest) {
 
   if (existing) {
     return NextResponse.json(
-      { error: 'An account with this business name already exists. Please log in.' },
+      { error: 'An account with this business name already exists. Please log in.', code: 'business_exists' },
       { status: 409 },
     )
   }
@@ -186,7 +244,7 @@ export async function POST(request: NextRequest) {
 
   if (clientError || !client) {
     console.error('[self-register] client insert failed:', clientError)
-    return NextResponse.json({ error: 'Registration failed' }, { status: 500 })
+    return NextResponse.json({ error: 'Registration failed', code: 'registration_failed' }, { status: 500 })
   }
 
   // Grant portal access. Without this row the user can verify but lands with
@@ -202,7 +260,7 @@ export async function POST(request: NextRequest) {
   if (portalError) {
     await supabaseAdmin.from('clients').delete().eq('id', client.id)
     console.error('[self-register] portal user insert failed:', portalError)
-    return NextResponse.json({ error: 'Registration failed' }, { status: 500 })
+    return NextResponse.json({ error: 'Registration failed', code: 'registration_failed' }, { status: 500 })
   }
 
   // Send the OTP last — on failure, roll back the rows we just created using
@@ -214,7 +272,7 @@ export async function POST(request: NextRequest) {
     await supabaseAdmin.from('client_portal_users').delete().eq('client_id', client.id)
     await supabaseAdmin.from('clients').delete().eq('id', client.id)
     console.error('[self-register] signInWithOtp failed:', otpError)
-    return NextResponse.json({ error: 'Registration failed' }, { status: 500 })
+    return NextResponse.json({ error: 'Registration failed', code: 'registration_failed' }, { status: 500 })
   }
 
   const { data: latestScan } = await supabaseAdmin

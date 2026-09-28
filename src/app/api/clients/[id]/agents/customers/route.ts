@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { clientHasIndustryFeature } from '@/lib/clients/industry-guard'
 import { supabaseAdmin } from '@/lib/supabase'
 import { isValidStage } from '@/lib/crm/agent-customer-stages'
 import { contactKindOf, readDomainRules } from '@/lib/crm/contact-kind'
@@ -33,6 +34,9 @@ export async function POST(req: Request, { params }: Context) {
   const { id } = await params
   const access = await requirePaidClientAccess(id)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
+  if (!(await clientHasIndustryFeature(id, 'agents'))) {
+    return NextResponse.json({ error: '这个功能不适用于你的业务' }, { status: 403 })
+  }
 
   let parsed: z.infer<typeof createSchema>
   try {
@@ -132,6 +136,9 @@ export async function PATCH(req: Request, { params }: Context) {
   const { id } = await params
   const access = await requirePaidClientAccess(id)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
+  if (!(await clientHasIndustryFeature(id, 'agents'))) {
+    return NextResponse.json({ error: '这个功能不适用于你的业务' }, { status: 403 })
+  }
 
   const qid = new URL(req.url).searchParams.get('id')
   if (!qid) return NextResponse.json({ error: 'Missing id.' }, { status: 400 })

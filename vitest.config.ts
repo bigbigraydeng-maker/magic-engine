@@ -9,6 +9,8 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
+    pool: 'threads',
+    poolOptions: { threads: { maxThreads: 2 } },
     exclude: [
       '**/node_modules/**',
       '**/.next/**',

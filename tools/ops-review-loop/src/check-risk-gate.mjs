@@ -26,7 +26,7 @@
 
 import { appendFileSync } from 'node:fs'
 
-import { classifyRisk, parseDeclaredRisk } from './risk.mjs'
+import { classifyRisk, readDeclaredRisk } from './risk.mjs'
 import {
   buildGateMarker,
   findGateFor,
@@ -222,7 +222,7 @@ async function postIssueComment(body) {
 /**
  * Read the PR and verify the run is still bound to its current head/base.
  *
- * @returns {Promise<{declaredRisk: 'A'|'B'|'C'|null, body: string}>}
+ * @returns {Promise<{declaredRisk: 'A'|'B'|'C'|null, declaredUnreadable: string|null, body: string}>}
  */
 async function loadPullRequest() {
   const data = await api(`/repos/${repository}/pulls/${pr}`)
@@ -230,7 +230,8 @@ async function loadPullRequest() {
     throw new Error('这次运行绑定的 head/base 已不是 PR 当前的 head/base，判定作废')
   }
   const body = typeof data?.body === 'string' ? data.body : ''
-  return { declaredRisk: parseDeclaredRisk(body), body }
+  const declared = readDeclaredRisk(body)
+  return { declaredRisk: declared.risk, declaredUnreadable: declared.unreadable, body }
 }
 
 /** Largest file the trial-run check will read. Anything bigger reads as `null`. */
@@ -298,7 +299,7 @@ if (!SHA_RE.test(baseSha) || !SHA_RE.test(headSha)) {
 }
 
 try {
-  const { declaredRisk, body } = await loadPullRequest()
+  const { declaredRisk, declaredUnreadable, body } = await loadPullRequest()
 
   // A failure to read the file list is NOT rethrown: `classifyRisk` rates an
   // unreadable list as A, and the error text is carried into the summary so a
@@ -312,7 +313,7 @@ try {
     filesError = err.message
   }
 
-  const rating = classifyRisk({ files, declaredRisk })
+  const rating = classifyRisk({ files, declaredRisk, declaredUnreadable })
 
   const sources = await listIssueComments()
 

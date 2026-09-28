@@ -43,6 +43,9 @@ beforeEach(()=>{
     if(name==='meta_ads_reserve_sponsored_analysis') return { data:{ reserved:true,idempotent:false,job_id:'job-1',reserve_usd:0.12 },error:null }
     if(name==='meta_ads_authorize_sponsored_analysis') return { data:true,error:null }
     if(name==='meta_ads_finish_sponsored_analysis') { jobStatus=String(args.final_status);return { data:true,error:null } }
+    // Tools Lab combined monthly backstop (src/lib/tools-lab/spend-cap.ts) — allowed by default here;
+    // see the dedicated 'platform_quota_reached' test below for the denied case.
+    if(name==='zhangqian_rate_limit_consume') return { data:[{ allowed:true,post_count:1 }],error:null }
     return { data:null,error:{ message:'unexpected rpc' } }
   })
 })
@@ -53,6 +56,37 @@ describe('托管 Meta 广告分析',()=>{
     await expect(generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id))
       .rejects.toThrow('sponsored_analysis_unavailable')
     expect(mocks.reserveRead).not.toHaveBeenCalled()
+    expect(mocks.metaGraphGet).not.toHaveBeenCalled()
+    expect(mocks.callClaudeChat).not.toHaveBeenCalled()
+  })
+
+  it('Tools Lab 全站每月合计上限用完（跟网站诊断共用一个桶）→ platform_quota_reached，不请求 Meta 或付费模型',async()=>{
+    mocks.rpc.mockImplementation(async(name:string,args:Record<string,unknown>)=>{
+      if(name==='meta_ads_reserve_sponsored_analysis') return { data:{ reserved:true,idempotent:false,job_id:'job-1',reserve_usd:0.12 },error:null }
+      if(name==='meta_ads_authorize_sponsored_analysis') return { data:true,error:null }
+      if(name==='meta_ads_finish_sponsored_analysis') { jobStatus=String(args.final_status);return { data:true,error:null } }
+      if(name==='zhangqian_rate_limit_consume') return { data:[{ allowed:false,post_count:2001 }],error:null }
+      return { data:null,error:{ message:'unexpected rpc' } }
+    })
+    await expect(generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id))
+      .rejects.toThrow('platform_quota_reached')
+    expect(mocks.reserveRead).not.toHaveBeenCalled()
+    expect(mocks.metaGraphGet).not.toHaveBeenCalled()
+    expect(mocks.callClaudeChat).not.toHaveBeenCalled()
+    // This client's own per-client sponsored budget was never even queried — the whole-platform check runs after it.
+    expect(mocks.rpc).not.toHaveBeenCalledWith('meta_ads_reserve_sponsored_analysis',expect.anything())
+  })
+
+  it('Tools Lab 全站上限的计数器本身读不出来 → 失败关闭（analysis_unavailable），绝不放行',async()=>{
+    mocks.rpc.mockImplementation(async(name:string,args:Record<string,unknown>)=>{
+      if(name==='meta_ads_reserve_sponsored_analysis') return { data:{ reserved:true,idempotent:false,job_id:'job-1',reserve_usd:0.12 },error:null }
+      if(name==='meta_ads_authorize_sponsored_analysis') return { data:true,error:null }
+      if(name==='meta_ads_finish_sponsored_analysis') { jobStatus=String(args.final_status);return { data:true,error:null } }
+      if(name==='zhangqian_rate_limit_consume') return { data:null,error:{ message:'down' } }
+      return { data:null,error:{ message:'unexpected rpc' } }
+    })
+    await expect(generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id))
+      .rejects.toThrow('analysis_unavailable')
     expect(mocks.metaGraphGet).not.toHaveBeenCalled()
     expect(mocks.callClaudeChat).not.toHaveBeenCalled()
   })
@@ -169,6 +203,7 @@ describe('托管 Meta 广告分析',()=>{
       if(name==='meta_ads_reserve_sponsored_analysis') return { data:{ reserved:true,idempotent:false,job_id:'job-1',reserve_usd:0.12 },error:null }
       if(name==='meta_ads_authorize_sponsored_analysis') return { data:false,error:null }
       if(name==='meta_ads_finish_sponsored_analysis') { jobStatus=String(args.final_status);return { data:true,error:null } }
+      if(name==='zhangqian_rate_limit_consume') return { data:[{ allowed:true,post_count:1 }],error:null }
       return { data:null,error:{ message:'unexpected rpc' } }
     })
     await expect(generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id))

@@ -3,7 +3,11 @@ const mocks=vi.hoisted(()=>({ from:vi.fn(),rpc:vi.fn(),insertAudit:vi.fn(),finis
 vi.mock('@/lib/supabase',()=>({ supabaseAdmin:{ from:mocks.from,rpc:mocks.rpc } }))
 vi.mock('@/lib/clients/binding-audit',()=>({ insertBindingAudit:mocks.insertAudit,finishBindingAudit:mocks.finishAudit }))
 vi.mock('@/lib/platform-oauth/vocabulary',()=>({ decryptToken:vi.fn(()=> 'private') }))
-vi.mock('../entitlement',()=>({ requirePilotActive:mocks.requirePilotActive,requirePilotRevision:mocks.requirePilotRevision }))
+vi.mock('../entitlement',async(importOriginal)=>{
+  const actual=await importOriginal<typeof import('../entitlement')>()
+  return { requirePilotActive:mocks.requirePilotActive,requirePilotRevision:mocks.requirePilotRevision,
+    requireConnectAllowed:actual.requireConnectAllowed,publicConnectOpen:actual.publicConnectOpen }
+})
 import { readGrant,activeConnection,activeConnectionForPrincipal,requireMetaScope,requireReleaseAuthorization,requireDiscoveryAuthorization } from '../store'
 import { auditedControl } from '../audit'
 import { MetaReadError } from '../../graph-read'
@@ -13,7 +17,7 @@ const grant={ id:'grant',client_id:'tenant',ad_account_id:'act_1234567890',revis
 function chain(data:unknown,error:unknown=null){ const result={ data,error };const c:Record<string,unknown>={ then:(resolve:(v:unknown)=>unknown)=>Promise.resolve(result).then(resolve) };for(const method of ['select','insert','delete','eq','is','gt','lt','contains','maybeSingle']) c[method]=vi.fn(()=>c);return c }
 function key(metadata:unknown={ meta_ads_grant_id:'grant',meta_ads_grant_revision:'r1',meta_ads_entitlement_revision:'ent-1' }) { return { metadata,scopes:p.scopes,expires_at:new Date(Date.now()+100000).toISOString() } }
 beforeEach(()=>{ vi.resetAllMocks();process.env.META_ADS_AI_ENABLED='true';mocks.rpc.mockResolvedValue({ data:false,error:null });mocks.insertAudit.mockResolvedValue({ id:'audit' });mocks.finishAudit.mockResolvedValue(true)
-  mocks.requirePilotActive.mockResolvedValue({ revision:'ent-1',new_actions_allowed:true });mocks.requirePilotRevision.mockResolvedValue({ revision:'ent-1',new_actions_allowed:true }) })
+  mocks.requirePilotActive.mockResolvedValue({ revision:'ent-1',new_actions_allowed:true,source:'ops' });mocks.requirePilotRevision.mockResolvedValue({ revision:'ent-1',new_actions_allowed:true,source:'ops' }) })
 describe('grant, token and control audit guards',()=>{
   it('requires explicit Meta scope, never inherits read:all',()=>{ expect(()=>requireMetaScope({ ...p,scopes:['read:all'] })).toThrow('scope_required') })
   it('denies revoked, expired and revision-stale keys',async()=>{
@@ -110,6 +114,24 @@ describe('OAuth state principal and browser binding',()=>{
     expect(mocks.from).not.toHaveBeenCalled();mocks.from.mockReturnValue(chain(null))
     await expect(consumeAdsState('s'.repeat(43),'b'.repeat(43),'principal')).rejects.toThrow('invalid_oauth_state')
   })
+  it('自助客户在 Meta 审核通过前不能连接 Facebook，且不写入任何 state 行',async()=>{
+    process.env.FACEBOOK_APP_ID='test';process.env.FACEBOOK_APP_SECRET='test';process.env.NEXT_PUBLIC_APP_URL='https://app.example'
+    delete process.env.META_ADS_AI_PUBLIC_CONNECT
+    mocks.requirePilotActive.mockResolvedValueOnce({ revision:'ent-1',new_actions_allowed:true,source:'self_serve' })
+    await expect(startAdsConsent('tenant','principal')).rejects.toThrow('connect_waiting_review')
+    expect(mocks.from).not.toHaveBeenCalled()
+  })
+
+  it('META_ADS_AI_PUBLIC_CONNECT=true 时自助客户可以连接 Facebook',async()=>{
+    process.env.FACEBOOK_APP_ID='test';process.env.FACEBOOK_APP_SECRET='test';process.env.NEXT_PUBLIC_APP_URL='https://app.example';process.env.META_ADS_AI_GRAPH_VERSION='v21.0'
+    process.env.META_ADS_AI_PUBLIC_CONNECT='true'
+    mocks.requirePilotActive.mockResolvedValueOnce({ revision:'ent-1',new_actions_allowed:true,source:'self_serve' })
+    mocks.from.mockReturnValue(chain(null))
+    const result=await startAdsConsent('tenant','principal')
+    expect(new URL(result.url).searchParams.get('scope')).toBe('ads_read')
+    delete process.env.META_ADS_AI_PUBLIC_CONNECT
+  })
+
   it('requests only ads_read and stores hashes, not state/cookie plaintext',async()=>{
     process.env.FACEBOOK_APP_ID='test';process.env.FACEBOOK_APP_SECRET='test';process.env.NEXT_PUBLIC_APP_URL='https://app.example';process.env.META_ADS_AI_GRAPH_VERSION='v21.0'
     const q=chain(null);mocks.from.mockReturnValue(q)

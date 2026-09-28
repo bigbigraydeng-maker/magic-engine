@@ -205,6 +205,17 @@ function orMatches(row: Row, expr: string): boolean {
         return v !== null && v !== undefined && String(v) <= value
       case 'eq':
         return String(v) === value
+      case 'neq':
+        // PostgREST 的 neq 是 SQL `<>`：NULL 不匹配
+        return v !== null && v !== undefined && String(v) !== value
+      case 'not': {
+        // 只实现 `col.not.in.("a","b")` —— 内核排除专属审批动作用到的那一种
+        if (!value.startsWith('in.(') || !value.endsWith(')')) {
+          throw new Error(`[fake-supabase] .or 只实现了 not.in：${cond}`)
+        }
+        const list = splitTopLevel(value.slice('in.('.length, -1)).map((x) => x.replace(/^"(.*)"$/, '$1'))
+        return v !== null && v !== undefined && !list.includes(String(v))
+      }
       default:
         throw new Error(`[fake-supabase] .or 没实现算子「${op}」：${cond}`)
     }

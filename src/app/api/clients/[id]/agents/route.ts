@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { clientHasIndustryFeature } from '@/lib/clients/industry-guard'
 import { supabaseAdmin } from '@/lib/supabase'
 import {
   contactKindOf,
@@ -186,6 +187,10 @@ export async function GET(_req: Request, { params }: Context) {
   const { id } = await params
   const access = await requirePaidClientAccess(id)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
+  // 纵深防御：页面已经有服务端闸，这里再挡一次直接敲 API 的情况 —— 只藏页面不够。
+  if (!(await clientHasIndustryFeature(id, 'agents'))) {
+    return NextResponse.json({ error: '这个功能不适用于你的业务' }, { status: 403 })
+  }
 
   try {
     const rules = await loadDomainRules(id)
