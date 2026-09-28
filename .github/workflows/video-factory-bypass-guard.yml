@@ -1,0 +1,66 @@
+name: OPS — Video factory bypass guard
+
+# Static early-warning check for the "video factory is the only publish path"
+# rule (CLAUDE.md §8, docs/agents/14-sudongpo.md, docs/PITFALLS.md D14,
+# docs/ledger/2026-09-29-video-factory-only-rule.md).
+#
+# 2026-09-28: a one-off script outside src/lib/factory/ called a
+# video-generation provider (Muapi) and then Facebook's publish endpoint
+# directly, skipping the recipe check, storyboard self-check and
+# fact-grounding the factory pipeline runs. Two videos went out with no audio
+# and fabricated pricing. This job reads every PR's changed files from the
+# GitHub API and fails if any file outside src/lib/factory/ adds both a video
+# provider call and a video publish call — the exact shape of that incident.
+#
+# It does NOT stop a script that is run once locally and never committed
+# (that was the actual incident) — see the guard's own doc comment
+# (tools/ops-review-loop/src/video-factory-bypass.mjs) for why no in-repo
+# runtime chokepoint can either. It stops the shape from becoming a reusable,
+# reviewable asset in this repository.
+#
+# Runs on every PR, no path/branch filter — any window on any branch could
+# commit this shape, unlike the auto-fix guard which only watches one lane.
+#
+# Checked out from `main`, never the PR head, so a PR cannot edit the guard
+# that judges it. It never merges, deploys, or modifies the PR — its only
+# output is pass/fail plus a job summary.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: video-factory-bypass-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  video-factory-bypass-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Check for video-factory bypass shape
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Bootstrap: this workflow checks out `main` on purpose, which means
+          # the very PR that introduces the guard script cannot see it yet.
+          # Tolerate exactly that case, loudly — the same bootstrap exception
+          # ops-fix-scope-guard.yml uses, for the same reason.
+          if [ ! -f tools/ops-review-loop/src/check-video-factory-bypass.mjs ]; then
+            echo "::notice::guard script is not on main yet — treating this as the bootstrap PR that adds it"
+            echo '## ⏭️ 视频工厂唯一出口闸门：引导中' >> "$GITHUB_STEP_SUMMARY"
+            echo '' >> "$GITHUB_STEP_SUMMARY"
+            echo '闸门脚本还没进 `main`（本闸门刻意从 main 检出，所以引入它的这个 PR 必然跑不了它自己）。' >> "$GITHUB_STEP_SUMMARY"
+            echo '合入之后，从下一个 PR 起就会真正生效。' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          node tools/ops-review-loop/src/check-video-factory-bypass.mjs
