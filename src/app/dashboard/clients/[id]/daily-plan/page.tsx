@@ -127,6 +127,7 @@ export default function DailyPlanPage() {
                   checking a day's content can still see the campaign's mood/
                   colour/dos&donts without leaving the page. */}
               <VisualDirectionSection
+                key={selectedCampaign.id}
                 campaign={selectedCampaign}
                 clientId={clientId}
                 onUpdated={handleCampaignUpdated}
