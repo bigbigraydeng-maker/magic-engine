@@ -64,7 +64,7 @@ import type { ManualItem } from './manual-item-types'
 import { MAX_ATTEMPTS, STALE_PROCESSING_MS } from '@/lib/social/comment-autoreply-constants'
 import { APP_BASE } from './binding-request-items'
 import { assessConfiguredPage } from '@/lib/meta/page-sync-authorization'
-import { resolveMetaTokenDetailed } from '@/lib/meta/token-selection'
+import { resolveMetaTokenDetailed, domainToEnvKey, pageIdToEnvVar, type ScopedTokenSource } from '@/lib/meta/token-selection'
 import { fetchAll } from '@/lib/supabase-paginate'
 
 export { MAX_ATTEMPTS, STALE_PROCESSING_MS } from '@/lib/social/comment-autoreply-constants'
@@ -92,8 +92,7 @@ function daysAgo(iso: string, now: Date): number {
  * 都不显示。`tokenSourceGuidance` 把这条路由放进 `href`（今日待办页面只把
  * `href` 渲染成可点按钮，`how` 只是纯文本 `<span>`——Codex round 7 复审 P2：
  * round 6 只把 URL 写进了 `how` 文案里，从来没有真的可点）。
- */
-/**
+ *
  * `intent=comment_reply`（Codex round 8 复审 P1）：评论引擎实际用的主页是
  * `social_comment_config.fb_page_id`，不一定等于 `clients.facebook_page_id`
  * ——不带这个 intent，回调会把新令牌存去 `clients.facebook_page_id`，评论
@@ -113,10 +112,23 @@ const SHARED_TOKEN_HOW =
   '这把钥匙同时给好几个客户用，改之前先确认真的要动公共钥匙（改错了会影响其他客户），' +
   '权限要勾上 pages_manage_engagement，保存时选带 deploy 的那个选项。'
 
-const ENV_VAR_HOW =
-  '重新走一遍 Meta 授权换一把新令牌（developers.facebook.com/tools/explorer/），这次生成时权限要勾上 ' +
-  'pages_manage_engagement（发评论回复要用，最容易被漏勾）；换好在 Render 后台 crazycontent 服务的 ' +
-  'Environment 更新这个客户专属的令牌变量，保存时选带 deploy 的那个选项（别选 Save only）。'
+/**
+ * 指名具体变量（Codex round 10 复审 P1）：`pickScopedMetaToken`
+ * （`token-selection.ts`）域名变量优先于主页变量——客户如果同时配了两个键，
+ * 泛泛说"这个客户专属的令牌变量"会让人改错那一个（比如按评论主页去改
+ * `_PAGE_` 那条，实际生效的其实是域名那条），改完部署评论还是回不出去。
+ * `varName` 读不出来（客户行读失败 / 两个键都没配）才退回泛泛的指引。
+ */
+function envVarHow(varName: string | null): string {
+  const varClause = varName
+    ? `${varName}（就是这一条，不是别的变量名，改错变量不会生效）`
+    : '这个客户专属的令牌变量（具体变量名这次没读出来，去 Render 后台按客户域名 / Facebook 主页 id 找对应那条）'
+  return (
+    '重新走一遍 Meta 授权换一把新令牌（developers.facebook.com/tools/explorer/），这次生成时权限要勾上 ' +
+    'pages_manage_engagement（发评论回复要用，最容易被漏勾）；换好在 Render 后台 crazycontent 服务的 ' +
+    `Environment 更新 ${varClause}，保存时选带 deploy 的那个选项（别选 Save only）。`
+  )
+}
 
 interface TokenSourceGuidance {
   how: string
@@ -154,13 +166,29 @@ async function tokenSourceGuidance(
   }
   try {
     const resolved = await resolveMetaTokenDetailed(supabase, clientId, env)
-    if (resolved && resolved !== 'ownership_unknown' && resolved.source === 'shared_fallback') {
-      return { how: SHARED_TOKEN_HOW, href: settingsHref }
+    if (resolved && resolved !== 'ownership_unknown') {
+      if (resolved.source === 'shared_fallback') return { how: SHARED_TOKEN_HOW, href: settingsHref }
+      const varName = await scopedEnvVarName(supabase, clientId, resolved.source)
+      return { how: envVarHow(varName), href: settingsHref }
     }
   } catch {
     // fall through to the default
   }
-  return { how: ENV_VAR_HOW, href: settingsHref }
+  return { how: envVarHow(null), href: settingsHref }
+}
+
+/** `client_domain`/`client_page` 各自对应的实际变量名（`token-selection.ts` 同一套推导）。 */
+async function scopedEnvVarName(
+  supabase: SupabaseClient,
+  clientId: string,
+  source: ScopedTokenSource,
+): Promise<string | null> {
+  const { data } = await supabase.from('clients').select('domain, facebook_page_id').eq('id', clientId).maybeSingle()
+  const row = data as { domain?: string | null; facebook_page_id?: string | null } | null
+  if (source === 'client_domain') {
+    return row?.domain ? `META_SYSTEM_USER_TOKEN_${domainToEnvKey(row.domain)}` : null
+  }
+  return row?.facebook_page_id ? pageIdToEnvVar(row.facebook_page_id) : null
 }
 
 async function fetchStuckRows(

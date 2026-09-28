@@ -348,6 +348,15 @@ const META_RESULT: Record<string, { ok: boolean; text: string }> = {
 }
 
 /**
+ * comment_reply 这三种结果落地的这个抽屉（`?settings=platform`）不是能
+ * "标记已阅"关掉待办的地方——那个按钮在独立的 `/settings` 页的「评论审计」
+ * 列表里（Codex round 10 复审 P2）：授权完看到结果之后，FDE 得自己再摸到
+ * 那个页面，而且下意识再点一次待办链接只会重新起一轮 Meta 授权，不会带他
+ * 过去。补一条直达链接。
+ */
+const COMMENT_REPLY_OUTCOMES = new Set(['no_comment_page', 'comment_reply_ready', 'comment_reply_not_granted'])
+
+/**
  * The one-click replacement for hand-editing a server environment variable.
  *
  * Every client used to need META_SYSTEM_USER_TOKEN_PAGE_<id> added to Render by
@@ -407,6 +416,14 @@ function ConnectMeta({
           }`}
         >
           {result.text}
+          {outcome && COMMENT_REPLY_OUTCOMES.has(outcome) && (
+            <>
+              {' '}
+              <a href={`/dashboard/clients/${clientId}/settings`} className="font-semibold underline">
+                去「评论审计」列表处理 →
+              </a>
+            </>
+          )}
         </div>
       )}
 

@@ -19,9 +19,16 @@ vi.mock('@/lib/meta/page-sync-authorization', () => ({
 }))
 
 const resolveMetaTokenDetailedMock = vi.fn()
-vi.mock('@/lib/meta/token-selection', () => ({
-  resolveMetaTokenDetailed: (...args: unknown[]) => resolveMetaTokenDetailedMock(...args),
-}))
+vi.mock('@/lib/meta/token-selection', async (importOriginal) => {
+  // domainToEnvKey / pageIdToEnvVar 是纯函数（Codex round 10 P1 用来点名实际
+  // env var），用真实实现而不是另外假一份——同一套推导逻辑没有理由在测试里
+  // 复制第二遍，复制出来的两份迟早会不同步。
+  const actual = await importOriginal<typeof import('@/lib/meta/token-selection')>()
+  return {
+    ...actual,
+    resolveMetaTokenDetailed: (...args: unknown[]) => resolveMetaTokenDetailedMock(...args),
+  }
+})
 
 interface EngagementRow {
   client_id: string
@@ -70,12 +77,23 @@ interface FakeDbOptions {
   dmRows?: EngagementRow[]
   processingRows?: EngagementRow[]
   errorMessage?: string
+  /** `scopedEnvVarName` 读 `clients` 表算实际变量名用的（Codex round 10 P1）。 */
+  clientsRow?: { domain?: string | null; facebook_page_id?: string | null } | null
 }
 
 function fakeDb(opts: FakeDbOptions) {
   const inSpy = vi.fn()
   const sb = {
     from: (table: string) => {
+      if (table === 'clients') {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: opts.clientsRow ?? null, error: null }),
+            }),
+          }),
+        }
+      }
       if (table !== 'social_comment_engagements') throw new Error(`unexpected table ${table}`)
       const chain = engagementsChain(
         { failed: opts.failedRows ?? [], dm_sent: opts.dmRows ?? [], processing: opts.processingRows ?? [] },
@@ -202,17 +220,48 @@ describe('pushCommentAutoreplyStuckItems', () => {
     expect(assessConfiguredPageMock).toHaveBeenCalledWith(sb, 'cts', PAGE_ID, expect.anything())
   })
 
-  it('令牌走的是专属环境变量（legacy_client_token）→ how 走专属变量指引', async () => {
+  // Codex round 10 P1：client_domain / client_page 两种「专属变量」各自对应不同的实际
+  // env var，`pickScopedMetaToken` 域名优先于主页——笼统说"专属变量"会让 FDE 改错那一个。
+  it('令牌走的是专属环境变量、来源是域名（client_domain）→ how 点名实际的域名变量', async () => {
     assessConfiguredPageMock.mockResolvedValue({ verified: true, via: 'legacy_client_token' })
-    resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_page' })
+    resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_domain' })
     const { sb } = fakeDb({
       failedRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-01T00:00:00Z' }],
+      clientsRow: { domain: 'ctstours.co.nz', facebook_page_id: PAGE_ID },
     })
     const items: ManualItem[] = []
     await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
     expect(items[0].how).toContain('pages_manage_engagement')
     expect(items[0].how).toContain('Render 后台')
+    expect(items[0].how).toContain('META_SYSTEM_USER_TOKEN_CTSTOURS_CO_NZ')
+    // 不能连主页变量也一起提，两条一起写等于又把人指错方向
+    expect(items[0].how).not.toContain('META_SYSTEM_USER_TOKEN_PAGE_')
+  })
+
+  it('令牌走的是专属环境变量、来源是主页（client_page）→ how 点名实际的主页变量', async () => {
+    assessConfiguredPageMock.mockResolvedValue({ verified: true, via: 'legacy_client_token' })
+    resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_page' })
+    const { sb } = fakeDb({
+      failedRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-01T00:00:00Z' }],
+      clientsRow: { domain: null, facebook_page_id: PAGE_ID },
+    })
+    const items: ManualItem[] = []
+    await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
+    expect(items[0].how).toContain(`META_SYSTEM_USER_TOKEN_PAGE_${PAGE_ID}`)
+  })
+
+  it('令牌走的是专属环境变量，但 clients 行读不出来 → how 退回不点名的通用指引，不整条待办失败', async () => {
+    assessConfiguredPageMock.mockResolvedValue({ verified: true, via: 'legacy_client_token' })
+    resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_page' })
+    const { sb } = fakeDb({
+      failedRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-01T00:00:00Z' }],
+      clientsRow: null,
+    })
+    const items: ManualItem[] = []
+    await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
+    expect(items[0].how).toContain('pages_manage_engagement')
     expect(items[0].how).toContain('这个客户专属的令牌变量')
+    expect(items[0].how).not.toContain('META_SYSTEM_USER_TOKEN_PAGE_')
   })
 
   it('令牌走的是公共钥匙（shared_fallback）→ how 说清是公共钥匙，不是这个客户专属变量（Codex round 3 P1）', async () => {
