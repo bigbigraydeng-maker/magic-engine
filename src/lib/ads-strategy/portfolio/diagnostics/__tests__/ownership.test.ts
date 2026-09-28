@@ -44,8 +44,10 @@ function adsetRow(id: string, campaignId: string, date: string, spend: number, l
 function campaignRow(id: string, date: string, spend: number, freq: number | null = null): DailyRow {
   return { level: 'campaign', entity_id: id, parent_id: null, insight_date: date, spend, impressions: spend * 40, reach: null, clicks: spend, leads: 0, messaging_conversations: 0, video_thruplays: null, actions: [], frequency_7d: freq }
 }
+/** 默认给一条新鲜、抓全的广告层抓取审计记录——大多数用例不测抓取健康度，要显式覆盖才测那条闸（Codex 第五轮后 adCaptureStale 把「零审计记录」也判 stale）。 */
+const FRESH_AD_CAPTURE = [{ level: 'ad' as const, complete: true, skipped_shared: false, error: null, captured_at: '2026-09-24T12:00:00Z' }]
 function account(snapshots: EntitySnapshotRow[], daily: DailyRow[], extra: Partial<AccountInput> = {}): AccountInput {
-  return { adAccountId: 'act_1', shared: false, timezone: 'Pacific/Auckland', currency: 'NZD', snapshots, daily, hourly: {}, hourlyError: null, latestCaptures: [], lastInsightDate: DATE, ...extra }
+  return { adAccountId: 'act_1', shared: false, timezone: 'Pacific/Auckland', currency: 'NZD', snapshots, daily, hourly: {}, hourlyError: null, latestCaptures: FRESH_AD_CAPTURE, lastInsightDate: DATE, ...extra }
 }
 function input(acc: AccountInput, extra: Partial<DiagnosisInput> = {}): DiagnosisInput {
   return {
@@ -215,6 +217,14 @@ describe('scopeAccountToClient', () => {
     expect(multi.excluded).toEqual([expect.objectContaining({ level: 'account', reason: 'page_unknown' })])
   })
 
+  it('🔴 客户没登记主页时，也要先查快照新不新鲜——「只看到一个主页」可能是过期数据算出来的（Codex 2026-09-28 第五轮）', () => {
+    const single = account([campaign('c1'), adset('as1', 'c1'), ad('ad1', 'as1', 'c1', OTHER)], [])
+    const stale = { ...single, latestCaptures: [{ level: 'ad' as const, complete: false, skipped_shared: false, error: 'timeout', captured_at: '2026-09-25T02:00:00Z' }] }
+    const scoped = scopeAccountToClient(stale, null, DATE, EVAL)
+    expect(scoped.accountLevelOnly).toBe(true)
+    expect(scoped.excluded).toEqual([expect.objectContaining({ level: 'account', reason: 'capture_stale' })])
+  })
+
   it('主页 id 是脏数据（全角数字、零宽字符、前导零）也要认得出，不能把客户自己的广告判成别家（Codex 2026-09-27）', () => {
     const dirtyClientPageId = '​００​1616575215312482 ' // 零宽字符 + 全角数字 + 前导零 + 尾随空格
     const snaps = [campaign('c1'), adset('as1', 'c1'), ad('ad1', 'as1', 'c1', OWN)]
@@ -240,6 +250,19 @@ describe('scopeAccountToClient', () => {
       expect(s.accountLevelOnly).toBe(true)
       expect(s.excluded).toEqual([expect.objectContaining({ level: 'account', reason: 'capture_stale' })])
     }
+  })
+
+  it('🔴 一条广告层抓取审计记录都没有、但有广告快照数据 → 判不了新不新鲜，也降级账户级（Codex 2026-09-28 第五轮：写入不是事务，审计行可能单独丢失）', () => {
+    const acc = { ...mixedAccount(), latestCaptures: [] }
+    const s = scopeAccountToClient(acc, OWN, DATE, EVAL)
+    expect(s.accountLevelOnly).toBe(true)
+    expect(s.excluded).toEqual([expect.objectContaining({ level: 'account', reason: 'capture_stale' })])
+  })
+
+  it('对照：一条广告层抓取审计记录都没有、也没有任何广告快照数据（真正的新账户）→ 不降级，没什么好误判的', () => {
+    const acc: AccountInput = { adAccountId: 'act_1', shared: false, timezone: 'Pacific/Auckland', currency: 'NZD', snapshots: [], daily: [], hourly: {}, hourlyError: null, latestCaptures: [], lastInsightDate: DATE }
+    const s = scopeAccountToClient(acc, OWN, DATE, EVAL)
+    expect(s.accountLevelOnly).toBe(false)
   })
 
   it('广告层快照最近一轮抓全且新鲜（24 小时内）→ 照常按主页切分，不降级账户级', () => {

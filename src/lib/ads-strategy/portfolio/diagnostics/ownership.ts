@@ -259,14 +259,16 @@ function scopeWithoutClientPage(account: AccountInput): ScopedAccount {
  */
 function adCaptureStale(account: AccountInput, evaluatedAt: string): boolean {
   const adCaptures = account.latestCaptures.filter(c => c.level === 'ad')
-  // 🔴 Codex 2026-09-27 第二轮建议把「一条广告层抓取审计记录都没有」也当作 stale（老账户可能在审计表
-  //    上线前就有广告级快照数据，之后再没抓过一轮）。评估过：snapshot-sync.ts 对同一轮同一层的快照写入
-  //    和 ad_snapshot_captures 审计行是配对写的（本文件顶部、loader.ts 头注释都在依赖这个不变量），
-  //    正常运作下不会出现「有 ad 级快照、却一条 ad 级审计行都没有」；且这条判据在诊断测试套件里会把大量
-  //    没有显式设置 latestCaptures 的既有 fixture（gates.test.ts 除外，那些不设 clientPageId 不受影响；
-  //    d11-audience-pool-starved.test.ts 等会受影响）误判成 accountLevelOnly，波及面和这条 P2 的实际
-  //    可达性不成比例。保留「没有审计记录 → 不拦」，未采纳；已记 docs/ledger 后续事项，不在本 PR 展开。
-  if (adCaptures.length === 0) return false
+  if (adCaptures.length === 0) {
+    // 🔴 Codex 2026-09-28 第五轮带了新证据推翻了上一版「配对写入」的假设：snapshot-sync.ts 先分块写
+    //    ad_entity_snapshots（captureAccountSnapshots 第 213-224 行），再单独一次 insert 写
+    //    ad_snapshot_captures 审计行（第 226 行 recordCaptures）——两次写入没有事务包起来，后一步
+    //    单独失败时，前一步已经写进去的广告级快照会留下、但一条审计记录都没有。这种账户没法证明数据
+    //    是不是新的，跟没数据不算一回事，只有连一条广告级快照数据都没有（真正的新账户/共用账户/
+    //    老 fixture）时才安全放过。
+    const hasAdSnapshotData = account.snapshots.some(r => r.level === 'ad') || (account.recentAds ?? []).length > 0 || (account.adPageHistory ?? []).length > 0
+    return hasAdSnapshotData
+  }
   const latest = adCaptures.reduce((a, b) => (a.captured_at > b.captured_at ? a : b))
   if (!latest.complete) return true
   const ageMs = Date.parse(evaluatedAt) - Date.parse(latest.captured_at)
@@ -275,16 +277,19 @@ function adCaptureStale(account: AccountInput, evaluatedAt: string): boolean {
 
 /**
  * 把账户切成「只剩客户自己的」系列 / 广告组（快照、广告组/系列日数据、按小时花费）。幂等：切过的再切一次结果不变。
- * 不切：clientPageId 缺省（没加载）/ 共用账户（本来就只做账户级）；clientPageId 为 null 见 scopeWithoutClientPage；
- * 广告层快照最近一轮没抓全或太旧见 adCaptureStale——这两种都降级成只做账户级，不是「原样跑」。
+ * 不切：clientPageId 缺省（没加载）/ 共用账户（本来就只做账户级）。
+ * 广告层快照最近一轮没抓全或太旧见 adCaptureStale——**不管 clientPageId 是不是 null 都先查这一条**：
+ * clientPageId 为 null 时如果只看到一个主页就会原样放行（scopeWithoutClientPage），但快照过期时那个
+ *「只有一个主页」的判断本身就可能是过期数据算出来的，缺口期间新增的第二个主页看不见
+ * （Codex 2026-09-28 第五轮：之前只在 clientPageId 非空的分支查这条，null 分支完全绕过去了）。
  */
 export function scopeAccountToClient(account: AccountInput, clientPageId: string | null | undefined, date: string, evaluatedAt: string): ScopedAccount {
   if (clientPageId === undefined || account.shared) return unscoped(account)
-  if (clientPageId === null) return scopeWithoutClientPage(account)
   if (adCaptureStale(account, evaluatedAt)) {
     return accountLevelOnlyResult(account, 'capture_stale',
       '广告层快照最近一轮没抓全或太旧，这一轮有没有新加进别家的广告核实不到，只做账户级诊断')
   }
+  if (clientPageId === null) return scopeWithoutClientPage(account)
 
   const ads = adsByAdset(account)
   const everSpent = (id: string) => spentInDays(account.daily, 'adset', id, null) > 0
