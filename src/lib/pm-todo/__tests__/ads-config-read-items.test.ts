@@ -169,7 +169,7 @@ describe('loadManualItems 接上了 pushAdsConfigReadItems', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const items = await loadManualItems(wholeDbFake(true), NOW)
-    const hit = items.filter((i) => i.kind === 'ads_config_unreadable' && i.what.includes('自动暂停读不出'))
+    const hit = items.filter((i) => i.kind === 'ads_config_unreadable' && i.what.includes('坏广告自动暂停有'))
     expect(hit).toHaveLength(1)
     vi.restoreAllMocks()
   })
