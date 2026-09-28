@@ -24,6 +24,8 @@ export interface LedgerEntry {
   /** YYYY-MM-DD，可选 */
   verifyBy: string | null
   verifyHow: string
+  /** 仅 status=decided 可用：true=无限期暂停，夜巡/7 天规则不催办，等人工改回 false 或换状态 */
+  onHold: boolean
   /** status 为 done/verified/failed 时必填 */
   doneOn: string | null
   doneRef: string | null

@@ -12,7 +12,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const FROZEN_KEYS = ['id', 'title', 'decided_on', 'source', 'verify_by', 'verify_how']
-export const ALLOWED_KEYS = ['status', 'owner', 'done_on', 'done_ref', 'verified_ref', 'last_checked', 'check_note']
+export const ALLOWED_KEYS = ['status', 'owner', 'on_hold', 'done_on', 'done_ref', 'verified_ref', 'last_checked', 'check_note']
 
 /**
  * 纯函数：给一份卡片全文应用 key=value 更新，返回新全文。

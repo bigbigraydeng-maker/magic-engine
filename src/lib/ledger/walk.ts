@@ -63,6 +63,7 @@ function classify(entry: LedgerEntry, today: string): LedgerFinding | null {
     case 'failed':
       return { kind: 'verification_failed', entry }
     case 'decided': {
+      if (entry.onHold) return null
       const daysIdle = daysBetween(entry.decidedOn, today)
       const overdue = entry.verifyBy !== null && entry.verifyBy < today
       if (daysIdle > STALE_DAYS || overdue) {

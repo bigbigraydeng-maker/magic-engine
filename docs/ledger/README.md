@@ -22,6 +22,7 @@ decided_on: 2026-09-24
 source: session:beef24ba   # 从哪来：session:<id 前 8 位> | pr:<n> | issue:<n> | doc:<path>
 verify_by: 2026-09-27      # 可选：到这天必须验
 verify_how: 一句话怎么验、验到什么算成、样本要多少才算能判
+on_hold: true              # 可选，仅 status: decided 能用；见下方「无限期暂停」
 done_on: 2026-09-25        # done/verified/failed 必填，且 ≥ decided_on
 done_ref: pr:1980          # done/verified/failed 必填：pr:<n> | commit:<sha> | doc:<path>（不许 url/session）
 verified_ref: doc:docs/ledger/evidence/<id>--2026-09-27.md   # verified/failed 必填，且 ≠ done_ref
@@ -77,6 +78,11 @@ node scripts/ledger-update.mjs <id> last_checked=2026-09-27 'check_note=PR 还�
 - 改动走 `claude/ledger-verify-<日期>` 分支开 PR；一晚零改动不开 PR、不出声
 
 `decided` 卡夜巡不碰——"决定了没做"由邮件催人，不由机器改。
+
+**无限期暂停（`on_hold: true`）**：PM 明确说"现在不用跟进、等我主动重提"的 `decided` 卡，写 `on_hold: true`，
+夜巡的 7 天 / `verify_by` 规则永远不会把它标成 `decided_stale`。不写这个字段的 `decided` 卡仍按正常 7 天规则催办
+——**不要指望"决定了没做"会自己不催，只有 `on_hold: true` 才不催**。PM 重提话题后，人工用
+`node scripts/ledger-update.mjs <id> on_hold=false` 关掉暂停，让卡片重新进入正常的 7 天催办节奏。
 
 ## 证据的硬约束（机器管一半，人管一半）
 

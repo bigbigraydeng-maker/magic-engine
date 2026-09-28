@@ -68,5 +68,6 @@ describe('applyUpdates', () => {
   it('exposes the frozen and allowed key lists', () => {
     expect(FROZEN_KEYS).toContain('verify_how')
     expect(ALLOWED_KEYS).toContain('last_checked')
+    expect(ALLOWED_KEYS).toContain('on_hold')
   })
 })
