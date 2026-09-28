@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { LIMITS, dayStartUtc, isAllowedOrigin, monthStartUtc, pruneOldVisitorKeys, siteHost, vetUrl } from '@/lib/tools-lab/site-check/guards'
-import { visitorDiagnostic, visitorKey } from '@/lib/tools-lab/site-check/visitor'
+import { visitorDiagnostic, visitorKey } from '@/lib/tools-lab/visitor'
 import { fetchRealHomepage } from '@/lib/tools-lab/site-check/homepage'
 import { consumeSteps, fail, json, preflight, readSmallJson } from '@/lib/tools-lab/site-check/http'
 import {
@@ -20,6 +20,7 @@ import {
   type NoWebsiteAnswers,
 } from '@/lib/tools-lab/site-check/diagnose'
 import { recentResult, storeLead, type StoredFindings } from '@/lib/tools-lab/site-check/leads'
+import { TOOLS_AI_CALLS_MONTHLY_BUCKET, TOOLS_AI_CALLS_MONTHLY_CAP } from '@/lib/tools-lab/spend-cap'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -105,6 +106,9 @@ function paidCaps(key: string): Parameters<typeof consumeSteps>[0] {
     { bucket: 'site_check_ip', key, windowStart: dayStartUtc(), cap: LIMITS.checkPerVisitorPerDay, code: 'daily_limit' },
     { bucket: 'site_check_day', key: 'all', windowStart: dayStartUtc(), cap: LIMITS.checkPerDay, code: 'site_busy' },
     { bucket: 'site_check_month', key: 'all', windowStart: monthStartUtc(), cap: LIMITS.checkPerMonth, code: 'monthly_limit' },
+    // Backstop shared with ads-check's sponsored analyses (src/lib/tools-lab/spend-cap.ts) — sized well
+    // above site-check's own 1500/month so it never binds under normal use; same visible message either way.
+    { bucket: TOOLS_AI_CALLS_MONTHLY_BUCKET, key: 'all', windowStart: monthStartUtc(), cap: TOOLS_AI_CALLS_MONTHLY_CAP, code: 'monthly_limit' },
   ]
 }
 
@@ -143,7 +147,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const parsed = parseInput(body)
     if ('code' in parsed) return fail(400, parsed.code, origin)
 
-    const key = visitorKey(req.headers)
+    const key = visitorKey(req.headers, 'site-check')
     console.info('[site-check] visitor', visitorDiagnostic(req.headers))
     if (!key) return fail(400, 'no_visitor', origin)
     const tooMany = await consumeSteps(

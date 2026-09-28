@@ -1,8 +1,10 @@
 # 「CRM 管理」底座设计稿 v1（WP-B）
 
-**状态**：草稿，待子牙（架构）+ 魏征（挑刺）复审；面向 FDE/销售的内部工具改版，板桥复审 B1/B7 的 UX 部分。
+**状态**：B1 已合并（[PR #2161](https://github.com/bigbigraydeng-maker/magic-engine/pull/2161)）。B2 已合并（[PR #2165](https://github.com/bigbigraydeng-maker/magic-engine/pull/2165)）。B4（并发改档保护）已在 B2 一起做完，不再单独算。B3+B5 已合并（[PR #2166](https://github.com/bigbigraydeng-maker/magic-engine/pull/2166)）。B6（删「今天要联系」页）已实现、过魏征实现复审（漏改的侧栏链接已修），已提审（[PR #2167](https://github.com/bigbigraydeng-maker/magic-engine/pull/2167)）。
+
+**B7（视觉重做）暂停，等板桥有空**：2026-09-28 这轮查过，板桥（非技术视角审查 Agent）当前离线（Remote Control 状态 offline），联系不上。B7 是"颜色/字体/字号统一过一遍"这种主观设计判断，PM 已经点名批评过一次现在的排版，不该在拿不到非技术视角复核的情况下自己一个人闷头重做一遍——那样风险是做完一版 PM 醒来还是不满意，等于白做。B1-B6 全部完成、合并，这是一个干净的停顿点；下一个窗口或板桥上线后再接 B7。
 **权威说明**：本文件 + `docs/specs/2026-09-28-crm-rebuild-plan.md` WP-B 节。后者定验收，本文件定怎么做。
-**写入者**：本会话（feat/crm-priority-section-ui），唯一。
+**写入者**：本会话（分支序列 feat/crm-priority-section-ui → feat/crm-all-contact-drawer-b2 → feat/crm-kind-filter-b3 → feat/crm-delete-today-page-b6，每个工作包独立分支，B1/B2/B3/B5/B6 均已合并或已提审），唯一。B7 未认领。
 
 ## 背景
 
