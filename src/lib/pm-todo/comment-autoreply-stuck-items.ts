@@ -407,12 +407,18 @@ export async function pushCommentAutoreplyStuckItems(
     // ≥3 个客户同时卡住时，先提醒这更像限流/Meta 接口问题，而不是无条件让人去
     // 换这一个客户的令牌——shared_fallback 换的还是好几个客户共用的公共钥匙，
     // 为了一个可能是限流的问题去换，反而让其它没事的客户一起担风险。
-    const tokenGuidance =
-      confirmed > 0 || agg.orphaned > 0
-        ? multiClientStuck
-          ? `现在同时有 ${byClient.size} 个客户都卡住了，看起来更像是限流或 Meta 接口本身的问题，不太像是这一个客户单独的令牌坏了——建议先去 Meta 开发者后台查一下平台状态、或者等下一轮看是不是自己恢复；如果确认不是大面积问题，再处理这个客户的令牌：${guidance.how} `
-          : `${guidance.how} `
-        : ''
+    const needsTokenFix = confirmed > 0 || agg.orphaned > 0
+    const tokenGuidance = needsTokenFix
+      ? multiClientStuck
+        ? `现在同时有 ${byClient.size} 个客户都卡住了，看起来更像是限流或 Meta 接口本身的问题，不太像是这一个客户单独的令牌坏了——建议先去 Meta 开发者后台查一下平台状态、或者等下一轮看是不是自己恢复；如果确认不是大面积问题，再处理这个客户的令牌：${guidance.how} `
+        : `${guidance.how} `
+      : ''
+    // 待办按钮的落点跟着上面同一个判据走（Codex round 18 复审 P2）：不需要换
+    // 令牌时（纯 stale_processing），按钮不能还是 guidance.href 那个跟这条待办
+    // 无关的 Meta 重授权入口——how 文案让去处理"评论审计"，按钮就该落在那。
+    const href = needsTokenFix
+      ? guidance.href
+      : `${APP_BASE}/dashboard/clients/${clientId}/settings?tab=content&audit=1`
 
     items.push({
       kind: 'comment_autoreply_stuck',
@@ -433,7 +439,7 @@ export async function pushCommentAutoreplyStuckItems(
           : '') +
         tokenGuidance +
         '确认处理完之后，回到"评论审计"列表给这几条点"已读"，这条待办会自动消失，不会一直卡在这里重复出现。',
-      href: guidance.href,
+      href,
     })
   }
 }

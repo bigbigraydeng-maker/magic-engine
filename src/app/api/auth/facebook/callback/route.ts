@@ -17,7 +17,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { verifyState, exchangeCode, exchangeForLongLivedToken, listPagesWithTokens, listGrantedScopes, META_PUBLISH_SCOPE, META_COMMENT_REPLY_SCOPE } from '@/lib/meta-oauth/client'
+import { verifyState, exchangeCode, exchangeForLongLivedToken, listPagesWithTokens, listGrantedScopes, META_PUBLISH_SCOPE, META_COMMENT_REPLY_SCOPE, META_COMMENT_READ_SCOPE } from '@/lib/meta-oauth/client'
 import { upsertConnection } from '@/lib/platform-oauth/connection-store'
 import { PLATFORM_PROVIDERS } from '@/lib/platform-oauth/vocabulary'
 import { projectFactoryConfig } from '@/lib/factory/client-config'
@@ -165,7 +165,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return back(clientId, granted.includes(META_PUBLISH_SCOPE) ? 'publish_ready' : 'publish_not_granted')
   }
   if (intent === 'comment_reply') {
-    return back(clientId, granted.includes(META_COMMENT_REPLY_SCOPE) ? 'comment_reply_ready' : 'comment_reply_not_granted')
+    // 两个 scope 都要拿到（Codex round 18 复审 P1）：Meta 同意页允许用户逐条
+    // 取消某一项授权，漏了 pages_read_user_content 时引擎发送前的读评论步骤
+    // （comment-autoreply-engine.ts 的 fetchPostCommentsResult）会先因 Graph
+    // #10 拿不到新评论，回复权限给了也没用。
+    const ready = granted.includes(META_COMMENT_REPLY_SCOPE) && granted.includes(META_COMMENT_READ_SCOPE)
+    return back(clientId, ready ? 'comment_reply_ready' : 'comment_reply_not_granted')
   }
 
   return back(clientId, 'connected')

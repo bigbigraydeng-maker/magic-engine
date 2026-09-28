@@ -86,6 +86,18 @@ export const META_PUBLISH_SCOPE = 'pages_manage_posts'
 export const META_COMMENT_REPLY_SCOPE = 'pages_manage_engagement'
 
 /**
+ * The permission that lets a stored Page token read comments OTHER people
+ * wrote — required separately from META_COMMENT_REPLY_SCOPE (see
+ * META_PAGE_SCOPES's own comment on `pages_read_user_content`, and
+ * comments.ts's header). Meta's consent screen lets a user toggle off one
+ * requested permission while granting the rest, so a reconnect can end up
+ * with reply/hide granted but read denied (or the reverse) — the callback
+ * must check both before calling comment-reply reauth "ready" (Codex round
+ * 18 复审 P1).
+ */
+export const META_COMMENT_READ_SCOPE = 'pages_read_user_content'
+
+/**
  * Why a connect flow was started. `publishing` marks the "Reauthorize Meta
  * Publishing" path so the callback can fail closed with a publishing-specific,
  * actionable message when Meta declines `pages_manage_posts`. `comment_reply`

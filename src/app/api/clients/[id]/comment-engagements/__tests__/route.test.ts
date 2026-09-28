@@ -9,6 +9,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
+import { STALE_PROCESSING_MS } from '@/lib/social/comment-autoreply-constants'
 
 vi.mock('@/lib/auth/client-access', () => ({
   requireDashboardClientAccess: vi.fn().mockResolvedValue({ ok: true }),
@@ -64,7 +65,7 @@ function row(over: Partial<Row>): Row {
  * 命中"：真实数据库里这由 Postgres 判断，这里直接由测试指定结果，只验证路由
  * 在命中/不命中两种情况下各自的响应对不对。
  */
-let patchLookupRow: { id: string; client_id: string; page_id: string; public_reply_id: string | null; reply_status: string } | null = null
+let patchLookupRow: { id: string; client_id: string; page_id: string; public_reply_id: string | null; reply_status: string; updated_at: string } | null = null
 let patchUpdateMatches = true
 let capturedPatchUpdate: Record<string, unknown> | null = null
 let patchUpdateEqCalls: Array<[string, unknown]> = []
@@ -300,7 +301,10 @@ async function PATCH_engagement(
  */
 describe('PATCH .../comment-engagements（mark_reviewed）', () => {
   beforeEach(() => {
-    patchLookupRow = { id: 'e1', client_id: 'cts', page_id: '1616575215312482', public_reply_id: null, reply_status: 'failed' }
+    patchLookupRow = {
+      id: 'e1', client_id: 'cts', page_id: '1616575215312482', public_reply_id: null,
+      reply_status: 'failed', updated_at: FAR_PAST,
+    }
     patchUpdateMatches = true
     capturedPatchUpdate = null
     patchUpdateEqCalls = []
@@ -339,5 +343,43 @@ describe('PATCH .../comment-engagements（mark_reviewed）', () => {
     const { res, body } = await PATCH_engagement('cts', { engagement_id: 'e1', action: 'mark_reviewed' })
     expect(res.status).toBe(404)
     expect(body.error).toBeTruthy()
+  })
+
+  // Codex round 18 复审 P2：乐观锁堵的是"点击之后行被动过"，堵不住"这次执行
+  // 根本没跑到 finalise() 就崩了"——那样 updated_at 永远不会再变，24 小时后
+  // 这行变成真正的 stale_processing，可乐观锁看 updated_at 没变化，照样放行。
+  // 这条待处理的行本身还在 processing、还没到宽限期，不该被判定为可以标记
+  // 已阅——不管传不传 expected_updated_at，都要拒绝。
+  it('行当前就是还在正常处理中的 processing（没到宽限期）→ 直接拒绝，不看 expected_updated_at 匹不匹配', async () => {
+    patchLookupRow = {
+      id: 'e1', client_id: 'cts', page_id: '1616575215312482', public_reply_id: null,
+      reply_status: 'processing', updated_at: new Date().toISOString(), // 刚认领，远没到宽限期
+    }
+    const { res, body } = await PATCH_engagement('cts', {
+      engagement_id: 'e1', action: 'mark_reviewed', expected_updated_at: new Date().toISOString(),
+    })
+    expect(res.status).toBe(409)
+    expect(body).toMatchObject({ success: false, processing: true })
+    expect(capturedPatchUpdate).toBeNull() // 从没走到写入那一步
+  })
+
+  it('行是 processing 但已经超过宽限期（真正卡死）→ 正常走乐观锁逻辑，不被这条新规则拦下', async () => {
+    patchLookupRow = {
+      id: 'e1', client_id: 'cts', page_id: '1616575215312482', public_reply_id: null,
+      reply_status: 'processing', updated_at: FAR_PAST,
+    }
+    const { res, body } = await PATCH_engagement('cts', { engagement_id: 'e1', action: 'mark_reviewed' })
+    expect(res.status).toBe(200)
+    expect(body).toMatchObject({ success: true, action: 'mark_reviewed' })
+  })
+
+  it('宽限期的边界：刚好卡在 STALE_PROCESSING_MS 之内 1 秒 → 仍然拒绝', async () => {
+    patchLookupRow = {
+      id: 'e1', client_id: 'cts', page_id: '1616575215312482', public_reply_id: null,
+      reply_status: 'processing', updated_at: new Date(Date.now() - STALE_PROCESSING_MS + 1000).toISOString(),
+    }
+    const { res, body } = await PATCH_engagement('cts', { engagement_id: 'e1', action: 'mark_reviewed' })
+    expect(res.status).toBe(409)
+    expect(body).toMatchObject({ processing: true })
   })
 })

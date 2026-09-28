@@ -307,7 +307,7 @@ describe('comment_reply reauth binds to social_comment_config.fb_page_id, not th
       { pageId: PAGE_ID, pageName: 'Inbox Page', pageToken: 'inbox-token' },
       { pageId: COMMENT_PAGE, pageName: 'Comment Page', pageToken: 'comment-token' },
     ])
-    mocks.listGrantedScopes.mockResolvedValue(['pages_show_list', 'pages_manage_engagement'])
+    mocks.listGrantedScopes.mockResolvedValue(['pages_show_list', 'pages_manage_engagement', 'pages_read_user_content'])
 
     const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
 
@@ -325,7 +325,7 @@ describe('comment_reply reauth binds to social_comment_config.fb_page_id, not th
     mocks.listPagesWithTokens.mockResolvedValue([
       { pageId: COMMENT_PAGE, pageName: 'Comment Page', pageToken: 'comment-token' },
     ])
-    mocks.listGrantedScopes.mockResolvedValue(['pages_show_list', 'pages_manage_engagement'])
+    mocks.listGrantedScopes.mockResolvedValue(['pages_show_list', 'pages_manage_engagement', 'pages_read_user_content'])
 
     const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
 
@@ -358,7 +358,7 @@ describe('comment_reply reauth binds to social_comment_config.fb_page_id, not th
   // Codex round 9 复审 P1: comment_reply used to fall through to the generic
   // 'connected' outcome even when Meta declined pages_manage_engagement,
   // telling the FDE the fix worked when public replies would keep failing.
-  it('reports comment_reply_ready only when the provider authoritatively granted pages_manage_engagement', async () => {
+  it('reports comment_reply_ready only when the provider authoritatively granted pages_manage_engagement AND pages_read_user_content', async () => {
     mocks.commentPageId = COMMENT_PAGE
     mocks.listPagesWithTokens.mockResolvedValue([
       { pageId: COMMENT_PAGE, pageName: 'Comment Page', pageToken: 'comment-token' },
@@ -366,6 +366,7 @@ describe('comment_reply reauth binds to social_comment_config.fb_page_id, not th
     mocks.listGrantedScopes.mockResolvedValue([
       'pages_show_list',
       'pages_manage_engagement',
+      'pages_read_user_content',
     ])
 
     const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
@@ -382,6 +383,7 @@ describe('comment_reply reauth binds to social_comment_config.fb_page_id, not th
       'pages_show_list',
       'pages_messaging',
       'pages_read_engagement',
+      'pages_read_user_content',
     ]) // pages_manage_engagement declined
 
     const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
@@ -391,6 +393,25 @@ describe('comment_reply reauth binds to social_comment_config.fb_page_id, not th
     // scope should not also block the read/inbox scopes that did come through.
     expect(mocks.upsertCalls).toHaveLength(1)
     expect(mocks.upsertCalls[0].scopes).not.toContain('pages_manage_engagement')
+  })
+
+  // Codex round 18 复审 P1：Meta 同意页允许用户逐条取消某一项授权——这条反过来
+  // 测：回复/隐藏的权限给了，但读别人评论的权限被拒。引擎发送前会先读评论
+  // （comment-autoreply-engine.ts 的 fetchPostCommentsResult），读不到的话回复
+  // 权限给了也用不上；round 18 之前这里会误报 comment_reply_ready。
+  it('reports comment_reply_not_granted when pages_manage_engagement is granted but pages_read_user_content is declined', async () => {
+    mocks.commentPageId = COMMENT_PAGE
+    mocks.listPagesWithTokens.mockResolvedValue([
+      { pageId: COMMENT_PAGE, pageName: 'Comment Page', pageToken: 'comment-token' },
+    ])
+    mocks.listGrantedScopes.mockResolvedValue([
+      'pages_show_list',
+      'pages_manage_engagement',
+    ]) // pages_read_user_content declined
+
+    const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+
+    expect(outcomeOf(res)).toBe('comment_reply_not_granted')
   })
 })
 

@@ -178,7 +178,7 @@ export async function PATCH(
 
   const { data: row } = await supabaseAdmin
     .from('social_comment_engagements')
-    .select('id, client_id, page_id, public_reply_id, reply_status')
+    .select('id, client_id, page_id, public_reply_id, reply_status, updated_at')
     .eq('id', engagementId)
     .eq('client_id', clientId)
     .maybeSingle()
@@ -188,6 +188,32 @@ export async function PATCH(
   const now = new Date().toISOString()
 
   if (action === 'mark_reviewed') {
+    // Refused outright for a row that's CURRENTLY still-fresh 'processing'
+    // (Codex round 18 复审 P2 — a gap the optimistic lock below doesn't
+    // cover): if THIS execution crashes before finalise() ever runs,
+    // updated_at never changes again, so a stale click's
+    // expected_updated_at would still match 24h later when the row becomes
+    // genuinely stale_processing — the lock has nothing to catch, since
+    // nothing ever wrote a different updated_at to disagree with it. A row
+    // that's processing and not yet past STALE_PROCESSING_MS hasn't reached
+    // any of the detector's 4 stuck categories yet, so there is nothing to
+    // confirm as reviewed regardless of what the client's timestamp says;
+    // only a row already past that same staleness threshold — the exact
+    // one the detector itself uses for its own stale_processing query — is
+    // a legitimate case to close.
+    const rowReplyStatus = (row as { reply_status: string }).reply_status
+    const rowUpdatedAt = (row as { updated_at: string }).updated_at
+    if (rowReplyStatus === 'processing' && Date.now() - Date.parse(rowUpdatedAt) < STALE_PROCESSING_MS) {
+      return NextResponse.json(
+        {
+          success: false,
+          processing: true,
+          error: '这条还在正常处理中（结果还不确定），等它跑完或者超过宽限期变成真正卡住了再处理',
+        },
+        { status: 409 },
+      )
+    }
+
     // Guarded on `updated_at` still matching what the client last saw when
     // it's passed (Codex round 17 复审 P2): a "标记已阅" click fired from a
     // page load taken while this row was still 'processing' can be delayed

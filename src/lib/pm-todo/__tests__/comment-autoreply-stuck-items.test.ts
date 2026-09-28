@@ -263,6 +263,23 @@ describe('pushCommentAutoreplyStuckItems', () => {
     // Codex round 18 复审 P2：纯 stale_processing（没有 confirmed、没有 orphaned）
     // 跟发送权限完全无关，不该被引去换令牌——envVarHow() 的文案一定含这个词。
     expect(items[0].how).not.toContain('pages_manage_engagement')
+    // 同一批 round 18 复审：按钮落点也要跟着文案走，不能还是指向令牌相关的
+    // href——不需要换令牌时应该落回"评论审计"列表，how 里说的正是让去那处理。
+    expect(items[0].href).toContain('/settings?tab=content&audit=1')
+  })
+
+  // Codex round 18 复审 P2：上一条测的是 envVarHow 分支的 href；这条专门测
+  // client_oauth 分支——它的 guidance.href 原本是 OAuth 重连 URL，纯
+  // stale_processing 时同样不该落到这个跟这条待办无关的地方。
+  it('纯 stale_processing 且令牌来源是 client_oauth → href 仍落"评论审计"，不是 OAuth 重连链接', async () => {
+    assessConfiguredPageMock.mockResolvedValue({ verified: true, via: 'client_oauth' })
+    const { sb } = fakeDb({
+      processingRows: [{ client_id: 'cts', page_id: PAGE_ID, updated_at: '2026-09-01T00:00:00Z' }],
+    })
+    const items: ManualItem[] = []
+    await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
+    expect(items[0].href).toContain('/settings?tab=content&audit=1')
+    expect(items[0].href).not.toContain('/api/auth/facebook/connect')
   })
 
   // Codex round 12 复审 P1：还没耗尽重试次数、但已经越过这个客户回看窗口的 failed
