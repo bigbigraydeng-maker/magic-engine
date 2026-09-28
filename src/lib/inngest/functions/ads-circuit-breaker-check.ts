@@ -12,8 +12,9 @@
  * 死锁。
  *
  * 触发后把该客户全部 `ads.*` 动作的 `client_automation_policies.mode` 写成
- * `deny`，写入口是新 SQL 函数 `ads_trip_circuit_breaker_policy`（唯一允许写
- * deny 的入口，见迁移 `20260928000001_ads_circuit_breaker_policy.sql`）。
+ * `deny`，写入口是新 SQL 函数 `ads_trip_circuit_breaker_policy_batch`（一次
+ * 事务处理全部键，唯一允许写 deny 的入口，见迁移
+ * `20260928000001_ads_circuit_breaker_policy.sql`）。
  * 解除走对应的 `ads_release_circuit_breaker_policy`，由
  * `POST .../ad-strategy-config/release-circuit-breaker` 路由调用（管理员操作，
  * 不在本文件）。
@@ -126,29 +127,55 @@ function worstVerdict(
 const TRIP_OUTCOME_MEANS_DENIED = new Set(['tripped', 'already_tripped', 'locked_by_other_deny'])
 
 /**
- * 逐键调触发函数；单键失败即抛（Inngest 按 retries 重试，SQL 函数本身幂等，重试安全）。
- *
- * 🔴 Codex P1 复审：`race_lost`（SELECT 和 UPDATE 之间行被并发改动，SQL 函数
- * 放弃这次写）以及任何非预期返回值必须当失败抛出，不能塞进 `applied` 当成功
- * 处理——那样整条函数仍以 `verdict: 'tripped'` 正常结束，但这个 key 的策略
- * 其实没被真的改成 deny，而事件 id 已经被这次调用消耗，当天不会再重试。
+ * 解析批次 RPC 的 jsonb 返回值，不信任线上返回的形状（`data` 从 supabase-js
+ * 过来是 `unknown`）。任何一行 outcome 不在 `TRIP_OUTCOME_MEANS_DENIED` 里
+ * 就抛——理由跟原来逐键版本一致：不能把"没确认成 deny"悄悄塞进成功结果。
  */
-async function tripAllKeys(sb: SupabaseClient, clientId: string, reason: string): Promise<AdsTripKeyResult[]> {
-  const results: AdsTripKeyResult[] = []
-  for (const key of listAdsActionKeys()) {
-    const { data, error } = await sb.rpc('ads_trip_circuit_breaker_policy', {
-      p_client_id: clientId,
-      p_action_key: key,
-      p_reason: reason,
-    })
-    if (error) throw new Error(`ads_trip_circuit_breaker_policy(${key}) failed: ${error.message}`)
-    const outcome = typeof data === 'string' ? data : 'unknown'
+function parseTripBatchResult(data: unknown): AdsTripKeyResult[] {
+  if (!Array.isArray(data)) {
+    throw new Error(`ads_trip_circuit_breaker_policy_batch returned non-array: ${JSON.stringify(data)}`)
+  }
+  return data.map((row, i) => {
+    const key = (row as { key?: unknown } | null)?.key
+    const outcome = (row as { outcome?: unknown } | null)?.outcome
+    if (typeof key !== 'string' || typeof outcome !== 'string') {
+      throw new Error(`ads_trip_circuit_breaker_policy_batch returned malformed row at index ${i}: ${JSON.stringify(row)}`)
+    }
     if (!TRIP_OUTCOME_MEANS_DENIED.has(outcome)) {
       throw new Error(
-        `ads_trip_circuit_breaker_policy(${key}) returned '${outcome}' — deny not confirmed in effect, not treating as success`,
+        `ads_trip_circuit_breaker_policy_batch(${key}) returned '${outcome}' — deny not confirmed in effect, not treating as success`,
       )
     }
-    results.push({ key, outcome })
+    return { key, outcome }
+  })
+}
+
+/**
+ * 一次 RPC 把全部 ads.* 键收进同一个数据库事务（Codex P1 复审：round 4 的逐键
+ * 循环调用单键函数，前面的键各自独立提交，若靠后的键命中 `race_lost`，
+ * Inngest 整批重试时前面的键只是幂等空转——但如果重试也持续失败，耗尽后
+ * 会遗留"部分键已经 deny、部分还没"的中间态：异常花费已经确认，仍有未
+ * 保护的键可以继续执行真钱动作。改成批次 SQL 函数后，任一键 race_lost 都
+ * 会在数据库层整体回滚，不会出现"半熔断"——要么这批全部落地 deny，要么
+ * 这次调用完全不生效，Inngest 重试的是干净的整批，不是烂尾的半截。
+ */
+async function tripAllKeys(sb: SupabaseClient, clientId: string, reason: string): Promise<AdsTripKeyResult[]> {
+  const keys = listAdsActionKeys()
+  const { data, error } = await sb.rpc('ads_trip_circuit_breaker_policy_batch', {
+    p_client_id: clientId,
+    p_action_keys: keys,
+    p_reason: reason,
+  })
+  if (error) throw new Error(`ads_trip_circuit_breaker_policy_batch failed: ${error.message}`)
+  const results = parseTripBatchResult(data)
+
+  // 防御性核对：批次函数要么把传入的每个键都处理完再返回，要么整体抛错
+  // （被 error 分支接住）——理论上不该出现"返回了但漏了几个键"，出现了
+  // 说明函数行为跟预期不符，宁可当失败抛出也不要悄悄放过。
+  const returnedKeys = new Set(results.map(r => r.key))
+  const missing = keys.filter(k => !returnedKeys.has(k))
+  if (missing.length > 0) {
+    throw new Error(`ads_trip_circuit_breaker_policy_batch missing outcomes for: ${missing.join(', ')}`)
   }
   return results
 }

@@ -153,6 +153,27 @@ describe('release-circuit-breaker — 内部员工可以解', () => {
     expect(json.error).toContain('boom')
   })
 
+  it('🔴 Codex P2：任一键 race_lost → 500 且不假装成功，不进入降意向逻辑', async () => {
+    signedInAs(STAFF)
+    // 第一个键正常解开，第二个键并发被改动导致 race_lost——之前的实现会照样 success:true。
+    mockRpc.mockResolvedValueOnce({ data: 'released', error: null } as never)
+    mockRpc.mockResolvedValueOnce({ data: 'race_lost', error: null } as never)
+    const res = await POST(postRequest(), params())
+    expect(res.status).toBe(500)
+    const json = (await res.json()) as { error: string }
+    expect(json.error).toContain('race_lost')
+    expect(mockFrom).not.toHaveBeenCalled() // 半解除状态不确定，不该顺手降 autonomy_mode
+  })
+
+  it('🔴 Codex P2：rpc 返回非字符串（unknown outcome）同样当失败，不当成功报告', async () => {
+    signedInAs(STAFF)
+    mockRpc.mockResolvedValue({ data: null, error: null } as never) // data 不是字符串 → 'unknown'
+    const res = await POST(postRequest(), params())
+    expect(res.status).toBe(500)
+    const json = (await res.json()) as { error: string }
+    expect(json.error).toContain('unknown')
+  })
+
   it('outcome=not_circuit_tripped 不计入 released 计数，也不降意向', async () => {
     signedInAs(STAFF)
     mockRpc.mockResolvedValue({ data: 'not_circuit_tripped', error: null } as never)

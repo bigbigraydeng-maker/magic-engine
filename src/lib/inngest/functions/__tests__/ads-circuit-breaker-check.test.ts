@@ -9,6 +9,12 @@
  * 桥接 unknown：Inngest SDK 的 `createFunction()` 返回类型不对外暴露
  * `.opts` / `.fn` 这两个内部字段的公开类型，但运行时真实存在——同一读法已在
  * ads-autonomy-sync.test.ts 验证过。
+ *
+ * 🔴 Codex P1 复审（round 6）：触发函数从"逐键调用单键 RPC"改成"一次调用传
+ * 全部键、批次 SQL 函数整批收进一个事务"，假 rpc 跟着改成一次调用返回
+ * jsonb 数组的形状；`race_lost` 在真实 SQL 里是 RAISE EXCEPTION 整批回滚，
+ * 表现为 RPC 返回 error（不是数组里混进一个 race_lost 字符串），下面用
+ * `rpcError` 模拟这条路径，`rpcOutcome` 只用来模拟数组里每个键的正常结果。
  */
 import { describe, it, expect, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -76,8 +82,9 @@ function historyRows(date: string, dollarsPerDay: number[], adAccountId: string 
 function fakeSupabase(opts: FakeOpts) {
   const rpc = vi.fn(async (_name: string, params: Record<string, unknown>) => {
     if (opts.rpcError !== undefined) return { data: null, error: { message: opts.rpcError } }
-    const key = String(params.p_action_key)
-    return { data: opts.rpcOutcome ? opts.rpcOutcome(key) : 'tripped', error: null }
+    const keys = params.p_action_keys as string[]
+    const data = keys.map((key) => ({ key, outcome: opts.rpcOutcome ? opts.rpcOutcome(key) : 'tripped' }))
+    return { data, error: null }
   })
 
   function configBuilder() {
@@ -213,7 +220,7 @@ describe('ads-circuit-breaker-check handler', () => {
     expect(rpc).not.toHaveBeenCalled()
   })
 
-  it('🔴 今天花费超 3 倍中位数 → tripped，每个 ads.* 键调一次 ads_trip_circuit_breaker_policy', async () => {
+  it('🔴 今天花费超 3 倍中位数 → tripped，一次批量调用 ads_trip_circuit_breaker_policy_batch 带上全部 ads.* 键', async () => {
     const { sb, rpc } = fakeSupabase({
       config: { autonomy_mode: 'bounded_auto' },
       insights: [...historyRows(DATE, [50, 50, 50, 40, 40, 50, 60]), { insight_date: DATE, ad_account_id: ACCOUNT, spend: 200 }],
@@ -225,14 +232,14 @@ describe('ads-circuit-breaker-check handler', () => {
     expect(result.verdict).toBe('tripped')
 
     const keys = listAdsActionKeys()
-    expect(rpc).toHaveBeenCalledTimes(keys.length)
+    expect(rpc).toHaveBeenCalledTimes(1) // 不是逐键循环——一次调用整批收进一个事务
     expect(result.applied).toHaveLength(keys.length)
-    for (const call of rpc.mock.calls) {
-      expect(call[0]).toBe('ads_trip_circuit_breaker_policy')
-      const params = call[1] as Record<string, unknown>
-      expect(params.p_client_id).toBe(CLIENT)
-      expect(typeof params.p_reason).toBe('string')
-    }
+
+    expect(rpc.mock.calls[0][0]).toBe('ads_trip_circuit_breaker_policy_batch')
+    const params = rpc.mock.calls[0][1] as Record<string, unknown>
+    expect(params.p_client_id).toBe(CLIENT)
+    expect(params.p_action_keys).toEqual(keys)
+    expect(typeof params.p_reason).toBe('string')
   })
 
   it('🔴 Codex P1：多账户——A 账户异常被 B 账户稀释的场景必须照样触发（按账户分别判定，不按客户合计）', async () => {
@@ -298,22 +305,31 @@ describe('ads-circuit-breaker-check handler', () => {
     expect(result.applied.every((r) => r.outcome === 'locked_by_other_deny')).toBe(true)
   })
 
-  it('🔴 Codex P1：race_lost（并发把行改了，deny 没真的写进去）→ 整个 handler 抛错，不能当成功放进 applied', async () => {
+  it('🔴 Codex P1：race_lost（批次函数整批回滚，RPC 返回 error）→ 整个 handler 抛错，不留半熔断', async () => {
     const { sb } = fakeSupabase({
       config: { autonomy_mode: 'bounded_auto' },
       insights: [...historyRows(DATE, [50, 50, 50, 40, 40, 50, 60]), { insight_date: DATE, ad_account_id: ACCOUNT, spend: 200 }],
-      rpcOutcome: () => 'race_lost',
+      rpcError: 'ads_trip_circuit_breaker_policy_batch: race_lost on action_key ads.pause_unit',
     })
     await expect(run(sb)).rejects.toThrow(/race_lost/)
   })
 
-  it('rpc 返回非预期字符串 → 同样当失败抛错，不能悄悄放行', async () => {
+  it('rpc 数组里混进非预期 outcome（防御性校验，理论上批次函数不会这样返回）→ 同样当失败抛错', async () => {
     const { sb } = fakeSupabase({
       config: { autonomy_mode: 'bounded_auto' },
       insights: [...historyRows(DATE, [50, 50, 50, 40, 40, 50, 60]), { insight_date: DATE, ad_account_id: ACCOUNT, spend: 200 }],
       rpcOutcome: () => 'some_future_outcome_this_code_does_not_know_about',
     })
     await expect(run(sb)).rejects.toThrow()
+  })
+
+  it('rpc 数组缺键（防御性校验）→ 抛错，不当成"没触发到的键就当没事"', async () => {
+    const { sb, rpc } = fakeSupabase({
+      config: { autonomy_mode: 'bounded_auto' },
+      insights: [...historyRows(DATE, [50, 50, 50, 40, 40, 50, 60]), { insight_date: DATE, ad_account_id: ACCOUNT, spend: 200 }],
+    })
+    rpc.mockResolvedValueOnce({ data: [], error: null }) // 批次函数本该返回全部键的结果，这里模拟异常缺失
+    await expect(run(sb)).rejects.toThrow(/missing outcomes/)
   })
 
   it('rpc 报错 → 整个 handler 抛错（交给 Inngest 按 retries 重试）', async () => {

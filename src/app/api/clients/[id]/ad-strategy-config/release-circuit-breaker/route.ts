@@ -29,6 +29,15 @@
  * 全局 admin 闸：跟 PATCH ad-strategy-config 同一理由——这是内部控制项，
  * 客户成员不能自己解除熔断。`updated_by` 由 `requireGlobalAdmin` 的 email 拼，
  * 不从 body 读（body 里给身份等于让调用方自报）。
+ *
+ * 🔴 Codex P2 复审：`race_lost`（或任何非预期返回值）不能当成功报告。前端只
+ *    看 `success` 字段就判断"已解除"，如果某个键在 SELECT 和 UPDATE 之间被
+ *    并发改动导致这个键其实没解开，这里之前会照样 `success: true`——FDE 会
+ *    以为已经解除、不会想到要重试，那个键继续保持 deny。现在任一键的
+ *    outcome 不在 `RELEASE_OUTCOME_HANDLED` 里就整体返回 500，不产生"部分
+ *    解除也算成功"的假象；FDE 重新点一次按钮即可——已经解开的键在
+ *    `ads_release_circuit_breaker_policy` 里会因为不再是 deny 而幂等报
+ *    `not_circuit_tripped`，只有真正卡住的那个键会再试一次。
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -44,6 +53,9 @@ export interface ReleaseKeyResult {
   readonly key: string
   readonly outcome: string // rpc 返回：released | not_circuit_tripped | no_policy_row | race_lost
 }
+
+/** 三种都代表"这个键已经处理完，不用重试"：真解了 / 本来就不是熔断锁 / 压根没有策略行。 */
+const RELEASE_OUTCOME_HANDLED = new Set(['released', 'not_circuit_tripped', 'no_policy_row'])
 
 export async function POST(
   _req: NextRequest,
@@ -71,6 +83,17 @@ export async function POST(
       )
     }
     results.push({ key, outcome: typeof data === 'string' ? data : 'unknown' })
+  }
+
+  const unresolved = results.filter(r => !RELEASE_OUTCOME_HANDLED.has(r.outcome))
+  if (unresolved.length > 0) {
+    return NextResponse.json(
+      {
+        error: `release incomplete — retry: ${unresolved.map(r => `${r.key}=${r.outcome}`).join(', ')}`,
+        results,
+      },
+      { status: 500 },
+    )
   }
 
   const released = results.filter(r => r.outcome === 'released').length

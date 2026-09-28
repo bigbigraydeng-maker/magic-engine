@@ -113,9 +113,12 @@ describe('② rpc(ads_sync_autonomy_policy) 只许出现在同步 worker 里', (
   })
 })
 
-describe('②b rpc(ads_trip_circuit_breaker_policy) 只许出现在熔断检查 worker 里', () => {
+describe('②b rpc(ads_trip_circuit_breaker_policy_batch) 只许出现在熔断检查 worker 里', () => {
   it('全仓唯一调用点就是熔断检查 worker，且 worker 自己确实在调', () => {
-    const pattern = /rpc\(\s*['"]ads_trip_circuit_breaker_policy['"]/
+    // 🔴 Codex P1 复审（round 6）：原来是逐键调用单键函数 ads_trip_circuit_breaker_policy，
+    // 靠后的键 race_lost 时前面已落地的键无法回滚，重试耗尽会遗留"半熔断"中间态。
+    // 改成一次调用传全部键、整批收进一个数据库事务的 _batch 版本，这条锁跟着改名。
+    const pattern = /rpc\(\s*['"]ads_trip_circuit_breaker_policy_batch['"]/
     const callers = listSource('src').filter((f) => pattern.test(stripComments(read(f))))
 
     expect(
@@ -126,7 +129,7 @@ describe('②b rpc(ads_trip_circuit_breaker_policy) 只许出现在熔断检查 
 
     expect(
       pattern.test(stripComments(read(CIRCUIT_BREAKER_WORKER))),
-      `${CIRCUIT_BREAKER_WORKER} 应该调用 rpc('ads_trip_circuit_breaker_policy') —— 否则上面那条断言是空转的`,
+      `${CIRCUIT_BREAKER_WORKER} 应该调用 rpc('ads_trip_circuit_breaker_policy_batch') —— 否则上面那条断言是空转的`,
     ).toBe(true)
   })
 })
