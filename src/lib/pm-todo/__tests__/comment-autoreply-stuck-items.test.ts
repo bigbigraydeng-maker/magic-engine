@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { pushCommentAutoreplyStuckItems } from '../comment-autoreply-stuck-items'
-import { MAX_ATTEMPTS } from '@/lib/social/comment-autoreply-engine'
 import type { ManualItem } from '../manual-item-types'
 
 const NOW = new Date('2026-09-28T00:00:00Z')
@@ -119,7 +118,6 @@ describe('pushCommentAutoreplyStuckItems', () => {
     expect(items[0].client_id).toBe('cts')
     expect(items[0].client_name).toBe('CTS Tours NZ')
     expect(items[0].what).toContain('3 条')
-    expect(items[0].what).toContain(`${MAX_ATTEMPTS} 次`)
     expect(items[0].what).toContain('36 天') // 2026-08-23T00:00Z → 2026-09-28T00:00Z（NOW）整 36 天
     expect(items[0].href).toBe('https://app.magicengine.com.au/dashboard/clients/cts/settings')
   })

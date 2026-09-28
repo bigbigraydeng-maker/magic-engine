@@ -77,11 +77,17 @@ describe('授权权限清单变更闸门（改了就来读文件头注）', () =
   })
 
   it('Facebook 主页授权的清单没有被悄悄改动', () => {
+    // 2026-09-28 加了 pages_manage_engagement（评论自动回复卡 39 天才发现漏了这条，
+    // PR #2190）——核对过 SCOPE_REPLAYED_ON_REFRESH：Meta 是 null，刷新不重放
+    // scope，这次加不会像 2026-09-15 微软那次弄死已有连接，只是老连接要重新点一次
+    // 「连接 Meta」才能拿到新权限，且 HEARTBEAT_POLICY 是穷举 Record，META 那条
+    // 编译期已经必须存在，不需要在这里额外新开。
     expect([...META_PAGE_SCOPES]).toEqual([
       'pages_show_list',
       'pages_messaging',
       'pages_read_engagement',
       'pages_read_user_content',
+      'pages_manage_engagement',
       'pages_manage_posts',
       'leads_retrieval',
       'pages_manage_ads',

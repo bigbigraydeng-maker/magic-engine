@@ -5,7 +5,17 @@
  *
  * Shows recent decisions from social_comment_engagements: what was replied /
  * DM'd / hidden / flagged for human. FDE can revert an auto-reply (deletes it
- * on Facebook) or mark a needs-human item reviewed.
+ * on Facebook), or mark a row reviewed — this is the only action that clears
+ * `reviewed_at`, which is what makes a permanently-stuck row (see
+ * comment-autoreply-stuck-items.ts) stop reappearing in the daily todo.
+ *
+ * "标记已阅" used to only show for `needs_human` rows. A row that's stuck
+ * (failed after exhausting retries, dm_sent with no public reply, or stale
+ * processing) has no requirement that `needs_human` be true — a plain praise
+ * comment that failed to send is still stuck, `needs_human=false` and all —
+ * so the button must also cover those, or the "point mark_reviewed to close
+ * this todo" instruction in that pm-todo channel has nowhere to click
+ * (Codex round 3 复审 P1).
  */
 
 import { useState, useEffect, useCallback } from 'react'
@@ -14,12 +24,13 @@ interface Props {
   clientId: string
 }
 
-interface Engagement {
+export interface Engagement {
   id: string
   category: string | null
   comment_text: string | null
   author_name: string | null
   public_reply_text: string | null
+  public_reply_id: string | null
   private_reply_sent: boolean
   hidden: boolean
   reply_status: string
@@ -27,6 +38,15 @@ interface Engagement {
   guardrail_flags: string[] | null
   reply_source: string | null
   created_at: string
+}
+
+/** Same "stuck" shape comment-autoreply-stuck-items.ts detects, loosened (no attempts/staleness check — showing the button a little early is harmless, hiding it isn't). Exported for a direct unit test; the component itself only calls it. */
+export function isStuck(it: Engagement): boolean {
+  return (
+    it.reply_status === 'failed' ||
+    it.reply_status === 'processing' ||
+    (it.reply_status === 'dm_sent' && !it.public_reply_id)
+  )
 }
 
 const CATEGORY_META: Record<string, { label: string; cls: string }> = {
@@ -148,7 +168,7 @@ export function CommentAuditList({ clientId }: Props) {
                   {busyId === it.id ? '处理中…' : '撤回回复'}
                 </button>
               )}
-              {it.needs_human && (
+              {(it.needs_human || isStuck(it)) && (
                 <button onClick={() => act(it.id, 'mark_reviewed')} disabled={busyId === it.id}
                   className="text-xs font-semibold text-slate-600 hover:underline disabled:opacity-50">
                   标记已阅
