@@ -25,12 +25,15 @@ function entryFile(id: string): string {
 
 describe('loadLedger', () => {
   it('仓库里的真实台账条目全部合法', () => {
-    const { entries, errors } = loadLedger()
+    const { entries, errors, warnings } = loadLedger()
     expect(errors, JSON.stringify(errors)).toEqual([])
     expect(entries.length).toBeGreaterThanOrEqual(1)
     expect(new Set(entries.map((entry) => entry.id)).size).toBe(entries.length)
     for (const entry of entries) {
       expect(entry.id).toMatch(ID_RE)
+    }
+    for (const w of warnings) {
+      console.log(`::warning::${w.file}: ${w.message}`)
     }
   })
 
