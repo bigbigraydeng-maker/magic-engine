@@ -1,4 +1,6 @@
 // Who is calling: a day-scoped, one-way visitor key that a caller cannot choose.
+// Shared by every Tools Lab tool (site-check today; ads-check and future tools reuse this — pass your
+// own `tool` string so each tool's HMAC key material stays in its own namespace).
 //
 // app.magicengine.com.au runs on Render behind Cloudflare. Cloudflare overwrites `cf-connecting-ip` with the real
 // client address — but only for requests that actually pass through Cloudflare. Anyone can reach the Render
@@ -79,12 +81,16 @@ function keySecret(): string | null {
   return process.env.SUPABASE_SERVICE_ROLE_KEY || null
 }
 
-/** One-way, day-scoped visitor key. The raw address is never stored. Returns null when no trusted address or no key. */
-export function visitorKey(headers: Headers, now: Date = new Date()): string | null {
+/**
+ * One-way, day-scoped visitor key. The raw address is never stored. Returns null when no trusted
+ * address or no key. `tool` namespaces the HMAC key material so two tools never share a bucket even
+ * if they happened to pick the same window/subject — pass a stable per-tool string (e.g. 'site-check').
+ */
+export function visitorKey(headers: Headers, tool: string, now: Date = new Date()): string | null {
   const addr = visitorAddress(headers)
   const secret = keySecret()
   if (!addr || !secret) return null
-  const material = hmacHex(secret, 'site-check-visitor-key-v1')
+  const material = hmacHex(secret, `${tool}-visitor-key-v1`)
   return hmacHex(material, `${now.toISOString().slice(0, 10)}|${subjectFor(addr.ip)}`)
 }
 
@@ -97,10 +103,10 @@ export function normaliseRecipient(email: string): string {
   return `${user}@${host}`
 }
 
-/** One-way, day-scoped key for an email recipient. Returns null when no key is configured. */
-export function recipientKey(email: string, now: Date = new Date()): string | null {
+/** One-way, day-scoped key for an email recipient. Returns null when no key is configured. `tool` — see `visitorKey`. */
+export function recipientKey(email: string, tool: string, now: Date = new Date()): string | null {
   const secret = keySecret()
   if (!secret) return null
-  const material = hmacHex(secret, 'site-check-recipient-key-v1')
+  const material = hmacHex(secret, `${tool}-recipient-key-v1`)
   return hmacHex(material, `${now.toISOString().slice(0, 10)}|${normaliseRecipient(email)}`)
 }

@@ -36,6 +36,7 @@ import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
 import type { SimaqianItemKind } from './simaqian-review-items'
+import type { ToolLeadItemKind } from './tool-lead-items'
 import type { PmKind } from './five-kinds'
 
 /**
@@ -163,6 +164,8 @@ export type ManualItemKind =
   | 'ledger_patrol_missing'
   /** 客人像是说他付款了，但不是我们自己确认的 —— 只有人能核对到账，不许机器自己打 paid 标签 */
   | 'paid_signal_needs_review'
+  /** 工具实验室有人留资（自助开通 / 网站诊断留邮箱）—— 这张表以前写完没人读，见 tool-lead-items.ts */
+  | ToolLeadItemKind
   | CommentScopeTodoKind
   /** 写在 Render 里的 Meta 钥匙被 Meta 作废（错误码 190）—— 只有人能重新授权 */
   | MetaTokenHealthKind
@@ -233,6 +236,8 @@ export type ManualItemKind =
   | FacebookSyncItemKind
   /** Magic Bridge 全平台免费额度用到 80% 以上 —— 要不要加额度由 PM 定 */
   | 'magic_bridge_quota'
+  /** Tools Lab 全站每月合计花费/次数上限用到 80% 以上（网站诊断+广告体检共用）—— 要不要加名额由 PM 定 */
+  | 'tools_wide_budget_warning'
 
 export interface ManualItem {
   kind: ManualItemKind
