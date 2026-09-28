@@ -10,7 +10,7 @@ verify_how: seo_meta_log 里这6行(pr_url含pull/212)到2026-10-12后会被每�
 done_on: 2026-09-28
 done_ref: pr:212
 last_checked: 2026-09-28
-check_note: chinatravel仓库PR #212已开出(未合并，待人工代码复审)；seo_meta_log已插入6条基线记录(baseline_ctr/position/impressions取自GSC 12周真实数据2026-07-01~09-24)；npx tsc --noEmit与npm run build均退出码0；6个改动页面渲染出的<title>含站内自动加的" | CTS Tours"后缀后核实为54-60字符，符合站内自己的规范
+check_note: chinatravel仓库PR #212已由PM本人合并(commit ed46c7e，2026-09-27 15:43)，main分支合并即触发Render自动部署，已上线；seo_meta_log已插入6条基线记录(baseline_ctr/position/impressions取自GSC 12周真实数据2026-07-01~09-24)；npx tsc --noEmit与npm run build均退出码0；6个改动页面渲染出的<title>含站内自动加的" | CTS Tours"后缀后核实为54-60字符，符合站内自己的规范
 ---
 诊断+方案见本会话记录（孔子/SEO agent，PM 2026-09-28 当场"做"授权）。
 不用新建 Inngest：ME 已有 `cloud-seo-meta-cycle-fanout`（每周一自动跑，读 `seo_meta_log` 里
