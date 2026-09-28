@@ -4,8 +4,8 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { listActiveGoals } from '@/lib/strategy/goals'
 import { autoFetchMetricValue } from '@/lib/strategy/auto-fetch'
-import { loadAdStrategyConfig } from '../config'
-import { computeGoalPace } from '../goal-pace'
+import { loadAdStrategyConfigWithSource } from '../config'
+import { computeGoalPace, type GoalPace } from '../goal-pace'
 import type { DigestGoalContext } from './internal-digest'
 import type { GoalRow } from '@/types/strategy'
 
@@ -103,6 +103,16 @@ function dayIndexAndTotal(periodStart: string, periodEnd: string, today: string)
   return { dayIndex, totalDays }
 }
 
+/**
+ * 读不出日预算上限时，预算那一道判断（「按上限到不了目标」）等于没做。
+ * 「落后」只靠线性节奏就能成立，照报；「按节奏走」要两道都过才算数，降成未判——
+ * 不能拿缺数当"没问题"。
+ */
+export function withoutCapLens(pace: GoalPace): GoalPace {
+  if (pace.verdict !== 'on_track') return pace
+  return { ...pace, verdict: 'unknown', reason: '读不出广告设置（日预算上限），预算够不够到目标今天没判' }
+}
+
 export async function buildDigestGoalContext(
   clientId: string,
   insightDate: string,
@@ -117,10 +127,10 @@ export async function buildDigestGoalContext(
     // unknown / 任何失败 → null（不是 0）。
     const actualToDate = fetched.ok ? fetched.value : null
 
-    const config = await loadAdStrategyConfig(clientId)
+    const { config, source, error: configError } = await loadAdStrategyConfigWithSource(clientId)
     const medianCostPerResultCents7d = await medianCostPerResultCents(clientId, insightDate)
 
-    const pace = computeGoalPace({
+    const computed = computeGoalPace({
       targetValue: goal.target_value,
       baselineValue: goal.baseline_value,
       periodStart: goal.period_start,
@@ -130,6 +140,10 @@ export async function buildDigestGoalContext(
       dailyCapCents: config.daily_budget_cap_cents,
       medianCostPerResultCents7d,
     })
+    const pace = source === 'fallback' ? withoutCapLens(computed) : computed
+    if (source === 'fallback') {
+      console.error(`[ads-strategy] goal context: ad_strategy_configs read failed for ${clientId}: ${configError ?? 'unknown error'}`)
+    }
 
     const { dayIndex, totalDays } = dayIndexAndTotal(goal.period_start, goal.period_end, insightDate)
 
@@ -140,6 +154,7 @@ export async function buildDigestGoalContext(
       dayIndex,
       totalDays,
       pace,
+      ...(source === 'fallback' ? { configReadError: configError ?? 'unknown error' } : {}),
     }
   } catch (err) {
     console.warn('[ads-strategy] goal context failed', err instanceof Error ? err.message : String(err))

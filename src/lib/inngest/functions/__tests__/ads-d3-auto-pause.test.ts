@@ -19,7 +19,7 @@ import {
   ADS_DIAGNOSTICS_COMPLETED_EVENT,
   type D3AutoPauseDeps,
 } from '../ads-d3-auto-pause'
-import type { AdStrategyConfig } from '@/lib/ads-strategy/config'
+import type { AdStrategyConfig, LoadedAdStrategyConfig } from '@/lib/ads-strategy/config'
 import type { Diagnosis } from '@/lib/ads-strategy/portfolio/diagnostics/types'
 import type { SubmitAdsAutoPauseResult } from '@/lib/action-submission/ads-auto-pause'
 
@@ -79,6 +79,19 @@ function makeConfig(overrides: Partial<AdStrategyConfig> = {}): AdStrategyConfig
   }
 }
 
+function loaded(config: AdStrategyConfig): LoadedAdStrategyConfig {
+  return { config, source: 'row' }
+}
+
+/** 读失败时 config.ts 真实返回的形状：默认值（autopilot 关、dry_run 开）+ fallback + 原始报错。 */
+function readFailed(error = 'column "autopilot_enabled" does not exist'): LoadedAdStrategyConfig {
+  return {
+    config: makeConfig({ autopilot_enabled: false, autopilot_dry_run: true }),
+    source: 'fallback',
+    error,
+  }
+}
+
 function makeD3Diagnosis(overrides: Partial<Diagnosis> = {}): Diagnosis {
   return {
     code: 'D3',
@@ -97,7 +110,7 @@ function makeDeps(overrides: Partial<D3AutoPauseDeps> = {}, existingRows: Row[] 
   const { supabase } = makeFakeFlywheelSupabase(existingRows)
   return {
     supabase,
-    loadConfig: vi.fn(async () => makeConfig()),
+    loadConfig: vi.fn(async () => loaded(makeConfig())),
     loadDiagnosisRun: vi.fn(async () => null),
     isSharedAccount: vi.fn(async () => false),
     submitCandidate: vi.fn(async (): Promise<SubmitAdsAutoPauseResult> => ({
@@ -170,7 +183,7 @@ describe('processD3Hit', () => {
     }))
     const { supabase, inserted } = makeFakeFlywheelSupabase()
     const dryOffConfig = makeConfig({ autopilot_dry_run: false })
-    const deps = makeDeps({ supabase, submitCandidate, loadConfig: vi.fn(async () => dryOffConfig) })
+    const deps = makeDeps({ supabase, submitCandidate, loadConfig: vi.fn(async () => loaded(dryOffConfig)) })
     const result = await processD3Hit(deps, {
       ...baseArgs, diagnosis: makeD3Diagnosis(), config: dryOffConfig,
     })
@@ -188,7 +201,7 @@ describe('processD3Hit', () => {
     }))
     const { supabase, inserted } = makeFakeFlywheelSupabase()
     const dryOffConfig = makeConfig({ autopilot_dry_run: false })
-    const deps = makeDeps({ supabase, submitCandidate, loadConfig: vi.fn(async () => dryOffConfig) })
+    const deps = makeDeps({ supabase, submitCandidate, loadConfig: vi.fn(async () => loaded(dryOffConfig)) })
     const result = await processD3Hit(deps, {
       ...baseArgs, diagnosis: makeD3Diagnosis(), config: dryOffConfig,
     })
@@ -202,12 +215,25 @@ describe('processD3Hit', () => {
     }))
     const { supabase, inserted } = makeFakeFlywheelSupabase()
     const dryOffConfig = makeConfig({ autopilot_dry_run: false })
-    const deps = makeDeps({ supabase, submitCandidate, loadConfig: vi.fn(async () => dryOffConfig) })
+    const deps = makeDeps({ supabase, submitCandidate, loadConfig: vi.fn(async () => loaded(dryOffConfig)) })
     const result = await processD3Hit(deps, {
       ...baseArgs, diagnosis: makeD3Diagnosis(), config: dryOffConfig,
     })
     expect(result.outcome).toBe('kernel_denied')
     expect(inserted[0].payload).toMatchObject({ status: 'blocked' })
+  })
+
+  it('单条处理时开关读失败 → 记 blocked 并带原始报错，不提交 Kernel，也不记成 dry_run_logged', async () => {
+    const submitCandidate = vi.fn()
+    const { supabase, inserted } = makeFakeFlywheelSupabase()
+    const deps = makeDeps({ supabase, submitCandidate, loadConfig: vi.fn(async () => readFailed('boom')) })
+    const result = await processD3Hit(deps, {
+      ...baseArgs, diagnosis: makeD3Diagnosis(), config: makeConfig({ autopilot_dry_run: false }),
+    })
+    expect(result.outcome).toBe('skipped_config_read_failed')
+    expect(submitCandidate).not.toHaveBeenCalled()
+    expect(inserted).toHaveLength(1)
+    expect(inserted[0].payload).toMatchObject({ status: 'blocked', config_read_error: 'boom' })
   })
 
   it('flywheel_actions 写入失败必须抛错，不能吞（实测：mock insert 返回 error 时断言抛出）', async () => {
@@ -262,7 +288,7 @@ describe('createD3AutoPauseFunction —— 装配契约', () => {
   it('autopilot_enabled=false → 跳过，不查诊断结果', async () => {
     const loadDiagnosisRun = vi.fn()
     const fn = createD3AutoPauseFunction(
-      makeDeps({ loadConfig: vi.fn(async () => makeConfig({ autopilot_enabled: false })), loadDiagnosisRun }),
+      makeDeps({ loadConfig: vi.fn(async () => loaded(makeConfig({ autopilot_enabled: false }))), loadDiagnosisRun }),
     )
     const result = await handlerOf(fn)({
       event: { data: { client_id: 'client-1', insight_date: '2026-09-21', diagnostic_run_id: 'n-1' } },
@@ -272,13 +298,29 @@ describe('createD3AutoPauseFunction —— 装配契约', () => {
     expect(loadDiagnosisRun).not.toHaveBeenCalled()
   })
 
+  it('开关读失败 → 单独报 config_read_failed（带原始报错），不混进 autopilot_disabled、不查诊断结果', async () => {
+    const loadDiagnosisRun = vi.fn()
+    const fn = createD3AutoPauseFunction(makeDeps({ loadConfig: vi.fn(async () => readFailed()), loadDiagnosisRun }))
+    const result = await handlerOf(fn)({
+      event: { data: { client_id: 'client-1', insight_date: '2026-09-21', diagnostic_run_id: 'n-1' } },
+      step: fakeStep(),
+    })
+    expect(result).toEqual({
+      ok: false,
+      reason: 'config_read_failed',
+      error: 'column "autopilot_enabled" does not exist',
+      processed: 0,
+    })
+    expect(loadDiagnosisRun).not.toHaveBeenCalled()
+  })
+
   it('只处理 D3 且 status=hit 的诊断，跳过 not_comparable 和别的诊断码', async () => {
     const submitCandidate = vi.fn(async (): Promise<SubmitAdsAutoPauseResult> => ({
       ok: true, outcome: 'pending_approval', runId: 'run-1', authorizationDecisionId: 'dec-1',
     }))
     const fn = createD3AutoPauseFunction(
       makeDeps({
-        loadConfig: vi.fn(async () => makeConfig({ autopilot_dry_run: false })),
+        loadConfig: vi.fn(async () => loaded(makeConfig({ autopilot_dry_run: false }))),
         loadDiagnosisRun: vi.fn(async () => ({
           clientId: 'client-1', date: '2026-09-21', evaluatedAt: '2026-09-22T00:00:00Z',
           diagnoses: [

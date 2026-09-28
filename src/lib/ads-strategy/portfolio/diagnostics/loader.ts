@@ -10,7 +10,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { fetchHourlyAdsetSpend, type GraphHourlySpendRow } from '@/lib/meta/entity-settings'
 import { findSharedAdAccounts, getClientAdAccountIds } from '@/lib/meta/client-ad-accounts'
-import { loadAdStrategyConfig } from '@/lib/ads-strategy/config'
+import { loadAdStrategyConfigWithSource, type AdStrategyConfig } from '@/lib/ads-strategy/config'
 import type { EntitySnapshotRow } from '../snapshot'
 import { loadOutcomeConfig } from '../outcome-config'
 import { buildAccountContext, localDayEndUtc, shiftDate } from './context'
@@ -230,6 +230,16 @@ async function loadClientPageId(clientId: string): Promise<string | null> {
   return (data as { facebook_page_id: string | null } | null)?.facebook_page_id ?? null
 }
 
+/**
+ * 客户的广告设置。读失败要抛（同上）——塌成默认值会让收件人检查拿着空列表跑，
+ * 该报的「收件人混了外部邮箱」就静默漏掉了；「没有行」是新客户，照默认值走。
+ */
+async function loadStrategyConfig(clientId: string): Promise<AdStrategyConfig> {
+  const { config, source, error } = await loadAdStrategyConfigWithSource(clientId)
+  if (source === 'fallback') throw new Error(`ad_strategy_configs read failed: ${error ?? 'unknown error'}`)
+  return config
+}
+
 export async function loadDiagnosisInput(clientId: string, date: string, evaluatedAt: string): Promise<DiagnosisInput> {
   const accountIds = await getClientAdAccountIds(clientId)
   const { shared } = await findSharedAdAccounts(clientId, accountIds)
@@ -239,7 +249,7 @@ export async function loadDiagnosisInput(clientId: string, date: string, evaluat
   }
   const [outcome, strategy, clientPageId] = await Promise.all([
     loadOutcomeConfig(clientId),
-    loadAdStrategyConfig(clientId),
+    loadStrategyConfig(clientId),
     loadClientPageId(clientId),
   ])
   return {
