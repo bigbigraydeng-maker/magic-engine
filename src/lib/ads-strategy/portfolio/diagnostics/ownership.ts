@@ -206,6 +206,8 @@ export interface ScopedAccount {
    */
   ownWindowSpend: number
   otherPageWindowSpend: number
+  /** 混主页/读不到主页的广告组近 7 天花费——判「登记主页可能不对」前必须先看这笔钱有没有算进去（Codex 2026-09-28 第四轮） */
+  unattributedWindowSpend: number
   /** 被切掉的广告组 / 系列 id（全部，不只排除清单里列出的）——判「有没有被切」用 */
   droppedAdsetIds: ReadonlySet<string>
   /**
@@ -218,7 +220,7 @@ export interface ScopedAccount {
 const round2 = (n: number) => Math.round(n * 100) / 100
 
 function unscoped(account: AccountInput): ScopedAccount {
-  return { account, excluded: [], accountLevelOnly: false, accountLevelOnlyReason: null, ownWindowSpend: 0, otherPageWindowSpend: 0, droppedAdsetIds: new Set(), selfNotOwnAdsetIds: new Set() }
+  return { account, excluded: [], accountLevelOnly: false, accountLevelOnlyReason: null, ownWindowSpend: 0, otherPageWindowSpend: 0, unattributedWindowSpend: 0, droppedAdsetIds: new Set(), selfNotOwnAdsetIds: new Set() }
 }
 
 function accountLevelOnlyResult(account: AccountInput, reason: 'page_unknown' | 'capture_stale', detail: string): ScopedAccount {
@@ -228,6 +230,7 @@ function accountLevelOnlyResult(account: AccountInput, reason: 'page_unknown' | 
     accountLevelOnlyReason: reason,
     ownWindowSpend: 0,
     otherPageWindowSpend: 0,
+    unattributedWindowSpend: 0,
     droppedAdsetIds: new Set(),
     selfNotOwnAdsetIds: new Set(),
     excluded: [{ adAccountId: account.adAccountId, level: 'account', id: account.adAccountId, name: null, reason, detail }],
@@ -319,13 +322,14 @@ export function scopeAccountToClient(account: AccountInput, clientPageId: string
 
   const days = new Set(windowDays(date))
   const excluded = listExcluded(account, drops, days)
-  const windowSpendWhere = (verdict: AdsetOwnership) => round2(account.daily
-    .filter(r => r.level === 'adset' && days.has(r.insight_date) && judge.verdict(r.entity_id) === verdict)
+  const windowSpendWhere = (verdicts: ReadonlySet<Verdict>) => round2(account.daily
+    .filter(r => r.level === 'adset' && days.has(r.insight_date) && verdicts.has(judge.verdict(r.entity_id)))
     .reduce((s, r) => s + r.spend, 0))
   const selfNotOwnAdsetIds = new Set(drops.filter(d => d.level === 'adset' && d.selfNotOwn).map(d => d.id))
   return {
     account: { ...account, snapshots, daily, hourly }, excluded, accountLevelOnly: false, accountLevelOnlyReason: null,
-    ownWindowSpend: windowSpendWhere('own'), otherPageWindowSpend: windowSpendWhere('other_page'),
+    ownWindowSpend: windowSpendWhere(new Set(['own'])), otherPageWindowSpend: windowSpendWhere(new Set(['other_page'])),
+    unattributedWindowSpend: windowSpendWhere(new Set(['mixed_pages', 'page_unknown'])),
     droppedAdsetIds: dropAdsets, selfNotOwnAdsetIds,
   }
 }
@@ -353,18 +357,46 @@ function listExcluded(account: AccountInput, drops: Drop[], days: ReadonlySet<st
  */
 export function diagnosePageMismatch(account: AccountInput, scoped: ScopedAccount, clientId: string, date: string): Diagnosis | null {
   // 广告层快照最近一轮没抓全/太旧时 scopeAccountToClient 已经把 accountLevelOnly 置 true（adCaptureStale），
-  // 这里第一条判断已经覆盖「多半是没抓到广告才判不出主页，不是登记错了」（魏征第二轮 + Codex 2026-09-27 合并）
-  if (scoped.accountLevelOnly || scoped.ownWindowSpend > 0 || scoped.otherPageWindowSpend <= 0) return null
+  // 这里第一条判断已经覆盖「多半是没抓到广告才判不出主页，不是登记错了」（魏征第二轮 + Codex 2026-09-27 合并）；
+  // 混主页/读不到主页的花费也必须算干净——那笔钱可能一部分是客户自己的，没排除干净就说「全在别家」会指错方向
+  // （Codex 2026-09-28 第四轮）
+  if (scoped.accountLevelOnly || scoped.ownWindowSpend > 0 || scoped.otherPageWindowSpend <= 0 || scoped.unattributedWindowSpend > 0) return null
   return {
     code: 'D7', status: 'hit', clientVisible: false,
     units: [{ level: 'account', id: account.adAccountId, name: null, adAccountId: account.adAccountId }],
     title: '这个账户近 7 天的花费全在别的 Facebook 主页的广告上：客户登记的主页可能不对',
-    evidence: { window_end: date, own_spend: scoped.ownWindowSpend, other_page_spend: scoped.otherPageWindowSpend, excluded_units: scoped.excluded.length },
+    evidence: { window_end: date, own_spend: scoped.ownWindowSpend, other_page_spend: scoped.otherPageWindowSpend, unattributed_spend: scoped.unattributedWindowSpend, excluded_units: scoped.excluded.length },
     sample: [{ label: '被排除的在投/有花费单位', value: scoped.excluded.length }],
     reasons: ['广告组层诊断只判挂客户登记主页的广告；登记错了，客户自己的广告组会全部被当成别人的'],
     manualTask: {
       what: `广告账户 ${account.adAccountId} 近 7 天花的钱全在别的 Facebook 主页的广告上，这个客户自己的广告组一个都没判。`,
       how: '先在广告后台看这些广告挂的是哪个主页：是这个客户的（换了主页或登记错了）就到客户设置页改登记主页；不是就确认这个账户是不是登记错了客户。',
+      href: `https://app.magicengine.com.au/dashboard/clients/${encodeURIComponent(clientId)}/settings`,
+    },
+  }
+}
+
+/**
+ * 快照过期/没抓全降级成只做账户级时，必须留一条能看见的诊断——不然广告组层诊断和机会发现整段跳过，
+ * 日数据可能仍在正常同步，只看今天有没有命中会误以为「今天没发现要紧的事」，把数据管线故障当成健康
+ * （Codex 2026-09-28 第四轮：run.ts 那个分支之前只记覆盖率，没生成任何 Diagnosis）。
+ */
+export function diagnoseCaptureStaleGap(account: AccountInput, clientId: string, date: string, evaluatedAt: string): Diagnosis {
+  const latest = account.latestCaptures.filter(c => c.level === 'ad').reduce<typeof account.latestCaptures[number] | null>(
+    (a, b) => (!a || b.captured_at > a.captured_at ? b : a), null)
+  const ageHours = latest ? Math.round((Date.parse(evaluatedAt) - Date.parse(latest.captured_at)) / 3_600_000) : null
+  return {
+    code: 'D7', status: 'hit', clientVisible: false,
+    units: [{ level: 'account', id: account.adAccountId, name: null, adAccountId: account.adAccountId }],
+    title: latest
+      ? `广告层设置快照最近一轮${latest.complete ? `是 ${ageHours} 小时前` : '没抓全'}：广告组层诊断和机会发现今天整段跳过`
+      : '广告层设置快照找不到抓取记录：广告组层诊断和机会发现今天整段跳过',
+    evidence: { window_end: date, latest_ad_capture_complete: latest?.complete ?? null, latest_ad_capture_age_hours: ageHours },
+    sample: [],
+    reasons: ['归属核实不到（快照没抓全，或超过 24 小时）：D1/D3/D4/D5/D9 与广告级 D2/D10/D11、O1/O2/O3 全部跳过；日数据可能仍在正常同步，不能只看今天有没有命中就当作健康'],
+    manualTask: {
+      what: `广告账户 ${account.adAccountId} 的广告设置快照最近一轮没抓全或太旧，今天的广告组层诊断整段跳过。`,
+      how: '打开「广告设置快照」抓取记录（按账户号搜 level=ad 的行），看最近一轮为什么没抓全或没再跑；抓取恢复正常后诊断会自动跑。',
       href: `https://app.magicengine.com.au/dashboard/clients/${encodeURIComponent(clientId)}/settings`,
     },
   }

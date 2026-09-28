@@ -17,7 +17,7 @@ import { diagnoseAccountHealth, diagnoseClientConfigHealth, diagnoseOutcomeTruth
 import { diagnosePlacementLeak } from './d9-placement-leak'
 import { adLevelCoverage, diagnoseAdLevelRules } from './d2-d10-ad-rules'
 import { diagnoseAudiencePoolStarved } from './d11-audience-pool-starved'
-import { diagnosePageMismatch, flagDroppedAdsetUnits, scopeAccountToClient } from './ownership'
+import { diagnoseCaptureStaleGap, diagnosePageMismatch, flagDroppedAdsetUnits, scopeAccountToClient } from './ownership'
 import type { AdLevelCoverage, Diagnosis, DiagnosisInput, DiagnosisRun, ExcludedEntity } from './types'
 
 export function runDiagnostics(input: DiagnosisInput): DiagnosisRun {
@@ -63,8 +63,11 @@ export function runDiagnostics(input: DiagnosisInput): DiagnosisRun {
         // capture_stale：客户是登记了主页的，input.clientPageId 非空，D2/D10 不会短路——它们会拿 rawCtx 里
         // 那份没法确认新不新鲜的快照数据逐条判「这条广告是不是挂客户主页」，跟 scopeAccountToClient 想拦住的
         // 是同一个风险（Codex 2026-09-27 第二轮：广告在最后一次完整抓取后换了主页，旧快照仍会放行）。
-        // 整段不跑，覆盖率记 capture_stale，不能记成「跑了、没查到问题」。
+        // 整段不跑，覆盖率记 capture_stale，不能记成「跑了、没查到问题」；且必须留一条看得见的诊断——
+        // 不然日数据正常时整段静默跳过，日报会说「今天没发现要紧的事」，把数据管线故障当成健康
+        // （Codex 2026-09-28 第四轮）。
         coverage.push({ adAccountId: account.adAccountId, ran: false, reason: 'capture_stale', adsChecked: 0 })
+        diagnoses.push(diagnoseCaptureStaleGap(account, input.clientId, input.date, input.evaluatedAt))
       }
       continue
     }

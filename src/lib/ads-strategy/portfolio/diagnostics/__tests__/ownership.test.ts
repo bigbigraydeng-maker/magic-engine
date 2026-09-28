@@ -365,6 +365,18 @@ describe('接进巡检 / 机会之后', () => {
     expect(run.diagnoses).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'D7', status: 'hit', title: expect.stringContaining('登记的主页可能不对') })]))
   })
 
+  it('🔴 有混主页/读不到主页的花费没算清楚时，不能断言「全花在别家」——那笔钱可能一部分是客户自己的（Codex 2026-09-28 第四轮）', () => {
+    const acc = mixedAccount()
+    // 客户自己的组零花费（触发条件之一），但另外混进一个「读不到主页」的广告组，近 7 天也有花费（没算进 own/other 任何一边）
+    acc.snapshots = [
+      ...acc.snapshots.map(r => (r.entity_id.startsWith('ad-own') ? { ...r, creative_page_id: OTHER } : r)),
+      campaign('c-unknown'), adset('as-unknown', 'c-unknown'), // 名下没有广告 → page_unknown（有花费时）
+    ]
+    acc.daily = [...acc.daily, ...days(7).map(d => adsetRow('as-unknown', 'c-unknown', d, 5))]
+    const run = runDiagnostics(input(acc))
+    expect(run.diagnoses.some(d => d.title.includes('登记的主页可能不对'))).toBe(false)
+  })
+
   it('广告层快照最近一轮没抓全时，不把「全被切掉」说成「登记主页不对」（原因是没抓到，魏征第二轮）', () => {
     const acc = mixedAccount()
     acc.snapshots = acc.snapshots.map(r => (r.entity_id.startsWith('ad-own') ? { ...r, creative_page_id: OTHER } : r))
@@ -380,6 +392,22 @@ describe('接进巡检 / 机会之后', () => {
     expect(run.adLevelCoverage).toEqual([expect.objectContaining({ ran: false, reason: 'capture_stale', adsChecked: 0 })])
     // D2/D10 完全没跑——不能有任何挂在这个账户广告上的命中
     expect(run.diagnoses.some(d => (d.code === 'D2' || d.code === 'D10') && d.status === 'hit')).toBe(false)
+  })
+
+  it('🔴 快照过期降级时必须留一条看得见的诊断，不能整段静默跳过（Codex 2026-09-28 第四轮）', () => {
+    const stale = [{ level: 'ad' as const, complete: false, skipped_shared: false, error: 'timeout', captured_at: '2026-09-25T02:00:00Z' }]
+    const acc = { ...mixedAccount(), latestCaptures: stale }
+    const run = runDiagnostics(input(acc))
+    expect(run.diagnoses).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'D7', status: 'hit', title: expect.stringContaining('整段跳过') }),
+    ]))
+  })
+
+  it('对照：快照新鲜时不产生「整段跳过」提醒', () => {
+    const fresh = [{ level: 'ad' as const, complete: true, skipped_shared: false, error: null, captured_at: '2026-09-25T02:00:00Z' }]
+    const acc = { ...mixedAccount(), latestCaptures: fresh }
+    const run = runDiagnostics(input(acc))
+    expect(run.diagnoses.some(d => d.title.includes('整段跳过'))).toBe(false)
   })
 
   it('对照：客户没登记主页（page_unknown）时，D2/D10 仍然照跑——它们自己会短路成「客户没登记主页」提醒，不是被这里拦下', () => {
