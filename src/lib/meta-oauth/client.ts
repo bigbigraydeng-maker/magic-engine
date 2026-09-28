@@ -77,6 +77,15 @@ export const META_PAGE_SCOPES = [
 export const META_PUBLISH_SCOPE = 'pages_manage_posts'
 
 /**
+ * The one Meta permission the comment auto-reply engine needs to send a
+ * public reply / hide a comment (see META_PAGE_SCOPES's own comment on this
+ * scope for the 2026-09-28 incident it exists to close). Comment-reply
+ * reauth readiness keys on this single name, same reasoning as
+ * META_PUBLISH_SCOPE — one source of truth for the callback and the settings UI.
+ */
+export const META_COMMENT_REPLY_SCOPE = 'pages_manage_engagement'
+
+/**
  * Why a connect flow was started. `publishing` marks the "Reauthorize Meta
  * Publishing" path so the callback can fail closed with a publishing-specific,
  * actionable message when Meta declines `pages_manage_posts`. `comment_reply`

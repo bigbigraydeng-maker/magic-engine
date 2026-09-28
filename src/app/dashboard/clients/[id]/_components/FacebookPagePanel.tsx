@@ -318,6 +318,21 @@ const META_RESULT: Record<string, { ok: boolean; text: string }> = {
     ok: false,
     text: '这个客户还没配好「发布到哪个 Facebook 主页」，所以没法发起发布授权。请先在「视频工厂配置」里把发布主页填好，再点「重新授权 Meta 发布权限」。',
   },
+  // Codex round 9 复审 P1/P2：comment_reply 这条重连路径没有页面上的按钮
+  // （见 comment-autoreply-stuck-items.ts 的注释），这里只是把待办链接重连
+  // 完成后的结果说清楚——要重试就回那条待办再点一次链接，不是这个页面上的按钮。
+  comment_reply_ready: {
+    ok: true,
+    text: '✓ Meta 已授予评论管理权限，评论自动回复现在应该能正常发公开回复了。',
+  },
+  comment_reply_not_granted: {
+    ok: false,
+    text: '连接成功了，但这次授权没有勾选「评论管理」权限，评论自动回复还是发不出公开回复。请回到「今日待办」里那条评论卡死的提醒，再点一次链接重新授权，这次在 Meta 授权页把这项权限一起勾上。',
+  },
+  no_comment_page: {
+    ok: false,
+    text: '这个客户的评论自动回复还没配好对应的 Facebook 主页，所以没法发起这次授权。请先在「评论自动回复」设置里把主页配好，再回到「今日待办」重新点一次链接。',
+  },
   denied: { ok: false, text: '授权取消了，没有任何改动。要接私信的话再点一次。' },
   no_pages: {
     ok: false,

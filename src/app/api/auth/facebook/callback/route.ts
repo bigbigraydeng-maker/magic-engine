@@ -17,7 +17,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { verifyState, exchangeCode, exchangeForLongLivedToken, listPagesWithTokens, listGrantedScopes, META_PUBLISH_SCOPE } from '@/lib/meta-oauth/client'
+import { verifyState, exchangeCode, exchangeForLongLivedToken, listPagesWithTokens, listGrantedScopes, META_PUBLISH_SCOPE, META_COMMENT_REPLY_SCOPE } from '@/lib/meta-oauth/client'
 import { upsertConnection } from '@/lib/platform-oauth/connection-store'
 import { PLATFORM_PROVIDERS } from '@/lib/platform-oauth/vocabulary'
 import { projectFactoryConfig } from '@/lib/factory/client-config'
@@ -31,6 +31,8 @@ type Outcome =
   | 'connected'
   | 'publish_ready'
   | 'publish_not_granted'
+  | 'comment_reply_ready'
+  | 'comment_reply_not_granted'
   | 'verify_failed'
   | 'no_publish_target'
   | 'no_comment_page'
@@ -151,12 +153,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     lastSyncedAt: new Date(),
   })
 
-  // The publishing reauthorisation fails closed: only report ready when the
-  // provider authoritatively confirmed pages_manage_posts. A declined grant
-  // (authoritative list without it) stays visibly not-ready and cannot be
-  // mistaken for success. Inbox connects (no intent) keep their existing outcome.
+  // The publishing / comment-reply reauthorisations fail closed: only report
+  // ready when the provider authoritatively confirmed the scope each one
+  // exists to recover. A declined grant (authoritative list without it) stays
+  // visibly not-ready and cannot be mistaken for success — Codex round 9 复审
+  // P1: comment_reply used to fall through to the generic 'connected' outcome
+  // even when pages_manage_engagement was declined, telling the FDE the fix
+  // worked when public replies would keep failing. Inbox connects (no intent)
+  // keep their existing outcome.
   if (intent === 'publishing') {
     return back(clientId, granted.includes(META_PUBLISH_SCOPE) ? 'publish_ready' : 'publish_not_granted')
+  }
+  if (intent === 'comment_reply') {
+    return back(clientId, granted.includes(META_COMMENT_REPLY_SCOPE) ? 'comment_reply_ready' : 'comment_reply_not_granted')
   }
 
   return back(clientId, 'connected')
