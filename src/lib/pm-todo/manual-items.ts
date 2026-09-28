@@ -37,6 +37,7 @@ import { pushToolLeadItems } from './tool-lead-items'
 import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
+import { pushAdsCircuitItems } from './ads-circuit-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
 import { pushDataDeletionFailureItems } from './data-deletion-items'
 import {
@@ -318,6 +319,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 每日广告巡检的广告级规则（D2 / D10）—— 只读，要不要改由人定；同一件事按 remind-cadence 节奏提醒
     (b) => pushAdsRuleFindingItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 广告级规则待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 广告熔断中的账户 —— 判据是"现在还处在熔断中吗"，不是时间窗口（v2.5 §6.2 派生态）
+    (b) => pushAdsCircuitItems(supabase, b, nameOf).catch((e) =>
+      console.warn('[manual-items] 广告熔断待办生成失败（不阻塞其他待办）:', e),
     ),
     // Facebook 删除数据请求处理失败 —— 失败不许只写日志（铁律 3）
     (b) => pushDataDeletionFailureItems(supabase, b, now).catch((e) =>
