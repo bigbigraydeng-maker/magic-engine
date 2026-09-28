@@ -59,6 +59,12 @@ interface InsightRow {
 
 interface FakeOpts {
   config?: ConfigRow | null
+  /**
+   * 🔴 Codex P2（round 10）测试专用：按调用顺序依次返回的 autonomy_mode 序列
+   * （第一次调用取第 0 个，第二次取第 1 个，超出长度后一直用最后一个）。
+   * 用来模拟"写 deny 之前 autonomy_mode 被管理员改掉"。给了这个就忽略 `config`。
+   */
+  configSequence?: (ConfigRow | null)[]
   insights?: InsightRow[]
   insightsError?: string
   rpcOutcome?: (actionKey: string) => string
@@ -87,11 +93,19 @@ function fakeSupabase(opts: FakeOpts) {
     return { data, error: null }
   })
 
+  let configCallIndex = 0
   function configBuilder() {
     const chain = {
       select: () => chain,
       eq: () => chain,
-      maybeSingle: async () => ({ data: opts.config ?? null, error: null }),
+      maybeSingle: async () => {
+        if (opts.configSequence) {
+          const idx = Math.min(configCallIndex, opts.configSequence.length - 1)
+          configCallIndex += 1
+          return { data: opts.configSequence[idx], error: null }
+        }
+        return { data: opts.config ?? null, error: null }
+      },
     }
     return chain
   }
@@ -358,5 +372,29 @@ describe('ads-circuit-breaker-check handler', () => {
       rpcError: 'boom',
     })
     await expect(run(sb)).rejects.toThrow('boom')
+  })
+
+  it('🔴 Codex P2（round 10）：写 deny 之前重新查一次 autonomy_mode——已经被管理员切成 observe 就放弃这次触发，不调 rpc', async () => {
+    const { sb, rpc } = fakeSupabase({
+      // 第一次读（函数入口）拿到 bounded_auto 才继续评估；写 deny 前的第二次读
+      // 已经变成 observe——模拟 Inngest 重放期间管理员手动切走了自治档位。
+      configSequence: [{ autonomy_mode: 'bounded_auto' }, { autonomy_mode: 'observe' }],
+      insights: [...historyRows(DATE, [50, 50, 50, 40, 40, 50, 60]), { insight_date: DATE, ad_account_id: ACCOUNT, spend: 200 }],
+    })
+    const result = (await run(sb)) as { ok: true; verdict: string; reason?: string }
+    expect(result.verdict).toBe('not_tripped')
+    expect(result.reason).toContain('bounded_auto')
+    expect(rpc).not.toHaveBeenCalled() // 没有真的写 deny
+  })
+
+  it('写 deny 前重新查到的 autonomy_mode 仍是 bounded_auto → 正常触发', async () => {
+    const { sb, rpc } = fakeSupabase({
+      configSequence: [{ autonomy_mode: 'bounded_auto' }, { autonomy_mode: 'bounded_auto' }],
+      insights: [...historyRows(DATE, [50, 50, 50, 40, 40, 50, 60]), { insight_date: DATE, ad_account_id: ACCOUNT, spend: 200 }],
+      rpcOutcome: () => 'tripped',
+    })
+    const result = (await run(sb)) as { ok: true; verdict: string }
+    expect(result.verdict).toBe('tripped')
+    expect(rpc).toHaveBeenCalled()
   })
 })

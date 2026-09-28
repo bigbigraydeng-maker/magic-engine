@@ -20,6 +20,12 @@
  * 不在本文件）。
  *
  * 🔴 **新增函数上线要手动 Sync `/api/inngest`**（STATE.md:174、PITFALLS F10）。
+ *
+ * 🔴 Codex P2 复审（round 10）：最早读 `autonomy_mode` 那一步的结果会被
+ *    Inngest 记忆化——如果写 deny 那一步失败重试（比如 race_lost），重放
+ *    时不会重新查库，管理员在退避等待期间把客户切回 `observe` 也不会被
+ *    看见，旧读数照样把客户拉回 deny。写 deny 前在**同一个 step 回调内部**
+ *    重新查一次 `autonomy_mode`，见 `trip-policy` 这个 `step.run` 的实现。
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -259,7 +265,34 @@ export function createAdsCircuitBreakerCheckFunction(deps: AdsCircuitBreakerChec
       }
 
       const tripReason = `[${worst.adAccountId}] ${worst.reason}`
-      const applied = await step.run('trip-policy', () => tripAllKeys(deps.getSupabase(), clientId, tripReason))
+
+      // 🔴 Codex P2 复审（round 10）：不能只信最早那次 read-autonomy-mode 的
+      // 读数就直接写 deny——Inngest 对已经成功的 step 做记忆化，如果
+      // trip-policy 这一步失败重试（比如刚加固的 race_lost），重放时早前
+      // 的 read-autonomy-mode 结果会被直接复用、不会重新查库，即使这段
+      // 退避等待期间管理员已经把客户切回 observe（很可能就是冲着这次熔断
+      // 去手动切的），旧的读数依然会把客户重新摁回 deny。修法：在
+      // trip-policy 这个 step 的回调**内部**（不是单独一个更早的 step）
+      // 重新查一次 autonomy_mode——这个回调本身在每次真正执行/重试时都会
+      // 完整重跑（不像已经成功过的 step 那样被记忆化跳过），所以这里的
+      // 读数天然是"这次真正要写之前"最新的一次。
+      const applied = await step.run('trip-policy', async () => {
+        const sb = deps.getSupabase()
+        const modeBeforeTrip = await readAutonomyMode(sb, clientId)
+        if (modeBeforeTrip !== 'bounded_auto') return null
+        return tripAllKeys(sb, clientId, tripReason)
+      })
+
+      if (applied === null) {
+        return {
+          ok: true,
+          client_id: clientId,
+          date,
+          verdict: 'not_tripped',
+          reason: `autonomy_mode 在写 deny 之前变成了非 bounded_auto，放弃这次触发（本该触发：${tripReason}）`,
+          applied: [],
+        }
+      }
 
       return { ok: true, client_id: clientId, date, verdict: 'tripped', reason: tripReason, applied }
     },

@@ -62,6 +62,17 @@
  *    不去同步"抢救"（那是 `ads-autonomy-sync` worker 的唯一职责，见架构锁
  *    ②），而是老实说"还没解除干净，请重试"；意向这时已经降到 `observe`
  *    并且已经叫醒过同步 worker，重试间隔内基本会自愈。
+ *
+ * 🔴 Codex P1 复审（round 10）：上一条说"已经叫醒过同步 worker"这句话本身
+ *    不够可靠——`notifyAutonomyModeChanged` 只在 `intentDowngraded` 分支里
+ *    调用一次，是 fire-and-forget（`.catch(() => undefined)`）。如果那一次
+ *    调用恰好发送失败，且后续重试时 `autonomy_mode` 已经是 `observe`（不
+ *    会再进降级分支），就没有任何路径会再叫醒同步 worker——终检会一直
+ *    发现同样的 `auto_approve` 残留、一直返回 500，直到明天的每日
+ *    reconcile 才会自愈，这段时间客户仍在自动花钱。修法：终检发现卡住时，
+ *    不管这次调用有没有走过降级分支，都额外调一次 `reconcileAutonomyMode`
+ *    （重新读当前 `updated_at` 再发通知）——每次 500 都会重新尝试叫醒，
+ *    不是只有第一次机会。
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -69,7 +80,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
 import { listAdsActionKeys } from '@/lib/ads-strategy/autonomy/sync-policy'
-import { notifyAutonomyModeChanged } from '@/lib/ads-strategy/autonomy/notify'
+import { notifyAutonomyModeChanged, reconcileAutonomyMode } from '@/lib/ads-strategy/autonomy/notify'
 
 export const dynamic = 'force-dynamic'
 
@@ -169,6 +180,15 @@ export async function POST(
     .filter((p): p is { action_key: string; mode: string } => p.mode === 'auto_approve')
     .map(p => p.action_key)
   if (stillAuto.length > 0) {
+    // 🔴 Codex P1 复审（round 10）：这次调用自己的 notifyAutonomyModeChanged
+    // 只在 intentDowngraded 分支里发（fire-and-forget，被 catch 吞掉）。如果
+    // 那次通知恰好发送失败，且这次意向早已经是 observe（上面的 if 分支不会
+    // 再进），就再也没有路径会重新叫醒同步 worker——只能等明天的每日
+    // reconcile，这段时间客户在 auto_approve 状态下继续自动花钱。终检发现
+    // 卡住时，不管这次调用有没有走过降级分支，都用 reconcileAutonomyMode
+    // 重新读一次当前 ad_strategy_configs.updated_at 再叫醒一次——每次卡住
+    // 都会重新尝试，不是只有第一次机会。
+    await reconcileAutonomyMode(supabaseAdmin, clientId).catch(() => undefined)
     return NextResponse.json(
       {
         error: `release not safely complete — these keys are still auto_approve, retry: ${stillAuto.join(', ')}`,

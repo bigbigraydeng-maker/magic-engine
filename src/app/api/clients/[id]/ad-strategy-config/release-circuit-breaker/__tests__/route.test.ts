@@ -15,17 +15,27 @@ import { NextRequest } from 'next/server'
 vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: vi.fn() }))
 vi.mock('@/lib/auth/require-session', () => ({ requireSession: vi.fn() }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { rpc: vi.fn(), from: vi.fn() } }))
+// round 10：终检卡住时会额外调 reconcileAutonomyMode——单独 mock 掉，隔离验证
+// "卡住时真的又叫醒了一次"，不用把这条也塞进 fakeConfigFrom 的读序列里。
+// notifyAutonomyModeChanged 保持真实实现（跟其它测试一样靠 INNGEST_EVENT_KEY
+// 空值内部软失败，不影响响应）。
+vi.mock('@/lib/ads-strategy/autonomy/notify', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/ads-strategy/autonomy/notify')>()
+  return { ...actual, reconcileAutonomyMode: vi.fn(async () => ({ sent: false, events: 0 })) }
+})
 
 import { POST } from '../route'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireSession } from '@/lib/auth/require-session'
 import { supabaseAdmin } from '@/lib/supabase'
 import { listAdsActionKeys } from '@/lib/ads-strategy/autonomy/sync-policy'
+import { reconcileAutonomyMode } from '@/lib/ads-strategy/autonomy/notify'
 
 const mockAccess = vi.mocked(requirePaidClientAccess)
 const mockSession = vi.mocked(requireSession)
 const mockRpc = vi.mocked(supabaseAdmin.rpc)
 const mockFrom = vi.mocked(supabaseAdmin.from)
+const mockReconcile = vi.mocked(reconcileAutonomyMode)
 
 /**
  * `ad_strategy_configs` 的假 `.from()` 链——支撑两条路径：
@@ -296,9 +306,12 @@ describe('release-circuit-breaker — 🔴 Codex P1（round 9）：not_circuit_t
     const json = (await res.json()) as { error: string }
     expect(json.error).toContain('auto_approve')
     expect(json.error).toContain(keys[0])
+    // 🔴 Codex P1（round 10）：卡住时必须重新叫醒一次同步 worker，不能只
+    // 依赖 intentDowngraded 那次可能已经失败的 fire-and-forget 通知。
+    expect(mockReconcile).toHaveBeenCalledWith(expect.anything(), CLIENT)
   })
 
-  it('终检全部键都不是 auto_approve → 200，正常报成功', async () => {
+  it('终检全部键都不是 auto_approve → 200，正常报成功，不用再额外叫醒（没有卡住）', async () => {
     signedInAs(STAFF)
     const keys = listAdsActionKeys()
     const { chain } = fakeConfigFrom('bounded_auto')
@@ -308,6 +321,7 @@ describe('release-circuit-breaker — 🔴 Codex P1（round 9）：not_circuit_t
     expect(res.status).toBe(200)
     const json = (await res.json()) as { success: boolean }
     expect(json.success).toBe(true)
+    expect(mockReconcile).not.toHaveBeenCalled()
   })
 
   it('终检读取失败 → 500，不假装通过', async () => {
