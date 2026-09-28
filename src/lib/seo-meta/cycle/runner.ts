@@ -31,7 +31,7 @@ import { persistZhugeActions } from '@/lib/zhuge/action-persister'
 import type { PriorityAction, ZhugeOutput } from '@/lib/zhuge/types'
 import { checkFactPreservation } from './fact-check'
 import { checkHardFactsPreserved } from './hard-fact-check'
-import { GATE_REASON, resolveGscSiteUrl, runGateForCandidate } from './gate'
+import { checkTitleOnTopic, GATE_REASON, resolveGscSiteUrl, runGateForCandidate } from './gate'
 import { fromGscPages, mergeCandidates, type RawGscPage } from './candidates'
 import { classifyMetaChangeOutcome } from './outcome-classifier'
 import type { MetaGenerationInput } from './ai-meta'
@@ -385,6 +385,19 @@ async function applyOnePrescription(
     return {
       proposal: { slug: candidate.slug, pageUrl: candidate.pageUrl, keyword: evidence.keyword, searchVolume: evidence.searchVolume, keywordDifficulty: evidence.keywordDifficulty, snapshotDate: evidence.snapshotDate, keywordDataSource: evidence.keywordDataSource, keywordDataLocation: evidence.keywordDataLocation, keywordDataNote: evidence.keywordDataNote, competitorTitles: evidence.competitorTitles, ctsRankingUrl: evidence.ctsRankingUrl, chosenReason: evidence.chosenReason, oldTitle: '', oldDesc: '', newTitle, newDesc, factCheckConsistent: false, factCheckReason: 'not checked — preview failed first', applied: false, skipReason: preview.skipReason },
       manualAction: null,
+    }
+  }
+
+  // 2026-09-28 incident follow-up: checked BEFORE the hard fact-check —
+  // neither that check nor the AI judge verify the new copy is even about
+  // the same page (chongqing-night-city-lights got a title about "The
+  // Forbidden City", which drops/adds no price/date/place-name the hard
+  // check watches for). Zero cost, no network call.
+  const topicCheck = checkTitleOnTopic(candidate.slug, newTitle, newDesc)
+  if (!topicCheck.onTopic) {
+    return {
+      proposal: { slug: candidate.slug, pageUrl: candidate.pageUrl, keyword: evidence.keyword, searchVolume: evidence.searchVolume, keywordDifficulty: evidence.keywordDifficulty, snapshotDate: evidence.snapshotDate, keywordDataSource: evidence.keywordDataSource, keywordDataLocation: evidence.keywordDataLocation, keywordDataNote: evidence.keywordDataNote, competitorTitles: evidence.competitorTitles, ctsRankingUrl: evidence.ctsRankingUrl, chosenReason: evidence.chosenReason, oldTitle: preview.oldTitle, oldDesc: preview.oldDesc, newTitle, newDesc, factCheckConsistent: false, factCheckReason: topicCheck.reason, applied: false, skipReason: 'generated_title_off_topic' },
+      manualAction: buildManualAction(`meta_cycle:${weekKey}:${candidate.slug}`, evidenceMeta, `/${candidate.slug} 的新标题/描述跟本页主题不沾边：${topicCheck.reason}`, '需要人工重写', undefined),
     }
   }
 
