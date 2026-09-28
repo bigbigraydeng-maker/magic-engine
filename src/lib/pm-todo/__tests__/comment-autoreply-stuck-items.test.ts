@@ -96,8 +96,14 @@ interface FakeDbOptions {
   errorMessage?: string
   /** `scopedEnvVarName` 读 `clients` 表算实际变量名用的（Codex round 10 P1）。 */
   clientsRow?: { domain?: string | null; facebook_page_id?: string | null } | null
-  /** `fetchLookbackDaysByClient` 读的每客户回看天数；缺省客户用 DEFAULT_LOOKBACK_DAYS=7 兜底。 */
+  /** `fetchClientConfigByClient` 读的每客户回看天数；缺省客户用 DEFAULT_LOOKBACK_DAYS=7 兜底。 */
   lookbackDays?: Record<string, number>
+  /**
+   * 这个客户 `social_comment_config.fb_page_id` 当前配的主页（Codex round 16
+   * 复审 P2）——跟历史卡死行上记的 `page_id` 是两回事，缺省表示这个客户没有
+   * 配置行 / 没填主页。
+   */
+  configuredPages?: Record<string, string | null>
 }
 
 function fakeDb(opts: FakeDbOptions) {
@@ -119,9 +125,17 @@ function fakeDb(opts: FakeDbOptions) {
           select: () => ({
             in: (_col: string, ids: readonly string[]) => {
               configInSpy(ids)
-              const rows = Object.entries(opts.lookbackDays ?? {})
-                .filter(([clientId]) => ids.includes(clientId))
-                .map(([client_id, lookback_days]) => ({ client_id, lookback_days }))
+              const clientIds = new Set([
+                ...Object.keys(opts.lookbackDays ?? {}),
+                ...Object.keys(opts.configuredPages ?? {}),
+              ])
+              const rows = Array.from(clientIds)
+                .filter((clientId) => ids.includes(clientId))
+                .map((client_id) => ({
+                  client_id,
+                  lookback_days: opts.lookbackDays?.[client_id] ?? null,
+                  fb_page_id: opts.configuredPages?.[client_id] ?? null,
+                }))
               return {
                 order: () => ({
                   range: async () => ({ data: rows, error: null }),
@@ -341,6 +355,23 @@ describe('pushCommentAutoreplyStuckItems', () => {
     // Codex round 8 P1：intent=comment_reply 让回调把新令牌存去评论引擎实际用的主页，不是 clients.facebook_page_id
     expect(items[0].href).toBe('https://app.magicengine.com.au/api/auth/facebook/connect?client_id=cts&intent=comment_reply')
     expect(assessConfiguredPageMock).toHaveBeenCalledWith(sb, 'cts', PAGE_ID, expect.anything())
+  })
+
+  // Codex round 16 复审 P2：客户中途换过 social_comment_config.fb_page_id 时，
+  // 旧配置页的历史卡死行还在，聚合只留第一条命中的 page_id，可能正好是旧页；
+  // OAuth 回调（intent=comment_reply）重新授权读的是这张表*当前*的 fb_page_id
+  // ——两边不是同一个来源，按钮可能修好一个已经不再使用的旧主页。
+  it('客户换过配置主页 → token 指引用当前配置的主页，不是历史卡死行上记的旧主页', async () => {
+    const OLD_PAGE = '1111111111'
+    const NEW_PAGE = '2222222222'
+    assessConfiguredPageMock.mockResolvedValue({ verified: true, via: 'client_oauth' })
+    const { sb } = fakeDb({
+      exhaustedRows: [{ client_id: 'cts', page_id: OLD_PAGE, updated_at: '2026-09-01T00:00:00Z' }],
+      configuredPages: { cts: NEW_PAGE },
+    })
+    const items: ManualItem[] = []
+    await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
+    expect(assessConfiguredPageMock).toHaveBeenCalledWith(sb, 'cts', NEW_PAGE, expect.anything())
   })
 
   // Codex round 15 复审 P1：评论配置页不是客户绑定页、且这个页的存量 OAuth 令牌

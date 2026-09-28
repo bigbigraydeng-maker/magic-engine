@@ -424,7 +424,7 @@ async function processClaimedComment(
   }
 }
 
-interface FinaliseResult {
+export interface FinaliseResult {
   status: string
   hidden: boolean
   dmSent: boolean
@@ -433,8 +433,24 @@ interface FinaliseResult {
   error?: string
 }
 
-/** Update the claimed row with the classification + send result. Logs (never throws) on DB error. */
-async function finalise(rowId: string, decision: CommentDecision, r: FinaliseResult): Promise<void> {
+/**
+ * Update the claimed row with the classification + send result. Logs (never
+ * throws) on DB error.
+ *
+ * Also clears reviewed_at/reviewed_by unconditionally (Codex round 16 复审
+ * P2): claimComment already clears them at claim time (round 15), but that
+ * only covers a review mark written BEFORE this retry attempt started —
+ * classifyComment/replyToComment/sendPrivateReply below all await real
+ * network calls, so the row sits in 'processing' with its OLD, stale
+ * needs_human value (finalise hasn't run yet to refresh it) for that whole
+ * stretch. If an FDE's "标记已阅" click lands in exactly that window, it
+ * writes a fresh reviewed_at that claimComment's claim-time clear has
+ * already run and can't catch. Clearing here too is a no-op for every other
+ * case (a brand-new row's reviewed_at was never set; a retry-claimed row's
+ * was already cleared by claimComment) and closes this one for real, since
+ * finalise is always the last write for a given attempt.
+ */
+export async function finalise(rowId: string, decision: CommentDecision, r: FinaliseResult): Promise<void> {
   const { error } = await supabaseAdmin
     .from('social_comment_engagements')
     .update({
@@ -450,6 +466,8 @@ async function finalise(rowId: string, decision: CommentDecision, r: FinaliseRes
       private_reply_sent: r.dmSent,
       hidden: r.hidden,
       error_message: r.error ?? null,
+      reviewed_at: null,
+      reviewed_by: null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', rowId)

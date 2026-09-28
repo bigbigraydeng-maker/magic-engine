@@ -7,8 +7,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { belongsToPage, claimComment, MAX_ATTEMPTS, type CommentConfig } from '../comment-autoreply-engine'
+import { belongsToPage, claimComment, finalise, MAX_ATTEMPTS, type CommentConfig, type FinaliseResult } from '../comment-autoreply-engine'
 import type { PageComment } from '@/lib/meta/comments'
+import type { CommentDecision } from '../comment-classifier'
 
 const CTS_PAGE = '1616575215312482'
 
@@ -141,5 +142,57 @@ describe('claimComment', () => {
     const claim = await claimComment(COMMENT, CONFIG)
     expect(claim).toBeNull()
     expect(capturedUpdatePayloads).toHaveLength(0)
+  })
+})
+
+const DECISION: CommentDecision = {
+  category: 'complaint',
+  confidence: 0.9,
+  publicReply: null,
+  publicReplyAfterDm: null,
+  privateReply: null,
+  shouldHide: false,
+  needsHuman: true,
+  guardrailFlags: [],
+  replySource: 'llm',
+}
+
+const FINALISE_RESULT: FinaliseResult = {
+  status: 'failed',
+  hidden: false,
+  dmSent: false,
+  publicReplyId: null,
+  publicText: null,
+  error: 'boom',
+}
+
+/**
+ * Codex round 16 复审 P2：`claimComment` 在认领瞬间清空 `reviewed_at` 只堵住了
+ * "这次重试开始前就已经被标记已阅"这一半——`classifyComment` /
+ * `replyToComment` / `sendPrivateReply`（`processClaimedComment` 内，
+ * `claimComment` 和 `finalise` 之间）都是真实的网络调用，这段时间行一直停在
+ * `processing`、`needs_human` 还是上一轮的旧值，FDE 这时候点"标记已阅"会
+ * 重新写一次 `reviewed_at`——`claimComment` 的清空已经跑过了，拦不住这次。
+ * `finalise` 作为这次尝试的最后一次写入，无条件把 `reviewed_at`/`reviewed_by`
+ * 也清一遍，才能真正堵死这条竞态：不管这次结果是什么，这次尝试的结果都还
+ * 没有人看过，旧的审核标记不该继续算数。
+ */
+describe('finalise', () => {
+  beforeEach(() => {
+    capturedUpdatePayloads = []
+  })
+
+  it('无论这次结果是什么，都顺带清空 reviewed_at / reviewed_by', async () => {
+    await finalise('row-1', DECISION, FINALISE_RESULT)
+    expect(capturedUpdatePayloads).toHaveLength(1)
+    expect(capturedUpdatePayloads[0]).toMatchObject({ reviewed_at: null, reviewed_by: null })
+  })
+
+  it('回复成功的结果同样清空——不是只有失败结果才清', async () => {
+    await finalise('row-1', { ...DECISION, needsHuman: false }, {
+      status: 'replied', hidden: false, dmSent: false, publicReplyId: 'fb_1', publicText: 'thanks!',
+    })
+    expect(capturedUpdatePayloads).toHaveLength(1)
+    expect(capturedUpdatePayloads[0]).toMatchObject({ reviewed_at: null, reviewed_by: null })
   })
 })

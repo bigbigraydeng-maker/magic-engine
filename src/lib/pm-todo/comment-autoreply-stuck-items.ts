@@ -235,21 +235,40 @@ async function scopedEnvVarName(
   return row?.facebook_page_id ? pageIdToEnvVar(row.facebook_page_id) : null
 }
 
-/** 每个客户配置的回看天数，读不到 / 没配置行的按默认值兜底。 */
-async function fetchLookbackDaysByClient(
+interface ClientCommentConfig {
+  lookbackDays: number
+  /** 这个客户评论引擎实际在用的主页——不是历史卡死行上记的那个（见下方用途）。 */
+  pageId: string | null
+}
+
+/**
+ * 每个客户当前的评论回看天数 + 实际配置主页，读不到 / 没配置行的按默认值兜底。
+ *
+ * `pageId` 一起查（Codex round 16 复审 P2）：`tokenSourceGuidance` 原来拿的是
+ * 聚合时"第一条卡死行"上记的 `page_id`——如果客户中途换过
+ * `social_comment_config.fb_page_id`，旧配置页的历史卡死行和新配置页的卡死
+ * 行会混在一起，聚合只留第一条命中的那个，可能正好是旧页；而 OAuth 回调
+ * （`intent=comment_reply`）重新授权时读的是这张表**当前**的 `fb_page_id`。
+ * 两边不是同一个来源，按钮可能修好了一个已经不再使用的旧主页。这里查的是
+ * 当前配置，跟回调保持同一个真相来源。
+ */
+async function fetchClientConfigByClient(
   supabase: SupabaseClient,
   activeClientIds: readonly string[],
-): Promise<Map<string, number>> {
-  const rows = await fetchAll<{ client_id: string; lookback_days: number | null }>((from, to) =>
-    supabase
-      .from('social_comment_config')
-      .select('client_id, lookback_days')
-      .in('client_id', activeClientIds)
-      .order('client_id', { ascending: true })
-      .range(from, to),
+): Promise<Map<string, ClientCommentConfig>> {
+  const rows = await fetchAll<{ client_id: string; lookback_days: number | null; fb_page_id: string | null }>(
+    (from, to) =>
+      supabase
+        .from('social_comment_config')
+        .select('client_id, lookback_days, fb_page_id')
+        .in('client_id', activeClientIds)
+        .order('client_id', { ascending: true })
+        .range(from, to),
   )
-  const map = new Map<string, number>()
-  for (const r of rows) map.set(r.client_id, r.lookback_days ?? DEFAULT_LOOKBACK_DAYS)
+  const map = new Map<string, ClientCommentConfig>()
+  for (const r of rows) {
+    map.set(r.client_id, { lookbackDays: r.lookback_days ?? DEFAULT_LOOKBACK_DAYS, pageId: r.fb_page_id })
+  }
   return map
 }
 
@@ -257,10 +276,11 @@ async function fetchStuckRows(
   supabase: SupabaseClient,
   activeClientIds: readonly string[],
   now: Date,
+  configByClient: Map<string, ClientCommentConfig>,
 ): Promise<StuckRow[]> {
   const staleBefore = new Date(now.getTime() - STALE_PROCESSING_MS).toISOString()
 
-  const [exhausted, dmOnly, staleProcessing, partialFailures, lookbackByClient] = await Promise.all([
+  const [exhausted, dmOnly, staleProcessing, partialFailures] = await Promise.all([
     fetchAll<RawEngagementRow>((from, to) =>
       supabase
         .from('social_comment_engagements')
@@ -308,12 +328,11 @@ async function fetchStuckRows(
         .order('id', { ascending: true })
         .range(from, to),
     ),
-    fetchLookbackDaysByClient(supabase, activeClientIds),
   ])
 
   const orphaned: StuckRow[] = partialFailures
     .filter((r) => {
-      const lookbackDays = lookbackByClient.get(r.client_id) ?? DEFAULT_LOOKBACK_DAYS
+      const lookbackDays = configByClient.get(r.client_id)?.lookbackDays ?? DEFAULT_LOOKBACK_DAYS
       const cutoff = now.getTime() - lookbackDays * 86_400_000
       return Date.parse(r.comment_created_at) < cutoff
     })
@@ -337,7 +356,8 @@ export async function pushCommentAutoreplyStuckItems(
 ): Promise<void> {
   if (activeClientIds.length === 0) return
 
-  const rows = await fetchStuckRows(supabase, activeClientIds, now)
+  const configByClient = await fetchClientConfigByClient(supabase, activeClientIds)
+  const rows = await fetchStuckRows(supabase, activeClientIds, now, configByClient)
 
   const byClient = new Map<string, { count: number; oldest: string; pageId: string; stale: number; orphaned: number }>()
   for (const row of rows) {
@@ -356,7 +376,11 @@ export async function pushCommentAutoreplyStuckItems(
 
   for (const [clientId, agg] of Array.from(byClient.entries())) {
     const days = daysAgo(agg.oldest, now)
-    const guidance = await tokenSourceGuidance(supabase, clientId, agg.pageId, env)
+    // 用这个客户*当前*配置的主页，不是聚合时随便留下的历史卡死行那个
+    // （Codex round 16 复审 P2）——见 fetchClientConfigByClient 的文档注释。
+    // 配置行读不到 / 没填主页才退回历史行的 pageId，好过完全没有页面可判断。
+    const pageId = configByClient.get(clientId)?.pageId || agg.pageId
+    const guidance = await tokenSourceGuidance(supabase, clientId, pageId, env)
     const confirmed = agg.count - agg.stale - agg.orphaned
 
     // 三类分开描述，不对"不确定"的那类断言"该回复"，也不对"越窗"的那类暗示
