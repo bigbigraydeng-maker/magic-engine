@@ -123,10 +123,9 @@ export default function DailyPlanPage() {
                 )}
               </div>
 
-              {/* Visual Direction — kept next to the review grid so whoever is
-                  checking a day's content can still see the campaign's mood/
-                  colour/dos&donts without leaving the page. */}
+              {/* key forces a remount on campaign switch — VisualDirectionSection only seeds its form state from `campaign` on mount, so without it a switch would keep showing (and could save) the previous campaign's draft. */}
               <VisualDirectionSection
+                key={selectedCampaign.id}
                 campaign={selectedCampaign}
                 clientId={clientId}
                 onUpdated={handleCampaignUpdated}
