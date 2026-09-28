@@ -58,6 +58,9 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   conversion_needs_review: 'decide', // 告诉广告平台一笔成交，撤不回
   ai_auto_review_circuit_breaker: 'decide', // 重新打开「AI 自动发给广告平台」
   ads_auto_pause_pending: 'decide', // 暂停在花钱的广告组
+  // 广告自治被熔断器冻住了，要不要恢复自动动手是个决定；同 ads_auto_pause_pending 一档
+  // （WP3.1b 重做 PR A，2026-09-28 合并主干时补——这份穷举表在那个 PR 分叉之后才建）
+  ads_circuit_tripped: 'decide',
   ads_rule_finding: 'decide', // 改不改在投的广告
   ad_readback_blocker: 'decide', // 正在花钱的广告组撞上已知坑，要改设置
   outcome_rows_orphaned: 'decide', // 旧效果数据删还是留（删了撤不回）
@@ -148,6 +151,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   cron_blind: 'dev',
   cron_stuck: 'dev',
   cron_failing: 'dev',
+  ads_config_unreadable: 'dev', // 广告回拉读不出广告设置，字段没对齐或临时故障，都是我们的活
   cron_not_running: 'dev',
   cron_silent_success: 'dev',
   ai_alerting_broken: 'dev',
