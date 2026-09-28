@@ -339,14 +339,20 @@ PR [#1952](https://github.com/bigbigraydeng-maker/magic-engine/pull/1952)：
 
 ---
 
-### 2026-09-23（AI 可见度：100% 探测失败 → PM 今日待办告警 + 旧 cron 失败计数修复）
+### 2026-09-28（AI 可见度：100% 探测失败 → PM 今日待办告警 + 旧 cron 失败计数修复）
 
-PR [#1943](https://github.com/bigbigraydeng-maker/magic-engine/pull/1943)：
-- 新增 `ai_tracker_all_failed` PM 待办项：当某客户的 AI 可见度周度体检所有探测全挂时，自动出现在今日待办里，带原因分桶（余额用光 / 授权失效 / 供应商出错）和修复指引
-- 修复旧 cron `ai-tracker-weekly/route.ts`：全挂客户以前被算成"成功"，现在正确计入失败
-- 查询使用 `fetchAll` 分页器避开 PostgREST 1000 行静默截断
-- 17 个新单测覆盖错误分桶、连续失败周数计算、提醒节拍、多客户场景
-- 经子牙（架构）+ 魏征（挑刺）两轮独立复审
+PR [#1943](https://github.com/bigbigraydeng-maker/magic-engine/pull/1943)（2026-09-23 开工，2026-09-28 合并）：
+- 新增 `ai_tracker_all_failed` PM 待办项：当某客户的 AI 可见度周度体检所有探测全挂、且主要原因需要
+  PM 动手（充值/换钥匙）时，自动出现在今日待办里，按实际出错的供应商（OpenAI/Google AI/Claude/
+  Perplexity）给对应的充值或换钥匙指引；不用 PM 操心的原因（暂时限流/供应商出错/我们解析不出排名/
+  数据库写入问题）单独归开发栏的新 kind `ai_tracker_all_failed_dev`，不计入 PM 待办数量
+- 修复旧 cron `ai-tracker-weekly/route.ts`：全挂客户以前被算成"成功"，现在用新增的 `runs_conclusive`
+  字段（跟快照闸门同一套可判定标准）正确计入失败，含"AI 答了但我们解析不出排名"这种更隐蔽的全挂
+- 查询使用 `fetchAll` 分页器 + `(ran_at, id)` 稳定排序，避开 PostgREST 1000 行静默截断和分页跳行
+- 30 个新单测覆盖错误分桶、按供应商路由修复指引、连续失败周数计算、提醒节拍、活跃客户名单过滤、多客户场景
+- 经子牙（架构）+ 魏征（挑刺）+ Codex 三轮独立复审共 12 条意见，其中一条是真的编译不过的错误、一条
+  会让所有新告警从待办里彻底消失，均已修；2 条架构级已知缺口（数据库更新失败时误读成成功、批次没跑完
+  时可能误报一次但会自愈）记入台账卡并回写 [ROADMAP §AI 可见度全挂告警上线后跟进](../ROADMAP.md)
 
 ### 2026-09-23（AI 可见度探测失败被当成「零提及」发给客户：数据结构分离 + 回执 finding + 过度矫正守卫）
 
