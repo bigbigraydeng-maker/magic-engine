@@ -68,18 +68,26 @@ BEGIN
     RETURN 'locked_by_other_deny';
   END IF;
 
+  -- 🔴 同一处 TOCTOU（Codex P2 复审在解除函数上发现后，本函数一并核对补齐）：
+  -- WHERE 必须重申 SELECT 已经确认过的 mode <> 'deny'，不能只靠上面两个 IF
+  -- 分支——否则 SELECT 确认"当前不是 deny"之后、UPDATE 真正执行之前，如果
+  -- 管理员并发把这一行设成人工 deny，这条 UPDATE 会照样命中，把 updated_by
+  -- 覆盖成 circuit-breaker:...，让后续 release 函数误以为这是熔断器自己
+  -- 设的、能被自动解除——审计痕迹被冲掉，管理员的硬锁被悄悄接管。
   UPDATE public.client_automation_policies
      SET mode       = 'deny',
          updated_by = v_updated_by
    WHERE client_id = p_client_id
      AND action_key = p_action_key
-     AND effective_to IS NULL;
+     AND effective_to IS NULL
+     AND mode <> 'deny';
 
   IF FOUND THEN
     RETURN 'tripped';
   END IF;
 
-  -- 上面 SELECT 到行、这里 UPDATE 却 0 行：并发把这行 effective_to 掉了，极罕见，原样报告。
+  -- 上面 SELECT 到行、这里 UPDATE 却 0 行：并发把这行改成了 deny（管理员抢先，
+  -- 或另一次熔断计算先落地）或 effective_to 掉了，极罕见，原样报告，不猜。
   RETURN 'race_lost';
 END;
 $$;
@@ -129,13 +137,19 @@ BEGIN
     RETURN 'not_circuit_tripped';
   END IF;
 
+  -- 🔴 Codex P2 复审：UPDATE 的 WHERE 必须跟上面 SELECT 检查的条件完全一致
+  -- （包含 updated_by），不能只查 mode = 'deny'——否则 SELECT 确认"这是熔断器
+  -- 自己设的 deny"之后、UPDATE 真正执行之前，如果有管理员并发把这一行改成
+  -- 人工 deny（换了原因），这条 UPDATE 只看 mode = 'deny' 还是会命中，把人工
+  -- 刚设的硬锁当成熔断器的旧 deny 解掉。
   UPDATE public.client_automation_policies
      SET mode       = 'require_approval',
          updated_by = p_updated_by
    WHERE client_id = p_client_id
      AND action_key = p_action_key
      AND effective_to IS NULL
-     AND mode = 'deny';
+     AND mode = 'deny'
+     AND updated_by LIKE 'circuit-breaker:%';
 
   IF FOUND THEN
     RETURN 'released';

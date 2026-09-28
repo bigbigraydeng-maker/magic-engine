@@ -288,6 +288,34 @@ describe('ads-circuit-breaker-check handler', () => {
     expect(result.applied.every((r) => r.outcome === 'already_tripped')).toBe(true)
   })
 
+  it('管理员已手动锁死（locked_by_other_deny）→ 照常返回——mode 已经是 deny，安全目标已达成', async () => {
+    const { sb, rpc } = fakeSupabase({
+      config: { autonomy_mode: 'bounded_auto' },
+      insights: [...historyRows(DATE, [50, 50, 50, 40, 40, 50, 60]), { insight_date: DATE, ad_account_id: ACCOUNT, spend: 200 }],
+      rpcOutcome: () => 'locked_by_other_deny',
+    })
+    const result = (await run(sb)) as { ok: true; applied: { outcome: string }[] }
+    expect(result.applied.every((r) => r.outcome === 'locked_by_other_deny')).toBe(true)
+  })
+
+  it('🔴 Codex P1：race_lost（并发把行改了，deny 没真的写进去）→ 整个 handler 抛错，不能当成功放进 applied', async () => {
+    const { sb } = fakeSupabase({
+      config: { autonomy_mode: 'bounded_auto' },
+      insights: [...historyRows(DATE, [50, 50, 50, 40, 40, 50, 60]), { insight_date: DATE, ad_account_id: ACCOUNT, spend: 200 }],
+      rpcOutcome: () => 'race_lost',
+    })
+    await expect(run(sb)).rejects.toThrow(/race_lost/)
+  })
+
+  it('rpc 返回非预期字符串 → 同样当失败抛错，不能悄悄放行', async () => {
+    const { sb } = fakeSupabase({
+      config: { autonomy_mode: 'bounded_auto' },
+      insights: [...historyRows(DATE, [50, 50, 50, 40, 40, 50, 60]), { insight_date: DATE, ad_account_id: ACCOUNT, spend: 200 }],
+      rpcOutcome: () => 'some_future_outcome_this_code_does_not_know_about',
+    })
+    await expect(run(sb)).rejects.toThrow()
+  })
+
   it('rpc 报错 → 整个 handler 抛错（交给 Inngest 按 retries 重试）', async () => {
     const { sb } = fakeSupabase({
       config: { autonomy_mode: 'bounded_auto' },

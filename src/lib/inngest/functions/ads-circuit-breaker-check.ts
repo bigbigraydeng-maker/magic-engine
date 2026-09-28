@@ -122,7 +122,17 @@ function worstVerdict(
   return { kind: 'not_tripped' }
 }
 
-/** 逐键调触发函数；单键失败即抛（Inngest 按 retries 重试，SQL 函数本身幂等，重试安全）。 */
+/** 三种都代表"这个键现在真的是 deny"：SQL 函数自己触发的、已经触发过的、或管理员已经手动锁死的。 */
+const TRIP_OUTCOME_MEANS_DENIED = new Set(['tripped', 'already_tripped', 'locked_by_other_deny'])
+
+/**
+ * 逐键调触发函数；单键失败即抛（Inngest 按 retries 重试，SQL 函数本身幂等，重试安全）。
+ *
+ * 🔴 Codex P1 复审：`race_lost`（SELECT 和 UPDATE 之间行被并发改动，SQL 函数
+ * 放弃这次写）以及任何非预期返回值必须当失败抛出，不能塞进 `applied` 当成功
+ * 处理——那样整条函数仍以 `verdict: 'tripped'` 正常结束，但这个 key 的策略
+ * 其实没被真的改成 deny，而事件 id 已经被这次调用消耗，当天不会再重试。
+ */
 async function tripAllKeys(sb: SupabaseClient, clientId: string, reason: string): Promise<AdsTripKeyResult[]> {
   const results: AdsTripKeyResult[] = []
   for (const key of listAdsActionKeys()) {
@@ -132,7 +142,13 @@ async function tripAllKeys(sb: SupabaseClient, clientId: string, reason: string)
       p_reason: reason,
     })
     if (error) throw new Error(`ads_trip_circuit_breaker_policy(${key}) failed: ${error.message}`)
-    results.push({ key, outcome: typeof data === 'string' ? data : 'unknown' })
+    const outcome = typeof data === 'string' ? data : 'unknown'
+    if (!TRIP_OUTCOME_MEANS_DENIED.has(outcome)) {
+      throw new Error(
+        `ads_trip_circuit_breaker_policy(${key}) returned '${outcome}' — deny not confirmed in effect, not treating as success`,
+      )
+    }
+    results.push({ key, outcome })
   }
   return results
 }
