@@ -479,16 +479,33 @@ export async function GET(req: NextRequest) {
           // consumer 去重查 autonomy_mode + 花费再判定——事件只带 client_id/date，
           // consumer 不信 payload 里可能过期的值。只对真有配置行的客户发（跟
           // 下面 WP3.1a reconcile 同一个闸），engine 整体 enabled=false 时数据
-          // 本来就没刷新，没有新东西可判，不发。发送失败 best-effort，不进
-          // failed：明天同一条链路会再发一次。
+          // 本来就没刷新，没有新东西可判，不发。
+          //
+          // 🔴 Codex P1 复审：必须等主账户 + 全部辅助账户的当日花费同步都成功
+          // 才发——只要有一个账户 `syncCampaignDailyInsights` 失败，consumer
+          // 读到的账户合计就会漏掉那部分花费，可能把真实超支算成正常。而且
+          // 事件 id 固定为 client_id:date，一旦发送过，当天哪怕后来手动补拉
+          // 成功也会被 Inngest 24h 去重、补不了这次安全检查——所以宁可跳过
+          // 不发，等明天新的 evaluationDate 自然重试，也不能带着残缺数据发。
+          const primarySpendSynced = result.ad_daily?.success === true
+          const secondarySpendSynced = (result.ad_daily_secondary ?? []).every(
+            (s) => s.ad_daily?.success === true,
+          )
           if (adConfigSource === 'row') {
-            result.circuit_breaker_check = await sendInngestEvent({
-              id: adsCircuitBreakerCheckEventId(client.client_id, evaluationDate),
-              name: ADS_CIRCUIT_BREAKER_CHECK_DUE,
-              data: { client_id: client.client_id, date: evaluationDate },
-            })
-              .then(() => ({ sent: true }))
-              .catch((e: unknown) => ({ sent: false, error: e instanceof Error ? e.message : String(e) }))
+            if (primarySpendSynced && secondarySpendSynced) {
+              result.circuit_breaker_check = await sendInngestEvent({
+                id: adsCircuitBreakerCheckEventId(client.client_id, evaluationDate),
+                name: ADS_CIRCUIT_BREAKER_CHECK_DUE,
+                data: { client_id: client.client_id, date: evaluationDate },
+              })
+                .then(() => ({ sent: true }))
+                .catch((e: unknown) => ({ sent: false, error: e instanceof Error ? e.message : String(e) }))
+            } else {
+              result.circuit_breaker_check = {
+                sent: false,
+                error: 'skipped: campaign spend sync incomplete this cycle (see ad_daily / ad_daily_secondary)',
+              }
+            }
           }
 
           // P21.K.2: judge each campaign against its own baseline and store the
