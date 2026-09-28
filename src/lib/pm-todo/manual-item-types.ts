@@ -137,6 +137,15 @@ export type ManualItemKind =
    * 但在所有现有看板上跟「没什么 AI 提到我们」长得一模一样。
    */
   | 'ai_tracker_all_failed'
+  /**
+   * 同上，但这周全挂的原因清一色是「不用人动手」的那几类
+   * （暂时限流 / 供应商自己出错 / 解析失败 / 我们数据库写入失败，见
+   * ai-tracker-failure-items.ts 的 GENERIC_FIX）—— 没有一条需要充值或换钥匙。
+   * 这条的 `how` 原文就写着「这条不用你动手」，不能进 PM 的「系统进不去、要你
+   * 点一次」动手栏（Codex 复审 2026-09-28：整周全挂但原因不需要人管时，还是
+   * 走了 ai_tracker_all_failed，把「不用你动手」的活算进了 PM 的任务数）。
+   */
+  | 'ai_tracker_all_failed_dev'
   | 'goal_baseline_mismatch'
   | 'diagnostic_findings'
   | 'prescription_updated'

@@ -389,6 +389,17 @@ async function processOne(input: ProcessOneInput): Promise<void> {
       return
     }
 
+    // A run that updated fine but whose parser threw is not conclusive — match
+    // isRunConclusive() so runs_succeeded/runs_failed agree with the snapshot
+    // aggregator (line ~436) and the PM-todo weekly-failure alert. Before this
+    // fix, ai-tracker-weekly/route.ts trusted runs_succeeded to decide whether
+    // a client's week counted as "all probes failed", so an all-parse-error
+    // week was silently logged as a success (Codex review 2026-09-28).
+    if (parseError !== null) {
+      result.runs_failed++
+      return
+    }
+
     result.runs_succeeded++
     if (clientBrandRank !== null) result.client_brand_mentions++
   } catch (err: unknown) {

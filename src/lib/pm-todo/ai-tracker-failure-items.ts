@@ -465,15 +465,33 @@ export function buildAiTrackerFailureItems(
     const clientName = clientNames.get(clientId) ?? clientId.slice(0, 8)
     const buckets = bucketErrors(latestWeek.errors)
     const errorSummary = summariseRunFailures(buckets)
-    const topBucket = buckets[0]
+    // Prefer a bucket that needs a human to act (quota/auth, i.e. has an
+    // ENGINE_FIX entry) over the raw count leader. Real incident (2026-09-20):
+    // OpenAI quota_exhausted and Google provider_error split the week's
+    // failures roughly evenly, and provider_error's rows sorted later ran_at
+    // so it tied or edged out quota_exhausted for buckets[0] — routing the PM
+    // to "no action needed" and hiding the top-up link while the account
+    // stayed dead (Codex review 2026-09-28).
+    const actionableBucket = buckets.find((b) => ENGINE_FIX[b.key])
+    const topBucket = actionableBucket ?? buckets[0]
     const guide = topBucket ? fixGuideFor(topBucket) : DEFAULT_FIX
     const duration =
       streak <= 1
         ? '这周'
         : `已经连续 ${streak} 周`
 
+    // A week only needs PM action when at least one bucket isn't in the
+    // "not your job" set (GENERIC_FIX: rate_limited/provider_error/
+    // parse_error/db_error, each `how` literally says "这条不用你动手").
+    // quota_exhausted/auth_failed (ENGINE_FIX) and the fail-closed `unknown`
+    // bucket stay PM-visible. Before this fix, a week of pure rate-limiting
+    // or pure provider errors still used the PM one_click kind, inflating
+    // the PM's action count with items their own `how` text disclaims
+    // (Codex review 2026-09-28).
+    const needsPmAction = buckets.some((b) => !GENERIC_FIX[b.key])
+
     items.push({
-      kind: 'ai_tracker_all_failed',
+      kind: needsPmAction ? 'ai_tracker_all_failed' : 'ai_tracker_all_failed_dev',
       client_id: clientId,
       client_name: clientName,
       what: `${duration}的 AI 可见度体检全挂了（${latestWeek.total} 条探测全部失败：${errorSummary}）—— 这个客户这周的 AI 可见度数据完全空白，看上去跟「没什么 AI 提到我们」一模一样，但其实是根本没测成`,
