@@ -14,6 +14,7 @@ function mk(over: Partial<LedgerEntry>): LedgerEntry {
     source: 'session:1',
     verifyBy: null,
     verifyHow: '',
+    onHold: false,
     doneOn: null,
     doneRef: null,
     verifiedRef: null,
@@ -61,6 +62,16 @@ describe('walkLedger', () => {
     expect(walkLedger([entry], today)).toEqual([
       { kind: 'decided_stale', entry, daysIdle: 2 },
     ])
+  })
+
+  it('decided 8 days ago but onHold → none, indefinite pause never nags', () => {
+    const entry = mk({ decidedOn: '2026-09-16', onHold: true })
+    expect(walkLedger([entry], today)).toEqual([])
+  })
+
+  it('decided with onHold and overdue verifyBy → still none', () => {
+    const entry = mk({ decidedOn: '2026-09-16', verifyBy: '2026-09-17', onHold: true })
+    expect(walkLedger([entry], today)).toEqual([])
   })
 
   it('done 2 days ago with no verifyBy → none (derived due date not yet reached)', () => {

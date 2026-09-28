@@ -17,6 +17,7 @@ function mk(over: Partial<LedgerEntry>): LedgerEntry {
     source: 'session:test',
     verifyBy: null,
     verifyHow: '看一眼',
+    onHold: false,
     doneOn: null,
     doneRef: null,
     verifiedRef: null,

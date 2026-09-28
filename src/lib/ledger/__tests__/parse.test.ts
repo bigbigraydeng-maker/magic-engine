@@ -186,4 +186,35 @@ describe('parseLedgerFile', () => {
     expect(result.entry.lastChecked).toBeNull()
     expect(result.entry.checkNote).toBeNull()
   })
+
+  it('没填 on_hold → 默认 false', () => {
+    const result = parseLedgerFile('2026-09-24-foo.md', fm(VALID))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.entry.onHold).toBe(false)
+  })
+
+  it('decided 且 on_hold: true → ok', () => {
+    const result = parseLedgerFile('2026-09-24-foo.md', fm(`${VALID}\non_hold: true`))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.entry.onHold).toBe(true)
+  })
+
+  it('on_hold 不是布尔值 → 报错', () => {
+    const result = parseLedgerFile('2026-09-24-foo.md', fm(`${VALID}\non_hold: 是的`))
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.reason).toContain('on_hold')
+  })
+
+  it('status 不是 decided 却填 on_hold: true → 报错', () => {
+    const fields =
+      VALID.replace('status: decided', 'status: done') +
+      '\ndone_on: 2026-09-25\ndone_ref: pr:1984\non_hold: true'
+    const result = parseLedgerFile('2026-09-24-foo.md', fm(fields))
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.reason).toContain('on_hold')
+  })
 })

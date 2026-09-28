@@ -53,6 +53,14 @@ function firstBadDate(obj: Record<string, unknown>, keys: readonly string[]): st
   return null
 }
 
+/** on_hold 只认 YAML 布尔 true/false；缺省 false */
+function onHoldOf(obj: Record<string, unknown>): { value: boolean; error: string | null } {
+  const value = obj['on_hold']
+  if (value === undefined) return { value: false, error: null }
+  if (typeof value === 'boolean') return { value, error: null }
+  return { value: false, error: 'on_hold 只能是 true/false' }
+}
+
 /** 校验指向字段的写法与类型白名单，返回第一个不合规的字段名 */
 function firstBadRef(obj: Record<string, unknown>): RefField | null {
   for (const [key, kinds] of Object.entries(REF_KINDS_BY_FIELD) as [RefField, readonly string[]][]) {
@@ -74,6 +82,9 @@ function statusShapeError(raw: Record<string, unknown>, status: string): string 
 
   if (status === 'decided' && (doneOn !== null || doneRef !== null || verifiedRef !== null)) {
     return 'status 为 decided 时不能填 done_on / done_ref / verified_ref'
+  }
+  if (status !== 'decided' && onHoldOf(raw).value) {
+    return 'on_hold 只能配 status: decided'
   }
   if (doneOn !== null && doneOn < decidedOn) return 'done_on 不能早于 decided_on'
   if (status === 'verified' || status === 'failed') {
@@ -107,6 +118,9 @@ function headerError(raw: Record<string, unknown>, file: string): string | null 
   if (badRef !== null) {
     return `${badRef} 格式不对或类型不允许（${LEDGER_REF_HELP}；${badRef} 只准 ${REF_KINDS_BY_FIELD[badRef].join('/')}）`
   }
+
+  const onHoldError = onHoldOf(raw).error
+  if (onHoldError !== null) return onHoldError
 
   const badDate = firstBadDate(raw, ['decided_on', 'verify_by', 'done_on', 'last_checked'])
   if (badDate !== null) return `${badDate} 不是 YYYY-MM-DD`
@@ -163,6 +177,7 @@ export function parseLedgerFile(file: string, text: string): LedgerParseResult {
     source: str(raw, 'source') as string,
     verifyBy: str(raw, 'verify_by'),
     verifyHow: str(raw, 'verify_how') as string,
+    onHold: onHoldOf(raw).value,
     doneOn: str(raw, 'done_on'),
     doneRef: str(raw, 'done_ref'),
     verifiedRef: str(raw, 'verified_ref'),
