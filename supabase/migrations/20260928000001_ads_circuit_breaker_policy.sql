@@ -32,9 +32,11 @@
 --    INSERT/UPDATE，不会遗留"部分键已经 deny、部分还没"的中间态；Inngest
 --    重试的是这一整批，要么全部成功要么完全不落地，不会有第三种状态。
 --
--- 🔴 幂等：已经是本函数自己写的 deny（updated_by 前缀 circuit-breaker:）→
---    该键记 already_tripped，不重复 UPDATE、不再次触发 policy_version+1
---    （不然每天熔断计算都在跑，会让在途授权反复作废）。
+-- 🔴 幂等但不冻结展示信息：已经是本函数自己写的 deny（updated_by 前缀
+--    circuit-breaker:）→ 该键记 already_tripped，mode 不重复 UPDATE，但
+--    updated_by 会刷新成这次评估的最新原因/触发账户（round 8 修正：只改
+--    updated_by 不会碰 policy_version——见下方函数体注释，之前完全不刷新
+--    是对 version_guard 触发器范围的误判）。
 --
 -- 🔴 不覆盖管理员的判断：当前是 deny 但不是本函数写的（人工设的）→
 --    该键记 locked_by_other_deny，原样让路。熔断器只负责"我判定要熔断"，
@@ -82,6 +84,23 @@ BEGIN
       v_outcome := 'tripped';
 
     ELSIF v_current_mode = 'deny' AND v_current_by LIKE 'circuit-breaker:%' THEN
+      -- 🔴 Codex P2 复审（round 8）：已经是 deny 也要刷新 updated_by 到这次的
+      -- 最新原因/账户，不能让第一次触发的账户信息冻结不变——账户 A 先触发、
+      -- 账户 B 后来才出问题时，pm-todo 从 updated_by 里抠触发账户给 PM 看
+      -- （见 pm-todo/ads-autonomy-items.ts 的 extractTriggeringAccount），旧值
+      -- 冻结会一直让 PM 只查 A、不知道要看 B。之前不刷新是怕重复触发
+      -- policy_version+1（原注释），但 version_guard 触发器明确把 updated_by
+      -- 排除在"授权相关字段"之外（20260808000003_me2_execution_kernel_v1.sql:
+      -- 118-132），只改这一列不会 bump 版本，这层顾虑本来就是可以避开的。
+      -- WHERE 重申 SELECT 确认过的条件——刷新是纯展示信息，并发丢了这次刷新
+      -- 不影响任何判定，不用回滚整批，下一轮评估会再刷新一次。
+      UPDATE public.client_automation_policies
+         SET updated_by = v_updated_by
+       WHERE client_id = p_client_id
+         AND action_key = v_action_key
+         AND effective_to IS NULL
+         AND mode = 'deny'
+         AND updated_by LIKE 'circuit-breaker:%';
       v_outcome := 'already_tripped';
 
     ELSIF v_current_mode = 'deny' THEN

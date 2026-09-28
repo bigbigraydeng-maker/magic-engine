@@ -26,8 +26,15 @@ interface ReceiptRow {
   synced_at: string
 }
 
-export function adsAutonomySettingsHref(clientId: string): string {
-  return `${APP_BASE}/dashboard/clients/${encodeURIComponent(clientId)}/settings`
+/**
+ * 🔴 Codex P2 复审：链接必须指向真正能操作的页面。自治档位单选和「解除熔断」
+ * 按钮都只在 `AutonomySettings` 组件（`ads-health/autonomy-settings.tsx`）里，
+ * 而这个组件只被 `ads-health/page.tsx` 渲染——`/settings` 页的 `AdStrategyPanel`
+ * 不含 `autonomy_mode`/熔断相关任何内容（全仓 grep 确认）。之前两条待办通道
+ * 都把 href 指向 `/settings`，点进去的人得自己再找一次入口。
+ */
+export function adsAutonomyAdsHealthHref(clientId: string): string {
+  return `${APP_BASE}/dashboard/clients/${encodeURIComponent(clientId)}/ads-health`
 }
 
 /** 去掉 `sync_failed:` 前缀，截断到 120 字，别把整段堆栈塞进待办。 */
@@ -54,7 +61,7 @@ function extractTriggeringAccount(updatedBy: string): string | null {
   return match ? match[1] : null
 }
 
-/** 单客户版本：Settings 页用来决定要不要画"熔断已触发"横幅 + 解除按钮。 */
+/** 单客户版本：广告健康页用来决定要不要画"熔断已触发"横幅 + 解除按钮。 */
 export async function isCircuitBreakerTripped(
   supabase: SupabaseClient,
   clientId: string,
@@ -110,9 +117,9 @@ export async function pushAdsAutonomyCircuitBreakerItems(
         (account
           ? `先到 Meta Ads Manager 核实账户 ${account} 的实际花费是否正常；`
           : '先到 Meta Ads Manager 核实实际花费是否正常（多账户客户请逐个核对）；') +
-        '确认没问题后在客户设置页点「解除熔断」按钮（不是重新拨自治档位——' +
+        '确认没问题后在客户广告健康页点「解除熔断」按钮（不是重新拨自治档位——' +
         '那个开关不会碰这把熔断锁，得点专门的解除按钮）。',
-      href: adsAutonomySettingsHref(row.client_id),
+      href: adsAutonomyAdsHealthHref(row.client_id),
     })
   }
 }
@@ -149,9 +156,9 @@ export async function pushAdsAutonomySyncItems(
         '面板上显示的自动/观察档位跟内核实际用的可能不一致 —— 拨到自动的会仍然要人审批，' +
         '拨回观察的可能仍在自动动钱。',
       how:
-        '打开客户设置页，把「自治档位」重新保存一次（会重新发同步）；' +
+        '打开客户广告健康页，把「自治档位」重新保存一次（会重新发同步）；' +
         `还是失败就查 ads_autonomy_sync_receipts 最近一行的 skipped_reason（${row.synced_at.slice(0, 10)}）。`,
-      href: adsAutonomySettingsHref(row.client_id),
+      href: adsAutonomyAdsHealthHref(row.client_id),
     })
   }
 }

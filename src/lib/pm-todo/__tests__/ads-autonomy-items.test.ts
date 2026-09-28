@@ -85,10 +85,12 @@ describe('pushAdsAutonomyCircuitBreakerItems', () => {
     await pushAdsAutonomyCircuitBreakerItems(sb, items, NOW, nameOf, [CLIENT])
 
     expect(items).toHaveLength(1)
-    const item = items[0] as unknown as { what: string; how: string; client_id: string }
+    const item = items[0] as unknown as { what: string; how: string; client_id: string; href: string }
     expect(item.client_id).toBe(CLIENT)
     expect(item.what).toContain('123456789')
     expect(item.how).toContain('123456789')
+    // 🔴 Codex P2：解除按钮只在广告健康页，不在 /settings（AdStrategyPanel 不含这块）。
+    expect(item.href).toBe(`https://app.magicengine.com.au/dashboard/clients/${CLIENT}/ads-health`)
   })
 
   it('updated_by 不带 [accountId]（如手工构造的 deny 行）→ 退回不点名账户的通用文案，不抛错', async () => {
