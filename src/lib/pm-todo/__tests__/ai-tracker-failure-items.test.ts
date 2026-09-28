@@ -193,8 +193,10 @@ describe('buildAiTrackerFailureItems', () => {
     })
     const items = buildAiTrackerFailureItems({ rows, error: null }, NAMES, WED)
     expect(items).toHaveLength(1)
-    // Must point at Gemini, not send the PM to fix an unrelated OpenAI account
-    expect(items[0]!.how).toContain('Gemini')
+    // Must point at Google AI, not send the PM to fix an unrelated OpenAI account
+    // ("Google AI" matches the product's established engine-display-names.ts
+    // convention, not the raw "Gemini" model-family name — Codex review 2026-09-28)
+    expect(items[0]!.how).toContain('Google AI')
     expect(items[0]!.href).toContain('aistudio.google.com')
     expect(items[0]!.href).not.toContain('openai.com')
   })

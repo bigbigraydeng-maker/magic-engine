@@ -114,13 +114,17 @@ function classifyError(entry: ErrorEntry): string {
     return 'rate_limited'
   }
 
-  // Authentication / authorization
+  // Authentication / authorization — deliberately NOT matching a bare "403"
+  // (like bare "429" above): a 403 can also mean model access restricted,
+  // region-blocked, or "service not enabled" — none of which a new API key
+  // fixes. Mirrors classifyOpenAIFailure's rule of requiring an explicit
+  // credential-code signal before concluding "the key itself is bad"
+  // (Codex review 2026-09-28).
   if (
     lower.includes('api key') ||
     lower.includes('api_key') ||
     lower.includes('authentication') ||
     lower.includes('unauthorized') ||
-    lower.includes('403') ||
     lower.includes('invalid_api_key') ||
     lower.includes('credential')
   ) {
@@ -200,7 +204,7 @@ const ENGINE_FIX: Record<string, Record<string, { how: string; href: string }>> 
       href: 'https://platform.openai.com/settings/organization/billing/overview',
     },
     google: {
-      how: '打开链接 → 查 Gemini 这把钥匙的用量/配额是不是到顶了。充完/调完额度回我一句，我把被跳过的 AI 可见度体检重跑',
+      how: '打开链接 → 查 Google AI 这把钥匙的用量/配额是不是到顶了。充完/调完额度回我一句，我把被跳过的 AI 可见度体检重跑',
       href: 'https://aistudio.google.com/apikey',
     },
     anthropic: {
@@ -218,7 +222,7 @@ const ENGINE_FIX: Record<string, Record<string, { how: string; href: string }>> 
       href: 'https://platform.openai.com/api-keys',
     },
     google: {
-      how: '打开链接 → 看 Gemini 的 API Key 是不是被禁用或者过期了。如果需要换钥匙，**别贴聊天里**，直接去 Render 后台换 GEMINI_API_KEY。换完回我一句',
+      how: '打开链接 → 看 Google AI 的 API Key 是不是被禁用或者过期了。如果需要换钥匙，**别贴聊天里**，直接去 Render 后台换 GEMINI_API_KEY。换完回我一句',
       href: 'https://aistudio.google.com/apikey',
     },
     anthropic: {
@@ -320,6 +324,11 @@ export type ClientNameMap = Map<string, string>
  *    and adding a third engine or more queries pushes past 1000, silently
  *    dropping the oldest weeks — exactly the data the streak calculation needs.
  *    子牙 + 魏征 both flagged this in review (2026-09-23).
+ * 🔴 Orders by `(ran_at, id)`, not `ran_at` alone — offset pagination needs a
+ *    fully unique sort key. With only `ran_at`, rows sharing a timestamp
+ *    (plausible once volume crosses a page boundary) can be skipped or
+ *    duplicated across pages; a skipped successful run would misreport a
+ *    client as 100% failed (Codex review 2026-09-28).
  */
 export async function readRecentAiTrackerRuns(
   supabase: SupabaseClient,
@@ -330,9 +339,10 @@ export async function readRecentAiTrackerRuns(
     const rows = await fetchAll<RunRow>((from, to) =>
       supabase
         .from('ai_visibility_runs')
-        .select('client_id, ai_engine, error_message, parse_error_message, ran_at')
+        .select('id, client_id, ai_engine, error_message, parse_error_message, ran_at')
         .gte('ran_at', since)
         .order('ran_at', { ascending: false })
+        .order('id', { ascending: false })
         .range(from, to),
     )
     return { rows, error: null }
