@@ -6,7 +6,7 @@ owner: pm
 decided_on: 2026-09-29
 source: session:5b9407a2
 done_on: 2026-09-29
-done_ref: pr:pending
+done_ref: pr:2179
 verify_by: 2026-10-06
 verify_how: "上线后在生产找一个被标成「别再联系」、且有 Messenger 或邮件对话的客人，打开他的抽屉试着手动回一句——应该发不出去，回复框提示「被标成『别再联系』」而不是「没有权限」；再找一个正常客人回一句，应该照常发出。另查 conversation_outbound_log 里这之后不应出现发给 DNC 客人的人工发送记录"
 ---
