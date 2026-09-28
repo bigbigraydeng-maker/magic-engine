@@ -344,8 +344,11 @@ PR [#1952](https://github.com/bigbigraydeng-maker/magic-engine/pull/1952)：
 PR [#1943](https://github.com/bigbigraydeng-maker/magic-engine/pull/1943)（2026-09-23 开工，2026-09-28 合并）：
 - 新增 `ai_tracker_all_failed` PM 待办项：当某客户的 AI 可见度周度体检所有探测全挂、且主要原因需要
   PM 动手（充值/换钥匙）时，自动出现在今日待办里，按实际出错的供应商（OpenAI/Google AI/Claude/
-  Perplexity）给对应的充值或换钥匙指引；不用 PM 操心的原因（暂时限流/供应商出错/我们解析不出排名/
-  数据库写入问题）单独归开发栏的新 kind `ai_tracker_all_failed_dev`，不计入 PM 待办数量
+  Perplexity）给对应的充值或换钥匙指引；不用 PM 操心的原因（暂时限流/供应商出错/我们解析不出排名）
+  单独归开发栏的新 kind `ai_tracker_all_failed_dev`，不计入 PM 待办数量。**数据库写入失败不在此列**：
+  插入失败时那次探测根本不落库、更新失败时那一行会被误读成成功，两种情况现在都读不到、分不进
+  `db_error` 桶（`ai-tracker-failure-items.ts` 里的 `db_error` 分类目前是死代码），见下方「3 条架构级
+  已知缺口」
 - 修复旧 cron `ai-tracker-weekly/route.ts`：全挂客户以前被算成"成功"，现在用新增的 `runs_conclusive`
   字段（跟快照闸门同一套可判定标准）正确计入失败，含"AI 答了但我们解析不出排名"这种更隐蔽的全挂
 - 查询使用 `fetchAll` 分页器 + `(ran_at, id)` 稳定排序，避开 PostgREST 1000 行静默截断和分页跳行
