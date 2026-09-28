@@ -7,7 +7,7 @@
  * 假件会让"漏了某个过滤条件"这类错法全部测绿。
  */
 
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
 vi.mock('@/lib/auth/client-access', () => ({
@@ -59,6 +59,17 @@ function row(over: Partial<Row>): Row {
 }
 
 /**
+ * PATCH 专用假数据——跟 GET `?stuck=1` 用的 `rows` 完全分开，互不干扰。
+ * `patchUpdateMatches` 模拟"带 `.eq('updated_at', expected)` 的条件更新是否
+ * 命中"：真实数据库里这由 Postgres 判断，这里直接由测试指定结果，只验证路由
+ * 在命中/不命中两种情况下各自的响应对不对。
+ */
+let patchLookupRow: { id: string; client_id: string; page_id: string; public_reply_id: string | null; reply_status: string } | null = null
+let patchUpdateMatches = true
+let capturedPatchUpdate: Record<string, unknown> | null = null
+let patchUpdateEqCalls: Array<[string, unknown]> = []
+
+/**
  * 每次 `.from()` 都开一条独立的假查询链，按已挂的过滤器真的筛一遍 `rows`。
  * `.range()` 直接忽略 from/to、一次性把筛完的结果全部返回——假数据集永远
  * 远小于 `fetchAll` 的单页上限（1000 行），第一页就会不满页提前返回，等价
@@ -68,6 +79,17 @@ function row(over: Partial<Row>): Row {
  */
 function makeEngagementsChain() {
   const filters: Array<(r: Row) => boolean> = []
+  const updateChain = {
+    eq: (col: string, val: unknown) => {
+      patchUpdateEqCalls.push([col, val])
+      return updateChain
+    },
+    select: () => updateChain,
+    maybeSingle: async () => ({
+      data: patchUpdateMatches ? { id: patchLookupRow?.id ?? 'row' } : null,
+      error: null,
+    }),
+  }
   const chain = {
     select: () => chain,
     eq: (col: keyof Row, val: unknown) => {
@@ -88,6 +110,13 @@ function makeEngagementsChain() {
     },
     order: () => chain,
     range: () => chain,
+    // PATCH 的行查找：`.select(...).eq('id',...).eq('client_id',...).maybeSingle()`
+    maybeSingle: async () => ({ data: patchLookupRow, error: null }),
+    // PATCH 的写入：`.update(...).eq('id',...)[.eq('updated_at',...)].select(...).maybeSingle()`
+    update: (payload: Record<string, unknown>) => {
+      capturedPatchUpdate = payload
+      return updateChain
+    },
     then: (resolve: (v: { data: Row[] | null; error: { message: string } | null }) => void) => {
       resolve({ data: rows.filter((r) => filters.every((f) => f(r))), error: null })
     },
@@ -245,5 +274,70 @@ describe('GET .../comment-engagements?stuck=1', () => {
       await expect(GET_stuck('cts')).rejects.toThrow('social_comment_config read failed')
       configError = null
     })
+  })
+})
+
+async function PATCH_engagement(
+  clientId: string,
+  body: { engagement_id: string; action: string; reviewer?: string; expected_updated_at?: string },
+) {
+  const { PATCH } = await import('../route')
+  const req = new NextRequest(`http://localhost/api/clients/${clientId}/comment-engagements`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+  const res = await PATCH(req, { params: Promise.resolve({ id: clientId }) })
+  return { res, body: (await res.json()) as { success?: boolean; stale?: boolean; error?: string; action?: string } }
+}
+
+/**
+ * `mark_reviewed` 的乐观并发锁（Codex round 17 复审 P2）：`finalise()`（round
+ * 16）已经在这次重试完成时清空 `reviewed_at`，但如果 FDE 基于还没刷新的旧
+ * 页面点了"标记已阅"、这次点击的请求在网络上被延迟，等它真正到达服务端时
+ * `finalise()` 可能已经先跑完了——前端没法靠自己判断这次点击是不是基于过时
+ * 状态，只有服务端能在写入那一刻用 `updated_at` 是否还等于点击时看到的那个
+ * 值来判断"这行在点击之后有没有被动过"。
+ */
+describe('PATCH .../comment-engagements（mark_reviewed）', () => {
+  beforeEach(() => {
+    patchLookupRow = { id: 'e1', client_id: 'cts', page_id: '1616575215312482', public_reply_id: null, reply_status: 'failed' }
+    patchUpdateMatches = true
+    capturedPatchUpdate = null
+    patchUpdateEqCalls = []
+  })
+
+  it('没传 expected_updated_at → 走原来的无条件更新，不加 updated_at 过滤', async () => {
+    const { res, body } = await PATCH_engagement('cts', { engagement_id: 'e1', action: 'mark_reviewed' })
+    expect(res.status).toBe(200)
+    expect(body).toMatchObject({ success: true, action: 'mark_reviewed' })
+    expect(patchUpdateEqCalls.some(([col]) => col === 'updated_at')).toBe(false)
+    expect(capturedPatchUpdate).toMatchObject({ needs_human: false, reviewed_at: expect.any(String) })
+  })
+
+  it('传了 expected_updated_at 且行没被动过 → 正常写入成功', async () => {
+    patchUpdateMatches = true
+    const { res, body } = await PATCH_engagement('cts', {
+      engagement_id: 'e1', action: 'mark_reviewed', expected_updated_at: '2026-09-28T00:00:00Z',
+    })
+    expect(res.status).toBe(200)
+    expect(body).toMatchObject({ success: true, action: 'mark_reviewed' })
+    expect(patchUpdateEqCalls).toContainEqual(['updated_at', '2026-09-28T00:00:00Z'])
+  })
+
+  it('传了 expected_updated_at 但行在点击之后被动过（比如系统重试改了它）→ 拒绝写入、返回 409 + stale', async () => {
+    patchUpdateMatches = false
+    const { res, body } = await PATCH_engagement('cts', {
+      engagement_id: 'e1', action: 'mark_reviewed', expected_updated_at: '2026-09-28T00:00:00Z',
+    })
+    expect(res.status).toBe(409)
+    expect(body).toMatchObject({ success: false, stale: true })
+    expect(body.error).toContain('已经变化')
+  })
+
+  it('查不到这一行（比如已经被删）→ 404，不碰乐观锁逻辑', async () => {
+    patchLookupRow = null
+    const { res, body } = await PATCH_engagement('cts', { engagement_id: 'e1', action: 'mark_reviewed' })
+    expect(res.status).toBe(404)
+    expect(body.error).toBeTruthy()
   })
 })

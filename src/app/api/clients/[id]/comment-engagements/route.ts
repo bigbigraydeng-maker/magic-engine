@@ -146,6 +146,8 @@ interface PatchBody {
   engagement_id?: unknown
   action?: unknown
   reviewer?: unknown
+  /** See `mark_reviewed`'s optimistic-concurrency guard below. */
+  expected_updated_at?: unknown
 }
 
 export async function PATCH(
@@ -166,6 +168,7 @@ export async function PATCH(
   const engagementId = typeof body.engagement_id === 'string' ? body.engagement_id : ''
   const action = body.action
   const reviewer = typeof body.reviewer === 'string' ? body.reviewer : null
+  const expectedUpdatedAt = typeof body.expected_updated_at === 'string' ? body.expected_updated_at : null
   if (!engagementId || (action !== 'revert' && action !== 'mark_reviewed')) {
     return NextResponse.json(
       { error: 'Body must include engagement_id and action ("revert" | "mark_reviewed")' },
@@ -185,10 +188,35 @@ export async function PATCH(
   const now = new Date().toISOString()
 
   if (action === 'mark_reviewed') {
-    await supabaseAdmin
+    // Guarded on `updated_at` still matching what the client last saw when
+    // it's passed (Codex round 17 复审 P2): a "标记已阅" click fired from a
+    // page load taken while this row was still 'processing' can be delayed
+    // in flight long enough for that same retry's `finalise()` to land
+    // first — `finalise()` clears reviewed_at (round 16), but the click's
+    // PATCH would then arrive afterward and silently overwrite it, and if
+    // that retry turned out to be the final one (row now exhausted),
+    // nothing ever runs again to clear it a second time — the detector's
+    // `.is('reviewed_at', null)` filter would hide it forever. The client
+    // can't fully prevent a stale click on its own (the button it rendered
+    // reflects whatever it last fetched, not the server's live state), so
+    // the server has to refuse a write that no longer applies: `updated_at`
+    // changes on every finalise()/claimComment() write, so a value that no
+    // longer matches means something happened to this row since the click
+    // was fired, and the mark shouldn't apply blindly on top of that.
+    // Optional — a caller that doesn't send it keeps the old unconditional
+    // behavior (only CommentAuditList calls this today, and always sends it).
+    let query = supabaseAdmin
       .from('social_comment_engagements')
       .update({ needs_human: false, reviewed_by: reviewer, reviewed_at: now, updated_at: now })
       .eq('id', engagementId)
+    if (expectedUpdatedAt) query = query.eq('updated_at', expectedUpdatedAt)
+    const { data: updated } = await query.select('id').maybeSingle()
+    if (expectedUpdatedAt && !updated) {
+      return NextResponse.json(
+        { success: false, stale: true, error: '这条记录在你查看之后已经变化（比如系统又重试了一次），请刷新页面确认现在的状态后再处理' },
+        { status: 409 },
+      )
+    }
     return NextResponse.json({ success: true, action: 'mark_reviewed' })
   }
 

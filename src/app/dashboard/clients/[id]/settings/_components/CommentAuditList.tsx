@@ -142,13 +142,21 @@ export function CommentAuditList({ clientId }: Props) {
 
   useEffect(() => { void load() }, [load])
 
-  const act = async (engagementId: string, action: 'revert' | 'mark_reviewed') => {
+  // `expectedUpdatedAt`（mark_reviewed 专用，Codex round 17 复审 P2）：告诉服务端
+  // 这次点击是基于哪个版本的行做出的决定——这行如果在点击之后、请求到达之前
+  // 又被系统重试改过（`updated_at` 变了），服务端会拒绝这次写入而不是盲目盖过去
+  // （见 route.ts PATCH 的注释）。revert 不受这条竞态影响，不用传。
+  const act = async (engagementId: string, action: 'revert' | 'mark_reviewed', expectedUpdatedAt?: string) => {
     setBusyId(engagementId)
     try {
       const res = await fetch(`/api/clients/${clientId}/comment-engagements`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ engagement_id: engagementId, action }),
+        body: JSON.stringify({
+          engagement_id: engagementId,
+          action,
+          ...(expectedUpdatedAt ? { expected_updated_at: expectedUpdatedAt } : {}),
+        }),
       })
       if (!res.ok) {
         const { error } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
@@ -230,7 +238,7 @@ export function CommentAuditList({ clientId }: Props) {
                 </button>
               )}
               {shouldShowMarkReviewed(it, stuckIds) && (
-                <button onClick={() => act(it.id, 'mark_reviewed')} disabled={busyId === it.id}
+                <button onClick={() => act(it.id, 'mark_reviewed', it.updated_at)} disabled={busyId === it.id}
                   className="text-xs font-semibold text-slate-600 hover:underline disabled:opacity-50">
                   标记已阅
                 </button>
