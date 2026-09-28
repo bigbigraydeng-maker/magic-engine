@@ -148,6 +148,16 @@ PR #1973 给 Meta 留资同步加了「上一轮已办完就别重跑」的闸�
 
 ---
 
+## 生产库存在没有对应 git migration 文件的 ads_circuit_events 表（2026-09-28 PR #2019 apply migration 前核实时查实，P3）
+
+`ads_circuit_events` 表（含 append-only 触发器）确实存在于生产 Supabase 项目，migration 历史里也有对应记录，但仓库（含最新 origin/main）的 `supabase/migrations/` 里找不到任何同名文件——有人/某工具绕开了"migration 文件进 git → PR 审 → 授权 apply"这条路径，直接对生产库跑了 DDL。已核实表是空的（0 行）、没有任何代码路径读写它，跟这次 apply 的 `ads_circuit_breaker_policy` migration（写 `client_automation_policies`）完全独立、不冲突。
+
+- **要做什么**：确认这两次操作的来源；要么补一份对应 migration 文件让 git 和生产对齐，要么记录清楚是一次性探索、决定要不要把这张空表也清掉。
+- **§11 打分**：频率低（一次性历史痕迹）· 收入低（空表，无实际影响）→ 两个低 → **P3**，待认领。详细推演见 [ledger 卡](./ledger/2026-09-28-ads-circuit-events-untracked-migration.md)。
+- 来源：PR [#2019](https://github.com/bigbigraydeng-maker/magic-engine/pull/2019) apply migration 前的例行核实查实。
+
+---
+
 ## Facebook 表单勾的「我不要收邮件」走不到 Mailchimp 的抑制标签（2026-09-24 查实，潜在，迄今 0 次，P3）
 
 一个人被订阅进 Mailchimp 之后**才**被判成 opt-out 时，`crm/meta-lead.ts` 会把触点回执从 `subscribed` 覆盖成 `skipped:explicit_opt_out`、并写上 `do_not_contact: true`；结果本地证据被改写成「没进名单」。**这不是 `src/lib/mailchimp/` 缺能力**——`api/cron/mailchimp-suppression-sync` 每天跑一次，职责就是把 CRM 判过的「别再联系」同步成 Mailchimp 的 `suppressed_do_not_email` 标签，`lib/mailchimp/suppression-sync.ts` 复用的正是 `crm/dnc.ts` 的 `isDoNotContact()`。真正的缺口在这条管道自己的取数：`api/cron/mailchimp-suppression-sync/route.ts` 的 `loadContactsForClient()` 查 `contact_touchpoints` 时只把 `metadata.outcome` 映射进 `DncTouch.outcome`，从没把同一条触点的 `metadata.do_not_contact` 映射进 `DncTouch.flagged`——所以 `crm/meta-lead.ts` 写下的这条 opt-out 触点，`isDoNotContact()` 永远看不到，人也就不会被这条每日 cron 打上抑制标签。
