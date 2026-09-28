@@ -252,7 +252,7 @@ describe('ads-circuit-breaker-check handler', () => {
     })
     const result = (await run(sb)) as { ok: true; verdict: string; reason?: string }
     expect(result.verdict).toBe('tripped')
-    expect(result.reason).toContain('act_a') // 报告里点名是哪个账户触发的
+    expect(result.reason).toContain('[a]') // 报告里点名是哪个账户触发的（act_ 前缀已归一化剥离）
     expect(rpc).toHaveBeenCalled() // 客户级动作仍然触发——账户 B 正常不代表客户整体放行
   })
 

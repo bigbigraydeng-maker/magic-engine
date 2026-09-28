@@ -52,6 +52,22 @@ function isoDayMinus(iso: string, days: number): string {
 }
 
 /**
+ * 去掉 `act_` 前缀再分组——跟 `client-ad-accounts.ts` 的 `stripActPrefix` /
+ * `google-data-pullback-daily/route.ts` 的 `isShared` 同一行逻辑，这里不
+ * import（那两处都是各自内联一份，本仓库对这个一行函数的既有做法就是
+ * 各文件自己写一份，不建共享依赖）。
+ *
+ * 🔴 Codex P1 复审：`client_meta_ad_accounts` 的表注释明确写着"本表不强制
+ * 格式"，同一个真实账户的历史行和当天行可能一条带 `act_` 前缀一条不带。
+ * 不做这层归一化，会把同一个账户拆成两个"假账户"：当天那组没有 5 天历史
+ * 判 undeterminable，历史那组当天花费是 0——按账户分别判定的修复（round 4）
+ * 反而被这个疏漏架空，真实的异常两组都测不出来。
+ */
+function normalizeAccountId(id: string): string {
+  return id.startsWith('act_') ? id.slice(4) : id
+}
+
+/**
  * 读 `evaluationDate` 当天 + 之前 `lookbackDays` 天，按账户分别给出每日花费
  * （分）。返回顺序按 `ad_account_id` 字典序，便于测试断言。
  *
@@ -94,13 +110,14 @@ export async function fetchClientDailySpendCentsByAccount(
 
   const toCents = (dollars: number): number => Math.round(dollars * 100)
 
-  // account_id -> date -> 分
+  // normalized account_id -> date -> 分
   const spendByAccountDay = new Map<string, Map<string, number>>()
   for (const row of rows) {
-    let byDay = spendByAccountDay.get(row.ad_account_id)
+    const accountKey = normalizeAccountId(row.ad_account_id)
+    let byDay = spendByAccountDay.get(accountKey)
     if (!byDay) {
       byDay = new Map<string, number>()
-      spendByAccountDay.set(row.ad_account_id, byDay)
+      spendByAccountDay.set(accountKey, byDay)
     }
     byDay.set(row.insight_date, (byDay.get(row.insight_date) ?? 0) + (row.spend ?? 0))
   }

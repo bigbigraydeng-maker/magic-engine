@@ -44,7 +44,7 @@ describe('fetchClientDailySpendCentsByAccount', () => {
     ])
     const result = await fetchClientDailySpendCentsByAccount(sb, CLIENT, '2026-09-27', 7)
     expect(result).toHaveLength(1)
-    expect(result?.[0].adAccountId).toBe('act_1')
+    expect(result?.[0].adAccountId).toBe('1') // act_ 前缀已归一化剥离，见下方"前缀不一致"用例
     expect(result?.[0].todayTotalSpendCents).toBe(1575) // (10.5+5.25) * 100
     expect(result?.[0].recentDailySpend).toContainEqual({ date: '2026-09-26', totalSpendCents: 2000 })
   })
@@ -57,17 +57,31 @@ describe('fetchClientDailySpendCentsByAccount', () => {
     const result = await fetchClientDailySpendCentsByAccount(sb, CLIENT, '2026-09-27', 7)
     expect(result).toHaveLength(2)
     const byAccount = new Map(result?.map((r) => [r.adAccountId, r.todayTotalSpendCents]))
-    expect(byAccount.get('act_a')).toBe(40000) // $400，不掺账户 B 的 $1000
-    expect(byAccount.get('act_b')).toBe(100000)
+    expect(byAccount.get('a')).toBe(40000) // $400，不掺账户 B 的 $1000
+    expect(byAccount.get('b')).toBe(100000)
   })
 
-  it('返回按 ad_account_id 字典序排列', async () => {
+  it('返回按归一化后的 ad_account_id 字典序排列', async () => {
     const sb = fakeSupabase([
       { insight_date: '2026-09-27', entity_id: 'z1', ad_account_id: 'act_z', spend: 1 },
       { insight_date: '2026-09-27', entity_id: 'a1', ad_account_id: 'act_a', spend: 1 },
     ])
     const result = await fetchClientDailySpendCentsByAccount(sb, CLIENT, '2026-09-27', 7)
-    expect(result?.map((r) => r.adAccountId)).toEqual(['act_a', 'act_z'])
+    expect(result?.map((r) => r.adAccountId)).toEqual(['a', 'z'])
+  })
+
+  it('🔴 Codex P1：同一账户历史行带 act_ 前缀、当天行不带（或反过来）——必须归并成一个账户，不能拆成两个', async () => {
+    const sb = fakeSupabase([
+      // 历史行带前缀，当天行不带——真实场景：client_meta_ad_accounts 不强制格式，
+      // 同一账户不同时间写入的行前缀可能不一致（见 20260913000001_client_meta_ad_accounts.sql）。
+      { insight_date: '2026-09-20', entity_id: 'c1', ad_account_id: 'act_42', spend: 100 },
+      { insight_date: '2026-09-27', entity_id: 'c2', ad_account_id: '42', spend: 400 },
+    ])
+    const result = await fetchClientDailySpendCentsByAccount(sb, CLIENT, '2026-09-27', 7)
+    expect(result).toHaveLength(1) // 不是 2——两条行是同一个真实账户
+    expect(result?.[0].adAccountId).toBe('42')
+    expect(result?.[0].todayTotalSpendCents).toBe(40000) // 当天 $400 那行没有跟历史行拆开
+    expect(result?.[0].recentDailySpend).toContainEqual({ date: '2026-09-20', totalSpendCents: 10000 }) // 历史 $100 那行也在同一账户的历史序列里
   })
 
   it('today 不出现在 recentDailySpend 里', async () => {
