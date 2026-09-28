@@ -44,7 +44,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { MICROSOFT_MAIL_SCOPES } from '@/lib/microsoft/mail-oauth'
 import { COMBINED_GOOGLE_SCOPES, GSC_SCOPES } from '@/lib/google-oauth/client'
-import { META_PAGE_SCOPES } from '@/lib/meta-oauth/client'
+import { META_PAGE_SCOPES, META_COMMENT_READ_SCOPES } from '@/lib/meta-oauth/client'
 import { TIKTOK_SCOPES } from '@/lib/tiktok-oauth/client'
 
 describe('授权权限清单变更闸门（改了就来读文件头注）', () => {
@@ -97,6 +97,15 @@ describe('授权权限清单变更闸门（改了就来读文件头注）', () =
   it('TikTok 授权的清单没有被悄悄改动', () => {
     expect([...TIKTOK_SCOPES]).toEqual(['user.info.basic', 'video.publish', 'video.upload'])
   })
+
+  it('Facebook 评论读取权限清单没有被悄悄改动', () => {
+    // META_COMMENT_READ_SCOPES 不是向 Meta 另外申请的新权限清单，两个值都已经
+    // 是上面 META_PAGE_SCOPES 里钉住的项——它只是"评论回复重授权就绪判定"要
+    // 同时核对的一个子集（round 19/20 复审两次抓到只查了其中一个）。所以上面
+    // 文件头注要求的三件事（重连待办 / 断线监控 / N 天无数据报警）不需要为它
+    // 另开一份，跟着 META_PAGE_SCOPES 已有的那份走即可。
+    expect([...META_COMMENT_READ_SCOPES]).toEqual(['pages_read_engagement', 'pages_read_user_content'])
+  })
 })
 
 /**
@@ -110,6 +119,7 @@ const PINNED_SCOPE_CONSTANTS = [
   'src/app/api/clients/[id]/comment-autoreply-probe/route.ts:REQUIRED_SCOPES',
   'src/lib/google-oauth/client.ts:COMBINED_GOOGLE_SCOPES',
   'src/lib/google-oauth/client.ts:GSC_SCOPES',
+  'src/lib/meta-oauth/client.ts:META_COMMENT_READ_SCOPES',
   'src/lib/meta-oauth/client.ts:META_PAGE_SCOPES',
   'src/lib/microsoft/mail-oauth.ts:MICROSOFT_MAIL_SCOPES',
   'src/lib/tiktok-oauth/client.ts:TIKTOK_SCOPES',
