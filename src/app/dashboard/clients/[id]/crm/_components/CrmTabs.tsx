@@ -1,11 +1,10 @@
 'use client'
 
 /**
- * 「CRM 管理」内部导航 —— 三页切换 + 相关工具的入口，crm/* 三页共用。
+ * 「CRM 管理」内部导航 —— 页面切换 + 相关工具的入口，crm/* 页面共用。
  *
- *   今天要联系 = 系统排好的、今天该打谁（手机端行动队列，能记笔记 / 打电话 / 发私信）
- *   全部客人   = 翻看所有人 / 查某个客人的来往记录（桌面横表）
- *   决策清单   = 只读版「今天要联系」（CI-WP01 / Issue #1009）——只看是谁 / 为什么 /
+ *   全部客人   = 翻看所有人 / 查某个客人的来往记录（桌面横表，点行开抽屉）
+ *   决策清单   = 只读版的优先级视图（CI-WP01 / Issue #1009）——只看是谁 / 为什么 /
  *                建议怎么办，没有任何能点的写操作，给不需要亲自动手的人看
  * 板桥定：说「客人」不说「联系人」；标签让同事不迷路「查人到底点哪个」。
  *
@@ -16,10 +15,9 @@
  * 离开了这一组标签（那几页目前没有挂这份导航），所以视觉上跟前三个主标签分开一段、
  * 弱化一级，标明「相关工具」，不是同一层级的页面切换。
  *
- * 🔴「今天要联系」暂时留着（魏征 2026-09-28 复审点名）：这一页文件头注写着
- * 「销售在外面用这一页」，是真实在用的工具。它的独有功能（私信/邮件回复、
- * 同行批量发送、今天进度）还没搬进「全部客人」，这时候拿掉入口 = 功能凭空消失
- * 只能靠背网址。等 B6（那些功能全部搬完、页面本身删除）时才把这一项去掉。
+ * 2026-09-28（WP-B6）：「今天要联系」这一项去掉了——它的独有功能（私信/邮件/
+ * WhatsApp 回复、一键动作、同行批量发送、分段「今天进度」）B2/B3/B5 已经全部搬进
+ * 「全部客人」，页面本身也删了（改成跳转 /crm/all，见 crm/page.tsx）。
  *
  * 同行渠道 / 我的客人两项按行业开关显示 —— 复用 industryFeatureFlags，跟首页
  * 「工具」页签的判据是同一份，不会出现两处标准不一致。
@@ -29,7 +27,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { industryFeatureFlags } from '@/lib/clients/industry-features'
 
-export function CrmTabs({ clientId, active }: { clientId: string; active: 'today' | 'all' | 'decisions' }) {
+export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' | 'decisions' }) {
   const base = `/dashboard/clients/${clientId}/crm`
   const cls = (on: boolean) =>
     `rounded-md px-4 py-1.5 text-sm font-bold transition ${
@@ -58,7 +56,6 @@ export function CrmTabs({ clientId, active }: { clientId: string; active: 'today
   return (
     <div className="flex flex-wrap items-center gap-3">
       <div className="inline-flex rounded-lg border border-me-charcoal/15 p-0.5">
-        <Link href={base} className={cls(active === 'today')}>今天要联系</Link>
         <Link href={`${base}/all`} className={cls(active === 'all')}>全部客人</Link>
         <Link href={`${base}/decisions`} className={cls(active === 'decisions')}>决策清单（只读）</Link>
       </div>
