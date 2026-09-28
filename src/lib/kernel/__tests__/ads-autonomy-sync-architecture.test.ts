@@ -21,12 +21,16 @@ const SRC = join(ROOT, 'src')
 
 const SYNC_WORKER = 'src/lib/inngest/functions/ads-autonomy-sync.ts'
 const SYNC_POLICY = 'src/lib/ads-strategy/autonomy/sync-policy.ts'
+const CIRCUIT_BREAKER_WORKER = 'src/lib/inngest/functions/ads-circuit-breaker-check.ts'
+const CIRCUIT_BREAKER_RELEASE_ROUTE =
+  'src/app/api/clients/[id]/ad-strategy-config/release-circuit-breaker/route.ts'
 const MIGRATIONS_DIR = 'supabase/migrations'
 
 /** 允许写 client_automation_policies 的 migration（白名单，不许悄悄扩） */
 const MIGRATION_WRITE_ALLOWLIST = [
   '20260915120000_brief_knowledge_migration_and_cts_history.sql',
   '20260926000001_ads_autonomy_sync.sql',
+  '20260928000001_ads_circuit_breaker_policy.sql',
 ]
 
 /** 递归列出目录下的 `.ts` / `.tsx` 文件（跳过 node_modules / .next）。 */
@@ -97,6 +101,42 @@ describe('② rpc(ads_sync_autonomy_policy) 只许出现在同步 worker 里', (
     expect(
       pattern.test(stripComments(read(SYNC_WORKER))),
       `${SYNC_WORKER} 应该调用 rpc('ads_sync_autonomy_policy') —— 否则上面那条断言是空转的`,
+    ).toBe(true)
+  })
+})
+
+describe('②b rpc(ads_trip_circuit_breaker_policy) 只许出现在熔断检查 worker 里', () => {
+  it('全仓唯一调用点就是熔断检查 worker，且 worker 自己确实在调', () => {
+    const pattern = /rpc\(\s*['"]ads_trip_circuit_breaker_policy['"]/
+    const callers = listSource('src').filter((f) => pattern.test(stripComments(read(f))))
+
+    expect(
+      callers,
+      '熔断检查 worker 是唯一写 deny 的入口。别处直接 rpc 这个函数 = 绕开幂等判据。\n' +
+        callers.join('\n'),
+    ).toEqual([CIRCUIT_BREAKER_WORKER])
+
+    expect(
+      pattern.test(stripComments(read(CIRCUIT_BREAKER_WORKER))),
+      `${CIRCUIT_BREAKER_WORKER} 应该调用 rpc('ads_trip_circuit_breaker_policy') —— 否则上面那条断言是空转的`,
+    ).toBe(true)
+  })
+})
+
+describe('②c rpc(ads_release_circuit_breaker_policy) 只许出现在解除路由里', () => {
+  it('全仓唯一调用点就是解除路由，且路由自己确实在调', () => {
+    const pattern = /rpc\(\s*['"]ads_release_circuit_breaker_policy['"]/
+    const callers = listSource('src').filter((f) => pattern.test(stripComments(read(f))))
+
+    expect(
+      callers,
+      '解除熔断只能走这一条内部管理员路由。别处直接 rpc 这个函数 = 绕开全局管理员闸。\n' +
+        callers.join('\n'),
+    ).toEqual([CIRCUIT_BREAKER_RELEASE_ROUTE])
+
+    expect(
+      pattern.test(stripComments(read(CIRCUIT_BREAKER_RELEASE_ROUTE))),
+      `${CIRCUIT_BREAKER_RELEASE_ROUTE} 应该调用 rpc('ads_release_circuit_breaker_policy') —— 否则上面那条断言是空转的`,
     ).toBe(true)
   })
 })

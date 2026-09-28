@@ -17,6 +17,7 @@ import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
 import { loadAdStrategyConfig, parseCreativePool, type CreativePoolEntry } from '@/lib/ads-strategy/config'
 import { notifyAutonomyModeChanged } from '@/lib/ads-strategy/autonomy/notify'
+import { isCircuitBreakerTripped } from '@/lib/pm-todo/ads-autonomy-items'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,7 +30,10 @@ export async function GET(
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
   const config = await loadAdStrategyConfig(clientId)
-  return NextResponse.json({ success: true, config })
+  // best-effort：跟 loadAdStrategyConfig 同一容错等级——读不到就不画横幅，
+  // 不能让这一步的读失败拖垮整个设置页（deny 行本身是否存在不受这次读取影响）。
+  const circuitBreakerTripped = await isCircuitBreakerTripped(supabaseAdmin, clientId, new Date()).catch(() => false)
+  return NextResponse.json({ success: true, config, circuit_breaker_tripped: circuitBreakerTripped })
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/

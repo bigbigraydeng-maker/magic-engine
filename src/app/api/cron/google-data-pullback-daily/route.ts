@@ -62,6 +62,7 @@ import { findSharedAdAccounts, getClientAdAccountIds } from '@/lib/meta/client-a
 import { hasVideoColumns, syncAdDailyInsights, syncAdsetDailyInsights, syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
 import { buildGrowthState } from '@/lib/ads-strategy/agents/patrol'
 import { reconcileAutonomyMode } from '@/lib/ads-strategy/autonomy/notify'
+import { ADS_CIRCUIT_BREAKER_CHECK_DUE, adsCircuitBreakerCheckEventId } from '@/lib/inngest/ads-events'
 import { resolveClientEvaluationDate } from '@/lib/ads-strategy/account-timezone'
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
 import { sendAdHealthDigest } from '@/lib/ads-strategy/digest'
@@ -116,6 +117,8 @@ interface ClientResult {
   ads_growth_state?: { success: boolean; date?: string; problems?: number; opportunities?: number; completeness?: string; error?: string }
   /** WP3.1a 每日 reconcile：给同步 worker 发一次叫醒铃（同一幂等 id，Inngest 24h 去重）。best-effort，不进 failed。 */
   autonomy_sync?: { sent: boolean; events: number; error?: string }
+  /** 熔断器运行时调用方：给 ads-circuit-breaker-check 发一次叫醒铃。best-effort，不进 failed。 */
+  circuit_breaker_check?: { sent: boolean; error?: string }
   /**
    * 2026-09-13: `ad_daily`/`ad_level` above stay the PRIMARY account's result
    * (unchanged shape, unchanged tallying). Any additional registered accounts
@@ -471,6 +474,22 @@ export async function GET(req: NextRequest) {
             client.meta_ad_account_id,
             ...allAccountIds,
           ])
+
+          // 熔断器运行时调用方（WP3 接线通电的后续）：当天花费已经拉完，叫醒
+          // consumer 去重查 autonomy_mode + 花费再判定——事件只带 client_id/date，
+          // consumer 不信 payload 里可能过期的值。只对真有配置行的客户发（跟
+          // 下面 WP3.1a reconcile 同一个闸），engine 整体 enabled=false 时数据
+          // 本来就没刷新，没有新东西可判，不发。发送失败 best-effort，不进
+          // failed：明天同一条链路会再发一次。
+          if (adConfigSource === 'row') {
+            result.circuit_breaker_check = await sendInngestEvent({
+              id: adsCircuitBreakerCheckEventId(client.client_id, evaluationDate),
+              name: ADS_CIRCUIT_BREAKER_CHECK_DUE,
+              data: { client_id: client.client_id, date: evaluationDate },
+            })
+              .then(() => ({ sent: true }))
+              .catch((e: unknown) => ({ sent: false, error: e instanceof Error ? e.message : String(e) }))
+          }
 
           // P21.K.2: judge each campaign against its own baseline and store the
           // day's account-health narrative. Reads the series just written above

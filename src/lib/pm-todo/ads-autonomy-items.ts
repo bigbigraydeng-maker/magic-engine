@@ -38,6 +38,26 @@ function stripPrefix(reason: string): string {
 
 export type AdsAutonomyCircuitBreakerItemKind = 'ads_autonomy_circuit_breaker'
 
+/** 单客户版本：Settings 页用来决定要不要画"熔断已触发"横幅 + 解除按钮。 */
+export async function isCircuitBreakerTripped(
+  supabase: SupabaseClient,
+  clientId: string,
+  now: Date,
+): Promise<boolean> {
+  const nowIso = now.toISOString()
+  const { data, error } = await supabase
+    .from('client_automation_policies')
+    .select('client_id')
+    .eq('client_id', clientId)
+    .eq('mode', 'deny')
+    .like('updated_by', 'circuit-breaker:%')
+    .lte('effective_from', nowIso)
+    .or(`effective_to.is.null,effective_to.gt.${nowIso}`)
+    .limit(1)
+  if (error) throw new Error(`client_automation_policies 读取失败：${error.message}`)
+  return (data ?? []).length > 0
+}
+
 export async function pushAdsAutonomyCircuitBreakerItems(
   supabase: SupabaseClient,
   items: ManualItem[],
@@ -70,7 +90,8 @@ export async function pushAdsAutonomyCircuitBreakerItems(
         '系统已自动把全部广告动作切到「禁止」档位，不再动钱。',
       how:
         '先到 Meta Ads Manager 核实实际花费是否正常；' +
-        '确认没问题后在客户设置页把「自治档位」重新设为「受限自动」，系统会解除熔断。',
+        '确认没问题后在客户设置页点「解除熔断」按钮（不是重新拨自治档位——' +
+        '那个开关不会碰这把熔断锁，得点专门的解除按钮）。',
       href: adsAutonomySettingsHref(row.client_id),
     })
   }

@@ -33,7 +33,57 @@ interface AdStrategyConfig {
 interface ConfigResponse {
   success?: boolean
   config?: AdStrategyConfig
+  circuit_breaker_tripped?: boolean
   error?: string
+}
+
+// ─── 熔断横幅（WP3 熔断器运行时调用方）───────────────────────────────────────
+
+function CircuitBreakerBanner({
+  clientId,
+  onReleased,
+}: {
+  clientId: string
+  onReleased: () => void
+}) {
+  const [releasing, setReleasing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const release = async () => {
+    setReleasing(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/ad-strategy-config/release-circuit-breaker`, {
+        method: 'POST',
+      })
+      const json = (await res.json()) as { success?: boolean; error?: string }
+      if (!res.ok || !json.success) throw new Error(json.error ?? `HTTP ${res.status}`)
+      onReleased()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '解除失败')
+    } finally {
+      setReleasing(false)
+    }
+  }
+
+  return (
+    <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4">
+      <p className="text-sm font-medium text-red-800">🔴 熔断已触发</p>
+      <p className="mt-1 text-xs text-red-700">
+        当日实际花费合计超过 7 天中位数的 3 倍，系统已自动把全部广告动作切到「禁止」档位，不再动钱。
+        先到 Meta Ads Manager 核实花费是否正常，确认没问题后再点下面按钮解除。
+      </p>
+      <button
+        type="button"
+        disabled={releasing}
+        onClick={release}
+        className="mt-2 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
+      >
+        {releasing ? '解除中…' : '解除熔断'}
+      </button>
+      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+    </div>
+  )
 }
 
 // ─── Sub-components (each kept small and single-purpose) ──────────────────────
@@ -174,6 +224,7 @@ function CreativePoolList({
 
 export default function AutonomySettings({ clientId }: { clientId: string }) {
   const [config, setConfig] = useState<AdStrategyConfig | null>(null)
+  const [circuitTripped, setCircuitTripped] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -193,6 +244,7 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
       const json = (await res.json()) as ConfigResponse
       if (!res.ok || !json.config) throw new Error(json.error ?? `HTTP ${res.status}`)
       applyConfig(json.config)
+      setCircuitTripped(json.circuit_breaker_tripped === true)
     } catch {
       setLoadError('读不到广告自治配置，稍后再试')
     }
@@ -263,6 +315,9 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-5">
+      {circuitTripped && (
+        <CircuitBreakerBanner clientId={clientId} onReleased={() => { setCircuitTripped(false); void load() }} />
+      )}
       <h2 className="text-sm font-semibold text-gray-800">目标 · 日预算上限 · 素材池</h2>
 
       <div className="mt-4 space-y-5">
