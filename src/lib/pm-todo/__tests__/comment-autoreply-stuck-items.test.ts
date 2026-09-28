@@ -260,6 +260,9 @@ describe('pushCommentAutoreplyStuckItems', () => {
     expect(items[0].what).not.toContain('确定该有公开回复')
     expect(items[0].how).toContain('先自己判断该怎么处理')
     expect(items[0].how).not.toContain('没有回复的才手动回一下')
+    // Codex round 18 复审 P2：纯 stale_processing（没有 confirmed、没有 orphaned）
+    // 跟发送权限完全无关，不该被引去换令牌——envVarHow() 的文案一定含这个词。
+    expect(items[0].how).not.toContain('pages_manage_engagement')
   })
 
   // Codex round 12 复审 P1：还没耗尽重试次数、但已经越过这个客户回看窗口的 failed
@@ -355,6 +358,32 @@ describe('pushCommentAutoreplyStuckItems', () => {
     // Codex round 8 P1：intent=comment_reply 让回调把新令牌存去评论引擎实际用的主页，不是 clients.facebook_page_id
     expect(items[0].href).toBe('https://app.magicengine.com.au/api/auth/facebook/connect?client_id=cts&intent=comment_reply')
     expect(assessConfiguredPageMock).toHaveBeenCalledWith(sb, 'cts', PAGE_ID, expect.anything())
+    // 只有这一个客户卡住，不该出现"同时有 N 个客户都卡住了"这条系统性故障提示。
+    expect(items[0].how).not.toContain('都卡住了')
+  })
+
+  // Codex round 18 复审 P2：同一轮如果好几个客户同时卡住，比起"这一个客户的令牌
+  // 恰好坏了"，更像是限流或 Meta 接口本身出问题——这时候还无条件让人去换令牌
+  // （尤其 shared_fallback 换的是好几个客户共用的公共钥匙）既解决不了问题，还会
+  // 让其它本来没事的客户一起担风险，所以要先给出这个信号，而不是照常给换令牌步骤。
+  it('≥3 个客户同时卡住 → 每个客户的 how 都先提示像是限流/Meta 接口问题，而不是直接让换令牌', async () => {
+    assessConfiguredPageMock.mockResolvedValue({ verified: true, via: 'client_oauth' })
+    const { sb } = fakeDb({
+      exhaustedRows: [
+        { client_id: 'a', page_id: PAGE_ID, updated_at: '2026-09-01T00:00:00Z' },
+        { client_id: 'b', page_id: PAGE_ID, updated_at: '2026-09-01T00:00:00Z' },
+        { client_id: 'c', page_id: PAGE_ID, updated_at: '2026-09-01T00:00:00Z' },
+      ],
+    })
+    const items: ManualItem[] = []
+    await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['a', 'b', 'c'])
+    expect(items).toHaveLength(3)
+    for (const item of items) {
+      expect(item.how).toContain('现在同时有 3 个客户都卡住了')
+      expect(item.how).toContain('看起来更像是限流或 Meta 接口本身的问题')
+      // 系统性故障的提示要包住原有的令牌指引，不是取代它——确认不是大面积问题之后还是要走这一步。
+      expect(item.how).toContain('连接 Meta')
+    }
   })
 
   // Codex round 16 复审 P2：客户中途换过 social_comment_config.fb_page_id 时，

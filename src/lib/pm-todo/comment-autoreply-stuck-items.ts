@@ -374,6 +374,12 @@ export async function pushCommentAutoreplyStuckItems(
     }
   }
 
+  // 同一轮有多少个不同客户卡住（Codex round 18 复审 P2）：≥3 个客户同时卡住，
+  // 比起"这一个客户的令牌恰好坏了"，更像是限流或 Meta 接口本身出问题——这种
+  // 时候还无条件建议去换令牌（尤其 shared_fallback 分支，换的是好几个客户共用
+  // 的公共钥匙），既解决不了限流类故障，还会让其它本来没事的客户跟着担风险。
+  const multiClientStuck = byClient.size >= 3
+
   for (const [clientId, agg] of Array.from(byClient.entries())) {
     const days = daysAgo(agg.oldest, now)
     // 用这个客户*当前*配置的主页，不是聚合时随便留下的历史卡死行那个
@@ -396,6 +402,18 @@ export async function pushCommentAutoreplyStuckItems(
       whatParts.push(`${agg.stale} 条处理到一半中断，原本该怎么处理还不确定（可能该回复、可能该隐藏成垃圾、也可能本该跳过不回，中断导致分类没能走完）`)
     }
 
+    // 令牌指引只在真有"确定该发但发不出去"的行时才给（Codex round 18 复审 P2）：
+    // 纯 stale_processing（中断，原因未知，跟发送权限完全无关）不该被引去换令牌。
+    // ≥3 个客户同时卡住时，先提醒这更像限流/Meta 接口问题，而不是无条件让人去
+    // 换这一个客户的令牌——shared_fallback 换的还是好几个客户共用的公共钥匙，
+    // 为了一个可能是限流的问题去换，反而让其它没事的客户一起担风险。
+    const tokenGuidance =
+      confirmed > 0 || agg.orphaned > 0
+        ? multiClientStuck
+          ? `现在同时有 ${byClient.size} 个客户都卡住了，看起来更像是限流或 Meta 接口本身的问题，不太像是这一个客户单独的令牌坏了——建议先去 Meta 开发者后台查一下平台状态、或者等下一轮看是不是自己恢复；如果确认不是大面积问题，再处理这个客户的令牌：${guidance.how} `
+          : `${guidance.how} `
+        : ''
+
     items.push({
       kind: 'comment_autoreply_stuck',
       client_id: clientId,
@@ -413,7 +431,7 @@ export async function pushCommentAutoreplyStuckItems(
         (agg.stale > 0
           ? '处理到一半中断的这些先自己判断该怎么处理，不要不分青红皂白照单全回——明显是垃圾广告就去 Facebook 手动隐藏，不确定要不要回、或者本来就不该回（比如这类评论客户设置里关了自动回复）就不用勉强回，跳过即可；'
           : '') +
-        `${guidance.how} ` +
+        tokenGuidance +
         '确认处理完之后，回到"评论审计"列表给这几条点"已读"，这条待办会自动消失，不会一直卡在这里重复出现。',
       href: guidance.href,
     })
