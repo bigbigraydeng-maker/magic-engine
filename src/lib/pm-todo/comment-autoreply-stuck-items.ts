@@ -72,10 +72,25 @@ function daysAgo(iso: string, now: Date): number {
   return Math.floor((now.getTime() - Date.parse(iso)) / 86_400_000)
 }
 
-const OAUTH_HOW =
-  '这个客户的 Facebook 主页令牌是通过"连接 Meta"存的 OAuth 授权，不是 Render 环境变量——' +
-  '去客户设置页找"连接 Meta"（或"重新连接"）按钮，用对这个主页有管理权限的 Facebook 账号重新授权一次，' +
-  '同意页上要确认 pages_manage_engagement 权限打开；改 Render 环境变量对这个客户不会生效，别浪费时间改错地方。'
+/**
+ * 直接链到能重新起一次 Meta 授权的路由，不描述"去找连接 Meta 按钮"（Codex
+ * round 6 复审 P1）：那个按钮长在客户主页详情页的 `FacebookPagePanel`，不在
+ * 这条待办 `href` 指向的独立 `/settings` 页；就算找对了地方，它的可见性判据
+ * （`reachable && verified && via !== 'legacy_client_token'`）只看"读得到吗"，
+ * 读没问题、只是缺发评论回复这一项权限的客户会被判定"同步正常"，两个按钮
+ * 都不显示。直接给 `/api/auth/facebook/connect?client_id=` 这条路由——它是
+ * 发起 Meta 同意页的真正入口，不经过任何按钮可见性判断，登录后有这个客户
+ * 权限就能直接触发。
+ */
+function oauthHow(clientId: string): string {
+  return (
+    '这个客户的 Facebook 主页令牌是通过"连接 Meta"存的 OAuth 授权，不是 Render 环境变量——' +
+    `打开 ${APP_BASE}/api/auth/facebook/connect?client_id=${clientId} 直接起一次 Meta 授权` +
+    '（不用在页面上找按钮，这个客户设置页里的"连接 Meta"按钮在权限只缺一项时可能不会显示），' +
+    '用对这个主页有管理权限的 Facebook 账号走完同意页，确认 pages_manage_engagement 权限打开；' +
+    '改 Render 环境变量对这个客户不会生效，别浪费时间改错地方。'
+  )
+}
 
 const SHARED_TOKEN_HOW =
   '这个客户没有专属 Meta 令牌，实际用的是公共钥匙 META_SYSTEM_USER_TOKEN（Render 后台 crazycontent 服务的 Environment 里）——' +
@@ -105,7 +120,7 @@ async function tokenSourceHow(
 ): Promise<string> {
   try {
     const assessment = await assessConfiguredPage(supabase, clientId, pageId, env)
-    if (assessment.verified && assessment.via === 'client_oauth') return OAUTH_HOW
+    if (assessment.verified && assessment.via === 'client_oauth') return oauthHow(clientId)
   } catch {
     // fall through — 用下面的令牌来源查询兜底判断
   }
