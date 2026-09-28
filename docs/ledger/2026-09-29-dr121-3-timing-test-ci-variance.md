@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-09-29
 source: session:9a244b0b
 done_on: 2026-09-29
-done_ref: pr:__PR_NUMBER__
+done_ref: pr:2196
 ---
 `tools/ops-review-loop/tests/risk.test.ts` 里 DR121-3 那条测试今晚闪测 3 次（#2183、#2189、
 广告构建控制在 223ms/253ms 各撞了一次），代码没改，重跑就过。本地连跑 7 次实测：正常
