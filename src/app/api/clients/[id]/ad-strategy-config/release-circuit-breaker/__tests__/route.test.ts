@@ -70,8 +70,13 @@ function fakeConfigFrom(
 /**
  * `client_automation_policies` 的假 `.from()` 链——round 9 新增的终检用：
  * `.select().eq().in().is()`，最后一环 `.is()` 直接 await 出 `{data, error}`。
+ * round 13 起 `updated_by` 是可选字段（真实查询已经 select 出来，旧测试不
+ * 关心的场景留空即可，`undefined` 在路由里安全地判定为"不是熔断器的 deny"）。
  */
-function fakePoliciesFrom(rows: Array<{ action_key: string; mode: string }>, errorMessage?: string) {
+function fakePoliciesFrom(
+  rows: Array<{ action_key: string; mode: string; updated_by?: string }>,
+  errorMessage?: string,
+) {
   const chain = {
     select: () => chain,
     eq: () => chain,
@@ -338,5 +343,49 @@ describe('release-circuit-breaker — 🔴 Codex P1（round 9）：not_circuit_t
     expect(res.status).toBe(500)
     const json = (await res.json()) as { error: string }
     expect(json.error).toContain('final read boom')
+  })
+})
+
+describe('release-circuit-breaker — 🔴 Codex P2（round 13）：逐键 release 和终检之间的窗口被并发重新熔断，终检必须也认得出来', () => {
+  it('终检发现某个键被熔断器重新写回 deny（并发 trip 抢跑）→ 500，不谎报成功', async () => {
+    signedInAs(STAFF)
+    mockRpc.mockResolvedValue({ data: 'released', error: null } as never)
+    const keys = listAdsActionKeys()
+    const { chain } = fakeConfigFrom('bounded_auto')
+    wireFrom(
+      chain,
+      fakePoliciesFrom([
+        { action_key: keys[0], mode: 'deny', updated_by: 'circuit-breaker:2026-09-28T00:00:00.000Z' },
+        { action_key: keys[1] ?? keys[0], mode: 'require_approval' },
+      ]),
+    )
+
+    const res = await POST(postRequest(), params())
+    expect(res.status).toBe(500)
+    const json = (await res.json()) as { error: string }
+    expect(json.error).toContain(keys[0])
+    expect(json.error).toContain('deny')
+    // 跟 auto_approve 残留同一惯例：发现没解干净要重新叫醒同步 worker 再试一次。
+    expect(mockReconcile).toHaveBeenCalledWith(
+      expect.anything(),
+      CLIENT,
+      expect.objectContaining({ idSuffix: expect.stringContaining('release-retry-') }),
+    )
+  })
+
+  it('某个键是 deny 但不是熔断器写的（管理员手动锁）→ 不算"没解干净"，正常报成功', async () => {
+    signedInAs(STAFF)
+    const keys = listAdsActionKeys()
+    const { chain } = fakeConfigFrom('bounded_auto')
+    wireFrom(
+      chain,
+      fakePoliciesFrom(keys.map(k => ({ action_key: k, mode: 'deny', updated_by: 'admin:someone@me.test' }))),
+    )
+
+    const res = await POST(postRequest(), params())
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as { success: boolean }
+    expect(json.success).toBe(true)
+    expect(mockReconcile).not.toHaveBeenCalled()
   })
 })

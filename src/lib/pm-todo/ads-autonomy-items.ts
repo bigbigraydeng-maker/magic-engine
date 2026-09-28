@@ -121,12 +121,13 @@ export async function pushAdsAutonomyCircuitBreakerItems(
       client_name: nameOf(row.client_id),
       what:
         `广告自治被熔断器自动停了${accountNote} —— 当日实际花费合计超过 7 天中位数的 3 倍，` +
-        '系统已自动把全部广告动作切到「禁止」档位，不再动钱。',
+        '系统已自动禁止 AI 继续自动调整这个客户的广告，但 Meta 上正在跑的广告不会因此停下来，预算该花还是会花。',
       how:
         (accountDisplay
           ? `先到 Meta Ads Manager 核实账户 ${accountDisplay} 的实际花费是否正常（同轮触发的每个账户都要查，不能只看第一个）；`
           : '先到 Meta Ads Manager 核实实际花费是否正常（多账户客户请逐个核对）；') +
-        '确认没问题后在客户广告健康页点「解除熔断」按钮（不是重新拨自治档位——' +
+        '花费确实异常的话，先在广告健康页对应系列卡片点「先全停」或「预算降 20%」把钱按住——这一步熔断本身不会替你做；' +
+        '核实没问题、或已经按住钱之后，再在同一页点「解除熔断」按钮（不是重新拨自治档位——' +
         '那个开关不会碰这把熔断锁，得点专门的解除按钮）。',
       href: adsAutonomyAdsHealthHref(row.client_id),
     })

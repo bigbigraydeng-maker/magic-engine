@@ -73,6 +73,16 @@
  *    不管这次调用有没有走过降级分支，都额外调一次 `reconcileAutonomyMode`
  *    （重新读当前 `updated_at` 再发通知）——每次 500 都会重新尝试叫醒，
  *    不是只有第一次机会。
+ *
+ * 🔴 Codex P2 复审（round 13）：终检只筛 `auto_approve` 漏掉另一种"没解干净"
+ *    ——逐键调用 release RPC 和终检读之间有一个窗口，如果熔断检查那个
+ *    Inngest 函数恰好在这个窗口里判定客户仍要熔断（真实异常花费还在继续），
+ *    批次 trip RPC 会把刚解开的键重新写回 `deny`。这种情况键的当前 mode
+ *    是 `deny` 不是 `auto_approve`，原判据完全看不见，会带着一个其实又被
+ *    重新熔断的键返回成功。改成任何一键只要还是 `auto_approve`，或者是
+ *    circuit-breaker 自己写的 `deny`（被重新熔断），都算没解干净——跟
+ *    `already_tripped` SQL 分支判断"是不是熔断器自己的 deny"同一个
+ *    `updated_by` 前缀判据，不新造一套。
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -167,19 +177,32 @@ export async function POST(
   // 终检（round 9）：见本文件顶部说明——not_circuit_tripped 不能区分
   // require_approval 和 auto_approve，返回成功前必须确认真的没有任何键
   // 停在 auto_approve。
+  //
+  // 🔴 Codex P2 复审（round 13）：只筛 auto_approve 漏掉另一种"没解干净"——
+  // 上面逐键调用 release RPC 和这里的终检读之间有一个窗口，如果熔断检查
+  // 那个 Inngest 函数恰好在这个窗口里判定同一个客户仍要熔断（比如异常花费
+  // 还在继续），批次 trip RPC 会把刚解开的键重新写回 deny。这种情况下键的
+  // 当前 mode 是 deny 不是 auto_approve，原判据完全看不见，会带着一个其实
+  // 又被重新熔断的键返回 success。改成任何一键只要还是 auto_approve，或者
+  // 是 circuit-breaker 自己写的 deny（被重新熔断），都算没解干净——跟
+  // "already_tripped" SQL 分支判断"是不是熔断器自己的 deny"同一个 updated_by
+  // 前缀判据。两种情况下都不是"谎报成功"，是老实说"没解干净"；如果是真被
+  // 重新熔断，FDE 再点一次解除会看到同样的结果，不会无限重试卡死。
   const { data: finalPolicies, error: finalReadError } = await supabaseAdmin
     .from('client_automation_policies')
-    .select('action_key, mode')
+    .select('action_key, mode, updated_by')
     .eq('client_id', clientId)
     .in('action_key', listAdsActionKeys())
     .is('effective_to', null)
   if (finalReadError) {
     return NextResponse.json({ error: `final policy verification failed: ${finalReadError.message}` }, { status: 500 })
   }
-  const stillAuto = (finalPolicies ?? [])
-    .filter((p): p is { action_key: string; mode: string } => p.mode === 'auto_approve')
-    .map(p => p.action_key)
-  if (stillAuto.length > 0) {
+  const notReleased = (finalPolicies ?? []).filter(
+    (p): p is { action_key: string; mode: string; updated_by: string | null } =>
+      p.mode === 'auto_approve' ||
+      (p.mode === 'deny' && typeof p.updated_by === 'string' && p.updated_by.startsWith('circuit-breaker:')),
+  )
+  if (notReleased.length > 0) {
     // 🔴 Codex P1 复审（round 10）：这次调用自己的 notifyAutonomyModeChanged
     // 只在 intentDowngraded 分支里发（fire-and-forget，被 catch 吞掉）。如果
     // 那次通知恰好发送失败，且这次意向早已经是 observe（上面的 if 分支不会
@@ -199,7 +222,7 @@ export async function POST(
     await reconcileAutonomyMode(supabaseAdmin, clientId, { idSuffix: `release-retry-${Date.now()}` }).catch(() => undefined)
     return NextResponse.json(
       {
-        error: `release not safely complete — these keys are still auto_approve, retry: ${stillAuto.join(', ')}`,
+        error: `release not safely complete — retry: ${notReleased.map(p => `${p.action_key}(${p.mode})`).join(', ')}`,
         released,
         results,
         intent_downgraded_to_observe: intentDowngraded,

@@ -70,8 +70,8 @@ function CircuitBreakerBanner({
     <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4">
       <p className="text-sm font-medium text-red-800">🔴 熔断已触发</p>
       <p className="mt-1 text-xs text-red-700">
-        当日实际花费合计超过 7 天中位数的 3 倍，系统已自动把全部广告动作切到「禁止」档位，不再动钱。
-        先到 Meta Ads Manager 核实花费是否正常，确认没问题后再点下面按钮解除。
+        当日实际花费合计超过 7 天中位数的 3 倍，系统已自动禁止 AI 继续自动调整这个客户的广告——但 Meta 上正在跑的广告不会因此停下来，预算该花还是会花。
+        先到 Meta Ads Manager 核实花费是否正常：确认没问题，点下面按钮解除；如果花费确实异常，先在上面对应系列卡片点「先全停」或「预算降 20%」把钱按住，再回来解除熔断。
       </p>
       <button
         type="button"

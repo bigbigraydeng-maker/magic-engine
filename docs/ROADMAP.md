@@ -68,6 +68,40 @@
 
 ---
 
+## Kernel 72 小时冷却期判据看不到自己刚做的改动——CTS/NAL 两个真实客户已经是 bounded_auto（2026-09-28 PR #2019 复审查实，P0）
+
+**§11 打分**：IMPACT 闭环关键度高（72 小时冷却是 spec 明确写死的治理约束，被绕过等于自治系统可以不受限速地连续改同一个客户的同一条广告）· 收入关联度高（真出现，是对 CTS Tours NZ / New Asian Logistics 两个真实客户的广告反复自动改动）· 频率**不确定**（不是低——Kernel 触发同一实体连续动作的真实频率没有查过，不能诚实评成低）→ 不满足"恰好一个低、两个高→P1"，按"零个低、两个以上高→**P0**"处理，不用常规两周节奏拖着。详细推演见 [ledger 卡](./ledger/2026-09-28-envelope-facts-cooldown-blind-to-kernel-own-changes.md)。
+
+- **现象**：`envelope-facts.ts` 的 `hoursSinceLastRealChange()` 只认 `ad_entity_snapshots.capture_reason = 'changed'`（周期性对账才会写）；Kernel 执行链只在写前留一条 `kernel_pre` 快照，没有任何生产代码在写成功后补一条 `kernel_post`（消费方 `diagnostics/loader.ts` 早就写好了认 `kernel_post` 的逻辑，只是从来没有数据）。同一实体如果被 Kernel 连续下两次自治动作，第二次读到的"距上次变化"仍是上一次周期性对账之前的旧数字，72 小时冷却闸形同虚设。
+- **为什么现在才是真问题**：查了生产库，`ad_strategy_configs.autonomy_mode = 'bounded_auto'` 当前有 2 条真实记录（CTS Tours NZ、New Asian Logistics）。这两个客户设置 bounded_auto 时 `createKernel()` 还没装 `resolveEnvelopeFacts`，按既有代码"不给 = bounded 动作一律拒"，此前它们的自治动作一直被 Kernel 无条件拒绝——冷却期判据从未真正对真实客户生效过。本 PR 把默认解析器接上（修复本身是对的、必须做），等于**冷却期漏洞和这两个客户的真实自治动作在同一次部署里一起上线**。
+- **要做什么**：在 `kernel/gateway.ts` 写成功后补一次 `captureClientSnapshots(..., { reason: 'kernel_post' })`；`hoursSinceLastRealChange` 的过滤扩到同时认 `changed` 和 `kernel_post`；落地按大任务规矩走子牙+魏征双审（碰 Kernel 执行链）。
+- **为什么没在这个 PR 里现在就修**：`envelope-facts.ts` 是 WP2 既有代码，本 PR 没有改动这个函数本身，只是把它接成默认值（这一步本身是本 PR 该做、也已做对的修复）；真正的冷却期修复是独立的 Kernel 执行链改动，不该在"接线 cron 调用方"这个已经因改动过大被 `fix-scope` 标红的 PR 里顺手加。这个 PR 合并本身不会让冷却期漏洞变得更差（circuit breaker 是独立的按花费金额触发的另一层保护，不依赖冷却期判据）。
+- 来源：PR [#2019](https://github.com/bigbigraydeng-maker/magic-engine/pull/2019) 复审查实（Codex round 13，独立核实）。
+
+---
+
+## circuit-breaker-spend.ts 账户级花费汇总没做系列归属过滤（2026-09-28 PR #2019 复审查实，P1）
+
+**§11 打分**：频率低（需要"账户内混有别的客户的系列"且"那些系列产生真实异常花费"同时成立；唯一有记录的实例——CTS 账户里的 4 条 Oztop 系列——写下时是休眠状态，近 7 天零花费）· IMPACT 闭环关键度高（一旦触发，后果跟 round 11 修的"跨客户共用账户"问题同构：别的客户花费被算进本客户名下）· 收入关联度高（真出现，直接是客户广告被误停或该拦的异常没拦下）→ 恰好一个低、两个高 → **P1**。详细推演见 [ledger 卡](./ledger/2026-09-28-circuit-breaker-account-level-campaign-attribution.md)。
+
+- **现象**：即使一个 Meta 广告账户当前只登记给一个客户（`findSharedAdAccounts` 排除不了这种情况），账户内部仍可能混着历史遗留、实际属于别的客户的系列（campaign）。`circuit-breaker-spend.ts` 按账户直接加总全部系列花费，没有做系列级归属过滤——但 `supabase/migrations/20260721000001_ad_daily_insights.sql` 的表注释明确写着"account-level rollup MUST aggregate from filtered campaign rows"，并点名 CTS 账户 2775766642787274 内有 4 条 Oztop 遗留系列。
+- **要做什么**：先确认 `ad_daily_insights` 写入侧有没有可用的系列级归属信号；如果没有，需要独立设计一个归属事实来源（新表/例外名单/人工登记），改完要同时更新 `circuit-breaker-spend.ts` 和其它既有读者（`evaluate.ts` 等，同样没做这层过滤）保持口径一致。
+- **为什么没在这个 PR 里现在就修**：核实过 `evaluate.ts` 等既有文件用的是同一种"不做系列归属过滤"的读法，这是全平台对 `ad_daily_insights` 的既有惯例缺口，不是这个 PR 独有的疏漏；要修对需要独立设计 + 跨文件改动，不是"接线 cron 调用方"这个 PR 顺手带一句代码能做对的事。
+- 来源：PR [#2019](https://github.com/bigbigraydeng-maker/magic-engine/pull/2019) 复审查实（Codex round 13）。
+
+---
+
+## 熔断检查 Inngest 函数自己重试耗尽仍失败时，没有任何人工可见的告警通道（2026-09-28 PR #2019 子牙复审查实，P1）
+
+**§11 打分**：频率低偏中（基础设施级失败总体少见，但有一个具体近期风险——本 PR 的 migration 按设计不随 PR 自动 apply，合并后如果有人忘记手动 apply 就先触发链路，会每次必然失败）· IMPACT 闭环关键度高（静默失效等于本 PR 核心目标名存实亡）· 收入关联度高（客户在没有熔断保护的情况下继续被判定"正常"）→ 恰好一个低、两个高 → **P1**。详细推演见 [ledger 卡](./ledger/2026-09-28-circuit-breaker-check-no-failure-monitoring.md)。
+
+- **现象**：`ads-circuit-breaker-check` 这个 Inngest 函数如果自己重试两次都失败，失败只存在于 Inngest 后台，不进 `cron_run_logs`、不进 Kernel 的 dead_letter 监控（这个函数不走 Kernel）、没有对应 pm-todo 待办——跟姊妹功能 `ads-autonomy-sync` worker 有专门的 `ads_autonomy_sync_receipts` 表 + 待办通道不对称。
+- **要做什么**：短期人工在 apply migration + Sync Inngest 后确认一次运行状态；中期照 `ads_autonomy_sync_receipts` 模式加一张回执表 + pm-todo 待办。
+- **为什么没在这个 PR 里现在就修**：需要新建数据结构或新的写入点，不是小改动，且本 PR 已经因改动过大被 `fix-scope` 标红。
+- 来源：PR [#2019](https://github.com/bigbigraydeng-maker/magic-engine/pull/2019) 子牙独立架构复审查实。
+
+---
+
 ## `meta-leads-sync` 每一轮都标红，「红了」这个信号已经不携带任何信息（2026-09-24 查实，P0）
 
 **§11 打分**：频率高（每 2 小时一轮，轮轮红）· IMPACT 闭环关键度高（Measure 段，报警器焊死在响，真出事分不出来）· 收入关联度高（这个报警器的职责就是发现线索断供；2026-08-21~08-30 同一个报警器失灵时 CTS 漏了 45 条线索）→ 零个低、三个高 → **P0**。
