@@ -64,8 +64,13 @@ try {
 const result = checkVideoFactoryBypass({ files })
 
 if (result.ok) {
+  const notice =
+    result.notices.length > 0
+      ? `\n\n> ⚠️ 但有 ${result.notices.length} 处文件名形似测试文件、内容却同时命中两个信号，没有拦但请人工看一眼：\n` +
+        result.notices.map((n) => `> - ${n}`).join('\n')
+      : ''
   summary(
-    `## ✅ 视频工厂唯一出口闸门：通过\n\n改动 ${files.length} 个文件，没有在 \`src/lib/factory/\` 之外发现「同一文件里既调视频生成接口又调发布接口」这种绕过形状。`,
+    `## ✅ 视频工厂唯一出口闸门：通过\n\n改动 ${files.length} 个文件，没有在 \`src/lib/factory/\` 之外发现「同一文件里既调视频生成接口又调发布接口」这种绕过形状。${notice}`,
   )
   process.exit(0)
 }

@@ -70,13 +70,21 @@ export const SELF_PREFIX = 'tools/ops-review-loop/'
 export const SCANNED_EXTENSIONS = ['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx']
 
 /**
- * A test file never runs as a standalone script against real providers — it
- * runs under vitest, which has no network access to these APIs in CI and no
- * secrets to call them with. Excluding it is also what keeps this guard from
- * flagging itself: a test proving this check catches the incident shape has
- * to spell out the provider/publish needles as string literals, and those
- * literals would otherwise show up as "added lines" in the very PR that adds
- * the test.
+ * 🔴 Known gap, flagged in 子牙's review of PR #2177: this is a *name* check,
+ * not proof the file actually runs under vitest. `scratchpad/foo.test.mjs`
+ * matches it and is never executed by anything — it is exactly as runnable a
+ * standalone script as `scratchpad/foo.mjs`, just wearing a test-shaped name.
+ * A committed bypass script can dodge this check by adopting that name.
+ *
+ * So a match here does NOT skip the file outright (that would silently pass
+ * the exact evasion above). It only downgrades a real hit from a failing
+ * `violation` to a non-failing `notice` — still visible in the job summary,
+ * never silent — because a *genuine* test file legitimately has to spell out
+ * these needles as string literals to test this guard at all (this repo's own
+ * `video-factory-bypass.test.ts` does exactly that), and failing every such
+ * test would make writing one impossible. See `docs/ledger/2026-09-29-video-
+ * factory-bypass-gate.md` known-gap ④ for the honest statement of what this
+ * does and does not close.
  */
 const TEST_FILE_RE = /(\.(test|spec)\.[a-z]+$)|(^|\/)(__tests__|tests)\//i
 
@@ -140,7 +148,7 @@ function firstSignatureHit(text, signatures) {
  * Decide whether one changed file's added lines match the incident shape.
  *
  * @param {{filename: string, patch?: string}} file
- * @returns {{skipped: true} | {skipped: false, unreadable: boolean, violation: string | null}}
+ * @returns {{skipped: true} | {skipped: false, unreadable: boolean, violation: string | null, notice?: string}}
  */
 export function checkFile(file) {
   const path = file?.filename
@@ -150,7 +158,8 @@ export function checkFile(file) {
   if (path.startsWith(FACTORY_PREFIX)) return { skipped: true }
   if (path.startsWith(SELF_PREFIX)) return { skipped: true }
   if (!SCANNED_EXTENSIONS.includes(extensionOf(path))) return { skipped: true }
-  if (TEST_FILE_RE.test(path)) return { skipped: true }
+
+  const isTestShaped = TEST_FILE_RE.test(path)
 
   const lines = addedLines(file.patch)
   if (lines.length === 0 && file.patch === undefined) {
@@ -175,13 +184,19 @@ export function checkFile(file) {
       : null)
   if (!publishHit) return { skipped: false, unreadable: false, violation: null }
 
-  return {
-    skipped: false,
-    unreadable: false,
-    violation:
-      `${path} —— 新增代码里同时出现视频生成接口（${providerHit.why}）和发布接口（${publishHit.why}），` +
-      `又不在 \`${FACTORY_PREFIX}\` 之下：这正是 2026-09-28 East Inter 事故的绕法（见 PITFALLS D14）`,
+  const message =
+    `${path} —— 新增代码里同时出现视频生成接口（${providerHit.why}）和发布接口（${publishHit.why}），` +
+    `又不在 \`${FACTORY_PREFIX}\` 之下：这正是 2026-09-28 East Inter 事故的绕法（见 PITFALLS D14）`
+
+  if (isTestShaped) {
+    // Downgraded, not silent: could be a bypass script wearing a test-shaped
+    // name (this check cannot tell), could be a genuine test. Either way a
+    // human sees it in the job summary; it just does not fail the merge gate
+    // on its own. See the TEST_FILE_RE doc comment above.
+    return { skipped: false, unreadable: false, violation: null, notice: `${message}（文件名形似测试文件，降级为提醒，不拦）` }
   }
+
+  return { skipped: false, unreadable: false, violation: message }
 }
 
 /**
@@ -189,19 +204,21 @@ export function checkFile(file) {
  * the video factory" shape.
  *
  * @param {{files: Array<{filename: string, patch?: string}>}} input
- * @returns {{ok: boolean, violations: string[]}}
+ * @returns {{ok: boolean, violations: string[], notices: string[]}}
  */
 export function checkVideoFactoryBypass({ files }) {
   if (!Array.isArray(files)) {
-    return { ok: false, violations: ['拿不到改动文件清单 —— 闸门无法判定，按失败处理'] }
+    return { ok: false, violations: ['拿不到改动文件清单 —— 闸门无法判定，按失败处理'], notices: [] }
   }
 
   const violations = []
+  const notices = []
   for (const file of files) {
     const result = checkFile(file)
     if (result.skipped) continue
     if (result.violation) violations.push(result.violation)
+    if (result.notice) notices.push(result.notice)
   }
 
-  return { ok: violations.length === 0, violations }
+  return { ok: violations.length === 0, violations, notices }
 }

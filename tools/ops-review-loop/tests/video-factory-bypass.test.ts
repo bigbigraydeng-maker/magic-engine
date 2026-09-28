@@ -99,7 +99,7 @@ describe('🔴 does not flag legitimate, unrelated changes', () => {
     expect(checkVideoFactoryBypass({ files: [selfChange] }).ok).toBe(true)
   })
 
-  it('leaves a test file alone even when it spells out both needles as fixtures', () => {
+  it('leaves this guard’s own test file alone (SELF_PREFIX, not the test-name rule)', () => {
     const testChange = file('tools/ops-review-loop/tests/video-factory-bypass.test.ts', [
       "const bypass = file('scratchpad/x.mjs', ['api.muapi.ai', 'video_reels'])",
     ])
@@ -132,6 +132,45 @@ describe('🔴 does not flag legitimate, unrelated changes', () => {
       "const res = await fetch(`${GRAPH_BASE}/${adAccountId}/campaigns`, opts)",
     ])
     expect(checkVideoFactoryBypass({ files: [unrelated] }).ok).toBe(true)
+  })
+})
+
+describe('🔴 known gap ④ (子牙 review, PR #2177): a test-shaped filename does not fully evade', () => {
+  // 子牙's probe: rename the East Inter script to *.test.mjs — TEST_FILE_RE
+  // matches the name, but nothing ever actually runs it under vitest, so it
+  // is exactly as executable a bypass script as the original. Full skip would
+  // silently pass this evasion; downgrading to a notice keeps it visible.
+  it('does not fail the gate, but surfaces a notice instead of skipping silently', () => {
+    const disguised = file('scratchpad/make-eastinter-reels.test.mjs', [
+      "const MUAPI_BASE = 'https://api.muapi.ai/api/v1'",
+      "await fetch(`https://graph.facebook.com/v21.0/${pageId}/video_reels`, opts)",
+    ])
+    const result = checkVideoFactoryBypass({ files: [disguised] })
+    expect(result.ok).toBe(true)
+    expect(result.violations).toEqual([])
+    expect(result.notices).toHaveLength(1)
+    expect(result.notices[0]).toContain('scratchpad/make-eastinter-reels.test.mjs')
+    expect(result.notices[0]).toContain('降级为提醒')
+  })
+
+  it('still fully fails a real (non-disguised) path with the same content', () => {
+    const real = file('scratchpad/make-eastinter-reels.mjs', [
+      "const MUAPI_BASE = 'https://api.muapi.ai/api/v1'",
+      "await fetch(`https://graph.facebook.com/v21.0/${pageId}/video_reels`, opts)",
+    ])
+    const result = checkVideoFactoryBypass({ files: [real] })
+    expect(result.ok).toBe(false)
+    expect(result.notices).toEqual([])
+  })
+
+  it('a genuine test elsewhere that legitimately needs both needles does not fail the gate', () => {
+    // e.g. a future test for src/lib/social/facebook-publisher.ts mocking a
+    // video path — this must not become impossible to write.
+    const genuineTest = file('src/lib/social/__tests__/facebook-publisher.test.ts', [
+      "  fetchMock.mockResolvedValueOnce({ url: 'https://api.muapi.ai/x', body: '...' })",
+      "  expect(calls).toContain('https://graph.facebook.com/v21.0/1/video_reels')",
+    ])
+    expect(checkVideoFactoryBypass({ files: [genuineTest] }).ok).toBe(true)
   })
 })
 
