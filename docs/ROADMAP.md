@@ -35,6 +35,17 @@
 
 红线不放宽：发布 / 口碑执行 / 花钱类无 PM 授权不做；事实服务端读；读不到 = 不动；每动作有回执与撤回。
 
+## 广告熔断检查当天同步不完整只 skip 不重试，故障当天的真实异常会被永久漏检（2026-09-28 PR #2019 复审查实，P1）
+
+**§11 打分**：频率低（要同时命中"账户清单或花费同步当天恰好失败"和"故障那天真的发生了会触发熔断的异常花费"两个条件的交集）· IMPACT 闭环关键度高（熔断器是 Act 段唯一自动止损闸，被跳过的那天以后只会变成历史样本，再也不会作为"今天"接受 3 倍判据检查）· 收入关联度高（真出现，代价是客户账户在故障当天继续 `auto_approve` 花钱且没有任何安全网）→ 恰好一个低、两个高 → **P1**。详细推演见 [ledger 卡](./ledger/2026-09-28-circuit-breaker-same-day-retry-gap.md)。
+
+- **现象**：`google-data-pullback-daily` 里 `circuit_breaker_check` 的发送闸（`accountDiscovery.complete && primarySpendSynced && secondarySpendSynced`）只要有一项不满足就整体 skip，原因记进 `result.circuit_breaker_check`，但不触发本轮重试；`evaluationDate` 之后只会前进，被跳过那天的数据即使后续被别的路径回填，也不会再有机会作为"今天"被熔断判据检查。
+- **要做什么**（二选一，接手时按当时 §11 分数和是否已有真实缺口发生定）：① 每日在 pullback 路由末尾加一段"回看最近 7 天 `circuit_breaker_check` 回执缺口"扫描，缺口对应日期数据若已补全就补发一次以该历史日期为 `date` 的 `ads.circuit_breaker.check_due`；② 用 pm-todo 管道下发人工待办，缺口出现时提醒 FDE/PM 手动核对那天花费有没有异常（更轻量但不自动闭环）。
+- **为什么没在发现当次就修**：两个方向都需要新的对账/补发基础设施，`google-data-pullback-daily` 是普通 cron 路由不是 Inngest 函数，没有"对某个历史 evaluationDate 单独重跑一次检查"的既有机制，需要独立设计 + 复审，不是"接线 cron 调用方"这个 PR 顺手带一句代码能做对的事；该 PR 的目标（熔断器在正常情况下自动触发）已经达成。
+- 来源：PR [#2019](https://github.com/bigbigraydeng-maker/magic-engine/pull/2019) 复审查实（Codex）。
+
+---
+
 ## `meta-leads-sync` 每一轮都标红，「红了」这个信号已经不携带任何信息（2026-09-24 查实，P0）
 
 **§11 打分**：频率高（每 2 小时一轮，轮轮红）· IMPACT 闭环关键度高（Measure 段，报警器焊死在响，真出事分不出来）· 收入关联度高（这个报警器的职责就是发现线索断供；2026-08-21~08-30 同一个报警器失灵时 CTS 漏了 45 条线索）→ 零个低、三个高 → **P0**。
