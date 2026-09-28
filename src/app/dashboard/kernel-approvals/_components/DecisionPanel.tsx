@@ -22,6 +22,8 @@ interface ApprovalPermissions {
   readonly canApprove: boolean
   readonly canReject: boolean
   readonly approveBlockedReason: string | null
+  /** 这个动作有专属审批入口时给出 —— 这里不画「同意」，改给去那里的链接。 */
+  readonly dedicatedEntry: { readonly label: string; readonly path: string } | null
 }
 
 interface DetailResponse {
@@ -55,6 +57,7 @@ const BLOCKED_REASON_LABEL: Record<string, string> = {
   insufficient_tier: '你的账号权限不够批这条（可以点「先不做」）',
   unknown_action: '系统认不出这个动作，不给批（可以点「先不做」）',
   unknown_action_version: '这条是旧版本的请求，不能用新规则批（可以点「先不做」）',
+  dedicated_entry: '这条要去它自己的批准页批——那里批完会立刻执行，这里只签不执行（可以点「先不做」）',
 }
 
 export default function DecisionPanel({
@@ -183,13 +186,22 @@ export default function DecisionPanel({
       </label>
 
       <div className="flex gap-2">
-        <button
-          className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:bg-slate-300"
-          disabled={!detail.permissions.canApprove || submitting}
-          onClick={() => void submit('approve')}
-        >
-          同意（只签授权，不执行）
-        </button>
+        {detail.permissions.dedicatedEntry ? (
+          <a
+            className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white"
+            href={detail.permissions.dedicatedEntry.path}
+          >
+            去「{detail.permissions.dedicatedEntry.label}」处理
+          </a>
+        ) : (
+          <button
+            className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:bg-slate-300"
+            disabled={!detail.permissions.canApprove || submitting}
+            onClick={() => void submit('approve')}
+          >
+            同意（只签授权，不执行）
+          </button>
+        )}
         <button
           className="rounded border border-slate-400 px-3 py-1.5 text-sm text-slate-700 disabled:opacity-40"
           disabled={!detail.permissions.canReject || submitting || !reason.trim()}

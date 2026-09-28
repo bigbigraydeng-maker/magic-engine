@@ -705,16 +705,18 @@ export default function ClientDetailPage() {
           <section>
             <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">诊断与分析</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {/* 客户消息不是"诊断",但它跟诊断一样是每天要开的页;放生产区会被
-                  一堆内容工具淹掉,所以放在诊断与分析区首位 —— 销售一进客户页就看到。 */}
-              {/* 销售每天第一件事就是开这一页,放在诊断区最前面。 */}
-              {industryFeatureFlags(client?.industry).listings && (
-                <ToolCard href={`/dashboard/clients/${clientId}/contacts`}        title="我的客人"       desc="手机上按房子列人 · 点一下说清楚他到哪一步了（中介自己用）"  badge="in_house" />
-              )}
-              <ToolCard href={`/dashboard/clients/${clientId}/crm`}                title="今天该联系谁"   desc="全渠道接触记录自动排序 · 说过别再联系的已挡在名单外"  badge="in_house" />
-              <ToolCard href={`/dashboard/clients/${clientId}/crm/all`}            title="全部客人"       desc="一张表看全部客人 · 点开看往来记录、记一笔、改跟进阶段"  badge="in_house" />
-              <ToolCard href={`/dashboard/clients/${clientId}/messenger`}          title="客户消息"       desc="Facebook 私信 · AI 写好需求卡和回复草稿 · 你按发送"  badge="in_house" />
-              <ToolCard href={`/dashboard/clients/${clientId}/business-inbox`}      title="商务收件箱"     desc="已连接的 Outlook 邮件 · 只读查看 · 显示 CRM 判到的跟进阶段"  badge="in_house" />
+              {/*
+                2026-09-28（CRM 重整 B1，PM 拍板）：这个区原来是 6 张散卡片（我的客人 /
+                今天该联系谁 / 全部客人 / 客户消息 / 商务收件箱 / 同行渠道）——收成 1 张
+                「CRM 管理」，进去之后在 CrmTabs 里能摸到全部 6 个目的地，一个都没少。
+                同一次改动顺手堵上了 WP-A 那个漏洞：以前「同行渠道」这张卡片没有任何
+                行业过滤，NAL（非旅游客户）也能点进去看到本该只有 CTS 才有的东西——
+                现在整张卡片收进「CRM 管理」，「同行渠道」子入口只在 industryFeatureFlags
+                判定为旅游客户时才出现（CrmTabs.tsx），服务端也补了闸（agents/page.tsx +
+                三条 API 路由），不是只藏了个按钮。见台账
+                client-custom-features-leak-to-other-clients。
+              */}
+              <ToolCard href={`/dashboard/clients/${clientId}/crm/all`}            title="CRM 管理"       desc="客人清单、往来记录、跟进阶段、同行渠道 —— 全部客人相关的功能都在这里"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/zhangqian`}          title="张骞发现"       desc="扫描社媒、评价、关键词、竞品，生成品牌现状全景报告"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/operating-agent`}   title="经营 Agent"      desc="把客户目标、产品范围和竞品证据合成下一步经营判断；无证据时明确说不知道" badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/diagnostic`}         title="华佗深度诊断"   desc="从 SEO/社媒/口碑/广告/AI可见/竞品六维打分，找到核心病灶"  badge="in_house" />

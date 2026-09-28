@@ -146,3 +146,56 @@ export function classifyOpenAIFailure(input: ProviderFailureInput): ProviderFail
 export function needsHuman(kind: ProviderFailureKind): boolean {
   return kind === 'account_exhausted' || kind === 'credential_invalid' || kind === 'gateway_auth_failed'
 }
+
+/**
+ * 同一套判据，喂进来的是 **SDK 抛出来的异常**而不是原始响应。
+ *
+ * WHY 需要这一层
+ * -------------
+ * `instrumentedFetch` 拦的是响应，负责「记一笔、让人知道」；但**调用方自己**也常常
+ * 需要当场改变行为 —— 最典型的是分批跑的循环：账户没钱时，对剩下每一条重试一遍，
+ * 等于把 SDK 的 429 退避（一条烧 20.1 秒，2026-09-23 生产实测）乘以条数，
+ * 把「充钱就好」放大成「这一段永远不返回、运行记录卡在 running」。
+ * 那一层拿不到这个决定权，因为它按约定**绝不向调用方抛**、也不改变控制流。
+ *
+ * 🔴 判据**不在这里重写**，原样委托给 `classifyOpenAIFailure` —— 第三份错误码清单
+ *    一定会跟前两份漂移，而漂移的方向永远是「把限流误判成没钱」。
+ *    这里只做一件事：把 SDK 的 `APIError` 还原成它当初收到的那个响应形状。
+ */
+export function classifyThrownOpenAIError(err: unknown): ProviderFailureKind {
+  if (!err || typeof err !== 'object') return 'other'
+  const e = err as {
+    status?: unknown
+    error?: unknown
+    code?: unknown
+    type?: unknown
+    headers?: unknown
+  }
+  const status = typeof e.status === 'number' ? e.status : 0
+  if (status === 0) return 'other'
+
+  // SDK 把响应体里的 `error` 对象原样挂在 `err.error` 上；拿不到就用平铺的
+  // code/type 拼一个等价的回去，让下游那份白名单照常认。
+  const body = JSON.stringify({
+    error:
+      e.error && typeof e.error === 'object'
+        ? e.error
+        : { code: typeof e.code === 'string' ? e.code : '', type: typeof e.type === 'string' ? e.type : '' },
+  })
+
+  const headers: Record<string, string> = {}
+  if (e.headers && typeof e.headers === 'object') {
+    const h = e.headers as { forEach?: (cb: (v: string, k: string) => void) => void }
+    if (typeof h.forEach === 'function') {
+      h.forEach((v, k) => {
+        headers[k] = v
+      })
+    } else {
+      for (const [k, v] of Object.entries(e.headers as Record<string, unknown>)) {
+        if (typeof v === 'string') headers[k] = v
+      }
+    }
+  }
+
+  return classifyOpenAIFailure({ status, body, headers })
+}

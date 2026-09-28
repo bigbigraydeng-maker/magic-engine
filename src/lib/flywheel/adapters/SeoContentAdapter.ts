@@ -11,6 +11,7 @@
 
 import { supabaseAdmin } from '../../supabase'
 import { getDomainMetrics } from '../../dataforseo/labs'
+import { SEO_WEEKLY_PAID_SOURCE } from '../seo-weekly'
 import { isValidSeoActionType, SEO_METRIC_KEY } from '../vocabulary'
 import { registerAdapter } from './registry'
 import type {
@@ -85,7 +86,7 @@ export class SeoContentAdapter implements FlywheelAdapter {
     const base = {
       clientId,
       flywheel: 'seo' as const,
-      source: 'semrush',
+      source: SEO_WEEKLY_PAID_SOURCE,
       sourceRef: { domain },
       measuredAt: now,
     }
@@ -111,7 +112,7 @@ export class SeoContentAdapter implements FlywheelAdapter {
           flywheel: 'seo',
           metric_key: row.metric_key,
           metric_value: row.metric_value,
-          source: 'semrush',
+          source: SEO_WEEKLY_PAID_SOURCE,
           source_ref: { domain },
           measured_at: now,
         })

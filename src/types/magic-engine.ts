@@ -324,6 +324,7 @@ export interface AiVisibilityRun {
   cost_usd: number | null
   latency_ms: number | null
   error_message: string | null
+  parse_error_message: string | null
   ran_at: string
 }
 

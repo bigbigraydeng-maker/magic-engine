@@ -12,7 +12,7 @@
  * [] on any error so a missing scope / account never breaks the main flow.
  */
 
-const GRAPH_BASE = 'https://graph.facebook.com/v20.0'
+import { GRAPH_BASE } from './graph-base'
 
 interface RawAd {
   creative?: {

@@ -16,6 +16,7 @@ import { EngineComparison } from './_components/EngineComparison';
 import { ModelStats } from './_components/ModelStats';
 import { QueriesManager } from './_components/QueriesManager';
 import type { AiVisibilityRun, AiVisibilitySnapshot, AiVisibilityQuery } from '@/types/magic-engine';
+import { isRunConclusive } from '@/lib/ai-tracker/run-conclusive';
 
 type Tab = 'rankings' | 'engines' | 'models' | 'queries';
 
@@ -56,7 +57,7 @@ interface EngineStat {
 function aggregateByEngine(runs: AiVisibilityRun[]): EngineStat[] {
   return AI_ENGINES.map(cfg => {
     const engineRuns = runs.filter(r => r.ai_engine === cfg.key);
-    const successful = engineRuns.filter(r => !r.error_message);
+    const successful = engineRuns.filter(isRunConclusive);
     const mentioned = successful.filter(r => r.client_brand_rank != null);
     const ranks = mentioned
       .map(r => r.client_brand_rank as number)
@@ -82,7 +83,7 @@ function aggregateByEngine(runs: AiVisibilityRun[]): EngineStat[] {
       avgRank,
       dir,
       trendLabel,
-      totalRuns: engineRuns.length,
+      totalRuns: successful.length,
       mentionRuns: mentioned.length,
     };
   });

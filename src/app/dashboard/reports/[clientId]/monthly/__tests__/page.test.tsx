@@ -368,6 +368,7 @@ describe('Monthly Report Page Components', () => {
             competitors: [{ brand: 'Rival Co', rank: 1 }, { brand: 'Other Ltd', rank: 3 }],
             engine: 'openai',
             run_at: '2026-05-30T00:00:00Z',
+            measured: true,
           },
           {
             question: 'cheap Auckland day trips',
@@ -376,6 +377,7 @@ describe('Monthly Report Page Components', () => {
             competitors: [],
             engine: 'perplexity',
             run_at: '2026-05-30T00:00:00Z',
+            measured: true,
           },
         ],
       }))
@@ -389,9 +391,9 @@ describe('Monthly Report Page Components', () => {
       expect(screen.getByText('#3 Other Ltd')).toBeInTheDocument()
       expect(screen.getByText('openai')).toBeInTheDocument()
 
-      // Not mentioned → N/M badge + "No run data" when no competitors were captured
+      // Measured but not mentioned → N/M badge + "No competitors found"
       expect(screen.getByText('N/M')).toBeInTheDocument()
-      expect(screen.getByText('No run data')).toBeInTheDocument()
+      expect(screen.getByText('No competitors found')).toBeInTheDocument()
       expect(screen.getByText('perplexity')).toBeInTheDocument()
     })
   })

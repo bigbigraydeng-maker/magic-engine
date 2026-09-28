@@ -18,6 +18,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ActionRun, CapabilityImplementation } from './types'
+import type { EnvelopeFacts, EnvelopeRequest } from './autonomy-envelope'
 import type { ActionRegistry } from './registry'
 import { getRun } from './store'
 
@@ -53,6 +54,18 @@ export interface KernelDeps {
    *    我们分不清「旧进程崩了」和「旧进程还活着只是慢」。
    */
   readonly ownerId: string
+  /**
+   * 受限自治信封的**事实来源**（spec 2026-09-24 §3 G5）。
+   *
+   * 🔴 Kernel 刻意不认识广告表。信封要的六项事实（改动前预算、账户合计、
+   *    日上限、距上次变动小时数、学习期、实验数）全部由域层实现去读
+   *    （`capabilities/ads/envelope-facts.ts`），Kernel 只认这个接口。
+   *
+   * 🔴 **缺这个解析器 = 拒绝**，不是「跳过信封检查」。声明成 bounded 的动作
+   *    没人能告诉 Kernel 真实预算是多少时，唯一诚实的答案是不做。
+   *    所以它是可选字段，但 authorize / gateway 在 bounded 路径上缺它就 deny。
+   */
+  readonly resolveEnvelopeFacts?: EnvelopeFactsResolver
   now(): Date
   /** 重试之间的等待。测试里换成不等，生产里就是真等。 */
   sleep(ms: number): Promise<void>
@@ -69,7 +82,28 @@ export interface KernelDepsInit {
   ownerId?: string
   now?: () => Date
   sleep?: (ms: number) => Promise<void>
+  /** 见 `KernelDeps.resolveEnvelopeFacts`。不给 = bounded 动作一律拒。 */
+  resolveEnvelopeFacts?: EnvelopeFactsResolver
 }
+
+/**
+ * 解析某一次 run 的信封事实。
+ *
+ * `at` 说明这是哪一层在问：授权层用当下最新快照，执行层用 `kernel_pre`
+ * （碰 provider 之前刚抓的那一份）。两层各算一次，事实来源不同，都必须过。
+ *
+ * 返回 `{ unavailable }` = 读不到 → 调用方 deny，**不得当作通过**。
+ */
+export type EnvelopeFactsResolver = (ctx: {
+  clientId: string
+  actionKey: string
+  input: Record<string, unknown>
+  at: 'authorize' | 'pre_provider'
+  runId: string
+}) => Promise<
+  | { readonly request: EnvelopeRequest; readonly facts: EnvelopeFacts }
+  | { readonly unavailable: string }
+>
 
 /** 进程内一次性的随机后缀 —— 重启之后不会跟崩溃前那份租约撞上。 */
 function bootNonce(): string {
@@ -86,6 +120,23 @@ export function createKernelDeps(init: KernelDepsInit): KernelDeps {
     ownerId: init.ownerId ?? `${init.workerId ?? 'kernel'}@${bootNonce()}`,
     now: init.now ?? (() => new Date()),
     sleep: init.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms))),
+    /**
+     * 🔴 **这一行以前漏了**（子牙 2026-09-27 审 WP3.1b 抓到）。
+     *
+     *    `KernelDepsInit` 从一开始就声明了这个字段、`KernelDeps` 也声明了、注释还写着
+     *    「不给 = bounded 动作一律拒」—— 但这个工厂的对象字面量里没有它，
+     *    所以调用方认认真真传进来的解析器被**静默丢掉**。
+     *
+     *    后果是闭合的、而且是「全拒」不是「偶尔拒」：
+     *      · `registry-ads.ts` 六个 ActionKey 全是 `approval: { mode: 'bounded' }`
+     *      · `authorize.ts` 在 bounded 路径上缺解析器就 `outside_autonomy_envelope` deny
+     *      · 于是每一条广告动作都拿回 denied，Meta 一个字节都不动
+     *
+     *    这跟本文件下方 `createKernel` 那句注释（`leaseSeconds` / `ownerId` 以前
+     *    「接了不转发」）是**同一类 bug**：**「参数类型收了它」和「行为真的变了」是两件事**。
+     *    架构测试现在盯着「生产 Kernel 工厂产出的 `deps.resolveEnvelopeFacts` 非空」。
+     */
+    resolveEnvelopeFacts: init.resolveEnvelopeFacts,
     async requireRun(runId: string) {
       const run = await getRun(init.supabase, runId)
       if (!run) throw new Error(`[kernel] 找不到执行实例 ${runId}`)

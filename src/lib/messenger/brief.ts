@@ -370,6 +370,15 @@ const NULL_TRIP: TripDetails = {
 export interface GenerateBriefDeps {
   /** Test-only override for the knowledge-base read (default: real `getClientKnowledge`). */
   knowledge?: GetClientKnowledgeDeps
+  /**
+   * Bounds the model call to whatever is left of the caller's per-candidate
+   * budget (see `brief-cycle.ts`'s `generateDueBriefs`). Without this the
+   * OpenAI request has no deadline of its own — the caller's clock check
+   * only runs BETWEEN candidates, so one slow call (2026-09-23: a 429 the
+   * SDK retries twice, ~20s) still runs past the gateway's own timeout and
+   * the whole chunk never returns (see `CHUNK_TIME_BUDGET_MS`).
+   */
+  signal?: AbortSignal
 }
 
 export interface GeneratedBrief {
@@ -410,21 +419,35 @@ export async function generateBrief(
 
   const identity = await loadClientIdentity(clientId)
   const facts = await loadClientFacts(clientId, deps.knowledge)
-  const { default: OpenAI } = await import('openai')
-  const client = new OpenAI({ apiKey })
-  const res = await client.responses.create({
-    model: modelName(),
-    input: [
-      { role: 'system', content: buildSystemPrompt(identity, facts.entries) },
-      {
-        role: 'user',
-        content: `${renderContext(context, identity.name)}Thread:\n${renderThread(messages, identity.name)}`,
+  // 🔴 **收编到统一入口**（2026-09-23，接 openai-client.ts 文件头点名留给本窗口的那条）。
+  //    原来这里自己 `new OpenAI({ apiKey })`，于是这条链路的失败**绕过了
+  //    `instrumentedFetch` 的拦截** —— 账户余额 9/20 耗尽三天没人知道，这里是漏网的一处。
+  //
+  //    `bypassGateway: true` 是刻意的，不是图省事：本函数用的是 `responses.create`，
+  //    而「网关代不代理 /v1/responses」在这个仓库里零证据（openai-client.ts 里写了
+  //    实测核对过程）。所以只拿拦截、不换路由 —— 换路由等于用一条没验过的链路
+  //    替掉一条在跑的链路。
+  const { getOpenAIClient } = await import('@/lib/ai/openai-client')
+  const client = getOpenAIClient({ apiKey, bypassGateway: true })
+  const res = await client.responses.create(
+    {
+      model: modelName(),
+      input: [
+        { role: 'system', content: buildSystemPrompt(identity, facts.entries) },
+        {
+          role: 'user',
+          content: `${renderContext(context, identity.name)}Thread:\n${renderThread(messages, identity.name)}`,
+        },
+      ],
+      text: {
+        format: { type: 'json_schema', name: 'messenger_brief', schema: MESSENGER_BRIEF_JSON_SCHEMA },
       },
-    ],
-    text: {
-      format: { type: 'json_schema', name: 'messenger_brief', schema: MESSENGER_BRIEF_JSON_SCHEMA },
-    },
-  } as Parameters<typeof client.responses.create>[0])
+    } as Parameters<typeof client.responses.create>[0],
+    // 🔴 2026-09-23 事故的直接原因：这个调用之前没有自己的超时，SDK 默认对 429
+    // 重试两次能把一条卡烧到 ~20 秒。`signal` 把剩余的段预算落到这一条调用本身，
+    // 而不是只靠调用方在条目之间读一次表。
+    deps.signal ? { signal: deps.signal } : undefined,
+  )
 
   const text = (res as { output_text?: string }).output_text ?? '{}'
   const brief = MessengerBriefSchema.parse(JSON.parse(text))
@@ -525,11 +548,13 @@ export async function storeBrief(
   brief: MessengerBrief,
   now: Date,
   knowledgeStatus: KnowledgeStatus | null = null,
+  /** Same per-candidate deadline as `generateBrief`'s — see its `GenerateBriefDeps.signal`. */
+  signal?: AbortSignal,
 ): Promise<void> {
   const today = now.toISOString().slice(0, 10)
   const countedToday = candidate.regenCountDate === today ? candidate.regenCount : 0
 
-  const { error } = await supabaseAdmin.from('conversation_briefs').upsert(
+  let query = supabaseAdmin.from('conversation_briefs').upsert(
     {
       conversation_id: candidate.conversationId,
       client_id: candidate.clientId,
@@ -555,6 +580,9 @@ export async function storeBrief(
     },
     { onConflict: 'conversation_id' },
   )
+  if (signal) query = query.abortSignal(signal)
+
+  const { error } = await query
 
   if (error) throw new Error(`brief upsert failed: ${error.message}`)
 }

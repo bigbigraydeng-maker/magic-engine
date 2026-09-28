@@ -21,6 +21,16 @@
  */
 
 /**
+ * 「上一轮已经办成了，本轮零 provider 调用」的跳过理由。
+ *
+ * ⚠️ 这个 key 是**健康信号**，不是故障：稳态下一整轮的 tally 会长成
+ * `{ 'skipped:already_synced': 13 }`，`subscribed` / `already_member` 都是 0。
+ * 今后任何健康检查**都不得**用「tally 里没有 subscribed / already_member」
+ * 当作故障判据 —— 那是正常运行的样子。
+ */
+export const ALREADY_SYNCED_REASON = 'already_synced'
+
+/**
  * 「本来就不该进名单」的跳过理由 —— 这几种一律不算异常。
  *
  * 共同点：不进名单是**正确结果**，没有任何人需要为此动手。
@@ -32,6 +42,7 @@ const EXPECTED_SKIP_REASONS = new Set([
   'contact_dnc', // 这个人已被标记免打扰
   'no_audience_config', // 这个客户没开邮件出口（查得到，就是没配）
   'no_audience_id', // 同上，provider 层的说法
+  'already_synced', // 上一轮已经办成了，这一轮不用再打 provider —— 不是异常
 ])
 
 /** tally key → 给 PM 看的人话。认不出的 key 走 `outletGapLabel` 的兜底。 */
@@ -76,4 +87,47 @@ export function countOutletGaps(tally: Record<string, number> | undefined): numb
     if (count > 0 && isOutletGap(key)) n += count
   }
   return n
+}
+
+// ── 「这条已经办完了吗」──────────────────────────────────────────────────────
+
+/**
+ * 存在触点 `metadata.mailchimp_result` 里的那份回执。
+ *
+ * **必须自己声明**：`tagRepair` 不在 `SubscribeMemberResult` 类型里，它是
+ * `subscribeMemberEnsuringTag` 在运行时展开进去的，从现有类型推不出来。
+ * 而且库里的值什么形状都可能有（历史行、人手改过的行），所以每个字段都当
+ * unknown 收。
+ */
+export interface StoredMailchimpReceipt {
+  status?: unknown
+  reason?: unknown
+  tagRepair?: unknown
+}
+
+/**
+ * 这条回执算不算「已经办完，本轮可以不用再打 Mailchimp」。
+ *
+ * 只有两种算办完：
+ *   · `subscribed` —— 我们把人加进名单了
+ *   · `already_member` **且**来源标签确实落地了（`applied` / `already_tagged`）
+ *
+ * 其余一律**不算**，照常重跑 —— 这正是 24 小时回看窗口要保住的重试能力：
+ *   · `pending`（回执没写完）→ 重跑
+ *   · `skipped:*`（缺配置 / 缺邮箱 / DNC 查不到）→ 配置修好后要能自愈
+ *   · `failed:*`（含不可重试的 auth / audience_not_found）→ 密钥修好后要能自愈
+ *   · `already_member` 但 `tagRepair` 缺失或以 `failed:` 开头 → 归因证据还没落地
+ *
+ * `not_attempted` 不算办完：它的唯一来源是「调用方压根没给标签名」，把
+ * 「没试过」判成「办完了」，正是这条链路 2026-09-06 整月丢归因的那个思维错误。
+ *
+ * **任何非预期形状（null / 字符串 / 数组 / 缺字段）一律返回 false 且不抛** ——
+ * 判不出来就当没办完，宁可多打一次，不可漏一次。
+ */
+export function isMailchimpSettled(raw: unknown): boolean {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return false
+  const receipt = raw as StoredMailchimpReceipt
+  if (receipt.status === 'subscribed') return true
+  if (receipt.status !== 'already_member') return false
+  return receipt.tagRepair === 'applied' || receipt.tagRepair === 'already_tagged'
 }

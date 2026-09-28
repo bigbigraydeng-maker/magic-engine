@@ -12,9 +12,11 @@ vi.mock('@/lib/strategy/auto-fetch', () => ({
   autoFetchMetricValue: vi.fn(),
 }))
 
-// startCronRun writes to cron_run_logs via supabaseAdmin — out of scope here
+// startCronRun writes to cron_run_logs via supabaseAdmin — replaced by a spy so
+// tests can assert what lands in the run log.
+const finishMock = vi.hoisted(() => vi.fn(async () => {}))
 vi.mock('@/lib/cron/run-logger', () => ({
-  startCronRun: vi.fn(async () => ({ finish: vi.fn(async () => {}) })),
+  startCronRun: vi.fn(async () => ({ finish: finishMock })),
 }))
 
 import { GET } from '../route'
@@ -128,5 +130,114 @@ describe('GET /api/cron/goal-current-value-refresh', () => {
     const body = await res.json()
     expect(body.failed).toBe(1)
     expect(body.succeeded).toBe(0)
+  })
+
+  it('same client with 2 active goals → each refreshed with its own period', async () => {
+    const goals = [
+      { id: 'g-signups', client_id: 'c1', primary_metric_key: 'signups_count', period_start: '2026-09-24', period_end: '2026-11-30' },
+      { id: 'g-leads', client_id: 'c1', primary_metric_key: 'leads_count', period_start: '2026-10-01', period_end: '2026-12-31' },
+    ]
+    const updatedIds: string[] = []
+    ;(supabaseAdmin.from as any).mockImplementation((table: string) => {
+      if (table === 'clients') {
+        return {
+          select: () => ({ in: () => ({ eq: () => Promise.resolve({ data: [{ id: 'c1' }], error: null }) }) }),
+        }
+      }
+      return {
+        select: () => ({ eq: () => Promise.resolve({ data: goals, error: null }) }),
+        update: () => ({
+          eq: (_col: string, id: string) => {
+            updatedIds.push(id)
+            return Promise.resolve({ error: null })
+          },
+        }),
+      }
+    })
+    ;(autoFetchMetricValue as any).mockImplementation(async (_db: unknown, _c: string, key: string) =>
+      ({ ok: true, value: key === 'leads_count' ? 23 : 2, source: 'x', snapshot_date: '2026-09-26', label: key }))
+
+    const res = await GET(makeReq('Bearer test-secret-123'))
+    const body = await res.json()
+
+    expect(body).toMatchObject({ processed: 2, succeeded: 2, failed: 0 })
+    expect(updatedIds.sort()).toEqual(['g-leads', 'g-signups'])
+    expect(autoFetchMetricValue).toHaveBeenCalledWith(expect.anything(), 'c1', 'signups_count', {
+      goalPeriod: { period_start: '2026-09-24', period_end: '2026-11-30' },
+    })
+    expect(autoFetchMetricValue).toHaveBeenCalledWith(expect.anything(), 'c1', 'leads_count', {
+      goalPeriod: { period_start: '2026-10-01', period_end: '2026-12-31' },
+    })
+    expect(finishMock).toHaveBeenCalledWith(expect.objectContaining({ processed: 2, completed: 2, failed: 0, error: undefined }))
+  })
+
+  it('real failures are written to the run log (error + summary); "no records yet" is logged but not a failure', async () => {
+    const goals = [
+      { id: 'g1', client_id: 'c1', primary_metric_key: 'signups_count', period_start: '2026-09-24', period_end: '2026-11-30' },
+      { id: 'g2', client_id: 'c1', primary_metric_key: 'leads_count', period_start: '2026-09-24', period_end: '2026-11-30' },
+    ]
+    ;(supabaseAdmin.from as any).mockImplementation((table: string) => {
+      if (table === 'clients') {
+        return {
+          select: () => ({ in: () => ({ eq: () => Promise.resolve({ data: [{ id: 'c1' }], error: null }) }) }),
+        }
+      }
+      return {
+        select: () => ({ eq: () => Promise.resolve({ data: goals, error: null }) }),
+        update: () => ({ eq: () => Promise.resolve({ error: null }) }),
+      }
+    })
+    ;(autoFetchMetricValue as any)
+      .mockResolvedValueOnce({ ok: false, unknown: true, noData: true, reason: 'no bookings yet' })
+      // unknown WITHOUT noData (ambiguous goal / query error) is still a fault
+      .mockResolvedValueOnce({ ok: false, unknown: true, reason: 'client has several active goals' })
+
+    const res = await GET(makeReq('Bearer test-secret-123'))
+    const body = await res.json()
+
+    expect(body).toMatchObject({ processed: 2, succeeded: 0, failed: 1 })
+    expect(finishMock).toHaveBeenCalledTimes(1)
+    type Entry = { goal_id: string; reason: string }
+    const [arg] = finishMock.mock.calls[0] as unknown as [
+      { failed: number; error?: string; summary?: { errors: Entry[]; no_data: Entry[] } },
+    ]
+    expect(arg.failed).toBe(1)
+    expect(arg.error).toBe('goal g2: client has several active goals')
+    expect(arg.summary?.errors).toEqual([{ goal_id: 'g2', reason: 'client has several active goals' }])
+    expect(arg.summary?.no_data).toEqual([{ goal_id: 'g1', reason: 'no bookings yet' }])
+  })
+
+  it('only "no records yet" → run is not failed (no error), but the reason is kept in summary', async () => {
+    const goals = [
+      { id: 'g1', client_id: 'c1', primary_metric_key: 'signups_count', period_start: '2026-09-24', period_end: '2026-11-30' },
+    ]
+    ;(supabaseAdmin.from as any).mockImplementation((table: string) => {
+      if (table === 'clients') {
+        return {
+          select: () => ({ in: () => ({ eq: () => Promise.resolve({ data: [{ id: 'c1' }], error: null }) }) }),
+        }
+      }
+      return { select: () => ({ eq: () => Promise.resolve({ data: goals, error: null }) }) }
+    })
+    ;(autoFetchMetricValue as any).mockResolvedValueOnce({ ok: false, unknown: true, noData: true, reason: 'no bookings yet' })
+
+    await GET(makeReq('Bearer test-secret-123'))
+
+    expect(finishMock).toHaveBeenCalledWith(expect.objectContaining({
+      failed: 0,
+      error: undefined,
+      summary: { errors: [], no_data: [{ goal_id: 'g1', reason: 'no bookings yet' }] },
+    }))
+  })
+
+  it('goals query error → 500 and a failed run with the reason (not "0 goals, clean")', async () => {
+    ;(supabaseAdmin.from as any).mockReturnValue({
+      select: () => ({ eq: () => Promise.resolve({ data: null, error: { message: 'db down' } }) }),
+    })
+
+    const res = await GET(makeReq('Bearer test-secret-123'))
+
+    expect(res.status).toBe(500)
+    expect(finishMock).toHaveBeenCalledWith({ failed: 1, error: 'Failed to load active goals: db down' })
   })
 })

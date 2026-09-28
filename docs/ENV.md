@@ -167,9 +167,19 @@
 | `VOICE_STORE` | 存储后端（`supabase`） | Render-web | ✅ |
 | `VOICE_TEST_NUMBERS` | 测试号码白名单 | Render-web | ✅ |
 | `VOICE_DEFAULT_AGENT_ID` | DID 丢失时的兜底坐席 | Render-web | ✅ |
+> 🔴 **判「这个变量还有没有人用」，不能只 grep `process.env.X`。**
+>
+> `lib/voice/config.ts` 用 zod schema 声明变量名，代码读的是 `cfg.env.X` / `parsed.X`，**全程不出现 `process.env.X`**。
+> 2026-08-01 就是按 `process.env` 搜出「0 引用」，误删了 9 个仍在用的语音变量（见 [PITFALLS A5](./PITFALLS.md)）。
+> 2026-09-27 这一行又被记成「代码 0 引用，待清理」，实测 **5 个里 4 个在用** —— 同一个坑第二次。
+> **正确做法**：`grep -rn "<变量名>" src/ scripts/`（搜名字本身，不搜 `process.env.`）。
+
 | `OUTBOUND_CALLING_ENABLED` | 🔴 **外呼总闸**，当前 `false`（板桥硬闸 #3） | Render-web | ✅ |
 | `DEFAULT_COUNTRY` / `DEFAULT_TIMEZONE` | `NZ` / `Pacific/Auckland` | Render-web | ✅ |
-| `TELEPHONY_PROVIDER` `TWILIO_ACCOUNT_SID` `TWILIO_AUTH_TOKEN` `DEFAULT_HUMAN_TRANSFER_URI` `WEBHOOK_REPLAY_WINDOW_SECONDS` | `.env.example` 有，代码 0 引用（已切 OpenAI 原生 SIP） | — | ⚠️ 待清理 |
+| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | 🔴 **在用，别清理**（2026-09-27 核实）。`lib/voice/config.ts:89` 用它俩判语音线路走 real 还是 mock，而 `:92-103` 在生产环境只要有 provider 落回 mock 就**抛错拒绝启动**；`api/voice/integration-status/route.ts:18` 还拿它对外报状态 | Render-web | ⬜ 待核 |
+| `DEFAULT_HUMAN_TRANSFER_URI` | 🔴 **在用，别清理**。转人工的兜底地址（`lib/voice/tools/impl.ts:151`、`scripts/voice/provision-tenant.ts:51`） | Render-web | ⬜ 待核 |
+| `WEBHOOK_REPLAY_WINDOW_SECONDS` | 🔴 **在用，别清理**。webhook 验签的防重放窗口（`lib/voice/providers/openai.ts:47`、`mock.ts:30`），有默认值 300 | Render-web | ✅ 有默认值 |
+| `TELEPHONY_PROVIDER` | `.env.example` 有；只在 `lib/voice/config.ts:35` 声明了默认值 `'twilio'`，**没有任何消费方** —— 这一个是真的可以清理 | — | ⚠️ 待清理 |
 | `WHATSAPP_ACCESS_TOKEN` / `_PHONE_NUMBER_ID` | **WhatsApp 收发的关键路径依赖**（`lib/whatsapp/send.ts`）。`_PHONE_NUMBER_ID` 必须与该客户 `clients.whatsapp_phone_number_id` 一致，不一致时发送会被主动挡下（防止用别的客户号码发消息） | Render-web | ⬜ 待配 |
 | `META_APP_SECRET` | WhatsApp webhook 验签用（`/api/webhooks/whatsapp`）。**缺了 POST 直接 500**，Meta 重试几轮后会停掉整个订阅 | Render-web | ⬜ 待配 |
 | `META_VERIFY_TOKEN` | WhatsApp webhook 订阅握手用。缺了在 Meta 后台**订阅不上** | Render-web | ⬜ 待配 |
@@ -187,6 +197,7 @@
 | `ATTRIBUTION_DUAL_WINDOW_ENABLED` | 归因双窗口总闸（默认 **关**）。开了之后被转交的动作会同时按 GSC 的 28 天节奏和 pass 1 的窗口各算一次。**在 `src/lib/memory/` 的消费方（extractor / learning-rollup）改成按动作计样本、并且分页读全之前不许开**（那 5 条查询也没分页，光去重不分页等于没修） —— 这是唯一还没改的一类；本 PR 已经把其余读取方（行业基准、三个信心读取、后台聚合页 `/api/admin/flywheel/aggregate`、执行看板 `/api/clients/[id]/execution`）**既改成按动作折叠、也改成分页读全**（只折叠不分页照样错：折叠是在读到的行里挑代表，带目标指标那行被截掉就会挑错代表，那不是少算是算错） —— 现在开会让同一个动作在学习和行业基准里被重复计数（Issue #859）。关着的时候两个写入方还会顺手清掉自己在非权威窗口上的旧行（老版本留下的），因为只拒绝新写入挡不住已经存在的第二个窗口；这一步只在权威窗口真的写进去之后才做，所以还算不出结果的动作会暂时保留那一行，等算得出来那一轮再清。⚠️ 配在 **web service** 上：`attribution-cron` 只是 `curl` 打这个接口，读 env 的是接请求的 web 进程；配到 cron 上开关不会生效，而且是静默不生效 | Render-web |
 | `SOCIAL_COMMENT_AUTOREPLY_KILL` | 社媒评论自动回复紧急关停 | Render-web |
 | `EMAIL_REPLY_DIGEST_ENABLED` | 🔴「客人来信没人回」汇总信总闸，默认 **关**（未配 = 不发，安全态）。开关在 `/api/cron/email-reply-digest` 路由里读 —— 是 web 进程，配到 cron job 自己身上不生效。2026-09-03 上线当天即由 PM 拍板暂停：现有排除只挡「自己人域名」和「同行域名」，挡不住陌生公司群发的推销，CTS 当天 32 条候选里噪音占七成，而排序按「等最久」，前 10 条有 8 条是营销邮件。**加好噪音过滤并用生产数据验证准确率之后才可开**；开的时候 `render.yaml` 里那段调度也要一起取消注释（两道闸） | Render-web |
+| `LEAD_FOLLOWUP_DIGEST_ENABLED` | 🔴「客人填了表还没人回」每日汇总信总闸，默认 **关**（未配 = 只挑名单不发信，安全态）。开关在 Inngest 云端函数 `cloud-crm-lead-followup-digest` 里读 —— **不是** Render cron 路由，配在 Inngest 跑得到的那份环境里。关着的时候名单照挑、回执照记（`sent:false` + `reason:'未启用'`），可以先看名单准不准再打开。**收件人没有环境变量，也不许有**：写死成函数文件里的字面量 `DIGEST_RECIPIENT = 'hello@magicengine.cloud'`（PM 2026-09-24 拍板第一步只发给 ME 自己），要改成发给客户的销售必须走一次代码改动 + 复审。🔴 **刻意不用 `ME_MAIL_TO_ADDRESS`** —— 那个常量读 `ME_MAIL_TO` 这个**全站共用**的环境变量（联系表单、cron 摘要、今日待办都读它），用它就等于「改一行配置就能把每个客户的客人名单发到任意地址」 | Render-web |
 | `LINKEDIN_PROGRESS_POST_ENABLED` | 🔴 ME 产品动态自动发 LinkedIn 总闸，默认关（未配 = 禁用，不用配才是安全态）。开关在 `/api/cron/linkedin-progress-post-{mon,thu}` 路由里读——那是 web 进程，两条 cron 只负责 `curl`；配到 cron job 自己的环境变量上不会生效。上线前提：PM 已在 Publer 连好个人 LinkedIn 账号，并在 Magic Lab Class 客户的 connectors 设置页把账号 ID 填进 Publer 绑定 | Render-web |
 | `SWEEP_CITIES` / `SWEEP_INDUSTRIES` | 线索扫描城市 / 行业范围。`src/lib/prospecting/sweep.ts` 里读（走 `envList('SWEEP_CITIES', …)`，变量名是字符串传进去的），调用方是 web 路由 `/api/cron/prospecting-sweep` | Render-web |
 | `ENABLE_REAL_GENERATION` | `.env.example` 有，代码 0 引用 | ⚠️ 待清理 |

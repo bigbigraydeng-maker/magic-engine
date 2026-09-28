@@ -3,6 +3,7 @@
  *
  * 🔴 共用账户（§14 M9）：快照里本来就只有账户级；日数据即使老同步写了两份，这里也不喂给实体级诊断
  *    （run.ts 对 shared 账户只跑 D1/D7，D1 用的是账户合计）。
+ * 非共用账户额外加载广告层日数据（D2/D10）；广告层 `parent_id` 是**广告系列** id，不是广告组 id。
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
@@ -13,8 +14,9 @@ import { loadAdStrategyConfig } from '@/lib/ads-strategy/config'
 import type { EntitySnapshotRow } from '../snapshot'
 import { loadOutcomeConfig } from '../outcome-config'
 import { buildAccountContext, localDayEndUtc, shiftDate } from './context'
+import { scopeAccountToClient } from './ownership'
 import { d1NeedsHourly } from './d1-delivery-stall'
-import type { AccountInput, CaptureCoverage, DailyRow, DiagnosisInput, HourlyRow } from './types'
+import type { AccountInput, AdPageSighting, AudienceCountPoint, CaptureCoverage, DailyRow, DiagnosisInput, HourlyRow, SettingChange } from './types'
 import { D1_REPEAT_LOOKBACK_DAYS } from './thresholds'
 
 const PAGE = 1000
@@ -36,6 +38,66 @@ export function hourlyRowsFromGraph(rows: GraphHourlySpendRow[]): HourlyRow[] {
   })).filter(r => Number.isInteger(r.hour))
 }
 
+/** 关键字段（不比 targeting_summary —— 它正是被加字段污染的那个）。 */
+const KEY_FIELDS = [
+  'status', 'daily_budget_minor', 'lifetime_budget_minor', 'bid_strategy', 'optimization_goal',
+  'destination_type', 'included_audience_ids', 'excluded_audience_ids', 'creative_video_ids', 'creative_page_id',
+  'audience_rule_object_ids', 'audience_rule_events', 'audience_retention_days',
+] as const
+
+function keyFieldsChanged(prev: EntitySnapshotRow, row: EntitySnapshotRow): boolean {
+  return KEY_FIELDS.some(f => JSON.stringify(prev[f]) !== JSON.stringify(row[f]))
+}
+
+/** 窗口里找不到前一行时，只有 Meta 修改时间落在抓取时刻前 2 天内才认。 */
+function changedWithoutPrev(row: EntitySnapshotRow): boolean {
+  if (!row.source_updated_time) return false
+  return Date.parse(row.captured_at) - Date.parse(row.source_updated_time) <= 2 * 86_400_000
+}
+
+function isRealChange(prev: EntitySnapshotRow | null, row: EntitySnapshotRow): boolean {
+  if (!prev) return changedWithoutPrev(row)
+  if (prev.source_updated_time && row.source_updated_time) {
+    return prev.source_updated_time !== row.source_updated_time
+  }
+  return keyFieldsChanged(prev, row)
+}
+
+/**
+ * 从近 35 天快照里抽「真改过」的设置变更（D2/D10 的学习期剔除用）。
+ * 🔴 快照的 changed 不等于 Meta 那边真改了：我们自己加字段、两个写入程序序列化不一致都会记成 changed
+ *    （2026-09-26 魏征生产核实：9/15 后约一半 changed 行 Meta 修改时间没动）。所以：
+ *    - 前后两行都有 source_updated_time → 只认它变了（Meta 的修改时间是权威）；
+ *    - 任一缺 → 退回比关键字段（状态、预算、出价、优化目标、去向、受众 id、素材视频、创意主页、受众收人规则与保留期），不比 targeting_summary（它正是被加字段污染的那个）；
+ *    - 窗口里找不到前一行 → 只有 source_updated_time 落在抓取时刻前 2 天内才认。
+ * 变更时刻优先用 source_updated_time，没有才用 captured_at。
+ */
+export function realSettingChanges(rows: readonly EntitySnapshotRow[]): SettingChange[] {
+  const byEntity = new Map<string, EntitySnapshotRow[]>()
+  for (const r of rows) {
+    const key = `${r.level}:${r.entity_id}`
+    const list = byEntity.get(key)
+    if (list) list.push(r)
+    else byEntity.set(key, [r])
+  }
+
+  const out: SettingChange[] = []
+  for (const list of byEntity.values()) {
+    list.sort((a, b) => (a.captured_at < b.captured_at ? -1 : a.captured_at > b.captured_at ? 1 : 0))
+    for (let i = 0; i < list.length; i++) {
+      const row = list[i]
+      if (row.capture_reason !== 'changed' && row.capture_reason !== 'kernel_post') continue
+      let prev: EntitySnapshotRow | null = null
+      for (let j = i - 1; j >= 0; j--) {
+        if (list[j].capture_reason !== 'disappeared') { prev = list[j]; break }
+      }
+      if (!isRealChange(prev, row)) continue
+      out.push({ level: row.level, entity_id: row.entity_id, captured_at: row.source_updated_time ?? row.captured_at })
+    }
+  }
+  return out
+}
+
 /** 截至某时刻，每个实体最新一行快照（去掉「消失」的实体）。 */
 export function latestSnapshotsAsOf(rows: EntitySnapshotRow[], asOfMs: number): EntitySnapshotRow[] {
   const latest = new Map<string, EntitySnapshotRow>()
@@ -46,6 +108,31 @@ export function latestSnapshotsAsOf(rows: EntitySnapshotRow[], asOfMs: number): 
     if (!prev || r.captured_at > prev.captured_at) latest.set(key, r)
   }
   return Array.from(latest.values()).filter(r => r.capture_reason !== 'disappeared')
+}
+
+/**
+ * 窗口内出现过的广告，每条取最后一行非「消失」快照（含后来被归档/删除的）。
+ * D11 算供血花费用：被归档的供血广告窗口内花过的钱也要算上（2026-09-27 魏征）。
+ */
+export function latestAdRowsEver(rows: readonly EntitySnapshotRow[]): EntitySnapshotRow[] {
+  const latest = new Map<string, EntitySnapshotRow>()
+  for (const r of rows) {
+    if (r.level !== 'ad' || r.capture_reason === 'disappeared') continue
+    const prev = latest.get(r.entity_id)
+    if (!prev || r.captured_at > prev.captured_at) latest.set(r.entity_id, r)
+  }
+  return Array.from(latest.values())
+}
+
+/** 近 35 天每条广告挂过的每个创意主页（非「消失」行，按 广告×广告组×主页 去重）。 */
+export function adPageSightings(rows: readonly EntitySnapshotRow[]): AdPageSighting[] {
+  const seen = new Map<string, AdPageSighting>()
+  for (const r of rows) {
+    if (r.level !== 'ad' || r.capture_reason === 'disappeared') continue
+    const key = `${r.entity_id}|${r.adset_id ?? ''}|${r.creative_page_id ?? ''}`
+    if (!seen.has(key)) seen.set(key, { entity_id: r.entity_id, adset_id: r.adset_id, creative_page_id: r.creative_page_id })
+  }
+  return Array.from(seen.values())
 }
 
 async function readAll<T>(build: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>): Promise<T[]> {
@@ -60,7 +147,28 @@ async function readAll<T>(build: (from: number, to: number) => PromiseLike<{ dat
   return out
 }
 
-async function loadAccount(clientId: string, adAccountId: string, shared: boolean, date: string): Promise<AccountInput> {
+/** 广告层近 28 天日数据（D2/D10）。二级排序 + 按 (entity_id, insight_date) 去重：跨页顺序不唯一时既不重也不漏。 */
+async function loadAdDaily(clientId: string, adAccountId: string, date: string): Promise<DailyRow[]> {
+  const rows = await readAll<DailyRow>((a, b) => supabaseAdmin.from('ad_daily_insights')
+    .select('level, entity_id, parent_id, insight_date, spend, impressions, reach, clicks, leads, messaging_conversations, video_thruplays, actions, frequency_7d')
+    .eq('client_id', clientId).eq('ad_account_id', adAccountId).eq('level', 'ad')
+    .gte('insight_date', shiftDate(date, -HISTORY_DAYS + 1)).lte('insight_date', date)
+    .order('insight_date', { ascending: true }).order('entity_id', { ascending: true }).range(a, b))
+
+  const byKey = new Map<string, DailyRow>()
+  for (const r of rows) {
+    byKey.set(`${r.entity_id}|${r.insight_date}`, {
+      ...r,
+      spend: Number(r.spend),
+      impressions: Number(r.impressions),
+      clicks: Number(r.clicks),
+      frequency_7d: r.frequency_7d === null || r.frequency_7d === undefined ? null : Number(r.frequency_7d),
+    })
+  }
+  return Array.from(byKey.values())
+}
+
+async function loadAccount(clientId: string, adAccountId: string, shared: boolean, date: string, clientPageId: string | null, evaluatedAt: string): Promise<AccountInput> {
   const tzRow = await supabaseAdmin.from('ad_entity_snapshots').select('timezone_name, currency')
     .eq('client_id', clientId).eq('ad_account_id', adAccountId).eq('level', 'account')
     .order('captured_at', { ascending: false }).limit(1).maybeSingle()
@@ -68,13 +176,17 @@ async function loadAccount(clientId: string, adAccountId: string, shared: boolea
   const currency = (tzRow.data as { currency: string | null } | null)?.currency ?? null
   const endMs = localDayEndUtc(date, timezone)
 
+  // 🔴 单键排序（只按 captured_at）分页会漏数据：一轮抓取写入的所有实体共享同一个 captured_at，
+  //    超过一页（1000 行）时同一时间戳内谁在前谁在后没保证，翻页边界可能落在同一时间戳里，导致
+  //    range 查询重复或漏掉行——`adPageHistory` 直接决定归属，漏一条别家历史就会把 mixed_pages 判成 own
+  //    （Codex 2026-09-27）。加 level/entity_id 兜底排序，形成稳定顺序。
   const snapshots = await readAll<EntitySnapshotRow>((a, b) => supabaseAdmin.from('ad_entity_snapshots').select('*')
     .eq('client_id', clientId).eq('ad_account_id', adAccountId)
     .gte('captured_at', new Date(endMs - 35 * 86_400_000).toISOString()).lte('captured_at', new Date(endMs).toISOString())
-    .order('captured_at', { ascending: false }).range(a, b))
+    .order('captured_at', { ascending: false }).order('level', { ascending: true }).order('entity_id', { ascending: true }).range(a, b))
 
   const daily = await readAll<DailyRow>((a, b) => supabaseAdmin.from('ad_daily_insights')
-    .select('level, entity_id, parent_id, insight_date, spend, impressions, reach, clicks, leads, messaging_conversations, video_thruplays, actions')
+    .select('level, entity_id, parent_id, insight_date, spend, impressions, reach, clicks, leads, messaging_conversations, video_thruplays, actions, frequency_7d')
     .eq('client_id', clientId).eq('ad_account_id', adAccountId).in('level', ['campaign', 'adset'])
     .gte('insight_date', shiftDate(date, -HISTORY_DAYS + 1)).lte('insight_date', date)
     .order('insight_date', { ascending: true }).range(a, b))
@@ -86,17 +198,34 @@ async function loadAccount(clientId: string, adAccountId: string, shared: boolea
       .eq('client_id', clientId).eq('ad_account_id', adAccountId).order('captured_at', { ascending: false }).limit(5),
   ])
 
+  const settingChanges = realSettingChanges(snapshots)
+  const audienceHistory: AudienceCountPoint[] = snapshots
+    .filter(r => r.level === 'audience' && r.capture_reason !== 'disappeared')
+    .map(r => ({ entity_id: r.entity_id, captured_at: r.captured_at, audience_count_lower: r.audience_count_lower }))
+
   const account: AccountInput = {
     adAccountId, shared, timezone, currency,
     snapshots: latestSnapshotsAsOf(snapshots, endMs),
-    daily: daily.map(r => ({ ...r, spend: Number(r.spend), impressions: Number(r.impressions), clicks: Number(r.clicks) })),
+    daily: daily.map(r => ({
+      ...r,
+      spend: Number(r.spend),
+      impressions: Number(r.impressions),
+      clicks: Number(r.clicks),
+      frequency_7d: r.frequency_7d === null || r.frequency_7d === undefined ? null : Number(r.frequency_7d),
+    })),
     hourly: {},
     hourlyError: null,
     latestCaptures: (captures.data ?? []) as CaptureCoverage[],
     lastInsightDate: (lastRow.data as { insight_date: string } | null)?.insight_date ?? null,
+    adDaily: shared ? undefined : await loadAdDaily(clientId, adAccountId, date),
+    settingChanges,
+    audienceHistory,
+    recentAds: latestAdRowsEver(snapshots),
+    adPageHistory: adPageSightings(snapshots),
   }
 
-  if (d1NeedsHourly(buildAccountContext(account, date))) {
+  // 预筛跟 D1 用同一口径（只看客户自己的广告组）：别人的花费掩盖客户掉量时也要拉小时数据
+  if (d1NeedsHourly(buildAccountContext(scopeAccountToClient(account, clientPageId, date, evaluatedAt).account, date))) {
     const token = await getMetaTokenForClient(clientId)
     if (!token) {
       account.hourlyError = 'no Meta token'
@@ -112,20 +241,32 @@ async function loadAccount(clientId: string, adAccountId: string, shared: boolea
   return account
 }
 
+/** 客户登记的 Facebook 主页。读失败要抛（跟本文件其它读一样）——不能塌成「没登记」，那会报一条假的配置缺口。 */
+async function loadClientPageId(clientId: string): Promise<string | null> {
+  const { data, error } = await supabaseAdmin.from('clients').select('facebook_page_id').eq('id', clientId).maybeSingle()
+  if (error) throw new Error(error.message)
+  return (data as { facebook_page_id: string | null } | null)?.facebook_page_id ?? null
+}
+
 export async function loadDiagnosisInput(clientId: string, date: string, evaluatedAt: string): Promise<DiagnosisInput> {
   const accountIds = await getClientAdAccountIds(clientId)
   const { shared } = await findSharedAdAccounts(clientId, accountIds)
+  const clientPageId = await loadClientPageId(clientId)
   const accounts: AccountInput[] = []
   for (const id of accountIds) {
-    accounts.push(await loadAccount(clientId, id, shared.has(id.replace(/^act_/, '')), date))
+    accounts.push(await loadAccount(clientId, id, shared.has(id.replace(/^act_/, '')), date, clientPageId, evaluatedAt))
   }
-  const [outcome, strategy] = await Promise.all([loadOutcomeConfig(clientId), loadAdStrategyConfig(clientId)])
+  const [outcome, strategy] = await Promise.all([
+    loadOutcomeConfig(clientId),
+    loadAdStrategyConfig(clientId),
+  ])
   return {
     clientId, date, evaluatedAt,
     outcome: outcome.config,
     outcomeConfigured: outcome.source === 'row' && outcome.config.primary !== null,
     messagingReferralAvailable: MESSAGING_REFERRAL_AVAILABLE,
     digestRecipients: strategy.digest_recipients,
+    clientPageId,
     accounts,
   }
 }

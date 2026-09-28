@@ -20,7 +20,7 @@ import type { KernelDeps } from './deps'
 import type { ExecutionResult } from './gateway'
 import { KernelError } from './errors'
 import { authorizeRun, reuseLiveAuthorization } from './authorize'
-import { approveRun, rejectRun } from './human-approval'
+import { approveRun, rejectRun, type HumanDecisionOptions } from './human-approval'
 import { executeAuthorizedRun, rehydrateSucceededRun, type ExecutionFence } from './gateway'
 import { computeIdempotencyKey, computeUnknownActionKey } from './idempotency'
 import {
@@ -543,8 +543,9 @@ export async function approveAndRun(
   deps: KernelDeps,
   runId: string,
   approvedByUser: string,
+  options: HumanDecisionOptions = {}, // 🔴 expectedDecisionId 原样透传——批的必须是人看到的那份
 ): Promise<ActionRunOutcome> {
-  const auth = await approveRun(deps, runId, approvedByUser)
+  const auth = await approveRun(deps, runId, approvedByUser, options)
   if (auth.verdict !== 'allow' || !auth.ctx) {
     return {
       kind: 'denied',
@@ -720,6 +721,12 @@ export const RECOVERABLE_DENY_CODES: ReadonlySet<string> = new Set([
   // 所以它属于「环境问题」这一类。🔴 结构性的 outward_side_effect_blocked
   // **不在**这份清单里，那一条是动作定义本身不合规，改条件救不了。
   'outward_requires_human_policy',
+  // 动作声明了信封内可自治，但这一次越出信封 / 事实读不到（spec 2026-09-24 §3 G5）。
+  // 🔴 环境问题，不是定义不合规：PM 调高日预算上限、过了 72 小时冷却、
+  //    或者单位退出学习期之后，同一件事理应能做。不可恢复的话幂等键会让
+  //    后续同内容提交命中这条旧 denied run，把动作永久锁死。
+  //    数据库 kernel_claim_run_recovery 里有一份必须一字不差的副本。
+  'outside_autonomy_envelope',
 ])
 
 /**
@@ -797,8 +804,9 @@ export async function rejectPendingRun(
   runId: string,
   rejectedByUser: string,
   reason: string,
+  options: HumanDecisionOptions = {}, // 🔴 同上：拒的也必须是人看到的那份
 ): Promise<ActionRunOutcome> {
-  const auth = await rejectRun(deps, runId, rejectedByUser, reason)
+  const auth = await rejectRun(deps, runId, rejectedByUser, reason, options)
   return {
     kind: 'denied',
     run: auth.run,

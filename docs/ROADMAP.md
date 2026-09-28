@@ -21,6 +21,177 @@
 
 ---
 
+## Agent 自治运行计划 v1 —— 14 个 agent 从「等派活」改成「目标 + 闹钟 + 待办署名」（PM 2026-09-24 拍板，文档 PR #1985 已合并）
+
+计划全文：[`docs/specs/2026-09-24-agent-autonomy-operating-plan-v1.md`](./specs/2026-09-24-agent-autonomy-operating-plan-v1.md)。达芬奇已撤（7 问并入 `docs/agents/10-ziya.md` §四b）。**仅 B1 / B2 这两批**由 DeepSeek 执行、Claude Code 统筹复审（PM 2026-09-24 指定）；其他任务的写入者仍按 CLAUDE.md §5 协作规则按任务能力分配。
+
+| 批 | 内容 | §11 打分 → 优先级 | 风险级 | 状态 |
+|---|---|---|---|---|
+| B1 广告 WP3 | Inngest 链、孔明预检 + denied 恢复点、韩信、Check/Tune、Jev、五段日报、`autonomy_mode`↔`client_automation_policies.mode` 同步设计、G11 熔断落点确认 | 高/高/高 → P0 | A | 已派 ME 广告构建控制（合同待开）；设计与实施各一次 子牙+魏征，狄仁杰看同步开关 |
+| B2 三只闹钟 | 马良出片自动 9 宫格自检 · 李白逐句溯源 + 月度提示词体检 · 司马迁周四读评价起草不发 | 中/中/中 → P2 | B | 已派 ME 2.0 构建控制；只写 pm-todo 三件套，避开周五六 |
+| B3 审查自动被叫 | 接线 `tools/ops-review-loop/src/risk.mjs` → PR 事件 → 自动分派魏征/狄仁杰/板桥 | 高/中/低 → P2 | A（碰 workflows） | PM 2026-09-25「分两档」插队：定级接线 + B/C 自动合 + A 级签字闸已派 ME 2.0（合同 A 级，DeepSeek 执行）；三人签字的自动写入仍待广告跑稳两周后开 |
+| B4 板桥待办人话闸 | 今日待办条目先过板桥改人话 | 高/中/中 → P2 | B | 待广告跑稳两周、且 B2 后再开 |
+| B5 孔子 SEO 笼子 | 给 SEO 改文案划「不问就能做」范围 | 广告跑稳两周后再打分 | A | 未开工 |
+
+红线不放宽：发布 / 口碑执行 / 花钱类无 PM 授权不做；事实服务端读；读不到 = 不动；每动作有回执与撤回。
+
+## `meta-leads-sync` 每一轮都标红，「红了」这个信号已经不携带任何信息（2026-09-24 查实，P0）
+
+**§11 打分**：频率高（每 2 小时一轮，轮轮红）· IMPACT 闭环关键度高（Measure 段，报警器焊死在响，真出事分不出来）· 收入关联度高（这个报警器的职责就是发现线索断供；2026-08-21~08-30 同一个报警器失灵时 CTS 漏了 45 条线索）→ 零个低、三个高 → **P0**。
+
+- **现象**：`cron_run_logs` 里 `meta-leads-sync` 最近每一轮 `status='failed'`。根因不是 CTS —— 是 Magic Lab Class（`377468af-…`）和 New Asian Logistics（`4ae76381-…`）两个客户的主页令牌缺 `pages_read_engagement` 等权限，`leadgen_forms` 每轮回 HTTP 400 code 190。
+- **为什么会染红整轮**：`api/cron/meta-leads-sync/route.ts` 只要有任一客户 `error` 就把 `summariseSyncProblems` 传给 `finish()`，`run-logger.ts` 见到 error 就把整轮标 `failed`。
+- **要做什么**：`run-logger.ts` 记的 `status` 必须如实反映这一轮真实取数是否成功——**不能**因为「这个权限错误不是本轮新增的」就不传 `error`，让 `finish()` 把持续故障写成 `completed`：现有健康待办只看最近一轮的失败状态生成 `cron_failing`，一旦这一轮伪装成功，两个客户仍在断供的事实会从标准健康监控里彻底消失，重演 2026-08-21~08-30 那次线索断供却看着正常的事故。真正要改的是**下游**：把「取不到线索」和「出口有问题」分开决定 `status`，在通知 / 健康待办层给同一个已知权限错误去重，或者新增一个 `degraded`（持续故障但非新增）状态单独告警——而不是靠错误新旧程度篡改这一轮的成败。
+- **顺带**：那两个客户的令牌权限本身也要么补齐、要么正式标成停用，不能一直挂着每轮报错。
+- 来源：PR [#1973](https://github.com/bigbigraydeng-maker/magic-engine/pull/1973) 复审过程查实（魏征）。
+
+---
+
+## 线索去重闸的两条后续（PR #1973 合并时明确留下，2026-09-24）
+
+PR #1973 给 Meta 留资同步加了「上一轮已办完就别重跑」的闸。Codex 复审提的两条 P2 当时没改（Ray 已按当时 head 授权合并，新增提交会作废环境审批），在这里记账：
+
+1. **settled 判据没绑定当前 audience / tag**（`lib/mailchimp/outlet-tally.ts` 的 `isMailchimpSettled`）。FDE 通过 `/api/clients/[id]/leads-config` 换了 audience id 或来源标签之后，回看窗口里那批已判 settled 的 lead 不会被推进**新**名单 —— 改动前它们会在 24 小时内被重新处理一次。
+   - 修法：把本次实际用的 `audienceId` + `tag` 一起写进 `metadata.mailchimp_result`（`crm/meta-lead.ts` Phase D），`isMailchimpSettled` 收一个期望配置参数，配置对不上就不算办完；历史回执缺这两个字段 → 判不成 settled → 部署后窗口内每条多跑一次然后收敛，自愈。
+   - **要动 `crm/meta-lead.ts` 的回执形状**（#1973 刻意一个字没动那个文件，那里带着合同 5425312107 / 5426843158 两份条款），按 A 级另走一轮设计 + 实施复审。
+2. **`settledLookupFailures` 没有消费者**。这个数已经进 `cron_run_logs.summary`，但没有任何告警在读它，所以「去重闸瞎了」目前只能靠人工查（已加 2026-09-26 的日历）。
+   - 修法：在 `pm-todo/manual-monitoring-items.ts` 加一条**独立**判据（不要复用 `isMailchimpExportFailureKey`，那是邮件出口的词汇表），`settledLookupFailures > 0` 时下发待办，带上客户和轮次。
+   - 后果有限：闸瞎掉只是退化成改动前每轮重打，不丢数据、不丢线索，白花 provider 调用。
+
+---
+
+## 台账证据文件没有任何格式或敏感信息检查（2026-09-26 查实，P3）
+
+`src/lib/ledger/load.ts:15` 用 `readdirSync(dir)`（不递归）再只留 `.md`，`docs/ledger/evidence/` 子目录整个被跳过，所以 `parse.ts:137` 那条「10 位以上连续数字」之类的检查对证据文件完全不生效；证据文件目前只有 `ledger-check-refs.sh` 查它存不存在。证据文件由夜巡和各窗口核验时写入，内容来自生产取数，是最可能混进账户号 / 客户私有数据的地方。
+
+- **要做什么**：给 `docs/ledger/evidence/**` 单独加一道检查（至少：长连续数字、邮箱 / 电话形态、令牌前缀），不要把证据文件塞进台账卡的完整格式解析（格式不同）。主页 ID 这类公开标识要不要豁免，实现时再定。
+- **§11 打分**：频率低（证据文件只在夜巡与偶发核验时写）· IMPACT 低（不在客户闭环内）· 收入低（迄今未发现客户数据入库）→ 三个低 → **P3**，待认领。
+- 来源：CRM 窗口 2026-09-26 准备 NAL 止血快照时查实。
+
+---
+
+## Facebook 表单勾的「我不要收邮件」走不到 Mailchimp 的抑制标签（2026-09-24 查实，潜在，迄今 0 次，P3）
+
+一个人被订阅进 Mailchimp 之后**才**被判成 opt-out 时，`crm/meta-lead.ts` 会把触点回执从 `subscribed` 覆盖成 `skipped:explicit_opt_out`、并写上 `do_not_contact: true`；结果本地证据被改写成「没进名单」。**这不是 `src/lib/mailchimp/` 缺能力**——`api/cron/mailchimp-suppression-sync` 每天跑一次，职责就是把 CRM 判过的「别再联系」同步成 Mailchimp 的 `suppressed_do_not_email` 标签，`lib/mailchimp/suppression-sync.ts` 复用的正是 `crm/dnc.ts` 的 `isDoNotContact()`。真正的缺口在这条管道自己的取数：`api/cron/mailchimp-suppression-sync/route.ts` 的 `loadContactsForClient()` 查 `contact_touchpoints` 时只把 `metadata.outcome` 映射进 `DncTouch.outcome`，从没把同一条触点的 `metadata.do_not_contact` 映射进 `DncTouch.flagged`——所以 `crm/meta-lead.ts` 写下的这条 opt-out 触点，`isDoNotContact()` 永远看不到，人也就不会被这条每日 cron 打上抑制标签。
+- **要做什么**：修 `loadContactsForClient()`，把 `metadata.do_not_contact === true` 一起映射进 `flagged`，复用并扩展这条已有的每日抑制管道——**不要**另起一套退订 / 归档写路径，否则会跟这条管道形成两个不一致的 DNC 出口。
+- **§11 打分**：频率低（生产核对 `metadata->>'do_not_contact' = 'true'` 命中 **0 条** —— CTS 现在的表单根本没有这个勾选项，要先有客户加上才可能发生）· IMPACT 闭环关键度中（不卡 Act，是合规口子）· 收入关联度低 → 两个低 → **P3**。埋着的雷，不是正在漏水的管子。
+- **不要据此以为「说过别联系的人在继续收信」** —— 那条链是通的：抑制管道每天正常跑（2026-09-23 扫 CTS 947 人、26 人已带 `suppressed_do_not_email`），**且 PM 2026-09-24 确认 CTS 发群发时已经把这个标签排除掉了**。电话 / 邮件笔记那条路进来的拒联，标签打得上、群发也确实躲开了。断的只有表单勾选这一条支路。
+- 涉及合同 5426843158。来源：魏征复审 PR #1973；口径经 PM 2026-09-24 确认后收窄。
+
+---
+
+## 26 个带抑制标签的人不被打扰，只靠 Mailchimp 后台一个人工排除设置顶着（2026-09-24 记，P2）
+
+`suppressed_do_not_email` 是个**标签**，标签本身不拦邮件 —— 只有在建群发、挑收件人那一步把它排除掉才生效。那一步是 Mailchimp 后台的手工设置，**代码层面没有任何东西能拦住**：谁哪天新建一封群发忘了加排除，26 个带这个标签的人当场全收到，而且没有任何告警。
+
+- **26 人不是清一色「明确说过别联系」**：`suppression-sync.ts:13-15` 打这个标签的口径是 `not_interested`（终结性销售拒绝——`note-parser.ts:28` 判的是「聊过了，明确不要了」，跟只是暂缓的 `not_interested_now` 不是一回事，且 `suppression-sync.ts:22-24` 明确写了它没有撤销机制——但不等于明确禁止联系）∪ `do_not_contact`（真正说过别再联系）的并集，而 `note-parser.ts:306,322` 会把 `not_interested` 显式记成 `do_not_contact: false`——两者语义不同。26 人里各占多少目前没有分开统计过，本条先按「带抑制标签」记账；后续如果要按拒联严重程度调整优先级或推「永久移出名单」的方案，必须先分别查出两类人数，且永久移除只能基于真正的 `do_not_contact` / 退订信号，不能把「明确不要了」当成「明确禁止联系」处理。
+- 现状：PM 2026-09-24 确认当前的群发已经排除了。所以这不是一个正在发生的故障，是一个**单点人工依赖**。
+- **§11 打分**：频率中（每建一封新群发就赌一次）· IMPACT 闭环关键度中（不卡闭环，但会让一次外发变成合规事故）· 收入关联度中（NZ 反垃圾邮件法 + 客户信誉）→ 零个低、零个高 → **P2**。
+- **可能的修法**（未拍板）：发信前用 Mailchimp 接口把这封群发的目标收件人核一遍，发现里面有带抑制标签的就拦下并下发待办；或者把真正 `do_not_contact` 的人从名单里移出去（但那要先想清楚「移出去之后怎么恢复」，`lib/mailchimp/client.ts` 开头那条「只 POST 不改会员状态」的红线是有理由的；`not_interested` 不适用「移出名单」，那类人是终结性销售拒绝，不等于明确要求别联系）。
+- 来源：PM 2026-09-24 确认排除设置存在时，顺带发现这条链依赖的是人不是代码。
+
+---
+
+## CTS 表格「员工跟进记录」换过列，转化回传那条线一直在读旧列（2026-09-24 查实并已修，记账用）
+
+**背景**：CTS 员工的电话跟进记录，表格第 505 行（含）以前写在 R 列，第 506 行起改写在 S 列（R 被拿去放 Facebook 后台链接）。`conversions/cts-crm-sheet-sync` 的 `parseSheet1Row` 恒读 R 列，于是 506 行之后的记录一个字都没读到。
+
+- **实际影响（已量化）**：`notesExcludeLead`（把「wrong number」「not interested」的脏线索挡在 CAPI 回传之外）原来判出 55 行该排除，修好之后是 67 行 —— **12 行本该排除的脏线索之前被当成合格线索传给了 Meta**。
+- **已修**：列判据收敛成 `ctsNoteColumnIndex(sheetRow)` 一处，`parseSheet1Row` 改成必须传行号（不给默认值，逼调用方想清楚）。两个消费方（转化回传 / 表单线索汇总信）共用这一份。
+- **还没做**：那 12 条已经传出去的脏转化没有撤回，也没评估过对 Meta 优化模型的影响。量很小（占已传总量极小比例），**先记在这里，不单独开工**；下次碰转化回传时一起看。
+- 来源：PR「客人填了表还没人回」查证过程，2026-09-24。
+
+---
+
+## Meta AI 客服的自动回复被当成「我们联系过了」，把新线索从「今天要联系」上挤掉（2026-09-24 查实，A 级，P0）
+
+**§11 打分**：频率高（每天都在发生 —— CTS 最近 30 天 259 条表单线索里 116 个人被这样挤掉）· IMPACT 闭环关键度高（卡在 Act：人进来了、系统认为已处理、于是没人去打这通电话）· 收入关联度高（客人留了电话没人回 = 直接丢单）→ 零个低、两个以上高 → **P0**。
+
+- **现象**：CTS 表单线索进 CRM 之后，Meta 自家的 AI 客服会在几分钟内自动回一条。这条回复写成 `contact_touchpoints`（`channel='messenger'`, `direction='outbound'`, `source='messenger'`, `raw` 恒空），跟一通真人回复在库里**长得一模一样**。`crm/segments` 的 `segmentContact` 只看 `lastOutbound > 0`，于是这个人不再是「新客人，还没打过」，被冲进 `stale_conversation` / `retry_channel` 埋掉。
+- **证据**：`conversation_messages` 里 CTS 2026-09 的 messenger 外发原文，最多的三条是「你的 AI 客服将会回复。」（86）「你已接管 AI 客服的这场聊天。」（40）「你的 AI 客服已将这个聊天转移给你。」（24），其余多为欢迎语和节日群发模板。生产核对：30 天 259 条线索，160 个在系统眼里「已联系」，其中 **116 个唯一联系过他们的是机器人**。
+- **🔴 一个想当然的修法先排除掉**（子牙复审 2026-09-24）：「在 `messenger/sync.ts` 写触点时按消息正文标 `metadata.automated`」**做不出来**。Messenger 出站触点是**一个会话一行**，不是一条消息一行（`messenger/link-contacts.ts` 的 `source_ref = <convId>:out`，`messenger/send.ts` 销售手动回复写的是同一个键的同一行）。AI 客服 10:00 自动回一条、真人 15:00 回一条，库里只有这一行——标了就把真人那次也抹掉，不标等于没修。照这句去做的人会先写完代码才发现打不通。
+- **两个真能做的修法**：
+  1. **拿 `conversation_outbound_log` 反查**（推荐）。那张表记着每一条 **ME 自己发出**的消息（`messenger/send.ts` / `microsoft/mail-send.ts` / `inngest/functions/conversation-inbound-autoack.ts` 都在写），拿它判「这个会话里有没有一条出站是真人经我们系统发的」，比猜正文硬得多。代价：多一次查询；不动写入侧、不影响任何现有统计。
+  2. **拆键**：出站触点分 `<convId>:out`（真人）和 `<convId>:out-auto`（机器）两行。代价：所有按触点条数做的聚合要同步改（`link-contacts.ts` 注释点名的那类），并且要回填存量（改客户数据，需 PM 单独授权）。
+- 两条路都要注意：「你已接管 AI 客服的这场聊天」反过来是**真人介入**的正信号，别一起标成机器。
+- **改完要一起撤掉的权宜之计**：`crm/lead-followup-due` 的 `isHumanFollowup` 现在把 Facebook 私信外发**整类**排除，`crm/lead-followup-digest` 的正文里也为此写了一段「为什么这个名单比后台那一页长」。根子修好之后这两处一起收回，否则两个地方对「联系过了没有」长期给不同答案（同 2026-09-22 广告看板 D5/O3 的坑）。
+- 来源：PR「客人填了表还没人回 —— 每天提醒一次」查证过程，2026-09-24。
+
+---
+
+## 「填了表没人回」汇总信转发给客户销售之前，必须先补提醒节奏（2026-09-24 复审提出，P2）
+
+**§11 打分**：频率中（只在这封信真的转给客户销售之后才天天发生，现在只发到 ME 自己信箱）· IMPACT 闭环关键度中（不影响判据对错，影响人会不会继续看这封信）· 收入关联度中（信被当噪音忽略 → 线索照样没人回）→ 零个低、零个高 → **P2**。
+
+- **现象**：`crm/lead-followup-due` 排序是「等最久排最前」再切 15 条，所以每天早上是**同一批最老的 15 个人**，一直到他们掉出 7 天窗口（约 6 天）、然后彻底沉进积压数字里再不出现。没有任何「已经提醒过了」的台账。
+- 现在收件人只有 ME 自己，看几天就知道准不准，无害。**一旦按计划转给客户的销售，那就是连续 6 天同样的名单、之后永久静音** —— 销售会先烦、再无视这一栏。
+- **修法**：接 `src/lib/pm-todo/remind-cadence.ts`（已有的两段式节奏，且明确避开 7 的倍数），并参照 `pm-todo/manual-crm-items.ts` 的做法，在生成名单的那一刻按当前状态再过滤一次，做到「有人处理完就不再冒出来」。
+- 同批还要一起做的两件（写在 `crm/lead-followup-digest.ts` 文件头 1b 条）：`interest` 之外的自由文本脱敏复核；正文里「直接回复这封邮件告诉我们」要换成一个真能点的入口，否则就是「下发给人的任务做不到」。
+
+---
+
+---
+
+## 线索同步到客户 Google 表格：上线前还差几步人工动作（2026-09-24 最终改为「写老表」，B 级，P1）
+
+**§11 打分**：频率高（每天都有新线索）/ IMPACT 闭环关键度高（卡在 Act，线索进不了销售手上）/ 收入关联度高（留了电话没人跟＝丢单）→ 零低、三高 → **P0**（代码已交付，剩下的人工动作按 P1 挂着）。
+
+代码已在 PR #1972（`src/lib/lead-sheets/` + `client_lead_sheet_routes`）。2026-09-24 当天 PM 改口三次，**最终口径是第三次**：
+「不要过度开发，就按照 fb 默认的表格式，把几个 form 的信息拉齐到一张 form 上」——
+也就是**写客户一直在用的那张老表**（`FB 即时表单 Infrontof2000` / `Sheet1`，
+`1vISaVkVkcQMSaR6Jo7xdmym6Ed5eE-q9025snYWYDVA`），保持 Facebook 原样的 32 列，
+只在表尾追加两列给 v4 表单多问的两个问题。**不新建表、不翻中文、不合并列。**
+前两版（分两张表 / 汇总进一张新建的 13 列中文表）作废。
+
+**这条链路现在一行也写不进去**，还差：
+
+1. **在 Sheet1 表尾加两列**（第 33、34 列 = AG / AH），表头逐字写 `when_are_you_hoping_to_travel?` 和 `whats_your_budget_per_person_nzd?`（Facebook 原字段名，不要翻中文）。
+   🔴 **必须加在最右边**：下面那两条下游读的是固定列下标，中间插一列会让它们整体错位。
+   排错了不会闷声错位——配置里带了一份 34 格的「表头签名」，系统开工前逐格比对，对不上就整轮停手并出待办。
+2. **CTS 的 Google 连接要重新授权一次** —— 现有令牌只有「看表格」的权限。写权限 `spreadsheets` 早在 #1972 就合进 `COMBINED_GOOGLE_SCOPES` 了，本次没再改 scope；已经连过 GSC/GA4 的客户不会因此掉线，只是拿不到新权限，而需要写表格的只有 CTS。走一次
+   `https://app.magicengine.com.au/api/auth/google/connect?client_id=c0000000-0000-0000-0000-000000000000&flow=admin`，在同意页上勾「查看、修改 Google 表格」。
+3. **两个 migration + seed SQL 还没 apply**（`supabase/migrations/20260925000003_client_lead_sheet_routes.sql` · `…000004_client_lead_sheet_routes_header.sql` · `scripts/seed-cts-lead-sheet-routes.sql`），按规矩等 PM 显式 go。
+4. **合并后去 Inngest 后台对 `/api/inngest` 点一次 Sync**，否则新函数安静地不跑。
+
+### ✅ 「切表会打断两条下游」这条风险随这次决定消失了
+
+`src/lib/conversions/cts-crm-sheet-sync-run.ts`（读表取成交喂广告回传）和
+`src/lib/crm/sheet-followup-sync.ts`（读员工跟进记录回灌 CRM）都把这张表的 id 写死在代码里。
+上一版切到新表会让它们安静地停在切表当天、日报还是绿的。**现在不切表，这个风险不存在**，
+两条下游一行都不用改。`CLIENT_FOLLOWUP_SHEETS` 跟 `client_lead_sheet_routes` 指的是同一张表、
+同一个 tab，两处配置重复这条**降回普通欠账**（待认领，见下）。
+
+### 待 PM 决定的两件事
+
+- **旧表上那条外部管道要不要停。** 这张表每天还在进 7–16 行（带着 ME 库里没有的广告组名/系列名/表单名，几乎可以肯定是客户自己账号里的 Zapier/Make）。ME 现在的定位是**补漏安全网**：先读表 → 已有的跳过 → 只补它漏掉的。实测 2026-09-20 以来库里 26 条线索，那条管道写进去了 23 条，漏的正好是 v4 表单那 3 条（它一条 v4 线索都没进过表）。两者并存不会写重（判重靠第 1 列的 `l:` 线索编号），所以**不急**；要不要让 ME 接管，PM 拍。
+- **补档窗口要不要往前调。** 现在卡在 `2026-09-20`，开闸第一轮只会追加 3 行（就是那 3 条 v4）。2026-07-24 ~ 2026-09-20 这一段往前调是安全的（全是真线索编号，判重挡得住重复）。
+  🔴🔴 **但 2026-07-24 之前调不得**：库里 735 条线索有 **347 条的 `source_ref` 不是 Facebook 线索编号**，而是历史导入时拼的 `邮箱|时间戳`（如 `dave.attwell@outlook.com|2026-06-14T...`），全部落在 2026-06-14 ~ 2026-07-25。往前调会（a）在第 1 列写出邮箱、（b）机器键永远对不上 → **那 347 个人在销售正在用的表上被重写一遍**。要补这一段得先把 `contact_touchpoints.source_ref` 回填成真编号，不是改个日期的事。
+
+**已知留白**（不是 bug，是如实留空）：
+- `form_name`（第 10 列）**必然是空的** —— `leads.ts` 本地没有表单名缓存，一律留空。表单编号在第 9 列，认得出是哪张表单。
+- `lead_status`（第 17 列）、员工跟进记录 / Many Chat / 邮件追踪那一片（第 18–32 列）一律留空 —— 别的管道和员工手工维护的，这条链路只 append 不覆盖，碰不到已有内容。
+- `inbox_url`（第 32 列）留空，**这是一个留给 PM 的问题**：线索的问答里带着一个叫 `inbox_url` 的字段（Meta 原样给的），v3 表单上是真的 Messenger 会话链接，可 v4 那三条的值是「Nil」「What answer」「the right itinerary」，像是 v4 建表单时把它改成了自由文本题。表里现有 703 行这一列全是空的，本轮跟现状保持一致。
+
+**待认领欠账**（都不致命，不挡合并）：
+
+1. **`src/lib/lead-sheets/` 名字是「线索」，实际只吃 Meta 即时表单。** `leads.ts` 把 `.eq('channel','meta_lead_form')` 写死在共享层。第二个客户的线索如果来自官网表单或 GHL，这个模块要改代码。两条路二选一：目录改名点明 meta-lead；或给路线表加一列 `source_channel`（默认 `meta_lead_form`）由取数层读。
+2. **`CLIENT_FOLLOWUP_SHEETS` 是同一张表的第二套配置。** 现在两处都指向同一张表同一个 tab，不会打架，但改表 id 要记得改两处。收编进 `client_lead_sheet_routes` 是正事，不急。
+3. **347 条历史线索的 `source_ref` 不是真线索编号**（见上）。修它才能补 2026-07-24 之前的历史。
+
+另外两条小的：`registry.ts` 里这条的 `schedule` 是手抄的，`registry.test.ts` 没有对它做「跟函数定义一致」的断言（漂移了 CI 不会红）；`leads.ts` 回查广告组/系列名字时把 `ad_entity_snapshots` 的全部历史快照分页拉回来，只为取一个名字，每小时一次的无谓开销。
+
+## Meta / TikTok / 商家页的授权只能靠状态位判断，没有心跳（2026-09-24 断线监控上线时留下的口子，P1）
+
+**§11 打分**：频率低（目前没有「状态位是绿的、实际却不通」的 Meta 实例证据；已知那几次断线状态位都变了，新上的监控抓得到）· IMPACT 闭环关键度高（广告的 Act 和 Measure 都靠它）· 收入关联度高（客户投诉/续费直接相关）→ 恰好一个低、两个高 → **P1**。
+
+**现状**：2026-09-24 上线的断线监控（`src/lib/platform-oauth/connection-health.ts`）对每个平台分两种判法 —— 微软邮箱和谷歌取数有「心跳」（每次成功刷新令牌会盖 `last_synced_at`，有固定节奏的定时任务在调），Meta / TikTok / 商家页 / 谷歌广告 / GTM **没有**：`token-manager` 里压根没有 Meta 和 TikTok 的刷新实现（用的是长期令牌），商家页只在有人发帖读评价时才刷。所以这几个平台目前只有「状态位不是 active」这一条判据。
+
+**口子在哪**：如果一条 Meta 授权实际已经不能用、而平台又没让我们撞到那个会改状态位的报错，监控看不出来。
+
+**要做的**：给这几个平台找一条真正的「最近一次成功调用」的证据 —— 要么在调用方成功后主动盖 `last_synced_at`（最小改动），要么按平台各自的数据落地表定义新鲜度探针。做之前先确认节奏：没有固定节奏的平台加了心跳只会天天误报，那比没有更糟。
+
+---
+
 ## AI 可见度周快照聚合把失败的 API 调用也计入总数，客户分数被系统性腰斩（2026-09-23 两位复审确认，A 级，P0）
 
 **§11 打分**：频率高（每周每个客户都在发生，生产数据 CTS 9-14 那周 221/408 次失败混入分母）· IMPACT 闭环关键度高（分数直接喂进下一轮处方，算低等于给错建议）· 收入关联度高（影响客户可见诊断报告的核心维度分数）→ 零个低、两个以上高 → **P0**。
@@ -82,6 +253,19 @@
 
 ---
 
+## D1「投放卡住」诊断 · UTC+7/+8 账户跨午夜的零投放段会永久漏报（2026-09-24 卫青复审发现，P3）
+
+**§11 打分**：频率低（现网 7 个广告账户全是 `Pacific/Auckland` ×6 + `Australia/Brisbane` ×1，没有一个落在 UTC+7/+8，今天触发不了）· IMPACT 闭环关键度高（D1 报的是"钱花不出去"，漏了就是客户预算白白少花，属于 Act 段该抓没抓）· 收入关联度低（当前无客户受影响）→ 两项低 → **P3**，记入待认领，不现在动。
+
+- **怎么来的**：PR [#1966](https://github.com/bigbigraydeng-maker/magic-engine/pull/1966) 把评估日从「UTC 的昨天」改成「广告账户时区的昨天」，评估日整体往后挪了一天。D1 的「报表滞后」守卫是拿**评估那一刻的账户本地钟点**跟缺口结束时刻比，评估日一挪，这个差值就整体少了 24 小时。
+- **判据在哪**：`src/lib/ads-strategy/portfolio/diagnostics/d1-delivery-stall.ts:142-146`，`sinceGapEnd = hoursFrom(D, run.end, evalLocal.day, evalLocal.hour)`，小于 `D1_REPORT_LAG_HOURS`（`thresholds.ts:18`，= 2）就判 `report_lag`「判不了」。
+- **什么条件下出错**：cron 固定 17:00 UTC（`render.yaml:360`），账户本地钟点 = `(17 + 偏移) mod 24`。偏移 +8（Australia/Perth）→ 本地 01:00，一段跑到当地午夜结束的零投放段算出来只有 1 小时 → 判 `report_lag`；偏移 +7（雅加达/曼谷）本地 00:00，连 23 点结束的段都躲不过。偏移 ≥ +9 的账户（奥克兰 +12/+13、悉尼 +10/+11、布里斯班 +10）算出来 ≥ 2 小时，不受影响。
+- **后果为什么是"永久"**：D1 只评估 `ctx.date` 这一天，下一轮 `ctx.date` 已经是 D+1，被判 `report_lag` 的那天**再也不会被重新评估**。改之前同一段卡住会在第二天那轮算成 25 小时稳稳命中，改之后从「晚一天报」退化成「一次也不报」。
+- **将来要修的话**：命中 `report_lag` 的那一天不能就这么丢掉。两个方向——(a) D1 单独退回评估 `shiftDate(D, -1)`（小时数据加载器本来就会取 D、D-1、D-2 三天，`D1_REPEAT_LOOKBACK_DAYS = 2`，数据现成）；(b) 把 `report_lag` 的那天记下来，下一轮补评一次。**接手前先确认现网有没有 UTC+7/+8 账户**——没有的话这条仍然只是隐患，不要因为它插队。
+- **同时发现的既有不一致（不属于本条，一并记着）**：`src/lib/cron/registry.ts:157` 里 `google-data-pullback-daily` 的调度写的还是 `'0 3 * * *'`，而 `render.yaml:360` 早在 2026-09-16 就按 PM 拍板改成 `'0 17 * * *'` 了。上面这条判据的全部安全性都建立在「17:00 UTC 跑」这个前提上，而仓库里有两份互相打架的记录。
+
+---
+
 ## Meta Ads AI 只读内测 · 换人接手一条已连接的 Facebook 授权时永久卡死（2026-09-22 发现，P3）
 
 **§11 打分**：频率低（一个客户通常固定一人/账号维护）· IMPACT 闭环关键度低（不阻塞当前 Act，有绕过办法）· 收入关联度低（无客户投诉/续费风险）→ 三项皆低 → **P3**，记入待认领，不现在动。
@@ -137,6 +321,34 @@ PM 要求把 parkhomes.nz 整体检查一遍还有什么可以升级。首页网
   - 频率：低（不是每天会撞上的故障，是"有人转发链接时"才体现）· IMPACT：中（影响转发链接后的点击欲望，偏 Act 前一步）· 收入：低（间接）→ 两低 → P3。
 
 ---
+
+## 广告 WP3 · Impact loop 接线 — 设计稿 v2.1 等 PM 认，实施按四小步（2026-09-25，A 级，P0）
+
+**§11 打分**：频率高（每日跑）· IMPACT 高（Check/Tune 段决定闭环通不通电）· 收入高（客户续费看广告效果）→ 三高 → **P0**。合同 [#1986](https://github.com/bigbigraydeng-maker/magic-engine/issues/1986)；设计稿 `docs/specs/2026-09-25-ads-impact-wp3-design-v1.md`（三方设计复审两轮：子牙 / 魏征 / 狄仁杰，21+27 条全部并入）。执行走 DeepSeek，本窗口统筹复审。
+
+- [ ] **WP3.1a 同步 worker**：`ad_strategy_configs.autonomy_mode` → `client_automation_policies.mode`（按 `(client_id, action_key)` 逐键条件 UPDATE，registry 动态取 `ads.*` 键；Kernel 一行不动；同步 SQL 函数 SECURITY DEFINER + REVOKE/GRANT；审计列 + receipts 表；架构测试 grep 禁令）。狄仁杰判「可进」。
+- [ ] **WP3.1b 熔断**：append-only `ads_circuit_events`（按账户，派生态：无 release 且 sticky/未过 24h = 熔断中）；resolver 钩子返回 unavailable → Kernel 两层拒；admin 解除接口 `guardGlobalAdmin`；**收编止损旁路** `ad-health/stop-loss/route.ts`（付费客户成员可直调 Meta 改预算/状态，不经 Kernel）；**账户级日预算上限**（`client_meta_ad_accounts.daily_budget_cap_cents` + envelope-facts 按账户取 + 绑定面板 UI；CTS 主 100 / 个人 50，客户级 150 为总闸）；**同 PR 修 WP2 遗留 [#1994](https://github.com/bigbigraydeng-maker/magic-engine/issues/1994)**（resolver 没接进生产 Kernel、pre_provider 不读 kernel_pre 快照、4000 行窗口）。migration 先 apply 再合并代码。
+- [ ] **WP3.1b PR A 拆出去的第四条旁路 · 止损接线 + B2 前端契约修 · 并入 PR C**（统筹 2026-09-28 技术决定）：🔴 **本 PR A 合并后，广告健康看板的"先按住钱"按钮仍完全绕过熔断器和执行内核，直接改 Meta**——`api/clients/[id]/ad-health/stop-loss/route.ts` 现在直调 `executeStopLoss`，一步都不经过 Kernel；`triggeredBy` 不是 `'human'` 的 AI 自治动作受熔断保护，人点按钮的这一种完全不受保护。这个洞在 PR C（三条旁路收编 + 止损接线 + 退休 `executeStopLoss` + B2）合并前一直开着，详见 [docs/ledger/2026-09-28-stop-loss-bypasses-circuit-breaker-until-pr-c.md](./ledger/2026-09-28-stop-loss-bypasses-circuit-breaker-until-pr-c.md)。提交适配器 `stop-loss-submission.ts` 已经写好、跟当前 Kernel/registry contract 核对过完全兼容，但**故意没提交进仓库**——先放在 worktree 外面 `.claude/worktrees/stop-loss-submission-holding/`，PR C 那一轮直接拿去放 `src/lib/ads-strategy/submission/` 就行，别重新设计一遍。还没接进路由、没写测试、没跑变异。
+🔴 **放进 `submission/` 目录那一刻，会撞上今晚新加的两层"人工触发身份"架构闸**：这个文件里的 `triggeredBy: 'human'` 会被判定成"没有配套鉴权调用"而报红（架构测试是按**单个文件**判定"声称人按的"和"有没有鉴权调用"两件事在不在同一个文件里，而这个文件是 Kernel 提交适配器，鉴权检查在**调用它的路由**里，不在它自己身上——两件事天生分在两个文件）。**这不是要放宽判据**（放宽等于给提权口子开后门），是接线那一轮必须先想清楚：要么这个适配器文件本身也做一次形式上的鉴权断言（即使实际鉴权已经在路由层做过），要么把两层闸的第二层改成"同一次调用链里存在鉴权"而不是"同一个文件里存在鉴权"（后者需要更贵的静态分析，本轮判据故意选了便宜但更严格的版本）。本发现是我自己写完适配器、拿它去跑架构测试探出来的（真实文件放进真实目录、真实跑测试，不是纸面推演）。
+- [ ] **WP3.1b 欠账（本轮明确没做，逐条登记，不许只留在台账里）**：
+  - [ ] **系列级 / 自动化三条旁路真收编**（`meta-ads/execute`、`meta-ads/boost-post`、`winner-reel-sync`）—— 需新增 4 个 ActionKey + capability handler，PR B / C 承载；`winner-reel-sync` 的保护判据是**学习期**不是预算（必须另建独立广告组，往在投组加广告会重置该组学习期；手册 `playbook-ads-meta-general` :249/:333/:367/:127-131 记了四处，NAL 实例每留资 $19.6→$138 七倍恶化）
+  - [ ] **运行时跨账户日上限强制** —— 卫青 2026-09-27 查实 CTS 两账户各花各的、合计 10 天超客户总闸。WP3.1b 只做了「配置时校验 sum ≤ 总闸」+「按账户取上限」，**运行时没人查「这个客户今天全部账户加起来花了多少」**，洞仍开着。不许因为 §3.9 做了就认为这条修好了
+  - [ ] **`client_meta_ad_accounts` 缺 `currency` 列** —— 账户级 `daily_budget_cap_cents` 的币种是隐含的、靠 `ad_entity_snapshots.currency` 反查。今天不出问题纯因 CTS/NAL 实测全 NZD。多币种客户接入前必须补；在那之前 PATCH 校验对「取不到币种」和「币种不一致」一律拒、不许相加
+  - [ ] **熔断 #4 Jev 连续低分接线** —— 数据源 `prescription_evaluations` 按 v2.2 §9.3/§11.8/§12 是 WP3.3 才建；3.1b 判据打桩恒返回 undeterminable（不熔不放），表就绪后接线
+  - [ ] **admin 熔断解除看板页** —— 3.1b 只交付 API（`guardGlobalAdmin` 保护），UI 延后
+  - [ ] **`ads.pause_unit` 缺专属审批入口 → 批准没有绑定保护** —— 人按的止损在 `observe` 客户上落成 `pending_approval` 后走通用审批页，而通用页的 `expectedDecisionId` 是可选参数（默认 `{}`），所以「批准的人看到的就是他批的那份」这条保护对它不生效。修它要给 `ads.pause_unit` 建专属入口 + 登记进 PR #2063 那张登记表；两边同时改那张表会撞，所以等 #2063 合并后做
+  - [ ] **让 `triggeredBy: 'human'` 不可自报** —— `SubmitActionInput.triggeredBy` 是提交方必填、`runner.ts:194` 原样写库、**零校验**；而人工止损信封刻意不看学习期 / 72h 冷却 / 变动 ≤20% / 日上限，所以**谁能填 `'human'` 就能跳过 AI 信封那五条闸**（统筹 + 卫青 2026-09-27 查出，我核实成立；今天生产代码零处填它，止损路由接上那一刻打开）。彻底修法 = `submitActionRun` 不收 `'human'`，改收一个由鉴权层产出的「已鉴权人工上下文」，Kernel 自己翻成 `'human'`，让类型系统保证「没鉴权过就构造不出 human 提交」（同 `AUTHORIZED_CONTEXT_MINTERS` 的思路）。代价是动 `runner.ts` 公开入参 = 动所有提交方，本轮太大。**本轮的替代是两层围栏**：`HUMAN_TRIGGER_ALLOWED_DIRS`（只有 `src/lib/ads-strategy/submission/` 能传）+ `HUMAN_TRIGGER_REQUIRED_AUTH_CALLS`（传它的文件必须命中鉴权调用，剥注释后按调用形式判），两条由架构测试强制、4 条变异全红。**不许因为围栏在了就认为这条修好了** —— 围栏管的是「哪个文件能说谁」，不是「说谁本身不可能」
+  - [ ] **provider-write 闸的 AST 化** —— 狄仁杰实测那道闸能被 barrel 转发 + 同目录相对 import 绕过（9 种写法里架构测试只认得 1 种）。修法在 `architecture.test.ts` 同文件里已有（341 行起的 AST 版 `moduleRefsIn`），存量弱点非本轮引入
+- [ ] **WP3.2 链条**：`google-data-pullback-daily` 末尾发 `ads.impact_cycle.due`（不新开 cron）；韩信（新 agent `docs/agents/12-hanxin.md`）编排：熔断检查 → 孔明 `isWithinEnvelope` 预检 → denied 恢复入批 → 去冲突 → Kernel；批次表 + 成员表；pm-todo 四个拉取函数 + 活性项。
+- [ ] **WP3.3 Check + Tune + Jev + 日报两段**：韩信在 `runAction` 成功后写 `flywheel_actions`（加 `action_run_id` 列）；attribution 加 `ads_check` 评估器（扩 `flywheel_outcomes_evaluator_key_check`、`OUTCOME_EVALUATOR` 登记、`ads.` owner）；Tune 复用 `memory-extractor`（`pattern_type` CHECK 扩 `budget|pause|creative`）；`prescription_evaluations`；日报 Check/Tune 段。
+- **不在 WP3**：任何客户开 `bounded_auto`（单独授权）；三个 stub capability 的真实实现；`deny` 写入口（v1 不提供，管理员的「关」= `observe`）。
+- **PM 需知**：翻 `autonomy_mode` 触发 `policy_version +1`，当天在途授权作废、下一轮重提（正常，日报提示）。
+
+## Agent 管理系统（旅行社送来的终端客户）· 上线后两条小尾巴（2026-09-24 上线，P3）
+
+PR [#1983](https://github.com/bigbigraydeng-maker/magic-engine/pull/1983) 已合并，两张 migration 已 apply。按 §11：频率低（CTS 一家在用）· IMPACT 低 · 收入中 → 两低 → **P3**，待认领。
+- [ ] 页面顶栏「最后同步时间」硬编码「每小时一次」+ TODO，改从 `mailbox-sync` 心跳读。
+- [ ] 大团客户（pax > 30 常态）会被 `needs_review` 淹掉看板；判据升级成「同 Agent 30 天内见过一次即默认信任」。CTS 短期不撞。
 
 ## 广告支柱 IMPACT 闭环升级 · 阶段 0 止血 + 阶段 1 只读诊断（2026-09-14 已开 PR，PM go 已完成，验证与收尾进行中）
 

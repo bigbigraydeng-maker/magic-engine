@@ -1,24 +1,107 @@
-# Merge authorization gate
+# 合并规则：机器判级，两档放行
 
-The workflow in `pr-merge-authorization.yml` turns merge authorization into a
-required, exact-revision check instead of relying on an agent remembering a
-chat phrase.
+PM 2026-09-25 拍板（台账卡 `docs/ledger/2026-09-25-merge-gate-machine-not-human.md`、
+`docs/ledger/2026-09-25-merge-two-tiers-auto-vs-signed.md`）：
 
-One-time repository setup after the workflow reaches `main`:
+> 合并不做"每次 GitHub 点头"的人工闸；分两档——B/C 级 PR 机器检查全绿自动合、
+> 不再在聊天里问 PM go；A 级要审核团队三人签字被机器记录后才合，接线前仍问 PM 一句。
 
-1. Create the GitHub Environment `merge-authorization`.
-2. Add Ray as its sole required reviewer and prevent administrator bypass.
-3. In the `main` ruleset, require the status check `Merge authorization (Ray)`.
-4. Do not grant automation tokens permission to approve protected environments.
+以前这里描述的「Merge authorization (Ray)」检查已删除：它依赖一个从未配置 required
+reviewer 的 GitHub 环境，5 秒自动通过，也从未进过主干必过清单，所以从未真正拦过任何
+一次合并。本文件现在只描述真实存在、真实执行的机制。
 
-Operating rule:
+## 谁来判级
 
-- Draft PRs need no approval and cannot be merged.
-- When a PR becomes ready, its current head waits for environment approval.
-- Every new commit cancels the prior run and creates a new approval request, so
-  an approval cannot silently carry over to changed code.
-- `GO MERGE #<number>` remains the human instruction in Build Control. The
-  controller may open the matching environment approval for Ray, but it must
-  never infer authorization from “continue”, “candidate”, or “visual pass”.
+`.github/workflows/pr-risk-gate.yml` 的检查 **`Risk gate`**。它用 `pull_request_target`
+触发，workflow 定义和脚本 `tools/ops-review-loop/src/check-risk-gate.mjs` 都从 `main`
+取——一个 PR 改不了判它的那把尺子。它**不检出、不执行 PR 的代码**，PR 只以数据身份进入
+（改动文件清单、正文里自报的级别、评论）。
 
-This gate never merges, deploys, publishes, or contacts a paid provider.
+级别由 `tools/ops-review-loop/src/risk.mjs` 按 PR **实际改动的文件**算出
+（规则见 `docs/ENGINEERING_QUALITY_GATES.md` §10.1）：
+
+- 命中受保护路径任一条 → **A**（数据库结构、CI 与本闸门、鉴权与隔离、Kernel、钱、
+  生产调度、对外发布、凭证、依赖清单，以及 **治理文件**：`CLAUDE.md`、`AGENTS.md`、
+  整个 `.github/`、`.claude/`、`docs/ENGINEERING_QUALITY_GATES.md`、`docs/ledger/README.md`、
+  `scripts/ledger-*`、`docs/playbooks/` 正文（`inbox.md` 除外））。
+- 每一个文件都命中严格低风险清单（文档、样式、图片、纯测试）→ **C**。
+- 其余 → **B**。
+- 改动清单读不到、为空、rename 说不出原路径 → **A**。PR 正文自报的级别只作下限。
+
+每次判级会在 PR 下留一条评论，末尾带隐藏标记
+`<!-- me-dev-gate:{...} -->`，同时绑定 base 与 head 两个 SHA；head 一动即作废。
+读标记只认 `github-actions[bot]` 写的（`selectTrustedGateMarkers`），任何人手打的一律忽略，
+并在摘要里写明忽略了几条。标记只是记录，检查每次都重新算级，不拿旧标记当输入。
+
+## 两档
+
+| 级别 | `Risk gate` 结果 | 合并方式 |
+|---|---|---|
+| **B / C** | 绿 | 检查自己执行 `gh pr merge --auto --merge`；GitHub 在**所有**必过检查全绿、review 线程全部解决后合并。没有人点，也不在聊天里问 PM |
+| **A** | 只有当 子牙 / 魏征 / 狄仁杰 三方对**当前 base+head** 都有可信身份写入的签字标记 `<!-- me-review-signoff:{...} -->` 时才绿；否则**红** | A 级永不自动合。绿了也要人合 |
+
+另有三种一律红且关闭 auto-merge：草稿 PR、fork 来的 PR、判级过程任何一步读不到。
+
+auto-merge 那一步不允许 `continue-on-error`：`gh` 失败即检查红，摘要写明
+"自动合并：已开启 / 已关闭 / 开启失败（原因）"。
+
+## 现阶段行为（如实）
+
+**签字标记的自动写入路径尚未建成**（自治计划 B3 的后半）。可信签字身份来自仓库变量
+`ME_SIGNOFF_TRUSTED_LOGINS`，今天为空——所以今天**所有 A 级 PR 的 `Risk gate` 都是红的**。
+
+现阶段 A 级 PR 的合并方式：仍由构建控制窗口在聊天里问 PM 一句，PM 决定后用
+`gh pr merge --admin` 合。这一步机器分不清"PM 说了 go"还是"agent 自己决定"——所有
+Claude 窗口都用 PM 的 gh 身份，今天如此，本机制上线后也如此，只有 B3 的独立签字身份能收口。
+agent 不得自行对 A 级 PR 执行 `--admin`。
+
+签字身份的硬约束（代码强制，变量里写了也不信）：`github-actions[bot]` 不能签
+（PR 分支上的任何 workflow 都能以它留言）；PR 作者不能签自己的 PR。B3 建签字写入时必须用
+一个既不是 `github-actions[bot]`、也不是 PM 登录名的独立机器身份（GitHub App 或独立账号）。
+
+## 主干规则集（仓库设置，PM 合并接线 PR 时一并授权）
+
+- `Protect main`：必过检查 `ai-orchestrator-tests` · `Ledger entries valid` ·
+  `Code change has ledger entry` · `Ledger refs exist` · **`ops-review-loop-tests`** ·
+  **`Kernel architecture test`**（2026-09-27 新增，`.github/workflows/kernel-architecture.yml`） ·
+  **`Application build`**（2026-09-27 新增，`.github/workflows/pr-application-validation.yml`）。
+  没有 bypass actor：这七道红了，管理员也合不进——**前提是检查产生的状态本身没被同一个 PR
+  伪造**，见下面「已知缺口」里 `Application build` / `Kernel architecture test` 的可信度边界。
+- `Application build` 为什么必过：2026-09-25 PR #2016 开着 auto-merge，编译还在跑时就被合进主干
+  （04:46:20 合，35 秒后编译报失败），之后约 7 小时每次上线都失败。它编的是 PR 自己的最新提交，
+  不是「主干 + 本 PR」，两个各自编得过的 PR 叠在一起仍可能编不过 —— 那种情况由今日待办的
+  「正式网站没换上新代码」兜底（`src/lib/pm-todo/deploy-health-items.ts`）。
+  同一个 workflow 里的 `Type-check` 这次没设必过，只因为 PM 这次授权的是编译这一道。它在 CI 里是
+  基线感知的（只拦相对主干**新增**的类型错误，旧错误不拦），近 40 个合并 PR 里 39 个绿；类型错误
+  不会让上线失败（`next.config.js` 构建时忽略类型错误），要不要也设成必过另由 PM 定。
+- `Kernel architecture test` 测的是「主干 + 本 PR」合并后的代码，只在推送时按当时的主干算一次，
+  主干后来变了不会自己重跑（规则集不要求分支先跟上主干）。所以 A 级 PR 手动 `--admin` 合并前，
+  先 `gh pr update-branch`，等这道检查在最新主干上重新变绿再合。
+- **`Risk gate`**（新建的独立规则集）：只含必过检查 `Risk gate`；bypass actor =
+  Repository admin。之所以单列：`--admin` 只绕过把你列为 bypass 的那个规则集，
+  `Protect main` 的七道照样拦。
+- **关闭条件（写死）**：B3 签字自动写入上线、`ME_SIGNOFF_TRUSTED_LOGINS` 指向独立机器身份后，
+  撤掉 `Risk gate` 规则集的 bypass（或把它并入 `Protect main`）。不撤，这个口子永久存在。
+- 环境 `merge-authorization` 已无 workflow 引用，可删。
+
+## 已知缺口
+
+- 用 `GITHUB_TOKEN` 开的 auto-merge，合并后**不会触发** `on: push` 的 workflow
+  （GitHub 防递归规则）。今天只影响 `parkhomes-deploy.yml`：Park Homes 网页改动
+  （`docs/clients/parkhomes/web/`，C 级）自动合进主干后不会自动部署，要手动
+  `workflow_dispatch`。补法是给 `Risk gate` 一个独立的细粒度 PAT；那是新凭证，由 PM 决定。
+- auto-merge 已开启却因 review 线程未解决等原因一直合不进，本检查看不见。后续事项：
+  今日待办加一栏"auto-merge 开了超过 N 天没合的 PR"。
+- `Application build`、`Kernel architecture test`（以及 `ai-orchestrator-tests` /
+  `ops-review-loop-tests` / 三道 Ledger 检查 `Ledger entries valid`、`Code change has ledger entry`、`Ledger refs exist`）都用 `on: pull_request` 触发，执行的是
+  **PR 分支自己那份** workflow 定义。一个 PR 只要同时把构建步骤换成必然成功的空壳、保留检查名
+  不变，产出的绿勾仍来自同一个 GitHub Actions `integration_id`，`Protect main` 分不出真假。
+  这类改动碰了 `.github/`，会被判 A 级、要 PM 在聊天里点头才合；所以今天「这几道检查绿了 =
+  真的编译/测试通过了」是流程上的信任，不是机制上的保证。修法另开任务设计并两审，这里不预设方案；
+  注意**不能**简单改成 `pull_request_target` 检出 PR head 来构建（见 `pr-risk-gate.yml` 顶部注释），
+  也不能只把现有可伪造的结果原样转发成另一个检查。台账：`docs/ledger/2026-09-27-application-build-check-not-tamper-proof.md`。
+
+## 这道闸不做的事
+
+不直接合并、不推送、不部署、不发布、不碰任何付费服务。`gh pr merge --auto` 只是
+给 GitHub 一个"检查全绿后合"的许可，合并动作由 GitHub 按规则集执行。

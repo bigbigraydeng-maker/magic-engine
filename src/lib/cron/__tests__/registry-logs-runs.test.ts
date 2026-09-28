@@ -10,7 +10,7 @@
  *   「这条不用你动手 —— 是我们代码里的欠账」—— 但 PM 每天早上照样看得到。
  *   本该是 dev 修的 bug，被硬塞到 PM 的动手栏。
  *
- * 2026-09-07 治理：`cron_blind` 挪进 daily-todo `DEV_OWNED_KINDS`
+ * 2026-09-07 治理：`cron_blind` 挪进开发车道（现为 `five-kinds.ts` 的 LANE_OF_KIND）
  * （`src/lib/pm-todo/daily-todo.ts`），不再进 PM 动手栏。这条 CI 守卫是双保险：
  * 在源头阻止 `logsRuns: false` 进 registry —— 有人 PR 新登记忘接
  * `startCronRun` 时，CI 立刻红，不用等到明早 PM 收到邮件才发现。

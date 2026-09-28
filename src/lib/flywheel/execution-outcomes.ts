@@ -8,7 +8,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
-import { keepOneCasePerAction } from '@/lib/flywheel/attribution/outcome-identity'
+import { effectiveVerdict, isSiteLevelUnattributable, keepOneCasePerAction } from '@/lib/flywheel/attribution/outcome-identity'
 import { fetchAll } from '@/lib/supabase-paginate'
 
 export interface ItemOutcomeSummary {
@@ -80,12 +80,15 @@ export async function fetchLatestOutcomesByAction(
 
   const outcomeByAction: Record<string, ItemOutcomeSummary> = {}
   for (const row of representative) {
+    // A whole-site metric cannot judge one action: show it undecided with no
+    // confidence, whatever an older run stored (see effectiveVerdict).
+    const siteLevel = isSiteLevelUnattributable(row.metric_key)
     outcomeByAction[row.action_id] = {
-      verdict: row.verdict as ItemOutcomeSummary['verdict'],
+      verdict: effectiveVerdict(row) as ItemOutcomeSummary['verdict'],
       metric_key: row.metric_key,
       delta: row.delta,
       delta_pct: row.delta_pct,
-      confidence: row.confidence,
+      confidence: siteLevel ? 0 : row.confidence,
       computed_at: row.computed_at,
     }
   }

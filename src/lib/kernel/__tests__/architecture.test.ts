@@ -30,8 +30,15 @@ import {
   KERNEL_RUNNER_SOURCE_MODULES,
   KERNEL_RUNNER_SYMBOLS,
   MIGRATION_VERSION_COLLISIONS_GRANDFATHERED,
+  HUMAN_TRIGGER_ALLOWED_DIRS,
+  HUMAN_TRIGGER_REQUIRED_AUTH_CALLS,
 } from '../boundaries'
 import { outwardBlockReason } from '../outward-authorization'
+import { createKernelDeps, type KernelDeps } from '../deps'
+import { createKernel } from '../index'
+import { ACTION_REGISTRY } from '../registry'
+import { createFakeSupabase } from './fake-supabase'
+import { HUMAN_STOP_ACTION_KEYS } from '../autonomy-envelope'
 
 const ROOT = process.cwd()
 const SRC = join(ROOT, 'src')
@@ -246,6 +253,16 @@ interface EslintConfig {
 }
 const eslintConfig = (): EslintConfig => JSON.parse(read('.eslintrc.json')) as EslintConfig
 
+/**
+ * CI 测的是「主干 + 本 PR」合并后的代码，而主干不要求 PR 先跟上最新。两个 PR 各自是绿的、
+ * 先后合进去才红（两个 migration 撞号最典型）—— 那之后每个 PR 都会红在别人的文件上。
+ * 但「不是我改的文件」不一定就是主干红：往 PROVIDER_WRITE_MODULES 新加模块时，
+ * 它的存量调用方也会列在这里，那是这个 PR 自己要补登的。
+ */
+const MAIN_ALREADY_RED_HINT =
+  '⚠️ 下面列出来的，如果既不是你这个 PR 改的、也不是你这次新纳入对外写模块的存量调用方，才说明主干本身已经红了：' +
+  '先修主干（找子牙），别在自己的 PR 里凑；主干修好后对你的 PR 跑 gh pr update-branch —— 这道检查不会自己重跑。\n'
+
 describe('L1 边界：对外写能力只能由 capability 层调用', () => {
   it('没有 capability 层之外的新 importer（历史清单只准变短）', () => {
     const allowed = new Set<string>(PROVIDER_WRITE_GRANDFATHERED)
@@ -268,7 +285,9 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
       violations,
       `这些文件绕过了执行内核直接 import 对外写能力。\n` +
         `正确做法是提交一个 action_run，让 Kernel 去执行；\n` +
-        `确实要豁免就把路径加进 boundaries.ts 的 PROVIDER_WRITE_GRANDFATHERED（那是一次要过 review 的 diff）。\n` +
+        `确实要豁免：先问子牙，同意后三处同加 —— boundaries.ts 的 PROVIDER_WRITE_GRANDFATHERED、` +
+        `.eslintrc.json 的 warn 豁免（路径里的方括号要转义）、本文件的 PROVIDER_WRITE_GRANDFATHERED_FROZEN。\n` +
+        MAIN_ALREADY_RED_HINT +
         violations.join('\n'),
     ).toEqual([])
   }, SCAN_TIMEOUT_MS)
@@ -277,9 +296,116 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
     const missing = PROVIDER_WRITE_GRANDFATHERED.filter((p) => !ALL_FILES.includes(p))
     expect(
       missing,
-      '这些豁免路径对应的文件已经不存在了，把它们从 boundaries.ts 里删掉 —— ' +
-        '留着会让清单看起来比实际更长，也会掩盖真实的收口进度。',
+      '这些豁免路径对应的文件已经不存在了，三处同删：boundaries.ts、.eslintrc.json 的 warn 豁免、' +
+        '本文件的 PROVIDER_WRITE_GRANDFATHERED_FROZEN —— 留着会让清单看起来比实际更长，也会掩盖真实的收口进度。',
     ).toEqual([])
+  })
+
+  /**
+   * 🔴 **「只准变短」要靠冻结清单钉住 —— 上面几条挡不住往清单里「加」。**
+   *
+   * 精确路径挡的是「新文件默认撞规则」，幽灵条目挡的是「文件删了、条目还留着」；
+   * 可往 boundaries.ts 里**加一条**真实 importer 的路径，上面几条照样全绿。
+   * 所以在这个测试文件里再冻一份：只改 boundaries.ts、不改这里 = 红。两份是故意的两把钥匙，
+   * 两个文件都在 A 级路径 src/lib/kernel/ 下。
+   *
+   * 比的是集合，不是条数：同一个 PR 里迁走一条旧的、再加一条新的，条数不变，集合变了。
+   * 另外两个开关一起钉：删掉一个对外写模块，它的调用方全部「合法」，比加豁免还省事；
+   * 多放一个允许目录，整个目录都能直接对外写。模块清单两个方向都冻：新加模块是好事，
+   * 但要同步进冻结清单，下限才会跟着涨——不涨的话，以后有人再把它删掉，这里看不出来。
+   *
+   * 2026-09-27：历史 26 条 + seo-meta 三条临时豁免（子牙拍板，SEO 3b · B7 迁走后删）。
+   */
+  const PROVIDER_WRITE_GRANDFATHERED_FROZEN: readonly string[] = [
+    'src/app/api/clients/[id]/cms/github/update-page/route.ts',
+    'src/app/api/clients/[id]/cms/publish-blog/route.ts',
+    'src/app/api/clients/[id]/cms/publish-geo-snippet/route.ts',
+    'src/app/api/clients/[id]/cms/publish-geo-to-github/route.ts',
+    'src/app/api/clients/[id]/cms/publish-shopify/route.ts',
+    'src/app/api/clients/[id]/cms/publish-wordpress/route.ts',
+    'src/app/api/clients/[id]/cms/shopify/route.ts',
+    'src/app/api/clients/[id]/cms/test/route.ts',
+    'src/app/api/clients/[id]/cms/wordpress/lookup-post/route.ts',
+    'src/app/api/clients/[id]/cms/wordpress/route.ts',
+    'src/app/api/clients/[id]/cms/wordpress/test/route.ts',
+    'src/app/api/clients/[id]/cms/wordpress/update-post/route.ts',
+    'src/app/api/clients/[id]/cms/wordpress/yoast-probe/route.ts',
+    'src/app/api/clients/[id]/gsc/index-request/route.ts',
+    'src/app/api/clients/[id]/reels/[draftId]/publish/route.ts',
+    'src/app/api/cms/github/webhook/route.ts',
+    'src/app/api/cron/cms-connection-retest/route.ts',
+    'src/app/api/publer/accounts/route.ts',
+    'src/app/api/publer/create-post/route.ts',
+    'src/app/api/publer/draft/[assetId]/route.ts',
+    'src/app/api/publer/schedule/route.ts',
+    'src/lib/blog/pr-sync.ts',
+    'src/lib/cms/page-upgrade-pr-sync.ts',
+    'src/lib/flywheel/social-post-publish.ts',
+    'src/lib/luban/tools.ts',
+    'src/lib/seo-meta/cts-meta-pr.ts',
+    'src/lib/inngest/functions/seo-meta-cycle.ts',
+    'src/lib/seo-meta/cycle/apply-adapter.ts',
+    'src/lib/seo-meta/cycle/pr-guard.ts',
+  ]
+  const PROVIDER_WRITE_MODULES_FROZEN: readonly string[] = [
+    '@/lib/publer/client',
+    '@/lib/cms/wordpress-client',
+    '@/lib/cms/shopify-client',
+    '@/lib/cms/github-client',
+    '@/lib/cms/blog-publisher',
+    '@/lib/cms/github-page-upgrade-publisher',
+    '@/lib/cms/meta-patcher',
+    '@/lib/gbp/publisher',
+    '@/lib/gsc/indexing-client',
+    '@/lib/gsc/sitemap-ping',
+  ]
+
+  it('🔴 历史清单只准变短：跟冻结清单比集合，多出来的先问子牙', () => {
+    const frozen = new Set(PROVIDER_WRITE_GRANDFATHERED_FROZEN)
+    const current = new Set<string>(PROVIDER_WRITE_GRANDFATHERED)
+    const added = Array.from(current).filter((p) => !frozen.has(p))
+    const removed = Array.from(frozen).filter((p) => !current.has(p))
+
+    expect(
+      added,
+      '豁免清单变长了。先问子牙（架构）：\n' +
+        '  · 这些如果是你这次新纳入对外写模块的存量调用方，补登是正常的；\n' +
+        '  · 否则就是又开了一个绕过执行内核的口子 —— 这段代码能不能改成提交一个 action_run？\n' +
+        '子牙同意了，才把这些路径同时加进本文件的 PROVIDER_WRITE_GRANDFATHERED_FROZEN。\n' +
+        added.join('\n'),
+    ).toEqual([])
+    expect(
+      removed,
+      '豁免清单变短了 —— 好事。把这些路径也从本文件的 PROVIDER_WRITE_GRANDFATHERED_FROZEN 里删掉，' +
+        '让清单只能往下走（空出来的名额不许留给下一个人悄悄用）。\n' +
+        removed.join('\n'),
+    ).toEqual([])
+  })
+
+  it('🔴 对外写模块清单只准变长（删一个模块 = 它的调用方全部变「合法」）', () => {
+    const modules = new Set<string>(PROVIDER_WRITE_MODULES)
+    const frozen = new Set(PROVIDER_WRITE_MODULES_FROZEN)
+    const dropped = PROVIDER_WRITE_MODULES_FROZEN.filter((m) => !modules.has(m))
+    const added = PROVIDER_WRITE_MODULES.filter((m) => !frozen.has(m))
+    expect(
+      dropped,
+      '这些模块从 PROVIDER_WRITE_MODULES 里删掉了，它们的调用方从此不受这道闸管。先问子牙；' +
+        '确实不再对外写（模块删了或改成只读），子牙同意后再从本文件的 PROVIDER_WRITE_MODULES_FROZEN 里删。\n' +
+        dropped.join('\n'),
+    ).toEqual([])
+    expect(
+      added,
+      '新纳入了对外写模块 —— 好事。同步加进本文件的 PROVIDER_WRITE_MODULES_FROZEN，让下限跟着涨' +
+        '（不涨的话，以后有人再把它删掉，上面那条看不出来）。\n' +
+        added.join('\n'),
+    ).toEqual([])
+  })
+
+  it('🔴 允许直接 import 对外写模块的目录只有 capability 层', () => {
+    expect(
+      [...PROVIDER_WRITE_ALLOWED_DIRS],
+      '多放一个目录 = 整个目录都能绕过执行内核直接对外写。先问子牙。',
+    ).toEqual(['src/lib/capabilities/'])
   })
 
   it('ESLint 的受限模块清单跟 boundaries.ts 一字不差', () => {
@@ -332,6 +458,111 @@ describe('L1 边界：Kernel 不许自己抓 service-role 客户端', () => {
         violations.join('\n'),
     ).toEqual([])
   }, SCAN_TIMEOUT_MS)
+})
+
+/**
+ * 🔴 **「接了不转发」这一类 bug 的专用闸**（WP3.1b，spec v2.2 §6.1 三大交付项之三）。
+ *
+ *    这个仓库已经踩过两次同一个形状：
+ *      · `createKernel` 收了 `leaseSeconds` / `ownerId` 但不转发 —— 公开 API 上写着
+ *        能配，实际永远是 300 秒 + 随机 owner（见 `kernel/index.ts` 那句注释）
+ *      · `createKernelDeps` 收了 `resolveEnvelopeFacts` 但不转发（子牙 2026-09-27
+ *        审 WP3.1b 实测抓到）—— 六个广告 ActionKey 全是 `bounded`，而 `authorize.ts`
+ *        在 bounded 路径上**缺解析器 = 一律拒**，于是每条广告动作都静默 denied
+ *
+ *    共同点：**类型签名收了它，行为没变**。类型检查永远绿，因为可选字段少给一个
+ *    完全合法。只有「造一个出来、看它在不在」这种行为断言才咬得住。
+ *
+ *    🔴 所以这一组断言的判据一律是**行为**：调真工厂 → 检查产物字段。
+ *       不许改成「grep 源码里有没有这个字段名」—— 那又退回类型层了。
+ *       变异验证：把 `deps.ts` 里 `resolveEnvelopeFacts: init.resolveEnvelopeFacts`
+ *       那一行删掉 → 本组第 1 条与第 3 条必红（已实测）。
+ */
+describe('🔴 Kernel 依赖工厂：声明了的字段必须真的转发（防「接了不转发」）', () => {
+  // 复用仓库既有的假件工厂（它自己在内部做那一次类型收口），这一组断言不发任何查询。
+  const probeClient = () => createFakeSupabase({})
+
+  it('createKernelDeps 转发 resolveEnvelopeFacts（不转发 = 全部 bounded 动作被拒）', () => {
+    const marker: NonNullable<KernelDeps['resolveEnvelopeFacts']> = async () => ({ unavailable: '合成解析器' })
+    const deps = createKernelDeps({
+      supabase: probeClient(),
+      registry: ACTION_REGISTRY,
+      capabilities: {},
+      resolveEnvelopeFacts: marker,
+    })
+    expect(
+      deps.resolveEnvelopeFacts,
+      'createKernelDeps 把传进来的 resolveEnvelopeFacts 丢掉了。\n' +
+        'authorize.ts 在 bounded 路径上缺这个解析器就一律 deny —— 不是「跳过检查」。\n' +
+        '后果：六个广告 ActionKey 每一条都拿回 denied/outside_autonomy_envelope，Meta 一个字节都不动。',
+    ).toBe(marker)
+  })
+
+  it('createKernelDeps 也转发 leaseSeconds / ownerId / now / sleep（同一类 bug 的其余字段）', () => {
+    const now = () => new Date('2026-09-27T00:00:00Z')
+    const sleep = async () => {}
+    const deps = createKernelDeps({
+      supabase: probeClient(),
+      registry: ACTION_REGISTRY,
+      capabilities: {},
+      leaseSeconds: 77,
+      ownerId: 'owner-probe',
+      now,
+      sleep,
+    })
+    expect(deps.leaseSeconds).toBe(77)
+    expect(deps.ownerId).toBe('owner-probe')
+    expect(deps.now).toBe(now)
+    expect(deps.sleep).toBe(sleep)
+  })
+
+  it('🔴 生产 Kernel 工厂（createKernel）产出的 deps.resolveEnvelopeFacts 非空', () => {
+    const deps = createKernel(probeClient())
+    expect(
+      typeof deps.resolveEnvelopeFacts,
+      '生产 Kernel 默认没装信封事实解析器。\n' +
+        'spec 2026-09-25-ads-impact-wp3-design-v1 v2.2 §6.1 把「createKernel 默认装」列为 3.1b 硬交付，\n' +
+        '因为忘了传的调用点会让该客户全部广告动作静默变成 denied —— 一个「看着上线了其实是死的」功能。',
+    ).toBe('function')
+  })
+
+  it('createKernel 的 overrides 能换掉默认解析器（测试要用这条路）', () => {
+    const marker: NonNullable<KernelDeps['resolveEnvelopeFacts']> = async () => ({ unavailable: '合成解析器' })
+    const deps = createKernel(probeClient(), { resolveEnvelopeFacts: marker })
+    expect(deps.resolveEnvelopeFacts).toBe(marker)
+  })
+})
+
+describe('🔴 人工止损信封的白名单必须真存在于注册表', () => {
+  /**
+   * 🔴 `HUMAN_STOP_ACTION_KEYS` 已经是 `readonly ActionKey[]`，所以**拼错一个字符
+   *    编译就不过**。但类型系统管不了另一种失败：
+   *    **一个 key 在闭合 union 里、却没有真的注册进 `ACTION_REGISTRY`**。
+   *    那样它会拿到人工信封的宽度，而 `authorize.ts` 在更前面就已经
+   *    因为查不到定义而拒了 —— 于是白名单里躺着一条永远不生效的条目，
+   *    而下一个人会以为它生效。统筹 2026-09-27 点名要这一条。
+   */
+  it('白名单里每个 ActionKey 都在 ACTION_REGISTRY 里', () => {
+    const missing = HUMAN_STOP_ACTION_KEYS.filter((key) => !ACTION_REGISTRY.has(key))
+    expect(
+      missing,
+      '这些 key 在人工止损信封的白名单里，但没有注册进 ACTION_REGISTRY。\n' +
+        'authorize.ts 会在更前面因为“查不到动作定义”就拒掉它，\n' +
+        '所以这条白名单条目永远不会生效 —— 而下一个读到它的人会以为它生效。',
+    ).toEqual([])
+  })
+
+  it('🔴 白名单里没有放类 / 建类动作（只允许“只会让花费变少”的）', () => {
+    // 判据用注册表里的信封分类，不是看名字里有没有 pause/cut 字样。
+    const forbidden = ['ads.scale_unit_budget', 'ads.add_retargeting_adset', 'ads.swap_creative'] as const
+    for (const key of forbidden) {
+      expect(
+        HUMAN_STOP_ACTION_KEYS.some((k) => k === key),
+        `${key} 是放类/建类动作，不该在人工止损信封白名单里 —— ` +
+          '人手动加预算没有“只会变少”这个安全性。',
+      ).toBe(false)
+    }
+  })
 })
 
 describe('依赖方向：Kernel 不许挂在被它治理的那些层上', () => {
@@ -1913,11 +2144,13 @@ describe('migration 版本不许撞车（P1-4）', () => {
       .filter(([v, files]) => files.length > 1 && !known.has(v))
       .map(([v, files]) => `${v} → ${files.join(' / ')}`)
 
+    // 2026-09-27 补登进豁免清单的三组是例外：没有 CI 跑这个测试时进的主干（见 boundaries.ts）
     expect(
       collisions,
       '这些 migration 用了同一个版本号。并行开发时各自分支都看不出来，' +
         '合并后 Supabase 的 migration 账本会出现重复 version。\n' +
         '把后来的那个改成一个更晚且唯一的版本号（不要往豁免清单里加）。\n' +
+        MAIN_ALREADY_RED_HINT +
         collisions.join('\n'),
     ).toEqual([])
   })
@@ -1937,6 +2170,87 @@ describe('migration 版本不许撞车（P1-4）', () => {
       resolved,
       '这些历史撞车已经被解决了，把它们从 boundaries.ts 的清单里删掉 —— ' +
         '留着会让欠账看起来比实际更多。',
+    ).toEqual([])
+  })
+
+  /**
+   * 🔴 撞车豁免清单同样只准变短，要钉两样：
+   *   · 版本号集合 —— 多一个版本号 = 又放进一次撞车；
+   *   · 每个版本号下的文件数 —— 清单按版本号豁免，同一个版本号再冒出一个文件，
+   *     上面的撞车检查照样放行。逐个版本钉，不钉总数：总数挡不住「这组少一个、那组多一个」。
+   * 2026-09-27：原 23 组（51 个文件）+ 补登 3 组（6 个文件）= 26 组、57 个文件；
+   * 其中下面 5 组各 3 个文件，其余 21 组各 2 个。
+   */
+  const MIGRATION_COLLISIONS_FROZEN: readonly string[] = [
+    '20260501000008',
+    '20260507000001',
+    '20260522000001',
+    '20260523000001',
+    '20260530000001',
+    '20260601000002',
+    '20260602000001',
+    '20260603000001',
+    '20260611000001',
+    '20260617000001',
+    '20260619000001',
+    '20260623000001',
+    '20260624000001',
+    '20260624000002',
+    '20260626000001',
+    '20260626000002',
+    '20260628000001',
+    '20260715000001',
+    '20260728000001',
+    '20260731100000',
+    '20260801120000',
+    '20260801150000',
+    '20260803140000',
+    '20260920100000',
+    '20260924000000',
+    '20260925000003',
+  ]
+  const MIGRATION_COLLISION_THREE_FILE_GROUPS: readonly string[] = [
+    '20260522000001',
+    '20260601000002',
+    '20260603000001',
+    '20260617000001',
+    '20260623000001',
+  ]
+
+  it('🔴 撞车豁免清单只准变短：版本号跟冻结清单比集合，每个版本号下的文件数钉死', () => {
+    const frozen = new Set(MIGRATION_COLLISIONS_FROZEN)
+    const current = new Set<string>(MIGRATION_VERSION_COLLISIONS_GRANDFATHERED)
+    const added = Array.from(current).filter((v) => !frozen.has(v))
+    const removed = Array.from(frozen).filter((v) => !current.has(v))
+    expect(
+      added,
+      '撞车豁免清单变长了 = 又放进一次撞车。先把自己的 migration 改个号；' +
+        '确实改不了先问子牙，同意后再加进本文件的 MIGRATION_COLLISIONS_FROZEN。\n' +
+        added.join('\n'),
+    ).toEqual([])
+    expect(
+      removed,
+      '撞车豁免清单变短了 —— 好事。把这些版本号也从本文件的 MIGRATION_COLLISIONS_FROZEN 里删掉。\n' +
+        removed.join('\n'),
+    ).toEqual([])
+
+    const count = new Map<string, number>()
+    for (const f of readdirSync(join(ROOT, 'supabase/migrations'))) {
+      const v = f.slice(0, 14)
+      if (f.endsWith('.sql') && current.has(v)) count.set(v, (count.get(v) ?? 0) + 1)
+    }
+    const threes = new Set(MIGRATION_COLLISION_THREE_FILE_GROUPS)
+    const drifted = Array.from(current)
+      .map((v) => ({ v, want: threes.has(v) ? 3 : 2, got: count.get(v) ?? 0 }))
+      .filter(({ want, got }) => want !== got)
+      .map(({ v, want, got }) => `${v}：钉住 ${want} 个文件，现在 ${got} 个`)
+    expect(
+      drifted,
+      '已豁免的版本号下，文件数跟钉住的对不上。\n' +
+        '变多了 = 已豁免的版本号下又冒出新文件（按版本号豁免会放行它）：把新文件改个号。\n' +
+        '变少了 = 有撞车被解决了：3 个变 2 个就从本文件的 MIGRATION_COLLISION_THREE_FILE_GROUPS 里删掉这个版本号；' +
+        '只剩 1 个的按上面幽灵条目那条的提示删。\n' +
+        drifted.join('\n'),
     ).toEqual([])
   })
 })
@@ -2007,8 +2321,11 @@ describe('两处清单不许分家（S1 / S2）', () => {
   //    这条前向迁移里的 CREATE OR REPLACE FUNCTION —— 不管目标环境有没有 apply
   //    过历史迁移，这条语句都会把函数换成最新版本。跟 runner.ts 比对必须用这份
   //    "最终生效" 的 SQL，历史文件本身不再改。
+  //
+  // 🔴 白名单的最新真相永远在**最新那份**前向迁移里。每次加新码都要把这个常量
+  //    往前挪到新的那份迁移上，历史文件一律不改。
   const RECOVERY_WHITELIST_MIGRATION_SQL =
-    'supabase/migrations/20260811040000_kernel_recovery_outward_requires_human_policy.sql'
+    'supabase/migrations/20260925000003_kernel_recovery_outside_autonomy_envelope.sql'
 
   it('🔴 可恢复拒绝码：SQL 里的白名单跟 runner.ts 的 RECOVERABLE_DENY_CODES 一字不差', async () => {
     // 真正的强制在 RPC 里（应用层那份只是为了把话说人话）。
@@ -2042,8 +2359,10 @@ describe('两处清单不许分家（S1 / S2）', () => {
     )
     // 新增的码必须在这份前向迁移里，且不在历史迁移里（否则又是原地改写）。
     expect(sql).toContain("'outward_requires_human_policy'")
+    expect(sql).toContain("'outside_autonomy_envelope'")
     const historical = read(MIGRATION_SQL)
     expect(historical).not.toContain('outward_requires_human_policy')
+    expect(historical).not.toContain('outside_autonomy_envelope')
   })
 
   it('🔴 恢复 RPC 里有状态 CAS 和指针 CAS 两道，且步骤重置在同一个函数里', () => {
@@ -2255,6 +2574,205 @@ describe('注册表的封闭性', () => {
           `${key} 的幂等键字段「${f}」必须出现在 input_schema 里`,
         ).toContain(f)
       }
+    }
+  })
+})
+
+/**
+ * 解除熔断这件事，只允许有一个入口，而且必须是人。
+ *
+ * 判据来自设计稿 `2026-09-25-ads-impact-wp3-design-v1.md` v2.5 §6.4。
+ *
+ * 为什么值得一道架构测试：`sticky` 的熔断**只能靠一行 release 解除**，时间过期对它无效。
+ * 所以「谁能写 release 行」＝「谁能让被冻住的自治重新动手」。这不是代码整洁问题，
+ * 是一条授权边界 —— 而授权边界靠人自觉记得是守不住的（今天已经撞过三次
+ * 「机制在、新东西没登记进去」）。
+ */
+describe('熔断解除：写 release 行的唯一入口（v2.5 §6.4）', () => {
+  /**
+   * 「这个文件会不会写一行 release」的判据。
+   *
+   * 🔴 三个条件同时满足才算，缺一个都不算：
+   *    · 提到这张表（`ads_circuit_events`）
+   *    · 真的在插入（`.insert(`）
+   *    · 插的内容里出现 `release`
+   *
+   * 为什么不能只看前两条：`circuit-state.ts` 读派生态时要 `.eq('kind', 'release')`，
+   * 它提到了表、提到了 release，但**只读不写**。只看「提到」会把只读模块也算成写入者，
+   * 于是这条测试要么被迫加白名单、要么被人当成噪音关掉 —— 两种都等于没有这道闸。
+   *
+   * 🔴 这个判据本身会过时：将来有人用别的写法（存储过程、RPC、批量脚本）写 release，
+   *    它就抓不到。所以下面那条「库层零写入者」是主闸，这条是「路由层必须过 admin」的
+   *    附加闸；真正兜底的是数据库那条 CHECK（`actor` 必须是 `human:<email>` 形状）。
+   *    三层各咬一次，不指望任何单独一层是完整的。
+   */
+  function writesReleaseRow(source: string): boolean {
+    return (
+      source.includes('ads_circuit_events') &&
+      source.includes('.insert(') &&
+      source.includes('release')
+    )
+  }
+
+  /**
+   * 🔴 **判据只看代码，不看注释**（这条是自己变异测出来的，2026-09-27）。
+   *
+   * 第一版写的是 `source.includes('guardGlobalAdmin')`。变异「把路由里的
+   * `requireGlobalAdmin` 换成普通 `requireAdmin`」——**测试是绿的**。
+   * 原因：那个路由的文件头注释里解释了「为什么不叠一个 `guardGlobalAdmin`」，
+   * 于是这个名字在注释里出现过，`includes` 就命中了。
+   *
+   * 也就是说：**一条注释里提到某个闸的名字，就能让这条架构测试放行一个没过闸的路由。**
+   * 这跟设计稿 v2.5 刚修掉的那个错是同一个 —— 把「必须满足某个判据」写成
+   * 「必须出现某个字面量」。我在修它的同一小时里又犯了一次。
+   *
+   * 所以：先 `stripComments`，再要求它是**调用形式**（`xxx(`）——
+   * import 了却从不调用同样不算过闸。
+   */
+  const codeOf = (f: string) => stripComments(readFileSync(join(ROOT, f), 'utf8'), f)
+
+  const candidates = ALL_FILES.filter((f) => !isTest(f)).filter((f) =>
+    writesReleaseRow(codeOf(f)),
+  )
+
+  it('🔴 `src/lib/**` 里不许存在任何写 release 行的路径', () => {
+    // 非 sticky 的 24 小时过期是**读取时现算**的派生态，不需要任何写入者
+    // （`circuit-state.ts` 文件头写了为什么）。所以库层需要这个能力的场景不存在；
+    // 一旦库层有了它，任何 cron / worker / 别的路由都能 import 去自动解除，
+    // 而「必须人解」就只剩一句说法。
+    expect(
+      candidates.filter((f) => f.startsWith('src/lib/')),
+      '库层出现写 release 的代码 = 熔断可以被程序自动解除，sticky 失去意义',
+    ).toEqual([])
+  })
+
+  it('🔴 写 release 行的路由必须过全局 admin 闸', () => {
+    const offenders = candidates.filter((f) => {
+      const code = codeOf(f)
+      // v2.5 就地修正：两个名字都接受。`guardGlobalAdmin()` 的实现就是
+      // `requireGlobalAdmin()` 外面包一层 NextResponse，判据完全相同；
+      // 而要拿 email 记 actor 只能用后者。判据是「过全局 admin 闸」，不是「出现某个函数名」。
+      //
+      // 🔴 要求**调用形式**且已剥注释（见 codeOf 上面那段）：
+      //    注释里提到名字不算、import 了不调用也不算。
+      return !/\bguardGlobalAdmin\s*\(/.test(code) && !/\brequireGlobalAdmin\s*\(/.test(code)
+    })
+    expect(offenders, '这些文件能写 release 行却没过全局 admin 闸').toEqual([])
+  })
+
+  it('这条闸真的在盯着东西（判据没有因为写法变化而扫空）', () => {
+    // 🔴 上面两条都是「列表应为空」，而**判据失效时它们也是空的** ——
+    //    这正是今天反复吃到的「绿有两种来路」。所以钉一条：
+    //    解除路由必须被这个判据抓到。它要是改了写法，这条先红，而不是静默放空。
+    expect(
+      candidates,
+      '解除路由应当被 writesReleaseRow 判据识别为写入者；扫不到说明判据已失效',
+    ).toContain('src/app/api/admin/ads/circuit/release/route.ts')
+  })
+})
+
+/**
+ * 「这是人按的」不许随便自报 —— 两层闸。
+ *
+ * 判据与理由见 `boundaries.ts` 的 `HUMAN_TRIGGER_ALLOWED_DIRS` 注释。一句话：
+ * `triggeredBy: 'human'` 让动作走人工止损信封，而那套信封刻意不看学习期 /
+ * 72h 冷却 / 变动 ≤20% / 日预算上限。**谁能填它，谁就能跳过 AI 信封那五条闸。**
+ * 而 `runner.ts` 对这个字段零校验。
+ *
+ * 🔴 **这两条闸现在盯着的是"零个文件"**（生产代码里还没人传 `'human'`，
+ *    止损路由接上时才会有第一个）。所以下面第三条用**真实磁盘探针**证明判据本身有效 ——
+ *    否则前两条会在判据失效时同样是绿的（今天反复吃到的「绿有两种来路」）。
+ */
+describe('人工触发身份：不许随便自报（两层闸）', () => {
+  const AUTH_CALL_RE = new RegExp(
+    `\\b(${HUMAN_TRIGGER_REQUIRED_AUTH_CALLS.join('|')})\\s*\\(`,
+  )
+
+  /** 判「这个文件会不会声称人按的」。剥注释后按字面量判 —— 注释里提到不算。 */
+  function claimsHumanTrigger(code: string): boolean {
+    return /triggeredBy:\s*'human'/.test(code) || /triggered_by:\s*'human'/.test(code)
+  }
+
+  function offendersIn(files: readonly string[], readCode: (f: string) => string) {
+    const claimers = files.filter((f) => claimsHumanTrigger(readCode(f)))
+    return {
+      claimers,
+      outsideAllowedDirs: claimers.filter(
+        (f) => !HUMAN_TRIGGER_ALLOWED_DIRS.some((dir) => f.startsWith(dir)),
+      ),
+      withoutAuth: claimers.filter((f) => !AUTH_CALL_RE.test(readCode(f))),
+    }
+  }
+
+  const readCode = (f: string) => stripComments(readFileSync(join(ROOT, f), 'utf8'), f)
+  const runtimeFiles = ALL_FILES.filter((f) => !isTest(f))
+
+  it(
+    '🔴 第一层：只有白名单目录能传 triggeredBy: \'human\'',
+    () => {
+      expect(
+        offendersIn(runtimeFiles, readCode).outsideAllowedDirs,
+        '这些文件声称「人按的」却不在 HUMAN_TRIGGER_ALLOWED_DIRS 里 —— ' +
+          '传它 = 跳过 AI 信封的学习期 / 冷却 / 20% / 日上限四条闸',
+      ).toEqual([])
+    },
+    // 🔴 扫描整仓运行时文件（剥注释 + 正则）。CI 上实测跑到 6.3s，触发
+    //    Vitest 默认 5s 超时——不是判据坏了，是这两条本来就该比默认值慢。
+    //    15s 留出约 2.4 倍余量，本地/CI 都验过在这个上限内。
+    15_000,
+  )
+
+  it(
+    '🔴 第二层：白名单目录里传它，也必须过鉴权',
+    () => {
+      // 白名单只管「哪个目录」，管不了「目录里那个文件是不是不需要登录就能打到」。
+      // 一条在允许目录里、匿名可达的路由照样能硬写 'human'，第一层抓不到它。
+      expect(
+        offendersIn(runtimeFiles, readCode).withoutAuth,
+        '这些文件声称「人按的」却没有任何鉴权调用 —— 没有东西证明真有人在',
+      ).toEqual([])
+    },
+    15_000,
+  )
+
+  it('🔴 这两条闸真的能抓到东西（真实磁盘探针，因为现在生产代码里是零个）', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'human-trigger-gate-'))
+    try {
+      // ① 白名单目录**外**、且有鉴权 —— 只该被第一层抓到
+      const outside = 'src/app/api/whatever/route.ts'
+      // ② 白名单目录**内**、但没有鉴权 —— 只该被第二层抓到
+      const inside = 'src/lib/ads-strategy/submission/rogue.ts'
+      // ③ 白名单目录内 + 有鉴权 —— 两层都该放行（这是合法形态）
+      const legit = 'src/lib/ads-strategy/submission/stop-loss-submission.ts'
+      // ④ 只在**注释**里提到 'human' —— 不该被当成 claimer
+      const commentOnly = 'src/lib/ads-strategy/submission/notes.ts'
+
+      const sources: Record<string, string> = {
+        [outside]: `await requireGlobalAdmin()
+submitActionRun({ triggeredBy: 'human' })`,
+        [inside]: `submitActionRun({ triggeredBy: 'human' })`,
+        [legit]: `await requireDashboardClientAccess(id)
+submitActionRun({ triggeredBy: 'human' })`,
+        [commentOnly]: `// 这里**不**传 triggeredBy: 'human'，理由见 boundaries.ts
+export const x = 1`,
+      }
+      const files = Object.keys(sources)
+      for (const f of files) {
+        const full = join(tmp, f.split('/').pop() as string)
+        writeFileSync(full, sources[f], 'utf8')
+      }
+      const read = (f: string) => stripComments(sources[f], f)
+      const result = offendersIn(files, read)
+
+      expect(result.outsideAllowedDirs, '第一层应当只抓到白名单目录外那一个').toEqual([outside])
+      expect(result.withoutAuth, '第二层应当只抓到没鉴权那一个').toEqual([inside])
+      expect(result.claimers, '合法形态不该被抓；只在注释里提到的更不该被抓').toEqual([
+        outside,
+        inside,
+        legit,
+      ])
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
     }
   })
 })

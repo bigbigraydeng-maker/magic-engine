@@ -20,13 +20,32 @@ import { Resend } from 'resend'
 import { supabaseAdmin } from '@/lib/supabase'
 import { meMailFrom, ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
 import { describeSendError } from '@/lib/ads-strategy/digest'
-import type { Diagnosis, DiagnosisRun } from './diagnostics/types'
+import type { Diagnosis, DiagnosisRun, ExcludedEntity } from './diagnostics/types'
+import type { GoalPace } from '../goal-pace'
 import type { FunnelRole } from './roles'
 import { bareAddress, isInternalEmail, splitAddresses } from './diagnostics/internal-email'
 
 export type InternalDigestDecision = 'alert' | 'uncertain' | 'recovery' | 'weekly' | 'skip'
 
+export interface DigestGoalContext {
+  title: string        // goals.title
+  label: string        // 指标人话名，如 '留资'
+  target: number       // goals.target_value
+  dayIndex: number     // 今天是目标期第几天（1-based）
+  totalDays: number
+  pace: GoalPace
+}
+
 const APP_BASE = 'https://app.magicengine.com.au'
+
+const EXCLUDED_REASON_LABEL: Record<ExcludedEntity['reason'], string> = {
+  meta_experiment: '在 Meta 对比测试中，测试结束前不下结论',
+  shared_account: '共用广告账户，只看账户层面',
+  other_page: '广告挂在别的 Facebook 主页上，不是这个客户的',
+  mixed_pages: '里面混着别的 Facebook 主页的广告，分不开，不判',
+  page_unknown: '读不到广告挂在哪个 Facebook 主页，确认不了是不是这个客户的',
+  capture_stale: '广告层快照最近一轮没抓全或太旧，归属核实不到，这几天只看账户层面',
+}
 
 const ROLE_ORDER: Array<{ key: FunnelRole | 'account'; label: string }> = [
   { key: 'account', label: '账户层面' },
@@ -56,6 +75,8 @@ const NOT_COMPARABLE_LABEL: Record<string, string> = {
   shared_account: '共用账户',
   below_min_sample: '数量太少',
   single_unit: '只有一个单位',
+  recently_changed: '最近改过设置，还在重新学习',
+  client_page_unknown: '客户没登记 Facebook 主页',
 }
 
 /** 只留内部收件人（环境变量兜底地址也要过内部核对）。返回裸地址。 */
@@ -118,6 +139,25 @@ export interface LegacyCampaign {
   headline: string
 }
 
+function goalSection(goal: DigestGoalContext | null | undefined): string {
+  if (!goal) {
+    return `<p style="font-size:13px;color:#64748b">目标进度：这个客户还没有生效中的目标。</p>`
+  }
+  const { title, label, target, dayIndex, totalDays, pace } = goal
+  if (pace.verdict === 'unknown') {
+    return `<p style="font-size:13px;color:#64748b">目标进度：${esc(title)} — 归属数据不足，未判（${esc(pace.reason)}）</p>`
+  }
+  const gap = pace.gapPct === null
+    ? '差距未判'
+    : (pace.gapPct >= 0 ? `超前 ${pace.gapPct}%` : `落后 ${Math.abs(pace.gapPct)}%`)
+  const projected = pace.projectedEnd === null ? '—' : String(pace.projectedEnd)
+  const base = `<b>目标进度</b>：${esc(title)} 目标 ${target} ${esc(label)}，第 ${dayIndex}/${totalDays} 天，已到 ${pace.actualToDate}（预计 ${projected}，${gap}）`
+  const tail = pace.verdict === 'unreachable_within_caps'
+    ? ` — <b style="color:#b91c1c">按当前预算上限到不了目标，需要 PM 决定：加预算 / 换素材 / 调目标</b>`
+    : ''
+  return `<p style="font-size:13px;margin:0 0 12px">${base}${tail}</p>`
+}
+
 function leadLine(decision: Exclude<InternalDigestDecision, 'skip'>, date: string, hits: number, nc: number): string {
   if (decision === 'alert') return `🔴 ${date} 发现 ${hits} 件要看的事`
   if (decision === 'recovery') return `🟢 ${date} 之前报的问题今天没再出现`
@@ -134,6 +174,7 @@ export function buildInternalDigest(opts: {
   decision: Exclude<InternalDigestDecision, 'skip'>
   legacyNeedsAction: LegacyCampaign[]
   droppedRecipients: number
+  goal?: DigestGoalContext | null
 }): { subject: string; html: string } {
   const hits = opts.run.diagnoses.filter(d => d.status === 'hit')
   const nc = opts.run.diagnoses.filter(d => d.status === 'not_comparable')
@@ -151,7 +192,7 @@ export function buildInternalDigest(opts: {
     : ''
 
   const excludedBlock = opts.run.excluded.length > 0
-    ? `<p style="margin-top:12px;font-size:12px;color:#64748b"><b>没参与诊断：</b>${opts.run.excluded.map(e => esc(`${e.name ?? e.id}（${e.reason === 'meta_experiment' ? '在 Meta 对比测试中，测试结束前不下结论' : '共用广告账户，只看账户层面'}）`)).join('；')}</p>`
+    ? `<p style="margin-top:12px;font-size:12px;color:#64748b"><b>没参与诊断：</b>${opts.run.excluded.map(e => esc(`${e.name ?? e.id}（${EXCLUDED_REASON_LABEL[e.reason]}）`)).join('；')}</p>`
     : ''
 
   const legacyBlock = opts.legacyNeedsAction.length > 0
@@ -164,6 +205,7 @@ export function buildInternalDigest(opts: {
 
   const html = `
     <div style="font-family:sans-serif;max-width:640px;margin:0 auto;padding:24px;color:#0f172a">
+      ${goalSection(opts.goal)}
       <p style="font-size:16px;font-weight:600;margin:0 0 6px">${esc(lead)}</p>
       <p style="font-size:12px;color:#64748b;margin:0">只读诊断，没有改任何广告和预算。仅限内部。</p>
       ${groups}
@@ -193,6 +235,7 @@ export async function persistAndSendInternalDigest(opts: {
   date: string
   run: DiagnosisRun
   configuredRecipients: string[]
+  goal?: DigestGoalContext | null
 }): Promise<InternalDigestResult> {
   const hits = opts.run.diagnoses.filter(d => d.status === 'hit').length
   const notComparable = opts.run.diagnoses.length - hits
@@ -223,7 +266,7 @@ export async function persistAndSendInternalDigest(opts: {
     if (!apiKey) return { decision, sent: false, recipients_dropped: dropped, persisted, error: 'RESEND_API_KEY not configured' }
 
     const campaigns = ((payload?.campaigns ?? []) as LegacyCampaign[]).filter(c => c.verdict === 'alert' || c.verdict === 'watch')
-    const { subject, html } = buildInternalDigest({ clientName: opts.clientName, date: opts.date, run: opts.run, decision, legacyNeedsAction: campaigns, droppedRecipients: dropped })
+    const { subject, html } = buildInternalDigest({ clientName: opts.clientName, date: opts.date, run: opts.run, decision, legacyNeedsAction: campaigns, droppedRecipients: dropped, goal: opts.goal })
     const { error } = await new Resend(apiKey).emails.send({ from: meMailFrom('Magic Engine 广告诊断（内部）'), to, subject, html })
     const status = error ? 'failed' : 'sent'
     if (payload) {

@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
+import { readBoundedJson } from '@/lib/http/bounded-body'
 import { extractBearer, verifyApiKey } from '@/lib/auth/api-key-access'
 import { requireOnboardingClientAccess } from '@/lib/auth/client-access'
 import { MetaReadError } from '../graph-read'
 import { enabled } from './contract'
-import { requirePilotActive,requirePilotLifecycleAccess } from './entitlement'
+import { isSelfServeClient,requirePilotActive,requirePilotLifecycleAccess } from './entitlement'
 import { requireMetaScope } from './store'
 export function json(data: unknown, status=200) { return NextResponse.json(data,{ status,headers:{ 'Cache-Control':'no-store' } }) }
 export function failure(error: unknown) { return json({ error:error instanceof MetaReadError ? error.code : 'request_failed' },error instanceof MetaReadError ? error.status : 500) }
@@ -20,7 +21,13 @@ export async function dashboardAccess(clientId: string) {
 }
 export async function pilotDashboardAccess(clientId: string) {
   const access=await dashboardAccess(clientId)
-  await requirePilotLifecycleAccess(clientId)
+  try {
+    await requirePilotLifecycleAccess(clientId)
+  } catch(error) {
+    // A self-serve member of a self-serve client may open the page before activating (it offers the activation).
+    const notYetOpened=error instanceof MetaReadError && error.code==='pilot_required'
+    if(!notYetOpened || access.tier!=='self_serve' || !await isSelfServeClient(clientId)) throw error
+  }
   return access
 }
 export async function activeDashboardAccess(clientId: string) {
@@ -36,17 +43,8 @@ export async function apiPrincipal(request: Request) {
   return result.auth
 }
 export async function boundedBody(request: Request): Promise<unknown> {
-  const reader = request.body?.getReader()
-  if (!reader) throw new MetaReadError('invalid_json')
-  const decoder = new TextDecoder()
-  let text = '', bytes = 0
-  while (true) {
-    const chunk = await reader.read()
-    if (chunk.done) break
-    bytes += chunk.value.byteLength
-    if (bytes > 24000) { await reader.cancel(); throw new MetaReadError('request_too_large',413) }
-    text += decoder.decode(chunk.value,{ stream:true })
-  }
-  text += decoder.decode()
-  try { return JSON.parse(text) as unknown } catch { throw new MetaReadError('invalid_json') }
+  const result = await readBoundedJson(request, 24000)
+  if (result.ok) return result.value
+  if (result.reason === 'too_large') throw new MetaReadError('request_too_large', 413)
+  throw new MetaReadError('invalid_json')
 }
