@@ -102,6 +102,17 @@
 
 ---
 
+## envelope-facts.ts 算账户预算合计时 pre_provider 判据没限定到本次快照批次（2026-09-28 PR #2019 复审查实，P2）
+
+**§11 打分**：频率低（需要实体从 Meta 后台消失/不再返回且旧 kernel_pre 快照恰好带着非零预算）· IMPACT 中（误挡的是本该放行的加预算动作，方向偏安全，不是资金泄露）· 收入关联中（间接影响）→ 不满足两个高，**P2**。详细推演见 [ledger 卡](./ledger/2026-09-28-envelope-facts-pre-provider-not-batch-scoped.md)。
+
+- **现象**：`envelope-facts.ts` 算账户当日预算合计时，`pre_provider` 判据只按 `capture_reason === 'kernel_pre'` 过滤，没有限定到"这次动作对应的那一批"快照，旧的、实体已消失的 `kernel_pre` 行会一直被计入。
+- **跟同文件的 P0 条目（冷却期看不到自己的改动）方向相反**：那条是过松（漏判），这条是过紧（误挡），不是同一个问题。
+- **为什么没在这个 PR 里现在就修**：`envelope-facts.ts` 是 WP2 既有代码，本 PR 未改动这部分逻辑；修对需要给快照抓取加批次标识，建议跟 P0 那条一起处理。
+- 来源：PR [#2019](https://github.com/bigbigraydeng-maker/magic-engine/pull/2019) 复审查实（Codex round 15）。
+
+---
+
 ## `meta-leads-sync` 每一轮都标红，「红了」这个信号已经不携带任何信息（2026-09-24 查实，P0）
 
 **§11 打分**：频率高（每 2 小时一轮，轮轮红）· IMPACT 闭环关键度高（Measure 段，报警器焊死在响，真出事分不出来）· 收入关联度高（这个报警器的职责就是发现线索断供；2026-08-21~08-30 同一个报警器失灵时 CTS 漏了 45 条线索）→ 零个低、三个高 → **P0**。
