@@ -13,10 +13,12 @@ set -euo pipefail
 FAILS=()
 
 # field <file> <key> —— 取 ^key: 的第一个值，去空白、去 \r
+# key 和冒号之间允许空格（"on_hold : true" 是合法 YAML，跟 "on_hold: true" 同义，
+# 不按这个宽松匹配会被当成没写这个字段，冻结检查就被空格绕过去了）
 field() {
   local f="$1" key="$2"
-  grep -m1 -E "^${key}:" "$f" 2>/dev/null \
-    | sed -E "s/^${key}:[[:space:]]*//" \
+  grep -m1 -E "^${key}[[:space:]]*:" "$f" 2>/dev/null \
+    | sed -E "s/^${key}[[:space:]]*:[[:space:]]*//" \
     | tr -d '\r' || true
 }
 
