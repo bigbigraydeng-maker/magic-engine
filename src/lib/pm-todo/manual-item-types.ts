@@ -136,6 +136,11 @@ export type ManualItemKind =
   | 'ad_readback_blocker'
   /** Mailchimp 出口 tally 里出现非预期失败（配置读不出来 / API key 失效 / 被限流 / provider 5xx） */
   | 'mailchimp_export_broken'
+  /**
+   * 广告每日回拉读不出客户的广告引擎配置 → 诊断 / 经营状态 / 日报对这些客户全部跳过。
+   * 2026-09-25 事故：代码先于加列的数据库改动上线，三个客户一起停了一天，没人知道。
+   */
+  | 'ads_config_unreadable'
   | 'blog_draft_waiting'
   /** 文章写好了，但这个客户的网站发布通道是断的 —— 要人去设置里接通一次 */
   | 'blog_publish_channel_broken'

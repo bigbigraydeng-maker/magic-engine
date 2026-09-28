@@ -59,7 +59,7 @@ export * from './manual-item-types'
 export { pushLinkedinProgressItems } from './manual-linkedin-items'
 export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems } from './manual-crm-items'
 import { pushVideoCreditsItem, pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
-import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems } from './manual-monitoring-items'
+import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems, pushAdsConfigReadItems } from './manual-monitoring-items'
 import { pushLeadsSanityItems, pushDiagnosticItems, pushPrescriptionItems } from './manual-strategy-items'
 
 export { pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
@@ -223,6 +223,11 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     // 这类失败从不设置 cron 结果的 error，cron 整体照样显示 completed，不单独捞出来就永远没人看见
     (b) => pushMailchimpExportItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] Mailchimp 出口检查失败（不阻塞其他待办）:', e),
+    ),
+    // 广告回拉读不出广告配置 → 诊断 / 经营状态 / 日报对这些客户静默跳过（2026-09-25 事故）。
+    // 这类失败混在该任务常年的 Meta 报错里，`cron_failing` 那条看不出来，必须单独捞。
+    (b) => pushAdsConfigReadItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 广告配置读取检查失败（不阻塞其他待办）:', e),
     ),
     // Facebook 私信 / 表单留资同步连续失败 —— 报错原来只进运行记录，NAL 的主页授权
     // 2026-09-16 失效后 9 天没人知道，新私信新留资全没进 CRM。授权失效只有主页管理员能修，必须下发。

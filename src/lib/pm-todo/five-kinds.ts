@@ -151,6 +151,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   cron_blind: 'dev',
   cron_stuck: 'dev',
   cron_failing: 'dev',
+  ads_config_unreadable: 'dev', // 广告回拉读不出广告设置，字段没对齐或临时故障，都是我们的活
   cron_not_running: 'dev',
   cron_silent_success: 'dev',
   ai_alerting_broken: 'dev',
