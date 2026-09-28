@@ -6,10 +6,79 @@
  * Meta 后台白找一圈。
  */
 
-import { describe, it, expect } from 'vitest'
-import { belongsToPage } from '../comment-autoreply-engine'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { belongsToPage, claimComment, MAX_ATTEMPTS, type CommentConfig } from '../comment-autoreply-engine'
+import type { PageComment } from '@/lib/meta/comments'
 
 const CTS_PAGE = '1616575215312482'
+
+/**
+ * `claimComment` 的两条真实 Supabase 调用路径（全新插入 / 重新认领 failed
+ * 行重试）——假查询链只做到能验证这两条路径 + 捕获 `.update()` 收到的字段，
+ * 不铺开完整的 engine 级测试基础设施（分类 / Meta API 调用等不在这个 finding
+ * 的验证范围内）。
+ */
+let insertShouldSucceed = false
+let existingRow: { id: string; reply_status: string; attempts: number } | null = null
+let updateShouldSucceed = true
+let capturedUpdatePayloads: Record<string, unknown>[] = []
+
+vi.mock('@/lib/supabase', () => ({
+  supabaseAdmin: {
+    from: (_table: string) => ({
+      insert: () => ({
+        select: () => ({
+          single: async () =>
+            insertShouldSucceed
+              ? { data: { id: 'new-row-id', attempts: 1 }, error: null }
+              : { data: null, error: { message: 'duplicate key value violates unique constraint' } },
+        }),
+      }),
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({ data: existingRow, error: null }),
+        }),
+      }),
+      update: (payload: Record<string, unknown>) => {
+        capturedUpdatePayloads.push(payload)
+        return {
+          eq: () => ({
+            eq: () => ({
+              select: () => ({
+                maybeSingle: async () =>
+                  updateShouldSucceed
+                    ? { data: { id: existingRow?.id ?? 'row' }, error: null }
+                    : { data: null, error: null },
+              }),
+            }),
+          }),
+        }
+      },
+    }),
+  },
+}))
+
+const COMMENT: PageComment = {
+  commentId: 'c1',
+  postId: 'p1',
+  message: 'hi',
+  fromId: 'u1',
+  fromName: 'User',
+  createdAt: '2026-09-28T00:00:00Z',
+  isFromPage: false,
+}
+
+const CONFIG: CommentConfig = {
+  client_id: 'cts',
+  fb_page_id: CTS_PAGE,
+  auto_reply_praise: true,
+  auto_reply_question: true,
+  auto_reply_complaint: true,
+  auto_hide_spam: true,
+  private_reply_enabled: true,
+  lookback_days: 7,
+  max_replies_per_run: 10,
+}
 
 describe('belongsToPage', () => {
   it('本主页的帖子（`<主页id>_<帖子id>`）算自己的', () => {
@@ -26,5 +95,51 @@ describe('belongsToPage', () => {
 
   it('前缀只是「开头像」不算 —— 必须整段主页 ID 加下划线', () => {
     expect(belongsToPage(`${CTS_PAGE}00_123`, CTS_PAGE)).toBe(false)
+  })
+})
+
+/**
+ * Codex round 15 复审 P2：`needs_human=true` 但还没耗尽重试的 failed 行——
+ * 一次公开回复尝试失败时 `status` 一律落 `'failed'`，不管 `decision.needsHuman`
+ * 是不是 true（见 `processClaimedComment` 里 `status` 的推导），所以这个组合
+ * 是真实可达的状态，不是纸面假设。FDE 在 CommentAuditList 看到 `needs_human`
+ * 徽章点"标记已阅"会写 `reviewed_at`；`finalise()` 从不清空它。如果
+ * `claimComment` 重新认领这行重试时不顺带清掉，等这行后面真耗尽重试变成
+ * exhausted，检测通道 `.is('reviewed_at', null)` 会把它永久滤掉——即使自动化
+ * 其实一直在正常重试，只是重试结果没人再看过。
+ */
+describe('claimComment', () => {
+  beforeEach(() => {
+    insertShouldSucceed = false
+    existingRow = null
+    updateShouldSucceed = true
+    capturedUpdatePayloads = []
+  })
+
+  it('重新认领一行还没耗尽重试的 failed 行 → 连带清空 reviewed_at / reviewed_by', async () => {
+    existingRow = { id: 'row-1', reply_status: 'failed', attempts: 1 }
+    const claim = await claimComment(COMMENT, CONFIG)
+    expect(claim).toEqual({ rowId: 'row-1', attempts: 2 })
+    expect(capturedUpdatePayloads).toHaveLength(1)
+    expect(capturedUpdatePayloads[0]).toMatchObject({
+      reply_status: 'processing',
+      attempts: 2,
+      reviewed_at: null,
+      reviewed_by: null,
+    })
+  })
+
+  it('全新评论（插入成功）→ 不碰 reviewed_at（这行从来没被审核过，列默认值就是 null）', async () => {
+    insertShouldSucceed = true
+    const claim = await claimComment(COMMENT, CONFIG)
+    expect(claim).toEqual({ rowId: 'new-row-id', attempts: 1 })
+    expect(capturedUpdatePayloads).toHaveLength(0)
+  })
+
+  it('已经耗尽重试的 failed 行不会被重新认领（attempts >= MAX_ATTEMPTS）', async () => {
+    existingRow = { id: 'row-1', reply_status: 'failed', attempts: MAX_ATTEMPTS }
+    const claim = await claimComment(COMMENT, CONFIG)
+    expect(claim).toBeNull()
+    expect(capturedUpdatePayloads).toHaveLength(0)
   })
 })

@@ -176,6 +176,17 @@ interface TokenSourceGuidance {
  * 返回值带 `href` 而不是只返回文案（Codex round 7 复审 P2）：三档里只有
  * `client_oauth` 需要一条不一样的落地页，其余两档仍然落设置页——href 跟着
  * 令牌来源走，不是固定值。
+ *
+ * `not_bound_page` 也要走 OAuth 重连（Codex round 15 复审 P1）：
+ * `assessConfiguredPage` 只在评论配置页（`social_comment_config.fb_page_id`）
+ * 不等于客户绑定页时才可能给出这个 reason——这种情况下 `resolveConfiguredPage`
+ * （`page-sync-authorization.ts`）只认这个客户对这个具体主页存过的 OAuth 令牌，
+ * `authorizeConfiguredPage` 在这条分支完全不读任何环境变量。也就是说不管这个
+ * 存量令牌是"还在但缺 scope"（→ `verified:true, via:'client_oauth'`，已经在走
+ * OAuth 分支）还是"整个没有/解不开"（→ `verified:false, reason:'not_bound_page'`），
+ * 唯一能修好的动作都是同一个：重新走一遍 `intent=comment_reply` 授权。原来只
+ * 判 `verified===true` 那一半，另一半会落进下面的环境变量分支——那些变量
+ * `authorizeConfiguredPage` 根本不会读，照做部署了也没用。
  */
 async function tokenSourceGuidance(
   supabase: SupabaseClient,
@@ -188,7 +199,10 @@ async function tokenSourceGuidance(
   const settingsHref = `${APP_BASE}/dashboard/clients/${clientId}/settings?tab=content&audit=1`
   try {
     const assessment = await assessConfiguredPage(supabase, clientId, pageId, env)
-    if (assessment.verified && assessment.via === 'client_oauth') {
+    const needsOAuthReconnect =
+      (assessment.verified && assessment.via === 'client_oauth') ||
+      (!assessment.verified && assessment.reason === 'not_bound_page')
+    if (needsOAuthReconnect) {
       return { how: oauthHow(), href: `${APP_BASE}/api/auth/facebook/connect?client_id=${clientId}&intent=comment_reply` }
     }
   } catch {

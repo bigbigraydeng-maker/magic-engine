@@ -278,9 +278,22 @@ interface Claim { rowId: string; attempts: number }
  *
  * New comment  → insert 'processing' (UNIQUE(comment_id) rejects a racing run).
  * Failed retry → update the existing 'failed' row to 'processing', guarded on
- *                reply_status='failed' so only one racer wins.
+ *                reply_status='failed' so only one racer wins. Also clears
+ *                reviewed_at/reviewed_by (Codex round 15 复审 P2): a
+ *                `needs_human=true` row can be `failed` before retries are
+ *                exhausted (see the `status` derivation below — a failed
+ *                public reply always yields 'failed' regardless of
+ *                needsHuman), so an FDE can legitimately click "标记已阅" on
+ *                it while it's still retriable — that action writes
+ *                `reviewed_at`, which `finalise()` never clears. Without
+ *                clearing it here, if this retry also ends up exhausting
+ *                MAX_ATTEMPTS, the stuck detector's `.is('reviewed_at',
+ *                null)` filter would permanently hide a row that is now
+ *                genuinely stuck, because the review timestamp still
+ *                describes the earlier, different failure the FDE actually
+ *                looked at — not this new attempt.
  */
-async function claimComment(comment: PageComment, config: CommentConfig): Promise<Claim | null> {
+export async function claimComment(comment: PageComment, config: CommentConfig): Promise<Claim | null> {
   const insertRes = await supabaseAdmin
     .from('social_comment_engagements')
     .insert({
@@ -318,7 +331,13 @@ async function claimComment(comment: PageComment, config: CommentConfig): Promis
   const nextAttempts = (row.attempts ?? 0) + 1
   const { data: updated } = await supabaseAdmin
     .from('social_comment_engagements')
-    .update({ reply_status: 'processing', attempts: nextAttempts, updated_at: new Date().toISOString() })
+    .update({
+      reply_status: 'processing',
+      attempts: nextAttempts,
+      updated_at: new Date().toISOString(),
+      reviewed_at: null,
+      reviewed_by: null,
+    })
     .eq('id', row.id)
     .eq('reply_status', 'failed') // lost the race if someone flipped it first
     .select('id')

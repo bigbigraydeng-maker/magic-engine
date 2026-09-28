@@ -343,6 +343,36 @@ describe('pushCommentAutoreplyStuckItems', () => {
     expect(assessConfiguredPageMock).toHaveBeenCalledWith(sb, 'cts', PAGE_ID, expect.anything())
   })
 
+  // Codex round 15 复审 P1：评论配置页不是客户绑定页、且这个页的存量 OAuth 令牌
+  // 已经没有了（撤销/删除/解不开）时，assessConfiguredPage 给 verified:false,
+  // reason:'not_bound_page'——这种页 authorizeConfiguredPage 只认这个页自己的
+  // OAuth 令牌，不读任何环境变量，之前会误判落进环境变量分支，指引完全无效。
+  it('评论配置页不是绑定页、且没有它的存量 OAuth 令牌（not_bound_page）→ how 仍指向重新连接 Meta，不落进环境变量分支', async () => {
+    assessConfiguredPageMock.mockResolvedValue({ verified: false, reason: 'not_bound_page' })
+    const { sb } = fakeDb({
+      exhaustedRows: [{ client_id: 'cts', page_id: PAGE_ID, updated_at: '2026-09-01T00:00:00Z' }],
+    })
+    const items: ManualItem[] = []
+    await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
+    expect(items[0].how).toContain('连接 Meta')
+    expect(items[0].how).toContain('改 Render 环境变量对这个客户不会生效')
+    expect(items[0].href).toBe('https://app.magicengine.com.au/api/auth/facebook/connect?client_id=cts&intent=comment_reply')
+  })
+
+  // 同样 verified:false，但 reason 不是 not_bound_page（比如 check_failed）时，
+  // 不该被新分支误吞——这类原因跟"配置页缺 OAuth 令牌"无关，仍要走环境变量兜底。
+  it('verified:false 但 reason 不是 not_bound_page → 不受影响，仍走环境变量兜底分支', async () => {
+    assessConfiguredPageMock.mockResolvedValue({ verified: false, reason: 'check_failed' })
+    resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'shared_fallback' })
+    const { sb } = fakeDb({
+      exhaustedRows: [{ client_id: 'cts', page_id: PAGE_ID, updated_at: '2026-09-01T00:00:00Z' }],
+    })
+    const items: ManualItem[] = []
+    await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
+    expect(items[0].how).toContain('META_SYSTEM_USER_TOKEN')
+    expect(items[0].href).not.toContain('/api/auth/facebook/connect')
+  })
+
   // Codex round 10 P1：client_domain / client_page 两种「专属变量」各自对应不同的实际
   // env var，`pickScopedMetaToken` 域名优先于主页——笼统说"专属变量"会让 FDE 改错那一个。
   it('令牌走的是专属环境变量、来源是域名（client_domain）→ how 点名实际的域名变量', async () => {
