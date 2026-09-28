@@ -5,6 +5,8 @@ status: done
 owner: agent
 decided_on: 2026-09-28
 source: pr:2190
+done_on: 2026-09-28
+done_ref: pr:2190
 verify_by: 2026-10-12
 verify_how: "查这个会话之后新开的 PR babysitting 场景，Codex 复审轮次是否在第 2-3 轮附近主动核对上限，而不是循环到 10+ 轮才想起来停"
 ---
