@@ -38,6 +38,22 @@ function stripPrefix(reason: string): string {
 
 export type AdsAutonomyCircuitBreakerItemKind = 'ads_autonomy_circuit_breaker'
 
+/**
+ * 从 `updated_by` 里抠出触发账户 id——写法见 `ads-circuit-breaker-check.ts`
+ * 的 `tripReason`：`[accountId] reason`，拼进 SQL 函数的 `updated_by` 时是
+ * `circuit-breaker:[accountId] reason...:timestamp`（Codex P2 复审：多账户
+ * 客户只有一个账户触发时，这个信息已经写进库了，之前的待办文案没读出来，
+ * PM 只能自己去 Meta Ads Manager 逐个账户排查）。抠不出来（比如手工建的
+ * deny 行不符合这个格式）就返回 null，文案退回不点名账户的通用版本。
+ *
+ * 这里的账户 id 是 circuit-breaker-spend.ts 归一化后的形式（不带 act_ 前缀）
+ * ——正好是 Meta Ads Manager 界面上显示账户号的形式，不用 FDE 自己再剥一次。
+ */
+function extractTriggeringAccount(updatedBy: string): string | null {
+  const match = /^circuit-breaker:\[([^\]]+)\]/.exec(updatedBy)
+  return match ? match[1] : null
+}
+
 /** 单客户版本：Settings 页用来决定要不要画"熔断已触发"横幅 + 解除按钮。 */
 export async function isCircuitBreakerTripped(
   supabase: SupabaseClient,
@@ -81,15 +97,19 @@ export async function pushAdsAutonomyCircuitBreakerItems(
   for (const row of (data ?? []) as Array<{ client_id: string; updated_by: string }>) {
     if (seen.has(row.client_id)) continue
     seen.add(row.client_id)
+    const account = extractTriggeringAccount(row.updated_by)
+    const accountNote = account ? `（触发账户：${account}）` : ''
     items.push({
       kind: 'ads_autonomy_circuit_breaker',
       client_id: row.client_id,
       client_name: nameOf(row.client_id),
       what:
-        '广告自治被熔断器自动停了 —— 当日实际花费合计超过 7 天中位数的 3 倍，' +
+        `广告自治被熔断器自动停了${accountNote} —— 当日实际花费合计超过 7 天中位数的 3 倍，` +
         '系统已自动把全部广告动作切到「禁止」档位，不再动钱。',
       how:
-        '先到 Meta Ads Manager 核实实际花费是否正常；' +
+        (account
+          ? `先到 Meta Ads Manager 核实账户 ${account} 的实际花费是否正常；`
+          : '先到 Meta Ads Manager 核实实际花费是否正常（多账户客户请逐个核对）；') +
         '确认没问题后在客户设置页点「解除熔断」按钮（不是重新拨自治档位——' +
         '那个开关不会碰这把熔断锁，得点专门的解除按钮）。',
       href: adsAutonomySettingsHref(row.client_id),

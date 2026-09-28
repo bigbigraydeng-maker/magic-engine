@@ -174,14 +174,33 @@ describe('release-circuit-breaker — 内部员工可以解', () => {
     expect(json.error).toContain('unknown')
   })
 
-  it('outcome=not_circuit_tripped 不计入 released 计数，也不降意向', async () => {
+  it('🔴 Codex P1（round 7）：outcome 全是 not_circuit_tripped（重试场景）但意向仍是 bounded_auto → 照样降级，不因 released=0 跳过', async () => {
+    signedInAs(STAFF)
+    // 模拟"第一次调用已经把策略解开，这次重试每个键都幂等报 not_circuit_tripped"——
+    // released 计数是 0，但 autonomy_mode 还没降，必须照样处理，不能靠 released 判断。
+    mockRpc.mockResolvedValue({ data: 'not_circuit_tripped', error: null } as never)
+    const { chain, updateCalls } = fakeConfigFrom('bounded_auto')
+    mockFrom.mockReturnValue(chain as never)
+
+    const res = await POST(postRequest(), params())
+    const json = (await res.json()) as { released: number; intent_downgraded_to_observe: boolean }
+    expect(json.released).toBe(0)
+    expect(json.intent_downgraded_to_observe).toBe(true) // released=0 不再等于"不用降"
+    expect(updateCalls).toHaveLength(1)
+    expect(updateCalls[0].autonomy_mode).toBe('observe')
+  })
+
+  it('outcome 全是 not_circuit_tripped 且意向已经是 observe → 不产生多余写入', async () => {
     signedInAs(STAFF)
     mockRpc.mockResolvedValue({ data: 'not_circuit_tripped', error: null } as never)
+    const { chain, updateCalls } = fakeConfigFrom('observe')
+    mockFrom.mockReturnValue(chain as never)
+
     const res = await POST(postRequest(), params())
     const json = (await res.json()) as { released: number; intent_downgraded_to_observe: boolean }
     expect(json.released).toBe(0)
     expect(json.intent_downgraded_to_observe).toBe(false)
-    expect(mockFrom).not.toHaveBeenCalled() // 什么都没真的解开，不该去动 autonomy_mode
+    expect(updateCalls).toHaveLength(0) // 已经是安全状态，不该反复写
   })
 })
 

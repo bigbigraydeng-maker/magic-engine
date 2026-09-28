@@ -22,9 +22,18 @@
  *    `ads_sync_autonomy_policy` 只挡 `mode = 'deny'`，不挡 `require_approval`。
  *    上面这段注释原先的假设（"PM 要恢复得自己再拨一次"）默认了 PM 不动
  *    autonomy_mode 状态就不会变，但每日 reconcile 本身就是那个"自己拨一次"
- *    的等价物，只是没人按。真正闭环解除必须让意向也退回 `observe`——
- *    只有 `released > 0`（真的解了至少一条）且当前意向仍是 `bounded_auto`
- *    时才降，不用没触发过的客户背这个副作用。
+ *    的等价物，只是没人按。真正闭环解除必须让意向也退回 `observe`。
+ *
+ * 🔴 Codex P1 复审（round 7）：降级判据不能用"这次调用自己 released 了几条"。
+ *    重现路径——第一次调用把全部策略解成 `require_approval`，随后读/写
+ *    `ad_strategy_configs` 短暂失败，接口整体返回 500；FDE 看到报错重新点
+ *    一次按钮，这次每个键的 RPC 都会幂等报 `not_circuit_tripped`（因为已经
+ *    不是 deny 了）——旧代码用 `released > 0` 当降级判据，这次重试
+ *    `released === 0`，永久跳过降级，`autonomy_mode` 卡在 `bounded_auto`，
+ *    下一次 reconcile 照样把它同步回 `auto_approve`，第一次调用解决的问题
+ *    被第二次调用的这个判据错误又打开了。改成只看当前 `autonomy_mode`
+ *    是否仍是 `bounded_auto`（不看这次调用自己解了几条）——幂等，重试
+ *    多少次结果都一样，不依赖"哪一次调用恰好是真正生效的那一次"。
  *
  * 全局 admin 闸：跟 PATCH ad-strategy-config 同一理由——这是内部控制项，
  * 客户成员不能自己解除熔断。`updated_by` 由 `requireGlobalAdmin` 的 email 拼，
@@ -100,33 +109,33 @@ export async function POST(
 
   // 意向必须跟着退回 observe，见本文件顶部 Codex P1 说明——否则下一次
   // ads-autonomy-sync 会把刚解开的 require_approval 悄悄同步回 auto_approve。
+  // 判据只看"当前意向是不是仍是 bounded_auto"，不看这次调用自己 released
+  // 了几条（round 7 修正：那个判据在重试场景下不幂等，见本文件顶部说明）。
   let intentDowngraded = false
-  if (released > 0) {
-    const { data: config, error: readError } = await supabaseAdmin
+  const { data: config, error: readError } = await supabaseAdmin
+    .from('ad_strategy_configs')
+    .select('autonomy_mode')
+    .eq('client_id', clientId)
+    .maybeSingle()
+  if (readError) {
+    return NextResponse.json({ error: `read autonomy_mode failed: ${readError.message}` }, { status: 500 })
+  }
+  if (config?.autonomy_mode === 'bounded_auto') {
+    const nowIso = new Date().toISOString()
+    const { error: downgradeError } = await supabaseAdmin
       .from('ad_strategy_configs')
-      .select('autonomy_mode')
+      .update({ autonomy_mode: 'observe', autonomy_mode_updated_by: staff.user.email ?? 'unknown', updated_at: nowIso })
       .eq('client_id', clientId)
-      .maybeSingle()
-    if (readError) {
-      return NextResponse.json({ error: `read autonomy_mode failed: ${readError.message}` }, { status: 500 })
+    if (downgradeError) {
+      return NextResponse.json(
+        { error: `downgrade autonomy_mode to observe failed: ${downgradeError.message}` },
+        { status: 500 },
+      )
     }
-    if (config?.autonomy_mode === 'bounded_auto') {
-      const nowIso = new Date().toISOString()
-      const { error: downgradeError } = await supabaseAdmin
-        .from('ad_strategy_configs')
-        .update({ autonomy_mode: 'observe', autonomy_mode_updated_by: staff.user.email ?? 'unknown', updated_at: nowIso })
-        .eq('client_id', clientId)
-      if (downgradeError) {
-        return NextResponse.json(
-          { error: `downgrade autonomy_mode to observe failed: ${downgradeError.message}` },
-          { status: 500 },
-        )
-      }
-      intentDowngraded = true
-      // 立即叫醒同步 worker 核对一遍策略表，不等明天的每日 reconcile——跟 PATCH
-      // 路由同一惯例。方向是收紧（bounded_auto → observe），不传 relaxed。
-      await notifyAutonomyModeChanged(clientId, nowIso).catch(() => undefined)
-    }
+    intentDowngraded = true
+    // 立即叫醒同步 worker 核对一遍策略表，不等明天的每日 reconcile——跟 PATCH
+    // 路由同一惯例。方向是收紧（bounded_auto → observe），不传 relaxed。
+    await notifyAutonomyModeChanged(clientId, nowIso).catch(() => undefined)
   }
 
   return NextResponse.json({ success: true, released, results, intent_downgraded_to_observe: intentDowngraded })
