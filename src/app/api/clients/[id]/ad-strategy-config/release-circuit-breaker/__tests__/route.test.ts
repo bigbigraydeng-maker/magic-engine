@@ -191,6 +191,38 @@ describe('release-circuit-breaker — 内部员工可以解', () => {
     expect(json.error).toContain('boom')
   })
 
+  it('🔴 Codex P1（round 14）：RPC 调用本身报错（不是 race_lost）+ 意向仍是 bounded_auto → 照样降到 observe，不跳过', async () => {
+    signedInAs(STAFF)
+    // 第一个键正常解开，第二个键调用本身失败（连接层，不是业务 race_lost）——
+    // 前面那个键已经真的从 deny 变成了 require_approval，不能让它晾在
+    // bounded_auto 意向下面。
+    mockRpc.mockResolvedValueOnce({ data: 'released', error: null } as never)
+    mockRpc.mockResolvedValueOnce({ data: null, error: { message: 'connection reset' } } as never)
+    const { chain, updateCalls } = fakeConfigFrom('bounded_auto')
+    wireFrom(chain, fakePoliciesFrom([]))
+
+    const res = await POST(postRequest(), params())
+    expect(res.status).toBe(500)
+    const json = (await res.json()) as { error: string; intent_downgraded_to_observe: boolean }
+    expect(json.error).toContain('connection reset')
+    expect(json.intent_downgraded_to_observe).toBe(true)
+    expect(updateCalls).toHaveLength(1)
+    expect(updateCalls[0].autonomy_mode).toBe('observe')
+  })
+
+  it('RPC 调用本身报错 + 意向已经不是 bounded_auto → 不产生多余降级写入', async () => {
+    signedInAs(STAFF)
+    mockRpc.mockResolvedValueOnce({ data: null, error: { message: 'timeout' } } as never)
+    const { chain, updateCalls } = fakeConfigFrom('observe')
+    wireFrom(chain, fakePoliciesFrom([]))
+
+    const res = await POST(postRequest(), params())
+    expect(res.status).toBe(500)
+    const json = (await res.json()) as { intent_downgraded_to_observe: boolean }
+    expect(json.intent_downgraded_to_observe).toBe(false)
+    expect(updateCalls).toHaveLength(0)
+  })
+
   it('🔴 Codex P2：任一键 race_lost → 500 且不假装成功，不进入降意向逻辑', async () => {
     signedInAs(STAFF)
     // 第一个键正常解开，第二个键并发被改动导致 race_lost——之前的实现会照样 success:true。

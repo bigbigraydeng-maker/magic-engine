@@ -83,6 +83,17 @@
  *    circuit-breaker 自己写的 `deny`（被重新熔断），都算没解干净——跟
  *    `already_tripped` SQL 分支判断"是不是熔断器自己的 deny"同一个
  *    `updated_by` 前缀判据，不新造一套。
+ *
+ * 🔴 Codex P1 复审（round 14）：逐键循环里某个键的 RPC 调用本身失败（网络/
+ *    连接层，不是业务返回的 race_lost）时，之前直接 500 返回、完全跳过
+ *    降级——前面已经跑过的键可能已经真的从 deny 解成了 require_approval，
+ *    晾在这个状态 + autonomy_mode 仍是 bounded_auto，之后任何一次更新
+ *    `ad_strategy_configs.updated_at` 的写入都会被每日 reconcile 悄悄同步
+ *    回 auto_approve。把降级逻辑抽成 `downgradeIfBoundedAuto`，这条早退
+ *    路径也调用它——跟 race_lost/`unresolved` 那条早退路径不同，那条的
+ *    "不降级"是刻意设计（测试里写明原因：race_lost 代表有并发写入方，
+ *    半解除状态不确定，没有再加一次写入的必要性），这条纯粹是连接层失败，
+ *    没有并发不确定性，降级是安全的，不能援引同一个"不降级"理由。
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -101,6 +112,42 @@ export interface ReleaseKeyResult {
 
 /** 三种都代表"这个键已经处理完，不用重试"：真解了 / 本来就不是熔断锁 / 压根没有策略行。 */
 const RELEASE_OUTCOME_HANDLED = new Set(['released', 'not_circuit_tripped', 'no_policy_row'])
+
+/**
+ * 尝试把 autonomy_mode 从 bounded_auto 收紧到 observe——从主路径（round 7/9/10/11
+ * 一路修过来的那段）抽出来，让新的早退路径也能调用同一份逻辑，而不是各自
+ * 再攒一份、漏掉某一处（round 14 复审起因）。
+ *
+ * 只在读/写 `ad_strategy_configs` 本身失败时返回非 null 的 `error`——不是
+ * "没降级"就算错误，`autonomy_mode` 本来就不是 `bounded_auto` 时"没降级"是
+ * 正常路径，不当失败。通知发送是 fire-and-forget（`.catch` 吞掉），不影响
+ * 这里的返回值。
+ */
+async function downgradeIfBoundedAuto(
+  clientId: string,
+  staffEmail: string,
+): Promise<{ downgraded: boolean; error: string | null }> {
+  const { data: config, error: readError } = await supabaseAdmin
+    .from('ad_strategy_configs')
+    .select('autonomy_mode')
+    .eq('client_id', clientId)
+    .maybeSingle()
+  if (readError) return { downgraded: false, error: `read autonomy_mode failed: ${readError.message}` }
+  if (config?.autonomy_mode !== 'bounded_auto') return { downgraded: false, error: null }
+
+  const nowIso = new Date().toISOString()
+  const { error: downgradeError } = await supabaseAdmin
+    .from('ad_strategy_configs')
+    .update({ autonomy_mode: 'observe', autonomy_mode_updated_by: staffEmail, updated_at: nowIso })
+    .eq('client_id', clientId)
+  if (downgradeError) {
+    return { downgraded: false, error: `downgrade autonomy_mode to observe failed: ${downgradeError.message}` }
+  }
+  // 立即叫醒同步 worker 核对一遍策略表，不等明天的每日 reconcile——跟 PATCH
+  // 路由同一惯例。方向是收紧（bounded_auto → observe），不传 relaxed。
+  await notifyAutonomyModeChanged(clientId, nowIso).catch(() => undefined)
+  return { downgraded: true, error: null }
+}
 
 export async function POST(
   _req: NextRequest,
@@ -122,8 +169,22 @@ export async function POST(
       p_updated_by: updatedBy,
     })
     if (error) {
+      // 🔴 Codex P1 复审（round 14）：前面已经跑过的键可能已经真的从 deny
+      // 解成了 require_approval——这里直接 500 返回、完全跳过降级，会让那些
+      // 键晾在 require_approval + autonomy_mode 仍是 bounded_auto 的状态，
+      // 之后任何一次更新 ad_strategy_configs.updated_at 的写入（比如批准
+      // 素材）都会让每日 reconcile 把它们悄悄同步回 auto_approve。这是 RPC
+      // 调用本身失败（网络/连接层），不是业务返回的 race_lost（那条路径的
+      // "不降级"是刻意设计，见下面 unresolved 分支旁的测试），没有并发方
+      // 正在动这一行的不确定性，降级是安全的。
+      const downgrade = await downgradeIfBoundedAuto(clientId, staff.user.email ?? 'unknown')
       return NextResponse.json(
-        { error: `ads_release_circuit_breaker_policy(${key}) failed: ${error.message}` },
+        {
+          error: `ads_release_circuit_breaker_policy(${key}) failed: ${error.message}`,
+          results,
+          intent_downgraded_to_observe: downgrade.downgraded,
+          ...(downgrade.error ? { downgrade_error: downgrade.error } : {}),
+        },
         { status: 500 },
       )
     }
@@ -147,32 +208,11 @@ export async function POST(
   // ads-autonomy-sync 会把刚解开的 require_approval 悄悄同步回 auto_approve。
   // 判据只看"当前意向是不是仍是 bounded_auto"，不看这次调用自己 released
   // 了几条（round 7 修正：那个判据在重试场景下不幂等，见本文件顶部说明）。
-  let intentDowngraded = false
-  const { data: config, error: readError } = await supabaseAdmin
-    .from('ad_strategy_configs')
-    .select('autonomy_mode')
-    .eq('client_id', clientId)
-    .maybeSingle()
-  if (readError) {
-    return NextResponse.json({ error: `read autonomy_mode failed: ${readError.message}` }, { status: 500 })
+  const mainDowngrade = await downgradeIfBoundedAuto(clientId, staff.user.email ?? 'unknown')
+  if (mainDowngrade.error) {
+    return NextResponse.json({ error: mainDowngrade.error }, { status: 500 })
   }
-  if (config?.autonomy_mode === 'bounded_auto') {
-    const nowIso = new Date().toISOString()
-    const { error: downgradeError } = await supabaseAdmin
-      .from('ad_strategy_configs')
-      .update({ autonomy_mode: 'observe', autonomy_mode_updated_by: staff.user.email ?? 'unknown', updated_at: nowIso })
-      .eq('client_id', clientId)
-    if (downgradeError) {
-      return NextResponse.json(
-        { error: `downgrade autonomy_mode to observe failed: ${downgradeError.message}` },
-        { status: 500 },
-      )
-    }
-    intentDowngraded = true
-    // 立即叫醒同步 worker 核对一遍策略表，不等明天的每日 reconcile——跟 PATCH
-    // 路由同一惯例。方向是收紧（bounded_auto → observe），不传 relaxed。
-    await notifyAutonomyModeChanged(clientId, nowIso).catch(() => undefined)
-  }
+  const intentDowngraded = mainDowngrade.downgraded
 
   // 终检（round 9）：见本文件顶部说明——not_circuit_tripped 不能区分
   // require_approval 和 auto_approve，返回成功前必须确认真的没有任何键
