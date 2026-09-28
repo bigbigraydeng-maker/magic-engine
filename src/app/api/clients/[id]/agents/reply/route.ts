@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { clientHasIndustryFeature } from '@/lib/clients/industry-guard'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendMailReply } from '@/lib/microsoft/mail-send'
+import { checkManualSendDnc } from '@/lib/crm/manual-send-dnc-gate'
 
 type Context = { params: Promise<{ id: string }> }
 
@@ -16,6 +18,9 @@ export async function POST(req: Request, { params }: Context) {
   const { id } = await params
   const access = await requirePaidClientAccess(id)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
+  if (!(await clientHasIndustryFeature(id, 'agents'))) {
+    return NextResponse.json({ error: '这个功能不适用于你的业务' }, { status: 403 })
+  }
 
   const sentByEmail = access.user?.email
   if (!sentByEmail) {
@@ -27,6 +32,11 @@ export async function POST(req: Request, { params }: Context) {
     parsed = replySchema.parse(await req.json())
   } catch {
     return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
+  }
+
+  const dnc = await checkManualSendDnc(id, parsed.conversationId)
+  if (dnc.blocked) {
+    return NextResponse.json({ error: dnc.error, reason: dnc.reason }, { status: dnc.status })
   }
 
   const result = await sendMailReply({

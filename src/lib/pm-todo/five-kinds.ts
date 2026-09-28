@@ -58,6 +58,9 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   conversion_needs_review: 'decide', // 告诉广告平台一笔成交，撤不回
   ai_auto_review_circuit_breaker: 'decide', // 重新打开「AI 自动发给广告平台」
   ads_auto_pause_pending: 'decide', // 暂停在花钱的广告组
+  // 广告自治被熔断器冻住了，要不要恢复自动动手是个决定；同 ads_auto_pause_pending 一档
+  // （WP3.1b 重做 PR A，2026-09-28 合并主干时补——这份穷举表在那个 PR 分叉之后才建）
+  ads_circuit_tripped: 'decide',
   ads_rule_finding: 'decide', // 改不改在投的广告
   ad_readback_blocker: 'decide', // 正在花钱的广告组撞上已知坑，要改设置
   outcome_rows_orphaned: 'decide', // 旧效果数据删还是留（删了撤不回）
@@ -71,6 +74,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   meta_data_deletion_failure: 'decide',
   // Magic Bridge 免费名额快满：加不加额度、加到多少美元由 PM 定（花钱）；不加则新客户到月底出不了报告
   magic_bridge_quota: 'decide',
+  tools_wide_budget_warning: 'decide',
 
   // ── 2 · 系统进不去、要人点一次的 ─────────────────────────────────────
   ai_provider_exhausted: 'one_click', // 充值
@@ -110,6 +114,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   knowledge_fact_expiring_soon: 'client_side', // 团期 / 价格要跟客户确认
   crm_important_due: 'client_side', // 客户员工约好的回电
   messenger_draft_send_failed: 'client_side', // 回复没发出去，要人工发给客人
+  tool_lead_needs_followup: 'client_side', // 工具实验室有人留资，值得联系一下
 
   // ── 4 · 发出去前要看一眼的 ───────────────────────────────────────────
   blog_draft_waiting: 'review',
@@ -146,6 +151,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   cron_blind: 'dev',
   cron_stuck: 'dev',
   cron_failing: 'dev',
+  ads_config_unreadable: 'dev', // 广告回拉读不出广告设置，字段没对齐或临时故障，都是我们的活
   cron_not_running: 'dev',
   cron_silent_success: 'dev',
   ai_alerting_broken: 'dev',

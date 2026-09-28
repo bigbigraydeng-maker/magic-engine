@@ -33,8 +33,11 @@ import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushFacebookSyncFailingItems } from './facebook-sync-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
+import { pushToolLeadItems } from './tool-lead-items'
+import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
+import { pushAdsCircuitItems } from './ads-circuit-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
 import { pushDataDeletionFailureItems } from './data-deletion-items'
 import {
@@ -56,7 +59,7 @@ export * from './manual-item-types'
 export { pushLinkedinProgressItems } from './manual-linkedin-items'
 export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems } from './manual-crm-items'
 import { pushVideoCreditsItem, pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
-import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems } from './manual-monitoring-items'
+import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems, pushAdsConfigReadItems } from './manual-monitoring-items'
 import { pushLeadsSanityItems, pushDiagnosticItems, pushPrescriptionItems } from './manual-strategy-items'
 
 export { pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
@@ -221,6 +224,11 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     (b) => pushMailchimpExportItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] Mailchimp 出口检查失败（不阻塞其他待办）:', e),
     ),
+    // 广告回拉读不出广告配置 → 诊断 / 经营状态 / 日报对这些客户静默跳过（2026-09-25 事故）。
+    // 这类失败混在该任务常年的 Meta 报错里，`cron_failing` 那条看不出来，必须单独捞。
+    (b) => pushAdsConfigReadItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 广告配置读取检查失败（不阻塞其他待办）:', e),
+    ),
     // Facebook 私信 / 表单留资同步连续失败 —— 报错原来只进运行记录，NAL 的主页授权
     // 2026-09-16 失效后 9 天没人知道，新私信新留资全没进 CRM。授权失效只有主页管理员能修，必须下发。
     (b) => pushFacebookSyncFailingItems(supabase, b, now).catch((e) =>
@@ -242,6 +250,14 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     // Magic Bridge 免费名额快用完 —— 用满后新客户这个月就生成不了报告（PM 定的全平台上限）
     (b) => pushMagicBridgeQuotaItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] Magic Bridge 免费额度待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 工具实验室有人留资（自助开通广告体检 / 网站诊断留邮箱）—— 这张表以前写完没人读
+    (b) => pushToolLeadItems(supabase, b, clients, now).catch((e) =>
+      console.warn('[manual-items] 工具实验室留资待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 工具实验室全站每月合计上限（网站诊断+广告体检赞助分析共用）快用完
+    (b) => pushToolsWideBudgetItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 工具实验室全站上限待办生成失败（不阻塞其他待办）:', e),
     ),
   ]
 }
@@ -308,6 +324,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 每日广告巡检的广告级规则（D2 / D10）—— 只读，要不要改由人定；同一件事按 remind-cadence 节奏提醒
     (b) => pushAdsRuleFindingItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 广告级规则待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 广告熔断中的账户 —— 判据是"现在还处在熔断中吗"，不是时间窗口（v2.5 §6.2 派生态）
+    (b) => pushAdsCircuitItems(supabase, b, nameOf).catch((e) =>
+      console.warn('[manual-items] 广告熔断待办生成失败（不阻塞其他待办）:', e),
     ),
     // Facebook 删除数据请求处理失败 —— 失败不许只写日志（铁律 3）
     (b) => pushDataDeletionFailureItems(supabase, b, now).catch((e) =>

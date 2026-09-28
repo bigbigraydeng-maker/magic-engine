@@ -30,8 +30,15 @@ import {
   KERNEL_RUNNER_SOURCE_MODULES,
   KERNEL_RUNNER_SYMBOLS,
   MIGRATION_VERSION_COLLISIONS_GRANDFATHERED,
+  HUMAN_TRIGGER_ALLOWED_DIRS,
+  HUMAN_TRIGGER_REQUIRED_AUTH_CALLS,
 } from '../boundaries'
 import { outwardBlockReason } from '../outward-authorization'
+import { createKernelDeps, type KernelDeps } from '../deps'
+import { createKernel } from '../index'
+import { ACTION_REGISTRY } from '../registry'
+import { createFakeSupabase } from './fake-supabase'
+import { HUMAN_STOP_ACTION_KEYS } from '../autonomy-envelope'
 
 const ROOT = process.cwd()
 const SRC = join(ROOT, 'src')
@@ -451,6 +458,111 @@ describe('L1 边界：Kernel 不许自己抓 service-role 客户端', () => {
         violations.join('\n'),
     ).toEqual([])
   }, SCAN_TIMEOUT_MS)
+})
+
+/**
+ * 🔴 **「接了不转发」这一类 bug 的专用闸**（WP3.1b，spec v2.2 §6.1 三大交付项之三）。
+ *
+ *    这个仓库已经踩过两次同一个形状：
+ *      · `createKernel` 收了 `leaseSeconds` / `ownerId` 但不转发 —— 公开 API 上写着
+ *        能配，实际永远是 300 秒 + 随机 owner（见 `kernel/index.ts` 那句注释）
+ *      · `createKernelDeps` 收了 `resolveEnvelopeFacts` 但不转发（子牙 2026-09-27
+ *        审 WP3.1b 实测抓到）—— 六个广告 ActionKey 全是 `bounded`，而 `authorize.ts`
+ *        在 bounded 路径上**缺解析器 = 一律拒**，于是每条广告动作都静默 denied
+ *
+ *    共同点：**类型签名收了它，行为没变**。类型检查永远绿，因为可选字段少给一个
+ *    完全合法。只有「造一个出来、看它在不在」这种行为断言才咬得住。
+ *
+ *    🔴 所以这一组断言的判据一律是**行为**：调真工厂 → 检查产物字段。
+ *       不许改成「grep 源码里有没有这个字段名」—— 那又退回类型层了。
+ *       变异验证：把 `deps.ts` 里 `resolveEnvelopeFacts: init.resolveEnvelopeFacts`
+ *       那一行删掉 → 本组第 1 条与第 3 条必红（已实测）。
+ */
+describe('🔴 Kernel 依赖工厂：声明了的字段必须真的转发（防「接了不转发」）', () => {
+  // 复用仓库既有的假件工厂（它自己在内部做那一次类型收口），这一组断言不发任何查询。
+  const probeClient = () => createFakeSupabase({})
+
+  it('createKernelDeps 转发 resolveEnvelopeFacts（不转发 = 全部 bounded 动作被拒）', () => {
+    const marker: NonNullable<KernelDeps['resolveEnvelopeFacts']> = async () => ({ unavailable: '合成解析器' })
+    const deps = createKernelDeps({
+      supabase: probeClient(),
+      registry: ACTION_REGISTRY,
+      capabilities: {},
+      resolveEnvelopeFacts: marker,
+    })
+    expect(
+      deps.resolveEnvelopeFacts,
+      'createKernelDeps 把传进来的 resolveEnvelopeFacts 丢掉了。\n' +
+        'authorize.ts 在 bounded 路径上缺这个解析器就一律 deny —— 不是「跳过检查」。\n' +
+        '后果：六个广告 ActionKey 每一条都拿回 denied/outside_autonomy_envelope，Meta 一个字节都不动。',
+    ).toBe(marker)
+  })
+
+  it('createKernelDeps 也转发 leaseSeconds / ownerId / now / sleep（同一类 bug 的其余字段）', () => {
+    const now = () => new Date('2026-09-27T00:00:00Z')
+    const sleep = async () => {}
+    const deps = createKernelDeps({
+      supabase: probeClient(),
+      registry: ACTION_REGISTRY,
+      capabilities: {},
+      leaseSeconds: 77,
+      ownerId: 'owner-probe',
+      now,
+      sleep,
+    })
+    expect(deps.leaseSeconds).toBe(77)
+    expect(deps.ownerId).toBe('owner-probe')
+    expect(deps.now).toBe(now)
+    expect(deps.sleep).toBe(sleep)
+  })
+
+  it('🔴 生产 Kernel 工厂（createKernel）产出的 deps.resolveEnvelopeFacts 非空', () => {
+    const deps = createKernel(probeClient())
+    expect(
+      typeof deps.resolveEnvelopeFacts,
+      '生产 Kernel 默认没装信封事实解析器。\n' +
+        'spec 2026-09-25-ads-impact-wp3-design-v1 v2.2 §6.1 把「createKernel 默认装」列为 3.1b 硬交付，\n' +
+        '因为忘了传的调用点会让该客户全部广告动作静默变成 denied —— 一个「看着上线了其实是死的」功能。',
+    ).toBe('function')
+  })
+
+  it('createKernel 的 overrides 能换掉默认解析器（测试要用这条路）', () => {
+    const marker: NonNullable<KernelDeps['resolveEnvelopeFacts']> = async () => ({ unavailable: '合成解析器' })
+    const deps = createKernel(probeClient(), { resolveEnvelopeFacts: marker })
+    expect(deps.resolveEnvelopeFacts).toBe(marker)
+  })
+})
+
+describe('🔴 人工止损信封的白名单必须真存在于注册表', () => {
+  /**
+   * 🔴 `HUMAN_STOP_ACTION_KEYS` 已经是 `readonly ActionKey[]`，所以**拼错一个字符
+   *    编译就不过**。但类型系统管不了另一种失败：
+   *    **一个 key 在闭合 union 里、却没有真的注册进 `ACTION_REGISTRY`**。
+   *    那样它会拿到人工信封的宽度，而 `authorize.ts` 在更前面就已经
+   *    因为查不到定义而拒了 —— 于是白名单里躺着一条永远不生效的条目，
+   *    而下一个人会以为它生效。统筹 2026-09-27 点名要这一条。
+   */
+  it('白名单里每个 ActionKey 都在 ACTION_REGISTRY 里', () => {
+    const missing = HUMAN_STOP_ACTION_KEYS.filter((key) => !ACTION_REGISTRY.has(key))
+    expect(
+      missing,
+      '这些 key 在人工止损信封的白名单里，但没有注册进 ACTION_REGISTRY。\n' +
+        'authorize.ts 会在更前面因为“查不到动作定义”就拒掉它，\n' +
+        '所以这条白名单条目永远不会生效 —— 而下一个读到它的人会以为它生效。',
+    ).toEqual([])
+  })
+
+  it('🔴 白名单里没有放类 / 建类动作（只允许“只会让花费变少”的）', () => {
+    // 判据用注册表里的信封分类，不是看名字里有没有 pause/cut 字样。
+    const forbidden = ['ads.scale_unit_budget', 'ads.add_retargeting_adset', 'ads.swap_creative'] as const
+    for (const key of forbidden) {
+      expect(
+        HUMAN_STOP_ACTION_KEYS.some((k) => k === key),
+        `${key} 是放类/建类动作，不该在人工止损信封白名单里 —— ` +
+          '人手动加预算没有“只会变少”这个安全性。',
+      ).toBe(false)
+    }
+  })
 })
 
 describe('依赖方向：Kernel 不许挂在被它治理的那些层上', () => {
@@ -2462,6 +2574,205 @@ describe('注册表的封闭性', () => {
           `${key} 的幂等键字段「${f}」必须出现在 input_schema 里`,
         ).toContain(f)
       }
+    }
+  })
+})
+
+/**
+ * 解除熔断这件事，只允许有一个入口，而且必须是人。
+ *
+ * 判据来自设计稿 `2026-09-25-ads-impact-wp3-design-v1.md` v2.5 §6.4。
+ *
+ * 为什么值得一道架构测试：`sticky` 的熔断**只能靠一行 release 解除**，时间过期对它无效。
+ * 所以「谁能写 release 行」＝「谁能让被冻住的自治重新动手」。这不是代码整洁问题，
+ * 是一条授权边界 —— 而授权边界靠人自觉记得是守不住的（今天已经撞过三次
+ * 「机制在、新东西没登记进去」）。
+ */
+describe('熔断解除：写 release 行的唯一入口（v2.5 §6.4）', () => {
+  /**
+   * 「这个文件会不会写一行 release」的判据。
+   *
+   * 🔴 三个条件同时满足才算，缺一个都不算：
+   *    · 提到这张表（`ads_circuit_events`）
+   *    · 真的在插入（`.insert(`）
+   *    · 插的内容里出现 `release`
+   *
+   * 为什么不能只看前两条：`circuit-state.ts` 读派生态时要 `.eq('kind', 'release')`，
+   * 它提到了表、提到了 release，但**只读不写**。只看「提到」会把只读模块也算成写入者，
+   * 于是这条测试要么被迫加白名单、要么被人当成噪音关掉 —— 两种都等于没有这道闸。
+   *
+   * 🔴 这个判据本身会过时：将来有人用别的写法（存储过程、RPC、批量脚本）写 release，
+   *    它就抓不到。所以下面那条「库层零写入者」是主闸，这条是「路由层必须过 admin」的
+   *    附加闸；真正兜底的是数据库那条 CHECK（`actor` 必须是 `human:<email>` 形状）。
+   *    三层各咬一次，不指望任何单独一层是完整的。
+   */
+  function writesReleaseRow(source: string): boolean {
+    return (
+      source.includes('ads_circuit_events') &&
+      source.includes('.insert(') &&
+      source.includes('release')
+    )
+  }
+
+  /**
+   * 🔴 **判据只看代码，不看注释**（这条是自己变异测出来的，2026-09-27）。
+   *
+   * 第一版写的是 `source.includes('guardGlobalAdmin')`。变异「把路由里的
+   * `requireGlobalAdmin` 换成普通 `requireAdmin`」——**测试是绿的**。
+   * 原因：那个路由的文件头注释里解释了「为什么不叠一个 `guardGlobalAdmin`」，
+   * 于是这个名字在注释里出现过，`includes` 就命中了。
+   *
+   * 也就是说：**一条注释里提到某个闸的名字，就能让这条架构测试放行一个没过闸的路由。**
+   * 这跟设计稿 v2.5 刚修掉的那个错是同一个 —— 把「必须满足某个判据」写成
+   * 「必须出现某个字面量」。我在修它的同一小时里又犯了一次。
+   *
+   * 所以：先 `stripComments`，再要求它是**调用形式**（`xxx(`）——
+   * import 了却从不调用同样不算过闸。
+   */
+  const codeOf = (f: string) => stripComments(readFileSync(join(ROOT, f), 'utf8'), f)
+
+  const candidates = ALL_FILES.filter((f) => !isTest(f)).filter((f) =>
+    writesReleaseRow(codeOf(f)),
+  )
+
+  it('🔴 `src/lib/**` 里不许存在任何写 release 行的路径', () => {
+    // 非 sticky 的 24 小时过期是**读取时现算**的派生态，不需要任何写入者
+    // （`circuit-state.ts` 文件头写了为什么）。所以库层需要这个能力的场景不存在；
+    // 一旦库层有了它，任何 cron / worker / 别的路由都能 import 去自动解除，
+    // 而「必须人解」就只剩一句说法。
+    expect(
+      candidates.filter((f) => f.startsWith('src/lib/')),
+      '库层出现写 release 的代码 = 熔断可以被程序自动解除，sticky 失去意义',
+    ).toEqual([])
+  })
+
+  it('🔴 写 release 行的路由必须过全局 admin 闸', () => {
+    const offenders = candidates.filter((f) => {
+      const code = codeOf(f)
+      // v2.5 就地修正：两个名字都接受。`guardGlobalAdmin()` 的实现就是
+      // `requireGlobalAdmin()` 外面包一层 NextResponse，判据完全相同；
+      // 而要拿 email 记 actor 只能用后者。判据是「过全局 admin 闸」，不是「出现某个函数名」。
+      //
+      // 🔴 要求**调用形式**且已剥注释（见 codeOf 上面那段）：
+      //    注释里提到名字不算、import 了不调用也不算。
+      return !/\bguardGlobalAdmin\s*\(/.test(code) && !/\brequireGlobalAdmin\s*\(/.test(code)
+    })
+    expect(offenders, '这些文件能写 release 行却没过全局 admin 闸').toEqual([])
+  })
+
+  it('这条闸真的在盯着东西（判据没有因为写法变化而扫空）', () => {
+    // 🔴 上面两条都是「列表应为空」，而**判据失效时它们也是空的** ——
+    //    这正是今天反复吃到的「绿有两种来路」。所以钉一条：
+    //    解除路由必须被这个判据抓到。它要是改了写法，这条先红，而不是静默放空。
+    expect(
+      candidates,
+      '解除路由应当被 writesReleaseRow 判据识别为写入者；扫不到说明判据已失效',
+    ).toContain('src/app/api/admin/ads/circuit/release/route.ts')
+  })
+})
+
+/**
+ * 「这是人按的」不许随便自报 —— 两层闸。
+ *
+ * 判据与理由见 `boundaries.ts` 的 `HUMAN_TRIGGER_ALLOWED_DIRS` 注释。一句话：
+ * `triggeredBy: 'human'` 让动作走人工止损信封，而那套信封刻意不看学习期 /
+ * 72h 冷却 / 变动 ≤20% / 日预算上限。**谁能填它，谁就能跳过 AI 信封那五条闸。**
+ * 而 `runner.ts` 对这个字段零校验。
+ *
+ * 🔴 **这两条闸现在盯着的是"零个文件"**（生产代码里还没人传 `'human'`，
+ *    止损路由接上时才会有第一个）。所以下面第三条用**真实磁盘探针**证明判据本身有效 ——
+ *    否则前两条会在判据失效时同样是绿的（今天反复吃到的「绿有两种来路」）。
+ */
+describe('人工触发身份：不许随便自报（两层闸）', () => {
+  const AUTH_CALL_RE = new RegExp(
+    `\\b(${HUMAN_TRIGGER_REQUIRED_AUTH_CALLS.join('|')})\\s*\\(`,
+  )
+
+  /** 判「这个文件会不会声称人按的」。剥注释后按字面量判 —— 注释里提到不算。 */
+  function claimsHumanTrigger(code: string): boolean {
+    return /triggeredBy:\s*'human'/.test(code) || /triggered_by:\s*'human'/.test(code)
+  }
+
+  function offendersIn(files: readonly string[], readCode: (f: string) => string) {
+    const claimers = files.filter((f) => claimsHumanTrigger(readCode(f)))
+    return {
+      claimers,
+      outsideAllowedDirs: claimers.filter(
+        (f) => !HUMAN_TRIGGER_ALLOWED_DIRS.some((dir) => f.startsWith(dir)),
+      ),
+      withoutAuth: claimers.filter((f) => !AUTH_CALL_RE.test(readCode(f))),
+    }
+  }
+
+  const readCode = (f: string) => stripComments(readFileSync(join(ROOT, f), 'utf8'), f)
+  const runtimeFiles = ALL_FILES.filter((f) => !isTest(f))
+
+  it(
+    '🔴 第一层：只有白名单目录能传 triggeredBy: \'human\'',
+    () => {
+      expect(
+        offendersIn(runtimeFiles, readCode).outsideAllowedDirs,
+        '这些文件声称「人按的」却不在 HUMAN_TRIGGER_ALLOWED_DIRS 里 —— ' +
+          '传它 = 跳过 AI 信封的学习期 / 冷却 / 20% / 日上限四条闸',
+      ).toEqual([])
+    },
+    // 🔴 扫描整仓运行时文件（剥注释 + 正则）。CI 上实测跑到 6.3s，触发
+    //    Vitest 默认 5s 超时——不是判据坏了，是这两条本来就该比默认值慢。
+    //    15s 留出约 2.4 倍余量，本地/CI 都验过在这个上限内。
+    15_000,
+  )
+
+  it(
+    '🔴 第二层：白名单目录里传它，也必须过鉴权',
+    () => {
+      // 白名单只管「哪个目录」，管不了「目录里那个文件是不是不需要登录就能打到」。
+      // 一条在允许目录里、匿名可达的路由照样能硬写 'human'，第一层抓不到它。
+      expect(
+        offendersIn(runtimeFiles, readCode).withoutAuth,
+        '这些文件声称「人按的」却没有任何鉴权调用 —— 没有东西证明真有人在',
+      ).toEqual([])
+    },
+    15_000,
+  )
+
+  it('🔴 这两条闸真的能抓到东西（真实磁盘探针，因为现在生产代码里是零个）', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'human-trigger-gate-'))
+    try {
+      // ① 白名单目录**外**、且有鉴权 —— 只该被第一层抓到
+      const outside = 'src/app/api/whatever/route.ts'
+      // ② 白名单目录**内**、但没有鉴权 —— 只该被第二层抓到
+      const inside = 'src/lib/ads-strategy/submission/rogue.ts'
+      // ③ 白名单目录内 + 有鉴权 —— 两层都该放行（这是合法形态）
+      const legit = 'src/lib/ads-strategy/submission/stop-loss-submission.ts'
+      // ④ 只在**注释**里提到 'human' —— 不该被当成 claimer
+      const commentOnly = 'src/lib/ads-strategy/submission/notes.ts'
+
+      const sources: Record<string, string> = {
+        [outside]: `await requireGlobalAdmin()
+submitActionRun({ triggeredBy: 'human' })`,
+        [inside]: `submitActionRun({ triggeredBy: 'human' })`,
+        [legit]: `await requireDashboardClientAccess(id)
+submitActionRun({ triggeredBy: 'human' })`,
+        [commentOnly]: `// 这里**不**传 triggeredBy: 'human'，理由见 boundaries.ts
+export const x = 1`,
+      }
+      const files = Object.keys(sources)
+      for (const f of files) {
+        const full = join(tmp, f.split('/').pop() as string)
+        writeFileSync(full, sources[f], 'utf8')
+      }
+      const read = (f: string) => stripComments(sources[f], f)
+      const result = offendersIn(files, read)
+
+      expect(result.outsideAllowedDirs, '第一层应当只抓到白名单目录外那一个').toEqual([outside])
+      expect(result.withoutAuth, '第二层应当只抓到没鉴权那一个').toEqual([inside])
+      expect(result.claimers, '合法形态不该被抓；只在注释里提到的更不该被抓').toEqual([
+        outside,
+        inside,
+        legit,
+      ])
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
     }
   })
 })
