@@ -14,7 +14,7 @@ import { NextRequest } from 'next/server'
 
 vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: vi.fn() }))
 vi.mock('@/lib/auth/require-session', () => ({ requireSession: vi.fn() }))
-vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { rpc: vi.fn() } }))
+vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { rpc: vi.fn(), from: vi.fn() } }))
 
 import { POST } from '../route'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
@@ -25,6 +25,37 @@ import { listAdsActionKeys } from '@/lib/ads-strategy/autonomy/sync-policy'
 const mockAccess = vi.mocked(requirePaidClientAccess)
 const mockSession = vi.mocked(requireSession)
 const mockRpc = vi.mocked(supabaseAdmin.rpc)
+const mockFrom = vi.mocked(supabaseAdmin.from)
+
+/**
+ * `ad_strategy_configs` 的假 `.from()` 链——支撑两条路径：
+ * `.select('autonomy_mode').eq(...).maybeSingle()` 读当前意向，
+ * `.update({...}).eq(...)` 写降级。`.eq()` 的返回值同时可 `await`（给 update
+ * 用）又能再 `.maybeSingle()`（给 select 用），因为两条路径共用同一个 `.eq()`。
+ */
+function fakeConfigFrom(
+  autonomyMode: 'bounded_auto' | 'observe' | null,
+  opts: { readError?: string; updateError?: string } = {},
+) {
+  const updateCalls: Record<string, unknown>[] = []
+  const eqResult = {
+    maybeSingle: async () =>
+      opts.readError
+        ? { data: null, error: { message: opts.readError } }
+        : { data: autonomyMode === null ? null : { autonomy_mode: autonomyMode }, error: null },
+    then: (resolve: (v: { error: { message: string } | null }) => void) =>
+      resolve(opts.updateError ? { error: { message: opts.updateError } } : { error: null }),
+  }
+  const chain = {
+    select: () => chain,
+    update: (payload: Record<string, unknown>) => {
+      updateCalls.push(payload)
+      return chain
+    },
+    eq: () => eqResult,
+  }
+  return { chain, updateCalls }
+}
 
 const CLIENT = 'client-uuid-release-circuit-breaker-test'
 const STAFF = 'fde@staff.test'
@@ -52,7 +83,9 @@ beforeEach(() => {
   vi.stubEnv('ADMIN_EMAIL_DOMAIN', '')
   vi.stubEnv('CLIENT_VIEWERS', `${VIEWER}:${CLIENT}`)
   vi.stubEnv('DEMO_ADMINS', `${DEMO}:${CLIENT}`)
+  vi.stubEnv('INNGEST_EVENT_KEY', '') // 不真的发事件；notifyAutonomyModeChanged 内部 catch，不影响响应
   mockRpc.mockResolvedValue({ data: 'released', error: null } as never)
+  mockFrom.mockReturnValue(fakeConfigFrom('bounded_auto').chain as never)
 })
 
 afterEach(() => {
@@ -92,7 +125,7 @@ describe('release-circuit-breaker — 内部员工可以解', () => {
   it('🔴 每个 ads.* 键调一次 RPC，updated_by 带 circuit-breaker-release: 前缀（不是原始 email）', async () => {
     signedInAs(STAFF)
     const res = await POST(postRequest(), params())
-    const json = (await res.json()) as { success: boolean; released: number }
+    const json = (await res.json()) as { success: boolean; released: number; intent_downgraded_to_observe: boolean }
 
     expect(res.status).toBe(200)
     expect(json.success).toBe(true)
@@ -100,6 +133,7 @@ describe('release-circuit-breaker — 内部员工可以解', () => {
     const keys = listAdsActionKeys()
     expect(mockRpc).toHaveBeenCalledTimes(keys.length)
     expect(json.released).toBe(keys.length)
+    expect(json.intent_downgraded_to_observe).toBe(true) // 默认 mock 意向是 bounded_auto，真的解了 → 必须跟着降
 
     for (const call of mockRpc.mock.calls) {
       expect(call[0]).toBe('ads_release_circuit_breaker_policy')
@@ -119,11 +153,66 @@ describe('release-circuit-breaker — 内部员工可以解', () => {
     expect(json.error).toContain('boom')
   })
 
-  it('outcome=not_circuit_tripped 不计入 released 计数', async () => {
+  it('outcome=not_circuit_tripped 不计入 released 计数，也不降意向', async () => {
     signedInAs(STAFF)
     mockRpc.mockResolvedValue({ data: 'not_circuit_tripped', error: null } as never)
     const res = await POST(postRequest(), params())
-    const json = (await res.json()) as { released: number }
+    const json = (await res.json()) as { released: number; intent_downgraded_to_observe: boolean }
     expect(json.released).toBe(0)
+    expect(json.intent_downgraded_to_observe).toBe(false)
+    expect(mockFrom).not.toHaveBeenCalled() // 什么都没真的解开，不该去动 autonomy_mode
+  })
+})
+
+describe('release-circuit-breaker — 🔴 Codex P1：解除后必须同步收紧 autonomy_mode，否则下一次 reconcile 悄悄恢复 auto_approve', () => {
+  it('意向仍是 bounded_auto + 真的解了 → 降到 observe，intent_downgraded_to_observe: true', async () => {
+    signedInAs(STAFF)
+    const { chain, updateCalls } = fakeConfigFrom('bounded_auto')
+    mockFrom.mockReturnValue(chain as never)
+
+    const res = await POST(postRequest(), params())
+    const json = (await res.json()) as { intent_downgraded_to_observe: boolean }
+
+    expect(res.status).toBe(200)
+    expect(json.intent_downgraded_to_observe).toBe(true)
+    expect(updateCalls).toHaveLength(1)
+    expect(updateCalls[0].autonomy_mode).toBe('observe')
+    expect(updateCalls[0].autonomy_mode_updated_by).toBe(STAFF)
+    expect(typeof updateCalls[0].updated_at).toBe('string')
+  })
+
+  it('意向已经是 observe（PM 已手动关过）→ 不再多写一次，intent_downgraded_to_observe: false', async () => {
+    signedInAs(STAFF)
+    const { chain, updateCalls } = fakeConfigFrom('observe')
+    mockFrom.mockReturnValue(chain as never)
+
+    const res = await POST(postRequest(), params())
+    const json = (await res.json()) as { intent_downgraded_to_observe: boolean }
+
+    expect(res.status).toBe(200)
+    expect(json.intent_downgraded_to_observe).toBe(false)
+    expect(updateCalls).toHaveLength(0) // 已经是安全状态，不产生多余写入 / 多余同步事件
+  })
+
+  it('读 autonomy_mode 失败 → 500，不假装降级成功', async () => {
+    signedInAs(STAFF)
+    const { chain } = fakeConfigFrom('bounded_auto', { readError: 'read boom' })
+    mockFrom.mockReturnValue(chain as never)
+
+    const res = await POST(postRequest(), params())
+    expect(res.status).toBe(500)
+    const json = (await res.json()) as { error: string }
+    expect(json.error).toContain('read boom')
+  })
+
+  it('写 autonomy_mode 失败 → 500，不假装降级成功（策略表已经解开，但意向没跟上必须让人看见）', async () => {
+    signedInAs(STAFF)
+    const { chain } = fakeConfigFrom('bounded_auto', { updateError: 'update boom' })
+    mockFrom.mockReturnValue(chain as never)
+
+    const res = await POST(postRequest(), params())
+    expect(res.status).toBe(500)
+    const json = (await res.json()) as { error: string }
+    expect(json.error).toContain('update boom')
   })
 })

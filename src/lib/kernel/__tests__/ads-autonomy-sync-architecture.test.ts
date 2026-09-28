@@ -26,9 +26,17 @@ const CIRCUIT_BREAKER_RELEASE_ROUTE =
   'src/app/api/clients/[id]/ad-strategy-config/release-circuit-breaker/route.ts'
 const MIGRATIONS_DIR = 'supabase/migrations'
 
-/** 允许写 client_automation_policies 的 migration（白名单，不许悄悄扩） */
+/**
+ * 允许写 client_automation_policies 的 migration（白名单，不许悄悄扩）。
+ *
+ * 两类合法条目：①一次性数据种子（给特定客户 INSERT 一条策略行，不是常驻运行时
+ * 写入者，不违反「同步 worker 是唯一写入者」——`brief_knowledge_migration...`
+ * 和 `ads_d3_auto_pause_v1` 都是这类，本测试写好之后才发现漏收了后者）；
+ * ②本文件顶部锁定的 SQL 函数定义本身（`ads_autonomy_sync` / `ads_circuit_breaker_policy`）。
+ */
 const MIGRATION_WRITE_ALLOWLIST = [
   '20260915120000_brief_knowledge_migration_and_cts_history.sql',
+  '20260922100000_ads_d3_auto_pause_v1.sql',
   '20260926000001_ads_autonomy_sync.sql',
   '20260928000001_ads_circuit_breaker_policy.sql',
 ]
