@@ -581,7 +581,7 @@ export async function pushAdsAutoPauseConfigReadItems(
     kind: 'ads_config_unreadable',
     client_id: 'infra',
     client_name: 'Magic Engine 后台',
-    what: `坏广告自动暂停读不出 ${affected.size} 个客户的广告设置 —— 这些客户「花钱没结果」的广告组今天没判要不要停（没停、也没提交审批，钱照常在花）${detail ? `。报错原话：${detail}` : ''}。只是一次临时读取失败的话，明天这条会自己消失`,
+    what: `过去 30 小时里，坏广告自动暂停有 ${affected.size} 个客户读不出广告设置 —— 这些客户那一轮「花钱没结果」的广告组没判要不要停（没停、也没提交审批，钱照常在花；其中可能有本来就没开自动暂停的客户）${detail ? `。报错原话：${detail}` : ''}。只是一次临时读取失败的话，过一天这条会自己消失`,
     how: '这条不用你动手 —— 是我们这边的欠账。回我一句「查一下广告配置」我就去看是字段没对齐还是临时故障',
     href: 'https://app.magicengine.com.au/dashboard/admin/cron-health',
   })
