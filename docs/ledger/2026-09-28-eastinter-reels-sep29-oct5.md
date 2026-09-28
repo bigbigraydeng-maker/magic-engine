@@ -4,6 +4,7 @@ title: East Inter Facebook Reels Sep 29–Oct 5 排期（2/7 done，5/7 等 Muap
 status: decided
 owner: agent
 decided_on: 2026-09-28
+verify_by: 2026-09-30
 source: session:e12e5606
 verify_how: 查 East Inter Facebook Page 的 Reels 发布记录，确认 7 条视频是否都已发布且首条评论都带了对应 UTM 链接；视频 ID / BM ID / 广告账户 ID 见 session:e12e5606，不进台账
 ---
@@ -19,6 +20,10 @@ verify_how: 查 East Inter Facebook Page 的 Reels 发布记录，确认 7 条�
 
 Muapi 余额不足，无法再提交新任务（最低阈值约 $0.50）。
 剩余 5 条（Oct 1–5）需 PM 去 muapi.ai/topup 充值约 $1–2，充完后 agent 可立即续跑。
+
+这条充值请求已接入今日待办「系统进不去、要你点一次的」栏（`src/lib/pm-todo/client-doc-manual-tasks.ts`），
+不再只停在本卡正文里；本卡额外设了 `verify_by: 2026-09-30`（第一条被卡住的 Oct 1 发布前一天），
+充值这件事拖到 Sep 30 还没动，夜巡会把它当「决定了没人动」拎给 PM（Codex 2026-09-28 复审第 3 轮 PR #2173）。
 
 ## 5 条待排脚本（已写好，充值后直接跑）
 
