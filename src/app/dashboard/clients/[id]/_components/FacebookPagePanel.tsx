@@ -419,7 +419,7 @@ function ConnectMeta({
           {outcome && COMMENT_REPLY_OUTCOMES.has(outcome) && (
             <>
               {' '}
-              <a href={`/dashboard/clients/${clientId}/settings`} className="font-semibold underline">
+              <a href={`/dashboard/clients/${clientId}/settings?tab=content&audit=1`} className="font-semibold underline">
                 去「评论审计」列表处理 →
               </a>
             </>

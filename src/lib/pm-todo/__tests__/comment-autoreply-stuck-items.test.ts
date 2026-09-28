@@ -145,7 +145,8 @@ describe('pushCommentAutoreplyStuckItems', () => {
     expect(items[0].client_name).toBe('CTS Tours NZ')
     expect(items[0].what).toContain('3 条')
     expect(items[0].what).toContain('36 天') // 2026-08-23T00:00Z → 2026-09-28T00:00Z（NOW）整 36 天
-    expect(items[0].href).toBe('https://app.magicengine.com.au/dashboard/clients/cts/settings')
+    // Codex round 11 P2：裸 /settings 落在默认的 connect 页签，「评论审计」板块在 content 页签里
+    expect(items[0].href).toBe('https://app.magicengine.com.au/dashboard/clients/cts/settings?tab=content&audit=1')
     // Codex round 3 P1：卡在 processing 的行可能其实已经发出去了，how 必须先讲"看一眼再回"，不能无条件让人去补发
     expect(items[0].how).toContain('是不是已经有回复了')
   })

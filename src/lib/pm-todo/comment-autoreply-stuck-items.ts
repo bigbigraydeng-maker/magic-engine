@@ -155,7 +155,9 @@ async function tokenSourceGuidance(
   pageId: string,
   env: Record<string, string | undefined>,
 ): Promise<TokenSourceGuidance> {
-  const settingsHref = `${APP_BASE}/dashboard/clients/${clientId}/settings`
+  // `?tab=content&audit=1`（Codex round 11 复审 P2）：裸 `/settings` 落在默认的
+  // `connect` 页签，「评论审计」板块在 `content` 页签里，而且不点开也不会挂载。
+  const settingsHref = `${APP_BASE}/dashboard/clients/${clientId}/settings?tab=content&audit=1`
   try {
     const assessment = await assessConfiguredPage(supabase, clientId, pageId, env)
     if (assessment.verified && assessment.via === 'client_oauth') {
