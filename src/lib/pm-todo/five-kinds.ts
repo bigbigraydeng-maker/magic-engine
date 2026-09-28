@@ -159,10 +159,12 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   cron_not_running: 'dev',
   cron_silent_success: 'dev',
   ai_alerting_broken: 'dev',
+  // 某客户整周 AI 可见度全挂，但原因清一色是「不用你动手」的那几类（限流/供应商出错/
+  // 解析失败/我们数据库写入失败）—— 没有充值或换钥匙这种需要人点一次的动作，
+  // 同 ai_tracker_all_failed 的 how 原文就写「这条不用你动手」，不该进 PM 动手栏
+  // （Codex 复审 2026-09-28）。
+  ai_tracker_all_failed_dev: 'dev',
   ai_gateway_broken: 'dev',
-  // 某客户 AI 可见度探测整周全挂，但主要原因是限流/供应商出错/解析失败/写入问题——
-  // 都不是 PM 该充值换钥匙的事，只是仍要显示「这周全挂了」（Codex 复审 2026-09-28）
-  ai_tracker_all_failed_not_actionable: 'dev',
   playbook_reference_stale: 'dev',
   platform_connection_pipeline_down: 'dev',
   platform_connection_check_failed: 'dev',

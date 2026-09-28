@@ -487,18 +487,25 @@ export function buildAiTrackerFailureItems(
     const errorSummary = summariseRunFailures(buckets)
     const guideBucket = pickGuideBucket(buckets)
     const guide = guideBucket ? fixGuideFor(guideBucket) : DEFAULT_FIX
-    // Fail toward showing it to the PM: only skip their lane when a bucket
-    // was actually picked and it's confirmed non-actionable. No bucket
-    // (shouldn't happen — every failed run pushes an ErrorEntry) defaults
-    // to actionable, same as DEFAULT_FIX's "go ask a human" text implies.
-    const isActionable = !guideBucket || ACTIONABLE_BUCKET_KEYS.has(guideBucket.key)
     const duration =
       streak <= 1
         ? '这周'
         : `已经连续 ${streak} 周`
 
+    // A week only counts as "not the PM's job" when EVERY bucket is
+    // confirmed non-actionable (GENERIC_FIX's explicit "这条不用你动手"
+    // set: rate_limited/provider_error/parse_error/db_error).
+    // quota_exhausted/auth_failed stay PM-visible, and so does the
+    // fail-closed `unknown` bucket — an unrecognised cause might well need
+    // a human, so it isn't hidden just because it's not on the known
+    // non-actionable list. Before this fix, a week of pure rate-limiting or
+    // pure provider errors still used the PM one_click kind, inflating the
+    // PM's action count with items their own `how` text disclaims (Codex
+    // review 2026-09-28).
+    const needsPmAction = buckets.some((b) => !GENERIC_FIX[b.key])
+
     items.push({
-      kind: isActionable ? 'ai_tracker_all_failed' : 'ai_tracker_all_failed_not_actionable',
+      kind: needsPmAction ? 'ai_tracker_all_failed' : 'ai_tracker_all_failed_dev',
       client_id: clientId,
       client_name: clientName,
       what: `${duration}的 AI 可见度体检全挂了（${latestWeek.total} 条探测全部失败：${errorSummary}）—— 这个客户这周的 AI 可见度数据完全空白，看上去跟「没什么 AI 提到我们」一模一样，但其实是根本没测成`,

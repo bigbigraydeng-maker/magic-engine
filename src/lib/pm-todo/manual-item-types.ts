@@ -78,7 +78,7 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // 2026-09-20 East International 三天没人知道。两种都进——不管原因是不是
   // 需要 PM 动手，都不能因为链接问题静默消失（Codex 复审 2026-09-28）。
   'ai_tracker_all_failed',
-  'ai_tracker_all_failed_not_actionable',
+  'ai_tracker_all_failed_dev',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */
@@ -140,11 +140,14 @@ export type ManualItemKind =
    */
   | 'ai_tracker_all_failed'
   /**
-   * 同上，但主要原因是限流/供应商自己出错/我们解析不出排名/数据库写入问题——
-   * 都不是 PM 该动手的事，只是仍然要显示「这周全挂了」（Codex 复审 2026-09-28：
-   * 之前不分这两种，会把「不用你动手」的活算进 PM 待办数量）。
+   * 同上，但这周全挂的原因清一色是「不用人动手」的那几类
+   * （暂时限流 / 供应商自己出错 / 解析失败 / 我们数据库写入失败，见
+   * ai-tracker-failure-items.ts 的 GENERIC_FIX）—— 没有一条需要充值或换钥匙。
+   * 这条的 `how` 原文就写着「这条不用你动手」，不能进 PM 的「系统进不去、要你
+   * 点一次」动手栏（Codex 复审 2026-09-28：整周全挂但原因不需要人管时，还是
+   * 走了 ai_tracker_all_failed，把「不用你动手」的活算进了 PM 的任务数）。
    */
-  | 'ai_tracker_all_failed_not_actionable'
+  | 'ai_tracker_all_failed_dev'
   | 'goal_baseline_mismatch'
   | 'diagnostic_findings'
   | 'prescription_updated'

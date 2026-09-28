@@ -403,14 +403,22 @@ async function processOne(input: ProcessOneInput): Promise<void> {
     }
 
     result.runs_succeeded++
-    // 🔴 Deliberately separate from runs_succeeded above: a parse failure
+    // 🔴 Deliberately separate from runs_succeeded above, and deliberately
+    //    NOT changing what runs_succeeded/runs_failed count: a parse failure
     //    (parseRanking threw, parse_error_message got set) still reaches
     //    here and still increments runs_succeeded — that's the existing,
     //    tested behavior (see orchestrator.test.ts "still counts the run
-    //    as succeeded when the update itself succeeds"). runs_conclusive
-    //    uses the same isRunConclusive standard as the snapshot gate, so
-    //    callers that need "did we get real data" don't have to re-derive
-    //    it (Codex review 2026-09-28).
+    //    as succeeded when the update itself succeeds"). Two other callers
+    //    read runs_succeeded/runs_failed directly (weekly-fanout.ts's
+    //    Inngest path uses `runs_succeeded > 0` for its receipt status;
+    //    ai-visibility-weekly.ts logs both fields) — flipping their meaning
+    //    here would silently change those paths' behavior too, with no
+    //    tests covering that. runs_conclusive is purely additive instead:
+    //    same isRunConclusive standard the snapshot gate already uses, so
+    //    a caller that needs "did we get real data" (the old
+    //    ai-tracker-weekly cron's all-failed detection) can read this
+    //    field without anyone else's behavior changing (Codex review
+    //    2026-09-28).
     if (isRunConclusive({ error_message: null, parse_error_message: parseError })) {
       result.runs_conclusive++
     }

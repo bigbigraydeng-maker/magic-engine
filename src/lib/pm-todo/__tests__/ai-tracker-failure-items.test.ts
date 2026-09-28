@@ -215,7 +215,7 @@ describe('buildAiTrackerFailureItems', () => {
     })
     const items = buildAiTrackerFailureItems({ rows, error: null }, NAMES, WED)
     expect(items).toHaveLength(1)
-    expect(items[0]!.kind).toBe('ai_tracker_all_failed_not_actionable')
+    expect(items[0]!.kind).toBe('ai_tracker_all_failed_dev')
   })
 
   it('a tied split between an actionable and non-actionable cause never hides the actionable one — real incident shape (Codex review 2026-09-28)', () => {
