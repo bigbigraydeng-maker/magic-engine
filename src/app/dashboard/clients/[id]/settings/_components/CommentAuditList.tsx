@@ -19,6 +19,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
+import { MAX_ATTEMPTS, STALE_PROCESSING_MS } from '@/lib/social/comment-autoreply-constants'
 
 interface Props {
   clientId: string
@@ -34,19 +35,30 @@ export interface Engagement {
   private_reply_sent: boolean
   hidden: boolean
   reply_status: string
+  attempts: number
   needs_human: boolean
+  reviewed_at: string | null
   guardrail_flags: string[] | null
   reply_source: string | null
   created_at: string
+  updated_at: string
 }
 
-/** Same "stuck" shape comment-autoreply-stuck-items.ts detects, loosened (no attempts/staleness check — showing the button a little early is harmless, hiding it isn't). Exported for a direct unit test; the component itself only calls it. */
-export function isStuck(it: Engagement): boolean {
-  return (
-    it.reply_status === 'failed' ||
-    it.reply_status === 'processing' ||
-    (it.reply_status === 'dm_sent' && !it.public_reply_id)
-  )
+/**
+ * Must mirror comment-autoreply-stuck-items.ts's own "stuck" query exactly,
+ * not just loosely by `reply_status` (Codex round 5 复审 P2): a `failed` row
+ * still mid-retry, or a `processing` row still well within a normal run, is
+ * not actually stuck yet. Showing the button for those anyway invites an
+ * early click that writes `reviewed_at` — which `finalise()` never clears —
+ * permanently hiding this row from the todo detector if it goes on to become
+ * genuinely stuck later. Already-reviewed rows are excluded too, so the
+ * button doesn't keep reappearing after being clicked once.
+ */
+export function isStuck(it: Engagement, now: number = Date.now()): boolean {
+  if (it.reviewed_at) return false
+  if (it.reply_status === 'failed') return it.attempts >= MAX_ATTEMPTS
+  if (it.reply_status === 'processing') return now - Date.parse(it.updated_at) >= STALE_PROCESSING_MS
+  return it.reply_status === 'dm_sent' && !it.public_reply_id
 }
 
 const CATEGORY_META: Record<string, { label: string; cls: string }> = {

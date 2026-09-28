@@ -33,6 +33,9 @@ import {
 } from './comment-post-skips'
 import { classifyComment, CommentDecision, CommentCategory } from './comment-classifier'
 import { ReplyContext } from './comment-guardrails'
+import { MAX_ATTEMPTS } from './comment-autoreply-constants'
+
+export { MAX_ATTEMPTS }
 
 export interface CommentConfig {
   client_id: string
@@ -77,8 +80,6 @@ export interface ClientRunResult {
   token_invalid?: string
 }
 
-/** Max send attempts before a 'failed' row stops being retried. */
-export const MAX_ATTEMPTS = 3
 /** Non-terminal statuses that should never be reprocessed (claimed or done). */
 const TERMINAL_OR_INFLIGHT = ['processing', 'replied', 'dm_sent', 'hidden', 'skipped', 'reverted']
 

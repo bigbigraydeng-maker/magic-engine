@@ -52,20 +52,15 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-item-types'
-import { MAX_ATTEMPTS } from '@/lib/social/comment-autoreply-engine'
+import { MAX_ATTEMPTS, STALE_PROCESSING_MS } from '@/lib/social/comment-autoreply-constants'
 import { APP_BASE } from './binding-request-items'
 import { assessConfiguredPage } from '@/lib/meta/page-sync-authorization'
 import { resolveMetaTokenDetailed } from '@/lib/meta/token-selection'
 import { fetchAll } from '@/lib/supabase-paginate'
 
-export type CommentAutoreplyStuckItemKind = 'comment_autoreply_stuck'
+export { MAX_ATTEMPTS, STALE_PROCESSING_MS } from '@/lib/social/comment-autoreply-constants'
 
-/**
- * 卡在 `processing` 超过这么久才算卡死。这个通道最快每 30 分钟跑一轮
- * （`social-comment-autoreply` cron 头注），单条评论的分类+发送正常是秒级——
- * 24 小时留了远超"同一轮还在跑"的余量，只抓真的被中断遗弃的行。
- */
-const STALE_PROCESSING_MS = 24 * 60 * 60 * 1000
+export type CommentAutoreplyStuckItemKind = 'comment_autoreply_stuck'
 
 interface StuckRow {
   client_id: string
