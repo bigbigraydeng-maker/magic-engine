@@ -131,4 +131,82 @@ export const CLIENT_DOC_MANUAL_TASKS: ClientDocManualTask[] = [
     href: 'https://business.facebook.com/settings/info',
     expiresAt: '2026-10-26T09:00:00+13:00',
   },
+  ...eastinterReelsFirstCommentTasks(),
 ]
+
+/**
+ * East International 7 条 Facebook Reels（docs/ledger/2026-09-28-eastinter-reels-sep29-oct5.md）
+ * 每条发布后都要人工在第一条评论粘贴带 UTM 的 CTA 链接，Reels 本身用 API 排期但这一步
+ * API 做不到（Facebook 没有「发布时自动加首评」的接口）。
+ *
+ * 之前这 7 条操作只写在台账卡正文里——decided 卡默认要闲置超过 7 天（2026-10-06）
+ * 才会被今日待办拎出来，届时全部发布时间早就过了，等于没人在发布当天被提醒去加首评
+ * （Codex 2026-09-28 复审 PR #2173 抓到）。改成每条各自一条今日待办，发布当天出现，
+ * 过期自动消失，不依赖台账的「闲置超期」兜底。
+ *
+ * clientId 用 'east-international' 占位：这个客户的真实生产 client_id 不在仓库里，
+ * 本次修复不查生产库确认，先用非 UUID 占位（同 'infra' 的写法），不影响待办展示——
+ * pushClientDocManualTaskItems 不按 clientId 反查 clients 表。以后核实到真实 id 时
+ * 顺手换掉。
+ *
+ * href 统一指向台账卡本身（session:e12e5606 里的视频 ID / BM ID 不进仓库，没有更精确
+ * 的直达链接可以确认），how 里说清楚去 Facebook 哪个标签页找哪条视频。
+ */
+function eastinterReelsFirstCommentTasks(): ClientDocManualTask[] {
+  const LEDGER_HREF =
+    'https://github.com/bigbigraydeng-maker/magic-engine/blob/main/docs/ledger/2026-09-28-eastinter-reels-sep29-oct5.md'
+  const clientId = 'east-international'
+  const clientName = 'East International'
+  const rows: Array<{ date: string; ctaUrl: string; expiresAt: string }> = [
+    {
+      date: 'Sep 29',
+      ctaUrl:
+        'https://eastinter.com.au/eastinter-pricing-calculator?utm_source=facebook&utm_medium=reel&utm_campaign=sea-freight-sep29',
+      expiresAt: '2026-09-30T09:00:00+10:00',
+    },
+    {
+      date: 'Sep 30',
+      ctaUrl:
+        'https://eastinter.com.au/eastinter-pricing-calculator?utm_source=facebook&utm_medium=reel&utm_campaign=4steps-sep30',
+      expiresAt: '2026-10-01T09:00:00+10:00',
+    },
+    {
+      date: 'Oct 1（周四）',
+      ctaUrl:
+        'https://eastinter.com.au/eastinter-pricing-calculator?utm_source=facebook&utm_medium=reel&utm_campaign=air-freight-oct1',
+      expiresAt: '2026-10-02T09:00:00+10:00',
+    },
+    {
+      date: 'Oct 2（周五）',
+      ctaUrl:
+        'https://eastinter.com.au/eastinter-pricing-calculator?utm_source=facebook&utm_medium=reel&utm_campaign=lcl-vs-fcl-oct2',
+      expiresAt: '2026-10-03T09:00:00+10:00',
+    },
+    {
+      date: 'Oct 3（周六）',
+      ctaUrl:
+        'https://eastinter.com.au/eastinter-pricing-calculator?utm_source=facebook&utm_medium=reel&utm_campaign=4steps-oct3',
+      expiresAt: '2026-10-04T09:00:00+11:00',
+    },
+    {
+      date: 'Oct 4（周日）',
+      ctaUrl:
+        'https://eastinter.com.au/eastinter-pricing-calculator?utm_source=facebook&utm_medium=reel&utm_campaign=cities-oct4',
+      expiresAt: '2026-10-05T09:00:00+11:00',
+    },
+    {
+      date: 'Oct 5（周一）',
+      ctaUrl:
+        'https://eastinter.com.au/eastinter-pricing-calculator?utm_source=facebook&utm_medium=reel&utm_campaign=one-partner-oct5',
+      expiresAt: '2026-10-06T09:00:00+11:00',
+    },
+  ]
+  return rows.map((r) => ({
+    clientId,
+    clientName,
+    what: `East International ${r.date} 10:00 AEST/AEDT 排期发布的 Facebook Reel 需要人工加首评——发布本身走 API 排期，但「发布后在第一条评论粘贴带 UTM 的 CTA 链接」这步 Facebook 没有排期接口能做，漏了这条视频就没有可追踪的落地页流量`,
+    how: `打开 East International 管理的 Facebook 主页 → Reels/视频标签，找到 ${r.date} 发布的这条 → 在第一条评论原样粘贴：${r.ctaUrl}`,
+    href: LEDGER_HREF,
+    expiresAt: r.expiresAt,
+  }))
+}
