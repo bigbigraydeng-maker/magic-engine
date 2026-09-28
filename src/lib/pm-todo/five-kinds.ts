@@ -78,6 +78,10 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
 
   // ── 2 · 系统进不去、要人点一次的 ─────────────────────────────────────
   ai_provider_exhausted: 'one_click', // 充值
+  // 某客户 AI 可见度探测整周全挂，多数是余额用光/钥匙失效，需要人去充值/换钥匙
+  // （Codex 复审 2026-09-28 抓到：漏了这条会让 LANE_OF_KIND 穷举表类型检查过不了，
+  // laneOf() 拿到 undefined，所有新告警从 PM 清单和邮件里彻底消失）
+  ai_tracker_all_failed: 'one_click',
   video_credits_out: 'one_click', // 充值
   dataforseo_credits_out: 'one_click', // 充值
   creatomate_render_failed: 'one_click', // 多数是出片额度用完，要人充值
