@@ -58,9 +58,11 @@ interface Props {
 /** Server failures, said the way a salesperson can act on. Same reasons, one wording per channel. */
 function humanError(channel: ReplyChannel, status: number, reason?: string): string {
   // Checked before the per-channel 403 branches, which would otherwise read as
-  // "no permission" and send staff chasing an account problem.
+  // "no permission" and send staff chasing an account problem. The banner button
+  // is not promised: an unlinked conversation or a failed lookup also lands here
+  // and shows no banner.
   if (reason === 'do_not_contact') {
-    return '这个客人被标成「别再联系」，系统不让再发。如果是判错了，先在他的记录里点黄条上的「判错了？点这里放回名单」。'
+    return '这个客人被标成「别再联系」，系统不让再发。如果确定是判错了，在他的记录里找黄条上的「判错了？点这里放回名单」；找不到这个按钮就找 Magic Engine 团队。'
   }
   if (reason === 'dnc_check_failed') {
     return '系统暂时查不到这个客人能不能联系，为安全起见先没发。等一分钟再试；连着失败请找团队。'
