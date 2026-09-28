@@ -54,9 +54,18 @@ export function runDiagnostics(input: DiagnosisInput): DiagnosisRun {
       continue
     }
     if (scoped.accountLevelOnly) {
-      // 客户没登记主页、账户里又有多个主页：只剩「去登记主页」那条提醒（D2/D10 的 client_page_unknown）
-      diagnoses.push(...diagnoseAdLevelRules(rawCtx, input))
-      coverage.push(adLevelCoverage(rawCtx, input))
+      if (scoped.accountLevelOnlyReason === 'page_unknown') {
+        // 客户没登记主页、账户里又有多个主页：只剩「去登记主页」那条提醒（D2/D10 的 client_page_unknown，
+        // input.clientPageId 本来就是 null，D2/D10 自己会短路成这条提醒，不会拿任何快照数据判归属）
+        diagnoses.push(...diagnoseAdLevelRules(rawCtx, input))
+        coverage.push(adLevelCoverage(rawCtx, input))
+      } else {
+        // capture_stale：客户是登记了主页的，input.clientPageId 非空，D2/D10 不会短路——它们会拿 rawCtx 里
+        // 那份没法确认新不新鲜的快照数据逐条判「这条广告是不是挂客户主页」，跟 scopeAccountToClient 想拦住的
+        // 是同一个风险（Codex 2026-09-27 第二轮：广告在最后一次完整抓取后换了主页，旧快照仍会放行）。
+        // 整段不跑，覆盖率记 capture_stale，不能记成「跑了、没查到问题」。
+        coverage.push({ adAccountId: account.adAccountId, ran: false, reason: 'capture_stale', adsChecked: 0 })
+      }
       continue
     }
 

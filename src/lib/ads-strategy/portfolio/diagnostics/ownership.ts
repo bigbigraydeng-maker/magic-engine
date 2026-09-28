@@ -198,6 +198,8 @@ export interface ScopedAccount {
    * 此时 `account` 是原样的（账户级判断用整个账户）。
    */
   accountLevelOnly: boolean
+  /** accountLevelOnly=true 时降级的原因：page_unknown=客户没登记主页/多主页；capture_stale=快照没抓全/太旧。跑广告级规则前必须先看这个（Codex 2026-09-27 第二轮）。 */
+  accountLevelOnlyReason: 'page_unknown' | 'capture_stale' | null
   /**
    * 近 7 天：名下广告全挂客户主页的广告组花费（含因 CBO 连坐被切的）/ 名下广告全挂别的主页的广告组花费。
    * 「登记主页可能不对」提示用；混主页、读不到主页的不算进任何一边（子牙第二轮：CBO 连坐不能说成「全花在别家」）。
@@ -216,13 +218,14 @@ export interface ScopedAccount {
 const round2 = (n: number) => Math.round(n * 100) / 100
 
 function unscoped(account: AccountInput): ScopedAccount {
-  return { account, excluded: [], accountLevelOnly: false, ownWindowSpend: 0, otherPageWindowSpend: 0, droppedAdsetIds: new Set(), selfNotOwnAdsetIds: new Set() }
+  return { account, excluded: [], accountLevelOnly: false, accountLevelOnlyReason: null, ownWindowSpend: 0, otherPageWindowSpend: 0, droppedAdsetIds: new Set(), selfNotOwnAdsetIds: new Set() }
 }
 
-function accountLevelOnlyResult(account: AccountInput, reason: ExcludedEntity['reason'], detail: string): ScopedAccount {
+function accountLevelOnlyResult(account: AccountInput, reason: 'page_unknown' | 'capture_stale', detail: string): ScopedAccount {
   return {
     account,
     accountLevelOnly: true,
+    accountLevelOnlyReason: reason,
     ownWindowSpend: 0,
     otherPageWindowSpend: 0,
     droppedAdsetIds: new Set(),
@@ -250,7 +253,14 @@ function scopeWithoutClientPage(account: AccountInput): ScopedAccount {
  */
 function adCaptureStale(account: AccountInput, evaluatedAt: string): boolean {
   const adCaptures = account.latestCaptures.filter(c => c.level === 'ad')
-  if (adCaptures.length === 0) return false // 共用账户/老 fixture 本来就没有这层快照记录，不在这里拦（各自的闸负责）
+  // 🔴 Codex 2026-09-27 第二轮建议把「一条广告层抓取审计记录都没有」也当作 stale（老账户可能在审计表
+  //    上线前就有广告级快照数据，之后再没抓过一轮）。评估过：snapshot-sync.ts 对同一轮同一层的快照写入
+  //    和 ad_snapshot_captures 审计行是配对写的（本文件顶部、loader.ts 头注释都在依赖这个不变量），
+  //    正常运作下不会出现「有 ad 级快照、却一条 ad 级审计行都没有」；且这条判据在诊断测试套件里会把大量
+  //    没有显式设置 latestCaptures 的既有 fixture（gates.test.ts 除外，那些不设 clientPageId 不受影响；
+  //    d11-audience-pool-starved.test.ts 等会受影响）误判成 accountLevelOnly，波及面和这条 P2 的实际
+  //    可达性不成比例。保留「没有审计记录 → 不拦」，未采纳；已记 docs/ledger 后续事项，不在本 PR 展开。
+  if (adCaptures.length === 0) return false
   const latest = adCaptures.reduce((a, b) => (a.captured_at > b.captured_at ? a : b))
   if (!latest.complete) return true
   const ageMs = Date.parse(evaluatedAt) - Date.parse(latest.captured_at)
@@ -314,7 +324,7 @@ export function scopeAccountToClient(account: AccountInput, clientPageId: string
     .reduce((s, r) => s + r.spend, 0))
   const selfNotOwnAdsetIds = new Set(drops.filter(d => d.level === 'adset' && d.selfNotOwn).map(d => d.id))
   return {
-    account: { ...account, snapshots, daily, hourly }, excluded, accountLevelOnly: false,
+    account: { ...account, snapshots, daily, hourly }, excluded, accountLevelOnly: false, accountLevelOnlyReason: null,
     ownWindowSpend: windowSpendWhere('own'), otherPageWindowSpend: windowSpendWhere('other_page'),
     droppedAdsetIds: dropAdsets, selfNotOwnAdsetIds,
   }

@@ -373,6 +373,28 @@ describe('接进巡检 / 机会之后', () => {
     expect(run.diagnoses.some(d => d.title.includes('登记的主页可能不对'))).toBe(false)
   })
 
+  it('🔴 快照过期降级时，D2/D10 不能继续用没法确认新不新鲜的快照判归属（覆盖率记 capture_stale，不是 ok）（Codex 2026-09-27 第二轮）', () => {
+    const stale = [{ level: 'ad' as const, complete: false, skipped_shared: false, error: 'timeout', captured_at: '2026-09-25T02:00:00Z' }]
+    const acc = { ...mixedAccount(), latestCaptures: stale }
+    const run = runDiagnostics(input(acc))
+    expect(run.adLevelCoverage).toEqual([expect.objectContaining({ ran: false, reason: 'capture_stale', adsChecked: 0 })])
+    // D2/D10 完全没跑——不能有任何挂在这个账户广告上的命中
+    expect(run.diagnoses.some(d => (d.code === 'D2' || d.code === 'D10') && d.status === 'hit')).toBe(false)
+  })
+
+  it('对照：客户没登记主页（page_unknown）时，D2/D10 仍然照跑——它们自己会短路成「客户没登记主页」提醒，不是被这里拦下', () => {
+    const run = runDiagnostics(input({ ...mixedAccount(), adDaily: [] }, { clientPageId: null }))
+    expect(run.adLevelCoverage).toEqual([expect.objectContaining({ ran: false, reason: 'client_page_unknown' })])
+  })
+
+  it('机会发现：快照过期 vs 没登记主页要分开说，不能都说成「没登记主页」（Codex 2026-09-27 第二轮）', () => {
+    const stale = [{ level: 'ad' as const, complete: false, skipped_shared: false, error: 'timeout', captured_at: '2026-09-25T02:00:00Z' }]
+    const acc = { ...mixedAccount(), latestCaptures: stale }
+    const run = runOpportunities(input(acc), 'complete')
+    expect(run.opportunities).toEqual([expect.objectContaining({ notComparableReason: 'capture_stale', title: expect.stringContaining('快照') })])
+    expect(run.opportunities[0].title).not.toContain('没登记')
+  })
+
   it('机会发现也不算别家的：别家广告组点击率再高也不出 O1', () => {
     const acc = mixedAccount()
     // 别家组点击率拉到客户组的 3 倍、花费低于均值 → 未切时会是「潜在爆款」
