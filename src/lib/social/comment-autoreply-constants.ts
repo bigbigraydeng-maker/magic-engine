@@ -23,3 +23,14 @@ export const MAX_ATTEMPTS = 3
  * minutes; 24 hours is a wide margin over any real single-run duration.
  */
 export const STALE_PROCESSING_MS = 24 * 60 * 60 * 1000
+
+/**
+ * `social_comment_config` DEFAULTS.lookback_days（comment-autoreply-config/
+ * route.ts）. Used wherever a client's configured value couldn't be read, to
+ * decide whether a not-yet-exhausted `failed` row has aged out of the
+ * engine's lookback window (Codex round 12/13 复审 P1) — the pm-todo
+ * detector and the audit list's own `?stuck=1` query both need the same
+ * fallback, or a row "stuck" by one and not the other loses its only
+ * closing action.
+ */
+export const DEFAULT_LOOKBACK_DAYS = 7

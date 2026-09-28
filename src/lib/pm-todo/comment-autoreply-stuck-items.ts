@@ -75,7 +75,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-item-types'
-import { MAX_ATTEMPTS, STALE_PROCESSING_MS } from '@/lib/social/comment-autoreply-constants'
+import { MAX_ATTEMPTS, STALE_PROCESSING_MS, DEFAULT_LOOKBACK_DAYS } from '@/lib/social/comment-autoreply-constants'
 import { APP_BASE } from './binding-request-items'
 import { assessConfiguredPage } from '@/lib/meta/page-sync-authorization'
 import { resolveMetaTokenDetailed, domainToEnvKey, pageIdToEnvVar, type ScopedTokenSource } from '@/lib/meta/token-selection'
@@ -110,9 +110,6 @@ interface RawEngagementRow {
 function daysAgo(iso: string, now: Date): number {
   return Math.floor((now.getTime() - Date.parse(iso)) / 86_400_000)
 }
-
-/** `social_comment_config` DEFAULTS.lookback_days（comment-autoreply-config/route.ts）。 */
-const DEFAULT_LOOKBACK_DAYS = 7
 
 /**
  * 直接链到能重新起一次 Meta 授权的路由，不描述"去找连接 Meta 按钮"（Codex

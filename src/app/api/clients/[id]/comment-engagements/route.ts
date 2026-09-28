@@ -28,7 +28,7 @@ import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { getPageAccessToken } from '@/lib/meta/page-posts'
 import { deleteComment } from '@/lib/meta/comments'
-import { MAX_ATTEMPTS, STALE_PROCESSING_MS } from '@/lib/social/comment-autoreply-constants'
+import { MAX_ATTEMPTS, STALE_PROCESSING_MS, DEFAULT_LOOKBACK_DAYS } from '@/lib/social/comment-autoreply-constants'
 
 export async function GET(
   req: NextRequest,
@@ -68,12 +68,20 @@ export async function GET(
 
 /**
  * Mirrors comment-autoreply-stuck-items.ts's own "permanently stuck" query
- * shape (three separate branches, unioned) rather than one raw PostgREST
- * `.or()` filter string — same predicate logic in two different query
- * styles would drift out of sync over time, and the three-branch shape is
- * already the proven, tested pattern for this exact definition of "stuck".
- * Capped at 200/branch defensively; a single client with more permanently-
- * stuck comments than that is its own emergency, visible elsewhere.
+ * shape (separate branches, unioned) rather than one raw PostgREST `.or()`
+ * filter string — same predicate logic in two different query styles would
+ * drift out of sync over time, and this shape is already the proven, tested
+ * pattern for this exact definition of "stuck". Capped at 200/branch
+ * defensively; a single client with more permanently-stuck comments than
+ * that is its own emergency, visible elsewhere.
+ *
+ * 4th branch — `failed` rows that haven't exhausted retries but have aged
+ * out of the client's configured lookback window (Codex round 13 复审 P1):
+ * round 12 added this category to the pm-todo detector but left this route
+ * and `CommentAuditList.tsx`'s `isStuck()` on the old 3-category definition,
+ * so a row only this route/detector agreed was "stuck" had no reachable
+ * "标记已阅" — the exact closed-loop gap round 6/7 already fixed once for
+ * the other three categories.
  */
 async function fetchStuckEngagements(clientId: string) {
   const staleBefore = new Date(Date.now() - STALE_PROCESSING_MS).toISOString()
@@ -86,16 +94,24 @@ async function fetchStuckEngagements(clientId: string) {
       .order('created_at', { ascending: false })
       .limit(200)
 
-  const [failed, dmOnly, stuckProcessing] = await Promise.all([
+  const [failed, dmOnly, stuckProcessing, partialFailed, config] = await Promise.all([
     base().eq('reply_status', 'failed').gte('attempts', MAX_ATTEMPTS),
     base().eq('reply_status', 'dm_sent').is('public_reply_id', null),
     base().eq('reply_status', 'processing').lt('updated_at', staleBefore),
+    base().eq('reply_status', 'failed').lt('attempts', MAX_ATTEMPTS),
+    supabaseAdmin.from('social_comment_config').select('lookback_days').eq('client_id', clientId).maybeSingle(),
   ])
-  for (const r of [failed, dmOnly, stuckProcessing]) {
+  for (const r of [failed, dmOnly, stuckProcessing, partialFailed]) {
     if (r.error) throw new Error(r.error.message)
   }
+  const lookbackDays = (config.data as { lookback_days?: number | null } | null)?.lookback_days ?? DEFAULT_LOOKBACK_DAYS
+  const lookbackCutoff = Date.now() - lookbackDays * 86_400_000
+  const orphaned = (partialFailed.data ?? []).filter(
+    (r) => Date.parse((r as { comment_created_at: string }).comment_created_at) < lookbackCutoff,
+  )
+
   const byId = new Map<string, NonNullable<typeof failed.data>[number]>()
-  for (const row of [...(failed.data ?? []), ...(dmOnly.data ?? []), ...(stuckProcessing.data ?? [])]) {
+  for (const row of [...(failed.data ?? []), ...(dmOnly.data ?? []), ...(stuckProcessing.data ?? []), ...orphaned]) {
     byId.set((row as { id: string }).id, row)
   }
   return Array.from(byId.values())

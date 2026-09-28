@@ -26,9 +26,20 @@ interface Row {
   updated_at: string
   reviewed_at: string | null
   created_at: string
+  /** 只有"重试没耗尽"这条分支需要——判断是否已越过回看窗口。 */
+  comment_created_at: string
 }
 
 let rows: Row[] = []
+/** `social_comment_config.lookback_days`——缺省时路由退回 DEFAULT_LOOKBACK_DAYS=7。 */
+let configLookbackDays: number | null = null
+
+// 2099 远到不可能被任何真实回看窗口越过——用来标"肯定还在窗口内"，跟文件
+// 里既有的 2020-01-01（"肯定已经过期/卡死"）配对，不依赖测试跑的时候真实
+// 系统时间具体是哪天（Codex round 13 复审 P1 新增分支同样按 Date.now() 走，
+// 沿用这个文件原有的写法，不引入新的可注入 now 参数）。
+const FAR_FUTURE = '2099-01-01T00:00:00Z'
+const FAR_PAST = '2020-01-01T00:00:00Z'
 
 function row(over: Partial<Row>): Row {
   return {
@@ -40,12 +51,13 @@ function row(over: Partial<Row>): Row {
     updated_at: '2026-09-01T00:00:00Z',
     reviewed_at: null,
     created_at: '2026-09-01T00:00:00Z',
+    comment_created_at: FAR_FUTURE,
     ...over,
   }
 }
 
 /** 每次 `.from()` 都开一条独立的假查询链，按已挂的过滤器真的筛一遍 `rows`。 */
-function makeChain() {
+function makeEngagementsChain() {
   const filters: Array<(r: Row) => boolean> = []
   const chain = {
     select: () => chain,
@@ -75,7 +87,23 @@ function makeChain() {
 }
 
 vi.mock('@/lib/supabase', () => ({
-  supabaseAdmin: { from: () => makeChain() },
+  supabaseAdmin: {
+    from: (table: string) => {
+      if (table === 'social_comment_config') {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: configLookbackDays === null ? null : { lookback_days: configLookbackDays },
+                error: null,
+              }),
+            }),
+          }),
+        }
+      }
+      return makeEngagementsChain()
+    },
+  },
 }))
 
 async function GET_stuck(clientId: string) {
@@ -92,8 +120,8 @@ describe('GET .../comment-engagements?stuck=1', () => {
     expect(engagements.map((r) => r.id)).toEqual(['e1'])
   })
 
-  it('failed 但还没耗尽重试 → 不返回', async () => {
-    rows = [row({ id: 'e1', reply_status: 'failed', attempts: 2 })]
+  it('failed 但还没耗尽重试、评论还在回看窗口内 → 不返回（下一轮正常会重试）', async () => {
+    rows = [row({ id: 'e1', reply_status: 'failed', attempts: 2, comment_created_at: FAR_FUTURE })]
     const { engagements } = await GET_stuck('cts')
     expect(engagements).toEqual([])
   })
@@ -105,7 +133,7 @@ describe('GET .../comment-engagements?stuck=1', () => {
   })
 
   it('processing 且超过宽限期 → 返回', async () => {
-    rows = [row({ id: 'e3', reply_status: 'processing', updated_at: '2020-01-01T00:00:00Z' })]
+    rows = [row({ id: 'e3', reply_status: 'processing', updated_at: FAR_PAST })]
     const { engagements } = await GET_stuck('cts')
     expect(engagements.map((r) => r.id)).toEqual(['e3'])
   })
@@ -123,7 +151,7 @@ describe('GET .../comment-engagements?stuck=1', () => {
   })
 
   it('不管多旧都返回——这是这条分支存在的意义（不受 created_at 近期窗口限制）', async () => {
-    rows = [row({ id: 'e6', reply_status: 'failed', attempts: 3, created_at: '2020-01-01T00:00:00Z' })]
+    rows = [row({ id: 'e6', reply_status: 'failed', attempts: 3, created_at: FAR_PAST })]
     const { engagements } = await GET_stuck('cts')
     expect(engagements.map((r) => r.id)).toEqual(['e6'])
   })
@@ -138,9 +166,61 @@ describe('GET .../comment-engagements?stuck=1', () => {
     rows = [
       row({ id: 'e1', reply_status: 'failed', attempts: 3 }),
       row({ id: 'e2', reply_status: 'dm_sent', public_reply_id: null }),
-      row({ id: 'e3', reply_status: 'processing', updated_at: '2020-01-01T00:00:00Z' }),
+      row({ id: 'e3', reply_status: 'processing', updated_at: FAR_PAST }),
     ]
     const { engagements } = await GET_stuck('cts')
     expect(engagements.map((r) => r.id).sort()).toEqual(['e1', 'e2', 'e3'])
+  })
+
+  // Codex round 13 复审 P1：round 12 给 pm-todo 检测通道加了第 4 类（重试没耗尽但
+  // 越过回看窗口），但这条审计路由还停在旧的 3 类定义——这类行在检测通道里算
+  // 卡死、待办也会下发，可这里却查不到它，"标记已阅"点不到，待办永久重复。
+  describe('越过回看窗口、还没耗尽重试次数的 failed 行（第 4 类）', () => {
+    it('评论发出时间早于回看窗口 → 返回', async () => {
+      configLookbackDays = null // 用默认 7 天
+      rows = [row({ id: 'e8', reply_status: 'failed', attempts: 1, comment_created_at: FAR_PAST })]
+      const { engagements } = await GET_stuck('cts')
+      expect(engagements.map((r) => r.id)).toEqual(['e8'])
+    })
+
+    it('评论发出时间还在回看窗口内 → 不返回', async () => {
+      configLookbackDays = null
+      rows = [row({ id: 'e9', reply_status: 'failed', attempts: 1, comment_created_at: FAR_FUTURE })]
+      const { engagements } = await GET_stuck('cts')
+      expect(engagements).toEqual([])
+    })
+
+    it('按这个客户配置的回看天数判断，不是写死的默认值', async () => {
+      // 配了很短的回看窗口（1 天）——2020 年那条评论无论如何都早已越窗，
+      // 用来确认真的读了 social_comment_config，而不是忽略配置只走默认值。
+      configLookbackDays = 1
+      rows = [row({ id: 'e10', reply_status: 'failed', attempts: 1, comment_created_at: FAR_PAST })]
+      const { engagements } = await GET_stuck('cts')
+      expect(engagements.map((r) => r.id)).toEqual(['e10'])
+    })
+
+    it('已经标记已阅 → 不返回，即使已经越窗', async () => {
+      configLookbackDays = null
+      rows = [
+        row({
+          id: 'e11', reply_status: 'failed', attempts: 1,
+          comment_created_at: FAR_PAST, reviewed_at: '2026-09-20T00:00:00Z',
+        }),
+      ]
+      const { engagements } = await GET_stuck('cts')
+      expect(engagements).toEqual([])
+    })
+
+    it('四类各一条 → 四条都返回', async () => {
+      configLookbackDays = null
+      rows = [
+        row({ id: 'e1', reply_status: 'failed', attempts: 3 }),
+        row({ id: 'e2', reply_status: 'dm_sent', public_reply_id: null }),
+        row({ id: 'e3', reply_status: 'processing', updated_at: FAR_PAST }),
+        row({ id: 'e4', reply_status: 'failed', attempts: 1, comment_created_at: FAR_PAST }),
+      ]
+      const { engagements } = await GET_stuck('cts')
+      expect(engagements.map((r) => r.id).sort()).toEqual(['e1', 'e2', 'e3', 'e4'])
+    })
   })
 })

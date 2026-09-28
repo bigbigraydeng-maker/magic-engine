@@ -53,6 +53,15 @@ export interface Engagement {
  * permanently hiding this row from the todo detector if it goes on to become
  * genuinely stuck later. Already-reviewed rows are excluded too, so the
  * button doesn't keep reappearing after being clicked once.
+ *
+ * Only covers 3 of the 4 categories (Codex round 13 复审 P1): a `failed` row
+ * that hasn't exhausted retries but has aged out of the client's configured
+ * `lookback_days` is ALSO stuck (comment-autoreply-stuck-items.ts §4), but
+ * this function has no way to know that client's lookback_days — it isn't
+ * on `Engagement` and this component never fetches client config. The
+ * caller covers that 4th category separately, by trusting any row the
+ * server's own `?stuck=1` fetch already returned (see `stuckIds` in
+ * `CommentAuditList`) rather than trying to re-derive it here.
  */
 export function isStuck(it: Engagement, now: number = Date.now()): boolean {
   if (it.reviewed_at) return false
@@ -73,6 +82,16 @@ export function mergeEngagements(recent: Engagement[], stuck: Engagement[]): Eng
   return Array.from(byId.values()).sort((a, b) => b.created_at.localeCompare(a.created_at))
 }
 
+/**
+ * Whether "标记已阅" should render for this row — `needs_human`, or stuck by
+ * one of the 3 categories `isStuck` can judge alone, or stuck by the 4th
+ * (lookback-orphaned) one that only the server's `?stuck=1` result can prove
+ * (Codex round 13 复审 P1 — see `isStuck`'s docstring for why).
+ */
+export function shouldShowMarkReviewed(it: Engagement, stuckIds: Set<string>, now: number = Date.now()): boolean {
+  return it.needs_human || isStuck(it, now) || stuckIds.has(it.id)
+}
+
 const CATEGORY_META: Record<string, { label: string; cls: string }> = {
   praise:    { label: '夸赞', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   question:  { label: '提问', cls: 'bg-sky-50 text-sky-700 border-sky-200' },
@@ -90,6 +109,10 @@ export function CommentAuditList({ clientId }: Props) {
   const [items, setItems] = useState<Engagement[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  // 服务端 `?stuck=1` 返回的 id 集合——`isStuck()` 判不出"越窗未耗尽"这一类
+  // （需要这个客户的 lookback_days，这个组件读不到），直接信这个集合，不重算
+  // （Codex round 13 复审 P1）。
+  const [stuckIds, setStuckIds] = useState<Set<string>>(new Set())
 
   /**
    * Fetches recent rows AND stuck rows separately, then merges (Codex round 7
@@ -110,6 +133,7 @@ export function CommentAuditList({ clientId }: Props) {
       if (!stuckRes.ok) throw new Error(`HTTP ${stuckRes.status}`)
       const { engagements: recent } = (await recentRes.json()) as { engagements: Engagement[] }
       const { engagements: stuck } = (await stuckRes.json()) as { engagements: Engagement[] }
+      setStuckIds(new Set(stuck.map((it) => it.id)))
       setItems(mergeEngagements(recent, stuck))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -205,7 +229,7 @@ export function CommentAuditList({ clientId }: Props) {
                   {busyId === it.id ? '处理中…' : '撤回回复'}
                 </button>
               )}
-              {(it.needs_human || isStuck(it)) && (
+              {shouldShowMarkReviewed(it, stuckIds) && (
                 <button onClick={() => act(it.id, 'mark_reviewed')} disabled={busyId === it.id}
                   className="text-xs font-semibold text-slate-600 hover:underline disabled:opacity-50">
                   标记已阅

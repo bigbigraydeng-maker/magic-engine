@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isStuck, mergeEngagements, type Engagement } from '../CommentAuditList'
+import { isStuck, mergeEngagements, shouldShowMarkReviewed, type Engagement } from '../CommentAuditList'
 import { MAX_ATTEMPTS, STALE_PROCESSING_MS } from '@/lib/social/comment-autoreply-constants'
 
 /**
@@ -105,5 +105,38 @@ describe('mergeEngagements', () => {
 
   it('两边都空 → 空数组', () => {
     expect(mergeEngagements([], [])).toEqual([])
+  })
+})
+
+/**
+ * `shouldShowMarkReviewed`（Codex round 13 复审 P1）：`isStuck` 判不出第 4 类
+ * （越过回看窗口、还没耗尽重试次数的 failed 行）——判这一类需要这个客户的
+ * `lookback_days`，`Engagement` 上没有这个字段。这一类只能靠服务端
+ * `?stuck=1` 的返回结果（`stuckIds`）来判定，不能靠本地重算。
+ */
+describe('shouldShowMarkReviewed', () => {
+  it('needs_human → 显示，不管 isStuck/stuckIds', () => {
+    expect(shouldShowMarkReviewed({ ...base, needs_human: true }, new Set(), NOW)).toBe(true)
+  })
+
+  it('isStuck 判定为卡死（比如 failed 耗尽重试）→ 显示', () => {
+    const engagement = { ...base, reply_status: 'failed', attempts: MAX_ATTEMPTS }
+    expect(shouldShowMarkReviewed(engagement, new Set(), NOW)).toBe(true)
+  })
+
+  it('第 4 类：failed 没耗尽重试，isStuck 判不出来，但在 stuckIds 里 → 显示', () => {
+    const engagement = { ...base, id: 'orphaned-1', reply_status: 'failed', attempts: 1 }
+    expect(isStuck(engagement, NOW)).toBe(false) // 确认 isStuck 单独判不出来
+    expect(shouldShowMarkReviewed(engagement, new Set(['orphaned-1']), NOW)).toBe(true)
+  })
+
+  it('既不是 needs_human，也不卡死，也不在 stuckIds 里 → 不显示', () => {
+    const engagement = { ...base, id: 'normal-1', reply_status: 'replied' }
+    expect(shouldShowMarkReviewed(engagement, new Set(['other-id']), NOW)).toBe(false)
+  })
+
+  it('已经标记已阅（reviewed_at 有值）且不在 stuckIds 里 → 不显示', () => {
+    const engagement = { ...base, reply_status: 'failed', attempts: MAX_ATTEMPTS, reviewed_at: '2026-09-27T00:00:00Z' }
+    expect(shouldShowMarkReviewed(engagement, new Set(), NOW)).toBe(false)
   })
 })
