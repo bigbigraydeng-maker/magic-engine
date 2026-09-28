@@ -33,27 +33,38 @@ vi.mock('@/lib/meta/token-selection', async (importOriginal) => {
 interface EngagementRow {
   client_id: string
   page_id: string
-  comment_created_at: string
+  updated_at: string
+  /** 只有"重试没耗尽"这条分支需要——用来判断是不是已经越过回看窗口。 */
+  comment_created_at?: string
 }
 
-type Branch = 'failed' | 'dm_sent' | 'processing'
+/** `failed` 按 attempts 比较符拆成两支：耗尽（exhausted）/ 没耗尽（partial，越窗才算卡死）。 */
+type Branch = 'exhausted' | 'dm_sent' | 'processing' | 'partial'
 
 /**
- * 假 `.from('social_comment_engagements')` 链：三条查询（failed / dm_sent /
- * 卡死的 processing）各自独立调用 `.from()`，靠这次调用里出现的 `reply_status`
- * 过滤值区分该回哪一份数据，`fetchAll` 的分页在 `.order().range()` 收尾
- * （单页测试数据 < 1000 行，一次 `.range()` 就到底，不需要模拟翻页）。
+ * 假 `.from('social_comment_engagements')` 链：四条查询（耗尽 failed / dm_sent /
+ * 卡死的 processing / 没耗尽的 failed）各自独立调用 `.from()`，靠 `reply_status`
+ * 过滤值 + attempts 比较符（`gte`/`lt`）区分该回哪一份数据，`fetchAll` 的分页在
+ * `.order().range()` 收尾（单页测试数据 < 1000 行，一次 `.range()` 就到底，不需要
+ * 模拟翻页）。
  */
 function engagementsChain(rowsByBranch: Partial<Record<Branch, EngagementRow[]>>, errorMessage?: string) {
-  let branch: Branch | null = null
+  let replyStatus: string | null = null
+  let attemptsCmp: 'gte' | 'lt' | null = null
   const chain = {
     select: () => chain,
     eq: (col: string, val: unknown) => {
-      if (col === 'reply_status') branch = val as Branch
+      if (col === 'reply_status') replyStatus = val as string
       return chain
     },
-    gte: () => chain,
-    lt: () => chain,
+    gte: (col: string) => {
+      if (col === 'attempts') attemptsCmp = 'gte'
+      return chain
+    },
+    lt: (col: string) => {
+      if (col === 'attempts') attemptsCmp = 'lt' // processing 分支也调用 lt()，但比较的是 updated_at，不是 attempts
+      return chain
+    },
     is: () => chain,
     in: (_col: string, ids: readonly string[]) => {
       chain._ids = ids
@@ -63,26 +74,35 @@ function engagementsChain(rowsByBranch: Partial<Record<Branch, EngagementRow[]>>
     _ids: [] as readonly string[],
     range: async () => {
       if (errorMessage) return { data: null, error: { message: errorMessage } }
+      const branch: Branch | null =
+        replyStatus === 'dm_sent' ? 'dm_sent' :
+        replyStatus === 'processing' ? 'processing' :
+        replyStatus === 'failed' && attemptsCmp === 'gte' ? 'exhausted' :
+        replyStatus === 'failed' && attemptsCmp === 'lt' ? 'partial' :
+        null
       const rows = (branch && rowsByBranch[branch]) || []
-      // reply_status 就是查询本身的过滤条件（每条分支查询只会命中同一个
-      // reply_status），直接从 branch 推，不用要求每条测试夹具都手写这一列。
-      return { data: rows.filter((r) => chain._ids.includes(r.client_id)).map((r) => ({ ...r, reply_status: branch })), error: null }
+      return { data: rows.filter((r) => chain._ids.includes(r.client_id)), error: null }
     },
   }
   return chain
 }
 
 interface FakeDbOptions {
-  failedRows?: EngagementRow[]
+  exhaustedRows?: EngagementRow[]
   dmRows?: EngagementRow[]
   processingRows?: EngagementRow[]
+  /** 没耗尽重试次数的 failed 行——只有 `comment_created_at` 早于回看窗口才算卡死。 */
+  partialRows?: EngagementRow[]
   errorMessage?: string
   /** `scopedEnvVarName` 读 `clients` 表算实际变量名用的（Codex round 10 P1）。 */
   clientsRow?: { domain?: string | null; facebook_page_id?: string | null } | null
+  /** `fetchLookbackDaysByClient` 读的每客户回看天数；缺省客户用 DEFAULT_LOOKBACK_DAYS=7 兜底。 */
+  lookbackDays?: Record<string, number>
 }
 
 function fakeDb(opts: FakeDbOptions) {
   const inSpy = vi.fn()
+  const configInSpy = vi.fn()
   const sb = {
     from: (table: string) => {
       if (table === 'clients') {
@@ -94,9 +114,31 @@ function fakeDb(opts: FakeDbOptions) {
           }),
         }
       }
+      if (table === 'social_comment_config') {
+        return {
+          select: () => ({
+            in: (_col: string, ids: readonly string[]) => {
+              configInSpy(ids)
+              const rows = Object.entries(opts.lookbackDays ?? {})
+                .filter(([clientId]) => ids.includes(clientId))
+                .map(([client_id, lookback_days]) => ({ client_id, lookback_days }))
+              return {
+                order: () => ({
+                  range: async () => ({ data: rows, error: null }),
+                }),
+              }
+            },
+          }),
+        }
+      }
       if (table !== 'social_comment_engagements') throw new Error(`unexpected table ${table}`)
       const chain = engagementsChain(
-        { failed: opts.failedRows ?? [], dm_sent: opts.dmRows ?? [], processing: opts.processingRows ?? [] },
+        {
+          exhausted: opts.exhaustedRows ?? [],
+          dm_sent: opts.dmRows ?? [],
+          processing: opts.processingRows ?? [],
+          partial: opts.partialRows ?? [],
+        },
         opts.errorMessage,
       )
       const originalIn = chain.in
@@ -107,7 +149,7 @@ function fakeDb(opts: FakeDbOptions) {
       return chain
     },
   } as unknown as SupabaseClient
-  return { sb, inSpy }
+  return { sb, inSpy, configInSpy }
 }
 
 describe('pushCommentAutoreplyStuckItems', () => {
@@ -130,10 +172,10 @@ describe('pushCommentAutoreplyStuckItems', () => {
     assessConfiguredPageMock.mockResolvedValue({ verified: false, reason: 'check_failed' })
     resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_page' })
     const { sb } = fakeDb({
-      failedRows: [
-        { client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-21T00:00:00Z' },
-        { client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-08-23T00:00:00Z' }, // 最早的一条，决定天数
-        { client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-08T00:00:00Z' },
+      exhaustedRows: [
+        { client_id: 'cts', page_id: PAGE_ID, updated_at: '2026-09-21T00:00:00Z' },
+        { client_id: 'cts', page_id: PAGE_ID, updated_at: '2026-08-23T00:00:00Z' }, // 最早的一条，决定天数
+        { client_id: 'cts', page_id: PAGE_ID, updated_at: '2026-09-08T00:00:00Z' },
       ],
     })
     const items: ManualItem[] = []
@@ -155,7 +197,7 @@ describe('pushCommentAutoreplyStuckItems', () => {
     assessConfiguredPageMock.mockResolvedValue({ verified: false, reason: 'check_failed' })
     resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_page' })
     const { sb } = fakeDb({
-      dmRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-01T00:00:00Z' }],
+      dmRows: [{ client_id: 'cts', page_id: PAGE_ID, updated_at: '2026-09-01T00:00:00Z' }],
     })
     const items: ManualItem[] = []
     await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
@@ -167,7 +209,7 @@ describe('pushCommentAutoreplyStuckItems', () => {
     assessConfiguredPageMock.mockResolvedValue({ verified: false, reason: 'check_failed' })
     resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_page' })
     const { sb } = fakeDb({
-      processingRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-01T00:00:00Z' }],
+      processingRows: [{ client_id: 'cts', page_id: PAGE_ID, updated_at: '2026-09-01T00:00:00Z' }],
     })
     const items: ManualItem[] = []
     await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
@@ -179,9 +221,9 @@ describe('pushCommentAutoreplyStuckItems', () => {
     assessConfiguredPageMock.mockResolvedValue({ verified: false, reason: 'check_failed' })
     resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_page' })
     const { sb } = fakeDb({
-      failedRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-08T00:00:00Z' }],
-      dmRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-10T00:00:00Z' }],
-      processingRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-08-23T00:00:00Z' }],
+      exhaustedRows: [{ client_id: 'cts', page_id: PAGE_ID, updated_at: '2026-09-08T00:00:00Z' }],
+      dmRows: [{ client_id: 'cts', page_id: PAGE_ID, updated_at: '2026-09-10T00:00:00Z' }],
+      processingRows: [{ client_id: 'cts', page_id: PAGE_ID, updated_at: '2026-08-23T00:00:00Z' }],
     })
     const items: ManualItem[] = []
     await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
@@ -196,7 +238,7 @@ describe('pushCommentAutoreplyStuckItems', () => {
     assessConfiguredPageMock.mockResolvedValue({ verified: false, reason: 'check_failed' })
     resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_page' })
     const { sb } = fakeDb({
-      processingRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-01T00:00:00Z' }],
+      processingRows: [{ client_id: 'cts', page_id: PAGE_ID, updated_at: '2026-09-01T00:00:00Z' }],
     })
     const items: ManualItem[] = []
     await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
@@ -206,10 +248,90 @@ describe('pushCommentAutoreplyStuckItems', () => {
     expect(items[0].how).not.toContain('没有回复的才手动回一下')
   })
 
+  // Codex round 12 复审 P1：还没耗尽重试次数、但已经越过这个客户回看窗口的 failed
+  // 行——engine 按 comment.createdAt 过滤，越窗的评论永远不会再被拿去重试，
+  // attempts 永远停在耗尽之前，原来的查询（只认 attempts>=MAX_ATTEMPTS）完全看不到它。
+  describe('越过回看窗口、还没耗尽重试次数的 failed 行（Codex round 12 P1）', () => {
+    it('评论发出时间早于这个客户的回看窗口 → 算卡死，且不说"该回复"（用不确定语气以外的"确定但不会自动重试"措辞）', async () => {
+      assessConfiguredPageMock.mockResolvedValue({ verified: false, reason: 'check_failed' })
+      resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_page' })
+      const { sb } = fakeDb({
+        partialRows: [
+          {
+            client_id: 'cts',
+            page_id: PAGE_ID,
+            updated_at: '2026-09-20T00:00:00Z',
+            comment_created_at: '2026-09-01T00:00:00Z', // 27 天前，超过默认 7 天回看窗口
+          },
+        ],
+      })
+      const items: ManualItem[] = []
+      await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
+      expect(items).toHaveLength(1)
+      expect(items[0].what).toContain('1 条失败一两次后还没到重试上限就先超出了系统回看评论的时间窗口')
+      expect(items[0].how).toContain('超出回看窗口的这些同样要手动回')
+      expect(items[0].how).toContain('不会因为权限修好就自动重新处理')
+    })
+
+    it('评论发出时间还在回看窗口内 → 不算卡死（下一轮正常会重试）', async () => {
+      const { sb } = fakeDb({
+        partialRows: [
+          {
+            client_id: 'cts',
+            page_id: PAGE_ID,
+            updated_at: '2026-09-27T00:00:00Z',
+            comment_created_at: '2026-09-26T00:00:00Z', // 2 天前，在默认 7 天回看窗口内
+          },
+        ],
+      })
+      const items: ManualItem[] = []
+      await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
+      expect(items).toEqual([])
+    })
+
+    it('按这个客户实际配置的回看天数判断，不是写死 7 天', async () => {
+      assessConfiguredPageMock.mockResolvedValue({ verified: false, reason: 'check_failed' })
+      resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_page' })
+      const { sb } = fakeDb({
+        partialRows: [
+          {
+            client_id: 'cts',
+            page_id: PAGE_ID,
+            updated_at: '2026-09-20T00:00:00Z',
+            comment_created_at: '2026-09-19T00:00:00Z', // 9 天前
+          },
+        ],
+        lookbackDays: { cts: 30 }, // 这个客户配的是 30 天，9 天前还在窗口内
+      })
+      const items: ManualItem[] = []
+      await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
+      expect(items).toEqual([]) // 30 天窗口内，不算卡死
+    })
+
+    it('"卡了几天"按 updated_at（进入当前状态的时间）算，不按 comment_created_at（评论发出时间）算', async () => {
+      assessConfiguredPageMock.mockResolvedValue({ verified: false, reason: 'check_failed' })
+      resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_page' })
+      const { sb } = fakeDb({
+        partialRows: [
+          {
+            client_id: 'cts',
+            page_id: PAGE_ID,
+            updated_at: '2026-09-26T00:00:00Z', // 系统 2 天前才最后碰过这一行
+            comment_created_at: '2026-08-01T00:00:00Z', // 评论本身 58 天前发的
+          },
+        ],
+      })
+      const items: ManualItem[] = []
+      await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
+      expect(items[0].what).toContain('2 天')
+      expect(items[0].what).not.toContain('58 天')
+    })
+  })
+
   it('令牌是存量 OAuth（client_oauth）→ how 指向重新连接 Meta，不指向 Render 环境变量', async () => {
     assessConfiguredPageMock.mockResolvedValue({ verified: true, via: 'client_oauth' })
     const { sb } = fakeDb({
-      failedRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-01T00:00:00Z' }],
+      exhaustedRows: [{ client_id: 'cts', page_id: PAGE_ID, updated_at: '2026-09-01T00:00:00Z' }],
     })
     const items: ManualItem[] = []
     await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
@@ -227,7 +349,7 @@ describe('pushCommentAutoreplyStuckItems', () => {
     assessConfiguredPageMock.mockResolvedValue({ verified: true, via: 'legacy_client_token' })
     resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_domain' })
     const { sb } = fakeDb({
-      failedRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-01T00:00:00Z' }],
+      exhaustedRows: [{ client_id: 'cts', page_id: PAGE_ID, updated_at: '2026-09-01T00:00:00Z' }],
       clientsRow: { domain: 'ctstours.co.nz', facebook_page_id: PAGE_ID },
     })
     const items: ManualItem[] = []
@@ -243,7 +365,7 @@ describe('pushCommentAutoreplyStuckItems', () => {
     assessConfiguredPageMock.mockResolvedValue({ verified: true, via: 'legacy_client_token' })
     resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_page' })
     const { sb } = fakeDb({
-      failedRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-01T00:00:00Z' }],
+      exhaustedRows: [{ client_id: 'cts', page_id: PAGE_ID, updated_at: '2026-09-01T00:00:00Z' }],
       clientsRow: { domain: null, facebook_page_id: PAGE_ID },
     })
     const items: ManualItem[] = []
@@ -255,7 +377,7 @@ describe('pushCommentAutoreplyStuckItems', () => {
     assessConfiguredPageMock.mockResolvedValue({ verified: true, via: 'legacy_client_token' })
     resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'client_page' })
     const { sb } = fakeDb({
-      failedRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-01T00:00:00Z' }],
+      exhaustedRows: [{ client_id: 'cts', page_id: PAGE_ID, updated_at: '2026-09-01T00:00:00Z' }],
       clientsRow: null,
     })
     const items: ManualItem[] = []
@@ -269,7 +391,7 @@ describe('pushCommentAutoreplyStuckItems', () => {
     assessConfiguredPageMock.mockResolvedValue({ verified: true, via: 'staff_verified' })
     resolveMetaTokenDetailedMock.mockResolvedValue({ token: 'tok', source: 'shared_fallback' })
     const { sb } = fakeDb({
-      failedRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-01T00:00:00Z' }],
+      exhaustedRows: [{ client_id: 'cts', page_id: PAGE_ID, updated_at: '2026-09-01T00:00:00Z' }],
     })
     const items: ManualItem[] = []
     await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
@@ -281,7 +403,7 @@ describe('pushCommentAutoreplyStuckItems', () => {
     assessConfiguredPageMock.mockRejectedValue(new Error('boom'))
     resolveMetaTokenDetailedMock.mockRejectedValue(new Error('boom'))
     const { sb } = fakeDb({
-      failedRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-01T00:00:00Z' }],
+      exhaustedRows: [{ client_id: 'cts', page_id: PAGE_ID, updated_at: '2026-09-01T00:00:00Z' }],
     })
     const items: ManualItem[] = []
     await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
@@ -289,11 +411,12 @@ describe('pushCommentAutoreplyStuckItems', () => {
     expect(items[0].how).toContain('Render 后台')
   })
 
-  it('按 activeClientIds 过滤查询（三条查询都要过滤）', async () => {
-    const { sb, inSpy } = fakeDb({})
+  it('按 activeClientIds 过滤查询（四条 engagements 查询 + 一条 lookback_days 查询都要过滤）', async () => {
+    const { sb, inSpy, configInSpy } = fakeDb({})
     await pushCommentAutoreplyStuckItems(sb, [], NOW, nameOf, ['cts', 'nal'])
     expect(inSpy).toHaveBeenCalledWith('client_id', ['cts', 'nal'])
-    expect(inSpy).toHaveBeenCalledTimes(3) // failed / dm_sent / processing 各一次
+    expect(inSpy).toHaveBeenCalledTimes(4) // 耗尽 failed / dm_sent / processing / 没耗尽 failed 各一次
+    expect(configInSpy).toHaveBeenCalledWith(['cts', 'nal'])
   })
 
   it('failed 分支读取失败 → 抛错（调用方用 .catch 兜底，这里不吞）', async () => {

@@ -13,8 +13,8 @@
  * 直接信号：一条评论该有公开回复、系统也真的试了，但连续 `MAX_ATTEMPTS` 次都
  * 没发出去。这样不管以后失败原因是不是还是权限问题，这条待办都不会失效。
  *
- * 三类行都算「系统不会再自动处理」，但确定性不同（Codex round 1/2 复审 P1，
- * round 8 复审 P1 修正确定性表述）：
+ * 四类行都算「系统不会再自动处理」，但确定性不同（Codex round 1/2 复审 P1，
+ * round 8 复审 P1 修正确定性表述，round 12 复审 P1 补第 4 类）：
  *   1. `reply_status='failed' && attempts>=MAX_ATTEMPTS`——分类已经完成、分类
  *      结果允许回复、也真的试着发了，只是发送本身失败、重试也耗尽——**确定**
  *      该有公开回复。
@@ -34,6 +34,20 @@
  *      这一类跟前两类分开描述，不对它断言"该回复"（Codex round 8 复审 P1：
  *      原版本三类一起说"该有公开回复"，会让 FDE 对垃圾评论或本该跳过的评论
  *      也去手动公开回复）。
+ *   4. `reply_status='failed' && attempts<MAX_ATTEMPTS`，但 `comment_created_at`
+ *      已经早于这个客户 `social_comment_config.lookback_days` 算出的回看窗口——
+ *      `comment-autoreply-engine.ts` 按 `comment.createdAt >= cutoff` 过滤要处理
+ *      的评论列表（早于 cutoff 的评论根本不会进 `comments` 数组），`filterProcessable`
+ *      /`claimComment` 再怎么允许重试也摸不到这一行，重试次数永远停在耗尽之前——
+ *      跟第 1 类一样**确定**该回复、只是没走到耗尽重试那一步，但同样永远不会
+ *      再被自动处理（Codex round 12 复审 P1：原来只查 `attempts>=MAX_ATTEMPTS`，
+ *      这类"卡在半路就先过期"的行完全没被这条通道看见）。修令牌/权限对这一类
+ *      没用——问题是时间窗口，不是权限，`how` 里单独说明。
+ *
+ * "卡了几天"用 `updated_at`（进入当前这个终态/卡住状态的时间），不用
+ * `comment_created_at`（Codex round 12 复审 P1）：一条评论发出时间和系统真正
+ * 卡住的时间可以差出一个 `lookback_days`（最多 30 天）——用评论发出时间会把
+ * "今天才卡住"的行报成"卡了一个月"，`what` 里的持续时间就是编的。
  *
  * 闭环（Codex round 1 复审 P1「没有能让这条待办消失的动作」，round 3 复审 P1
  * 补丁）：FDE 在设置页「评论审计」列表对某一行点「已读」（PATCH
@@ -71,17 +85,34 @@ export { MAX_ATTEMPTS, STALE_PROCESSING_MS } from '@/lib/social/comment-autorepl
 
 export type CommentAutoreplyStuckItemKind = 'comment_autoreply_stuck'
 
+/**
+ * `exhausted`/`dm_only` — confirmed, retries exhausted normally (module
+ * docstring §1–2). `stale_processing` — NOT confirmed, interrupted mid-run
+ * (§3). `orphaned` — confirmed, but aged out of the engine's lookback window
+ * before exhausting retries, so it never will (§4, Codex round 12 复审 P1).
+ */
+type StuckReason = 'exhausted' | 'dm_only' | 'stale_processing' | 'orphaned'
+
 interface StuckRow {
   client_id: string
   page_id: string
-  comment_created_at: string
-  /** `processing` = stale-processing (Codex round 8 复审 P1: unlike the other two, this one is NOT confirmed "should reply" — see the module docstring). */
-  reply_status: 'failed' | 'dm_sent' | 'processing'
+  /** When this row entered its current stuck state — see docstring's "卡了几天" note. */
+  updated_at: string
+  reason: StuckReason
+}
+
+interface RawEngagementRow {
+  client_id: string
+  page_id: string
+  updated_at: string
 }
 
 function daysAgo(iso: string, now: Date): number {
   return Math.floor((now.getTime() - Date.parse(iso)) / 86_400_000)
 }
+
+/** `social_comment_config` DEFAULTS.lookback_days（comment-autoreply-config/route.ts）。 */
+const DEFAULT_LOOKBACK_DAYS = 7
 
 /**
  * 直接链到能重新起一次 Meta 授权的路由，不描述"去找连接 Meta 按钮"（Codex
@@ -193,6 +224,24 @@ async function scopedEnvVarName(
   return row?.facebook_page_id ? pageIdToEnvVar(row.facebook_page_id) : null
 }
 
+/** 每个客户配置的回看天数，读不到 / 没配置行的按默认值兜底。 */
+async function fetchLookbackDaysByClient(
+  supabase: SupabaseClient,
+  activeClientIds: readonly string[],
+): Promise<Map<string, number>> {
+  const rows = await fetchAll<{ client_id: string; lookback_days: number | null }>((from, to) =>
+    supabase
+      .from('social_comment_config')
+      .select('client_id, lookback_days')
+      .in('client_id', activeClientIds)
+      .order('client_id', { ascending: true })
+      .range(from, to),
+  )
+  const map = new Map<string, number>()
+  for (const r of rows) map.set(r.client_id, r.lookback_days ?? DEFAULT_LOOKBACK_DAYS)
+  return map
+}
+
 async function fetchStuckRows(
   supabase: SupabaseClient,
   activeClientIds: readonly string[],
@@ -200,11 +249,11 @@ async function fetchStuckRows(
 ): Promise<StuckRow[]> {
   const staleBefore = new Date(now.getTime() - STALE_PROCESSING_MS).toISOString()
 
-  const [failed, dmOnly, stuckProcessing] = await Promise.all([
-    fetchAll<StuckRow>((from, to) =>
+  const [exhausted, dmOnly, staleProcessing, partialFailures, lookbackByClient] = await Promise.all([
+    fetchAll<RawEngagementRow>((from, to) =>
       supabase
         .from('social_comment_engagements')
-        .select('client_id, page_id, comment_created_at, reply_status')
+        .select('client_id, page_id, updated_at')
         .eq('reply_status', 'failed')
         .gte('attempts', MAX_ATTEMPTS)
         .is('reviewed_at', null)
@@ -212,10 +261,10 @@ async function fetchStuckRows(
         .order('id', { ascending: true })
         .range(from, to),
     ),
-    fetchAll<StuckRow>((from, to) =>
+    fetchAll<RawEngagementRow>((from, to) =>
       supabase
         .from('social_comment_engagements')
-        .select('client_id, page_id, comment_created_at, reply_status')
+        .select('client_id, page_id, updated_at')
         .eq('reply_status', 'dm_sent')
         .is('public_reply_id', null)
         .is('reviewed_at', null)
@@ -223,10 +272,10 @@ async function fetchStuckRows(
         .order('id', { ascending: true })
         .range(from, to),
     ),
-    fetchAll<StuckRow>((from, to) =>
+    fetchAll<RawEngagementRow>((from, to) =>
       supabase
         .from('social_comment_engagements')
-        .select('client_id, page_id, comment_created_at, reply_status')
+        .select('client_id, page_id, updated_at')
         .eq('reply_status', 'processing')
         .lt('updated_at', staleBefore)
         .is('reviewed_at', null)
@@ -234,8 +283,37 @@ async function fetchStuckRows(
         .order('id', { ascending: true })
         .range(from, to),
     ),
+    // 还没耗尽重试次数（Codex round 12 复审 P1）：单独查出来，是不是"卡死"要
+    // 看这条评论是否已经越过这个客户的回看窗口——不是所有 attempts 没耗尽的
+    // failed 行都算卡死，大多数还会在下一轮正常重试。
+    fetchAll<RawEngagementRow & { comment_created_at: string }>((from, to) =>
+      supabase
+        .from('social_comment_engagements')
+        .select('client_id, page_id, updated_at, comment_created_at')
+        .eq('reply_status', 'failed')
+        .lt('attempts', MAX_ATTEMPTS)
+        .is('reviewed_at', null)
+        .in('client_id', activeClientIds)
+        .order('id', { ascending: true })
+        .range(from, to),
+    ),
+    fetchLookbackDaysByClient(supabase, activeClientIds),
   ])
-  return [...failed, ...dmOnly, ...stuckProcessing]
+
+  const orphaned: StuckRow[] = partialFailures
+    .filter((r) => {
+      const lookbackDays = lookbackByClient.get(r.client_id) ?? DEFAULT_LOOKBACK_DAYS
+      const cutoff = now.getTime() - lookbackDays * 86_400_000
+      return Date.parse(r.comment_created_at) < cutoff
+    })
+    .map((r) => ({ client_id: r.client_id, page_id: r.page_id, updated_at: r.updated_at, reason: 'orphaned' as const }))
+
+  return [
+    ...exhausted.map((r) => ({ ...r, reason: 'exhausted' as const })),
+    ...dmOnly.map((r) => ({ ...r, reason: 'dm_only' as const })),
+    ...staleProcessing.map((r) => ({ ...r, reason: 'stale_processing' as const })),
+    ...orphaned,
+  ]
 }
 
 export async function pushCommentAutoreplyStuckItems(
@@ -250,31 +328,34 @@ export async function pushCommentAutoreplyStuckItems(
 
   const rows = await fetchStuckRows(supabase, activeClientIds, now)
 
-  const byClient = new Map<string, { count: number; oldest: string; pageId: string; stale: number }>()
+  const byClient = new Map<string, { count: number; oldest: string; pageId: string; stale: number; orphaned: number }>()
   for (const row of rows) {
-    const stale = row.reply_status === 'processing' ? 1 : 0
+    const stale = row.reason === 'stale_processing' ? 1 : 0
+    const orphaned = row.reason === 'orphaned' ? 1 : 0
     const cur = byClient.get(row.client_id)
     if (!cur) {
-      byClient.set(row.client_id, { count: 1, oldest: row.comment_created_at, pageId: row.page_id, stale })
+      byClient.set(row.client_id, { count: 1, oldest: row.updated_at, pageId: row.page_id, stale, orphaned })
     } else {
       cur.count += 1
       cur.stale += stale
-      if (row.comment_created_at < cur.oldest) cur.oldest = row.comment_created_at
+      cur.orphaned += orphaned
+      if (row.updated_at < cur.oldest) cur.oldest = row.updated_at
     }
   }
 
   for (const [clientId, agg] of Array.from(byClient.entries())) {
     const days = daysAgo(agg.oldest, now)
     const guidance = await tokenSourceGuidance(supabase, clientId, agg.pageId, env)
-    const confirmed = agg.count - agg.stale
+    const confirmed = agg.count - agg.stale - agg.orphaned
 
-    // 确定该回复的（failed / dm_sent 半失败）跟处理到一半中断、不确定原本该
-    // 怎么处理的（processing 卡死）分开描述，不对后者断言"该回复"——中断可能
-    // 发生在分类完成之前，那种情况下也可能本该隐藏成垃圾或本来就不回复
-    // （Codex round 8 复审 P1）。
+    // 三类分开描述，不对"不确定"的那类断言"该回复"，也不对"越窗"的那类暗示
+    // "修好权限就会自动补上"（Codex round 8 复审 P1、round 12 复审 P1）。
     const whatParts: string[] = []
     if (confirmed > 0) {
       whatParts.push(`${confirmed} 条确定该有公开回复但发不出去了（发送重试耗尽 / 私信发了但公开回复没发）`)
+    }
+    if (agg.orphaned > 0) {
+      whatParts.push(`${agg.orphaned} 条失败一两次后还没到重试上限就先超出了系统回看评论的时间窗口，不管权限修没修好都不会再被自动处理`)
     }
     if (agg.stale > 0) {
       whatParts.push(`${agg.stale} 条处理到一半中断，原本该怎么处理还不确定（可能该回复、可能该隐藏成垃圾、也可能本该跳过不回，中断导致分类没能走完）`)
@@ -285,7 +366,7 @@ export async function pushCommentAutoreplyStuckItems(
       client_id: clientId,
       client_name: nameOf(clientId),
       what:
-        `${whatParts.join('，另外 ')}，系统都已经不会再自动处理了，最早一条已经卡了 ${days} 天。` +
+        `${whatParts.join('，另外 ')}，最早一条已经卡了 ${days} 天。` +
         '具体原因系统存的是引擎写死的通用文案，看不出细节——常见是 Facebook Page 令牌缺了发评论回复需要的权限，' +
         '也可能是限流或 Meta 接口的其他问题，需要人工核实。',
       how:
@@ -293,6 +374,7 @@ export async function pushCommentAutoreplyStuckItems(
         '再去 Facebook 主页对应评论下面看一眼是不是已经有回复了（个别卡住的是系统其实发出去了、只是没能把"发成功"这件事存回数据库，不是真的没回，' +
         '直接补发会变成重复回复客户）——' +
         (confirmed > 0 ? '确定该回复的这些，没有回复的才手动回一下（系统不会补发）；' : '') +
+        (agg.orphaned > 0 ? '超出回看窗口的这些同样要手动回——这几条不会因为权限修好就自动重新处理；' : '') +
         (agg.stale > 0
           ? '处理到一半中断的这些先自己判断该怎么处理，不要不分青红皂白照单全回——明显是垃圾广告就去 Facebook 手动隐藏，不确定要不要回、或者本来就不该回（比如这类评论客户设置里关了自动回复）就不用勉强回，跳过即可；'
           : '') +
