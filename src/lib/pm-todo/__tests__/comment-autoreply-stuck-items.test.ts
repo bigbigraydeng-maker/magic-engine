@@ -25,25 +25,35 @@ interface EngagementRow {
   comment_created_at: string
 }
 
+type Branch = 'failed' | 'dm_sent' | 'processing'
+
 /**
- * 假 `.from('social_comment_engagements')` 链：两条查询（failed 分支 / dm_sent
- * 分支）各自独立调用 `.from()`，靠这次调用里出现的 `reply_status` 过滤值区分
- * 该回哪一份数据，最后在 `.in()` 收尾。
+ * 假 `.from('social_comment_engagements')` 链：三条查询（failed / dm_sent /
+ * 卡死的 processing）各自独立调用 `.from()`，靠这次调用里出现的 `reply_status`
+ * 过滤值区分该回哪一份数据，`fetchAll` 的分页在 `.order().range()` 收尾
+ * （单页测试数据 < 1000 行，一次 `.range()` 就到底，不需要模拟翻页）。
  */
-function engagementsChain(failedRows: EngagementRow[], dmRows: EngagementRow[], errorMessage?: string) {
-  let branch: 'failed' | 'dm_sent' | null = null
+function engagementsChain(rowsByBranch: Partial<Record<Branch, EngagementRow[]>>, errorMessage?: string) {
+  let branch: Branch | null = null
   const chain = {
     select: () => chain,
     eq: (col: string, val: unknown) => {
-      if (col === 'reply_status') branch = val as 'failed' | 'dm_sent'
+      if (col === 'reply_status') branch = val as Branch
       return chain
     },
     gte: () => chain,
+    lt: () => chain,
     is: () => chain,
-    in: async (_col: string, ids: readonly string[]) => {
+    in: (_col: string, ids: readonly string[]) => {
+      chain._ids = ids
+      return chain
+    },
+    order: () => chain,
+    _ids: [] as readonly string[],
+    range: async () => {
       if (errorMessage) return { data: null, error: { message: errorMessage } }
-      const rows = branch === 'failed' ? failedRows : dmRows
-      return { data: rows.filter((r) => ids.includes(r.client_id)), error: null }
+      const rows = (branch && rowsByBranch[branch]) || []
+      return { data: rows.filter((r) => chain._ids.includes(r.client_id)), error: null }
     },
   }
   return chain
@@ -52,6 +62,7 @@ function engagementsChain(failedRows: EngagementRow[], dmRows: EngagementRow[], 
 interface FakeDbOptions {
   failedRows?: EngagementRow[]
   dmRows?: EngagementRow[]
+  processingRows?: EngagementRow[]
   errorMessage?: string
 }
 
@@ -60,9 +71,12 @@ function fakeDb(opts: FakeDbOptions) {
   const sb = {
     from: (table: string) => {
       if (table !== 'social_comment_engagements') throw new Error(`unexpected table ${table}`)
-      const chain = engagementsChain(opts.failedRows ?? [], opts.dmRows ?? [], opts.errorMessage)
+      const chain = engagementsChain(
+        { failed: opts.failedRows ?? [], dm_sent: opts.dmRows ?? [], processing: opts.processingRows ?? [] },
+        opts.errorMessage,
+      )
       const originalIn = chain.in
-      chain.in = async (...args: Parameters<typeof originalIn>) => {
+      chain.in = (...args: Parameters<typeof originalIn>) => {
         inSpy(...args)
         return originalIn(...args)
       }
@@ -121,16 +135,28 @@ describe('pushCommentAutoreplyStuckItems', () => {
     expect(items[0].what).toContain('1 条')
   })
 
-  it('failed 和 dm_sent 两类同一客户会合并计数', async () => {
+  it('卡在 processing 超过宽限期的行也算卡死（Codex round 2 P1）', async () => {
     assessConfiguredPageMock.mockResolvedValue({ verified: false, reason: 'check_failed' })
     const { sb } = fakeDb({
-      failedRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-08T00:00:00Z' }],
-      dmRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-08-23T00:00:00Z' }],
+      processingRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-01T00:00:00Z' }],
     })
     const items: ManualItem[] = []
     await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
     expect(items).toHaveLength(1)
-    expect(items[0].what).toContain('2 条')
+    expect(items[0].what).toContain('1 条')
+  })
+
+  it('三类同一客户会合并计数', async () => {
+    assessConfiguredPageMock.mockResolvedValue({ verified: false, reason: 'check_failed' })
+    const { sb } = fakeDb({
+      failedRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-08T00:00:00Z' }],
+      dmRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-09-10T00:00:00Z' }],
+      processingRows: [{ client_id: 'cts', page_id: PAGE_ID, comment_created_at: '2026-08-23T00:00:00Z' }],
+    })
+    const items: ManualItem[] = []
+    await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
+    expect(items).toHaveLength(1)
+    expect(items[0].what).toContain('3 条')
     expect(items[0].what).toContain('36 天')
   })
 
@@ -168,11 +194,11 @@ describe('pushCommentAutoreplyStuckItems', () => {
     expect(items[0].how).toContain('Render 后台')
   })
 
-  it('按 activeClientIds 过滤查询（两条查询都要过滤）', async () => {
+  it('按 activeClientIds 过滤查询（三条查询都要过滤）', async () => {
     const { sb, inSpy } = fakeDb({})
     await pushCommentAutoreplyStuckItems(sb, [], NOW, nameOf, ['cts', 'nal'])
     expect(inSpy).toHaveBeenCalledWith('client_id', ['cts', 'nal'])
-    expect(inSpy).toHaveBeenCalledTimes(2) // failed 分支 + dm_sent 分支各一次
+    expect(inSpy).toHaveBeenCalledTimes(3) // failed / dm_sent / processing 各一次
   })
 
   it('failed 分支读取失败 → 抛错（调用方用 .catch 兜底，这里不吞）', async () => {

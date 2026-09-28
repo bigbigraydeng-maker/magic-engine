@@ -13,11 +13,18 @@
  * 直接信号：一条评论该有公开回复、系统也真的试了，但连续 `MAX_ATTEMPTS` 次都
  * 没发出去。这样不管以后失败原因是不是还是权限问题，这条待办都不会失效。
  *
- * 两类行都算「该有公开回复但永远不会有」（Codex round 1 复审 P1）：
+ * 三类行都算「该有公开回复但永远不会有」（Codex round 1/2 复审 P1）：
  *   1. `reply_status='failed' && attempts>=MAX_ATTEMPTS`——送失败，重试也耗尽。
  *   2. `reply_status='dm_sent' && public_reply_id is null`——`processClaimedComment`
  *      的状态判定只要私信发成功就写 `dm_sent`，哪怕公开回复同时失败；`dm_sent`
  *      在 `TERMINAL_OR_INFLIGHT` 里，永远不会再重试公开回复这一半。
+ *   3. `reply_status='processing'` 且卡住超过 `STALE_PROCESSING_MS`——`claimComment`
+ *      先把行改成 `processing` 再调 `processClaimedComment`；如果这中间那次调用
+ *      抛错/整个 cron 调用超时，行会永远停在 `processing`（`filterProcessable`
+ *      只接纳"没有行"或"`failed` 且 attempts 未耗尽"两种，`processing` 两种都不是），
+ *      既不会被重试，也不会被判定为失败——静默失踪，比 `failed` 更隐蔽。
+ *      `STALE_PROCESSING_MS` 给了一个远超单次处理耗时的宽限期，避免把正在跑的
+ *      同一轮 cron 误判成卡死。
  *
  * 闭环（Codex round 1 复审 P1「没有能让这条待办消失的动作」）：FDE 在设置页
  * 「评论审计」列表对某一行点「已读」（PATCH .../comment-engagements action=
@@ -29,6 +36,10 @@
  * 环境变量只在没有存量令牌时才会被用到——对 OAuth 客户，改环境变量不会生效，
  * 必须走"重新连接 Meta"。
  *
+ * 三条查询都走 `fetchAll` 分页（Codex round 2 复审 P2）：PostgREST 单次查询硬顶
+ * 1000 行、超过静默截断（见 supabase-paginate.ts 头注 2026-07-29 CTS 实测事故），
+ * 不分页在这条通道跨全平台客户累计卡住行数变多后会悄悄漏算、漏报某个客户。
+ *
  * 本文件只读一行 `mark_reviewed` 之外不碰 social_comment_engagements 任何数据。
  */
 
@@ -37,8 +48,16 @@ import type { ManualItem } from './manual-item-types'
 import { MAX_ATTEMPTS } from '@/lib/social/comment-autoreply-engine'
 import { APP_BASE } from './binding-request-items'
 import { assessConfiguredPage } from '@/lib/meta/page-sync-authorization'
+import { fetchAll } from '@/lib/supabase-paginate'
 
 export type CommentAutoreplyStuckItemKind = 'comment_autoreply_stuck'
+
+/**
+ * 卡在 `processing` 超过这么久才算卡死。这个通道最快每 30 分钟跑一轮
+ * （`social-comment-autoreply` cron 头注），单条评论的分类+发送正常是秒级——
+ * 24 小时留了远超"同一轮还在跑"的余量，只抓真的被中断遗弃的行。
+ */
+const STALE_PROCESSING_MS = 24 * 60 * 60 * 1000
 
 interface StuckRow {
   client_id: string
@@ -79,26 +98,46 @@ async function tokenSourceHow(
 async function fetchStuckRows(
   supabase: SupabaseClient,
   activeClientIds: readonly string[],
+  now: Date,
 ): Promise<StuckRow[]> {
-  const [failed, dmOnly] = await Promise.all([
-    supabase
-      .from('social_comment_engagements')
-      .select('client_id, page_id, comment_created_at')
-      .eq('reply_status', 'failed')
-      .gte('attempts', MAX_ATTEMPTS)
-      .is('reviewed_at', null)
-      .in('client_id', activeClientIds),
-    supabase
-      .from('social_comment_engagements')
-      .select('client_id, page_id, comment_created_at')
-      .eq('reply_status', 'dm_sent')
-      .is('public_reply_id', null)
-      .is('reviewed_at', null)
-      .in('client_id', activeClientIds),
+  const staleBefore = new Date(now.getTime() - STALE_PROCESSING_MS).toISOString()
+
+  const [failed, dmOnly, stuckProcessing] = await Promise.all([
+    fetchAll<StuckRow>((from, to) =>
+      supabase
+        .from('social_comment_engagements')
+        .select('client_id, page_id, comment_created_at')
+        .eq('reply_status', 'failed')
+        .gte('attempts', MAX_ATTEMPTS)
+        .is('reviewed_at', null)
+        .in('client_id', activeClientIds)
+        .order('id', { ascending: true })
+        .range(from, to),
+    ),
+    fetchAll<StuckRow>((from, to) =>
+      supabase
+        .from('social_comment_engagements')
+        .select('client_id, page_id, comment_created_at')
+        .eq('reply_status', 'dm_sent')
+        .is('public_reply_id', null)
+        .is('reviewed_at', null)
+        .in('client_id', activeClientIds)
+        .order('id', { ascending: true })
+        .range(from, to),
+    ),
+    fetchAll<StuckRow>((from, to) =>
+      supabase
+        .from('social_comment_engagements')
+        .select('client_id, page_id, comment_created_at')
+        .eq('reply_status', 'processing')
+        .lt('updated_at', staleBefore)
+        .is('reviewed_at', null)
+        .in('client_id', activeClientIds)
+        .order('id', { ascending: true })
+        .range(from, to),
+    ),
   ])
-  if (failed.error) throw new Error(`social_comment_engagements 读取失败：${failed.error.message}`)
-  if (dmOnly.error) throw new Error(`social_comment_engagements 读取失败：${dmOnly.error.message}`)
-  return [...(failed.data ?? []), ...(dmOnly.data ?? [])] as StuckRow[]
+  return [...failed, ...dmOnly, ...stuckProcessing]
 }
 
 export async function pushCommentAutoreplyStuckItems(
@@ -111,7 +150,7 @@ export async function pushCommentAutoreplyStuckItems(
 ): Promise<void> {
   if (activeClientIds.length === 0) return
 
-  const rows = await fetchStuckRows(supabase, activeClientIds)
+  const rows = await fetchStuckRows(supabase, activeClientIds, now)
 
   const byClient = new Map<string, { count: number; oldest: string; pageId: string }>()
   for (const row of rows) {
