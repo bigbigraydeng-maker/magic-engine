@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-09-29
 source: session:31cdcfa9
 done_on: 2026-09-29
-done_ref: pr:2184
+done_ref: pr:2189
 verify_by: 2026-10-05
 verify_how: "抽 2-3 个现存的、没有合并最新主干的旧 PR，触发一次新的检查跑（推一次空提交或点 Rerun），确认「Ledger entries valid」不再报「scripts/ledger-check-frozen.sh 找不到文件」这类错误，改成显示 ::notice 跳过；同时确认新开的、已经带着这份脚本的 PR 上这项检查真的在跑（不是也被静默跳过）。"
 ---
