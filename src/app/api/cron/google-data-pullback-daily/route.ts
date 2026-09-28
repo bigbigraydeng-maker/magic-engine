@@ -664,7 +664,7 @@ export async function GET(req: NextRequest) {
   // Collect per-client errors so postmortem is possible without Render logs.
   // Diagnostic only — no behavior change.
   const errors = results.flatMap(r => {
-    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ads_growth_state'|'ad_daily_secondary'; error: string }> = []
+    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ads_growth_state'|'ad_daily_secondary'|'circuit_breaker_check'; error: string }> = []
     if (r.gsc?.success === false && r.gsc.error)               out.push({ client_id: r.client_id, source: 'gsc',        error: r.gsc.error })
     if (r.ga4?.success === false && r.ga4.error)               out.push({ client_id: r.client_id, source: 'ga4',        error: r.ga4.error })
     if (r.meta?.success === false && r.meta.error)             out.push({ client_id: r.client_id, source: 'meta',       error: r.meta.error })
@@ -676,6 +676,16 @@ export async function GET(req: NextRequest) {
     if (r.ad_digest && !r.ad_digest.sent && r.ad_digest.error)  out.push({ client_id: r.client_id, source: 'ad_digest', error: r.ad_digest.error })
     if (r.ad_diagnostics?.error) out.push({ client_id: r.client_id, source: 'ad_diagnostics', error: r.ad_diagnostics.error })
     if (r.ads_growth_state?.error) out.push({ client_id: r.client_id, source: 'ads_growth_state', error: r.ads_growth_state.error })
+    // 🔴 Codex P1 复审：熔断检查事件发不出去（Inngest 短暂不可用/key 错/超时）
+    // 不能悄无声息——那天这个 bounded_auto 客户的花费安全检查就是没跑，且
+    // 事件 id 被这次尝试消耗掉，不会自动补。跟 ad_daily_secondary 同一原则：
+    // 不进 failed（这是全新的 best-effort 步骤，不该训练 PM 忽略失败邮件），
+    // 但必须在 cron_run_logs 里留痕，不能人工翻页都翻不到。真正"主动跳过"
+    // （complete/sync 判断为不完整）的 error 以 'skipped:' 开头，不算失败。
+    if (r.circuit_breaker_check && !r.circuit_breaker_check.sent && r.circuit_breaker_check.error &&
+        !r.circuit_breaker_check.error.startsWith('skipped:')) {
+      out.push({ client_id: r.client_id, source: 'circuit_breaker_check', error: r.circuit_breaker_check.error })
+    }
     // 2026-09-13 (魏征 review): a secondary account's sync failure used to be
     // completely invisible — not in `failed`, not here, not console.error'd —
     // the exact "looks fine, actually never worked" shape this whole PR is
@@ -701,7 +711,8 @@ export async function GET(req: NextRequest) {
   // errors that actually count as failures belong here — ad_level and
   // ad_daily_secondary are excluded (both best-effort, neither triggers `failed`)
   // and must not become the headline of an email they never triggered.
-  const headlineError = errors.find(e => e.source !== 'ad_level' && e.source !== 'adset_level' && e.source !== 'ad_daily_secondary')
+  const headlineError = errors.find(e =>
+    e.source !== 'ad_level' && e.source !== 'adset_level' && e.source !== 'ad_daily_secondary' && e.source !== 'circuit_breaker_check')
   const errorMessage = failed > 0 && headlineError
     ? `${headlineError.source}: ${headlineError.error}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ''}`
     : undefined

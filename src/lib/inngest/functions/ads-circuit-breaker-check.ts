@@ -25,8 +25,12 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { inngest, CLOUD_FN_PREFIX } from '../client'
 import { supabaseAdmin } from '@/lib/supabase'
 import { ADS_CIRCUIT_BREAKER_CHECK_DUE } from '../ads-events'
-import { evaluateCircuitBreaker, CIRCUIT_BREAKER_LOOKBACK_DAYS } from '@/lib/ads-strategy/circuit-breaker'
-import { fetchClientDailySpendCents } from '@/lib/ads-strategy/circuit-breaker-spend'
+import {
+  evaluateCircuitBreaker,
+  CIRCUIT_BREAKER_LOOKBACK_DAYS,
+  type CircuitBreakerVerdict,
+} from '@/lib/ads-strategy/circuit-breaker'
+import { fetchClientDailySpendCentsByAccount } from '@/lib/ads-strategy/circuit-breaker-spend'
 import { listAdsActionKeys } from '@/lib/ads-strategy/autonomy/sync-policy'
 
 export const ADS_CIRCUIT_BREAKER_CHECK_FN_ID = `${CLOUD_FN_PREFIX}ads-circuit-breaker-check`
@@ -85,6 +89,39 @@ async function readAutonomyMode(sb: SupabaseClient, clientId: string): Promise<'
   return data.autonomy_mode === 'bounded_auto' ? 'bounded_auto' : 'observe'
 }
 
+interface AccountVerdict {
+  readonly adAccountId: string
+  readonly verdict: CircuitBreakerVerdict
+}
+
+/**
+ * 多账户里最严重的那个代表整个客户：tripped > undeterminable > not_tripped
+ * （宁可保守）。触发动作本身仍是客户级（`client_automation_policies` 没有
+ * 账户维度），但判定必须按账户分别算，见本文件顶部说明。
+ */
+function worstVerdict(
+  perAccount: readonly AccountVerdict[],
+):
+  | { kind: 'tripped'; adAccountId: string; reason: string }
+  | { kind: 'undeterminable'; adAccountId: string; reason: string }
+  | { kind: 'not_tripped' } {
+  const tripped = perAccount.find(
+    (a): a is AccountVerdict & { verdict: Extract<CircuitBreakerVerdict, { tripped: true }> } =>
+      a.verdict.tripped === true,
+  )
+  if (tripped) {
+    return { kind: 'tripped', adAccountId: tripped.adAccountId, reason: tripped.verdict.reason }
+  }
+  const undeterminable = perAccount.find(
+    (a): a is AccountVerdict & { verdict: Extract<CircuitBreakerVerdict, { tripped: 'undeterminable' }> } =>
+      a.verdict.tripped === 'undeterminable',
+  )
+  if (undeterminable) {
+    return { kind: 'undeterminable', adAccountId: undeterminable.adAccountId, reason: undeterminable.verdict.reason }
+  }
+  return { kind: 'not_tripped' }
+}
+
 /** 逐键调触发函数；单键失败即抛（Inngest 按 retries 重试，SQL 函数本身幂等，重试安全）。 */
 async function tripAllKeys(sb: SupabaseClient, clientId: string, reason: string): Promise<AdsTripKeyResult[]> {
   const results: AdsTripKeyResult[] = []
@@ -122,32 +159,56 @@ export function createAdsCircuitBreakerCheckFunction(deps: AdsCircuitBreakerChec
       // step 抛错时重试（配了 retries: 2），正常返回值一律当"成功"，重试配置
       // 会形同虚设；而且事件 id 固定为 client_id:date，一次"正常返回的失败"
       // 会让这天的安全检查永久跳过、没有任何可见回执或重试机会。
-      const spend = await step.run('read-spend', async () => {
-        const result = await fetchClientDailySpendCents(deps.getSupabase(), clientId, date, CIRCUIT_BREAKER_LOOKBACK_DAYS)
+      const perAccountSpend = await step.run('read-spend', async () => {
+        const result = await fetchClientDailySpendCentsByAccount(
+          deps.getSupabase(),
+          clientId,
+          date,
+          CIRCUIT_BREAKER_LOOKBACK_DAYS,
+        )
         if (result === null) throw new Error(`read-spend failed: ad_daily_insights unreadable for ${clientId}:${date}`)
         return result
       })
 
-      const verdict = evaluateCircuitBreaker({
-        clientId,
-        todayTotalSpendCents: spend.todayTotalSpendCents,
-        recentDailySpend: spend.recentDailySpend,
-      })
-
-      if (verdict.tripped !== true) {
+      // 窗口内一条 campaign 花费行都没有（还没有数据，或客户没有登记任何账户）——
+      // 没有账户可判，等价于"数据不充分"，不熔不放。
+      if (perAccountSpend.length === 0) {
         return {
           ok: true,
           client_id: clientId,
           date,
-          verdict: verdict.tripped === 'undeterminable' ? 'undeterminable' : 'not_tripped',
-          reason: verdict.tripped === 'undeterminable' ? verdict.reason : undefined,
+          verdict: 'undeterminable',
+          reason: `窗口内没有任何账户的花费数据（${clientId}:${date}）`,
           applied: [],
         }
       }
 
-      const applied = await step.run('trip-policy', () => tripAllKeys(deps.getSupabase(), clientId, verdict.reason))
+      // 🔴 Codex P1 复审：按账户分别判定，不按客户合计——见本文件顶部说明。
+      const perAccountVerdict: AccountVerdict[] = perAccountSpend.map((s) => ({
+        adAccountId: s.adAccountId,
+        verdict: evaluateCircuitBreaker({
+          clientId,
+          todayTotalSpendCents: s.todayTotalSpendCents,
+          recentDailySpend: s.recentDailySpend,
+        }),
+      }))
+      const worst = worstVerdict(perAccountVerdict)
 
-      return { ok: true, client_id: clientId, date, verdict: 'tripped', reason: verdict.reason, applied }
+      if (worst.kind !== 'tripped') {
+        return {
+          ok: true,
+          client_id: clientId,
+          date,
+          verdict: worst.kind,
+          reason: worst.kind === 'undeterminable' ? `[${worst.adAccountId}] ${worst.reason}` : undefined,
+          applied: [],
+        }
+      }
+
+      const tripReason = `[${worst.adAccountId}] ${worst.reason}`
+      const applied = await step.run('trip-policy', () => tripAllKeys(deps.getSupabase(), clientId, tripReason))
+
+      return { ok: true, client_id: clientId, date, verdict: 'tripped', reason: tripReason, applied }
     },
   )
 }

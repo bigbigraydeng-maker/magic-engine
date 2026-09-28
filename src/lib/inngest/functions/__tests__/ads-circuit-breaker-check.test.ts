@@ -47,6 +47,7 @@ interface ConfigRow {
 
 interface InsightRow {
   insight_date: string
+  ad_account_id: string
   spend: number | null
 }
 
@@ -58,11 +59,13 @@ interface FakeOpts {
   rpcError?: string
 }
 
-/** 按天生成 7 条非零花费历史（美元），从 date 往前数 lookbackDays 天，不含 date 本身。 */
-function historyRows(date: string, dollarsPerDay: number[]): InsightRow[] {
+const ACCOUNT = 'act_1'
+
+/** 按天生成 7 条非零花费历史（美元），从 date 往前数 lookbackDays 天，不含 date 本身。单账户，默认 ACCOUNT。 */
+function historyRows(date: string, dollarsPerDay: number[], adAccountId: string = ACCOUNT): InsightRow[] {
   return dollarsPerDay.map((spend, i) => {
     const ms = Date.parse(`${date}T00:00:00Z`) - (dollarsPerDay.length - i) * 86_400_000
-    return { insight_date: new Date(ms).toISOString().slice(0, 10), spend }
+    return { insight_date: new Date(ms).toISOString().slice(0, 10), ad_account_id: adAccountId, spend }
   })
 }
 
@@ -203,7 +206,7 @@ describe('ads-circuit-breaker-check handler', () => {
   it('今天花费在 3 倍中位数以内 → not_tripped，不调 rpc', async () => {
     const { sb, rpc } = fakeSupabase({
       config: { autonomy_mode: 'bounded_auto' },
-      insights: [...historyRows(DATE, [50, 50, 50, 40, 40, 50, 60]), { insight_date: DATE, spend: 100 }],
+      insights: [...historyRows(DATE, [50, 50, 50, 40, 40, 50, 60]), { insight_date: DATE, ad_account_id: ACCOUNT, spend: 100 }],
     })
     const result = await run(sb)
     expect(result).toMatchObject({ ok: true, verdict: 'not_tripped' })
@@ -213,7 +216,7 @@ describe('ads-circuit-breaker-check handler', () => {
   it('🔴 今天花费超 3 倍中位数 → tripped，每个 ads.* 键调一次 ads_trip_circuit_breaker_policy', async () => {
     const { sb, rpc } = fakeSupabase({
       config: { autonomy_mode: 'bounded_auto' },
-      insights: [...historyRows(DATE, [50, 50, 50, 40, 40, 50, 60]), { insight_date: DATE, spend: 200 }],
+      insights: [...historyRows(DATE, [50, 50, 50, 40, 40, 50, 60]), { insight_date: DATE, ad_account_id: ACCOUNT, spend: 200 }],
       rpcOutcome: () => 'tripped',
     })
     const result = (await run(sb)) as { ok: true; verdict: string; applied: { key: string; outcome: string }[] }
@@ -232,10 +235,53 @@ describe('ads-circuit-breaker-check handler', () => {
     }
   })
 
+  it('🔴 Codex P1：多账户——A 账户异常被 B 账户稀释的场景必须照样触发（按账户分别判定，不按客户合计）', async () => {
+    // 账户 A：稳定 7 天 $100/天，今天冲到 $400（4x，单独看该触发）。
+    // 账户 B：稳定 7 天 $1000/天，今天也是 $1000（完全正常）。
+    // 客户合计：历史 7*1100=7700，今天 1400，倍率仅约 1.27x——按客户合计不会触发，
+    // 必须按账户分别判定才能抓到账户 A。
+    const { sb, rpc } = fakeSupabase({
+      config: { autonomy_mode: 'bounded_auto' },
+      insights: [
+        ...historyRows(DATE, [100, 100, 100, 100, 100, 100, 100], 'act_a'),
+        { insight_date: DATE, ad_account_id: 'act_a', spend: 400 },
+        ...historyRows(DATE, [1000, 1000, 1000, 1000, 1000, 1000, 1000], 'act_b'),
+        { insight_date: DATE, ad_account_id: 'act_b', spend: 1000 },
+      ],
+      rpcOutcome: () => 'tripped',
+    })
+    const result = (await run(sb)) as { ok: true; verdict: string; reason?: string }
+    expect(result.verdict).toBe('tripped')
+    expect(result.reason).toContain('act_a') // 报告里点名是哪个账户触发的
+    expect(rpc).toHaveBeenCalled() // 客户级动作仍然触发——账户 B 正常不代表客户整体放行
+  })
+
+  it('多账户都正常 → not_tripped，不调 rpc', async () => {
+    const { sb, rpc } = fakeSupabase({
+      config: { autonomy_mode: 'bounded_auto' },
+      insights: [
+        ...historyRows(DATE, [100, 100, 100, 100, 100, 100, 100], 'act_a'),
+        { insight_date: DATE, ad_account_id: 'act_a', spend: 110 },
+        ...historyRows(DATE, [1000, 1000, 1000, 1000, 1000, 1000, 1000], 'act_b'),
+        { insight_date: DATE, ad_account_id: 'act_b', spend: 1000 },
+      ],
+    })
+    const result = await run(sb)
+    expect(result).toMatchObject({ ok: true, verdict: 'not_tripped' })
+    expect(rpc).not.toHaveBeenCalled()
+  })
+
+  it('窗口内完全没有花费数据（新客户/没有登记账户）→ undeterminable，不调 rpc', async () => {
+    const { sb, rpc } = fakeSupabase({ config: { autonomy_mode: 'bounded_auto' }, insights: [] })
+    const result = await run(sb)
+    expect(result).toMatchObject({ ok: true, verdict: 'undeterminable' })
+    expect(rpc).not.toHaveBeenCalled()
+  })
+
   it('已经是熔断器自己设的 deny（already_tripped）→ 照常返回，不额外报错', async () => {
     const { sb, rpc } = fakeSupabase({
       config: { autonomy_mode: 'bounded_auto' },
-      insights: [...historyRows(DATE, [50, 50, 50, 40, 40, 50, 60]), { insight_date: DATE, spend: 200 }],
+      insights: [...historyRows(DATE, [50, 50, 50, 40, 40, 50, 60]), { insight_date: DATE, ad_account_id: ACCOUNT, spend: 200 }],
       rpcOutcome: () => 'already_tripped',
     })
     const result = (await run(sb)) as { ok: true; applied: { outcome: string }[] }
@@ -245,7 +291,7 @@ describe('ads-circuit-breaker-check handler', () => {
   it('rpc 报错 → 整个 handler 抛错（交给 Inngest 按 retries 重试）', async () => {
     const { sb } = fakeSupabase({
       config: { autonomy_mode: 'bounded_auto' },
-      insights: [...historyRows(DATE, [50, 50, 50, 40, 40, 50, 60]), { insight_date: DATE, spend: 200 }],
+      insights: [...historyRows(DATE, [50, 50, 50, 40, 40, 50, 60]), { insight_date: DATE, ad_account_id: ACCOUNT, spend: 200 }],
       rpcError: 'boom',
     })
     await expect(run(sb)).rejects.toThrow('boom')
