@@ -62,7 +62,7 @@ export interface AdsTripKeyResult {
 export type AdsCircuitBreakerCheckReceipt =
   | {
       ok: false
-      reason: 'invalid_payload' | 'no_config' | 'not_bounded_auto' | 'spend_unreadable'
+      reason: 'invalid_payload' | 'no_config' | 'not_bounded_auto'
       client_id: string | null
     }
   | {
@@ -118,10 +118,15 @@ export function createAdsCircuitBreakerCheckFunction(deps: AdsCircuitBreakerChec
       if (mode === null) return { ok: false, reason: 'no_config', client_id: clientId }
       if (mode !== 'bounded_auto') return { ok: false, reason: 'not_bounded_auto', client_id: clientId }
 
-      const spend = await step.run('read-spend', () =>
-        fetchClientDailySpendCents(deps.getSupabase(), clientId, date, CIRCUIT_BREAKER_LOOKBACK_DAYS),
-      )
-      if (spend === null) return { ok: false, reason: 'spend_unreadable', client_id: clientId }
+      // 🔴 Codex P1 复审：读失败必须 throw，不能正常返回软失败——Inngest 只在
+      // step 抛错时重试（配了 retries: 2），正常返回值一律当"成功"，重试配置
+      // 会形同虚设；而且事件 id 固定为 client_id:date，一次"正常返回的失败"
+      // 会让这天的安全检查永久跳过、没有任何可见回执或重试机会。
+      const spend = await step.run('read-spend', async () => {
+        const result = await fetchClientDailySpendCents(deps.getSupabase(), clientId, date, CIRCUIT_BREAKER_LOOKBACK_DAYS)
+        if (result === null) throw new Error(`read-spend failed: ad_daily_insights unreadable for ${clientId}:${date}`)
+        return result
+      })
 
       const verdict = evaluateCircuitBreaker({
         clientId,

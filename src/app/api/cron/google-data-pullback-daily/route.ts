@@ -58,7 +58,7 @@ import { adsMetricKeysWrittenBy } from '@/lib/flywheel/metric-registry'
 import { MetaAdsAdapter } from '@/lib/flywheel/adapters/MetaAdsAdapter'
 import { startCronRun } from '@/lib/cron/run-logger'
 import { resolveMetaTokenDetailed, ownsKey, loadTokenOwnerPeers, type TokenOwnerRow } from '@/lib/meta/token-selection'
-import { findSharedAdAccounts, getClientAdAccountIds } from '@/lib/meta/client-ad-accounts'
+import { findSharedAdAccounts, getClientAdAccountsWithStatus } from '@/lib/meta/client-ad-accounts'
 import { hasVideoColumns, syncAdDailyInsights, syncAdsetDailyInsights, syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
 import { buildGrowthState } from '@/lib/ads-strategy/agents/patrol'
 import { reconcileAutonomyMode } from '@/lib/ads-strategy/autonomy/notify'
@@ -430,7 +430,13 @@ export async function GET(req: NextRequest) {
           // readback-sweep all just query by client_id), so this is the one
           // change needed for those to start seeing every account.
           // Non-fatal per account: one account's failure must not skip the rest.
-          const allAccountIds = await getClientAdAccountIds(client.client_id)
+          // 🔴 Codex P1 复审：`getClientAdAccountIds` 在 `client_meta_ad_accounts`
+          // 查询失败时会静默降级成只剩主账户——降级后的名单和"这个客户真的
+          // 只有一个账户"长得一模一样，熔断门槛的 `ad_daily_secondary` 判断
+          // 分不出这两种情况。改用带 `complete` 标记的版本，把这个信号带给
+          // 下面的熔断发送闸。
+          const accountDiscovery = await getClientAdAccountsWithStatus(client.client_id)
+          const allAccountIds = accountDiscovery.accounts.map(a => a.adAccountId)
           const secondaryAccountIds = allAccountIds.filter(id => id !== client.meta_ad_account_id)
           // ads IMPACT §14 M9：新增的广告组级同步对共用账户（同账户登记给多个客户）跳过，
           // 不把同一批广告组写进两家名下。系列级/广告级的老同步维持原状（既有问题，诊断读侧另做隔离）。
@@ -481,18 +487,21 @@ export async function GET(req: NextRequest) {
           // 下面 WP3.1a reconcile 同一个闸），engine 整体 enabled=false 时数据
           // 本来就没刷新，没有新东西可判，不发。
           //
-          // 🔴 Codex P1 复审：必须等主账户 + 全部辅助账户的当日花费同步都成功
-          // 才发——只要有一个账户 `syncCampaignDailyInsights` 失败，consumer
-          // 读到的账户合计就会漏掉那部分花费，可能把真实超支算成正常。而且
-          // 事件 id 固定为 client_id:date，一旦发送过，当天哪怕后来手动补拉
-          // 成功也会被 Inngest 24h 去重、补不了这次安全检查——所以宁可跳过
-          // 不发，等明天新的 evaluationDate 自然重试，也不能带着残缺数据发。
+          // 🔴 Codex P1 复审（两轮）：必须等主账户 + 全部辅助账户的当日花费同步都
+          // 成功才发——只要有一个账户 `syncCampaignDailyInsights` 失败，consumer
+          // 读到的账户合计就会漏掉那部分花费，可能把真实超支算成正常；账户名单
+          // 本身发现不全（`accountDiscovery.complete === false`）同样会漏账户，
+          // 且比同步失败更隐蔽——`ad_daily_secondary` 会因为“不知道有这个账户”
+          // 而根本不出现，`every()` 对空数组照样判真。事件 id 固定为
+          // client_id:date，一旦发送过，当天哪怕后来手动补拉成功也会被 Inngest
+          // 24h 去重、补不了这次安全检查——所以宁可跳过不发，等明天新的
+          // evaluationDate 自然重试，也不能带着残缺数据发。
           const primarySpendSynced = result.ad_daily?.success === true
           const secondarySpendSynced = (result.ad_daily_secondary ?? []).every(
             (s) => s.ad_daily?.success === true,
           )
           if (adConfigSource === 'row') {
-            if (primarySpendSynced && secondarySpendSynced) {
+            if (accountDiscovery.complete && primarySpendSynced && secondarySpendSynced) {
               result.circuit_breaker_check = await sendInngestEvent({
                 id: adsCircuitBreakerCheckEventId(client.client_id, evaluationDate),
                 name: ADS_CIRCUIT_BREAKER_CHECK_DUE,
@@ -503,7 +512,9 @@ export async function GET(req: NextRequest) {
             } else {
               result.circuit_breaker_check = {
                 sent: false,
-                error: 'skipped: campaign spend sync incomplete this cycle (see ad_daily / ad_daily_secondary)',
+                error: accountDiscovery.complete
+                  ? 'skipped: campaign spend sync incomplete this cycle (see ad_daily / ad_daily_secondary)'
+                  : 'skipped: client_meta_ad_accounts lookup incomplete this cycle, account list may be missing secondary accounts',
               }
             }
           }

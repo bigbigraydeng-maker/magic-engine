@@ -144,8 +144,17 @@ vi.mock('@/lib/ads-strategy/agents/patrol', () => ({
 // keeps its original single-account behavior untouched.
 const mockGetClientAdAccountIds = vi.fn().mockResolvedValue([])
 const mockFindSharedAdAccounts = vi.fn().mockResolvedValue({ shared: new Set<string>() })
+// getClientAdAccountsWithStatus (Codex P1, PR #2019) wraps the same configured
+// ids with complete:true — every existing test above keeps driving the ids
+// through mockGetClientAdAccountIds unchanged; only the circuit-breaker-check
+// tests below override this adapter directly to exercise complete:false.
+const mockGetClientAdAccountsWithStatus = vi.fn(async (...args: unknown[]) => {
+  const ids = (await mockGetClientAdAccountIds(...args)) as string[]
+  return { accounts: ids.map((id) => ({ adAccountId: id, label: null, isPrimary: false })), complete: true }
+})
 vi.mock('@/lib/meta/client-ad-accounts', () => ({
   getClientAdAccountIds: (...args: unknown[]) => mockGetClientAdAccountIds(...args),
+  getClientAdAccountsWithStatus: (...args: unknown[]) => mockGetClientAdAccountsWithStatus(...args),
   findSharedAdAccounts: (...args: unknown[]) => mockFindSharedAdAccounts(...args),
 }))
 
@@ -692,6 +701,29 @@ describe('GET /api/cron/google-data-pullback-daily — 多账户 ad_daily_insigh
         adset_level: { success: true, rows_written: 7 },
       },
     ])
+  })
+
+  it('🔴 Codex P1：client_meta_ad_accounts 名单读取降级（complete:false）→ 熔断检查跳过，不当"只有一个账户"处理', async () => {
+    mockLoadAdStrategyConfigWithSource.mockResolvedValue({
+      config: { enabled: true }, source: 'row',
+    })
+    // 降级场景：账户名单查询失败，只兜底到主账户——跟"客户真的只有一个账户"
+    // 长得一样，但 complete:false 说明这不可信，可能漏了真实存在的辅助账户。
+    mockGetClientAdAccountsWithStatus.mockResolvedValueOnce({
+      accounts: [{ adAccountId: AD_ACCOUNT, label: '主账户', isPrimary: true }],
+      complete: false,
+    })
+
+    const { GET } = await import('./route')
+    const res = await GET(makeRequest(CRON_SECRET))
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    const check = json.results[0].circuit_breaker_check
+    expect(check.sent).toBe(false)
+    // 断言字符串是"跳过"而不是"发了但 Inngest key 缺失"——证明代码真的没有
+    // 走到 sendInngestEvent，不是走到了又刚好失败。
+    expect(check.error).toContain('lookup incomplete')
   })
 
   // ads IMPACT 阶段 1 §2.2：广告组级日数据 + 视频列按 migration 是否 apply 决定写不写。

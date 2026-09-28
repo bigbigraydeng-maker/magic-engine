@@ -68,6 +68,63 @@ export async function getClientAdAccounts(clientId: string): Promise<ClientAdAcc
   return primary ? [{ adAccountId: primary, label: '主账户', isPrimary: true }] : []
 }
 
+export interface ClientAdAccountsStatus {
+  readonly accounts: ClientAdAccount[]
+  /**
+   * false = the `client_meta_ad_accounts` query itself failed and this list
+   * fell back to the single legacy `meta_ad_account_id` column. A client who
+   * genuinely has only one account looks identical to one whose real account
+   * list just failed to load — callers with money-safety stakes (e.g. the
+   * circuit breaker gate) must not treat `accounts` alone as proof of
+   * completeness; check this flag first.
+   */
+  readonly complete: boolean
+}
+
+/**
+ * Same lookup as `getClientAdAccounts`, but surfaces whether the primary
+ * `client_meta_ad_accounts` read actually succeeded instead of swallowing
+ * the error into an identical-looking fallback list (Codex P1, PR #2019: the
+ * circuit breaker's "did every account's spend sync" gate was silently
+ * fooled by this exact degrade-to-primary-only path).
+ */
+export async function getClientAdAccountsWithStatus(clientId: string): Promise<ClientAdAccountsStatus> {
+  const { data, error } = await supabaseAdmin
+    .from('client_meta_ad_accounts')
+    .select('ad_account_id, label, is_primary')
+    .eq('client_id', clientId)
+    .order('is_primary', { ascending: false })
+
+  if (!error && data && data.length > 0) {
+    return {
+      accounts: (data as Array<{ ad_account_id: string; label: string | null; is_primary: boolean }>).map(row => ({
+        adAccountId: row.ad_account_id,
+        label: row.label,
+        isPrimary: row.is_primary,
+      })),
+      complete: true,
+    }
+  }
+
+  if (error) console.error('[meta/client-ad-accounts] query failed:', error.message)
+
+  const { data: client, error: clientError } = await supabaseAdmin
+    .from('clients')
+    .select('meta_ad_account_id')
+    .eq('id', clientId)
+    .maybeSingle()
+
+  if (clientError) {
+    console.error('[meta/client-ad-accounts] fallback query failed:', clientError.message)
+    return { accounts: [], complete: false }
+  }
+  const primary = (client as { meta_ad_account_id?: string | null } | null)?.meta_ad_account_id
+  const accounts = primary ? [{ adAccountId: primary, label: '主账户', isPrimary: true }] : []
+  // error === undefined here means client_meta_ad_accounts genuinely has zero rows for
+  // this client (not a query failure) — that IS a complete answer, just a short one.
+  return { accounts, complete: !error }
+}
+
 function stripActPrefix(id: string): string {
   return id.startsWith('act_') ? id.slice(4) : id
 }

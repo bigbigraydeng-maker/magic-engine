@@ -14,11 +14,13 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { DailySpendEntry } from './circuit-breaker'
+import { fetchAll } from '@/lib/supabase-paginate'
 
 const DAY_MS = 86_400_000
 
 interface AdDailyInsightSpendRow {
   insight_date: string
+  entity_id: string
   spend: number | null
 }
 
@@ -39,6 +41,12 @@ function isoDayMinus(iso: string, days: number): string {
  *
  * 读失败返回 null（调用方按「读不到 = 不动」处理，不当 0 用——0 会被
  * `evaluateCircuitBreaker` 当"今天没花钱"，跟"读不到"是两回事）。
+ *
+ * 🔴 Codex P2 复审：走 `fetchAll` 分页，不能裸查——PostgREST 单次硬顶 1000 行
+ * （`supabase-paginate.ts`），账户大、系列多的客户 8 天窗口内的 campaign 行
+ * 数一旦过顶就会被静默截断，且没有稳定排序时被丢的行不可预测，可能正好
+ * 丢当天数据、低估花费从而漏触发熔断。`.order(insight_date).order(entity_id)`
+ * 跟 `diagnostics/loader.ts` 同一套稳定排序，配 `fetchAll` 的 `.range()` 用。
  */
 export async function fetchClientDailySpendCents(
   sb: SupabaseClient,
@@ -47,18 +55,27 @@ export async function fetchClientDailySpendCents(
   lookbackDays: number,
 ): Promise<ClientDailySpendCents | null> {
   const since = isoDayMinus(evaluationDate, lookbackDays)
-  const { data, error } = await sb
-    .from('ad_daily_insights')
-    .select('insight_date, spend')
-    .eq('client_id', clientId)
-    .eq('level', 'campaign')
-    .gte('insight_date', since)
-    .lte('insight_date', evaluationDate)
 
-  if (error || !data) return null
+  let rows: AdDailyInsightSpendRow[]
+  try {
+    rows = await fetchAll<AdDailyInsightSpendRow>((from, to) =>
+      sb
+        .from('ad_daily_insights')
+        .select('insight_date, entity_id, spend')
+        .eq('client_id', clientId)
+        .eq('level', 'campaign')
+        .gte('insight_date', since)
+        .lte('insight_date', evaluationDate)
+        .order('insight_date', { ascending: true })
+        .order('entity_id', { ascending: true })
+        .range(from, to),
+    )
+  } catch {
+    return null
+  }
 
   const spendByDay = new Map<string, number>()
-  for (const row of data as AdDailyInsightSpendRow[]) {
+  for (const row of rows) {
     spendByDay.set(row.insight_date, (spendByDay.get(row.insight_date) ?? 0) + (row.spend ?? 0))
   }
 

@@ -87,16 +87,18 @@ function fakeSupabase(opts: FakeOpts) {
   }
 
   function insightsBuilder() {
-    const result =
-      opts.insightsError !== undefined
-        ? { data: null, error: { message: opts.insightsError } }
-        : { data: opts.insights ?? [], error: null }
+    // fetchClientDailySpendCents 走 fetchAll 分页；用例行数都远低于 1000，
+    // 单页 range() 就能把整批数据一次性喂完。
     const chain = {
       select: () => chain,
       eq: () => chain,
       gte: () => chain,
       lte: () => chain,
-      then: (resolve: (v: typeof result) => void) => resolve(result),
+      order: () => chain,
+      range: async () =>
+        opts.insightsError !== undefined
+          ? { data: null, error: { message: opts.insightsError } }
+          : { data: opts.insights ?? [], error: null },
     }
     return chain
   }
@@ -182,10 +184,9 @@ describe('ads-circuit-breaker-check handler', () => {
     expect(rpc).not.toHaveBeenCalled()
   })
 
-  it('花费读取失败 → spend_unreadable，不调 rpc', async () => {
+  it('🔴 花费读取失败 → 整个 handler 抛错（不能正常返回软失败，否则 Inngest 不重试、事件 id 白白被去重锁死），不调 rpc', async () => {
     const { sb, rpc } = fakeSupabase({ config: { autonomy_mode: 'bounded_auto' }, insightsError: 'boom' })
-    const result = await run(sb)
-    expect(result).toMatchObject({ ok: false, reason: 'spend_unreadable' })
+    await expect(run(sb)).rejects.toThrow()
     expect(rpc).not.toHaveBeenCalled()
   })
 
