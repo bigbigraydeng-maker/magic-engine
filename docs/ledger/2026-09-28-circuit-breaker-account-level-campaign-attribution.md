@@ -6,11 +6,11 @@ owner: agent
 decided_on: 2026-09-28
 source: session:dcc2476b
 verify_by: 2026-10-12
-verify_how: 查 client_meta_ad_accounts 里当前每个账户是否仍只登记给一个客户但账户内混有其他客户系列（`ad_daily_insights` 按 ad_account_id 分组、按 entity_id 对照 Meta 后台系列归属核对）；`20260721000001_ad_daily_insights.sql` 里点名的 CTS 账户 2775766642787274 内的 4 条 Oztop 系列是否仍是活跃/花费为零，若已产生真实花费立即按 §11 重新打分
+verify_how: 查 client_meta_ad_accounts 里当前每个账户是否仍只登记给一个客户但账户内混有其他客户系列（`ad_daily_insights` 按 ad_account_id 分组、按 entity_id 对照 Meta 后台系列归属核对）；`ad_daily_insights` 建表迁移文件表注释里点名的那个 CTS 账户（账户 id 见该迁移文件原文，台账不抄账户号）内的 4 条 Oztop 系列是否仍是活跃/花费为零，若已产生真实花费立即按 §11 重新打分
 ---
 Codex 复审 PR #2019（熔断器运行时调用方 round 13）：`circuit-breaker-spend.ts:91-160` 的 `fetchClientDailySpendCentsByAccount` 按 `client_id` + `level='campaign'` 读 `ad_daily_insights` 后，直接把同一 `ad_account_id` 下全部行的 `spend` 相加当作"这个账户当日花费"。round 11 已经排除了"同一账户登记给多个客户"的情况（`findSharedAdAccounts`），但这条指出一个不同的场景：一个账户即使**当前只登记给这一个客户**，账户内部仍可能混着历史遗留的、实际属于别的客户的系列（campaign）。
 
-已核实这是真实存在的数据形状，不是猜测：`supabase/migrations/20260721000001_ad_daily_insights.sql:16-22` 的表注释原话——"CTS's account 2775766642787274 still carries 4 legacy Oztop campaigns (~$175 over 90d, zero spend in the last 7d; confirmed by PM 2026-07-20 as historical spillover from before Oztop had its own account). Any account-level rollup MUST aggregate from filtered campaign rows rather than trusting an account-level total." 也就是说：这张表从设计时就知道会出现"一个账户、多个客户的系列混杂"，并且明确要求账户级汇总必须先按系列过滤归属——`circuit-breaker-spend.ts` 目前没有做这层过滤，直接违反了这条表注释写明的使用前提。
+已核实这是真实存在的数据形状，不是猜测：`ad_daily_insights` 建表迁移文件（文件名含 `ad_daily_insights`，具体版本号台账不抄，直接搜文件名即可定位）第 16-22 行表注释原话——"CTS's account [账户 id 见原文] still carries 4 legacy Oztop campaigns (~$175 over 90d, zero spend in the last 7d; confirmed by PM 2026-07-20 as historical spillover from before Oztop had its own account). Any account-level rollup MUST aggregate from filtered campaign rows rather than trusting an account-level total."（原文含完整账户 id，台账按规矩不抄）也就是说：这张表从设计时就知道会出现"一个账户、多个客户的系列混杂"，并且明确要求账户级汇总必须先按系列过滤归属——`circuit-breaker-spend.ts` 目前没有做这层过滤，直接违反了这条表注释写明的使用前提。
 
 **这条建议没有被立即采纳为代码改动**，用 CLAUDE.md §11 三维打分明示：
 

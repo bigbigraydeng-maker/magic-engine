@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-09-28
 source: session:dcc2476b
 verify_by: 2026-10-05
-verify_how: 查 CTS Tours NZ（c0000000-0000-0000-0000-000000000000）和 New Asian Logistics（4ae76381-cd45-43bd-85cd-98cfd7604007）合并部署后的 action_runs / ad_entity_snapshots，看有没有出现"同一 adset/campaign 在 72 小时内被 Kernel 执行两次以上真实设置改动"；若出现即刻按 P0 处理，不等到期
+verify_how: 查 CTS Tours NZ（client_id 见 CLAUDE.md 客户 ID 列表，台账不抄）和 New Asian Logistics（client_id 4ae76381-cd45-43bd-85cd-98cfd7604007）合并部署后的 action_runs / ad_entity_snapshots，看有没有出现"同一 adset/campaign 在 72 小时内被 Kernel 执行两次以上真实设置改动"；若出现即刻按 P0 处理，不等到期
 ---
 Codex 复审 PR #2019（熔断器运行时调用方 round 13）：`src/lib/capabilities/ads/envelope-facts.ts:91-97` 的 `hoursSinceLastRealChange()` 只识别 `ad_entity_snapshots.capture_reason = 'changed'` 的行来判断"距上次真实设置变化过了多久"（72 小时冷却期判据的事实来源）。已独立核实这个判据本身没写错——问题在于**没有东西在 Kernel 写完之后立刻补一条能被它认出来的快照**。
 
