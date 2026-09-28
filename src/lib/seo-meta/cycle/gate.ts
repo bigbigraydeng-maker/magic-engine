@@ -124,17 +124,56 @@ const KEYWORD_SNAPSHOT_MAX_AGE_DAYS = 14
 const KEYWORD_REUSE_WINDOW_DAYS = 90
 
 /**
- * Which of a page's own GSC queries counts as "on-topic". The page's most
- * distinctive slug token (longest word >3 chars) must appear in the query —
- * e.g. "liziba" for liziba-station-chongqing-guide. Picking the LONGEST
- * token, not just any token, is what stops "chongqing" (shared by many CTS
- * pages) from qualifying a query on its own — the exact collision that
- * caused the incident.
+ * 2026-09-28 事故（第二次撞上同一类碰撞）: the previous version of this
+ * function picked a single "core" token — whichever slug token was
+ * LONGEST — on the theory that the longest word is the most distinctive
+ * one. For a compound China-city slug that reasoning inverts: the city
+ * name itself ("chongqing", 9 chars) is almost always the LONGEST token in
+ * every one of that city's pages' slugs, and it's also the LEAST
+ * distinctive one — shared by every Chongqing page on the site. Requiring
+ * only that single shared token to appear in a GSC query let
+ * "how many days in chongqing" (a real query, genuinely showing a handful
+ * of impressions against the Liziba page's URL — GSC legitimately
+ * attributes a broad query to more than one of a site's pages) qualify as
+ * `liziba-monorail-chongqing-guide`'s "own" on-topic query, even though
+ * "liziba"/"monorail" — the tokens that actually distinguish this page from
+ * every other Chongqing page — are absent from it.
+ *
+ * Fix: return ALL slug tokens long enough to matter, and require a query to
+ * match at least two of them (or the one it has, for a single-token slug)
+ * before it counts as on-topic. A shared geography word alone is no longer
+ * enough; the query must also touch something that is actually specific to
+ * this page.
  */
-function coreTopicToken(slug: string): string | null {
-  const tokens = slug.split('-').filter((t) => t.length > 3)
-  if (tokens.length === 0) return null
-  return tokens.reduce((longest, t) => (t.length > longest.length ? t : longest), tokens[0])
+export function coreTopicTokens(slug: string): string[] {
+  return slug.split('-').filter((t) => t.length > 3)
+}
+
+const MIN_ON_TOPIC_TOKEN_MATCHES = 2
+
+/**
+ * Second, independent layer against the same 2026-09-28 incident's OTHER
+ * failure shape (chongqing-night-city-lights → "The Forbidden City &
+ * China's Best Cities"): even with a correctly on-topic `keyword`, the AI
+ * generation step can still drift onto an unrelated place/topic — neither
+ * the hard fact-check nor the AI judge catch this, because both only look
+ * for CONTRADICTIONS between old and new text, never "is the new text about
+ * the same place at all". This is a cheap, non-AI floor: the generated
+ * title+description must mention at least one of the page's own distinctive
+ * slug words. It cannot verify the copy is GOOD, only that it did not
+ * wander onto a different page's subject entirely.
+ */
+export function checkTitleOnTopic(slug: string, newTitle: string, newDesc: string): { onTopic: true } | { onTopic: false; reason: string } {
+  const tokens = coreTopicTokens(slug)
+  if (tokens.length === 0) return { onTopic: true }
+  const text = `${newTitle} ${newDesc}`.toLowerCase()
+  if (tokens.some((t) => text.includes(t))) return { onTopic: true }
+  return { onTopic: false, reason: `generated title/description mentions none of this page's own topic words (${tokens.join(', ')}) — looks like it drifted onto a different page's subject` }
+}
+
+function onTopicTokenMatchCount(tokens: string[], query: string): number {
+  const lower = query.toLowerCase()
+  return tokens.filter((t) => lower.includes(t)).length
 }
 
 /**
@@ -168,24 +207,28 @@ export async function deriveTopicMatchedKeyword(
   })
 
   if (!candidate.pageUrl || !candidate.slug) return fail('candidate has no page URL/slug to query GSC for')
-  const coreToken = coreTopicToken(candidate.slug)
-  if (!coreToken) return fail(`slug "${candidate.slug}" has no token long enough to use as a topic check`)
+  const tokens = coreTopicTokens(candidate.slug)
+  if (tokens.length === 0) return fail(`slug "${candidate.slug}" has no token long enough to use as a topic check`)
+  const requiredMatches = Math.min(MIN_ON_TOPIC_TOKEN_MATCHES, tokens.length)
 
   const rows = await fetchGscQueriesForPage(siteUrl, candidate.pageUrl, clientId).catch(() => null)
   if (!rows || rows.length === 0) {
     return fail(`GSC returned no page-scoped queries for ${candidate.pageUrl} — cannot verify topic match`)
   }
 
-  const onTopicRows = rows.filter((r): r is typeof r & { query: string } => typeof r.query === 'string' && r.query.toLowerCase().includes(coreToken))
+  const onTopicRows = rows.filter(
+    (r): r is typeof r & { query: string } =>
+      typeof r.query === 'string' && onTopicTokenMatchCount(tokens, r.query) >= requiredMatches,
+  )
   const onTopic = onTopicRows
     .filter((r) => isEnglishQuery(r.query))
-    .sort((a, b) => b.impressions - a.impressions)[0]
+    .sort((a, b) => onTopicTokenMatchCount(tokens, b.query) - onTopicTokenMatchCount(tokens, a.query) || b.impressions - a.impressions)[0]
 
   if (!onTopic || typeof onTopic.query !== 'string') {
     if (onTopicRows.length > 0) {
       return fail(`this page's on-topic GSC queries are all non-English (highest-impression example: "${onTopicRows[0].query}") — NZ audience requires an English target keyword, refusing to use it`)
     }
-    return fail(`none of this page's own GSC queries contain its core topic word "${coreToken}" — refusing to borrow a query from another page`)
+    return fail(`none of this page's own GSC queries match at least ${requiredMatches} of its distinctive slug words (${tokens.join(', ')}) — refusing to borrow a query that only shares a generic/shared word (e.g. a city name) with another page`)
   }
 
   return { keyword: onTopic.query, impressions: onTopic.impressions }
