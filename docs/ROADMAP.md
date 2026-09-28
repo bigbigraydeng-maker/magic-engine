@@ -57,6 +57,17 @@
 
 ---
 
+## `findSharedAdAccounts` 全表查询没分页，共享广告账户登记表超过 PostgREST 单次上限时可能被误判独占（2026-09-28 PR #2019 复审查实，P1）
+
+**§11 打分**：频率低（要 `client_meta_ad_accounts` 总行数超过 PostgREST 单次返回上限，且被截断部分恰好包含相关共享登记，当前客户规模离门槛还很远）· IMPACT 闭环关键度高（一旦触发，后果跟 round 11 刚修的原始 bug 一样：跨客户共享账户的花费被错算进本客户名下，可能误触发或该触发时没触发熔断）· 收入关联度高（真出现，直接是客户广告被误停或超预算没被拦下）→ 恰好一个低、两个高 → **P1**。详细推演见 [ledger 卡](./ledger/2026-09-28-find-shared-ad-accounts-pagination-gap.md)。
+
+- **现象**：`src/lib/meta/client-ad-accounts.ts:139-148` 的 `findSharedAdAccounts` 用一次不分页、无稳定排序的 `.select('client_id, ad_account_id')` 查全表构造共享账户集合，没有 `.range()`/`.limit()`/`.order()`；已核实描述准确。
+- **要做什么**：给这个函数加 `fetchAll` 式分页（参考同代码库里读花费数据已有的分页写法）或把账户归属判定下沉到数据库侧一次性算完整；改完要跑一遍全部 5 个调用方（`diagnostics/loader.ts`、`snapshot-sync.ts`、`ads-d3-auto-pause.ts`、`ai/live-rules.ts`、PR #2019 新增的 `circuit-breaker-spend.ts`）的测试，确认没有因为改分页方式引入行为变化。
+- **为什么没在发现当次就修**：`findSharedAdAccounts` 是复用的既有平台能力，不是这个 PR 新写的代码，这个 PR 只是新增了它的第 5 个调用方；修对需要动一个被 4 个既有场景依赖的共享函数，是独立的平台层小修复，不依赖这个 PR 是否已合并；且这个 PR 本身已经因改动过大被 `fix-scope` 闸门标红，不适合继续在它里面追加范围外的平台层改动。
+- 来源：PR [#2019](https://github.com/bigbigraydeng-maker/magic-engine/pull/2019) 复审查实（Codex）。
+
+---
+
 ## `meta-leads-sync` 每一轮都标红，「红了」这个信号已经不携带任何信息（2026-09-24 查实，P0）
 
 **§11 打分**：频率高（每 2 小时一轮，轮轮红）· IMPACT 闭环关键度高（Measure 段，报警器焊死在响，真出事分不出来）· 收入关联度高（这个报警器的职责就是发现线索断供；2026-08-21~08-30 同一个报警器失灵时 CTS 漏了 45 条线索）→ 零个低、三个高 → **P0**。
