@@ -46,7 +46,7 @@ WebFetch `ctstours.co.nz/tours/china/discovery/golden-china`（今天现查，�
 >
 > I'm Baker, CTS's China specialist. This 12-day route covers Great Wall at Juyongguan, the Terracotta Warriors up close, a night cruise down the Huangpu. Flights, 9 nights in 4-star hotels and 26 meals are all sorted — you just show up and take it in.
 >
-> 25 years running trips like this out of NZ, on the ground with China Travel Service (est. 1928). If November could work for you, full itinerary + seat check is in the first comment 👇
+> Backed by CTS — China's travel brand since 1928 — with 25 years of Kiwi-led NZ operations. If November could work for you, full itinerary + seat check is in the first comment 👇
 >
 > #GoldenChina #ChinaTravel #CTSTours #NZTravellers #GreatWall
 
@@ -104,6 +104,16 @@ WebFetch `ctstours.co.nz/tours/china/discovery/golden-china`（今天现查，�
 > #ChineseFood #PekingDuck #ChinaTravel #CTSTours
 
 首评：`👉 Full meal plan + 12-day itinerary: https://www.ctstours.co.nz/tours/china/discovery/golden-china?utm_source=facebook&utm_medium=reel&utm_campaign=goldenchina-food-oct3`
+
+### Instagram 版 CTA 与 bio 链接（跟 FB 首评不是同一套）
+
+IG 帖子改"first comment"为"link in bio"时不能只换文案里的一个词——IG 一个账号同一时间只有一条 bio 链接，5 条 Reel 没法像 FB 首评那样各带各自的 campaign UTM。核实过 CTS 目前没有接 Linktree 类多链接工具，所以这周按"一条 Reel 系列、一条共享 bio 链接"处理：
+
+- IG 文案把 "full itinerary + seat check is in the first comment 👇" 改成 "full itinerary + seat check is in my bio 👇"（其余文案不变）
+- 这周期间（9/29–10/3）CTS Instagram bio 需要指向：
+  `https://www.ctstours.co.nz/tours/china/discovery/golden-china?utm_source=instagram&utm_medium=bio&utm_campaign=goldenchina-sep29oct5-reels`
+- 这条 UTM 只能按"这一周的 Reel 系列"做归因，拆不到单条视频——跟 FB 首评的逐条归因精度不一样，如果要逐条归因需要接 Linktree 之类的多链接工具，这是下一轮可以评估的事，本轮先用共享链接
+- **需要人工动手**：我没有 CTS Instagram 账号的登录权限，改 bio 只能登录 Instagram App/网页版操作，不在 Publer API 覆盖范围内——已作为独立待办下发（见下）
 
 ### 发布方式（复用既有管线，没有新造轮子）
 

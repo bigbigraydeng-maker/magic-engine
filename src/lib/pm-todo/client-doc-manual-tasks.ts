@@ -131,4 +131,41 @@ export const CLIENT_DOC_MANUAL_TASKS: ClientDocManualTask[] = [
     href: 'https://business.facebook.com/settings/info',
     expiresAt: '2026-10-26T09:00:00+13:00',
   },
+  {
+    // 见 docs/clients/cts/2026-09-29-cts-reels-sep29-oct5-schedule.md「2 条排不出来」表第 1 行。
+    // Codex 复审第 3 轮抓到：这两个 PM 决定此前只写进文档，ledger 卡（decided，无 verify_by）
+    // 按 src/lib/ledger/walk.ts 默认 7 天到期才会进今日待办，最早要 10/7 才提醒，晚于
+    // Oct 4/5 两个发布位——决策截止前 PM 不会经现有管道看到。改成直接下发带截止时间的待办。
+    clientId: 'c0000000-0000-0000-0000-000000000000',
+    clientName: 'CTS Tours NZ',
+    pmKind: 'decide',
+    what: 'CTS Golden China Reel 排期 Oct 4（周日）这条卡住：本地出片引擎和素材库都在、能跑，但 Baker Gu 旁白配音一直是罐头 TTS 音质（7 月已定性为跟爆款最大差距），配音方案至今没拍板——不拍板这条就排不出去',
+    how: '回其中一个：① 批一个配音方案（付费 TTS 如 ElevenLabs，或真人录音，二选一，需要追加预算）；② 明确这条本周先跳过配音、改成纯文字卡+BGM 无旁白版本（会改变 Baker Gu 人设的呈现方式）。回其中一句我就能继续出片，不耽误 10/4 当天排期',
+    href: 'https://github.com/bigbigraydeng-maker/magic-engine/blob/main/docs/clients/cts/2026-09-29-cts-reels-sep29-oct5-schedule.md',
+    expiresAt: '2026-10-04T09:00:00+13:00',
+  },
+  {
+    // 见 docs/clients/cts/2026-09-29-cts-reels-sep29-oct5-schedule.md「2 条排不出来」表第 2 行。
+    // 同上，避免这条也只躺在文档里等 ledger 7 天默认到期。
+    clientId: 'c0000000-0000-0000-0000-000000000000',
+    clientName: 'CTS Tours NZ',
+    pmKind: 'decide',
+    what: 'CTS Golden China Reel 排期 Oct 5（周一）这条卡住：这天该发客人见证（Social Proof），但红线要求 testimonial 禁 AI 人脸、必须是真实团友照片+授权——CTS 现在没有一条真实已授权的客人评价可用（master_brief 里现成的例子还标着「审核未过」，之前发生过编造评价被抓的事故），不是工具问题，是没有素材',
+    how: '找一条真实客人评价（文字+同意公开使用，最好带照片），发给内容窗口，我当天就能出片；一时找不到就回一句「这周先跳过」，这条本周先空着，不算耽误',
+    href: 'https://github.com/bigbigraydeng-maker/magic-engine/blob/main/docs/clients/cts/2026-09-29-cts-reels-sep29-oct5-schedule.md',
+    expiresAt: '2026-10-05T09:00:00+13:00',
+  },
+  {
+    // 见 docs/clients/cts/2026-09-29-cts-reels-sep29-oct5-schedule.md「Instagram 版 CTA 与 bio
+    // 链接」一节。Codex 复审第 3 轮抓到：文案把 CTA 从「first comment」换成「link in bio」，
+    // 但没人核实过 CTS Instagram 的 bio 链接现在指向哪、UTM 对不对——IG 一次只能挂一条链接，
+    // 不核实/不改就可能把观众导去旧内容，这批 Reel 的 IG 归因也会全部丢失。开发这边没有
+    // CTS Instagram 账号登录权限，只能下发人工核实。
+    clientId: 'c0000000-0000-0000-0000-000000000000',
+    clientName: 'CTS Tours NZ',
+    what: 'CTS Instagram 这周（9/29–10/3）要发 5 条 Golden China Reel，文案 CTA 走「link in bio」，但 bio 现在有没有指向这条产品页、UTM 对不对没人核实过——IG 一次只能挂一条链接，不更新的话 Reel 观众点进 bio 可能是旧内容，这批 Reel 的归因也会全部丢失',
+    how: '登录 CTS Instagram（App 或网页版）→ Edit profile → Website 一栏，确认/改成：https://www.ctstours.co.nz/tours/china/discovery/golden-china?utm_source=instagram&utm_medium=bio&utm_campaign=goldenchina-sep29oct5-reels ；改完回一句「bio 改好了」',
+    href: 'https://www.instagram.com/accounts/edit/',
+    expiresAt: '2026-10-03T23:59:00+13:00',
+  },
 ]
