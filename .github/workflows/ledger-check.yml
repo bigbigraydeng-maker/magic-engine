@@ -43,7 +43,20 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: bash scripts/ledger-check-frozen.sh
+        run: |
+          # Bootstrap guard (2026-09-28, incident): this step's own definition comes
+          # from a merge of base+head for `pull_request`-triggered workflows, but the
+          # checkout above pins to the PR's own head.sha — so the moment this step
+          # landed on main, every PR branch that had not yet merged in the script
+          # (i.e. every PR open before this line existed) started failing a required
+          # check for a script it never had a chance to include. Same bootstrap
+          # exception `check-video-factory-bypass.mjs` (PR #2177) and
+          # `ops-fix-scope-guard.yml` already use, for the same reason.
+          if [ ! -f scripts/ledger-check-frozen.sh ]; then
+            echo "::notice::scripts/ledger-check-frozen.sh not on this branch yet — treating as pre-existing PR, skipping (will re-run for real once the branch merges main)"
+            exit 0
+          fi
+          bash scripts/ledger-check-frozen.sh
 
   code-change-has-ledger-entry:
     # dependabot 与夜巡分支豁免，避免机器提交被台账闸卡住。
