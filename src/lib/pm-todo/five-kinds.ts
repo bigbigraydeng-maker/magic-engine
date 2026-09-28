@@ -78,6 +78,10 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
 
   // ── 2 · 系统进不去、要人点一次的 ─────────────────────────────────────
   ai_provider_exhausted: 'one_click', // 充值
+  // 某客户 AI 可见度探测整周全挂，多数是余额用光/钥匙失效，需要人去充值/换钥匙
+  // （Codex 复审 2026-09-28 抓到：漏了这条会让 LANE_OF_KIND 穷举表类型检查过不了，
+  // laneOf() 拿到 undefined，所有新告警从 PM 清单和邮件里彻底消失）
+  ai_tracker_all_failed: 'one_click',
   video_credits_out: 'one_click', // 充值
   dataforseo_credits_out: 'one_click', // 充值
   creatomate_render_failed: 'one_click', // 多数是出片额度用完，要人充值
@@ -155,6 +159,11 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   cron_not_running: 'dev',
   cron_silent_success: 'dev',
   ai_alerting_broken: 'dev',
+  // 某客户整周 AI 可见度全挂，但原因清一色是「不用你动手」的那几类（限流/供应商出错/
+  // 解析失败/我们数据库写入失败）—— 没有充值或换钥匙这种需要人点一次的动作，
+  // 同 ai_tracker_all_failed 的 how 原文就写「这条不用你动手」，不该进 PM 动手栏
+  // （Codex 复审 2026-09-28）。
+  ai_tracker_all_failed_dev: 'dev',
   ai_gateway_broken: 'dev',
   playbook_reference_stale: 'dev',
   platform_connection_pipeline_down: 'dev',

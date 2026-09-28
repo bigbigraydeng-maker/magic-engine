@@ -21,6 +21,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { pushAttributionItems } from './attribution-items'
 import { clientListUnreadableItem, loadActiveClients, type ClientRow } from './client-roster'
+import { pushAiTrackerFailureItems } from './ai-tracker-failure-items'
 import { pushConversionReviewItems } from './conversion-review-items'
 import { pushAiAutoReviewCircuitBreakerItems } from './ai-auto-review-circuit-breaker-items'
 import { pushMetaTokenHealthItems } from './meta-token-health-items'
@@ -155,6 +156,12 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     }),
     // 按时没跑 / 查不出跑没跑 —— PM 2026-08-03 要求「不能完成需要有报错」
     (b) => pushCronHealthItems(supabase, b, now),
+    // 某客户的 AI 可见度探测整周全挂了 —— 没测成被当测出来是零（2026-09-20 三天没人知道）。
+    // 放在 infra 区而不是 per-client 区：它自己查 ai_visibility_runs，不看 clients 表里的
+    // 别的字段；但传 clients 进去是为了只对在服务的客户报警（Codex 复审 2026-09-28）。
+    (b) => pushAiTrackerFailureItems(supabase, b, now, clients).catch((e) =>
+      console.warn('[manual-items] AI 可见度全挂检查失败（不阻塞其他待办）:', e),
+    ),
     // 外部平台的授权断了 —— 跟上面几条一样属于基础设施检查，跟「系统里有几个客户」
     // 无关，所以放在客户名单那条提前返回之前。2026-09-24：CTS 邮箱断了 9 天没人知道，
     // 全站没有任何一条路会把它端出来（模块自己会兜底，不抛给这里）。
