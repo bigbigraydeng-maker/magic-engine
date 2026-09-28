@@ -20,11 +20,17 @@
  *
  * `spend` 列是账户币种主单位（美元/纽元，非整数），本模块只在离开这层时
  * 转一次分（× 100 四舍五入），跟 `medianCostPerResultCents` 同一换算方式。
+ *
+ * 🔴 Codex P1 复审：跨客户共用账户（同一 Meta 账户登记给多个客户，生产已有
+ * 实例）会排除在返回结果外——`findSharedAdAccounts` 查询失败按本模块统一的
+ * "读不到 = 不动"惯例返回 `null`。见 `fetchClientDailySpendCentsByAccount`
+ * 函数体内注释。
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { DailySpendEntry } from './circuit-breaker'
 import { fetchAll } from '@/lib/supabase-paginate'
+import { findSharedAdAccounts } from '@/lib/meta/client-ad-accounts'
 
 const DAY_MS = 86_400_000
 
@@ -122,8 +128,24 @@ export async function fetchClientDailySpendCentsByAccount(
     byDay.set(row.insight_date, (byDay.get(row.insight_date) ?? 0) + (row.spend ?? 0))
   }
 
+  // 🔴 Codex P1 复审：同一个 Meta 账户可能登记给多个客户（2026-09-14 生产实查：
+  // Roman HU 与 30 Kiteroa 同登记 act_1260456876069575，见 client-ad-accounts.ts
+  // 的 findSharedAdAccounts 文档）。google-data-pullback-daily 的系列级同步对
+  // 共用账户没有做隔离（M9 只隔离了广告组级，系列级"既有问题，诊断读侧另做
+  // 隔离"——见该文件 isShared 附近注释），会把整个账户的 campaign 花费重复
+  // 写进每个登记了这个账户的客户名下：不排除的话，账户上任何一次真实突增都
+  // 会让全部登记了它的客户一起被熔断，即使异常跟其中某个客户毫无关系。用
+  // 既有的 findSharedAdAccounts（diagnostics/loader.ts、snapshot-sync.ts、
+  // ads-d3-auto-pause.ts 同一套读侧隔离，M9 规定的既有能力，不新建）排除共用
+  // 账户；查不出来就 fail closed 返回 null——跟本函数其它读失败路径同一惯例
+  // （读不到 = 不动），不能把"查不出来"当"没有共用账户"处理。
+  const candidateAccountIds = [...spendByAccountDay.keys()]
+  const { shared: sharedAccountIds, error: sharedError } = await findSharedAdAccounts(clientId, candidateAccountIds)
+  if (sharedError) return null
+
   const out: AccountDailySpendCents[] = []
-  for (const adAccountId of [...spendByAccountDay.keys()].sort()) {
+  for (const adAccountId of candidateAccountIds.sort()) {
+    if (sharedAccountIds.has(adAccountId)) continue // 共用账户：这个客户的判定不该被别的客户的账户活动影响
     const byDay = spendByAccountDay.get(adAccountId)!
     const recentDailySpend: DailySpendEntry[] = []
     for (const [date, dollars] of byDay) {

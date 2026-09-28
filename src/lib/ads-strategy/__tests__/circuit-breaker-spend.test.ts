@@ -2,12 +2,28 @@
  * `fetchClientDailySpendCentsByAccount`：按账户、按天汇总 `ad_daily_insights`
  * 真实花费，美元转分，today 从 recentDailySpend 里剔除（Codex P1 复审：按账户
  * 分别判定，不按客户合计，见 circuit-breaker-spend.ts 顶部说明）。
+ *
+ * 🔴 Codex P1 复审（round 11）：`findSharedAdAccounts` 用的是模块级
+ * `supabaseAdmin`（不接受本文件其它函数那种可注入 `sb`），所以用 `vi.mock`
+ * 换掉，不是靠假 `sb` 的 `.from()` 分支处理——跟 `live-rules.test.ts` 同一
+ * 套路。默认"没有共用账户、查询不出错"，个别用例按需覆盖。
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
+
+const mockFindSharedAdAccounts = vi.fn()
+vi.mock('@/lib/meta/client-ad-accounts', () => ({
+  findSharedAdAccounts: (...args: unknown[]) => mockFindSharedAdAccounts(...args),
+}))
+
 import { fetchClientDailySpendCentsByAccount } from '../circuit-breaker-spend'
 
 const CLIENT = 'client-uuid-spend-test'
+
+beforeEach(() => {
+  mockFindSharedAdAccounts.mockReset()
+  mockFindSharedAdAccounts.mockResolvedValue({ shared: new Set<string>() })
+})
 
 interface Row {
   insight_date: string
@@ -134,5 +150,35 @@ describe('fetchClientDailySpendCentsByAccount', () => {
     const result = await fetchClientDailySpendCentsByAccount(sb, CLIENT, '2026-09-27', 7)
     expect(calls).toBeGreaterThan(1) // 证明真的分了页，不是单次裸查
     expect(result?.[0].todayTotalSpendCents).toBe(120000) // 1200 * $1 * 100 分
+  })
+
+  it('🔴 Codex P1（round 11）：跨客户共用账户被排除，不参与这个客户的熔断判定', async () => {
+    const sb = fakeSupabase([
+      { insight_date: '2026-09-27', entity_id: 'a1', ad_account_id: 'act_a', spend: 400 }, // 独占账户
+      { insight_date: '2026-09-27', entity_id: 'b1', ad_account_id: 'act_b', spend: 99999 }, // 共用账户，花费再离谱也不算这个客户的
+    ])
+    mockFindSharedAdAccounts.mockResolvedValue({ shared: new Set(['b']) })
+
+    const result = await fetchClientDailySpendCentsByAccount(sb, CLIENT, '2026-09-27', 7)
+    expect(result).toHaveLength(1)
+    expect(result?.[0].adAccountId).toBe('a')
+    expect(mockFindSharedAdAccounts).toHaveBeenCalledWith(CLIENT, expect.arrayContaining(['a', 'b']))
+  })
+
+  it('🔴 Codex P1（round 11）：查不出哪些账户共用 → fail closed 返回 null，不当"没有共用账户"处理', async () => {
+    const sb = fakeSupabase([{ insight_date: '2026-09-27', entity_id: 'a1', ad_account_id: 'act_a', spend: 400 }])
+    mockFindSharedAdAccounts.mockResolvedValue({ shared: new Set(), error: 'client_meta_ad_accounts unreachable' })
+
+    const result = await fetchClientDailySpendCentsByAccount(sb, CLIENT, '2026-09-27', 7)
+    expect(result).toBeNull()
+  })
+
+  it('全部账户都独占（没有共用）→ 照常返回全部', async () => {
+    const sb = fakeSupabase([
+      { insight_date: '2026-09-27', entity_id: 'a1', ad_account_id: 'act_a', spend: 400 },
+      { insight_date: '2026-09-27', entity_id: 'b1', ad_account_id: 'act_b', spend: 1000 },
+    ])
+    const result = await fetchClientDailySpendCentsByAccount(sb, CLIENT, '2026-09-27', 7)
+    expect(result?.map((r) => r.adAccountId).sort()).toEqual(['a', 'b'])
   })
 })

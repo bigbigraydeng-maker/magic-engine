@@ -15,9 +15,20 @@
  * jsonb 数组的形状；`race_lost` 在真实 SQL 里是 RAISE EXCEPTION 整批回滚，
  * 表现为 RPC 返回 error（不是数组里混进一个 race_lost 字符串），下面用
  * `rpcError` 模拟这条路径，`rpcOutcome` 只用来模拟数组里每个键的正常结果。
+ *
+ * 🔴 Codex P1 复审（round 11）：`circuit-breaker-spend.ts` 现在会调
+ * `findSharedAdAccounts` 排除跨客户共用账户，那个函数用的是模块级
+ * `supabaseAdmin`（不吃本文件的假 `sb`），跟 `circuit-breaker-spend.test.ts`
+ * 同一套路用 `vi.mock` 换掉，默认"没有共用账户、查询不出错"——这里不重跑
+ * 共用账户排除的逻辑本身（那在 circuit-breaker-spend.test.ts）。
  */
 import { describe, it, expect, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
+
+vi.mock('@/lib/meta/client-ad-accounts', () => ({
+  findSharedAdAccounts: vi.fn(async () => ({ shared: new Set<string>() })),
+}))
+
 import {
   createAdsCircuitBreakerCheckFunction,
   parseCheckPayload,

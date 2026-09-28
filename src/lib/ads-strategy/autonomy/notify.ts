@@ -22,6 +22,18 @@ export interface AutonomyNotifyOptions {
   readonly relaxed?: boolean
   /** 测试注入 */
   readonly send?: typeof sendInngestEvent
+  /**
+   * 🔴 Codex P1 复审（round 11）：追加到事件 id 末尾，绕开 Inngest 按
+   * `(client_id, updated_at)` 的 24h 去重。默认的幂等 id 假设"同一个
+   * updated_at 只需要成功处理一次"，但如果 sync worker 自己重试耗尽后仍然
+   * 失败（不是没发出去，是发出去了但没处理成功），`updated_at` 没变、
+   * 默认 id 也没变，之后同样内容的补救调用会被 Inngest 直接吞掉，
+   * sync worker 永远没有第二次机会——即使它自己基于
+   * `ads_autonomy_sync_receipts` 的幂等判据本可以正确重试。用于"这次是
+   * 明确要求重新尝试，不管上次内容是否已经处理过"的补救场景（比如
+   * release-circuit-breaker 终检发现卡住后的叫醒）。
+   */
+  readonly idSuffix?: string
 }
 
 /** PATCH 写入口调用：意向变了 → 发叫醒铃。幂等 id = autonomy_sync:<client_id>:<updated_at>。 */
@@ -31,9 +43,10 @@ export async function notifyAutonomyModeChanged(
   options: AutonomyNotifyOptions = {},
 ): Promise<AutonomyNotifyResult> {
   const send = options.send ?? sendInngestEvent
+  const baseId = adsAutonomySyncEventId(clientId, sourceUpdatedAt)
   const events = [
     {
-      id: adsAutonomySyncEventId(clientId, sourceUpdatedAt),
+      id: options.idSuffix ? `${baseId}:${options.idSuffix}` : baseId,
       name: ADS_AUTONOMY_MODE_CHANGED,
       data: { client_id: clientId },
     },

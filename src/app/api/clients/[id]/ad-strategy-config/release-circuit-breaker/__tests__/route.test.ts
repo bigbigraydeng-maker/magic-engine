@@ -308,7 +308,12 @@ describe('release-circuit-breaker — 🔴 Codex P1（round 9）：not_circuit_t
     expect(json.error).toContain(keys[0])
     // 🔴 Codex P1（round 10）：卡住时必须重新叫醒一次同步 worker，不能只
     // 依赖 intentDowngraded 那次可能已经失败的 fire-and-forget 通知。
-    expect(mockReconcile).toHaveBeenCalledWith(expect.anything(), CLIENT)
+    expect(mockReconcile).toHaveBeenCalledWith(
+      expect.anything(),
+      CLIENT,
+      // round 11：带 idSuffix 绕开事件去重，见 notify.ts 顶部说明。
+      expect.objectContaining({ idSuffix: expect.stringContaining('release-retry-') }),
+    )
   })
 
   it('终检全部键都不是 auto_approve → 200，正常报成功，不用再额外叫醒（没有卡住）', async () => {

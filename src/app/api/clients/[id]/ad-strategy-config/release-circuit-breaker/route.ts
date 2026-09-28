@@ -188,7 +188,15 @@ export async function POST(
     // 卡住时，不管这次调用有没有走过降级分支，都用 reconcileAutonomyMode
     // 重新读一次当前 ad_strategy_configs.updated_at 再叫醒一次——每次卡住
     // 都会重新尝试，不是只有第一次机会。
-    await reconcileAutonomyMode(supabaseAdmin, clientId).catch(() => undefined)
+    //
+    // 🔴 Codex P1 复审（round 11）：光是"再叫醒一次"还不够——默认幂等 id 只
+    // 认 (client_id, updated_at)，如果第一次事件已经成功送达（不是发送失败，
+    // 是 sync worker 收到了但自己重试耗尽后仍然失败），`updated_at` 这时不会
+    // 再变，用默认 id 重发会被 Inngest 24h 去重直接吞掉，worker 连再跑一次
+    // 的机会都拿不到。这里传 idSuffix 绕开去重——sync worker 自己基于
+    // `ads_autonomy_sync_receipts`（不是事件 id）判断某个 updated_at 是否
+    // 真的同步成功过，绕开事件级去重不会让它把已经成功的键重新做一遍。
+    await reconcileAutonomyMode(supabaseAdmin, clientId, { idSuffix: `release-retry-${Date.now()}` }).catch(() => undefined)
     return NextResponse.json(
       {
         error: `release not safely complete — these keys are still auto_approve, retry: ${stillAuto.join(', ')}`,
