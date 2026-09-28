@@ -101,11 +101,25 @@ export function FollowUpChip({ dueAt, overdue }: { dueAt: string | null; overdue
  * not need to know that rule, only the deadline it creates — and, when it has
  * passed, what to do instead.
  */
-export function WindowNotice({ window }: { window: ReplyWindow }) {
+export function WindowNotice({
+  window,
+  channel = 'messenger',
+}: {
+  window: ReplyWindow
+  /**
+   * 只影响 `closed` 那一句 —— 原文写的是「Facebook 已经不让回这条了」，
+   * 对 WhatsApp 是错的（渠道不对，而且顾问会去检查 Facebook 那边）。
+   * 倒计时那两句两条渠道通用，不用分。
+   */
+  channel?: 'messenger' | 'email' | 'whatsapp'
+}) {
   const text: Record<WindowKind, string> = {
     standard:    `还有 ${formatRemaining(window.msRemaining)}可以直接回复`,
     human_agent: `已超过 24 小时，还能在 ${formatRemaining(window.msRemaining)}内回一次`,
-    closed:      'Facebook 已经不让回这条了 —— 请改用电话或邮件联系',
+    closed:
+      channel === 'whatsapp'
+        ? '他超过 24 小时没说话了，WhatsApp 不让我们主动发 —— 请改用电话或邮件联系'
+        : 'Facebook 已经不让回这条了 —— 请改用电话或邮件联系',
   }
   const tone: Record<WindowKind, string> = {
     standard:    'bg-[#5C8A4A]/10 text-[#5C8A4A]',

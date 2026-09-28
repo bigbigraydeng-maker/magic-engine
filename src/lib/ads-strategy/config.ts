@@ -94,7 +94,7 @@ export function parseCreativePool(raw: unknown): CreativePoolEntry[] {
  */
 export async function loadAdStrategyConfigWithSource(
   clientId: string,
-): Promise<{ config: AdStrategyConfig; source: ConfigSource }> {
+): Promise<{ config: AdStrategyConfig; source: ConfigSource; error?: string }> {
   const { data, error } = await supabaseAdmin
     .from('ad_strategy_configs')
     .select('client_id, enabled, digest_recipients, daily_budget_cap_cents, autonomy_mode, creative_pool, autopilot_enabled, autopilot_dry_run')
@@ -103,7 +103,9 @@ export async function loadAdStrategyConfigWithSource(
 
   if (error) {
     console.warn(`[ad-strategy] config read failed for ${clientId}, falling back to enabled:`, error.message)
-    return { config: defaultConfig(clientId), source: 'fallback' }
+    // 2026-09-25 事故：代码先上线、加列的 migration 晚一天才 apply，这里每次读都 400，
+    // 调用方据 'fallback' 静默跳过了所有客户的诊断。把原始报错带出去，让调用方能喊出来。
+    return { config: defaultConfig(clientId), source: 'fallback', error: error.message }
   }
   if (!data) return { config: defaultConfig(clientId), source: 'default' }
 

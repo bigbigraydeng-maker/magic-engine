@@ -61,7 +61,7 @@ export type PlatformConnectionItemKind =
   /** 这项检查自己读不出来了 —— 不报 ≠ 没事（dev 车道） */
   | 'platform_connection_check_failed'
 
-/** 这几种 PM 做不了，只能转给 dev。要跟 `daily-todo.ts` 的 DEV_OWNED_KINDS 对得上。 */
+/** 这几种 PM 做不了，只能转给 dev。要跟 `five-kinds.ts` 的 LANE_OF_KIND 对得上（有测试钉着）。 */
 export const DEV_LANE_CONNECTION_KINDS: PlatformConnectionItemKind[] = [
   'platform_connection_pipeline_down',
   'platform_connection_not_enrolled',

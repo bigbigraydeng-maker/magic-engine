@@ -19,7 +19,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { FOCUS_CLIENT_IDS } from '@/lib/pm-todo/daily-todo'
+import { esc, FOCUS_CLIENT_IDS } from '@/lib/pm-todo/daily-todo'
 
 const STALE_AFTER_DAYS = 3
 /** Keyword snapshots are WEEKLY by design — 8 days tolerance, not 3, or
@@ -73,6 +73,11 @@ export interface ClientWeekly {
       observed_impressions: number | null
       outcome: string | null
     }>
+    /**
+     * 看板上这周新排了几张还没做的建议卡。2026-09-26 从每日待办挪过来 —— 系统和 FDE 在推，
+     * 不是 PM 五类里的事，每天报一遍只会把真要他动手的淹掉。可选：老数据 / 测试里没有就不报。
+     */
+    cards_new_week?: number
   }
   blog: {
     generated_week: number
@@ -184,7 +189,7 @@ async function gatherClient(
     return (data ?? []) as KwRow[]
   }
 
-  const [curKw, priKw, gsc, findings, titles, outcomesChecked, blogGen, blogPub, blogWait, socialMetrics, adRows, reels] =
+  const [curKw, priKw, gsc, findings, titles, outcomesChecked, blogGen, blogPub, blogWait, socialMetrics, adRows, reels, cards] =
     await Promise.all([
       fetchKw(current),
       fetchKw(prior),
@@ -254,6 +259,12 @@ async function gatherClient(
         .select('id', { count: 'exact', head: true })
         .eq('client_id', clientId)
         .in('status', ['video_ready', 'images_ready', 'in_review']),
+      supabase
+        .from('execution_items')
+        .select('id', { count: 'exact', head: true })
+        .eq('client_id', clientId)
+        .eq('status', 'pending')
+        .gte('created_at', weekAgoIso),
     ])
 
   const seoWeek = computeSeoWeek(curKw, priKw)
@@ -290,6 +301,7 @@ async function gatherClient(
       titles_applied_week: (titles.data ?? []).length,
       freshness: freshness((titles.data as Array<{ created_at: string }> | null)?.[0]?.created_at ?? null, now),
       outcomes_checked_week: (outcomesChecked.data ?? []) as ClientWeekly['auto_changes']['outcomes_checked_week'],
+      cards_new_week: cards.count ?? 0,
     },
     blog: {
       generated_week: blogGen.count ?? 0,
@@ -341,7 +353,33 @@ function moverText(m: KeywordMover): string {
   return `「${m.keyword}」第${m.from}名→第${m.to}名`
 }
 
-export function renderWeeklyReport(clients: ClientWeekly[], nzDateLabel: string): {
+/**
+ * 从今日待办挪过来的「系统替你做了什么」（PM 2026-09-26：今日待办只留五类，知会挪周报）。
+ * 来源是 `loadManualItems` 里车道为 weekly 的那几种（five-kinds.ts），**不按重点客户过滤** ——
+ * 其它在服务的客户的知会也得有人看见。读失败时是 `{ error }`，周报里如实写「没读出来」。
+ */
+export type WeeklyNotices =
+  | { rows: Array<{ client_name: string; what: string; how: string; href: string }> }
+  | { error: string }
+
+function renderNotices(notices: WeeklyNotices | undefined): string {
+  if (!notices) return ''
+  const box = (inner: string) => `
+    <div style="margin:0 0 14px;padding:12px 14px;border:1px solid #e2e8f0;border-radius:10px">
+      <p style="margin:0 0 6px;font-size:13px;font-weight:700;color:#0f172a">📣 这周系统替你做了什么（看一眼就行）</p>
+      ${inner}
+    </div>`
+  if ('error' in notices) {
+    return box(line(`<span style="color:#dc2626">⚠️ 这一栏这周没读出来（${esc(notices.error.slice(0, 160))}）—— 不等于这周没事</span>`))
+  }
+  if (notices.rows.length === 0) return ''
+  return box(notices.rows.map((n) => `
+      <p style="margin:0 0 6px;font-size:13px;color:#334155"><b>${esc(n.client_name)}</b>：${esc(n.what)}<br/>
+        <span style="color:#64748b">→ ${esc(n.how)}${n.href ? ` · <a href="${esc(n.href)}" style="color:#0891b2">去看看</a>` : ''}</span>
+      </p>`).join(''))
+}
+
+export function renderWeeklyReport(clients: ClientWeekly[], nzDateLabel: string, notices?: WeeklyNotices): {
   subject: string
   html: string
 } {
@@ -374,10 +412,14 @@ export function renderWeeklyReport(clients: ClientWeekly[], nzDateLabel: string)
       })
       .join('')
 
+    const cardsLine = (c.auto_changes.cards_new_week ?? 0) > 0
+      ? line(`看板上本周新排了 ${c.auto_changes.cards_new_week} 张建议卡还没做（系统和 FDE 在推，不用你挑）· <a href="https://app.magicengine.com.au/dashboard/clients/${c.client_id}/execution" style="color:#0891b2">看看板</a>`)
+      : ''
     const autoLines = (c.auto_changes.titles_applied_week > 0
       ? line(`系统本周自动改了 <b>${c.auto_changes.titles_applied_week}</b> 个页面标题/描述（网站上已生效）`)
       : line('本周没有自动改动'))
       + outcomeLines
+      + cardsLine
 
     const blogLines = [
       line(`本周生成 ${c.blog.generated_week} 篇、发布 ${c.blog.published_week} 篇`),
@@ -427,6 +469,7 @@ export function renderWeeklyReport(clients: ClientWeekly[], nzDateLabel: string)
       <p style="margin:0 0 16px;font-size:13px;color:#64748b">
         两家客户过去一周的排名、自动改动、内容与广告。标了 ⚠️ 的是数据断了，不是没事。
       </p>
+      ${renderNotices(notices)}
       ${sections}
       <p style="margin-top:16px;font-size:12px;color:#94a3b8">
         每周一早自动发。日常待办看 <a href="https://app.magicengine.com.au/dashboard/today" style="color:#0891b2">今日待办</a>。

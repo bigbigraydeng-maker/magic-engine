@@ -84,7 +84,8 @@ export async function pushCreatomateRenderItems(
     const clientName = clientNames.get(row.client_id)?.name ?? '未知客户'
     const creditsOut = /402|insufficient|credit/i.test(row.error ?? '')
     items.push({
-      kind: 'creatomate_render_failed',
+      // 额度用完只有人能充值；别的做片失败是我们要查的（今日待办按 kind 分车道）
+      kind: creditsOut ? 'creatomate_render_failed' : 'creatomate_render_error',
       client_id: row.client_id,
       client_name: clientName,
       what: creditsOut

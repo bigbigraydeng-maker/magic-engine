@@ -33,9 +33,12 @@ import type { PlatformConnectionItemKind } from './platform-connection-items'
 import type { FacebookSyncItemKind } from './facebook-sync-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
+import type { AdsCircuitItemKind } from './ads-circuit-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
 import type { SimaqianItemKind } from './simaqian-review-items'
+import type { ToolLeadItemKind } from './tool-lead-items'
+import type { PmKind } from './five-kinds'
 
 /**
  * 这些条目**链接坏了也照样下发**。
@@ -89,6 +92,10 @@ export type ManualItemKind =
    *  docs/specs/2026-09-09-creatomate-connector-spec-v1.md §4.4，旧管线的 reapStale() 已死，
    *  这条是它的替代 */
   | 'creatomate_render_failed'
+  /** 人工待办整个没读出来（loadManualItems 抛了）—— 清单不全，不许显示成「今天没事」 */
+  | 'todo_items_unreadable'
+  /** Creatomate 做片失败但不是额度问题 —— 要我们查是哪一步卡了（开发的活） */
+  | 'creatomate_render_error'
   | 'dataforseo_credits_out'
   | 'cron_not_running'
   | 'cron_blind'
@@ -129,7 +136,14 @@ export type ManualItemKind =
   | 'ad_readback_blocker'
   /** Mailchimp 出口 tally 里出现非预期失败（配置读不出来 / API key 失效 / 被限流 / provider 5xx） */
   | 'mailchimp_export_broken'
+  /**
+   * 广告每日回拉读不出客户的广告引擎配置 → 诊断 / 经营状态 / 日报对这些客户全部跳过。
+   * 2026-09-25 事故：代码先于加列的数据库改动上线，三个客户一起停了一天，没人知道。
+   */
+  | 'ads_config_unreadable'
   | 'blog_draft_waiting'
+  /** 文章写好了，但这个客户的网站发布通道是断的 —— 要人去设置里接通一次 */
+  | 'blog_publish_channel_broken'
   | 'cross_client_leak'
   | 'price_claim_unbacked'
   | 'auto_run_blocked'
@@ -156,6 +170,8 @@ export type ManualItemKind =
   | 'ledger_patrol_missing'
   /** 客人像是说他付款了，但不是我们自己确认的 —— 只有人能核对到账，不许机器自己打 paid 标签 */
   | 'paid_signal_needs_review'
+  /** 工具实验室有人留资（自助开通 / 网站诊断留邮箱）—— 这张表以前写完没人读，见 tool-lead-items.ts */
+  | ToolLeadItemKind
   | CommentScopeTodoKind
   /** 写在 Render 里的 Meta 钥匙被 Meta 作废（错误码 190）—— 只有人能重新授权 */
   | MetaTokenHealthKind
@@ -173,6 +189,7 @@ export type ManualItemKind =
   | AdsAutonomyItemKind
   /** 每日广告巡检的广告级规则（D2 素材疲劳 / D10 点进去之后差了）：要人拍板改不改，系统不会自动改 */
   | AdsRuleFindingItemKind
+  | AdsCircuitItemKind
   /** Facebook 删除数据请求处理失败 —— 用户在 Facebook 里要求删数据，我们答应了却没做到，不许只写日志 */
   | 'meta_data_deletion_failure'
   /** 有成交/咨询等着人核对要不要告诉广告平台 —— 撤不回，所以必须人点 */
@@ -205,8 +222,10 @@ export type ManualItemKind =
   | PageBindingItemKind
   /** 排期发的 Facebook 帖子发出去了，但一直拿不到帖子编号 —— 成绩收不回来 */
   | DailyPlanMeasurementItemKind
-  /** 私信客服健康心跳查出问题（issue #1587）：消息量骤降 / 验证器拦截率或出错率过高 / 退订登记写入失败 */
+  /** 私信客服健康心跳查出问题（issue #1587）：消息量骤降 / 验证器拦截率过高 / 退订登记写入失败 */
   | 'conversation_health_alert'
+  /** 同一个心跳查出「AI 起草回复一直报错」—— 这条只有我们能修（开发的活） */
+  | 'conversation_health_check_error'
   /** 经验手册（Claude 持久记忆，不在仓库）里点名的函数/路径/表名疑似过期，每周巡检自动发现 */
   | 'playbook_reference_stale'
   /**
@@ -224,6 +243,8 @@ export type ManualItemKind =
   | FacebookSyncItemKind
   /** Magic Bridge 全平台免费额度用到 80% 以上 —— 要不要加额度由 PM 定 */
   | 'magic_bridge_quota'
+  /** Tools Lab 全站每月合计花费/次数上限用到 80% 以上（网站诊断+广告体检共用）—— 要不要加名额由 PM 定 */
+  | 'tools_wide_budget_warning'
 
 export interface ManualItem {
   kind: ManualItemKind
@@ -235,6 +256,12 @@ export interface ManualItem {
   how: string
   /** Direct link to the place the action happens. */
   href: string
+  /**
+   * 在 PM 五类里换一类（见 five-kinds.ts `laneOf`）。**只能在五类之间换，挪不出 PM 的清单** ——
+   * 一个写错的覆盖不许让一条待办悄悄消失。要把活挪给开发就拆一个新 kind。
+   * 目前只有方案文档里的一次性人工动作（client-doc-manual-tasks.ts）会写它。
+   */
+  pm_kind?: PmKind
 }
 
 /** GSC URL-inspection deep link — the exact screen with the resubmit button. */

@@ -29,6 +29,12 @@
 -- (which lists `clients` under "未受影响" and swept every other policy to
 -- service_role). Adding a column does not create a new policy requirement.
 
+-- 🔴 子牙复审 2026-09-28：加列本身是毫秒级的（三处都是无 DEFAULT 的可空列，PG11+
+-- 只改 catalog，不重写表），但 ALTER 要拿 ACCESS EXCLUSIVE 锁。`conversation_messages`
+-- 是入站 webhook 的热表 —— 一旦有长事务正占着它，这条 ALTER 会排在锁队列头部，把它
+-- 后面所有读写一起堵死，包括正在收客人消息的那条路。宁可失败重跑，不要堵住入站写入。
+SET lock_timeout = '3s';
+
 ALTER TABLE clients ADD COLUMN IF NOT EXISTS whatsapp_phone_number_id TEXT;
 
 COMMENT ON COLUMN clients.whatsapp_phone_number_id IS
