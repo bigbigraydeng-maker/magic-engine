@@ -160,6 +160,9 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   cron_silent_success: 'dev',
   ai_alerting_broken: 'dev',
   ai_gateway_broken: 'dev',
+  // 某客户 AI 可见度探测整周全挂，但主要原因是限流/供应商出错/解析失败/写入问题——
+  // 都不是 PM 该充值换钥匙的事，只是仍要显示「这周全挂了」（Codex 复审 2026-09-28）
+  ai_tracker_all_failed_not_actionable: 'dev',
   playbook_reference_stale: 'dev',
   platform_connection_pipeline_down: 'dev',
   platform_connection_check_failed: 'dev',

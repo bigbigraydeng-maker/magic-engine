@@ -75,8 +75,10 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   'deploy_not_live',
   'deploy_check_failed',
   // 全量探测失败跟「AI 没提到我们」长得一模一样 —— 测不成被当测出来是零，
-  // 2026-09-20 East International 三天没人知道。
+  // 2026-09-20 East International 三天没人知道。两种都进——不管原因是不是
+  // 需要 PM 动手，都不能因为链接问题静默消失（Codex 复审 2026-09-28）。
   'ai_tracker_all_failed',
+  'ai_tracker_all_failed_not_actionable',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */
@@ -132,11 +134,17 @@ export type ManualItemKind =
    */
   | 'ai_gateway_broken'
   /**
-   * 某客户整周的 AI 可见度探测全部失败 —— 不是「没被提到」，是「根本没测成」。
-   * 2026-09-20 East International 24/24 探测全挂（OpenAI 没钱 + Google 报错），
-   * 但在所有现有看板上跟「没什么 AI 提到我们」长得一模一样。
+   * 某客户整周的 AI 可见度探测全部失败，且最主要的原因需要 PM 动手（充值/换钥匙）——
+   * 不是「没被提到」，是「根本没测成」。2026-09-20 East International 24/24 探测全挂
+   * （OpenAI 没钱 + Google 报错），但在所有现有看板上跟「没什么 AI 提到我们」长得一模一样。
    */
   | 'ai_tracker_all_failed'
+  /**
+   * 同上，但主要原因是限流/供应商自己出错/我们解析不出排名/数据库写入问题——
+   * 都不是 PM 该动手的事，只是仍然要显示「这周全挂了」（Codex 复审 2026-09-28：
+   * 之前不分这两种，会把「不用你动手」的活算进 PM 待办数量）。
+   */
+  | 'ai_tracker_all_failed_not_actionable'
   | 'goal_baseline_mismatch'
   | 'diagnostic_findings'
   | 'prescription_updated'

@@ -265,6 +265,26 @@ function fixGuideFor(bucket: ErrorBucket): { how: string; href: string } {
   return GENERIC_FIX[bucket.key] ?? DEFAULT_FIX
 }
 
+/** Bucket keys where the "how" text genuinely asks the PM to do something. */
+const ACTIONABLE_BUCKET_KEYS = new Set(['quota_exhausted', 'auth_failed'])
+
+/**
+ * Pick which bucket drives the guide shown to the PM.
+ *
+ * Always prefers an actionable bucket (quota/auth) over a larger
+ * non-actionable one — a tie, or even a minority, must never hide the one
+ * thing the PM can actually fix. The real incident this module exists for
+ * was exactly a 12/12 split between OpenAI quota exhaustion and a Google
+ * provider error; `bucketErrors`' stable sort combined with the query's
+ * `ran_at DESC` ordering (engines run in a fixed order within a batch, so
+ * the last-run engine's rows sort first on ties) could put the non-actionable
+ * bucket at buckets[0], hiding the recharge prompt behind "not your job"
+ * (Codex review 2026-09-28).
+ */
+function pickGuideBucket(buckets: ErrorBucket[]): ErrorBucket | undefined {
+  return buckets.find((b) => ACTIONABLE_BUCKET_KEYS.has(b.key)) ?? buckets[0]
+}
+
 // ─── Core query and item builder ────────────────────────────────────────────
 
 /** Shape of a single run row from the query. */
@@ -465,15 +485,20 @@ export function buildAiTrackerFailureItems(
     const clientName = clientNames.get(clientId) ?? clientId.slice(0, 8)
     const buckets = bucketErrors(latestWeek.errors)
     const errorSummary = summariseRunFailures(buckets)
-    const topBucket = buckets[0]
-    const guide = topBucket ? fixGuideFor(topBucket) : DEFAULT_FIX
+    const guideBucket = pickGuideBucket(buckets)
+    const guide = guideBucket ? fixGuideFor(guideBucket) : DEFAULT_FIX
+    // Fail toward showing it to the PM: only skip their lane when a bucket
+    // was actually picked and it's confirmed non-actionable. No bucket
+    // (shouldn't happen — every failed run pushes an ErrorEntry) defaults
+    // to actionable, same as DEFAULT_FIX's "go ask a human" text implies.
+    const isActionable = !guideBucket || ACTIONABLE_BUCKET_KEYS.has(guideBucket.key)
     const duration =
       streak <= 1
         ? '这周'
         : `已经连续 ${streak} 周`
 
     items.push({
-      kind: 'ai_tracker_all_failed',
+      kind: isActionable ? 'ai_tracker_all_failed' : 'ai_tracker_all_failed_not_actionable',
       client_id: clientId,
       client_name: clientName,
       what: `${duration}的 AI 可见度体检全挂了（${latestWeek.total} 条探测全部失败：${errorSummary}）—— 这个客户这周的 AI 可见度数据完全空白，看上去跟「没什么 AI 提到我们」一模一样，但其实是根本没测成`,

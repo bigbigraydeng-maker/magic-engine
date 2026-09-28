@@ -208,6 +208,40 @@ describe('buildAiTrackerFailureItems', () => {
     expect(items[0]!.how).not.toContain('充值')
   })
 
+  it('a pure non-actionable week (rate-limited/provider-error/etc) uses the dev-owned kind, not one_click', () => {
+    const rows = makeRuns('client-a', THIS_MONDAY, 24, {
+      engine: 'google',
+      errorMsg: '[GoogleGenerativeAI Error] 500 Internal Server Error',
+    })
+    const items = buildAiTrackerFailureItems({ rows, error: null }, NAMES, WED)
+    expect(items).toHaveLength(1)
+    expect(items[0]!.kind).toBe('ai_tracker_all_failed_not_actionable')
+  })
+
+  it('a tied split between an actionable and non-actionable cause never hides the actionable one — real incident shape (Codex review 2026-09-28)', () => {
+    // Real 2026-09-20 incident: 12 OpenAI quota-exhausted + 12 Google provider
+    // errors, evenly split. Provider-error rows listed FIRST here to simulate
+    // the query's ran_at DESC ordering putting the later-run engine's rows
+    // ahead of the earlier one on a tie — pickGuideBucket must still surface
+    // the actionable (quota) bucket regardless of array/tie order.
+    const rows = [
+      ...makeRuns('client-a', THIS_MONDAY, 12, {
+        engine: 'google',
+        errorMsg: '[GoogleGenerativeAI Error] 500 Internal Server Error',
+      }),
+      ...makeRuns('client-a', THIS_MONDAY, 12, {
+        engine: 'openai',
+        errorMsg: '429 You have no credits remaining',
+      }),
+    ]
+    const items = buildAiTrackerFailureItems({ rows, error: null }, NAMES, WED)
+    expect(items).toHaveLength(1)
+    // Must be the actionable, one_click kind — not buried behind "not your job"
+    expect(items[0]!.kind).toBe('ai_tracker_all_failed')
+    expect(items[0]!.how).toContain('充值')
+    expect(items[0]!.how).toContain('OpenAI')
+  })
+
   it('parse failures (provider answered, ranking unparseable) still count as 100% failure', () => {
     // error_message is null (the provider call itself succeeded) but
     // parse_error_message is set — orchestrator.ts's processOne leaves
