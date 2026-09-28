@@ -138,7 +138,8 @@ function oauthHow(): string {
 const SHARED_TOKEN_HOW =
   '这个客户没有专属 Meta 令牌，实际用的是公共钥匙 META_SYSTEM_USER_TOKEN（Render 后台 crazycontent 服务的 Environment 里）——' +
   '这把钥匙同时给好几个客户用，改之前先确认真的要动公共钥匙（改错了会影响其他客户），' +
-  '权限要勾上 pages_manage_engagement，保存时选带 deploy 的那个选项。'
+  '权限要勾上 pages_manage_engagement（发评论回复/隐藏）和 pages_read_user_content（读别人写的评论，' +
+  '缺这条新钥匙能通过健康检查但一读评论就报 Graph #10），保存时选带 deploy 的那个选项。'
 
 /**
  * 指名具体变量（Codex round 10 复审 P1）：`pickScopedMetaToken`
@@ -153,7 +154,8 @@ function envVarHow(varName: string | null): string {
     : '这个客户专属的令牌变量（具体变量名这次没读出来，去 Render 后台按客户域名 / Facebook 主页 id 找对应那条）'
   return (
     '重新走一遍 Meta 授权换一把新令牌（developers.facebook.com/tools/explorer/），这次生成时权限要勾上 ' +
-    'pages_manage_engagement（发评论回复要用，最容易被漏勾）；换好在 Render 后台 crazycontent 服务的 ' +
+    'pages_manage_engagement（发评论回复/隐藏，最容易被漏勾）和 pages_read_user_content（读别人写的评论，' +
+    '单独一条 scope，缺这条新钥匙能读别的东西但一读评论就报 Graph #10）；换好在 Render 后台 crazycontent 服务的 ' +
     `Environment 更新 ${varClause}，保存时选带 deploy 的那个选项（别选 Save only）。`
   )
 }
@@ -359,26 +361,33 @@ export async function pushCommentAutoreplyStuckItems(
   const configByClient = await fetchClientConfigByClient(supabase, activeClientIds)
   const rows = await fetchStuckRows(supabase, activeClientIds, now, configByClient)
 
-  const byClient = new Map<string, { count: number; oldest: string; pageId: string; stale: number; orphaned: number }>()
+  const byClient = new Map<string, { count: number; oldest: string; newest: string; pageId: string; stale: number; orphaned: number }>()
   for (const row of rows) {
     const stale = row.reason === 'stale_processing' ? 1 : 0
     const orphaned = row.reason === 'orphaned' ? 1 : 0
     const cur = byClient.get(row.client_id)
     if (!cur) {
-      byClient.set(row.client_id, { count: 1, oldest: row.updated_at, pageId: row.page_id, stale, orphaned })
+      byClient.set(row.client_id, { count: 1, oldest: row.updated_at, newest: row.updated_at, pageId: row.page_id, stale, orphaned })
     } else {
       cur.count += 1
       cur.stale += stale
       cur.orphaned += orphaned
       if (row.updated_at < cur.oldest) cur.oldest = row.updated_at
+      if (row.updated_at > cur.newest) cur.newest = row.updated_at
     }
   }
 
-  // 同一轮有多少个不同客户卡住（Codex round 18 复审 P2）：≥3 个客户同时卡住，
-  // 比起"这一个客户的令牌恰好坏了"，更像是限流或 Meta 接口本身出问题——这种
-  // 时候还无条件建议去换令牌（尤其 shared_fallback 分支，换的是好几个客户共用
-  // 的公共钥匙），既解决不了限流类故障，还会让其它本来没事的客户跟着担风险。
-  const multiClientStuck = byClient.size >= 3
+  // 同一轮有多少个不同客户"最近"卡住（Codex round 18 复审 P2，修正上一版的漏洞）：
+  // byClient.size 数的是所有还没标记已阅的历史卡死行——只要某个客户囤过任意
+  // 年代、任意原因的一条卡死行没人点已读，这个数字就会长期 ≥3，导致所有客户
+  // 的待办都被误判成"现在同时出问题"、建议等一等，反而拖慢真正当下卡住的
+  // 客户的处理。改成只数"最近一次卡死时间"（newest）落在 STALE_PROCESSING_MS
+  // 窗口内的客户——这些才是当下还在活跃出问题的，跟这条通道自己判断
+  // stale_processing 用的同一个新鲜度标准。
+  const recentlyStuckClients = Array.from(byClient.values()).filter(
+    (agg) => now.getTime() - Date.parse(agg.newest) < STALE_PROCESSING_MS,
+  ).length
+  const multiClientStuck = recentlyStuckClients >= 3
 
   for (const [clientId, agg] of Array.from(byClient.entries())) {
     const days = daysAgo(agg.oldest, now)
@@ -410,7 +419,7 @@ export async function pushCommentAutoreplyStuckItems(
     const needsTokenFix = confirmed > 0 || agg.orphaned > 0
     const tokenGuidance = needsTokenFix
       ? multiClientStuck
-        ? `现在同时有 ${byClient.size} 个客户都卡住了，看起来更像是限流或 Meta 接口本身的问题，不太像是这一个客户单独的令牌坏了——建议先去 Meta 开发者后台查一下平台状态、或者等下一轮看是不是自己恢复；如果确认不是大面积问题，再处理这个客户的令牌：${guidance.how} `
+        ? `现在同时有 ${recentlyStuckClients} 个客户都刚卡住了，看起来更像是限流或 Meta 接口本身的问题，不太像是这一个客户单独的令牌坏了——建议先去 Meta 开发者后台查一下平台状态、或者等下一轮看是不是自己恢复；如果确认不是大面积问题，再处理这个客户的令牌：${guidance.how} `
         : `${guidance.how} `
       : ''
     // 待办按钮的落点跟着上面同一个判据走（Codex round 18 复审 P2）：不需要换

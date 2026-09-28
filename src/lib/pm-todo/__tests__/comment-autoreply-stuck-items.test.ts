@@ -383,22 +383,47 @@ describe('pushCommentAutoreplyStuckItems', () => {
   // 恰好坏了"，更像是限流或 Meta 接口本身出问题——这时候还无条件让人去换令牌
   // （尤其 shared_fallback 换的是好几个客户共用的公共钥匙）既解决不了问题，还会
   // 让其它本来没事的客户一起担风险，所以要先给出这个信号，而不是照常给换令牌步骤。
-  it('≥3 个客户同时卡住 → 每个客户的 how 都先提示像是限流/Meta 接口问题，而不是直接让换令牌', async () => {
+  it('≥3 个客户最近同时卡住 → 每个客户的 how 都先提示像是限流/Meta 接口问题，而不是直接让换令牌', async () => {
     assessConfiguredPageMock.mockResolvedValue({ verified: true, via: 'client_oauth' })
+    const recentlyStuck = '2026-09-27T23:30:00Z' // NOW 前 30 分钟，落在 STALE_PROCESSING_MS（24h）窗口内
     const { sb } = fakeDb({
       exhaustedRows: [
-        { client_id: 'a', page_id: PAGE_ID, updated_at: '2026-09-01T00:00:00Z' },
-        { client_id: 'b', page_id: PAGE_ID, updated_at: '2026-09-01T00:00:00Z' },
-        { client_id: 'c', page_id: PAGE_ID, updated_at: '2026-09-01T00:00:00Z' },
+        { client_id: 'a', page_id: PAGE_ID, updated_at: recentlyStuck },
+        { client_id: 'b', page_id: PAGE_ID, updated_at: recentlyStuck },
+        { client_id: 'c', page_id: PAGE_ID, updated_at: recentlyStuck },
       ],
     })
     const items: ManualItem[] = []
     await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['a', 'b', 'c'])
     expect(items).toHaveLength(3)
     for (const item of items) {
-      expect(item.how).toContain('现在同时有 3 个客户都卡住了')
+      expect(item.how).toContain('现在同时有 3 个客户都刚卡住了')
       expect(item.how).toContain('看起来更像是限流或 Meta 接口本身的问题')
       // 系统性故障的提示要包住原有的令牌指引，不是取代它——确认不是大面积问题之后还是要走这一步。
+      expect(item.how).toContain('连接 Meta')
+    }
+  })
+
+  // Codex round 18 复审 P2（第二批）：byClient.size 数的是所有还没标记已阅的
+  // 历史卡死行，不看时间——3 个客户各自囤着几个月前、互不相关的旧卡死行时，
+  // 不该被当成"现在同时出问题"。这条测的是修复后的行为：全是陈年旧账时，
+  // 即使有 3 个不同客户，也不该出现系统性故障提示。
+  it('3 个客户都卡住，但都是几个月前的陈年旧账（不是最近同时发生）→ 不出现系统性故障提示', async () => {
+    assessConfiguredPageMock.mockResolvedValue({ verified: true, via: 'client_oauth' })
+    const { sb } = fakeDb({
+      exhaustedRows: [
+        { client_id: 'a', page_id: PAGE_ID, updated_at: '2026-06-01T00:00:00Z' }, // 客户 a：6 月的旧账
+        { client_id: 'b', page_id: PAGE_ID, updated_at: '2026-07-15T00:00:00Z' }, // 客户 b：7 月的旧账，原因跟 a 无关
+        { client_id: 'c', page_id: PAGE_ID, updated_at: '2026-08-20T00:00:00Z' }, // 客户 c：8 月的旧账，原因跟 a/b 都无关
+      ],
+    })
+    const items: ManualItem[] = []
+    await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['a', 'b', 'c'])
+    expect(items).toHaveLength(3)
+    for (const item of items) {
+      expect(item.how).not.toContain('都刚卡住了')
+      expect(item.how).not.toContain('看起来更像是限流或 Meta 接口本身的问题')
+      // 没有系统性故障提示时，原有的令牌指引要原样保留，不能被误伤。
       expect(item.how).toContain('连接 Meta')
     }
   })
@@ -462,6 +487,10 @@ describe('pushCommentAutoreplyStuckItems', () => {
     const items: ManualItem[] = []
     await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
     expect(items[0].how).toContain('pages_manage_engagement')
+    // Codex round 18 复审 P2：跟 meta-token-health-items.ts 同一个漏洞——只勾
+    // pages_manage_engagement 换出来的新钥匙发得了回复但读不了评论，两处清单
+    // 都要有 pages_read_user_content。
+    expect(items[0].how).toContain('pages_read_user_content')
     expect(items[0].how).toContain('Render 后台')
     expect(items[0].how).toContain('META_SYSTEM_USER_TOKEN_CTSTOURS_CO_NZ')
     // 不能连主页变量也一起提，两条一起写等于又把人指错方向
@@ -504,6 +533,7 @@ describe('pushCommentAutoreplyStuckItems', () => {
     await pushCommentAutoreplyStuckItems(sb, items, NOW, nameOf, ['cts'])
     expect(items[0].how).toContain('META_SYSTEM_USER_TOKEN')
     expect(items[0].how).toContain('没有专属 Meta 令牌')
+    expect(items[0].how).toContain('pages_read_user_content')
   })
 
   it('令牌来源判不出来（两处都读失败）→ how 退回默认的专属变量指引，不整条待办失败', async () => {
