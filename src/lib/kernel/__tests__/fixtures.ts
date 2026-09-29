@@ -7,6 +7,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ActionDefinition, CapabilityImplementation } from '../types'
+import type { EnvelopeFactsResolver } from '../deps'
 import type { ActionRegistry } from '../registry'
 import { createKernelDeps, type KernelDeps } from '../deps'
 import { createFakeSupabase, type FakeSupabaseOptions, type Row, type Tables } from './fake-supabase'
@@ -52,6 +53,7 @@ export interface FixtureOptions {
   productionPackages?: Row[]
   extraTables?: Tables
   supabaseOptions?: FakeSupabaseOptions
+  resolveEnvelopeFacts?: EnvelopeFactsResolver
 }
 
 /**
@@ -142,6 +144,7 @@ export function makeFixture(args: {
     supabase,
     registry: args.registry,
     capabilities: args.capabilities(supabase),
+    ...(args.options?.resolveEnvelopeFacts ? { resolveEnvelopeFacts: args.options.resolveEnvelopeFacts } : {}),
     workerId: 'test-worker',
     ...(args.leaseSeconds !== undefined ? { leaseSeconds: args.leaseSeconds } : {}),
     ...(args.ownerId !== undefined ? { ownerId: args.ownerId } : {}),

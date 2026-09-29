@@ -38,6 +38,7 @@ export type ActionKey =
   //    而是落一条可恢复的 deny 并给 PM 一张三件套待办。
   | 'ads.pause_unit'
   | 'ads.cut_unit_budget'
+  | 'ads.cut_campaign_budget'
   | 'ads.scale_unit_budget'
   | 'ads.budget_move_plan'
   | 'ads.add_retargeting_adset'

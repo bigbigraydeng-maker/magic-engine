@@ -36,6 +36,7 @@ function snap(over: Row = {}): Row {
     campaign_id: 'cmp-1',
     budget_level: null,
     daily_budget_minor: null,
+    currency: 'NZD',
     learning_stage: null,
     ad_studies: null,
     effective_status: 'ACTIVE',
@@ -144,9 +145,16 @@ function makeSb(t: Tables, log: Log): SupabaseClient {
 
 const withRollback: Readonly<Record<string, CapabilityImplementation>> = {
   'ads.pause_unit': { actionKey: 'ads.pause_unit', version: 1, steps: {}, rollback: async () => ({ ok: true, rollbackKind: 'noop', detail: {} }) } as unknown as CapabilityImplementation,
+  'ads.cut_campaign_budget': { actionKey: 'ads.cut_campaign_budget', version: 1, steps: {}, rollback: async () => ({ ok: true, rollbackKind: 'noop', detail: {} }) } as unknown as CapabilityImplementation,
 }
 
-function resolve(t: Partial<Tables>, log: Log, at: 'authorize' | 'pre_provider' = 'authorize') {
+function resolve(
+  t: Partial<Tables>,
+  log: Log,
+  at: 'authorize' | 'pre_provider' = 'authorize',
+  actionKey: 'ads.pause_unit' | 'ads.cut_campaign_budget' = 'ads.pause_unit',
+  input: Record<string, unknown> = { ad_account_id: ACCOUNT, adset_id: ADSET, cycle_date: '2026-09-27' },
+) {
   const tables: Tables = {
     ad_entity_snapshots: [],
     ad_strategy_configs: { daily_budget_cap_cents: 10_000 },
@@ -163,12 +171,53 @@ function resolve(t: Partial<Tables>, log: Log, at: 'authorize' | 'pre_provider' 
   })
   return resolver({
     clientId: CLIENT,
-    actionKey: 'ads.pause_unit',
-    input: { ad_account_id: ACCOUNT, adset_id: ADSET, cycle_date: '2026-09-27' },
+    actionKey,
+    input,
     at,
     runId: 'run-1',
   })
 }
+
+describe('ads.cut_campaign_budget CBO facts', () => {
+  const campaign = (over: Row = {}) => snap({
+    level: 'campaign', entity_id: '456', campaign_id: null, adset_id: null,
+    budget_level: 'cbo', daily_budget_minor: 5_000, learning_stage: 'LEARNING',
+    effective_status: 'ACTIVE', currency: 'NZD', ...over,
+  })
+  const run = (rows: Row[], after = 4_000, over: Row = {}) => {
+    const testLog = log()
+    return resolve({ ad_entity_snapshots: [...rows, campaign(over)] }, testLog, 'authorize', 'ads.cut_campaign_budget', {
+      ad_account_id: ACCOUNT, campaign_id: '456', after_cents: after, cycle_date: '2026-09-27',
+    })
+  }
+
+  it('读取系列自己的 CBO 预算，并在账户合计中避免把子广告组重复计入', async () => {
+    const r = await run([
+      snap({ level: 'adset', entity_id: 'as-cbo', campaign_id: '456', budget_level: 'cbo', daily_budget_minor: 5_000, currency: 'NZD' }),
+    ])
+    expect(r).toMatchObject({
+      request: { kind: 'budget_change', afterCents: 4_000 },
+      facts: { beforeCents: 5_000, accountDailyTotalBeforeCents: 5_000, dailyCapCents: 10_000, hasRollbackHandler: true },
+    })
+  })
+
+  it('拒绝借减预算动作提高系列预算', async () => {
+    const r = await run([], 5_001)
+    expect(r).toMatchObject({ unavailable: expect.stringContaining('高于当前预算') })
+  })
+
+  it('拒绝 ABO 或币种未知的系列快照', async () => {
+    expect(await run([], 4_000, { budget_level: 'abo' })).toMatchObject({ unavailable: expect.stringContaining('不是系列级 CBO') })
+    expect(await run([], 4_000, { currency: null })).toMatchObject({ unavailable: expect.stringContaining('币种未知') })
+  })
+
+  it('在投账户实体预算缺失时无法核算总额，拒绝执行', async () => {
+    const r = await run([
+      snap({ level: 'adset', entity_id: 'as-abo', campaign_id: 'other', budget_level: 'abo', daily_budget_minor: null, currency: 'NZD', effective_status: 'ACTIVE' }),
+    ])
+    expect(r).toMatchObject({ unavailable: expect.stringContaining('预算缺失或无效') })
+  })
+})
 
 const log = (): Log => ({ snapQueries: [], errors: {} })
 

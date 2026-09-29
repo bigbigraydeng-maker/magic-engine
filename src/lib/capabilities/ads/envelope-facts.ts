@@ -35,6 +35,7 @@ import { DELIVERING_STATUSES } from '@/lib/ads-strategy/portfolio/diagnostics/co
 const CHANGE_KIND: Readonly<Record<string, EnvelopeChangeKind>> = {
   'ads.pause_unit': 'pause',
   'ads.cut_unit_budget': 'budget_change',
+  'ads.cut_campaign_budget': 'budget_change',
   'ads.scale_unit_budget': 'budget_change',
   'ads.budget_move_plan': 'budget_change',
   'ads.add_retargeting_adset': 'new_spend',
@@ -48,6 +49,7 @@ interface SnapRow {
   campaign_id: string | null
   budget_level: string | null
   daily_budget_minor: number | null
+  currency: string | null
   learning_stage: string | null
   ad_studies: unknown
   effective_status: string | null
@@ -56,7 +58,7 @@ interface SnapRow {
 }
 
 const SNAP_COLUMNS =
-  'level, entity_id, adset_id, campaign_id, budget_level, daily_budget_minor, learning_stage, ad_studies, effective_status, capture_reason, captured_at'
+  'level, entity_id, adset_id, campaign_id, budget_level, daily_budget_minor, currency, learning_stage, ad_studies, effective_status, capture_reason, captured_at'
 
 /**
  * 只有这些投放状态算「在花钱」，用来加总账户当日预算。
@@ -216,6 +218,12 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
         subject = { entityId: id, level: 'adset', learningApplicable: true }
         break
       }
+      case 'ads.cut_campaign_budget': {
+        const id = str('campaign_id')
+        if (!id || !/^\d{1,32}$/.test(id)) return cantRead('input 里没有有效的 campaign_id')
+        subject = { entityId: id, level: 'campaign', learningApplicable: true }
+        break
+      }
       case 'ads.swap_creative': {
         const adId = str('ad_id')
         if (!adId) return cantRead('input 里没有 ad_id')
@@ -244,6 +252,12 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
     const subjectRows = rows.filter(r => r.level === subject.level && r.entity_id === subject.entityId)
     const target = latestOf(subjectRows)
     if (!target) return cantRead(`快照里查不到 ${subject.level} ${subject.entityId}`)
+    if (actionKey === 'ads.cut_campaign_budget') {
+      if (target.budget_level !== 'cbo') return unavailable('facts:目标不是系列级 CBO 预算，不执行系列预算调整')
+      if (typeof target.currency !== 'string' || !target.currency.trim()) {
+        return unavailable('facts:系列预算币种未知，不能与账户上限比较')
+      }
+    }
 
     // ── 账户当日预算合计 ────────────────────────────────────────────────────
     // 🔴 Meta 有两种预算位，只加广告组级会**系统性少算**，让日上限这道闸偏松：
@@ -272,12 +286,20 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
         if (c.budget_level !== 'cbo') continue
         cboCampaignIds.add(c.entity_id)
         if (!DELIVERING.has(c.effective_status ?? '')) continue
+        if (actionKey === 'ads.cut_campaign_budget' &&
+            (typeof c.daily_budget_minor !== 'number' || !Number.isSafeInteger(c.daily_budget_minor) || c.daily_budget_minor <= 0)) {
+          return unavailable(`facts:在投 CBO 系列 ${c.entity_id} 的预算缺失或无效，无法安全核算账户日预算`)
+        }
         if (typeof c.daily_budget_minor === 'number') accountTotal += c.daily_budget_minor
       }
       for (const a of latestAdsets.values()) {
         // CBO 旗下的广告组不再单独计入 —— 钱在系列那一层，重复加就翻倍。
         if (a.campaign_id && cboCampaignIds.has(a.campaign_id)) continue
         if (!DELIVERING.has(a.effective_status ?? '')) continue
+        if (actionKey === 'ads.cut_campaign_budget' &&
+            (typeof a.daily_budget_minor !== 'number' || !Number.isSafeInteger(a.daily_budget_minor) || a.daily_budget_minor <= 0)) {
+          return unavailable(`facts:在投广告组 ${a.entity_id} 的预算缺失或无效，无法安全核算账户日预算`)
+        }
         if (typeof a.daily_budget_minor === 'number') accountTotal += a.daily_budget_minor
       }
     }
@@ -359,6 +381,23 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
       : kind === 'creative_only' ? (beforeCents ?? 0)          // 不碰钱，等于没变
       : typeof afterRaw === 'number' ? afterRaw
       : Number.NaN                                              // 该带却没带 → 纯函数判成无效金额
+
+    if (actionKey === 'ads.cut_campaign_budget') {
+      if (!Number.isSafeInteger(beforeCents) || beforeCents === null || beforeCents <= 0 ||
+          !Number.isSafeInteger(afterCents) || afterCents < 0) {
+        return unavailable('facts:系列预算或目标金额无效，无法安全判断减预算')
+      }
+      if (afterCents > beforeCents) {
+        return unavailable('facts:减系列预算目标高于当前预算，禁止借减预算动作加钱')
+      }
+      const budgetRows = rows.filter(r =>
+        ((r.level === 'campaign' && r.budget_level === 'cbo') || r.level === 'adset') &&
+        typeof r.daily_budget_minor === 'number',
+      )
+      if (budgetRows.some(r => r.currency !== target.currency)) {
+        return unavailable('facts:账户预算币种不一致，不能合计账户日预算')
+      }
+    }
 
     const request: EnvelopeRequest = { kind, afterCents }
     const facts: EnvelopeFacts = {
