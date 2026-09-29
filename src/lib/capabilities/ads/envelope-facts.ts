@@ -34,6 +34,7 @@ import { DELIVERING_STATUSES } from '@/lib/ads-strategy/portfolio/diagnostics/co
 /** 每个广告动作对花费的性质。信封按性质分流（暂停不走变动比例，等等）。 */
 const CHANGE_KIND: Readonly<Record<string, EnvelopeChangeKind>> = {
   'ads.pause_unit': 'pause',
+  'ads.pause_campaign': 'pause',
   'ads.cut_unit_budget': 'budget_change',
   'ads.cut_campaign_budget': 'budget_change',
   'ads.scale_unit_budget': 'budget_change',
@@ -222,6 +223,12 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
         const id = str('campaign_id')
         if (!id || !/^\d{1,32}$/.test(id)) return cantRead('input 里没有有效的 campaign_id')
         subject = { entityId: id, level: 'campaign', learningApplicable: true }
+        break
+      }
+      case 'ads.pause_campaign': {
+        const id = str('campaign_id')
+        if (!id || !/^\d{1,32}$/.test(id)) return cantRead('input 里没有有效的 campaign_id')
+        subject = { entityId: id, level: 'campaign', learningApplicable: false }
         break
       }
       case 'ads.swap_creative': {

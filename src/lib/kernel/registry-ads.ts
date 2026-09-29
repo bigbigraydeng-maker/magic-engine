@@ -90,6 +90,26 @@ const ADS_PAUSE_UNIT: ActionDefinition<'ads.pause_unit'> = {
   allowedPurposes: ['growth'],
 }
 
+/** 人工止损：暂停整个系列，保留系列级语义而不留下仍 ACTIVE 的外壳。 */
+const ADS_PAUSE_CAMPAIGN: ActionDefinition<'ads.pause_campaign'> = {
+  actionKey: 'ads.pause_campaign',
+  version: 1,
+  title: '暂停整个广告系列',
+  inputSchema: {
+    type: 'object', required: ['cycle_date', 'ad_account_id', 'campaign_id'],
+    properties: { cycle_date: { type: 'string' }, ad_account_id: { type: 'string' }, campaign_id: { type: 'string' } },
+    additionalProperties: false,
+  },
+  outputSchema: { type: 'object', required: ['applied'], properties: { applied: { type: 'boolean' } }, additionalProperties: true },
+  capability: 'ads.pause_campaign', risk: 'high', sideEffect: 'outward', reversible: true,
+  outwardAuthorization: { declaredIn: 'docs/roadmap/2026-09-27-ads-wp3-1b-v2-redo-plan.md §零', approval: { mode: 'bounded', envelope: ADS_ENVELOPE }, rollback: 'provider_native' },
+  idempotency: { keyFields: ['cycle_date', 'campaign_id'], scope: 'client' },
+  costModel: { kind: 'fixed', estimate: () => 0, stepCeilingUsd: zeroCeilings(['snapshot_pre', 'apply', 'readback']) },
+  providerIdempotency: 'unsupported', retryPolicy: { maxAttempts: 1, backoff: 'fixed', baseMs: 0 },
+  verification: { method: 'ads_readback_integrity', delayMs: 600_000 }, requiredCapabilityTier: 'paid_client',
+  steps: ['snapshot_pre', 'apply', 'readback'], allowedPurposes: ['growth'],
+}
+
 /**
  * `ads.cut_unit_budget` —— **收**类。砍预算不走变动比例（只会让花费变少），
  * 信封里对它最关键的是 `respectDailyCapCents`（砍完不能低于客户配的日上限口径）。
@@ -387,6 +407,7 @@ const ADS_SWAP_CREATIVE: ActionDefinition<'ads.swap_creative'> = {
 
 export const ADS_ACTION_DEFINITIONS = {
   'ads.pause_unit': ADS_PAUSE_UNIT,
+  'ads.pause_campaign': ADS_PAUSE_CAMPAIGN,
   'ads.cut_unit_budget': ADS_CUT_UNIT_BUDGET,
   'ads.cut_campaign_budget': ADS_CUT_CAMPAIGN_BUDGET,
   'ads.scale_unit_budget': ADS_SCALE_UNIT_BUDGET,

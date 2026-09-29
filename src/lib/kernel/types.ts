@@ -37,6 +37,7 @@ export type ActionKey =
   //    这六个都是 outward + bounded：信封内自动执行，信封外不执行也不转审批，
   //    而是落一条可恢复的 deny 并给 PM 一张三件套待办。
   | 'ads.pause_unit'
+  | 'ads.pause_campaign'
   | 'ads.cut_unit_budget'
   | 'ads.cut_campaign_budget'
   | 'ads.scale_unit_budget'
