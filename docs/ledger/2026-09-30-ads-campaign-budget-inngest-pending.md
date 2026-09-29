@@ -4,7 +4,7 @@ title: 广告系列预算下调代码已接入 Kernel 与 Inngest，仍需在应
 status: decided
 owner: agent
 decided_on: 2026-09-30
-source: conversation:ads-automation
+source: pr:2204
 verify_by: 2026-10-07
 verify_how: 应用版本部署后，在 Inngest 控制台同步 `/api/inngest`，用无 Meta 写入的探针确认函数已注册与事件可投递；预算变更真实试跑需 PM 单独批准并使用指定测试账户。
 ---
