@@ -328,7 +328,7 @@ PM 要求把 parkhomes.nz 整体检查一遍还有什么可以升级。首页网
 
 - [ ] **WP3.1a 同步 worker**：`ad_strategy_configs.autonomy_mode` → `client_automation_policies.mode`（按 `(client_id, action_key)` 逐键条件 UPDATE，registry 动态取 `ads.*` 键；Kernel 一行不动；同步 SQL 函数 SECURITY DEFINER + REVOKE/GRANT；审计列 + receipts 表；架构测试 grep 禁令）。狄仁杰判「可进」。
 - [x] **WP3.1b 核心安全链已合并（PR #2204）**：熔断、账户级预算上限、生产 Kernel 接线及 WP2 遗留修复已进入当前 `origin/main` 基线。WP3.1b 仍有后续欠账，不能据此称整包完成；预算 Inngest 首次云端注册/无写入探针与真实预算写入审批见 [Inngest 待验证台账](./ledger/2026-09-30-ads-campaign-budget-inngest-pending.md) 和 [安全试跑台账](./ledger/2026-09-30-ads-campaign-budget-first-run.md)。
-- [ ] **WP3.1b 止损接线 + B2 前端契约修（本地实现待评审）**：当前工作分支已把广告健康看板止损从直连 Meta 改为经 Kernel 提交；人身份边界由访问校验与架构测试约束。实现记录与本地验证见 [止损接线台账](./ledger/2026-09-28-stop-loss-bypasses-circuit-breaker-until-pr-c.md)。尚未推送/评审/部署，不能据此宣称线上已受熔断保护；上线后仍须按台账验证真实执行记录及熔断拒绝。
+- [ ] **WP3.1b 止损接线 + B2 前端契约修（PR #2205 草稿待审）**：当前工作分支已把广告健康看板止损从直连 Meta 改为经 Kernel 提交；人身份边界由访问校验与架构测试约束。实现与待验收条件见[止损接线台账](./ledger/2026-09-30-ads-stop-loss-kernel-wiring.md)。尚未合并/部署；上线后仍须验证真实执行记录及熔断拒绝。
 - [ ] **WP3.1b 欠账（本轮明确没做，逐条登记，不许只留在台账里）**：
   - [ ] **系列级 / 自动化三条旁路真收编**（`meta-ads/execute`、`meta-ads/boost-post`、`winner-reel-sync`）—— 需新增 4 个 ActionKey + capability handler，PR B / C 承载；`winner-reel-sync` 的保护判据是**学习期**不是预算（必须另建独立广告组，往在投组加广告会重置该组学习期；手册 `playbook-ads-meta-general` :249/:333/:367/:127-131 记了四处，NAL 实例每留资 $19.6→$138 七倍恶化）
   - [ ] **运行时跨账户日上限强制** —— 卫青 2026-09-27 查实 CTS 两账户各花各的、合计 10 天超客户总闸。WP3.1b 只做了「配置时校验 sum ≤ 总闸」+「按账户取上限」，**运行时没人查「这个客户今天全部账户加起来花了多少」**，洞仍开着。不许因为 §3.9 做了就认为这条修好了
