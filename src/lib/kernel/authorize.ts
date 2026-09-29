@@ -593,7 +593,9 @@ export async function authorizeRun(
     action_version: run.action_version,
     verdict: 'allow',
     deny_code: null,
-    reason: `这个客户已经允许系统自己做「${definition.title}」，且这次不花钱、不对外`,
+    reason: definition.sideEffect === 'outward'
+      ? `这个客户已允许有限自动执行「${definition.title}」，本次通过信封检查；执行前仍须重读事实`
+      : `这个客户已经允许系统自己做「${definition.title}」，且这次不花钱、不对外`,
     policy_snapshot: snapshotOf(policy, definition, run.input),
     policy_id: policy.id,
     policy_version: policy.policy_version,

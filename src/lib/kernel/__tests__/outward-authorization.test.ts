@@ -36,6 +36,14 @@ const GOOD_DECLARATION: OutwardAuthorization = {
   approval: { mode: 'human_only' },
   rollback: 'snapshot_restore',
 }
+const BOUNDED_ENVELOPE = {
+  maxBudgetDeltaRatio: 0.2,
+  respectDailyCapCents: true,
+  minHoursSinceLastChange: 72,
+  excludeLearningPhase: true,
+  excludeAdStudies: true,
+  requiresRollbackHandler: true,
+} as const
 
 /** 一个**完全合规**的对外动作。各条用例只在它上面破坏一处。 */
 function outwardDefinition(patch: Partial<ActionDefinition> = {}): ActionDefinition {
@@ -243,6 +251,55 @@ describe('授权层：对外动作默认拒绝', () => {
     expect(f.tables.authorization_decisions[0].deny_code).toBe('outward_requires_human_policy')
     expect(String(f.tables.authorization_decisions[0].reason)).toContain('要人点头')
     expect(calls).toEqual([])
+  })
+
+  it('bounded 对外动作只在 auto_approve 且授权与执行前重验均通过时放行', async () => {
+    const calls: string[] = []
+    const resolveEnvelopeFacts = vi.fn(async () => ({
+      request: { kind: 'budget_change' as const, afterCents: 900 },
+      facts: {
+        beforeCents: 1_000,
+        accountDailyTotalBeforeCents: 1_000,
+        dailyCapCents: 2_000,
+        hoursSinceLastChange: 100,
+        learningPhaseApplicable: true,
+        learningStage: 'SUCCESS',
+        adStudyCount: 0,
+        hasRollbackHandler: true,
+      },
+    }))
+    const f = makeFixture({
+      registry: makeRegistry([outwardDefinition({
+        outwardAuthorization: {
+          declaredIn: GOOD_DECLARATION.declaredIn,
+          approval: { mode: 'bounded', envelope: BOUNDED_ENVELOPE },
+          rollback: 'provider_native',
+        },
+        providerIdempotency: 'unsupported',
+        verification: null,
+      })]),
+      capabilities: () => ({
+        [KEY]: {
+          actionKey: KEY,
+          version: 1,
+          steps: Object.fromEntries(['build', 'persist', 'verify'].map((name) => [name, async () => {
+            calls.push(name)
+            return { output: { package_id: 'p1', content_hash: HASH }, costActualUsd: 0 }
+          }])),
+          rollback: async () => ({ ok: true, rollbackKind: 'provider_native', detail: {} }),
+        } as unknown as CapabilityImplementation,
+      }),
+      options: {
+        policy: { action_key: KEY, mode: 'auto_approve', spend_cap_per_run_usd: 100 },
+        resolveEnvelopeFacts,
+      },
+    })
+
+    const result = await runAction(f.kernel, submitInput())
+    expect(result.kind).toBe('succeeded')
+    expect(calls).toEqual(['build', 'persist', 'verify'])
+    // 授权时读一次，三个 provider 步骤各自执行前再读一次。
+    expect(resolveEnvelopeFacts).toHaveBeenCalledTimes(4)
   })
 
   it('outward + require_approval → 停在等人点头，capability 一次都不调', async () => {
