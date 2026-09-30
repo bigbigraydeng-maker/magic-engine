@@ -18,6 +18,7 @@ import { createBuildPublishPackageCapability } from './seo/build-publish-package
 import { createPageApplyOptimizationCapability } from './page-apply-optimization'
 import { createAdsAutoPauseCapability } from './ads-auto-pause'
 import { createPauseUnitCapability } from './ads/pause-unit'
+import { createPauseCampaignCapability } from './ads/pause-campaign'
 import { createCutUnitBudgetCapability } from './ads/cut-unit-budget'
 import { createCutCampaignBudgetCapability } from './ads/cut-campaign-budget'
 import { createScaleUnitBudgetCapability } from './ads/scale-unit-budget'
@@ -47,6 +48,7 @@ export function createCapabilities(
     // 广告支柱受限自治六件（spec 2026-09-24 §3 G4/G5）。
     // pause / cut / scale 三件已真实实现；剩余三件跨多对象暂 stub 转人工。
     'ads.pause_unit':             createPauseUnitCapability(sb),
+    'ads.pause_campaign':         createPauseCampaignCapability(sb),
     'ads.cut_unit_budget':        createCutUnitBudgetCapability(sb),
     'ads.cut_campaign_budget':    createCutCampaignBudgetCapability(sb),
     'ads.scale_unit_budget':      createScaleUnitBudgetCapability(sb),

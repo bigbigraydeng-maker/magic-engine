@@ -353,13 +353,40 @@ function StopLossBlock({ clientId, c, playbook }: { clientId: string; c: Campaig
       const res = await fetch(`/api/clients/${clientId}/ad-health/stop-loss`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaign_id: c.campaign_id, action }),
+        body: JSON.stringify({ campaign_id: c.campaign_id, action, request_id: globalThis.crypto.randomUUID() }),
       })
       const json = await res.json()
+      if (json.error === 'no_active_goal') {
+        setResult({ kind: 'err', text: '这个客户还没有生效的增长目标，所以系统没有把止损动作提交给执行内核。先补齐目标后再试。' })
+        return
+      }
+      if (json.error === 'goal_unreadable' || json.error === 'adsets_unreadable' || json.error === 'timezone_unreadable') {
+        setResult({ kind: 'err', text: '系统暂时读不到执行所需资料，没有提交任何 Meta 修改。稍后再试；如果持续出现我会排查。' })
+        return
+      }
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
 
       if (json.not_cuttable) {
         setResult({ kind: 'err', text: '这条广告的每天预算改不了。能立刻做的是先全停。' })
+        return
+      }
+      if (json.status === 'awaiting_approval') {
+        setResult({ kind: 'err', text: '止损请求已登记，正在等待授权；广告目前还没有确认变更。' })
+        return
+      }
+      if (json.status === 'in_progress') {
+        setResult({ kind: 'err', text: '止损请求已在执行中，尚未拿到完成回执。请稍后刷新广告状态，不要重复提交。' })
+        return
+      }
+      if (json.status === 'refused') {
+        const denied = json.runs?.every((run: { kind: string }) => run.kind === 'denied')
+        setResult({ kind: 'err', text: denied
+          ? (json.reason ? `执行内核没有放行这次操作：${json.reason}` : '执行内核没有放行这次操作，广告没有变更。')
+          : '执行内核没有给出完成回执；请先到 Meta 核实当前状态，再决定是否重试。' })
+        return
+      }
+      if (json.status === 'partial') {
+        setResult({ kind: 'err', text: `本次结果不一致：${json.succeeded_count} 项完成、${json.pending_count} 项待审批、${json.in_progress_count} 项执行中、${json.refused_count} 项未放行。请核对 Meta 当前状态后再决定下一步。` })
         return
       }
       if (!json.ok) {
@@ -375,7 +402,7 @@ function StopLossBlock({ clientId, c, playbook }: { clientId: string; c: Campaig
       setSettled(true)
     } catch (err) {
       console.error('[ads-health] stop-loss failed:', err)
-      setResult({ kind: 'err', text: '这次没改成功,钱没动。稍后再点一次;连续失败我去查。' })
+      setResult({ kind: 'err', text: '系统没有收到明确回执，广告状态可能已变化。先去 Meta 核实，再决定是否重试。' })
     } finally {
       setBusy(null)
     }

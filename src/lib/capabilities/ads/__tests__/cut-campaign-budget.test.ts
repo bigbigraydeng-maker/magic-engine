@@ -4,7 +4,7 @@ import { createFakeSupabase } from '@/lib/kernel/__tests__/fake-supabase'
 import { findOtherClientRegistrations } from '@/lib/meta/ad-account-binding'
 import { getRegisteredAccountIds } from '@/lib/meta/campaign-ownership'
 import { getCampaignDetails } from '@/lib/meta/campaign-management'
-import { setCampaignDailyBudget, setCampaignStatus } from '@/lib/meta/campaign-writes'
+import { setCampaignDailyBudget } from '@/lib/meta/campaign-writes'
 import { createCutCampaignBudgetCapability } from '../cut-campaign-budget'
 
 vi.mock('@/lib/meta/ad-account-binding', () => ({
@@ -13,7 +13,7 @@ vi.mock('@/lib/meta/ad-account-binding', () => ({
 }))
 vi.mock('@/lib/meta/campaign-ownership', () => ({ getRegisteredAccountIds: vi.fn() }))
 vi.mock('@/lib/meta/campaign-management', () => ({ getCampaignDetails: vi.fn() }))
-vi.mock('@/lib/meta/campaign-writes', () => ({ setCampaignDailyBudget: vi.fn(), setCampaignStatus: vi.fn() }))
+vi.mock('@/lib/meta/campaign-writes', () => ({ setCampaignDailyBudget: vi.fn() }))
 vi.mock('../common', () => ({
   makeSnapshotPreStep: vi.fn(() => vi.fn(async () => ({ output: { captured: true } }))),
   makeReadbackVerification: vi.fn((expected, actual) => ({
@@ -41,7 +41,6 @@ describe('系列级预算能力只降低已登记、独占账户里的 CBO 系�
     vi.mocked(findOtherClientRegistrations).mockResolvedValue([])
     vi.mocked(getCampaignDetails).mockResolvedValue({ id: '456', name: 'campaign', status: 'ACTIVE', daily_budget: '5000', account_id: '1234567890' })
     vi.mocked(setCampaignDailyBudget).mockResolvedValue(true)
-    vi.mocked(setCampaignStatus).mockResolvedValue(true)
   })
 
   it('写入前重读系列和账户，成功后保留原值作为撤回依据', async () => {
@@ -51,22 +50,16 @@ describe('系列级预算能力只降低已登记、独占账户里的 CBO 系�
     expect(result.output).toEqual({ campaign_id: '456', applied: true, prior_daily_budget_cents: 5_000, new_daily_budget_cents: 4_000, campaign_status_after: 'ACTIVE' })
   })
 
-  it('Meta 因预算变更暂停原本投放中的系列时，在 Kernel capability 内尝试恢复', async () => {
+  it('预算变更后系列已暂停时不自动重新开启，以免覆盖新的暂停决定', async () => {
     vi.mocked(getCampaignDetails)
       .mockResolvedValueOnce({ id: '456', name: 'campaign', status: 'ACTIVE', daily_budget: '5000', account_id: '1234567890' })
       .mockResolvedValueOnce({ id: '456', name: 'campaign', status: 'PAUSED', daily_budget: '4000', account_id: '1234567890' })
     const result = await cap.steps.apply(step())
-    expect(setCampaignStatus).toHaveBeenCalledWith('456', 'fake-token', 'ACTIVE')
-    expect(result.output).toMatchObject({ campaign_status_after: 'ACTIVE' })
-  })
-
-  it('自动恢复失败时在 Kernel 输出中留下可见警告', async () => {
-    vi.mocked(getCampaignDetails)
-      .mockResolvedValueOnce({ id: '456', name: 'campaign', status: 'ACTIVE', daily_budget: '5000', account_id: '1234567890' })
-      .mockResolvedValueOnce({ id: '456', name: 'campaign', status: 'PAUSED', daily_budget: '4000', account_id: '1234567890' })
-    vi.mocked(setCampaignStatus).mockResolvedValue(false)
-    const result = await cap.steps.apply(step())
-    expect(result.output).toMatchObject({ campaign_status_after: 'PAUSED', status_warning: expect.stringContaining('恢复失败') })
+    expect(result.output).toMatchObject({
+      campaign_status_after: 'PAUSED',
+      status_warning: expect.stringContaining('未自动重新开启'),
+    })
+    expect(setCampaignDailyBudget).toHaveBeenCalledWith('456', 'fake-token', 4_000)
   })
 
   it('目标高于实时预算时拒绝写入', async () => {

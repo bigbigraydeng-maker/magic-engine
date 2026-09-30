@@ -123,13 +123,15 @@ describe('人工暂停信封 · 不受学习期与冷却期限制', () => {
 })
 
 describe('人工止损信封 · 白名单是穷举的，不是黑名单', () => {
-  it('白名单只有两个收类动作', () => {
-    expect([...HUMAN_STOP_ACTION_KEYS].sort()).toEqual(['ads.cut_unit_budget', 'ads.pause_unit'])
+  it('白名单只有明确的四种收类动作', () => {
+    expect([...HUMAN_STOP_ACTION_KEYS].sort()).toEqual(['ads.cut_campaign_budget', 'ads.cut_unit_budget', 'ads.pause_campaign', 'ads.pause_unit'])
   })
 
   it.each([
     { actionKey: 'ads.pause_unit', request: req(), facts: prodFacts() },
+    { actionKey: 'ads.pause_campaign', request: req(), facts: prodFacts() },
     { actionKey: 'ads.cut_unit_budget', request: req({ kind: 'budget_change', afterCents: 500 }), facts: prodFacts({ beforeCents: 1000 }) },
+    { actionKey: 'ads.cut_campaign_budget', request: req({ kind: 'budget_change', afterCents: 500 }), facts: prodFacts({ beforeCents: 1000 }) },
   ])(
     '$actionKey + 人触发 → 走人工信封，只允许真实收缩',
     ({ actionKey, request, facts }) => {
@@ -150,8 +152,6 @@ describe('人工止损信封 · 白名单是穷举的，不是黑名单', () => 
     'ads.add_retargeting_adset',
     'ads.swap_creative',
     'ads.budget_move_plan',
-    'ads.pause_campaign',
-    'ads.cut_campaign_budget',
     'ads.boost_page_post',
     'ads.create_reel_ad',
   ])('🔴 %s 即使人触发也走 AI 信封（放类/建类没有「只会变少」这个安全性）', (actionKey) => {

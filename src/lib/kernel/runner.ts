@@ -52,6 +52,8 @@ export interface SubmitActionInput {
   /** 依据什么。形状通用，词汇不属于任何域。 */
   evidence?: Record<string, unknown>
   correlationId?: string
+  /** Stable across retries of one confirmed attempt; new user intent must use a new value. */
+  idempotencyNonce?: string
 }
 
 export interface SubmitResult {
@@ -136,9 +138,13 @@ export async function submitActionRun(
   const definition = deps.registry.get(input.actionKey)
 
   // 未知动作也要有稳定身份，否则每天会新增一条一模一样的拒绝记录
+  if (input.idempotencyNonce !== undefined &&
+      (typeof input.idempotencyNonce !== 'string' || input.idempotencyNonce.length < 1 || input.idempotencyNonce.length > 128)) {
+    throw new KernelError('INVALID_INPUT', '幂等请求标识无效')
+  }
   const idempotencyKey = definition
-    ? computeIdempotencyKey(definition, input.clientId, input.input)
-    : computeUnknownActionKey(input.actionKey, input.clientId, input.input)
+    ? computeIdempotencyKey(definition, input.clientId, input.input, input.idempotencyNonce)
+    : computeUnknownActionKey(input.actionKey, input.clientId, input.input, input.idempotencyNonce)
 
   const existing = await findRunByIdempotencyKey(deps.supabase, input.clientId, idempotencyKey)
   if (existing) return { run: existing, existing: true }

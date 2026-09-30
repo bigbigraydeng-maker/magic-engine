@@ -16,7 +16,7 @@ const facts: EnvelopeFacts = {
 
 // Real runner/authorization/gateway; only persistence, server facts and the external
 // operation are replaced. No live database, advertising account or token is used.
-function fixture(actionKey: 'ads.pause_unit' | 'ads.cut_unit_budget', resolveFacts: EnvelopeFactsResolver) {
+function fixture(actionKey: 'ads.pause_unit' | 'ads.pause_campaign' | 'ads.cut_unit_budget' | 'ads.cut_campaign_budget', resolveFacts: EnvelopeFactsResolver) {
   const base = ACTION_REGISTRY.get(actionKey)
   if (!base) throw new Error('Missing production ads definition')
   const definition: ActionDefinition = { ...base, verification: null }
@@ -36,27 +36,43 @@ function fixture(actionKey: 'ads.pause_unit' | 'ads.cut_unit_budget', resolveFac
   })
   const kernel = { ...f.kernel, resolveEnvelopeFacts: resolveFacts }
   const input = {
-    clientId: CLIENT_A, goalId: GOAL_A, purpose: 'growth' as const,
+    clientId: CLIENT_A, goalId: actionKey === 'ads.cut_campaign_budget' ? null : GOAL_A,
+    purpose: actionKey === 'ads.cut_campaign_budget' ? 'maintenance' as const : 'growth' as const,
     actionKey, triggeredBy: 'human' as TriggeredBy,
     input: {
-      cycle_date: '2026-09-30', ad_account_id: '123', adset_id: '456',
-      ...(actionKey === 'ads.cut_unit_budget' ? { after_cents: 500 } : {}),
+      cycle_date: '2026-09-30', ad_account_id: '123',
+      ...(actionKey.includes('campaign') ? { campaign_id: '456' } : { adset_id: '456' }),
+      ...(actionKey.startsWith('ads.cut_') ? { after_cents: 500 } : {}),
     },
   }
   return { kernel, input, write, definition, fixture: f, tables: f.tables }
 }
 
 describe('人工止损从提交到执行的安全边界', () => {
-  it.each(['ads.pause_unit', 'ads.cut_unit_budget'] as const)('%s 两层均允许真实止损，重放只写一次', async key => {
-    const request: EnvelopeRequest = key === 'ads.pause_unit'
+  it.each(['ads.pause_unit', 'ads.pause_campaign', 'ads.cut_unit_budget', 'ads.cut_campaign_budget'] as const)('%s 两层均允许真实止损，重放只写一次', async key => {
+    const request: EnvelopeRequest = key === 'ads.pause_unit' || key === 'ads.pause_campaign'
       ? { kind: 'pause', afterCents: 0 } : { kind: 'budget_change', afterCents: 500 }
     const resolver = vi.fn<EnvelopeFactsResolver>(async () => ({ request, facts }))
     const f = fixture(key, resolver)
-    expect((await runAction(f.kernel, f.input)).kind).toBe('succeeded')
+    const first = await runAction(f.kernel, f.input)
+    expect(first.kind, JSON.stringify(first)).toBe('succeeded')
     await runAction(f.kernel, f.input)
     expect(f.write).toHaveBeenCalledTimes(1)
     expect(resolver).toHaveBeenCalledWith(expect.objectContaining({ at: 'authorize' }))
     expect(resolver).toHaveBeenCalledWith(expect.objectContaining({ at: 'pre_provider' }))
+  })
+
+  it('同一请求重试不重复写入，但用户重新发起的止损会创建新动作', async () => {
+    const resolver = vi.fn<EnvelopeFactsResolver>(async () => ({
+      request: { kind: 'pause', afterCents: 0 }, facts,
+    }))
+    const f = fixture('ads.pause_campaign', resolver)
+    const firstIntent = { ...f.input, idempotencyNonce: 'attempt-1' }
+
+    expect((await runAction(f.kernel, firstIntent)).kind).toBe('succeeded')
+    expect((await runAction(f.kernel, firstIntent)).kind).toBe('idempotent_hit')
+    expect((await runAction(f.kernel, { ...f.input, idempotencyNonce: 'attempt-2' })).kind).toBe('succeeded')
+    expect(f.write).toHaveBeenCalledTimes(2)
   })
 
   it.each(['facts:query_failed', 'circuit:tripped', 'budget_decreased'])('授权后发生 %s：执行前挡住，零写入', async condition => {

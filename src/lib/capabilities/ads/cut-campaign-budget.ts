@@ -11,7 +11,7 @@ import { KernelError, RetryableCapabilityError } from '@/lib/kernel/errors'
 import { canonicalAccountDigits, findOtherClientRegistrations } from '@/lib/meta/ad-account-binding'
 import { getRegisteredAccountIds } from '@/lib/meta/campaign-ownership'
 import { getCampaignDetails } from '@/lib/meta/campaign-management'
-import { setCampaignDailyBudget, setCampaignStatus } from '@/lib/meta/campaign-writes'
+import { setCampaignDailyBudget } from '@/lib/meta/campaign-writes'
 import { makeReadbackVerification, makeSnapshotPreStep, requireMetaToken } from './common'
 
 function input(step: CapabilityStepContext) {
@@ -100,9 +100,7 @@ export function createCutCampaignBudgetCapability(sb: SupabaseClient): Capabilit
         } else {
           campaignStatus = afterBudget.status
           if (status === 'ACTIVE' && afterBudget.status !== 'ACTIVE') {
-            const restored = await setCampaignStatus(campaignId, token, 'ACTIVE')
-            if (restored) campaignStatus = 'ACTIVE'
-            else statusWarning = '预算已修改，但广告系列被 Meta 暂停且自动恢复失败；请检查 Meta 广告后台。'
+            statusWarning = '预算已修改，但广告系列状态已变化；为避免覆盖新的状态决定，未自动重新开启，请检查 Meta 广告后台。'
           }
         }
         return {

@@ -257,7 +257,9 @@ export const HUMAN_STOP_ENVELOPE: HumanStopEnvelope = {
  */
 export const HUMAN_STOP_ACTION_KEYS: readonly ActionKey[] = [
   'ads.pause_unit',
+  'ads.pause_campaign',
   'ads.cut_unit_budget',
+  'ads.cut_campaign_budget',
 ]
 
 /** 人按的收类动作在不在人工信封内。纯函数。 */
@@ -270,11 +272,11 @@ export function isWithinHumanStopEnvelope(
   if (!facts.hasRollbackHandler) {
     reasons.push('这个动作没有注册撤回处理函数，撤不回来的事就算是人按的也不做')
   }
-  if (actionKey === 'ads.pause_unit') {
+  if (actionKey === 'ads.pause_unit' || actionKey === 'ads.pause_campaign') {
     if (request.kind !== 'pause' || request.afterCents !== 0) {
       reasons.push('人工暂停必须是暂停请求，不能夹带预算变更')
     }
-  } else if (actionKey === 'ads.cut_unit_budget') {
+  } else if (actionKey === 'ads.cut_unit_budget' || actionKey === 'ads.cut_campaign_budget') {
     if (request.kind !== 'budget_change') reasons.push('人工减预算必须是预算变更请求')
     const before = facts.beforeCents
     const after = request.afterCents
