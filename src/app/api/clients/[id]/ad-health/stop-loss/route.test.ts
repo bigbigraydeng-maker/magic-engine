@@ -127,19 +127,19 @@ describe('stop-loss POST — campaign belonging to another client', () => {
     expectNoMetaWrite()
   })
 
-  it('belongs-to-client pause is submitted as an authenticated Kernel action, no direct Meta write', async () => {
+  it('belongs-to-client budget cut returns Kernel warnings without a direct Meta write', async () => {
     m.getCampaignDetails.mockResolvedValue({
       id: '120220000000000002', name: 'A campaign', status: 'ACTIVE', daily_budget: '5000', account_id: '1111111111',
     })
-    m.submitStopLoss.mockResolvedValueOnce({ action: 'pause_campaign', runs: [
-      { entityId: '120220000000000002', name: 'A campaign', runId: 'run-1', kind: 'succeeded', humanReason: null },
+    m.submitStopLoss.mockResolvedValueOnce({ action: 'cut_campaign', runs: [
+      { entityId: '120220000000000002', name: 'A campaign', runId: 'run-1', kind: 'succeeded', humanReason: null, warnings: ['广告系列状态已变化，未自动重新开启。'] },
     ] })
-    const res = await post({ campaign_id: '120220000000000002', action: 'pause' })
+    const res = await post({ campaign_id: '120220000000000002', action: 'cut' })
     expect(res.status).toBe(200)
-    expect(await res.json()).toMatchObject({ ok: true, executed: true, status: 'executed', runs: [{ runId: 'run-1' }] })
+    expect(await res.json()).toMatchObject({ ok: true, executed: true, status: 'executed', runs: [{ runId: 'run-1' }], warnings: ['广告系列状态已变化，未自动重新开启。'] })
     expect(m.submitStopLoss).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-      clientId: CLIENT_A, goalId: 'goal-1', campaignId: '120220000000000002', adAccountId: '1111111111',
-      cycleDate: '2026-09-30', requestId: 'de305d54-75b4-431b-adb2-eb6b9e546014', action: 'pause_campaign',
+      clientId: CLIENT_A, goalId: undefined, campaignId: '120220000000000002', adAccountId: '1111111111',
+      cycleDate: '2026-09-30', requestId: 'de305d54-75b4-431b-adb2-eb6b9e546014', action: 'cut_campaign',
     }))
     expectNoMetaWrite()
   })

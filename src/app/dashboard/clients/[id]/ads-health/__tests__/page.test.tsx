@@ -190,9 +190,24 @@ describe('every card that is burning money offers a way to stop it', () => {
     await userEvent.click(screen.getByText('预算降 20%'))
     await waitFor(() => expect(screen.getByText(/已降到每天/)).toBeTruthy())
     expect(screen.getByText(/已降到每天/).textContent).toContain('48')
+    expect(screen.queryByText(/广告还在跑/)).toBeNull()
     const post = (fetch.mock.calls as unknown as Array<[string, RequestInit | undefined]>).find(([, init]) => init?.method === 'POST')
     expect(randomUUID).toHaveBeenCalledOnce()
     expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ request_id: 'de305d54-75b4-431b-adb2-eb6b9e546014' })
+  })
+
+  it('shows a campaign state warning without claiming the ad is still running', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health/stop-loss': { current_daily: 60, planned_daily: 48, cuttable: true, pausable: true, executed: true, action: 'cut', ok: true, new_daily: 48, warnings: ['广告系列状态已变化，未自动重新开启，请检查。'] },
+      '/ad-health': respond([OZTOP_ALERT]),
+    }))
+    render(<AdsHealthPage />)
+    await waitFor(() => expect(screen.getByText('预算降 20%')).toBeTruthy())
+
+    await userEvent.click(screen.getByText('预算降 20%'))
+
+    await waitFor(() => expect(screen.getByText(/未自动重新开启/)).toBeTruthy())
+    expect(screen.queryByText(/广告还在跑/)).toBeNull()
   })
 
   it('an un-cuttable budget still leaves a next step — never "go do it yourself"', async () => {

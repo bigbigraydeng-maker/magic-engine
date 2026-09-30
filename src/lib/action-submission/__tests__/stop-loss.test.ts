@@ -41,4 +41,19 @@ describe('submitStopLossThroughKernel', () => {
     expect(runAction).toHaveBeenCalledTimes(2)
     expect(runAction.mock.calls.map(([, input]) => (input as { input: { adset_id: string } }).input.adset_id)).toEqual(['adset-a', 'adset-b'])
   })
+
+  it('returns user-facing warnings from the capability apply result', async () => {
+    runAction.mockResolvedValueOnce({
+      kind: 'succeeded', run: { id: 'run-cut' }, humanReason: null,
+      execution: { steps: [{ step_key: 'apply', output: { status_warning: '广告系列状态已变化，未自动重新开启。' } }] },
+    })
+    const deps = {} as Parameters<typeof submitStopLossThroughKernel>[0]
+    const result = await submitStopLossThroughKernel(deps, {
+      clientId: 'client-a', access: { ok: true, user: { id: 'user-a' } } as never,
+      campaignId: '123456789', adAccountId: 'act_1234567890', cycleDate: '2026-09-30', requestId: 'attempt-3',
+      action: 'cut_campaign', targets: [{ id: '123456789', name: 'Campaign', currentCents: 5000, afterCents: 4000 }],
+    })
+
+    expect(result.runs[0]?.warnings).toEqual(['广告系列状态已变化，未自动重新开启。'])
+  })
 })
