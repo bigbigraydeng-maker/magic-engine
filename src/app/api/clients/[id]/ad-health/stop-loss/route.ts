@@ -160,6 +160,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
   const pendingCount = kinds.filter(kind => kind === 'pending_approval').length
   const inProgressCount = kinds.filter(kind => kind === 'in_progress').length
   const refusedCount = kinds.length - succeededCount - pendingCount - inProgressCount
+  const warnings = submitted.runs.flatMap(run => run.warnings ?? [])
   const awaitingApproval = pendingCount > 0 && succeededCount === 0 && refusedCount === 0 && inProgressCount === 0
   const status = executed ? 'executed' : awaitingApproval ? 'awaiting_approval'
     : inProgressCount > 0 && succeededCount === 0 && pendingCount === 0 && refusedCount === 0 ? 'in_progress'
@@ -178,6 +179,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     pending_count: pendingCount,
     refused_count: refusedCount,
     in_progress_count: inProgressCount,
+    warnings,
     current_daily: currentDaily,
     new_daily: newDaily,
     reason: submitted.runs.find(run => run.humanReason)?.humanReason ?? null,

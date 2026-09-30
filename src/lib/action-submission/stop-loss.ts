@@ -14,7 +14,7 @@ export interface StopLossSubmitInput {
   clientId: string; access: StopLossAccess; goalId?: string; campaignId: string; adAccountId: string
   cycleDate: string; requestId: string; action: StopLossKernelAction; targets: readonly StopLossKernelTarget[]
 }
-export interface StopLossSubmitResult { action: StopLossKernelAction; runs: Array<{ entityId: string; name: string; runId: string; kind: ActionRunOutcome['kind']; humanReason: string | null }> }
+export interface StopLossSubmitResult { action: StopLossKernelAction; runs: Array<{ entityId: string; name: string; runId: string; kind: ActionRunOutcome['kind']; humanReason: string | null; warnings: string[] }> }
 
 /** Sequential by design: same-account envelope facts must see prior submissions. */
 export async function submitStopLossThroughKernel(deps: KernelDeps, input: StopLossSubmitInput): Promise<StopLossSubmitResult> {
@@ -45,7 +45,11 @@ export async function submitStopLossThroughKernel(deps: KernelDeps, input: StopL
       input: actionInput,
     }
     const outcome = await runAction(deps, submit)
-    runs.push({ entityId: target.id, name: target.name, runId: outcome.run.id, kind: outcome.kind, humanReason: outcome.humanReason })
+    const warnings = outcome.execution?.steps.flatMap(step => {
+      const warning = step.step_key === 'apply' ? step.output.status_warning : undefined
+      return typeof warning === 'string' && warning.trim() ? [warning] : []
+    }) ?? []
+    runs.push({ entityId: target.id, name: target.name, runId: outcome.run.id, kind: outcome.kind, humanReason: outcome.humanReason, warnings })
   }
   return { action: input.action, runs }
 }

@@ -396,7 +396,7 @@ function StopLossBlock({ clientId, c, playbook }: { clientId: string; c: Campaig
 
       const warn = (json.warnings as string[] | undefined)?.filter(Boolean) ?? []
       const done = action === 'cut'
-        ? `已降到每天 $${(json.new_daily as number).toFixed(2)}(原来 $${(json.current_daily as number).toFixed(2)})。广告还在跑。`
+        ? `已降到每天 $${(json.new_daily as number).toFixed(2)}(原来 $${(json.current_daily as number).toFixed(2)})。`
         : '已停投,这条广告不再花钱了。'
       setResult({ kind: 'ok', text: warn.length > 0 ? `${done}\n⚠️ ${warn.join(' ')}` : done })
       setSettled(true)
