@@ -346,6 +346,7 @@ describe('campaign daily Post review — concurrent state', () => {
           reviewed_at: '2026-09-01T15:05:00.000Z',
           reviewed_by_user_id: USER_ID,
           reviewer_role: 'admin',
+          checklist: REVISION_CHECKLIST,
         },
       },
     })
@@ -365,6 +366,42 @@ describe('campaign daily Post review — concurrent state', () => {
     expect(json.review_meta).toBeUndefined()
     expect(JSON.stringify(json)).not.toContain(USER_ID)
     expect(mockFrom).toHaveBeenCalledTimes(1)
+  })
+
+  it('writes an updated checklist when the revision reason stays the same', async () => {
+    allow()
+    const existing = reviewMeta({
+      posts: {
+        [DATE]: {
+          verdict: 'NEEDS_REVISION',
+          reason: 'Replace the image',
+          reviewed_at: '2026-09-01T15:05:00.000Z',
+          reviewed_by_user_id: USER_ID,
+          reviewer_role: 'admin',
+          checklist: REVISION_CHECKLIST,
+        },
+      },
+    })
+    stubLatestPlan(planData(existing))
+    const updated = chain('maybeSingle', { data: { id: PLAN_ID }, error: null })
+    mockFrom.mockReturnValueOnce(updated as never)
+    const revisedChecklist = REVISION_CHECKLIST.map(item => item.key === 'logo_watermark_present'
+      ? { ...item, detail: 'Logo 与安全区重叠' }
+      : item)
+
+    const response = await PATCH(request({
+      expected_review_revision: REVIEW_REVISION,
+      verdict: 'NEEDS_REVISION',
+      reason: 'Replace the image',
+      checklist_human: revisedChecklist,
+    }), params())
+    const json = await response.json()
+    const written = updated.update.mock.calls[0][0] as { plan_data: { review_meta: { posts: Record<string, { checklist: Array<{ key: string; detail: string | null }> }> } } }
+
+    expect(response.status).toBe(200)
+    expect(json.changed).toBe(true)
+    expect(written.plan_data.review_meta.posts[DATE].checklist.find(item => item.key === 'logo_watermark_present')?.detail)
+      .toBe('Logo 与安全区重叠')
   })
 
   it('revalidates an identical PASS retry and rejects it when the image later becomes unusable', async () => {

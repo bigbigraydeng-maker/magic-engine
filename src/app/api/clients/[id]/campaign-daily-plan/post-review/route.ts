@@ -162,10 +162,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     const reason = command.verdict === 'NEEDS_REVISION' ? command.reason!.trim() : null
     const previous = currentReview?.posts[command.date]
+    const previousHumanChecklist = previous?.checklist.filter(item => item.judge === 'HUMAN') ?? []
+    const checklistUnchanged = JSON.stringify(previousHumanChecklist) === JSON.stringify(humanChecklist.items)
     if (
       command.verdict === 'NEEDS_REVISION' &&
       previous?.verdict === command.verdict &&
-      previous?.reason === reason
+      previous?.reason === reason &&
+      checklistUnchanged
     ) {
       return NextResponse.json({ success: true, changed: false, review_revision: currentReview?.revision ?? null })
     }
