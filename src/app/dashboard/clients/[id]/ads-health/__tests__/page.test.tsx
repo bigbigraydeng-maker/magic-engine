@@ -177,16 +177,22 @@ describe('every card that is burning money offers a way to stop it', () => {
   })
 
   it('a budget cut reports the new daily number, so the PM can verify it', async () => {
-    vi.stubGlobal('fetch', mockFetch({
+    const randomUUID = vi.fn().mockReturnValue('de305d54-75b4-431b-adb2-eb6b9e546014')
+    vi.stubGlobal('crypto', { randomUUID })
+    const fetch = mockFetch({
       '/ad-health/stop-loss': { current_daily: 60, planned_daily: 48, cuttable: true, pausable: true, executed: true, action: 'cut', ok: true, new_daily: 48, warnings: [] },
       '/ad-health': respond([OZTOP_ALERT]),
-    }))
+    })
+    vi.stubGlobal('fetch', fetch)
     render(<AdsHealthPage />)
     await waitFor(() => expect(screen.getByText('预算降 20%')).toBeTruthy())
 
     await userEvent.click(screen.getByText('预算降 20%'))
     await waitFor(() => expect(screen.getByText(/已降到每天/)).toBeTruthy())
     expect(screen.getByText(/已降到每天/).textContent).toContain('48')
+    const post = (fetch.mock.calls as unknown as Array<[string, RequestInit | undefined]>).find(([, init]) => init?.method === 'POST')
+    expect(randomUUID).toHaveBeenCalledOnce()
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ request_id: 'de305d54-75b4-431b-adb2-eb6b9e546014' })
   })
 
   it('an un-cuttable budget still leaves a next step — never "go do it yourself"', async () => {

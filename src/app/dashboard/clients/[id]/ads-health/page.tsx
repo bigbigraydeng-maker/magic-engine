@@ -353,7 +353,7 @@ function StopLossBlock({ clientId, c, playbook }: { clientId: string; c: Campaig
       const res = await fetch(`/api/clients/${clientId}/ad-health/stop-loss`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaign_id: c.campaign_id, action }),
+        body: JSON.stringify({ campaign_id: c.campaign_id, action, request_id: globalThis.crypto.randomUUID() }),
       })
       const json = await res.json()
       if (json.error === 'no_active_goal') {
@@ -402,7 +402,7 @@ function StopLossBlock({ clientId, c, playbook }: { clientId: string; c: Campaig
       setSettled(true)
     } catch (err) {
       console.error('[ads-health] stop-loss failed:', err)
-      setResult({ kind: 'err', text: '这次没改成功,钱没动。稍后再点一次;连续失败我去查。' })
+      setResult({ kind: 'err', text: '系统没有收到明确回执，广告状态可能已变化。先去 Meta 核实，再决定是否重试。' })
     } finally {
       setBusy(null)
     }

@@ -15,11 +15,12 @@ describe('submitStopLossThroughKernel', () => {
     const deps = {} as Parameters<typeof submitStopLossThroughKernel>[0]
     await submitStopLossThroughKernel(deps, {
       clientId: 'client-a', access: { ok: true, user: { id: 'user-a' } } as never,
-      goalId: 'goal-a', campaignId: '123456789', adAccountId: 'act_1234567890', cycleDate: '2026-09-30',
+      goalId: 'goal-a', campaignId: '123456789', adAccountId: 'act_1234567890', cycleDate: '2026-09-30', requestId: 'attempt-1',
       action: 'pause_campaign', targets: [{ id: '123456789', name: 'Campaign', currentCents: 5000 }],
     })
     expect(runAction).toHaveBeenCalledWith(deps, expect.objectContaining({
       actionKey: 'ads.pause_campaign', triggeredBy: 'human', triggeredByRef: 'user-a', goalId: 'goal-a',
+      idempotencyNonce: 'attempt-1',
       input: { cycle_date: '2026-09-30', ad_account_id: 'act_1234567890', campaign_id: '123456789' },
     }))
   })
@@ -28,7 +29,7 @@ describe('submitStopLossThroughKernel', () => {
     const deps = {} as Parameters<typeof submitStopLossThroughKernel>[0]
     const base = {
       clientId: 'client-a', access: { ok: true, user: { id: 'user-a' } } as never,
-      goalId: 'goal-a', campaignId: '123456789', adAccountId: 'act_1234567890', cycleDate: '2026-09-30',
+      goalId: 'goal-a', campaignId: '123456789', adAccountId: 'act_1234567890', cycleDate: '2026-09-30', requestId: 'attempt-2',
     }
     await submitStopLossThroughKernel(deps, { ...base, action: 'cut_campaign', targets: [{ id: '123456789', name: 'Campaign', currentCents: 5000, afterCents: 4000 }] })
     expect(runAction.mock.calls[0][1]).toMatchObject({ actionKey: 'ads.cut_campaign_budget', purpose: 'maintenance', goalId: null, input: { campaign_id: '123456789', after_cents: 4000 } })

@@ -70,7 +70,7 @@ function post(body: unknown) {
   return POST(
     new NextRequest(`http://localhost/api/clients/${CLIENT_A}/ad-health/stop-loss`, {
       method: 'POST',
-      body: JSON.stringify(body),
+      body: JSON.stringify({ request_id: 'de305d54-75b4-431b-adb2-eb6b9e546014', ...(body as object) }),
     }),
     { params: { id: CLIENT_A } },
   )
@@ -91,6 +91,13 @@ beforeEach(() => {
 })
 
 describe('stop-loss POST — campaign belonging to another client', () => {
+  it('requires a stable request ID before any Meta lookup', async () => {
+    const res = await post({ campaign_id: '120220000000000002', action: 'pause', request_id: null })
+    expect(res.status).toBe(400)
+    expect(m.getCampaignDetails).not.toHaveBeenCalled()
+    expectNoMetaWrite()
+  })
+
   it.each(['pause', 'cut'] as const)('action=%s on client B campaign → 403, no Meta write', async action => {
     m.getCampaignDetails.mockResolvedValue({
       id: '120220000000000002', name: 'B campaign', status: 'ACTIVE', daily_budget: '5000', account_id: '2222222222',
@@ -132,7 +139,7 @@ describe('stop-loss POST — campaign belonging to another client', () => {
     expect(await res.json()).toMatchObject({ ok: true, executed: true, status: 'executed', runs: [{ runId: 'run-1' }] })
     expect(m.submitStopLoss).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       clientId: CLIENT_A, goalId: 'goal-1', campaignId: '120220000000000002', adAccountId: '1111111111',
-      cycleDate: '2026-09-30', action: 'pause_campaign',
+      cycleDate: '2026-09-30', requestId: 'de305d54-75b4-431b-adb2-eb6b9e546014', action: 'pause_campaign',
     }))
     expectNoMetaWrite()
   })

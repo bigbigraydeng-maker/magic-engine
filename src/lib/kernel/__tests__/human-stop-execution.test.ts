@@ -62,6 +62,19 @@ describe('人工止损从提交到执行的安全边界', () => {
     expect(resolver).toHaveBeenCalledWith(expect.objectContaining({ at: 'pre_provider' }))
   })
 
+  it('同一请求重试不重复写入，但用户重新发起的止损会创建新动作', async () => {
+    const resolver = vi.fn<EnvelopeFactsResolver>(async () => ({
+      request: { kind: 'pause', afterCents: 0 }, facts,
+    }))
+    const f = fixture('ads.pause_campaign', resolver)
+    const firstIntent = { ...f.input, idempotencyNonce: 'attempt-1' }
+
+    expect((await runAction(f.kernel, firstIntent)).kind).toBe('succeeded')
+    expect((await runAction(f.kernel, firstIntent)).kind).toBe('idempotent_hit')
+    expect((await runAction(f.kernel, { ...f.input, idempotencyNonce: 'attempt-2' })).kind).toBe('succeeded')
+    expect(f.write).toHaveBeenCalledTimes(2)
+  })
+
   it.each(['facts:query_failed', 'circuit:tripped', 'budget_decreased'])('授权后发生 %s：执行前挡住，零写入', async condition => {
     const request: EnvelopeRequest = { kind: 'budget_change', afterCents: 500 }
     const resolver: EnvelopeFactsResolver = async ({ at }) => {

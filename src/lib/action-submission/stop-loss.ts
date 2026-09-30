@@ -12,7 +12,7 @@ export type StopLossKernelAction = 'pause_campaign' | 'cut_campaign' | 'cut_unit
 export interface StopLossKernelTarget { id: string; name: string; currentCents: number; afterCents?: number }
 export interface StopLossSubmitInput {
   clientId: string; access: StopLossAccess; goalId?: string; campaignId: string; adAccountId: string
-  cycleDate: string; action: StopLossKernelAction; targets: readonly StopLossKernelTarget[]
+  cycleDate: string; requestId: string; action: StopLossKernelAction; targets: readonly StopLossKernelTarget[]
 }
 export interface StopLossSubmitResult { action: StopLossKernelAction; runs: Array<{ entityId: string; name: string; runId: string; kind: ActionRunOutcome['kind']; humanReason: string | null }> }
 
@@ -39,6 +39,7 @@ export async function submitStopLossThroughKernel(deps: KernelDeps, input: StopL
       goalId: input.action === 'cut_campaign' ? null : input.goalId,
       triggeredBy: 'human',
       triggeredByRef: input.access.user.id, rationale: `广告健康看板人工止损：${input.action}`,
+      idempotencyNonce: input.requestId,
       evidence: { source: 'ads_health_stop_loss', campaign_id: input.campaignId, entity_name: target.name,
         current_daily_budget_cents: target.currentCents, requested_change: envelopeRequest },
       input: actionInput,

@@ -6,7 +6,7 @@
  *                          what a 20% cut becomes, and whether a cut is possible
  *                          at all. Read-only; called when the PM opens the menu
  *                          so the confirm dialog can show real numbers.
- *   POST { campaign_id, action: 'cut' | 'pause' }  → execute.
+ *   POST { campaign_id, action: 'cut' | 'pause', request_id }  → execute.
  *
  * Responses carry FACTS, not prose: all PM-facing wording lives in the page so
  * copy stays in one reviewable place.
@@ -89,7 +89,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
   const access = await requireStopLossAccess(clientId)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
-  let body: { campaign_id?: string; action?: string }
+  let body: { campaign_id?: string; action?: string; request_id?: unknown }
   try {
     body = await req.json()
   } catch {
@@ -97,9 +97,13 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
   }
 
   const { campaign_id: campaignId, action } = body
+  const requestId = body.request_id
   if (!campaignId) return NextResponse.json({ error: 'campaign_id is required' }, { status: 400 })
   if (action !== 'cut' && action !== 'pause') {
     return NextResponse.json({ error: "action must be 'cut' or 'pause'" }, { status: 400 })
+  }
+  if (typeof requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+    return NextResponse.json({ error: 'request_id must be a UUID' }, { status: 400 })
   }
 
   const token = await resolveToken(clientId)
@@ -147,7 +151,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
   const timezone = await resolveAccountTimezone(ownership.campaign.account_id ?? '')
   if (!timezone) return NextResponse.json({ error: 'timezone_unreadable' }, { status: 503 })
   const submitted = await submitStopLossThroughKernel(createKernel(supabaseAdmin), {
-    clientId, access, goalId, campaignId, adAccountId: ownership.campaign.account_id ?? '',
+    clientId, access, goalId, campaignId, adAccountId: ownership.campaign.account_id ?? '', requestId,
     cycleDate: accountDayKey(timezone, new Date()), action: kernelAction, targets,
   })
   const kinds = submitted.runs.map(run => run.kind)
