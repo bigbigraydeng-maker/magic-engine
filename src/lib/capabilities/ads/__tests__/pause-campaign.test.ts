@@ -45,6 +45,19 @@ describe('ads.pause_campaign', () => {
     expect(setCampaignStatus).not.toHaveBeenCalled()
   })
 
+  it('撤回时不自动重新开启暂停中的系列，以免恢复广告花费', async () => {
+    if (!cap.rollback) throw new Error('expected rollback handler')
+    vi.mocked(getCampaignDetails).mockResolvedValue({ id: '456', name: 'Campaign', status: 'PAUSED', account_id: '1234567890' })
+
+    const result = await cap.rollback(step, { apply: { prior_status: 'ACTIVE', applied: true } })
+
+    expect(result).toMatchObject({
+      ok: false,
+      failure_reason: expect.stringContaining('未自动重新开启'),
+    })
+    expect(setCampaignStatus).not.toHaveBeenCalled()
+  })
+
   it('账户未登记或被多个客户共用时拒绝写入', async () => {
     vi.mocked(getRegisteredAccountIds).mockResolvedValueOnce({ ids: [] })
     await expect(cap.steps.apply(step)).rejects.toMatchObject({ code: 'INVALID_INPUT' })

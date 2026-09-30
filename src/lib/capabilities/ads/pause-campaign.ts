@@ -51,12 +51,14 @@ export function createPauseCampaignCapability(sb: SupabaseClient): CapabilityImp
       const { campaignId, accountId } = readInput(step)
       const prior = outputs.apply?.prior_status
       if (prior !== 'ACTIVE') return { ok: true, rollbackKind: 'noop', detail: { reason: '改前系列不是 ACTIVE，无需恢复' } }
-      const { token, row } = await campaign(step, campaignId, accountId)
+      const { row } = await campaign(step, campaignId, accountId)
       if (row.status !== 'PAUSED') return { ok: false, rollbackKind: 'provider_native', detail: { campaign_id: campaignId, actual_status: row.status }, failure_reason: '系列状态已被其他操作修改，未自动覆盖' }
-      const ok = await setCampaignStatus(campaignId, token, 'ACTIVE')
-      return ok
-        ? { ok: true, rollbackKind: 'provider_native', detail: { campaign_id: campaignId, restored_status: 'ACTIVE' } }
-        : { ok: false, rollbackKind: 'provider_native', detail: { campaign_id: campaignId }, failure_reason: 'Meta 未确认恢复广告系列' }
+      return {
+        ok: false,
+        rollbackKind: 'provider_native',
+        detail: { campaign_id: campaignId, actual_status: row.status },
+        failure_reason: '无法确认当前暂停是否由本次操作造成；为避免覆盖后续决定，未自动重新开启，请人工检查',
+      }
     },
   }
 }
