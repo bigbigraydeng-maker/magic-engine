@@ -32,6 +32,9 @@ services:
     env: node
     schedule: "50 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 120 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/vision-analyzer \
@@ -60,6 +63,9 @@ services:
     env: node
     schedule: "15 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/poll-visual-jobs \
@@ -81,6 +87,9 @@ services:
     env: node
     schedule: "0 2 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 120 -X POST -H "x-cron-secret: $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/site-audit-jobs \
@@ -98,6 +107,9 @@ services:
     env: node
     schedule: "0 */6 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/attribution \
@@ -124,6 +136,9 @@ services:
     env: node
     schedule: "35 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/zhangqian-sweeper \
@@ -143,6 +158,9 @@ services:
     env: node
     schedule: "0 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/prospecting-sweep
@@ -160,6 +178,9 @@ services:
     env: node
     schedule: "0 2 * * 1"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/job-boards-weekly
@@ -188,6 +209,9 @@ services:
     env: node
     schedule: "45 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/blog-stuck-generating \
@@ -211,6 +235,9 @@ services:
     env: node
     schedule: "*/30 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/tailor-made-jobs-sweeper
@@ -229,6 +256,9 @@ services:
     env: node
     schedule: "0 18 * * 0"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 30 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/ai-tracker-weekly \
@@ -250,6 +280,9 @@ services:
     env: node
     schedule: "30 16 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 600 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/ai-visibility-weekly \
@@ -269,6 +302,9 @@ services:
     env: node
     schedule: "30 17 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/goal-current-value-refresh \
@@ -286,6 +322,9 @@ services:
     env: node
     schedule: "0 2 * * 1"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/keyword-snapshots-weekly \
@@ -304,6 +343,9 @@ services:
     env: node
     schedule: "30 3 * * 1"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/reputation-snapshots-weekly
@@ -320,6 +362,9 @@ services:
     env: node
     schedule: "0 4 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/social-engagement-pullback \
@@ -342,6 +387,9 @@ services:
     env: node
     schedule: "0 15 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/winner-reel-sync-daily
@@ -359,6 +407,9 @@ services:
     env: node
     schedule: "0 17 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/google-data-pullback-daily \
@@ -377,6 +428,9 @@ services:
     env: node
     schedule: "0 3 * * 1"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/zhuge-recalculate \
@@ -395,6 +449,9 @@ services:
     env: node
     schedule: "*/10 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/viral-analyzer-worker \
@@ -413,6 +470,9 @@ services:
     env: node
     schedule: "0 0 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/viral-discovery-weekly \
@@ -430,6 +490,9 @@ services:
     env: node
     schedule: "0 22 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/content-factory-intake
@@ -456,6 +519,9 @@ services:
     env: node
     schedule: "0 8 * * 1"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 800 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/diagnostic-weekly
@@ -479,6 +545,9 @@ services:
     env: node
     schedule: "20 6 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/kpi-backfill
@@ -494,6 +563,9 @@ services:
     env: node
     schedule: "40 7 * * 1"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/benchmark-accumulator
@@ -514,6 +586,9 @@ services:
     env: node
     schedule: "10 6 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/cms-connection-retest
@@ -530,6 +605,9 @@ services:
     env: node
     schedule: "0 8 * * 2"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 800 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/prescription-weekly
@@ -550,6 +628,9 @@ services:
     env: node
     schedule: "30 9 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
         "https://app.magicengine.com.au/api/cron/execution-auto-run?dry_run=1"
@@ -562,6 +643,9 @@ services:
     env: node
     schedule: "0 5 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/anomaly-detector \
@@ -578,6 +662,9 @@ services:
     env: node
     schedule: "0 6 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/daily-cron-digest \
@@ -596,6 +683,9 @@ services:
     env: node
     schedule: "0 19 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/proposal-view-digest
@@ -616,6 +706,9 @@ services:
     env: node
     schedule: "0 7 * * 1"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/agent-learning-rollup
@@ -651,6 +744,9 @@ services:
     env: node
     schedule: "30 6 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 360 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/memory-extractor
@@ -670,6 +766,9 @@ services:
     env: node
     schedule: "0 5 * * 1"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -X POST \
         -H "Authorization: Bearer $CRON_SECRET" \
@@ -688,6 +787,9 @@ services:
     env: node
     schedule: "0 1 * * 0"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/site-audit-weekly
@@ -705,6 +807,9 @@ services:
     env: node
     schedule: "30 18 * * 0"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/weekly-seo-report
@@ -722,6 +827,9 @@ services:
     env: node
     schedule: "0 19 * * 0-4"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 120 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/pm-daily-todo
@@ -738,6 +846,9 @@ services:
     env: node
     schedule: "15 18 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/product-map-sync
@@ -771,6 +882,9 @@ services:
     env: node
     schedule: "0 3 * * 2"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/blog-weekly
@@ -785,6 +899,9 @@ services:
     env: node
     schedule: "0 4 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/seo-patrol-daily \
@@ -803,6 +920,9 @@ services:
     env: node
     schedule: "0 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/social-comment-autoreply
@@ -833,6 +953,9 @@ services:
     env: node
     schedule: "5 * * * *"   # 原 "*/10 * * * *"：一轮领 1 条(FB 视频上传慢),10 分钟一轮够用
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/factory-publish-worker
@@ -851,6 +974,9 @@ services:
     env: node
     schedule: "0 20 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 120 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/factory-order-scheduler
@@ -886,6 +1012,9 @@ services:
     env: node
     schedule: "25 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 120 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/factory-publish-sweeper
@@ -940,6 +1069,9 @@ services:
     env: node
     schedule: "10 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/messenger-sync-hourly
@@ -969,6 +1101,9 @@ services:
     env: node
     schedule: "25 */2 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/meta-leads-sync
@@ -994,6 +1129,9 @@ services:
     env: node
     schedule: "40 20 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/ad-readback-sweep
@@ -1010,6 +1148,9 @@ services:
     env: node
     schedule: "30 */6 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/ad-entity-snapshot
@@ -1043,6 +1184,9 @@ services:
     env: node
     schedule: "40 4 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/mailchimp-activity-sync
@@ -1071,6 +1215,9 @@ services:
     env: node
     schedule: "10 5 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/mailchimp-paid-tagging
@@ -1095,6 +1242,9 @@ services:
     env: node
     schedule: "20 5 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/mailchimp-suppression-sync
@@ -1116,6 +1266,9 @@ services:
     env: node
     schedule: "*/30 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/team-memory-sweeper
@@ -1142,6 +1295,9 @@ services:
     env: node
     schedule: "30 20 * * 0"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/linkedin-progress-post-mon
@@ -1153,6 +1309,9 @@ services:
     env: node
     schedule: "30 20 * * 3"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/linkedin-progress-post-thu
@@ -1173,6 +1332,9 @@ services:
     env: node
     schedule: "0 18 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 180 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/market-intel-daily
@@ -1194,6 +1356,9 @@ services:
     env: node
     schedule: "50 16 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 180 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/cron-run-logs-cleanup
