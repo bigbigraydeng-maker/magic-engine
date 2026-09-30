@@ -217,13 +217,15 @@ export function isWithinEnvelope(
  * 所以「拿 AI 信封把字段置 false」**编译期就不成立** —— 这是好事：
  * 它保证 `AutonomyEnvelope` 永远是那套严格的 AI 信封，想放宽只能显式另立一套（就是这里）。
  *
- * ## 只保留三条判据
+ * ## 人工止损判据
  *
  * 1. **撤回处理函数存在** —— 在本函数里查（`facts.hasRollbackHandler`）
  * 2. **归属校验通过** —— 由 `authorize.ts` 的客户/目标归属段落 + 路由层
  *    `assertCampaignOwnedByClient` 保证，**不在这里重复**
  * 3. **实体存在** —— 由 `envelope-facts.ts` 保证：读不到实体它返回 `unavailable`，
  *    调用方在进本函数**之前**就已经 deny 了
+ * 4. **动作真的只收不放** —— 暂停必须是 pause/0；减预算必须有有效原预算，
+ *    且目标不大于它。不能仅凭 ActionKey 的名字认定这是止损。
  *
  * 🔴 第 2、3 条不在本函数里不等于没做。改这里之前先确认那两处还在，
  *    别因为「这里只剩一条」就以为人工路径没有归属校验。
@@ -231,7 +233,7 @@ export function isWithinEnvelope(
 export interface HumanStopEnvelope {
   /** 判别标记 —— 让「拿错信封」在类型层就露出来，不是靠字段长得像。 */
   readonly kind: 'human_stop'
-  /** 唯一保留的硬判据：撤不回来的事，人按也不做。 */
+  /** 撤不回来的事，人按也不做；收缩方向另按动作及真实金额检查。 */
   readonly requiresRollbackHandler: true
 }
 
@@ -259,10 +261,33 @@ export const HUMAN_STOP_ACTION_KEYS: readonly ActionKey[] = [
 ]
 
 /** 人按的收类动作在不在人工信封内。纯函数。 */
-export function isWithinHumanStopEnvelope(facts: EnvelopeFacts): EnvelopeVerdict {
+export function isWithinHumanStopEnvelope(
+  actionKey: string,
+  request: EnvelopeRequest,
+  facts: EnvelopeFacts,
+): EnvelopeVerdict {
   const reasons: string[] = []
   if (!facts.hasRollbackHandler) {
     reasons.push('这个动作没有注册撤回处理函数，撤不回来的事就算是人按的也不做')
+  }
+  if (actionKey === 'ads.pause_unit') {
+    if (request.kind !== 'pause' || request.afterCents !== 0) {
+      reasons.push('人工暂停必须是暂停请求，不能夹带预算变更')
+    }
+  } else if (actionKey === 'ads.cut_unit_budget') {
+    if (request.kind !== 'budget_change') reasons.push('人工减预算必须是预算变更请求')
+    const before = facts.beforeCents
+    const after = request.afterCents
+    if (typeof before !== 'number' || !Number.isFinite(before) || before < 0) {
+      reasons.push('读不到有效的原日预算，无法确认这次只会减预算')
+    }
+    if (!Number.isFinite(after) || after < 0) {
+      reasons.push('目标日预算不是有效金额')
+    } else if (typeof before === 'number' && after > before) {
+      reasons.push('目标日预算高于当前预算，不能以人工止损名义加预算')
+    }
+  } else {
+    reasons.push('这个动作不属于人工止损')
   }
   return { within: reasons.length === 0, reasons }
 }
@@ -306,7 +331,7 @@ export function selectEnvelopeVerdict(args: {
     HUMAN_STOP_ACTION_KEYS.some((key) => key === args.actionKey)
 
   if (human) {
-    return { ...isWithinHumanStopEnvelope(args.facts), envelopeUsed: 'human_stop' }
+    return { ...isWithinHumanStopEnvelope(args.actionKey, args.request, args.facts), envelopeUsed: 'human_stop' }
   }
   return {
     ...isWithinEnvelope(args.request, args.facts, args.envelope),

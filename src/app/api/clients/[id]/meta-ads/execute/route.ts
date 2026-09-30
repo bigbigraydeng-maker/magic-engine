@@ -23,17 +23,16 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requireAdsCampaignBudgetAccess, queueAdsCampaignBudgetDecrease } from '@/lib/action-submission/ads-campaign-budget'
+import { createKernel } from '@/lib/kernel'
+import { inngest } from '@/lib/inngest/client'
+import { ADS_CAMPAIGN_BUDGET_DECREASE_REQUESTED } from '@/lib/inngest/ads-events'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
-import {
-  setCampaignStatus,
-  setCampaignDailyBudget,
-  getCampaignDetails,
-} from '@/lib/meta/client'
+import { setCampaignStatus } from '@/lib/meta/client'
 import { assertCampaignOwnedByClient } from '@/lib/meta/campaign-ownership'
-import { checkBudgetWithinSafeRange } from '@/lib/meta/guardrails'
 import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
 import { resolveAndLogAdsExpectedMetric } from '@/lib/flywheel/ads-expected-metric'
+import { nzToday } from '@/lib/pm-todo/ledger-items'
 
 const SUPPORTED_ACTION_TYPES = new Set([
   ADS_ACTION_TYPE.PAUSE_CAMPAIGN,
@@ -58,7 +57,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
   const clientId = params.id
 
   // ── Auth ─────────────────────────────────────────────────────────────────
-  const access = await requirePaidClientAccess(clientId)
+  const access = await requireAdsCampaignBudgetAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
@@ -120,20 +119,13 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
   // without an audit row. A sales campaign is graded on ROAS, a Messenger
   // campaign on cost per conversation — the old code promised nothing at all,
   // which is why every action here produced zero outcomes.
-  const expectedMetric = resolveAndLogAdsExpectedMetric(
-    { objective: beforeDetails.objective },
-    'meta-ads/execute',
-  )
+  const expectedMetric = action_type === ADS_ACTION_TYPE.ADJUST_BID
+    ? null
+    : resolveAndLogAdsExpectedMetric({ objective: beforeDetails.objective }, 'meta-ads/execute')
 
   // ── Execute action ────────────────────────────────────────────────────────
   let after: typeof before
   let metaSuccess = false
-  // Set when the force-pause guard could not certify the campaign is still
-  // ACTIVE after a budget change — surfaced in the response AND the audit row,
-  // never swallowed (魏征 P1-4: a guard that fails silently is worse than none,
-  // because the record then claims everything is fine).
-  let guardWarning: string | null = null
-  let guardMarker: 'reread_failed' | 'reactivate_failed' | null = null
 
   if (action_type === ADS_ACTION_TYPE.PAUSE_CAMPAIGN) {
     metaSuccess = await setCampaignStatus(campaign_id, accessToken, 'PAUSED')
@@ -143,7 +135,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     after = { ...before, status: 'ACTIVE' }
   } else if (action_type === ADS_ACTION_TYPE.ADJUST_BID) {
     const newBudget = actionParams.new_daily_budget
-    if (typeof newBudget !== 'number' || newBudget <= 0) {
+    if (typeof newBudget !== 'number' || !Number.isFinite(newBudget) || newBudget <= 0) {
       return NextResponse.json(
         { error: 'params.new_daily_budget (positive number in whole currency units) is required for adjust_bid' },
         { status: 400 },
@@ -155,56 +147,59 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
         { status: 422 },
       )
     }
-    // Meta API expects budget in minor currency units (cents for USD/AUD)
+    // Kernel and Meta use the account's minor currency unit (two decimals for AU/NZ accounts).
     const budgetCents = Math.round(newBudget * 100)
+    if (!Number.isSafeInteger(budgetCents)) {
+      return NextResponse.json({ error: 'params.new_daily_budget is outside the supported range' }, { status: 400 })
+    }
 
-    // ±20% hard safety limit — larger swings must go through Talk to Us (manual review)
-    const currentCents = parseInt(beforeDetails.daily_budget, 10)
-    const guard = checkBudgetWithinSafeRange(currentCents, budgetCents)
-    if (!guard.ok) {
+    const currentCents = Number(beforeDetails.daily_budget)
+    if (!Number.isSafeInteger(currentCents) || currentCents <= 0) {
       return NextResponse.json(
-        {
-          error:
-            `Budget change exceeds the ±20% safety limit. ` +
-            `Current daily budget is $${(currentCents / 100).toFixed(2)}; ` +
-            `allowed range is $${(guard.allowedMinCents / 100).toFixed(2)}–$${(guard.allowedMaxCents / 100).toFixed(2)}. ` +
-            `Larger changes require manual review (Talk to Us).`,
-          code: 'exceeds_safe_adjustment',
-          current_daily_budget: currentCents,
-          allowed_min: guard.allowedMinCents,
-          allowed_max: guard.allowedMaxCents,
-        },
+        { error: 'Meta returned an invalid campaign budget; the change was not submitted.' },
         { status: 422 },
       )
     }
-
-    metaSuccess = await setCampaignDailyBudget(campaign_id, accessToken, budgetCents)
-    after = { ...before, daily_budget: String(budgetCents) }
-
-    // Force-pause guard: Meta silently pauses an entity whose daily_budget was
-    // just updated (memory: budget-update-forces-pause). If the campaign was
-    // ACTIVE before, re-read the ENTITY status (instant, unlike insights) and
-    // reactivate — otherwise "adjust budget" quietly becomes "stop the ads".
-    if (metaSuccess && before.status === 'ACTIVE') {
-      const reread = await getCampaignDetails(campaign_id, accessToken)
-      if (!reread) {
-        // Can't certify the post-change status — say so instead of optimistically
-        // recording ACTIVE in the audit trail.
-        guardMarker = 'reread_failed'
-        guardWarning = '预算已改,但无法确认广告是否仍在投放中 — 请到 Meta 广告后台核对这条广告没有被停。'
-      } else if (reread.status !== 'ACTIVE') {
-        const reactivated = await setCampaignStatus(campaign_id, accessToken, 'ACTIVE')
-        after = {
-          ...after,
-          status: reactivated ? 'ACTIVE' : reread.status,
-        }
-        if (!reactivated) {
-          guardMarker = 'reactivate_failed'
-          guardWarning = '预算已改,但广告被平台自动暂停且自动重启失败 — 广告目前是停的,请到 Meta 广告后台手动开启。'
-          console.error(`[meta-ads/execute] budget update force-paused ${campaign_id} and reactivation FAILED`)
-        }
-      }
+    if (budgetCents > currentCents) {
+      return NextResponse.json(
+        { error: '这个入口目前只支持降低广告系列日预算；上调预算暂不开放。', code: 'campaign_budget_increase_not_supported' },
+        { status: 422 },
+      )
     }
+    if (actionParams.execution_item_id !== undefined && typeof actionParams.execution_item_id !== 'string') {
+      return NextResponse.json({ error: 'params.execution_item_id must be a string' }, { status: 400 })
+    }
+
+    const submitted = await queueAdsCampaignBudgetDecrease(createKernel(supabaseAdmin), {
+      clientId,
+      access,
+      cycleDate: nzToday(new Date()),
+      adAccountId: beforeDetails.account_id ?? '',
+      campaignId: campaign_id,
+      afterCents: budgetCents,
+      executionItemId: actionParams.execution_item_id ?? null,
+    })
+    try {
+      await inngest.send({
+        name: ADS_CAMPAIGN_BUDGET_DECREASE_REQUESTED,
+        data: { client_id: clientId, action_run_id: submitted.run.id },
+      })
+    } catch (error) {
+      console.error('[meta-ads/execute] Inngest dispatch failed:', error)
+      return NextResponse.json({
+        error: '预算操作已登记，但暂时无法排入执行队列；请重试。',
+        actionRunId: submitted.run.id,
+        kind: 'queue_failed',
+      }, { status: 503 })
+    }
+    return NextResponse.json({
+      success: true,
+      status: 'queued',
+      actionRunId: submitted.run.id,
+      campaignId: campaign_id,
+      before,
+      after: { ...before, daily_budget: String(budgetCents) },
+    }, { status: 202 })
   } else {
     return NextResponse.json({ error: 'Unhandled action type' }, { status: 422 })
   }
@@ -230,7 +225,6 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
         campaign_id,
         before,
         after,
-        ...(guardMarker ? { force_pause_guard: guardMarker } : {}),
       },
       expected_metric: expectedMetric,
     })
@@ -258,6 +252,34 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     campaignId: campaign_id,
     before,
     after,
-    ...(guardWarning ? { warning: guardWarning } : {}),
+  })
+}
+
+/** Poll the Kernel receipt; authorization is scoped to the same client as the run. */
+export async function GET(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
+  const clientId = params.id
+  const access = await requireAdsCampaignBudgetAccess(clientId)
+  if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
+  const actionRunId = req.nextUrl.searchParams.get('runId')
+  if (!actionRunId || !/^[0-9a-f-]{36}$/i.test(actionRunId)) {
+    return NextResponse.json({ error: 'runId is required' }, { status: 400 })
+  }
+  const { data: run, error } = await supabaseAdmin.from('action_runs')
+    .select('id, client_id, action_key, status, last_error')
+    .eq('id', actionRunId).eq('client_id', clientId).maybeSingle()
+  if (error) return NextResponse.json({ error: 'Could not read the action status.' }, { status: 503 })
+  if (!run || run.action_key !== 'ads.cut_campaign_budget') {
+    return NextResponse.json({ error: 'Action run not found.' }, { status: 404 })
+  }
+  const { data: receipt, error: receiptError } = await supabaseAdmin.from('flywheel_actions')
+    .select('id, payload')
+    .eq('client_id', clientId).eq('payload->>action_run_id', actionRunId).maybeSingle()
+  if (receiptError) return NextResponse.json({ error: 'Could not read the action receipt.' }, { status: 503 })
+  return NextResponse.json({
+    status: (receipt?.payload as { status?: string } | null)?.status === 'workflow_failed'
+      ? 'workflow_failed'
+      : run.status,
+    humanReason: run.last_error,
+    receipt: receipt ?? null,
   })
 }
