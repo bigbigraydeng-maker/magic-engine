@@ -7,7 +7,8 @@
 ## 依赖
 
 - Node 18+(用内置 fetch)
-- Python3 + ffmpeg + piper(装配走 `~/Documents/CTS_BrandKit/make_promo.py`,已有)
+- Python3 + ffmpeg + ffprobe + tesseract + piper(装配走 `~/Documents/CTS_BrandKit/make_promo.py`,已有)
+- Tesseract 用于封面占位字检测;未安装或不可运行时，该审核项保持 `NOT_MEASURED` 并阻止自动通过。可用 `FACTORY_TESSERACT_PATH` 指定可执行文件。
 - `CTS_BrandKit/assets`(logo/music/watermark/voice,已有)
 
 ## 配置

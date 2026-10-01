@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import type { WorkOrderStatus } from '@/lib/factory/types'
+import { REEL_HUMAN_CHECK_KEYS, type CheckItemOutcome, type ContentCheckItemResult, type ContentCheckItemKey } from '@/lib/social/content-review'
 import { FactoryChat } from './FactoryChat'
 
 // P21.J ME 原生化 P1 — 审核 Inbox(spec me-native-design v0.2 §2.1)
@@ -25,6 +26,7 @@ interface WorkOrder {
     video_path?: string
     redline_hits?: string[]
     quality_flags?: Array<{ category: string; detail: string }>
+    quality_checklist_auto?: ContentCheckItemResult[]
   } | null
 }
 
@@ -36,12 +38,50 @@ const qualityFlagsOf = (o: WorkOrder): Array<{ category: string; detail: string 
     ? o.output.quality_flags.filter((f) => f && typeof f.detail === 'string' && f.detail)
     : []
 
+const autoChecklistOf = (o: WorkOrder): ContentCheckItemResult[] =>
+  Array.isArray(o.output?.quality_checklist_auto) ? o.output.quality_checklist_auto : []
+const autoChecklistReady = (o: WorkOrder): boolean =>
+  autoChecklistOf(o).length > 0 && autoChecklistOf(o).every(item => item.judge === 'AUTO' && item.outcome === 'PASS')
+
 const QUALITY_FLAG_LABEL: Record<string, string> = {
   competitor_brand: '⚠️ 疑似把竞品品牌当自己卖点',
   placeholder_caption: '⚠️ 字幕疑似内部标签冒充文案',
   narrator_voice_mismatch: '⚠️ 人称口吻疑似不符简报要求',
   quality_check_unavailable: '⚠️ 品控检测暂不可用,请重点人工复核',
 }
+
+const HUMAN_CHECK_LABEL: Record<ContentCheckItemKey, string> = {
+  audio_track_present_nonsilent: '音轨存在且非静音',
+  resolution_aspect_ratio_correct: '分辨率与宽高比正确',
+  subtitle_timing_aligned: '字幕时间轴对齐',
+  cover_frame_not_blank_or_placeholder: '封面帧不是空白或占位图',
+  factual_claims_have_source: '事实性主张有来源',
+  factual_claims_source_verified: '来源支持对应主张',
+  viral_recipe_hook_matched: '开头符合已选爆款配方',
+  safe_zone_text_in_bounds: '文字位于安全区内',
+  logo_watermark_present: '品牌 Logo / 水印正确',
+  subtitle_short_and_large: '字幕短且清晰易读',
+  asset_provenance_labeled: '素材来源已标注',
+  asset_provenance_matches_claim_context: '素材与主张场景相符',
+  bgm_segmented_with_fades: 'BGM 分段并带淡入淡出',
+  format_is_reel: '发布格式为 Reel',
+  cta_in_first_comment_not_body: 'CTA 位于首评而非正文',
+  first_comment_link_has_tracking_params: '首评链接含追踪参数',
+}
+
+type ChecklistDraft = Record<ContentCheckItemKey, { outcome: CheckItemOutcome; detail: string; source_ref: string }>
+const emptyChecklistDraft = (): ChecklistDraft => Object.fromEntries(
+  REEL_HUMAN_CHECK_KEYS.map(key => [key, { outcome: 'NOT_MEASURED', detail: '', source_ref: '' }]),
+) as ChecklistDraft
+
+const checklistPayload = (draft: ChecklistDraft): ContentCheckItemResult[] =>
+  REEL_HUMAN_CHECK_KEYS.map(key => ({
+    key,
+    judge: 'HUMAN',
+    outcome: draft[key].outcome,
+    detail: draft[key].detail.trim() || null,
+    source_ref: draft[key].source_ref.trim() || null,
+  }))
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
 const publicUrl = (path?: string) =>
@@ -55,6 +95,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<WorkOrder | null>(null)
+  const [checklistDraft, setChecklistDraft] = useState<ChecklistDraft>(emptyChecklistDraft)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -157,8 +198,19 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
                 </div>
               )}
 
+              {!autoChecklistReady(o) && (
+                <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                  <p className="text-sm font-medium text-red-800">自动媒体检测未完成，服务端会阻断通过</p>
+                  <p className="mt-1 text-xs text-red-700">
+                    {autoChecklistOf(o).length > 0
+                      ? autoChecklistOf(o).filter(item => item.outcome !== 'PASS').map(item => `${HUMAN_CHECK_LABEL[item.key] ?? item.key}：${item.detail ?? '未测'}`).join('；')
+                      : '自动检查清单缺失'}
+                  </p>
+                </div>
+              )}
+
               <button
-                onClick={() => setConfirming(o)}
+                onClick={() => { setConfirming(o); setChecklistDraft(emptyChecklistDraft()) }}
                 disabled={busy === o.id}
                 className="w-full sm:w-auto sm:self-start px-5 h-11 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 mb-2"
               >{busy === o.id ? '处理中…' : '✓ 通过·待发布'}</button>
@@ -174,7 +226,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
 
       {confirming && (
         <div className="fixed inset-0 z-40 bg-black/45 grid place-items-center p-4" onClick={() => setConfirming(null)}>
-          <div className="bg-white rounded-xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <p className="font-medium text-slate-900 mb-1">通过并排入发布队列</p>
 
             {redlineHitsOf(confirming).length > 0 && (
@@ -199,6 +251,45 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
               </div>
             )}
 
+            <div className="mb-4 space-y-3">
+              <h3 className="text-sm font-medium text-slate-800">人工审核清单</h3>
+              <p className="text-xs text-amber-700">所有项需逐项标记 PASS 才能通过。自动音视频检测尚未上线，因此当前 Reel 审批仍会被服务端阻断。</p>
+              {REEL_HUMAN_CHECK_KEYS.map(key => (
+                <div key={key} className="rounded-lg border border-slate-200 p-3">
+                  <p className="text-sm font-medium text-slate-800">{HUMAN_CHECK_LABEL[key]}</p>
+                  <div className="mt-2 flex gap-4 text-xs">
+                    {(['PASS', 'FAIL', 'NOT_MEASURED'] as const).map(outcome => (
+                      <label key={outcome} className="flex items-center gap-1">
+                        <input
+                          type="radio"
+                          name={`check-${confirming.id}-${key}`}
+                          checked={checklistDraft[key].outcome === outcome}
+                          onChange={() => setChecklistDraft(prev => ({ ...prev, [key]: { ...prev[key], outcome } }))}
+                        />
+                        {outcome === 'NOT_MEASURED' ? '未检查' : outcome}
+                      </label>
+                    ))}
+                  </div>
+                  {checklistDraft[key].outcome === 'FAIL' && (
+                    <input
+                      className="mt-2 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+                      placeholder="说明未通过原因"
+                      value={checklistDraft[key].detail}
+                      onChange={e => setChecklistDraft(prev => ({ ...prev, [key]: { ...prev[key], detail: e.target.value } }))}
+                    />
+                  )}
+                  {(key === 'factual_claims_have_source' || key === 'factual_claims_source_verified') && (
+                    <input
+                      className="mt-2 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+                      placeholder="来源 HTTPS URL 或 client_asset:<ID>"
+                      value={checklistDraft[key].source_ref}
+                      onChange={e => setChecklistDraft(prev => ({ ...prev, [key]: { ...prev[key], source_ref: e.target.value } }))}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+
             {/* 文案必须跟发布链路的真实状态一致。旧文案写「链路正在建设,通过不会发出去」,而
                 publish-worker(facebook-reel-adapter 真打 Graph API)此后已经落地,只是 cron 未注册
                 —— 说死「不会发」是骗人的。这里只陈述能保证的事实。 */}
@@ -209,8 +300,8 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
             </p>
             <div className="flex gap-3">
               <button
-                onClick={() => void act(confirming.id, { action: 'approve' })}
-                disabled={busy === confirming.id}
+                onClick={() => void act(confirming.id, { action: 'approve', checklist_human: checklistPayload(checklistDraft) })}
+                disabled={busy === confirming.id || !autoChecklistReady(confirming) || REEL_HUMAN_CHECK_KEYS.some(key => checklistDraft[key].outcome !== 'PASS')}
                 className="flex-1 h-10 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
               >{busy === confirming.id ? '处理中…' : '确定通过'}</button>
               <button onClick={() => setConfirming(null)} className="px-5 h-10 rounded-lg border border-slate-200 text-sm">再想想</button>
