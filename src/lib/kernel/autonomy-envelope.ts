@@ -51,8 +51,12 @@ export interface EnvelopeFacts {
   beforeCents: number | null
   /** 改动前，这个账户全部预算单位的日预算合计（分）。 */
   accountDailyTotalBeforeCents: number | null
+  /** 改动前，客户所有 Meta 广告账户的日预算合计（分）；上调预算时必须读到。 */
+  clientDailyTotalBeforeCents: number | null
   /** 客户配置的日预算上限（分）。null = 没设 → 拒绝。 */
   dailyCapCents: number | null
+  /** 客户所有广告账户共用的日预算上限（分）；上调预算时必须读到。 */
+  clientDailyCapCents: number | null
   /** 距这个单位上一次**真实**设置变化过了多少小时（按快照算，含人工改动，§14 K12）。 */
   hoursSinceLastChange: number | null
   /**
@@ -107,6 +111,13 @@ export function isWithinEnvelope(
   if (facts.hoursSinceLastChange === null) reasons.push('读不到这个单位上次设置变动的时间')
   if (envelope.respectDailyCapCents && facts.dailyCapCents === null) {
     reasons.push('这个客户还没设日预算上限，没有上限就不自动动钱')
+  }
+  const isIncreasing = facts.beforeCents !== null && request.afterCents > facts.beforeCents
+  if (envelope.respectDailyCapCents && isIncreasing && facts.clientDailyTotalBeforeCents === null) {
+    reasons.push('读不到客户所有广告账户的日预算合计')
+  }
+  if (envelope.respectDailyCapCents && isIncreasing && facts.clientDailyCapCents === null) {
+    reasons.push('读不到客户所有广告账户共用的日预算上限')
   }
 
   // ── 再拒「明确不该动」──────────────────────────────────────────────────
@@ -177,6 +188,20 @@ export function isWithinEnvelope(
         `改完账户当日预算合计 ${accountAfter} 分，超过上限 ${cap} 分的 ${Math.round(OVERSHOOT_TOLERANCE * 100)}% 缓冲` +
           `（${Math.floor(capWithBuffer)} 分）`,
       )
+    }
+  }
+
+  // 上调预算前，还要把这次变动加到客户所有广告账户的预算总和里。
+  // 这里按客户总上限硬拦（不套单账户信封的 20% 波动余量），避免多个账户
+  // 各自未超上限、合计却越过客户总预算。完整的跨账户事实由 Ads resolver 提供。
+  if (envelope.respectDailyCapCents && isIncreasing) {
+    const clientBefore = facts.clientDailyTotalBeforeCents as number
+    const clientCap = facts.clientDailyCapCents as number
+    const clientAfter = clientBefore - (facts.beforeCents as number) + after
+    if (!Number.isSafeInteger(clientBefore) || !Number.isSafeInteger(clientCap) || clientBefore < 0 || clientCap <= 0) {
+      reasons.push('客户跨账户预算合计或总上限不是有效金额')
+    } else if (clientAfter > clientCap) {
+      reasons.push(`加完后客户所有广告账户日预算合计 ${clientAfter} 分，超过客户总上限 ${clientCap} 分`)
     }
   }
 

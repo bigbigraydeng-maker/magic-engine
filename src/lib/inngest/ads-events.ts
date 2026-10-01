@@ -12,6 +12,9 @@ export const ADS_AUTONOMY_ENVELOPE_RELAXED = 'ads.autonomy_envelope.relaxed'
 /** A human-submitted campaign-level budget decrease is ready for durable execution. */
 export const ADS_CAMPAIGN_BUDGET_DECREASE_REQUESTED = 'ads.campaign_budget.decrease_requested'
 
+/** An O1 budget increase was explicitly approved and is ready for execution. */
+export const ADS_O1_BUDGET_SCALE_APPROVED = 'ads.o1_budget_scale.approved'
+
 export interface AdsClientEventData {
   readonly client_id: string
 }

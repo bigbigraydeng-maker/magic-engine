@@ -77,7 +77,9 @@ const RUN: Pick<ActionRun, 'id' | 'client_id' | 'action_key' | 'input' | 'trigge
 const okFacts: EnvelopeFacts = {
   beforeCents: 1000,
   accountDailyTotalBeforeCents: 5000,
+  clientDailyTotalBeforeCents: 5000,
   dailyCapCents: 10_000,
+  clientDailyCapCents: 10_000,
   hoursSinceLastChange: 100,
   learningPhaseApplicable: true,
   learningStage: 'SUCCESS',
