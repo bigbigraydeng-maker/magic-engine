@@ -6,8 +6,7 @@
  * 而「有实现、没接上」正是这个 bug 本身的形态(红线扫描一直存在于交付环节,却从未
  * 覆盖真正发出去的那串文案)。
  *
- * 关键事实:交付时扫的是 output.caption + 分镜文字;发布时发的是 buildCaption() 从
- * brief.copy.endcard 另拼的字。两串不是同一个东西。
+ * 发布正文取分镜文案;CTA 与带追踪参数的落地页链接必须放在首评。
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -76,7 +75,7 @@ function installMocks(s: Scenario) {
                     quality_checklist_auto: REEL_AUTO_CHECK_KEYS.map(key => ({ key, judge: 'AUTO', outcome: 'PASS', detail: 'measured', source_ref: null })),
                   }),
                 },
-                brief: { angle: 'X', copy: { endcard: s.endcard } },
+                brief: { angle: 'X', copy: { segments: [{ caption: 'Explore with us' }], endcard: s.endcard } },
               },
               error: null,
             }
@@ -194,12 +193,15 @@ describe('发布正文红线闸', () => {
     expect(finalStatus()).toMatchObject({ status: 'publish_failed', next_retry_at: null })
   })
 
-  it('发布正文由 cta + offer + url 拼成(确认扫的就是真发出去的那串)', async () => {
+  it('正文使用分镜文案,CTA 与追踪链接放首评', async () => {
     installMocks({ redlines: [], endcard: { cta: 'Book now', offer: ['Save 20%', 'Ends Friday'], url: 'https://ctstours.co.nz' } })
     await run()
 
     expect(mockPublish).toHaveBeenCalledWith(
-      expect.objectContaining({ caption: 'Book now\nSave 20% · Ends Friday\nhttps://ctstours.co.nz' }),
+      expect.objectContaining({
+        caption: 'Explore with us',
+        firstComment: expect.stringContaining('Book now\nSave 20% · Ends Friday\nhttps://ctstours.co.nz/?utm_source=facebook&utm_medium=organic_social'),
+      }),
     )
   })
 })

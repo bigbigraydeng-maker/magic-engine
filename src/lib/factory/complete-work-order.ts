@@ -12,7 +12,8 @@ import { FACTORY_B_TRACK_SCENE_TAGS, FACTORY_CLIENT_DERIVED_SCENE_TAG } from './
 import { scanContentQualityFlags, type QualityFlag } from './content-quality-guard'
 import { scanRedlineHits, validateClipPath } from './worker-guard'
 import { assertRecipeReceipt, winnerRecipeFromBrief, type WinnerRecipe } from './recipe'
-import { REEL_AUTO_CHECK_KEYS, unmeasuredAutoChecks } from '@/lib/social/content-review'
+import { buildReelPostCaption, buildReelPublishAutoChecks } from '@/lib/social/reel-publishing'
+import { buildReelMediaAutoChecks, type ReelMediaEvidence } from '@/lib/social/reel-media-checks'
 
 const ACTIVE_STATUSES = ['claimed', 'producing']
 
@@ -39,6 +40,7 @@ export interface CompleteParams {
   newClips: CompleteClipInput[]
   /** blocker 1:recipe 单必须携带 executed receipt;legacy 单可 undefined。 */
   recipeReceipt?: unknown
+  mediaEvidence?: ReelMediaEvidence | null
 }
 
 /**
@@ -119,7 +121,7 @@ export async function completeWorkOrder(
   supabase: SupabaseClient,
   p: CompleteParams,
 ): Promise<CompleteResult> {
-  const { wo, workerId, videoPath, segmentsPath, srtPath, caption, actualCost, newClips, recipeReceipt } = p
+  const { wo, workerId, videoPath, segmentsPath, srtPath, caption, actualCost, newClips, recipeReceipt, mediaEvidence } = p
   const clientId = wo.client_id as string
   const woId = wo.id as string
 
@@ -289,12 +291,16 @@ export async function completeWorkOrder(
     caption,
     redline_hits: redlineHits,
     quality_flags: qualityFlags,
-    // v0.2 does not include the media-detector engine. Record that each
-    // server-owned check was not measured; approve rejects this state.
-    quality_checklist_auto: unmeasuredAutoChecks(
-      REEL_AUTO_CHECK_KEYS,
-      'Automatic media detector is not implemented; this check was not measured and blocks approval.',
-    ),
+    // Media results are collected by the authenticated rendering worker and
+    // interpreted here at the server boundary. Missing probe values fail closed.
+    quality_checklist_auto: [
+      ...buildReelMediaAutoChecks(mediaEvidence),
+      ...buildReelPublishAutoChecks({
+        workOrderId: woId,
+        body: buildReelPostCaption((briefRecord.copy ?? {}) as Record<string, unknown>),
+        endcard: (((briefRecord.copy ?? {}) as Record<string, unknown>).endcard ?? {}) as Record<string, unknown>,
+      }),
+    ],
     new_clip_ids: insertedClipIds,
   }
 

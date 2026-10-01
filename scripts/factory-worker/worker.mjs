@@ -118,6 +118,7 @@ const CLIP_UNIT_COST = Number(ENV.FACTORY_CLIP_UNIT_COST_USD || '0.225')
 // by default, while keeping an explicit override for restricted launchd environments.
 const FFPROBE_BIN = ENV.FACTORY_FFPROBE_PATH || 'ffprobe'
 const FFMPEG_BIN = ENV.FACTORY_FFMPEG_PATH || 'ffmpeg'
+const TESSERACT_BIN = ENV.FACTORY_TESSERACT_PATH || 'tesseract'
 const PYTHON_BIN = ENV.FACTORY_PYTHON_PATH || 'python3'
 // Inngest one-candidate workflow can impose a stricter per-run ceiling than the
 // work-order budget.  Missing means legacy/manual worker behaviour is unchanged.
@@ -505,7 +506,9 @@ async function processOrder(wo) {
     // 上传三件套
     const videoBuf = readFileSync(finalPath)
     const segmentsJson = Buffer.from(JSON.stringify({ segments: wo.brief.segments, copy }, null, 2))
-    const srt = Buffer.from(buildSrt(wo.brief.segments, copy))
+    const srtText = buildSrt(wo.brief.segments, copy)
+    const srt = Buffer.from(srtText)
+    const mediaEvidence = probeMediaEvidence(finalPath, srtText)
     await uploadSigned(wo.uploads.video.signed_url, videoBuf, 'video/mp4')
     await uploadSigned(wo.uploads.segments_json.signed_url, segmentsJson, 'application/json')
     await uploadSigned(wo.uploads.srt.signed_url, srt, 'text/plain')
@@ -519,6 +522,7 @@ async function processOrder(wo) {
       caption,
       actual_cost_usd: cost,
       new_clips: newClips,
+      media_evidence: mediaEvidence,
     })
     if (!r.ok) throw new Error(`complete ${r.status}: ${JSON.stringify(r.json)}`)
     log(`✅ 工单 ${woId} 完成 → ${r.json.status ?? 'in_review'}`, r.json.redline_hits?.length ? `(红线标记: ${r.json.redline_hits})` : '')
@@ -562,6 +566,7 @@ export async function runRecipeSequence({ wo, recipe, tmp, deps }) {
     tmpJoin,
     probeDurationFn,
     probeLoudnessFn,
+    probeMediaEvidenceFn = () => ({}),
     hashFileFn,
     execAssembleFn,
     completeFn,
@@ -769,9 +774,11 @@ export async function runRecipeSequence({ wo, recipe, tmp, deps }) {
     Buffer.from(JSON.stringify(receipt, null, 2)),
     'application/json',
   )
+  const executedSrt = buildExecutedSrt({ recipe, hookText, captionsByRole })
+  const mediaEvidence = probeMediaEvidenceFn(outputPath, executedSrt)
   await uploadSignedFn(
     wo.uploads.srt.signed_url,
-    Buffer.from(buildExecutedSrt({ recipe, hookText, captionsByRole })),
+    Buffer.from(executedSrt),
     'text/plain',
   )
 
@@ -794,6 +801,7 @@ export async function runRecipeSequence({ wo, recipe, tmp, deps }) {
     actual_cost_usd: cost,
     new_clips: newClips,
     recipe_receipt: receipt,
+    media_evidence: mediaEvidence,
   })
   if (!r.ok) throw new Error(`complete ${r.status}: ${JSON.stringify(r.json)}`)
   logFn?.(`✅ 工单 ${woId} recipe 完成 → ${r.json?.status ?? 'in_review'}`)
@@ -819,6 +827,7 @@ async function processRecipeOrder(wo, tmp, recipe) {
       tmpJoin: (t, name) => join(t, name),
       probeDurationFn: probeClipDuration,
       probeLoudnessFn: probeLoudnessLufs,
+      probeMediaEvidenceFn: probeMediaEvidence,
       hashFileFn: sha256File,
       execAssembleFn: ({ cfgPath, outputPath }) => {
         execFileSync(PYTHON_BIN, [MAKE_PROMO, cfgPath], { stdio: 'inherit' })
@@ -883,6 +892,67 @@ export function probeHasAudio(path) {
   } catch {
     return false
   }
+}
+
+function parseSubtitleCues(srt) {
+  return String(srt).split(/\r?\n\s*\r?\n/).flatMap((block) => {
+    const lines = block.split(/\r?\n/)
+    const timing = lines.find((line) => line.includes('-->'))
+    if (!timing) return []
+    const match = timing.match(/(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})/)
+    if (!match) return [{ start_seconds: NaN, end_seconds: NaN, text: '' }]
+    const toSeconds = (h, m, s, ms) => Number(h) * 3600 + Number(m) * 60 + Number(s) + Number(ms) / 1000
+    return [{
+      start_seconds: toSeconds(match[1], match[2], match[3], match[4]),
+      end_seconds: toSeconds(match[5], match[6], match[7], match[8]),
+      text: lines.slice(lines.indexOf(timing) + 1).join(' ').replace(/<[^>]*>/g, '').trim(),
+    }]
+  })
+}
+
+/** Probe the final encoded file before it leaves the authenticated render worker. */
+export function probeMediaEvidence(path, srt) {
+  const evidence = { subtitle_cues: parseSubtitleCues(srt) }
+  try {
+    const raw = execFileSync(FFPROBE_BIN, [
+      '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'json', path,
+    ], { encoding: 'utf8' })
+    const stream = JSON.parse(raw).streams?.[0]
+    if (Number.isInteger(stream?.width)) evidence.width = stream.width
+    if (Number.isInteger(stream?.height)) evidence.height = stream.height
+    const duration = probeClipDuration(path)
+    if (Number.isFinite(duration)) evidence.duration_seconds = duration
+  } catch {
+    // Leave only the video metadata unmeasured; other independent checks remain usable.
+  }
+  evidence.audio_stream_present = probeHasAudio(path)
+  evidence.audio_loudness_lufs = probeLoudnessLufs(path)
+
+  try {
+    const pixels = execFileSync(FFMPEG_BIN, [
+      '-hide_banner', '-loglevel', 'error', '-ss', '0.5', '-i', path, '-frames:v', '1',
+      '-vf', 'scale=32:32:flags=area,format=gray', '-f', 'rawvideo', '-pix_fmt', 'gray', 'pipe:1',
+    ])
+    if (pixels.length === 32 * 32) {
+      const values = [...pixels]
+      const mean = values.reduce((sum, value) => sum + value, 0) / values.length
+      evidence.cover_mean_luma = Number(mean.toFixed(2))
+      evidence.cover_luma_range = Math.max(...values) - Math.min(...values)
+    }
+    const frame = execFileSync(FFMPEG_BIN, [
+      '-hide_banner', '-loglevel', 'error', '-ss', '0.5', '-i', path, '-frames:v', '1',
+      '-vf', 'scale=640:640:flags=neighbor', '-f', 'image2pipe', '-vcodec', 'png', 'pipe:1',
+    ])
+    const ocr = execFileSync(TESSERACT_BIN, ['stdin', 'stdout', '--psm', '11'], {
+      input: frame,
+      encoding: 'utf8',
+      timeout: 15000,
+    })
+    evidence.cover_placeholder_detected = /\b(?:placeholder|sample video|lorem ipsum|insert (?:logo|text|image)|your (?:logo|text))\b/i.test(ocr)
+  } catch {
+    // Missing OCR or an unprobeable frame is not a PASS. The server records it as NOT_MEASURED.
+  }
+  return evidence
 }
 
 /**
