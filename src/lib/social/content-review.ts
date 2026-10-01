@@ -113,7 +113,10 @@ export function validateContentChecklist(
       source_ref: typeof item.source_ref === 'string' ? item.source_ref.trim() || null : null,
     }
     if (result.outcome === 'FAIL' && !result.detail) return { ok: false, error: `checklist ${result.key} requires a failure detail` }
-    if (FACTUAL_KEYS.has(result.key) && judge === 'HUMAN' && !result.source_ref) {
+    // A failed factual check may mean there is no source to cite. Requiring a
+    // source in that case prevents reviewers from recording the exact defect.
+    // Passing a factual check still requires evidence.
+    if (FACTUAL_KEYS.has(result.key) && judge === 'HUMAN' && result.outcome === 'PASS' && !result.source_ref) {
       return { ok: false, error: `checklist ${result.key} requires source_ref` }
     }
     if (!FACTUAL_KEYS.has(result.key) && result.source_ref !== null) {

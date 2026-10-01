@@ -36,11 +36,18 @@ describe('social content review checklist', () => {
     expect(checklistPasses(unmeasuredAutoChecks(REEL_AUTO_CHECK_KEYS, 'engine absent'))).toBe(false)
   })
 
-  it('requires B-class evidence refs and a detail when an item fails', () => {
+  it('requires evidence to pass a B-class check but allows a failed check to record a missing source', () => {
     const missingSource = passHuman(POST_HUMAN_CHECK_KEYS).map(item =>
       item.key === 'factual_claims_have_source' ? { ...item, source_ref: null } : item,
     )
     expect(validateContentChecklist(missingSource, POST_HUMAN_CHECK_KEYS, 'HUMAN').ok).toBe(false)
+
+    const failedWithoutSource = passHuman(POST_HUMAN_CHECK_KEYS).map(item =>
+      item.key === 'factual_claims_have_source'
+        ? { ...item, outcome: 'FAIL' as const, detail: 'No source was provided', source_ref: null }
+        : item,
+    )
+    expect(validateContentChecklist(failedWithoutSource, POST_HUMAN_CHECK_KEYS, 'HUMAN').ok).toBe(true)
 
     const missingDetail = passHuman(POST_HUMAN_CHECK_KEYS).map(item =>
       item.key === 'logo_watermark_present' ? { ...item, outcome: 'FAIL', detail: null } : item,
