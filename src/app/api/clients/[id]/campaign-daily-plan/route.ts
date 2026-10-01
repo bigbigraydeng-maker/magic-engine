@@ -31,9 +31,11 @@ import {
   buildPublishingPlan,
   buildAdCandidate,
   buildEmptyDays,
+  campaignDailyPlanReceiptLock,
   isReviewablePostDate,
   todayIso,
   type CampaignDailyPlanData,
+  type CampaignDailyPlanReceiptLock,
   type CampaignDailyPostReviewMeta,
 } from '@/lib/campaign/daily-plan'
 import { CampaignDailyPublishMetaSchema } from '@/lib/campaign/daily-plan-publish'
@@ -113,6 +115,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         review_summary: { passed: 0, needs_revision: 0, total: 0 },
         publish_queue_receipt: null,
         publish_receipt: null,
+        review_lock: null,
         facebook_page_id: null,
       })
     }
@@ -343,6 +346,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       review_summary: reviewSummary,
       publish_queue_receipt: publishQueueMeta,
       publish_receipt: publishMeta,
+      // Raw receipt presence, not the validated receipts above: a stale
+      // publish_meta reads as null there but still locks Post review.
+      review_lock: campaignDailyPlanReceiptLock(planData),
       facebook_page_id: (clientRow as { facebook_page_id?: string | null } | null)?.facebook_page_id ?? null,
     })
   } catch (err: unknown) {
@@ -351,8 +357,6 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 }
 
 // ─── POST ─────────────────────────────────────────────────────────────────────
-
-type PlanLockReason = 'PLAN_ALREADY_PUBLISHED' | 'PLAN_PUBLISH_QUEUED'
 
 /**
  * A complete-snapshot POST rebuilds `plan_data` from scratch, so overwriting
@@ -372,15 +376,8 @@ type PlanLockReason = 'PLAN_ALREADY_PUBLISHED' | 'PLAN_PUBLISH_QUEUED'
  * newest row by created_at, which would orphan the old receipt (recall would
  * answer PLAN_ID_MISMATCH for posts that are still live).
  */
-function receiptBlockingOverwrite(planData: Partial<CampaignDailyPlanData> | null): PlanLockReason | null {
-  if (!planData) return null
-  if (planData.publish_meta !== undefined) return 'PLAN_ALREADY_PUBLISHED'
-  if (planData.publish_queue_meta !== undefined) return 'PLAN_PUBLISH_QUEUED'
-  return null
-}
-
 function planLockedResponse(
-  reason: PlanLockReason,
+  reason: CampaignDailyPlanReceiptLock,
   planId: string,
   planData: Partial<CampaignDailyPlanData> | null
 ) {
@@ -510,7 +507,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (existingReadError) throw existingReadError
 
     const existingPlanData = (existing?.plan_data ?? null) as Partial<CampaignDailyPlanData> | null
-    const blockedBy = receiptBlockingOverwrite(existingPlanData)
+    const blockedBy = campaignDailyPlanReceiptLock(existingPlanData)
     if (existing?.id && blockedBy) {
       return planLockedResponse(blockedBy, existing.id, existingPlanData)
     }

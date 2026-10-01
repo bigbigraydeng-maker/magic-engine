@@ -76,10 +76,13 @@ interface DailyPlanResponse {
     posts: Array<{ date: string; image_asset_id: string; cta_url: string; review_verdict: 'PASS' }>
   } | null
   publish_receipt: PublishReceipt | null
+  review_lock: 'PLAN_PUBLISH_QUEUED' | 'PLAN_ALREADY_PUBLISHED' | null
   facebook_page_id: string | null
 }
 
 type PublishQueueStatus = 'READY' | 'NEEDS_REVISION' | 'PENDING_REVIEW'
+
+const REVIEW_LOCKED_MESSAGE = '这份计划已进入发布队列或已发布，Post 审核已锁定；要改内容请新建一个推广活动。'
 
 const GROUNDING_LABEL: Record<DailyPlanResponse['grounding']['status'], string> = {
   OK: '✅ 已连接 Master Brief',
@@ -220,6 +223,10 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
       const json = await res.json()
       if (activeScope.current !== scope) return
       if (!res.ok || !json.success) {
+        if (res.status === 409 && (json.error === 'PLAN_PUBLISH_QUEUED' || json.error === 'PLAN_ALREADY_PUBLISHED')) {
+          await load()
+          throw new Error(REVIEW_LOCKED_MESSAGE)
+        }
         if (res.status === 409) {
           await load()
           throw new Error('计划或审核状态已更新，页面已刷新，请确认后再操作。')
@@ -335,6 +342,8 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
   const publishQueueReadyCount = publishQueueItems.filter(item => item.status === 'READY').length
   const publishQueueReady = publishQueueItems.length > 0 && publishQueueReadyCount === publishQueueItems.length
   const publishQueueReceipt = data.publish_queue_receipt
+  // Same lock the post-review route enforces; the server stays the authority.
+  const reviewLocked = Boolean(data.review_lock)
 
   return (
     <div className="border border-black/[.06] rounded-xl overflow-hidden">
@@ -347,7 +356,7 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
           {reviewSummary.total > 0 && (
             <button
               type="button"
-              disabled={reviewSaving || bulkReviewSaving || pendingPostCount === 0}
+              disabled={reviewLocked || reviewSaving || bulkReviewSaving || pendingPostCount === 0}
               onClick={() => void bulkPassPendingPosts()}
               className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
                 pendingPostCount === 0
@@ -492,6 +501,7 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
                         <input
                           type="text"
                           value={reviewReason}
+                          disabled={reviewLocked}
                           maxLength={500}
                           onChange={event => setReviewReason(event.target.value)}
                           placeholder="如需修改，请写明原因"
@@ -502,7 +512,7 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
                         {!selectedPostPassed && (
                           <button
                             type="button"
-                            disabled={reviewSaving}
+                            disabled={reviewLocked || reviewSaving}
                             onClick={() => void submitPostReview('PASS')}
                             className="rounded-md bg-[#5C8A4A] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
                           >
@@ -516,13 +526,16 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
                         )}
                         <button
                           type="button"
-                          disabled={reviewSaving}
+                          disabled={reviewLocked || reviewSaving}
                           onClick={() => void submitPostReview('NEEDS_REVISION')}
                           className="rounded-md border border-[#C2453A]/30 px-3 py-1.5 text-xs font-medium text-[#C2453A] disabled:opacity-50"
                         >
                           Post 需修改
                         </button>
                       </div>
+                      {reviewLocked && !reviewError && (
+                        <p className="text-[11px] text-me-charcoal/60">{REVIEW_LOCKED_MESSAGE}</p>
+                      )}
                       {reviewError && <p className="text-[11px] text-[#C2453A]">{reviewError}</p>}
                       <p className="text-[10px] leading-relaxed text-me-charcoal/40">
                         这里只记录该 Facebook Post 的人工审阅；不代表事实核验、Story/Reel 通过、生成、排期、Provider 或发布授权。

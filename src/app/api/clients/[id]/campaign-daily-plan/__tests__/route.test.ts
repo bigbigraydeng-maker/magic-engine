@@ -1739,3 +1739,25 @@ describe('campaign-daily-plan POST — never erases a publish or publish-queue r
     expect(plans.rows).toHaveLength(1)
   })
 })
+
+// The panel disables Post review from `review_lock`, which must follow the
+// same raw-receipt rule the post-review route enforces — not the validated
+// receipts, which report a stale publish_meta as null.
+describe('campaign-daily-plan GET — review_lock mirrors the post-review receipt lock', () => {
+  it.each([
+    ['no receipt', () => ({ review_meta: storedReviewMeta() }), null],
+    ['queued', () => ({ review_meta: storedReviewMeta(), publish_queue_meta: storedQueueMeta() }), 'PLAN_PUBLISH_QUEUED'],
+    ['published', () => ({ review_meta: storedReviewMeta(), publish_queue_meta: storedQueueMeta(), publish_meta: storedPublishMeta() }), 'PLAN_ALREADY_PUBLISHED'],
+    ['stale publish receipt hidden from publish_receipt', () => ({ review_meta: storedReviewMeta(), publish_meta: storedPublishMeta({ review_revision: '10000000-0000-0000-0000-000000000077' }) }), 'PLAN_ALREADY_PUBLISHED'],
+  ])('%s', async (label, extras, expected) => {
+    allow()
+    mockGetCampaign.mockResolvedValue(CAMPAIGN)
+    mockPostTables(socialPlansTable([storedPlanRow(extras())]))
+
+    const json = await (await GET(getRequest(CAMPAIGN_ID), params())).json()
+
+    expect(json.success).toBe(true)
+    expect(json.review_lock).toBe(expected)
+    if (label.startsWith('stale')) expect(json.publish_receipt).toBeNull()
+  })
+})

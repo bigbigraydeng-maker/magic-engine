@@ -14,8 +14,10 @@ import {
   CAMPAIGN_DAILY_PLAN_KIND,
   CampaignDailyPostReviewCommandSchema,
   CampaignDailyPostReviewMetaSchema,
+  campaignDailyPlanReceiptLock,
   isReviewablePostDate,
   type CampaignDailyPlanData,
+  type CampaignDailyPlanReceiptLock,
   type CampaignDailyPostReviewMeta,
 } from '@/lib/campaign/daily-plan'
 
@@ -29,6 +31,34 @@ function errorMessage(error: unknown): string {
 
 function conflict(error: string) {
   return NextResponse.json({ success: false, error }, { status: 409 })
+}
+
+/**
+ * Changing a review after queueing would strand the plan: publish rejects
+ * the queue receipt as stale, the queue refuses a second receipt, and the
+ * plan POST refuses to overwrite a queued row. During an in-flight publish
+ * it would also make the publish receipt write miss, leaving live Posts
+ * that recall cannot find.
+ */
+function reviewLockedResponse(
+  reason: CampaignDailyPlanReceiptLock,
+  planId: string,
+  planData: Partial<CampaignDailyPlanData> | null
+) {
+  const publishStatus = (planData?.publish_meta as { status?: unknown } | undefined)?.status
+  return NextResponse.json(
+    {
+      success: false,
+      error: reason,
+      plan_id: planId,
+      publish_status: typeof publishStatus === 'string' ? publishStatus : null,
+      message: `${reason === 'PLAN_ALREADY_PUBLISHED'
+        ? 'This plan already has a Facebook publish record.'
+        : 'This plan is already in the publish queue.'} Post reviews are locked so the queue and publish records stay valid. Create a new campaign for changed content.`,
+      next_step: 'CREATE_NEW_CAMPAIGN',
+    },
+    { status: 409 }
+  )
 }
 
 function isHttpsUrl(value: unknown): boolean {
@@ -79,6 +109,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       return NextResponse.json({ success: false, error: 'PLAN_NOT_FOUND' }, { status: 404 })
     }
     if (row.id !== command.plan_id) return conflict('PLAN_SUPERSEDED')
+
+    const storedPlanData = row.plan_data as Partial<CampaignDailyPlanData> | null
+    const receiptLock = campaignDailyPlanReceiptLock(storedPlanData)
+    if (receiptLock) return reviewLockedResponse(receiptLock, row.id, storedPlanData)
 
     const planData = row.plan_data as unknown as CampaignDailyPlanData
     if (
@@ -196,6 +230,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     // Atomic compare-and-set. The first decision only matches a missing/null
     // review_meta; later decisions must match the exact previous review token.
     // If another reviewer or a new plan wins the race, no row is returned.
+    // A publish-queue or publish receipt that lands after the read above
+    // also makes the update miss, so it never goes stale underneath.
     const updateQuery = supabaseAdmin
       .from('social_plans')
       .update({ plan_data: nextPlanData })
@@ -203,6 +239,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       .eq('client_id', clientId)
       .eq('campaign_id', command.campaign_id)
       .contains('plan_data', revisionFilter)
+      .is('plan_data->publish_queue_meta', null)
+      .is('plan_data->publish_meta', null)
 
     const { data: updated, error: updateError } = currentReview
       ? await updateQuery

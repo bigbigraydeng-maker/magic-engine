@@ -291,6 +291,23 @@ export function isReviewablePostDate(plan: CampaignDailyPlanData, date: string):
   )
 }
 
+export type CampaignDailyPlanReceiptLock = 'PLAN_ALREADY_PUBLISHED' | 'PLAN_PUBLISH_QUEUED'
+
+/**
+ * Once a plan carries a publish-queue or publish receipt, its reviewed
+ * snapshot is frozen: publish validates the queue receipt against the exact
+ * `review_meta.revision`, and its receipt write compare-and-sets on it.
+ * Any receipt counts, valid or not — a malformed one still fails closed.
+ */
+export function campaignDailyPlanReceiptLock(
+  planData: Partial<CampaignDailyPlanData> | null | undefined
+): CampaignDailyPlanReceiptLock | null {
+  if (!planData) return null
+  if (planData.publish_meta !== undefined) return 'PLAN_ALREADY_PUBLISHED'
+  if (planData.publish_queue_meta !== undefined) return 'PLAN_PUBLISH_QUEUED'
+  return null
+}
+
 // A bundle inside a POST snapshot is COMPLETE: Post + 4-frame Story + Reel
 // are all required. Partial days (e.g. Post-only) are not accepted through
 // this seam — they would either force a per-bundle grounding/merge layer
