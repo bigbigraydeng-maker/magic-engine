@@ -207,20 +207,22 @@ const ADS_CUT_CAMPAIGN_BUDGET: ActionDefinition<'ads.cut_campaign_budget'> = {
 }
 
 /**
- * `ads.scale_unit_budget` —— **放**类。信封里对它最关键的是 `respectDailyCapCents`
+ * `ads.scale_unit_budget` —— **放**类。支持 ABO 广告组和 CBO 广告系列；信封里对它最关键的是 `respectDailyCapCents`
  * 与 `maxBudgetDeltaRatio`：加预算同时受客户日上限和 ±20% 两道约束。
  */
 const ADS_SCALE_UNIT_BUDGET: ActionDefinition<'ads.scale_unit_budget'> = {
   actionKey: 'ads.scale_unit_budget',
   version: 1,
-  title: '给一个表现好的投放单位加日预算（不超过信封允许的比例和日上限）',
+  title: '给一个表现好的广告组或广告系列加日预算（不超过信封允许的比例和日上限）',
   inputSchema: {
     type: 'object',
-    required: ['cycle_date', 'ad_account_id', 'adset_id', 'after_cents'],
+    required: ['cycle_date', 'ad_account_id', 'adset_id', 'before_cents', 'after_cents'],
     properties: {
       cycle_date: { type: 'string' },
       ad_account_id: { type: 'string' },
       adset_id: { type: 'string' },
+      campaign_id: { type: 'string' },
+      before_cents: { type: 'number' },
       after_cents: { type: 'number' },
     },
     additionalProperties: false,
@@ -242,7 +244,7 @@ const ADS_SCALE_UNIT_BUDGET: ActionDefinition<'ads.scale_unit_budget'> = {
     approval: { mode: 'bounded', envelope: ADS_ENVELOPE },
     rollback: 'provider_native',
   },
-  idempotency: { keyFields: ['cycle_date', 'adset_id', 'after_cents'], scope: 'client' },
+  idempotency: { keyFields: ['cycle_date', 'adset_id', 'campaign_id', 'before_cents', 'after_cents'], scope: 'client' },
   costModel: {
     kind: 'fixed',
     estimate: () => 0,

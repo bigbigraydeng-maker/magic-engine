@@ -54,7 +54,7 @@ export async function listAdSetsInCampaign(
   accessToken: string,
 ): Promise<AdSetSummary[] | null> {
   const params = new URLSearchParams({
-    fields: 'id,name,status,effective_status,daily_budget',
+    fields: 'id,name,status,effective_status,daily_budget,account_id',
     limit: '50',
     access_token: accessToken,
   })

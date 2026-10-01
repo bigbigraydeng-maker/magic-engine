@@ -542,7 +542,7 @@ export default function AdsHealthPage() {
       </div>
 
       {!loading && !error && (
-        <div className="mb-6"><GrowthPanel state={data ? data.growth : undefined} /></div>
+        <div className="mb-6"><GrowthPanel state={data ? data.growth : undefined} clientId={clientId} /></div>
       )}
 
       <div className="mb-6"><AutonomySettings clientId={clientId} /></div>

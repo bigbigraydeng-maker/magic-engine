@@ -49,7 +49,9 @@ function prodFacts(over: Partial<EnvelopeFacts> = {}): EnvelopeFacts {
   return {
     beforeCents: null,
     accountDailyTotalBeforeCents: null,
+    clientDailyTotalBeforeCents: null,
     dailyCapCents: null,
+    clientDailyCapCents: null,
     hoursSinceLastChange: null,
     learningPhaseApplicable: true,
     learningStage: null,
@@ -224,7 +226,9 @@ describe('人工止损信封 · AI 信封那条路没被改坏（回归）', () 
       facts: {
         beforeCents: 1000,
         accountDailyTotalBeforeCents: 5000,
+        clientDailyTotalBeforeCents: 5000,
         dailyCapCents: 10_000,
+        clientDailyCapCents: 10_000,
         hoursSinceLastChange: 100,
         learningPhaseApplicable: true,
         learningStage: 'SUCCESS',

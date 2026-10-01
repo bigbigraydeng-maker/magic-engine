@@ -24,6 +24,7 @@ import { leadSheetSyncFanOut, leadSheetSyncOne } from './lead-sheet-sync'
 import { crmLeadFollowupDigest } from './crm-lead-followup-digest'
 import { adsAutonomySyncFunction } from './ads-autonomy-sync'
 import { adsCampaignBudgetDecrease } from './ads-campaign-budget'
+import { adsO1BudgetScale } from './ads-o1-budget-scale'
 import { maliangRenderCheck } from './maliang-render-check'
 import { libaiCopyProvenance } from './libai-copy-provenance'
 import { libaiPromptLibraryMonthly } from './libai-prompt-library-monthly'
@@ -65,6 +66,7 @@ export const cloudFunctions = [
   crmLeadFollowupDigest,
   adsAutonomySyncFunction,
   adsCampaignBudgetDecrease,
+  adsO1BudgetScale,
   maliangRenderCheck,
   libaiCopyProvenance,
   libaiPromptLibraryMonthly,

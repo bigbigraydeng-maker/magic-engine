@@ -9,7 +9,8 @@ import { executeAuthorizedRun } from '../gateway'
 import { CLIENT_A, GOAL_A, makeFixture, makeRegistry, liveFence } from './fixtures'
 
 const facts: EnvelopeFacts = {
-  beforeCents: 1000, accountDailyTotalBeforeCents: null, dailyCapCents: null,
+  beforeCents: 1000, accountDailyTotalBeforeCents: null, clientDailyTotalBeforeCents: null,
+  dailyCapCents: null, clientDailyCapCents: null,
   learningPhaseApplicable: true, learningStage: null, hoursSinceLastChange: null,
   adStudyCount: 1, hasRollbackHandler: true,
 }
