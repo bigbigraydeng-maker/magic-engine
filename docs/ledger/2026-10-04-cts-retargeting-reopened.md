@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-04
 done_on: 2026-10-04
-done_ref: doc:docs/ledger/2026-10-04-cts-retargeting-reopened.md
+done_ref: pr:2209
 source: session:e78010ff
 verify_by: 2026-10-11
 verify_how: 查三件，数字从 ad_daily_insights 与 Meta 账户活动日志取，本卡不留客户经营数据。①该系列重新打开后有没有被谁再次停掉或改预算，看活动日志并且看真实投放状态（effective_status 过了过渡态要落到 ACTIVE）；②重新打开后每天的花费与留资，用 9/22 到 9/30 的每条留资成本当基线，10/1 到 10/3 的数据不能当基线（那几天账户付款停摆又补量）；③一周内该系列有没有再出现单日花费显著超过日预算的情况，超过的话回头看是不是补量，还是需要给账户加日上限
