@@ -28,9 +28,9 @@ function fake(rows: Row[]): SupabaseClient {
 
 const names = new Map([['c1', { name: '客户甲' }]])
 
-function run(summary: unknown) {
+function run(summary: unknown, status = 'completed') {
   const items: ManualItem[] = []
-  return pushPaymentEmailNeedsHumanItems(fake([{ summary, started_at: '2026-10-04T18:00:00Z', status: 'completed' }]), items, names, NOW).then(
+  return pushPaymentEmailNeedsHumanItems(fake([{ summary, started_at: '2026-10-04T18:00:00Z', status }]), items, names, NOW).then(
     () => items,
   )
 }
@@ -64,6 +64,24 @@ describe('pushPaymentEmailNeedsHumanItems', () => {
     expect(await run({ payments: { ok: true, summary: { c1: { needsHuman: [] } } } })).toHaveLength(0)
     expect(await run({ nalSync: { ok: true } })).toHaveLength(0)
     expect(await run({ payments: { ok: false, error: 'x' } })).toHaveLength(0)
+  })
+
+  it('🔴 流水线别的段失败导致整条记录是 failed，识别段本身的结果仍要下发', async () => {
+    const items = await run(
+      { payments: { ok: true, summary: { c1: { needsHuman: [{ messageId: 'm1', reason: 'amount_missing' }] } } } },
+      'failed',
+    )
+    expect(items).toHaveLength(1)
+  })
+
+  it('最近一次识别段失败 → 不展示更早一次的过期结果', async () => {
+    const items: ManualItem[] = []
+    const rows = [
+      { summary: { payments: { ok: false, error: 'x' } }, started_at: '2026-10-04T18:00:00Z', status: 'failed' },
+      { summary: { payments: { ok: true, summary: { c1: { needsHuman: [{ reason: 'amount_missing' }] } } } }, started_at: '2026-10-03T18:00:00Z', status: 'completed' },
+    ]
+    await pushPaymentEmailNeedsHumanItems(fake(rows), items, names, NOW)
+    expect(items).toHaveLength(0)
   })
 
   it('这个 kind 在五类车道里是 PM 可见栏（不会悄悄消失）', () => {

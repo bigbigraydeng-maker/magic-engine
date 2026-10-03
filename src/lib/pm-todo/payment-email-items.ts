@@ -42,16 +42,21 @@ export async function pushPaymentEmailNeedsHumanItems(
     .from('cron_run_logs')
     .select('summary, started_at, status')
     .eq('job_name', 'conversion-daily-pipeline')
-    .eq('status', 'completed')
+    // 不筛 status：流水线任何一段失败都会把整条记录标成 failed，但识别段本身可能是好的——
+    // 筛 completed 会让同一天别的段一出错，需要人核对的付款邮件就从待办里消失（子牙 Round 2）。
     .gte('started_at', since)
     .order('started_at', { ascending: false })
     .limit(10)
   if (error) throw new Error(`cron_run_logs query failed: ${error.message}`)
 
-  // 取最近一次**带 payments 段**的运行（旧的运行记录没有这一段）。
+  // 取最近一次**带 payments 段**的运行（旧的运行记录 / 还在 running 的没有这一段）。
   for (const run of (data ?? []) as Array<{ summary?: { payments?: { ok?: boolean; summary?: unknown } } | null }>) {
-    const perClient = run.summary?.payments?.ok === true ? run.summary.payments.summary : null
-    if (!perClient || typeof perClient !== 'object') continue
+    const payments = run.summary?.payments
+    if (!payments) continue
+    // 最近一次识别段本身失败 → 不展示更早一次的过期结果（失败另有流水线告警）。
+    if (payments.ok !== true) return
+    const perClient = payments.summary
+    if (!perClient || typeof perClient !== 'object') return
     for (const [clientId, entry] of Object.entries(perClient as Record<string, unknown>)) {
       const list = (entry as { needsHuman?: unknown } | null)?.needsHuman
       if (!Array.isArray(list) || list.length === 0) continue

@@ -153,6 +153,29 @@ describe('🔴 魏征 2026-10-04 复审：金额口径', () => {
   })
 })
 
+describe('🔴 魏征 Round 2 探针', () => {
+  it('欧式金额写法 $1.500,00 不读成 1.50 → ambiguous', () => {
+    const r = confirmed('Your deposit has been received: $1.500,00 in total.')
+    expect(r.amount).toBeNull()
+    expect(r.amountIssue).toBe('ambiguous')
+  })
+
+  it('币种用英文名写（Australian dollars）→ currency_conflict', () => {
+    const r = confirmed('Your deposit of $500.00 has been received. All amounts are in Australian dollars.')
+    expect(r.flags).toContain('currency_conflict')
+  })
+
+  it.each(['£', '€', 'euros', 'HK$'])('正文出现其它币种符号/名称 %s → currency_conflict', (tok) => {
+    const r = confirmed(`Your deposit of $500.00 has been received. Hotel extras are quoted in ${tok}.`)
+    expect(r.flags).toContain('currency_conflict')
+  })
+
+  it('"received in full … This was the deposit" → 类型降为 unknown', () => {
+    const r = confirmed('Your payment of $500 has been received in full. This was the deposit for your trip.')
+    expect(r.kind).toBe('unknown')
+  })
+})
+
 describe('发票号', () => {
   it('多个不同发票号 → 不选', () => {
     const r = confirmed('Your deposit of $500 has been received for INV-1001. Earlier invoice INV-0999 is closed.')

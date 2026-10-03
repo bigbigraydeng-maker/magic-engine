@@ -132,10 +132,22 @@ function toDecimal(intPart: string, frac: string | undefined): string {
   return `${whole}.${(f + '00').slice(0, 2)}`
 }
 
+/** 数字后面紧跟 `.5` / `,00` 之类 = 不是规范的 1–2 位小数写法（如欧式 `$1.500,00`），宁可当歧义也不读成别的数。 */
+const MALFORMED = 'malformed'
+
+function isMalformedTail(text: string, end: number): boolean {
+  // 数字被截断（如 `$1.500,00` 先吃到 `1.50`，后面还跟着 `0`）或后面还有 `.5` / `,00` 都不是规范写法。
+  return /^\d|^[.,]\d/.test(text.slice(end, end + 2))
+}
+
 function amountsIn(text: string): AmountCandidate[] {
   const seen = new Map<string, AmountCandidate>()
   const first = new RegExp(AMOUNT_RES[0].source, 'gi')
   for (let m = first.exec(text); m; m = first.exec(text)) {
+    if (isMalformedTail(text, m.index + m[0].length)) {
+      seen.set(`${MALFORMED}|${m.index}`, { value: MALFORMED, currency: null })
+      continue
+    }
     const code = (m[1] ?? m[4] ?? null)?.toUpperCase() ?? null
     const prefixCode = /\b(NZ|AU|US)\$/i.exec(m[0])?.[1]?.toUpperCase()
     const currency = code ?? (prefixCode ? `${prefixCode}D` : null)
@@ -144,6 +156,10 @@ function amountsIn(text: string): AmountCandidate[] {
   }
   const second = new RegExp(AMOUNT_RES[1].source, 'gi')
   for (let m = second.exec(text); m; m = second.exec(text)) {
+    if (isMalformedTail(text, m.index + m[0].length)) {
+      seen.set(`${MALFORMED}|${m.index}`, { value: MALFORMED, currency: null })
+      continue
+    }
     const value = toDecimal(m[2], m[3])
     const currency = m[1].toUpperCase()
     seen.set(`${value}|${currency}`, { value, currency })
@@ -187,6 +203,7 @@ function pickAmount(
     fromAdjacent = pool.length > 0
   }
   if (pool.length === 0) return { amount: null, issue: 'missing', fromAdjacent: false }
+  if (pool.some((c) => c.value === MALFORMED)) return { amount: null, issue: 'ambiguous', fromAdjacent: false }
   if (pool.length > 1) return { amount: null, issue: 'ambiguous', fromAdjacent: false }
   const only = pool[0]
   const currency = only.currency ?? config.defaultCurrency?.toUpperCase() ?? null
@@ -197,9 +214,23 @@ function pickAmount(
 }
 
 /** 全文出现的币种代码里，有没有跟所取币种不一样的（"$500 … All prices in AUD"）。 */
+const CURRENCY_MENTIONS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\b(?:NZD|NZ\$|new\s+zealand\s+dollars?|kiwi\s+dollars?)/i, 'NZD'],
+  [/\b(?:AUD|AU\$|A\$|australian\s+dollars?|aussie\s+dollars?)/i, 'AUD'],
+  [/\b(?:USD|US\$|american\s+dollars?|us\s+dollars?|u\.s\.\s+dollars?)/i, 'USD'],
+  [/\b(?:CAD|CA\$|canadian\s+dollars?)/i, 'CAD'],
+  [/\b(?:HKD|HK\$|hong\s+kong\s+dollars?)/i, 'HKD'],
+  [/\b(?:SGD|S\$|singapore\s+dollars?)/i, 'SGD'],
+  [/\b(?:CNY|RMB|yuan|renminbi)\b/i, 'CNY'],
+  [/\b(?:GBP|pounds?\s+sterling|british\s+pounds?)\b|£/i, 'GBP'],
+  [/\b(?:EUR|euros?)\b|€/i, 'EUR'],
+  [/\b(?:JPY|yen)\b|¥/i, 'JPY'],
+]
+
+/** 全文提到的币种（代码 / 符号 / 英文币名）里，有没有跟所取币种不一样的。 */
 export function hasConflictingCurrency(text: string, chosen: string): boolean {
-  const codes = new Set((text.match(/\b(?:NZD|AUD|USD)\b/gi) ?? []).map((c) => c.toUpperCase()))
-  return [...codes].some((c) => c !== chosen.toUpperCase())
+  const want = chosen.toUpperCase()
+  return CURRENCY_MENTIONS.some(([re, code]) => code !== want && re.test(text))
 }
 
 // ── 4. 发票号 ──────────────────────────────────────────────────────────────
@@ -258,9 +289,13 @@ export function extractPaymentFromEmail(
   if (picked.amount && hasConflictingCurrency(stripped.text, picked.amount.currency)) flags.push('currency_conflict')
   const invoices = extractInvoiceNumbers(stripped.text, config.invoicePatterns)
 
+  // 「received in full … This was the deposit」：确认句像全款、全文却说这是定金 → 类型不可信，降成 unknown（不进自动车道）。
+  const rawKind = classifyPaymentKind(signal.evidence)
+  const kind = rawKind === 'full' && /\bdeposit\b/i.test(stripped.text) ? 'unknown' : rawKind
+
   return {
     status: 'confirmed',
-    kind: classifyPaymentKind(signal.evidence),
+    kind,
     amount: picked.amount,
     amountIssue: picked.issue,
     invoiceNo: invoices.length === 1 ? invoices[0] : null,
