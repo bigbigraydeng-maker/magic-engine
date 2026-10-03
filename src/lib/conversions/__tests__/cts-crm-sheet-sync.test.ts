@@ -15,6 +15,7 @@ import {
   parseSheetDateCell,
   type CrmManagementRow,
   type Sheet1LeadRow,
+  parseMetaLeadId,
 } from '../cts-crm-sheet-sync'
 
 function crmRow(overrides: Partial<CrmManagementRow> = {}): CrmManagementRow {
@@ -32,6 +33,7 @@ function crmRow(overrides: Partial<CrmManagementRow> = {}): CrmManagementRow {
 
 function sheet1Row(overrides: Partial<Sheet1LeadRow> = {}): Sheet1LeadRow {
   return {
+    metaLeadId: null,
     createdTime: '2026-06-14T02:39:49-05:00',
     email: 'jane@example.com',
     fullName: 'Jane Doe',
@@ -270,6 +272,7 @@ describe('parseSheet1Row / parseCrmManagementRow — real column layout', () => 
     const cells = sheet1Cells()
     cells[17] = 'voice mail' // R 员工跟进记录（505 行及以前）
     expect(parseSheet1Row(cells, 100)).toEqual({
+      metaLeadId: null,
       createdTime: '2026-06-14T02:39:49-05:00',
       email: 'jane@example.com',
       fullName: 'Jane Doe',
@@ -320,5 +323,55 @@ describe('parseSheet1Row / parseCrmManagementRow — real column layout', () => 
       stage: '4-已订金',
       stageUpdatedDate: '15/07/2026',
     })
+  })
+})
+
+describe('parseMetaLeadId — Facebook 线索编号（Sheet1 A 列）', () => {
+  it('认 `l:` 开头加 15–17 位纯数字', () => {
+    expect(parseMetaLeadId('l:1687504185706630')).toBe('1687504185706630')
+    expect(parseMetaLeadId(' l:123456789012345 ')).toBe('123456789012345')
+    expect(parseMetaLeadId('l:12345678901234567')).toBe('12345678901234567')
+  })
+
+  it('🔴 格式不对一律 null —— 宁可不带这把匹配键，也不把猜出来的编号发给 Meta', () => {
+    expect(parseMetaLeadId(null)).toBeNull()
+    expect(parseMetaLeadId('')).toBeNull()
+    expect(parseMetaLeadId('f')).toBeNull() // 表头
+    expect(parseMetaLeadId('1687504185706630')).toBeNull() // 缺 `l:` 前缀
+    expect(parseMetaLeadId('l:12345678901234')).toBeNull() // 14 位，太短
+    expect(parseMetaLeadId('l:123456789012345678')).toBeNull() // 18 位，太长
+    expect(parseMetaLeadId('l:16875041857066x0')).toBeNull() // 夹杂字母
+    expect(parseMetaLeadId('ag:120246715959600307')).toBeNull() // 广告编号不是线索编号
+  })
+
+  it('parseSheet1Row 从 A 列读', () => {
+    const cells = new Array(20).fill('')
+    cells[0] = 'l:1687504185706630'
+    cells[1] = '2026-06-14T02:39:49-05:00'
+    cells[13] = 'jane@example.com'
+    expect(parseSheet1Row(cells, 100).metaLeadId).toBe('1687504185706630')
+  })
+})
+
+describe('classifyCtsCrmPerson — 线索编号随分类结果带出去', () => {
+  it('合格线索：带上匹配到的 Sheet1 行的线索编号', () => {
+    const r = classifyCtsCrmPerson(crmRow(), sheet1Row({ metaLeadId: '1687504185706630' }))
+    expect(r.kind).toBe('qualified_lead')
+    if (r.kind === 'qualified_lead') expect(r.metaLeadId).toBe('1687504185706630')
+  })
+
+  it('合格线索：没匹配到 Sheet1 行（只靠 CRM管理 日期兜底）时为 null', () => {
+    const r = classifyCtsCrmPerson(crmRow(), null)
+    expect(r.kind).toBe('qualified_lead')
+    if (r.kind === 'qualified_lead') expect(r.metaLeadId).toBeNull()
+  })
+
+  it('成交候选：同样带出线索编号', () => {
+    const r = classifyCtsCrmPerson(
+      crmRow({ stage: '4-已订金', stageUpdatedDate: '01/07/2026' }),
+      sheet1Row({ metaLeadId: '1687504185706630' }),
+    )
+    expect(r.kind).toBe('purchase_candidate')
+    if (r.kind === 'purchase_candidate') expect(r.metaLeadId).toBe('1687504185706630')
   })
 })

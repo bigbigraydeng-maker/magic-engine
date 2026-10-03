@@ -88,7 +88,14 @@ function emptySummary(): CtsCrmSyncSummary {
   }
 }
 
-/** Sheet1 按电话建索引，供 CRM管理 逐行关联；查不到有效电话的行直接跳过索引。 */
+/**
+ * Sheet1 按电话建索引，供 CRM管理 逐行关联；查不到有效电话的行直接跳过索引。
+ *
+ * 同一个电话在 Sheet1 有多行（同一个人交过多次表单）时取**最先出现的那一行**——姓名、邮箱、
+ * 提交时间、Facebook 线索编号都来自这同一行，彼此自洽（首次接触归因）。2026-10-04 魏征复审点名：
+ * 这意味着发给 Meta 的 lead_id 是该客人**第一次**提交的那条，不一定是促成成交的那条；
+ * 同一个人的任何一条线索对应的都是同一个真人，归到首次接触可接受，所以保持现状并用测试固定，
+ * 不改成“多条就不带”（那会恰好丢掉重复提交的高意向客人）。*/
 function indexSheet1ByPhone(rows: Sheet1LeadRow[]): Map<string, Sheet1LeadRow> {
   const map = new Map<string, Sheet1LeadRow>()
   for (const row of rows) {
@@ -278,6 +285,7 @@ async function processQualifiedLead(
       clientId: CTS_CLIENT_ID,
       contactId,
       outcomeKind: 'lead',
+      metaLeadId: classified.metaLeadId,
       customerPhone: classified.phoneE164,
       customerEmail: classified.email,
       customerFirst: classified.fullName,
@@ -322,6 +330,7 @@ async function processPurchaseCandidate(
       clientId: CTS_CLIENT_ID,
       contactId,
       outcomeKind: 'purchase',
+      metaLeadId: classified.metaLeadId,
       customerPhone: classified.phoneE164,
       customerEmail: classified.email,
       customerFirst: classified.fullName,
