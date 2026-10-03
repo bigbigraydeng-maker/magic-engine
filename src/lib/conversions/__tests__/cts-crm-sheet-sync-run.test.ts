@@ -19,6 +19,7 @@ vi.mock('@/lib/google-sheets/client', () => ({
 
 // ── Sheet1 行构造：B=1 created_time, N=13 email, O=14 full_name, P=15 phone, R=17 notes ──
 function sheet1Row(opts: {
+  leadId?: string
   createdTime?: string
   email?: string
   fullName?: string
@@ -26,6 +27,7 @@ function sheet1Row(opts: {
   notes?: string
 }): string[] {
   const row = new Array(18).fill('')
+  row[0] = opts.leadId ?? ''
   row[1] = opts.createdTime ?? ''
   row[13] = opts.email ?? ''
   row[14] = opts.fullName ?? ''
@@ -170,6 +172,58 @@ describe('runCtsCrmSync', () => {
     expect(outcomes).toHaveLength(1)
     expect(outcomes[0]).toMatchObject({ outcome_kind: 'lead', source_kind: 'crm_sheet_sync' })
     expect(audits).toHaveLength(1)
+  })
+
+  it('🔴 Sheet1 A 列的 Facebook 线索编号随合格线索写进 meta_lead_id', async () => {
+    sheet1Fixture.mockReturnValue([
+      sheet1Row({ leadId: 'l:1687504185706630', createdTime: '2026-06-14T02:39:49-05:00', phone: 'p:+6421363598', email: 'jane@example.com', fullName: 'Jane Doe' }),
+    ])
+    crmFixture.mockReturnValue([crmRow({ entryDate: '14/06/2026', phone: 'p:+6421363598', tour: 'Best of China 15D' })])
+
+    const { client, outcomes } = fakeSupabase()
+    await runCtsCrmSync({ supabase: client })
+
+    expect(outcomes[0]).toMatchObject({ outcome_kind: 'lead', meta_lead_id: '1687504185706630' })
+  })
+
+  it('线索编号随成交一起写进 meta_lead_id', async () => {
+    sheet1Fixture.mockReturnValue([sheet1Row({ leadId: 'l:1687504185706630', phone: 'p:+6421363598' })])
+    crmFixture.mockReturnValue([
+      crmRow({ phone: 'p:+6421363598', tour: 'Golden China Tour', stage: '4-已订金', stageUpdatedDate: '01/07/2026' }),
+    ])
+
+    const { client, outcomes } = fakeSupabase({
+      groupTours: [{ payload: { name: 'Golden China Tour', price: 'From NZD $4,999 per person' } }],
+    })
+    await runCtsCrmSync({ supabase: client })
+
+    expect(outcomes[0]).toMatchObject({ outcome_kind: 'purchase', meta_lead_id: '1687504185706630' })
+  })
+
+  it('A 列不是线索编号（空/表头/乱写）时 meta_lead_id 为 null，记录照常写入', async () => {
+    sheet1Fixture.mockReturnValue([sheet1Row({ leadId: 'f', createdTime: '2026-06-14T02:39:49-05:00', phone: 'p:+6421363598' })])
+    crmFixture.mockReturnValue([crmRow({ entryDate: '14/06/2026', phone: 'p:+6421363598', tour: 'Best of China 15D' })])
+
+    const { client, outcomes } = fakeSupabase()
+    const summary = await runCtsCrmSync({ supabase: client })
+
+    expect(summary.insertedLeads).toBe(1)
+    expect(outcomes[0].meta_lead_id).toBeNull()
+  })
+
+  it('同一个电话在 Sheet1 有两行不同线索编号时，取最先出现的那一行（首次接触），且与该行的提交时间自洽', async () => {
+    sheet1Fixture.mockReturnValue([
+      sheet1Row({ leadId: 'l:1111111111111111', createdTime: '2026-06-14T02:39:49-05:00', phone: 'p:+6421363598' }),
+      sheet1Row({ leadId: 'l:2222222222222222', createdTime: '2026-09-12T02:39:49-05:00', phone: 'p:+6421363598' }),
+    ])
+    crmFixture.mockReturnValue([crmRow({ entryDate: '14/06/2026', phone: 'p:+6421363598', tour: 'Best of China 15D' })])
+
+    const { client, outcomes } = fakeSupabase()
+    await runCtsCrmSync({ supabase: client })
+
+    expect(outcomes).toHaveLength(1)
+    expect(outcomes[0]).toMatchObject({ meta_lead_id: '1111111111111111' })
+    expect(String(outcomes[0].occurred_at).startsWith('2026-06-14')).toBe(true)
   })
 
   it('links an existing contact via contact_identities and leaves contactNotLinked at 0', async () => {

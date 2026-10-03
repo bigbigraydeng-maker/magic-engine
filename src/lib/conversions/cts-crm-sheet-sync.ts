@@ -30,6 +30,8 @@ import { normalisePhone, normaliseEmail } from '@/lib/crm/identity'
 // ── 原始行 ──────────────────────────────────────────────────────────────────
 
 export interface Sheet1LeadRow {
+  /** Facebook 线索编号（Meta lead id，15–17 位纯数字）。A 列 `l:<数字>`；格式不对一律 null。 */
+  metaLeadId: string | null
   createdTime: string | null
   email: string | null
   fullName: string | null
@@ -79,12 +81,24 @@ export function ctsNoteColumnIndex(sheetRow: number): number {
 export function parseSheet1Row(cells: string[], sheetRow: number): Sheet1LeadRow {
   const at = (i: number) => (cells[i]?.trim() ? cells[i].trim() : null)
   return {
+    metaLeadId: parseMetaLeadId(at(0)),
     createdTime: at(1),
     email: at(13),
     fullName: at(14),
     phoneRaw: at(15),
     followUpNotes: at(ctsNoteColumnIndex(sheetRow)),
   }
+}
+
+/**
+ * Sheet1 A 列的 Facebook 线索编号：`l:1687504185706630` → `'1687504185706630'`。
+ * 只认 15–17 位纯数字（Meta 官方说明的 lead id 长度）；其它写法一律 null，
+ * 宁可不带这把匹配键，也不把一个猜出来的编号发给 Meta（发出去撤不回）。
+ */
+export function parseMetaLeadId(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  const m = /^l:(\d{15,17})$/i.exec(raw.trim())
+  return m ? m[1] : null
 }
 
 /** CRM管理 实测列下标（0-based）：A=0, B=1, C=2, D=3, E=4, G=6, H=7。 */
@@ -187,6 +201,8 @@ export function stageIsPurchase(stage: string | null): boolean {
 
 export interface QualifiedLead {
   kind: 'qualified_lead'
+  /** 匹配到的 Sheet1 行的 Facebook 线索编号；没匹配到 Sheet1 行就是 null。 */
+  metaLeadId: string | null
   phoneE164: string
   email: string | null
   fullName: string | null
@@ -206,6 +222,7 @@ export interface PurchaseMissingDate {
 
 export interface PurchaseCandidate {
   kind: 'purchase_candidate'
+  metaLeadId: string | null
   phoneE164: string
   email: string | null
   fullName: string | null
@@ -268,6 +285,7 @@ export function classifyCtsCrmPerson(
     }
     return {
       kind: 'purchase_candidate',
+      metaLeadId: matchedSheet1Row?.metaLeadId ?? null,
       phoneE164,
       email: normaliseEmail(matchedSheet1Row?.email ?? crmRow.email),
       fullName: matchedSheet1Row?.fullName ?? crmRow.name,
@@ -289,6 +307,7 @@ export function classifyCtsCrmPerson(
   if (matchedSheet1Row?.createdTime) {
     return {
       kind: 'qualified_lead',
+      metaLeadId: matchedSheet1Row.metaLeadId,
       phoneE164,
       email,
       fullName,
@@ -301,6 +320,7 @@ export function classifyCtsCrmPerson(
     if (parsed) {
       return {
         kind: 'qualified_lead',
+        metaLeadId: matchedSheet1Row?.metaLeadId ?? null,
         phoneE164,
         email,
         fullName,
