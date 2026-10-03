@@ -14,6 +14,7 @@
  *   · 每个 step 的返回值里不含邮箱/完整电话（PII 不进 Inngest 云端）
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { MAX_BATCH_SIZE } from '@/lib/conversions/ai-auto-review-run'
 
 const failOpenCronRuns = vi.fn<(job: string, message: string, opts: { startedBefore: Date }) => Promise<number>>(async () => 1)
 vi.mock('@/lib/cron/run-logger', () => ({
@@ -310,13 +311,13 @@ describe('分块循环怎么推进、怎么停', () => {
     expect(harness.ranStepIds.at(-1)).toBe('log-finish')
   })
 
-  it('审核块 processed 满一块就再来一块，不满就停；日上限仍是 50 条（10 块 × 5）', async () => {
+  it('审核块 processed 满一块就再来一块，不满就停；日上限是 MAX_BATCH_SIZE 条（60 = 12 块 × 5）', async () => {
     const { harness, calls } = await run({
       reviewClient: async (clientId) => (clientId === CTS ? ranSummary(AI_REVIEW_CHUNK_SIZE) : ranSummary(1)),
     })
     expect(harness.ranStepIds.filter((id) => id.startsWith('ai-review-nal'))).toEqual(['ai-review-nal-1'])
-    expect(harness.ranStepIds.filter((id) => id.startsWith('ai-review-cts'))).toHaveLength(50 / AI_REVIEW_CHUNK_SIZE)
-    expect(calls.review.filter((c) => c.clientId === CTS)).toHaveLength(10)
+    expect(harness.ranStepIds.filter((id) => id.startsWith('ai-review-cts'))).toHaveLength(MAX_BATCH_SIZE / AI_REVIEW_CHUNK_SIZE)
+    expect(calls.review.filter((c) => c.clientId === CTS)).toHaveLength(MAX_BATCH_SIZE / AI_REVIEW_CHUNK_SIZE)
   })
 
   it('🔴 审核块之间 carried = 前几块累计批准的条数/金额；首块不带 carried（首块才做熔断预检）', async () => {
