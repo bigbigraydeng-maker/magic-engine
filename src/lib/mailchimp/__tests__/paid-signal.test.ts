@@ -395,3 +395,29 @@ describe('looksLikeCustomerAddress · 别把同事标成付费客户', () => {
     expect(looksLikeCustomerAddress('not-an-email', CTS_OWN)).toBe(false)
   })
 })
+
+describe('readPaidSignal · 金额夹在名词和 received 之间 / 口语收尾（2026-10-04 成交识别要用）', () => {
+  const out = (text: string) => readPaidSignal({ text, direction: 'outbound' })
+
+  it.each([
+    'Hi Sam, your deposit of $500.00 has been received. Thanks!',
+    'Hi Sam, your payment $7760.00 has been received in full.',
+    'I confirm your payment NZD 2000 has been received in full.',
+    'Deposit received with thanks and we confirm the departure date.',
+    'The payment was received with thanks.',
+    'Thank you for the deposit payment received well.',
+  ])('认得出：%s', (text) => {
+    expect(out(text).kind).toBe('confirmed')
+  })
+
+  it.each([
+    'Your booking will be confirmed once your deposit of $500 has been received.',
+    'Has your deposit of $500 been received?',
+    'Your payment of $500 has not been received.',
+    'Please confirm whether the deposit of $500 has been received.',
+    'Thanks for the booking form received well.',
+    'Your payment 2 has been received.',
+  ])('🔴 仍然不算确认：%s', (text) => {
+    expect(out(text).kind).not.toBe('confirmed')
+  })
+})

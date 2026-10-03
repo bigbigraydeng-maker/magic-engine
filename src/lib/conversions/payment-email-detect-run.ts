@@ -1,0 +1,548 @@
+/**
+ * 邮箱付款确认 → 成交（purchase）的识别批处理（PM 2026-10-04 拍板：不要人批，查到凭据就自动标成交）。
+ *
+ * 读信 = `microsoft/mail-graph`，判信与提取 = `payment-email-extract`（复用 `mailchimp/paid-signal`），
+ * 入库 = `intake.buildIntakeRow`（来源 `inbox_extract`），外发 = `writeback-service.sendApprovedOutcome`
+ * （7 天窗口 / 拒联 / 唯一键 / 非 live 只干跑 全部沿用，一道不改）。
+ *
+ * ## 双车道（见 docs/specs/2026-10-04-cts-payment-email-detection-and-qualified-lead-feedback.md §5）
+ *
+ *   自动车道：证据齐全才进 —— 无转发/引用冲突、类型是定金或全款、邮箱与联系人精确一致、
+ *             金额币种唯一、线程无取消/退款字样、跨来源无重复、没拒联。自动批准并发送。
+ *   人工车道：任何一条不满足 → 有金额的写成 `pending_review`（审核页可见，**不进 AI 自动批准**），
+ *             没金额的数据库根本不让写（Meta 的 Purchase 要求金额和币种）→ 只进汇总 `needsHuman`。
+ *
+ * 🔴 撤不回的事只靠这里的规则把关，所以：
+ *   · 每次运行最多自动发 `MAX_AUTO_SENDS_PER_RUN` 条、单笔不超过 `MAX_AUTO_AMOUNT_MINOR`，超出的留在人工车道；
+ *   · 绝不估算金额、绝不按价目表补；找不到就是找不到；
+ *   · 证据句不写库、不写审计，只记它的 sha256（审计表只增不删，原文会和「删除个人信息」冲突）；
+ *   · 客户配置没开 `leads_config.payment_email_detect.enabled` 就一条都不处理（fail-closed）。
+ */
+
+import { createHash } from 'node:crypto'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { looksLikeCustomerAddress } from '@/lib/mailchimp/paid-signal'
+import { ownDomainsOf } from '@/lib/microsoft/mail-ingest'
+import type { MessageTextResult } from '@/lib/microsoft/mail-graph'
+import { buildIntakeRow, type IntakeInput } from './intake'
+import { toMinorUnits } from './money'
+import { isTooLateToApprove } from './event-window'
+import { extractPaymentFromEmail, type PaymentExtraction } from './payment-email-extract'
+import { sendApprovedOutcome, type SendDeps } from './writeback-service'
+
+export const MAX_AUTO_SENDS_PER_RUN = 10
+export const MAX_AUTO_AMOUNT_MINOR = 30_000_00
+export const MAX_FETCH_PER_RUN = 80
+/** 同时在途的读邮件请求数；单步目标 ≤ 60 秒（网关 ~125 秒硬上限，PITFALLS F8）。 */
+export const FETCH_CONCURRENCY = 5
+export const DEFAULT_LOOKBACK_DAYS = 8
+export const AUTO_REVIEWER_IDENTITY = 'auto:payment-email-evidence'
+export const DETECTOR_ACTOR = 'payment-email-detect'
+
+const CANCEL_WORDS = /\b(refund(?:ed|s)?|cancel(?:l?ed|l?ing|lation)?)\b/i
+const ID_CHUNK = 100
+
+export type NeedsHumanReason =
+  | `amount_${'missing' | 'ambiguous' | 'no_currency' | 'unsupported_currency'}`
+  | 'duplicate_suspected'
+  | 'cancel_words_in_thread'
+  | 'do_not_contact'
+  | 'auto_cap_reached'
+  | 'no_match_key'
+  | 'mail_text_unreadable'
+  | 'intake_rejected'
+
+export interface PaymentDetectSummary {
+  ran: boolean
+  reason?: 'disabled' | 'no_candidates' | 'no_mailbox'
+  dryRun: boolean
+  scanned: number
+  fetched: number
+  fetchErrors: number
+  notConfirmed: number
+  balanceIgnored: number
+  unknownKind: number
+  expired: number
+  duplicates: number
+  autoCreated: number
+  autoApproved: number
+  autoSendStatuses: Record<string, number>
+  humanQueued: number
+  /** dryRun 下「本来会走自动车道」的条数（不写库、不外发）。 */
+  wouldAuto: number
+  truncated: boolean
+  needsHuman: Array<{ messageId: string; reason: NeedsHumanReason }>
+}
+
+export interface PaymentDetectDeps {
+  supabase: SupabaseClient
+  /** 取一封信的全文；令牌、重试由调用方包好。 */
+  fetchText: (messageId: string) => Promise<MessageTextResult>
+  sendDeps: Omit<SendDeps, 'supabase'>
+  /** 该客户邮箱地址，用来算「自己人」域名。 */
+  mailboxAddress: string | null
+  now?: Date
+  dryRun?: boolean
+}
+
+interface DetectConfig {
+  enabled: boolean
+  defaultCurrency: string | null
+  lookbackDays: number
+  ownDomains: string[]
+}
+
+interface Candidate {
+  messageId: string
+  sentAt: string
+  conversationId: string
+  contactId: string
+}
+
+interface ContactFacts {
+  displayName: string | null
+  doNotContact: boolean
+  emails: string[]
+  phone: string | null
+  metaLeadId: string | null
+}
+
+export function emptySummary(dryRun: boolean): PaymentDetectSummary {
+  return {
+    ran: false,
+    dryRun,
+    scanned: 0,
+    fetched: 0,
+    fetchErrors: 0,
+    notConfirmed: 0,
+    balanceIgnored: 0,
+    unknownKind: 0,
+    expired: 0,
+    duplicates: 0,
+    autoCreated: 0,
+    autoApproved: 0,
+    autoSendStatuses: {},
+    humanQueued: 0,
+    wouldAuto: 0,
+    truncated: false,
+    needsHuman: [],
+  }
+}
+
+/** 客户配置：`leads_config.payment_email_detect`。没配 = 关。 */
+export function readDetectConfig(
+  clientDomain: string | null,
+  leadsConfig: unknown,
+  mailboxAddress: string | null,
+): DetectConfig {
+  const cfg = (leadsConfig ?? {}) as {
+    payment_email_detect?: { enabled?: unknown; default_currency?: unknown; lookback_days?: unknown }
+    own_email_domains?: unknown
+  }
+  const raw = cfg.payment_email_detect ?? {}
+  const extra = Array.isArray(cfg.own_email_domains)
+    ? cfg.own_email_domains.filter((d): d is string => typeof d === 'string')
+    : []
+  const days = typeof raw.lookback_days === 'number' ? Math.floor(raw.lookback_days) : DEFAULT_LOOKBACK_DAYS
+  return {
+    enabled: raw.enabled === true,
+    defaultCurrency:
+      typeof raw.default_currency === 'string' && raw.default_currency.trim()
+        ? raw.default_currency.trim().toUpperCase()
+        : null,
+    lookbackDays: Math.min(Math.max(days, 1), 14),
+    ownDomains: ownDomainsOf(mailboxAddress, clientDomain, extra),
+  }
+}
+
+function sha256Of(evidence: string): string {
+  return createHash('sha256').update(evidence.replace(/\s+/g, ' ').trim().toLowerCase()).digest('hex')
+}
+
+function chunk<T>(list: T[], size: number): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size))
+  return out
+}
+
+// ── 读候选 ──────────────────────────────────────────────────────────────────
+
+async function listCandidates(supabase: SupabaseClient, clientId: string, since: Date): Promise<Candidate[]> {
+  const { data: convs, error } = await supabase
+    .from('conversations')
+    .select('id, contact_id')
+    .eq('client_id', clientId)
+    .eq('channel', 'email')
+    .not('contact_id', 'is', null)
+    .gte('last_message_at', since.toISOString())
+  if (error) throw new Error(`读取邮件会话失败：${error.message}`)
+  const contactByConv = new Map((convs ?? []).map((c) => [c.id as string, c.contact_id as string]))
+
+  const out: Candidate[] = []
+  for (const ids of chunk([...contactByConv.keys()], ID_CHUNK)) {
+    const { data: msgs, error: mErr } = await supabase
+      .from('conversation_messages')
+      .select('conversation_id, message_id, sent_at')
+      .in('conversation_id', ids)
+      .eq('direction', 'outbound')
+      .gte('sent_at', since.toISOString())
+      .order('sent_at', { ascending: true })
+    if (mErr) throw new Error(`读取已发邮件失败：${mErr.message}`)
+    for (const m of msgs ?? []) {
+      out.push({
+        messageId: m.message_id as string,
+        sentAt: m.sent_at as string,
+        conversationId: m.conversation_id as string,
+        contactId: contactByConv.get(m.conversation_id as string) as string,
+      })
+    }
+  }
+  return out
+}
+
+async function alreadyProcessed(supabase: SupabaseClient, clientId: string, ids: string[]): Promise<Set<string>> {
+  const done = new Set<string>()
+  for (const part of chunk(ids, ID_CHUNK)) {
+    const { data, error } = await supabase
+      .from('me_sale_outcomes')
+      .select('source_ref')
+      .eq('client_id', clientId)
+      .eq('source_kind', 'inbox_extract')
+      .in('source_ref', part)
+    if (error) throw new Error(`查询已处理邮件失败：${error.message}`)
+    for (const r of data ?? []) done.add(r.source_ref as string)
+  }
+  return done
+}
+
+async function loadContactFacts(supabase: SupabaseClient, clientId: string, contactId: string): Promise<ContactFacts> {
+  const [contact, idents, leadTp] = await Promise.all([
+    supabase.from('contacts').select('display_name, do_not_contact').eq('id', contactId).eq('client_id', clientId).maybeSingle(),
+    supabase.from('contact_identities').select('kind, value').eq('contact_id', contactId).eq('client_id', clientId),
+    supabase
+      .from('contact_touchpoints')
+      .select('source_ref')
+      .eq('contact_id', contactId)
+      .eq('client_id', clientId)
+      .eq('source', 'meta_lead_form')
+      .order('occurred_at', { ascending: false })
+      .limit(5),
+  ])
+  if (contact.error || idents.error || leadTp.error) {
+    throw new Error(`读取联系人信息失败：${(contact.error ?? idents.error ?? leadTp.error)?.message}`)
+  }
+  const rows = (idents.data ?? []) as Array<{ kind: string; value: string }>
+  const lead = ((leadTp.data ?? []) as Array<{ source_ref: string | null }>)
+    .map((r) => r.source_ref ?? '')
+    .find((v) => /^\d{15,17}$/.test(v))
+  return {
+    displayName: (contact.data?.display_name as string | null) ?? null,
+    doNotContact: contact.data?.do_not_contact === true,
+    emails: rows.filter((r) => r.kind === 'email').map((r) => r.value.trim().toLowerCase()),
+    phone: rows.find((r) => r.kind === 'phone')?.value ?? null,
+    metaLeadId: lead ?? null,
+  }
+}
+
+async function threadMentionsCancel(supabase: SupabaseClient, conversationId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('conversation_messages')
+    .select('body')
+    .eq('conversation_id', conversationId)
+    .limit(200)
+  if (error) throw new Error(`读取线程失败：${error.message}`)
+  return (data ?? []).some((m) => CANCEL_WORDS.test((m.body as string | null) ?? ''))
+}
+
+async function hasExistingPurchase(
+  supabase: SupabaseClient,
+  clientId: string,
+  contactId: string,
+  metaLeadId: string | null,
+): Promise<boolean> {
+  const base = () =>
+    supabase
+      .from('me_sale_outcomes')
+      .select('id', { count: 'exact', head: true })
+      .eq('client_id', clientId)
+      .eq('outcome_kind', 'purchase')
+      .neq('review_status', 'rejected')
+      .is('redacted_at', null)
+  const byContact = await base().eq('contact_id', contactId)
+  if (byContact.error) throw new Error(`查重失败：${byContact.error.message}`)
+  if ((byContact.count ?? 0) > 0) return true
+  if (!metaLeadId) return false
+  const byLead = await base().eq('meta_lead_id', metaLeadId)
+  if (byLead.error) throw new Error(`查重失败：${byLead.error.message}`)
+  return (byLead.count ?? 0) > 0
+}
+
+// ── 写库 ────────────────────────────────────────────────────────────────────
+
+function splitName(displayName: string | null): { first: string | null; last: string | null } {
+  const parts = (displayName ?? '').trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return { first: null, last: null }
+  return { first: parts[0], last: parts.length > 1 ? parts.slice(1).join(' ') : null }
+}
+
+async function insertOutcome(
+  supabase: SupabaseClient,
+  input: IntakeInput,
+  audit: Record<string, unknown>,
+  now: Date,
+): Promise<{ id: string; amountMinor: number } | 'duplicate' | { error: string }> {
+  const built = buildIntakeRow(input, { defaultPhoneCountry: null, now })
+  if (!built.ok) return { error: built.errors.join('; ') }
+  const { data, error } = await supabase.from('me_sale_outcomes').insert(built.row).select('id').single()
+  if (error) {
+    // 唯一索引命中（同邮件 / 同线索 / 同邮箱+单号）= 跨来源防重在起作用，不是错误。
+    return (error as { code?: string }).code === '23505' ? 'duplicate' : { error: error.message }
+  }
+  const id = (data as { id: string }).id
+  await supabase.from('me_conversion_audit').insert({ outcome_id: id, action: 'created', actor: DETECTOR_ACTOR, detail: audit })
+  return { id, amountMinor: built.row.amount_minor ?? 0 }
+}
+
+async function approveByEvidence(supabase: SupabaseClient, outcomeId: string, now: Date): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('me_sale_outcomes')
+    .update({
+      review_status: 'approved',
+      reviewed_by: AUTO_REVIEWER_IDENTITY,
+      reviewed_at: now.toISOString(),
+      reviewed_ip: null,
+      reviewed_ua: null,
+      review_request_id: crypto.randomUUID(),
+      updated_at: now.toISOString(),
+    })
+    .eq('id', outcomeId)
+    .eq('review_status', 'pending_review')
+    .select('id')
+  if (error) throw new Error(`自动批准失败：${error.message}`)
+  return (data?.length ?? 0) > 0
+}
+
+// ── 主流程 ──────────────────────────────────────────────────────────────────
+
+interface Verdict {
+  lane: 'auto' | 'human' | 'skip'
+  reason?: NeedsHumanReason
+}
+
+interface EvalContext {
+  extraction: Extract<PaymentExtraction, { status: 'confirmed' }>
+  facts: ContactFacts
+  recipient: string | null
+  cancelWords: boolean
+  duplicate: boolean
+  ownDomains: string[]
+}
+
+/** 纯判定：把「所有已知事实」折成车道。单独成函数方便逐条测。 */
+export function decideLane(c: EvalContext): Verdict {
+  if (c.extraction.amountIssue) return { lane: 'skip', reason: `amount_${c.extraction.amountIssue}` }
+  if (c.duplicate) return { lane: 'skip', reason: 'duplicate_suspected' }
+  if (c.cancelWords) return { lane: 'skip', reason: 'cancel_words_in_thread' }
+  if (c.facts.doNotContact) return { lane: 'skip', reason: 'do_not_contact' }
+  const customerLike = looksLikeCustomerAddress(c.recipient, c.ownDomains)
+  const emailExact = !!c.recipient && customerLike && c.facts.emails.includes(c.recipient.toLowerCase())
+  const clean = c.extraction.flags.length === 0 && c.extraction.invoiceAmbiguous === false
+  const kindOk = c.extraction.kind === 'deposit' || c.extraction.kind === 'full'
+  return emailExact && clean && kindOk ? { lane: 'auto' } : { lane: 'human' }
+}
+
+export async function runPaymentEmailDetection(
+  clientId: string,
+  deps: PaymentDetectDeps,
+): Promise<PaymentDetectSummary> {
+  const { supabase } = deps
+  const now = deps.now ?? new Date()
+  const dryRun = deps.dryRun === true
+  const summary = emptySummary(dryRun)
+
+  const { data: client, error } = await supabase.from('clients').select('domain, leads_config').eq('id', clientId).maybeSingle()
+  if (error) throw new Error(`读取客户配置失败：${error.message}`)
+  if (!client) throw new Error('客户不存在')
+  const cfg = readDetectConfig(client.domain as string | null, client.leads_config, deps.mailboxAddress)
+  if (!cfg.enabled) return { ...summary, reason: 'disabled' }
+
+  const since = new Date(now.getTime() - cfg.lookbackDays * 86_400_000)
+  const all = await listCandidates(supabase, clientId, since)
+  const done = await alreadyProcessed(supabase, clientId, all.map((c) => c.messageId))
+  const todo = all.filter((c) => !done.has(c.messageId))
+  summary.ran = true
+  summary.scanned = todo.length
+  summary.truncated = todo.length > MAX_FETCH_PER_RUN
+  if (todo.length === 0) return { ...summary, reason: 'no_candidates' }
+
+  let sends = 0
+  const batch = todo.slice(0, MAX_FETCH_PER_RUN)
+  for (const group of chunk(batch, FETCH_CONCURRENCY)) {
+    // 只并发读邮件全文（慢的是网络）；判定、写库、发送仍然逐封串行，名额与防重不会被并发打乱。
+    const texts = await Promise.all(group.map((c) => deps.fetchText(c.messageId)))
+    for (let i = 0; i < group.length; i++) {
+      const used = await processOne(group[i], texts[i], { clientId, cfg, deps, summary, now }, sends)
+      if (used) sends++
+    }
+  }
+  return summary
+}
+
+/** 处理一封已取到全文（或取失败）的邮件。返回是否占用了一个自动发送名额。 */
+async function processOne(cand: Candidate, text: MessageTextResult, ctx: RunCtx, sends: number): Promise<boolean> {
+  const { summary } = ctx
+  if (!text.ok) {
+    summary.fetchErrors++
+    summary.needsHuman.push({ messageId: cand.messageId, reason: 'mail_text_unreadable' })
+    return false
+  }
+  summary.fetched++
+  const ex = extractPaymentFromEmail(
+    { subject: text.message.subject, body: text.message.body },
+    { defaultCurrency: ctx.cfg.defaultCurrency },
+  )
+  if (ex.status !== 'confirmed') {
+    summary.notConfirmed++
+    return false
+  }
+  if (ex.kind === 'balance') {
+    summary.balanceIgnored++
+    return false
+  }
+  if (ex.kind === 'unknown') {
+    summary.unknownKind++
+    return false
+  }
+  if (isTooLateToApprove(cand.sentAt, ctx.now)) {
+    summary.expired++
+    return false
+  }
+  return handleConfirmed(cand, ex, text.message.firstRecipient?.address ?? null, ctx, sends < MAX_AUTO_SENDS_PER_RUN)
+}
+
+type Confirmed = Extract<PaymentExtraction, { status: 'confirmed' }>
+
+interface RunCtx {
+  clientId: string
+  cfg: DetectConfig
+  deps: PaymentDetectDeps
+  summary: PaymentDetectSummary
+  now: Date
+}
+
+/** 处理一封已确认、类型明确的付款邮件。返回是否占用了一个自动发送名额。 */
+async function handleConfirmed(
+  cand: Candidate,
+  ex: Confirmed,
+  recipient: string | null,
+  ctx: RunCtx,
+  canSend: boolean,
+): Promise<boolean> {
+  const { supabase } = ctx.deps
+  const facts = await loadContactFacts(supabase, ctx.clientId, cand.contactId)
+  const [cancelWords, duplicate] = await Promise.all([
+    threadMentionsCancel(supabase, cand.conversationId),
+    hasExistingPurchase(supabase, ctx.clientId, cand.contactId, facts.metaLeadId),
+  ])
+  const verdict = decideLane({ extraction: ex, facts, recipient, cancelWords, duplicate, ownDomains: ctx.cfg.ownDomains })
+  if (verdict.lane === 'skip') {
+    if (verdict.reason === 'duplicate_suspected') ctx.summary.duplicates++
+    ctx.summary.needsHuman.push({ messageId: cand.messageId, reason: verdict.reason as NeedsHumanReason })
+    return false
+  }
+  const overAmountCap = ex.amount != null && (toMinorUnits(ex.amount.value, ex.amount.currency) ?? Infinity) > MAX_AUTO_AMOUNT_MINOR
+  const wantsAuto = verdict.lane === 'auto'
+  if (wantsAuto && (overAmountCap || !canSend)) {
+    ctx.summary.needsHuman.push({ messageId: cand.messageId, reason: 'auto_cap_reached' })
+  }
+  const goAuto = wantsAuto && !overAmountCap && canSend
+  if (ctx.deps.dryRun) {
+    if (goAuto) ctx.summary.wouldAuto++
+    return false
+  }
+  return writeAndMaybeSend(cand, ex, facts, recipient, goAuto, ctx)
+}
+
+async function writeAndMaybeSend(
+  cand: Candidate,
+  ex: Confirmed,
+  facts: ContactFacts,
+  recipient: string | null,
+  goAuto: boolean,
+  ctx: RunCtx,
+): Promise<boolean> {
+  const { supabase } = ctx.deps
+  const name = splitName(facts.displayName)
+  const email = goAuto ? recipient : facts.emails[0] ?? null
+  if (!email && !facts.phone) {
+    ctx.summary.needsHuman.push({ messageId: cand.messageId, reason: 'no_match_key' })
+    return false
+  }
+  const created = await insertOutcome(
+    supabase,
+    {
+      clientId: ctx.clientId,
+      contactId: cand.contactId,
+      outcomeKind: 'purchase',
+      customerEmail: email,
+      customerPhone: facts.phone,
+      customerFirst: name.first,
+      customerLast: name.last,
+      orderRef: ex.invoiceNo,
+      amount: ex.amount?.value ?? null,
+      currency: ex.amount?.currency ?? null,
+      occurredAt: cand.sentAt,
+      sourceKind: 'inbox_extract',
+      sourceRef: cand.messageId,
+      createdBy: goAuto ? 'auto:payment-email' : 'payment-email:needs-review',
+      metaLeadId: facts.metaLeadId,
+    },
+    {
+      lane: goAuto ? 'auto' : 'human',
+      kind: ex.kind,
+      has_invoice_no: ex.invoiceNo != null,
+      evidence_sha256: sha256Of(ex.evidence),
+      flags: ex.flags,
+    },
+    ctx.now,
+  )
+  if (created === 'duplicate') {
+    ctx.summary.duplicates++
+    ctx.summary.needsHuman.push({ messageId: cand.messageId, reason: 'duplicate_suspected' })
+    return false
+  }
+  if ('error' in created) {
+    ctx.summary.needsHuman.push({ messageId: cand.messageId, reason: 'intake_rejected' })
+    return false
+  }
+  if (!goAuto) {
+    ctx.summary.humanQueued++
+    return false
+  }
+  ctx.summary.autoCreated++
+  return approveAndSend(created.id, ctx)
+}
+
+async function approveAndSend(outcomeId: string, ctx: RunCtx): Promise<boolean> {
+  const { supabase } = ctx.deps
+  if (!(await approveByEvidence(supabase, outcomeId, ctx.now))) return false
+  await supabase.from('me_conversion_audit').insert({
+    outcome_id: outcomeId,
+    action: 'auto_approved_by_payment_evidence',
+    actor: DETECTOR_ACTOR,
+    detail: { reviewer: AUTO_REVIEWER_IDENTITY },
+  })
+  ctx.summary.autoApproved++
+  try {
+    // 发送一律用真实时间，不透传本批的 `now`（同 ai-auto-review-run 的教训：过去时的 last_attempt_at 会让发送状态机误判卡住）。
+    const sent = await sendApprovedOutcome(outcomeId, { supabase, ...ctx.deps.sendDeps })
+    ctx.summary.autoSendStatuses[sent.status] = (ctx.summary.autoSendStatuses[sent.status] ?? 0) + 1
+    await supabase
+      .from('me_conversion_audit')
+      .insert({ outcome_id: outcomeId, action: 'sent', actor: DETECTOR_ACTOR, detail: { status: sent.status } })
+  } catch (e) {
+    ctx.summary.autoSendStatuses.error = (ctx.summary.autoSendStatuses.error ?? 0) + 1
+    console.error('[payment-email-detect] send failed', outcomeId, e instanceof Error ? e.message : e)
+  }
+  return true
+}

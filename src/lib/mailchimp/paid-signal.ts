@@ -75,6 +75,14 @@ const RECEIVED_PATTERNS: readonly RegExp[] = [
   // 允许中间插一个副词：真实语料里有「payment has been **well** received」
   // 和「deposit has **now** been received」。不允许插词是首版最大的假阴性来源。
   /\b(?:your |the )?(?:payment|deposit|balance|funds)\s+(?:has|have|is|was|were)\s+(?:\w+\s+){0,2}?(?:been\s+)?(?:\w+\s+){0,1}?received\b[^.!?\n]*/i,
+  // 金额夹在名词和 has been received 之间：「Your deposit of $500.00 has been received」
+  // 「Your payment $7760.00 has been received in full」。成交识别（conversions/payment-email-extract）
+  // 要靠它取同句金额。无 `of` 时必须带 `$` 或币种代码，避免把「payment 2 has been…」当金额。
+  /\b(?:your |the )?(?:(?:balance|final|deposit|full)\s+)?(?:payment|deposit|balance|funds)\s+(?:of\s+(?:(?:NZD|AUD|USD)\s*)?(?:(?:NZ|AU|US)?\$\s*)?|(?:(?:NZD|AUD|USD)\s*)?(?:NZ|AU|US)?\$\s*|(?:NZD|AUD|USD)\s*)[\d,]+(?:\.\d{1,2})?(?:\s*(?:NZD|AUD|USD))?\s+(?:has|have|is|was|were)\s+(?:\w+\s+){0,2}?(?:been\s+)?(?:\w+\s+){0,1}?received\b[^.!?\n]*/i,
+  // 真实往来里最常见的口语写法（2026-10-04 对 info@ 已发邮件抽样）：
+  // 「Deposit received with thanks」「The payment was received with thanks」「deposit payment received well」。
+  // 只收「received with thanks / received well」这两个收尾，不放宽成裸 `deposit received`。
+  /\b(?:your |the )?(?:payment|deposit)(?:\s+payment)?\s+(?:is\s+|was\s+)?(?:well\s+)?received\s+(?:with\s+thanks|well)\b[^.!?\n]*/i,
   /\bwe(?:'ve| have)\s+received\s+(?:your|the)\s+(?:\w+\s+){0,2}?(?:payment|deposit|balance|funds)\b[^.!?\n]*/i,
   /\breceived\s+(?:your|the)\s+(?:\w+\s+){0,2}?(?:payment|deposit|balance|funds)\b[^.!?\n]*/i,
   /\b(?:thank\s+you|thanks|many\s+thanks)\s+(?:so\s+much\s+|very\s+much\s+|again\s+)?for\s+(?:your|the)\s+(?:\w+\s+){0,2}?(?:payment|deposit)\b[^.!?\n]*/i,

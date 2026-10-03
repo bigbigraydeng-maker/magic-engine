@@ -35,7 +35,27 @@ import {
   type CircuitBreakerRule,
 } from './ai-auto-review-circuit-breaker'
 import { sendApprovedOutcome, type SendDeps } from './writeback-service'
+import type { SourceKind } from './intake'
 import { approvalCutoffIso, eventAgeMs, isTooLateToApprove, DAY_MS, META_EVENT_WINDOW_DAYS } from './event-window'
+
+/**
+ * AI 自动批准**只认白名单来源**——新来源默认不可，必须在这里显式加上才会被自动批准。
+ *
+ * 为什么是白名单不是黑名单：「邮箱付款识别」（`inbox_extract`）写进来的人工车道记录
+ * （转发 / 收件人对不上 / 类型存疑）本来就是规则判不准、要留给人看的；AI 只看姓名、
+ * 金额、天数，会把它们放行并直接外发，等于人工闸被绕开（设计稿 §5，子牙 2026-10-04 复审）。
+ * 该来源里「证据齐全」的那部分由 `payment-email-detect-run` 自己的确定性规则批准，不走 AI。
+ */
+export const AI_AUTO_REVIEWABLE_SOURCE_KINDS: readonly SourceKind[] = [
+  'manual_seed',
+  'web_form',
+  'meta_lead_form',
+  'api',
+  'crm_hubspot',
+  'crm_sheet_sync',
+  'messenger_conversation',
+  'crm_stage_manual',
+]
 
 /** 一次批处理最多处理这么多条——限制单次运行的最坏影响范围，跟熔断是两道独立的闸。 */
 export const MAX_BATCH_SIZE = 50
@@ -181,6 +201,7 @@ export async function runAiAutoReviewForClient(
     )
     .eq('client_id', clientId)
     .eq('review_status', 'pending_review')
+    .in('source_kind', [...AI_AUTO_REVIEWABLE_SOURCE_KINDS])
     .is('redacted_at', null)
     .lt('ai_review_attempts', MAX_UNCERTAIN_ATTEMPTS)
     .or(`ai_last_reviewed_at.is.null,ai_last_reviewed_at.lt.${cooldownCutoff}`)
