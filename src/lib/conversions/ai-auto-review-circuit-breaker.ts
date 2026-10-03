@@ -32,7 +32,8 @@ const BASELINE_WINDOW_DAYS = 7
 const RELATIVE_MULTIPLIER = 3
 /** 不管历史均值多低，这两个是硬顶（按客户体量差异很大，先给一个保守默认值，
  *  真上线后可以按 `clients` 表加一列覆盖，目前这两个客户体量都在这个量级内）。 */
-const ABSOLUTE_MAX_APPROVED_PER_DAY = 30
+// 与单次运行硬顶（BATCH_HARD_STOP_COUNT=60）配套：硬顶放到 60，24 小时绝对上限不能比它低，否则一次合法的积压清理会被第二天的预检直接熔断。
+const ABSOLUTE_MAX_APPROVED_PER_DAY = 60
 const ABSOLUTE_MAX_AMOUNT_MINOR_PER_DAY = 50_000_00 // 50,000 元（含税）为单位货币的粗略硬顶
 /** uncertain 堆积多少条就算"AI 普遍判不了这个客户的数据，需要人看一眼"。 */
 const UNCERTAIN_BACKLOG_THRESHOLD = 10

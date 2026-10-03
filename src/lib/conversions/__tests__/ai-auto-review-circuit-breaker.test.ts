@@ -98,12 +98,13 @@ describe('checkCircuitBreaker', () => {
     // 历史 7 天均值故意造得很高（比如每天 20 笔），让"3倍均值"远超硬顶 30——
     // 这种情况下相对阈值形同虚设，必须靠绝对硬顶兜底。
     for (let i = 0; i < 7; i++) {
-      for (let j = 0; j < 20; j++) {
+      for (let j = 0; j < 30; j++) {
         outcomes.push(approvedRow(1000, new Date(NOW.getTime() - (i + 1) * 86_400_000 - j * 60_000).toISOString()))
       }
     }
-    // 近 24 小时 31 笔——低于"3倍历史均值"(60)，但超过绝对硬顶 30
-    for (let i = 0; i < 31; i++) {
+    // 近 24 小时 61 笔——低于"3倍历史均值"(60)×… 历史均值每天 20 笔、3 倍 = 60；这里要让相对阈值形同虚设：
+    // 把历史每天笔数抬到 30（均值 30，3 倍 = 90），近 24 小时 61 笔低于 90 但超过绝对硬顶 60
+    for (let i = 0; i < 61; i++) {
       outcomes.push(approvedRow(1000, new Date(NOW.getTime() - i * 60_000).toISOString()))
     }
     const v = await callCheck(NOW)

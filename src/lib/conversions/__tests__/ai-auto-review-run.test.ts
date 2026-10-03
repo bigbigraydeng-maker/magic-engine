@@ -159,8 +159,8 @@ beforeEach(() => {
   vi.mocked(sendApprovedOutcome).mockClear()
 })
 
-function run() {
-  return runAiAutoReviewForClient('c1', { supabase: supabaseHolder as never, sendDeps: { writer: {} as never, fetcher: fetch }, now: NOW })
+function run(opts: Parameters<typeof runAiAutoReviewForClient>[2] = {}) {
+  return runAiAutoReviewForClient('c1', { supabase: supabaseHolder as never, sendDeps: { writer: {} as never, fetcher: fetch }, now: NOW }, opts)
 }
 
 describe('runAiAutoReviewForClient', () => {
@@ -367,10 +367,11 @@ describe('runAiAutoReviewForClient', () => {
       inputSnapshot: {},
       rawOutput: '{}',
     })
-    const summary = await run()
+    // 批量上限要比硬顶大，硬顶才有机会命中（默认批量上限 = 硬顶时，行被取完就结束，不会走到熔断分支）。
+    const summary = await run({ maxBatchSize: BATCH_HARD_STOP_COUNT + extra })
     expect(summary).toMatchObject({ ran: true })
     if (summary.ran) {
-      // 硬顶命中后应该提前停手，不会把 25 条全部判完。
+      // 硬顶命中后应该提前停手，不会把全部判完。
       expect(summary.approved).toBeLessThan(BATCH_HARD_STOP_COUNT + extra)
       expect(summary.approved).toBeGreaterThanOrEqual(BATCH_HARD_STOP_COUNT)
     }
