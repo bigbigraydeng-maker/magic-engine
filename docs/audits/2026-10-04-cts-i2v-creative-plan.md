@@ -111,3 +111,20 @@ AI 20 条 × US$0.225 = US$4.50，加 30% 重试，合计约 **US$5.85**（单�
 - ~/Dropbox/MagicLab_Studio/CTS/footage/ai/real2v 的 9 个视频来源没查。
 - 圣诞团基督城版价格、Panorama 含项、Best of China 为何 3 月已招满与官网不一致，都没核。
 - 配方样本含单条 2.3 亿播放的爆款，均值被拉高，仅供参考。
+
+## 九、试片与首批成品（2026-10-04 卫青，已生成）
+**AI 图生视频试片（Muapi kling-v2.1-standard-i2v，只用授权清楚的图）**：计划 4 条，**只成功 1 条**，其余 3 条因 Muapi 余额不足被拒（402 INSUFFICIENT_CREDITS，没有扣费）。
+- 成功：`greatwall_pullback`（北京长城，源图 CC BY 2.0 · xiquinhosilva · Wikimedia Commons，成片须署名），5 秒、720×1280，花费 US$0.225。自检：城墙走向、烽火台、敌楼全程稳定，云在飘、镜头后拉，没有凭空多出人或建筑，合格。
+- 未跑：`longjing_tiltup`（龙井，CC BY 2.0 · Dave Proffer）、`gorges_aerialdrift`（三峡，CC BY 3.0 · Tan Wei Liang Byorn）、`westlake_truck`（西湖，Pexels）。
+- **Muapi 余额只剩 US$0.0274**，要继续必须 PM 充值；按方案总价约 US$5.85（含重试），建议一次充 10 美元。
+- 文件与回执：`~/Dropbox/MagicLab_Studio/CTS/output/i2v-pilot-20261004/`（含 receipts.json，有 request_id、源图路径、署名、提示词）。
+
+**非 AI 运镜首屏钩子（iStock 原图，只裁切加缩放，零重绘，零花费）**：8 条，每条 5 秒、1080×1920。自检（每条首/中/尾三帧）构图正确、主体完整。
+上海烟花（圣诞团）、上海夜街（圣诞团；右下角会带出 Swatch 招牌）、天坛、紫禁城夜景、张家界石柱、成都熊猫、桂林漓江日落、西安兵马俑。
+文件与回执：`~/Dropbox/MagicLab_Studio/CTS/output/kenburns-istock-20261004/`（receipts.json 记录每条的 iStock 编号、源文件、裁窗、运镜）。
+
+**模板定版（Creatomate，检验员在后台建了 4 个 CANDIDATE 副本，未渲染、未花额度）**
+1. 问题钩子型：Questions & Quizzes（12 秒，1 个视频位）。首选。
+2. 价格加出发期型、AI 片段混剪型：Real Estate Video Montage（19 秒，4 个视频位，左上角已有常驻 logo 位，需删 4 秒尾卡并把文字上移进安全区）。
+3. 清单型：5 Facts Story（38 秒偏长，3 个视频位，7 段文字要改成每行不超 6 词）。
+共性待办：新加 CTS logo 水印层（带背景色块）、文字落进安全区、画布从 720×1280 提到 1080×1920。Photo Story 无竖版，淘汰；New Listing Story 房产广告味重且无视频位，淘汰。
