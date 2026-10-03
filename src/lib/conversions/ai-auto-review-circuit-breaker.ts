@@ -76,6 +76,9 @@ async function fetchBaselineDailyAverage(
     .select('amount_minor, reviewed_at')
     .eq('client_id', clientId)
     .eq('review_status', 'approved')
+    // 只数 AI 自己批的：邮箱付款识别（`auto:payment-email-evidence`）的自动批准不该抬高 AI 的日均/单笔基线，
+    // 否则单笔 1 万的定金会把「金额异常」的阈值垫高（子牙 2026-10-04 复审）。
+    .eq('reviewed_by', AI_REVIEWER_IDENTITY)
     .gte('reviewed_at', since)
 
   if (error) throw new Error(`查历史基线失败：${error.message}`)

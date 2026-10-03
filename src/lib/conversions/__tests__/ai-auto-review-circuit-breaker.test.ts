@@ -5,7 +5,7 @@
  * ② 批准占比异常要能在总量没涨的情况下单独触发。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { checkCircuitBreaker, isSingleRecordAmountAnomalous, AI_REVIEWER_IDENTITY } from '../ai-auto-review-circuit-breaker'
+import { checkCircuitBreaker, isSingleRecordAmountAnomalous, AI_REVIEWER_IDENTITY, fetchBaselineDailyAverage } from '../ai-auto-review-circuit-breaker'
 
 type Row = Record<string, unknown>
 
@@ -194,5 +194,16 @@ describe('isSingleRecordAmountAnomalous', () => {
 
   it('金额为 null（如 lead 类型）不触发', () => {
     expect(isSingleRecordAmountAnomalous(null, 10000)).toBe(false)
+  })
+})
+
+
+describe('fetchBaselineDailyAverage · 只数 AI 自己批的', () => {
+  it('🔴 其它审核人（如邮箱付款识别的自动批准）的大额记录不抬高 AI 的单笔基线', async () => {
+    const t = new Date(NOW.getTime() - 86_400_000).toISOString()
+    outcomes.push(approvedRow(10_000, t))
+    outcomes.push(approvedRow(900_000, t, 'auto:payment-email-evidence'))
+    const base = await fetchBaselineDailyAverage(supabaseHolder as unknown as Parameters<typeof fetchBaselineDailyAverage>[0], 'c1', NOW)
+    expect(base.maxSingleAmountMinor).toBe(10_000)
   })
 })

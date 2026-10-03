@@ -75,6 +75,14 @@ const RECEIVED_PATTERNS: readonly RegExp[] = [
   // 允许中间插一个副词：真实语料里有「payment has been **well** received」
   // 和「deposit has **now** been received」。不允许插词是首版最大的假阴性来源。
   /\b(?:your |the )?(?:payment|deposit|balance|funds)\s+(?:has|have|is|was|were)\s+(?:\w+\s+){0,2}?(?:been\s+)?(?:\w+\s+){0,1}?received\b[^.!?\n]*/i,
+  // 金额夹在名词和 has been received 之间：「Your deposit of $500.00 has been received」
+  // 「Your payment $7760.00 has been received in full」。成交识别（conversions/payment-email-extract）
+  // 要靠它取同句金额。无 `of` 时必须带 `$` 或币种代码，避免把「payment 2 has been…」当金额。
+  /\b(?:your |the )?(?:(?:balance|final|deposit|full)\s+)?(?:payment|deposit|balance|funds)\s+(?:of\s+(?:(?:NZD|AUD|USD)\s*)?(?:(?:NZ|AU|US)?\$\s*)?|(?:(?:NZD|AUD|USD)\s*)?(?:NZ|AU|US)?\$\s*|(?:NZD|AUD|USD)\s*)[\d,]+(?:\.\d{1,2})?(?:\s*(?:NZD|AUD|USD))?\s+(?:has|have|is|was|were)\s+(?:\w+\s+){0,2}?(?:been\s+)?(?:\w+\s+){0,1}?received\b[^.!?\n]*/i,
+  // 真实往来里最常见的口语写法（2026-10-04 对 info@ 已发邮件抽样）：
+  // 「Deposit received with thanks」「The payment was received with thanks」「deposit payment received well」。
+  // 只收「received with thanks / received well」这两个收尾，不放宽成裸 `deposit received`。
+  /\b(?:your |the )?(?:payment|deposit)(?:\s+payment)?\s+(?:is\s+|was\s+)?(?:well\s+)?received\s+(?:with\s+thanks|well)(?=\s*(?:$|[.!?,;\n]|and\b))[^.!?\n]*/i,
   /\bwe(?:'ve| have)\s+received\s+(?:your|the)\s+(?:\w+\s+){0,2}?(?:payment|deposit|balance|funds)\b[^.!?\n]*/i,
   /\breceived\s+(?:your|the)\s+(?:\w+\s+){0,2}?(?:payment|deposit|balance|funds)\b[^.!?\n]*/i,
   /\b(?:thank\s+you|thanks|many\s+thanks)\s+(?:so\s+much\s+|very\s+much\s+|again\s+)?for\s+(?:your|the)\s+(?:\w+\s+){0,2}?(?:payment|deposit)\b[^.!?\n]*/i,
@@ -209,6 +217,15 @@ const NEGATION = /\b(?:not|never|nt)\b|n['’]t\b/i
 const REQUEST_TONE =
   /\b(?:please\s+(?:confirm|advise|check|let)|can\s+you\s+(?:confirm|advise|check)|could\s+you\s+(?:confirm|advise|check)|kindly\s+(?:confirm|advise)|confirm\s+(?:whether|if)|let\s+us\s+know\s+(?:whether|if)|checking\s+(?:whether|if)|wondering\s+(?:whether|if))\b/i
 
+/**
+ * 「还没收到 / 应当收到」的将来式：`is yet to be received` / `is due to be received by Friday` /
+ * `is required to be received`。它们含 `payment … is … received`，旧正则允许中间夹两个词，
+ * 于是被当成确认句（魏征 2026-10-04 复审实测：三句都判成已收到、带金额进自动车道）。
+ * 查**命中的整段文本**，不只看命中点之前。
+ */
+const FUTURE_RECEIVE =
+  /\b(?:yet\s+to|due\s+to|required\s+to|expected\s+to|supposed\s+to|going\s+to|about\s+to|need(?:s|ed)?\s+to|must|should|will|would|to)\s+(?:\w+\s+){0,2}?be\s+(?:\w+\s+){0,1}?received\b/i
+
 /** 命中点所在句子的边界（绝对下标）。 */
 function sentenceBounds(text: string, index: number): { start: number; end: number } {
   const start =
@@ -247,6 +264,7 @@ function findConfirmation(text: string): string | null {
     // ② 否定 —— 「payment has **not** been received」。not 落在匹配**内部**，
     //    所以必须查匹配文本本身，只看前文是查不到的。
     if (NEGATION.test(m[0])) continue
+    if (FUTURE_RECEIVE.test(m[0])) continue
 
     // ③ 条件 / 将来 —— 只看命中点**之前**那一段（绝对下标切，别自己算偏移），
     //    避免被句尾的「…received in full, we will send the itinerary」误伤。

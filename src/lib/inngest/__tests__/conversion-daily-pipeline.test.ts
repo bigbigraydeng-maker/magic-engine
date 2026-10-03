@@ -240,6 +240,39 @@ describe('分块循环怎么推进、怎么停', () => {
     expect(calls.resend.map((c) => c.clientId)).toEqual([NAL, CTS])
   })
 
+  it('邮箱付款识别段：同步之后、AI 审核之前跑，计入运行记录 7/7', async () => {
+    const detect = vi.fn(async () => ({ ok: true }))
+    const { harness, finish, result } = await run({ detectPayments: detect })
+    expect(harness.ranStepIds).toEqual([
+      'log-start',
+      'sync-nal-1',
+      'sync-nal-2',
+      'sync-cts-1',
+      'sync-cts-2',
+      'detect-payments',
+      'ai-review-nal-1',
+      'ai-review-cts-1',
+      'resend-failed-nal',
+      'resend-failed-cts',
+      'log-finish',
+    ])
+    expect(detect).toHaveBeenCalledTimes(1)
+    expect(result).toHaveProperty('payments')
+    expect(finish).toHaveBeenCalledWith('run-1', expect.any(Number), expect.objectContaining({ processed: 7, completed: 7, failed: 0 }))
+  })
+
+  it('邮箱付款识别段失败 → 记失败，但同步已完成、审核与补发照常（互不连坐）', async () => {
+    const { result, harness, finish } = await run({
+      detectPayments: async () => {
+        throw new Error('模拟 Graph 读取失败')
+      },
+    })
+    expect(result.payments).toMatchObject({ ok: false, error: expect.stringContaining('模拟 Graph 读取失败') })
+    expect(harness.ranStepIds).toContain('ai-review-cts-1')
+    expect(harness.ranStepIds).toContain('resend-failed-cts')
+    expect(finish).toHaveBeenCalledWith('run-1', expect.any(Number), expect.objectContaining({ processed: 7, completed: 6, failed: 1 }))
+  })
+
   it('游标靠上一块的返回值推进：offset / insertedSoFar 跨块传递，且经过了 JSON 序列化', async () => {
     const { calls, result } = await run()
     expect(calls.cts).toEqual([

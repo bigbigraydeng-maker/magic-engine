@@ -27,7 +27,13 @@ vi.mock('../writeback-service', () => ({
 import { judgeOutcome } from '../ai-auto-review'
 import { checkCircuitBreaker, isSingleRecordAmountAnomalous } from '../ai-auto-review-circuit-breaker'
 import { sendApprovedOutcome } from '../writeback-service'
-import { runAiAutoReviewForClient, MAX_UNCERTAIN_ATTEMPTS, BATCH_HARD_STOP_COUNT } from '../ai-auto-review-run'
+import {
+  runAiAutoReviewForClient,
+  MAX_UNCERTAIN_ATTEMPTS,
+  BATCH_HARD_STOP_COUNT,
+  AI_AUTO_REVIEWABLE_SOURCE_KINDS,
+} from '../ai-auto-review-run'
+import { SOURCE_KINDS } from '../intake'
 import { DAY_MS } from '../event-window'
 
 type Row = Record<string, unknown>
@@ -49,6 +55,7 @@ function fakeDb(table: string) {
       filters.every(([op, col, val]) => {
         if (op === 'eq') return r[col] === val
         if (op === 'is') return val === null ? r[col] == null : r[col] === val
+        if (op === 'in') return (val as unknown[]).includes(r[col])
         if (op === 'lt') {
           if (typeof r[col] === 'number') return (r[col] as number) < (val as number)
           // 时间列按真实时刻比，不按字符串比（'…00Z' 和 '…00.000Z' 是同一刻）。
@@ -71,6 +78,10 @@ function fakeDb(table: string) {
     },
     lt: (col: string, val: unknown) => {
       filters.push(['lt', col, val])
+      return builder
+    },
+    in: (col: string, vals: unknown[]) => {
+      filters.push(['in', col, vals])
       return builder
     },
     // 幂等窗口的 or() 在这份假件里当直通处理（不额外过滤）——这份测试不断言
@@ -373,6 +384,20 @@ describe('runAiAutoReviewForClient', () => {
     expect(summary).toMatchObject({ ran: true, processed: 0 })
     expect(judgeOutcome).not.toHaveBeenCalled()
     expect(sendApprovedOutcome).not.toHaveBeenCalled()
+  })
+
+  it('🔴 邮箱付款识别（inbox_extract）的待批记录不进 AI 自动批准——白名单来源之外一律不碰', async () => {
+    outcomes.push(pendingRow({ source_kind: 'inbox_extract' }))
+    const summary = await run()
+    expect(summary).toMatchObject({ ran: true, processed: 0 })
+    expect(judgeOutcome).not.toHaveBeenCalled()
+    expect(sendApprovedOutcome).not.toHaveBeenCalled()
+    expect((outcomes[0] as { review_status: string }).review_status).toBe('pending_review')
+  })
+
+  it('白名单本身：不含 inbox_extract，且每一项都是合法来源', () => {
+    expect(AI_AUTO_REVIEWABLE_SOURCE_KINDS).not.toContain('inbox_extract')
+    for (const k of AI_AUTO_REVIEWABLE_SOURCE_KINDS) expect(SOURCE_KINDS).toContain(k)
   })
 
   it('AI 判 approve 期间被人工页面抢先批准（真实竞态）→ CAS 检测到 0 行受影响，不重复发送、不写虚假审计（魏征最终复审回归测试）', async () => {
