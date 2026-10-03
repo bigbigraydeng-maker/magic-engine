@@ -170,6 +170,8 @@ export interface MessageText {
   body: string
   /** 第一个收件人 —— 跟 `toMessage` 对已发送邮件取 counterparty 的口径一致。 */
   firstRecipient: { address: string; name: string | null } | null
+  /** 收件人 + 抄送人总数。成交识别只在「恰好一个收件人」时才敢自动：抄送/多人的信，确认句不一定是对第一个人说的。 */
+  recipientCount: number
 }
 
 export type MessageTextResult = { ok: true; message: MessageText } | { ok: false; error: string; status?: number }
@@ -182,7 +184,7 @@ export type MessageTextResult = { ok: true; message: MessageText } | { ok: false
  * id 必须是同步时存下的 ImmutableId（同一个 `Prefer: IdType` 才认得）。
  */
 export async function fetchMessageText(accessToken: string, messageId: string): Promise<MessageTextResult> {
-  const select = encodeURIComponent('subject,body,toRecipients')
+  const select = encodeURIComponent('subject,body,toRecipients,ccRecipients')
   const url = `${GRAPH}/me/messages/${encodeURIComponent(messageId)}?$select=${select}`
   let res: Response
   try {
@@ -203,6 +205,7 @@ export async function fetchMessageText(accessToken: string, messageId: string): 
     subject?: string | null
     body?: { content?: string | null } | null
     toRecipients?: GraphAddress[] | null
+    ccRecipients?: GraphAddress[] | null
   }
   return {
     ok: true,
@@ -210,6 +213,7 @@ export async function fetchMessageText(accessToken: string, messageId: string): 
       subject: raw.subject?.trim() || null,
       body: raw.body?.content ?? '',
       firstRecipient: pickAddress(raw.toRecipients?.[0]),
+      recipientCount: (raw.toRecipients?.length ?? 0) + (raw.ccRecipients?.length ?? 0),
     },
   }
 }

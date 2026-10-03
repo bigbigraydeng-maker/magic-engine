@@ -417,6 +417,10 @@ describe('readPaidSignal · 金额夹在名词和 received 之间 / 口语收尾
     'Please confirm whether the deposit of $500 has been received.',
     'Thanks for the booking form received well.',
     'Your payment 2 has been received.',
+    'Your deposit of $500 is yet to be received.',
+    'Your deposit of $500 is due to be received by Friday.',
+    'Your deposit of $500 is required to be received before we confirm.',
+    'The payment received well before the deadline is what we need.',
   ])('🔴 仍然不算确认：%s', (text) => {
     expect(out(text).kind).not.toBe('confirmed')
   })

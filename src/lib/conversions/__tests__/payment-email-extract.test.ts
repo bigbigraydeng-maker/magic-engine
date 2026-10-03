@@ -127,6 +127,32 @@ describe('金额：不估算、多个就不选', () => {
   })
 })
 
+describe('🔴 魏征 2026-10-04 复审：金额口径', () => {
+  it('邻句取到的金额带 amount_adjacent 旗标（不得进自动车道）', () => {
+    const r = confirmed('Thank you, your deposit has been received. Amount: $500.00.')
+    expect(r.amount).toEqual({ value: '500.00', currency: 'NZD' })
+    expect(r.flags).toContain('amount_adjacent')
+  })
+
+  it('邻句是总价/团费 → 不取（OWED_WORDS 含 total/price/fee/fare…）', () => {
+    for (const lead of ['The total tour price is $5,200.', 'Package cost $5,200.', 'The fare is $5,200.']) {
+      const r = confirmed(`${lead} Your deposit has been received.`)
+      expect(r.amount, lead).toBeNull()
+      expect(r.amountIssue, lead).toBe('missing')
+    }
+  })
+
+  it('币种冲突：正文出现与所取币种不同的币种代码 → currency_conflict 旗标', () => {
+    const r = confirmed('Your deposit of $500.00 has been received. All prices are in AUD.')
+    expect(r.flags).toContain('currency_conflict')
+  })
+
+  it('同句带显式币种、全文只有这一个币种 → 无旗标', () => {
+    const r = confirmed('Your deposit of AUD 600.00 has been received.')
+    expect(r.flags).toEqual([])
+  })
+})
+
 describe('发票号', () => {
   it('多个不同发票号 → 不选', () => {
     const r = confirmed('Your deposit of $500 has been received for INV-1001. Earlier invoice INV-0999 is closed.')

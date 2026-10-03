@@ -123,13 +123,14 @@ function seed(opts: { enabled?: boolean } = {}) {
 // 假库没有的方法，用例会直接抛 TypeError，不会静默通过）。
 const supabase = { from: (t: string) => table(t) } as unknown as PaymentDetectDeps['supabase']
 
-function mail(body: string, opts: { to?: string; subject?: string } = {}) {
+function mail(body: string, opts: { to?: string; subject?: string; recipientCount?: number } = {}) {
   return {
     ok: true as const,
     message: {
       subject: opts.subject ?? 'Your booking',
       body,
       firstRecipient: { address: opts.to ?? 'sam@customer.test', name: null },
+      recipientCount: opts.recipientCount ?? 1,
     },
   }
 }
@@ -139,7 +140,7 @@ const GOOD = 'Hi Sam, your deposit of $500.00 has been received. Invoice INV-204
 function deps(over: Partial<PaymentDetectDeps> = {}): PaymentDetectDeps {
   return {
     supabase,
-    fetchText: vi.fn(async () => mail(GOOD)),
+    fetchText: vi.fn(async (_id: string) => mail(GOOD)),
     sendDeps: {} as PaymentDetectDeps['sendDeps'],
     mailboxAddress: 'info@shop.example',
     now: NOW,
@@ -210,7 +211,8 @@ describe('自动车道', () => {
       db.contacts.push({ id: cid(n), client_id: CLIENT, display_name: `Person ${n}`, do_not_contact: false })
       db.contact_identities.push({ contact_id: cid(n), client_id: CLIENT, kind: 'email', value: 'sam@customer.test' })
     }
-    const s = await runPaymentEmailDetection(CLIENT, deps())
+    const byId = (id: string) => mail(`Hi, your deposit of $500.00 has been received. Invoice INV-${id.replace(/\D/g, '') || '1'}00.`)
+    const s = await runPaymentEmailDetection(CLIENT, deps({ fetchText: vi.fn(async (id: string) => byId(id)) }))
     expect(s.autoApproved).toBe(MAX_AUTO_SENDS_PER_RUN)
     expect(sendApprovedOutcome).toHaveBeenCalledTimes(MAX_AUTO_SENDS_PER_RUN)
     expect(s.needsHuman.some((n) => n.reason === 'auto_cap_reached')).toBe(true)
@@ -220,7 +222,7 @@ describe('自动车道', () => {
 
 describe('人工车道：写 pending_review，绝不外发', () => {
   it('主题是转发', async () => {
-    const d = deps({ fetchText: vi.fn(async () => mail(GOOD, { subject: 'Fw: Booking' })) })
+    const d = deps({ fetchText: vi.fn(async (_id: string) => mail(GOOD, { subject: 'Fw: Booking' })) })
     const s = await runPaymentEmailDetection(CLIENT, d)
     expect(s.humanQueued).toBe(1)
     expect(db.me_sale_outcomes[0].review_status).toBe('pending_review')
@@ -228,14 +230,14 @@ describe('人工车道：写 pending_review，绝不外发', () => {
   })
 
   it('收件人邮箱和联系人不一致（代付等）', async () => {
-    const d = deps({ fetchText: vi.fn(async () => mail(GOOD, { to: 'agent@travel.test' })) })
+    const d = deps({ fetchText: vi.fn(async (_id: string) => mail(GOOD, { to: 'agent@travel.test' })) })
     const s = await runPaymentEmailDetection(CLIENT, d)
     expect(s.humanQueued).toBe(1)
     expect(sendApprovedOutcome).not.toHaveBeenCalled()
   })
 
   it('收件人是自己人域名 → 不当客人', async () => {
-    const d = deps({ fetchText: vi.fn(async () => mail(GOOD, { to: 'colleague@shop.example' })) })
+    const d = deps({ fetchText: vi.fn(async (_id: string) => mail(GOOD, { to: 'colleague@shop.example' })) })
     const s = await runPaymentEmailDetection(CLIENT, d)
     expect(s.humanQueued).toBe(1)
     expect(sendApprovedOutcome).not.toHaveBeenCalled()
@@ -244,14 +246,14 @@ describe('人工车道：写 pending_review，绝不外发', () => {
 
 describe('不写库的情形（只进 needsHuman 或忽略）', () => {
   it('没有金额 → 数据库不让写，只进清单', async () => {
-    const d = deps({ fetchText: vi.fn(async () => mail('Your deposit has been received. Thank you.')) })
+    const d = deps({ fetchText: vi.fn(async (_id: string) => mail('Your deposit has been received. Thank you.')) })
     const s = await runPaymentEmailDetection(CLIENT, d)
     expect(s.needsHuman).toEqual([{ messageId: 'msg-1', reason: 'amount_missing' }])
     expect(db.me_sale_outcomes).toHaveLength(0)
   })
 
   it('金额有两个 → ambiguous，不选', async () => {
-    const d = deps({ fetchText: vi.fn(async () => mail('Your deposit of $500 has been received out of $5,000.')) })
+    const d = deps({ fetchText: vi.fn(async (_id: string) => mail('Your deposit of $500 has been received out of $5,000.')) })
     const s = await runPaymentEmailDetection(CLIENT, d)
     expect(s.needsHuman[0].reason).toBe('amount_ambiguous')
     expect(db.me_sale_outcomes).toHaveLength(0)
@@ -273,32 +275,101 @@ describe('不写库的情形（只进 needsHuman 或忽略）', () => {
     expect(sendApprovedOutcome).not.toHaveBeenCalled()
   })
 
-  it('已被拒绝的旧成交不占位（人工拒绝后可重新识别）', async () => {
-    db.me_sale_outcomes.push({ id: 'old', client_id: CLIENT, contact_id: cid(1), outcome_kind: 'purchase', review_status: 'rejected', source_kind: 'crm_sheet_sync', source_ref: 'row-9', redacted_at: null })
+  it('🔴 人工拒绝过的成交：窗口内同一联系人再来确认信，不自动发（转人工）', async () => {
+    db.me_sale_outcomes.push({ id: 'old', client_id: CLIENT, contact_id: cid(1), outcome_kind: 'purchase', review_status: 'rejected', source_kind: 'crm_sheet_sync', source_ref: 'row-9', redacted_at: null, created_at: '2026-10-01T00:00:00.000Z' })
     const s = await runPaymentEmailDetection(CLIENT, deps())
-    expect(s.autoApproved).toBe(1)
+    expect(s.autoApproved).toBe(0)
+    expect(s.needsHuman).toEqual([{ messageId: 'msg-1', reason: 'previously_rejected' }])
+    expect(sendApprovedOutcome).not.toHaveBeenCalled()
   })
 
   it('尾款只忽略；只写 payment received 的 unknown 只报表', async () => {
-    const d1 = deps({ fetchText: vi.fn(async () => mail('Your balance payment of $4,000.00 has been received.')) })
+    const d1 = deps({ fetchText: vi.fn(async (_id: string) => mail('Your balance payment of $4,000.00 has been received.')) })
     expect((await runPaymentEmailDetection(CLIENT, d1)).balanceIgnored).toBe(1)
-    const d2 = deps({ fetchText: vi.fn(async () => mail('Your payment has been received, thank you.')) })
+    const d2 = deps({ fetchText: vi.fn(async (_id: string) => mail('Your payment has been received, thank you.')) })
     expect((await runPaymentEmailDetection(CLIENT, d2)).unknownKind).toBe(1)
     expect(db.me_sale_outcomes).toHaveLength(0)
   })
 
   it('读不到邮件全文 → 计入失败，不猜', async () => {
-    const d = deps({ fetchText: vi.fn(async () => ({ ok: false as const, error: 'HTTP 404' })) })
+    const d = deps({ fetchText: vi.fn(async (_id: string) => ({ ok: false as const, error: 'HTTP 404' })) })
     const s = await runPaymentEmailDetection(CLIENT, d)
     expect(s.fetchErrors).toBe(1)
     expect(s.needsHuman[0].reason).toBe('mail_text_unreadable')
   })
 
   it('催款信不是成交', async () => {
-    const d = deps({ fetchText: vi.fn(async () => mail('Please find the payment link below: https://pay.example/x')) })
+    const d = deps({ fetchText: vi.fn(async (_id: string) => mail('Please find the payment link below: https://pay.example/x')) })
     const s = await runPaymentEmailDetection(CLIENT, d)
     expect(s.notConfirmed).toBe(1)
     expect(db.me_sale_outcomes).toHaveLength(0)
+  })
+})
+
+describe('🔴 魏征 2026-10-04 复审的攻击形态', () => {
+  it('"yet to be received" 是还没收到，不是成交', async () => {
+    const d = deps({ fetchText: vi.fn(async (_id: string) => mail('Your deposit of $500 is yet to be received.')) })
+    expect((await runPaymentEmailDetection(CLIENT, d)).notConfirmed).toBe(1)
+    expect(db.me_sale_outcomes).toHaveLength(0)
+  })
+
+  it('金额只在邻句（可能是总价）→ 不自动，转人工车道', async () => {
+    const d = deps({
+      fetchText: vi.fn(async (_id: string) => mail('Thank you, your deposit has been received. Amount: $500.00.')),
+    })
+    const s = await runPaymentEmailDetection(CLIENT, d)
+    expect(s.autoApproved).toBe(0)
+    expect(s.humanQueued).toBe(1)
+    expect(sendApprovedOutcome).not.toHaveBeenCalled()
+  })
+
+  it('邻句是总价/团费 → 不取金额，也不写库', async () => {
+    const d = deps({
+      fetchText: vi.fn(async (_id: string) => mail('The full tour price is $5,200. Your deposit has been received.')),
+    })
+    const s = await runPaymentEmailDetection(CLIENT, d)
+    expect(s.needsHuman).toEqual([{ messageId: 'msg-1', reason: 'amount_missing' }])
+    expect(db.me_sale_outcomes).toHaveLength(0)
+  })
+
+  it('取消字样出现在本封邮件全文（超过 255 字之后）→ 不自动', async () => {
+    const long = `Your deposit of $500.00 has been received. ${'x '.repeat(200)}Please note our cancellation policy applies.`
+    const d = deps({ fetchText: vi.fn(async (_id: string) => mail(long)) })
+    const s = await runPaymentEmailDetection(CLIENT, d)
+    expect(s.needsHuman.some((n) => n.reason === 'cancel_words_in_thread')).toBe(true)
+    expect(sendApprovedOutcome).not.toHaveBeenCalled()
+  })
+
+  it('币种冲突（$ 默认 NZD，正文说 All prices in AUD）→ 不自动', async () => {
+    const d = deps({
+      fetchText: vi.fn(async (_id: string) => mail('Your deposit of $500.00 has been received. All prices are in AUD.')),
+    })
+    const s = await runPaymentEmailDetection(CLIENT, d)
+    expect(s.autoApproved).toBe(0)
+    expect(s.humanQueued).toBe(1)
+  })
+
+  it('多个收件人/有抄送 → 不自动', async () => {
+    const d = deps({ fetchText: vi.fn(async (_id: string) => mail(GOOD, { recipientCount: 2 })) })
+    const s = await runPaymentEmailDetection(CLIENT, d)
+    expect(s.autoApproved).toBe(0)
+    expect(s.humanQueued).toBe(1)
+  })
+
+  it('金额超过自动上限 → 转人工', async () => {
+    const d = deps({ fetchText: vi.fn(async (_id: string) => mail('Your deposit of $12,000.00 has been received.')) })
+    const s = await runPaymentEmailDetection(CLIENT, d)
+    expect(s.autoApproved).toBe(0)
+    expect(s.needsHuman.some((n) => n.reason === 'auto_cap_reached')).toBe(true)
+  })
+
+  it('新邮件优先：候选按发送时间从新到旧处理', async () => {
+    db.conversations.push({ id: 'conv-new', client_id: CLIENT, channel: 'email', contact_id: cid(9), last_message_at: NOW.toISOString() })
+    db.conversation_messages.push({ id: 'rn', conversation_id: 'conv-new', message_id: 'msg-new', direction: 'outbound', sent_at: '2026-10-03T12:00:00.000Z', body: 'x' })
+    const seen: string[] = []
+    const d = deps({ fetchText: vi.fn(async (id: string) => (seen.push(id), mail('not a payment mail'))) })
+    await runPaymentEmailDetection(CLIENT, d)
+    expect(seen[0]).toBe('msg-new')
   })
 })
 
@@ -318,6 +389,8 @@ describe('decideLane（纯判定）', () => {
     recipient: 'a@b.test',
     cancelWords: false,
     duplicate: false,
+    previouslyRejected: false,
+    recipientCount: 1,
     ownDomains: ['own.example'],
   }
 
@@ -327,5 +400,7 @@ describe('decideLane（纯判定）', () => {
     expect(decideLane({ ...base, extraction: { ...base.extraction, invoiceAmbiguous: true } }).lane).toBe('human'))
   it('类型不是定金/全款 → human', () =>
     expect(decideLane({ ...base, extraction: { ...base.extraction, kind: 'unknown' } }).lane).toBe('human'))
+  it('多收件人 → human', () => expect(decideLane({ ...base, recipientCount: 2 }).lane).toBe('human'))
+  it('被人拒绝过 → skip', () => expect(decideLane({ ...base, previouslyRejected: true }).lane).toBe('skip'))
   it('邮箱大小写不同仍算精确', () => expect(decideLane({ ...base, recipient: 'A@B.test' }).lane).toBe('auto'))
 })

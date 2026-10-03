@@ -25,20 +25,19 @@ describe('purchase dedupe migration', () => {
     expect(same).toEqual([FILE])
   })
 
-  it('两条都是部分唯一索引，只管 purchase，被拒绝/已删除的不占位', () => {
-    for (const name of ['uq_me_sale_outcomes_purchase_per_lead', 'uq_me_sale_outcomes_purchase_per_email_order']) {
-      const m = new RegExp(`create unique index if not exists ${name}[\\s\\S]*?;`, 'i').exec(SQL)
-      expect(m, name).not.toBeNull()
-      const block = m![0]
-      expect(block).toMatch(/outcome_kind = 'purchase'/)
-      expect(block).toMatch(/review_status <> 'rejected'/)
-      expect(block).toMatch(/redacted_at is null/)
-    }
+  it('只有一个部分唯一索引：同邮箱（不分大小写）+ 同单号，只管 purchase，被拒绝/已删除的不占位', () => {
+    const m = /create unique index if not exists uq_me_sale_outcomes_purchase_per_email_order[\s\S]*?;/i.exec(SQL)
+    expect(m).not.toBeNull()
+    const block = m![0]
+    expect(block).toMatch(/\(client_id, lower\(customer_email\), order_ref\)/)
+    expect(block).toMatch(/outcome_kind = 'purchase'/)
+    expect(block).toMatch(/review_status <> 'rejected'/)
+    expect(block).toMatch(/redacted_at is null/)
   })
 
-  it('线索编号索引按 client + meta_lead_id；邮箱索引不分大小写且带单号', () => {
-    expect(SQL).toMatch(/\(client_id, meta_lead_id\)/)
-    expect(SQL).toMatch(/\(client_id, lower\(customer_email\), order_ref\)/)
+  it('🔴 不建线索级唯一索引：同一客人订第二个团是合法的第二笔成交', () => {
+    expect(SQL).not.toMatch(/\(client_id, meta_lead_id\)/)
+    expect(SQL.match(/create unique index/gi)).toHaveLength(1)
   })
 
   it('不删数据、不插行、不改行', () => {

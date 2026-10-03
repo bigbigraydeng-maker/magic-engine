@@ -31,8 +31,13 @@ import { extractPaymentFromEmail, type PaymentExtraction } from './payment-email
 import { sendApprovedOutcome, type SendDeps } from './writeback-service'
 
 export const MAX_AUTO_SENDS_PER_RUN = 10
-export const MAX_AUTO_AMOUNT_MINOR = 30_000_00
-export const MAX_FETCH_PER_RUN = 80
+/** 定金通常几百到几千；比这大的一律转人工（魏征 2026-10-04 复审：3 万太松）。 */
+export const MAX_AUTO_AMOUNT_MINOR = 10_000_00
+export const MAX_FETCH_PER_RUN = 100
+/** 整段识别的时间预算；到点就停并标 truncated（单步网关 ~125 秒硬上限，PITFALLS F8）。 */
+export const DETECT_DEADLINE_MS = 90_000
+/** 人工拒绝过的成交，这么多天内同一联系人再识别出确认信一律转人工，不再自动发。 */
+export const REJECTION_COOLDOWN_DAYS = 30
 /** 同时在途的读邮件请求数；单步目标 ≤ 60 秒（网关 ~125 秒硬上限，PITFALLS F8）。 */
 export const FETCH_CONCURRENCY = 5
 export const DEFAULT_LOOKBACK_DAYS = 8
@@ -51,6 +56,8 @@ export type NeedsHumanReason =
   | 'no_match_key'
   | 'mail_text_unreadable'
   | 'intake_rejected'
+  | 'previously_rejected'
+  | 'multiple_recipients'
 
 export interface PaymentDetectSummary {
   ran: boolean
@@ -186,7 +193,8 @@ async function listCandidates(supabase: SupabaseClient, clientId: string, since:
       .in('conversation_id', ids)
       .eq('direction', 'outbound')
       .gte('sent_at', since.toISOString())
-      .order('sent_at', { ascending: true })
+      .order('sent_at', { ascending: false })
+      .limit(1000)
     if (mErr) throw new Error(`读取已发邮件失败：${mErr.message}`)
     for (const m of msgs ?? []) {
       out.push({
@@ -197,7 +205,8 @@ async function listCandidates(supabase: SupabaseClient, clientId: string, since:
       })
     }
   }
-  return out
+  // 新到旧：就算超过单次上限，被丢下的也是最旧的（它们离 7 天窗口最近、最不值得发）。
+  return out.sort((a, b) => (a.sentAt < b.sentAt ? 1 : -1))
 }
 
 async function alreadyProcessed(supabase: SupabaseClient, clientId: string, ids: string[]): Promise<Set<string>> {
@@ -277,6 +286,25 @@ async function hasExistingPurchase(
   return (byLead.count ?? 0) > 0
 }
 
+async function hasRecentRejection(
+  supabase: SupabaseClient,
+  clientId: string,
+  contactId: string,
+  now: Date,
+): Promise<boolean> {
+  const since = new Date(now.getTime() - REJECTION_COOLDOWN_DAYS * 86_400_000).toISOString()
+  const { count, error } = await supabase
+    .from('me_sale_outcomes')
+    .select('id', { count: 'exact', head: true })
+    .eq('client_id', clientId)
+    .eq('contact_id', contactId)
+    .eq('outcome_kind', 'purchase')
+    .eq('review_status', 'rejected')
+    .gte('created_at', since)
+  if (error) throw new Error(`查询被拒记录失败：${error.message}`)
+  return (count ?? 0) > 0
+}
+
 // ── 写库 ────────────────────────────────────────────────────────────────────
 
 function splitName(displayName: string | null): { first: string | null; last: string | null } {
@@ -290,13 +318,18 @@ async function insertOutcome(
   input: IntakeInput,
   audit: Record<string, unknown>,
   now: Date,
-): Promise<{ id: string; amountMinor: number } | 'duplicate' | { error: string }> {
+): Promise<{ id: string; amountMinor: number } | 'duplicate' | 'already' | { error: string }> {
   const built = buildIntakeRow(input, { defaultPhoneCountry: null, now })
   if (!built.ok) return { error: built.errors.join('; ') }
   const { data, error } = await supabase.from('me_sale_outcomes').insert(built.row).select('id').single()
   if (error) {
-    // 唯一索引命中（同邮件 / 同线索 / 同邮箱+单号）= 跨来源防重在起作用，不是错误。
-    return (error as { code?: string }).code === '23505' ? 'duplicate' : { error: error.message }
+    // 只认**哪一个**唯一约束命中：同一封邮件再来一遍 = 已处理，静默；
+    // 同线索 / 同邮箱+单号 = 跨来源已有成交，记疑似重复；别的 23505 当错误，不许吞（子牙/魏征 2026-10-04 复审）。
+    if ((error as { code?: string }).code === '23505') {
+      if (error.message.includes('uq_me_sale_outcomes_source')) return 'already'
+      if (error.message.includes('uq_me_sale_outcomes_purchase_per_')) return 'duplicate'
+    }
+    return { error: error.message }
   }
   const id = (data as { id: string }).id
   await supabase.from('me_conversion_audit').insert({ outcome_id: id, action: 'created', actor: DETECTOR_ACTOR, detail: audit })
@@ -335,6 +368,8 @@ interface EvalContext {
   recipient: string | null
   cancelWords: boolean
   duplicate: boolean
+  previouslyRejected: boolean
+  recipientCount: number
   ownDomains: string[]
 }
 
@@ -342,11 +377,14 @@ interface EvalContext {
 export function decideLane(c: EvalContext): Verdict {
   if (c.extraction.amountIssue) return { lane: 'skip', reason: `amount_${c.extraction.amountIssue}` }
   if (c.duplicate) return { lane: 'skip', reason: 'duplicate_suspected' }
+  if (c.previouslyRejected) return { lane: 'skip', reason: 'previously_rejected' }
   if (c.cancelWords) return { lane: 'skip', reason: 'cancel_words_in_thread' }
   if (c.facts.doNotContact) return { lane: 'skip', reason: 'do_not_contact' }
   const customerLike = looksLikeCustomerAddress(c.recipient, c.ownDomains)
   const emailExact = !!c.recipient && customerLike && c.facts.emails.includes(c.recipient.toLowerCase())
-  const clean = c.extraction.flags.length === 0 && c.extraction.invoiceAmbiguous === false
+  // 只有恰好一个收件人且无抄送才敢自动：多人/抄送的信，确认句不一定是对第一个人说的。
+  const clean =
+    c.extraction.flags.length === 0 && c.extraction.invoiceAmbiguous === false && c.recipientCount === 1
   const kindOk = c.extraction.kind === 'deposit' || c.extraction.kind === 'full'
   return emailExact && clean && kindOk ? { lane: 'auto' } : { lane: 'human' }
 }
@@ -376,8 +414,13 @@ export async function runPaymentEmailDetection(
   if (todo.length === 0) return { ...summary, reason: 'no_candidates' }
 
   let sends = 0
+  const t0 = Date.now()
   const batch = todo.slice(0, MAX_FETCH_PER_RUN)
   for (const group of chunk(batch, FETCH_CONCURRENCY)) {
+    if (Date.now() - t0 > DETECT_DEADLINE_MS) {
+      summary.truncated = true
+      break
+    }
     // 只并发读邮件全文（慢的是网络）；判定、写库、发送仍然逐封串行，名额与防重不会被并发打乱。
     const texts = await Promise.all(group.map((c) => deps.fetchText(c.messageId)))
     for (let i = 0; i < group.length; i++) {
@@ -417,7 +460,18 @@ async function processOne(cand: Candidate, text: MessageTextResult, ctx: RunCtx,
     summary.expired++
     return false
   }
-  return handleConfirmed(cand, ex, text.message.firstRecipient?.address ?? null, ctx, sends < MAX_AUTO_SENDS_PER_RUN)
+  return handleConfirmed(
+    cand,
+    ex,
+    {
+      recipient: text.message.firstRecipient?.address ?? null,
+      recipientCount: text.message.recipientCount,
+      // 本封邮件自己的全文也查取消/退款字样（线程里存的只是 255 字摘要，会漏）。
+      bodyCancel: CANCEL_WORDS.test(text.message.body),
+    },
+    ctx,
+    sends < MAX_AUTO_SENDS_PER_RUN,
+  )
 }
 
 type Confirmed = Extract<PaymentExtraction, { status: 'confirmed' }>
@@ -434,17 +488,28 @@ interface RunCtx {
 async function handleConfirmed(
   cand: Candidate,
   ex: Confirmed,
-  recipient: string | null,
+  mail: { recipient: string | null; recipientCount: number; bodyCancel: boolean },
   ctx: RunCtx,
   canSend: boolean,
 ): Promise<boolean> {
   const { supabase } = ctx.deps
+  const recipient = mail.recipient
   const facts = await loadContactFacts(supabase, ctx.clientId, cand.contactId)
-  const [cancelWords, duplicate] = await Promise.all([
+  const [threadCancel, duplicate, previouslyRejected] = await Promise.all([
     threadMentionsCancel(supabase, cand.conversationId),
     hasExistingPurchase(supabase, ctx.clientId, cand.contactId, facts.metaLeadId),
+    hasRecentRejection(supabase, ctx.clientId, cand.contactId, ctx.now),
   ])
-  const verdict = decideLane({ extraction: ex, facts, recipient, cancelWords, duplicate, ownDomains: ctx.cfg.ownDomains })
+  const verdict = decideLane({
+    extraction: ex,
+    facts,
+    recipient,
+    cancelWords: mail.bodyCancel || threadCancel,
+    duplicate,
+    previouslyRejected,
+    recipientCount: mail.recipientCount,
+    ownDomains: ctx.cfg.ownDomains,
+  })
   if (verdict.lane === 'skip') {
     if (verdict.reason === 'duplicate_suspected') ctx.summary.duplicates++
     ctx.summary.needsHuman.push({ messageId: cand.messageId, reason: verdict.reason as NeedsHumanReason })
@@ -506,6 +571,7 @@ async function writeAndMaybeSend(
     },
     ctx.now,
   )
+  if (created === 'already') return false
   if (created === 'duplicate') {
     ctx.summary.duplicates++
     ctx.summary.needsHuman.push({ messageId: cand.messageId, reason: 'duplicate_suspected' })
@@ -542,7 +608,8 @@ async function approveAndSend(outcomeId: string, ctx: RunCtx): Promise<boolean> 
       .insert({ outcome_id: outcomeId, action: 'sent', actor: DETECTOR_ACTOR, detail: { status: sent.status } })
   } catch (e) {
     ctx.summary.autoSendStatuses.error = (ctx.summary.autoSendStatuses.error ?? 0) + 1
-    console.error('[payment-email-detect] send failed', outcomeId, e instanceof Error ? e.message : e)
+    // 只记错误类型，不记原文（错误信息里可能带邮箱/金额）。
+    console.error('[payment-email-detect] send failed', outcomeId, e instanceof Error ? e.name : 'unknown')
   }
   return true
 }

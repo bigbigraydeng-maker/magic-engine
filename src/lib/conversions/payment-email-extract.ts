@@ -18,6 +18,19 @@ import { minorUnitsFor, toMinorUnits } from './money'
 
 export type PaymentKind = 'deposit' | 'full' | 'balance' | 'unknown'
 export type AmountIssue = 'missing' | 'ambiguous' | 'no_currency' | 'unsupported_currency'
+/**
+ * 任何旗标都不得进自动车道：
+ *   amount_adjacent  金额不在确认句同一句里（邻句可能是总价/团费，魏征 2026-10-04 实测取错）
+ *   currency_conflict 正文出现与所取币种不同的币种代码（"$500 … All prices in AUD"）
+ */
+export type ExtractFlag =
+  | 'forwarded'
+  | 'embedded_forward'
+  | 'quoted_chain_removed'
+  | 'evidence_not_verbatim'
+  | 'mixed_with_chasing'
+  | 'amount_adjacent'
+  | 'currency_conflict'
 
 export interface PaymentExtractConfig {
   /** 正文只写 `$` 没写币种时用的默认币种（客户配置，如 NZD）。null = 没配就不猜。 */
@@ -45,7 +58,7 @@ export type PaymentExtraction =
       /** 逐字确认句（只在内存里用，不写库、不写审计）。 */
       evidence: string
       /** 触发降级的原因：任何一项存在都不得进自动车道。 */
-      flags: Array<'forwarded' | 'embedded_forward' | 'quoted_chain_removed' | 'evidence_not_verbatim' | 'mixed_with_chasing'>
+      flags: ExtractFlag[]
     }
 
 // ── 1. 剥引用链 ─────────────────────────────────────────────────────────────
@@ -157,28 +170,36 @@ function sentencesAround(text: string, evidence: string): { same: string; adjace
   }
 }
 
-const OWED_WORDS = /\b(balance|due|remaining|outstanding|owing|owed|payable|instalment|installment|will\s+be\s+charged)\b/i
+const OWED_WORDS =
+  /\b(balance|due|remaining|outstanding|owing|owed|payable|instalment|installment|will\s+be\s+charged|total|price|priced|cost|costs|fee|fees|fare|fares|package|per\s+person|cancellation|refund)\b/i
 
 function pickAmount(
   text: string,
   evidence: string,
   config: PaymentExtractConfig,
-): { amount: { value: string; currency: string } | null; issue: AmountIssue | null } {
+): { amount: { value: string; currency: string } | null; issue: AmountIssue | null; fromAdjacent: boolean } {
   const { same, adjacent } = sentencesAround(text, evidence)
   let pool = amountsIn(same)
+  let fromAdjacent = false
   if (pool.length === 0) {
     const usable = adjacent.filter((s) => !OWED_WORDS.test(s))
-    const fromAdjacent = usable.flatMap((s) => amountsIn(s))
-    pool = fromAdjacent
+    pool = usable.flatMap((s) => amountsIn(s))
+    fromAdjacent = pool.length > 0
   }
-  if (pool.length === 0) return { amount: null, issue: 'missing' }
-  if (pool.length > 1) return { amount: null, issue: 'ambiguous' }
+  if (pool.length === 0) return { amount: null, issue: 'missing', fromAdjacent: false }
+  if (pool.length > 1) return { amount: null, issue: 'ambiguous', fromAdjacent: false }
   const only = pool[0]
   const currency = only.currency ?? config.defaultCurrency?.toUpperCase() ?? null
-  if (!currency) return { amount: null, issue: 'no_currency' }
-  if (minorUnitsFor(currency) == null) return { amount: null, issue: 'unsupported_currency' }
-  if (toMinorUnits(only.value, currency) == null) return { amount: null, issue: 'ambiguous' }
-  return { amount: { value: only.value, currency }, issue: null }
+  if (!currency) return { amount: null, issue: 'no_currency', fromAdjacent }
+  if (minorUnitsFor(currency) == null) return { amount: null, issue: 'unsupported_currency', fromAdjacent }
+  if (toMinorUnits(only.value, currency) == null) return { amount: null, issue: 'ambiguous', fromAdjacent }
+  return { amount: { value: only.value, currency }, issue: null, fromAdjacent }
+}
+
+/** 全文出现的币种代码里，有没有跟所取币种不一样的（"$500 … All prices in AUD"）。 */
+export function hasConflictingCurrency(text: string, chosen: string): boolean {
+  const codes = new Set((text.match(/\b(?:NZD|AUD|USD)\b/gi) ?? []).map((c) => c.toUpperCase()))
+  return [...codes].some((c) => c !== chosen.toUpperCase())
 }
 
 // ── 4. 发票号 ──────────────────────────────────────────────────────────────
@@ -224,7 +245,7 @@ export function extractPaymentFromEmail(
     return { status: 'not_confirmed' }
   }
 
-  const flags: Array<'forwarded' | 'embedded_forward' | 'quoted_chain_removed' | 'evidence_not_verbatim' | 'mixed_with_chasing'> = []
+  const flags: ExtractFlag[] = []
   if (signal.kind === 'needs_review') {
     flags.push(signal.reason === 'forwarded' ? 'forwarded' : 'mixed_with_chasing')
   }
@@ -233,6 +254,8 @@ export function extractPaymentFromEmail(
   if (!evidenceIsVerbatim(signal.evidence, stripped.text)) flags.push('evidence_not_verbatim')
 
   const picked = pickAmount(stripped.text, signal.evidence, config)
+  if (picked.fromAdjacent) flags.push('amount_adjacent')
+  if (picked.amount && hasConflictingCurrency(stripped.text, picked.amount.currency)) flags.push('currency_conflict')
   const invoices = extractInvoiceNumbers(stripped.text, config.invoicePatterns)
 
   return {
