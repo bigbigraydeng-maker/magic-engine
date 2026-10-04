@@ -9,6 +9,7 @@ import {
   DEFAULT_LOCATION_CODE,
   DEFAULT_LANGUAGE_CODE,
   authHeader,
+  assertTaskOk,
   deriveIntent,
   errorMessage,
   type DomainMetrics,
@@ -171,6 +172,8 @@ export async function fetchDomainRankOverview(
   // causing all stub competitor enrichment to silently return 0/0.
   const json = await res.json() as {
     tasks?: Array<{
+      status_code?:    number
+      status_message?: string
       result?: Array<{
         items?: Array<{
           metrics?: {
@@ -180,6 +183,8 @@ export async function fetchDomainRankOverview(
       }>
     }>
   }
+
+  assertTaskOk(json.tasks?.[0], 'domain_rank_overview')
 
   const organic = json.tasks?.[0]?.result?.[0]?.items?.[0]?.metrics?.organic
   return {

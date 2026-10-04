@@ -9,6 +9,7 @@ import {
   DEFAULT_LOCATION_CODE,
   DEFAULT_LANGUAGE_CODE,
   authHeader,
+  assertTaskOk,
   deriveIntent,
   type LabsCompetitor,
   type LabsKeyword,
@@ -46,6 +47,8 @@ export async function getSerpCompetitors(
 
   const json = await res.json() as {
     tasks?: Array<{
+      status_code?:    number
+      status_message?: string
       result?: Array<{
         items?: Array<{
           domain?:       string
@@ -61,6 +64,8 @@ export async function getSerpCompetitors(
       }>
     }>
   }
+
+  assertTaskOk(json.tasks?.[0], 'competitors_domain')
 
   const items = json.tasks?.[0]?.result?.[0]?.items ?? []
 
@@ -119,7 +124,7 @@ export async function getKeywordsGapWithStatus(
   )
 
   // Merge competitor results, keeping the highest-volume entry per keyword.
-  const failedCount = perCompetitor.filter(r => r.status !== 'fulfilled').length
+  let failedCount = perCompetitor.filter(r => r.status !== 'fulfilled').length
   const byKeyword = new Map<string, LabsKeyword>()
   for (const settled of perCompetitor) {
     if (settled.status !== 'fulfilled') continue
@@ -151,6 +156,7 @@ export async function getKeywordsGapWithStatus(
         }
       }
     } catch (err) {
+      failedCount += 1
       console.warn('[labs/getKeywordsGap] KD enrichment failed', {
         clientDomain,
         competitorCount: competitorDomains.length,
@@ -197,6 +203,8 @@ async function fetchDomainIntersectionGap(
 
   const json = await res.json() as {
     tasks?: Array<{
+      status_code?:    number
+      status_message?: string
       result?: Array<{
         items?: Array<{
           keyword_data?: {
@@ -214,6 +222,8 @@ async function fetchDomainIntersectionGap(
       }>
     }>
   }
+
+  assertTaskOk(json.tasks?.[0], 'domain_intersection')
 
   const items = json.tasks?.[0]?.result?.[0]?.items ?? []
 
