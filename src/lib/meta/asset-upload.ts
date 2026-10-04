@@ -131,3 +131,113 @@ export async function uploadAssetToMeta(
     ? uploadVideoToMeta(adAccountId, asset.storageUrl, accessToken, asset.filename)
     : uploadImageToMeta(adAccountId, asset.storageUrl, accessToken, asset.filename ?? 'asset.jpg')
 }
+
+// ── 等视频转码好 ────────────────────────────────────────────────────────────
+
+export interface WaitVideoOptions {
+  /** 两次查询之间等多久。默认 4 秒。 */
+  intervalMs?: number
+  /** **所有视频共用**的总期限。默认 25 秒。25 秒够不够没有实测依据 —— 不够就如实报，不假装好了。 */
+  timeoutMs?: number
+  /** 单次查询的上限。默认 15 秒。 */
+  requestTimeoutMs?: number
+  /** 可注入，测试用。 */
+  sleep?: (ms: number) => Promise<void>
+  now?: () => number
+}
+
+export type WaitVideoResult =
+  | { ok: true }
+  | { ok: false; reason: 'timeout' | 'video_error' | 'fatal'; error: string }
+
+type Probe = { state: 'ready' } | { state: 'wait' } | { state: 'fatal'; error: string }
+
+/**
+ * Meta 的「临时性」错误码：限流、临时故障。它们常常是 **HTTP 400**，不是 429 ——
+ * 只看状态码会把限流当成致命错误。1 未知错误、2 临时故障、4 应用限流、17 用户限流、
+ * 32 主页限流、341 临时故障、613 调用过多、80004 广告类限流。
+ */
+const TRANSIENT_CODES = new Set([1, 2, 4, 17, 32, 341, 613, 80004])
+
+function classifyHttpError(httpStatus: number, json: unknown): Probe {
+  const err = (json as { error?: { code?: unknown; is_transient?: unknown; message?: unknown } } | null)?.error
+  const code = typeof err?.code === 'number' ? err.code : undefined
+  if (code === 190) return { state: 'fatal', error: '这个客户的 Meta 授权失效了（code 190），要重新授权' }
+  if (httpStatus === 429 || httpStatus >= 500) return { state: 'wait' }
+  if (err?.is_transient === true || (code !== undefined && TRANSIENT_CODES.has(code))) {
+    return { state: 'wait' }
+  }
+  // 响应体读不懂的 4xx 分类不了 —— 白等没意义，直接报。
+  const why = typeof err?.message === 'string' ? err.message : '返回内容读不懂'
+  return { state: 'fatal', error: `Meta 拒绝查询视频 HTTP ${httpStatus}：${why.slice(0, 200)}` }
+}
+
+async function probeVideo(videoId: string, accessToken: string, requestTimeoutMs: number): Promise<Probe> {
+  if (!videoId) return { state: 'fatal', error: '有一条创意没有视频号' }
+  const params = new URLSearchParams({ fields: 'status', access_token: accessToken })
+  let res: Response
+  try {
+    res = await fetch(`${GRAPH_BASE}/${videoId}?${params}`, { signal: AbortSignal.timeout(requestTimeoutMs) })
+  } catch {
+    return { state: 'wait' } // 网络抖动 / 超时：下一轮再试，总期限兜底
+  }
+  const text = await res.text().catch(() => '')
+  let json: unknown = null
+  try { json = JSON.parse(text) } catch { /* 读不懂就保持 null */ }
+  if (!res.ok) return classifyHttpError(res.status, json)
+
+  const st = (json as { status?: { video_status?: unknown } } | null)?.status?.video_status
+  if (st === 'ready') return { state: 'ready' }
+  if (st === 'error') return { state: 'fatal', error: `视频 ${videoId} 转码失败（Meta 报 error）` }
+  // processing / uploading / 字段缺失 / 没见过的值：一律当「还没好」。缺失不等于好了。
+  return { state: 'wait' }
+}
+
+/** 不是有限数 / 太小的配置当没给：NaN 会让期限永远不到（热循环），0 会连着打 Graph 直到限流。 */
+const sane = (n: number | undefined, fallback: number, min: number): number =>
+  typeof n === 'number' && Number.isFinite(n) && n >= min ? n : fallback
+
+/**
+ * 等视频转码好再建广告。**不假装同步完成**：到期还没好就返回失败，由上游如实告诉人
+ * 「广告没建，稍后重试」。放在任何写操作之前调用，所以失败时账户里什么都没建。
+ *
+ * 每一轮对所有没好的视频**同时**查：串行的话 4 条视频各卡 15 秒，一轮就是 60 秒，
+ * 远超总期限（期限只在整轮结束后才检查）。单次请求的超时也随剩余期限收紧。
+ */
+export async function waitForVideoReady(
+  videoIds: readonly string[],
+  accessToken: string,
+  opts: WaitVideoOptions = {},
+): Promise<WaitVideoResult> {
+  const intervalMs = sane(opts.intervalMs, 4_000, 500)
+  const timeoutMs = sane(opts.timeoutMs, 25_000, 1_000)
+  const requestTimeoutMs = sane(opts.requestTimeoutMs, 15_000, 1_000)
+  const now = opts.now ?? Date.now
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+
+  const startedAt = now()
+  const pending = new Set(videoIds)
+  while (pending.size > 0) {
+    const perRequest = Math.max(1_000, Math.min(requestTimeoutMs, startedAt + timeoutMs - now()))
+    const ids = [...pending]
+    const probes = await Promise.all(ids.map((id) => probeVideo(id, accessToken, perRequest)))
+    for (const [k, probe] of probes.entries()) {
+      if (probe.state === 'fatal') {
+        return { ok: false, reason: probe.error.includes('转码失败') ? 'video_error' : 'fatal', error: probe.error }
+      }
+      if (probe.state === 'ready') pending.delete(ids[k])
+    }
+    if (pending.size === 0) break
+    const left = startedAt + timeoutMs - now()
+    if (left <= 0) {
+      const secs = Math.round((now() - startedAt) / 1000)
+      return {
+        ok: false,
+        reason: 'timeout',
+        error: `等了 ${secs} 秒，视频还在转码（${[...pending].join('、')}）—— 广告没建，稍后重试`,
+      }
+    }
+    await sleep(Math.min(intervalMs, left))
+  }
+  return { ok: true }
+}
