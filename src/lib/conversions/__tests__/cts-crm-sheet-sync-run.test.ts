@@ -462,6 +462,6 @@ describe('分块（2026-09-22，conversion-daily-pipeline 拆块）', () => {
 function emptyLike(): CtsCrmSyncSummary {
   return {
     totalCrmRows: 0, excludedNoPhone: 0, excludedByNotes: 0, excludedNoInterest: 0, rejectedStaleLeads: 0, excludedNoDate: 0, insertedLeads: 0, insertedPurchases: 0,
-    skippedAlreadySynced: 0, heldForManualReview: [], contactNotLinked: 0, insertErrors: [], cappedAtMaxInserts: false,
+    skippedAlreadySynced: 0, heldForManualReview: [], contactNotLinked: 0, insertErrors: [], cappedAtMaxInserts: false, qualifiedFromConversation: 0, conversationReadFailed: 0, skippedPastWindow: 0,
   }
 }

@@ -392,6 +392,7 @@ describe('decideLane（纯判定）', () => {
     previouslyRejected: false,
     recipientCount: 1,
     ownDomains: ['own.example'],
+    channelBound: false,
   }
 
   it('齐全 → auto', () => expect(decideLane(base).lane).toBe('auto'))
