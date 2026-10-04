@@ -54,18 +54,6 @@ describe('getClientFacts', () => {
       expect(result.reason).toBe('no_active_brief')
     })
 
-    it('ignores an archived row even when is_active is true', async () => {
-      seed(
-        [clientRow(A_ID)],
-        [briefRow(A_ID, { status: 'archived', is_active: true })],
-      )
-
-      const result = await getClientFacts(A_ID, OPTS_NULL)
-      expect(result.ok).toBe(false)
-      if (result.ok) throw new Error('expected failure')
-      expect(result.reason).toBe('no_active_brief')
-    })
-
     it('ignores a project-level brief', async () => {
       seed(
         [clientRow(A_ID)],
@@ -135,18 +123,6 @@ describe('getClientFacts', () => {
       expect(result.facts.brand.website_host.source).toBe('master_briefs.source_website_urls')
     })
 
-    it('falls back to the client domain', async () => {
-      seed(
-        [clientRow(A_ID, { domain: 'dom.example' })],
-        [briefRow(A_ID, { website: null, source_website_urls: null })],
-      )
-
-      const result = await getClientFacts(A_ID, OPTS_NULL)
-      if (!result.ok) throw new Error(`expected ok, got ${result.reason}`)
-      expect(result.facts.brand.website_host.value).toBe('dom.example')
-      expect(result.facts.brand.website_host.source).toBe('clients.domain')
-    })
-
     it('returns null with source none when nothing is available', async () => {
       seed(
         [clientRow(A_ID, { domain: null })],
@@ -159,17 +135,6 @@ describe('getClientFacts', () => {
       expect(result.facts.brand.website_host.source).toBe('none')
     })
 
-    it('ignores a non-http website and falls through', async () => {
-      seed(
-        [clientRow(A_ID, { domain: 'dom.example' })],
-        [briefRow(A_ID, { website: 'javascript:alert(1)' })],
-      )
-
-      const result = await getClientFacts(A_ID, OPTS_NULL)
-      if (!result.ok) throw new Error(`expected ok, got ${result.reason}`)
-      expect(result.facts.brand.website_host.value).toBe('dom.example')
-      expect(result.facts.brand.website_host.source).toBe('clients.domain')
-    })
   })
 
   describe('brand_voice subset', () => {

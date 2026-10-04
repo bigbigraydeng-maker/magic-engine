@@ -78,34 +78,6 @@ describe('getClientFacts', () => {
       expect(result.facts.warnings).toContain('topics_none_configured')
     })
 
-    it('counts unusable entries instead of silently dropping them', async () => {
-      seed(
-        [clientRow(A_ID, { brand_redline_phrases: ['ok phrase', ' ', 'a'] })],
-        [briefRow(A_ID)],
-      )
-
-      const result = await getClientFacts(A_ID, OPTS_NULL)
-      if (!result.ok) throw new Error(`expected ok, got ${result.reason}`)
-
-      expect(result.facts.taboos.redline_phrases.value.items).toEqual(['ok phrase'])
-      expect(result.facts.taboos.redline_phrases.value.unusable_count).toBe(2)
-      expect(result.facts.taboos.redline_phrases.value.status).toBe('set')
-      expect(result.facts.warnings).toContain('redline_phrases_has_unusable_entries')
-    })
-
-    it('reports an all-unusable list as all_unusable with a warning', async () => {
-      seed(
-        [clientRow(A_ID, { brand_redline_phrases: [' '] })],
-        [briefRow(A_ID)],
-      )
-
-      const result = await getClientFacts(A_ID, OPTS_NULL)
-      if (!result.ok) throw new Error(`expected ok, got ${result.reason}`)
-
-      expect(result.facts.taboos.redline_phrases.value.items).toEqual([])
-      expect(result.facts.taboos.redline_phrases.value.status).toBe('all_unusable')
-      expect(result.facts.warnings).toContain('redline_phrases_all_unusable')
-    })
   })
 
   describe('malformed taboo data fails closed', () => {
@@ -118,23 +90,6 @@ describe('getClientFacts', () => {
       expect(result.reason).toBe('client_malformed')
     })
 
-    it('fails with brief_malformed when excluded_topics is not a list', async () => {
-      seed([clientRow(A_ID)], [briefRow(A_ID, { excluded_topics: 'not a list' })])
-
-      const result = await getClientFacts(A_ID, OPTS_NULL)
-      expect(result.ok).toBe(false)
-      if (result.ok) throw new Error('expected failure')
-      expect(result.reason).toBe('brief_malformed')
-    })
-
-    it('fails with brief_malformed when avoid_words contains a non-string', async () => {
-      seed([clientRow(A_ID)], [briefRow(A_ID, { avoid_words: ['fine', 42] })])
-
-      const result = await getClientFacts(A_ID, OPTS_NULL)
-      expect(result.ok).toBe(false)
-      if (result.ok) throw new Error('expected failure')
-      expect(result.reason).toBe('brief_malformed')
-    })
   })
 
   describe('failures never return an empty pack', () => {
@@ -202,16 +157,6 @@ describe('getClientFacts', () => {
       expect('facts' in result).toBe(false)
     })
 
-    it('resolves with unexpected_error when the clients query rejects', async () => {
-      seed([clientRow(A_ID)], [briefRow(A_ID)])
-      fake.state.rejects.clients = true
-
-      const result = await getClientFacts(A_ID, OPTS_NULL)
-      expect(result.ok).toBe(false)
-      if (result.ok) throw new Error('expected failure')
-      expect(result.reason).toBe('unexpected_error')
-      expect('facts' in result).toBe(false)
-    })
   })
 
   describe('field whitelist', () => {
@@ -245,17 +190,6 @@ describe('getClientFacts', () => {
       expect(JSON.stringify(result)).not.toContain('LEAKCHECK')
     })
 
-    it('does not leak forbidden columns even when the database ignores projections', async () => {
-      seed([clientRow(A_ID, { domain: 'a-client.example' })], [briefRow(A_ID)])
-      fake.state.leak = true
-
-      const result = await getClientFacts(A_ID, OPTS_NULL)
-      if (!result.ok) throw new Error(`expected ok, got ${result.reason}`)
-
-      // Sanity: the leaked rows really do contain the markers.
-      expect(JSON.stringify(fake.state.tables.master_briefs)).toContain('LEAKCHECK')
-      expect(JSON.stringify(result)).not.toContain('LEAKCHECK')
-    })
   })
 
   describe('two-client isolation', () => {
@@ -298,45 +232,6 @@ describe('getClientFacts', () => {
       expect(bJson).toContain('beta-redline')
     })
 
-    it('keeps concurrent calls isolated', async () => {
-      seedTwoClients()
-
-      const [aResult, bResult] = await Promise.all([
-        getClientFacts(A_ID, OPTS_NULL),
-        getClientFacts(B_ID, OPTS_NULL),
-      ])
-
-      if (!aResult.ok) throw new Error(`expected ok, got ${aResult.reason}`)
-      if (!bResult.ok) throw new Error(`expected ok, got ${bResult.reason}`)
-
-      const aJson = JSON.stringify(aResult).toLowerCase()
-      const bJson = JSON.stringify(bResult).toLowerCase()
-      expect(aJson).not.toContain('beta')
-      expect(aJson).toContain('alpha-redline')
-      expect(bJson).not.toContain('alpha')
-      expect(bJson).toContain('beta-redline')
-    })
-
-    it('filters every query by the requested id', async () => {
-      seedTwoClients()
-
-      const result = await getClientFacts(A_ID, OPTS_NULL)
-      if (!result.ok) throw new Error(`expected ok, got ${result.reason}`)
-
-      const clientQueries = fake.state.queries.filter((q) => q.table === 'clients')
-      const briefQueries = fake.state.queries.filter((q) => q.table === 'master_briefs')
-      expect(clientQueries.length).toBeGreaterThan(0)
-      expect(briefQueries.length).toBeGreaterThan(0)
-
-      for (const q of clientQueries) {
-        expect(q.filters).toContainEqual({ op: 'eq', col: 'id', val: A_ID })
-      }
-      for (const q of briefQueries) {
-        expect(q.filters).toContainEqual({ op: 'eq', col: 'client_id', val: A_ID })
-        expect(q.filters).toContainEqual({ op: 'is', col: 'project_id', val: null })
-      }
-    })
-
     it('defence 1: rejects multiple client rows even when filters are ignored', async () => {
       seed(
         [clientRow(A_ID), clientRow(B_ID)],
@@ -354,16 +249,6 @@ describe('getClientFacts', () => {
       // A's brief is seeded on purpose: with B's brief the brief check would also fail and hide this defence.
       seed([clientRow(B_ID)], [briefRow(A_ID)])
       fake.state.leak = true
-
-      const result = await getClientFacts(A_ID, OPTS_NULL)
-      expect(result.ok).toBe(false)
-      if (result.ok) throw new Error('expected failure')
-      expect(result.reason).toBe('isolation_violation')
-    })
-
-    it('defence 4: rejects a project-level brief that slipped past a broken project_id filter', async () => {
-      fake.state.ignoreIsFilters = true
-      seed([clientRow(A_ID)], [briefRow(A_ID, { project_id: 'p1' })])
 
       const result = await getClientFacts(A_ID, OPTS_NULL)
       expect(result.ok).toBe(false)

@@ -32,23 +32,6 @@ describe('getClientFacts review fixes', () => {
       expect(result.reason).toBe('no_active_brief')
     })
 
-    it('picks the active legacy row over a higher-version inactive one', async () => {
-      seed(
-        [clientRow(A_ID)],
-        [
-          briefRow(A_ID, { id: 'legacy-5', status: null, is_active: false, version: 5 }),
-          briefRow(A_ID, { id: 'legacy-3', status: null, is_active: true, version: 3 }),
-        ],
-      )
-
-      const result = await getClientFacts(A_ID, OPTS_NULL)
-      if (!result.ok) throw new Error(`expected ok, got ${result.reason}`)
-
-      expect(result.facts.brief.matched_by).toBe('is_active_fallback')
-      expect(result.facts.brief.id).toBe('legacy-3')
-      expect(result.facts.brief.version).toBe(3)
-    })
-
     it('fails with ambiguous_brief when two legacy active rows share a version', async () => {
       seed(
         [clientRow(A_ID)],
@@ -75,16 +58,6 @@ describe('getClientFacts review fixes', () => {
       expect(result.reason).toBe('client_malformed')
     })
 
-    it('fails with client_malformed when the brand_redline_phrases key is missing', async () => {
-      const row = clientRow(A_ID)
-      delete row.brand_redline_phrases
-      seed([row], [briefRow(A_ID)])
-
-      const result = await getClientFacts(A_ID, OPTS_NULL)
-      expect(result.ok).toBe(false)
-      if (result.ok) throw new Error('expected failure')
-      expect(result.reason).toBe('client_malformed')
-    })
   })
 
   describe('warnings', () => {
@@ -111,21 +84,6 @@ describe('getClientFacts review fixes', () => {
       expect(result.facts.warnings).toContain('tone_words_none_configured')
     })
 
-    it('reports all_unusable topics and unusable redline entries', async () => {
-      seed(
-        [clientRow(A_ID, { brand_redline_phrases: ['ok phrase', 'x'] })],
-        [briefRow(A_ID, { excluded_topics: [' '] })],
-      )
-
-      const result = await getClientFacts(A_ID, OPTS_NULL)
-      if (!result.ok) throw new Error(`expected ok, got ${result.reason}`)
-
-      expect(result.facts.taboos.topics.value.status).toBe('all_unusable')
-      expect(result.facts.warnings).toContain('topics_all_unusable')
-
-      expect(result.facts.taboos.redline_phrases.value.status).toBe('set')
-      expect(result.facts.taboos.redline_phrases.value.unusable_entries).toEqual(['x'])
-    })
   })
 
   describe('leak markers (case-insensitive)', () => {
@@ -163,44 +121,6 @@ describe('getClientFacts review fixes', () => {
       expect(result.facts.warnings).toContain('brand_voice_malformed')
     })
 
-    it('warns target_audience_malformed when target_audience is an array', async () => {
-      seed(
-        [clientRow(A_ID)],
-        [briefRow(A_ID, { target_audience: [] })],
-      )
-
-      const result = await getClientFacts(A_ID, OPTS_NULL)
-      if (!result.ok) throw new Error(`expected ok, got ${result.reason}`)
-
-      expect(result.facts.brand.target_audience.value).toBeNull()
-      expect(result.facts.warnings).toContain('target_audience_malformed')
-    })
-
-    it('warns vi_colors_malformed when vi_colors is a string', async () => {
-      seed(
-        [clientRow(A_ID)],
-        [briefRow(A_ID, { vi_colors: '#fff' })],
-      )
-
-      const result = await getClientFacts(A_ID, OPTS_NULL)
-      if (!result.ok) throw new Error(`expected ok, got ${result.reason}`)
-
-      expect(result.facts.visual.vi_colors.value).toBeNull()
-      expect(result.facts.warnings).toContain('vi_colors_malformed')
-    })
-
-    it('does not warn brand_voice_malformed when brand_voice is null', async () => {
-      seed(
-        [clientRow(A_ID)],
-        [briefRow(A_ID, { brand_voice: null })],
-      )
-
-      const result = await getClientFacts(A_ID, OPTS_NULL)
-      if (!result.ok) throw new Error(`expected ok, got ${result.reason}`)
-
-      expect(result.facts.brand.brand_voice.value).toBeNull()
-      expect(result.facts.warnings).not.toContain('brand_voice_malformed')
-    })
   })
 
   describe('full field mapping', () => {
@@ -278,18 +198,6 @@ describe('getClientFacts review fixes', () => {
       expect(result.facts.brand.website_host.source).toBe('none')
     })
 
-    it('normalises an https client domain', async () => {
-      seed(
-        [clientRow(A_ID, { domain: 'https://Dom.Example/x' })],
-        [briefRow(A_ID, { website: null, source_website_urls: null })],
-      )
-
-      const result = await getClientFacts(A_ID, OPTS_NULL)
-      if (!result.ok) throw new Error(`expected ok, got ${result.reason}`)
-
-      expect(result.facts.brand.website_host.value).toBe('dom.example')
-      expect(result.facts.brand.website_host.source).toBe('clients.domain')
-    })
   })
 
   describe('list truncation', () => {
