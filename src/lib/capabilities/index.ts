@@ -26,6 +26,7 @@ import {
   createAddRetargetingAdsetCapability,
   createBudgetMovePlanCapability,
   createSwapCreativeCapability,
+  createActivatePausedDraftStubCapability,
 } from './ads/deferred-to-human'
 
 /**
@@ -55,6 +56,8 @@ export function createCapabilities(
     'ads.budget_move_plan':       createBudgetMovePlanCapability(sb),
     'ads.add_retargeting_adset':  createAddRetargetingAdsetCapability(sb),
     'ads.swap_creative':          createSwapCreativeCapability(sb),
+    // 开启暂停广告：真实现（预检/开启/回读/补暂停）在后续轮次替换这个 stub。
+    'ads.activate_paused_draft':  createActivatePausedDraftStubCapability(sb),
   }
 }
 

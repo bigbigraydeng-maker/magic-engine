@@ -5,6 +5,7 @@
  *   · ads.budget_move_plan       —— 挪预算（先减后加、总额不变、多腿事务）
  *   · ads.add_retargeting_adset  —— 新建再营销广告组（要建广告组、绑受众、绑素材）
  *   · ads.swap_creative          —— 给广告换一个已批准的素材（要建 creative、切换 ad）
+ *   ·  ads.activate_paused_draft  —— 开启暂停广告（真实现在后面的轮次替换这个 stub）
  *
  * 🔴 为什么先做 stub 而不是真实执行：
  *    这三个都要跨多个 Meta 对象、跨多次 API、涉及 audience/creative 域的封装
@@ -38,6 +39,8 @@ const REASON: Readonly<Record<string, string>> = {
     '新建再营销广告组要跨 audience/adset/ad 三层，本轮先不上线自动执行；PM 手动在 Ads Manager 里建',
   'ads.swap_creative':
     '换素材要建新 creative 再切换，本轮先不上线自动执行；PM 手动在 Ads Manager 里换',
+  'ads.activate_paused_draft':
+    '开启暂停广告的真实执行体还没上线，本轮不支持自动开启；请在 Meta 广告后台手动开启，或等开启流程上线',
 }
 
 function deferredStep(actionKey: ActionKey) {
@@ -105,4 +108,8 @@ export function createAddRetargetingAdsetCapability(sb: SupabaseClient): Capabil
 
 export function createSwapCreativeCapability(sb: SupabaseClient): CapabilityImplementation {
   return createDeferredCapability('ads.swap_creative', sb)
+}
+
+export function createActivatePausedDraftStubCapability(sb: SupabaseClient): CapabilityImplementation {
+  return createDeferredCapability('ads.activate_paused_draft', sb)
 }

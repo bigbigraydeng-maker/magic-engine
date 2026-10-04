@@ -407,6 +407,84 @@ const ADS_SWAP_CREATIVE: ActionDefinition<'ads.swap_creative'> = {
   allowedPurposes: ['growth'],
 }
 
+/**
+ * `ads.activate_paused_draft` —— 把一条已建好的暂停广告（系列/广告组/广告 三层）开启。
+ *
+ * 🔴 `human_only`：开启 = 真花钱 + 真产生私信对话，必须授权人点头，不走信封自治。
+ * 🔴 `providerIdempotency: 'supported'`：把状态设成 ACTIVE 是幂等置位，重复设不会产生第二次副作用。
+ * 🔴 `rollback: 'provider_native'`：撤回 = 把三层改回 PAUSED，同样是幂等状态置位，
+ *    capability 必须提供 rollback 处理函数（Gateway 对 provider_native 强制要求）。
+ * 🔴 `requiredCapabilityTier: 'admin'`：只约束通用审批口，真正的授权人名单在
+ *    `/activate` 路由与 capability 预检里强制。
+ * 🔴 `allowedPurposes: ['maintenance']` 而不是 growth：和 `ads.auto_pause_on_d3` 同理 ——
+ *    growth 要求挂 goal_id，而多数客户的 Goal 层是空的，硬凑一个目标比不挂更危险。
+ *    权宜之计，台账卡复查。
+ */
+const ADS_ACTIVATE_PAUSED_DRAFT: ActionDefinition<'ads.activate_paused_draft'> = {
+  actionKey: 'ads.activate_paused_draft',
+  version: 1,
+  title: '开启一条已建好的暂停广告（需授权人批准，会真花钱）',
+  inputSchema: {
+    type: 'object',
+    required: [
+      'draft_action_id',
+      'draft_hash',
+      'ad_account_id',
+      'campaign_id',
+      'ad_set_id',
+      'ad_ids',
+      'daily_budget_cents',
+      'currency',
+      'cap_cents_snapshot',
+      'meta_fingerprint',
+    ],
+    properties: {
+      draft_action_id: { type: 'string' },
+      draft_hash: { type: 'string' },
+      ad_account_id: { type: 'string' },
+      campaign_id: { type: 'string' },
+      ad_set_id: { type: 'string' },
+      ad_ids: { type: 'array' },
+      daily_budget_cents: { type: 'number' },
+      currency: { type: 'string' },
+      cap_cents_snapshot: { type: 'number' },
+      meta_fingerprint: { type: 'object' },
+    },
+    additionalProperties: false,
+  },
+  outputSchema: {
+    type: 'object',
+    required: ['activated', 'verified_status'],
+    properties: {
+      activated: { type: 'boolean' },
+      verified_status: { type: 'string' },
+      layers: { type: 'object' },
+    },
+    additionalProperties: true,
+  },
+  capability: 'ads.activate_paused_draft',
+  risk: 'high',
+  sideEffect: 'outward',
+  reversible: true,
+  outwardAuthorization: {
+    declaredIn: 'docs/specs/2026-10-04-ads-activation-gate.md',
+    approval: { mode: 'human_only' },
+    rollback: 'provider_native',
+  },
+  idempotency: { keyFields: ['draft_action_id', 'draft_hash'], scope: 'client' },
+  costModel: {
+    kind: 'fixed',
+    estimate: () => 0,
+    stepCeilingUsd: zeroCeilings(['snapshot_pre', 'apply', 'readback']),
+  },
+  providerIdempotency: 'supported',
+  retryPolicy: { maxAttempts: 3, backoff: 'exponential', baseMs: 1000 },
+  verification: { method: 'ads_readback_integrity', delayMs: 0 },
+  requiredCapabilityTier: 'admin',
+  steps: ['snapshot_pre', 'apply', 'readback'],
+  allowedPurposes: ['maintenance'],
+}
+
 export const ADS_ACTION_DEFINITIONS = {
   'ads.pause_unit': ADS_PAUSE_UNIT,
   'ads.pause_campaign': ADS_PAUSE_CAMPAIGN,
@@ -416,4 +494,5 @@ export const ADS_ACTION_DEFINITIONS = {
   'ads.budget_move_plan': ADS_BUDGET_MOVE_PLAN,
   'ads.add_retargeting_adset': ADS_ADD_RETARGETING_ADSET,
   'ads.swap_creative': ADS_SWAP_CREATIVE,
+  'ads.activate_paused_draft': ADS_ACTIVATE_PAUSED_DRAFT,
 } as const

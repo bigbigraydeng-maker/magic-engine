@@ -44,6 +44,9 @@ export type ActionKey =
   | 'ads.budget_move_plan'
   | 'ads.add_retargeting_adset'
   | 'ads.swap_creative'
+  // 人工授权后开启暂停草案：human_only + outward，不在信封内自动执行。
+  // 开启 = 真花钱 + 真产生私信对话，必须授权人点头，没有 bounded 这条路。
+  | 'ads.activate_paused_draft'
 
 /** 一个 run 为了什么而跑。决定它需不需要挂 Goal。 */
 export type ActionPurpose =
