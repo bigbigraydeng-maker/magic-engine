@@ -51,6 +51,17 @@ export function readLenientList(value: unknown, warnings: string[], label: strin
   return result.slice(0, MAX_BRAND_LIST_ITEMS)
 }
 
+/** Zero-width / soft-hyphen characters are invisible: left in, a redline phrase would silently never match. */
+const INVISIBLE_CHARS = /[\u200B-\u200F\u2060\uFEFF\u00AD]/g
+
+/** ASCII control characters (newlines included) become a space so one entry can never span lines. */
+const CONTROL_CHARS = /[\u0000-\u001F\u007F]+/g
+
+/** Clean one taboo entry without truncating it (truncation would weaken a hard scan). */
+function cleanTabooEntry(entry: string): string {
+  return entry.replace(INVISIBLE_CHARS, '').replace(CONTROL_CHARS, ' ').replace(/\s+/g, ' ').trim()
+}
+
 function isUnusableTabooEntry(entry: string): boolean {
   const normalized = entry.normalize('NFKC').replace(NON_WORD_CHARS, '')
   return normalized.length < MIN_TABOO_LEN
@@ -66,15 +77,15 @@ export function buildTier(lists: ReadonlyArray<readonly string[]>): TabooTier {
   const seen = new Set<string>()
   let unusableCount = 0
   for (const entry of raw) {
-    if (isUnusableTabooEntry(entry)) {
+    const cleaned = cleanTabooEntry(entry)
+    if (isUnusableTabooEntry(cleaned)) {
       unusableCount += 1
       continue
     }
-    const trimmed = entry.trim()
-    const key = trimmed.toLowerCase()
+    const key = cleaned.toLowerCase()
     if (seen.has(key)) continue
     seen.add(key)
-    items.push(trimmed)
+    items.push(cleaned)
   }
   return { items, status, unusable_count: unusableCount }
 }

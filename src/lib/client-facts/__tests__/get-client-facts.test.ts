@@ -16,10 +16,9 @@ interface FakeResult {
   error: FakeError | null
 }
 
-// A table-modelled fake of the supabase client. Unmodelled tables throw. It really executes
-// eq / is / order / limit and projects only the selected columns, exactly like PostgREST.
-// `leak` mode ignores every filter and column projection (a deliberately broken database)
-// so each defence inside getClientFacts can be tested on its own.
+// Table-modelled fake of the supabase client (unmodelled tables throw). It executes eq / is /
+// order / limit and projects selected columns like PostgREST; `leak` mode ignores every filter
+// and projection (a broken database) so each defence inside getClientFacts is tested alone.
 const fake = vi.hoisted(() => {
   const CLIENT_COLUMNS = ['id', 'name', 'domain', 'brand_redline_phrases']
   const BRIEF_COLUMNS = [
@@ -94,9 +93,9 @@ vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: (t: string) => fake.fr
 
 import { getClientFacts } from '../get-client-facts'
 
-// A real client id shape: version and variant digits are zero, so it must be accepted.
-const A_ID = 'c0000000-0000-0000-0000-000000000000'
-const B_ID = 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84'
+// Synthetic ids; A has zero version/variant digits (a real id shape) and must be accepted.
+const A_ID = 'a0000000-0000-0000-0000-000000000000'
+const B_ID = 'b1111111-1111-4111-8111-111111111111'
 
 const OPTS_NULL = { callerClientId: null }
 
@@ -158,7 +157,6 @@ function seed(clients: Row[], briefs: Row[]): void {
   fake.state.tables.clients = clients
   fake.state.tables.master_briefs = briefs
 }
-
 beforeEach(() => {
   fake.state.tables = { clients: [], master_briefs: [] }
   fake.state.errors = {}

@@ -103,6 +103,7 @@ export type ClientFactsFailureReason =
 
 export type ClientFactsResult =
   | { ok: true; facts: ClientFacts }
+  /** `detail` may carry raw database error text: server logs only, never return it to a browser. */
   | { ok: false; reason: ClientFactsFailureReason; detail?: string }
 
 export interface GetClientFactsOptions {

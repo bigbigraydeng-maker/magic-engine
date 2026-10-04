@@ -1,6 +1,6 @@
 export interface BriefActivationRow {
   id: string
-  status: string | null
+  status?: string | null
   is_active: boolean | null
   project_id?: string | null
 }
@@ -58,7 +58,7 @@ export function classifyBriefActivation(rows: readonly BriefActivationRow[]): Br
     if (row.is_active === true) {
       isActiveIds.push(row.id)
       if (row.status === 'draft') draftWithIsActiveIds.push(row.id)
-      if (row.status === null) legacyNullStatusIsActiveIds.push(row.id)
+      if (row.status === null || row.status === undefined) legacyNullStatusIsActiveIds.push(row.id)
     }
   }
 
