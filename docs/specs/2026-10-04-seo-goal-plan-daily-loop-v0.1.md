@@ -204,7 +204,7 @@ CTS 谷歌口径：近三个完整周点击 268 / 269 / 266，曝光 ~14.7k / 13
 | 计划项类型（`action_type`） | 来源机会 | 谁做 | 做到哪算完成（核验） |
 |---|---|---|---|
 | `seo.plan.diagnose_page` 诊断某页/某词 | 页级点击率偏低、排名下跌、没收录 | **机器自做**：抓 SERP 前三、核对标题长度、查同题自家页、查收录原因，产出一份结论写回卡 | **产物字段齐全才算**：`serp_top3_urls`、`title_length`、`own_pages_same_topic`、`fetched_at` 四项都在；缺任何一项 → 结论"判不了（数据不全，本轮不动）"，**不是**完成，也不当 0 放行（自己写结论自己验是软承诺，已否决） |
-| `seo.plan.draft_post` 为某词出文章草稿 | 近机会词（该词排名页不是博客、无自家兄弟页抢）、缺口词 | **机器出稿 → 人点头 → 走现有博客发布管线** | `blog_posts` 出现 `primary_keyword/volume/kd` 与计划一致的行且状态走到 `published`，并且线上网址 200 |
+| `seo.plan.draft_post` 为某词出文章草稿 | 近机会词（该词排名页不是博客、无自家兄弟页抢）、缺口词 | **机器出稿 → 人点头 → 走现有博客发布管线** | `blog_posts` 出现 `primary_keyword/keyword_volume/keyword_kd`（现有真实列名）与计划一致的行且状态走到 `published`，并且线上网址 200 |
 | `seo.plan.strengthen_page` 加强某页（补小节/加内链/往枢纽汇链） | 近机会词（已有页在排但内容不全）、自相残杀 | **只出方案，人做**（手册 §四：加内链/动结构必须人点头）；方案含 what / how / 直达链接 | 重新抓取该页，方案中指定的链接/小节**真的出现**（`link_present`/`text_present`）。抓取被 CDN/反爬拦住（手册 §三）→ "没测成"，不是通过也不是失败；需补一个**只读重抓封装**（现有站点重抓只有按需接口） |
 | `seo.plan.consolidate_pages` 合并/规范网址/跳转 | 自相残杀 | **只出方案，A 级动作不自动**；第 1 阶段只出方案 | 方案被 PM 采纳（decide）后由人执行；核验同上。**PM 不采纳 → 记 `decided_no` + 原因，算"已处置"，但不进"核验完成"计数**（防止拿"不做"充数） |
 | `seo.plan.recheck_rank` 复查目标词排名 | 所有已核验完成的上述项 | **机器自做**：T+14 天与 T+28 天各查一次该词（固定 `depth` 与参数，同词多取一次，手册 §九） | **基线不用周快照**（它只存"当时有排名的词"，且最多滞后 7 天）：**派发当天现场对该词查一次**，把排名、`depth`、取数时间一起写进 `steps_json.baseline`。四态结论：移动≥3 名 / 没动 / 没测成 / **超出查询深度**（基线或复查查不到 ≠ 掉出榜，也 ≠ 没测成，单列） |
@@ -230,7 +230,7 @@ CTS 谷歌口径：近三个完整周点击 268 / 269 / 266，曝光 ~14.7k / 13
 顺序固定：**① 先核验昨天 → ② 再做今天到期的机器活 → ③ 合并人工件 → ④ 写记分牌**。
 - 核验：对所有"待核验"计划项跑 `verify`；通过 → `completed` + `execution_logs(kind='note', meta.verified=true, meta.receipt=…)`（`execution_logs.kind` 库里有约束，只允许 `note/status_change/ai_assist/blocker/adjustment`，不新增 `verified` 值；**先写核验日志、写成功才改状态**，日志写失败则不置完成，避免卡片显示完成却无回执）；人已点完成但核验不过 → 卡保持 `in_progress`（不改状态枚举），在 `execution_logs(kind='note', meta.claimed_unverified=true, meta.verify_failure=…)` 记一条，进记分牌与次日合并条目；该标记即 `claimed_unverified` 的唯一持久化落点，只读日志、不新增状态值。
 - **拦截人工"完成"（P1 修订）**：现有 `src/app/api/clients/[id]/execution/[itemId]/route.ts:133-137` 会把"完成"直接写成 `status='completed'`+`completed_at`，门户也按它统计。WP-3 必须在该路由对"计划项"（`steps_json.loop` 标记存在者）改为：人点完成 → 状态写 `in_progress`、写一条 `execution_logs(kind='note', meta.claimed_done=true)` 并返回"待核验"，**不写 `completed_at`**；只有上面的核验链路（先日志后状态）才能把计划项置为 `completed`。非计划项行为不变。这样"完成"统计只会数到机器核验过的卡，无需新增状态枚举；门户/统计里"待核验"= `in_progress` 且最新 note 带 `claimed_done`。
-- 机器活：`diagnose_page`、`recheck_rank`；再加"草稿生成"（走现有博客引擎，产出 `blog_posts` 草稿并写好 `primary_keyword/volume/kd`）。
+- 机器活：`diagnose_page`、`recheck_rank`；再加"草稿生成"（走现有博客引擎，产出 `blog_posts` 草稿并写好 `primary_keyword/keyword_volume/keyword_kd`）。
 - 合并人工件：当天所有需要人看的东西合并成**一条**（至多 1 条/天），内容 = 每件事的 **what（问题+影响）/ how（点哪里）/ href（直达）**，类型 `review` 车道。
 - 托管：**Inngest**（CLAUDE §3：跨步骤异步 + 外部副作用的默认工作流层）。事件名业务可读：`seo.loop.week_planned` / `seo.loop.item_dispatched` / `seo.loop.item_verified` / `seo.loop.day_closed`；每阶段写机器可读回执（request id、client id、item id、status、provider 花费、`no_publish` 状态、created_at）。**人工点头只推进到下一事件，不等于发布授权**；发布仍走周博客管线现有闸。
   - **回执落点**：`cron_run_logs`（与 `seo-meta-cycle` 同法，任务名 `seo-loop-*`）；记分牌行也写这里。
@@ -279,8 +279,8 @@ CLAUDE §3「能自动就别丢给人；真丢给人，就把话说到他不用�
 | **WP-3 周计划器 + 每日派发器**（含 3a 新目标指标 `seo_gsc_clicks_28d`、公共预算闸、旧机制隔离 §6.3-6~8） | §6.3、§6.4；Inngest 函数 + 回执 + 登记 `cron/registry.ts`；写库只经 `action-persister.ts` 新增导出函数 | Prescribe → Act | **A（新增预算账本表 + RPC 属迁移且涉及资金上限；另若改 `kernel/boundaries.ts` 名单或碰发布/Kernel 注册表同样 A）**，迁移单独 A 级 PR，走子牙+魏征+狄仁杰 | 频率 高 / IMPACT 高（卡 Act，闭环断在这）/ 收入 中 → **P0** | **是**：独立 SEO 周预算账本（表 + 原子预留/结算 RPC） |
 | **WP-4 每日核验器 + 记分牌 + 独立体检** | §6.5、§3；核验器四态；`pm-daily-todo` 里加独立体检（缺行/没跑→开发欠账，7 天→`decide`）；只读重抓封装；与 WP-3 **同批上线** | Check | B | 频率 高 / IMPACT 高（没有它整条链是假的）/ 收入 中 → **P0** | 否 |
 | **WP-5 PM 可见面** | 今日待办新增 1 个 `review` 车道 kind（≤1 条/天）；周报新增"SEO 记分牌 + 放弃清单（带 what/how/href 与一键恢复）"；不改五类规则；查 `pm-todo` 其他 `source='zhuge'` 过滤不误收计划项 | Check→Tune（可见） | B（动 `five-kinds.ts` 穷举表） | 频率 高 / IMPACT 中 / 收入 低 → **P2** | 否 |
-| **WP-2 缺口词与自相残杀体检** | `keyword_gap`、`cannibalization` 接机会池；`seo-agent` 评分接每周；预算闸；竞品名单走客户配置 | Inspect | B（付费调用，预算闸硬上限） | 频率 中 / IMPACT 中 / 收入 中 → **P2** | 否（枚举值与 `priority` 列已由 WP-1 迁移提供，WP-2 依赖 WP-1） |
-| **WP-6 周博客对齐机会** | 草稿必带 `primary_keyword/volume/kd`；**拒稿必须记原因**（新增一个可空列属迁移，需先确认，若加列则单独 A 级迁移 PR）；竞品品牌词拦截 | Act | B（加列则迁移 A） | 频率 中 / IMPACT 中 / 收入 中 → **P2** | **可能**（`blog_posts` 加 `rejection_reason`，需开工时核实现有字段，不在本稿定） |
+| **WP-2 缺口词与自相残杀体检** | `keyword_gap`、`cannibalization` 接机会池；`seo-agent` 评分接每周；预算闸；竞品名单走客户配置 | Inspect | **A**（真实消耗供应商预算：须验证所有调用都经预算闸、重复执行不重复扣额、超限 fail-closed；走子牙+魏征+狄仁杰） | 频率 中 / IMPACT 中 / 收入 中 → **P2** | 否（枚举值与 `priority` 列已由 WP-1 迁移提供，WP-2 依赖 WP-1） |
+| **WP-6 周博客对齐机会** | 草稿必带 `primary_keyword/keyword_volume/keyword_kd`（现有列名）；**拒稿必须记原因**（新增一个可空列属迁移，需先确认，若加列则单独 A 级迁移 PR）；竞品品牌词拦截 | Act | B（加列则迁移 A） | 频率 中 / IMPACT 中 / 收入 中 → **P2** | **可能**（`blog_posts` 加 `rejection_reason`，需开工时核实现有字段，不在本稿定） |
 | **WP-7 泛化** | 第二客户（Oztop 目前暂停，另有其他客户视 PM 优先级） | — | — | 频率 低 / IMPACT 中 / 收入 中 → **P2**（等 CTS 跑稳 4~6 周再评） | 视客户 |
 
 **顺序**：WP-0 → （WP-1a 近机会词 + WP-3 + WP-4 同批）→ WP-5 → WP-2 → WP-6 → WP-7。
@@ -315,10 +315,10 @@ CLAUDE §3「能自动就别丢给人；真丢给人，就把话说到他不用�
 | `loop.wip_cap` | 8 | 在途上限 |
 | `loop.abandon_degrade_rate` | 0.5（连续 2 周） | 放弃率降级阈值 |
 | `loop.weekly_budget_usd` | 2 | 每客户每周 DataForSEO 合计预算 |
-| `loop.competitor_domains` / `loop.brand_aliases` | 空 | 竞品名单（FDE/PM 确认）、品牌别名 |
+| （不新增）竞品名单 / 品牌别名 | — | **直接复用 `clients.competitor_domains` 与 `clients.brand_aliases`**（权威来源，已有读写 API/解析器，CTS 品牌别名已写入）；空则该机会类型停产并记"没测成（缺竞品）"，**不自己兜底选竞品** |
 
 ### 8.3 不做什么（本版明确排除）
-广告 / 社媒 / GEO；改标题验收与 `seo-meta/cycle/`、`clients.seo_config`（只**读**）、PR #2217；自动写客户网站（含内链、canonical、合并页）；"请求谷歌收录"；新建落地页；把执行结论写进经验记忆；SEO Campaign 新类型；新建任何表；第二个客户上线；对 Oztop 的任何动作；承诺"SEO 动作带来了流量"。
+广告 / 社媒 / GEO；改标题验收与 `seo-meta/cycle/`、`clients.seo_config`（只**读**）、PR #2217；自动写客户网站（含内链、canonical、合并页）；"请求谷歌收录"；新建落地页；把执行结论写进经验记忆；SEO Campaign 新类型；除 WP-3 的独立 SEO 周预算账本（及 WP-1 的枚举/列迁移）外不新建表；第二个客户上线；对 Oztop 的任何动作；承诺"SEO 动作带来了流量"。
 
 ### 8.4 仍需 PM 决定的（只列业务口径，一次一个）
 1. ~~CTS 28 天点击量目标~~ —— **PM 2026-10-04 在对话里选「进取」：28 天点击 1,340（基线约 1,070，+25%），周期 2026-10-05～2027-01-03。** 仅为口径决定；建目标（WP-0）尚未执行，基线需按 §6.1 同一取数函数重算后再写入。注意稿内已说明：该档偏紧、不是预测。
