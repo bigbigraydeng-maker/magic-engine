@@ -118,7 +118,7 @@ CTS 谷歌口径：近三个完整周点击 268 / 269 / 266，曝光 ~14.7k / 13
 | 1,2 没执行器 / 空跑 | 每类计划项都标明"谁做"：**机器自做 / 机器出稿等人点头 / 只出方案人做**；不假装有执行器的类型一律不进计划（见 §6.2） | 当场试跑：一轮真实跑完，每类至少一张卡走到核验 |
 | 3 被判人工专属 | 计划项走**自己的派发器**，不借 auto-run 的白名单；人工类单列 | — |
 | 4 没人看见 | 每日最多 1 条合并条目进待办（review 类）+ 周报记分牌；**"计划 / 核验完成 / 判不了 / 过期"每天一行**。**警报不放在这条链自己里面**（链挂了就不会自己报）：由**另一条独立任务 `pm-daily-todo` 里的一道体检**读记分牌——昨天没有记分牌行 / 核验器没跑 → 进"开发欠账"栏（`/dashboard/admin/cron-health#dev-debt`）；同一条警报**连续 7 天没人处理 → 升成 1 条 `decide` 待办**（说清 what/how/href） | 验收：人为停掉派发器一天，次日 `pm-daily-todo` 的输出里出现该欠账；停满 7 天出现 `decide` 条目（试跑时用时间拨快的测试数据验证） |
-| 5 悄悄作废 | 计划项**不再被 14 天自动 superseded**；超 14 天未动 → 明确置 `skipped` 并写 `reason=expired_no_action`，进周报"放弃清单"。**放弃清单每一行都带 what/how/href 和"一键恢复"（置回 pending）**；**连续 2 周放弃率 >50% → 自动降为每周只出 1 条机器自做项，并发 1 条给 PM 的知会**（防止"点不动→在途堆满→系统沉默"） | 记分牌的"过期数"必须等于周报放弃清单行数；降级触发有专测 |
+| 5 悄悄作废 | 计划项**不再被 14 天自动 superseded**；超 14 天未动 → 明确置 `skipped`，`reason=expired_no_action` 写入 `execution_logs.meta.reason` 与 `steps_json.skip_reason`，进周报"放弃清单"。**放弃清单每一行都带 what/how/href 和"一键恢复"（置回 pending）**；**连续 2 周放弃率 >50% → 自动降为每周只出 1 条机器自做项，并发 1 条给 PM 的知会**（防止"点不动→在途堆满→系统沉默"） | 记分牌的"过期数"必须等于周报放弃清单行数；降级触发有专测 |
 | 6 没回写 | **完成 = 核验器查到真实产物**（见 §6.2）；人点"完成"也要过核验，不过的标"自称完成未核验"；**核验有四种独立结论：核验通过 / 核验不过 / 没测成（取数失败、被拦截、窗口缺天）/ 判不了（数据不全，本轮不动）**，后两种不进"完成"也不进"失败" | 记分牌只数"已核验完成"，"没测成/判不了"各占一列；每类核验器各有"没测成"的测试用例 |
 | 7 不挂目标 | 每张计划项写 `initiative_id` + `steps_json.goal_id/plan_week/opportunity_ref`；**顶层同时写 `keyword` 与 `url`**（旧去重键只读顶层，见 §6.3） | 抽查：任一张卡能顺藤摸到目标和机会 |
 | （新增）堆积 | **在途上限**：未完成计划项 ≥ 8 条，当周不再出新项（并受上面"降级"兜底，不会无限沉默） | 记分牌显示在途数 |
@@ -143,7 +143,7 @@ CTS 谷歌口径：近三个完整周点击 268 / 269 / 266，曝光 ~14.7k / 13
 | 环节 | 复用什么 | 新增什么 |
 |---|---|---|
 | 目标 | `goals`（`createGoal`/`activateGoal`）、`goal-current-value-refresh` | 一个新指标 `seo_gsc_clicks_28d`（读 `gsc_page_daily`，近 28 天点击）；GA4 自然会话留作参考 |
-| 机会 | `seo_patrol_findings`（`rule_id` 无约束，免迁移）、`keyword_snapshots`、`seo-agent` 评分、`getKeywordsGap`/`getKeywordIdeas` | 新规则：近机会词、缺口词、页级点击率偏低（见 §5.1） |
+| 机会 | `seo_patrol_findings`（`rule_id` 是 `seo_patrol_rule` 枚举，需迁移扩值，见 WP-1）、`keyword_snapshots`、`seo-agent` 评分、`getKeywordsGap`/`getKeywordIdeas` | 新规则：近机会词、缺口词、页级点击率偏低（见 §5.1） |
 | 计划 | `initiatives`（复用现有类型，每目标 ≤3 条）、`execution_items`（`due_date`、`initiative_id`、`steps_json`、`action_type` 均已有列） | 周一计划器（挑 ≤5 项、排日期） |
 | 执行 | 周博客管线、`seo-meta/cycle`（不碰）、人工点头面 | 每日派发器 + 3 个机器自做小动作 |
 | 核验 | `gsc_page_daily`、URL Inspection（已有，每客户每天用 20 次，配额 2,000）、站点抓取、`keyword_snapshots` | 每日核验器 |
@@ -174,8 +174,8 @@ CTS 谷歌口径：近三个完整周点击 268 / 269 / 266，曝光 ~14.7k / 13
 **不做**：`missing_internal_link` 不修（只对孤儿页触发是已知取舍）；内链机会改由"同题自相残杀"和"枢纽页体检"产出。
 
 ### 5.2 机会池如何落地
-- 写 `seo_patrol_findings`（新 `rule_id`，免迁移；TS 联合类型要加）。**注意**：这张表每天"先清后写"，只存最新一批；机会池要的是"本周候选"，所以**机会被周计划挑中那一刻，把证据快照（词/量/难度/排名/取数日期）抄进计划项 `steps_json.opportunity`**，之后不再依赖这张表。
-- `seo-agent` 的评分与大模型排序接成**每周一次**（不是每日），产出写进机会池的 `priority` 字段；大模型只负责排序与写"为什么"，**量/难度/排名一律只来自 DataForSEO/GSC，不让模型编数字**。
+- 写 `seo_patrol_findings`（新 `rule_id`：**需迁移**给 `seo_patrol_rule` 枚举加 `near_miss_keyword`/`ctr_gap_page`/`keyword_gap`/`cannibalization` 四个值，并同步 TS 联合类型）。**注意**：这张表每天"先清后写"，只存最新一批；机会池要的是"本周候选"，所以**机会被周计划挑中那一刻，把证据快照（词/量/难度/排名/取数日期）抄进计划项 `steps_json.opportunity`**，之后不再依赖这张表。
+- `seo-agent` 的评分与大模型排序接成**每周一次**（不是每日），产出写进机会池的 `priority` 字段（该表**目前没有此列**，由 WP-1 迁移新增可空 `priority INTEGER` 与 `priority_reason TEXT`）；大模型只负责排序与写"为什么"，**量/难度/排名一律只来自 DataForSEO/GSC，不让模型编数字**。
 
 ---
 
@@ -213,7 +213,7 @@ CTS 谷歌口径：近三个完整周点击 268 / 269 / 266，曝光 ~14.7k / 13
 ### 6.3 每周一排活（计划器）
 1. 读 active SEO 目标与本周机会池，按"**潜在点击上限 ÷ 难度成本**"排序，**每周 ≤5 项**；组合规则：至少 1 项机器自做、最多 2 项需人点头（防止一周堆 5 个等人批的）。
 2. **在途上限**：未完成计划项 ≥8 → 本周只补核验与复查，不出新项。
-3. 上周没做完的**顺延一次**；再没动 → 置 `skipped` + `reason=expired_no_action` → 周报"放弃清单"。
+3. 上周没做完的**顺延一次**；再没动 → 置 `skipped`，`reason=expired_no_action` 记入 `execution_logs.meta.reason` + `steps_json.skip_reason` → 周报"放弃清单"。
 4. 每项写：`initiative_id`、`due_date`（周一至周五按"机器自做先、人点头后"错开，避免周五扎堆）、`steps_json={loop:'seo_goal_v1', goal_id, plan_week, opportunity:{keyword,volume,kd,rank,fetched_at,source}, baseline:{rank_at_plan,fetched_at}, verify:{type,params,check_on}}`。
 5. 计划项挂的 `initiative`：每目标最多 3 条（复用现有类型：`demand_generation`=近机会/缺口词出稿；`competitive_defense`=掉名次/自相残杀；`trust_building` 不用）。先归档 CTS 那 16 条过期计划项（第 0 步）。
 6. 与旧机制隔离（子牙必改项，**均为具体条件，不是原则**）：
@@ -227,14 +227,14 @@ CTS 谷歌口径：近三个完整周点击 268 / 269 / 266，曝光 ~14.7k / 13
 
 ### 6.4 每日任务拆分（每个工作日一次）
 顺序固定：**① 先核验昨天 → ② 再做今天到期的机器活 → ③ 合并人工件 → ④ 写记分牌**。
-- 核验：对所有"待核验"计划项跑 `verify`；通过 → `completed` + `execution_logs(kind='verified')`；人已点完成但核验不过 → 记 `claimed_unverified`，进记分牌与次日合并条目。
+- 核验：对所有"待核验"计划项跑 `verify`；通过 → `completed` + `execution_logs(kind='note', meta.verified=true, meta.receipt=…)`（`execution_logs.kind` 库里有约束，只允许 `note/status_change/ai_assist/blocker/adjustment`，不新增 `verified` 值；**先写核验日志、写成功才改状态**，日志写失败则不置完成，避免卡片显示完成却无回执）；人已点完成但核验不过 → 记 `claimed_unverified`，进记分牌与次日合并条目。
 - 机器活：`diagnose_page`、`recheck_rank`；再加"草稿生成"（走现有博客引擎，产出 `blog_posts` 草稿并写好 `primary_keyword/volume/kd`）。
 - 合并人工件：当天所有需要人看的东西合并成**一条**（至多 1 条/天），内容 = 每件事的 **what（问题+影响）/ how（点哪里）/ href（直达）**，类型 `review` 车道。
 - 托管：**Inngest**（CLAUDE §3：跨步骤异步 + 外部副作用的默认工作流层）。事件名业务可读：`seo.loop.week_planned` / `seo.loop.item_dispatched` / `seo.loop.item_verified` / `seo.loop.day_closed`；每阶段写机器可读回执（request id、client id、item id、status、provider 花费、`no_publish` 状态、created_at）。**人工点头只推进到下一事件，不等于发布授权**；发布仍走周博客管线现有闸。
   - **回执落点**：`cron_run_logs`（与 `seo-meta-cycle` 同法，任务名 `seo-loop-*`）；记分牌行也写这里。
   - **`dry_run` 语义**：不写 `execution_items`、不调大模型出稿、不发布；计划预览与"本该核验什么"写进回执 summary；DataForSEO/GSC **只读调用可真调**（花费记入预算闸）。
   - **时区**：周一~周五按 `Pacific/Auckland`。**登记**：新增的 Inngest 定时函数必须同步登记 `src/lib/cron/registry.ts`（孔子稿 §4.1 已指出 `seo-meta-cycle` 就漏登过），否则"夜巡没来"检查是瞎的；Inngest 后台要手动 Sync。
-  - **付费调用统一预算闸（放公共层，不只缺口词）**：所有 DataForSEO 调用——缺口词、派发当天**现场基线**、`diagnose_page` 抓 SERP 前三、T+14/T+28 复查——**走同一个按客户按周的预算账本**，复用 `geo-remeasure/budget-ledger.ts` 的原子扣账写法；超限 → 当项记"没测成（预算）"，不偷偷降级。**单价首轮试跑实测后写进台账，本稿不估。**
+  - **付费调用统一预算闸（放公共层，不只缺口词）**：所有 DataForSEO 调用——缺口词、派发当天**现场基线**、`diagnose_page` 抓 SERP 前三、T+14/T+28 复查——**走同一个按客户按周的 SEO 预算账本**。注意：现有 `geo-remeasure/budget-ledger.ts` 是 GEO 月度账本（写 `geo_client_budgets`/`geo_budget_reservations`，UTC 月键，无预算行即拒绝），**不能直接承载 SEO 周额度，也不得混用 GEO 额度**；因此 WP-3 **新建独立 SEO 周预算账本**（新表 + 原子预留/结算 RPC，周键按 ISO 周、预算行缺失 fail-closed，RLS 用 service-role 模板），只借鉴 GEO 账本的原子扣账写法；超限 → 当项记"没测成（预算）"，不偷偷降级。**单价首轮试跑实测后写进台账，本稿不估。**
   - **GSC 数据滞后**：所有 GSC 取数跳过最近 3 天；核验窗口与基线窗口同口径。
 
 ### 6.5 记分牌（每天一行，PM 不用点开也能看见"有没有在转"）
@@ -272,12 +272,12 @@ CLAUDE §3「能自动就别丢给人；真丢给人，就把话说到他不用�
 
 | WP | 内容 | IMPACT 段 | 风险 | §11 打分 | 迁移 |
 |---|---|---|---|---|---|
-| **WP-0 清场 + 立目标** | 归档 CTS 过期 16 条计划项；25 张僵尸 pending 卡置 `skipped(reason=legacy_cleanup)`；PM 拍定后建并激活 SEO 目标；输出"清了什么/怎么恢复"清单 | Prescribe（目标） | **A 级流程**（改生产数据：PM 在对话里回「合」才动；非代码 PR） | 频率 低 / IMPACT 高 / 收入 中 → **P2**（但它是 WP-3/4 的**前置**，排最前） | 否 |
-| **WP-1 发现规则重做**（其中 1a「近机会词」是 WP-3/4 的前置，**随 P0 链同批提级**） | 新规则 `near_miss_keyword`、`ctr_gap_page`；`not_indexed` 按谷歌原因分类并降级；`keyword_opportunity` 输入改为"机会池"；R1 判据重定义；机会证据快照抄进计划项；`findingsToActions` 显式排除新规则（专测：只产计划项不产旧卡） | Inspect | B | 频率 高 / IMPACT 中 / 收入 中 → **P2**（1a 因前置关系与 WP-3/4 同批做） | 否（`rule_id` 无约束，已查 `pg_constraint`；TS 联合类型要加） |
-| **WP-3 周计划器 + 每日派发器**（含 3a 新目标指标 `seo_gsc_clicks_28d`、公共预算闸、旧机制隔离 §6.3-6~8） | §6.3、§6.4；Inngest 函数 + 回执 + 登记 `cron/registry.ts`；写库只经 `action-persister.ts` 新增导出函数 | Prescribe → Act | **B；若实现要改 `kernel/boundaries.ts` 名单，或碰钱/发布/Kernel 注册表，则升 A，PR 保持草稿直到定级**（子牙意见） | 频率 高 / IMPACT 高（卡 Act，闭环断在这）/ 收入 中 → **P0** | 否 |
+| **WP-0 清场 + 立目标** | 归档 CTS 过期 16 条计划项；25 张僵尸 pending 卡置 `skipped`，原因 `legacy_cleanup` 写入 `execution_logs(kind='status_change', meta.reason)` 并同步 `steps_json.skip_reason`（`execution_items` 无 `reason` 列，PATCH 也不收该字段；WP-0/3/周报统一读这两处）；PM 拍定后建并激活 SEO 目标；输出"清了什么/怎么恢复"清单 | Prescribe（目标） | **A 级流程**（改生产数据：PM 在对话里回「合」才动；非代码 PR） | 频率 低 / IMPACT 高 / 收入 中 → **P2**（但它是 WP-3/4 的**前置**，排最前） | 否 |
+| **WP-1 发现规则重做**（其中 1a「近机会词」是 WP-3/4 的前置，**随 P0 链同批提级**） | 新规则 `near_miss_keyword`、`ctr_gap_page`；`not_indexed` 按谷歌原因分类并降级；`keyword_opportunity` 输入改为"机会池"；R1 判据重定义；机会证据快照抄进计划项；`findingsToActions` 显式排除新规则（专测：只产计划项不产旧卡） | Inspect | **A（含迁移）** | 频率 高 / IMPACT 中 / 收入 中 → **P2**（1a 因前置关系与 WP-3/4 同批做） | **是**：①`ALTER TYPE seo_patrol_rule ADD VALUE` 加 4 个新值（`near_miss_keyword`/`ctr_gap_page`/`keyword_gap`/`cannibalization`，WP-2 的两个也在此一次加完）；②`seo_patrol_findings` 加可空 `priority`、`priority_reason`；③TS 联合类型同步。迁移单独 A 级 PR，走子牙+魏征+狄仁杰 |
+| **WP-3 周计划器 + 每日派发器**（含 3a 新目标指标 `seo_gsc_clicks_28d`、公共预算闸、旧机制隔离 §6.3-6~8） | §6.3、§6.4；Inngest 函数 + 回执 + 登记 `cron/registry.ts`；写库只经 `action-persister.ts` 新增导出函数 | Prescribe → Act | **A（新增预算账本表 + RPC 属迁移且涉及资金上限；另若改 `kernel/boundaries.ts` 名单或碰发布/Kernel 注册表同样 A）**，迁移单独 A 级 PR，走子牙+魏征+狄仁杰 | 频率 高 / IMPACT 高（卡 Act，闭环断在这）/ 收入 中 → **P0** | **是**：独立 SEO 周预算账本（表 + 原子预留/结算 RPC） |
 | **WP-4 每日核验器 + 记分牌 + 独立体检** | §6.5、§3；核验器四态；`pm-daily-todo` 里加独立体检（缺行/没跑→开发欠账，7 天→`decide`）；只读重抓封装；与 WP-3 **同批上线** | Check | B | 频率 高 / IMPACT 高（没有它整条链是假的）/ 收入 中 → **P0** | 否 |
 | **WP-5 PM 可见面** | 今日待办新增 1 个 `review` 车道 kind（≤1 条/天）；周报新增"SEO 记分牌 + 放弃清单（带 what/how/href 与一键恢复）"；不改五类规则；查 `pm-todo` 其他 `source='zhuge'` 过滤不误收计划项 | Check→Tune（可见） | B（动 `five-kinds.ts` 穷举表） | 频率 高 / IMPACT 中 / 收入 低 → **P2** | 否 |
-| **WP-2 缺口词与自相残杀体检** | `keyword_gap`、`cannibalization` 接机会池；`seo-agent` 评分接每周；预算闸；竞品名单走客户配置 | Inspect | B（付费调用，预算闸硬上限） | 频率 中 / IMPACT 中 / 收入 中 → **P2** | 否 |
+| **WP-2 缺口词与自相残杀体检** | `keyword_gap`、`cannibalization` 接机会池；`seo-agent` 评分接每周；预算闸；竞品名单走客户配置 | Inspect | B（付费调用，预算闸硬上限） | 频率 中 / IMPACT 中 / 收入 中 → **P2** | 否（枚举值与 `priority` 列已由 WP-1 迁移提供，WP-2 依赖 WP-1） |
 | **WP-6 周博客对齐机会** | 草稿必带 `primary_keyword/volume/kd`；**拒稿必须记原因**（新增一个可空列属迁移，需先确认，若加列则单独 A 级迁移 PR）；竞品品牌词拦截 | Act | B（加列则迁移 A） | 频率 中 / IMPACT 中 / 收入 中 → **P2** | **可能**（`blog_posts` 加 `rejection_reason`，需开工时核实现有字段，不在本稿定） |
 | **WP-7 泛化** | 第二客户（Oztop 目前暂停，另有其他客户视 PM 优先级） | — | — | 频率 低 / IMPACT 中 / 收入 中 → **P2**（等 CTS 跑稳 4~6 周再评） | 视客户 |
 
