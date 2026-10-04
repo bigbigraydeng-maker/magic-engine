@@ -21,6 +21,7 @@ import {
   competitorsGapFingerprint,
   dedupeInFlight,
   isCacheableResult,
+  markRefreshAttempt,
   readCompetitorsGapCache,
   writeCompetitorsGapCache,
 } from '@/lib/seo-intelligence/competitors-gap-cache'
@@ -203,6 +204,7 @@ export async function GET(
     if (cached) return NextResponse.json(cached, { headers: { ...CACHE_HEADERS, 'X-Cache': 'HIT' } })
 
     const result = await dedupeInFlight(`${cacheKey}:${fingerprint}`, async () => {
+      if (forceRefresh) await markRefreshAttempt(cacheKey, (client.semrush_db as string | null) ?? 'au')
       const computed = await computeGap(clientId, client.domain as string, locationCode, businessTerms, excludedTopics)
       if (computed.cacheable) {
         await writeCompetitorsGapCache(cacheKey, fingerprint, (client.semrush_db as string | null) ?? 'au', computed.result)

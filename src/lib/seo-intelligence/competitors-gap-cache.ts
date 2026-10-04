@@ -82,10 +82,46 @@ export async function readCompetitorsGapCache<T>(
   if (!payload || payload.fingerprint !== fingerprint) return null
 
   if (opts.forceRefresh) {
-    const age = now - new Date(data.fetched_at as string).getTime()
-    if (age >= REFRESH_COOLDOWN_MS) return null
+    const lastAttempt = await readRefreshAttempt(key)
+    const last = Math.max(new Date(data.fetched_at as string).getTime(), lastAttempt ?? 0)
+    if (now - last >= REFRESH_COOLDOWN_MS) return null
   }
   return payload.result
+}
+
+function attemptKey(key: string): string {
+  return `${key}:refresh-attempt`
+}
+
+async function readRefreshAttempt(key: string): Promise<number | null> {
+  const { data, error } = await supabaseAdmin
+    .from('local_data_cache')
+    .select('fetched_at')
+    .eq('cache_key', attemptKey(key))
+    .maybeSingle()
+  if (error || !data) return null
+  const t = new Date(data.fetched_at as string).getTime()
+  return Number.isNaN(t) ? null : t
+}
+
+/**
+ * Persist the start of a paid forced refresh in its own row, so the cooldown
+ * holds even when the refresh fails or yields an uncacheable result (the old
+ * valid cache row is left untouched).
+ */
+export async function markRefreshAttempt(key: string, market: string, now: number = Date.now()): Promise<void> {
+  const { error } = await supabaseAdmin.from('local_data_cache').upsert(
+    {
+      cache_key: attemptKey(key),
+      connector: CONNECTOR,
+      market,
+      payload: {},
+      fetched_at: new Date(now).toISOString(),
+      expires_at: new Date(now + REFRESH_COOLDOWN_MS).toISOString(),
+    },
+    { onConflict: 'cache_key' },
+  )
+  if (error) console.warn('[competitors-gap-cache] attempt marker write failed', error.message)
 }
 
 export async function writeCompetitorsGapCache<T>(
