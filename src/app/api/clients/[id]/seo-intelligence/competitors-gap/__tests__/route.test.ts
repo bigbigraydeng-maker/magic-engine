@@ -6,6 +6,7 @@ const db = {
   client: { id: 'c1', domain: 'client.com', semrush_db: 'nz', industry: 'x', competitor_domains: null as string[] | null },
   cache: new Map<string, Record<string, unknown>>(),
   failCacheWrite: false,
+  tier: 'admin' as 'admin' | 'paid_client',
 }
 
 vi.mock('@/lib/supabase', () => ({
@@ -31,7 +32,7 @@ vi.mock('@/lib/supabase', () => ({
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
-  requirePaidClientAccess: async () => ({ ok: true }),
+  requirePaidClientAccess: async () => ({ ok: true, tier: db.tier }),
 }))
 vi.mock('@/lib/content/brief-injector', () => ({ getActiveBrief: async () => null }))
 vi.mock('@/lib/competitors/resolver', () => ({
@@ -75,6 +76,7 @@ beforeEach(() => {
   db.cache.clear()
   db.failCacheWrite = false
   db.client.competitor_domains = null
+  db.tier = 'admin'
   getSerpCompetitors.mockReset().mockResolvedValue([serp('a.com'), serp('b.com')])
   getKeywordsGap.mockReset().mockResolvedValue({ keywords: [kw('k1')], failedCount: 0 })
   fetchDomainRankOverview.mockReset().mockResolvedValue({ organic_keywords: 5, organic_traffic: 7 })
@@ -123,6 +125,19 @@ describe('competitors-gap server cache', () => {
     vi.setSystemTime(t0 + REFRESH_COOLDOWN_MS + 1000)
     expect((await call('?refresh=1')).headers.get('X-Cache')).toBe('MISS')
     expect(paidCalls()).toBeGreaterThan(billed)
+  })
+
+  it('refresh=1 is ignored for non-admin client accounts even after the cooldown', async () => {
+    const t0 = Date.now()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(t0)
+    db.tier = 'paid_client'
+    await call()
+    const billed = paidCalls()
+
+    vi.setSystemTime(t0 + REFRESH_COOLDOWN_MS + 1000)
+    expect((await call('?refresh=1')).headers.get('X-Cache')).toBe('HIT')
+    expect(paidCalls()).toBe(billed)
   })
 
   it('expires after 24h', async () => {

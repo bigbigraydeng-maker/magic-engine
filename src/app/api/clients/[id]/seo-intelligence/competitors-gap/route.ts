@@ -144,8 +144,9 @@ async function computeGap(
  * }
  *
  * Cache: 24 h server-side in local_data_cache (see competitors-gap-cache.ts).
- * Invalidated early when FDE/brief competitor lists change; `?refresh=1` forces a
- * re-pull but only after a 10 min cooldown. Errors/partial results are never cached.
+ * Invalidated early when FDE/brief competitor lists change; `?refresh=1` (admin only;
+ * ignored for client accounts) forces a re-pull but only after a 10 min cooldown.
+ * Errors/partial results are never cached.
  * One uncached run = 1 competitors_domain + 0-5 domain_rank_overview
  * + 1-3 domain_intersection + 1 keyword_overview paid call.
  */
@@ -197,7 +198,7 @@ export async function GET(
     terms: businessTerms,
     excluded: excludedTopics,
   })
-  const forceRefresh = req.nextUrl.searchParams.get('refresh') === '1'
+  const forceRefresh = access.tier === 'admin' && req.nextUrl.searchParams.get('refresh') === '1'
 
   try {
     const cached = await readCompetitorsGapCache<GapResult>(cacheKey, fingerprint, { forceRefresh })
