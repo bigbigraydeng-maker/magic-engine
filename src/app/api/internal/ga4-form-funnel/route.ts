@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { fetchGa4FormFunnelRaw } from '@/lib/ga4/client'
+import { fetchGa4FormFunnelRaw, Ga4ApiError } from '@/lib/ga4/client'
 import { summariseFormFunnel, type FormFunnelSummary } from '@/lib/ga4/form-funnel'
 
 /**
- * GET /api/cron/ga4-form-funnel   (manual only — NOT scheduled, no render.yaml entry)
+ * GET /api/internal/ga4-form-funnel   (manual only — NOT a cron: lives outside /api/cron so the
+ * cron-coverage check does not mistake it for an unscheduled job)
  *
  * Read-only report: how many people started a form (GA4 `form_start`) vs reached the
  * thank-you page, per client with a connected GA4 property. Writes nothing anywhere, so
@@ -13,7 +14,8 @@ import { summariseFormFunnel, type FormFunnelSummary } from '@/lib/ga4/form-funn
  * Triggered through the manual trial workflow (`manual-cron-trial.yml`), which carries the
  * CRON_SECRET; the GA4 credentials live on the server, never in a developer window.
  *
- * Query: client_id=<uuid> (optional), days=<1..90> (default 28), dry_run=1|0 (ignored: read-only)
+ * Query: client_id=<uuid> (REQUIRED — one client per call keeps the run inside its time limit),
+ *        days=<1..90> (default 28), dry_run=1|0 (ignored: read-only)
  * Auth: Bearer ${CRON_SECRET}
  */
 
@@ -39,21 +41,20 @@ export async function GET(req: NextRequest) {
   }
 
   const params = req.nextUrl.searchParams
-  const clientId = params.get('client_id') ?? undefined
-  if (clientId !== undefined && !UUID.test(clientId)) {
-    return NextResponse.json({ error: 'client_id must be a UUID' }, { status: 400 })
+  const clientId = params.get('client_id')
+  if (!clientId || !UUID.test(clientId)) {
+    return NextResponse.json({ error: 'client_id (UUID) is required' }, { status: 400 })
   }
   const daysRaw = Number(params.get('days') ?? '28')
   const days = Number.isInteger(daysRaw) && daysRaw >= 1 && daysRaw <= 90 ? daysRaw : 28
   const dryRun = params.get('dry_run') === '1'
 
-  let q = supabaseAdmin
+  const { data: conns, error } = await supabaseAdmin
     .from('client_connectors')
     .select('client_id, config')
+    .eq('client_id', clientId)
     .eq('anchor', 'ga4')
     .eq('status', 'connected')
-  if (clientId) q = q.eq('client_id', clientId)
-  const { data: conns, error } = await q
   if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 })
 
   const results: ClientResult[] = []
@@ -69,11 +70,14 @@ export async function GET(req: NextRequest) {
         ? { client_id: c.client_id, status: 'ok', summary: summariseFormFunnel(raw) }
         : { client_id: c.client_id, status: 'no_token' })
     } catch (err) {
-      results.push({ client_id: c.client_id, status: 'error', error: (err instanceof Error ? err.message : String(err)).slice(0, 200) })
+      // Fixed short code only: Google's response text (account / property details) stays in the server log.
+      const code = err instanceof Ga4ApiError ? `GA4 HTTP ${err.httpStatus} ${err.googleStatus}`.slice(0, 80) : 'GA4 read failed'
+      results.push({ client_id: c.client_id, status: 'error', error: code })
     }
   }
 
-  const failed = results.filter(r => r.status === 'error' || r.status === 'no_token').length
+  // no_token (not authorised / authorisation revoked) is a client state, not a system fault: shown, not counted as failed.
+  const failed = results.filter(r => r.status === 'error').length
   return NextResponse.json(
     { success: failed === 0, dry_run: dryRun, read_only: true, days, clients_processed: results.length, failed, results },
     { status: failed === 0 ? 200 : 500 },

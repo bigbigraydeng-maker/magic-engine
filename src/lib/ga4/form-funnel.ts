@@ -24,11 +24,15 @@ export interface FormFunnelRaw {
   /** eventName → counts, for form_start / form_submit / generate_lead */
   events: Record<string, EventCounts>
   startByPath: PathCounts[]
-  /** pages whose path contains "thank": views in `events`, people in `users` */
+  /** pages whose path contains "thank": views in `events`, people in `users` (people NOT de-duplicated across paths) */
   thankYouByPath: PathCounts[]
+  /** de-duplicated people / views across every matched thank-you page */
+  thankYouTotal: EventCounts
 }
 
 export interface FormFunnelSummary {
+  /** One plain sentence first — the number below is a rough proxy, not an exact abandonment rate. */
+  plain: string
   period: { start: string; end: string }
   formStart: EventCounts
   formSubmit: EventCounts
@@ -37,8 +41,8 @@ export interface FormFunnelSummary {
   thankYou: EventCounts
   /** people who started a form minus people who reached a thank-you page (≥0), or null when not comparable */
   startedNotReachedThankYou: number | null
-  /** startedNotReachedThankYou / form-start people (0..1), or null when not comparable */
-  proxyAbandonRate: number | null
+  /** startedNotReachedThankYou / form-start people (0..1), or null when not comparable. ROUGH ONLY — see plain / notes. */
+  roughAbandonShare_ROUGH_ONLY: number | null
   startByPath: PathCounts[]
   thankYouByPath: PathCounts[]
   notes: string[]
@@ -46,16 +50,17 @@ export interface FormFunnelSummary {
 
 const ZERO: EventCounts = { events: 0, users: 0 }
 
+/** Paths can carry odd text; keep what is shown short. */
+const clip = (p: PathCounts): PathCounts => ({ ...p, path: p.path.split('?')[0].slice(0, 80) })
+
 export function summariseFormFunnel(raw: FormFunnelRaw): FormFunnelSummary {
   const formStart = raw.events.form_start ?? ZERO
   const formSubmit = raw.events.form_submit ?? ZERO
   const generateLead = raw.events.generate_lead ?? ZERO
-  const thankYou: EventCounts = raw.thankYouByPath.reduce(
-    (acc, p) => ({ events: acc.events + p.events, users: acc.users + p.users }),
-    { events: 0, users: 0 },
-  )
+  const thankYou: EventCounts = raw.thankYouTotal
   const notes: string[] = [
-    '这是代理估算，不是精确放弃率：谷歌分析没法把"开始填表的人"和"到感谢页的人"逐人对上；到感谢页但没触发开始填表（比如换设备、别的入口）会让估算偏乐观。',
+    '这是粗估，方向不确定，不是精确放弃率。会抬高估算的：form_start 在站内所有表单都会触发（搜索框、订阅框、登录框），这些人本来就不会去感谢页。会压低估算的：路径里含 thank 的页面都算"到过感谢页"（订阅感谢页、预订确认页、名字里带 thank 的文章）；跨设备的人也可能对不上。两边偏差方向相反，净结果无法预判。',
+    '请核对下面列出的每个感谢页路径是不是真的"提交成功页"；不是的话这个数不能用。',
     'generate_lead（产生线索）事件在本站曾被证实在没有表单的页面也触发，只列出，不参与计算。',
   ]
   let started: number | null = null
@@ -68,10 +73,14 @@ export function summariseFormFunnel(raw: FormFunnelRaw): FormFunnelSummary {
     started = formStart.users - thankYou.users
     rate = started / formStart.users
   }
+  const plain = rate === null
+    ? `这段时间无法给出放弃的粗估（开始填表约 ${formStart.users} 人，到过感谢页约 ${thankYou.users} 人，两个数对不上，见说明）。`
+    : `粗估：开始填表约 ${formStart.users} 人，到过感谢页约 ${thankYou.users} 人，约 ${Math.round(rate * 100)}% 的人动了表单但没到感谢页——方向不确定，不是精确放弃率。`
   return {
+    plain,
     period: { start: raw.periodStart, end: raw.periodEnd },
     formStart, formSubmit, generateLeadUntrusted: generateLead, thankYou,
-    startedNotReachedThankYou: started, proxyAbandonRate: rate,
-    startByPath: raw.startByPath, thankYouByPath: raw.thankYouByPath, notes,
+    startedNotReachedThankYou: started, roughAbandonShare_ROUGH_ONLY: rate,
+    startByPath: raw.startByPath.map(clip), thankYouByPath: raw.thankYouByPath.map(clip), notes,
   }
 }

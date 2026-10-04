@@ -532,5 +532,13 @@ export async function fetchGa4FormFunnelRaw(
     path: r.dimensionValues?.[0]?.value ?? '', events: num(r.metricValues?.[0]?.value), users: num(r.metricValues?.[1]?.value),
   }))
 
-  return { periodStart, periodEnd, events, startByPath, thankYouByPath }
+  // People who saw ANY thank-you page, de-duplicated by GA4 (summing per-path users would count a person twice).
+  const thankTotalReport = await runReport(token, normalized, periodStart, periodEnd, {
+    metrics: ['screenPageViews', 'totalUsers'],
+    dimensionFilter: { filter: { fieldName: 'pagePath', stringFilter: { matchType: 'CONTAINS', value: 'thank' } } },
+  })
+  const totalRow = thankTotalReport.rows?.[0]
+  const thankYouTotal = { events: num(totalRow?.metricValues?.[0]?.value), users: num(totalRow?.metricValues?.[1]?.value) }
+
+  return { periodStart, periodEnd, events, startByPath, thankYouByPath, thankYouTotal }
 }
