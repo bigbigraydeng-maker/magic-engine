@@ -32,7 +32,27 @@
  * strict regex; this is a *rating record* with a structured payload. One regex
  * serving both would have to loosen to fit, and the loosened one is the one
  * that decides whether an automated push happens.
+ *
+ * 🔴 **Provenance beyond the author login (Codex finding, PR #1211 P1).**
+ *
+ * `selectTrustedGateMarkers` already drops anything not authored by
+ * `TRUSTED_GATE_AUTHORS` (`trust.mjs`), but that login —
+ * `github-actions[bot]` — is shared by every GitHub Actions workflow in the
+ * repo, not exclusive to this control plane. When a `secret` is supplied
+ * (this control plane's own `OPS_GATE_MARKER_SECRET`), `buildGateMarker`
+ * additionally signs the payload (`trust.mjs`'s `signGateProvenance`) and
+ * `selectTrustedGateMarkers` requires that signature to verify before
+ * trusting a marker — a forged comment from some other same-repo workflow
+ * cannot produce it without the secret. `secret` is optional and additive on
+ * purpose: omitting it reproduces this module's pre-existing, author-only
+ * behaviour exactly (every test and call site written before this
+ * protection existed keeps working unchanged), while every one of this PR's
+ * three entrypoint scripts is wired to read the real secret from
+ * `process.env.OPS_GATE_MARKER_SECRET` and pass it through — so once that
+ * secret is provisioned, verification is enforced end to end.
  */
+
+import { signGateProvenance, verifyGateProvenance } from './trust.mjs'
 
 /** Payload schema version. Bump only with a parser that still reads v1. */
 export const GATE_MARKER_VERSION = 1
@@ -79,11 +99,13 @@ function serialisePayload(payload) {
 /**
  * Build one gate marker.
  *
- * @param {{base: string, head: string, risk: string, reasons?: string[], score?: number|null, decision?: string|null}} input
+ * @param {{base: string, head: string, risk: string, reasons?: string[], score?: number|null, decision?: string|null, secret?: string|null}} input
+ *   `secret`, when a non-empty string, signs the payload — see the module
+ *   header's "Provenance beyond the author login" section.
  * @returns {string}
  * @throws if the marker does not survive its own parser
  */
-export function buildGateMarker({ base, head, risk, reasons = [], score = null, decision = null }) {
+export function buildGateMarker({ base, head, risk, reasons = [], score = null, decision = null, secret = null }) {
   if (!VALID_RISKS.has(risk)) {
     throw new Error(`refusing to emit a gate marker with risk "${risk}" — only A / B / C are storable`)
   }
@@ -99,6 +121,11 @@ export function buildGateMarker({ base, head, risk, reasons = [], score = null, 
   // "we did not measure".
   if (Number.isFinite(score)) payload.score = score
   if (typeof decision === 'string' && decision !== '') payload.decision = decision
+  // Signed last, over every field above — see trust.mjs's signGateProvenance
+  // for why the whole payload (not just base/head/risk) has to be covered.
+  if (typeof secret === 'string' && secret !== '') {
+    payload.sig = signGateProvenance(payload, secret)
+  }
 
   const marker = `<!-- me-dev-gate:${serialisePayload(payload)} -->`
 
@@ -209,10 +236,19 @@ export function shouldPostGateComment({ existing, risk, decision }) {
  * cannot be folded into `parseGateMarkers`: that function is handed strings and
  * has no way to know.
  *
- * @param {{sources?: Array<{author?: string|null, body?: string|null}>|unknown, trustedAuthors?: Iterable<string>|unknown}} input
+ * 🔴 Codex finding on PR #1211 (P1): the author check above is necessary but
+ * not sufficient — `github-actions[bot]` is the login every Actions workflow
+ * in the repo shares, not one exclusive to this control plane, so any other
+ * same-repo workflow with `pull-requests: write` can satisfy it too. When
+ * `secret` is supplied, a marker additionally has to carry a `sig` that
+ * verifies against it (`trust.mjs`'s `verifyGateProvenance`) — omitting
+ * `secret` reproduces the pre-existing author-only behaviour exactly, so
+ * every caller written before this protection existed is unaffected.
+ *
+ * @param {{sources?: Array<{author?: string|null, body?: string|null}>|unknown, trustedAuthors?: Iterable<string>|unknown, secret?: string|null}} input
  * @returns {GateRecord[]}
  */
-export function selectTrustedGateMarkers({ sources, trustedAuthors } = {}) {
+export function selectTrustedGateMarkers({ sources, trustedAuthors, secret = null } = {}) {
   // A bare string is rejected rather than iterated: `trustedAuthors: 'ci-bot'`
   // would otherwise become the six single characters of that name, trusting
   // nobody while looking configured.
@@ -237,5 +273,12 @@ export function selectTrustedGateMarkers({ sources, trustedAuthors } = {}) {
   const trusted = new Set([...(iterable ? trustedAuthors : [])].filter((a) => typeof a === 'string'))
   if (!Array.isArray(sources)) return []
   const bodies = sources.filter((s) => s && trusted.has(s.author)).map((s) => s.body)
-  return parseGateMarkers(bodies)
+  const candidates = parseGateMarkers(bodies)
+  // Additive, not a replacement for the author check above: `secret` unset
+  // (the pre-existing default) keeps this function's original behaviour
+  // byte-for-byte. `secret` set requires every candidate's `sig` to verify —
+  // one that does not (missing, forged, or signed by a different secret) is
+  // dropped exactly like an untrusted author would be.
+  if (typeof secret !== 'string' || secret === '') return candidates
+  return candidates.filter((record) => verifyGateProvenance(record, secret))
 }

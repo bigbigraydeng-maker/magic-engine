@@ -67,11 +67,20 @@ jobs:
         # standard is zero.
         run: npx tsc -p tools/ai-orchestrator/tsconfig.json
 
-      - name: Tests, including architecture and workflow supply-chain checks
+      - name: Tests, including architecture, workflow supply-chain and dev-gate checks
         # Verbose so the check log names every governance assertion that ran:
         # architecture.test.ts (module isolation, file size, no `any`) and
         # workflow-supply-chain.test.ts (action pinning, permissions, triggers).
-        run: npx vitest run tools/ai-orchestrator --reporter=verbose
+        #
+        # tools/ops-review-loop is included here too (ME2-OPS03 PR2), not run
+        # as its own workflow: that tool's own workflow-guards.test.ts asserts
+        # its guard scripts exist and its workflows stay in shape, and the only
+        # way that assertion means anything is if deleting the script it checks
+        # for turns THIS required check red. A separate, unrequired workflow
+        # running the same suite would let that exact deletion pass silently —
+        # see tools/ops-review-loop/README.md's "tests do not run in CI yet"
+        # section, which this line resolves.
+        run: npx vitest run tools/ai-orchestrator tools/ops-review-loop --reporter=verbose
 
       - name: Confirm the run changed nothing
         run: |

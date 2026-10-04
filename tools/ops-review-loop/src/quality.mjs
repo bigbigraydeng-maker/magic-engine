@@ -24,9 +24,21 @@
  *
  * Points are fungible; safety is not. A PR could reach 92 on documentation and
  * reuse while its required CI is red. `decideReadiness` therefore evaluates the
- * hard gates first and independently: red CI, an unresolved Codex P0/P1/P2 on
- * the current head, a rating bound to a stale sha, missing A-level evidence, or
- * *any* unreadable input blocks readiness at any score.
+ * hard gates first and independently: red CI, a failed or unread auto-fix
+ * blast-radius guard, an unresolved Codex P0/P1/P2 on the current head, a
+ * rating bound to a stale sha, missing A-level evidence, or *any* unreadable
+ * input blocks readiness at any score.
+ *
+ * 🔴 Codex finding on PR #1211 (P1): `scope-guard-green` used to be scored
+ * only as a 5-point signal (see `SCORE_DIMENSIONS` below) — a failed
+ * ops-fix-scope-guard run (the actual security boundary on the auto-fix
+ * loop, per that workflow's own header) cost 5 points, not the verdict. On a
+ * C-level PR (75-point threshold) that is recoverable with points to spare
+ * elsewhere, so a PR whose blast-radius guard failed, or whose result could
+ * not even be read, could still reach READY. `hardGateBlockers` now treats
+ * `gates.scopeGuardPassed` the same way it already treats `requiredCiPassed`
+ * — `true` clears it, anything else (`false`, or unreadable/not-yet-terminal
+ * reported as `null`/`undefined`) blocks, independent of score.
  *
  * 🔴 **What Codex does and does not contribute here.**
  *
@@ -414,6 +426,13 @@ function hardGateBlockers({ risk, gates, observedSignals }) {
       g.requiredCiPassed === null || g.requiredCiPassed === undefined
         ? '必过 CI 状态读不到 —— 按未通过处理'
         : '必过 CI 未通过',
+    )
+  }
+  if (g.scopeGuardPassed !== true) {
+    blockers.push(
+      g.scopeGuardPassed === null || g.scopeGuardPassed === undefined
+        ? '爆炸半径闸门（ops-fix-scope-guard）状态读不到或未完成 —— 按未通过处理'
+        : '爆炸半径闸门（ops-fix-scope-guard）未通过 —— 自动修复的安全边界失败，不允许只扣分放行',
     )
   }
   if (typeof g.openBlockerCount !== 'number') {

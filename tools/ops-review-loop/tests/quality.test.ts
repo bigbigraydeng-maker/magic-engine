@@ -38,6 +38,7 @@ const cleanGates = {
   evidenceReadable: true,
   shaMatches: true,
   requiredCiPassed: true,
+  scopeGuardPassed: true,
   openBlockerCount: 0,
   // Non-A paths ignore this; A paths require it, and "we did not compute it" is
   // itself a blocker, so the clean baseline has to carry a real evaluation.
@@ -150,6 +151,47 @@ describe('hard gates outrank the total', () => {
     for (const id of A_REQUIRED_SIGNALS as string[]) {
       expect(ALL_SIGNALS).toContain(id)
     }
+  })
+
+  /**
+   * Codex finding on PR #1211 (P1): `scope-guard-green` used to be scored as
+   * a 5-point signal only. A failed or unreadable auto-fix blast-radius
+   * guard — the real security boundary on the auto-fix loop — could cost 5
+   * points and still let a C-level PR reach READY on the rest of its score.
+   * It is now a hard gate, same shape as `requiredCiPassed`: only `true`
+   * clears it, everywhere, at any risk level.
+   */
+  it('blocks a 100-point PR whose auto-fix blast-radius guard failed', () => {
+    const result = decideReadiness({
+      risk: 'C',
+      score: perfect,
+      gates: { ...cleanGates, scopeGuardPassed: false },
+      observedSignals: ALL_SIGNALS,
+    })
+    expect(result.ready).toBe(false)
+    expect(result.blockers.join('\n')).toContain('爆炸半径闸门')
+  })
+
+  it('blocks a 100-point PR whose auto-fix blast-radius guard status could not be read', () => {
+    const result = decideReadiness({
+      risk: 'B',
+      score: perfect,
+      gates: { ...cleanGates, scopeGuardPassed: null },
+      observedSignals: ALL_SIGNALS,
+    })
+    expect(result.ready).toBe(false)
+    expect(result.blockers.join('\n')).toContain('爆炸半径闸门')
+  })
+
+  it('blocks when the guard gate is simply missing from the input, not just explicitly false', () => {
+    const { scopeGuardPassed: _dropped, ...withoutGuard } = cleanGates
+    const result = decideReadiness({
+      risk: 'A',
+      score: perfect,
+      gates: withoutGuard,
+      observedSignals: ALL_SIGNALS,
+    })
+    expect(result.ready).toBe(false)
   })
 })
 

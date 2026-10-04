@@ -1,0 +1,84 @@
+name: OPS — Dev Gate Recheck
+
+# Part of ME2-OPS03 PR2. See tools/ops-review-loop/src/recheck-readiness.mjs
+# for the full reasoning; summary:
+#
+# The review-triggered leg (ops-codex-to-claude-fix.yml) only posts a
+# READY/BLOCKED verdict when a Codex review actually lands. A C-level PR the
+# stable 20% sample (sampling.mjs) does not select never receives one, so
+# nothing would otherwise re-evaluate it once required CI goes green — the
+# "skip Codex and nobody ever re-triggers it" outcome the spec forbids.
+#
+# This workflow closes that gap: whenever the required `ai-orchestrator CI`
+# workflow finishes anywhere in the repo, it hands off to the script, which
+# does all the real filtering (workflow name, PR eligibility, whether a Codex
+# review is actually owed). Every A/B PR and every sampled C is left entirely
+# to the review-triggered leg — see the script's header comment for why the
+# two never race.
+#
+# WHY THIS ALSO LISTENS FOR `OPS — Auto-fix blast radius guard`
+# ----------------------------------------------------------------
+# Codex finding (PR #1211, P2): the verdict this workflow writes scores
+# ops-fix-scope-guard.yml's own check run (`scope-guard-green`), not just the
+# required CI's — and that workflow's `pull_request` trigger races
+# ai-orchestrator-ci.yml's on every push. Listening only for `ai-orchestrator
+# CI` meant whichever of the two finished first triggered a run that could
+# lock in a verdict while the OTHER was still queued/in_progress, silently
+# scoring it as not passed. recheck-readiness.mjs now requires both check
+# runs to be `completed` before writing anything; listening for either
+# workflow's completion here is what guarantees whichever one finishes
+# SECOND is the one that actually triggers the write.
+#
+# WHY workflow_run, NOT check_run
+# --------------------------------
+# GitHub does not deliver `check_run` events for check suites GitHub Actions
+# itself created — a deliberate anti-recursion rule, and
+# `ai-orchestrator-tests` is exactly such a check suite. A `check_run`
+# trigger here would therefore never fire in production: this whole recheck
+# leg would look wired and be dead on arrival. See
+# https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#check_run
+# `workflow_run` carries the same facts this script needs (head sha,
+# associated pull requests, status/conclusion) without that exclusion.
+#
+# It never merges, deploys, applies a migration, or touches production. Its
+# only possible write is one PR comment.
+
+on:
+  workflow_run:
+    workflows: ["ai-orchestrator CI", "OPS — Auto-fix blast radius guard"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: read
+
+concurrency:
+  # Same literal group ops-codex-request-review.yml uses for its CI-green
+  # fallback write path on the same head sha (pinned by
+  # tools/ops-review-loop/tests/workflow-guards.test.ts). GitHub concurrency
+  # groups serialise across different workflow files that share a group
+  # name — that is what stops this leg's "unsampled C, CI just went green"
+  # write from racing request-review.mjs's own "CI was already green when I
+  # rated" fallback write for the exact same base/head pair. Read-before-write
+  # alone is not atomic; this is.
+  group: ops-dev-gate-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  recheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Checked out from main, not any PR head, for the same reason as the
+      # sibling loop workflows: this control-plane script must not be
+      # influenced by the PR it is evaluating.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Re-evaluate readiness for unsampled C-level PRs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node tools/ops-review-loop/src/recheck-readiness.mjs

@@ -14,24 +14,34 @@ const createIssueComment = vi.fn().mockResolvedValue({})
 const listIssueComments = vi.fn().mockResolvedValue([])
 const listReviewComments = vi.fn().mockResolvedValue([])
 const listCheckRunsForRef = vi.fn()
+const getPullRequest = vi.fn()
 
 vi.mock('../src/github.mjs', () => ({
   createIssueComment: (...a: unknown[]) => createIssueComment(...a),
   listIssueComments: (...a: unknown[]) => listIssueComments(...a),
   listReviewComments: (...a: unknown[]) => listReviewComments(...a),
   listCheckRunsForRef: (...a: unknown[]) => listCheckRunsForRef(...a),
-  getPullRequest: vi.fn(),
+  getPullRequest: (...a: unknown[]) => getPullRequest(...a),
 }))
 
 const SHA = 'c'.repeat(40)
+const BASE = 'b'.repeat(40)
 
 function run(dir: string) {
   const eventPath = join(dir, 'event.json')
   writeFileSync(
     eventPath,
     JSON.stringify({
-      pull_request: { number: 931, head: { sha: SHA } },
-      review: { id: 1, body: 'Codex Review: no findings worth flagging.' },
+      // handle-review.mjs (ME2-OPS03 PR2) reads pull_request.base.sha at
+      // module load, for every plan.action branch — not just 'ready' — so
+      // this fixture needs it even though the wait-ci path never scores risk.
+      pull_request: { number: 931, head: { sha: SHA }, base: { sha: BASE }, body: '' },
+      // commit_id must equal the event's own head sha — handle-review.mjs
+      // (ME2-OPS03 PR2 Codex finding) fails closed at entry otherwise,
+      // treating the review as already stale and skipping without writing
+      // anything, which is why these fixtures need it even though none of
+      // them are testing staleness itself.
+      review: { id: 1, body: 'Codex Review: no findings worth flagging.', commit_id: SHA },
     }),
   )
   const outPath = join(dir, 'out.txt')
@@ -58,6 +68,11 @@ describe('handle-review: CI never went green', () => {
     createIssueComment.mockClear()
     listIssueComments.mockReset().mockResolvedValue([])
     listCheckRunsForRef.mockReset()
+    // Default: the PR's head is still the reviewed commit when handle-review.mjs
+    // re-checks freshness right before writing — see the isStale guard in
+    // src/handle-review.mjs. Tests here are exercising the wait-ci report, not
+    // staleness, so none of them override this.
+    getPullRequest.mockReset().mockResolvedValue({ head: { sha: SHA } })
   })
 
   afterEach(() => {
@@ -104,6 +119,11 @@ describe('handle-review: the BLOCKED ON CI report must use the gate\'s own stand
     createIssueComment.mockClear()
     listIssueComments.mockReset().mockResolvedValue([])
     listCheckRunsForRef.mockReset()
+    // Default: the PR's head is still the reviewed commit when handle-review.mjs
+    // re-checks freshness right before writing — see the isStale guard in
+    // src/handle-review.mjs. Tests here are exercising the wait-ci report, not
+    // staleness, so none of them override this.
+    getPullRequest.mockReset().mockResolvedValue({ head: { sha: SHA } })
   })
 
   afterEach(() => {
@@ -173,6 +193,11 @@ describe('handle-review: the report must not contradict itself', () => {
     createIssueComment.mockClear()
     listIssueComments.mockReset().mockResolvedValue([])
     listCheckRunsForRef.mockReset()
+    // Default: the PR's head is still the reviewed commit when handle-review.mjs
+    // re-checks freshness right before writing — see the isStale guard in
+    // src/handle-review.mjs. Tests here are exercising the wait-ci report, not
+    // staleness, so none of them override this.
+    getPullRequest.mockReset().mockResolvedValue({ head: { sha: SHA } })
   })
 
   afterEach(() => {

@@ -1,13 +1,16 @@
 name: OPS — Codex Review to Claude Fix
 
-# Part of the ME2-OPS02 Claude <-> Codex review loop. See
+# Part of the ME2-OPS02 Claude <-> Codex review loop, extended by ME2-OPS03
+# PR2 with a risk-based round budget and a real delivery-quality gate. See
 # tools/ops-review-loop/README.md for the full state diagram.
 #
 # This is the "review" leg: when Codex submits a review on a qualifying PR,
 # decide (in tools/ops-review-loop/src/handle-review.mjs, unit-tested offline
 # in tools/ops-review-loop/tests/) whether to dispatch one aggregated Claude
-# fix task, post READY FOR PRODUCT OWNER, post NEEDS HUMAN REVIEW after 3
-# rounds, or do nothing (dedup).
+# fix task, evaluate delivery quality and post READY FOR PRODUCT OWNER or
+# BLOCKED (quality.mjs), post NEEDS HUMAN REVIEW once the round budget for
+# this PR's risk level is used up (maxRoundsForRisk: A=2, B=1, C=1), or do
+# nothing (dedup).
 #
 # It never merges, deploys, applies a migration, queries or modifies
 # production, bypasses required CI, or marks a PR ready for review. It never
@@ -121,6 +124,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          # `review.commit_id` — the commit Codex actually reviewed, already
+          # asserted equal to this event's `pull_request.head.sha` at
+          # handle-review.mjs's entry (see its header comment). The only sha
+          # the findings fed to Claude below can be trusted to describe.
+          REVIEWED_SHA: ${{ github.event.review.commit_id }}
         run: |
           set -euo pipefail
           head_before=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha)
@@ -151,9 +159,24 @@ jobs:
           echo "head_before=${head_before}" >> "$GITHUB_OUTPUT"
           echo "Branch head before this fix round: ${head_before}"
 
+          # Codex finding (PR #1211, P1): "Decide next stage" (steps.plan) has
+          # its own fresh-head check, but that check runs BEFORE this step —
+          # and its own CI poll can itself run for several minutes, plus the
+          # `gh api` round-trip above. A push landing in either window must not
+          # let the next step hand Codex's (now stale) findings to Claude,
+          # which would commit and push on top of it. This is the check
+          # closest to the actual write — one step before it, deliberately, so
+          # nothing can land between this check and the action running.
+          if [ "$head_before" != "$REVIEWED_SHA" ]; then
+            echo "::warning::PR #${PR_NUMBER} head moved from the reviewed commit ${REVIEWED_SHA} to ${head_before} before this fix round could start. Skipping without invoking Claude."
+            echo "head_fresh=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "head_fresh=yes" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Invoke Claude to fix Codex findings
         id: claude
-        if: steps.plan.outputs.action == 'dispatch-fix'
+        if: steps.plan.outputs.action == 'dispatch-fix' && steps.baseline.outputs.head_fresh == 'yes'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

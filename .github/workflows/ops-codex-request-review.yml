@@ -1,12 +1,16 @@
 name: OPS — Request Codex Review
 
-# Part of the ME2-OPS02 Claude <-> Codex review loop. See
+# Part of the ME2-OPS02 Claude <-> Codex review loop, extended by ME2-OPS03
+# PR2 with automatic risk rating and Codex-review sampling. See
 # tools/ops-review-loop/README.md for the full state diagram.
 #
-# This is the "push" leg only: whenever a qualifying PR gets a new head
-# commit, ask the native Codex GitHub App to review it — exactly once per
-# head sha. It posts one PR comment and nothing else. It never merges,
-# deploys, applies a migration, or touches production data or credentials.
+# This is the "push" leg: whenever a qualifying PR gets a new head commit,
+# request-review.mjs (1) rates the PR from its actual changed files
+# (risk.mjs) and posts the rating once per base+head pair, then (2) decides
+# whether this head still needs a Codex review — A and B always, C by a
+# stable 20% sample (sampling.mjs) — and if so asks the native Codex GitHub
+# App to review it, exactly once per head sha. It never merges, deploys,
+# applies a migration, or touches production data or credentials.
 #
 # WHY THIS USES OPS_REVIEW_PAT AND NOT THE BUILT-IN GITHUB_TOKEN
 # --------------------------------------------------------------
@@ -35,9 +39,22 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  # Codex finding (PR #1211, P1): request-review.mjs's "CI already green"
+  # fallback calls GET /commits/{ref}/check-runs for unsampled C-level PRs.
+  # Without this scope that call 403s on every one of them — no error
+  # surfaces to a human, it just silently produces zero verdicts for 80% of
+  # C-level PRs. Minimal grant, read-only, matches ops-dev-gate-recheck.yml's
+  # own `checks: read` for the same API call.
+  checks: read
 
 concurrency:
-  group: ops-codex-review-pr-${{ github.event.pull_request.number }}
+  # Same literal group ops-dev-gate-recheck.yml uses for the same head sha
+  # (pinned by tools/ops-review-loop/tests/workflow-guards.test.ts). This
+  # leg's own CI-green fallback (see request-review.mjs's `else` branch) can
+  # write the exact same readiness verdict the recheck leg writes for an
+  # unsampled C-level PR; sharing the group serialises the two instead of
+  # relying on a read-before-write race that has no atomicity behind it.
+  group: ops-dev-gate-${{ github.event.pull_request.head.sha }}
   cancel-in-progress: false
 
 jobs:

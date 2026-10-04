@@ -35,6 +35,13 @@ concurrency:
 
 jobs:
   fix-scope:
+    # Stable, distinctive check name (mirrors ai-orchestrator-ci.yml's own
+    # reasoning) — tools/ops-review-loop/src/verdict.mjs (shared by
+    # handle-review.mjs and recheck-readiness.mjs) looks up this check run by
+    # name to score the `scope-guard-green` delivery signal, so renaming it
+    # silently breaks that scoring rather than a merge gate.
+    # workflow-guards.test.ts asserts it.
+    name: ops-fix-scope-guard
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

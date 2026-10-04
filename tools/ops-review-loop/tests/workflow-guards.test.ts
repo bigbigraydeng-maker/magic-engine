@@ -31,9 +31,11 @@ interface WorkflowStep {
   run?: string
   if?: string
   with?: Record<string, unknown>
+  env?: Record<string, string>
 }
 interface WorkflowJob {
   if?: string
+  name?: string
   steps?: WorkflowStep[]
   permissions?: Record<string, string>
 }
@@ -191,6 +193,14 @@ describe('the request-review workflow', () => {
     expect(guardIndex).toBeGreaterThanOrEqual(0)
     expect(postIndex).toBeGreaterThan(guardIndex)
   })
+
+  it('grants checks: read for the unsampled-C "CI already green" fallback, and nothing broader', () => {
+    // Codex finding (PR #1211, P1): request-review.mjs's fallback path calls
+    // GET /commits/{ref}/check-runs. Without this scope that 403s silently on
+    // every unsampled C-level PR — no error surfaces, just zero verdicts.
+    expect(request.doc.permissions?.checks).toBe('read')
+    expect(request.doc.permissions?.checks).not.toBe('write')
+  })
 })
 
 describe('the codex-to-claude-fix workflow', () => {
@@ -247,9 +257,25 @@ describe('the codex-to-claude-fix workflow', () => {
     )
   })
 
-  it('only invokes claude-code-action when the plan step said dispatch-fix', () => {
+  it('only invokes claude-code-action when the plan step said dispatch-fix AND the head is still the reviewed commit', () => {
     const claudeStep = fix.steps.find((s) => s.uses?.startsWith('anthropics/claude-code-action'))
-    expect(claudeStep?.if).toBe("steps.plan.outputs.action == 'dispatch-fix'")
+    expect(claudeStep?.if).toBe("steps.plan.outputs.action == 'dispatch-fix' && steps.baseline.outputs.head_fresh == 'yes'")
+  })
+
+  it('re-checks the reviewed sha immediately before dispatching, one step before the action runs', () => {
+    // Codex finding (PR #1211, P1): handle-review.mjs's own fresh-head check
+    // (isStale) runs before this step, and its own CI poll can run for
+    // several minutes — a window the previous baseline step did not re-check.
+    // The baseline step must compare against `review.commit_id` (the commit
+    // Codex actually reviewed, not just "some head we read a moment ago") and
+    // gate the action step on the result, closest to the actual write.
+    const baseline = fix.steps.find((s) => s.id === 'baseline')
+    expect(baseline?.env?.REVIEWED_SHA).toBe('${{ github.event.review.commit_id }}')
+    expect(baseline?.run).toContain('head_fresh=no')
+    expect(baseline?.run).toContain('head_fresh=yes')
+    expect(baseline?.run).toContain('"$head_before" != "$REVIEWED_SHA"')
+    const claudeStep = fix.steps.find((s) => s.uses?.startsWith('anthropics/claude-code-action'))
+    expect(claudeStep?.if).toContain('steps.baseline.outputs.head_fresh')
   })
 
   it('records the fix round outcome after the Claude step, on success or failure', () => {
@@ -389,9 +415,112 @@ describe('the smoke-test workflow', () => {
   })
 })
 
-describe('the round cap is 3 in the source that actually enforces it', () => {
-  it('handle-review.mjs defines MAX_ROUNDS = 3', () => {
+describe('the round cap follows risk, not a flat number (ME2-OPS03 PR2)', () => {
+  it('handle-review.mjs no longer hard-codes MAX_ROUNDS = 3', () => {
     const source = readFileSync(join(process.cwd(), 'tools/ops-review-loop/src/handle-review.mjs'), 'utf8')
-    expect(source).toMatch(/const MAX_ROUNDS = 3\b/)
+    expect(source).not.toMatch(/const MAX_ROUNDS = 3\b/)
+  })
+
+  it('handle-review.mjs derives its round budget from maxRoundsForRisk, not a literal', () => {
+    const source = readFileSync(join(process.cwd(), 'tools/ops-review-loop/src/handle-review.mjs'), 'utf8')
+    expect(source).toMatch(/import \{[^}]*maxRoundsForRisk[^}]*\} from '\.\/risk\.mjs'/)
+    expect(source).toContain('maxRoundsForRisk(risk)')
+  })
+})
+
+describe('the required check now also runs tools/ops-review-loop (ME2-OPS03 PR2)', () => {
+  it('ai-orchestrator-ci.yml runs this tool\'s test suite too, in the same required job', () => {
+    // Deliberately in the SAME step as tools/ai-orchestrator's own suite, not a
+    // second workflow: a separate, unrequired workflow running the same tests
+    // would let the exact scenario workflow-guards.test.ts's "guard script must
+    // exist" assertion cares about (deleting check-fix-scope.mjs from main) pass
+    // silently. See ops-fix-scope-guard.yml and this file's own header comment.
+    const ciSource = readFileSync(join(process.cwd(), '.github/workflows/ai-orchestrator-ci.yml'), 'utf8')
+    expect(ciSource).toContain('npx vitest run tools/ai-orchestrator tools/ops-review-loop')
+  })
+})
+
+describe('the dev-gate recheck workflow (unsampled C-level PRs)', () => {
+  const RECHECK_PATH = join(ROOT, 'ops-dev-gate-recheck.yml')
+  const recheck = load(RECHECK_PATH)
+
+  it('parses as YAML with a workflow_run trigger scoped to ai-orchestrator CI and ops-fix-scope-guard', () => {
+    // Codex A-level finding on PR #1211: GitHub does not deliver `check_run`
+    // events for check suites GitHub Actions itself created (a deliberate
+    // anti-recursion rule), and ai-orchestrator-tests is exactly such a
+    // suite — a `check_run` trigger here would never fire in production.
+    // `workflow_run` has no such exclusion. Pinned here so nobody "simplifies"
+    // this back to check_run without re-reading why it was dead on arrival.
+    expect(recheck.doc).toBeTruthy()
+    expect(Object.keys(recheck.triggers)).toEqual(['workflow_run'])
+    const trigger = recheck.triggers.workflow_run as { workflows: string[]; types: string[] }
+    // Codex finding (PR #1211, P2): the verdict this workflow writes also
+    // scores ops-fix-scope-guard.yml's own check run, and that workflow races
+    // ai-orchestrator-ci.yml on every push. Listening for both — not just
+    // ai-orchestrator CI — is what guarantees whichever one finishes SECOND
+    // still triggers a run (recheck-readiness.mjs requires both terminal
+    // before it writes anything; see its own assertions).
+    expect(trigger.workflows).toEqual(['ai-orchestrator CI', 'OPS — Auto-fix blast radius guard'])
+    expect(trigger.types).toEqual(['completed'])
+  })
+
+  it('never grants a forbidden write scope', () => {
+    expect(recheck.doc.permissions).toBeDefined()
+    for (const scope of FORBIDDEN_WRITE_SCOPES) {
+      expect(recheck.doc.permissions?.[scope]).not.toBe('write')
+    }
+  })
+
+  it('has no contents: write', () => {
+    expect(recheck.doc.permissions?.contents).not.toBe('write')
+  })
+
+  it('contains no merge, deploy, or migration operation', () => {
+    const lower = recheck.source.toLowerCase()
+    for (const term of DANGEROUS_SUBSTRINGS) {
+      expect(lower, `${recheck.path} must not contain "${term}"`).not.toContain(term)
+    }
+  })
+
+  it('checks out the control-plane script from main, not any PR head', () => {
+    const checkout = recheck.steps.find((s) => s.uses?.startsWith('actions/checkout'))
+    expect(checkout?.with?.ref).toBe('main')
+  })
+
+  it('pins actions/checkout to a full commit SHA, never a moveable tag', () => {
+    // A-level control plane — no long-lived tag reference, same standard
+    // ai-orchestrator-ci.yml already holds itself to.
+    const checkout = recheck.steps.find((s) => s.uses?.startsWith('actions/checkout'))
+    const [, version] = (checkout?.uses ?? '').split('@')
+    expect(version, `${checkout?.uses} must be pinned to a 40-character commit SHA`).toMatch(/^[0-9a-f]{40}$/)
+  })
+
+  it('runs recheck-readiness.mjs', () => {
+    const step = recheck.steps.find((s) => s.run?.includes('recheck-readiness.mjs'))
+    expect(step).toBeDefined()
+  })
+
+  it('shares its concurrency group literal with the request-review workflow for the same head sha', () => {
+    // Codex A-level finding on PR #1211: request-review.mjs's CI-green
+    // fallback and this recheck leg can both write the same PR's readiness
+    // verdict for the same head sha. Read-before-write is not atomic on its
+    // own; what makes it safe is the two workflows sharing one concurrency
+    // group so GitHub serialises them. Pinned as an exact string match (with
+    // each workflow's own event field substituted) so the two cannot drift
+    // apart silently.
+    const recheckGroup = recheck.doc.concurrency?.group ?? ''
+    const requestGroup = request.doc.concurrency?.group ?? ''
+    expect(recheckGroup).toBe('ops-dev-gate-${{ github.event.workflow_run.head_sha }}')
+    expect(requestGroup).toBe('ops-dev-gate-${{ github.event.pull_request.head.sha }}')
+    expect(recheck.doc.concurrency?.['cancel-in-progress']).toBe(false)
+    expect(request.doc.concurrency?.['cancel-in-progress']).toBe(false)
+    const literalPrefix = (group: string) => group.replace(/\$\{\{[^}]*\}\}/, '<head-sha>')
+    expect(literalPrefix(recheckGroup)).toBe(literalPrefix(requestGroup))
+  })
+})
+
+describe('the fix-scope-guard job carries a stable check name verdict.mjs relies on', () => {
+  it('ops-fix-scope-guard.yml names its job ops-fix-scope-guard', () => {
+    expect(scope.doc.jobs?.['fix-scope']?.name).toBe('ops-fix-scope-guard')
   })
 })

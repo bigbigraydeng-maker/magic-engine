@@ -5,26 +5,47 @@
  *   dispatch-fix  -> the workflow invokes claude-code-action directly with
  *                    the aggregated findings as its prompt, then a separate
  *                    step (mark-fix-outcome.mjs) records success/failure
- *   needs-human   -> post "NEEDS HUMAN REVIEW" and stop (3 rounds already used)
- *   ready         -> post "READY FOR PRODUCT OWNER" (no actionable findings, CI green)
+ *   needs-human   -> post "NEEDS HUMAN REVIEW" and stop (round budget used up)
+ *   ready         -> no actionable findings, CI green: evaluate delivery
+ *                    quality (quality.mjs) and post READY FOR PRODUCT OWNER
+ *                    or BLOCKED — see the `case 'ready'` handler below
  *   wait-ci       -> no actionable findings, and required CI still hasn't
  *                    gone green after polling within this run
  *   skip          -> this head sha already has a marker for the stage we'd write
  *
  * It never merges, deploys, applies a migration, or resolves a review thread.
- * `plan.mjs` holds the actual decision logic and is unit-tested in isolation;
- * this file is the I/O glue around it.
+ * `plan.mjs` holds the dispatch/round-cap decision logic and is unit-tested
+ * in isolation; this file is the I/O glue around it.
+ *
+ * Round budget (ME2-OPS03 PR2): replaces the flat `MAX_ROUNDS = 3` with
+ * `maxRoundsForRisk(risk)` (A=2, B=1, C=1), where `risk` is read off the
+ * current trusted `me-dev-gate` marker — the same one `request-review.mjs`
+ * posts on every push. No current trusted marker for this exact head (should
+ * not happen in normal operation, since rating runs on every push before a
+ * review can land, but a marker can be missing, stale, or untrusted) means
+ * `risk` is `undefined`, and `maxRoundsForRisk` gives that the smallest
+ * budget rather than the largest — fail closed, an unrated PR must not buy
+ * more unattended pushes than a known-A one gets.
  */
 import { readFileSync } from 'node:fs'
-import { createIssueComment, getPullRequest, listCheckRunsForRef, listIssueComments, listReviewComments } from './github.mjs'
+import {
+  createIssueComment,
+  getPullRequest,
+  listCheckRunsForRef,
+  listIssueComments,
+  listReviewComments,
+} from './github.mjs'
 import { buildMarker, parseMarkers } from './markers.mjs'
 import { decideStage } from './plan.mjs'
 import { setOutput } from './output.mjs'
 import { buildFixPrompt } from './prompt.mjs'
 import { waitForRequiredCheck } from './poll.mjs'
 import { isActionable } from './severity.mjs'
+import { maxRoundsForRisk } from './risk.mjs'
+import { findGateFor, selectTrustedGateMarkers } from './gate-marker.mjs'
+import { buildVerdictComment } from './verdict.mjs'
+import { TRUSTED_GATE_AUTHORS } from './trust.mjs'
 
-const MAX_ROUNDS = 3
 // Matches the job name in ai-orchestrator-ci.yml ("ai-orchestrator-tests") or
 // the workflow name shown in the Checks tab ("ai-orchestrator CI") — whichever
 // GitHub surfaces as the check-run `name`.
@@ -38,19 +59,46 @@ const POLL_ATTEMPTS = Number(process.env.OPS_POLL_ATTEMPTS ?? 12)
 const POLL_INTERVAL_MS = Number(process.env.OPS_POLL_INTERVAL_MS ?? 20000)
 
 const token = process.env.GITHUB_TOKEN
+// Codex finding (PR #1211, P1): see request-review.mjs's identical constant
+// for why a marker's author login alone is not sufficient provenance.
+const gateSecret = process.env.OPS_GATE_MARKER_SECRET || null
 const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/')
 const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'))
 const pr = event.pull_request.number
-const sha = event.pull_request.head.sha
+const eventHeadSha = event.pull_request.head.sha
+const base = event.pull_request.base.sha
+const prBody = event.pull_request.body ?? ''
 const review = event.review
 
-const [issueComments, reviewComments, initialCheckRuns] = await Promise.all([
-  listIssueComments(token, owner, repo, pr),
-  listReviewComments(token, owner, repo, pr, review.id),
-  listCheckRunsForRef(token, owner, repo, sha),
-])
+function checkSucceeded(run) {
+  return run?.status === 'completed' && run?.conclusion === 'success'
+}
 
-const markers = parseMarkers(issueComments.map((c) => c.body))
+/**
+ * Everything that happens once a review is confirmed to describe the commit
+ * it claims to. `sha` is `review.commit_id`, never `pull_request.head.sha`
+ * directly — see the entry check below for why.
+ */
+async function handleFreshReview(sha) {
+  const [issueComments, reviewComments, initialCheckRuns] = await Promise.all([
+    listIssueComments(token, owner, repo, pr),
+    listReviewComments(token, owner, repo, pr, review.id),
+    listCheckRunsForRef(token, owner, repo, sha),
+  ])
+
+  const markers = parseMarkers(issueComments.map((c) => c.body))
+
+// The risk this PR is rated at, from the same trusted-marker mechanism
+// request-review.mjs writes to. Bound to THIS exact head — a rating for an
+// older sha does not count (`isGateCurrent`).
+const trustedGates = selectTrustedGateMarkers({
+  sources: issueComments.map((c) => ({ author: c.user?.login ?? null, body: c.body })),
+  trustedAuthors: TRUSTED_GATE_AUTHORS,
+  secret: gateSecret,
+})
+const currentGate = findGateFor({ markers: trustedGates, base, head: sha })
+const risk = currentGate?.risk
+const MAX_ROUNDS = maxRoundsForRisk(risk)
 
 const findingCandidates = [
   { source: 'review summary', body: review.body ?? '' },
@@ -58,21 +106,6 @@ const findingCandidates = [
 ]
 const actionableFindings = findingCandidates.filter((f) => isActionable(f.body))
 const hasActionableFindings = actionableFindings.length > 0
-
-// Concurrency guard for the dispatch path only (the only path that pushes).
-// The auto-fix leg used to stay pinned to the narrow `claude/me2-*` lane
-// specifically so it would never land on a branch a live window was holding
-// (CLAUDE.md §6, one window per branch). Now that it shares the same
-// `claude/*` scope as the review-request leg, this re-fetch is what stands
-// in for that: if the PR's head has moved past the sha Codex reviewed by the
-// time this job actually runs, someone pushed while the review was in
-// flight, and dispatching now would push a fix for code that is no longer
-// current. Only worth the extra API call when there is something to dispatch.
-const isStale = hasActionableFindings ? (await getPullRequest(token, owner, repo, pr)).head.sha !== sha : false
-
-function checkSucceeded(run) {
-  return run?.status === 'completed' && run?.conclusion === 'success'
-}
 
 let requiredCheck = initialCheckRuns.find((run) => REQUIRED_CHECK_NAME_PATTERN.test(run.name))
 // The freshest full list we have. Reporting from the pre-poll snapshot
@@ -108,6 +141,17 @@ if (!hasActionableFindings && !checkSucceeded(requiredCheck)) {
 
 const ciSuccess = checkSucceeded(requiredCheck)
 
+// Fail closed against a head that moved since `sha` (review.commit_id) was
+// reviewed. One fresh fetch, taken as late as possible — after the CI poll
+// above, which can itself run for several minutes — so it also catches a
+// push that landed *during* this very run, not just before it. `isStale`
+// still feeds `decideStage` so the dispatch path keeps its existing
+// "skip without consuming a round" behaviour; the check below extends the
+// same guarantee to needs-human / wait-ci / ready, none of which decideStage
+// gates on staleness (see plan.mjs — isStale only matters when there are
+// actionable findings).
+const isStale = (await getPullRequest(token, owner, repo, pr)).head.sha !== sha
+
 const plan = decideStage({
   markers,
   sha,
@@ -116,6 +160,14 @@ const plan = decideStage({
   ciSuccess,
   maxRounds: MAX_ROUNDS,
 })
+
+if (isStale && plan.action !== 'skip') {
+  console.log(
+    `PR #${pr}: head moved past ${sha} (the reviewed commit) before this run could write its conclusion — skipping ${plan.action} without consuming a round.`,
+  )
+  setOutput('action', 'skip')
+  return
+}
 
 switch (plan.action) {
   case 'skip': {
@@ -130,7 +182,7 @@ switch (plan.action) {
       owner,
       repo,
       pr,
-      `**NEEDS HUMAN REVIEW**\n\nCodex has raised actionable findings for ${MAX_ROUNDS} automated fix rounds without a clean review. Stopping automation here — please review manually.\n\n${marker}`
+      `**NEEDS HUMAN REVIEW**\n\nCodex has raised actionable findings for ${MAX_ROUNDS} automated fix round(s) (risk level ${risk ?? 'unknown'}) without a clean review. Stopping automation here — please review manually.\n\n${marker}`
     )
     setOutput('action', 'needs-human')
     break
@@ -202,15 +254,40 @@ switch (plan.action) {
     break
   }
   case 'ready': {
-    const marker = buildMarker({ stage: 'ready', pr, sha })
-    await createIssueComment(
+    // ME2-OPS03 PR2: no actionable Codex findings and required CI is green is
+    // no longer enough on its own to say READY. Score delivery quality
+    // (quality.mjs, via the shared verdict.mjs) and run the hard gates — the
+    // same wiring recheck-readiness.mjs uses for the unsampled-C path — and
+    // post whichever of READY FOR PRODUCT OWNER / BLOCKED the evidence
+    // actually supports. A missing/stale trusted gate marker (`risk` is
+    // `undefined`, `currentGate` is falsy) is not special-cased away here —
+    // it flows into `shaMatches: false`, which is itself a hard-gate blocker.
+    const { decision, comment } = await buildVerdictComment({
       token,
       owner,
       repo,
-      pr,
-      `**READY FOR PRODUCT OWNER**\n\nCodex reports no actionable P0/P1/P2 findings and required CI is green. This automation never merges — a human must take it from here.\n\n${marker}`
-    )
-    setOutput('action', 'ready')
+      prNumber: pr,
+      prBody,
+      base,
+      sha,
+      risk: risk ?? null,
+      shaMatches: Boolean(currentGate),
+      checkRuns: latestCheckRuns,
+      requiredCiPassed: ciSuccess,
+      openBlockerCount: actionableFindings.length,
+      secret: gateSecret,
+    })
+    // Terminal for this sha either way (READY or BLOCKED): a future push
+    // creates a new sha and this whole evaluation runs fresh. Reusing the
+    // 'ready' stage name for both outcomes keeps plan.mjs's dedup
+    // (`hasMarkerForSha('ready')`) untouched — that marker means "a readiness
+    // verdict was posted for this sha", not literally "approved". It is a
+    // different marker family from the `me-dev-gate` one `buildVerdictComment`
+    // already embeds (that one carries the score/decision payload; this one is
+    // what plan.mjs's dedup actually parses), so both are appended below.
+    const stageMarker = buildMarker({ stage: 'ready', pr, sha })
+    await createIssueComment(token, owner, repo, pr, `${comment}\n${stageMarker}`)
+    setOutput('action', decision.decision === 'READY_FOR_PRODUCT_OWNER' ? 'ready' : 'blocked')
     break
   }
   case 'dispatch-fix': {
@@ -240,4 +317,30 @@ switch (plan.action) {
   }
   default:
     throw new Error(`Unhandled plan action: ${plan.action}`)
+}
+}
+
+// GitHub's review payload carries the commit Codex actually reviewed in
+// `review.commit_id` — not `pull_request.head.sha`, which reflects the PR's
+// head at event-delivery time and can already be newer than what Codex saw
+// if a push landed while the review was in flight or queued for delivery.
+// Trusting the delivered head here would let an already-stale review drive
+// a head sha Codex never looked at.
+//
+// Fail closed in two places, not one:
+//   1. Here, at entry: `commit_id` must exist and must already match this
+//      same event's head. A mismatch here means the review was stale the
+//      moment GitHub delivered it — do nothing, no round consumed.
+//   2. Inside `handleFreshReview`, right before any write (`isStale`,
+//      re-checked against a FRESH fetch) — because that function's own CI
+//      poll can itself run for several minutes, its own window for a push
+//      to land in.
+const reviewedSha = typeof review?.commit_id === 'string' ? review.commit_id : null
+if (!reviewedSha || reviewedSha !== eventHeadSha) {
+  console.log(
+    `PR #${pr}: review.commit_id (${reviewedSha ?? 'missing'}) does not match the event's head sha (${eventHeadSha}) — this review was already stale on delivery. Skipping without writing anything or consuming a round.`,
+  )
+  setOutput('action', 'skip')
+} else {
+  await handleFreshReview(reviewedSha)
 }

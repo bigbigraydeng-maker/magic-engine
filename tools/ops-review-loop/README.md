@@ -47,20 +47,32 @@ Nothing here resolves a review conversation. Nothing here can push to
 `.github/workflows/**` or `tools/ai-orchestrator/**` (the fix prompt explicitly
 forbids it, on top of whatever the Claude GitHub App's own token permits).
 
-## Risk rating and delivery scoring — present, NOT yet wired
+## Risk rating and delivery scoring — wired (ME2-OPS03 PR2)
 
-`risk.mjs`, `sampling.mjs`, `quality.mjs` and `gate-marker.mjs` are in `src/`
-with 229 offline tests. **No workflow calls any of them yet.** They are on
-`main` first, on purpose: both loop workflows run `actions/checkout ref: main`,
-so a step that calls a brand-new module fails on the PR that introduces it,
-every time, until both halves are on main — the exact trap the inline
-`baseline` step in `ops-codex-to-claude-fix.yml` documents. Wiring is a separate
-PR.
+`risk.mjs`, `sampling.mjs`, `quality.mjs` and `gate-marker.mjs` shipped in
+ME2-OPS03 PR1 as pure, offline-tested modules with no workflow calling them.
+This PR (PR2) is the wiring:
 
-Until that PR lands, the loop still behaves exactly as the state diagram above
-describes: every `claude/*` PR asks Codex, and the cap is a flat three rounds.
+- `request-review.mjs` (the push leg) rates every PR from its actual changed
+  files, posts the rating once per base+head pair, then decides — via
+  `sampling.mjs` — whether this head still needs a Codex review before asking
+  for one.
+- `handle-review.mjs` (the review leg) reads the current trusted rating to
+  size the automated-fix round budget (`maxRoundsForRisk`: A=2, B=1, C=1,
+  replacing the flat three) and, once Codex has no actionable findings and
+  required CI is green, runs the full delivery-quality evaluation
+  (`quality.mjs`'s `scoreDelivery` + `evaluateSpecializedEvidence` +
+  `decideReadiness`) instead of posting READY unconditionally.
+- `recheck-readiness.mjs` (a new leg, `ops-dev-gate-recheck.yml`) closes the
+  one gap the review leg cannot: a C-level PR the stable sample does not
+  select never gets a Codex review, so nothing would otherwise re-evaluate it
+  once required CI goes green. It runs on every completed check run and acts
+  only for that exact case.
+- `evidence.mjs` and `report.mjs` are new pure modules this wiring needed:
+  deterministic signal/evidence detection from PR body text and diff shape,
+  and the PM-readable comment text paired with each posted marker.
 
-What the modules decide, once wired:
+What the modules decide:
 
 | module | question |
 |---|---|
@@ -111,17 +123,15 @@ Two facts worth keeping, because both were measured rather than assumed:
   still burned all three automated rounds before landing on NEEDS HUMAN REVIEW.
   That PR is why `maxRoundsForRisk` exists.
 
-### `tools/ops-review-loop` tests do not run in CI yet
+### `tools/ops-review-loop` tests run in the required check (ME2-OPS03 PR2)
 
-The required check is `ai-orchestrator-tests`, and it runs
-`npx vitest run tools/ai-orchestrator` — which does **not** match this
-directory. So every test here, old and new, runs only on a laptop.
-
-That also makes one claim in `ops-fix-scope-guard.yml` wrong today: its
-bootstrap branch says `workflow-guards.test.ts` is "part of the REQUIRED
-ai-orchestrator-tests check" and would turn red if the guard script were deleted
-from main. It would not — nothing runs it. Fixing that means editing a workflow,
-so it belongs to the wiring PR, not this one.
+The required check `ai-orchestrator-tests` (`ai-orchestrator-ci.yml`) now runs
+`npx vitest run tools/ai-orchestrator tools/ops-review-loop` — both directories,
+one required check, no new branch-protection setup needed from the Product
+Owner. That also makes `ops-fix-scope-guard.yml`'s bootstrap-branch claim true:
+`workflow-guards.test.ts` really is part of a required check now, so deleting
+the guard script it asserts on from `main` turns that check red instead of
+silently disarming the guard.
 
 ## Why plain Node instead of `actions/github-script`
 
@@ -175,6 +185,21 @@ grant. That means:
 - Whether `.github/workflows/**` pushes from this GitHub App installation are
   actually accepted is untested by this same constraint — see the PR
   description for what happened when this branch was pushed.
+
+### ME2-OPS03 PR2's session had the same constraint
+
+The wiring PR (this one) was built under the identical restriction: no
+outbound network access, so `npm ci` could not run, `node_modules` was never
+installed, and `npx vitest run tools/ops-review-loop` / `npx tsc --noEmit` /
+`npm run build` could not be executed locally. Every new test in `tests/`
+(`evidence.test.ts`, `report.test.ts`, `readiness-decision.test.ts`,
+`request-review.test.ts`, `recheck-readiness.test.ts`, plus the updates to
+`workflow-guards.test.ts` and `gate-marker`/`risk`/`quality`/`sampling`
+consumers) was written and hand-traced against the modules it imports, but not
+run. The required check (`ai-orchestrator-tests`, now covering this directory
+too — see below) is what actually proves it on the frozen head; a human or a
+follow-up session with `npm ci` access should confirm before treating this PR
+as verified.
 
 ## One-time repository setup needed from the Product Owner
 
