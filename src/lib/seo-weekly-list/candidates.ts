@@ -189,6 +189,8 @@ export function buildNearMissCandidates(
 
 export interface DailyPageRow {
   page_url: string
+  /** YYYY-MM-DD; present when the query selects it (used to check a window is fully loaded). */
+  day?: string
   clicks: number | null
   impressions: number | null
   position: number | null

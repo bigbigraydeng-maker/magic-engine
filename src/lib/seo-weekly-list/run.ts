@@ -22,10 +22,12 @@ import {
   matchOwnPages,
   tokenKey,
   type DailyPageRow,
+  type PageAggRow,
   type SitePageRow,
   type SnapshotKeywordRow,
 } from './candidates'
-import { buildCtrGapItem, buildNearMissItem, type ItemContext, type PlanItemDraft } from './items'
+import { buildCtrGapItem, buildDecayItem, buildNearMissItem, type ItemContext, type PlanItemDraft } from './items'
+import { buildDecayCandidates, type DecayCandidate } from './decay'
 import { CAUSE_LABEL, diagnoseCtrGap, type CtrDiagnosis, type PageQueryRow } from './ctr-diagnosis'
 import { fetchGscQueriesForPage } from '@/lib/gsc/client'
 import { fetchLiveSnippet, type SnippetFetcher } from './live-snippet'
@@ -66,6 +68,8 @@ export interface WeeklyListClientResult {
   preview: string[]
   /** High-potential pages left out because their last crawl is too old to take a baseline from (data gap, surfaced not hidden). */
   stale_crawl_pages?: string[]
+  /** Traffic-decay source switched off for this run (thin history / read failed), with why. Absent = ran normally. */
+  decay_note?: string
   /** Items whose verify / expire write failed (the run continues; any entry turns the cron red). */
   item_errors?: string[]
   error?: string
@@ -339,7 +343,7 @@ async function buildDrafts(
     start.setUTCDate(start.getUTCDate() - (GSC_WINDOW_DAYS - 1))
     const startDay = start.toISOString().slice(0, 10)
     dailyRows = await readAll<DailyPageRow>(
-      (from, to) => supabase.from('gsc_page_daily').select('page_url, clicks, impressions, position').eq('client_id', clientId).gte('day', startDay).lte('day', gscDay).order('day', { ascending: true }).order('page_key', { ascending: true }).order('page_url', { ascending: true }).range(from, to),
+      (from, to) => supabase.from('gsc_page_daily').select('page_url, clicks, impressions, position, day').eq('client_id', clientId).gte('day', startDay).lte('day', gscDay).order('day', { ascending: true }).order('page_key', { ascending: true }).order('page_url', { ascending: true }).range(from, to),
       'gsc_page_daily',
     )
   }
@@ -454,6 +458,25 @@ async function buildDrafts(
     ctrEligible.push({ c, page })
   }
 
+  // Traffic decay: previous 28 days vs latest 28 days. Thin history or a failed read only
+  // switches this source off (noted in the result); it never blocks the other items.
+  if (gscDay) {
+    const recentDays = new Set(dailyRows.map(r => r.day).filter(Boolean)).size
+    const decay = await loadDecayCandidates(supabase, clientId, gscDay, pageAgg, recentDays, config)
+    if (decay.note) result.decay_note = decay.note
+    for (const c of decay.candidates) {
+      const canon = canonicalUrl(c.url)
+      if ((canon && blockedUrls.has(canon)) || isExcludedUrl(c.url, protectedSlugs, recentMetaUrls)) continue
+      const page = canon ? sitePageByCanon.get(canon) : undefined
+      if (!page) continue
+      if (!hasFreshCrawl(page, now, config)) {
+        noteStale(result, c.url) // no trustworthy word-count baseline
+        continue
+      }
+      ranked.push({ potential: c.potentialClicks, build: idx => buildDecayItem(c, page, ctx, idx) })
+    }
+  }
+
   // CTR diagnosis for the top low-CTR pages: read the page's OWN search queries from Google
   // (free) and combine with title / sibling-page facts. A failed read never blocks the item —
   // it just says the query data could not be fetched.
@@ -507,6 +530,40 @@ async function buildDrafts(
   }
 
   return drafts
+}
+
+/**
+ * Pages whose Google clicks fell clearly more than the site's between the previous and the
+ * latest 28 days. Both windows must be (nearly) fully loaded, otherwise a data gap would read
+ * as a traffic collapse.
+ */
+async function loadDecayCandidates(
+  supabase: SupabaseClient,
+  clientId: string,
+  gscDay: string,
+  recentPages: PageAggRow[],
+  recentDays: number,
+  config: SeoLoopConfig,
+): Promise<{ candidates: DecayCandidate[]; note: string | null }> {
+  if (recentDays < config.decayMinPriorDays) return { candidates: [], note: `recent_window_thin:${recentDays}d` }
+  const end = new Date(`${gscDay}T00:00:00Z`)
+  end.setUTCDate(end.getUTCDate() - GSC_WINDOW_DAYS)
+  const start = new Date(end)
+  start.setUTCDate(start.getUTCDate() - (GSC_WINDOW_DAYS - 1))
+  const startDay = start.toISOString().slice(0, 10)
+  const endDay = end.toISOString().slice(0, 10)
+  let rows: DailyPageRow[]
+  try {
+    rows = await readAll<DailyPageRow>(
+      (from, to) => supabase.from('gsc_page_daily').select('page_url, clicks, impressions, position, day').eq('client_id', clientId).gte('day', startDay).lte('day', endDay).order('day', { ascending: true }).order('page_key', { ascending: true }).order('page_url', { ascending: true }).range(from, to),
+      'gsc_page_daily(prior)',
+    )
+  } catch {
+    return { candidates: [], note: 'prior_window_read_failed' }
+  }
+  const priorDays = new Set(rows.map(r => r.day).filter(Boolean)).size
+  if (priorDays < config.decayMinPriorDays) return { candidates: [], note: `prior_window_thin:${priorDays}d` }
+  return { candidates: buildDecayCandidates(recentPages, aggregatePageRows(rows), config).candidates, note: null }
 }
 
 /** A page's crawl is fresh enough to serve as a word-count baseline (weekly crawl → ≤ baselineMaxCrawlAgeDays). */

@@ -9,6 +9,7 @@
 
 import { canonicalUrl } from '@/lib/url/canonical-url'
 import type { CtrGapCandidate, KeywordMember, NearMissCandidate, SitePageRow } from './candidates'
+import { DECAY_CAUSE_LABEL, type DecayCandidate } from './decay'
 import { CAUSE_LABEL, type CtrDiagnosis } from './ctr-diagnosis'
 
 export const SEO_PLAN_LOOP_MARKER = 'seo_goal_v1'
@@ -192,6 +193,74 @@ export function buildCtrGapItem(
   }
 }
 
+const DECAY_CAUSE_STEP: Record<DecayCandidate['cause'], string> = {
+  rank_loss: '③ 对比这页前一期的内容：有没有过时的信息（日期、价格、行程、政策）、少了关键小节；先补最新信息，再补缺的小节，并检查有没有内链指向它。',
+  visibility_down: '③ 先判断是不是季节或需求本身变少（和去年同期比；没有去年数据就写明"假设"）。不是季节的话，看它之前能露出的搜索词是不是丢了，针对丢的词补内容。',
+  ctr_drop: '③ 曝光没少，重点看线上真实标题和描述是否还吸引人、是否被别的搜索板块压住（用"点击率偏低"那类任务的诊断方法）；内容不用大改。',
+  mixed: '③ 原因不单一：先做①②，再对比这页前一期的内容和搜索词，列出你看到的差异后再决定改什么。',
+}
+
+export function buildDecayItem(
+  c: DecayCandidate,
+  page: SitePageRow | undefined,
+  ctx: ItemContext,
+  index: number,
+): PlanItemDraft {
+  const failure = '下次清单（14 天）页面没有实质改动，判没执行；改动 28 天后该页点击仍低于前一期的 70%，判没起效（点击回升与"页面真改了"分开记，不做点击归因）'
+  const pct = (r: number) => `${Math.round((1 - r) * 100)}%`
+  const evidence: EvidenceLine[] = [
+    {
+      claim: `该页最近 28 天点击 ${c.recentClicks}、曝光 ${c.recentImpressions}${c.recentPosition === null ? '（没有曝光）' : `、平均排第 ${c.recentPosition.toFixed(1)}`}；前 28 天点击 ${c.priorClicks}、曝光 ${c.priorImpressions}、平均排第 ${c.priorPosition.toFixed(1)}。点击少了 ${pct(c.pageRatio)}`,
+      source: '谷歌搜索数据（逐页逐天，两个 28 天窗口）',
+      fetched_at: ctx.gscDay,
+      confidence: '确认',
+    },
+    {
+      claim: `同期全站点击${c.siteRatio >= 1 ? `多了 ${Math.round((c.siteRatio - 1) * 100)}%` : `少了 ${pct(c.siteRatio)}`}，所以这页是明显比全站更差，不是整站波动`,
+      source: '谷歌搜索数据（全站合计）',
+      fetched_at: ctx.gscDay,
+      confidence: '确认',
+    },
+    {
+      claim: `系统读数：${DECAY_CAUSE_LABEL[c.cause]}（只是曝光、排名数字的机械判断，不代表一定是这个原因）`,
+      source: '谷歌搜索数据（曝光、平均排名对比）',
+      fetched_at: ctx.gscDay,
+      confidence: '很可能',
+    },
+  ]
+  const how = [
+    '① 先看这页收录了吗、线上能不能正常打开，有没有被误设成不让收录。',
+    '② 看这页主要搜索词的排名有没有被竞品或自家别的页面拿走（后台"逐页对比"同主题页面的曝光）。',
+    DECAY_CAUSE_STEP[c.cause],
+    '④ 改完请记下改了什么，便于核对。',
+  ].join('\n')
+  return {
+    actionType: PLAN_ACTION.STRENGTHEN_PAGE,
+    title: `加强页面：流量下滑 ${c.url}`,
+    description: [
+      `【为什么】${evidence[0].claim}。同期${evidence[1].claim.replace('，所以这页是明显比全站更差，不是整站波动', '')}，这页掉得明显比全站多（粗估少了约 ${c.potentialClicks} 次点击/28 天，只用于排序）。`,
+      `【系统读数】${DECAY_CAUSE_LABEL[c.cause]}（机械可核对的数字，见证据；不代表一定是这个原因）`,
+      `【怎么做】\n${how}`,
+      `【怎么算没起效】${failure}`,
+      `【证据】${evidence.map(e => `${e.claim}〔${e.confidence}｜${e.source}｜${e.fetched_at}〕`).join('；')}`,
+      `【链接】${c.url} ｜ ${ctx.intelligenceHref}`,
+    ].join('\n'),
+    keyword: null,
+    url: c.url,
+    dueDate: dueDateFor(ctx.planWeek, index),
+    stepsJson: baseSteps(ctx, 'traffic_decay', null, c.url, evidence, failure, {
+      opportunity: {
+        prior_clicks: c.priorClicks, recent_clicks: c.recentClicks,
+        prior_impressions: c.priorImpressions, recent_impressions: c.recentImpressions,
+        prior_position: c.priorPosition, recent_position: c.recentPosition,
+        page_ratio: c.pageRatio, site_ratio: c.siteRatio, cause: c.cause, potential_clicks_estimate: c.potentialClicks,
+      },
+      baseline: { snapshot_date: ctx.gscDay, word_count: page?.word_count ?? null, crawled_at: page?.crawled_at ?? null, title: page?.title ?? null },
+      verify: { type: 'page_strengthened' },
+    }),
+  }
+}
+
 function diagnosisEvidence(d: CtrDiagnosis, ctx: ItemContext): EvidenceLine[] {
   const out: EvidenceLine[] = []
   out.push(d.liveTitle
@@ -247,7 +316,7 @@ function titleCheck(liveTitle: string | null): string {
 
 function baseSteps(
   ctx: ItemContext,
-  kind: 'near_miss' | 'ctr_gap',
+  kind: 'near_miss' | 'ctr_gap' | 'traffic_decay',
   keyword: string | null,
   url: string | null,
   evidence: EvidenceLine[],
