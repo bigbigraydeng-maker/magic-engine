@@ -122,6 +122,7 @@ export async function POST(
       .from('client_site_pages')
       .update({
         title: crawlResult.title || page.url,
+        ...(crawlResult.metaDescription ? { meta_description: crawlResult.metaDescription } : {}),
         markdown_content: crawlResult.markdown,
         word_count: wordCount,
         page_type: classification.page_type,
