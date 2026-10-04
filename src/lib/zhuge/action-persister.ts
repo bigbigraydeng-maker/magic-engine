@@ -474,6 +474,134 @@ export async function writeExecutionItems(
   return { inserted: toInsert.length, superseded: toSupersede.length }
 }
 
+// ── SEO weekly list items (docs/specs/2026-10-04-seo-weekly-list-v0.2.md) ───────
+//
+// The weekly list writes its items HERE (not in a new file) because this file is
+// already on the Kernel architecture test's grandfathered execution_items writer
+// list, which may only shrink. These items are `source='zhuge'` with
+// `steps_json.loop` set; that marker is what keeps them out of the 14-day
+// auto-expiry (card-expiry.ts) and the patrol's weekly card cap
+// (seo-patrol/job.ts counts only cards carrying a string `rule_id`).
+
+export const SEO_PLAN_LOOP = 'seo_goal_v1'
+
+export interface SeoPlanItemInsert {
+  actionType: string
+  title: string
+  description: string
+  keyword: string | null
+  url: string | null
+  dueDate: string
+  stepsJson: Record<string, unknown>
+  initiativeId: string | null
+}
+
+/**
+ * Insert weekly-list items. An item whose dedup key matches a still-open list item
+ * (pending / in_progress) is skipped — never superseded: last week's item stays and
+ * keeps its clock. Returns how many were inserted and how many were duplicates.
+ */
+export async function writeSeoPlanItems(
+  supabase: SupabaseClient,
+  clientId: string,
+  items: SeoPlanItemInsert[],
+): Promise<{ inserted: number; duplicates: number; ids: string[] }> {
+  if (items.length === 0) return { inserted: 0, duplicates: 0, ids: [] }
+
+  const { data: open, error: selErr } = await supabase
+    .from('execution_items')
+    .select('action_type, steps_json')
+    .eq('client_id', clientId)
+    .eq('dimension', 'seo')
+    .in('status', ['pending', 'in_progress'])
+    .in('action_type', Array.from(new Set(items.map((i) => i.actionType))))
+  if (selErr) throw new Error(`seo plan items dedup check failed: ${selErr.message}`)
+
+  const openKeys = new Set<string>()
+  for (const row of (open as Array<{ action_type: string; steps_json: Record<string, unknown> | null }> | null) ?? []) {
+    if (row.steps_json?.loop !== SEO_PLAN_LOOP) continue
+    openKeys.add(executionItemDedupKey(row.action_type, row.steps_json.keyword, row.steps_json.url))
+  }
+
+  const fresh: SeoPlanItemInsert[] = []
+  const batch = new Set<string>()
+  let duplicates = 0
+  for (const item of items) {
+    const key = executionItemDedupKey(item.actionType, item.keyword, item.url)
+    if (openKeys.has(key) || batch.has(key)) {
+      duplicates += 1
+      continue
+    }
+    batch.add(key)
+    fresh.push(item)
+  }
+  if (fresh.length === 0) return { inserted: 0, duplicates, ids: [] }
+
+  const rows = fresh.map((item, idx) => ({
+    prescription_id: null,
+    client_id: clientId,
+    finding_id: null,
+    dimension: 'seo',
+    title: item.title,
+    description: item.description,
+    fix_type: 'fde_manual',
+    action_type: item.actionType,
+    status: 'pending',
+    source: 'zhuge',
+    zhuge_session_id: null,
+    sort_order: idx + 1,
+    due_date: item.dueDate,
+    initiative_id: item.initiativeId,
+    steps_json: { ...item.stepsJson, loop: SEO_PLAN_LOOP },
+  }))
+  const { data: inserted, error: insErr } = await supabase.from('execution_items').insert(rows).select('id')
+  if (insErr) throw new Error(`seo plan items insert failed: ${insErr.message}`)
+  const ids = ((inserted as Array<{ id: string }> | null) ?? []).map((r) => r.id)
+  return { inserted: ids.length, duplicates, ids }
+}
+
+export interface SeoPlanItemTransition {
+  id: string
+  clientId: string
+  to: 'completed' | 'skipped'
+  /** Human-readable reason, also stored as steps_json.skip_reason / verified evidence. */
+  reason: string
+  /** Full steps_json to persist (caller merges verify/skip fields into the current one). */
+  stepsJson: Record<string, unknown>
+  now?: Date
+}
+
+/**
+ * Close a list item (verified-complete, or skipped as expired). The audit row is
+ * written FIRST and the status flips only if that insert succeeded, so a card can
+ * never show "completed" without a receipt. execution_logs.author is constrained to
+ * system / luban / fde — this uses 'system'.
+ */
+export async function transitionSeoPlanItem(
+  supabase: SupabaseClient,
+  t: SeoPlanItemTransition,
+): Promise<void> {
+  const now = (t.now ?? new Date()).toISOString()
+  const { error: logErr } = await supabase.from('execution_logs').insert({
+    execution_item_id: t.id,
+    client_id: t.clientId,
+    author: 'system',
+    kind: 'status_change',
+    content: t.to === 'completed' ? `系统核对通过：${t.reason}` : `放弃：${t.reason}`,
+    meta: { to: t.to, reason: t.reason, loop: SEO_PLAN_LOOP, verified: t.to === 'completed' },
+  })
+  if (logErr) throw new Error(`seo plan item audit log failed: ${logErr.message}`)
+
+  const patch: Record<string, unknown> = { status: t.to, steps_json: t.stepsJson, updated_at: now }
+  if (t.to === 'completed') patch.completed_at = now
+  const { error: updErr } = await supabase
+    .from('execution_items')
+    .update(patch)
+    .eq('id', t.id)
+    .in('status', ['pending', 'in_progress'])
+  if (updErr) throw new Error(`seo plan item status update failed: ${updErr.message}`)
+}
+
 // ── Decision history (Phase 23.D) ─────────────────────────────────────────────
 
 /**

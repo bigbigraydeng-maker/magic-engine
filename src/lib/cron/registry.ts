@@ -250,6 +250,7 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   { service: 'prospecting-sweep', jobName: 'prospecting-sweep', schedule: '*/30 * * * *', logsRuns: true },
   { service: 'reputation-snapshots-weekly', jobName: 'reputation-snapshots-weekly', schedule: '30 3 * * 1', logsRuns: true },
   { service: 'seo-patrol-daily', jobName: 'seo-patrol-daily', schedule: '0 4 * * *', logsRuns: true },
+  { service: 'seo-weekly-list', jobName: 'seo-weekly-list', schedule: '30 4 * * 1', logsRuns: true, addedAt: '2026-10-04' },
   { service: 'site-audit-cron', jobName: 'site-audit-cron', schedule: '0 2 * * *', logsRuns: true },
   { service: 'site-audit-weekly', jobName: 'site-audit-weekly', schedule: '0 1 * * 0', logsRuns: true },
   { service: 'social-comment-autoreply', jobName: 'social-comment-autoreply', schedule: '*/30 * * * *', logsRuns: true },
