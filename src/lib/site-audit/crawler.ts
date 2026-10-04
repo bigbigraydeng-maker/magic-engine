@@ -51,6 +51,8 @@ export interface CrawlResult {
   statusCode: number
   error?: string
   crawledAt: Date
+  /** <meta name="description"> from Jina's JSON envelope; null = page has none / not captured. */
+  metaDescription?: string | null
   /**
    * Set when Jina returned an anti-bot challenge page (SiteGround / Cloudflare
    * / Wordfence / Sucuri / generic). The crawler still records the URL but
@@ -597,9 +599,9 @@ export async function crawlPages(
     const crawledAt = new Date()
 
     try {
-      const { fetchUrlAsMarkdown } = await import('../brief/jina')
+      const { fetchUrlWithMeta } = await import('../brief/jina')
       const { detectAntibotChallenge } = await import('./antibot-detector')
-      const jinaResult = await withTimeout(fetchUrlAsMarkdown(url), timeout)
+      const jinaResult = await withTimeout(fetchUrlWithMeta(url), timeout)
       const title = jinaResult.title || extractTitle(jinaResult.markdown, url)
 
       // 2026-06-20 Oztop incident — Jina passes anti-bot challenge pages
@@ -611,6 +613,7 @@ export async function crawlPages(
         url,
         markdown: antibot ? '' : jinaResult.markdown,
         title:    antibot ? '' : title,
+        metaDescription: antibot ? null : jinaResult.description,
         statusCode: 200,
         crawledAt,
         ...(antibot ? { antibot, error: `antibot_${antibot.kind}: ${antibot.evidence}` } : {}),

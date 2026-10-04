@@ -12,6 +12,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { JobRunner } from './job-runner'
 import { discoverSitemapUrls as crawlerDiscoverUrls, crawlPages } from './crawler'
 import { enrichCrawledPage } from './page-enrichment'
+import { orderStalestFirst, summarizeCapSkips } from './crawl-order'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -194,6 +195,9 @@ export async function crawlAndClassifyPages(
             url: crawl.url,
             path: pagePath,
             title: crawl.title,
+            // Only written when the page really has one: a blank must not wipe a
+            // value captured earlier, and "not captured" is not "no description".
+            ...(crawl.metaDescription ? { meta_description: crawl.metaDescription } : {}),
             markdown_content: crawl.markdown,
             word_count: wordCount,
             page_type: pageType,
@@ -259,6 +263,36 @@ export function summarizeMarkFailures(failed: Array<{ url: string; error: string
 }
 
 /**
+ * Reorder discovered URLs so the longest-unrefreshed pages come first. Only matters
+ * when the cap will cut something; a read failure keeps sitemap order (the old behaviour).
+ */
+async function orderByStaleness(
+  supabase: SupabaseClient,
+  clientId: string,
+  urls: string[],
+): Promise<string[]> {
+  try {
+    const { data, error } = await supabase
+      .from('client_site_pages')
+      .select('url, crawled_at')
+      .eq('client_id', clientId)
+      .limit(5000)
+    if (error || !data) {
+      console.warn('[site-audit] could not read crawl history, keeping sitemap order:', error?.message)
+      return urls
+    }
+    const crawledAt = new Map<string, string>()
+    for (const row of data as Array<{ url: string; crawled_at: string | null }>) {
+      if (row.crawled_at) crawledAt.set(row.url, row.crawled_at)
+    }
+    return orderStalestFirst(urls, crawledAt)
+  } catch (err) {
+    console.warn('[site-audit] could not read crawl history, keeping sitemap order:', err instanceof Error ? err.message : String(err))
+    return urls
+  }
+}
+
+/**
  * Execute a single site-audit job identified by `jobId`.
  *
  * Flow:
@@ -311,11 +345,15 @@ export async function executeJob(
       return
     }
 
+    // 3b. If the site has more pages than the cap, crawl the stalest first so
+    //     the same tail is not skipped every run (2026-10-05 CTS: 179 pages, cap 150).
+    const orderedUrls = await orderByStaleness(supabase, job.client_id, urls)
+
     // 4. Crawl, classify, GEO-detect, upsert
     const { successful, failed } = await crawlAndClassifyPages(
       supabase,
       job.client_id,
-      urls,
+      orderedUrls,
       jobId,
       resolvedOptions
     )
@@ -326,9 +364,12 @@ export async function executeJob(
       totalPagesClassified: successful.length,
     })
     const failedUrls = failed.map((f) => f.url)
-    const markSummary = summarizeMarkFailures(failed)
-    if (markSummary) {
-      await runner.completeJob(jobId, failedUrls, markSummary)
+    const note = [
+      summarizeMarkFailures(failed),
+      summarizeCapSkips(urls.length, resolvedOptions.maxPages ?? DEFAULT_MAX_PAGES),
+    ].filter((n): n is string => n !== null).join('；')
+    if (note) {
+      await runner.completeJob(jobId, failedUrls, note)
     } else {
       await runner.completeJob(jobId, failedUrls)
     }
