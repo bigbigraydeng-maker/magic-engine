@@ -1,6 +1,6 @@
 ---
 id: 2026-10-04-cts-christmas-sample-reel-awaiting-pm
-title: CTS 圣诞团、Best of China、Panorama 五条样片（四种片型）（真实视频素材 + Remotion 动画）已出，等 PM 审，通过前不放量、不投放
+title: CTS 四个产品各一条样片（四种片型、四首歌，圣诞团朋克 / Best of China 悬念 / Panorama 清单 / Two Cities 路线），等 PM 审，通过前不放量、不投放（真实视频素材 + Remotion 动画）已出，等 PM 审，通过前不放量、不投放
 status: decided
 owner: agent
 decided_on: 2026-10-04
