@@ -26,7 +26,7 @@ import {
   type SnapshotKeywordRow,
 } from './candidates'
 import { buildCtrGapItem, buildNearMissItem, type ItemContext, type PlanItemDraft } from './items'
-import { diagnoseCtrGap, type CtrDiagnosis, type PageQueryRow } from './ctr-diagnosis'
+import { CAUSE_LABEL, diagnoseCtrGap, type CtrDiagnosis, type PageQueryRow } from './ctr-diagnosis'
 import { fetchGscQueriesForPage } from '@/lib/gsc/client'
 import { verifyPlanItem, type BlogRow, type CrawledPage, type OpenPlanItem } from './verify'
 
@@ -257,7 +257,7 @@ async function runForClient(
   const drafts = await buildDrafts(supabase, client, goal.id, config, now, result, fetchPageQueries)
   if (drafts.length === 0) return { ...result, withheld: result.withheld ?? 'no_candidates' }
   const chosen = drafts.slice(0, slots)
-  result.preview = chosen.map(d => d.title)
+  result.preview = chosen.map(previewLine)
   if (dryRun) return result
 
   const initiativeId = await loadInitiativeId(supabase, clientId, goal.id)
@@ -506,4 +506,15 @@ function hasFreshCrawl(page: SitePageRow, now: Date, config: SeoLoopConfig): boo
 function noteStale(result: WeeklyListClientResult, url: string): void {
   const list = (result.stale_crawl_pages ??= [])
   if (list.length < 5 && !list.includes(url)) list.push(url)
+}
+
+/**
+ * One preview line per item. For low-CTR items it also states the diagnosis cause and whether
+ * the page's own Google queries were actually fetched — so a dry run shows whether the live
+ * Google read worked, not just which pages were picked.
+ */
+function previewLine(d: PlanItemDraft): string {
+  const diag = d.stepsJson.ctr_diagnosis as CtrDiagnosis | undefined
+  if (!diag) return d.title
+  return `${d.title} ｜诊断：${CAUSE_LABEL[diag.cause]}｜该页搜索词${diag.queriesAvailable ? '已取到' : '没取到'}`
 }

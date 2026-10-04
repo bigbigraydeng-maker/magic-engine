@@ -263,5 +263,20 @@ describe('runSeoWeeklyList', () => {
     await runSeoWeeklyList(db.client(), { now: NOW, dryRun: true, fetchPageQueries: async (_s, url) => { calls.push(url); return null } })
     expect(calls.length).toBe(3)
   })
+
+  it('the preview states the diagnosis cause and whether the Google query read worked', async () => {
+    const mk = () => {
+      const db = baseDb()
+      db.rows('gsc_performance_snapshots').push({ client_id: CID, period_end: '2026-10-03', site_url: 'https://x.com/' })
+      return db
+    }
+    const withRows = await runSeoWeeklyList(mk().client(), {
+      now: NOW, dryRun: true,
+      fetchPageQueries: async () => [{ query: 'low ctr page', clicks: 1, impressions: 25, ctr: 0.04, position: 5 }],
+    })
+    expect(withRows.results[0].preview.join('\n')).toContain('该页搜索词已取到')
+    const failed = await runSeoWeeklyList(mk().client(), { now: NOW, dryRun: true, fetchPageQueries: async () => null })
+    expect(failed.results[0].preview.join('\n')).toContain('该页搜索词没取到')
+  })
 })
 
