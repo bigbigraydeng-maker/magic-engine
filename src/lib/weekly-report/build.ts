@@ -20,6 +20,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { esc, FOCUS_CLIENT_IDS } from '@/lib/pm-todo/daily-todo'
+import { gatherSeoListWeekly, seoListLines, type SeoListWeeklyResult } from '@/lib/seo-weekly-list/report'
 
 const STALE_AFTER_DAYS = 3
 /** Keyword snapshots are WEEKLY by design — 8 days tolerance, not 3, or
@@ -62,6 +63,8 @@ export interface ClientWeekly {
     findings_week: number
     freshness: FreshnessStamp
   }
+  /** SEO weekly list block (null when the client has no active list goal). Optional: old data / tests have none. */
+  seo_list?: SeoListWeeklyResult
   auto_changes: {
     titles_applied_week: number
     /** Of this week's changes, how many recorded a rank baseline (ranked or not_in_top_n) and can therefore be verified later. Optional: old data / tests have none. */
@@ -296,9 +299,12 @@ async function gatherClient(
   }>
   const adLatest = ads.reduce<string | null>((m, r) => (m && m > r.insight_date ? m : r.insight_date), null)
 
+  const seoList = await gatherSeoListWeekly(supabase, clientId, now)
+
   return {
     client_id: clientId,
     name: (client as { name: string }).name,
+    seo_list: seoList,
     seo: {
       ...seoWeek,
       gsc_clicks_28d: gscRow?.total_clicks ?? null,
@@ -435,6 +441,7 @@ export function renderWeeklyReport(clients: ClientWeekly[], nzDateLabel: string,
       c.seo.movers_up.length > 0 ? line(`涨得最好：${c.seo.movers_up.map(moverText).join('；')}`) : '',
       c.seo.movers_down.length > 0 ? line(`跌得要看：${c.seo.movers_down.map(moverText).join('；')}`) : '',
       line(`巡逻员本周抓到 ${c.seo.findings_week} 个新发现`),
+      ...seoListLines(c.seo_list ?? null, `https://app.magicengine.com.au/dashboard/clients/${c.client_id}/execution`).map(line),
     ].filter(Boolean).join('')
 
     const OUTCOME_LABEL: Record<string, string> = {
