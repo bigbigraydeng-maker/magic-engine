@@ -68,7 +68,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   asAdmin('ray@x.com')
   mockAccounts.mockResolvedValue({ ids: ['act_1'] })
-  mockCircuit.mockResolvedValue({ tripped: false, reason: null, queryError: null })
+  mockCircuit.mockResolvedValue({ tripped: false, reason: null, sticky: false, openTripCount: 0, queryError: null })
 })
 
 describe('鉴权', () => {
@@ -175,7 +175,7 @@ describe('GET 查开关状态', () => {
 
   it('账户都没熔断 → 200 且 engaged:false', async () => {
     mockAccounts.mockResolvedValue({ ids: ['act_1'] })
-    mockCircuit.mockResolvedValue({ tripped: false, reason: null, queryError: null })
+    mockCircuit.mockResolvedValue({ tripped: false, reason: null, sticky: false, openTripCount: 0, queryError: null })
     const res = await GET(getReq(`?clientId=${CLIENT}`))
     expect(res.status).toBe(200)
     expect((await res.json()).engaged).toBe(false)
@@ -186,6 +186,8 @@ describe('GET 查开关状态', () => {
     mockCircuit.mockResolvedValue({
       tripped: true,
       reason: 'manual_emergency_stop: 测试',
+      sticky: true,
+      openTripCount: 1,
       queryError: null,
     })
     const res = await GET(getReq(`?clientId=${CLIENT}`))
@@ -196,7 +198,7 @@ describe('GET 查开关状态', () => {
 
   it('readCircuitState 返回 queryError → circuit_unreadable', async () => {
     mockAccounts.mockResolvedValue({ ids: ['act_1'] })
-    mockCircuit.mockResolvedValue({ tripped: false, reason: null, queryError: '读不到' })
+    mockCircuit.mockResolvedValue({ tripped: false, reason: null, sticky: false, openTripCount: 0, queryError: '读不到' })
     const res = await GET(getReq(`?clientId=${CLIENT}`))
     const body = await res.json()
     expect(body.engaged).toBe(true)
