@@ -91,25 +91,6 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     )
   }
 
-  // ── ME 私信广告草案不许经「恢复」直接开启 ─────────────────────────────────
-  // 私信广告的开启必须走审批流程；这个入口没有授权/预算检查。判据是账本里有没有
-  // 这个系列的私信草案记录。查不出来也拒绝（fail-closed）——只有明确「没有」才放行。
-  if (action_type === 'ads.reactivate_campaign') {
-    const draftCheck = await checkMessengerDraftCampaign(supabaseAdmin, clientId, String(campaign_id))
-    if (draftCheck === 'is_messenger_draft') {
-      return NextResponse.json(
-        { error: MESSENGER_REACTIVATE_BLOCKED_MESSAGE, code: 'messenger_reactivate_blocked' },
-        { status: 422 },
-      )
-    }
-    if (draftCheck !== 'not_messenger_draft') {
-      return NextResponse.json(
-        { error: MESSENGER_LOOKUP_FAILED_MESSAGE, code: 'messenger_draft_lookup_failed' },
-        { status: 422 },
-      )
-    }
-  }
-
   // ── Token ─────────────────────────────────────────────────────────────────
   // Per-client token first (META_SYSTEM_USER_TOKEN_<DOMAIN>, the path the daily
   // pull and winner-sync already run on in production), falling back to the
@@ -131,6 +112,27 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     return NextResponse.json({ error: ownership.error }, { status: 403 })
   }
   const beforeDetails = ownership.campaign
+
+  // ── ME 私信广告草案不许经「恢复」直接开启 ─────────────────────────────────
+  // 私信广告的开启必须走审批流程；这个入口没有授权/预算检查。判据是账本里有没有
+  // 这个系列的私信草案记录（不按客户过滤：Meta 系列编号全局唯一，共用广告账户时
+  // 别家客户的人也够得着这个系列）。放在归属校验之后，免得借它探测别家的系列编号。
+  // 查不出来也拒绝（fail-closed）——只有明确「没有」才放行。
+  if (action_type === 'ads.reactivate_campaign') {
+    const draftCheck = await checkMessengerDraftCampaign(supabaseAdmin, String(campaign_id))
+    if (draftCheck === 'is_messenger_draft') {
+      return NextResponse.json(
+        { error: MESSENGER_REACTIVATE_BLOCKED_MESSAGE, code: 'messenger_reactivate_blocked' },
+        { status: 422 },
+      )
+    }
+    if (draftCheck !== 'not_messenger_draft') {
+      return NextResponse.json(
+        { error: MESSENGER_LOOKUP_FAILED_MESSAGE, code: 'messenger_draft_lookup_failed' },
+        { status: 422 },
+      )
+    }
+  }
 
   const before = {
     status:       beforeDetails.status,

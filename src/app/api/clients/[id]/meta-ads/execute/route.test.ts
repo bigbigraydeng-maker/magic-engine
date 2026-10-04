@@ -5,6 +5,10 @@
  * from client B's ad account while the resolved token is the shared fallback.
  * assertCampaignOwnedByClient runs for real (not mocked); every action type must
  * stop at 403 before any Meta write or flywheel_actions audit row.
+ *
+ * The Messenger-draft reactivation guard (checkMessengerDraftCampaign) runs
+ * AFTER the ownership check and is NOT scoped to the requesting client, so a
+ * draft recorded under any client for the same campaign blocks reactivation.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
@@ -53,7 +57,6 @@ vi.mock('@/lib/supabase', () => ({
           const rows = m.draftRows.filter((row) =>
             filters.every(([col, val]) => {
               if (
-                col !== 'client_id' &&
                 col !== 'action_type' &&
                 col !== 'payload->draft->>kind' &&
                 col !== 'payload->>campaignId'
@@ -230,7 +233,7 @@ describe('meta-ads/execute POST — reactivating ME Messenger draft campaigns', 
     expect(body.code).toBe('messenger_reactivate_blocked')
     expect(body.error).toContain('审批流程')
     expect(m.setCampaignStatus).not.toHaveBeenCalled()
-    expect(m.getCampaignDetails).not.toHaveBeenCalled()
+    expect(m.getCampaignDetails).toHaveBeenCalledTimes(1)
     expect(m.otherTableInsert).not.toHaveBeenCalled()
   })
 
@@ -250,16 +253,17 @@ describe('meta-ads/execute POST — reactivating ME Messenger draft campaigns', 
     const body = await res.json()
     expect(body.code).toBe('messenger_draft_lookup_failed')
     expect(m.setCampaignStatus).not.toHaveBeenCalled()
-    expect(m.getCampaignDetails).not.toHaveBeenCalled()
   })
 
-  it('does not block when the draft belongs to another client', async () => {
+  it('blocks reactivation even when the draft was recorded under another client (shared ad account)', async () => {
     m.draftRows = [messengerRow(CLIENT_B, CAMP)]
 
     const res = await post({ action_type: 'ads.reactivate_campaign', campaign_id: CAMP })
 
-    expect(res.status).toBe(200)
-    expect(m.setCampaignStatus).toHaveBeenCalledWith(CAMP, 'SHARED_FALLBACK_TOKEN', 'ACTIVE')
+    expect(res.status).toBe(422)
+    const body = await res.json()
+    expect(body.code).toBe('messenger_reactivate_blocked')
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
   })
 
   it('does not block when the draft kind is not a Messenger conversation', async () => {
@@ -278,5 +282,31 @@ describe('meta-ads/execute POST — reactivating ME Messenger draft campaigns', 
 
     expect(res.status).toBe(200)
     expect(m.setCampaignStatus).toHaveBeenCalledWith(CAMP, 'SHARED_FALLBACK_TOKEN', 'PAUSED')
+  })
+
+  it('refuses a malformed campaign id spelling (leading zero) without writing', async () => {
+    const MALFORMED = '0120210000000000001'
+    m.getCampaignDetails.mockResolvedValue({
+      id: MALFORMED, name: 'A campaign', status: 'PAUSED', daily_budget: '5000', account_id: '1111111111',
+    })
+
+    const res = await post({ action_type: 'ads.reactivate_campaign', campaign_id: MALFORMED })
+
+    expect([403, 422]).toContain(res.status)
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
+  })
+
+  it('does not reveal Messenger drafts of campaigns outside the client account', async () => {
+    m.draftRows = [messengerRow(CLIENT_B, '120220000000000002')]
+    // The describe-level beforeEach points getCampaignDetails at client A's account;
+    // this case needs a campaign that lives in an account client A has NOT registered.
+    m.getCampaignDetails.mockResolvedValue({
+      id: '120220000000000002', name: 'B campaign', status: 'PAUSED', daily_budget: '5000', account_id: '2222222222',
+    })
+
+    const res = await post({ action_type: 'ads.reactivate_campaign', campaign_id: '120220000000000002' })
+
+    expect(res.status).toBe(403)
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
   })
 })
