@@ -47,3 +47,8 @@ master_briefs.products｜factory_config.verified_offer/verified_cta/render.creat
 - 「SEO/博客不读禁忌」不完整：`blog/weekly-blog.ts:137` 与 `seo-intelligence/keyword-relevance.ts:72` 已读 `excluded_topics`，迁移 `20260611000001` 存在；是否已在生产 apply 仍未验证。
 - 「知识库对内容渠道零接入」属实，但 CTS 的 4 条价格类事实已在迁移 `20260915120000` 写入 `client_knowledge_facts` 并授予读取准入。
 - 新增发现：`/api/content/route-a|b|c` 无任何鉴权（中间件不覆盖 /api）；现有价格识别正则不认 NZD/¥/元/USD（已实测）；`first-party-tours.ts` 抓取失败返回 `[]`；官网为终裁与 CTS 已下架团仍挂官网的事故冲突（`offerings.yaml` 记录）。
+
+## 生产库只读核对（2026-10-05 晚，只读，样本=全部 19 个有 Master Brief 的客户）
+- `master_briefs.excluded_topics` 列**生产里存在**（魏征担心的「发布代码已在 select 一个可能不存在的列」不成立）。
+- 「生效 brief」两种取法：`status='active'` 的客户 14 个，`is_active=true` 的客户 19 个；**5 个客户只有 `is_active`、`status` 不是 active**（0 个客户反过来）。所以任何渠道若只认 `status='active'`，会让这 5 个客户读不到 brief（目前 GEO 与 AI 可见度问句正是只认 status）；统一取法前必须先看这 5 个是谁。
+- CTS：Master Brief 的 `products` 为空；`avoid_words` 16 个；`clients.brand_redline_phrases` 3 条；`website` 有值。Oztop：`products` 为空；`avoid_words` 0 个；红线 5 条；`website` 有值。即「产品不在 Master Brief 里」在这两个客户上成立。
