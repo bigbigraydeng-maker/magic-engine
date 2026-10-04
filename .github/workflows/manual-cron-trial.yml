@@ -15,6 +15,7 @@ name: Manual cron trial (dry-run first)
 #   1. 只读，或只写自家表；
 #   2. `dry_run=1` 时必须零写入（路由里必须读 dry_run 参数）；
 #   3. 不触发对外发布 / 发信 / 扣费 / 客户可见外发 / 广告改动 —— 这类路由永远不进本入口，要走 Inngest 授权事件。
+#   （纯只读路由，如 ga4-form-funnel：读线上谷歌分析、不写任何东西；`dry_run` 参数被接受但不起作用。）
 #
 # 其它约束：输入一律走环境变量再校验；真写入必须同时 dry_run=false 且 confirm=WRITE-LIVE，
 # 任何其它取值一律按演练处理；并发串行；摘要只写白名单字段；摘要里的模式以**服务端返回的 dry_run 字段**为准，
@@ -29,6 +30,7 @@ on:
         type: choice
         options:
           - seo-weekly-list
+          - ga4-form-funnel
       dry_run:
         description: 'Dry run (compute only, write nothing). Untick AND set confirm for a REAL run.'
         required: true
@@ -72,6 +74,7 @@ jobs:
           fi
           case "$JOB" in
             seo-weekly-list) ;;
+            ga4-form-funnel) ;;
             *) echo "::error::job not in allowlist"; exit 1 ;;
           esac
 
@@ -115,9 +118,16 @@ jobs:
             exit 1
           fi
 
-          # Whitelisted fields only; error text trimmed. The server's own dry_run flag is the truth.
-          jq '{success, dry_run, clients_processed, failed,
-               results: [(.results // [])[] | {client_id, open_before, verified_pass, verify_pending, verify_not_measured, expired, inserted, duplicates, withheld, skipped_keywords, stale_crawl_pages, preview, item_errors: ((.item_errors // []) | length), error: ((.error // null) | if . == null then null else (tostring | .[0:160]) end)}]}' /tmp/body.json > /tmp/summary.json
+          # Whitelisted fields only (per job); error text trimmed. The server's own dry_run flag is the truth.
+          case "$JOB" in
+            seo-weekly-list)
+              filter='{success, dry_run, clients_processed, failed,
+               results: [(.results // [])[] | {client_id, open_before, verified_pass, verify_pending, verify_not_measured, expired, inserted, duplicates, withheld, skipped_keywords, stale_crawl_pages, preview, item_errors: ((.item_errors // []) | length), error: ((.error // null) | if . == null then null else (tostring | .[0:160]) end)}]}' ;;
+            ga4-form-funnel)
+              filter='{success, dry_run, read_only, days, clients_processed, failed,
+               results: [(.results // [])[] | {client_id, status, error: ((.error // null) | if . == null then null else (tostring | .[0:160]) end), summary: (.summary // null)}]}' ;;
+          esac
+          jq "$filter" /tmp/body.json > /tmp/summary.json
           summary ""
           summary '```json'
           cat /tmp/summary.json >> "$GITHUB_STEP_SUMMARY"
