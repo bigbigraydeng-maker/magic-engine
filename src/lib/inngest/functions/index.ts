@@ -16,6 +16,7 @@ import { conversationInboundDraft } from './conversation-inbound-draft'
 import { conversationHealthHeartbeat } from './conversation-health-heartbeat'
 import { postPublishFanOut, postPublishCheck } from './seo-post-publish-monitor'
 import { seoMetaCycleFanOut, seoMetaCycleRunOne } from './seo-meta-cycle'
+import { seoMetaRankSamplerFanOut, seoMetaRankSamplerOne } from './seo-meta-rank-sampler'
 import { competitorWatchWeeklyFanOut, competitorWatchRunOne } from './competitor-watch-weekly'
 import { aiVisibilityWeeklyFanOut, aiVisibilityTrackerRunOne } from './ai-visibility-weekly'
 import { reelBatchRender } from './reel-batch-render'
@@ -55,6 +56,8 @@ export const cloudFunctions = [
   postPublishCheck,
   seoMetaCycleFanOut,
   seoMetaCycleRunOne,
+  seoMetaRankSamplerFanOut,
+  seoMetaRankSamplerOne,
   competitorWatchWeeklyFanOut,
   competitorWatchRunOne,
   aiVisibilityWeeklyFanOut,
