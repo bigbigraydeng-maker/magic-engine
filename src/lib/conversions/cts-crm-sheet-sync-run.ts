@@ -55,7 +55,11 @@ export interface CtsCrmSyncSummary {
   totalCrmRows: number
   excludedNoPhone: number
   excludedByNotes: number
+  /** 填了表单、没被标无效，但员工记录里没有明确兴趣证据——不当合格线索发（PM 2026-10-04）。 */
+  excludedNoInterest: number
   excludedNoDate: number
+  /** 旧规则放进来、待核对的线索，按新规则复判不合格 → 自动拒绝（不发给 Meta）的条数。 */
+  rejectedStaleLeads: number
   insertedLeads: number
   insertedPurchases: number
   /** 已经同步过、这次命中幂等键被跳过——预期行为，不是错误。 */
@@ -77,7 +81,9 @@ function emptySummary(): CtsCrmSyncSummary {
     totalCrmRows: 0,
     excludedNoPhone: 0,
     excludedByNotes: 0,
+    excludedNoInterest: 0,
     excludedNoDate: 0,
+    rejectedStaleLeads: 0,
     insertedLeads: 0,
     insertedPurchases: 0,
     skippedAlreadySynced: 0,
@@ -218,6 +224,8 @@ export function mergeCtsCrmSummaries(a: CtsCrmSyncSummary, b: CtsCrmSyncSummary)
     excludedNoPhone: a.excludedNoPhone + b.excludedNoPhone,
     excludedByNotes: a.excludedByNotes + b.excludedByNotes,
     excludedNoDate: a.excludedNoDate + b.excludedNoDate,
+    excludedNoInterest: a.excludedNoInterest + b.excludedNoInterest,
+    rejectedStaleLeads: a.rejectedStaleLeads + b.rejectedStaleLeads,
     insertedLeads: a.insertedLeads + b.insertedLeads,
     insertedPurchases: a.insertedPurchases + b.insertedPurchases,
     skippedAlreadySynced: a.skippedAlreadySynced + b.skippedAlreadySynced,
@@ -239,13 +247,13 @@ const EXISTING_REFS_PAGE = 1000
  *    再撞唯一索引（每行 3–5 次往返，实测 0.4–2.4 秒/行），拆块只是把 20 分钟分摊、
  *    没有减少（子牙 2026-09-22 复审 M6）。
  */
-async function loadExistingSourceRefs(supabase: SupabaseClient): Promise<Set<string>> {
-  const refs = new Set<string>()
+async function loadExistingSourceRefs(supabase: SupabaseClient): Promise<Map<string, { id: string; reviewStatus: string }>> {
+  const refs = new Map<string, { id: string; reviewStatus: string }>()
   let lastId: string | null = null
   for (;;) {
     let q = supabase
       .from('me_sale_outcomes')
-      .select('id, source_ref')
+      .select('id, source_ref, review_status')
       .eq('client_id', CTS_CLIENT_ID)
       .eq('source_kind', 'crm_sheet_sync')
       .not('source_ref', 'is', null)
@@ -254,18 +262,62 @@ async function loadExistingSourceRefs(supabase: SupabaseClient): Promise<Set<str
     if (lastId) q = q.gt('id', lastId)
     const { data, error } = await q
     if (error) throw new Error(`读取已同步记录失败：${error.message}`)
-    const rows = (data ?? []) as Array<{ id: string; source_ref: string | null }>
-    for (const r of rows) if (r.source_ref) refs.add(r.source_ref)
+    const rows = (data ?? []) as Array<{ id: string; source_ref: string | null; review_status: string }>
+    for (const r of rows) if (r.source_ref) refs.set(r.source_ref, { id: r.id, reviewStatus: r.review_status })
     if (rows.length < EXISTING_REFS_PAGE) break
     lastId = rows[rows.length - 1].id
   }
   return refs
 }
 
-function tallyExcluded(summary: CtsCrmSyncSummary, reason: 'no_qualifying_phone' | 'excluded_by_notes' | 'no_usable_date'): void {
+function tallyExcluded(
+  summary: CtsCrmSyncSummary,
+  reason: 'no_qualifying_phone' | 'excluded_by_notes' | 'no_usable_date' | 'no_interest_evidence',
+): void {
   if (reason === 'no_qualifying_phone') summary.excludedNoPhone++
   else if (reason === 'excluded_by_notes') summary.excludedByNotes++
+  else if (reason === 'no_interest_evidence') summary.excludedNoInterest++
   else summary.excludedNoDate++
+}
+
+/**
+ * 旧规则（只看电话和两个排除词）放进来、还在「待核对」的线索，按新规则复判不合格（排除词 / 没有兴趣证据）→
+ * 拒绝，不告诉 Meta。CAS：只在仍是 pending_review 时才拒，已批准/已发出的绝不动（撤不回）。
+ */
+async function rejectStalePendingLead(
+  supabase: SupabaseClient,
+  existing: { id: string; reviewStatus: string } | undefined,
+  reason: 'excluded_by_notes' | 'no_interest_evidence',
+  summary: CtsCrmSyncSummary,
+): Promise<void> {
+  if (!existing || existing.reviewStatus !== 'pending_review') return
+  const now = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('me_sale_outcomes')
+    .update({
+      review_status: 'rejected',
+      reject_reason: 'other',
+      reject_note: reason === 'excluded_by_notes' ? '员工记录里出现排除词（打错电话/不感兴趣/已订别家等）' : '员工记录里没有明确兴趣证据，不当合格线索发',
+      reviewed_by: 'auto:cts-qualify-rule',
+      reviewed_at: now,
+      updated_at: now,
+    })
+    .eq('id', existing.id)
+    .eq('review_status', 'pending_review')
+    .select('id')
+  if (error) {
+    summary.insertErrors.push({ phoneMasked: '(stale-lead-reject)', error: error.message })
+    return
+  }
+  if ((data?.length ?? 0) > 0) {
+    summary.rejectedStaleLeads++
+    await supabase.from('me_conversion_audit').insert({
+      outcome_id: existing.id,
+      action: 'rejected',
+      actor: 'cts-crm-sheet-sync',
+      detail: { reason },
+    })
+  }
 }
 
 /** 一条合格线索：关联联系人、组装、写库。 */
@@ -390,6 +442,10 @@ export async function runCtsCrmSyncChunk(
 
     if (classified.kind === 'excluded') {
       tallyExcluded(summary, classified.reason)
+      // 旧规则遗留的待核对线索，新规则下不合格 → 拒绝（见 rejectStalePendingLead）。
+      if (phoneKey && (classified.reason === 'excluded_by_notes' || classified.reason === 'no_interest_evidence')) {
+        await rejectStalePendingLead(supabase, existingRefs.get(ctsSourceRef(phoneKey, 'lead')), classified.reason, summary)
+      }
       continue
     }
     if (classified.kind === 'purchase_missing_date') {
