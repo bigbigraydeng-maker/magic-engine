@@ -64,14 +64,23 @@ export interface ClientWeekly {
   }
   auto_changes: {
     titles_applied_week: number
+    /** Of this week's changes, how many recorded a rank baseline (ranked or not_in_top_n) and can therefore be verified later. Optional: old data / tests have none. */
+    titles_with_rank_baseline_week?: number
     freshness: FreshnessStamp
-    /** PM 2026-09-20 item 8: SEO Meta-Cycle's T+14 Check outcomes classified this week — which pages, before/after CTR, sample size, verdict. */
+    /**
+     * Checked changes this week. Two kinds of row share this list: legacy page-CTR checks
+     * (`outcome` set — switched off 2026-10-04, kept so old rows still render) and target-keyword
+     * rank verdicts (`rank_verdict` set).
+     */
     outcomes_checked_week: Array<{
       page_slug: string
       baseline_ctr: number | null
       observed_ctr: number | null
       observed_impressions: number | null
       outcome: string | null
+      rank_verdict?: string | null
+      baseline_rank_group?: number | null
+      verdict_detail?: { reason?: string | null; median_delta?: number | null } | null
     }>
     /**
      * 看板上这周新排了几张还没做的建议卡。2026-09-26 从每日待办挪过来 —— 系统和 FDE 在推，
@@ -212,7 +221,7 @@ async function gatherClient(
       // window is the applied-channel equivalent of wp_updated=true.
       supabase
         .from('seo_meta_log')
-        .select('created_at')
+        .select('created_at, baseline_rank_status')
         .eq('client_id', clientId)
         .or('wp_updated.eq.true,applied_channel.eq.pr')
         .gte('created_at', weekAgoIso),
@@ -220,7 +229,7 @@ async function gatherClient(
       // this week — surfaced in the report, not just written to the DB.
       supabase
         .from('seo_meta_log')
-        .select('page_slug, baseline_ctr, observed_ctr, observed_impressions, outcome')
+        .select('page_slug, baseline_ctr, observed_ctr, observed_impressions, outcome, rank_verdict, baseline_rank_group, verdict_detail')
         .eq('client_id', clientId)
         .not('checked_at', 'is', null)
         .gte('checked_at', weekAgoIso)
@@ -299,6 +308,8 @@ async function gatherClient(
     },
     auto_changes: {
       titles_applied_week: (titles.data ?? []).length,
+      titles_with_rank_baseline_week: ((titles.data ?? []) as Array<{ baseline_rank_status?: string | null }>)
+        .filter((r) => r.baseline_rank_status === 'ranked' || r.baseline_rank_status === 'not_in_top_n').length,
       freshness: freshness((titles.data as Array<{ created_at: string }> | null)?.[0]?.created_at ?? null, now),
       outcomes_checked_week: (outcomesChecked.data ?? []) as ClientWeekly['auto_changes']['outcomes_checked_week'],
       cards_new_week: cards.count ?? 0,
@@ -379,6 +390,35 @@ function renderNotices(notices: WeeklyNotices | undefined): string {
       </p>`).join(''))
 }
 
+const RANK_REASON_LABEL: Record<string, string> = {
+  reverted: '改完又被撤回了',
+  superseded: '两周内又改过这一页，没法单独判',
+  no_baseline: '改的时候没能记下排名',
+  baseline_other_own_page: '改的时候排在前面的是站内另一页',
+  live_title_mismatch: '线上现在的标题不是我们写的那个',
+  fetch_failed: '多次查谷歌排名都失败了',
+  url_changed: '后来排在前面的是站内另一页',
+  never_ranked: '前几页里一直没有这一页',
+}
+
+/** One plain-language line for a target-keyword rank verdict. Never says "有效"/"变差": a rank move is not a verdict on the title. */
+function rankLineText(o: ClientWeekly['auto_changes']['outcomes_checked_week'][number]): string {
+  const base = o.baseline_rank_group ?? null
+  const delta = o.verdict_detail?.median_delta ?? null
+  const before = base !== null ? `第 ${base} 名` : '榜外'
+  const after = base !== null && delta !== null ? `第 ${base + delta} 名` : '—'
+  switch (o.rank_verdict) {
+    case 'no_detectable_change': return `目标词排名 ${before} → ${after} · ➖ 没看出变化`
+    case 'rank_moved_up': return `目标词排名 ${before} → ${after} · 🔺 上升了 ${Math.abs(delta ?? 0)} 名`
+    case 'rank_moved_down': return `目标词排名 ${before} → ${after} · 🔻 下降了 ${Math.abs(delta ?? 0)} 名`
+    case 'entered_top_n': return `目标词排名 ${before} → 进入前几页 · 🔺 新上榜`
+    case 'dropped_out': return `目标词排名 ${before} → 榜外 · 🔻 掉出榜`
+    case 'unstable': return '目标词排名忽进忽出 · ❔ 不下结论'
+    case 'confounded': return '目标词排名有变动，但同期没改的词也在同向变动 · ❔ 不下结论'
+    default: return `❔ 没测成（${RANK_REASON_LABEL[o.verdict_detail?.reason ?? ''] ?? '原因不明'}）`
+  }
+}
+
 export function renderWeeklyReport(clients: ClientWeekly[], nzDateLabel: string, notices?: WeeklyNotices): {
   subject: string
   html: string
@@ -403,20 +443,27 @@ export function renderWeeklyReport(clients: ClientWeekly[], nzDateLabel: string,
       regressed: '⚠️ 变差了（已下发人工任务，去点 PR 的 Revert 按钮改回去）',
       insufficient_data: '❔ 数据还不够，先不判',
     }
+    const rankLines = c.auto_changes.outcomes_checked_week.filter((o) => o.rank_verdict)
     const outcomeLines = c.auto_changes.outcomes_checked_week
       .map((o) => {
+        if (o.rank_verdict) return line(`&nbsp;&nbsp;/${o.page_slug}：${rankLineText(o)}`)
         const before = o.baseline_ctr !== null ? `${(o.baseline_ctr * 100).toFixed(2)}%` : '—'
         const after = o.observed_ctr !== null ? `${(o.observed_ctr * 100).toFixed(2)}%` : '—'
         const label = o.outcome ? OUTCOME_LABEL[o.outcome] ?? o.outcome : '—'
         return line(`&nbsp;&nbsp;/${o.page_slug}：点击率 ${before} → ${after}（曝光 ${o.observed_impressions ?? '—'} 次）· ${label}`)
       })
       .join('')
+      + (rankLines.length > 0 ? line('&nbsp;&nbsp;ℹ️ 排名没动 ≠ 改动没用：标题主要影响点击率，而这个站的流量还不足以测出点击率的变化。排名变动也只说明发生了什么，不证明是标题造成的。') : '')
 
     const cardsLine = (c.auto_changes.cards_new_week ?? 0) > 0
       ? line(`看板上本周新排了 ${c.auto_changes.cards_new_week} 张建议卡还没做（系统和 FDE 在推，不用你挑）· <a href="https://app.magicengine.com.au/dashboard/clients/${c.client_id}/execution" style="color:#0891b2">看看板</a>`)
       : ''
     const autoLines = (c.auto_changes.titles_applied_week > 0
-      ? line(`系统本周自动改了 <b>${c.auto_changes.titles_applied_week}</b> 个页面标题/描述（网站上已生效）`)
+      ? line(`系统本周自动改了 <b>${c.auto_changes.titles_applied_week}</b> 个页面标题/描述（网站上已生效）${
+          c.auto_changes.titles_with_rank_baseline_week !== undefined
+            ? `，其中 ${c.auto_changes.titles_with_rank_baseline_week} 个记下了改动前的排名、日后能验收`
+            : ''
+        }`)
       : line('本周没有自动改动'))
       + outcomeLines
       + cardsLine
