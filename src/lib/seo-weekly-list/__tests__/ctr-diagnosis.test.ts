@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { diagnoseCtrGap, findSiblings, type PageQueryRow } from '../ctr-diagnosis'
 import { buildCtrGapItem, type ItemContext } from '../items'
+import type { LiveSnippet } from '../live-snippet'
+const liveOf = (title: string | null, description: string | null = 'd'): LiveSnippet => ({ title, description, canonical: null, noindex: false, status: 200 })
 import type { CtrGapCandidate, PageAggRow, SitePageRow } from '../candidates'
 
 const page = (url: string, title: string): SitePageRow => ({ url, path: new URL(url).pathname, title, h1: null, word_count: 900 })
@@ -54,7 +56,7 @@ describe('diagnoseCtrGap', () => {
   it('top query absent from the title → title_mismatch, naming the query; branded queries are never "missing"', () => {
     const lonely = page('https://x.com/best-time', 'Month-by-Month Guide')
     const d = diagnoseCtrGap({
-      page: { url: lonely.url, impressions: 1000 }, title: lonely.title, sitePages: [lonely, ...filler], pageAgg: [agg(lonely.url, 1000, 6)],
+      page: { url: lonely.url, impressions: 1000 }, title: lonely.title, live: liveOf('Month-by-Month Guide | Acme Tours'), sitePages: [lonely, ...filler], pageAgg: [agg(lonely.url, 1000, 6)],
       brandRoot: 'acme', brandAliases: ['acme'],
       queries: [q('acme tours', 500, 40, 2), q('best time to visit china', 300, 3, 6), q('china weather by month', 100, 1, 6)],
     })
@@ -67,11 +69,11 @@ describe('diagnoseCtrGap', () => {
   it('long title with otherwise-fine queries → title_truncated; no query data falls back to siblings/title checks and says so', () => {
     const long = page('https://x.com/long', 'Chongqing Night City: Why This Mountain Metropolis Glows After Dark In Winter')
     const ok = diagnoseCtrGap({
-      page: { url: long.url, impressions: 800 }, title: long.title, sitePages: [long, ...filler], pageAgg: [agg(long.url, 800, 5)], brandRoot: 'acme', brandAliases: null,
+      page: { url: long.url, impressions: 800 }, title: long.title, live: liveOf(long.title ?? ''), sitePages: [long, ...filler], pageAgg: [agg(long.url, 800, 5)], brandRoot: 'acme', brandAliases: null,
       queries: [q('chongqing night city', 400, 4, 6)],
     })
     expect(ok.cause).toBe('title_truncated')
-    const none = diagnoseCtrGap({ ...base, sitePages: [long, ...filler], pageAgg: [agg(long.url, 800, 5)], page: { url: long.url, impressions: 800 }, title: long.title, queries: null })
+    const none = diagnoseCtrGap({ ...base, sitePages: [long, ...filler], pageAgg: [agg(long.url, 800, 5)], page: { url: long.url, impressions: 800 }, title: long.title, live: liveOf(long.title ?? ''), queries: null })
     expect(none.queriesAvailable).toBe(false)
     expect(none.cause).toBe('title_truncated')
     const plain = diagnoseCtrGap({ ...base, sitePages: [UNRELATED, ...filler], pageAgg: [agg(UNRELATED.url, 3153, 41)], page: { url: UNRELATED.url, impressions: 3153 }, title: UNRELATED.title, queries: [] })
@@ -100,3 +102,39 @@ describe('ctr_gap item with a diagnosis', () => {
     expect(it.description).toContain('分食同一主题')
   })
 })
+
+describe('live <title> is the only source of title facts', () => {
+  const longCrawl = page('https://x.com/p', 'T'.repeat(90)) // crawler "title" (really the H1) is long …
+  it('a long crawler title is IGNORED when the live <title> is short — no false truncation claim', () => {
+    const d = diagnoseCtrGap({
+      page: { url: longCrawl.url, impressions: 800 }, title: longCrawl.title, live: liveOf('Short live title | Acme Tours'),
+      sitePages: [longCrawl, ...filler], pageAgg: [agg(longCrawl.url, 800, 5)], brandRoot: 'acme', brandAliases: ['acme'], queries: [q('short live title', 300, 3, 6)],
+    })
+    expect(d.titleTruncated).toBe(false)
+    expect(d.titleSource).toBe('live')
+    expect(d.quickFixes).toHaveLength(0)
+  })
+  it('no live title → titleSource unavailable, no length / mismatch claims at all (never falls back to the crawler heading)', () => {
+    const d = diagnoseCtrGap({
+      page: { url: longCrawl.url, impressions: 800 }, title: longCrawl.title, live: null,
+      sitePages: [longCrawl, ...filler], pageAgg: [agg(longCrawl.url, 800, 5)], brandRoot: 'acme', brandAliases: null, queries: [q('something else', 300, 3, 6)],
+    })
+    expect(d.titleSource).toBe('unavailable')
+    expect(d.titleTruncated).toBe(false)
+    expect(d.titleMisses).toEqual([])
+    expect(d.liveTitle).toBeNull()
+  })
+  it('duplicate brand tail and over-long live title become quick fixes; the item shows the live title as evidence', () => {
+    const live = liveOf('Liziba Station Chongqing: Train Through a Building | CTS | CTS Tours')
+    const d = diagnoseCtrGap({ page: { url: SELF.url, impressions: 2386 }, title: SELF.title, live, sitePages, pageAgg, brandRoot: 'ctstours', brandAliases: ['cts', 'cts tours'], queries: [q('liziba station', 900, 3, 9)] })
+    expect(d.quickFixes.join('；')).toContain('品牌后缀重复')
+    expect(d.quickFixes.join('；')).toContain('超过约 60')
+    const ctx: ItemContext = { clientId: 'c1', goalId: 'g1', planWeek: '2026-10-05', snapshotDate: '2026-09-28', gscDay: '2026-09-29', intelligenceHref: 'https://app/x', pageImpressions: new Map() }
+    const gap: CtrGapCandidate = { kind: 'ctr_gap', url: SELF.url, clicks: 4, impressions: 2386, position: 9.4, ctr: 0.0017, benchmark: 0.035, potentialClicks: 80 }
+    const it = buildCtrGapItem(gap, SELF, ctx, 0, d)
+    expect(it.description).toContain('【顺手可修】')
+    expect(it.description).toContain('线上真实标题：「Liziba Station Chongqing: Train Through a Building | CTS | CTS Tours」')
+    expect(it.description).not.toContain('A Complete Visitor Guide') // the crawler heading is never shown as the title
+  })
+})
+

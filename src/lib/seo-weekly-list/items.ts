@@ -120,7 +120,7 @@ export function buildNearMissItem(
     split
       ? `② 站内有 ${matches.length} 个页面都沾这个词：${matches.slice(0, 4).map(m => m.title ?? m.url).join(' ｜ ')}。先决定哪页当主页，其余往主页汇内链、不再抢同一个词。`
       : '② 确认没有别的自家页面在抢同一个词。',
-    titleCheck(main.title),
+    titleCheck(null),
     '④ 补充覆盖该词意图的小节，并在相关页面加指向它的内链（至少 2 处）。系统核对的是"页面正文是否实质变长"，请确实补内容，而不只是改导航或排版。',
   ].join('\n')
   return {
@@ -162,10 +162,10 @@ export function buildCtrGapItem(
     },
   ]
   if (diag) evidence.push(...diagnosisEvidence(diag, ctx))
-  const how = (diag ? diagnosisHow(diag, page?.title ?? null) : [
+  const how = (diag ? diagnosisHow(diag) : [
     '① 先看这页收录了吗。',
     '② 看是否有别的自家页面在分食同一主题（后台"逐页对比"同主题页面的曝光）。',
-    titleCheck(page?.title ?? null),
+    titleCheck(null),
     '④ 标题或首段没写清读者要的答案、或被别的搜索结果板块压住，才考虑改内容；改动后请记下改了什么，便于核对。',
   ]).join('\n')
   return {
@@ -174,6 +174,7 @@ export function buildCtrGapItem(
     description: [
       `【为什么】${evidence[0].claim}。已排在第一页但点的人少（点击率偏低，粗估增量约 +${c.potentialClicks} 次点击/28 天，按通用点击率曲线算，只用于排序）。`,
       diag ? `【系统诊断】${CAUSE_LABEL[diag.cause]}（机械可核对的事实，见证据；不代表一定是这个原因）` : '',
+      diag && diag.quickFixes.length > 0 ? `【顺手可修】${diag.quickFixes.join('；')}` : '',
       `【怎么做】\n${how}`,
       `【怎么算没起效】${failure}`,
       `【证据】${evidence.map(e => `${e.claim}〔${e.confidence}｜${e.source}｜${e.fetched_at}〕`).join('；')}`,
@@ -193,6 +194,9 @@ export function buildCtrGapItem(
 
 function diagnosisEvidence(d: CtrDiagnosis, ctx: ItemContext): EvidenceLine[] {
   const out: EvidenceLine[] = []
+  out.push(d.liveTitle
+    ? { claim: `线上真实标题：「${d.liveTitle}」（${d.liveTitle.length} 个字符）`, source: '线上页面 HTML 的 <title>', fetched_at: ctx.gscDay, confidence: '确认' }
+    : { claim: '没取到线上真实标题（不使用站点抓取表里的标题——那是页面大标题，不是搜索结果标题）', source: '线上页面 HTML', fetched_at: ctx.gscDay, confidence: '假设' })
   if (d.queriesAvailable) {
     const lines = d.topQueries.slice(0, 5).map(q => `「${q.query}」曝光${q.impressions}、点击${q.clicks}、排第${q.position.toFixed(1)}${q.underperforming ? '（点击率明显低于该名次常见水平）' : ''}${q.inTitle ? '' : '（标题里没有）'}`)
     out.push({ claim: `这页自己的前几个搜索词：${lines.join('；')}`, source: '谷歌搜索数据（该页查询）', fetched_at: ctx.gscDay, confidence: '确认' })
@@ -209,7 +213,7 @@ function diagnosisEvidence(d: CtrDiagnosis, ctx: ItemContext): EvidenceLine[] {
   return out
 }
 
-function diagnosisHow(d: CtrDiagnosis, title: string | null): string[] {
+function diagnosisHow(d: CtrDiagnosis): string[] {
   const steps = ['① 先看这页收录了吗。']
   if (d.siblings.length > 0) {
     steps.push(`② 先处理分食：${d.siblings.map(s => s.url).join('、')} 与本页争同一主题。决定哪页当主页，另一页的标题改成与主页明显不同的角度（或把它的内链汇向主页），不要两页用近乎相同的标题。`)
@@ -221,15 +225,20 @@ function diagnosisHow(d: CtrDiagnosis, title: string | null): string[] {
   } else if (d.titleMisses.length > 0) {
     steps.push(`③ 这页最大的搜索词「${d.titleMisses.join('」「')}」没有出现在标题里：把最大的那个词放到标题前面，并写明读者能得到什么（数字、适用对象）。`)
   } else {
-    steps.push(titleCheck(title))
+    steps.push(titleCheck(d.liveTitle))
   }
   if (d.titleTruncated) steps.push(`④ 标题 ${d.titleLength} 个字符，超过约 ${TITLE_TRUNCATION_CHARS}，会被截断：缩短，关键词前置（若该页在标题保护名单内则只能人工改）。`)
   steps.push('⑤ 改完请记下改了什么，便于核对；系统核对的是页面正文是否实质变长，标题的效果要 28 天后看排名，点击率前后对比在这个流量下判不了。')
   return steps
 }
 
-function titleCheck(title: string | null): string {
-  if (!title) return '③ 标题体检：没取到该页标题，请直接看页面。'
+/**
+ * Title check. `liveTitle` must be the real <title> read from the live page — never the crawler's
+ * `title` column (that is the page heading, not what Google shows).
+ */
+function titleCheck(liveTitle: string | null): string {
+  const title = liveTitle
+  if (!title) return '③ 标题体检：这次没取到线上真实标题（系统只信线上 <title>），请直接打开页面看标题长度和是否重复品牌后缀。'
   const len = title.length
   return len > TITLE_TRUNCATION_CHARS
     ? `③ 标题体检：「${title}」共 ${len} 个字符，超过约 ${TITLE_TRUNCATION_CHARS}，在谷歌里会被截断，把关键词放前面并缩短（若该页在标题保护名单内则只能人工改）。`

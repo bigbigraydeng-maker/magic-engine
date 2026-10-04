@@ -12,6 +12,7 @@ import { ctrBenchmarkForPosition } from '@/lib/seo-patrol/rules'
 import { isBrandedKeywordWithAliases } from '@/lib/seo-intelligence/intent-strategy'
 import { canonicalUrl } from '@/lib/url/canonical-url'
 import type { PageAggRow, SitePageRow } from './candidates'
+import { snippetQuickFixes, type LiveSnippet } from './live-snippet'
 
 export interface PageQueryRow {
   query: string
@@ -53,6 +54,11 @@ export interface CtrDiagnosis {
   siblings: SiblingPage[]
   titleLength: number | null
   titleTruncated: boolean
+  /** Where the title facts come from: the real <title> read live, or nothing trustworthy. */
+  titleSource: 'live' | 'unavailable'
+  /** Mechanical defects of the real search snippet (duplicate brand tail, over-long title …). */
+  quickFixes: string[]
+  liveTitle: string | null
 }
 
 const TITLE_TRUNCATION_CHARS = 60
@@ -88,6 +94,8 @@ export interface DiagnoseInput {
   page: { url: string; impressions: number }
   title: string | null
   queries: PageQueryRow[] | null
+  /** The page's real <title>/description read from the live HTML; null when it could not be fetched. */
+  live?: LiveSnippet | null
   sitePages: SitePageRow[]
   pageAgg: PageAggRow[]
   brandRoot: string
@@ -124,15 +132,21 @@ export function findSiblings(input: Pick<DiagnoseInput, 'page' | 'title' | 'site
 }
 
 export function diagnoseCtrGap(input: DiagnoseInput): CtrDiagnosis {
-  const titleLength = input.title ? input.title.length : null
+  // Title facts come ONLY from the live <title>. client_site_pages.title is the page heading (H1), not the
+  // string Google shows, so it is never used for length / truncation / word-match checks.
+  const liveTitle = input.live?.title ?? null
+  const titleLength = liveTitle ? liveTitle.length : null
   const titleTruncated = titleLength !== null && titleLength > TITLE_TRUNCATION_CHARS
+  const titleSource: CtrDiagnosis['titleSource'] = liveTitle ? 'live' : 'unavailable'
+  const quickFixes = input.live ? snippetQuickFixes(input.live, input.brandAliases) : []
   const siblings = findSiblings(input)
-  const titleWords = new Set(contentWords(input.title ?? ''))
+  const titleWords = new Set(contentWords(liveTitle ?? ''))
 
   if (!input.queries || input.queries.length === 0) {
     return {
       cause: siblings.length > 0 ? 'siblings' : titleTruncated ? 'title_truncated' : 'no_query_data',
       queriesAvailable: false, topQueries: [], lowRankShare: null, brandedShare: null, titleMisses: [], siblings, titleLength, titleTruncated,
+      titleSource, quickFixes, liveTitle,
     }
   }
 
@@ -149,7 +163,7 @@ export function diagnoseCtrGap(input: DiagnoseInput): CtrDiagnosis {
       inTitle: qWords.length > 0 && qWords.every(w => titleWords.has(w)),
     }
   })
-  const titleMisses = rows.slice(0, 3).filter(r => {
+  const titleMisses = !liveTitle ? [] : rows.slice(0, 3).filter(r => {
     const q = contentWords(r.query)
     return q.length > 0 && !q.every(w => titleWords.has(w)) && !isBrandedKeywordWithAliases(r.query, input.brandRoot, input.brandAliases)
   }).map(r => r.query)
@@ -161,7 +175,7 @@ export function diagnoseCtrGap(input: DiagnoseInput): CtrDiagnosis {
   else if (lowRankShare !== null && lowRankShare >= 0.5) cause = 'low_rank_queries'
   else if (titleMisses.length > 0) cause = 'title_mismatch'
   else if (titleTruncated) cause = 'title_truncated'
-  return { cause, queriesAvailable: true, topQueries, lowRankShare, brandedShare, titleMisses, siblings, titleLength, titleTruncated }
+  return { cause, queriesAvailable: true, topQueries, lowRankShare, brandedShare, titleMisses, siblings, titleLength, titleTruncated, titleSource, quickFixes, liveTitle }
 }
 
 export const CAUSE_LABEL: Record<CtrCause, string> = {
@@ -169,6 +183,6 @@ export const CAUSE_LABEL: Record<CtrCause, string> = {
   low_rank_queries: '曝光主要来自排第 8 名及以后的词（名次问题，不是标题问题）',
   title_mismatch: '这页最大的搜索词没有出现在标题里',
   title_truncated: '标题过长，在谷歌里会被截断',
-  no_query_data: '没取到这页的搜索词数据，只能做标题和同主题页面检查',
+  no_query_data: '没取到这页的搜索词数据，只能做线上标题和同主题页面检查',
   unclear: '数据没有指向明确原因',
 }

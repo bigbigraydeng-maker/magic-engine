@@ -278,5 +278,24 @@ describe('runSeoWeeklyList', () => {
     const failed = await runSeoWeeklyList(mk().client(), { now: NOW, dryRun: true, fetchPageQueries: async () => null })
     expect(failed.results[0].preview.join('\n')).toContain('该页搜索词没取到')
   })
+
+  it('the preview states whether the live title was read; a failed live read degrades gracefully; at most 3 pages are fetched', async () => {
+    const mk = () => {
+      const db = baseDb()
+      db.rows('gsc_performance_snapshots').push({ client_id: CID, period_end: '2026-10-03', site_url: 'https://x.com/' })
+      return db
+    }
+    const urls: string[] = []
+    const ok = await runSeoWeeklyList(mk().client(), {
+      now: NOW, dryRun: true, fetchPageQueries: async () => null,
+      fetchSnippet: async (u) => { urls.push(u); return { title: 'Low CTR | Acme | Acme Tours', description: 'd', canonical: null, noindex: false, status: 200 } },
+    })
+    expect(ok.results[0].preview.join('\n')).toContain('线上标题已取到')
+    expect(ok.results[0].preview.join('\n')).toContain('顺手可修')
+    expect(urls.length).toBeLessThanOrEqual(3)
+    const bad = await runSeoWeeklyList(mk().client(), { now: NOW, dryRun: true, fetchPageQueries: async () => null, fetchSnippet: async () => { throw new Error('site down') } })
+    expect(bad.failed).toBe(0)
+    expect(bad.results[0].preview.join('\n')).toContain('线上标题没取到')
+  })
 })
 
