@@ -218,5 +218,50 @@ describe('runSeoWeeklyList', () => {
     expect(r2.results[0].item_errors?.[0]).toMatch(/audit down/)
     expect(broken.rows('execution_items').find(x => x.id === 's1')!.status).toBe('pending')
   })
+
+  it('low-CTR items get a diagnosis from the page\'s own Google queries; at most 3 pages are read; a failed read does not block the item', async () => {
+    const mkDb = () => {
+      const db = baseDb()
+      db.rows('gsc_performance_snapshots').push({ client_id: CID, period_end: '2026-10-03', site_url: 'https://x.com/' })
+      return db
+    }
+    const calls: string[] = []
+    const ok = await runSeoWeeklyList(mkDb().client(), {
+      now: NOW,
+      fetchPageQueries: async (_site, url) => { calls.push(url); return [{ query: 'low ctr page', clicks: 1, impressions: 25, ctr: 0.04, position: 5 }] },
+    })
+    expect(ok.failed).toBe(0)
+    expect(calls.length).toBeLessThanOrEqual(3)
+    expect(calls).toContain('https://x.com/low-ctr')
+
+    const db2 = mkDb()
+    await runSeoWeeklyList(db2.client(), { now: NOW, fetchPageQueries: async () => { throw new Error('google down') } })
+    const item = db2.rows('execution_items').find(x => (x.steps_json as { url: string | null }).url === 'https://x.com/low-ctr')
+    expect(item).toBeDefined()
+    expect(String(item!.description)).toContain('没取到这页的搜索词数据')
+  })
+
+  it('a high-potential page whose crawl is too old is reported as a data gap instead of vanishing silently', async () => {
+    const db = baseDb()
+    db.rows('client_site_pages').find(p => p.url === 'https://x.com/low-ctr')!.crawled_at = '2026-08-01T00:00:00Z'
+    const r = await runSeoWeeklyList(db.client(), { now: NOW, fetchPageQueries: async () => null })
+    expect(r.results[0].stale_crawl_pages).toContain('https://x.com/low-ctr')
+  })
+
+  it('reads at most 3 pages\' queries per run even when many pages are eligible', async () => {
+    const db = baseDb()
+    db.rows('gsc_performance_snapshots').push({ client_id: CID, period_end: '2026-10-03', site_url: 'https://x.com/' })
+    for (let i = 0; i < 6; i += 1) {
+      const url = `https://x.com/extra-${i}`
+      db.rows('client_site_pages').push({ client_id: CID, url, path: `/extra-${i}`, title: `Extra ${i}`, h1: null, word_count: 800, status_code: 200, crawl_status: 'crawled', crawled_at: '2026-10-03T00:00:00Z' })
+      for (let d = 0; d < 28; d += 1) {
+        const day = new Date('2026-09-29T00:00:00Z'); day.setUTCDate(day.getUTCDate() - d)
+        db.rows('gsc_page_daily').push({ client_id: CID, day: day.toISOString().slice(0, 10), page_key: url, page_url: url, clicks: 0, impressions: 30 + i, position: 6 })
+      }
+    }
+    const calls: string[] = []
+    await runSeoWeeklyList(db.client(), { now: NOW, dryRun: true, fetchPageQueries: async (_s, url) => { calls.push(url); return null } })
+    expect(calls.length).toBe(3)
+  })
 })
 

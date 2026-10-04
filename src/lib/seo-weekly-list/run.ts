@@ -26,13 +26,28 @@ import {
   type SnapshotKeywordRow,
 } from './candidates'
 import { buildCtrGapItem, buildNearMissItem, type ItemContext, type PlanItemDraft } from './items'
+import { diagnoseCtrGap, type CtrDiagnosis, type PageQueryRow } from './ctr-diagnosis'
+import { fetchGscQueriesForPage } from '@/lib/gsc/client'
 import { verifyPlanItem, type BlogRow, type CrawledPage, type OpenPlanItem } from './verify'
 
 const LOCATION_CODE_BY_DB: Record<string, number> = { au: 2036, nz: 2554 }
 const PAGE_SIZE = 1000
 const MAX_PAGES = 20
 const GSC_WINDOW_DAYS = 28
+/** Per client per run: how many low-CTR pages get a live per-page query read from Google (free). */
+const MAX_QUERY_FETCH = 3
 const DAY_MS = 86_400_000
+
+/** Reads one page's own search queries (Google Search Console). Injected so tests never touch Google. */
+export type PageQueryFetcher = (siteUrl: string, pageUrl: string, clientId: string) => Promise<PageQueryRow[] | null>
+
+const defaultFetchPageQueries: PageQueryFetcher = async (siteUrl, pageUrl, clientId) => {
+  const rows = await fetchGscQueriesForPage(siteUrl, pageUrl, clientId)
+  if (!rows) return null
+  return rows
+    .filter(r => typeof r.query === 'string' && r.query.length > 0)
+    .map(r => ({ query: r.query as string, clicks: r.clicks, impressions: r.impressions, ctr: r.ctr, position: r.position }))
+}
 
 export interface WeeklyListClientResult {
   client_id: string
@@ -48,6 +63,8 @@ export interface WeeklyListClientResult {
   withheld: 'wip_cap' | 'no_candidates' | 'no_snapshot' | 'stale_snapshot' | null
   skipped_keywords: number
   preview: string[]
+  /** High-potential pages left out because their last crawl is too old to take a baseline from (data gap, surfaced not hidden). */
+  stale_crawl_pages?: string[]
   /** Items whose verify / expire write failed (the run continues; any entry turns the cron red). */
   item_errors?: string[]
   error?: string
@@ -138,15 +155,16 @@ async function loadPlanRows(supabase: SupabaseClient, clientId: string, statuses
 
 export async function runSeoWeeklyList(
   supabase: SupabaseClient,
-  opts: { now?: Date; dryRun?: boolean; clientId?: string } = {},
+  opts: { now?: Date; dryRun?: boolean; clientId?: string; fetchPageQueries?: PageQueryFetcher } = {},
 ): Promise<WeeklyListRunResult> {
   const now = opts.now ?? new Date()
+  const fetchPageQueries = opts.fetchPageQueries ?? defaultFetchPageQueries
   const dryRun = opts.dryRun ?? false
   const goals = await loadEligibleGoals(supabase, opts.clientId)
   const results: WeeklyListClientResult[] = []
   for (const goal of goals) {
     try {
-      results.push(await runForClient(supabase, goal, now, dryRun))
+      results.push(await runForClient(supabase, goal, now, dryRun, fetchPageQueries))
     } catch (err) {
       results.push({
         client_id: goal.client_id, goal_id: goal.id, dry_run: dryRun, open_before: 0,
@@ -164,6 +182,7 @@ async function runForClient(
   goal: { id: string; client_id: string },
   now: Date,
   dryRun: boolean,
+  fetchPageQueries: PageQueryFetcher,
 ): Promise<WeeklyListClientResult> {
   const clientId = goal.client_id
   const result: WeeklyListClientResult = {
@@ -235,7 +254,7 @@ async function runForClient(
   const slots = Math.min(config.weeklyMaxItems, config.wipCap - stillOpen)
   if (slots <= 0) return { ...result, withheld: 'wip_cap' }
 
-  const drafts = await buildDrafts(supabase, client, goal.id, config, now, result)
+  const drafts = await buildDrafts(supabase, client, goal.id, config, now, result, fetchPageQueries)
   if (drafts.length === 0) return { ...result, withheld: result.withheld ?? 'no_candidates' }
   const chosen = drafts.slice(0, slots)
   result.preview = chosen.map(d => d.title)
@@ -280,6 +299,7 @@ async function buildDrafts(
   config: SeoLoopConfig,
   now: Date,
   result: WeeklyListClientResult,
+  fetchPageQueries: PageQueryFetcher,
 ): Promise<PlanItemDraft[]> {
   const clientId = client.id
   const locationCode = LOCATION_CODE_BY_DB[client.semrush_db ?? 'au'] ?? LOCATION_CODE_BY_DB.au
@@ -397,6 +417,7 @@ async function buildDrafts(
   const ctrGap = buildCtrGapCandidates(pageAgg, config)
 
   type Ranked = { potential: number; build: (index: number) => PlanItemDraft | null }
+  const ctrEligible: Array<{ c: (typeof ctrGap)[number]; page: SitePageRow }> = []
   const ranked: Ranked[] = []
   for (const c of near.candidates) {
     if (blockedKeywordKeys.has(tokenKey(c.primary.keyword))) continue
@@ -411,15 +432,47 @@ async function buildDrafts(
       result.skipped_keywords += 1
       continue
     }
-    if (main && !hasFreshCrawl(main, now, config)) continue // no trustworthy word-count baseline
+    if (main && !hasFreshCrawl(main, now, config)) {
+      noteStale(result, main.url) // no trustworthy word-count baseline
+      continue
+    }
     ranked.push({ potential: c.potentialClicks, build: i => buildNearMissItem(c, matches, ctx, i) })
   }
   for (const c of ctrGap) {
     const canon = canonicalUrl(c.url)
     if ((canon && blockedUrls.has(canon)) || isExcludedUrl(c.url, protectedSlugs, recentMetaUrls)) continue
     const page = canon ? sitePageByCanon.get(canon) : undefined
-    if (!page || !hasFreshCrawl(page, now, config)) continue // no trustworthy word-count baseline
-    ranked.push({ potential: c.potentialClicks, build: i => buildCtrGapItem(c, page, ctx, i) })
+    if (!page) continue
+    if (!hasFreshCrawl(page, now, config)) {
+      noteStale(result, c.url) // no trustworthy word-count baseline
+      continue
+    }
+    ctrEligible.push({ c, page })
+  }
+
+  // CTR diagnosis for the top low-CTR pages: read the page's OWN search queries from Google
+  // (free) and combine with title / sibling-page facts. A failed read never blocks the item —
+  // it just says the query data could not be fetched.
+  const { data: gscSite } = await supabase
+    .from('gsc_performance_snapshots').select('site_url').eq('client_id', clientId).order('period_end', { ascending: false }).limit(1).maybeSingle()
+  const siteUrl = (gscSite as { site_url: string } | null)?.site_url ?? null
+  for (const [i, e] of ctrEligible.entries()) {
+    let diag: CtrDiagnosis | undefined
+    if (i < MAX_QUERY_FETCH) {
+      let queries: PageQueryRow[] | null = null
+      if (siteUrl) {
+        try {
+          queries = await fetchPageQueries(siteUrl, e.c.url, clientId)
+        } catch {
+          queries = null
+        }
+      }
+      diag = diagnoseCtrGap({
+        page: { url: e.c.url, impressions: e.c.impressions }, title: e.page.title, queries, sitePages, pageAgg,
+        brandRoot: domainRoot(client.domain ?? ''), brandAliases: client.brand_aliases,
+      })
+    }
+    ranked.push({ potential: e.c.potentialClicks, build: idx => buildCtrGapItem(e.c, e.page, ctx, idx, diag) })
   }
   ranked.sort((a, b) => b.potential - a.potential)
 
@@ -448,4 +501,9 @@ async function buildDrafts(
 function hasFreshCrawl(page: SitePageRow, now: Date, config: SeoLoopConfig): boolean {
   if (page.crawl_status !== 'crawled' || !page.crawled_at) return false
   return (now.getTime() - Date.parse(page.crawled_at)) / DAY_MS <= config.baselineMaxCrawlAgeDays
+}
+
+function noteStale(result: WeeklyListClientResult, url: string): void {
+  const list = (result.stale_crawl_pages ??= [])
+  if (list.length < 5 && !list.includes(url)) list.push(url)
 }

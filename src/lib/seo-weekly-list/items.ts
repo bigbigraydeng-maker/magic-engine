@@ -9,6 +9,7 @@
 
 import { canonicalUrl } from '@/lib/url/canonical-url'
 import type { CtrGapCandidate, KeywordMember, NearMissCandidate, SitePageRow } from './candidates'
+import { CAUSE_LABEL, type CtrDiagnosis } from './ctr-diagnosis'
 
 export const SEO_PLAN_LOOP_MARKER = 'seo_goal_v1'
 export const PLAN_ACTION = {
@@ -149,6 +150,7 @@ export function buildCtrGapItem(
   page: SitePageRow | undefined,
   ctx: ItemContext,
   index: number,
+  diag?: CtrDiagnosis,
 ): PlanItemDraft {
   const failure = '28 天后该页曝光不变而点击率仍低于排名对应水平，且页面无实质改动，判没起效（不做点击归因，只看页面是否真改了）'
   const evidence: EvidenceLine[] = [
@@ -159,22 +161,24 @@ export function buildCtrGapItem(
       confidence: '确认',
     },
   ]
-  const how = [
+  if (diag) evidence.push(...diagnosisEvidence(diag, ctx))
+  const how = (diag ? diagnosisHow(diag, page?.title ?? null) : [
     '① 先看这页收录了吗。',
     '② 看是否有别的自家页面在分食同一主题（后台"逐页对比"同主题页面的曝光）。',
     titleCheck(page?.title ?? null),
     '④ 标题或首段没写清读者要的答案、或被别的搜索结果板块压住，才考虑改内容；改动后请记下改了什么，便于核对。',
-  ].join('\n')
+  ]).join('\n')
   return {
     actionType: PLAN_ACTION.STRENGTHEN_PAGE,
     title: `加强页面：点击率偏低 ${c.url}`,
     description: [
       `【为什么】${evidence[0].claim}。已排在第一页但点的人少（点击率偏低，粗估增量约 +${c.potentialClicks} 次点击/28 天，按通用点击率曲线算，只用于排序）。`,
+      diag ? `【系统诊断】${CAUSE_LABEL[diag.cause]}（机械可核对的事实，见证据；不代表一定是这个原因）` : '',
       `【怎么做】\n${how}`,
       `【怎么算没起效】${failure}`,
       `【证据】${evidence.map(e => `${e.claim}〔${e.confidence}｜${e.source}｜${e.fetched_at}〕`).join('；')}`,
       `【链接】${c.url} ｜ ${ctx.intelligenceHref}`,
-    ].join('\n'),
+    ].filter(Boolean).join('\n'),
     keyword: null,
     url: c.url,
     dueDate: dueDateFor(ctx.planWeek, index),
@@ -182,8 +186,46 @@ export function buildCtrGapItem(
       opportunity: { impressions: c.impressions, clicks: c.clicks, position: c.position, ctr: c.ctr, benchmark: c.benchmark, potential_clicks_estimate: c.potentialClicks },
       baseline: { snapshot_date: ctx.gscDay, word_count: page?.word_count ?? null, crawled_at: page?.crawled_at ?? null, title: page?.title ?? null },
       verify: { type: 'page_strengthened' },
+      ...(diag ? { ctr_diagnosis: diag } : {}),
     }),
   }
+}
+
+function diagnosisEvidence(d: CtrDiagnosis, ctx: ItemContext): EvidenceLine[] {
+  const out: EvidenceLine[] = []
+  if (d.queriesAvailable) {
+    const lines = d.topQueries.slice(0, 5).map(q => `「${q.query}」曝光${q.impressions}、点击${q.clicks}、排第${q.position.toFixed(1)}${q.underperforming ? '（点击率明显低于该名次常见水平）' : ''}${q.inTitle ? '' : '（标题里没有）'}`)
+    out.push({ claim: `这页自己的前几个搜索词：${lines.join('；')}`, source: '谷歌搜索数据（该页查询）', fetched_at: ctx.gscDay, confidence: '确认' })
+    if (d.lowRankShare !== null) {
+      out.push({ claim: `这些词里 ${Math.round(d.lowRankShare * 100)}% 的曝光来自排第 8 名及以后的词；品牌词占 ${Math.round((d.brandedShare ?? 0) * 100)}%`, source: '谷歌搜索数据（该页查询）', fetched_at: ctx.gscDay, confidence: '确认' })
+    }
+  }
+  if (d.siblings.length > 0) {
+    out.push({
+      claim: `同主题自家页面：${d.siblings.map(s => `${s.url}（曝光${s.impressions}、点击${s.clicks}，共同词：${s.sharedTerms.join('/')}）`).join('；')}`,
+      source: '站内页面文本匹配 + 谷歌逐页数据', fetched_at: ctx.gscDay, confidence: '很可能',
+    })
+  }
+  return out
+}
+
+function diagnosisHow(d: CtrDiagnosis, title: string | null): string[] {
+  const steps = ['① 先看这页收录了吗。']
+  if (d.siblings.length > 0) {
+    steps.push(`② 先处理分食：${d.siblings.map(s => s.url).join('、')} 与本页争同一主题。决定哪页当主页，另一页的标题改成与主页明显不同的角度（或把它的内链汇向主页），不要两页用近乎相同的标题。`)
+  } else {
+    steps.push('② 站内没有发现明显的同主题页面分食。')
+  }
+  if (d.cause === 'low_rank_queries') {
+    steps.push('③ 曝光主要来自排第 8 名及以后的词：先提升名次（补覆盖这些词的内容、加内链），不要急着改标题。')
+  } else if (d.titleMisses.length > 0) {
+    steps.push(`③ 这页最大的搜索词「${d.titleMisses.join('」「')}」没有出现在标题里：把最大的那个词放到标题前面，并写明读者能得到什么（数字、适用对象）。`)
+  } else {
+    steps.push(titleCheck(title))
+  }
+  if (d.titleTruncated) steps.push(`④ 标题 ${d.titleLength} 个字符，超过约 ${TITLE_TRUNCATION_CHARS}，会被截断：缩短，关键词前置（若该页在标题保护名单内则只能人工改）。`)
+  steps.push('⑤ 改完请记下改了什么，便于核对；系统核对的是页面正文是否实质变长，标题的效果要 28 天后看排名，点击率前后对比在这个流量下判不了。')
+  return steps
 }
 
 function titleCheck(title: string | null): string {
