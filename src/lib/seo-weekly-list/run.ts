@@ -28,6 +28,7 @@ import {
 import { buildCtrGapItem, buildNearMissItem, type ItemContext, type PlanItemDraft } from './items'
 import { CAUSE_LABEL, diagnoseCtrGap, type CtrDiagnosis, type PageQueryRow } from './ctr-diagnosis'
 import { fetchGscQueriesForPage } from '@/lib/gsc/client'
+import { fetchLiveSnippet, type SnippetFetcher } from './live-snippet'
 import { verifyPlanItem, type BlogRow, type CrawledPage, type OpenPlanItem } from './verify'
 
 const LOCATION_CODE_BY_DB: Record<string, number> = { au: 2036, nz: 2554 }
@@ -155,16 +156,17 @@ async function loadPlanRows(supabase: SupabaseClient, clientId: string, statuses
 
 export async function runSeoWeeklyList(
   supabase: SupabaseClient,
-  opts: { now?: Date; dryRun?: boolean; clientId?: string; fetchPageQueries?: PageQueryFetcher } = {},
+  opts: { now?: Date; dryRun?: boolean; clientId?: string; fetchPageQueries?: PageQueryFetcher; fetchSnippet?: SnippetFetcher } = {},
 ): Promise<WeeklyListRunResult> {
   const now = opts.now ?? new Date()
   const fetchPageQueries = opts.fetchPageQueries ?? defaultFetchPageQueries
+  const fetchSnippet = opts.fetchSnippet ?? fetchLiveSnippet
   const dryRun = opts.dryRun ?? false
   const goals = await loadEligibleGoals(supabase, opts.clientId)
   const results: WeeklyListClientResult[] = []
   for (const goal of goals) {
     try {
-      results.push(await runForClient(supabase, goal, now, dryRun, fetchPageQueries))
+      results.push(await runForClient(supabase, goal, now, dryRun, fetchPageQueries, fetchSnippet))
     } catch (err) {
       results.push({
         client_id: goal.client_id, goal_id: goal.id, dry_run: dryRun, open_before: 0,
@@ -183,6 +185,7 @@ async function runForClient(
   now: Date,
   dryRun: boolean,
   fetchPageQueries: PageQueryFetcher,
+  fetchSnippet: SnippetFetcher,
 ): Promise<WeeklyListClientResult> {
   const clientId = goal.client_id
   const result: WeeklyListClientResult = {
@@ -254,7 +257,7 @@ async function runForClient(
   const slots = Math.min(config.weeklyMaxItems, config.wipCap - stillOpen)
   if (slots <= 0) return { ...result, withheld: 'wip_cap' }
 
-  const drafts = await buildDrafts(supabase, client, goal.id, config, now, result, fetchPageQueries)
+  const drafts = await buildDrafts(supabase, client, goal.id, config, now, result, fetchPageQueries, fetchSnippet)
   if (drafts.length === 0) return { ...result, withheld: result.withheld ?? 'no_candidates' }
   const chosen = drafts.slice(0, slots)
   result.preview = chosen.map(previewLine)
@@ -300,6 +303,7 @@ async function buildDrafts(
   now: Date,
   result: WeeklyListClientResult,
   fetchPageQueries: PageQueryFetcher,
+  fetchSnippet: SnippetFetcher,
 ): Promise<PlanItemDraft[]> {
   const clientId = client.id
   const locationCode = LOCATION_CODE_BY_DB[client.semrush_db ?? 'au'] ?? LOCATION_CODE_BY_DB.au
@@ -459,16 +463,24 @@ async function buildDrafts(
   for (const [i, e] of ctrEligible.entries()) {
     let diag: CtrDiagnosis | undefined
     if (i < MAX_QUERY_FETCH) {
-      let queries: PageQueryRow[] | null = null
-      if (siteUrl) {
+      const readQueries = async (): Promise<PageQueryRow[] | null> => {
+        if (!siteUrl) return null
         try {
-          queries = await fetchPageQueries(siteUrl, e.c.url, clientId)
+          return await fetchPageQueries(siteUrl, e.c.url, clientId)
         } catch {
-          queries = null
+          return null
         }
       }
+      const readSnippet = async () => {
+        try {
+          return await fetchSnippet(e.c.url)
+        } catch {
+          return null
+        }
+      }
+      const [queries, live] = await Promise.all([readQueries(), readSnippet()])
       diag = diagnoseCtrGap({
-        page: { url: e.c.url, impressions: e.c.impressions }, title: e.page.title, queries, sitePages, pageAgg,
+        page: { url: e.c.url, impressions: e.c.impressions }, title: e.page.title, queries, live, sitePages, pageAgg,
         brandRoot: domainRoot(client.domain ?? ''), brandAliases: client.brand_aliases,
       })
     }
@@ -516,5 +528,6 @@ function noteStale(result: WeeklyListClientResult, url: string): void {
 function previewLine(d: PlanItemDraft): string {
   const diag = d.stepsJson.ctr_diagnosis as CtrDiagnosis | undefined
   if (!diag) return d.title
-  return `${d.title} ｜诊断：${CAUSE_LABEL[diag.cause]}｜该页搜索词${diag.queriesAvailable ? '已取到' : '没取到'}`
+  const fixes = diag.quickFixes.length > 0 ? `｜顺手可修${diag.quickFixes.length}项` : ''
+  return `${d.title} ｜诊断：${CAUSE_LABEL[diag.cause]}｜该页搜索词${diag.queriesAvailable ? '已取到' : '没取到'}｜线上标题${diag.titleSource === 'live' ? '已取到' : '没取到'}${fixes}`
 }

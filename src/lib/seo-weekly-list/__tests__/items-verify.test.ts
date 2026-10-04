@@ -50,10 +50,10 @@ describe('buildNearMissItem', () => {
 
 describe('buildCtrGapItem', () => {
   const gap: CtrGapCandidate = { kind: 'ctr_gap', url: 'https://x.com/p', clicks: 2, impressions: 800, position: 6.2, ctr: 0.0025, benchmark: 0.035, potentialClicks: 26 }
-  it('flags a title over 60 chars as truncated, and says length is fine when it is not', () => {
-    const long = 'T'.repeat(70)
-    expect(buildCtrGapItem(gap, page('https://x.com/p', long), ctx, 0).description).toMatch(/70 个字符[\s\S]*截断/)
-    expect(buildCtrGapItem(gap, page('https://x.com/p', 'Short title'), ctx, 0).description).toMatch(/不会被截断/)
+  it('without live data the item makes NO claim about title length (the crawler "title" is the page heading, not the search title)', () => {
+    const d = buildCtrGapItem(gap, page('https://x.com/p', 'T'.repeat(70)), ctx, 0)
+    expect(d.description).not.toMatch(/70 个字符/)
+    expect(d.description).toContain('这次没取到线上真实标题')
   })
   it('carries url top-level and no keyword', () => {
     const it = buildCtrGapItem(gap, undefined, ctx, 0)
