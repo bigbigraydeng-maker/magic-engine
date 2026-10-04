@@ -11,6 +11,7 @@ import {
   authHeader,
   assertTaskOk,
   deriveIntent,
+  DataForSeoTaskError,
   type LabsCompetitor,
   type LabsKeyword,
 } from './labs-types'
@@ -65,9 +66,16 @@ export async function getSerpCompetitors(
     }>
   }
 
-  assertTaskOk(json.tasks?.[0], 'competitors_domain')
 
-  const items = json.tasks?.[0]?.result?.[0]?.items ?? []
+  const task = json.tasks?.[0]
+  if ((task?.status_code ?? 0) !== 20000) {
+    throw new DataForSeoTaskError(
+      task?.status_code,
+      `DataForSEO competitors_domain task error ${task?.status_code ?? 'missing'}: ${task?.status_message ?? 'unknown'}`,
+    )
+  }
+
+  const items = task?.result?.[0]?.items ?? []
 
   return items
     .filter(it => it.domain && it.domain !== domain)
@@ -156,6 +164,7 @@ export async function getKeywordsGapWithStatus(
         }
       }
     } catch (err) {
+      // KD stays null for these keywords: count as a failed call so callers never cache it.
       failedCount += 1
       console.warn('[labs/getKeywordsGap] KD enrichment failed', {
         clientDomain,
@@ -223,9 +232,16 @@ async function fetchDomainIntersectionGap(
     }>
   }
 
-  assertTaskOk(json.tasks?.[0], 'domain_intersection')
 
-  const items = json.tasks?.[0]?.result?.[0]?.items ?? []
+  const task = json.tasks?.[0]
+  if ((task?.status_code ?? 0) !== 20000) {
+    throw new DataForSeoTaskError(
+      task?.status_code,
+      `DataForSEO domain_intersection task error ${task?.status_code ?? 'missing'}: ${task?.status_message ?? 'unknown'}`,
+    )
+  }
+
+  const items = task?.result?.[0]?.items ?? []
 
   return items
     .filter(it => it.keyword_data?.keyword)
