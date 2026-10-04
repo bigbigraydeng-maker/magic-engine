@@ -29,7 +29,8 @@
 | **logo（线 B）** | `client-config.ts:177` 取模板里叫 logo 的图层 | ❌ 模板里写死 |
 | **品牌色 VI** | 仅 `lecture-render.ts:648`（讲课线，已退役） | ❌ 渲染层没读 |
 | 避讳词 `avoid_words` / `vi_donts` | 只进提示词 | ❌ 软约束；`worker-guard.ts:104-119` 的硬扫只扫禁语和禁区 |
-| 配方（爆款样本） | `viral-structure.ts:129`、`evaluate.ts:201` | 只取节奏数字，不取画面形态 |
+| 配方（爆款样本）节奏 | `viral-structure.ts:129`（`loadViralStructure`）、`evaluate.ts:201` | 这一步只取节奏数字 |
+| 配方（爆款样本）画面指导 | `evaluate.ts:333-362` 调 `getViralVisualPlan` / `getViralClipDirective`；`viral-style-advisor.ts:101-143` | ✅ 已连：按爆款库 `key_techniques` 和开场类型生成镜头语法、画面提示、禁用模式，计划写入工单；不要求完整计划的配方也会注入视觉 hook 和 techniques。配方对账还缺哪些视觉列需另行逐列核对，别当成整块缺口重建 |
 | 素材池 | `client-asset-pool.ts:79-141` | ❌ 不读（只读素材库本身） |
 
 「苏东坡」代码里**没有对应实现**，只是文档角色（`CLAUDE.md:243`）；真有的自动审查是马良（只看画面/字/logo）和 `content-quality-guard`。
