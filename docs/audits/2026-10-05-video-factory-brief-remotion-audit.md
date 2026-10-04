@@ -6,7 +6,7 @@
 
 ## 结论（一段话）
 
-**视频工厂只有一半连着 Master Brief：文案、禁区、品牌名连了；logo、品牌色、Slogan 的「画面层」没连。** logo 来自 Mac 上的本机文件夹或 Creatomate 模板，不是从 Master Brief 来的。
+**视频工厂只有一半连着 Master Brief：文案、禁区、品牌名连了；logo、品牌色、Slogan 的「画面层」没连。** logo 来自 Mac 上的本机文件夹或客户级工厂配置（`clients.factory_config.render.creatomate.static_overrides`），不是从 Master Brief 来的。
 **每日计划跟工厂完全没连**：每日计划只会写 Reel 脚本、发图片帖，从不向工厂要视频；「工厂出片→发布→自动建广告」最后一步也没人接。
 **Remotion 在仓库里是零**：今天的几条视频全在仓库外，文案、价格、logo 都是手写死的，更没经过工厂的审核与发布闸。
 **你担心「所有工作都在云里做」，答案是：不用。** 工厂现在就是「云上管数据和闸门，一台 Mac 管渲染」，Remotion 正适合挂在那台 Mac 上。
@@ -26,7 +26,7 @@
 | 文案生成（配方路径） | `evaluate.ts:353-393` | ❌ 不读，端卡事实来自客户配置 `verified_cta` |
 | 成片复扫/品控/发布前 | `complete-work-order.ts:161-231`、`publish-worker.ts:77-125` | ✅ 禁区 + 品牌名防发错主页 |
 | **logo（线 A）** | `worker.mjs:82,95-109` 读 Mac 上 `brandkit/assets/logo_color.png` | ❌ 本机文件夹，靠 worker 环境变量映射 |
-| **logo（线 B）** | `client-config.ts:177` 取模板里叫 logo 的图层 | ❌ 模板里写死 |
+| **logo（线 B）** | `client-config.ts:177` 取模板里叫 logo 的图层 | ❌ 来自客户级工厂配置的固定图层覆盖值（`static_overrides`，`client-config.ts:164-183`），不是 Master Brief；改造落点是这份客户配置，不是改 Creatomate 模板 |
 | **品牌色 VI** | 仅 `lecture-render.ts:648`（讲课线，已退役） | ❌ 渲染层没读 |
 | 避讳词 `avoid_words` / `vi_donts` | 只进提示词 | ❌ 软约束；`worker-guard.ts:104-119` 的硬扫只扫禁语和禁区 |
 | 配方（爆款样本）节奏 | `viral-structure.ts:129`（`loadViralStructure`）、`evaluate.ts:201` | 这一步只取节奏数字 |
@@ -67,7 +67,7 @@
 **推荐 A，第一步先做 C 的收片入口**（把今天的成片接进闸门），第二步把模板改成吃 Master Brief。
 **PM 硬要求（2026-10-05）**：`~/Projects/cts-remotion` 里约 6 个 Remotion 模板和已渲染成片**必须保留，不能丢**。所以「收片入口」的**第 0 步是先备份、再接入工厂**：整个目录先备份一份到 Dropbox，确认备份在了，才允许任何接入动作碰这个目录。
 **这一步已做完（2026-10-05，另一个窗口做的，我事后核对过）**：备份在 Dropbox 的 `Magic Engine/by-client/01_CTS_Tours/Remotion_Reels_backup_20261005/`（不含 node_modules，里面有 README.txt 写了恢复办法，共 1.4G）。我核对了文件数，和原目录一一对应：src 17、public 23、tools 3、out 成片 57。注意：这只是一份拷贝，原目录仍然不是 git 仓库；接入工厂时仍不要直接改原目录。
-级别与审：整体按 **A 级**（给外部成片开一个进发布链路的口子，属发布相关）；其中纯渲染适配器部分是 B。新增依赖 = 大任务，必须 **子牙 + 魏征** 设计与实施各审一次；面向客户加 **板桥**；若改鉴权/出片机准入再加 **狄仁杰**。写代码默认交 DeepSeek（`CLAUDE.md §5`），Claude Code 出指令、审 diff、跑测试。
+级别与审：整体按 **A 级**（给外部成片开一个进发布链路的口子，属发布相关）；其中纯渲染适配器部分是 B。新增依赖 = 大任务，必须 **子牙 + 魏征** 设计与实施各审一次，Remotion 引擎属 L3 Connector，另须 **鲁班 + 该 Connector 域负责人** 复审（层级门要求）；面向客户加 **板桥**；若改鉴权/出片机准入再加 **狄仁杰**。写代码默认交 DeepSeek（`CLAUDE.md §5`），Claude Code 出指令、审 diff、跑测试。
 需要 PM 记一笔：PM 当初是嫌 Creatomate 模板「平庸」才换 Remotion（记忆 `reference-cts-remotion-local-project`）；已买供应商是默认项，换引擎属 PM 决定，应在台账留一句。
 
 ## 5. Remotion 成片要投广告，必过哪几道闸
