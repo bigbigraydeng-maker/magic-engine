@@ -175,6 +175,7 @@ CTS 谷歌口径：近三个完整周点击 268 / 269 / 266，曝光 ~14.7k / 13
 
 ### 5.2 机会池如何落地
 - 写 `seo_patrol_findings`（新 `rule_id`：**需迁移**给 `seo_patrol_rule` 枚举加 `near_miss_keyword`/`ctr_gap_page`/`keyword_gap`/`cannibalization` 四个值，并同步 TS 联合类型）。**注意**：这张表每天"先清后写"，只存最新一批；机会池要的是"本周候选"，所以**机会被周计划挑中那一刻，把证据快照（词/量/难度/排名/取数日期）抄进计划项 `steps_json.opportunity`**，之后不再依赖这张表。
+- **每日巡检会清掉每周机会（评审 P2 采纳）**：现有 `persistFindings`（`seo-patrol/job.ts`）按客户删除**全部** `status='fresh'` 的 finding，不分规则。WP-1 验收：①每日巡检的"先清后写"**只删每日规则的编号**（旧 5 条 + 新增的每日规则），**不碰**周规则（`keyword_gap`、`cannibalization`）；②周规则由**周任务自己**按规则编号先清后写；③周任务的"取数 → 评分排序 → 写机会 → 周计划器挑选并抄进计划项"放在**同一个 Inngest 运行的相邻步骤**里，周计划器只读本次运行刚写的机会。专测：每日巡检跑完后，周规则的 finding 仍在。
 - `seo-agent` 的评分与大模型排序接成**每周一次**（不是每日），产出写进机会池的 `priority` 字段（该表**目前没有此列**，由 WP-1 迁移新增可空 `priority INTEGER` 与 `priority_reason TEXT`）；大模型只负责排序与写"为什么"，**量/难度/排名一律只来自 DataForSEO/GSC，不让模型编数字**。
 
 ---
@@ -227,7 +228,7 @@ CTS 谷歌口径：近三个完整周点击 268 / 269 / 266，曝光 ~14.7k / 13
 
 ### 6.4 每日任务拆分（每个工作日一次）
 顺序固定：**① 先核验昨天 → ② 再做今天到期的机器活 → ③ 合并人工件 → ④ 写记分牌**。
-- 核验：对所有"待核验"计划项跑 `verify`；通过 → `completed` + `execution_logs(kind='note', meta.verified=true, meta.receipt=…)`（`execution_logs.kind` 库里有约束，只允许 `note/status_change/ai_assist/blocker/adjustment`，不新增 `verified` 值；**先写核验日志、写成功才改状态**，日志写失败则不置完成，避免卡片显示完成却无回执）；人已点完成但核验不过 → 记 `claimed_unverified`，进记分牌与次日合并条目。
+- 核验：对所有"待核验"计划项跑 `verify`；通过 → `completed` + `execution_logs(kind='note', meta.verified=true, meta.receipt=…)`（`execution_logs.kind` 库里有约束，只允许 `note/status_change/ai_assist/blocker/adjustment`，不新增 `verified` 值；**先写核验日志、写成功才改状态**，日志写失败则不置完成，避免卡片显示完成却无回执）；**人点"完成"的处理（评审 P1 采纳）**：现有执行卡接口 `execution/[itemId]/route.ts` 对任何卡都会立刻写 `completed`、门户也直接按它统计，所以**该接口必须对带 `steps_json.loop` 的计划项拦截**：人点"完成"时状态**保持 `in_progress`**，只写持久化标记 `steps_json.verify={state:'claimed', claimed_at}`（`execution_items` 状态枚举不含新值，故不新增状态、用 `steps_json` 落点）；**只有核验器通过才置 `completed`**。核验不过 → `verify.state='failed'`，仍是 `in_progress`，进记分牌"自称完成未核验"与次日合并条目。所有"完成"统计因此天然只认核验过的；该接口改动归 WP-4（A 级评估：动执行卡完成语义，需专测"人点完成不会直接变 completed"+"门户完成数不含未核验"）。
 - 机器活：`diagnose_page`、`recheck_rank`；再加"草稿生成"（走现有博客引擎，产出 `blog_posts` 草稿并写好 `primary_keyword/volume/kd`）。
 - 合并人工件：当天所有需要人看的东西合并成**一条**（至多 1 条/天），内容 = 每件事的 **what（问题+影响）/ how（点哪里）/ href（直达）**，类型 `review` 车道。
 - 托管：**Inngest**（CLAUDE §3：跨步骤异步 + 外部副作用的默认工作流层）。事件名业务可读：`seo.loop.week_planned` / `seo.loop.item_dispatched` / `seo.loop.item_verified` / `seo.loop.day_closed`；每阶段写机器可读回执（request id、client id、item id、status、provider 花费、`no_publish` 状态、created_at）。**人工点头只推进到下一事件，不等于发布授权**；发布仍走周博客管线现有闸。
