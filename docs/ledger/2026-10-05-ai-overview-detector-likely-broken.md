@@ -1,13 +1,15 @@
 ---
 id: 2026-10-05-ai-overview-detector-likely-broken
 title: 「AI 概览」检测很可能是坏的（1676 条全 false），需拿到 DataForSEO 密钥发一次试探才能确认并修
-status: decided
-owner: pm
+status: done
+owner: agent
 decided_on: 2026-10-05
 source: session:0e415fe6
 verify_by: 2026-10-12
-verify_how: 用现有封装发 1 条只读 SERP 试探，看真实返回里 AI 概览条目的结构；对上解析代码后修并加真实样本测试
+verify_how: 下次每周跑（10-12 前后）后查 serp_ai_overview_snapshots 新行 has_ai_overview 是否出现 true、引用来源非空；样本看全部新行
+done_on: 2026-10-05
+done_ref: pr:2242
 ---
-读码结论：src/lib/dataforseo/serp.ts 按嵌套 ai_overview 字段解析（现有测试的样本是自编的），且请求没带 load_async_ai_overview。
-这个窗口没有 DataForSEO 密钥，试探未跑；在确认前，该列按「没测到」处理，不得当作「没有 AI 概览」。
-下一步：PM 在窗口里提供密钥后发一次试探（约 0.002–0.006 美元），改动按 A 级走。
+试探已跑（1 次，$0.002）：确认是解析写错，真实返回里 AI 概览正文在 items[].text、引用在顶层 references[]。
+修复见 PR 2242（请求参数未改，调用量不变，B 级）。历史 1676 行仍是「没测到」，未回填。
+是否开 load_async_ai_overview 待新数据再判。
