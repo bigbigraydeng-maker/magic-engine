@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-10-05
 source: session:1bfd1871
 verify_by: 2026-10-08
-verify_how: 协调窗口跑影子统计（SQL+命令见 docs/audits/2026-10-05-claim-recognition-hardening.md §4），price_strict 新增命中逐条判误伤；全是真价格才算过，样本量随结论报
+verify_how: 协调窗口跑审计文档里那段只读 SQL，命中行逐条判是不是真价格；全是真价格才算过，样本总数随结论报
 done_on: 2026-10-05
 done_ref: pr:2250
 ---
