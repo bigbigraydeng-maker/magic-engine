@@ -131,6 +131,10 @@
 - **阶段 B（验 ME 自己的代码）**：必须在带令牌的服务器上调 `createDraftForApproval`。本机拿不到生产令牌，**我不读任何 `.env*`**。怎么拿到带令牌的环境 = 未解决项（见 §11）。
 - 回执（对象 id、时间、回读报告原文、删除结果含删不掉的 id）写 `docs/ledger/evidence/`，PR 正文「## 当场试跑」引用。阶段 B 没跑通前 PR 正文如实写「未当场试跑 + 原因」，不写「可上线」。
 
+### 阶段 A 已于 2026-10-04 完成（PM 本人同意）
+
+回执：`docs/ledger/evidence/2026-10-04-me-messenger-ad-trial-run-awaiting-pm--stage-a.md`。结论：①`MESSAGE_PAGE` + `app_destination` 无链接 → Meta 接受；②`OUTCOME_ENGAGEMENT + CONVERSATIONS + MESSENGER + 主页` 整组 → 接受；③不传欢迎语 → 创意建成（最终审核结果未观察）。新发现：广告的 `effective_status` 创建后短暂是 `IN_PROCESS`，配置状态 `status` 才是 `PAUSED`（实现读的正是 `status`，选对了）；创意里视频号会被 Meta 换成新副本；残留 1 个创意 + 1 个视频副本删不掉（台账卡已记）。**阶段 B 仍未做。**
+
 ## 11. 未解决项（汇报时原样交出）
 
 1. 阶段 B 试跑怎么拿到带令牌的环境（PM 决定）。
