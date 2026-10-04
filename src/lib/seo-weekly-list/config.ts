@@ -33,6 +33,18 @@ export interface SeoLoopConfig {
   snapshotMaxAgeDays: number
   /** A page's crawl must be at most this old to take a word-count baseline from it. */
   baselineMaxCrawlAgeDays: number
+  /** Traffic decay: the page needs at least this many clicks in the PREVIOUS 28 days to count. */
+  decayMinPriorClicks: number
+  /** Traffic decay: clicks must have fallen by at least this share (0.4 = 40%). */
+  decayMinDropRatio: number
+  /** Traffic decay: ... and by at least this many clicks (noise guard for small pages). */
+  decayMinAbsDrop: number
+  /** Traffic decay: the click loss must exceed this many "standard deviations" of ordinary random variation (sqrt of the previous clicks), so a 13 → 7 wobble on a small page is not a decline. */
+  decaySigma: number
+  /** Traffic decay: page ratio / site ratio must be at or below this (page falls clearly more than the site). */
+  decayVsSiteRatio: number
+  /** Traffic decay: the previous 28-day window must have data on at least this many days, else no decay items. */
+  decayMinPriorDays: number
 }
 
 export const DEFAULT_SEO_LOOP_CONFIG: SeoLoopConfig = {
@@ -49,6 +61,12 @@ export const DEFAULT_SEO_LOOP_CONFIG: SeoLoopConfig = {
   strengthenMinWordGain: 100,
   snapshotMaxAgeDays: 14,
   baselineMaxCrawlAgeDays: 8,
+  decayMinPriorClicks: 8,
+  decayMinDropRatio: 0.4,
+  decayMinAbsDrop: 5,
+  decaySigma: 2,
+  decayVsSiteRatio: 0.6,
+  decayMinPriorDays: 26,
 }
 
 /** Read `seo_config.loop` overrides; anything that is not a finite positive number is ignored. */
