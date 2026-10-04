@@ -44,20 +44,19 @@ export function competitorsGapFingerprint(inputs: Record<string, unknown>): stri
 
 /**
  * Only complete results may be cached. getKeywordsGap swallows per-competitor
- * failures (allSettled), so an empty gap for non-empty competitors, or a stub
+ * failures (allSettled), so any failed competitor call (gapFailedCount > 0), or a stub
  * competitor whose enrichment failed (both metrics still null), is a degraded
  * answer that must be retried rather than frozen for 24 h.
  */
 export function isCacheableResult(args: {
   competitors: Array<{ monthly_traffic: number | null; keyword_count: number | null }>
-  rawGapCount: number
-  gapCompetitorCount: number
+  gapFailedCount: number
 }): boolean {
   const stubUnenriched = args.competitors.some(
     c => c.monthly_traffic === null && c.keyword_count === null,
   )
   if (stubUnenriched) return false
-  if (args.gapCompetitorCount > 0 && args.rawGapCount === 0) return false
+  if (args.gapFailedCount > 0) return false
   return true
 }
 

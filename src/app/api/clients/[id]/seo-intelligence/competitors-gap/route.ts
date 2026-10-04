@@ -3,7 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import {
   getSerpCompetitors,
-  getKeywordsGap,
+  getKeywordsGapWithStatus,
   fetchDomainRankOverview,
   type LabsCompetitor,
   type LabsKeyword,
@@ -76,6 +76,7 @@ async function computeGap(
     clientId,
     filteredSerp.map(c => c.domain),
     5,
+    true, // strict: a DB read failure must not silently degrade to auto-discovered domains
   )
   const competitors: LabsCompetitor[] = resolved.domains.map(domain =>
     serpMap.get(domain) ?? {
@@ -108,17 +109,17 @@ async function computeGap(
 
   // ── Step 3: Keyword gap using top 3 competitor domains
   const top3       = competitors.slice(0, 3).map(c => c.domain)
-  const rawGapKeywords: LabsKeyword[] = top3.length > 0
-    ? await getKeywordsGap(domain, top3, locationCode, 200)
-    : []
+  const gap = top3.length > 0
+    ? await getKeywordsGapWithStatus(domain, top3, locationCode, 200)
+    : { keywords: [] as LabsKeyword[], failedCount: 0 }
+  const rawGapKeywords = gap.keywords
   const gapKeywords = rawGapKeywords
     .filter(keyword => isBusinessRelevantKeyword(keyword.keyword, businessTerms, excludedTopics))
     .slice(0, 100)
 
   const cacheable = isCacheableResult({
     competitors,
-    rawGapCount: rawGapKeywords.length,
-    gapCompetitorCount: top3.length,
+    gapFailedCount: gap.failedCount,
   })
   return { result: { domain, competitors, gapKeywords }, cacheable }
 }

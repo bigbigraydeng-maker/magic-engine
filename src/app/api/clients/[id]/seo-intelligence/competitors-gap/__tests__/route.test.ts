@@ -52,7 +52,7 @@ const getKeywordsGap = vi.fn()
 const fetchDomainRankOverview = vi.fn()
 vi.mock('@/lib/dataforseo/labs', () => ({
   getSerpCompetitors: (...a: unknown[]) => getSerpCompetitors(...a),
-  getKeywordsGap: (...a: unknown[]) => getKeywordsGap(...a),
+  getKeywordsGapWithStatus: (...a: unknown[]) => getKeywordsGap(...a),
   fetchDomainRankOverview: (...a: unknown[]) => fetchDomainRankOverview(...a),
 }))
 
@@ -76,7 +76,7 @@ beforeEach(() => {
   db.failCacheWrite = false
   db.client.competitor_domains = null
   getSerpCompetitors.mockReset().mockResolvedValue([serp('a.com'), serp('b.com')])
-  getKeywordsGap.mockReset().mockResolvedValue([kw('k1')])
+  getKeywordsGap.mockReset().mockResolvedValue({ keywords: [kw('k1')], failedCount: 0 })
   fetchDomainRankOverview.mockReset().mockResolvedValue({ organic_keywords: 5, organic_traffic: 7 })
 })
 
@@ -143,8 +143,20 @@ describe('competitors-gap server cache', () => {
     expect((await call()).status).toBe(200)
   })
 
+  it('does not cache a partial gap (some competitors failed but keywords returned)', async () => {
+    getKeywordsGap.mockResolvedValueOnce({ keywords: [kw('k1')], failedCount: 1 })
+    await call()
+    expect(db.cache.size).toBe(0)
+  })
+
+  it('caches a complete empty gap (all calls succeeded, no gap)', async () => {
+    getKeywordsGap.mockResolvedValueOnce({ keywords: [], failedCount: 0 })
+    await call()
+    expect(db.cache.size).toBe(1)
+  })
+
   it('does not cache a degraded result (gap swallowed to empty for real competitors)', async () => {
-    getKeywordsGap.mockResolvedValueOnce([])
+    getKeywordsGap.mockResolvedValueOnce({ keywords: [], failedCount: 1 })
     await call()
     expect(db.cache.size).toBe(0)
     expect((await call()).headers.get('X-Cache')).toBe('MISS')

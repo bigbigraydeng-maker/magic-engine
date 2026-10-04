@@ -96,7 +96,21 @@ export async function getKeywordsGap(
   locationCode: number = DEFAULT_LOCATION_CODE,
   limit: number = 100,
 ): Promise<LabsKeyword[]> {
-  if (competitorDomains.length === 0) return []
+  return (await getKeywordsGapWithStatus(clientDomain, competitorDomains, locationCode, limit)).keywords
+}
+
+/**
+ * Same as getKeywordsGap, but also reports how many per-competitor
+ * domain_intersection calls failed so callers can tell a genuinely empty gap
+ * (failedCount 0) from a degraded one (failedCount > 0).
+ */
+export async function getKeywordsGapWithStatus(
+  clientDomain: string,
+  competitorDomains: string[],
+  locationCode: number = DEFAULT_LOCATION_CODE,
+  limit: number = 100,
+): Promise<{ keywords: LabsKeyword[]; failedCount: number }> {
+  if (competitorDomains.length === 0) return { keywords: [], failedCount: 0 }
 
   const perCompetitor = await Promise.allSettled(
     competitorDomains.map(competitor =>
@@ -105,6 +119,7 @@ export async function getKeywordsGap(
   )
 
   // Merge competitor results, keeping the highest-volume entry per keyword.
+  const failedCount = perCompetitor.filter(r => r.status !== 'fulfilled').length
   const byKeyword = new Map<string, LabsKeyword>()
   for (const settled of perCompetitor) {
     if (settled.status !== 'fulfilled') continue
@@ -145,7 +160,7 @@ export async function getKeywordsGap(
     }
   }
 
-  return sorted
+  return { keywords: sorted, failedCount }
 }
 
 /**
