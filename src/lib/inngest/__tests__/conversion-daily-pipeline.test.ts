@@ -107,6 +107,7 @@ function ctsSummary(over: Partial<CtsCrmSyncSummary> = {}): CtsCrmSyncSummary {
     contactNotLinked: 0,
     insertErrors: [],
     cappedAtMaxInserts: false,
+    qualifiedFromConversation: 0, conversationReadFailed: 0, skippedPastWindow: 0,
     ...over,
   }
 }
