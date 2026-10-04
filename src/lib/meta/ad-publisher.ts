@@ -14,8 +14,8 @@
  * 所以失败时按创建的**逆序**删回去，删不掉的如实报出来让人处理。
  */
 
-import type { AdDraft, AdDraftCreative } from '@/lib/ads-strategy/ad-draft'
-import { metaTripletFor } from '@/lib/ads-strategy/ad-draft'
+import type { AdDraft, AdDraftCreative, AudienceMode } from '@/lib/ads-strategy/ad-draft'
+import { DRAFT_AUDIENCE_MODE, metaTripletFor } from '@/lib/ads-strategy/ad-draft'
 
 const GRAPH_BASE = 'https://graph.facebook.com/v21.0'
 
@@ -107,6 +107,30 @@ async function graphDelete(id: string, accessToken: string): Promise<boolean> {
  * （`NZ ∪ 北岸10km半径` = 整个 NZ），城市半径形同虚设。给了城市就只用城市，
  * 不再带国家（2026-08-04 事故：北岸 $1.25M 的房源投给了整个新西兰）。
  */
+/**
+ * 受众模式 → `targeting_automation` / `targeting_relaxation_types` 这两个 Meta 参数。
+ *
+ * 独立导出成纯函数，是为了让「冷启动开 Advantage+ / 再营销锁死名单」这条分支
+ * 逻辑能直接单测，不用等真的加出 `warm_retarget` 这个 `DraftKind` 才能撞到它。
+ *
+ * **这不代表传了就一定生效** —— Meta 可能照样自动开/放宽，所以建完还要回读一遍
+ * （这正是 `launch-readback.ts` 闸门存在的理由）。
+ */
+export function audienceAutomationFor(mode: AudienceMode): Record<string, unknown> {
+  if (mode === 'warm_retarget') {
+    // 再营销：受众名单是唯一投放依据。Advantage+ 和名单外扩展但凡开一个，
+    // 名单就形同虚设（2026-08-04 事故，见 launch-readback.ts 的
+    // retargeting_advantage_audience / retargeting_relaxed）。
+    return {
+      targeting_automation: { advantage_audience: 0 },
+      targeting_relaxation_types: { custom_audience: 0 },
+    }
+  }
+  // 冷启动：没有名单可投，让 Advantage+ 广泛定向配合 Meta 系统自动优化找人
+  // （Andromeda 打法）。锁死等于白白关掉 Meta 自己的优化能力。
+  return { targeting_automation: { advantage_audience: 1 } }
+}
+
 function targetingFor(d: AdDraft): Record<string, unknown> {
   const geo: Record<string, unknown> =
     d.geoCityKeys && d.geoCityKeys.length > 0
@@ -116,9 +140,7 @@ function targetingFor(d: AdDraft): Record<string, unknown> {
     geo_locations: geo,
     age_min: d.ageMin ?? 25,
     age_max: d.ageMax ?? 65,
-    // 明确关掉 Meta 的自动放宽。**这不代表它一定关着** —— Meta 可能照样开，
-    // 所以建完还要回读一遍（这正是闸门存在的理由）。
-    targeting_automation: { advantage_audience: 0 },
+    ...audienceAutomationFor(DRAFT_AUDIENCE_MODE[d.kind]),
   }
 }
 

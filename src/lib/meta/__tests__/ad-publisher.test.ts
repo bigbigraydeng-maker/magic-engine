@@ -6,7 +6,7 @@
  * 设计就作废了，而且从数据上完全看不出来（广告跑得好好的）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { publishDraftPaused, activatePublished } from '../ad-publisher'
+import { publishDraftPaused, activatePublished, audienceAutomationFor } from '../ad-publisher'
 import type { AdDraft } from '@/lib/ads-strategy/ad-draft'
 
 const DRAFT: AdDraft = {
@@ -127,6 +127,42 @@ describe('targetingFor — 城市和国家不能同时给（2026-08-04 事故：
       .geo_locations
     expect(geo.countries).toEqual(['NZ'])
     expect(geo.cities).toBeUndefined()
+  })
+})
+
+describe('audienceAutomationFor — [AD-ADV-1] 按打法显式传 Advantage+，不再无差别关闭', () => {
+  it('冷启动（cold）→ advantage_audience=1，让 Meta 自动扩量找人', () => {
+    const targeting = audienceAutomationFor('cold')
+    expect(targeting.targeting_automation).toEqual({ advantage_audience: 1 })
+  })
+
+  it('再营销（warm_retarget）→ advantage_audience=0 且名单外扩展也显式关掉', () => {
+    // 目前两种 DraftKind 都是冷启动，还没有真实的 warm_retarget 打法——
+    // 这里直接测受众模式 → Meta 参数这条纯函数分支，不用等真的加出第三种草案类型。
+    const targeting = audienceAutomationFor('warm_retarget')
+    expect(targeting.targeting_automation).toEqual({ advantage_audience: 0 })
+    expect(targeting.targeting_relaxation_types).toEqual({ custom_audience: 0 })
+  })
+})
+
+describe('publishDraftPaused — [AD-ADV-1] 冷启动打法建出来的 targeting 显式带 advantage_audience=1', () => {
+  it('留资广告（lead_form）', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused(DRAFT, 'act_1', 'tok')
+    const targeting = JSON.parse(calls.find((c) => c.url.includes('/adsets'))!.body.get('targeting')!)
+    expect(targeting.targeting_automation).toEqual({ advantage_audience: 1 })
+  })
+
+  it('视频完播广告（video_thruplay）', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused(
+      { ...DRAFT, kind: 'video_thruplay', creatives: [
+        { name: 'V', primaryText: 'x', headline: 'y', videoId: 'v1' },
+      ] },
+      'act_1', 'tok',
+    )
+    const targeting = JSON.parse(calls.find((c) => c.url.includes('/adsets'))!.body.get('targeting')!)
+    expect(targeting.targeting_automation).toEqual({ advantage_audience: 1 })
   })
 })
 

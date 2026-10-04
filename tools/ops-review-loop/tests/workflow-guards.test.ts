@@ -31,6 +31,7 @@ interface WorkflowStep {
   run?: string
   if?: string
   with?: Record<string, unknown>
+  env?: Record<string, string>
 }
 interface WorkflowJob {
   if?: string

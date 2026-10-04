@@ -28,6 +28,28 @@ export const DRAFT_PLAY: Readonly<Record<DraftKind, PlayKey>> = {
   video_thruplay: 'thruplay_pool_build',
 }
 
+/**
+ * 受众模式 —— 决定 Meta 的 Advantage+ 受众扩展开不开（`ad-publisher.ts` 的
+ * `audienceAutomationFor` 按它出参）。
+ *
+ *   cold          冷启动获客：没有名单可投，让 Advantage+ 广泛定向配合 Meta
+ *                 系统自动优化找人（Andromeda 打法），不许锁死。
+ *   warm_retarget 再营销：受众名单是唯一投放依据，必须锁死 —— 关掉
+ *                 Advantage+ 和名单外扩展，否则名单形同虚设（2026-08-04
+ *                 事故：见 `launch-readback.ts` 的 `retargeting_advantage_audience`）。
+ *
+ * `roles.ts` 的角色判定只在广告组**包含了再营销类受众**时才看 advantage_audience
+ * 这个字段（见该文件 `retargetingIds.length > 0` 分支）；下面两种冷启动打法都
+ * 不带包含受众，所以把它们的 advantage_audience 改成 1 不会影响诊断层判定。
+ */
+export type AudienceMode = 'cold' | 'warm_retarget'
+
+/** 打法 → 受众模式。目前两种打法都是冷启动；加 `warm_retarget` 打法时在这里登记。 */
+export const DRAFT_AUDIENCE_MODE: Readonly<Record<DraftKind, AudienceMode>> = {
+  lead_form: 'cold',
+  video_thruplay: 'cold',
+}
+
 export interface AdDraftCreative {
   /** 广告名 —— 只给内部人看。 */
   name: string
