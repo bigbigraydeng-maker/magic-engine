@@ -51,7 +51,7 @@ export interface CrawlResult {
   statusCode: number
   error?: string
   crawledAt: Date
-  /** <meta name="description"> from Jina's JSON envelope; null = page has none / not captured. */
+  /** <meta name="description"> from Jina's JSON envelope; string = captured; null = confirmed absent; undefined = not captured (antibot / failed fetch). */
   metaDescription?: string | null
   /**
    * Set when Jina returned an anti-bot challenge page (SiteGround / Cloudflare
@@ -613,7 +613,7 @@ export async function crawlPages(
         url,
         markdown: antibot ? '' : jinaResult.markdown,
         title:    antibot ? '' : title,
-        metaDescription: antibot ? null : jinaResult.description,
+        ...(antibot ? {} : { metaDescription: jinaResult.description }),
         statusCode: 200,
         crawledAt,
         ...(antibot ? { antibot, error: `antibot_${antibot.kind}: ${antibot.evidence}` } : {}),

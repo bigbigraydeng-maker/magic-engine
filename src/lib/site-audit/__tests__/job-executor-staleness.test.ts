@@ -119,10 +119,17 @@ describe('crawlAndClassifyPages — meta_description', () => {
     expect(supabase.upsert.mock.calls[0][0].meta_description).toBe('Snippet text.')
   })
 
-  it('leaves the column out when none was captured, so an earlier value is not wiped', async () => {
-    vi.mocked(crawlPages).mockResolvedValue([crawlResult(U('/p'), { metaDescription: null })])
+  it('leaves the column out when not captured, so an earlier value is not wiped', async () => {
+    vi.mocked(crawlPages).mockResolvedValue([crawlResult(U('/p'), {})])
     const supabase = makeSupabase([])
     await crawlAndClassifyPages(supabase, 'client-1', [U('/p')], 'job-1', { maxPages: 10, rateLimitMs: 0 })
     expect(supabase.upsert.mock.calls[0][0]).not.toHaveProperty('meta_description')
+  })
+
+  it('writes null when the page is confirmed to have no description', async () => {
+    vi.mocked(crawlPages).mockResolvedValue([crawlResult(U('/p'), { metaDescription: null })])
+    const supabase = makeSupabase([])
+    await crawlAndClassifyPages(supabase, 'client-1', [U('/p')], 'job-1', { maxPages: 10, rateLimitMs: 0 })
+    expect(supabase.upsert.mock.calls[0][0].meta_description).toBeNull()
   })
 })

@@ -195,9 +195,8 @@ export async function crawlAndClassifyPages(
             url: crawl.url,
             path: pagePath,
             title: crawl.title,
-            // Only written when the page really has one: a blank must not wipe a
-            // value captured earlier, and "not captured" is not "no description".
-            ...(crawl.metaDescription ? { meta_description: crawl.metaDescription } : {}),
+            // undefined = not captured (keep old value); null = confirmed absent (clear it).
+            ...(crawl.metaDescription !== undefined ? { meta_description: crawl.metaDescription } : {}),
             markdown_content: crawl.markdown,
             word_count: wordCount,
             page_type: pageType,
