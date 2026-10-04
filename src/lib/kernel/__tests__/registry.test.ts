@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest'
 import { ACTION_REGISTRY, ACTION_KEYS, validateAgainstSchema } from '../registry'
 import { computeIdempotencyKey, computeUnknownActionKey } from '../idempotency'
 import { KernelError } from '../errors'
+import { outwardBlockReason } from '../outward-authorization'
 import type { ActionDefinition } from '../types'
 
 const DEF = ACTION_REGISTRY.get('seo.build_publish_package') as ActionDefinition
@@ -156,5 +157,122 @@ describe('契约自洽：会花钱的动作必须如实声明 provider 幂等能
       bad,
       '填错的代价是客户被重复扣款 —— 所以这一项必须是有意识填的，不能靠默认值。',
     ).toEqual([])
+  })
+})
+
+describe('ads.activate_paused_draft —— 开启暂停广告的动作定义', () => {
+  const KEY = 'ads.activate_paused_draft'
+  const def = ACTION_REGISTRY.get(KEY) as ActionDefinition
+  const VALID_INPUT = {
+    draft_action_id: 'draft-1',
+    draft_hash: 'hash-1',
+    ad_account_id: '123',
+    campaign_id: 'c1',
+    ad_set_id: 's1',
+    ad_ids: ['a1', 'a2'],
+    daily_budget_cents: 500,
+    currency: 'NZD',
+    cap_cents_snapshot: 15000,
+    meta_fingerprint: { campaign: 'x', ad_set: 'y' },
+  }
+
+  it('已注册：注册表认得出它，清单里也有它', () => {
+    expect(ACTION_REGISTRY.has(KEY)).toBe(true)
+    expect(ACTION_KEYS).toContain(KEY)
+  })
+
+  it('必须人批：开启会真花钱，所以是 human_only 且 sideEffect 是 outward', () => {
+    expect(def.outwardAuthorization?.approval.mode).toBe('human_only')
+    expect(def.sideEffect).toBe('outward')
+  })
+
+  it('授权层级是 admin、目的是 maintenance', () => {
+    expect(def.requiredCapabilityTier).toBe('admin')
+    expect(def.allowedPurposes).toEqual(['maintenance'])
+  })
+
+  it('撤回必须是 provider_native，且声明可逆', () => {
+    expect(def.outwardAuthorization?.rollback).toBe('provider_native')
+    expect(def.reversible).toBe(true)
+  })
+
+  it('结构闸放行：声明完整，outwardBlockReason 返回 null', () => {
+    expect(outwardBlockReason(def)).toBeNull()
+  })
+
+  it('风险等级是 high', () => {
+    expect(def.risk).toBe('high')
+  })
+
+  it('合法输入通过校验', () => {
+    expect(validateAgainstSchema(def.inputSchema, VALID_INPUT).ok).toBe(true)
+  })
+
+  it('缺任何一个必填字段都被拒，并说清缺哪个', () => {
+    for (const field of def.inputSchema.required ?? []) {
+      const input: Record<string, unknown> = { ...VALID_INPUT }
+      delete input[field]
+      const r = validateAgainstSchema(def.inputSchema, input)
+      expect(r.ok, `缺 ${field} 时应当被拒`).toBe(false)
+      expect(r.ok === false && r.reason).toContain(field)
+    }
+  })
+
+  it('多夹带字段被拒', () => {
+    const r = validateAgainstSchema(def.inputSchema, { ...VALID_INPUT, publish: true })
+    expect(r.ok).toBe(false)
+    expect(r.ok === false && r.reason).toContain('publish')
+  })
+
+  it('类型不对被拒', () => {
+    expect(validateAgainstSchema(def.inputSchema, { ...VALID_INPUT, ad_ids: 'a1' }).ok).toBe(false)
+    expect(
+      validateAgainstSchema(def.inputSchema, { ...VALID_INPUT, daily_budget_cents: '500' }).ok,
+    ).toBe(false)
+    expect(
+      validateAgainstSchema(def.inputSchema, { ...VALID_INPUT, meta_fingerprint: 'x' }).ok,
+    ).toBe(false)
+  })
+
+  it('幂等键：同一草案同一版本算出同一把键', () => {
+    const a = computeIdempotencyKey(def, 'client-1', VALID_INPUT)
+    const b = computeIdempotencyKey(def, 'client-1', VALID_INPUT)
+    expect(a).toBe(b)
+  })
+
+  it('幂等键：草案内容 hash 变了就是另一件事', () => {
+    const base = computeIdempotencyKey(def, 'client-1', VALID_INPUT)
+    const changed = computeIdempotencyKey(def, 'client-1', { ...VALID_INPUT, draft_hash: 'hash-2' })
+    expect(changed).not.toBe(base)
+  })
+
+  it('幂等键：换一个 nonce 就是新一次尝试', () => {
+    const noNonce = computeIdempotencyKey(def, 'client-1', VALID_INPUT)
+    const first = computeIdempotencyKey(def, 'client-1', VALID_INPUT, '1')
+    const second = computeIdempotencyKey(def, 'client-1', VALID_INPUT, '2')
+    expect(first).not.toBe(second)
+    expect(first).not.toBe(noNonce)
+    expect(second).not.toBe(noNonce)
+  })
+
+  it('幂等键字段是空的 → 抛 KernelError', () => {
+    expect(() =>
+      computeIdempotencyKey(def, 'client-1', { ...VALID_INPUT, draft_action_id: '' }),
+    ).toThrow(KernelError)
+    expect(() =>
+      computeIdempotencyKey(def, 'client-1', { ...VALID_INPUT, draft_hash: '' }),
+    ).toThrow(KernelError)
+  })
+
+  it('每个执行步骤的成本上界都是有限的 0', () => {
+    for (const step of def.steps) {
+      const ceiling = def.costModel.stepCeilingUsd?.[step]
+      expect(Number.isFinite(ceiling), `步骤 ${step} 缺少有限成本上界`).toBe(true)
+      expect(ceiling).toBe(0)
+    }
+  })
+
+  it('步骤固定为 snapshot_pre → apply → readback', () => {
+    expect(def.steps).toEqual(['snapshot_pre', 'apply', 'readback'])
   })
 })
