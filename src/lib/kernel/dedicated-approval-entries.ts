@@ -35,6 +35,13 @@ export const DEDICATED_APPROVAL_ENTRIES: readonly DedicatedApprovalEntry[] = [
     label: '广告自动暂停待批准页',
     path: (clientId) => `/dashboard/clients/${encodeURIComponent(clientId)}/ad-health/auto-pause`,
   },
+  {
+    actionKey: 'ads.activate_paused_draft',
+    label: '私信广告开启待批准页',
+    // 开启审批页是全局页（按授权人视角列出所有客户的等批准草案），不按客户分路径；
+    // 入参 clientId 这里用不到。
+    path: () => '/dashboard/ad-approval',
+  },
 ]
 
 export function dedicatedApprovalEntryFor(actionKey: string): DedicatedApprovalEntry | null {

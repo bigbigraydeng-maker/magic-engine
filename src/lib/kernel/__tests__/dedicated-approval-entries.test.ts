@@ -61,6 +61,35 @@ describe('登记表守卫：不许登记假入口', () => {
   })
 })
 
+describe('私信广告开启的专属入口登记', () => {
+  const ACTIVATE = 'ads.activate_paused_draft'
+
+  it('已登记，标签是私信广告开启待批准页', () => {
+    expect(dedicatedApprovalEntryFor(ACTIVATE)?.label).toBe('私信广告开启待批准页')
+  })
+
+  it('入口路径是全局审批页，不随客户变化', () => {
+    const entry = dedicatedApprovalEntryFor(ACTIVATE)
+    expect(entry?.path('c0000000-0000-0000-0000-000000000000')).toBe('/dashboard/ad-approval')
+    expect(entry?.path('c1111111-1111-1111-1111-111111111111')).toBe('/dashboard/ad-approval')
+  })
+
+  it('🔴 它的等批准不再发通用待办（否则客户成员能在通用口抢签）', async () => {
+    const rows = Array.from({ length: 3 }, (_, i) => run(ACTIVATE, 'pending_approval', i + 1))
+    const deadLetter = run(OTHER, 'dead_letter', 600)
+    const todos = await fetchKernelHandoffTodos(sbWith([...rows, deadLetter]), NOW)
+
+    expect(todos.map((t) => t.run_id)).toEqual([deadLetter.id])
+  })
+
+  it('它的死信 / 被拒仍走通用待办', async () => {
+    const dl = run(ACTIVATE, 'dead_letter', 5)
+    const denied = run(ACTIVATE, 'denied', 6)
+    const todos = await fetchKernelHandoffTodos(sbWith([dl, denied]), NOW)
+    expect(todos.map((t) => t.run_id).sort()).toEqual([dl.id, denied.id].sort())
+  })
+})
+
 let seq = 0
 function run(actionKey: string, status: string, minutesAgo: number): Row {
   seq += 1
