@@ -175,6 +175,7 @@ CTS 谷歌口径：近三个完整周点击 268 / 269 / 266，曝光 ~14.7k / 13
 
 ### 5.2 机会池如何落地
 - 写 `seo_patrol_findings`（新 `rule_id`：**需迁移**给 `seo_patrol_rule` 枚举加 `near_miss_keyword`/`ctr_gap_page`/`keyword_gap`/`cannibalization` 四个值，并同步 TS 联合类型）。**注意**：这张表每天"先清后写"，只存最新一批；机会池要的是"本周候选"，所以**机会被周计划挑中那一刻，把证据快照（词/量/难度/排名/取数日期）抄进计划项 `steps_json.opportunity`**，之后不再依赖这张表。
+- **隔离周机会生命周期（P2 修订）**：现有 `seo-patrol-daily`（`src/lib/seo-patrol/job.ts:488-492`）按客户删除全部 `status='fresh'` 的 finding，不分规则，会清掉周写入、尚未被周计划器消费的 `keyword_gap`/`cannibalization`/`near_miss_keyword`/`ctr_gap_page`。WP-1 必须把该删除**限定为每日规则的 `rule_id` 白名单**（`stale_content`/`not_indexed` 等现有每日规则），周规则行不被每日任务触碰；周规则行由周任务自己"先清本周规则再写"，并在同一次周任务内按 排序 → 写计划项（抄证据快照）连续完成，计划项写成功后才把对应 finding 置 `consumed`。WP-1 须加测试：每日任务跑完后周规则 `fresh` 行仍在。
 - `seo-agent` 的评分与大模型排序接成**每周一次**（不是每日），产出写进机会池的 `priority` 字段（该表**目前没有此列**，由 WP-1 迁移新增可空 `priority INTEGER` 与 `priority_reason TEXT`）；大模型只负责排序与写"为什么"，**量/难度/排名一律只来自 DataForSEO/GSC，不让模型编数字**。
 
 ---
@@ -227,7 +228,8 @@ CTS 谷歌口径：近三个完整周点击 268 / 269 / 266，曝光 ~14.7k / 13
 
 ### 6.4 每日任务拆分（每个工作日一次）
 顺序固定：**① 先核验昨天 → ② 再做今天到期的机器活 → ③ 合并人工件 → ④ 写记分牌**。
-- 核验：对所有"待核验"计划项跑 `verify`；通过 → `completed` + `execution_logs(kind='note', meta.verified=true, meta.receipt=…)`（`execution_logs.kind` 库里有约束，只允许 `note/status_change/ai_assist/blocker/adjustment`，不新增 `verified` 值；**先写核验日志、写成功才改状态**，日志写失败则不置完成，避免卡片显示完成却无回执）；人已点完成但核验不过 → 记 `claimed_unverified`，进记分牌与次日合并条目。
+- 核验：对所有"待核验"计划项跑 `verify`；通过 → `completed` + `execution_logs(kind='note', meta.verified=true, meta.receipt=…)`（`execution_logs.kind` 库里有约束，只允许 `note/status_change/ai_assist/blocker/adjustment`，不新增 `verified` 值；**先写核验日志、写成功才改状态**，日志写失败则不置完成，避免卡片显示完成却无回执）；人已点完成但核验不过 → 卡保持 `in_progress`（不改状态枚举），在 `execution_logs(kind='note', meta.claimed_unverified=true, meta.verify_failure=…)` 记一条，进记分牌与次日合并条目；该标记即 `claimed_unverified` 的唯一持久化落点，只读日志、不新增状态值。
+- **拦截人工"完成"（P1 修订）**：现有 `src/app/api/clients/[id]/execution/[itemId]/route.ts:133-137` 会把"完成"直接写成 `status='completed'`+`completed_at`，门户也按它统计。WP-3 必须在该路由对"计划项"（`steps_json.plan_item` 标记存在者）改为：人点完成 → 状态写 `in_progress`、写一条 `execution_logs(kind='note', meta.claimed_done=true)` 并返回"待核验"，**不写 `completed_at`**；只有上面的核验链路（先日志后状态）才能把计划项置为 `completed`。非计划项行为不变。这样"完成"统计只会数到机器核验过的卡，无需新增状态枚举；门户/统计里"待核验"= `in_progress` 且最新 note 带 `claimed_done`。
 - 机器活：`diagnose_page`、`recheck_rank`；再加"草稿生成"（走现有博客引擎，产出 `blog_posts` 草稿并写好 `primary_keyword/volume/kd`）。
 - 合并人工件：当天所有需要人看的东西合并成**一条**（至多 1 条/天），内容 = 每件事的 **what（问题+影响）/ how（点哪里）/ href（直达）**，类型 `review` 车道。
 - 托管：**Inngest**（CLAUDE §3：跨步骤异步 + 外部副作用的默认工作流层）。事件名业务可读：`seo.loop.week_planned` / `seo.loop.item_dispatched` / `seo.loop.item_verified` / `seo.loop.day_closed`；每阶段写机器可读回执（request id、client id、item id、status、provider 花费、`no_publish` 状态、created_at）。**人工点头只推进到下一事件，不等于发布授权**；发布仍走周博客管线现有闸。
