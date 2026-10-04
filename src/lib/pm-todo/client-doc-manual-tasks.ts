@@ -17,6 +17,8 @@ export interface ClientDocManualTask {
   what: string
   how: string
   href: string
+  /** ISO instant，未到这个时间点不下发（缺省 = 立即下发）。 */
+  startsAt?: string
   /** ISO instant，过了这个时间点不再下发。 */
   expiresAt: string
   /**
@@ -27,6 +29,17 @@ export interface ClientDocManualTask {
 }
 
 export const CLIENT_DOC_MANUAL_TASKS: ClientDocManualTask[] = [
+  {
+    // 见 docs/audits/2026-10-05-cts-meta-ads-review-payment-stall.md；账号 ID 在该审计文档里
+    clientId: 'c0000000-0000-0000-0000-000000000000',
+    clientName: 'CTS Tours NZ',
+    what: '广告账号 10/1 因付款失败停投约 2 天，少收约 20 条线索；10/2 已扣款恢复，但付款方式若再失败会重演',
+    how: '打开链接看「付款状态」：有欠款点「立即付款」；付款方式失败或将过期就「添加/更换付款方式」换一张有额度的卡；都正常就确认付款方式有效，并在台账卡回一句「付款正常」',
+    href: 'https://business.facebook.com/billing_hub/payment_settings?asset_id=2775766642787274',
+    // 观察窗口 10/5–10/8（奥克兰日期，含首尾）；用绝对时刻避免 UTC/NZ 日期错位
+    startsAt: '2026-10-05T00:00:00+13:00',
+    expiresAt: '2026-10-09T00:00:00+13:00',
+  },
   {
     // 见 docs/clients/cts/2026-09-07-golden-china-surge-plan.md「已知数据缺口」
     clientId: 'c0000000-0000-0000-0000-000000000000',

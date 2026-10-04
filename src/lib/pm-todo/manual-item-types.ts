@@ -267,8 +267,6 @@ export type ManualItemKind =
   | 'magic_bridge_quota'
   /** Tools Lab 全站每月合计花费/次数上限用到 80% 以上（网站诊断+广告体检共用）—— 要不要加名额由 PM 定 */
   | 'tools_wide_budget_warning'
-  /** CTS 个人广告账号付款确认（2026-10-05 至 10-08 观察窗口的一次性任务） */
-  | 'ads_payment_check'
 
 export interface ManualItem {
   kind: ManualItemKind
