@@ -9,7 +9,6 @@ import {
   DEFAULT_LOCATION_CODE,
   DEFAULT_LANGUAGE_CODE,
   authHeader,
-  assertTaskOk,
   deriveIntent,
   DataForSeoTaskError,
   type LabsCompetitor,

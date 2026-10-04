@@ -108,21 +108,3 @@ export function normalizeDataForSeoIntent(intent: string | null | undefined, cpc
 export function errorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason)
 }
-
-/**
- * Throw when a DataForSEO task reports a non-success status_code inside an
- * otherwise-successful HTTP 200 response (e.g. 40210 balance exhausted).
- * A missing task or missing status_code is treated as OK so existing mocks
- * that omit the field keep working.
- */
-export function assertTaskOk(
-  task: { status_code?: number; status_message?: string } | undefined,
-  endpoint: string,
-): void {
-  if (task && typeof task.status_code === 'number' && task.status_code !== 20000) {
-    throw new DataForSeoTaskError(
-      task.status_code,
-      `DataForSEO ${endpoint} task error ${task.status_code}: ${task.status_message ?? 'unknown'}`,
-    )
-  }
-}
