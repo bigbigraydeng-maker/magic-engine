@@ -317,6 +317,16 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 🔴 schedule 这一列不许手抄：唯一定义在 src/lib/competitors/watch.ts 的
   //    COMPETITOR_WATCH_CRON，同目录的测试会断言两边一致。
   { service: 'inngest:cloud-competitor-watch-weekly-fanout', jobName: 'competitor-watch-weekly', schedule: '45 5 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-20' },
+  // SEO 标题自动优化：每周一的「选页→过闸→改标题」主链（2026-09-20 起在线上跑，但此前**没登记**，
+  // 也就是说它哪天因为没 Sync 而安静地不跑了，这里不会喊——「不在监控范围」和「一切正常」在告警里长得一样）。
+  // 🔴 jobName 取的是主链最后一步的收尾回执（seo-meta-cycle-step6-completed）：每个客户的每次运行
+  //    不管走到哪一步（跳过、没适配器、跑完）都会写这一条，所以它是「这一周这条链醒过」的唯一证据。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/seo-meta/cycle/roster.ts 的 META_CYCLE_CRON，同目录测试会断言一致。
+  { service: 'inngest:cloud-seo-meta-cycle-fanout', jobName: 'seo-meta-cycle-step6-completed', schedule: '30 5 * * 1', logsRuns: true, scheduler: 'inngest' },
+  // SEO 标题自动优化的「验收」：每天一次，给改满 18 天的页查目标词排名（影子期，只写 seo_meta_log）。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/seo-meta/cycle/rank-sampler.ts 的 RANK_SAMPLER_CRON。
+  // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑——这条登记就是为了把它喊出来。
+  { service: 'inngest:cloud-seo-meta-rank-sampler-fanout', jobName: 'seo-meta-rank-sampler', schedule: '20 20 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-04' },
   // 每周 AI 可见度追踪（GEO）灰度迁移。旧 Render cron `ai-tracker-weekly`（上面那条老登记）
   // 原样保留、对没开灰度开关的客户继续跑；这条新登记只覆盖开了
   // `seo_config.ai_visibility_inngest_enabled` 的客户，故意用不同的 jobName——两条链路
