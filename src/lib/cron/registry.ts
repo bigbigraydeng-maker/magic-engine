@@ -152,17 +152,35 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 2026-09-23 事故防御：这个任务负责每天写 ad_daily_insights + ad_health_narratives，
   // 但 9/20-9/23 三天 status='completed' 却一行没写（上游数据源断了，写下游被跳过），
   // 现有 judgeJob 只看 cron_run_logs 状态放行——outputTables 声明就是补这个缝：
-  // 26h 没新行就算 silent_success，红灯喊出来。日 cron × 2.5 宽限 ≈ 26h（同 overdue 逻辑）。
+  //
+  // 🔴 阈值 24h（不是 26h）：Codex 复审 2026-09-27 P1 提出，作者复核后采纳。
+  //    该任务实际 17:00 UTC 跑（render.yaml），唯一自动调用 checkCronHealth 报警的
+  //    pm-daily-todo 在 19:00 UTC 跑（两者只差 2h）。某天整批没写时，上一批约 17:0X
+  //    写入的行到当天 19:00 检查时只有约 25h55m，够不到严格的 `> 26h`（实测 25.92h）；
+  //    24h 抓得到。这是收紧的唯一理由。
+  //
+  //    ⚠️ 但**别把 24h 当成「单日整批缺失已经盖住了」**（魏征 2026-09-27 复审 W131-1
+  //    纠正了本注释早先的说法）：pm-daily-todo 的调度是 `0 19 * * 0-4`，**UTC 周五、
+  //    周六不发**。而 9/25 那次整批缺失正是 UTC 周五。任务本身周末照跑，所以周五缺一天、
+  //    周六就自己补上了新行，等到周日 19:00 再查，最新一行只隔约 2h —— 阈值不管是 24
+  //    还是 26 都零告警。**一周有 2 天的整批缺失，这条判据看不见，跟阈值无关。**
+  //    真正要盖住它得换判据：查「最近 7 天每一天都得有这一天的行」，而不是只看最新一行
+  //    隔了多久。后续卡：docs/ledger/2026-09-28-cron-freshness-misses-friday-saturday.md
+  //
+  //    另：按需实时算健康的入口（今日待办接口、/api/workflows-health，缓存 60s）在每天
+  //    17:00 UTC 开跑到今天这批写完之间会有一小段假红（实测 17:06 UTC 起，长度≈今天比
+  //    昨天晚写多久，通常几十秒到几分钟，新西兰清早 6 点前后），会自己消失、不进邮件。
+  //    子牙 2026-09-27 判可接受、不加豁免：豁免本身又是一个可能静默吞掉真问题的口子。
   { service: 'google-data-pullback-daily', jobName: 'google-data-pullback-daily', schedule: '0 3 * * *', logsRuns: true,
     outputTables: [
-      { table: 'ad_daily_insights', freshnessHours: 26 },
-      { table: 'ad_health_narratives', freshnessHours: 26 },
-      // 2026-09-25 事故：读广告配置 400 → 所有客户的诊断 / 经营状态静默跳过，
-      // 但账户级体检照写 ad_health_narratives，上面两条都是绿的。经营状态每个
-      // 有 Meta 账户的客户每天必写一行，它停了就是整条诊断链停了。
-      // 只看全表最新一行，所以只抓「所有客户一起停」；个别客户停由 summary.errors 的
-      // ad_config / ads_growth_state 兜。所有广告客户都被人手暂停时它会误报一条（子牙 / 魏征复审，可接受）。
-      { table: 'ads_growth_states', freshnessHours: 26 },
+      { table: 'ad_daily_insights', freshnessHours: 24 },
+      { table: 'ad_health_narratives', freshnessHours: 24 },
+      // 🔴 2026-09-25 事故补登记：这张表（广告巡察结论，也是广告刹车「数据不全就冻结」那条判据的输入）
+      //    整天零行、六客户全缺，却**零告警躺了一整天**——因为它当时没登记在这里，沉默死检测
+      //    只查声明过的表；而已声明的 ad_health_narratives 那天**反而有行**（写它的代码在闸门之前），
+      //    新鲜度检查于是显示健康。两边都不报。根因与全过程见
+      //    docs/ledger/2026-09-27-growth-states-missing-0925-root-cause.md。
+      { table: 'ads_growth_states', freshnessHours: 24 },
     ] },
   { service: 'industry-ai-visibility-daily', jobName: 'industry-ai-visibility-daily', schedule: '30 2 * * *', logsRuns: true },
   { service: 'job-boards-weekly', jobName: 'job-boards-weekly', schedule: '0 2 * * 1', logsRuns: true },
