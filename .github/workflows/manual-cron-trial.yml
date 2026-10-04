@@ -1,0 +1,90 @@
+name: Manual cron trial (dry-run first)
+
+# 「当面试跑」入口（PM 2026-10-05 规矩：先当面试跑、报达没达预期，之后才排日历）。
+#
+# 手动触发一个**白名单内**的定时任务路由：默认 dry_run=1（只算不写），输出写进本次运行的摘要。
+# 为什么放在 GitHub Actions：线上 CRON_SECRET 只存在于仓库 Secrets 与 Render，开发窗口不读、
+# 也不该读 .env.local 里的生产密钥；这里由 Actions 带着 Secret 去调，窗口只需 `gh workflow run`。
+#
+# 安全约束（改这个文件属 A 级，须三方签字 + PM 点头）：
+#   - 只在 main 上的这份文件能带 Secret 跑（见 job 的 if）：PR 分支改出来的副本拿不到 Secret 的用途。
+#   - 路由只能从下面的白名单选；新增一个要改本文件并重新过 A 级审核。
+#   - 输入一律走环境变量再校验，不直接拼进 shell。
+#   - 真写入（dry_run=false）需要显式勾选，且摘要里会醒目标出。
+#   - 不打印 Secret；响应体是我们自己路由的 JSON（不含密钥）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: 'Cron route to trigger (allowlist)'
+        required: true
+        type: choice
+        options:
+          - seo-weekly-list
+      dry_run:
+        description: 'dry_run=1 (compute only, write nothing). Untick for a REAL run.'
+        required: true
+        type: boolean
+        default: true
+      client_id:
+        description: 'Optional: one client UUID only'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  trigger:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Trigger allowlisted cron route
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          JOB: ${{ inputs.job }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          CLIENT_ID: ${{ inputs.client_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::CRON_SECRET secret not set"
+            exit 1
+          fi
+          case "$JOB" in
+            seo-weekly-list) ;;
+            *) echo "::error::job not in allowlist"; exit 1 ;;
+          esac
+          query=""
+          if [ "$DRY_RUN" = "true" ]; then query="dry_run=1"; fi
+          if [ -n "${CLIENT_ID:-}" ]; then
+            if ! printf '%s' "$CLIENT_ID" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'; then
+              echo "::error::client_id must be a UUID"; exit 1
+            fi
+            query="${query:+$query&}client_id=$CLIENT_ID"
+          fi
+          url="https://app.magicengine.com.au/api/cron/$JOB${query:+?$query}"
+          mode="DRY RUN (nothing written)"
+          if [ "$DRY_RUN" != "true" ]; then mode="REAL RUN (writes enabled)"; fi
+          echo "Triggering: $url  [$mode]"
+          status=$(curl -sS -o /tmp/body.json -w '%{http_code}' --max-time 300 \
+            -H "Authorization: Bearer $CRON_SECRET" "$url")
+          {
+            echo "### Manual cron trial: \`$JOB\` — $mode"
+            echo ""
+            echo "HTTP status: **$status**"
+            echo ""
+            echo '```json'
+            head -c 20000 /tmp/body.json
+            echo ""
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "HTTP status: $status"
+          head -c 20000 /tmp/body.json
+          echo ""
+          if [ "$status" != "200" ]; then
+            echo "::error::non-200 from cron route"
+            exit 1
+          fi
