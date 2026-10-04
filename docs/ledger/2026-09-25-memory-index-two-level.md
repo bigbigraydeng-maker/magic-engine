@@ -9,6 +9,7 @@ verify_by: 2026-10-02
 verify_how: 跑 bash ~/.claude/scripts/memory-index-check.sh（仓库副本 docs/ledger/evidence/2026-09-24-memory-index-over-limit--check.sh）退出码 0，三条同时成立：MEMORY.md 小于 17000 字节；记忆目录里每个 .md 都在 MEMORY.md 或 MEMORY.md 直接链接到的 memory-index-*.md 里有一条链接；索引里没有指向不存在文件的链接。到期那天把这周新写进记忆目录的文件也一并数进去
 done_on: 2026-09-25
 done_ref: pr:1993
+last_checked: 2026-10-04
 ---
 接替 2026-09-24-memory-index-over-limit（原判据"全部文件都在 MEMORY.md 一个文件里且小于 17KB"数学上做不到，已翻 failed，算式见证据文件）。
 2026-09-25 已做：读完 144 个未索引文件，27 个合并进手册/主题记忆后挪出目录，其余全部入索引；总索引 13,642 字节，326 个文件两跳全覆盖。

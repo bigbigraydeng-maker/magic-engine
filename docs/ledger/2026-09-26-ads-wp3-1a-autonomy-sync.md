@@ -9,6 +9,7 @@ verify_by: 2026-10-02
 verify_how: "生产库 client_automation_policies 里 CTS/NAL 六个 ads.* 键各一活动行 mode=auto_approve 且 updated_by 以 autonomy-sync: 开头；翻回 observe 后 24h 内变 require_approval"
 done_on: 2026-09-26
 done_ref: commit:ca11ecc8
+last_checked: 2026-10-04
 ---
 WP3.1a（A 级）。写入口仍是现有 PATCH /api/clients/[id]/ad-strategy-config（全局管理员闸），只多记 autonomy_mode_updated_by 并发一条 Inngest 叫醒铃；
 worker `cloud-ads-autonomy-sync` 回库读当前值，经 SQL 函数 ads_sync_autonomy_policy 逐键写策略表（全仓唯一调用点，架构测试锁死），每键一行 ads_autonomy_sync_receipts；每日 pullback 末尾再对账一次。
