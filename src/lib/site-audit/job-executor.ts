@@ -152,12 +152,13 @@ export async function crawlAndClassifyPages(
     if (crawl.error) {
       failed.push({ url: crawl.url, error: crawl.error })
       crawledCount++
-      // Record the attempt so repeat failures back off in the staleness ordering
-      // instead of taking the top slots every run. Data columns are left untouched.
+      // Record a first-time failure so the URL has a row. ignoreDuplicates keeps any
+      // existing row untouched: a transient error must not overwrite the last
+      // successful snapshot (status, crawled_at) that SEO signals and dedup read.
       try {
         let failPath = '/'
         try { failPath = new URL(crawl.url).pathname } catch { /* keep default */ }
-        await supabase.from('client_site_pages').upsert(
+        const { error: failMarkError } = await supabase.from('client_site_pages').upsert(
           {
             client_id:    clientId,
             url:          crawl.url,
@@ -166,10 +167,16 @@ export async function crawlAndClassifyPages(
             crawl_status: 'failed',
             crawl_error:  crawl.error,
           },
-          { onConflict: 'client_id,url' },
+          { onConflict: 'client_id,url', ignoreDuplicates: true },
         )
+        if (failMarkError) {
+          console.warn('[site-audit] could not record failed attempt', crawl.url, failMarkError.message)
+          failed[failed.length - 1].error = `${crawl.error}${MARK_FAILED_MARKER}${failMarkError.message}`
+        }
       } catch (err) {
-        console.warn('[site-audit] could not record failed attempt', crawl.url, err instanceof Error ? err.message : String(err))
+        const message = err instanceof Error ? err.message : String(err)
+        console.warn('[site-audit] could not record failed attempt', crawl.url, message)
+        failed[failed.length - 1].error = `${crawl.error}${MARK_FAILED_MARKER}${message}`
       }
 
       // Periodic progress update

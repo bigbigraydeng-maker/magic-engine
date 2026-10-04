@@ -20,7 +20,7 @@ import { detectGEOBlock } from '../geo-detector'
 
 const U = (p: string) => `https://example.com${p}`
 
-function makeSupabase(history: Array<{ url: string; crawled_at: string | null }> | 'throw') {
+function makeSupabase(history: Array<{ url: string; crawled_at: string | null; crawl_status?: string }> | 'throw') {
   const upsert = vi.fn().mockResolvedValue({ data: null, error: null })
   const limit = history === 'throw'
     ? vi.fn().mockRejectedValue(new Error('boom'))
@@ -59,10 +59,10 @@ describe('executeJob — cap handling', () => {
     const runner = makeRunner(2)
     vi.mocked(JobRunner).mockImplementation(() => runner as never)
     const supabase = makeSupabase([
-      { url: U('/a'), crawled_at: '2026-10-04T00:00:00Z' },
-      { url: U('/b'), crawled_at: '2026-09-13T00:00:00Z' },
-      { url: U('/c'), crawled_at: '2026-10-04T00:00:00Z' },
-      { url: U('/d'), crawled_at: '2026-09-20T00:00:00Z' },
+      { url: U('/a'), crawl_status: 'crawled', crawled_at: '2026-10-04T00:00:00Z' },
+      { url: U('/b'), crawl_status: 'crawled', crawled_at: '2026-09-13T00:00:00Z' },
+      { url: U('/c'), crawl_status: 'crawled', crawled_at: '2026-10-04T00:00:00Z' },
+      { url: U('/d'), crawl_status: 'crawled', crawled_at: '2026-09-20T00:00:00Z' },
     ])
 
     await executeJob(supabase, 'job-1')
