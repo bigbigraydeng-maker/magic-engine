@@ -11,11 +11,12 @@ L1 平台基础设施（整合既有能力，不是新支柱）。读 `master_br
 - **只返回结构化对象，不返回 prompt 文本**。文本仍由 `brief-injector.formatBriefForPrompt` 唯一渲染；Reels 自写序列化器 `reels/generator.ts:280` 本 PR 不删不切，只标记「待切」。影子对比只比**事实层**，不比整段 prompt（`formatBriefForPrompt` 还吃 content_pillars、platform_strategy、products、brand_story_md，这些本步不在 facts 里）。
 - 每个字段是 `{ value, source }`，`source` 写「哪张表哪一列」。
 - `facts`：`client_id`、`brief {id, version, matched_by}`、`brand`（brand_name、tagline、core_proposition、brand_voice 子集、target_audience 子集、`website_host` 仅展示用）、`visual`（vi_colors、vi_style_keywords、vi_dos、vi_donts、可选 `logo` 引用——本步永远不填）、`taboos` 三级、`warnings: string[]`。
-- **禁忌三级，不拍扁**，每级是 `{ items: string[], status: 'set' | 'none_configured', unusable_count: number }`：
+- **禁忌三级，不拍扁**，每级是 `{ items, status: 'set' | 'none_configured' | 'all_unusable', unusable_count, unusable_entries }`（`all_unusable`＝有条目但一条都没法匹配，扫 items 等于扫空集；`unusable_entries` 让回执能点名丢了哪些词；单个汉字算可用，其他文字至少 2 个字符；条目只清洗不截断：去零宽/软连字符，控制字符变空格）：
   - `redline_phrases`＝`clients.brand_redline_phrases`（硬扫）；
   - `topics`＝`master_briefs.excluded_topics`（话题级，匹配语义是**子串**，不是整词）；
   - `tone_words`＝`master_briefs.avoid_words` ∪ `brand_voice.avoid_keywords`（只提示）。
   - `none_configured`（null/缺失/空数组）与读失败（`ok:false`）严格区分；`none_configured` 同时往 `warnings` 写 `redline_phrases_none_configured` / `topics_none_configured`（以字段名为前缀，另有 `<tier>_all_unusable`、`<tier>_has_unusable_entries`）——下游硬闸见到它必须在回执里明说「没有红线可扫」，不能当通过。
+  - `clients.brand_redline_phrases` 在库里是 `NOT NULL DEFAULT '{}'`，读到 null/缺键只可能是读坏了 → `client_malformed`，不当成「没配置」。
   - 字段存成字符串/对象，或数组里有非字符串 → `ok:false reason:'brief_malformed'`（clients 那列则 `client_malformed`），照 `draft-redlines.ts readList` 的口径。空串、纯空白、折叠后短于 2 字的条目不静默丢，计入 `unusable_count`。
   - 代码里没有「平台级硬红线」常量，往共享代码写词违反平台化铁律，所以 `redline_phrases` 只来自客户自己的列。
   - 旧列 `content_avoid` 不进 taboos（无编辑入口，来源不明）。
@@ -47,6 +48,9 @@ L1 平台基础设施（整合既有能力，不是新支柱）。读 `master_br
 
 ## 切换前必须先对账（不在本 PR 范围，写进 PR 正文）
 现有禁忌消费者口径不同：`draft-redlines.ts` / `draft-listing` 把 redline ∪ avoid_words ∪ excluded_topics **全当硬扫**；本函数把 avoid_words 降为 tone_words（按规划）。切换前必须逐消费者对账：旧硬集合里有、新硬集合里没有的词，PM 看过之前阻断切换。
+
+## 切换前对账补充（魏征实施复审第 D 条）
+除 avoid_words 降级外，新旧口径还有 4 处不同，切换时逐条确认：① 取 brief：旧 `draft-redlines` 用 `is_active=true`+`maybeSingle`、不过滤 `project_id`（可能取到草稿或楼盘级），新函数取 `status='active'`+`project_id IS NULL`；② 没有 brief 时：旧代码仍返回客户红线，新函数整体 `no_active_brief`（统计第 3 条）；③ 数组里有 null/非字符串元素：旧 `readList` 过滤掉，新函数整体 `brief_malformed`/`client_malformed`，库里 `text[]` 带 NULL 元素的客户切换时会从「能用」变成「读失败」；④ 匹配语义：旧代码对纯 ASCII 短语整词匹配，topics 在 `keyword-relevance` 里是子串匹配，本函数只交付词表，不管下游怎么扫。
 
 ## 开放项
 生产库 `master_briefs.excluded_topics` 列是否已 apply 未验证（迁移头写「未经 PM 批准不得 apply」）。未 apply 时本函数对所有客户返回 `schema_not_ready`——有意的 fail-closed，影子阶段没有下游消费者，不会伤到现有渠道。这是 PM 第一条只读统计。

@@ -16,15 +16,21 @@ export interface Sourced<T> {
 export type BriefMatchedBy = 'status' | 'is_active_fallback'
 
 /**
- * One taboo tier. `none_configured` (null / missing / empty list) is a different thing
- * from a failed read (which is `ok:false` and never reaches this type): downstream hard
- * gates must say "no redlines to scan" in their receipt instead of treating it as a pass.
+ * One taboo tier. `none_configured` (null / missing / empty list) and `all_unusable` are different
+ * from a failed read (which is `ok:false` and never reaches this type): downstream hard gates
+ * must say "no redlines to scan" in their receipt instead of treating either as a pass.
  */
 export interface TabooTier {
   items: string[]
-  status: 'set' | 'none_configured'
+  /**
+   * `none_configured`: nothing configured. `all_unusable`: entries exist but none can be matched
+   * on (so scanning `items` would scan nothing). `set`: at least one usable entry.
+   */
+  status: 'set' | 'none_configured' | 'all_unusable'
   /** Entries that were blank or too short to match on; counted, never silently dropped. */
   unusable_count: number
+  /** The unusable entries themselves (cleaned; `(blank)` when nothing visible is left), so a receipt can name them. */
+  unusable_entries: string[]
 }
 
 export interface BrandVoiceFacts {

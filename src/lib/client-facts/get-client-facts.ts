@@ -151,7 +151,7 @@ function warnTier(warnings: string[], name: string, tier: TabooTier): void {
   if (tier.status === 'none_configured') {
     warnings.push(`${name}_none_configured`)
   }
-  if (tier.status === 'set' && tier.items.length === 0) {
+  if (tier.status === 'all_unusable') {
     warnings.push(`${name}_all_unusable`)
   }
   if (tier.unusable_count > 0) {
@@ -166,9 +166,11 @@ function buildTaboos(
   brandVoice: BrandVoiceFacts | null,
   warnings: string[],
 ): { kind: 'ok'; taboos: ClientFacts['taboos'] } | { kind: 'fail'; reason: ClientFactsFailureReason; detail?: string } {
+  // The column is NOT NULL DEFAULT '{}': null/undefined here means the read itself went wrong
+  // (e.g. the column fell out of the select), which must not look like "no redlines configured".
   const redlineRaw = readStrictList(clientRow.brand_redline_phrases)
-  if (redlineRaw === null) {
-    return { kind: 'fail', reason: 'client_malformed', detail: 'brand_redline_phrases is not a string list' }
+  if (redlineRaw === null || clientRow.brand_redline_phrases === null || clientRow.brand_redline_phrases === undefined) {
+    return { kind: 'fail', reason: 'client_malformed', detail: 'brand_redline_phrases is missing or not a string list' }
   }
   const topicsRaw = readStrictList(briefRow.excluded_topics)
   if (topicsRaw === null) {
@@ -252,7 +254,7 @@ function buildBrand(
 /** Build the visual identity facts block. */
 function buildVisual(briefRow: Record<string, unknown>, warnings: string[]): ClientFacts['visual'] {
   return {
-    vi_colors: { value: parseViColors(briefRow.vi_colors), source: 'master_briefs.vi_colors' },
+    vi_colors: { value: parseViColors(briefRow.vi_colors, warnings), source: 'master_briefs.vi_colors' },
     vi_style_keywords: {
       value: readLenientList(briefRow.vi_style_keywords, warnings, 'vi_style_keywords'),
       source: 'master_briefs.vi_style_keywords',

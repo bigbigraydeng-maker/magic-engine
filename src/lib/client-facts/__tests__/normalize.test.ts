@@ -93,7 +93,7 @@ describe('readLenientList', () => {
     const result = readLenientList(input, warnings, 'label')
     expect(result).toHaveLength(MAX_BRAND_LIST_ITEMS)
     expect(MAX_BRAND_LIST_ITEMS).toBe(50)
-    expect(warnings).toEqual([])
+    expect(warnings).toEqual(['label_truncated'])
   })
 })
 
@@ -117,7 +117,8 @@ describe('buildTier', () => {
     // 'a' is too short after normalization, '!!' and '  ' normalize to nothing.
     expect(tier.items).toEqual([])
     expect(tier.unusable_count).toBe(3)
-    expect(tier.status).toBe('set')
+    expect(tier.unusable_entries).toEqual(['a', '!!', '(blank)'])
+    expect(tier.status).toBe('all_unusable')
   })
 
   it('treats full-width NFKC characters as usable and keeps the trimmed original', () => {
@@ -247,7 +248,7 @@ describe('parseViColors', () => {
       accent: '#333',
       background: '#444',
       secret: '#555',
-    })
+    }, [])
     expect(result).not.toBeNull()
     expect(Object.keys(result ?? {})).toEqual([
       'primary',
@@ -259,9 +260,12 @@ describe('parseViColors', () => {
   })
 
   it('returns null for a non-object value', () => {
-    expect(parseViColors('nope')).toBeNull()
-    expect(parseViColors(null)).toBeNull()
-    expect(parseViColors([])).toBeNull()
+    const warnings: string[] = []
+    expect(parseViColors('nope', warnings)).toBeNull()
+    expect(parseViColors([], warnings)).toBeNull()
+    expect(warnings).toEqual(['vi_colors_malformed', 'vi_colors_malformed'])
+    expect(parseViColors(null, warnings)).toBeNull()
+    expect(warnings).toHaveLength(2)
   })
 })
 

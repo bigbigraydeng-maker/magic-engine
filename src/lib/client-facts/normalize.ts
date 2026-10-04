@@ -18,7 +18,9 @@ export function cleanText(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const stripped = value.replace(STRIP_CHARS, '').trim()
   if (stripped.length === 0) return null
-  return stripped.slice(0, MAX_BRAND_TEXT_LEN)
+  // Count code points, not UTF-16 units, so an emoji is never cut in half.
+  const chars = Array.from(stripped)
+  return chars.length > MAX_BRAND_TEXT_LEN ? chars.slice(0, MAX_BRAND_TEXT_LEN).join('') : stripped
 }
 
 export function readStrictList(value: unknown): string[] | null {
@@ -38,17 +40,22 @@ export function readLenientList(value: unknown, warnings: string[], label: strin
   }
   const result: string[] = []
   let sawNonString = false
+  let truncated = false
   for (const element of value) {
+    if (result.length >= MAX_BRAND_LIST_ITEMS) {
+      truncated = true
+      break
+    }
     if (typeof element !== 'string') {
       sawNonString = true
       continue
     }
     const cleaned = cleanText(element)
     if (cleaned !== null) result.push(cleaned)
-    if (result.length >= MAX_BRAND_LIST_ITEMS) break
   }
   if (sawNonString) warnings.push(`${label}_malformed`)
-  return result.slice(0, MAX_BRAND_LIST_ITEMS)
+  if (truncated) warnings.push(`${label}_truncated`)
+  return result
 }
 
 /** Zero-width / soft-hyphen characters are invisible: left in, a redline phrase would silently never match. */
@@ -62,9 +69,11 @@ function cleanTabooEntry(entry: string): string {
   return entry.replace(INVISIBLE_CHARS, '').replace(CONTROL_CHARS, ' ').replace(/\s+/g, ' ').trim()
 }
 
+/** One Han character is a meaningful taboo word (e.g. a single-character term); other scripts need MIN_TABOO_LEN. */
 function isUnusableTabooEntry(entry: string): boolean {
   const normalized = entry.normalize('NFKC').replace(NON_WORD_CHARS, '')
-  return normalized.length < MIN_TABOO_LEN
+  const minLength = /\p{Script=Han}/u.test(normalized) ? 1 : MIN_TABOO_LEN
+  return normalized.length < minLength
 }
 
 export function buildTier(lists: ReadonlyArray<readonly string[]>): TabooTier {
@@ -72,14 +81,13 @@ export function buildTier(lists: ReadonlyArray<readonly string[]>): TabooTier {
   for (const list of lists) {
     for (const entry of list) raw.push(entry)
   }
-  const status: TabooTier['status'] = raw.length === 0 ? 'none_configured' : 'set'
   const items: string[] = []
+  const unusableEntries: string[] = []
   const seen = new Set<string>()
-  let unusableCount = 0
   for (const entry of raw) {
     const cleaned = cleanTabooEntry(entry)
     if (isUnusableTabooEntry(cleaned)) {
-      unusableCount += 1
+      unusableEntries.push(cleaned.length > 0 ? cleaned : '(blank)')
       continue
     }
     const key = cleaned.toLowerCase()
@@ -87,7 +95,9 @@ export function buildTier(lists: ReadonlyArray<readonly string[]>): TabooTier {
     seen.add(key)
     items.push(cleaned)
   }
-  return { items, status, unusable_count: unusableCount }
+  const status: TabooTier['status'] =
+    raw.length === 0 ? 'none_configured' : items.length === 0 ? 'all_unusable' : 'set'
+  return { items, status, unusable_count: unusableEntries.length, unusable_entries: unusableEntries }
 }
 
 function readFormality(value: unknown, warnings: string[]): BrandVoiceFacts['formality'] {
@@ -109,8 +119,17 @@ function readPersona(value: unknown): BrandVoiceFacts['persona'] {
   return { name, role: cleanText(value.role) }
 }
 
-export function parseBrandVoice(value: unknown, warnings: string[]): BrandVoiceFacts | null {
-  if (!isPlainObject(value)) return null
+/** null/undefined is "not configured" (quiet); any other non-object means unreadable data, so say so. */
+function asObjectOrWarn(value: unknown, warnings: string[], label: string): Record<string, unknown> | null {
+  if (value === null || value === undefined) return null
+  if (isPlainObject(value)) return value
+  warnings.push(`${label}_malformed`)
+  return null
+}
+
+export function parseBrandVoice(input: unknown, warnings: string[]): BrandVoiceFacts | null {
+  const value = asObjectOrWarn(input, warnings, 'brand_voice')
+  if (value === null) return null
   return {
     tone_keywords: readLenientList(value.tone_keywords, warnings, 'brand_voice_tone_keywords'),
     avoid_keywords: readLenientList(value.avoid_keywords, warnings, 'brand_voice_avoid_keywords'),
@@ -121,8 +140,9 @@ export function parseBrandVoice(value: unknown, warnings: string[]): BrandVoiceF
   }
 }
 
-export function parseTargetAudience(value: unknown, warnings: string[]): TargetAudienceFacts | null {
-  if (!isPlainObject(value)) return null
+export function parseTargetAudience(input: unknown, warnings: string[]): TargetAudienceFacts | null {
+  const value = asObjectOrWarn(input, warnings, 'target_audience')
+  if (value === null) return null
   return {
     interests: readLenientList(value.interests, warnings, 'target_audience_interests'),
     pain_points: readLenientList(value.pain_points, warnings, 'target_audience_pain_points'),
@@ -131,8 +151,9 @@ export function parseTargetAudience(value: unknown, warnings: string[]): TargetA
   }
 }
 
-export function parseViColors(value: unknown): ViColorsFacts | null {
-  if (!isPlainObject(value)) return null
+export function parseViColors(input: unknown, warnings: string[]): ViColorsFacts | null {
+  const value = asObjectOrWarn(input, warnings, 'vi_colors')
+  if (value === null) return null
   return {
     primary: cleanText(value.primary),
     secondary: cleanText(value.secondary),
