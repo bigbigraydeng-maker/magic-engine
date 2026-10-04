@@ -598,7 +598,7 @@ describe('crawlAndClassifyPages — database writes', () => {
     expect(result.failed[0].url).toBe(urls[0])
   })
 
-  it('does NOT upsert pages that failed to crawl (error field present)', async () => {
+  it('records a failed crawl only as a first-time row, never overwriting an existing snapshot', async () => {
     const url = 'https://example.com/broken'
     vi.mocked(crawlPages).mockResolvedValue([
       makeCrawlResult(url, { error: 'Timeout', statusCode: 0, markdown: '' }),
@@ -612,7 +612,11 @@ describe('crawlAndClassifyPages — database writes', () => {
       { maxPages: 100, rateLimitMs: 0 }
     )
 
-    expect(mockSupabase._upsert).not.toHaveBeenCalled()
+    expect(mockSupabase._upsert).toHaveBeenCalledTimes(1)
+    const [row, opts] = mockSupabase._upsert.mock.calls[0]
+    expect(row).toMatchObject({ url, crawl_status: 'failed', crawl_error: 'Timeout' })
+    expect(row).not.toHaveProperty('markdown_content')
+    expect(opts).toMatchObject({ ignoreDuplicates: true })
     expect(result.failed).toHaveLength(1)
     expect(result.failed[0]).toMatchObject({ url, error: 'Timeout' })
   })
