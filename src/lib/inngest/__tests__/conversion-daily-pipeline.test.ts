@@ -97,6 +97,8 @@ function ctsSummary(over: Partial<CtsCrmSyncSummary> = {}): CtsCrmSyncSummary {
     totalCrmRows: 0,
     excludedNoPhone: 0,
     excludedByNotes: 0,
+    excludedNoInterest: 0,
+    rejectedStaleLeads: 0,
     excludedNoDate: 0,
     insertedLeads: 0,
     insertedPurchases: 0,
