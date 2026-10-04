@@ -118,6 +118,13 @@ if [ -n "$probing" ]; then
   # Inside another launcher's probe: no download, fail fast and quiet.
   exit 127
 fi
+# Network reads need explicit authorization (project rules): download only when
+# IMPECCABLE_ALLOW_DOWNLOAD=1 is set; otherwise print the pre-install steps.
+if [ "${IMPECCABLE_ALLOW_DOWNLOAD:-}" != 1 ]; then
+  echo "impeccable: engine $version is not installed and automatic download is disabled (no external network access without authorization)." >&2
+  echo "Pre-install impeccable-$os-$arch from https://github.com/pbakaus/impeccable/releases (tag engine-v$version) into $cache_root/bin/$version/impeccable$exe (then chmod +x), set IMPECCABLE_BIN to a preinstalled binary, or re-run with IMPECCABLE_ALLOW_DOWNLOAD=1 once network reads are authorized." >&2
+  exit 127
+fi
 if [ -n "$version" ] && [ "$os" != unknown ] && [ "$arch" != unknown ]; then
   base="${IMPECCABLE_DOWNLOAD_BASE:-https://github.com/pbakaus/impeccable/releases/download}"
   asset="impeccable-$os-$arch"
