@@ -152,6 +152,25 @@ export async function crawlAndClassifyPages(
     if (crawl.error) {
       failed.push({ url: crawl.url, error: crawl.error })
       crawledCount++
+      // Record the attempt so repeat failures back off in the staleness ordering
+      // instead of taking the top slots every run. Data columns are left untouched.
+      try {
+        let failPath = '/'
+        try { failPath = new URL(crawl.url).pathname } catch { /* keep default */ }
+        await supabase.from('client_site_pages').upsert(
+          {
+            client_id:    clientId,
+            url:          crawl.url,
+            path:         failPath,
+            crawled_at:   crawl.crawledAt.toISOString(),
+            crawl_status: 'failed',
+            crawl_error:  crawl.error,
+          },
+          { onConflict: 'client_id,url' },
+        )
+      } catch (err) {
+        console.warn('[site-audit] could not record failed attempt', crawl.url, err instanceof Error ? err.message : String(err))
+      }
 
       // Periodic progress update
       if ((i + 1) % PROGRESS_UPDATE_INTERVAL === 0) {
@@ -273,7 +292,7 @@ async function orderByStaleness(
   try {
     const { data, error } = await supabase
       .from('client_site_pages')
-      .select('url, crawled_at')
+      .select('url, crawled_at, crawl_status')
       .eq('client_id', clientId)
       .limit(5000)
     if (error || !data) {
@@ -281,8 +300,11 @@ async function orderByStaleness(
       return urls
     }
     const crawledAt = new Map<string, string>()
-    for (const row of data as Array<{ url: string; crawled_at: string | null }>) {
-      if (row.crawled_at) crawledAt.set(row.url, row.crawled_at)
+    for (const row of data as Array<{ url: string; crawled_at: string | null; crawl_status: string | null }>) {
+      // 'crawled' = real refresh; 'failed' = attempt time (back off repeat failures).
+      // Anti-bot challenged / pending pages were never refreshed, so they stay first in line.
+      const attempted = row.crawl_status === 'crawled' || row.crawl_status === 'failed'
+      if (row.crawled_at && attempted) crawledAt.set(row.url, row.crawled_at)
     }
     return orderStalestFirst(urls, crawledAt)
   } catch (err) {
