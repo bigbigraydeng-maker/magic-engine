@@ -1,0 +1,31 @@
+{
+  "brandColor": "#0B6E99",
+  "logoFile": "logo.png",
+  "musicFile": null,
+  "beats": [0.2, 0.7, 1.2, 1.7, 2.2, 2.7, 3.2, 3.7, 4.2, 4.7, 5.2, 5.7, 6.2, 6.7, 7.2, 7.7, 8.2, 8.7, 9.2, 9.7, 10.2, 10.7, 11.2, 11.7, 12.2, 12.7, 13.2, 13.7, 14.2, 14.7],
+  "hook": {
+    "clip": "clips/hook.mp4",
+    "lines": [
+      { "badge": "2", "text": "BEDS" },
+      { "badge": null, "text": "SEA VIEWS" },
+      { "badge": null, "text": "OPEN SAT" }
+    ]
+  },
+  "items": [
+    { "text": "2 BEDROOMS, 2 BATHROOMS", "clip": "clips/item1.mp4", "blurBackdrop": false },
+    { "text": "SECURE CAR SPACE", "clip": "clips/item2.mp4", "blurBackdrop": true },
+    { "text": "NORTH-FACING BALCONY", "clip": "clips/item3.mp4", "blurBackdrop": false },
+    { "text": "5 MIN WALK TO THE TRAIN", "clip": "clips/item4.mp4", "blurBackdrop": true }
+  ],
+  "itemLabel": "HIGHLIGHT",
+  "revealTitle": "THE APARTMENT.",
+  "price": {
+    "backdropClip": "clips/price.mp4",
+    "fromLabel": "GUIDE",
+    "currencyPrefix": "A$",
+    "amount": 1250000,
+    "qualifier": "LEVEL 12 · 2 BED · 2 BATH",
+    "dateLine": "OPEN SAT 12 OCT, 11AM",
+    "footnote": "FICTIONAL EXAMPLE · NOT A REAL LISTING"
+  }
+}
