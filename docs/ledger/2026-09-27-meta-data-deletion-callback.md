@@ -10,6 +10,7 @@ done_ref: pr:2111
 verify_by: 2026-10-04
 verify_how: 迁移执行、PR 合并上线后，用应用密钥给一个不存在的 Facebook 编号签一个删除请求发到 https://app.magicengine.com.au/api/meta/data-deletion ，应返回确认码；打开返回的进度链接显示「没有存这个 Facebook 账号的数据」；数据库 meta_data_deletion_requests 多一行 no_data，任何连接不变。说明页 https://app.magicengine.com.au/data-deletion 不登录能打开。不成：先查迁移是否已执行（函数 meta_process_data_deletion 是否存在）。
 last_checked: 2026-10-04
+check_note: 本晚夜巡未逐项复核此卡，仅批量更新检查日期；待下轮夜巡补查
 ---
 设计：docs/specs/2026-09-27-magic-bridge-self-serve-open-design.md §8.5（分支 chore/mb-open-eval）。
 审查：设计两轮 子牙 + 魏征 + 板桥；实施后 子牙 + 魏征 + 板桥 + 狄仁杰（攻击验证），全部阻塞问题已修。

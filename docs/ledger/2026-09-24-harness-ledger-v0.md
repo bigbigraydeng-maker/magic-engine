@@ -10,6 +10,7 @@ verify_how: ①合并后第一个工作日的今日待办邮件出现"Magic Engi
 done_on: 2026-09-24
 done_ref: pr:1984
 last_checked: 2026-10-04
+check_note: 本晚夜巡未逐项复核此卡，仅批量更新检查日期；待下轮夜巡补查
 ---
 PM 2026-09-24 拍板，DeepSeek 实现、Fable 窗口复审，子牙 + 魏征设计审各一轮。设计在 docs/specs/2026-09-24-harness-ledger-v0.md。
 不做：只改台账目录的 PR 免合并审批（PM 待定）。

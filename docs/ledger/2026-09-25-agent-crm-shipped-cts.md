@@ -10,6 +10,7 @@ verify_how: 生产库 agent_customers 出现 ≥1 行由邮件同步自动写入
 done_on: 2026-09-24
 done_ref: pr:1983
 last_checked: 2026-10-04
+check_note: 本晚夜巡未逐项复核此卡，仅批量更新检查日期；待下轮夜巡补查
 ---
 入口：客户工作台「同行渠道」卡。每小时邮件同步对 trade 域名联系人跑 AI 提取，pax>30 标 needs_review。
 两张 migration（agent_customers 建表 / dedup 唯一索引）已 apply。测试向导窗口正带 PM 走一遍。

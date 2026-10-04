@@ -10,6 +10,7 @@ verify_how: 合并后等每 6 小时一次的归因任务跑过一轮，再查�
 done_on: 2026-09-26
 done_ref: pr:2044
 last_checked: 2026-10-04
+check_note: 本晚夜巡未逐项复核此卡，仅批量更新检查日期；待下轮夜巡补查
 ---
 PM 2026-09-26 在孔子窗口回「用 deepseek 修复 你来做质量检测」；第 1 条（停止从噪音里学）拆成 1a（本卡）和 1b（记忆下架，另卡 2026-09-26-seo-stop-learning-from-noise）。
 改动面：flywheel/attribution（共用判断 + 两个评估器同一个打分函数）、case-library/outcome-confidence、flywheel/aggregate、后台飞轮成效接口与页面、诸葛亮查历史工具。

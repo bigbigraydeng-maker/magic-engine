@@ -10,6 +10,7 @@ verify_how: 上线后第一个工作日早上的今日待办邮件：①只有�
 done_on: 2026-09-26
 done_ref: pr:2065
 last_checked: 2026-10-04
+check_note: 本晚夜巡未逐项复核此卡，仅批量更新检查日期；待下轮夜巡补查
 ---
 PM 2026-09-26 拍板（记忆 project-pm-todo-only-five-kinds-2026-09-26）：9-25 那封 166 件，真要 PM 管的约 10 件。
 按 9-25 组成重建的夹具：旧口径 166 → 新口径 25 件，全部落在五类里（src/lib/pm-todo/__tests__/fixtures/todo-2026-09-25.ts）。

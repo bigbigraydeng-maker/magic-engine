@@ -10,6 +10,7 @@ verify_how: 上线后第一个工作日，若下列任一待办触发，确认�
 done_on: 2026-09-27
 done_ref: pr:2065
 last_checked: 2026-10-04
+check_note: 本晚夜巡未逐项复核此卡，仅批量更新检查日期；待下轮夜巡补查
 ---
 原作者窗口（hopeful-williamson）归档后转手接手，把 PR #2065 的 CONFLICTING 解掉。
 

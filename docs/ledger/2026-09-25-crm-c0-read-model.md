@@ -10,5 +10,6 @@ verify_how: PR 合并后 all/page.tsx 无改动仍能拿到老响应；带 ?page
 done_on: 2026-09-25
 done_ref: pr:2001
 last_checked: 2026-10-04
+check_note: 本晚夜巡未逐项复核此卡，仅批量更新检查日期；待下轮夜巡补查
 ---
 CRM 升级 6 轮（方案 pr:2000）第一轮，DeepSeek 1 轮 $0.02，Fable 窗口出提示词 + 复审 + 修类型错。

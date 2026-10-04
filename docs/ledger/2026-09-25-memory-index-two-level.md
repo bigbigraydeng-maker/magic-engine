@@ -10,6 +10,7 @@ verify_how: 跑 bash ~/.claude/scripts/memory-index-check.sh（仓库副本 docs
 done_on: 2026-09-25
 done_ref: pr:1993
 last_checked: 2026-10-04
+check_note: 本晚夜巡未逐项复核此卡，仅批量更新检查日期；待下轮夜巡补查
 ---
 接替 2026-09-24-memory-index-over-limit（原判据"全部文件都在 MEMORY.md 一个文件里且小于 17KB"数学上做不到，已翻 failed，算式见证据文件）。
 2026-09-25 已做：读完 144 个未索引文件，27 个合并进手册/主题记忆后挪出目录，其余全部入索引；总索引 13,642 字节，326 个文件两跳全覆盖。
