@@ -1,3 +1,5 @@
+> 已被 v0.3 取代：docs/specs/2026-10-05-client-content-foundation-plan-v0.3.md
+
 # 客户内容底座：规划 v0.2（PM 2026-10-05 已定总纲：底座先行，Remotion 与统一发布挂在底座下；待四位审查员）
 
 日期 2026-10-05 · 状态：规划（总纲已定），未写代码 · 依据：`docs/audits/2026-10-05-channel-client-facts-sources.md`、`2026-10-05-video-functions-inventory.md`、ROADMAP「旅游版 Tour 管理模块 P1」、`ME_PRODUCT_DEFINITION.md` §3.2（价格/库存/出发日期留外部源 Connector 读）。

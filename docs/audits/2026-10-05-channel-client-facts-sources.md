@@ -41,3 +41,9 @@ master_briefs.products｜factory_config.verified_offer/verified_cta/render.creat
 
 ## 不确定、没验证
 生产库里 CTS 的 products/avoid_words/website 是否有值；`excluded_topics` 迁移是否已 apply；`group_tours` 来历；知识库对 CTS 是否 live；TikTok、Google Ads、小红书、portal 自助向导没覆盖。
+
+## 更正（四位审查员核对后，2026-10-05 晚）
+- 「价格白名单只在视频 A」不准：`content/price-claim-gate.ts`（`judgeOutgoingPost`）已装在 Publer 三个发布口（create-post、schedule、quick-post）与 `pm-todo/manual-content-items.ts`；`seo-meta/cycle/hard-fact-check.ts` 也有原文核对。视频 A 的白名单在 `factory/copy-generator.ts:103/154`。
+- 「SEO/博客不读禁忌」不完整：`blog/weekly-blog.ts:137` 与 `seo-intelligence/keyword-relevance.ts:72` 已读 `excluded_topics`，迁移 `20260611000001` 存在；是否已在生产 apply 仍未验证。
+- 「知识库对内容渠道零接入」属实，但 CTS 的 4 条价格类事实已在迁移 `20260915120000` 写入 `client_knowledge_facts` 并授予读取准入。
+- 新增发现：`/api/content/route-a|b|c` 无任何鉴权（中间件不覆盖 /api）；现有价格识别正则不认 NZD/¥/元/USD（已实测）；`first-party-tours.ts` 抓取失败返回 `[]`；官网为终裁与 CTS 已下架团仍挂官网的事故冲突（`offerings.yaml` 记录）。
