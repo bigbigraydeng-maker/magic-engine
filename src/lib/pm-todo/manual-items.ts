@@ -37,6 +37,7 @@ import { pushFacebookSyncFailingItems } from './facebook-sync-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
 import { pushToolLeadItems } from './tool-lead-items'
 import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
+import { pushAdsPaymentCheckItems } from './ads-payment-check-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
 import { pushAdsCircuitItems } from './ads-circuit-items'
@@ -271,6 +272,8 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     (b) => pushToolsWideBudgetItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 工具实验室全站上限待办生成失败（不阻塞其他待办）:', e),
     ),
+    // CTS 广告账号付款确认（10/5–10/8 一次性观察窗口）
+    async (b) => pushAdsPaymentCheckItems(b, now),
   ]
 }
 

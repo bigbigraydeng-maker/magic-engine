@@ -78,6 +78,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   tools_wide_budget_warning: 'decide',
 
   // ── 2 · 系统进不去、要人点一次的 ─────────────────────────────────────
+  ads_payment_check: 'one_click', // 去 Meta 付款设置确认/换卡
   ai_provider_exhausted: 'one_click', // 充值
   // 某客户 AI 可见度探测整周全挂，多数是余额用光/钥匙失效，需要人去充值/换钥匙
   // （Codex 复审 2026-09-28 抓到：漏了这条会让 LANE_OF_KIND 穷举表类型检查过不了，
