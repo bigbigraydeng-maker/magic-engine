@@ -65,7 +65,7 @@ export const ListReel: React.FC<Record<string, unknown>> = (rawProps) => {
         <Sequence key={i} from={timing.itemFrom[i]} durationInFrames={timing.itemDur[i]}><Item props={props} index={i} dur={timing.itemDur[i]} /><CutFlash /></Sequence>
       ))}
       <Sequence from={timing.revealFrom} durationInFrames={timing.totalFrames - timing.revealFrom}>
-        <PriceScene backdrop={props.price.backdropClip} brandColor={props.brandColor} fromLabel={props.price.fromLabel} currency={props.price.currency} amount={props.price.amount} qualifier={props.price.qualifier} departLine={props.price.departLine} footnote={props.price.footnote} top={700} />
+        <PriceScene backdrop={props.price.backdropClip} brandColor={props.brandColor} fromLabel={props.price.fromLabel} currencyPrefix={props.price.currencyPrefix} amount={props.price.amount} qualifier={props.price.qualifier} dateLine={props.price.dateLine} footnote={props.price.footnote} top={700} />
         <div style={{ position: 'absolute', left: 90, top: 596, fontFamily, color: '#fff', fontSize: 60, fontWeight: 900, textShadow: '0 4px 24px rgba(0,0,0,0.6)' }}><Reveal delay={0}><div>{props.revealTitle}</div></Reveal></div>
         <CutFlash />
       </Sequence>

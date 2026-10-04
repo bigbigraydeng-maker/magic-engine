@@ -26,6 +26,11 @@ export interface ListReelTiming {
   totalFrames: number;
 }
 
+/** Number of beats the layout needs for a given item count (last one marks the end). */
+export function requiredBeatCount(itemCount: number): number {
+  return HOOK_BEATS + ITEM_BEATS * itemCount + REVEAL_BEATS + 1;
+}
+
 /** Convert a beat time (seconds) to a frame index with the sync shift applied. */
 function fb(beats: readonly number[], i: number): number {
   return Math.round(Math.max(0, beats[i]) * FPS) + SYNC_SHIFT_FRAMES;
@@ -36,7 +41,7 @@ export function computeTiming(
   beats: readonly number[],
   itemCount: number,
 ): ListReelTiming {
-  const needed = HOOK_BEATS + ITEM_BEATS * itemCount + REVEAL_BEATS + 1;
+  const needed = requiredBeatCount(itemCount);
   if (beats.length < needed) {
     throw new Error(
       `节拍数量不够：${itemCount} 个条目至少需要 ${needed} 个节拍，现在只有 ${beats.length} 个`,
@@ -44,6 +49,9 @@ export function computeTiming(
   }
 
   const hookFrames = fb(beats, HOOK_BEATS);
+  if (hookFrames < 1) {
+    throw new Error('开场段时长为 0 帧（节拍间隔太近）');
+  }
   const itemFrom: number[] = [];
   const itemDur: number[] = [];
 
@@ -66,6 +74,9 @@ export function computeTiming(
     HOOK_BEATS + ITEM_BEATS * itemCount + REVEAL_BEATS,
   );
 
+  if (totalFrames - revealFrom < 1) {
+    throw new Error('价格段时长为 0 帧（节拍间隔太近）');
+  }
   if (totalFrames < MIN_TOTAL_FRAMES) {
     throw new Error(`成片太短：只有 ${totalFrames} 帧，至少需要 ${MIN_TOTAL_FRAMES} 帧（节拍间隔太近）`);
   }

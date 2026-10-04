@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { bundle } from '@remotion/bundler'
 import { selectComposition, renderMedia, makeCancelSignal } from '@remotion/renderer'
 import { parseListReelProps, collectAssetFiles } from './src/schema.ts'
+import { computeTimingFromProps } from './src/timing.ts'
 
 const USAGE = `用法：node render.mjs --props <props.json> --out <out.mp4> [选项]
 
@@ -83,7 +84,7 @@ function parseCliArgs(argv) {
     : 2
 
   const timeoutSec = values['timeout-sec']
-    ? parseIntOption(values['timeout-sec'], '--timeout-sec', 30, Number.MAX_SAFE_INTEGER)
+    ? parseIntOption(values['timeout-sec'], '--timeout-sec', 30, 86400)
     : 600
 
   const browserExecutable =
@@ -116,7 +117,9 @@ function loadProps(propsFile) {
   }
 
   try {
-    return parseListReelProps(json)
+    const props = parseListReelProps(json)
+    computeTimingFromProps(props) // reject impossible timing before any browser starts
+    return props
   } catch (err) {
     throw new CliError(err.message, 3)
   }
@@ -202,6 +205,8 @@ async function runRender(opts) {
   checkAssets(props, opts.publicDir)
 
   fs.mkdirSync(path.dirname(opts.outFile), { recursive: true })
+  // A failed run must never leave an older file that looks like a fresh result.
+  fs.rmSync(opts.outFile, { force: true })
 
   const entryPoint = path.join(path.dirname(fileURLToPath(import.meta.url)), 'src', 'index.ts')
 
@@ -211,12 +216,13 @@ async function runRender(opts) {
     timedOut = true
     cancel()
   }, opts.timeoutSec * 1000)
+  let bundleDir
   const hardTimer = setTimeout(() => {
+    cleanupBundle(bundleDir)
     process.stderr.write(`渲染超时：超过 ${opts.timeoutSec} 秒，已终止\n`)
     process.exit(124)
   }, opts.timeoutSec * 1000 + 20000)
 
-  let bundleDir
   const startedAt = Date.now()
   try {
     bundleDir = await bundle({ entryPoint, publicDir: opts.publicDir })
@@ -283,6 +289,8 @@ async function main() {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Compare real paths so a symlinked/bin invocation does not silently do nothing.
+const invokedPath = process.argv[1] ? fs.realpathSync(process.argv[1]) : ''
+if (import.meta.url === pathToFileURL(invokedPath).href) {
   main()
 }

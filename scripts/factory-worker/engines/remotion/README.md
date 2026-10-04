@@ -36,10 +36,10 @@ node render.mjs --props <props.json> --out <out.mp4> [--public-dir <素材目录
 | `brandColor` | `#RRGGBB` |
 | `logoFile` / `musicFile` / 各 `clip` | 只允许相对文件名（可带子目录），禁止网址、绝对路径、`..`、空格；扩展名限制：logo `png/jpg/jpeg/webp`，音乐 `mp3/wav/m4a`，镜头 `mp4/mov/webm`。`musicFile` 可为 `null`（无音乐） |
 | `beats` | 剪辑节拍时间（秒），严格递增，最多 80 个；条目数 N 时至少需要 `2N+13` 个；用到的最后一个节拍不得超过 90 秒 |
-| `hook.lines` | 恰好 3 行，每行 `{ badge, text }`：`badge` 可为 `null`（最长 6 字符），`text` 最长 **12** 字符（再长会自动折行，版面会乱）；第 3 行带高亮底色 |
+| `hook.lines` | 恰好 3 行，每行 `{ badge, text }`：`badge` 可为 `null`（最长 6 字符），`text` 最长 9 字符，且「徽章长度+1+文字长度」不超过 9（再长会折行，版面会乱）；第 3 行带高亮底色 |
 | `items` | 3–7 条，每条 `{ text(≤48), clip, blurBackdrop }`；`blurBackdrop=true` 表示该条是抽象概念，镜头只当模糊氛围背景，避免画面假装在表现它 |
 | `itemLabel` / `revealTitle` | 条目上方小字、价格上方标题 |
-| `price` | `{ backdropClip, fromLabel, currency, amount(正整数), qualifier, departLine, footnote }` |
+| `price` | `{ backdropClip, fromLabel, currencyPrefix(直接拼在金额前，如 `A$`), amount(正整数), qualifier, dateLine, footnote }` |
 
 时长随 `beats` 与条目数动态计算：开场 4 拍，每条目 2 拍，价格揭晓 8 拍（`src/timing.ts`），没有写死条目数。
 
@@ -72,4 +72,7 @@ RUN_REMOTION_RENDER=1 npm run test:render   # 真渲染冒烟（本机，需要 
 - **字体**：Montserrat 通过 `@remotion/google-fonts` 在渲染时联网加载，离线环境会等到超时。
 - **素材不随包提供**：镜头、logo、音乐都要放进素材目录；客户真实产品/价格的画面只能用客户自己提供的素材。
 - **版面**：针对 1080×1920 与 Meta Reels 安全区设计（文字在 y≈270–1248、右侧留 120px）；价格串很长时字号会自动缩小，但整体仍是为「一行价格」设计的。
+- **字体**只加载了 Montserrat 的拉丁字符集，中文等会回退到系统字体；文字固定白色，品牌色太浅时对比度会不够。
+- **预览**：`@remotion/cli` 仅用于本地预览（`npx remotion studio src/index.ts`，在面板里粘贴 props JSON）；渲染不依赖它。
+- **接出片机（R2）前注意**：①`--public-dir` 会被整个拷进临时打包目录，工单渲染应给每张工单建一个只放 props 引用素材的暂存目录；②只信退出码，不信输出文件是否存在（每次启动已先删旧成片）；③打包与选片阶段不支持取消，硬超时最多比设定值晚 20 秒；④本包要求 Node ≥ 22.18，出片机现在写的是 ≥ 22.4，接线时要统一。
 - 只迁了 `ListReel` 一个模板；原来的「运营在 X 国 / 已经 N 年」徽章因为带客户声明没有迁移。

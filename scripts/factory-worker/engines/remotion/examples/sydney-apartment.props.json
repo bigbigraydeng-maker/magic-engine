@@ -22,10 +22,10 @@
   "price": {
     "backdropClip": "clips/price.mp4",
     "fromLabel": "GUIDE",
-    "currency": "A$",
+    "currencyPrefix": "A$",
     "amount": 1250000,
     "qualifier": "LEVEL 12 · 2 BED · 2 BATH",
-    "departLine": "OPEN SAT 12 OCT, 11AM",
+    "dateLine": "OPEN SAT 12 OCT, 11AM",
     "footnote": "FICTIONAL EXAMPLE · NOT A REAL LISTING"
   }
 }

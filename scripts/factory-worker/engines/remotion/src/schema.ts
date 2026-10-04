@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { requiredBeatCount } from './timing.ts';
 
 /** Minimum number of checklist items. */
 export const MIN_ITEMS = 3;
@@ -8,6 +9,9 @@ export const MAX_ITEMS = 7;
 /** Relative path made only of safe segments (no leading slash, backslash, colon, spaces). */
 export const SAFE_REL_PATH =
   /^[A-Za-z0-9][A-Za-z0-9._-]*(\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/;
+
+/** Rough width budget of one hook line (118px bold caps; 10 wide letters already pass the 960px safe edge). */
+export const MAX_HOOK_LINE_CHARS = 9;
 
 /** Allowed video clip extensions. */
 export const CLIP_EXTS = ['.mp4', '.mov', '.webm'];
@@ -54,7 +58,7 @@ function text(max: number) {
 const HOOK_LINE = z
   .object({
     badge: text(6).nullable(),
-    text: text(12),
+    text: text(9),
   })
   .strict();
 
@@ -70,10 +74,10 @@ const PRICE = z
   .object({
     backdropClip: relFile('价格背景镜头', CLIP_EXTS),
     fromLabel: text(20),
-    currency: text(6),
+    currencyPrefix: text(6),
     amount: z.number().int().positive().max(9999999),
     qualifier: text(40),
-    departLine: text(40),
+    dateLine: text(40),
     footnote: text(80),
   })
   .strict();
@@ -115,7 +119,7 @@ export const ListReelPropsSchema = z
       }
     }
 
-    const needed = 2 * val.items.length + 13;
+    const needed = requiredBeatCount(val.items.length);
     if (beats.length < needed) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -125,14 +129,24 @@ export const ListReelPropsSchema = z
       return;
     }
 
-    const endIndex = 2 * val.items.length + 12;
-    if (endIndex < beats.length && beats[endIndex] > 90) {
+    if (beats[needed - 1] > 90) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['beats'],
         message: '成片总时长不能超过 90 秒',
       });
     }
+
+    val.hook.lines.forEach((line, i) => {
+      const width = (line.badge === null ? 0 : line.badge.length + 1) + line.text.length;
+      if (width > MAX_HOOK_LINE_CHARS) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['hook', 'lines', i],
+          message: `开场第 ${i + 1} 行太长（含徽章最多约 ${MAX_HOOK_LINE_CHARS} 个字符，否则会折行）`,
+        });
+      }
+    });
   });
 
 /** Inferred props type for the checklist video template. */

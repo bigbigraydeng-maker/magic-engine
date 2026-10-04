@@ -124,6 +124,50 @@ describe('render.mjs command line guards', () => {
     ])
     assert.equal(result.status, 2)
   })
+
+  it('exits 2 when --timeout-sec is above the maximum (timer overflow guard)', () => {
+    const dir = tmp()
+    const props = writeProps(dir)
+    const result = runRender(['--props', props, '--out', path.join(dir, 'out.mp4'), '--timeout-sec', '100000'])
+    assert.equal(result.status, 2)
+  })
+
+  it('exits 3 before any browser starts when the price scene would last 0 frames', () => {
+    const dir = tmp()
+    // 4 items: the price scene starts at beat index 12; squeeze beats 12..20 together
+    const props = writeProps(dir, (p) => {
+      for (let k = 0; k <= 8; k++) p.beats[12 + k] = 6.2 + k * 0.001
+      return p
+    })
+    const result = runRender(['--props', props, '--out', path.join(dir, 'out.mp4')])
+    assert.equal(result.status, 3)
+    assert.match(result.stderr, /价格段时长为 0 帧/)
+  })
+
+  it('exits 4 when an asset is a symlink pointing outside the public dir', () => {
+    const dir = tmp()
+    const pub = path.join(dir, 'public')
+    fs.mkdirSync(path.join(pub, 'clips'), { recursive: true })
+    const names = ['logo.png', 'clips/hook.mp4', 'clips/item1.mp4', 'clips/item2.mp4', 'clips/item3.mp4', 'clips/item4.mp4', 'clips/price.mp4']
+    for (const name of names) fs.writeFileSync(path.join(pub, name), 'x')
+    const outside = path.join(dir, 'secret.mp4')
+    fs.writeFileSync(outside, 'secret')
+    fs.rmSync(path.join(pub, 'clips/hook.mp4'))
+    fs.symlinkSync(outside, path.join(pub, 'clips/hook.mp4'))
+    const props = writeProps(dir)
+    const result = runRender(['--props', props, '--public-dir', pub, '--out', path.join(dir, 'out.mp4')])
+    assert.equal(result.status, 4)
+    assert.match(result.stderr, /越出素材目录/)
+  })
+
+  it('still runs when started through a symlink (does not exit 0 silently)', () => {
+    const dir = tmp()
+    const link = path.join(dir, 'render-link.mjs')
+    fs.symlinkSync(renderPath, link)
+    const result = spawnSync(process.execPath, [link], { encoding: 'utf8' })
+    assert.equal(result.status, 2)
+    assert.match(result.stderr, /用法/)
+  })
 })
 
 const skipSmoke =

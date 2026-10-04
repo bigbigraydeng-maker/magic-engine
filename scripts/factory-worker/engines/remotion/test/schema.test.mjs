@@ -203,12 +203,23 @@ describe('text length and content', () => {
     })
   })
 
-  test('hook line text of 13 chars is rejected, 12 accepted', () => {
+  test('hook line text of 10 chars is rejected, 9 accepted', () => {
     rejects((props) => {
-      props.hook.lines[0].text = 'A'.repeat(13)
+      props.hook.lines[1].text = 'A'.repeat(10)
     })
     const ok = valid()
-    ok.hook.lines[0].text = 'A'.repeat(12)
+    ok.hook.lines[1].text = 'A'.repeat(9)
+    assert.doesNotThrow(() => parseListReelProps(ok))
+  })
+
+  test('hook line wider than the budget (badge + space + text > 9) is rejected', () => {
+    rejects((props) => {
+      props.hook.lines[0].badge = '27'
+      props.hook.lines[0].text = 'A'.repeat(7)
+    }, '开场第 1 行太长')
+    const ok = valid()
+    ok.hook.lines[0].badge = '27'
+    ok.hook.lines[0].text = 'A'.repeat(6)
     assert.doesNotThrow(() => parseListReelProps(ok))
   })
 
@@ -224,9 +235,9 @@ describe('text length and content', () => {
     })
   })
 
-  test('currency of 7 chars is rejected', () => {
+  test('currencyPrefix of 7 chars is rejected', () => {
     rejects((props) => {
-      props.price.currency = 'A'.repeat(7)
+      props.price.currencyPrefix = 'A'.repeat(7)
     })
   })
 
