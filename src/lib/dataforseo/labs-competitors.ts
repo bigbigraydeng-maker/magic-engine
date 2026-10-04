@@ -10,6 +10,7 @@ import {
   DEFAULT_LANGUAGE_CODE,
   authHeader,
   deriveIntent,
+  DataForSeoTaskError,
   type LabsCompetitor,
   type LabsKeyword,
 } from './labs-types'
@@ -46,6 +47,8 @@ export async function getSerpCompetitors(
 
   const json = await res.json() as {
     tasks?: Array<{
+      status_code?:    number
+      status_message?: string
       result?: Array<{
         items?: Array<{
           domain?:       string
@@ -62,7 +65,16 @@ export async function getSerpCompetitors(
     }>
   }
 
-  const items = json.tasks?.[0]?.result?.[0]?.items ?? []
+
+  const task = json.tasks?.[0]
+  if ((task?.status_code ?? 0) !== 20000) {
+    throw new DataForSeoTaskError(
+      task?.status_code,
+      `DataForSEO competitors_domain task error ${task?.status_code ?? 'missing'}: ${task?.status_message ?? 'unknown'}`,
+    )
+  }
+
+  const items = task?.result?.[0]?.items ?? []
 
   return items
     .filter(it => it.domain && it.domain !== domain)
@@ -119,7 +131,7 @@ export async function getKeywordsGapWithStatus(
   )
 
   // Merge competitor results, keeping the highest-volume entry per keyword.
-  const failedCount = perCompetitor.filter(r => r.status !== 'fulfilled').length
+  let failedCount = perCompetitor.filter(r => r.status !== 'fulfilled').length
   const byKeyword = new Map<string, LabsKeyword>()
   for (const settled of perCompetitor) {
     if (settled.status !== 'fulfilled') continue
@@ -151,6 +163,8 @@ export async function getKeywordsGapWithStatus(
         }
       }
     } catch (err) {
+      // KD stays null for these keywords: count as a failed call so callers never cache it.
+      failedCount += 1
       console.warn('[labs/getKeywordsGap] KD enrichment failed', {
         clientDomain,
         competitorCount: competitorDomains.length,
@@ -197,6 +211,8 @@ async function fetchDomainIntersectionGap(
 
   const json = await res.json() as {
     tasks?: Array<{
+      status_code?:    number
+      status_message?: string
       result?: Array<{
         items?: Array<{
           keyword_data?: {
@@ -215,7 +231,16 @@ async function fetchDomainIntersectionGap(
     }>
   }
 
-  const items = json.tasks?.[0]?.result?.[0]?.items ?? []
+
+  const task = json.tasks?.[0]
+  if ((task?.status_code ?? 0) !== 20000) {
+    throw new DataForSeoTaskError(
+      task?.status_code,
+      `DataForSEO domain_intersection task error ${task?.status_code ?? 'missing'}: ${task?.status_message ?? 'unknown'}`,
+    )
+  }
+
+  const items = task?.result?.[0]?.items ?? []
 
   return items
     .filter(it => it.keyword_data?.keyword)

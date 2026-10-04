@@ -202,7 +202,7 @@ export async function GET(
     const cached = await readCompetitorsGapCache<GapResult>(cacheKey, fingerprint, { forceRefresh })
     if (cached) return NextResponse.json(cached, { headers: { ...CACHE_HEADERS, 'X-Cache': 'HIT' } })
 
-    const result = await dedupeInFlight(cacheKey, async () => {
+    const result = await dedupeInFlight(`${cacheKey}:${fingerprint}`, async () => {
       const computed = await computeGap(clientId, client.domain as string, locationCode, businessTerms, excludedTopics)
       if (computed.cacheable) {
         await writeCompetitorsGapCache(cacheKey, fingerprint, (client.semrush_db as string | null) ?? 'au', computed.result)

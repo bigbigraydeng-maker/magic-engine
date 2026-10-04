@@ -154,7 +154,7 @@ describe('getDomainMetrics — provider failures are not zeros', () => {
   const overviewResponse = {
     ok: true,
     json: () => Promise.resolve({
-      tasks: [{ result: [{ items: [{ metrics: { organic: { count: 12, etv: 340 } } }] }] }],
+      tasks: [{ status_code: 20000, result: [{ items: [{ metrics: { organic: { count: 12, etv: 340 } } }] }] }],
     }),
   } as Response
   const rankResponse = {
@@ -174,5 +174,15 @@ describe('getDomainMetrics — provider failures are not zeros', () => {
     mockFetch.mockReturnValueOnce(Promise.resolve({ ok: false, status: 429 } as Response))
 
     await expect(getDomainMetrics('example.com')).rejects.toThrow('backlink rank unavailable')
+  })
+
+  it('throws on an HTTP 200 task-level error (e.g. 40210) instead of returning 0/0', async () => {
+    mockFetch.mockReturnValueOnce(Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ tasks: [{ status_code: 40210, status_message: 'Insufficient funds' }] }),
+    } as Response))
+    mockFetch.mockReturnValueOnce(Promise.resolve(rankResponse))
+
+    await expect(getDomainMetrics('example.com')).rejects.toThrow('task error 40210')
   })
 })
