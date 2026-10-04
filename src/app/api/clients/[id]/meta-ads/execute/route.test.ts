@@ -18,6 +18,8 @@ const m = vi.hoisted(() => ({
   inngestSend: vi.fn(),
   statusRun: null as null | Record<string, unknown>,
   statusReceipt: null as null | Record<string, unknown>,
+  draftRows: [] as Array<{ client_id: string; action_type: string; payload: { draft: { kind: string }; campaignId: string } }>,
+  draftLookupError: null as null | { message: string },
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
@@ -36,6 +38,40 @@ vi.mock('@/lib/supabase', () => ({
     from: (table: string) => {
       if (table === 'client_meta_ad_accounts') {
         return { select: () => ({ eq: m.registeredAccounts }) }
+      }
+      if (table === 'flywheel_actions') {
+        const filters: Array<[string, unknown]> = []
+        const builder: Record<string, unknown> = {}
+        builder.select = () => builder
+        builder.eq = (col: string, val: unknown) => {
+          filters.push([col, val])
+          return builder
+        }
+        builder.maybeSingle = vi.fn().mockResolvedValue({ data: m.statusReceipt, error: null })
+        builder.insert = m.otherTableInsert
+        builder.limit = () => {
+          const rows = m.draftRows.filter((row) =>
+            filters.every(([col, val]) => {
+              if (
+                col !== 'client_id' &&
+                col !== 'action_type' &&
+                col !== 'payload->draft->>kind' &&
+                col !== 'payload->>campaignId'
+              ) {
+                throw new Error('unexpected column ' + col)
+              }
+              const path = col.replace('->>', '->').split('->')
+              let current: unknown = row
+              for (const segment of path) {
+                if (current === null || typeof current !== 'object') return false
+                current = (current as Record<string, unknown>)[segment]
+              }
+              return current === val
+            }),
+          )
+          return Promise.resolve({ data: rows, error: m.draftLookupError })
+        }
+        return builder
       }
       const builder: Record<string, unknown> = {}
       builder.select = () => builder
@@ -84,6 +120,8 @@ beforeEach(() => {
   m.inngestSend.mockResolvedValue({ ids: ['event-1'] })
   m.statusRun = null
   m.statusReceipt = null
+  m.draftRows = []
+  m.draftLookupError = null
   m.registeredAccounts.mockResolvedValue({ data: [{ ad_account_id: 'act_1111111111' }], error: null })
   m.getCampaignDetails.mockResolvedValue({
     id: '120220000000000002', name: 'B campaign', status: 'ACTIVE', daily_budget: '5000', account_id: '2222222222',
@@ -161,5 +199,84 @@ describe('meta-ads/execute POST — campaign belonging to another client', () =>
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toMatchObject({ status: 'succeeded', receipt: { id: 'receipt-1' } })
+  })
+})
+
+describe('meta-ads/execute POST — reactivating ME Messenger draft campaigns', () => {
+  const CAMP = '120210000000000001'
+  const CLIENT_B = 'bbbbbbbb-1111-4000-8000-000000000000'
+
+  function messengerRow(clientId: string, campaignId: string, kind = 'messenger_conversation') {
+    return { client_id: clientId, action_type: 'ads.create_ad', payload: { draft: { kind }, campaignId } }
+  }
+
+  beforeEach(() => {
+    m.getCampaignDetails.mockResolvedValue({
+      id: CAMP, name: 'A campaign', status: 'PAUSED', daily_budget: '5000', account_id: '1111111111',
+    })
+    m.setCampaignStatus.mockResolvedValue(true)
+    m.otherTableInsert.mockReturnValue({
+      select: () => ({ single: vi.fn().mockResolvedValue({ data: { id: 'act1' }, error: null }) }),
+    })
+  })
+
+  it('blocks reactivation when a Messenger draft exists for the client', async () => {
+    m.draftRows = [messengerRow(CLIENT_A, CAMP)]
+
+    const res = await post({ action_type: 'ads.reactivate_campaign', campaign_id: CAMP })
+
+    expect(res.status).toBe(422)
+    const body = await res.json()
+    expect(body.code).toBe('messenger_reactivate_blocked')
+    expect(body.error).toContain('审批流程')
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
+    expect(m.getCampaignDetails).not.toHaveBeenCalled()
+    expect(m.otherTableInsert).not.toHaveBeenCalled()
+  })
+
+  it('reactivates when no Messenger draft exists', async () => {
+    const res = await post({ action_type: 'ads.reactivate_campaign', campaign_id: CAMP })
+
+    expect(res.status).toBe(200)
+    expect(m.setCampaignStatus).toHaveBeenCalledWith(CAMP, 'SHARED_FALLBACK_TOKEN', 'ACTIVE')
+  })
+
+  it('fails closed when the draft lookup errors', async () => {
+    m.draftLookupError = { message: 'db down' }
+
+    const res = await post({ action_type: 'ads.reactivate_campaign', campaign_id: CAMP })
+
+    expect(res.status).toBe(422)
+    const body = await res.json()
+    expect(body.code).toBe('messenger_draft_lookup_failed')
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
+    expect(m.getCampaignDetails).not.toHaveBeenCalled()
+  })
+
+  it('does not block when the draft belongs to another client', async () => {
+    m.draftRows = [messengerRow(CLIENT_B, CAMP)]
+
+    const res = await post({ action_type: 'ads.reactivate_campaign', campaign_id: CAMP })
+
+    expect(res.status).toBe(200)
+    expect(m.setCampaignStatus).toHaveBeenCalledWith(CAMP, 'SHARED_FALLBACK_TOKEN', 'ACTIVE')
+  })
+
+  it('does not block when the draft kind is not a Messenger conversation', async () => {
+    m.draftRows = [messengerRow(CLIENT_A, CAMP, 'video_thruplay')]
+
+    const res = await post({ action_type: 'ads.reactivate_campaign', campaign_id: CAMP })
+
+    expect(res.status).toBe(200)
+    expect(m.setCampaignStatus).toHaveBeenCalledWith(CAMP, 'SHARED_FALLBACK_TOKEN', 'ACTIVE')
+  })
+
+  it('does not block pausing a campaign that has a Messenger draft', async () => {
+    m.draftRows = [messengerRow(CLIENT_A, CAMP)]
+
+    const res = await post({ action_type: 'ads.pause_campaign', campaign_id: CAMP })
+
+    expect(res.status).toBe(200)
+    expect(m.setCampaignStatus).toHaveBeenCalledWith(CAMP, 'SHARED_FALLBACK_TOKEN', 'PAUSED')
   })
 })
