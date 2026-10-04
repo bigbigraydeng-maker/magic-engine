@@ -16,6 +16,20 @@ import {
   extractExcludedTopics,
   isBusinessRelevantKeyword,
 } from '@/lib/seo-intelligence/keyword-relevance'
+import {
+  competitorsGapCacheKey,
+  competitorsGapFingerprint,
+  dedupeInFlight,
+  isCacheableResult,
+  readCompetitorsGapCache,
+  writeCompetitorsGapCache,
+} from '@/lib/seo-intelligence/competitors-gap-cache'
+
+// HTTP-level cache is only a short CDN buffer; the billing guard is the
+// server-side cache above. Kept at 60 s so refreshes stay cheap to reason about.
+const CACHE_HEADERS = {
+  'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=60',
+}
 
 const LOCATION_CODE_BY_DB: Record<string, number> = { au: 2036, nz: 2554 }
 
@@ -37,6 +51,78 @@ const GENERIC_DOMAIN_BLOCKLIST = new Set([
   'hotels.com', 'agoda.com', 'airbnb.com', 'hostelworld.com',
 ])
 
+interface GapResult {
+  domain: string
+  competitors: LabsCompetitor[]
+  gapKeywords: LabsKeyword[]
+}
+
+/** The paid part: every DataForSEO call for this route happens in here only. */
+async function computeGap(
+  clientId: string,
+  domain: string,
+  locationCode: number,
+  businessTerms: ReturnType<typeof buildBusinessKeywordTerms>,
+  excludedTopics: ReturnType<typeof extractExcludedTopics>,
+): Promise<{ result: GapResult; cacheable: boolean }> {
+  // ── Step 1: Discover competitors via DataForSEO (fallback source for resolver)
+  const rawSerpResults = await getSerpCompetitors(domain, locationCode, 20)
+  const filteredSerp   = rawSerpResults.filter(c => !GENERIC_DOMAIN_BLOCKLIST.has(c.domain))
+  const serpMap        = new Map(filteredSerp.map(c => [c.domain, c]))
+
+  // ── Step 2: Resolve final competitor list via unified resolver
+  //   Priority: clients.competitor_domains (FDE) > master_briefs > DataForSEO auto
+  const resolved = await getClientCompetitors(
+    clientId,
+    filteredSerp.map(c => c.domain),
+    5,
+  )
+  const competitors: LabsCompetitor[] = resolved.domains.map(domain =>
+    serpMap.get(domain) ?? {
+      domain,
+      avg_position:    null,
+      intersections:   0,
+      monthly_traffic: null,
+      keyword_count:   null,
+    }
+  )
+
+  // ── Step 2.5: Enrich stub competitors (those not in SERP list — typically
+  //   FDE hand-picked niche competitors that DataForSEO competitors_domain
+  //   missed). One domain_rank_overview call per stub, in parallel.
+  //   intersections + avg_position stay null (we have no shared-keyword data
+  //   for them), but monthly_traffic + keyword_count get real values.
+  const stubsToEnrich = competitors.filter(c => c.monthly_traffic === null && c.keyword_count === null)
+  if (stubsToEnrich.length > 0) {
+    const enrichResults = await Promise.allSettled(
+      stubsToEnrich.map(c => fetchDomainRankOverview(c.domain, locationCode)),
+    )
+    stubsToEnrich.forEach((stub, idx) => {
+      const r = enrichResults[idx]
+      if (r.status === 'fulfilled') {
+        stub.monthly_traffic = r.value.organic_traffic
+        stub.keyword_count   = r.value.organic_keywords
+      }
+    })
+  }
+
+  // ── Step 3: Keyword gap using top 3 competitor domains
+  const top3       = competitors.slice(0, 3).map(c => c.domain)
+  const rawGapKeywords: LabsKeyword[] = top3.length > 0
+    ? await getKeywordsGap(domain, top3, locationCode, 200)
+    : []
+  const gapKeywords = rawGapKeywords
+    .filter(keyword => isBusinessRelevantKeyword(keyword.keyword, businessTerms, excludedTopics))
+    .slice(0, 100)
+
+  const cacheable = isCacheableResult({
+    competitors,
+    rawGapCount: rawGapKeywords.length,
+    gapCompetitorCount: top3.length,
+  })
+  return { result: { domain, competitors, gapKeywords }, cacheable }
+}
+
 /**
  * GET /api/clients/[id]/seo-intelligence/competitors-gap
  *
@@ -55,10 +141,14 @@ const GENERIC_DOMAIN_BLOCKLIST = new Set([
  *   gapKeywords: LabsKeyword[]      // up to 100 untapped keywords
  * }
  *
- * Cache: 24 h (expensive DataForSEO live calls).
+ * Cache: 24 h server-side in local_data_cache (see competitors-gap-cache.ts).
+ * Invalidated early when FDE/brief competitor lists change; `?refresh=1` forces a
+ * re-pull but only after a 10 min cooldown. Errors/partial results are never cached.
+ * One uncached run = 1 competitors_domain + 0-5 domain_rank_overview
+ * + 1-3 domain_intersection + 1 keyword_overview paid call.
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id: clientId } = await params
@@ -69,7 +159,7 @@ export async function GET(
 
   const { data: client, error: clientError } = await supabaseAdmin
     .from('clients')
-    .select('id, domain, semrush_db, industry')
+    .select('id, domain, semrush_db, industry, competitor_domains')
     .eq('id', clientId)
     .single()
 
@@ -96,68 +186,30 @@ export async function GET(
   })
   const excludedTopics = extractExcludedTopics(briefRecord)
 
+  const cacheKey = competitorsGapCacheKey(clientId, locationCode)
+  const fingerprint = competitorsGapFingerprint({
+    domain: client.domain,
+    locationCode,
+    fde: client.competitor_domains ?? null,
+    brief: briefRecord?.competitor_domains ?? null,
+    terms: businessTerms,
+    excluded: excludedTopics,
+  })
+  const forceRefresh = req.nextUrl.searchParams.get('refresh') === '1'
+
   try {
-    // ── Step 1: Discover competitors via DataForSEO (fallback source for resolver)
-    const rawSerpResults = await getSerpCompetitors(client.domain, locationCode, 20)
-    const filteredSerp   = rawSerpResults.filter(c => !GENERIC_DOMAIN_BLOCKLIST.has(c.domain))
-    const serpMap        = new Map(filteredSerp.map(c => [c.domain, c]))
+    const cached = await readCompetitorsGapCache<GapResult>(cacheKey, fingerprint, { forceRefresh })
+    if (cached) return NextResponse.json(cached, { headers: { ...CACHE_HEADERS, 'X-Cache': 'HIT' } })
 
-    // ── Step 2: Resolve final competitor list via unified resolver
-    //   Priority: clients.competitor_domains (FDE) > master_briefs > DataForSEO auto
-    const resolved = await getClientCompetitors(
-      clientId,
-      filteredSerp.map(c => c.domain),
-      5,
-    )
-    const competitors: LabsCompetitor[] = resolved.domains.map(domain =>
-      serpMap.get(domain) ?? {
-        domain,
-        avg_position:    null,
-        intersections:   0,
-        monthly_traffic: null,
-        keyword_count:   null,
+    const result = await dedupeInFlight(cacheKey, async () => {
+      const computed = await computeGap(clientId, client.domain as string, locationCode, businessTerms, excludedTopics)
+      if (computed.cacheable) {
+        await writeCompetitorsGapCache(cacheKey, fingerprint, (client.semrush_db as string | null) ?? 'au', computed.result)
       }
-    )
+      return computed.result
+    })
 
-    // ── Step 2.5: Enrich stub competitors (those not in SERP list — typically
-    //   FDE hand-picked niche competitors that DataForSEO competitors_domain
-    //   missed). One domain_rank_overview call per stub, in parallel.
-    //   intersections + avg_position stay null (we have no shared-keyword data
-    //   for them), but monthly_traffic + keyword_count get real values.
-    const stubsToEnrich = competitors.filter(c => c.monthly_traffic === null && c.keyword_count === null)
-    if (stubsToEnrich.length > 0) {
-      const enrichResults = await Promise.allSettled(
-        stubsToEnrich.map(c => fetchDomainRankOverview(c.domain, locationCode)),
-      )
-      stubsToEnrich.forEach((stub, idx) => {
-        const r = enrichResults[idx]
-        if (r.status === 'fulfilled') {
-          stub.monthly_traffic = r.value.organic_traffic
-          stub.keyword_count   = r.value.organic_keywords
-        }
-      })
-    }
-
-    // ── Step 3: Keyword gap using top 3 competitor domains
-    const top3       = competitors.slice(0, 3).map(c => c.domain)
-    const rawGapKeywords: LabsKeyword[] = top3.length > 0
-      ? await getKeywordsGap(client.domain, top3, locationCode, 200)
-      : []
-    const gapKeywords = rawGapKeywords
-      .filter(keyword => isBusinessRelevantKeyword(keyword.keyword, businessTerms, excludedTopics))
-      .slice(0, 100)
-
-    return NextResponse.json(
-      { domain: client.domain, competitors, gapKeywords },
-      {
-        headers: {
-          // Short cache so FDE-edited competitor_domains take effect within ~1 minute.
-          // Trade-off: DataForSEO calls are gated by this cache, so don't drop to 0;
-          // 60s strikes a balance between freshness and API spend (was 86400 / 24h).
-          'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=60',
-        },
-      },
-    )
+    return NextResponse.json(result, { headers: { ...CACHE_HEADERS, 'X-Cache': 'MISS' } })
   } catch {
     return NextResponse.json(
       { error: 'Keyword Intelligence is temporarily unavailable. Competitor discovery will retry after billing or API access is restored.' },
