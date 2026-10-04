@@ -50,5 +50,6 @@ describe('report', () => {
     }, 'x').join('\n')
     expect(html).not.toContain('<script>')
     expect(html).toContain('&lt;script&gt;')
+    expect(seoListLines({ error: 'a"b' }, 'x')[0]).toContain('a&quot;b')
   })
 })

@@ -27,7 +27,7 @@ describe('buildNearMissItem', () => {
     expect(it.description).toContain('〔假设｜') // zero text matches ≠ "no such page" (synonyms)
     expect(it.description).toContain('不认同义词')
     expect(it.description).toContain('同一意思的其他说法已并入本项')
-    expect(it.description).toContain('未经验证的估算')
+    expect(it.description).toContain('只用于排序，不是预测')
     expect(it.description).not.toMatch(/带来.*点击/)
   })
 
@@ -69,7 +69,7 @@ describe('verifyPlanItem', () => {
   const draftItem = { id: 'i1', created_at: created, steps_json: { keyword: 'nz visa china', verify: { type: 'blog_published' } } }
   const crawled = (over: Partial<CrawledPage> = {}): CrawledPage => ({
     url: 'https://x.com/blog/nz-visa-china', status_code: 200, crawl_status: 'crawled', crawled_at: '2026-10-12T00:00:00Z',
-    word_count: 1200, markdown_content: 'hello', ...over,
+    word_count: 1200, ...over,
   })
   const post = (over: Partial<BlogRow> = {}): BlogRow => ({ primary_keyword: 'NZ Visa China', status: 'published', slug: 'nz-visa-china', published_at: '2026-10-08T00:00:00Z', ...over })
 
@@ -81,29 +81,46 @@ describe('verifyPlanItem', () => {
     expect(verifyPlanItem(draftItem, { blogs: [post()], pages: [crawled()], config: cfg }).outcome).toBe('pass')
   })
 
-  it('blog_published: a blocked / non-200 crawl is not_measured, never pass', () => {
+  it('blog_published: non-200, or a ~60-word anti-bot challenge page that crawled "fine", is not_measured — never pass', () => {
     expect(verifyPlanItem(draftItem, { blogs: [post()], pages: [crawled({ status_code: 404 })], config: cfg }).outcome).toBe('not_measured')
-    expect(verifyPlanItem(draftItem, { blogs: [post()], pages: [crawled({ markdown_content: 'Robot Challenge Screen' })], config: cfg }).outcome).toBe('not_measured')
+    expect(verifyPlanItem(draftItem, { blogs: [post()], pages: [crawled({ word_count: 63 })], config: cfg }).outcome).toBe('not_measured')
+  })
+
+  it('blog_published: the page must be EXACTLY the slug — slug "seo" must not match /seo-tips', () => {
+    const item = { ...draftItem, steps_json: { keyword: 'seo', verify: { type: 'blog_published' } } }
+    const wrong = crawled({ url: 'https://x.com/blog/seo-tips' })
+    expect(verifyPlanItem(item, { blogs: [post({ primary_keyword: 'seo', slug: 'seo' })], pages: [wrong], config: cfg }).outcome).toBe('not_measured')
+    const right = crawled({ url: 'https://x.com/blog/seo' })
+    expect(verifyPlanItem(item, { blogs: [post({ primary_keyword: 'seo', slug: 'seo' })], pages: [right], config: cfg }).outcome).toBe('pass')
   })
 
   const strengthen = {
     id: 'i2', created_at: created,
-    steps_json: { url: 'https://x.com/p', verify: { type: 'page_strengthened' }, baseline: { word_count: 800, link_count: 3 } },
+    steps_json: { url: 'https://x.com/p', verify: { type: 'page_strengthened' }, baseline: { word_count: 800, crawled_at: '2026-10-04T12:00:00Z' } },
   }
   const pageNow = (over: Partial<CrawledPage> = {}): CrawledPage => ({
-    url: 'https://x.com/p', status_code: 200, crawl_status: 'crawled', crawled_at: '2026-10-12T00:00:00Z', word_count: 800,
-    markdown_content: '[a](/a) [b](/b) [c](/c)', ...over,
+    url: 'https://x.com/p', status_code: 200, crawl_status: 'crawled', crawled_at: '2026-10-12T00:00:00Z', word_count: 800, ...over,
   })
 
-  it('page_strengthened: no crawl after creation → not_measured; unchanged → pending; +words or +links → pass', () => {
+  it('page_strengthened: no crawl after creation → not_measured; unchanged → pending; +100 words → pass', () => {
     expect(verifyPlanItem(strengthen, { blogs: [], pages: [pageNow({ crawled_at: '2026-10-04T00:00:00Z' })], config: cfg }).outcome).toBe('not_measured')
     expect(verifyPlanItem(strengthen, { blogs: [], pages: [pageNow()], config: cfg }).outcome).toBe('pending')
     expect(verifyPlanItem(strengthen, { blogs: [], pages: [pageNow({ word_count: 950 })], config: cfg }).outcome).toBe('pass')
-    expect(verifyPlanItem(strengthen, { blogs: [], pages: [pageNow({ markdown_content: '[a](/a) [b](/b) [c](/c) [d](/d) [e](/e)' })], config: cfg }).outcome).toBe('pass')
   })
 
-  it('page_strengthened: failed or blocked crawl and missing baseline are not_measured', () => {
+  it('page_strengthened: a crawl that is not newer than the BASELINE crawl cannot show this item\'s work (stale-baseline false positive)', () => {
+    // item created 10-05 but its baseline crawl was 10-06 (clock skew / late baseline): a 10-05 crawl must not count
+    const late = { ...strengthen, steps_json: { ...strengthen.steps_json, baseline: { word_count: 800, crawled_at: '2026-10-11T00:00:00Z' } } }
+    expect(verifyPlanItem(late, { blogs: [], pages: [pageNow({ word_count: 1100, crawled_at: '2026-10-10T00:00:00Z' })], config: cfg }).outcome).toBe('not_measured')
+  })
+
+  it('page_strengthened: navigation / link changes alone never verify (links are not a criterion)', () => {
+    expect(verifyPlanItem(strengthen, { blogs: [], pages: [pageNow({ word_count: 805 })], config: cfg }).outcome).toBe('pending')
+  })
+
+  it('page_strengthened: failed / suspiciously short crawl and missing baseline are not_measured', () => {
     expect(verifyPlanItem(strengthen, { blogs: [], pages: [pageNow({ crawl_status: 'failed' })], config: cfg }).outcome).toBe('not_measured')
+    expect(verifyPlanItem(strengthen, { blogs: [], pages: [pageNow({ word_count: 63 })], config: cfg }).outcome).toBe('not_measured')
     expect(verifyPlanItem({ ...strengthen, steps_json: { url: 'https://x.com/p', verify: { type: 'page_strengthened' }, baseline: {} } }, { blogs: [], pages: [pageNow()], config: cfg }).outcome).toBe('not_measured')
     expect(verifyPlanItem(strengthen, { blogs: [], pages: [], config: cfg }).outcome).toBe('not_measured')
   })

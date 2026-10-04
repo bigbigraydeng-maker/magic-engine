@@ -94,3 +94,49 @@ describe('isolation from the old card machinery', () => {
     expect(s.blockedKeys.has(executionItemDedupKey('seo.refresh_blog', 'alpha', null))).toBe(false)
   })
 })
+
+describe('review hardening', () => {
+  it('writeExecutionItems for a patrol action never supersedes a list item, even on the same keyword', async () => {
+    const { writeExecutionItems } = await import('@/lib/zhuge/action-persister')
+    const db = new FakeDb()
+    await writeSeoPlanItems(db.client(), CID, [item('alpha', null)])
+    await writeExecutionItems(db.client(), CID, null, [{
+      rank: 1, dimension: 'seo', action_type: 'seo.refresh_blog', why_now: 'w', evidence_refs: [], expected_impact: 'high', effort: 'low',
+      execution_mode: 'in_house', executable_by: null, metadata: { keyword: 'alpha', rule_id: 'stale_content' },
+    }])
+    const plan = db.rows('execution_items').find(r => r.action_type === 'seo.plan.draft_post')!
+    expect(plan.status).toBe('pending')
+  })
+
+  it('transition returns false and leaves a correcting audit row when the card was already closed by someone else', async () => {
+    const db = new FakeDb({ execution_items: [{ id: 'i1', client_id: CID, dimension: 'seo', status: 'superseded', source: 'zhuge', steps_json: {} }] })
+    const ok = await transitionSeoPlanItem(db.client(), { id: 'i1', clientId: CID, to: 'completed', reason: 'ok', stepsJson: {} })
+    expect(ok).toBe(false)
+    expect(db.rows('execution_items')[0].status).toBe('superseded')
+    expect(db.rows('execution_logs').some(l => (l.meta as { applied?: boolean }).applied === false)).toBe(true)
+  })
+
+  it('transition is scoped to the client: another client\'s card id cannot be closed', async () => {
+    const db = new FakeDb({ execution_items: [{ id: 'i1', client_id: 'other', dimension: 'seo', status: 'pending', source: 'zhuge', steps_json: {} }] })
+    const ok = await transitionSeoPlanItem(db.client(), { id: 'i1', clientId: CID, to: 'skipped', reason: 'x', stepsJson: {} })
+    expect(ok).toBe(false)
+    expect(db.rows('execution_items')[0].status).toBe('pending')
+  })
+
+  it('two overlapping runs that both pass the "already open?" read end with ONE open item (smallest id wins, loser skipped with a reason)', async () => {
+    const db = new FakeDb()
+    // simulate the race: run A inserted just before run B's insert (B's read happened earlier)
+    await writeSeoPlanItems(db.client(), CID, [item('alpha', null)])
+    const winner = db.rows('execution_items')[0].id as string
+    // run B bypasses its (stale) dedup read by inserting directly, then resolves
+    db.rows('execution_items').push({ id: 'zzz-late', client_id: CID, dimension: 'seo', source: 'zhuge', status: 'pending', action_type: 'seo.plan.draft_post', steps_json: { loop: SEO_PLAN_LOOP, keyword: 'alpha', url: null } })
+    const { resolveSeoPlanDuplicateRace } = await import('@/lib/zhuge/action-persister')
+    await resolveSeoPlanDuplicateRace(db.client(), CID, ['zzz-late'])
+    const open = db.rows('execution_items').filter(r => r.status === 'pending')
+    expect(open.map(r => r.id)).toEqual([winner])
+    const loser = db.rows('execution_items').find(r => r.id === 'zzz-late')!
+    expect(loser.status).toBe('skipped')
+    expect((loser.steps_json as { skip_reason: string }).skip_reason).toBe('duplicate_race')
+  })
+})
+

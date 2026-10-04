@@ -71,12 +71,12 @@ export function buildNearMissItem(
   const p = c.primary
   const failure = `28 天后「${p.keyword}」排名没有上移至少 3 名，判没起效（不做点击归因）`
   const evidence: EvidenceLine[] = [
-    { claim: `「${p.keyword}」排第 ${p.position}，月搜 ${p.volume}，难度 ${p.kd}`, source: 'keyword_snapshots（DataForSEO 周快照）', fetched_at: ctx.snapshotDate, confidence: '确认' },
+    { claim: `「${p.keyword}」排第 ${p.position}，月搜 ${p.volume}，难度 ${p.kd}`, source: '关键词排名周快照（Keyword Intelligence）', fetched_at: ctx.snapshotDate, confidence: '确认' },
     {
       claim: matches.length === 0
         ? '站内标题/H1/路径含全部词的页面有 0 个（文本匹配，不认同义词/别名，不能当作"站内没有"）'
         : `站内标题/H1/路径含全部词的页面有 ${matches.length} 个（文本匹配，未核实谁在排）`,
-      source: 'client_site_pages 文本匹配',
+      source: '站内页面文本匹配',
       fetched_at: ctx.snapshotDate,
       confidence: matches.length === 0 ? '假设' : '很可能',
     },
@@ -95,7 +95,7 @@ export function buildNearMissItem(
       actionType: PLAN_ACTION.DRAFT_POST,
       title: `写新文章：${p.keyword}（第${p.position}名，月搜${p.volume}）`,
       description: [
-        `【为什么】${evidence[0].claim}，站内没有明显对应页面；这是差一步上第一页的词（估算上限约 +${c.potentialClicks} 次点击/月，未经验证的估算）。`,
+        `【为什么】${evidence[0].claim}，站内没有明显对应页面；这是差一步上第一页的词（粗估增量约 +${c.potentialClicks} 次点击/月，按通用点击率曲线算，只用于排序，不是预测）。`,
         variantsLine(c.members),
         `【怎么做】\n${how}`,
         `【怎么算没起效】${failure}`,
@@ -120,13 +120,13 @@ export function buildNearMissItem(
       ? `② 站内有 ${matches.length} 个页面都沾这个词：${matches.slice(0, 4).map(m => m.title ?? m.url).join(' ｜ ')}。先决定哪页当主页，其余往主页汇内链、不再抢同一个词。`
       : '② 确认没有别的自家页面在抢同一个词。',
     titleCheck(main.title),
-    `④ 补充覆盖该词意图的小节，并在相关页面加指向它的内链（至少 ${2} 处）。`,
+    '④ 补充覆盖该词意图的小节，并在相关页面加指向它的内链（至少 2 处）。系统核对的是"页面正文是否实质变长"，请确实补内容，而不只是改导航或排版。',
   ].join('\n')
   return {
     actionType: PLAN_ACTION.STRENGTHEN_PAGE,
     title: `加强页面：${p.keyword}（第${p.position}名，月搜${p.volume}）`,
     description: [
-      `【为什么】${evidence[0].claim}；站内最可能的对应页面：${main.url}（估算上限约 +${c.potentialClicks} 次点击/月，未经验证）。`,
+      `【为什么】${evidence[0].claim}；站内最可能的对应页面：${main.url}（粗估增量约 +${c.potentialClicks} 次点击/月，按通用点击率曲线算，只用于排序）。`,
       variantsLine(c.members),
       `【怎么做】\n${how}`,
       `【怎么算没起效】${failure}`,
@@ -138,7 +138,7 @@ export function buildNearMissItem(
     dueDate: dueDateFor(ctx.planWeek, index),
     stepsJson: baseSteps(ctx, 'near_miss', p.keyword, main.url, evidence, failure, {
       opportunity: { members: c.members, matched_pages: matches.map(m => m.url), potential_clicks_estimate: c.potentialClicks },
-      baseline: { rank: p.position, volume: p.volume, kd: p.kd, snapshot_date: ctx.snapshotDate, word_count: main.word_count },
+      baseline: { rank: p.position, volume: p.volume, kd: p.kd, snapshot_date: ctx.snapshotDate, word_count: main.word_count, crawled_at: main.crawled_at ?? null },
       verify: { type: 'page_strengthened' },
     }),
   }
@@ -154,7 +154,7 @@ export function buildCtrGapItem(
   const evidence: EvidenceLine[] = [
     {
       claim: `该页近 28 天曝光 ${c.impressions}、平均排第 ${c.position.toFixed(1)}、点击率 ${(c.ctr * 100).toFixed(2)}%（该排名常见水平约 ${(c.benchmark * 100).toFixed(1)}%）`,
-      source: 'gsc_page_daily（谷歌逐页逐天）',
+      source: '谷歌搜索数据（逐页逐天）',
       fetched_at: ctx.gscDay,
       confidence: '确认',
     },
@@ -169,7 +169,7 @@ export function buildCtrGapItem(
     actionType: PLAN_ACTION.STRENGTHEN_PAGE,
     title: `加强页面：点击率偏低 ${c.url}`,
     description: [
-      `【为什么】${evidence[0].claim}。已排在第一页但点的人少（点击率偏低，估算上限约 +${c.potentialClicks} 次点击/28 天，未经验证）。`,
+      `【为什么】${evidence[0].claim}。已排在第一页但点的人少（点击率偏低，粗估增量约 +${c.potentialClicks} 次点击/28 天，按通用点击率曲线算，只用于排序）。`,
       `【怎么做】\n${how}`,
       `【怎么算没起效】${failure}`,
       `【证据】${evidence.map(e => `${e.claim}〔${e.confidence}｜${e.source}｜${e.fetched_at}〕`).join('；')}`,
@@ -180,7 +180,7 @@ export function buildCtrGapItem(
     dueDate: dueDateFor(ctx.planWeek, index),
     stepsJson: baseSteps(ctx, 'ctr_gap', null, c.url, evidence, failure, {
       opportunity: { impressions: c.impressions, clicks: c.clicks, position: c.position, ctr: c.ctr, benchmark: c.benchmark, potential_clicks_estimate: c.potentialClicks },
-      baseline: { snapshot_date: ctx.gscDay, word_count: page?.word_count ?? null, title: page?.title ?? null },
+      baseline: { snapshot_date: ctx.gscDay, word_count: page?.word_count ?? null, crawled_at: page?.crawled_at ?? null, title: page?.title ?? null },
       verify: { type: 'page_strengthened' },
     }),
   }

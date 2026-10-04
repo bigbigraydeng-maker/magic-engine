@@ -557,7 +557,50 @@ export async function writeSeoPlanItems(
   const { data: inserted, error: insErr } = await supabase.from('execution_items').insert(rows).select('id')
   if (insErr) throw new Error(`seo plan items insert failed: ${insErr.message}`)
   const ids = ((inserted as Array<{ id: string }> | null) ?? []).map((r) => r.id)
-  return { inserted: ids.length, duplicates, ids }
+  const lost = await resolveSeoPlanDuplicateRace(supabase, clientId, ids)
+  return { inserted: ids.length - lost.length, duplicates: duplicates + lost.length, ids: ids.filter((id) => !lost.includes(id)) }
+}
+
+/**
+ * Two overlapping runs (scheduled + manual) can both pass the "is it already open?" read.
+ * There is no unique index to stop that, so after inserting we re-read: for each key with
+ * more than one open list item, the smallest id wins and every other one inserted by THIS
+ * call is skipped (with an audit row). Both racing runs reach the same verdict.
+ */
+export async function resolveSeoPlanDuplicateRace(
+  supabase: SupabaseClient,
+  clientId: string,
+  myIds: string[],
+): Promise<string[]> {
+  if (myIds.length === 0) return []
+  const { data, error } = await supabase
+    .from('execution_items')
+    .select('id, action_type, steps_json')
+    .eq('client_id', clientId)
+    .eq('dimension', 'seo')
+    .eq('source', 'zhuge')
+    .in('status', ['pending', 'in_progress'])
+  if (error) throw new Error(`seo plan duplicate-race check failed: ${error.message}`)
+  const rows = ((data as Array<{ id: string; action_type: string; steps_json: Record<string, unknown> | null }> | null) ?? [])
+    .filter((r) => r.steps_json?.loop === SEO_PLAN_LOOP)
+  const byKey = new Map<string, string[]>()
+  for (const r of rows) {
+    const key = executionItemDedupKey(r.action_type, r.steps_json?.keyword, r.steps_json?.url)
+    byKey.set(key, [...(byKey.get(key) ?? []), r.id])
+  }
+  const lost: string[] = []
+  for (const ids of Array.from(byKey.values())) {
+    if (ids.length < 2) continue
+    const winner = [...ids].sort()[0]
+    for (const id of ids) if (id !== winner && myIds.includes(id)) lost.push(id)
+  }
+  for (const id of lost) {
+    await transitionSeoPlanItem(supabase, {
+      id, clientId, to: 'skipped', reason: 'duplicate_race（两次运行同时写入同一事项，保留较早的一条）',
+      stepsJson: { ...(rows.find((r) => r.id === id)?.steps_json ?? {}), skip_reason: 'duplicate_race' },
+    })
+  }
+  return lost
 }
 
 export interface SeoPlanItemTransition {
@@ -575,12 +618,13 @@ export interface SeoPlanItemTransition {
  * Close a list item (verified-complete, or skipped as expired). The audit row is
  * written FIRST and the status flips only if that insert succeeded, so a card can
  * never show "completed" without a receipt. execution_logs.author is constrained to
- * system / luban / fde — this uses 'system'.
+ * system / luban / fde — this uses 'system'. Returns false (and logs a correction) when the
+ * card was no longer open, so callers must not count it as verified / expired.
  */
 export async function transitionSeoPlanItem(
   supabase: SupabaseClient,
   t: SeoPlanItemTransition,
-): Promise<void> {
+): Promise<boolean> {
   const now = (t.now ?? new Date()).toISOString()
   const { error: logErr } = await supabase.from('execution_logs').insert({
     execution_item_id: t.id,
@@ -594,12 +638,28 @@ export async function transitionSeoPlanItem(
 
   const patch: Record<string, unknown> = { status: t.to, steps_json: t.stepsJson, updated_at: now }
   if (t.to === 'completed') patch.completed_at = now
-  const { error: updErr } = await supabase
+  const { data: hit, error: updErr } = await supabase
     .from('execution_items')
     .update(patch)
     .eq('id', t.id)
+    .eq('client_id', t.clientId)
     .in('status', ['pending', 'in_progress'])
+    .select('id')
   if (updErr) throw new Error(`seo plan item status update failed: ${updErr.message}`)
+  if (((hit as unknown[] | null) ?? []).length === 0) {
+    // Another flow closed the card between our read and this write. The audit row above
+    // already exists, so leave a correcting row rather than a receipt that lies.
+    await supabase.from('execution_logs').insert({
+      execution_item_id: t.id,
+      client_id: t.clientId,
+      author: 'system',
+      kind: 'status_change',
+      content: '状态没有变更：这张卡在核对期间已被其他流程改动，上一条"核对通过/放弃"记录不生效',
+      meta: { to: t.to, applied: false, loop: SEO_PLAN_LOOP },
+    })
+    return false
+  }
+  return true
 }
 
 // ── Decision history (Phase 23.D) ─────────────────────────────────────────────

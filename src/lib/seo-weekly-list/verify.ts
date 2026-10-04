@@ -39,23 +39,25 @@ export interface CrawledPage {
   crawl_status: string | null
   crawled_at: string | null
   word_count: number | null
-  markdown_content: string | null
-}
-
-export function countMarkdownLinks(markdown: string | null): number {
-  if (!markdown) return 0
-  return (markdown.match(/\]\(https?:\/\/[^)\s]+\)|\]\(\/[^)\s]*\)/g) ?? []).length
 }
 
 function asRecord(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' ? (v as Record<string, unknown>) : {}
 }
 
-const ANTIBOT_MARKERS = ['robot challenge screen', 'robot-suspicion', 'just a moment...']
+/** An anti-bot challenge page crawls "fine" (HTTP 200) with ~60 words; a real article has hundreds. */
+const REAL_PAGE_MIN_WORDS = 150
 
 function looksBlocked(p: CrawledPage): boolean {
-  const md = (p.markdown_content ?? '').toLowerCase()
-  return ANTIBOT_MARKERS.some(m => md.includes(m))
+  return p.word_count === null || p.word_count < REAL_PAGE_MIN_WORDS
+}
+
+/** True when the page's last path segment is exactly the slug (never a prefix like /seo-tips for "seo"). */
+function pageIsSlug(url: string, slug: string): boolean {
+  const canon = canonicalUrl(url)
+  if (!canon || slug === '') return false
+  const segs = canon.slice(canon.indexOf('/')).split('/').filter(Boolean)
+  return (segs[segs.length - 1] ?? '').toLowerCase() === slug
 }
 
 export function verifyPlanItem(
@@ -79,14 +81,14 @@ export function verifyPlanItem(
     if (!post) return { outcome: 'pending', reason: '还没有该关键词的已发布文章' }
     const slug = (post.slug ?? '').toLowerCase()
     const publishedAt = Date.parse(post.published_at as string)
-    const page = ctx.pages.find(p => slug !== '' && p.url.toLowerCase().includes(`/${slug}`))
+    const page = ctx.pages.find(p => pageIsSlug(p.url, slug))
     if (!page || page.crawled_at === null || Date.parse(page.crawled_at) < publishedAt) {
       return { outcome: 'not_measured', reason: '文章已发布，但站点抓取还没覆盖到它，待下次抓取' }
     }
     if (page.status_code === 200 && page.crawl_status === 'crawled' && !looksBlocked(page)) {
       return { outcome: 'pass', reason: `文章已发布且线上网址可访问（抓取 ${page.crawled_at.slice(0, 10)}）` }
     }
-    return { outcome: 'not_measured', reason: `文章已发布，但抓取结果异常（状态码 ${page.status_code ?? '未知'}）` }
+    return { outcome: 'not_measured', reason: `文章已发布，但抓取结果异常（状态码 ${page.status_code ?? '未知'}，字数 ${page.word_count ?? '未知'}）` }
   }
 
   if (verify.type === 'page_strengthened') {
@@ -95,29 +97,25 @@ export function verifyPlanItem(
     const page = ctx.pages.find(p => canonicalUrl(p.url) === url)
     if (!page) return { outcome: 'not_measured', reason: '站点抓取里没有这个页面' }
     if (page.crawl_status !== 'crawled' || looksBlocked(page)) {
-      return { outcome: 'not_measured', reason: '该页最近一次抓取失败或被拦截' }
-    }
-    if (page.crawled_at === null || Date.parse(page.crawled_at) <= created) {
-      return { outcome: 'not_measured', reason: '清单创建后站点还没有重新抓取过这个页面' }
+      return { outcome: 'not_measured', reason: '该页最近一次抓取失败或疑似被拦截（字数异常少）' }
     }
     const baseline = asRecord(steps.baseline)
+    // The page must have been crawled AFTER both the item and the baseline crawl, else
+    // a change made before the item existed would read as this item's work.
+    const baseCrawl = typeof baseline.crawled_at === 'string' ? Date.parse(baseline.crawled_at) : null
+    const floor = Math.max(created, baseCrawl ?? 0)
+    if (page.crawled_at === null || Date.parse(page.crawled_at) <= floor) {
+      return { outcome: 'not_measured', reason: '清单创建后站点还没有重新抓取过这个页面' }
+    }
     const baseWords = typeof baseline.word_count === 'number' ? baseline.word_count : null
-    const baseLinks = typeof baseline.link_count === 'number' ? baseline.link_count : null
-    const wordGain = baseWords !== null && page.word_count !== null ? page.word_count - baseWords : null
-    const linkGain = baseLinks !== null ? countMarkdownLinks(page.markdown_content) - baseLinks : null
-    if (wordGain === null && linkGain === null) {
-      return { outcome: 'not_measured', reason: '没有创建当天的字数/内链基线，无法比较' }
+    if (baseWords === null || page.word_count === null || baseCrawl === null) {
+      return { outcome: 'not_measured', reason: '没有创建当天的字数基线（或基线没有抓取时间），无法比较' }
     }
-    if (
-      (wordGain !== null && wordGain >= ctx.config.strengthenMinWordGain) ||
-      (linkGain !== null && linkGain >= ctx.config.strengthenMinLinkGain)
-    ) {
-      return {
-        outcome: 'pass',
-        reason: `页面有实质改动：字数 ${wordGain === null ? '—' : (wordGain >= 0 ? '+' : '') + wordGain}、内链 ${linkGain === null ? '—' : (linkGain >= 0 ? '+' : '') + linkGain}（抓取 ${page.crawled_at.slice(0, 10)}）`,
-      }
+    const wordGain = page.word_count - baseWords
+    if (wordGain >= ctx.config.strengthenMinWordGain) {
+      return { outcome: 'pass', reason: `页面正文实质变长：字数 +${wordGain}（抓取 ${page.crawled_at.slice(0, 10)}）` }
     }
-    return { outcome: 'pending', reason: '页面已重新抓取，但字数和内链都没有明显增加' }
+    return { outcome: 'pending', reason: `页面已重新抓取，但字数只变化 ${wordGain >= 0 ? '+' : ''}${wordGain}，未达 ${ctx.config.strengthenMinWordGain}` }
   }
 
   return { outcome: 'not_measured', reason: '未知的核对类型' }

@@ -8,6 +8,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { SEO_LOOP_METRIC_KEY } from './config'
 
 const DAY_MS = 86_400_000
+const REPORT_ROW_CAP = 1000
 
 export interface SeoListItemLine {
   title: string
@@ -75,8 +76,11 @@ export async function gatherSeoListWeekly(
       .eq('dimension', 'seo')
       .eq('source', 'zhuge')
       .gte('created_at', since90)
-      .limit(1000)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .limit(REPORT_ROW_CAP)
     if (iErr) return { error: iErr.message }
+    if ((rows ?? []).length >= REPORT_ROW_CAP) return { error: `读满 ${REPORT_ROW_CAP} 行上限，数据可能不全，先不出数` }
     const items = ((rows ?? []) as ItemRow[]).filter(r => r.steps_json?.loop === 'seo_goal_v1')
 
     const weekAgo = now.getTime() - 7 * DAY_MS
@@ -106,7 +110,7 @@ export async function gatherSeoListWeekly(
 }
 
 function esc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
 /** Plain-Chinese lines (HTML-escaped) for the SEO block of the weekly report. */

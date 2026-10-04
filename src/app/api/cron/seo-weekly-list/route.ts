@@ -35,6 +35,9 @@ export async function GET(req: NextRequest) {
 
   const dryRun = req.nextUrl.searchParams.get('dry_run') === '1'
   const clientId = req.nextUrl.searchParams.get('client_id') ?? undefined
+  if (clientId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clientId)) {
+    return NextResponse.json({ error: 'client_id must be a UUID' }, { status: 400 })
+  }
   const cronRun = dryRun ? null : await startCronRun('seo-weekly-list')
 
   try {
@@ -50,7 +53,8 @@ export async function GET(req: NextRequest) {
         per_client: result.results,
       },
     })
-    return NextResponse.json({ success: result.failed === 0, dry_run: dryRun, ...result })
+    // 500 on any per-client failure: Render's `curl -f` then marks the run red instead of green.
+    return NextResponse.json({ success: result.failed === 0, dry_run: dryRun, ...result }, { status: result.failed === 0 ? 200 : 500 })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     await cronRun?.finish({ failed: 1, error: message })

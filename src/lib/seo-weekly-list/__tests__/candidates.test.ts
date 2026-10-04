@@ -31,6 +31,38 @@ describe('tokenKey', () => {
     expect(tokenKey('visa for china nz')).toBe(tokenKey('nz china visa'))
     expect(tokenKey('forbidden city')).toBe(tokenKey('the forbidden city'))
     expect(tokenKey('imperial palace')).not.toBe(tokenKey('forbidden city'))
+    expect(tokenKey("xi'an")).toBe(tokenKey('xian'))
+  })
+})
+
+describe('buildNearMissCandidates — review fixes', () => {
+  it('keeps direction: "A to B" and "B to A" are different searches and are not merged', () => {
+    expect(tokenKey('flights from auckland to sydney')).not.toBe(tokenKey('flights from sydney to auckland'))
+  })
+
+  it('a topic already ranking top-3 under another phrasing is not a gap; positions 4-5 can still gain (to top-3)', () => {
+    const { candidates } = buildNearMissCandidates(
+      [kw('china visa guide', 2, 900, 3), kw('guide china visa', 15, 800, 3), kw('forbidden city', 4, 1600, 2)],
+      opts,
+    )
+    expect(candidates.map(c => c.primary.keyword)).toEqual(['forbidden city'])
+    expect(candidates[0].potentialClicks).toBeGreaterThan(0)
+  })
+
+  it('a keyword with no Latin letters is skipped WITH a reason, not silently', () => {
+    const { candidates, skipped } = buildNearMissCandidates([kw('中国签证', 15, 500, 2)], opts)
+    expect(candidates).toHaveLength(0)
+    expect(skipped[0].reason).toMatch(/拉丁字符/)
+  })
+
+  it('a competitor whose domain root is only generic words does not blanket-skip ordinary keywords; the reason names the root when it does match', () => {
+    const generic = { ...opts, competitorDomains: ['newzealand.com', 'worldjourneys.co.nz', 'wendywutours.co.nz'] }
+    const { candidates, skipped } = buildNearMissCandidates(
+      [kw('new zealand china tours', 15, 500, 2), kw('wendywutours china', 15, 500, 2)],
+      generic,
+    )
+    expect(candidates.map(c => c.primary.keyword)).toEqual(['new zealand china tours'])
+    expect(skipped[0].reason).toContain('wendywutours')
   })
 })
 
@@ -59,7 +91,7 @@ describe('buildNearMissCandidates', () => {
       opts,
     )
     expect(candidates.map(c => c.primary.keyword)).toEqual(['good phrase'])
-    expect(skipped.map(s => s.reason)).toEqual(expect.arrayContaining(['品牌词', '竞品品牌词']))
+    expect(skipped.map(s => s.reason)).toEqual(expect.arrayContaining(['品牌词', expect.stringContaining('竞品品牌词')]))
   })
 
   it('never treats a missing volume or difficulty as zero — it is skipped with a reason', () => {
@@ -113,5 +145,21 @@ describe('exclusions and own-page matching', () => {
     const pages = [{ url: 'https://x.com/v', path: '/china-visa-guide-for-new-zealanders', title: null, h1: null, word_count: null }]
     expect(matchOwnPages('nz china visa', pages)).toHaveLength(1)
     expect(matchOwnPages('au china visa', pages)).toHaveLength(0)
+  })
+
+  it('ordinary tokens match whole words too: "tour" does not match "tourist"', () => {
+    const pages = [{ url: 'https://x.com/a', path: '/tourist-info', title: 'Tourist info', h1: null, word_count: 1 }]
+    expect(matchOwnPages('tour', pages)).toHaveLength(0)
+    expect(matchOwnPages('tourist', pages)).toHaveLength(1)
+    expect(matchOwnPages('tourists', pages)).toHaveLength(1)
+  })
+
+  it('matches WHOLE words only: "au" never matches restaurant/Tauranga, and the host ("co.nz") never makes every page an "nz" page', () => {
+    const pages = [
+      { url: 'https://x.co.nz/restaurants-in-tauranga', path: '/restaurants-in-tauranga', title: 'Restaurants because', h1: null, word_count: 1 },
+      { url: 'https://x.co.nz/something', path: null, title: null, h1: null, word_count: 1 },
+    ]
+    expect(matchOwnPages('au visa', pages)).toHaveLength(0)
+    expect(matchOwnPages('nz something', pages)).toHaveLength(0)
   })
 })

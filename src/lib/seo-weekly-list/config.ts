@@ -27,10 +27,12 @@ export interface SeoLoopConfig {
   expiryDays: number
   /** A target decided (completed / skipped) within this window is not re-listed. */
   cooldownDays: number
-  /** strengthen_page verifies when the page gained this many words … */
+  /** strengthen_page verifies when the page gained at least this many words since the item was created. */
   strengthenMinWordGain: number
-  /** … or this many markdown links. */
-  strengthenMinLinkGain: number
+  /** Keyword snapshot older than this many days → no new items (stale ranks must not read as current). */
+  snapshotMaxAgeDays: number
+  /** A page's crawl must be at most this old to take a word-count baseline from it. */
+  baselineMaxCrawlAgeDays: number
 }
 
 export const DEFAULT_SEO_LOOP_CONFIG: SeoLoopConfig = {
@@ -45,7 +47,8 @@ export const DEFAULT_SEO_LOOP_CONFIG: SeoLoopConfig = {
   expiryDays: 14,
   cooldownDays: 90,
   strengthenMinWordGain: 100,
-  strengthenMinLinkGain: 2,
+  snapshotMaxAgeDays: 14,
+  baselineMaxCrawlAgeDays: 8,
 }
 
 /** Read `seo_config.loop` overrides; anything that is not a finite positive number is ignored. */
