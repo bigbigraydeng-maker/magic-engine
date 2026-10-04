@@ -143,7 +143,7 @@ CTS 谷歌口径：近三个完整周点击 268 / 269 / 266，曝光 ~14.7k / 13
 | 环节 | 复用什么 | 新增什么 |
 |---|---|---|
 | 目标 | `goals`（`createGoal`/`activateGoal`）、`goal-current-value-refresh` | 一个新指标 `seo_gsc_clicks_28d`（读 `gsc_page_daily`，近 28 天点击）；GA4 自然会话留作参考 |
-| 机会 | `seo_patrol_findings`（`rule_id` 无约束，免迁移）、`keyword_snapshots`、`seo-agent` 评分、`getKeywordsGap`/`getKeywordIdeas` | 新规则：近机会词、缺口词、页级点击率偏低（见 §5.1） |
+| 机会 | `seo_patrol_findings`（`rule_id` 是 `seo_patrol_rule` 枚举，需迁移扩值，见 WP-1）、`keyword_snapshots`、`seo-agent` 评分、`getKeywordsGap`/`getKeywordIdeas` | 新规则：近机会词、缺口词、页级点击率偏低（见 §5.1） |
 | 计划 | `initiatives`（复用现有类型，每目标 ≤3 条）、`execution_items`（`due_date`、`initiative_id`、`steps_json`、`action_type` 均已有列） | 周一计划器（挑 ≤5 项、排日期） |
 | 执行 | 周博客管线、`seo-meta/cycle`（不碰）、人工点头面 | 每日派发器 + 3 个机器自做小动作 |
 | 核验 | `gsc_page_daily`、URL Inspection（已有，每客户每天用 20 次，配额 2,000）、站点抓取、`keyword_snapshots` | 每日核验器 |
@@ -174,8 +174,8 @@ CTS 谷歌口径：近三个完整周点击 268 / 269 / 266，曝光 ~14.7k / 13
 **不做**：`missing_internal_link` 不修（只对孤儿页触发是已知取舍）；内链机会改由"同题自相残杀"和"枢纽页体检"产出。
 
 ### 5.2 机会池如何落地
-- 写 `seo_patrol_findings`（新 `rule_id`，免迁移；TS 联合类型要加）。**注意**：这张表每天"先清后写"，只存最新一批；机会池要的是"本周候选"，所以**机会被周计划挑中那一刻，把证据快照（词/量/难度/排名/取数日期）抄进计划项 `steps_json.opportunity`**，之后不再依赖这张表。
-- `seo-agent` 的评分与大模型排序接成**每周一次**（不是每日），产出写进机会池的 `priority` 字段；大模型只负责排序与写"为什么"，**量/难度/排名一律只来自 DataForSEO/GSC，不让模型编数字**。
+- 写 `seo_patrol_findings`（新 `rule_id`：**需迁移**给 `seo_patrol_rule` 枚举加 `near_miss_keyword`/`ctr_gap_page`/`keyword_gap`/`cannibalization` 四个值，并同步 TS 联合类型）。**注意**：这张表每天"先清后写"，只存最新一批；机会池要的是"本周候选"，所以**机会被周计划挑中那一刻，把证据快照（词/量/难度/排名/取数日期）抄进计划项 `steps_json.opportunity`**，之后不再依赖这张表。
+- `seo-agent` 的评分与大模型排序接成**每周一次**（不是每日），产出写进机会池的 `priority` 字段（该表**目前没有此列**，由 WP-1 迁移新增可空 `priority INTEGER` 与 `priority_reason TEXT`）；大模型只负责排序与写"为什么"，**量/难度/排名一律只来自 DataForSEO/GSC，不让模型编数字**。
 
 ---
 
@@ -273,11 +273,11 @@ CLAUDE §3「能自动就别丢给人；真丢给人，就把话说到他不用�
 | WP | 内容 | IMPACT 段 | 风险 | §11 打分 | 迁移 |
 |---|---|---|---|---|---|
 | **WP-0 清场 + 立目标** | 归档 CTS 过期 16 条计划项；25 张僵尸 pending 卡置 `skipped(reason=legacy_cleanup)`；PM 拍定后建并激活 SEO 目标；输出"清了什么/怎么恢复"清单 | Prescribe（目标） | **A 级流程**（改生产数据：PM 在对话里回「合」才动；非代码 PR） | 频率 低 / IMPACT 高 / 收入 中 → **P2**（但它是 WP-3/4 的**前置**，排最前） | 否 |
-| **WP-1 发现规则重做**（其中 1a「近机会词」是 WP-3/4 的前置，**随 P0 链同批提级**） | 新规则 `near_miss_keyword`、`ctr_gap_page`；`not_indexed` 按谷歌原因分类并降级；`keyword_opportunity` 输入改为"机会池"；R1 判据重定义；机会证据快照抄进计划项；`findingsToActions` 显式排除新规则（专测：只产计划项不产旧卡） | Inspect | B | 频率 高 / IMPACT 中 / 收入 中 → **P2**（1a 因前置关系与 WP-3/4 同批做） | 否（`rule_id` 无约束，已查 `pg_constraint`；TS 联合类型要加） |
+| **WP-1 发现规则重做**（其中 1a「近机会词」是 WP-3/4 的前置，**随 P0 链同批提级**） | 新规则 `near_miss_keyword`、`ctr_gap_page`；`not_indexed` 按谷歌原因分类并降级；`keyword_opportunity` 输入改为"机会池"；R1 判据重定义；机会证据快照抄进计划项；`findingsToActions` 显式排除新规则（专测：只产计划项不产旧卡） | Inspect | **A（含迁移）** | 频率 高 / IMPACT 中 / 收入 中 → **P2**（1a 因前置关系与 WP-3/4 同批做） | **是**：①`ALTER TYPE seo_patrol_rule ADD VALUE` 加 4 个新值（`near_miss_keyword`/`ctr_gap_page`/`keyword_gap`/`cannibalization`，WP-2 的两个也在此一次加完）；②`seo_patrol_findings` 加可空 `priority`、`priority_reason`；③TS 联合类型同步。迁移单独 A 级 PR，走子牙+魏征+狄仁杰 |
 | **WP-3 周计划器 + 每日派发器**（含 3a 新目标指标 `seo_gsc_clicks_28d`、公共预算闸、旧机制隔离 §6.3-6~8） | §6.3、§6.4；Inngest 函数 + 回执 + 登记 `cron/registry.ts`；写库只经 `action-persister.ts` 新增导出函数 | Prescribe → Act | **B；若实现要改 `kernel/boundaries.ts` 名单，或碰钱/发布/Kernel 注册表，则升 A，PR 保持草稿直到定级**（子牙意见） | 频率 高 / IMPACT 高（卡 Act，闭环断在这）/ 收入 中 → **P0** | 否 |
 | **WP-4 每日核验器 + 记分牌 + 独立体检** | §6.5、§3；核验器四态；`pm-daily-todo` 里加独立体检（缺行/没跑→开发欠账，7 天→`decide`）；只读重抓封装；与 WP-3 **同批上线** | Check | B | 频率 高 / IMPACT 高（没有它整条链是假的）/ 收入 中 → **P0** | 否 |
 | **WP-5 PM 可见面** | 今日待办新增 1 个 `review` 车道 kind（≤1 条/天）；周报新增"SEO 记分牌 + 放弃清单（带 what/how/href 与一键恢复）"；不改五类规则；查 `pm-todo` 其他 `source='zhuge'` 过滤不误收计划项 | Check→Tune（可见） | B（动 `five-kinds.ts` 穷举表） | 频率 高 / IMPACT 中 / 收入 低 → **P2** | 否 |
-| **WP-2 缺口词与自相残杀体检** | `keyword_gap`、`cannibalization` 接机会池；`seo-agent` 评分接每周；预算闸；竞品名单走客户配置 | Inspect | B（付费调用，预算闸硬上限） | 频率 中 / IMPACT 中 / 收入 中 → **P2** | 否 |
+| **WP-2 缺口词与自相残杀体检** | `keyword_gap`、`cannibalization` 接机会池；`seo-agent` 评分接每周；预算闸；竞品名单走客户配置 | Inspect | B（付费调用，预算闸硬上限） | 频率 中 / IMPACT 中 / 收入 中 → **P2** | 否（枚举值与 `priority` 列已由 WP-1 迁移提供，WP-2 依赖 WP-1） |
 | **WP-6 周博客对齐机会** | 草稿必带 `primary_keyword/volume/kd`；**拒稿必须记原因**（新增一个可空列属迁移，需先确认，若加列则单独 A 级迁移 PR）；竞品品牌词拦截 | Act | B（加列则迁移 A） | 频率 中 / IMPACT 中 / 收入 中 → **P2** | **可能**（`blog_posts` 加 `rejection_reason`，需开工时核实现有字段，不在本稿定） |
 | **WP-7 泛化** | 第二客户（Oztop 目前暂停，另有其他客户视 PM 优先级） | — | — | 频率 低 / IMPACT 中 / 收入 中 → **P2**（等 CTS 跑稳 4~6 周再评） | 视客户 |
 
