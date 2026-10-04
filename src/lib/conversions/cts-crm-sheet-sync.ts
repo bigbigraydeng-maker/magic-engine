@@ -160,6 +160,7 @@ const EXCLUDE_NOTE_PATTERNS: readonly RegExp[] = [
   /暂不/,
   /不考虑/,
   /不打算/,
+  /^\s*(?:stop|unsubscribe)\s*[.!]*\s*$/im,
 ]
 
 const MONTHS_NO_MAY =
@@ -206,6 +207,38 @@ const INTEREST_NOTE_PATTERNS: readonly RegExp[] = [
 export function notesExcludeLead(notes: string | null): boolean {
   if (!notes) return false
   return EXCLUDE_NOTE_PATTERNS.some((re) => re.test(notes))
+}
+
+/**
+ * Facebook 即时表单提交后，Messenger 会自动生成一条首条入站消息，形如
+ * "Hello! I filled out your form and would like to know more about …"。
+ * 这条模板消息**不算**客户真的跟我们聊过（PM 2026-10-05：124 条近期线索里
+ * 107 条只有这一条）。空/纯空白同样不算。
+ *
+ * 实测里前缀花样很多（emoji、"Hi,"、"Hello!!"、引用标记 `>`/`&gt;`、全角标点），
+ * 所以先归一化再匹配。模板句后面必须**没有**实质内容——"…form yesterday but
+ * nobody called" 这种是真人写的，不能算模板。
+ */
+const FORM_TEMPLATE_PATTERN =
+  /^[\s\W_]*(?:hello|hi|hey)\b[\s\W]*i\s+(?:have\s+)?(?:filled|completed|submitted)\s+(?:out\s+|in\s+)?(?:your|the)\s+form(?=\s*(?:$|[.!,;:]|and\b|would\b|i'?d\b|i\s+would\b|to\s+know\b))/i
+
+/** 自动回复 / 休假自动应答——同样不是客户真的跟我们聊过。 */
+const AUTO_REPLY_PATTERN =
+  /\b(?:out\s+of\s+(?:the\s+)?office|auto[-\s]?reply|automatic\s+reply|automatically\s+generated|do\s+not\s+reply)\b/i
+const AUTO_REPLY_PATTERN_CJK = /自动回复|休假中|外出办公/
+
+export function isFormTemplateMessage(body: string | null | undefined): boolean {
+  if (!body || !body.trim()) return true
+  const normalised = body
+    .normalize('NFKC')
+    .replace(/^\s*(?:&gt;|>)+/, '')
+    .trim()
+  if (!normalised) return true
+  return (
+    FORM_TEMPLATE_PATTERN.test(normalised) ||
+    AUTO_REPLY_PATTERN.test(normalised) ||
+    AUTO_REPLY_PATTERN_CJK.test(normalised)
+  )
 }
 
 export type NoteQualification = 'qualified' | 'excluded' | 'no_evidence'
@@ -340,7 +373,12 @@ export interface PurchaseCandidate {
 
 export interface ExcludedRow {
   kind: 'excluded'
-  reason: 'no_qualifying_phone' | 'excluded_by_notes' | 'no_usable_date' | 'no_interest_evidence'
+  reason:
+    | 'no_qualifying_phone'
+    | 'excluded_by_notes'
+    | 'no_usable_date'
+    | 'no_interest_evidence'
+    | 'no_customer_conversation'
 }
 
 export type ClassifiedRow = QualifiedLead | PurchaseMissingDate | PurchaseCandidate | ExcludedRow
