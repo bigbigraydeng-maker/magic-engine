@@ -324,3 +324,91 @@ describe('查询失败必须 fail closed', () => {
     expect(inserted).toHaveLength(0)
   })
 })
+
+describe('紧急开关熔断只有授权人能解除', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('名单已配，调用者不在名单 → 403，一行都不写', async () => {
+    vi.stubEnv('ADS_ACTIVATION_APPROVER_EMAILS', 'ray@x.com')
+    asAdmin('other@x.com')
+    rows = [trip({ id: 't1', reason: 'manual_emergency_stop: 测试' })]
+
+    const res = await POST(req({ clientId: CLIENT, adAccountId: 'act_1' }))
+
+    expect(res.status).toBe(403)
+    expect(inserted).toHaveLength(0)
+  })
+
+  it('名单已配，调用者在名单（大小写不敏感）→ 200，写一行 release', async () => {
+    vi.stubEnv('ADS_ACTIVATION_APPROVER_EMAILS', 'ray@x.com')
+    asAdmin('RAY@X.COM')
+    rows = [trip({ id: 't1', reason: 'manual_emergency_stop: 测试' })]
+
+    const res = await POST(req({ clientId: CLIENT, adAccountId: 'act_1' }))
+
+    expect(res.status).toBe(200)
+    expect((await res.json()).released).toBe(1)
+    expect(inserted).toHaveLength(1)
+    expect(inserted[0].trip_event_id).toBe('t1')
+  })
+
+  it('名单没配 → 任意全局管理员仍可解除（退回原行为，防死锁）', async () => {
+    vi.stubEnv('ADS_ACTIVATION_APPROVER_EMAILS', '')
+    asAdmin('anyone@x.com')
+    rows = [trip({ id: 't1', reason: 'manual_emergency_stop: 测试' })]
+
+    const res = await POST(req({ clientId: CLIENT, adAccountId: 'act_1' }))
+
+    expect(res.status).toBe(200)
+    expect((await res.json()).released).toBe(1)
+    expect(inserted).toHaveLength(1)
+  })
+
+  it('名单已配，只有系统熔断 → 调用者不在名单也照旧可解除', async () => {
+    vi.stubEnv('ADS_ACTIVATION_APPROVER_EMAILS', 'ray@x.com')
+    asAdmin('other@x.com')
+    rows = [trip({ id: 't1', reason: 'spend_over_cap' })]
+
+    const res = await POST(req({ clientId: CLIENT, adAccountId: 'act_1' }))
+
+    expect(res.status).toBe(200)
+    expect((await res.json()).released).toBe(1)
+    expect(inserted).toHaveLength(1)
+  })
+
+  it('🔴 紧急开关 trip 与系统 trip 并存，调用者不在名单 → 403，一行都不写（all-or-nothing）', async () => {
+    vi.stubEnv('ADS_ACTIVATION_APPROVER_EMAILS', 'ray@x.com')
+    asAdmin('other@x.com')
+    rows = [
+      trip({ id: 't1', reason: 'manual_emergency_stop: 测试' }),
+      trip({ id: 't2', reason: 'spend_over_cap', created_at: '2026-09-27T01:00:00.000Z' }),
+    ]
+
+    const res = await POST(req({ clientId: CLIENT, adAccountId: 'act_1' }))
+
+    expect(res.status).toBe(403)
+    expect(inserted).toHaveLength(0)
+  })
+
+  it('紧急开关 trip 已解除过（不在 open 里）→ 不再限制，只解系统那条', async () => {
+    vi.stubEnv('ADS_ACTIVATION_APPROVER_EMAILS', 'ray@x.com')
+    asAdmin('other@x.com')
+    rows = [
+      trip({ id: 't1', reason: 'manual_emergency_stop: 测试' }),
+      {
+        ...trip({ id: 'r1' }),
+        kind: 'release',
+        trip_event_id: 't1',
+        sticky: false,
+        reason: '人工解除',
+      },
+      trip({ id: 't2', reason: 'spend_over_cap', created_at: '2026-09-27T01:00:00.000Z' }),
+    ]
+
+    const res = await POST(req({ clientId: CLIENT, adAccountId: 'act_1' }))
+
+    expect(res.status).toBe(200)
+    expect((await res.json()).released).toBe(1)
+    expect(inserted.map((r) => r.trip_event_id)).toEqual(['t2'])
+  })
+})

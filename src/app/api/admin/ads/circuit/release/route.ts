@@ -39,6 +39,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
 import { CIRCUIT_NON_STICKY_TTL_MS } from '@/lib/ads-strategy/circuit-state'
+import { KILL_REASON_PREFIX } from '@/lib/ads-strategy/activation-kill'
+import {
+  APPROVER_ENV_NAME,
+  isApproverEmail,
+  parseApproverList,
+} from '@/lib/ads-strategy/activation-approver'
 
 /** 跟数据库那条 CHECK 同一个判据，早一层拒掉，错误信息给人看。 */
 const ACTOR_EMAIL_SHAPE = /^[^@\s]+@[^@\s]+$/
@@ -137,6 +143,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const open = candidates.filter((row) => !alreadyReleased.has(row.id))
   if (open.length === 0) {
     return NextResponse.json({ released: 0, message: '这个账户当前没有需要解除的熔断' })
+  }
+
+  // 紧急开关打开的熔断：名单配了就只有授权人能解；名单没配时退回原行为（任何全局管理员），
+  // 避免"开关解不掉 → 该账户自动动作永久被冻结"的死锁（名单没配时开启通道本来也开不了）。
+  const manualTrips = open.filter((trip) => trip.reason.startsWith(KILL_REASON_PREFIX))
+  if (manualTrips.length > 0) {
+    const listConfigured = parseApproverList(process.env[APPROVER_ENV_NAME]).length > 0
+    if (listConfigured && !isApproverEmail(email)) {
+      return NextResponse.json(
+        { error: '这是紧急开关打开的熔断，只有授权人能解除。你的账号不在授权人名单里' },
+        { status: 403 },
+      )
+    }
   }
 
   // ③ **每条未解 trip 各写一行 release**，不是写一行「全解了」。
