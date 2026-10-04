@@ -1,26 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const holder = vi.hoisted(() => ({
-  current: null as unknown,
-}))
+vi.mock('@/lib/auth/require-session', () => ({ requireSession: vi.fn() }))
+vi.mock('@/lib/auth/whitelist', () => ({ getUserPermissions: vi.fn(() => null) }))
+vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 
-vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: vi.fn() }))
-vi.mock('@/lib/supabase', () => ({
-  supabaseAdmin: {
-    from: (table: string) => {
-      const fake = holder.current as {
-        from: (t: string) => unknown
-      }
-      return fake.from(table)
-    },
-  },
-}))
-
-import { guardContentGeneration } from '../guard-content-generation'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
-import { createFakeTables, type FakeTables } from './fake-tables'
-
-const mockAccess = vi.mocked(requirePaidClientAccess)
+import { guardContentGeneration } from '@/lib/content/guard-content-generation'
+import { requireSession } from '@/lib/auth/require-session'
+import { supabaseAdmin } from '@/lib/supabase'
+import { createFakeTables, type FakeTables } from '@/lib/content/__tests__/fake-tables'
+import type { AccessType } from '@/lib/auth/access-types'
 
 const CLIENT_A = 'a0000000-0000-4000-8000-000000000001'
 const CLIENT_B = 'b0000000-0000-4000-8000-000000000002'
@@ -40,269 +28,192 @@ const SEED = {
   ],
 }
 
-let fake: FakeTables
+const mockRequireSession = vi.mocked(requireSession)
+const mockFrom = vi.mocked(supabaseAdmin.from)
+const holder: { current: FakeTables } = { current: createFakeTables(SEED) }
 
-function body(res: { json: () => Promise<unknown> } | null) {
+function mockUser(email: string) {
+  mockRequireSession.mockResolvedValue({
+    ok: true,
+    user: { id: 'user-1', email },
+  } as never)
+}
+
+function mockPortalRows(
+  rows: Array<{ client_id: string; access_type?: AccessType }>,
+  error: unknown = null,
+) {
+  const enriched = rows.map((r) => ({
+    client_id: r.client_id,
+    access_type: r.access_type ?? 'dashboard',
+    scoped_admin: false,
+  }))
+  return {
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    in: vi.fn().mockResolvedValue({ data: enriched, error }),
+  }
+}
+
+function install(portal: ReturnType<typeof mockPortalRows>) {
+  mockFrom.mockImplementation((table: string) => {
+    if (table === 'client_portal_users') return portal as never
+    return holder.current.from(table) as never
+  })
+}
+
+function paid(clientId: string) {
+  mockUser('paid@example.com')
+  install(mockPortalRows([{ client_id: clientId, access_type: 'dashboard' }]))
+}
+
+async function body(res: { json: () => Promise<unknown> } | null) {
   return res!.json()
 }
 
 beforeEach(() => {
-  fake = createFakeTables(SEED)
-  holder.current = fake
-  mockAccess.mockResolvedValue({ ok: true } as never)
+  vi.resetAllMocks()
+  holder.current = createFakeTables(SEED)
 })
 
-afterEach(() => vi.clearAllMocks())
+afterEach(() => vi.restoreAllMocks())
 
 describe('guardContentGeneration', () => {
-  it('rejects a missing client_id with 400 and never authenticates', async () => {
-    const res = await guardContentGeneration({ client_id: undefined })
+  it.each([
+    ['missing', undefined],
+    ['numeric', 123],
+    ['non-uuid', 'abc'],
+    ['uppercase', CLIENT_A.toUpperCase()],
+  ])('rejects a %s client_id with 400 and never authenticates', async (_label, value) => {
+    const res = await guardContentGeneration({ client_id: value })
     expect(res!.status).toBe(400)
-    expect((await body(res)) as { success: boolean }).toMatchObject({ success: false })
-    expect(mockAccess).not.toHaveBeenCalled()
-    expect(fake.calls).toEqual([])
+    expect(await body(res)).toMatchObject({ success: false })
+    expect(mockRequireSession).not.toHaveBeenCalled()
+    expect(holder.current.calls).toEqual([])
   })
 
-  it('rejects a numeric client_id with 400', async () => {
-    const res = await guardContentGeneration({ client_id: 123 })
-    expect(res!.status).toBe(400)
-    expect((await body(res)) as { success: boolean }).toMatchObject({ success: false })
-    expect(mockAccess).not.toHaveBeenCalled()
-    expect(fake.calls).toEqual([])
-  })
-
-  it('rejects a non-uuid client_id with 400', async () => {
-    const res = await guardContentGeneration({ client_id: 'abc' })
-    expect(res!.status).toBe(400)
-    expect((await body(res)) as { success: boolean }).toMatchObject({ success: false })
-    expect(mockAccess).not.toHaveBeenCalled()
-    expect(fake.calls).toEqual([])
-  })
-
-  it('rejects an uppercase client_id with 400', async () => {
-    const res = await guardContentGeneration({ client_id: CLIENT_A.toUpperCase() })
-    expect(res!.status).toBe(400)
-    expect((await body(res)) as { success: boolean }).toMatchObject({ success: false })
-    expect(mockAccess).not.toHaveBeenCalled()
-    expect(fake.calls).toEqual([])
-  })
-
-  it('passes through an unauthenticated 401 without touching the DB', async () => {
-    mockAccess.mockResolvedValue({
-      ok: false,
-      status: 401,
-      error: 'Unauthorized',
-      reason: 'unauthorized',
-    } as never)
-
-    const res = await guardContentGeneration({
-      client_id: CLIENT_A,
-      execution_item_id: ITEM_A,
-    })
-
+  it('returns 401 with no session and never queries a table', async () => {
+    mockRequireSession.mockResolvedValue({ ok: false, status: 401, error: 'Unauthorized' } as never)
+    install(mockPortalRows([]))
+    const res = await guardContentGeneration({ client_id: CLIENT_A })
     expect(res!.status).toBe(401)
-    expect(await body(res)).toEqual({
-      success: false,
-      error: 'Unauthorized',
-      reason: 'unauthorized',
-    })
-    expect(fake.calls).toEqual([])
+    expect(holder.current.calls).toEqual([])
   })
 
-  it('passes through a wrong-client 403', async () => {
-    mockAccess.mockResolvedValue({
-      ok: false,
-      status: 403,
-      error: 'Forbidden',
-      reason: 'forbidden',
-    } as never)
+  it('rejects a self_serve user with 403 paid_only before any ownership lookup', async () => {
+    mockUser('free@example.com')
+    install(mockPortalRows([{ client_id: CLIENT_A, access_type: 'self_serve' }]))
+    const res = await guardContentGeneration({ client_id: CLIENT_A, execution_item_id: ITEM_A })
+    expect(res!.status).toBe(403)
+    expect(await body(res)).toMatchObject({ reason: 'paid_only' })
+    expect(holder.current.calls).not.toContain('execution_items')
+  })
 
+  it('allows a paid row for the requested client and rejects a foreign one', async () => {
+    paid(CLIENT_A)
+    expect(await guardContentGeneration({ client_id: CLIENT_A })).toBeNull()
+
+    paid(CLIENT_B)
     const res = await guardContentGeneration({ client_id: CLIENT_A })
     expect(res!.status).toBe(403)
+    expect(await body(res)).toMatchObject({ error: 'Forbidden' })
   })
 
-  it('rejects self_serve with a paid_only 403', async () => {
-    mockAccess.mockResolvedValue({
-      ok: false,
-      status: 403,
-      error: 'This feature requires a paid plan. Contact Magic Lab to unlock.',
-      reason: 'paid_only',
-    } as never)
-
-    const res = await guardContentGeneration({ client_id: CLIENT_A })
-    expect(res!.status).toBe(403)
-    expect((await body(res)) as { reason: string }).toMatchObject({ reason: 'paid_only' })
-  })
-
-  it('passes through a lookup_failed 500', async () => {
-    mockAccess.mockResolvedValue({
-      ok: false,
-      status: 500,
-      error: 'Authorization check failed',
-      reason: 'lookup_failed',
-    } as never)
-
+  it('fails closed with 500 when the portal lookup errors', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockUser('paid@example.com')
+    install(mockPortalRows([], { message: 'x' }))
     const res = await guardContentGeneration({ client_id: CLIENT_A })
     expect(res!.status).toBe(500)
   })
 
-  it('calls requirePaidClientAccess exactly once with the client id', async () => {
-    await guardContentGeneration({ client_id: CLIENT_A })
-    expect(mockAccess).toHaveBeenCalledTimes(1)
-    expect(mockAccess).toHaveBeenCalledWith(CLIENT_A)
-  })
-
-  it('returns null with no optional ids and no DB reads', async () => {
-    const res = await guardContentGeneration({ client_id: CLIENT_A })
-    expect(res).toBeNull()
-    expect(fake.calls).toEqual([])
-  })
-
-  it('returns null when optional ids are null/undefined', async () => {
+  it('skips null/undefined optional ids without querying', async () => {
+    paid(CLIENT_A)
     const res = await guardContentGeneration({
       client_id: CLIENT_A,
       execution_item_id: null,
       production_package_id: undefined,
     })
     expect(res).toBeNull()
-    expect(fake.calls).toEqual([])
+    expect(holder.current.calls).toEqual([])
   })
 
-  it('allows an execution item owned by the client', async () => {
-    const res = await guardContentGeneration({
-      client_id: CLIENT_A,
-      execution_item_id: ITEM_A,
-    })
-    expect(res).toBeNull()
-    expect(fake.calls).toEqual(['execution_items'])
-  })
+  it.each([
+    ['execution_item_id', 'execution_items', ITEM_A, ITEM_B],
+    ['production_package_id', 'production_packages', PKG_A, PKG_B],
+  ])('checks ownership of %s', async (field, table, own, foreign) => {
+    paid(CLIENT_A)
+    expect(await guardContentGeneration({ client_id: CLIENT_A, [field]: own })).toBeNull()
+    expect(holder.current.calls).toEqual([table])
 
-  it("rejects another client's execution item", async () => {
-    const res = await guardContentGeneration({
-      client_id: CLIENT_A,
-      execution_item_id: ITEM_B,
-    })
-    expect(res!.status).toBe(403)
-    expect((await body(res)) as { error: string }).toMatchObject({ error: 'Forbidden' })
-  })
+    holder.current = createFakeTables(SEED)
+    const foreignRes = await guardContentGeneration({ client_id: CLIENT_A, [field]: foreign })
+    expect(foreignRes!.status).toBe(403)
+    const foreignBody = await body(foreignRes)
+    expect(foreignBody).toMatchObject({ error: 'Forbidden' })
 
-  it('rejects a non-existent execution item with the same body as a foreign one', async () => {
-    const foreign = await guardContentGeneration({
+    holder.current = createFakeTables(SEED)
+    const missingRes = await guardContentGeneration({
       client_id: CLIENT_A,
-      execution_item_id: ITEM_B,
+      [field]: 'e0000000-0000-4000-8000-0000000000ff',
     })
-    const missing = await guardContentGeneration({
-      client_id: CLIENT_A,
-      execution_item_id: 'e0000000-0000-4000-8000-0000000000ff',
-    })
-
-    expect(missing!.status).toBe(403)
-    expect(await body(missing)).toEqual(await body(foreign))
-  })
-
-  it('allows an owned package and rejects a foreign package', async () => {
-    const own = await guardContentGeneration({
-      client_id: CLIENT_A,
-      production_package_id: PKG_A,
-    })
-    expect(own).toBeNull()
-    expect(fake.calls).toEqual(['production_packages'])
-
-    fake = createFakeTables(SEED)
-    holder.current = fake
-
-    const foreign = await guardContentGeneration({
-      client_id: CLIENT_A,
-      production_package_id: PKG_B,
-    })
-    expect(foreign!.status).toBe(403)
-    expect((await body(foreign)) as { error: string }).toMatchObject({ error: 'Forbidden' })
+    expect(missingRes!.status).toBe(403)
+    expect(await body(missingRes)).toEqual(foreignBody)
   })
 
   it('rejects an execution item id passed as a production_package_id', async () => {
-    const res = await guardContentGeneration({
-      client_id: CLIENT_A,
-      production_package_id: ITEM_A,
-    })
+    paid(CLIENT_A)
+    const res = await guardContentGeneration({ client_id: CLIENT_A, production_package_id: ITEM_A })
     expect(res!.status).toBe(403)
   })
 
   it('allows both owned ids and reads both tables in order', async () => {
+    paid(CLIENT_A)
     const res = await guardContentGeneration({
       client_id: CLIENT_A,
       execution_item_id: ITEM_A,
       production_package_id: PKG_A,
     })
     expect(res).toBeNull()
-    expect(fake.calls).toEqual(['execution_items', 'production_packages'])
+    expect(holder.current.calls).toEqual(['execution_items', 'production_packages'])
   })
 
-  it('rejects invalid execution_item_id values with 400', async () => {
-    const invalid: unknown[] = ['', 0, false, {}, [], 'abc', ITEM_A.toUpperCase()]
-
-    for (const value of invalid) {
-      fake = createFakeTables(SEED)
-      holder.current = fake
-
-      const res = await guardContentGeneration({
-        client_id: CLIENT_A,
-        execution_item_id: value,
-      })
-
+  it.each([
+    ['execution_item_id', ITEM_A],
+    ['production_package_id', PKG_A],
+  ])('rejects invalid %s values with 400 and no query', async (field, upper) => {
+    paid(CLIENT_A)
+    for (const value of ['', 0, false, {}, [], 'abc', upper.toUpperCase()]) {
+      holder.current = createFakeTables(SEED)
+      const res = await guardContentGeneration({ client_id: CLIENT_A, [field]: value })
       expect(res!.status).toBe(400)
-      expect((await body(res)) as { error: string }).toMatchObject({
-        error: expect.stringContaining('execution_item_id'),
-      })
-      expect(fake.calls).toEqual([])
+      expect(await body(res)).toMatchObject({ error: expect.stringContaining(field) })
+      expect(holder.current.calls).toEqual([])
     }
   })
 
-  it('rejects invalid production_package_id values with 400', async () => {
-    const invalid: unknown[] = ['', 0, false, {}, [], 'abc', PKG_A.toUpperCase()]
-
-    for (const value of invalid) {
-      fake = createFakeTables(SEED)
-      holder.current = fake
-
-      const res = await guardContentGeneration({
-        client_id: CLIENT_A,
-        production_package_id: value,
-      })
-
-      expect(res!.status).toBe(400)
-      expect((await body(res)) as { error: string }).toMatchObject({
-        error: expect.stringContaining('production_package_id'),
-      })
-      expect(fake.calls).toEqual([])
-    }
+  it('returns 401 (not 400) for an unauthenticated caller with an invalid execution_item_id', async () => {
+    mockRequireSession.mockResolvedValue({ ok: false, status: 401, error: 'Unauthorized' } as never)
+    install(mockPortalRows([]))
+    const res = await guardContentGeneration({ client_id: CLIENT_A, execution_item_id: 'not-a-uuid' })
+    expect(res!.status).toBe(401)
   })
 
-  it('fails closed with 500 when the DB errors', async () => {
-    fake = createFakeTables(SEED, { errorOnTable: 'execution_items' })
-    holder.current = fake
-
-    const res = await guardContentGeneration({
-      client_id: CLIENT_A,
-      execution_item_id: ITEM_A,
-    })
-
+  it('fails closed with 500 when the ownership query errors', async () => {
+    paid(CLIENT_A)
+    holder.current = createFakeTables(SEED, { errorOnTable: 'execution_items' })
+    const res = await guardContentGeneration({ client_id: CLIENT_A, execution_item_id: ITEM_A })
     expect(res!.status).toBe(500)
-    expect((await body(res)) as { error: string }).toMatchObject({
-      error: 'Authorization check failed',
-    })
+    expect(await body(res)).toMatchObject({ error: 'Authorization check failed' })
   })
 
-  it('fails closed with 500 and leaks nothing when access throws', async () => {
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    mockAccess.mockRejectedValue(new Error('secret db password leaked'))
-
+  it('fails closed with 500 and leaks nothing when auth throws', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockRequireSession.mockRejectedValue(new Error('secret db password leaked'))
     const res = await guardContentGeneration({ client_id: CLIENT_A })
-
     expect(res!.status).toBe(500)
     const parsed = await body(res)
     expect(parsed).toMatchObject({ error: 'Authorization check failed' })
     expect(JSON.stringify(parsed)).not.toContain('secret')
-
-    spy.mockRestore()
   })
 })
