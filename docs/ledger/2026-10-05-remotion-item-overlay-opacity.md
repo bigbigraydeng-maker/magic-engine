@@ -5,6 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-05
 source: session:52d6775d
+verify_how: 下一条真实出片用 0.15–0.25 重出，抽 9 宫格对比原 0.4；背景明显更亮且白字仍清楚算成，仍偏暗就换亮素材或关模糊
 done_on: 2026-10-05
 done_ref: pr:2261
 ---
