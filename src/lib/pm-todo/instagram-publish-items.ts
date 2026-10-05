@@ -162,7 +162,7 @@ export async function pushInstagramPublishItems(
     .select('id, client_id, output, published_ref')
     .eq('status', 'published')
     .eq('published_ref->>platform', 'facebook')
-    .gte('updated_at', since)
+    .or(`updated_at.gte.${since},output->instagram_publish->>status.eq.failed`)
     .order('updated_at', { ascending: false })
     .limit(200)
   if (error) throw new Error('instagram publish items query failed: ' + error.message)

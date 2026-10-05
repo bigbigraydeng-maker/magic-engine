@@ -13,7 +13,7 @@ import { startCronRun } from '@/lib/cron/run-logger'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
-/** 前面已用掉这么久(毫秒)就不再开始 Instagram 这一步(它最坏要 6+ 分钟,留给下一轮) */
+/** 前面已用掉这么久(毫秒)就不再开始 Instagram 这一步(它最坏要约 160 秒(上传+排期各 20 次轮询),留给下一轮) */
 const INSTAGRAM_START_BUDGET_MS = 90_000
 
 // 🔴 必须写 cron_run_logs(2026-08-03 补):此前这条路由不留任何运行痕迹,

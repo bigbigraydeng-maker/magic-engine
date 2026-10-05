@@ -102,17 +102,17 @@ function makeFakeSupabase(result: {
   error: { message: string } | null
 }): {
   supabase: Parameters<typeof pushInstagramPublishItems>[0]
-  calls: { eq: Array<[string, unknown]>; gte: Array<[string, unknown]> }
+  calls: { eq: Array<[string, unknown]>; or: string[] }
 } {
-  const calls = { eq: [] as Array<[string, unknown]>, gte: [] as Array<[string, unknown]> }
+  const calls = { eq: [] as Array<[string, unknown]>, or: [] as string[] }
   const query = {
     select: () => query,
     eq: (col: string, val: unknown) => {
       calls.eq.push([col, val])
       return query
     },
-    gte: (col: string, val: unknown) => {
-      calls.gte.push([col, val])
+    or: (filter: string) => {
+      calls.or.push(filter)
       return query
     },
     order: () => query,
@@ -189,7 +189,7 @@ describe('pushInstagramPublishItems', () => {
     ).rejects.toThrow('instagram publish items query failed: boom')
   })
 
-  it('uses .eq(status,published) and the lookback .gte', async () => {
+  it('uses .eq(status,published) and the lookback OR unresolved-failed .or', async () => {
     const { supabase, calls } = makeFakeSupabase({ data: [], error: null })
     const now = new Date('2024-01-10T00:00:00Z')
     await pushInstagramPublishItems(supabase, items(), now, nameOf)
@@ -197,7 +197,9 @@ describe('pushInstagramPublishItems', () => {
     const expectedSince = new Date(
       now.getTime() - INSTAGRAM_ITEM_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
     ).toISOString()
-    expect(calls.gte).toContainEqual(['updated_at', expectedSince])
+    expect(calls.or).toEqual([
+      `updated_at.gte.${expectedSince},output->instagram_publish->>status.eq.failed`,
+    ])
   })
 })
 

@@ -14,7 +14,8 @@ import type { PublishAdapter, PublishTarget, PublishedRef } from '../types'
 
 const PUBLER_BASE = 'https://app.publer.com/api/v1'
 const POLL_INTERVAL_MS = 4000
-const MAX_POLLS = 45
+// 上传 + 排期两个任务各最多 20×4s=80s;配合 cron 的 90s 起跑预算,总耗时 < curl 的 300s 上限
+const MAX_POLLS = 20
 const SCHEDULE_DELAY_MS = 3 * 60 * 1000
 const LOOKUP_PAGES = 3 // 对账每个状态最多翻几页(新帖排在前面;翻太深没意义)
 
@@ -137,6 +138,21 @@ export function jobFailureMessage(status: unknown): string | null {
   return null
 }
 
+/**
+ * Publer job-status 真实响应是嵌套的:{ data: { status, result: { payload } } }。
+ * 解包成 { status, payload };同时兼容旧的扁平形状 { status, payload }。
+ */
+export function unwrapJobStatus(raw: unknown): { status?: unknown; payload?: unknown } {
+  const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+  if (!isObj(raw)) return {}
+  const data = isObj(raw['data']) ? raw['data'] : raw
+  const result = isObj(data['result']) ? data['result'] : undefined
+  return {
+    status: data['status'] ?? raw['status'],
+    payload: result?.['payload'] ?? data['payload'] ?? raw['payload'],
+  }
+}
+
 /** Publer 列表响应三种形状:裸数组 / {posts:[]} / {data:[]}。只留纯对象。 */
 export function normalizePostList(raw: unknown): Array<Record<string, unknown>> {
   let list: unknown
@@ -210,12 +226,13 @@ export function createPublerInstagramAdapter(deps: PublerInstagramDeps = {}): Pu
     return res.json().catch(() => ({}))
   }
 
-  // 轮询任务:complete/completed → 返回;failed/error → throw;超 45 次 → 超时。
-  async function pollJob(jobId: string): Promise<Record<string, unknown>> {
+  // 轮询任务:complete/completed → 返回;failed/error → throw;超 MAX_POLLS 次 → 超时。
+  async function pollJob(jobId: string): Promise<{ status?: unknown; payload?: unknown }> {
     for (let i = 0; i < MAX_POLLS; i++) {
-      const status = await publerRequest('GET', `/job_status/${jobId}`)
-      const s = status && typeof status === 'object' ? (status as Record<string, unknown>)['status'] : undefined
-      if (s === 'complete' || s === 'completed') return status as Record<string, unknown>
+      const raw = await publerRequest('GET', `/job_status/${jobId}`)
+      const status = unwrapJobStatus(raw)
+      const s = status['status']
+      if (s === 'complete' || s === 'completed') return status
       if (s === 'failed' || s === 'error') {
         throw new PublerRejectedError(`Publer 任务失败(${jobId})`)
       }
