@@ -35,6 +35,7 @@ export function computeIdempotencyKey(
   definition: ActionDefinition,
   clientId: string,
   input: Record<string, unknown>,
+  nonce?: string,
 ): string {
   const parts: string[] = []
   for (const field of definition.idempotency.keyFields) {
@@ -52,8 +53,9 @@ export function computeIdempotencyKey(
   const scopePrefix =
     definition.idempotency.scope === 'client' ? `client:${clientId}` : 'global'
 
+  const noncePart = nonce === undefined ? '' : `|nonce=${canonical(nonce)}`
   const digest = createHash('sha256')
-    .update(`${scopePrefix}|${definition.actionKey}|v${definition.version}|${parts.join('|')}`)
+    .update(`${scopePrefix}|${definition.actionKey}|v${definition.version}|${parts.join('|')}${noncePart}`)
     .digest('hex')
     .slice(0, 32)
 
@@ -66,9 +68,11 @@ export function computeUnknownActionKey(
   actionKey: string,
   clientId: string,
   input: Record<string, unknown>,
+  nonce?: string,
 ): string {
+  const noncePart = nonce === undefined ? '' : `|nonce=${canonical(nonce)}`
   const digest = createHash('sha256')
-    .update(`client:${clientId}|unknown|${actionKey}|${canonical(input)}`)
+    .update(`client:${clientId}|unknown|${actionKey}|${canonical(input)}${noncePart}`)
     .digest('hex')
     .slice(0, 32)
   return `unknown:${actionKey}:${digest}`

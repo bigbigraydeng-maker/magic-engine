@@ -34,6 +34,7 @@ function outcome(over: Partial<OutcomeForSend> = {}): OutcomeForSend {
     currency: 'NZD',
     occurredAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
     pageScopedUserId: null,
+    metaLeadId: null,
     actionSource: 'email',
     ...over,
   }
@@ -157,5 +158,20 @@ describe('边界', () => {
     const p = maskForPreview(outcome(), { ...CONFIG, defaultPhoneCountry: null }, META)
     expect((p.客户 as Record<string, unknown>).电话).toBeNull()
     expect(p.匹配键_无).toContain('电话')
+  })
+})
+
+describe('Facebook 线索编号', () => {
+  it('🔴 只给「有/无」，原始编号绝不出现在预览里（预览会永久留底）', () => {
+    const preview = maskForPreview(outcome({ metaLeadId: '1687504185706630' }), CONFIG, META)
+    const text = JSON.stringify(preview)
+    expect(text).not.toContain('1687504185706630')
+    expect(text).toContain('Facebook 线索编号')
+    expect((preview.匹配键_有 as string[]).includes('Facebook 线索编号')).toBe(true)
+  })
+
+  it('没有时列在「匹配键_无」里', () => {
+    const preview = maskForPreview(outcome(), CONFIG, META)
+    expect((preview.匹配键_无 as string[]).includes('Facebook 线索编号')).toBe(true)
   })
 })
