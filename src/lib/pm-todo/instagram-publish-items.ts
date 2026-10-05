@@ -133,12 +133,13 @@ export function buildInstagramPublishItems(
   return items
 }
 
-/** Facebook 回执的发布时间还在跟发窗口内(读不出时间 = 不算,宁可少报不乱报) */
-function isWithinFollowWindow(publishedRef: unknown, now: Date): boolean {
-  if (typeof publishedRef !== 'object' || publishedRef === null) return false
+/** Facebook 回执的发布时间:'within' 窗口内 / 'expired' 确实超过窗口 / 'unknown' 读不出(宁可少报不乱报) */
+function followWindowState(publishedRef: unknown, now: Date): 'within' | 'expired' | 'unknown' {
+  if (typeof publishedRef !== 'object' || publishedRef === null) return 'unknown'
   const at = (publishedRef as Record<string, unknown>).published_at
   const t = typeof at === 'string' ? Date.parse(at) : NaN
-  return Number.isFinite(t) && now.getTime() - t <= MAX_FB_AGE_MS
+  if (!Number.isFinite(t)) return 'unknown'
+  return now.getTime() - t <= MAX_FB_AGE_MS ? 'within' : 'expired'
 }
 
 /**
@@ -180,7 +181,9 @@ export async function pushInstagramPublishItems(
     if (receipt === null) continue
     // 超过「自动跟发窗口」的片系统不会再试了(见 MAX_FB_AGE_MS)—— 不能再挂「接好后会自动补发」,
     // 但失败也不能悄悄消失:改成「已错过自动补发、请决定是否手动处理」
-    if (!isWithinFollowWindow(row.published_ref, now)) {
+    const windowState = followWindowState(row.published_ref, now)
+    if (windowState === 'unknown') continue
+    if (windowState === 'expired') {
       if (receipt.status === 'failed') {
         blocked.push({ work_order_id: receipt.work_order_id, client_id: receipt.client_id, failure_kind: receipt.failure_kind ?? 'other', error: receipt.error ?? '', expired: true })
       }

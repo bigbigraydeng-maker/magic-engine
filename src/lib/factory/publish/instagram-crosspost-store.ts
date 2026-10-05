@@ -6,6 +6,8 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { resolveBoundPublerAccount } from '@/lib/flywheel/social-post-publish'
+import { MAX_FB_AGE_MS } from './instagram-receipt'
 import type { PublishTarget } from '../types'
 import type { CrosspostCandidate, CrosspostStore } from './instagram-crosspost'
 
@@ -34,20 +36,25 @@ function rowToCandidate(row: Record<string, unknown>): CrosspostCandidate {
   }
 }
 
-/** 校验 Publer Instagram 账号 id 的格式。 */
-const PUBLER_ACCOUNT_ID_RE = /^[A-Za-z0-9_-]{8,64}$/
-
-/** 从 factory_config 中解析 Instagram 账号 id；没配/不合法返回 null(不查品牌,没配的客户不该被品牌缺失拖累)。 */
-function parseInstagramAccountId(factoryConfig: unknown): string | null {
-  const cfg = asPlainObject(factoryConfig)
-  if (cfg === null) return null
-  const raw = asPlainObject(cfg.instagram_target)
-  if (raw === null) return null
-  if (raw.platform !== 'publer') return null
-  if (raw.publer_provider !== 'instagram') return null
-  const accountId = raw.publer_account_id
-  if (typeof accountId !== 'string') return null
-  return PUBLER_ACCOUNT_ID_RE.test(accountId) ? accountId : null
+/** 已在 Publer 连接器里绑定 Instagram 账号的客户 id(连接器是账号绑定的唯一真相源)。 */
+async function listInstagramBoundClientIds(): Promise<string[]> {
+  const { data, error } = await supabaseAdmin
+    .from('client_connectors')
+    .select('client_id, config')
+    .eq('anchor', 'publer')
+  if (error) throw error
+  const rows = Array.isArray(data) ? data : []
+  const ids: string[] = []
+  for (const row of rows) {
+    const r = asPlainObject(row)
+    const ids2 = asPlainObject(asPlainObject(r?.config)?.publer_account_ids)
+    if (r === null || ids2 === null || typeof r.client_id !== 'string') continue
+    const hasInstagram = Object.entries(ids2).some(
+      ([k, v]) => k.toLowerCase() === 'instagram' && typeof v === 'string' && v.length > 0,
+    )
+    if (hasInstagram) ids.push(r.client_id)
+  }
+  return ids
 }
 
 /**
@@ -57,6 +64,11 @@ function parseInstagramAccountId(factoryConfig: unknown): string | null {
 export function createSupabaseCrosspostStore(): CrosspostStore {
   return {
     async listCandidates(limit: number): Promise<CrosspostCandidate[]> {
+      // 在库里就排除「没绑 Instagram 的客户」和「已过 48 小时窗口的帖子」,
+      // 否则这些永远不会被处理的行会占满 limit,饿死真正可处理的候选。
+      const boundClientIds = await listInstagramBoundClientIds()
+      if (boundClientIds.length === 0) return []
+      const cutoff = new Date(Date.now() - MAX_FB_AGE_MS).toISOString()
       const { data, error } = await supabaseAdmin
         .from('content_work_orders')
         .select(
@@ -64,6 +76,8 @@ export function createSupabaseCrosspostStore(): CrosspostStore {
         )
         .eq('status', 'published')
         .eq('published_ref->>platform', 'facebook')
+        .in('client_id', boundClientIds)
+        .gte('published_ref->>published_at', cutoff)
         .order('updated_at', { ascending: false })
         .limit(limit)
       if (error) throw error
@@ -72,14 +86,9 @@ export function createSupabaseCrosspostStore(): CrosspostStore {
     },
 
     async loadInstagramTarget(clientId: string): Promise<PublishTarget | null> {
-      const { data: clientRow, error: clientErr } = await supabaseAdmin
-        .from('clients')
-        .select('factory_config')
-        .eq('id', clientId)
-        .maybeSingle()
-      if (clientErr) throw clientErr
-      const accountId = parseInstagramAccountId(asPlainObject(clientRow)?.factory_config)
-      if (accountId === null) return null
+      const account = await resolveBoundPublerAccount(clientId, 'instagram')
+      if (account === null) return null
+      const accountId = account.id
 
       // 防误发要用客户品牌名核对 Publer 账号名;缺品牌名 => 失败关闭(不猜)。
       const { data: brandRow, error: brandErr } = await supabaseAdmin

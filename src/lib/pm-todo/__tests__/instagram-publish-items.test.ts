@@ -209,7 +209,7 @@ function items(): ManualItem[] {
 
 describe('跟发窗口与「防重复标记没读回」', () => {
   const NOW = new Date('2024-01-10T00:00:00Z')
-  it('Facebook 发出已超过 48 小时的片:系统不会再试,不挂「接好后会自动补发」的待办', async () => {
+  it('Facebook 发出已超过 48 小时的失败片:下发「需决定是否手动处理」待办,不挂「接好后会自动补发」', async () => {
     const receipt = makeReceipt({ failure_kind: 'account', error: 'disconnected' })
     const { supabase } = makeFakeSupabase({
       data: [{ id: 'wo-1', client_id: 'client-1', output: withReceipt({}, receipt), published_ref: { published_at: '2024-01-05T00:00:00Z' } }],
@@ -217,7 +217,10 @@ describe('跟发窗口与「防重复标记没读回」', () => {
     })
     const out: ManualItem[] = []
     await pushInstagramPublishItems(supabase, out, NOW, nameOf)
-    expect(out).toHaveLength(0)
+    expect(out).toHaveLength(1)
+    expect(out[0]?.what).toContain('48 小时')
+    expect(out[0]?.how).toContain('手动补发')
+    expect(out[0]?.how).not.toContain('自动再试')
   })
 
   it('Facebook 回执读不出发布时间:宁可少报,不乱报', async () => {
