@@ -360,7 +360,8 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
     render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
 
     await screen.findByText('Facebook Post 审核')
-    expect(screen.getByText('Post 通过')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Post 通过' })).not.toBeInTheDocument()
+    expect(screen.getByText(/CTA 首评发布能力完成、相关检查可测/)).toBeInTheDocument()
     expect(screen.getByText('Post 需修改')).toBeInTheDocument()
     expect(screen.getByText(/不代表事实核验、Story\/Reel 通过、生成、排期、Provider 或发布授权/)).toBeInTheDocument()
     expect(screen.getByText('NOT_AUTHORIZED')).toBeInTheDocument()
@@ -452,12 +453,21 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
     render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
     await screen.findByText('Facebook Post 审核')
 
-    fireEvent.click(screen.getByText('Post 需修改'))
-    expect(await screen.findByText('请先写明需要修改的原因。')).toBeInTheDocument()
+    expect(screen.getByText('Post 需修改').closest('button')).toBeDisabled()
     expect(global.fetch).toHaveBeenCalledTimes(1)
 
     fireEvent.change(screen.getByPlaceholderText('如需修改，请写明原因'), {
       target: { value: 'Use a stronger opening line' },
+    })
+    fireEvent.click(screen.getAllByRole('radio', { name: 'FAIL' })[2])
+    fireEvent.change(screen.getAllByPlaceholderText('说明未通过原因')[0], {
+      target: { value: 'Logo missing' },
+    })
+    fireEvent.change(screen.getAllByPlaceholderText('来源 HTTPS URL 或 client_asset:<ID>')[0], {
+      target: { value: 'https://example.test/source' },
+    })
+    fireEvent.change(screen.getAllByPlaceholderText('来源 HTTPS URL 或 client_asset:<ID>')[1], {
+      target: { value: 'https://example.test/source' },
     })
     fireEvent.click(screen.getByText('Post 需修改'))
 
@@ -475,6 +485,13 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
       date: '2026-08-24',
       verdict: 'NEEDS_REVISION',
       reason: 'Use a stronger opening line',
+      checklist_human: [
+        { key: 'factual_claims_have_source', judge: 'HUMAN', outcome: 'NOT_MEASURED', detail: null, source_ref: 'https://example.test/source' },
+        { key: 'factual_claims_source_verified', judge: 'HUMAN', outcome: 'NOT_MEASURED', detail: null, source_ref: 'https://example.test/source' },
+        { key: 'logo_watermark_present', judge: 'HUMAN', outcome: 'FAIL', detail: 'Logo missing', source_ref: null },
+        { key: 'asset_provenance_labeled', judge: 'HUMAN', outcome: 'NOT_MEASURED', detail: null, source_ref: null },
+        { key: 'asset_provenance_matches_claim_context', judge: 'HUMAN', outcome: 'NOT_MEASURED', detail: null, source_ref: null },
+      ],
     })
   })
 
@@ -493,73 +510,31 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
     expect(screen.queryByText('已通过')).not.toBeInTheDocument()
   })
 
-  it('makes a current PASS visually obvious and removes the duplicate pass action', async () => {
+  it('does not display an unusable legacy PASS as current', async () => {
     mockFetchOnce(reviewPayload({
       verdict: 'PASS',
       reason: null,
       reviewed_at: '2026-09-01T15:05:00.000Z',
-      is_current: true,
+      is_current: false,
     }))
 
     render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
 
-    await screen.findByText('✓ 这一天的 Facebook Post 已通过')
-    expect(screen.getByText('Post 已通过 1/1')).toBeInTheDocument()
-    expect(screen.getByText('✓ Post 已通过')).toBeInTheDocument()
+    await screen.findByText('已失效，需重审')
+    expect(screen.getByText('Post 已通过 0/1')).toBeInTheDocument()
+    expect(screen.getByText(/首评发布能力完成、相关检查可测/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Post 通过' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Post 需修改' })).toBeInTheDocument()
   })
 
-  it('batch-passes pending Posts one at a time using the latest review revision', async () => {
-    const first = reviewPayload()
-    first.days = daysGrid(['2026-08-24', '2026-08-25'])
-    first.bundles = [
-      first.bundles[0],
-      {
-        ...first.bundles[0],
-        date: '2026-08-25',
-        post: { ...first.bundles[0].post, hook: 'Second Post', image_asset_id: 'asset-2' },
-        post_review: null,
-      },
-    ]
-    first.review_summary = { passed: 0, needs_revision: 0, total: 2 }
-    const reviewed = {
-      ...first,
-      review_revision: '30000000-0000-0000-0000-000000000003',
-      bundles: first.bundles.map(bundle => ({
-        ...bundle,
-        post_review: {
-          verdict: 'PASS',
-          reason: null,
-          reviewed_at: '2026-09-01T15:10:00.000Z',
-          is_current: true,
-        },
-      })),
-      review_summary: { passed: 2, needs_revision: 0, total: 2 },
-    }
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => first })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ success: true, changed: true, review_revision: '20000000-0000-0000-0000-000000000002' }) })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ success: true, changed: true, review_revision: '30000000-0000-0000-0000-000000000003' }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => reviewed }) as unknown as typeof fetch
+  it('keeps bulk pass unavailable while server-owned first-comment checks are unmeasured', async () => {
+    mockFetchOnce(reviewPayload())
 
     render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: /批量通过未审 Post（2）/ }))
-
-    await screen.findByText('全部 Post 已通过')
-    const calls = vi.mocked(global.fetch).mock.calls
-    expect(calls).toHaveLength(4)
-    expect(JSON.parse(calls[1][1]!.body as string)).toMatchObject({
-      date: '2026-08-24',
-      verdict: 'PASS',
-      expected_review_revision: null,
-    })
-    expect(JSON.parse(calls[2][1]!.body as string)).toMatchObject({
-      date: '2026-08-25',
-      verdict: 'PASS',
-      expected_review_revision: '20000000-0000-0000-0000-000000000002',
-    })
+    await screen.findByText('Facebook Post 审核')
+    expect(screen.queryByRole('button', { name: /批量通过未审 Post/ })).not.toBeInTheDocument()
+    expect(screen.getByText(/首评发布能力完成、相关检查可测/)).toBeInTheDocument()
   })
 
   it('ignores an old client GET that resolves after the panel switches clients', async () => {

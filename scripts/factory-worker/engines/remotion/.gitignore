@@ -1,0 +1,4 @@
+node_modules/
+out/
+# local trial assets (clips, music, logos) are never committed
+public/

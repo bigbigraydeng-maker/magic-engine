@@ -67,6 +67,7 @@ const METRIC_PLACEHOLDERS: Record<string, MetricPlaceholder> = {
   },
   social_followers_growth: { baseline: 'e.g. 0', target: 'e.g. 1000' },
   organic_traffic:     { baseline: 'e.g. 1000',  target: 'e.g. 5000' },
+  seo_gsc_clicks_28d:  { baseline: 'e.g. 1000',  target: 'e.g. 1300' },
 }
 
 function placeholderFor(metric: MetricCandidate | null, direction: TargetDirection, kind: 'baseline' | 'target'): string {

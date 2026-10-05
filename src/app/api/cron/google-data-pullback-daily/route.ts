@@ -51,7 +51,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { fetchGscSnapshot } from '@/lib/gsc/client'
 import { gscSiteUrlFromConfig } from '@/lib/gsc/connected-clients'
 import { fetchGa4Snapshot, fetchGa4PaidSearchMetrics } from '@/lib/ga4/client'
-import { getAdAccountInsights, getAdCampaignInsights, MetaAdsInsights } from '@/lib/meta/client'
+import { getAdAccountInsightsResult, getAdCampaignInsights, MetaAdsInsights } from '@/lib/meta/client'
 import { fetchAccountInsights, loadGoogleAdsCreds } from '@/lib/google-ads/client'
 import { SEO_METRIC_KEY, GA4_METRIC_KEY, ADS_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import { adsMetricKeysWrittenBy } from '@/lib/flywheel/metric-registry'
@@ -916,14 +916,17 @@ async function syncMeta(
     const since = thirtyDaysAgo.toISOString().slice(0, 10)
     const until = today.toISOString().slice(0, 10)
 
-    const [insights, campaigns] = await Promise.all([
-      getAdAccountInsights(adAccountId, accessToken, since, until),
+    const [insightsResult, campaigns] = await Promise.all([
+      getAdAccountInsightsResult(adAccountId, accessToken, since, until),
       getAdCampaignInsights(adAccountId, accessToken, since, until),
     ])
 
-    if (!insights) {
-      return { success: false, error: 'getAdAccountInsights returned null — check META_SYSTEM_USER_TOKEN and ad account ID' }
+    if (!insightsResult.ok) {
+      const failure = insightsResult.failure
+      const reason = failure.kind === 'http_error' ? `${failure.kind} (${failure.status})` : failure.kind
+      return { success: false, error: `getAdAccountInsights ${reason}` }
     }
+    const insights = insightsResult.insights
 
     const { data, error } = await supabaseAdmin
       .from('meta_ads_snapshots')

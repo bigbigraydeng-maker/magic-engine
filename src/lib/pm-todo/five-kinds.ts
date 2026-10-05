@@ -56,6 +56,7 @@ export function isPmKind(lane: TodoLane): lane is PmKind {
 export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // ── 1 · 要拍板的（撤不回 / 花钱 / 对外）─────────────────────────────
   conversion_needs_review: 'decide', // 告诉广告平台一笔成交，撤不回
+  payment_email_needs_human: 'truth', // 邮件说收到款了、系统判不了真假/金额，要人核对
   ai_auto_review_circuit_breaker: 'decide', // 重新打开「AI 自动发给广告平台」
   ads_auto_pause_pending: 'decide', // 暂停在花钱的广告组
   // 广告自治被熔断器冻住了，要不要恢复自动动手是个决定；同 ads_auto_pause_pending 一档

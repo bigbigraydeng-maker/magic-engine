@@ -514,6 +514,7 @@ export async function authorizeRun(
    *    只有直接调 authorizeRun 的测试才会不传（那时没有第二个执行者）。
    */
   fence?: { generation: number },
+  options: { readonly requireHumanApproval?: boolean } = {},
 ): Promise<AuthorizationOutcome> {
   const now = deps.now()
 
@@ -548,8 +549,23 @@ export async function authorizeRun(
   const { definition, policy, costEstimate, costCap } = pf
   const expiresAt = new Date(now.getTime() + policy.decision_ttl_seconds * 1000).toISOString()
 
+  // A caller that promises an approval screen must never race a policy change
+  // into an automatic provider write. Re-read policy in preflight, then deny if
+  // it no longer requires approval; do not silently downgrade this request.
+  if (options.requireHumanApproval && policy.mode !== 'require_approval') {
+    return recordDeny(deps, {
+      run,
+      definition,
+      policy,
+      code: 'outward_requires_human_policy',
+      reason: `「${definition.title}」的当前规则不是“必须人工批准”——本次请求已停止，没有执行预算变更`,
+      costEstimate,
+      fence,
+    })
+  }
+
   // 要人点头。
-  if (policy.mode === 'require_approval') {
+  if (policy.mode === 'require_approval' || options.requireHumanApproval) {
     const decision = await insertDecision(deps.supabase, {
       action_run_id: run.id,
       client_id: run.client_id,
@@ -593,7 +609,9 @@ export async function authorizeRun(
     action_version: run.action_version,
     verdict: 'allow',
     deny_code: null,
-    reason: `这个客户已经允许系统自己做「${definition.title}」，且这次不花钱、不对外`,
+    reason: definition.sideEffect === 'outward'
+      ? `这个客户已允许有限自动执行「${definition.title}」，本次通过信封检查；执行前仍须重读事实`
+      : `这个客户已经允许系统自己做「${definition.title}」，且这次不花钱、不对外`,
     policy_snapshot: snapshotOf(policy, definition, run.input),
     policy_id: policy.id,
     policy_version: policy.policy_version,
