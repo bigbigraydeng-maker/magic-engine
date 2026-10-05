@@ -356,3 +356,37 @@ describe('录入校验 · 其它', () => {
     expect(r.errors.length).toBeGreaterThanOrEqual(4)
   })
 })
+
+describe('录入 · Facebook 线索编号（meta_lead_id）', () => {
+  it('合法编号（15–17 位纯数字）原样写进行', () => {
+    const r = buildIntakeRow(purchase({ metaLeadId: ' 1687504185706630 ' }), CTX)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.row.meta_lead_id).toBe('1687504185706630')
+  })
+
+  it('没传就是 null，不影响现有记录', () => {
+    const r = buildIntakeRow(purchase(), CTX)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.row.meta_lead_id).toBeNull()
+  })
+
+  it('🔴 格式不对：丢掉并给提示，但不拦住整条记录（它只是增强项）', () => {
+    for (const bad of ['l:1687504185706630', '12345', '168750418570663x', '123456789012345678']) {
+      const r = buildIntakeRow(purchase({ metaLeadId: bad }), CTX)
+      expect(r.ok, bad).toBe(true)
+      if (!r.ok) continue
+      expect(r.row.meta_lead_id, bad).toBeNull()
+      expect(r.warnings.join(), bad).toContain('线索编号格式不对')
+    }
+  })
+
+  it('线索编号本身不能代替邮箱/电话/私信身份 —— 至少还得有一把原有匹配键', () => {
+    const r = buildIntakeRow(
+      purchase({ customerEmail: null, customerPhone: null, metaLeadId: '1687504185706630' }),
+      CTX,
+    )
+    expect(r.ok).toBe(false)
+  })
+})

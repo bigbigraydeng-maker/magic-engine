@@ -35,6 +35,7 @@ import {
   isReviewablePostDate,
   type CampaignDailyPlanData,
 } from '@/lib/campaign/daily-plan'
+import { postChecklistPasses } from '@/lib/social/content-review'
 import {
   CampaignDailyPublishCommandSchema,
   CampaignDailyPublishMetaSchema,
@@ -124,6 +125,13 @@ async function loadReviewedPlan(
   ) {
     return conflict('REVIEW_STATE_INVALID')
   }
+  const checklistReady = planData.bundles
+    .filter(bundle => !!bundle.post)
+    .every(bundle => {
+      const decision = review.data.posts[bundle.date]
+      return decision?.verdict === 'PASS' && decision.reviewer_role === 'admin' && postChecklistPasses(decision.checklist)
+    })
+  if (!checklistReady) return conflict('REVIEW_CHECKLIST_REQUIRED')
   if (review.data.revision !== command.review_revision) return conflict('REVIEW_REVISION_MISMATCH')
 
   // The no-publish queue receipt is the proof that these exact Posts passed

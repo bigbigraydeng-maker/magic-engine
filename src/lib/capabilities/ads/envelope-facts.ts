@@ -34,7 +34,9 @@ import { DELIVERING_STATUSES } from '@/lib/ads-strategy/portfolio/diagnostics/co
 /** 每个广告动作对花费的性质。信封按性质分流（暂停不走变动比例，等等）。 */
 const CHANGE_KIND: Readonly<Record<string, EnvelopeChangeKind>> = {
   'ads.pause_unit': 'pause',
+  'ads.pause_campaign': 'pause',
   'ads.cut_unit_budget': 'budget_change',
+  'ads.cut_campaign_budget': 'budget_change',
   'ads.scale_unit_budget': 'budget_change',
   'ads.budget_move_plan': 'budget_change',
   'ads.add_retargeting_adset': 'new_spend',
@@ -42,12 +44,16 @@ const CHANGE_KIND: Readonly<Record<string, EnvelopeChangeKind>> = {
 }
 
 interface SnapRow {
+  id: string
+  ad_account_id: string
+  shared_account: boolean
   level: string
   entity_id: string
   adset_id: string | null
   campaign_id: string | null
   budget_level: string | null
   daily_budget_minor: number | null
+  currency: string | null
   learning_stage: string | null
   ad_studies: unknown
   effective_status: string | null
@@ -56,7 +62,7 @@ interface SnapRow {
 }
 
 const SNAP_COLUMNS =
-  'level, entity_id, adset_id, campaign_id, budget_level, daily_budget_minor, learning_stage, ad_studies, effective_status, capture_reason, captured_at'
+  'id, ad_account_id, shared_account, level, entity_id, adset_id, campaign_id, budget_level, daily_budget_minor, currency, learning_stage, ad_studies, effective_status, capture_reason, captured_at'
 
 /**
  * 只有这些投放状态算「在花钱」，用来加总账户当日预算。
@@ -68,9 +74,206 @@ const SNAP_COLUMNS =
  *    统一到诊断层的一份，改只改一处，两边不会分家。
  */
 const DELIVERING = DELIVERING_STATUSES
+const CLIENT_BUDGET_FACT_FRESH_MS = 24 * 60 * 60 * 1000
+const CLIENT_BUDGET_ROW_LIMIT = 20_000
+const POSTGREST_PAGE_SIZE = 1_000
+
+interface ClientBudgetRollup {
+  totalCents: number
+  accountTotals: Map<string, number>
+  capCents: number
+}
+
+/**
+ * 上调预算前，按客户全部已登记账户重新核算预算配置。
+ * 所有账户都必须有近 24 小时内完整的账户/系列/广告组抓取回执；快照只用于读
+ * 当前设置，任一账户、币种、预算或分页无法证明完整时都拒绝上调。
+ */
+async function loadClientBudgetRollup(
+  sb: SupabaseClient,
+  clientId: string,
+  targetAccountId: string,
+  targetLevel: 'adset' | 'campaign',
+  targetEntityId: string,
+  expectedTargetBeforeCents: number,
+  clientCapCents: number | null,
+  now: Date,
+  at: 'authorize' | 'pre_provider',
+): Promise<ClientBudgetRollup | { unavailable: string }> {
+  const unavailable = (why: string) => ({ unavailable: `facts:${why}` } as const)
+  if (!Number.isSafeInteger(clientCapCents) || clientCapCents === null || clientCapCents <= 0) {
+    return unavailable('客户日预算总上限未配置或无效')
+  }
+
+  const { data: registry, error: registryError } = await sb
+    .from('client_meta_ad_accounts')
+    .select('ad_account_id, daily_budget_cap_cents')
+    .eq('client_id', clientId)
+  if (registryError) return unavailable(`读取客户广告账户清单失败：${registryError.message}`)
+  let accounts = (registry ?? []) as Array<{ ad_account_id: string; daily_budget_cap_cents: number | null }>
+  if (accounts.length === 0) {
+    const { data: client, error: clientError } = await sb
+      .from('clients')
+      .select('meta_ad_account_id')
+      .eq('id', clientId)
+      .maybeSingle()
+    if (clientError) return unavailable(`读取客户主广告账户失败：${clientError.message}`)
+    const legacyId = (client as { meta_ad_account_id?: string | null } | null)?.meta_ad_account_id
+    if (!legacyId) return unavailable('客户没有已登记的 Meta 广告账户')
+    accounts = [{ ad_account_id: legacyId, daily_budget_cap_cents: clientCapCents }]
+  }
+
+  const accountIds = accounts.map(a => a.ad_account_id)
+  if (!accountIds.includes(targetAccountId)) return unavailable('目标广告账户不在客户已登记账户清单内')
+  const registeredCaps = accounts.map(a => a.daily_budget_cap_cents)
+  const perAccountCaps = accounts.length === 1 && registeredCaps[0] == null
+    ? [clientCapCents]
+    : registeredCaps
+  if (perAccountCaps.some(c => !Number.isSafeInteger(c) || c === null || c <= 0)) {
+    return unavailable('客户有广告账户没有有效的账户级日预算上限')
+  }
+  const capTotal = (perAccountCaps as number[]).reduce((sum, cap) => sum + cap, 0)
+  if (!Number.isSafeInteger(capTotal) || capTotal > clientCapCents) {
+    return unavailable('各广告账户的日预算上限合计超过客户总上限')
+  }
+
+  const since = new Date(now.getTime() - CLIENT_BUDGET_FACT_FRESH_MS).toISOString()
+  const captures: Array<{ ad_account_id: string; level: string; complete: boolean; skipped_shared: boolean; captured_at: string; capture_reason: string }> = []
+  for (let offset = 0; ; offset += POSTGREST_PAGE_SIZE) {
+    const { data: page, error } = await sb
+      .from('ad_snapshot_captures')
+      .select('ad_account_id, level, captured_at, complete, skipped_shared, capture_reason')
+      .eq('client_id', clientId)
+      .in('ad_account_id', accountIds)
+      .in('level', ['account', 'campaign', 'adset'])
+      .gte('captured_at', since)
+      .order('captured_at', { ascending: false })
+      .range(offset, offset + POSTGREST_PAGE_SIZE - 1)
+    if (error) return unavailable(`读取跨账户快照回执失败：${error.message}`)
+    const batch = (page ?? []) as typeof captures
+    captures.push(...batch)
+    if (captures.length > CLIENT_BUDGET_ROW_LIMIT) return unavailable('跨账户快照回执过多，无法证明数据完整')
+    if (batch.length < POSTGREST_PAGE_SIZE) break
+  }
+
+  const latestCapture = new Map<string, (typeof captures)[number]>()
+  for (const row of captures) {
+    const key = `${row.ad_account_id}:${row.level}`
+    if (!latestCapture.has(key)) latestCapture.set(key, row)
+  }
+  const rounds = new Set([...latestCapture.values()].map(row => row.captured_at))
+  if (rounds.size !== 1) return unavailable('客户各账户不是同一轮快照，不能证明总预算完整')
+  const roundAt = [...rounds][0]
+  const roundTime = Date.parse(roundAt)
+  if (!Number.isFinite(roundTime) || roundTime > now.getTime() || roundTime < now.getTime() - CLIENT_BUDGET_FACT_FRESH_MS) {
+    return unavailable('客户预算快照时间无效或过期')
+  }
+  if (at === 'pre_provider' && [...latestCapture.values()].some(row => row.capture_reason !== 'kernel_pre')) {
+    return unavailable('执行前缺少客户所有账户同一轮 kernel_pre 快照')
+  }
+  for (const accountId of accountIds) {
+    for (const level of ['account', 'campaign', 'adset']) {
+      const capture = latestCapture.get(`${accountId}:${level}`)
+      if (!capture || !capture.complete || capture.skipped_shared) {
+        return unavailable(`广告账户 ${accountId} 的${level}快照不完整或共用，不能核算客户总预算`)
+      }
+    }
+  }
+
+  const snapshots: SnapRow[] = []
+  for (let offset = 0; ; offset += POSTGREST_PAGE_SIZE) {
+    const { data: page, error } = await sb
+      .from('ad_entity_snapshots')
+      .select(SNAP_COLUMNS)
+      .eq('client_id', clientId)
+      .in('ad_account_id', accountIds)
+      .in('level', ['account', 'campaign', 'adset'])
+      .eq('captured_at', roundAt)
+      .order('captured_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(offset, offset + POSTGREST_PAGE_SIZE - 1)
+    if (error) return unavailable(`读取客户跨账户预算快照失败：${error.message}`)
+    const batch = (page ?? []) as SnapRow[]
+    snapshots.push(...batch)
+    if (snapshots.length > CLIENT_BUDGET_ROW_LIMIT) return unavailable('跨账户预算快照超过安全读取上限')
+    if (batch.length < POSTGREST_PAGE_SIZE) break
+  }
+
+  const rows = snapshots
+  const latest = new Map<string, SnapRow>()
+  for (const row of rows) {
+    const key = `${row.ad_account_id}:${row.level}:${row.entity_id}`
+    if (!latest.has(key)) latest.set(key, row)
+  }
+
+  const currencies = new Set<string>()
+  const accountTotals = new Map<string, number>()
+  for (const accountId of accountIds) {
+    const accountRows = [...latest.values()].filter(r => r.ad_account_id === accountId)
+    const accountSnap = accountRows.find(r => r.level === 'account')
+    if (!accountSnap || accountSnap.shared_account || typeof accountSnap.currency !== 'string' || !accountSnap.currency.trim()) {
+      return unavailable(`广告账户 ${accountId} 的币种或客户归属无法确认`)
+    }
+    const currency = accountSnap.currency.trim().toUpperCase()
+    currencies.add(currency)
+    if (accountRows.some(r => (r.level === 'campaign' || r.level === 'adset') && r.currency?.trim().toUpperCase() !== currency)) {
+      return unavailable(`广告账户 ${accountId} 的预算币种与账户币种不一致`)
+    }
+
+    const campaigns = accountRows.filter(r => r.level === 'campaign')
+    const adsets = accountRows.filter(r => r.level === 'adset')
+    const cboCampaignIds = new Set<string>()
+    let total = 0
+    for (const campaign of campaigns) {
+      if (campaign.capture_reason === 'disappeared' || !DELIVERING.has(campaign.effective_status ?? '')) continue
+      if (campaign.budget_level === 'cbo') {
+        cboCampaignIds.add(campaign.entity_id)
+        const amount = campaign.daily_budget_minor
+        if (!Number.isSafeInteger(amount) || amount === null || amount <= 0 || campaign.currency !== currency) {
+          return unavailable(`投放中的广告系列 ${campaign.entity_id} 预算或币种无法确认`)
+        }
+        total += amount
+      } else if (campaign.budget_level !== 'abo') {
+        return unavailable(`投放中的广告系列 ${campaign.entity_id} 预算层级无法确认`)
+      }
+    }
+    for (const adset of adsets) {
+      if (adset.capture_reason === 'disappeared' || !DELIVERING.has(adset.effective_status ?? '')) continue
+      if (adset.campaign_id && cboCampaignIds.has(adset.campaign_id)) continue
+      const amount = adset.daily_budget_minor
+      if (adset.budget_level !== 'abo' || !Number.isSafeInteger(amount) || amount === null || amount <= 0 || adset.currency !== currency) {
+        return unavailable(`投放中的广告组 ${adset.entity_id} 预算或币种无法确认`)
+      }
+      total += amount
+    }
+    if (!Number.isSafeInteger(total)) return unavailable(`广告账户 ${accountId} 预算合计溢出`)
+    const cap = perAccountCaps[accountIds.indexOf(accountId)] as number
+    if (total > cap) return unavailable(`广告账户 ${accountId} 当前预算已超过账户级上限`)
+    accountTotals.set(accountId, total)
+  }
+
+  if (currencies.size !== 1) return unavailable('客户广告账户币种不一致，不能把不同币种的预算相加')
+  const totalCents = [...accountTotals.values()].reduce((sum, value) => sum + value, 0)
+  if (!Number.isSafeInteger(totalCents) || totalCents > clientCapCents) {
+    return unavailable('客户当前跨账户日预算已超过客户总上限')
+  }
+  if (accountTotals.get(targetAccountId) === undefined || accountTotals.get(targetAccountId) === null) {
+    return unavailable('读不到目标广告账户的预算合计')
+  }
+  const targetRow = latest.get(`${targetAccountId}:${targetLevel}:${targetEntityId}`)
+  if (!targetRow || targetRow.capture_reason === 'disappeared' || targetRow.daily_budget_minor !== expectedTargetBeforeCents) {
+    return unavailable('目标预算与本次授权读取的基线不一致')
+  }
+
+  return { totalCents, accountTotals, capCents: clientCapCents }
+}
 
 function studyCount(raw: unknown): number {
   return Array.isArray(raw) ? raw.length : 0
+}
+
+function afterRawIsIncrease(after: unknown, before: number | null): boolean {
+  return typeof after === 'number' && Number.isFinite(after) && typeof before === 'number' && after > before
 }
 
 function latestOf(rows: readonly SnapRow[]): SnapRow | null {
@@ -207,13 +410,55 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
 
     // ── 解析这次动作真正该看的实体 ──────────────────────────────────────────
     let subject: Subject
+    let learningTargetOverride: SnapRow | null = null
     switch (actionKey) {
       case 'ads.pause_unit':
-      case 'ads.cut_unit_budget':
-      case 'ads.scale_unit_budget': {
+      case 'ads.cut_unit_budget': {
         const id = str('adset_id')
         if (!id) return cantRead('input 里没有 adset_id')
         subject = { entityId: id, level: 'adset', learningApplicable: true }
+        break
+      }
+      case 'ads.scale_unit_budget': {
+        const id = str('adset_id')
+        if (!id) return cantRead('input 里没有 O1 来源广告组 adset_id')
+        const campaignId = str('campaign_id')
+        if (campaignId) {
+          if (!/^\d{1,32}$/.test(campaignId)) return cantRead('input 里的 campaign_id 格式无效')
+          const sourceAdset = latestOf(rows.filter(r => r.level === 'adset' && r.entity_id === id))
+          if (!sourceAdset || sourceAdset.campaign_id !== campaignId) {
+            return unavailable('facts:O1 来源广告组不属于本次调整的广告系列')
+          }
+          learningTargetOverride = sourceAdset
+          const campaign = latestOf(rows.filter(r => r.level === 'campaign' && r.entity_id === campaignId))
+          if (!campaign || campaign.budget_level !== 'cbo') {
+            return unavailable('facts:目标广告系列不是系列级 CBO 预算')
+          }
+          const latestChildren = new Map<string, SnapRow>()
+          for (const child of rows.filter(r => r.level === 'adset' && r.campaign_id === campaignId)) {
+            const prior = latestChildren.get(child.entity_id)
+            if (!prior || Date.parse(child.captured_at) > Date.parse(prior.captured_at)) latestChildren.set(child.entity_id, child)
+          }
+          const deliveringChildren = [...latestChildren.values()].filter(child => DELIVERING.has(child.effective_status ?? ''))
+          if (deliveringChildren.length !== 1 || deliveringChildren[0]?.entity_id !== id) {
+            return unavailable('facts:O1 广告组不是该系列唯一在投广告组，不能按单组信号提高系列预算')
+          }
+          subject = { entityId: campaignId, level: 'campaign', learningApplicable: true }
+        } else {
+          subject = { entityId: id, level: 'adset', learningApplicable: true }
+        }
+        break
+      }
+      case 'ads.cut_campaign_budget': {
+        const id = str('campaign_id')
+        if (!id || !/^\d{1,32}$/.test(id)) return cantRead('input 里没有有效的 campaign_id')
+        subject = { entityId: id, level: 'campaign', learningApplicable: true }
+        break
+      }
+      case 'ads.pause_campaign': {
+        const id = str('campaign_id')
+        if (!id || !/^\d{1,32}$/.test(id)) return cantRead('input 里没有有效的 campaign_id')
+        subject = { entityId: id, level: 'campaign', learningApplicable: false }
         break
       }
       case 'ads.swap_creative': {
@@ -244,6 +489,16 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
     const subjectRows = rows.filter(r => r.level === subject.level && r.entity_id === subject.entityId)
     const target = latestOf(subjectRows)
     if (!target) return cantRead(`快照里查不到 ${subject.level} ${subject.entityId}`)
+    const learningTarget = learningTargetOverride ?? target
+    if (actionKey === 'ads.cut_campaign_budget') {
+      if (target.budget_level !== 'cbo') return unavailable('facts:目标不是系列级 CBO 预算，不执行系列预算调整')
+      if (typeof target.currency !== 'string' || !target.currency.trim()) {
+        return unavailable('facts:系列预算币种未知，不能与账户上限比较')
+      }
+    }
+    if (actionKey === 'ads.scale_unit_budget' && str('campaign_id') && target.budget_level !== 'cbo') {
+      return unavailable('facts:目标不是系列级 CBO 预算，不能按系列上调')
+    }
 
     // ── 账户当日预算合计 ────────────────────────────────────────────────────
     // 🔴 Meta 有两种预算位，只加广告组级会**系统性少算**，让日上限这道闸偏松：
@@ -272,12 +527,20 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
         if (c.budget_level !== 'cbo') continue
         cboCampaignIds.add(c.entity_id)
         if (!DELIVERING.has(c.effective_status ?? '')) continue
+        if (actionKey === 'ads.cut_campaign_budget' &&
+            (typeof c.daily_budget_minor !== 'number' || !Number.isSafeInteger(c.daily_budget_minor) || c.daily_budget_minor <= 0)) {
+          return unavailable(`facts:在投 CBO 系列 ${c.entity_id} 的预算缺失或无效，无法安全核算账户日预算`)
+        }
         if (typeof c.daily_budget_minor === 'number') accountTotal += c.daily_budget_minor
       }
       for (const a of latestAdsets.values()) {
         // CBO 旗下的广告组不再单独计入 —— 钱在系列那一层，重复加就翻倍。
         if (a.campaign_id && cboCampaignIds.has(a.campaign_id)) continue
         if (!DELIVERING.has(a.effective_status ?? '')) continue
+        if (actionKey === 'ads.cut_campaign_budget' &&
+            (typeof a.daily_budget_minor !== 'number' || !Number.isSafeInteger(a.daily_budget_minor) || a.daily_budget_minor <= 0)) {
+          return unavailable(`facts:在投广告组 ${a.entity_id} 的预算缺失或无效，无法安全核算账户日预算`)
+        }
         if (typeof a.daily_budget_minor === 'number') accountTotal += a.daily_budget_minor
       }
     }
@@ -353,6 +616,16 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
       ? 0
       : typeof target.daily_budget_minor === 'number' ? target.daily_budget_minor : null
 
+    // O1 carries the exact budget that was shown for human approval. Pin it to
+    // both the authorization snapshot and the pre-provider snapshot so a later
+    // change cannot reuse an old approved `after_cents` against a new baseline.
+    if (actionKey === 'ads.scale_unit_budget') {
+      const approvedBefore = input.before_cents
+      if (!Number.isSafeInteger(approvedBefore) || approvedBefore !== beforeCents) {
+        return unavailable('获批时的预算已变化；请重新提交并重新审批')
+      }
+    }
+
     const afterRaw = input.after_cents
     const afterCents =
       kind === 'pause' ? 0
@@ -360,15 +633,56 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
       : typeof afterRaw === 'number' ? afterRaw
       : Number.NaN                                              // 该带却没带 → 纯函数判成无效金额
 
+    // 只有加预算需要跨客户的硬上限判定。逐账户现有判据仍由下面的单账户
+    // facts 提供；如果客户任一账户或完整抓取证据读不全，增加动作一律拒绝。
+    let clientDailyTotalBeforeCents: number | null = null
+    let clientDailyCapCents: number | null = null
+    if (actionKey === 'ads.scale_unit_budget' && afterRawIsIncrease(afterCents, beforeCents)) {
+      const rollup = await loadClientBudgetRollup(
+        deps.sb,
+        clientId,
+        adAccountId,
+        str('campaign_id') ? 'campaign' : 'adset',
+        subject.entityId,
+        beforeCents ?? Number.NaN,
+        typeof cfg?.daily_budget_cap_cents === 'number' ? cfg.daily_budget_cap_cents : null,
+        now(),
+        at,
+      )
+      if ('unavailable' in rollup) return unavailable(rollup.unavailable)
+      clientDailyTotalBeforeCents = rollup.totalCents
+      clientDailyCapCents = rollup.capCents
+      accountTotal = rollup.accountTotals.get(adAccountId) ?? null
+    }
+
+    if (actionKey === 'ads.cut_campaign_budget') {
+      if (!Number.isSafeInteger(beforeCents) || beforeCents === null || beforeCents <= 0 ||
+          !Number.isSafeInteger(afterCents) || afterCents < 0) {
+        return unavailable('facts:系列预算或目标金额无效，无法安全判断减预算')
+      }
+      if (afterCents > beforeCents) {
+        return unavailable('facts:减系列预算目标高于当前预算，禁止借减预算动作加钱')
+      }
+      const budgetRows = rows.filter(r =>
+        ((r.level === 'campaign' && r.budget_level === 'cbo') || r.level === 'adset') &&
+        typeof r.daily_budget_minor === 'number',
+      )
+      if (budgetRows.some(r => r.currency !== target.currency)) {
+        return unavailable('facts:账户预算币种不一致，不能合计账户日预算')
+      }
+    }
+
     const request: EnvelopeRequest = { kind, afterCents }
     const facts: EnvelopeFacts = {
       beforeCents,
       accountDailyTotalBeforeCents: accountTotal,
+      clientDailyTotalBeforeCents,
       dailyCapCents,
+      clientDailyCapCents,
       hoursSinceLastChange: cooldownHours,
       learningPhaseApplicable: subject.learningApplicable,
-      learningStage: target.learning_stage,
-      adStudyCount: studyCount(target.ad_studies),
+      learningStage: learningTarget.learning_stage,
+      adStudyCount: studyCount(learningTarget.ad_studies),
       hasRollbackHandler: typeof deps.capabilities[actionKey]?.rollback === 'function',
     }
 

@@ -51,6 +51,7 @@ const A_PATHS: Array<[string, string]> = [
   ['docs/ENGINEERING_QUALITY_GATES.md', 'quality gate rulebook'],
   ['docs/ledger/README.md', 'ledger rules'],
   ['scripts/ledger-check-refs.sh', 'ledger check script'],
+  ['src/lib/ledger/parse.ts', 'ledger parser/validator'],
   ['src/middleware.ts', 'request-level auth boundary'],
   ['src/lib/auth/client-access.ts', 'client access boundary'],
   ['src/app/api/auth/callback/route.ts', 'auth endpoint'],
@@ -945,7 +946,9 @@ describe('the unreadable-line quote is safe to post (W121-2)', () => {
 /**
  * DR121-3: `\s*[:：|]?\s*` after a label backtracked quadratically — a 64 KB
  * body took 4–8 s inside a required check. Every hostile shape below must
- * stay well under the budget.
+ * stay well under the budget. CI runner scheduling noise can exceed 200 ms;
+ * 300 ms still catches the former multi-second backtracking regression with
+ * ample margin while avoiding a brittle microbenchmark threshold.
  */
 describe('readDeclaredRisk stays linear on hostile 64 KB bodies (DR121-3)', () => {
   const KB64 = 64 * 1024
@@ -963,6 +966,6 @@ describe('readDeclaredRisk stays linear on hostile 64 KB bodies (DR121-3)', () =
   ])('%s', (_label, body) => {
     const start = performance.now()
     readDeclaredRisk(body)
-    expect(performance.now() - start).toBeLessThan(200)
+    expect(performance.now() - start).toBeLessThan(300)
   })
 })

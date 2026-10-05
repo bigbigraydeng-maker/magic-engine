@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest'
-import { assertBrandMatches, encodeIdemTag } from './facebook-reel-adapter'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+vi.mock('@/lib/meta/token-manager', () => ({ getStoredPageToken: vi.fn(async () => 'test-page-token') }))
+import { assertBrandMatches, encodeIdemTag, facebookReelAdapter } from './facebook-reel-adapter'
+
+afterEach(() => vi.unstubAllGlobals())
 
 describe('assertBrandMatches(防把 A 客户的片发到 B 客户主页)', () => {
   it('页名包含品牌 → 放行', () => {
@@ -32,5 +35,39 @@ describe('encodeIdemTag(幂等标记必须不可见)', () => {
     const a = encodeIdemTag('9d38d511-3e3e-432d-8106-b5a9086409de')
     expect(encodeIdemTag('9d38d511-3e3e-432d-8106-b5a9086409de')).toBe(a)
     expect(encodeIdemTag('3cc6d68d-13d1-4713-85dc-4fbd0e59c815')).not.toBe(a)
+  })
+})
+
+describe('Facebook Reel 首评', () => {
+  it('真发完成后把 CTA 首评写入 Reel，并返回首评 id', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      requests.push({ url, init })
+      if (url.includes('fields=name')) return Response.json({ name: 'Example Brand' })
+      const body = init?.body == null ? new URLSearchParams() : new URLSearchParams(String(init.body))
+      if (url.endsWith('/video_reels') && body.get('upload_phase') === 'start') return Response.json({ video_id: 'video-1' })
+      if (url.includes('rupload.facebook.com')) return Response.json({ success: true })
+      if (url.includes('/comments?')) return Response.json({ data: [] })
+      if (url.endsWith('/comments')) return Response.json({ id: 'comment-1' })
+      if (url.includes('permalink_url')) return Response.json({ permalink_url: 'https://facebook.test/reel/video-1' })
+      return Response.json({})
+    }))
+
+    const result = await facebookReelAdapter.publish({
+      videoUrl: 'https://storage.test/reel.mp4',
+      caption: 'Discover China',
+      firstComment: 'Book now: https://example.test/?utm_source=facebook',
+      target: { client_id: 'client-1', page_id: 'page-1', platform: 'facebook' },
+      idempotencyTag: 'work-order-1',
+      draft: false,
+    })
+
+    expect(result.first_comment_id).toBe('comment-1')
+    const commentRequest = requests.find(request => request.url.endsWith('/comments') && request.init?.method === 'POST')
+    expect(commentRequest).toBeDefined()
+    const message = new URLSearchParams(String(commentRequest!.init?.body)).get('message')
+    expect(message).toContain('Book now: https://example.test/?utm_source=facebook')
+    expect(message).toMatch(/[⁣​‌]+$/)
   })
 })
