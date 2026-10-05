@@ -48,7 +48,7 @@ node render.mjs --props <props.json> --out <out.mp4> [--public-dir <素材目录
 ### 音乐与踩点
 
 - `tools/analyze-music.py`（上一级 `scripts/factory-worker/tools/`）：`python3 analyze-music.py <文件或文件夹…> [--out x.json]`，只读音乐，输出每首的时长、BPM（>150 自动折半）、首拍、小节起点。需要 python3 + numpy + scipy + ffmpeg；不装任何 Node 依赖，不调付费接口。文件夹按名字取 mp3/wav/m4a，名字带 `temp` 的跳过。
-- `catalog/music.json`：音乐目录（仅数据，音频文件不进仓库）。情绪 / 能量档 / 适合模板是按曲名和 BPM 的**推测**，每首都标 `needs_listening: true`，**没人听过的不许进选歌预筛**；带 `SUSPECT` 的是同曲两个版本 BPM 对不上，用前要听。
+- `catalog/music.json`：音乐目录（仅数据，音频文件不进仓库）。情绪 / 能量档 / 适合模板是按曲名和 BPM 的**推测**，每首都标 `beats_unverified: true`——只表示节拍 / 情绪 / 适合模板还没人用耳朵或渲后复核量过，**与版权无关**（量过再改成 false）；`beats_unverified` 的曲子先不进选歌预筛。带 `SUSPECT` 的是同曲两个版本 BPM 对不上，用前要先听节拍。
 - `src/music.ts`：`beatsFor(entry, needBeats, startBar, stride = 1)` 生成相对起点的节拍数组（第一个是所选小节的起点；音乐起点落在帧边界上，所以第一个值在 0 到 1 帧之间）；`musicStartFor(entry, startBar)` 给出 `musicStartSec`。快歌可以把 `stride` 设成 2，让切换慢一倍。
 - 渲后复核：用渲出来的成片量「画面切点 ↔ 最近鼓点」的偏差，超 ±50 毫秒就是 BPM / 首拍不准，人工改目录值。
 - 例子 `examples/sydney-apartment-synced.props.json`：带音乐的版本（节拍由 `beatsFor` 生成）；文件名 `music/<目录 id>.<扩展名>`，出片时把音乐按 id 拷进暂存目录。
@@ -77,7 +77,7 @@ RUN_REMOTION_RENDER=1 npm run test:render   # 真渲染冒烟（本机，需要 
 ## 授权结论与已知限制
 
 - **Remotion 授权**：官网写明个人和 3 人以内的公司免费（含商用）；4 人及以上要付费，自动出片系统走 Automators 档（每次渲染 $0.01、每月最低 $100）。2026-10-05 PM 确认 Magic Lab 目前 3 人以内，可以免费用；**团队长到 4 人时必须改买授权**。「3 人」是否含兼职/外包、免费档下自动出片是否有额外限制，官网摘要没有说明，不能当结论。
-- **音乐**：只用 PM 2026-10-05 确认可商用（含广告）的三个 Dropbox 音乐文件夹（`MagicLab_Studio/Music`、`_shared/music`、`CTS/remotion-assets/music`），范围外的、名字带 temp 或来源不明的一律不用。
+- **音乐**：只用 PM 已拍板可商用（含广告）的三个 Dropbox 音乐文件夹（`MagicLab_Studio/Music`、`_shared/music`、`CTS/remotion-assets/music`），不再核对；这三个文件夹之外的音乐不在目录里。
 - **本机需要 Chrome**：首次渲染会自动下载 Chrome Headless Shell；也可用 `--browser-executable` 指向已有的。
 - **字体**：Montserrat 通过 `@remotion/google-fonts` 在渲染时联网加载，离线环境会等到超时。
 - **素材不随包提供**：镜头、logo、音乐都要放进素材目录；客户真实产品/价格的画面只能用客户自己提供的素材。

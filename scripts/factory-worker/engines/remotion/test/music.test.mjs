@@ -179,7 +179,7 @@ describe('music catalogue', () => {
       assert.ok(['low', 'mid', 'high'].includes(t.energy))
       assert.ok(Array.isArray(t.suits))
       for (const s of t.suits) assert.ok(['list', 'montage', 'quiz'].includes(s))
-      assert.equal(t.needs_listening, true)
+      assert.equal(t.beats_unverified, true)
     }
   })
 
@@ -195,7 +195,7 @@ describe('music catalogue', () => {
     }
   })
 
-  test('no file name mentions temp', () => {
+  test('the catalogue has no scratch (temp) files', () => {
     for (const t of tracks) assert.ok(!/temp/i.test(t.file))
   })
 

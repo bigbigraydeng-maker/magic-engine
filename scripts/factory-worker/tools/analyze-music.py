@@ -115,7 +115,7 @@ def analyse(path):
 
 
 def expand(paths):
-    """Expand directories non-recursively to audio files, skipping names with 'temp'."""
+    """Expand directories non-recursively to audio files, skipping scratch files named temp*."""
     out = []
     for p in paths:
         if os.path.isdir(p):
