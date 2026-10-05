@@ -333,6 +333,27 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # SEO weekly list — Mondays 04:30 UTC (after keyword-snapshots-weekly at 02:00).
+  # For clients with an ACTIVE seo_gsc_clicks_28d goal: verify open list items, expire
+  # stale ones, add up to 5 new items from stored data. No outward writes, no paid calls.
+  # Spec: docs/specs/2026-10-04-seo-weekly-list-v0.2.md. Dry-run: add ?dry_run=1.
+  # 密钥走 fromGroup（自动挂上，不用人去后台 link）。⚠️ 新增 cron 服务要 Render 同步 blueprint
+  # 才会真正创建——不同步它一次都不会跑且不报错（mailbox-sync-hourly 教训）；cron/registry.ts 的
+  # 「没跑」检查（addedAt 2026-10-04 起算宽限）就是兜这个的。
+  - type: cron
+    name: seo-weekly-list
+    env: node
+    schedule: "30 4 * * 1"
+    buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/seo-weekly-list
+    envVars:
+      - fromGroup: me-shared-cron-secret
+
   # Weekly reputation snapshots — every Monday at 3:30am UTC (~3:30pm NZST)
   # GBP / Tripadvisor rating + review count + incremental reviews for active
   # clients with reputation identities configured (DataForSEO 计划 阶段 2).

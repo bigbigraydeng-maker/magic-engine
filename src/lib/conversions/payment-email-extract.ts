@@ -101,9 +101,47 @@ export function stripQuotedChain(body: string): {
  * 不看整句 —— 「Your deposit has been received, balance due 30 days prior」整句同时有两个词，
  * 但被确认收到的是 deposit。
  */
+const CN_KIND_NOUNS: ReadonlyArray<readonly [RegExp, PaymentKind]> = [
+  [/定金|订金/, 'deposit'],
+  [/尾款|余款/, 'balance'],
+  [/全款|全额/, 'full'],
+  [/款项|付款/, 'unknown'],
+]
+
+/** 中文名词在 evidence 里第一次出现的位置；没有则 -1。 */
+function firstCnKindIndex(evidence: string): number {
+  let best = -1
+  for (const [re] of CN_KIND_NOUNS) {
+    const m = re.exec(evidence)
+    if (m && (best === -1 || m.index < best)) best = m.index
+  }
+  return best
+}
+
+/**
+ * 中文名词里出现的**不同**类型（忽略 款项|付款）。
+ * 多于一种 = 类型不可信，返回 null；恰好一种返回该类型；没有返回 undefined。
+ */
+function cnKindFromEvidence(evidence: string): PaymentKind | null | undefined {
+  const kinds = new Set<PaymentKind>()
+  for (const [re, kind] of CN_KIND_NOUNS) {
+    if (kind !== 'unknown' && re.test(evidence)) kinds.add(kind)
+  }
+  if (kinds.size > 1) return null
+  if (kinds.size === 1) return [...kinds][0]
+  return undefined
+}
+
 export function classifyPaymentKind(evidence: string): PaymentKind {
   const lower = evidence.toLowerCase()
   const noun = /\b(deposit|balance|payment|funds)\b/.exec(lower)
+  const cnIndex = firstCnKindIndex(evidence)
+  const cnKind = cnKindFromEvidence(evidence)
+  // 中文名词出现在英文名词之前（或英文名词不存在）时，以中文为准。
+  if (cnIndex !== -1 && (!noun || cnIndex < noun.index)) {
+    // 多于一种中文类型 = 不可信；恰好一种才用。
+    return cnKind ?? 'unknown'
+  }
   if (!noun) return 'unknown'
   if (noun[1] === 'deposit') return 'deposit'
   if (noun[1] === 'balance') return 'balance'
@@ -176,7 +214,7 @@ function mergeBareDollar(list: AmountCandidate[]): AmountCandidate[] {
 /** 把文本切成句子，返回命中点所在句及其前后句。 */
 function sentencesAround(text: string, evidence: string): { same: string; adjacent: string[] } {
   const flat = text.replace(/\s+/g, ' ')
-  const parts = flat.split(/(?<=[.!?])\s+/)
+  const parts = flat.split(/(?<=[.!?])\s+|(?<=[。！？])/).filter((s) => s.length > 0)
   const needle = evidence.replace(/\s+/g, ' ').trim().toLowerCase()
   const idx = parts.findIndex((s) => s.toLowerCase().includes(needle))
   if (idx === -1) return { same: evidence, adjacent: [] }
@@ -187,7 +225,7 @@ function sentencesAround(text: string, evidence: string): { same: string; adjace
 }
 
 const OWED_WORDS =
-  /\b(balance|due|remaining|outstanding|owing|owed|payable|instalment|installment|will\s+be\s+charged|total|price|priced|cost|costs|fee|fees|fare|fares|package|per\s+person|cancellation|refund)\b/i
+  /\b(balance|due|remaining|outstanding|owing|owed|payable|instalment|installment|will\s+be\s+charged|total|price|priced|cost|costs|fee|fees|fare|fares|package|per\s+person|cancellation|refund)\b|尾款|余款|总价|全价|团费|费用|价格|余额|应付|待付|总额|合计|共计/i
 
 function pickAmount(
   text: string,
@@ -291,7 +329,7 @@ export function extractPaymentFromEmail(
 
   // 「received in full … This was the deposit」：确认句像全款、全文却说这是定金 → 类型不可信，降成 unknown（不进自动车道）。
   const rawKind = classifyPaymentKind(signal.evidence)
-  const kind = rawKind === 'full' && /\bdeposit\b/i.test(stripped.text) ? 'unknown' : rawKind
+  const kind = rawKind === 'full' && /(?:\bdeposit\b|定金|订金)/i.test(stripped.text) ? 'unknown' : rawKind
 
   return {
     status: 'confirmed',

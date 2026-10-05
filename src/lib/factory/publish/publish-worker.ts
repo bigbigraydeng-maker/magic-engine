@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { PublishAdapter, PublishTarget, PublishedRef } from '../types'
 import { scanRedlineHits } from '../worker-guard'
+import { sanitizeFailReason } from './publish-display'
 import { facebookReelAdapter } from './facebook-reel-adapter'
 import { buildReelPublishedEvent } from './reel-published-event'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
@@ -164,6 +165,7 @@ async function markFailed(
     .from('content_work_orders')
     .update({
       status: 'publish_failed',
+      reject_reason: sanitizeFailReason(reason), // PM sees why on the dashboard; token-free
       publish_attempts: attempts + 1,
       // terminal:next_retry_at 置空 = 不再自动重试,等 PM 决策;否则退避后重试
       next_retry_at: terminal ? null : new Date(Date.now() + backoffMin * 60_000).toISOString(),
@@ -171,7 +173,7 @@ async function markFailed(
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
-  console.error(`[publish-worker] ${id} failed (attempt ${attempts + 1}${terminal ? ',terminal' : ''}): ${reason}`)
+  console.error(`[publish-worker] ${id} failed (attempt ${attempts + 1}${terminal ? ',terminal' : ''}): ${sanitizeFailReason(reason)}`)
 }
 
 // ── 处理一条 ──────────────────────────────────────────────────────────────────
@@ -207,6 +209,8 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   // 本地幂等锚(魏征 B9 防双发):本工单之前已 start 过(published_ref.provisional + video_id)→ 说明上次
   // 发到一半崩了。**绝不盲目重发**:先对账,确认已发→补记;确认不了→ terminal 标失败推人工核对,宁可不发不双发。
   const priorRef = (wo['published_ref'] ?? null) as Record<string, unknown> | null
+  const angleOf = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
+  const label = angleOf(brief['angle']) || angleOf(wo['angle']) || target.expect_brand || 'Reel'
   const copy = (brief['copy'] ?? {}) as Record<string, unknown>
   const endcard = (copy['endcard'] ?? {}) as Record<string, unknown>
   const firstComment = buildReelFirstComment(endcard, id)
@@ -231,12 +235,12 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
           target, videoId: String(recovered.video_id ?? priorRef['video_id']), idempotencyTag: id, message: firstComment.text,
         })
       }
-      await recordPublished(id, recovered, clientId, brief)
+      await recordPublished(id, recovered, clientId, label)
       return { order_id: id, result: 'skipped_existing', detail: 'recovered_after_interrupt' }
     }
     await supabaseAdmin
       .from('content_work_orders')
-      .update({ status: 'publish_failed', next_retry_at: null, publishing_started_at: null, updated_at: new Date().toISOString() })
+      .update({ status: 'publish_failed', reject_reason: '上次发布中途中断,平台侧未确认是否已发出,请人工核对 Facebook 主页', next_retry_at: null, publishing_started_at: null, updated_at: new Date().toISOString() })
       .eq('id', id)
     console.error(`[publish-worker] ${id} 上次 start(video_id=${priorRef['video_id']})后中断且平台侧未确认→不重发,待人工核对`)
     return { order_id: id, result: 'failed', detail: 'interrupted_verify_manual' }
@@ -251,7 +255,7 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
           target, videoId: String(existing.video_id ?? existing.post_id), idempotencyTag: id, message: firstComment.text,
         })
       }
-      await recordPublished(id, existing, clientId, brief)
+      await recordPublished(id, existing, clientId, label)
       return { order_id: id, result: 'skipped_existing', detail: existing.post_id }
     }
   } catch (e) {
@@ -300,7 +304,7 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   }
 
   // 硬事务:先落 published_ref + status(幂等锚,最优先)→ 再三落库(尽力,可后补)
-  await recordPublished(id, ref, clientId, brief)
+  await recordPublished(id, ref, clientId, label)
   // 发布信号(me/factory.reel.published):发完喊一声给下游自动建广告。
   // 只在真·PUBLISHED 的 facebook Reel 上喊(草稿不可 promote 成广告,绝不喊)。best-effort,不阻塞返回。
   await emitReelPublishedEvent(id, ref, clientId)
@@ -312,14 +316,14 @@ async function recordPublished(
   id: string,
   ref: PublishedRef,
   clientId: string,
-  brief: Record<string, unknown>,
+  label: string,
 ): Promise<void> {
   await supabaseAdmin
     .from('content_work_orders')
-    .update({ status: 'published', published_ref: ref, next_retry_at: null, updated_at: new Date().toISOString() })
+    .update({ status: 'published', published_ref: ref, reject_reason: null, next_retry_at: null, updated_at: new Date().toISOString() })
     .eq('id', id)
   // 三落库(fde_work_logs + execution_items + flywheel_actions)best-effort,不阻塞、失败可后补
-  await writeThreeBooks(id, ref, clientId, brief).catch((e) =>
+  await writeThreeBooks(id, ref, clientId, label).catch((e) =>
     console.error(`[publish-worker] 三落库失败(片已发出,不回滚) ${id}: ${e instanceof Error ? e.message : e}`),
   )
 }
@@ -329,12 +333,11 @@ async function writeThreeBooks(
   id: string,
   ref: PublishedRef,
   clientId: string,
-  brief: Record<string, unknown>,
+  angle: string,
 ): Promise<void> {
-  const angle = typeof brief['angle'] === 'string' ? (brief['angle'] as string) : 'factory reel'
   const today = new Date().toISOString().slice(0, 10)
   const execMode = ref.platform === 'facebook' ? 'in_house' : 'third_party'
-  const vendor = ref.platform === 'facebook' ? 'oztop_facebook' : 'cts_publer'
+  const vendor = ref.platform === 'facebook' ? 'meta_graph' : 'publer' // channel (same label as reel-measurement adapter), not customer: client_id is already on every row
 
   const nowIso = new Date().toISOString()
   // 三张表各自独立写:一张挂不拖累另两张(魏征 P1-3),尤其 fde_work_logs(PM 主看板)必须落。

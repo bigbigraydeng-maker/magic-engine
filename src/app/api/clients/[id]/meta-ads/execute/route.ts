@@ -14,7 +14,7 @@
  *   200 { success, actionId, campaignId, before, after }
  *   400 missing required fields
  *   403 campaign_id does not belong to this client's registered ad account (AD-SEC-1)
- *   422 action not supported or campaign has no daily_budget (for adjust_bid)
+ *   422 action not supported, campaign has no daily_budget (for adjust_bid), or reactivate of an ME Messenger draft campaign
  *   424 META_SYSTEM_USER_TOKEN not configured
  *   502 Meta Graph API call failed
  *
@@ -33,6 +33,11 @@ import { assertCampaignOwnedByClient } from '@/lib/meta/campaign-ownership'
 import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
 import { resolveAndLogAdsExpectedMetric } from '@/lib/flywheel/ads-expected-metric'
 import { nzToday } from '@/lib/pm-todo/ledger-items'
+import {
+  checkMessengerDraftCampaign,
+  MESSENGER_REACTIVATE_BLOCKED_MESSAGE,
+  MESSENGER_LOOKUP_FAILED_MESSAGE,
+} from '@/lib/ads-strategy/messenger-draft-campaign-guard'
 
 const SUPPORTED_ACTION_TYPES = new Set([
   ADS_ACTION_TYPE.PAUSE_CAMPAIGN,
@@ -107,6 +112,27 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     return NextResponse.json({ error: ownership.error }, { status: 403 })
   }
   const beforeDetails = ownership.campaign
+
+  // ── ME 私信广告草案不许经「恢复」直接开启 ─────────────────────────────────
+  // 私信广告的开启必须走审批流程；这个入口没有授权/预算检查。判据是账本里有没有
+  // 这个系列的私信草案记录（不按客户过滤：Meta 系列编号全局唯一，共用广告账户时
+  // 别家客户的人也够得着这个系列）。放在归属校验之后，免得借它探测别家的系列编号。
+  // 查不出来也拒绝（fail-closed）——只有明确「没有」才放行。
+  if (action_type === 'ads.reactivate_campaign') {
+    const draftCheck = await checkMessengerDraftCampaign(supabaseAdmin, String(campaign_id))
+    if (draftCheck === 'is_messenger_draft') {
+      return NextResponse.json(
+        { error: MESSENGER_REACTIVATE_BLOCKED_MESSAGE, code: 'messenger_reactivate_blocked' },
+        { status: 422 },
+      )
+    }
+    if (draftCheck !== 'not_messenger_draft') {
+      return NextResponse.json(
+        { error: MESSENGER_LOOKUP_FAILED_MESSAGE, code: 'messenger_draft_lookup_failed' },
+        { status: 422 },
+      )
+    }
+  }
 
   const before = {
     status:       beforeDetails.status,

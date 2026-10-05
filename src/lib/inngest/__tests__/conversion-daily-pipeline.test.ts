@@ -98,6 +98,7 @@ function ctsSummary(over: Partial<CtsCrmSyncSummary> = {}): CtsCrmSyncSummary {
     excludedNoPhone: 0,
     excludedByNotes: 0,
     excludedNoInterest: 0,
+    excludedNoConversation: 0,
     rejectedStaleLeads: 0,
     excludedNoDate: 0,
     insertedLeads: 0,
@@ -107,6 +108,7 @@ function ctsSummary(over: Partial<CtsCrmSyncSummary> = {}): CtsCrmSyncSummary {
     contactNotLinked: 0,
     insertErrors: [],
     cappedAtMaxInserts: false,
+    qualifiedFromConversation: 0, conversationReadFailed: 0, skippedPastWindow: 0,
     ...over,
   }
 }

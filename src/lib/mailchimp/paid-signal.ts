@@ -93,6 +93,92 @@ const RECEIVED_PATTERNS: readonly RegExp[] = [
 ]
 
 /**
+ * 中文确认句 —— CTS 员工在 Messenger / WhatsApp 上常用中文确认收款。
+ *
+ * 与英文 `RECEIVED_PATTERNS` 并列使用，只在 outbound 时生效（同英文）。
+ * 中文没有词形变化，但同样有「还没到账」的写法（未收到 / 待收到 / 收到后），
+ * 所以命中后必须过 `cnBlocked` 这一关，否则「定金未收到」会被当成已收款。
+ */
+const CN_RECEIVED_PATTERNS: readonly RegExp[] = [
+  /(?:已经?|已)(?:收到|到账)[^。！？!?\n]{0,12}?(?:定金|订金|款项|付款|全款|全额|尾款|余款)[^。！？!?\n]*/,
+  /(?:定金|订金|款项|付款|全款|全额|尾款|余款)(?:已经?|已)?(?:收到|到账|入账)[^。！？!?\n]*/,
+  /(?:收到|收讫)(?:了)?(?:您的|你的|你们的)?(?:定金|订金|款项|付款|全款|全额|尾款|余款)[^。！？!?\n]*/,
+]
+
+/** 中文否定 / 条件 / 疑问词 —— 出现在命中所在分句里就说明钱还没到。 */
+const CN_BLOCKERS =
+  /未|没有|没|尚未|还没|不曾|待|等到|等|一旦|如果|若|是否|能否|请问|请确认|吗|嘛|？|\?|如|麻烦|请您|请核实|核实|预计|假设|万一|只要|的话|比如|例如|请核对|核对|如有问题|有问题请|请联系|请查收|请查看/
+
+/**
+ * 整句级别的阻断词 —— 命中所在**整句**里出现这些就说明钱还没到。
+ *
+ * 分句级 `CN_BLOCKERS` 只看命中所在分句，管不到「客人说：定金已收到」这种
+ * 转述，也管不到「明天转」这种将来时。整句里出现转述 / 模板 / 将来时措辞，
+ * 一律降级不认。
+ */
+const CN_SENTENCE_BLOCKERS =
+  /测试|模板|示例|忽略|明天|稍后|晚点|待会|准备转|将转|会转|还没|尚未|没到|客人说|客户说|他说|她说|对方说|你说|他们说|据说|听说|客户已收到|客人已收到|客户已经收到|客人已经收到|客户已付|客人已付|请核实|请核对|如有问题|有问题请|请联系|请查收|请查看/
+
+const CN_MESSAGE_BLOCKERS = /测试|模板|示例|忽略/
+
+/** 命中点**之前**的条件式收尾 —— 「收到后 / 到账后」说明这是将来时。 */
+const CN_PREFIX_BLOCKERS = /收到后|到账后|收到之后|到账之后|待收到|等收到/
+
+/** 分句边界（中英文标点都算）。 */
+function cnClauseBounds(text: string, index: number): { start: number; end: number } {
+  let start = 0
+  for (let i = index - 1; i >= 0; i--) {
+    if (/[。！？!?\n,，;；]/.test(text[i])) {
+      start = i + 1
+      break
+    }
+  }
+  let end = text.length
+  for (let i = index; i < text.length; i++) {
+    if (/[。！？!?\n,，;；]/.test(text[i])) {
+      end = i
+      break
+    }
+  }
+  return { start, end }
+}
+
+/** 命中所在的整句（按句末标点切分）。 */
+function cnSentence(text: string, index: number): string {
+  let start = 0
+  for (let i = index - 1; i >= 0; i--) {
+    if (/[。！？!?\n]/.test(text[i])) {
+      start = i + 1
+      break
+    }
+  }
+  let end = text.length
+  for (let i = index; i < text.length; i++) {
+    if (/[。！？!?\n]/.test(text[i])) {
+      end = i
+      break
+    }
+  }
+  return text.slice(start, end)
+}
+
+/** 中文命中是否被否定 / 条件 / 疑问挡住。 */
+function cnBlocked(text: string, matchIndex: number, matchText: string): boolean {
+  const { start, end } = cnClauseBounds(text, matchIndex)
+  const clause = text.slice(start, end)
+  if (CN_BLOCKERS.test(clause)) return true
+  // 分句边界停在 `？`/`?` 上且不含它，所以句末问号要单独看。
+  if (text[end] === '？' || text[end] === '?') return true
+  if (CN_SENTENCE_BLOCKERS.test(cnSentence(text, matchIndex))) return true
+  // Template / ignore markers anywhere in the message void a confirmation (orchestrator fix: next-sentence "请忽略此条").
+  if (CN_MESSAGE_BLOCKERS.test(text)) return true
+  const before = text.slice(start, matchIndex)
+  if (CN_PREFIX_BLOCKERS.test(before)) return true
+  // 「收到定金后…」= 将来时：名词后紧跟「后 / 之后」
+  return /(?:定金|订金|款项|付款|全款|全额|尾款|余款)(?:之后|后)/.test(matchText)
+}
+
+/**
  * 条件 / 将来 / 否定词 —— 出现在确认句**前面**就说明钱还没到。
  *
  * 这是魏征复审攻破首版的那一刀，用一句旅行社发票标准条款：
@@ -271,6 +357,19 @@ function findConfirmation(text: string): string | null {
     if (CONDITIONAL_LEADINS.test(text.slice(start, m.index))) continue
 
     return m[0].trim().slice(0, EVIDENCE_MAX)
+  }
+  return findCnConfirmation(text)
+}
+
+/** 中文确认句 —— 与英文并列，命中后过 `cnBlocked` 排掉否定 / 条件 / 疑问。 */
+function findCnConfirmation(text: string): string | null {
+  for (const re of CN_RECEIVED_PATTERNS) {
+    const global = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`)
+    let m: RegExpExecArray | null
+    while ((m = global.exec(text))) {
+      if (!cnBlocked(text, m.index, m[0])) return m[0].trim().slice(0, EVIDENCE_MAX)
+      if (global.lastIndex === m.index) global.lastIndex += 1
+    }
   }
   return null
 }

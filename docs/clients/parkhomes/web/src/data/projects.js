@@ -79,6 +79,13 @@ export const projects = [
           alt: 'Aerial view of homes, framing and earthworks beside the watercourse',
           caption: 'Site photography — homes and construction activity within the developing community.',
         },
+        // Supplied by the client (Jason, 2026-10-04) via email — Riverside progress update video.
+        // The caption date is when the video was received, not an inferred capture or stage date.
+        video: {
+          youtubeId: 'iFYwBhUnhr8',
+          title: 'Riverside — development progress update',
+          caption: 'Progress update video — supplied by the developer, October 2026.',
+        },
       },
       homes: {
         heading: 'A closer look at the homes.',
