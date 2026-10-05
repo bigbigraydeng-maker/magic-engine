@@ -2,7 +2,7 @@
 id: 2026-09-27-cts-thruplay-audience-supply
 title: CTS 再营销池断供 10 天，开顶层 ThruPlay 小额供血（每天 15 纽币），跑一天验版位和池子增长
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: doc:docs/PITFALLS.md
 done_on: 2026-09-27
