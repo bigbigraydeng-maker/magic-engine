@@ -38,6 +38,10 @@ const MIN_IMPRESSIONS = 10
 
 // ── Pure: narrow-lane source editing ────────────────────────────────────────────
 
+function oneLine(s: string): string {
+  return s.replace(/[\r\n]+/g, ' ').trim()
+}
+
 function escapeSingle(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
 }
@@ -194,8 +198,11 @@ export function replaceMetaForSlug(
   if (!found) return null
   const { slugIdx, windowEnd, window, titleRe, descRe, title: oldTitle, desc: oldDesc } = found
 
-  let newWindow = window.replace(titleRe, `$1'${escapeSingle(newTitle)}'`)
-  newWindow = newWindow.replace(descRe, `$1'${escapeSingle(newDesc)}'`)
+  // Function replacers on purpose: a string replacement would treat `$&`, `$'`, `$$` ... in the
+  // NEW text as special patterns and splice source code into the literal (review of #2284).
+  // Newlines are collapsed first: a raw newline inside a single-quoted literal is not valid TypeScript.
+  let newWindow = window.replace(titleRe, (_m: string, lead: string) => `${lead}'${escapeSingle(oneLine(newTitle))}'`)
+  newWindow = newWindow.replace(descRe, (_m: string, lead: string) => `${lead}'${escapeSingle(oneLine(newDesc))}'`)
 
   return {
     updated: source.slice(0, slugIdx) + newWindow + source.slice(windowEnd),

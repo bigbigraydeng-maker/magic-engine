@@ -11,3 +11,4 @@ verify_how: 合并部署并同步后看 10/12（周一）那轮的 seo-meta-cycl
 PM 2026-10-06 回复"纳入"。背景：10/5 那轮 9 个候选里 2 个（chongqing-travel-guide、forbidden-city-travel-guide）因为在 guides.ts 里、周循环只读 seo-pages* 与 blogs* 开头的文件，被挡成 slug_not_in_any_data_file。
 危险点：指南里"章节"对象也有 title 字段，按旧写法会把第一个章节标题当页面标题改掉。所以新增 'guide' 字段写法：只认顶层 `slug`、只改 metaTitle / metaDescription，缺一个就拒绝，且文件名必须恰好是 guides.ts。已拿 CTS 真实的 guides.ts 逐个试改全部 24 个指南：每个都只变 2 行。
 潜力不大（约 100 次点击/28 天，粗估），已知未验证：生成的新标题可能不带指南原有的「| CTS Tours NZ」品牌尾巴。
+复审（子牙 + 魏征，2026-10-06）均为 PASS-WITH-FIXES：魏征指出写入层老隐患（新文案含 $&、$' 或换行会写坏源码，对所有页都有效），已改成函数式替换并把换行压成空格，补 3 条测试。已知安全失败：同一轮同一文件只能改成一个指南（提交用旧文件指纹，第二个会被 GitHub 拒绝）；品牌尾巴与 60 字符截断是后续事项。

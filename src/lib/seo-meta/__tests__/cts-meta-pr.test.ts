@@ -291,3 +291,30 @@ describe('pickCandidates', () => {
     expect(out.map((c) => c.slug)).toEqual(['beijing-tours'])
   })
 })
+
+describe('replaceMetaForSlug — special characters in the NEW text never corrupt the source (review of #2284)', () => {
+  const NASTY = "From $& to $' and $` and $$ and ${x} — NZ$3,999 pp"
+  // The single quote inside is escaped when written into a single-quoted literal.
+  const WRITTEN = NASTY.replace(/'/g, "\\'")
+  it('default style: $-patterns are written literally, not expanded', () => {
+    const r = replaceMetaForSlug(HUB_SOURCE, 'beijing-tours', NASTY, NASTY)
+    expect(r).not.toBeNull()
+    expect(r!.updated).toContain(`title: '${WRITTEN}'`)
+    expect(r!.updated).toContain(`description: '${WRITTEN}'`)
+  })
+  it('guide style: $-patterns are written literally, neighbours untouched', () => {
+    const r = replaceMetaForSlug(GUIDES_SOURCE, 'chongqing-travel-guide', NASTY, NASTY, 'guide')
+    expect(r).not.toBeNull()
+    expect(r!.updated).toContain(`metaTitle: '${WRITTEN}'`)
+    expect(r!.updated).toContain(`metaDescription: '${WRITTEN}'`)
+    expect(r!.updated).toContain("metaTitle: 'Beijing Travel Guide | CTS Tours NZ'")
+    expect(r!.updated).toContain("{ title: 'Liziba Station'")
+  })
+  it('newlines in the new text are collapsed to one space (a raw newline would break the TypeScript file)', () => {
+    const r = replaceMetaForSlug(HUB_SOURCE, 'beijing-tours', 'Line one\nLine two\r\nLine three', 'Desc one\n\nDesc two')
+    expect(r).not.toBeNull()
+    expect(r!.updated).toContain("title: 'Line one Line two Line three'")
+    expect(r!.updated).toContain("description: 'Desc one Desc two'")
+    expect(r!.updated).not.toMatch(/title: '[^'\n]*\n/)
+  })
+})
