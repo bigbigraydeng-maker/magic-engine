@@ -69,6 +69,18 @@ node render.mjs --props examples/sydney-apartment.props.json --public-dir /tmp/r
 - logo 现在只在最后 2 拍出现（`LOGO_BEATS`），不再常驻每一帧。
 - 音乐的测试在 `test/music.test.mjs`，由 `schema.test.mjs` 末尾一行 import 带进 `npm test`（`package.json` 是受保护路径，本包不动它）。
 
+## 蒙太奇快切模板（包 B，`--template montage`）
+
+快速切镜头（每拍一切，指定小节半拍加速）、切点卡在音乐节拍上、满屏大字词串，1080×1920，目标 15 秒左右（`beats[totalBeats]` 不得超过 20 秒）。渲染：`node render.mjs --template montage --props <props.json> --public-dir <素材目录> --out <out.mp4>`；不写 `--template` 就是原来的清单模板。示例：`examples/sydney-montage.props.json`（虚构，镜头文件用 `tools/make-placeholder-assets.mjs` 生成的占位素材，音乐自备一首约 120 BPM 的）。
+
+props 里没有任何默认值，缺项直接拒。`src/montage.ts` 的卡口（对应方案 §1.1，防「卡得很准的幻灯片」）：
+- **第一个词必须从第 0 拍开始，且是数字或问句**；视频第 0 帧就有镜头和大字（第 0 拍恒为第 0 帧，音乐首拍晚于 0 秒也不会黑屏）。
+- 镜头池至少 8 条、至少 3 种类型（`aerial` 航拍 / `street` 街景 / `person` 画面里有人 / `detail` 细节）；相邻两镜不重复；有 `person` 镜头时每第 3 个无标签镜头位固定用它。`person` 只表示「画面里有真人」，**库存里的路人也算，不等于真人出镜 / 自拍感，那一列仍是未满足**。
+- 词可带 `clipTag`，该词所在拍只用同标签镜头，找不到同标签镜头直接拒。**含地名、景点、产品名的词必须带 `clipTag`**（schema 看不出哪个词是地名，由上游的选择器强制）：试跑里没绑标签的「YANGTZE」词叠在长城镜头上，正是这种张冠李戴。
+- 闪白只在每 4 拍的重拍（光敏安全），其余只推近 / 抖动；logo 只在最后 2 拍；音乐必填。
+- 每条镜头带 `lenFrames`（时长帧数）、可选 `luma`（平均亮度，用来拉平镜头间亮度差）、`source`（own / stock / ai）。
+- 音画偏差：节拍对应帧整体后移 `MONTAGE_SYNC_SHIFT_FRAMES = 2` 帧（实测：1 帧时偏差 −33 毫秒，2 帧时 +1 毫秒）。
+
 ## 测试
 
 ```bash

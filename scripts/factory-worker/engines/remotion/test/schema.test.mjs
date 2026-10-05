@@ -600,6 +600,8 @@ describe('timing', () => {
   })
 })
 
-// Music catalog tests ride along with this file because package.json (an A-level path) lists test files explicitly.
+// Music, montage and template tests ride along with this file because package.json (an A-level path) lists test files explicitly.
 import './music.test.mjs'
 import './music-excerpt.test.mjs'
+import './montage.test.mjs'
+import './templates.test.mjs'
