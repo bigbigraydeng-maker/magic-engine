@@ -88,6 +88,10 @@ export const ListReelPropsSchema = z
     brandColor: z.string().regex(HEX_COLOR, {
       message: '颜色必须是 #RRGGBB 十六进制',
     }),
+    itemOverlayOpacity: z
+      .number()
+      .min(0, { message: '遮罩深浅必须在 0 到 0.6 之间' })
+      .max(0.6, { message: '遮罩深浅必须在 0 到 0.6 之间' }),
     logoFile: relFile('logo 文件', LOGO_EXTS),
     musicFile: relFile('音乐文件', MUSIC_EXTS).nullable(),
     beats: z.array(z.number().finite().min(0).max(120)).max(80),

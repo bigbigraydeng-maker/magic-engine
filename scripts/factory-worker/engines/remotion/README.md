@@ -34,6 +34,7 @@ node render.mjs --props <props.json> --out <out.mp4> [--public-dir <素材目录
 | 字段 | 规则 |
 |---|---|
 | `brandColor` | `#RRGGBB` |
+| `itemOverlayOpacity` | 条目页镜头上黑色遮罩的深浅，数字 0–0.6（含）；`0.4` 是原来的效果，越小背景越亮，`0` 不加遮罩；必填，无默认值 |
 | `logoFile` / `musicFile` / 各 `clip` | 只允许相对文件名（可带子目录），禁止网址、绝对路径、`..`、空格；扩展名限制：logo `png/jpg/jpeg/webp`，音乐 `mp3/wav/m4a`，镜头 `mp4/mov/webm`。`musicFile` 可为 `null`（无音乐） |
 | `beats` | 剪辑节拍时间（秒），严格递增，最多 80 个；条目数 N 时至少需要 `2N+13` 个；用到的最后一个节拍不得超过 90 秒 |
 | `hook.lines` | 恰好 3 行，每行 `{ badge, text }`：`badge` 可为 `null`（最长 6 字符），`text` 最长 9 字符，且「徽章长度+1+文字长度」不超过 9（再长会折行，版面会乱）；第 3 行带高亮底色 |

@@ -107,6 +107,7 @@ describe('fixture and asset collection', () => {
 describe('missing fields', () => {
   const topLevelKeys = [
     'brandColor',
+    'itemOverlayOpacity',
     'logoFile',
     'musicFile',
     'beats',
@@ -361,6 +362,34 @@ describe('brandColor', () => {
   }
 })
 
+describe('itemOverlayOpacity', () => {
+  test('rejects -0.1', () => {
+    rejects((props) => {
+      props.itemOverlayOpacity = -0.1
+    })
+  })
+
+  test('rejects 0.61', () => {
+    rejects((props) => {
+      props.itemOverlayOpacity = 0.61
+    })
+  })
+
+  test("rejects '0.4'", () => {
+    rejects((props) => {
+      props.itemOverlayOpacity = '0.4'
+    })
+  })
+
+  for (const good of [0, 0.6, 0.4]) {
+    test(`accepts ${good}`, () => {
+      const props = valid()
+      props.itemOverlayOpacity = good
+      assert.doesNotThrow(() => parseListReelProps(props))
+    })
+  }
+})
+
 describe('beats', () => {
   test('a duplicate value is rejected', () => {
     rejects((props) => {
@@ -480,6 +509,7 @@ describe('no defaults', () => {
   test('parseListReelProps({}) throws and mentions every top-level key', () => {
     const keys = [
       'brandColor',
+      'itemOverlayOpacity',
       'logoFile',
       'musicFile',
       'beats',
