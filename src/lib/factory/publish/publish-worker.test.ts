@@ -38,13 +38,19 @@ interface Scenario {
   /** 模拟红线查询失败(fail-closed 用例) */
   redlineQueryError?: boolean
   checklistReady?: boolean
+  noAngle?: boolean
+  /** 上次上传到一半崩了:留着 provisional 回执 */
+  interrupted?: boolean
 }
 
 /** 记录所有对 content_work_orders 的 update payload,用来断言最终状态 */
 let woUpdates: Record<string, unknown>[]
+/** 记录所有 insert payload,用来断言三落库内容 */
+let inserts: { table: string; payload: Record<string, unknown> }[]
 
 function installMocks(s: Scenario) {
   woUpdates = []
+  inserts = []
   let claimed = false
 
   mockFrom.mockImplementation((table: string) => {
@@ -64,7 +70,7 @@ function installMocks(s: Scenario) {
                 client_id: CLIENT_ID,
                 master_brief_id: 'mb-1',
                 publish_attempts: 0,
-              published_ref: null,
+              published_ref: s.interrupted ? { provisional: true, video_id: 'v1' } : null,
                 review_ref: s.checklistReady === false ? {} : { checklist_human: REEL_HUMAN_CHECK_KEYS.map(key => ({
                   key, judge: 'HUMAN', outcome: 'PASS', detail: null,
                   source_ref: key.startsWith('factual_') ? 'https://example.test/source' : null,
@@ -75,7 +81,7 @@ function installMocks(s: Scenario) {
                     quality_checklist_auto: REEL_AUTO_CHECK_KEYS.map(key => ({ key, judge: 'AUTO', outcome: 'PASS', detail: 'measured', source_ref: null })),
                   }),
                 },
-                brief: { angle: 'X', copy: { segments: [{ caption: 'Explore with us' }], endcard: s.endcard } },
+                brief: { ...(s.noAngle ? {} : { angle: 'X' }), copy: { segments: [{ caption: 'Explore with us' }], endcard: s.endcard } },
               },
               error: null,
             }
@@ -113,7 +119,7 @@ function installMocks(s: Scenario) {
     for (const m of ['eq', 'or', 'order', 'limit', 'maybeSingle', 'single']) builder[m] = () => builder
     builder.select = (cols?: string) => { ctx.select = cols ?? ''; return builder }
     builder.update = (p: Record<string, unknown>) => { ctx.isUpdate = true; ctx.payload = p; return builder }
-    builder.insert = () => builder
+    builder.insert = (p: Record<string, unknown>) => { inserts.push({ table, payload: p }); return builder }
     ;(builder as { then: unknown }).then = (r: (v: { data: unknown; error: unknown }) => unknown) => r(resolve())
     return builder as never
   })
@@ -203,5 +209,48 @@ describe('发布正文红线闸', () => {
         firstComment: expect.stringContaining('Book now\nSave 20% · Ends Friday\nhttps://ctstours.co.nz/?utm_source=facebook&utm_medium=organic_social'),
       }),
     )
+  })
+})
+
+describe('发布记录与失败原因', () => {
+  it('publish failure writes a token-free reject_reason', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' } })
+    mockPublish.mockRejectedValueOnce(new Error('FB upload 失败 400: access_token=EAAfaketokenfaketokenfaketoken1234 https://graph.facebook.com/x'))
+    await run()
+
+    const last = finalStatus()!
+    expect(last.status).toBe('publish_failed')
+    expect(typeof last.reject_reason).toBe('string')
+    expect(String(last.reject_reason)).toContain('FB upload 失败 400')
+    expect(String(last.reject_reason)).not.toContain('EAAfake')
+    expect(String(last.reject_reason)).not.toContain('graph.facebook.com')
+  })
+
+  it('a successful publish clears the old reason and labels the vendor by channel, not customer', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' } })
+    await run()
+
+    expect(finalStatus()).toMatchObject({ status: 'published', reject_reason: null })
+    const fw = inserts.find((i) => i.table === 'flywheel_actions')
+    expect(fw?.payload.vendor).toBe('meta_graph')
+    expect(JSON.stringify(inserts)).not.toContain('oztop')
+  })
+
+  it('title falls back to the brand name, never the placeholder "factory reel"', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' }, noAngle: true })
+    await run()
+
+    const ex = inserts.find((i) => i.table === 'execution_items')
+    expect(String(ex?.payload.title)).toContain('CTS Tours')
+    expect(String(ex?.payload.title)).not.toContain('factory reel')
+  })
+
+  it('interrupted upload is not re-sent and tells the PM to check manually', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' }, interrupted: true })
+    const r = await run()
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(r.detail).toBe('interrupted_verify_manual')
+    expect(String(finalStatus()!.reject_reason)).toContain('中断')
   })
 })

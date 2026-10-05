@@ -4,6 +4,7 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin } from '@/lib/auth/require-admin'
+import { toPublishedView } from '@/lib/factory/publish/publish-display'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,7 +16,7 @@ export async function GET() {
     .from('content_work_orders')
     // 单个字面量(不能用 + 拼接):Supabase 客户端靠字面量类型解析列名,拼接后变成 string 就推不出行类型
     .select(
-      'id, client_id, status, order_type, angle, rationale_one_liner, actual_cost_usd, budget_cap_usd, attempt_count, reclaim_count, reject_reason, source_ad_id, review_ref, output, heartbeat_at, created_at, updated_at',
+      'id, client_id, status, order_type, angle, rationale_one_liner, actual_cost_usd, budget_cap_usd, attempt_count, reclaim_count, reject_reason, source_ad_id, review_ref, output, published_ref, heartbeat_at, created_at, updated_at',
     )
     .order('created_at', { ascending: false })
     .limit(100)
@@ -36,6 +37,10 @@ export async function GET() {
     .in('id', clientIds.length > 0 ? clientIds : ['00000000-0000-0000-0000-000000000000'])
   const nameById = new Map((clients ?? []).map((c) => [c.id, c.name as string]))
 
-  const orders = (data ?? []).map((w) => ({ ...w, client_name: nameById.get(w.client_id) ?? w.client_id }))
+  const orders = (data ?? []).map(({ published_ref, ...w }) => ({
+    ...w,
+    client_name: nameById.get(w.client_id) ?? w.client_id,
+    published: toPublishedView(published_ref),
+  }))
   return NextResponse.json({ orders, worker: { last_heartbeat_at: lastHeartbeat, active_count: active.length } })
 }
