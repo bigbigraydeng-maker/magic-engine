@@ -1,6 +1,6 @@
 ---
 id: 2026-10-05-remotion-template-catalog-selector-plan
-title: Remotion 模板目录 + 配套音乐 + 模板选择器的方案写好了（3 个模板、自动节拍、选择器宁可不出片也不乱出片），等 PM 拍 4 个业务题
+title: Remotion 模板目录 + 配套音乐 + 模板选择器的方案写好了（3 个模板、自动节拍、选择器宁可不出片也不乱出片），等 PM 拍剩下 3 个业务题（第 4 题选择器先规则后大模型，PM 已同意）
 status: decided
 owner: pm
 decided_on: 2026-10-05
