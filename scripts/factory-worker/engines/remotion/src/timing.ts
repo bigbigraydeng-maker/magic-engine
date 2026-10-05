@@ -16,6 +16,8 @@ export const ITEM_BEATS = 2;
 export const MIN_TOTAL_FRAMES = 60;
 /** Number of beats consumed by the price reveal. */
 export const REVEAL_BEATS = 8;
+/** Number of closing beats during which the logo is shown. */
+export const LOGO_BEATS = 2;
 
 /** Frame timing layout for the checklist video. */
 export interface ListReelTiming {
@@ -23,6 +25,7 @@ export interface ListReelTiming {
   itemFrom: number[];
   itemDur: number[];
   revealFrom: number;
+  logoFrom: number;
   totalFrames: number;
 }
 
@@ -81,7 +84,12 @@ export function computeTiming(
     throw new Error(`成片太短：只有 ${totalFrames} 帧，至少需要 ${MIN_TOTAL_FRAMES} 帧（节拍间隔太近）`);
   }
 
-  return { hookFrames, itemFrom, itemDur, revealFrom, totalFrames };
+  const logoFrom = fb(
+    beats,
+    HOOK_BEATS + ITEM_BEATS * itemCount + REVEAL_BEATS - LOGO_BEATS,
+  );
+
+  return { hookFrames, itemFrom, itemDur, revealFrom, logoFrom, totalFrames };
 }
 
 /** Compute the frame timing layout directly from validated props. */

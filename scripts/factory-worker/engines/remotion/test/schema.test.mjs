@@ -21,6 +21,9 @@ import {
   SYNC_SHIFT_FRAMES,
 } from '../src/timing.ts'
 
+// package.json lists test files explicitly (editing it is A-level), so the music tests are registered here.
+import './music.test.mjs'
+
 // Fresh clone of the valid fixture for every test.
 const valid = () =>
   structuredClone(
