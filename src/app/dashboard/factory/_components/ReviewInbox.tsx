@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { WorkOrderStatus } from '@/lib/factory/types'
 import { REEL_HUMAN_CHECK_KEYS, type CheckItemOutcome, type ContentCheckItemResult, type ContentCheckItemKey } from '@/lib/social/content-review'
+import { defaultFactSourceRef, reviewErrorZh } from '@/lib/factory/review-ui'
 import { FactoryChat } from './FactoryChat'
 
 // P21.J ME 原生化 P1 — 审核 Inbox(spec me-native-design v0.2 §2.1)
@@ -14,6 +15,7 @@ interface WorkOrder {
   client_id: string
   client_name: string
   status: WorkOrderStatus
+  fact_source_url?: string | null // 工单自带的官网产品页(brief.copy.endcard.url),用来预填「事实有来源」
   angle: string
   rationale_one_liner: string
   // redline_hits:交付时服务端复扫命中的品牌红线词(complete-work-order.ts)。
@@ -70,8 +72,9 @@ const HUMAN_CHECK_LABEL: Record<ContentCheckItemKey, string> = {
 }
 
 type ChecklistDraft = Record<ContentCheckItemKey, { outcome: CheckItemOutcome; detail: string; source_ref: string }>
-const emptyChecklistDraft = (): ChecklistDraft => Object.fromEntries(
-  REEL_HUMAN_CHECK_KEYS.map(key => [key, { outcome: 'NOT_MEASURED', detail: '', source_ref: '' }]),
+const FACT_KEYS: readonly ContentCheckItemKey[] = ['factual_claims_have_source', 'factual_claims_source_verified']
+const emptyChecklistDraft = (factSource = ''): ChecklistDraft => Object.fromEntries(
+  REEL_HUMAN_CHECK_KEYS.map(key => [key, { outcome: 'NOT_MEASURED', detail: '', source_ref: FACT_KEYS.includes(key) ? factSource : '' }]),
 ) as ChecklistDraft
 
 const checklistPayload = (draft: ChecklistDraft): ContentCheckItemResult[] =>
@@ -134,7 +137,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
       setOrders((prev) => prev.filter((o) => o.id !== id)) // 审完自动翻下一条
       setConfirming(null)
     } catch (e) {
-      setError(e instanceof Error ? e.message : '操作失败')
+      setError(e instanceof Error ? reviewErrorZh(e.message, k => HUMAN_CHECK_LABEL[k as ContentCheckItemKey] ?? k) : '操作失败')
     } finally {
       setBusy(null)
     }
@@ -151,7 +154,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
         待审 {orders.length > 0 ? <span className="text-amber-600">· 今天 {orders.length} 条等你</span> : <span className="text-slate-400">· 都审完了,去忙别的</span>}
       </h2>
 
-      {error && <div className="mb-3 px-4 py-2 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>}
+      {error && !confirming && <div className="mb-3 px-4 py-2 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>}
 
       <div className={clientId ? 'grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4 items-start' : ''}>
       <div className="space-y-4">
@@ -210,7 +213,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
               )}
 
               <button
-                onClick={() => { setConfirming(o); setChecklistDraft(emptyChecklistDraft()) }}
+                onClick={() => { setError(null); setConfirming(o); setChecklistDraft(emptyChecklistDraft(defaultFactSourceRef(o.fact_source_url))) }}
                 disabled={busy === o.id}
                 className="w-full sm:w-auto sm:self-start px-5 h-11 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 mb-2"
               >{busy === o.id ? '处理中…' : '✓ 通过·待发布'}</button>
@@ -253,7 +256,12 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
 
             <div className="mb-4 space-y-3">
               <h3 className="text-sm font-medium text-slate-800">人工审核清单</h3>
-              <p className="text-xs text-amber-700">所有项需逐项标记 PASS 才能通过。自动音视频检测尚未上线，因此当前 Reel 审批仍会被服务端阻断。</p>
+              <p className="text-xs text-amber-700">所有项需逐项标记 PASS 才能通过。「事实有来源」两项要填来源网址(已按工单自带的官网页预填,可改)。</p>
+              <button
+                type="button"
+                onClick={() => setChecklistDraft(prev => Object.fromEntries(REEL_HUMAN_CHECK_KEYS.map(key => [key, { ...prev[key], outcome: 'PASS' }])) as ChecklistDraft)}
+                className="px-3 h-8 rounded-lg border border-slate-300 text-xs hover:bg-slate-50"
+              >{REEL_HUMAN_CHECK_KEYS.length} 项全部标为通过</button>
               {REEL_HUMAN_CHECK_KEYS.map(key => (
                 <div key={key} className="rounded-lg border border-slate-200 p-3">
                   <p className="text-sm font-medium text-slate-800">{HUMAN_CHECK_LABEL[key]}</p>
@@ -290,14 +298,11 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
               ))}
             </div>
 
-            {/* 文案必须跟发布链路的真实状态一致。旧文案写「链路正在建设,通过不会发出去」,而
-                publish-worker(facebook-reel-adapter 真打 Graph API)此后已经落地,只是 cron 未注册
-                —— 说死「不会发」是骗人的。这里只陈述能保证的事实。 */}
             <p className="text-sm text-slate-600 mb-5">
               通过 = 标记这条合格、<span className="font-medium text-slate-900">排入发布队列</span>。
-              发布程序已实现但定时器尚未启用,所以现在通过不会立刻发出;
-              <span className="font-medium text-slate-900">一旦启用,队列里的片子会自动发到客户主页</span>,请按「已经会发出去」的标准把关。确定通过?
+              目前发布是<span className="font-medium text-slate-900">草稿模式</span>:只会存成 Facebook 草稿,<span className="font-medium text-slate-900">不会公开</span>,要公开需要在 Facebook 里手动点发布。确定通过?
             </p>
+            {error && <div className="mb-3 px-3 py-2 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>}
             <div className="flex gap-3">
               <button
                 onClick={() => void act(confirming.id, { action: 'approve', checklist_human: checklistPayload(checklistDraft) })}
