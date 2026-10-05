@@ -106,7 +106,7 @@ function isGenericRoot(root: string): boolean {
 }
 
 /** The competitor root contained in the keyword (e.g. "wendywu" from wendywutours.co.nz), or null. */
-function competitorBrandMatch(keyword: string, competitorRoots: string[]): string | null {
+export function competitorBrandMatch(keyword: string, competitorRoots: string[]): string | null {
   const flat = keyword.toLowerCase().replace(/[^a-z0-9]+/g, '')
   return competitorRoots.find(root => root.length >= 6 && !isGenericRoot(root) && flat.includes(root)) ?? null
 }
