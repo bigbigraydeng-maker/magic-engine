@@ -7,7 +7,7 @@
  * 滑出，手机上铺满整屏。prospecting 的看板也是这个交互。
  */
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ComposeNote, type StageOption } from './ComposeNote'
 import { WhatsAppReply } from './WhatsAppReply'
 import { ContactTimeline, type TimelineSummary } from './ContactTimeline'
@@ -16,6 +16,8 @@ import { EmailReply } from './EmailReply'
 import { DncBanner } from './DncBanner'
 import { MarkWonPanel } from './MarkWonPanel'
 import { ImportantMarkerEditor } from './ImportantMarkerEditor'
+import { PrecallBriefCard } from './PrecallBriefCard'
+import type { PrecallCard } from '@/lib/crm/precall-card'
 import { drawerActions, nextStageChoices, type Channel } from '@/lib/crm/drawer-actions'
 import type { Segment } from '@/lib/crm/segments'
 
@@ -117,6 +119,11 @@ export function PersonDrawer({
    */
   const [summary, setSummary] = useState<TimelineSummary | null>(null)
   const onSummary = useCallback((s: TimelineSummary | null) => setSummary(s), [])
+  /** 「电话前 30 秒」卡片，跟 summary 同一次拉取回传（同样必须 useCallback）。 */
+  const [precall, setPrecall] = useState<PrecallCard | null>(null)
+  const onPrecall = useCallback((p: PrecallCard | null) => setPrecall(p), [])
+  /** 换人时先清掉，免得新的一份没到之前顶上还是上一位客人的电话。 */
+  useEffect(() => setPrecall(null), [row.contactId])
 
   const changeStage = async (toStage: string, label: string) => {
     if (!window.confirm(`现在：${row.stageLabel ?? '还没标到哪一步'} → 改成「${label}」？`)) return
@@ -240,6 +247,7 @@ export function PersonDrawer({
             这三样都来自往来记录本身，不额外拉一次接口：`ContactTimeline`
             算好之后回传（判据只有一份）。
           */}
+          {precall && <PrecallBriefCard card={precall} />}
           {summary && (summary.lastText || summary.tour || summary.travelWindow) && (
             <div className="mb-3 rounded-xl border border-me-ochre/25 bg-me-ochre/[0.06] px-3 py-2.5">
               {summary.lastText && (
@@ -481,6 +489,7 @@ export function PersonDrawer({
               clientId={clientId}
               contactId={row.contactId}
               onSummary={onSummary}
+              onPrecall={onPrecall}
             />
           </div>
         </div>
