@@ -30,6 +30,8 @@ export const MONTAGE_SYNC_SHIFT_FRAMES = 2;
 export const MONTAGE_LOGO_BEATS = 2;
 /** Minimum total frames for a montage. */
 export const MONTAGE_MIN_TOTAL_FRAMES = 60;
+/** Shortest allowed gap between two beats; fast bars halve it. */
+export const MONTAGE_MIN_BEAT_GAP_SEC = 0.25;
 
 const SLUG = z
   .string()
@@ -111,6 +113,7 @@ type MontageBase = z.infer<typeof MontageBaseSchema>;
 /** Validate beats ordering, count and total duration. */
 function checkBeats(val: MontageBase, ctx: z.RefinementCtx): void {
   const beats = val.beats;
+  let increasing = true;
   for (let i = 1; i < beats.length; i++) {
     if (beats[i] <= beats[i - 1]) {
       ctx.addIssue({
@@ -118,7 +121,22 @@ function checkBeats(val: MontageBase, ctx: z.RefinementCtx): void {
         path: ['beats'],
         message: '节拍必须严格递增',
       });
+      increasing = false;
       break;
+    }
+  }
+  if (increasing) {
+    const last = Math.min(beats.length - 1, val.totalBeats);
+    for (let i = 1; i <= last; i++) {
+      const gap = beats[i] - beats[i - 1];
+      if (gap < MONTAGE_MIN_BEAT_GAP_SEC) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['beats'],
+          message: `节拍间隔太近：第 ${i} 拍与上一拍只差 ${gap.toFixed(3)} 秒（至少 ${MONTAGE_MIN_BEAT_GAP_SEC} 秒）`,
+        });
+        break;
+      }
     }
   }
   const needed = val.totalBeats + 1;

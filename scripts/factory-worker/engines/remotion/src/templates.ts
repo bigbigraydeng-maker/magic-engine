@@ -7,7 +7,9 @@ import {
   parseMontageReelProps,
   collectMontageAssetFiles,
   computeMontageTiming,
+  buildMontageSegments,
 } from './montage.ts';
+import { stagedFileName, type MusicCatalog } from './music.ts';
 
 /** Allowed template ids. */
 export const TEMPLATE_IDS = ['list', 'montage'] as const;
@@ -45,10 +47,36 @@ export function loadTemplate(id: TemplateId, input: unknown): LoadedTemplate {
   }
   const props = parseMontageReelProps(input);
   const totalFrames = computeMontageTiming(props).totalFrames;
+  // Throws a readable error for layouts that would only crash later at render time.
+  buildMontageSegments(props);
   return {
     compositionId: 'MontageReel',
     props,
     assetFiles: collectMontageAssetFiles(props),
     totalFrames,
   };
+}
+
+/** Where a staged music file name (props.musicFile) lives in the shared music library, or null if it is not a catalog track. */
+export function musicSourceOf(
+  catalog: MusicCatalog,
+  stagedName: string,
+): { id: string; folder: string; file: string; status: string } | null {
+  for (const track of catalog.tracks) {
+    let name: string;
+    try {
+      name = stagedFileName(track);
+    } catch {
+      continue;
+    }
+    if (name === stagedName) {
+      return {
+        id: track.id,
+        folder: track.folder,
+        file: track.file,
+        status: track.status,
+      };
+    }
+  }
+  return null;
 }

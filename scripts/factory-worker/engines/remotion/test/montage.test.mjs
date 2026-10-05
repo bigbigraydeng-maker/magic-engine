@@ -14,6 +14,7 @@ import {
   MONTAGE_SYNC_SHIFT_FRAMES,
   MONTAGE_LOGO_BEATS,
   MONTAGE_MIN_TOTAL_FRAMES,
+  MONTAGE_MIN_BEAT_GAP_SEC,
 } from '../src/montage.ts'
 
 import { FPS } from '../src/timing.ts'
@@ -127,6 +128,7 @@ describe('montage props', () => {
     assert.equal(MONTAGE_SYNC_SHIFT_FRAMES, 2)
     assert.equal(MONTAGE_LOGO_BEATS, 2)
     assert.equal(MONTAGE_MIN_TOTAL_FRAMES, 60)
+    assert.equal(MONTAGE_MIN_BEAT_GAP_SEC, 0.25)
   })
 })
 
@@ -234,6 +236,27 @@ describe('montage schema rejects', () => {
       raw.words[1].text = 'ABCDEFGHIJKLM'
     })
   })
+
+  test('beats spaced 0.2 seconds apart', () => {
+    rejects((raw) => {
+      const beats = []
+      for (let i = 0; i < 40; i++) {
+        beats.push(Math.round((0.5 + i * 0.2) * 1000) / 1000)
+      }
+      raw.beats = beats
+    }, '节拍间隔太近')
+  })
+
+  test('beats spaced exactly 0.25 seconds apart parse', () => {
+    const raw = valid()
+    const beats = []
+    for (let i = 0; i < 40; i++) {
+      beats.push(Math.round((0.5 + i * 0.25) * 1000) / 1000)
+    }
+    raw.beats = beats
+    const parsed = parseMontageReelProps(raw)
+    assert.equal(parsed.beats.length, 40)
+  })
 })
 
 describe('computeMontageTiming', () => {
@@ -256,9 +279,8 @@ describe('computeMontageTiming', () => {
     for (let i = 0; i < 40; i++) {
       beats.push(Math.round(i * 0.001 * 1000) / 1000)
     }
-    raw.beats = beats
-    const parsed = parseMontageReelProps(raw)
-    assert.throws(() => computeMontageTiming(parsed), /成片太短|太近/)
+    // The schema now rejects this spacing first (see 'montage schema rejects'); the timing helper keeps its own guard.
+    assert.throws(() => computeMontageTiming({ beats, totalBeats: raw.totalBeats }), /成片太短|太近/)
   })
 })
 

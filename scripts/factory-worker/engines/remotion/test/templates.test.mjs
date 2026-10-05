@@ -8,7 +8,9 @@ import {
   TEMPLATE_IDS,
   isTemplateId,
   loadTemplate,
+  musicSourceOf,
 } from '../src/templates.ts'
+import { parseMusicCatalog } from '../src/music.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 
@@ -111,4 +113,52 @@ test('the sydney montage example loads and uses 3 or more clip kinds', () => {
   const loaded = loadTemplate('montage', raw)
   assert.equal(loaded.compositionId, 'MontageReel')
   assert.ok(new Set(raw.clips.map((c) => c.kind)).size >= 3)
+})
+
+/** Load the real music catalog fixture. */
+function musicCatalog() {
+  return parseMusicCatalog(
+    JSON.parse(
+      fs.readFileSync(new URL('../catalog/music.json', import.meta.url), 'utf8'),
+    ),
+  )
+}
+
+test('musicSourceOf resolves a Music folder track', () => {
+  const catalog = musicCatalog()
+  const src = musicSourceOf(catalog, 'pipa-trap.m4a')
+  assert.ok(src)
+  assert.equal(src.id, 'pipa-trap')
+  assert.equal(src.folder, 'Music')
+  assert.equal(src.file, '琵琶陷阱.m4a')
+  assert.equal(typeof src.status, 'string')
+})
+
+test('musicSourceOf resolves a _shared/music folder track', () => {
+  const catalog = musicCatalog()
+  const src = musicSourceOf(catalog, 'jade-river-journey.mp3')
+  assert.ok(src)
+  assert.equal(src.id, 'jade-river-journey')
+  assert.equal(src.folder, '_shared/music')
+  assert.equal(src.file, 'Jade River Journey.mp3')
+  assert.equal(typeof src.status, 'string')
+})
+
+test('musicSourceOf returns null for unknown or non-exact names', () => {
+  const catalog = musicCatalog()
+  assert.equal(musicSourceOf(catalog, 'unknown-song.mp3'), null)
+  assert.equal(musicSourceOf(catalog, 'PIPA-TRAP.M4A'), null)
+})
+
+test('musicSourceOf skips a corrupt catalog entry without throwing', () => {
+  const catalog = structuredClone(musicCatalog())
+  catalog.tracks.push({
+    ...catalog.tracks[0],
+    id: 'weird-track',
+    file: 'weird.ogg',
+  })
+  const src = musicSourceOf(catalog, 'pipa-trap.m4a')
+  assert.ok(src)
+  assert.equal(src.id, 'pipa-trap')
+  assert.equal(musicSourceOf(catalog, 'unknown.mp3'), null)
 })
