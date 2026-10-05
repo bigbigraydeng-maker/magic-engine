@@ -30,7 +30,7 @@
 |---|---|---|---|---|
 | 1 | **任务健康** | `cron_run_logs` 表最近 24 小时记录，按 CTS 相关任务过滤（广告日报、SEO、Messenger 同步、Meta 留资同步、内容工厂发布、GBP）。判定逻辑见 [`src/lib/cron/health.ts`](../../src/lib/cron/health.ts) 的 `checkCronHealth`，任务清单见 [`src/lib/cron/registry.ts`](../../src/lib/cron/registry.ts)（62 条），后台页面 [`/dashboard/admin/cron-health`](../../src/app/dashboard/admin/cron-health/page.tsx) | 该跑的都跑了、状态不是 `failed`、没有卡死（`running` 超 60 分钟） | 任何一条从没跑过 / 该跑没跑 / 最近一次失败 / 卡死超 1 小时，都是 P0 发现，不是可以跳过的小事 |
 | 2 | **真实产出核验（重点，不可省略）** | 挑昨天 1-2 条"系统自动改了客户看得见的东西"的记录，去真实那个东西里核对，不是看日志 | 抽查的那条跟日志描述一致 | 见下方"怎么验"；如果昨天没有任何自动改动，写"昨天没有自动改动"并跳过，不用编造 |
-| 3 | **广告日报有没有真的送达** | 用 `ListAgents` / `list_task_runs` 查名字类似"【每天】CTS 广告花费/留资日报"的会话，是不是在过去约 24 小时内跑过 | 跑过，且报告里的数字不是"查不到" | 没跑 = P0 发现。这个任务目前从 `/Users/raydeng/Projects/magic-engine/.claude/worktrees/nervous-aryabhata-3a910b/.env.local` 读取 `RENDER_API_KEY`——这个 worktree 目录随时可能被 Claude 的会话管理机制回收删除，见本文第 4 节"已知运维风险"。发现凭据路径失效，不要只报症状，发卡片要求换成稳定存放位置 |
+| 3 | **广告日报有没有真的送达、有没有按时** | 用 `list_task_runs` 查 `cts-daily-ads-report`：它的定时是每天新西兰时间 09:00，所以**昨天那次应该在昨天 09:00–10:00（新西兰时间）之间开跑**，`started_at` 是 UTC，先换算（夏令时 UTC+13，2026-09-27 起）。再查 `ledger-nightly-verify` / `cts-pm-weekly` / `nal-whatsapp-ad-status-check` / `playbook-staleness-weekly` 有没有状态还是 `running`、开跑超过 2 小时的 | 按时开跑，报告里的数字不是"查不到"；没有卡住超 2 小时的定时任务 | **没跑 = P0；迟到超 1 小时也 = P0，要写迟到几小时**——只看"过去 24 小时跑过"会漏：2026-09-28 那次晚 13 小时才补跑，24 小时口径照样算过。有定时任务卡住超 2 小时 = P0"卡住占名额"：桌面 App 同一时间最多跑 3 个定时任务，3 个都卡在等人点"允许"时，其它到点的任务（包括广告日报）一律排不上，见第 4 节 |
 | 4 | **跨窗口状态** | `ListAgents` | 没有 CTS 相关会话卡在 `busy` 超过 12 小时，也没有 `idle` 但手上挂着未合并、等拍板的 PR | 有 → 一行说清"卡在等什么" |
 | 5 | **目标进度一句话** | `goals` 表，CTS 当前 active 目标的 `current_value` vs `target` | 有数据就给一句进度；没有 active 目标就静默跳过，不用提醒"没有目标"这种空话 | — |
 | 6 | **纯播放广告有没有在偷偷烧钱进假用户（PITFALLS D9）** | 对当前每一个 `status=ACTIVE` 且 `optimization_goal` 是 `THRUPLAY`/`video_view` 这类纯播放目标的广告组，直接拉最近几天的 `insights`（`breakdowns=publisher_platform`），算 `audience_network` 花费占比 | `audience_network` 占比 <5%（正常波动）；如果广告组建的时候就手动设了 `targeting.publisher_platforms` 排除 `audience_network`，占比应该接近 0% | **占比 ≥20% = P0 发现，当天必须报**：这是 2026-09-16 就记录过的坑（钱流进 Audience Network"奖励视频"版位，用户是游戏里为换奖励被迫看完，不是真实感兴趣的人，完播率虚高但都是假信号）。2026-09-21 CTS 新建的圣诞团 ThruPlay 广告组就是因为建的时候没设这个排除，第二天实测 95%+ 花费又进了这个坑——**任何新建的纯播放广告组都要当天查一次这一项，不要等到有人主动问才查**。查的方法不是只看 `targeting.publisher_platforms` 这个设置本身（设了不代表真的挡住了，还没有拿真实花费验证过），必须拉真实 `insights` 数据核实 |
@@ -85,6 +85,9 @@
 ---
 
 ## 4. 已知运维风险
+
+**本机定时任务最多同时跑 3 个，卡住的会把后面的全堵住（2026-09-28 实测）**：那天 `ledger-nightly-verify`（前一晚 21:32 开跑）、`cts-pm-daily`（08:36）、`cts-pm-weekly`（08:41）三个都卡在一条等人点"允许"的命令上，没人点就一直不结束。App 日志 `~/Library/Logs/Claude/main.log` 从 08:30 起每分钟一行 `Skipping dispatch for <任务>: global_limit (active=3, limit=3)`，广告日报 09:00 起被跳过，直到 22:04 名额空出来才补跑（日志里带 `missed: 2026-09-27T20:00:00.000Z`，即新西兰 09:00 那一次）。**不是电脑睡眠**（电源日志当天 16:56 前没有任何睡眠记录），**也不是夏令时**（9/27 夏令时当天那次正常在 09:04 开跑）。App 本身会补跑，只是要等名额空出来。日检第 3 项的"迟到超 1 小时 / 卡住超 2 小时"就是为这个加的。根治是把广告日报搬进 ME 后台定时任务，不再依赖这台电脑，见台账 `2026-09-28-cts-ads-report-move-to-backend`。
+
 
 **CTS 广告日报任务（`~/.claude/scheduled-tasks/cts-daily-ads-report/`）目前从一个临时 worktree 目录读取凭据，这个目录随时可能被回收，这是需要修的问题，不是可以先放着的小事。**
 
