@@ -9,7 +9,7 @@ describe('defaultFactSourceRef', () => {
   it('prefills a valid https url', () => {
     expect(defaultFactSourceRef('https://ctstours.co.nz/tours/china/signature/grand-tour')).toBe('https://ctstours.co.nz/tours/china/signature/grand-tour')
   })
-  it.each([undefined, null, '', 'http://a.com/x', 'ftp://a.com', 'not a url', 42])('leaves %p empty', (v) => {
+  it.each([undefined, null, '', 'https://ctstours.co.nz', 'https://ctstours.co.nz/', 'http://a.com/x', 'ftp://a.com', 'not a url', 42])('leaves %p empty (incl. homepage)', (v) => {
     expect(defaultFactSourceRef(v)).toBe('')
   })
 })

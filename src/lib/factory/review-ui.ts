@@ -3,9 +3,10 @@
 
 import { isValidContentSourceRef } from '@/lib/social/content-review'
 
-/** 工单自带的事实核对来源(brief.copy.endcard.url)。不是合法 https 网址就返回空,宁可留空让 PM 自己填。 */
+/** 工单链接(brief.copy.endcard.url)。只有产品深链才预填:copy-generator 常把它强制写成品牌首页,首页不是「片里事实的出处」。 */
 export function defaultFactSourceRef(url: unknown): string {
-  return typeof url === 'string' && url.startsWith('https://') && isValidContentSourceRef(url) ? url : ''
+  if (typeof url !== 'string' || !url.startsWith('https://') || !isValidContentSourceRef(url)) return ''
+  return new URL(url).pathname.replace(/\/+$/, '') === '' ? '' : url
 }
 
 /** labelOf:清单项 key → 中文名(弹窗里已有这张表,调用方传进来,避免再抄一份) */

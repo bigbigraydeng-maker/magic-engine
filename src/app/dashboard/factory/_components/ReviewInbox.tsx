@@ -124,6 +124,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
 
   const act = useCallback(async (id: string, payload: Record<string, unknown>) => {
     setBusy(id)
+    setError(null)
     try {
       const res = await fetch(`/api/factory/work-orders/${id}/review`, {
         method: 'POST',
@@ -256,7 +257,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
 
             <div className="mb-4 space-y-3">
               <h3 className="text-sm font-medium text-slate-800">人工审核清单</h3>
-              <p className="text-xs text-amber-700">所有项需逐项标记 PASS 才能通过。「事实有来源」两项要填来源网址(已按工单自带的官网页预填,可改)。</p>
+              <p className="text-xs text-amber-700">所有项需逐项标记 PASS 才能通过。「事实有来源」两项要填来源网址:已按这条片的链接预填,请确认这个页面确实支持片里的价格/天数/日期,不是就改成对应产品页。点「全部标为通过」前请先逐项看过。</p>
               <button
                 type="button"
                 onClick={() => setChecklistDraft(prev => Object.fromEntries(REEL_HUMAN_CHECK_KEYS.map(key => [key, { ...prev[key], outcome: 'PASS' }])) as ChecklistDraft)}
