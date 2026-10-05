@@ -11,4 +11,5 @@ verify_how: "查三件事：官网这个团的价格改完并上线没有；停�
 PM 2026-10-06 指令降价，并要求按 Campaign 组织、Instagram 一起推、Reel 与动态走视频工厂。
 库里已建（均为停放或草稿，刻意的）：Campaign 6f143a16-0abf-462f-8dad-d37a7c52de29（状态 archived，官网改价上线后改 active）、目标 287dc046-0b95-42fd-9fc1-4f5d39ecd8be（draft，转 active 前先加按团过滤取数）、initiative 546dfa08-a7dc-4923-a9f0-86f99140af99。
 已派出的任务：官网与客服机器人价格同步（task_cd39f921）、Remotion 社媒动态与 Reel 广告（task_6d39b949）、竞品价格调研（子牙窗口内后台任务）。
+PM 同日补充：这是常年主推的引流款，素材与邮件按「常年款加每期冲刺款」模板化设计，价格尽量单一来源，度量要能按团统计。
 未做且需 PM 决定：广告预算、官网改价 PR 的合并。
