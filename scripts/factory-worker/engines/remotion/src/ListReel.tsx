@@ -38,7 +38,7 @@ const Item: React.FC<{ props: ListReelProps; index: number; dur: number }> = ({ 
   return (
     <AbsoluteFill>
       <AbsoluteFill style={{ transform: `scale(${punch})`, filter: props.items[index].blurBackdrop ? 'blur(14px)' : 'none' }}><Footage src={props.items[index].clip} zoomTo={1.08} /></AbsoluteFill>
-      <AbsoluteFill style={{ background: 'rgba(0,0,0,0.4)' }} />
+      {props.itemOverlayOpacity > 0 ? <AbsoluteFill style={{ background: `rgba(0,0,0,${props.itemOverlayOpacity})` }} /> : null}
       <div style={{ position: 'absolute', left: 90, top: 640, width: 870, fontFamily, color: '#fff', textShadow: '0 4px 24px rgba(0,0,0,0.85)' }}>
         <div style={{ fontSize: 40, fontWeight: 900, letterSpacing: 4, opacity: 0.95 }}>{props.itemLabel} {index + 1}/{props.items.length}</div>
         <div style={{ display: 'flex', alignItems: 'center', marginTop: 18 }}>

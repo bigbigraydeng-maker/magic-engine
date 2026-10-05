@@ -30,7 +30,7 @@ function makeEnv() {
 }
 
 const PROPS = {
-  logoFile: 'logo.png', musicFile: null, brandColor: '#112233',
+  logoFile: 'logo.png', musicFile: null, brandColor: '#112233', itemOverlayOpacity: 0.4,
   hook: { clip: 'clips/h.mp4', lines: [{ badge: '2', text: 'BEDS' }, { badge: null, text: 'VIEWS' }, { badge: null, text: 'OPEN' }] },
   items: [
     { text: 'ITEM ONE', clip: 'clips/a.mp4', blurBackdrop: false },
