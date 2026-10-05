@@ -362,6 +362,10 @@ async function recordReferralOnly(clientId: string, event: MessengerMessagingEve
     const psid = event.sender?.id
     const referral = pickReferral(event)
     if (!psid || !referral) return
+    // Meta sends referral-only events for threads that already exist, so this is
+    // not necessarily how the thread began. Mark the source and time so a later
+    // reader can tell it apart from a first-message referral.
+    const capturedAt = event.timestamp ? new Date(event.timestamp).toISOString() : new Date().toISOString()
 
     const { data, error } = await supabaseAdmin
       .from('conversations')
@@ -374,20 +378,20 @@ async function recordReferralOnly(clientId: string, event: MessengerMessagingEve
     // A failed lookup is NOT "no thread" — do not silently drop the referral.
     if (error) {
       console.error(
-        `[webhooks/meta/messenger] referral-only lookup FAILED for psid=${psid}: ${error.message}`,
+        `[webhooks/meta/messenger] referral-only lookup FAILED for client=${clientId}: ${error.message}`,
       )
       return
     }
     if (!data?.id) {
       console.warn(
-        `[webhooks/meta/messenger] referral-only event for psid=${psid} had no stored thread — skipped`,
+        `[webhooks/meta/messenger] referral-only event for client=${clientId} had no stored thread — skipped`,
       )
       return
     }
 
     const { error: refErr } = await supabaseAdmin
       .from('conversations')
-      .update({ entry_referral: referral })
+      .update({ entry_referral: { ...referral, via: 'messaging_referrals', captured_at: capturedAt } })
       .eq('id', data.id as string)
       .is('entry_referral', null)
     if (refErr) {

@@ -432,8 +432,19 @@ describe('POST — 来源归因（referral）', () => {
     const res = await POST(makePost(webhookPayload([event])))
 
     expect(res.status).toBe(200)
+    // Marked with its channel and capture time: the thread already existed, so
+    // this may not be how it began.
     expect(captured.updates).toContainEqual(
-      expect.objectContaining({ table: 'conversations', payload: { entry_referral: referral } }),
+      expect.objectContaining({
+        table: 'conversations',
+        payload: {
+          entry_referral: {
+            ...referral,
+            via: 'messaging_referrals',
+            captured_at: new Date(1788336000000).toISOString(),
+          },
+        },
+      }),
     )
     expect(captured.filters.conversations).toMatchObject({ id: 'convo-1', __is_entry_referral: null })
     expect(captured.convoUpserts).toHaveLength(0)
