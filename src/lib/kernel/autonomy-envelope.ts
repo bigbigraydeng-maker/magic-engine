@@ -18,7 +18,7 @@
  *    就等于一次静默放行。同 `§14 M4`「缺行按锁定处理」。
  */
 
-import type { AutonomyEnvelope } from './types'
+import type { ActionKey, AutonomyEnvelope, TriggeredBy } from './types'
 
 /**
  * 这次动作对花费的性质。不同性质走不同判据——把暂停也套上「变动不超过 20%」
@@ -51,8 +51,12 @@ export interface EnvelopeFacts {
   beforeCents: number | null
   /** 改动前，这个账户全部预算单位的日预算合计（分）。 */
   accountDailyTotalBeforeCents: number | null
+  /** 改动前，客户所有 Meta 广告账户的日预算合计（分）；上调预算时必须读到。 */
+  clientDailyTotalBeforeCents: number | null
   /** 客户配置的日预算上限（分）。null = 没设 → 拒绝。 */
   dailyCapCents: number | null
+  /** 客户所有广告账户共用的日预算上限（分）；上调预算时必须读到。 */
+  clientDailyCapCents: number | null
   /** 距这个单位上一次**真实**设置变化过了多少小时（按快照算，含人工改动，§14 K12）。 */
   hoursSinceLastChange: number | null
   /**
@@ -107,6 +111,13 @@ export function isWithinEnvelope(
   if (facts.hoursSinceLastChange === null) reasons.push('读不到这个单位上次设置变动的时间')
   if (envelope.respectDailyCapCents && facts.dailyCapCents === null) {
     reasons.push('这个客户还没设日预算上限，没有上限就不自动动钱')
+  }
+  const isIncreasing = facts.beforeCents !== null && request.afterCents > facts.beforeCents
+  if (envelope.respectDailyCapCents && isIncreasing && facts.clientDailyTotalBeforeCents === null) {
+    reasons.push('读不到客户所有广告账户的日预算合计')
+  }
+  if (envelope.respectDailyCapCents && isIncreasing && facts.clientDailyCapCents === null) {
+    reasons.push('读不到客户所有广告账户共用的日预算上限')
   }
 
   // ── 再拒「明确不该动」──────────────────────────────────────────────────
@@ -180,5 +191,177 @@ export function isWithinEnvelope(
     }
   }
 
+  // 上调预算前，还要把这次变动加到客户所有广告账户的预算总和里。
+  // 这里按客户总上限硬拦（不套单账户信封的 20% 波动余量），避免多个账户
+  // 各自未超上限、合计却越过客户总预算。完整的跨账户事实由 Ads resolver 提供。
+  if (envelope.respectDailyCapCents && isIncreasing) {
+    const clientBefore = facts.clientDailyTotalBeforeCents as number
+    const clientCap = facts.clientDailyCapCents as number
+    const clientAfter = clientBefore - (facts.beforeCents as number) + after
+    if (!Number.isSafeInteger(clientBefore) || !Number.isSafeInteger(clientCap) || clientBefore < 0 || clientCap <= 0) {
+      reasons.push('客户跨账户预算合计或总上限不是有效金额')
+    } else if (clientAfter > clientCap) {
+      reasons.push(`加完后客户所有广告账户日预算合计 ${clientAfter} 分，超过客户总上限 ${clientCap} 分`)
+    }
+  }
+
   return { within: reasons.length === 0, reasons }
+}
+
+// ── 人按的「收」类动作：另一套信封 ─────────────────────────────────────────
+
+/**
+ * 🔴 **人按的紧急止损专用信封 —— 跟 `AutonomyEnvelope` 是两种不同的东西，不是它的降级版。**
+ *
+ * ## 为什么必须另立一套（生产数据证明，不是偏好）
+ *
+ * `isWithinEnvelope` 在 kind 分流**之前**有 7 条拒绝条件，全部是为「防 AI 反复折腾」设计的。
+ * 用它去拦**人按的刹车**，2026-09-27 实测的后果是刹车 100% 拧不动：
+ *
+ * | 客户 | 广告组 | `learning_stage` 为 NULL | 预算挂在系列上（CBO） |
+ * |---|---|---|---|
+ * | CTS Tours NZ | 36 | **36** | 20 |
+ * | New Asian Logistics | 10 | **10** | 10 |
+ *
+ * · 46 个广告组的 `learning_stage` **全部是 NULL** → `inLearningPhase(null) === true`
+ *   → 第 ⑦ 条「读不到学习期状态，按还在学习期处理」拒掉**每一个**
+ * · CBO 广告组没有自己的日预算 → `beforeCents === null` → 第 ① 条拒
+ *   （按账户级统计更狠：NAL 126/126 全 CBO、CTS 269/514）
+ * · CTS 还在跑留资表单 A/B → 第 ⑥ 条 `excludeAdStudies` 再拒一层
+ *
+ * ## 判据差异的实质
+ *
+ * 那些条件防的是「AI 反复折腾学习期、把预算越调越离谱」。
+ * **人按紧急停车是为了少花钱** —— 学习期和 72h 冷却保护的是**学习进度**，不是**钱**。
+ * 把两件不同的事塞进同一个判据，结果就是上面那张表。
+ *
+ * ## 类型层面为什么不能「把字段改成 false」
+ *
+ * `AutonomyEnvelope` 的 `respectDailyCapCents` / `excludeLearningPhase` / `excludeAdStudies` /
+ * `requiresRollbackHandler` 四项的类型是**字面量 `true`**（见 `types.ts`），
+ * 所以「拿 AI 信封把字段置 false」**编译期就不成立** —— 这是好事：
+ * 它保证 `AutonomyEnvelope` 永远是那套严格的 AI 信封，想放宽只能显式另立一套（就是这里）。
+ *
+ * ## 人工止损判据
+ *
+ * 1. **撤回处理函数存在** —— 在本函数里查（`facts.hasRollbackHandler`）
+ * 2. **归属校验通过** —— 由 `authorize.ts` 的客户/目标归属段落 + 路由层
+ *    `assertCampaignOwnedByClient` 保证，**不在这里重复**
+ * 3. **实体存在** —— 由 `envelope-facts.ts` 保证：读不到实体它返回 `unavailable`，
+ *    调用方在进本函数**之前**就已经 deny 了
+ * 4. **动作真的只收不放** —— 暂停必须是 pause/0；减预算必须有有效原预算，
+ *    且目标不大于它。不能仅凭 ActionKey 的名字认定这是止损。
+ *
+ * 🔴 第 2、3 条不在本函数里不等于没做。改这里之前先确认那两处还在，
+ *    别因为「这里只剩一条」就以为人工路径没有归属校验。
+ */
+export interface HumanStopEnvelope {
+  /** 判别标记 —— 让「拿错信封」在类型层就露出来，不是靠字段长得像。 */
+  readonly kind: 'human_stop'
+  /** 撤不回来的事，人按也不做；收缩方向另按动作及真实金额检查。 */
+  readonly requiresRollbackHandler: true
+}
+
+export const HUMAN_STOP_ENVELOPE: HumanStopEnvelope = {
+  kind: 'human_stop',
+  requiresRollbackHandler: true,
+}
+
+/**
+ * 🔴 **能走人工信封的 ActionKey —— 穷举白名单，不是黑名单。**
+ *
+ * 为什么必须白名单：以后新增 ActionKey 时，
+ * · 黑名单会让新 key **默认落进人工信封（默认放宽）**
+ * · 白名单会让新 key **默认走 AI 信封（默认收紧）**
+ *
+ * 同 `boundaries.ts` 那句「穷举白名单而不是黑名单否定」。这个仓库反复踩过「默认放宽」。
+ *
+ * 🔴 **只收类**（只会让花费变少）。放类 / 建类（`scale_unit_budget` /
+ *    `add_retargeting_adset` / `swap_creative` / `create_reel_ad` 等）即使人触发也走 AI 信封 ——
+ *    人手动加预算没有「只会变少」这个安全性。
+ */
+export const HUMAN_STOP_ACTION_KEYS: readonly ActionKey[] = [
+  'ads.pause_unit',
+  'ads.pause_campaign',
+  'ads.cut_unit_budget',
+  'ads.cut_campaign_budget',
+]
+
+/** 人按的收类动作在不在人工信封内。纯函数。 */
+export function isWithinHumanStopEnvelope(
+  actionKey: string,
+  request: EnvelopeRequest,
+  facts: EnvelopeFacts,
+): EnvelopeVerdict {
+  const reasons: string[] = []
+  if (!facts.hasRollbackHandler) {
+    reasons.push('这个动作没有注册撤回处理函数，撤不回来的事就算是人按的也不做')
+  }
+  if (actionKey === 'ads.pause_unit' || actionKey === 'ads.pause_campaign') {
+    if (request.kind !== 'pause' || request.afterCents !== 0) {
+      reasons.push('人工暂停必须是暂停请求，不能夹带预算变更')
+    }
+  } else if (actionKey === 'ads.cut_unit_budget' || actionKey === 'ads.cut_campaign_budget') {
+    if (request.kind !== 'budget_change') reasons.push('人工减预算必须是预算变更请求')
+    const before = facts.beforeCents
+    const after = request.afterCents
+    if (typeof before !== 'number' || !Number.isFinite(before) || before < 0) {
+      reasons.push('读不到有效的原日预算，无法确认这次只会减预算')
+    }
+    if (!Number.isFinite(after) || after < 0) {
+      reasons.push('目标日预算不是有效金额')
+    } else if (typeof before === 'number' && after > before) {
+      reasons.push('目标日预算高于当前预算，不能以人工止损名义加预算')
+    }
+  } else {
+    reasons.push('这个动作不属于人工止损')
+  }
+  return { within: reasons.length === 0, reasons }
+}
+
+/** 这一次该用哪套信封判。`'human_stop'` = 人按的收类动作。 */
+export type EnvelopeChoice = 'human_stop' | 'ads_autonomy'
+
+/**
+ * 分派：人按的收类动作走人工信封，其余一律走 AI 自治信封。
+ *
+ * 🔴 **两条必须同时成立**，缺一条就走 AI 信封：
+ *   1. `triggeredBy === 'human'` —— 调用方必须从**服务端授权上下文**取，
+ *      **不许从请求体读**（body 里给 triggeredBy 等于让调用方自报身份，
+ *      同 spec §6.4 对解除接口 `actor` 的要求）。本函数只是纯判定，
+ *      「这个值从哪来」由调用方保证 —— `authorize.ts` 传的是 `run.triggered_by`，
+ *      那一列在提交时由 Kernel 自己写，不经请求体。
+ *   2. `actionKey` 在 `HUMAN_STOP_ACTION_KEYS` 白名单里。
+ *
+ * 返回值带上 `envelopeUsed`，让调用方能把「走了哪套」写进 deny 理由与回执 ——
+ * 否则排查时分不清「人工信封拒了」和「AI 信封拒了」，两者该做的处置完全不同。
+ */
+export function selectEnvelopeVerdict(args: {
+  /** 从 `action_runs.triggered_by` 来 —— 那一列的类型**就是** `TriggeredBy`，所以这里收紧。 */
+  readonly triggeredBy: TriggeredBy
+  /**
+   * 🔴 这里**如实用 `string`，不是 `ActionKey`** —— 不是偷懒，是实况：
+   *    `action_runs.action_key` 那一列的类型是 `string`（`types.ts:380`），值从数据库来。
+   *    硬标成 `ActionKey` 会逼调用点加一个类型强转，那等于把想要的检查亲手关掉。
+   *    **不对称是对的**：进来的值如实是 `string`，而下面那张白名单是我自己写的代码、
+   *    必须是 `readonly ActionKey[]`（拼错一个字符就编译不过）。
+   */
+  readonly actionKey: string
+  readonly request: EnvelopeRequest
+  readonly facts: EnvelopeFacts
+  readonly envelope: AutonomyEnvelope
+}): EnvelopeVerdict & { readonly envelopeUsed: EnvelopeChoice } {
+  const human =
+    args.triggeredBy === 'human' &&
+    // 用 some 逐个比而不是 includes：白名单是 readonly ActionKey[]、进来的是 string，
+    // includes 会要求两边同型 → 逼出一个类型强转。some 里的 === 不需要。
+    HUMAN_STOP_ACTION_KEYS.some((key) => key === args.actionKey)
+
+  if (human) {
+    return { ...isWithinHumanStopEnvelope(args.actionKey, args.request, args.facts), envelopeUsed: 'human_stop' }
+  }
+  return {
+    ...isWithinEnvelope(args.request, args.facts, args.envelope),
+    envelopeUsed: 'ads_autonomy',
+  }
 }

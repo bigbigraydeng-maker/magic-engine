@@ -21,14 +21,20 @@ import { WindowNotice } from './bits'
  * 完全一样，唯一不同的是「发去哪」和「失败了怎么翻译成人话」。
  * 2026-09-15 加邮件时改的：新渠道照这两张表添一行就行，不用碰组件本体。
  */
-const REPLY_ENDPOINT: Record<'messenger' | 'email', (clientId: string, conversationId: string) => string> = {
+type ReplyChannel = 'messenger' | 'email' | 'whatsapp'
+
+const REPLY_ENDPOINT: Record<ReplyChannel, (clientId: string, conversationId: string) => string> = {
   messenger: (c, id) => `/api/clients/${c}/messenger/conversations/${id}/reply`,
   email: (c, id) => `/api/clients/${c}/email/conversations/${id}/reply`,
+  whatsapp: (c, id) => `/api/clients/${c}/whatsapp/conversations/${id}/reply`,
 }
 
-const CONFIRM_TEXT: Record<'messenger' | 'email', (customerName: string) => string> = {
+const CONFIRM_TEXT: Record<ReplyChannel, (customerName: string) => string> = {
   messenger: (name) => `确定发给 ${name}？\n这条会以 CTS 的 Facebook 主页发出去，客户马上就能看到。`,
   email: (name) => `确定发给 ${name}？\n这条会通过邮件发出去，客户很快就会收到。`,
+  // 刻意不写客户名 —— 上面 messenger 那行把「CTS」写死在共享组件里了（红线 2，
+  // 已记台账，不在这个改动里顺手动线上文案）。这条对任何客户都成立。
+  whatsapp: (name) => `确定发给 ${name}？\n这条会发到他的 WhatsApp，客户马上就能看到。`,
 }
 
 interface Props {
@@ -46,11 +52,41 @@ interface Props {
   viewerEmail: string | null
   onSent: () => void
   /** Which line this goes out on. Defaults to messenger — the only channel this box originally spoke. */
-  channel?: 'messenger' | 'email'
+  channel?: ReplyChannel
 }
 
 /** Server failures, said the way a salesperson can act on. Same reasons, one wording per channel. */
-function humanError(channel: 'messenger' | 'email', status: number, reason?: string): string {
+function humanError(channel: ReplyChannel, status: number, reason?: string): string {
+  // Checked before the per-channel 403 branches, which would otherwise read as
+  // "no permission" and send staff chasing an account problem. The banner button
+  // is not promised: an unlinked conversation or a failed lookup also lands here
+  // and shows no banner.
+  if (reason === 'do_not_contact') {
+    return '这个客人被标成「别再联系」，系统不让再发。如果确定是判错了，在他的记录里找黄条上的「判错了？点这里放回名单」；找不到这个按钮就找 Magic Engine 团队。'
+  }
+  if (reason === 'dnc_check_failed') {
+    return '系统暂时查不到这个客人能不能联系，为安全起见先没发。等一分钟再试；连着失败请找团队。'
+  }
+  if (channel === 'whatsapp') {
+    // 🔴 四种原因必须分开说（魏征复审 2026-09-28）：`lib/whatsapp/send.ts` 把
+    // 「环境没配」「归属查不到」「没绑号」「绑的号跟配置号不一致」全归到
+    // `no_token`，而原来的适配器一律翻成「授权掉线了，请重连」—— 顾问去重连
+    // 解决不了号码填错一位的问题。这里按状态码分开，并且**不出现供应商真名**。
+    if (reason === 'window_closed' || status === 409) {
+      return '他超过 24 小时没说话了，WhatsApp 不让我们主动发。请打电话或发邮件找他。'
+    }
+    if (reason === 'no_token' || status === 424) {
+      return 'WhatsApp 还没接好，发不出去。找 Magic Engine 团队，说「WhatsApp 号码没连上」。'
+    }
+    if (reason === 'graph_failed' || status === 502) {
+      return 'WhatsApp 没收下这条。等一分钟再试；连着失败请找团队。'
+    }
+    if (reason === 'wrong_channel' || reason === 'not_found' || status === 404) {
+      return '这个人还没在 WhatsApp 上跟你们说过话，发不了。'
+    }
+    if (status === 403) return '你的账号没有权限从这里发消息。'
+    return '没发出去，系统已记录。可以再试一次。'
+  }
   if (channel === 'email') {
     if (reason === 'no_thread' || status === 409) {
       return '这个人还没跟你们邮件往来过，发不了。'
@@ -133,7 +169,7 @@ export function ReplyBox({
 
   return (
     <div className="space-y-2">
-      {replyWindow && <WindowNotice window={replyWindow} />}
+      {replyWindow && <WindowNotice window={replyWindow} channel={channel} />}
 
       <div>
         <label

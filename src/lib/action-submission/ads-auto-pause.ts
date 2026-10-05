@@ -18,10 +18,14 @@
  */
 
 import { runAction, approveAndRun, rejectPendingRun } from '@/lib/kernel/runner'
+import { KernelError } from '@/lib/kernel/errors'
+import { isUuid } from '@/lib/validation-utils'
 import type { KernelDeps } from '@/lib/kernel/deps'
 import type { ActionRunOutcome, SubmitActionInput } from '@/lib/kernel/runner'
 
-export const ADS_AUTO_PAUSE_ACTION_KEY = 'ads.auto_pause_on_d3' as const
+import { ADS_AUTO_PAUSE_ACTION_KEY } from './ads-auto-pause-key'
+
+export { ADS_AUTO_PAUSE_ACTION_KEY }
 
 export interface AdsAutoPauseCandidateInput {
   readonly clientId: string
@@ -103,26 +107,47 @@ export interface ApproveAndExecuteResult {
 }
 
 /**
+ * 🔴 审批人页面上看到的那份审批请求 id —— **运行时**也要校验。
+ *    请求体里的 JSON 不受 TypeScript 约束；这里一旦漏成 undefined，Kernel 会
+ *    静默退回「服务端重读当前那份」再照批（`human-approval.ts` 的老行为），
+ *    也就是替人批了他没看见的东西。所以缺了 / 形态不对一律当场抛，不往下走。
+ */
+function requireSeenDecisionId(expectedDecisionId: unknown): string {
+  if (typeof expectedDecisionId !== 'string' || !isUuid(expectedDecisionId.trim())) {
+    throw new KernelError(
+      'INVALID_INPUT',
+      '没有带上你页面上看到的那份审批请求 —— 没法确认你批的是你看见的那一件，这次没有生效。刷新一下再点',
+    )
+  }
+  return expectedDecisionId.trim().toLowerCase()
+}
+
+/**
  * PM/FDE 在待办卡片上点「批准」——签批准 + 立刻执行，一次调用。
  *
  * `approvedByUser` 必须来自服务端认证会话（登录邮箱），**绝不**信请求体。
+ * `expectedDecisionId` 必须是页面渲染那一刻拿到的那份；对不上 Kernel 在写库前就拒。
  */
 export async function approveAndExecuteAdsAutoPause(
   deps: KernelDeps,
   runId: string,
   approvedByUser: string,
+  expectedDecisionId: string,
 ): Promise<ApproveAndExecuteResult> {
-  const outcome = await approveAndRun(deps, runId, approvedByUser)
+  const seen = requireSeenDecisionId(expectedDecisionId)
+  const outcome = await approveAndRun(deps, runId, approvedByUser, { expectedDecisionId: seen })
   return { runId: outcome.run.id, kind: outcome.kind, humanReason: outcome.humanReason }
 }
 
-/** PM/FDE 点「驳回」——只签拒绝，不执行任何东西。 */
+/** PM/FDE 点「驳回」——只签拒绝，不执行任何东西。拒的也必须是人看到的那份。 */
 export async function rejectAdsAutoPause(
   deps: KernelDeps,
   runId: string,
   rejectedByUser: string,
   reason: string,
+  expectedDecisionId: string,
 ): Promise<ApproveAndExecuteResult> {
-  const outcome = await rejectPendingRun(deps, runId, rejectedByUser, reason)
+  const seen = requireSeenDecisionId(expectedDecisionId)
+  const outcome = await rejectPendingRun(deps, runId, rejectedByUser, reason, { expectedDecisionId: seen })
   return { runId: outcome.run.id, kind: outcome.kind, humanReason: outcome.humanReason }
 }

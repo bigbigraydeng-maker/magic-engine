@@ -481,3 +481,61 @@ export async function pushMailchimpExportItems(
     })
   }
 }
+
+/** google-data-pullback-daily 每天一轮；超过这个窗口的记录算旧账，不再报。 */
+const ADS_CONFIG_READ_STALE_HOURS = 30
+
+/**
+ * 广告每日回拉读不出广告配置 → 下发到「系统欠账」。
+ *
+ * 为什么单独一条、不靠 `cron_failing`：这个任务常年挂着几条客户 Meta 报错，
+ * 在 `cron_failing` 里永远是「报错」状态 —— 2026-09-25 读配置每次 400、所有客户的
+ * 诊断和经营状态一起停了一天，混在老报错里没人看出来。这条只认 `ad_config` 这一种来源。
+ *
+ * 跟 `pushMailchimpExportItems` 同理：不只挑 completed —— 这类错误本身就会把那一轮标成 failed。
+ */
+export async function pushAdsConfigReadItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('cron_run_logs')
+    .select('finished_at, summary')
+    .eq('job_name', 'google-data-pullback-daily')
+    .not('finished_at', 'is', null)
+    .in('status', ['completed', 'failed'])
+    .order('finished_at', { ascending: false })
+    // 多拿几轮：提前结束的那种运行（没客户 / 读客户表失败）summary 里没有 errors，
+    // 只看最新一条会让前一轮的配置读失败被它盖掉（魏征复审）。
+    .limit(3)
+
+  if (error) throw new Error(`cron_run_logs query failed: ${error.message}`)
+
+  type Run = { finished_at: string | null; summary: { errors?: Array<{ client_id?: string; source?: string; error?: string }> } | null }
+  const run = ((data ?? []) as Run[]).find((r) => Array.isArray(r.summary?.errors))
+  if (!run?.summary?.errors) return
+
+  const hoursOld = run.finished_at ? (now.getTime() - Date.parse(run.finished_at)) / 3_600_000 : null
+  if (hoursOld !== null && hoursOld > ADS_CONFIG_READ_STALE_HOURS) return
+
+  const configErrors = run.summary.errors.filter((e) => e.source === 'ad_config')
+  const affected = new Set(configErrors.map((e) => e.client_id ?? '?'))
+  if (affected.size === 0) return
+
+  // 原始报错摘一段：「字段没加上」不会自己好，「一次超时」明天自己消失 —— 只有看报错才分得清
+  //（子牙 / 魏征复审）。去掉路由拼的前缀和任何 uuid，不把客户 id 带进 PM 邮件。
+  const detail = (configErrors[0]?.error ?? '')
+    .replace(/^.*?for this client:\s*/, '')
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<id>')
+    .slice(0, 120)
+
+  items.push({
+    kind: 'ads_config_unreadable',
+    client_id: 'infra',
+    client_name: 'Magic Engine 后台',
+    what: `广告每日回拉读不出 ${affected.size} 个客户的广告设置 —— 这些客户今天的广告诊断、经营状态、内部日报**和坏广告自动暂停**全部跳过了（广告数据本身照常在拉，钱照常在花）${detail ? `。报错原话：${detail}` : ''}。如果是数据库字段没加上，不会自己好；如果只是一次临时读取失败，明天这条会自己消失`,
+    how: '这条不用你动手 —— 是我们这边的欠账。回我一句「查一下广告配置」我就去看是字段没对齐还是临时故障，并把漏掉的诊断补跑',
+    href:'https://app.magicengine.com.au/dashboard/admin/cron-health',
+  })
+}

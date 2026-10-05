@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '@/lib/supabase'
-import { recordToolSignupOnce } from '@/lib/tools-lab/lead-events'
+import { recordToolLead } from '@/lib/tools-lab/lead-events'
 
 const DASHBOARD_ROOT = '/dashboard'
 const PROSPECT_ROOT = '/prospect'
@@ -93,7 +93,9 @@ export async function resolveSelfServeLanding(
   if (nextPath === adsCheckPath(clientId)) {
     // A Tools Lab lead is a first verified sign-in through the entry (`welcome` = the welcome grant was just made),
     // not a returning customer re-entering the check-up.
-    if (welcome && requestedPath === ADS_CHECK_ENTRY) await recordToolSignupOnce(clientId, 'ads-check')
+    if (welcome && requestedPath === ADS_CHECK_ENTRY) {
+      await recordToolLead({ tool: 'ads-check', pagePath: ADS_CHECK_ENTRY, targetHref: ADS_CHECK_ENTRY, dedupeKey: { client_id: clientId } })
+    }
     return nextPath
   }
   const { data } = await supabaseAdmin

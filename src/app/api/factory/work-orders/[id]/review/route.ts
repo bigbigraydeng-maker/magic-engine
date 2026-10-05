@@ -29,9 +29,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const result =
     parsed.action === 'approve'
-      ? await applyApprove(supabaseAdmin, id, reviewer)
+      ? await applyApprove(supabaseAdmin, id, reviewer, undefined, parsed.checklistHuman)
       : parsed.action === 'reject_quality'
-        ? await applyQualityReject(supabaseAdmin, id, parsed.feedback, reviewer)
+        ? await applyQualityReject(supabaseAdmin, id, parsed.feedback, reviewer, undefined, parsed.checklistHuman)
         : await applyBudgetUpdate(supabaseAdmin, id, parsed.newBudget, reviewer)
 
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status })

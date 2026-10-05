@@ -1,0 +1,30 @@
+{
+  "name": "@magic-engine/remotion-engine",
+  "private": true,
+  "type": "module",
+  "description": "Generic Remotion render engine for Magic Engine (ListReel template, props-only, no client facts).",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "render": "node render.mjs",
+    "test": "node --test test/schema.test.mjs test/no-client-facts.test.mjs test/render-smoke.test.mjs",
+    "test:render": "RUN_REMOTION_RENDER=1 node --test test/render-smoke.test.mjs",
+    "type-check": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.532",
+    "@remotion/cli": "4.0.532",
+    "@remotion/google-fonts": "4.0.532",
+    "@remotion/renderer": "4.0.532",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.532",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.0",
+    "typescript": "^5.9.0"
+  }
+}

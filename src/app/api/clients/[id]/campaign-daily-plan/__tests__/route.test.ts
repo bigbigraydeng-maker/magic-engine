@@ -660,7 +660,7 @@ describe('campaign-daily-plan GET — multi-day bundles, provenance and readines
     expect(json.ad_candidate.status).toBe('NOT_AUTHORIZED')
   })
 
-  it('projects per-Post review without converting it into bundle or publishing approval', async () => {
+  it('treats legacy PASS as expired without converting it into publishing approval', async () => {
     allow()
     mockGetCampaign.mockResolvedValue(CAMPAIGN)
     const reviewedPlan = {
@@ -713,12 +713,12 @@ describe('campaign-daily-plan GET — multi-day bundles, provenance and readines
       verdict: 'PASS',
       reason: null,
       reviewed_at: '2026-08-24T01:00:00.000Z',
-      is_current: true,
+      is_current: false,
     })
     expect(passed.post_review.reviewed_by_user_id).toBeUndefined()
     expect(revise.post_review).toMatchObject({ verdict: 'NEEDS_REVISION', reason: 'Replace the image' })
     expect(passed.readiness.human_approval).toBe(false)
-    expect(json.review_summary).toEqual({ passed: 1, needs_revision: 1, total: 2 })
+    expect(json.review_summary).toEqual({ passed: 0, needs_revision: 1, total: 2 })
     expect(json.review_revision).toBe('10000000-0000-0000-0000-000000000001')
     expect(json.publishing_plan.status).toBe('NOT_AUTHORIZED')
   })

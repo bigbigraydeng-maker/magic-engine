@@ -132,7 +132,7 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 | zhuge-weekly-recalculate | `0 3 * * 1` | `/api/cron/zhuge-recalculate` |
 | reputation-snapshots-weekly | `30 3 * * 1` | `/api/cron/reputation-snapshots-weekly` |
 | oztop-seo-optimizer | `0 5 * * 1` | `/api/cron/oztop-seo-optimizer?max=8` |
-| ~~cts-seo-optimizer~~ | ~~`30 5 * * 1`~~ | **已退役 2026-09-20**（PR #1812 从 render.yaml 删掉；路由代码留着备回滚但不再被调度）。由 Inngest 版「SEO 标题周循环 v1」接替，见 §4.3 `seo-meta-cycle-trigger` 行 |
+| ~~cts-seo-optimizer~~ | ~~`30 5 * * 1`~~ | **已退役 2026-09-20**（PR #1812 从 render.yaml 删掉；路由代码已在 2026-09-29（PR #2200）改成被调用就返回 410 并记失败，不再是回滚入口；Render 后台那条旧定时服务 2026-10-05 核查为「手动暂停」）。由 Inngest 版「SEO 标题周循环 v1」接替，见 §4.3 `seo-meta-cycle-trigger` 行 |
 | agent-learning-rollup | `0 7 * * 1` | `/api/cron/agent-learning-rollup` |
 | ~~factory-stock-refill~~ | ~~`0 19 * * 1`~~ | **已暂停 2026-09-08**（PM 停抓图：抓来的图无人消费，白花 Apify 钱；render.yaml/registry 已注释） |
 | blog-weekly | `0 3 * * 2` | `/api/cron/blog-weekly` |

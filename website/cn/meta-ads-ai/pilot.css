@@ -8,8 +8,9 @@
 .pilot-hero-grid { position: relative; display: grid; grid-template-columns: minmax(0,1.02fr) minmax(420px,.98fr); gap: 70px; align-items: center; }
 .pilot-kicker { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 25px; color: var(--pilot-gold-soft); font-size: .78rem; font-weight: 700; letter-spacing: .1em; }
 .pilot-kicker i { width: 24px; height: 2px; background: var(--pilot-gold); }
-.pilot-hero h1 { max-width: 690px; margin-bottom: 28px; font-size: clamp(3.5rem,5.7vw,5.2rem); font-weight: 600; line-height: .98; }
-.pilot-hero h1 span,.pilot-hero h1 em { display: block; white-space: nowrap; }
+.pilot-hero h1 { max-width: 100%; margin-bottom: 28px; font-size: clamp(2.6rem,3.6vw,3.3rem); font-weight: 600; line-height: 1.04; }
+/* Line 1 is ~10.6× the font size wide: sized to fit the left column; wrapping allowed so it can never run into the card. */
+.pilot-hero h1 span,.pilot-hero h1 em { display: block; overflow-wrap: anywhere; text-wrap: balance; }
 .pilot-hero h1 em { color: var(--pilot-gold-soft); font-style: normal; }
 .pilot-lead { max-width: 680px; color: rgba(255,255,255,.72) !important; font-size: clamp(1.04rem,1.7vw,1.25rem); line-height: 1.9; }
 .pilot-actions { margin-top: 34px; }

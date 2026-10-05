@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({ from: vi.fn(), record: vi.fn() }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: mocks.from } }))
-vi.mock('@/lib/tools-lab/lead-events', () => ({ recordToolSignupOnce: mocks.record }))
+vi.mock('@/lib/tools-lab/lead-events', () => ({ recordToolLead: mocks.record }))
 
 import { ADS_CHECK_ENTRY, normalizeSelfServeTarget, resolveSelfServeLanding } from '../self-serve-routing'
 
@@ -31,7 +31,7 @@ describe('Tools Lab ad check-up entry', () => {
   it('arriving through the entry skips the onboarding wizard and records the lead once', async () => {
     onboarding(false)
     await expect(resolveSelfServeLanding(CLIENT, ADS_CHECK_ENTRY, true)).resolves.toBe(`/meta-ads-ai/${CLIENT}`)
-    expect(mocks.record).toHaveBeenCalledWith(CLIENT, 'ads-check')
+    expect(mocks.record).toHaveBeenCalledWith({ tool: 'ads-check', pagePath: ADS_CHECK_ENTRY, targetHref: ADS_CHECK_ENTRY, dedupeKey: { client_id: CLIENT } })
     expect(mocks.from).not.toHaveBeenCalled()
   })
 

@@ -3,6 +3,8 @@ import {
   judgeWorkerPresence,
   judgeQueueByClient,
   QUEUE_STALE_HOURS,
+  WORKER_OFFLINE_HOURS,
+  latestAliveAt,
   type QueueSnapshot,
 } from './worker-presence'
 
@@ -23,8 +25,8 @@ describe('judgeWorkerPresence —— 队列里有活但没人干', () => {
     expect(judgeWorkerPresence(snap({ queued: 0, lastHeartbeatHours: 500 })).idle).toBe(true)
   })
 
-  it('有活但刚进队列 → 不报，可能工人正在跑别的单', () => {
-    expect(judgeWorkerPresence(snap({ queued: 2, oldestQueuedHours: 1 })).idle).toBe(true)
+  it('有活但刚进队列（不到 30 分钟）→ 不报，可能工人正在跑别的单', () => {
+    expect(judgeWorkerPresence(snap({ queued: 2, oldestQueuedHours: 0.2 })).idle).toBe(true)
   })
 
   it('🔴 有活、等久了、也确实没人动 → 报，并说清等了多久', () => {
@@ -56,10 +58,26 @@ describe('judgeWorkerPresence —— 队列里有活但没人干', () => {
 
   it('刚好卡在门槛上不报 —— 边界宁可漏一次，不要天天嚷', () => {
     expect(
-      judgeWorkerPresence(snap({ queued: 1, oldestQueuedHours: QUEUE_STALE_HOURS })).idle,
+      judgeWorkerPresence(snap({ queued: 1, oldestQueuedHours: WORKER_OFFLINE_HOURS })).idle,
     ).toBe(false)
     expect(
-      judgeWorkerPresence(snap({ queued: 1, oldestQueuedHours: QUEUE_STALE_HOURS - 0.1 })).idle,
+      judgeWorkerPresence(snap({ queued: 1, oldestQueuedHours: WORKER_OFFLINE_HOURS - 0.1 })).idle,
+    ).toBe(true)
+  })
+
+  it('🔴 离线 30 分钟 + 队列有活 → 报，话术用分钟（不用等 6 小时）', () => {
+    const v = judgeWorkerPresence(snap({ queued: 1, oldestQueuedHours: 0.8, lastHeartbeatHours: 0.6 }))
+    expect(v.idle).toBe(false)
+    if (!v.idle) {
+      expect(v.kind).toBe('worker_offline')
+      expect(v.humanReason).toContain('48 分钟')
+      expect(v.humanReason).toContain('36 分钟没有工人动过')
+    }
+  })
+
+  it('🔴 活着但没领到单（4 分钟前刚报过存活，排了 2 小时）→ 不报', () => {
+    expect(
+      judgeWorkerPresence(snap({ queued: 1, oldestQueuedHours: 2, lastHeartbeatHours: 0.07 })).idle,
     ).toBe(true)
   })
 })
@@ -158,12 +176,13 @@ describe('judgeWorkerPresence —— 🔴 「没人干活」优先于「失败�
     }
   })
 
-  it('失败工单还没等够久 → 不报（跟新活同一个门槛，不给失败单开小灶）', () => {
+  it('工人在线 + 失败工单还没等够 6 小时 → 不报（跟新活同一个门槛，不给失败单开小灶）', () => {
     expect(
       judgeWorkerPresence(
         snap({
           queued: 1,
           oldestQueuedHours: QUEUE_STALE_HOURS - 0.1,
+          lastHeartbeatHours: 0.1,
           queuedStuckOnFailure: 1,
           stuckSampleReason: 'muapi submit: Insufficient credit balance',
         }),
@@ -252,10 +271,20 @@ describe('judgeQueueByClient —— 🔴 心跳按客户算，不跨客户串台
   it('没到门槛的客户不进结果', () => {
     expect(
       judgeQueueByClient(
-        [{ client_id: 'a', created_at: hoursAgo(1), reject_reason: null }],
+        [{ client_id: 'a', created_at: hoursAgo(0.2), reject_reason: null }],
         new Map(),
         NOW,
       ),
     ).toHaveLength(0)
+  })
+})
+
+describe('latestAliveAt —— 存活信号只算给它声明能领的客户', () => {
+  const ping = (started_at: string, client_ids: string[]) => ({ started_at, summary: { client_ids } })
+  it('干活心跳和存活信号取最新；没声明的客户不被担保', () => {
+    const pings = [ping('2026-09-08T10:00:00Z', ['a']), ping('2026-09-08T09:00:00Z', ['a', 'B'])]
+    expect(latestAliveAt('2026-09-08T08:00:00Z', pings, 'a')).toBe('2026-09-08T10:00:00Z')
+    expect(latestAliveAt('2026-09-08T08:00:00Z', pings, 'b')).toBe('2026-09-08T09:00:00Z')
+    expect(latestAliveAt(undefined, pings, 'c')).toBeUndefined()
   })
 })
