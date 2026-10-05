@@ -6,7 +6,7 @@
  * 设计就作废了，而且从数据上完全看不出来（广告跑得好好的）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { publishDraftPaused, activatePublished } from '../ad-publisher'
+import { publishDraftPaused, activatePublished, pausePublished } from '../ad-publisher'
 import type { AdDraft } from '@/lib/ads-strategy/ad-draft'
 
 const DRAFT: AdDraft = {
@@ -181,5 +181,282 @@ describe('activatePublished — 三层都要开', () => {
       { campaignId: 'camp1', adSetId: 'as1', adIds: ['ad1'] }, 'tok',
     )
     expect(r.ok).toBe(false)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 私信（点击后进 Messenger 对话）类型
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MSG: AdDraft = {
+  kind: 'messenger_conversation',
+  clientId: 'c1',
+  campaignName: 'DM campaign',
+  adSetName: 'DM set',
+  dailyBudget: 20,
+  durationDays: 7,
+  geoCountries: ['NZ'],
+  pageId: 'p1',
+  creatives: [
+    {
+      name: 'DM ad', primaryText: 'Join our Christmas tour', headline: 'Message us',
+      description: 'Ask us anything', videoId: 'v1', thumbnailImageHash: 'th1', language: 'en',
+    },
+  ],
+}
+
+const bodyOf = (path: string) => calls.find((c) => c.url.includes(path))!.body
+
+describe('publishDraftPaused — 私信类型的四步参数', () => {
+  it('系列：互动目标 + 暂停', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused(MSG, 'act_1', 'tok')
+    const b = bodyOf('/campaigns')
+    expect(b.get('objective')).toBe('OUTCOME_ENGAGEMENT')
+    expect(b.get('status')).toBe('PAUSED')
+  })
+
+  it('广告组：对话优化 + 落点 Messenger + 只带主页', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused(MSG, 'act_1', 'tok')
+    const b = bodyOf('/adsets')
+    expect(b.get('optimization_goal')).toBe('CONVERSATIONS')
+    expect(b.get('destination_type')).toBe('MESSENGER')
+    expect(b.get('billing_event')).toBe('IMPRESSIONS')
+    expect(JSON.parse(b.get('promoted_object')!)).toEqual({ page_id: 'p1' })
+    expect(b.get('daily_budget')).toBe('2000')
+  })
+
+  it('创意：视频 + 缩略图 hash + 发送消息按钮(app_destination)', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused(MSG, 'act_1', 'tok')
+    const spec = JSON.parse(bodyOf('/adcreatives').get('object_story_spec')!)
+    expect(spec.page_id).toBe('p1')
+    expect(spec.video_data).toEqual({
+      video_id: 'v1',
+      message: 'Join our Christmas tour',
+      title: 'Message us',
+      link_description: 'Ask us anything',
+      image_hash: 'th1',
+      call_to_action: { type: 'MESSAGE_PAGE', value: { app_destination: 'MESSENGER' } },
+    })
+  })
+
+  it('🔴 创意里不能出现任何 link（D13：接口建私信素材带 messenger_doc 链接会被 Meta 当场拒）', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused(MSG, 'act_1', 'tok')
+    const raw = bodyOf('/adcreatives').get('object_story_spec')!
+    expect(raw).not.toContain('"link"')
+    expect(raw).not.toContain('messenger_doc')
+    expect(raw).not.toContain('lead_gen_form_id')
+  })
+
+  it('缩略图：同时给了 hash 和链接 → 只传 hash；只有链接 → 传 image_url', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    const mk = (c: object) => ({ ...MSG, creatives: [{ ...MSG.creatives[0], thumbnailImageHash: undefined, ...c }] })
+    await publishDraftPaused(mk({ thumbnailImageHash: 'H', thumbnailUrl: 'https://a.test/t.jpg' }), 'act_1', 'tok')
+    let vd = JSON.parse(bodyOf('/adcreatives').get('object_story_spec')!).video_data
+    expect(vd.image_hash).toBe('H')
+    expect(vd.image_url).toBeUndefined()
+
+    calls = []
+    await publishDraftPaused(mk({ thumbnailUrl: 'https://a.test/t.jpg' }), 'act_1', 'tok')
+    vd = JSON.parse(bodyOf('/adcreatives').get('object_story_spec')!).video_data
+    expect(vd.image_url).toBe('https://a.test/t.jpg')
+    expect(vd.image_hash).toBeUndefined()
+  })
+
+  it('全程 PAUSED：每一个带 status 的写请求都是 PAUSED，整个过程没有 ACTIVE', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    const r = await publishDraftPaused(
+      { ...MSG, creatives: [MSG.creatives[0], { ...MSG.creatives[0], name: 'DM ad 2' }] }, 'act_1', 'tok',
+    )
+    expect(r.ok).toBe(true)
+    const withStatus = calls.filter((c) => c.method === 'POST' && c.body.has('status'))
+    expect(withStatus).toHaveLength(4) // 系列 + 组 + 2 条广告
+    expect(withStatus.every((c) => c.body.get('status') === 'PAUSED')).toBe(true)
+    expect(calls.some((c) => [...c.body.values()].some((v) => v.includes('ACTIVE')))).toBe(false)
+  })
+
+  it('每次写请求都带超时信号（卡死不能把整个请求拖过平台的超时线）', async () => {
+    const seen: (AbortSignal | null | undefined)[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      seen.push(init?.signal)
+      const id = url.includes('/campaigns') ? 'camp1' : url.includes('/adsets') ? 'as1' : url.includes('/adcreatives') ? 'cr1' : 'ad1'
+      return { ok: true, status: 200, text: async () => JSON.stringify({ id }) } as Response
+    }))
+    await publishDraftPaused(MSG, 'act_1', 'tok')
+    expect(seen).toHaveLength(4)
+    expect(seen.every((s) => s instanceof AbortSignal)).toBe(true)
+  })
+
+  it('陌生类型直接抛，不静默建成别的东西', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await expect(publishDraftPaused({ ...MSG, kind: 'nope' as never }, 'act_1', 'tok')).rejects.toThrow()
+    expect(calls).toHaveLength(0)
+  })
+})
+
+describe('publishDraftPaused — 私信类型失败要收拾干净', () => {
+  it('创意被 Meta 拒（例如按钮类型不被接受）→ 先删广告组再删系列，orphans 为空', async () => {
+    vi.stubGlobal('fetch', mockGraph({ onPath: '/adcreatives' }))
+    const r = await publishDraftPaused(MSG, 'act_1', 'tok')
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.step).toBe('creative')
+    expect(r.orphans).toEqual([])
+    const deletes = calls.filter((c) => c.method === 'DELETE').map((c) => (c.url.includes('as1') ? 'as1' : 'camp1'))
+    expect(deletes).toEqual(['as1', 'camp1']) // 逆序
+  })
+
+  it('第二条创意失败 → 第一条已建的创意 / 广告也要一起删', async () => {
+    let n = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET', body: new URLSearchParams(String(init?.body ?? '')) })
+      if (init?.method === 'DELETE') return { ok: true, status: 200, text: async () => '{}' } as Response
+      if (url.includes('/adcreatives') && ++n === 2) {
+        return { ok: false, status: 400, text: async () => 'nope' } as Response
+      }
+      const id = url.includes('/campaigns') ? 'camp1' : url.includes('/adsets') ? 'as1'
+        : url.includes('/adcreatives') ? 'cr1' : 'ad1'
+      return { ok: true, status: 200, text: async () => JSON.stringify({ id }) } as Response
+    }))
+    const r = await publishDraftPaused(
+      { ...MSG, creatives: [MSG.creatives[0], { ...MSG.creatives[0], name: 'second' }] }, 'act_1', 'tok',
+    )
+    expect(r.ok).toBe(false)
+    const deleted = calls.filter((c) => c.method === 'DELETE').map((c) => c.url.split('/').pop()!.split('?')[0])
+    expect(deleted).toEqual(['ad1', 'cr1', 'as1', 'camp1'])
+  })
+
+  it('请求超时 / 断网（不知道 Meta 建成没有）→ 回滚已建的，并把名字记进 orphans', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET', body: new URLSearchParams() })
+      if (init?.method === 'DELETE') return { ok: true, status: 200, text: async () => '{}' } as Response
+      if (url.includes('/adsets')) throw new Error('The operation was aborted due to timeout')
+      return { ok: true, status: 200, text: async () => '{"id":"camp1"}' } as Response
+    }))
+    const r = await publishDraftPaused(MSG, 'act_1', 'tok')
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.orphans).toHaveLength(1)
+    expect(r.orphans[0]).toContain('未确认是否已建成')
+    expect(r.orphans[0]).toContain('DM set')
+    expect(calls.some((c) => c.method === 'DELETE' && c.url.includes('camp1'))).toBe(true)
+  })
+
+  it('网关超时(HTTP 502/504)可能是 Meta 建成之后才超时 → 也算「可能已建成」', async () => {
+    for (const status of [502, 504]) {
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+        if (init?.method === 'DELETE') return { ok: true, status: 200, text: async () => '{}' } as Response
+        if (url.includes('/adsets')) return { ok: false, status, text: async () => 'gateway timeout' } as Response
+        return { ok: true, status: 200, text: async () => '{"id":"camp1"}' } as Response
+      }))
+      const r = await publishDraftPaused(MSG, 'act_1', 'tok')
+      expect(r.ok, String(status)).toBe(false)
+      if (!r.ok) expect(r.orphans.join(' ')).toContain('未确认是否已建成')
+    }
+  })
+
+  it('Meta 明确拒绝（HTTP 400）不算「可能已建成」，不往 orphans 里写名字', async () => {
+    vi.stubGlobal('fetch', mockGraph({ onPath: '/adsets' }))
+    const r = await publishDraftPaused(MSG, 'act_1', 'tok')
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.orphans).toEqual([])
+  })
+})
+
+describe('publishDraftPaused — 时间预算', () => {
+  it('过了 stopWritingAt → 一次写都不发，直接失败', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    const r = await publishDraftPaused(MSG, 'act_1', 'tok', { stopWritingAt: 1_000, now: () => 5_000 })
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.error).toContain('时间')
+    expect(calls).toHaveLength(0)
+  })
+
+  it('建到一半时间到 → 停手并回滚已建的', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    let t = 0
+    const now = () => (t += 40) // 每次取一次时间就走 40ms
+    const r = await publishDraftPaused(MSG, 'act_1', 'tok', { stopWritingAt: 100, now })
+    expect(r.ok).toBe(false)
+    expect(calls.some((c) => c.method === 'POST' && c.url.includes('/campaigns'))).toBe(true)
+    expect(calls.some((c) => c.method === 'POST' && c.url.includes('/adcreatives'))).toBe(false)
+    expect(calls.some((c) => c.method === 'DELETE' && c.url.includes('camp1'))).toBe(true)
+  })
+
+  it('回滚也有期限：过了 giveUpRollbackAt 就不再删，没删的全部如实进 orphans', async () => {
+    vi.stubGlobal('fetch', mockGraph({ onPath: '/adsets' }))
+    const r = await publishDraftPaused(MSG, 'act_1', 'tok', { giveUpRollbackAt: 1, now: () => 1_000 })
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.orphans).toEqual(['camp1'])
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false)
+  })
+
+  it('不给预算 → 现有行为不变（不限时）', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    const r = await publishDraftPaused(DRAFT, 'act_1', 'tok')
+    expect(r.ok).toBe(true)
+  })
+})
+
+describe('pausePublished — 回读发现不是暂停时补一刀', () => {
+  it('三层同时发(不是一个等一个)：止损要快', async () => {
+    let inFlight = 0
+    let peak = 0
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      inFlight++
+      peak = Math.max(peak, inFlight)
+      await new Promise((r) => setTimeout(r, 5))
+      inFlight--
+      return { ok: true, status: 200, text: async () => '{"success":true}' } as Response
+    }))
+    await pausePublished({ campaignId: 'camp1', adSetId: 'as1', adIds: ['ad1', 'ad2'] }, 'tok')
+    expect(peak).toBe(4)
+  })
+
+  it('广告 / 组 / 系列三层都改成 PAUSED', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET', body: new URLSearchParams(String(init?.body ?? '')) })
+      return { ok: true, status: 200, text: async () => '{"success":true}' } as Response
+    }))
+    const r = await pausePublished({ campaignId: 'camp1', adSetId: 'as1', adIds: ['ad1', 'ad2'] }, 'tok')
+    expect(r).toEqual({ ok: true, failed: [] })
+    expect(calls.map((c) => c.url.split('/').pop()!.split('?')[0])).toEqual(['ad1', 'ad2', 'as1', 'camp1'])
+    expect(calls.every((c) => c.body.get('status') === 'PAUSED')).toBe(true)
+  })
+
+  it('有期限：过了 deadlineAt 就不再试，没来得及的如实报出来（补暂停不能把整次请求拖过超时线）', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET', body: new URLSearchParams() })
+      return { ok: true, status: 200, text: async () => '{"success":true}' } as Response
+    }))
+    let t = 0
+    const r = await pausePublished(
+      { campaignId: 'camp1', adSetId: 'as1', adIds: ['ad1'] }, 'tok',
+      { deadlineAt: 100, now: () => (t += 60) }, // 第 1 次取 60 ≤ 100 过，之后都超
+    )
+    expect(calls).toHaveLength(1)
+    expect(r.ok).toBe(false)
+    expect(r.failed).toHaveLength(2)
+    expect(r.failed.join(' ')).toContain('没来得及')
+  })
+
+  it('一层失败不影响其它层继续试，失败的如实返回', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET', body: new URLSearchParams() })
+      return url.includes('as1')
+        ? ({ ok: false, status: 400, text: async () => 'boom' } as Response)
+        : ({ ok: true, status: 200, text: async () => '{"success":true}' } as Response)
+    }))
+    const r = await pausePublished({ campaignId: 'camp1', adSetId: 'as1', adIds: ['ad1'] }, 'tok')
+    expect(r.ok).toBe(false)
+    expect(r.failed).toHaveLength(1)
+    expect(r.failed[0]).toContain('as1')
+    expect(calls).toHaveLength(3) // 失败了也继续试系列
   })
 })

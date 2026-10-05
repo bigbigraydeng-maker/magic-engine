@@ -2,10 +2,21 @@
 
 import { describe, expect, it } from 'vitest'
 import { approveBudgetWithinCap, parseReviewBody } from './review-actions'
+import { REEL_HUMAN_CHECK_KEYS } from '@/lib/social/content-review'
+
+const passChecklist = REEL_HUMAN_CHECK_KEYS.map(key => ({
+  key,
+  judge: 'HUMAN',
+  outcome: 'PASS',
+  detail: null,
+  source_ref: key.startsWith('factual_') ? 'https://example.test/source' : null,
+}))
 
 describe('parseReviewBody', () => {
   it('approve 合法', () => {
-    expect(parseReviewBody({ action: 'approve' })).toEqual({ ok: true, action: 'approve' })
+    expect(parseReviewBody({ action: 'approve', checklist_human: passChecklist })).toEqual({
+      ok: true, action: 'approve', checklistHuman: passChecklist,
+    })
   })
   it('未知 action → 拒', () => {
     const r = parseReviewBody({ action: 'delete' })
@@ -14,11 +25,11 @@ describe('parseReviewBody', () => {
   it('reject_quality 必带 feedback', () => {
     expect(parseReviewBody({ action: 'reject_quality' }).ok).toBe(false)
     expect(parseReviewBody({ action: 'reject_quality', feedback: '  ' }).ok).toBe(false)
-    const r = parseReviewBody({ action: 'reject_quality', feedback: '画面质量' })
-    expect(r).toEqual({ ok: true, action: 'reject_quality', feedback: '画面质量' })
+    const r = parseReviewBody({ action: 'reject_quality', feedback: '画面质量', checklist_human: passChecklist })
+    expect(r).toEqual({ ok: true, action: 'reject_quality', feedback: '画面质量', checklistHuman: passChecklist })
   })
   it('reject_quality feedback 截断 2000', () => {
-    const r = parseReviewBody({ action: 'reject_quality', feedback: 'x'.repeat(3000) })
+    const r = parseReviewBody({ action: 'reject_quality', feedback: 'x'.repeat(3000), checklist_human: passChecklist })
     expect(r.ok && r.action === 'reject_quality' && r.feedback.length).toBe(2000)
   })
   it('reject_budget 正数且 ≤ $50', () => {

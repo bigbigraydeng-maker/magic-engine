@@ -9,6 +9,8 @@
  * per-client configuration data. Adding a new client's one-off task means
  * appending here, not editing the shared loader path.
  */
+import type { PmKind } from './five-kinds'
+
 export interface ClientDocManualTask {
   clientId: string
   clientName: string
@@ -17,6 +19,11 @@ export interface ClientDocManualTask {
   href: string
   /** ISO instant，过了这个时间点不再下发。 */
   expiresAt: string
+  /**
+   * 这件事属于 PM 五类里的哪一类（默认「点一次」）。比如「要不要对生产库执行」
+   * 是拍板，不是点一次 —— 写在这里，今日待办就会把它放进「要你拍板的」那一栏。
+   */
+  pmKind?: PmKind
 }
 
 export const CLIENT_DOC_MANUAL_TASKS: ClientDocManualTask[] = [
@@ -43,6 +50,8 @@ export const CLIENT_DOC_MANUAL_TASKS: ClientDocManualTask[] = [
     // 且没人知道要去翻文档。2026-09-21 Codex 复审第 3 轮抓到，已改成同数组里独立一条今日待办。
     clientId: '4ae76381-cd45-43bd-85cd-98cfd7604007',
     clientName: 'New Asian Logistics (NAL)',
+    // 「要不要对生产数据库执行」是撤不回的拍板，不是点一次
+    pmKind: 'decide',
     what: 'NAL 的 WhatsApp 接入卡在第一步：生产数据库 clients 表还没有 whatsapp_phone_number_id 这一列，migration 代码半个月前已合并但从未对生产执行——这是纯新增字段（4 个 ADD COLUMN + 1 个唯一索引，不改 RLS），风险很低，但按铁律必须 PM 明确拍板才能对生产数据库执行',
     how: '点右边链接看一眼这个 migration 具体改了什么（很短，4 段加字段说明）；确认可以执行就回一句 `go apply`，这里就会去跑；暂时不想动就回 `暂不`，之后想清楚了再说',
     href: 'https://github.com/bigbigraydeng-maker/magic-engine/blob/main/supabase/migrations/20260902000002_whatsapp_phone_number_id.sql',

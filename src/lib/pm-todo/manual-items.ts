@@ -21,7 +21,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { pushAttributionItems } from './attribution-items'
 import { clientListUnreadableItem, loadActiveClients, type ClientRow } from './client-roster'
+import { pushAiTrackerFailureItems } from './ai-tracker-failure-items'
 import { pushConversionReviewItems } from './conversion-review-items'
+import { pushPaymentEmailNeedsHumanItems } from './payment-email-items'
 import { pushAiAutoReviewCircuitBreakerItems } from './ai-auto-review-circuit-breaker-items'
 import { pushMetaTokenHealthItems } from './meta-token-health-items'
 import { deployCheckFailedItem, pushDeployHealthItems } from './deploy-health-items'
@@ -33,8 +35,13 @@ import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushFacebookSyncFailingItems } from './facebook-sync-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
+import { pushToolLeadItems } from './tool-lead-items'
+import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
+import { pushAdsCircuitItems } from './ads-circuit-items'
+import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
+import { pushDataDeletionFailureItems } from './data-deletion-items'
 import {
   buildCrawlHealthItems,
   buildNotIndexedItems,
@@ -54,7 +61,7 @@ export * from './manual-item-types'
 export { pushLinkedinProgressItems } from './manual-linkedin-items'
 export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems } from './manual-crm-items'
 import { pushVideoCreditsItem, pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
-import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems } from './manual-monitoring-items'
+import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems, pushAdsConfigReadItems } from './manual-monitoring-items'
 import { pushLeadsSanityItems, pushDiagnosticItems, pushPrescriptionItems } from './manual-strategy-items'
 
 export { pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
@@ -150,6 +157,12 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     }),
     // 按时没跑 / 查不出跑没跑 —— PM 2026-08-03 要求「不能完成需要有报错」
     (b) => pushCronHealthItems(supabase, b, now),
+    // 某客户的 AI 可见度探测整周全挂了 —— 没测成被当测出来是零（2026-09-20 三天没人知道）。
+    // 放在 infra 区而不是 per-client 区：它自己查 ai_visibility_runs，不看 clients 表里的
+    // 别的字段；但传 clients 进去是为了只对在服务的客户报警（Codex 复审 2026-09-28）。
+    (b) => pushAiTrackerFailureItems(supabase, b, now, clients).catch((e) =>
+      console.warn('[manual-items] AI 可见度全挂检查失败（不阻塞其他待办）:', e),
+    ),
     // 外部平台的授权断了 —— 跟上面几条一样属于基础设施检查，跟「系统里有几个客户」
     // 无关，所以放在客户名单那条提前返回之前。2026-09-24：CTS 邮箱断了 9 天没人知道，
     // 全站没有任何一条路会把它端出来（模块自己会兜底，不抛给这里）。
@@ -182,6 +195,10 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     // 成交/咨询等着人核对要不要告诉广告平台 —— 撤不回的动作，只能人点（#1397）
     (b) => pushConversionReviewItems(supabase, b, clients, now).catch((e) =>
       console.warn('[manual-items] 成交待核对读取失败（不阻塞其他待办）:', e),
+    ),
+    // 邮件里确认收到款、但系统没法自动记成交的 —— 不写进待办就死在运行日志里
+    (b) => pushPaymentEmailNeedsHumanItems(supabase, b, clients, now).catch((e) =>
+      console.warn('[manual-items] 邮箱付款待核对读取失败（不阻塞其他待办）:', e),
     ),
     // AI 全自动审核被异常刹车暂停了 —— 拉模式，事件送达失败也照样出得来
     (b) => pushAiAutoReviewCircuitBreakerItems(supabase, b).catch((e) =>
@@ -219,6 +236,11 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     (b) => pushMailchimpExportItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] Mailchimp 出口检查失败（不阻塞其他待办）:', e),
     ),
+    // 广告回拉读不出广告配置 → 诊断 / 经营状态 / 日报对这些客户静默跳过（2026-09-25 事故）。
+    // 这类失败混在该任务常年的 Meta 报错里，`cron_failing` 那条看不出来，必须单独捞。
+    (b) => pushAdsConfigReadItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 广告配置读取检查失败（不阻塞其他待办）:', e),
+    ),
     // Facebook 私信 / 表单留资同步连续失败 —— 报错原来只进运行记录，NAL 的主页授权
     // 2026-09-16 失效后 9 天没人知道，新私信新留资全没进 CRM。授权失效只有主页管理员能修，必须下发。
     (b) => pushFacebookSyncFailingItems(supabase, b, now).catch((e) =>
@@ -236,6 +258,18 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     // 客人说他付款了但没法自动确认 —— 只有人能对银行流水，不许机器自己打 paid 标签
     (b) => pushPaidSignalReviewItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 待确认付款读取失败（不阻塞其他待办）:', e),
+    ),
+    // Magic Bridge 免费名额快用完 —— 用满后新客户这个月就生成不了报告（PM 定的全平台上限）
+    (b) => pushMagicBridgeQuotaItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] Magic Bridge 免费额度待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 工具实验室有人留资（自助开通广告体检 / 网站诊断留邮箱）—— 这张表以前写完没人读
+    (b) => pushToolLeadItems(supabase, b, clients, now).catch((e) =>
+      console.warn('[manual-items] 工具实验室留资待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 工具实验室全站每月合计上限（网站诊断+广告体检赞助分析共用）快用完
+    (b) => pushToolsWideBudgetItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 工具实验室全站上限待办生成失败（不阻塞其他待办）:', e),
     ),
   ]
 }
@@ -302,6 +336,14 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 每日广告巡检的广告级规则（D2 / D10）—— 只读，要不要改由人定；同一件事按 remind-cadence 节奏提醒
     (b) => pushAdsRuleFindingItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 广告级规则待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 广告熔断中的账户 —— 判据是"现在还处在熔断中吗"，不是时间窗口（v2.5 §6.2 派生态）
+    (b) => pushAdsCircuitItems(supabase, b, nameOf).catch((e) =>
+      console.warn('[manual-items] 广告熔断待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // Facebook 删除数据请求处理失败 —— 失败不许只写日志（铁律 3）
+    (b) => pushDataDeletionFailureItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 删除数据请求失败待办生成失败（不阻塞其他待办）:', e),
     ),
     // 客户之间有没有串台 —— PM 2026-08-05：「坚决不能胡窜」。
     // 实测查到 CTS 的发布通道指向 Oztop 的网站，填错两个多月没人发现。
@@ -554,6 +596,7 @@ export function pushClientDocManualTaskItems(
       what: t.what,
       how: t.how,
       href: t.href,
+      ...(t.pmKind ? { pm_kind: t.pmKind } : {}),
     })
   }
 }
@@ -656,7 +699,8 @@ async function pushConversationHealthAlertItems(
           : `，已经持续 ${Math.floor(hoursOngoing / 24)} 天没恢复`
 
     items.push({
-      kind: 'conversation_health_alert',
+      // 「AI 起草一直报错」只有我们能修，拆成单独一种，今日待办按 kind 把它转给开发
+      kind: row.check_type === 'verifier_error_rate_high' ? 'conversation_health_check_error' : 'conversation_health_alert',
       client_id: row.client_id,
       client_name: nameOf(row.client_id),
       what: `${channelLabel} 私信客服：${conversationHealthProblemLabel(row.check_type)}${durationText}（${row.detail}）`,
@@ -666,9 +710,21 @@ async function pushConversationHealthAlertItems(
   }
 }
 
-async function pushCrossClientItems(supabase: SupabaseClient, items: ManualItem[]): Promise<void> {
+export async function pushCrossClientItems(supabase: SupabaseClient, items: ManualItem[]): Promise<void> {
   const findings = await auditCrossClientLeaks(supabase)
+  // 同一个网址 / 账号查出的几条是**同一件串台**的不同侧面（2026-09-25：「CTS 名下存着
+  // oztop 的网址」和「CTS 与 oztop 的发布通道指向同一网址」是一件事）—— 合成一条，
+  // 所有涉及的客户和说法都留着。不同网址的不合：两件串台就是两件事。
+  const groups = new Map<string, { severity: 'critical' | 'warning'; value: string; clients: string[]; whats: string[] }>()
   for (const f of findings) {
+    const key = `${f.severity}|${f.value.trim().toLowerCase().replace(/\/+$/, '')}`
+    const g = groups.get(key) ?? { severity: f.severity, value: f.value, clients: [], whats: [] }
+    for (const c of f.clients) if (!g.clients.includes(c)) g.clients.push(c)
+    g.whats.push(f.what)
+    groups.set(key, g)
+  }
+  for (const f of Array.from(groups.values())) {
+    const what = f.whats.join('；')
     items.push({
       kind: 'cross_client_leak',
       // 串台涉及多个客户，名字里全列出来，别只挂一个
@@ -676,8 +732,8 @@ async function pushCrossClientItems(supabase: SupabaseClient, items: ManualItem[
       client_name: f.clients.join(' / '),
       what:
         f.severity === 'critical'
-          ? `🔴 客户资料串台：${f.what}`
-          : `⚠️ ${f.what}`,
+          ? `🔴 客户资料串台：${what}`
+          : `⚠️ ${what}`,
       how:
         f.severity === 'critical'
           ? '进客户设置页核对这条配置填的是不是本人的。在纠正之前，系统已经拒绝用它发布任何东西'
@@ -709,7 +765,8 @@ async function pushBlogDraftItems(
   const todos = await fetchBlogDraftTodos(supabase, ids, now)
   for (const t of todos) {
     items.push({
-      kind: 'blog_draft_waiting',
+      // 发布通道断了的那种，人要做的是去设置里接通（点一次），不是审稿
+      kind: t.channelBroken ? 'blog_publish_channel_broken' : 'blog_draft_waiting',
       client_id: t.client_id,
       client_name: nameOf(t.client_id),
       what: t.what,

@@ -27,7 +27,7 @@
 **服务构成**（2026-08-12 实读）：1 个 web service + **47 个 Render Cron Job** + 12 个 GitHub Actions workflow（其中 5 个带 `schedule:`）。
 > 旧版这里写「28 个 Render Cron Job」，与 §4.1 表格自己的数（41）都对不上，两处都已更正。
 
-**`main` 的分支保护（2026-08-12 实读，别再说「开不了」）**：ruleset **`Protect main`（id 20550157）enforcement=active** —— 禁删 · 禁 non-fast-forward · **只许 merge commit**（不许 squash / rebase）· **所有复审线程必须标记已解决** · 必过状态检查 `ai-orchestrator-tests`；approving review 数要求为 0。
+**`main` 的分支保护**（ruleset 基本信息 2026-08-12 实读；必过检查清单已按 [`.github/merge-authorization.md`](../.github/merge-authorization.md) 于 2026-09-27 同步，别再说只有一道）：ruleset **`Protect main`（id 20550157）enforcement=active** —— 禁删 · 禁 non-fast-forward · **只许 merge commit**（不许 squash / rebase）· **所有复审线程必须标记已解决** · 必过状态检查共七道：`ai-orchestrator-tests` · `Ledger entries valid` · `Code change has ledger entry` · `Ledger refs exist` · `ops-review-loop-tests` · `Kernel architecture test`（2026-09-27 新增）· `Application build`（2026-09-27 新增，两道检查的可信度边界见 merge-authorization.md「已知缺口」）；approving review 数要求为 0；没有 bypass actor。另有独立规则集 `Risk gate`（只含必过检查 `Risk gate`，bypass actor = Repository admin）。
 另有两条同名旧 ruleset（`protect-main` / `protect-main Magic Engine`）处于 **disabled**，别被它们误导。
 
 ## 2. 代码规模
@@ -132,7 +132,7 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 | zhuge-weekly-recalculate | `0 3 * * 1` | `/api/cron/zhuge-recalculate` |
 | reputation-snapshots-weekly | `30 3 * * 1` | `/api/cron/reputation-snapshots-weekly` |
 | oztop-seo-optimizer | `0 5 * * 1` | `/api/cron/oztop-seo-optimizer?max=8` |
-| ~~cts-seo-optimizer~~ | ~~`30 5 * * 1`~~ | **已退役 2026-09-20**（PR #1812 从 render.yaml 删掉；路由代码留着备回滚但不再被调度）。由 Inngest 版「SEO 标题周循环 v1」接替，见 §4.3 `seo-meta-cycle-trigger` 行 |
+| ~~cts-seo-optimizer~~ | ~~`30 5 * * 1`~~ | **已退役 2026-09-20**（PR #1812 从 render.yaml 删掉；路由代码已在 2026-09-29（PR #2200）改成被调用就返回 410 并记失败，不再是回滚入口；Render 后台那条旧定时服务 2026-10-05 核查为「手动暂停」）。由 Inngest 版「SEO 标题周循环 v1」接替，见 §4.3 `seo-meta-cycle-trigger` 行 |
 | agent-learning-rollup | `0 7 * * 1` | `/api/cron/agent-learning-rollup` |
 | ~~factory-stock-refill~~ | ~~`0 19 * * 1`~~ | **已暂停 2026-09-08**（PM 停抓图：抓来的图无人消费，白花 Apify 钱；render.yaml/registry 已注释） |
 | blog-weekly | `0 3 * * 2` | `/api/cron/blog-weekly` |

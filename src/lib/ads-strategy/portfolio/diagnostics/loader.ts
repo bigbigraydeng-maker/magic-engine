@@ -14,8 +14,9 @@ import { loadAdStrategyConfig } from '@/lib/ads-strategy/config'
 import type { EntitySnapshotRow } from '../snapshot'
 import { loadOutcomeConfig } from '../outcome-config'
 import { buildAccountContext, localDayEndUtc, shiftDate } from './context'
+import { scopeAccountToClient } from './ownership'
 import { d1NeedsHourly } from './d1-delivery-stall'
-import type { AccountInput, CaptureCoverage, DailyRow, DiagnosisInput, HourlyRow, SettingChange } from './types'
+import type { AccountInput, AdPageSighting, AudienceCountPoint, CaptureCoverage, DailyRow, DiagnosisInput, HourlyRow, SettingChange } from './types'
 import { D1_REPEAT_LOOKBACK_DAYS } from './thresholds'
 
 const PAGE = 1000
@@ -41,6 +42,7 @@ export function hourlyRowsFromGraph(rows: GraphHourlySpendRow[]): HourlyRow[] {
 const KEY_FIELDS = [
   'status', 'daily_budget_minor', 'lifetime_budget_minor', 'bid_strategy', 'optimization_goal',
   'destination_type', 'included_audience_ids', 'excluded_audience_ids', 'creative_video_ids', 'creative_page_id',
+  'audience_rule_object_ids', 'audience_rule_events', 'audience_retention_days',
 ] as const
 
 function keyFieldsChanged(prev: EntitySnapshotRow, row: EntitySnapshotRow): boolean {
@@ -66,7 +68,7 @@ function isRealChange(prev: EntitySnapshotRow | null, row: EntitySnapshotRow): b
  * 🔴 快照的 changed 不等于 Meta 那边真改了：我们自己加字段、两个写入程序序列化不一致都会记成 changed
  *    （2026-09-26 魏征生产核实：9/15 后约一半 changed 行 Meta 修改时间没动）。所以：
  *    - 前后两行都有 source_updated_time → 只认它变了（Meta 的修改时间是权威）；
- *    - 任一缺 → 退回比关键字段（状态、预算、出价、优化目标、去向、受众 id、素材视频、创意主页），不比 targeting_summary（它正是被加字段污染的那个）；
+ *    - 任一缺 → 退回比关键字段（状态、预算、出价、优化目标、去向、受众 id、素材视频、创意主页、受众收人规则与保留期），不比 targeting_summary（它正是被加字段污染的那个）；
  *    - 窗口里找不到前一行 → 只有 source_updated_time 落在抓取时刻前 2 天内才认。
  * 变更时刻优先用 source_updated_time，没有才用 captured_at。
  */
@@ -108,6 +110,31 @@ export function latestSnapshotsAsOf(rows: EntitySnapshotRow[], asOfMs: number): 
   return Array.from(latest.values()).filter(r => r.capture_reason !== 'disappeared')
 }
 
+/**
+ * 窗口内出现过的广告，每条取最后一行非「消失」快照（含后来被归档/删除的）。
+ * D11 算供血花费用：被归档的供血广告窗口内花过的钱也要算上（2026-09-27 魏征）。
+ */
+export function latestAdRowsEver(rows: readonly EntitySnapshotRow[]): EntitySnapshotRow[] {
+  const latest = new Map<string, EntitySnapshotRow>()
+  for (const r of rows) {
+    if (r.level !== 'ad' || r.capture_reason === 'disappeared') continue
+    const prev = latest.get(r.entity_id)
+    if (!prev || r.captured_at > prev.captured_at) latest.set(r.entity_id, r)
+  }
+  return Array.from(latest.values())
+}
+
+/** 近 35 天每条广告挂过的每个创意主页（非「消失」行，按 广告×广告组×主页 去重）。 */
+export function adPageSightings(rows: readonly EntitySnapshotRow[]): AdPageSighting[] {
+  const seen = new Map<string, AdPageSighting>()
+  for (const r of rows) {
+    if (r.level !== 'ad' || r.capture_reason === 'disappeared') continue
+    const key = `${r.entity_id}|${r.adset_id ?? ''}|${r.creative_page_id ?? ''}`
+    if (!seen.has(key)) seen.set(key, { entity_id: r.entity_id, adset_id: r.adset_id, creative_page_id: r.creative_page_id })
+  }
+  return Array.from(seen.values())
+}
+
 async function readAll<T>(build: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>): Promise<T[]> {
   const out: T[] = []
   for (let from = 0; ; from += PAGE) {
@@ -141,7 +168,7 @@ async function loadAdDaily(clientId: string, adAccountId: string, date: string):
   return Array.from(byKey.values())
 }
 
-async function loadAccount(clientId: string, adAccountId: string, shared: boolean, date: string): Promise<AccountInput> {
+async function loadAccount(clientId: string, adAccountId: string, shared: boolean, date: string, clientPageId: string | null, evaluatedAt: string): Promise<AccountInput> {
   const tzRow = await supabaseAdmin.from('ad_entity_snapshots').select('timezone_name, currency')
     .eq('client_id', clientId).eq('ad_account_id', adAccountId).eq('level', 'account')
     .order('captured_at', { ascending: false }).limit(1).maybeSingle()
@@ -149,10 +176,14 @@ async function loadAccount(clientId: string, adAccountId: string, shared: boolea
   const currency = (tzRow.data as { currency: string | null } | null)?.currency ?? null
   const endMs = localDayEndUtc(date, timezone)
 
+  // 🔴 单键排序（只按 captured_at）分页会漏数据：一轮抓取写入的所有实体共享同一个 captured_at，
+  //    超过一页（1000 行）时同一时间戳内谁在前谁在后没保证，翻页边界可能落在同一时间戳里，导致
+  //    range 查询重复或漏掉行——`adPageHistory` 直接决定归属，漏一条别家历史就会把 mixed_pages 判成 own
+  //    （Codex 2026-09-27）。加 level/entity_id 兜底排序，形成稳定顺序。
   const snapshots = await readAll<EntitySnapshotRow>((a, b) => supabaseAdmin.from('ad_entity_snapshots').select('*')
     .eq('client_id', clientId).eq('ad_account_id', adAccountId)
     .gte('captured_at', new Date(endMs - 35 * 86_400_000).toISOString()).lte('captured_at', new Date(endMs).toISOString())
-    .order('captured_at', { ascending: false }).range(a, b))
+    .order('captured_at', { ascending: false }).order('level', { ascending: true }).order('entity_id', { ascending: true }).range(a, b))
 
   const daily = await readAll<DailyRow>((a, b) => supabaseAdmin.from('ad_daily_insights')
     .select('level, entity_id, parent_id, insight_date, spend, impressions, reach, clicks, leads, messaging_conversations, video_thruplays, actions, frequency_7d')
@@ -168,6 +199,9 @@ async function loadAccount(clientId: string, adAccountId: string, shared: boolea
   ])
 
   const settingChanges = realSettingChanges(snapshots)
+  const audienceHistory: AudienceCountPoint[] = snapshots
+    .filter(r => r.level === 'audience' && r.capture_reason !== 'disappeared')
+    .map(r => ({ entity_id: r.entity_id, captured_at: r.captured_at, audience_count_lower: r.audience_count_lower }))
 
   const account: AccountInput = {
     adAccountId, shared, timezone, currency,
@@ -185,9 +219,13 @@ async function loadAccount(clientId: string, adAccountId: string, shared: boolea
     lastInsightDate: (lastRow.data as { insight_date: string } | null)?.insight_date ?? null,
     adDaily: shared ? undefined : await loadAdDaily(clientId, adAccountId, date),
     settingChanges,
+    audienceHistory,
+    recentAds: latestAdRowsEver(snapshots),
+    adPageHistory: adPageSightings(snapshots),
   }
 
-  if (d1NeedsHourly(buildAccountContext(account, date))) {
+  // 预筛跟 D1 用同一口径（只看客户自己的广告组）：别人的花费掩盖客户掉量时也要拉小时数据
+  if (d1NeedsHourly(buildAccountContext(scopeAccountToClient(account, clientPageId, date, evaluatedAt).account, date))) {
     const token = await getMetaTokenForClient(clientId)
     if (!token) {
       account.hourlyError = 'no Meta token'
@@ -213,14 +251,14 @@ async function loadClientPageId(clientId: string): Promise<string | null> {
 export async function loadDiagnosisInput(clientId: string, date: string, evaluatedAt: string): Promise<DiagnosisInput> {
   const accountIds = await getClientAdAccountIds(clientId)
   const { shared } = await findSharedAdAccounts(clientId, accountIds)
+  const clientPageId = await loadClientPageId(clientId)
   const accounts: AccountInput[] = []
   for (const id of accountIds) {
-    accounts.push(await loadAccount(clientId, id, shared.has(id.replace(/^act_/, '')), date))
+    accounts.push(await loadAccount(clientId, id, shared.has(id.replace(/^act_/, '')), date, clientPageId, evaluatedAt))
   }
-  const [outcome, strategy, clientPageId] = await Promise.all([
+  const [outcome, strategy] = await Promise.all([
     loadOutcomeConfig(clientId),
     loadAdStrategyConfig(clientId),
-    loadClientPageId(clientId),
   ])
   return {
     clientId, date, evaluatedAt,

@@ -609,3 +609,35 @@ describe('POST — 一条坏消息不能带走一整批', () => {
     expect(res.status).toBe(200)
   })
 })
+
+/**
+ * 🔴 魏征复审 2026-09-28，实测确认后修：**WhatsApp 昵称不许盖掉库里已有的真名。**
+ *
+ * `resolveContact` 的 `renameOk` 默认 true（`lib/crm/identity.ts:249`），所以不显式
+ * 关掉的话，每一条 WhatsApp 消息都会把 `contacts.display_name` 改写成客人自设的
+ * WhatsApp 昵称。这里传进去的 identity 只有电话号，命中的往往是早就存在的老联系人
+ * —— CTS 库里 774 条表单留资 + 642 通电话的人，报名时填的真名会被表情 / 小名静默
+ * 覆盖，且原名不可恢复。
+ *
+ * 两条都要：传了那个开关，**而且**名字本身照旧传过去（首次建人靠它，
+ * `identity.ts:203` 的 insert 路径不看 renameOk）。少了后半条，新客人会变成无名氏。
+ */
+describe('POST — 不许用 WhatsApp 昵称盖掉已有的名字', () => {
+  it('调 resolveContact 时明确传 overwriteDisplayName: false', async () => {
+    stubDb()
+    await POST(makePost(messagePayload({ waId: WA_ID, name: '🌸小美🌸', body: '你好' })))
+
+    expect(mockResolveContact).toHaveBeenCalledWith(
+      expect.objectContaining({ overwriteDisplayName: false }),
+    )
+  })
+
+  it('名字照旧传过去 —— 首次建人要靠它，不能连带把新客人变成无名氏', async () => {
+    stubDb()
+    await POST(makePost(messagePayload({ waId: WA_ID, name: '🌸小美🌸', body: '你好' })))
+
+    expect(mockResolveContact).toHaveBeenCalledWith(
+      expect.objectContaining({ displayName: '🌸小美🌸' }),
+    )
+  })
+})

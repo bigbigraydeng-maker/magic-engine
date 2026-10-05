@@ -30,8 +30,12 @@ vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 vi.mock('@/lib/messenger-agent/conversation-approval-emit', () => ({
   emitConversationApprovalEvent: vi.fn(),
 }))
+vi.mock('@/lib/crm/manual-send-dnc-gate', () => ({
+  checkManualSendDnc: vi.fn(async () => ({ blocked: false })),
+}))
 
 import { POST } from '../route'
+import { checkManualSendDnc } from '@/lib/crm/manual-send-dnc-gate'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { sendReply } from '@/lib/messenger/send'
 import { supabaseAdmin } from '@/lib/supabase'
@@ -226,6 +230,52 @@ describe('POST reply — failures surface accurately', () => {
 
     expect(res.status).toBe(409)
     expect(await res.json()).toMatchObject({ reason: 'window_closed' })
+  })
+})
+
+describe('POST reply — do-not-contact gate on a human free-text send', () => {
+  const mockGate = vi.mocked(checkManualSendDnc)
+
+  it('refuses a customer marked do-not-contact and never reaches sendReply', async () => {
+    allow()
+    mockGate.mockResolvedValueOnce({
+      blocked: true,
+      status: 403,
+      reason: 'do_not_contact',
+      error: 'dnc',
+    })
+
+    const res = await POST(request({ body: 'hi' }), params())
+
+    expect(mockGate).toHaveBeenCalledWith(CTS, CONVO)
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({ reason: 'do_not_contact' })
+    expect(mockSend).not.toHaveBeenCalled()
+  })
+
+  it('refuses when the do-not-contact check itself failed (fail closed)', async () => {
+    allow()
+    mockGate.mockResolvedValueOnce({
+      blocked: true,
+      status: 503,
+      reason: 'dnc_check_failed',
+      error: 'x',
+    })
+
+    const res = await POST(request({ body: 'hi' }), params())
+
+    expect(res.status).toBe(503)
+    expect(await res.json()).toMatchObject({ reason: 'dnc_check_failed' })
+    expect(mockSend).not.toHaveBeenCalled()
+  })
+
+  it('does not run on the draft-decision branch (F2 re-checks opt-out before it sends)', async () => {
+    allow()
+    mockFrom.mockReturnValueOnce(makeSelectBuilder({ data: null, error: null }) as never)
+
+    await POST(request({ draft_id: DRAFT_ID, action: 'reject' }), params())
+
+    expect(mockGate).not.toHaveBeenCalled()
   })
 })
 

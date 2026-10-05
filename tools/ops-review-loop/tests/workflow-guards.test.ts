@@ -326,7 +326,7 @@ describe('the auto-fix blast-radius guard (the real boundary)', () => {
   })
 
   it('protects the paths that would let the lane widen itself', () => {
-    const protectedPrefixes = PROTECTED_PATHS.map((r) => r.prefix ?? r.suffix ?? r.includes)
+    const protectedPrefixes = PROTECTED_PATHS.map((r) => r.prefix ?? r.suffix)
     for (const needed of ['.github/workflows/', 'tools/ops-review-loop/', 'supabase/migrations/', 'render.yaml']) {
       expect(protectedPrefixes, `${needed} must stay protected`).toContain(needed)
     }

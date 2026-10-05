@@ -24,7 +24,7 @@ import type {
 } from './types'
 import type { KernelDeps } from './deps'
 import { validateAgainstSchema } from './registry'
-import { isWithinEnvelope } from './autonomy-envelope'
+import { selectEnvelopeVerdict } from './autonomy-envelope'
 import { outwardBlockReason } from './outward-authorization'
 import {
   getActivePolicy,
@@ -427,11 +427,37 @@ export async function preflight(deps: KernelDeps, run: ActionRun, now: Date): Pr
       )
     }
 
-    const verdict = isWithinEnvelope(resolved.request, resolved.facts, approval.envelope)
+    // 🔴 人按的「收」类动作走另一套信封（`HUMAN_STOP_ENVELOPE`），不走 AI 自治信封。
+    //    `triggered_by` 取的是 `action_runs` 那一列。
+    //
+    // 🔴 **这里原来写着「提交时由 Kernel 自己写、不经请求体，所以不是调用方自报的」——
+    //    那句话是误导性的，我自己写的，2026-09-27 改掉。**
+    //    Kernel 确实是写那一列的人，但值来自 `SubmitActionInput.triggeredBy`
+    //    （`runner.ts:47` 必填 → `runner.ts:194` 原样写入），**没有任何校验**。
+    //    也就是说「人按的」这个身份**就是调用方自报的** —— 原注释让读代码的人
+    //    以为这里有一道不存在的保证，而这条判据正是人工信封绕过 AI 五条闸的唯一凭据。
+    //
+    //    真正的约束在 `boundaries.ts` 的 `HUMAN_TRIGGER_ALLOWED_DIRS`（哪个目录能传）
+    //    + `HUMAN_TRIGGER_REQUIRED_AUTH_CALLS`（传它的文件必须过鉴权），两条都由
+    //    架构测试强制。彻底的修法（让 `'human'` 不可自报）是欠账，见那两条的注释。
+    //    为什么必须分家：AI 信封里「学习期未知就不动」「72h 冷却」「在 A/B 测试里不动」
+    //    这几条防的是 AI 反复折腾学习期，而人按紧急停车是为了**少花钱** ——
+    //    2026-09-27 实测拿 AI 信封拦人按的刹车，CTS + NAL 46 个广告组因 `learning_stage`
+    //    全是 NULL 被 100% 拒掉（详见 autonomy-envelope.ts 里 HUMAN_STOP_ENVELOPE 的注释）。
+    const verdict = selectEnvelopeVerdict({
+      triggeredBy: run.triggered_by,
+      actionKey: run.action_key,
+      request: resolved.request,
+      facts: resolved.facts,
+      envelope: approval.envelope,
+    })
     if (!verdict.within) {
+      // 🔴 理由里带上走的是哪套信封 —— 否则排查时分不清「人工信封拒了」还是
+      //    「AI 信封拒了」，而这两种该做的处置完全不同。
+      const which = verdict.envelopeUsed === 'human_stop' ? '人工止损信封' : '自治信封'
       return bad(
         'outside_autonomy_envelope',
-        `这一次的改动不在自治信封内：${verdict.reasons.join('；')}`,
+        `这一次的改动不在${which}内：${verdict.reasons.join('；')}`,
         definition,
         policy,
         costEstimate,
@@ -488,6 +514,7 @@ export async function authorizeRun(
    *    只有直接调 authorizeRun 的测试才会不传（那时没有第二个执行者）。
    */
   fence?: { generation: number },
+  options: { readonly requireHumanApproval?: boolean } = {},
 ): Promise<AuthorizationOutcome> {
   const now = deps.now()
 
@@ -522,8 +549,23 @@ export async function authorizeRun(
   const { definition, policy, costEstimate, costCap } = pf
   const expiresAt = new Date(now.getTime() + policy.decision_ttl_seconds * 1000).toISOString()
 
+  // A caller that promises an approval screen must never race a policy change
+  // into an automatic provider write. Re-read policy in preflight, then deny if
+  // it no longer requires approval; do not silently downgrade this request.
+  if (options.requireHumanApproval && policy.mode !== 'require_approval') {
+    return recordDeny(deps, {
+      run,
+      definition,
+      policy,
+      code: 'outward_requires_human_policy',
+      reason: `「${definition.title}」的当前规则不是“必须人工批准”——本次请求已停止，没有执行预算变更`,
+      costEstimate,
+      fence,
+    })
+  }
+
   // 要人点头。
-  if (policy.mode === 'require_approval') {
+  if (policy.mode === 'require_approval' || options.requireHumanApproval) {
     const decision = await insertDecision(deps.supabase, {
       action_run_id: run.id,
       client_id: run.client_id,
@@ -567,7 +609,9 @@ export async function authorizeRun(
     action_version: run.action_version,
     verdict: 'allow',
     deny_code: null,
-    reason: `这个客户已经允许系统自己做「${definition.title}」，且这次不花钱、不对外`,
+    reason: definition.sideEffect === 'outward'
+      ? `这个客户已允许有限自动执行「${definition.title}」，本次通过信封检查；执行前仍须重读事实`
+      : `这个客户已经允许系统自己做「${definition.title}」，且这次不花钱、不对外`,
     policy_snapshot: snapshotOf(policy, definition, run.input),
     policy_id: policy.id,
     policy_version: policy.policy_version,

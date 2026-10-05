@@ -11,6 +11,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   classifyAiNotice,
+  classifyPageReplies,
   isAutomatedPageMessage,
   lastHumanPageReplyAt,
   normaliseNoticeText,
@@ -283,6 +284,34 @@ describe('lastHumanPageReplyAt', () => {
     expect(lastHumanPageReplyAt(thread)).toBeNull()
   })
 
+  /**
+   * 排序必须按**时刻**，不能按字符串（魏征复审 2026-09-26 抓到，本用例是复现）。
+   *
+   * `…T10:01:00Z` 和 `…T22:00:00+12:00` 是同一天的不同写法，字符串比较会把带
+   * 偏移量的那条排到很后面。实测：客人 09:59Z 来信 → AI 接管通知写成 22:00+12:00
+   * → AI 回复写成 10:01Z（间隔 120 秒，躲过秒回判据），字符串排序得到
+   * 「来信 → AI 回复 → 通知」，那条 AI 回复于是在「还没接管」的状态下被判成真人。
+   */
+  it('通知带时区偏移、回复用 Z —— 仍按真实时刻排序，AI 回复不算真人', () => {
+    const thread: ThreadMessage[] = [
+      { direction: 'inbound', body: '你好', sentAt: '2026-09-20T09:59:00Z', tags: [] },
+      { direction: 'outbound', body: '你的 AI 客服将会回复。', sentAt: '2026-09-20T22:00:00+12:00', tags: [] },
+      { direction: 'outbound', body: '您好，有什么可以帮您？', sentAt: '2026-09-20T10:01:00Z', tags: [] },
+    ]
+    expect(lastHumanPageReplyAt(thread)).toBeNull()
+  })
+
+  it('时间解析不出来的那条排到最后，不去改变前面几条的判定', () => {
+    const thread: ThreadMessage[] = [
+      { direction: 'inbound', body: '你好', sentAt: '2026-09-20T09:59:00Z', tags: [] },
+      { direction: 'outbound', body: '你的 AI 客服将会回复。', sentAt: '2026-09-20T10:00:00Z', tags: [] },
+      { direction: 'outbound', body: '您好，有什么可以帮您？', sentAt: '2026-09-20T10:01:00Z', tags: [] },
+      { direction: 'outbound', body: '这条时间是坏的', sentAt: 'not-a-date', tags: [] },
+    ]
+    // 坏时间那条排最后；此时 AI 仍在接管，所以它也不算真人。
+    expect(lastHumanPageReplyAt(thread)).toBeNull()
+  })
+
   it('空数组 → null', () => {
     expect(lastHumanPageReplyAt([])).toBeNull()
   })
@@ -298,5 +327,84 @@ describe('lastHumanPageReplyAt', () => {
     const shuffled = [ordered[4], ordered[1], ordered[3], ordered[0], ordered[2]]
     expect(lastHumanPageReplyAt(shuffled)).toBe(lastHumanPageReplyAt(ordered))
     expect(lastHumanPageReplyAt(shuffled)).toBe(at(100))
+  })
+})
+
+describe('classifyPageReplies', () => {
+  function msg(
+    direction: 'inbound' | 'outbound',
+    sentAt: string,
+    body: string,
+    over: Partial<ThreadMessage> = {},
+  ): ThreadMessage {
+    return { direction, sentAt, body, tags: [], ...over }
+  }
+
+  it('每条出站消息各得一个 verdict，inbound 不产出', () => {
+    const thread = [
+      msg('inbound', '2026-09-20T10:00:00Z', '你好'),
+      msg('outbound', '2026-09-20T10:00:05Z', '你的 AI 客服将会回复。'),
+      msg('outbound', '2026-09-20T10:00:20Z', 'Hi there'),
+      msg('outbound', '2026-09-20T10:30:00Z', '你已接管 AI 客服的这场聊天。'),
+      msg('outbound', '2026-09-20T10:35:00Z', 'Sure, here are the details'),
+    ]
+    expect(classifyPageReplies(thread).map((v) => v.kind)).toEqual([
+      'notice',
+      'automated',
+      'notice',
+      'human',
+    ])
+  })
+
+  it('viaMeAutoAck 出站 → me_autoack，且不算真人回复', () => {
+    const thread = [
+      msg('inbound', '2026-09-20T10:00:00Z', '你好'),
+      msg('outbound', '2026-09-20T10:02:00Z', 'Thanks, we will get back to you.', {
+        viaMeAutoAck: true,
+      }),
+    ]
+    expect(classifyPageReplies(thread).map((v) => v.kind)).toEqual(['me_autoack'])
+    expect(lastHumanPageReplyAt(thread)).toBeNull()
+  })
+
+  it('viaMeAutoAck 不改变谁在回话：其后 3 分钟的普通出站仍是真人', () => {
+    const thread = [
+      msg('inbound', '2026-09-20T10:00:00Z', '你好'),
+      msg('outbound', '2026-09-20T10:02:00Z', 'Thanks, we will get back to you.', {
+        viaMeAutoAck: true,
+      }),
+      msg('outbound', '2026-09-20T10:05:00Z', '我是真人客服，帮您处理。'),
+    ]
+    expect(classifyPageReplies(thread).map((v) => v.kind)).toEqual(['me_autoack', 'human'])
+  })
+
+  it('与 lastHumanPageReplyAt 一致：等于最后一条 human verdict 的 sentAt', () => {
+    const threadA = [
+      msg('inbound', '2026-09-20T10:00:00Z', '你好'),
+      msg('outbound', '2026-09-20T10:00:05Z', '你的 AI 客服将会回复。'),
+      msg('outbound', '2026-09-20T10:00:20Z', 'Hi there'),
+      msg('outbound', '2026-09-20T10:30:00Z', '你已接管 AI 客服的这场聊天。'),
+      msg('outbound', '2026-09-20T10:35:00Z', 'Sure, here are the details'),
+    ]
+    const threadC = [
+      msg('inbound', '2026-09-20T10:00:00Z', '你好'),
+      msg('outbound', '2026-09-20T10:02:00Z', 'Thanks, we will get back to you.', {
+        viaMeAutoAck: true,
+      }),
+      msg('outbound', '2026-09-20T10:05:00Z', '我是真人客服，帮您处理。'),
+    ]
+    for (const thread of [threadA, threadC]) {
+      const humans = classifyPageReplies(thread).filter((v) => v.kind === 'human')
+      const expected = humans.length > 0 ? humans[humans.length - 1].sentAt : null
+      expect(lastHumanPageReplyAt(thread)).toBe(expected)
+    }
+  })
+
+  it('只有来信的会话 → 空数组', () => {
+    const thread = [
+      msg('inbound', '2026-09-20T10:00:00Z', '你好'),
+      msg('inbound', '2026-09-20T10:05:00Z', '在吗'),
+    ]
+    expect(classifyPageReplies(thread)).toEqual([])
   })
 })

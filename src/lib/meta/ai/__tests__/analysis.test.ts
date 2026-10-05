@@ -14,6 +14,8 @@ vi.mock('../../graph-read',async()=>{
 })
 
 import { generateAnalysis,listAnalyses,normaliseHeadings,placeRuleSection,safeCharge,stripFatigueSentences } from '../analysis'
+import { buildRuleCards } from '../rule-cards'
+import { renderRuleSection,type RuleSectionInput } from '@/lib/ads-strategy/rules/client-copy'
 
 const grant={ id:'10000000-0000-4000-8000-000000000001',connection_id:'20000000-0000-4000-8000-000000000001',
   ad_account_id:'act_1234567890',revision:'30000000-0000-4000-8000-000000000001',entitlement_revision:'40000000-0000-4000-8000-000000000001' }
@@ -41,6 +43,9 @@ beforeEach(()=>{
     if(name==='meta_ads_reserve_sponsored_analysis') return { data:{ reserved:true,idempotent:false,job_id:'job-1',reserve_usd:0.12 },error:null }
     if(name==='meta_ads_authorize_sponsored_analysis') return { data:true,error:null }
     if(name==='meta_ads_finish_sponsored_analysis') { jobStatus=String(args.final_status);return { data:true,error:null } }
+    // Tools Lab combined monthly backstop (src/lib/tools-lab/spend-cap.ts) — allowed by default here;
+    // see the dedicated 'platform_quota_reached' test below for the denied case.
+    if(name==='zhangqian_rate_limit_consume') return { data:[{ allowed:true,post_count:1 }],error:null }
     return { data:null,error:{ message:'unexpected rpc' } }
   })
 })
@@ -51,6 +56,37 @@ describe('托管 Meta 广告分析',()=>{
     await expect(generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id))
       .rejects.toThrow('sponsored_analysis_unavailable')
     expect(mocks.reserveRead).not.toHaveBeenCalled()
+    expect(mocks.metaGraphGet).not.toHaveBeenCalled()
+    expect(mocks.callClaudeChat).not.toHaveBeenCalled()
+  })
+
+  it('Tools Lab 全站每月合计上限用完（跟网站诊断共用一个桶）→ platform_quota_reached，不请求 Meta 或付费模型',async()=>{
+    mocks.rpc.mockImplementation(async(name:string,args:Record<string,unknown>)=>{
+      if(name==='meta_ads_reserve_sponsored_analysis') return { data:{ reserved:true,idempotent:false,job_id:'job-1',reserve_usd:0.12 },error:null }
+      if(name==='meta_ads_authorize_sponsored_analysis') return { data:true,error:null }
+      if(name==='meta_ads_finish_sponsored_analysis') { jobStatus=String(args.final_status);return { data:true,error:null } }
+      if(name==='zhangqian_rate_limit_consume') return { data:[{ allowed:false,post_count:2001 }],error:null }
+      return { data:null,error:{ message:'unexpected rpc' } }
+    })
+    await expect(generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id))
+      .rejects.toThrow('platform_quota_reached')
+    expect(mocks.reserveRead).not.toHaveBeenCalled()
+    expect(mocks.metaGraphGet).not.toHaveBeenCalled()
+    expect(mocks.callClaudeChat).not.toHaveBeenCalled()
+    // This client's own per-client sponsored budget was never even queried — the whole-platform check runs after it.
+    expect(mocks.rpc).not.toHaveBeenCalledWith('meta_ads_reserve_sponsored_analysis',expect.anything())
+  })
+
+  it('Tools Lab 全站上限的计数器本身读不出来 → 失败关闭（analysis_unavailable），绝不放行',async()=>{
+    mocks.rpc.mockImplementation(async(name:string,args:Record<string,unknown>)=>{
+      if(name==='meta_ads_reserve_sponsored_analysis') return { data:{ reserved:true,idempotent:false,job_id:'job-1',reserve_usd:0.12 },error:null }
+      if(name==='meta_ads_authorize_sponsored_analysis') return { data:true,error:null }
+      if(name==='meta_ads_finish_sponsored_analysis') { jobStatus=String(args.final_status);return { data:true,error:null } }
+      if(name==='zhangqian_rate_limit_consume') return { data:null,error:{ message:'down' } }
+      return { data:null,error:{ message:'unexpected rpc' } }
+    })
+    await expect(generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id))
+      .rejects.toThrow('analysis_unavailable')
     expect(mocks.metaGraphGet).not.toHaveBeenCalled()
     expect(mocks.callClaudeChat).not.toHaveBeenCalled()
   })
@@ -167,6 +203,7 @@ describe('托管 Meta 广告分析',()=>{
       if(name==='meta_ads_reserve_sponsored_analysis') return { data:{ reserved:true,idempotent:false,job_id:'job-1',reserve_usd:0.12 },error:null }
       if(name==='meta_ads_authorize_sponsored_analysis') return { data:false,error:null }
       if(name==='meta_ads_finish_sponsored_analysis') { jobStatus=String(args.final_status);return { data:true,error:null } }
+      if(name==='zhangqian_rate_limit_consume') return { data:[{ allowed:true,post_count:1 }],error:null }
       return { data:null,error:{ message:'unexpected rpc' } }
     })
     await expect(generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id))
@@ -546,6 +583,78 @@ describe('报告口径与第三部分',()=>{
     expect(JSON.stringify(modelInput)).not.toContain('降到了')
   })
 
+  it('生成时存下的第三部分与读的时候重新拼的逐字相同，广告名带 $ 符号也能去重',async()=>{
+    const d=(n:number)=>new Date(Date.now()-n*86_400_000).toISOString().slice(0,10)
+    const row=(date:string)=>({
+      client_id:'a1000000-0000-4000-8000-000000000001',date,
+      payload:{
+        dataCompleteness:'complete',
+        adLevelCoverage:[{ adAccountId:grant.ad_account_id,ran:true,reason:'ok',adsChecked:3 }],
+        problems:[{
+          code:'D10',status:'hit',title:'内部标题',clientVisible:true,
+          units:[{ level:'ad',id:'ad1',name:"Save $& more $$ Kids$' deal",adAccountId:grant.ad_account_id }],
+          reasons:['止损：内部'],
+          evidence:{ core_metric:'lead',baseline_source:'own_history',base_rate:0.16,recent_rate:0.04,
+            base_cost_per_result:7,recent_cost_per_result:30,recent_spend:90 },
+        }],
+      },
+    })
+    const rows=[row(d(1)),row(d(2))]
+    const growthChain:Record<string,unknown>={}
+    growthChain.select=vi.fn(()=>growthChain)
+    growthChain.eq=vi.fn(()=>growthChain)
+    growthChain.gte=vi.fn(()=>growthChain)
+    growthChain.order=vi.fn(async()=>({ data:rows,error:null }))
+    mocks.from.mockImplementation((table:string)=>table==='ads_growth_states' ? growthChain : query(table))
+
+    mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
+      if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'NZD',timezone_name:'Pacific/Auckland' }
+      if(path===`${grant.ad_account_id}/adsets`) return { data:[
+        { id:'as-msg',destination_type:'MESSENGER',optimization_goal:'CONVERSATIONS' },
+        { id:'as-lead',destination_type:'ON_AD',optimization_goal:'LEAD_GENERATION' },
+        { id:'as-video',destination_type:'ON_VIDEO',optimization_goal:'THRUPLAY' },
+      ] }
+      if(params.level==='adset') return { data:[
+        { campaign_id:'c1',adset_id:'as-msg',spend:'60',actions:[
+          { action_type:'onsite_conversion.messaging_conversation_started_7d',value:'6' },
+          { action_type:'lead',value:'5' },
+        ] },
+        { campaign_id:'c2',adset_id:'as-lead',spend:'40',actions:[
+          { action_type:'lead',value:'4' },
+          { action_type:'onsite_conversion.messaging_conversation_started_7d',value:'3' },
+        ] },
+        { campaign_id:'c3',adset_id:'as-video',spend:'10',actions:[] },
+      ] }
+      if(params.level==='account') return { data:[{ spend:'110',impressions:'5000',clicks:'100' }] }
+      if(params.level==='campaign') return { data:[
+        { campaign_id:'c1',campaign_name:'私信',spend:'60',impressions:'3000',clicks:'60' },
+        { campaign_id:'c2',campaign_name:'表单',spend:'40',impressions:'1500',clicks:'30' },
+      ] }
+      if(params.level==='ad') return { data:[
+        { ad_id:'ad1',ad_name:"Save $& more $$ Kids$' deal",spend:'50',impressions:'1000',clicks:'20' },
+      ] }
+      return { data:[] }
+    })
+    mocks.callClaudeChat.mockResolvedValue({ text:'一、总体结果\n花费 110。\n四、版位\n数据不足。',
+      input_tokens:500,output_tokens:200,cost_usd:0.004,stop_reason:'end_turn' })
+
+    const result=await generateAnalysis('a1000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001',grant.id)
+    expect(result.status).toBe('completed')
+
+    const finishCall=mocks.rpc.mock.calls.find(call=>call[0]==='meta_ads_finish_sponsored_analysis')
+    const finishArgs=finishCall?.[1] as Record<string,unknown>
+    const reportBody=String(finishArgs.report_body)
+    expect(reportBody).not.toContain('[[RULE_SECTION]]')
+    expect(reportBody).toContain("「Save $& more $$ Kids$' deal」")
+    expect(reportBody.split('四、版位\n数据不足。').length-1).toBe(1)
+
+    const rebuilt=buildRuleCards((finishArgs.evidence_payload as { rule_section?:unknown }).rule_section,
+      reportBody,new Date().toISOString().slice(0,10))
+    expect(rebuilt.cards?.bodyReplaced).toBe(true)
+    expect(rebuilt.report).toContain('这条已经放在上面「我们正在跟进的广告」里，这里不再重复。')
+    expect(rebuilt.report).toContain('四、版位\n数据不足。')
+  })
+
   it('AI 自己写的第三部分被整段替换，且不残留广告名',async()=>{
     mocks.metaGraphGet.mockImplementation(async(path:string,_token:string,params:Record<string,string>)=>{
       if(path===grant.ad_account_id) return { id:grant.ad_account_id,currency:'NZD',timezone_name:'Pacific/Auckland' }
@@ -672,9 +781,34 @@ describe('listAnalyses 只把图表用得到的证据字段发给浏览器',()=>
       campaigns:fullEvidence.campaigns,comparison:fullEvidence.comparison,
       daily_campaigns:fullEvidence.daily_campaigns,placements:fullEvidence.placements,
       age_gender:fullEvidence.age_gender,devices:fullEvidence.devices,regions:fullEvidence.regions,
+      rule_cards:null,
     })
     expect(result.evidence).not.toHaveProperty('video_ads')
     expect(result.evidence).not.toHaveProperty('fatigue_candidates')
+  })
+
+  it('有巡检结论时拼出卡片，正文第三部分换成一句话，且不把逐条广告花费发给浏览器',async()=>{
+    const sec={ source:'patrol',dataDate:'2026-09-25',adsChecked:12,findings:[{
+      kind:'fatigue',adName:'Ad A',
+      headline:'「Ad A」最近 3 天，看到广告后点进来的人变少了：点击率从之前两周的 3.0% 降到了 1.0%（数据截至 9月25日）',
+      detail:'说明文字',action:'如果你最近自己改过这条广告的图片或视频，请告诉我们。',spend:12.5,explainsCtr:true,
+    }] }
+    const report=`一、总体结果\n花费。\n\n${renderRuleSection(sec as RuleSectionInput)}\n\n四、广告出现的位置\n文字。`
+    const chain:Record<string,unknown>={}
+    for(const method of ['select','eq','order','limit']) chain[method]=vi.fn(()=>chain)
+    chain.then=(resolve:(value:unknown)=>unknown)=>Promise.resolve({ data:[{ id:'job-1',status:'completed',ad_account_id:'act_1',
+      window_since:'2026-09-15',window_until:'2026-09-21',report_markdown:report,error_code:null,created_at:'t',completed_at:'t',
+      evidence:{ campaigns:[],rule_section:sec } }],error:null }).then(resolve)
+    mocks.from.mockReturnValue(chain)
+    const [result]=await listAnalyses('client','principal')
+    const evidence=result.evidence as { rule_cards:{ title:string;cards:{ headline:string }[] } }
+    expect(evidence.rule_cards.title).toBe('我们正在跟进的广告（1 条）')
+    expect(evidence.rule_cards.cards[0].headline).toBe('最近 3 天，看到广告后点进来的人变少了：点击率从之前两周的 3.0% 降到了 1.0%。')
+    expect(result.evidence).not.toHaveProperty('rule_section')
+    expect(JSON.stringify(result.evidence)).not.toContain('12.5')
+    expect(result.report_markdown).toContain('这条已经放在上面「我们正在跟进的广告」里，这里不再重复。')
+    expect(result.report_markdown).toContain('四、广告出现的位置\n文字。')
+    expect(result.report_markdown).not.toContain('说明文字')
   })
 
   it('evidence 为 null 时不报错，直接透传 null',async()=>{

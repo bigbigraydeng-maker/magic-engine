@@ -143,6 +143,7 @@
 | `INTERNAL_WORKER_TOKEN` | Voice worker 内部鉴权 | Render-web | ✅ |
 | `FACTORY_WORKER_TOKEN` | Factory worker 认领工单鉴权 | Render-web + worker | ❌ |
 | `FACTORY_WORKER_TARGET_CLIENT_ID` | 本地 Factory worker 可选单客户 claim 目标；提供时服务端必须再与 `FACTORY_WORKER_CLIENT_IDS` 求交集，不提供时沿用现有全白名单行为 | worker-local `.env` | ❌ |
+| `FACTORY_REMOTION_CLIENT_IDS` | 本地 Factory worker 允许走 Remotion 引擎（`brief.engine='remotion'`）的 client_id，逗号分隔；默认空 = 全部拒绝 | worker-local `.env` | ❌ |
 | `UPLOAD_LINK_SECRET` | 客户免登录上传链接签名（未配时 fallback 到 `CRON_SECRET`） | Render-web | ❌ |
 | `ADMIN_KEY_KILL_SWITCH` | 紧急关停全部 admin API key（设 `true` 生效） | Render-web | ❌ |
 | `OPENAI_WEBHOOK_SECRET` | OpenAI Realtime webhook 校验 | Render-web | ✅ |
@@ -167,9 +168,19 @@
 | `VOICE_STORE` | 存储后端（`supabase`） | Render-web | ✅ |
 | `VOICE_TEST_NUMBERS` | 测试号码白名单 | Render-web | ✅ |
 | `VOICE_DEFAULT_AGENT_ID` | DID 丢失时的兜底坐席 | Render-web | ✅ |
+> 🔴 **判「这个变量还有没有人用」，不能只 grep `process.env.X`。**
+>
+> `lib/voice/config.ts` 用 zod schema 声明变量名，代码读的是 `cfg.env.X` / `parsed.X`，**全程不出现 `process.env.X`**。
+> 2026-08-01 就是按 `process.env` 搜出「0 引用」，误删了 9 个仍在用的语音变量（见 [PITFALLS A5](./PITFALLS.md)）。
+> 2026-09-27 这一行又被记成「代码 0 引用，待清理」，实测 **5 个里 4 个在用** —— 同一个坑第二次。
+> **正确做法**：`grep -rn "<变量名>" src/ scripts/`（搜名字本身，不搜 `process.env.`）。
+
 | `OUTBOUND_CALLING_ENABLED` | 🔴 **外呼总闸**，当前 `false`（板桥硬闸 #3） | Render-web | ✅ |
 | `DEFAULT_COUNTRY` / `DEFAULT_TIMEZONE` | `NZ` / `Pacific/Auckland` | Render-web | ✅ |
-| `TELEPHONY_PROVIDER` `TWILIO_ACCOUNT_SID` `TWILIO_AUTH_TOKEN` `DEFAULT_HUMAN_TRANSFER_URI` `WEBHOOK_REPLAY_WINDOW_SECONDS` | `.env.example` 有，代码 0 引用（已切 OpenAI 原生 SIP） | — | ⚠️ 待清理 |
+| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | 🔴 **在用，别清理**（2026-09-27 核实）。`lib/voice/config.ts:89` 用它俩判语音线路走 real 还是 mock，而 `:92-103` 在生产环境只要有 provider 落回 mock 就**抛错拒绝启动**；`api/voice/integration-status/route.ts:18` 还拿它对外报状态 | Render-web | ⬜ 待核 |
+| `DEFAULT_HUMAN_TRANSFER_URI` | 🔴 **在用，别清理**。转人工的兜底地址（`lib/voice/tools/impl.ts:151`、`scripts/voice/provision-tenant.ts:51`） | Render-web | ⬜ 待核 |
+| `WEBHOOK_REPLAY_WINDOW_SECONDS` | 🔴 **在用，别清理**。webhook 验签的防重放窗口（`lib/voice/providers/openai.ts:47`、`mock.ts:30`），有默认值 300 | Render-web | ✅ 有默认值 |
+| `TELEPHONY_PROVIDER` | `.env.example` 有；只在 `lib/voice/config.ts:35` 声明了默认值 `'twilio'`，**没有任何消费方** —— 这一个是真的可以清理 | — | ⚠️ 待清理 |
 | `WHATSAPP_ACCESS_TOKEN` / `_PHONE_NUMBER_ID` | **WhatsApp 收发的关键路径依赖**（`lib/whatsapp/send.ts`）。`_PHONE_NUMBER_ID` 必须与该客户 `clients.whatsapp_phone_number_id` 一致，不一致时发送会被主动挡下（防止用别的客户号码发消息） | Render-web | ⬜ 待配 |
 | `META_APP_SECRET` | WhatsApp webhook 验签用（`/api/webhooks/whatsapp`）。**缺了 POST 直接 500**，Meta 重试几轮后会停掉整个订阅 | Render-web | ⬜ 待配 |
 | `META_VERIFY_TOKEN` | WhatsApp webhook 订阅握手用。缺了在 Meta 后台**订阅不上** | Render-web | ⬜ 待配 |
