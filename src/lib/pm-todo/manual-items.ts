@@ -23,6 +23,7 @@ import { pushAttributionItems } from './attribution-items'
 import { clientListUnreadableItem, loadActiveClients, type ClientRow } from './client-roster'
 import { pushAiTrackerFailureItems } from './ai-tracker-failure-items'
 import { pushConversionReviewItems } from './conversion-review-items'
+import { pushPaymentEmailNeedsHumanItems } from './payment-email-items'
 import { pushAiAutoReviewCircuitBreakerItems } from './ai-auto-review-circuit-breaker-items'
 import { pushMetaTokenHealthItems } from './meta-token-health-items'
 import { deployCheckFailedItem, pushDeployHealthItems } from './deploy-health-items'
@@ -194,6 +195,10 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     // 成交/咨询等着人核对要不要告诉广告平台 —— 撤不回的动作，只能人点（#1397）
     (b) => pushConversionReviewItems(supabase, b, clients, now).catch((e) =>
       console.warn('[manual-items] 成交待核对读取失败（不阻塞其他待办）:', e),
+    ),
+    // 邮件里确认收到款、但系统没法自动记成交的 —— 不写进待办就死在运行日志里
+    (b) => pushPaymentEmailNeedsHumanItems(supabase, b, clients, now).catch((e) =>
+      console.warn('[manual-items] 邮箱付款待核对读取失败（不阻塞其他待办）:', e),
     ),
     // AI 全自动审核被异常刹车暂停了 —— 拉模式，事件送达失败也照样出得来
     (b) => pushAiAutoReviewCircuitBreakerItems(supabase, b).catch((e) =>

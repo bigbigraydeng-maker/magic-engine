@@ -56,6 +56,8 @@ export function maskForPreview(
   // Meta 文档说这个字段发给他们时"不哈希"，跟"我们自己存的时候要不要打码"
   // 是两件事，不能因为前者就默认后者也不用管。
   note('Facebook 私信身份', outcome.pageScopedUserId != null)
+  // 线索编号同样只给「有/无」，不把原始值写进永久留底的 payload_preview。
+  note('Facebook 线索编号', outcome.metaLeadId != null)
 
   const ageDays = (Date.now() - new Date(outcome.occurredAt).getTime()) / 86_400_000
   const tooOld = ageDays > meta.maxEventAgeDays

@@ -234,6 +234,7 @@ Claude Code、Codex、CMUX DeepSeek 都可承担规划或审查；用户可直�
 - **写前先读**：改任何文件前先读它的 exports、直接调用方、共享工具；不确定某段代码为何如此设计时**先问再改**
 - 新表 migration 的 RLS 一律 service-role 模板 —— **必须写 `FOR ALL TO service_role USING (true)`，漏掉 `TO service_role` = 对匿名访客敞开读写**（2026-08-03 实测泄露 118 条策略）。禁止 `workspace_id` / `client_team` / `auth.uid()`。见 [DECISIONS](./docs/DECISIONS.md)
 - 新建 `/api/cron/*` 路由必须**同一个 PR 内**加 `render.yaml` 调度条目
+- **做网页 / 落地页 / 界面，上线或交付前必过 Impeccable 检查**（`.claude/skills/impeccable`，PM 2026-10-04 拍板）：运行 `.claude/skills/impeccable/scripts/impeccable detect <目录或网址>`，真问题当场修，误报写明理由；PR 或交付说明里写检查前后数字。客户页面的品牌色 / logo 必须先读 `master_briefs` 的 VI 再交给它，客户私有信息不写进共享 skill。它是现成工具（Buy），首次使用要下载检查程序（属外网读取，须先获准，再设 `IMPECCABLE_ALLOW_DOWNLOAD=1`），之后本地运行、无外部副作用，**不需要 Inngest**；只管网页，不管视频（视频仍走工厂）
 
 ### 8. 客户数据红线（违反 = 直接伤害客户）
 
