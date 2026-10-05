@@ -1,0 +1,364 @@
+// Vitest for remotion-branch.mjs. All IO is faked through `deps`; real temp dirs are used only for files.
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { EventEmitter } from 'node:events'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { RemotionOrderError, resolveEngine, checkRemotionHealth, processRemotionOrder, runRemotionRender } from './remotion-branch.mjs'
+
+const roots = []
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+  vi.useRealTimers()
+  for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true })
+})
+
+function makeEnv() {
+  const root = mkdtempSync(join(tmpdir(), 'remotion-test-'))
+  roots.push(root)
+  const studio = join(root, 'studio')
+  const acme = join(studio, 'ACME')
+  mkdirSync(join(acme, 'brandkit', 'assets'), { recursive: true })
+  writeFileSync(join(acme, 'brandkit', 'assets', 'watermark.png'), 'WATERMARK-BYTES')
+  const lib = join(acme, 'remotion-assets')
+  mkdirSync(join(lib, 'clips'), { recursive: true })
+  for (const n of ['h', 'a', 'b', 'c', 'p']) writeFileSync(join(lib, 'clips', `${n}.mp4`), `clip-${n}`)
+  const tmp = join(root, 'tmp')
+  mkdirSync(tmp, { recursive: true })
+  return { root, studio, acme, lib, tmp }
+}
+
+const PROPS = {
+  logoFile: 'logo.png', musicFile: null, brandColor: '#112233',
+  hook: { clip: 'clips/h.mp4', lines: [{ badge: '2', text: 'BEDS' }, { badge: null, text: 'VIEWS' }, { badge: null, text: 'OPEN' }] },
+  items: [
+    { text: 'ITEM ONE', clip: 'clips/a.mp4', blurBackdrop: false },
+    { text: 'ITEM TWO', clip: 'clips/b.mp4', blurBackdrop: false },
+    { text: 'ITEM THREE', clip: 'clips/c.mp4', blurBackdrop: false },
+  ],
+  itemLabel: 'INCLUDED', revealTitle: 'THE LIST.',
+  price: { backdropClip: 'clips/p.mp4', fromLabel: 'FROM', currencyPrefix: 'A$', amount: 12345, qualifier: 'PER PERSON', dateLine: 'SAT 12 OCT', footnote: 'EXAMPLE ONLY' },
+}
+
+const FILES = ['logo.png', 'clips/h.mp4', 'clips/a.mp4', 'clips/b.mp4', 'clips/c.mp4', 'clips/p.mp4']
+const TIMING = { hookFrames: 60, itemFrom: [60, 120, 180], itemDur: [60, 60, 60], revealFrom: 240, totalFrames: 360 }
+
+function makeWo(over = {}) {
+  return {
+    work_order_id: 'wo-1', client_id: 'client-a',
+    brief: { engine: 'remotion', remotion: { template: 'list', props: PROPS }, ...over },
+    uploads: {
+      video: { signed_url: 'https://sig/v', path: 'renders/c/wo-1/final.mp4' },
+      segments_json: { signed_url: 'https://sig/s', path: 'renders/c/wo-1/segments.json' },
+      srt: { signed_url: 'https://sig/t', path: 'renders/c/wo-1/captions.srt' },
+    },
+  }
+}
+
+function makeDeps(env, over = {}) {
+  return {
+    log: vi.fn(),
+    heartbeatFn: vi.fn(async () => ({ ok: true, abort: false })),
+    uploadSignedFn: vi.fn(async () => {}),
+    completeFn: vi.fn(async () => ({ ok: true, status: 200, json: { status: 'in_review' } })),
+    probeMediaEvidenceFn: vi.fn(() => ({ width: 1080, height: 1920, duration_seconds: 12, audio_stream_present: true })),
+    brandkitFor: vi.fn(() => join(env.root, 'studio/ACME/brandkit')),
+    studioRoot: join(env.root, 'studio'),
+    clientStudio: { 'client-a': 'ACME' },
+    allowedClientIds: ['client-a'],
+    workerId: 'w1',
+    healthFn: () => [],
+    loadEngineFn: async () => ({ parseListReelProps: (p) => p, collectAssetFiles: () => FILES, computeTimingFromProps: () => TIMING, FPS: 30 }),
+    renderFn: vi.fn(async ({ outFile }) => { writeFileSync(outFile, 'video-bytes'); return { code: 0, stderrTail: '' } }),
+    heartbeatIntervalMs: 10, timeoutSec: 600,
+    ...over,
+  }
+}
+
+const run = (env, deps, wo = makeWo()) => processRemotionOrder({ wo, tmp: env.tmp, deps })
+const errOf = (p) => p.then(() => null, (e) => e)
+const waitAbort = ({ signal }) => new Promise((r) => signal.addEventListener('abort', () => r({ code: null, stderrTail: '' }), { once: true }))
+const recordingRender = (deps, fn) => {
+  const inner = deps.renderFn
+  deps.renderFn = vi.fn(async (a) => { fn(a); return inner(a) })
+}
+const sequence = (codes) => {
+  let i = 0
+  return vi.fn(async ({ outFile }) => {
+    const code = codes[Math.min(i++, codes.length - 1)]
+    if (code === 0) writeFileSync(outFile, 'video-bytes')
+    return { code, stderrTail: code === 0 ? '' : `tail-${code}` }
+  })
+}
+
+describe('resolveEngine', () => {
+  it('defaults to legacy, accepts remotion, refuses unknown', () => {
+    expect(resolveEngine({})).toBe('legacy')
+    expect(resolveEngine({ engine: 'remotion' })).toBe('remotion')
+    for (const engine of ['legacy', '', 'ffmpeg']) {
+      const err = (() => { try { resolveEngine({ engine }) } catch (e) { return e } })()
+      expect(err).toBeInstanceOf(RemotionOrderError)
+      expect(err.retryable).toBe(false)
+    }
+  })
+})
+
+describe('processRemotionOrder refusals', () => {
+  it.each([
+    ['client not allowed', { client_id: 'client-z' }, {}, {}, null],
+    ['creative_recipe present', {}, { creative_recipe: { id: 'x' } }, {}, null],
+    ['reopened_from', {}, { reopened_from: 'wo-0' }, {}, null],
+    ['remotion missing', {}, { remotion: undefined }, {}, null],
+    ['health problems', {}, {}, { healthFn: () => ['缺少 zod'] }, /出片机还没装好 Remotion/],
+    ['bad props', {}, {}, { loadEngineFn: async () => ({ parseListReelProps: () => { throw new Error('字段 hook：太长') }, collectAssetFiles: () => FILES, computeTimingFromProps: () => TIMING, FPS: 30 }) }, /字段 hook：太长/],
+  ])('%s', async (_name, woOver, briefOver, depsOver, re) => {
+    const env = makeEnv()
+    const deps = makeDeps(env, depsOver)
+    const wo = makeWo(briefOver)
+    Object.assign(wo, woOver)
+    const err = await errOf(run(env, deps, wo))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.retryable).toBe(false)
+    if (re) expect(err.message).toMatch(re)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+    expect(deps.uploadSignedFn).not.toHaveBeenCalled()
+    expect(deps.completeFn).not.toHaveBeenCalled()
+  })
+})
+
+describe('checkRemotionHealth', () => {
+  it('reports missing deps, bad browser, old Node, and is clean on Node 22.18', () => {
+    const nothing = checkRemotionHealth({ existsFn: () => false }).join(' ')
+    expect(nothing).toMatch(/npm ci/)
+    expect(nothing).toMatch(/浏览器/)
+    const badBrowser = checkRemotionHealth({ env: { REMOTION_BROWSER_EXECUTABLE: '/nope' }, existsFn: (x) => x !== '/nope' }).join(' ')
+    expect(badBrowser).toContain('/nope')
+    expect(checkRemotionHealth({ nodeVersion: '20.1.0', existsFn: () => true }).join(' ')).toMatch(/Node/)
+    expect(checkRemotionHealth({ nodeVersion: '22.18.0', existsFn: () => true })).toEqual([])
+  })
+})
+
+describe('happy path', () => {
+  it('renders, uploads three artifacts, completes, and captions every string', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env)
+    let staged = null
+    let logoBytes = null
+    recordingRender(deps, (args) => {
+      staged = readdirSync(args.publicDir, { recursive: true }).map(String)
+      logoBytes = readFileSync(join(args.publicDir, 'logo.png'))
+    })
+    const props = { ...PROPS, hook: { ...PROPS.hook, lines: [{ badge: '2', text: 'BE\u200bDS' }, ...PROPS.hook.lines.slice(1)] } }
+    const wo = makeWo({ remotion: { template: 'list', props } })
+    const res = await run(env, deps, wo)
+    expect(res).toEqual({ ok: true, cost: 0 })
+    expect(deps.renderFn).toHaveBeenCalledTimes(1)
+    expect(staged).toContain('logo.png')
+    expect(staged).toContain(join('clips', 'a.mp4'))
+    expect(logoBytes.toString()).toBe('WATERMARK-BYTES')
+    expect(deps.uploadSignedFn).toHaveBeenCalledTimes(3)
+    expect(deps.uploadSignedFn.mock.calls.map((c) => c[0])).toEqual([
+      wo.uploads.video.signed_url, wo.uploads.segments_json.signed_url, wo.uploads.srt.signed_url,
+    ])
+    expect(deps.completeFn).toHaveBeenCalledTimes(1)
+    const payload = deps.completeFn.mock.calls[0][0]
+    expect(payload.actual_cost_usd).toBe(0)
+    expect(payload.new_clips).toEqual([])
+    expect('recipe_receipt' in payload).toBe(false)
+    expect(payload.video_url).toBe(wo.uploads.video.path)
+    expect(payload.segments_json_url).toBe(wo.uploads.segments_json.path)
+    expect(payload.srt_url).toBe(wo.uploads.srt.path)
+    expect(payload.worker_id).toBe('w1')
+    const srt = deps.uploadSignedFn.mock.calls[2][1].toString()
+    expect(srt.startsWith('1\n00:00:00,000 --> 00:00:02,000\n')).toBe(true)
+    expect(srt.match(/-->/g)).toHaveLength(5)
+    expect(existsSync(join(env.tmp, 'remotion'))).toBe(false)
+    const caption = payload.caption
+    for (const s of ['BEDS', 'VIEWS', 'OPEN', 'ITEM ONE', 'ITEM TWO', 'ITEM THREE',
+      'INCLUDED', 'THE LIST.', 'FROM', 'PER PERSON', 'SAT 12 OCT', 'EXAMPLE ONLY', 'A$12,345',
+      '2 BEDS', 'INCLUDED 1/3 ITEM ONE', 'INCLUDED 3/3 ITEM THREE']) {
+      expect(caption).toContain(s)
+    }
+    expect(caption).not.toContain('\u200b')
+  })
+})
+
+describe('render exit codes', () => {
+  it('retries once on failure then succeeds, and fails after two generic failures', async () => {
+    const env = makeEnv()
+    const retryDeps = makeDeps(env, { renderFn: sequence([5, 0]) })
+    const res = await run(env, retryDeps)
+    expect(res.ok).toBe(true)
+    expect(retryDeps.renderFn).toHaveBeenCalledTimes(2)
+
+    const failDeps = makeDeps(env, { renderFn: sequence([5, 5]) })
+    const err = await errOf(run(env, failDeps))
+    expect(err).toBeInstanceOf(Error)
+    expect(err).not.toBeInstanceOf(RemotionOrderError)
+    expect(err.retryable).toBeUndefined()
+    expect(failDeps.renderFn).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([124, 3, 4])('fatal exit code %i', async (code) => {
+    const env = makeEnv()
+    const deps = makeDeps(env, { renderFn: vi.fn(async () => ({ code, stderrTail: `tail-${code}` })) })
+    const err = await errOf(run(env, deps))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toContain(`tail-${code}`)
+    expect(deps.renderFn).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('heartbeat during render', () => {
+  it('beats while rendering and stops after', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env, {
+      renderFn: vi.fn(async ({ outFile }) => {
+        await new Promise((r) => setTimeout(r, 80))
+        writeFileSync(outFile, 'video-bytes')
+        return { code: 0, stderrTail: '' }
+      }),
+    })
+    await run(env, deps)
+    expect(deps.heartbeatFn.mock.calls.length).toBeGreaterThanOrEqual(3)
+    const after = deps.heartbeatFn.mock.calls.length
+    await new Promise((r) => setTimeout(r, 50))
+    expect(deps.heartbeatFn.mock.calls.length).toBe(after)
+  })
+
+  it.each([
+    ['abort', async () => ({ abort: true }), /abort/],
+    ['409', async () => { throw new Error('non-2xx status 409: x') }, /409/],
+  ])('aborts on %s', async (_name, heartbeatFn, re) => {
+    const env = makeEnv()
+    const deps = makeDeps(env, { heartbeatFn: vi.fn(heartbeatFn), renderFn: vi.fn(waitAbort) })
+    await expect(run(env, deps)).rejects.toThrow(re)
+    expect(deps.uploadSignedFn).not.toHaveBeenCalled()
+    expect(deps.completeFn).not.toHaveBeenCalled()
+  })
+
+  it('ignores transient heartbeat errors', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env, { heartbeatFn: vi.fn(async () => { throw new Error('network down') }) })
+    const res = await run(env, deps)
+    expect(res.ok).toBe(true)
+    expect(deps.log).toHaveBeenCalled()
+  })
+})
+
+describe('assets and client isolation', () => {
+  it.each([
+    ['missing asset', {}, null],
+    ['non-png logo', { loadEngineFn: async () => ({ parseListReelProps: (p) => p, collectAssetFiles: () => ['logo.jpg', ...FILES.slice(1)], computeTimingFromProps: () => TIMING, FPS: 30 }) }, { remotion: { template: 'list', props: { ...PROPS, logoFile: 'logo.jpg' } } }],
+  ])('rejects %s', async (_name, depsOver, woOver) => {
+    const env = makeEnv()
+    if (_name === 'missing asset') rmSync(join(env.lib, 'clips', 'b.mp4'))
+    const wo = woOver ? makeWo(woOver) : makeWo()
+    await expect(run(env, makeDeps(env, depsOver), wo)).rejects.toThrow(_name === 'missing asset' ? /clips\/b\.mp4/ : /\.png/)
+  })
+
+  it('rejects when brandkitFor throws', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env, { brandkitFor: vi.fn(() => { throw new Error('没配 studio 目录') }) })
+    await expect(run(env, deps)).rejects.toThrow(/没配 studio 目录/)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+
+  it('rejects a symlinked asset library outside the client', async () => {
+    const env = makeEnv()
+    const other = join(env.studio, 'OTHER', 'remotion-assets')
+    mkdirSync(join(other, 'clips'), { recursive: true })
+    for (const n of ['h', 'a', 'b', 'c', 'p']) writeFileSync(join(other, 'clips', `${n}.mp4`), `clip-${n}`)
+    rmSync(env.lib, { recursive: true, force: true })
+    symlinkSync(other, env.lib)
+    const deps = makeDeps(env)
+    await expect(run(env, deps)).rejects.toThrow(RemotionOrderError)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+})
+
+describe('post-render checks', () => {
+  it.each([
+    ['wrong resolution', { probeMediaEvidenceFn: vi.fn(() => ({ width: 720, height: 1280, duration_seconds: 12 })) }],
+    ['wrong duration', { probeMediaEvidenceFn: vi.fn(() => ({ width: 1080, height: 1920, duration_seconds: 20 })) }],
+    ['empty output', { renderFn: vi.fn(async ({ outFile }) => { writeFileSync(outFile, ''); return { code: 0, stderrTail: '' } }) }],
+    ['music configured but no audio stream', { loadEngineFn: async () => ({ parseListReelProps: (p) => ({ ...p, musicFile: 'clips/a.mp4' }), collectAssetFiles: () => FILES, computeTimingFromProps: () => TIMING, FPS: 30 }), probeMediaEvidenceFn: vi.fn(() => ({ width: 1080, height: 1920, duration_seconds: 12, audio_stream_present: false })) }],
+    ['ffprobe measured nothing', { probeMediaEvidenceFn: vi.fn(() => ({})) }],
+  ])('rejects %s', async (_name, over) => {
+    const env = makeEnv()
+    const deps = makeDeps(env, over)
+    await expect(run(env, deps)).rejects.toThrow(RemotionOrderError)
+    expect(deps.uploadSignedFn).not.toHaveBeenCalled()
+    expect(deps.completeFn).not.toHaveBeenCalled()
+  })
+
+  it.each([[422, true], [500, false]])('complete %i is %s non-retryable', async (status, flag) => {
+    const env = makeEnv()
+    const deps = makeDeps(env, { completeFn: vi.fn(async () => ({ ok: false, status, json: {} })) })
+    const err = await errOf(run(env, deps))
+    expect(err).toBeInstanceOf(Error)
+    expect(err instanceof RemotionOrderError).toBe(flag)
+  })
+})
+
+describe('dispatch through worker.processOrder', () => {
+  const stubFetch = () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, abort: false }) }))
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it.each([
+    ['unknown engine', { engine: 'bogus' }, null],
+    ['remotion client not allowed', { engine: 'remotion', remotion: { template: 'list', props: {} } }, 'FACTORY_REMOTION_CLIENT_IDS'],
+  ])('fails %s with retryable false', async (_name, brief, expectedError) => {
+    const { processOrder } = await import('./worker.mjs')
+    const fetchMock = stubFetch()
+    const res = await processOrder({ work_order_id: 'wo-9', client_id: 'client-a', budget_cap_usd: 1, brief })
+    expect(res).toBe(false)
+    const failCall = fetchMock.mock.calls.find((c) => String(c[0]).endsWith('/wo-9/fail'))
+    expect(failCall).toBeTruthy()
+    const body = JSON.parse(failCall[1].body)
+    expect(body.retryable).toBe(false)
+    if (expectedError) expect(body.error).toContain(expectedError)
+  })
+})
+
+describe('runRemotionRender', () => {
+  const fakeChild = () => Object.assign(new EventEmitter(), { pid: 4242, stdout: new EventEmitter(), stderr: new EventEmitter() })
+  const args = (spawnFn, over = {}) => ({ propsFile: 'p', outFile: 'o', publicDir: 'd', tmpDir: '/t', spawnFn, ...over })
+
+  it('spawns detached with a whitelisted env and reaps the group', async () => {
+    vi.spyOn(process, 'kill').mockImplementation(() => true)
+    const spawnFn = vi.fn(() => { const c = fakeChild(); setImmediate(() => c.emit('close', 0)); return c })
+    const env = { PATH: '/bin', HOME: '/h', FACTORY_WORKER_TOKEN: 'secret', REMOTION_BROWSER_EXECUTABLE: '/b' }
+    const result = await runRemotionRender(args(spawnFn, { env }))
+    expect(result.code).toBe(0)
+    const opts = spawnFn.mock.calls[0][2]
+    expect(opts.detached).toBe(true)
+    expect(opts.env).toEqual({ PATH: '/bin', HOME: '/h', TMPDIR: '/t', REMOTION_BROWSER_EXECUTABLE: '/b' })
+    expect(process.kill).toHaveBeenCalledWith(-4242, 'SIGKILL')
+  })
+
+  it('resolves when the pipes stay open after the CLI exits', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(process, 'kill').mockImplementation(() => true)
+    const spawnFn = vi.fn(() => { const c = fakeChild(); setImmediate(() => c.emit('exit', 0)); return c })
+    const p = runRemotionRender(args(spawnFn))
+    await vi.advanceTimersByTimeAsync(3100)
+    await expect(p).resolves.toMatchObject({ code: 0 })
+  })
+
+  it('abort kills the whole process group', async () => {
+    vi.spyOn(process, 'kill').mockImplementation(() => true)
+    const ac = new AbortController()
+    const child = fakeChild()
+    const spawnFn = vi.fn(() => child)
+    const p = runRemotionRender(args(spawnFn, { signal: ac.signal }))
+    ac.abort()
+    expect(process.kill).toHaveBeenCalledWith(-4242, 'SIGKILL')
+    child.emit('close', null)
+    await expect(p).resolves.toMatchObject({ code: null })
+  })
+})
