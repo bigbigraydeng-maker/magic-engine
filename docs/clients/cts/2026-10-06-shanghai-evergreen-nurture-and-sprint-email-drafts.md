@@ -3,7 +3,7 @@
 > 状态：**草稿，未发送、未排期、未改名单、未在 Mailchimp 建任何东西**（2026-10-06）。
 > 风险级：C（文档）。发送本身属 A 类动作（对外发布 + 客户可见），**必须 PM 本人同意**。
 > 对应 Campaign：`campaign_briefs` 6f143a16-0abf-462f-8dad-d37a7c52de29（刻意停放 archived）· 草稿目标 287dc046-0b95-42fd-9fc1-4f5d39ecd8be。
-> 英文正文里的 `[W] [B] [N] [U]` 是溯源标记，**发送前必须全部剥掉**（见 §1）。
+> 英文正文里的 `[W] [W*] [B] [P] [N] [U]` 是溯源标记，**发送前必须全部剥掉**（见 §1）。
 
 ---
 
@@ -26,6 +26,7 @@
 | `[W]` | 官网可溯：2026-10-06 抓取团页逐句核对过（见 §1.1） |
 | `[W*]` | 官网可溯，**但依赖改价上线**：只有 PR #223 上线后、页面上真的写着这个价才算数；上线前不得发 |
 | `[B]` | brief 可溯：来自 `campaign_briefs` 6f143a16（PM 2026-10-06 指令） |
+| `[P]` | PM 口头确认、**官网还没写**：团人数上限 20（2026-10-06 由架构审核窗口转述 PM 口头确认，PM 本人在本窗口没说过）。**发送前以官网为准：官网当天页面没写这个数，整句删除** |
 | `[N]` | 无事实主张（称呼、语气、行动号召） |
 | `[U]` | 未证实 → 草稿里已经**删掉或改写**，只在 §7 留痕，不会出现在英文正文里 |
 
@@ -51,7 +52,7 @@
 | 签证 | "NZ passport holders: visit China visa-free for 30 days (until 31 Dec 2026)." → **2027 出发不适用，邮件不引用** | 官网（过期） |
 | 口碑 | "Rated by real travellers ★★★★★ Google 4.4 · 12 reviews"；页面无任何具名团友故事 | 官网 |
 | 资质 | "TAANZ member & IATA-accredited" · "Backed by CTS · Founded 1928" · 25 years Kiwi-led | 官网 |
-| **团规模** | **页面没写**（只有订单表单可选 1–8+ 人）。PM 口述"小团"→ **未证实，所有邮件不写 small group** | 未证实 |
+| **团规模** | **页面没写**（只有订单表单可选 1–8+ 人）。2026-10-06 转述 PM 口头确认「人数上限 20 人」，官网正在补写 → 邮件只写 "group size up to 20"（变量 `{{GROUP_SIZE_MAX}}`），**不写 small group 之类形容词、不写余位**；发送前官网仍没写这个数就删句 | PM 口头确认（`[P]`） |
 
 升级目标团（2026-10-06 抓取，均 HTTP 200）：
 
@@ -73,6 +74,7 @@
 | `{{NEXT_DEPARTURE}}` | 如 "25 March 2027" | 官网 "Next confirmed departure" | 发送前核对（常年邮件不得写死） |
 | `{{FREE_CHANGE_DAYS}}` | 60 | 官网 | 发送前核对 |
 | `{{FREE_CHANGE_CUTOFF_CLAUSE}}` / `{{FREE_CHANGE_CUTOFF}}` | 仅冲刺邮件：出发日减 60 天（25 Mar 2027 → 24 Jan 2027） | **推算值**，需 CTS 确认"60 天"的算法 | CTS 确认前冲刺邮件不带这一句（见 SP2 备注） |
+| `{{GROUP_SIZE_MAX}}` | 20 | PM 口头确认（经 2026-10-06 架构审核窗口转述）；官网补写后以官网为准 | 发送前核对官网；官网没写这个数 = 整句删除；**常年邮件不写死**，改了人数只改这一处 |
 | `{{SEATS_NOTE}}` | 可选整块；只有 CTS **书面**确认余位才出现 | CTS | 没有确认 = 整块不出现，**绝不凭感觉写"快满了/仅剩 X 位"** |
 | `{{GOOGLE_RATING}}` `{{GOOGLE_REVIEWS}}` | 如 4.4 / 12 | 团页 "Rated by real travellers" 行 | 发送前核对 |
 | `{{TALE_PRICE}}` `{{TALE_DATE}}` | 如 "NZD $3,480" / "18 March 2027" | beijing-xian 团页 | 发送前核对 |
@@ -244,7 +246,7 @@ CTS 在 ME 库里共 1,116 个联系人，其中**有邮箱、没标"别联系"�
 | 主题 B | Reading the price: what's in and what's extra |
 | 预览句 | Airfares, hotels, guide and entrance fees — and what you pay on top. |
 | 唯一主 CTA | 按钮 "Check availability →" → `{{ENQUIRY_URL}}`（utm_content=n4） |
-| 含变量 | `{{FIRST_NAME}}` `{{PRICE_FROM}}` `{{PRICE_BASIS}}` `{{SINGLE_SUPP}}` `{{NEXT_DEPARTURE}}` `{{SEATS_NOTE}}`（可选） |
+| 含变量 | `{{FIRST_NAME}}` `{{PRICE_FROM}}` `{{PRICE_BASIS}}` `{{SINGLE_SUPP}}` `{{NEXT_DEPARTURE}}` `{{GROUP_SIZE_MAX}}`（`[P]` 句，官网没写就删）`{{SEATS_NOTE}}`（可选） |
 
 > Hi {{FIRST_NAME}}, [N]
 >
@@ -258,6 +260,8 @@ CTS 在 ME 库里共 1,116 个联系人，其中**有邮箱、没标"别联系"�
 > • An English-speaking tour guide [W]
 > • Entrance fees and land transfers [W]
 > • 13 meals: 7 breakfasts, 5 lunches and 1 dinner [W]
+>
+> Group size is up to {{GROUP_SIZE_MAX}} travellers. [P]
 >
 > Not covered: travel insurance (strongly recommended), tips (suggested NZD $10 per day per person), meals not listed, free-time transport and optional activities. A single room is an extra {{SINGLE_SUPP}}. [W / W*]
 >
@@ -306,7 +310,7 @@ CTS 在 ME 库里共 1,116 个联系人，其中**有邮箱、没标"别联系"�
 
 ## 4. 首期冲刺邮件（SP1–SP2，2027-03-25 出发）
 
-> 这两封是"一次性群发"，跟 N 序列不同：**给已经在名单里的历史询价人**。变量照样一律用 §1.2，**不把 2027-03-25 或"20 人"写死**。
+> 这两封是"一次性群发"，跟 N 序列不同：**给已经在名单里的历史询价人**。变量照样一律用 §1.2，**不把 2027-03-25 或人数上限 20 写死**（用 `{{NEXT_DEPARTURE}}`、`{{GROUP_SIZE_MAX}}`）。
 
 ### 4.1 分群（估算，ME 库只读，2026-10-06）
 下表是 ME 库里"有邮箱、没标别联系、阶段不是已付款/已订金/临行/没兴趣/已报价"的人，按**第一条命中**归组（互斥）。**Mailchimp 实际可发人数一定 ≤ 这些数**（ME 库 824 人 vs Mailchimp 安全分群 744 人；还要再扣退订和销售跟进中的人）。
@@ -347,7 +351,7 @@ CTS 在 ME 库里共 1,116 个联系人，其中**有邮箱、没标"别联系"�
 | 主题 B | Shanghai & Surroundings: 10 days, {{NEXT_DEPARTURE}} departure |
 | 预览句 | Airfares, hotels, an English-speaking guide and entrance fees are in the price. |
 | 唯一主 CTA | 按钮 "Check availability for {{NEXT_DEPARTURE}} →" → `{{ENQUIRY_URL}}`（utm_campaign=sh_sprint_202703, utm_content=sp1） |
-| 含变量 | `{{FIRST_NAME}}` `{{PRICE_FROM}}` `{{PRICE_BASIS}}` `{{SINGLE_SUPP}}` `{{NEXT_DEPARTURE}}` `{{SEATS_NOTE}}` |
+| 含变量 | `{{FIRST_NAME}}` `{{PRICE_FROM}}` `{{PRICE_BASIS}}` `{{SINGLE_SUPP}}` `{{NEXT_DEPARTURE}}` `{{GROUP_SIZE_MAX}}`（`[P]`）`{{SEATS_NOTE}}` |
 
 > Hi {{FIRST_NAME}}, [N]
 >
@@ -357,7 +361,7 @@ CTS 在 ME 库里共 1,116 个联系人，其中**有邮箱、没标"别联系"�
 >
 > The route is a 10-day loop through the Yangtze Delta: Suzhou's gardens, Wuxi's lakeside sights, Hanfu photos and afternoon tea in Xinshi water town, West Lake in Hangzhou, then the Bund in Shanghai. [W]
 >
-> A single room is an extra {{SINGLE_SUPP}}, and you can amend dates or travellers at no fee until 60 days before departure. [W*]
+> Group size is up to {{GROUP_SIZE_MAX}} travellers, a single room is an extra {{SINGLE_SUPP}}, and you can amend dates or travellers at no fee until 60 days before departure. [P / W*]
 >
 > {{SEATS_NOTE}} [仅在 CTS 书面确认余位时出现，否则整行删除]
 >
@@ -419,7 +423,7 @@ CTS 在 ME 库里共 1,116 个联系人，其中**有邮箱、没标"别联系"�
 ## 6. 发送前必过的闸门（缺一不发）
 
 1. **改价已上线并验证**：PR #223 合并 + 线上团页真的显示新价（抓页面核对，不是看 PR 状态）。
-2. **价格/日期/余位变量逐个对照官网当天页面**；`{{SEATS_NOTE}}` 没有 CTS 书面确认就整行删。
+2. **价格/日期/人数上限变量逐个对照官网当天页面**；`{{GROUP_SIZE_MAX}}` 官网当天没写这个数就整句删（不能只凭口头确认发出去）；`{{SEATS_NOTE}}` 没有 CTS 书面确认就整行删。
 3. **每封至少一个官网团页链接**，每个链接 `curl -sL -o /dev/null -w "%{http_code}"` = 200；团名文字和配图各自成链接（`docs/sops/cts-newsletter-send-checklist.md` 第 1 条，分支 `claude/determined-dewdney-a724f5`）。
 4. **收件人手工排除核对**：§4.2 清单逐项在 Mailchimp 预览页看规则，不信分群名字。
 5. **进行中序列的价格对账**：官网每次改价后，对 N1/N4/N5 里的价格对一次。
@@ -437,7 +441,7 @@ CTS 在 ME 库里共 1,116 个联系人，其中**有邮箱、没标"别联系"�
 4. 冲刺分群人数是**估算**：ME 库与 Mailchimp 的人数口径不同（824 vs 744）；Mailchimp 里没有"感兴趣的团"字段，无法直接实测各组人数。
 5. `{{FREE_CHANGE_CUTOFF}}`（24 Jan 2027）是我从"出发前 60 天"推出来的，CTS 没确认过算法。
 6. 回复邮件（"reply to this email"）的收件箱有没有人看，没核对 Mailchimp 的 reply-to 设置。
-7. 团规模（"小团"）官网没写，已从全部文案中去掉。
+7. 团人数上限 20：只是转述的 PM 口头确认（官网正在补写），PM 本人没在本窗口说过；邮件只写 "group size up to 20" 这一句事实，已按 `[P]` 标记，发送前以官网为准，官网没写就删。
 8. 同一人短时间内被多封营销邮件触达的上限，Mailchimp 能否用分群条件自动控制，没验证。
 9. 签证：官网只写到 2026-12-31，2027 年是否延续**没查到**；所有邮件只写"以出发时政策为准"。
 
