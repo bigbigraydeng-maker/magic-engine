@@ -5,9 +5,20 @@
  * discover/register routes. Survives Render restarts and works correctly
  * across multiple instances.
  *
- * Two services exported:
+ * This is also, as of the Tools Lab shared-plumbing pass, the one place that calls the
+ * `zhangqian_rate_limit_consume` RPC (`consumeQuotaBucket` below) — every atomic per-bucket quota check
+ * in the codebase (public-scan/discover-register's multi-dimension limiter here, and every Tools Lab
+ * tool's per-visitor/whole-site cap via `consumeQuota`) goes through this one function now. Two
+ * different failure policies sit on top of the same call: `consumeQuota` fails closed (any RPC error
+ * refuses the request — used by site-check, a fully public tool where a silent failure would mean
+ * unlimited free paid-AI calls); `consumeScanRateLimits` fails open with a legacy upsert fallback (used
+ * by public-scan/discover-register, unchanged from before this refactor — see its own docstring).
  *
+ * Four services exported:
+ *
+ *   consumeQuota(bucketType, bucketKey, windowStart, cap) → boolean, throws QuotaUnavailable on any failure
  *   checkScanRateLimits({ ip, email?, domain }) → { allowed, blockedBy?, limits }
+ *   consumeScanRateLimits({ ip, email?, domain }) → same shape, atomically incrementing
  *   getDomainCache(domain) / setDomainCache(domain, job_id)
  *
  * Defaults: 3 scans per dimension per UTC day. The function increments the
@@ -22,6 +33,85 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { canonicalEmail } from '@/lib/auth/email'
+
+export interface AtomicConsumeResult {
+  allowed: boolean
+  postCount: number
+}
+
+export interface AtomicConsumeFailure {
+  error: string
+  /**
+   * 'rpc_error': the call itself failed (network/PostgREST/permission — the store is genuinely down).
+   * 'malformed_response': the call succeeded but returned a shape with no usable decision (a store-side
+   * contract bug, not an availability problem). Callers may treat these differently — see
+   * `consumeScanRateLimits` below, which blocks on 'malformed_response' rather than falling back to its
+   * legacy fail-open path, matching this function's behavior before it was centralised here.
+   */
+  kind: 'rpc_error' | 'malformed_response'
+}
+
+/**
+ * The bare RPC call: one atomic check+increment against `zhangqian_rate_limit_consume` for a single
+ * bucket. No failure policy of its own — callers decide fail-open vs fail-closed on error (see
+ * `consumeQuota`, fail-closed on either failure kind, and `consumeScanRateLimits` below, fail-open with
+ * a legacy fallback only for 'rpc_error').
+ */
+export async function consumeQuotaBucket(
+  bucketType: string,
+  bucketKey: string,
+  windowStart: string,
+  cap: number,
+): Promise<AtomicConsumeResult | AtomicConsumeFailure> {
+  const { data, error } = await supabaseAdmin.rpc('zhangqian_rate_limit_consume', {
+    p_bucket_type: bucketType,
+    p_bucket_key: bucketKey,
+    p_window_start: windowStart,
+    p_cap: cap,
+  })
+  if (error) return { error: error.message, kind: 'rpc_error' }
+  const row = (Array.isArray(data) ? data[0] : data) as { allowed?: unknown; post_count?: unknown } | null
+  if (!row || typeof row.allowed !== 'boolean') return { error: 'quota store returned no decision', kind: 'malformed_response' }
+  return { allowed: row.allowed, postCount: typeof row.post_count === 'number' ? row.post_count : 0 }
+}
+
+export class QuotaUnavailable extends Error {}
+
+/**
+ * Fail-closed atomic consume: returns true when allowed. Any RPC error, thrown exception, or missing
+ * decision throws `QuotaUnavailable` — callers refuse the request rather than let it through. This is
+ * the policy every Tools Lab tool wants (a public, unauthenticated, paid-AI-calling endpoint must never
+ * fail open just because the quota store hiccupped).
+ */
+export async function consumeQuota(
+  bucketType: string,
+  bucketKey: string,
+  windowStart: string,
+  cap: number,
+): Promise<boolean> {
+  let result: AtomicConsumeResult | AtomicConsumeFailure
+  try {
+    result = await consumeQuotaBucket(bucketType, bucketKey, windowStart, cap)
+  } catch (err) {
+    throw new QuotaUnavailable(err instanceof Error ? err.message : String(err))
+  }
+  if ('error' in result) throw new QuotaUnavailable(result.error)
+  return result.allowed
+}
+
+/**
+ * UTC day/month window starts for `consumeQuota` bucket keys. Moved here (not left in site-check's own
+ * guards.ts, which they were previously defined in) because this is the neutral, tool-agnostic home for
+ * atomic-quota plumbing — a non-site-check caller (e.g. ads-check's spend cap) importing a date helper
+ * from a file whose own header says "for the free website check" would be a new, backwards coupling.
+ */
+export function dayStartUtc(now: Date = new Date()): string {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString()
+}
+
+export function monthStartUtc(now: Date = new Date()): string {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
+}
 
 const DEFAULT_DAILY_CAP = 3
 /** 24h — both the rate-limit window length and the domain cache TTL. */
@@ -151,16 +241,21 @@ export async function consumeScanRateLimits(
   let blockedBy: BucketType | undefined
 
   for (const [type, key] of keys) {
-    const { data, error } = await supabaseAdmin.rpc('zhangqian_rate_limit_consume', {
-      p_bucket_type:  type,
-      p_bucket_key:   key,
-      p_window_start: ws,
-      p_cap:          cap,
-    })
-    if (error) {
+    const result = await consumeQuotaBucket(type, key, ws, cap)
+    if ('error' in result && result.kind === 'malformed_response') {
+      // The RPC itself is reachable and answered — it just didn't return a usable decision (a store-side
+      // contract bug, not an availability problem). Block this dimension rather than falling through to
+      // the "RPC unreachable" fallback below — matches this function's behavior before the atomic call
+      // was centralised into `consumeQuotaBucket` (魏征 review, PR #2163).
+      console.warn('[rate-limiter] atomic RPC returned no usable decision, blocking this dimension', { type, key, error: result.error })
+      counts[type] = { count: 0, cap, key }
+      if (!blockedBy) blockedBy = type
+      continue
+    }
+    if ('error' in result) {
       // Defensive: fall back to legacy non-atomic upsert + treat as allowed
       // (loud warning so we notice if the RPC starts failing in prod).
-      console.warn('[rate-limiter] atomic RPC failed, falling back', { type, key, error: error.message })
+      console.warn('[rate-limiter] atomic RPC failed, falling back', { type, key, error: result.error })
       const { data: row } = await supabaseAdmin
         .from('zhangqian_scan_rate_limits')
         .select('count')
@@ -180,12 +275,8 @@ export async function consumeScanRateLimits(
       continue
     }
 
-    const row = (Array.isArray(data) ? data[0] : data) as
-      | { allowed: boolean; post_count: number }
-      | null
-    const postCount = row?.post_count ?? 0
-    counts[type] = { count: postCount, cap, key }
-    if (!row?.allowed && !blockedBy) blockedBy = type
+    counts[type] = { count: result.postCount, cap, key }
+    if (!result.allowed && !blockedBy) blockedBy = type
   }
 
   if (!counts.ip)     counts.ip     = { count: 0, cap, key: normalizeIp(input.ip) }

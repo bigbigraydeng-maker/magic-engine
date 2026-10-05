@@ -178,6 +178,7 @@ describe('buildTodoEmail', () => {
     'attribution_audit_failed',
     'client_list_unreadable',
     'cron_blind',
+    'ads_config_unreadable',
   ] as const)('🛠 %s 只在「开发欠账」那一行小字里出现，不抬高总数', (kind) => {
     const email = buildTodoEmail(3, {
       ...EMPTY,

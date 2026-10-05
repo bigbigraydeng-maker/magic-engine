@@ -9,6 +9,7 @@ import {
   buildSrt,
   claimMatchesTarget,
   heartbeat,
+  pingAlive,
   probeLoudnessLufs,
   resolveCopy,
 } from './worker.mjs'
@@ -159,5 +160,19 @@ describe('buildSrt — 空 caption 的段落不许在字幕里复读兜底文案
     const srt = buildSrt(segments, buggyCopy)
     const occurrences = srt.split(WO.angle).length - 1
     expect(occurrences).toBe(8) // 旧 bug:8 段全复读同一句
+  })
+})
+
+describe('pingAlive — 空闲存活信号', () => {
+  it('4 分钟内不重复发；失败只返回 false 不抛错', async () => {
+    const calls = []
+    const ok = async (url) => { calls.push(url); return { ok: true, status: 200 } }
+    const t0 = Date.now() + 3_600_000 // heartbeat 测试也会触发一次 ping，时间要在它之后
+    expect(await pingAlive(ok, t0)).toBe(true)
+    expect(await pingAlive(ok, t0 + 60_000)).toBe(false)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toContain('/api/factory/worker/ping')
+    const boom = async () => { throw new Error('offline') }
+    expect(await pingAlive(boom, t0 + 5 * 60_000)).toBe(false)
   })
 })

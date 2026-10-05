@@ -25,6 +25,19 @@ describe('loadAdStrategyConfigWithSource — asymmetric fail-open', () => {
     expect(source).toBe('fallback')
   })
 
+  // 2026-09-25 事故：读失败时调用方需要原始报错才能把它记进运行记录（否则只剩一个 'fallback'）
+  it('a read error carries the provider message out; a missing row carries no error', async () => {
+    maybeSingle.mockResolvedValue({ data: null, error: { message: 'column ad_strategy_configs.autopilot_enabled does not exist' } })
+    const failed = await loadAdStrategyConfigWithSource('c1')
+    expect(failed.source).toBe('fallback')
+    expect(failed.error).toContain('autopilot_enabled does not exist')
+
+    maybeSingle.mockResolvedValue({ data: null, error: null })
+    const missing = await loadAdStrategyConfigWithSource('c1')
+    expect(missing.source).toBe('default')
+    expect(missing.error).toBeUndefined()
+  })
+
   it('marks a missing row as default (a fresh client, legitimately on)', async () => {
     maybeSingle.mockResolvedValue({ data: null, error: null })
     const { config, source } = await loadAdStrategyConfigWithSource('c1')

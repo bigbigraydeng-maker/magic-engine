@@ -12,13 +12,15 @@ export interface PrioritySectionHeaderProps {
   title: string
   hint: string
   total: number
+  /** 今天这一段处理了多少人——不传就不显示这一块（不是所有调用方都算得出"今天"这个概念）。 */
+  progress?: { total: number; done: number; left: number }
   open: boolean
   /** 跨满整行 —— 段头是插在同一张表 <tbody> 里的一个 <tr>，不是独立表格。 */
   colSpan: number
   onToggle: () => void
 }
 
-export function PrioritySectionHeader({ title, hint, total, open, colSpan, onToggle }: PrioritySectionHeaderProps) {
+export function PrioritySectionHeader({ title, hint, total, progress, open, colSpan, onToggle }: PrioritySectionHeaderProps) {
   return (
     <tr className="border-y border-me-charcoal/10 bg-me-ivory/60">
       <td colSpan={colSpan} className="px-4 py-2">
@@ -33,6 +35,17 @@ export function PrioritySectionHeader({ title, hint, total, open, colSpan, onTog
           <span className="rounded-full bg-white px-2 py-0.5 text-xs font-bold text-me-charcoal/70">
             {total} 人
           </span>
+          {progress && progress.total > 0 && (
+            progress.left === 0 ? (
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700">
+                今天都过了一遍 ✓
+              </span>
+            ) : (
+              <span className="rounded-full bg-me-ivory px-2 py-0.5 text-xs font-bold text-me-charcoal/60">
+                今天动过 {progress.done} · 还剩 {progress.left}
+              </span>
+            )
+          )}
           <span className="truncate text-xs text-me-charcoal/45">{hint}</span>
         </button>
       </td>

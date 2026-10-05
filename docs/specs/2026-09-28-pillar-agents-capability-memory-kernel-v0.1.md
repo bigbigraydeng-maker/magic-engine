@@ -86,7 +86,7 @@ PM 说的「手册一直在学习」= 第一层；「memory」= 两层都要。
 1. **每个对外写 = 一个 ActionKey + `src/lib/capabilities/<pillar>/<action>.ts` + 撤回处理**；授权模式按客户由 `client_automation_policies` 决定（`observe` / `human_only` / `bounded`）；`bounded` 必有信封（上限、冷却、受保护对象），信封外 = 可恢复的 deny + PM 三件套。
 2. **边界测试按解析后的真实路径判**，不只认 `@/lib/...` 写法——SEO 调研发现 `cms/seo-fix-orchestrator.ts:23` 用相对路径 import 绕过了 `architecture.test.ts:271`；#2087 复审（DR87-3）发现同类问题。这是三个支柱共用的前置修复。
 3. **Memory 只从「动作级」Check 学**：每个动作写预期指标 → T+N evaluator 写 `flywheel_outcomes`（按动作粒度：SEO 按页、GEO 按问题集、社媒按帖）→ `memory-extractor` 经 `classifyActionCase` 过滤后进 `client_proven_patterns` / `client_failed_experiments`；每个支柱在出处方 / 生成内容前读自己 flywheel 的记忆。
-4. **每个 agent 一份手册**：`docs/agents/12-kongzi.md`、`13-mengzi.md`、`14-sudongpo.md`，含「Memory Layer 接口」读写表（照 `11-weiqing.md` §八）与停手条件。`00-architecture.md` §5.4 写入权限矩阵补上三者。
+4. **每个 agent 一份手册**：`docs/agents/13-kongzi.md`、`14-sudongpo.md`、`15-mengzi.md`（12 已预留给广告编排「韩信」），含「Memory Layer 接口」读写表（照 `11-weiqing.md` §八）与停手条件。`00-architecture.md` §5.4 写入权限矩阵补上三者。
 
 ### 4.1 孔子（SEO）
 

@@ -6,7 +6,7 @@
  * 7 列对应 7 个阶段。手机上堆成竖排（销售在外面用这一页，横滑七列没法用）。
  */
 
-import { formatRelative, type AgentCustomerRow, type AgentRow } from '../page'
+import { formatRelative, type AgentCustomerRow, type AgentRow } from './AgentsClient'
 import {
   TRAVEL_AGENT_CUSTOMER_STAGES,
   TRAVEL_STAGE_LABELS,

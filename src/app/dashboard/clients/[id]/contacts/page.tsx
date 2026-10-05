@@ -312,11 +312,12 @@ export default function MyContactsPage() {
             这一页是给<strong>按房子跟客人的中介</strong>做的 —— 手机上一屏把「谁到哪一步了」标完。
             这个客户没有按房子经营，用它反而绕远。
           </p>
+          {/* 2026-09-28 WP-B6：「今天要联系」页已删除，功能全部并进「全部客人」。 */}
           <a
-            href={`/dashboard/clients/${clientId}/crm`}
+            href={`/dashboard/clients/${clientId}/crm/all`}
             className="mt-4 inline-block rounded-xl bg-me-charcoal px-4 py-2.5 text-sm font-bold text-white"
           >
-            去「客户跟进」看今天该联系谁 →
+            去「全部客人」看客户跟进 →
           </a>
         </div>
       </div>

@@ -196,6 +196,40 @@ describe('verified_offer — B4 真促销数字白名单(板桥+魏征:红线放
     expect(copy.segments[0].title_main).toBe('$35.50/m²') // 落模板 offer path,真价仍在
   })
 
+  it('🔴 币种词写法的编造价(NZD / ¥ / 元)也拦(2026-10-05 补强前这些写法会漏网上成片)', async () => {
+    for (const fake of ['From NZD 4,999', '¥3999 起', '3999元起', '4,999 NZD 起']) {
+      callClaudeChat.mockResolvedValue({
+        text: JSON.stringify({
+          segments: [
+            { role: 'hook', title_main: fake, title_sub: 'Llm only line' },
+            { role: 'middle', caption: 'y' },
+            { role: 'cta', caption: 'z' },
+          ],
+          endcard: { cta: 'Book now', offer: [], url: 'oztopbuildingsupplies.com.au' },
+        }),
+      })
+      const copy = await generateAdCopy({ brief: BRIEF, angle: 'walnut', rationale: 'why', segmentRoles: ROLES, expectedMetric: 'monthly_revenue' })
+      expect(JSON.stringify(copy), fake).not.toContain('Llm only line') // 落了模板,LLM 独有的行不在
+      expect(JSON.stringify(copy), fake).not.toMatch(/NZD|¥|元/)
+    }
+  })
+
+  it('verified_offer 写的是 NZD 真价 → AI 用同一个数字放行(白名单只比数字,币种词不影响提数)', async () => {
+    callClaudeChat.mockResolvedValue({
+      text: JSON.stringify({
+        segments: [
+          { role: 'hook', title_main: 'From NZD 4,999', title_sub: 'Llm only line' },
+          { role: 'middle', caption: 'y' },
+          { role: 'cta', caption: 'z' },
+        ],
+        endcard: { cta: 'Book now', offer: [], url: 'oztopbuildingsupplies.com.au' },
+      }),
+    })
+    const copy = await generateAdCopy({ brief: BRIEF, angle: 'walnut', rationale: 'why', segmentRoles: ROLES, expectedMetric: 'monthly_revenue', verifiedOffer: { price_from: 'NZD 4,999', offer_expiry: '31 July' } })
+    expect(copy.segments[0].title_main).toBe('From NZD 4,999')
+    expect(copy.segments[0].title_sub).toBe('Llm only line') // LLM 独有字段在 = 确实放行而不是落模板
+  })
+
   it('无 LLM(模板)+ verified_offer → 真价当钩子 + 截止紧迫感(本地无大脑也出真数字片)', async () => {
     callClaudeChat.mockResolvedValue(BAD_JSON)
     const copy = await generateAdCopy({ brief: BRIEF, angle: 'walnut clearance', rationale: 'why', segmentRoles: ROLES, expectedMetric: 'monthly_revenue', verifiedOffer: OFFER })

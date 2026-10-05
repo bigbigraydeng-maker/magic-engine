@@ -1,12 +1,16 @@
 import { parse as parseYaml } from 'yaml'
 import { parseRef, LEDGER_REF_HELP } from './refs'
-import { LEDGER_OWNERS, LEDGER_STATUSES, REF_KINDS_BY_FIELD, type LedgerEntry, type LedgerOwner, type LedgerParseResult, type LedgerStatus } from './types'
+import { LEDGER_OWNERS, LEDGER_STATUSES, REF_KINDS_BY_FIELD, type LedgerEntry, type LedgerOwner, type LedgerParseResult, type LedgerStatus, type LedgerWarning } from './types'
 
 type RefField = keyof typeof REF_KINDS_BY_FIELD
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 // 10 位以上连续数字像账户号，台账只写指针不抄正文
 const ACCOUNT_RE = /\d{10,}/
+
+export const MAX_BODY_LINES = 5
+export const BODY_RULE_ROLLOUT = '2026-09-29'
+const BODY_VERBOSE_THRESHOLD = 20
 
 function fail(file: string, reason: string): LedgerParseResult {
   return { ok: false, error: { file, reason } }
@@ -153,13 +157,26 @@ export function parseLedgerFile(file: string, text: string): LedgerParseResult {
   if (shapeError !== null) return fail(file, shapeError)
 
   const body = split.body.trim()
+  const warnings: LedgerWarning[] = []
+
+  const bodyLines = body === '' ? 0 : body.split('\n').filter((l) => l.trim() !== '').length
+  const decidedOn = str(raw, 'decided_on') as string
+  if (bodyLines > MAX_BODY_LINES) {
+    if (decidedOn >= BODY_RULE_ROLLOUT) {
+      return fail(file, `正文 ${bodyLines} 行，超过上限 ${MAX_BODY_LINES} 行（README 规则）`)
+    }
+    const msg = bodyLines > BODY_VERBOSE_THRESHOLD
+      ? `正文 ${bodyLines} 行，超过上限 ${MAX_BODY_LINES} 行。超过 20 行的细节建议移到 docs/audits/，台账只留指针`
+      : `正文 ${bodyLines} 行，超过上限 ${MAX_BODY_LINES} 行（上线前的老卡，只提示不拦）`
+    warnings.push({ file, message: msg })
+  }
 
   const entry: LedgerEntry = {
     id: str(raw, 'id') as string,
     title: str(raw, 'title') as string,
     status: status as LedgerStatus,
     owner: str(raw, 'owner') as LedgerOwner,
-    decidedOn: str(raw, 'decided_on') as string,
+    decidedOn,
     source: str(raw, 'source') as string,
     verifyBy: str(raw, 'verify_by'),
     verifyHow: str(raw, 'verify_how') as string,
@@ -170,5 +187,5 @@ export function parseLedgerFile(file: string, text: string): LedgerParseResult {
     checkNote: str(raw, 'check_note'),
     body,
   }
-  return { ok: true, entry }
+  return { ok: true, entry, warnings }
 }

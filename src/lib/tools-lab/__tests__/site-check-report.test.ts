@@ -7,6 +7,8 @@ import { NextRequest } from 'next/server'
 const rpcMock = vi.fn()
 const fromMock = vi.fn()
 const callClaudeChatMock = vi.fn()
+const recordToolLeadMock = vi.fn()
+const inngestSendMock = vi.fn()
 
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
@@ -24,6 +26,10 @@ vi.mock('@/lib/net/safe-fetch', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/net/safe-fetch')>()
   return { ...actual, safeFetchText: vi.fn() }
 })
+
+vi.mock('@/lib/tools-lab/lead-events', () => ({ recordToolLead: (...args: unknown[]) => recordToolLeadMock(...args) }))
+vi.mock('@/lib/inngest/client', () => ({ inngest: { send: (...args: unknown[]) => inngestSendMock(...args) } }))
+vi.mock('@/lib/inngest/functions/tools-lab-lead-followup', () => ({ TOOLS_LAB_REPORT_EMAIL_ATTEMPTED_EVENT: 'tools_lab/report_email.attempted' }))
 
 import { safeFetchText } from '@/lib/net/safe-fetch'
 import { POST as report } from '@/app/api/public/site-check/report/route'
@@ -58,6 +64,8 @@ beforeEach(() => {
   process.env.SUPABASE_SERVICE_ROLE_KEY = ENV.SUPABASE_SERVICE_ROLE_KEY
   process.env.RESEND_API_KEY = ENV.RESEND_API_KEY
   safeFetchTextMock.mockReset()
+  recordToolLeadMock.mockReset().mockResolvedValue(undefined)
+  inngestSendMock.mockReset().mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -286,6 +294,51 @@ describe('report', () => {
       'send',
       'release',
     ])
+  })
+
+  it('a successful send records a Tools Lab lead (the one genuine "wants to talk to us" signal in this flow)', async () => {
+    reportNet(LEAD)
+    await send({ leadId: LEAD.id, email: 'a@b.com', consent: true })
+    expect(recordToolLeadMock).toHaveBeenCalledWith({
+      tool: 'site-check',
+      pagePath: '/cn/discover',
+      targetHref: LEAD.url,
+      dedupeKey: { lead_id: LEAD.id },
+      extraMetadata: { url: LEAD.url, market: LEAD.market },
+      email: 'a@b.com',
+    })
+  })
+
+  it('a failed send does not record a lead (nothing was actually delivered)', async () => {
+    reportNet(LEAD, { send: 500 })
+    await send({ leadId: LEAD.id, email: 'a@b.com', consent: true })
+    expect(recordToolLeadMock).not.toHaveBeenCalled()
+  })
+
+  it('a successful send emits a delivered:true receipt', async () => {
+    reportNet(LEAD)
+    await send({ leadId: LEAD.id, email: 'a@b.com', consent: true })
+    expect(inngestSendMock).toHaveBeenCalledWith({
+      name: 'tools_lab/report_email.attempted',
+      data: expect.objectContaining({ leadId: LEAD.id, delivered: true, failureCode: null }),
+    })
+  })
+
+  it('a failed send emits a delivered:false receipt with the failure code, and never blocks the 502', async () => {
+    reportNet(LEAD, { send: 500 })
+    const res = await send({ leadId: LEAD.id, email: 'a@b.com', consent: true })
+    expect(res.status).toBe(502)
+    expect(inngestSendMock).toHaveBeenCalledWith({
+      name: 'tools_lab/report_email.attempted',
+      data: expect.objectContaining({ leadId: LEAD.id, delivered: false, failureCode: 'send_failed' }),
+    })
+  })
+
+  it('a lead-recording failure never turns a delivered report into an error response for the visitor', async () => {
+    reportNet(LEAD)
+    recordToolLeadMock.mockRejectedValueOnce(new Error('db down'))
+    const res = await send({ leadId: LEAD.id, email: 'a@b.com', consent: true })
+    expect(res.status).toBe(200)
   })
 
   it('refuses calls from other sites and made-up lead ids', async () => {

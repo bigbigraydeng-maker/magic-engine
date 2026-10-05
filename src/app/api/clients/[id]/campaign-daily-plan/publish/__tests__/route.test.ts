@@ -43,6 +43,15 @@ const REVIEW_REVISION = '10000000-0000-0000-0000-000000000001'
 const PAGE_ID = '227633594573276'
 const DATES = ['2026-09-03', '2026-09-04']
 const ASSETS = ['e0000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000002']
+const POST_CHECK_KEYS = [
+  'factual_claims_have_source', 'factual_claims_source_verified', 'logo_watermark_present',
+  'asset_provenance_labeled', 'asset_provenance_matches_claim_context',
+]
+const POST_AUTO_KEYS = ['cta_in_first_comment_not_body', 'first_comment_link_has_tracking_params']
+const PASS_POST_CHECKLIST = [
+  ...POST_CHECK_KEYS.map(key => ({ key, judge: 'HUMAN', outcome: 'PASS', detail: null, source_ref: key.startsWith('factual_') ? 'https://example.test/source' : null })),
+  ...POST_AUTO_KEYS.map(key => ({ key, judge: 'AUTO', outcome: 'PASS', detail: 'measured', source_ref: null })),
+]
 
 function keyFor(date: string) {
   return publishIdempotencyKey({
@@ -127,6 +136,8 @@ function planData(overrides: Record<string, unknown> = {}) {
         reason: null,
         reviewed_at: '2026-09-01T15:05:00.000Z',
         reviewed_by_user_id: USER_ID,
+        reviewer_role: 'admin',
+        checklist: PASS_POST_CHECKLIST,
       }])),
     },
     publish_queue_meta: queueReceipt(),
@@ -332,6 +343,21 @@ describe('publish bridge — dry run is the default', () => {
 })
 
 describe('publish bridge — review chain is mandatory', () => {
+  it('refuses a legacy PASS whose structured checklist is absent', async () => {
+    const plan = planData()
+    const posts = (plan as unknown as { review_meta: { posts: Record<string, Record<string, unknown>> } }).review_meta.posts
+    delete posts[DATES[0]].checklist
+    delete posts[DATES[0]].reviewer_role
+    stubTables({ plan })
+
+    const response = await POST(request({ no_publish: false }), params)
+
+    expect(response.status).toBe(409)
+    expect((await response.json()).error).toBe('REVIEW_CHECKLIST_REQUIRED')
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(mockGetMetaToken).not.toHaveBeenCalled()
+  })
+
   it('refuses to publish a plan that never got a no-publish queue receipt', async () => {
     const plan = planData()
     delete (plan as Record<string, unknown>).publish_queue_meta

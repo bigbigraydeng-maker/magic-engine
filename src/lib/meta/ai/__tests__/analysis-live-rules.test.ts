@@ -68,6 +68,8 @@ beforeEach(() => {
     if (name === 'meta_ads_reserve_sponsored_analysis') return { data: { reserved: true, idempotent: false, job_id: 'job-1', reserve_usd: 0.12 }, error: null }
     if (name === 'meta_ads_authorize_sponsored_analysis') return { data: true, error: null }
     if (name === 'meta_ads_finish_sponsored_analysis') return { data: true, error: null }
+    // Tools Lab combined monthly backstop (src/lib/tools-lab/spend-cap.ts) — allowed by default.
+    if (name === 'zhangqian_rate_limit_consume') return { data: [{ allowed: true, post_count: 1 }], error: null }
     return { data: null, error: { message: 'unexpected rpc' } }
   })
   mocks.metaGraphGet.mockImplementation(async (path: string, _token: string, params: Record<string, string>) => {
