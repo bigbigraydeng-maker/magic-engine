@@ -8,6 +8,8 @@ import {
   collectMontageAssetFiles,
   computeMontageTiming,
   buildMontageSegments,
+  recipeGapsOf,
+  type RecipeGap,
 } from './montage.ts';
 import { stagedFileName, type MusicCatalog } from './music.ts';
 
@@ -31,6 +33,8 @@ export interface LoadedTemplate {
   props: object;
   assetFiles: string[];
   totalFrames: number;
+  /** Columns of the recipe the template cannot satisfy for these props; absent means not evaluated. */
+  recipeGaps?: RecipeGap[];
 }
 
 /** Parse and validate input for a template, returning everything the renderer needs. */
@@ -54,6 +58,7 @@ export function loadTemplate(id: TemplateId, input: unknown): LoadedTemplate {
     props,
     assetFiles: collectMontageAssetFiles(props),
     totalFrames,
+    recipeGaps: recipeGapsOf(props),
   };
 }
 
