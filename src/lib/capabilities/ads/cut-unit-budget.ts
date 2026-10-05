@@ -1,8 +1,8 @@
 /**
  * Capability · `ads.cut_unit_budget`
  *
- * 砍一个投放单位的日预算。信封分类 `budget_change`；变动比例 ≤ 20% 由信封在
- * authorize/gateway 两处已判过，capability 层不再重判，直接照 input.after_cents 写。
+ * 砍一个投放单位的日预算。信封分类 `budget_change`；authorize/gateway 两处
+ * 按 AI 或人工规则检查。实际写入前再次确认只减不增，防止快照之后预算又被下调。
  * **这是收类动作**。
  *
  * 撤回路径 = 用改前快照里的 daily_budget 写回去。
@@ -18,7 +18,7 @@ import type {
   CapabilityStepResult,
   OutwardRollbackResult,
 } from '@/lib/kernel/types'
-import { RetryableCapabilityError } from '@/lib/kernel/errors'
+import { KernelError, RetryableCapabilityError } from '@/lib/kernel/errors'
 import { getAdSetStatus, setAdSetDailyBudget } from '@/lib/meta/adsets'
 import { makeReadbackVerification, makeSnapshotPreStep, requireMetaToken } from './common'
 
@@ -83,14 +83,18 @@ export function createCutUnitBudgetCapability(sb: SupabaseClient): CapabilityImp
         const token = await requireMetaToken(step.ctx.clientId)
 
         // 🔴 先读一次现状：**不是**为了信封 —— 信封已由 gateway.ts 在这一步之前调 `preProviderEnvelopeBlockReason` 用 kernel_pre 快照重算过了。
-        //    这里读现状**只**为撤回留证据（handler 里读的是 provider 当下的值，snapshot 里读的是几秒前的值，两者可能因人工改动短暂不一致）。
+        //    这里读取实时值作撤回依据，并再次防止旧计划反向增加已被下调的预算。
         //    读失败 = 环境类，重试。
         const before = await getAdSetStatus(id, token)
         if (!before) throw new RetryableCapabilityError(`读不到广告组 ${id} 的当前状态`)
 
-        const beforeCents = before.daily_budget ? parseInt(before.daily_budget, 10) : null
-        if (beforeCents === null) {
-          throw new RetryableCapabilityError(`Meta 没回 daily_budget，可能这个组是 CBO 系列下的`)
+        const rawBudget = before.daily_budget?.trim() ?? ''
+        const beforeCents = /^\d+$/.test(rawBudget) ? Number(rawBudget) : Number.NaN
+        if (!Number.isSafeInteger(beforeCents) || beforeCents < 0) {
+          throw new RetryableCapabilityError('Meta 没回有效的 daily_budget，无法确认减预算方向')
+        }
+        if (newCents > beforeCents) {
+          throw new KernelError('INVALID_INPUT', '当前预算已低于计划金额，这次减预算会反向加钱，已停止执行')
         }
 
         const ok = await setAdSetDailyBudget(id, token, newCents)

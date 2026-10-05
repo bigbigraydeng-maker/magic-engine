@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { applyApprove, applyBudgetUpdate, applyQualityReject } from './review-apply'
+import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS } from '@/lib/social/content-review'
 
 type Resp = { data: unknown; error: unknown }
 
@@ -23,15 +24,28 @@ function mockSupabase(queue: Resp[]): { db: SupabaseClient; inserts: unknown[] }
 
 const IN_REVIEW_WO = {
   id: 'wo-1', client_id: 'c-1', status: 'in_review', review_ref: {},
+  output: { quality_checklist_auto: REEL_AUTO_CHECK_KEYS.map(key => ({ key, judge: 'AUTO', outcome: 'PASS', detail: 'measured', source_ref: null })) },
   brief: { segments: [] }, signal_id: 's-1', goal_id: 'g-1', master_brief_id: 'mb-1',
   winner_structure_id: null, order_type: 'fresh_angle', angle: 'X',
   angle_source: {}, rationale_one_liner: 'why', budget_cap_usd: 2, source_ad_id: 'ad-1',
 }
 
+const PASS_HUMAN = REEL_HUMAN_CHECK_KEYS.map(key => ({
+  key, judge: 'HUMAN' as const, outcome: 'PASS' as const, detail: null,
+  source_ref: key.startsWith('factual_') ? 'https://example.test/source' : null,
+}))
+const FAIL_HUMAN = PASS_HUMAN.map(item => item.key === 'viral_recipe_hook_matched'
+  ? { ...item, outcome: 'FAIL' as const, detail: 'Hook did not match recipe' }
+  : { ...item, outcome: 'NOT_MEASURED' as const })
+const approve = (db: SupabaseClient, id = 'wo-1', reviewer = 'me@x.com', clientId?: string) =>
+  applyApprove(db, id, reviewer, clientId, PASS_HUMAN)
+const reject = (db: SupabaseClient, id = 'wo-1', feedback = '画面太慢', reviewer = 'me@x.com', clientId?: string) =>
+  applyQualityReject(db, id, feedback, reviewer, clientId, FAIL_HUMAN)
+
 describe('applyApprove — 花钱闸(魏征红线③)', () => {
   it('in_review + 无 publish_budget → approved', async () => {
     const { db } = mockSupabase([{ data: IN_REVIEW_WO, error: null }, { data: [{ id: 'wo-1' }], error: null }])
-    const r = await applyApprove(db, 'wo-1', 'me@x.com')
+    const r = await approve(db)
     expect(r.ok).toBe(true)
     expect(r.status).toBe(200)
   })
@@ -39,7 +53,7 @@ describe('applyApprove — 花钱闸(魏征红线③)', () => {
   it('🔴 publish_budget > $50 → 422 拦(服务端硬顶,前端绕不过)', async () => {
     const wo = { ...IN_REVIEW_WO, review_ref: { publish_budget_usd: 99 } }
     const { db } = mockSupabase([{ data: wo, error: null }])
-    const r = await applyApprove(db, 'wo-1', 'me@x.com')
+    const r = await approve(db)
     expect(r.ok).toBe(false)
     expect(r.status).toBe(422)
   })
@@ -47,29 +61,46 @@ describe('applyApprove — 花钱闸(魏征红线③)', () => {
   it('publish_budget = $50 边界 → 放行', async () => {
     const wo = { ...IN_REVIEW_WO, review_ref: { publish_budget_usd: 50 } }
     const { db } = mockSupabase([{ data: wo, error: null }, { data: [{ id: 'wo-1' }], error: null }])
-    expect((await applyApprove(db, 'wo-1', 'me@x.com')).ok).toBe(true)
+    expect((await approve(db)).ok).toBe(true)
+  })
+
+  it('缺失或未测自动媒体检查 → 直接调用 applyApprove 也会被拒', async () => {
+    const missing = { ...IN_REVIEW_WO, output: {} }
+    const missingDb = mockSupabase([{ data: missing, error: null }])
+    expect((await approve(missingDb.db)).status).toBe(422)
+
+    const unmeasured = {
+      ...IN_REVIEW_WO,
+      output: {
+        quality_checklist_auto: IN_REVIEW_WO.output.quality_checklist_auto.map((item, index) =>
+          index === 0 ? { ...item, outcome: 'NOT_MEASURED' } : item,
+        ),
+      },
+    }
+    const unmeasuredDb = mockSupabase([{ data: unmeasured, error: null }])
+    expect((await approve(unmeasuredDb.db)).status).toBe(422)
   })
 
   it('非 in_review → 409', async () => {
     const { db } = mockSupabase([{ data: { ...IN_REVIEW_WO, status: 'approved' }, error: null }])
-    const r = await applyApprove(db, 'wo-1', 'me@x.com')
+    const r = await approve(db)
     expect(r.ok).toBe(false)
     expect(r.status).toBe(409)
   })
 
   it('工单不存在 → 404', async () => {
     const { db } = mockSupabase([{ data: null, error: null }])
-    expect((await applyApprove(db, 'wo-x', 'me@x.com')).status).toBe(404)
+    expect((await approve(db, 'wo-x')).status).toBe(404)
   })
 
   it('clientId 不匹配 → 403(跨客户越权)', async () => {
     const { db } = mockSupabase([{ data: IN_REVIEW_WO, error: null }])
-    expect((await applyApprove(db, 'wo-1', 'me@x.com', 'other-client')).status).toBe(403)
+    expect((await approve(db, 'wo-1', 'me@x.com', 'other-client')).status).toBe(403)
   })
 
   it('update 0 行(被 sweeper 抢) → 409', async () => {
     const { db } = mockSupabase([{ data: IN_REVIEW_WO, error: null }, { data: [], error: null }])
-    expect((await applyApprove(db, 'wo-1', 'me@x.com')).status).toBe(409)
+    expect((await approve(db)).status).toBe(409)
   })
 })
 
@@ -80,7 +111,7 @@ describe('applyQualityReject — 打回重开', () => {
       { data: [{ id: 'wo-1' }], error: null },   // update 老单
       { data: { id: 'wo-2' }, error: null },     // insert 新单
     ])
-    const r = await applyQualityReject(db, 'wo-1', '画面太慢', 'me@x.com')
+    const r = await reject(db)
     expect(r.ok).toBe(true)
     expect(r.data?.reopened_work_order_id).toBe('wo-2')
     // 意见进了新单 brief.review_feedback
@@ -95,7 +126,7 @@ describe('applyQualityReject — 打回重开', () => {
       { data: [{ id: 'wo-1' }], error: null },
       { data: { id: 'wo-2' }, error: null },
     ])
-    const r = await applyQualityReject(db, 'wo-1', '画面太慢', 'me@x.com')
+    const r = await reject(db)
     expect(r.ok).toBe(true)
     expect(r.data?.recipe_replan_required).toBe(false)
     expect(r.data?.reopened_status).toBe('queued')
@@ -129,7 +160,7 @@ describe('applyQualityReject — 打回重开', () => {
       { data: [{ id: 'wo-1' }], error: null },
       { data: { id: 'wo-2' }, error: null },
     ])
-    const r = await applyQualityReject(db, 'wo-1', '画面太慢', 'me@x.com')
+    const r = await reject(db)
     expect(r.ok).toBe(true)
     expect(r.data?.recipe_replan_required).toBe(true)
     expect(r.data?.reopened_status).toBe('dead_letter')
@@ -169,7 +200,7 @@ describe('applyQualityReject — 打回重开', () => {
       { data: [{ id: 'wo-1' }], error: null },
       { data: { id: 'wo-2' }, error: null },
     ])
-    const r = await applyQualityReject(db, 'wo-1', '重来', 'me@x.com')
+    const r = await reject(db, 'wo-1', '重来')
     expect(r.ok).toBe(true)
     expect(r.data?.recipe_replan_required).toBe(true)
     const reopened = inserts[0] as { brief: { recipe_replan_required?: boolean; review_feedback_digest?: string } }

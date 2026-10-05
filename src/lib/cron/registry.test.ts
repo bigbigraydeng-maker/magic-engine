@@ -8,6 +8,9 @@ import { FLYWHEEL_SEO_WEEKLY_CRON, FLYWHEEL_SEO_WEEKLY_JOB } from '../flywheel/s
 import { COMPETITOR_WATCH_CRON, COMPETITOR_WATCH_JOB } from '../competitors/watch'
 import { AI_VISIBILITY_WEEKLY_CRON, AI_VISIBILITY_WEEKLY_JOB } from '../ai-tracker/weekly-fanout'
 import { GSC_PAGE_DAILY_CRON, GSC_PAGE_DAILY_JOB, GSC_PAGE_DAILY_PULL_JOB } from '../gsc/page-daily-plan'
+import { META_CYCLE_CRON } from '@/lib/seo-meta/cycle/roster'
+import { RANK_SAMPLER_CRON, RANK_SAMPLER_JOB } from '@/lib/seo-meta/cycle/rank-sampler'
+import { STEP6_JOB_NAME } from '@/lib/seo-meta/cycle/receipts'
 
 const ROOT = path.resolve(__dirname, '../../..')
 const CRON_ROUTES_DIR = path.join(ROOT, 'src/app/api/cron')
@@ -437,6 +440,21 @@ describe('每个写运行记录的地方，都必须有人认领', () => {
     expect(entry!.scheduler).toBe('inngest')
     expect(entry!.schedule, 'the pull entry must follow GSC_PAGE_DAILY_CRON (its upstream fan-out)').toBe(GSC_PAGE_DAILY_CRON)
     expect(entry!.outputTables).toBeUndefined()
+  })
+
+  it('🔴 SEO 改标题周一主链：周期不许手抄，且必须登记（没登记 = 它安静地不跑时没人喊）', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === STEP6_JOB_NAME)
+    expect(entry, `清单里找不到 ${STEP6_JOB_NAME}`).toBeDefined()
+    expect(entry!.scheduler).toBe('inngest')
+    expect(entry!.schedule, '清单里的周期跟 src/lib/seo-meta/cycle/roster.ts 的 META_CYCLE_CRON 不一致').toBe(META_CYCLE_CRON)
+  })
+
+  it('🔴 SEO 排名每日采样：周期不许手抄，且是新登记（带 addedAt，首轮到点前不算"从没跑过"）', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === RANK_SAMPLER_JOB)
+    expect(entry, `清单里找不到 ${RANK_SAMPLER_JOB}`).toBeDefined()
+    expect(entry!.scheduler).toBe('inngest')
+    expect(entry!.schedule, '清单里的周期跟 src/lib/seo-meta/cycle/rank-sampler.ts 的 RANK_SAMPLER_CRON 不一致').toBe(RANK_SAMPLER_CRON)
+    expect(entry!.addedAt).toBe('2026-10-04')
   })
 
   it('🔴 白名单不许过期：排上班了就该从白名单删掉', () => {
