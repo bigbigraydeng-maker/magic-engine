@@ -4,7 +4,7 @@ title: CTS 官网产品事实快照（价格/天数/出发日/包含项）能只
 status: done
 owner: agent
 decided_on: 2026-10-05
-source: doc:docs/specs/2026-10-05-content-foundation-trimmed-scope.md
+source: session:9db568bb
 verify_by: 2026-10-12
 verify_how: 接线后在真实库里跑一次刷新再读一次：CTS 产品页都有记录、与官网一致；抓失败的页显示 fetch_failed 而不是旧数；超过 14 天显示 stale
 done_on: 2026-10-05
