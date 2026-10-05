@@ -55,6 +55,17 @@ node render.mjs --props examples/sydney-apartment.props.json --public-dir /tmp/r
 
 占位素材是 ffmpeg 生成的渐变色块，只用来验证流程，不是真实镜头。
 
+## 音乐目录与自动节拍（包 A）
+
+`catalog/music.json` 登记了可用的库乐（29 首，来自 `MagicLab_Studio/Music` 与 `MagicLab_Studio/_shared/music`；客户专属曲不入共享目录）。节拍不再手写：`src/music.ts` 的 `beatsFor(entry, itemCount)` 从目录里的 BPM / 首拍偏移 / 小节位算出 props 里的 `beats`，`stagedFileName(entry)` 给出 `props.musicFile` 要写的安全文件名（渲染时音频要以这个名字放进素材目录，原文件名带空格和中文）。
+
+- **新增一首**：`python3 ../../tools/analyze-music.py <音频文件>` 输出一行 JSON（时长、检测 BPM、首拍偏移、小节位），照格式补 `id / folder / file / energy / style / mood` 进 `music.json`，状态先写 `pending_listen`。需要 python3 + numpy + scipy + ffmpeg（出片机已有 Python3 + ffmpeg）。
+- **检测会翻倍**：算法偏向报更快的拍，同一首曲子的两个版本测出过 199 与 100。所以检测值 > 150 一律按双倍速折半（`FOLD_ABOVE_BPM`）；**每首歌第一次渲完要量一次音画偏差**（PM 备份里的 `qa.py`），在 ±50 毫秒内才把状态改成 `ready`。
+- **`pending_listen` 的歌不许被选器选用**（选器是后续包）；目前只有 `pipa-trap` 量过（偏差 −10 毫秒），其余全部待量。
+- 音乐商用范围以 PM 2026-10-05 拍板的三个文件夹为准；名字带 `temp` 的来源不明文件不入目录。
+- logo 现在只在最后 2 拍出现（`LOGO_BEATS`），不再常驻每一帧。
+- 音乐的测试在 `test/music.test.mjs`，由 `schema.test.mjs` 末尾一行 import 带进 `npm test`（`package.json` 是受保护路径，本包不动它）。
+
 ## 测试
 
 ```bash
