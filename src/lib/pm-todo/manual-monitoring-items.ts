@@ -389,7 +389,7 @@ export async function pushAdReadbackItems(
         what: `广告组「${s.adSetName}」正在花钱，而且撞上了已知会出事的设置：${why}${
           sample ? ` 买家现在看到的是：${sample}` : ''
         }`,
-        how: '打开链接 → 找到这个广告组 → 按上面那句话改。改完当天不用管，第二天早上这条会自己消失',
+        how: '打开链接 → 找到这个广告组 → 按上面那句话改（多半是按语言拆开，或把「允许投给名单以外的人」关掉）。改完当天不用管，第二天早上这条会自己消失',
         href: `https://adsmanager.facebook.com/adsmanager/manage/adsets?act=${r.adAccountId.replace(
           /^act_/,
           '',

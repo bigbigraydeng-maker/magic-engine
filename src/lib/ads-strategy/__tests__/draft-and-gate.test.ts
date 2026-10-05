@@ -157,6 +157,19 @@ describe('createDraftForApproval', () => {
     expect(r.status).toBe('blocked')
   })
 
+  it('🔴 回读不到优化目标 + 草案是看完类视频 + 版位没锁 → 仍然 blocked（不能静默跳过版位检查）', async () => {
+    mWait.mockResolvedValue({ ok: true } as Awaited<ReturnType<typeof waitForVideoReady>>)
+    mAdSet.mockResolvedValue({ id: 'as1', name: '养受众', targeting: { geo_locations: { countries: ['NZ'] } } })
+    const { sb } = fakeSupabase()
+    const video = { name: 'V', primaryText: 'Watch our story', headline: 'Story', videoId: 'v1' }
+    const r = await createDraftForApproval(
+      { ...DRAFT, kind: 'video_thruplay', creatives: [video] },
+      { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' },
+    )
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('playback_placement_not_locked')
+  })
+
   it('客户行业真的传进闸门文案（G11 接线）：travel 说「客户服务市场」，不说中性词', async () => {
     const { sb } = fakeSupabase()
     const r = await createDraftForApproval(DRAFT, {

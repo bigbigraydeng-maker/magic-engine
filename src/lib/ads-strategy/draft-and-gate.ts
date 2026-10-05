@@ -300,6 +300,7 @@ function launchReportFor(
       isRetargeting: DRAFT_PLAY[draft.kind] === 'warm_pool_retarget' ? true : undefined,
     }),
     industry: deps.industry ?? null,
+    expectedOptimizationGoal: metaTripletFor(draft.kind).optimizationGoal,
   })
 }
 

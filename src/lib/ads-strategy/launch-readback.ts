@@ -87,6 +87,8 @@ export interface LaunchReadbackInput {
   expectedGeo?: string | null
   /** 客户行业（`clients.industry`），只用来从广告剧本取叫法；给不出就用中性词。 */
   industry?: string | null
+  /** 建广告那条路已知草案该是什么优化目标；回读目标读不到（空串）时靠它仍能做版位检查。 */
+  expectedOptimizationGoal?: string
 }
 
 export interface LaunchReadbackReport {
@@ -322,7 +324,7 @@ export function checkLaunch(input: LaunchReadbackInput): LaunchReadbackReport {
   }
 
   // ── 坑 6：看完类视频广告没锁版位 ──────────────────────────────────
-  if (isPlaybackGoal(adSet.optimizationGoal)) {
+  if (isPlaybackGoal(adSet.optimizationGoal) || isPlaybackGoal(input.expectedOptimizationGoal ?? '')) {
     const got = new Set((t.publisherPlatforms ?? []).map((p) => p.toLowerCase()))
     const locked =
       got.size === PLAYBACK_REQUIRED_PLATFORMS.length &&
