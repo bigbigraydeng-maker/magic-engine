@@ -73,6 +73,8 @@ export interface AdSetReadback {
     implicitLookalikeIds?: string[]
     /** 投放地区名，用于跟房源所在地对照。 */
     geoNames?: string[]
+    /** 回读到的版位。缺失/空 = 自动版位（Meta 想投哪投哪）。 */
+    publisherPlatforms?: string[]
   }
   creatives: CreativeReadback[]
 }
@@ -103,6 +105,16 @@ const MESSAGING_GOALS = new Set([
 const MESSAGING_DESTINATIONS = new Set([
   'MESSENGER', 'WHATSAPP', 'INSTAGRAM_DIRECT', 'MESSAGING_APPS',
 ])
+
+/**
+ * 看完类视频目标必须手动锁版位（PITFALLS D9 / 手册十五）。
+ * 留自动版位时 Meta 会把大部分钱导向 Audience Network 的手机游戏奖励视频。
+ */
+export const PLAYBACK_OPTIMIZATION_GOALS: ReadonlySet<string> = new Set(['THRUPLAY', 'VIDEO_VIEWS'])
+export const PLAYBACK_REQUIRED_PLATFORMS: readonly string[] = ['facebook', 'instagram']
+export function isPlaybackGoal(goal: string): boolean {
+  return PLAYBACK_OPTIMIZATION_GOALS.has(goal.toUpperCase())
+}
 
 /**
  * 这个广告组会不会把买家带进私信。
@@ -307,6 +319,32 @@ export function checkLaunch(input: LaunchReadbackInput): LaunchReadbackReport {
       message: `有 ${emptyCreatives.length} 条创意回读不到任何买家可见文字 —— 要么真的空，要么回读没取全，两种都得看一眼。`,
       learnedFrom: '2026-08-04：回读取不到的东西 ≠ 不存在，静默假设是最贵的假设',
     })
+  }
+
+  // ── 坑 6：看完类视频广告没锁版位 ──────────────────────────────────
+  if (isPlaybackGoal(adSet.optimizationGoal)) {
+    const got = new Set((t.publisherPlatforms ?? []).map((p) => p.toLowerCase()))
+    const locked =
+      got.size === PLAYBACK_REQUIRED_PLATFORMS.length &&
+      PLAYBACK_REQUIRED_PLATFORMS.every((p) => got.has(p))
+    if (!locked) {
+      const state =
+        got.size === 0
+          ? '现在是自动版位'
+          : got.has('audience_network')
+            ? `现在含 Audience Network（${[...got].join('、')}）`
+            : `现在是 ${[...got].join('、')}`
+      findings.push({
+        code: 'playback_placement_not_locked',
+        severity: 'blocker',
+        message:
+          `这是「看完视频」类广告组，投放位置必须手动锁成只投 Facebook 和 Instagram。${state}。` +
+          '自动版位会让 Meta 把大部分钱花在手机游戏奖励视频上，完播率虚高、还会把假观众沉淀进再营销名单。' +
+          '读不到版位也按没锁处理。' +
+          '去广告组设置把投放位置改成手动，只勾 Facebook 和 Instagram。',
+        learnedFrom: '2026-09-20 CTS 事故：看完类视频广告留自动版位，95% 花费落在 Audience Network 手游奖励视频（PITFALLS D9）',
+      })
+    }
   }
 
   return {
