@@ -34,6 +34,7 @@ on:
           - seo-weekly-list
           - ga4-form-funnel
           - keyword-opportunity
+          - gsc-query-overlap
       dry_run:
         description: 'Dry run (compute only, write nothing). Untick AND set confirm for a REAL run.'
         required: true
@@ -80,9 +81,10 @@ jobs:
             seo-weekly-list) route="api/cron/seo-weekly-list" ;;
             ga4-form-funnel) route="api/internal/ga4-form-funnel" ;;
             keyword-opportunity) route="api/internal/keyword-opportunity" ;;
+            gsc-query-overlap) route="api/internal/gsc-query-overlap" ;;
             *) echo "::error::job not in allowlist"; exit 1 ;;
           esac
-          if { [ "$JOB" = "ga4-form-funnel" ] || [ "$JOB" = "keyword-opportunity" ]; } && [ -z "${CLIENT_ID:-}" ]; then
+          if { [ "$JOB" = "ga4-form-funnel" ] || [ "$JOB" = "keyword-opportunity" ] || [ "$JOB" = "gsc-query-overlap" ]; } && [ -z "${CLIENT_ID:-}" ]; then
             echo "::error::$JOB needs client_id (one client per run)"; exit 1
           fi
 
@@ -137,6 +139,8 @@ jobs:
                results: [(.results // [])[] | {client_id, status, error: ((.error // null) | if . == null then null else (tostring | .[0:160]) end), summary: (.summary // null)}]}' ;;
             keyword-opportunity)
               filter='{success, dry_run, read_only, status, paid_calls_made, est_cost_usd, estimate_note, location_code, plan, summary}' ;;
+            gsc-query-overlap)
+              filter='{success, read_only, status, days, start_date, end_date, rows_fetched, rows_truncated, overlapping_queries, pairs, top_queries, error}' ;;
             *) echo "::error::no summary filter for this job"; exit 1 ;;
           esac
           jq "$filter" /tmp/body.json > /tmp/summary.json
