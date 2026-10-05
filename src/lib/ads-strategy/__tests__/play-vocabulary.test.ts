@@ -26,6 +26,13 @@ describe('PLAY_CATALOG', () => {
     expect(traps).toContain('语言')
   })
 
+  it('私信打法写明接口建素材不能带链接、视频必须带缩略图（D13 / 魏征 2026-10-04）', () => {
+    const traps = PLAY_CATALOG.messenger_direct.knownTraps.join(' ')
+    expect(traps).toContain('不能带链接')
+    expect(traps).toContain('app_destination')
+    expect(traps).toContain('缩略图')
+  })
+
   it('重定向打法必须写明 Meta 会默认放宽', () => {
     const traps = PLAY_CATALOG.warm_pool_retarget.knownTraps.join(' ')
     expect(traps).toContain('优势受众')

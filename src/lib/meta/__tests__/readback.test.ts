@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { extractBuyerFacingText, fetchAdCreativesReadback } from '../readback'
+import { extractBuyerFacingText, fetchAdCreativesReadback, fetchAdSetReadback, fetchCampaignStatus } from '../readback'
 
 describe('extractBuyerFacingText —— 宁多勿漏', () => {
   it('摘 link_data 里的正文/标题/描述', () => {
@@ -236,5 +236,45 @@ describe('fetchAdCreativesReadback — 自然帖投流要去主页把文案取�
     )
     const rows = await fetchAdCreativesReadback('as1', 'tok')
     expect(rows![0].texts).toEqual([])
+  })
+})
+
+describe('回读要带状态 + 每次请求有超时（建「全程暂停」的广告要有回读证据）', () => {
+  const okJson = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => '' }) as unknown as Response
+
+  it('取广告组时索要 status 字段', async () => {
+    const f = vi.fn(async () => okJson({ id: 'as1', status: 'PAUSED' }))
+    vi.stubGlobal('fetch', f)
+    const adSet = await fetchAdSetReadback('as1', 'tok')
+    const url = (f.mock.calls[0] as unknown as [string])[0]
+    expect(decodeURIComponent(url)).toMatch(/fields=[^&]*\bstatus\b/)
+    expect(adSet?.status).toBe('PAUSED')
+  })
+
+  it('取广告时索要 status，并把每条广告的 status 带出来', async () => {
+    const f = vi.fn(async () => okJson({ data: [{ id: 'ad1', name: 'x', status: 'PAUSED', creative: { body: 'hi' } }] }))
+    vi.stubGlobal('fetch', f)
+    const rows = await fetchAdCreativesReadback('as1', 'tok')
+    expect(decodeURIComponent((f.mock.calls[0] as unknown as [string])[0])).toMatch(/fields=id,name,status,creative/)
+    expect(rows?.[0].status).toBe('PAUSED')
+  })
+
+  it('系列状态：读到返回字符串；读不到 / 返回里没有 → null（不是 PAUSED）', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => okJson({ id: 'c1', status: 'PAUSED' })))
+    expect(await fetchCampaignStatus('c1', 'tok')).toBe('PAUSED')
+    vi.stubGlobal('fetch', vi.fn(async () => okJson({ id: 'c1' })))
+    expect(await fetchCampaignStatus('c1', 'tok')).toBeNull()
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, text: async () => 'x' }) as unknown as Response))
+    expect(await fetchCampaignStatus('c1', 'tok')).toBeNull()
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('timeout') }))
+    expect(await fetchCampaignStatus('c1', 'tok')).toBeNull()
+  })
+
+  it('读请求带超时信号', async () => {
+    const f = vi.fn(async () => okJson({ id: 'as1' }))
+    vi.stubGlobal('fetch', f)
+    await fetchAdSetReadback('as1', 'tok')
+    const init = (f.mock.calls[0] as unknown as [string, RequestInit])[1]
+    expect(init.signal).toBeInstanceOf(AbortSignal)
   })
 })

@@ -33,6 +33,7 @@ import type { PlatformConnectionItemKind } from './platform-connection-items'
 import type { FacebookSyncItemKind } from './facebook-sync-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
+import type { AdsCircuitItemKind } from './ads-circuit-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
 import type { SimaqianItemKind } from './simaqian-review-items'
@@ -73,6 +74,11 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // 探活多半判成坏链接 —— 宁可让人自己找入口，也不能让它静默消失。
   'deploy_not_live',
   'deploy_check_failed',
+  // 全量探测失败跟「AI 没提到我们」长得一模一样 —— 测不成被当测出来是零，
+  // 2026-09-20 East International 三天没人知道。两种都进——不管原因是不是
+  // 需要 PM 动手，都不能因为链接问题静默消失（Codex 复审 2026-09-28）。
+  'ai_tracker_all_failed',
+  'ai_tracker_all_failed_dev',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */
@@ -127,6 +133,21 @@ export type ManualItemKind =
    * 写着「这条不用你动手」的活（魏征 / 子牙 2026-09-23 都点了这条）。
    */
   | 'ai_gateway_broken'
+  /**
+   * 某客户整周的 AI 可见度探测全部失败，且最主要的原因需要 PM 动手（充值/换钥匙）——
+   * 不是「没被提到」，是「根本没测成」。2026-09-20 East International 24/24 探测全挂
+   * （OpenAI 没钱 + Google 报错），但在所有现有看板上跟「没什么 AI 提到我们」长得一模一样。
+   */
+  | 'ai_tracker_all_failed'
+  /**
+   * 同上，但这周全挂的原因清一色是「不用人动手」的那几类
+   * （暂时限流 / 供应商自己出错 / 解析失败 / 我们数据库写入失败，见
+   * ai-tracker-failure-items.ts 的 GENERIC_FIX）—— 没有一条需要充值或换钥匙。
+   * 这条的 `how` 原文就写着「这条不用你动手」，不能进 PM 的「系统进不去、要你
+   * 点一次」动手栏（Codex 复审 2026-09-28：整周全挂但原因不需要人管时，还是
+   * 走了 ai_tracker_all_failed，把「不用你动手」的活算进了 PM 的任务数）。
+   */
+  | 'ai_tracker_all_failed_dev'
   | 'goal_baseline_mismatch'
   | 'diagnostic_findings'
   | 'prescription_updated'
@@ -135,6 +156,11 @@ export type ManualItemKind =
   | 'ad_readback_blocker'
   /** Mailchimp 出口 tally 里出现非预期失败（配置读不出来 / API key 失效 / 被限流 / provider 5xx） */
   | 'mailchimp_export_broken'
+  /**
+   * 广告每日回拉读不出客户的广告引擎配置 → 诊断 / 经营状态 / 日报对这些客户全部跳过。
+   * 2026-09-25 事故：代码先于加列的数据库改动上线，三个客户一起停了一天，没人知道。
+   */
+  | 'ads_config_unreadable'
   | 'blog_draft_waiting'
   /** 文章写好了，但这个客户的网站发布通道是断的 —— 要人去设置里接通一次 */
   | 'blog_publish_channel_broken'
@@ -183,10 +209,13 @@ export type ManualItemKind =
   | AdsAutonomyItemKind
   /** 每日广告巡检的广告级规则（D2 素材疲劳 / D10 点进去之后差了）：要人拍板改不改，系统不会自动改 */
   | AdsRuleFindingItemKind
+  | AdsCircuitItemKind
   /** Facebook 删除数据请求处理失败 —— 用户在 Facebook 里要求删数据，我们答应了却没做到，不许只写日志 */
   | 'meta_data_deletion_failure'
   /** 有成交/咨询等着人核对要不要告诉广告平台 —— 撤不回，所以必须人点 */
   | 'conversion_needs_review'
+  /** 公司回信确认收到款，但缺金额/疑似重复/有取消字样，系统没法自动记成交 —— 要人核对（2026-10-04） */
+  | 'payment_email_needs_human'
   /** 发给广告平台时断线了，不知道对方收没收 —— 程序绝不自己重发，等人核对 */
   | 'conversion_send_in_doubt'
   /** 已批准的成交/咨询因为连接广告平台的授权失效发不出去，7 天内不修就永久丢（2026-09-22） */
