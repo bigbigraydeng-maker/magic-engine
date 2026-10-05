@@ -156,13 +156,11 @@ export async function getSerpPage(
           rating?:                number | null
           reviews_count?:         number | null
           address?:               string | null
-          ai_overview?: {
-            text?:         string | null
-            references?: Array<{
-              url?:   string | null
-              title?: string | null
-            }>
-          } | null
+          // type 'ai_overview' (verified against a live response 2026-10-05):
+          // text lives in items[].text, sources in top-level references[].
+          markdown?:              string | null
+          items?:                 Array<{ text?: string | null }> | null
+          references?:            Array<{ url?: string | null }> | null
         }>
       }>
     }>
@@ -203,10 +201,14 @@ export async function getSerpPage(
   ))
 
   const aiItem = items.find(it => it.type === 'ai_overview')
-  const aiOverviewText    = aiItem?.ai_overview?.text ?? null
-  const aiOverviewSources = (aiItem?.ai_overview?.references ?? [])
-    .map(r => r.url ?? '')
+  const aiBody = (aiItem?.items ?? [])
+    .map(e => e.text ?? '')
     .filter(Boolean)
+    .join('\n\n')
+  const aiOverviewText    = aiItem ? (aiBody || aiItem.markdown || null) : null
+  const aiOverviewSources = Array.from(new Set(
+    (aiItem?.references ?? []).map(r => r.url ?? '').filter(Boolean),
+  ))
 
   const localPack = items
     .filter(it => it.type === 'local_pack')

@@ -6,7 +6,7 @@
 
 ## 依赖
 
-- Node 18+(用内置 fetch)
+- Node 22.18+(用内置 fetch;Remotion 分支要直接 import `.ts` 校验文件,旧流程自己只需 18+)
 - Python3 + ffmpeg + ffprobe + tesseract + piper(装配走 `~/Documents/CTS_BrandKit/make_promo.py`,已有)
 - Tesseract 用于封面占位字检测;未安装或不可运行时，该审核项保持 `NOT_MEASURED` 并阻止自动通过。可用 `FACTORY_TESSERACT_PATH` 指定可执行文件。
 - `CTS_BrandKit/assets`(logo/music/watermark/voice,已有)
@@ -74,6 +74,15 @@ correct recipe order must already be queued by the existing factory scheduler. L
 receipts live in `~/Library/Application Support/Magic Engine/inngest-cts-workflow/`.
 `FACTORY_WORKER_TOKEN` is required only when the code gate passes and generation starts;
 the relay can therefore report a missing/unregistered recipe without production access.
+
+## Remotion 引擎分支(R2a)
+
+工单 `brief.engine === 'remotion'` 时走 `remotion-branch.mjs`：工单自带 `brief.remotion = { template: 'list', props }`，出片机校验 → 暂存素材 → 调 `engines/remotion/render.mjs` 渲染（每 60 秒心跳）→ 上传三件套 → `complete`。成本记 0，只存草稿。
+
+- 先决：`engines/remotion` 里跑过 `npm ci` 且浏览器可用；`.env` 里 `FACTORY_REMOTION_CLIENT_IDS` 列出允许的客户（默认空 = 全部拒绝）。
+- 素材：logo 只取该客户品牌包的 `assets/watermark.png`；镜头/音乐放 `<STUDIO_ROOT>/<该客户 studio 文件夹>/remotion-assets/`，`props` 里写相对文件名。
+- 不认识的 `engine`、带 `creative_recipe`、打回重开的单一律拒收，不会落进旧流程。
+- 批准前要过的自动检查：成片必须有音轨，且工单 `brief.copy.endcard` 要有 cta 和 url（见 `docs/audits/2026-10-05-remotion-r2a-worker-branch.md`）。
 
 ## 运行
 

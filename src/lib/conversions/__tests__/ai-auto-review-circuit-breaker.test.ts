@@ -19,6 +19,7 @@ function fakeDb(table: string) {
     return outcomes.filter((r) =>
       filters.every(([op, col, val]) => {
         if (op === 'eq') return r[col] === val
+        if (op === 'neq') return r[col] !== val
         if (op === 'gte') {
           const cell = r[col]
           if (typeof cell === 'string' && typeof val === 'string') return cell >= val
@@ -36,6 +37,10 @@ function fakeDb(table: string) {
     },
     eq: (col: string, val: unknown) => {
       filters.push(['eq', col, val])
+      return builder
+    },
+    neq: (col: string, val: unknown) => {
+      filters.push(['neq', col, val])
       return builder
     },
     gte: (col: string, val: unknown) => {

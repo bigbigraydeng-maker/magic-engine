@@ -27,6 +27,7 @@ import type { MessageTextResult } from '@/lib/microsoft/mail-graph'
 import { buildIntakeRow, type IntakeInput } from './intake'
 import { toMinorUnits } from './money'
 import { isTooLateToApprove } from './event-window'
+import { advanceContactStage } from '@/lib/crm/advance-contact-stage'
 import { extractPaymentFromEmail, type PaymentExtraction } from './payment-email-extract'
 import { sendApprovedOutcome, type SendDeps } from './writeback-service'
 
@@ -44,7 +45,7 @@ export const DEFAULT_LOOKBACK_DAYS = 8
 export const AUTO_REVIEWER_IDENTITY = 'auto:payment-email-evidence'
 export const DETECTOR_ACTOR = 'payment-email-detect'
 
-const CANCEL_WORDS = /\b(refund(?:ed|s)?|cancel(?:l?ed|l?ing|lation)?)\b/i
+const CANCEL_WORDS = /\b(refund(?:ed|s)?|cancel(?:l?ed|l?ing|lation)?)\b|取消|退款|退订|退钱|不去了|改期|不想去/i
 const ID_CHUNK = 100
 
 export type NeedsHumanReason =
@@ -58,6 +59,7 @@ export type NeedsHumanReason =
   | 'intake_rejected'
   | 'previously_rejected'
   | 'multiple_recipients'
+  | 'not_auto_eligible'
 
 export interface PaymentDetectSummary {
   ran: boolean
@@ -73,11 +75,16 @@ export interface PaymentDetectSummary {
   duplicates: number
   autoCreated: number
   autoApproved: number
+  /** 自动车道里成功把联系人 CRM 阶段推进了的条数。 */
+  stageAdvanced: number
+  /** 自动车道里尝试推进阶段但失败/被拒的条数（不阻断发送）。 */
+  stageAdvanceFailed: number
   autoSendStatuses: Record<string, number>
   humanQueued: number
   /** dryRun 下「本来会走自动车道」的条数（不写库、不外发）。 */
   wouldAuto: number
   truncated: boolean
+  byChannel: Record<'email' | 'messenger' | 'whatsapp', { scanned: number; confirmed: number }>
   needsHuman: Array<{ messageId: string; reason: NeedsHumanReason }>
 }
 
@@ -99,11 +106,16 @@ interface DetectConfig {
   ownDomains: string[]
 }
 
+type Channel = 'email' | 'messenger' | 'whatsapp'
+
 interface Candidate {
   messageId: string
   sentAt: string
   conversationId: string
   contactId: string
+  channel: Channel
+  body: string | null
+  participantPsid: string | null
 }
 
 interface ContactFacts {
@@ -128,10 +140,17 @@ export function emptySummary(dryRun: boolean): PaymentDetectSummary {
     duplicates: 0,
     autoCreated: 0,
     autoApproved: 0,
+    stageAdvanced: 0,
+    stageAdvanceFailed: 0,
     autoSendStatuses: {},
     humanQueued: 0,
     wouldAuto: 0,
     truncated: false,
+    byChannel: {
+      email: { scanned: 0, confirmed: 0 },
+      messenger: { scanned: 0, confirmed: 0 },
+      whatsapp: { scanned: 0, confirmed: 0 },
+    },
     needsHuman: [],
   }
 }
@@ -174,34 +193,53 @@ function chunk<T>(list: T[], size: number): T[][] {
 
 // ── 读候选 ──────────────────────────────────────────────────────────────────
 
+interface ConvMeta {
+  contactId: string
+  channel: Channel
+  participantPsid: string | null
+}
+
 async function listCandidates(supabase: SupabaseClient, clientId: string, since: Date): Promise<Candidate[]> {
   const { data: convs, error } = await supabase
     .from('conversations')
-    .select('id, contact_id')
+    .select('id, contact_id, channel, participant_psid')
     .eq('client_id', clientId)
-    .eq('channel', 'email')
+    .in('channel', ['email', 'messenger', 'whatsapp'])
     .not('contact_id', 'is', null)
     .gte('last_message_at', since.toISOString())
-  if (error) throw new Error(`读取邮件会话失败：${error.message}`)
-  const contactByConv = new Map((convs ?? []).map((c) => [c.id as string, c.contact_id as string]))
+  if (error) throw new Error(`读取会话失败：${error.message}`)
+  const metaByConv = new Map(
+    (convs ?? []).map((c) => [
+      c.id as string,
+      {
+        contactId: c.contact_id as string,
+        channel: c.channel as Channel,
+        participantPsid: (c.participant_psid as string | null) ?? null,
+      } satisfies ConvMeta,
+    ]),
+  )
 
   const out: Candidate[] = []
-  for (const ids of chunk([...contactByConv.keys()], ID_CHUNK)) {
+  for (const ids of chunk([...metaByConv.keys()], ID_CHUNK)) {
     const { data: msgs, error: mErr } = await supabase
       .from('conversation_messages')
-      .select('conversation_id, message_id, sent_at')
+      .select('conversation_id, message_id, sent_at, body')
       .in('conversation_id', ids)
       .eq('direction', 'outbound')
       .gte('sent_at', since.toISOString())
       .order('sent_at', { ascending: false })
       .limit(1000)
-    if (mErr) throw new Error(`读取已发邮件失败：${mErr.message}`)
+    if (mErr) throw new Error(`读取已发消息失败：${mErr.message}`)
     for (const m of msgs ?? []) {
+      const meta = metaByConv.get(m.conversation_id as string) as ConvMeta
       out.push({
         messageId: m.message_id as string,
         sentAt: m.sent_at as string,
         conversationId: m.conversation_id as string,
-        contactId: contactByConv.get(m.conversation_id as string) as string,
+        contactId: meta.contactId,
+        channel: meta.channel,
+        body: (m.body as string | null) ?? null,
+        participantPsid: meta.participantPsid,
       })
     }
   }
@@ -216,7 +254,7 @@ async function alreadyProcessed(supabase: SupabaseClient, clientId: string, ids:
       .from('me_sale_outcomes')
       .select('source_ref')
       .eq('client_id', clientId)
-      .eq('source_kind', 'inbox_extract')
+      .in('source_kind', ['inbox_extract', 'messenger_conversation'])
       .in('source_ref', part)
     if (error) throw new Error(`查询已处理邮件失败：${error.message}`)
     for (const r of data ?? []) done.add(r.source_ref as string)
@@ -318,10 +356,21 @@ async function insertOutcome(
   input: IntakeInput,
   audit: Record<string, unknown>,
   now: Date,
+  approvedBy?: string,
 ): Promise<{ id: string; amountMinor: number } | 'duplicate' | 'already' | { error: string }> {
   const built = buildIntakeRow(input, { defaultPhoneCountry: null, now })
   if (!built.ok) return { error: built.errors.join('; ') }
-  const { data, error } = await supabase.from('me_sale_outcomes').insert(built.row).select('id').single()
+  // Messenger/WhatsApp rows are inserted already-approved so the AI reviewer never sees a pending window.
+  const row = approvedBy
+    ? {
+        ...built.row,
+        review_status: 'approved',
+        reviewed_by: approvedBy,
+        reviewed_at: now.toISOString(),
+        review_request_id: crypto.randomUUID(),
+      }
+    : built.row
+  const { data, error } = await supabase.from('me_sale_outcomes').insert(row).select('id').single()
   if (error) {
     // 只认**哪一个**唯一约束命中：同一封邮件再来一遍 = 已处理，静默；
     // 同线索 / 同邮箱+单号 = 跨来源已有成交，记疑似重复；别的 23505 当错误，不许吞（子牙/魏征 2026-10-04 复审）。
@@ -371,6 +420,8 @@ interface EvalContext {
   previouslyRejected: boolean
   recipientCount: number
   ownDomains: string[]
+  /** messenger/whatsapp 是 1:1 平台绑定会话，收件人天然就是对方，无需邮箱精确匹配。 */
+  channelBound: boolean
 }
 
 /** 纯判定：把「所有已知事实」折成车道。单独成函数方便逐条测。 */
@@ -381,12 +432,27 @@ export function decideLane(c: EvalContext): Verdict {
   if (c.cancelWords) return { lane: 'skip', reason: 'cancel_words_in_thread' }
   if (c.facts.doNotContact) return { lane: 'skip', reason: 'do_not_contact' }
   const customerLike = looksLikeCustomerAddress(c.recipient, c.ownDomains)
-  const emailExact = !!c.recipient && customerLike && c.facts.emails.includes(c.recipient.toLowerCase())
+  const emailExact =
+    c.channelBound || (!!c.recipient && customerLike && c.facts.emails.includes(c.recipient.toLowerCase()))
   // 只有恰好一个收件人且无抄送才敢自动：多人/抄送的信，确认句不一定是对第一个人说的。
   const clean =
     c.extraction.flags.length === 0 && c.extraction.invoiceAmbiguous === false && c.recipientCount === 1
   const kindOk = c.extraction.kind === 'deposit' || c.extraction.kind === 'full'
   return emailExact && clean && kindOk ? { lane: 'auto' } : { lane: 'human' }
+}
+
+/** 取一封候选消息的全文：email 走 Graph，messenger/whatsapp 直接用库里存的 body。 */
+function fetchCandidateText(cand: Candidate, deps: PaymentDetectDeps): Promise<MessageTextResult> {
+  if (cand.channel === 'email') return deps.fetchText(cand.messageId)
+  return Promise.resolve({
+    ok: true,
+    message: {
+      subject: null,
+      body: cand.body ?? '',
+      firstRecipient: null,
+      recipientCount: 1,
+    },
+  })
 }
 
 export async function runPaymentEmailDetection(
@@ -421,8 +487,9 @@ export async function runPaymentEmailDetection(
       summary.truncated = true
       break
     }
-    // 只并发读邮件全文（慢的是网络）；判定、写库、发送仍然逐封串行，名额与防重不会被并发打乱。
-    const texts = await Promise.all(group.map((c) => deps.fetchText(c.messageId)))
+    // 只并发读邮件全文（慢的是网络）；messenger/whatsapp 全文已在库里，立即 resolve。
+    // 判定、写库、发送仍然逐封串行，名额与防重不会被并发打乱。
+    const texts = await Promise.all(group.map((c) => fetchCandidateText(c, deps)))
     for (let i = 0; i < group.length; i++) {
       const used = await processOne(group[i], texts[i], { clientId, cfg, deps, summary, now }, sends)
       if (used) sends++
@@ -434,6 +501,7 @@ export async function runPaymentEmailDetection(
 /** 处理一封已取到全文（或取失败）的邮件。返回是否占用了一个自动发送名额。 */
 async function processOne(cand: Candidate, text: MessageTextResult, ctx: RunCtx, sends: number): Promise<boolean> {
   const { summary } = ctx
+  summary.byChannel[cand.channel].scanned++
   if (!text.ok) {
     summary.fetchErrors++
     summary.needsHuman.push({ messageId: cand.messageId, reason: 'mail_text_unreadable' })
@@ -448,6 +516,7 @@ async function processOne(cand: Candidate, text: MessageTextResult, ctx: RunCtx,
     summary.notConfirmed++
     return false
   }
+  summary.byChannel[cand.channel].confirmed++
   if (ex.kind === 'balance') {
     summary.balanceIgnored++
     return false
@@ -509,23 +578,71 @@ async function handleConfirmed(
     previouslyRejected,
     recipientCount: mail.recipientCount,
     ownDomains: ctx.cfg.ownDomains,
+    channelBound: cand.channel !== 'email',
   })
   if (verdict.lane === 'skip') {
     if (verdict.reason === 'duplicate_suspected') ctx.summary.duplicates++
     ctx.summary.needsHuman.push({ messageId: cand.messageId, reason: verdict.reason as NeedsHumanReason })
     return false
   }
+  // WhatsApp is identification only: Meta matching requirements for WhatsApp are unverified, so never auto-send.
+  if (cand.channel === 'whatsapp') {
+    ctx.summary.needsHuman.push({ messageId: cand.messageId, reason: 'not_auto_eligible' })
+    return false
+  }
+  // 私信身份（PSID）是 Meta 匹配 messenger 事件的依据；没有 PSID 的 messenger 会话只有邮箱/电话，
+  // 却会被按 business_messaging 渠道发出，口径对不上（子牙 Round 2）→ 只识别、不自动发。
+  if (cand.channel === 'messenger' && !cand.participantPsid) {
+    ctx.summary.needsHuman.push({ messageId: cand.messageId, reason: 'not_auto_eligible' })
+    return false
+  }
   const overAmountCap = ex.amount != null && (toMinorUnits(ex.amount.value, ex.amount.currency) ?? Infinity) > MAX_AUTO_AMOUNT_MINOR
   const wantsAuto = verdict.lane === 'auto'
+  const goAuto = wantsAuto && !overAmountCap && canSend
+  // messenger/whatsapp 只走自动车道：任何一条不满足就整封丢弃，绝不写人工行（平台会话没有可审核的邮箱/金额上下文）。
+  if (cand.channel !== 'email' && !goAuto) {
+    ctx.summary.needsHuman.push({ messageId: cand.messageId, reason: 'not_auto_eligible' })
+    return false
+  }
   if (wantsAuto && (overAmountCap || !canSend)) {
     ctx.summary.needsHuman.push({ messageId: cand.messageId, reason: 'auto_cap_reached' })
   }
-  const goAuto = wantsAuto && !overAmountCap && canSend
   if (ctx.deps.dryRun) {
     if (goAuto) ctx.summary.wouldAuto++
     return false
   }
   return writeAndMaybeSend(cand, ex, facts, recipient, goAuto, ctx)
+}
+
+/** 渠道相关的身份字段：email 走邮箱/电话，messenger/whatsapp 走 PSID 与联系人已有邮箱。 */
+function outcomeIdentity(
+  cand: Candidate,
+  goAuto: boolean,
+  facts: ContactFacts,
+  recipient: string | null,
+): {
+  customerEmail: string | null
+  customerPhone: string | null
+  sourceKind: 'inbox_extract' | 'messenger_conversation'
+  createdBy: string
+  pageScopedUserId: string | null
+} {
+  if (cand.channel === 'email') {
+    return {
+      customerEmail: goAuto ? recipient : facts.emails[0] ?? null,
+      customerPhone: facts.phone,
+      sourceKind: 'inbox_extract',
+      createdBy: goAuto ? 'auto:payment-email' : 'payment-email:needs-review',
+      pageScopedUserId: null,
+    }
+  }
+  return {
+    customerEmail: facts.emails[0] ?? null,
+    customerPhone: facts.phone,
+    sourceKind: 'messenger_conversation',
+    createdBy: 'auto:payment-conversation',
+    pageScopedUserId: cand.channel === 'messenger' ? cand.participantPsid : null,
+  }
 }
 
 async function writeAndMaybeSend(
@@ -538,8 +655,9 @@ async function writeAndMaybeSend(
 ): Promise<boolean> {
   const { supabase } = ctx.deps
   const name = splitName(facts.displayName)
-  const email = goAuto ? recipient : facts.emails[0] ?? null
-  if (!email && !facts.phone) {
+  const identity = outcomeIdentity(cand, goAuto, facts, recipient)
+  const preApproved = goAuto && cand.channel !== 'email'
+  if (!identity.customerEmail && !identity.customerPhone && !identity.pageScopedUserId) {
     ctx.summary.needsHuman.push({ messageId: cand.messageId, reason: 'no_match_key' })
     return false
   }
@@ -549,18 +667,19 @@ async function writeAndMaybeSend(
       clientId: ctx.clientId,
       contactId: cand.contactId,
       outcomeKind: 'purchase',
-      customerEmail: email,
-      customerPhone: facts.phone,
+      customerEmail: identity.customerEmail,
+      customerPhone: identity.customerPhone,
       customerFirst: name.first,
       customerLast: name.last,
       orderRef: ex.invoiceNo,
       amount: ex.amount?.value ?? null,
       currency: ex.amount?.currency ?? null,
       occurredAt: cand.sentAt,
-      sourceKind: 'inbox_extract',
+      sourceKind: identity.sourceKind,
       sourceRef: cand.messageId,
-      createdBy: goAuto ? 'auto:payment-email' : 'payment-email:needs-review',
+      createdBy: identity.createdBy,
       metaLeadId: facts.metaLeadId,
+      pageScopedUserId: identity.pageScopedUserId,
     },
     {
       lane: goAuto ? 'auto' : 'human',
@@ -570,6 +689,7 @@ async function writeAndMaybeSend(
       flags: ex.flags,
     },
     ctx.now,
+    preApproved ? AUTO_REVIEWER_IDENTITY : undefined,
   )
   if (created === 'already') return false
   if (created === 'duplicate') {
@@ -586,17 +706,66 @@ async function writeAndMaybeSend(
     return false
   }
   ctx.summary.autoCreated++
-  return approveAndSend(created.id, ctx)
+  // goAuto 只会在 deposit / full 时为真（decideLane 的 kindOk）；这里只是给类型收窄。
+  if (ex.kind !== 'deposit' && ex.kind !== 'full') return false
+  return approveAndSend(created.id, cand.contactId, ex.kind, ctx, preApproved)
 }
 
-async function approveAndSend(outcomeId: string, ctx: RunCtx): Promise<boolean> {
+/**
+ * Stages from which an automatic advance is allowed. The stage change is a deliberate
+ * PM-approved exception to the "看账不看话" rule in stage-from-conversation.ts because the
+ * evidence is the company's own confirmation message.
+ */
+const STAGE_ADVANCE_FROM = new Set(['new', 'contacted', 'quoted'])
+
+/**
+ * 自动车道记完成交后，把联系人 CRM 阶段往前推一档（定金→deposit_paid，全款→paid_full）。
+ * 纯尽力而为：任何失败只计数、不抛、不阻断后面的发送。
+ */
+async function advanceStageForPayment(ctx: RunCtx, contactId: string, kind: 'deposit' | 'full'): Promise<void> {
+  const target = kind === 'deposit' ? 'deposit_paid' : 'paid_full'
+  try {
+    const { data, error } = await ctx.deps.supabase
+      .from('contacts')
+      .select('stage')
+      .eq('id', contactId)
+      .eq('client_id', ctx.clientId)
+      .maybeSingle()
+    if (error) throw new Error(error.message)
+    const current = (data as { stage: string | null } | null)?.stage ?? null
+    if (current !== null && !STAGE_ADVANCE_FROM.has(current)) return
+    const res = await advanceContactStage(
+      ctx.deps.supabase,
+      ctx.clientId,
+      contactId,
+      target,
+      '邮箱/私信确认收款（自动）',
+      'auto:payment-detect',
+      current,
+    )
+    if (res.ok && res.changed) ctx.summary.stageAdvanced++
+    else if (!res.ok) ctx.summary.stageAdvanceFailed++
+  } catch (e) {
+    ctx.summary.stageAdvanceFailed++
+    console.error('[payment-email-detect] stage advance failed', contactId, e instanceof Error ? e.name : 'unknown')
+  }
+}
+
+async function approveAndSend(
+  outcomeId: string,
+  contactId: string,
+  kind: 'deposit' | 'full',
+  ctx: RunCtx,
+  preApproved: boolean,
+): Promise<boolean> {
   const { supabase } = ctx.deps
-  if (!(await approveByEvidence(supabase, outcomeId, ctx.now))) return false
+  // Pre-approved rows (messenger/whatsapp) were inserted as approved; skip the CAS.
+  if (!preApproved && !(await approveByEvidence(supabase, outcomeId, ctx.now))) return false
   await supabase.from('me_conversion_audit').insert({
     outcome_id: outcomeId,
     action: 'auto_approved_by_payment_evidence',
     actor: DETECTOR_ACTOR,
-    detail: { reviewer: AUTO_REVIEWER_IDENTITY },
+    detail: { reviewer: AUTO_REVIEWER_IDENTITY, pre_approved: preApproved },
   })
   ctx.summary.autoApproved++
   try {
@@ -606,6 +775,8 @@ async function approveAndSend(outcomeId: string, ctx: RunCtx): Promise<boolean> 
     await supabase
       .from('me_conversion_audit')
       .insert({ outcome_id: outcomeId, action: 'sent', actor: DETECTOR_ACTOR, detail: { status: sent.status } })
+    // 被拦下（客人拒联 / 已删除个人信息 = redacted）的不改阶段：那条成交没发出去，也不该动他的营销状态。
+    if (sent.status !== 'redacted') await advanceStageForPayment(ctx, contactId, kind)
   } catch (e) {
     ctx.summary.autoSendStatuses.error = (ctx.summary.autoSendStatuses.error ?? 0) + 1
     // 只记错误类型，不记原文（错误信息里可能带邮箱/金额）。

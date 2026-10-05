@@ -154,6 +154,13 @@ const EXCLUDE_NOTE_PATTERNS: readonly RegExp[] = [
   /不感兴趣/,
   /打错/,
   /已订/,
+  /没兴趣/,
+  /没有兴趣/,
+  /暂时不去/,
+  /暂不/,
+  /不考虑/,
+  /不打算/,
+  /^\s*(?:stop|unsubscribe)\s*[.!]*\s*$/im,
 ]
 
 const MONTHS_NO_MAY =
@@ -202,6 +209,38 @@ export function notesExcludeLead(notes: string | null): boolean {
   return EXCLUDE_NOTE_PATTERNS.some((re) => re.test(notes))
 }
 
+/**
+ * Facebook 即时表单提交后，Messenger 会自动生成一条首条入站消息，形如
+ * "Hello! I filled out your form and would like to know more about …"。
+ * 这条模板消息**不算**客户真的跟我们聊过（PM 2026-10-05：124 条近期线索里
+ * 107 条只有这一条）。空/纯空白同样不算。
+ *
+ * 实测里前缀花样很多（emoji、"Hi,"、"Hello!!"、引用标记 `>`/`&gt;`、全角标点），
+ * 所以先归一化再匹配。模板句后面必须**没有**实质内容——"…form yesterday but
+ * nobody called" 这种是真人写的，不能算模板。
+ */
+const FORM_TEMPLATE_PATTERN =
+  /^[\s\W_]*(?:hello|hi|hey)\b[\s\W]*i\s+(?:have\s+)?(?:filled|completed|submitted)\s+(?:out\s+|in\s+)?(?:your|the)\s+form(?=\s*(?:$|[.!,;:]|and\b|would\b|i'?d\b|i\s+would\b|to\s+know\b))/i
+
+/** 自动回复 / 休假自动应答——同样不是客户真的跟我们聊过。 */
+const AUTO_REPLY_PATTERN =
+  /\b(?:out\s+of\s+(?:the\s+)?office|auto[-\s]?reply|automatic\s+reply|automatically\s+generated|do\s+not\s+reply)\b/i
+const AUTO_REPLY_PATTERN_CJK = /自动回复|休假中|外出办公/
+
+export function isFormTemplateMessage(body: string | null | undefined): boolean {
+  if (!body || !body.trim()) return true
+  const normalised = body
+    .normalize('NFKC')
+    .replace(/^\s*(?:&gt;|>)+/, '')
+    .trim()
+  if (!normalised) return true
+  return (
+    FORM_TEMPLATE_PATTERN.test(normalised) ||
+    AUTO_REPLY_PATTERN.test(normalised) ||
+    AUTO_REPLY_PATTERN_CJK.test(normalised)
+  )
+}
+
 export type NoteQualification = 'qualified' | 'excluded' | 'no_evidence'
 
 /**
@@ -214,6 +253,34 @@ export function qualifyByNotes(notes: string | null): NoteQualification {
   if (!notes || !notes.trim()) return 'no_evidence'
   if (notesExcludeLead(notes)) return 'excluded'
   return INTEREST_NOTE_PATTERNS.some((re) => re.test(notes)) || hasTravelMonth(notes) ? 'qualified' : 'no_evidence'
+}
+
+/**
+ * 客户自己消息里的兴趣证据——比员工记录严：只有**具体**证据才算 qualified。
+ * 光说 "interested" / "keen"（没有下文）不算，含糊的 "not now" / "maybe later"
+ * 归 no_evidence（延后，不是合格），排除词与员工记录共用一套。
+ */
+const CONVERSATION_INTEREST_PATTERNS: readonly RegExp[] = [
+  /\b202[7-9]\b/,
+  /\bnext\s+year\b/i,
+  /明年/,
+  /\b(?:very|really|extremely|so)\s+(?:keen|interested|excited)\b/i,
+  /\b(?:keen|interested)\s+(?:to\s+\w+|in\s+(?:going|booking|travell?ing|joining|taking|doing|the\s+(?:tour|trip)))\b/i,
+  /\b(?:wants?|wanted|would\s+like|hop(?:es|ing)|planning|looking)\s+to\s+(?:book|go|travel|visit|join|take)\b/i,
+  /\bwill\s+(?:book|pay|send\s+(?:the\s+)?deposit)\b/i,
+  /\b(?:deposit\s+(?:invoice|sent|paid|requested)|invoice\s+(?:sent|issued))\b/i,
+  /感兴趣|有意向|想去|想订/,
+]
+
+const CONVERSATION_DEFERRED_PATTERN = /\bnot\s+now\b|\bmaybe\s+later\b|\bnot\s+(?:right\s+)?now\b|\bnext\s+time\b/i
+
+export function qualifyByConversation(text: string | null): NoteQualification {
+  if (!text || !text.trim()) return 'no_evidence'
+  if (notesExcludeLead(text)) return 'excluded'
+  if (CONVERSATION_DEFERRED_PATTERN.test(text)) return 'no_evidence'
+  return CONVERSATION_INTEREST_PATTERNS.some((re) => re.test(text)) || hasTravelMonth(text)
+    ? 'qualified'
+    : 'no_evidence'
 }
 
 /**
@@ -282,6 +349,8 @@ export interface QualifiedLead {
   occurredAt: string
   /** true = 用的是"进线日期"顶的（只有日期没有时间），不是 FB 的精确提交时间。 */
   occurredAtIsDateOnly: boolean
+  /** 'notes' = 员工跟进记录本身就显示了兴趣；'conversation' = 客户自己的消息显示了兴趣。 */
+  interestFrom: 'notes' | 'conversation'
 }
 
 export interface PurchaseMissingDate {
@@ -304,7 +373,12 @@ export interface PurchaseCandidate {
 
 export interface ExcludedRow {
   kind: 'excluded'
-  reason: 'no_qualifying_phone' | 'excluded_by_notes' | 'no_usable_date' | 'no_interest_evidence'
+  reason:
+    | 'no_qualifying_phone'
+    | 'excluded_by_notes'
+    | 'no_usable_date'
+    | 'no_interest_evidence'
+    | 'no_customer_conversation'
 }
 
 export type ClassifiedRow = QualifiedLead | PurchaseMissingDate | PurchaseCandidate | ExcludedRow
@@ -316,6 +390,7 @@ export type ClassifiedRow = QualifiedLead | PurchaseMissingDate | PurchaseCandid
 export function classifyCtsCrmPerson(
   crmRow: CrmManagementRow,
   matchedSheet1Row: Sheet1LeadRow | null,
+  conversationText?: string | null,
 ): ClassifiedRow {
   const phoneE164 = ctsPhoneE164(crmRow.phoneRaw) ?? ctsPhoneE164(matchedSheet1Row?.phoneRaw ?? null)
 
@@ -369,11 +444,17 @@ export function classifyCtsCrmPerson(
   if (!phoneE164) {
     return { kind: 'excluded', reason: 'no_qualifying_phone' }
   }
-  const qualification = qualifyByNotes(notes)
-  if (qualification === 'excluded') {
+  const n = qualifyByNotes(notes)
+  const c = conversationText ? qualifyByConversation(conversationText) : 'no_evidence'
+  if (n === 'excluded' || c === 'excluded') {
     return { kind: 'excluded', reason: 'excluded_by_notes' }
   }
-  if (qualification === 'no_evidence') {
+  let interestFrom: 'notes' | 'conversation'
+  if (n === 'qualified') {
+    interestFrom = 'notes'
+  } else if (c === 'qualified') {
+    interestFrom = 'conversation'
+  } else {
     return { kind: 'excluded', reason: 'no_interest_evidence' }
   }
 
@@ -389,6 +470,7 @@ export function classifyCtsCrmPerson(
       fullName,
       occurredAt: new Date(matchedSheet1Row.createdTime).toISOString(),
       occurredAtIsDateOnly: false,
+      interestFrom,
     }
   }
   if (crmRow.entryDate) {
@@ -402,6 +484,7 @@ export function classifyCtsCrmPerson(
         fullName,
         occurredAt: parsed.toISOString(),
         occurredAtIsDateOnly: true,
+        interestFrom,
       }
     }
   }

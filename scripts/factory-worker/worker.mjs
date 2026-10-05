@@ -43,6 +43,12 @@ import {
   winnerRecipeFromBrief,
 } from './creative-recipe.mjs'
 
+import {
+  checkRemotionHealth,
+  processRemotionOrder,
+  resolveEngine,
+} from './remotion-branch.mjs'
+
 // ── 配置 ──────────────────────────────────────────────────────────────────────
 
 function loadEnv() {
@@ -129,6 +135,9 @@ const ORCHESTRATOR_REQUIRED_RECIPE_ID = ENV.FACTORY_ORCHESTRATOR_REQUIRED_RECIPE
 const ORCHESTRATOR_REQUIRED_RECIPE_VERSION = ENV.FACTORY_ORCHESTRATOR_REQUIRED_RECIPE_VERSION === undefined
   ? null
   : Number(ENV.FACTORY_ORCHESTRATOR_REQUIRED_RECIPE_VERSION)
+// R2a remotion engine: only clients listed here may use brief.engine='remotion' (empty = refuse all).
+const REMOTION_CLIENT_IDS = (ENV.FACTORY_REMOTION_CLIENT_IDS || '')
+  .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
 
 const log = (...a) => console.log(new Date().toISOString(), ...a)
 
@@ -469,9 +478,9 @@ function assemble(wo, localPaths, copy, tmp) {
 
 // ── 单工单处理 ──────────────────────────────────────────────────────────────────
 
-async function processOrder(wo) {
+export async function processOrder(wo) {
   const woId = wo.work_order_id
-  log(`领到工单 ${woId} · ${wo.brief.segments.length} 段 · 预算上限 $${wo.budget_cap_usd}`)
+  log(`领到工单 ${woId} · ${wo.brief.segments?.length ?? 0} 段 · 预算上限 $${wo.budget_cap_usd}`)
   const tmp = mkdtempSync(join(tmpdir(), 'factory_'))
   try {
     await heartbeat(woId, 0)
@@ -479,6 +488,11 @@ async function processOrder(wo) {
     // fail-closed(recipe 与 legacy 分支都不能走)。claim route 会把解析原因放进
     // recipe_intent_invalid_reason;非空即拒。
     assertNoRecipeIntentInvalidReason(wo.recipe_intent_invalid_reason)
+    // R2a: engine dispatch runs BEFORE the recipe-intent gates on purpose — those gates only stop
+    // recipe clients from running a legacy shell, and a remotion order is an explicit other engine.
+    if (resolveEngine(wo.brief) === 'remotion') {
+      return await processRemotionOrder({ wo, tmp, deps: remotionDeps(woId) })
+    }
     // R3/R4:reopened 单只有**显式** recipe_replan_required marker 才 fail-closed;legacy 无
     // recipe review 重试不受影响。marker+缺 recipe → 抛 WINNER_RECIPE_REPLAN_REQUIRED,
     // 全走 outer catch 落到 fail(retryable=false)。
@@ -529,7 +543,7 @@ async function processOrder(wo) {
     return true
   } catch (e) {
     log(`❌ 工单 ${woId} 失败: ${e.message}`)
-    const retryable = !/预扣硬顶|max_new_clips|无上传通道|既无库存|WINNER_RECIPE_/.test(e.message)
+    const retryable = e?.retryable ?? !/预扣硬顶|max_new_clips|无上传通道|既无库存|WINNER_RECIPE_/.test(e.message)
     await failOrder(woId, e.message.slice(0, 500), retryable)
     return false
   }
@@ -866,6 +880,22 @@ async function processRecipeOrder(wo, tmp, recipe) {
   })
 }
 
+// R2a remotion branch: wire the real IO (the branch itself lives in remotion-branch.mjs).
+function remotionDeps(woId) {
+  return {
+    log,
+    heartbeatFn: (id, c) => heartbeat(id, c),
+    uploadSignedFn: uploadSigned,
+    completeFn: (payload) => api(`/api/factory/worker/${woId}/complete`, 'POST', payload),
+    probeMediaEvidenceFn: probeMediaEvidence,
+    brandkitFor,
+    studioRoot: STUDIO_ROOT,
+    clientStudio: CLIENT_STUDIO,
+    allowedClientIds: REMOTION_CLIENT_IDS,
+    workerId: WORKER_ID,
+  }
+}
+
 /**
  * claim response 带 recipe_intent_invalid_reason(clients.factory_config.creative_recipe
  * 解析失败,例如未知 id / 缺 version / 版本对不上)→ worker 一律拒,不进 recipe 也不进 legacy。
@@ -1011,6 +1041,12 @@ async function main() {
   const jsonResult = process.argv.includes('--json-result')
   const intervalMs = Number(ENV.FACTORY_POLL_INTERVAL_MS || '30000')
   log(`worker 启动 id=${WORKER_ID} api=${API_BASE} loop=${loop}`)
+  if (REMOTION_CLIENT_IDS.length > 0) {
+    const remotionProblems = checkRemotionHealth()
+    if (remotionProblems.length > 0) {
+      log(`⚠️ Remotion 引擎未就绪，remotion 工单会被拒绝：${remotionProblems.join('；')}`)
+    }
+  }
   do {
     try {
       const result = await runOneOrder()
