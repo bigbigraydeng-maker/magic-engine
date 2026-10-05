@@ -41,6 +41,15 @@ export interface LedgerParseError {
   reason: string
 }
 
+export interface LedgerWarning {
+  file: string
+  message: string
+}
+
 export type LedgerParseResult =
-  | { ok: true; entry: LedgerEntry }
+  | { ok: true; entry: LedgerEntry; warnings: LedgerWarning[] }
   | { ok: false; error: LedgerParseError }
+
+/** README 规定的冻结字段：改了判据等于换了一张卡，请新建 */
+export const FROZEN_FIELDS = ['id', 'title', 'decided_on', 'source', 'verify_by', 'verify_how'] as const
+export type FrozenField = typeof FROZEN_FIELDS[number]

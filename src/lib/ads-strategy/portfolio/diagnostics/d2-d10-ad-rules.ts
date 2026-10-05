@@ -641,7 +641,10 @@ function clientPageUnknown(ctx: AccountContext, input: DiagnosisInput): Diagnosi
     units: [],
     evidence: { window_end: ctx.date },
     sample: [],
-    reasons: ['一个广告账户里可能投着别的客户的广告，不登记主页就可能把别人的广告算到这个客户头上'],
+    reasons: [
+      '一个广告账户里可能投着别的客户的广告，不登记主页就可能把别人的广告算到这个客户头上',
+      '没登记主页时，「花钱没结果」的自动暂停建议也一律拦下（确认不了广告组是这个客户的）',
+    ],
     clientVisible: false,
     manualTask: {
       what: '客户没登记 Facebook 主页，广告级检查（素材疲劳 / 点进去之后差了）整段没跑',

@@ -31,7 +31,7 @@ import {
   recipientKey,
   visitorAddress,
   visitorKey,
-} from '@/lib/tools-lab/site-check/visitor'
+} from '@/lib/tools-lab/visitor'
 import {
   extractText,
   extractTitle,
@@ -199,41 +199,41 @@ describe('extractText / extractTitle', () => {
 
 describe('visitorKey', () => {
   it('no Cloudflare client address → null (request refused)', () => {
-    expect(visitorKey(new Headers({}))).toBeNull()
+    expect(visitorKey(new Headers({}), 'site-check')).toBeNull()
   })
   it('stable within a day, different next day, never the raw address', () => {
     const h = new Headers(TRUSTED)
-    const a = visitorKey(h, new Date('2026-09-27T10:00:00Z'))
-    const b = visitorKey(h, new Date('2026-09-27T23:00:00Z'))
-    const c = visitorKey(h, new Date('2026-09-28T01:00:00Z'))
+    const a = visitorKey(h, 'site-check', new Date('2026-09-27T10:00:00Z'))
+    const b = visitorKey(h, 'site-check', new Date('2026-09-27T23:00:00Z'))
+    const c = visitorKey(h, 'site-check', new Date('2026-09-28T01:00:00Z'))
     expect(a).toBe(b)
     expect(a).not.toBe(c)
     expect(a).not.toContain('203.0.113.7')
   })
   it('IPv4-mapped IPv6 is keyed as the IPv4 address (not one shared bucket)', () => {
-    const k = (ip: string) => visitorKey(hdrs(ip), new Date('2026-09-27T10:00:00Z'))
+    const k = (ip: string) => visitorKey(hdrs(ip), 'site-check', new Date('2026-09-27T10:00:00Z'))
     expect(k('::ffff:198.51.100.4')).toBe(k('198.51.100.4'))
     expect(k('::ffff:198.51.100.4')).not.toBe(k('::ffff:198.51.100.5'))
   })
   it('IPv6 addresses in the same /48 share one key', () => {
-    const k = (ip: string) => visitorKey(hdrs(ip), new Date('2026-09-27T10:00:00Z'))
+    const k = (ip: string) => visitorKey(hdrs(ip), 'site-check', new Date('2026-09-27T10:00:00Z'))
     expect(k('2001:db8:1:2::1')).toBe(k('2001:db8:1:ffff::9'))
     expect(k('2001:db8:1:2::1')).not.toBe(k('2001:db8:2::1'))
   })
   it('no server key configured → null (request refused, never a shared bucket)', () => {
     delete process.env.SUPABASE_SERVICE_ROLE_KEY
-    expect(visitorKey(new Headers(TRUSTED))).toBeNull()
+    expect(visitorKey(new Headers(TRUSTED), 'site-check')).toBeNull()
   })
   it('forged cf-connecting-ip without a Cloudflare hop → null', () => {
-    expect(visitorKey(hdrs('203.0.113.7', '8.8.8.8'))).toBeNull()
-    expect(visitorKey(hdrs('203.0.113.7', '203.0.113.7, 8.8.8.8, 10.0.0.5'))).toBeNull()
+    expect(visitorKey(hdrs('203.0.113.7', '8.8.8.8'), 'site-check')).toBeNull()
+    expect(visitorKey(hdrs('203.0.113.7', '203.0.113.7, 8.8.8.8, 10.0.0.5'), 'site-check')).toBeNull()
   })
   it('only x-forwarded-for, no cf-connecting-ip → null', () => {
-    expect(visitorKey(new Headers({ 'x-forwarded-for': '203.0.113.7, 162.158.10.1' }))).toBeNull()
+    expect(visitorKey(new Headers({ 'x-forwarded-for': '203.0.113.7, 162.158.10.1' }), 'site-check')).toBeNull()
   })
   it('attacker-supplied leftmost xff entry does not matter', () => {
-    const a = visitorKey(new Headers(TRUSTED), new Date('2026-09-27T10:00:00Z'))
-    const b = visitorKey(hdrs('203.0.113.7', '1.2.3.4, 203.0.113.7, 162.158.10.1'), new Date('2026-09-27T10:00:00Z'))
+    const a = visitorKey(new Headers(TRUSTED), 'site-check', new Date('2026-09-27T10:00:00Z'))
+    const b = visitorKey(hdrs('203.0.113.7', '1.2.3.4, 203.0.113.7, 162.158.10.1'), 'site-check', new Date('2026-09-27T10:00:00Z'))
     expect(a).toBe(b)
   })
   it('internal hop after Cloudflare is skipped', () => {
@@ -244,6 +244,17 @@ describe('visitorKey', () => {
     expect(isCloudflareAddress('8.8.8.8')).toBe(false)
     expect(isCloudflareAddress('2606:4700::1')).toBe(true)
   })
+  it('a different tool namespace never shares a bucket with site-check, even same address/day', () => {
+    const h = new Headers(TRUSTED)
+    const now = new Date('2026-09-27T10:00:00Z')
+    expect(visitorKey(h, 'site-check', now)).not.toBe(visitorKey(h, 'ads-check', now))
+  })
+  it('regression pin: site-check keeps producing the exact key it always has (tool param defaults nothing away)', () => {
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-key'
+    const key = visitorKey(new Headers(TRUSTED), 'site-check', new Date('2026-09-27T10:00:00Z'))
+    // Pinned from this exact input before the tool param existed — must never change for existing traffic.
+    expect(key).toBe('e6887de0ad52e3b69cd62cab9b5741952b456a2cb64ce3f3ddd7d2c60de14992')
+  })
 })
 
 describe('normaliseRecipient / recipientKey', () => {
@@ -253,7 +264,11 @@ describe('normaliseRecipient / recipientKey', () => {
   })
   it('recipientKey returns null without a server key', () => {
     delete process.env.SUPABASE_SERVICE_ROLE_KEY
-    expect(recipientKey('a@b.com')).toBeNull()
+    expect(recipientKey('a@b.com', 'site-check')).toBeNull()
+  })
+  it('recipientKey is namespaced by tool too, same email same day', () => {
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-key'
+    expect(recipientKey('a@b.com', 'site-check')).not.toBe(recipientKey('a@b.com', 'ads-check'))
   })
 })
 

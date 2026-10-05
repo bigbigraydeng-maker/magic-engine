@@ -18,7 +18,7 @@
  */
 
 /** 行业专属功能。加新功能前先问：这东西对别的行业有意义吗？有就别加进来。 */
-export type IndustryFeature = 'listings' | 'projects' | 'tailor_made'
+export type IndustryFeature = 'listings' | 'projects' | 'tailor_made' | 'agents'
 
 /**
  * 归一化：下划线/连字符/多余空格统一，大小写拉平。
@@ -39,13 +39,20 @@ const REAL_ESTATE_KEYWORDS = [
   '房地产', '地产', '中介', '楼盘',
 ]
 
+const TRAVEL_KEYWORDS = ['travel', 'tour', 'tourism', 'sightseeing', 'cruise', '旅游', '旅行', '观光', '行程']
+
 const FEATURE_KEYWORDS: Record<IndustryFeature, string[]> = {
   // 「房子」= 中介手上在卖的每一套房
   listings: REAL_ESTATE_KEYWORDS,
   // 「楼盘」= 中介名下的开发项目,各带自己的 brief/策略/素材(PM 2026-08-03:
   // 这是 Magic Engine 海外地产版的独有工具,别的行业不该看到)
   projects: REAL_ESTATE_KEYWORDS,
-  tailor_made: ['travel', 'tour', 'tourism', 'sightseeing', 'cruise', '旅游', '旅行', '观光', '行程'],
+  tailor_made: TRAVEL_KEYWORDS,
+  // 「同行渠道」= 旅行社同行代终端客户订团(agent_customers 表)。只对旅游客户有意义 ——
+  // 跟 tailor_made 共用同一组关键词，不另起一套，免得两边判据分叉
+  // (2026-09-28 查证：这张卡片此前没有任何行业过滤，NAL 也能看到，见台账
+  // client-custom-features-leak-to-other-clients)。
+  agents: TRAVEL_KEYWORDS,
 }
 
 /**
@@ -68,5 +75,6 @@ export function industryFeatureFlags(industry: string | null | undefined): Recor
     listings: hasIndustryFeature(industry, 'listings'),
     projects: hasIndustryFeature(industry, 'projects'),
     tailor_made: hasIndustryFeature(industry, 'tailor_made'),
+    agents: hasIndustryFeature(industry, 'agents'),
   }
 }

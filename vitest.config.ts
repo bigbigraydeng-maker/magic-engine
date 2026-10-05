@@ -9,6 +9,8 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
+    pool: 'threads',
+    poolOptions: { threads: { maxThreads: 2 } },
     exclude: [
       '**/node_modules/**',
       '**/.next/**',
@@ -27,6 +29,9 @@ export default defineConfig({
       'scripts/factory-worker/inngest-pilot.test.mjs',
       'scripts/factory-worker/inngest-cts-workflow.test.mjs',
       'scripts/factory-worker/worker-inngest-bridge.test.mjs',
+      // Remotion 渲染引擎是独立 npm 包（自带依赖与 node:test 测试，由它自己的
+      // `npm test` 跑）；主仓不装它的依赖，放进来只会报「没有测试套件」。
+      'scripts/factory-worker/engines/remotion/**',
     ],
     coverage: {
       provider: 'v8',

@@ -95,6 +95,7 @@ import {
 import { runAiAutoReviewForClient, MAX_BATCH_SIZE, type RunOptions, type RunSummary } from '@/lib/conversions/ai-auto-review-run'
 import { runFailedWritebackResend } from '@/lib/conversions/writeback-resend-run'
 import { metaCapiWriter } from '@/lib/meta/capi/writer'
+import { runPaymentEmailDetectionForEnabledClients } from '@/lib/conversions/payment-email-detect-wire'
 
 export const CONVERSION_DAILY_PIPELINE_JOB = 'conversion-daily-pipeline'
 export const CONVERSION_DAILY_PIPELINE_TZ = 'Pacific/Auckland'
@@ -193,6 +194,11 @@ export type ConversionPipelineDeps = {
   syncCtsChunk: (cursor: CtsCrmSyncCursor) => Promise<CtsCrmSyncChunkResult>
   reviewClient: (clientId: string, opts: ReviewChunkOptions) => Promise<RunSummary>
   resendFailed: (clientId: string, opts: { nowIso: string }) => Promise<unknown>
+  /**
+   * 邮箱付款确认 → 成交（2026-10-04）：对开了 `leads_config.payment_email_detect.enabled` 的客户各跑一遍。
+   * 可选：没传就不跑这一段（旧测试与本地试跑不受影响）。放在同步之后、AI 审核之前。
+   */
+  detectPayments?: (opts: { nowIso: string }) => Promise<unknown>
   /** 运行记录读写——默认真的 run-logger；本地 Inngest dev server 试跑时注入假的。 */
   runLog?: {
     start: (jobName: string) => Promise<string>
@@ -355,6 +361,10 @@ export async function runConversionDailyPipeline(
     deps.syncCtsChunk,
     mergeCtsCrmSummaries,
   )
+  const detectPayments = deps.detectPayments
+  const payments = detectPayments
+    ? await step.run('detect-payments', () => timed('detect-payments', () => detectPayments({ nowIso })))
+    : null
   const nalReview = await runReviewChunks(step, 'ai-review-nal', NAL_CLIENT_ID, nowIso, deps.reviewClient)
   const ctsReview = await runReviewChunks(step, 'ai-review-cts', CTS_CLIENT_ID, nowIso, deps.reviewClient)
   const nalResend = await step.run('resend-failed-nal', () =>
@@ -364,16 +374,17 @@ export async function runConversionDailyPipeline(
     timed('resend-failed-cts', () => deps.resendFailed(CTS_CLIENT_ID, { nowIso })),
   )
 
-  const results = { nalSync, ctsSync, nalReview, ctsReview, nalResend, ctsResend }
+  const results = { nalSync, ctsSync, ...(payments ? { payments } : {}), nalReview, ctsReview, nalResend, ctsResend }
+  const total = Object.keys(results).length
   const failedCount = Object.values(results).filter((r) => !r.ok).length
 
   await step.run('log-finish', async () => {
     await runLog.finish(started.runId, started.startedAt, {
-      processed: 6,
-      completed: 6 - failedCount,
+      processed: total,
+      completed: total - failedCount,
       failed: failedCount,
       summary: results,
-      error: failedCount > 0 ? `${failedCount}/6 段失败，看 summary 具体哪段` : undefined,
+      error: failedCount > 0 ? `${failedCount}/${total} 段失败，看 summary 具体哪段` : undefined,
     })
     return null
   })
@@ -401,4 +412,5 @@ export const conversionDailyPipeline = createConversionDailyPipelineFunction({
       sendDeps: { writer: metaCapiWriter, fetcher: fetch },
       now: new Date(nowIso),
     }),
+  detectPayments: ({ nowIso }) => runPaymentEmailDetectionForEnabledClients({ nowIso }),
 })

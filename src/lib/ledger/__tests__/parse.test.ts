@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseLedgerFile } from '../parse'
+import { parseLedgerFile, BODY_RULE_ROLLOUT, MAX_BODY_LINES } from '../parse'
 
 /** 拼一个带文件头的台账文本 */
 function fm(fields: string, body = '正文'): string {
@@ -185,5 +185,58 @@ describe('parseLedgerFile', () => {
     if (!result.ok) return
     expect(result.entry.lastChecked).toBeNull()
     expect(result.entry.checkNote).toBeNull()
+  })
+
+  it('合法条目返回空 warnings', () => {
+    const result = parseLedgerFile('2026-09-24-foo.md', fm(VALID, '正文'))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.warnings).toEqual([])
+  })
+
+  describe('正文行数上限', () => {
+    const longBody = Array.from({ length: MAX_BODY_LINES + 3 }, (_, i) => `第 ${i + 1} 行`).join('\n')
+
+    it('新卡正文超过 5 行 → 报错', () => {
+      const newFields = VALID.replace('decided_on: 2026-09-24', `decided_on: ${BODY_RULE_ROLLOUT}`)
+        .replace('id: 2026-09-24-foo', `id: ${BODY_RULE_ROLLOUT}-foo`)
+      const result = parseLedgerFile(`${BODY_RULE_ROLLOUT}-foo.md`, fm(newFields, longBody))
+      expect(result.ok).toBe(false)
+      if (result.ok) return
+      expect(result.error.reason).toContain(`${MAX_BODY_LINES + 3} 行`)
+      expect(result.error.reason).toContain('上限')
+    })
+
+    it('老卡正文超过 5 行 → 通过但有 warning', () => {
+      const result = parseLedgerFile('2026-09-24-foo.md', fm(VALID, longBody))
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.warnings).toHaveLength(1)
+      expect(result.warnings[0].message).toContain(`${MAX_BODY_LINES + 3} 行`)
+    })
+
+    it('老卡正文超过 20 行 → warning 里提到 docs/audits/', () => {
+      const veryLongBody = Array.from({ length: 25 }, (_, i) => `第 ${i + 1} 行`).join('\n')
+      const result = parseLedgerFile('2026-09-24-foo.md', fm(VALID, veryLongBody))
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.warnings).toHaveLength(1)
+      expect(result.warnings[0].message).toContain('docs/audits/')
+    })
+
+    it('正文刚好 5 行 → 不报错不提示', () => {
+      const exactBody = Array.from({ length: MAX_BODY_LINES }, (_, i) => `第 ${i + 1} 行`).join('\n')
+      const result = parseLedgerFile('2026-09-24-foo.md', fm(VALID, exactBody))
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.warnings).toEqual([])
+    })
+
+    it('空正文 → 不报错不提示', () => {
+      const result = parseLedgerFile('2026-09-24-foo.md', fm(VALID, ''))
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.warnings).toEqual([])
+    })
   })
 })

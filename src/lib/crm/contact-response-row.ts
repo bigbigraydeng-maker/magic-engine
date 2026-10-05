@@ -147,6 +147,15 @@ export function responseRowFor(
       segment: seg.segment,
       segmentLabel: SEGMENT_ACTION_META[seg.segment].label,
       temperature: seg.temperature,
+      /**
+       * 这个人该走哪个渠道联系 + 为什么排到这一批 —— PersonDrawer 靠 `suggestedChannel`
+       * 决定给哪几个按钮（`drawer-actions.ts`）。子牙 2026-09-28 复审 B2 时查出：
+       * 这两个字段 `segmentContact()` 早就算出来了，这里却没往响应行里塞，
+       * 「全部客人」页换用 PersonDrawer 后会一路兜底成 'phone'——对一个只有
+       * Facebook 私信、没有电话的客人会硬渲染"没打通"这种电话话术按钮。
+       */
+      suggestedChannel: seg.suggestedChannel,
+      reason: seg.reason,
       custom,
     },
   }

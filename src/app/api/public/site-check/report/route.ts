@@ -5,10 +5,20 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { LIMITS, dayStartUtc, isAllowedOrigin, pruneOldVisitorKeys } from '@/lib/tools-lab/site-check/guards'
-import { recipientKey, visitorKey } from '@/lib/tools-lab/site-check/visitor'
+import { recipientKey, visitorKey } from '@/lib/tools-lab/visitor'
 import { consumeSteps, fail, json, preflight, readSmallJson } from '@/lib/tools-lab/site-check/http'
 import { claimLead, getLead, releaseLead, type LeadRow, type StoredFindings } from '@/lib/tools-lab/site-check/leads'
 import { buildEmail, sendReportEmail } from '@/lib/tools-lab/site-check/report-email'
+import { recordToolLead } from '@/lib/tools-lab/lead-events'
+import { inngest } from '@/lib/inngest/client'
+import { TOOLS_LAB_REPORT_EMAIL_ATTEMPTED_EVENT } from '@/lib/inngest/functions/tools-lab-lead-followup'
+
+/** Best-effort audit receipt for a send attempt (success or failure) — never blocks the response. */
+function receiptReportEmailAttempt(leadId: string, delivered: boolean, failureCode: string | null): void {
+  void inngest
+    .send({ name: TOOLS_LAB_REPORT_EMAIL_ATTEMPTED_EVENT, data: { leadId, delivered, failureCode, attempted_at: new Date().toISOString() } })
+    .catch((err) => console.warn('[site-check] report_email.attempted emit failed', err instanceof Error ? err.message : String(err)))
+}
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -36,9 +46,9 @@ async function checkRequest(req: NextRequest, origin: string | null): Promise<Ch
     return fail(400, 'report_not_ready', origin)
   }
   if (lead.status !== 'scouted') return fail(409, 'already_sent', origin)
-  const visitor = visitorKey(req.headers)
+  const visitor = visitorKey(req.headers, 'site-check')
   if (!visitor) return fail(400, 'no_visitor', origin)
-  const recipient = recipientKey(email)
+  const recipient = recipientKey(email, 'site-check')
   if (!recipient) return fail(503, 'unavailable', origin)
   return { lead, findings, email: email.trim().toLowerCase(), visitor, recipient }
 }
@@ -74,8 +84,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     } catch (err) {
       console.error('site-check report email failed:', err instanceof Error ? err.message : String(err))
       await releaseLead(lead.id)
+      receiptReportEmailAttempt(lead.id, false, 'send_failed')
       return fail(502, 'send_failed', origin)
     }
+    receiptReportEmailAttempt(lead.id, true, null)
+    // A delivered report is the one genuine "this visitor wants to talk to us" signal in this flow —
+    // record it as a Tools Lab lead so a human actually sees it (docs/registry/platform-candidates.md
+    // shared-plumbing pass, criterion ②). Best effort: never blocks the response the visitor already got.
+    void recordToolLead({
+      tool: 'site-check',
+      pagePath: '/cn/discover',
+      targetHref: lead.url,
+      dedupeKey: { lead_id: lead.id },
+      extraMetadata: { url: lead.url, market: lead.market },
+      email,
+    }).catch(() => undefined)
     return json(200, { ok: true }, origin)
   } catch (err) {
     console.error('site-check report fatal error:', err instanceof Error ? err.message : String(err))

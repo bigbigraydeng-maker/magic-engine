@@ -82,6 +82,7 @@ type OutcomeRow = {
   review_status: string
   redacted_at: string | null
   page_scoped_user_id: string | null
+  meta_lead_id: string | null
   source_kind: SourceKind
 }
 
@@ -100,6 +101,7 @@ function toOutcomeForSend(row: OutcomeRow): OutcomeForSend {
     currency: row.currency,
     occurredAt: row.occurred_at,
     pageScopedUserId: row.page_scoped_user_id,
+    metaLeadId: row.meta_lead_id,
     actionSource: actionSourceForSourceKind(row.source_kind),
   }
 }
@@ -132,7 +134,7 @@ export async function sendApprovedOutcome(
     .select(
       'id, client_id, contact_id, outcome_kind, customer_email, customer_phone, ' +
         'customer_first, customer_last, order_ref, amount_minor, currency, ' +
-        'occurred_at, review_status, redacted_at, page_scoped_user_id, source_kind',
+        'occurred_at, review_status, redacted_at, page_scoped_user_id, meta_lead_id, source_kind',
     )
     .eq('id', outcomeId)
     .maybeSingle()
