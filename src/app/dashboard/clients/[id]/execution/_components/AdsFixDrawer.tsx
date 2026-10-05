@@ -32,6 +32,8 @@ type Phase = 'select' | 'confirm' | 'submitting' | 'done' | 'error'
 interface ExecuteResult {
   success:    boolean
   actionId?:  string
+  actionRunId?: string
+  status?: string
   campaignId: string
   before:     { status: string; name: string; daily_budget: string | null }
   after:      { status: string; name: string; daily_budget: string | null }
@@ -100,6 +102,41 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
 
       const data = await res.json() as ExecuteResult & { error?: string }
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
+
+      if (res.status === 202 && data.actionRunId) {
+        // The external budget write runs in Inngest. Poll its Kernel receipt so
+        // the drawer never reports success merely because queue dispatch worked.
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+          const statusRes = await fetch(
+            `/api/clients/${clientId}/meta-ads/execute?runId=${encodeURIComponent(data.actionRunId)}`,
+          )
+          const statusData = await statusRes.json() as {
+            status?: string
+            humanReason?: string | null
+            receipt?: { id?: string; payload?: Partial<ExecuteResult> & { warning?: string; status?: string; reason?: string } } | null
+            error?: string
+          }
+          if (!statusRes.ok) throw new Error(statusData.error ?? `HTTP ${statusRes.status}`)
+          if (statusData.status === 'denied' || statusData.status === 'dead_letter' || statusData.status === 'failed' || statusData.status === 'workflow_failed') {
+            throw new Error(statusData.humanReason ?? statusData.receipt?.payload?.reason ?? `预算任务未执行（${statusData.status}）`)
+          }
+          if (statusData.status === 'succeeded' && statusData.receipt?.payload?.before && statusData.receipt.payload.after) {
+            setResult({
+              success: true,
+              actionId: statusData.receipt.id,
+              actionRunId: data.actionRunId,
+              campaignId: data.campaignId,
+              before: statusData.receipt.payload.before,
+              after: statusData.receipt.payload.after,
+              warning: statusData.receipt.payload.warning,
+            })
+            setPhase('done')
+            return
+          }
+        }
+        throw new Error(`预算任务仍在处理中。任务编号：${data.actionRunId}。请稍后重新打开看板查看。`)
+      }
 
       setResult(data)
       setPhase('done')
@@ -298,7 +335,7 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
                       }`}
                     >
                       <p className="text-sm font-black text-slate-900">调整日预算</p>
-                      <p className="mt-0.5 text-[11px] text-slate-500">降低花费，保留投放（需 CBO）</p>
+                      <p className="mt-0.5 text-[11px] text-slate-500">降低花费，保留投放（仅支持 CBO）</p>
                     </button>
                   </div>
 
@@ -323,7 +360,7 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
                         如需调整广告组预算，请前往 Meta Ads Manager 操作。
                       </p>
                       <p className="text-xs font-semibold text-amber-600">
-                        ⚠ 单次调整幅度限当前日预算的 ±20%；超出需走 Talk to Us 人工审核。
+                        ⚠ 目前只支持下调，单次最多降低当前日预算的 20%。
                       </p>
                     </div>
                   )}

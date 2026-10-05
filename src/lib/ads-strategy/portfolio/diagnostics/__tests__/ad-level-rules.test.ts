@@ -67,8 +67,10 @@ function campaignFreqRow(freq: number, date = DATE): DailyRow {
 
 function account(snaps: EntitySnapshotRow[], adDaily: DailyRow[], extraDaily: DailyRow[] = [], settingChanges: SettingChange[] = []): AccountInput {
   return { adAccountId: 'act_1', shared: false, timezone: 'Pacific/Auckland', currency: 'NZD', snapshots: snaps,
-    daily: [...adsetRowsFrom(adDaily), ...extraDaily], hourly: {}, hourlyError: null, latestCaptures: [], lastInsightDate: DATE,
-    adDaily, settingChanges }
+    daily: [...adsetRowsFrom(adDaily), ...extraDaily], hourly: {}, hourlyError: null,
+    // 默认给一条新鲜、抓全的广告层抓取审计记录：adCaptureStale 把「零审计记录 + 有广告快照」也判 stale（Codex 第五轮）
+    latestCaptures: [{ level: 'ad', complete: true, skipped_shared: false, error: null, captured_at: '2026-09-24T12:00:00Z' }],
+    lastInsightDate: DATE, adDaily, settingChanges }
 }
 function input(extra: Partial<DiagnosisInput> = {}): DiagnosisInput {
   return { clientId: 'c', date: DATE, evaluatedAt: '2026-09-25T03:00:00Z',

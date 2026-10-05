@@ -230,6 +230,8 @@ export interface PublishedRef {
   video_id?: string
   published_at: string
   permalink?: string
+  /** Published Reel's idempotently-created CTA comment, when enabled. */
+  first_comment_id?: string
   /**
    * 这条回执对应的是真·公开发布(PUBLISHED)还是草稿(DRAFT)。
    * 由 adapter 按 draft 参数盖戳 —— publish-worker 只在 PUBLISHED 时才 emit 发布信号,
@@ -258,6 +260,7 @@ export interface PublishAdapter {
   publish(args: {
     videoUrl: string
     caption: string
+    firstComment?: string
     target: PublishTarget
     idempotencyTag: string
     draft: boolean
@@ -265,6 +268,13 @@ export interface PublishAdapter {
   }): Promise<PublishedRef>
   /** 幂等对账(魏征 B9 防双发):查平台侧该 wo(靠 idempotencyTag)是否已发。已发→回执,未发→null。 */
   findExisting(args: { target: PublishTarget; idempotencyTag: string }): Promise<PublishedRef | null>
+  /** Create or recover the CTA first comment without duplicating it after a worker retry. */
+  ensureFirstComment?(args: {
+    target: PublishTarget
+    videoId: string
+    idempotencyTag: string
+    message: string
+  }): Promise<string>
 }
 
 export interface WorkOrderBrief {

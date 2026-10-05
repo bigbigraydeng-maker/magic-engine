@@ -151,7 +151,10 @@ async function runSixSteps(
   const step1 = await step.run('check-due', async () => runStep1CheckDue(supabaseAdmin, adapter, config, weekKey, false))
   await step.run('log-step1-receipt', async () => writeStepReceipt(supabaseAdmin, {
     jobName: STEP1_JOB_NAME, clientId, weekKey, status: 'completed',
-    processed: step1.checked, completed: step1.checked, failed: 0, summary: step1,
+    processed: step1.checked, completed: step1.checked, failed: 0,
+    // The page-CTR check is off during the rank shadow period (runner.ts Step1Options); say so
+    // in the receipt, so zeros here read as "switched off" and not "nothing was due".
+    summary: { ...step1, legacy_ctr_check: 'off_rank_shadow_period' },
   }))
 
   // Step 2: candidates_ready

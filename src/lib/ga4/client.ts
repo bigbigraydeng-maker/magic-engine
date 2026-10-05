@@ -20,6 +20,7 @@
  */
 
 import { getValidAccessToken } from '@/lib/google-oauth/client'
+import type { FormFunnelRaw } from './form-funnel'
 import { getValidTokenForConnection } from '@/lib/platform-oauth/token-manager'
 import { supabaseAdmin } from '@/lib/supabase'
 import { toGa4ResourceName } from './property-id'
@@ -479,4 +480,65 @@ export async function fetchGa4KeyEventBreakdown(
     if (name === 'form_start') formStarts = count
   }
   return { keyEventsByName, formStarts }
+}
+
+/**
+ * Form funnel raw numbers (read-only): form_start / form_submit / generate_lead counts and
+ * people, form_start by page, and thank-you page views / people. Summarised in form-funnel.ts.
+ */
+export async function fetchGa4FormFunnelRaw(
+  propertyId: string,
+  clientId: string,
+  periodDays: number = DEFAULT_PERIOD_DAYS,
+): Promise<FormFunnelRaw | null> {
+  const token = await resolveAccessToken(clientId)
+  if (!token) return null
+  const normalized = normalizePropertyId(propertyId)
+  const periodEnd = toIsoDate(new Date())
+  const periodStart = toIsoDate(daysAgo(periodDays))
+  const num = (v: string | undefined): number => Number(v ?? '0') || 0
+
+  const eventsReport = await runReport(token, normalized, periodStart, periodEnd, {
+    dimensions: ['eventName'],
+    metrics: ['eventCount', 'totalUsers'],
+    limit: 20,
+    dimensionFilter: { filter: { fieldName: 'eventName', inListFilter: { values: ['form_start', 'form_submit', 'generate_lead'] } } },
+  })
+  const events: Record<string, { events: number; users: number }> = {}
+  for (const row of eventsReport.rows ?? []) {
+    const name = row.dimensionValues?.[0]?.value ?? ''
+    events[name] = { events: num(row.metricValues?.[0]?.value), users: num(row.metricValues?.[1]?.value) }
+  }
+
+  const startReport = await runReport(token, normalized, periodStart, periodEnd, {
+    dimensions: ['pagePath'],
+    metrics: ['eventCount', 'totalUsers'],
+    orderBy: 'eventCount',
+    limit: 15,
+    dimensionFilter: { filter: { fieldName: 'eventName', stringFilter: { matchType: 'EXACT', value: 'form_start' } } },
+  })
+  const startByPath = (startReport.rows ?? []).map(r => ({
+    path: r.dimensionValues?.[0]?.value ?? '', events: num(r.metricValues?.[0]?.value), users: num(r.metricValues?.[1]?.value),
+  }))
+
+  const thankReport = await runReport(token, normalized, periodStart, periodEnd, {
+    dimensions: ['pagePath'],
+    metrics: ['screenPageViews', 'totalUsers'],
+    orderBy: 'screenPageViews',
+    limit: 10,
+    dimensionFilter: { filter: { fieldName: 'pagePath', stringFilter: { matchType: 'CONTAINS', value: 'thank' } } },
+  })
+  const thankYouByPath = (thankReport.rows ?? []).map(r => ({
+    path: r.dimensionValues?.[0]?.value ?? '', events: num(r.metricValues?.[0]?.value), users: num(r.metricValues?.[1]?.value),
+  }))
+
+  // People who saw ANY thank-you page, de-duplicated by GA4 (summing per-path users would count a person twice).
+  const thankTotalReport = await runReport(token, normalized, periodStart, periodEnd, {
+    metrics: ['screenPageViews', 'totalUsers'],
+    dimensionFilter: { filter: { fieldName: 'pagePath', stringFilter: { matchType: 'CONTAINS', value: 'thank' } } },
+  })
+  const totalRow = thankTotalReport.rows?.[0]
+  const thankYouTotal = { events: num(totalRow?.metricValues?.[0]?.value), users: num(totalRow?.metricValues?.[1]?.value) }
+
+  return { periodStart, periodEnd, events, startByPath, thankYouByPath, thankYouTotal }
 }

@@ -156,6 +156,26 @@ describe('ReplyBox — refusals', () => {
     expect(screen.queryByText(/409/)).not.toBeInTheDocument()
   })
 
+  it.each(['messenger', 'whatsapp', 'email'] as const)(
+    'on %s, says the customer is do-not-contact — not "no permission" — when the server refuses for that',
+    async (channel) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: false,
+          status: 403,
+          json: async () => ({ error: 'dnc', reason: 'do_not_contact' }),
+        }),
+      )
+      renderBox({ channel })
+
+      await userEvent.click(screen.getByRole('button', { name: '发送给客户' }))
+
+      expect(await screen.findByText(/被标成「别再联系」/)).toBeInTheDocument()
+      expect(screen.queryByText(/没有权限/)).not.toBeInTheDocument()
+    },
+  )
+
   it('keeps the typed text on screen when the send fails', async () => {
     vi.stubGlobal(
       'fetch',

@@ -411,6 +411,11 @@ export const PRIMARY_METRIC_CATALOG: MetricCandidate[] = [
     unit: 'sessions/mo', measurement: 'auto',
     recommended_for: ['awareness', 'acquisition'],
     default_direction: 'increase' },
+  { key: 'seo_gsc_clicks_28d', label_en: 'Google search clicks (28 days)', label_zh: '谷歌搜索点击（近 28 天）',
+    unit: 'clicks/28d', measurement: 'auto',
+    recommended_for: ['awareness', 'acquisition'],
+    default_direction: 'increase',
+    note: '取 gsc_page_daily 全部页点击；窗口止于最近一个已入库日，数据过期或不全时不出数' },
 ]
 
 /**

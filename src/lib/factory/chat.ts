@@ -8,6 +8,7 @@ import type Anthropic from '@anthropic-ai/sdk'
 import { callClaudeWithTools, type ClaudeToolCall } from '@/lib/anthropic/client'
 import { FACTORY_PUBLISH_BUDGET_HARD_CAP_USD } from './constants'
 import { applyBudgetUpdate, applyQualityReject } from './review-apply'
+import { REEL_HUMAN_CHECK_KEYS, type ContentCheckItemResult } from '@/lib/social/content-review'
 
 interface FactoryChatCtx {
   supabase: SupabaseClient
@@ -33,8 +34,24 @@ const REJECT_TOOL: Anthropic.Tool = {
     properties: {
       work_order_id: { type: 'string', description: '要打回的工单 id(先用 list_pending_reviews 拿)' },
       feedback: { type: 'string', description: '打回意见,中文,如实转述用户要改什么' },
+      checklist_human: {
+        type: 'array',
+        description: '完整人工清单。只把用户明确确认或反馈的问题映射为 PASS/FAIL；其余设为 NOT_MEASURED。事实来源两项必须附 HTTPS URL 或 client_asset:<ID>。',
+        items: {
+          type: 'object',
+          properties: {
+            key: { type: 'string', enum: [...REEL_HUMAN_CHECK_KEYS] },
+            judge: { type: 'string', enum: ['HUMAN'] },
+            outcome: { type: 'string', enum: ['PASS', 'FAIL', 'NOT_MEASURED'] },
+            detail: { type: ['string', 'null'] },
+            source_ref: { type: ['string', 'null'] },
+          },
+          required: ['key', 'judge', 'outcome', 'detail', 'source_ref'],
+          additionalProperties: false,
+        },
+      },
     },
-    required: ['work_order_id', 'feedback'],
+    required: ['work_order_id', 'feedback', 'checklist_human'],
   },
 }
 
@@ -84,9 +101,13 @@ function buildFactoryChatTools(ctx: FactoryChatCtx): {
     },
 
     async reject_work_order(input: unknown) {
-      const { work_order_id, feedback } = (input ?? {}) as { work_order_id?: string; feedback?: string }
-      if (!work_order_id || !feedback?.trim()) return '缺少 work_order_id 或 feedback。'
-      const r = await applyQualityReject(ctx.supabase, work_order_id, feedback.trim(), ctx.reviewer, ctx.clientId)
+      const { work_order_id, feedback, checklist_human } = (input ?? {}) as {
+        work_order_id?: string
+        feedback?: string
+        checklist_human?: ContentCheckItemResult[]
+      }
+      if (!work_order_id || !feedback?.trim() || !Array.isArray(checklist_human)) return '缺少 work_order_id、feedback 或 checklist_human。'
+      const r = await applyQualityReject(ctx.supabase, work_order_id, feedback.trim(), ctx.reviewer, ctx.clientId, checklist_human)
       if (!r.ok) return `打回失败: ${r.error}`
       return `已打回并重开一条工单(新工单 ${r.data?.reopened_work_order_id}),意见「${feedback.trim()}」已带进新单,worker 接单后会重做。`
     },
@@ -114,7 +135,7 @@ function buildSystemPrompt(clientName: string): string {
     '',
     '你能做的:',
     '① 用 list_pending_reviews 看有哪些成片待审;',
-    '② 用 reject_work_order 按用户意见打回(老单作废+自动重开重做);',
+    '② 用 reject_work_order 按用户意见打回(老单作废+自动重开重做);结构化清单只记录用户明确确认的内容,没检查的项必须标 NOT_MEASURED,不要推断为 PASS;',
     '③ 用 adjust_budget 调投放预算(不重做画面)。',
     '',
     `你【不能】做「通过/投放」——花钱那一下只能用户在页面上亲手点「通过并投放(上限 $${FACTORY_PUBLISH_BUDGET_HARD_CAP_USD})」按钮,你没有这个工具,也不要假装点了。`,
