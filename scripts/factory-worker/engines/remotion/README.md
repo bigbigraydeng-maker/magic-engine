@@ -62,7 +62,7 @@ node render.mjs --props examples/sydney-apartment.props.json --public-dir /tmp/r
 - **新增一首**：`python3 ../../tools/analyze-music.py <音频文件>` 输出一行 JSON（时长、检测 BPM、首拍偏移、小节位），照格式补 `id / folder / file / energy / style / mood` 进 `music.json`，状态先写 `pending_listen`。需要 python3 + numpy + scipy + ffmpeg（出片机已有 Python3 + ffmpeg）。
 - **检测会翻倍**：算法偏向报更快的拍，同一首曲子的两个版本测出过 199 与 100。所以检测值 > 150 一律按双倍速折半（`FOLD_ABOVE_BPM`）；**每首歌第一次渲完要量一次音画偏差**（PM 备份里的 `qa.py`），在 ±50 毫秒内才把状态改成 `ready`。
 - **`pending_listen` 的歌不许被选器选用**（选器是后续包）；目前只有 `pipa-trap` 量过（偏差 −10 毫秒），其余全部待量。
-- 音乐商用范围以 PM 2026-10-05 拍板的三个文件夹为准；名字带 `temp` 的来源不明文件不入目录。
+- 音乐版权：`MagicLab_Studio/Music`、`_shared/music`、`CTS/remotion-assets/music` 三个文件夹里的歌，PM 已拍板都可商用（含广告），**不再核实**。`pending_listen` 只表示「节拍和音画偏差还没量过」，与版权无关。
 - logo 现在只在最后 2 拍出现（`LOGO_BEATS`），不再常驻每一帧。
 - 音乐的测试在 `test/music.test.mjs`，由 `schema.test.mjs` 末尾一行 import 带进 `npm test`（`package.json` 是受保护路径，本包不动它）。
 
@@ -79,7 +79,7 @@ RUN_REMOTION_RENDER=1 npm run test:render   # 真渲染冒烟（本机，需要 
 ## 授权结论与已知限制
 
 - **Remotion 授权**：官网写明个人和 3 人以内的公司免费（含商用）；4 人及以上要付费，自动出片系统走 Automators 档（每次渲染 $0.01、每月最低 $100）。2026-10-05 PM 确认 Magic Lab 目前 3 人以内，可以免费用；**团队长到 4 人时必须改买授权**。「3 人」是否含兼职/外包、免费档下自动出片是否有额外限制，官网摘要没有说明，不能当结论。
-- **音乐**：模板支持音乐，但音乐文件的商用来源没有确认前，带音乐的成片不得用于广告。
+- **音乐**：模板支持音乐；上面三个乐库文件夹 PM 已拍板可商用（含广告），见「音乐目录与自动节拍」。
 - **本机需要 Chrome**：首次渲染会自动下载 Chrome Headless Shell；也可用 `--browser-executable` 指向已有的。
 - **字体**：Montserrat 通过 `@remotion/google-fonts` 在渲染时联网加载，离线环境会等到超时。
 - **素材不随包提供**：镜头、logo、音乐都要放进素材目录；客户真实产品/价格的画面只能用客户自己提供的素材。
