@@ -4,7 +4,8 @@ import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import type { WorkOrderStatus } from '@/lib/factory/types'
-import { STATUS_META, STATUS_ORDER } from './_components/statusMeta'
+import type { PublishedView } from '@/lib/factory/publish/publish-display'
+import { STATUS_META, STATUS_ORDER, publishedBadge, REASON_STATUSES } from './_components/statusMeta'
 import { ReviewInbox } from './_components/ReviewInbox'
 
 // P21.J 驾驶舱 — 看片 + 对话框 + 全局工单状态,一页搞定(PM:factory 页 = 驾驶舱)
@@ -25,6 +26,7 @@ interface WorkOrder {
   reclaim_count: number
   reject_reason: string | null
   source_ad_id: string | null
+  published: PublishedView | null
   created_at: string
 }
 
@@ -237,9 +239,20 @@ export default function FactoryCockpitPage() {
                           </div>
                           <p className="text-sm text-slate-700 mt-1">{o.rationale_one_liner}</p>
                           <p className="text-xs text-slate-400 mt-0.5">角度: {o.angle}</p>
-                          {o.reject_reason && (
-                            <p className="text-xs text-red-600 mt-1">失败原因: {o.reject_reason}</p>
+                          {o.reject_reason && REASON_STATUSES.includes(o.status) && (
+                            <p className="text-xs text-red-600 mt-1">
+                              {o.status === 'review_rejected' ? '打回原因' : '失败原因'}: {o.reject_reason}
+                            </p>
                           )}
+                          {(o.status === 'published' || o.status === 'measuring' || o.status === 'closed' || (o.status === 'publish_failed' && o.published?.provisional)) && (() => {
+                            const b = publishedBadge(o.published)
+                            return (
+                              <p className="text-xs mt-1 flex items-center gap-2">
+                                <span className={`inline-block px-2 py-0.5 rounded-full ${b.color}`}>{b.label}</span>
+                                {b.href && <a href={b.href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">在 Facebook 查看</a>}
+                              </p>
+                            )
+                          })()}
                           <p className="text-xs text-slate-400 mt-1">
                             成本 ${Number(o.actual_cost_usd).toFixed(2)} / 上限 ${Number(o.budget_cap_usd).toFixed(2)}
                             {o.attempt_count > 0 ? ` · 尝试 ${o.attempt_count}` : ''}

@@ -290,13 +290,11 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
               ))}
             </div>
 
-            {/* 文案必须跟发布链路的真实状态一致。旧文案写「链路正在建设,通过不会发出去」,而
-                publish-worker(facebook-reel-adapter 真打 Graph API)此后已经落地,只是 cron 未注册
-                —— 说死「不会发」是骗人的。这里只陈述能保证的事实。 */}
+            {/* 文案只陈述能保证的事实:发布 cron 每小时跑一次;全局开关没开时只发草稿。 */}
             <p className="text-sm text-slate-600 mb-5">
               通过 = 标记这条合格、<span className="font-medium text-slate-900">排入发布队列</span>。
-              发布程序已实现但定时器尚未启用,所以现在通过不会立刻发出;
-              <span className="font-medium text-slate-900">一旦启用,队列里的片子会自动发到客户主页</span>,请按「已经会发出去」的标准把关。确定通过?
+              发布程序每小时自动跑一次,队列里的片子会自动发到客户主页;
+              <span className="font-medium text-slate-900">全局发布开关没开时只存成草稿、不公开</span>(看板会标「草稿,未公开」)。请按「已经会发出去」的标准把关。确定通过?
             </p>
             <div className="flex gap-3">
               <button
