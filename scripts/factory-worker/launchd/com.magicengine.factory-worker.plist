@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  出片机开机自启模板。不含任何密钥：密钥只在 scripts/factory-worker/.env，由 --env-file 读取。
+  三个占位符安装前要替换（见同目录 README.md）：
+    __NODE__  node 的绝对路径（要 22.18 以上）
+    __REPO__  代码仓库主目录的绝对路径
+    __HOME__  你的用户目录，例如 /Users/xxx
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.magicengine.factory-worker</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>--env-file=__REPO__/scripts/factory-worker/.env</string>
+    <string>__REPO__/scripts/factory-worker/worker.mjs</string>
+    <string>--loop</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+
+  <!-- launchd 的 PATH 很短，出片要用到 python3 / ffmpeg / tesseract / piper -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <!-- 登录就起；退出（崩溃或被杀）就拉起；至少隔 30 秒，防止配置错了狂刷 -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/magicengine-factory-worker.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/magicengine-factory-worker.log</string>
+</dict>
+</plist>

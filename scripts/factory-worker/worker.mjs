@@ -1032,6 +1032,27 @@ function loadMusicLibrary() {
 
 // ── 主循环 ──────────────────────────────────────────────────────────────────────
 
+// 空闲存活信号：让服务端知道「出片机还活着、只是没领到单」，离线才能在 30 分钟内判出来。
+// 尽力而为——失败只记一行日志，绝不影响领单；干活期间由工单心跳负责，不重复发。
+const PING_EVERY_MS = 4 * 60_000
+let lastPingAt = 0
+export async function pingAlive(fetchFn = fetch, now = Date.now()) {
+  if (now - lastPingAt < PING_EVERY_MS) return false
+  lastPingAt = now
+  try {
+    const res = await fetchFn(`${API_BASE}/api/factory/worker/ping`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${WORKER_TOKEN}` },
+      body: JSON.stringify(buildClaimBody(WORKER_ID, TARGET_CLIENT_ID)),
+    })
+    if (!res.ok) log(`存活信号发送失败 status=${res.status}`)
+    return res.ok
+  } catch (e) {
+    log('存活信号发送失败:', e?.message ?? e)
+    return false
+  }
+}
+
 async function main() {
   if (!WORKER_TOKEN) {
     console.error('FATAL: FACTORY_WORKER_TOKEN 未配置(scripts/factory-worker/.env)')
@@ -1049,6 +1070,7 @@ async function main() {
   }
   do {
     try {
+      if (loop) await pingAlive()
       const result = await runOneOrder()
       if (jsonResult) console.log(`FACTORY_WORKER_RESULT ${JSON.stringify(result)}`)
       if (!result.claimed && loop) log('无 queued 工单,等待…')
