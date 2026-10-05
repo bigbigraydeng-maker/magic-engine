@@ -17,6 +17,13 @@ export interface ReplyMetricRow {
 }
 
 /**
+ * A whole-string email address. Meta-synced Page messages carry the Page's
+ * display name, which could contain an '@' (a name like "Tours @ Auckland"),
+ * so a bare `includes('@')` is not enough to say "sent through ME".
+ */
+const EMAIL_SENDER_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+/**
  * Map a stored row to the shape the classifier understands. Outbound rows sent
  * through ME carry the sender's email in `senderName`; Meta-synced Page
  * messages carry the Page name instead, which has no '@'. The auto-ack email is
@@ -37,7 +44,7 @@ export function rowToThreadMessage(row: ReplyMetricRow): ThreadMessage {
       senderName === AUTOACK_SENT_BY_EMAIL &&
       normaliseNoticeText(body) === normaliseNoticeText(AUTOACK_TEMPLATE)
     message.viaMeAutoAck = viaMeAutoAck
-    message.sentByHumanViaMe = senderName.includes('@') && !viaMeAutoAck
+    message.sentByHumanViaMe = EMAIL_SENDER_RE.test(senderName) && !viaMeAutoAck
   }
   return message
 }

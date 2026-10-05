@@ -25,6 +25,47 @@ function thread(messages: ThreadMessage[]) {
   return { conversationId: 'c1', messages }
 }
 
+describe('rowToThreadMessage — sender detection', () => {
+  const base: ReplyMetricRow = {
+    conversationId: 'c1',
+    direction: 'outbound',
+    body: 'Here are the details',
+    senderName: null,
+    sentAt: '2026-09-10T11:00:00Z',
+  }
+
+  it('a Page display name containing an @ is not an ME sender', () => {
+    expect(rowToThreadMessage({ ...base, senderName: 'Tours @ Auckland' }).sentByHumanViaMe).toBe(false)
+  })
+
+  it('a whole-string email is an ME sender', () => {
+    expect(rowToThreadMessage({ ...base, senderName: 'agent@example.com' }).sentByHumanViaMe).toBe(true)
+  })
+})
+
+describe('computeReplyMetrics — boundaries', () => {
+  it('a reply exactly 24h after the first customer message counts as within 24h; one second later does not', () => {
+    const exact = computeReplyMetrics(
+      [thread([msg('inbound', '2026-09-10T10:00:00Z', 'Hello'), msg('outbound', '2026-09-11T10:00:00Z', 'Hi, here are the details')])],
+      opts,
+    )
+    expect(exact.humanRepliedWithin24h).toBe(1)
+    const late = computeReplyMetrics(
+      [thread([msg('inbound', '2026-09-10T10:00:00Z', 'Hello'), msg('outbound', '2026-09-11T10:00:01Z', 'Hi, here are the details')])],
+      opts,
+    )
+    expect(late.humanReplied).toBe(1)
+    expect(late.humanRepliedWithin24h).toBe(0)
+  })
+
+  it('a thread whose first message is exactly 24h old is mature; one second younger is not', () => {
+    const exact = computeReplyMetrics([thread([msg('inbound', '2026-10-04T00:00:00Z', 'Hello')])], opts)
+    expect(exact.mature).toBe(1)
+    const young = computeReplyMetrics([thread([msg('inbound', '2026-10-04T00:00:01Z', 'Hello')])], opts)
+    expect(young.mature).toBe(0)
+  })
+})
+
 describe('computeReplyMetrics', () => {
   it('counts a human reply within 24h', () => {
     const result = computeReplyMetrics(
@@ -145,12 +186,18 @@ describe('computeReplyMetrics', () => {
   })
 })
 
+interface FakeCall {
+  table: string
+  method: string
+  args: unknown[]
+}
+
 interface FakeChain {
-  select: () => FakeChain
-  eq: () => FakeChain
-  gte: () => FakeChain
-  in: () => FakeChain
-  order: () => FakeChain
+  select: (...args: unknown[]) => FakeChain
+  eq: (...args: unknown[]) => FakeChain
+  gte: (...args: unknown[]) => FakeChain
+  in: (...args: unknown[]) => FakeChain
+  order: (...args: unknown[]) => FakeChain
   range: (a: number, b: number) => Promise<{ data: object[] | null; error: { message: string } | null }>
 }
 
@@ -158,16 +205,26 @@ function asClient(fake: object): SupabaseClient {
   return fake as SupabaseClient
 }
 
-function makeFakeClient(tables: Record<string, object[]>, errorTable?: string): SupabaseClient {
-  return asClient({
+/** Records every chained call so tests can pin the filters, not just the result. */
+function makeFakeClient(
+  tables: Record<string, object[]>,
+  errorTable?: string,
+): { db: SupabaseClient; calls: FakeCall[] } {
+  const calls: FakeCall[] = []
+  const db = asClient({
     from(table: string) {
+      const record = (method: string) => (...args: unknown[]) => {
+        calls.push({ table, method, args })
+        return chain
+      }
       const chain: FakeChain = {
-        select: () => chain,
-        eq: () => chain,
-        gte: () => chain,
-        in: () => chain,
-        order: () => chain,
+        select: record('select'),
+        eq: record('eq'),
+        gte: record('gte'),
+        in: record('in'),
+        order: record('order'),
         range: (a: number, b: number) => {
+          calls.push({ table, method: 'range', args: [a, b] })
           if (table === errorTable) {
             return Promise.resolve({ data: null, error: { message: 'boom' } })
           }
@@ -178,11 +235,12 @@ function makeFakeClient(tables: Record<string, object[]>, errorTable?: string): 
       return chain
     },
   })
+  return { db, calls }
 }
 
 describe('fetchReplyMetrics', () => {
   it('reads conversations and messages and computes metrics', async () => {
-    const db = makeFakeClient({
+    const { db, calls } = makeFakeClient({
       conversations: [{ id: 'c1' }],
       conversation_messages: [
         { conversation_id: 'c1', direction: 'inbound', body: 'Hello', sender_name: null, sent_at: '2026-09-10T10:00:00Z' },
@@ -191,10 +249,30 @@ describe('fetchReplyMetrics', () => {
     })
     const result = await fetchReplyMetrics(db, 'client-1', opts)
     expect(result.humanReplied).toBe(1)
+    // Pin the filters: a dropped client or channel filter would still return the
+    // same rows from this fake, so assert the calls themselves.
+    expect(calls).toContainEqual({ table: 'conversations', method: 'eq', args: ['client_id', 'client-1'] })
+    expect(calls).toContainEqual({ table: 'conversations', method: 'eq', args: ['channel', 'messenger'] })
+    expect(calls).toContainEqual({
+      table: 'conversations',
+      method: 'gte',
+      args: ['last_message_at', opts.from.toISOString()],
+    })
+  })
+
+  it('pages past the 1000-row response cap and chunks conversation ids by 100', async () => {
+    const conversations = Array.from({ length: 1001 }, (_, i) => ({ id: `c${i}` }))
+    const { db, calls } = makeFakeClient({ conversations, conversation_messages: [] })
+    await fetchReplyMetrics(db, 'client-1', opts)
+    expect(calls.filter((c) => c.table === 'conversations' && c.method === 'range')).toHaveLength(2)
+    const idChunks = calls.filter((c) => c.table === 'conversation_messages' && c.method === 'in')
+    expect(idChunks).toHaveLength(11)
+    expect((idChunks[0].args[1] as string[]).length).toBe(100)
+    expect((idChunks[10].args[1] as string[]).length).toBe(1)
   })
 
   it('throws when the conversations query returns an error', async () => {
-    const db = makeFakeClient({ conversations: [{ id: 'c1' }] }, 'conversations')
+    const { db } = makeFakeClient({ conversations: [{ id: 'c1' }] }, 'conversations')
     await expect(fetchReplyMetrics(db, 'client-1', opts)).rejects.toThrow('boom')
   })
 })
