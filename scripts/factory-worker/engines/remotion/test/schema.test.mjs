@@ -17,6 +17,7 @@ import {
   FPS,
   HOOK_BEATS,
   ITEM_BEATS,
+  LOGO_BEATS,
   REVEAL_BEATS,
   SYNC_SHIFT_FRAMES,
 } from '../src/timing.ts'
@@ -542,6 +543,14 @@ describe('timing', () => {
     assert.deepEqual(timing.itemFrom, [67, 97, 127, 157])
     assert.equal(timing.revealFrom, 187)
     assert.equal(timing.totalFrames, 307)
+    assert.equal(timing.logoFrom, 277)
+  })
+
+  test('the logo appears only during the last LOGO_BEATS beats', () => {
+    const timing = computeTimingFromProps(valid())
+    assert.equal(LOGO_BEATS, 2)
+    assert.ok(timing.logoFrom >= timing.revealFrom)
+    assert.ok(timing.logoFrom < timing.totalFrames)
   })
 
   test('three items produce three item slots', () => {
@@ -590,3 +599,6 @@ describe('timing', () => {
     )
   })
 })
+
+// Music catalog tests ride along with this file because package.json (an A-level path) lists test files explicitly.
+import './music.test.mjs'
