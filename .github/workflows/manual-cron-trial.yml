@@ -1,0 +1,161 @@
+name: Manual cron trial (dry-run first)
+
+# 「当面试跑」入口（PM 2026-10-05 规矩：先当面试跑、报达没达预期，之后才排日历）。
+#
+# 手动触发一个**白名单内**的定时任务路由，默认只演练（dry_run=1，只算不写），结果写进本次运行的摘要。
+# 为什么放在 GitHub Actions：线上 CRON_SECRET 只存在于仓库 Secrets 与 Render；开发窗口不读、也不该读
+# .env.local 里的生产密钥，所以由 Actions 带着 Secret 去调，窗口只需 `gh workflow run`。
+#
+# ⚠️ 实话（子牙/魏征/狄仁杰 2026-10-05 复审）：本文件**没有**把 Secret 收窄。仓库级 Secret 对任何有写权限的人
+#    推上来的分支 workflow 都可读（现有 5 个 workflow 也在用 CRON_SECRET），下面 job 里的 `if: main` 只是防手滑，
+#    不是防攻击。真正收窄要把 Secret 放进「只允许 main」的 GitHub Environment —— 需要有 Secret 明文的管理员来做，
+#    已另开台账卡跟踪，不在本文件范围。
+#
+# 白名单准入规则（新增路由必须同时满足，并改下面 options 与 case 两处 + 过 A 级审核；有测试守着）：
+#   1. 只读，或只写自家表；
+#   2. `dry_run=1` 时必须零写入（路由里必须读 dry_run 参数）；
+#   3. 不触发对外发布 / 发信 / 扣费 / 客户可见外发 / 广告改动 —— 这类路由永远不进本入口，要走 Inngest 授权事件。
+#   （纯只读路由，如 ga4-form-funnel：读线上谷歌分析、不写任何东西；`dry_run` 参数被接受但不起作用。）
+#   （只读但要花钱的路由，如 keyword-opportunity：不写任何东西；`dry_run=1` 必须零供应商调用，真跑（dry_run=false + confirm）才付费，
+#    摘要里写明调用次数和费用估算。）
+#
+# 其它约束：输入一律走环境变量再校验；真写入必须同时 dry_run=false 且 confirm=WRITE-LIVE，
+# 任何其它取值一律按演练处理；并发串行；摘要只写白名单字段；摘要里的模式以**服务端返回的 dry_run 字段**为准，
+# 与请求不一致直接失败。
+
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: 'Cron route to trigger (allowlist — keep in sync with the case below)'
+        required: true
+        type: choice
+        options:
+          - seo-weekly-list
+          - ga4-form-funnel
+          - keyword-opportunity
+      dry_run:
+        description: 'Dry run (compute only, write nothing). Untick AND set confirm for a REAL run.'
+        required: true
+        type: boolean
+        default: true
+      confirm:
+        description: 'Only for a REAL run: type WRITE-LIVE'
+        required: false
+        type: string
+      client_id:
+        description: 'Optional: one client UUID only'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manual-cron-trial
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Trigger allowlisted cron route
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          JOB: ${{ inputs.job }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          CONFIRM: ${{ inputs.confirm }}
+          CLIENT_ID: ${{ inputs.client_id }}
+        run: |
+          set -uo pipefail
+          summary() { printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"; }
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::CRON_SECRET secret not set"
+            exit 1
+          fi
+          # Allowlist + route path per job. The read-only funnel lives outside /api/cron (it is not a cron).
+          case "$JOB" in
+            seo-weekly-list) route="api/cron/seo-weekly-list" ;;
+            ga4-form-funnel) route="api/internal/ga4-form-funnel" ;;
+            keyword-opportunity) route="api/internal/keyword-opportunity" ;;
+            *) echo "::error::job not in allowlist"; exit 1 ;;
+          esac
+          if { [ "$JOB" = "ga4-form-funnel" ] || [ "$JOB" = "keyword-opportunity" ]; } && [ -z "${CLIENT_ID:-}" ]; then
+            echo "::error::$JOB needs client_id (one client per run)"; exit 1
+          fi
+
+          # Real run only on the exact pair (dry_run=false AND confirm=WRITE-LIVE); everything else is a dry run.
+          expect_dry="true"
+          if [ "$DRY_RUN" = "false" ]; then
+            if [ "${CONFIRM:-}" != "WRITE-LIVE" ]; then
+              echo "::error::real run requested but confirm != WRITE-LIVE"; exit 1
+            fi
+            expect_dry="false"
+          fi
+
+          query="dry_run=1"
+          if [ "$expect_dry" = "false" ]; then query="dry_run=0"; fi
+          if [ -n "${CLIENT_ID:-}" ]; then
+            cid=$(printf '%s' "$CLIENT_ID" | tr '[:upper:]' '[:lower:]')
+            if [[ ! "$cid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+              echo "::error::client_id must be a single UUID"; exit 1
+            fi
+            query="$query&client_id=$cid"
+          fi
+          url="https://app.magicengine.com.au/$route?$query"
+          mode="DRY RUN (nothing written)"
+          if [ "$expect_dry" = "false" ]; then mode="REAL RUN (writes enabled)"; fi
+          if [ "$expect_dry" = "false" ] && [ "$JOB" = "keyword-opportunity" ]; then mode="REAL RUN (PAID vendor calls, no database writes)"; fi
+          echo "Triggering: $url  [$mode]"
+
+          status=$(curl -sS -o /tmp/body.json -w '%{http_code}' --max-time 300 \
+            -H "Authorization: Bearer $CRON_SECRET" "$url") || status=000
+
+          summary "### Manual cron trial: \`$JOB\` — $mode"
+          summary ""
+          summary "HTTP status: **$status**"
+          if [ "$status" = "000" ]; then
+            summary ""
+            summary "⚠️ curl failed or timed out. **Not writing does not follow from this** — in a real run the server may still be working. Check the data before retrying."
+            exit 1
+          fi
+          if ! jq -e . /tmp/body.json >/dev/null 2>&1; then
+            summary ""
+            summary "Response was not JSON (status $status); body not shown."
+            exit 1
+          fi
+
+          # Whitelisted fields only (per job); error text trimmed. The server's own dry_run flag is the truth.
+          case "$JOB" in
+            seo-weekly-list)
+              filter='{success, dry_run, clients_processed, failed,
+               results: [(.results // [])[] | {client_id, open_before, verified_pass, verify_pending, verify_not_measured, expired, inserted, duplicates, withheld, skipped_keywords, stale_crawl_pages, preview, item_errors: ((.item_errors // []) | length), error: ((.error // null) | if . == null then null else (tostring | .[0:160]) end)}]}' ;;
+            ga4-form-funnel)
+              filter='{success, dry_run, read_only, days, clients_processed, failed,
+               results: [(.results // [])[] | {client_id, status, error: ((.error // null) | if . == null then null else (tostring | .[0:160]) end), summary: (.summary // null)}]}' ;;
+            keyword-opportunity)
+              filter='{success, dry_run, read_only, status, paid_calls_made, est_cost_usd, estimate_note, location_code, plan, summary}' ;;
+            *) echo "::error::no summary filter for this job"; exit 1 ;;
+          esac
+          jq "$filter" /tmp/body.json > /tmp/summary.json
+          summary ""
+          summary '```json'
+          cat /tmp/summary.json >> "$GITHUB_STEP_SUMMARY"
+          summary '```'
+          cat /tmp/summary.json
+
+          server_dry=$(jq -r '.dry_run' /tmp/body.json)
+          if [ "$server_dry" != "$expect_dry" ]; then
+            summary ""
+            summary "❌ Server reported dry_run=$server_dry but this run requested dry_run=$expect_dry. Treat as UNSAFE: check the data."
+            echo "::error::server dry_run flag does not match the request"
+            exit 1
+          fi
+          if [ "$status" != "200" ]; then
+            summary ""
+            summary "Non-200: the run may have partly completed (a client failed). Do not blindly retry a real run."
+            echo "::error::non-200 from cron route"
+            exit 1
+          fi

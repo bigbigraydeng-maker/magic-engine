@@ -11,6 +11,8 @@ import { scanRedlineHits } from '../worker-guard'
 import { facebookReelAdapter } from './facebook-reel-adapter'
 import { buildReelPublishedEvent } from './reel-published-event'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
+import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS, checklistPasses, validateContentChecklist } from '@/lib/social/content-review'
+import { buildReelFirstComment, buildReelPostCaption } from '@/lib/social/reel-publishing'
 
 const MAX_PUBLISH_ATTEMPTS = 3
 const RETRY_BACKOFF_MIN = 10 // 失败退避基数(分钟)· 指数
@@ -180,6 +182,17 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   const brief = (wo['brief'] ?? {}) as Record<string, unknown>
   const output = (wo['output'] ?? {}) as Record<string, unknown>
 
+  // Re-check the approval receipt at the last server boundary before any
+  // provider lookup/upload. This also quarantines legacy `approved` rows that
+  // predate structured review checklists.
+  const reviewRef = (wo['review_ref'] ?? {}) as Record<string, unknown>
+  const humanChecklist = validateContentChecklist(reviewRef['checklist_human'], REEL_HUMAN_CHECK_KEYS, 'HUMAN')
+  const autoChecklist = validateContentChecklist(output['quality_checklist_auto'], REEL_AUTO_CHECK_KEYS, 'AUTO')
+  if (!humanChecklist.ok || !autoChecklist.ok || !checklistPasses(humanChecklist.items) || !checklistPasses(autoChecklist.items)) {
+    await markFailed(id, attempts, 'approval checklist missing, incomplete, failed, or not measured', true)
+    return { order_id: id, result: 'failed', detail: 'approval_checklist_incomplete' }
+  }
+
   const target = await resolveTarget(clientId)
   if (!target) {
     await markFailed(id, attempts, '未配置 publish_target(缺配置绝不猜/误发)')
@@ -194,9 +207,30 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   // 本地幂等锚(魏征 B9 防双发):本工单之前已 start 过(published_ref.provisional + video_id)→ 说明上次
   // 发到一半崩了。**绝不盲目重发**:先对账,确认已发→补记;确认不了→ terminal 标失败推人工核对,宁可不发不双发。
   const priorRef = (wo['published_ref'] ?? null) as Record<string, unknown> | null
+  const copy = (brief['copy'] ?? {}) as Record<string, unknown>
+  const endcard = (copy['endcard'] ?? {}) as Record<string, unknown>
+  const firstComment = buildReelFirstComment(endcard, id)
+  if (!firstComment) {
+    await markFailed(id, attempts, '首评 CTA 或 HTTPS 追踪链接无效', true)
+    return { order_id: id, result: 'failed', detail: 'invalid_first_comment' }
+  }
+  const caption = buildReelPostCaption(copy)
+  // Check both strings before an idempotency recovery can add the first comment
+  // to a Reel that was already started in a previous attempt.
+  const redlineErr = await scanPublishCaption(clientId, wo['master_brief_id'], `${caption}\n${firstComment.text}`)
+  if (redlineErr) {
+    await markFailed(id, attempts, redlineErr, true)
+    return { order_id: id, result: 'failed', detail: 'redline_hit' }
+  }
+
   if (priorRef && priorRef['provisional'] === true && priorRef['video_id']) {
     const recovered = await adapter.findExisting({ target, idempotencyTag: id }).catch(() => null)
     if (recovered) {
+      if (!opts.draft && adapter.ensureFirstComment && !recovered.first_comment_id) {
+        recovered.first_comment_id = await adapter.ensureFirstComment({
+          target, videoId: String(recovered.video_id ?? priorRef['video_id']), idempotencyTag: id, message: firstComment.text,
+        })
+      }
       await recordPublished(id, recovered, clientId, brief)
       return { order_id: id, result: 'skipped_existing', detail: 'recovered_after_interrupt' }
     }
@@ -212,6 +246,11 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   try {
     const existing = await adapter.findExisting({ target, idempotencyTag: id })
     if (existing) {
+      if (!opts.draft && adapter.ensureFirstComment && !existing.first_comment_id) {
+        existing.first_comment_id = await adapter.ensureFirstComment({
+          target, videoId: String(existing.video_id ?? existing.post_id), idempotencyTag: id, message: firstComment.text,
+        })
+      }
       await recordPublished(id, existing, clientId, brief)
       return { order_id: id, result: 'skipped_existing', detail: existing.post_id }
     }
@@ -234,25 +273,13 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
     return { order_id: id, result: 'failed', detail: 'bad_video_url' }
   }
 
-  // caption:品牌接地文案(endcard.url 已锁客户域名)
-  const copy = (brief['copy'] ?? {}) as Record<string, unknown>
-  const endcard = (copy['endcard'] ?? {}) as Record<string, unknown>
-  const caption = buildCaption(copy, endcard)
-
-  // 发布正文红线闸(补 B10):这串字跟审片时扫过的不是同一串,发出去前必须自己过一次。
-  // 命中 → 终态失败不重试(重试只会每轮重扫同一串文案、每次都命中),等人工改文案或改红线。
-  const redlineErr = await scanPublishCaption(clientId, wo['master_brief_id'], caption)
-  if (redlineErr) {
-    await markFailed(id, attempts, redlineErr, true)
-    return { order_id: id, result: 'failed', detail: 'redline_hit' }
-  }
-
   // 发布(draft 由 opts 控制:首测=草稿不公开)
   let ref: PublishedRef
   try {
     ref = await adapter.publish({
       videoUrl,
       caption,
+      firstComment: firstComment.text,
       target,
       idempotencyTag: id,
       draft: opts.draft,
@@ -278,13 +305,6 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   // 只在真·PUBLISHED 的 facebook Reel 上喊(草稿不可 promote 成广告,绝不喊)。best-effort,不阻塞返回。
   await emitReelPublishedEvent(id, ref, clientId)
   return { order_id: id, result: 'published', detail: ref.permalink ?? ref.post_id }
-}
-
-function buildCaption(copy: Record<string, unknown>, endcard: Record<string, unknown>): string {
-  const cta = typeof endcard['cta'] === 'string' ? (endcard['cta'] as string) : ''
-  const url = typeof endcard['url'] === 'string' ? (endcard['url'] as string) : ''
-  const offer = Array.isArray(endcard['offer']) ? (endcard['offer'] as string[]).join(' · ') : ''
-  return [cta, offer, url].filter(Boolean).join('\n')
 }
 
 // published_ref 硬事务 + 三落库尽力而为(魏征 B9:三落库失败不回滚 published,片已发出回滚会致重发)

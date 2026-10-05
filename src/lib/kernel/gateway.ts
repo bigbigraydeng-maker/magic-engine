@@ -178,16 +178,16 @@ function assertDecisionMatches(args: {
     )
   }
 
-  // 🔴 对外动作：最终放行**必须是人签的**。
-  //
-  //    授权层已经保证了「outward + auto_approve」签不出放行，但那是它对自己的保证；
-  //    Gateway 不信任上游的保证，只信库里这条 append-only 记录写的是谁批的。
-  //    授权层被改坏、被绕过、或者哪天多出第二条签发路径时，这一句仍然拦得住。
-  if (definition.sideEffect === 'outward' && decision.decided_by !== 'human') {
+  // 只接受当前自动政策下、逐动作声明 bounded 的 policy 放行；human_only 与未知来源仍拒。
+  const boundedPolicyAllow =
+    decision.decided_by === 'policy' &&
+    currentPolicy.mode === 'auto_approve' &&
+    definition.outwardAuthorization?.approval.mode === 'bounded'
+  if (definition.sideEffect === 'outward' && decision.decided_by !== 'human' && !boundedPolicyAllow) {
     throw new KernelError(
       'OUTWARD_SIDE_EFFECT_BLOCKED',
       `这条对外动作的放行是「${decision.decided_by}」签的，不是人点头的 —— ` +
-        '对外动作只认人工批准，已停手',
+        '也不符合已声明的有限自动授权，已停手',
       { detail: { decidedBy: decision.decided_by, actionKey: decision.action_key } },
     )
   }

@@ -91,10 +91,12 @@ vi.mock('@/lib/ga4/client', () => ({
 // ── Mock Meta API ─────────────────────────────────────────────────────────────
 
 const mockGetAdAccountInsights = vi.fn()
+const mockGetAdAccountInsightsResult = vi.fn()
 const mockGetAdCampaignInsights = vi.fn()
 
 vi.mock('@/lib/meta/client', () => ({
   getAdAccountInsights:  (...args: unknown[]) => mockGetAdAccountInsights(...args),
+  getAdAccountInsightsResult: (...args: unknown[]) => mockGetAdAccountInsightsResult(...args),
   getAdCampaignInsights: (...args: unknown[]) => mockGetAdCampaignInsights(...args),
 }))
 
@@ -223,6 +225,12 @@ describe('GET /api/cron/google-data-pullback-daily — P22.A.5 MetaAds flywheel�
       error: null,
     })
     mockGetAdAccountInsights.mockResolvedValue(MOCK_INSIGHTS)
+    mockGetAdAccountInsightsResult.mockImplementation(async (...args: unknown[]) => {
+      const insights = await mockGetAdAccountInsights(...args)
+      return insights
+        ? { ok: true, insights }
+        : { ok: false, failure: { kind: 'empty_data' } }
+    })
     mockGetAdCampaignInsights.mockResolvedValue([])
     mockSnapshotSingle.mockResolvedValue({ data: { id: 'snap-001' }, error: null })
 
@@ -280,6 +288,31 @@ describe('GET /api/cron/google-data-pullback-daily — P22.A.5 MetaAds flywheel�
     await GET(makeRequest(CRON_SECRET))
 
     expect(mockPullMetrics).not.toHaveBeenCalled()
+  })
+
+  it('keeps a Meta HTTP failure red and records its fingerprint in the cron receipt', async () => {
+    mockGetAdAccountInsightsResult.mockResolvedValue({
+      ok: false,
+      failure: { kind: 'http_error', status: 429 },
+    })
+
+    const { GET } = await import('./route')
+    const response = await GET(makeRequest(CRON_SECRET))
+    const json = await response.json()
+    const receipt = mockCronFinish.mock.calls.at(-1)?.[0] as {
+      error?: string
+      failed: number
+      summary: { errors: Array<{ client_id: string; source: string; error: string }> }
+    }
+
+    expect(json.failed).toBe(1)
+    expect(receipt.failed).toBe(1)
+    expect(receipt.error).toContain('meta: getAdAccountInsights http_error (429)')
+    expect(receipt.summary.errors).toContainEqual({
+      client_id: CLIENT_ID,
+      source: 'meta',
+      error: 'getAdAccountInsights http_error (429)',
+    })
   })
 
   it('does NOT call pullMetrics when META_SYSTEM_USER_TOKEN is missing', async () => {
