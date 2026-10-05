@@ -32,10 +32,18 @@
 - `caption` = `27 · DAYS · FLIGHTS · INCLUDED · 4-5 STAR · HOTELS · DOMESTIC · FLIGHTS · ENGLISH · GUIDE · NZ$10,899 · PER PERSON · TWIN SHARE · DEPARTS · 8 MAY 2027 · 16 OCT 2027 · NZ$10,899 · 27 DAYS`。
 - 旧 worker 遇 `montage` 必须拒收：旧代码的条件是 `template !== 'list'` 直接抛非重试错误，这一点读代码确认，**没有另起旧版本实测**。
 
-## 没做 / 需要 PM 或有授权的窗口做
-- **没有真领一张生产工单**：方案要求「本机真领一张 montage 工单」，这需要 PM 授权对生产库建一张测试工单（`brief.engine='remotion'`，`brief.remotion.template='montage'`，`brief.copy.endcard` 带 `cta` 和 `url`——否则首评两项自动检查判 FAIL，见 R2a 审计 §六），并给出片机配 `FACTORY_REMOTION_CLIENT_IDS` 与素材目录。上面的本机试跑覆盖了出片机分支的全部逻辑，但**没覆盖真服务器的 claim/complete 往返**。
-- 44 MB 的成片能不能过存储桶大小限制，没有核实。
+## 真领生产工单试跑（PM 2026-10-06 回「授权」后做）
+授权范围：对生产库建**一张**蒙太奇测试工单，只存草稿，不发布，不审批。
+- **工单**：`23ba32e8-e58b-4feb-877f-4b8943ba8ea4`（CTS，`template: montage`，内容同上面的 CTS 版，`brief.copy.endcard` 用 10/5 那几张单已核过的官网链接与文案，`budget_cap_usd` 0.50，`angle_source.source = manual_remotion_trial`）。建单走 SQL 直插，字段形状照 10/5 两张 Remotion 试跑单。
+- **谁来领**：为避免 Mac 上常驻的出片机（`mac-ray-cts-one-shot-…`，跑的是 main，不认 montage，也没开通 remotion）抢单后拒收，我先在本机用**本分支代码**起了第二个出片机进程（id `mac-ray-remotion-packc-trial`，轮询 2 秒，只认 CTS + remotion，`MUAPI_API_KEY` 置空、`FACTORY_PUBLISH_LIVE=false`，素材/乐库用临时 studio 目录，品牌包和 `Music/` 乐库是指向真目录的符号链接），**再**建单。它在建单后 3 秒领到单（13:57:18），13:58:56 完成，随后我立刻停掉了它；常驻出片机全程没动。
+- **结果**：状态 `in_review`（进了审片队列），`actual_cost_usd = 0`，`attempt_count = 0`；服务端 `complete` 往返成功。服务端自动检查 **7 项全 PASS**：有音轨（−16.3 LUFS）、1080×1920 / 14.741 秒、字幕 18 条时间对齐、封面非空白非占位、Reel 格式、CTA 在首条评论、首评链接带追踪参数；`redline_hits` 为空。`quality_flags` 里有 1 条 `narrator_voice_mismatch`（简报要求第一人称、文案是公司口吻），与 10/5 两张清单试跑单完全相同，PM 当时已决定放行「品牌自己视角」的信息清单型。
+- **没有**：审批（`review_ref` 为空）、发布（`published_ref` / `published_ad_id` 为空）、花钱（成本 0，未走任何付费生成接口）。这张单现在留在审片队列里，**我没有批准也没有拒绝它**。
+- 音乐确实是从共享乐库 `Music/` 取的（符号链接指向真目录），成片音轨在、响度正常。
+
+## 仍没做 / 需要有授权的人做
+- 44 MB 的成片上传成功（没有撞存储桶大小限制，真往返已验证）。
 - 没有独立审查（A 级要子牙 + 魏征 + 狄仁杰签字，尚未进行）。
+- 旧版 worker 遇 `montage` 必拒收：读代码确认，并且**这次实际观察到**常驻 worker（main 版）确实没有抢到单，没法证明它会拒收，仍是读代码结论。
 
 ## Reuse Statement
 复用：R2a 出片机分支整体、包 B 的注册表与 `loadTemplate`、包 A 的音乐目录。新增均为 platform-shared；客户相关只在 props / 素材库；乐库来自共享文件夹，不含客户专属曲；客户名没有写进共享代码。
