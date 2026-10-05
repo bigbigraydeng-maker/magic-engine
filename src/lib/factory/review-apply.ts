@@ -4,6 +4,15 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { approveBudgetWithinCap } from './review-actions'
+import {
+  REEL_AUTO_CHECK_KEYS,
+  REEL_HUMAN_CHECK_KEYS,
+  checklistPasses,
+  hasChecklistFailure,
+  isValidContentSourceRef,
+  validateContentChecklist,
+  type ContentCheckItemResult,
+} from '@/lib/social/content-review'
 import { computeReviewFeedbackDigest, RecipeConfigError, winnerRecipeFromBrief } from './recipe'
 import type { ReviewRejectCategory } from './types'
 
@@ -15,6 +24,23 @@ export interface ReviewApplyResult {
 }
 
 type WO = Record<string, unknown>
+
+async function validateChecklistSources(
+  supabase: SupabaseClient,
+  clientId: string,
+  items: readonly ContentCheckItemResult[],
+): Promise<string | null> {
+  const refs = items.map(item => item.source_ref).filter((ref): ref is string => Boolean(ref))
+  if (refs.some(ref => !isValidContentSourceRef(ref))) return 'checklist contains an invalid source_ref'
+  const assetIds = Array.from(new Set(refs
+    .filter(ref => ref.startsWith('client_asset:'))
+    .map(ref => ref.slice('client_asset:'.length))))
+  if (assetIds.length === 0) return null
+  const { data, error } = await supabase.from('client_assets').select('id').eq('client_id', clientId).in('id', assetIds)
+  if (error) return `checklist source lookup failed: ${error.message}`
+  if ((data ?? []).length !== assetIds.length) return 'checklist source is not owned by this client'
+  return null
+}
 
 /** 载入并校验:必须存在、in_review、(可选)属于该客户 */
 async function loadInReview(
@@ -44,9 +70,19 @@ export async function applyApprove(
   id: string,
   reviewer: string,
   clientId?: string,
+  checklistHuman: unknown = null,
 ): Promise<ReviewApplyResult> {
   const { wo, err } = await loadInReview(supabase, id, clientId)
   if (err) return err
+  const checkedHuman = validateContentChecklist(checklistHuman, REEL_HUMAN_CHECK_KEYS, 'HUMAN')
+  if (!checkedHuman.ok) return { ok: false, status: 400, error: checkedHuman.error }
+  if (!checklistPasses(checkedHuman.items)) return { ok: false, status: 422, error: 'all human checklist items must PASS' }
+  const sourceError = await validateChecklistSources(supabase, String(wo!.client_id), checkedHuman.items)
+  if (sourceError) return { ok: false, status: 422, error: sourceError }
+  const output = (wo!.output ?? {}) as Record<string, unknown>
+  const checkedAuto = validateContentChecklist(output.quality_checklist_auto, REEL_AUTO_CHECK_KEYS, 'AUTO')
+  if (!checkedAuto.ok) return { ok: false, status: 422, error: `automatic checklist unavailable: ${checkedAuto.error}` }
+  if (!checklistPasses(checkedAuto.items)) return { ok: false, status: 422, error: 'automatic checklist is incomplete or not measured' }
   const reviewRef = (wo!.review_ref ?? {}) as Record<string, unknown>
   const gate = approveBudgetWithinCap(reviewRef)
   if (!gate.ok) return { ok: false, status: 422, error: gate.error }
@@ -55,7 +91,7 @@ export async function applyApprove(
     .from('content_work_orders')
     .update({
       status: 'approved',
-      review_ref: { ...reviewRef, approved_by: reviewer, approved_at: new Date().toISOString() },
+      review_ref: { ...reviewRef, approved_by: reviewer, approved_at: new Date().toISOString(), checklist_human: checkedHuman.items },
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
@@ -73,9 +109,15 @@ export async function applyQualityReject(
   feedback: string,
   reviewer: string,
   clientId?: string,
+  checklistHuman: unknown = null,
 ): Promise<ReviewApplyResult> {
   const { wo, err } = await loadInReview(supabase, id, clientId)
   if (err) return err
+  const checkedHuman = validateContentChecklist(checklistHuman, REEL_HUMAN_CHECK_KEYS, 'HUMAN')
+  if (!checkedHuman.ok) return { ok: false, status: 400, error: checkedHuman.error }
+  if (!hasChecklistFailure(checkedHuman.items)) return { ok: false, status: 400, error: 'quality rejection requires a failed checklist item' }
+  const sourceError = await validateChecklistSources(supabase, String(wo!.client_id), checkedHuman.items)
+  if (sourceError) return { ok: false, status: 422, error: sourceError }
 
   const { data: upd, error } = await supabase
     .from('content_work_orders')
@@ -108,6 +150,7 @@ export async function applyQualityReject(
     review_feedback: feedback.slice(0, 2000),
     review_feedback_by: reviewer,
     reopened_from: id,
+    review_checklist_failed_items: checkedHuman.items.filter(item => item.outcome === 'FAIL').map(item => item.key),
   }
   if (originallyHadRecipe) {
     // 保留旧 recipe 供审计,但从 top-level 抹掉,worker/evaluate 都不再拿到可用 recipe

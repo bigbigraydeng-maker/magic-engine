@@ -60,11 +60,35 @@ PR #1973 给 Meta 留资同步加了「上一轮已办完就别重跑」的闸�
 
 ---
 
-## CTS 有人被判 opt-out 之后，系统改写了本地证据却没把人从 Mailchimp 名单里摘掉（2026-09-24 复审顺带查实，2026-09-24 复审二轮改写描述）
+## 台账证据文件没有任何格式或敏感信息检查（2026-09-26 查实，P3）
+
+`src/lib/ledger/load.ts:15` 用 `readdirSync(dir)`（不递归）再只留 `.md`，`docs/ledger/evidence/` 子目录整个被跳过，所以 `parse.ts:137` 那条「10 位以上连续数字」之类的检查对证据文件完全不生效；证据文件目前只有 `ledger-check-refs.sh` 查它存不存在。证据文件由夜巡和各窗口核验时写入，内容来自生产取数，是最可能混进账户号 / 客户私有数据的地方。
+
+- **要做什么**：给 `docs/ledger/evidence/**` 单独加一道检查（至少：长连续数字、邮箱 / 电话形态、令牌前缀），不要把证据文件塞进台账卡的完整格式解析（格式不同）。主页 ID 这类公开标识要不要豁免，实现时再定。
+- **§11 打分**：频率低（证据文件只在夜巡与偶发核验时写）· IMPACT 低（不在客户闭环内）· 收入低（迄今未发现客户数据入库）→ 三个低 → **P3**，待认领。
+- 来源：CRM 窗口 2026-09-26 准备 NAL 止血快照时查实。
+
+---
+
+## Facebook 表单勾的「我不要收邮件」走不到 Mailchimp 的抑制标签（2026-09-24 查实，潜在，迄今 0 次，P3）
 
 一个人被订阅进 Mailchimp 之后**才**被判成 opt-out 时，`crm/meta-lead.ts` 会把触点回执从 `subscribed` 覆盖成 `skipped:explicit_opt_out`、并写上 `do_not_contact: true`；结果本地证据被改写成「没进名单」。**这不是 `src/lib/mailchimp/` 缺能力**——`api/cron/mailchimp-suppression-sync` 每天跑一次，职责就是把 CRM 判过的「别再联系」同步成 Mailchimp 的 `suppressed_do_not_email` 标签，`lib/mailchimp/suppression-sync.ts` 复用的正是 `crm/dnc.ts` 的 `isDoNotContact()`。真正的缺口在这条管道自己的取数：`api/cron/mailchimp-suppression-sync/route.ts` 的 `loadContactsForClient()` 查 `contact_touchpoints` 时只把 `metadata.outcome` 映射进 `DncTouch.outcome`，从没把同一条触点的 `metadata.do_not_contact` 映射进 `DncTouch.flagged`——所以 `crm/meta-lead.ts` 写下的这条 opt-out 触点，`isDoNotContact()` 永远看不到，人也就不会被这条每日 cron 打上抑制标签。
 - **要做什么**：修 `loadContactsForClient()`，把 `metadata.do_not_contact === true` 一起映射进 `flagged`，复用并扩展这条已有的每日抑制管道——**不要**另起一套退订 / 归档写路径，否则会跟这条管道形成两个不一致的 DNC 出口。
-- 涉及合同 5426843158。来源：魏征复审 PR #1973。
+- **§11 打分**：频率低（生产核对 `metadata->>'do_not_contact' = 'true'` 命中 **0 条** —— CTS 现在的表单根本没有这个勾选项，要先有客户加上才可能发生）· IMPACT 闭环关键度中（不卡 Act，是合规口子）· 收入关联度低 → 两个低 → **P3**。埋着的雷，不是正在漏水的管子。
+- **不要据此以为「说过别联系的人在继续收信」** —— 那条链是通的：抑制管道每天正常跑（2026-09-23 扫 CTS 947 人、26 人已带 `suppressed_do_not_email`），**且 PM 2026-09-24 确认 CTS 发群发时已经把这个标签排除掉了**。电话 / 邮件笔记那条路进来的拒联，标签打得上、群发也确实躲开了。断的只有表单勾选这一条支路。
+- 涉及合同 5426843158。来源：魏征复审 PR #1973；口径经 PM 2026-09-24 确认后收窄。
+
+---
+
+## 26 个带抑制标签的人不被打扰，只靠 Mailchimp 后台一个人工排除设置顶着（2026-09-24 记，P2）
+
+`suppressed_do_not_email` 是个**标签**，标签本身不拦邮件 —— 只有在建群发、挑收件人那一步把它排除掉才生效。那一步是 Mailchimp 后台的手工设置，**代码层面没有任何东西能拦住**：谁哪天新建一封群发忘了加排除，26 个带这个标签的人当场全收到，而且没有任何告警。
+
+- **26 人不是清一色「明确说过别联系」**：`suppression-sync.ts:13-15` 打这个标签的口径是 `not_interested`（终结性销售拒绝——`note-parser.ts:28` 判的是「聊过了，明确不要了」，跟只是暂缓的 `not_interested_now` 不是一回事，且 `suppression-sync.ts:22-24` 明确写了它没有撤销机制——但不等于明确禁止联系）∪ `do_not_contact`（真正说过别再联系）的并集，而 `note-parser.ts:306,322` 会把 `not_interested` 显式记成 `do_not_contact: false`——两者语义不同。26 人里各占多少目前没有分开统计过，本条先按「带抑制标签」记账；后续如果要按拒联严重程度调整优先级或推「永久移出名单」的方案，必须先分别查出两类人数，且永久移除只能基于真正的 `do_not_contact` / 退订信号，不能把「明确不要了」当成「明确禁止联系」处理。
+- 现状：PM 2026-09-24 确认当前的群发已经排除了。所以这不是一个正在发生的故障，是一个**单点人工依赖**。
+- **§11 打分**：频率中（每建一封新群发就赌一次）· IMPACT 闭环关键度中（不卡闭环，但会让一次外发变成合规事故）· 收入关联度中（NZ 反垃圾邮件法 + 客户信誉）→ 零个低、零个高 → **P2**。
+- **可能的修法**（未拍板）：发信前用 Mailchimp 接口把这封群发的目标收件人核一遍，发现里面有带抑制标签的就拦下并下发待办；或者把真正 `do_not_contact` 的人从名单里移出去（但那要先想清楚「移出去之后怎么恢复」，`lib/mailchimp/client.ts` 开头那条「只 POST 不改会员状态」的红线是有理由的；`not_interested` 不适用「移出名单」，那类人是终结性销售拒绝，不等于明确要求别联系）。
+- 来源：PM 2026-09-24 确认排除设置存在时，顺带发现这条链依赖的是人不是代码。
 
 ---
 
@@ -155,6 +179,18 @@ PR #1973 给 Meta 留资同步加了「上一轮已办完就别重跑」的闸�
 3. **347 条历史线索的 `source_ref` 不是真线索编号**（见上）。修它才能补 2026-07-24 之前的历史。
 
 另外两条小的：`registry.ts` 里这条的 `schedule` 是手抄的，`registry.test.ts` 没有对它做「跟函数定义一致」的断言（漂移了 CI 不会红）；`leads.ts` 回查广告组/系列名字时把 `ad_entity_snapshots` 的全部历史快照分页拉回来，只为取一个名字，每小时一次的无谓开销。
+
+## Meta / TikTok / 商家页的授权只能靠状态位判断，没有心跳（2026-09-24 断线监控上线时留下的口子，P1）
+
+**§11 打分**：频率低（目前没有「状态位是绿的、实际却不通」的 Meta 实例证据；已知那几次断线状态位都变了，新上的监控抓得到）· IMPACT 闭环关键度高（广告的 Act 和 Measure 都靠它）· 收入关联度高（客户投诉/续费直接相关）→ 恰好一个低、两个高 → **P1**。
+
+**现状**：2026-09-24 上线的断线监控（`src/lib/platform-oauth/connection-health.ts`）对每个平台分两种判法 —— 微软邮箱和谷歌取数有「心跳」（每次成功刷新令牌会盖 `last_synced_at`，有固定节奏的定时任务在调），Meta / TikTok / 商家页 / 谷歌广告 / GTM **没有**：`token-manager` 里压根没有 Meta 和 TikTok 的刷新实现（用的是长期令牌），商家页只在有人发帖读评价时才刷。所以这几个平台目前只有「状态位不是 active」这一条判据。
+
+**口子在哪**：如果一条 Meta 授权实际已经不能用、而平台又没让我们撞到那个会改状态位的报错，监控看不出来。
+
+**要做的**：给这几个平台找一条真正的「最近一次成功调用」的证据 —— 要么在调用方成功后主动盖 `last_synced_at`（最小改动），要么按平台各自的数据落地表定义新鲜度探针。做之前先确认节奏：没有固定节奏的平台加了心跳只会天天误报，那比没有更糟。
+
+---
 
 ## AI 可见度周快照聚合把失败的 API 调用也计入总数，客户分数被系统性腰斩（2026-09-23 两位复审确认，A 级，P0）
 
@@ -291,7 +327,17 @@ PM 要求把 parkhomes.nz 整体检查一遍还有什么可以升级。首页网
 **§11 打分**：频率高（每日跑）· IMPACT 高（Check/Tune 段决定闭环通不通电）· 收入高（客户续费看广告效果）→ 三高 → **P0**。合同 [#1986](https://github.com/bigbigraydeng-maker/magic-engine/issues/1986)；设计稿 `docs/specs/2026-09-25-ads-impact-wp3-design-v1.md`（三方设计复审两轮：子牙 / 魏征 / 狄仁杰，21+27 条全部并入）。执行走 DeepSeek，本窗口统筹复审。
 
 - [ ] **WP3.1a 同步 worker**：`ad_strategy_configs.autonomy_mode` → `client_automation_policies.mode`（按 `(client_id, action_key)` 逐键条件 UPDATE，registry 动态取 `ads.*` 键；Kernel 一行不动；同步 SQL 函数 SECURITY DEFINER + REVOKE/GRANT；审计列 + receipts 表；架构测试 grep 禁令）。狄仁杰判「可进」。
-- [ ] **WP3.1b 熔断**：append-only `ads_circuit_events`（按账户，派生态：无 release 且 sticky/未过 24h = 熔断中）；resolver 钩子返回 unavailable → Kernel 两层拒；admin 解除接口 `guardGlobalAdmin`；**收编止损旁路** `ad-health/stop-loss/route.ts`（付费客户成员可直调 Meta 改预算/状态，不经 Kernel）；**账户级日预算上限**（`client_meta_ad_accounts.daily_budget_cap_cents` + envelope-facts 按账户取 + 绑定面板 UI；CTS 主 100 / 个人 50，客户级 150 为总闸）；**同 PR 修 WP2 遗留 [#1994](https://github.com/bigbigraydeng-maker/magic-engine/issues/1994)**（resolver 没接进生产 Kernel、pre_provider 不读 kernel_pre 快照、4000 行窗口）。migration 先 apply 再合并代码。
+- [x] **WP3.1b 核心安全链已合并（PR #2204）**：熔断、账户级预算上限、生产 Kernel 接线及 WP2 遗留修复已进入当前 `origin/main` 基线。WP3.1b 仍有后续欠账，不能据此称整包完成；预算 Inngest 首次云端注册/无写入探针与真实预算写入审批见 [Inngest 待验证台账](./ledger/2026-09-30-ads-campaign-budget-inngest-pending.md) 和 [安全试跑台账](./ledger/2026-09-30-ads-campaign-budget-first-run.md)。
+- [ ] **WP3.1b 止损接线 + B2 前端契约修（PR #2205 草稿待审）**：当前工作分支已把广告健康看板止损从直连 Meta 改为经 Kernel 提交；人身份边界由访问校验与架构测试约束。实现与待验收条件见[止损接线台账](./ledger/2026-09-30-ads-stop-loss-kernel-wiring.md)。尚未合并/部署；上线后仍须验证真实执行记录及熔断拒绝。
+- [ ] **WP3.1b 欠账（本轮明确没做，逐条登记，不许只留在台账里）**：
+  - [ ] **系列级 / 自动化三条旁路真收编**（`meta-ads/execute`、`meta-ads/boost-post`、`winner-reel-sync`）—— 需新增 4 个 ActionKey + capability handler，PR B / C 承载；`winner-reel-sync` 的保护判据是**学习期**不是预算（必须另建独立广告组，往在投组加广告会重置该组学习期；手册 `playbook-ads-meta-general` :249/:333/:367/:127-131 记了四处，NAL 实例每留资 $19.6→$138 七倍恶化）
+  - [ ] **运行时跨账户日上限强制** —— 卫青 2026-09-27 查实 CTS 两账户各花各的、合计 10 天超客户总闸。WP3.1b 只做了「配置时校验 sum ≤ 总闸」+「按账户取上限」，**运行时没人查「这个客户今天全部账户加起来花了多少」**，洞仍开着。不许因为 §3.9 做了就认为这条修好了
+  - [ ] **`client_meta_ad_accounts` 缺 `currency` 列** —— 账户级 `daily_budget_cap_cents` 的币种是隐含的、靠 `ad_entity_snapshots.currency` 反查。今天不出问题纯因 CTS/NAL 实测全 NZD。多币种客户接入前必须补；在那之前 PATCH 校验对「取不到币种」和「币种不一致」一律拒、不许相加
+  - [ ] **熔断 #4 Jev 连续低分接线** —— 数据源 `prescription_evaluations` 按 v2.2 §9.3/§11.8/§12 是 WP3.3 才建；3.1b 判据打桩恒返回 undeterminable（不熔不放），表就绪后接线
+  - [ ] **admin 熔断解除看板页** —— 3.1b 只交付 API（`guardGlobalAdmin` 保护），UI 延后
+  - [ ] **`ads.pause_unit` 缺专属审批入口 → 批准没有绑定保护** —— 人按的止损在 `observe` 客户上落成 `pending_approval` 后走通用审批页，而通用页的 `expectedDecisionId` 是可选参数（默认 `{}`），所以「批准的人看到的就是他批的那份」这条保护对它不生效。修它要给 `ads.pause_unit` 建专属入口 + 登记进 PR #2063 那张登记表；两边同时改那张表会撞，所以等 #2063 合并后做
+  - [ ] **让 `triggeredBy: 'human'` 不可自报** —— `SubmitActionInput.triggeredBy` 是提交方必填、`runner.ts:194` 原样写库、**零校验**；而人工止损信封刻意不看学习期 / 72h 冷却 / 变动 ≤20% / 日上限，所以**谁能填 `'human'` 就能跳过 AI 信封那五条闸**（统筹 + 卫青 2026-09-27 查出，我核实成立；今天生产代码零处填它，止损路由接上那一刻打开）。彻底修法 = `submitActionRun` 不收 `'human'`，改收一个由鉴权层产出的「已鉴权人工上下文」，Kernel 自己翻成 `'human'`，让类型系统保证「没鉴权过就构造不出 human 提交」（同 `AUTHORIZED_CONTEXT_MINTERS` 的思路）。代价是动 `runner.ts` 公开入参 = 动所有提交方，本轮太大。**本轮的替代是两层围栏**：`HUMAN_TRIGGER_ALLOWED_DIRS`（只有 `src/lib/ads-strategy/submission/` 能传）+ `HUMAN_TRIGGER_REQUIRED_AUTH_CALLS`（传它的文件必须命中鉴权调用，剥注释后按调用形式判），两条由架构测试强制、4 条变异全红。**不许因为围栏在了就认为这条修好了** —— 围栏管的是「哪个文件能说谁」，不是「说谁本身不可能」
+  - [ ] **provider-write 闸的 AST 化** —— 狄仁杰实测那道闸能被 barrel 转发 + 同目录相对 import 绕过（9 种写法里架构测试只认得 1 种）。修法在 `architecture.test.ts` 同文件里已有（341 行起的 AST 版 `moduleRefsIn`），存量弱点非本轮引入
 - [ ] **WP3.2 链条**：`google-data-pullback-daily` 末尾发 `ads.impact_cycle.due`（不新开 cron）；韩信（新 agent `docs/agents/12-hanxin.md`）编排：熔断检查 → 孔明 `isWithinEnvelope` 预检 → denied 恢复入批 → 去冲突 → Kernel；批次表 + 成员表；pm-todo 四个拉取函数 + 活性项。
 - [ ] **WP3.3 Check + Tune + Jev + 日报两段**：韩信在 `runAction` 成功后写 `flywheel_actions`（加 `action_run_id` 列）；attribution 加 `ads_check` 评估器（扩 `flywheel_outcomes_evaluator_key_check`、`OUTCOME_EVALUATOR` 登记、`ads.` owner）；Tune 复用 `memory-extractor`（`pattern_type` CHECK 扩 `budget|pause|creative`）；`prescription_evaluations`；日报 Check/Tune 段。
 - **不在 WP3**：任何客户开 `bounded_auto`（单独授权）；三个 stub capability 的真实实现；`deny` 写入口（v1 不提供，管理员的「关」= `observe`）。

@@ -49,8 +49,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchGscSnapshot } from '@/lib/gsc/client'
+import { gscSiteUrlFromConfig } from '@/lib/gsc/connected-clients'
 import { fetchGa4Snapshot, fetchGa4PaidSearchMetrics } from '@/lib/ga4/client'
-import { getAdAccountInsights, getAdCampaignInsights, MetaAdsInsights } from '@/lib/meta/client'
+import { getAdAccountInsightsResult, getAdCampaignInsights, MetaAdsInsights } from '@/lib/meta/client'
 import { fetchAccountInsights, loadGoogleAdsCreds } from '@/lib/google-ads/client'
 import { SEO_METRIC_KEY, GA4_METRIC_KEY, ADS_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import { adsMetricKeysWrittenBy } from '@/lib/flywheel/metric-registry'
@@ -60,10 +61,13 @@ import { resolveMetaTokenDetailed, ownsKey, loadTokenOwnerPeers, type TokenOwner
 import { findSharedAdAccounts, getClientAdAccountIds } from '@/lib/meta/client-ad-accounts'
 import { hasVideoColumns, syncAdDailyInsights, syncAdsetDailyInsights, syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
 import { buildGrowthState } from '@/lib/ads-strategy/agents/patrol'
+import { reconcileAutonomyMode } from '@/lib/ads-strategy/autonomy/notify'
 import { resolveClientEvaluationDate } from '@/lib/ads-strategy/account-timezone'
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
 import { sendAdHealthDigest } from '@/lib/ads-strategy/digest'
 import { runPortfolioDiagnostics } from '@/lib/ads-strategy/portfolio/run-daily'
+import { sendInngestEvent } from '@/lib/workflows/inngest-event'
+import { ADS_DIAGNOSTICS_COMPLETED_EVENT } from '@/lib/inngest/functions/ads-d3-auto-pause'
 import { snapshotTablesExist } from '@/lib/ads-strategy/portfolio/snapshot-sync'
 import { loadAdStrategyConfigWithSource, resolveDigestRecipients } from '@/lib/ads-strategy/config'
 
@@ -106,8 +110,18 @@ interface ClientResult {
   ad_digest?: { sent: boolean; decision: string; error?: string }
   /** ads IMPACT 阶段 1：只读诊断 + 内部版日报 */
   ad_diagnostics?: { success: boolean; hits: number; not_comparable: number; excluded: number; digest_decision?: string; digest_sent?: boolean; recipients_dropped?: number; error?: string }
+  /**
+   * 广告引擎配置**读失败**（不是没配置行）。2026-09-25 事故：读配置每次 400，
+   * 下面的诊断 / 经营状态 / 日报全按 fallback 静默跳过，运行记录里一个字没有。
+   * 计入 `failed`，并优先当失败邮件头条 —— 它一坏就是所有客户一起停。
+   */
+  ad_config?: { success: false; error: string }
+  /** Ads D3 自动暂停：诊断完成后发给 Inngest 的事件（consumer 自己判要不要出手）。 */
+  ad_auto_pause_event?: { sent: boolean; error?: string }
   /** 卫青巡察：问题 + 机会 + 目标节奏 → ads_growth_states 一行（spec 2026-09-24 §4）。 */
   ads_growth_state?: { success: boolean; date?: string; problems?: number; opportunities?: number; completeness?: string; error?: string }
+  /** WP3.1a 每日 reconcile：给同步 worker 发一次叫醒铃（同一幂等 id，Inngest 24h 去重）。best-effort，不进 failed。 */
+  autonomy_sync?: { sent: boolean; events: number; error?: string }
   /**
    * 2026-09-13: `ad_daily`/`ad_level` above stay the PRIMARY account's result
    * (unchanged shape, unchanged tallying). Any additional registered accounts
@@ -121,6 +135,40 @@ interface ClientResult {
     adset_level?: { success: boolean; rows_written?: number; error?: string }
   }>
   adset_level?: { success: boolean; rows_written?: number; error?: string }
+}
+
+/**
+ * Ads D3 自动暂停：诊断成功后发一条事件。事件只带三个字段——`client_id` /
+ * `insight_date` / `diagnostic_run_id`（`ad_health_narratives.id`）——不带
+ * 诊断明细、不带客户名、不带具体数字（子牙复审：防止客户事实混进 shared
+ * 事件契约）。consumer 拿这三个字段回库查开关和诊断结果。
+ *
+ * `diagnostic_run_id` 读不到（行还没写、或读取失败）就不发——没有稳定的
+ * run id，consumer 那边也没法把 flywheel_actions 记录挂对。
+ */
+async function fireAdsDiagnosticsCompletedEvent(
+  clientId: string,
+  insightDate: string,
+): Promise<{ sent: boolean; error?: string }> {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('ad_health_narratives')
+      .select('id')
+      .eq('client_id', clientId)
+      .eq('insight_date', insightDate)
+      .maybeSingle()
+    if (error || !data) {
+      return { sent: false, error: error?.message ?? 'ad_health_narratives 行未找到' }
+    }
+    await sendInngestEvent({
+      id: `ads-diagnostics-completed:${clientId}:${insightDate}`,
+      name: ADS_DIAGNOSTICS_COMPLETED_EVENT,
+      data: { client_id: clientId, insight_date: insightDate, diagnostic_run_id: (data as { id: string }).id },
+    })
+    return { sent: true }
+  } catch (e) {
+    return { sent: false, error: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 // ─── Route ───────────────────────────────────────────────────────────────────
@@ -195,10 +243,9 @@ export async function GET(req: NextRequest) {
     const entry = workMap.get(row.client_id) ?? { client_id: row.client_id }
 
     if (row.anchor === 'gsc') {
-      const siteUrl = row.config?.site_url
-      if (typeof siteUrl === 'string' && siteUrl.trim()) {
-        entry.site_url = siteUrl.trim()
-      }
+      // Same "usable GSC property" rule as the per-page daily fan-out roster.
+      const siteUrl = gscSiteUrlFromConfig(row.config)
+      if (siteUrl) entry.site_url = siteUrl
     } else if (row.anchor === 'ga4') {
       const propertyId = row.config?.property_id
       if (typeof propertyId === 'string' && propertyId.trim()) {
@@ -361,8 +408,14 @@ export async function GET(req: NextRequest) {
         // P21.K.5: per-client on/off. The snapshot above still runs (it feeds
         // the monthly report etc.); only the Ad Strategy Engine honours the
         // switch, so an FDE can silence a client without losing base data.
-        const { config: adStrategyConfig, source: adConfigSource } =
+        const { config: adStrategyConfig, source: adConfigSource, error: adConfigError } =
           await loadAdStrategyConfigWithSource(client.client_id)
+        if (adConfigSource === 'fallback') {
+          result.ad_config = {
+            success: false,
+            error: `ad_strategy_configs read failed — diagnostics, growth state and digest skipped for this client: ${adConfigError ?? 'unknown error'}`,
+          }
+        }
 
         // P21.K.1: campaign-level DAILY series for the Ad Strategy Engine.
         // Separate from the 30-day rolling snapshot above, which cannot answer
@@ -490,6 +543,13 @@ export async function GET(req: NextRequest) {
               const digest = await sendAdHealthDigest(client.client_id, client.client_name ?? 'Client', evaluationDate, resolveDigestRecipients(adStrategyConfig))
               result.ad_digest = { sent: digest.sent, decision: `fallback:${digest.decision}`, error: digest.error }
             }
+            // Ads D3 自动暂停：诊断成功就发事件，consumer 自己重查开关（是否
+            // autonomy_mode）——事件只带 client_id/insight_date/diagnostic_run_id，
+            // 不带诊断明细/客户名/具体数字（子牙复审）。best-effort：这一步失败
+            // 不影响诊断和日报本身已经完成的事实，只丢一条 error 供排查。
+            if (result.ad_diagnostics.success) {
+              result.ad_auto_pause_event = await fireAdsDiagnosticsCompletedEvent(client.client_id, evaluationDate)
+            }
 
             // 卫青巡察（spec 2026-09-24 §4）：问题 + 机会 + 目标节奏合成一行经营状态，
             // 看板和日报从那一行读。放在诊断之后：两边都要广告组级数据，顺序一致好排错。
@@ -502,6 +562,14 @@ export async function GET(req: NextRequest) {
               })),
             ])
           }
+        }
+
+        // WP3.1a 每日 reconcile（spec 2026-09-25 §4.4）：不只靠 PATCH 的事件，每天对账一次，
+        // 把 autonomy_mode 的意向同步进 Kernel 策略表。只对真有配置行的客户发；失败不进 failed。
+        if (adConfigSource === 'row') {
+          result.autonomy_sync = await reconcileAutonomyMode(supabaseAdmin, client.client_id).catch(
+            (e: unknown) => ({ sent: false, events: 0, error: e instanceof Error ? e.message : String(e) }),
+          )
         }
       } else {
         // Client has a Meta ad account but no usable token — surface it as a
@@ -550,7 +618,8 @@ export async function GET(req: NextRequest) {
       r.meta?.success === false ||
       r.google_ads?.success === false ||
       r.ad_daily?.success === false ||
-      r.ad_health?.success === false,
+      r.ad_health?.success === false ||
+      r.ad_config?.success === false,
   ).length
   // ad_level is deliberately NOT in `failed`: this count drives
   // cron_run_logs.failed_count, which the daily-cron-digest emails on. The
@@ -561,7 +630,7 @@ export async function GET(req: NextRequest) {
   // Collect per-client errors so postmortem is possible without Render logs.
   // Diagnostic only — no behavior change.
   const errors = results.flatMap(r => {
-    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ads_growth_state'|'ad_daily_secondary'; error: string }> = []
+    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ads_growth_state'|'ad_daily_secondary'|'ad_config'; error: string }> = []
     if (r.gsc?.success === false && r.gsc.error)               out.push({ client_id: r.client_id, source: 'gsc',        error: r.gsc.error })
     if (r.ga4?.success === false && r.ga4.error)               out.push({ client_id: r.client_id, source: 'ga4',        error: r.ga4.error })
     if (r.meta?.success === false && r.meta.error)             out.push({ client_id: r.client_id, source: 'meta',       error: r.meta.error })
@@ -571,6 +640,7 @@ export async function GET(req: NextRequest) {
     if (r.adset_level?.success === false && r.adset_level.error) out.push({ client_id: r.client_id, source: 'adset_level', error: r.adset_level.error })
     if (r.ad_health?.success === false && r.ad_health.error)   out.push({ client_id: r.client_id, source: 'ad_health', error: r.ad_health.error })
     if (r.ad_digest && !r.ad_digest.sent && r.ad_digest.error)  out.push({ client_id: r.client_id, source: 'ad_digest', error: r.ad_digest.error })
+    if (r.ad_config?.success === false) out.push({ client_id: r.client_id, source: 'ad_config', error: r.ad_config.error })
     if (r.ad_diagnostics?.error) out.push({ client_id: r.client_id, source: 'ad_diagnostics', error: r.ad_diagnostics.error })
     if (r.ads_growth_state?.error) out.push({ client_id: r.client_id, source: 'ads_growth_state', error: r.ads_growth_state.error })
     // 2026-09-13 (魏征 review): a secondary account's sync failure used to be
@@ -598,7 +668,11 @@ export async function GET(req: NextRequest) {
   // errors that actually count as failures belong here — ad_level and
   // ad_daily_secondary are excluded (both best-effort, neither triggers `failed`)
   // and must not become the headline of an email they never triggered.
-  const headlineError = errors.find(e => e.source !== 'ad_level' && e.source !== 'adset_level' && e.source !== 'ad_daily_secondary')
+  // 配置读失败优先当头条：它一坏是所有客户的诊断一起停，而且以前正是被排在前面的
+  // 常年 meta 报错盖住、没人注意到（2026-09-25 事故）。
+  const headlineError =
+    errors.find(e => e.source === 'ad_config') ??
+    errors.find(e => e.source !== 'ad_level' && e.source !== 'adset_level' && e.source !== 'ad_daily_secondary')
   const errorMessage = failed > 0 && headlineError
     ? `${headlineError.source}: ${headlineError.error}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ''}`
     : undefined
@@ -842,14 +916,17 @@ async function syncMeta(
     const since = thirtyDaysAgo.toISOString().slice(0, 10)
     const until = today.toISOString().slice(0, 10)
 
-    const [insights, campaigns] = await Promise.all([
-      getAdAccountInsights(adAccountId, accessToken, since, until),
+    const [insightsResult, campaigns] = await Promise.all([
+      getAdAccountInsightsResult(adAccountId, accessToken, since, until),
       getAdCampaignInsights(adAccountId, accessToken, since, until),
     ])
 
-    if (!insights) {
-      return { success: false, error: 'getAdAccountInsights returned null — check META_SYSTEM_USER_TOKEN and ad account ID' }
+    if (!insightsResult.ok) {
+      const failure = insightsResult.failure
+      const reason = failure.kind === 'http_error' ? `${failure.kind} (${failure.status})` : failure.kind
+      return { success: false, error: `getAdAccountInsights ${reason}` }
     }
+    const insights = insightsResult.insights
 
     const { data, error } = await supabaseAdmin
       .from('meta_ads_snapshots')

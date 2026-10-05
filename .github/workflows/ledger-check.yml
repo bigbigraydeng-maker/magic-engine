@@ -29,6 +29,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -38,6 +39,11 @@ jobs:
         run: npm ci
       - name: Validate ledger entries
         run: npx vitest run src/lib/ledger
+      - name: Check frozen fields
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/ledger-check-frozen.sh
 
   code-change-has-ledger-entry:
     # dependabot 与夜巡分支豁免，避免机器提交被台账闸卡住。

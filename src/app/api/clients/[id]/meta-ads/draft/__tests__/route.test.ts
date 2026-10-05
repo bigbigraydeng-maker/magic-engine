@@ -37,6 +37,11 @@ vi.mock('@/lib/ads-strategy/draft-and-gate', () => ({
   createDraftForApproval: (...a: unknown[]) => createDraftForApproval(...a),
 }))
 
+const loadDraftRedlines = vi.fn()
+vi.mock('@/lib/ads-strategy/draft-redlines', () => ({
+  loadDraftRedlines: (...a: unknown[]) => loadDraftRedlines(...a),
+}))
+
 import { POST } from '../route'
 
 const req = (body: Record<string, unknown>) =>
@@ -49,6 +54,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   clientRow = { meta_ad_account_id: 'act_1', facebook_page_id: 'real-page-id', country: 'New Zealand' }
   getMetaTokenForClient.mockResolvedValue('tok')
+  loadDraftRedlines.mockResolvedValue([])
   createDraftForApproval.mockResolvedValue({ actionId: 'a1', status: 'awaiting_approval', summary: 'x', findings: [] })
 })
 
@@ -65,5 +71,29 @@ describe('POST /meta-ads/draft — pageId 归属（AD-SEC-2）', () => {
     const res = await POST(req({ pageId: '请求体里随便一个id', geoCountries: ['NZ'] }), { params: Promise.resolve({ id: 'c1' }) })
     expect(res.status).toBe(424)
     expect(createDraftForApproval).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST /meta-ads/draft — 客户禁用词', () => {
+  const ctx = { params: Promise.resolve({ id: 'c1' }) }
+  const depsArg = () => createDraftForApproval.mock.calls[0][1] as { brandRedlines?: string[] }
+
+  it('读到的禁用词原样传给起草（不是写死的）', async () => {
+    loadDraftRedlines.mockResolvedValue(['phrase one', 'phrase two'])
+    await POST(req({ geoCountries: ['NZ'] }), ctx)
+    expect(loadDraftRedlines).toHaveBeenCalledWith(expect.anything(), 'c1')
+    expect(depsArg().brandRedlines).toEqual(['phrase one', 'phrase two'])
+  })
+
+  it('客户没配（空数组）→ 传空数组，不能变成 undefined（两者意思不同）', async () => {
+    loadDraftRedlines.mockResolvedValue([])
+    await POST(req({ geoCountries: ['NZ'] }), ctx)
+    expect(depsArg().brandRedlines).toEqual([])
+  })
+
+  it('读库失败（null）→ 传 undefined = 没加载，绝不退化成空数组', async () => {
+    loadDraftRedlines.mockResolvedValue(null)
+    await POST(req({ geoCountries: ['NZ'] }), ctx)
+    expect(depsArg().brandRedlines).toBeUndefined()
   })
 })

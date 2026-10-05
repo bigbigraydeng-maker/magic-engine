@@ -34,6 +34,8 @@ const CONTACTS: Row[] = [
   { id: 'a1', client_id: 'client-a', stage: 'new' },
   // 隔壁中介的客人。
   { id: 'b1', client_id: 'client-b', stage: 'new' },
+  // 刚导入、还没人标过阶段。
+  { id: 'a2', client_id: 'client-a', stage: null },
 ]
 
 const STAGES: Row[] = [
@@ -150,5 +152,44 @@ describe('PATCH stage — 合法值', () => {
   it('缺 toStage → 400', async () => {
     const { status } = await patch('client-a', 'a1', {})
     expect(status).toBe(400)
+  })
+})
+
+describe('PATCH stage — expectedFromStage 并发保护（2026-09-28）', () => {
+  it('不传 → 老行为，照常改', async () => {
+    const { status, body } = await patch('client-a', 'a1', { toStage: 'qualified' })
+    expect(status).toBe(200)
+    expect(body).toEqual({ stage: 'qualified', changed: true })
+  })
+
+  it('🔴 传了、跟库里现在的不一致 → 409，带上 actualStage，不写库', async () => {
+    const { status, body } = await patch('client-a', 'a1', { toStage: 'qualified', expectedFromStage: 'contacted' })
+    expect(status).toBe(409)
+    expect(body.actualStage).toBe('new')
+    expect(updates).toHaveLength(0)
+    expect(inserts).toHaveLength(0)
+  })
+
+  it('传了、跟库里一致 → 照常改', async () => {
+    const { status } = await patch('client-a', 'a1', { toStage: 'qualified', expectedFromStage: 'new' })
+    expect(status).toBe(200)
+  })
+
+  /**
+   * 🔴 魏征 2026-09-28 复审 B2 实现时查出：路由层曾经把「body 里 expectedFromStage
+   * 是 null」和「body 里根本没有这个字段」都解析成 undefined，导致并发闸对
+   * 「这个人还没标过任何阶段」这批人（PersonDrawer 发的正是 `row.stage`，
+   * 刚导入的客户这里就是 null）完全失效——而这正是两人同时抢着标第一下最容易
+   * 撞上的场景。这里锁住修好之后的行为。
+   */
+  it('expectedFromStage: null，且库里这个人确实还没标过 → 照常改（两边都是"还没标"）', async () => {
+    const { status } = await patch('client-a', 'a2', { toStage: 'qualified', expectedFromStage: null })
+    expect(status).toBe(200)
+  })
+
+  it('🔴 expectedFromStage: null，但库里其实已经被标过了 → 409，null 不等于"没传"', async () => {
+    const { status, body } = await patch('client-a', 'a1', { toStage: 'qualified', expectedFromStage: null })
+    expect(status).toBe(409)
+    expect(body.actualStage).toBe('new')
   })
 })

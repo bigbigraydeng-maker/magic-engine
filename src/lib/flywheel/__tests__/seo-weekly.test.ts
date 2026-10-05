@@ -20,6 +20,7 @@ import {
   parseSnapshotDue,
   PROVIDER_CALLS_PER_CLIENT,
   recentlySnapshotted,
+  SEO_WEEKLY_PAID_SOURCE,
   snapshotEventId,
   snapshotOneClient,
 } from '../seo-weekly'
@@ -143,7 +144,7 @@ describe('防重复扣费闸 —— 这是真闸，不是事件去重', () => {
   it('最近扫过 → 跳过，一次外部调用都不发生', async () => {
     const fake = fakeSupabase({
       flywheel_metrics: {
-        data: [{ client_id: CTS, flywheel: 'seo', measured_at: '2026-09-06T00:00:00Z' }],
+        data: [{ client_id: CTS, flywheel: 'seo', source: SEO_WEEKLY_PAID_SOURCE, measured_at: '2026-09-06T00:00:00Z' }],
         error: null,
       },
     })
@@ -168,7 +169,7 @@ describe('防重复扣费闸 —— 这是真闸，不是事件去重', () => {
   it('🔴 只看这个客户、只看 SEO —— 条件漏一个就会拿别人的数据当自己扫过了', async () => {
     const fake = fakeSupabase({
       flywheel_metrics: {
-        data: [{ client_id: OZTOP, flywheel: 'seo', measured_at: '2026-09-06T00:00:00Z' }],
+        data: [{ client_id: OZTOP, flywheel: 'seo', source: SEO_WEEKLY_PAID_SOURCE, measured_at: '2026-09-06T00:00:00Z' }],
         error: null,
       },
     })
@@ -176,6 +177,22 @@ describe('防重复扣费闸 —— 这是真闸，不是事件去重', () => {
     expect(r.skip).toBe(false)
     expect(fake.filtersFor('flywheel_metrics')).toContainEqual(['client_id', CTS])
     expect(fake.filtersFor('flywheel_metrics')).toContainEqual(['flywheel', 'seo'])
+    expect(fake.filtersFor('flywheel_metrics')).toContainEqual(['source', SEO_WEEKLY_PAID_SOURCE])
+  })
+
+  it('🔴 每天回拉的谷歌 / GA4 数据和博客篇数都不算「扫过」—— 2026-09 三周全被它骗成 skipped', async () => {
+    const fake = fakeSupabase({
+      flywheel_metrics: {
+        data: [
+          { client_id: CTS, flywheel: 'seo', source: 'gsc_pullback', measured_at: '2026-09-06T17:02:41Z' },
+          { client_id: CTS, flywheel: 'seo', source: 'ga4_pullback', measured_at: '2026-09-06T17:02:43Z' },
+          { client_id: CTS, flywheel: 'seo', source: 'blog_posts', measured_at: '2026-09-06T00:00:00Z' },
+        ],
+        error: null,
+      },
+    })
+    const r = await recentlySnapshotted(fake.client, CTS, new Date('2026-09-07T00:00:00Z'))
+    expect(r).toEqual({ skip: false, reason: null, lastAt: null })
   })
 
   it('间隔小于一周 —— 否则会把下一次正常的周更也挡掉', () => {

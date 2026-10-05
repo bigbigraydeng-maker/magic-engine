@@ -32,11 +32,14 @@ import type { AccessTier } from '@/lib/auth/access-types'
 export type ActionKey =
   | 'seo.build_publish_package'
   | 'page.apply_optimization_request'
+  | 'ads.auto_pause_on_d3'
   // ── 广告支柱受限自治（spec 2026-09-24 §3 G4/G5，PM 2026-09-24 拍板）────────
   //    这六个都是 outward + bounded：信封内自动执行，信封外不执行也不转审批，
   //    而是落一条可恢复的 deny 并给 PM 一张三件套待办。
   | 'ads.pause_unit'
+  | 'ads.pause_campaign'
   | 'ads.cut_unit_budget'
+  | 'ads.cut_campaign_budget'
   | 'ads.scale_unit_budget'
   | 'ads.budget_move_plan'
   | 'ads.add_retargeting_adset'
@@ -187,6 +190,11 @@ export type VerificationMethod =
    *    Growth 层的 matched remeasurement 走下游 Measurement/Verification 链，跟这个 method 无关。
    */
   | 'page_apply_integrity'
+  /**
+   * 🔴 `ads.auto_pause_on_d3` 专用：暂停之后回读 Meta 广告组状态，
+   *    确认它真的是 `PAUSED`（不是「写入没报错就算数」）。
+   */
+  | 'ads_pause_integrity'
   /**
    * 广告动作的执行完整性回读（spec 2026-09-24 §3 G5）。
    * 只判「这次受授权的改动是否真按批准的值落到 Meta 上」——回读改后设置、

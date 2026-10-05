@@ -21,6 +21,10 @@
  *                          mention share × 100 (A2.1-γ). Has a same-day freshness
  *                          gate — returns ok:false if the snapshot isn't today's.
  *
+ *   - seo_gsc_clicks_28d → SUM(gsc_page_daily.clicks) over the 28 days ending at
+ *                          the client's latest loaded day (all pages, not the
+ *                          top-50 snapshot). Fails closed on stale / partial data.
+ *
  * Not yet supported (data source missing or complex):
  *   - conversion_rate    → derived GA4 (events/sessions)
  *   - social_followers_growth → no data source
@@ -44,8 +48,26 @@ import { countOutcome, type OutcomeStep } from '@/lib/ads-strategy/portfolio/out
 export type AutoFetchResult =
   | { ok: true;  value: number; source: string; snapshot_date: string; label: string }
   | { ok: false; reason: string }
-  /** 归属数据不足，不是 0 —— callers must never display 0 for this variant. */
-  | { ok: false; reason: string; unknown: true }
+  /**
+   * 归属数据不足，不是 0 —— callers must never display 0 for this variant.
+   * `noData`: the source answered fine and simply has no records yet (e.g. no
+   * bookings logged). Not a system fault — schedulers must not count it as a
+   * failed run. Every other unknown (query error, ambiguous goal) stays a fault.
+   */
+  | { ok: false; reason: string; unknown: true; noData?: true }
+
+export interface AutoFetchOptions {
+  /**
+   * The period of the goal this value is for. Period-scoped metrics
+   * (leads_count via ads, messaging_started, signups_count) count inside it.
+   *
+   * 🔴 Pass it whenever you have the goal row: a client may run several active
+   *    goals at once (seen 2026-09-24: signups_count + leads_count), and without
+   *    it we can only fall back to "the client's single active goal" — which
+   *    fails for every goal of that client.
+   */
+  goalPeriod?: GoalPeriod
+}
 
 /**
  * Attempt to auto-fetch a current value for the given metric key.
@@ -53,12 +75,15 @@ export type AutoFetchResult =
  * @param supabase  Admin client
  * @param clientId  Client UUID
  * @param metricKey e.g. 'organic_traffic'
+ * @param options   goalPeriod — see AutoFetchOptions
  */
 export async function autoFetchMetricValue(
   supabase: SupabaseClient,
   clientId: string,
   metricKey: string,
+  options: AutoFetchOptions = {},
 ): Promise<AutoFetchResult> {
+  const { goalPeriod } = options
   switch (metricKey) {
     case 'organic_traffic':
       return fetchOrganicTraffic(supabase, clientId)
@@ -73,16 +98,18 @@ export async function autoFetchMetricValue(
       // tells FDE to top up the rest. When GA4 has nothing, fall back to the
       // ads outcome ladder (spec 2026-09-24 ads IMPACT §3 G1).
       const ga = await fetchFormSubmissions(supabase, clientId)
-      return ga.ok ? ga : fetchAdsOutcome(supabase, clientId, 'lead')
+      return ga.ok ? ga : fetchAdsOutcome(supabase, clientId, 'lead', goalPeriod)
     }
     // 🔴 「报名/预订数」是真成交，不是广告留资。WP0 一度把它接到 fetchAdsOutcome('lead')
     //    上——那会让「33 个报名」的目标拿留资数去填，数字看着漂亮但名不符实。
     case 'signups_count':
-      return fetchBookings(supabase, clientId)
+      return fetchBookings(supabase, clientId, goalPeriod)
     case 'messaging_started':
-      return fetchAdsOutcome(supabase, clientId, 'messaging_started')
+      return fetchAdsOutcome(supabase, clientId, 'messaging_started', goalPeriod)
     case 'ai_visibility_score':
       return fetchAiVisibilityScore(supabase, clientId)
+    case 'seo_gsc_clicks_28d':
+      return fetchSeoGscClicks28d(supabase, clientId)
     default:
       return { ok: false, reason: `metric '${metricKey}' does not have an auto-fetch source yet` }
   }
@@ -137,6 +164,99 @@ async function fetchOrganicTraffic(
     snapshot_date: data.period_end,
     label: `${organicSessions.toLocaleString()} organic sessions (${formatDate(data.period_start)} → ${formatDate(data.period_end)})`,
   }
+}
+
+// ── seo_gsc_clicks_28d ─────────────────────────────────────────────────────
+//
+// North-star SEO metric (playbook-seo-general §十): real Google clicks for the
+// whole site, summed from gsc_page_daily (every page, every day) — NOT the
+// top-50 gsc_performance_snapshots, which truncates the long tail.
+//
+// Window = the 28 days ending at the client's LATEST loaded day. GSC data lags
+// by days (observed 3–5), so anchoring on "today" would count empty trailing
+// days as zero. Fails closed (never returns a partial sum as a number):
+//   · no rows            → noData
+//   · latest day too old → unknown (the daily pull is broken, not "zero clicks")
+//   · < MIN days present → unknown (partial window)
+//   · row cap hit        → unknown (refuse to sum a truncated read)
+
+const GSC_WINDOW_DAYS = 28
+const GSC_MIN_DAYS_PRESENT = 26
+const GSC_MAX_STALENESS_DAYS = 10
+const GSC_PAGE_SIZE = 1000
+const GSC_MAX_PAGES = 40
+
+function addDaysIso(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+async function fetchSeoGscClicks28d(
+  supabase: SupabaseClient,
+  clientId: string,
+  now: Date = new Date(),
+): Promise<AutoFetchResult> {
+  const { data: latest, error: latestErr } = await supabase
+    .from('gsc_page_daily')
+    .select('day')
+    .eq('client_id', clientId)
+    .order('day', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ day: string }>()
+
+  if (latestErr) {
+    return { ok: false, reason: `gsc_page_daily query failed: ${latestErr.message}`, unknown: true }
+  }
+  if (!latest) {
+    return { ok: false, reason: 'No gsc_page_daily rows yet — GSC daily pull has not loaded this client', unknown: true, noData: true }
+  }
+
+  const endDay = latest.day
+  const staleDays = Math.floor((now.getTime() - Date.parse(`${endDay}T00:00:00Z`)) / 86_400_000)
+  if (staleDays > GSC_MAX_STALENESS_DAYS) {
+    return { ok: false, reason: `gsc_page_daily latest day ${endDay} is ${staleDays} days old — daily pull looks broken`, unknown: true }
+  }
+  const startDay = addDaysIso(endDay, -(GSC_WINDOW_DAYS - 1))
+
+  let total = 0
+  const daysPresent = new Set<string>()
+  for (let page = 0; page < GSC_MAX_PAGES; page += 1) {
+    const { data, error } = await supabase
+      .from('gsc_page_daily')
+      .select('day, clicks')
+      .eq('client_id', clientId)
+      .gte('day', startDay)
+      .lte('day', endDay)
+      .order('day', { ascending: true })
+      .order('page_key', { ascending: true })
+      .range(page * GSC_PAGE_SIZE, (page + 1) * GSC_PAGE_SIZE - 1)
+    if (error) {
+      return { ok: false, reason: `gsc_page_daily read failed: ${error.message}`, unknown: true }
+    }
+    const rows = (data ?? []) as Array<{ day: string; clicks: number | null }>
+    for (const row of rows) {
+      total += typeof row.clicks === 'number' ? row.clicks : 0
+      daysPresent.add(row.day)
+    }
+    if (rows.length < GSC_PAGE_SIZE) {
+      if (daysPresent.size < GSC_MIN_DAYS_PRESENT) {
+        return {
+          ok: false,
+          reason: `gsc_page_daily has only ${daysPresent.size}/${GSC_WINDOW_DAYS} days in ${startDay} → ${endDay} — refusing a partial sum`,
+          unknown: true,
+        }
+      }
+      return {
+        ok: true,
+        value: total,
+        source: 'auto.gsc_clicks_28d',
+        snapshot_date: endDay,
+        label: `${total.toLocaleString()} Google clicks (${formatDate(startDay)} → ${formatDate(endDay)}, ${daysPresent.size} days)`,
+      }
+    }
+  }
+  return { ok: false, reason: `gsc_page_daily read hit the ${GSC_MAX_PAGES * GSC_PAGE_SIZE}-row cap — refusing to sum a truncated read`, unknown: true }
 }
 
 // ── brand_search_volume ────────────────────────────────────────────────────
@@ -647,7 +767,7 @@ function formatDate(iso: string): string {
 // ── ads outcomes（spec 2026-09-24 ads IMPACT §3 G1）────────────────────────────
 // 广告结果从 ad_daily_insights 按 outcome-ladder 口径累计；任何一行归不上（M2）→ unknown，绝不当 0。
 
-interface ActiveGoalPeriod {
+export interface GoalPeriod {
   period_start: string
   period_end: string
 }
@@ -662,20 +782,32 @@ interface AdsetInsightRow {
 const ADSET_INSIGHT_COLUMNS = 'reach, video_thruplays, actions'
 const ADSET_PAGE_SIZE = 1000
 
-async function loadActiveGoalPeriod(
+/**
+ * Use the caller's goal period; only when none was passed, fall back to the
+ * client's single active goal. With 2+ active goals the fallback cannot know
+ * which one is meant, so it says so instead of guessing.
+ */
+async function resolveGoalPeriod(
   supabase: SupabaseClient,
   clientId: string,
-): Promise<{ ok: true; period: ActiveGoalPeriod } | { ok: false; reason: string; unknown: true }> {
+  goalPeriod: GoalPeriod | undefined,
+): Promise<{ ok: true; period: GoalPeriod } | { ok: false; reason: string; unknown: true }> {
+  if (goalPeriod) return { ok: true, period: goalPeriod }
+
   const { data, error } = await supabase
     .from('goals')
     .select('period_start, period_end')
     .eq('client_id', clientId)
     .eq('status', 'active')
-    .maybeSingle<ActiveGoalPeriod>()
+    .limit(2)
 
   if (error) return { ok: false, reason: error.message, unknown: true }
-  if (!data) return { ok: false, reason: 'no active goal', unknown: true }
-  return { ok: true, period: data }
+  const rows = (data ?? []) as GoalPeriod[]
+  if (rows.length === 0) return { ok: false, reason: 'no active goal', unknown: true }
+  if (rows.length > 1) {
+    return { ok: false, reason: 'client has several active goals — caller must pass goalPeriod', unknown: true }
+  }
+  return { ok: true, period: rows[0] }
 }
 
 /**
@@ -686,7 +818,7 @@ async function loadActiveGoalPeriod(
 async function loadAdsetRowsPaged(
   supabase: SupabaseClient,
   clientId: string,
-  period: ActiveGoalPeriod,
+  period: GoalPeriod,
 ): Promise<{ ok: true; rows: AdsetInsightRow[] } | { ok: false; reason: string; unknown: true }> {
   const rows: AdsetInsightRow[] = []
   for (let from = 0; ; from += ADSET_PAGE_SIZE) {
@@ -738,8 +870,12 @@ function sumOutcome(
  *    而同期 CRM 表 1599 行里只有 1 行填了阶段——正是后者。
  *    日报会显示「未判」并带上原因，这本身就是在催那一格被填上。
  */
-async function fetchBookings(supabase: SupabaseClient, clientId: string): Promise<AutoFetchResult> {
-  const goal = await loadActiveGoalPeriod(supabase, clientId)
+async function fetchBookings(
+  supabase: SupabaseClient,
+  clientId: string,
+  goalPeriod: GoalPeriod | undefined,
+): Promise<AutoFetchResult> {
+  const goal = await resolveGoalPeriod(supabase, clientId, goalPeriod)
   if (!goal.ok) return goal
 
   // head:true → 不取行只取计数，计数在 `count` 里（`data` 是 null，别去读它的 length）。
@@ -759,6 +895,7 @@ async function fetchBookings(supabase: SupabaseClient, clientId: string): Promis
     return {
       ok: false,
       unknown: true,
+      noData: true,
       reason: '成交数还没有任何记录 —— 可能是真的还没成交，也可能是 CRM「阶段」那一列没人填（两者在库里长得一样，不猜）',
     }
   }
@@ -769,8 +906,9 @@ async function fetchAdsOutcome(
   supabase: SupabaseClient,
   clientId: string,
   step: OutcomeStep,
+  goalPeriod: GoalPeriod | undefined,
 ): Promise<AutoFetchResult> {
-  const goal = await loadActiveGoalPeriod(supabase, clientId)
+  const goal = await resolveGoalPeriod(supabase, clientId, goalPeriod)
   if (!goal.ok) return goal
 
   const loaded = await loadAdsetRowsPaged(supabase, clientId, goal.period)

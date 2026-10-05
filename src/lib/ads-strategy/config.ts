@@ -26,6 +26,8 @@ export interface AdStrategyConfig {
   daily_budget_cap_cents: number | null
   autonomy_mode: AutonomyMode
   creative_pool: CreativePoolEntry[]
+  autopilot_enabled: boolean
+  autopilot_dry_run: boolean
 }
 
 /**
@@ -45,6 +47,8 @@ export function defaultConfig(clientId: string): AdStrategyConfig {
     daily_budget_cap_cents: null,
     autonomy_mode: 'observe',
     creative_pool: [],
+    autopilot_enabled: false,
+    autopilot_dry_run: true,
   }
 }
 
@@ -90,16 +94,18 @@ export function parseCreativePool(raw: unknown): CreativePoolEntry[] {
  */
 export async function loadAdStrategyConfigWithSource(
   clientId: string,
-): Promise<{ config: AdStrategyConfig; source: ConfigSource }> {
+): Promise<{ config: AdStrategyConfig; source: ConfigSource; error?: string }> {
   const { data, error } = await supabaseAdmin
     .from('ad_strategy_configs')
-    .select('client_id, enabled, digest_recipients, daily_budget_cap_cents, autonomy_mode, creative_pool')
+    .select('client_id, enabled, digest_recipients, daily_budget_cap_cents, autonomy_mode, creative_pool, autopilot_enabled, autopilot_dry_run')
     .eq('client_id', clientId)
     .maybeSingle()
 
   if (error) {
     console.warn(`[ad-strategy] config read failed for ${clientId}, falling back to enabled:`, error.message)
-    return { config: defaultConfig(clientId), source: 'fallback' }
+    // 2026-09-25 事故：代码先上线、加列的 migration 晚一天才 apply，这里每次读都 400，
+    // 调用方据 'fallback' 静默跳过了所有客户的诊断。把原始报错带出去，让调用方能喊出来。
+    return { config: defaultConfig(clientId), source: 'fallback', error: error.message }
   }
   if (!data) return { config: defaultConfig(clientId), source: 'default' }
 
@@ -116,6 +122,8 @@ export async function loadAdStrategyConfigWithSource(
           : null,
       autonomy_mode: data.autonomy_mode === 'bounded_auto' ? 'bounded_auto' : 'observe',
       creative_pool: parseCreativePool(data.creative_pool),
+      autopilot_enabled: data.autopilot_enabled === true,
+      autopilot_dry_run: data.autopilot_dry_run !== false,
     },
     source: 'row',
   }

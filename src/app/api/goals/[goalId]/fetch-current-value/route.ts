@@ -54,7 +54,9 @@ export async function GET(
     })
   }
 
-  const result = await autoFetchMetricValue(supabaseAdmin, clientId, goal.primary_metric_key)
+  const result = await autoFetchMetricValue(supabaseAdmin, clientId, goal.primary_metric_key, {
+    goalPeriod: { period_start: goal.period_start, period_end: goal.period_end },
+  })
 
   // A2.1-γ: persist fetched value back to goals table so VerdictPanel can show source + time
   // A3 fix (2026-06-08): write the real fetch source (auto.ga4_conversions /

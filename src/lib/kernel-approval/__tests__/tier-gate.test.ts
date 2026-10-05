@@ -190,7 +190,7 @@ describe('assertActorMayApprove（批准前的硬闸）', () => {
 
   it('能批的时候 permissions 两项都是真，且没有 blocked 原因', () => {
     const perms = approvalPermissionsFor(fakeRun(), 'paid_client')
-    expect(perms).toEqual({ canApprove: true, canReject: true, approveBlockedReason: null })
+    expect(perms).toEqual({ canApprove: true, canReject: true, approveBlockedReason: null, dedicatedEntry: null })
   })
 
   it('✅ 版本对得上时照常放行（判据不是把所有人都拦掉）', () => {

@@ -9,6 +9,8 @@
  * per-client configuration data. Adding a new client's one-off task means
  * appending here, not editing the shared loader path.
  */
+import type { PmKind } from './five-kinds'
+
 export interface ClientDocManualTask {
   clientId: string
   clientName: string
@@ -17,6 +19,11 @@ export interface ClientDocManualTask {
   href: string
   /** ISO instant，过了这个时间点不再下发。 */
   expiresAt: string
+  /**
+   * 这件事属于 PM 五类里的哪一类（默认「点一次」）。比如「要不要对生产库执行」
+   * 是拍板，不是点一次 —— 写在这里，今日待办就会把它放进「要你拍板的」那一栏。
+   */
+  pmKind?: PmKind
 }
 
 export const CLIENT_DOC_MANUAL_TASKS: ClientDocManualTask[] = [
@@ -43,10 +50,13 @@ export const CLIENT_DOC_MANUAL_TASKS: ClientDocManualTask[] = [
     // 且没人知道要去翻文档。2026-09-21 Codex 复审第 3 轮抓到，已改成同数组里独立一条今日待办。
     clientId: '4ae76381-cd45-43bd-85cd-98cfd7604007',
     clientName: 'New Asian Logistics (NAL)',
+    // 「要不要对生产数据库执行」是撤不回的拍板，不是点一次
+    pmKind: 'decide',
     what: 'NAL 的 WhatsApp 接入卡在第一步：生产数据库 clients 表还没有 whatsapp_phone_number_id 这一列，migration 代码半个月前已合并但从未对生产执行——这是纯新增字段（4 个 ADD COLUMN + 1 个唯一索引，不改 RLS），风险很低，但按铁律必须 PM 明确拍板才能对生产数据库执行',
     how: '点右边链接看一眼这个 migration 具体改了什么（很短，4 段加字段说明）；确认可以执行就回一句 `go apply`，这里就会去跑；暂时不想动就回 `暂不`，之后想清楚了再说',
     href: 'https://github.com/bigbigraydeng-maker/magic-engine/blob/main/supabase/migrations/20260902000002_whatsapp_phone_number_id.sql',
-    expiresAt: '2026-10-21T09:00:00+13:00',
+    // PM 2026-09-26 定「先不花」钱走 360dialog，WhatsApp 进 CRM 暂停；这三步做完也收不到消息（NAL 号码在 WhatsApp Business App 上，要走服务商托管的并存开户），提前撤下，恢复时再重发。
+    expiresAt: '2026-09-26T00:00:00+12:00',
   },
   {
     // 见 docs/ROADMAP.md「NAL 广告预算止血 + WhatsApp 对话接入排查」（2026-09-21）
@@ -64,7 +74,8 @@ export const CLIENT_DOC_MANUAL_TASKS: ClientDocManualTask[] = [
     what: 'NAL 的 WhatsApp 消息线卡住收不到消息——当前系统用户令牌缺 whatsapp_business_management 权限，查不到 NAL 那个 WhatsApp 号码的技术编号（phone_number_id）。注意这只是其中一个卡点：生产数据库 clients 表的 whatsapp_phone_number_id 这一列还没真正建（migration 代码已合并但从未对生产执行），这条待办做完也还接不通，两件事都要做完才行',
     how: '打开 Business Settings → 左侧「用户」→「系统用户」→ 选中给 Magic Engine 用的那个系统用户 → Generate New Token → 权限清单里额外勾上 whatsapp_business_management（其余已勾的权限保持不变）→ 生成后不要粘贴发给任何人或任何聊天/agent：自己有 Render 权限就直接登录 Render 后台把新 token 更新进这个服务 Environment 里的系统用户令牌那一项；没有 Render 权限就用 1Password 或 Bitwarden 建一条会自动过期的一次性安全分享链接，发给有 Render 权限的人去更新',
     href: 'https://business.facebook.com/settings/system-users',
-    expiresAt: '2026-10-21T09:00:00+13:00',
+    // PM 2026-09-26 定「先不花」钱走 360dialog，WhatsApp 进 CRM 暂停；这三步做完也收不到消息（NAL 号码在 WhatsApp Business App 上，要走服务商托管的并存开户），提前撤下，恢复时再重发。
+    expiresAt: '2026-09-26T00:00:00+12:00',
   },
   {
     // 卡点：即使权限和迁移都补上，Meta App 后台的 webhook 订阅没打开，Meta 照样不推送消息；
@@ -83,7 +94,8 @@ export const CLIENT_DOC_MANUAL_TASKS: ClientDocManualTask[] = [
     what: '就算权限和数据库字段都补上了，生产环境现在还没配 META_VERIFY_TOKEN 和 META_APP_SECRET 这两个变量，前者缺了订阅握手直接失败，后者缺了就算握手成功、消息也会被签名校验直接拒收返回 500（不是「没打开开关」，是这条线现在物理上收不到消息）；这一步只有能登 Meta App 后台+Render 后台的人能核实和操作，开发机验证不了',
     how: '① 想一个只用于这条 webhook 的随机验证字符串，记下来；② 登录 Render 后台，把这个服务 Environment 里新增变量 META_VERIFY_TOKEN，值填①那串字符串；③ 打开 Meta App 后台 → 选中给 NAL 用的那个 App → 左侧「设置」→「基本资料」→ App Secret 一栏点 Show 复制出来 → 回 Render 同一个 Environment 页面新增变量 META_APP_SECRET，值填这串密钥；两个变量都填完后保存生效；④ 回 Meta App 后台左侧「WhatsApp」→「Configuration」→ Callback URL 填 https://app.magicengine.com.au/api/webhooks/whatsapp，Verify Token 填跟②完全相同的字符串 → 点 Verify and Save；⑤ 确认订阅了 messages 事件，没订阅就勾 Subscribe',
     href: 'https://developers.facebook.com/apps/',
-    expiresAt: '2026-10-21T09:00:00+13:00',
+    // PM 2026-09-26 定「先不花」钱走 360dialog，WhatsApp 进 CRM 暂停；这三步做完也收不到消息（NAL 号码在 WhatsApp Business App 上，要走服务商托管的并存开户），提前撤下，恢复时再重发。
+    expiresAt: '2026-09-26T00:00:00+12:00',
   },
   {
     // 见 docs/ROADMAP.md「NAL 广告预算止血 + WhatsApp 对话接入排查」第一件事（2026-09-21）。
@@ -105,5 +117,18 @@ export const CLIENT_DOC_MANUAL_TASKS: ClientDocManualTask[] = [
     how: '打开 Meta Ads Manager → 选中 NAL 的广告账户 → 搜索框输入广告组编号 52589967398925（或名字「物流潜在客户广告组」）→ 右上角 Breakdown → By Time → Day → 看恢复投放后每天的「Messaging conversations started」（开始的私信对话数，Meta 原生指标，跟人工判定的「有效咨询」不完全是一回事，但能先做粗判）有没有回到接近暂停前每天 4-7 条的水平；已经回升就回一句「已回升」，看不懂这项指标或数字不对就发给顾问窗口进一步排查',
     href: 'https://adsmanager.facebook.com/adsmanager/manage/adsets',
     expiresAt: '2026-09-23T09:00:00+13:00',
+  },
+  {
+    // 见 issue #1299（2026-09-01 查实 Meta 应用 business_verification_passes=false）。
+    // 它同时卡住三件事：WhatsApp 消息进 CRM、CTS Messenger 自动回复上线、给客户一键授权；
+    // 只能 PM 本人上传公司文件，开发做不了。可 25 天里它只躺在 issue 里，没进任何待办 ——
+    // 铁律 3 下半「管道不许断头」。2026-09-26 CRM 冲刺核实 WhatsApp 卡点时补发。
+    // 法定主体按 #1061 / #1049 冻结值：Magic Engine AI Technology Limited（新西兰注册）。
+    clientId: 'infra',
+    clientName: 'Magic Engine（平台）',
+    what: 'ME 在 Meta 的企业认证从 9 月 1 日查到就没通过，一直没人动。它同时卡着三件事：WhatsApp 消息进 CRM、CTS 的 Messenger 自动回复上线、以后给客户一键授权。这一步只能你本人上传公司文件，开发这边做不了',
+    how: '点链接打开 Meta 商务管理平台，先确认左上角选的是 Magic Engine 这个商务组合 → 「企业信息」里找到「企业验证」点开始 → 公司名称填 Magic Engine AI Technology Limited（Limited 不要写成 Ltd），地址按公司注册文件原样填，两处都要跟文件逐字一致 → 上传新西兰公司注册证书（Certificate of Incorporation，在新西兰 Companies Office 网站上能下载）→ 提交。Meta 一般几天到一周用邮件回复；被退回就把那封邮件转给 CRM 构建窗口',
+    href: 'https://business.facebook.com/settings/info',
+    expiresAt: '2026-10-26T09:00:00+13:00',
   },
 ]

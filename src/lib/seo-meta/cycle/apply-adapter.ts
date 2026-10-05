@@ -37,6 +37,7 @@
  */
 
 import type { GithubClient } from '@/lib/cms/github-client'
+import { scrubString } from '@/lib/mcp/vendor-filter'
 import { buildSlugIndex, replaceMetaForSlug } from '@/lib/seo-meta/cts-meta-pr'
 import { resolvePrGuard } from './pr-guard'
 import type { ApplyAdapter, ApplyAdapterResult, MetaCycleGateEvidence } from './types'
@@ -63,7 +64,9 @@ function buildPrBody(slug: string, keyword: string, oldTitle: string, newTitle: 
     `### /${slug}`,
     `目标词:「${keyword}」`,
     `- 搜索量: ${evidence.searchVolume}${volumeUnit} · 难度: ${evidence.keywordDifficulty}/100（数据日期 ${evidence.snapshotDate}）`,
-    `- 数据来源: ${evidence.keywordDataNote}`,
+    // 这个 PR 开在客户的公开网站仓库里：来源说明换成封装名（CLAUDE.md 第三方封装名规则）。
+    // 只换这一行 —— 标题、描述原文要跟网站上真实改动一字不差。
+    `- 数据来源: ${scrubString(evidence.keywordDataNote)}`,
     `- 本页在 SERP 里的排名 URL: ${evidence.ctsRankingUrl ?? '（这次 SERP 结果里没查到本站排这个词）'}`,
     `- 对手前 3 名标题:`,
     competitors,
@@ -92,7 +95,9 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
     const dir = await github
       .listDirectory(conn.repoOwner, conn.repoName, conn.dataDir, conn.defaultBranch)
       .catch(() => [])
-    const dataFiles = dir.filter((e) => e.type === 'file' && /^(seo-pages|blogs).*\.ts$/.test(e.name))
+    // guides.ts (destination guides) is allowed by EXACT name only: its entries use metaTitle/metaDescription
+    // and need the 'guide' field style — a look-alike file name must never be edited with the wrong style.
+    const dataFiles = dir.filter((e) => e.type === 'file' && /^(seo-pages.*|blogs.*|guides)\.ts$/.test(e.name))
     for (const entry of dataFiles) {
       const f = await github
         .getFileContent(conn.repoOwner, conn.repoName, entry.path, conn.defaultBranch)
@@ -174,7 +179,8 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
         return { applied: false, newTitle, newDesc, oldTitle: '', oldDesc: '', skipReason: 'slug_not_in_any_data_file' }
       }
 
-      const replaced = replaceMetaForSlug(entry.source, candidate.slug, newTitle, newDesc)
+      const style = path.split('/').pop() === 'guides.ts' ? 'guide' : 'default'
+      const replaced = replaceMetaForSlug(entry.source, candidate.slug, newTitle, newDesc, style)
       if (!replaced) {
         return { applied: false, newTitle, newDesc, oldTitle: '', oldDesc: '', skipReason: 'slug_not_in_file' }
       }

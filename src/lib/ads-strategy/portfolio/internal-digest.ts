@@ -20,7 +20,7 @@ import { Resend } from 'resend'
 import { supabaseAdmin } from '@/lib/supabase'
 import { meMailFrom, ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
 import { describeSendError } from '@/lib/ads-strategy/digest'
-import type { Diagnosis, DiagnosisRun } from './diagnostics/types'
+import type { Diagnosis, DiagnosisRun, ExcludedEntity } from './diagnostics/types'
 import type { GoalPace } from '../goal-pace'
 import type { FunnelRole } from './roles'
 import { bareAddress, isInternalEmail, splitAddresses } from './diagnostics/internal-email'
@@ -37,6 +37,15 @@ export interface DigestGoalContext {
 }
 
 const APP_BASE = 'https://app.magicengine.com.au'
+
+const EXCLUDED_REASON_LABEL: Record<ExcludedEntity['reason'], string> = {
+  meta_experiment: '在 Meta 对比测试中，测试结束前不下结论',
+  shared_account: '共用广告账户，只看账户层面',
+  other_page: '广告挂在别的 Facebook 主页上，不是这个客户的',
+  mixed_pages: '里面混着别的 Facebook 主页的广告，分不开，不判',
+  page_unknown: '读不到广告挂在哪个 Facebook 主页，确认不了是不是这个客户的',
+  capture_stale: '广告层快照最近一轮没抓全或太旧，归属核实不到，这几天只看账户层面',
+}
 
 const ROLE_ORDER: Array<{ key: FunnelRole | 'account'; label: string }> = [
   { key: 'account', label: '账户层面' },
@@ -66,6 +75,8 @@ const NOT_COMPARABLE_LABEL: Record<string, string> = {
   shared_account: '共用账户',
   below_min_sample: '数量太少',
   single_unit: '只有一个单位',
+  recently_changed: '最近改过设置，还在重新学习',
+  client_page_unknown: '客户没登记 Facebook 主页',
 }
 
 /** 只留内部收件人（环境变量兜底地址也要过内部核对）。返回裸地址。 */
@@ -181,7 +192,7 @@ export function buildInternalDigest(opts: {
     : ''
 
   const excludedBlock = opts.run.excluded.length > 0
-    ? `<p style="margin-top:12px;font-size:12px;color:#64748b"><b>没参与诊断：</b>${opts.run.excluded.map(e => esc(`${e.name ?? e.id}（${e.reason === 'meta_experiment' ? '在 Meta 对比测试中，测试结束前不下结论' : '共用广告账户，只看账户层面'}）`)).join('；')}</p>`
+    ? `<p style="margin-top:12px;font-size:12px;color:#64748b"><b>没参与诊断：</b>${opts.run.excluded.map(e => esc(`${e.name ?? e.id}（${EXCLUDED_REASON_LABEL[e.reason]}）`)).join('；')}</p>`
     : ''
 
   const legacyBlock = opts.legacyNeedsAction.length > 0

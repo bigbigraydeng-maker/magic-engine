@@ -30,7 +30,24 @@ Magic Engine 不采用“一切改动都用最高强度验证”，也不回到�
 - SSRF、凭据、密钥、重定向、外部网络安全边界；
 - 付款、计费、预算、供应商花费；
 - CMS 发布、广告投放、邮件/社媒发布等不可轻易撤回的外部副作用；
+- 外部平台授权的**权限清单变更**（任何 `*_SCOPES` 常量）—— 见下方专条；
 - 失败可能造成客户数据泄露、错误执行、重复收费、生产中断或不可逆损害。
+
+#### A 级专条：改 `*_SCOPES` 必须同 PR 带上重连下发（2026-09-24 事故后加）
+
+改授权权限清单会让**已经连好的客户**在下次续期时断掉（微软）或让新功能对老客户
+静默 403（谷歌）。真实代价：CTS 邮箱断 9 天，客人询价一封没进系统，而那次改动的
+提交说明里其实已经写了「已有连接需要重连」—— **写在提交说明里不算下发**。
+
+所以这类 PR 的验收条件里必须同时包含三项，缺一不算完成：
+
+1. 受影响客户的**重连待办**会进今日待办「🙋 需要你动手」，带 what / how / href；
+2. 这个平台在 `src/lib/platform-oauth/connection-health.ts` 的 `HEARTBEAT_POLICY`
+   里有心跳节奏（没有就写清为什么）；
+3. 「多久没通上话就报警」的判据（同上 `staleHours`）。
+
+`src/lib/platform-oauth/__tests__/scope-change-gate.test.ts` 会在清单被改动时失败，
+把这三项摆到改动者眼前。事故全文见 [PITFALLS F11 / F12](./PITFALLS.md)。
 
 ### B 级：普通产品与业务逻辑
 
@@ -152,12 +169,12 @@ Magic Engine 不采用“一切改动都用最高强度验证”，也不回到�
 ### 10.1 定级：`risk.mjs`
 
 - 输入是 PR 的**实际改动文件清单**，不是 PR 描述。
-- 命中受保护路径清单中任意一条即为 **A**（migration / `.sql`、`.github/workflows/`、`tools/ops-review-loop/`、`tools/ai-orchestrator/`、`render.yaml`、`src/middleware.ts`、`src/lib/auth/`、`src/app/api/auth/`、`src/app/api/webhooks/`、RLS、隔离判定、`src/lib/kernel/`、`src/app/api/kernel/`、`src/lib/execution/`、计费 / 支付 / 额度、cron 注册与路由、对外发布器、对外发信、花费与发布 guardrail、SSRF 边界、凭证、`package.json` / `package-lock.json`）。
+- 命中受保护路径清单中任意一条即为 **A**（migration / `.sql`、`.github/workflows/`、`tools/ops-review-loop/`、`tools/ai-orchestrator/`、`render.yaml`、`src/middleware.ts`、`src/lib/auth/`、`src/app/api/auth/`、`src/app/api/webhooks/`、RLS、隔离判定、`src/lib/kernel/`、`src/app/api/kernel/`、`src/lib/execution/`、计费 / 支付 / 额度、cron 注册与路由、对外发布器、对外发信、花费与发布 guardrail、SSRF 边界、凭证、`package.json` / `package-lock.json`；2026-09-27 补：任意目录的 `.env*`（不分大小写，只放过根目录模板 `.env.example`）与 `.gitignore` / `.dockerignore`、`next.config.*`、`middleware` 各种写法、`instrumentation*`、`Dockerfile*`、`supabase/config.toml`、`.nvmrc` / `.node-version` / `.tool-versions`、`tools/local-executor-bridge/`、`tsconfig*.json`、`vitest.config|setup|workspace|projects.*`、`playwright.config.*` / `jest.config.*`、`postcss|tailwind.config.*`、`.babelrc*` / `babel.config.*` / `.swcrc`、`eslint.config.*` / `.eslintrc*`、`.husky/`、数据库红线检查脚本 `scripts/check-policy-to-clause.mjs` / `scripts/db-replay-and-verify.sh`、任意目录的 `package.json` 与依赖锁、`.npmrc` —— 这些以前判 B、会无人自动合，一行就能泄密钥、关检查或改生产运行方式）。
 - **C 是白名单，不是兜底**：只有文档、样式、图片、纯测试文件命中低风险清单；一个 diff 里**每一个**文件都命中才算 C。没认出来的一律 **B**。
 - **读不到就是 A**：清单拿不到、为空、某一项没有文件名 —— 全部按 A 处理并注明「读不到」。「我们没看」和「我们看了没问题」不许长得一样。「读不到」这条理由永远排在原因列表最前面，不会被条数上限截掉。
 - **rename 两头都算**：GitHub 把 `git mv .github/workflows/guard.yml docs/guard.yml` 报成一条记录 —— 新路径在 `filename`，受保护的旧路径在 `previous_filename`。只看 `filename` 会把「悄悄停用控制面」判成改文档，所以新旧路径都定级、取更高的一档。标成 `renamed` / `copied` 却说不出原路径的记录按读不到处理。
-- 自报级别只作下限（见 §2 的提示）。
-- 每条 A 规则还带一个**风险类别**（migration / 控制面 / 生产调度 / 鉴权隔离 / Kernel 执行 / 钱 / 对外副作用 / 出网边界 / 凭证 / 供应链 / 读不到），这是 §10.4 决定「要哪种专项证据」的依据。
+- 自报级别只作下限（见 §2 的提示）。统一写法是正文一行 `风险级别：A`；机器也认 `风险级：A`、`**风险级：A**`、`风险级：**A**`、`Risk: A`、以及 `## 风险级` 标题下一行写等级。以风险级标签开头、带冒号或独占一行、却读不出等级的（如 `风险级别：见下表`）按 **A** 处理，并在理由里点名那一行 —— 2026-09-26 #2061、#2075 就是写了 A 但机器没读出，被当 B 无人自动合并。
+- 每条 A 规则还带一个**风险类别**（migration / 控制面 / 生产调度 / 鉴权隔离 / Kernel 执行 / 钱 / 对外副作用 / 出网边界 / 凭证 / 供应链 / 治理 / 构建与运行配置 / 读不到），这是 §10.4 决定「要哪种专项证据」的依据。
 
 ### 10.2 抽样：`sampling.mjs`
 

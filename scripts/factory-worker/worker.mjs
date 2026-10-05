@@ -43,6 +43,12 @@ import {
   winnerRecipeFromBrief,
 } from './creative-recipe.mjs'
 
+import {
+  checkRemotionHealth,
+  processRemotionOrder,
+  resolveEngine,
+} from './remotion-branch.mjs'
+
 // ── 配置 ──────────────────────────────────────────────────────────────────────
 
 function loadEnv() {
@@ -118,6 +124,7 @@ const CLIP_UNIT_COST = Number(ENV.FACTORY_CLIP_UNIT_COST_USD || '0.225')
 // by default, while keeping an explicit override for restricted launchd environments.
 const FFPROBE_BIN = ENV.FACTORY_FFPROBE_PATH || 'ffprobe'
 const FFMPEG_BIN = ENV.FACTORY_FFMPEG_PATH || 'ffmpeg'
+const TESSERACT_BIN = ENV.FACTORY_TESSERACT_PATH || 'tesseract'
 const PYTHON_BIN = ENV.FACTORY_PYTHON_PATH || 'python3'
 // Inngest one-candidate workflow can impose a stricter per-run ceiling than the
 // work-order budget.  Missing means legacy/manual worker behaviour is unchanged.
@@ -128,6 +135,9 @@ const ORCHESTRATOR_REQUIRED_RECIPE_ID = ENV.FACTORY_ORCHESTRATOR_REQUIRED_RECIPE
 const ORCHESTRATOR_REQUIRED_RECIPE_VERSION = ENV.FACTORY_ORCHESTRATOR_REQUIRED_RECIPE_VERSION === undefined
   ? null
   : Number(ENV.FACTORY_ORCHESTRATOR_REQUIRED_RECIPE_VERSION)
+// R2a remotion engine: only clients listed here may use brief.engine='remotion' (empty = refuse all).
+const REMOTION_CLIENT_IDS = (ENV.FACTORY_REMOTION_CLIENT_IDS || '')
+  .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
 
 const log = (...a) => console.log(new Date().toISOString(), ...a)
 
@@ -201,6 +211,8 @@ export async function heartbeat(woId, costSoFar, fetchFn = fetch) {
     )
   }
   if (json.abort === true) log(`⚠️ heartbeat abort 信号(超预算),woId=${woId}`)
+  // 干活期间别的客户看不到这台 worker 的工单心跳，顺手报一次存活（4 分钟节流，尽力而为）
+  await pingAlive(fetchFn)
   return json
 }
 
@@ -468,9 +480,9 @@ function assemble(wo, localPaths, copy, tmp) {
 
 // ── 单工单处理 ──────────────────────────────────────────────────────────────────
 
-async function processOrder(wo) {
+export async function processOrder(wo) {
   const woId = wo.work_order_id
-  log(`领到工单 ${woId} · ${wo.brief.segments.length} 段 · 预算上限 $${wo.budget_cap_usd}`)
+  log(`领到工单 ${woId} · ${wo.brief.segments?.length ?? 0} 段 · 预算上限 $${wo.budget_cap_usd}`)
   const tmp = mkdtempSync(join(tmpdir(), 'factory_'))
   try {
     await heartbeat(woId, 0)
@@ -478,6 +490,11 @@ async function processOrder(wo) {
     // fail-closed(recipe 与 legacy 分支都不能走)。claim route 会把解析原因放进
     // recipe_intent_invalid_reason;非空即拒。
     assertNoRecipeIntentInvalidReason(wo.recipe_intent_invalid_reason)
+    // R2a: engine dispatch runs BEFORE the recipe-intent gates on purpose — those gates only stop
+    // recipe clients from running a legacy shell, and a remotion order is an explicit other engine.
+    if (resolveEngine(wo.brief) === 'remotion') {
+      return await processRemotionOrder({ wo, tmp, deps: remotionDeps(woId) })
+    }
     // R3/R4:reopened 单只有**显式** recipe_replan_required marker 才 fail-closed;legacy 无
     // recipe review 重试不受影响。marker+缺 recipe → 抛 WINNER_RECIPE_REPLAN_REQUIRED,
     // 全走 outer catch 落到 fail(retryable=false)。
@@ -505,7 +522,9 @@ async function processOrder(wo) {
     // 上传三件套
     const videoBuf = readFileSync(finalPath)
     const segmentsJson = Buffer.from(JSON.stringify({ segments: wo.brief.segments, copy }, null, 2))
-    const srt = Buffer.from(buildSrt(wo.brief.segments, copy))
+    const srtText = buildSrt(wo.brief.segments, copy)
+    const srt = Buffer.from(srtText)
+    const mediaEvidence = probeMediaEvidence(finalPath, srtText)
     await uploadSigned(wo.uploads.video.signed_url, videoBuf, 'video/mp4')
     await uploadSigned(wo.uploads.segments_json.signed_url, segmentsJson, 'application/json')
     await uploadSigned(wo.uploads.srt.signed_url, srt, 'text/plain')
@@ -519,13 +538,14 @@ async function processOrder(wo) {
       caption,
       actual_cost_usd: cost,
       new_clips: newClips,
+      media_evidence: mediaEvidence,
     })
     if (!r.ok) throw new Error(`complete ${r.status}: ${JSON.stringify(r.json)}`)
     log(`✅ 工单 ${woId} 完成 → ${r.json.status ?? 'in_review'}`, r.json.redline_hits?.length ? `(红线标记: ${r.json.redline_hits})` : '')
     return true
   } catch (e) {
     log(`❌ 工单 ${woId} 失败: ${e.message}`)
-    const retryable = !/预扣硬顶|max_new_clips|无上传通道|既无库存|WINNER_RECIPE_/.test(e.message)
+    const retryable = e?.retryable ?? !/预扣硬顶|max_new_clips|无上传通道|既无库存|WINNER_RECIPE_/.test(e.message)
     await failOrder(woId, e.message.slice(0, 500), retryable)
     return false
   }
@@ -562,6 +582,7 @@ export async function runRecipeSequence({ wo, recipe, tmp, deps }) {
     tmpJoin,
     probeDurationFn,
     probeLoudnessFn,
+    probeMediaEvidenceFn = () => ({}),
     hashFileFn,
     execAssembleFn,
     completeFn,
@@ -769,9 +790,11 @@ export async function runRecipeSequence({ wo, recipe, tmp, deps }) {
     Buffer.from(JSON.stringify(receipt, null, 2)),
     'application/json',
   )
+  const executedSrt = buildExecutedSrt({ recipe, hookText, captionsByRole })
+  const mediaEvidence = probeMediaEvidenceFn(outputPath, executedSrt)
   await uploadSignedFn(
     wo.uploads.srt.signed_url,
-    Buffer.from(buildExecutedSrt({ recipe, hookText, captionsByRole })),
+    Buffer.from(executedSrt),
     'text/plain',
   )
 
@@ -794,6 +817,7 @@ export async function runRecipeSequence({ wo, recipe, tmp, deps }) {
     actual_cost_usd: cost,
     new_clips: newClips,
     recipe_receipt: receipt,
+    media_evidence: mediaEvidence,
   })
   if (!r.ok) throw new Error(`complete ${r.status}: ${JSON.stringify(r.json)}`)
   logFn?.(`✅ 工单 ${woId} recipe 完成 → ${r.json?.status ?? 'in_review'}`)
@@ -819,6 +843,7 @@ async function processRecipeOrder(wo, tmp, recipe) {
       tmpJoin: (t, name) => join(t, name),
       probeDurationFn: probeClipDuration,
       probeLoudnessFn: probeLoudnessLufs,
+      probeMediaEvidenceFn: probeMediaEvidence,
       hashFileFn: sha256File,
       execAssembleFn: ({ cfgPath, outputPath }) => {
         execFileSync(PYTHON_BIN, [MAKE_PROMO, cfgPath], { stdio: 'inherit' })
@@ -857,6 +882,22 @@ async function processRecipeOrder(wo, tmp, recipe) {
   })
 }
 
+// R2a remotion branch: wire the real IO (the branch itself lives in remotion-branch.mjs).
+function remotionDeps(woId) {
+  return {
+    log,
+    heartbeatFn: (id, c) => heartbeat(id, c),
+    uploadSignedFn: uploadSigned,
+    completeFn: (payload) => api(`/api/factory/worker/${woId}/complete`, 'POST', payload),
+    probeMediaEvidenceFn: probeMediaEvidence,
+    brandkitFor,
+    studioRoot: STUDIO_ROOT,
+    clientStudio: CLIENT_STUDIO,
+    allowedClientIds: REMOTION_CLIENT_IDS,
+    workerId: WORKER_ID,
+  }
+}
+
 /**
  * claim response 带 recipe_intent_invalid_reason(clients.factory_config.creative_recipe
  * 解析失败,例如未知 id / 缺 version / 版本对不上)→ worker 一律拒,不进 recipe 也不进 legacy。
@@ -883,6 +924,67 @@ export function probeHasAudio(path) {
   } catch {
     return false
   }
+}
+
+function parseSubtitleCues(srt) {
+  return String(srt).split(/\r?\n\s*\r?\n/).flatMap((block) => {
+    const lines = block.split(/\r?\n/)
+    const timing = lines.find((line) => line.includes('-->'))
+    if (!timing) return []
+    const match = timing.match(/(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})/)
+    if (!match) return [{ start_seconds: NaN, end_seconds: NaN, text: '' }]
+    const toSeconds = (h, m, s, ms) => Number(h) * 3600 + Number(m) * 60 + Number(s) + Number(ms) / 1000
+    return [{
+      start_seconds: toSeconds(match[1], match[2], match[3], match[4]),
+      end_seconds: toSeconds(match[5], match[6], match[7], match[8]),
+      text: lines.slice(lines.indexOf(timing) + 1).join(' ').replace(/<[^>]*>/g, '').trim(),
+    }]
+  })
+}
+
+/** Probe the final encoded file before it leaves the authenticated render worker. */
+export function probeMediaEvidence(path, srt) {
+  const evidence = { subtitle_cues: parseSubtitleCues(srt) }
+  try {
+    const raw = execFileSync(FFPROBE_BIN, [
+      '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'json', path,
+    ], { encoding: 'utf8' })
+    const stream = JSON.parse(raw).streams?.[0]
+    if (Number.isInteger(stream?.width)) evidence.width = stream.width
+    if (Number.isInteger(stream?.height)) evidence.height = stream.height
+    const duration = probeClipDuration(path)
+    if (Number.isFinite(duration)) evidence.duration_seconds = duration
+  } catch {
+    // Leave only the video metadata unmeasured; other independent checks remain usable.
+  }
+  evidence.audio_stream_present = probeHasAudio(path)
+  evidence.audio_loudness_lufs = probeLoudnessLufs(path)
+
+  try {
+    const pixels = execFileSync(FFMPEG_BIN, [
+      '-hide_banner', '-loglevel', 'error', '-ss', '0.5', '-i', path, '-frames:v', '1',
+      '-vf', 'scale=32:32:flags=area,format=gray', '-f', 'rawvideo', '-pix_fmt', 'gray', 'pipe:1',
+    ])
+    if (pixels.length === 32 * 32) {
+      const values = [...pixels]
+      const mean = values.reduce((sum, value) => sum + value, 0) / values.length
+      evidence.cover_mean_luma = Number(mean.toFixed(2))
+      evidence.cover_luma_range = Math.max(...values) - Math.min(...values)
+    }
+    const frame = execFileSync(FFMPEG_BIN, [
+      '-hide_banner', '-loglevel', 'error', '-ss', '0.5', '-i', path, '-frames:v', '1',
+      '-vf', 'scale=640:640:flags=neighbor', '-f', 'image2pipe', '-vcodec', 'png', 'pipe:1',
+    ])
+    const ocr = execFileSync(TESSERACT_BIN, ['stdin', 'stdout', '--psm', '11'], {
+      input: frame,
+      encoding: 'utf8',
+      timeout: 15000,
+    })
+    evidence.cover_placeholder_detected = /\b(?:placeholder|sample video|lorem ipsum|insert (?:logo|text|image)|your (?:logo|text))\b/i.test(ocr)
+  } catch {
+    // Missing OCR or an unprobeable frame is not a PASS. The server records it as NOT_MEASURED.
+  }
+  return evidence
 }
 
 /**
@@ -932,6 +1034,28 @@ function loadMusicLibrary() {
 
 // ── 主循环 ──────────────────────────────────────────────────────────────────────
 
+// 存活信号：让服务端知道「出片机还活着、只是没领到单 / 正在给别的客户干活」，离线才能在 30 分钟内判出来。
+// 尽力而为——失败只记一行日志、有 10 秒超时，不会卡住领单。
+const PING_EVERY_MS = 4 * 60_000
+let lastPingAt = 0
+export async function pingAlive(fetchFn = fetch, now = Date.now()) {
+  if (now - lastPingAt < PING_EVERY_MS) return false
+  lastPingAt = now
+  try {
+    const res = await fetchFn(`${API_BASE}/api/factory/worker/ping`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${WORKER_TOKEN}` },
+      body: JSON.stringify(buildClaimBody(WORKER_ID, TARGET_CLIENT_ID)),
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!res.ok) log(`存活信号发送失败 status=${res.status}`)
+    return res.ok
+  } catch (e) {
+    log('存活信号发送失败:', e?.message ?? e)
+    return false
+  }
+}
+
 async function main() {
   if (!WORKER_TOKEN) {
     console.error('FATAL: FACTORY_WORKER_TOKEN 未配置(scripts/factory-worker/.env)')
@@ -941,9 +1065,17 @@ async function main() {
   const jsonResult = process.argv.includes('--json-result')
   const intervalMs = Number(ENV.FACTORY_POLL_INTERVAL_MS || '30000')
   log(`worker 启动 id=${WORKER_ID} api=${API_BASE} loop=${loop}`)
+  if (REMOTION_CLIENT_IDS.length > 0) {
+    const remotionProblems = checkRemotionHealth()
+    if (remotionProblems.length > 0) {
+      log(`⚠️ Remotion 引擎未就绪，remotion 工单会被拒绝：${remotionProblems.join('；')}`)
+    }
+  }
   do {
     try {
       const result = await runOneOrder()
+      // 领单请求没抛错才算「活着且能领单」；领单一直失败时不报存活，离线提醒才会响
+      if (loop) await pingAlive()
       if (jsonResult) console.log(`FACTORY_WORKER_RESULT ${JSON.stringify(result)}`)
       if (!result.claimed && loop) log('无 queued 工单,等待…')
       else if (!result.claimed) { log('无 queued 工单,退出'); break }

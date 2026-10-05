@@ -3,12 +3,17 @@
  * The first case IS the incident: the exact pair that slipped through.
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
+
 import {
   topicTokens,
   tokenJaccard,
   normalizeSlug,
   findDuplicate,
+  checkContentDuplicate,
   type ExistingContent,
 } from '../content-gate'
 
@@ -82,5 +87,151 @@ describe('text primitives', () => {
     expect(normalizeSlug('https://x.com/blog/my-post/')).toBe('my-post')
     expect(normalizeSlug('content/blog/my-post.md')).toBe('my-post')
     expect(normalizeSlug(null)).toBeNull()
+  })
+})
+
+describe('checkContentDuplicate — firewall-blocked site pages still count (2026-09-26)', () => {
+  // Type aliases (not interfaces) so rows stay assignable to Record<string, unknown>
+  // without any double type assertion.
+  type FakeSitePageRow = {
+    client_id: string
+    url: string
+    title: string | null
+    primary_keyword: string | null
+    crawl_status: string
+  }
+
+  type FakeBlogPostRow = {
+    client_id: string
+    title: string | null
+    topic: string | null
+    slug: string | null
+    status: string
+    primary_keyword: string | null
+  }
+
+  type FakeRow = Record<string, unknown>
+
+  interface FakeQuery {
+    select(cols: string): FakeQuery
+    eq(col: string, val: unknown): FakeQuery
+    in(col: string, vals: readonly unknown[]): FakeQuery
+    then<TResult>(
+      resolve: (value: { data: FakeRow[]; error: null }) => TResult,
+    ): Promise<TResult>
+  }
+
+  interface FakeSupabase {
+    from(table: string): FakeQuery
+  }
+
+  function asClient(x: object): SupabaseClient {
+    return x as SupabaseClient
+  }
+
+  function makeFakeClient(tables: Record<string, FakeRow[]>): FakeSupabase {
+    return {
+      from(table: string): FakeQuery {
+        let rows: FakeRow[] = tables[table] ?? []
+        const query: FakeQuery = {
+          select() {
+            return query
+          },
+          eq(col: string, val: unknown) {
+            rows = rows.filter((r) => r[col] === val)
+            return query
+          },
+          in(col: string, vals: readonly unknown[]) {
+            rows = rows.filter((r) => vals.includes(r[col]))
+            return query
+          },
+          then<TResult>(
+            resolve: (value: { data: FakeRow[]; error: null }) => TResult,
+          ): Promise<TResult> {
+            return Promise.resolve({ data: rows, error: null }).then(resolve)
+          },
+        }
+        return query
+      },
+    }
+  }
+
+  const sitePages: FakeSitePageRow[] = [
+    {
+      client_id: 'client-1',
+      url: 'https://example.com/product-category/hybrid-flooring/',
+      title: 'Hybrid Flooring',
+      primary_keyword: null,
+      crawl_status: 'antibot_challenged',
+    },
+    {
+      client_id: 'client-1',
+      url: 'https://example.com/product-category/wool-carpet/',
+      title: 'Wool Carpet',
+      primary_keyword: null,
+      crawl_status: 'failed',
+    },
+    {
+      client_id: 'client-1',
+      url: 'https://example.com/about/',
+      title: 'About Us',
+      primary_keyword: null,
+      crawl_status: 'crawled',
+    },
+    {
+      client_id: 'client-1',
+      url: 'https://example.com/product-category/spc-flooring/',
+      title: 'example.com',
+      primary_keyword: null,
+      crawl_status: 'antibot_challenged',
+    },
+  ]
+
+  const blogPosts: FakeBlogPostRow[] = []
+
+  function fakeClient(): SupabaseClient {
+    return asClient(
+      makeFakeClient({
+        blog_posts: blogPosts,
+        client_site_pages: sitePages,
+      }),
+    )
+  }
+
+  it('treats an antibot_challenged page as existing content', async () => {
+    const verdict = await checkContentDuplicate(
+      'client-1',
+      { topic: 'Hybrid Flooring', primary_keyword: null, slug: null },
+      fakeClient(),
+    )
+    expect(verdict).toEqual({
+      verdict: 'duplicate',
+      source: 'site_page',
+      existing_title: 'Hybrid Flooring',
+      existing_ref: 'https://example.com/product-category/hybrid-flooring/',
+    })
+  })
+
+  it('catches a blocked page whose stored title is only the domain, via its URL path', async () => {
+    const verdict = await checkContentDuplicate(
+      'client-1',
+      { topic: 'SPC Flooring', primary_keyword: null, slug: null },
+      fakeClient(),
+    )
+    expect(verdict).toEqual({
+      verdict: 'duplicate',
+      source: 'site_page',
+      existing_title: 'example.com',
+      existing_ref: 'https://example.com/product-category/spc-flooring/',
+    })
+  })
+
+  it('still excludes pages whose crawl_status is failed', async () => {
+    const verdict = await checkContentDuplicate(
+      'client-1',
+      { topic: 'Wool Carpet', primary_keyword: null, slug: null },
+      fakeClient(),
+    )
+    expect(verdict).toEqual({ verdict: 'new' })
   })
 })

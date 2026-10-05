@@ -10,6 +10,7 @@
 import { z } from 'zod'
 import type { CampaignBrief } from '@/types/magic-engine'
 import type { CampaignDailyPublishMeta } from '@/lib/campaign/daily-plan-publish'
+import { CONTENT_CHECK_KEYS, type ContentCheckItemResult } from '@/lib/social/content-review'
 
 export const CAMPAIGN_DAILY_PLAN_KIND = 'campaign_daily_v1' as const
 
@@ -114,6 +115,8 @@ export interface CampaignDailyPostReviewDecision {
   reason: string | null
   reviewed_at: string
   reviewed_by_user_id: string
+  reviewer_role: 'admin' | 'client-viewer'
+  checklist: ContentCheckItemResult[]
 }
 
 export interface CampaignDailyPostReviewMeta {
@@ -190,7 +193,18 @@ const postReviewDecisionSchema = z
     reason: z.string().max(500).nullable(),
     reviewed_at: z.string().datetime(),
     reviewed_by_user_id: uuidLike,
+    // Legacy decisions are treated as client-viewer so old PASS records can
+    // never pass the new internal-admin publication gate.
+    reviewer_role: z.enum(['admin', 'client-viewer']).default('client-viewer'),
+    checklist: z.array(z.object({
+      key: z.enum(CONTENT_CHECK_KEYS),
+      judge: z.enum(['AUTO', 'HUMAN']),
+      outcome: z.enum(['PASS', 'FAIL', 'NOT_MEASURED']),
+      detail: z.string().nullable(),
+      source_ref: z.string().nullable(),
+    }).strict()).default([]),
   })
+  .strict()
   .superRefine((value, ctx) => {
     const reason = value.reason?.trim() ?? ''
     if (value.verdict === 'NEEDS_REVISION' && reason.length === 0) {
@@ -226,7 +240,15 @@ export const CampaignDailyPostReviewCommandSchema = z
     date: dateStringSchema,
     verdict: z.enum(['PASS', 'NEEDS_REVISION']),
     reason: z.string().max(500).optional().nullable(),
+    checklist_human: z.array(z.object({
+      key: z.enum(CONTENT_CHECK_KEYS),
+      judge: z.literal('HUMAN'),
+      outcome: z.enum(['PASS', 'FAIL', 'NOT_MEASURED']),
+      detail: z.string().nullable(),
+      source_ref: z.string().nullable(),
+    }).strict()),
   })
+  .strict()
   .superRefine((value, ctx) => {
     const reason = value.reason?.trim() ?? ''
     if (value.verdict === 'NEEDS_REVISION' && reason.length === 0) {

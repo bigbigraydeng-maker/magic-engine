@@ -23,7 +23,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
-import { persistZhugeActions } from '@/lib/zhuge/action-persister'
+import { persistZhugeActions, executionItemDedupKey } from '@/lib/zhuge/action-persister'
+import { SEO_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
 import type { PriorityAction, ZhugeOutput } from '@/lib/zhuge/types'
 import { runSeoPatrolRules } from './rules'
 import { buildPageSignals } from './page-signals'
@@ -35,6 +36,29 @@ import type {
 
 // Max actions to surface per client per day. Iris SOP: "max 3, ranked by impact".
 const MAX_ACTIONS_PER_CLIENT = 3
+
+/** At most this many NEW patrol cards per client in any rolling 7 days (PM: 每周只出几条最值得做的). */
+export const WEEKLY_CARD_CAP_PER_CLIENT = 3
+
+/** A card a human closed (completed / skipped) holds its target back this many days. */
+export const DECIDED_CARD_HOLD_DAYS = 14
+
+/**
+ * A completed "write a new article" card holds its target this many days: the new page
+ * needs time to be indexed and to rank, and a second article on the same keyword in the
+ * meantime would compete with the first one.
+ */
+export const PUBLISHED_CARD_HOLD_DAYS = 90
+
+/**
+ * The weekly cap looks back 7 days minus 1 hour. The patrol runs once a day and a run
+ * takes minutes, so a card opened during one run must be outside the window at the same
+ * run 7 days later — with a full 7 days it would still count and the cap would span 8 runs.
+ */
+const WEEKLY_WINDOW_MS = 7 * 86_400_000 - 3_600_000
+
+/** PostgREST returns at most this many rows per request — a full page may be a partial list. */
+const CARD_READ_LIMIT = 1000
 
 // Finding type → priority rank (1 = highest). Drives the "today's 3 things" order.
 const RULE_RANK: Record<SeoPatrolFinding['ruleId'], number> = {
@@ -77,6 +101,13 @@ export interface SeoPatrolClientResult {
   actions_created: number
   /** R2 page-signal feed health — 'missing'/'error' means R2 was off this run. */
   page_data_status?: PageDataStatus
+  /**
+   * Why cards were held back today although there were new targets: the existing-card
+   * lookup failed (no card opened), or the rolling weekly cap cut at least one new target.
+   */
+  cards_withheld_reason?: 'card_lookup_failed' | 'weekly_cap'
+  /** Findings held back because their target already has a card. */
+  findings_held_existing_card?: number
   error?: string
 }
 
@@ -242,7 +273,10 @@ async function fetchKeywordRows(
  * NOTE: rank here is the *priority order* (1..N). persistZhugeActions writes
  * it to execution_items.sort_order so the card surfaces in the right slot.
  */
-export function findingsToActions(findings: SeoPatrolFinding[]): PriorityAction[] {
+export function findingsToActions(
+  findings: SeoPatrolFinding[],
+  opts: { blockedKeys?: ReadonlySet<string>; limit?: number } = {},
+): PriorityAction[] {
   const sorted = [...findings].sort(
     (a, b) => RULE_RANK[a.ruleId] - RULE_RANK[b.ruleId],
   )
@@ -255,7 +289,19 @@ export function findingsToActions(findings: SeoPatrolFinding[]): PriorityAction[
     seen.add(key)
     return true
   })
-  const top = deduped.slice(0, MAX_ACTIONS_PER_CLIENT)
+  // Drop targets that already have a card (see buildCardSuppression) and keep one card
+  // per card key — the key the persister de-duplicates on — so the daily slots are spent
+  // on targets that are new. This runs BEFORE the daily cut on purpose.
+  const cardKeys = new Set<string>()
+  const fresh = deduped.filter((f) => {
+    const key = executionItemDedupKey(f.suggestedActionType, f.keyword, f.url)
+    if (opts.blockedKeys?.has(key)) return false
+    if (cardKeys.has(key)) return false
+    cardKeys.add(key)
+    return true
+  })
+  const limit = Math.max(0, Math.min(MAX_ACTIONS_PER_CLIENT, opts.limit ?? MAX_ACTIONS_PER_CLIENT))
+  const top = fresh.slice(0, limit)
 
   return top.map((f, idx) => {
     const subject = f.keyword ?? f.url ?? 'site'
@@ -295,6 +341,124 @@ export function findingsToActions(findings: SeoPatrolFinding[]): PriorityAction[
       executable_by: null,
     }
   })
+}
+
+/** A kanban card row as far as patrol suppression cares. */
+export interface PatrolCardRow {
+  action_type: string
+  status: string
+  source: string | null
+  steps_json: Record<string, unknown> | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface CardSuppression {
+  /** Card keys (executionItemDedupKey) the patrol must not open a new card for today. */
+  blockedKeys: Set<string>
+  /**
+   * Distinct targets (card keys) the patrol opened cards for within the weekly window,
+   * whatever those cards' status is now. Distinct, so duplicate cards of one target
+   * (common before this cap existed) count once.
+   */
+  openedLast7Days: number
+}
+
+/** Pure: which targets are held back, and how many distinct targets the weekly window already carded. */
+export function buildCardSuppression(rows: readonly PatrolCardRow[], now: Date): CardSuppression {
+  const weekSince = now.getTime() - WEEKLY_WINDOW_MS
+  const blockedKeys = new Set<string>()
+  const openedKeys = new Set<string>()
+  for (const row of rows) {
+    const meta = row.steps_json ?? {}
+    const key = executionItemDedupKey(row.action_type, meta.keyword, meta.url ?? meta.page_url)
+    if (row.status === 'pending' || row.status === 'in_progress') {
+      blockedKeys.add(key)
+    } else if (
+      (row.status === 'completed' || row.status === 'skipped') &&
+      row.updated_at !== null &&
+      Date.parse(row.updated_at) >= now.getTime() - holdDaysFor(row) * 86_400_000
+    ) {
+      blockedKeys.add(key)
+    }
+    const isPatrolCard = row.source === 'zhuge' && typeof meta.rule_id === 'string'
+    if (isPatrolCard && row.created_at !== null && Date.parse(row.created_at) >= weekSince) {
+      openedKeys.add(key)
+    }
+  }
+  return { blockedKeys, openedLast7Days: openedKeys.size }
+}
+
+/** How many days a card a human closed holds its target back. */
+function holdDaysFor(row: PatrolCardRow): number {
+  return row.status === 'completed' && row.action_type === SEO_ACTION_TYPE.PUBLISH_BLOG
+    ? PUBLISHED_CARD_HOLD_DAYS
+    : DECIDED_CARD_HOLD_DAYS
+}
+
+/**
+ * Read this client's SEO cards that can hold a target back or count toward the weekly
+ * cap. Three plain reads (no `or()`), so every filter is really evaluated by the
+ * table-modelled test fakes:
+ *   1. open cards (pending / in_progress), however old — an open card holds its target;
+ *   2. cards a human closed (completed / skipped) within the longest hold window;
+ *   3. patrol-sourced cards created within the weekly window, whatever their status.
+ * A row may come back from more than one read; buildCardSuppression works on sets, so
+ * that is harmless. Fails closed: any read error, or any read that comes back full at
+ * the row limit (possibly partial), is reported instead of guessed at.
+ */
+export async function loadCardSuppression(
+  supabase: SupabaseClient,
+  clientId: string,
+  now: Date,
+): Promise<{ ok: true; value: CardSuppression } | { ok: false; error: string }> {
+  const columns = 'action_type, status, source, steps_json, created_at, updated_at'
+  const decidedSince = new Date(
+    now.getTime() - Math.max(DECIDED_CARD_HOLD_DAYS, PUBLISHED_CARD_HOLD_DAYS) * 86_400_000,
+  ).toISOString()
+  const weekSince = new Date(now.getTime() - WEEKLY_WINDOW_MS).toISOString()
+  const seoCards = () =>
+    supabase.from('execution_items').select(columns).eq('client_id', clientId).eq('dimension', 'seo')
+  const reads = await Promise.all([
+    seoCards().in('status', ['pending', 'in_progress']).limit(CARD_READ_LIMIT),
+    seoCards().in('status', ['completed', 'skipped']).gte('updated_at', decidedSince).limit(CARD_READ_LIMIT),
+    seoCards().eq('source', 'zhuge').gte('created_at', weekSince).limit(CARD_READ_LIMIT),
+  ])
+  const rows: PatrolCardRow[] = []
+  for (const { data, error } of reads) {
+    if (error) return { ok: false, error: error.message }
+    const page = (data ?? []) as PatrolCardRow[]
+    if (page.length >= CARD_READ_LIMIT) {
+      return { ok: false, error: `card read hit the ${CARD_READ_LIMIT}-row limit; refusing to decide on a partial list` }
+    }
+    rows.push(...page)
+  }
+  return { ok: true, value: buildCardSuppression(rows, now) }
+}
+
+export interface PatrolCardPlan {
+  actions: PriorityAction[]
+  /** 'weekly_cap' when the rolling weekly cap held back at least one new target today. */
+  withheldReason: 'weekly_cap' | null
+  /** Findings whose target already has a card (open, or closed by a human recently). */
+  heldExistingCard: number
+}
+
+/** Pure: today's cards after the existing-card hold and the rolling weekly cap. */
+export function planPatrolCards(findings: SeoPatrolFinding[], suppression: CardSuppression): PatrolCardPlan {
+  const heldExistingCard = findings.filter((f) =>
+    suppression.blockedKeys.has(executionItemDedupKey(f.suggestedActionType, f.keyword, f.url)),
+  ).length
+  const remaining = Math.max(0, WEEKLY_CARD_CAP_PER_CLIENT - suppression.openedLast7Days)
+  // New targets today before the weekly cap (still at most the daily cap) …
+  const candidates = findingsToActions(findings, { blockedKeys: suppression.blockedKeys })
+  // … and after it. The cap withheld something only if it cut at least one of them.
+  const actions = findingsToActions(findings, { blockedKeys: suppression.blockedKeys, limit: remaining })
+  return {
+    actions,
+    withheldReason: candidates.length > actions.length ? 'weekly_cap' : null,
+    heldExistingCard,
+  }
 }
 
 // ── Persistence ──────────────────────────────────────────────────────────────────
@@ -365,6 +529,7 @@ async function persistFindings(
 export async function runSeoPatrolForClient(
   client: SeoPatrolClient,
   supabase: SupabaseClient = supabaseAdmin,
+  now: Date = new Date(),
 ): Promise<SeoPatrolClientResult> {
   const base: SeoPatrolClientResult = {
     client_id: client.id,
@@ -385,7 +550,18 @@ export async function runSeoPatrolForClient(
 
     if (findings.length === 0) return base
 
-    const actions = findingsToActions(findings)
+    const suppression = await loadCardSuppression(supabase, client.id, now)
+    if (!suppression.ok) {
+      // Fail closed: without the list of existing cards a repeat cannot be told from a
+      // new target, so no card today. The findings are already saved above.
+      base.cards_withheld_reason = 'card_lookup_failed'
+      base.error = `card lookup failed: ${suppression.error}`
+      return base
+    }
+    const plan = planPatrolCards(findings, suppression.value)
+    base.findings_held_existing_card = plan.heldExistingCard
+    if (plan.withheldReason) base.cards_withheld_reason = plan.withheldReason
+    const actions = plan.actions
     if (actions.length === 0) return base
 
     const output: ZhugeOutput = {
@@ -425,6 +601,12 @@ export interface SeoPatrolBatchResult {
   failed: number
   /** Clients whose R2 page-signal feed was missing or errored this run. */
   page_data_problems: number
+  /** Clients where the rolling weekly cap held back at least one new target today. */
+  clients_withheld_weekly_cap: number
+  /** Clients that got no card today because the existing-card lookup failed (fail closed). */
+  clients_withheld_lookup_failed: number
+  /** Findings held back across all clients because their target already has a card. */
+  findings_held_existing_card: number
   results: SeoPatrolClientResult[]
 }
 
@@ -460,6 +642,9 @@ export async function runSeoPatrol(
     page_data_problems: results.filter(
       (r) => r.page_data_status && r.page_data_status !== 'ok',
     ).length,
+    clients_withheld_weekly_cap: results.filter((r) => r.cards_withheld_reason === 'weekly_cap').length,
+    clients_withheld_lookup_failed: results.filter((r) => r.cards_withheld_reason === 'card_lookup_failed').length,
+    findings_held_existing_card: results.reduce((s, r) => s + (r.findings_held_existing_card ?? 0), 0),
     results,
   }
 }

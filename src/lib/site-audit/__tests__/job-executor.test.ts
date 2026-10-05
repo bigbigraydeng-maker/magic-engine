@@ -34,6 +34,7 @@ import {
   executeJob,
   discoverSitemapUrls,
   crawlAndClassifyPages,
+  summarizeMarkFailures,
   type ExecuteJobOptions,
 } from '../job-executor'
 import { JobRunner } from '../job-runner'
@@ -205,7 +206,7 @@ describe('executeJob', () => {
     await executeJob(mockSupabase as unknown as SupabaseClient, 'job-123')
 
     expect(mockRunner.startJob).toHaveBeenCalledWith('job-123')
-    expect(mockRunner.completeJob).toHaveBeenCalledWith('job-123')
+    expect(mockRunner.completeJob).toHaveBeenCalledWith('job-123', [])
     expect(mockRunner.failJob).not.toHaveBeenCalled()
   })
 
@@ -283,6 +284,54 @@ describe('executeJob', () => {
 
     expect(mockRunner.completeJob).toHaveBeenCalled()
     expect(mockRunner.failJob).not.toHaveBeenCalled()
+  })
+
+  it('passes failed URLs to completeJob when some pages fail to crawl', async () => {
+    const urls = [
+      'https://example.com/',
+      'https://example.com/broken',
+      'https://example.com/about',
+    ]
+
+    vi.mocked(crawlerDiscoverUrls).mockResolvedValue(urls)
+    vi.mocked(crawlPages).mockResolvedValue([
+      makeCrawlResult(urls[0]),
+      makeCrawlResult(urls[1], { error: 'Timeout', statusCode: 0, markdown: '' }),
+      makeCrawlResult(urls[2]),
+    ])
+
+    await executeJob(mockSupabase as unknown as SupabaseClient, 'job-123')
+
+    expect(mockRunner.completeJob).toHaveBeenCalledWith('job-123', [urls[1]])
+  })
+
+  it('saves a summary on the job when a blocked-page mark fails', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    mockSupabase = makeSupabaseMock({ message: 'check constraint violated' })
+
+    vi.mocked(crawlerDiscoverUrls).mockResolvedValue(['https://example.com/blocked'])
+    vi.mocked(crawlPages).mockResolvedValue([
+      makeCrawlResult('https://example.com/blocked', {
+        markdown: '',
+        title: '',
+        antibot: {
+          kind: 'siteground',
+          evidence: 'body contains "Robot Challenge Screen"',
+        },
+        error: 'antibot_siteground: body contains "Robot Challenge Screen"',
+      }),
+    ])
+
+    await executeJob(mockSupabase, 'job-123')
+
+    expect(mockRunner.completeJob).toHaveBeenCalledWith(
+      'job-123',
+      ['https://example.com/blocked'],
+      expect.stringContaining('1 个被防火墙挡住的页面没能标记上')
+    )
+
+    spy.mockRestore()
   })
 
   // ── Classification fallback ──────────────────────────────────────────────
@@ -493,6 +542,7 @@ describe('crawlAndClassifyPages — database writes', () => {
       has_geo_block: false,
       status_code: 200,
     })
+    expect(upsertArg.crawl_error).toBeNull()
     // job_id is not a column on client_site_pages (removed in 40d43a86)
     expect(upsertArg).not.toHaveProperty('job_id')
   })
@@ -919,5 +969,95 @@ describe('crawlAndClassifyPages — non-Error throw in upsert (Suite 8)', () => 
     expect(result.failed).toHaveLength(1)
     expect(result.failed[0].error).toBe('plain string failure')
     expect(result.successful).toHaveLength(0)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Suite 9: Anti-bot mark write is checked (2026-09-26)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('crawlAndClassifyPages — anti-bot mark write is checked (2026-09-26)', () => {
+  afterEach(() => vi.clearAllMocks())
+
+  it('records the mark failure when the antibot upsert returns an error', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    vi.mocked(JobRunner).mockImplementation(() => makeRunnerMock() as never)
+    vi.mocked(crawlPages).mockResolvedValue([
+      makeCrawlResult('https://example.com/blocked', {
+        markdown: '',
+        title: '',
+        antibot: {
+          kind: 'siteground',
+          evidence: 'body contains "Robot Challenge Screen"',
+        },
+        error: 'antibot_siteground: body contains "Robot Challenge Screen"',
+      }),
+    ])
+
+    const supabase = makeSupabaseMock({
+      message: 'new row violates check constraint "client_site_pages_crawl_status_check"',
+    })
+
+    const result = await crawlAndClassifyPages(
+      supabase as unknown as SupabaseClient,
+      'client-abc',
+      ['https://example.com/blocked'],
+      'job-123',
+      { maxPages: 100, rateLimitMs: 0 }
+    )
+
+    expect(result.failed).toHaveLength(1)
+    expect(result.failed[0].error).toContain('mark failed')
+    expect(result.failed[0].error).toContain('client_site_pages_crawl_status_check')
+    expect(result.successful).toHaveLength(0)
+    expect(supabase._upsert).toHaveBeenCalledTimes(1)
+    expect(supabase._upsert.mock.calls[0][0].crawl_status).toBe('antibot_challenged')
+    expect(consoleErrorSpy).toHaveBeenCalled()
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('does not record a mark failure when the antibot upsert succeeds', async () => {
+    vi.mocked(JobRunner).mockImplementation(() => makeRunnerMock() as never)
+    vi.mocked(crawlPages).mockResolvedValue([
+      makeCrawlResult('https://example.com/blocked', {
+        markdown: '',
+        title: '',
+        antibot: {
+          kind: 'siteground',
+          evidence: 'body contains "Robot Challenge Screen"',
+        },
+        error: 'antibot_siteground: body contains "Robot Challenge Screen"',
+      }),
+    ])
+
+    const supabase = makeSupabaseMock()
+
+    const result = await crawlAndClassifyPages(
+      supabase as unknown as SupabaseClient,
+      'client-abc',
+      ['https://example.com/blocked'],
+      'job-123',
+      { maxPages: 100, rateLimitMs: 0 }
+    )
+
+    expect(result.failed).toHaveLength(1)
+    expect(result.failed[0].error).not.toContain('mark failed')
+  })
+})
+
+describe('summarizeMarkFailures', () => {
+  it('returns null when no blocked-page mark failed', () => {
+    expect(summarizeMarkFailures([{ url: 'https://example.com/a', error: 'Timeout' }])).toBeNull()
+  })
+
+  it('counts the failed marks and keeps the first reason', () => {
+    const summary = summarizeMarkFailures([
+      { url: 'https://example.com/a', error: 'antibot_siteground; mark failed: check constraint violated' },
+      { url: 'https://example.com/b', error: 'Timeout' },
+      { url: 'https://example.com/c', error: 'antibot_siteground; mark failed: other' },
+    ])
+    expect(summary).toBe('2 个被防火墙挡住的页面没能标记上（第一个原因：check constraint violated）')
   })
 })
