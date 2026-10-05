@@ -210,6 +210,9 @@ function makeProgressReporter() {
 async function runRender(opts) {
   const loaded = loadProps(opts.propsFile, opts.template)
   checkAssets(loaded.assetFiles, opts.publicDir)
+  for (const gap of loaded.recipeGaps ?? []) {
+    process.stdout.write(`配方${gap.status}：${gap.column}（${gap.reason}）\n`)
+  }
 
   fs.mkdirSync(path.dirname(opts.outFile), { recursive: true })
   // A failed run must never leave an older file that looks like a fresh result.

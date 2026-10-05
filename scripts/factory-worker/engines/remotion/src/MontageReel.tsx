@@ -20,8 +20,8 @@ const Cut: React.FC<{ props: MontageReelProps; seg: MontageSegment }> = ({ props
   const punch = interpolate(frame, [0, 5], [1.22, 1.04], { extrapolateRight: 'clamp' })
   const sx = frame < 4 ? (rnd(seg.from + frame) - 0.5) * 26 : 0
   const sy = frame < 4 ? (rnd(seg.from + frame + 9) - 0.5) * 26 : 0
-  // photosensitivity: flash only on bar downbeats and a soft one mid-bar; never on every cut
-  const flash = seg.down ? interpolate(frame, [0, 3], [0.26, 0], { extrapolateRight: 'clamp' }) : seg.mid ? interpolate(frame, [0, 2], [0.1, 0], { extrapolateRight: 'clamp' }) : 0
+  // photosensitivity: flash only on the bar downbeat (every 4 beats); never on every cut
+  const flash = seg.down ? interpolate(frame, [0, 3], [0.26, 0], { extrapolateRight: 'clamp' }) : 0
   const clip = props.clips[seg.clip]
   // normalise brightness between clips so cut-to-cut luminance jumps stay small (photosensitivity margin)
   const luma = clip.luma ?? 95

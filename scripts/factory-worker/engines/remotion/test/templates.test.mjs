@@ -55,6 +55,7 @@ function montageProps() {
     beats,
     totalBeats: 32,
     fastBars: [2, 5],
+    placeTerms: [],
     words,
     clips,
   }
@@ -113,6 +114,21 @@ test('the sydney montage example loads and uses 3 or more clip kinds', () => {
   const loaded = loadTemplate('montage', raw)
   assert.equal(loaded.compositionId, 'MontageReel')
   assert.ok(new Set(raw.clips.map((c) => c.kind)).size >= 3)
+})
+
+test('loadTemplate montage reports no recipe gaps for a complete fixture', () => {
+  assert.deepEqual(loadTemplate('montage', montageProps()).recipeGaps, [])
+})
+
+test('recipe gaps reflect the sydney example and are absent for list', () => {
+  const raw = JSON.parse(
+    fs.readFileSync(new URL('../examples/sydney-montage.props.json', import.meta.url), 'utf8'),
+  )
+  assert.deepEqual(
+    loadTemplate('montage', raw).recipeGaps.map((g) => g.column),
+    ['真实感'],
+  )
+  assert.equal(loadTemplate('list', listProps()).recipeGaps, undefined)
 })
 
 /** Load the real music catalog fixture. */

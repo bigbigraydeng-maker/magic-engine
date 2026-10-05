@@ -443,11 +443,13 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
   let files
   let timing
   let totalFrames
+  let recipeGaps = null
   try {
     const loaded = eng.loadTemplate(template, remotion.props)
     props = loaded.props
     files = loaded.assetFiles
     totalFrames = loaded.totalFrames
+    recipeGaps = loaded.recipeGaps ?? null
     timing = template === 'list' ? eng.computeTimingFromProps(props) : null
   } catch (e) {
     throw new RemotionOrderError('工单里的视频参数不合格：' + e.message)
@@ -557,6 +559,7 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
           ? { source: 'catalog', id: musicSource.id, folder: musicSource.folder, file: musicSource.file, status: musicSource.status }
           : (props.musicFile ? { source: 'client_library', file: props.musicFile } : null),
         props,
+        recipe_gaps: recipeGaps,
         render: { attempts, elapsed_s },
       }, null, 2),
     )

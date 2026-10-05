@@ -15,6 +15,9 @@ import {
   MONTAGE_LOGO_BEATS,
   MONTAGE_MIN_TOTAL_FRAMES,
   MONTAGE_MIN_BEAT_GAP_SEC,
+  maxFlashesPerSecond,
+  recipeGapsOf,
+  MONTAGE_MAX_FLASHES_PER_SEC,
 } from '../src/montage.ts'
 
 import { FPS } from '../src/timing.ts'
@@ -46,8 +49,8 @@ const valid = () => {
   for (let i = 0; i < 12; i++) {
     const n = String(i + 1).padStart(2, '0')
     let tag = `general-${i}`
-    if (i === 3) tag = 'beach'
-    if (i === 7) tag = 'kitchen'
+    if (i === 3 || i === 9) tag = 'beach'
+    if (i === 7 || i === 11) tag = 'kitchen'
     clips.push({
       file: `clips/c${n}.mp4`,
       tag,
@@ -64,6 +67,7 @@ const valid = () => {
     beats,
     totalBeats: 32,
     fastBars: [2, 5],
+    placeTerms: ['BEACH', 'MANLY'],
     words,
     clips,
   }
@@ -196,6 +200,30 @@ describe('montage schema rejects', () => {
     rejects((raw) => {
       raw.words[3].clipTag = 'nope'
     }, '在镜头池里不存在')
+  })
+
+  test('place word without clipTag', () => {
+    rejects((raw) => {
+      raw.words[1].text = 'MANLY'
+    }, '含地名')
+  })
+
+  test('place word match is case-insensitive', () => {
+    rejects((raw) => {
+      raw.words[1].text = 'manly wharf'
+    }, '含地名')
+  })
+
+  test('clipTag carried by a single clip', () => {
+    rejects((raw) => {
+      raw.clips[9].tag = 'general-9'
+    }, '只有 1 条镜头')
+  })
+
+  test('placeTerms missing', () => {
+    rejects((raw) => {
+      delete raw.placeTerms
+    })
   })
 
   test('only 2 kinds', () => {
@@ -412,5 +440,51 @@ describe('buildMontageSegments', () => {
         beat % 4 === 0 && seg.from === montageFrameOf(parsed.beats, beat)
       assert.equal(seg.down, expected)
     }
+  })
+})
+
+describe('montage guards', () => {
+  test('full-width question mark opens a video', () => {
+    const raw = valid()
+    raw.words[0].text = '为什么？'
+    assert.doesNotThrow(() => parseMontageReelProps(raw))
+  })
+
+  test('one flash per bar, none mid-bar', () => {
+    const parsed = parseMontageReelProps(valid())
+    const segs = buildMontageSegments(parsed)
+    for (const seg of segs) assert.equal('mid' in seg, false)
+    assert.equal(segs.filter((s) => s.down).length, parsed.totalBeats / 4)
+    assert.ok(maxFlashesPerSecond(segs) <= MONTAGE_MAX_FLASHES_PER_SEC)
+  })
+
+  test('maxFlashesPerSecond counts 4 flashes inside one second', () => {
+    const seg = (from, down) => ({ from, dur: 6, clip: 0, start: 0, bw: false, down })
+    const segs = [0, 6, 12, 18].map((from) => seg(from, true))
+    segs.push(seg(24, false))
+    assert.equal(maxFlashesPerSecond(segs), 4)
+    assert.ok(maxFlashesPerSecond(segs) > MONTAGE_MAX_FLASHES_PER_SEC)
+    assert.equal(maxFlashesPerSecond([seg(0, true), seg(30, true)]), 1)
+  })
+
+  test('recipe gaps are reported honestly', () => {
+    const parsed = parseMontageReelProps(valid())
+    assert.deepEqual(recipeGapsOf(parsed).map((g) => g.column), ['真实感'])
+    for (const gap of recipeGapsOf(parsed)) assert.equal(gap.status, '未满足')
+
+    const noPerson = valid()
+    for (const clip of noPerson.clips) {
+      if (clip.kind === 'person') clip.kind = 'detail'
+    }
+    assert.deepEqual(
+      recipeGapsOf(parseMontageReelProps(noPerson)).map((g) => g.column),
+      ['真人出镜/自拍感', '真实感'],
+    )
+
+    noPerson.clips[0].source = 'own'
+    assert.deepEqual(
+      recipeGapsOf(parseMontageReelProps(noPerson)).map((g) => g.column),
+      ['真人出镜/自拍感'],
+    )
   })
 })

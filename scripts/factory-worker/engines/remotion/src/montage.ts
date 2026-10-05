@@ -32,6 +32,8 @@ export const MONTAGE_LOGO_BEATS = 2;
 export const MONTAGE_MIN_TOTAL_FRAMES = 60;
 /** Shortest allowed gap between two beats; fast bars halve it. */
 export const MONTAGE_MIN_BEAT_GAP_SEC = 0.25;
+/** Photosensitivity cap: most flashes allowed in any one second. */
+export const MONTAGE_MAX_FLASHES_PER_SEC = 3;
 
 const SLUG = z
   .string()
@@ -91,6 +93,7 @@ const MontageBaseSchema = z
     fastBars: z.array(z.number().int().min(0)).min(1, {
       message: '快切小节至少要有一个',
     }),
+    placeTerms: z.array(z.string().min(1).max(24)).max(30),
     words: z
       .array(WORD)
       .min(MONTAGE_MIN_WORDS, {
@@ -186,7 +189,7 @@ function checkWords(val: MontageBase, ctx: z.RefinementCtx): void {
   const words = val.words;
   const first = words[0];
   if (first !== undefined) {
-    const okText = /^\d/.test(first.text) || first.text.endsWith('?');
+    const okText = /^\d/.test(first.text) || /[?？]$/.test(first.text);
     if (first.at !== 0 || !okText) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -249,15 +252,38 @@ function checkClips(val: MontageBase, ctx: z.RefinementCtx): void {
   }
 }
 
-/** Validate that every word clipTag exists in the clip pool. */
+/** Validate word clipTags: existence in the pool, place-name binding and tag coverage. */
 function checkWordTags(val: MontageBase, ctx: z.RefinementCtx): void {
   const tags = new Set(val.clips.map((c) => c.tag));
+  const tagCounts = new Map<string, number>();
+  for (const clip of val.clips) {
+    tagCounts.set(clip.tag, (tagCounts.get(clip.tag) ?? 0) + 1);
+  }
+  const terms = val.placeTerms.map((t) => t.toLowerCase());
   val.words.forEach((w, i) => {
-    if (w.clipTag !== undefined && !tags.has(w.clipTag)) {
+    if (w.clipTag !== undefined) {
+      if (!tags.has(w.clipTag)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['words', i],
+          message: `词「${w.text}」要求的镜头标签「${w.clipTag}」在镜头池里不存在`,
+        });
+      } else if ((tagCounts.get(w.clipTag) ?? 0) < 2) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['words', i],
+          message: `镜头标签「${w.clipTag}」只有 1 条镜头，连续使用会重复，至少要 2 条`,
+        });
+      }
+      return;
+    }
+    const lower = w.text.toLowerCase();
+    const term = terms.find((t) => lower.includes(t));
+    if (term !== undefined) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['words', i],
-        message: `词「${w.text}」要求的镜头标签「${w.clipTag}」在镜头池里不存在`,
+        message: `词「${w.text}」含地名「${term}」，必须绑定镜头标签（clipTag）`,
       });
     }
   });
@@ -346,7 +372,6 @@ export interface MontageSegment {
   start: number;
   bw: boolean;
   down: boolean;
-  mid: boolean;
 }
 
 /** Deterministic pseudo-random number in [0, 1) from an integer seed. */
@@ -472,8 +497,27 @@ function makeSegment(
     start,
     bw: bar % 3 === 2,
     down: beat % 4 === 0 && part === 0,
-    mid: beat % 4 === 2 && part === 0,
   };
+}
+
+/** Largest number of flash frames falling inside any one-second window. */
+export function maxFlashesPerSecond(
+  segments: readonly MontageSegment[],
+): number {
+  const flashes = segments.filter((s) => s.down).map((s) => s.from);
+  let worst = 0;
+  for (const start of flashes) {
+    let count = 0;
+    for (const f of flashes) {
+      if (f - start >= 0 && f - start < FPS) {
+        count += 1;
+      }
+    }
+    if (count > worst) {
+      worst = count;
+    }
+  }
+  return worst;
 }
 
 /** Build the deterministic list of montage segments. */
@@ -492,5 +536,38 @@ export function buildMontageSegments(props: MontageReelProps): MontageSegment[] 
       k += 1;
     }
   }
+  const worst = maxFlashesPerSecond(out);
+  if (worst > MONTAGE_MAX_FLASHES_PER_SEC) {
+    throw new Error(
+      `闪白太密：任意 1 秒内最多 ${MONTAGE_MAX_FLASHES_PER_SEC} 次，现在有 ${worst} 次`,
+    );
+  }
   return out;
+}
+
+/** One recipe column the template cannot satisfy for a given set of props. */
+export interface RecipeGap {
+  column: string;
+  status: '未满足';
+  reason: string;
+}
+
+/** Recipe columns the montage cannot satisfy for these props. */
+export function recipeGapsOf(props: MontageReelProps): RecipeGap[] {
+  const gaps: RecipeGap[] = [];
+  if (!props.clips.some((c) => c.kind === 'person')) {
+    gaps.push({
+      column: '真人出镜/自拍感',
+      status: '未满足',
+      reason: '镜头池里没有真人镜头',
+    });
+  }
+  if (!props.clips.some((c) => c.source === 'own')) {
+    gaps.push({
+      column: '真实感',
+      status: '未满足',
+      reason: '镜头池里没有自有素材（全部是库存或 AI）',
+    });
+  }
+  return gaps;
 }

@@ -49,6 +49,11 @@
   3,
   6
  ],
+ "placeTerms": [
+  "BEACH",
+  "SYDNEY",
+  "MANLY"
+ ],
  "words": [
   {
    "at": 0,
@@ -182,7 +187,7 @@
   },
   {
    "file": "clips/item1.mp4",
-   "tag": "aerial-b",
+   "tag": "beach",
    "kind": "aerial",
    "source": "ai",
    "lenFrames": 300
@@ -224,7 +229,7 @@
   },
   {
    "file": "clips/item7.mp4",
-   "tag": "detail-b",
+   "tag": "kitchen",
    "kind": "detail",
    "source": "ai",
    "lenFrames": 300
