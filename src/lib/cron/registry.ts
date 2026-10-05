@@ -413,6 +413,7 @@ export const UNSCHEDULED_CRON_ROUTES: Readonly<Record<string, string>> = {
 
   // cts-seo-optimizer 于 2026-09-20 退役（PM 拍板）：render.yaml 那条定时任务已删，
   // 换成 Inngest 原生的 cloud-seo-meta-cycle-fanout（同目录 seo-meta-cycle 的对账测试
-  // 管它）。路由文件和 startCronRun 调用留着只为回滚，本条不该再被排班。
-  'cts-seo-optimizer': '2026-09-20 退役，换成 Inngest cloud-seo-meta-cycle-fanout，路由留着只为回滚',
+  // 管它）。路由文件已在 2026-09-29（PR #2200）改成「被调用就返回 410 并记失败」，不再是回滚备用入口，
+  // 也不要再把它当回滚路径：9-28 就是这样被带回来的。本条不该再被排班。
+  'cts-seo-optimizer': '2026-09-20 退役，换成 Inngest cloud-seo-meta-cycle-fanout；路由 2026-09-29 起固定返回 410，不是回滚入口',
 }
