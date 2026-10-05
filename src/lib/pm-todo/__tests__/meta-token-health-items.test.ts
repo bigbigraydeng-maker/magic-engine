@@ -332,6 +332,11 @@ describe('meta token health items', () => {
     await pushMetaTokenHealthItems(db([row({})]), items, env, fetchImpl)
     expect(items[0].how).toContain('ads_management')
     expect(items[0].how).toContain('Save only')
+    // Codex round 18 复审 P2：comments.ts 的头注写死读评论要 pages_read_user_content
+    // （跟只管发回复/隐藏的 pages_manage_engagement 是两个 scope）——漏勾这条，
+    // 照着这份清单换出来的新钥匙一读评论就报 Graph #10，而这条健康检查本身只探
+    // /me、不检查具体权限，不会告诉 PM 少了什么。
+    expect(items[0].how).toContain('pages_read_user_content')
   })
 
   it('tells the PM to deploy on save for the shared token too', async () => {
@@ -341,6 +346,7 @@ describe('meta token health items', () => {
       fakeFetch({ 'tok-shared': { status: 400, body: DEAD } }),
     )
     expect(items[0].how).toContain('Save only')
+    expect(items[0].how).toContain('pages_read_user_content')
   })
 
   it('resolves with no items and never probes when no tokens are configured', async () => {

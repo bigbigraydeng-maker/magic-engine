@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   upsertCalls:                [] as Array<Record<string, unknown>>,
   boundPageId:                '1616575215312482' as string | null,
   factoryConfig:              { publish_target: { platform: 'facebook', page_id: '1616575215312482' } } as unknown,
+  commentPageId:               '1616575215312482' as string | null,
 }))
 
 vi.mock('@/lib/meta-oauth/client', async (importOriginal) => {
@@ -45,14 +46,16 @@ vi.mock('@/lib/platform-oauth/connection-store', () => ({
 
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
-    from: vi.fn(() => ({
+    from: vi.fn((table: string) => ({
       select: vi.fn(() => ({
         eq: vi.fn(() => ({
           maybeSingle: vi.fn(() =>
-            Promise.resolve({
-              data: { facebook_page_id: mocks.boundPageId, factory_config: mocks.factoryConfig },
-              error: null,
-            }),
+            table === 'social_comment_config'
+              ? Promise.resolve({ data: { fb_page_id: mocks.commentPageId }, error: null })
+              : Promise.resolve({
+                  data: { facebook_page_id: mocks.boundPageId, factory_config: mocks.factoryConfig },
+                  error: null,
+                }),
           ),
         })),
       })),
@@ -101,6 +104,7 @@ beforeEach(() => {
   mocks.upsertCalls.length = 0
   mocks.boundPageId = PAGE_ID
   mocks.factoryConfig = { publish_target: { platform: 'facebook', page_id: PAGE_ID } }
+  mocks.commentPageId = PAGE_ID
   process.env.NEXT_PUBLIC_APP_URL = 'https://app.magic-engine.com'
   process.env.FACEBOOK_APP_SECRET = 'app-secret-456'
   mocks.verifyState.mockReturnValue({ clientId: CLIENT_ID })
@@ -286,6 +290,153 @@ describe('publishing reauth binds to factory_config.publish_target, not the inbo
 
     expect(outcomeOf(res)).toBe('page_not_granted')
     expect(mocks.upsertCalls).toHaveLength(0)
+  })
+})
+
+describe('comment_reply reauth binds to social_comment_config.fb_page_id, not the inbox Page (Codex round 8 复审 P1)', () => {
+  const COMMENT_PAGE = '444555666'
+
+  beforeEach(() => {
+    mocks.verifyState.mockReturnValue({ clientId: CLIENT_ID, intent: 'comment_reply' })
+  })
+
+  it('stores the token for the comment-reply Page when it differs from the inbox Page', async () => {
+    mocks.boundPageId = PAGE_ID // inbox Page
+    mocks.commentPageId = COMMENT_PAGE
+    mocks.listPagesWithTokens.mockResolvedValue([
+      { pageId: PAGE_ID, pageName: 'Inbox Page', pageToken: 'inbox-token' },
+      { pageId: COMMENT_PAGE, pageName: 'Comment Page', pageToken: 'comment-token' },
+    ])
+    mocks.listGrantedScopes.mockResolvedValue([
+      'pages_show_list', 'pages_manage_engagement', 'pages_read_engagement', 'pages_read_user_content',
+    ])
+
+    const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+
+    expect(outcomeOf(res)).toBe('comment_reply_ready')
+    // The persisted account_id + token must be the COMMENT-REPLY Page, never the inbox one —
+    // this is exactly the bug: a plain reconnect used to always bind clients.facebook_page_id.
+    expect(mocks.upsertCalls).toHaveLength(1)
+    expect(mocks.upsertCalls[0].accountId).toBe(COMMENT_PAGE)
+    expect(mocks.upsertCalls[0].accessToken).toBe('comment-token')
+  })
+
+  it('works when only a comment-reply Page exists and the inbox binding is absent', async () => {
+    mocks.boundPageId = null // no inbox binding
+    mocks.commentPageId = COMMENT_PAGE
+    mocks.listPagesWithTokens.mockResolvedValue([
+      { pageId: COMMENT_PAGE, pageName: 'Comment Page', pageToken: 'comment-token' },
+    ])
+    mocks.listGrantedScopes.mockResolvedValue([
+      'pages_show_list', 'pages_manage_engagement', 'pages_read_engagement', 'pages_read_user_content',
+    ])
+
+    const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+
+    expect(outcomeOf(res)).toBe('comment_reply_ready')
+    expect(mocks.upsertCalls[0].accountId).toBe(COMMENT_PAGE)
+  })
+
+  it('fails closed with no_comment_page and writes nothing when social_comment_config has no fb_page_id', async () => {
+    mocks.commentPageId = null
+
+    const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+
+    expect(outcomeOf(res)).toBe('no_comment_page')
+    expect(mocks.upsertCalls).toHaveLength(0)
+  })
+
+  it('fails closed (page_not_granted, no write) when the granted Meta Pages do not include the comment-reply Page', async () => {
+    mocks.commentPageId = COMMENT_PAGE
+    // Meta hands back only some OTHER page — not the configured comment-reply Page.
+    mocks.listPagesWithTokens.mockResolvedValue([
+      { pageId: PAGE_ID, pageName: 'Inbox Page', pageToken: 'inbox-token' },
+    ])
+
+    const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+
+    expect(outcomeOf(res)).toBe('page_not_granted')
+    expect(mocks.upsertCalls).toHaveLength(0)
+  })
+
+  // Codex round 9 复审 P1: comment_reply used to fall through to the generic
+  // 'connected' outcome even when Meta declined pages_manage_engagement,
+  // telling the FDE the fix worked when public replies would keep failing.
+  it('reports comment_reply_ready only when the provider authoritatively granted pages_manage_engagement AND both read scopes', async () => {
+    mocks.commentPageId = COMMENT_PAGE
+    mocks.listPagesWithTokens.mockResolvedValue([
+      { pageId: COMMENT_PAGE, pageName: 'Comment Page', pageToken: 'comment-token' },
+    ])
+    mocks.listGrantedScopes.mockResolvedValue([
+      'pages_show_list',
+      'pages_manage_engagement',
+      'pages_read_engagement',
+      'pages_read_user_content',
+    ])
+
+    const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+
+    expect(outcomeOf(res)).toBe('comment_reply_ready')
+  })
+
+  it('reports comment_reply_not_granted AND still stores the token when Meta declines pages_manage_engagement', async () => {
+    mocks.commentPageId = COMMENT_PAGE
+    mocks.listPagesWithTokens.mockResolvedValue([
+      { pageId: COMMENT_PAGE, pageName: 'Comment Page', pageToken: 'comment-token' },
+    ])
+    mocks.listGrantedScopes.mockResolvedValue([
+      'pages_show_list',
+      'pages_messaging',
+      'pages_read_engagement',
+      'pages_read_user_content',
+    ]) // pages_manage_engagement declined
+
+    const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+
+    expect(outcomeOf(res)).toBe('comment_reply_not_granted')
+    // The connection still gets stored (whatever WAS granted) — declining one
+    // scope should not also block the read/inbox scopes that did come through.
+    expect(mocks.upsertCalls).toHaveLength(1)
+    expect(mocks.upsertCalls[0].scopes).not.toContain('pages_manage_engagement')
+  })
+
+  // Codex round 18 复审 P1：Meta 同意页允许用户逐条取消某一项授权——这条反过来
+  // 测：回复/隐藏的权限给了，但读别人评论的权限被拒。引擎发送前会先读评论
+  // （comment-autoreply-engine.ts 的 fetchPostCommentsResult），读不到的话回复
+  // 权限给了也用不上；round 18 之前这里会误报 comment_reply_ready。
+  it('reports comment_reply_not_granted when pages_manage_engagement is granted but pages_read_user_content is declined', async () => {
+    mocks.commentPageId = COMMENT_PAGE
+    mocks.listPagesWithTokens.mockResolvedValue([
+      { pageId: COMMENT_PAGE, pageName: 'Comment Page', pageToken: 'comment-token' },
+    ])
+    mocks.listGrantedScopes.mockResolvedValue([
+      'pages_show_list',
+      'pages_manage_engagement',
+    ]) // pages_read_user_content declined
+
+    const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+
+    expect(outcomeOf(res)).toBe('comment_reply_not_granted')
+  })
+
+  // Codex round 19 复审 P1：round 18 的修复只查了 pages_read_user_content，
+  // 漏了跟它成对出现的 pages_read_engagement——comments.ts 头注写的是两个一起
+  // 才够读评论。这条单独把 pages_read_engagement 拒掉、留着另外两个都给，
+  // 证明单独漏这一个也会被挡下来，不是靠“反正另一个也没给”侥幸测过。
+  it('reports comment_reply_not_granted when pages_manage_engagement and pages_read_user_content are granted but pages_read_engagement is declined', async () => {
+    mocks.commentPageId = COMMENT_PAGE
+    mocks.listPagesWithTokens.mockResolvedValue([
+      { pageId: COMMENT_PAGE, pageName: 'Comment Page', pageToken: 'comment-token' },
+    ])
+    mocks.listGrantedScopes.mockResolvedValue([
+      'pages_show_list',
+      'pages_manage_engagement',
+      'pages_read_user_content',
+    ]) // pages_read_engagement declined
+
+    const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+
+    expect(outcomeOf(res)).toBe('comment_reply_not_granted')
   })
 })
 

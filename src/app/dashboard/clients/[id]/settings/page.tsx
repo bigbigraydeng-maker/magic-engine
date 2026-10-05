@@ -87,6 +87,14 @@ interface ConnectCallbacks {
   mail: boolean
   gbp: boolean
   oauth: boolean
+  /**
+   * `?audit=1` — a pm-todo link landing straight on the comment-autoreply
+   * audit section (Codex round 11 复审 P2): a bare `/settings` link defaults
+   * to the `connect` tab and, even with `?tab=content`, that section starts
+   * collapsed like any other — this is the same defaultOpen mechanism the
+   * other callbacks already use, not a new pattern.
+   */
+  audit: boolean
 }
 
 function TabBody({
@@ -214,7 +222,7 @@ function TabBody({
           <SettingsSection icon="💬" title="Facebook 评论自动回复">
             <CommentAutoReplyPanel clientId={clientId} />
           </SettingsSection>
-          <SettingsSection icon="🗂️" title="最近自动回复（审计）">
+          <SettingsSection icon="🗂️" title="最近自动回复（审计）" defaultOpen={callbacks.audit}>
             <CommentAuditList clientId={clientId} />
           </SettingsSection>
         </>
@@ -248,6 +256,8 @@ export default function ClientSettingsPage() {
   // 邮箱授权回跳（见 MailboxPanel）——用它来判断该默认展开哪一块，不用来
   // 渲染横幅（那条横幅在 MailboxPanel 自己里面）。
   const mailStatus = searchParams.get('mail')
+  // pm-todo 待办直达评论审计列表用的（Codex round 11 复审 P2）。
+  const auditParam = searchParams.get('audit')
 
   const errorMessage =
     gbpStatus === 'error' ? (ERROR_MESSAGES[gbpReason] ?? '连接过程中发生未知错误，请重试。') : null
@@ -340,7 +350,7 @@ export default function ClientSettingsPage() {
           <TabBody
             tab={tab}
             clientId={clientId}
-            callbacks={{ mail: mailStatus !== null, gbp: gbpStatus !== null, oauth: oauthStatus !== null }}
+            callbacks={{ mail: mailStatus !== null, gbp: gbpStatus !== null, oauth: oauthStatus !== null, audit: auditParam !== null }}
           />
         </div>
       </div>

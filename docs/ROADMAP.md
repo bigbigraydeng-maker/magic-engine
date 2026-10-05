@@ -21,6 +21,18 @@
 
 ---
 
+## CTS Facebook 评论自动回复断更 39 天，Meta 钥匙健康检查测不出「缺权限」这类失效（2026-09-28 查实，P0）
+
+**§11 打分**：频率不低（8/23 到 9/21 持续在发生，断更 39 天至今）· IMPACT 闭环关键度高（"社媒"支柱真正接了飞轮的执行动作，不是只诊断的口碑/竞品）· 收入关联度高（客户官方主页上，粉丝/潜客提问没人回，直接影响客户观感）→ 零个低、两个以上高 → **P0**。
+
+- **现象**：CTS 的 Facebook 评论公开回复从 2026-08-20 起断更，7 条该回的评论（夸奖/提问类）连续失败 3 次后被系统放弃、不会再重试，报错全部指向 `pages_manage_engagement` 权限。
+- **为什么没人报警**：现成的"Meta 钥匙健康检查"故意只探测"钥匙整个作废了没"（错误码 190），不查具体权限范围，钥匙还活着但缺这一项权限时照样判"活着"。同一份代码里"钥匙坏了怎么修"的操作指南本身也没有把 `pages_manage_engagement` 列进要勾的权限清单，照着修一遍大概率还是会复发。
+- **PR [#2190](https://github.com/bigbigraydeng-maker/magic-engine/pull/2190) 里做了什么**：加了一条新的 pm-todo 检测通道（认"评论连续失败到系统放弃"这个直接症状，不猜根因），把权限清单缺口补上了。
+- **还没做、需要人**：① 有 CTS 这个 Facebook Page 管理权限的人重新走一遍 Meta 授权，这次要带上 `pages_manage_engagement`；② 手动去 CTS 的 Facebook 主页把那 7 条卡住的评论回复掉（系统不会自动补发）。
+- 详细推演见台账 [2026-09-28-cts-comment-autoreply-stuck-39-days](./ledger/2026-09-28-cts-comment-autoreply-stuck-39-days.md)。
+
+---
+
 ## Agent 自治运行计划 v1 —— 14 个 agent 从「等派活」改成「目标 + 闹钟 + 待办署名」（PM 2026-09-24 拍板，文档 PR #1985 已合并）
 
 计划全文：[`docs/specs/2026-09-24-agent-autonomy-operating-plan-v1.md`](./specs/2026-09-24-agent-autonomy-operating-plan-v1.md)。达芬奇已撤（7 问并入 `docs/agents/10-ziya.md` §四b）。**仅 B1 / B2 这两批**由 DeepSeek 执行、Claude Code 统筹复审（PM 2026-09-24 指定）；其他任务的写入者仍按 CLAUDE.md §5 协作规则按任务能力分配。

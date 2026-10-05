@@ -5,28 +5,107 @@
  *
  * Shows recent decisions from social_comment_engagements: what was replied /
  * DM'd / hidden / flagged for human. FDE can revert an auto-reply (deletes it
- * on Facebook) or mark a needs-human item reviewed.
+ * on Facebook), or mark a row reviewed — this is the only action that clears
+ * `reviewed_at`, which is what makes a permanently-stuck row (see
+ * comment-autoreply-stuck-items.ts) stop reappearing in the daily todo.
+ *
+ * "标记已阅" used to only show for `needs_human` rows. A row that's stuck
+ * (failed after exhausting retries, dm_sent with no public reply, or stale
+ * processing) has no requirement that `needs_human` be true — a plain praise
+ * comment that failed to send is still stuck, `needs_human=false` and all —
+ * so the button must also cover those, or the "point mark_reviewed to close
+ * this todo" instruction in that pm-todo channel has nowhere to click
+ * (Codex round 3 复审 P1).
  */
 
 import { useState, useEffect, useCallback } from 'react'
+import { MAX_ATTEMPTS, STALE_PROCESSING_MS } from '@/lib/social/comment-autoreply-constants'
 
 interface Props {
   clientId: string
 }
 
-interface Engagement {
+export interface Engagement {
   id: string
   category: string | null
   comment_text: string | null
   author_name: string | null
   public_reply_text: string | null
+  public_reply_id: string | null
   private_reply_sent: boolean
   hidden: boolean
   reply_status: string
+  attempts: number
   needs_human: boolean
+  reviewed_at: string | null
   guardrail_flags: string[] | null
   reply_source: string | null
   created_at: string
+  updated_at: string
+  post_id: string
+  comment_id: string
+}
+
+/**
+ * Facebook's own permalink shape for a comment: post URL + `?comment_id=`
+ * deep-links to that comment on the post, scrolled to and highlighted.
+ * `post_id`/`comment_id` are stored exactly as Graph API returned them
+ * (claimComment's insert), so no extra API call or field is needed to build
+ * this (Codex round 18 复审 P2: FDE had no way to open the specific stuck
+ * comment on Facebook to check whether it already has a reply there — the
+ * audit list only shows author/text/time, not enough to locate a 39-day-old
+ * comment on a busy page by hand).
+ */
+export function facebookCommentUrl(postId: string, commentId: string): string {
+  return `https://www.facebook.com/${postId}?comment_id=${commentId}`
+}
+
+/**
+ * Must mirror comment-autoreply-stuck-items.ts's own "stuck" query exactly,
+ * not just loosely by `reply_status` (Codex round 5 复审 P2): a `failed` row
+ * still mid-retry, or a `processing` row still well within a normal run, is
+ * not actually stuck yet. Showing the button for those anyway invites an
+ * early click that writes `reviewed_at` — which `finalise()` never clears —
+ * permanently hiding this row from the todo detector if it goes on to become
+ * genuinely stuck later. Already-reviewed rows are excluded too, so the
+ * button doesn't keep reappearing after being clicked once.
+ *
+ * Only covers 3 of the 4 categories (Codex round 13 复审 P1): a `failed` row
+ * that hasn't exhausted retries but has aged out of the client's configured
+ * `lookback_days` is ALSO stuck (comment-autoreply-stuck-items.ts §4), but
+ * this function has no way to know that client's lookback_days — it isn't
+ * on `Engagement` and this component never fetches client config. The
+ * caller covers that 4th category separately, by trusting any row the
+ * server's own `?stuck=1` fetch already returned (see `stuckIds` in
+ * `CommentAuditList`) rather than trying to re-derive it here.
+ */
+export function isStuck(it: Engagement, now: number = Date.now()): boolean {
+  if (it.reviewed_at) return false
+  if (it.reply_status === 'failed') return it.attempts >= MAX_ATTEMPTS
+  if (it.reply_status === 'processing') return now - Date.parse(it.updated_at) >= STALE_PROCESSING_MS
+  return it.reply_status === 'dm_sent' && !it.public_reply_id
+}
+
+/**
+ * Union of the recency-windowed page and the always-complete stuck set, by
+ * id, newest first (Codex round 7 复审 P1: a stuck row older than the recency
+ * window would otherwise never load, so its only closing action — the
+ * "标记已阅" button below — becomes permanently unreachable).
+ */
+export function mergeEngagements(recent: Engagement[], stuck: Engagement[]): Engagement[] {
+  const byId = new Map<string, Engagement>()
+  for (const it of [...recent, ...stuck]) byId.set(it.id, it)
+  return Array.from(byId.values()).sort((a, b) => b.created_at.localeCompare(a.created_at))
+}
+
+/**
+ * Whether "标记已阅" should render for this row — `needs_human`, or stuck by
+ * one of the 3 categories `isStuck` can judge alone, or stuck by the 4th
+ * (lookback-orphaned) one that only the server's `?stuck=1` result can prove
+ * (Codex round 13 复审 P1 — see `isStuck`'s docstring for why).
+ */
+export function shouldShowMarkReviewed(it: Engagement, stuckIds: Set<string>, now: number = Date.now()): boolean {
+  return it.needs_human || isStuck(it, now) || stuckIds.has(it.id)
 }
 
 const CATEGORY_META: Record<string, { label: string; cls: string }> = {
@@ -46,14 +125,32 @@ export function CommentAuditList({ clientId }: Props) {
   const [items, setItems] = useState<Engagement[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  // 服务端 `?stuck=1` 返回的 id 集合——`isStuck()` 判不出"越窗未耗尽"这一类
+  // （需要这个客户的 lookback_days，这个组件读不到），直接信这个集合，不重算
+  // （Codex round 13 复审 P1）。
+  const [stuckIds, setStuckIds] = useState<Set<string>>(new Set())
 
+  /**
+   * Fetches recent rows AND stuck rows separately, then merges (Codex round 7
+   * 复审 P1): the API's default page is a recency window (`?limit=25`), so a
+   * stuck row older than that never loads here — its only closing action
+   * ("标记已阅" below) becomes permanently unreachable even after an FDE has
+   * manually handled it. `?stuck=1` returns every currently-stuck row for
+   * this client regardless of age; merging guarantees one is always visible.
+   */
   const load = useCallback(async () => {
     setError(null)
     try {
-      const res = await fetch(`/api/clients/${clientId}/comment-engagements?limit=25`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const { engagements } = (await res.json()) as { engagements: Engagement[] }
-      setItems(engagements)
+      const [recentRes, stuckRes] = await Promise.all([
+        fetch(`/api/clients/${clientId}/comment-engagements?limit=25`),
+        fetch(`/api/clients/${clientId}/comment-engagements?stuck=1`),
+      ])
+      if (!recentRes.ok) throw new Error(`HTTP ${recentRes.status}`)
+      if (!stuckRes.ok) throw new Error(`HTTP ${stuckRes.status}`)
+      const { engagements: recent } = (await recentRes.json()) as { engagements: Engagement[] }
+      const { engagements: stuck } = (await stuckRes.json()) as { engagements: Engagement[] }
+      setStuckIds(new Set(stuck.map((it) => it.id)))
+      setItems(mergeEngagements(recent, stuck))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -61,13 +158,21 @@ export function CommentAuditList({ clientId }: Props) {
 
   useEffect(() => { void load() }, [load])
 
-  const act = async (engagementId: string, action: 'revert' | 'mark_reviewed') => {
+  // `expectedUpdatedAt`（mark_reviewed 专用，Codex round 17 复审 P2）：告诉服务端
+  // 这次点击是基于哪个版本的行做出的决定——这行如果在点击之后、请求到达之前
+  // 又被系统重试改过（`updated_at` 变了），服务端会拒绝这次写入而不是盲目盖过去
+  // （见 route.ts PATCH 的注释）。revert 不受这条竞态影响，不用传。
+  const act = async (engagementId: string, action: 'revert' | 'mark_reviewed', expectedUpdatedAt?: string) => {
     setBusyId(engagementId)
     try {
       const res = await fetch(`/api/clients/${clientId}/comment-engagements`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ engagement_id: engagementId, action }),
+        body: JSON.stringify({
+          engagement_id: engagementId,
+          action,
+          ...(expectedUpdatedAt ? { expected_updated_at: expectedUpdatedAt } : {}),
+        }),
       })
       if (!res.ok) {
         const { error } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
@@ -142,14 +247,18 @@ export function CommentAuditList({ clientId }: Props) {
             )}
 
             <div className="mt-2 flex items-center gap-3">
+              <a href={facebookCommentUrl(it.post_id, it.comment_id)} target="_blank" rel="noopener noreferrer"
+                className="text-xs font-semibold text-blue-600 hover:underline">
+                去 Facebook 看原评论 →
+              </a>
               {(it.reply_status === 'replied' || it.reply_status === 'dm_sent') && (
                 <button onClick={() => act(it.id, 'revert')} disabled={busyId === it.id}
                   className="text-xs font-semibold text-red-600 hover:underline disabled:opacity-50">
                   {busyId === it.id ? '处理中…' : '撤回回复'}
                 </button>
               )}
-              {it.needs_human && (
-                <button onClick={() => act(it.id, 'mark_reviewed')} disabled={busyId === it.id}
+              {shouldShowMarkReviewed(it, stuckIds) && (
+                <button onClick={() => act(it.id, 'mark_reviewed', it.updated_at)} disabled={busyId === it.id}
                   className="text-xs font-semibold text-slate-600 hover:underline disabled:opacity-50">
                   标记已阅
                 </button>

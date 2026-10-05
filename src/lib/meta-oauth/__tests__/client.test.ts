@@ -77,6 +77,13 @@ describe('meta-oauth state', () => {
     })
   })
 
+  it('round-trips the comment_reply intent when one is set (Codex round 8 复审 P1)', () => {
+    expect(verifyState(buildState(CLIENT, 'comment_reply'))).toEqual({
+      clientId: CLIENT,
+      intent: 'comment_reply',
+    })
+  })
+
   it('an intent-less state stays exactly the old shape — no intent key leaks in', () => {
     // The inbox connect must be untouched: same signed payload, no intent.
     expect(verifyState(buildState(CLIENT))).toEqual({ clientId: CLIENT })

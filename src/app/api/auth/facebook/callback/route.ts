@@ -17,7 +17,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { verifyState, exchangeCode, exchangeForLongLivedToken, listPagesWithTokens, listGrantedScopes, META_PUBLISH_SCOPE } from '@/lib/meta-oauth/client'
+import { verifyState, exchangeCode, exchangeForLongLivedToken, listPagesWithTokens, listGrantedScopes, META_PUBLISH_SCOPE, META_COMMENT_REPLY_SCOPE, META_COMMENT_READ_SCOPES } from '@/lib/meta-oauth/client'
 import { upsertConnection } from '@/lib/platform-oauth/connection-store'
 import { PLATFORM_PROVIDERS } from '@/lib/platform-oauth/vocabulary'
 import { projectFactoryConfig } from '@/lib/factory/client-config'
@@ -31,8 +31,11 @@ type Outcome =
   | 'connected'
   | 'publish_ready'
   | 'publish_not_granted'
+  | 'comment_reply_ready'
+  | 'comment_reply_not_granted'
   | 'verify_failed'
   | 'no_publish_target'
+  | 'no_comment_page'
   | 'no_pages'
   | 'page_not_granted'
   | 'no_page_bound'
@@ -80,19 +83,25 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const pages = await listPagesWithTokens(longToken)
   if (pages.length === 0) return back(clientId, 'no_pages')
 
-  // Which Page do we need a token for? These are two independent fields:
-  //   • inbox connect  → clients.facebook_page_id (the Messenger sync target)
-  //   • publishing      → factory_config.publish_target.page_id (what the
+  // Which Page do we need a token for? These are three independent fields:
+  //   • inbox connect    → clients.facebook_page_id (the Messenger sync target)
+  //   • publishing       → factory_config.publish_target.page_id (what the
   //                        Facebook Reel adapter actually posts to)
-  // Storing the inbox Page's token while claiming the publishing Page is ready
-  // is exactly the failure this reauth exists to end, so publishing resolves its
-  // own target — re-read here server-side (never from a client-supplied id or
-  // the signed state) so a config change mid-flow fails closed below.
-  const { data } = await supabaseAdmin
-    .from('clients')
-    .select('facebook_page_id, factory_config')
-    .eq('id', clientId)
-    .maybeSingle()
+  //   • comment_reply    → social_comment_config.fb_page_id (what the comment
+  //                        auto-reply engine actually replies on — not always
+  //                        the same Page as clients.facebook_page_id; Codex
+  //                        round 8 复审 P1: a plain reconnect silently stored
+  //                        the new token for the wrong Page when they diverge)
+  // Storing one Page's token while claiming a DIFFERENT one is ready is exactly
+  // the failure this reauth exists to end, so each intent resolves its own
+  // target — re-read here server-side (never from a client-supplied id or the
+  // signed state) so a config change mid-flow fails closed below.
+  const [{ data }, { data: commentConfig }] = await Promise.all([
+    supabaseAdmin.from('clients').select('facebook_page_id, factory_config').eq('id', clientId).maybeSingle(),
+    intent === 'comment_reply'
+      ? supabaseAdmin.from('social_comment_config').select('fb_page_id').eq('client_id', clientId).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ])
 
   let targetPageId: string | null
   if (intent === 'publishing') {
@@ -103,6 +112,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       return back(clientId, 'no_publish_target')
     }
     targetPageId = target.page_id
+  } else if (intent === 'comment_reply') {
+    targetPageId = (commentConfig as { fb_page_id?: string | null } | null)?.fb_page_id ?? null
+    if (!targetPageId) return back(clientId, 'no_comment_page')
   } else {
     targetPageId = (data as { facebook_page_id?: string | null } | null)?.facebook_page_id ?? null
     if (!targetPageId) return back(clientId, 'no_page_bound')
@@ -141,12 +153,28 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     lastSyncedAt: new Date(),
   })
 
-  // The publishing reauthorisation fails closed: only report ready when the
-  // provider authoritatively confirmed pages_manage_posts. A declined grant
-  // (authoritative list without it) stays visibly not-ready and cannot be
-  // mistaken for success. Inbox connects (no intent) keep their existing outcome.
+  // The publishing / comment-reply reauthorisations fail closed: only report
+  // ready when the provider authoritatively confirmed the scope each one
+  // exists to recover. A declined grant (authoritative list without it) stays
+  // visibly not-ready and cannot be mistaken for success — Codex round 9 复审
+  // P1: comment_reply used to fall through to the generic 'connected' outcome
+  // even when pages_manage_engagement was declined, telling the FDE the fix
+  // worked when public replies would keep failing. Inbox connects (no intent)
+  // keep their existing outcome.
   if (intent === 'publishing') {
     return back(clientId, granted.includes(META_PUBLISH_SCOPE) ? 'publish_ready' : 'publish_not_granted')
+  }
+  if (intent === 'comment_reply') {
+    // 三个 scope 都要拿到（Codex round 18/19 复审 P1）：Meta 同意页允许用户
+    // 逐条取消某一项授权。读评论要 pages_read_engagement 和
+    // pages_read_user_content 两个一起才够（comments.ts 头注写死的组合，round
+    // 19 抓到 round 18 只查了后一半），缺任何一个，引擎发送前的读评论步骤
+    // （comment-autoreply-engine.ts 的 fetchPostCommentsResult）都会先因 Graph
+    // #10 拿不到新评论，回复权限给了也没用。
+    const ready =
+      granted.includes(META_COMMENT_REPLY_SCOPE) &&
+      META_COMMENT_READ_SCOPES.every((scope) => granted.includes(scope))
+    return back(clientId, ready ? 'comment_reply_ready' : 'comment_reply_not_granted')
   }
 
   return back(clientId, 'connected')

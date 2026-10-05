@@ -34,6 +34,7 @@ import type { FacebookSyncItemKind } from './facebook-sync-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
 import type { AdsCircuitItemKind } from './ads-circuit-items'
+import type { CommentAutoreplyStuckItemKind } from './comment-autoreply-stuck-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
 import type { SimaqianItemKind } from './simaqian-review-items'
@@ -188,6 +189,8 @@ export type ManualItemKind =
   | 'ledger_unreadable'
   /** 台账：到期的卡两天没被夜巡盖章——夜巡没来，不是没事 */
   | 'ledger_patrol_missing'
+  /** 评论自动回复连续失败到系统放弃重试，且不会自己再补发（2026-09-28 CTS 卡了 39 天没人知道） */
+  | CommentAutoreplyStuckItemKind
   /** 客人像是说他付款了，但不是我们自己确认的 —— 只有人能核对到账，不许机器自己打 paid 标签 */
   | 'paid_signal_needs_review'
   /** 工具实验室有人留资（自助开通 / 网站诊断留邮箱）—— 这张表以前写完没人读，见 tool-lead-items.ts */

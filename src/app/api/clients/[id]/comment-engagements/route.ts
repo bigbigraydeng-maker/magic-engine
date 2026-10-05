@@ -2,13 +2,24 @@
  * Social comment engagements — FDE audit view.
  *
  * GET   → recent auto-reply decisions for the client (what was replied / DM'd /
- *         hidden / flagged for human). Supports ?status=, ?needs_human=1, ?limit=.
+ *         hidden / flagged for human). Supports ?status=, ?needs_human=1, ?limit=,
+ *         ?stuck=1.
  * PATCH → intervene on one engagement:
  *           action 'revert'        — delete our public reply on FB, mark reverted
  *           action 'mark_reviewed' — FDE acknowledged (clears needs_human)
  *
  * Read-only surface over a full-auto system: the cron does the work, humans
  * only inspect + occasionally undo.
+ *
+ * `?stuck=1` mirrors comment-autoreply-stuck-items.ts's own "permanently
+ * stuck" predicate (failed+retries exhausted / dm_sent with no public reply /
+ * processing past the stale window) instead of the default recency window
+ * (Codex round 7 复审 P1): the default `?limit=` page only covers the most
+ * recent rows, so a stuck row older than that never loads client-side — its
+ * only closing action ("标记已阅" in CommentAuditList.tsx) becomes permanently
+ * unreachable even after an FDE has manually handled it. `stuck=1` ignores
+ * `limit`/`status`/`needs_human` and returns every currently-stuck row for
+ * this client regardless of age.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -17,6 +28,8 @@ import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { getPageAccessToken } from '@/lib/meta/page-posts'
 import { deleteComment } from '@/lib/meta/comments'
+import { MAX_ATTEMPTS, STALE_PROCESSING_MS, DEFAULT_LOOKBACK_DAYS } from '@/lib/social/comment-autoreply-constants'
+import { fetchAll } from '@/lib/supabase-paginate'
 
 export async function GET(
   req: NextRequest,
@@ -27,6 +40,13 @@ export async function GET(
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
   const url = new URL(req.url)
+  const stuck = url.searchParams.get('stuck') === '1'
+
+  if (stuck) {
+    const data = await fetchStuckEngagements(clientId)
+    return NextResponse.json({ engagements: data })
+  }
+
   const status = url.searchParams.get('status')
   const needsHuman = url.searchParams.get('needs_human') === '1'
   const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') ?? '50', 10) || 50))
@@ -47,10 +67,87 @@ export async function GET(
   return NextResponse.json({ engagements: data ?? [] })
 }
 
+interface StuckEngagementRow {
+  id: string
+  comment_created_at: string
+  [key: string]: unknown
+}
+
+/**
+ * Mirrors comment-autoreply-stuck-items.ts's own "permanently stuck" query
+ * shape (separate branches, unioned) rather than one raw PostgREST `.or()`
+ * filter string — same predicate logic in two different query styles would
+ * drift out of sync over time, and this shape is already the proven, tested
+ * pattern for this exact definition of "stuck".
+ *
+ * All 4 branches page through `fetchAll` rather than a flat `.limit(200)`
+ * (Codex round 14 复审 P2): the old cap applied before the 4th branch's
+ * lookback filtering, so a client with a burst of >200 recent still-
+ * retriable failures could push genuinely older orphaned rows out of the
+ * capped page entirely — under-reporting exactly the rows the pm-todo
+ * detector (which already uses `fetchAll`, see
+ * comment-autoreply-stuck-items.ts) counts as stuck, leaving their only
+ * closing action ("标记已阅") permanently unreachable.
+ *
+ * 4th branch — `failed` rows that haven't exhausted retries but have aged
+ * out of the client's configured lookback window (Codex round 13 复审 P1):
+ * round 12 added this category to the pm-todo detector but left this route
+ * and `CommentAuditList.tsx`'s `isStuck()` on the old 3-category definition,
+ * so a row only this route/detector agreed was "stuck" had no reachable
+ * "标记已阅" — the exact closed-loop gap round 6/7 already fixed once for
+ * the other three categories. Fails closed on a `social_comment_config`
+ * read error (Codex round 14 复审 P2) instead of silently defaulting to 7
+ * days: a transient read failure defaulting to a shorter-than-configured
+ * window could misclassify a still-within-window row as orphaned, letting
+ * the front end write `reviewed_at` on a row that isn't actually stuck yet
+ * — which `finalise()` never clears, permanently hiding it from the
+ * detector once it does go on to become genuinely stuck (the same failure
+ * mode round 5 already fixed once for premature "标记已阅" clicks).
+ */
+async function fetchStuckEngagements(clientId: string) {
+  const staleBefore = new Date(Date.now() - STALE_PROCESSING_MS).toISOString()
+  const base = () =>
+    supabaseAdmin
+      .from('social_comment_engagements')
+      .select('*')
+      .eq('client_id', clientId)
+      .is('reviewed_at', null)
+      .order('id', { ascending: true })
+
+  const [failed, dmOnly, stuckProcessing, partialFailed, config] = await Promise.all([
+    fetchAll<StuckEngagementRow>((from, to) =>
+      base().eq('reply_status', 'failed').gte('attempts', MAX_ATTEMPTS).range(from, to),
+    ),
+    fetchAll<StuckEngagementRow>((from, to) =>
+      base().eq('reply_status', 'dm_sent').is('public_reply_id', null).range(from, to),
+    ),
+    fetchAll<StuckEngagementRow>((from, to) =>
+      base().eq('reply_status', 'processing').lt('updated_at', staleBefore).range(from, to),
+    ),
+    fetchAll<StuckEngagementRow>((from, to) =>
+      base().eq('reply_status', 'failed').lt('attempts', MAX_ATTEMPTS).range(from, to),
+    ),
+    supabaseAdmin.from('social_comment_config').select('lookback_days').eq('client_id', clientId).maybeSingle(),
+  ])
+  if (config.error) throw new Error(config.error.message)
+
+  const lookbackDays = (config.data as { lookback_days?: number | null } | null)?.lookback_days ?? DEFAULT_LOOKBACK_DAYS
+  const lookbackCutoff = Date.now() - lookbackDays * 86_400_000
+  const orphaned = partialFailed.filter((r) => Date.parse(r.comment_created_at) < lookbackCutoff)
+
+  const byId = new Map<string, StuckEngagementRow>()
+  for (const row of [...failed, ...dmOnly, ...stuckProcessing, ...orphaned]) {
+    byId.set(row.id, row)
+  }
+  return Array.from(byId.values())
+}
+
 interface PatchBody {
   engagement_id?: unknown
   action?: unknown
   reviewer?: unknown
+  /** See `mark_reviewed`'s optimistic-concurrency guard below. */
+  expected_updated_at?: unknown
 }
 
 export async function PATCH(
@@ -71,6 +168,7 @@ export async function PATCH(
   const engagementId = typeof body.engagement_id === 'string' ? body.engagement_id : ''
   const action = body.action
   const reviewer = typeof body.reviewer === 'string' ? body.reviewer : null
+  const expectedUpdatedAt = typeof body.expected_updated_at === 'string' ? body.expected_updated_at : null
   if (!engagementId || (action !== 'revert' && action !== 'mark_reviewed')) {
     return NextResponse.json(
       { error: 'Body must include engagement_id and action ("revert" | "mark_reviewed")' },
@@ -80,7 +178,7 @@ export async function PATCH(
 
   const { data: row } = await supabaseAdmin
     .from('social_comment_engagements')
-    .select('id, client_id, page_id, public_reply_id, reply_status')
+    .select('id, client_id, page_id, public_reply_id, reply_status, updated_at')
     .eq('id', engagementId)
     .eq('client_id', clientId)
     .maybeSingle()
@@ -90,10 +188,61 @@ export async function PATCH(
   const now = new Date().toISOString()
 
   if (action === 'mark_reviewed') {
-    await supabaseAdmin
+    // Refused outright for a row that's CURRENTLY still-fresh 'processing'
+    // (Codex round 18 复审 P2 — a gap the optimistic lock below doesn't
+    // cover): if THIS execution crashes before finalise() ever runs,
+    // updated_at never changes again, so a stale click's
+    // expected_updated_at would still match 24h later when the row becomes
+    // genuinely stale_processing — the lock has nothing to catch, since
+    // nothing ever wrote a different updated_at to disagree with it. A row
+    // that's processing and not yet past STALE_PROCESSING_MS hasn't reached
+    // any of the detector's 4 stuck categories yet, so there is nothing to
+    // confirm as reviewed regardless of what the client's timestamp says;
+    // only a row already past that same staleness threshold — the exact
+    // one the detector itself uses for its own stale_processing query — is
+    // a legitimate case to close.
+    const rowReplyStatus = (row as { reply_status: string }).reply_status
+    const rowUpdatedAt = (row as { updated_at: string }).updated_at
+    if (rowReplyStatus === 'processing' && Date.now() - Date.parse(rowUpdatedAt) < STALE_PROCESSING_MS) {
+      return NextResponse.json(
+        {
+          success: false,
+          processing: true,
+          error: '这条还在正常处理中（结果还不确定），等它跑完或者超过宽限期变成真正卡住了再处理',
+        },
+        { status: 409 },
+      )
+    }
+
+    // Guarded on `updated_at` still matching what the client last saw when
+    // it's passed (Codex round 17 复审 P2): a "标记已阅" click fired from a
+    // page load taken while this row was still 'processing' can be delayed
+    // in flight long enough for that same retry's `finalise()` to land
+    // first — `finalise()` clears reviewed_at (round 16), but the click's
+    // PATCH would then arrive afterward and silently overwrite it, and if
+    // that retry turned out to be the final one (row now exhausted),
+    // nothing ever runs again to clear it a second time — the detector's
+    // `.is('reviewed_at', null)` filter would hide it forever. The client
+    // can't fully prevent a stale click on its own (the button it rendered
+    // reflects whatever it last fetched, not the server's live state), so
+    // the server has to refuse a write that no longer applies: `updated_at`
+    // changes on every finalise()/claimComment() write, so a value that no
+    // longer matches means something happened to this row since the click
+    // was fired, and the mark shouldn't apply blindly on top of that.
+    // Optional — a caller that doesn't send it keeps the old unconditional
+    // behavior (only CommentAuditList calls this today, and always sends it).
+    let query = supabaseAdmin
       .from('social_comment_engagements')
       .update({ needs_human: false, reviewed_by: reviewer, reviewed_at: now, updated_at: now })
       .eq('id', engagementId)
+    if (expectedUpdatedAt) query = query.eq('updated_at', expectedUpdatedAt)
+    const { data: updated } = await query.select('id').maybeSingle()
+    if (expectedUpdatedAt && !updated) {
+      return NextResponse.json(
+        { success: false, stale: true, error: '这条记录在你查看之后已经变化（比如系统又重试了一次），请刷新页面确认现在的状态后再处理' },
+        { status: 409 },
+      )
+    }
     return NextResponse.json({ success: true, action: 'mark_reviewed' })
   }
 

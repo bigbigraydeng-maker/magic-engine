@@ -11,6 +11,7 @@ import { NextRequest } from 'next/server'
 const mocks = vi.hoisted(() => ({
   requireDashboardClientAccess: vi.fn(),
   factoryConfig: { publish_target: { platform: 'facebook', page_id: '778899' } } as unknown,
+  commentPageId: '556677' as string | null,
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
@@ -19,11 +20,13 @@ vi.mock('@/lib/auth/client-access', () => ({
 
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
-    from: vi.fn(() => ({
+    from: vi.fn((table: string) => ({
       select: vi.fn(() => ({
         eq: vi.fn(() => ({
           maybeSingle: vi.fn(() =>
-            Promise.resolve({ data: { factory_config: mocks.factoryConfig }, error: null }),
+            table === 'social_comment_config'
+              ? Promise.resolve({ data: { fb_page_id: mocks.commentPageId }, error: null })
+              : Promise.resolve({ data: { factory_config: mocks.factoryConfig }, error: null }),
           ),
         })),
       })),
@@ -54,6 +57,7 @@ beforeEach(() => {
   process.env.NEXT_PUBLIC_APP_URL = 'https://app.magic-engine.com'
   mocks.requireDashboardClientAccess.mockResolvedValue(adminAccess())
   mocks.factoryConfig = { publish_target: { platform: 'facebook', page_id: '778899' } }
+  mocks.commentPageId = '556677'
 })
 
 describe('tenant isolation — no unauthenticated / cross-tenant reauthorisation', () => {
@@ -155,6 +159,39 @@ describe('publishing reauth must not even start without a valid Facebook publish
     mocks.factoryConfig = {} // even with no publish target...
     const res = await GET(makeRequest({ clientId: CLIENT_ID }))
     // ...a plain connect still proceeds to Meta (inbox anchored to facebook_page_id).
+    expect(new URL(res.headers.get('location') ?? '').hostname).toContain('facebook.com')
+  })
+})
+
+describe('comment_reply intent (Codex round 8 复审 P1: the comment engine Page is not always clients.facebook_page_id)', () => {
+  it('intent=comment_reply round-trips into the state and forces rerequest', async () => {
+    const res = await GET(makeRequest({ clientId: CLIENT_ID, intent: 'comment_reply' }))
+
+    expect(res.status).toBe(307)
+    const authUrl = new URL(res.headers.get('location') ?? '')
+    expect(authUrl.hostname).toContain('facebook.com')
+    expect(authUrl.searchParams.get('auth_type')).toBe('rerequest')
+
+    const state = authUrl.searchParams.get('state') ?? ''
+    expect(verifyState(state)).toEqual({ clientId: CLIENT_ID, intent: 'comment_reply' })
+  })
+
+  it('fails closed to the panel with no_comment_page when no comment-reply Page is configured — never reaches Meta', async () => {
+    mocks.commentPageId = null
+
+    const res = await GET(makeRequest({ clientId: CLIENT_ID, intent: 'comment_reply' }))
+
+    const url = new URL(res.headers.get('location') ?? '')
+    expect(url.hostname).not.toContain('facebook.com')
+    expect(url.pathname).toBe(`/dashboard/clients/${CLIENT_ID}`)
+    expect(url.searchParams.get('meta')).toBe('no_comment_page')
+  })
+
+  it('proceeds to Meta when a comment-reply Page is configured', async () => {
+    mocks.commentPageId = '556677'
+
+    const res = await GET(makeRequest({ clientId: CLIENT_ID, intent: 'comment_reply' }))
+
     expect(new URL(res.headers.get('location') ?? '').hostname).toContain('facebook.com')
   })
 })

@@ -33,6 +33,9 @@ import {
 } from './comment-post-skips'
 import { classifyComment, CommentDecision, CommentCategory } from './comment-classifier'
 import { ReplyContext } from './comment-guardrails'
+import { MAX_ATTEMPTS } from './comment-autoreply-constants'
+
+export { MAX_ATTEMPTS }
 
 export interface CommentConfig {
   client_id: string
@@ -77,8 +80,6 @@ export interface ClientRunResult {
   token_invalid?: string
 }
 
-/** Max send attempts before a 'failed' row stops being retried. */
-export const MAX_ATTEMPTS = 3
 /** Non-terminal statuses that should never be reprocessed (claimed or done). */
 const TERMINAL_OR_INFLIGHT = ['processing', 'replied', 'dm_sent', 'hidden', 'skipped', 'reverted']
 
@@ -277,9 +278,22 @@ interface Claim { rowId: string; attempts: number }
  *
  * New comment  → insert 'processing' (UNIQUE(comment_id) rejects a racing run).
  * Failed retry → update the existing 'failed' row to 'processing', guarded on
- *                reply_status='failed' so only one racer wins.
+ *                reply_status='failed' so only one racer wins. Also clears
+ *                reviewed_at/reviewed_by (Codex round 15 复审 P2): a
+ *                `needs_human=true` row can be `failed` before retries are
+ *                exhausted (see the `status` derivation below — a failed
+ *                public reply always yields 'failed' regardless of
+ *                needsHuman), so an FDE can legitimately click "标记已阅" on
+ *                it while it's still retriable — that action writes
+ *                `reviewed_at`, which `finalise()` never clears. Without
+ *                clearing it here, if this retry also ends up exhausting
+ *                MAX_ATTEMPTS, the stuck detector's `.is('reviewed_at',
+ *                null)` filter would permanently hide a row that is now
+ *                genuinely stuck, because the review timestamp still
+ *                describes the earlier, different failure the FDE actually
+ *                looked at — not this new attempt.
  */
-async function claimComment(comment: PageComment, config: CommentConfig): Promise<Claim | null> {
+export async function claimComment(comment: PageComment, config: CommentConfig): Promise<Claim | null> {
   const insertRes = await supabaseAdmin
     .from('social_comment_engagements')
     .insert({
@@ -317,7 +331,13 @@ async function claimComment(comment: PageComment, config: CommentConfig): Promis
   const nextAttempts = (row.attempts ?? 0) + 1
   const { data: updated } = await supabaseAdmin
     .from('social_comment_engagements')
-    .update({ reply_status: 'processing', attempts: nextAttempts, updated_at: new Date().toISOString() })
+    .update({
+      reply_status: 'processing',
+      attempts: nextAttempts,
+      updated_at: new Date().toISOString(),
+      reviewed_at: null,
+      reviewed_by: null,
+    })
     .eq('id', row.id)
     .eq('reply_status', 'failed') // lost the race if someone flipped it first
     .select('id')
@@ -404,7 +424,7 @@ async function processClaimedComment(
   }
 }
 
-interface FinaliseResult {
+export interface FinaliseResult {
   status: string
   hidden: boolean
   dmSent: boolean
@@ -413,8 +433,24 @@ interface FinaliseResult {
   error?: string
 }
 
-/** Update the claimed row with the classification + send result. Logs (never throws) on DB error. */
-async function finalise(rowId: string, decision: CommentDecision, r: FinaliseResult): Promise<void> {
+/**
+ * Update the claimed row with the classification + send result. Logs (never
+ * throws) on DB error.
+ *
+ * Also clears reviewed_at/reviewed_by unconditionally (Codex round 16 复审
+ * P2): claimComment already clears them at claim time (round 15), but that
+ * only covers a review mark written BEFORE this retry attempt started —
+ * classifyComment/replyToComment/sendPrivateReply below all await real
+ * network calls, so the row sits in 'processing' with its OLD, stale
+ * needs_human value (finalise hasn't run yet to refresh it) for that whole
+ * stretch. If an FDE's "标记已阅" click lands in exactly that window, it
+ * writes a fresh reviewed_at that claimComment's claim-time clear has
+ * already run and can't catch. Clearing here too is a no-op for every other
+ * case (a brand-new row's reviewed_at was never set; a retry-claimed row's
+ * was already cleared by claimComment) and closes this one for real, since
+ * finalise is always the last write for a given attempt.
+ */
+export async function finalise(rowId: string, decision: CommentDecision, r: FinaliseResult): Promise<void> {
   const { error } = await supabaseAdmin
     .from('social_comment_engagements')
     .update({
@@ -430,6 +466,8 @@ async function finalise(rowId: string, decision: CommentDecision, r: FinaliseRes
       private_reply_sent: r.dmSent,
       hidden: r.hidden,
       error_message: r.error ?? null,
+      reviewed_at: null,
+      reviewed_by: null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', rowId)

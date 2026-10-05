@@ -42,6 +42,12 @@ export const META_PAGE_SCOPES = [
   // 东西。没有它,评论自动回复对每个帖子都拿到 Graph #10,客人的提问系统一条
   // 都看不见(2026-08-15 生产日志实测)。已经连过的客户要重新点一次「连接 Meta」。
   'pages_read_user_content',
+  // 回复/隐藏**别人写的**评论必须有这一条 —— 上面那条只够读,发公开回复用的是
+  // 另一个权限。漏了这条时 Meta 侧多半仍让授权走完(不报错),但 replyToComment
+  // 一直返回失败,表现是"能读评论、发不出回复",跟直接漏 pages_read_user_content
+  // 的报错方式不一样,更隐蔽(2026-09-28 CTS 评论回复静默卡 39 天才发现漏了这条)。
+  // 已经连过的客户要重新点一次「连接 Meta」才能拿到它。
+  'pages_manage_engagement',
   // 发内容到主页(Reel/贴文)必须有这一条。没有它,存下来的 token 只能读不能发——
   // 2026-08-04 讲课片发布就卡在「读得到、发不出去」。
   // 已经连过的客户(CTS/Roman)只做收件箱同步,不受影响;要发内容的客户重新点一次「连接 Meta」即可。
@@ -71,12 +77,42 @@ export const META_PAGE_SCOPES = [
 export const META_PUBLISH_SCOPE = 'pages_manage_posts'
 
 /**
+ * The one Meta permission the comment auto-reply engine needs to send a
+ * public reply / hide a comment (see META_PAGE_SCOPES's own comment on this
+ * scope for the 2026-09-28 incident it exists to close). Comment-reply
+ * reauth readiness keys on this single name, same reasoning as
+ * META_PUBLISH_SCOPE — one source of truth for the callback and the settings UI.
+ */
+export const META_COMMENT_REPLY_SCOPE = 'pages_manage_engagement'
+
+/**
+ * The permissions that let a stored Page token read comments OTHER people
+ * wrote — required separately from META_COMMENT_REPLY_SCOPE, and required
+ * TOGETHER as a pair (see comments.ts's header: "Requires ... with
+ * pages_read_engagement + pages_read_user_content"). Meta's consent screen
+ * lets a user toggle off any one requested permission while granting the
+ * rest, so a reconnect can end up with reply/hide granted but only one (or
+ * neither) of these two read scopes — the callback must check reply +
+ * BOTH read scopes before calling comment-reply reauth "ready". First
+ * added with just pages_read_user_content (Codex round 18 复审 P1), then
+ * caught missing its required pair pages_read_engagement in the very next
+ * review round (Codex round 19 复审 P1) — grouped into one array so a
+ * future reader can't repeat that same half-fix.
+ */
+export const META_COMMENT_READ_SCOPES = ['pages_read_engagement', 'pages_read_user_content'] as const
+
+/**
  * Why a connect flow was started. `publishing` marks the "Reauthorize Meta
  * Publishing" path so the callback can fail closed with a publishing-specific,
- * actionable message when Meta declines `pages_manage_posts`. Absent = the
+ * actionable message when Meta declines `pages_manage_posts`. `comment_reply`
+ * marks the comment-autoreply reconnect path (Codex round 8 复审 P1): the
+ * comment engine's configured Page (`social_comment_config.fb_page_id`) is not
+ * always the same Page as `clients.facebook_page_id` — a plain reconnect would
+ * silently store the new token for the wrong Page, leaving the Page comments
+ * actually get replied on still without the missing scope. Absent = the
  * existing inbox-sync connect, whose outcomes are unchanged.
  */
-export type MetaConnectIntent = 'publishing'
+export type MetaConnectIntent = 'publishing' | 'comment_reply'
 
 export interface VerifiedState {
   clientId: string
@@ -130,7 +166,10 @@ export function verifyState(state: string): VerifiedState | null {
     }
     if (typeof data.clientId !== 'string' || typeof data.exp !== 'number') return null
     if (Date.now() > data.exp) return null
-    const intent = data.intent === 'publishing' ? 'publishing' : undefined
+    const intent =
+      data.intent === 'publishing' ? 'publishing' :
+      data.intent === 'comment_reply' ? 'comment_reply' :
+      undefined
     return intent ? { clientId: data.clientId, intent } : { clientId: data.clientId }
   } catch {
     return null
@@ -142,9 +181,10 @@ export function verifyState(state: string): VerifiedState | null {
 /**
  * @param rerequest When true, adds `auth_type=rerequest`. Meta suppresses a
  *   permission the user already declined once — the consent screen simply omits
- *   it — so a plain re-consent can never recover `pages_manage_posts`. Only
- *   `rerequest` forces Meta to show the declined permission again. Reserved for
- *   the publishing reauthorisation path; the ordinary connect never sets it.
+ *   it — so a plain re-consent can never recover a missing scope. Only
+ *   `rerequest` forces Meta to show a declined permission again. Reserved for
+ *   the publishing and comment-reply reauthorisation paths; the ordinary
+ *   connect never sets it.
  */
 export function buildAuthUrl(state: string, redirectUri: string, rerequest = false): string {
   const params = new URLSearchParams({

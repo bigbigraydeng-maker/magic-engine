@@ -318,6 +318,21 @@ const META_RESULT: Record<string, { ok: boolean; text: string }> = {
     ok: false,
     text: '这个客户还没配好「发布到哪个 Facebook 主页」，所以没法发起发布授权。请先在「视频工厂配置」里把发布主页填好，再点「重新授权 Meta 发布权限」。',
   },
+  // Codex round 9 复审 P1/P2：comment_reply 这条重连路径没有页面上的按钮
+  // （见 comment-autoreply-stuck-items.ts 的注释），这里只是把待办链接重连
+  // 完成后的结果说清楚——要重试就回那条待办再点一次链接，不是这个页面上的按钮。
+  comment_reply_ready: {
+    ok: true,
+    text: '✓ Meta 已授予评论管理权限，评论自动回复现在应该能正常发公开回复了。',
+  },
+  comment_reply_not_granted: {
+    ok: false,
+    text: '连接成功了，但这次授权没有勾选「评论管理」权限，评论自动回复还是发不出公开回复。请回到「今日待办」里那条评论卡死的提醒，再点一次链接重新授权，这次在 Meta 授权页把这项权限一起勾上。',
+  },
+  no_comment_page: {
+    ok: false,
+    text: '这个客户的评论自动回复还没配好对应的 Facebook 主页，所以没法发起这次授权。请先在「评论自动回复」设置里把主页配好，再回到「今日待办」重新点一次链接。',
+  },
   denied: { ok: false, text: '授权取消了，没有任何改动。要接私信的话再点一次。' },
   no_pages: {
     ok: false,
@@ -331,6 +346,15 @@ const META_RESULT: Record<string, { ok: boolean; text: string }> = {
   bad_state: { ok: false, text: '这个连接链接已经过期了，请重新点一次「连接 Meta」。' },
   exchange_failed: { ok: false, text: 'Meta 那边没有换出凭证，请稍后再试一次。' },
 }
+
+/**
+ * comment_reply 这三种结果落地的这个抽屉（`?settings=platform`）不是能
+ * "标记已阅"关掉待办的地方——那个按钮在独立的 `/settings` 页的「评论审计」
+ * 列表里（Codex round 10 复审 P2）：授权完看到结果之后，FDE 得自己再摸到
+ * 那个页面，而且下意识再点一次待办链接只会重新起一轮 Meta 授权，不会带他
+ * 过去。补一条直达链接。
+ */
+const COMMENT_REPLY_OUTCOMES = new Set(['no_comment_page', 'comment_reply_ready', 'comment_reply_not_granted'])
 
 /**
  * The one-click replacement for hand-editing a server environment variable.
@@ -392,6 +416,14 @@ function ConnectMeta({
           }`}
         >
           {result.text}
+          {outcome && COMMENT_REPLY_OUTCOMES.has(outcome) && (
+            <>
+              {' '}
+              <a href={`/dashboard/clients/${clientId}/settings?tab=content&audit=1`} className="font-semibold underline">
+                去「评论审计」列表处理 →
+              </a>
+            </>
+          )}
         </div>
       )}
 
