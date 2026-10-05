@@ -228,4 +228,25 @@ describe('GET /api/internal/keyword-opportunity', () => {
     expect(keywords).not.toContain('cts seo audit')
     expect(keywords).not.toContain('wendywutours seo')
   })
+
+  it('the relevance gate is applied: phrases sharing no topic word with the seeds, and travel-noise phrases, never reach the summary', async () => {
+    process.env.CRON_SECRET = 's'
+    h.clients = CLIENT
+    h.brief = BRIEF // seeds: seo audit / technical seo / site speed
+    h.ideas = [
+      idea('technical seo checklist', 900),
+      idea('cheap pasta recipes', 40000),
+      idea('seo audit flights', 30000),
+    ]
+    const res = await GET(req(`?client_id=${CID}&dry_run=0`, 'Bearer s'))
+    const body = await res.json()
+    expect(res.status).toBe(200)
+    const all = JSON.stringify(body.summary)
+    expect(all).toContain('technical seo checklist')
+    expect(all).not.toContain('cheap pasta recipes')
+    expect(all).not.toContain('seo audit flights')
+    expect(body.summary.excluded.offTopic).toBeGreaterThan(0)
+    expect(body.summary.excluded.noise).toBeGreaterThan(0)
+  })
 })
+

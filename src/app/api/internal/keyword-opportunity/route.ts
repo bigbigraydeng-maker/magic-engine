@@ -11,6 +11,8 @@ import {
   MAX_IDEAS_PER_SEED,
   pickSeeds,
   summariseOpportunity,
+  topicAnchors,
+  TRAVEL_NOISE_TOKENS,
   type OwnRank,
   type SeedIdeas,
 } from '@/lib/seo-intelligence/keyword-opportunity'
@@ -183,6 +185,10 @@ export async function GET(req: NextRequest) {
     brandRoot: domainRoot(client.domain ?? ''),
     brandAliases: client.brand_aliases,
     competitorDomains: client.competitor_domains ?? [],
+    // Relevance gate: a phrase must share a topic word with the brief seeds / tracked keywords,
+    // and travel-adjacent noise (airlines, passports, immigration portals) is dropped.
+    anchors: topicAnchors(seeds, own.map(o => o.keyword)),
+    noiseTokens: TRAVEL_NOISE_TOKENS,
   })
   const summary = summariseOpportunity(rows, excluded, results)
 
