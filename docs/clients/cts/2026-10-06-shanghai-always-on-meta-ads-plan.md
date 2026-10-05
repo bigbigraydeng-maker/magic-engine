@@ -102,7 +102,7 @@
 | 要换的 | 怎么换 | 不动的 |
 |---|---|---|
 | 出发日期（如 25 March 2027） | 写在**广告文案和标题**里，不烧进视频 | 系列、广告组、受众、表单问题 |
-| 余位 | 只有 CTS 给出真实数字才写（例如「N places left」）；没有就不写。不用「仅剩」这类没数据的紧迫话术 | 同上 |
+| 余位 | **不写余位**（2026-10-06 子牙转达 PM 的约束）。也不用「仅剩」这类没数据的紧迫话术 | 同上 |
 | 素材 | 视频里**不出现价格和日期**，同一条 Reel 跨期复用；每期只换 1 条新 Reel | 常年的 3 条核心 Reel |
 | 招募窗口 | 冲刺期（出发前 100～60 天）预算最多**再加 $15/天**，走 ME 现有预算审批流，不手工改 | 常年底座 $30/天 |
 | 命名 | 广告名 = `SH-<出发日>-<素材>-<版本>`（如 `SH-20270325-R1-v1`），**这个名字就是以后按团/按期统计的唯一标记** | — |
@@ -120,7 +120,7 @@
 - ⚠️ 工厂当前**没有 Remotion 收片入口**（`docs/audits/2026-10-05-video-factory-brief-remotion-audit.md`），入口建好前产出只算「样片」，**样片不能进广告**；
 - **视频里不烧价格和日期**（价格、日期写在广告文案里，这样降价/换期不用重渲）；字幕走短句大字 + 安全区 y270–1248；
 - 画面必须能对上真实行程：上海、苏州、无锡、新市古镇、杭州。官网图库有「苏州运河图和乌镇图其实是同一处风景」的已知问题（`feedback-cts-site-tour-images-mislabelled-check-exif`），**用图/用镜头前先核真实来源**；不编评价、不用没核实的客户见证（CTS 旧手册里出过编造见证，`feedback-cts-brochure-had-fabricated-testimonials`）；
-- 「小团」只能说 small group，**不写具体人数**：官网「max 18」与目标招 20 人矛盾，CTS 没确认前不写数字。
+- **团人数上限**：2026-10-06 PM 口头确认「上海周边团人数上限 20 人」（经子牙转达，官网正在补写）。文案写 `group size up to 20`，**不用 small group 这类形容词**，不写余位。上线前以官网为准：官网若仍写「max 18」或别的数，先停下对齐再上线。
 
 **广告用（首批）**：
 
@@ -134,11 +134,11 @@
 | S3 | 静图 | 同上 | 一张真实主图（杭州或上海；核来源），备用 |
 
 - 首批上 4 条（R1 R2 R3 S1），S2 S3 备用；**之后每两周补 1 条新 Reel**（旅游素材 1–2 周后会老化，手册旅游行业第四条）。一个季度大约 6 条新 Reel。
-- 可选 R4「小团 + 英语导游」：等 CTS 确认团人数表述后再做。
+- 可选 R4「英语导游 + 团人数上限 20」：官网补写人数上限后再做。
 - 每条 Reel 同时是「看过视频」池子的种子，**它的 video id 要在广告上线前先追加进新池子的收人规则**（手册 §二十八 坑 1）。
 
 **文案骨架**（等官网改价上线后再核一遍每个数字）：
-- 主文案：「10 days across Shanghai, Suzhou, Wuxi, Xinshi ancient town and Hangzhou. Flights, 7 nights' hotels, an English-speaking guide and 13 meals included. From NZD $2,699 per person twin share, flights included. Departs 25 March 2027.」
+- 主文案：「10 days across Shanghai, Suzhou, Wuxi, Xinshi ancient town and Hangzhou. Flights, 7 nights' hotels, an English-speaking guide and 13 meals included. Group size up to 20. From NZD $2,699 per person twin share, flights included. Departs 25 March 2027.」
 - 标题：「Shanghai & Surroundings · from NZD $2,699」
 - 说明行：「Per person, twin share. Single supplement NZD $400. Subject to availability.」
 - 拼写用 NZ 英语。
@@ -203,8 +203,8 @@
 3. **不写「原价 $3,399 / 现价 $2,699 / 立省 $700」类对比价**：新西兰对「原价/现价」有严格要求（需证明原价真实卖过一段时间），CTS 没确认前一律不用，也不加删除线。
 4. **签证**：只写「Visa requirements as per policy at time of departure」/「签证以出发时政策为准」。**不写 visa-free**：官网横幅到 2026-12-31 结束，2027-03 的团不能引用；2027 年是否延续没查到。
 5. **不编评价、不编见证**；「CTS 25 年 / 1928 年」两个说法都不用（`project_cts_1928_vs_nz_25_years` 有矛盾）；文案里每句话要么官网可溯、要么 brief 可溯、要么先删。
-6. **不写具体团人数**（max 12 / 18 / 20 都不写）。
-7. **余位话术**只在有真实数字时用，写成「N places left as at <日期>」，过期就撤。
+6. **团人数只写 `group size up to 20`**（PM 口头确认 2026-10-06，官网补写中，上线前以官网为准）；不用 small group 等形容词。
+7. **不写余位**（PM 约束）；也不用没有数据的紧迫话术。
 8. **Meta 个人属性规则**：不写「你是不是 55 岁以上？」「你有健康问题吗？」这类点名个人特征的第二人称句子。
 9. **品牌封装名**：对外不出现真实供应商名（视频/配图用的 Visual Studio 等封装名，CLAUDE.md 第三方封装名一节）。
 10. **新西兰拼写**；地区只写新西兰。
@@ -217,7 +217,7 @@
 
 | # | 前提 | 谁 | 怎么验 |
 |---|---|---|---|
-| 1 | 官网 $2,699 已上线 | 官网窗口 [66fd25]（PR #223） | 抓官网页看价格；已加日历提醒 |
+| 1 | 官网 $2,699 已上线，且人数上限写的是 20 | 官网窗口 [66fd25]（PR #223） | 抓官网页看价格和人数；已加日历提醒 |
 | 2 | 首批视频/图通过工厂配方对账 + 苏东坡/马良审查 + PM 授权 | 视频工厂窗口 [f3db97] | 审查记录 |
 | 3 | **Instagram 连接**：见 8.2 | 需要有 IG 登录权限的人 | 官方账户下能查到 IG 账号 |
 | 4 | 表单建成并用测试线索验证落进老表 | 执行窗口 | 老表里出现测试行，且 campaign 名在列里 |
