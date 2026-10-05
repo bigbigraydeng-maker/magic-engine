@@ -5,6 +5,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { ctsSourceRef } from '../cts-crm-sheet-sync'
 import { runCtsCrmSync, runCtsCrmSyncChunk, mergeCtsCrmSummaries, type CtsCrmSyncSummary } from '../cts-crm-sheet-sync-run'
 
 const sheet1Fixture = vi.fn()
@@ -32,7 +33,8 @@ function sheet1Row(opts: {
   row[13] = opts.email ?? ''
   row[14] = opts.fullName ?? ''
   row[15] = opts.phone ?? ''
-  row[17] = opts.notes ?? ''
+  // 默认带一条兴趣证据：合格线索现在必须有（2026-10-04），没写记录的行按「没有兴趣证据」被排除。
+  row[17] = opts.notes ?? 'very keen, wants to go in March 2027'
   return row
 }
 
@@ -56,7 +58,13 @@ function crmRow(opts: {
 // ── 按表建模的假 Supabase ──────────────────────────────────────────────────
 type Row = Record<string, unknown>
 
-function fakeSupabase(seed: { contactIdentities?: Row[]; groupTours?: Row[] } = {}): {
+/** 由电话号码派生的稳定假 uuid（insertOutcome 要求 contactId 是 uuid）。 */
+function autoContactId(phone: string): string {
+  const digits = phone.replace(/\D/g, '').padStart(12, '0').slice(-12)
+  return `00000000-0000-4000-8000-${digits}`
+}
+
+function fakeSupabase(seed: { contactIdentities?: Row[]; groupTours?: Row[]; realConversations?: boolean } = {}): {
   client: SupabaseClient
   outcomes: Row[]
   audits: Row[]
@@ -68,6 +76,9 @@ function fakeSupabase(seed: { contactIdentities?: Row[]; groupTours?: Row[] } = 
   const insertAttempts = { n: 0 }
   const contactIdentities = seed.contactIdentities ?? []
   const groupTours = seed.groupTours ?? []
+  // 2026-10-05：合格线索必须有真实客人对话。默认给每个电话自动补一个联系人 + 一条真实入站消息，
+  // 旧用例意图不变；需要测「没有对话」的用例走 qualify-needs-conversation.test.ts。
+  const autoConversation = seed.realConversations ?? true
 
   const client = {
     from(table: string) {
@@ -78,12 +89,54 @@ function fakeSupabase(seed: { contactIdentities?: Row[]; groupTours?: Row[] } = 
         return {
           select: () => ({
             eq: () => ({
+              in: async (_col: string, values: string[]) => {
+                const seeded = contactIdentities.filter((r) => values.includes(r.value as string))
+                const auto = autoConversation
+                  ? values
+                      .filter((v) => v.startsWith('+') && !seeded.some((r) => r.value === v))
+                      .map((v) => ({ contact_id: autoContactId(v), kind: 'phone', value: v }))
+                  : []
+                return { data: [...seeded, ...auto], error: null }
+              },
+            }),
+          }),
+        }
+      }
+      if (table === 'conversations') {
+        // 实测核实：loadInboundConversationText() 对这张表只调用
+        // .select('id, contact_id').eq('client_id', ...).in('contact_id', [...])。
+        return {
+          select: () => ({
+            eq: () => ({
               in: async (_col: string, values: string[]) => ({
-                data: contactIdentities.filter((r) => values.includes(r.value as string)),
+                data: autoConversation ? values.map((c) => ({ id: `auto-conv-${c}`, contact_id: c })) : [],
                 error: null,
               }),
             }),
           }),
+        }
+      }
+      if (table === 'conversation_messages') {
+        // 实测核实：对这张表调用 .select(...).in('conversation_id', [...]).eq().gte().order().limit() 然后 await。
+        return {
+          select: () => {
+            let convIds: string[] = []
+            const q = {
+              in: (_col: string, values: string[]) => ((convIds = values), q),
+              eq: () => q,
+              gte: () => q,
+              order: () => q,
+              limit: () => q,
+              then: (resolve: (r: { data: Row[]; error: null }) => unknown) =>
+                resolve({
+                  data: autoConversation
+                    ? convIds.map((id) => ({ conversation_id: id, body: 'How much is the Best of China tour?', sent_at: new Date().toISOString() }))
+                    : [],
+                  error: null,
+                }),
+            }
+            return q
+          },
         }
       }
       if (table === 'group_tours') {
@@ -114,7 +167,7 @@ function fakeSupabase(seed: { contactIdentities?: Row[]; groupTours?: Row[] } = 
               resolve({
                 data: outcomes
                   .filter((o) => o.source_kind === 'crm_sheet_sync' && o.source_ref != null && (lastId == null || (o.id as string) > lastId))
-                  .map((o) => ({ id: o.id, source_ref: o.source_ref })),
+                  .map((o) => ({ id: o.id, source_ref: o.source_ref, review_status: o.review_status ?? 'pending_review' })),
                 error: null,
               }),
           }
@@ -122,6 +175,21 @@ function fakeSupabase(seed: { contactIdentities?: Row[]; groupTours?: Row[] } = 
         }
         return {
           select: () => refQuery(),
+          // rejectStalePendingLead() 只调用 .update(patch).eq('id', id).eq('review_status','pending_review').select('id')
+          update: (patch: Row) => {
+            const conds: Array<[string, unknown]> = []
+            const q = {
+              eq: (col: string, v: unknown) => (conds.push([col, v]), q),
+              select: async () => {
+                const hit = outcomes.filter((o) =>
+                  conds.every(([c, v]) => (c === 'review_status' ? (o.review_status ?? 'pending_review') === v : o[c] === v)),
+                )
+                hit.forEach((o) => Object.assign(o, patch))
+                return { data: hit.map((o) => ({ id: o.id })), error: null }
+              },
+            }
+            return q
+          },
           insert: (row: Row) => ({
             select: () => ({
               single: async () => {
@@ -168,7 +236,7 @@ describe('runCtsCrmSync', () => {
     const summary = await runCtsCrmSync({ supabase: client })
 
     expect(summary.insertedLeads).toBe(1)
-    expect(summary.contactNotLinked).toBe(1) // 没有预置任何 contact_identities
+    expect(summary.contactNotLinked).toBe(0) // 新规则：合格线索必须有联系人 + 真实对话，假库默认自动补联系人
     expect(outcomes).toHaveLength(1)
     expect(outcomes[0]).toMatchObject({ outcome_kind: 'lead', source_kind: 'crm_sheet_sync' })
     expect(audits).toHaveLength(1)
@@ -289,6 +357,37 @@ describe('runCtsCrmSync', () => {
     expect(summary.insertedPurchases).toBe(0)
     expect(summary.heldForManualReview).toHaveLength(1)
     expect(outcomes).toHaveLength(0)
+  })
+
+  it('🔴 填了表单但员工记录里没有兴趣证据 → 不写库（不当合格线索发），只计数', async () => {
+    sheet1Fixture.mockReturnValue([sheet1Row({ phone: 'p:+6421363598', notes: 'called, no answer' })])
+    crmFixture.mockReturnValue([crmRow({ entryDate: '14/06/2026', phone: 'p:+6421363598' })])
+    const { client, outcomes } = fakeSupabase()
+    const summary = await runCtsCrmSync({ supabase: client })
+    expect(summary.insertedLeads).toBe(0)
+    expect(summary.excludedNoInterest).toBe(1)
+    expect(outcomes).toHaveLength(0)
+  })
+
+  it('🔴 旧规则遗留的待核对线索，新规则下没有兴趣证据 → 自动拒绝；已批准的绝不动', async () => {
+    sheet1Fixture.mockReturnValue([
+      sheet1Row({ phone: 'p:+6421363598', notes: 'called, no answer' }),
+      sheet1Row({ phone: 'p:+6421363599', notes: 'called, no answer' }),
+    ])
+    crmFixture.mockReturnValue([
+      crmRow({ entryDate: '14/06/2026', phone: 'p:+6421363598' }),
+      crmRow({ entryDate: '14/06/2026', phone: 'p:+6421363599' }),
+    ])
+    const { client, outcomes, audits } = fakeSupabase()
+    outcomes.push(
+      { id: 'o-pending', client_id: 'c0000000-0000-0000-0000-000000000000', source_kind: 'crm_sheet_sync', source_ref: ctsSourceRef('+6421363598', 'lead'), review_status: 'pending_review' },
+      { id: 'o-approved', client_id: 'c0000000-0000-0000-0000-000000000000', source_kind: 'crm_sheet_sync', source_ref: ctsSourceRef('+6421363599', 'lead'), review_status: 'approved' },
+    )
+    const summary = await runCtsCrmSync({ supabase: client })
+    expect(summary.rejectedStaleLeads).toBe(1)
+    expect(outcomes.find((o) => o.id === 'o-pending')).toMatchObject({ review_status: 'rejected', reviewed_by: 'auto:cts-qualify-rule' })
+    expect(outcomes.find((o) => o.id === 'o-approved')?.review_status).toBe('approved')
+    expect(audits.some((a) => a.outcome_id === 'o-pending' && a.action === 'rejected')).toBe(true)
   })
 
   it('is idempotent: running twice does not insert the same lead twice', async () => {
@@ -413,7 +512,7 @@ describe('分块（2026-09-22，conversion-daily-pipeline 拆块）', () => {
 
 function emptyLike(): CtsCrmSyncSummary {
   return {
-    totalCrmRows: 0, excludedNoPhone: 0, excludedByNotes: 0, excludedNoDate: 0, insertedLeads: 0, insertedPurchases: 0,
-    skippedAlreadySynced: 0, heldForManualReview: [], contactNotLinked: 0, insertErrors: [], cappedAtMaxInserts: false,
+    totalCrmRows: 0, excludedNoPhone: 0, excludedByNotes: 0, excludedNoInterest: 0, excludedNoConversation: 0, rejectedStaleLeads: 0, excludedNoDate: 0, insertedLeads: 0, insertedPurchases: 0,
+    skippedAlreadySynced: 0, heldForManualReview: [], contactNotLinked: 0, insertErrors: [], cappedAtMaxInserts: false, qualifiedFromConversation: 0, conversationReadFailed: 0, skippedPastWindow: 0,
   }
 }

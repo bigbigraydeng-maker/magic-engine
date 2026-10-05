@@ -38,7 +38,8 @@ function sheet1Row(overrides: Partial<Sheet1LeadRow> = {}): Sheet1LeadRow {
     email: 'jane@example.com',
     fullName: 'Jane Doe',
     phoneRaw: 'p:+6421363598',
-    followUpNotes: null,
+    // 默认带兴趣证据（2026-10-04 起合格线索必须有）；要测「没记录」就显式传 null。
+    followUpNotes: 'very keen, wants to go in March 2027',
     ...overrides,
   }
 }
@@ -102,8 +103,12 @@ describe('classifyCtsCrmPerson — lead path', () => {
     }
   })
 
-  it('falls back to CRM管理 entryDate when there is no Sheet1 match', () => {
-    const result = classifyCtsCrmPerson(crmRow(), null)
+  it('没有 Sheet1 行（读不到员工记录）→ 没有兴趣证据，不当合格线索', () => {
+    expect(classifyCtsCrmPerson(crmRow(), null)).toEqual({ kind: 'excluded', reason: 'no_interest_evidence' })
+  })
+
+  it('falls back to CRM管理 entryDate when the Sheet1 row has no created_time', () => {
+    const result = classifyCtsCrmPerson(crmRow(), sheet1Row({ createdTime: null }))
     expect(result.kind).toBe('qualified_lead')
     if (result.kind === 'qualified_lead') {
       expect(result.occurredAtIsDateOnly).toBe(true)
@@ -115,7 +120,7 @@ describe('classifyCtsCrmPerson — lead path', () => {
   it('still classifies as a qualified lead when entryDate is a Sheets native-date serial number (2026-09 regression)', () => {
     // 实测：2026-09-12 起新增的行，entryDate 读出来是 '46277' 而不是 'DD/MM/YYYY' 文本。
     // 这条曾经会落进下面的"两边都没有可用日期"分支，把当天最新的咨询错判成 excluded。
-    const result = classifyCtsCrmPerson(crmRow({ entryDate: '46277' }), null)
+    const result = classifyCtsCrmPerson(crmRow({ entryDate: '46277' }), sheet1Row({ createdTime: null }))
     expect(result.kind).toBe('qualified_lead')
     if (result.kind === 'qualified_lead') {
       expect(result.occurredAt.startsWith('2026-09-12')).toBe(true)
@@ -361,7 +366,7 @@ describe('classifyCtsCrmPerson — 线索编号随分类结果带出去', () => 
   })
 
   it('合格线索：没匹配到 Sheet1 行（只靠 CRM管理 日期兜底）时为 null', () => {
-    const r = classifyCtsCrmPerson(crmRow(), null)
+    const r = classifyCtsCrmPerson(crmRow(), sheet1Row({ createdTime: null, metaLeadId: null }))
     expect(r.kind).toBe('qualified_lead')
     if (r.kind === 'qualified_lead') expect(r.metaLeadId).toBeNull()
   })
@@ -373,5 +378,66 @@ describe('classifyCtsCrmPerson — 线索编号随分类结果带出去', () => 
     )
     expect(r.kind).toBe('purchase_candidate')
     if (r.kind === 'purchase_candidate') expect(r.metaLeadId).toBe('1687504185706630')
+  })
+})
+
+import { qualifyByNotes } from '../cts-crm-sheet-sync'
+
+describe('qualifyByNotes · PM 2026-10-04 口径（松）', () => {
+  it.each([
+    'Spoke to her, very keen, wants deposit invoice',
+    'Great talk. Would like to go in October',
+    'interested in the Best of China tour',
+    'Wants to travel next year',
+    'planning for 2027',
+    '客人很感兴趣，明年想去',
+    'invoice sent, waiting for payment',
+    'looking to book for March',
+    'Tale of Two cities 18 March wife 50th birthday',
+    'best of china 11 march',
+    'follow up best of china in May',
+    'march departure first time traveller',
+    'maybe travel in 2028/2029',
+    'airnz staff will look at 13 May Best of China',
+  ])('合格：%s', (n) => expect(qualifyByNotes(n)).toBe('qualified'))
+
+  it.each([
+    'wrong number',
+    'Not interested, thanks',
+    'already booked with another company',
+    'he is no longer interested',
+    'not very keen, too expensive',
+    "isn't interested in going this year",
+    'please do not contact again',
+  ])('🔴 排除（压倒兴趣词）：%s', (n) => expect(qualifyByNotes(n)).toBe('excluded'))
+
+  it('含糊：既说不感兴趣 2026 又说 2027 想去 → 排除（宁可不发）', () => {
+    expect(qualifyByNotes('not interested in 2026 but keen for 2027')).toBe('excluded')
+  })
+
+  it.each([
+    null,
+    '',
+    '   ',
+    'called, no answer',
+    'voice mail left, will retry tomorrow',
+    'sent brochure',
+    'voice mail 3 Oct',
+    'left text message 12 September',
+    'she may call back',
+    'follow up Best of China itinerary',
+  ])(
+    '没有兴趣证据（%s）→ 不当合格线索发',
+    (n) => expect(qualifyByNotes(n as string | null)).toBe('no_evidence'),
+  )
+
+  it('"may" 只在 "in may" 时当月份，助动词不算', () => {
+    expect(qualifyByNotes('she may call back')).toBe('no_evidence')
+    expect(qualifyByNotes('wants to go in May')).toBe('qualified')
+  })
+
+  it('classify：填了表单但记录里没有兴趣证据 → excluded/no_interest_evidence', () => {
+    const r = classifyCtsCrmPerson(crmRow({}), sheet1Row({ followUpNotes: 'called, no answer' }))
+    expect(r).toEqual({ kind: 'excluded', reason: 'no_interest_evidence' })
   })
 })

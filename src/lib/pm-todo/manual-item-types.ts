@@ -214,6 +214,8 @@ export type ManualItemKind =
   | 'meta_data_deletion_failure'
   /** 有成交/咨询等着人核对要不要告诉广告平台 —— 撤不回，所以必须人点 */
   | 'conversion_needs_review'
+  /** 公司回信确认收到款，但缺金额/疑似重复/有取消字样，系统没法自动记成交 —— 要人核对（2026-10-04） */
+  | 'payment_email_needs_human'
   /** 发给广告平台时断线了，不知道对方收没收 —— 程序绝不自己重发，等人核对 */
   | 'conversion_send_in_doubt'
   /** 已批准的成交/咨询因为连接广告平台的授权失效发不出去，7 天内不修就永久丢（2026-09-22） */
