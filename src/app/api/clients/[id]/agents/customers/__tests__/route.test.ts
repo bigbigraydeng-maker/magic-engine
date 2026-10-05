@@ -10,6 +10,7 @@ vi.mock('@/lib/auth/client-access', () => ({
 let contactMatchesClient = false
 let contactEmail = 'agent@hot.co.nz'
 let tradeDomains: string[] = ['hot.co.nz']
+let clientIndustry: string | null = 'travel'
 
 const contactsSelect = vi.fn().mockImplementation(() => ({
   eq: () => ({
@@ -33,7 +34,10 @@ const identitiesSelect = vi.fn().mockImplementation(() => ({
 const clientsSelect = vi.fn().mockImplementation(() => ({
   eq: () => ({
     maybeSingle: () => Promise.resolve({
-      data: { leads_config: { trade_domains: tradeDomains } },
+      // industry: 'travel' —— 这条路由现在也走 clientHasIndustryFeature(id, 'agents') 闸
+      // （2026-09-28，堵 NAL 能看到 CTS 专属同行渠道数据那个漏洞），不给这个字段闸会
+      // 直接判 false、所有 happy path 测试都会先被 403 挡掉。
+      data: { leads_config: { trade_domains: tradeDomains }, industry: clientIndustry },
       error: null,
     }),
   }),
@@ -55,7 +59,7 @@ vi.mock('@/lib/supabase', () => ({
   },
 }))
 
-import { POST } from '../route'
+import { POST, PATCH } from '../route'
 
 function makeReq(body: unknown): Request {
   // 用最小 Request shape：POST handler 只调 req.json() 和 new URL(req.url)
@@ -72,6 +76,19 @@ describe('POST /api/clients/[id]/agents/customers', () => {
     contactMatchesClient = false
     contactEmail = 'agent@hot.co.nz'
     tradeDomains = ['hot.co.nz']
+    clientIndustry = 'travel'
+  })
+
+  it('🔴 非旅游客户敲这条 API → 403，行业闸排在其他判据前面（2026-09-28）', async () => {
+    clientIndustry = 'logistics'
+    contactMatchesClient = true
+    contactEmail = 'alex@hot.co.nz'
+    const res = await POST(makeReq({
+      agentContactId: '00000000-0000-0000-0000-000000000000',
+      customerName: 'Chris Brown',
+    }), { params: Promise.resolve({ id: 'clientA' }) })
+    expect(res.status).toBe(403)
+    expect(agentCustomersInsert).not.toHaveBeenCalled()
   })
 
   it('拒绝跨客户的 agentContactId（clientA 想插 clientB 的 contact）', async () => {
@@ -137,5 +154,20 @@ describe('POST /api/clients/[id]/agents/customers', () => {
     expect(insertPayload.client_id).toBe('clientA')
     expect(insertPayload.customer_name).toBe('Chris Brown')
     expect(insertPayload.pax).toBe(2)
+  })
+})
+
+describe('PATCH /api/clients/[id]/agents/customers', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockRequire.mockResolvedValue({ ok: true })
+    clientIndustry = 'travel'
+  })
+
+  it('🔴 非旅游客户敲这条 API → 403，改状态之前就先被挡下来（2026-09-28）', async () => {
+    clientIndustry = 'logistics'
+    const req = { json: () => Promise.resolve({ stage: 'won' }), url: 'http://localhost/api/clients/clientA/agents/customers?id=ac1' } as Request
+    const res = await PATCH(req, { params: Promise.resolve({ id: 'clientA' }) })
+    expect(res.status).toBe(403)
   })
 })

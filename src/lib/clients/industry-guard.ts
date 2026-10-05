@@ -44,4 +44,8 @@ export const INDUSTRY_FEATURE_NOTICE: Record<IndustryFeature, { title: string; b
     title: '这个功能不适用于你的业务',
     body: '「行程单」是给旅游业务用的。如果这里应该出现，请在客户设置里把行业填成旅游。',
   },
+  agents: {
+    title: '这个功能不适用于你的业务',
+    body: '「同行渠道」是给旅游业务用的（旅行社同行代终端客户订团）。如果这里应该出现，请在客户设置里把行业填成旅游。',
+  },
 }

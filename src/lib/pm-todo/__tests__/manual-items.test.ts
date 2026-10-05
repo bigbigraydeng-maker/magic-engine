@@ -753,20 +753,21 @@ describe('buildTodoEmail — manual lane', () => {
     cronFailures24h: 0,
   }
 
+  // 客户网站上的 ME 插件停了 —— 要转给客户那边（五类里的第 3 类）
   const item: ManualItem = {
-    kind: 'not_indexed',
+    kind: 'meta_stuck',
     client_id: 'cid-2',
     client_name: 'oztop',
-    what: 'https://oztop/x 谷歌爬过但没收录（已 9 天），这个页面拿不到任何谷歌流量',
-    how: '打开链接（已定位到这个网址），点页面上的「请求编入索引」，然后就不用管了',
+    what: '25 条标题/描述改动排了 59 天还没上到网站，说明网站那边的自动应用停了',
+    how: '登录客户网站后台看看 Magic Engine 插件是不是被停用了，启用它就会自动补上',
     href: 'https://search.google.com/search-console/inspect?resource_id=x&id=y',
   }
 
   it('renders what / how / link for each manual item', () => {
     const { html } = buildTodoEmail(3, { ...EMPTY, manualItems: [item] }, '1 Aug')
-    expect(html).toContain('需要你动手')
-    expect(html).toContain('谷歌爬过但没收录')
-    expect(html).toContain('请求编入索引')
+    expect(html).toContain('要转给客户那边的')
+    expect(html).toContain('自动应用停了')
+    expect(html).toContain('插件是不是被停用了')
     /**
      * `&` 在 HTML 属性里写成 `&amp;` 才是**正确**的（浏览器会还原成 `&`，链接照常能点）。
      * 从 PR #1037 起 `href` 走统一转义 —— 那一刀是为了挡住客人在私信里发的标记
@@ -788,12 +789,12 @@ describe('buildTodoEmail — manual lane', () => {
       manualItems: [item],
       draftsByClient: [{ name: 'CTS Tours NZ', id: 'cid-1', drafts: 2 }],
     }, '1 Aug')
-    expect(html.indexOf('需要你动手')).toBeLessThan(html.indexOf('Blog 草稿待审'))
+    expect(html.indexOf('要转给客户那边的')).toBeLessThan(html.indexOf('Blog 草稿写好了'))
   })
 
   it('no manual items → section absent, quiet day still says all-clear', () => {
     const email = buildTodoEmail(3, EMPTY, '1 Aug')
-    expect(email.html).not.toContain('需要你动手')
+    expect(email.html).not.toContain('要转给客户那边的')
     expect(email.html).toContain('今天没有待办')
   })
 })
@@ -1005,7 +1006,10 @@ describe('email_reply_due — 客人来信没人回', () => {
   const NOW = new Date('2026-09-03T09:00:00Z')
   const nameOf = () => 'CTS Tours NZ'
 
-  /** 客人 30 小时前来过一封信，之后没人做过任何事。 */
+  /**
+   * 客人 30 小时前来过一封信，之后没人做过任何事。
+   * 他是从广告表单来的（身份来源 meta_lead_form）—— 跟客户打过交道，不算陌生来信。
+   */
   function crmTables(over: Record<string, Row[]> = {}): Record<string, Row[]> {
     return {
       conversations: [
@@ -1021,7 +1025,9 @@ describe('email_reply_due — 客人来信没人回', () => {
       ],
       contacts: [{ id: 'p1', do_not_contact: false, display_name: 'Christine Matehaere' }],
       contact_touchpoints: [],
-      contact_identities: [{ contact_id: 'p1', kind: 'email', value: 'christine@gmail.com' }],
+      contact_identities: [
+        { contact_id: 'p1', kind: 'email', value: 'christine@gmail.com', first_source: 'meta_lead_form' },
+      ],
       clients: [{ id: CLIENT, leads_config: { own_email_domains: ['ctstours.co.nz'] } }],
       cron_run_logs: [],
       ...over,
@@ -1069,7 +1075,7 @@ describe('email_reply_due — 客人来信没人回', () => {
 
     expect(email.totalItems).toBe(1)
     expect(email.subject).toContain('1 件')
-    expect(email.html).toContain('需要你动手')
+    expect(email.html).toContain('要转给客户那边的')
     expect(email.html).toContain('Christine Matehaere')
     expect(email.html).toContain('去做这件事')
   })
@@ -1093,7 +1099,7 @@ describe('email_reply_due — 客人来信没人回', () => {
 
     // 空名单不该变成一栏空标题 —— 安静的一天要真的安静
     const email = buildTodoEmail(3, { ...EMPTY_COUNTS, manualItems: items }, '3 Sep')
-    expect(email.html).not.toContain('需要你动手')
+    expect(email.html).not.toContain('要转给客户那边的')
     expect(email.html).toContain('今天没有待办')
   })
 
@@ -1174,7 +1180,8 @@ describe('email_reply_due — 客人来信没人回', () => {
     )
 
     expect(items).toHaveLength(1)
-    expect(items[0].kind).toBe('email_sync_stale')
+    // 整趟挂了是我们要修的（开发的活），PM 清单顶上会因此出一句「今天没查成」
+    expect(items[0].kind).toBe('email_sync_broken')
     expect(items[0].what).toContain('令牌过期')
     expect(items[0].what).toContain('别把它当成「没人在等」')
     expect(items[0].href.startsWith('https://app.magicengine.com.au/')).toBe(true)
@@ -1197,6 +1204,8 @@ describe('email_reply_due — 客人来信没人回', () => {
     )
 
     expect(items).toHaveLength(1)
+    // 读不进来多半是授权掉了 —— 要人点一次，留在 PM 的清单里
+    expect(items[0].kind).toBe('email_sync_stale')
     expect(items[0].client_name).toBe('CTS Tours NZ')
     expect(items[0].what).toContain('info@ctstours.co.nz')
     expect(items[0].how).toContain('重新授权')
@@ -1237,7 +1246,7 @@ describe('email_reply_due — 客人来信没人回', () => {
     )
 
     expect(items).toHaveLength(1)
-    expect(items[0].kind).toBe('email_sync_stale')
+    expect(items[0].kind).toBe('email_sync_broken')
     expect(items[0].what).toContain('令牌过期')
   })
 
@@ -1250,7 +1259,7 @@ describe('email_reply_due — 客人来信没人回', () => {
     )
 
     expect(items).toHaveLength(1)
-    expect(items[0].kind).toBe('email_sync_stale')
+    expect(items[0].kind).toBe('email_sync_broken')
     expect(items[0].what).toContain('卡住了')
     expect(items[0].href.startsWith('https://app.magicengine.com.au/')).toBe(true)
   })
@@ -1266,12 +1275,10 @@ describe('email_reply_due — 客人来信没人回', () => {
   })
 
   /**
-   * 🔴 一页最多列 10 条，压掉的那些必须自己成为一条待办。
-   *
-   * 只 console.warn 等于没说：看这一页的人不会去翻 Render 日志，
-   * 数完 10 条就以为清空了。
+   * 不再封顶：同一个客户 13 封都下发，今日待办把它们合成一行、带着人数
+   * （以前一页只列 10 封 + 一条「还有 3 封没列出来」）。
    */
-  it('超过一页能列的条数时，剩下几条也要下发，不许只写日志', async () => {
+  it('13 封都下发，渲染时合成一行「共 13 条同类」，不再有「还有 N 封没列」', async () => {
     const convos = Array.from({ length: 13 }, (_, i) => ({
       id: `conv-${i}`,
       client_id: CLIENT,
@@ -1289,15 +1296,138 @@ describe('email_reply_due — 客人来信没人回', () => {
           do_not_contact: false,
           display_name: `客人 ${c.contact_id}`,
         })),
-        contact_identities: [],
+        contact_identities: convos.map((c) => ({
+          contact_id: c.contact_id, kind: 'email', value: `${c.contact_id}@gmail.com`, first_source: 'web_form',
+        })),
       }),
     )
 
-    expect(items.filter((i) => i.kind === 'email_reply_due')).toHaveLength(11)
-    const extra = items[items.length - 1]
-    expect(extra.what).toContain('还有 3 封')
-    expect(extra.client_name).toBe('CTS Tours NZ')
-    expect(extra.href).toBe(`https://app.magicengine.com.au/dashboard/clients/${CLIENT}/crm/all`)
+    expect(items.filter((i) => i.kind === 'email_reply_due')).toHaveLength(13)
+    expect(items.some((i) => i.what.includes('没有列出来'))).toBe(false)
+
+    const email = buildTodoEmail(3, { ...EMPTY_COUNTS, manualItems: items }, '3 Sep')
+    expect(email.totalItems).toBe(1)
+    expect(email.html).toContain('共 13 条同类')
+    // 合并后的链接落到这个客户的「全部客人」，不带某一个人的 contact 参数
+    expect(email.html).toContain(`https://app.magicengine.com.au/dashboard/clients/${CLIENT}/crm/all"`)
+  })
+
+  /**
+   * 陌生地址第一次来信（2026-09-25：CTS 待回 42 人里 10 个是推销）。
+   * 判据只看库里的事实：我们给他写过信 / 从别的渠道来过 / 在邮件名单上 / 身份来自表单或私信。
+   * 一条都没有的挪进一行「N 封陌生来信」—— **不丢**，真客人的第一封询价也长这样。
+   */
+  describe('陌生地址第一次来信', () => {
+    const pitch = (id: string, subject: string, hoursAgo: number): Row => ({
+      id: `conv-${id}`,
+      client_id: CLIENT,
+      contact_id: id,
+      channel: 'email',
+      subject,
+      last_message_at: new Date(NOW.getTime() - hoursAgo * 3_600_000).toISOString(),
+      last_message_from: 'customer',
+    })
+
+    it('没有任何往来记录的人不按「客人来信」一人一条，合成一条带主题的陌生来信', async () => {
+      const items = await run(
+        crmTables({
+          conversations: [
+            pitch('p1', '想问 12 月的团还有没有位', 30),
+            pitch('v1', 'Want to offer customers a better way to pay?', 700),
+            pitch('v2', 'Local Japan Experiences for Your Clients', 100),
+          ],
+          contacts: [
+            { id: 'p1', do_not_contact: false, display_name: 'Christine Matehaere' },
+            { id: 'v1', do_not_contact: false, display_name: 'Afterpay Team' },
+            { id: 'v2', do_not_contact: false, display_name: 'kanpai' },
+          ],
+          contact_identities: [
+            { contact_id: 'p1', kind: 'email', value: 'christine@gmail.com', first_source: 'meta_lead_form' },
+            // 7 月从邮箱批量导入的来源 'outlook' 不算「主动找上门」
+            { contact_id: 'v1', kind: 'email', value: 'news@afterpay.example', first_source: 'outlook' },
+            { contact_id: 'v2', kind: 'email', value: 'hi@kanpai.example', first_source: 'email' },
+          ],
+        }),
+      )
+
+      const due = items.filter((i) => i.kind === 'email_reply_due')
+      expect(due).toHaveLength(1)
+      expect(due[0].what).toContain('Christine Matehaere')
+
+      const strangers = items.filter((i) => i.kind === 'email_first_contact')
+      expect(strangers).toHaveLength(1)
+      expect(strangers[0].what).toContain('2 封陌生地址')
+      // 新来的在前：真询价多半是最近才来的
+      expect(strangers[0].what.indexOf('kanpai')).toBeLessThan(strangers[0].what.indexOf('Afterpay'))
+      expect(strangers[0].how).toContain('不是客人')
+      expect(strangers[0].href).toBe(`https://app.magicengine.com.au/dashboard/clients/${CLIENT}/crm/all`)
+    })
+
+    it('我们给他写过信 / 在邮件名单上 / 私信来过 → 算打过交道，照常一人一条', async () => {
+      const items = await run(
+        crmTables({
+          conversations: [pitch('a', 'Re: Quote please', 50), pitch('b', 'Re: Your China itinerary', 50), pitch('c', 'hello', 50)],
+          contacts: [
+            { id: 'a', do_not_contact: false, display_name: 'Andrea' },
+            { id: 'b', do_not_contact: false, display_name: 'Sharyn' },
+            { id: 'c', do_not_contact: false, display_name: 'Eva' },
+          ],
+          contact_identities: [
+            { contact_id: 'a', kind: 'email', value: 'a@gmail.com', first_source: 'email' },
+            { contact_id: 'b', kind: 'email', value: 'b@yahoo.example', first_source: 'email' },
+            { contact_id: 'c', kind: 'email', value: 'c@msn.example', first_source: 'email' },
+          ],
+          contact_touchpoints: [
+            { contact_id: 'a', occurred_at: '2026-08-01T00:00:00Z', channel: 'email', direction: 'outbound', source: 'microsoft_mail', metadata: { automated: false } },
+            { contact_id: 'b', occurred_at: '2026-08-30T00:00:00Z', channel: 'email', direction: 'inbound', source: 'mailchimp', metadata: {} },
+            { contact_id: 'c', occurred_at: '2026-08-01T00:00:00Z', channel: 'messenger', direction: 'inbound', source: 'messenger', metadata: {} },
+          ],
+        }),
+      )
+      expect(items.filter((i) => i.kind === 'email_reply_due')).toHaveLength(3)
+      expect(items.some((i) => i.kind === 'email_first_contact')).toBe(false)
+    })
+
+    it('🔴 员工手记（me_manual）和机器自动回执不算打过交道', async () => {
+      const items = await run(
+        crmTables({
+          conversations: [pitch('v', 'Participate to International Travel Experience', 60)],
+          contacts: [{ id: 'v', do_not_contact: false, display_name: 'Bitesp' }],
+          contact_identities: [{ contact_id: 'v', kind: 'email', value: 'x@bitesp.example', first_source: 'email' }],
+          contact_touchpoints: [
+            // 手记写在来信之前（之后的话会被「有人处理过了」那条直接挡掉）
+            { contact_id: 'v', occurred_at: '2026-08-01T00:00:00Z', channel: 'phone', direction: 'outbound', source: 'me_manual', metadata: {} },
+            { contact_id: 'v', occurred_at: '2026-08-02T00:00:00Z', channel: 'email', direction: 'outbound', source: 'microsoft_mail', metadata: { automated: true } },
+          ],
+        }),
+      )
+      expect(items.map((i) => i.kind)).toEqual(['email_first_contact'])
+    })
+
+    it('网站表单通知（主题带 Contact form）算真询价，照常一人一条', async () => {
+      const items = await run(
+        crmTables({
+          conversations: [pitch('f', 'Re: Contact form: General Inquiry — Lyndsay', 40)],
+          contacts: [{ id: 'f', do_not_contact: false, display_name: 'Lyndsay' }],
+          contact_identities: [{ contact_id: 'f', kind: 'email', value: 'l@gmail.com', first_source: 'email' }],
+        }),
+      )
+      expect(items.map((i) => i.kind)).toEqual(['email_reply_due'])
+    })
+
+    it('ME 自己信箱发来的（[PREVIEW] 自测）对每个客户都算自己人，不列', async () => {
+      const items = await run(
+        crmTables({
+          conversations: [pitch('me', '[PREVIEW] Welcome to CTS Tours', 60)],
+          contacts: [{ id: 'me', do_not_contact: false, display_name: 'Big Ray Deng' }],
+          contact_identities: [{ contact_id: 'me', kind: 'email', value: 'hello@magicengine.cloud', first_source: 'email' }],
+          contact_touchpoints: [
+            { contact_id: 'me', occurred_at: '2026-08-19T00:00:00Z', channel: 'email', direction: 'outbound', source: 'microsoft_mail', metadata: { automated: false } },
+          ],
+        }),
+      )
+      expect(items).toEqual([])
+    })
   })
 })
 

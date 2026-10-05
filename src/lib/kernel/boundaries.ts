@@ -23,6 +23,7 @@
  * 发帖、发布文章、改 meta、提交收录、改商家页。
  */
 export const PROVIDER_WRITE_MODULES = [
+  '@/lib/meta/campaign-writes',
   '@/lib/publer/client',
   '@/lib/cms/wordpress-client',
   '@/lib/cms/shopify-client',
@@ -233,6 +234,65 @@ export const KERNEL_RUNNER_ALLOWED_CALLER_DIRS = [
  *    `KERNEL_RUNNER_SYMBOLS` 里的名字在这两条路径下被具名导入时才算违规。
  *    type-only imports 不算（拿签名类型不能真调 progression）。
  */
+/**
+ * 🔴 **谁能声称「这是人按的」** —— 只有这些目录能传 `triggeredBy: 'human'`。
+ *
+ * 为什么需要这道闸（统筹 + 卫青 2026-09-27 查出，我核实成立）：
+ *
+ *   `SubmitActionInput.triggeredBy`（`runner.ts:47`）是**提交方必填**的字段，
+ *   `runner.ts:194` 直接把它写进 `action_runs.triggered_by`，
+ *   **没有校验、不从会话推导、调用方说是什么就是什么**。
+ *
+ *   而 `authorize.ts` 的人工止损信封（`HUMAN_STOP_ENVELOPE`）只看两件事：
+ *   `triggered_by === 'human'` + 动作在白名单里。它刻意**不看**学习期 / 72h 冷却 /
+ *   变动 ≤20% / 日预算上限 —— 因为人按紧急停车就是为了少花钱，拿 AI 信封拦它
+ *   会 100% 拒掉（2026-09-27 实测 CTS + NAL 46 个广告组 `learning_stage` 全是 NULL）。
+ *
+ *   两件事合起来：**谁能填 `'human'`，谁就能跳过 AI 信封那五条闸。**
+ *
+ * 🔴 **这条闸的必要性来自一处不对称，值得写下来**：
+ *   同一套设计对「事实」守得很严 —— 止损提交的 `input` 里只传
+ *   `cycle_date` / `ad_account_id` / `adset_id`，改前预算、账户合计、日上限
+ *   一律不传，全部服务端重读（有键集合严格相等的测试钉着），理由是
+ *   「让被约束者自报约束等于没有约束」。
+ *   **但 `triggeredBy` 恰恰是提交方自报的，而且自报的是身份不是事实。**
+ *   身份比事实更危险：事实能服务端重读一遍去核，身份没法重读 ——
+ *   run 行上写着 `'human'`，Kernel 没有第二个来源能对。
+ *
+ * 🔴 **今天还没有洞**：生产代码里零处填 `'human'`（只有 3 个测试文件里有）。
+ *   它在止损路由接上的那一刻打开 —— 那条路由必须传 `'human'`。
+ *   所以闸要在那之前装好，而不是等它打开了再补。
+ *
+ * 🔴 **光有这道目录白名单不够，必须配第二层**：白名单只管「哪个目录能传」，
+ *   管不了「目录里那个文件是不是不需要登录就能打到」。所以架构测试还要求：
+ *   传 `'human'` 的文件**必须同时命中鉴权调用**（`requireGlobalAdmin(` /
+ *   `guardGlobalAdmin(` / `requireDashboardClientAccess(` 之一，剥注释后按调用形式判）。
+ *
+ * 🔴 **更彻底的做法本轮没做**（欠账，见 PR 描述 + ROADMAP）：让 `'human'` 不可自报 ——
+ *   `submitActionRun` 不收 `triggeredBy: 'human'`，改收一个由鉴权层产出的
+ *   「已鉴权人工上下文」，Kernel 自己翻成 `'human'`。那样类型系统就保证了
+ *   「没鉴权过就构造不出 human 提交」，跟 `AUTHORIZED_CONTEXT_MINTERS` 是同一个思路。
+ *   代价是动 `runner.ts` 的公开入参 = 动所有提交方，本轮太大。
+ *   **本轮的替代就是上面那两层围栏。**
+ *
+ * 🔴 新增一个目录 = 拆一次架构评审。加之前先问：现有目录能不能承载？
+ */
+export const HUMAN_TRIGGER_ALLOWED_DIRS = ['src/lib/action-submission/'] as const
+
+/**
+ * 传 `triggeredBy: 'human'` 的文件必须命中的鉴权调用之一（第二层）。
+ *
+ * 为什么是这四个：前两个是内部员工判据（`ADMIN_EMAILS` / `ADMIN_EMAIL_DOMAIN`），
+ * 后两个是客户看板的按客户/付费权限鉴权 —— 看板里的预算下调和止损动作由人点，
+ * 所以走客户鉴权也算「真有人按过」。**都不算的话，就没有任何东西证明有人在。**
+ */
+export const HUMAN_TRIGGER_REQUIRED_AUTH_CALLS = [
+  'requireGlobalAdmin',
+  'guardGlobalAdmin',
+  'requireDashboardClientAccess',
+  'requirePaidClientAccess',
+] as const
+
 export const KERNEL_RUNNER_SOURCE_MODULES = ['@/lib/kernel/runner', '@/lib/kernel'] as const
 
 /**

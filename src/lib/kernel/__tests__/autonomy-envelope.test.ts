@@ -29,7 +29,9 @@ function facts(over: Partial<EnvelopeFacts> = {}): EnvelopeFacts {
   return {
     beforeCents: 1000,
     accountDailyTotalBeforeCents: 5000,
+    clientDailyTotalBeforeCents: 5000,
     dailyCapCents: 10_000,
+    clientDailyCapCents: 20_000,
     hoursSinceLastChange: 100,
     learningPhaseApplicable: true,
     learningStage: 'SUCCESS',
@@ -60,6 +62,8 @@ describe('信封 · 读不到一律拒，不给默认值', () => {
   it.each([
     ['改动前预算', { beforeCents: null }, '改动前的日预算'],
     ['账户日预算合计', { accountDailyTotalBeforeCents: null }, '日预算合计'],
+    ['客户跨账户日预算合计', { clientDailyTotalBeforeCents: null }, '客户所有广告账户'],
+    ['客户跨账户日上限', { clientDailyCapCents: null }, '共用的日预算上限'],
     ['上次变动时间', { hoursSinceLastChange: null }, '上次设置变动的时间'],
     ['客户日预算上限', { dailyCapCents: null }, '日预算上限'],
   ])('%s 读不到 → 拒绝', (_label, over, needle) => {
@@ -227,6 +231,42 @@ describe('信封 · 日预算上限（PM 2026-09-24：20% 缓冲 + 超缓冲时�
     )
     expect(v.within).toBe(false)
     expect(v.reasons.some(r => r.includes('缓冲'))).toBe(true)
+  })
+})
+
+describe('信封 · 加预算必须通过客户跨账户硬上限', () => {
+  it('多个账户合计加完超过客户总上限 → 拒绝，即使目标账户自身仍未超', () => {
+    const v = isWithinEnvelope(
+      req({ afterCents: 1_100 }),
+      facts({
+        beforeCents: 1_000,
+        accountDailyTotalBeforeCents: 5_000,
+        dailyCapCents: 10_000,
+        clientDailyTotalBeforeCents: 9_950,
+        clientDailyCapCents: 10_000,
+      }),
+      ENVELOPE,
+    )
+    expect(v.within).toBe(false)
+    expect(v.reasons.some(r => r.includes('超过客户总上限'))).toBe(true)
+  })
+
+  it('合计刚好等于客户总上限 → 放行', () => {
+    const v = isWithinEnvelope(
+      req({ afterCents: 1_050 }),
+      facts({ clientDailyTotalBeforeCents: 9_950, clientDailyCapCents: 10_000 }),
+      ENVELOPE,
+    )
+    expect(v.within).toBe(true)
+  })
+
+  it('减预算不依赖跨账户预算读取', () => {
+    const v = isWithinEnvelope(
+      req({ afterCents: 900 }),
+      facts({ clientDailyTotalBeforeCents: null, clientDailyCapCents: null }),
+      ENVELOPE,
+    )
+    expect(v.within).toBe(true)
   })
 })
 

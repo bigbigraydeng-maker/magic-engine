@@ -95,7 +95,9 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
     const dir = await github
       .listDirectory(conn.repoOwner, conn.repoName, conn.dataDir, conn.defaultBranch)
       .catch(() => [])
-    const dataFiles = dir.filter((e) => e.type === 'file' && /^(seo-pages|blogs).*\.ts$/.test(e.name))
+    // guides.ts (destination guides) is allowed by EXACT name only: its entries use metaTitle/metaDescription
+    // and need the 'guide' field style — a look-alike file name must never be edited with the wrong style.
+    const dataFiles = dir.filter((e) => e.type === 'file' && /^(seo-pages.*|blogs.*|guides)\.ts$/.test(e.name))
     for (const entry of dataFiles) {
       const f = await github
         .getFileContent(conn.repoOwner, conn.repoName, entry.path, conn.defaultBranch)
@@ -177,7 +179,8 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
         return { applied: false, newTitle, newDesc, oldTitle: '', oldDesc: '', skipReason: 'slug_not_in_any_data_file' }
       }
 
-      const replaced = replaceMetaForSlug(entry.source, candidate.slug, newTitle, newDesc)
+      const style = path.split('/').pop() === 'guides.ts' ? 'guide' : 'default'
+      const replaced = replaceMetaForSlug(entry.source, candidate.slug, newTitle, newDesc, style)
       if (!replaced) {
         return { applied: false, newTitle, newDesc, oldTitle: '', oldDesc: '', skipReason: 'slug_not_in_file' }
       }

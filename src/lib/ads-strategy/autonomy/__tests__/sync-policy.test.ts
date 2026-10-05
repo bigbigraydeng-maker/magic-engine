@@ -44,6 +44,10 @@ describe('listAdsActionKeys', () => {
   it('包含 ads.pause_unit', () => {
     expect(listAdsActionKeys()).toContain('ads.pause_unit')
   })
+
+  it('系列预算动作会进入 Inngest 驱动的广告策略同步', () => {
+    expect(listAdsActionKeys()).toContain('ads.cut_campaign_budget')
+  })
 })
 
 describe('planAutonomySync', () => {

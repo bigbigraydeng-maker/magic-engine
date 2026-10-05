@@ -6,7 +6,7 @@
  * 一个 Agent 一张卡，卡里是他送来的每个终端客户一行。点一行开抽屉。
  */
 
-import { formatRelative, type AgentCustomerRow, type AgentRow } from '../page'
+import { formatRelative, type AgentCustomerRow, type AgentRow } from './AgentsClient'
 
 export function AgentList({
   agents,

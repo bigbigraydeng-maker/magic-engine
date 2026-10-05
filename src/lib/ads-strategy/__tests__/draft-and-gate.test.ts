@@ -12,14 +12,20 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 vi.mock('@/lib/meta/ad-publisher', () => ({
   publishDraftPaused: vi.fn(),
   activatePublished: vi.fn(),
+  pausePublished: vi.fn(),
 }))
 vi.mock('@/lib/meta/readback', () => ({
   fetchAdSetReadback: vi.fn(),
   fetchAdCreativesReadback: vi.fn(),
+  fetchCampaignStatus: vi.fn(),
+}))
+vi.mock('@/lib/meta/asset-upload', () => ({
+  waitForVideoReady: vi.fn(),
 }))
 
-import { publishDraftPaused, activatePublished } from '@/lib/meta/ad-publisher'
-import { fetchAdSetReadback, fetchAdCreativesReadback } from '@/lib/meta/readback'
+import { publishDraftPaused, activatePublished, pausePublished } from '@/lib/meta/ad-publisher'
+import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus } from '@/lib/meta/readback'
+import { waitForVideoReady } from '@/lib/meta/asset-upload'
 import {
   createDraftForApproval,
   approveDraft,
@@ -31,6 +37,9 @@ const mPublish = vi.mocked(publishDraftPaused)
 const mActivate = vi.mocked(activatePublished)
 const mAdSet = vi.mocked(fetchAdSetReadback)
 const mCreatives = vi.mocked(fetchAdCreativesReadback)
+const mCampaignStatus = vi.mocked(fetchCampaignStatus)
+const mWait = vi.mocked(waitForVideoReady)
+const mPause = vi.mocked(pausePublished)
 
 /** 记下每次写进账本的 payload，测试直接检查它。 */
 function fakeSupabase(existing?: DraftRecord) {
@@ -148,6 +157,19 @@ describe('createDraftForApproval', () => {
     expect(r.status).toBe('blocked')
   })
 
+  it('🔴 回读不到优化目标 + 草案是看完类视频 + 版位没锁 → 仍然 blocked（不能静默跳过版位检查）', async () => {
+    mWait.mockResolvedValue({ ok: true } as Awaited<ReturnType<typeof waitForVideoReady>>)
+    mAdSet.mockResolvedValue({ id: 'as1', name: '养受众', targeting: { geo_locations: { countries: ['NZ'] } } })
+    const { sb } = fakeSupabase()
+    const video = { name: 'V', primaryText: 'Watch our story', headline: 'Story', videoId: 'v1' }
+    const r = await createDraftForApproval(
+      { ...DRAFT, kind: 'video_thruplay', creatives: [video] },
+      { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' },
+    )
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('playback_placement_not_locked')
+  })
+
   it('客户行业真的传进闸门文案（G11 接线）：travel 说「客户服务市场」，不说中性词', async () => {
     const { sb } = fakeSupabase()
     const r = await createDraftForApproval(DRAFT, {
@@ -211,5 +233,285 @@ describe('approveDraft — 唯一让钱动起来的地方', () => {
     const { sb } = fakeSupabase()
     const r = await approveDraft('nope', sb, 'tok')
     expect(r.ok).toBe(false)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 私信（点击后进 Messenger 对话）类型 —— 全链路
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MSG: AdDraft = {
+  kind: 'messenger_conversation',
+  clientId: 'c1',
+  campaignName: 'DM campaign',
+  adSetName: 'DM set',
+  dailyBudget: 20,
+  durationDays: 7,
+  geoCountries: ['NZ'],
+  pageId: 'p1',
+  creatives: [
+    { name: 'DM ad', primaryText: 'Join our Christmas tour', headline: 'Message us', videoId: 'v1', thumbnailImageHash: 'th1', language: 'en' },
+    { name: 'DM ad 2', primaryText: 'See the route', headline: 'Ask us', videoId: 'v2', thumbnailImageHash: 'th2', language: 'en' },
+  ],
+}
+
+const MSG_PUBLISH = { ok: true as const, campaignId: 'camp1', adSetId: 'as1', adIds: ['ad1', 'ad2'], orphans: [] }
+const T0 = 1_000_000
+
+function messengerReadback(over: { adSet?: object; ads?: object[] } = {}) {
+  mAdSet.mockResolvedValue({
+    id: 'as1', name: 'DM set', optimization_goal: 'CONVERSATIONS', destination_type: 'MESSENGER',
+    status: 'PAUSED', targeting: { geo_locations: { countries: ['NZ'] } },
+    ...over.adSet,
+  })
+  mCreatives.mockResolvedValue((over.ads ?? [
+    { adId: 'ad1', adName: 'DM ad', status: 'PAUSED', texts: ['Join our Christmas tour', 'Hi! Please let us know how we can help you.'] },
+    { adId: 'ad2', adName: 'DM ad 2', status: 'PAUSED', texts: ['See the route'] },
+  ]) as never)
+}
+
+function deps(sb: SupabaseClient, over: object = {}) {
+  return { supabase: sb, adAccountId: 'act_1', accessToken: 'tok', brandRedlines: [] as string[], now: () => T0, ...over }
+}
+
+describe('createDraftForApproval — 私信类型', () => {
+  beforeEach(() => {
+    mPublish.mockResolvedValue(MSG_PUBLISH)
+    mWait.mockResolvedValue({ ok: true })
+    mCampaignStatus.mockResolvedValue('PAUSED')
+    mPause.mockResolvedValue({ ok: true, failed: [] })
+    messengerReadback()
+  })
+
+  it('全链路：等转码 → 建 → 回读 → 过闸 → 等人点头；记下查了几条红线', async () => {
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(MSG, deps(sb, { brandRedlines: ['a phrase', 'b phrase'] }))
+    expect(r.status).toBe('awaiting_approval')
+    expect(mWait).toHaveBeenCalledWith(['v1', 'v2'], 'tok', expect.objectContaining({ timeoutMs: 25_000 }))
+    expect(mPublish).toHaveBeenCalledTimes(1)
+    expect(inserted[0].redlinesChecked).toBe(2)
+    // Meta 自动加的问候语也摊给人看
+    expect(inserted[0].buyerWillSee?.[0].lines.join(' ')).toContain('Please let us know')
+    expect(mPause).not.toHaveBeenCalled()
+  })
+
+  it('时间预算按请求开始时刻算：45 秒后不再写、80 秒后不再回滚', async () => {
+    const { sb } = fakeSupabase()
+    await createDraftForApproval(MSG, deps(sb))
+    const opts = mPublish.mock.calls[0][3]
+    expect(opts).toMatchObject({ stopWritingAt: T0 + 45_000, giveUpRollbackAt: T0 + 80_000 })
+  })
+
+  it('红线没加载(undefined) → 拒建：不等转码、不建、记 failed 且 redlinesChecked=null', async () => {
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(MSG, deps(sb, { brandRedlines: undefined }))
+    expect(r.status).toBe('failed')
+    expect(inserted[0].error).toContain('brandRedlines')
+    expect(inserted[0].redlinesChecked).toBeNull()
+    expect(mWait).not.toHaveBeenCalled()
+    expect(mPublish).not.toHaveBeenCalled()
+  })
+
+  it('名单里太短、没拿来比的条目不静默忽略：记进 redlinesSkipped', async () => {
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(MSG, deps(sb, { brandRedlines: ['a', ' ', 'real phrase'] }))
+    expect(r.status).toBe('awaiting_approval')
+    expect(inserted[0].redlinesChecked).toBe(3)
+    expect(inserted[0].redlinesSkipped).toEqual(['a', ' '])
+  })
+
+  it('名单都能用时不带 redlinesSkipped 字段', async () => {
+    const { sb, inserted } = fakeSupabase()
+    await createDraftForApproval(MSG, deps(sb, { brandRedlines: ['real phrase'] }))
+    expect(inserted[0].redlinesSkipped).toBeUndefined()
+  })
+
+  it('文案命中客户禁用词 → 拒建', async () => {
+    const { sb, inserted } = fakeSupabase()
+    const d = { ...MSG, creatives: [{ ...MSG.creatives[0], primaryText: 'Proudly founded in １９００' }] }
+    const r = await createDraftForApproval(d, deps(sb, { brandRedlines: ['founded in 1900'] }))
+    expect(r.status).toBe('failed')
+    expect(inserted[0].error).toContain('founded in 1900')
+    expect(inserted[0].redlinesChecked).toBe(1)
+    expect(mPublish).not.toHaveBeenCalled()
+  })
+
+  it('转码等不到 → failed，如实写原因；没建任何东西，没有 orphans', async () => {
+    mWait.mockResolvedValue({ ok: false, reason: 'timeout', error: '等了 25 秒，视频还在转码（v2）—— 广告没建，稍后重试' })
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(MSG, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('广告没建')
+    expect(mPublish).not.toHaveBeenCalled()
+    expect(inserted[0].orphans).toBeUndefined()
+  })
+
+  it('建失败 → failed，orphans 带进账本', async () => {
+    mPublish.mockResolvedValue({ ok: false, step: 'creative', error: 'bad', orphans: ['未确认是否已建成：广告「x」'] })
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(MSG, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(inserted[0].orphans).toEqual(['未确认是否已建成：广告「x」'])
+  })
+
+  it('回读发现广告组是 ACTIVE → blocked，并立刻补暂停，结果入账', async () => {
+    messengerReadback({ adSet: { status: 'ACTIVE' } })
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(MSG, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('not_paused')
+    expect(mPause).toHaveBeenCalledWith(
+      { campaignId: 'camp1', adSetId: 'as1', adIds: ['ad1', 'ad2'], orphans: [], ok: true },
+      'tok',
+      // 补暂停也有期限：从请求开始算 92 秒
+      { deadlineAt: T0 + 92_000, now: expect.any(Function) },
+    )
+    expect(inserted[0].autoPause).toEqual({ ok: true, failed: [] })
+    expect(inserted[0].readback).toContain('补暂停')
+  })
+
+  it('补暂停也失败 → 读报告的人能看到 🔴 和失败的 id', async () => {
+    messengerReadback({ ads: [{ adId: 'ad1', adName: 'x', status: 'ACTIVE', texts: ['hi'] }, { adId: 'ad2', adName: 'y', status: 'PAUSED', texts: ['hi'] }] })
+    mPause.mockResolvedValue({ ok: false, failed: ['ad1：HTTP 400'] })
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(MSG, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(inserted[0].autoPause).toEqual({ ok: false, failed: ['ad1：HTTP 400'] })
+    expect(inserted[0].readback).toContain('🔴')
+    expect(inserted[0].readback).toContain('ad1：HTTP 400')
+  })
+
+  it('系列状态读不到(null) → blocked（读不到 ≠ 暂停着）', async () => {
+    mCampaignStatus.mockResolvedValue(null)
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(MSG, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('not_paused')
+  })
+
+  it('目标 / 落点跟声明的不一样 → blocked', async () => {
+    messengerReadback({ adSet: { optimization_goal: 'LINK_CLICKS', destination_type: 'WEBSITE' } })
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(MSG, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('messaging_adset_mismatch')
+  })
+
+  it('回读到的广告条数不对(含 0 条) → blocked，不放行', async () => {
+    messengerReadback({ ads: [] })
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(MSG, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('ad_count_mismatch')
+  })
+
+  it('Meta 自动加的问候语命中红线 → blocked', async () => {
+    messengerReadback({ ads: [
+      { adId: 'ad1', adName: 'a', status: 'PAUSED', texts: ['We were founded in 1900'] },
+      { adId: 'ad2', adName: 'b', status: 'PAUSED', texts: ['ok'] },
+    ] })
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(MSG, deps(sb, { brandRedlines: ['founded in 1900'] }))
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('brand_redline_in_readback')
+  })
+
+  it('建完发现整次请求已经用掉太多时间 → 不回读，blocked（查不出来 ≠ 没问题），但 id 留着', async () => {
+    const now = vi.fn().mockReturnValueOnce(T0).mockReturnValue(T0 + 80_000)
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(MSG, deps(sb, { now }))
+    expect(r.status).toBe('blocked')
+    expect(r.error).toContain('没来得及回读')
+    expect(mAdSet).not.toHaveBeenCalled()
+    expect(inserted[0].adSetId).toBe('as1')
+  })
+
+  it('闸门原有的多语言 blocker 对私信类型照样生效（复用，不是重写）', async () => {
+    messengerReadback({ ads: [
+      { adId: 'ad1', adName: 'EN', status: 'PAUSED', texts: ['Join our Christmas tour'] },
+      { adId: 'ad2', adName: 'ZH', status: 'PAUSED', texts: ['圣诞节新西兰双岛游，欢迎私信咨询'] },
+    ] })
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(MSG, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('mixed_script_messaging_adset')
+  })
+})
+
+describe('createDraftForApproval — 请求体形状不对时不抛 500、要落账', () => {
+  const MALFORMED = [[null], [5], [{ name: 'A', primaryText: 5, headline: 'h' }]]
+
+  it('creatives 里有 null / 数字 / 非字符串 → failed 并落账，什么都不建（私信和留资都一样）', async () => {
+    for (const kind of ['messenger_conversation', 'lead_form'] as const) {
+      for (const creatives of MALFORMED) {
+        mPublish.mockClear(); mWait.mockClear()
+        const { sb, inserted } = fakeSupabase()
+        const d = { ...(kind === 'lead_form' ? DRAFT : MSG), creatives } as unknown as AdDraft
+        const r = await createDraftForApproval(d, deps(sb))
+        expect(r.status, `${kind} ${JSON.stringify(creatives)}`).toBe('failed')
+        expect(inserted).toHaveLength(1)
+        expect(mPublish).not.toHaveBeenCalled()
+        expect(mWait).not.toHaveBeenCalled()
+      }
+    }
+  })
+
+  it('creatives 不是数组 / kind 是陌生值 → 同样 failed 落账，不抛', async () => {
+    for (const patch of [{ creatives: undefined }, { kind: 'weird' }]) {
+      const { sb, inserted } = fakeSupabase()
+      const r = await createDraftForApproval({ ...MSG, ...patch } as unknown as AdDraft, deps(sb))
+      expect(r.status).toBe('failed')
+      expect(inserted).toHaveLength(1)
+    }
+  })
+})
+
+describe('createDraftForApproval — 其它类型的行为不变', () => {
+  it('留资草案：不等转码、不查期望、不给预算参数、不补暂停', async () => {
+    mPublish.mockResolvedValue(OK_PUBLISH)
+    mAdSet.mockResolvedValue({
+      id: 'as1', name: 'North Shore', optimization_goal: 'LEAD_GENERATION', destination_type: 'ON_AD',
+      targeting: { geo_locations: { countries: ['NZ'] } },
+    })
+    mCreatives.mockResolvedValue([{ adId: 'ad1', adName: 'EN', texts: ['Brand new four bedroom home in Rothesay Bay'] }])
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(DRAFT, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(r.status).toBe('awaiting_approval')
+    expect(mWait).not.toHaveBeenCalled()
+    expect(mCampaignStatus).not.toHaveBeenCalled()
+    expect(mPause).not.toHaveBeenCalled()
+    expect(mPublish.mock.calls[0][3]).toBeUndefined()
+  })
+})
+
+describe('approveDraft — 私信广告现在不能用「开」按钮打开', () => {
+  const base = { status: 'awaiting_approval' as const, summary: 's', campaignId: 'camp1', adSetId: 'as1', adIds: ['ad1'] }
+
+  it('私信类型即使状态是等待批准 → 拒，零 Meta 调用，账本不改', async () => {
+    const { sb, updated } = fakeSupabase({ ...base, draft: MSG })
+    const r = await approveDraft('act1', sb, 'tok')
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('私信')
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(updated).toHaveLength(0)
+  })
+
+  it('账本里 kind 陌生 / 缺失 / draft 缺失的旧记录 → 白名单一律拒', async () => {
+    for (const draft of [{ ...DRAFT, kind: 'weird' }, { ...DRAFT, kind: undefined }, undefined]) {
+      mActivate.mockClear()
+      const { sb, updated } = fakeSupabase({ ...base, draft } as unknown as DraftRecord)
+      const r = await approveDraft('act1', sb, 'tok')
+      expect(r.ok, JSON.stringify(draft?.kind)).toBe(false)
+      expect(mActivate).not.toHaveBeenCalled()
+      expect(updated).toHaveLength(0)
+    }
+  })
+
+  it('原来的两种类型照样能开', async () => {
+    mActivate.mockResolvedValue({ ok: true })
+    for (const kind of ['lead_form', 'video_thruplay'] as const) {
+      const { sb } = fakeSupabase({ ...base, draft: { ...DRAFT, kind } })
+      expect((await approveDraft('act1', sb, 'tok')).ok, kind).toBe(true)
+    }
   })
 })

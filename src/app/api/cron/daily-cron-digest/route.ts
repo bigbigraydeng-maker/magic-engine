@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
   // reviewable line」，`RawWorkItemSource` 里本来就有 'cron_failure'，
   // 只是一直只接在一个喂静态假数据的预览接口上。这里是它第一个真实调用方。
   // 不自己另写一套收敛，是因为两套口径会给出两个不同的「今天有几件事」，
-  // 而这个计数口径已经翻过两次车（见 daily-todo.ts 的 INFORMATIONAL_KINDS 注释）。
+  // 而这个计数口径已经翻过两次车（见 src/lib/pm-todo/five-kinds.ts 头注）。
   const repFor = new Map<string, typeof failedRuns[number]>()
   const rawItems: RawWorkItem[] = failedRuns.map((r) => {
     const detail = (r.error_message ?? '').trim() || summaryFailureDetail(r.summary)

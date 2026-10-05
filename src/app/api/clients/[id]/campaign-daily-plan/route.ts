@@ -37,6 +37,7 @@ import {
   type CampaignDailyPostReviewMeta,
 } from '@/lib/campaign/daily-plan'
 import { CampaignDailyPublishMetaSchema } from '@/lib/campaign/daily-plan-publish'
+import { postChecklistPasses } from '@/lib/social/content-review'
 
 interface ActiveMasterBriefRef {
   id: string
@@ -301,7 +302,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
             verdict: storedReview.verdict,
             reason: storedReview.reason,
             reviewed_at: storedReview.reviewed_at,
-            is_current: storedReview.verdict !== 'PASS' || passStillCurrent,
+            is_current: storedReview.verdict !== 'PASS' || (
+              passStillCurrent &&
+              storedReview.reviewer_role === 'admin' &&
+              postChecklistPasses(storedReview.checklist)
+            ),
           }
         : null
       return {
