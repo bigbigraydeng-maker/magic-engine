@@ -294,7 +294,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
             <p className="text-sm text-slate-600 mb-5">
               通过 = 标记这条合格、<span className="font-medium text-slate-900">排入发布队列</span>。
               发布程序每小时自动跑一次,队列里的片子会自动发到客户主页;
-              <span className="font-medium text-slate-900">全局发布开关没开时只存成草稿、不公开</span>(看板会标「草稿,未公开」)。请按「已经会发出去」的标准把关。确定通过?
+              <span className="font-medium text-slate-900">全局发布开关没开时只存成草稿、不公开</span>(看板会标「发布时存为草稿」)。请按「已经会发出去」的标准把关。确定通过?
             </p>
             <div className="flex gap-3">
               <button

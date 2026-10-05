@@ -6,7 +6,7 @@
 1. `markFailed` 与「上次发布中断」分支写 `reject_reason`（经 `sanitizeFailReason` 脱敏：令牌、网址、存储路径、`fbtrace_id`、≥40 位长串；截断 200 字）；发布成功时清空旧原因。
 2. `flywheel_actions.vendor` 改为渠道常量（facebook→`meta_graph`，与 `factory-reel-measurement-adapter` 同名；其它→`publer`），不再写死 `oztop_facebook`。客户靠每行的 `client_id` 区分。标题回退：brief.angle → 工单 angle 列 → 品牌名 → `Reel`。
 3. `GET /api/factory/work-orders` 补取 `published_ref`，只外发 `published = {video_state, permalink, published_at, provisional}`；永久链接只接受 facebook.com / fb.watch 的 https，无账号密码。
-4. 看板：已发布（草稿，未公开）/ 已公开（带链接）/ 发到一半中断 / 已在平台上（公开状态未核实）四种徽章；失败原因仅在失败类状态显示。
+4. 看板：发布时存为草稿（只是发布时的请求参数，未向 Facebook 回读）/ 已公开（带链接）/ 发到一半中断 / 已在平台上（公开状态未核实）四种徽章；失败原因仅在失败类状态显示。
 5. `ReviewInbox` 过期文案「定时器尚未启用」已更正。
 
 ## 审查
