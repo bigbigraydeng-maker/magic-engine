@@ -42,7 +42,7 @@ const STABLE = 'https://x.com/stable'
 const gone = { clicks: 2, impressions: 20, position: 5 }
 
 describe('weekly list · traffic decay source', () => {
-  it('lists a page whose clicks fell far more than the site, with evidence and a page_strengthened check', async () => {
+  it('lists a page whose clicks fell far more than the site, with evidence and a page_changed check', async () => {
     const d = db([
       ...gscRows(A, { clicks: 0, impressions: 4, position: 9 }, gone),
       ...gscRows(STABLE, { clicks: 3, impressions: 30, position: 4 }, { clicks: 3, impressions: 30, position: 4 }),
@@ -55,7 +55,7 @@ describe('weekly list · traffic decay source', () => {
     expect(String(item.title)).toContain('/decaying')
     const steps = item.steps_json as Record<string, unknown> & { evidence: Array<{ confidence: string }>; verify: { type: string }; baseline: { word_count: number } }
     expect(steps.kind).toBe('traffic_decay')
-    expect(steps.verify.type).toBe('page_strengthened')
+    expect(steps.verify.type).toBe('page_changed')
     expect(steps.baseline.word_count).toBe(800)
     expect(steps.evidence[0].confidence).toBe('确认')
     expect(JSON.stringify(steps.evidence)).toContain('点击少了 100%')
