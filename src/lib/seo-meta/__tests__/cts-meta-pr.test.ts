@@ -5,7 +5,13 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { replaceMetaForSlug, buildSlugIndex, pickCandidates } from '../cts-meta-pr'
+import {
+  replaceMetaForSlug,
+  readMetaForSlug,
+  buildSlugIndex,
+  pickCandidates,
+} from '../cts-meta-pr'
+import type { MetaFieldStyle } from '../cts-meta-pr'
 
 const HUB_SOURCE = `// SEO Pages Data
 export const chinaToursMeta: SeoPageMeta = {
@@ -43,6 +49,40 @@ export const longtailBatch1Posts: BlogPost[] = [
     author: 'Baker Gu',
   },
 ];
+`
+
+/** Destination guides (guides.ts): metaTitle/metaDescription + section titles. */
+const GUIDES_SOURCE = `export const beijingGuide: DestinationGuide = {
+  id: 'guide-beijing',
+  slug: 'beijing-travel-guide',
+  destinationName: 'Beijing',
+  metaTitle: 'Beijing Travel Guide | CTS Tours NZ',
+  metaDescription: 'Old beijing desc.',
+  sections: [
+    { title: 'Forbidden City', id: 'forbidden-city', content: ['a'] },
+  ],
+  relatedGuideSlugs: ['chongqing-travel-guide'],
+};
+
+export const chongqingGuide: DestinationGuide = {
+  id: 'guide-chongqing',
+  slug: 'chongqing-travel-guide',
+  destinationName: 'Chongqing',
+  metaTitle: 'Old Chongqing Title | CTS Tours NZ',
+  metaDescription: 'Old chongqing desc.',
+  sections: [
+    { title: 'Liziba Station', id: 'liziba-station', content: ['b'] },
+  ],
+};
+
+export const noMetaGuide: DestinationGuide = {
+  id: 'guide-nowhere',
+  slug: 'no-meta-guide',
+  destinationName: 'Nowhere',
+  sections: [
+    { title: 'Only a section title', id: 'x', content: ['c'] },
+  ],
+};
 `
 
 describe('replaceMetaForSlug — narrow lane', () => {
@@ -95,6 +135,102 @@ describe('replaceMetaForSlug — narrow lane', () => {
 ];
 `
     expect(replaceMetaForSlug(missingExcerpt, 'no-excerpt-post', 'a', 'b')).toBeNull()
+  })
+
+  it('default style still works when the style argument is omitted (back-compat)', () => {
+    const result = replaceMetaForSlug(HUB_SOURCE, 'beijing-tours', 'Compat Title | CTS', 'Compat desc.')
+    expect(result).not.toBeNull()
+    expect(result!.updated).toContain("title: 'Compat Title | CTS'")
+    expect(result!.updated).toContain("description: 'Compat desc.'")
+  })
+})
+
+describe('replaceMetaForSlug — guide style', () => {
+  it('replaces ONLY metaTitle and metaDescription of the requested guide', () => {
+    const result = replaceMetaForSlug(
+      GUIDES_SOURCE,
+      'chongqing-travel-guide',
+      'New Chongqing Title | CTS Tours NZ',
+      'New chongqing desc.',
+      'guide',
+    )
+    expect(result).not.toBeNull()
+    expect(result!.updated).toContain("metaTitle: 'New Chongqing Title | CTS Tours NZ'")
+    expect(result!.updated).toContain("metaDescription: 'New chongqing desc.'")
+    // section titles are untouched
+    expect(result!.updated).toContain("title: 'Liziba Station'")
+    expect(result!.updated).toContain("title: 'Forbidden City'")
+    // neighbouring guide's meta is untouched
+    expect(result!.updated).toContain("metaTitle: 'Beijing Travel Guide | CTS Tours NZ'")
+    expect(result!.oldTitle).toBe('Old Chongqing Title | CTS Tours NZ')
+    expect(result!.oldDesc).toBe('Old chongqing desc.')
+  })
+
+  it('escapes a single quote in the new title', () => {
+    const result = replaceMetaForSlug(
+      GUIDES_SOURCE,
+      'chongqing-travel-guide',
+      "NZ's Best Chongqing Guide | CTS",
+      'New desc.',
+      'guide',
+    )
+    expect(result).not.toBeNull()
+    expect(result!.updated).toContain("metaTitle: 'NZ\\'s Best Chongqing Guide | CTS'")
+  })
+
+  it('returns null for a guide with no metaTitle/metaDescription (source untouched)', () => {
+    const result = replaceMetaForSlug(GUIDES_SOURCE, 'no-meta-guide', 'a', 'b', 'guide')
+    expect(result).toBeNull()
+  })
+
+  it('a nested slug mention never edits the wrong guide', () => {
+    // relatedSlugs mentions 'chongqing-travel-guide' inside the beijing guide,
+    // but the top-level anchor is what matters.
+    const result = replaceMetaForSlug(
+      GUIDES_SOURCE,
+      'chongqing-travel-guide',
+      'New Chongqing Title | CTS Tours NZ',
+      'New chongqing desc.',
+      'guide',
+    )
+    expect(result).not.toBeNull()
+    expect(result!.updated).toContain("metaTitle: 'Beijing Travel Guide | CTS Tours NZ'")
+    expect(result!.updated).toContain("metaTitle: 'New Chongqing Title | CTS Tours NZ'")
+  })
+
+  it('a slug that only appears nested returns null in guide style', () => {
+    // 'chongqing-travel-guide' appears nested in relatedSlugs; a slug that
+    // appears ONLY nested (not as a top-level key) must not match.
+    const nestedOnly = `export const guides = [
+  {
+    slug: 'beijing-travel-guide',
+    metaTitle: 'Beijing Travel Guide | CTS Tours NZ',
+    metaDescription: 'Old beijing desc.',
+    relatedSlugs: ['chongqing-travel-guide'],
+  },
+]
+`
+    expect(replaceMetaForSlug(nestedOnly, 'chongqing-travel-guide', 'a', 'b', 'guide')).toBeNull()
+  })
+})
+
+describe('readMetaForSlug — guide style', () => {
+  it('returns the metaTitle / metaDescription of the requested guide', () => {
+    const meta = readMetaForSlug(GUIDES_SOURCE, 'chongqing-travel-guide', 'guide')
+    expect(meta).not.toBeNull()
+    expect(meta!.title).toBe('Old Chongqing Title | CTS Tours NZ')
+    expect(meta!.desc).toBe('Old chongqing desc.')
+  })
+
+  it('returns null for a guide with no meta fields', () => {
+    expect(readMetaForSlug(GUIDES_SOURCE, 'no-meta-guide', 'guide')).toBeNull()
+  })
+
+  it('default style is unchanged when style is omitted', () => {
+    const meta = readMetaForSlug(HUB_SOURCE, 'beijing-tours')
+    expect(meta).not.toBeNull()
+    expect(meta!.title).toBe('Beijing Tours | CTS')
+    expect(meta!.desc).toBe('Old beijing description.')
   })
 })
 
