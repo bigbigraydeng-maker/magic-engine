@@ -33,6 +33,7 @@ import {
   classifyCtsCrmPerson,
   ctsPhoneE164,
   ctsSourceRef,
+  isFormTemplateMessage,
   type Sheet1LeadRow,
 } from './cts-crm-sheet-sync'
 
@@ -58,6 +59,8 @@ export interface CtsCrmSyncSummary {
   excludedByNotes: number
   /** 填了表单、没被标无效，但员工记录里没有明确兴趣证据——不当合格线索发（PM 2026-10-04）。 */
   excludedNoInterest: number
+  /** 员工记录判合格，但客人从没真实发起过对话（表单自带的首条消息不算）——不当合格线索发。 */
+  excludedNoConversation: number
   excludedNoDate: number
   /** 旧规则放进来、待核对的线索，按新规则复判不合格 → 自动拒绝（不发给 Meta）的条数。 */
   rejectedStaleLeads: number
@@ -89,6 +92,7 @@ function emptySummary(): CtsCrmSyncSummary {
     excludedNoPhone: 0,
     excludedByNotes: 0,
     excludedNoInterest: 0,
+    excludedNoConversation: 0,
     excludedNoDate: 0,
     rejectedStaleLeads: 0,
     qualifiedFromConversation: 0,
@@ -236,6 +240,7 @@ export function mergeCtsCrmSummaries(a: CtsCrmSyncSummary, b: CtsCrmSyncSummary)
     excludedByNotes: a.excludedByNotes + b.excludedByNotes,
     excludedNoDate: a.excludedNoDate + b.excludedNoDate,
     excludedNoInterest: a.excludedNoInterest + b.excludedNoInterest,
+    excludedNoConversation: a.excludedNoConversation + b.excludedNoConversation,
     rejectedStaleLeads: a.rejectedStaleLeads + b.rejectedStaleLeads,
     qualifiedFromConversation: a.qualifiedFromConversation + b.qualifiedFromConversation,
     skippedPastWindow: a.skippedPastWindow + b.skippedPastWindow,
@@ -286,22 +291,30 @@ async function loadExistingSourceRefs(supabase: SupabaseClient): Promise<Map<str
 
 function tallyExcluded(
   summary: CtsCrmSyncSummary,
-  reason: 'no_qualifying_phone' | 'excluded_by_notes' | 'no_usable_date' | 'no_interest_evidence',
+  reason: 'no_qualifying_phone' | 'excluded_by_notes' | 'no_usable_date' | 'no_interest_evidence' | 'no_customer_conversation',
 ): void {
   if (reason === 'no_qualifying_phone') summary.excludedNoPhone++
   else if (reason === 'excluded_by_notes') summary.excludedByNotes++
   else if (reason === 'no_interest_evidence') summary.excludedNoInterest++
+  else if (reason === 'no_customer_conversation') summary.excludedNoConversation++
   else summary.excludedNoDate++
 }
 
+/** 拒绝旧待核对线索时写进 `reject_note` 的说明文案。 */
+function staleRejectNote(reason: 'excluded_by_notes' | 'no_interest_evidence' | 'no_customer_conversation'): string {
+  if (reason === 'excluded_by_notes') return '员工记录里出现排除词（打错电话/不感兴趣/已订别家等）'
+  if (reason === 'no_interest_evidence') return '员工记录里没有明确兴趣证据，不当合格线索发'
+  return '客人没有真实发起过对话（表单自带的首条消息不算），不当合格线索发'
+}
+
 /**
- * 旧规则（只看电话和两个排除词）放进来、还在「待核对」的线索，按新规则复判不合格（排除词 / 没有兴趣证据）→
- * 拒绝，不告诉 Meta。CAS：只在仍是 pending_review 时才拒，已批准/已发出的绝不动（撤不回）。
+ * 旧规则（只看电话和两个排除词）放进来、还在「待核对」的线索，按新规则复判不合格（排除词 / 没有兴趣证据 /
+ * 没有真实对话）→ 拒绝，不告诉 Meta。CAS：只在仍是 pending_review 时才拒，已批准/已发出的绝不动（撤不回）。
  */
 async function rejectStalePendingLead(
   supabase: SupabaseClient,
   existing: { id: string; reviewStatus: string } | undefined,
-  reason: 'excluded_by_notes' | 'no_interest_evidence',
+  reason: 'excluded_by_notes' | 'no_interest_evidence' | 'no_customer_conversation',
   summary: CtsCrmSyncSummary,
 ): Promise<void> {
   if (!existing || existing.reviewStatus !== 'pending_review') return
@@ -311,7 +324,7 @@ async function rejectStalePendingLead(
     .update({
       review_status: 'rejected',
       reject_reason: 'other',
-      reject_note: reason === 'excluded_by_notes' ? '员工记录里出现排除词（打错电话/不感兴趣/已订别家等）' : '员工记录里没有明确兴趣证据，不当合格线索发',
+      reject_note: staleRejectNote(reason),
       reviewed_by: 'auto:cts-qualify-rule',
       reviewed_at: now,
       updated_at: now,
@@ -399,6 +412,8 @@ async function loadBodiesByContact(
       const contactId = convToContact.get(row.conversation_id)
       const body = row.body?.trim()
       if (!contactId || !body) continue
+      // 表单自带的首条消息不算「客人真实发起过对话」——只留真人手打的消息。
+      if (isFormTemplateMessage(body)) continue
       const list = bodiesByContact.get(contactId) ?? []
       if (list.length >= INBOUND_MESSAGES_PER_CONTACT) continue
       list.push(body.slice(0, INBOUND_BODY_MAX_CHARS))
@@ -525,43 +540,38 @@ function normaliseEmailForLookup(email: string | null | undefined): string | nul
   return trimmed ? trimmed : null
 }
 
-/**
- * 先按员工记录分类，再对「员工记录里没有兴趣证据」的行补读客户自己的消息、重新分类。
- *
- * 只有这些行需要读会话（其余行的分类不依赖会话文本），所以先收集它们的联系人、
- * 一次批量读，避免逐行往返。读不到会话文本的行保持原分类。
- */
-async function classifyChunkRows(
+interface PreparedRow {
+  crmRow: CrmManagementRow
+  phoneKey: string | null
+  matchedSheet1: Sheet1LeadRow | null
+  classified: ClassifiedRow
+}
+
+interface ClassifiedChunkRow {
+  crmRow: CrmManagementRow
+  phoneKey: string | null
+  classified: ClassifiedRow
+  conversationReadFailed?: boolean
+  /** 员工记录判合格/判「没有兴趣证据」，但联系人没关联上——会话文本无从查起，跳过不判、不拒、不写。 */
+  contactUnlinked?: boolean
+}
+
+/** 这一行的分类是否依赖客户会话文本：员工记录判「没有兴趣证据」或判合格线索，都要看会话。 */
+function needsConversationLookup(p: PreparedRow): boolean {
+  if (!p.phoneKey) return false
+  if (p.classified.kind === 'qualified_lead') return true
+  return p.classified.kind === 'excluded' && p.classified.reason === 'no_interest_evidence'
+}
+
+/** 收集需要读会话的行的联系人 id（一次批量读，避免逐行往返）。 */
+async function collectConversationContacts(
   supabase: SupabaseClient,
-  rows: CrmManagementRow[],
-  sheet1ByPhone: Map<string, Sheet1LeadRow>,
-): Promise<
-  Array<{
-    crmRow: CrmManagementRow
-    phoneKey: string | null
-    classified: ClassifiedRow
-    conversationReadFailed?: boolean
-  }>
-> {
-  const prepared = rows.map((crmRow) => {
-    const phoneKey = ctsPhoneE164(crmRow.phoneRaw)
-    const matchedSheet1 = phoneKey ? (sheet1ByPhone.get(phoneKey) ?? null) : null
-    return { crmRow, phoneKey, matchedSheet1, classified: classifyCtsCrmPerson(crmRow, matchedSheet1) }
-  })
-
-  const needsConversationIndexes: number[] = []
-  prepared.forEach((p, index) => {
-    if (p.phoneKey && p.classified.kind === 'excluded' && p.classified.reason === 'no_interest_evidence') {
-      needsConversationIndexes.push(index)
-    }
-  })
-  if (needsConversationIndexes.length === 0) {
-    return prepared.map(({ crmRow, phoneKey, classified }) => ({ crmRow, phoneKey, classified }))
-  }
-
-  const contactIds = new Set<string>()
+  prepared: PreparedRow[],
+  indexes: number[],
+): Promise<{ contactIdByIndex: Map<number, string>; contactIds: string[] }> {
   const contactIdByIndex = new Map<number, string>()
-  for (const index of needsConversationIndexes) {
+  const contactIds = new Set<string>()
+  for (const index of indexes) {
     const p = prepared[index]
     const email = normaliseEmailForLookup(p.matchedSheet1?.email ?? p.crmRow.email)
     const contactId = await findExistingContactId(supabase, CTS_CLIENT_ID, p.phoneKey, email)
@@ -570,14 +580,60 @@ async function classifyChunkRows(
       contactIds.add(contactId)
     }
   }
+  return { contactIdByIndex, contactIds: [...contactIds] }
+}
 
-  const { texts: conversationText, failed } = await loadInboundConversationText(
-    supabase,
-    CTS_CLIENT_ID,
-    [...contactIds],
-    new Date(),
-  )
+/**
+ * 用会话文本复判一行。
+ *
+ * - 员工记录判合格线索：联系人没关联上 → `contactUnlinked`（跳过，不判不拒）；关联上但没真实文本 →
+ *   降级为 `no_customer_conversation`；有真实文本 → 重跑分类，客户消息里的排除词压过员工记录里的正面备注，
+ *   否则保留原合格判定。
+ * - 员工记录判「没有兴趣证据」：联系人没关联上 → `contactUnlinked`；有真实文本 → 重跑分类。
+ */
+function reclassifyWithConversation(
+  p: PreparedRow,
+  text: string | undefined,
+  hadContact: boolean,
+): { classified: ClassifiedRow; contactUnlinked?: boolean } {
+  if (p.classified.kind === 'qualified_lead') {
+    if (!hadContact) return { classified: p.classified, contactUnlinked: true }
+    if (!text) return { classified: { kind: 'excluded', reason: 'no_customer_conversation' } }
+    const reclassified = classifyCtsCrmPerson(p.crmRow, p.matchedSheet1, text)
+    return { classified: reclassified.kind === 'excluded' ? reclassified : p.classified }
+  }
+  if (!hadContact) return { classified: p.classified, contactUnlinked: true }
+  if (!text) return { classified: p.classified }
+  return { classified: classifyCtsCrmPerson(p.crmRow, p.matchedSheet1, text) }
+}
 
+/**
+ * 先按员工记录分类，再对「员工记录里没有兴趣证据」和「员工记录判合格线索」的行补读客户自己的消息。
+ *
+ * 只有这些行需要读会话（其余行的分类不依赖会话文本），所以先收集它们的联系人、
+ * 一次批量读，避免逐行往返。读不到会话文本的行保持原分类。
+ */
+async function classifyChunkRows(
+  supabase: SupabaseClient,
+  rows: CrmManagementRow[],
+  sheet1ByPhone: Map<string, Sheet1LeadRow>,
+): Promise<ClassifiedChunkRow[]> {
+  const prepared: PreparedRow[] = rows.map((crmRow) => {
+    const phoneKey = ctsPhoneE164(crmRow.phoneRaw)
+    const matchedSheet1 = phoneKey ? (sheet1ByPhone.get(phoneKey) ?? null) : null
+    return { crmRow, phoneKey, matchedSheet1, classified: classifyCtsCrmPerson(crmRow, matchedSheet1) }
+  })
+
+  const needsConversationIndexes: number[] = []
+  prepared.forEach((p, index) => {
+    if (needsConversationLookup(p)) needsConversationIndexes.push(index)
+  })
+  if (needsConversationIndexes.length === 0) {
+    return prepared.map(({ crmRow, phoneKey, classified }) => ({ crmRow, phoneKey, classified }))
+  }
+
+  const { contactIdByIndex, contactIds } = await collectConversationContacts(supabase, prepared, needsConversationIndexes)
+  const { texts: conversationText, failed } = await loadInboundConversationText(supabase, CTS_CLIENT_ID, contactIds, new Date())
   const failedIndexes = failed ? new Set(needsConversationIndexes) : null
 
   return prepared.map((p, index) => {
@@ -586,8 +642,8 @@ async function classifyChunkRows(
     }
     const contactId = contactIdByIndex.get(index)
     const text = contactId ? conversationText.get(contactId) : undefined
-    if (!text) return { crmRow: p.crmRow, phoneKey: p.phoneKey, classified: p.classified }
-    return { crmRow: p.crmRow, phoneKey: p.phoneKey, classified: classifyCtsCrmPerson(p.crmRow, p.matchedSheet1, text) }
+    const { classified, contactUnlinked } = reclassifyWithConversation(p, text, Boolean(contactId))
+    return { crmRow: p.crmRow, phoneKey: p.phoneKey, classified, contactUnlinked }
   })
 }
 
@@ -626,8 +682,14 @@ export async function runCtsCrmSyncChunk(
 
   const rows = await classifyChunkRows(supabase, crmRows.slice(start, end), sheet1ByPhone)
 
-  for (const { phoneKey, classified, conversationReadFailed } of rows) {
+  for (const { phoneKey, classified, conversationReadFailed, contactUnlinked } of rows) {
     summary.totalCrmRows++
+
+    // 联系人没关联上：会话文本无从查起，跳过这一行，不计数、不拒绝、不写入。
+    if (contactUnlinked) {
+      summary.contactNotLinked++
+      continue
+    }
 
     // 读会话失败时「没有兴趣证据」是未知，不能当成没有——跳过这一行，不计数、不拒绝、不写入。
     if (conversationReadFailed) {
@@ -638,7 +700,12 @@ export async function runCtsCrmSyncChunk(
     if (classified.kind === 'excluded') {
       tallyExcluded(summary, classified.reason)
       // 旧规则遗留的待核对线索，新规则下不合格 → 拒绝（见 rejectStalePendingLead）。
-      if (phoneKey && (classified.reason === 'excluded_by_notes' || classified.reason === 'no_interest_evidence')) {
+      if (
+        phoneKey &&
+        (classified.reason === 'excluded_by_notes' ||
+          classified.reason === 'no_interest_evidence' ||
+          classified.reason === 'no_customer_conversation')
+      ) {
         await rejectStalePendingLead(supabase, existingRefs.get(ctsSourceRef(phoneKey, 'lead')), classified.reason, summary)
       }
       continue
