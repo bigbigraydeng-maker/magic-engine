@@ -299,9 +299,11 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
               ))}
             </div>
 
+            {/* 文案只陈述能保证的事实:发布 cron 每小时跑一次;全局开关没开时只发草稿。 */}
             <p className="text-sm text-slate-600 mb-5">
               通过 = 标记这条合格、<span className="font-medium text-slate-900">排入发布队列</span>。
-              目前发布是<span className="font-medium text-slate-900">草稿模式</span>:只会存成 Facebook 草稿,<span className="font-medium text-slate-900">不会公开</span>,要公开需要在 Facebook 里手动点发布。确定通过?
+              发布程序每小时自动跑一次,队列里的片子会自动发到客户主页;
+              <span className="font-medium text-slate-900">全局发布开关没开时只存成草稿、不公开</span>(看板会标「发布时存为草稿」)。请按「已经会发出去」的标准把关。确定通过?
             </p>
             {error && <div className="mb-3 px-3 py-2 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>}
             <div className="flex gap-3">

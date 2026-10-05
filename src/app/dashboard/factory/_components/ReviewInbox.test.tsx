@@ -31,7 +31,7 @@ it('prefills source, one-click all PASS, shows plain-Chinese server error inside
   const urls = [...document.querySelectorAll('input[placeholder^="来源"]')] as HTMLInputElement[]
   expect(urls.map(i => i.value)).toEqual([URL_OK, URL_OK])
   expect(btn('确定通过')?.hasAttribute('disabled')).toBe(true) // 不会替 PM 默认 PASS
-  expect(document.body.textContent).toContain('草稿模式')
+  expect(document.body.textContent).toContain('只存成草稿')
   await click(btn('项全部标为通过'))
   expect(btn('确定通过')?.hasAttribute('disabled')).toBe(false)
   await click(btn('确定通过'))
