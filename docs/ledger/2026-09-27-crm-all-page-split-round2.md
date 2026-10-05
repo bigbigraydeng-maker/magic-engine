@@ -10,6 +10,7 @@ done_ref: pr:2089
 verify_by: 2026-10-01
 verify_how: 跑 `wc -l "src/app/dashboard/clients/[id]/crm/all/page.tsx"` 必须 < 800。另跑 `npm test -- all/__tests__`，除既有那 3 条 nal-mark-won-panel 失败（基线 21e7675b 同样失败、同样行号 71/83/109、同样报 Jordan Example 找不到）之外全绿
 last_checked: 2026-10-05
+check_note: 10-05 夜巡未核查本卡判据（夜巡只有本地只读权限，无生产库、登录态或外网），待人工或下一轮核查
 ---
 纯搬家，一行逻辑没改：`ContactDetail` 和只有它用的两个面板（`MarkWonPanel` / `ImportantMarkerEditor`）连同 `NAL_CLIENT_ID` 常量，一起搬进 `all/_components/ContactDetail.tsx`。搬前搬后那 372 行**逐字比对一致**（除了给三个组件加 `export`）。
 

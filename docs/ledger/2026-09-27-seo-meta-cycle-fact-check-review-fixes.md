@@ -10,6 +10,7 @@ done_ref: pr:1948
 verify_by: 2026-10-04
 verify_how: 周一 cron 正常跑完无回归；/china-tours 被正确拦截（反向 + 正向事实检查均触发）
 last_checked: 2026-10-05
+check_note: 10-05 夜巡未核查本卡判据（夜巡只有本地只读权限，无生产库、登录态或外网），待人工或下一轮核查
 ---
 子牙 + 魏征审查 PR #1948 提出 5 条缺陷 + 子牙追加 4 项必改，全部修复：
 1. BLOCKER: hard-fact-check 增加反向检查 — AI 改写新增的事实同样拦截

@@ -10,6 +10,7 @@ verify_how: ①合并后第一个工作日的今日待办邮件出现"Magic Engi
 done_on: 2026-09-24
 done_ref: pr:1984
 last_checked: 2026-10-05
+check_note: 10-05 夜巡未核查本卡判据（夜巡只有本地只读权限，无生产库、登录态或外网），待人工或下一轮核查
 ---
 PM 2026-09-24 拍板，DeepSeek 实现、Fable 窗口复审，子牙 + 魏征设计审各一轮。设计在 docs/specs/2026-09-24-harness-ledger-v0.md。
 不做：只改台账目录的 PR 免合并审批（PM 待定）。

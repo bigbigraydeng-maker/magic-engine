@@ -10,5 +10,6 @@ verify_how: ①下一个 C 级 PR 走 pr-risk-gate 判 C 后 gh 开 auto-merge�
 done_on: 2026-09-26
 done_ref: pr:2023
 last_checked: 2026-10-05
+check_note: 10-05 夜巡未核查本卡判据（夜巡只有本地只读权限，无生产库、登录态或外网），待人工或下一轮核查
 ---
 PM 2026-09-26 拍板方案 X 后执行。Protect main 只加 `ops-review-loop-tests`（bypass_actors 保持空、谁都绕不过五道台账/测试检查）；新建独立规则集 `Risk gate`（id 23998653，bypass_actors = RepositoryRole 5 Admin，只含 `Risk gate` 一道），实现"Protect main 五道任何人都绕不过 + Risk gate 一道 PM 用 --admin 能绕"。变量 `ME_SIGNOFF_TRUSTED_LOGINS` 不设 = 谁都不信 = A 级 Risk gate 恒红，等 B3 独立签字身份建成再指过去。旧环境 `merge-authorization` 保留（可选删这次不动）。改前/改后证据存于 scratchpad settings-change/before.txt 与 after.txt。

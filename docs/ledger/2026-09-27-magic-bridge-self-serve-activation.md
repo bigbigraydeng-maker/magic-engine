@@ -10,6 +10,7 @@ done_ref: pr:2112
 verify_by: 2026-10-04
 verify_how: 迁移执行、PR 合并上线后：① 用一个测试用自助注册客户打开 Magic Bridge 页，看到「正在等 Meta 官方审核」和示例报告链接，没有连接按钮；② CTS 的 Magic Bridge 页照常打开、照常能生成报告；③ 生产 meta_ads_ai_quota_config 有三行（facebook_user 1、ad_account 1、platform 30）。不成：先查迁移是否已执行（邀请表有没有 source 列）。
 last_checked: 2026-10-05
+check_note: 10-05 夜巡未核查本卡判据（夜巡只有本地只读权限，无生产库、登录态或外网），待人工或下一轮核查
 ---
 PM 9/27 定方向 A（新客户自助用），额度默认值 PM 同意；不接 MTC。设计：docs/specs/2026-09-27-magic-bridge-self-serve-open-design.md（分支 chore/mb-open-eval）§2、§8。
 审查：设计两轮 子牙 + 魏征 + 板桥；实施后 子牙 + 魏征 + 板桥 + 狄仁杰，全部阻塞项已修。验证：本机一次性 PostgreSQL 45 项 + 原有 111 项、单元测试 951 条、变异探针 22/22。

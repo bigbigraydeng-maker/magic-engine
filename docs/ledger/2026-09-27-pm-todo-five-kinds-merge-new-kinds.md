@@ -10,6 +10,7 @@ verify_how: 上线后第一个工作日，若下列任一待办触发，确认�
 done_on: 2026-09-27
 done_ref: pr:2065
 last_checked: 2026-10-05
+check_note: 10-05 夜巡未核查本卡判据（夜巡只有本地只读权限，无生产库、登录态或外网），待人工或下一轮核查
 ---
 原作者窗口（hopeful-williamson）归档后转手接手，把 PR #2065 的 CONFLICTING 解掉。
 

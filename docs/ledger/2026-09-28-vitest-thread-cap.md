@@ -10,6 +10,7 @@ verify_by: 2026-10-05
 done_on: 2026-09-28
 done_ref: pr:2164
 last_checked: 2026-10-05
+check_note: 10-05 夜巡未核查本卡判据（夜巡只有本地只读权限，无生产库、登录态或外网），待人工或下一轮核查
 ---
 
 `vitest.config.ts` 加 `pool: 'threads'` + `poolOptions.threads.maxThreads: 2`，把每个窗口的 vitest 子进程峰值从原本吃满全部核心（本机 10 个）压到最多 2 个。

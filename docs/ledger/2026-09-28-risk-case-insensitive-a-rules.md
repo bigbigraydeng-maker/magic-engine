@@ -9,6 +9,7 @@ verify_how: 用 A_PATHS 每条路径的大小写混合变体跑 classifyFile，�
 done_on: 2026-09-28
 done_ref: pr:2156
 last_checked: 2026-10-05
+check_note: 10-05 夜巡未核查本卡判据（夜巡只有本地只读权限，无生产库、登录态或外网），待人工或下一轮核查
 ---
 
 ruleMatches 对 A 规则启用大小写不敏感比较，堵住 macOS core.ignorecase=true 绕过漏洞。C 规则不变，避免 B 降 C。

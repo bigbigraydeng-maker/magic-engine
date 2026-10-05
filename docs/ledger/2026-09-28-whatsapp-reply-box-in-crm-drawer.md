@@ -10,6 +10,7 @@ source: session:5b9407a2
 verify_by: 2026-10-05
 verify_how: 号码接上当天按板桥定的演示流程当着顾问跑一遍——① 用一部私人手机给 CTS 那个号发一条消息；② 在 ME「今天该联系谁」里点开这个人，抽屉里应出现「📱 在这里直接回他的 WhatsApp」和倒计时；③ 在框里回一句、点发送、确认那部手机真收到；④ 回库核对 `select direction, sent_by_email from conversation_messages where conversation_id=<那条> order by sent_at` 能看到 outbound 一行且署名是操作人。任一步不成立 = 这张卡回退成 failed
 last_checked: 2026-10-05
+check_note: 10-05 夜巡未核查本卡判据（夜巡只有本地只读权限，无生产库、登录态或外网），待人工或下一轮核查
 ---
 
 ## 一句话

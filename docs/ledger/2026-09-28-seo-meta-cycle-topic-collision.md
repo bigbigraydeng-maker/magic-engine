@@ -10,5 +10,6 @@ verify_how: 下次 CTS 每周自动改标题任务（或手动 dry_run）跑过�
 done_on: 2026-09-28
 done_ref: pr:2172
 last_checked: 2026-10-05
+check_note: 10-05 夜巡未核查本卡判据（夜巡只有本地只读权限，无生产库、登录态或外网），待人工或下一轮核查
 ---
 2026-09-28 05:31 UTC 一轮自动改标题把 liziba-monorail-chongqing-guide 套用了另一页的标题、chongqing-night-city-lights 换成完全不相关的"Forbidden City"标题。根因：gate.ts 用"最长词"判定页面独特主题词，而复合地名 slug 里最长词常是全站共享的城市名；且现有事实核对只测矛盾不测跑题。pr:2172 修了取词逻辑（要求命中≥2 个独特词）并加了 checkTitleOnTopic 跑题检查，4 条回归测试通过。两条被写错的线上标题尚未纠正——本会话没有能查到 seo_meta_log 的数据库权限，需要 PM 指派能连库或能看 chinatravel 仓库 PR diff 的人取 old_title 后再改。

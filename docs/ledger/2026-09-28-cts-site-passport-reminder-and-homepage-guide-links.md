@@ -10,5 +10,6 @@ verify_how: 抓 https://www.ctstours.co.nz/traveller-details 的 HTML 含 "check
 done_on: 2026-09-28
 done_ref: pr:210
 last_checked: 2026-10-05
+check_note: 10-05 夜巡未核查本卡判据（夜巡只有本地只读权限，无生产库、登录态或外网），待人工或下一轮核查
 ---
 CTS 网站仓 chinatravel。护照提醒 = PR #208 首版 + #209 改成「免签、护照有效期是旅客自己责任、建议 6 个月+空白页」并链到既有页 /china-visa-guide-for-new-zealanders（未新建重复页）。首页城市卡片 = PR #210 把 /{city}-tours 改为 /{city}-travel-guide（GSC 证据：指南页曝光是 tours 页 6–23 倍、排名多数更靠前）。三条已合并 main，Render 自动部署；合并当时真站尚未刷新，监控中。

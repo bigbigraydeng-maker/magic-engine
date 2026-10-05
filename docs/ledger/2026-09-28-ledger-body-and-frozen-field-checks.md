@@ -10,5 +10,6 @@ verify_how: 造两张故意违规的卡跑 `npx vitest run src/lib/ledger`：①
 done_on: 2026-09-28
 done_ref: pr:2155
 last_checked: 2026-10-05
+check_note: 10-05 夜巡未核查本卡判据（夜巡只有本地只读权限，无生产库、登录态或外网），待人工或下一轮核查
 ---
 后续：6 张老卡的 title/verify_how 被 YAML 空格# 截断（夜巡读到的也是截断版），需让夜巡改读原始文本——ads-d3-autopause-one-click-approval / ads-wp2-gateway-envelope-recheck / b2-changelog-and-ledger-correction / cts-title-cycle-stays-on / nal-messenger-outage-task-already-sent / pm-todo-five-kinds-merge-new-kinds

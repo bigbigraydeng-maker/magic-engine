@@ -10,7 +10,7 @@ verify_how: ls ~/.claude/skills/grilling 存在且 settings 里没有放行 gh p
 done_on: 2026-09-25
 done_ref: pr:1989
 last_checked: 2026-10-05
-check_note: 记忆已如实改为未安装，settings 没放行 gh pr merge
+check_note: 记忆已如实改为未安装（验收「或」分支成立）；未核查 settings 是否放行 gh pr merge
 verified_ref: doc:docs/ledger/evidence/2026-09-24-claimed-gates-missing--2026-10-05.md
 ---
 审计发现 feedback-grill-before-building 声称装了 grilling 技能和 gh pr merge 拦截，

@@ -10,6 +10,7 @@ source: session:d9b147f8
 verify_by: 2026-10-05
 verify_how: 查 PR #2162 的审查状态：子牙、魏征两位是否都过了。子牙+魏征都过、且 PM 在对话里明确说"合"之后才能合并（本 PR 碰安全/鉴权/数据库结构，A 级，机器不自动合）。合并前重新确认 CI 全绿。跟主干同步这一步已经做完（2026-09-28，统筹拍板用 merge、不用 rebase），不用再单独确认。
 last_checked: 2026-10-05
+check_note: 10-05 夜巡未核查本卡判据（夜巡只有本地只读权限，无生产库、登录态或外网），待人工或下一轮核查
 ---
 广告自治熔断器 + 账户级日预算上限那批改动收尾，开成草稿 PR：[#2162](https://github.com/bigbigraydeng-maker/magic-engine/pull/2162)。
 
