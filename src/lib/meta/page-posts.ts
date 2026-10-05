@@ -12,7 +12,7 @@ export interface PagePost {
   fullId: string       // "<page_id>_<post_id>"
   createdAt: string    // ISO
   message: string
-  mediaType: string    // 'video' | 'photo' | 'album' | 'link' | ...
+  mediaType: string    // 'video' | 'photo' | 'album' | 'link' | 'reel' | ...
   reactions: number
   comments: number
   shares: number
@@ -123,6 +123,13 @@ export function rankVideoWinners(
  * with the /{id}/comments edge.
  *
  * Graceful: returns [] on any error (the edge/permission may vary per account).
+ *
+ * Deliberately requests only fields covered by META_PAGE_SCOPES (no `insights`,
+ * which needs `read_insights` — a permission most connected Page tokens do not
+ * have). Folding an insights field into this query would make Graph reject the
+ * WHOLE request for those tokens, and this function turns any non-2xx response
+ * into `[]` — silently hiding every Reel from comment-autoreply callers. Reel
+ * view-count metrics are fetched separately by fetchPageReelVideoViews below.
  */
 export async function fetchPageReels(
   pageId: string,
@@ -169,6 +176,60 @@ export async function fetchPageReels(
       score: 0,
     }
   })
+}
+
+export interface ReelVideoViews {
+  id: string
+  videoViews: number
+}
+
+interface RawReelInsightValue {
+  value: number
+}
+
+interface RawReelInsightItem {
+  name: string
+  values?: RawReelInsightValue[]
+}
+
+/**
+ * Fetch per-reel lifetime video views via Graph Insights — a SEPARATE request
+ * from fetchPageReels (see the note above it) so a token without `read_insights`
+ * still gets the base reel list from that call.
+ *
+ * Throws on any fetch/HTTP/Graph-level error (e.g. a token missing
+ * `read_insights`) instead of swallowing it to `[]` — a caller that folds an
+ * empty array into "no reels have views yet" cannot tell that apart from
+ * "every reel's view count is silently missing". Callers that treat this leg
+ * as non-fatal (metrics sync) must catch it themselves and surface the
+ * failure (e.g. `reel_metrics_error`) rather than let it disappear.
+ */
+export async function fetchPageReelVideoViews(
+  pageId: string,
+  pageAccessToken: string,
+  limit = 50,
+): Promise<ReelVideoViews[]> {
+  const fields = ['id', 'insights.metric(post_video_views){values}'].join(',')
+  const url = `${GRAPH_BASE}/${pageId}/video_reels?fields=${fields}&limit=${limit}&access_token=${encodeURIComponent(pageAccessToken)}`
+
+  const res = await fetch(url)
+  if (!res.ok) {
+    throw new Error(`fetchPageReelVideoViews ${pageId}: ${res.status} ${await res.text()}`)
+  }
+
+  const body = (await res.json()) as {
+    data?: Array<{ id: string; insights?: { data?: RawReelInsightItem[] } }>
+    error?: { message: string }
+  }
+  if (body.error) throw new Error(`fetchPageReelVideoViews ${pageId}: ${body.error.message}`)
+
+  const out: ReelVideoViews[] = []
+  for (const r of body.data ?? []) {
+    const viewsItem = r.insights?.data?.find((d) => d.name === 'post_video_views')
+    const videoViews = viewsItem?.values?.[0]?.value
+    if (videoViews !== undefined) out.push({ id: r.id, videoViews })
+  }
+  return out
 }
 
 export interface ManagedPage {
