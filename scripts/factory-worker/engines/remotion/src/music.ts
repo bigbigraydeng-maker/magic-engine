@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { requiredBeatCount } from './timing.ts';
+import { FPS, requiredBeatCount } from './timing.ts';
 import { SAFE_REL_PATH, MUSIC_EXTS, formatZodIssues } from './schema.ts';
 
 /** Folders under the studio root that may hold music files. */
@@ -44,7 +44,7 @@ export const MusicEntrySchema = z
       .int({ message: '小节相位必须是 0 到 3 的整数' })
       .min(0, { message: '小节相位必须是 0 到 3 的整数' })
       .max(3, { message: '小节相位必须是 0 到 3 的整数' }),
-    status: z.enum(['ready', 'pending_listen']),
+    status: z.enum(['ready', 'beats_unverified']),
     energy: z.enum(['low', 'mid', 'high']),
     style: z
       .string()
@@ -148,4 +148,46 @@ export function beatGrid(entry: MusicEntry, count: number): number[] {
 /** Compute the beat times needed for a video with `itemCount` items. */
 export function beatsFor(entry: MusicEntry, itemCount: number): number[] {
   return beatGrid(entry, requiredBeatCount(itemCount));
+}
+
+/** A music excerpt that starts at a bar: where to start the audio, and the beat times relative to that start. */
+export interface MusicExcerpt {
+  musicStartSec: number;
+  beats: number[];
+}
+
+/** Like beatsFor, but the video starts at the downbeat of bar `startBar` (0 = first bar) instead of at the start of the file. */
+export function excerptFor(
+  entry: MusicEntry,
+  itemCount: number,
+  startBar: number,
+): MusicExcerpt {
+  if (!Number.isInteger(startBar) || startBar < 0) {
+    throw new Error('起始小节必须是不小于 0 的整数：' + startBar);
+  }
+  const basePeriod = 60 / entry.bpmDetected;
+  const step = entry.bpmDetected > FOLD_ABOVE_BPM ? 2 : 1;
+  const firstIndex = step === 1 ? entry.barPhase : entry.barPhase % 2;
+  const downbeat =
+    entry.offsetSec + (firstIndex + 4 * step * startBar) * basePeriod;
+  const musicStartSec =
+    Math.round((Math.floor(downbeat * FPS + 1e-6) / FPS) * 10000) / 10000;
+  const lead = downbeat - musicStartSec;
+  const count = requiredBeatCount(itemCount);
+  const beats: number[] = [];
+  for (let k = 0; k < count; k++) {
+    beats.push(round3(lead + k * step * basePeriod));
+  }
+  if (musicStartSec + beats[count - 1] > entry.durationSec - 1) {
+    throw new Error(
+      '音乐太短：' +
+        entry.id +
+        ' 从第 ' +
+        startBar +
+        ' 小节起放不下 ' +
+        count +
+        ' 个节拍',
+    );
+  }
+  return { musicStartSec, beats };
 }

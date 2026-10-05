@@ -9,7 +9,7 @@
    "bpmDetected": 133.0,
    "offsetSec": 0.01,
    "barPhase": 1,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "high",
    "style": "percussive",
    "mood": "强力、冲击"
@@ -22,7 +22,7 @@
    "bpmDetected": 122.5,
    "offsetSec": 0.33,
    "barPhase": 2,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "high",
    "style": "percussive",
    "mood": "重鼓点"
@@ -35,7 +35,7 @@
    "bpmDetected": 100.0,
    "offsetSec": 0.09,
    "barPhase": 1,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "mid",
    "style": "build",
    "mood": "渐强、推进"
@@ -48,7 +48,7 @@
    "bpmDetected": 81.0,
    "offsetSec": 0.08,
    "barPhase": 0,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "mid",
    "style": "suspense",
    "mood": "悬念、紧张"
@@ -61,7 +61,7 @@
    "bpmDetected": 131.7,
    "offsetSec": 0.1,
    "barPhase": 0,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "high",
    "style": "stinger",
    "mood": "结尾重音（短）"
@@ -74,7 +74,7 @@
    "bpmDetected": 103.0,
    "offsetSec": 0.23,
    "barPhase": 1,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "mid",
    "style": "stinger",
    "mood": "揭晓感（短）"
@@ -87,7 +87,7 @@
    "bpmDetected": 81.1,
    "offsetSec": 0.54,
    "barPhase": 1,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "low",
    "style": "light",
    "mood": "轻松愉快"
@@ -100,7 +100,7 @@
    "bpmDetected": 110.0,
    "offsetSec": 0.12,
    "barPhase": 0,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "mid",
    "style": "light",
    "mood": "开阔、期待（短）"
@@ -113,7 +113,7 @@
    "bpmDetected": 167.2,
    "offsetSec": 0.1,
    "barPhase": 2,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "low",
    "style": "light",
    "mood": "舒缓（短）"
@@ -126,7 +126,7 @@
    "bpmDetected": 154.0,
    "offsetSec": 0.33,
    "barPhase": 0,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "mid",
    "style": "retro",
    "mood": "复古律动"
@@ -152,7 +152,7 @@
    "bpmDetected": 91.2,
    "offsetSec": 0.02,
    "barPhase": 0,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "low",
    "style": "lyrical",
    "mood": "抒情（短）"
@@ -165,7 +165,7 @@
    "bpmDetected": 132.0,
    "offsetSec": 0.14,
    "barPhase": 0,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "mid",
    "style": "flowing",
    "mood": "流动、旅行感"
@@ -178,7 +178,7 @@
    "bpmDetected": 90.0,
    "offsetSec": 0.32,
    "barPhase": 0,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "low",
    "style": "steady",
    "mood": "沉稳、励志"
@@ -191,7 +191,7 @@
    "bpmDetected": 194.6,
    "offsetSec": 0.22,
    "barPhase": 3,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "mid",
    "style": "steady",
    "mood": "推进、商务"
@@ -204,7 +204,7 @@
    "bpmDetected": 109.0,
    "offsetSec": 0.01,
    "barPhase": 0,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "mid",
    "style": "warm",
    "mood": "温暖、轻快"
@@ -217,7 +217,7 @@
    "bpmDetected": 108.9,
    "offsetSec": 0.07,
    "barPhase": 0,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "mid",
    "style": "warm",
    "mood": "温暖、轻快"
@@ -230,7 +230,7 @@
    "bpmDetected": 100.0,
    "offsetSec": 0.1,
    "barPhase": 0,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "mid",
    "style": "warm",
    "mood": "温暖、居家"
@@ -243,7 +243,7 @@
    "bpmDetected": 98.3,
    "offsetSec": 0.48,
    "barPhase": 3,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "mid",
    "style": "warm",
    "mood": "温暖、居家"
@@ -256,7 +256,7 @@
    "bpmDetected": 199.1,
    "offsetSec": 0.03,
    "barPhase": 2,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "high",
    "style": "percussive",
    "mood": "打击感"
@@ -269,7 +269,7 @@
    "bpmDetected": 100.0,
    "offsetSec": 0.54,
    "barPhase": 0,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "high",
    "style": "percussive",
    "mood": "打击感"
@@ -282,7 +282,7 @@
    "bpmDetected": 179.0,
    "offsetSec": 0.15,
    "barPhase": 0,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "high",
    "style": "percussive",
    "mood": "节奏感强"
@@ -295,7 +295,7 @@
    "bpmDetected": 118.0,
    "offsetSec": 0.48,
    "barPhase": 3,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "high",
    "style": "percussive",
    "mood": "节奏感强"
@@ -308,7 +308,7 @@
    "bpmDetected": 137.0,
    "offsetSec": 0.03,
    "barPhase": 0,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "high",
    "style": "chinese-instrument",
    "mood": "中式、气势"
@@ -321,7 +321,7 @@
    "bpmDetected": 89.9,
    "offsetSec": 0.16,
    "barPhase": 2,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "high",
    "style": "chinese-instrument",
    "mood": "中式、气势"
@@ -334,7 +334,7 @@
    "bpmDetected": 138.0,
    "offsetSec": 0.19,
    "barPhase": 0,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "high",
    "style": "chinese-instrument",
    "mood": "中式、清亮（短）"
@@ -347,7 +347,7 @@
    "bpmDetected": 108.0,
    "offsetSec": 0.23,
    "barPhase": 0,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "mid",
    "style": "chinese-instrument",
    "mood": "中式、喜庆（过短）"
@@ -360,7 +360,7 @@
    "bpmDetected": 131.0,
    "offsetSec": 0.36,
    "barPhase": 0,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "mid",
    "style": "unknown",
    "mood": "未知"
@@ -373,7 +373,7 @@
    "bpmDetected": 81.0,
    "offsetSec": 0.06,
    "barPhase": 2,
-   "status": "pending_listen",
+   "status": "beats_unverified",
    "energy": "low",
    "style": "calm",
    "mood": "冷静（短）"

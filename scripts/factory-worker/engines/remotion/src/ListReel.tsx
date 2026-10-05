@@ -3,7 +3,7 @@ import { AbsoluteFill, Audio, interpolate, Sequence, spring, staticFile, useCurr
 import { CutFlash, Footage, Logo, Reveal } from './components'
 import { PriceScene } from './PriceScene'
 import { parseListReelProps, type ListReelProps } from './schema'
-import { computeTimingFromProps } from './timing'
+import { computeTimingFromProps, FPS } from './timing'
 import { fontFamily } from './theme'
 
 const Hook: React.FC<{ props: ListReelProps }> = ({ props }) => {
@@ -70,7 +70,7 @@ export const ListReel: React.FC<Record<string, unknown>> = (rawProps) => {
         <CutFlash />
       </Sequence>
       <Sequence from={timing.logoFrom} durationInFrames={timing.totalFrames - timing.logoFrom}><Logo file={props.logoFile} /></Sequence>
-      {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9} /> : null}
+      {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
     </AbsoluteFill>
   )
 }
