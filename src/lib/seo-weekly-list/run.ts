@@ -31,7 +31,7 @@ import { buildDecayCandidates, type DecayCandidate } from './decay'
 import { CAUSE_LABEL, diagnoseCtrGap, type CtrDiagnosis, type PageQueryRow } from './ctr-diagnosis'
 import { fetchGscQueriesForPage } from '@/lib/gsc/client'
 import { fetchLiveSnippet, type SnippetFetcher } from './live-snippet'
-import { verifyPlanItem, type BlogRow, type CrawledPage, type OpenPlanItem } from './verify'
+import { verifyPlanItem, type BlogRow, type CrawledPage, type MetaLogRow, type OpenPlanItem } from './verify'
 
 const LOCATION_CODE_BY_DB: Record<string, number> = { au: 2036, nz: 2554 }
 const PAGE_SIZE = 1000
@@ -219,11 +219,12 @@ async function runForClient(
       (from, to) => supabase.from('blog_posts').select('primary_keyword, status, slug, published_at').eq('client_id', clientId).eq('status', 'published').order('published_at', { ascending: true }).order('id', { ascending: true }).range(from, to),
       'blog_posts',
     )
+    const metaLog = await loadMetaLog(supabase, clientId)
     const itemErrors: string[] = []
     for (const row of open) {
       try {
       const item: OpenPlanItem = { id: row.id, created_at: row.created_at, steps_json: row.steps_json ?? {} }
-      const decision = verifyPlanItem(item, { blogs, pages, config })
+      const decision = verifyPlanItem(item, { blogs, pages, config, metaLog })
       const steps = { ...item.steps_json, verify: { ...(item.steps_json.verify as Record<string, unknown> | undefined), state: decision.outcome, reason: decision.reason, checked_at: now.toISOString() } }
       if (decision.outcome === 'pass') {
         const applied = dryRun || (await transitionSeoPlanItem(supabase, { id: row.id, clientId, to: 'completed', reason: decision.reason, stepsJson: steps, now }))
@@ -290,6 +291,22 @@ async function loadInitiativeId(supabase: SupabaseClient, clientId: string, goal
     .maybeSingle()
   if (error) throw new Error(`initiatives read failed: ${error.message}`)
   return (data as { id: string } | null)?.id ?? null
+}
+
+/**
+ * The automatic title/description cycle's edit log, so a list item whose page the cycle already
+ * changed can be recorded as done. A failed read only switches that shortcut off (items then
+ * fall back to the word-count check) — it never aborts the run.
+ */
+async function loadMetaLog(supabase: SupabaseClient, clientId: string): Promise<MetaLogRow[]> {
+  try {
+    return await readAll<MetaLogRow>(
+      (from, to) => supabase.from('seo_meta_log').select('page_url, optimised_at, reverted_at, pr_url, applied_channel').eq('client_id', clientId).order('optimised_at', { ascending: true }).order('id', { ascending: true }).range(from, to),
+      'seo_meta_log',
+    )
+  } catch {
+    return []
+  }
 }
 
 async function loadCrawledPages(supabase: SupabaseClient, clientId: string): Promise<CrawledPage[]> {

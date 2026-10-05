@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest'
 import type { LabsKeyword } from '@/lib/dataforseo/labs-types'
 import {
   MAX_SEEDS,
+  TRAVEL_NOISE_TOKENS,
   bandOf,
   buildOpportunityRows,
   estimateMaxCostUsd,
   pickSeeds,
   summariseOpportunity,
+  topicAnchors,
 } from '../keyword-opportunity'
 import type { ExcludedCounts, OwnRank, SeedIdeas } from '../keyword-opportunity'
 
@@ -22,7 +24,7 @@ const seed = (name: string, ideas: LabsKeyword[], status: SeedIdeas['status'] = 
 
 const opts = { brandRoot: 'ctstours', brandAliases: ['cts'], competitorDomains: ['wendywutours.co.nz'] }
 
-const noExcluded = (): ExcludedCounts => ({ brand: 0, competitorBrand: 0, noVolume: 0, lowVolume: 0 })
+const noExcluded = (): ExcludedCounts => ({ brand: 0, competitorBrand: 0, noVolume: 0, lowVolume: 0, offTopic: 0, noise: 0 })
 
 describe('pickSeeds', () => {
   it('trims, drops empty / non-string / over-long items, de-dupes case-insensitively and caps at MAX_SEEDS', () => {
@@ -54,6 +56,21 @@ describe('pickSeeds', () => {
 describe('estimateMaxCostUsd', () => {
   it('is one call per seed plus one item per idea, rounded to 4 decimals', () => {
     expect(estimateMaxCostUsd(12, 300)).toBe(0.48)
+  })
+})
+
+describe('topicAnchors', () => {
+  it('keeps topic words and drops generic travel filler, short tokens and numeric tokens', () => {
+    const anchors = topicAnchors(
+      ['china visa free entry nz', "terracotta warriors xi'an", 'guilin li river tours', 'best time visit china'],
+      ['chongqing', 'china holidays', 'great wall of china tours'],
+    )
+    for (const kept of ['china', 'terracotta', 'warriors', 'xian', 'guilin', 'chongqing']) {
+      expect(anchors.has(kept)).toBe(true)
+    }
+    for (const dropped of ['visa', 'tours', 'best', 'time', 'visit', 'great', 'wall', 'river', 'free', 'entry', 'holidays', 'li', 'nz']) {
+      expect(anchors.has(dropped)).toBe(false)
+    }
   })
 })
 
@@ -115,6 +132,57 @@ describe('buildOpportunityRows', () => {
       { seed: 'tours', status: 'ok', ideas: 1 },
       { seed: 'broken', status: 'error', ideas: 0 },
     ])
+  })
+
+  it('drops off-topic phrases when anchors are given, keeping phrases that carry an anchor', () => {
+    const anchors = topicAnchors(
+      ['china visa free entry nz', "terracotta warriors xi'an", 'guilin li river tours', 'best time visit china'],
+      ['chongqing', 'china holidays', 'great wall of china tours'],
+    )
+    const results = [
+      seed('china visa', [
+        idea('nz passport renewal', 30000),
+        idea('house of travel', 27000),
+        idea('china visa on arrival', 500),
+      ]),
+    ]
+    const { rows, excluded } = buildOpportunityRows(results, [], { ...opts, anchors })
+    expect(rows.map(r => r.keyword)).toEqual(['china visa on arrival'])
+    expect(excluded.offTopic).toBe(2)
+    expect(excluded.noise).toBe(0)
+  })
+
+  it('drops noise-token phrases into the noise bucket, not offTopic', () => {
+    const anchors = topicAnchors(['china visa free entry nz'], [])
+    const results = [
+      seed('china visa', [
+        idea('china southern airlines', 12000),
+        idea('flights to china', 880),
+        idea('china tour packages', 500),
+      ]),
+    ]
+    const { rows, excluded } = buildOpportunityRows(results, [], { ...opts, anchors, noiseTokens: TRAVEL_NOISE_TOKENS })
+    expect(rows.map(r => r.keyword)).toEqual(['china tour packages'])
+    expect(excluded.noise).toBe(2)
+    expect(excluded.offTopic).toBe(0)
+  })
+
+  it('drops nothing for relevance when anchors and noiseTokens are absent', () => {
+    const results = [seed('china visa', [idea('nz passport renewal', 30000), idea('china southern airlines', 12000)])]
+    const { rows, excluded } = buildOpportunityRows(results, [], opts)
+    expect(rows.map(r => r.keyword)).toEqual(['nz passport renewal', 'china southern airlines'])
+    expect(excluded.offTopic).toBe(0)
+    expect(excluded.noise).toBe(0)
+  })
+
+  it('counts a phrase in only the first matching bucket', () => {
+    const anchors = new Set(['china'])
+    const results = [seed('tours', [idea('wendy wu tours china', 500)])]
+    const { rows, excluded } = buildOpportunityRows(results, [], { ...opts, anchors })
+    expect(rows).toEqual([])
+    expect(excluded.competitorBrand).toBe(1)
+    expect(excluded.offTopic).toBe(0)
+    expect(excluded.noise).toBe(0)
   })
 })
 
@@ -178,3 +246,14 @@ describe('summariseOpportunity', () => {
     expect(both.ceiling_gain_to_p5).toBe(Math.round(400 * (0.07 - 0.012)))
   })
 })
+
+describe('visa phrases need a destination word', () => {
+  it('"nz visa application" is off-topic noise but "china visa for nz" passes (visa alone is never an anchor)', () => {
+    const anchors = topicAnchors(['china visa free entry nz'], ['china tours'])
+    const results = [seed('visa', [idea('nz visa application', 4000, 20, 'transactional'), idea('china visa for nz', 800, 20, 'transactional')])]
+    const { rows, excluded } = buildOpportunityRows(results, [], { ...opts, anchors })
+    expect(rows.map(r => r.keyword)).toEqual(['china visa for nz'])
+    expect(excluded.offTopic).toBe(1)
+  })
+})
+
