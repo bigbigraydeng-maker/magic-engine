@@ -20,7 +20,7 @@ import type { KernelDeps } from './deps'
 import type { ExecutionResult } from './gateway'
 import { KernelError } from './errors'
 import { authorizeRun, reuseLiveAuthorization } from './authorize'
-import { approveRun, rejectRun } from './human-approval'
+import { approveRun, rejectRun, type HumanDecisionOptions } from './human-approval'
 import { executeAuthorizedRun, rehydrateSucceededRun, type ExecutionFence } from './gateway'
 import { computeIdempotencyKey, computeUnknownActionKey } from './idempotency'
 import {
@@ -33,6 +33,7 @@ import {
   insertRun,
   listSteps,
   updateRun,
+  updateRunFenced,
   updateStep,
   UniqueViolationError,
   type RecoveryKind,
@@ -52,6 +53,8 @@ export interface SubmitActionInput {
   /** 依据什么。形状通用，词汇不属于任何域。 */
   evidence?: Record<string, unknown>
   correlationId?: string
+  /** Stable across retries of one confirmed attempt; new user intent must use a new value. */
+  idempotencyNonce?: string
 }
 
 export interface SubmitResult {
@@ -136,9 +139,13 @@ export async function submitActionRun(
   const definition = deps.registry.get(input.actionKey)
 
   // 未知动作也要有稳定身份，否则每天会新增一条一模一样的拒绝记录
+  if (input.idempotencyNonce !== undefined &&
+      (typeof input.idempotencyNonce !== 'string' || input.idempotencyNonce.length < 1 || input.idempotencyNonce.length > 128)) {
+    throw new KernelError('INVALID_INPUT', '幂等请求标识无效')
+  }
   const idempotencyKey = definition
-    ? computeIdempotencyKey(definition, input.clientId, input.input)
-    : computeUnknownActionKey(input.actionKey, input.clientId, input.input)
+    ? computeIdempotencyKey(definition, input.clientId, input.input, input.idempotencyNonce)
+    : computeUnknownActionKey(input.actionKey, input.clientId, input.input, input.idempotencyNonce)
 
   const existing = await findRunByIdempotencyKey(deps.supabase, input.clientId, idempotencyKey)
   if (existing) return { run: existing, existing: true }
@@ -248,6 +255,7 @@ export interface ActionRunOutcome {
 export async function runAction(
   deps: KernelDeps,
   input: SubmitActionInput,
+  options: { readonly requireHumanApproval?: boolean } = {},
 ): Promise<ActionRunOutcome> {
   const submitted = await submitActionRun(deps, input)
 
@@ -255,7 +263,21 @@ export async function runAction(
   const settled = await outcomeForSettledRun(deps, submitted.run)
   if (settled) return settled
 
-  return driveIntermediateRun(deps, submitted.run.id)
+  // Proposal screens may create a pending request, but must never become a
+  // recovery/dispatch endpoint for an already approved or currently running
+  // outward action. Only its dedicated approval route or durable worker may
+  // resume that state.
+  if (options.requireHumanApproval && ['authorized', 'running', 'authorizing'].includes(submitted.run.status)) {
+    return {
+      kind: 'in_progress',
+      run: submitted.run,
+      decision: null,
+      execution: null,
+      humanReason: '这条预算建议已经批准或正在处理；请从审批队列继续，不要重新提交',
+    }
+  }
+
+  return driveIntermediateRun(deps, submitted.run.id, options)
 }
 
 /**
@@ -347,6 +369,7 @@ async function outcomeForSettledRun(
 async function driveIntermediateRun(
   deps: KernelDeps,
   runId: string,
+  options: { readonly requireHumanApproval?: boolean } = {},
 ): Promise<ActionRunOutcome> {
   const ownerId = nextOwnerId(deps)
   const claim = await claimOrTakeoverRun(deps.supabase, {
@@ -359,6 +382,25 @@ async function driveIntermediateRun(
 
   // 领到了。拿最新一行（带上刚写下的租约和代际）。
   const owned = await deps.requireRun(runId)
+
+  // A stale submit response can still say `queued` after another request has
+  // authorized the run. Proposal-only callers must release that claim and let
+  // the dedicated approval route dispatch it, even after the old lease expired.
+  if (options.requireHumanApproval && owned.status === 'authorized') {
+    await updateRunFenced(deps.supabase, owned.id, claim.claimGeneration, {
+      claimed_by: null,
+      claimed_at: null,
+      heartbeat_at: null,
+      lease_expires_at: null,
+    })
+    return {
+      kind: 'in_progress',
+      run: await deps.requireRun(owned.id),
+      decision: null,
+      execution: null,
+      humanReason: '这条预算建议已经批准；请由审批入口交给执行队列处理',
+    }
+  }
 
   // 🔴 接管的是一条**正在跑**的 run（上一个执行者崩在 handler 调用中途）——
   //    这跟「收费步骤抛出结果未知的异常」是**同一个场景**：
@@ -385,7 +427,7 @@ async function driveIntermediateRun(
     if (reused?.ctx) return executeAndWrap(deps, reused.decision, reused.ctx, fence)
   }
 
-  const auth = await authorizeRun(deps, owned, fence)
+  const auth = await authorizeRun(deps, owned, fence, options)
 
   if (auth.verdict === 'deny') {
     return { kind: 'denied', run: auth.run, decision: auth.decision, execution: null, humanReason: auth.decision.reason }
@@ -543,8 +585,9 @@ export async function approveAndRun(
   deps: KernelDeps,
   runId: string,
   approvedByUser: string,
+  options: HumanDecisionOptions = {}, // 🔴 expectedDecisionId 原样透传——批的必须是人看到的那份
 ): Promise<ActionRunOutcome> {
-  const auth = await approveRun(deps, runId, approvedByUser)
+  const auth = await approveRun(deps, runId, approvedByUser, options)
   if (auth.verdict !== 'allow' || !auth.ctx) {
     return {
       kind: 'denied',
@@ -803,8 +846,9 @@ export async function rejectPendingRun(
   runId: string,
   rejectedByUser: string,
   reason: string,
+  options: HumanDecisionOptions = {}, // 🔴 同上：拒的也必须是人看到的那份
 ): Promise<ActionRunOutcome> {
-  const auth = await rejectRun(deps, runId, rejectedByUser, reason)
+  const auth = await rejectRun(deps, runId, rejectedByUser, reason, options)
   return {
     kind: 'denied',
     run: auth.run,

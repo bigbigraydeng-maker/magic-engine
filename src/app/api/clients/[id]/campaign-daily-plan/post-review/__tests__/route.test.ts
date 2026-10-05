@@ -20,6 +20,23 @@ const USER_ID = 'f0000000-0000-0000-0000-000000000001'
 const PLAN_REVISION = '2026-09-01T15:00:04.513Z'
 const REVIEW_REVISION = '10000000-0000-0000-0000-000000000001'
 const DATE = '2026-09-03'
+const POST_HUMAN_KEYS = [
+  'factual_claims_have_source',
+  'factual_claims_source_verified',
+  'logo_watermark_present',
+  'asset_provenance_labeled',
+  'asset_provenance_matches_claim_context',
+]
+const PASS_CHECKLIST = POST_HUMAN_KEYS.map(key => ({
+  key,
+  judge: 'HUMAN',
+  outcome: 'PASS',
+  detail: null,
+  source_ref: key.startsWith('factual_') ? 'https://example.test/source' : null,
+}))
+const REVISION_CHECKLIST = PASS_CHECKLIST.map(item => item.key === 'logo_watermark_present'
+  ? { ...item, outcome: 'FAIL', detail: 'Logo 缺失' }
+  : item)
 
 function request(overrides: Record<string, unknown> = {}) {
   return new NextRequest(`http://localhost/api/clients/${CLIENT_ID}/campaign-daily-plan/post-review`, {
@@ -33,6 +50,7 @@ function request(overrides: Record<string, unknown> = {}) {
       date: DATE,
       verdict: 'PASS',
       reason: null,
+      checklist_human: PASS_CHECKLIST,
       ...overrides,
     }),
   })
@@ -95,6 +113,16 @@ function allow() {
   } as never)
 }
 
+function allowClientViewer() {
+  mockAccess.mockResolvedValue({
+    ok: true,
+    user: { id: USER_ID, email: 'reviewer@example.test' },
+    role: 'client-viewer',
+    tier: 'paid_client',
+    allowedClientId: CLIENT_ID,
+  } as never)
+}
+
 function stubLatestPlan(data = planData()) {
   const read = chain('limit', { data: [{ id: PLAN_ID, plan_data: data, created_at: PLAN_REVISION }], error: null })
   mockFrom.mockReturnValueOnce(read as never)
@@ -122,12 +150,42 @@ describe('campaign daily Post review — authorization and target binding', () =
     expect(mockFrom).not.toHaveBeenCalled()
   })
 
+  it('rejects caller-supplied reviewer_role instead of trusting a spoofed admin value', async () => {
+    allowClientViewer()
+
+    const response = await PATCH(request({ reviewer_role: 'admin' }), params())
+
+    expect(response.status).toBe(400)
+    expect((await response.json()).error).toBe('INVALID_REVIEW_COMMAND')
+    expect(mockFrom).not.toHaveBeenCalled()
+  })
+
+  it('blocks a client-viewer PASS using the server-derived role', async () => {
+    allowClientViewer()
+
+    const response = await PATCH(request(), params())
+
+    expect(response.status).toBe(403)
+    expect((await response.json()).error).toBe('ADMIN_REVIEW_REQUIRED')
+    expect(mockFrom).not.toHaveBeenCalled()
+  })
+
   it('requires a reason when the Post needs revision', async () => {
     allow()
 
-    const response = await PATCH(request({ verdict: 'NEEDS_REVISION', reason: '   ' }), params())
+    const response = await PATCH(request({ verdict: 'NEEDS_REVISION', reason: '   ', checklist_human: REVISION_CHECKLIST }), params())
 
     expect(response.status).toBe(400)
+    expect(mockFrom).not.toHaveBeenCalled()
+  })
+
+  it('requires at least one explicit failed checklist item for NEEDS_REVISION', async () => {
+    allow()
+
+    const response = await PATCH(request({ verdict: 'NEEDS_REVISION', reason: 'Please revise' }), params())
+
+    expect(response.status).toBe(400)
+    expect((await response.json()).error).toBe('REVISION_REQUIRES_FAILED_CHECK')
     expect(mockFrom).not.toHaveBeenCalled()
   })
 
@@ -163,34 +221,24 @@ describe('campaign daily Post review — authorization and target binding', () =
 })
 
 describe('campaign daily Post review — truthful PASS boundary', () => {
-  it('revalidates a current client-owned usable image before recording PASS', async () => {
+  it('validates a current image but fails closed because first-comment checks are not implemented', async () => {
     allow()
     stubLatestPlan()
     const asset = chain('maybeSingle', {
       data: { id: ASSET_ID, storage_url: 'https://assets.test/post.png', mime_type: 'image/png', status: 'analyzed', archived_at: null },
       error: null,
     })
-    const update = chain('maybeSingle', { data: { id: PLAN_ID }, error: null })
-    mockFrom.mockReturnValueOnce(asset as never).mockReturnValueOnce(update as never)
+    mockFrom.mockReturnValueOnce(asset as never)
 
     const response = await PATCH(request(), params())
     const json = await response.json()
 
-    expect(response.status).toBe(200)
-    expect(json.changed).toBe(true)
-    expect(json.review_revision).toEqual(expect.any(String))
-    expect(json.review_meta).toBeUndefined()
-    const written = update.update.mock.calls[0][0] as { plan_data: { review_meta: { posts: Record<string, unknown> } } }
-    expect(written.plan_data.review_meta.posts[DATE]).toMatchObject({
-      verdict: 'PASS',
-      reason: null,
-      reviewed_by_user_id: USER_ID,
-    })
+    expect(response.status).toBe(422)
+    expect(json.error).toBe('AUTO_CHECKS_UNAVAILABLE')
+    expect(json.blocked_checks).toEqual(['cta_in_first_comment_not_body', 'first_comment_link_has_tracking_params'])
     expect(asset.eq).toHaveBeenCalledWith('client_id', CLIENT_ID)
     expect(asset.eq).toHaveBeenCalledWith('id', ASSET_ID)
-    expect(update.is).toHaveBeenCalledWith('plan_data->review_meta', null)
-    expect(update.eq).toHaveBeenCalledWith('client_id', CLIENT_ID)
-    expect(update.eq).toHaveBeenCalledWith('campaign_id', CAMPAIGN_ID)
+    expect(mockFrom).toHaveBeenCalledTimes(2)
   })
 
   it('refuses PASS when the image is missing or no longer usable', async () => {
@@ -235,14 +283,14 @@ describe('campaign daily Post review — truthful PASS boundary', () => {
   })
 
   it('records NEEDS_REVISION for incomplete content without requiring a usable image', async () => {
-    allow()
+    allowClientViewer()
     const incomplete = planData()
     incomplete.bundles[0].post.image_asset_id = ''
     stubLatestPlan(incomplete)
     const update = chain('maybeSingle', { data: { id: PLAN_ID }, error: null })
     mockFrom.mockReturnValueOnce(update as never)
 
-    const response = await PATCH(request({ verdict: 'NEEDS_REVISION', reason: '  Replace the image  ' }), params())
+    const response = await PATCH(request({ verdict: 'NEEDS_REVISION', reason: '  Replace the image  ', checklist_human: REVISION_CHECKLIST }), params())
     const json = await response.json()
 
     expect(response.status).toBe(200)
@@ -252,6 +300,7 @@ describe('campaign daily Post review — truthful PASS boundary', () => {
       verdict: 'NEEDS_REVISION',
       reason: 'Replace the image',
       reviewed_by_user_id: USER_ID,
+      reviewer_role: 'client-viewer',
     })
     expect(mockFrom).toHaveBeenCalledTimes(2)
   })
@@ -272,14 +321,15 @@ describe('campaign daily Post review — concurrent state', () => {
   it('returns 409 when compare-and-set loses a concurrent update', async () => {
     allow()
     stubLatestPlan(planData(reviewMeta()))
-    const asset = chain('maybeSingle', {
-      data: { id: ASSET_ID, storage_url: 'https://assets.test/post.jpg', mime_type: 'image/jpeg', status: 'analyzed', archived_at: null },
-      error: null,
-    })
     const update = chain('maybeSingle', { data: null, error: null })
-    mockFrom.mockReturnValueOnce(asset as never).mockReturnValueOnce(update as never)
+    mockFrom.mockReturnValueOnce(update as never)
 
-    const response = await PATCH(request({ expected_review_revision: REVIEW_REVISION }), params())
+    const response = await PATCH(request({
+      expected_review_revision: REVIEW_REVISION,
+      verdict: 'NEEDS_REVISION',
+      reason: 'Replace the image',
+      checklist_human: REVISION_CHECKLIST,
+    }), params())
 
     expect(response.status).toBe(409)
     expect((await response.json()).error).toBe('REVIEW_CONFLICT')
@@ -295,6 +345,8 @@ describe('campaign daily Post review — concurrent state', () => {
           reason: 'Replace the image',
           reviewed_at: '2026-09-01T15:05:00.000Z',
           reviewed_by_user_id: USER_ID,
+          reviewer_role: 'admin',
+          checklist: REVISION_CHECKLIST,
         },
       },
     })
@@ -304,6 +356,7 @@ describe('campaign daily Post review — concurrent state', () => {
       expected_review_revision: REVIEW_REVISION,
       verdict: 'NEEDS_REVISION',
       reason: 'Replace the image',
+      checklist_human: REVISION_CHECKLIST,
     }), params())
     const json = await response.json()
 
@@ -315,6 +368,42 @@ describe('campaign daily Post review — concurrent state', () => {
     expect(mockFrom).toHaveBeenCalledTimes(1)
   })
 
+  it('writes an updated checklist when the revision reason stays the same', async () => {
+    allow()
+    const existing = reviewMeta({
+      posts: {
+        [DATE]: {
+          verdict: 'NEEDS_REVISION',
+          reason: 'Replace the image',
+          reviewed_at: '2026-09-01T15:05:00.000Z',
+          reviewed_by_user_id: USER_ID,
+          reviewer_role: 'admin',
+          checklist: REVISION_CHECKLIST,
+        },
+      },
+    })
+    stubLatestPlan(planData(existing))
+    const updated = chain('maybeSingle', { data: { id: PLAN_ID }, error: null })
+    mockFrom.mockReturnValueOnce(updated as never)
+    const revisedChecklist = REVISION_CHECKLIST.map(item => item.key === 'logo_watermark_present'
+      ? { ...item, detail: 'Logo 与安全区重叠' }
+      : item)
+
+    const response = await PATCH(request({
+      expected_review_revision: REVIEW_REVISION,
+      verdict: 'NEEDS_REVISION',
+      reason: 'Replace the image',
+      checklist_human: revisedChecklist,
+    }), params())
+    const json = await response.json()
+    const written = updated.update.mock.calls[0][0] as { plan_data: { review_meta: { posts: Record<string, { checklist: Array<{ key: string; detail: string | null }> }> } } }
+
+    expect(response.status).toBe(200)
+    expect(json.changed).toBe(true)
+    expect(written.plan_data.review_meta.posts[DATE].checklist.find(item => item.key === 'logo_watermark_present')?.detail)
+      .toBe('Logo 与安全区重叠')
+  })
+
   it('revalidates an identical PASS retry and rejects it when the image later becomes unusable', async () => {
     allow()
     const existing = reviewMeta({
@@ -324,6 +413,7 @@ describe('campaign daily Post review — concurrent state', () => {
           reason: null,
           reviewed_at: '2026-09-01T15:05:00.000Z',
           reviewed_by_user_id: USER_ID,
+          reviewer_role: 'admin',
         },
       },
     })
@@ -350,6 +440,7 @@ describe('campaign daily Post review — concurrent state', () => {
           reason: 'Wrong day',
           reviewed_at: '2026-09-01T15:05:00.000Z',
           reviewed_by_user_id: USER_ID,
+          reviewer_role: 'client-viewer',
         },
       },
     })

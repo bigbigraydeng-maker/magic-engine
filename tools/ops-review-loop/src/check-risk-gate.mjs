@@ -26,10 +26,17 @@
 
 import { appendFileSync } from 'node:fs'
 
-import { classifyRisk, parseDeclaredRisk } from './risk.mjs'
-import { buildGateMarker, findGateFor, parseGateMarkers, selectTrustedGateMarkers } from './gate-marker.mjs'
+import { classifyRisk, readDeclaredRisk } from './risk.mjs'
+import {
+  buildGateMarker,
+  findGateFor,
+  parseGateMarkers,
+  selectTrustedGateMarkers,
+  shouldPostGateComment,
+} from './gate-marker.mjs'
 import { evaluateSignoffs, parseSignoffMarkers, selectTrustedSignoffMarkers } from './signoff-marker.mjs'
 import { decideMerge, summariseDecision } from './merge-decision.mjs'
+import { applyTrialRunToDecision, describeTrialRun, evaluateTrialRunSafely } from './quality.mjs'
 
 /**
  * The identity this workflow's `GITHUB_TOKEN` posts as, and the ONLY author
@@ -215,23 +222,52 @@ async function postIssueComment(body) {
 /**
  * Read the PR and verify the run is still bound to its current head/base.
  *
- * @returns {Promise<{declaredRisk: 'A'|'B'|'C'|null}>}
+ * @returns {Promise<{declaredRisk: 'A'|'B'|'C'|null, declaredUnreadable: string|null, body: string}>}
  */
 async function loadPullRequest() {
   const data = await api(`/repos/${repository}/pulls/${pr}`)
   if (data?.head?.sha !== headSha || data?.base?.sha !== baseSha) {
     throw new Error('这次运行绑定的 head/base 已不是 PR 当前的 head/base，判定作废')
   }
-  return { declaredRisk: parseDeclaredRisk(data?.body) }
+  const body = typeof data?.body === 'string' ? data.body : ''
+  const declared = readDeclaredRisk(body)
+  return { declaredRisk: declared.risk, declaredUnreadable: declared.unreadable, body }
+}
+
+/** Largest file the trial-run check will read. Anything bigger reads as `null`. */
+const TRIAL_RUN_READ_CAP = 64 * 1024
+
+/**
+ * Read files at the PR head through the contents API — as DATA only, never
+ * checked out or executed. A file that cannot be read, is too big, or is not a
+ * plain base64 file comes back `null`, which the trial-run check treats as
+ * "needs a trial run".
+ *
+ * @param {string[]} paths
+ * @returns {Promise<Record<string, string|null>>}
+ */
+async function readHeadFiles(paths) {
+  const out = {}
+  for (const path of paths) {
+    try {
+      const encoded = path.split('/').map(encodeURIComponent).join('/')
+      const data = await api(`/repos/${repository}/contents/${encoded}?ref=${headSha}`)
+      const ok = data?.type === 'file' && data?.encoding === 'base64' && Number(data?.size) <= TRIAL_RUN_READ_CAP
+      out[path] = ok ? Buffer.from(String(data.content), 'base64').toString('utf8') : null
+    } catch {
+      out[path] = null
+    }
+  }
+  return out
 }
 
 /**
  * Build the human summary text for the step summary and the posted comment.
  *
- * @param {{rating: any, decision: any, signoff: any, ignoredMarkers: number, filesError: string|null}} input
+ * @param {{rating: any, decision: any, signoff: any, ignoredMarkers: number, filesError: string|null, trialRun: any}} input
  * @returns {string}
  */
-function buildSummaryText({ rating, decision, signoff, ignoredMarkers, filesError }) {
+function buildSummaryText({ rating, decision, signoff, ignoredMarkers, filesError, trialRun }) {
   const lines = [
     summariseDecision({
       risk: rating.risk,
@@ -244,6 +280,7 @@ function buildSummaryText({ rating, decision, signoff, ignoredMarkers, filesErro
     lines.push(`- 签字：已有 ${signoff.present.join('/') || '无'}，缺 ${signoff.missing.join('/') || '无'}`)
     lines.push('- 现阶段：签字自动写入尚未建成，A 级由 PM 决定是否以管理员身份合并')
   }
+  lines.push(...describeTrialRun(trialRun))
   if (filesError) {
     lines.push(`- 改动清单读取失败：${filesError}`)
   }
@@ -262,7 +299,7 @@ if (!SHA_RE.test(baseSha) || !SHA_RE.test(headSha)) {
 }
 
 try {
-  const { declaredRisk } = await loadPullRequest()
+  const { declaredRisk, declaredUnreadable, body } = await loadPullRequest()
 
   // A failure to read the file list is NOT rethrown: `classifyRisk` rates an
   // unreadable list as A, and the error text is carried into the summary so a
@@ -276,7 +313,7 @@ try {
     filesError = err.message
   }
 
-  const rating = classifyRisk({ files, declaredRisk })
+  const rating = classifyRisk({ files, declaredRisk, declaredUnreadable })
 
   const sources = await listIssueComments()
 
@@ -299,11 +336,21 @@ try {
   const ignoredSignoff = parseSignoffMarkers(sources.map((s) => s.body)).length - signoffMarkers.length
   const signoff = evaluateSignoffs({ markers: signoffMarkers, base: baseSha, head: headSha })
 
-  const decision = decideMerge({
-    risk: rating.risk,
-    draft: parseTriState(prDraft),
-    fork: parseTriState(prIsFork),
-    signoff,
+  // 当场试跑 can only make the decision stricter — it never yields `enable`.
+  const trialRun = await evaluateTrialRunSafely({
+    files,
+    body,
+    today: new Date().toISOString().slice(0, 10),
+    readFiles: readHeadFiles,
+  })
+  const decision = applyTrialRunToDecision({
+    decision: decideMerge({
+      risk: rating.risk,
+      draft: parseTriState(prDraft),
+      fork: parseTriState(prIsFork),
+      signoff,
+    }),
+    trialRun,
   })
 
   const summaryText = buildSummaryText({
@@ -312,25 +359,31 @@ try {
     signoff,
     ignoredMarkers: ignoredGate + ignoredSignoff,
     filesError,
+    trialRun,
   })
   summary(summaryText)
-
-  // Post the rating only when there is no current marker for this exact pair,
-  // or the one on record disagrees with what we just computed.
-  if (!existing || existing.risk !== rating.risk) {
-    const marker = buildGateMarker({
-      base: baseSha,
-      head: headSha,
-      risk: rating.risk,
-      reasons: rating.reasons,
-    })
-    await postIssueComment(`${summaryText}\n\n${marker}`)
-  }
 
   // Invariant: `enable` only when pass && tier === 'auto'. Every other path
   // writes `disable`, so a stale `enable` cannot survive a later evaluation.
   const outputDecision =
     decision.pass === true && decision.tier === 'auto' ? decision.decision : 'disable'
+
+  // Post the rating only when there is no current marker for this exact pair,
+  // or the one on record disagrees with what we just computed. The decision is
+  // compared too: an `edited` run that fills in 当场试跑 changes the decision
+  // without changing the head, and a stale "❌" comment would mislead the PM
+  // (魏征 W78-2, #2078).
+  if (shouldPostGateComment({ existing, risk: rating.risk, decision: outputDecision })) {
+    const marker = buildGateMarker({
+      base: baseSha,
+      head: headSha,
+      risk: rating.risk,
+      reasons: rating.reasons,
+      decision: outputDecision,
+    })
+    await postIssueComment(`${summaryText}\n\n${marker}`)
+  }
+
   writeOutputs({ risk: rating.risk, decision: outputDecision, tier: decision.tier })
 
   process.exit(decision.pass ? 0 : 1)

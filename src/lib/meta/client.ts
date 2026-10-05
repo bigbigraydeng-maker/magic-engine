@@ -23,8 +23,8 @@
 export { GRAPH_BASE, MAX_INSIGHT_PAGES, fetchInsightPages } from './graph-base'
 export type { InsightPageWalk } from './graph-base'
 
-export { getAdAccountInsights, parseInsights } from './account-insights'
-export type { MetaAdsInsights, GraphInsightsData } from './account-insights'
+export { getAdAccountInsights, getAdAccountInsightsResult, parseInsights } from './account-insights'
+export type { MetaAdsInsights, GraphInsightsData, MetaAccountInsightsFailure, MetaAccountInsightsResult } from './account-insights'
 
 export {
   getAdCampaignInsights,

@@ -3,7 +3,9 @@ import { Resend } from 'resend'
 import { supabaseAdmin } from '@/lib/supabase'
 import { startCronRun } from '@/lib/cron/run-logger'
 import { meMailFrom, ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
-import { gatherWeeklyReport, renderWeeklyReport } from '@/lib/weekly-report/build'
+import { gatherWeeklyReport, renderWeeklyReport, type WeeklyNotices } from '@/lib/weekly-report/build'
+import { loadManualItems } from '@/lib/pm-todo/manual-items'
+import { laneOf } from '@/lib/pm-todo/five-kinds'
 
 /**
  * GET /api/cron/weekly-seo-report (22.E.S18)
@@ -42,14 +44,25 @@ export async function GET(req: NextRequest) {
     }
 
     const now = new Date()
-    const clients = await gatherWeeklyReport(supabaseAdmin, now)
     const nzDateLabel = now.toLocaleDateString('en-NZ', {
       timeZone: 'Pacific/Auckland',
       day: 'numeric',
       month: 'short',
       year: 'numeric',
     })
-    const email = renderWeeklyReport(clients, nzDateLabel)
+    // 知会从今日待办挪到这里（PM 2026-09-26）。读挂了不拖垮整封周报，但要在周报里说出来。
+    // 跟客户数据并行取：网关大约 125 秒就断（PITFALLS F10），两段串着跑会逼近上限。
+    const [clients, notices] = await Promise.all([
+      gatherWeeklyReport(supabaseAdmin, now),
+      loadManualItems(supabaseAdmin, now)
+        .then((items): WeeklyNotices => ({
+          rows: items
+            .filter((m) => laneOf(m) === 'weekly')
+            .map((m) => ({ client_name: m.client_name, what: m.what, how: m.how, href: m.href })),
+        }))
+        .catch((err: unknown): WeeklyNotices => ({ error: err instanceof Error ? err.message : String(err) })),
+    ])
+    const email = renderWeeklyReport(clients, nzDateLabel, notices)
 
     const resend = new Resend(apiKey)
     const { error: sendError } = await resend.emails.send({

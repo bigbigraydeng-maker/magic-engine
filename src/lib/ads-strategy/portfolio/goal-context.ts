@@ -2,15 +2,34 @@
  * 日报"目标进度"段的取数（spec 2026-09-24 §3 G1/G2/G10）。尽力而为，任何一步拿不到 → null（日报写"没有生效中的目标"或"未判"），绝不抛、绝不把缺数当 0。
  */
 import { supabaseAdmin } from '@/lib/supabase'
-import { getActiveGoal } from '@/lib/strategy/goals'
+import { listActiveGoals } from '@/lib/strategy/goals'
 import { autoFetchMetricValue } from '@/lib/strategy/auto-fetch'
 import { loadAdStrategyConfig } from '../config'
 import { computeGoalPace } from '../goal-pace'
 import type { DigestGoalContext } from './internal-digest'
+import type { GoalRow } from '@/types/strategy'
 
 const DAY_MS = 86_400_000
 export const MEDIAN_WINDOW_DAYS = 7
 export const MIN_MEDIAN_DAYS = 3
+
+/**
+ * Goal metrics that autoFetchMetricValue can fill from ad_daily_insights via the
+ * outcome ladder (leads_count falls back to the ads 'lead' step; messaging_started
+ * is the ads 'messaging_started' step). Keep in sync with the switch in
+ * src/lib/strategy/auto-fetch.ts. signups_count is NOT here: it reads real
+ * bookings from me_sale_outcomes, which ads cannot move day to day.
+ */
+export const ADS_ATTRIBUTABLE_METRIC_KEYS: ReadonlySet<string> = new Set(['leads_count', 'messaging_started'])
+
+/**
+ * With several active goals, prefer the newest one the ads can measure; if none
+ * qualifies, fall back to the newest. `goals` must be ordered newest first
+ * (listActiveGoals does that).
+ */
+export function pickDigestGoal(goals: readonly GoalRow[]): GoalRow | null {
+  return goals.find(g => ADS_ATTRIBUTABLE_METRIC_KEYS.has(g.primary_metric_key)) ?? goals[0] ?? null
+}
 
 interface AdDailyInsightRow {
   insight_date: string
@@ -89,7 +108,7 @@ export async function buildDigestGoalContext(
   insightDate: string,
 ): Promise<DigestGoalContext | null> {
   try {
-    const goal = await getActiveGoal(supabaseAdmin, clientId)
+    const goal = pickDigestGoal(await listActiveGoals(supabaseAdmin, clientId))
     if (!goal) return null
 
     const fetched = await autoFetchMetricValue(supabaseAdmin, clientId, goal.primary_metric_key, {

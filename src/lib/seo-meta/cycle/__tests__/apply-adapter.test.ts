@@ -106,3 +106,81 @@ describe('createCtsRepoApplyAdapter.apply — merge-state correctness (fixed bug
     expect(github.createPullRequest).not.toHaveBeenCalled()
   })
 })
+
+describe('PR 正文开在客户的公开仓库里：不许出现真实供应商名', () => {
+  const bodyOf = (github: ReturnType<typeof fakeGithub>): string => github.createPullRequest.mock.calls[0][2].body
+
+  it('市场数据那种来源说明换成封装名，标题原文不变', async () => {
+    const github = fakeGithub({ mergeResult: true })
+    const adapter = createCtsRepoApplyAdapter(github, CONN)
+    await adapter.apply({ candidate: candidate(), newTitle: 'New Title', newDesc: 'New desc', weekKey: '2026-W38', dryRun: false, evidence: EVIDENCE })
+    const body = bodyOf(github)
+    expect(body).not.toMatch(/dataforseo/i)
+    expect(body).toContain('搜索量/难度来自 NZ 市场的 Keyword Intelligence 数据')
+    expect(body).toContain('**New Title**')
+    expect(body).toContain('- 标题: Old Title')
+  })
+
+  it('谷歌曝光估算那种来源说明也换', async () => {
+    const github = fakeGithub({ mergeResult: true })
+    const adapter = createCtsRepoApplyAdapter(github, CONN)
+    const evidence: MetaCycleGateEvidence = {
+      ...EVIDENCE,
+      keywordDataSource: 'gsc_serp',
+      keywordDataNote: '需求来自谷歌后台真实曝光 214 次；难度按谷歌前三名网站强度估算为 12（非 DataForSEO 难度分）',
+    }
+    await adapter.apply({ candidate: candidate(), newTitle: 'New Title', newDesc: 'New desc', weekKey: '2026-W38', dryRun: false, evidence })
+    const body = bodyOf(github)
+    expect(body).not.toMatch(/dataforseo/i)
+    expect(body).toContain('（非 Keyword Intelligence 难度分）')
+  })
+})
+
+describe('destination guides (guides.ts) are editable, with the guide field style', () => {
+  const GUIDES_FILE = 'src/lib/data/guides.ts'
+  const GUIDES = [
+    "export const chongqingGuide: DestinationGuide = {",
+    "  id: 'guide-chongqing',",
+    "  slug: 'chongqing-travel-guide',",
+    "  metaTitle: 'Old Chongqing Title | CTS Tours NZ',",
+    "  metaDescription: 'Old chongqing desc.',",
+    "  sections: [",
+    "    { title: 'Liziba Station', id: 'liziba-station', content: ['b'] },",
+    "  ],",
+    "};",
+    "",
+  ].join('\n')
+
+  function guidesGithub() {
+    const gh = fakeGithub({ mergeResult: true })
+    gh.listDirectory.mockResolvedValue([
+      { name: 'guides.ts', path: GUIDES_FILE, type: 'file' },
+      { name: 'guides-extra.ts', path: 'src/lib/data/guides-extra.ts', type: 'file' },
+      { name: 'unrelated.ts', path: 'src/lib/data/unrelated.ts', type: 'file' },
+    ])
+    gh.getFileContent.mockImplementation(async (_o: string, _r: string, path: string) =>
+      path === GUIDES_FILE ? { decodedContent: GUIDES, sha: 'guides-sha', content: '', size: GUIDES.length } : { decodedContent: "export const x = [{ slug: 'chongqing-travel-guide', title: 'WRONG', description: 'WRONG' }]", sha: 'other', content: '', size: 10 })
+    return gh
+  }
+
+  it('a guide slug is now editable, and only guides.ts (exact name) is read — look-alike names are not', async () => {
+    const gh = guidesGithub()
+    const adapter = createCtsRepoApplyAdapter(gh, CONN)
+    expect(await adapter.canEditSlug('chongqing-travel-guide')).toBe(true)
+    const readPaths = gh.getFileContent.mock.calls.map((c: unknown[]) => c[2])
+    expect(readPaths).toEqual([GUIDES_FILE])
+  })
+
+  it('the commit changes ONLY metaTitle and metaDescription — the section title is untouched', async () => {
+    const gh = guidesGithub()
+    const adapter = createCtsRepoApplyAdapter(gh, CONN)
+    const res = await adapter.apply({ candidate: candidate({ slug: 'chongqing-travel-guide', pageUrl: 'https://example.com/chongqing-travel-guide' }), newTitle: 'New Chongqing Title', newDesc: 'New chongqing desc.', weekKey: '2026-W41', dryRun: false, evidence: EVIDENCE })
+    expect(res.applied).toBe(true)
+    expect(res.oldTitle).toBe('Old Chongqing Title | CTS Tours NZ')
+    const committed = gh.commitFile.mock.calls[0][4] as string
+    expect(committed).toContain("metaTitle: 'New Chongqing Title'")
+    expect(committed).toContain("metaDescription: 'New chongqing desc.'")
+    expect(committed).toContain("{ title: 'Liziba Station', id: 'liziba-station'")
+    expect(gh.commitFile.mock.calls[0][2]).toBe(GUIDES_FILE)
+  })
+})

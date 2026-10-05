@@ -92,6 +92,7 @@ describe('回归：真实广告组回读', () => {
     targeting: {
       geo_locations: { regions: [{ name: 'Auckland Region' }] },
       targeting_automation: { advantage_audience: 0 },
+      publisher_platforms: ['facebook', 'instagram'], // 看完类视频必须锁版位（PITFALLS D9）
       // 真实返回里 custom_audiences / targeting_relaxation_types 都不存在
     },
   }

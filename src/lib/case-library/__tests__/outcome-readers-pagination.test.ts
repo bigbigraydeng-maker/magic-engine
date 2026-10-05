@@ -39,10 +39,10 @@ function row(over: Record<string, unknown> = {}) {
   return {
     id: 'x',
     action_id: 'filler',
-    metric_key: 'seo.gsc.clicks',
+    metric_key: 'seo.gsc.page_clicks',
     window_days: 28,
     verdict: 'confirmed',
-    flywheel_actions: { action_type: 'noise.action', expected_metric: 'seo.gsc.clicks' },
+    flywheel_actions: { action_type: 'noise.action', expected_metric: 'seo.gsc.page_clicks' },
     ...over,
   }
 }
@@ -54,7 +54,7 @@ describe('fetchOutcomeConfidenceMap reads every page', () => {
       row({
         id: 'late', action_id: 'late',
         verdict: 'reversed',
-        flywheel_actions: { action_type: 'late.action', expected_metric: 'seo.gsc.clicks' },
+        flywheel_actions: { action_type: 'late.action', expected_metric: 'seo.gsc.page_clicks' },
       }),
     ]
     const { supabase, seen } = pagedSupabase(rows)
@@ -72,12 +72,12 @@ describe('fetchOutcomeConfidenceMap reads every page', () => {
       ...Array.from({ length: PAGE - 1 }, (_, i) => row({ id: `n${i}`, action_id: `n${i}` })),
       // Same action, two metrics; the promised one is last.
       row({
-        id: 'a-imp', action_id: 'a1', metric_key: 'seo.gsc.impressions', verdict: 'reversed',
-        flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.gsc.clicks' },
+        id: 'a-imp', action_id: 'a1', metric_key: 'seo.gsc.page_impressions', verdict: 'reversed',
+        flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.gsc.page_clicks' },
       }),
       row({
-        id: 'a-clicks', action_id: 'a1', metric_key: 'seo.gsc.clicks', verdict: 'confirmed',
-        flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.gsc.clicks' },
+        id: 'a-clicks', action_id: 'a1', metric_key: 'seo.gsc.page_clicks', verdict: 'confirmed',
+        flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.gsc.page_clicks' },
       }),
     ]
     const { supabase } = pagedSupabase(rows)
@@ -96,7 +96,7 @@ describe('the per-client readers page too', () => {
       ...Array.from({ length: PAGE }, (_, i) => row({ id: `n${i}`, action_id: `n${i}` })),
       row({
         id: 'late', action_id: 'late', verdict: 'reversed',
-        flywheel_actions: { action_type: 'late.action', expected_metric: 'seo.gsc.clicks' },
+        flywheel_actions: { action_type: 'late.action', expected_metric: 'seo.gsc.page_clicks' },
       }),
     ]
     const { supabase } = pagedSupabase(rows)
@@ -108,7 +108,7 @@ describe('the per-client readers page too', () => {
 
   it('fetchSeoBlogConfidenceByMode keeps an action from page two', async () => {
     const blog = (over: Record<string, unknown>) => row({
-      flywheel_actions: { action_type: 'seo.publish_blog', payload: { mode: 'unified' }, expected_metric: 'seo.gsc.clicks' },
+      flywheel_actions: { action_type: 'seo.publish_blog', payload: { mode: 'unified' }, expected_metric: 'seo.gsc.page_clicks' },
       ...over,
     })
     const rows = [
@@ -120,5 +120,24 @@ describe('the per-client readers page too', () => {
     const byMode = await fetchSeoBlogConfidenceByMode(supabase, 'c1')
 
     expect(byMode.unified.sampleSize).toBe(PAGE + 1)
+  })
+})
+
+describe('the global reader counts old site-level verdicts as undecided', () => {
+  it('a stored confirmed on seo.gsc.clicks is not a decided case', async () => {
+    const rows = [
+      row({
+        id: 's1',
+        action_id: 's1',
+        metric_key: 'seo.gsc.clicks',
+        verdict: 'confirmed',
+        flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.gsc.clicks' },
+      }),
+    ]
+    const { supabase } = pagedSupabase(rows)
+
+    const map = await fetchOutcomeConfidenceMap(supabase)
+
+    expect(map['seo.publish_blog']).toEqual({ successRate: 0, sampleSize: 0, totalCases: 1 })
   })
 })

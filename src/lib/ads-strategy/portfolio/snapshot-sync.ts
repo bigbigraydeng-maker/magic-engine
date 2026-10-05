@@ -236,6 +236,9 @@ export async function captureClientSnapshots(
   accountIds: string[],
   opts: { reason?: CaptureRunReason; now?: Date } = {},
 ): Promise<ClientSnapshotResult> {
+  // A multi-account capture is one evidence round. Share one timestamp so a
+  // caller can prove that all account and entity levels came from that round.
+  const capturedAt = opts.now ?? new Date()
   const token = await getMetaTokenForClient(clientId)
   if (!token) return { client_id: clientId, success: false, accounts: [], error: 'no Meta token configured for client' }
 
@@ -245,7 +248,7 @@ export async function captureClientSnapshots(
     accounts.push(await captureAccountSnapshots(clientId, id, token, {
       shared: shared.has(normalizeAccountId(id)),
       reason: opts.reason,
-      now: opts.now,
+      now: capturedAt,
     }))
   }
   const success = !sharedError && accounts.every(a => !a.error && a.levels.every(l => l.complete || l.skipped_shared))

@@ -20,6 +20,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AccessTier } from '@/lib/auth/access-types'
 import type { ActionDefinition, ActionRun } from '@/lib/kernel/types'
 import { ACTION_REGISTRY } from '@/lib/kernel/registry'
+import { dedicatedApprovalEntryFor } from '@/lib/kernel/dedicated-approval-entries'
 import { approveRun, rejectRun } from '@/lib/kernel/human-approval'
 import { KernelError } from '@/lib/kernel/errors'
 import { createKernelDeps, type KernelDeps } from '@/lib/kernel/deps'
@@ -144,64 +145,88 @@ export interface ApprovalPermissions {
   /** 🔴 拒绝永远允许 —— 留成字段是为了让界面读到的是**事实**，不是一句约定。 */
   readonly canReject: true
   /** 批不了的原因；能批时是 null。给界面用来说人话，不是让它自己判。 */
-  readonly approveBlockedReason:
-    | 'unknown_action'
-    | 'unknown_action_version'
-    | 'insufficient_tier'
-    | null
+  readonly approveBlockedReason: BaseApproveBlock | 'dedicated_entry' | null
+  /**
+   * 这个动作有专属审批入口时，那个入口在哪（界面画「去那里处理」的链接用）；否则 null。
+   * 来自 `kernel/dedicated-approval-entries.ts` —— 全仓唯一那张登记表。
+   */
+  readonly dedicatedEntry: { readonly label: string; readonly path: string } | null
+}
+
+type BaseApproveBlock = 'unknown_action' | 'unknown_action_version' | 'insufficient_tier'
+
+/** 基础判定：版本 + 档次，全部读注册表。专属入口的路由也只过这一段。 */
+function baseApproveBlock(run: ActionRun, actorTier: AccessTier): BaseApproveBlock | null {
+  const found = lookupDefinition(run)
+  if (!found.ok) return found.reason
+  if (!canAuthorizeAction(actorTier, found.definition.requiredCapabilityTier)) return 'insufficient_tier'
+  return null
 }
 
 export function approvalPermissionsFor(
   run: ActionRun,
   actorTier: AccessTier,
 ): ApprovalPermissions {
-  const found = lookupDefinition(run)
-  if (!found.ok) {
-    return { canApprove: false, canReject: true, approveBlockedReason: found.reason }
+  const entry = dedicatedApprovalEntryFor(run.action_key)
+  // 🔴 有专属入口的动作，这里一律不给批：通用面只签不执行，批了事情也不会发生，
+  //    专属页那条反而再也批不了。拒绝照旧允许（上面那段不对称的理由不变）。
+  const blocked = entry ? 'dedicated_entry' : baseApproveBlock(run, actorTier)
+  return {
+    canApprove: blocked === null,
+    canReject: true,
+    approveBlockedReason: blocked,
+    dedicatedEntry: entry ? { label: entry.label, path: entry.path(run.client_id) } : null,
   }
-  if (!canAuthorizeAction(actorTier, found.definition.requiredCapabilityTier)) {
-    return { canApprove: false, canReject: true, approveBlockedReason: 'insufficient_tier' }
-  }
-  return { canApprove: true, canReject: true, approveBlockedReason: null }
 }
 
-/**
- * 批准前的硬闸。**只在 `resolution === 'approve'` 时调**（见 `approvalPermissionsFor`）。
- */
-export function assertActorMayApprove(run: ActionRun, actorTier: AccessTier): void {
-  const perms = approvalPermissionsFor(run, actorTier)
-  if (perms.canApprove) return
+function blockedMessage(run: ActionRun, reason: BaseApproveBlock | 'dedicated_entry'): string {
+  if (reason === 'dedicated_entry') {
+    const label = dedicatedApprovalEntryFor(run.action_key)?.label ?? '它自己的批准页'
+    return `这条要去「${label}」批 —— 那里批完会立刻执行；这里只签不执行，批了事情也不会发生。` +
+      '**你仍然可以点「不做」**'
+  }
+  if (reason === 'unknown_action_version') {
+    return `这条动作是按第 ${run.action_version} 版契约排的，系统现在跑的是另一版 ——` +
+      '契约变过，不能拿新版的规则来批一条旧请求。' +
+      '**你仍然可以点「不做」把它清掉**，或者请人重新排一次'
+  }
+  if (reason === 'unknown_action') {
+    return `系统认不出「${run.action_key}」这个动作 —— 没有人给它定过谁有资格授权它，所以批不了。` +
+      '**你仍然可以点「不做」把它清掉**。这条不会自动执行'
+  }
+  return '这个动作需要更高的权限才能批准 —— 你的账号档次不够。请让有权限的同事来点。' +
+    '**你仍然可以点「不做」**'
+}
 
-  const detail = {
+function throwBlocked(
+  run: ActionRun,
+  actorTier: AccessTier | null, // null = 调用方手里没有档次（decideApproval 那一道），不编一个
+  reason: BaseApproveBlock | 'dedicated_entry',
+): never {
+  throw new ApprovalError('forbidden_tier', blockedMessage(run, reason), {
     runId: run.id,
     actionKey: run.action_key,
     actionVersion: run.action_version,
     actorTier,
-    reason: perms.approveBlockedReason,
-  }
-  if (perms.approveBlockedReason === 'unknown_action_version') {
-    throw new ApprovalError(
-      'forbidden_tier',
-      `这条动作是按第 ${run.action_version} 版契约排的，系统现在跑的是另一版 ——` +
-        '契约变过，不能拿新版的规则来批一条旧请求。' +
-        '**你仍然可以点「不做」把它清掉**，或者请人重新排一次',
-      detail,
-    )
-  }
-  if (perms.approveBlockedReason === 'unknown_action') {
-    throw new ApprovalError(
-      'forbidden_tier',
-      `系统认不出「${run.action_key}」这个动作 —— 没有人给它定过谁有资格授权它，所以批不了。` +
-        '**你仍然可以点「不做」把它清掉**。这条不会自动执行',
-      detail,
-    )
-  }
-  throw new ApprovalError(
-    'forbidden_tier',
-    '这个动作需要更高的权限才能批准 —— 你的账号档次不够。请让有权限的同事来点。' +
-      '**你仍然可以点「不做」**',
-    detail,
-  )
+    reason,
+  })
+}
+
+/**
+ * 通用审批面批准前的硬闸。**只在 `resolution === 'approve'` 时调**（见 `approvalPermissionsFor`）。
+ */
+export function assertActorMayApprove(run: ActionRun, actorTier: AccessTier): void {
+  const perms = approvalPermissionsFor(run, actorTier)
+  if (perms.approveBlockedReason !== null) throwBlocked(run, actorTier, perms.approveBlockedReason)
+}
+
+/**
+ * 专属审批入口批准前的硬闸：只过版本 + 档次（读注册表），**不**过专属入口那一层 ——
+ * 它自己就是那个入口。不补这道的话，注册表把门槛提到 admin 时专属路由不会跟着变。
+ */
+export function assertActorMayApproveAction(run: ActionRun, actorTier: AccessTier): void {
+  const blocked = baseApproveBlock(run, actorTier)
+  if (blocked !== null) throwBlocked(run, actorTier, blocked)
 }
 
 // ── 读 ────────────────────────────────────────────────────────────────────────
@@ -242,7 +267,7 @@ function toSummary(run: ActionRun, expectedDecisionId: string): PendingApprovalS
  *    （`decision.client_id` + `decision.action_run_id`，对不上抛 `CROSS_CLIENT`）。
  *    审批的**读**路径没理由比执行路径松。
  */
-function decisionBelongsToRun(
+export function decisionBelongsToRun(
   decision: {
     id: string
     action_run_id: string
@@ -430,7 +455,11 @@ function readResolution(record: Record<string, unknown>): 'approve' | 'reject' {
  *    会被判成 STALE_DECISION —— 合法的批准 / 拒绝永远提交不上去。
  */
 function readExpectedDecisionId(record: Record<string, unknown>): string {
-  const raw = record.expectedDecisionId
+  return parseExpectedDecisionId(record.expectedDecisionId)
+}
+
+/** 同一套判据，给不走 `parseDecisionInput` 的专属审批入口复用（不许另写一份）。 */
+export function parseExpectedDecisionId(raw: unknown): string {
   if (typeof raw !== 'string' || raw.trim().length === 0) {
     throw new ApprovalError(
       'invalid_request',
@@ -600,6 +629,10 @@ export async function decideApproval(
   args: { run: ActionRun; actorEmail: string; input: ApprovalDecisionInput },
 ): Promise<ApprovalDecisionResult> {
   const { run, actorEmail, input } = args
+  // 🔴 不只靠路由那一行：任何调到这里的批准，只要动作有专属入口，一律不签（见 approvalPermissionsFor）。
+  if (input.resolution === 'approve' && dedicatedApprovalEntryFor(run.action_key)) {
+    throwBlocked(run, null, 'dedicated_entry')
+  }
   try {
     const outcome =
       input.resolution === 'reject'

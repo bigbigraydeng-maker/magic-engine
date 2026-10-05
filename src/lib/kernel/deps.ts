@@ -120,6 +120,23 @@ export function createKernelDeps(init: KernelDepsInit): KernelDeps {
     ownerId: init.ownerId ?? `${init.workerId ?? 'kernel'}@${bootNonce()}`,
     now: init.now ?? (() => new Date()),
     sleep: init.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms))),
+    /**
+     * 🔴 **这一行以前漏了**（子牙 2026-09-27 审 WP3.1b 抓到）。
+     *
+     *    `KernelDepsInit` 从一开始就声明了这个字段、`KernelDeps` 也声明了、注释还写着
+     *    「不给 = bounded 动作一律拒」—— 但这个工厂的对象字面量里没有它，
+     *    所以调用方认认真真传进来的解析器被**静默丢掉**。
+     *
+     *    后果是闭合的、而且是「全拒」不是「偶尔拒」：
+     *      · `registry-ads.ts` 六个 ActionKey 全是 `approval: { mode: 'bounded' }`
+     *      · `authorize.ts` 在 bounded 路径上缺解析器就 `outside_autonomy_envelope` deny
+     *      · 于是每一条广告动作都拿回 denied，Meta 一个字节都不动
+     *
+     *    这跟本文件下方 `createKernel` 那句注释（`leaseSeconds` / `ownerId` 以前
+     *    「接了不转发」）是**同一类 bug**：**「参数类型收了它」和「行为真的变了」是两件事**。
+     *    架构测试现在盯着「生产 Kernel 工厂产出的 `deps.resolveEnvelopeFacts` 非空」。
+     */
+    resolveEnvelopeFacts: init.resolveEnvelopeFacts,
     async requireRun(runId: string) {
       const run = await getRun(init.supabase, runId)
       if (!run) throw new Error(`[kernel] 找不到执行实例 ${runId}`)

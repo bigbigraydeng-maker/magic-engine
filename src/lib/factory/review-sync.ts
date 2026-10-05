@@ -6,6 +6,14 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { FACTORY_PUBLISH_BUDGET_HARD_CAP_USD } from './constants'
+import {
+  REEL_AUTO_CHECK_KEYS,
+  REEL_HUMAN_CHECK_KEYS,
+  checklistPasses,
+  hasChecklistFailure,
+  isValidContentSourceRef,
+  validateContentChecklist,
+} from '@/lib/social/content-review'
 
 const AIRTABLE_API = 'https://api.airtable.com/v0'
 
@@ -202,6 +210,11 @@ interface PullResult {
 
 async function applyApprove(wo: Record<string, unknown>, rec: AirtableRecord): Promise<boolean> {
   const ref = (wo.review_ref ?? {}) as Record<string, unknown>
+  const output = (wo.output ?? {}) as Record<string, unknown>
+  const human = validateContentChecklist(ref['checklist_human'], REEL_HUMAN_CHECK_KEYS, 'HUMAN')
+  const auto = validateContentChecklist(output['quality_checklist_auto'], REEL_AUTO_CHECK_KEYS, 'AUTO')
+  if (!human.ok || !auto.ok || !checklistPasses(human.items) || !checklistPasses(auto.items)) return false
+  if (human.items.some(item => item.source_ref && !isValidContentSourceRef(item.source_ref))) return false
   const reviewer = (rec.fields[F.reviewer] as { email?: string } | undefined)?.email ?? 'unknown'
   const { data: upd, error } = await supabaseAdmin
     .from('content_work_orders')
@@ -223,6 +236,11 @@ async function applyQualityReject(
   feedback: string,
   reviewer: string,
 ): Promise<boolean> {
+  // Airtable's retired review form has no structured checklist field. Refuse
+  // rather than letting this legacy synchronizer bypass the ME review API.
+  const ref = (wo.review_ref ?? {}) as Record<string, unknown>
+  const human = validateContentChecklist(ref['checklist_human'], REEL_HUMAN_CHECK_KEYS, 'HUMAN')
+  if (!human.ok || !hasChecklistFailure(human.items)) return false
   const { data: upd, error } = await supabaseAdmin
     .from('content_work_orders')
     .update({
@@ -253,6 +271,7 @@ async function applyQualityReject(
       review_feedback: feedback,
       review_feedback_by: reviewer,
       reopened_from: wo.id,
+      review_checklist_failed_items: human.items.filter(item => item.outcome === 'FAIL').map(item => item.key),
     },
     budget_cap_usd: wo.budget_cap_usd,
     source_ad_id: wo.source_ad_id,

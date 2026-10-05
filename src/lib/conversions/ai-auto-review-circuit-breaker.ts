@@ -13,6 +13,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { approvalCutoffIso } from './event-window'
 
 export type CircuitBreakerRule =
   | 'volume_spike'
@@ -29,9 +30,16 @@ export type CircuitBreakerVerdict =
 const BASELINE_WINDOW_DAYS = 7
 /** "远超"历史均值的倍数——均值再低，也不能无限放大成"随便发都不算异常"。 */
 const RELATIVE_MULTIPLIER = 3
-/** 不管历史均值多低，这两个是硬顶（按客户体量差异很大，先给一个保守默认值，
- *  真上线后可以按 `clients` 表加一列覆盖，目前这两个客户体量都在这个量级内）。 */
-const ABSOLUTE_MAX_APPROVED_PER_DAY = 30
+/**
+ * 不管历史均值多低，这两个是硬顶（按客户体量差异很大，先给一个保守默认值，
+ * 真上线后可以按 `clients` 表加一列覆盖，目前这两个客户体量都在这个量级内）。
+ *
+ * 注意：lead 类型的 outcome（`outcome_kind = 'lead'`）不带钱，PM 2026-10-05 拍板
+ * 把它们从笔数 / 金额 / 批准占比这三条统计里排除——线索多不代表有资金风险，不该
+ * 因为线索量涨了就把整条自动处理熔断。带钱的 outcome 仍然受全部刹车约束。
+ */
+// 与单次运行硬顶（BATCH_HARD_STOP_COUNT=60）配套：硬顶放到 60，24 小时绝对上限不能比它低，否则一次合法的积压清理会被第二天的预检直接熔断。
+const ABSOLUTE_MAX_APPROVED_PER_DAY = 60
 const ABSOLUTE_MAX_AMOUNT_MINOR_PER_DAY = 50_000_00 // 50,000 元（含税）为单位货币的粗略硬顶
 /** uncertain 堆积多少条就算"AI 普遍判不了这个客户的数据，需要人看一眼"。 */
 const UNCERTAIN_BACKLOG_THRESHOLD = 10
@@ -54,6 +62,7 @@ async function fetchApprovedLast24h(
     .eq('client_id', clientId)
     .eq('review_status', 'approved')
     .eq('reviewed_by', AI_REVIEWER_IDENTITY)
+    .neq('outcome_kind', 'lead')
     .gte('reviewed_at', since)
 
   if (error) throw new Error(`查最近 24 小时 AI 批准记录失败：${error.message}`)
@@ -75,6 +84,11 @@ async function fetchBaselineDailyAverage(
     .select('amount_minor, reviewed_at')
     .eq('client_id', clientId)
     .eq('review_status', 'approved')
+    // 只数 AI 自己批的：邮箱付款识别（`auto:payment-email-evidence`）的自动批准不该抬高 AI 的日均/单笔基线，
+    // 否则单笔 1 万的定金会把「金额异常」的阈值垫高（子牙 2026-10-04 复审）。
+    .eq('reviewed_by', AI_REVIEWER_IDENTITY)
+    // lead 不带钱，不参与基线统计（PM 2026-10-05）。
+    .neq('outcome_kind', 'lead')
     .gte('reviewed_at', since)
 
   if (error) throw new Error(`查历史基线失败：${error.message}`)
@@ -89,10 +103,16 @@ async function fetchBaselineDailyAverage(
   }
 }
 
+/**
+ * 只数「还来得及发」的 uncertain——已过期或离过期不到余量的，本轮会被
+ * `ai-auto-review-run.ts` 直接判过期清掉，不代表 AI 判不了这个客户的数据。
+ * 不排除的话，过期行会先把熔断顶开，清理那一步根本轮不到跑（2026-09-19 CTS 就是这样被暂停的）。
+ */
 async function fetchUncertainBacklogCount(
   supabase: SupabaseClient,
   clientId: string,
   minAttempts: number,
+  now: Date,
 ): Promise<number> {
   const { count, error } = await supabase
     .from('me_sale_outcomes')
@@ -100,6 +120,7 @@ async function fetchUncertainBacklogCount(
     .eq('client_id', clientId)
     .eq('review_status', 'pending_review')
     .gte('ai_review_attempts', minAttempts)
+    .gte('occurred_at', approvalCutoffIso(now))
 
   if (error) throw new Error(`查 uncertain 堆积数失败：${error.message}`)
   return count ?? 0
@@ -121,6 +142,8 @@ async function fetchLast24hJudgedCounts(
     .from('me_sale_outcomes')
     .select('review_status, reviewed_by')
     .eq('client_id', clientId)
+    // lead 不带钱，不参与批准占比统计（PM 2026-10-05）。
+    .neq('outcome_kind', 'lead')
     .gte('ai_last_reviewed_at', since)
 
   if (error) throw new Error(`查最近 24 小时 AI 判断次数失败：${error.message}`)
@@ -148,7 +171,7 @@ export async function checkCircuitBreaker(
   const [recent, baseline, uncertainBacklog, judged] = await Promise.all([
     fetchApprovedLast24h(supabase, clientId, now),
     fetchBaselineDailyAverage(supabase, clientId, now),
-    fetchUncertainBacklogCount(supabase, clientId, 1),
+    fetchUncertainBacklogCount(supabase, clientId, 1, now),
     fetchLast24hJudgedCounts(supabase, clientId, now),
   ])
 

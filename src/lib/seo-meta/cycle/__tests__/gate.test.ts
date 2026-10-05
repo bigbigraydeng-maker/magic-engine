@@ -43,6 +43,7 @@ const CONFIG: MetaCycleClientConfig = {
   cooldownDays: 30,
   brandVoice: 'factual AU/NZ English',
   keywordFallbackLocations: [],
+  protectedSlugs: [],
 }
 
 beforeEach(() => {
@@ -183,6 +184,23 @@ describe('runStep3Gate — editable-slug check runs BEFORE any DataForSEO/GSC sp
     expect(mockFetchGscQueriesForPage).not.toHaveBeenCalled()
     expect(mockGetSerpPage).not.toHaveBeenCalled()
   })
+
+  it('skips a protected conversion-page slug before even checking canEditSlug (PM 2026-09-23 incident follow-up: /china-tours must never reach the gate)', async () => {
+    const { runStep3Gate } = await import('../runner')
+    const supabase = fakeSupabase({ snapshotRow: { config: { site_url: 'https://ctstours.co.nz/' } } })
+    const canEditSlug = vi.fn(async () => true)
+    const adapter: ApplyAdapter = { channel: 'pr', canEditSlug, apply: vi.fn() }
+    const candidates = [candidate({ slug: 'china-tours', pageUrl: 'https://ctstours.co.nz/china-tours' })]
+    const config = { ...CONFIG, protectedSlugs: ['china-tours'] }
+
+    const result = await runStep3Gate(supabase, adapter, config, candidates)
+
+    expect(result.passed).toHaveLength(0)
+    expect(result.failures).toHaveLength(1)
+    expect(result.failures[0].reason).toBe('protected_conversion_page')
+    expect(canEditSlug).not.toHaveBeenCalled()
+    expect(mockFetchGscQueriesForPage).not.toHaveBeenCalled()
+  })
 })
 
 describe('deriveTopicMatchedKeyword — English-only target keyword (PM 2026-09-20 W38 dry-run follow-up)', () => {
@@ -199,5 +217,77 @@ describe('deriveTopicMatchedKeyword — English-only target keyword (PM 2026-09-
     expect('failure' in result).toBe(false)
     if ('failure' in result) return
     expect(result.keyword).toBe('leshan giant buddha day trip')
+  })
+})
+
+describe('deriveTopicMatchedKeyword — 2026-09-28 incident regression: a shared city-name token must not qualify a query on its own', () => {
+  it('refuses "how many days in chongqing" for the Liziba page — it shares only "chongqing" with the slug, not a page-specific word like "liziba"/"monorail"', async () => {
+    const { deriveTopicMatchedKeyword } = await import('../gate')
+    // Real shape of the incident: GSC genuinely attributes some impressions
+    // for this broad, shared-city query to the Liziba page's URL (Google
+    // occasionally shows more than one of a site's pages for a broad
+    // query) — high impressions, but the ONLY shared word is "chongqing".
+    const rows: GscSnapshotRow[] = [
+      { query: 'how many days in chongqing', impressions: 300, clicks: 4, ctr: 0.013, position: 12 },
+      { query: 'liziba monorail station guide', impressions: 40, clicks: 3, ctr: 0.075, position: 7 },
+    ]
+    mockFetchGscQueriesForPage.mockResolvedValue(rows)
+
+    const result = await deriveTopicMatchedKeyword(
+      'https://ctstours.co.nz/',
+      candidate({ slug: 'liziba-monorail-chongqing-guide', pageUrl: 'https://ctstours.co.nz/blog/liziba-monorail-chongqing-guide' }),
+      CONFIG.clientId,
+    )
+
+    // Must pick the page's OWN low-impression-but-actually-relevant query,
+    // never the high-impression query that really belongs to a different
+    // page (chinatravel #199/#200's exact shape).
+    expect('failure' in result).toBe(false)
+    if ('failure' in result) return
+    expect(result.keyword).toBe('liziba monorail station guide')
+  })
+
+  it('skips entirely (never borrows the shared-city query) when the page has no query matching 2+ of its own distinctive slug words', async () => {
+    const { deriveTopicMatchedKeyword } = await import('../gate')
+    const rows: GscSnapshotRow[] = [
+      { query: 'how many days in chongqing', impressions: 300, clicks: 4, ctr: 0.013, position: 12 },
+    ]
+    mockFetchGscQueriesForPage.mockResolvedValue(rows)
+
+    const result = await deriveTopicMatchedKeyword(
+      'https://ctstours.co.nz/',
+      candidate({ slug: 'chongqing-night-city-lights', pageUrl: 'https://ctstours.co.nz/blog/chongqing-night-city-lights' }),
+      CONFIG.clientId,
+    )
+
+    expect('failure' in result).toBe(true)
+    if (!('failure' in result)) return
+    expect(result.failure.reason).toBe('no_page_scoped_keyword_match')
+  })
+})
+
+describe('checkTitleOnTopic — 2026-09-28 incident regression: generated copy must mention something specific to the page', () => {
+  it('flags a generated title/description that has drifted onto a completely different subject', async () => {
+    const { checkTitleOnTopic } = await import('../gate')
+
+    const result = checkTitleOnTopic(
+      'chongqing-night-city-lights',
+      "The Forbidden Palace & China's Top Destinations | CTS Tours",
+      'Explore the Forbidden Palace and other must-see stops across China with CTS Tours.',
+    )
+
+    expect(result.onTopic).toBe(false)
+  })
+
+  it('passes a generated title/description that mentions one of the page\'s own distinctive words', async () => {
+    const { checkTitleOnTopic } = await import('../gate')
+
+    const result = checkTitleOnTopic(
+      'chongqing-night-city-lights',
+      'Chongqing Night City Lights: A Kiwi Traveller\'s Guide | CTS',
+      'See Chongqing light up after dark — book your night city lights tour with CTS Tours.',
+    )
+
+    expect(result.onTopic).toBe(true)
   })
 })
