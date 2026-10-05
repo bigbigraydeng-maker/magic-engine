@@ -9,6 +9,13 @@ interface Props {
 
 const PRODUCTION_SHORTCUTS = [
   {
+    icon: '📅',
+    label: '每日计划',
+    desc: '审核 7 日 Facebook Post 排期',
+    href: (id: string) => `/dashboard/clients/${id}/daily-plan`,
+    color: 'hover:border-me-ochre/40',
+  },
+  {
     icon: '📋',
     label: '内容看板',
     desc: '审核 · 排期 · 发布所有内容',

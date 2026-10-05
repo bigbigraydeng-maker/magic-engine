@@ -5,6 +5,14 @@
 
 ---
 
+### 2026-10-05（Park Homes 官网：Riverside 页「工程进度」加上客户发来的进度更新视频）
+
+PR [#2252](https://github.com/bigbigraydeng-maker/magic-engine/pull/2252) 由机器自动合并（C 级），随后手动触发 `parkhomes-deploy.yml` 发布（自动合并不会触发发布，见 [合并审批](../../.github/merge-authorization.md)「已知缺口」），线上已核实。客户 Jason 2026-10-04 邮件发来一条 Riverside 进度更新视频（YouTube），要求放上网站。嵌入位置是 Riverside 页「Development progress」一段的航拍图下方，由 `projects.js` 里新增的可选字段 `story.progress.video` 驱动；说明只写「开发商提供，2026 年 10 月」（收到时间），不从视频推断分期或完工状态；原有的走访视频保留在原处。代码由 DeepSeek 写（aider 一次性 1 轮，$0.0042），Claude Code 出指令、审 diff、构建、提交。验证：站点构建 20 页通过；生成页与线上页均含新旧两个视频嵌入；浏览器实际打开线上页，新视频播放器加载正常（16:9，无横向溢出）。台账卡 `2026-10-05-parkhomes-riverside-update-video`。
+
+**Reuse Statement**：客户专属站点内容。复用既有 ProjectStory 布局和已有的视频嵌入写法；新增一个可选数据字段和约 15 行条件渲染，全部在客户站点目录内，未进入共享运行时。
+
+---
+
 ### 2026-09-27（Magic Engine 工具实验室第二步：官网「网站免费诊断」不再出假结果、有防刷与花费上限、中文页出中文结果）
 
 - **为什么**：官网免费诊断会在 AI 失败时把写死的示例当成诊断给访客看，前端还有假分数和夸大的进度；没有任何次数上限；只有英文、写死澳新语境。实施中又发现官网（Cloudflare）的服务端连不上数据库，诊断从没存下过一条线索。
@@ -338,6 +346,15 @@ PR [#1952](https://github.com/bigbigraydeng-maker/magic-engine/pull/1952)：
   导出限制的真实类型错误，已修
 
 ---
+
+### 2026-09-23（AI 可见度：100% 探测失败 → PM 今日待办告警 + 旧 cron 失败计数修复）
+
+PR [#1943](https://github.com/bigbigraydeng-maker/magic-engine/pull/1943)：
+- 新增 `ai_tracker_all_failed` PM 待办项：当某客户的 AI 可见度周度体检所有探测全挂时，自动出现在今日待办里，带原因分桶（余额用光 / 授权失效 / 供应商出错）和修复指引
+- 修复旧 cron `ai-tracker-weekly/route.ts`：全挂客户以前被算成"成功"，现在正确计入失败
+- 查询使用 `fetchAll` 分页器避开 PostgREST 1000 行静默截断
+- 17 个新单测覆盖错误分桶、连续失败周数计算、提醒节拍、多客户场景
+- 经子牙（架构）+ 魏征（挑刺）两轮独立复审
 
 ### 2026-09-23（AI 可见度探测失败被当成「零提及」发给客户：数据结构分离 + 回执 finding + 过度矫正守卫）
 

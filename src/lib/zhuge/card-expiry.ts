@@ -10,6 +10,7 @@
  * longer today's recommendation — mark it 'superseded' (existing status,
  * same value the persister uses). Human-created cards (source fde/luban)
  * are never touched: those are commitments, not recommendations.
+ * SEO weekly-list items (steps_json.loop set) are also never touched here.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -37,6 +38,9 @@ export async function supersedeStaleZhugeCards(
     .update({ status: 'superseded' })
     .eq('status', 'pending')
     .eq('source', 'zhuge')
+    // SEO weekly-list items carry steps_json.loop and run their own expiry
+    // (skipped + reason, visible in the weekly report) — never silently superseded.
+    .is('steps_json->>loop', null)
     .lt('created_at', cutoff)
     .select('id')
 

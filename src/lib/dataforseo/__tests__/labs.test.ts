@@ -5,6 +5,9 @@ import {
   getKeywordsForSite,
   getKeywordIdeas,
   bulkKeywordVolume,
+  getSerpCompetitors,
+  fetchDomainRankOverview,
+  getKeywordsGapWithStatus,
 } from '../labs'
 
 vi.mock('@/lib/validation-utils', () => ({ validateEnvVar: () => 'test' }))
@@ -154,7 +157,7 @@ describe('getDomainMetrics — provider failures are not zeros', () => {
   const overviewResponse = {
     ok: true,
     json: () => Promise.resolve({
-      tasks: [{ result: [{ items: [{ metrics: { organic: { count: 12, etv: 340 } } }] }] }],
+      tasks: [{ status_code: 20000, result: [{ items: [{ metrics: { organic: { count: 12, etv: 340 } } }] }] }],
     }),
   } as Response
   const rankResponse = {
@@ -174,5 +177,91 @@ describe('getDomainMetrics — provider failures are not zeros', () => {
     mockFetch.mockReturnValueOnce(Promise.resolve({ ok: false, status: 429 } as Response))
 
     await expect(getDomainMetrics('example.com')).rejects.toThrow('backlink rank unavailable')
+  })
+
+  it('throws on an HTTP 200 task-level error (e.g. 40210) instead of returning 0/0', async () => {
+    mockFetch.mockReturnValueOnce(Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ tasks: [{ status_code: 40210, status_message: 'Insufficient funds' }] }),
+    } as Response))
+    mockFetch.mockReturnValueOnce(Promise.resolve(rankResponse))
+
+    await expect(getDomainMetrics('example.com')).rejects.toThrow('task error 40210')
+  })
+})
+
+describe('task-level failures are rejected (HTTP 200 but status_code != 20000)', () => {
+  beforeEach(() => mockFetch.mockReset())
+
+  const taskError = () =>
+    Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ tasks: [{ status_code: 40210, status_message: 'balance', result: null }] }),
+    } as Response)
+
+  it('getSerpCompetitors rejects on a task-level error', async () => {
+    mockFetch.mockReturnValue(taskError())
+    await expect(getSerpCompetitors('x.com', 2036, 5)).rejects.toThrow('40210')
+  })
+
+  it('fetchDomainRankOverview rejects on a task-level error', async () => {
+    mockFetch.mockReturnValue(taskError())
+    await expect(fetchDomainRankOverview('x.com', 2036)).rejects.toThrow('40210')
+  })
+
+  it('getKeywordsGapWithStatus degrades to empty keywords and counts every failed domain', async () => {
+    mockFetch.mockReturnValue(taskError())
+    const r = await getKeywordsGapWithStatus('client.com', ['a.com', 'b.com'], 2036, 10)
+    expect(r).toEqual({ keywords: [], failedCount: 2 })
+  })
+
+  it('getKeywordsGapWithStatus keeps intersection keywords when KD enrichment fails', async () => {
+    mockFetch.mockReturnValueOnce(Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        tasks: [{
+          status_code: 20000,
+          result: [{
+            items: [{
+              keyword_data: {
+                keyword: 'foo bar',
+                keyword_info: { search_volume: 100, cpc: 1, competition: 0.1 },
+                keyword_properties: { keyword_difficulty: null },
+              },
+            }],
+          }],
+        }],
+      }),
+    } as Response))
+    mockFetch.mockReturnValueOnce(Promise.resolve({ ok: false, status: 500 } as Response))
+
+    const r = await getKeywordsGapWithStatus('client.com', ['a.com'], 2036, 10)
+
+    expect(r.keywords).toHaveLength(1)
+    expect(r.failedCount).toBe(1)
+  })
+
+  it('getKeywordsGapWithStatus reports no failures when the intersection succeeds', async () => {
+    mockFetch.mockReturnValue(Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        tasks: [{
+          status_code: 20000,
+          result: [{
+            items: [{
+              keyword_data: {
+                keyword: 'foo bar',
+                keyword_info: { search_volume: 100, cpc: 1, competition: 0.1 },
+                keyword_properties: { keyword_difficulty: 30 },
+              },
+            }],
+          }],
+        }],
+      }),
+    } as Response))
+
+    const r = await getKeywordsGapWithStatus('client.com', ['a.com'], 2036, 10)
+
+    expect(r.failedCount).toBe(0)
   })
 })
