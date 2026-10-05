@@ -83,7 +83,10 @@ props 里没有任何默认值，缺项直接拒。`src/montage.ts` 的卡口（
 出片机（`scripts/factory-worker/remotion-branch.mjs`）按工单 `brief.remotion = { template, props }` 渲染：`template` 必须是 `src/templates.ts` 注册表里有的（现在是 `list`、`montage`），不认识的直接拒（不重试）；`--template` 会原样传给 `render.mjs`。**旧版出片机不认识 `montage`，也会拒收**——所以升级出片机之前不要建 `montage` 工单。
 
 - **音乐从共享乐库取**：`props.musicFile` 如果是 `catalog/music.json` 里某首的暂存名（`stagedFileName`，如 `pipa-trap.m4a`），出片机从 `<STUDIO_ROOT>/<目录里的 folder>/<file>`（即 `Music/`、`_shared/music/`）拷进该单暂存目录，路径必须落在该乐库文件夹内（含符号链接）；不在目录里的音乐名仍按 R2a 老办法从该客户的 `remotion-assets/` 取。出片机 Mac 上这两个乐库文件夹要在（Dropbox 同步到 `MagicLab_Studio/` 下）。
-- 目录里状态是 `pending_listen`（节拍没量过）的歌，**出片机不拦**，由上游选择器决定用不用。
+- **目录里的暂存名是保留名**：目录里有的暂存名（如 `pipa-trap.m4a`）一律从乐库取，即使客户素材库里也有同名文件（出片机会写一条「乐库优先」日志）。客户专属授权曲不要放进共享目录，用不同的文件名放在该客户的 `remotion-assets/` 里。
+- 目录里状态是 `pending_listen`（节拍没量过）的歌，**出片机不拦**，由上游选择器决定用不用；用了哪首、状态如何，都记在成片的 `segments.json` 的 `music` 字段里。
+- **旧版出片机遇到 `montage` 会把单子永久作废**（claim 接口不看出片机会什么）：必须先把所有出片机升级到含包 C 的版本，再建 `montage` 工单。错误信息以 `UNKNOWN_TEMPLATE:` 开头，方便搜。
+- 节拍间隔不得小于 0.25 秒（`MONTAGE_MIN_BEAT_GAP_SEC`）。
 - 字幕与 `caption`：`list` 沿用原来的三段；`montage` 一个词一条字幕，`caption` 是所有词用 ` · ` 连起来（服务端红线复扫扫的就是它）。
 - 成片体检、心跳、上传、`complete` 与 R2a 完全一致；`montage` 的 `musicFile` 必填，所以音轨检查一定会查。
 

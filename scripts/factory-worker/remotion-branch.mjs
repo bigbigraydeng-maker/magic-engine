@@ -2,6 +2,7 @@
 import { spawn } from 'node:child_process'
 import {
   existsSync, copyFileSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync,
+  openSync, closeSync, fstatSync, constants,
 } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -70,23 +71,23 @@ export function checkRemotionHealth({
 // Dynamically import the Remotion validation modules (only used in this branch).
 export async function loadRemotionEngine(engineDir = REMOTION_ENGINE_DIR) {
   try {
-    const schema = await import(pathToFileURL(join(engineDir, 'src', 'schema.ts')).href)
     const timing = await import(pathToFileURL(join(engineDir, 'src', 'timing.ts')).href)
     const templates = await import(pathToFileURL(join(engineDir, 'src', 'templates.ts')).href)
     const montage = await import(pathToFileURL(join(engineDir, 'src', 'montage.ts')).href)
     const music = await import(pathToFileURL(join(engineDir, 'src', 'music.ts')).href)
-    const catalog = music.parseMusicCatalog(
-      JSON.parse(readFileSync(join(engineDir, 'catalog', 'music.json'), 'utf8')),
-    )
+    let catalog = null
     return {
-      parseListReelProps: schema.parseListReelProps,
-      collectAssetFiles: schema.collectAssetFiles,
       computeTimingFromProps: timing.computeTimingFromProps,
       FPS: timing.FPS,
       isTemplateId: templates.isTemplateId,
       loadTemplate: templates.loadTemplate,
       montageFrameOf: montage.montageFrameOf,
-      musicSourceFor: (name) => templates.musicSourceOf(catalog, name),
+      musicSourceFor: (name) => {
+        catalog ??= music.parseMusicCatalog(
+          JSON.parse(readFileSync(join(engineDir, 'catalog', 'music.json'), 'utf8')),
+        )
+        return templates.musicSourceOf(catalog, name)
+      },
     }
   } catch (e) {
     throw new RemotionOrderError(
@@ -142,17 +143,28 @@ export function buildRemotionSrt(props, timing, fps) {
     .join('')
 }
 
-// Every montage word joined for the server-side red-line rescan.
+// Every montage word joined with plain spaces for the server-side red-line rescan,
+// so multi-word banned phrases still match as substrings.
 export function buildMontageCaption(props) {
-  return props.words.map((w) => clean(w.text)).join(' · ')
+  return props.words.map((w) => clean(w.text)).join(' ')
+}
+
+// Refuse montage props whose words are all invisible after cleaning.
+export function assertMontageTextVisible(props) {
+  props.words.forEach((w, i) => {
+    if (clean(w.text) === '') {
+      throw new RemotionOrderError(`蒙太奇第 ${i + 1} 个词清理后是空的（只含不可见字符）`)
+    }
+  })
 }
 
 // Build the SRT captions for the montage layout, one cue per word.
 export function buildMontageSrt(props, frameOf, fps) {
+  const endSec = frameOf(props.beats, props.totalBeats) / fps
   return props.words
     .map((w, i) => {
       const from = frameOf(props.beats, w.at) / fps
-      const to = frameOf(props.beats, w.at + w.beats) / fps
+      const to = Math.max(from + 0.05, Math.min(frameOf(props.beats, w.at + w.beats) / fps, endSec - 0.1))
       return `${i + 1}\n${fmtTime(from)} --> ${fmtTime(to)}\n${clean(w.text)}\n\n`
     })
     .join('')
@@ -162,6 +174,24 @@ export function buildMontageSrt(props, frameOf, fps) {
 const isInside = (parent, child) => {
   const rel = relative(parent, child)
   return rel === '' || (!rel.startsWith('..' + sep) && rel !== '..' && !isAbsolute(rel))
+}
+
+// Copy a file that must stay inside `rootReal`, guarding against TOCTOU swaps.
+export function copyWithinRoot(srcReal, rootReal, dest) {
+  const fd = openSync(srcReal, constants.O_RDONLY | constants.O_NOFOLLOW)
+  let buf
+  try {
+    if (!fstatSync(fd).isFile()) throw new Error('not a regular file')
+    buf = readFileSync(fd)
+  } finally {
+    closeSync(fd)
+  }
+  writeFileSync(dest, buf)
+  const again = realpathSync(srcReal)
+  if (again !== srcReal || !isInside(rootReal, again)) {
+    rmSync(dest, { force: true })
+    throw new Error('source changed during copy')
+  }
 }
 
 // Copy the referenced assets into the staging directory.
@@ -185,8 +215,7 @@ export function stageRemotionAssets({ props, files, stageDir, brandkitDir, asset
       if (!isInside(rootReal, musicReal) || !statSync(musicReal).isFile()) throw new Error('bad')
       const musicDest = join(stageDir, props.musicFile)
       mkdirSync(dirname(musicDest), { recursive: true })
-      copyFileSync(musicReal, musicDest)
-      if (statSync(musicDest).size !== statSync(musicReal).size) throw new Error('short')
+      copyWithinRoot(musicReal, rootReal, musicDest)
     } catch {
       throw new RemotionOrderError(`乐库里找不到音乐文件：${props.musicFile}（应在 ${musicRoot}）`)
     }
@@ -210,10 +239,7 @@ export function stageRemotionAssets({ props, files, stageDir, brandkitDir, asset
       const srcReal = realpathSync(resolve(libReal, name))
       if (!isInside(libReal, srcReal) || !statSync(srcReal).isFile()) throw new Error('bad')
       mkdirSync(dirname(dest), { recursive: true })
-      copyFileSync(srcReal, dest)
-      if (statSync(dest).size !== statSync(srcReal).size) {
-        throw new RemotionOrderError(`素材拷贝不完整：${name}`)
-      }
+      copyWithinRoot(srcReal, libReal, dest)
     } catch (e) {
       if (e instanceof RemotionOrderError) throw e
       missing.push(name)
@@ -391,7 +417,9 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
   const eng = await loadEngineFn()
   const template = remotion.template
   if (!eng.isTemplateId(template)) {
-    throw new RemotionOrderError(`不认识的模板 "${template}"：出片机的模板注册表里没有它`)
+    throw new RemotionOrderError(
+      `UNKNOWN_TEMPLATE: 不认识的模板 ${JSON.stringify(String(template)).slice(0, 40)}：出片机的模板注册表里没有它。先升级出片机，或检查工单 brief.remotion.template`,
+    )
   }
   let props
   let files
@@ -406,6 +434,7 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
   } catch (e) {
     throw new RemotionOrderError('工单里的视频参数不合格：' + e.message)
   }
+  if (template === 'montage') assertMontageTextVisible(props)
 
   const hb = startHeartbeats({
     woId: wo.work_order_id,
@@ -429,7 +458,17 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     }
     const clientRootDir = join(deps.studioRoot, deps.clientStudio[wo.client_id])
     const assetLibDir = join(clientRootDir, 'remotion-assets')
-    const musicSource = props.musicFile ? eng.musicSourceFor(props.musicFile) : null
+    let musicSource = null
+    if (props.musicFile) {
+      try {
+        musicSource = eng.musicSourceFor(props.musicFile)
+      } catch (e) {
+        throw new RemotionOrderError('音乐目录读不了：' + e.message)
+      }
+    }
+    if (musicSource && existsSync(join(assetLibDir, props.musicFile))) {
+      deps.log(`音乐 ${props.musicFile} 在共享乐库和客户素材库里都有，按乐库版本出片（乐库优先）`)
+    }
     const musicRoot = musicSource ? join(deps.studioRoot, musicSource.folder) : null
     const musicPath = musicSource ? join(musicRoot, musicSource.file) : null
     stageRemotionAssets({ props, files, stageDir, brandkitDir, assetLibDir, clientRootDir, musicPath, musicRoot })
@@ -493,7 +532,15 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     hb.assertAlive()
 
     const segmentsJson = Buffer.from(
-      JSON.stringify({ engine: 'remotion', template, props, render: { attempts, elapsed_s } }, null, 2),
+      JSON.stringify({
+        engine: 'remotion',
+        template,
+        music: musicSource
+          ? { source: 'catalog', id: musicSource.id, folder: musicSource.folder, file: musicSource.file, status: musicSource.status }
+          : (props.musicFile ? { source: 'client_library', file: props.musicFile } : null),
+        props,
+        render: { attempts, elapsed_s },
+      }, null, 2),
     )
     await deps.uploadSignedFn(wo.uploads.video.signed_url, readFileSync(finalPath), 'video/mp4')
     hb.assertAlive()

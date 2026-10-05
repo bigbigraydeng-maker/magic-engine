@@ -7,6 +7,7 @@ import {
   parseMontageReelProps,
   collectMontageAssetFiles,
   computeMontageTiming,
+  buildMontageSegments,
 } from './montage.ts';
 import { stagedFileName, type MusicCatalog } from './music.ts';
 
@@ -46,6 +47,8 @@ export function loadTemplate(id: TemplateId, input: unknown): LoadedTemplate {
   }
   const props = parseMontageReelProps(input);
   const totalFrames = computeMontageTiming(props).totalFrames;
+  // Throws a readable error for layouts that would only crash later at render time.
+  buildMontageSegments(props);
   return {
     compositionId: 'MontageReel',
     props,
@@ -58,10 +61,21 @@ export function loadTemplate(id: TemplateId, input: unknown): LoadedTemplate {
 export function musicSourceOf(
   catalog: MusicCatalog,
   stagedName: string,
-): { folder: string; file: string } | null {
+): { id: string; folder: string; file: string; status: string } | null {
   for (const track of catalog.tracks) {
-    if (stagedFileName(track) === stagedName) {
-      return { folder: track.folder, file: track.file };
+    let name: string;
+    try {
+      name = stagedFileName(track);
+    } catch {
+      continue;
+    }
+    if (name === stagedName) {
+      return {
+        id: track.id,
+        folder: track.folder,
+        file: track.file,
+        status: track.status,
+      };
     }
   }
   return null;
