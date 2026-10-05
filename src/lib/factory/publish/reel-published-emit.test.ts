@@ -22,6 +22,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { facebookReelAdapter } from './facebook-reel-adapter'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { reelPublishedEventId } from './reel-published-event'
+import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS } from '@/lib/social/content-review'
 
 const mockFrom = vi.mocked(supabaseAdmin.from)
 const mockPublish = vi.mocked(facebookReelAdapter.publish)
@@ -50,7 +51,16 @@ function installWorkerMocks() {
               data: {
                 id: WO_ID, client_id: CLIENT_ID, master_brief_id: 'mb-1',
                 publish_attempts: 0, published_ref: null,
-                output: { video_path: 'renders/c/wo/final.mp4' },
+                output: {
+                  video_path: 'renders/c/wo/final.mp4',
+                  quality_checklist_auto: REEL_AUTO_CHECK_KEYS.map(key => ({ key, judge: 'AUTO', outcome: 'PASS', detail: 'measured', source_ref: null })),
+                },
+                review_ref: {
+                  checklist_human: REEL_HUMAN_CHECK_KEYS.map(key => ({
+                    key, judge: 'HUMAN', outcome: 'PASS', detail: null,
+                    source_ref: key.startsWith('factual_') ? 'https://example.test/source' : null,
+                  })),
+                },
                 brief: { angle: 'China tour', copy: { endcard: { cta: 'Book your China tour', url: 'https://ctstours.co.nz' } } },
               },
               error: null,

@@ -16,59 +16,25 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { buildIdentities, resolveContact, AmbiguousIdentityError } from '@/lib/crm/identity'
+import { contactKindOf, readDomainRules } from '@/lib/crm/contact-kind'
 import { EMPTY_ATTRIBUTION } from '@/lib/crm/attribution'
-import { segmentContact, SEGMENT_ACTION_META } from '@/lib/crm/segments'
+import { segmentContact } from '@/lib/crm/segments'
 import { buildContactModel } from '@/lib/crm/contact-model'
+import {
+  responseRowFor,
+  stageMetaOf,
+  type ContactRow,
+  type TouchRow,
+  type StageRow,
+} from '@/lib/crm/contact-response-row'
 import { buildPriorityView } from '@/lib/crm/contact-list-view'
 import type { SectionKey } from '@/lib/crm/list-sections'
-import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import { fetchAll } from '@/lib/supabase-paginate'
 import {
   extractCustomColumns,
   visibleCustomColumns,
   type CustomColumnKey,
-  type TouchpointForColumn,
 } from '@/lib/crm/table-columns'
-
-interface ContactRow {
-  id: string
-  display_name: string | null
-  primary_phone: string | null
-  primary_email: string | null
-  do_not_contact: boolean
-  snooze_until: string | null
-  stage: string | null
-  first_seen_at: string
-  pinned_at: string | null
-  important_note: string | null
-  important_due_at: string | null
-}
-
-interface TouchRow {
-  id: string
-  contact_id: string
-  channel: string
-  direction: 'inbound' | 'outbound'
-  occurred_at: string
-  summary: string | null
-  /** 原话。存量结果值读的时候要靠它重判一次（见 reclassifyStoredOutcome）。 */
-  raw: string | null
-  metadata: Record<string, unknown> | null
-  source: string | null
-}
-
-interface StageRow {
-  stage_key: string
-  label: string
-  marketing_action: string
-  is_terminal: boolean
-}
-
-function ts(v: string | null | undefined): number {
-  if (!v) return 0
-  const t = new Date(v).getTime()
-  return Number.isNaN(t) ? 0 : t
-}
 
 /** 分页 / 筛选 / 搜索的解析结果。见 `parseListQuery`。 */
 interface ListQuery {
@@ -90,6 +56,13 @@ interface ListQuery {
   sectionPage?: Partial<Record<SectionKey, number>>
   /** `?contact=<id>` —— 今日待办的直达链接；服务端定位它落在哪段哪页。 */
   focusContactId?: string
+  /**
+   * `?kind=retail|trade` —— 只筛终端客户 / 只筛同行（2026-09-28 WP-B3）。
+   * 不传 = 老行为，不做任何按身份的筛选，逐字不变（默认「全部客人」不因为
+   * 加这个功能就悄悄把员工/同行从原有列表里拿掉——那是另一个决定，这次没做）。
+   * 只在平铺分页路径（getPaged）生效，分段视图这一轮不接。
+   */
+  kind?: 'retail' | 'trade'
 }
 
 const DEFAULT_PER_PAGE = 100
@@ -107,7 +80,7 @@ const MAX_PER_PAGE = 500
 function parseListQuery(url: URL): ListQuery | { error: string } {
   const sp = url.searchParams
   const paged =
-    sp.has('page') || sp.has('perPage') || sp.has('stage') || sp.has('stages') || sp.has('q')
+    sp.has('page') || sp.has('perPage') || sp.has('stage') || sp.has('stages') || sp.has('q') || sp.has('kind')
 
   const rawPage = sp.get('page')
   const rawPerPage = sp.get('perPage')
@@ -174,8 +147,12 @@ function parseListQuery(url: URL): ListQuery | { error: string } {
   const rawFocus = sp.get('contact')
   const focusContactId = rawFocus === null ? undefined : rawFocus.trim() || undefined
 
+  const rawKind = sp.get('kind')
+  if (rawKind !== null && rawKind !== 'retail' && rawKind !== 'trade') return { error: 'invalid kind' }
+  const kind = rawKind === 'retail' || rawKind === 'trade' ? rawKind : undefined
+
   // view=priority 不走分页路径：它自己一次拉全（筛选后的）子集再在内存里分段。
-  return { paged: view === null && paged, page, perPage, stages, q, view, open, sectionPage, focusContactId }
+  return { paged: view === null && paged, page, perPage, stages, q, view, open, sectionPage, focusContactId, kind }
 }
 
 /**
@@ -197,6 +174,64 @@ function contactFilterParams(query: ListQuery): {
 }
 
 /**
+ * 「同行」「员工」各自的 id——不管请求要 retail 还是 trade 视图，都从这两个
+ * 小集合出发：trade 视图直接 `.in()` 同行那一份；retail 视图 `.not(...'in'...)`
+ * 排掉同行+员工。两条路径的 id 列表都只跟「同行/员工有多少人」成正比（CTS 约
+ * 20 人），不会随客户总联系人数（1000+）一起变大，避免 PostgREST `.in()` 背上
+ * 一条跟总数一样长的 URL（本文件其它地方已经踩过这类"in 列表太长"的坑）。
+ *
+ * 判据跟 `crm/today/route.ts` 完全一致（同一份 `contactKindOf`/`readDomainRules`，
+ * 不在这里另起一套）：一个人可能有多个邮箱身份，同行常用私人邮箱来问事，
+ * 只看 `primary_email` 会漏判。
+ */
+async function loadTradeAndStaffIds(clientId: string): Promise<{ tradeIds: string[]; staffIds: string[] }> {
+  const [clientRes, identities, contactsLite] = await Promise.all([
+    supabaseAdmin.from('clients').select('leads_config').eq('id', clientId).maybeSingle(),
+    // 🔴 魏征 2026-09-28 复审 B3 查出：range 分页必须配 order，否则页之间顺序不稳，
+    // 客户联系人/身份超过一页（1000 条）时会漏行或重复行——跟本仓库 2026-07-29 CTS
+    // 事故同款问题，`crm/today/route.ts` 抄的是同一套判定逻辑但那边配了 order，
+    // 这里漏抄了。
+    fetchAll<{ contact_id: string; value: string }>((from, to) =>
+      supabaseAdmin
+        .from('contact_identities')
+        .select('contact_id, value')
+        .eq('client_id', clientId)
+        .eq('kind', 'email')
+        .order('contact_id', { ascending: true })
+        .range(from, to),
+    ),
+    fetchAll<{ id: string; primary_email: string | null }>((from, to) =>
+      supabaseAdmin
+        .from('contacts')
+        .select('id, primary_email')
+        .eq('client_id', clientId)
+        .order('id', { ascending: true })
+        .range(from, to),
+    ),
+  ])
+
+  const rules = readDomainRules((clientRes.data as { leads_config: unknown } | null)?.leads_config)
+  const emailsByContact = new Map<string, string[]>()
+  for (const c of contactsLite) {
+    if (c.primary_email) emailsByContact.set(c.id, [c.primary_email])
+  }
+  for (const i of identities) {
+    const list = emailsByContact.get(i.contact_id) ?? []
+    if (!list.includes(i.value)) list.push(i.value)
+    emailsByContact.set(i.contact_id, list)
+  }
+
+  const tradeIds: string[] = []
+  const staffIds: string[] = []
+  for (const [id, emails] of emailsByContact) {
+    const kind = contactKindOf(emails, rules)
+    if (kind === 'trade') tradeIds.push(id)
+    else if (kind === 'staff') staffIds.push(id)
+  }
+  return { tradeIds, staffIds }
+}
+
+/**
  * 分页路径：只拉当前页的人 + 这些人的触点。
  *
  * 跟老路径的区别只有「拉谁」—— 逐人组装（segmentContact / extractCustomColumns /
@@ -205,7 +240,7 @@ function contactFilterParams(query: ListQuery): {
  * 触点必须按 `contact_id in (当前页)` 收窄：CTS 量级下全量触点 1271 条，
  * 分页的意义就是别为了 100 个人把全库读一遍。
  */
-async function getPaged(clientId: string, query: ListQuery): Promise<NextResponse> {
+async function getPaged(clientId: string, query: ListQuery, viewerEmail: string | null): Promise<NextResponse> {
   let total: number
   let pageContacts: ContactRow[]
   let stageRows: StageRow[]
@@ -213,12 +248,39 @@ async function getPaged(clientId: string, query: ListQuery): Promise<NextRespons
     // 两次查询的过滤条件必须逐字一致 —— 共享一份过滤参数后各自 apply。
     const filters = contactFilterParams(query)
 
+    // kind 筛选（?kind=retail|trade，WP-B3）：先把同行/员工这两小撮人的 id 算出来，
+    // 两条查询各自叠加同一份 id 过滤——跟 stages/orExpr 一样，必须逐字一致。
+    let kindInIds: string[] | null = null
+    let kindNotInIds: string[] | null = null
+    if (query.kind) {
+      const { tradeIds, staffIds } = await loadTradeAndStaffIds(clientId)
+      if (query.kind === 'trade') {
+        if (tradeIds.length === 0) {
+          return NextResponse.json({
+            total: 0,
+            page: query.page,
+            perPage: query.perPage,
+            columns: [],
+            items: [],
+            viewerEmail,
+          })
+        }
+        kindInIds = tradeIds
+      } else {
+        kindNotInIds = [...tradeIds, ...staffIds]
+      }
+    }
+
     let countBuilder = supabaseAdmin
       .from('contacts')
       .select('id', { count: 'exact', head: true })
       .eq('client_id', clientId)
     if (filters.stages !== null) countBuilder = countBuilder.in('stage', filters.stages)
     if (filters.orExpr !== null) countBuilder = countBuilder.or(filters.orExpr)
+    if (kindInIds !== null) countBuilder = countBuilder.in('id', kindInIds)
+    if (kindNotInIds !== null && kindNotInIds.length > 0) {
+      countBuilder = countBuilder.not('id', 'in', `(${kindNotInIds.join(',')})`)
+    }
 
     let pageBuilder = supabaseAdmin
       .from('contacts')
@@ -226,11 +288,27 @@ async function getPaged(clientId: string, query: ListQuery): Promise<NextRespons
       .eq('client_id', clientId)
     if (filters.stages !== null) pageBuilder = pageBuilder.in('stage', filters.stages)
     if (filters.orExpr !== null) pageBuilder = pageBuilder.or(filters.orExpr)
+    if (kindInIds !== null) pageBuilder = pageBuilder.in('id', kindInIds)
+    if (kindNotInIds !== null && kindNotInIds.length > 0) {
+      pageBuilder = pageBuilder.not('id', 'in', `(${kindNotInIds.join(',')})`)
+    }
 
     const [countRes, pageRes, stages] = await Promise.all([
       countBuilder,
       pageBuilder
-        .order('id', { ascending: true })
+        // 🔴 2026-09-28 修：原来是 `.order('id', ...)`——`contacts.id` 是 UUID，
+        // 按它排等于按随机字符串排。第 1 页选出来的 20 个人跟"谁最近有动静"没有
+        // 任何关系，而页面上「最近联系 ↓」那个箭头只对**已经选出的这一页**做
+        // 客户端排序（page.tsx 注释自己写着「排序只对当前页生效」）——两层叠加，
+        // 效果是"挑 20 个近乎随机的人，把这 20 个人按最近联系排一下"，
+        // 今晚刚建档的 WhatsApp 测试联系人因此在 1026 人里怎么翻都翻不到。
+        // 改成按 `first_seen_at` 倒序：真正的"按最后一次接触排"要在每人身上先
+        // 算出跨渠道最新触点时间再排序，这份 SQL 目前是查完整批触点后在内存里
+        // 组装（见本文件头注），做不到"先排序再分页"——那是一次更大的改动
+        // （物化视图 / 缓存列），记进台账，不在这次一起做。`first_seen_at` 是
+        // 唯一已经在这次查询里、单调、不为空的时间列，至少让"今天刚进来的人"
+        // 能在默认视图里被看见，比随机排序找不到强。
+        .order('first_seen_at', { ascending: false })
         .range((query.page - 1) * query.perPage, query.page * query.perPage - 1),
       fetchAll<StageRow>((from, to) =>
         supabaseAdmin
@@ -285,6 +363,10 @@ async function getPaged(clientId: string, query: ListQuery): Promise<NextRespons
     perPage: query.perPage,
     columns: visibleCustomColumns(customPerContact),
     items: out,
+    // 「全部客人」页展开一个联系人时要显示「发出去会记在谁名下」，
+    // 而这个响应是该页唯一读到当前登录身份的地方（跟「今天要联系」页
+    // 从自己的 data.viewerEmail 拿是同一个模式，不新起一个接口）。
+    viewerEmail,
   })
 }
 
@@ -300,7 +382,7 @@ async function getPaged(clientId: string, query: ListQuery): Promise<NextRespons
  * CTS 量级约 5k 行 / 1.4MB，跟今天页每次打开读的量相同。真要收窄得按 100 个
  * contact_id 一批走 `.in()`（PostgREST URL 长度限制），留作后续一轮。
  */
-async function getPriority(clientId: string, query: ListQuery): Promise<NextResponse> {
+async function getPriority(clientId: string, query: ListQuery, viewerEmail: string | null): Promise<NextResponse> {
   let contacts: ContactRow[]
   let touches: TouchRow[]
   let stageRows: StageRow[]
@@ -374,6 +456,7 @@ async function getPriority(clientId: string, query: ListQuery): Promise<NextResp
     focus,
     columns: visibleCustomColumns(customPerContact),
     sections,
+    viewerEmail,
   })
 }
 
@@ -396,13 +479,14 @@ export async function GET(
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
+  const viewerEmail = access.user.email?.toLowerCase().trim() ?? null
 
   const parsed = parseListQuery(new URL(req.url))
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 })
   }
-  if (parsed.paged) return getPaged(clientId, parsed)
-  if (parsed.view === 'priority') return getPriority(clientId, parsed)
+  if (parsed.paged) return getPaged(clientId, parsed, viewerEmail)
+  if (parsed.view === 'priority') return getPriority(clientId, parsed, viewerEmail)
 
   // 必须分页拉全 —— Supabase 单次查询硬顶 1000 行，`.limit(20000)` 会被静默
   // 砍掉且不报错。实测 CTS：库里 1271 条触点只回 1000 条；配合 order desc，
@@ -453,94 +537,8 @@ export async function GET(
     totalContacts: out.length,
     columns: visibleCustomColumns(customPerContact),
     contacts: out,
+    viewerEmail,
   })
-}
-
-/** 阶段 map：label 给「跟进到哪步」列，suppressed 决定这个人算不算已结论（影响冷热）。 */
-function stageMetaOf(stageRows: StageRow[]): Map<string, { label: string; suppressed: boolean }> {
-  const stageMeta = new Map<string, { label: string; suppressed: boolean }>()
-  for (const s of stageRows) {
-    stageMeta.set(s.stage_key, {
-      label: s.label,
-      suppressed: stageSuppressesWorklist(
-        isMarketingAction(s.marketing_action) ? s.marketing_action : 'suppress',
-        s.is_terminal,
-      ),
-    })
-  }
-  return stageMeta
-}
-
-/** 每人一行的响应形状 —— 平铺列表与 view=priority 共用，两个形状里同一个人长得一模一样。 */
-function responseRowFor(
-  c: ContactRow,
-  tps: TouchRow[],
-  stageMeta: Map<string, { label: string; suppressed: boolean }>,
-  model: ReturnType<typeof buildContactModel>,
-  seg: ReturnType<typeof segmentContact>,
-): { row: Record<string, unknown>; custom: Record<CustomColumnKey, string | null> } {
-  // 进线时间 = 真实最早一条触点（不是导入日期）；没触点退回 first_seen_at。
-  // 最近联系 = 最晚一条触点；0 触点显式 null —— 绝不 fallback last_seen_at
-  // （它默认 = 建档时的 NOW()，会假装有过一次根本没发生的沟通）。
-  let firstTouch = 0
-  let lastTouch = 0
-  for (const t of tps) {
-    const v = ts(t.occurred_at)
-    if (v > 0) {
-      if (firstTouch === 0 || v < firstTouch) firstTouch = v
-      if (v > lastTouch) lastTouch = v
-    }
-  }
-
-  const forColumns: TouchpointForColumn[] = tps.map((t) => ({
-    channel: t.channel,
-    occurredAt: t.occurred_at,
-    metadata: t.metadata,
-  }))
-  const custom = extractCustomColumns(forColumns)
-
-  return {
-    custom,
-    row: {
-      contactId: c.id,
-      name: c.display_name || '未留姓名',
-      firstSeenAt: firstTouch > 0 ? new Date(firstTouch).toISOString() : c.first_seen_at,
-      lastTouchAt: lastTouch > 0 ? new Date(lastTouch).toISOString() : null,
-      phone: c.primary_phone,
-      /**
-       * 号码在库里但打不通 —— **两个 CRM 入口必须说同一件事**（Codex 复审 2026-08-16）。
-       *
-       * 不带的话，同一个已判坏的号在「今天该联系谁」被禁用，切到「全部客人」
-       * 展开却照旧能一点就拨。销售会以为其中一边是过时的，而两边他都不再信。
-       */
-      phoneUnusable: seg.phoneUnusable ?? false,
-      /**
-       * 被标成「别再联系」—— 页面据此给出**取消**那条路。
-       *
-       * 今日待办下发的「可能被误判成永久拒联」人工任务，href 指向的正是
-       * 「全部客人」这一页（Codex 复审 2026-08-16）。不带这个字段，FDE 照着
-       * 任务点进来会发现根本没有任务里说的那个按钮 —— 照着做也做不成
-       * 的人工任务，比不下发更糟。用上面 model 已经算好的那份，不重算。
-       */
-      doNotContact: model.doNotContact,
-      email: c.primary_email,
-      // 电话邮箱都没有时，页面据此显示「仅 FB 私信」而不是「没留联系方式」。
-      hasMessenger: tps.some((t) => t.channel === 'messenger'),
-      stage: c.stage,
-      // 认不出的 stage_key（配置里删了）显示原值，别留空白。
-      stageLabel: c.stage ? (stageMeta.get(c.stage)?.label ?? c.stage) : null,
-      // 人工置顶（contacts.pinned_at）。这一轮只读出来给页面显示 / 切换，
-      // 排序仍是系统算的 —— 置顶优先排序是下一轮的事。
-      pinnedAt: c.pinned_at,
-      // 「⭐置顶」附带的原因和到期日（contacts.important_note / important_due_at）。
-      // 这一轮只读出来给页面显示，编辑走 PATCH .../important，UI 是下一轮的事。
-      important: { note: c.important_note, dueAt: c.important_due_at },
-      segment: seg.segment,
-      segmentLabel: SEGMENT_ACTION_META[seg.segment].label,
-      temperature: seg.temperature,
-      custom,
-    },
-  }
 }
 
 /**

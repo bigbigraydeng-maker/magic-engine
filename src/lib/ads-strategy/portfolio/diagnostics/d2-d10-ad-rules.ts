@@ -641,7 +641,10 @@ function clientPageUnknown(ctx: AccountContext, input: DiagnosisInput): Diagnosi
     units: [],
     evidence: { window_end: ctx.date },
     sample: [],
-    reasons: ['一个广告账户里可能投着别的客户的广告，不登记主页就可能把别人的广告算到这个客户头上'],
+    reasons: [
+      '一个广告账户里可能投着别的客户的广告，不登记主页就可能把别人的广告算到这个客户头上',
+      '没登记主页时，「花钱没结果」的自动暂停建议也一律拦下（确认不了广告组是这个客户的）',
+    ],
     clientVisible: false,
     manualTask: {
       what: '客户没登记 Facebook 主页，广告级检查（素材疲劳 / 点进去之后差了）整段没跑',
@@ -663,6 +666,22 @@ export function adLevelCoverage(ctx: AccountContext, input: DiagnosisInput): AdL
   if (input.clientPageId === null) return { ...base, ran: false, reason: 'client_page_unknown', adsChecked: 0 }
   const adsChecked = ctx.ads.filter(ad => isEligible(ctx, input, ad)).length
   return { ...base, ran: true, reason: 'ok', adsChecked }
+}
+
+/**
+ * How many eligible ads had enough recent delivery and history to be judged at all (buildAdCase non-null).
+ * Read-only companion for Magic Bridge's on-the-spot check: its "looked at N ads" must not count ads the rules
+ * could not judge (魏征 2026-09-27). Does not change what diagnoseAdLevelRules reports.
+ */
+export function adLevelJudgeableCount(ctx: AccountContext, input: DiagnosisInput): number {
+  const adDaily = ctx.account.adDaily
+  if (input.clientPageId === undefined || input.clientPageId === null || adDaily === undefined) return 0
+  const recent = windowDays(ctx.date, RULE_RECENT_DAYS)
+  const baseline = windowDays(shiftDate(ctx.date, -RULE_RECENT_DAYS), RULE_BASELINE_DAYS)
+  const rowsByAd = dedupeByAd(adDaily)
+  const historyStart = historyStartOf(adDaily)
+  return ctx.ads.filter(ad => isEligible(ctx, input, ad)
+    && buildAdCase(ctx, input, ad, rowsByAd.get(ad.entity_id) ?? [], recent, baseline, historyStart) !== null).length
 }
 
 export function diagnoseAdLevelRules(ctx: AccountContext, input: DiagnosisInput): Diagnosis[] {

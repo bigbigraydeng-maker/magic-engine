@@ -1,7 +1,7 @@
 ---
 id: 2026-09-26-b2-changelog-and-ledger-correction
 title: "docs: B2 三只闹钟 CHANGELOG 条目 + 台账卡事故归因修正"
-status: done
+status: verified
 risk: C
 owner: agent
 decided_on: 2026-09-26
@@ -10,6 +10,9 @@ done_on: 2026-09-26
 done_ref: pr:2026
 verify_how: "CHANGELOG 有 2026-09-25 B2 条目 + 台账卡 fix-manual-items-syntax 正文写 #2016 不是 #2017"
 verify_by: 2026-09-27
+last_checked: 2026-09-27
+check_note: 主干 CHANGELOG 第 91 行有 9-25 B2 条目，台账卡正文归因写 #2016，两条都满足
+verified_ref: doc:docs/ledger/evidence/2026-09-26-b2-changelog-and-ledger-correction--2026-09-27.md
 ---
 
 B2 收尾文档工作：

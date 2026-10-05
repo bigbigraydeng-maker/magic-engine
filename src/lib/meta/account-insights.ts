@@ -35,6 +35,16 @@ export interface GraphInsightsData {
   outbound_clicks_ctr?: MetaActionStat[]
 }
 
+export type MetaAccountInsightsFailure =
+  | { kind: 'network_error' }
+  | { kind: 'http_error'; status: number }
+  | { kind: 'invalid_json' }
+  | { kind: 'empty_data' }
+
+export type MetaAccountInsightsResult =
+  | { ok: true; insights: MetaAdsInsights }
+  | { ok: false; failure: MetaAccountInsightsFailure }
+
 /**
  * Fetch account-level ad insights from Meta Graph API.
  *
@@ -49,6 +59,21 @@ export async function getAdAccountInsights(
   since: string,
   until: string,
 ): Promise<MetaAdsInsights | null> {
+  const result = await getAdAccountInsightsResult(adAccountId, accessToken, since, until)
+  if (result.ok) return result.insights
+  const failure = result.failure
+  const detail = failure.kind === 'http_error' ? `${failure.kind} (${failure.status})` : failure.kind
+  console.error(`[meta/client] account insights failed: ${detail}`)
+  return null
+}
+
+/** Detailed result for callers that need to distinguish a known data gap from an API failure. */
+export async function getAdAccountInsightsResult(
+  adAccountId: string,
+  accessToken: string,
+  since: string,
+  until: string,
+): Promise<MetaAccountInsightsResult> {
   const fields = [
     'spend',
     'impressions',
@@ -71,22 +96,28 @@ export async function getAdAccountInsights(
   let res: Response
   try {
     res = await fetch(url)
-  } catch (err) {
-    console.error('[meta/client] fetch error:', err)
-    return null
+  } catch {
+    return { ok: false, failure: { kind: 'network_error' } }
   }
 
   if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    console.error(`[meta/client] HTTP ${res.status}:`, body.slice(0, 300))
-    return null
+    return { ok: false, failure: { kind: 'http_error', status: res.status } }
   }
 
-  const json = await res.json() as { data?: GraphInsightsData[] }
-  const row = json.data?.[0]
-  if (!row) return null
+  let json: unknown
+  try {
+    json = await res.json()
+  } catch {
+    return { ok: false, failure: { kind: 'invalid_json' } }
+  }
+  if (!json || typeof json !== 'object') return { ok: false, failure: { kind: 'invalid_json' } }
+  const data = (json as { data?: unknown }).data
+  if (data === undefined) return { ok: false, failure: { kind: 'empty_data' } }
+  if (!Array.isArray(data)) return { ok: false, failure: { kind: 'invalid_json' } }
+  const row = data[0] as GraphInsightsData | undefined
+  if (!row) return { ok: false, failure: { kind: 'empty_data' } }
 
-  return parseInsights(row)
+  return { ok: true, insights: parseInsights(row) }
 }
 
 export function parseInsights(row: GraphInsightsData): MetaAdsInsights {

@@ -15,9 +15,11 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   computeD3AutoPauseIdempotencyKey,
   processD3Hit,
+  verifyAdsetOwnership,
   createD3AutoPauseFunction,
   ADS_DIAGNOSTICS_COMPLETED_EVENT,
   type D3AutoPauseDeps,
+  type AdsetOwnershipCheck,
 } from '../ads-d3-auto-pause'
 import type { AdStrategyConfig } from '@/lib/ads-strategy/config'
 import type { Diagnosis } from '@/lib/ads-strategy/portfolio/diagnostics/types'
@@ -100,6 +102,7 @@ function makeDeps(overrides: Partial<D3AutoPauseDeps> = {}, existingRows: Row[] 
     loadConfig: vi.fn(async () => makeConfig()),
     loadDiagnosisRun: vi.fn(async () => null),
     isSharedAccount: vi.fn(async () => false),
+    verifyAdsetOwnership: vi.fn(async (): Promise<AdsetOwnershipCheck> => ({ owned: true, adsChecked: 2, clientPageId: 'page-own' })),
     submitCandidate: vi.fn(async (): Promise<SubmitAdsAutoPauseResult> => ({
       ok: true, outcome: 'pending_approval', runId: 'run-1', authorizationDecisionId: 'dec-1',
     })),
@@ -222,6 +225,152 @@ describe('processD3Hit', () => {
     await expect(
       processD3Hit(deps, { ...baseArgs, diagnosis: makeD3Diagnosis(), config: makeConfig({ autopilot_dry_run: true }) }),
     ).rejects.toThrow(/写 flywheel_actions 失败/)
+  })
+})
+
+describe('processD3Hit —— 归属闸（第二道防线，2026-09-27）', () => {
+  const baseArgs = { clientId: 'client-1', insightDate: '2026-09-21', diagnosisRunId: 'narrative-1' }
+
+  it('🔴 广告组挂别的主页 → 记 blocked，dry-run 也不记「会提交」，绝不提交 Kernel', async () => {
+    const submitCandidate = vi.fn()
+    const { supabase, inserted } = makeFakeFlywheelSupabase()
+    const verifyAdsetOwnership = vi.fn(async (): Promise<AdsetOwnershipCheck> => ({ owned: false, verdict: 'other_page', detail: '挂在别的主页' }))
+    const deps = makeDeps({ supabase, submitCandidate, verifyAdsetOwnership })
+    const result = await processD3Hit(deps, { ...baseArgs, diagnosis: makeD3Diagnosis(), config: makeConfig({ autopilot_dry_run: true }) })
+    expect(result.outcome).toBe('skipped_not_client_owned')
+    expect(verifyAdsetOwnership).toHaveBeenCalledWith('client-1', '123456', 'adset-1')
+    expect(submitCandidate).not.toHaveBeenCalled()
+    expect(inserted).toHaveLength(1)
+    expect(inserted[0].payload).toMatchObject({ status: 'blocked', ownership_verdict: 'other_page' })
+  })
+
+  it('dry_run=false 也一样拦：Kernel 一次都不调', async () => {
+    const submitCandidate = vi.fn()
+    const dryOffConfig = makeConfig({ autopilot_dry_run: false })
+    const deps = makeDeps({
+      submitCandidate, loadConfig: vi.fn(async () => dryOffConfig),
+      verifyAdsetOwnership: vi.fn(async (): Promise<AdsetOwnershipCheck> => ({ owned: false, verdict: 'client_page_unknown', detail: '没登记主页' })),
+    })
+    const result = await processD3Hit(deps, { ...baseArgs, diagnosis: makeD3Diagnosis(), config: dryOffConfig })
+    expect(result.outcome).toBe('skipped_not_client_owned')
+    expect(submitCandidate).not.toHaveBeenCalled()
+  })
+
+  it('系统没法核实（读失败 / 快照没抓全）→ 记 failed，不记 blocked', async () => {
+    for (const verdict of ['read_failed', 'capture_stale'] as const) {
+      const { supabase, inserted } = makeFakeFlywheelSupabase()
+      const deps = makeDeps({ supabase, verifyAdsetOwnership: vi.fn(async (): Promise<AdsetOwnershipCheck> => ({ owned: false, verdict, detail: 'x' })) })
+      const result = await processD3Hit(deps, { ...baseArgs, diagnosis: makeD3Diagnosis(), config: makeConfig() })
+      expect(result.outcome).toBe('skipped_not_client_owned')
+      expect(inserted[0].payload).toMatchObject({ status: 'failed', ownership_verdict: verdict })
+    }
+  })
+
+  it('核实通过 → 归属依据写进记账和 Kernel 证据（批准的人看得见）', async () => {
+    const submitCandidate = vi.fn(async (): Promise<SubmitAdsAutoPauseResult> => ({
+      ok: true, outcome: 'pending_approval', runId: 'run-1', authorizationDecisionId: 'dec-1',
+    }))
+    const { supabase, inserted } = makeFakeFlywheelSupabase()
+    const dryOffConfig = makeConfig({ autopilot_dry_run: false })
+    const deps = makeDeps({ supabase, submitCandidate, loadConfig: vi.fn(async () => dryOffConfig) })
+    await processD3Hit(deps, { ...baseArgs, diagnosis: makeD3Diagnosis(), config: dryOffConfig })
+    const own = { verdict: 'own', ads_checked: 2, client_page_id: 'page-own' }
+    expect(inserted[0].payload).toMatchObject({ ownership: own })
+    expect(submitCandidate).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ evidence: expect.objectContaining({ ownership: own }) }))
+  })
+
+  it('同一天已记过拦截 → 当天不重判（偏保守，补登主页后第二天才会重新判）', async () => {
+    const key = computeD3AutoPauseIdempotencyKey({ clientId: 'client-1', diagnosisCode: 'D3', entityId: 'adset-1', insightDate: '2026-09-21' })
+    const verifyAdsetOwnership = vi.fn()
+    const deps = makeDeps({ verifyAdsetOwnership }, [
+      { id: 'x', client_id: 'client-1', flywheel: 'ads', action_type: 'ads.auto_pause_on_d3', payload: { idempotency_key: key, status: 'blocked' } },
+    ])
+    const result = await processD3Hit(deps, { ...baseArgs, diagnosis: makeD3Diagnosis(), config: makeConfig() })
+    expect(result.outcome).toBe('skipped_already_recorded')
+    expect(verifyAdsetOwnership).not.toHaveBeenCalled()
+  })
+})
+
+describe('verifyAdsetOwnership —— 回库核实', () => {
+  const NOW = new Date('2026-09-27T00:00:00Z')
+  interface Tables {
+    page?: string | null
+    capture?: { complete: boolean; captured_at: string } | null
+    ads?: Array<{ entity_id: string; creative_page_id: string | null; capture_reason: string }>
+    fail?: 'clients' | 'ad_snapshot_captures' | 'ad_entity_snapshots'
+  }
+  /** 按表建模：clients / ad_snapshot_captures / ad_entity_snapshots，其余表抛错。 */
+  function fake(t: Tables): SupabaseClient {
+    const from = (table: string) => {
+      const err = t.fail === table ? { message: `${table} down` } : null
+      const b: Record<string, unknown> = {}
+      let from0 = 0
+      let to0 = Infinity
+      for (const m of ['select', 'eq', 'gte', 'order', 'limit']) b[m] = () => b
+      b.range = (a: number, z: number) => { from0 = a; to0 = z; return b }
+      if (table === 'clients') b.maybeSingle = async () => ({ data: err ? null : { facebook_page_id: t.page ?? null }, error: err })
+      else if (table === 'ad_snapshot_captures') b.maybeSingle = async () => ({ data: err ? null : t.capture ?? null, error: err })
+      else if (table === 'ad_entity_snapshots') b.then = (res: (v: unknown) => unknown) => res({ data: err ? null : (t.ads ?? []).slice(from0, to0 + 1), error: err })
+      else throw new Error(`fake supabase: 表 '${table}' 没建模`)
+      return b
+    }
+    return { from } as unknown as SupabaseClient
+  }
+  const fresh = { complete: true, captured_at: '2026-09-26T21:00:00Z' }
+  const verify = (t: Tables) => verifyAdsetOwnership(fake(t), 'client-1', 'act_1', 'adset-1', NOW)
+
+  it('名下广告每一行都挂客户主页 → owned，带广告条数', async () => {
+    const r = await verify({ page: '99999999', capture: fresh, ads: [
+      { entity_id: 'a1', creative_page_id: '99999999', capture_reason: 'daily' },
+      { entity_id: 'a1', creative_page_id: '99999999', capture_reason: 'changed' },
+      { entity_id: 'a2', creative_page_id: '99999999', capture_reason: 'daily' },
+    ] })
+    expect(r).toEqual({ owned: true, adsChecked: 2, clientPageId: '99999999' })
+  })
+
+  it('🔴 广告换过主页（旧行挂别家）→ mixed_pages，不放行', async () => {
+    const r = await verify({ page: '99999999', capture: fresh, ads: [
+      { entity_id: 'a1', creative_page_id: '99999999', capture_reason: 'changed' },
+      { entity_id: 'a1', creative_page_id: '11111111', capture_reason: 'daily' },
+    ] })
+    expect(r).toMatchObject({ owned: false, verdict: 'mixed_pages' })
+  })
+
+  it('全挂别家 → other_page；一条广告都没有 → page_unknown；「消失」行不算数', async () => {
+    expect(await verify({ page: '99999999', capture: fresh, ads: [{ entity_id: 'a1', creative_page_id: '11111111', capture_reason: 'daily' }] }))
+      .toMatchObject({ owned: false, verdict: 'other_page' })
+    expect(await verify({ page: '99999999', capture: fresh, ads: [{ entity_id: 'a1', creative_page_id: '99999999', capture_reason: 'disappeared' }] }))
+      .toMatchObject({ owned: false, verdict: 'page_unknown' })
+  })
+
+  it('客户没登记主页 → client_page_unknown', async () => {
+    expect(await verify({ page: null, capture: fresh })).toMatchObject({ owned: false, verdict: 'client_page_unknown' })
+  })
+
+  it('广告层快照最近一轮没抓全 / 超过 24 小时 / 找不到 → capture_stale（看不到新加进组的别家广告）', async () => {
+    const ads = [{ entity_id: 'a1', creative_page_id: '99999999', capture_reason: 'daily' }]
+    expect(await verify({ page: '99999999', capture: { complete: false, captured_at: '2026-09-26T21:00:00Z' }, ads })).toMatchObject({ verdict: 'capture_stale' })
+    expect(await verify({ page: '99999999', capture: { complete: true, captured_at: '2026-09-25T00:00:00Z' }, ads })).toMatchObject({ verdict: 'capture_stale' })
+    expect(await verify({ page: '99999999', capture: null, ads })).toMatchObject({ verdict: 'capture_stale' })
+  })
+
+  it('大广告组分页读完：第二页里的别家主页行照样判出来（不因为读满一页就放行或永远判不了）', async () => {
+    const own = Array.from({ length: 1500 }, (_, i) => ({ entity_id: `a${i % 30}`, creative_page_id: '99999999', capture_reason: 'daily' }))
+    expect(await verify({ page: '99999999', capture: fresh, ads: own })).toMatchObject({ owned: true, adsChecked: 30 })
+    const olderOther = [...own, { entity_id: 'a0', creative_page_id: '11111111', capture_reason: 'daily' }]
+    expect(await verify({ page: '99999999', capture: fresh, ads: olderOther })).toMatchObject({ owned: false, verdict: 'mixed_pages' })
+  })
+
+  it('🔴 读满 10 页（可能截断、更老的别家行没读到）→ read_failed，不放行（魏征第二轮）', async () => {
+    const ads = Array.from({ length: 10_000 }, (_, i) => ({ entity_id: `a${i % 3}`, creative_page_id: '99999999', capture_reason: 'daily' }))
+    expect(await verify({ page: '99999999', capture: fresh, ads })).toMatchObject({ owned: false, verdict: 'read_failed', detail: expect.stringContaining('可能没读全') })
+    expect(await verify({ page: '99999999', capture: fresh, ads: ads.slice(1) })).toMatchObject({ owned: true })
+  })
+
+  it('任何一张表读失败 → read_failed', async () => {
+    for (const fail of ['clients', 'ad_snapshot_captures', 'ad_entity_snapshots'] as const) {
+      expect(await verify({ page: '99999999', capture: fresh, ads: [], fail })).toMatchObject({ owned: false, verdict: 'read_failed' })
+    }
   })
 })
 

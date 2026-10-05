@@ -11,6 +11,7 @@ export type RuleCardsData = {
   promise: string
   bodyReplaced: boolean
   cards: RuleCardData[]
+  footer?: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -35,12 +36,14 @@ export function ruleCardsOf(evidence: unknown): RuleCardsData | null {
   if (typeof raw.bodyReplaced !== 'boolean') return null
   if (!Array.isArray(raw.cards) || raw.cards.length < 1) return null
   if (!raw.cards.every(isRuleCard)) return null
+  if (raw.footer !== undefined && typeof raw.footer !== 'string') return null
   return {
     title: raw.title,
     intro: raw.intro,
     promise: raw.promise,
     bodyReplaced: raw.bodyReplaced,
     cards: raw.cards,
+    footer: raw.footer,
   }
 }
 
@@ -59,7 +62,7 @@ export default function RuleCards({ data }: { data: RuleCardsData }) {
   return <section aria-label={data.title} className="min-w-0 space-y-3 rounded-xl border border-slate-200 bg-slate-100/70 p-4" data-testid="rule-cards">
     <h3 className="text-base font-semibold text-slate-950">{data.title}</h3>
     <p className="text-[15px] leading-7 text-slate-800">{data.intro}</p>
-    <p className="text-[15px] leading-7 text-slate-700">{data.promise}</p>
+    {data.promise !== '' && <p className="text-[15px] leading-7 text-slate-700">{data.promise}</p>}
     <div className="space-y-3">
       {visible.map((card, index) => <RuleCard key={`${index}-${card.adLabel}`} card={card} />)}
     </div>
@@ -69,5 +72,6 @@ export default function RuleCards({ data }: { data: RuleCardsData }) {
         {rest.map((card, index) => <RuleCard key={`${index + 5}-${card.adLabel}`} card={card} />)}
       </div>
     </details>}
+    {data.footer !== undefined && data.footer !== '' && <p className="text-[15px] leading-7 text-slate-700">{data.footer}</p>}
   </section>
 }

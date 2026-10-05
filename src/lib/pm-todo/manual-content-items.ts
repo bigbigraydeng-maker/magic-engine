@@ -4,7 +4,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-item-types'
-import { judgeWorkerPresence, judgeQueueByClient } from '@/lib/factory/worker-presence'
+import { judgeWorkerPresence, judgeQueueByClient, latestAliveAt } from '@/lib/factory/worker-presence'
 import { containsPriceClaim } from '@/lib/content/price-claim'
 import { judgeOutgoingPost } from '@/lib/content/price-claim-gate'
 import { SOURCE_LABELS } from '@/lib/assets/provenance'
@@ -84,7 +84,8 @@ export async function pushCreatomateRenderItems(
     const clientName = clientNames.get(row.client_id)?.name ?? '未知客户'
     const creditsOut = /402|insufficient|credit/i.test(row.error ?? '')
     items.push({
-      kind: 'creatomate_render_failed',
+      // 额度用完只有人能充值；别的做片失败是我们要查的（今日待办按 kind 分车道）
+      kind: creditsOut ? 'creatomate_render_failed' : 'creatomate_render_error',
       client_id: row.client_id,
       client_name: clientName,
       what: creditsOut
@@ -213,6 +214,14 @@ export async function pushFactoryWorkerItems(
 
   // 心跳按客户查 —— 判定层解释了为什么不能用全局最新的（judgeQueueByClient 头注）。
   const clientIds = Array.from(new Set(queued.map((q) => q.client_id)))
+  // 空闲时的存活信号（worker 空闲时每 ~4 分钟、干活时跟着工单心跳 ping 一次，复用 cron_run_logs，一台 worker 一行）。
+  const { data: aliveData, error: aliveError } = await supabase
+    .from('cron_run_logs')
+    .select('started_at, summary')
+    .eq('job_name', 'factory-worker-alive')
+  if (aliveError) throw new Error(`factory alive-ping query failed: ${aliveError.message}`)
+  const pings = (aliveData ?? []) as Array<{ started_at: string; summary: { client_ids?: string[] | null } | null }>
+
   const latestHbByClient = new Map<string, string>()
   for (const clientId of clientIds) {
     // A busy client's history must not crowd another client's latest heartbeat out of a global limit.
@@ -225,7 +234,8 @@ export async function pushFactoryWorkerItems(
       .limit(1)
     if (hbError) throw new Error(`factory heartbeat query failed: ${hbError.message}`)
     const latest = (hbRows ?? [])[0] as { heartbeat_at: string } | undefined
-    if (latest) latestHbByClient.set(clientId, latest.heartbeat_at)
+    const alive = latestAliveAt(latest?.heartbeat_at, pings, clientId)
+    if (alive) latestHbByClient.set(clientId, alive)
   }
 
   // 一个客户一条：不同客户的 worker 在线状态是独立的，合成一条会把两种
@@ -282,7 +292,8 @@ function pushOneFactoryWorkerItem(
         ? `。另外这些工单上次失败过，系统报的原因是：「${verdict.sampleReason}」`
         : ''),
     how:
-      '在那台 Mac 上跑 `node scripts/factory-worker/worker.mjs --loop`，它会自己把排队的活领走。' +
+      '在那台 Mac 的终端里，已装开机自启的话跑 `launchctl kickstart -k gui/$(id -u)/com.magicengine.factory-worker`（把它重启）；' +
+      '没装的话跑 `node scripts/factory-worker/worker.mjs --loop`。起来之后它会自己把排队的活领走，这条待办也会自己消失。如果那台 Mac 只是合盖睡着了，唤醒它就行。' +
       (verdict.sampleReason
         ? '开机之后如果这些工单还是过不去，就是上面那条原因（写着余额不足就去充值），回我一句我来查。'
         : '') +

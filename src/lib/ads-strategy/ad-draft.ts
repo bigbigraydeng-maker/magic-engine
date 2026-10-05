@@ -18,15 +18,44 @@
  */
 
 import type { PlayKey } from './play-vocabulary'
+import { dominantScript } from './launch-readback'
 
-/** 目前 ME 会发的两种广告。要加第三种，先在 PLAY_CATALOG 里有对应打法。 */
-export type DraftKind = 'lead_form' | 'video_thruplay'
+/** 目前 ME 会发的三种广告。要加第四种，先在 PLAY_CATALOG 里有对应打法。 */
+export type DraftKind = 'lead_form' | 'video_thruplay' | 'messenger_conversation'
 
 /** 打法 → 这个草案要走哪套 Meta 参数。两边必须对得上，别各自加。 */
 export const DRAFT_PLAY: Readonly<Record<DraftKind, PlayKey>> = {
   lead_form: 'lead_form_harvest',
   video_thruplay: 'thruplay_pool_build',
+  messenger_conversation: 'messenger_direct',
 }
+
+export function isKnownDraftKind(k: unknown): k is DraftKind {
+  return typeof k === 'string' && Object.prototype.hasOwnProperty.call(DRAFT_PLAY, k)
+}
+
+/**
+ * ME 的「开」按钮允许开哪些类型 —— **白名单**。
+ *
+ * 私信广告不在里面：它一开就是真花钱、真产生对话，而「开」之前该有的 PM 授权、
+ * 每日总预算检查、紧急开关还没做（检查报告第 2 步）。第 2 步上线时把它加进来。
+ * 用白名单而不是「私信类型除外」的黑名单：账本里 `kind` 缺失或写了陌生值的旧记录，
+ * 黑名单会放行，白名单会拒。
+ */
+export const APPROVABLE_KINDS: ReadonlySet<DraftKind> = new Set<DraftKind>([
+  'lead_form',
+  'video_thruplay',
+])
+
+export function isApprovableKind(k: unknown): boolean {
+  return isKnownDraftKind(k) && APPROVABLE_KINDS.has(k)
+}
+
+/**
+ * 私信广告的按钮类型。单独一个常量：D13 实测过审的是 GET_QUOTE，MESSAGE_PAGE +
+ * 接口建 在本仓还没有实测记录；当场试跑第一步就验它，被 Meta 拒就改这一处。
+ */
+export const MESSENGER_CTA_TYPE = 'MESSAGE_PAGE'
 
 export interface AdDraftCreative {
   /** 广告名 —— 只给内部人看。 */
@@ -43,8 +72,18 @@ export interface AdDraftCreative {
    */
   imageHash?: string
   videoId?: string
-  /** 视频封面。Meta 建视频广告时必给，没有就用视频首帧（由 publisher 处理）。 */
+  /**
+   * 视频封面。Meta 的 `video_data` 要求给封面。**没有「缺了就用首帧」这回事** ——
+   * publisher 只在给了值时才传。私信类型缺封面直接被 `validateDraft` 拒。
+   * 两个都给时以 `thumbnailImageHash` 为准（链接可能是会过期的签名链接）。
+   */
   thumbnailUrl?: string
+  thumbnailImageHash?: string
+  /**
+   * 这条创意的文案是什么语言（如 `en` / `zh`）。私信类型必填，且同一组必须一致 ——
+   * 光靠文字体系判不出「英文 vs 毛利语 / 越南语」（都是拉丁字母）。
+   */
+  language?: string
 }
 
 export interface AdDraft {
@@ -80,6 +119,9 @@ export const MAX_AUTO_DAILY_BUDGET = 50
 /** 一次最多跑多久 —— 再长的投放应该是续，不是一次性下注。 */
 export const MAX_DURATION_DAYS = 30
 
+/** 私信组里最多几条创意：写操作次数和等转码的总时间都随它涨，要有顶。 */
+export const MAX_MESSENGER_CREATIVES = 4
+
 export interface DraftProblem {
   field: string
   message: string
@@ -92,6 +134,32 @@ export interface DraftProblem {
  * 买家会看到什么、Meta 会自动加什么，一律等建完回读 —— 那些在这里查不出来。
  */
 export function validateDraft(d: AdDraft): DraftProblem[] {
+  // 请求体是 `body as AdDraft`，形状没人保证过 —— 先挡住会让后面直接抛 500（且不留账）的输入。
+  if (!isKnownDraftKind(d.kind)) {
+    return [{ field: 'kind', message: `不认识的广告类型：${String(d.kind)}` }]
+  }
+  if (!Array.isArray(d.creatives) || d.creatives.some((c) => !isCreativeShape(c))) {
+    return [{ field: 'creatives', message: '广告文案格式不对（每条都要有文字的正文和标题）' }]
+  }
+  return [
+    ...validateCommon(d),
+    ...(d.kind === 'messenger_conversation' ? validateMessenger(d) : []),
+  ]
+}
+
+const OPTIONAL_TEXT_FIELDS = [
+  'description', 'videoId', 'imageHash', 'thumbnailUrl', 'thumbnailImageHash', 'language',
+] as const
+
+/** 请求体里每条创意：正文和标题必须是字符串，其余字段有就必须是字符串（数字会让后面的 `.trim()` 抛 500）。 */
+function isCreativeShape(c: unknown): boolean {
+  if (typeof c !== 'object' || c === null) return false
+  const o = c as Record<string, unknown>
+  if (typeof o.primaryText !== 'string' || typeof o.headline !== 'string') return false
+  return OPTIONAL_TEXT_FIELDS.every((k) => o[k] === undefined || typeof o[k] === 'string')
+}
+
+function validateCommon(d: AdDraft): DraftProblem[] {
   const p: DraftProblem[] = []
 
   if (!d.clientId) p.push({ field: 'clientId', message: '没说是哪个客户' })
@@ -122,7 +190,7 @@ export function validateDraft(d: AdDraft): DraftProblem[] {
   d.creatives.forEach((c, i) => {
     if (!c.primaryText.trim()) p.push({ field: `creatives[${i}].primaryText`, message: '正文是空的' })
     if (!c.headline.trim()) p.push({ field: `creatives[${i}].headline`, message: '标题是空的' })
-    if (d.kind === 'video_thruplay' && !c.videoId) {
+    if ((d.kind === 'video_thruplay' || d.kind === 'messenger_conversation') && !c.videoId) {
       p.push({ field: `creatives[${i}].videoId`, message: '视频广告没给视频' })
     }
     if (d.kind === 'lead_form' && !c.imageHash && !c.videoId) {
@@ -144,6 +212,54 @@ export function validateDraft(d: AdDraft): DraftProblem[] {
   return p
 }
 
+const HTTPS_URL = /^https:\/\/\S+$/i
+/** 语言代码：两位小写字母（ISO 639-1：`en` / `zh` / `mi`）。三位的 `eng` 和 `en` 会被当成两种语言，所以不收。 */
+const LANG_CODE = /^[a-z]{2}$/
+
+/** `en-NZ` / `en_AU` → `en`；不像语言代码的返回 null。 */
+function primaryLanguage(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const primary = raw.trim().toLowerCase().split(/[-_]/)[0]
+  return LANG_CODE.test(primary) ? primary : null
+}
+
+/** 私信类型独有的、建之前就能判的错。通用部分已在 `validateCommon` 查过。 */
+function validateMessenger(d: AdDraft): DraftProblem[] {
+  const p: DraftProblem[] = []
+  if (d.creatives.length > MAX_MESSENGER_CREATIVES) {
+    p.push({ field: 'creatives', message: `私信组最多 ${MAX_MESSENGER_CREATIVES} 条创意` })
+  }
+
+  d.creatives.forEach((c, i) => {
+    const hasThumb = !!c.thumbnailImageHash || (!!c.thumbnailUrl && HTTPS_URL.test(c.thumbnailUrl))
+    if (!hasThumb) {
+      p.push({
+        field: `creatives[${i}].thumbnail`,
+        message: '视频广告没有封面（要 thumbnailImageHash，或 https 开头的 thumbnailUrl）',
+      })
+    }
+  })
+
+  // 一语言一组：自报的语言必须是代码、且全组一致。
+  const langs = d.creatives.map((c) => primaryLanguage(c.language))
+  if (langs.some((l) => l === null)) {
+    p.push({ field: 'creatives.language', message: '每条创意都要写两位语言代码（如 en / zh / mi），不能留空，也不能写成 English / eng' })
+  } else if (new Set(langs).size > 1) {
+    p.push({ field: 'creatives.language', message: `同一个私信广告组只能一种语言，现在有：${[...new Set(langs)].join(' / ')}` })
+  }
+
+  // 第二道：文字体系。自报可以说谎，字不会。
+  const scripts = new Set(
+    d.creatives
+      .map((c) => dominantScript([c.primaryText, c.headline, c.description ?? '']))
+      .filter((s) => s !== null),
+  )
+  if (scripts.size > 1) {
+    p.push({ field: 'creatives.script', message: `文案里混着 ${scripts.size} 种文字体系（${[...scripts].join(' / ')}）—— Meta 的自动问候语会照抄每条创意的语言` })
+  }
+  return p
+}
+
 /** Meta 的 objective / optimization_goal / destination_type 三件套，按草案类型定死。 */
 export interface MetaObjectiveTriplet {
   objective: string
@@ -158,29 +274,47 @@ export interface MetaObjectiveTriplet {
  * 写死不给调：这三个字段配错就是「名字叫留资、实际在买曝光」那类问题，
  * 而它在数据上看起来完全正常（2026-08-04 「暖池重定向」实测就是这么坏的）。
  */
-export function metaTripletFor(kind: DraftKind): MetaObjectiveTriplet {
-  if (kind === 'lead_form') {
-    return {
-      objective: 'OUTCOME_LEADS',
-      optimizationGoal: 'LEAD_GENERATION',
-      billingEvent: 'IMPRESSIONS',
-      destinationType: 'ON_AD', // 表单开在广告里，不把人带去私信
-    }
-  }
-  return {
+const META_TRIPLET: Readonly<Record<DraftKind, MetaObjectiveTriplet>> = {
+  lead_form: {
+    objective: 'OUTCOME_LEADS',
+    optimizationGoal: 'LEAD_GENERATION',
+    billingEvent: 'IMPRESSIONS',
+    destinationType: 'ON_AD', // 表单开在广告里，不把人带去私信
+  },
+  video_thruplay: {
     objective: 'OUTCOME_AWARENESS',
     optimizationGoal: 'THRUPLAY',
     billingEvent: 'IMPRESSIONS',
     destinationType: 'ON_VIDEO',
-  }
+  },
+  messenger_conversation: {
+    objective: 'OUTCOME_ENGAGEMENT',
+    optimizationGoal: 'CONVERSATIONS',
+    billingEvent: 'IMPRESSIONS',
+    destinationType: 'MESSENGER',
+  },
+}
+
+/**
+ * 用 `Record<DraftKind, …>` 而不是 if/else 兜底：以前「不是留资就当养受众」，加第三种类型时
+ * 漏改这里不会有任何编译错误，只会静默把它建成别的东西。陌生类型直接抛 —— 调用方
+ * 应该已经被 `validateDraft` 拦住了，走到这里说明有人绕过了它。
+ */
+export function metaTripletFor(kind: DraftKind): MetaObjectiveTriplet {
+  if (!isKnownDraftKind(kind)) throw new Error(`不认识的广告类型：${String(kind)}`)
+  return META_TRIPLET[kind]
 }
 
 /** 一句话说清这条广告在做什么 —— 审批页第一行。 */
+const DRAFT_WHAT: Readonly<Record<DraftKind, string>> = {
+  lead_form: '收联系方式（填表单）',
+  video_thruplay: '养受众（让人看完视频，之后可以再投给他们）',
+  messenger_conversation: '私信开聊（让人点广告直接进 Messenger 和我们对话）',
+}
+
 export function describeDraft(d: AdDraft): string {
   const total = d.dailyBudget * d.durationDays
-  const what =
-    d.kind === 'lead_form'
-      ? '收联系方式（填表单）'
-      : '养受众（让人看完视频，之后可以再投给他们）'
+  // 这一步在 `validateDraft` 之前就会被调（账本的摘要），所以 kind 可能是请求体里的任何值。
+  const what = isKnownDraftKind(d.kind) ? DRAFT_WHAT[d.kind] : '（不认识的广告类型）'
   return `${what}，每天 $${d.dailyBudget}、跑 ${d.durationDays} 天，最多花 $${total}`
 }
