@@ -342,7 +342,7 @@ export function checkLaunch(input: LaunchReadbackInput): LaunchReadbackReport {
           '自动版位会让 Meta 把大部分钱花在手机游戏奖励视频上，完播率虚高、还会把假观众沉淀进再营销名单。' +
           '读不到版位也按没锁处理。' +
           '去广告组设置把投放位置改成手动，只勾 Facebook 和 Instagram。',
-        learnedFrom: '2026-09-20 CTS 事故：看完类视频广告留自动版位，95% 花费落在 Audience Network 手游奖励视频（PITFALLS D9）',
+        learnedFrom: '看完类视频广告留自动版位，95% 花费落在 Audience Network 手游奖励视频，完播率虚高（PITFALLS D9）',
       })
     }
   }

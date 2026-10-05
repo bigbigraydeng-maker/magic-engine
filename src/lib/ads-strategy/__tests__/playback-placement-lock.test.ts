@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { publishDraftPaused } from '@/lib/meta/ad-publisher'
 import type { AdDraft } from '@/lib/ads-strategy/ad-draft'
-import { checkLaunch, type LaunchReadbackInput } from '@/lib/ads-strategy/launch-readback'
+import { checkLaunch, renderReadback, type LaunchReadbackInput } from '@/lib/ads-strategy/launch-readback'
 import { adaptMetaAdSet, type RawMetaTargeting } from '@/lib/ads-strategy/meta-readback-adapter'
 
 const DRAFT: AdDraft = {
@@ -40,10 +40,13 @@ describe('建广告组：看完类视频必须锁版位', () => {
     expect(targetingOf().publisher_platforms).toEqual(['facebook', 'instagram'])
   })
 
-  it('留资广告不受影响 —— 版位不写，交给 Meta 默认', async () => {
-    vi.stubGlobal('fetch', mockGraph())
-    await publishDraftPaused(DRAFT, 'act_1', 'tok')
-    expect(targetingOf().publisher_platforms).toBeUndefined()
+  it('留资 / 私信广告不受影响 —— 版位不写，交给 Meta 默认', async () => {
+    for (const kind of ['lead_form', 'messenger_conversation'] as const) {
+      calls = []
+      vi.stubGlobal('fetch', mockGraph())
+      await publishDraftPaused({ ...DRAFT, kind }, 'act_1', 'tok')
+      expect(targetingOf().publisher_platforms, kind).toBeUndefined()
+    }
   })
 })
 
@@ -58,38 +61,37 @@ const input = (goal: string, platforms?: string[]): LaunchReadbackInput => ({
 const codes = (i: LaunchReadbackInput) => checkLaunch(i).findings.map((f) => f.code)
 
 describe('回读闸门：看完类视频版位', () => {
-  it('🔴 自动版位（没读到版位）→ blocker，且说清是自动版位', () => {
-    const r = checkLaunch(input('THRUPLAY'))
-    expect(r.findings.map((f) => f.code)).toContain('playback_placement_not_locked')
-    expect(r.safeToActivate).toBe(false)
-    expect(r.findings.find((f) => f.code === 'playback_placement_not_locked')!.message).toContain('自动版位')
+  const LOCK = 'playback_placement_not_locked'
+
+  it.each<[string, string[] | undefined, string]>([
+    ['THRUPLAY', undefined, '自动版位（没读到版位）'],
+    ['THRUPLAY', [], '空数组不是锁好了'],
+    ['THRUPLAY', ['facebook', 'instagram', 'audience_network'], '混进 Audience Network'],
+    ['VIDEO_VIEWS', ['facebook'], '只锁 facebook 不够，必须正好 facebook + instagram'],
+    ['THRUPLAY', ['facebook', 'facebook'], '重复项不能凑数'],
+    ['thruplay', undefined, '目标名大小写不敏感'],
+  ])('🔴 拦下：%s', (goal, platforms, label) => {
+    expect(codes(input(goal, platforms)), label).toContain(LOCK)
+    expect(checkLaunch(input(goal, platforms)).safeToActivate, label).toBe(false)
   })
 
-  it('🔴 混进 Audience Network → blocker', () => {
-    const r = checkLaunch(input('THRUPLAY', ['facebook', 'instagram', 'audience_network']))
-    expect(r.safeToActivate).toBe(false)
-    expect(r.findings.find((f) => f.code === 'playback_placement_not_locked')!.message).toContain('Audience Network')
+  it.each<[string, string[] | undefined, string]>([
+    ['THRUPLAY', ['instagram', 'facebook'], '顺序反了也算锁对'],
+    ['thruplay', ['Facebook', 'INSTAGRAM'], '大小写不敏感'],
+    ['LEAD_GENERATION', undefined, '留资目标不被要求'],
+    ['CONVERSATIONS', undefined, '私信目标不被要求'],
+    ['REACH', undefined, '其它非看完类目标不被要求'],
+  ])('放行：%s', (goal, platforms, label) => {
+    expect(codes(input(goal, platforms)), label).not.toContain(LOCK)
+    expect(checkLaunch(input(goal, platforms)).safeToActivate, label).toBe(true)
   })
 
-  it('🔴 只锁 facebook 不够 —— 必须正好 facebook + instagram', () => {
-    expect(codes(input('VIDEO_VIEWS', ['facebook']))).toContain('playback_placement_not_locked')
-  })
-
-  it('顺序反了也算锁对', () => {
-    const i = input('THRUPLAY', ['instagram', 'facebook'])
-    expect(codes(i)).not.toContain('playback_placement_not_locked')
-    expect(checkLaunch(i).safeToActivate).toBe(true)
-  })
-
-  it('非看完类目标不拿这条去要求它', () => {
-    for (const goal of ['LEAD_GENERATION', 'CONVERSATIONS']) {
-      expect(codes(input(goal)), goal).not.toContain('playback_placement_not_locked')
-      expect(checkLaunch(input(goal)).safeToActivate, goal).toBe(true)
-    }
-  })
-
-  it('🔴 空数组不是「锁好了」→ blocker', () => {
-    expect(codes(input('THRUPLAY', []))).toContain('playback_placement_not_locked')
+  it('提示里说清是自动版位 / Audience Network，且不带客户名', () => {
+    const auto = renderReadback(checkLaunch(input('THRUPLAY')))
+    const an = renderReadback(checkLaunch(input('THRUPLAY', ['facebook', 'instagram', 'audience_network'])))
+    expect(auto).toContain('自动版位')
+    expect(an).toContain('Audience Network')
+    for (const banned of ['CTS', 'Oztop', 'Roman', 'NAL']) expect(auto + an, banned).not.toContain(banned)
   })
 })
 
