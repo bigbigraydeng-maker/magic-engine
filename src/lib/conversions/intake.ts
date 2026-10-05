@@ -92,6 +92,8 @@ export type IntakeInput = {
    * 匹配键——Meta 官方文档要求原样传（不哈希），跟邮箱/电话的哈希处理不一样。
    */
   pageScopedUserId?: string | null
+  /** Facebook 即时表单的线索编号（lead id，15–17 位纯数字）。不是匹配键的"必需项"，只是让 Meta 把成交对回那条广告线索。 */
+  metaLeadId?: string | null
 }
 
 export type IntakeContext = {
@@ -117,6 +119,7 @@ export type IntakeRow = {
   source_ref: string | null
   created_by: string | null
   page_scoped_user_id: string | null
+  meta_lead_id: string | null
 }
 
 export type IntakeResult =
@@ -220,6 +223,17 @@ export function buildIntakeRow(input: IntakeInput, ctx: IntakeContext): IntakeRe
 
   const pageScopedUserId = input.pageScopedUserId?.trim() || null
 
+  // 线索编号只做增强，不是必需项：格式不对就丢掉并提示，不拦住整条记录。
+  const rawLeadId = input.metaLeadId?.trim() || ''
+  let metaLeadId: string | null = null
+  if (rawLeadId) {
+    if (/^\d{15,17}$/.test(rawLeadId)) {
+      metaLeadId = rawLeadId
+    } else {
+      warnings.push('Facebook 线索编号格式不对（应为 15–17 位纯数字），已忽略')
+    }
+  }
+
   if (!email && !phone && !pageScopedUserId) {
     errors.push(
       '至少要有邮箱、电话、或 Facebook 私信身份之一 —— 一个都没有的话，发给 Meta 100% 匹配不上',
@@ -258,6 +272,7 @@ export function buildIntakeRow(input: IntakeInput, ctx: IntakeContext): IntakeRe
       source_ref: input.sourceRef?.trim() || null,
       created_by: input.createdBy?.trim() || null,
       page_scoped_user_id: pageScopedUserId,
+      meta_lead_id: metaLeadId,
     },
   }
 }
