@@ -9,6 +9,7 @@ done_on: 2026-09-25
 done_ref: pr:2010
 verify_by: 2026-10-02
 verify_how: PR 合并后 ad_strategy_configs 表的 RLS 策略含 TO service_role；autopilot_dry_run 手动改后不被 migration 覆盖；processD3Hit 执行前重读配置
+last_checked: 2026-10-05
 ---
 代码审查发现四项问题，本次全部修复并推送：
 1. RLS 漏洞：原 migration 漏 TO service_role，anon 可读写 autopilot 开关，新建修复 migration

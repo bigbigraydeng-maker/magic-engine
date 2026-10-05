@@ -9,6 +9,7 @@ done_on: 2026-09-27
 done_ref: pr:2114
 verify_by: 2026-10-01
 verify_how: 跑 `npx tsx --env-file=<.env.local> scripts/probe-crm-stage-actor-label.ts`。判成：每一种「谁改的」都翻成人话（不含冒号、机器不带「改的」二字）、带客人原话的那些剥完开头原话还在、AI 判断带理由的比例 ≥95%。数字会涨（AI 每天在判），涨了不算问题；出现新的机器身份（形如 `ai:xxx` / `system:xxx`）会被脚本判成「系统」而不是漏出去，但该在 actors.ts 里给它一句正式翻译
+last_checked: 2026-10-05
 ---
 PM 2026-09-27 定的方向：**尽量少让人手动填写或选择，让大模型根据互动痕迹去记录、判断、给建议。**
 

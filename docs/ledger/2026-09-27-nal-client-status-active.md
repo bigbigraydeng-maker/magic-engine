@@ -9,6 +9,7 @@ done_on: 2026-09-27
 done_ref: commit:4b3e958a
 verify_by: 2026-09-29
 verify_how: 跑 `select client_status from clients where id='4ae76381-cd45-43bd-85cd-98cfd7604007'` 必须是 active。再看 NAL 有没有进那几个每周任务：`select job_name, started_at from cron_run_logs where job_name in ('keyword-snapshots-weekly','ai-tracker-weekly','site-audit-weekly','goal-current-value-refresh') order by started_at desc limit 8`，然后确认这几次运行的处理清单里含 NAL。另外查 `select current_value, current_value_fetched_at from goals where client_id='4ae76381-...' and status='active'`——不再是 null 才算真通
+last_checked: 2026-10-05
 ---
 **PM 2026-09-27 授权，已执行：`clients.client_status` 由 `prospect` 改成 `active`，1 行。** PM 原话「改 / NAL 现在也是正式客户」。
 
