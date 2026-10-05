@@ -263,6 +263,10 @@ export type ManualItemKind =
   | SimaqianItemKind
   /** Facebook 私信 / 表单留资同步连续失败（授权失效时要有主页管理员重新「连接 Meta」） */
   | FacebookSyncItemKind
+  /** 工厂把 Facebook Reel 同步到客户 Instagram(Publer)时,Publer 里的 Instagram 账号掉线 —— 只有人能去 Publer 重新连接 */
+  | 'instagram_account_disconnected'
+  /** 同步到 Instagram 自动重试都失败、已放弃 —— 要开发看原因 */
+  | 'instagram_publish_failed'
   /** Magic Bridge 全平台免费额度用到 80% 以上 —— 要不要加额度由 PM 定 */
   | 'magic_bridge_quota'
   /** Tools Lab 全站每月合计花费/次数上限用到 80% 以上（网站诊断+广告体检共用）—— 要不要加名额由 PM 定 */

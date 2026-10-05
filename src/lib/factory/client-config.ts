@@ -8,6 +8,7 @@
  *
  * 各字段的真实消费方:
  *   publish_target             → publish/publish-worker.ts resolveTarget()
+ *   instagram_target           → publish/instagram-crosspost.ts createSupabaseCrosspostStore.loadInstagramTarget()
  *   factory_goal_id            → evaluate.ts → strategist.ts pickFactoryGoal()
  *   verified_offer             → evaluate.ts(B4 客户级持久真促销)
  *   verified_cta               → evaluate.ts → recipe brief → worker 端卡(客户级已验证联系方式)
@@ -30,6 +31,7 @@ export const SUPPORTED_PLATFORMS = ['facebook'] as const
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const PAGE_ID_RE = /^\d{5,32}$/
+const PUBLER_ACCOUNT_ID_RE = /^[A-Za-z0-9_-]{8,64}$/
 const MAX_TEXT = 120
 /**
  * 必须**严格小于** worker 的段时长地板 1.0s(worker.mjs assemble 里那个 Math.max(dur, 1.0))。
@@ -66,6 +68,8 @@ export const EMPTY_CREATIVE_PROFILE: CreativeProfile = {
 
 export interface FactoryConfigView {
   publish_target: { platform: string; page_id: string } | null
+  /** Publer 里 Instagram 账号 ID;null = 不发 Instagram。 */
+  instagram_target: { publer_account_id: string } | null
   factory_goal_id: string | null
   verified_offer: { price_from: string; offer_expiry: string } | null
   /** 端卡客户事实；phone/url/departure 必须同时存在，price 可选。 */
@@ -124,6 +128,7 @@ export function projectFactoryConfig(raw: unknown): FactoryConfigView {
   return {
     // 只填一半的发布目标等于没配(resolveTarget 会 markFailed),投影成 null 让 UI 显示「缺发布目标」
     publish_target: platform && pageId ? { platform, page_id: pageId } : null,
+    instagram_target: projectInstagramTarget(cfg.instagram_target),
     factory_goal_id: typeof cfg.factory_goal_id === 'string' ? cfg.factory_goal_id : null,
     verified_offer: priceFrom
       ? { price_from: priceFrom, offer_expiry: asTrimmed(vo?.offer_expiry) ?? '' }
@@ -142,6 +147,16 @@ export function projectFactoryConfig(raw: unknown): FactoryConfigView {
     })(),
     render: projectRender(cfg.render),
   }
+}
+
+/** 库里的 instagram_target → UI 认识的形状。脏数据/只填一半一律降级 null。 */
+function projectInstagramTarget(raw: unknown): FactoryConfigView['instagram_target'] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const t = raw as Record<string, unknown>
+  if (t.platform !== 'publer' || t.publer_provider !== 'instagram') return null
+  const accountId = asTrimmed(t.publer_account_id)
+  if (!accountId || !PUBLER_ACCOUNT_ID_RE.test(accountId)) return null
+  return { publer_account_id: accountId }
 }
 
 /** 校验 Record<string,string>——脏数据(非对象/含非字符串值)一律拒绝,不半收半弃。 */
@@ -232,6 +247,19 @@ export function mergeFactoryConfig(
         return { ok: false, error: '主页 ID 必须是纯数字(不是主页网址,也不是广告账户 ID)' }
       }
       next.publish_target = { platform, page_id: pageId }
+    }
+  }
+
+  if ('instagram_target' in body) {
+    const it = body.instagram_target as Record<string, unknown> | null
+    const accountId = asTrimmed(it?.publer_account_id)
+    if (it === null || !accountId) {
+      delete next.instagram_target
+    } else {
+      if (!PUBLER_ACCOUNT_ID_RE.test(accountId)) {
+        return { ok: false, error: 'Instagram 账号 ID 格式不对(应是 Publer 里该账号的 ID,字母数字 8-64 位,不是 @用户名,也不是网址)' }
+      }
+      next.instagram_target = { platform: 'publer', publer_provider: 'instagram', publer_account_id: accountId }
     }
   }
 

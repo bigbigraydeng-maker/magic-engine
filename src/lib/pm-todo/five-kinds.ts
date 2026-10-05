@@ -102,6 +102,8 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   lead_sheet_reauth_needed: 'one_click', // 写表被 Google 判 403，重新走一次「连接 Google」
   blog_publish_channel_broken: 'one_click', // 去设置里把网站发布通道接通
   factory_worker_idle: 'one_click', // 出片机器没开机，只有人能开
+  instagram_account_disconnected: 'one_click', // Publer 里 Instagram 账号掉线，只有人能去重新连接
+  instagram_publish_failed: 'dev', // 同步 Instagram 重试都失败：开发看原因，不占 PM 的清单
   email_sync_stale: 'one_click', // 邮箱授权掉了 / 一个都没连上
   client_doc_manual_task: 'one_click', // 方案文档里的一次性人工动作；条目可用 pmKind 换一类
   // 主干合进去的代码没上线（各窗口说的「已上线」不算数）：看上线记录，催修复 PR 尽快合、或回一句

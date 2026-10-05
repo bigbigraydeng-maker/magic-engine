@@ -23,7 +23,7 @@ const CTS_LIKE = {
 describe('projectFactoryConfig — 投影', () => {
   it('空配置 → 全 null / false,不抛', () => {
     expect(projectFactoryConfig({})).toEqual({
-      publish_target: null, factory_goal_id: null, verified_offer: null, verified_cta: null,
+      publish_target: null, instagram_target: null, factory_goal_id: null, verified_offer: null, verified_cta: null,
       allow_b_track_landmark_ads: false, auto_order_enabled: false,
       creative_profile: EMPTY_CREATIVE_PROFILE,
       creative_recipe: null,
@@ -213,6 +213,68 @@ describe('mergeFactoryConfig — 发布目标校验', () => {
     const r = mergeFactoryConfig({}, { publish_target: { platform: 'publer', page_id: '123456' } })
     expect(r.ok).toBe(false)
     expect(!r.ok && r.error).toContain('facebook')
+  })
+})
+
+describe('instagram_target — Publer Instagram 目标', () => {
+  const VALID = { platform: 'publer', publer_provider: 'instagram', publer_account_id: '69e777ad78f5d69b2b030c76' }
+
+  it('合法配置 → 投影出账号 ID', () => {
+    expect(projectFactoryConfig({ instagram_target: VALID }).instagram_target).toEqual({
+      publer_account_id: '69e777ad78f5d69b2b030c76',
+    })
+  })
+
+  it('🔴 脏数据(平台/提供方不对、ID 太短、缺 ID)→ 投影 null,不半收半弃', () => {
+    expect(projectFactoryConfig({ instagram_target: { ...VALID, platform: 'facebook' } }).instagram_target).toBeNull()
+    expect(projectFactoryConfig({ instagram_target: { ...VALID, publer_provider: 'facebook' } }).instagram_target).toBeNull()
+    expect(projectFactoryConfig({ instagram_target: { ...VALID, publer_account_id: 'abc' } }).instagram_target).toBeNull()
+    expect(projectFactoryConfig({ instagram_target: { platform: 'publer', publer_provider: 'instagram' } }).instagram_target).toBeNull()
+    expect(projectFactoryConfig({ instagram_target: null }).instagram_target).toBeNull()
+  })
+
+  it('合法账号 ID → 存下(平台/提供方由代码固定)', () => {
+    const r = mergeFactoryConfig({}, { instagram_target: { publer_account_id: '69e777ad78f5d69b2b030c76' } })
+    expect(r.ok && r.config.instagram_target).toEqual(VALID)
+  })
+
+  it('传 null → 删掉该 key', () => {
+    const r = mergeFactoryConfig({ instagram_target: VALID }, { instagram_target: null })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect('instagram_target' in r.config).toBe(false)
+  })
+
+  it('账号 ID 清空 → 视同不发 Instagram,删掉该 key', () => {
+    const r = mergeFactoryConfig({ instagram_target: VALID }, { instagram_target: { publer_account_id: '   ' } })
+    expect(r.ok && 'instagram_target' in r.config).toBe(false)
+  })
+
+  it('🔴 填成 @用户名 → 拒', () => {
+    const r = mergeFactoryConfig({}, { instagram_target: { publer_account_id: '@cts_tours' } })
+    expect(r.ok).toBe(false)
+    expect(!r.ok && r.error).toContain('格式不对')
+  })
+
+  it('🔴 填成网址 → 拒', () => {
+    const r = mergeFactoryConfig({}, { instagram_target: { publer_account_id: 'https://instagram.com/cts_tours' } })
+    expect(r.ok).toBe(false)
+  })
+
+  it('改 Instagram 目标不碰其他配置', () => {
+    const r = mergeFactoryConfig(
+      { publish_target: { platform: 'facebook', page_id: '123456' }, factory_goal_id: 'ef92d878-c283-4a1c-be7d-1462c8c4a83c' },
+      { instagram_target: { publer_account_id: '69e777ad78f5d69b2b030c76' } },
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.config.publish_target).toEqual({ platform: 'facebook', page_id: '123456' })
+    expect(r.config.factory_goal_id).toBe('ef92d878-c283-4a1c-be7d-1462c8c4a83c')
+  })
+
+  it('body 未提及 instagram_target → 现有配置原样保留(合并语义)', () => {
+    const r = mergeFactoryConfig({ instagram_target: VALID }, { allow_b_track_landmark_ads: true })
+    expect(r.ok && r.config.instagram_target).toEqual(VALID)
   })
 })
 
