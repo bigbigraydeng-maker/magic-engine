@@ -18,6 +18,13 @@ export const MAX_IDEAS_PER_SEED = 300
 export const EST_COST_PER_CALL_USD = 0.01
 export const EST_COST_PER_ITEM_USD = 0.0001
 
+/**
+ * Industry default for tourism clients: phrases containing these words are
+ * travel-adjacent noise (airlines, passports, immigration portals) rather than
+ * destination demand. Callers may pass their own list instead.
+ */
+export const TRAVEL_NOISE_TOKENS: readonly string[] = ['airlines', 'airline', 'flights', 'flight', 'airfare', 'airfares', 'airport', 'passport', 'immigration', 'embassy', 'consulate', 'login']
+
 /** Seeds come from a database column: anything that is not a usable string is dropped. */
 export function pickSeeds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return []
@@ -59,7 +66,14 @@ export interface OpportunityRow {
   ownPosition: number | null
   band: RankBand
 }
-export interface ExcludedCounts { brand: number; competitorBrand: number; noVolume: number; lowVolume: number }
+export interface ExcludedCounts {
+  brand: number
+  competitorBrand: number
+  noVolume: number
+  lowVolume: number
+  offTopic: number
+  noise: number
+}
 
 export function bandOf(position: number | null): RankBand {
   if (position === null) return 'not_tracked'
@@ -75,6 +89,45 @@ export interface BuildOptions {
   competitorDomains: string[]
   /** keep only phrases with at least this monthly volume. Default 50. */
   minVolume?: number
+  /** when provided and non-empty, a phrase must contain at least one anchor as a whole token */
+  anchors?: ReadonlySet<string>
+  /** when provided, a phrase containing any of these as a whole token is dropped */
+  noiseTokens?: readonly string[]
+}
+
+/** Travel words, place-of-client words and filler that never identify a topic on their own. */
+const GENERIC_TOKENS = new Set([
+  'tours', 'tour', 'travel', 'travels', 'trip', 'trips', 'holiday', 'holidays',
+  'package', 'packages', 'guide', 'guides', 'best', 'time', 'visit', 'small',
+  'group', 'cultural', 'authentic', 'experience', 'experiences', 'specialist',
+  'specialists', 'zealand', 'zealanders', 'kiwi', 'kiwis', 'auckland', 'from',
+  'with', 'free', 'entry', 'great', 'river', 'mountain', 'mountains', 'avatar',
+  'wall', 'services', 'service', 'company', 'agency', 'deals', 'cheap', 'price',
+  'prices', 'near', 'online',
+  // "visa" is relevant only next to a destination word (china visa), so it is never an anchor by itself
+  'visa', 'visas',
+])
+
+/** Tokens of a phrase, order-insensitive, with the directional marker stripped. */
+function phraseTokens(keyword: string): string[] {
+  return tokenKey(keyword).replace(/^>/, '').split(' ').filter(Boolean)
+}
+
+/**
+ * Topic words shared by the seeds and the client's own keywords: long enough to
+ * carry meaning, not generic travel filler, not purely numeric.
+ */
+export function topicAnchors(seeds: string[], ownKeywords: string[]): Set<string> {
+  const anchors = new Set<string>()
+  for (const phrase of [...seeds, ...ownKeywords]) {
+    for (const token of phraseTokens(phrase)) {
+      if (token.length < 4) continue
+      if (GENERIC_TOKENS.has(token)) continue
+      if (/^\d+$/.test(token)) continue
+      anchors.add(token)
+    }
+  }
+  return anchors
 }
 
 interface Group {
@@ -106,6 +159,17 @@ function ownPositionsByKey(own: OwnRank[]): Map<string, number | null> {
   return map
 }
 
+/** First relevance bucket the phrase falls into, or null when it passes the gate. */
+function relevanceExclusion(
+  tokens: string[],
+  anchors: ReadonlySet<string> | undefined,
+  noiseTokens: readonly string[] | undefined,
+): 'noise' | 'offTopic' | null {
+  if (noiseTokens && tokens.some(t => noiseTokens.includes(t))) return 'noise'
+  if (anchors && anchors.size > 0 && !tokens.some(t => anchors.has(t))) return 'offTopic'
+  return null
+}
+
 export function buildOpportunityRows(
   results: SeedIdeas[],
   own: OwnRank[],
@@ -113,7 +177,7 @@ export function buildOpportunityRows(
 ): { rows: OpportunityRow[]; excluded: ExcludedCounts } {
   const minVolume = opts.minVolume ?? 50
   const competitorRoots = opts.competitorDomains.map(domainRoot)
-  const excluded: ExcludedCounts = { brand: 0, competitorBrand: 0, noVolume: 0, lowVolume: 0 }
+  const excluded: ExcludedCounts = { brand: 0, competitorBrand: 0, noVolume: 0, lowVolume: 0, offTopic: 0, noise: 0 }
   const groups = new Map<string, Group>()
 
   for (const result of results) {
@@ -124,6 +188,10 @@ export function buildOpportunityRows(
       if (isBrandedKeywordWithAliases(keyword, opts.brandRoot, opts.brandAliases)) { excluded.brand++; continue }
       if (competitorBrandMatch(keyword, competitorRoots) !== null) { excluded.competitorBrand++; continue }
       if (idea.search_volume < minVolume) { excluded.lowVolume++; continue }
+      const tokens = phraseTokens(keyword)
+      const relevance = relevanceExclusion(tokens, opts.anchors, opts.noiseTokens)
+      if (relevance === 'noise') { excluded.noise++; continue }
+      if (relevance === 'offTopic') { excluded.offTopic++; continue }
       const key = tokenKey(keyword)
       if (!key || key === '>') continue
       const candidate: OpportunityRow = {
