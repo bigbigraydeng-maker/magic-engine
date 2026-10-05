@@ -26,7 +26,7 @@ const GRAPH_BASE = 'https://graph.facebook.com/v21.0'
 
 /** 广告组回读要的字段。targeting 必须整个拿回来 —— 我们要看的正是 Meta 补的那些。 */
 const ADSET_FIELDS =
-  'id,name,optimization_goal,destination_type,effective_status,campaign_id,targeting'
+  'id,name,optimization_goal,destination_type,status,effective_status,campaign_id,targeting'
 
 /**
  * 创意里所有**买家会看到**的文字。
@@ -36,12 +36,15 @@ const ADSET_FIELDS =
  * 返回不同的子结构，点名少一个就静默丢一句买家能看到的话。
  */
 const AD_FIELDS =
-  'id,name,creative{id,object_story_spec,asset_feed_spec,body,title,effective_object_story_id}'
+  'id,name,status,creative{id,object_story_spec,asset_feed_spec,body,title,effective_object_story_id}'
+
+/** 单次请求的上限：回读卡死不能把整个建广告请求拖过平台的超时线。 */
+const READ_TIMEOUT_MS = 15_000
 
 async function graphGet(url: string, label: string): Promise<unknown | null> {
   let res: Response
   try {
-    res = await fetch(url)
+    res = await fetch(url, { signal: AbortSignal.timeout(READ_TIMEOUT_MS) })
   } catch (err) {
     console.error(`[meta/readback] ${label} fetch error:`, err)
     return null
@@ -70,6 +73,17 @@ export async function fetchAdSetReadback(
   const o = json as Record<string, unknown>
   if (typeof o.id !== 'string') return null
   return o as unknown as RawMetaAdSet
+}
+
+/** 一个广告系列配置的 status。读不到返回 null（= 查不出来，不是暂停着）。 */
+export async function fetchCampaignStatus(
+  campaignId: string,
+  accessToken: string,
+): Promise<string | null> {
+  const params = new URLSearchParams({ fields: 'status', access_token: accessToken })
+  const json = await graphGet(`${GRAPH_BASE}/${campaignId}?${params}`, `campaign ${campaignId}`)
+  const status = (json as { status?: unknown } | null)?.status
+  return typeof status === 'string' ? status : null
 }
 
 /**
@@ -226,7 +240,7 @@ export async function fetchAdCreativesReadback(
       }
     }
 
-    out.push({ adId: String(ad.id ?? ''), adName: ad.name, texts })
+    out.push({ adId: String(ad.id ?? ''), adName: ad.name, status: ad.status, texts })
   }
   return out
 }

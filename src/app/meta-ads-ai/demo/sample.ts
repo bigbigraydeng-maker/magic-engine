@@ -67,7 +67,7 @@ function dailyCampaigns(windowSince: string) {
   }))
 }
 
-function demoFindings(dataDate: string): ClientRuleFinding[] {
+function demoFindings(dataDate: string, view: 'self_serve' | 'managed'): ClientRuleFinding[] {
   const raw: RuleFinding[] = [
     {
       code: 'D10',
@@ -100,13 +100,16 @@ function demoFindings(dataDate: string): ClientRuleFinding[] {
       },
     },
   ]
-  const opts = { currency: 'NZD', dataDate, campaignFrequency: () => null }
+  const opts = { currency: 'NZD', dataDate, campaignFrequency: () => null, voice: view }
   return raw
     .map((f) => toClientFinding(f, opts))
     .filter((f): f is ClientRuleFinding => f !== null)
 }
 
-function reportSections(section: RuleSectionInput): string[] {
+function reportSections(section: RuleSectionInput, view: 'self_serve' | 'managed'): string[] {
+  const directions = view === 'self_serve'
+    ? '八、三条可以考虑的方向\n1. 私信咨询系列每位只要 NZ$10，比预约表单便宜三分之一，可以先把预算往它挪一点，再看三四天。\n2. Instagram 快拍的点击率只有 Facebook 动态的一半，可以专门做一版竖屏的图片或视频试试。\n3. 近一半花费落在 45 岁以上女性身上，但咨询大多来自 25 到 44 岁，可以把年龄范围往年轻一些调，再看一周。'
+    : '八、三条可以考虑的方向\n1. 私信咨询系列每位只要 NZ$10，比预约表单便宜三分之一，可以和团队商量往它多放一些预算。\n2. Instagram 快拍的点击率只有 Facebook 动态的一半，可以考虑专门做一版竖屏的图片或视频。\n3. 近一半花费落在 45 岁以上女性身上，但咨询大多来自 25 到 44 岁，可以把重点人群往年轻一些调。'
   return [
     '一、总体结果\n这 7 天一共花了 NZ$700，广告被看到约 42,000 次，看到的人约 15,000 位，平均每人看到接近 3 次。一共被点击 600 次，点击率约 1.4%，比前 7 天略高。30 人留下联系方式，20 人发来私信，平均每位咨询花 NZ$13，比前 7 天便宜 NZ$2。',
     '二、广告系列效率排行\n私信咨询系列每带来一位咨询只要 NZ$10，是这周效率最高的；预约表单系列花得最多（NZ$450），每位 NZ$15；短视频系列这周主要是让更多人看到，花了 NZ$50，不算咨询成本。',
@@ -115,21 +118,21 @@ function reportSections(section: RuleSectionInput): string[] {
     '五、视频表现\n看过短视频的人里，约四成看到了一半，约一成半看完了整条。开头几秒留住人的效果还可以。',
     '六、受众\n近一半花费（约 47%）落在 45 岁以上的女性身上，但留下联系方式和发私信的人大多在 25 到 44 岁之间。',
     '七、每日趋势\n每天花费比较平稳，在 NZ$95 到 NZ$110 之间；点击率每天都在 1.4% 左右，很稳定。',
-    '八、三条可以考虑的方向\n1. 私信咨询系列每位只要 NZ$10，比预约表单便宜三分之一，可以和团队商量往它多放一些预算。\n2. Instagram 快拍的点击率只有 Facebook 动态的一半，可以考虑专门做一版竖屏的图片或视频。\n3. 近一半花费落在 45 岁以上女性身上，但咨询大多来自 25 到 44 岁，可以把重点人群往年轻一些调。',
+    directions,
   ]
 }
 
-export function demoAnalysis(today: string): ReportAnalysis {
+export function demoAnalysis(today: string, view: 'self_serve' | 'managed' = 'self_serve'): ReportAnalysis {
   const windowUntil = localDayOffset(today, -1)
   const windowSince = localDayOffset(today, -7)
-  const findings = demoFindings(windowUntil)
+  const findings = demoFindings(windowUntil, view)
   const section: RuleSectionInput = {
-    source: 'patrol',
+    source: view === 'self_serve' ? 'live' : 'patrol',
     dataDate: windowUntil,
     adsChecked: 12,
     findings,
   }
-  const reportText = reportSections(section).join('\n\n')
+  const reportText = reportSections(section, view).join('\n\n')
   const { cards, report } = buildRuleCards(section, reportText, today)
   const evidence = {
     campaigns: CAMPAIGNS,

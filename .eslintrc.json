@@ -16,7 +16,8 @@
               "**/lib/cms/meta-patcher",
               "**/lib/gbp/publisher",
               "**/lib/gsc/indexing-client",
-              "**/lib/gsc/sitemap-ping"
+              "**/lib/gsc/sitemap-ping",
+              "**/lib/meta/campaign-writes"
             ],
             "message": "对外写能力只能由 src/lib/capabilities/** 调用。请提交一个 action_run，让执行内核去跑（见 src/lib/kernel/boundaries.ts）。"
           }
@@ -70,7 +71,10 @@
         "src/lib/cms/page-upgrade-pr-sync.ts",
         "src/lib/flywheel/social-post-publish.ts",
         "src/lib/luban/tools.ts",
-        "src/lib/seo-meta/cts-meta-pr.ts"
+        "src/lib/seo-meta/cts-meta-pr.ts",
+        "src/lib/inngest/functions/seo-meta-cycle.ts",
+        "src/lib/seo-meta/cycle/apply-adapter.ts",
+        "src/lib/seo-meta/cycle/pr-guard.ts"
       ],
       "rules": {
         "no-restricted-imports": "warn"

@@ -6,6 +6,7 @@
 // draft=true → DRAFT(不公开,首测验格式);false → PUBLISHED(真发,不可逆)。
 // 幂等对账(魏征 B9 防"发了没记上"重发):caption 埋零宽 wo 标记,findExisting 扫最近 Reel 描述比对。
 
+import { createHash } from 'node:crypto'
 import { getStoredPageToken } from '@/lib/meta/token-manager'
 import type { PublishAdapter, PublishTarget, PublishedRef } from '../types'
 
@@ -26,6 +27,48 @@ export function encodeIdemTag(woId: string): string {
 // 品牌名归一(去 Pty Ltd/空格/符号/大小写)用于防误发页名匹配
 function normBrand(s: string): string {
   return s.toLowerCase().replace(/pty\.?\s*ltd\.?/g, '').replace(/[^a-z0-9]/g, '')
+}
+
+function firstCommentMarker(idempotencyTag: string): string {
+  const hash = createHash('sha256').update(`reel-first-comment:${idempotencyTag}`).digest('hex').slice(0, 8)
+  return encodeIdemTag(hash)
+}
+
+async function ensurePageFirstComment(args: {
+  pageId: string
+  videoId: string
+  accessToken: string
+  idempotencyTag: string
+  message: string
+}): Promise<string> {
+  const marker = firstCommentMarker(args.idempotencyTag)
+  const params = new URLSearchParams({
+    fields: 'id,message',
+    filter: 'stream',
+    order: 'reverse_chronological',
+    limit: '100',
+    access_token: args.accessToken,
+  })
+  const read = await fetch(`${GRAPH}/${args.videoId}/comments?${params}`)
+  const existingJson = await read.json().catch(() => ({})) as { data?: Array<Record<string, unknown>> }
+  if (!read.ok || !Array.isArray(existingJson.data)) {
+    throw new Error(`读取 Reel 首评失败 ${read.status}`)
+  }
+  const existing = existingJson.data.find(comment =>
+    typeof comment.message === 'string' && comment.message.includes(marker),
+  )
+  if (existing && typeof existing.id === 'string') return existing.id
+
+  const body = new URLSearchParams({
+    message: `${args.message}${marker}`,
+    access_token: args.accessToken,
+  })
+  const created = await fetch(`${GRAPH}/${args.videoId}/comments`, { method: 'POST', body })
+  const createdJson = await created.json().catch(() => ({})) as Record<string, unknown>
+  if (!created.ok || typeof createdJson.id !== 'string') {
+    throw new Error(`发布 Reel 首评失败 ${created.status}: ${JSON.stringify(createdJson)}`)
+  }
+  return createdJson.id
 }
 
 // 取该页的 page token + 页名。
@@ -87,7 +130,7 @@ async function graphPost(path: string, params: Record<string, string>): Promise<
 export const facebookReelAdapter: PublishAdapter = {
   platform: 'facebook',
 
-  async publish({ videoUrl, caption, target, idempotencyTag, draft, onStarted }) {
+  async publish({ videoUrl, caption, firstComment, target, idempotencyTag, draft, onStarted }) {
     const { accessToken, pageId } = await resolveToken(target)
     const description = caption + encodeIdemTag(idempotencyTag)
 
@@ -117,6 +160,17 @@ export const facebookReelAdapter: PublishAdapter = {
       description,
     })
 
+    // A draft is not public, so Graph cannot accept a comment yet. Live posts
+    // receive the CTA in the first comment, using the stable work-order marker
+    // to recover safely if the worker is interrupted after the Reel is live.
+    const firstCommentId = draft || !firstComment?.trim() ? undefined : await ensurePageFirstComment({
+      pageId,
+      videoId,
+      accessToken,
+      idempotencyTag,
+      message: firstComment,
+    })
+
     // 拿 permalink(尽力,失败不阻塞——video_id 才是硬锚)
     let permalink: string | undefined
     try {
@@ -136,7 +190,14 @@ export const facebookReelAdapter: PublishAdapter = {
       permalink,
       // 盖戳:草稿 vs 正式。publish-worker 只在 PUBLISHED 时 emit 发布信号,草稿绝不通知下游。
       video_state: draft ? 'DRAFT' : 'PUBLISHED',
+      ...(firstCommentId ? { first_comment_id: firstCommentId } : {}),
     }
+  },
+
+  async ensureFirstComment({ target, videoId, idempotencyTag, message }) {
+    if (!message.trim()) throw new Error('首评内容不能为空')
+    const { accessToken, pageId } = await resolveToken(target)
+    return ensurePageFirstComment({ pageId, videoId, accessToken, idempotencyTag, message })
   },
 
   // 幂等对账:扫该页最近 Reel 的 description,命中零宽标记 = 已发,返回回执(不重发)

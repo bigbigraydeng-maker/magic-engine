@@ -44,6 +44,7 @@ export type NotComparableReason =
   | 'no_awareness_spend'  // 没有破冰花费，漏斗缺位这条无从谈起
   | 'recently_changed'    // 基线期内本广告/广告组/系列改过设置或整组断投，自身前后比不可信（§13 学习期）
   | 'client_page_unknown' // 客户没登记 Facebook 主页，分不清账户里哪些广告是这个客户的
+  | 'capture_stale'       // 广告层快照最近一轮没抓全或太旧，归属核实不到（区别于 client_page_unknown：客户是登记了主页的，是数据管线的问题）
 
 export interface DiagnosisUnit {
   level: 'account' | 'campaign' | 'adset' | 'ad'
@@ -180,6 +181,17 @@ export interface AccountInput {
    * D11 算供血花费用：被归档的供血广告窗口内花过的钱也要算上（2026-09-27 魏征）。缺省 = 只看当前在的广告。
    */
   recentAds?: EntitySnapshotRow[]
+  /**
+   * 近 35 天每条广告挂过的每个创意主页（非「消失」行去重）。归属判定用（ownership.ts）：广告换过主页，
+   * 只看最后一行会把前半段别家花的钱算给客户（2026-09-27 魏征）。缺省 = 只看当前快照 + recentAds。
+   */
+  adPageHistory?: AdPageSighting[]
+}
+
+export interface AdPageSighting {
+  entity_id: string
+  adset_id: string | null
+  creative_page_id: string | null
 }
 
 export interface DiagnosisInput {
@@ -207,7 +219,11 @@ export interface ExcludedEntity {
   level: 'campaign' | 'adset' | 'account'
   id: string
   name: string | null
-  reason: 'meta_experiment' | 'shared_account'
+  /**
+   * other_page / mixed_pages / page_unknown：按创意主页判不是（或确认不了是）这个客户的广告组/系列（ownership.ts）。
+   * capture_stale：广告层快照最近一轮没抓全或太旧，归属核实不到，整个账户降级只做账户级（Codex 2026-09-27）。
+   */
+  reason: 'meta_experiment' | 'shared_account' | 'other_page' | 'mixed_pages' | 'page_unknown' | 'capture_stale'
   detail: string
 }
 
@@ -218,8 +234,11 @@ export interface ExcludedEntity {
 export interface AdLevelCoverage {
   adAccountId: string
   ran: boolean
-  /** ok = 跑了；shared_account = 共用账户只做账户级；not_loaded = 没加载广告层数据；client_page_unknown = 客户没登记主页 */
-  reason: 'ok' | 'shared_account' | 'not_loaded' | 'client_page_unknown'
+  /**
+   * ok = 跑了；shared_account = 共用账户只做账户级；not_loaded = 没加载广告层数据；
+   * client_page_unknown = 客户没登记主页；capture_stale = 广告层快照最近一轮没抓全/太旧，归属核实不到。
+   */
+  reason: 'ok' | 'shared_account' | 'not_loaded' | 'client_page_unknown' | 'capture_stale'
   /** 跑了时：进入规则的正在投放、挂客户主页、以点击/结果为目标的广告条数 */
   adsChecked: number
 }

@@ -22,8 +22,8 @@ describe('demoAnalysis', () => {
     expect(analysis.window_until).toBe('2026-10-09')
   })
 
-  it('builds two rule cards and replaces the third section', () => {
-    const analysis = demoAnalysis(TODAY)
+  it('builds two rule cards and replaces the third section (managed view)', () => {
+    const analysis = demoAnalysis(TODAY, 'managed')
     const evidence = analysis.evidence as { rule_cards: { cards: unknown[]; bodyReplaced: boolean } }
     expect(evidence.rule_cards).not.toBeNull()
     expect(evidence.rule_cards.cards).toHaveLength(2)
@@ -62,9 +62,20 @@ describe('demoAnalysis', () => {
 
   it('does not use the stale promise wording', () => {
     // 承诺句在卡片里，不在正文（魏征：原来查正文永远会过）
-    const cards = (demoAnalysis(TODAY).evidence as { rule_cards: { promise: string } }).rule_cards
+    const cards = (demoAnalysis(TODAY, 'managed').evidence as { rule_cards: { promise: string } }).rule_cards
     expect(cards.promise).toContain('你不用动手')
     expect(cards.promise).not.toContain('原定')
+  })
+
+  it('defaults to the self-serve view: own-voice cards, no team promise, owner-sized directions', () => {
+    const analysis = demoAnalysis(TODAY)
+    const cards = (analysis.evidence as { rule_cards: { title: string; promise: string; cards: Array<{ action: string }> } }).rule_cards
+    expect(cards.title).toContain('值得你看一眼的广告')
+    expect(cards.promise).toBe('')
+    expect(cards.cards).toHaveLength(2)
+    for (const card of cards.cards) expect(card.action).not.toMatch(/告诉我们|团队|你不用动手/)
+    expect(analysis.report_markdown).toContain('可以先把预算往它挪一点')
+    expect(analysis.report_markdown).not.toContain('和团队商量')
   })
 
   it('contains no real client names or account ids', () => {
@@ -87,13 +98,20 @@ describe('demo page', () => {
     expect(screen.getByTestId('report-body')).toBeInTheDocument()
   })
 
-  it('renders the banner, heading and footer email', () => {
-    render(<DemoPage />)
-    expect(screen.getByRole('note')).toHaveTextContent('以下数字全部是虚构的样例。报告的格式和检查方法，跟签约客户看到的一模一样。')
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('示例报告：Magic Bridge 每周给你看什么')
-    expect(screen.getByRole('link', { name: 'hello@magicengine.cloud' })).toHaveAttribute(
-      'href',
-      'mailto:hello@magicengine.cloud?subject=Magic%20Bridge%20广告报告',
-    )
+  it('renders the banner, brand heading, view tabs and the sign-up button (self-serve by default)', () => {
+    render(<DemoPage searchParams={{}} />)
+    expect(screen.getByRole('note')).toHaveTextContent('以下是虚构的示例店铺，数字不是真实客户的。')
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('示例报告：体检报告长什么样')
+    expect(screen.getByRole('link', { name: '自己用，你会看到' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('link', { name: '交给我们管，你会看到' })).toHaveAttribute('href', '/meta-ads-ai/demo?view=managed')
+    expect(screen.getByRole('link', { name: '免费体检我的广告' })).toHaveAttribute('href', '/meta-ads-ai/mine')
+    expect(screen.getByRole('link', { name: 'hello@magicengine.cloud' })).toHaveAttribute('href', 'mailto:hello@magicengine.cloud?subject=Facebook%20广告体检')
+    expect(document.body.textContent).not.toContain('Magic Bridge')
+  })
+
+  it('shows the managed view when asked', () => {
+    render(<DemoPage searchParams={{ view: 'managed' }} />)
+    expect(screen.getByRole('link', { name: '交给我们管，你会看到' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByText(/交给我们代管后/)).toBeInTheDocument()
   })
 })

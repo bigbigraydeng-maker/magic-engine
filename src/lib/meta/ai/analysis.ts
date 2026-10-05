@@ -5,13 +5,16 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { AI_ENTITY_FIELDS } from '../entity-settings'
 import { graphAfter, graphRows, metaGraphGet, MetaReadError } from '../graph-read'
 import { compareMetrics, coreResultsByCampaign, normaliseInsight, previousWindow, resolveWindow, summariseCoreResults, type AdsetMeta, type CoreResultSummary, type Window } from './metrics'
-import { loadRuleFindings } from './rule-findings'
+import { liveRulesDecision, loadRuleFindings, type LiveRulesDecision } from './rule-findings'
+import { LIVE_RULES_BUDGET_MS, runLiveRules } from './live-rules'
 import { buildRuleCards } from './rule-cards'
 import { renderRuleSection, type RuleSectionInput } from '@/lib/ads-strategy/rules/client-copy'
 import { loadOutcomeConfig } from '@/lib/ads-strategy/portfolio/outcome-config'
 import type { OutcomeStep } from '@/lib/ads-strategy/portfolio/outcome-ladder'
 import { activeConnectionForPrincipal, reserveRead } from './store'
 import { requirePilotActive } from './entitlement'
+import { consumeQuota, monthStartUtc, QuotaUnavailable } from '@/lib/zhangqian/rate-limiter'
+import { TOOLS_AI_CALLS_MONTHLY_BUCKET, TOOLS_AI_CALLS_MONTHLY_CAP } from '@/lib/tools-lab/spend-cap'
 
 const BASE_FIELDS = 'account_id,campaign_id,campaign_name,ad_id,ad_name,date_start,date_stop,spend,impressions,reach,frequency,clicks,actions'
 const VIDEO_FIELDS = 'video_play_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p95_watched_actions,video_p100_watched_actions,video_thruplay_watched_actions'
@@ -94,6 +97,18 @@ async function requireSponsoredPreflight(clientId: string) {
     + Number(data.sponsored_analysis_reserve_usd) > Number(budget.data.cap_usd)) {
     throw new MetaReadError('sponsored_budget_exhausted', 429)
   }
+  // Combined backstop shared with site-check (src/lib/tools-lab/spend-cap.ts): this client's own cap
+  // above is per-client and stays authoritative — this only catches sponsored spend piling up in
+  // aggregate across every sponsored client, which nothing bounded before this. Reuses the existing
+  // (previously unwired) 'platform_quota_reached' code/copy — a whole-platform "come back next month".
+  let toolsWideAllowed: boolean
+  try {
+    toolsWideAllowed = await consumeQuota(TOOLS_AI_CALLS_MONTHLY_BUCKET, 'all', monthStartUtc(), TOOLS_AI_CALLS_MONTHLY_CAP)
+  } catch (err) {
+    if (err instanceof QuotaUnavailable) throw new MetaReadError('analysis_unavailable', 503)
+    throw err
+  }
+  if (!toolsWideAllowed) throw new MetaReadError('platform_quota_reached', 429)
 }
 
 async function requireSnapshot(clientId: string, principalId: string, grant: GrantRow, connectionVersion: string) {
@@ -271,7 +286,15 @@ async function loadEvidence(clientId: string, principalId: string, grant: GrantR
     return Number.isFinite(f) && f > 0 ? f : null
   }
   const deliveringAdIds = new Set(videos.filter(r => typeof r.ad_id === 'string' && Number(r.spend ?? 0) > 0).map(r => String(r.ad_id)))
-  const rules = await loadRuleFindings(clientId, { adAccountId: grant.ad_account_id, now: new Date(), currency, deliveringAdIds, campaignFrequency })
+  const patrol = await loadRuleFindings(clientId, { adAccountId: grant.ad_account_id, now: new Date(), currency, deliveringAdIds, campaignFrequency })
+  const decision: LiveRulesDecision = patrol.section.source === 'none' && patrol.section.reason === 'not_connected'
+    ? await liveRulesDecision(clientId) : { kind: 'patrol' }
+  const ruleSection: RuleSectionInput = decision.kind === 'live'
+    // 总时限封顶：主体读取和现场算合计不超过同一个 45 秒（魏征 2026-09-27），剩余时间为 0 时直接写「没拿到数据」
+    ? await runLiveRules({ clientId, adAccountId: grant.ad_account_id, token: connection.token, currency, timezone, windowUntil: window.until },
+      Math.max(0, Math.min(LIVE_RULES_BUDGET_MS, deadline - Date.now())))
+    : decision.kind === 'unavailable' ? { source: 'none', reason: 'live_unavailable' } : patrol.section
+  const selfServeVoice = decision.kind === 'live' || (decision.kind === 'unavailable' && decision.voice === 'self_serve')
   return { account: { id: grant.ad_account_id, currency, timezone }, current_window: window, previous_window: previous,
     coverage: { campaign_rows_read: campaigns.length, campaign_rows_sent: Math.min(campaigns.length, 20),
       note: '广告系列、视频和年龄性别明细只发送按花费排序的有限候选；结论不得外推到未列出的行。',
@@ -289,7 +312,8 @@ async function loadEvidence(clientId: string, principalId: string, grant: GrantR
       String(a.date_start).localeCompare(String(b.date_start))).slice(0, 100),
     devices: topSpend(devices, 10),
     regions: topSpend(regions, 20),
-    rule_section: rules.section }
+    rule_section: ruleSection,
+    report_voice: selfServeVoice ? 'self_serve' as const : 'managed' as const }
 }
 
 /** 环比里原来那几项是写死只认「留资」的口径，对私信广告是错的——拿掉，结果环比改看 core_results。 */
@@ -313,7 +337,19 @@ function reportSlice(evidence: Record<string, unknown>): Record<string, unknown>
   return Object.fromEntries(Object.entries(evidence).filter(([k]) => REPORT_KEYS.has(k)))
 }
 
-function systemPrompt() {
+const DIRECTION_MANAGED = '八、三条可以考虑的方向：每条一句话写清“方向 + 数据依据”，写成可以和广告团队商量的建议，不要写成让老板自己去后台操作的步骤，也不要针对某一条广告；只有证据足够时才给具体建议。'
+/** 自助客户没有广告团队：建议写成老板自己能试的一小步（设计 §8.4，魏征 S5）。 */
+const DIRECTION_SELF_SERVE = '八、三条可以考虑的方向：每条一句话写清“方向 + 数据依据”，写成老板自己可以试的一小步（例如“把预算往平均每位咨询花得少的系列挪一点，再看三四天”），不要写成一长串后台操作步骤，也不要针对某一条广告；只有证据足够时才给具体建议；改不改由老板决定。'
+
+export function systemPrompt(voice: 'managed' | 'self_serve' = 'managed') {
+  const lines = managedPromptLines()
+  if (voice === 'managed') return lines.join('\n')
+  // 自助客户：「不建议修改」会被读成不许给老板建议（板桥 5）；结尾邀请语由系统第三部分统一出一次（板桥 9）
+  return lines.map(l => (l === DIRECTION_MANAGED ? DIRECTION_SELF_SERVE : l.replace('不建议或声称已修改广告', '不声称已经修改过广告')))
+    .concat('结尾不要写“联系我们”或任何邀请的话。').join('\n')
+}
+
+function managedPromptLines(): string[] {
   return [
     '你是 Magic Engine 的广告分析师，基于只读汇总证据，给不懂广告术语的商家老板写中文分析报告。',
     '',
@@ -333,8 +369,8 @@ function systemPrompt() {
     '五、视频表现：如有视频数据，说看完四分之一、一半、四分之三和整条视频的人各占多少；数据不足就写“数据不足”。',
     '六、受众：年龄性别分布与花费分布是否匹配。',
     '七、每日趋势：如有 daily_campaigns 数据，说花费和点击率是平稳还是前高后低。',
-    '八、三条可以考虑的方向：每条一句话写清“方向 + 数据依据”，写成可以和广告团队商量的建议，不要写成让老板自己去后台操作的步骤，也不要针对某一条广告；只有证据足够时才给具体建议。',
-  ].join('\n')
+    DIRECTION_MANAGED,
+  ]
 }
 
 async function finish(clientId: string, principalId: string, jobId: string, status: string, cost: number,
@@ -440,7 +476,7 @@ async function runAnalysis(clientId: string, principalId: string, grant: GrantRo
     modelAttempted = true
     let result
     try {
-      result = await callClaudeChat({ systemPrompt: systemPrompt(), messages: [{ role: 'user', content: `以下是只读汇总证据：\n${payload}` }],
+      result = await callClaudeChat({ systemPrompt: systemPrompt(evidence.report_voice), messages: [{ role: 'user', content: `以下是只读汇总证据：\n${payload}` }],
         model: MODEL_HAIKU, maxOutputTokens: 4000, singleAttempt: true })
       knownCost = result.cost_usd
     } catch (error) {
