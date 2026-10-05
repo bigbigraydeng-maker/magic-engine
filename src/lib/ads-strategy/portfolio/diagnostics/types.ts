@@ -18,7 +18,7 @@ import type { OutcomeConfig } from '../outcome-ladder'
  * 两者形状完全相同、走同一条日报和看板管道；区别只在 code 前缀和 clientVisible 默认值。
  */
 export type DiagnosisCode =
-  | 'D1' | 'D2' | 'D3' | 'D4' | 'D5' | 'D6' | 'D7' | 'D8' | 'D9' | 'D10'
+  | 'D1' | 'D2' | 'D3' | 'D4' | 'D5' | 'D6' | 'D7' | 'D8' | 'D9' | 'D10' | 'D11'
   | 'O1' | 'O2' | 'O3' | 'O4'
 export type DiagnosisStatus = 'hit' | 'not_comparable'
 
@@ -44,6 +44,7 @@ export type NotComparableReason =
   | 'no_awareness_spend'  // 没有破冰花费，漏斗缺位这条无从谈起
   | 'recently_changed'    // 基线期内本广告/广告组/系列改过设置或整组断投，自身前后比不可信（§13 学习期）
   | 'client_page_unknown' // 客户没登记 Facebook 主页，分不清账户里哪些广告是这个客户的
+  | 'capture_stale'       // 广告层快照最近一轮没抓全或太旧，归属核实不到（区别于 client_page_unknown：客户是登记了主页的，是数据管线的问题）
 
 export interface DiagnosisUnit {
   level: 'account' | 'campaign' | 'adset' | 'ad'
@@ -122,6 +123,13 @@ export interface SettingChange {
   captured_at: string
 }
 
+/** 某个受众某次抓取时的人数下限（Meta 显示值，按百取整；≤1000 = 显示下限，判不了）。 */
+export interface AudienceCountPoint {
+  entity_id: string
+  captured_at: string
+  audience_count_lower: number | null
+}
+
 /** 某天某小时（账户时区）某广告组的花费。不入库，只在 D1 预筛命中后按需拉。 */
 export interface HourlyRow {
   adset_id: string | null
@@ -163,6 +171,27 @@ export interface AccountInput {
   adDaily?: DailyRow[]
   /** 近 35 天的设置变更（D2/D10「最近改过」闸）。缺省 = 没加载。 */
   settingChanges?: SettingChange[]
+  /**
+   * 近 35 天受众人数快照（D11 受众池断供用）：从已读的快照里抽 level='audience'、非「消失」行，不加查询。
+   * 缺省 = 没加载 → D11 不跑。
+   */
+  audienceHistory?: AudienceCountPoint[]
+  /**
+   * 近 35 天出现过的广告（每条取最后一行非「消失」快照，含后来被归档/删除的）。
+   * D11 算供血花费用：被归档的供血广告窗口内花过的钱也要算上（2026-09-27 魏征）。缺省 = 只看当前在的广告。
+   */
+  recentAds?: EntitySnapshotRow[]
+  /**
+   * 近 35 天每条广告挂过的每个创意主页（非「消失」行去重）。归属判定用（ownership.ts）：广告换过主页，
+   * 只看最后一行会把前半段别家花的钱算给客户（2026-09-27 魏征）。缺省 = 只看当前快照 + recentAds。
+   */
+  adPageHistory?: AdPageSighting[]
+}
+
+export interface AdPageSighting {
+  entity_id: string
+  adset_id: string | null
+  creative_page_id: string | null
 }
 
 export interface DiagnosisInput {
@@ -190,8 +219,28 @@ export interface ExcludedEntity {
   level: 'campaign' | 'adset' | 'account'
   id: string
   name: string | null
-  reason: 'meta_experiment' | 'shared_account'
+  /**
+   * other_page / mixed_pages / page_unknown：按创意主页判不是（或确认不了是）这个客户的广告组/系列（ownership.ts）。
+   * capture_stale：广告层快照最近一轮没抓全或太旧，归属核实不到，整个账户降级只做账户级（Codex 2026-09-27）。
+   */
+  reason: 'meta_experiment' | 'shared_account' | 'other_page' | 'mixed_pages' | 'page_unknown' | 'capture_stale'
   detail: string
+}
+
+/**
+ * 广告级规则（D2/D10）在某个广告账户上到底跑没跑。给客户看的报告据此区分「检查过、没发现」和「根本没检查」——
+ * 后者绝不能说成前者（2026-09-26 子牙/魏征 Magic Bridge 设计审）。
+ */
+export interface AdLevelCoverage {
+  adAccountId: string
+  ran: boolean
+  /**
+   * ok = 跑了；shared_account = 共用账户只做账户级；not_loaded = 没加载广告层数据；
+   * client_page_unknown = 客户没登记主页；capture_stale = 广告层快照最近一轮没抓全/太旧，归属核实不到。
+   */
+  reason: 'ok' | 'shared_account' | 'not_loaded' | 'client_page_unknown' | 'capture_stale'
+  /** 跑了时：进入规则的正在投放、挂客户主页、以点击/结果为目标的广告条数 */
+  adsChecked: number
 }
 
 export interface DiagnosisRun {
@@ -200,4 +249,5 @@ export interface DiagnosisRun {
   evaluatedAt: string
   diagnoses: Diagnosis[]
   excluded: ExcludedEntity[]
+  adLevelCoverage?: AdLevelCoverage[]
 }

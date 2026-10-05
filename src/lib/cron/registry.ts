@@ -157,6 +157,12 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
     outputTables: [
       { table: 'ad_daily_insights', freshnessHours: 26 },
       { table: 'ad_health_narratives', freshnessHours: 26 },
+      // 2026-09-25 事故：读广告配置 400 → 所有客户的诊断 / 经营状态静默跳过，
+      // 但账户级体检照写 ad_health_narratives，上面两条都是绿的。经营状态每个
+      // 有 Meta 账户的客户每天必写一行，它停了就是整条诊断链停了。
+      // 只看全表最新一行，所以只抓「所有客户一起停」；个别客户停由 summary.errors 的
+      // ad_config / ads_growth_state 兜。所有广告客户都被人手暂停时它会误报一条（子牙 / 魏征复审，可接受）。
+      { table: 'ads_growth_states', freshnessHours: 26 },
     ] },
   { service: 'industry-ai-visibility-daily', jobName: 'industry-ai-visibility-daily', schedule: '30 2 * * *', logsRuns: true },
   { service: 'job-boards-weekly', jobName: 'job-boards-weekly', schedule: '0 2 * * 1', logsRuns: true },
@@ -244,6 +250,7 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   { service: 'prospecting-sweep', jobName: 'prospecting-sweep', schedule: '*/30 * * * *', logsRuns: true },
   { service: 'reputation-snapshots-weekly', jobName: 'reputation-snapshots-weekly', schedule: '30 3 * * 1', logsRuns: true },
   { service: 'seo-patrol-daily', jobName: 'seo-patrol-daily', schedule: '0 4 * * *', logsRuns: true },
+  { service: 'seo-weekly-list', jobName: 'seo-weekly-list', schedule: '30 4 * * 1', logsRuns: true, addedAt: '2026-10-04' },
   { service: 'site-audit-cron', jobName: 'site-audit-cron', schedule: '0 2 * * *', logsRuns: true },
   { service: 'site-audit-weekly', jobName: 'site-audit-weekly', schedule: '0 1 * * 0', logsRuns: true },
   { service: 'social-comment-autoreply', jobName: 'social-comment-autoreply', schedule: '*/30 * * * *', logsRuns: true },
@@ -311,6 +318,16 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 🔴 schedule 这一列不许手抄：唯一定义在 src/lib/competitors/watch.ts 的
   //    COMPETITOR_WATCH_CRON，同目录的测试会断言两边一致。
   { service: 'inngest:cloud-competitor-watch-weekly-fanout', jobName: 'competitor-watch-weekly', schedule: '45 5 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-20' },
+  // SEO 标题自动优化：每周一的「选页→过闸→改标题」主链（2026-09-20 起在线上跑，但此前**没登记**，
+  // 也就是说它哪天因为没 Sync 而安静地不跑了，这里不会喊——「不在监控范围」和「一切正常」在告警里长得一样）。
+  // 🔴 jobName 取的是主链最后一步的收尾回执（seo-meta-cycle-step6-completed）：每个客户的每次运行
+  //    不管走到哪一步（跳过、没适配器、跑完）都会写这一条，所以它是「这一周这条链醒过」的唯一证据。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/seo-meta/cycle/roster.ts 的 META_CYCLE_CRON，同目录测试会断言一致。
+  { service: 'inngest:cloud-seo-meta-cycle-fanout', jobName: 'seo-meta-cycle-step6-completed', schedule: '30 5 * * 1', logsRuns: true, scheduler: 'inngest' },
+  // SEO 标题自动优化的「验收」：每天一次，给改满 18 天的页查目标词排名（影子期，只写 seo_meta_log）。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/seo-meta/cycle/rank-sampler.ts 的 RANK_SAMPLER_CRON。
+  // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑——这条登记就是为了把它喊出来。
+  { service: 'inngest:cloud-seo-meta-rank-sampler-fanout', jobName: 'seo-meta-rank-sampler', schedule: '20 20 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-04' },
   // 每周 AI 可见度追踪（GEO）灰度迁移。旧 Render cron `ai-tracker-weekly`（上面那条老登记）
   // 原样保留、对没开灰度开关的客户继续跑；这条新登记只覆盖开了
   // `seo_config.ai_visibility_inngest_enabled` 的客户，故意用不同的 jobName——两条链路
@@ -336,6 +353,27 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 一律不发，只写回执给今日待办拉。周期与 src/lib/inngest/functions/simaqian-reputation-weekly.ts
   // 的 SIMAQIAN_CRON 一致（同目录测试断言两边相等）。避开周五周六。
   { service: 'inngest:cloud-simaqian-reputation-weekly', jobName: 'simaqian-reputation-weekly', schedule: '0 9 * * 4', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-25' },
+  // Per-page daily Google Search Console store (item 4, PR-A): a daily 18:30 UTC fan-out sends one
+  // pull order per GSC-connected client (the last 5 days) plus up to 3 backfill months per client.
+  // Its output is the receipts table: no new receipt for 26 h means the chain did not run (for
+  // example Inngest was not re-synced after deploy) or dispatched nothing.
+  //
+  // 🔴 timestampColumn is `started_at`, NOT `finished_at`: `finished_at` is NULL while an order runs,
+  //    and the freshness prober sorts DESC, where Postgres puts NULLs first — a running or stuck
+  //    receipt would read as "table never written", a false alarm every evening. A stuck order is
+  //    still reported: its cron_run_logs row stays `running` and the stuck check catches it.
+  // 🔴 schedule must not be hand-copied: the only definition is GSC_PAGE_DAILY_CRON in
+  //    src/lib/gsc/page-daily-plan.ts, and registry.test.ts asserts they are equal.
+  { service: 'inngest:cloud-gsc-page-daily-fanout', jobName: 'gsc-page-daily', schedule: '30 18 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-26',
+    outputTables: [{ table: 'gsc_page_fetch_receipts', freshnessHours: 26, timestampColumn: 'started_at' }] },
+  // The pull orders of the same chain, under their own job name. Event-triggered: the fan-out above sends one
+  // event per order, so this runs on the fan-out's daily schedule — registered the way messenger-brief-hourly
+  // (an event consumer of a scheduled upstream) is. A separate job name keeps one client's failed order from
+  // hiding behind the next order's row, and keeps the dispatch row's own report visible.
+  // No outputTables: the receipts table is declared once, on the fan-out entry. If no client is GSC-connected,
+  // no order is sent and this entry will look overdue — the only legitimate silence.
+  // 🔴 schedule must not be hand-copied: it is the upstream fan-out's GSC_PAGE_DAILY_CRON (registry.test.ts).
+  { service: 'inngest:cloud-gsc-page-daily-pull', jobName: 'gsc-page-daily-pull', schedule: '30 18 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-26' },
 ] as const
 
 /**
@@ -385,6 +423,7 @@ export const UNSCHEDULED_CRON_ROUTES: Readonly<Record<string, string>> = {
 
   // cts-seo-optimizer 于 2026-09-20 退役（PM 拍板）：render.yaml 那条定时任务已删，
   // 换成 Inngest 原生的 cloud-seo-meta-cycle-fanout（同目录 seo-meta-cycle 的对账测试
-  // 管它）。路由文件和 startCronRun 调用留着只为回滚，本条不该再被排班。
-  'cts-seo-optimizer': '2026-09-20 退役，换成 Inngest cloud-seo-meta-cycle-fanout，路由留着只为回滚',
+  // 管它）。路由文件已在 2026-09-29（PR #2200）改成「被调用就返回 410 并记失败」，不再是回滚备用入口，
+  // 也不要再把它当回滚路径：9-28 就是这样被带回来的。本条不该再被排班。
+  'cts-seo-optimizer': '2026-09-20 退役，换成 Inngest cloud-seo-meta-cycle-fanout；路由 2026-09-29 起固定返回 410，不是回滚入口',
 }

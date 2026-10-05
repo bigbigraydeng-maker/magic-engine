@@ -43,9 +43,31 @@ export interface SyncRunRow {
   summary: { results?: SyncResultRow[] } | null
 }
 
-/** Graph 返回的授权 / 权限失效（code 190 = OAuthException）。两种写法都认：`"code":190` 和 `code=190`。 */
+/**
+ * Graph 报的这一次失败，是不是「要人重新授权」那一类。
+ *
+ * 认三个 Meta 错误码，三个都只有主页管理员重新点一次「连接 Meta」能修：
+ *   · 190 —— 令牌失效 / 过期（OAuthException）
+ *   · 200 —— 缺权限，或这个令牌对应的人在该主页上没有被批准的角色
+ *   ·  10 —— 同类的权限被拒
+ * 三种写法都认：`"code":190`、`code=190`、`(#200)`。
+ *
+ * 🔴 **为什么 200 和 10 是后补上的**（2026-09-26 当场试跑抓到）：
+ * 第一版只认 190。拿生产库真实运行记录跑一遍检测器，4 个在失败的客户里有 2 个
+ * （Roman HU、East International）报的是 `HTTP 403 code=200 (#200) Requires
+ * permission: pages_messaging`，于是被判成「不是授权问题」，卡片写的是
+ * 「这条不用你动手，回我一句我去查」—— 可我查完也只能得出「请主页管理员重新
+ * 授权」这同一个结论。等于把一件客户能自己修的事，变成一次白跑的往返。
+ * 设计复审当时判「200 不算盲区」，前提是没有客户在撞它；真实数据把这个前提推翻了。
+ */
+const META_AUTH_ERROR_CODES = [190, 200, 10] as const
+
 export function isFacebookAuthError(error: string): boolean {
-  return /code"?\s*[:=]\s*190\b/.test(error) || error.includes('OAuthException')
+  if (error.includes('OAuthException')) return true
+  return META_AUTH_ERROR_CODES.some(
+    (code) =>
+      new RegExp(`code"?\\s*[:=]\\s*${code}\\b`).test(error) || error.includes(`(#${code})`),
+  )
 }
 
 /** 「连接 Meta」按钮只在客户页的设置抽屉 platform 页签里（同 page-binding-items.ts）。 */

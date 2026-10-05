@@ -30,9 +30,11 @@ import { readPageMetrics } from '@/lib/seo/post-publish-monitor-store'
 import { persistZhugeActions } from '@/lib/zhuge/action-persister'
 import type { PriorityAction, ZhugeOutput } from '@/lib/zhuge/types'
 import { checkFactPreservation } from './fact-check'
-import { GATE_REASON, resolveGscSiteUrl, runGateForCandidate } from './gate'
+import { checkHardFactsPreserved } from './hard-fact-check'
+import { checkTitleOnTopic, GATE_REASON, resolveGscSiteUrl, runGateForCandidate } from './gate'
 import { fromGscPages, mergeCandidates, type RawGscPage } from './candidates'
 import { classifyMetaChangeOutcome } from './outcome-classifier'
+import { fetchTargetRank, type FetchTargetRankFn } from './rank-check'
 import type { MetaGenerationInput } from './ai-meta'
 import type {
   ApplyAdapter,
@@ -128,6 +130,18 @@ async function processCheckDueRow(
   return { outcome: 'regressed', manualAction: buildManualAction(`seo_meta_log:${row.id}`, meta, what, how, row.pr_url ?? undefined) }
 }
 
+export interface Step1Options {
+  /**
+   * The T+14 page-CTR before/after check is OFF by default (2026-10-04). A placebo
+   * over a window with no title changes called 41% of eligible CTS pages
+   * "improved"/"regressed" — every `regressed` here would send a human to revert a
+   * change on noise — and it writes `checked_at`, which permanently removes the row
+   * from the re-check queue. Effect verification now runs through the target-keyword
+   * rank sampler (rank-verdict.ts). Pass true only to re-run the legacy check on purpose.
+   */
+  legacyCtrCheck?: boolean
+}
+
 export async function runStep1CheckDue(
   supabase: SupabaseClient,
   adapter: ApplyAdapter,
@@ -135,8 +149,10 @@ export async function runStep1CheckDue(
   weekKey: string,
   dryRun: boolean,
   now: Date = new Date(),
+  options: Step1Options = {},
 ): Promise<Step1Result> {
   const result: Step1Result = { checked: 0, improved: 0, flat: 0, insufficientData: 0, regressed: 0, routedToManual: 0 }
+  if (!options.legacyCtrCheck) return result
 
   const cutoff = new Date(now.getTime() - CHECK_AFTER_DAYS * 86_400_000).toISOString()
   const { data, error } = await supabase
@@ -269,6 +285,19 @@ export async function runStep3Gate(
   for (const candidate of candidates) {
     if (passed.length >= config.maxPagesPerRun) break // enough good candidates found — stop spending on SERP/GSC calls for the rest of the wide pool
 
+    // PM 2026-09-23 (incident follow-up): checked FIRST, before even
+    // canEditSlug — a protected conversion page (e.g. CTS's /china-tours)
+    // must never be auto-edited, no matter what the rest of the gate or the
+    // fact-check would otherwise allow. Zero cost: no network call.
+    if (candidate.slug && config.protectedSlugs.includes(candidate.slug.toLowerCase())) {
+      failures.push({
+        candidate,
+        reason: GATE_REASON.PROTECTED_PAGE,
+        detail: `slug "${candidate.slug}" is on this client's protected conversion-page list (clients.seo_config.meta_cycle_protected_slugs) — meta-cycle never touches it automatically, regardless of gate/fact-check outcome`,
+      })
+      continue
+    }
+
     // PM 2026-09-20 (data-completeness follow-up): check this FIRST, before
     // any GSC/DataForSEO/SERP spend — a page with no matching editable data
     // file (e.g. forbidden-city-travel-guide) used to only be discovered in
@@ -310,6 +339,9 @@ export interface MetaCycleProposal {
   applied: boolean
   prUrl?: string
   skipReason?: string
+  /** Target-keyword rank recorded just before the change was applied (rank verification baseline). */
+  baselineRankStatus?: string
+  baselineRankGroup?: number | null
 }
 
 export interface Step4Result {
@@ -333,6 +365,7 @@ async function applyOnePrescription(
   evidence: MetaCycleGateEvidence,
   generateMeta: GenerateMetaFn,
   dryRun: boolean,
+  fetchRank: FetchTargetRankFn,
 ): Promise<{ proposal: MetaCycleProposal | null; manualAction: PriorityAction | null }> {
   if (!candidate.pageUrl || !candidate.slug) return { proposal: null, manualAction: null }
 
@@ -374,7 +407,32 @@ async function applyOnePrescription(
     }
   }
 
-  const factCheck = await checkFactPreservation(preview.oldTitle, preview.oldDesc, newTitle, newDesc)
+  // 2026-09-28 incident follow-up: checked BEFORE the hard fact-check —
+  // neither that check nor the AI judge verify the new copy is even about
+  // the same page (chongqing-night-city-lights got a title about "The
+  // Forbidden City", which drops/adds no price/date/place-name the hard
+  // check watches for). Zero cost, no network call.
+  const topicCheck = checkTitleOnTopic(candidate.slug, newTitle, newDesc)
+  if (!topicCheck.onTopic) {
+    return {
+      proposal: { slug: candidate.slug, pageUrl: candidate.pageUrl, keyword: evidence.keyword, searchVolume: evidence.searchVolume, keywordDifficulty: evidence.keywordDifficulty, snapshotDate: evidence.snapshotDate, keywordDataSource: evidence.keywordDataSource, keywordDataLocation: evidence.keywordDataLocation, keywordDataNote: evidence.keywordDataNote, competitorTitles: evidence.competitorTitles, ctsRankingUrl: evidence.ctsRankingUrl, chosenReason: evidence.chosenReason, oldTitle: preview.oldTitle, oldDesc: preview.oldDesc, newTitle, newDesc, factCheckConsistent: false, factCheckReason: topicCheck.reason, applied: false, skipReason: 'generated_title_off_topic' },
+      manualAction: buildManualAction(`meta_cycle:${weekKey}:${candidate.slug}`, evidenceMeta, `/${candidate.slug} 的新标题/描述跟本页主题不沾边：${topicCheck.reason}`, '需要人工重写', undefined),
+    }
+  }
+
+  // PM 2026-09-23 incident follow-up: the hard, non-AI rule runs FIRST and
+  // is a hard block on its own — if it fails, the AI judge (Jev) is never
+  // even called, both to save the call and because a dropped price/date/
+  // place-name is unambiguous, unlike "does this contradict" which needs
+  // judgment. Only a candidate that clears the hard rule reaches the AI
+  // judge, which still runs so it stays what it was — the primary defence
+  // against semantic reversals (visa-free -> visa-required) the regex can't
+  // see. Both are fail-closed; the caller doesn't need to know which one
+  // blocked.
+  const hardCheck = checkHardFactsPreserved(preview.oldTitle, preview.oldDesc, newTitle, newDesc)
+  const factCheck = hardCheck.consistent
+    ? await checkFactPreservation(preview.oldTitle, preview.oldDesc, newTitle, newDesc)
+    : { consistent: false, reason: hardCheck.reason }
   const base: MetaCycleProposal = {
     slug: candidate.slug, pageUrl: candidate.pageUrl, keyword: evidence.keyword,
     searchVolume: evidence.searchVolume, keywordDifficulty: evidence.keywordDifficulty, snapshotDate: evidence.snapshotDate,
@@ -387,11 +445,22 @@ async function applyOnePrescription(
   if (!factCheck.consistent) {
     return {
       proposal: { ...base, skipReason: 'fact_contradiction_detected' },
-      manualAction: buildManualAction(`meta_cycle:${weekKey}:${candidate.slug}`, evidenceMeta, `AI 判官认为 /${candidate.slug} 的新文案跟原文事实矛盾：${factCheck.reason}`, '需要人工重写', undefined),
+      manualAction: buildManualAction(`meta_cycle:${weekKey}:${candidate.slug}`, evidenceMeta, `/${candidate.slug} 的新文案跟原文事实有出入，没有通过：${factCheck.reason}`, '需要人工重写', undefined),
     }
   }
 
   if (dryRun) return { proposal: base, manualAction: null }
+
+  // Rank baseline: a live SERP read taken immediately BEFORE the change goes live. Never
+  // reuse the gate's earlier SERP result (different depth, minutes older), and never block
+  // the change on it — a failed read is recorded as fetch_failed and the row is later
+  // reported as not_measured:no_baseline instead of being silently unverifiable.
+  const baselineRank = await fetchRank({
+    keyword: evidence.keyword,
+    countryCode: config.semrushDb === 'nz' ? 'nz' : 'au',
+    domain: config.domain,
+    targetUrl: candidate.pageUrl,
+  })
 
   let applyResult: ApplyAdapterResult
   try {
@@ -401,14 +470,25 @@ async function applyOnePrescription(
   }
 
   if (applyResult.applied) {
-    await supabase.from('seo_meta_log').insert({
+    const { error: logError } = await supabase.from('seo_meta_log').insert({
       client_id: config.clientId, content_type: 'meta', page_slug: candidate.slug, page_url: candidate.pageUrl,
       keyword: evidence.keyword, old_title: applyResult.oldTitle, old_desc: applyResult.oldDesc,
       new_title: applyResult.newTitle, new_desc: applyResult.newDesc, wp_updated: false, applied_channel: adapter.channel,
       optimised_at: new Date().toISOString(), baseline_ctr: candidate.ctr, baseline_position: candidate.position,
       baseline_impressions: candidate.impressions, pr_url: applyResult.prUrl ?? null,
+      baseline_rank_group: baselineRank.rankGroup, baseline_rank_status: baselineRank.status,
+      baseline_serp_depth: baselineRank.depth, baseline_serp_fetched_at: baselineRank.fetchedAt,
     })
-    return { proposal: { ...base, applied: true, prUrl: applyResult.prUrl }, manualAction: null }
+    const rankFields = { baselineRankStatus: baselineRank.status, baselineRankGroup: baselineRank.rankGroup }
+    if (logError) {
+      // The change is already live. Without this row the cooldown, the revert pointer and the rank
+      // verification all silently lose it — so say so loudly instead of reporting a clean apply.
+      return {
+        proposal: { ...base, ...rankFields, applied: true, prUrl: applyResult.prUrl, skipReason: 'applied_but_log_insert_failed' },
+        manualAction: buildManualAction(`meta_cycle:${weekKey}:${candidate.slug}`, evidenceMeta, `/${candidate.slug} 的标题已经改上线了，但没能记进改动台账（${logError.message}），所以冷却期和效果验证都看不到这次改动。`, '需要开发补记这一行', applyResult.prUrl),
+      }
+    }
+    return { proposal: { ...base, ...rankFields, applied: true, prUrl: applyResult.prUrl }, manualAction: null }
   }
 
   if (applyResult.skipReason === 'pr_opened_but_not_merged') {
@@ -428,12 +508,13 @@ export async function runStep4Applied(
   passed: Step3Result['passed'],
   generateMeta: GenerateMetaFn,
   dryRun: boolean,
+  fetchRank: FetchTargetRankFn = fetchTargetRank,
 ): Promise<Step4Result> {
   const result: Step4Result = { proposals: [], applied: [], routedManual: 0 }
   const manualActions: PriorityAction[] = []
 
   for (const { candidate, evidence } of passed) {
-    const outcome = await applyOnePrescription(supabase, adapter, config, weekKey, candidate, evidence, generateMeta, dryRun)
+    const outcome = await applyOnePrescription(supabase, adapter, config, weekKey, candidate, evidence, generateMeta, dryRun, fetchRank)
     if (outcome.proposal) {
       result.proposals.push(outcome.proposal)
       if (outcome.proposal.applied) result.applied.push({ slug: outcome.proposal.slug, prUrl: outcome.proposal.prUrl })

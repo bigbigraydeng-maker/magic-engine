@@ -1,0 +1,12 @@
+{
+  // 只给「在 Node 里渲染真页面」那类试跑脚本用（scripts/probe-crm-priority-ui.ts）。
+  //
+  // 根 tsconfig 是 "jsx": "preserve"（交给 Next 自己编译）。tsx/esbuild 遇到 preserve
+  // 会退回 classic 运行时，把 JSX 编成 React.createElement，而页面组件按 automatic
+  // 运行时写、没有 `import React` —— 于是一渲染就 "React is not defined"。
+  // vitest 也是为同一件事在 vitest.config.ts 里设了 esbuild.jsx = 'automatic'。
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx"
+  }
+}

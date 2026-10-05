@@ -424,6 +424,7 @@ describe('GET /api/kernel/approvals/[runId]', () => {
       canApprove: false,
       canReject: true,
       approveBlockedReason: 'unknown_action_version',
+      dedicatedEntry: null,
     })
   })
 
@@ -433,6 +434,7 @@ describe('GET /api/kernel/approvals/[runId]', () => {
       canApprove: true,
       canReject: true,
       approveBlockedReason: null,
+      dedicatedEntry: null,
     })
   })
 

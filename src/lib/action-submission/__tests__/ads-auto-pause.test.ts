@@ -101,13 +101,16 @@ describe('submitAdsAutoPauseCandidate', () => {
   })
 })
 
+const SEEN = '11111111-2222-4333-8444-555555555555'
+
 describe('approveAndExecuteAdsAutoPause', () => {
-  it('一次调用签批准 + 执行（走 approveAndRun，不是先 approveRun 再另外触发）', async () => {
+  it('一次调用签批准 + 执行，并把人看到的那份审批请求 id 原样交给 Kernel', async () => {
     approveAndRun.mockResolvedValueOnce({
       kind: 'succeeded', run: fakeRun({ status: 'succeeded' }), decision: null, execution: null, humanReason: null,
     } satisfies ActionRunOutcome)
-    const result = await approveAndExecuteAdsAutoPause(dummyDeps, 'run-1', 'fde@magicengine.cloud')
-    expect(approveAndRun).toHaveBeenCalledWith(dummyDeps, 'run-1', 'fde@magicengine.cloud')
+    const result = await approveAndExecuteAdsAutoPause(dummyDeps, 'run-1', 'fde@magicengine.cloud', SEEN.toUpperCase())
+    // 归一成小写：库里读出来的 id 永远是小写，大写会被误判成过期
+    expect(approveAndRun).toHaveBeenCalledWith(dummyDeps, 'run-1', 'fde@magicengine.cloud', { expectedDecisionId: SEEN })
     expect(result).toEqual({ runId: 'run-1', kind: 'succeeded', humanReason: null })
   })
 
@@ -115,18 +118,40 @@ describe('approveAndExecuteAdsAutoPause', () => {
     approveAndRun.mockResolvedValueOnce({
       kind: 'dead_letter', run: fakeRun({ status: 'dead_letter' }), decision: null, execution: null, humanReason: '暂停调用失败',
     } satisfies ActionRunOutcome)
-    const result = await approveAndExecuteAdsAutoPause(dummyDeps, 'run-1', 'fde@magicengine.cloud')
+    const result = await approveAndExecuteAdsAutoPause(dummyDeps, 'run-1', 'fde@magicengine.cloud', SEEN)
     expect(result.kind).toBe('dead_letter')
+  })
+
+  it.each([
+    ['漏成 undefined（请求体不受类型约束）', undefined],
+    ['空字符串', ''],
+    ['不是 uuid', 'dec-1'],
+  ])('🔴 没带上看到的那份（%s）→ 当场抛，一步都不进 Kernel', async (_label, bad) => {
+    approveAndRun.mockClear()
+    await expect(
+      approveAndExecuteAdsAutoPause(dummyDeps, 'run-1', 'fde@magicengine.cloud', bad as unknown as string),
+    ).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+    expect(approveAndRun).not.toHaveBeenCalled()
   })
 })
 
 describe('rejectAdsAutoPause', () => {
-  it('只签拒绝，不执行任何东西', async () => {
+  it('只签拒绝，不执行任何东西；拒的也是人看到的那一份', async () => {
     rejectPendingRun.mockResolvedValueOnce({
       kind: 'denied', run: fakeRun({ status: 'denied' }), decision: null, execution: null, humanReason: '不批准',
     } satisfies ActionRunOutcome)
-    const result = await rejectAdsAutoPause(dummyDeps, 'run-1', 'fde@magicengine.cloud', '数据看起来是暂时的')
-    expect(rejectPendingRun).toHaveBeenCalledWith(dummyDeps, 'run-1', 'fde@magicengine.cloud', '数据看起来是暂时的')
+    const result = await rejectAdsAutoPause(dummyDeps, 'run-1', 'fde@magicengine.cloud', '数据看起来是暂时的', SEEN)
+    expect(rejectPendingRun).toHaveBeenCalledWith(
+      dummyDeps, 'run-1', 'fde@magicengine.cloud', '数据看起来是暂时的', { expectedDecisionId: SEEN },
+    )
     expect(result.kind).toBe('denied')
+  })
+
+  it('🔴 没带看到的那份 → 当场抛，不进 Kernel', async () => {
+    rejectPendingRun.mockClear()
+    await expect(
+      rejectAdsAutoPause(dummyDeps, 'run-1', 'fde@magicengine.cloud', '不要', undefined as unknown as string),
+    ).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+    expect(rejectPendingRun).not.toHaveBeenCalled()
   })
 })

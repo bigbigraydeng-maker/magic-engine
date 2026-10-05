@@ -30,6 +30,7 @@ import type { FlywheelName, ExecutionMode } from '@/lib/flywheel/adapters/types'
 import { saveDecisionHistory } from '@/lib/memory/service'
 import { assertAdsExpectedMetric } from '@/lib/flywheel/metric-registry'
 import { resolveClientAdsExpectedMetric } from '@/lib/flywheel/ads-expected-metric'
+import { canonicalUrl } from '@/lib/url/canonical-url'
 
 // ── Dimension mappings ────────────────────────────────────────────────────────
 
@@ -327,13 +328,20 @@ export function actionTypeToTitle(actionType: string): string {
  * metadata/steps_json is part of the identity. Actions without a keyword fall
  * back to action_type-only, preserving the original behaviour for
  * conduct-sourced actions.
+ *
+ * When the card also carries a page URL (`url` or `page_url`), the canonical URL
+ * is part of the identity too: the patrol's "not indexed" / "missing internal
+ * link" cards have a URL but no keyword, and without it two cards for different
+ * pages collided — only one survived a batch and they superseded each other day
+ * after day. Cards without a URL (ads, GEO, social, conduct) keep the old key.
  */
-export function executionItemDedupKey(actionType: string, keyword: unknown): string {
+export function executionItemDedupKey(actionType: string, keyword: unknown, url?: unknown): string {
   const kw =
     typeof keyword === 'string' && keyword.trim().length > 0
       ? keyword.trim().toLowerCase()
       : ''
-  return `${actionType}::${kw}`
+  const page = typeof url === 'string' && url.trim().length > 0 ? canonicalUrl(url.trim()) : null
+  return page ? `${actionType}::${page}::${kw}` : `${actionType}::${kw}`
 }
 
 // ── writeExecutionItems ────────────────────────────────────────────────────────
@@ -344,7 +352,7 @@ export function executionItemDedupKey(actionType: string, keyword: unknown): str
  * Writes ALL dimensions (including reputation + competitor) unlike
  * flywheel_actions which skips those two.
  *
- * Deduplication logic — keyed by (action_type, keyword) via executionItemDedupKey,
+ * Deduplication logic — keyed by (action_type, canonical page URL when present, keyword) via executionItemDedupKey,
  * NOT action_type alone (the patrol emits several cards of one action_type for
  * different keywords; keying on action_type alone let duplicates of the same
  * keyword accumulate +1 per run — Sungenix/IB 2026-08-01 incident):
@@ -394,7 +402,7 @@ export async function writeExecutionItems(
   // be superseded, not just whichever the Map kept last.
   const byDedupKey = new Map<string, ExistingRow[]>()
   for (const row of (existingRows as ExistingRow[] | null) ?? []) {
-    const key = executionItemDedupKey(row.action_type, row.steps_json?.keyword)
+    const key = executionItemDedupKey(row.action_type, row.steps_json?.keyword, row.steps_json?.url ?? row.steps_json?.page_url)
     const group = byDedupKey.get(key)
     if (group) group.push(row)
     else byDedupKey.set(key, [row])
@@ -405,7 +413,7 @@ export async function writeExecutionItems(
   const batchKeys = new Set<string>()
 
   for (const action of actions) {
-    const key = executionItemDedupKey(action.action_type, action.metadata?.keyword)
+    const key = executionItemDedupKey(action.action_type, action.metadata?.keyword, action.metadata?.url ?? action.metadata?.page_url)
     // Same finding appearing twice in one batch: insert only the first
     if (batchKeys.has(key)) continue
     batchKeys.add(key)
@@ -464,6 +472,194 @@ export async function writeExecutionItems(
   }
 
   return { inserted: toInsert.length, superseded: toSupersede.length }
+}
+
+// ── SEO weekly list items (docs/specs/2026-10-04-seo-weekly-list-v0.2.md) ───────
+//
+// The weekly list writes its items HERE (not in a new file) because this file is
+// already on the Kernel architecture test's grandfathered execution_items writer
+// list, which may only shrink. These items are `source='zhuge'` with
+// `steps_json.loop` set; that marker is what keeps them out of the 14-day
+// auto-expiry (card-expiry.ts) and the patrol's weekly card cap
+// (seo-patrol/job.ts counts only cards carrying a string `rule_id`).
+
+export const SEO_PLAN_LOOP = 'seo_goal_v1'
+
+export interface SeoPlanItemInsert {
+  actionType: string
+  title: string
+  description: string
+  keyword: string | null
+  url: string | null
+  dueDate: string
+  stepsJson: Record<string, unknown>
+  initiativeId: string | null
+}
+
+/**
+ * Insert weekly-list items. An item whose dedup key matches a still-open list item
+ * (pending / in_progress) is skipped — never superseded: last week's item stays and
+ * keeps its clock. Returns how many were inserted and how many were duplicates.
+ */
+export async function writeSeoPlanItems(
+  supabase: SupabaseClient,
+  clientId: string,
+  items: SeoPlanItemInsert[],
+): Promise<{ inserted: number; duplicates: number; ids: string[] }> {
+  if (items.length === 0) return { inserted: 0, duplicates: 0, ids: [] }
+
+  const { data: open, error: selErr } = await supabase
+    .from('execution_items')
+    .select('action_type, steps_json')
+    .eq('client_id', clientId)
+    .eq('dimension', 'seo')
+    .in('status', ['pending', 'in_progress'])
+    .in('action_type', Array.from(new Set(items.map((i) => i.actionType))))
+  if (selErr) throw new Error(`seo plan items dedup check failed: ${selErr.message}`)
+
+  const openKeys = new Set<string>()
+  for (const row of (open as Array<{ action_type: string; steps_json: Record<string, unknown> | null }> | null) ?? []) {
+    if (row.steps_json?.loop !== SEO_PLAN_LOOP) continue
+    openKeys.add(executionItemDedupKey(row.action_type, row.steps_json.keyword, row.steps_json.url))
+  }
+
+  const fresh: SeoPlanItemInsert[] = []
+  const batch = new Set<string>()
+  let duplicates = 0
+  for (const item of items) {
+    const key = executionItemDedupKey(item.actionType, item.keyword, item.url)
+    if (openKeys.has(key) || batch.has(key)) {
+      duplicates += 1
+      continue
+    }
+    batch.add(key)
+    fresh.push(item)
+  }
+  if (fresh.length === 0) return { inserted: 0, duplicates, ids: [] }
+
+  const rows = fresh.map((item, idx) => ({
+    prescription_id: null,
+    client_id: clientId,
+    finding_id: null,
+    dimension: 'seo',
+    title: item.title,
+    description: item.description,
+    fix_type: 'fde_manual',
+    action_type: item.actionType,
+    status: 'pending',
+    source: 'zhuge',
+    zhuge_session_id: null,
+    sort_order: idx + 1,
+    due_date: item.dueDate,
+    initiative_id: item.initiativeId,
+    steps_json: { ...item.stepsJson, loop: SEO_PLAN_LOOP },
+  }))
+  const { data: inserted, error: insErr } = await supabase.from('execution_items').insert(rows).select('id')
+  if (insErr) throw new Error(`seo plan items insert failed: ${insErr.message}`)
+  const ids = ((inserted as Array<{ id: string }> | null) ?? []).map((r) => r.id)
+  const lost = await resolveSeoPlanDuplicateRace(supabase, clientId, ids)
+  return { inserted: ids.length - lost.length, duplicates: duplicates + lost.length, ids: ids.filter((id) => !lost.includes(id)) }
+}
+
+/**
+ * Two overlapping runs (scheduled + manual) can both pass the "is it already open?" read.
+ * There is no unique index to stop that, so after inserting we re-read: for each key with
+ * more than one open list item, the smallest id wins and every other one inserted by THIS
+ * call is skipped (with an audit row). Both racing runs reach the same verdict.
+ */
+export async function resolveSeoPlanDuplicateRace(
+  supabase: SupabaseClient,
+  clientId: string,
+  myIds: string[],
+): Promise<string[]> {
+  if (myIds.length === 0) return []
+  const { data, error } = await supabase
+    .from('execution_items')
+    .select('id, action_type, steps_json')
+    .eq('client_id', clientId)
+    .eq('dimension', 'seo')
+    .eq('source', 'zhuge')
+    .in('status', ['pending', 'in_progress'])
+  if (error) throw new Error(`seo plan duplicate-race check failed: ${error.message}`)
+  const rows = ((data as Array<{ id: string; action_type: string; steps_json: Record<string, unknown> | null }> | null) ?? [])
+    .filter((r) => r.steps_json?.loop === SEO_PLAN_LOOP)
+  const byKey = new Map<string, string[]>()
+  for (const r of rows) {
+    const key = executionItemDedupKey(r.action_type, r.steps_json?.keyword, r.steps_json?.url)
+    byKey.set(key, [...(byKey.get(key) ?? []), r.id])
+  }
+  const lost: string[] = []
+  for (const ids of Array.from(byKey.values())) {
+    if (ids.length < 2) continue
+    const winner = [...ids].sort()[0]
+    for (const id of ids) if (id !== winner && myIds.includes(id)) lost.push(id)
+  }
+  for (const id of lost) {
+    await transitionSeoPlanItem(supabase, {
+      id, clientId, to: 'skipped', reason: 'duplicate_race（两次运行同时写入同一事项，保留较早的一条）',
+      stepsJson: { ...(rows.find((r) => r.id === id)?.steps_json ?? {}), skip_reason: 'duplicate_race' },
+    })
+  }
+  return lost
+}
+
+export interface SeoPlanItemTransition {
+  id: string
+  clientId: string
+  to: 'completed' | 'skipped'
+  /** Human-readable reason, also stored as steps_json.skip_reason / verified evidence. */
+  reason: string
+  /** Full steps_json to persist (caller merges verify/skip fields into the current one). */
+  stepsJson: Record<string, unknown>
+  now?: Date
+}
+
+/**
+ * Close a list item (verified-complete, or skipped as expired). The audit row is
+ * written FIRST and the status flips only if that insert succeeded, so a card can
+ * never show "completed" without a receipt. execution_logs.author is constrained to
+ * system / luban / fde — this uses 'system'. Returns false (and logs a correction) when the
+ * card was no longer open, so callers must not count it as verified / expired.
+ */
+export async function transitionSeoPlanItem(
+  supabase: SupabaseClient,
+  t: SeoPlanItemTransition,
+): Promise<boolean> {
+  const now = (t.now ?? new Date()).toISOString()
+  const { error: logErr } = await supabase.from('execution_logs').insert({
+    execution_item_id: t.id,
+    client_id: t.clientId,
+    author: 'system',
+    kind: 'status_change',
+    content: t.to === 'completed' ? `系统核对通过：${t.reason}` : `放弃：${t.reason}`,
+    meta: { to: t.to, reason: t.reason, loop: SEO_PLAN_LOOP, verified: t.to === 'completed' },
+  })
+  if (logErr) throw new Error(`seo plan item audit log failed: ${logErr.message}`)
+
+  const patch: Record<string, unknown> = { status: t.to, steps_json: t.stepsJson, updated_at: now }
+  if (t.to === 'completed') patch.completed_at = now
+  const { data: hit, error: updErr } = await supabase
+    .from('execution_items')
+    .update(patch)
+    .eq('id', t.id)
+    .eq('client_id', t.clientId)
+    .in('status', ['pending', 'in_progress'])
+    .select('id')
+  if (updErr) throw new Error(`seo plan item status update failed: ${updErr.message}`)
+  if (((hit as unknown[] | null) ?? []).length === 0) {
+    // Another flow closed the card between our read and this write. The audit row above
+    // already exists, so leave a correcting row rather than a receipt that lies.
+    await supabase.from('execution_logs').insert({
+      execution_item_id: t.id,
+      client_id: t.clientId,
+      author: 'system',
+      kind: 'status_change',
+      content: '状态没有变更：这张卡在核对期间已被其他流程改动，上一条"核对通过/放弃"记录不生效',
+      meta: { to: t.to, applied: false, loop: SEO_PLAN_LOOP },
+    })
+    return false
+  }
+  return true
 }
 
 // ── Decision history (Phase 23.D) ─────────────────────────────────────────────

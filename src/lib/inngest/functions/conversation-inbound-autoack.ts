@@ -72,6 +72,7 @@ import {
   type PostSaleClassificationPolicy,
 } from '@/lib/messenger-agent/classify'
 import { hasIndustryFeature } from '@/lib/clients/industry-features'
+import { AUTOACK_SENT_BY_EMAIL, AUTOACK_TEMPLATE } from '@/lib/messenger/autoack-identity'
 
 export const CONVERSATION_AUTOACK_SENT_EVENT = 'conversation/autoack.sent'
 
@@ -84,15 +85,13 @@ export const CONVERSATION_AUTOACK_SENT_EVENT = 'conversation/autoack.sent'
  * 账号发的——这是本次实现里唯一没有现成约定可抄、需要自己定的判断，已在
  * PR 描述里留痕给复审看。
  */
-export const AUTOACK_SENT_BY_EMAIL = 'governed-reply-agent@magicengine.cloud'
+export { AUTOACK_SENT_BY_EMAIL }
 
 /**
  * 🔴 硬编码、双语、零客户专属事实——见文件头 §9.14 C.5 说明。
  * 不含团名/价格/电话/日期，任何行业、任何客户都能收到这条而不会说错话。
  */
-export const AUTOACK_TEMPLATE =
-  "Thanks for your message — one of our team will get back to you with the details shortly.\n" +
-  '感谢您的留言，我们的顾问正在为您整理详细信息，稍后回复您。'
+export { AUTOACK_TEMPLATE }
 
 export type AutoAckOutcome =
   | 'sent'

@@ -11,7 +11,7 @@ import { adsetRows, isDelivering, money, shiftDate, sumSpend, unitOf, windowDays
 import { countOutcome } from '../outcome-ladder'
 import { benjaminiHochberg } from './d5-budget-result-mismatch'
 import type { EntitySnapshotRow } from '../snapshot'
-import type { CheckBack, DailyRow, Diagnosis, DiagnosisInput, DiagnosisUnit } from './types'
+import type { AdLevelCoverage, CheckBack, DailyRow, Diagnosis, DiagnosisInput, DiagnosisUnit } from './types'
 import { CORE_METRIC_NOUN, isClickDrivenGoal, resolveCoreMetric, type CoreMetric } from '../../rules/core-metric'
 import { classifyFatigue, D2_CTR_SIGNAL_FLOOR, D2_MIN_BASE_IMPRESSIONS, D2_MIN_CTR_DROP, D2_MIN_RECENT_IMPRESSIONS, FATIGUE_FREQUENCY_HIGH, type FatigueKind } from '../../rules/fatigue'
 import {
@@ -160,7 +160,7 @@ function isEligible(ctx: AccountContext, input: DiagnosisInput, ad: EntitySnapsh
   return isClickDrivenGoal(adset.optimization_goal)
 }
 
-function toLocalDate(iso: string, tz: string | null): string {
+export function toLocalDate(iso: string, tz: string | null): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz ?? 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso))
 }
 
@@ -213,7 +213,7 @@ function passesCostFloor(recentTotals: FunnelTotals, base: FunnelTotals): boolea
   return recentTotals.spend >= cpr
 }
 
-function campaignFrequency(ctx: AccountContext, campaignId: string | null): number | null {
+export function campaignFrequency(ctx: AccountContext, campaignId: string | null): number | null {
   if (!campaignId) return null
   const wanted = new Set([ctx.date, shiftDate(ctx.date, -1)])
   let freq: number | null = null
@@ -317,6 +317,7 @@ function baseEvidence(ctx: AccountContext, c: AdCase, base: FunnelTotals, source
     peer_ads: peerCount,
     dropped_days: c.dropped,
     first_delivery: c.firstDelivery,
+    campaign_id: c.ad.campaign_id,
     change_date: c.changeDate,
     ...extra,
   }
@@ -380,7 +381,8 @@ function d2Hit(ctx: AccountContext, c: AdCase, base: FunnelTotals, v: StepVerdic
     evidence: baseEvidence(ctx, c, base, 'own_history', null, v, adj, 'ctr', { frequency_7d: freq, fatigue_kind: kind }),
     sample: sampleFor(c, base, 'impressions'),
     reasons: [suggestion, stopLoss, basis, caliber, discipline],
-    clientVisible: false,
+    // 命中结论可给客户看（Magic Bridge 报告经客户文案模板转写后展示）；判不了的备注仍只内部
+    clientVisible: true,
     checkBack,
   }
 }
@@ -588,7 +590,8 @@ function d10Hit(ctx: AccountContext, c: AdCase, base: FunnelTotals, v: StepVerdi
     evidence: baseEvidence(ctx, c, base, source, peerCount, v, adj, 'link_click_to_result', extra),
     sample: sampleFor(c, base, 'link'),
     reasons: [suggestion, stopLoss, basis, discipline],
-    clientVisible: false,
+    // 命中结论可给客户看（Magic Bridge 报告经客户文案模板转写后展示）；判不了的备注仍只内部
+    clientVisible: true,
     checkBack,
   }
 }
@@ -638,7 +641,10 @@ function clientPageUnknown(ctx: AccountContext, input: DiagnosisInput): Diagnosi
     units: [],
     evidence: { window_end: ctx.date },
     sample: [],
-    reasons: ['一个广告账户里可能投着别的客户的广告，不登记主页就可能把别人的广告算到这个客户头上'],
+    reasons: [
+      '一个广告账户里可能投着别的客户的广告，不登记主页就可能把别人的广告算到这个客户头上',
+      '没登记主页时，「花钱没结果」的自动暂停建议也一律拦下（确认不了广告组是这个客户的）',
+    ],
     clientVisible: false,
     manualTask: {
       what: '客户没登记 Facebook 主页，广告级检查（素材疲劳 / 点进去之后差了）整段没跑',
@@ -651,6 +657,31 @@ function clientPageUnknown(ctx: AccountContext, input: DiagnosisInput): Diagnosi
 function hasRecentSpend(rows: readonly DailyRow[], recent: readonly string[]): boolean {
   const inDays = new Set(recent)
   return rows.some(r => inDays.has(r.insight_date) && r.spend > 0)
+}
+
+/** 这个账户上广告级规则跑没跑、看了几条广告。条件与 diagnoseAdLevelRules 开头的几道闸一致。 */
+export function adLevelCoverage(ctx: AccountContext, input: DiagnosisInput): AdLevelCoverage {
+  const base = { adAccountId: ctx.account.adAccountId }
+  if (input.clientPageId === undefined || ctx.account.adDaily === undefined) return { ...base, ran: false, reason: 'not_loaded', adsChecked: 0 }
+  if (input.clientPageId === null) return { ...base, ran: false, reason: 'client_page_unknown', adsChecked: 0 }
+  const adsChecked = ctx.ads.filter(ad => isEligible(ctx, input, ad)).length
+  return { ...base, ran: true, reason: 'ok', adsChecked }
+}
+
+/**
+ * How many eligible ads had enough recent delivery and history to be judged at all (buildAdCase non-null).
+ * Read-only companion for Magic Bridge's on-the-spot check: its "looked at N ads" must not count ads the rules
+ * could not judge (魏征 2026-09-27). Does not change what diagnoseAdLevelRules reports.
+ */
+export function adLevelJudgeableCount(ctx: AccountContext, input: DiagnosisInput): number {
+  const adDaily = ctx.account.adDaily
+  if (input.clientPageId === undefined || input.clientPageId === null || adDaily === undefined) return 0
+  const recent = windowDays(ctx.date, RULE_RECENT_DAYS)
+  const baseline = windowDays(shiftDate(ctx.date, -RULE_RECENT_DAYS), RULE_BASELINE_DAYS)
+  const rowsByAd = dedupeByAd(adDaily)
+  const historyStart = historyStartOf(adDaily)
+  return ctx.ads.filter(ad => isEligible(ctx, input, ad)
+    && buildAdCase(ctx, input, ad, rowsByAd.get(ad.entity_id) ?? [], recent, baseline, historyStart) !== null).length
 }
 
 export function diagnoseAdLevelRules(ctx: AccountContext, input: DiagnosisInput): Diagnosis[] {

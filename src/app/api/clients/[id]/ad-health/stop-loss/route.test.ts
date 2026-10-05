@@ -18,11 +18,18 @@ const m = vi.hoisted(() => ({
   setCampaignDailyBudget: vi.fn(),
   setAdSetDailyBudget: vi.fn(),
   setAdSetStatus: vi.fn(),
+  submitStopLoss: vi.fn(),
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
-  requirePaidClientAccess: vi.fn().mockResolvedValue({ ok: true, tier: 'paid_client' }),
+  requirePaidClientAccess: vi.fn().mockResolvedValue({ ok: true, tier: 'paid_client', user: { id: 'operator-1' } }),
 }))
+vi.mock('@/lib/action-submission/stop-loss', () => ({
+  requireStopLossAccess: vi.fn().mockResolvedValue({ ok: true, tier: 'paid_client', user: { id: 'operator-1' } }),
+  submitStopLossThroughKernel: m.submitStopLoss,
+}))
+vi.mock('@/lib/kernel', () => ({ createKernel: vi.fn(() => ({ kernel: true })) }))
+vi.mock('@/lib/ads-strategy/account-timezone', () => ({ resolveAccountTimezone: vi.fn().mockResolvedValue('Pacific/Auckland'), accountDayKey: vi.fn(() => '2026-09-30') }))
 vi.mock('@/lib/meta/token-manager', () => ({
   getMetaTokenForClient: vi.fn().mockResolvedValue('SHARED_FALLBACK_TOKEN'),
 }))
@@ -31,6 +38,10 @@ vi.mock('@/lib/supabase', () => ({
     from: (table: string) => {
       if (table === 'client_meta_ad_accounts') {
         return { select: () => ({ eq: m.registeredAccounts }) }
+      }
+      if (table === 'goals') {
+        const q = { eq: () => q, order: () => q, limit: () => q, maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'goal-1' }, error: null }) }
+        return { select: () => q }
       }
       return {
         select: () => ({ eq: () => ({ maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }) }) }),
@@ -59,7 +70,7 @@ function post(body: unknown) {
   return POST(
     new NextRequest(`http://localhost/api/clients/${CLIENT_A}/ad-health/stop-loss`, {
       method: 'POST',
-      body: JSON.stringify(body),
+      body: JSON.stringify({ request_id: 'de305d54-75b4-431b-adb2-eb6b9e546014', ...(body as object) }),
     }),
     { params: { id: CLIENT_A } },
   )
@@ -76,9 +87,17 @@ beforeEach(() => {
   vi.clearAllMocks()
   // Client A only ever registered its own account.
   m.registeredAccounts.mockResolvedValue({ data: [{ ad_account_id: 'act_1111111111' }], error: null })
+  m.submitStopLoss.mockResolvedValue({ action: 'pause_campaign', runs: [] })
 })
 
 describe('stop-loss POST — campaign belonging to another client', () => {
+  it('requires a stable request ID before any Meta lookup', async () => {
+    const res = await post({ campaign_id: '120220000000000002', action: 'pause', request_id: null })
+    expect(res.status).toBe(400)
+    expect(m.getCampaignDetails).not.toHaveBeenCalled()
+    expectNoMetaWrite()
+  })
+
   it.each(['pause', 'cut'] as const)('action=%s on client B campaign → 403, no Meta write', async action => {
     m.getCampaignDetails.mockResolvedValue({
       id: '120220000000000002', name: 'B campaign', status: 'ACTIVE', daily_budget: '5000', account_id: '2222222222',
@@ -105,6 +124,23 @@ describe('stop-loss POST — campaign belonging to another client', () => {
 
     expect(res.status).toBe(403)
     expect(m.getCampaignDetails).not.toHaveBeenCalled()
+    expectNoMetaWrite()
+  })
+
+  it('belongs-to-client budget cut returns Kernel warnings without a direct Meta write', async () => {
+    m.getCampaignDetails.mockResolvedValue({
+      id: '120220000000000002', name: 'A campaign', status: 'ACTIVE', daily_budget: '5000', account_id: '1111111111',
+    })
+    m.submitStopLoss.mockResolvedValueOnce({ action: 'cut_campaign', runs: [
+      { entityId: '120220000000000002', name: 'A campaign', runId: 'run-1', kind: 'succeeded', humanReason: null, warnings: ['广告系列状态已变化，未自动重新开启。'] },
+    ] })
+    const res = await post({ campaign_id: '120220000000000002', action: 'cut' })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ ok: true, executed: true, status: 'executed', runs: [{ runId: 'run-1' }], warnings: ['广告系列状态已变化，未自动重新开启。'] })
+    expect(m.submitStopLoss).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      clientId: CLIENT_A, goalId: undefined, campaignId: '120220000000000002', adAccountId: '1111111111',
+      cycleDate: '2026-09-30', requestId: 'de305d54-75b4-431b-adb2-eb6b9e546014', action: 'cut_campaign',
+    }))
     expectNoMetaWrite()
   })
 })

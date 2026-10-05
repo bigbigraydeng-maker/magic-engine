@@ -1,5 +1,5 @@
 /**
- * 每日广告巡检的广告级规则（D2 素材疲劳 / D10 点进去之后差了）→ 下发到「需要你动手」。
+ * 每日广告巡检的广告级规则（D2 素材疲劳 / D10 点进去之后差了 / D11 再营销受众池断供）→ 下发到「需要你动手」。
  *
  * 只读：只读 `ads_growth_states`、生成待办；系统不会自动改广告。
  * 同一条广告同一个问题按 remind-cadence 节奏提醒（前 3 天每天、之后只周日），不天天刷屏。
@@ -10,80 +10,40 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-item-types'
 import { APP_BASE } from './binding-request-items'
 import { shouldRemindToday } from './remind-cadence'
+import {
+  ADS_RULE_STALE_DAYS,
+  ADS_RULE_MIN_STREAK,
+  ADS_RULE_CODES,
+  findingKey,
+  ruleHits,
+  streakFor,
+  streakForReason,
+  isUsableNewest,
+  type RuleFinding,
+  type GrowthStateRow,
+} from '@/lib/ads-strategy/rules/patrol-findings'
+
+export {
+  ADS_RULE_STALE_DAYS,
+  ADS_RULE_STREAK_GAP_DAYS,
+  ADS_RULE_MIN_STREAK,
+  ADS_RULE_CODES,
+  findingKey,
+  ruleHits,
+  streakFor,
+  type RuleFinding,
+  type GrowthStateRow,
+} from '@/lib/ads-strategy/rules/patrol-findings'
 
 export type AdsRuleFindingItemKind = 'ads_rule_finding'
 
 /** 回看多少天的巡察记录来算「连着几天」 */
 export const ADS_RULE_LOOKBACK_DAYS = 14
-/** 最新一行巡察记录超过这么多天 → 巡察自己停了，这里不拿旧结论说事 */
-export const ADS_RULE_STALE_DAYS = 3
-/** 同一件事两次命中之间隔几天以内还算「连着」（周五周六待办不跑、巡察偶尔缺一天） */
-export const ADS_RULE_STREAK_GAP_DAYS = 3
 /** 一条待办的 how 里最多列几条 */
 export const ADS_RULE_MAX_LISTED = 3
-/** 连着这么多次巡察都命中才进待办：只命中一天的多半是波动（2026-09-26 回放：一次单日误报） */
-export const ADS_RULE_MIN_STREAK = 2
-
-export const ADS_RULE_CODES: ReadonlySet<string> = new Set(['D2', 'D10'])
-
-export interface RuleFinding {
-  code: string
-  status: string
-  title: string
-  units?: Array<{ level: string; id: string; name: string | null }>
-  reasons?: string[]
-  checkBack?: { after: string; condition: string; fallback: string }
-  notComparableReason?: string
-  manualTask?: { what: string; how: string; href: string | null }
-}
-
-export interface GrowthStateRow {
-  client_id: string
-  date: string // YYYY-MM-DD
-  payload: { dataCompleteness?: string; problems?: RuleFinding[] } | null
-}
 
 export function adsHealthHref(clientId: string): string {
   return `${APP_BASE}/dashboard/clients/${encodeURIComponent(clientId)}/ads-health`
-}
-
-/** `${code}:${ad unit id}`，取第一个 level 为 'ad' 的 unit；没有就 null。 */
-export function findingKey(f: RuleFinding): string | null {
-  const ad = f.units?.find((u) => u.level === 'ad')
-  return ad ? `${f.code}:${ad.id}` : null
-}
-
-/** 一行 payload.problems 里 status 为 'hit' 的 D2/D10（payload/problems 缺失时为空）。 */
-export function ruleHits(row: GrowthStateRow): RuleFinding[] {
-  const problems = row.payload?.problems
-  if (!problems) return []
-  return problems.filter((p) => ADS_RULE_CODES.has(p.code) && p.status === 'hit')
-}
-
-/** 两个 YYYY-MM-DD 之间差几天（UTC 零点起算，四舍五入）。 */
-function dayGap(from: string, to: string): number {
-  const a = Date.parse(`${from}T00:00:00Z`)
-  const b = Date.parse(`${to}T00:00:00Z`)
-  return Math.round((b - a) / 86_400_000)
-}
-
-/**
- * 这个 key 连着命中几天，从该客户最新一行往回数。
- * `rowsNewestFirst` 是**一个客户**按日期倒序的行。逐行看：命中就 +1，
- * 前提是跟上一个计入的命中日期之间不超过 ADS_RULE_STREAK_GAP_DAYS 天；
- * 一旦超过就停。没命中的行直接断连（隔一天命中一次不算连着）。
- */
-export function streakFor(key: string, rowsNewestFirst: readonly GrowthStateRow[]): number {
-  let streak = 0
-  let lastHitDate: string | null = null
-  for (const row of rowsNewestFirst) {
-    const hit = ruleHits(row).some((f) => findingKey(f) === key)
-    if (!hit) break
-    if (lastHitDate !== null && dayGap(row.date, lastHitDate) > ADS_RULE_STREAK_GAP_DAYS) break
-    streak += 1
-    lastHitDate = row.date
-  }
-  return streak
 }
 
 /** 一行止损文案：reasons 里以 '止损：' 开头的，否则用 checkBack 拼，再否则空串。 */
@@ -110,31 +70,15 @@ function groupByClient(rows: readonly GrowthStateRow[]): Map<string, GrowthState
   return byClient
 }
 
-/** 最新一行是否够新、且不是 partial。 */
-function isUsableNewest(newest: GrowthStateRow, now: Date): boolean {
-  if (newest.payload?.dataCompleteness === 'partial') return false
-  const today = now.toISOString().slice(0, 10)
-  return dayGap(newest.date, today) <= ADS_RULE_STALE_DAYS
-}
-
-/** D10 在前、D2 在后，组内保持原顺序。 */
+/** D10 在前、D2 次之、D11 再次，其余最后；同 rank 内保持原顺序（sort 稳定）。 */
 function orderCandidates(findings: readonly RuleFinding[]): RuleFinding[] {
-  const rank = (f: RuleFinding): number => (f.code === 'D10' ? 0 : 1)
-  return [...findings].sort((a, b) => rank(a) - rank(b))
-}
-
-/** 这个 notComparableReason 连着出现几次，从该客户最新一行往回数（同 streakFor 的断连规则）。 */
-function streakForReason(reason: string, rowsNewestFirst: readonly GrowthStateRow[]): number {
-  let streak = 0
-  let lastHitDate: string | null = null
-  for (const row of rowsNewestFirst) {
-    const hit = (row.payload?.problems ?? []).some((p) => p.notComparableReason === reason)
-    if (!hit) break
-    if (lastHitDate !== null && dayGap(row.date, lastHitDate) > ADS_RULE_STREAK_GAP_DAYS) break
-    streak += 1
-    lastHitDate = row.date
+  const rank = (f: RuleFinding): number => {
+    if (f.code === 'D10') return 0
+    if (f.code === 'D2') return 1
+    if (f.code === 'D11') return 2
+    return 3
   }
-  return streak
+  return [...findings].sort((a, b) => rank(a) - rank(b))
 }
 
 /** 客户级配置缺口（如没登记 Facebook 主页）：最新一行有带 manualTask 的该问题就出一条，不看命中连击。 */
@@ -160,10 +104,12 @@ function configGapItem(
   }
 }
 
-function findingLines(f: RuleFinding): string[] {
+function findingLines(f: RuleFinding, prevFirst?: string): string[] {
   const lines = [`• ${f.title}`]
   const first = f.reasons?.[0]
-  if (first && !first.startsWith('止损：')) lines.push(`  怎么办：${first}`)
+  if (first && !first.startsWith('止损：')) {
+    lines.push(first === prevFirst ? '  怎么办：同上一条' : `  怎么办：${first}`)
+  }
   const stop = stopLossText(f)
   if (stop) lines.push(`  ${stop}`)
   return lines
@@ -171,7 +117,7 @@ function findingLines(f: RuleFinding): string[] {
 
 function buildHow(kept: readonly RuleFinding[]): string {
   const listed = kept.slice(0, ADS_RULE_MAX_LISTED)
-  const lines = listed.flatMap(findingLines)
+  const lines = listed.flatMap((f, i) => findingLines(f, listed[i - 1]?.reasons?.[0]))
   const rest = kept.length - listed.length
   if (rest > 0) lines.push(`…另有 ${rest} 条，进广告健康页「要看的事」里看`)
   lines.push('这些系统不会自动改；打开广告健康页看证据和对照，要不要动由你定（一次只改一处）。')
@@ -183,7 +129,7 @@ function buildHow(kept: readonly RuleFinding[]): string {
  * 每个客户：按日期倒序；最新一行必须在 ADS_RULE_STALE_DAYS 天内（拿 YYYY-MM-DD 跟 now 的 UTC 日期比）
  * 且 payload.dataCompleteness 不是 'partial'，否则跳过。
  * 候选 = 最新一行里 ruleHits 且有 findingKey 的，保留 shouldRemindToday(streakFor(key, rows), 0, now) 为真的。
- * 顺序：D10 在前、D2 在后，组内保持原顺序。
+ * 顺序：D10 → D2 → D11，组内保持原顺序。
  */
 export function buildAdsRuleFindingItems(
   rows: readonly GrowthStateRow[],
@@ -209,7 +155,7 @@ export function buildAdsRuleFindingItems(
         kind: 'ads_rule_finding',
         client_id: clientId,
         client_name: nameOf(clientId),
-        what: `${kept.length} 条广告需要你看一眼：${kept[0].title}`,
+        what: `${kept.length} 件广告的事需要你看一眼：${kept[0].title}`,
         how: buildHow(kept),
         href: adsHealthHref(clientId),
       })

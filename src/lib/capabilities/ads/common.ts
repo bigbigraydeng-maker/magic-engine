@@ -40,7 +40,7 @@ export async function requireMetaToken(clientId: string): Promise<string> {
  *    `ad_entity_snapshots` 表里，那才是 append-only 的审计源；handler 里
  *    捧着一个副本传下去只会造成两份数据不一致。
  */
-export function makeSnapshotPreStep(sb: SupabaseClient) {
+export function makeSnapshotPreStep(sb: SupabaseClient, opts: { allClientAccounts?: boolean } = {}) {
   return async function snapshotPre(step: CapabilityStepContext): Promise<CapabilityStepResult> {
     const runInput = step.runInput as { ad_account_id?: unknown }
     const adAccountId = typeof runInput.ad_account_id === 'string' ? runInput.ad_account_id : null
@@ -48,7 +48,24 @@ export function makeSnapshotPreStep(sb: SupabaseClient) {
 
     // 🔴 snapshot-sync 是幂等的：同一时刻抓一次就够，重试会用同一个 `captured_at`
     //    锚点比对，不会写重。这里失败按可重试处理（网络/Meta 抖动都是环境）。
-    const summary = await captureClientSnapshots(step.ctx.clientId, [adAccountId], { reason: 'kernel_pre' })
+    let accountIds = [adAccountId]
+    if (opts.allClientAccounts) {
+      const { data: registered, error: registryError } = await sb
+        .from('client_meta_ad_accounts').select('ad_account_id').eq('client_id', step.ctx.clientId)
+      if (registryError) throw new RetryableCapabilityError(`读取客户广告账户清单失败：${registryError.message}`)
+      accountIds = ((registered ?? []) as Array<{ ad_account_id: string }>).map(row => row.ad_account_id)
+      if (accountIds.length === 0) {
+        const { data: client, error: clientError } = await sb.from('clients')
+          .select('meta_ad_account_id').eq('id', step.ctx.clientId).maybeSingle()
+        if (clientError) throw new RetryableCapabilityError(`读取客户主广告账户失败：${clientError.message}`)
+        const legacyId = (client as { meta_ad_account_id?: string | null } | null)?.meta_ad_account_id
+        if (legacyId) accountIds = [legacyId]
+      }
+      if (!accountIds.includes(adAccountId)) {
+        throw new RetryableCapabilityError('目标广告账户不在客户完整账户清单中')
+      }
+    }
+    const summary = await captureClientSnapshots(step.ctx.clientId, accountIds, { reason: 'kernel_pre' })
       .catch((err: unknown) => {
         throw new RetryableCapabilityError(
           `抓 kernel_pre 快照失败：${err instanceof Error ? err.message : String(err)}`,

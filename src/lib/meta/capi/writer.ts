@@ -143,6 +143,15 @@ export class MetaCapiWriter implements DestinationWriter<MetaCapiPayload> {
       if (config.facebookPageId) userData.page_id = config.facebookPageId
     }
 
+    // ⚠️ 这只是给既有 Purchase/Lead 事件多加一把匹配键，**不是** Meta 的 “CRM 线索阶段回传”
+    //    （Conversion Leads：system_generated + custom_data.event_source=crm + 月 200 线索 /
+    //    28 天内成交等条件）。后者是另一套集成，当前没做，别因为这里出现 lead_id 就当成做过了。
+    // 🔴 第四种匹配键——Facebook 即时表单线索编号。官方参数表标注「Do not hash」，
+    //    跟 em/ph/fn/ln 不同，不能套 hash* 函数。只放真有的、格式对的（15–17 位纯数字）。
+    if (outcome.metaLeadId && /^\d{15,17}$/.test(outcome.metaLeadId)) {
+      userData.lead_id = outcome.metaLeadId
+    }
+
     const event: MetaCapiPayload['data'][number] = {
       event_name: EVENT_NAME[outcome.outcomeKind],
       event_time: Math.floor(new Date(outcome.occurredAt).getTime() / 1000),

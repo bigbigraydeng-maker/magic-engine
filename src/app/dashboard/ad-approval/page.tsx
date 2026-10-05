@@ -15,7 +15,7 @@
 import Link from 'next/link'
 import { supabaseAdmin } from '@/lib/supabase'
 import { ADS_CREATE_ACTION, type DraftRecord } from '@/lib/ads-strategy/draft-and-gate'
-import { describeDraft } from '@/lib/ads-strategy/ad-draft'
+import { describeDraft, isApprovableKind } from '@/lib/ads-strategy/ad-draft'
 import ApproveButtons from './_components/ApproveButtons'
 
 export const dynamic = 'force-dynamic'
@@ -160,7 +160,16 @@ export default async function AdApprovalPage() {
                     </ul>
                   )}
 
-                  <ApproveButtons actionId={r.id} costLine={costLine(p)} />
+                  {/* 和 approveDraft 用同一个判断：不在白名单的（私信广告、旧记录）不给按钮，
+                      否则这里会摆一个点了必报错的绿按钮。 */}
+                  {isApprovableKind(p.draft?.kind) ? (
+                    <ApproveButtons actionId={r.id} costLine={costLine(p)} />
+                  ) : (
+                    <p className="mt-4 rounded-lg bg-slate-100 p-3 text-sm text-slate-600">
+                      暂不可开：这种广告要等「PM 授权 + 每日总预算检查」上线之后才能开。
+                      它现在是暂停状态，一分钱没花。
+                    </p>
+                  )}
                 </article>
               )
             })}

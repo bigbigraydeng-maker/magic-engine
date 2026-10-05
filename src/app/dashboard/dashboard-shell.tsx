@@ -218,7 +218,9 @@ function buildScopedAdminSections(clientId: string, industry: string | null): Na
         // 中介在车里 / 开放日现场用手机开的那一页：按房子列人，点一下说清楚他到哪一步。
         // 放在「客户跟进」前面 —— 他每天开的是这一页，不是内部那张排班表。
         { key: 'contacts',    label: '我的客人', mark: 'MY', href: at('/contacts') },
-        { key: 'crm',         label: '客户跟进', mark: 'CR', href: at('/crm') },
+        // 2026-09-28 WP-B6：「今天要联系」页删了，直接指到「全部客人」——
+        // 老网址本身还在（会跳转），但天天点的主入口没理由多绕一次跳转。
+        { key: 'crm',         label: '客户跟进', mark: 'CR', href: at('/crm/all') },
         { key: 'connectors',  label: '数据连接', mark: 'CN', href: at('/settings?tab=connect') },
       ],
     },

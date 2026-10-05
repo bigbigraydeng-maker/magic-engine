@@ -35,7 +35,9 @@ export async function POST(
   }
 
   try {
-    const result = await runExtractorForClient(supabaseAdmin, clientId)
+    // Manual runs never switch memories off: every switch-off must land in the daily cron's
+    // run log, which is the rollback list. Switching on still follows the same validity rule.
+    const result = await runExtractorForClient(supabaseAdmin, clientId, new Date(), { reconcile: false })
     return NextResponse.json({ success: true, result })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
