@@ -178,6 +178,7 @@ export function buildCtrGapItem(
       diag && diag.quickFixes.length > 0 ? `【顺手可修】${diag.quickFixes.join('；')}` : '',
       `【怎么做】\n${how}`,
       `【怎么算没起效】${failure}`,
+      '【自动记录】本页如被系统的每周自动改标题流程改上线，这条会自动记为"已执行"（只证明改了，不证明有效）。',
       `【证据】${evidence.map(e => `${e.claim}〔${e.confidence}｜${e.source}｜${e.fetched_at}〕`).join('；')}`,
       `【链接】${c.url} ｜ ${ctx.intelligenceHref}`,
     ].filter(Boolean).join('\n'),
@@ -187,7 +188,7 @@ export function buildCtrGapItem(
     stepsJson: baseSteps(ctx, 'ctr_gap', null, c.url, evidence, failure, {
       opportunity: { impressions: c.impressions, clicks: c.clicks, position: c.position, ctr: c.ctr, benchmark: c.benchmark, potential_clicks_estimate: c.potentialClicks },
       baseline: { snapshot_date: ctx.gscDay, word_count: page?.word_count ?? null, crawled_at: page?.crawled_at ?? null, title: page?.title ?? null },
-      verify: { type: 'page_strengthened' },
+      verify: { type: 'page_changed' },
       ...(diag ? { ctr_diagnosis: diag } : {}),
     }),
   }
@@ -242,6 +243,7 @@ export function buildDecayItem(
       `【系统读数】${DECAY_CAUSE_LABEL[c.cause]}（机械可核对的数字，见证据；不代表一定是这个原因）`,
       `【怎么做】\n${how}`,
       `【怎么算没起效】${failure}`,
+      '【自动记录】本页如被系统的每周自动改标题流程改上线，这条会自动记为"已执行"（只证明改了，不证明有效）。',
       `【证据】${evidence.map(e => `${e.claim}〔${e.confidence}｜${e.source}｜${e.fetched_at}〕`).join('；')}`,
       `【链接】${c.url} ｜ ${ctx.intelligenceHref}`,
     ].join('\n'),
@@ -256,7 +258,7 @@ export function buildDecayItem(
         page_ratio: c.pageRatio, site_ratio: c.siteRatio, cause: c.cause, potential_clicks_estimate: c.potentialClicks,
       },
       baseline: { snapshot_date: ctx.gscDay, word_count: page?.word_count ?? null, crawled_at: page?.crawled_at ?? null, title: page?.title ?? null },
-      verify: { type: 'page_strengthened' },
+      verify: { type: 'page_changed' },
     }),
   }
 }
