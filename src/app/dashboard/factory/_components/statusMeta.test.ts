@@ -23,6 +23,7 @@ describe('publishedBadge', () => {
   })
   it('only failure-like statuses show reject_reason', () => {
     expect(REASON_STATUSES).toContain('publish_failed')
+    expect(REASON_STATUSES).toContain('queued') // retryable worker failure goes back to queued WITH a reason; must stay visible
     expect(REASON_STATUSES).not.toContain('published')
   })
 })
