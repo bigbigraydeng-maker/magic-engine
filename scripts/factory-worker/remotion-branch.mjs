@@ -2,9 +2,9 @@
 import { spawn } from 'node:child_process'
 import {
   existsSync, copyFileSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync,
-  openSync, closeSync, fstatSync, constants,
+  openSync, closeSync, fstatSync, readSync, writeSync, constants,
 } from 'node:fs'
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 /** Directory that holds the Remotion package (schema.ts, timing.ts, render.mjs). */
@@ -18,6 +18,9 @@ export class RemotionOrderError extends Error {
     this.retryable = false
   }
 }
+
+// A RemotionOrderError the server may hand back to us (environment/version problems).
+const retryableOrderError = (message) => Object.assign(new RemotionOrderError(message), { retryable: true })
 
 // Map brief.engine to a branch name; unknown values are refused, never legacy.
 export function resolveEngine(brief) {
@@ -179,14 +182,29 @@ const isInside = (parent, child) => {
 // Copy a file that must stay inside `rootReal`, guarding against TOCTOU swaps.
 export function copyWithinRoot(srcReal, rootReal, dest) {
   const fd = openSync(srcReal, constants.O_RDONLY | constants.O_NOFOLLOW)
-  let buf
+  let outFd
+  let copied = 0
+  let size
   try {
-    if (!fstatSync(fd).isFile()) throw new Error('not a regular file')
-    buf = readFileSync(fd)
+    const st = fstatSync(fd)
+    if (!st.isFile()) throw new Error('not a regular file')
+    size = st.size
+    outFd = openSync(dest, 'w')
+    const chunk = Buffer.alloc(1024 * 1024)
+    for (;;) {
+      const n = readSync(fd, chunk, 0, chunk.length, null)
+      if (n === 0) break
+      writeSync(outFd, chunk, 0, n)
+      copied += n
+    }
   } finally {
     closeSync(fd)
+    if (outFd !== undefined) closeSync(outFd)
   }
-  writeFileSync(dest, buf)
+  if (copied !== size) {
+    rmSync(dest, { force: true })
+    throw new RemotionOrderError(`素材拷贝不完整：${basename(dest)}`)
+  }
   const again = realpathSync(srcReal)
   if (again !== srcReal || !isInside(rootReal, again)) {
     rmSync(dest, { force: true })
@@ -195,7 +213,7 @@ export function copyWithinRoot(srcReal, rootReal, dest) {
 }
 
 // Copy the referenced assets into the staging directory.
-export function stageRemotionAssets({ props, files, stageDir, brandkitDir, assetLibDir, clientRootDir, musicPath = null, musicRoot = null }) {
+export function stageRemotionAssets({ props, files, stageDir, brandkitDir, assetLibDir, clientRootDir, musicPath = null, musicRoot = null, musicFolder = '' }) {
   if (!props.logoFile.toLowerCase().endsWith('.png')) {
     throw new RemotionOrderError('logo 文件名必须是 .png（logo 一律取自该客户品牌包的 watermark.png）')
   }
@@ -217,7 +235,7 @@ export function stageRemotionAssets({ props, files, stageDir, brandkitDir, asset
       mkdirSync(dirname(musicDest), { recursive: true })
       copyWithinRoot(musicReal, rootReal, musicDest)
     } catch {
-      throw new RemotionOrderError(`乐库里找不到音乐文件：${props.musicFile}（应在 ${musicRoot}）`)
+      throw new RemotionOrderError(`乐库里找不到音乐文件：${props.musicFile}（乐库文件夹：${musicFolder}）`)
     }
   }
 
@@ -417,7 +435,7 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
   const eng = await loadEngineFn()
   const template = remotion.template
   if (!eng.isTemplateId(template)) {
-    throw new RemotionOrderError(
+    throw retryableOrderError(
       `UNKNOWN_TEMPLATE: 不认识的模板 ${JSON.stringify(String(template)).slice(0, 40)}：出片机的模板注册表里没有它。先升级出片机，或检查工单 brief.remotion.template`,
     )
   }
@@ -463,7 +481,7 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
       try {
         musicSource = eng.musicSourceFor(props.musicFile)
       } catch (e) {
-        throw new RemotionOrderError('音乐目录读不了：' + e.message)
+        throw retryableOrderError('音乐目录读不了：' + e.message)
       }
     }
     if (musicSource && existsSync(join(assetLibDir, props.musicFile))) {
@@ -471,7 +489,7 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     }
     const musicRoot = musicSource ? join(deps.studioRoot, musicSource.folder) : null
     const musicPath = musicSource ? join(musicRoot, musicSource.file) : null
-    stageRemotionAssets({ props, files, stageDir, brandkitDir, assetLibDir, clientRootDir, musicPath, musicRoot })
+    stageRemotionAssets({ props, files, stageDir, brandkitDir, assetLibDir, clientRootDir, musicPath, musicRoot, musicFolder: musicSource ? musicSource.folder : '' })
     hb.assertAlive()
 
     const propsFile = join(root, 'props.json')

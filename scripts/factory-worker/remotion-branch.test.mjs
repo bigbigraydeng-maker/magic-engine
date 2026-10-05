@@ -453,6 +453,7 @@ describe('montage template and shared music', () => {
     wo.brief.remotion = { template: 'car\nousel', props: MONTAGE_PROPS }
     const err = await errOf(run(env, deps, wo))
     expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.retryable).toBe(true)
     expect(err.message.startsWith('UNKNOWN_TEMPLATE:')).toBe(true)
     expect(err.message).not.toContain('\n')
     expect(deps.renderFn).not.toHaveBeenCalled()
@@ -466,6 +467,7 @@ describe('montage template and shared music', () => {
     })
     const err = await errOf(run(env, deps, montageWo()))
     expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.retryable).toBe(true)
     expect(err.message).toContain('音乐目录读不了')
     expect(deps.renderFn).not.toHaveBeenCalled()
   })
@@ -527,6 +529,8 @@ describe('montage template and shared music', () => {
     const err = await errOf(run(env, deps, montageWo()))
     expect(err).toBeInstanceOf(RemotionOrderError)
     expect(err.message).toContain('乐库里找不到音乐文件')
+    expect(err.message).toContain('乐库文件夹：Music')
+    expect(err.message).not.toContain(env.root)
     expect(deps.renderFn).not.toHaveBeenCalled()
   })
 
@@ -633,6 +637,16 @@ describe('copyWithinRoot', () => {
     const dest = join(env.root, 'copy.mp4')
     expect(() => copyWithinRoot(realpathSync(join(env.lib, 'clips')), realpathSync(env.lib), dest)).toThrow()
     expect(existsSync(dest)).toBe(false)
+  })
+
+  it('streams a multi-chunk file byte-for-byte', () => {
+    const env = makeEnv()
+    const src = join(env.lib, 'clips', 'big.mp4')
+    const bytes = Buffer.alloc(5 * 1024 * 1024 + 123, 7)
+    writeFileSync(src, bytes)
+    const dest = join(env.root, 'big-copy.mp4')
+    copyWithinRoot(realpathSync(src), realpathSync(env.lib), dest)
+    expect(Buffer.compare(readFileSync(dest), bytes)).toBe(0)
   })
 })
 
