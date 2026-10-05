@@ -143,6 +143,9 @@ interface MessengerMessage {
    *  message — skipped, same as WhatsApp's `statuses` callbacks having no `messages`. */
   is_echo?: boolean
   attachments?: MessengerAttachment[]
+  /** Click-to-Messenger ad referral, delivered INSIDE the first message object
+   *  (per Meta docs) rather than on the top-level event. See `pickReferral`. */
+  referral?: MessengerReferral
 }
 
 interface MessengerMessagingEvent {
@@ -176,6 +179,24 @@ function messageBody(msg: MessengerMessage): string {
   const media = extractMedia(msg)
   if (!media) return '[unsupported message]'
   return `[${media.kind} message]`
+}
+
+/** A referral is only useful if it actually carries attribution. A Shops
+ *  product-page referral looks like `{ product: { id } }` and must be ignored. */
+function isUsableReferral(r: MessengerReferral | undefined): r is MessengerReferral {
+  if (!r) return false
+  return typeof r.ad_id === 'string' || typeof r.source === 'string' || typeof r.ref === 'string'
+}
+
+/**
+ * Where a thread came from. Meta delivers the ad referral either on the
+ * top-level event or inside the first message object, so both are candidates.
+ * Prefer one carrying `ad_id` (the strongest attribution); otherwise the first
+ * usable candidate. Returns undefined when nothing usable is present.
+ */
+function pickReferral(event: MessengerMessagingEvent): MessengerReferral | undefined {
+  const candidates = [event.referral, event.message?.referral].filter(isUsableReferral)
+  return candidates.find((r) => typeof r.ad_id === 'string') ?? candidates[0]
 }
 
 // ---------------------------------------------------------------------------
@@ -305,7 +326,7 @@ async function storeMessage(
     psid,
     undefined, // Messenger's `messaging` event carries no display name; the
     // hourly sync fills participant_name in from the Graph API's participants list.
-    event.referral,
+    pickReferral(event),
     sentAt,
   )
 
@@ -328,6 +349,56 @@ async function storeMessage(
   if (msgErr) throw new Error(`conversation_messages upsert failed: ${msgErr.message}`)
 
   return { conversationId: conversationRowId, messageId: msg.mid, contactId, sentAt }
+}
+
+/**
+ * Record attribution for a referral-only event (Meta's `messaging_referrals`
+ * callback: `event.referral` present, no `event.message`). Meta sends these for
+ * threads that already exist, so we only fill an empty `entry_referral` and
+ * never create a conversation row. Best effort — never throws.
+ */
+async function recordReferralOnly(clientId: string, event: MessengerMessagingEvent): Promise<void> {
+  try {
+    const psid = event.sender?.id
+    const referral = pickReferral(event)
+    if (!psid || !referral) return
+
+    const { data, error } = await supabaseAdmin
+      .from('conversations')
+      .select('id')
+      .eq('client_id', clientId)
+      .eq('channel', 'messenger')
+      .eq('participant_psid', psid)
+      .maybeSingle()
+
+    // A failed lookup is NOT "no thread" — do not silently drop the referral.
+    if (error) {
+      console.error(
+        `[webhooks/meta/messenger] referral-only lookup FAILED for psid=${psid}: ${error.message}`,
+      )
+      return
+    }
+    if (!data?.id) {
+      console.warn(
+        `[webhooks/meta/messenger] referral-only event for psid=${psid} had no stored thread — skipped`,
+      )
+      return
+    }
+
+    const { error: refErr } = await supabaseAdmin
+      .from('conversations')
+      .update({ entry_referral: referral })
+      .eq('id', data.id as string)
+      .is('entry_referral', null)
+    if (refErr) {
+      console.error(
+        `[webhooks/meta/messenger] referral-only entry_referral 写入失败（会话 ${data.id as string}）:`,
+        refErr.message,
+      )
+    }
+  } catch (err) {
+    console.error(`[webhooks/meta/messenger] referral-only 处理失败:`, err)
+  }
 }
 
 /**
@@ -438,6 +509,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     for (const event of events) {
+      // Referral-only event (no message): record attribution on the existing
+      // thread, then move on. Never affects the failures/503 logic.
+      if (!event.message && event.referral) {
+        await recordReferralOnly(lookup.clientId, event)
+        continue
+      }
+
       try {
         const result = await storeMessage(lookup.clientId, pageId, event)
         if (!result) continue // echo / non-message event — not an error, nothing to store
