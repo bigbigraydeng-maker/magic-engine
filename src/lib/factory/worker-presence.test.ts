@@ -279,12 +279,12 @@ describe('judgeQueueByClient —— 🔴 心跳按客户算，不跨客户串台
   })
 })
 
-describe('latestAliveAt —— 存活信号按客户归属', () => {
-  const ping = (started_at: string, client_id: string | null) => ({ started_at, summary: { client_id } })
-  it('干活心跳和空闲存活信号取最新；带 client_id 的只算给那个客户', () => {
-    const pings = [ping('2026-09-08T10:00:00Z', 'a'), ping('2026-09-08T09:00:00Z', null)]
+describe('latestAliveAt —— 存活信号只算给它声明能领的客户', () => {
+  const ping = (started_at: string, client_ids: string[]) => ({ started_at, summary: { client_ids } })
+  it('干活心跳和存活信号取最新；没声明的客户不被担保', () => {
+    const pings = [ping('2026-09-08T10:00:00Z', ['a']), ping('2026-09-08T09:00:00Z', ['a', 'B'])]
     expect(latestAliveAt('2026-09-08T08:00:00Z', pings, 'a')).toBe('2026-09-08T10:00:00Z')
     expect(latestAliveAt('2026-09-08T08:00:00Z', pings, 'b')).toBe('2026-09-08T09:00:00Z')
-    expect(latestAliveAt(undefined, [], 'a')).toBeUndefined()
+    expect(latestAliveAt(undefined, pings, 'c')).toBeUndefined()
   })
 })

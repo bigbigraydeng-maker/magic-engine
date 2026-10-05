@@ -211,6 +211,8 @@ export async function heartbeat(woId, costSoFar, fetchFn = fetch) {
     )
   }
   if (json.abort === true) log(`⚠️ heartbeat abort 信号(超预算),woId=${woId}`)
+  // 干活期间别的客户看不到这台 worker 的工单心跳，顺手报一次存活（4 分钟节流，尽力而为）
+  await pingAlive(fetchFn)
   return json
 }
 
@@ -1032,8 +1034,8 @@ function loadMusicLibrary() {
 
 // ── 主循环 ──────────────────────────────────────────────────────────────────────
 
-// 空闲存活信号：让服务端知道「出片机还活着、只是没领到单」，离线才能在 30 分钟内判出来。
-// 尽力而为——失败只记一行日志，绝不影响领单；干活期间由工单心跳负责，不重复发。
+// 存活信号：让服务端知道「出片机还活着、只是没领到单 / 正在给别的客户干活」，离线才能在 30 分钟内判出来。
+// 尽力而为——失败只记一行日志、有 10 秒超时，不会卡住领单。
 const PING_EVERY_MS = 4 * 60_000
 let lastPingAt = 0
 export async function pingAlive(fetchFn = fetch, now = Date.now()) {
@@ -1044,6 +1046,7 @@ export async function pingAlive(fetchFn = fetch, now = Date.now()) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${WORKER_TOKEN}` },
       body: JSON.stringify(buildClaimBody(WORKER_ID, TARGET_CLIENT_ID)),
+      signal: AbortSignal.timeout(10_000),
     })
     if (!res.ok) log(`存活信号发送失败 status=${res.status}`)
     return res.ok
@@ -1070,8 +1073,9 @@ async function main() {
   }
   do {
     try {
-      if (loop) await pingAlive()
       const result = await runOneOrder()
+      // 领单请求没抛错才算「活着且能领单」；领单一直失败时不报存活，离线提醒才会响
+      if (loop) await pingAlive()
       if (jsonResult) console.log(`FACTORY_WORKER_RESULT ${JSON.stringify(result)}`)
       if (!result.claimed && loop) log('无 queued 工单,等待…')
       else if (!result.claimed) { log('无 queued 工单,退出'); break }

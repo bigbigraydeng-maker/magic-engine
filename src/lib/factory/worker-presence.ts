@@ -214,16 +214,18 @@ export function judgeQueueByClient(
 }
 
 /**
- * 一个客户的「最近一次工人还活着」：干活时的工单心跳 与 空闲时的存活信号取最新。
- * 存活信号带 `client_id` 时只算给那个客户，不带 = 全客户通用的 worker。
+ * 一个客户的「最近一次工人还活着」：干活时的工单心跳 与 空闲/干活间隙的存活信号取最新。
+ * 存活信号只算给它自己声明能领的客户（`client_ids`，服务端按领单白名单展开），
+ * 不能替没人服务的客户担保。
  */
 export function latestAliveAt(
   workOrderHeartbeat: string | undefined,
-  pings: ReadonlyArray<{ started_at: string; summary: { client_id?: string | null } | null }>,
+  pings: ReadonlyArray<{ started_at: string; summary: { client_ids?: string[] | null } | null }>,
   clientId: string,
 ): string | undefined {
+  const id = clientId.toLowerCase()
   const times = pings
-    .filter((p) => !p.summary?.client_id || p.summary.client_id.toLowerCase() === clientId.toLowerCase())
+    .filter((p) => (p.summary?.client_ids ?? []).some((c) => c.toLowerCase() === id))
     .map((p) => p.started_at)
   if (workOrderHeartbeat) times.push(workOrderHeartbeat)
   return times.sort((a, b) => Date.parse(b) - Date.parse(a))[0]

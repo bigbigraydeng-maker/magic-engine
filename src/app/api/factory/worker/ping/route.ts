@@ -5,7 +5,12 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { isWorkerAuthorized, workerIdFromBody } from '@/lib/factory/worker-guard'
+import {
+  isWorkerAuthorized,
+  workerClaimClientIds,
+  workerClientWhitelist,
+  workerIdFromBody,
+} from '@/lib/factory/worker-guard'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,10 +27,15 @@ export async function POST(req: NextRequest) {
     // body 必须有 worker_id，下面会拒
   }
   const workerId = workerIdFromBody(body)
-  if (!workerId) return NextResponse.json({ error: 'worker_id required' }, { status: 400 })
-  // 限定了单客户的 worker 带上 client_id，读侧才不会把它的存活算给别的客户
-  const rawClient = body['client_id']
-  const clientId = typeof rawClient === 'string' && rawClient.trim() ? rawClient.trim() : null
+  if (!workerId || workerId.length > 100) {
+    return NextResponse.json({ error: 'worker_id required (<=100 chars)' }, { status: 400 })
+  }
+  // 存活信号只算给「这台 worker 真能领的客户」：跟 claim 同一套白名单口径。
+  // 没限定客户的 worker 展开成整个白名单；限定了就只算那一个；越权或白名单没配一律拒。
+  const whitelist = workerClientWhitelist()
+  if (!whitelist) return NextResponse.json({ error: 'FACTORY_WORKER_CLIENT_IDS not configured' }, { status: 503 })
+  const clientIds = workerClaimClientIds(body, whitelist)
+  if (!clientIds) return NextResponse.json({ error: 'client_id must be allowlisted when provided' }, { status: 403 })
 
   const at = new Date().toISOString()
   const row = {
@@ -33,7 +43,7 @@ export async function POST(req: NextRequest) {
     started_at: at,
     finished_at: at,
     duration_ms: 0,
-    summary: { worker_id: workerId, client_id: clientId },
+    summary: { worker_id: workerId, client_ids: clientIds },
   }
   const { data: existing, error: findErr } = await supabaseAdmin
     .from('cron_run_logs')

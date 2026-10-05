@@ -27,7 +27,7 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <string>/opt/homebrew/bin:/usr/local/bin:__HOME__/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
 
   <!-- 登录就起；退出（崩溃或被杀）就拉起；至少隔 30 秒，防止配置错了狂刷 -->

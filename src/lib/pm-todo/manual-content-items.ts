@@ -214,13 +214,13 @@ export async function pushFactoryWorkerItems(
 
   // 心跳按客户查 —— 判定层解释了为什么不能用全局最新的（judgeQueueByClient 头注）。
   const clientIds = Array.from(new Set(queued.map((q) => q.client_id)))
-  // 空闲时的存活信号（worker 每 ~4 分钟 ping 一次，复用 cron_run_logs，一台 worker 一行）。
+  // 空闲时的存活信号（worker 空闲时每 ~4 分钟、干活时跟着工单心跳 ping 一次，复用 cron_run_logs，一台 worker 一行）。
   const { data: aliveData, error: aliveError } = await supabase
     .from('cron_run_logs')
     .select('started_at, summary')
     .eq('job_name', 'factory-worker-alive')
   if (aliveError) throw new Error(`factory alive-ping query failed: ${aliveError.message}`)
-  const pings = (aliveData ?? []) as Array<{ started_at: string; summary: { client_id?: string | null } | null }>
+  const pings = (aliveData ?? []) as Array<{ started_at: string; summary: { client_ids?: string[] | null } | null }>
 
   const latestHbByClient = new Map<string, string>()
   for (const clientId of clientIds) {
@@ -293,7 +293,7 @@ function pushOneFactoryWorkerItem(
         : ''),
     how:
       '在那台 Mac 的终端里，已装开机自启的话跑 `launchctl kickstart -k gui/$(id -u)/com.magicengine.factory-worker`（把它重启）；' +
-      '没装的话跑 `node scripts/factory-worker/worker.mjs --loop`。起来之后它会自己把排队的活领走，这条待办也会自己消失。' +
+      '没装的话跑 `node scripts/factory-worker/worker.mjs --loop`。起来之后它会自己把排队的活领走，这条待办也会自己消失。如果那台 Mac 只是合盖睡着了，唤醒它就行。' +
       (verdict.sampleReason
         ? '开机之后如果这些工单还是过不去，就是上面那条原因（写着余额不足就去充值），回我一句我来查。'
         : '') +

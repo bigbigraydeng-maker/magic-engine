@@ -27,8 +27,8 @@ function database(orders: Row[], logs: Row[]) {
 const order = (client_id: string, waitedMin: number): Row => ({
   client_id, status: 'queued', created_at: minsAgo(waitedMin), heartbeat_at: null, reject_reason: null,
 })
-const ping = (pingedMinAgo: number, client_id: string | null = null): Row => ({
-  job_name: 'factory-worker-alive', started_at: minsAgo(pingedMinAgo), summary: { worker_id: 'mac-1', client_id },
+const ping = (pingedMinAgo: number, client_ids: string[] = ['a', 'b']): Row => ({
+  job_name: 'factory-worker-alive', started_at: minsAgo(pingedMinAgo), summary: { worker_id: 'mac-1', client_ids },
 })
 const names = new Map([['a', { name: 'Client A' }], ['b', { name: 'Client B' }]])
 const run = async (orders: Row[], logs: Row[]) => {
@@ -58,7 +58,7 @@ describe('出片机离线提醒（30 分钟）', () => {
   })
 
   it('只限定了客户 B 的出片机在报存活，不能替客户 A 担保', async () => {
-    const items = await run([order('a', 50), order('b', 50)], [ping(1, 'b')])
+    const items = await run([order('a', 50), order('b', 50)], [ping(1, ['b'])])
     expect(items.map(i => i.what).join('')).toContain('Client A')
     expect(items.map(i => i.what).join('')).not.toContain('Client B')
   })
