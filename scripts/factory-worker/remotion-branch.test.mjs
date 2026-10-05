@@ -44,6 +44,26 @@ const PROPS = {
 const FILES = ['logo.png', 'clips/h.mp4', 'clips/a.mp4', 'clips/b.mp4', 'clips/c.mp4', 'clips/p.mp4']
 const TIMING = { hookFrames: 60, itemFrom: [60, 120, 180], itemDur: [60, 60, 60], revealFrom: 240, totalFrames: 360 }
 
+const MONTAGE_PROPS = { logoFile: 'logo.png', musicFile: 'song-one.m4a', beats: [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5], words: [{ at: 0, beats: 1, text: '3 BED' }, { at: 1, beats: 2, text: 'OPEN SAT' }] }
+const MONTAGE_FILES = ['logo.png', 'song-one.m4a', 'clips/a.mp4', 'clips/b.mp4']
+
+function makeEngine(over = {}) {
+  return {
+    FPS: 30,
+    isTemplateId: (id) => id === 'list' || id === 'montage',
+    loadTemplate: (id, p) => ({
+      compositionId: id === 'list' ? 'ListReel' : 'MontageReel',
+      props: p,
+      assetFiles: id === 'list' ? FILES : MONTAGE_FILES,
+      totalFrames: 360,
+    }),
+    computeTimingFromProps: () => TIMING,
+    montageFrameOf: (beats, i) => (i === 0 ? 0 : Math.round(beats[i] * 30) + 2),
+    musicSourceFor: () => null,
+    ...over,
+  }
+}
+
 function makeWo(over = {}) {
   return {
     work_order_id: 'wo-1', client_id: 'client-a',
@@ -69,7 +89,7 @@ function makeDeps(env, over = {}) {
     allowedClientIds: ['client-a'],
     workerId: 'w1',
     healthFn: () => [],
-    loadEngineFn: async () => ({ parseListReelProps: (p) => p, collectAssetFiles: () => FILES, computeTimingFromProps: () => TIMING, FPS: 30 }),
+    loadEngineFn: async () => makeEngine(),
     renderFn: vi.fn(async ({ outFile }) => { writeFileSync(outFile, 'video-bytes'); return { code: 0, stderrTail: '' } }),
     heartbeatIntervalMs: 10, timeoutSec: 600,
     ...over,
@@ -111,7 +131,7 @@ describe('processRemotionOrder refusals', () => {
     ['reopened_from', {}, { reopened_from: 'wo-0' }, {}, null],
     ['remotion missing', {}, { remotion: undefined }, {}, null],
     ['health problems', {}, {}, { healthFn: () => ['缺少 zod'] }, /出片机还没装好 Remotion/],
-    ['bad props', {}, {}, { loadEngineFn: async () => ({ parseListReelProps: () => { throw new Error('字段 hook：太长') }, collectAssetFiles: () => FILES, computeTimingFromProps: () => TIMING, FPS: 30 }) }, /字段 hook：太长/],
+    ['bad props', {}, {}, { loadEngineFn: async () => makeEngine({ loadTemplate: () => { throw new Error('字段 hook：太长') } }) }, /字段 hook：太长/],
   ])('%s', async (_name, woOver, briefOver, depsOver, re) => {
     const env = makeEnv()
     const deps = makeDeps(env, depsOver)
@@ -250,7 +270,7 @@ describe('heartbeat during render', () => {
 describe('assets and client isolation', () => {
   it.each([
     ['missing asset', {}, null],
-    ['non-png logo', { loadEngineFn: async () => ({ parseListReelProps: (p) => p, collectAssetFiles: () => ['logo.jpg', ...FILES.slice(1)], computeTimingFromProps: () => TIMING, FPS: 30 }) }, { remotion: { template: 'list', props: { ...PROPS, logoFile: 'logo.jpg' } } }],
+    ['non-png logo', { loadEngineFn: async () => makeEngine({ loadTemplate: (id, p) => ({ compositionId: 'ListReel', props: p, assetFiles: ['logo.jpg', ...FILES.slice(1)], totalFrames: 360 }) }) }, { remotion: { template: 'list', props: { ...PROPS, logoFile: 'logo.jpg' } } }],
   ])('rejects %s', async (_name, depsOver, woOver) => {
     const env = makeEnv()
     if (_name === 'missing asset') rmSync(join(env.lib, 'clips', 'b.mp4'))
@@ -283,7 +303,7 @@ describe('post-render checks', () => {
     ['wrong resolution', { probeMediaEvidenceFn: vi.fn(() => ({ width: 720, height: 1280, duration_seconds: 12 })) }],
     ['wrong duration', { probeMediaEvidenceFn: vi.fn(() => ({ width: 1080, height: 1920, duration_seconds: 20 })) }],
     ['empty output', { renderFn: vi.fn(async ({ outFile }) => { writeFileSync(outFile, ''); return { code: 0, stderrTail: '' } }) }],
-    ['music configured but no audio stream', { loadEngineFn: async () => ({ parseListReelProps: (p) => ({ ...p, musicFile: 'clips/a.mp4' }), collectAssetFiles: () => FILES, computeTimingFromProps: () => TIMING, FPS: 30 }), probeMediaEvidenceFn: vi.fn(() => ({ width: 1080, height: 1920, duration_seconds: 12, audio_stream_present: false })) }],
+    ['music configured but no audio stream', { loadEngineFn: async () => makeEngine({ loadTemplate: (id, p) => ({ compositionId: 'ListReel', props: { ...p, musicFile: 'clips/a.mp4' }, assetFiles: FILES, totalFrames: 360 }) }), probeMediaEvidenceFn: vi.fn(() => ({ width: 1080, height: 1920, duration_seconds: 12, audio_stream_present: false })) }],
     ['ffprobe measured nothing', { probeMediaEvidenceFn: vi.fn(() => ({})) }],
   ])('rejects %s', async (_name, over) => {
     const env = makeEnv()
@@ -325,6 +345,75 @@ describe('dispatch through worker.processOrder', () => {
   })
 })
 
+describe('montage template and shared music', () => {
+  const montageWo = () => {
+    const wo = makeWo()
+    wo.brief.remotion = { template: 'montage', props: MONTAGE_PROPS }
+    return wo
+  }
+
+  it('renders a montage order with music from the shared library', async () => {
+    const env = makeEnv()
+    mkdirSync(join(env.studio, 'Music'), { recursive: true })
+    writeFileSync(join(env.studio, 'Music', 'Song One.m4a'), 'song-bytes')
+    const deps = makeDeps(env, {
+      loadEngineFn: async () => makeEngine({ musicSourceFor: () => ({ folder: 'Music', file: 'Song One.m4a' }) }),
+    })
+    let musicPresent = null
+    let renderArgs = null
+    recordingRender(deps, (a) => {
+      renderArgs = a
+      musicPresent = existsSync(join(a.publicDir, 'song-one.m4a'))
+    })
+    const res = await run(env, deps, montageWo())
+    expect(res).toEqual({ ok: true, cost: 0 })
+    expect(renderArgs.template).toBe('montage')
+    expect(musicPresent).toBe(true)
+    const segments = JSON.parse(deps.uploadSignedFn.mock.calls[1][1].toString())
+    expect(segments.template).toBe('montage')
+    expect(deps.completeFn.mock.calls[0][0].caption).toBe('3 BED · OPEN SAT')
+    const srt = deps.uploadSignedFn.mock.calls[2][1].toString()
+    expect(srt).toContain('OPEN SAT')
+    expect(srt).toContain('-->')
+  })
+
+  it('rejects music symlinked outside the music folder', async () => {
+    const env = makeEnv()
+    mkdirSync(join(env.studio, 'Music'), { recursive: true })
+    writeFileSync(join(env.root, 'outside.m4a'), 'outside-bytes')
+    symlinkSync(join(env.root, 'outside.m4a'), join(env.studio, 'Music', 'escape.m4a'))
+    const deps = makeDeps(env, {
+      loadEngineFn: async () => makeEngine({ musicSourceFor: () => ({ folder: 'Music', file: 'escape.m4a' }) }),
+    })
+    const err = await errOf(run(env, deps, montageWo()))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toContain('乐库里找不到音乐文件')
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+
+  it('rejects music missing from the library', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env, {
+      loadEngineFn: async () => makeEngine({ musicSourceFor: () => ({ folder: 'Music', file: 'nope.m4a' }) }),
+    })
+    const err = await errOf(run(env, deps, montageWo()))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toContain('乐库里找不到音乐文件')
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+
+  it('rejects an unknown template', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env)
+    const wo = makeWo()
+    wo.brief.remotion = { template: 'carousel', props: MONTAGE_PROPS }
+    const err = await errOf(run(env, deps, wo))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toContain('不认识的模板')
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+})
+
 describe('runRemotionRender', () => {
   const fakeChild = () => Object.assign(new EventEmitter(), { pid: 4242, stdout: new EventEmitter(), stderr: new EventEmitter() })
   const args = (spawnFn, over = {}) => ({ propsFile: 'p', outFile: 'o', publicDir: 'd', tmpDir: '/t', spawnFn, ...over })
@@ -348,6 +437,19 @@ describe('runRemotionRender', () => {
     const p = runRemotionRender(args(spawnFn))
     await vi.advanceTimersByTimeAsync(3100)
     await expect(p).resolves.toMatchObject({ code: 0 })
+  })
+
+  it.each([
+    ['montage', 'montage'],
+    [undefined, 'list'],
+  ])('passes template %s as %s', async (template, expected) => {
+    vi.spyOn(process, 'kill').mockImplementation(() => true)
+    const spawnFn = vi.fn(() => { const c = fakeChild(); setImmediate(() => c.emit('close', 0)); return c })
+    await runRemotionRender(args(spawnFn, template === undefined ? {} : { template }))
+    const argv = spawnFn.mock.calls[0][1]
+    const i = argv.indexOf('--template')
+    expect(i).toBeGreaterThanOrEqual(0)
+    expect(argv[i + 1]).toBe(expected)
   })
 
   it('abort kills the whole process group', async () => {

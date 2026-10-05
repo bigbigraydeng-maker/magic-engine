@@ -8,6 +8,7 @@ import {
   collectMontageAssetFiles,
   computeMontageTiming,
 } from './montage.ts';
+import { stagedFileName, type MusicCatalog } from './music.ts';
 
 /** Allowed template ids. */
 export const TEMPLATE_IDS = ['list', 'montage'] as const;
@@ -51,4 +52,17 @@ export function loadTemplate(id: TemplateId, input: unknown): LoadedTemplate {
     assetFiles: collectMontageAssetFiles(props),
     totalFrames,
   };
+}
+
+/** Where a staged music file name (props.musicFile) lives in the shared music library, or null if it is not a catalog track. */
+export function musicSourceOf(
+  catalog: MusicCatalog,
+  stagedName: string,
+): { folder: string; file: string } | null {
+  for (const track of catalog.tracks) {
+    if (stagedFileName(track) === stagedName) {
+      return { folder: track.folder, file: track.file };
+    }
+  }
+  return null;
 }

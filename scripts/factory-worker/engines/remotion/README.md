@@ -78,6 +78,15 @@ props 里没有任何默认值，缺项直接拒。`src/montage.ts` 的卡口（
 - 每条镜头带 `lenFrames`（时长帧数）、可选 `luma`（平均亮度，用来拉平镜头间亮度差）、`source`（own / stock / ai）。
 - 音画偏差：节拍对应帧整体后移 `MONTAGE_SYNC_SHIFT_FRAMES = 2` 帧（实测：1 帧时偏差 −33 毫秒，2 帧时 +1 毫秒）。
 
+## 出片机怎么用这些模板（包 C）
+
+出片机（`scripts/factory-worker/remotion-branch.mjs`）按工单 `brief.remotion = { template, props }` 渲染：`template` 必须是 `src/templates.ts` 注册表里有的（现在是 `list`、`montage`），不认识的直接拒（不重试）；`--template` 会原样传给 `render.mjs`。**旧版出片机不认识 `montage`，也会拒收**——所以升级出片机之前不要建 `montage` 工单。
+
+- **音乐从共享乐库取**：`props.musicFile` 如果是 `catalog/music.json` 里某首的暂存名（`stagedFileName`，如 `pipa-trap.m4a`），出片机从 `<STUDIO_ROOT>/<目录里的 folder>/<file>`（即 `Music/`、`_shared/music/`）拷进该单暂存目录，路径必须落在该乐库文件夹内（含符号链接）；不在目录里的音乐名仍按 R2a 老办法从该客户的 `remotion-assets/` 取。出片机 Mac 上这两个乐库文件夹要在（Dropbox 同步到 `MagicLab_Studio/` 下）。
+- 目录里状态是 `pending_listen`（节拍没量过）的歌，**出片机不拦**，由上游选择器决定用不用。
+- 字幕与 `caption`：`list` 沿用原来的三段；`montage` 一个词一条字幕，`caption` 是所有词用 ` · ` 连起来（服务端红线复扫扫的就是它）。
+- 成片体检、心跳、上传、`complete` 与 R2a 完全一致；`montage` 的 `musicFile` 必填，所以音轨检查一定会查。
+
 ## 测试
 
 ```bash

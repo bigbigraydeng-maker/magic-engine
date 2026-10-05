@@ -72,11 +72,21 @@ export async function loadRemotionEngine(engineDir = REMOTION_ENGINE_DIR) {
   try {
     const schema = await import(pathToFileURL(join(engineDir, 'src', 'schema.ts')).href)
     const timing = await import(pathToFileURL(join(engineDir, 'src', 'timing.ts')).href)
+    const templates = await import(pathToFileURL(join(engineDir, 'src', 'templates.ts')).href)
+    const montage = await import(pathToFileURL(join(engineDir, 'src', 'montage.ts')).href)
+    const music = await import(pathToFileURL(join(engineDir, 'src', 'music.ts')).href)
+    const catalog = music.parseMusicCatalog(
+      JSON.parse(readFileSync(join(engineDir, 'catalog', 'music.json'), 'utf8')),
+    )
     return {
       parseListReelProps: schema.parseListReelProps,
       collectAssetFiles: schema.collectAssetFiles,
       computeTimingFromProps: timing.computeTimingFromProps,
       FPS: timing.FPS,
+      isTemplateId: templates.isTemplateId,
+      loadTemplate: templates.loadTemplate,
+      montageFrameOf: montage.montageFrameOf,
+      musicSourceFor: (name) => templates.musicSourceOf(catalog, name),
     }
   } catch (e) {
     throw new RemotionOrderError(
@@ -132,6 +142,22 @@ export function buildRemotionSrt(props, timing, fps) {
     .join('')
 }
 
+// Every montage word joined for the server-side red-line rescan.
+export function buildMontageCaption(props) {
+  return props.words.map((w) => clean(w.text)).join(' · ')
+}
+
+// Build the SRT captions for the montage layout, one cue per word.
+export function buildMontageSrt(props, frameOf, fps) {
+  return props.words
+    .map((w, i) => {
+      const from = frameOf(props.beats, w.at) / fps
+      const to = frameOf(props.beats, w.at + w.beats) / fps
+      return `${i + 1}\n${fmtTime(from)} --> ${fmtTime(to)}\n${clean(w.text)}\n\n`
+    })
+    .join('')
+}
+
 // True when `child` is inside `parent` (separator-aware, not a bare prefix).
 const isInside = (parent, child) => {
   const rel = relative(parent, child)
@@ -139,7 +165,7 @@ const isInside = (parent, child) => {
 }
 
 // Copy the referenced assets into the staging directory.
-export function stageRemotionAssets({ props, files, stageDir, brandkitDir, assetLibDir, clientRootDir }) {
+export function stageRemotionAssets({ props, files, stageDir, brandkitDir, assetLibDir, clientRootDir, musicPath = null, musicRoot = null }) {
   if (!props.logoFile.toLowerCase().endsWith('.png')) {
     throw new RemotionOrderError('logo 文件名必须是 .png（logo 一律取自该客户品牌包的 watermark.png）')
   }
@@ -152,7 +178,21 @@ export function stageRemotionAssets({ props, files, stageDir, brandkitDir, asset
   mkdirSync(dirname(logoDest), { recursive: true })
   copyFileSync(join(brandkitDir, 'assets', 'watermark.png'), logoDest)
 
-  const others = files.filter((f) => f !== props.logoFile)
+  if (musicPath !== null) {
+    try {
+      const musicReal = realpathSync(musicPath)
+      const rootReal = realpathSync(musicRoot)
+      if (!isInside(rootReal, musicReal) || !statSync(musicReal).isFile()) throw new Error('bad')
+      const musicDest = join(stageDir, props.musicFile)
+      mkdirSync(dirname(musicDest), { recursive: true })
+      copyFileSync(musicReal, musicDest)
+      if (statSync(musicDest).size !== statSync(musicReal).size) throw new Error('short')
+    } catch {
+      throw new RemotionOrderError(`乐库里找不到音乐文件：${props.musicFile}（应在 ${musicRoot}）`)
+    }
+  }
+
+  const others = files.filter((f) => f !== props.logoFile && !(musicPath !== null && f === props.musicFile))
   if (others.length === 0) return
 
   let libReal
@@ -193,6 +233,7 @@ export function runRemotionRender({
   outFile,
   publicDir,
   tmpDir,
+  template = 'list',
   engineDir = REMOTION_ENGINE_DIR,
   timeoutSec = 600,
   signal,
@@ -204,6 +245,7 @@ export function runRemotionRender({
       join(engineDir, 'render.mjs'),
       '--props', propsFile,
       '--out', outFile,
+      '--template', template,
       '--public-dir', publicDir,
       '--timeout-sec', String(timeoutSec),
     ], {
@@ -284,8 +326,8 @@ function assertRemotionBrief(wo, deps) {
     throw new RemotionOrderError('remotion 引擎暂不支持打回重做：重渲只会得到同一条片子')
   }
   const remotion = brief.remotion
-  if (!remotion || typeof remotion !== 'object' || remotion.template !== 'list' || typeof remotion.props !== 'object' || remotion.props === null) {
-    throw new RemotionOrderError('工单缺少 brief.remotion（template 只支持 "list"，且必须带 props）')
+  if (!remotion || typeof remotion !== 'object' || typeof remotion.template !== 'string' || typeof remotion.props !== 'object' || remotion.props === null) {
+    throw new RemotionOrderError('工单缺少 brief.remotion（必须带 template 字符串和 props 对象）')
   }
   return remotion
 }
@@ -347,13 +389,20 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
   }
 
   const eng = await loadEngineFn()
+  const template = remotion.template
+  if (!eng.isTemplateId(template)) {
+    throw new RemotionOrderError(`不认识的模板 "${template}"：出片机的模板注册表里没有它`)
+  }
   let props
   let files
   let timing
+  let totalFrames
   try {
-    props = eng.parseListReelProps(remotion.props)
-    files = eng.collectAssetFiles(props)
-    timing = eng.computeTimingFromProps(props)
+    const loaded = eng.loadTemplate(template, remotion.props)
+    props = loaded.props
+    files = loaded.assetFiles
+    totalFrames = loaded.totalFrames
+    timing = template === 'list' ? eng.computeTimingFromProps(props) : null
   } catch (e) {
     throw new RemotionOrderError('工单里的视频参数不合格：' + e.message)
   }
@@ -380,7 +429,10 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     }
     const clientRootDir = join(deps.studioRoot, deps.clientStudio[wo.client_id])
     const assetLibDir = join(clientRootDir, 'remotion-assets')
-    stageRemotionAssets({ props, files, stageDir, brandkitDir, assetLibDir, clientRootDir })
+    const musicSource = props.musicFile ? eng.musicSourceFor(props.musicFile) : null
+    const musicRoot = musicSource ? join(deps.studioRoot, musicSource.folder) : null
+    const musicPath = musicSource ? join(musicRoot, musicSource.file) : null
+    stageRemotionAssets({ props, files, stageDir, brandkitDir, assetLibDir, clientRootDir, musicPath, musicRoot })
     hb.assertAlive()
 
     const propsFile = join(root, 'props.json')
@@ -396,6 +448,7 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
         outFile: finalPath,
         publicDir: stageDir,
         tmpDir,
+        template,
         timeoutSec,
         signal: hb.signal,
       })
@@ -419,9 +472,12 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     if (!stat.isFile() || stat.size <= 0) {
       throw new RemotionOrderError('成片体检没过：渲染产物不存在或为空')
     }
-    const srtText = buildRemotionSrt(props, timing, eng.FPS)
+    const srtText = template === 'list'
+      ? buildRemotionSrt(props, timing, eng.FPS)
+      : buildMontageSrt(props, eng.montageFrameOf, eng.FPS)
+    const caption = template === 'list' ? buildRemotionCaption(props) : buildMontageCaption(props)
     const evidence = deps.probeMediaEvidenceFn(finalPath, srtText)
-    const expected = timing.totalFrames / eng.FPS
+    const expected = totalFrames / eng.FPS
     if (evidence.width !== 1080 || evidence.height !== 1920) {
       if (!Number.isInteger(evidence.width)) {
         throw new RemotionOrderError('成片体检没过：没测到分辨率（出片机的 ffprobe 可能没装好）')
@@ -437,7 +493,7 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     hb.assertAlive()
 
     const segmentsJson = Buffer.from(
-      JSON.stringify({ engine: 'remotion', template: 'list', props, render: { attempts, elapsed_s } }, null, 2),
+      JSON.stringify({ engine: 'remotion', template, props, render: { attempts, elapsed_s } }, null, 2),
     )
     await deps.uploadSignedFn(wo.uploads.video.signed_url, readFileSync(finalPath), 'video/mp4')
     hb.assertAlive()
@@ -451,7 +507,7 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
       video_url: wo.uploads.video.path,
       segments_json_url: wo.uploads.segments_json.path,
       srt_url: wo.uploads.srt.path,
-      caption: buildRemotionCaption(props),
+      caption,
       actual_cost_usd: 0,
       new_clips: [],
       media_evidence: evidence,

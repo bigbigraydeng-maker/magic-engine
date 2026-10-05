@@ -8,7 +8,9 @@ import {
   TEMPLATE_IDS,
   isTemplateId,
   loadTemplate,
+  musicSourceOf,
 } from '../src/templates.ts'
+import { parseMusicCatalog } from '../src/music.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 
@@ -111,4 +113,35 @@ test('the sydney montage example loads and uses 3 or more clip kinds', () => {
   const loaded = loadTemplate('montage', raw)
   assert.equal(loaded.compositionId, 'MontageReel')
   assert.ok(new Set(raw.clips.map((c) => c.kind)).size >= 3)
+})
+
+/** Load the real music catalog fixture. */
+function musicCatalog() {
+  return parseMusicCatalog(
+    JSON.parse(
+      fs.readFileSync(new URL('../catalog/music.json', import.meta.url), 'utf8'),
+    ),
+  )
+}
+
+test('musicSourceOf resolves a Music folder track', () => {
+  const catalog = musicCatalog()
+  assert.deepEqual(musicSourceOf(catalog, 'pipa-trap.m4a'), {
+    folder: 'Music',
+    file: '琵琶陷阱.m4a',
+  })
+})
+
+test('musicSourceOf resolves a _shared/music folder track', () => {
+  const catalog = musicCatalog()
+  assert.deepEqual(musicSourceOf(catalog, 'jade-river-journey.mp3'), {
+    folder: '_shared/music',
+    file: 'Jade River Journey.mp3',
+  })
+})
+
+test('musicSourceOf returns null for unknown or non-exact names', () => {
+  const catalog = musicCatalog()
+  assert.equal(musicSourceOf(catalog, 'unknown-song.mp3'), null)
+  assert.equal(musicSourceOf(catalog, 'PIPA-TRAP.M4A'), null)
 })
