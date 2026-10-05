@@ -402,18 +402,18 @@ export function FactoryConfigPanel({ clientId }: Props) {
         {/* Instagram 目标 */}
         <div>
           <label className="block text-xs font-bold uppercase tracking-wide text-slate-500">
-            同时发到哪个 Instagram 账号(Publer 账号 ID,可不填)
+            同时发到哪个 Instagram 账号(Publishing Hub 账号 ID,可不填)
           </label>
           <input
             type="text"
             value={draft.igAccountId}
             onChange={(e) => setDraft((d) => ({ ...d, igAccountId: e.target.value }))}
-            placeholder="Publer 里该账号的 ID(字母数字,别填 @用户名)"
+            placeholder="Publishing Hub 里该账号的 ID(字母数字,别填 @用户名)"
             className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
             disabled={saving}
           />
           <p className="mt-1 text-xs text-slate-400">
-            在 Publer 里该客户的 Instagram 账号 ID。留空 = 不发 Instagram。填了以后:Facebook 那条片(草稿或真发)出来后,同一条片会同步到 Instagram,只同步 Facebook 发出后 48 小时内的片;Instagram 另有独立的真发开关,没打开前一律只在 Publer 里存草稿、不会公开。
+            在 Publishing Hub 里该客户的 Instagram 账号 ID。留空 = 不发 Instagram。填了以后:Facebook 那条片(草稿或真发)出来后,同一条片会同步到 Instagram,只同步 Facebook 发出后 48 小时内的片;Instagram 另有独立的真发开关,没打开前一律只在 Publishing Hub 里存草稿、不会公开。
           </p>
         </div>
 

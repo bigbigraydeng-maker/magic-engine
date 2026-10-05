@@ -12,6 +12,9 @@
  *  - 认领（claim）先于一切检查：任何后续失败都能留下机器可读回执。
  *  - 乐观写：每次写 output 都带 updated_at 守卫，冲突即 lost_race。
  *  - 发布成功后绝不回滚回执：回滚会导致重复发布。
+ *  - 排期(scheduled)只是「已提交」，不是「已发布」：这里不写完成账(execution_items completed /
+ *    fde_work_logs「已发到」)。Publer 只暴露 draft/scheduled，没有读回 published 的路径，
+ *    读回能力上线前三本账不记，避免排期失败时永久记一次不存在的成功发布。
  */
 
 import {
@@ -38,7 +41,7 @@ import {
   buildReelPostCaption,
 } from '@/lib/social/reel-publishing'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
-import { buildInstagramReelSubmittedEvent } from './instagram-publish-event'
+import { emitFor, emitMissingEvents } from './instagram-crosspost-events'
 import { createSupabaseCrosspostStore } from './instagram-crosspost-store'
 import {
   MAX_FB_AGE_MS,
@@ -71,9 +74,6 @@ export function instagramLive(factoryLive: boolean, env: Record<string, string |
 
 /** 每次运行最多扫描的候选数。 */
 const CANDIDATE_LIMIT = 50
-
-/** emitMissingEvents 最多补发的候选数。 */
-const MISSING_EVENTS_LIMIT = 5
 
 /** 审批门失败时的统一原因。 */
 const APPROVAL_FAIL =
@@ -144,7 +144,7 @@ export interface InstagramCrosspostOutcome {
 }
 
 /** 当前正在处理的工单的可变状态：回执 + 最新 updated_at + 最新 output。 */
-interface Current {
+export interface Current {
   candidate: CrosspostCandidate
   receipt: InstagramPublishReceipt
   updatedAt: string
@@ -182,22 +182,6 @@ function readEndcard(copy: Record<string, unknown>): Record<string, unknown> {
   return asPlainObject(copy.endcard) ?? {}
 }
 
-/** 计算发布标签：brief.angle || candidate.angle || expect_brand || 'Reel'。 */
-function computeLabel(
-  candidate: CrosspostCandidate,
-  target: PublishTarget,
-): string {
-  const briefAngle = candidate.brief.angle
-  if (typeof briefAngle === 'string' && briefAngle.length > 0) return briefAngle
-  if (candidate.angle !== null && candidate.angle.length > 0) {
-    return candidate.angle
-  }
-  if (target.expect_brand !== undefined && target.expect_brand.length > 0) {
-    return target.expect_brand
-  }
-  return 'Reel'
-}
-
 /** 生产依赖：未注入的部分用真实实现。 */
 function resolveDeps(deps?: Partial<CrosspostDeps>): CrosspostDeps {
   return {
@@ -210,7 +194,7 @@ function resolveDeps(deps?: Partial<CrosspostDeps>): CrosspostDeps {
     // 三本账用独立的 action_type:同一工单的 Facebook 回执行(factory_reel_publish)必须保持唯一,
     // 测量那边按 (action_type, work_order_id) 回读,两行同键会让 Facebook 的测量登记报错。
     recordBooks: deps?.recordBooks ?? ((id, ref, clientId, angle) =>
-      writeThreeBooks(id, ref, clientId, angle, { actionType: INSTAGRAM_BOOKS_ACTION_TYPE, channelLabel: 'Instagram(Publer)' })),
+      writeThreeBooks(id, ref, clientId, angle, { actionType: INSTAGRAM_BOOKS_ACTION_TYPE, channelLabel: 'Instagram(Publishing Hub)' })),
     now: deps?.now ?? (() => new Date()),
     newRequestId: deps?.newRequestId ?? (() => crypto.randomUUID()),
   }
@@ -227,7 +211,7 @@ export async function runInstagramCrosspost(
   const d = resolveDeps(deps)
   const candidates = await d.store.listCandidates(CANDIDATE_LIMIT)
   const now = d.now()
-  const targets = new Map<string, PublishTarget | null>() // 同一客户一轮只查一次
+  const targets = new Map<string, TargetLookup>() // 同一客户一轮只查一次
   const stats = { configErrors: 0 }
   const finish = (o: InstagramCrosspostOutcome): InstagramCrosspostOutcome =>
     stats.configErrors > 0 ? { ...o, config_errors: stats.configErrors } : o
@@ -238,8 +222,8 @@ export async function runInstagramCrosspost(
     if (!isFreshFacebookPost(c, now)) continue
     // 同一客户两次提交之间隔开一段时间:开关刚打开时窗口里可能攒着好几条,不许一小时内连发一串 Reel
     if (recentlySubmitted.has(c.client_id)) continue
-    const target = await loadTargetOnce(targets, c.client_id, d, stats)
-    if (target === null) continue // 没配 Instagram(或这个客户的配置读不出来):静默跳过
+    const lookup = await loadTargetOnce(targets, c.client_id, d, stats)
+    if (lookup.target === null && lookup.error === undefined) continue // 没配 Instagram:静默跳过
 
     const receipt0 = readReceipt(c.output)
     const decision = decideSweep({
@@ -250,7 +234,11 @@ export async function runInstagramCrosspost(
     })
     if (decision.action === 'skip') continue
 
-    return finish(await processOne(c, target, receipt0, decision.action, opts.live, d))
+    // 配置读不出(缺品牌名/查库抖动):留下失败回执,重试用尽后进今日待办,不静默丢掉
+    if (lookup.target === null) {
+      return finish(await failConfigRead(c, receipt0, lookup.error ?? '', opts.live, d))
+    }
+    return finish(await processOne(c, lookup.target, receipt0, decision.action, opts.live, d))
   }
 
   await emitMissingEvents(candidates, d)
@@ -276,23 +264,44 @@ function isFreshFacebookPost(c: CrosspostCandidate, now: Date): boolean {
   return Number.isFinite(at) && now.getTime() - at <= MAX_FB_AGE_MS && at - now.getTime() <= 5 * 60 * 1000
 }
 
+interface TargetLookup {
+  target: PublishTarget | null
+  /** 读配置失败时的原因(target 此时为 null) */
+  error?: string
+}
+
 /** 读客户的 Instagram 目标并缓存。一个客户读失败只影响他自己,不拖垮整轮扫描。 */
 async function loadTargetOnce(
-  cache: Map<string, PublishTarget | null>,
+  cache: Map<string, TargetLookup>,
   clientId: string,
   d: CrosspostDeps,
   stats: { configErrors: number },
-): Promise<PublishTarget | null> {
-  if (cache.has(clientId)) return cache.get(clientId) ?? null
-  let target: PublishTarget | null = null
+): Promise<TargetLookup> {
+  const hit = cache.get(clientId)
+  if (hit !== undefined) return hit
+  let lookup: TargetLookup
   try {
-    target = await d.store.loadInstagramTarget(clientId)
+    lookup = { target: await d.store.loadInstagramTarget(clientId) }
   } catch (e: unknown) {
     stats.configErrors += 1
     console.error(`[instagram-crosspost] 读客户 Instagram 配置失败 client=${clientId}`, e)
+    lookup = { target: null, error: e instanceof Error ? e.message : '读客户 Instagram 配置失败' }
   }
-  cache.set(clientId, target)
-  return target
+  cache.set(clientId, lookup)
+  return lookup
+}
+
+/** 配置读取失败:认领后写一条非终态失败回执(失败次数用尽后由今日待办接手)。 */
+async function failConfigRead(
+  c: CrosspostCandidate,
+  receipt0: InstagramPublishReceipt | null,
+  error: string,
+  live: boolean,
+  d: CrosspostDeps,
+): Promise<InstagramCrosspostOutcome> {
+  const claimed = await claimOrder(c, '', receipt0, live, d)
+  if ('outcome' in claimed) return claimed.outcome
+  return await failWith(claimed.current, 'other', `客户 Instagram 配置读取失败:${error}`, false, d)
 }
 
 /**
@@ -307,64 +316,15 @@ async function processOne(
   live: boolean,
   d: CrosspostDeps,
 ): Promise<InstagramCrosspostOutcome> {
-  const now = d.now()
-  const tag = candidate.id
-  const label = computeLabel(candidate, target)
+  const claimed = await claimOrder(candidate, target.publer_account_id ?? '', receipt0, live, d)
+  if ('outcome' in claimed) return claimed.outcome
+  const current = claimed.current
 
-  // 1. 认领：先写回执，后续任何失败都能留下机器可读状态。
-  const r1 = newClaim({
-    workOrderId: candidate.id,
-    clientId: candidate.client_id,
-    publerAccountId: target.publer_account_id ?? '',
-    requestId: d.newRequestId(),
-    live,
-    firstCommentRequested: true,
-    now,
-    prev: receipt0,
-  })
-  const claimedOutput = withReceipt(candidate.output, r1)
-  const claimWrite = await d.store.writeOutput(
-    candidate.id,
-    candidate.updated_at,
-    claimedOutput,
-  )
-  if (!claimWrite.ok) {
-    return { order_id: candidate.id, result: 'lost_race' }
-  }
-  const current: Current = {
-    candidate,
-    receipt: r1,
-    updatedAt: claimWrite.updatedAt,
-    output: claimedOutput,
-  }
-
-  // 2. 审批门：最后一道边界复查，与 Facebook worker 一致。
-  const gate = checkApproval(candidate)
-  if (gate !== null) {
-    return await failWith(current, 'other', gate, true, d)
-  }
-
-  // 3. 文案 + 首评 + 红线。
-  const copy = readCopy(candidate.brief)
-  const endcard = readEndcard(copy)
-  const firstComment = buildReelFirstComment(endcard, candidate.id, 'instagram')
-  if (firstComment === null) {
-    return await failWith(
-      current,
-      'other',
-      '首评 CTA 或 HTTPS 追踪链接无效',
-      true,
-      d,
-    )
-  }
-  const caption = buildReelPostCaption(copy)
-  const redline = await runRedline(candidate, caption, firstComment.text, d)
-  if (redline !== null) {
-    return await failWith(current, 'other', redline, true, d)
-  }
+  const content = await prepareContent(current, d)
+  if ('outcome' in content) return content.outcome
 
   // 4. 对账：先问 Publer 是否已经存在，绝不盲目重建。
-  const reconcile = await reconcileExisting(current, target, tag, action, d)
+  const reconcile = await reconcileExisting(current, target, candidate.id, action, d)
   if (reconcile !== null) return reconcile
 
   // 5. 视频 URL 校验。
@@ -380,19 +340,72 @@ async function processOne(
 
   // 6. 发布。
   const publishResult = await doPublish(
-    current,
-    target,
-    tag,
-    videoUrl,
-    caption,
-    firstComment.text,
-    live,
-    d,
+    current, target, candidate.id, videoUrl, content.caption, content.firstComment, live, d,
   )
   if (publishResult.ref === undefined) return publishResult.outcome
   const ref = publishResult.ref
 
-  // 7. 记录成功。
+  // 7. 记录成功 + 8. 发事件（失败只记日志，绝不改状态）。
+  const providerState = await recordSubmitted(current, ref, live, d)
+  await emitFor(current, ref, d)
+  return {
+    order_id: candidate.id,
+    result: providerState === 'scheduled' ? 'scheduled' : 'drafted',
+    detail: current.receipt.post_id ?? ref.post_id,
+  }
+}
+
+/** 1. 认领：先写回执，后续任何失败都能留下机器可读状态。 */
+async function claimOrder(
+  candidate: CrosspostCandidate,
+  publerAccountId: string,
+  receipt0: InstagramPublishReceipt | null,
+  live: boolean,
+  d: CrosspostDeps,
+): Promise<{ current: Current } | { outcome: InstagramCrosspostOutcome }> {
+  const r1 = newClaim({
+    workOrderId: candidate.id,
+    clientId: candidate.client_id,
+    publerAccountId,
+    requestId: d.newRequestId(),
+    live,
+    firstCommentRequested: true,
+    now: d.now(),
+    prev: receipt0,
+  })
+  const claimedOutput = withReceipt(candidate.output, r1)
+  const claimWrite = await d.store.writeOutput(candidate.id, candidate.updated_at, claimedOutput)
+  if (!claimWrite.ok) return { outcome: { order_id: candidate.id, result: 'lost_race' } }
+  return { current: { candidate, receipt: r1, updatedAt: claimWrite.updatedAt, output: claimedOutput } }
+}
+
+/** 2-3. 审批门 + 文案 + 首评 + 红线。通过返回文案，否则返回已写好回执的 outcome。 */
+async function prepareContent(
+  current: Current,
+  d: CrosspostDeps,
+): Promise<{ caption: string; firstComment: string } | { outcome: InstagramCrosspostOutcome }> {
+  const candidate = current.candidate
+  const gate = checkApproval(candidate)
+  if (gate !== null) return { outcome: await failWith(current, 'other', gate, true, d) }
+
+  const copy = readCopy(candidate.brief)
+  const firstComment = buildReelFirstComment(readEndcard(copy), candidate.id, 'instagram')
+  if (firstComment === null) {
+    return { outcome: await failWith(current, 'other', '首评 CTA 或 HTTPS 追踪链接无效', true, d) }
+  }
+  const caption = buildReelPostCaption(copy)
+  const redline = await runRedline(candidate, caption, firstComment.text, d)
+  if (redline !== null) return { outcome: await failWith(current, 'other', redline, true, d) }
+  return { caption, firstComment: firstComment.text }
+}
+
+/** 7. 写成功回执（写冲突只记日志，帖子已存在，后续扫描会对账，绝不回滚）。返回 provider 状态。 */
+async function recordSubmitted(
+  current: Current,
+  ref: PublishedRef,
+  live: boolean,
+  d: CrosspostDeps,
+): Promise<'draft' | 'scheduled'> {
   const r = markSubmitted(
     current.receipt,
     {
@@ -404,39 +417,15 @@ async function processOne(
     },
     d.now(),
   )
-  const successWrite = await d.store.writeOutput(
-    candidate.id,
-    current.updatedAt,
-    withReceipt(current.output, r),
-  )
-  if (!successWrite.ok) {
-    // 帖子已存在；后续扫描会对账。绝不回滚。
-    console.error(
-      `[instagram-crosspost] 成功回执写入冲突 order=${candidate.id} post=${r.post_id}`,
-    )
+  const w = await d.store.writeOutput(current.candidate.id, current.updatedAt, withReceipt(current.output, r))
+  if (!w.ok) {
+    console.error(`[instagram-crosspost] 成功回执写入冲突 order=${current.candidate.id} post=${r.post_id}`)
   } else {
     current.receipt = r
-    current.updatedAt = successWrite.updatedAt
+    current.updatedAt = w.updatedAt
     current.output = withReceipt(current.output, r)
   }
-
-  if (r.status === 'scheduled') {
-    await d
-      .recordBooks(candidate.id, ref, candidate.client_id, label)
-      .catch((e: unknown) => {
-        console.error('[instagram-crosspost] 三本书写入失败', e)
-      })
-  }
-
-  // 8. 发事件（失败只记日志，绝不改状态）。
-  await emitFor(current, ref, d)
-
-  const providerState = r.provider_state ?? (live ? 'scheduled' : 'draft')
-  return {
-    order_id: candidate.id,
-    result: providerState === 'scheduled' ? 'scheduled' : 'drafted',
-    detail: r.post_id,
-  }
+  return r.provider_state ?? (live ? 'scheduled' : 'draft')
 }
 
 /** 审批门：human + auto 清单都必须存在、完整、通过。返回 null 表示通过。 */
@@ -524,12 +513,6 @@ async function reconcileExisting(
         `[instagram-crosspost] 对账回执写入冲突 order=${current.candidate.id}`,
       )
     }
-    // 「发出去了但本地没记上」的那条也要补三本账(否则这条永远缺账);草稿不算
-    if (r.status === 'scheduled') {
-      await d
-        .recordBooks(current.candidate.id, existing, current.candidate.client_id, computeLabel(current.candidate, target))
-        .catch((e: unknown) => console.error('[instagram-crosspost] 三本书写入失败(对账补记)', e))
-    }
     await emitFor(current, existing, d)
     return {
       order_id: current.candidate.id,
@@ -542,7 +525,7 @@ async function reconcileExisting(
     return await failWith(
       current,
       'other',
-      '上次发布中途中断,Publer 侧未确认是否已发出,请人工核对 Instagram',
+      '上次发布中途中断,Publishing Hub 侧未确认是否已发出,请人工核对 Instagram',
       true,
       d,
     )
@@ -667,144 +650,5 @@ async function failWith(
     order_id: current.candidate.id,
     result: 'failed',
     detail: kind === 'account' ? 'account' : 'other',
-  }
-}
-
-/**
- * 发 Inngest 事件并把 event_ids 写回回执。任何失败只记日志，绝不改状态
- * （帖子已存在，回滚会导致重复发布）。
- */
-async function emitFor(
-  current: Current,
-  ref: PublishedRef,
-  d: CrosspostDeps,
-): Promise<void> {
-  const r = current.receipt
-  const mediaId = r.media_id ?? ref.video_id
-  // 草稿还是排期以「刚拿到的回执 ref」为准:成功回执写库冲突时 current.receipt 可能还停在 creating,
-  // 那时拿它兜底成 draft 会把真排期的帖子报成「草稿/未发布」,而事件 id 固定,之后再补发也会被去重 —— 下游永远以为没公开。
-  const providerState = ref.provider_state ?? r.provider_state
-  if (mediaId === undefined || providerState === undefined) {
-    console.error(
-      `[instagram-crosspost] 缺 media_id 或发布状态,跳过事件 order=${current.candidate.id}`,
-    )
-    return
-  }
-  let ev: { id: string; name: string; data: Record<string, unknown> }
-  try {
-    ev = buildInstagramReelSubmittedEvent({
-      workOrderId: current.candidate.id,
-      clientId: current.candidate.client_id,
-      publerAccountId: r.publer_account_id,
-      mediaId,
-      postId: ref.post_id ?? r.post_id,
-      providerState,
-      scheduledAt: ref.scheduled_at ?? r.scheduled_at,
-      firstCommentRequested: r.first_comment_requested,
-      requestId: r.request_id,
-      createdAt: d.now().toISOString(),
-    })
-  } catch (e: unknown) {
-    console.error('[instagram-crosspost] 事件构造失败', e)
-    return
-  }
-
-  let sent: { event_ids: string[] }
-  try {
-    sent = await d.emit(ev)
-  } catch (e: unknown) {
-    console.error('[instagram-crosspost] 事件发送失败', e)
-    return
-  }
-
-  const withEvents: InstagramPublishReceipt = {
-    ...r,
-    event_ids: sent.event_ids,
-    updated_at: d.now().toISOString(),
-  }
-  const w = await d.store.writeOutput(
-    current.candidate.id,
-    current.updatedAt,
-    withReceipt(current.output, withEvents),
-  )
-  if (!w.ok) {
-    console.error(
-      `[instagram-crosspost] event_ids 写入冲突 order=${current.candidate.id}`,
-    )
-    return
-  }
-  current.receipt = withEvents
-  current.updatedAt = w.updatedAt
-  current.output = withReceipt(current.output, withEvents)
-}
-
-/**
- * 补发漏掉的事件：只处理 draft/scheduled 且缺 event_ids 的候选，最多 5 个。
- * 事件 id 是确定性的，重发无害。
- */
-async function emitMissingEvents(
-  candidates: CrosspostCandidate[],
-  d: CrosspostDeps,
-): Promise<void> {
-  let count = 0
-  for (const c of candidates) {
-    if (count >= MISSING_EVENTS_LIMIT) return
-    const receipt = readReceipt(c.output)
-    if (receipt === null) continue
-    if (receipt.status !== 'draft' && receipt.status !== 'scheduled') continue
-    if (receipt.post_id === undefined) continue
-    if (receipt.media_id === undefined) continue
-    if (receipt.event_ids !== undefined && receipt.event_ids.length > 0) continue
-    count += 1
-    await emitMissingOne(c, receipt, d)
-  }
-}
-
-/** 补发单个候选的事件。 */
-async function emitMissingOne(
-  c: CrosspostCandidate,
-  receipt: InstagramPublishReceipt,
-  d: CrosspostDeps,
-): Promise<void> {
-  const mediaId = receipt.media_id
-  if (mediaId === undefined) return
-  const providerState = receipt.provider_state ?? (receipt.status === 'scheduled' ? 'scheduled' : 'draft')
-  let ev: { id: string; name: string; data: Record<string, unknown> }
-  try {
-    ev = buildInstagramReelSubmittedEvent({
-      workOrderId: c.id,
-      clientId: c.client_id,
-      publerAccountId: receipt.publer_account_id,
-      mediaId,
-      postId: receipt.post_id,
-      providerState,
-      scheduledAt: receipt.scheduled_at,
-      firstCommentRequested: receipt.first_comment_requested,
-      requestId: receipt.request_id,
-      createdAt: d.now().toISOString(),
-    })
-  } catch (e: unknown) {
-    console.error('[instagram-crosspost] 补发事件构造失败', e)
-    return
-  }
-  let sent: { event_ids: string[] }
-  try {
-    sent = await d.emit(ev)
-  } catch (e: unknown) {
-    console.error('[instagram-crosspost] 补发事件发送失败', e)
-    return
-  }
-  const withEvents: InstagramPublishReceipt = {
-    ...receipt,
-    event_ids: sent.event_ids,
-    updated_at: d.now().toISOString(),
-  }
-  const w = await d.store.writeOutput(
-    c.id,
-    c.updated_at,
-    withReceipt(c.output, withEvents),
-  )
-  if (!w.ok) {
-    console.error(`[instagram-crosspost] 补发 event_ids 写入冲突 order=${c.id}`)
   }
 }

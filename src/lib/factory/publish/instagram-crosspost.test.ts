@@ -274,7 +274,7 @@ describe('runInstagramCrosspost', () => {
     const receipt = readReceipt(rows.get(WO_ID)?.output)
     expect(receipt?.status).toBe('scheduled')
     expect(receipt?.authorization).toBe('AUTHORIZED')
-    expect(recordBooks).toHaveBeenCalledTimes(1)
+    expect(recordBooks).not.toHaveBeenCalled() // 排期≠已发布,不记完成账
 
     expect(calls[0].data.provider_state).toBe('scheduled')
   })
@@ -630,8 +630,13 @@ describe('runInstagramCrosspost', () => {
       },
     }
     const { adapter, publishCalls } = makeAdapter()
-    const out = await runInstagramCrosspost({ live: true }, makeDeps({ store: flaky, adapter }))
-    expect(out.result).toBe('scheduled')
+    const deps = makeDeps({ store: flaky, adapter })
+    // 第一轮:坏客户留下失败回执(不静默丢);第二轮:坏客户在退避期,轮到好客户发出
+    const first = await runInstagramCrosspost({ live: true }, deps)
+    expect(first.result).toBe('failed')
+    expect(publishCalls).toHaveLength(0)
+    const second = await runInstagramCrosspost({ live: true }, deps)
+    expect(second.result).toBe('scheduled')
     expect(publishCalls).toHaveLength(1)
   })
 
@@ -714,7 +719,7 @@ describe('runInstagramCrosspost', () => {
     const out = await runInstagramCrosspost({ live: true }, makeDeps({ store, adapter, recordBooks }))
     expect(out.result).toBe('recovered')
     expect(publishCalls).toHaveLength(0)
-    expect(recordBooks).toHaveBeenCalledTimes(1)
+    expect(recordBooks).not.toHaveBeenCalled()
   })
 
   it('24. 事件的草稿/排期以刚拿到的回执为准,不是回执里的旧状态(成功回执写冲突时不能把真排期报成草稿)', async () => {
@@ -813,7 +818,7 @@ describe('runInstagramCrosspost', () => {
     const { store } = makeStore([makeCandidate()])
     const broken: CrosspostStore = { ...store, async loadInstagramTarget() { throw new Error('缺品牌名,无法做防误发校验') } }
     const out = await runInstagramCrosspost({ live: true }, makeDeps({ store: broken }))
-    expect(out.result).toBe('no_candidate')
+    expect(out.result).toBe('failed')
     expect(out.config_errors).toBe(1)
   })
 })
