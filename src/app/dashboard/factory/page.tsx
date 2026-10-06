@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import type { WorkOrderStatus } from '@/lib/factory/types'
+import { factoryConfigHref } from '@/lib/factory/config-link'
 import type { PublishedView } from '@/lib/factory/publish/publish-display'
 import { STATUS_META, STATUS_ORDER, publishedBadge, REASON_STATUSES } from './_components/statusMeta'
 import { ReviewInbox } from './_components/ReviewInbox'
@@ -148,7 +149,7 @@ export default function FactoryCockpitPage() {
               但从这里得能一步跳过去 —— 否则日常在这页发现配置不对,要绕回客户列表再翻设置。 */}
           {selectedClient && (
             <Link
-              href={`/dashboard/clients/${selectedClient}/settings`}
+              href={factoryConfigHref(selectedClient)}
               className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600"
             >⚙️ 该客户工厂配置</Link>
           )}
