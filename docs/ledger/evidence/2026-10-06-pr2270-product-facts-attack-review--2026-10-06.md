@@ -22,7 +22,7 @@
 ## 必修 1：自写抓取绕开平台已有的安全抓取（复用 + 重绑定）
 
 `src/lib/net/safe-fetch.ts` 的 `safeFetchText` 已经做了：逐跳重新解析并把连接绑死在已验证的地址上、按网段拦内网/元数据/IPv6 映射、多地址任一不合法就拒、体积上限、跳转上限，且已有 `site-audit`、`web-intelligence/targets`、`tools-lab` 等多个调用方。PR 2270 另写了一个更弱的 `guardedGet`，违反 Reuse First。
-修法（实现由作者定）：用 `safeFetchText(url, { maxRedirects: 3, maxResponseBytes: 2_000_000, userAgent })`，拿到结果后对最终 `res.url` 再查一次域名白名单 + 只认 443 端口 + 内容类型（只放 `text/html`、`application/xml`、`text/xml`、`text/plain`）。
+修法（实现由作者定）：用 `safeFetchText(url, { maxRedirects: 3, maxResponseBytes: 2_000_000, userAgent })`，但 `safeFetchText` 只限制协议和目标 IP，不限制业务域名，且目前没有逐跳钩子：只在拿到结果后查最终 `res.url`，白名单站 30x 到任意公网域名时会先把请求发出去（整条跳转链走完才检查），挡不住「被客户站驱动去请求未授权公网目标」。因此验收要求是：**每次重定向真正拨号前**就执行域名白名单 + 只认 443 端口校验（例如给共享抓取器加逐跳 URL policy 回调，首跳和每个 30x 目标都在解析/连接前过它，不通过直接拒绝、不发请求）；内容类型（只放 `text/html`、`application/xml`、`text/xml`、`text/plain`）在收到响应头后检查。最终 `res.url` 复查可保留，但只作兜底，不能替代逐跳校验。
 
 ## 必修 2：同一天重跑，失败页从读取结果里消失
 
