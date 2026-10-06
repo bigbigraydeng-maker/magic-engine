@@ -252,4 +252,37 @@ describe('buildMontageProps', () => {
     expect(result.props.words.length).toBe(12)
     expect(result.receipt.profile).toBe('property')
   })
+  it('rejects invalid brand colour and logo before building', () => {
+    for (const brand of [
+      { brandColor: 'blue', logoFile: 'logo.png' },
+      { brandColor: '#0B6E99', logoFile: 'https://x.test/logo.png' },
+      { brandColor: '#0B6E99', logoFile: '/abs/logo.png' },
+      { brandColor: '#0B6E99', logoFile: 'logo.svg' },
+    ]) {
+      const r = buildMontageProps(baseInput({ brand }))
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.reason).toBe('brand_invalid')
+    }
+  })
+
+  it('rejects profile words that violate the engine word rules', () => {
+    const make = (first: string, extra: string): IndustryWordProfile => ({
+      id: 'x',
+      buildWords() {
+        const texts = [first, extra, ...Array.from({ length: 10 }, () => '2 BED')]
+        return { ok: true, words: texts.map((text): WordSpec => ({ text, beats: 1, bg: 'black' })) }
+      },
+    })
+    const cases: Array<[IndustryWordProfile, string]> = [
+      [make('OPEN', '2 BED'), 'first_word_invalid'],
+      [make('2 BED', 'WAY TOO LONG WORD'), 'word_too_long'],
+      [make('2 BED', '   '), 'word_invalid'],
+      [make('2 BED', 'A\tB'), 'word_invalid'],
+    ]
+    for (const [profile, reason] of cases) {
+      const r = buildMontageProps(baseInput({ profile }))
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.reason).toBe(reason)
+    }
+  })
 })

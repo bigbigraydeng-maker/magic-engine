@@ -102,6 +102,44 @@ function clipProblem(c: AssetPoolClip): string | null {
   return null
 }
 
+const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/
+const LOGO_EXT = /\.(png|jpg|jpeg|webp)$/i
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
+const WORD_MAX_CHARS = 12
+
+/** Gate: brand colour and logo file must satisfy the engine contract. */
+function gateBrand(brand: BrandInput): { ok: true } | Failure {
+  if (typeof brand.brandColor !== 'string' || !HEX_COLOR.test(brand.brandColor)) {
+    return fail('brand_invalid', `品牌色不合规：${String(brand.brandColor)}（必须是 #RRGGBB）`, '请修正客户品牌色配置')
+  }
+  const logo = typeof brand.logoFile === 'string' ? brand.logoFile : ''
+  if (logo.length > 120 || !SAFE_REL_PATH.test(logo) || logo.includes('..') || !LOGO_EXT.test(logo)) {
+    return fail('brand_invalid', `logo 文件名不合规：${String(brand.logoFile)}`, '请修正客户 logo 文件配置（相对文件名，png/jpg/jpeg/webp）')
+  }
+  return { ok: true }
+}
+
+/** Gate: every word must satisfy the engine word schema and first-word rule. */
+function gateWords(words: readonly WordSpec[]): { ok: true } | Failure {
+  for (const w of words) {
+    const t = typeof w.text === 'string' ? w.text.trim() : ''
+    if (t.length < 1 || CONTROL_CHARS.test(w.text)) {
+      return fail('word_invalid', `词不合规（为空或含控制字符）：${String(w.text)}`, '请检查行业词库')
+    }
+    if (t.length > WORD_MAX_CHARS) {
+      return fail('word_too_long', `词太长（最多 ${WORD_MAX_CHARS} 个字符）：${t}`, '请精简词库')
+    }
+    if (!Number.isInteger(w.beats) || w.beats < 1 || w.beats > 3) {
+      return fail('word_invalid', `词「${t}」的拍数必须是 1 到 3`, '请检查行业词库')
+    }
+  }
+  const first = words[0]?.text.trim() ?? ''
+  if (!/^\d/.test(first) && !/[?？]$/.test(first)) {
+    return fail('first_word_invalid', `第一个词必须是数字或问句：${first}`, '请让行业词库以数字或问句开头')
+  }
+  return { ok: true }
+}
+
 /** Gate 4: pool field validity, duplicates, size and kind diversity — on the clips actually emitted. */
 function gatePool(
   pool: readonly AssetPoolClip[],
@@ -232,6 +270,10 @@ function assemble(
 
 /** Build validated montage props and a receipt, or a structured failure. */
 export function buildMontageProps(input: BuildMontageInput): MontageBuildResult {
+  const brandGate = gateBrand(input.brand)
+  if (!brandGate.ok) {
+    return brandGate
+  }
   const factGate = gateFact(input.fact, input.now)
   if (!factGate.ok) {
     return factGate
@@ -251,6 +293,11 @@ export function buildMontageProps(input: BuildMontageInput): MontageBuildResult 
   }
   if (words.length > 30) {
     return fail('too_many_words', `词数量有 ${words.length} 个，最多 30 个`, '请精简词库')
+  }
+
+  const wordGate = gateWords(words)
+  if (!wordGate.ok) {
+    return wordGate
   }
 
   const echo = echoCheck(input.fact, words)
