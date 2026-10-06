@@ -48,6 +48,8 @@ const SUPPORTED_ACTION_TYPES = new Set([
   'ads.reactivate_campaign',   // undo of pause — not in vocab (undo path only)
 ])
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 interface RouteParams {
   params: { id: string }
 }
@@ -78,7 +80,8 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { action_type, campaign_id, params: actionParams = {} } = body
+  const { action_type, campaign_id } = body
+  const actionParams = body.params && typeof body.params === 'object' && !Array.isArray(body.params) ? body.params : {}
 
   if (!action_type || !campaign_id) {
     return NextResponse.json(
@@ -92,6 +95,14 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
       { error: `Unsupported action_type: "${action_type}". Supported: ${Array.from(SUPPORTED_ACTION_TYPES).join(', ')}` },
       { status: 422 },
     )
+  }
+
+  // execution_item_id 来自请求体，会原样写进回执：必须是 UUID 字符串，别的一律 400。
+  if (
+    actionParams.execution_item_id !== undefined &&
+    (typeof actionParams.execution_item_id !== 'string' || !UUID_RE.test(actionParams.execution_item_id))
+  ) {
+    return NextResponse.json({ error: 'params.execution_item_id must be a UUID string' }, { status: 400 })
   }
 
   // ── 重开 = 重新花钱：只有 PM（全局管理员，ADMIN_EMAILS 精确名单）能做 ─────────

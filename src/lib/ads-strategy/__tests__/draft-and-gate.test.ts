@@ -29,6 +29,7 @@ import { waitForVideoReady } from '@/lib/meta/asset-upload'
 import {
   createDraftForApproval,
   approveDraft,
+  rejectDraft,
   type DraftRecord,
 } from '../draft-and-gate'
 import type { AdDraft } from '../ad-draft'
@@ -46,7 +47,11 @@ const mPause = vi.mocked(pausePublished)
 /** 记下每次写进账本的 payload，测试直接检查它。 */
 function fakeSupabase(
   existing?: DraftRecord,
-  opts: { updateError?: { message: string } | null; failAfterFirstUpdate?: boolean } = {},
+  opts: {
+    updateError?: { message: string } | null
+    failAfterFirstUpdate?: boolean
+    claimMatches?: boolean
+  } = {},
 ) {
   const inserted: DraftRecord[] = []
   const updated: DraftRecord[] = []
@@ -81,7 +86,14 @@ function fakeSupabase(
             ? { message: 'late fail' }
             : null
           : opts.updateError ?? null
-        return { eq: async () => ({ data: null, error }) }
+        const matched = opts.claimMatches !== false
+        const b = {
+          eq: () => b,
+          select: async () => ({ data: matched ? [{ id: 'act1' }] : [], error }),
+          then: (resolve: (v: { data: null; error: { message: string } | null }) => unknown, reject?: (e: unknown) => unknown) =>
+            Promise.resolve({ data: null, error }).then(resolve, reject),
+        }
+        return b
       },
     }),
   } as unknown as SupabaseClient
@@ -239,6 +251,7 @@ describe('approveDraft — 唯一让钱动起来的地方', () => {
     const r = await approveDraft('act1', sb, 'tok', PM)
     expect(r.ok).toBe(false)
     expect(updated.every((u) => u.status !== 'active')).toBe(true)
+    expect(updated.at(-1)?.status).toBe('awaiting_approval')
     expect(updated.at(-1)?.activation?.status).toBe('meta_failed')
   })
 
@@ -257,7 +270,7 @@ describe('approveDraft — 唯一让钱动起来的地方', () => {
     const { sb, updated } = fakeSupabase(READY)
     const r = await approveDraft('act1', sb, 'tok', PM)
     expect(r.ok).toBe(true)
-    expect(updated[0].status).toBe('awaiting_approval')
+    expect(updated[0].status).toBe('activating')
     expect(updated[0].activation).toMatchObject({
       schema: 'ads.spend_activation_receipt.v1',
       entry: 'ad-approval',
@@ -287,6 +300,68 @@ describe('approveDraft — 唯一让钱动起来的地方', () => {
     const { sb } = fakeSupabase(READY, { failAfterFirstUpdate: true })
     const r = await approveDraft('act1', sb, 'tok', PM)
     expect(r).toEqual({ ok: true, warning: expect.stringContaining('late fail') })
+  })
+
+  it('同一条被并发批准：占不到位 → 不开，零 Meta 调用', async () => {
+    const { sb } = fakeSupabase(READY, { claimMatches: false })
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('别处处理过')
+    expect(mActivate).not.toHaveBeenCalled()
+  })
+
+  it('占位之后开失败 → 退回等待批准并带失败回执，可重试', async () => {
+    mActivate.mockResolvedValue({ ok: false, error: 'HTTP 400' })
+    const { sb, updated } = fakeSupabase(READY)
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    expect(updated[0].status).toBe('activating')
+    expect(updated.at(-1)?.status).toBe('awaiting_approval')
+    expect(updated.at(-1)?.activation).toMatchObject({ status: 'meta_failed', error: 'HTTP 400' })
+  })
+
+  it('占位之后开失败且失败回执也写不进去 → 如实说停在开启中', async () => {
+    mActivate.mockResolvedValue({ ok: false, error: 'HTTP 400' })
+    const { sb } = fakeSupabase(READY, { failAfterFirstUpdate: true })
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('开启中')
+  })
+})
+
+describe('rejectDraft — 只能否决还在等待的', () => {
+  const READY_DRAFT: DraftRecord = {
+    status: 'awaiting_approval', draft: DRAFT, summary: 's',
+    campaignId: 'camp1', adSetId: 'as1', adIds: ['ad1'],
+  }
+
+  it('等待批准的 → 否决成功，状态变 rejected', async () => {
+    const { sb, updated } = fakeSupabase(READY_DRAFT)
+    const r = await rejectDraft('act1', sb)
+    expect(r.ok).toBe(true)
+    expect(updated[0].status).toBe('rejected')
+  })
+
+  it('已经开了的不能再否决，账本不被改成假话', async () => {
+    const { sb, updated } = fakeSupabase({ ...READY_DRAFT, status: 'active' })
+    const r = await rejectDraft('act1', sb)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('active')
+    expect(updated).toHaveLength(0)
+  })
+
+  it('开启中的不能否决', async () => {
+    const { sb, updated } = fakeSupabase({ ...READY_DRAFT, status: 'activating' })
+    const r = await rejectDraft('act1', sb)
+    expect(r.ok).toBe(false)
+    expect(updated).toHaveLength(0)
+  })
+
+  it('否决时被别处抢先改了 → 如实报，不假装成功', async () => {
+    const { sb } = fakeSupabase(READY_DRAFT, { claimMatches: false })
+    const r = await rejectDraft('act1', sb)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('别处处理过')
   })
 })
 

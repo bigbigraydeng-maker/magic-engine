@@ -443,3 +443,48 @@ describe('meta-ads/execute POST — reactivation needs PM authority and a receip
     expect(m.authority).not.toHaveBeenCalled()
   })
 })
+
+describe('meta-ads/execute POST — hostile request bodies', () => {
+  const CAMP = '120210000000000001'
+
+  beforeEach(() => {
+    m.getCampaignDetails.mockResolvedValue({
+      id: CAMP, name: 'A campaign', status: 'PAUSED', daily_budget: '5000', account_id: '1111111111',
+    })
+    m.setCampaignStatus.mockResolvedValue(true)
+    m.otherTableInsert.mockReturnValue({
+      select: () => ({ single: vi.fn().mockResolvedValue({ data: { id: 'act1' }, error: null }) }),
+    })
+  })
+
+  it('params: null does not crash (no 500)', async () => {
+    const res = await post({ action_type: 'ads.pause_campaign', campaign_id: CAMP, params: null })
+
+    expect(res.status).toBe(200)
+  })
+
+  it('execution_item_id that is not a UUID → 400, nothing written', async () => {
+    const res = await post({
+      action_type: 'ads.reactivate_campaign',
+      campaign_id: CAMP,
+      params: { execution_item_id: 'not-a-uuid' },
+    })
+
+    expect(res.status).toBe(400)
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
+    expect(m.otherTableInsert).not.toHaveBeenCalled()
+  })
+
+  it('a valid UUID execution_item_id is accepted on reactivate', async () => {
+    const res = await post({
+      action_type: 'ads.reactivate_campaign',
+      campaign_id: CAMP,
+      params: { execution_item_id: '11111111-2222-4333-8444-555555555555' },
+    })
+
+    expect(res.status).toBe(200)
+    expect(m.otherTableInsert).toHaveBeenCalledWith(expect.objectContaining({
+      execution_item_id: '11111111-2222-4333-8444-555555555555',
+    }))
+  })
+})
