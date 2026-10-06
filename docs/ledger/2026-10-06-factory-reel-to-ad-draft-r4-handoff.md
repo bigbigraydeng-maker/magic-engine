@@ -1,6 +1,6 @@
 ---
 id: 2026-10-06-factory-reel-to-ad-draft-r4-handoff
-title: PM 要求广告出口优先接通：R4 任务单已写好，待转给 02 号广告构建控制窗口（前置 #2310 已合并）
+title: PM 要求广告出口优先接通：R4 任务单已写好，待转给 02 号广告构建控制窗口（前置 PR2310 已合并）
 status: decided
 owner: pm
 decided_on: 2026-10-06
