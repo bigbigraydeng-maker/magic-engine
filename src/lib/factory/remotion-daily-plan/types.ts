@@ -50,15 +50,22 @@ export interface WordSpec {
   bg: 'black' | 'brand' | 'white'
 }
 
+/** `today` is the client's LOCAL calendar date (YYYY-MM-DD), already computed by the builder. */
+export interface WordContext {
+  now: Date
+  today: string
+}
+
 /** Industry-specific word chain. A profile never invents numbers: every digit must come from the fact. */
 export interface IndustryWordProfile {
   id: string
-  buildWords(fact: ProductFactInput, now: Date): { ok: true; words: WordSpec[] } | { ok: false; reason: BlockReason; detail: string }
+  buildWords(fact: ProductFactInput, ctx: WordContext): { ok: true; words: WordSpec[] } | { ok: false; reason: BlockReason; detail: string }
 }
 
 export type BlockReason =
   | 'fact_not_ok' | 'fact_stale' | 'fact_incomplete' | 'departures_past' | 'price_currency_unknown'
   | 'pool_too_small' | 'pool_kinds_too_few' | 'pool_duplicate_file'
+  | 'pool_invalid_clip' | 'brand_invalid' | 'word_invalid'
   | 'no_usable_music' | 'too_few_words' | 'too_many_words' | 'number_not_in_fact' | 'word_too_long'
 
 export interface MontageProps {

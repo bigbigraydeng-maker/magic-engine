@@ -29,6 +29,8 @@ export interface BuildMontageInput {
   tracks: readonly MusicTrack[]
   profile: IndustryWordProfile
   now: Date
+  /** Client's IANA time zone for 'today' (default Pacific/Auckland — AU/NZ clients). */
+  timeZone?: string
 }
 
 /** Failure shape shared by every gate. */
@@ -72,25 +74,91 @@ function gateFact(fact: ProductFactInput, now: Date): { ok: true } | Failure {
   return { ok: true }
 }
 
-/** Gate 4: pool duplicates, size and kind diversity. */
+const CLIP_PATH = /^[A-Za-z0-9][A-Za-z0-9._-]*(\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/
+const CLIP_EXTS = ['.mp4', '.mov', '.webm']
+const LOGO_EXTS = ['.png', '.jpg', '.jpeg', '.webp']
+const TAG = /^[a-z0-9-]{1,24}$/
+const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/
+const CLIP_KINDS = ['aerial', 'street', 'person', 'detail']
+const CLIP_SOURCES = ['own', 'stock', 'ai']
+const WORD_BGS = ['black', 'brand', 'white']
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
+
+/** A safe relative file name with an allowed extension (same rule as the engine's relFile). */
+function isSafeFile(file: string, exts: readonly string[]): boolean {
+  if (file.length > 120 || file.includes('..') || !CLIP_PATH.test(file)) return false
+  return exts.some((e) => file.toLowerCase().endsWith(e))
+}
+
+/** Engine-equivalent field check for one pool clip; returns the problem or null. */
+function clipProblem(c: AssetPoolClip): string | null {
+  if (typeof c.file !== 'string' || !isSafeFile(c.file, CLIP_EXTS)) return `镜头文件名不合规：${String(c.file)}`
+  if (typeof c.tag !== 'string' || !TAG.test(c.tag)) return `镜头标签不合规（只能小写字母、数字、连字符）：${String(c.tag)}`
+  if (!CLIP_KINDS.includes(c.kind)) return `镜头类型不合规：${String(c.kind)}`
+  if (!CLIP_SOURCES.includes(c.source)) return `镜头来源不合规：${String(c.source)}`
+  if (!Number.isInteger(c.lenFrames) || c.lenFrames < 30 || c.lenFrames > 900) return `镜头长度必须是 30 到 900 帧：${c.file}`
+  if (c.luma !== undefined && !(Number.isFinite(c.luma) && c.luma >= 1 && c.luma <= 255)) return `镜头亮度必须在 1 到 255：${c.file}`
+  return null
+}
+
+/** Gate 4: truncate to the clips actually emitted, then check fields, duplicates, size and kind diversity on THAT set. */
 function gatePool(
   pool: readonly AssetPoolClip[],
 ): { ok: true; clips: AssetPoolClip[] } | Failure {
+  const clips = pool.slice(0, POOL_MAX_CLIPS)
+  for (const c of clips) {
+    const problem = clipProblem(c)
+    if (problem !== null) return fail('pool_invalid_clip', problem, '请修正该客户的镜头池配置')
+  }
   const seen = new Set<string>()
-  for (const c of pool) {
+  for (const c of clips) {
     if (seen.has(c.file)) {
       return fail('pool_duplicate_file', `镜头文件重复：${c.file}`, '请删除重复的镜头文件')
     }
     seen.add(c.file)
   }
-  if (pool.length < POOL_MIN_CLIPS) {
-    return fail('pool_too_small', `镜头池只有 ${pool.length} 个，至少需要 ${POOL_MIN_CLIPS} 个`, '请补充更多镜头')
+  if (clips.length < POOL_MIN_CLIPS) {
+    return fail('pool_too_small', `镜头池只有 ${clips.length} 个，至少需要 ${POOL_MIN_CLIPS} 个`, '请补充更多镜头')
   }
-  const kinds = new Set(pool.map((c) => c.kind))
+  const kinds = new Set(clips.map((c) => c.kind))
   if (kinds.size < POOL_MIN_KINDS) {
     return fail('pool_kinds_too_few', `镜头池只有 ${kinds.size} 种类型，至少需要 ${POOL_MIN_KINDS} 种`, '请补充不同类型的镜头')
   }
-  return { ok: true, clips: pool.slice(0, POOL_MAX_CLIPS) }
+  return { ok: true, clips }
+}
+
+/** Gate 4b: brand colour and logo file must satisfy the engine's constraints. */
+function gateBrand(brand: BrandInput): { ok: true } | Failure {
+  if (typeof brand.brandColor !== 'string' || !HEX_COLOR.test(brand.brandColor)) {
+    return fail('brand_invalid', `品牌色不是 #RRGGBB：${String(brand.brandColor)}`, '请在品牌资料里填写 #RRGGBB 格式的品牌色')
+  }
+  if (typeof brand.logoFile !== 'string' || !isSafeFile(brand.logoFile, LOGO_EXTS)) {
+    return fail('brand_invalid', `logo 文件名不合规：${String(brand.logoFile)}`, 'logo 必须是素材库里的 png/jpg/webp 相对文件名')
+  }
+  return { ok: true }
+}
+
+/** Gate 5b: engine-equivalent checks on what an industry profile returned (the profile is an open extension point). */
+function gateWords(words: readonly WordSpec[]): { ok: true } | Failure {
+  for (const w of words) {
+    const t = typeof w.text === 'string' ? w.text.trim() : ''
+    if (t.length < 1 || t.length > 12 || CONTROL_CHARS.test(w.text)) {
+      return fail('word_invalid', `词「${String(w.text)}」必须是 1 到 12 个字符且不含控制字符`, '请修正行业词串')
+    }
+    if (![1, 2, 3].includes(w.beats) || !WORD_BGS.includes(w.bg)) {
+      return fail('word_invalid', `词「${w.text}」的拍数必须是 1 到 3、背景必须是 black/brand/white`, '请修正行业词串')
+    }
+  }
+  const first = words[0]
+  if (first !== undefined && !(/^\d/.test(first.text.trim()) || /[?？]$/.test(first.text.trim()))) {
+    return fail('word_invalid', `第一个词「${first.text}」必须以数字开头或是问句`, '蒙太奇首词必须是数字或问句，请修正行业词串')
+  }
+  return { ok: true }
+}
+
+/** The client's local calendar date as YYYY-MM-DD (en-CA formats that way). */
+function localToday(now: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now)
 }
 
 /** Gate 6: every digit-run in a word must appear in the product fact. */
@@ -203,12 +271,21 @@ export function buildMontageProps(input: BuildMontageInput): MontageBuildResult 
   if (!poolGate.ok) {
     return poolGate
   }
+  const brandGate = gateBrand(input.brand)
+  if (!brandGate.ok) {
+    return brandGate
+  }
 
-  const built = input.profile.buildWords(input.fact, input.now)
+  const today = localToday(input.now, input.timeZone ?? 'Pacific/Auckland')
+  const built = input.profile.buildWords(input.fact, { now: input.now, today })
   if (!built.ok) {
     return fail(built.reason, built.detail, '请检查产品事实或行业词库')
   }
   const words = built.words
+  const wordGate = gateWords(words)
+  if (!wordGate.ok) {
+    return wordGate
+  }
   if (words.length < 10) {
     return fail('too_few_words', `词数量只有 ${words.length} 个，至少需要 10 个`, '请补充更多产品事实或包含项目')
   }

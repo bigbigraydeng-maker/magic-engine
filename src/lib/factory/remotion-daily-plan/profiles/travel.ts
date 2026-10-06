@@ -1,4 +1,4 @@
-import type { IndustryWordProfile, ProductFactInput, WordSpec, BlockReason } from '../types'
+import type { IndustryWordProfile, ProductFactInput, WordContext, WordSpec, BlockReason } from '../types'
 
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'] as const
 
@@ -12,8 +12,9 @@ function validateFact(fact: ProductFactInput): { ok: true } | { ok: false; reaso
   if (days === null || !Number.isInteger(days) || days < 1 || days > 99) {
     return { ok: false, reason: 'fact_incomplete', detail: 'duration_days must be an integer 1..99' }
   }
-  if (fact.from_price === null) {
-    return { ok: false, reason: 'fact_incomplete', detail: 'from_price is required' }
+  const price = fact.from_price
+  if (price === null || !Number.isFinite(price.amount) || price.amount <= 0) {
+    return { ok: false, reason: 'fact_incomplete', detail: 'from_price.amount must be a positive finite number' }
   }
   if (fact.departures === null || fact.departures.length === 0) {
     return { ok: false, reason: 'fact_incomplete', detail: 'departures must be non-empty' }
@@ -72,13 +73,17 @@ function inclusionWords(inclusions: string[]): WordSpec[] {
   return words
 }
 
-/** Keep ISO dates strictly after today's UTC date, sorted ascending, max 2. */
-function futureDepartures(departures: string[], now: Date): string[] {
-  const todayIso = now.toISOString().slice(0, 10)
-  return departures
-    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d > todayIso)
-    .sort()
-    .slice(0, 2)
+/** True only for a real calendar date written as YYYY-MM-DD (rejects 2027-02-31). */
+function isCalendarDate(iso: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false
+  const [y, m, d] = iso.split('-').map(Number)
+  const t = new Date(Date.UTC(y, m - 1, d))
+  return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d
+}
+
+/** Keep real calendar dates strictly after the client's local today, sorted ascending, max 2. */
+function futureDepartures(departures: string[], today: string): string[] {
+  return departures.filter((d) => isCalendarDate(d) && d > today).sort().slice(0, 2)
 }
 
 /** Format an ISO date as `${d} ${MON} ${yyyy}` without locale. */
@@ -89,8 +94,8 @@ function formatDeparture(iso: string): string {
 }
 
 /** Build the departure words, or fail if none remain. */
-function departureWords(departures: string[], now: Date): { ok: true; words: WordSpec[] } | { ok: false; reason: BlockReason; detail: string } {
-  const future = futureDepartures(departures, now)
+function departureWords(departures: string[], today: string): { ok: true; words: WordSpec[] } | { ok: false; reason: BlockReason; detail: string } {
+  const future = futureDepartures(departures, today)
   if (future.length === 0) {
     return { ok: false, reason: 'departures_past', detail: 'no departures after today' }
   }
@@ -132,7 +137,7 @@ function checkLengths(words: WordSpec[]): { ok: true } | { ok: false; reason: Bl
   return { ok: true }
 }
 
-function buildWords(fact: ProductFactInput, now: Date): BuildResult {
+function buildWords(fact: ProductFactInput, ctx: WordContext): BuildResult {
   const valid = validateFact(fact)
   if (!valid.ok) return valid
 
@@ -144,7 +149,7 @@ function buildWords(fact: ProductFactInput, now: Date): BuildResult {
   const priceResult = priceWord(price.amount, price.currency)
   if (!priceResult.ok) return priceResult
 
-  const departuresResult = departureWords(departures, now)
+  const departuresResult = departureWords(departures, ctx.today)
   if (!departuresResult.ok) return departuresResult
 
   const words: WordSpec[] = []
