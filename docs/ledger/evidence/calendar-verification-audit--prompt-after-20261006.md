@@ -17,7 +17,7 @@ b. 用 `mcp__scheduled-tasks__list_task_runs`（taskId=`ledger-nightly-verify`�
 - 普通会议/私人事项（标题是人名、meeting、Zoom、通话）；
 - 已闭环的：标题以 ✅/❌ 开头，或以"（已验证""【已验证""（孔子已核过"开头，或描述里含"【自动巡检"且含"✅已验证"。
 - 注意：描述里有「待落台账」但标题还没 ✅/❌ 的，**不算已闭环**，次日照常重新挑出重试第 4 步（先看已有的台账 PR 是否已合并，已合并就只补标题标记）。
-剩下的按开始时间从早到晚排，**每次最多处理 30 条**，其余留给明天（回执里写"顺延未处理 N 条"）。
+剩下的**按优先级排序**，每次最多处理 30 条，其余留给明天（回执里写"顺延未处理 N 条"）。排序：①描述里一条【自动巡检】行都没有的（从没巡检过）排最前，按开始时间从早到晚；②其余按描述里最后一条【自动巡检】日期从旧到新（最久没查的先查）。这样长期 `not_yet`/`没查成`/PM 动手类的事件不会天天占满配额、把新到期事件挤出 14 天窗口。
 
 ## 第 2 步：对每条事件，按描述做只读核对
 事件描述通常写了"查三件事 / 怎么算成 / 不成时第一步"，照它查。描述里若有 `ledger-id: <卡 id>` 就读对应 `docs/ledger/<id>.md`（先 `git fetch origin main`，从 `origin/main` 读）；没有就用标题关键词/PR 号在 `docs/ledger/*.md` 里 grep，对得上就用，对不上就不对卡，直接按事件描述查。
@@ -42,8 +42,9 @@ git worktree add -b "$B" "$W" origin/main 2>/dev/null || git worktree add "$W" "
 cd "$W" && ln -sfn /Users/raydeng/Projects/magic-engine/node_modules node_modules
 ```
 - **对得上一张 `done` 卡**：先把今天取的数据写进证据 `docs/ledger/evidence/<卡id>--<今天>.md`（含 `fetched_at`、查了什么、数字+样本量、命令、结论），再 `node scripts/ledger-update.mjs <id> status=verified|failed last_checked=<今天> 'check_note=…' verified_ref=doc:docs/ledger/evidence/<卡id>--<今天>.md`。
+- **对不上卡 + 已验证**：同样新建一张卡（路径与字段同下条，但 `status: done`、`owner: agent`、`verify_by`=明天、`verify_how: 复核证据文件 <路径> 中的数字仍成立`、`check_note` 写已验证的事实），证据文件写进 `done_ref`；新卡按规则不能直接 verified，由夜巡次日盖章。这样「待落台账」有落点，事件下次不会无限重复核验。
 - **对不上卡 + 没达预期**：新建一张卡 `docs/ledger/<今天>-calendar-<slug>.md`：`status: done`、`owner: pm`、`decided_on`=`done_on`=今天、`source: session:calendar-audit`（若格式检查不认就改 `doc:docs/ledger/evidence/...`）、`done_ref: doc:<证据文件>`、`verify_by`=今天、`verify_how: 由 PM 定：<日历事件原标题>`、`check_note` 写问题和影响。这样它会经今日待办的「台账」栏到 PM 眼前。title 写人话，frontmatter 里不许"空格+#"，全文不许 10 位以上连续数字。
-- 没有任何落卡动作就**不开 PR**。有则：
+- 没有任何落卡动作就**不开 PR**。有则先查有没有未合并的旧巡检 PR：`gh pr list --state open --search "head:claude/ledger-calendar-" --json headRefName,number,statusCheckRollup`。**有 OPEN（含 CI 红）的旧 PR → 复用它的分支**（worktree 切到该分支、在上面补改/修 CI、推送），不再按今天日期另开分支和新卡；新建未匹配卡前先 `grep -l` 事件标题确认库里和旧 PR 里都没有同一事件的卡。没有旧 PR 才新建，命令如下：
 ```bash
 cd "$W" && git add docs/ledger && git commit -q -m "chore(ledger): 日历巡检 $D [HARNESS.LEDGER.CALENDAR]" && git push -q -u origin "$B"
 gh pr create --base main --head "$B" --title "日历巡检 $D" --body "<每张卡一行：id → 结果 → 原因>" && gh pr merge "$B" --auto --merge
@@ -56,7 +57,7 @@ CI 红了不要绕，把原因写进回执，**且不加 ✅/❌ 标题标记**�
 - 有 `❌`（没达预期）；有"还验不了"≥3 次；有"没查成"（同一事件只在首次和之后每 3 天各升级一次，数描述里已有的「没查成」行数：0、3、6… 行时才升级，其余天只追加描述不升级）；
 - 有事件**到期已超 2 天仍没闭环**（开始时间 < 今天-2天，且既不是 ✅ 也不是 ❌）——逐条列出；**PM 动手类**每条只在到期后第 2 天和第 5 天各提一次；
 - 第 0 步有 `gap_self` / `gap_nightly`。
-卡片里每条写：哪个事件（原标题）/ 现在查到什么 / 影响 / PM 要做什么一步。什么都没有就不发卡、不出声。
+卡片里每条写：哪个事件（原标题）/ 现在查到什么 / 影响 / PM 要做什么一步 / **直达链接**（日历事件链接，加上相关 PR、页面或后台的 URL，PM 点一下就到，不用自己搜）。缺链接的事项视为没下发好。什么都没有就不发卡、不出声。
 
 ## 第 6 步：写回执（每次必写，哪怕零事件）
 ```bash
