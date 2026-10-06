@@ -10,4 +10,4 @@ verify_how: "PM 看 hello 邮箱 4 封测试邮件，决定「Group size is up t
 ---
 Mailchimp 草稿 SP1 编号 1b574858da、N1 编号 0552f7cb8a，均未发送、未排期，只发过测试到 hello 邮箱。
 价格 NZD $2,699、单人房加 $400、下期出发 25 March 2027，10/7 抓官网团页核对一致。
-「Group size is up to 18」官网客人可见页面没有出处，待 PM 确认；已提示：10/2 已发出的 W3 邮件里上海团仍写旧价 $3,399。
+「Group size is up to 18」官网客人可见页面没有出处，待 PM 确认；另发现：9/29 已发出的 W3 邮件里上海团仍写旧价 $3,399。
