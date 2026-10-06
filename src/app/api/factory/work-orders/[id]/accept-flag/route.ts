@@ -5,13 +5,14 @@
 
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { guardAdmin, requireAdmin } from '@/lib/auth/require-admin'
+import { guardGlobalAdmin, requireAdmin } from '@/lib/auth/require-admin'
 import { applyAcceptFlag } from '@/lib/factory/review-accept-flag'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await guardAdmin()
+  // Restricted demo admins must not record acceptances for other clients' orders.
+  const guard = await guardGlobalAdmin()
   if (guard) return guard
   const admin = await requireAdmin()
   const reviewer = admin.ok ? (admin.user.email ?? 'admin') : 'admin'

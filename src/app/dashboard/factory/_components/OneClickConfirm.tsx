@@ -2,12 +2,13 @@
 
 interface OneClickConfirmProps {
   itemLabels: string[]
+  sourceUrl: string
   busy: boolean
   onConfirm: () => void
   onExpand: () => void
 }
 
-export function OneClickConfirm({ itemLabels, busy, onConfirm, onExpand }: OneClickConfirmProps) {
+export function OneClickConfirm({ itemLabels, sourceUrl, busy, onConfirm, onExpand }: OneClickConfirmProps) {
   return (
     <div className="space-y-3">
       <p className="text-sm text-slate-600">
@@ -22,6 +23,11 @@ export function OneClickConfirm({ itemLabels, busy, onConfirm, onExpand }: OneCl
           ))}
         </ul>
       </div>
+
+      <p className="text-xs text-slate-600">
+        来源网址(已按这条片的链接预填,请点开确认它支持片里的价格/天数/日期):
+        <a href={sourceUrl} target="_blank" rel="noreferrer" className="underline break-all">{sourceUrl}</a>
+      </p>
 
       <div className="flex items-center gap-3">
         <button

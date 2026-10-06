@@ -40,7 +40,12 @@ const redlineHitsOf = (o: WorkOrder): string[] =>
 
 const qualityFlagsOf = (o: WorkOrder): Array<{ category: string; detail: string }> =>
   Array.isArray(o.output?.quality_flags)
-    ? o.output.quality_flags.filter((f) => f && typeof f.detail === 'string' && f.detail)
+    ? o.output.quality_flags
+        .filter((f) => f && typeof f === 'object')
+        .map((f) => ({
+          category: typeof f.category === 'string' && f.category ? f.category : 'unknown',
+          detail: typeof f.detail === 'string' ? f.detail : '',
+        }))
     : []
 
 const autoChecklistOf = (o: WorkOrder): ContentCheckItemResult[] =>
@@ -118,6 +123,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
   const [hasShown, setHasShown] = useState(false) // 显示过一次就常驻,刷新不卸载(防对话框丢历史)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [acceptedFlagsError, setAcceptedFlagsError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<WorkOrder | null>(null)
   const [checklistDraft, setChecklistDraft] = useState<ChecklistDraft>(emptyChecklistDraft)
   const [showDetails, setShowDetails] = useState(false)
@@ -135,6 +141,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
       setOrders(pending)
       if (pending.length > 0) setHasShown(true)
       setError(null)
+      setAcceptedFlagsError(typeof json.accepted_flags_error === 'string' && json.accepted_flags_error ? json.accepted_flags_error : null)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
     } finally {
@@ -198,6 +205,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
       </h2>
 
       {error && !confirming && <div className="mb-3 px-4 py-2 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>}
+      {acceptedFlagsError && <div className="mb-3 px-4 py-2 rounded-lg bg-red-50 text-red-700 text-sm">「已接受」记录读取失败,已接受的提醒可能显示不准:{acceptedFlagsError}</div>}
 
       <div className={clientId ? 'grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4 items-start' : ''}>
       <div className="space-y-4">
@@ -249,12 +257,16 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
                             <span className="block text-xs text-amber-700 mt-0.5">{f.detail}</span>
                           </p>
                           {isAcceptableFlagCategory(f.category) && (
-                            <button
-                              type="button"
-                              onClick={() => void acceptFlag(o.id, f.category)}
-                              disabled={busy === o.id}
-                              className="mt-1 px-2 h-7 rounded border border-amber-300 text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-50"
-                            >PM 已接受</button>
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => void acceptFlag(o.id, f.category)}
+                                disabled={busy === o.id}
+                                title="接受 = 这份简报下以后同类口吻提醒不再挡路;改了人设会重新提醒"
+                                className="mt-1 px-2 h-7 rounded border border-amber-300 text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                              >PM 已接受</button>
+                              <p className="mt-1 text-xs text-amber-700">接受 = 这份简报下以后同类口吻提醒不再挡路;改了人设会重新提醒</p>
+                            </>
                           )}
                         </div>
                       ))}
@@ -291,7 +303,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
 
       {confirming && (
         <div className="fixed inset-0 z-40 bg-black/45 grid place-items-center p-4" onClick={() => setConfirming(null)}>
-          <div className="bg-white rounded-xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div role="dialog" aria-modal="true" className="bg-white rounded-xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <p className="font-medium text-slate-900 mb-1">通过并排入发布队列</p>
 
             {redlineHitsOf(confirming).length > 0 && (
@@ -333,6 +345,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
                   <div className="mb-4">
                     <OneClickConfirm
                       itemLabels={REEL_HUMAN_CHECK_KEYS.map(k => HUMAN_CHECK_LABEL[k])}
+                      sourceUrl={defaultFactSourceRef(confirming.fact_source_url)}
                       busy={busy === confirming.id}
                       onConfirm={() => void act(confirming.id, { action: 'approve', checklist_human: checklistPayload(allPass(checklistDraft)) })}
                       onExpand={() => setShowDetails(true)}

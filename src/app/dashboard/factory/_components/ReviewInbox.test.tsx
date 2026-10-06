@@ -26,10 +26,11 @@ const mount = async (
   responses: Array<{ ok: boolean; error?: string }>,
   orderOverride: Partial<Order> = {},
   expand = false,
+  acceptedFlagsError?: string,
 ) => {
   const merged: Order = { ...order, ...orderOverride }
   vi.stubGlobal('fetch', vi.fn(async (u: string, init?: { method?: string; body?: string }) => {
-    if (init?.method !== 'POST') return { ok: true, json: async () => ({ orders: [merged] }) }
+    if (init?.method !== 'POST') return { ok: true, json: async () => ({ orders: [merged], accepted_flags_error: acceptedFlagsError ?? null }) }
     posts.push({ url: u, body: init.body ? JSON.parse(init.body) : undefined })
     const r = responses.shift()!
     return { ok: r.ok, status: r.ok ? 200 : 422, json: async () => (r.ok ? {} : { error: r.error }) }
@@ -127,4 +128,21 @@ it('missing fact_source_url: no one-click, shows prefilled-source reason', async
   await mount([{ ok: true }], { fact_source_url: null })
   expect(btn(ONE_CLICK)).toBeUndefined()
   expect(document.body.textContent).toContain('来源网址没有预填')
+})
+
+it('one-click panel links to the prefilled source URL', async () => {
+  await mount([{ ok: true }])
+  const link = document.querySelector('a') as HTMLAnchorElement | null
+  expect(link?.getAttribute('href')).toBe(URL_OK)
+})
+
+it('quality flag with no detail at all still blocks one-click', async () => {
+  await mount([{ ok: true }], { output: { quality_checklist_auto: auto, quality_flags: [{ category: 'competitor_brand' }] } })
+  expect(btn(ONE_CLICK)).toBeUndefined()
+})
+
+it('accepted_flags_error surfaces a red notice with the message', async () => {
+  await mount([{ ok: true }], {}, false, 'boom')
+  expect(document.body.textContent).toContain('读取失败')
+  expect(document.body.textContent).toContain('boom')
 })

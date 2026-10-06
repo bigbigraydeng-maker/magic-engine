@@ -126,8 +126,8 @@ describe('applyApprove server gate stays strict', () => {
       ...IN_REVIEW_WO,
       output: {
         quality_checklist_auto: IN_REVIEW_WO.output.quality_checklist_auto,
-        redline_hits: [{ rule: 'no_medical_claims', detail: 'mentions cure' }],
-        quality_flags: [{ flag: 'pacing_slow', detail: 'first 3s static' }],
+        redline_hits: ['no_medical_claims'],
+        quality_flags: [{ category: 'competitor_brand', detail: 'first 3s static' }],
       },
     }
     const { db, updates } = mockSupabase([
