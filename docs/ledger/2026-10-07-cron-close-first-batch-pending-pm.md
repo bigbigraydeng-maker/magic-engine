@@ -4,7 +4,7 @@ title: 第一批 5 条没人读的定时任务（关 3、降 1、去重复 1）�
 status: decided
 owner: pm
 decided_on: 2026-10-07
-source: doc:docs/audits/2026-10-07-cron-data-readers-audit.md
+source: session:65a5db61
 verify_by: 2026-10-14
 verify_how: PM 回「合」并合并后，Render 后台 job-boards-weekly、execution-auto-run、team-memory-sweeper 三项不再运行，行业 AI 可见度改为每周一；cron_run_logs 里三者最新一行停在合并日之前。
 ---
