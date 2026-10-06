@@ -6,7 +6,6 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
-import { resolveBoundPublerAccount } from '@/lib/flywheel/social-post-publish'
 import { MAX_FB_AGE_MS } from './instagram-receipt'
 import type { PublishTarget } from '../types'
 import type { CrosspostCandidate, CrosspostStore } from './instagram-crosspost'
@@ -36,6 +35,16 @@ function rowToCandidate(row: Record<string, unknown>): CrosspostCandidate {
   }
 }
 
+/** 从 Publer 连接器配置里取 Instagram 账号 id(大小写不敏感:连接器页直接用 Publer 的 provider 字段当 key)。 */
+function boundInstagramId(config: unknown): string | null {
+  const ids = asPlainObject(asPlainObject(config)?.publer_account_ids)
+  if (ids === null) return null
+  for (const [k, v] of Object.entries(ids)) {
+    if (k.toLowerCase() === 'instagram' && typeof v === 'string' && v.length > 0) return v
+  }
+  return null
+}
+
 /** 已在 Publer 连接器里绑定 Instagram 账号的客户 id(连接器是账号绑定的唯一真相源)。 */
 async function listInstagramBoundClientIds(): Promise<string[]> {
   const { data, error } = await supabaseAdmin
@@ -47,12 +56,7 @@ async function listInstagramBoundClientIds(): Promise<string[]> {
   const ids: string[] = []
   for (const row of rows) {
     const r = asPlainObject(row)
-    const ids2 = asPlainObject(asPlainObject(r?.config)?.publer_account_ids)
-    if (r === null || ids2 === null || typeof r.client_id !== 'string') continue
-    const hasInstagram = Object.entries(ids2).some(
-      ([k, v]) => k.toLowerCase() === 'instagram' && typeof v === 'string' && v.length > 0,
-    )
-    if (hasInstagram) ids.push(r.client_id)
+    if (r !== null && typeof r.client_id === 'string' && boundInstagramId(r.config) !== null) ids.push(r.client_id)
   }
   return ids
 }
@@ -86,9 +90,18 @@ export function createSupabaseCrosspostStore(): CrosspostStore {
     },
 
     async loadInstagramTarget(clientId: string): Promise<PublishTarget | null> {
-      const account = await resolveBoundPublerAccount(clientId, 'instagram')
-      if (account === null) return null
-      const accountId = account.id
+      // 直接读连接器里绑的账号 id,**不**在这里去 Publer 核对它还在不在:
+      // 绑了但账号已从 Publer 掉线/被移除,必须走到发布那一步由适配器报「账号错误」→ 失败回执 + 重新连接待办,
+      // 在这里当成「没配」就会静默跳过、直到 48 小时窗口过期都没人知道。
+      const { data: connectorRow, error: connectorErr } = await supabaseAdmin
+        .from('client_connectors')
+        .select('config')
+        .eq('client_id', clientId)
+        .eq('anchor', 'publer')
+        .maybeSingle()
+      if (connectorErr) throw connectorErr
+      const accountId = boundInstagramId(asPlainObject(connectorRow)?.config)
+      if (accountId === null) return null
 
       // 防误发要用客户品牌名核对 Publer 账号名;缺品牌名 => 失败关闭(不猜)。
       const { data: brandRow, error: brandErr } = await supabaseAdmin

@@ -30,15 +30,11 @@ function builder(table: string) {
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: (table: string) => builder(table) } }))
 
-const resolveBound = vi.fn()
-vi.mock('@/lib/flywheel/social-post-publish', () => ({ resolveBoundPublerAccount: (...a: unknown[]) => resolveBound(...a) }))
-
 import { createSupabaseCrosspostStore } from './instagram-crosspost-store'
 
 beforeEach(() => {
   calls = []
   results = {}
-  resolveBound.mockReset()
 })
 
 const has = (table: string, method: string, ...args: unknown[]) =>
@@ -104,23 +100,31 @@ describe('writeOutput(乐观并发)', () => {
 })
 
 describe('loadInstagramTarget', () => {
-  const account = { id: 'acct12345678', provider: 'instagram' }
+  const connector = (ids: Record<string, string> | undefined) => ({
+    data: ids === undefined ? null : { config: { publer_account_ids: ids } },
+    error: null,
+  })
 
   it('连接器里没绑 Instagram → null,而且根本不去查品牌', async () => {
-    resolveBound.mockResolvedValue(null)
+    results.client_connectors = [connector({ facebook: 'fbacct123456' })]
     expect(await createSupabaseCrosspostStore().loadInstagramTarget('c1')).toBeNull()
-    expect(resolveBound).toHaveBeenCalledWith('c1', 'instagram')
+    expect(has('client_connectors', 'eq', 'anchor', 'publer')).toBe(true)
     expect(calls.some((c) => c.table === 'master_briefs')).toBe(false)
   })
 
+  it('这个客户根本没有 Publer 连接器 → null', async () => {
+    results.client_connectors = [connector(undefined)]
+    expect(await createSupabaseCrosspostStore().loadInstagramTarget('c1')).toBeNull()
+  })
+
   it('配了但客户没有品牌名 → 抛错(失败关闭,没法做防串客户核对)', async () => {
-    resolveBound.mockResolvedValue(account)
+    results.client_connectors = [connector({ instagram: 'acct12345678' })]
     results.master_briefs = [{ data: null, error: null }]
     await expect(createSupabaseCrosspostStore().loadInstagramTarget('c1')).rejects.toThrow(/品牌/)
   })
 
-  it('配齐 → 返回带品牌名与客户 id 的目标', async () => {
-    resolveBound.mockResolvedValue(account)
+  it('配齐 → 返回带品牌名与客户 id 的目标(key 大小写不敏感)', async () => {
+    results.client_connectors = [connector({ Instagram: 'acct12345678' })]
     results.master_briefs = [{ data: { brand_name: 'Some Brand' }, error: null }]
     expect(await createSupabaseCrosspostStore().loadInstagramTarget('c1')).toEqual({
       platform: 'publer',
@@ -129,5 +133,12 @@ describe('loadInstagramTarget', () => {
       client_id: 'c1',
       expect_brand: 'Some Brand',
     })
+  })
+
+  it('绑定的账号已从 Publer 掉线时,这里不去 Publer 核对、照样返回目标 —— 让发布那一步报「账号错误」走失败回执+重连待办,而不是被当成没配静默跳过', async () => {
+    results.client_connectors = [connector({ instagram: 'removedacct0001' })]
+    results.master_briefs = [{ data: { brand_name: 'Some Brand' }, error: null }]
+    const t = await createSupabaseCrosspostStore().loadInstagramTarget('c1')
+    expect(t?.publer_account_id).toBe('removedacct0001')
   })
 })

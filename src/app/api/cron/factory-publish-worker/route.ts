@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { runPublishWorker, reconcileMissingReelEvents } from '@/lib/factory/publish/publish-worker'
 import { runLecturePublishSweep, type PublishOutcome } from '@/lib/factory/lecture-publish'
-import { runInstagramCrosspost, instagramLive, type InstagramCrosspostOutcome } from '@/lib/factory/publish/instagram-crosspost'
+import { runInstagramCrosspost, instagramLive, instagramLiveClients, type InstagramCrosspostOutcome } from '@/lib/factory/publish/instagram-crosspost'
 import { startCronRun } from '@/lib/cron/run-logger'
 
 export const dynamic = 'force-dynamic'
@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
 
     // Instagram 交叉发布(Publer):FB Reel 发完后同一条片发到客户 IG。
     // 同样单独 try —— IG 这条线出问题(如 Publer 账号掉线)不该把 FB 工单发布的运行记录带成失败。
-    // 真发要两个开关都明确打开(FACTORY_PUBLISH_LIVE + FACTORY_INSTAGRAM_LIVE):任何一个没开 = 只存 Publer 草稿。
+    // 真发要三样都到位:FACTORY_PUBLISH_LIVE + FACTORY_INSTAGRAM_LIVE 两个开关都是 true,且该客户在 FACTORY_INSTAGRAM_LIVE_CLIENTS 名单里;缺一样 = 只存 Publer 草稿。
     // 预算:300 秒是和上面 FB 发布、讲课片共用的。IG 单条最坏要等 Publer 两轮各 3 分钟,所以前面已经用掉
     // 大半时间就让给下一轮 —— 被硬杀会把回执停在「创建中」,15 分钟后还得人工核对,是假警报。
     let instagram: InstagramCrosspostOutcome | { skipped: string } | { error: string }
@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
       instagram = { skipped: 'time_budget' }
     } else {
       try {
-        instagram = await runInstagramCrosspost({ live: instagramLive(live) })
+        instagram = await runInstagramCrosspost({ live: instagramLive(live), liveClientIds: instagramLiveClients() })
       } catch (e) {
         instagram = { error: e instanceof Error ? e.message : String(e) }
       }

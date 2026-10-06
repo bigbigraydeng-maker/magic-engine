@@ -208,13 +208,13 @@ async function main(): Promise<void> {
   fake.accountsMode = 'ok'
   const later = new Date(now.getTime() + 2 * 3600_000)
   currentNow = later
-  const run4 = await runInstagramCrosspost({ live: true }, { ...deps, now: () => later })
+  const run4 = await runInstagramCrosspost({ live: true, liveClientIds: new Set([CLIENT_ID]) }, { ...deps, now: () => later })
   console.log(JSON.stringify(run4))
   check('Facebook 还没真发 → Instagram 绝不抢先(不发)', run4.result === 'no_candidate' && fake.posts.length === 0)
 
   console.log('\n═══ 第 5 轮：总开关打开 + Facebook 已真发 ═══')
   rows.set(WO_DRAFT, { ...makeRow(WO_DRAFT, 'PUBLISHED', '2026-10-06T09:00:00.000Z'), output: rows.get(WO_DRAFT)!.output, updated_at: rows.get(WO_DRAFT)!.updated_at })
-  const run5 = await runInstagramCrosspost({ live: true }, { ...deps, now: () => later })
+  const run5 = await runInstagramCrosspost({ live: true, liveClientIds: new Set([CLIENT_ID]) }, { ...deps, now: () => later })
   console.log(JSON.stringify(run5))
   const r5 = readReceipt(rows.get(WO_DRAFT)?.output)
   check('结果是 scheduled', run5.result === 'scheduled')

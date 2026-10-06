@@ -72,6 +72,16 @@ export function instagramLive(factoryLive: boolean, env: Record<string, string |
   return factoryLive && env.FACTORY_INSTAGRAM_LIVE === 'true'
 }
 
+/**
+ * 哪些客户允许 Instagram 真发:环境变量 FACTORY_INSTAGRAM_LIVE_CLIENTS(逗号分隔的客户 id)。
+ * 为什么要按客户列名单:Publer 连接器里绑了 Instagram 账号,只代表「这个客户能用 Publer 发帖」,
+ * 不代表客户同意工厂 Reel 自动跟发;只靠全局开关,一开就会让所有绑了账号的客户的 Reel 都真排期。
+ * 没配 = 空名单 = 谁都不真发(全是草稿)。
+ */
+export function instagramLiveClients(env: Record<string, string | undefined> = process.env): ReadonlySet<string> {
+  return new Set((env.FACTORY_INSTAGRAM_LIVE_CLIENTS ?? '').split(',').map((x) => x.trim()).filter(Boolean))
+}
+
 /** 每次运行最多扫描的候选数。 */
 const CANDIDATE_LIMIT = 50
 
@@ -205,7 +215,8 @@ function resolveDeps(deps?: Partial<CrosspostDeps>): CrosspostDeps {
  * 没有可处理候选时，顺带补发漏掉的 Inngest 事件（幂等）。
  */
 export async function runInstagramCrosspost(
-  opts: { live: boolean },
+  // liveClientIds:允许真发的客户名单;不传 = 空名单 = 全部只存草稿(失败关闭)
+  opts: { live: boolean; liveClientIds?: ReadonlySet<string> },
   deps?: Partial<CrosspostDeps>,
 ): Promise<InstagramCrosspostOutcome> {
   const d = resolveDeps(deps)
@@ -222,6 +233,7 @@ export async function runInstagramCrosspost(
     if (!isFreshFacebookPost(c, now)) continue
     // 同一客户两次提交之间隔开一段时间:开关刚打开时窗口里可能攒着好几条,不许一小时内连发一串 Reel
     if (recentlySubmitted.has(c.client_id)) continue
+    const live = opts.live && (opts.liveClientIds?.has(c.client_id) ?? false) // 全局开关 + 该客户在真发名单里,缺一不可
     const lookup = await loadTargetOnce(targets, c.client_id, d, stats)
     if (lookup.target === null && lookup.error === undefined) continue // 没配 Instagram:静默跳过
 
@@ -229,16 +241,16 @@ export async function runInstagramCrosspost(
     const decision = decideSweep({
       receipt: receipt0,
       fbVideoState: readFbVideoState(c.published_ref),
-      live: opts.live,
+      live,
       now,
     })
     if (decision.action === 'skip') continue
 
     // 配置读不出(缺品牌名/查库抖动):留下失败回执,重试用尽后进今日待办,不静默丢掉
     if (lookup.target === null) {
-      return finish(await failConfigRead(c, receipt0, lookup.error ?? '', opts.live, d))
+      return finish(await failConfigRead(c, receipt0, lookup.error ?? '', live, d))
     }
-    return finish(await processOne(c, lookup.target, receipt0, decision.action, opts.live, d))
+    return finish(await processOne(c, lookup.target, receipt0, decision.action, live, d))
   }
 
   await emitMissingEvents(candidates, d)
