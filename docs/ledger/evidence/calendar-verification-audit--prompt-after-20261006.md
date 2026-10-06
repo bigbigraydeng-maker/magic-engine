@@ -68,7 +68,7 @@ jq -n --arg run_at "<ISO 新西兰时间>" --arg window "<起>~<止>" \
   --argjson escalated true_or_false --arg pr "<url 或空>" \
   --arg gap_self "<原文或空>" --arg gap_nightly "<原文或空>" \
   --argjson results '[]' \
-  '{run_at:$run_at,gap_self:($gap_self|select(.!="")),gap_nightly:($gap_nightly|select(.!="")),window:$window,candidates:$candidates,processed:$processed,deferred_unprocessed:$deferred,results:$results,escalated:$escalated,pr:($pr|select(.!=""))}' > "$R"
+  '{run_at:$run_at,gap_self:$gap_self,gap_nightly:$gap_nightly,window:$window,candidates:$candidates,processed:$processed,deferred_unprocessed:$deferred,results:$results,escalated:$escalated,pr:$pr} | with_entries(select(.value!=""))' > "$R"
 ```
 `results` 每项形如 `{event,start,outcome(verified|failed|not_yet|unreadable|pm_action),ledger_id,fact,unreadable_reason}`：逐项用 `jq --arg` 追加（`jq --arg e "$标题" ... '.results += [{event:$e,...}]' "$R" > "$R.tmp" && mv "$R.tmp" "$R"`），不要手写 JSON 字符串。写完必须 `jq -e . "$R"` 校验可解析；校验失败 = 回执无效，按"本次没跑成"处理并升级，不能当成功。第 0 步 a 检查昨天回执时也要用 `jq -e .` 校验，不可解析按 `gap_self: 昨天回执损坏` 记。
 最后的聊天总结：一两句大白话 + 回执路径。
