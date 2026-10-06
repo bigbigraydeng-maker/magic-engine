@@ -33,6 +33,8 @@ import {
 } from '../draft-and-gate'
 import type { AdDraft } from '../ad-draft'
 
+const PM = { actorUserId: 'u-pm', actorEmail: 'pm@magiclab.test', basis: 'global_admin' as const }
+
 const mPublish = vi.mocked(publishDraftPaused)
 const mActivate = vi.mocked(activatePublished)
 const mAdSet = vi.mocked(fetchAdSetReadback)
@@ -42,9 +44,13 @@ const mWait = vi.mocked(waitForVideoReady)
 const mPause = vi.mocked(pausePublished)
 
 /** 记下每次写进账本的 payload，测试直接检查它。 */
-function fakeSupabase(existing?: DraftRecord) {
+function fakeSupabase(
+  existing?: DraftRecord,
+  opts: { updateError?: { message: string } | null; failAfterFirstUpdate?: boolean } = {},
+) {
   const inserted: DraftRecord[] = []
   const updated: DraftRecord[] = []
+  let updateCount = 0
   const sb = {
     from: () => ({
       insert: (row: { payload: DraftRecord }) => {
@@ -69,7 +75,13 @@ function fakeSupabase(existing?: DraftRecord) {
       }),
       update: (row: { payload: DraftRecord }) => {
         updated.push(row.payload)
-        return { eq: async () => ({ data: null, error: null }) }
+        updateCount += 1
+        const error = opts.failAfterFirstUpdate
+          ? updateCount > 1
+            ? { message: 'late fail' }
+            : null
+          : opts.updateError ?? null
+        return { eq: async () => ({ data: null, error }) }
       },
     }),
   } as unknown as SupabaseClient
@@ -202,21 +214,21 @@ describe('approveDraft — 唯一让钱动起来的地方', () => {
   it('等待批准的 → 开，并且把状态改成在投', async () => {
     mActivate.mockResolvedValue({ ok: true })
     const { sb, updated } = fakeSupabase(READY)
-    const r = await approveDraft('act1', sb, 'tok')
+    const r = await approveDraft('act1', sb, 'tok', PM)
     expect(r.ok).toBe(true)
-    expect(updated[0].status).toBe('active')
+    expect(updated.at(-1)?.status).toBe('active')
   })
 
   it('已经开过的不能再开一次', async () => {
     const { sb } = fakeSupabase({ ...READY, status: 'active' })
-    const r = await approveDraft('act1', sb, 'tok')
+    const r = await approveDraft('act1', sb, 'tok', PM)
     expect(r).toEqual({ ok: false, error: expect.stringContaining('active') })
     expect(mActivate).not.toHaveBeenCalled()
   })
 
   it('被闸门拦下的不能开', async () => {
     const { sb } = fakeSupabase({ ...READY, status: 'blocked' })
-    const r = await approveDraft('act1', sb, 'tok')
+    const r = await approveDraft('act1', sb, 'tok', PM)
     expect(r.ok).toBe(false)
     expect(mActivate).not.toHaveBeenCalled()
   })
@@ -224,15 +236,57 @@ describe('approveDraft — 唯一让钱动起来的地方', () => {
   it('Meta 那边开失败 → 不许把状态改成在投', async () => {
     mActivate.mockResolvedValue({ ok: false, error: 'HTTP 400' })
     const { sb, updated } = fakeSupabase(READY)
-    const r = await approveDraft('act1', sb, 'tok')
+    const r = await approveDraft('act1', sb, 'tok', PM)
     expect(r.ok).toBe(false)
-    expect(updated).toHaveLength(0)
+    expect(updated.every((u) => u.status !== 'active')).toBe(true)
+    expect(updated.at(-1)?.activation?.status).toBe('meta_failed')
   })
 
   it('找不到这条 → 报错，不是静默成功', async () => {
     const { sb } = fakeSupabase()
-    const r = await approveDraft('nope', sb, 'tok')
+    const r = await approveDraft('nope', sb, 'tok', PM)
     expect(r.ok).toBe(false)
+  })
+
+  it('开之前先写授权回执：谁、哪个客户、哪个系列、依据、时间', async () => {
+    const seenUpdateCounts: number[] = []
+    mActivate.mockImplementation(async () => {
+      seenUpdateCounts.push(updated.length)
+      return { ok: true }
+    })
+    const { sb, updated } = fakeSupabase(READY)
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(true)
+    expect(updated[0].status).toBe('awaiting_approval')
+    expect(updated[0].activation).toMatchObject({
+      schema: 'ads.spend_activation_receipt.v1',
+      entry: 'ad-approval',
+      basis: 'global_admin',
+      actor_user_id: 'u-pm',
+      actor_email: 'pm@magiclab.test',
+      client_id: 'c1',
+      campaign_id: 'camp1',
+      draft_action_id: 'act1',
+      status: 'authorized_pending',
+    })
+    expect(typeof updated[0].activation?.authorized_at).toBe('string')
+    expect(updated.at(-1)?.activation?.status).toBe('executed')
+    expect(seenUpdateCounts).toEqual([1])
+  })
+
+  it('授权回执写不进去 → 不开，零 Meta 调用', async () => {
+    const { sb } = fakeSupabase(READY, { updateError: { message: 'db down' } })
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('授权回执')
+    expect(mActivate).not.toHaveBeenCalled()
+  })
+
+  it('开成功但最后写账本失败 → 如实带 warning，不假装干净', async () => {
+    mActivate.mockResolvedValue({ ok: true })
+    const { sb } = fakeSupabase(READY, { failAfterFirstUpdate: true })
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r).toEqual({ ok: true, warning: expect.stringContaining('late fail') })
   })
 })
 
@@ -489,7 +543,7 @@ describe('approveDraft — 私信广告现在不能用「开」按钮打开', ()
 
   it('私信类型即使状态是等待批准 → 拒，零 Meta 调用，账本不改', async () => {
     const { sb, updated } = fakeSupabase({ ...base, draft: MSG })
-    const r = await approveDraft('act1', sb, 'tok')
+    const r = await approveDraft('act1', sb, 'tok', PM)
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error).toContain('私信')
     expect(mActivate).not.toHaveBeenCalled()
@@ -500,7 +554,7 @@ describe('approveDraft — 私信广告现在不能用「开」按钮打开', ()
     for (const draft of [{ ...DRAFT, kind: 'weird' }, { ...DRAFT, kind: undefined }, undefined]) {
       mActivate.mockClear()
       const { sb, updated } = fakeSupabase({ ...base, draft } as unknown as DraftRecord)
-      const r = await approveDraft('act1', sb, 'tok')
+      const r = await approveDraft('act1', sb, 'tok', PM)
       expect(r.ok, JSON.stringify(draft?.kind)).toBe(false)
       expect(mActivate).not.toHaveBeenCalled()
       expect(updated).toHaveLength(0)
@@ -511,7 +565,7 @@ describe('approveDraft — 私信广告现在不能用「开」按钮打开', ()
     mActivate.mockResolvedValue({ ok: true })
     for (const kind of ['lead_form', 'video_thruplay'] as const) {
       const { sb } = fakeSupabase({ ...base, draft: { ...DRAFT, kind } })
-      expect((await approveDraft('act1', sb, 'tok')).ok, kind).toBe(true)
+      expect((await approveDraft('act1', sb, 'tok', PM)).ok, kind).toBe(true)
     }
   })
 })
