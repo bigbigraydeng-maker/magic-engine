@@ -82,6 +82,24 @@ export function instagramLiveClients(env: Record<string, string | undefined> = p
   return new Set((env.FACTORY_INSTAGRAM_LIVE_CLIENTS ?? '').split(',').map((x) => x.trim()).filter(Boolean))
 }
 
+/**
+ * 允许处理的「客户id:Publer 账号id」名单(FACTORY_INSTAGRAM_ENABLED_CLIENTS,逗号分隔)。
+ * 只有被点名的「客户:账号」才会被处理(连接器绑定客户自己能改,不能当依据);
+ * 没配 = 谁都不处理,连草稿也不建。
+ */
+export function instagramEnabledClients(env: Record<string, string | undefined> = process.env): ReadonlyMap<string, string> {
+  const out = new Map<string, string>()
+  for (const entry of (env.FACTORY_INSTAGRAM_ENABLED_CLIENTS ?? '').split(',')) {
+    const idx = entry.indexOf(':')
+    if (idx < 0) continue
+    const clientId = entry.slice(0, idx).trim()
+    const accountId = entry.slice(idx + 1).trim()
+    if (clientId.length === 0 || accountId.length === 0) continue
+    out.set(clientId, accountId) // 重复客户保留最后一个
+  }
+  return out
+}
+
 /** 每次运行最多扫描的候选数。 */
 const CANDIDATE_LIMIT = 50
 
@@ -216,7 +234,8 @@ function resolveDeps(deps?: Partial<CrosspostDeps>): CrosspostDeps {
  */
 export async function runInstagramCrosspost(
   // liveClientIds:允许真发的客户名单;不传 = 空名单 = 全部只存草稿(失败关闭)
-  opts: { live: boolean; liveClientIds?: ReadonlySet<string> },
+  // enabledClients:允许处理的「客户:账号」名单;不传 = 空 = 谁都不处理(连草稿也不建)
+  opts: { live: boolean; liveClientIds?: ReadonlySet<string>; enabledClients?: ReadonlyMap<string, string> },
   deps?: Partial<CrosspostDeps>,
 ): Promise<InstagramCrosspostOutcome> {
   const d = resolveDeps(deps)
@@ -227,15 +246,26 @@ export async function runInstagramCrosspost(
   const finish = (o: InstagramCrosspostOutcome): InstagramCrosspostOutcome =>
     stats.configErrors > 0 ? { ...o, config_errors: stats.configErrors } : o
 
+  const enabled = opts.enabledClients ?? new Map<string, string>()
+  // 防重复发布的对账可能失效时,不许真发,只许草稿。
+  const unverifiedPresent = candidates.some((c) => readReceipt(c.output)?.idempotency_unverified === true)
   const recentlySubmitted = clientsWithRecentSubmission(candidates, now)
 
   for (const c of candidates) {
     if (!isFreshFacebookPost(c, now)) continue
     // 同一客户两次提交之间隔开一段时间:开关刚打开时窗口里可能攒着好几条,不许一小时内连发一串 Reel
     if (recentlySubmitted.has(c.client_id)) continue
-    const live = opts.live && (opts.liveClientIds?.has(c.client_id) ?? false) // 全局开关 + 该客户在真发名单里,缺一不可
+    // 只有被点名的「客户:账号」才处理;没点名 = 连草稿也不建
+    if (!enabled.has(c.client_id)) continue
+    const live = opts.live && !unverifiedPresent && (opts.liveClientIds?.has(c.client_id) ?? false) // 全局开关 + 该客户在真发名单里,缺一不可
     const lookup = await loadTargetOnce(targets, c.client_id, d, stats)
     if (lookup.target === null && lookup.error === undefined) continue // 没配 Instagram:静默跳过
+    // 绑定账号必须与启用名单完全一致:连接器绑定客户自己能改,不能当依据
+    if (lookup.target !== null && enabled.get(c.client_id) !== lookup.target.publer_account_id) {
+      stats.configErrors += 1
+      console.error('[instagram-crosspost] 绑定账号与启用名单不符 client=' + c.client_id)
+      continue
+    }
 
     const receipt0 = readReceipt(c.output)
     const decision = decideSweep({
@@ -497,7 +527,8 @@ async function reconcileExisting(
       ? 'account'
       : 'other'
     const msg = e instanceof Error ? e.message : 'findExisting 失败'
-    return await failWith(current, kind, msg, false, d)
+    // 本地锚已写(media_id 存在)= 建帖请求可能已发出,后续只许对账。
+    return await failWith(current, kind, msg, false, d, current.receipt.media_id !== undefined)
   }
 
   if (existing !== null) {
@@ -591,7 +622,8 @@ async function doPublish(
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : '发布失败'
     if (isPublerAccountError(e)) {
-      return { ref: undefined, outcome: await failWith(current, 'account', msg, false, d) }
+      // 账号类失败也可能发生在建帖之后:本地锚已写就标记 post_may_exist。
+      return { ref: undefined, outcome: await failWith(current, 'account', msg, false, d, current.receipt.status === 'creating') }
     }
     // 不知道帖子建没建出来(超时/网络断/5xx,且本地锚已写)→ 不写 failed。
     // 写了 failed,10 分钟后会被当成「新片」重新上传重新建帖 = Instagram 上两条一样的片。
@@ -612,6 +644,8 @@ async function holdUncertain(
   const held: InstagramPublishReceipt = {
     ...current.receipt,
     error: sanitizeFailReason(message),
+    // 建帖请求已发出、结果不确定:粘住 post_may_exist,后续只许对账。
+    post_may_exist: true,
     updated_at: d.now().toISOString(),
   }
   const w = await d.store.writeOutput(current.candidate.id, current.updatedAt, withReceipt(current.output, held))
@@ -635,10 +669,11 @@ async function failWith(
   message: string,
   terminal: boolean,
   d: CrosspostDeps,
+  mayHavePosted = false,
 ): Promise<InstagramCrosspostOutcome> {
   const failed = markFailed(
     current.receipt,
-    { error: sanitizeFailReason(message), kind },
+    { error: sanitizeFailReason(message), kind, mayHavePosted },
     d.now(),
   )
   const r: InstagramPublishReceipt = terminal

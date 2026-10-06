@@ -10,6 +10,7 @@ import {
   runInstagramCrosspost,
   instagramLive,
   instagramLiveClients,
+  instagramEnabledClients,
   MIN_GAP_PER_CLIENT_MS,
   type CrosspostCandidate,
   type CrosspostDeps,
@@ -20,7 +21,7 @@ import {
   REEL_AUTO_CHECK_KEYS,
   REEL_HUMAN_CHECK_KEYS,
 } from '@/lib/social/content-review'
-import { ACCOUNT_RETRY_MINUTES, readReceipt } from './instagram-receipt'
+import { ACCOUNT_RETRY_MINUTES, readReceipt, withReceipt } from './instagram-receipt'
 import { PublerAccountError, PublerRejectedError } from './instagram-publer-adapter'
 
 // ===== 测试夹具 =====
@@ -30,6 +31,8 @@ const WO_ID = '11111111-1111-4111-8111-111111111111'
 const CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
 /** 真发名单:只含夹具客户。不在名单里的客户即使全局开关全开也只存草稿 */
 const LIVE_CLIENTS = new Set([CLIENT_ID])
+/** 启用名单:夹具客户 -> 内存 store 返回的账号。没点名 = 连草稿也不建 */
+const ENABLED = new Map([[CLIENT_ID, 'acct_12345678']])
 
 /** 构造一份全部 PASS 的清单。 */
 function passingChecklist(
@@ -246,7 +249,7 @@ describe('runInstagramCrosspost', () => {
     const recordBooks = vi.fn(async () => undefined)
     const deps = makeDeps({ store, adapter, emit, recordBooks })
 
-    const out = await runInstagramCrosspost({ live: false }, deps)
+    const out = await runInstagramCrosspost({ live: false, enabledClients: ENABLED }, deps)
     expect(out.result).toBe('drafted')
     expect(publishCalls).toHaveLength(1)
     expect(publishCalls[0].draft).toBe(true)
@@ -270,7 +273,7 @@ describe('runInstagramCrosspost', () => {
     const recordBooks = vi.fn(async () => undefined)
     const deps = makeDeps({ store, adapter, emit, recordBooks })
 
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     expect(out.result).toBe('scheduled')
     expect(publishCalls[0].draft).toBe(false)
 
@@ -287,7 +290,7 @@ describe('runInstagramCrosspost', () => {
     const { adapter, publishCalls } = makeAdapter()
     const deps = makeDeps({ store, adapter })
 
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     expect(out.result).toBe('no_candidate')
     expect(publishCalls).toHaveLength(0)
   })
@@ -297,7 +300,7 @@ describe('runInstagramCrosspost', () => {
     const { adapter, publishCalls } = makeAdapter()
     const deps = makeDeps({ store, adapter })
 
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     expect(out.result).toBe('no_candidate')
     expect(publishCalls).toHaveLength(0)
   })
@@ -313,7 +316,7 @@ describe('runInstagramCrosspost', () => {
     const { adapter, publishCalls } = makeAdapter()
     const deps = makeDeps({ store: noTargetStore, adapter })
 
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     expect(out.result).toBe('no_candidate')
     expect(publishCalls).toHaveLength(0)
   })
@@ -342,7 +345,7 @@ describe('runInstagramCrosspost', () => {
     const { adapter, publishCalls } = makeAdapter()
     const deps = makeDeps({ store, adapter })
 
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     expect(out.result).toBe('no_candidate')
     expect(publishCalls).toHaveLength(0)
   })
@@ -357,7 +360,7 @@ describe('runInstagramCrosspost', () => {
     const now = new Date('2024-01-01T00:00:00.000Z')
     const deps = makeDeps({ store, adapter, now: () => now })
 
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     expect(out.result).toBe('failed')
     const receipt = readReceipt(rows.get(WO_ID)?.output)
     expect(receipt?.status).toBe('failed')
@@ -367,7 +370,7 @@ describe('runInstagramCrosspost', () => {
     expect(retryAt - now.getTime()).toBe(ACCOUNT_RETRY_MINUTES * 60 * 1000)
 
     // 第二次立即运行：退避中，不重发。
-    const out2 = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const out2 = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     expect(out2.result).toBe('no_candidate')
     expect(publishCalls).toHaveLength(1)
   })
@@ -382,24 +385,24 @@ describe('runInstagramCrosspost', () => {
     let now = new Date('2024-01-01T00:00:00.000Z')
     const deps = makeDeps({ store, adapter, now: () => now })
 
-    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     let receipt = readReceipt(rows.get(WO_ID)?.output)
     expect(receipt?.attempts).toBe(1)
     expect(receipt?.next_retry_at).not.toBeNull()
 
     now = new Date(Date.parse(receipt?.next_retry_at ?? '') + 1000)
-    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     receipt = readReceipt(rows.get(WO_ID)?.output)
     expect(receipt?.attempts).toBe(2)
 
     now = new Date(Date.parse(receipt?.next_retry_at ?? '') + 1000)
-    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     receipt = readReceipt(rows.get(WO_ID)?.output)
     expect(receipt?.attempts).toBe(3)
     expect(receipt?.next_retry_at).toBeNull()
 
     const before = publishCalls.length
-    const out4 = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const out4 = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     expect(out4.result).toBe('no_candidate')
     expect(publishCalls.length).toBe(before)
   })
@@ -416,7 +419,7 @@ describe('runInstagramCrosspost', () => {
     const { adapter, publishCalls } = makeAdapter({ existing })
     const deps = makeDeps({ store, adapter })
 
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     expect(out.result).toBe('recovered')
     expect(publishCalls).toHaveLength(0)
     const receipt = readReceipt(rows.get(WO_ID)?.output)
@@ -449,7 +452,7 @@ describe('runInstagramCrosspost', () => {
     const now = new Date('2024-01-01T00:20:00.000Z') // 20 分钟后
     const deps = makeDeps({ store, adapter, now: () => now })
 
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     expect(out.result).toBe('failed')
     expect(publishCalls).toHaveLength(0)
   })
@@ -460,7 +463,7 @@ describe('runInstagramCrosspost', () => {
     const { adapter, publishCalls } = makeAdapter()
     const deps = makeDeps({ store, adapter })
 
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     expect(out.result).toBe('lost_race')
     expect(publishCalls).toHaveLength(0)
   })
@@ -471,7 +474,7 @@ describe('runInstagramCrosspost', () => {
     const scanCaption = vi.fn(async () => 'blocked by redline')
     const deps = makeDeps({ store, adapter, scanCaption })
 
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     expect(out.result).toBe('failed')
     expect(publishCalls).toHaveLength(0)
     const receipt = readReceipt(rows.get(WO_ID)?.output)
@@ -484,7 +487,7 @@ describe('runInstagramCrosspost', () => {
     const { adapter, publishCalls } = makeAdapter()
     const deps = makeDeps({ store, adapter })
 
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     expect(out.result).toBe('failed')
     expect(publishCalls).toHaveLength(0)
   })
@@ -510,7 +513,7 @@ describe('runInstagramCrosspost', () => {
     })
     const deps = makeDeps({ store, adapter })
 
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     expect(out.result).toBe('scheduled')
     expect(statusAtCreate).toBe('creating')
     expect(mediaAtCreate).toBe('media-0042')
@@ -561,7 +564,7 @@ describe('runInstagramCrosspost', () => {
     })
     const deps = makeDeps({ store: customStore, adapter })
 
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     expect(out.result).toBe('failed')
     expect(created).toBe(false)
   })
@@ -577,14 +580,14 @@ describe('runInstagramCrosspost', () => {
     })
     const deps = makeDeps({ store, adapter, emit })
 
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     expect(out.result).toBe('scheduled')
     let receipt = readReceipt(rows.get(WO_ID)?.output)
     expect(receipt?.status).toBe('scheduled')
     expect(receipt?.event_ids).toBeUndefined()
 
     // 下一轮：候选已 scheduled，decideSweep 跳过，走 emitMissingEvents。
-    const out2 = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const out2 = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     expect(out2.result).toBe('no_candidate')
     receipt = readReceipt(rows.get(WO_ID)?.output)
     expect(receipt?.event_ids).toEqual(['evt-late'])
@@ -595,7 +598,7 @@ describe('runInstagramCrosspost', () => {
     const { adapter, publishCalls } = makeAdapter()
     const deps = makeDeps({ store, adapter })
 
-    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     const firstComment = publishCalls[0].firstComment
     expect(typeof firstComment).toBe('string')
     expect(firstComment as string).toContain('utm_source=instagram')
@@ -606,7 +609,7 @@ describe('runInstagramCrosspost', () => {
       makeCandidate({ fbVideoState: 'PUBLISHED', fbPublishedAt: '2023-12-29T00:00:00.000Z' }),
     ])
     const { adapter, publishCalls } = makeAdapter()
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, makeDeps({ store, adapter }))
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, makeDeps({ store, adapter }))
     expect(out.result).toBe('no_candidate')
     expect(publishCalls).toHaveLength(0)
   })
@@ -616,7 +619,7 @@ describe('runInstagramCrosspost', () => {
     delete stale.published_ref.published_at
     const { store } = makeStore([stale])
     const { adapter, publishCalls } = makeAdapter()
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, makeDeps({ store, adapter }))
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, makeDeps({ store, adapter }))
     expect(out.result).toBe('no_candidate')
     expect(publishCalls).toHaveLength(0)
   })
@@ -634,11 +637,12 @@ describe('runInstagramCrosspost', () => {
     }
     const { adapter, publishCalls } = makeAdapter()
     const deps = makeDeps({ store: flaky, adapter })
+    const enabled = new Map([[CLIENT_ID, 'acct_12345678'], ['bad-client', 'acct_12345678']])
     // 第一轮:坏客户留下失败回执(不静默丢);第二轮:坏客户在退避期,轮到好客户发出
-    const first = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const first = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: enabled }, deps)
     expect(first.result).toBe('failed')
     expect(publishCalls).toHaveLength(0)
-    const second = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const second = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: enabled }, deps)
     expect(second.result).toBe('scheduled')
     expect(publishCalls).toHaveLength(1)
   })
@@ -658,7 +662,7 @@ describe('runInstagramCrosspost', () => {
     const { adapter } = makeAdapter({ existing: null })
     // 两条都跳过(FB 状态未知)也要只查一次
     for (const c of [a, b]) delete c.published_ref.video_state
-    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, makeDeps({ store: counting, adapter }))
+    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, makeDeps({ store: counting, adapter }))
     expect(loads).toBe(1)
   })
 
@@ -674,7 +678,7 @@ describe('runInstagramCrosspost', () => {
       },
     })
     const deps = makeDeps({ store, adapter })
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     expect(out.result).toBe('failed')
     expect(out.detail).toBe('uncertain')
     const r = readReceipt(rows.get(WO_ID)?.output)
@@ -682,12 +686,12 @@ describe('runInstagramCrosspost', () => {
     expect(r?.error).toContain('502')
 
     // 立刻再跑:在途,不动
-    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, deps)
+    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
     expect(publishCalls).toHaveLength(1)
 
     // 20 分钟后:走对账(找不到 → 终态失败转人工),依然不会再建帖
     const later = makeDeps({ store, adapter, now: () => new Date('2024-01-01T00:20:00.000Z') })
-    const out3 = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, later)
+    const out3 = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, later)
     expect(out3.result).toBe('failed')
     expect(publishCalls).toHaveLength(1)
     expect(created).toBe(0)
@@ -702,7 +706,7 @@ describe('runInstagramCrosspost', () => {
         throw new PublerRejectedError('Publer 拒绝发布: nope')
       },
     })
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, makeDeps({ store, adapter }))
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, makeDeps({ store, adapter }))
     expect(out.result).toBe('failed')
     const r = readReceipt(rows.get(WO_ID)?.output)
     expect(r?.status).toBe('failed')
@@ -719,7 +723,7 @@ describe('runInstagramCrosspost', () => {
       },
     })
     const recordBooks = vi.fn(async () => undefined)
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, makeDeps({ store, adapter, recordBooks }))
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, makeDeps({ store, adapter, recordBooks }))
     expect(out.result).toBe('recovered')
     expect(publishCalls).toHaveLength(0)
     expect(recordBooks).not.toHaveBeenCalled()
@@ -740,7 +744,7 @@ describe('runInstagramCrosspost', () => {
         return realWrite(id, expected, output)
       },
     }
-    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, makeDeps({ store: flaky, adapter, emit }))
+    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, makeDeps({ store: flaky, adapter, emit }))
     expect(calls).toHaveLength(1)
     expect(calls[0].data.provider_state).toBe('scheduled')
     expect(calls[0].data.no_publish).toBe(false)
@@ -753,12 +757,12 @@ describe('runInstagramCrosspost', () => {
     const { store, rows } = makeStore([first, second])
     const { adapter, publishCalls } = makeAdapter()
     const deps = makeDeps({ store, adapter })
-    await runInstagramCrosspost({ live: false }, deps)
+    await runInstagramCrosspost({ live: false, enabledClients: ENABLED }, deps)
     expect(publishCalls).toHaveLength(1)
-    await runInstagramCrosspost({ live: false }, deps)
+    await runInstagramCrosspost({ live: false, enabledClients: ENABLED }, deps)
     expect(publishCalls).toHaveLength(1) // 间隔内第二条不发
     const later = makeDeps({ store, adapter, now: () => new Date(Date.parse('2024-01-01T00:00:00.000Z') + MIN_GAP_PER_CLIENT_MS + 60_000) })
-    await runInstagramCrosspost({ live: false }, later)
+    await runInstagramCrosspost({ live: false, enabledClients: ENABLED }, later)
     expect(publishCalls).toHaveLength(2)
     expect(rows.size).toBe(2)
   })
@@ -766,7 +770,7 @@ describe('runInstagramCrosspost', () => {
   it('26. Facebook 发布时间在未来(脏数据)= 来路不明,不跟发', async () => {
     const { store } = makeStore([makeCandidate({ fbPublishedAt: '2024-01-02T00:00:00.000Z' })])
     const { adapter, publishCalls } = makeAdapter()
-    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, makeDeps({ store, adapter }))
+    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, makeDeps({ store, adapter }))
     expect(publishCalls).toHaveLength(0)
   })
 
@@ -788,7 +792,7 @@ describe('runInstagramCrosspost', () => {
       mutate(c.output, c.review_ref)
       const { store, rows } = makeStore([c])
       const { adapter, publishCalls } = makeAdapter()
-      const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, makeDeps({ store, adapter }))
+      const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, makeDeps({ store, adapter }))
       expect(out.result).toBe('failed')
       expect(publishCalls).toHaveLength(0)
       expect(readReceipt(rows.get(WO_ID)?.output)?.next_retry_at).toBeNull()
@@ -801,7 +805,7 @@ describe('runInstagramCrosspost', () => {
     const scanCaption = vi.fn(async () => {
       throw new Error('db down')
     })
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, makeDeps({ store, adapter, scanCaption }))
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, makeDeps({ store, adapter, scanCaption }))
     expect(out.result).toBe('failed')
     expect(publishCalls).toHaveLength(0)
     expect(readReceipt(rows.get(WO_ID)?.output)?.next_retry_at).toBeNull()
@@ -811,7 +815,7 @@ describe('runInstagramCrosspost', () => {
     const { store } = makeStore([makeCandidate()])
     const { adapter } = makeAdapter()
     const scanCaption = vi.fn(async () => null)
-    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, makeDeps({ store, adapter, scanCaption }))
+    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, makeDeps({ store, adapter, scanCaption }))
     const scanned = String((scanCaption.mock.calls[0] as unknown[])[2])
     expect(scanned).toContain('Discover China')
     expect(scanned).toContain('utm_source=instagram')
@@ -820,9 +824,143 @@ describe('runInstagramCrosspost', () => {
   it('30. 一个客户配置读失败 → 汇总里带 config_errors(不只死在日志里)', async () => {
     const { store } = makeStore([makeCandidate()])
     const broken: CrosspostStore = { ...store, async loadInstagramTarget() { throw new Error('缺品牌名,无法做防误发校验') } }
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, makeDeps({ store: broken }))
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, makeDeps({ store: broken }))
     expect(out.result).toBe('failed')
     expect(out.config_errors).toBe(1)
+  })
+
+  // ───── Round 7:启用名单 / 幂等标记 / post_may_exist ─────
+
+  it('31. 没传 enabledClients(或空)= 谁都不处理:不查配置、不发布', async () => {
+    const { store } = makeStore([makeCandidate()])
+    let loads = 0
+    const counting: CrosspostStore = {
+      ...store,
+      async loadInstagramTarget(clientId: string) {
+        loads += 1
+        return store.loadInstagramTarget(clientId)
+      },
+    }
+    const { adapter, publishCalls } = makeAdapter()
+    const omitted = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS }, makeDeps({ store: counting, adapter }))
+    expect(omitted.result).toBe('no_candidate')
+    const empty = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: new Map() }, makeDeps({ store: counting, adapter }))
+    expect(empty.result).toBe('no_candidate')
+    expect(loads).toBe(0)
+    expect(publishCalls).toHaveLength(0)
+  })
+
+  it('32. 客户被点名但账号与绑定不符:不发布、不写回执、config_errors=1', async () => {
+    const { store, rows } = makeStore([makeCandidate()])
+    const { adapter, publishCalls } = makeAdapter()
+    const wrong = new Map([[CLIENT_ID, 'acct_99999999']])
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: wrong }, makeDeps({ store, adapter }))
+    expect(out.result).toBe('no_candidate')
+    expect(out.config_errors).toBe(1)
+    expect(publishCalls).toHaveLength(0)
+    expect(readReceipt(rows.get(WO_ID)?.output)).toBeNull()
+  })
+
+  it('33. 同批里有一条 idempotency_unverified 回执 → 真发降级为草稿', async () => {
+    const flagged = makeCandidate({ id: '77777777-7777-4777-8777-777777777777' })
+    flagged.output = withReceipt(flagged.output, {
+      schema_version: 1,
+      status: 'draft',
+      work_order_id: flagged.id,
+      client_id: CLIENT_ID,
+      publer_account_id: 'acct_12345678',
+      request_id: 'aaaaaaaa-0000-4000-8000-000000000002',
+      attempts: 0,
+      first_comment_requested: true,
+      no_publish: true,
+      authorization: 'DRAFT_ONLY',
+      cost_usd: 0,
+      idempotency_unverified: true,
+      created_at: '2023-12-31T20:00:00.000Z',
+      updated_at: '2023-12-31T20:00:00.000Z', // 早于「现在」30 分钟以上,否则同客户最小间隔会先把整批挡住
+    })
+    const target = makeCandidate()
+    const { store } = makeStore([flagged, target])
+    const { adapter, publishCalls } = makeAdapter()
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, makeDeps({ store, adapter }))
+    expect(out.result).toBe('drafted')
+    expect(publishCalls).toHaveLength(1)
+    expect(publishCalls[0].draft).toBe(true)
+  })
+
+  it('34. 对账时 findExisting 抛错(回执有 media_id)→ post_may_exist,下一轮只对账不重发', async () => {
+    const candidate = makeCandidate()
+    candidate.output = {
+      ...candidate.output,
+      instagram_publish: {
+        schema_version: 1,
+        status: 'creating',
+        work_order_id: WO_ID,
+        client_id: CLIENT_ID,
+        publer_account_id: 'acct_12345678',
+        request_id: 'aaaaaaaa-0000-4000-8000-000000000000',
+        attempts: 0,
+        media_id: 'media-0000-old',
+        first_comment_requested: true,
+        no_publish: false,
+        authorization: 'AUTHORIZED',
+        cost_usd: 0,
+        created_at: '2024-01-01T00:00:00.000Z',
+        updated_at: '2024-01-01T00:00:00.000Z',
+      },
+    }
+    const { store, rows } = makeStore([candidate])
+    let findCalls = 0
+    const adapter: PublishAdapter = {
+      platform: 'publer',
+      async publish() {
+        throw new Error('不该走到发布')
+      },
+      async findExisting() {
+        findCalls += 1
+        if (findCalls === 1) throw new Error('publer 抖动')
+        return null
+      },
+    }
+    const now = new Date('2024-01-01T00:20:00.000Z') // 卡死,走对账
+    const deps = makeDeps({ store, adapter, now: () => now })
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, deps)
+    expect(out.result).toBe('failed')
+    const r = readReceipt(rows.get(WO_ID)?.output)
+    expect(r?.status).toBe('failed')
+    expect(r?.post_may_exist).toBe(true)
+
+    // 退避到期后再跑:只对账(找不到 → 终态失败),绝不重发
+    const later = makeDeps({ store, adapter, now: () => new Date(Date.parse(r?.next_retry_at ?? '') + 1000) })
+    const out2 = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, later)
+    expect(out2.result).toBe('failed')
+    expect(findCalls).toBe(2)
+    expect(readReceipt(rows.get(WO_ID)?.output)?.next_retry_at).toBeNull()
+  })
+
+  it('35. onStarted 之后普通错误 → 回执保持 creating 且 post_may_exist=true', async () => {
+    const { store, rows } = makeStore([makeCandidate()])
+    const { adapter } = makeAdapter({
+      publishImpl: async ({ onStarted }) => {
+        await onStarted?.('media-0001')
+        throw new Error('socket hang up')
+      },
+    })
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, makeDeps({ store, adapter }))
+    expect(out.result).toBe('failed')
+    const r = readReceipt(rows.get(WO_ID)?.output)
+    expect(r?.status).toBe('creating')
+    expect(r?.post_may_exist).toBe(true)
+  })
+})
+
+describe('instagramEnabledClients(启用名单解析)', () => {
+  it('逗号分隔的「客户:账号」,按第一个冒号切分,空项忽略,重复客户保留最后一个', () => {
+    const m = instagramEnabledClients({ FACTORY_INSTAGRAM_ENABLED_CLIENTS: ' a:b , c:d:e,,x: , :y ' })
+    expect([...m.entries()]).toEqual([['a', 'b'], ['c', 'd:e']])
+  })
+  it('没配 = 空 Map', () => {
+    expect(instagramEnabledClients({}).size).toBe(0)
   })
 })
 
@@ -843,7 +981,7 @@ describe('按客户点名真发(Publer 绑了账号 ≠ 客户同意自动跟发
   it('全局开关打开、但该客户不在名单里 → 只存草稿,绝不排期', async () => {
     const { store, rows } = makeStore([makeCandidate({ fbVideoState: 'PUBLISHED' })])
     const { adapter, publishCalls } = makeAdapter()
-    const out = await runInstagramCrosspost({ live: true, liveClientIds: new Set(['someone-else']) }, makeDeps({ store, adapter }))
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: new Set(['someone-else']), enabledClients: ENABLED }, makeDeps({ store, adapter }))
     expect(out.result).toBe('drafted')
     expect(publishCalls[0].draft).toBe(true)
     expect(readReceipt(rows.get(WO_ID)?.output)?.authorization).toBe('DRAFT_ONLY')
@@ -852,7 +990,7 @@ describe('按客户点名真发(Publer 绑了账号 ≠ 客户同意自动跟发
   it('不传名单 = 空名单 = 失败关闭:全局开关再开也只存草稿', async () => {
     const { store } = makeStore([makeCandidate({ fbVideoState: 'PUBLISHED' })])
     const { adapter, publishCalls } = makeAdapter()
-    await runInstagramCrosspost({ live: true }, makeDeps({ store, adapter }))
+    await runInstagramCrosspost({ live: true, enabledClients: ENABLED }, makeDeps({ store, adapter }))
     expect(publishCalls[0].draft).toBe(true)
   })
 

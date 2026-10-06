@@ -171,7 +171,7 @@ async function main(): Promise<void> {
   }
 
   console.log('\n═══ 第 1 轮：草稿模式（FACTORY_PUBLISH_LIVE 没开）═══')
-  const run1 = await runInstagramCrosspost({ live: false }, deps)
+  const run1 = await runInstagramCrosspost({ live: false, enabledClients: new Map([[CLIENT_ID, IG_ACCOUNT]]) }, deps)
   console.log(JSON.stringify(run1))
   const r1 = readReceipt(rows.get(WO_DRAFT)?.output)
   check('结果是 drafted', run1.result === 'drafted')
@@ -188,7 +188,7 @@ async function main(): Promise<void> {
 
   console.log('\n═══ 第 2 轮：立刻重跑（不许重复发）═══')
   const before = fake.posts.length
-  const run2 = await runInstagramCrosspost({ live: false }, deps)
+  const run2 = await runInstagramCrosspost({ live: false, enabledClients: new Map([[CLIENT_ID, IG_ACCOUNT]]) }, deps)
   console.log(JSON.stringify(run2))
   check('没有新候选', run2.result === 'no_candidate')
   check('Publer 里帖子数量没变(没重发)', fake.posts.length === before)
@@ -197,7 +197,7 @@ async function main(): Promise<void> {
   rows.set(WO_DRAFT, makeRow(WO_DRAFT, 'DRAFT', '2026-10-05T20:00:00.000Z')) // 回到「没发过」
   fake.posts.length = 0
   fake.accountsMode = 'missing'
-  const run3 = await runInstagramCrosspost({ live: false }, deps)
+  const run3 = await runInstagramCrosspost({ live: false, enabledClients: new Map([[CLIENT_ID, IG_ACCOUNT]]) }, deps)
   console.log(JSON.stringify(run3))
   const r3 = readReceipt(rows.get(WO_DRAFT)?.output)
   check('结果是 failed,且归类为账号问题', run3.result === 'failed' && r3?.failure_kind === 'account')
@@ -208,13 +208,13 @@ async function main(): Promise<void> {
   fake.accountsMode = 'ok'
   const later = new Date(now.getTime() + 2 * 3600_000)
   currentNow = later
-  const run4 = await runInstagramCrosspost({ live: true, liveClientIds: new Set([CLIENT_ID]) }, { ...deps, now: () => later })
+  const run4 = await runInstagramCrosspost({ live: true, liveClientIds: new Set([CLIENT_ID]), enabledClients: new Map([[CLIENT_ID, IG_ACCOUNT]]) }, { ...deps, now: () => later })
   console.log(JSON.stringify(run4))
   check('Facebook 还没真发 → Instagram 绝不抢先(不发)', run4.result === 'no_candidate' && fake.posts.length === 0)
 
   console.log('\n═══ 第 5 轮：总开关打开 + Facebook 已真发 ═══')
   rows.set(WO_DRAFT, { ...makeRow(WO_DRAFT, 'PUBLISHED', '2026-10-06T09:00:00.000Z'), output: rows.get(WO_DRAFT)!.output, updated_at: rows.get(WO_DRAFT)!.updated_at })
-  const run5 = await runInstagramCrosspost({ live: true, liveClientIds: new Set([CLIENT_ID]) }, { ...deps, now: () => later })
+  const run5 = await runInstagramCrosspost({ live: true, liveClientIds: new Set([CLIENT_ID]), enabledClients: new Map([[CLIENT_ID, IG_ACCOUNT]]) }, { ...deps, now: () => later })
   console.log(JSON.stringify(run5))
   const r5 = readReceipt(rows.get(WO_DRAFT)?.output)
   check('结果是 scheduled', run5.result === 'scheduled')
@@ -229,15 +229,15 @@ async function main(): Promise<void> {
   rows.delete(WO_DRAFT)
   fake.posts.length = 0
   fake.scheduleMode = 'http500'
-  const run6 = await runInstagramCrosspost({ live: false }, { ...deps, now: () => later })
+  const run6 = await runInstagramCrosspost({ live: false, enabledClients: new Map([[CLIENT_ID, IG_ACCOUNT]]) }, { ...deps, now: () => later })
   console.log(JSON.stringify(run6))
   const r6 = readReceipt(rows.get(WO_UNSURE)?.output)
   check('结果是 failed/uncertain', run6.result === 'failed' && run6.detail === 'uncertain')
   check('回执保持「创建中」,没有写成可重试的失败', r6?.status === 'creating' && r6.attempts === 0)
   fake.scheduleMode = 'ok'
-  const run6b = await runInstagramCrosspost({ live: false }, { ...deps, now: () => new Date(later.getTime() + 60_000) })
+  const run6b = await runInstagramCrosspost({ live: false, enabledClients: new Map([[CLIENT_ID, IG_ACCOUNT]]) }, { ...deps, now: () => new Date(later.getTime() + 60_000) })
   check('一分钟后再跑:视为在途,不动、不重发', run6b.result === 'no_candidate' && fake.posts.length === 0)
-  const run6c = await runInstagramCrosspost({ live: false }, { ...deps, now: () => new Date(later.getTime() + 20 * 60_000) })
+  const run6c = await runInstagramCrosspost({ live: false, enabledClients: new Map([[CLIENT_ID, IG_ACCOUNT]]) }, { ...deps, now: () => new Date(later.getTime() + 20 * 60_000) })
   console.log(JSON.stringify(run6c))
   check('20 分钟后:只对账(找不到就转人工),仍然不重发', run6c.result === 'failed' && fake.posts.length === 0 && readReceipt(rows.get(WO_UNSURE)?.output)?.next_retry_at === null)
 

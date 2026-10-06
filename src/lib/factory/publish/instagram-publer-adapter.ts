@@ -18,6 +18,7 @@ const POLL_INTERVAL_MS = 4000
 const MAX_POLLS = 20
 const SCHEDULE_DELAY_MS = 3 * 60 * 1000
 const LOOKUP_PAGES = 3 // 对账每个状态最多翻几页(新帖排在前面;翻太深没意义)
+const REQUEST_TIMEOUT_MS = 30_000
 
 /** 账号类错误(授权失效/账号找不到/provider 不符)—— 单独一类,调用方可据此提示"去重连"。 */
 export class PublerAccountError extends Error {
@@ -197,8 +198,24 @@ export function createPublerInstagramAdapter(deps: PublerInstagramDeps = {}): Pu
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
   const now = deps.now ?? (() => new Date())
 
+  // 密钥脱敏:错误消息里绝不带 key/workspace 值(规矩③)。空值跳过,避免把空串全替换。
+  function redact(text: string): string {
+    const env = readEnv()
+    let out = text
+    for (const secret of [env.apiKey, env.workspaceId]) {
+      if (secret) out = out.split(secret).join('[已隐藏]')
+    }
+    return out
+  }
+
   // 唯一出口:所有 Publer 请求都过这里,统一头 + 统一错误分类(规矩③⑤)。
-  async function publerRequest(method: string, path: string, body?: unknown): Promise<unknown> {
+  // opts.create 只给「建东西」的 POST 传:只有它们被 4xx 拒了才能确定没建出来,重试才安全。
+  async function publerRequest(
+    method: string,
+    path: string,
+    body?: unknown,
+    opts: { create?: boolean } = {},
+  ): Promise<unknown> {
     const env = readEnv()
     const headers: Record<string, string> = {
       'User-Agent': 'Mozilla/5.0',
@@ -207,20 +224,32 @@ export function createPublerInstagramAdapter(deps: PublerInstagramDeps = {}): Pu
     }
     if (body !== undefined) headers['Content-Type'] = 'application/json'
 
-    const res = await fetchFn(`${baseUrl}${path}`, {
-      method,
-      headers,
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    })
+    let res: Response
+    try {
+      res = await fetchFn(`${baseUrl}${path}`, {
+        method,
+        headers,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      })
+    } catch (e) {
+      // 超时/中断 = 不知道建没建出来 → 普通错误,绝不判成「明确拒绝」
+      const name = e && typeof e === 'object' ? (e as { name?: unknown }).name : undefined
+      if (name === 'TimeoutError' || name === 'AbortError') {
+        throw new Error(`Publer 请求超时(${method} ${path})`)
+      }
+      const msg = e instanceof Error ? e.message : String(e)
+      throw new Error(redact(msg))
+    }
 
     if (!res.ok) {
       if (res.status === 401 || res.status === 403) {
         throw new PublerAccountError(`Publer 授权失效或被拦截(HTTP ${res.status})`)
       }
       const text = await res.text().catch(() => '')
-      const message = `Publer ${method} ${path} ${res.status}: ${text.slice(0, 200)}`
-      // 4xx = Publer 明确说不行(请求没被受理);5xx = 不知道有没有受理,保持普通错误让调用方对账
-      if (res.status >= 400 && res.status < 500) throw new PublerRejectedError(message)
+      const message = redact(`Publer ${method} ${path} ${res.status}: ${text.slice(0, 200)}`)
+      // 只有建帖请求的 4xx 才是「明确拒绝」(请求没被受理);轮询/查询的 4xx 结果未知,不能当拒绝
+      if (opts.create === true && res.status >= 400 && res.status < 500) throw new PublerRejectedError(message)
       throw new Error(message)
     }
     return res.json().catch(() => ({}))
@@ -266,11 +295,16 @@ export function createPublerInstagramAdapter(deps: PublerInstagramDeps = {}): Pu
 
   // 上传视频拿 media id:POST /media/from-url → job → payload[0].id。
   async function uploadMedia(videoUrl: string, idempotencyTag: string): Promise<string> {
-    const created = await publerRequest('POST', '/media/from-url', {
-      media: [{ url: videoUrl, name: `me-factory-${idempotencyTag}` }],
-      type: 'single',
-      in_library: true,
-    })
+    const created = await publerRequest(
+      'POST',
+      '/media/from-url',
+      {
+        media: [{ url: videoUrl, name: `me-factory-${idempotencyTag}` }],
+        type: 'single',
+        in_library: true,
+      },
+      { create: true },
+    )
     const jobId = created && typeof created === 'object' ? (created as Record<string, unknown>)['job_id'] : undefined
     if (typeof jobId !== 'string' || !jobId) throw new Error('Publer 上传未返回 job_id')
 
@@ -284,7 +318,7 @@ export function createPublerInstagramAdapter(deps: PublerInstagramDeps = {}): Pu
 
   // 排期/草稿:POST /posts/schedule → job → 失败信息非空则 throw。
   async function schedulePost(body: Record<string, unknown>): Promise<string> {
-    const created = await publerRequest('POST', '/posts/schedule', body)
+    const created = await publerRequest('POST', '/posts/schedule', body, { create: true })
     const jobId = created && typeof created === 'object' ? (created as Record<string, unknown>)['job_id'] : undefined
     if (typeof jobId !== 'string' || !jobId) throw new Error('Publer 排期未返回 job_id')
 
@@ -302,6 +336,7 @@ export function createPublerInstagramAdapter(deps: PublerInstagramDeps = {}): Pu
   ): Promise<{ post: Record<string, unknown>; state: 'draft' | 'scheduled' | 'published' } | null> {
     const tag = encodeIdemTag(idempotencyTag)
     for (const state of ['draft', 'scheduled', 'published'] as const) {
+      let lastPageNonEmpty = false
       for (let page = 0; page < LOOKUP_PAGES; page++) {
         const raw = await publerRequest(
           'GET',
@@ -310,7 +345,15 @@ export function createPublerInstagramAdapter(deps: PublerInstagramDeps = {}): Pu
         const list = normalizePostList(raw)
         const hit = list.find((p) => typeof p['text'] === 'string' && (p['text'] as string).includes(tag))
         if (hit) return { post: hit, state }
-        if (list.length === 0) break // 这个 state 翻到头了
+        if (list.length === 0) {
+          lastPageNonEmpty = false
+          break // 这个 state 翻到头了
+        }
+        lastPageNonEmpty = true
+      }
+      // 翻满 LOOKUP_PAGES 页仍非空且没命中:可能还有更深的页,不能当「没发过」放行重发
+      if (lastPageNonEmpty) {
+        throw new Error('Publer 对账翻页未到底,无法确认有没有发过,保守不继续')
       }
     }
     return null
@@ -385,8 +428,8 @@ export function createPublerInstagramAdapter(deps: PublerInstagramDeps = {}): Pu
       }
 
       const ref = toRef({ accountId: target.publer_account_id, mediaId, jobId, found, draft, scheduledAt })
-      // 读回成功却没找到我们埋的标记:Publer/Instagram 可能吞了零宽字符,下一次对账会漏掉这条 → 标出来让人看
-      return readBackOk && found === null ? { ...ref, idempotency_unverified: true } : ref
+      // 读回失败、或读回成功却没找到标记(零宽字符可能被吞)→ 对账可能失效,标出来让人看
+      return !readBackOk || found === null ? { ...ref, idempotency_unverified: true } : ref
     },
 
     // 幂等对账:三个 state 扫一遍。非 OK 响应 throw(fail closed,调用方不能盲发)。

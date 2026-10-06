@@ -76,6 +76,8 @@ export interface InstagramPublishReceipt {
   next_retry_at?: string | null
   /** 建帖后读回没找到幂等标记:防重复发布的对账可能失效(首次真连草稿验证要看这一项) */
   idempotency_unverified?: boolean
+  /** 建帖请求发出过、结果不确定:只许对账,不许直接重建。 */
+  post_may_exist?: boolean
   event_ids?: string[]
   created_at: string
   updated_at: string
@@ -166,6 +168,7 @@ function copyReceipt(raw: Record<string, unknown>, status: InstagramReceiptStatu
     if (retryAt !== undefined) out.next_retry_at = retryAt
   }
   if (raw.idempotency_unverified === true) out.idempotency_unverified = true
+  if (raw.post_may_exist === true) out.post_may_exist = true
   if (Array.isArray(raw.event_ids)) out.event_ids = raw.event_ids.filter((x): x is string => typeof x === 'string')
   return out
 }
@@ -218,6 +221,10 @@ export function newClaim(args: NewClaimArgs): InstagramPublishReceipt {
   if (prev?.media_id !== undefined) {
     receipt.media_id = prev.media_id
   }
+  // 上一次可能已建帖:新一次尝试也必须只对账,不能直接重建。
+  if (prev?.post_may_exist === true) {
+    receipt.post_may_exist = true
+  }
   return receipt
 }
 
@@ -268,12 +275,16 @@ export function markSubmitted(
   delete next.error
   delete next.failure_kind
   delete next.next_retry_at
+  // 已记录提交结果:不再有"可能已建帖"的不确定性。
+  delete next.post_may_exist
   return next
 }
 
 export interface MarkFailedArgs {
   error: string
   kind: InstagramFailureKind
+  /** 建帖请求已发出但结果未知:标记 post_may_exist,后续只许对账。 */
+  mayHavePosted?: boolean
 }
 
 const EMPTY_ERROR = '发布失败(原因未记录)'
@@ -296,11 +307,13 @@ export function markFailed(
 ): InstagramPublishReceipt {
   const error = sanitizeError(args.error)
   const updatedAt = now.toISOString()
+  // 一旦可能已建帖就粘住:后续失败(哪怕没再传 mayHavePosted)也必须只对账。
+  const postMayExist = args.mayHavePosted === true || r.post_may_exist === true
   if (args.kind === 'account') {
     const retryAt = new Date(
       now.getTime() + ACCOUNT_RETRY_MINUTES * 60 * 1000,
     ).toISOString()
-    return {
+    const next: InstagramPublishReceipt = {
       ...r,
       status: 'failed',
       error,
@@ -308,6 +321,8 @@ export function markFailed(
       next_retry_at: retryAt,
       updated_at: updatedAt,
     }
+    if (postMayExist) next.post_may_exist = true
+    return next
   }
   const oldAttempts = r.attempts
   const newAttempts = oldAttempts + 1
@@ -318,7 +333,7 @@ export function markFailed(
           now.getTime() +
             OTHER_BACKOFF_MINUTES * 2 ** oldAttempts * 60 * 1000,
         ).toISOString()
-  return {
+  const next: InstagramPublishReceipt = {
     ...r,
     status: 'failed',
     error,
@@ -327,6 +342,8 @@ export function markFailed(
     next_retry_at: nextRetryAt,
     updated_at: updatedAt,
   }
+  if (postMayExist) next.post_may_exist = true
+  return next
 }
 
 /**
@@ -394,10 +411,13 @@ export function decideSweep(args: DecideSweepArgs): SweepDecision {
     return { action: 'skip', reason: 'already_done' }
   }
 
-  // 5. claiming：卡死则重跑，否则视为在途。
+  // 5. claiming：卡死则重跑；但若可能已建帖，只能对账，绝不重建。
   if (receipt.status === 'claiming') {
     const age = parseAge(receipt.updated_at, now)
-    if (age >= STALE_CLAIM_MS) return { action: 'run' }
+    if (age >= STALE_CLAIM_MS) {
+      if (receipt.post_may_exist === true) return { action: 'reconcile' }
+      return { action: 'run' }
+    }
     return { action: 'skip', reason: 'in_flight' }
   }
 
@@ -417,5 +437,7 @@ export function decideSweep(args: DecideSweepArgs): SweepDecision {
       return { action: 'skip', reason: 'backoff' }
     }
   }
+  // 到期可重试；但若可能已建帖，只能对账，绝不重建。
+  if (receipt.post_may_exist === true) return { action: 'reconcile' }
   return { action: 'run' }
 }

@@ -476,3 +476,133 @@ describe('幂等标记读回', () => {
     expect((await run([{ id: 'p1', text: `c\n${tag}` }])).idempotency_unverified).toBeUndefined()
   })
 })
+
+describe('轮询/查询的 4xx 不是「明确拒绝」(防重复帖)', () => {
+  const happyUntilSchedule = (url: string, method: string) => {
+    if (url.endsWith('/accounts')) return ACCOUNTS_OK
+    if (url.endsWith('/media/from-url')) return { json: { job_id: 'jm' } }
+    if (url.endsWith('/job_status/jm')) return { json: { status: 'complete', payload: [{ id: 'media-0001' }] } }
+    return method === 'POST' ? { json: { job_id: 'jp' } } : { json: [] }
+  }
+
+  it('建帖成功后轮询 job_status 返回 429 → 不是明确拒绝', async () => {
+    const { fetchFn } = makeFetch((u, m) => {
+      if (u.endsWith('/job_status/jp')) return { status: 429, text: 'slow down' }
+      return happyUntilSchedule(u, m)
+    })
+    const adapter = createPublerInstagramAdapter({ fetchFn, sleep: async () => {} })
+    const err = await adapter
+      .publish({ videoUrl: 'u', caption: 'c', target: target(), idempotencyTag: 'wo-1', draft: true })
+      .catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(isPublerRejectedError(err)).toBe(false)
+    expect(isPublerAccountError(err)).toBe(false)
+  })
+
+  it('GET /accounts 返回 404 → 不是明确拒绝(普通错误)', async () => {
+    const { fetchFn } = makeFetch(() => ({ status: 404, text: 'nope' }))
+    const adapter = createPublerInstagramAdapter({ fetchFn, sleep: async () => {} })
+    const err = await adapter
+      .publish({ videoUrl: 'u', caption: 'c', target: target(), idempotencyTag: 'wo-1', draft: true })
+      .catch((e: unknown) => e)
+    expect(isPublerRejectedError(err)).toBe(false)
+  })
+
+  it('POST /media/from-url 返回 422 → 明确拒绝', async () => {
+    const { fetchFn } = makeFetch((u, m) => {
+      if (u.endsWith('/accounts')) return ACCOUNTS_OK
+      if (u.endsWith('/media/from-url')) return { status: 422, text: 'bad url' }
+      return happyUntilSchedule(u, m)
+    })
+    const adapter = createPublerInstagramAdapter({ fetchFn, sleep: async () => {} })
+    const err = await adapter
+      .publish({ videoUrl: 'u', caption: 'c', target: target(), idempotencyTag: 'wo-1', draft: true })
+      .catch((e: unknown) => e)
+    expect(isPublerRejectedError(err)).toBe(true)
+  })
+})
+
+describe('密钥脱敏', () => {
+  it('响应体里的 key 被替换成 [已隐藏]', async () => {
+    process.env.PUBLER_API_KEY = 'secret-key-123'
+    const { fetchFn } = makeFetch(() => ({ status: 500, text: 'boom secret-key-123' }))
+    const adapter = createPublerInstagramAdapter({ fetchFn, sleep: async () => {} })
+    const err = await adapter
+      .publish({ videoUrl: 'u', caption: 'c', target: target(), idempotencyTag: 'wo-1', draft: true })
+      .catch((e: unknown) => e)
+    const msg = String((err as Error).message)
+    expect(msg).not.toContain('secret-key-123')
+    expect(msg).toContain('[已隐藏]')
+  })
+
+  it('fetch 自身抛错里的 key 也被脱敏', async () => {
+    process.env.PUBLER_API_KEY = 'secret-key-123'
+    const fetchFn = (async () => {
+      throw new Error('boom secret-key-123')
+    }) as typeof fetch
+    const adapter = createPublerInstagramAdapter({ fetchFn, sleep: async () => {} })
+    const err = await adapter
+      .publish({ videoUrl: 'u', caption: 'c', target: target(), idempotencyTag: 'wo-1', draft: true })
+      .catch((e: unknown) => e)
+    expect(String((err as Error).message)).not.toContain('secret-key-123')
+  })
+})
+
+describe('请求超时', () => {
+  it('fetch 抛 TimeoutError → 普通错误含「超时」,不是明确拒绝', async () => {
+    const fetchFn = (async () => {
+      const e = new Error('timed out')
+      e.name = 'TimeoutError'
+      throw e
+    }) as typeof fetch
+    const adapter = createPublerInstagramAdapter({ fetchFn, sleep: async () => {} })
+    const err = await adapter
+      .publish({ videoUrl: 'u', caption: 'c', target: target(), idempotencyTag: 'wo-1', draft: true })
+      .catch((e: unknown) => e)
+    expect(String((err as Error).message)).toContain('超时')
+    expect(isPublerRejectedError(err)).toBe(false)
+  })
+})
+
+describe('对账翻页 fail closed', () => {
+  it('draft 三页都非空且没命中 → 抛「保守不继续」', async () => {
+    const { fetchFn } = makeFetch((url) => {
+      if (url.includes('state=draft')) return { json: [{ id: 'x', text: 'other' }] }
+      return { json: [] }
+    })
+    const adapter = createPublerInstagramAdapter({ fetchFn, sleep: async () => {} })
+    await expect(adapter.findExisting({ target: target(), idempotencyTag: 'wo-9' })).rejects.toThrow(/保守不继续/)
+  })
+
+  it('第 0 页非空、第 1 页空且没命中 → 仍返回 null', async () => {
+    const { fetchFn } = makeFetch((url) => {
+      if (url.includes('state=draft') && url.includes('page=0')) return { json: [{ id: 'x', text: 'other' }] }
+      return { json: [] }
+    })
+    const adapter = createPublerInstagramAdapter({ fetchFn, sleep: async () => {} })
+    expect(await adapter.findExisting({ target: target(), idempotencyTag: 'wo-9' })).toBeNull()
+  })
+})
+
+describe('读回失败也标 idempotency_unverified', () => {
+  it('排期完成后 GET /posts 返回 500 → 仍 resolve 且标 unverified', async () => {
+    const { fetchFn } = makeFetch((url, method) => {
+      if (url.endsWith('/accounts')) return ACCOUNTS_OK
+      if (url.endsWith('/media/from-url')) return { json: { job_id: 'jm' } }
+      if (url.endsWith('/job_status/jm')) return { json: { status: 'complete', payload: [{ id: 'media-0001' }] } }
+      if (url.endsWith('/posts/schedule')) return { json: { job_id: 'jp' } }
+      if (url.endsWith('/job_status/jp')) return { json: { status: 'complete', payload: { failures: {} } } }
+      if (url.includes('/posts?')) return { status: 500, text: 'boom' }
+      return method === 'GET' ? { json: [] } : { json: {} }
+    })
+    const adapter = createPublerInstagramAdapter({ fetchFn, sleep: async () => {} })
+    const ref = await adapter.publish({
+      videoUrl: 'u',
+      caption: 'c',
+      target: target(),
+      idempotencyTag: 'wo-1',
+      draft: true,
+    })
+    expect(ref.idempotency_unverified).toBe(true)
+  })
+})
