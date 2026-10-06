@@ -1,7 +1,7 @@
 ---
 id: 2026-10-06-calendar-cts-ai-visibility-drop-signal
 title: CTS AI 可见度回填后 9/21 仍出现一条下滑告警，需判断是不是旧告警重复
-status: failed
+status: done
 owner: pm
 decided_on: 2026-10-06
 source: doc:docs/ledger/evidence/2026-10-06-calendar-cts-ai-visibility-drop-signal.md
