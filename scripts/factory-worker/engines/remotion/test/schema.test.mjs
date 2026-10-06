@@ -600,6 +600,58 @@ describe('timing', () => {
   })
 })
 
+describe('logoMode', () => {
+  test('props without logoMode still parse and stay undefined', () => {
+    const parsed = parseListReelProps(valid())
+    assert.equal(parsed.logoMode, undefined)
+  })
+
+  test("logoMode 'last_beats' is accepted", () => {
+    const props = valid()
+    props.logoMode = 'last_beats'
+    assert.doesNotThrow(() => parseListReelProps(props))
+  })
+
+  test("logoMode 'always' is accepted", () => {
+    const props = valid()
+    props.logoMode = 'always'
+    assert.doesNotThrow(() => parseListReelProps(props))
+  })
+
+  test("logoMode 'forever' is rejected", () => {
+    rejects((props) => {
+      props.logoMode = 'forever'
+    })
+  })
+
+  test('logoMode null is rejected', () => {
+    rejects((props) => {
+      props.logoMode = null
+    })
+  })
+
+  test('the default timing is unchanged (regression)', () => {
+    const props = valid()
+    const fromProps = computeTimingFromProps(props)
+    const fromBeats = computeTiming(props.beats, props.items.length)
+    const explicit = computeTiming(props.beats, props.items.length, 'last_beats')
+    assert.deepEqual(fromProps, fromBeats)
+    assert.deepEqual(fromProps, explicit)
+  })
+
+  test("logoMode 'always' starts the logo at frame 0 and changes nothing else", () => {
+    const props = valid()
+    const base = computeTimingFromProps(props)
+    const always = computeTimingFromProps({ ...props, logoMode: 'always' })
+    assert.equal(always.logoFrom, 0)
+    assert.equal(always.hookFrames, base.hookFrames)
+    assert.deepEqual(always.itemFrom, base.itemFrom)
+    assert.deepEqual(always.itemDur, base.itemDur)
+    assert.equal(always.revealFrom, base.revealFrom)
+    assert.equal(always.totalFrames, base.totalFrames)
+  })
+})
+
 // Music, montage and template tests ride along with this file because package.json (an A-level path) lists test files explicitly.
 import './music.test.mjs'
 import './music-excerpt.test.mjs'
