@@ -4,7 +4,7 @@ title: 每日计划接 Remotion 出片：先做「服务端生成视频参数」
 status: decided
 owner: agent
 decided_on: 2026-10-06
-source: session:1b649c
+source: session:aa674920
 verify_by: 2026-10-13
 verify_how: PR1 已开且「当场试跑」有 CTS 事实 + 非 CTS 假事实各一份参数过真引擎校验并渲出一条；PR2 在 PR1 合并后开，试跑需 PM 授权在生产库建一张草稿测试工单；官网事实快照 PR 2270 合并情况已确认
 ---
