@@ -1,9 +1,11 @@
 ---
 id: 2026-10-06-pr2299-merged-by-pm-before-weiqing-review
 title: PM 本人在卫青复核完成前，把 PR2299 合进了方案分支（不是主干）；方案与预算余量代码仍未进主干，主干合并等 PR2285 与复核补丁
-status: decided
+status: done
 owner: pm
 decided_on: 2026-10-06
+done_on: 2026-10-06
+done_ref: doc:docs/ledger/2026-10-06-cts-shanghai-ads-weiqing-recheck-2299.md
 source: session:ec90bb17
 verify_by: 2026-10-13
 verify_how: 看 PR2285（方案主 PR，草稿，基线是主干）是否在卫青复核补丁（PR2309）并入后经 PM 回「合」进了主干；预算余量代码文件在主干上存在才算进主干。
