@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { WorkOrderStatus } from '@/lib/factory/types'
 import { REEL_HUMAN_CHECK_KEYS, type CheckItemOutcome, type ContentCheckItemResult, type ContentCheckItemKey } from '@/lib/social/content-review'
-import { defaultFactSourceRef, reviewErrorZh } from '@/lib/factory/review-ui'
+import { defaultFactSourceRef, reviewErrorZh, reviewGate } from '@/lib/factory/review-ui'
+import { isAcceptableFlagCategory } from '@/lib/factory/review-flag-categories'
 import { FactoryChat } from './FactoryChat'
+import { OneClickConfirm } from './OneClickConfirm'
 
 // P21.J ME 原生化 P1 — 审核 Inbox(spec me-native-design v0.2 §2.1)
 // 试验田:看片 + 拍板。in_review 工单 → 大号播放器 + 人话理由 +
@@ -30,6 +32,7 @@ interface WorkOrder {
     quality_flags?: Array<{ category: string; detail: string }>
     quality_checklist_auto?: ContentCheckItemResult[]
   } | null
+  accepted_flags?: Array<{ category: string; accepted_at: string; accepted_by: string }>
 }
 
 const redlineHitsOf = (o: WorkOrder): string[] =>
@@ -44,6 +47,21 @@ const autoChecklistOf = (o: WorkOrder): ContentCheckItemResult[] =>
   Array.isArray(o.output?.quality_checklist_auto) ? o.output.quality_checklist_auto : []
 const autoChecklistReady = (o: WorkOrder): boolean =>
   autoChecklistOf(o).length > 0 && autoChecklistOf(o).every(item => item.judge === 'AUTO' && item.outcome === 'PASS')
+
+const acceptedCategoriesOf = (o: WorkOrder): string[] => (o.accepted_flags ?? []).map(f => f.category)
+
+const acceptedDateOf = (o: WorkOrder, category: string): string | null => {
+  const entry = (o.accepted_flags ?? []).find(f => f.category === category)
+  return entry ? entry.accepted_at.slice(0, 10) : null
+}
+
+const gateOf = (o: WorkOrder) => reviewGate({
+  autoReady: autoChecklistReady(o),
+  redlineHits: redlineHitsOf(o),
+  qualityFlags: qualityFlagsOf(o),
+  acceptedCategories: acceptedCategoriesOf(o),
+  factSourcePrefilled: defaultFactSourceRef(o.fact_source_url) !== '',
+})
 
 const QUALITY_FLAG_LABEL: Record<string, string> = {
   competitor_brand: '⚠️ 疑似把竞品品牌当自己卖点',
@@ -77,6 +95,9 @@ const emptyChecklistDraft = (factSource = ''): ChecklistDraft => Object.fromEntr
   REEL_HUMAN_CHECK_KEYS.map(key => [key, { outcome: 'NOT_MEASURED', detail: '', source_ref: FACT_KEYS.includes(key) ? factSource : '' }]),
 ) as ChecklistDraft
 
+const allPass = (draft: ChecklistDraft): ChecklistDraft =>
+  Object.fromEntries(REEL_HUMAN_CHECK_KEYS.map(key => [key, { ...draft[key], outcome: 'PASS' }])) as ChecklistDraft
+
 const checklistPayload = (draft: ChecklistDraft): ContentCheckItemResult[] =>
   REEL_HUMAN_CHECK_KEYS.map(key => ({
     key,
@@ -99,6 +120,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
   const [error, setError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<WorkOrder | null>(null)
   const [checklistDraft, setChecklistDraft] = useState<ChecklistDraft>(emptyChecklistDraft)
+  const [showDetails, setShowDetails] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -143,6 +165,26 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
       setBusy(null)
     }
   }, [])
+
+  const acceptFlag = useCallback(async (id: string, category: string) => {
+    setBusy(id)
+    setError(null)
+    try {
+      const res = await fetch(`/api/factory/work-orders/${id}/accept-flag`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}))
+        setError(`没接受成功:${j.error ?? res.status}`)
+        return
+      }
+      await load()
+    } finally {
+      setBusy(null)
+    }
+  }, [load])
 
   // 只在「从没显示过 + 当前也没待审」时隐藏。一旦显示过就常驻——刷新时绝不整体卸载,
   // 否则右侧对话框(ReviewInbox 的子组件)会被连带卸载,历史 + 正在输入的指令全丢(PM 报的 bug)。
@@ -192,13 +234,32 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
               )}
 
               {qualityFlagsOf(o).length > 0 && (
-                <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">
-                  {qualityFlagsOf(o).map((f, i) => (
-                    <p key={i} className="text-sm text-amber-800">
-                      <span className="font-medium">{QUALITY_FLAG_LABEL[f.category] ?? '⚠️ 品控提示'}</span>
-                      <span className="block text-xs text-amber-700 mt-0.5">{f.detail}</span>
+                <div className="mb-4 space-y-1">
+                  {qualityFlagsOf(o).filter(f => isAcceptableFlagCategory(f.category) && acceptedCategoriesOf(o).includes(f.category)).map((f, i) => (
+                    <p key={`accepted-${i}`} className="text-sm text-slate-500">
+                      已接受({acceptedDateOf(o, f.category)}) · {QUALITY_FLAG_LABEL[f.category]?.replace('⚠️ ', '') ?? '品控提示'}
                     </p>
                   ))}
+                  {qualityFlagsOf(o).some(f => !(isAcceptableFlagCategory(f.category) && acceptedCategoriesOf(o).includes(f.category))) && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">
+                      {qualityFlagsOf(o).filter(f => !(isAcceptableFlagCategory(f.category) && acceptedCategoriesOf(o).includes(f.category))).map((f, i) => (
+                        <div key={i}>
+                          <p className="text-sm text-amber-800">
+                            <span className="font-medium">{QUALITY_FLAG_LABEL[f.category] ?? '⚠️ 品控提示'}</span>
+                            <span className="block text-xs text-amber-700 mt-0.5">{f.detail}</span>
+                          </p>
+                          {isAcceptableFlagCategory(f.category) && (
+                            <button
+                              type="button"
+                              onClick={() => void acceptFlag(o.id, f.category)}
+                              disabled={busy === o.id}
+                              className="mt-1 px-2 h-7 rounded border border-amber-300 text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                            >PM 已接受</button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -214,7 +275,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
               )}
 
               <button
-                onClick={() => { setError(null); setConfirming(o); setChecklistDraft(emptyChecklistDraft(defaultFactSourceRef(o.fact_source_url))) }}
+                onClick={() => { setError(null); setConfirming(o); setShowDetails(false); setChecklistDraft(emptyChecklistDraft(defaultFactSourceRef(o.fact_source_url))) }}
                 disabled={busy === o.id}
                 className="w-full sm:w-auto sm:self-start px-5 h-11 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 mb-2"
               >{busy === o.id ? '处理中…' : '✓ 通过·待发布'}</button>
@@ -245,18 +306,54 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
             )}
 
             {qualityFlagsOf(confirming).length > 0 && (
-              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">
-                {qualityFlagsOf(confirming).map((f, i) => (
-                  <p key={i} className="text-sm text-amber-800">
-                    <span className="font-medium">{QUALITY_FLAG_LABEL[f.category] ?? '⚠️ 品控提示'}</span>
-                    <span className="block text-xs text-amber-700 mt-0.5">{f.detail}</span>
+              <div className="mb-3 space-y-1">
+                {qualityFlagsOf(confirming).filter(f => isAcceptableFlagCategory(f.category) && acceptedCategoriesOf(confirming).includes(f.category)).map((f, i) => (
+                  <p key={`accepted-${i}`} className="text-sm text-slate-500">
+                    已接受({acceptedDateOf(confirming, f.category)}) · {QUALITY_FLAG_LABEL[f.category]?.replace('⚠️ ', '') ?? '品控提示'}
                   </p>
                 ))}
+                {qualityFlagsOf(confirming).some(f => !(isAcceptableFlagCategory(f.category) && acceptedCategoriesOf(confirming).includes(f.category))) && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">
+                    {qualityFlagsOf(confirming).filter(f => !(isAcceptableFlagCategory(f.category) && acceptedCategoriesOf(confirming).includes(f.category))).map((f, i) => (
+                      <p key={i} className="text-sm text-amber-800">
+                        <span className="font-medium">{QUALITY_FLAG_LABEL[f.category] ?? '⚠️ 品控提示'}</span>
+                        <span className="block text-xs text-amber-700 mt-0.5">{f.detail}</span>
+                      </p>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
-            <div className="mb-4 space-y-3">
-              <h3 className="text-sm font-medium text-slate-800">人工审核清单</h3>
+            {(() => {
+              const gate = gateOf(confirming)
+              const detailsOpen = showDetails || !gate.oneClick
+              if (!detailsOpen) {
+                return (
+                  <div className="mb-4">
+                    <OneClickConfirm
+                      itemLabels={REEL_HUMAN_CHECK_KEYS.map(k => HUMAN_CHECK_LABEL[k])}
+                      busy={busy === confirming.id}
+                      onConfirm={() => void act(confirming.id, { action: 'approve', checklist_human: checklistPayload(allPass(checklistDraft)) })}
+                      onExpand={() => setShowDetails(true)}
+                    />
+                  </div>
+                )
+              }
+              return (
+                <>
+                  {!gate.oneClick && (
+                    <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                      <p className="text-sm font-medium text-amber-800">不能一键通过,请逐项核对:</p>
+                      <ul className="mt-1 list-disc list-inside space-y-0.5">
+                        {gate.reasons.map((r, i) => (
+                          <li key={i} className="text-xs text-amber-700">{r}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  <div className="mb-4 space-y-3">
+                    <h3 className="text-sm font-medium text-slate-800">人工审核清单</h3>
               <p className="text-xs text-amber-700">所有项需逐项标记 PASS 才能通过。「事实有来源」两项要填来源网址:已按这条片的链接预填,请确认这个页面确实支持片里的价格/天数/日期,不是就改成对应产品页。点「全部标为通过」前请先逐项看过。</p>
               <button
                 type="button"
@@ -295,9 +392,12 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
                       onChange={e => setChecklistDraft(prev => ({ ...prev, [key]: { ...prev[key], source_ref: e.target.value } }))}
                     />
                   )}
-                </div>
-              ))}
-            </div>
+                    </div>
+                  ))}
+                  </div>
+                </>
+              )
+            })()}
 
             {/* 文案只陈述能保证的事实:发布 cron 每小时跑一次;全局开关没开时只发草稿。 */}
             <p className="text-sm text-slate-600 mb-5">
@@ -307,11 +407,13 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
             </p>
             {error && <div className="mb-3 px-3 py-2 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>}
             <div className="flex gap-3">
-              <button
-                onClick={() => void act(confirming.id, { action: 'approve', checklist_human: checklistPayload(checklistDraft) })}
-                disabled={busy === confirming.id || !autoChecklistReady(confirming) || REEL_HUMAN_CHECK_KEYS.some(key => checklistDraft[key].outcome !== 'PASS')}
-                className="flex-1 h-10 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
-              >{busy === confirming.id ? '处理中…' : '确定通过'}</button>
+              {(showDetails || !gateOf(confirming).oneClick) && (
+                <button
+                  onClick={() => void act(confirming.id, { action: 'approve', checklist_human: checklistPayload(checklistDraft) })}
+                  disabled={busy === confirming.id || !autoChecklistReady(confirming) || REEL_HUMAN_CHECK_KEYS.some(key => checklistDraft[key].outcome !== 'PASS')}
+                  className="flex-1 h-10 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
+                >{busy === confirming.id ? '处理中…' : '确定通过'}</button>
+              )}
               <button onClick={() => setConfirming(null)} className="px-5 h-10 rounded-lg border border-slate-200 text-sm">再想想</button>
             </div>
           </div>
