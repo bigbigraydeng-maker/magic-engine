@@ -5,6 +5,7 @@ import type { WorkOrderStatus } from '@/lib/factory/types'
 import { REEL_HUMAN_CHECK_KEYS, type CheckItemOutcome, type ContentCheckItemResult, type ContentCheckItemKey } from '@/lib/social/content-review'
 import { defaultFactSourceRef, reviewErrorZh } from '@/lib/factory/review-ui'
 import { FactoryChat } from './FactoryChat'
+import { OrderNo } from './OrderNo'
 
 // P21.J ME 原生化 P1 — 审核 Inbox(spec me-native-design v0.2 §2.1)
 // 试验田:看片 + 拍板。in_review 工单 → 大号播放器 + 人话理由 +
@@ -177,6 +178,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
               <div className="flex items-center gap-2 text-sm mb-2 flex-wrap">
                 <span className="font-medium text-slate-800">{o.client_name}</span>
                 <span className="text-xs text-slate-500 border border-slate-200 rounded-full px-2 py-0.5">{o.angle}</span>
+                <OrderNo id={o.id} />
               </div>
               <p className="text-sm text-slate-700 bg-blue-50 rounded-lg px-3 py-2 mb-4">{o.rationale_one_liner}</p>
 
@@ -231,7 +233,10 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
       {confirming && (
         <div className="fixed inset-0 z-40 bg-black/45 grid place-items-center p-4" onClick={() => setConfirming(null)}>
           <div className="bg-white rounded-xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <p className="font-medium text-slate-900 mb-1">通过并排入发布队列</p>
+            <div className="flex items-center gap-2 mb-1">
+              <p className="font-medium text-slate-900">通过并排入发布队列</p>
+              <OrderNo id={confirming.id} />
+            </div>
 
             {redlineHitsOf(confirming).length > 0 && (
               <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
