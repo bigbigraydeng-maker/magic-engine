@@ -4,7 +4,7 @@ title: 狄仁杰审 CTS 官网产品事实抓取（PR 2270）：应升 A 级，�
 status: decided
 owner: agent
 decided_on: 2026-10-06
-source: pr:2270
+source: session:6bcf0793
 verify_by: 2026-10-13
 verify_how: PR 2270 正文改为 A 级且仍是草稿；抓取改走 src/lib/net/safe-fetch 并在最终网址上再查一次域名白名单；同一天连跑两次刷新后，没测成/抓失败的页仍出现在读取结果里（有测试用例）；PM 在对话里亲口同意后才合
 ---
