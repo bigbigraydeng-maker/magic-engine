@@ -19,6 +19,10 @@ describe('getAdAccountInsightsResult', () => {
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: [] })))
     await expect(getAdAccountInsightsResult('act_1', 'token', '2026-09-01', '2026-09-02'))
+      .resolves.toEqual({ ok: false, failure: { kind: 'no_delivery' } })
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({})))
+    await expect(getAdAccountInsightsResult('act_1', 'token', '2026-09-01', '2026-09-02'))
       .resolves.toEqual({ ok: false, failure: { kind: 'empty_data' } })
   })
 
