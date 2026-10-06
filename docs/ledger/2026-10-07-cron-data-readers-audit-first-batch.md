@@ -4,7 +4,7 @@ title: 78 个每日自动任务审计完：只有 24 个有人读且有用，第
 status: decided
 owner: pm
 decided_on: 2026-10-07
-source: doc:docs/audits/2026-10-07-cron-data-readers-audit.md
+source: session:65a5db61
 verify_by: 2026-10-14
 verify_how: 看审计文档第二节第一批 5 条有没有已按 PM 回复关掉或明确保留；第三节第 1 条私信写卡重复调用有没有开修复卡。
 ---
