@@ -26,7 +26,7 @@ export const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/;
 const NO_CONTROL_CHARS = /^[^\u0000-\u001f\u007f]*$/;
 
 /** Build a validator for a safe relative file name with an allowed extension. */
-function relFile(kind: string, exts: string[]) {
+export function relFile(kind: string, exts: string[]) {
   return z
     .string()
     .max(120)
@@ -46,7 +46,7 @@ function relFile(kind: string, exts: string[]) {
 }
 
 /** Build a trimmed, non-empty, control-char-free text validator with a max length. */
-function text(max: number) {
+export function text(max: number) {
   return z
     .string()
     .trim()
@@ -77,8 +77,9 @@ const PRICE = z
     currencyPrefix: text(6),
     amount: z.number().int().positive().max(9999999),
     qualifier: text(40),
-    dateLine: text(40),
+    dateLine: text(40).optional(),
     footnote: text(80),
+    footnoteSize: z.number().int().min(30, { message: '脚注字号必须在 30 到 60 之间' }).max(60, { message: '脚注字号必须在 30 到 60 之间' }).optional(),
   })
   .strict();
 
@@ -93,7 +94,14 @@ export const ListReelPropsSchema = z
       .min(0, { message: '遮罩深浅必须在 0 到 0.6 之间' })
       .max(0.6, { message: '遮罩深浅必须在 0 到 0.6 之间' }),
     logoFile: relFile('logo 文件', LOGO_EXTS),
+    logoMode: z
+      .enum(['last_beats', 'always'], {
+        message: 'logoMode 只能是 last_beats 或 always',
+      })
+      .optional(),
+    cutFlash: z.boolean().optional(),
     musicFile: relFile('音乐文件', MUSIC_EXTS).nullable(),
+    musicStartSec: z.number().min(0).max(600).optional(),
     beats: z.array(z.number().finite().min(0).max(120)).max(80),
     hook: z
       .object({

@@ -5,14 +5,14 @@ import { parseArgs } from 'node:util'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { bundle } from '@remotion/bundler'
 import { selectComposition, renderMedia, makeCancelSignal } from '@remotion/renderer'
-import { parseListReelProps, collectAssetFiles } from './src/schema.ts'
-import { computeTimingFromProps } from './src/timing.ts'
+import { TEMPLATE_IDS, isTemplateId, loadTemplate } from './src/templates.ts'
 
 const USAGE = `用法：node render.mjs --props <props.json> --out <out.mp4> [选项]
 
 选项：
   --props <file>              必填，props JSON 文件路径
   --out <file.mp4>            必填，输出 mp4 文件路径（必须以 .mp4 结尾）
+  --template <list|montage>   模板，默认 list
   --public-dir <dir>          素材目录（默认：render.mjs 同级的 public）
   --concurrency <int>         并发数 1..16（默认 2）
   --timeout-sec <int>         总超时秒数，至少 30（默认 600）
@@ -47,6 +47,7 @@ function parseCliArgs(argv) {
       options: {
         props: { type: 'string' },
         out: { type: 'string' },
+        template: { type: 'string' },
         'public-dir': { type: 'string' },
         concurrency: { type: 'string' },
         'timeout-sec': { type: 'string' },
@@ -76,6 +77,11 @@ function parseCliArgs(argv) {
     throw new CliError(`--out 必须以 .mp4 结尾，收到：${outFile}`, 2)
   }
 
+  const template = values.template ?? 'list'
+  if (!isTemplateId(template)) {
+    throw new CliError(`--template 只能是 ${TEMPLATE_IDS.join(' / ')}，收到：${template}`, 2)
+  }
+
   const defaultPublicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public')
   const publicDir = values['public-dir'] ? path.resolve(values['public-dir']) : defaultPublicDir
 
@@ -93,6 +99,7 @@ function parseCliArgs(argv) {
   return {
     propsFile: path.resolve(propsFile),
     outFile: path.resolve(outFile),
+    template,
     publicDir,
     concurrency,
     timeoutSec,
@@ -100,8 +107,8 @@ function parseCliArgs(argv) {
   }
 }
 
-/** Read and validate the props file. */
-function loadProps(propsFile) {
+/** Read and validate the props file for the given template. */
+function loadProps(propsFile, template) {
   let raw
   try {
     raw = fs.readFileSync(propsFile, 'utf8')
@@ -117,16 +124,16 @@ function loadProps(propsFile) {
   }
 
   try {
-    const props = parseListReelProps(json)
-    computeTimingFromProps(props) // reject impossible timing before any browser starts
-    return props
+    // loadTemplate validates props and computes timing, rejecting impossible
+    // timing before any browser starts.
+    return loadTemplate(template, json)
   } catch (err) {
     throw new CliError(err.message, 3)
   }
 }
 
 /** Verify every referenced asset exists inside the public dir (no symlink escapes). */
-function checkAssets(props, publicDir) {
+function checkAssets(assetFiles, publicDir) {
   const missing = []
   const escaped = []
   let realPublicDir
@@ -136,7 +143,7 @@ function checkAssets(props, publicDir) {
     throw new CliError(`素材目录不存在或不可访问：${publicDir}（${err.message}）`, 4)
   }
 
-  for (const name of collectAssetFiles(props)) {
+  for (const name of assetFiles) {
     const full = path.resolve(publicDir, name)
     let stat
     try {
@@ -201,8 +208,11 @@ function makeProgressReporter() {
 
 /** Run the full render pipeline. */
 async function runRender(opts) {
-  const props = loadProps(opts.propsFile)
-  checkAssets(props, opts.publicDir)
+  const loaded = loadProps(opts.propsFile, opts.template)
+  checkAssets(loaded.assetFiles, opts.publicDir)
+  for (const gap of loaded.recipeGaps ?? []) {
+    process.stdout.write(`配方${gap.status}：${gap.column}（${gap.reason}）\n`)
+  }
 
   fs.mkdirSync(path.dirname(opts.outFile), { recursive: true })
   // A failed run must never leave an older file that looks like a fresh result.
@@ -229,8 +239,8 @@ async function runRender(opts) {
 
     const composition = await selectComposition({
       serveUrl: bundleDir,
-      id: 'ListReel',
-      inputProps: props,
+      id: loaded.compositionId,
+      inputProps: loaded.props,
       browserExecutable: opts.browserExecutable,
     })
 
@@ -240,7 +250,7 @@ async function runRender(opts) {
       codec: 'h264',
       crf: 18,
       outputLocation: opts.outFile,
-      inputProps: props,
+      inputProps: loaded.props,
       concurrency: opts.concurrency,
       cancelSignal,
       browserExecutable: opts.browserExecutable,
