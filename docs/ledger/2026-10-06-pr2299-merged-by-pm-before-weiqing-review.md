@@ -1,6 +1,6 @@
 ---
 id: 2026-10-06-pr2299-merged-by-pm-before-weiqing-review
-title: PM 本人在卫青复核完成前，把 PR2299 合进了方案分支（不是主干）；方案与预算余量代码仍未进主干，主干合并等 #2285 与复核补丁
+title: PM 本人在卫青复核完成前，把 PR2299 合进了方案分支（不是主干）；方案与预算余量代码仍未进主干，主干合并等 PR2285 与复核补丁
 status: decided
 owner: pm
 decided_on: 2026-10-06
