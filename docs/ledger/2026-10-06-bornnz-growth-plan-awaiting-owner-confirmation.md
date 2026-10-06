@@ -1,6 +1,6 @@
 ---
 id: 2026-10-06-bornnz-growth-plan-awaiting-owner-confirmation
-title: BORNNZ 月销 1 万增长方案已交 PM，等老板确认 6 件事后才执行
+title: BORNNZ 增长方案已交 PM，等老板确认 6 件事后才执行
 status: decided
 owner: pm
 decided_on: 2026-10-06
@@ -12,3 +12,7 @@ verify_how: 老板是否回复了方案第 09 节的 6 项（广告预算上限�
 放大广告前必须先做两件事：校准广告成交金额与网站对不上的问题；核查广告账户被标成住房类特殊类别的原因。
 客户名单含个人信息，只存本机 ~/Documents/ME-client-data/bornnz/2026-10-06/，不进仓库。
 老板版方案需 PM 在 Artifact 分享菜单开权限后才能发给老板。
+人工任务（PM）：
+- what：老板版方案（会话 c34ec310 里发布的「老板版」Artifact，不是内部版）还没开分享，老板打不开，6 项确认就卡在这里。
+- how：打开下面的入口 → 找到标题为老板版的那份 Artifact → 点右上角「分享」→ 把权限改成「知道链接的人可查看」→ 复制链接发给老板，并请老板回复第 09 节 6 项。
+- href：老板版 Artifact 的直达链接在会话 c34ec310 的发布记录里（链接地址仓库内没有存档，发布者需把它补写到这里）。
