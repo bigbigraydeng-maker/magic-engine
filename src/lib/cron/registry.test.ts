@@ -488,9 +488,9 @@ describe('每个写运行记录的地方，都必须有人认领', () => {
  * 里那条 curl 的 URL 解出来，读取位置从路由源码里查，位置标注从 docs/ENV.md 的表格里
  * 按表头定位「配在哪」那一列取。所以它不是第二份变量清单 —— 没有一项事实是抄来的。
  */
+// job-boards-weekly 于 2026-10-07 暂停，其开关暂不对账，恢复时加回。
 const CRON_TRIGGERED_WEB_FLAGS: { env: string; service: string }[] = [
   { env: 'PROSPECTING_SWEEP_ENABLED', service: 'prospecting-sweep' },
-  { env: 'JOB_SIGNAL_INGEST_ENABLED', service: 'job-boards-weekly' },
 ]
 
 /**
