@@ -16,6 +16,7 @@ b. 用 `mcp__scheduled-tasks__list_task_runs`（taskId=`ledger-nightly-verify`�
 用日历工具读 `hello@magicengine.cloud`，取**开始时间在 [今天-14天, 现在]** 的事件（更早的不碰，由 PM 另行批量清）。跳过：
 - 普通会议/私人事项（标题是人名、meeting、Zoom、通话）；
 - 已闭环的：标题以 ✅/❌ 开头，或以"（已验证""【已验证""（孔子已核过"开头，或描述里含"【自动巡检"且含"✅已验证"。
+- 注意：描述里有「待落台账」但标题还没 ✅/❌ 的，**不算已闭环**，次日照常重新挑出重试第 4 步（先看已有的台账 PR 是否已合并，已合并就只补标题标记）。
 剩下的按开始时间从早到晚排，**每次最多处理 30 条**，其余留给明天（回执里写"顺延未处理 N 条"）。
 
 ## 第 2 步：对每条事件，按描述做只读核对
@@ -26,8 +27,8 @@ b. 用 `mcp__scheduled-tasks__list_task_runs`（taskId=`ledger-nightly-verify`�
 ## 第 3 步：每条事件落到四种结果之一，并回写日历
 **金额一律读回币种再写**（广告金额多为新西兰元），不要默认美元；成本线/阈值以生产库配置（如 `ad_strategy_configs`）为准，事件描述里的数字若与配置不一致，写明不一致，不要拿描述里的数字直接判 ❌。
 用日历的 update_event，**在原描述末尾追加一行**（不整段替换），格式 `【自动巡检 <今天>】<结果>：<一句话事实>`：
-1. **已验证**（描述里**每一项**成功条件都核到了今天取的真实数据；只核了其中几项 → 不打 ✅，按下面第 3 种写「部分验证：已核第几项、没核第几项」）→ 标题前加 `✅ `，追加一行带数字/样本量的结果。对得上卡 → 走第 4 步改 verified。
-2. **没达预期** → 标题前加 `❌ `，追加一行。走第 4 步让它进今日待办。
+1. **已验证**（描述里**每一项**成功条件都核到了今天取的真实数据；只核了其中几项 → 不打 ✅，按下面第 3 种写「部分验证：已核第几项、没核第几项」）→ 追加一行带数字/样本量的结果，并带「待落台账」字样；**此时先不改标题**，走第 4 步，台账 PR 成功合并后才加 `✅ `。
+2. **没达预期** → 追加一行并带「待落台账」字样；**此时先不改标题**，走第 4 步，台账 PR 成功合并后才加 `❌ `，这样它才会进今日待办。
 3. **还验不了**（数据还没产生/时间没到）→ 标题不变，追加 `【自动巡检 <今天>】还验不了（第 N 次）：原因`；N = 描述里已有同样行数 + 1。**N ≥ 3 → 当天升级**。
 4. **没查成**（读不到）→ 标题不变，追加 `【自动巡检 <今天>】没查成：原因（不是通过）`。当天升级。
 **PM 动手类**：追加一行 `【自动巡检 <今天>】等 PM 动手，已提醒` 仅在首次升级时追加。
@@ -47,7 +48,8 @@ cd "$W" && ln -sfn /Users/raydeng/Projects/magic-engine/node_modules node_module
 cd "$W" && git add docs/ledger && git commit -q -m "chore(ledger): 日历巡检 $D [HARNESS.LEDGER.CALENDAR]" && git push -q -u origin "$B"
 gh pr create --base main --head "$B" --title "日历巡检 $D" --body "<每张卡一行：id → 结果 → 原因>" && gh pr merge "$B" --auto --merge
 ```
-CI 红了不要绕，把原因写进回执。
+CI 红了不要绕，把原因写进回执，**且不加 ✅/❌ 标题标记**（保持「待落台账」状态，次日自动重试）。建工作副本、推送、建 PR 任一步失败同理。
+- **关闭标记**：只有 `gh pr view "$B" --json state -q .state` 返回 `MERGED`（auto-merge 尚未完成则等到次日重试时再确认）才用 update_event 给标题加 `✅ `/`❌ `，并把描述里的「待落台账」改成「台账已落」。
 
 ## 第 5 步：升级（一天最多一张卡片，汇总，不刷屏）
 用 `mcp__ccd_session__spawn_task` 给 PM 一张大白话卡片，满足任一条才发：
@@ -59,12 +61,16 @@ CI 红了不要绕，把原因写进回执。
 ## 第 6 步：写回执（每次必写，哪怕零事件）
 ```bash
 mkdir -p ~/.claude/calendar-audit-receipts
-cat > ~/.claude/calendar-audit-receipts/<今天>.json <<'EOF'
-{"run_at":"<ISO 新西兰时间>","gap_self":null,"gap_nightly":null,"window":"<起>~<止>","candidates":N,"processed":N,"deferred_unprocessed":N,
- "results":[{"event":"<标题>","start":"<开始>","outcome":"verified|failed|not_yet|unreadable|pm_action","ledger_id":null,"fact":"<一句话>","unreadable_reason":null}],
- "escalated":true/false,"pr":"<url|null>"}
-EOF
+# 动态值（标题、事实、错误原文）可能含引号/反斜杠/换行，必须用 jq 序列化，禁止把原文直接拼进 heredoc
+R=~/.claude/calendar-audit-receipts/<今天>.json
+jq -n --arg run_at "<ISO 新西兰时间>" --arg window "<起>~<止>" \
+  --argjson candidates N --argjson processed N --argjson deferred N \
+  --argjson escalated true_or_false --arg pr "<url 或空>" \
+  --arg gap_self "<原文或空>" --arg gap_nightly "<原文或空>" \
+  --argjson results '[]' \
+  '{run_at:$run_at,gap_self:($gap_self|select(.!="")),gap_nightly:($gap_nightly|select(.!="")),window:$window,candidates:$candidates,processed:$processed,deferred_unprocessed:$deferred,results:$results,escalated:$escalated,pr:($pr|select(.!=""))}' > "$R"
 ```
+`results` 每项形如 `{event,start,outcome(verified|failed|not_yet|unreadable|pm_action),ledger_id,fact,unreadable_reason}`：逐项用 `jq --arg` 追加（`jq --arg e "$标题" ... '.results += [{event:$e,...}]' "$R" > "$R.tmp" && mv "$R.tmp" "$R"`），不要手写 JSON 字符串。写完必须 `jq -e . "$R"` 校验可解析；校验失败 = 回执无效，按"本次没跑成"处理并升级，不能当成功。第 0 步 a 检查昨天回执时也要用 `jq -e .` 校验，不可解析按 `gap_self: 昨天回执损坏` 记。
 最后的聊天总结：一两句大白话 + 回执路径。
 
 ## 硬约束
