@@ -4,8 +4,10 @@ import { useCallback, useEffect, useState } from 'react'
 import type { WorkOrderStatus } from '@/lib/factory/types'
 import { REEL_HUMAN_CHECK_KEYS, type CheckItemOutcome, type ContentCheckItemResult, type ContentCheckItemKey } from '@/lib/social/content-review'
 import { defaultFactSourceRef, reviewErrorZh } from '@/lib/factory/review-ui'
+import { factoryVideoUrl } from '@/lib/factory/outlets'
 import { FactoryChat } from './FactoryChat'
 import { OrderNo } from './OrderNo'
+import { PublishOutlets } from './PublishOutlets'
 
 // P21.J ME 原生化 P1 — 审核 Inbox(spec me-native-design v0.2 §2.1)
 // 试验田:看片 + 拍板。in_review 工单 → 大号播放器 + 人话理由 +
@@ -215,11 +217,24 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
                 </div>
               )}
 
-              <button
-                onClick={() => { setError(null); setConfirming(o); setChecklistDraft(emptyChecklistDraft(defaultFactSourceRef(o.fact_source_url))) }}
-                disabled={busy === o.id}
-                className="w-full sm:w-auto sm:self-start px-5 h-11 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 mb-2"
-              >{busy === o.id ? '处理中…' : '✓ 通过·待发布'}</button>
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                <button
+                  onClick={() => { setError(null); setConfirming(o); setChecklistDraft(emptyChecklistDraft(defaultFactSourceRef(o.fact_source_url))) }}
+                  disabled={busy === o.id}
+                  className="w-full sm:w-auto px-5 h-11 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
+                >{busy === o.id ? '处理中…' : '✓ 通过·待发布'}</button>
+                {o.output?.video_path && (
+                  <a
+                    href={factoryVideoUrl(o.output.video_path, SUPABASE_URL, `${o.id.slice(0, 8)}.mp4`)}
+                    download
+                    className="ml-3 text-sm text-blue-600 underline"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >下载成片</a>
+                )}
+              </div>
+
+              <PublishOutlets />
 
               <p className="text-xs text-slate-400">要改画面或调预算?在右边跟 Claude 说人话即可。</p>
             </div>

@@ -47,3 +47,29 @@ it('clears the old error when a retry succeeds (no stale red text on the page)',
   expect(document.querySelector('.fixed')).toBeNull()
   expect(document.body.textContent).not.toContain('这一项要填来源网址')
 })
+
+const mountOrders = async (orders: unknown[]) => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ orders }) })))
+  const div = document.body.appendChild(document.createElement('div'))
+  await act(async () => { createRoot(div).render(<ReviewInbox />) })
+}
+
+it('shows a download link only when the order has a video_path', async () => {
+  await mountOrders([
+    { ...order, output: { ...order.output, video_path: 'x/y.mp4' } },
+    { ...order, id: 'w2', output: { ...order.output } },
+  ])
+  const links = [...document.querySelectorAll('a')].filter(a => a.textContent === '下载成片') as HTMLAnchorElement[]
+  expect(links).toHaveLength(1)
+  expect(links[0].href.endsWith('/content-factory/x/y.mp4?download=w1.mp4')).toBe(true)
+})
+
+it('renders the publish outlets disclosure with the outlet list', async () => {
+  await mountOrders([{ ...order, output: { ...order.output, video_path: 'x/y.mp4' } }])
+  expect(document.body.textContent).toContain('通过后会去哪里?')
+  const details = document.querySelector('details') as HTMLDetailsElement
+  await act(async () => { details.open = true })
+  expect(document.body.textContent).toContain('Instagram')
+  expect(document.body.textContent).toContain('未接通')
+  expect(document.body.textContent).toContain('Facebook 主页 Reel')
+})
