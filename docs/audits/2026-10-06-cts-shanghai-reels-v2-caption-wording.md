@@ -87,6 +87,28 @@
 - 生产库 `clients.factory_config.render.creatomate.offers['shanghai-surroundings'].price_line` 仍是「7 Nights · From NZD $3,399 pp」：由统筹窗口改，本窗口不动库。历史文档与测试夹具里的 3,399 是历史记录，不改。
 - 「3,399 划掉」样式（PM 说「可以」非「必须」）：需要出片机仓库 `engines/remotion/src/schema.ts` 的 `price` 加可选旧价字段 + `ListReel.tsx` 价格块加划线样式 + 校验（旧价必须大于现价、必须有官网出处）+ 测试，**中等改动**，且「划掉旧价」属于价格声明，发布前须逐字核官网当时价。这一轮不做，PM 要再说。
 
+## 六之四、出片机更新与「logo 常驻」两张新工单（统筹窗口授权，2026-10-06）
+
+出片机更新（`magic-engine-worker` 检出，常驻进程 `com.magicengine.factory-worker`）：
+- 更新前：`7b3cc092f`（分离头，进程 03:40 起）。更新后：`12ffc388e`（= PR #2313 合并提交；与旧版相比 `scripts/factory-worker` 另带入 `bb1bc7658` 蒙太奇补丁，只影响 montage 模板）。
+- 时机：更新前查过库，没有 `queued/claimed/producing` 工单（没打断在渲的单）。
+- 做法：`git checkout --detach 12ffc388e` + `launchctl kickstart -k gui/<uid>/com.magicengine.factory-worker`（第一次检出因提交未拉取失败，进程只是按原版本重启了一次，随后拉取成功再换版本重启）。
+- **回退**：在该检出里 `git checkout --detach 7b3cc092f6e8e83e173d811c7227539440b7f0a2`，再 `launchctl kickstart -k gui/$(id -u)/com.magicengine.factory-worker`。
+- 重启后读回：日志 03:54:31 `worker 启动 … loop=true`，之后每 30 秒 `无 queued 工单,等待…`，并成功领走并渲完下面两张单；`FACTORY_REMOTION_CLIENT_IDS` 已配置（CTS 之前的 4 张 remotion 单都被领走即证明），本窗口没有读 `.env`。
+
+四张「v2」工单现状（全部草稿，`in_review`，花费 0，只剩已被 PM 接受的 `narrator_voice_mismatch`）：
+
+| 工单号 | 款 | logo | 7 项自动检查 |
+|---|---|---|---|
+| `09e26e9e-8396-4583-a3b1-87eed6e34133` | 常年款 E3 v2 | 最后 2 拍 | 7/7 PASS |
+| `770ab18a-46c5-43ec-b56c-1ce66814291e` | 冲刺款 S3 v2 | 最后 2 拍 | 7/7 PASS |
+| `a13cbd09-7c7b-4f07-bf4d-97b78094e8fd` | 常年款 E3 v2 | **常驻**（`logoMode: always`） | 7/7 PASS |
+| `e01c44d6-2080-4da1-b132-1297e8396ac3` | 冲刺款 S3 v2 | **常驻** | 7/7 PASS |
+
+旧两张（`a0773341-6cad-4ce8-bcd8-a7f0c310aa8d` / `e2f92d54-68c2-4d58-8c27-6c464483c972`，`THE TRIP` 版）原样保留。常驻版工单是 03:55:35 / 03:56:49 UTC 被更新后的出片机领走，03:56:17 / 03:57:29 渲完（约 41 / 40 秒）；从存储取回 `a13cbd09…` 的成片，14.549 秒，第 0.4 秒起 logo 就在画面（已看图）。
+
+**判定更优的「常驻」版就是上表后两张**（参数文件 `E3v2-logo-always.order.json` / `S3v2-logo-always.order.json`）；审核时请把常驻版放前面，最后 2 拍版留作对照。logo 缩小 / 变淡 / 下移的后续见台账卡 `2026-10-06-cts-reel-logo-shrink-fade-lower-followup`（决定权在 PM，到 2026-10-13）。
+
 ## Reuse Statement
 
 - 复用：remotion `list` 模板与 `parseListReelProps` 校验（两份新 props 本机通过）、出片机 `--loop` 常驻进程、既有审核自动检查与 `content-quality-guard`；无新增代码。
