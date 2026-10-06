@@ -42,7 +42,10 @@ node render.mjs --props <props.json> --out <out.mp4> [--public-dir <素材目录
 | `hook.lines` | 恰好 3 行，每行 `{ badge, text }`：`badge` 可为 `null`（最长 6 字符），`text` 最长 9 字符，且「徽章长度+1+文字长度」不超过 9（再长会折行，版面会乱）；第 3 行带高亮底色 |
 | `items` | 3–7 条，每条 `{ text(≤48), clip, blurBackdrop }`；`blurBackdrop=true` 表示该条是抽象概念，镜头只当模糊氛围背景，避免画面假装在表现它 |
 | `itemLabel` / `revealTitle` | 条目上方小字、价格上方标题 |
+| `cutFlash` | 可选布尔；`false` 去掉切镜时的闪白，不写＝照旧闪白 |
 | `price` | `{ backdropClip, fromLabel, currencyPrefix(直接拼在金额前，如 `A$`), amount(正整数), qualifier, dateLine, footnote }` |
+| `price.dateLine` | 可选；不写＝价格页不显示日期那一行 |
+| `price.footnoteSize` | 可选整数 30–60，脚注字号，缺省 30 |
 
 时长随 `beats` 与条目数动态计算：开场 4 拍，每条目 2 拍，价格揭晓 8 拍（`src/timing.ts`），没有写死条目数。
 

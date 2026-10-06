@@ -56,18 +56,19 @@ const Item: React.FC<{ props: ListReelProps; index: number; dur: number }> = ({ 
 export const ListReel: React.FC<Record<string, unknown>> = (rawProps) => {
   const props = parseListReelProps(rawProps)
   const timing = computeTimingFromProps(props)
+  const flash = props.cutFlash !== false
   const frame = useCurrentFrame()
   const vol = interpolate(frame, [0, 8, timing.totalFrames - 36, timing.totalFrames - 4], [0, 1, 1, 0], { extrapolateRight: 'clamp' })
   return (
     <AbsoluteFill style={{ background: '#000' }}>
       <Sequence from={0} durationInFrames={timing.hookFrames}><Hook props={props} /></Sequence>
       {props.items.map((_, i) => (
-        <Sequence key={i} from={timing.itemFrom[i]} durationInFrames={timing.itemDur[i]}><Item props={props} index={i} dur={timing.itemDur[i]} /><CutFlash /></Sequence>
+        <Sequence key={i} from={timing.itemFrom[i]} durationInFrames={timing.itemDur[i]}><Item props={props} index={i} dur={timing.itemDur[i]} />{flash ? <CutFlash /> : null}</Sequence>
       ))}
       <Sequence from={timing.revealFrom} durationInFrames={timing.totalFrames - timing.revealFrom}>
-        <PriceScene backdrop={props.price.backdropClip} brandColor={props.brandColor} fromLabel={props.price.fromLabel} currencyPrefix={props.price.currencyPrefix} amount={props.price.amount} qualifier={props.price.qualifier} dateLine={props.price.dateLine} footnote={props.price.footnote} top={700} />
+        <PriceScene backdrop={props.price.backdropClip} brandColor={props.brandColor} fromLabel={props.price.fromLabel} currencyPrefix={props.price.currencyPrefix} amount={props.price.amount} qualifier={props.price.qualifier} dateLine={props.price.dateLine} footnote={props.price.footnote} footnoteSize={props.price.footnoteSize} top={700} />
         <div style={{ position: 'absolute', left: 90, top: 596, fontFamily, color: '#fff', fontSize: 60, fontWeight: 900, textShadow: '0 4px 24px rgba(0,0,0,0.6)' }}><Reveal delay={0}><div>{props.revealTitle}</div></Reveal></div>
-        <CutFlash />
+        {flash ? <CutFlash /> : null}
       </Sequence>
       <Sequence from={timing.logoFrom} durationInFrames={timing.totalFrames - timing.logoFrom}><Logo file={props.logoFile} /></Sequence>
       {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
