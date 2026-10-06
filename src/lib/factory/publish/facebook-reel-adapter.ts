@@ -25,7 +25,7 @@ export function encodeIdemTag(woId: string): string {
 }
 
 // 品牌名归一(去 Pty Ltd/空格/符号/大小写)用于防误发页名匹配
-function normBrand(s: string): string {
+export function normBrand(s: string): string {
   return s.toLowerCase().replace(/pty\.?\s*ltd\.?/g, '').replace(/[^a-z0-9]/g, '')
 }
 
