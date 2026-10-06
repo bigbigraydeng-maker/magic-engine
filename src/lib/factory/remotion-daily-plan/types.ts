@@ -58,7 +58,7 @@ export interface IndustryWordProfile {
 
 export type BlockReason =
   | 'fact_not_ok' | 'fact_stale' | 'fact_incomplete' | 'departures_past' | 'price_currency_unknown'
-  | 'pool_too_small' | 'pool_kinds_too_few' | 'pool_duplicate_file'
+  | 'pool_too_small' | 'pool_kinds_too_few' | 'pool_duplicate_file' | 'pool_clip_invalid'
   | 'no_usable_music' | 'too_few_words' | 'too_many_words' | 'number_not_in_fact' | 'word_too_long'
 
 export interface MontageProps {

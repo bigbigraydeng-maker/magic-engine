@@ -173,6 +173,23 @@ describe('buildMontageProps', () => {
     expect(failReason(buildMontageProps(baseInput({ pool: dup })))).toBe('pool_duplicate_file')
   })
 
+  it('checks kind diversity on the truncated pool, not the full one', () => {
+    const big: AssetPoolClip[] = Array.from({ length: 25 }, (_, i) => ({
+      ...pool[0],
+      file: `clip-${i}.mp4`,
+      tag: `t${i}`,
+      kind: i === 24 ? 'detail' : i % 2 === 0 ? 'aerial' : 'street',
+    } as AssetPoolClip))
+    expect(failReason(buildMontageProps(baseInput({ pool: big })))).toBe('pool_kinds_too_few')
+  })
+
+  it('rejects clips that violate the engine contract', () => {
+    for (const bad of [{ tag: 'Bad_Tag' }, { file: '../x.mp4' }, { file: 'a b.mp4' }, { lenFrames: 10 }, { lenFrames: 1000 }]) {
+      const broken = pool.map((c, i) => (i === 0 ? { ...c, ...bad } : c))
+      expect(failReason(buildMontageProps(baseInput({ pool: broken })))).toBe('pool_clip_invalid')
+    }
+  })
+
   it('rejects unusable music', () => {
     expect(failReason(buildMontageProps(baseInput({ tracks: [] })))).toBe('no_usable_music')
     const short = tracks.map((t) => ({ ...t, durationSec: 10 }))

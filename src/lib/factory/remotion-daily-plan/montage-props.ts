@@ -72,25 +72,62 @@ function gateFact(fact: ProductFactInput, now: Date): { ok: true } | Failure {
   return { ok: true }
 }
 
-/** Gate 4: pool duplicates, size and kind diversity. */
+const SAFE_REL_PATH = /^[A-Za-z0-9][A-Za-z0-9._-]*(\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/
+const CLIP_EXT = /\.(mp4|mov|webm)$/i
+const CLIP_TAG = /^[a-z0-9-]{1,24}$/
+const CLIP_KIND_SET: ReadonlySet<string> = new Set(['aerial', 'street', 'person', 'detail'])
+const CLIP_SOURCE_SET: ReadonlySet<string> = new Set(['own', 'stock', 'ai'])
+
+/** Describe the first engine-contract violation of one clip, or null when valid. */
+function clipProblem(c: AssetPoolClip): string | null {
+  const file = typeof c.file === 'string' ? c.file : ''
+  if (file.length > 120 || !SAFE_REL_PATH.test(file) || file.includes('..') || !CLIP_EXT.test(file)) {
+    return `镜头文件名不合规：${String(c.file)}`
+  }
+  if (typeof c.tag !== 'string' || !CLIP_TAG.test(c.tag)) {
+    return `镜头标签不合规：${String(c.tag)}（只能是小写字母、数字和连字符，最多 24 个字符）`
+  }
+  if (!CLIP_KIND_SET.has(c.kind)) {
+    return `镜头类型不合规：${String(c.kind)}`
+  }
+  if (!CLIP_SOURCE_SET.has(c.source)) {
+    return `镜头来源不合规：${String(c.source)}`
+  }
+  if (!Number.isInteger(c.lenFrames) || c.lenFrames < 30 || c.lenFrames > 900) {
+    return `镜头长度必须是 30 到 900 帧：${String(c.lenFrames)}`
+  }
+  if (c.luma !== undefined && (typeof c.luma !== 'number' || !(c.luma >= 1 && c.luma <= 255))) {
+    return `镜头亮度必须在 1 到 255 之间：${String(c.luma)}`
+  }
+  return null
+}
+
+/** Gate 4: pool field validity, duplicates, size and kind diversity — on the clips actually emitted. */
 function gatePool(
   pool: readonly AssetPoolClip[],
 ): { ok: true; clips: AssetPoolClip[] } | Failure {
+  const clips = pool.slice(0, POOL_MAX_CLIPS)
+  for (const c of clips) {
+    const problem = clipProblem(c)
+    if (problem !== null) {
+      return fail('pool_clip_invalid', problem, '请修正镜头池配置里的这个镜头')
+    }
+  }
   const seen = new Set<string>()
-  for (const c of pool) {
+  for (const c of clips) {
     if (seen.has(c.file)) {
       return fail('pool_duplicate_file', `镜头文件重复：${c.file}`, '请删除重复的镜头文件')
     }
     seen.add(c.file)
   }
-  if (pool.length < POOL_MIN_CLIPS) {
-    return fail('pool_too_small', `镜头池只有 ${pool.length} 个，至少需要 ${POOL_MIN_CLIPS} 个`, '请补充更多镜头')
+  if (clips.length < POOL_MIN_CLIPS) {
+    return fail('pool_too_small', `镜头池只有 ${clips.length} 个，至少需要 ${POOL_MIN_CLIPS} 个`, '请补充更多镜头')
   }
-  const kinds = new Set(pool.map((c) => c.kind))
+  const kinds = new Set(clips.map((c) => c.kind))
   if (kinds.size < POOL_MIN_KINDS) {
     return fail('pool_kinds_too_few', `镜头池只有 ${kinds.size} 种类型，至少需要 ${POOL_MIN_KINDS} 种`, '请补充不同类型的镜头')
   }
-  return { ok: true, clips: pool.slice(0, POOL_MAX_CLIPS) }
+  return { ok: true, clips }
 }
 
 /** Gate 6: every digit-run in a word must appear in the product fact. */
