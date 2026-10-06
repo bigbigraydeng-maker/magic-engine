@@ -8,4 +8,4 @@
 - 主账户（尾号 7274）：三层级最新 2026-10-05，9/23 行数 10/2/2，9/24 行数 9/2/2，达标
 - 第二账户（尾号 0470）：三层级最新 2026-09-22，9/23 和 9/24 均 0 行，未达标
 - cron_run_logs google-data-pullback-daily：9/22 起 14 次全部 failed，最近报错为 Oztop 等客户 Meta getAdAccountInsights empty_data，不是 CTS
-- 未核实：该账户 9/23 起是否真的没花钱
+- 结论（已核实）：docs/clients/cts/2026-10-06-remotion-video-ad-plan.md 记录该账户最后一笔花费在 9/22，六个广告组当前都无花费；9/23 起无花费 = 正常，不是补数遗漏，无需 PM 再核查，故不再登记待办卡
