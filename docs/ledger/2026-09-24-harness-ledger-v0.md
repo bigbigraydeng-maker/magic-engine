@@ -9,6 +9,8 @@ verify_by: 2026-09-30
 verify_how: ①合并后第一个工作日的今日待办邮件出现"Magic Engine 平台治理"栏下以「台账」开头的条目（NAL Messenger 那张卡过了 9/27 就该出现）；②一个故意写 done_ref pr:999999 的测试 PR 被「Ledger refs exist」拦红。两条都成才算成
 done_on: 2026-09-24
 done_ref: pr:1984
+last_checked: 2026-10-06
+check_note: 夜巡只能读仓库和公开页面，这条要登录后台或查生产库才能验，今晚判不了
 ---
 PM 2026-09-24 拍板，DeepSeek 实现、Fable 窗口复审，子牙 + 魏征设计审各一轮。设计在 docs/specs/2026-09-24-harness-ledger-v0.md。
 不做：只改台账目录的 PR 免合并审批（PM 待定）。

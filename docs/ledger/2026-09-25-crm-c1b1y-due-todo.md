@@ -9,5 +9,7 @@ verify_by: 2026-10-06
 verify_how: 合并后一位 CTS 联系人被写 important_note 且 due_at 设为今天或过去，次日待办邮件里出现「⭐重要标记到期」条目；员工清 due_at 后次日不再出现
 done_on: 2026-09-25
 done_ref: pr:2007
+last_checked: 2026-10-06
+check_note: 夜巡只能读仓库和公开页面，这条要登录后台或查生产库才能验，今晚判不了
 ---
 方案 pr:2000 §7 C1 板桥硬伤 2 完整收官（星标 + 原因 + 到期日 + 到期入待办）。DeepSeek 一轮 $0.01；3 文件；tsc 0 新增、55 pm-todo 测试全过。

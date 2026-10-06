@@ -9,6 +9,8 @@ verify_by: 2026-10-06
 verify_how: A级审查后验证 Post review/queue/publish 与 Reel approve/worker 对缺项、失败和 NOT_MEASURED 均拒绝，合法已测清单才允许继续。
 done_on: 2026-09-29
 done_ref: pr:2193
+last_checked: 2026-10-06
+check_note: 夜巡只能读仓库和公开页面，这条要登录后台或查生产库才能验，今晚判不了
 ---
 Post 审核记录服务端角色和结构化清单；Reel 记录人工清单及自动检查状态。
 首评发布与音视频检测器未实现期间，审批与发布入口 fail-closed。

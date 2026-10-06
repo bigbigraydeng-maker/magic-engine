@@ -9,6 +9,8 @@ verify_by: 2026-10-01
 verify_how: ls ~/.claude/skills/grilling 存在且 settings 里没有放行 gh pr merge；或对应记忆文件已改为"未安装"
 done_on: 2026-09-25
 done_ref: pr:1989
+last_checked: 2026-10-06
+check_note: 夜巡只能读仓库和公开页面，这条要登录后台或查生产库才能验，今晚判不了
 ---
 审计发现 feedback-grill-before-building 声称装了 grilling 技能和 gh pr merge 拦截，
 实际 settings.local.json 反而放行了 gh pr *。"防护已建"的记录本身是假的。

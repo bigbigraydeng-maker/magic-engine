@@ -9,5 +9,7 @@ verify_by: 2026-09-30
 verify_how: PR 合并后 all/page.tsx 无改动仍能拿到老响应；带 ?page=1&perPage=100 调用能拿到 paged 响应；对 CTS 客户 stage=quoted 筛选人数与 Supabase Studio 上直查一致
 done_on: 2026-09-25
 done_ref: pr:2001
+last_checked: 2026-10-06
+check_note: 夜巡只能读仓库和公开页面，这条要登录后台或查生产库才能验，今晚判不了
 ---
 CRM 升级 6 轮（方案 pr:2000）第一轮，DeepSeek 1 轮 $0.02，Fable 窗口出提示词 + 复审 + 修类型错。
