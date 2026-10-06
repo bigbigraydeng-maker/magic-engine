@@ -11,7 +11,6 @@
  *   adset-insights.ts      — ad-set daily time series
  *   ad-insights.ts         — ad daily time series
  *   campaign-management.ts — read "before" state, set status / budget
- *   boost.ts               — boost an existing Page post
  *
  * P12.B.2: Used by the /api/clients/[id]/meta-ads/sync route to pull
  * account-level insights and write them to meta_ads_snapshots.
@@ -53,6 +52,3 @@ export {
   setCampaignDailyBudget,
 } from './campaign-management'
 export type { CampaignDetails } from './campaign-management'
-
-export { boostPagePost } from './boost'
-export type { BoostPostResult } from './boost'

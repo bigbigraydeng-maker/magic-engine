@@ -37,11 +37,15 @@ node render.mjs --props <props.json> --out <out.mp4> [--public-dir <素材目录
 | `itemOverlayOpacity` | 条目页镜头上黑色遮罩的深浅，数字 0–0.6（含）；`0.4` 是原来的效果，越小背景越亮，`0` 不加遮罩；必填，无默认值 |
 | `musicStartSec` | 可选，0–600 秒：音乐从文件的第几秒开始放（`beats` 是相对这个起点的时间）；缺省按 0，旧 props 不受影响。由 `excerptFor` 算出，音乐起点落在视频帧边界上 |
 | `logoFile` / `musicFile` / 各 `clip` | 只允许相对文件名（可带子目录），禁止网址、绝对路径、`..`、空格；扩展名限制：logo `png/jpg/jpeg/webp`，音乐 `mp3/wav/m4a`，镜头 `mp4/mov/webm`。`musicFile` 可为 `null`（无音乐） |
+| `logoMode` | 可选，`last_beats`（缺省）＝ logo 只在最后 2 拍出现；`always` ＝ logo 全程常驻 |
 | `beats` | 剪辑节拍时间（秒），严格递增，最多 80 个；条目数 N 时至少需要 `2N+13` 个；用到的最后一个节拍不得超过 90 秒 |
 | `hook.lines` | 恰好 3 行，每行 `{ badge, text }`：`badge` 可为 `null`（最长 6 字符），`text` 最长 9 字符，且「徽章长度+1+文字长度」不超过 9（再长会折行，版面会乱）；第 3 行带高亮底色 |
 | `items` | 3–7 条，每条 `{ text(≤48), clip, blurBackdrop }`；`blurBackdrop=true` 表示该条是抽象概念，镜头只当模糊氛围背景，避免画面假装在表现它 |
 | `itemLabel` / `revealTitle` | 条目上方小字、价格上方标题 |
+| `cutFlash` | 可选布尔；`false` 去掉切镜时的闪白，不写＝照旧闪白 |
 | `price` | `{ backdropClip, fromLabel, currencyPrefix(直接拼在金额前，如 `A$`), amount(正整数), qualifier, dateLine, footnote }` |
+| `price.dateLine` | 可选；不写＝价格页不显示日期那一行 |
+| `price.footnoteSize` | 可选整数 30–60，脚注字号，缺省 30 |
 
 时长随 `beats` 与条目数动态计算：开场 4 拍，每条目 2 拍，价格揭晓 8 拍（`src/timing.ts`），没有写死条目数。
 
@@ -66,7 +70,7 @@ node render.mjs --props examples/sydney-apartment.props.json --public-dir /tmp/r
 - 音乐只用 PM 已拍板可商用（含广告）的三个文件夹（`Music`、`_shared/music`、`CTS/remotion-assets/music`），不再核对；名字带 `temp` 的是临时文件，不入目录。
 - **从指定小节起播**：`excerptFor(entry, itemCount, startBar)` 返回 `{ musicStartSec, beats }`（`beats` 相对起点，第一个值是所选小节的起点，落在 0–1 帧内）；把两个值一起写进 props。`beatsFor` 仍是「从文件开头放」的老用法，不变。
 - **目录里的 BPM / 首拍还是旧分析器算的**（只看前 60 秒、拍点偏早一帧）。`analyze-music.py` 现已改为整首分析并修掉偏一帧（合成鼓点轨：旧版首拍早 20 毫秒，新版 ±2 毫秒），新数值会让首拍晚 12–46 毫秒；有 5 首 BPM 与目录对不上（`big-stomp-kick` 122.5→124.5、`feel-good-travel` 81→121.9、`founders-in-motion` 194.6→97.1、`snap-the-floor` 179→159、`analytical-scholar` 81→104.1），所以**没有批量重写目录**，等这些听过、量过再重生成。
-- logo 现在只在最后 2 拍出现（`LOGO_BEATS`），不再常驻每一帧。
+- logo 现在只在最后 2 拍出现（`LOGO_BEATS`），不再常驻每一帧。可选 `logoMode: "always"` 恢复常驻；不写则仍是最后 2 拍。
 - 音乐的测试在 `test/music.test.mjs`，由 `schema.test.mjs` 末尾一行 import 带进 `npm test`（`package.json` 是受保护路径，本包不动它）。
 
 ## 蒙太奇快切模板（包 B，`--template montage`）
