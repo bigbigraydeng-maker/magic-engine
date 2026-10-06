@@ -11,6 +11,6 @@ verified_ref: doc:docs/ledger/evidence/2026-10-06-calendar-cts-ai-visibility-dro
 last_checked: 2026-10-06
 verify_by: 2026-10-06
 verify_how: 由 PM 定：查一下 CTS AI 可见度回填之后，自动跑的三件事有没有出问题
-check_note: 已查明：9/21 到 9/27 那 7 条是同一行旧指标每天重算的重复告警，9/27 新指标后回升，非回填算反；详见 other-two-checks 卡证据
+check_note: 已查明：9/21 到 9/27 那 7 条是同一行旧指标每天重算，属旧输入重复；详见 other-two-checks 卡证据
 ---
 日历闭环巡检在 2026-10-06 核对到期提醒「查一下 CTS AI 可见度回填之后，自动跑的三件事有没有出问题」，结果没达预期，详见证据文件。由 PM 决定下一步。
