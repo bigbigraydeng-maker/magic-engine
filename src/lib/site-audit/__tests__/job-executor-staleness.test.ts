@@ -22,12 +22,18 @@ const U = (p: string) => `https://example.com${p}`
 
 function makeSupabase(history: Array<{ url: string; crawled_at: string | null; crawl_status?: string }> | 'throw') {
   const upsert = vi.fn().mockResolvedValue({ data: null, error: null })
-  const limit = history === 'throw'
+  // Mirrors the paginated read: select().eq().order().range(from, to) over `history`.
+  const range = history === 'throw'
     ? vi.fn().mockRejectedValue(new Error('boom'))
-    : vi.fn().mockResolvedValue({ data: history, error: null })
-  const select = vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ limit }) })
+    : vi.fn().mockImplementation((from: number, to: number) =>
+        Promise.resolve({ data: history.slice(from, to + 1), error: null }))
+  const order = vi.fn().mockReturnValue({ range })
+  const select = vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ order }) })
   const from = vi.fn().mockReturnValue({ upsert, select })
-  return { from, upsert } as unknown as SupabaseClient & { upsert: ReturnType<typeof vi.fn> }
+  return { from, upsert, range } as unknown as SupabaseClient & {
+    upsert: ReturnType<typeof vi.fn>
+    range: ReturnType<typeof vi.fn>
+  }
 }
 
 function makeRunner(maxPages: number) {
@@ -69,6 +75,26 @@ describe('executeJob — cap handling', () => {
 
     const crawled = vi.mocked(crawlPages).mock.calls[0][0]
     expect(crawled.slice(0, 2)).toEqual([U('/b'), U('/d')])
+  })
+
+  it('reads crawl history past the first 1000 rows so old rows cannot hide a stale page', async () => {
+    const urls = [U('/target'), U('/other')]
+    vi.mocked(discoverSitemapUrls).mockResolvedValue(urls)
+    vi.mocked(crawlPages).mockResolvedValue([])
+    vi.mocked(JobRunner).mockImplementation(() => makeRunner(1) as never)
+    // 1200 rows: /target (stalest) sorts after the first 1000-row page, /other is fresh.
+    const filler = Array.from({ length: 1199 }, (_, i) => ({
+      url: U(`/old-${String(i).padStart(4, '0')}`), crawl_status: 'crawled', crawled_at: '2026-10-04T00:00:00Z',
+    }))
+    const history = [...filler, { url: U('/zz-last'), crawl_status: 'crawled', crawled_at: '2026-10-04T00:00:00Z' }]
+    history.splice(1100, 0, { url: U('/target'), crawl_status: 'crawled', crawled_at: '2026-09-01T00:00:00Z' })
+    history.splice(5, 0, { url: U('/other'), crawl_status: 'crawled', crawled_at: '2026-10-04T00:00:00Z' })
+    const supabase = makeSupabase(history)
+
+    await executeJob(supabase, 'job-1')
+
+    expect(supabase.range).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(crawlPages).mock.calls[0][0][0]).toBe(U('/target'))
   })
 
   it('keeps sitemap order when crawl history cannot be read', async () => {

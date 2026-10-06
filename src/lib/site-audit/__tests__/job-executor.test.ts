@@ -35,6 +35,7 @@ import {
   discoverSitemapUrls,
   crawlAndClassifyPages,
   summarizeMarkFailures,
+  summarizeRecordFailures,
   type ExecuteJobOptions,
 } from '../job-executor'
 import { JobRunner } from '../job-runner'
@@ -103,11 +104,17 @@ function makeGeoResult(overrides: Record<string, unknown> = {}) {
 }
 
 /** Build a Supabase mock whose `.from(table).upsert(...)` resolves to success. */
-function makeSupabaseMock(upsertError: unknown = null) {
+function makeSupabaseMock(upsertError: unknown = null, updateError: unknown = null) {
   const upsertFn = vi.fn().mockResolvedValue({ data: null, error: upsertError })
-  const fromFn = vi.fn().mockReturnValue({ upsert: upsertFn })
-  return { from: fromFn, _upsert: upsertFn } as unknown as SupabaseClient & {
+  // update().eq().eq().eq() chain that is also awaitable, like a real query builder.
+  const updateChain = Object.assign(Promise.resolve({ data: null, error: updateError }), { eq: vi.fn() })
+  updateChain.eq.mockReturnValue(updateChain)
+  const updateFn = vi.fn().mockReturnValue(updateChain)
+  const fromFn = vi.fn().mockReturnValue({ upsert: upsertFn, update: updateFn })
+  return { from: fromFn, _upsert: upsertFn, _update: updateFn, _updateEq: updateChain.eq } as unknown as SupabaseClient & {
     _upsert: ReturnType<typeof vi.fn>
+    _update: ReturnType<typeof vi.fn>
+    _updateEq: ReturnType<typeof vi.fn>
   }
 }
 
@@ -619,6 +626,44 @@ describe('crawlAndClassifyPages — database writes', () => {
     expect(opts).toMatchObject({ ignoreDuplicates: true })
     expect(result.failed).toHaveLength(1)
     expect(result.failed[0]).toMatchObject({ url, error: 'Timeout' })
+  })
+
+  it('refreshes the attempt time only on rows already marked failed, never on a good snapshot', async () => {
+    const url = 'https://example.com/broken'
+    vi.mocked(crawlPages).mockResolvedValue([
+      makeCrawlResult(url, { error: 'Timeout', statusCode: 0, markdown: '' }),
+    ])
+
+    await crawlAndClassifyPages(
+      mockSupabase as unknown as SupabaseClient, 'client-abc', [url], 'job-123',
+      { maxPages: 100, rateLimitMs: 0 }
+    )
+
+    expect(mockSupabase._update).toHaveBeenCalledTimes(1)
+    const [patch] = mockSupabase._update.mock.calls[0]
+    expect(Object.keys(patch).sort()).toEqual(['crawl_error', 'crawled_at'])
+    expect(mockSupabase._updateEq.mock.calls).toEqual([
+      ['client_id', 'client-abc'], ['url', url], ['crawl_status', 'failed'],
+    ])
+  })
+
+  it('reports a database error on the failed-attempt write as a record failure, not a firewall one', async () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockSupabase = makeSupabaseMock(null, { message: 'permission denied' })
+    const url = 'https://example.com/broken'
+    vi.mocked(crawlPages).mockResolvedValue([
+      makeCrawlResult(url, { error: 'Timeout', statusCode: 0, markdown: '' }),
+    ])
+
+    const result = await crawlAndClassifyPages(
+      mockSupabase as unknown as SupabaseClient, 'client-abc', [url], 'job-123',
+      { maxPages: 100, rateLimitMs: 0 }
+    )
+    spy.mockRestore()
+
+    expect(summarizeMarkFailures(result.failed)).toBeNull()
+    expect(summarizeRecordFailures(result.failed)).toContain('permission denied')
+    expect(summarizeRecordFailures(result.failed)).not.toContain('防火墙')
   })
 
   it('upserts GEO block info when detected', async () => {
