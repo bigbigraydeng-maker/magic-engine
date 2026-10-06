@@ -12,8 +12,8 @@ function validateFact(fact: ProductFactInput): { ok: true } | { ok: false; reaso
   if (days === null || !Number.isInteger(days) || days < 1 || days > 99) {
     return { ok: false, reason: 'fact_incomplete', detail: 'duration_days must be an integer 1..99' }
   }
-  if (fact.from_price === null) {
-    return { ok: false, reason: 'fact_incomplete', detail: 'from_price is required' }
+  if (fact.from_price === null || !Number.isFinite(fact.from_price.amount) || fact.from_price.amount <= 0) {
+    return { ok: false, reason: 'fact_incomplete', detail: 'from_price.amount must be a finite positive number' }
   }
   if (fact.departures === null || fact.departures.length === 0) {
     return { ok: false, reason: 'fact_incomplete', detail: 'departures must be non-empty' }
@@ -72,11 +72,27 @@ function inclusionWords(inclusions: string[]): WordSpec[] {
   return words
 }
 
-/** Keep ISO dates strictly after today's UTC date, sorted ascending, max 2. */
-function futureDepartures(departures: string[], now: Date): string[] {
-  const todayIso = now.toISOString().slice(0, 10)
+/** Default client-local zone for date comparison (AU/NZ target market). */
+const DEFAULT_TIME_ZONE = 'Pacific/Auckland'
+
+/** Today's calendar date (YYYY-MM-DD) in the given IANA time zone. */
+function localTodayIso(now: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now)
+}
+
+/** True when the string is a real calendar date in YYYY-MM-DD form. */
+function isRealIsoDate(d: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d)
+  if (m === null) return false
+  const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])))
+  return dt.getUTCFullYear() === Number(m[1]) && dt.getUTCMonth() === Number(m[2]) - 1 && dt.getUTCDate() === Number(m[3])
+}
+
+/** Keep real ISO dates strictly after today's client-local date, sorted ascending, max 2. */
+function futureDepartures(departures: string[], now: Date, timeZone: string): string[] {
+  const todayIso = localTodayIso(now, timeZone)
   return departures
-    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d > todayIso)
+    .filter((d) => isRealIsoDate(d) && d > todayIso)
     .sort()
     .slice(0, 2)
 }
@@ -89,8 +105,8 @@ function formatDeparture(iso: string): string {
 }
 
 /** Build the departure words, or fail if none remain. */
-function departureWords(departures: string[], now: Date): { ok: true; words: WordSpec[] } | { ok: false; reason: BlockReason; detail: string } {
-  const future = futureDepartures(departures, now)
+function departureWords(departures: string[], now: Date, timeZone: string): { ok: true; words: WordSpec[] } | { ok: false; reason: BlockReason; detail: string } {
+  const future = futureDepartures(departures, now, timeZone)
   if (future.length === 0) {
     return { ok: false, reason: 'departures_past', detail: 'no departures after today' }
   }
@@ -132,7 +148,7 @@ function checkLengths(words: WordSpec[]): { ok: true } | { ok: false; reason: Bl
   return { ok: true }
 }
 
-function buildWords(fact: ProductFactInput, now: Date): BuildResult {
+function buildWords(fact: ProductFactInput, now: Date, timeZone: string = DEFAULT_TIME_ZONE): BuildResult {
   const valid = validateFact(fact)
   if (!valid.ok) return valid
 
@@ -144,7 +160,7 @@ function buildWords(fact: ProductFactInput, now: Date): BuildResult {
   const priceResult = priceWord(price.amount, price.currency)
   if (!priceResult.ok) return priceResult
 
-  const departuresResult = departureWords(departures, now)
+  const departuresResult = departureWords(departures, now, timeZone)
   if (!departuresResult.ok) return departuresResult
 
   const words: WordSpec[] = []

@@ -29,6 +29,8 @@ export interface BuildMontageInput {
   tracks: readonly MusicTrack[]
   profile: IndustryWordProfile
   now: Date
+  /** IANA zone of the client, used to decide what "today" is; defaults to the profile's AU/NZ zone. */
+  timeZone?: string
 }
 
 /** Failure shape shared by every gate. */
@@ -283,7 +285,7 @@ export function buildMontageProps(input: BuildMontageInput): MontageBuildResult 
     return poolGate
   }
 
-  const built = input.profile.buildWords(input.fact, input.now)
+  const built = input.profile.buildWords(input.fact, input.now, input.timeZone)
   if (!built.ok) {
     return fail(built.reason, built.detail, '请检查产品事实或行业词库')
   }

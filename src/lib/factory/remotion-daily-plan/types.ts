@@ -53,7 +53,7 @@ export interface WordSpec {
 /** Industry-specific word chain. A profile never invents numbers: every digit must come from the fact. */
 export interface IndustryWordProfile {
   id: string
-  buildWords(fact: ProductFactInput, now: Date): { ok: true; words: WordSpec[] } | { ok: false; reason: BlockReason; detail: string }
+  buildWords(fact: ProductFactInput, now: Date, timeZone?: string): { ok: true; words: WordSpec[] } | { ok: false; reason: BlockReason; detail: string }
 }
 
 export type BlockReason =
