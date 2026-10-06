@@ -220,7 +220,7 @@ async function main(): Promise<void> {
   check('结果是 scheduled', run5.result === 'scheduled')
   check('Publer 里是排期帖,时间 = 现在 + 3 分钟', fake.posts[0]?.state === 'scheduled' && fake.posts[0].scheduled_at === new Date(later.getTime() + 180_000).toISOString(), fake.posts[0]?.scheduled_at)
   check('回执:scheduled / AUTHORIZED / 带排期时间', r5?.status === 'scheduled' && r5.authorization === 'AUTHORIZED' && Boolean(r5.scheduled_at))
-  check('真排期才写三本账', books.includes(WO_DRAFT))
+  check('排期只是「已提交」,不写「已发布」三本账(没有读回已发布的路径,避免记一次不存在的成功)', books.length === 0)
 
 
   console.log('\n═══ 第 6 轮：建帖请求返回 500（不知道有没有受理）→ 不许因此重复发 ═══')

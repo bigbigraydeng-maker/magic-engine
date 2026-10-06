@@ -18,7 +18,6 @@ interface Props {
 
 interface Config {
   publish_target: { platform: string; page_id: string } | null
-  instagram_target: { publer_account_id: string } | null
   factory_goal_id: string | null
   verified_offer: {
     price_from: string
@@ -105,7 +104,6 @@ type PanelState =
 /** draft 用扁平字符串,省掉嵌套对象的空值分支 */
 interface Draft {
   pageId: string
-  igAccountId: string
   goalId: string
   priceFrom: string
   offerExpiry: string
@@ -142,7 +140,6 @@ interface Draft {
 
 const toDraft = (c: Config, activeGoals: Goal[] = []): Draft => ({
   pageId: c.publish_target?.page_id ?? '',
-  igAccountId: c.instagram_target?.publer_account_id ?? '',
   // 存量数据可能指向一个已经不再活跃（或已被删除）的 Goal —— 下拉框里找不到这个选项，
   // 只能显示占位文字，但如果这里原样把这个失效 ID 塞进 draft，保存时后端会拒收整份表单
   // （包括这次真正要改的其它字段），且没有任何 UI 途径能清掉它（下拉框在零活跃目标时是
@@ -177,7 +174,7 @@ const toDraft = (c: Config, activeGoals: Goal[] = []): Draft => ({
 })
 
 const eqDraft = (a: Draft, b: Draft) =>
-  a.pageId === b.pageId && a.igAccountId === b.igAccountId && a.goalId === b.goalId && a.priceFrom === b.priceFrom &&
+  a.pageId === b.pageId && a.goalId === b.goalId && a.priceFrom === b.priceFrom &&
   a.offerExpiry === b.offerExpiry && a.verifiedServices === b.verifiedServices &&
   a.ctaPhone === b.ctaPhone && a.ctaUrl === b.ctaUrl &&
   a.ctaDeparture === b.ctaDeparture && a.ctaPrice === b.ctaPrice &&
@@ -196,7 +193,7 @@ const eqDraft = (a: Draft, b: Draft) =>
 export function FactoryConfigPanel({ clientId }: Props) {
   const [state, setState] = useState<PanelState>({ phase: 'loading' })
   const [draft, setDraft] = useState<Draft>(toDraft({
-    publish_target: null, instagram_target: null, factory_goal_id: null, verified_offer: null, verified_cta: null,
+    publish_target: null, factory_goal_id: null, verified_offer: null, verified_cta: null,
     allow_b_track_landmark_ads: false, auto_order_enabled: false, creative_profile: EMPTY_STYLE,
     creative_recipe: null, render: null,
   }))
@@ -286,7 +283,6 @@ export function FactoryConfigPanel({ clientId }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           publish_target: draft.pageId.trim() ? { platform: 'facebook', page_id: draft.pageId.trim() } : null,
-          instagram_target: draft.igAccountId.trim() ? { publer_account_id: draft.igAccountId.trim() } : null,
           factory_goal_id: draft.goalId || null,
           // 服务承诺可以单独存在(有免费测量但没在做特价),所以只要两者之一有值就落库
           verified_offer: (draft.priceFrom.trim() || draft.verifiedServices.trim())
@@ -396,24 +392,6 @@ export function FactoryConfigPanel({ clientId }: Props) {
           <p className="mt-1 text-xs text-slate-400">
             纯数字。<span className="font-medium text-amber-700">别填广告账户 ID</span> —— 这两个填反过一次。
             {data.facebook_page_url && <> 本客户已登记主页:<span className="font-mono">{data.facebook_page_url}</span></>}
-          </p>
-        </div>
-
-        {/* Instagram 目标 */}
-        <div>
-          <label className="block text-xs font-bold uppercase tracking-wide text-slate-500">
-            同时发到哪个 Instagram 账号(Publishing Hub 账号 ID,可不填)
-          </label>
-          <input
-            type="text"
-            value={draft.igAccountId}
-            onChange={(e) => setDraft((d) => ({ ...d, igAccountId: e.target.value }))}
-            placeholder="Publishing Hub 里该账号的 ID(字母数字,别填 @用户名)"
-            className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-            disabled={saving}
-          />
-          <p className="mt-1 text-xs text-slate-400">
-            在 Publishing Hub 里该客户的 Instagram 账号 ID。留空 = 不发 Instagram。填了以后:Facebook 那条片(草稿或真发)出来后,同一条片会同步到 Instagram,只同步 Facebook 发出后 48 小时内的片;Instagram 另有独立的真发开关,没打开前一律只在 Publishing Hub 里存草稿、不会公开。
           </p>
         </div>
 
