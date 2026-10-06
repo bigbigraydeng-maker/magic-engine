@@ -11,4 +11,5 @@ done_on: 2026-10-06
 done_ref: doc:docs/audits/2026-10-06-cts-shanghai-reels-v2-caption-wording.md
 ---
 把条目小标题 THE TRIP 换成 INCLUDED（官网 What's Included），条目 1 改为 FLIGHTS FROM AUCKLAND。
+logo 常驻 vs 最后 2 拍：两位审查都判常驻更优（须缩小/降透明/下移），常驻版尚未进队列（等出片机更新，PR #2313）。
 只存草稿，未发布、未排期、未碰广告；旧两张工单保留。仍不能发布：库存视频授权、价格出现太晚等旧缺口未动。
