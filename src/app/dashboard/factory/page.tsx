@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import type { WorkOrderStatus } from '@/lib/factory/types'
 import type { PublishedView } from '@/lib/factory/publish/publish-display'
+import { factoryVideoUrl } from '@/lib/factory/outlets'
 import { STATUS_META, STATUS_ORDER, publishedBadge, REASON_STATUSES } from './_components/statusMeta'
 import { ReviewInbox } from './_components/ReviewInbox'
 
@@ -27,6 +28,7 @@ interface WorkOrder {
   reject_reason: string | null
   source_ad_id: string | null
   published: PublishedView | null
+  output?: { video_path?: string } | null
   created_at: string
 }
 
@@ -258,6 +260,15 @@ export default function FactoryCockpitPage() {
                             {o.attempt_count > 0 ? ` · 尝试 ${o.attempt_count}` : ''}
                             {o.reclaim_count > 0 ? ` · 回收 ${o.reclaim_count}` : ''}
                           </p>
+                          {(['approved', 'publishing', 'publish_failed', 'published', 'measuring', 'closed'] as const).includes(o.status as 'approved') && o.output?.video_path && (
+                            <a
+                              href={factoryVideoUrl(o.output.video_path, process.env.NEXT_PUBLIC_SUPABASE_URL ?? '', `${o.id.slice(0, 8)}.mp4`)}
+                              download
+                              className="text-xs text-blue-600 underline"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >下载成片</a>
+                          )}
                         </div>
                         {o.status === 'dead_letter' && (
                           <button
