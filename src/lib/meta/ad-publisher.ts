@@ -16,6 +16,7 @@
 
 import type { AdDraft, AdDraftCreative } from '@/lib/ads-strategy/ad-draft'
 import { metaTripletFor, MESSENGER_CTA_TYPE } from '@/lib/ads-strategy/ad-draft'
+import { isPlaybackGoal, PLAYBACK_REQUIRED_PLATFORMS } from '@/lib/ads-strategy/launch-readback'
 
 const GRAPH_BASE = 'https://graph.facebook.com/v21.0'
 
@@ -139,6 +140,10 @@ function targetingFor(d: AdDraft): Record<string, unknown> {
     geo_locations: geo,
     age_min: d.ageMin ?? 25,
     age_max: d.ageMax ?? 65,
+    // 看完类视频必须手动锁版位，否则 Meta 把钱导向 Audience Network 奖励视频（PITFALLS D9）。
+    ...(isPlaybackGoal(metaTripletFor(d.kind).optimizationGoal)
+      ? { publisher_platforms: [...PLAYBACK_REQUIRED_PLATFORMS] }
+      : {}),
     // 明确关掉 Meta 的自动放宽。**这不代表它一定关着** —— Meta 可能照样开，
     // 所以建完还要回读一遍（这正是闸门存在的理由）。
     targeting_automation: { advantage_audience: 0 },

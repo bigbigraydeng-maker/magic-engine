@@ -58,7 +58,13 @@ function crmRow(opts: {
 // ── 按表建模的假 Supabase ──────────────────────────────────────────────────
 type Row = Record<string, unknown>
 
-function fakeSupabase(seed: { contactIdentities?: Row[]; groupTours?: Row[] } = {}): {
+/** 由电话号码派生的稳定假 uuid（insertOutcome 要求 contactId 是 uuid）。 */
+function autoContactId(phone: string): string {
+  const digits = phone.replace(/\D/g, '').padStart(12, '0').slice(-12)
+  return `00000000-0000-4000-8000-${digits}`
+}
+
+function fakeSupabase(seed: { contactIdentities?: Row[]; groupTours?: Row[]; realConversations?: boolean } = {}): {
   client: SupabaseClient
   outcomes: Row[]
   audits: Row[]
@@ -70,6 +76,9 @@ function fakeSupabase(seed: { contactIdentities?: Row[]; groupTours?: Row[] } = 
   const insertAttempts = { n: 0 }
   const contactIdentities = seed.contactIdentities ?? []
   const groupTours = seed.groupTours ?? []
+  // 2026-10-05：合格线索必须有真实客人对话。默认给每个电话自动补一个联系人 + 一条真实入站消息，
+  // 旧用例意图不变；需要测「没有对话」的用例走 qualify-needs-conversation.test.ts。
+  const autoConversation = seed.realConversations ?? true
 
   const client = {
     from(table: string) {
@@ -80,12 +89,54 @@ function fakeSupabase(seed: { contactIdentities?: Row[]; groupTours?: Row[] } = 
         return {
           select: () => ({
             eq: () => ({
+              in: async (_col: string, values: string[]) => {
+                const seeded = contactIdentities.filter((r) => values.includes(r.value as string))
+                const auto = autoConversation
+                  ? values
+                      .filter((v) => v.startsWith('+') && !seeded.some((r) => r.value === v))
+                      .map((v) => ({ contact_id: autoContactId(v), kind: 'phone', value: v }))
+                  : []
+                return { data: [...seeded, ...auto], error: null }
+              },
+            }),
+          }),
+        }
+      }
+      if (table === 'conversations') {
+        // 实测核实：loadInboundConversationText() 对这张表只调用
+        // .select('id, contact_id').eq('client_id', ...).in('contact_id', [...])。
+        return {
+          select: () => ({
+            eq: () => ({
               in: async (_col: string, values: string[]) => ({
-                data: contactIdentities.filter((r) => values.includes(r.value as string)),
+                data: autoConversation ? values.map((c) => ({ id: `auto-conv-${c}`, contact_id: c })) : [],
                 error: null,
               }),
             }),
           }),
+        }
+      }
+      if (table === 'conversation_messages') {
+        // 实测核实：对这张表调用 .select(...).in('conversation_id', [...]).eq().gte().order().limit() 然后 await。
+        return {
+          select: () => {
+            let convIds: string[] = []
+            const q = {
+              in: (_col: string, values: string[]) => ((convIds = values), q),
+              eq: () => q,
+              gte: () => q,
+              order: () => q,
+              limit: () => q,
+              then: (resolve: (r: { data: Row[]; error: null }) => unknown) =>
+                resolve({
+                  data: autoConversation
+                    ? convIds.map((id) => ({ conversation_id: id, body: 'How much is the Best of China tour?', sent_at: new Date().toISOString() }))
+                    : [],
+                  error: null,
+                }),
+            }
+            return q
+          },
         }
       }
       if (table === 'group_tours') {
@@ -185,7 +236,7 @@ describe('runCtsCrmSync', () => {
     const summary = await runCtsCrmSync({ supabase: client })
 
     expect(summary.insertedLeads).toBe(1)
-    expect(summary.contactNotLinked).toBe(1) // 没有预置任何 contact_identities
+    expect(summary.contactNotLinked).toBe(0) // 新规则：合格线索必须有联系人 + 真实对话，假库默认自动补联系人
     expect(outcomes).toHaveLength(1)
     expect(outcomes[0]).toMatchObject({ outcome_kind: 'lead', source_kind: 'crm_sheet_sync' })
     expect(audits).toHaveLength(1)
@@ -461,7 +512,7 @@ describe('分块（2026-09-22，conversion-daily-pipeline 拆块）', () => {
 
 function emptyLike(): CtsCrmSyncSummary {
   return {
-    totalCrmRows: 0, excludedNoPhone: 0, excludedByNotes: 0, excludedNoInterest: 0, rejectedStaleLeads: 0, excludedNoDate: 0, insertedLeads: 0, insertedPurchases: 0,
+    totalCrmRows: 0, excludedNoPhone: 0, excludedByNotes: 0, excludedNoInterest: 0, excludedNoConversation: 0, rejectedStaleLeads: 0, excludedNoDate: 0, insertedLeads: 0, insertedPurchases: 0,
     skippedAlreadySynced: 0, heldForManualReview: [], contactNotLinked: 0, insertErrors: [], cappedAtMaxInserts: false, qualifiedFromConversation: 0, conversationReadFailed: 0, skippedPastWindow: 0,
   }
 }

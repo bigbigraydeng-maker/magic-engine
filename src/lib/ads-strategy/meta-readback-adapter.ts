@@ -33,6 +33,7 @@ export interface RawMetaTargeting {
   expanded_implicit_custom_audiences?: { id?: unknown }[]
   targeting_relaxation_types?: { custom_audience?: unknown; lookalike?: unknown }
   targeting_automation?: { advantage_audience?: unknown }
+  publisher_platforms?: unknown[]
 }
 
 export interface RawMetaAdSet {
@@ -134,6 +135,7 @@ export function adaptMetaAdSet(
       customAudienceIds:     strList(t?.custom_audiences, (a) => (a as { id?: unknown })?.id),
       implicitLookalikeIds:  strList(t?.expanded_implicit_custom_audiences, (a) => (a as { id?: unknown })?.id),
       geoNames:              geoNames(t),
+      publisherPlatforms:    strList(t?.publisher_platforms, (p) => p),
     },
     creatives: creatives.map<CreativeReadback>((c) => ({
       adId: c.adId,
