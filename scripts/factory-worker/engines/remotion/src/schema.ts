@@ -93,6 +93,11 @@ export const ListReelPropsSchema = z
       .min(0, { message: '遮罩深浅必须在 0 到 0.6 之间' })
       .max(0.6, { message: '遮罩深浅必须在 0 到 0.6 之间' }),
     logoFile: relFile('logo 文件', LOGO_EXTS),
+    logoMode: z
+      .enum(['last_beats', 'always'], {
+        message: 'logoMode 只能是 last_beats 或 always',
+      })
+      .optional(),
     musicFile: relFile('音乐文件', MUSIC_EXTS).nullable(),
     musicStartSec: z.number().min(0).max(600).optional(),
     beats: z.array(z.number().finite().min(0).max(120)).max(80),
