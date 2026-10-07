@@ -1,6 +1,6 @@
 ---
 id: 2026-10-07-cts-review-request-draft
-title: CTS 老客户感谢 + 邀请 Google 评价邮件草稿已建好，测试邮件已发到 hello 邮箱
+title: CTS 老客户感谢 + 邀请 Google 评价 + NZD $200 代金券邮件草稿已建好，测试邮件已发到 hello 邮箱
 status: done
 owner: pm
 decided_on: 2026-10-07
@@ -12,3 +12,4 @@ Mailchimp 草稿编号 d15110cf0b，未发送、未排期，只发过测试到 h
 写法：感谢，邀请所有人留诚实评价并介绍朋友，不满意的请直接联系我们；不做只引导满意客人的筛选，不给奖励。
 收件名单暂挂已付款客户占位（33 人），付款不等于出行过，需 CTS 确认名单。
 Google 评价按钮用官网页脚里 CTS 的 Google 商家页链接，返回 200。
+代金券（PM 10/8 定）：NZD $200，1 年有效，可自用或送人，仅限 CTS China 团，不含 tailor-made、stopover、机票。已写成「感谢」、不与留评价挂钩（Google 禁止奖励换评价）。兑换方式「回信或联系时报出」是我拟的，待 CTS 确认。
