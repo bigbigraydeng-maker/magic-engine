@@ -26,6 +26,7 @@ import type { EmailReplyItemKind } from './email-reply-items'
 import type { BindingRequestItemKind } from './binding-request-items'
 import type { PageBindingItemKind } from './page-binding-items'
 import type { CommentScopeTodoKind } from './comment-scope-items'
+import type { CommentReplyScopeTodoKind } from './comment-reply-scope-items'
 import type { MetaTokenHealthKind } from './meta-token-health-items'
 import type { DeployHealthItemKind } from './deploy-health-items'
 import type { LeadSheetItemKind } from './lead-sheet-items'
@@ -193,6 +194,7 @@ export type ManualItemKind =
   /** 工具实验室有人留资（自助开通 / 网站诊断留邮箱）—— 这张表以前写完没人读，见 tool-lead-items.ts */
   | ToolLeadItemKind
   | CommentScopeTodoKind
+  | CommentReplyScopeTodoKind
   /** 写在 Render 里的 Meta 钥匙被 Meta 作废（错误码 190）—— 只有人能重新授权 */
   | MetaTokenHealthKind
   /** 上面那项检查自己没跑成 —— 不报 ≠ 钥匙都活着 */
