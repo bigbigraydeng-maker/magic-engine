@@ -558,7 +558,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // 调用之前。dry run 也要过：审核者得在授权前就看到哪几条被拦了，而不是授权后
     // 才发现发不出去。
     const priceBlocks = await findPriceGateBlocks(clientId, pending)
-    if (priceBlocks.length > 0) return conflict('PRICE_CLAIM_UNBACKED', { blocked: priceBlocks })
+    if (priceBlocks.length > 0) return conflict('PRICE_CLAIM_UNBACKED', {
+      blocked: priceBlocks,
+      hint: '整批已暂停（不是只拦列出的日期）：把列出日期的价格去掉或换成客户确认过的图，再重新演练。',
+    })
 
     if (command.no_publish) {
       return NextResponse.json({
