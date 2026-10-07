@@ -36,7 +36,7 @@ import {
   type CampaignDailyPlanData,
 } from '@/lib/campaign/daily-plan'
 import { postChecklistPasses } from '@/lib/social/content-review'
-import { judgeOutgoingPost, priceGateMessage } from '@/lib/content/price-claim-gate'
+import { judgePriceClaimWithSource, priceGateMessage } from '@/lib/content/price-claim-gate'
 import { buildPostPriceText, judgePostPriceFacts, loadOfferPriceFacts } from '@/lib/content/price-fact-gate'
 import {
   CampaignDailyPublishCommandSchema,
@@ -150,6 +150,7 @@ async function loadReviewedPlan(
 interface PublishCandidate extends CampaignDailyPublishPlannedPost {
   message: string
   imageUrl: string
+  imageSource: string | null
 }
 
 /**
@@ -171,7 +172,7 @@ async function buildCandidates(
   const assetIds = Array.from(new Set(selected.map(post => post.image_asset_id)))
   const { data: assets, error } = await supabaseAdmin
     .from('client_assets')
-    .select('id, storage_url, mime_type, status, archived_at')
+    .select('id, storage_url, mime_type, status, archived_at, source')
     .eq('client_id', clientId)
     .in('id', assetIds)
   if (error) throw error
@@ -210,6 +211,7 @@ async function buildCandidates(
       cta_url: entry.cta_url,
       message: buildPostPriceText(post),
       imageUrl: asset.storage_url as string,
+      imageSource: (asset.source as string | null) ?? null,
     })
   }
 
@@ -504,17 +506,12 @@ async function persistReceipt(
  * 真价，就拦下整批，让审核者在授权前先看到。判定与界面共用同一段代码，不会出现
  * 「界面拦了后端放行」这种最难查的不一致。
  */
-async function findPriceGateBlocks(
-  clientId: string,
+function findPriceGateBlocks(
   posts: PublishCandidate[],
-): Promise<Array<{ date: string; message: string }>> {
+): Array<{ date: string; message: string }> {
   const blocks: Array<{ date: string; message: string }> = []
   for (const post of posts) {
-    const verdict = await judgeOutgoingPost(supabaseAdmin, {
-      clientId,
-      caption: post.message,
-      imageUrl: post.imageUrl,
-    })
+    const verdict = judgePriceClaimWithSource({ caption: post.message, source: post.imageSource })
     if (verdict.blocked) blocks.push({ date: post.date, message: priceGateMessage(verdict.source) })
   }
   return blocks
@@ -580,7 +577,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // 真价只配真画面 —— 东西出去前的最后一道闸，且必须在任何 token 查询 / provider
     // 调用之前。dry run 也要过：审核者得在授权前就看到哪几条被拦了，而不是授权后
     // 才发现发不出去。
-    const priceBlocks = await findPriceGateBlocks(clientId, pending)
+    const priceBlocks = findPriceGateBlocks(pending)
     if (priceBlocks.length > 0) return conflict('PRICE_CLAIM_UNBACKED', {
       blocked: priceBlocks,
       hint: '整批已暂停（不是只拦列出的日期）：把列出日期的价格去掉或换成客户确认过的图，再重新演练。',
