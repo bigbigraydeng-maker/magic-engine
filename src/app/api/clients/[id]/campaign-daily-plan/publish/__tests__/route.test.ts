@@ -172,6 +172,10 @@ interface TableState {
   updateResult?: unknown
   /** Error returned by the cron_run_logs insert (measurement failure record). */
   recordInsertError?: { message: string } | null
+  /** `clients.factory_config` as the price fact check reads it. */
+  factoryConfig?: Record<string, unknown> | null
+  /** Make the `clients` read fail (the price fact check must then fail closed). */
+  clientsReadError?: { message: string }
 }
 
 let updateSpy: ReturnType<typeof vi.fn>
@@ -201,7 +205,12 @@ function stubTables(state: TableState = {}) {
     }
     if (table === 'client_assets') return chain({ data: assets, error: null }, 'in')
     if (table === 'clients') {
-      return chain({ data: { facebook_page_id: state.facebookPageId ?? PAGE_ID }, error: null }, 'maybeSingle')
+      return chain(
+        state.clientsReadError
+          ? { data: null, error: state.clientsReadError }
+          : { data: { facebook_page_id: state.facebookPageId ?? PAGE_ID, factory_config: state.factoryConfig ?? null }, error: null },
+        'maybeSingle',
+      )
     }
     if (table === 'social_plans') {
       const read = chain({ data: [{ id: PLAN_ID, plan_data: plan, created_at: PLAN_REVISION }], error: null }, 'limit')
@@ -934,5 +943,118 @@ describe('publish bridge — price claim gate', () => {
       caption: 'Hook 1\n\nBody 1\n\nEnquire now: https://ctstours.co.nz/tours/china-classic',
       imageUrl: `https://assets.test/${ASSETS[0]}.jpg`,
     })
+  })
+})
+
+describe('publish bridge — price fact check', () => {
+  // Fictional operator; the check is client-agnostic and reads facts from `clients.factory_config`.
+  const FACTORY_CONFIG = {
+    render: {
+      creatomate: {
+        offers: {
+          'alps-akl': {
+            tour: 'Alpine Journeys — Swiss Alps Explorer (Auckland departure)',
+            price_line: '8 Nights · From NZD $5,400 pp',
+            single_supplement: 'NZD $650',
+            url: 'https://ctstours.co.nz/tours/china-classic',
+          },
+        },
+      },
+    },
+  }
+
+  function pricedPlan(price: string) {
+    return planData({
+      bundles: DATES.map((date, index) => ({
+        date,
+        post: {
+          hook: 'Swiss Alps Explorer',
+          body: `Departing Auckland. ${price} per person twin share.`,
+          cta: 'Enquire now',
+          cta_url: 'https://ctstours.co.nz/tours/china-classic',
+          image_asset_id: ASSETS[index],
+        },
+        story: null,
+        reel: null,
+      })),
+    })
+  }
+
+  it('lets a price that matches the client facts through (dry run)', async () => {
+    stubTables({ plan: pricedPlan('NZD $5,400'), factoryConfig: FACTORY_CONFIG })
+
+    const response = await POST(request(), params)
+
+    expect(response.status).toBe(200)
+    expect((await response.json()).mode).toBe('DRY_RUN')
+  })
+
+  it('blocks a wrong price on a dry run, naming each date and the real number', async () => {
+    stubTables({ plan: pricedPlan('NZD $4,400'), factoryConfig: FACTORY_CONFIG })
+
+    const response = await POST(request(), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(json.error).toBe('PRICE_FACT_UNVERIFIED')
+    expect(json.blocked.map((b: { date: string }) => b.date)).toEqual(DATES)
+    expect(json.blocked[0].reason).toBe('mismatch')
+    expect(json.blocked[0].message).toContain('4,400')
+    expect(json.blocked[0].message).toContain('5,400')
+    expect(mockPublish).not.toHaveBeenCalled()
+  })
+
+  it('blocks a live run before token lookup, provider call, event or receipt write', async () => {
+    stubTables({ plan: pricedPlan('NZD $4,400'), factoryConfig: FACTORY_CONFIG })
+    armProvider()
+
+    const response = await POST(request({ no_publish: false }), params)
+
+    expect(response.status).toBe(409)
+    expect((await response.json()).error).toBe('PRICE_FACT_UNVERIFIED')
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(mockSendInngestEvent).not.toHaveBeenCalled()
+    expect(mockGetStoredPageToken).not.toHaveBeenCalled()
+    expect(mockGetMetaToken).not.toHaveBeenCalled()
+    expect(updateSpy).not.toHaveBeenCalled()
+  })
+
+  it('blocks a priced post when the client has no price facts configured (cannot compare = block)', async () => {
+    stubTables({ plan: pricedPlan('NZD $5,400'), factoryConfig: null })
+
+    const response = await POST(request(), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(json.error).toBe('PRICE_FACT_UNVERIFIED')
+    expect(json.blocked[0].reason).toBe('no_facts')
+  })
+
+  it('fails closed when the client config cannot be read — never treats it as "nothing to check"', async () => {
+    stubTables({ plan: pricedPlan('NZD $5,400'), factoryConfig: FACTORY_CONFIG, clientsReadError: { message: 'db down' } })
+    armProvider()
+
+    const response = await POST(request({ no_publish: false }), params)
+
+    expect(response.status).toBe(500)
+    expect(mockPublish).not.toHaveBeenCalled()
+  })
+
+  it('does not stop a post that states no price, even with no facts configured', async () => {
+    stubTables({ factoryConfig: null })
+
+    const response = await POST(request(), params)
+
+    expect(response.status).toBe(200)
+  })
+
+  it('keeps the image-provenance gate first when both gates would block', async () => {
+    stubTables({ plan: pricedPlan('NZD $4,400'), factoryConfig: FACTORY_CONFIG })
+    mockJudge.mockResolvedValue({ blocked: true, priceClaimed: true, source: 'stock' })
+
+    const response = await POST(request(), params)
+
+    expect(response.status).toBe(409)
+    expect((await response.json()).error).toBe('PRICE_CLAIM_UNBACKED')
   })
 })

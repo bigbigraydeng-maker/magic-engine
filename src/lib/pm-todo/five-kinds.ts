@@ -134,6 +134,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   messenger_draft_pending_approval: 'review',
   messenger_draft_escalation: 'review',
   price_claim_unbacked: 'review',
+  price_fact_unverified: 'review',
 
   // ── 5 · 系统判不了真假的 ─────────────────────────────────────────────
   cross_client_leak: 'truth',
