@@ -73,6 +73,7 @@ import { auditGoalBaselines } from '@/lib/strategy/baseline-audit'
 import { fetchBlogDraftTodos } from '@/lib/pm-todo/blog-drafts'
 import { fetchAutoRunTodos } from '@/lib/pm-todo/auto-run-items'
 import { fetchCommentScopeTodos } from '@/lib/pm-todo/comment-scope-items'
+import { fetchCommentReplyScopeTodos } from '@/lib/pm-todo/comment-reply-scope-items'
 import { fetchKernelHandoffTodos } from '@/lib/kernel/handoff'
 import { auditCrossClientLeaks } from '@/lib/clients/cross-client-audit'
 import {
@@ -812,6 +813,9 @@ async function pushAutoRunItems(
  *
  * 判定与文案都在 `comment-scope-items.ts`：那边直接读 cron 自己写的运行记录，
  * 所以这里说的话跟机器真遇到的失败永远一致。
+ *
+ * 也覆盖「读得到评论、但回复被 Meta 拒掉」的那种（缺 pages_manage_engagement）——
+ * 判定与文案在 `comment-reply-scope-items.ts`。
  */
 async function pushCommentScopeItems(
   supabase: SupabaseClient,
@@ -821,6 +825,17 @@ async function pushCommentScopeItems(
 ): Promise<void> {
   const todos = await fetchCommentScopeTodos(supabase, now)
   for (const t of todos) {
+    items.push({
+      kind: t.kind,
+      client_id: t.client_id,
+      client_name: nameOf(t.client_id),
+      what: t.what,
+      how: t.how,
+      href: t.href,
+    })
+  }
+  const replyTodos = await fetchCommentReplyScopeTodos(supabase, now)
+  for (const t of replyTodos) {
     items.push({
       kind: t.kind,
       client_id: t.client_id,
