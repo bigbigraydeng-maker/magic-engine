@@ -13,6 +13,12 @@ describe('containsPriceClaim — 命中价格声明', () => {
     ['Buy 2 for 1 this weekend', 'Buy X for Y 明确报价'],
     ['AUD 88 per m²', 'AUD 前缀'],
     ['SPC flooring 29/sqm installed', '裸单价'],
+    ['From 2,699 per person', '无币种 from + per person'],
+    ['Twin share 3,499pp', 'pp 后缀'],
+    ['only 2699', 'only + 裸数字'],
+    ['price: 2699', 'price 冒号'],
+    ['costs 1200 per couple', 'per couple'],
+    ['just 899 a person', 'a person'],
   ])('%s → 拦（%s）', (text) => {
     expect(containsPriceClaim(text)).toBe(true)
   })
@@ -39,6 +45,19 @@ describe('containsPriceClaim — 不是价格的正常文案照常放行', () =>
     ['Top 10 for 2026 — where to go next', '裸 "X for Y" 是排行不是报价'],
     ['Open 7 days for walk-in customers', '"7 days for" 不是报价'],
   ])('%s → 放行（%s）', (text) => {
+    expect(containsPriceClaim(text)).toBe(false)
+  })
+
+  it.each([
+    'from 2026 we run tours',
+    'only 2 left',
+    'from 2027 onwards',
+    'only 500 guests',
+    'just 100 km from Auckland',
+    'limited to 18 per person',
+    'since 2024 we run small tours',
+    'Price list available on request',
+  ])('%s → 放行', (text) => {
     expect(containsPriceClaim(text)).toBe(false)
   })
 
