@@ -54,6 +54,11 @@ export type PriceFactVerdict =
 const URL_RE = /https?:\/\/\S+/g
 const NUMBER_RE = /\d[\d,]*(?:\.\d+)?/g
 const PAREN_RE = /\(([^)]*)\)/
+const ZERO_WIDTH_RE = /[\u200b-\u200d\u2060\ufeff]/g
+
+/** Unit words that follow a number and mean it is NOT a price. */
+const NON_PRICE_UNIT_RE =
+  /^\s*(?:people|persons?|guests?|travell?ers?|followers?|reviews?|km|kilometres?|metres?|meters?|years?|visitors?|members?|days?|nights?|adults?|children|stars?|pax|hours?|weeks?|steps|sqm)\b/i
 
 /** Lowercase, turn `&` into ` and `, collapse every non-alphanumeric run to a single space. */
 function normalise(s: string): string {
@@ -133,23 +138,86 @@ function classifyMatch(
   return { raw, unit: 'money', value, currency: currencyFromWindow(window) }
 }
 
+/** Normalise text before scanning: NFKC, strip zero-width chars, unify spaces. */
+function normaliseForScan(text: string): string {
+  return text
+    .normalize('NFKC')
+    .replace(ZERO_WIDTH_RE, '')
+    .replace(/\u00a0/g, ' ')
+}
+
+/** A collected claim plus its span in the cleaned text. */
+interface SpannedClaim {
+  start: number
+  end: number
+  claim: ExtractedPriceClaim
+}
+
+/** Does a span overlap any already-collected span? */
+function overlapsAny(spans: SpannedClaim[], start: number, end: number): boolean {
+  return spans.some((s) => start < s.end && end > s.start)
+}
+
+/** True when the text right after a number starts with a non-price unit word. */
+function followedByUnitWord(text: string, end: number): boolean {
+  return NON_PRICE_UNIT_RE.test(text.slice(end))
+}
+
+/** Is a bare 4-digit number a year-like value (1900-2099) with no comma? */
+function isYearLike(raw: string): boolean {
+  if (raw.includes(',')) return false
+  const n = Number(raw)
+  return Number.isInteger(n) && n >= 1900 && n <= 2099
+}
+
+/** Extra patterns the shared regex misses; each yields a span to classify. */
+function extraScan(cleaned: string, spans: SpannedClaim[]): void {
+  const patterns: RegExp[] = [
+    /(?<![\d,.])\d{1,3}(?:,\d{3})+(?:\.\d+)?(?![\d,])/g,
+    /\b(?:was|now|special|deal|reduced(?:\s+to)?|down\s+to)[^\S\r\n]*[:：]?[^\S\r\n]*(\d[\d,]*(?:\.\d+)?)/gi,
+    /\d[\d,]*(?:\.\d+)?[^\S\r\n]*(?:nz|us|au|aud|nzd)[^\S\r\n]*dollars?/gi,
+    /\d[\d,]*(?:\.\d+)?[^\S\r\n]*%[^\S\r\n]*(?:discount|cheaper|reduction|reduced|saving|savings)\b/gi,
+  ]
+  for (const re of patterns) {
+    for (const m of cleaned.matchAll(re)) {
+      const raw = m[0]
+      const start = m.index ?? 0
+      const end = start + raw.length
+      if (overlapsAny(spans, start, end)) continue
+      if (followedByUnitWord(cleaned, end)) continue
+      if (re === patterns[1]) {
+        const num = m[1]
+        if (num.replace(/,/g, '').length < 3) continue
+        if (isYearLike(num)) continue
+      }
+      spans.push({ start, end, claim: classifyMatch(raw, start, cleaned) })
+    }
+  }
+}
+
 /**
  * Extract every price claim from a piece of text.
  * URLs are stripped first (utm digits are not prices).
+ *
+ * Known gaps (still NOT recognised): bare 4-digit prices with no cue and no
+ * currency (e.g. "North Island tour 1999"), `块`, HTML entities, `CNY`, and a
+ * price between 1900 and 2099 written without a comma or currency.
  */
 export function extractPriceClaims(text: string): ExtractedPriceClaim[] {
   if (typeof text !== 'string' || text.length === 0) return []
-  const cleaned = text
+  const cleaned = normaliseForScan(text)
     .replace(URL_RE, ' ')
     .replace(/(\d[,.]?)[^\S\r\n]+((?:nzd|aud|usd|rmb)[^\S\r\n]*[$\d])/gi, '$1\n$2')
   const re = new RegExp(PRICE_CLAIM_STRICT_RE.source, 'gi')
-  const out: ExtractedPriceClaim[] = []
+  const spans: SpannedClaim[] = []
   for (const m of cleaned.matchAll(re)) {
     const raw = m[0]
-    const index = m.index ?? 0
-    out.push(classifyMatch(raw, index, cleaned))
+    const start = m.index ?? 0
+    spans.push({ start, end: start + raw.length, claim: classifyMatch(raw, start, cleaned) })
   }
-  return out
+  extraScan(cleaned, spans)
+  spans.sort((a, b) => a.start - b.start)
+  return spans.map((s) => s.claim)
 }
 
 /** Extract the parenthetical from a label, or null. */
@@ -158,13 +226,14 @@ function parenthetical(label: string): string | null {
   return m === null ? null : m[1]
 }
 
-/** Words (letters only, length > 3, lowercase) from a parenthetical, minus "departure". */
+/** Words (letters only, length > 3, lowercase) from a parenthetical, minus noise words. */
 function qualifiersFrom(label: string): string[] {
   const paren = parenthetical(label)
   if (paren === null) return []
   const words = paren.toLowerCase().match(/[a-z]+/g)
   if (words === null) return []
-  return words.filter((w) => w.length > 3 && w !== 'departure')
+  const noise = new Set(['departure', 'from', 'with', 'ex', 'via'])
+  return words.filter((w) => w.length > 3 && !noise.has(w))
 }
 
 /** The part of a label after the last ` — ` or ` - `, with any parenthetical removed. */
@@ -250,6 +319,28 @@ function expectedStrings(candidates: OfferPriceFacts[]): string[] {
   return out
 }
 
+/** A candidate plus whether it matched by name (stem) rather than by url. */
+interface Candidate {
+  offer: OfferPriceFacts
+  byName: boolean
+}
+
+/**
+ * Drop name-matched candidates whose non-empty stem is a strict substring of
+ * another name-matched candidate's stem. Url-matched candidates are never dropped.
+ */
+function dropSubstringStems(candidates: Candidate[]): Candidate[] {
+  const nameStems = candidates
+    .filter((c) => c.byName && c.offer.stem.length > 0)
+    .map((c) => c.offer.stem)
+  return candidates.filter((c) => {
+    if (!c.byName || c.offer.stem.length === 0) return true
+    const stem = c.offer.stem
+    const isSubstring = nameStems.some((other) => other !== stem && other.includes(stem))
+    return !isSubstring
+  })
+}
+
 /** Verify every price claim in a post against the client's offer facts. */
 export function verifyPostPrices(input: {
   text: string
@@ -273,13 +364,14 @@ export function verifyPostPrices(input: {
   const normalisedText = normalise(text)
   const normalisedCta = normaliseUrl(ctaUrl)
 
-  let candidates = offers.filter((offer) => {
-    if (textHasStem(normalisedText, offer.stem)) return true
-    if (offer.url !== null && normalisedCta !== null && offer.url === normalisedCta) return true
-    return false
-  })
+  const matched: Candidate[] = []
+  for (const offer of offers) {
+    const byName = textHasStem(normalisedText, offer.stem)
+    const byUrl = offer.url !== null && normalisedCta !== null && offer.url === normalisedCta
+    if (byName || byUrl) matched.push({ offer, byName })
+  }
 
-  if (candidates.length === 0) {
+  if (matched.length === 0) {
     return {
       status: 'blocked',
       reason: 'offer_unresolved',
@@ -287,6 +379,8 @@ export function verifyPostPrices(input: {
       problems: claims.map((c) => ({ claim: c.raw, expected: [] })),
     }
   }
+
+  let candidates = dropSubstringStems(matched).map((c) => c.offer)
 
   const narrowed = candidates.filter((offer) =>
     offer.qualifiers.some((q) => textHasQualifier(normalisedText, q)),
@@ -378,5 +472,5 @@ export function priceFactMessage(verdict: PriceFactVerdict): string {
     }
   }
   const expectedText = expected.length > 0 ? expected.join('、') : '（资料里没有可对照的价格）'
-  return `文案里写了${claims}，但客户资料里该团只有这些价格：${expectedText}。已拦下。`
+  return `文案里写了${claims}，但客户资料里该团没有这个数字（资料里已有的价格：${expectedText}）。请先对照官网确认这个数对不对：对的话，把它补进客户设置里的资料包；不对的话，改文案。已拦下。`
 }

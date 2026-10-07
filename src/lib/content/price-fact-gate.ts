@@ -82,3 +82,18 @@ export function judgePostPriceFacts(input: {
     message: priceFactMessage(verdict),
   }
 }
+
+/**
+ * The exact text a post is published with (and therefore judged on):
+ * hook, body, then "CTA: link". The publish route and the to-do scan both
+ * build it here so the two can never judge different text.
+ */
+export function buildPostPriceText(post: {
+  hook: string
+  body: string
+  cta: string
+  cta_url: string | null
+}): string {
+  const ctaLine = post.cta_url ? `${post.cta}: ${post.cta_url}` : post.cta
+  return [post.hook, post.body, ctaLine].map(part => part.trim()).join('\n\n')
+}

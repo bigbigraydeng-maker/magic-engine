@@ -37,7 +37,7 @@ import {
 } from '@/lib/campaign/daily-plan'
 import { postChecklistPasses } from '@/lib/social/content-review'
 import { judgeOutgoingPost, priceGateMessage } from '@/lib/content/price-claim-gate'
-import { judgePostPriceFacts, loadOfferPriceFacts } from '@/lib/content/price-fact-gate'
+import { buildPostPriceText, judgePostPriceFacts, loadOfferPriceFacts } from '@/lib/content/price-fact-gate'
 import {
   CampaignDailyPublishCommandSchema,
   CampaignDailyPublishMetaSchema,
@@ -208,7 +208,7 @@ async function buildCandidates(
       }),
       image_asset_id: entry.image_asset_id,
       cta_url: entry.cta_url,
-      message: [post.hook, post.body, `${post.cta}: ${post.cta_url}`].map(part => part.trim()).join('\n\n'),
+      message: buildPostPriceText(post),
       imageUrl: asset.storage_url as string,
     })
   }

@@ -10,7 +10,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-item-types'
-import { judgePostPriceFacts, loadOfferPriceFacts } from '@/lib/content/price-fact-gate'
+import { buildPostPriceText, judgePostPriceFacts, loadOfferPriceFacts } from '@/lib/content/price-fact-gate'
+import { factoryConfigHref } from '@/lib/factory/config-link'
 
 const LOOKBACK_DAYS = 14
 const MAX_PLANS = 60
@@ -107,7 +108,12 @@ function collectBlocked(
     if (!bundle.post) continue
     if (!bundle.date || bundle.date < today) continue
     if (published.has(bundle.date)) continue
-    const text = [bundle.post.hook, bundle.post.body, bundle.post.cta].join('\n\n')
+    const text = buildPostPriceText({
+      hook: bundle.post.hook,
+      body: bundle.post.body,
+      cta: bundle.post.cta,
+      cta_url: bundle.post.ctaUrl,
+    })
     const verdict = judgePostPriceFacts({ text, ctaUrl: bundle.post.ctaUrl, offers })
     if (verdict.blocked) blocked.push({ date: bundle.date, message: verdict.message })
   }
@@ -120,15 +126,23 @@ function buildItem(
   clientName: string,
   blocked: BlockedPost[],
 ): ManualItem {
-  const dates = blocked.map((b) => b.date)
+  const shown = blocked.slice(0, 3).map((b) => b.date).join('、')
+  const dates = blocked.length > 3 ? `${shown} 等` : shown
   const firstMessage = blocked[0]?.message ?? ''
   return {
     kind: 'price_fact_unverified',
     client_id: clientId,
     client_name: clientName,
-    what: `${clientName} 本周发布计划里有 ${blocked.length} 条帖子的价格数字核对不过（${dates.join('、')}）。发布时系统会把整批拦下，一条都发不出去。第一条的问题：${firstMessage}`,
-    how: '两条路选一条：① 价格写错了 —— 打开链接，在每日计划里把对应日期文案里的价格改成客户官网上的数字，再重新审核；② 价格没错、只是系统里没有这个团的价格资料 —— 去客户设置 →「视频工厂配置」→ 资料包，给该团补上官网上的原话价格（例如 NZD $2,699、单人房加价 NZD $400）和团名，再回来重新演练。',
-    href: `https://app.magicengine.com.au/dashboard/clients/${clientId}/daily-plan`,
+    what:
+      `${clientName} 本周的发布计划整批发不出去：${blocked.length} 条帖子（${dates}）里写的价格，跟客户资料里的价格对不上，系统就把整批暂停了——` +
+      `包括价格没问题的那些。第一条的问题：${firstMessage}`,
+    how:
+      '先对照客户官网上的团页，看帖子里的价格对不对。' +
+      '【价格确实写错了】这个页面上改不了文案，回我一句「重出 ' + (blocked[0]?.date ?? '') + ' 的文案」，我按官网价格重出。' +
+      '【价格没错，只是资料里没有这一项】点这个链接，打开「视频工厂配置」里的「资料包」，找到这个团（没有就点「+ 新增资料包」），点「+ 加一个字段」逐项补上：' +
+      '字段名 tour、值填官网上的团名；字段名 url、值填这个团的网页地址（帖子里的链接）；' +
+      '字段名 single_supplement、值填官网原话的单人房加价，例如 NZD $400；字段名 tips、值填官网原话的小费，例如 NZD $10 per day。补完回我一句，我重新演练。',
+    href: `https://app.magicengine.com.au${factoryConfigHref(clientId)}`,
   }
 }
 

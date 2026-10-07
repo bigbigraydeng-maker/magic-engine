@@ -163,7 +163,7 @@ describe('pushPriceFactItems —— 价格核对不过的帖子要摆到待办�
     expect(items).toHaveLength(0)
   })
 
-  it('价格写错 → 恰好一条待办，kind 正确，what 带日期，href 指向每日计划', async () => {
+  it('价格写错 → 恰好一条待办，kind 正确，what 带日期，href 指向资料包设置', async () => {
     const db = makeSupabase({
       socialPlans: [
         planRow({
@@ -184,8 +184,32 @@ describe('pushPriceFactItems —— 价格核对不过的帖子要摆到待办�
     expect(items).toHaveLength(1)
     expect(items[0].kind).toBe('price_fact_unverified')
     expect(items[0].what).toContain(FUTURE)
-    expect(items[0].what).toContain('拦下')
-    expect(items[0].href.endsWith('/daily-plan')).toBe(true)
+    expect(items[0].what).toContain('整批发不出去')
+    expect(items[0].how).toContain('single_supplement')
+    expect(items[0].href).toContain(`/dashboard/clients/${CLIENT}/settings`)
+    expect(items[0].href).toContain('section=factory-config')
+  })
+
+  it('文案没写团名、团名只出现在 CTA 链接里 → 跟发布出口判定一致，不出待办（同源，防假警）', async () => {
+    const offers = OFFERS // no url field: the tour name can only be found inside the published CTA link
+    const db = makeSupabase({
+      socialPlans: [
+        planRow({
+          bundles: [
+            bundle(FUTURE, {
+              hook: 'What does it include?',
+              body: 'NZD $5,400 per person',
+              cta: 'Enquire',
+              cta_url: 'https://example.com/tours/swiss-alps-explorer',
+            }),
+          ],
+        }),
+      ],
+      clients: [clientRow(offers)],
+    })
+    const items: ManualItem[] = []
+    await pushPriceFactItems(db, items, NOW, nameOf)
+    expect(items).toHaveLength(0)
   })
 
   it('客户没配价格资料 + 有价格的帖子 → 一条待办（没资料 = 拦）', async () => {

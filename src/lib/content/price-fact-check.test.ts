@@ -263,7 +263,7 @@ describe('priceFactMessage —— 拦下来必须说清', () => {
       problems: [{ claim: 'NZD $9,999', expected: ['NZD $5,400'] }],
     })
     expect(msg).toContain('「')
-    expect(msg).toContain('只有这些价格')
+    expect(msg).toContain('没有这个数字')
     expect(msg).toContain('已拦下')
   })
 })
@@ -272,5 +272,87 @@ describe('buildOfferPriceFacts —— 空输入', () => {
   it('null / undefined → []', () => {
     expect(buildOfferPriceFacts(null)).toEqual([])
     expect(buildOfferPriceFacts(undefined)).toEqual([])
+  })
+})
+
+describe('Fix 1 —— 长团名不能被短团名（其子串）判成 ambiguous', () => {
+  const offers = buildOfferPriceFacts({
+    classic: {
+      tour: 'Alpine Journeys — Classic',
+      price_line: 'From NZD $2,000 pp',
+    },
+    'classic-plus': {
+      tour: 'Alpine Journeys — Classic Plus (Christchurch departure)',
+      price_line: 'From NZD $3,999 pp',
+    },
+  })
+
+  it('"Classic Plus NZD $3,999" → verified，只认 Plus', () => {
+    const v = verifyPostPrices({ text: 'Classic Plus NZD $3,999', offers })
+    expect(v.status).toBe('verified')
+    if (v.status !== 'verified') throw new Error('expected verified')
+    expect(v.offerKeys).toEqual(['classic-plus'])
+  })
+
+  it('"Classic NZD $2,000" → verified，只认 Classic', () => {
+    const v = verifyPostPrices({ text: 'Classic NZD $2,000', offers })
+    expect(v.status).toBe('verified')
+    if (v.status !== 'verified') throw new Error('expected verified')
+    expect(v.offerKeys).toEqual(['classic'])
+  })
+})
+
+describe('Fix 2 —— qualifier 词表', () => {
+  it('"from" 不再当 qualifier', () => {
+    const offers = buildOfferPriceFacts({
+      x: { tour: 'X (from Auckland)', price_line: 'From NZD $1,000 pp' },
+    })
+    expect(offers[0].qualifiers).toEqual(['auckland'])
+  })
+})
+
+describe('Fix 3 —— 额外价格写法', () => {
+  const cases = [
+    'was 2,699, now 1,999',
+    'Price ex Auckland 1,999',
+    'tour - 1,999',
+    '1999 NZ dollars',
+    '20% discount',
+    '＄1,999',
+    '$1,999',
+    'NZD 1,999',
+  ]
+  for (const text of cases) {
+    it(`能抽出价格：${text}`, () => {
+      expect(extractPriceClaims(text).length).toBeGreaterThan(0)
+    })
+  }
+
+  it('零宽字符夹在 $ 和数字之间也能抽出', () => {
+    expect(extractPriceClaims('$\u200b1,999').length).toBeGreaterThan(0)
+  }) 
+})
+
+describe('Fix 3 —— 不误报', () => {
+  const cases = ['Over 10,000 followers', '5,000 km of coastline', 'Since 2026, our team…', '22 Dec 2026']
+  for (const text of cases) {
+    it(`零 claim：${text}`, () => {
+      expect(extractPriceClaims(text)).toHaveLength(0)
+    })
+  }
+})
+
+describe('Fix 3 —— promo 写法写错价格要拦下', () => {
+  it('"Italian Lakes was 3,200, now 1,999" → mismatch', () => {
+    const offers = buildOfferPriceFacts({
+      lakes: {
+        tour: 'Alpine Journeys — Italian Lakes',
+        price_line: 'From NZD $3,200 pp',
+      },
+    })
+    const v = verifyPostPrices({ text: 'Italian Lakes was 3,200, now 1,999', offers })
+    expect(v.status).toBe('blocked')
+    if (v.status !== 'blocked') throw new Error('expected blocked')
+    expect(v.reason).toBe('mismatch')
   })
 })
