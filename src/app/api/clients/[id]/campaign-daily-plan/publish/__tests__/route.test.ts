@@ -12,10 +12,6 @@ vi.mock('@/lib/meta/page-posts', () => ({
   getPageAccessToken: vi.fn(),
   publishPagePhotoPost: vi.fn(),
 }))
-vi.mock('@/lib/content/price-claim-gate', async importOriginal => ({
-  ...(await importOriginal<typeof import('@/lib/content/price-claim-gate')>()),
-  judgeOutgoingPost: vi.fn(),
-}))
 
 import { POST } from '../route'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
@@ -23,7 +19,6 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-manager'
 import { getPageAccessToken, publishPagePhotoPost } from '@/lib/meta/page-posts'
-import { judgeOutgoingPost } from '@/lib/content/price-claim-gate'
 import {
   CampaignDailyPublishMetaSchema,
   DailyPlanPostPublishedEventSchema,
@@ -38,7 +33,6 @@ const mockGetMetaToken = vi.mocked(getMetaTokenForClient)
 const mockGetStoredPageToken = vi.mocked(getStoredPageToken)
 const mockGetPageToken = vi.mocked(getPageAccessToken)
 const mockPublish = vi.mocked(publishPagePhotoPost)
-const mockJudge = vi.mocked(judgeOutgoingPost)
 
 const CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
 const CAMPAIGN_ID = 'a0000000-0000-0000-0000-000000000001'
@@ -170,6 +164,8 @@ interface TableState {
   assets?: unknown[]
   facebookPageId?: string | null
   updateResult?: unknown
+  /** `source` on every stubbed client_assets row; null models a missing source. */
+  assetSource?: string | null
   /** Error returned by the cron_run_logs insert (measurement failure record). */
   recordInsertError?: { message: string } | null
 }
@@ -186,6 +182,7 @@ function stubTables(state: TableState = {}) {
     mime_type: 'image/jpeg',
     status: 'analyzed',
     archived_at: null,
+    source: state.assetSource === undefined ? 'client_verified' : state.assetSource,
   }))
   updateSpy = vi.fn()
   recordInsertSpy = vi.fn()
@@ -246,9 +243,6 @@ function armProvider() {
 
 beforeEach(() => {
   allow()
-  // Default: nothing is price-blocked, so the existing tests exercise the
-  // publish path unchanged. The gate's own describe block overrides this.
-  mockJudge.mockResolvedValue({ blocked: false, priceClaimed: false, source: 'unknown' })
 })
 
 afterEach(() => {
@@ -876,9 +870,17 @@ describe('publish bridge — live run records real provider ids', () => {
 })
 
 describe('publish bridge — price claim gate', () => {
+  /** Plan whose reviewed copy carries a real price in every Post body. */
+  function pricedPlan() {
+    const plan = planData()
+    for (const bundle of (plan as unknown as { bundles: Array<{ post: { body: string } }> }).bundles) {
+      bundle.post.body = 'Tour from NZD $2,699 per person'
+    }
+    return plan
+  }
+
   it('blocks a dry run before any provider call, so the reviewer sees it pre-authorisation', async () => {
-    stubTables()
-    mockJudge.mockResolvedValue({ blocked: true, priceClaimed: true, source: 'stock' })
+    stubTables({ plan: pricedPlan(), assetSource: 'stock' })
 
     const response = await POST(request(), params)
     const json = await response.json()
@@ -890,15 +892,16 @@ describe('publish bridge — price claim gate', () => {
       expect(typeof block.message).toBe('string')
       expect(block.message.length).toBeGreaterThan(0)
     }
+    expect(typeof json.hint).toBe('string')
+    expect(json.hint.length).toBeGreaterThan(0)
     expect(mockPublish).not.toHaveBeenCalled()
     expect(mockSendInngestEvent).not.toHaveBeenCalled()
     expect(mockGetMetaToken).not.toHaveBeenCalled()
   })
 
   it('blocks a live run before token lookup, provider call or receipt write', async () => {
-    stubTables()
+    stubTables({ plan: pricedPlan(), assetSource: 'stock' })
     armProvider()
-    mockJudge.mockResolvedValue({ blocked: true, priceClaimed: true, source: 'stock' })
 
     const response = await POST(request({ no_publish: false }), params)
     const json = await response.json()
@@ -912,9 +915,8 @@ describe('publish bridge — price claim gate', () => {
   })
 
   it('lets a backed price claim publish normally', async () => {
-    stubTables()
+    stubTables({ plan: pricedPlan(), assetSource: 'client_verified' })
     armProvider()
-    mockJudge.mockResolvedValue({ blocked: false, priceClaimed: true, source: 'client_verified' })
 
     const response = await POST(request({ no_publish: false }), params)
 
@@ -922,17 +924,25 @@ describe('publish bridge — price claim gate', () => {
     expect(mockPublish).toHaveBeenCalledTimes(DATES.length)
   })
 
-  it('judges the reviewed copy and the authoritative asset url, not caller input', async () => {
-    stubTables()
+  it('fails closed when the asset row has no source at all', async () => {
+    stubTables({ plan: pricedPlan(), assetSource: null })
     armProvider()
 
-    await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+    const response = await POST(request({ no_publish: false }), params)
+    const json = await response.json()
 
-    expect(mockJudge).toHaveBeenCalledTimes(1)
-    expect(mockJudge.mock.calls[0][1]).toEqual({
-      clientId: CLIENT_ID,
-      caption: 'Hook 1\n\nBody 1\n\nEnquire now: https://ctstours.co.nz/tours/china-classic',
-      imageUrl: `https://assets.test/${ASSETS[0]}.jpg`,
-    })
+    expect(response.status).toBe(409)
+    expect(json.error).toBe('PRICE_CLAIM_UNBACKED')
+    expect(mockPublish).not.toHaveBeenCalled()
+  })
+
+  it('does not block an unpriced Post even when the asset source is unbacked', async () => {
+    stubTables({ assetSource: 'stock' })
+    armProvider()
+
+    const response = await POST(request({ no_publish: false }), params)
+
+    expect(response.status).toBe(200)
+    expect(mockPublish).toHaveBeenCalledTimes(DATES.length)
   })
 })
