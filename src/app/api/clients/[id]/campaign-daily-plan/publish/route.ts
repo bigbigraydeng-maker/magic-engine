@@ -36,6 +36,7 @@ import {
   type CampaignDailyPlanData,
 } from '@/lib/campaign/daily-plan'
 import { postChecklistPasses } from '@/lib/social/content-review'
+import { judgeOutgoingPost, priceGateMessage } from '@/lib/content/price-claim-gate'
 import {
   CampaignDailyPublishCommandSchema,
   CampaignDailyPublishMetaSchema,
@@ -494,6 +495,30 @@ async function persistReceipt(
   return Boolean(data)
 }
 
+/**
+ * 「真实价格只能配真实画面」—— 服务端那道闸，跟 /api/publer/create-post 同源。
+ *
+ * 界面上的闸挡的是手滑；这里挡的是绕过界面的路。这条 bridge 一旦跑起来东西就真
+ * 出去了，人不在场，所以每条待发 Post 的文案都要过一遍：文案报了价、配图却背不了
+ * 真价，就拦下整批，让审核者在授权前先看到。判定与界面共用同一段代码，不会出现
+ * 「界面拦了后端放行」这种最难查的不一致。
+ */
+async function findPriceGateBlocks(
+  clientId: string,
+  posts: PublishCandidate[],
+): Promise<Array<{ date: string; message: string }>> {
+  const blocks: Array<{ date: string; message: string }> = []
+  for (const post of posts) {
+    const verdict = await judgeOutgoingPost(supabaseAdmin, {
+      clientId,
+      caption: post.message,
+      imageUrl: post.imageUrl,
+    })
+    if (verdict.blocked) blocks.push({ date: post.date, message: priceGateMessage(verdict.source) })
+  }
+  return blocks
+}
+
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const clientId = params.id
   const access = await requirePaidClientAccess(clientId)
@@ -528,6 +553,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const alreadyPublished = previous?.published ?? []
 
     const { pending, skipped } = partitionByIdempotency(candidates, alreadyPublished)
+
+    // 真价只配真画面 —— 东西出去前的最后一道闸，且必须在任何 token 查询 / provider
+    // 调用之前。dry run 也要过：审核者得在授权前就看到哪几条被拦了，而不是授权后
+    // 才发现发不出去。
+    const priceBlocks = await findPriceGateBlocks(clientId, pending)
+    if (priceBlocks.length > 0) return conflict('PRICE_CLAIM_UNBACKED', { blocked: priceBlocks })
 
     if (command.no_publish) {
       return NextResponse.json({
