@@ -1854,3 +1854,5 @@ Gate B 定的 `minSampleSize=3`，页面目前只会显示「数据还不够说�
 - [ ] **[P3] 待办只看每个客户最新一份计划**，同客户并行第二个活动的计划不会出待办（发布时仍被拦）。
 - [ ] **[P3] `verifyPostPrices` 拆成「解析候选团」和「逐条核价」两段；`price-fact-items.ts` 的 `isRecord/readPath` 与 gate 重复。**
 - [ ] **[P3] 设置页资料包没有字段名提示**（`tour` `url` 影响匹配，价格字段名随意），加占位符说明。
+- [ ] **[P3] 魏征二审：新增的「带千分位逗号的数字都算价格」会多拦社交证明文案**（Join 2,500 happy guests、1,000 5-star reviews、1,500 bookings、up to 8,848 m）。补单位词表（customers/bookings/spots/rooms/m/tours/5-star reviews）；只会多拦、不会多放。
+- [ ] **[P2] 已知缺口：`now 1999`、`was 2,699, now 1999` 这类 1900–2099 间不带逗号的促销价会被当年份放过**（NZ 团价常落在这一带）。让 was/now 后面的数字不再按年份排除即可堵上。
