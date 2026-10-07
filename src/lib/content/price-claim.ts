@@ -48,8 +48,8 @@ const CURRENCY_CLAIM_SOURCES = [
 const PRICE_NUMBER = String.raw`(?:\d{3,}|\d{1,3}(?:,\d{3})+)(?:\.\d+)?`
 const NON_PRICE_UNIT = String.raw`(?:people|persons?|guests?|spots?|seats?|places?|rooms?|tickets?|followers?|reviews?|km|years?|visitors?|members?|days?|nights?|adults?|child(?:ren)?|stars?|pax|hours?|weeks?|m|metres?|meters?|miles?|kilometres?|kilometers?|sqm|m2|m²|fans?|likes?|views?|subscribers?)`
 const PRICE_UNIT_CLAIM_SOURCES = [
-  String.raw`(?<![\d,.])${PRICE_NUMBER}${HSPACE}(?:pp\b|p\.p\.|p/p\b|pppn\b|/${HSPACE}(?:person|pp|pax|head|adult|traveller|traveler|guest)\b|(?:per|a)${HSPACE}(?:person|adult|head|couple|pax|traveller|traveler|guest|twin|double|single)\b|twin${HSPACE}share\b|per${HSPACE}room\b|each\b)`,
-  String.raw`\b(?:from|only|just|price[sd]?|price${HSPACE}is|priced?${HSPACE}at|costs?|fares?|twin${HSPACE}share|starting${HSPACE}(?:at|from)|starts?${HSPACE}(?:at|from)|as${HSPACE}low${HSPACE}as|nz)${HSPACE}[:：\-–—]?${HSPACE}(?!(?:19|20)\d\d(?![\d,]))(?<![\d,.])${PRICE_NUMBER}(?![\d,])(?!${HSPACE}${NON_PRICE_UNIT}(?![a-z0-9²]))`,
+  String.raw`(?<![\d,.])${PRICE_NUMBER}${HSPACE}(?:pp\b|p\.p\.|p/p\b|pppn\b|/${HSPACE}(?:person|pp|pax|head|adult|traveller|traveler|guest)\b|(?:per|a)${HSPACE}(?:person|adult|head|couple|pax|traveller|traveler|guest|twin|double|single)\b|twin${HSPACE}share\b|per${HSPACE}room\b|each\b(?!${HSPACE}(?:way|year|day|night|month|week|room|other)\b))`,
+  String.raw`\b(?:from|only|just|price[sd]?|price${HSPACE}is|priced?${HSPACE}at|costs?|fares?|twin${HSPACE}share|starting${HSPACE}(?:at|from)|starts?${HSPACE}(?:at|from)|as${HSPACE}low${HSPACE}as)${HSPACE}[:：\-–—]?${HSPACE}(?:nz${HSPACE})?(?!(?:19|20)\d\d(?![\d,]))(?<![\d,.])${PRICE_NUMBER}(?![\d,])(?!${HSPACE}${NON_PRICE_UNIT}(?![a-z0-9²]))`,
 ]
 
 /**
@@ -118,7 +118,7 @@ export const PRICE_CLAIM_RECALL_RE = new RegExp(
  *   · 旧的 AUD 源(\baud\b\s*\d)允许跨行配对,"All prices in AUD↵7 day tour" 仍命中 —— 为保证超集不能改旧源
  *   · 币种在数字前、后面跟 free/per 等词时仍算价格("NZD 99 free cancellation" 命中,有意)
  *   · "纽币"之外的口语说法(澳刀/美刀已收;块、毛 没收)
- *   · "from 120 Queen St"、"only 500 plants" 这类 3 位数 + 非列表单位的说法会命中
+ *   · "from 120 Queen St"、"only 500 plants" 这类 3 位数 + 非列表单位的说法会命中；"Room 305 each" 这类 3 位数 + each 也会命中
  *
  * 带 `g` 标志,只允许用 `String.prototype.match` 调用 —— `RegExp.test` 会推进
  * `lastIndex`,跨模块共用同一个实例时会出现「隔次返回 false」的幽灵 bug。

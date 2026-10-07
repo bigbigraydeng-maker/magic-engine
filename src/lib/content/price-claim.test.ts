@@ -68,7 +68,7 @@ describe('containsPriceClaim — 不是价格的正常文案照常放行', () =>
     'limited to 18 per person',
     'since 2024 we run small tours',
     'Price list available on request',
-    'from 300 meters away',
+    'from 300 meters away', 'Wellington NZ 6011', 'Call NZ 0800 123 456', '12 Queen St, Auckland, NZ 1010', 'Made in NZ 100% wool', '300 each way',
     'Just 150 metres from the beach',
     'from 300 m² of space',
     'from 300m away',
