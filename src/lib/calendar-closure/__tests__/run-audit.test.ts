@@ -239,6 +239,27 @@ describe('runCalendarClosureAudit', () => {
     expect(h.loadCronRuns).toHaveBeenCalledTimes(1)
   })
 
+  it('ledger_card_status 的 id 必须等于事件自己的 ledger-id，否则 unreadable（不许借自己的编号探别的卡）', async () => {
+    const id = '2026-10-01-human-card'
+    const other = '2026-10-02-other-card'
+    const events = [makeEvent({ id: 'ev-1', title: '要人核', description: `ledger-id: ${id}` })]
+    const cards = new Map<string, LedgerCardView>([
+      [id, makeCard({ id }) ],
+      [other, makeCard({ id: other, status: 'verified' })],
+    ])
+    const h = makeHarness({ events, cards })
+
+    const receipt = await runCalendarClosureAudit(h.deps, {
+      dryRun: true,
+      source: 'live',
+      onlyEventId: 'ev-1',
+      probeOverrideLine: `ledger_card_status id=${other} status=verified`,
+    })
+
+    expect(receipt.results[0].kind).toBe('probe_unreadable')
+    expect(receipt.results[0].fact).toContain('不一致')
+  })
+
   it('override with an invalid line -> probe_unreadable', async () => {
     const id = '2026-10-01-human-card'
     const events = [makeEvent({ id: 'ev-1', title: '要人核', description: `ledger-id: ${id}` })]

@@ -14,7 +14,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-item-types'
 import { LEDGER_ENTRY_URL } from './ledger-items'
-import { shouldRemindToday, streakPhrase } from './remind-cadence'
+import { streakPhrase } from './remind-cadence'
 import {
   CALENDAR_CLOSURE_JOB,
   type AuditReceipt,
@@ -42,6 +42,8 @@ const INNGEST_URL = 'https://app.inngest.com'
 
 /** 巡检超过这么久没跑，就当它没在跑。 */
 const STALE_MS = 36 * 60 * 60 * 1000
+/** 停在 running 超过这么久就当卡死。 */
+const RUNNING_STUCK_MS = 2 * 60 * 60 * 1000
 /** 回看多久的运行记录。 */
 const LOOKBACK_MS = 3 * 24 * 60 * 60 * 1000
 
@@ -63,6 +65,11 @@ function infraItem(
 
 function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s
+}
+
+/** 日历标题进待办前去掉换行/控制字符：标题不可信，待办文字常被直接贴进别的窗口。 */
+function cleanTitle(s: string, max: number): string {
+  return truncate(s.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').trim(), max)
 }
 
 function ledgerHref(ledgerId: string | null, htmlLink: string): string {
@@ -104,7 +111,7 @@ export function buildCalendarClosureItems(receipt: AuditReceipt, now: Date): Man
         'calendar_closure_check_failed',
         `日历到期事项巡检读不出台账（${receipt.error ?? '没留原因'}）——这一栏空着不等于没事。`,
         '找任何一个 Claude Code 窗口说「修台账」。',
-        '',
+        LEDGER_ENTRY_URL,
       ),
     )
     return items
@@ -115,10 +122,11 @@ export function buildCalendarClosureItems(receipt: AuditReceipt, now: Date): Man
   for (const result of receipt.results) {
     if (result.kind === 'closed' || result.kind === 'covered') continue
 
+    // 到期没验的事项每天都报（到期 14 天窗口内）：它不是"同一故障连续出现"，不能套降噪节奏，
+    // 否则逾期第 5 天起一周只响一次（魏征 2026-10-08 复审）。无编号事项已汇总成一条，不会刷屏。
     const streak = result.overdueDays + 1
-    if (!shouldRemindToday(streak, 0, now)) continue
 
-    const title = truncate(result.title, 80)
+    const title = cleanTitle(result.title, 80)
     const href = ledgerHref(result.ledgerId, result.htmlLink)
 
     switch (result.kind) {
@@ -184,7 +192,7 @@ export function buildCalendarClosureItems(receipt: AuditReceipt, now: Date): Man
 
   if (noLedger.length > 0) {
     const n = noLedger.length
-    const titles = noLedger.slice(0, 5).map((r) => truncate(r.title, 80))
+    const titles = noLedger.slice(0, 5).map((r) => cleanTitle(r.title, 80))
     const suffix = n > 5 ? ` 等共 ${n} 个` : ''
     items.push(
       infraItem(
@@ -273,7 +281,17 @@ export async function pushCalendarClosureItems(
 
   const latest = rows[0]
 
-  if (latest.status === 'running') return
+  if (latest.status === 'running') {
+    // 跑了 2 小时还停在 running = 进程中途被杀、onFailure 也没收口；不能静默
+    if (now.getTime() - Date.parse(latest.started_at) <= RUNNING_STUCK_MS) return
+    items.push(
+      checkFailedItem(
+        '「日历到期事项巡检」最近一轮开了头却超过 2 小时没收尾——多半是中途被中断了。',
+        '把这句话发到开发窗口；在那之前先自己打开日历，看今天到期的验证事项有没有人跟。',
+      ),
+    )
+    return
+  }
 
   if (latest.status === 'failed' || latest.error_message) {
     const reason = truncate(latest.error_message ?? '没留原因', 160)

@@ -175,3 +175,26 @@ describe('isClosedTitle', () => {
     expect(isClosedTitle('  ✅ done')).toBe(true)
   })
 })
+
+describe('parseDescription - 外部输入压力', () => {
+  it('畸形超长 probe 行（曾能造成指数回溯）在 50ms 内返回，且判不合格', () => {
+    const evil = `probe: cron_run_ok${' a=b=c'.repeat(40)} =`
+    const start = Date.now()
+    const r = parseDescription(`ledger-id: 2026-10-08-a\n${evil}`)
+    expect(Date.now() - start).toBeLessThan(50)
+    expect(r.probe).toBeNull()
+    expect(r.reason).toMatch(/probe 行不合格/)
+  })
+
+  it('超过 8000 字的描述被截断处理，不拖垮', () => {
+    const start = Date.now()
+    const r = parseDescription(`ledger-id: 2026-10-08-a\n${'x'.repeat(200_000)}`)
+    expect(Date.now() - start).toBeLessThan(50)
+    expect(r.ledgerId).toBe('2026-10-08-a')
+  })
+
+  it('参数名 __proto__ 被拒', () => {
+    const r = parseDescription('ledger-id: 2026-10-08-a\nprobe: cron_run_ok __proto__=x within_hours=1')
+    expect(r.probe).toBeNull()
+  })
+})

@@ -60,6 +60,9 @@ interface CalendarApiEvent {
   etag?: string
   updated?: string
   start?: { date?: string; dateTime?: string }
+  creator?: { self?: boolean }
+  organizer?: { self?: boolean }
+  attendees?: { self?: boolean; responseStatus?: string }[]
 }
 
 interface CalendarApiResponse {
@@ -159,6 +162,9 @@ export async function readCalendarEvents(opts: {
 
     for (const item of json.items ?? []) {
       if (item.status === 'cancelled') continue
+      // 只收 PM 自己日历创建的事件：别人发来的邀请（标题可被陌生人随便写）不进巡检，也就不会进今日待办
+      if (item.creator?.self !== true && item.organizer?.self !== true) continue
+      if (item.attendees?.some((a) => a.self === true && a.responseStatus === 'declined')) continue
 
       const startNz = item.start?.date ?? (item.start?.dateTime ? toNzDate(item.start.dateTime) : null)
       if (!startNz) continue

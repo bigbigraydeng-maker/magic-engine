@@ -8,10 +8,13 @@ import {
 
 /** Whole-line ledger-id line: `ledger-id: <token>` */
 const LEDGER_LINE = /^ledger-id:\s*(\S+)$/
-/** Whole-line probe line: `probe: <name> [k=v ...]` */
-const PROBE_LINE = /^probe:\s*(\S+)((?:\s+\S+=\S+)*)$/
+/** 描述总长与单行长度上限：日历描述是外部可写数据，超长直接截断/拒绝，防正则与内存被拖垮 */
+const MAX_DESCRIPTION_CHARS = 8000
+const MAX_LINE_CHARS = 300
+/** Probe 行前缀；参数部分故意不用嵌套量词的正则（曾被构造输入造成指数回溯），改成 split 逐个校验 */
+const PROBE_PREFIX = /^probe:\s*/
 /** Param key: lowercase letters and underscores only */
-const PARAM_KEY = /^[a-z_]+$/
+const PARAM_KEY = /^[a-z][a-z_]*$/
 /** Param value: conservative charset, bounded length */
 const PARAM_VALUE = /^[A-Za-z0-9_.:-]{1,80}$/
 /** cron_run_ok.job value */
@@ -28,7 +31,10 @@ const REQUIRED_PARAMS: Record<ProbeName, readonly string[]> = {
 
 /** Split into trimmed lines, tolerating CRLF / CR / LF. */
 function splitLines(description: string): string[] {
-  return description.split(/\r\n|\r|\n/).map((line) => line.trim())
+  return description
+    .slice(0, MAX_DESCRIPTION_CHARS)
+    .split(/\r\n|\r|\n/)
+    .map((line) => line.trim())
 }
 
 /** Parse `k=v` tokens into a record; returns null on any malformed token. */
@@ -80,20 +86,24 @@ export function parseDescription(description: string): ParsedDescription {
   const lines = splitLines(description)
 
   const ledgerTokens: string[] = []
-  const probeMatches: RegExpExecArray[] = []
+  const probeMatches: { name: string; tokens: string[] }[] = []
   // 以 ledger-id: / probe: 开头的行一律计数——格式不合格的行也算"出现过"，不许悄悄忽略
   let ledgerLikeCount = 0
   let probeLikeCount = 0
   for (const line of lines) {
     if (/^ledger-id:/.test(line)) ledgerLikeCount += 1
     if (/^probe:/.test(line)) probeLikeCount += 1
+    // 超长行不进任何正则/拆分：算"出现过但格式不合格"
+    if (line.length > MAX_LINE_CHARS) continue
     const ledger = LEDGER_LINE.exec(line)
     if (ledger) {
       ledgerTokens.push(ledger[1])
       continue
     }
-    const probe = PROBE_LINE.exec(line)
-    if (probe) probeMatches.push(probe)
+    if (PROBE_PREFIX.test(line)) {
+      const tokens = line.replace(PROBE_PREFIX, '').split(/\s+/).filter((t) => t.length > 0)
+      if (tokens.length > 0) probeMatches.push({ name: tokens[0], tokens: tokens.slice(1) })
+    }
   }
 
   // --- ledger-id resolution ---
@@ -131,10 +141,7 @@ export function parseDescription(description: string): ParsedDescription {
     probe = null
     if (reason === null) reason = '描述里出现多个 probe 行'
   } else if (probeMatches.length === 1) {
-    const match = probeMatches[0]
-    const name = match[1]
-    const tail = match[2].trim()
-    const tokens = tail.length === 0 ? [] : tail.split(/\s+/)
+    const { name, tokens } = probeMatches[0]
 
     if (!PROBE_NAMES.includes(name as ProbeName)) {
       if (reason === null) reason = `probe 行不合格：未知 probe ${name}`

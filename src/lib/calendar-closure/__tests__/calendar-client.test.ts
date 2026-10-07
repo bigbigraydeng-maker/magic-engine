@@ -53,7 +53,7 @@ describe('readCalendarEvents', () => {
         items: [
           {
             id: 'evt-1',
-            status: 'confirmed',
+            status: 'confirmed', creator: { self: true },
             summary: '跟进 A',
             description: 'ledger-id: 2026-10-09-abc',
             htmlLink: 'https://calendar.google.com/event?eid=1',
@@ -79,7 +79,7 @@ describe('readCalendarEvents', () => {
         items: [
           {
             id: 'evt-allday',
-            status: 'confirmed',
+            status: 'confirmed', creator: { self: true },
             summary: '全天',
             start: { date: '2026-10-09' },
           },
@@ -98,7 +98,7 @@ describe('readCalendarEvents', () => {
       jsonResponse({
         items: [
           { id: 'a', status: 'cancelled', start: { date: '2026-10-09' } },
-          { id: 'b', status: 'confirmed', start: { date: '2026-10-09' } },
+          { id: 'b', status: 'confirmed', creator: { self: true }, start: { date: '2026-10-09' } },
         ],
       }),
     )
@@ -113,7 +113,7 @@ describe('readCalendarEvents', () => {
       jsonResponse({
         items: [
           { id: 'no-start', status: 'confirmed' },
-          { id: 'ok', status: 'confirmed', start: { date: '2026-10-09' } },
+          { id: 'ok', status: 'confirmed', creator: { self: true }, start: { date: '2026-10-09' } },
         ],
       }),
     )
@@ -131,14 +131,14 @@ describe('readCalendarEvents', () => {
           etag: '"p1"',
           updated: '2026-10-09T00:00:00.000Z',
           nextPageToken: 'page-2',
-          items: [{ id: 'a', status: 'confirmed', start: { date: '2026-10-09' } }],
+          items: [{ id: 'a', status: 'confirmed', creator: { self: true }, start: { date: '2026-10-09' } }],
         }),
       )
       .mockResolvedValueOnce(
         jsonResponse({
           etag: '"p2"',
           updated: '2026-10-09T01:00:00.000Z',
-          items: [{ id: 'b', status: 'confirmed', start: { date: '2026-10-09' } }],
+          items: [{ id: 'b', status: 'confirmed', creator: { self: true }, start: { date: '2026-10-09' } }],
         }),
       )
 
@@ -203,9 +203,9 @@ describe('readCalendarEvents', () => {
     const fetcher = vi
       .fn()
       .mockResolvedValueOnce(
-        jsonResponse({ nextPageToken: 'p2', items: [{ id: 'a', status: 'confirmed', start: { date: '2026-10-09' } }] }),
+        jsonResponse({ nextPageToken: 'p2', items: [{ id: 'a', status: 'confirmed', creator: { self: true }, start: { date: '2026-10-09' } }] }),
       )
-      .mockResolvedValueOnce(jsonResponse({ items: [{ id: 'b', status: 'confirmed', start: { date: '2026-10-09' } }] }))
+      .mockResolvedValueOnce(jsonResponse({ items: [{ id: 'b', status: 'confirmed', creator: { self: true }, start: { date: '2026-10-09' } }] }))
 
     await readCalendarEvents({ todayNz: TODAY, fetcher, token: 'tok' })
 

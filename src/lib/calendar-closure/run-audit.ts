@@ -232,6 +232,12 @@ export async function runCalendarClosureAudit(
       continue
     }
 
+    // 核对参数必须绑定事件自己的台账卡：日历是外部可写数据，不许借自己的 ledger-id 去探测别的卡
+    if (probe.name === 'ledger_card_status' && probe.params.id !== decision.ledgerId) {
+      results.push(unreadableResult(decision, '核对参数里的台账卡与事件自己的 ledger-id 不一致'))
+      continue
+    }
+
     try {
       const r = await runProbe(probe, probeDeps)
       results.push({
