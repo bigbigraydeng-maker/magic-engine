@@ -30,6 +30,7 @@ import type { CommentReplyScopeTodoKind } from './comment-reply-scope-items'
 import type { MetaTokenHealthKind } from './meta-token-health-items'
 import type { DeployHealthItemKind } from './deploy-health-items'
 import type { LeadSheetItemKind } from './lead-sheet-items'
+import type { CalendarClosureItemKind } from './calendar-closure-items'
 import type { PlatformConnectionItemKind } from './platform-connection-items'
 import type { FacebookSyncItemKind } from './facebook-sync-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
@@ -205,6 +206,8 @@ export type ManualItemKind =
   | 'deploy_check_failed'
   /** 线索没写进客户的 Google 表格 —— 销售看的那张表缺人，留资 90 天后永久取不回 */
   | LeadSheetItemKind
+  /** 日历上带日期的验证事项每日巡检：读不到日历 / 巡检没跑成 / 没法自动核对 / 核对没达预期 */
+  | CalendarClosureItemKind
   /** 执行内核停手 / 等审批 / 被规则挡下 —— 必须有人看见，不许死在日志里 */
   | 'kernel_needs_human'
   /** 自治开关同步到执行内核失败 —— 面板档位和内核实际档位可能不一致（WP3.1a） */

@@ -22,6 +22,7 @@ import { aiVisibilityWeeklyFanOut, aiVisibilityTrackerRunOne } from './ai-visibi
 import { reelBatchRender } from './reel-batch-render'
 import { adsD3AutoPause } from './ads-d3-auto-pause'
 import { leadSheetSyncFanOut, leadSheetSyncOne } from './lead-sheet-sync'
+import { calendarClosureAudit } from './calendar-closure-audit'
 import { crmLeadFollowupDigest } from './crm-lead-followup-digest'
 import { adsAutonomySyncFunction } from './ads-autonomy-sync'
 import { adsCampaignBudgetDecrease } from './ads-campaign-budget'
@@ -66,6 +67,7 @@ export const cloudFunctions = [
   adsD3AutoPause,
   leadSheetSyncFanOut,
   leadSheetSyncOne,
+  calendarClosureAudit,
   crmLeadFollowupDigest,
   adsAutonomySyncFunction,
   adsCampaignBudgetDecrease,
