@@ -4,7 +4,7 @@ title: 邮件「每人 7 天最多 2 封」的发信前自动数数检查已做�
 status: decided
 owner: pm
 decided_on: 2026-10-08
-source: doc:docs/ledger/2026-10-08-cts-email-two-per-week-cap.md
+source: session:00f65edf
 verify_by: 2026-10-15
 verify_how: "PM 回复排除名单怎么落地（打标签 / 一次性排除分群 / 只给 PM 看名单）并同意给 CTS 配上限 2 封 / 7 天后，才能接上；接上前不会有任何邮件被拦"
 ---
