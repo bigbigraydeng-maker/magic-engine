@@ -243,4 +243,26 @@ describe('readCalendarEvents', () => {
   it('CALENDAR_READONLY_SCOPE 是 calendar.readonly', () => {
     expect(CALENDAR_READONLY_SCOPE).toBe('https://www.googleapis.com/auth/calendar.readonly')
   })
+
+  it('只收 PM 自己日历创建的事件：外部邀请、已拒绝的事件被丢掉', async () => {
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      jsonResponse({
+        items: [
+          { id: 'mine', status: 'confirmed', creator: { self: true }, start: { date: '2026-10-09' } },
+          { id: 'org', status: 'confirmed', organizer: { self: true }, start: { date: '2026-10-09' } },
+          { id: 'stranger', status: 'confirmed', creator: { self: false }, start: { date: '2026-10-09' } },
+          { id: 'nocreator', status: 'confirmed', start: { date: '2026-10-09' } },
+          {
+            id: 'declined',
+            status: 'confirmed',
+            creator: { self: true },
+            attendees: [{ self: true, responseStatus: 'declined' }],
+            start: { date: '2026-10-09' },
+          },
+        ],
+      }),
+    )
+    const result = await readCalendarEvents({ todayNz: TODAY, fetcher, token: 'tok' })
+    expect(result.events.map((e) => e.id)).toEqual(['mine', 'org'])
+  })
 })
