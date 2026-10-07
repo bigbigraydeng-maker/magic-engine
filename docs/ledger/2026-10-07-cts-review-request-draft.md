@@ -14,3 +14,4 @@ Mailchimp 草稿编号 d15110cf0b，未发送、未排期，只发过测试到 h
 Google 评价按钮用官网页脚里 CTS 的 Google 商家页链接，返回 200。
 代金券（PM 10/8 定）：NZD $200，1 年有效，可自用或送人，仅限 CTS China 团，不含 tailor-made、stopover、机票。已写成「感谢」、不与留评价挂钩（Google 禁止奖励换评价）。兑换方式「回信或联系时报出」是我拟的，待 CTS 确认。
 照片（PM 10/8 确认可用）：客人自己的中国旅行照，已传 Mailchimp 文件库；文案口气定为：感谢→美好记忆→NZD $200→请他分享评价。
+模板已存：Mailchimp 模板库「CTS 老客户感谢+代金券+Google评价（2026-10）」；仓库备份 docs/clients/cts/email-templates/。
