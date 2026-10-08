@@ -38,6 +38,8 @@ interface FakeConfig {
   updateError?: { message: string }
   /** 让 update 匹配 0 行（模拟乐观锁失败）。 */
   updateMatchesZero?: boolean
+  /** 在 update 真正落盘前，对匹配到的行调用一次（模拟读与写之间的并发改动）。 */
+  beforeUpdate?: (row: FakeRow) => void
 }
 
 interface FakeSupabase {
@@ -145,16 +147,22 @@ function makeFakeSupabase(config: FakeConfig = {}): FakeSupabase {
             async select(_cols: string) {
               if (config.updateError) return { data: null, error: config.updateError }
               if (config.updateMatchesZero) return { data: [], error: null }
-              const match = rows.find((r) =>
+              // 并发改动要发生在「读」之后、「按条件写」之前：先让钩子改行，再评估过滤条件。
+              const idFilter = filters.find((f) => f.col === 'id')
+              const hookTarget = idFilter ? rows.find((r) => r.id === idFilter.val) : undefined
+              if (hookTarget) config.beforeUpdate?.(hookTarget)
+              const matches = rows.filter((r) =>
                 filters.every((f) => {
                   if (f.col === 'id') return r.id === f.val
                   if (f.col === 'payload->>status') return r.payload.status === f.val
                   return false
                 }),
               )
-              if (!match) return { data: [], error: null }
-              match.payload = patch.payload
-              return { data: [{ id: match.id }], error: null }
+              if (matches.length === 0) return { data: [], error: null }
+              for (const match of matches) {
+                match.payload = patch.payload
+              }
+              return { data: matches.map((m) => ({ id: m.id })), error: null }
             },
           }
           return builder
@@ -270,6 +278,82 @@ describe('claimIntent', () => {
     const res = await claimIntent(fake.client, baseInput())
     expect(res).toEqual({ ok: false, reason: 'identity_mismatch', field: 'mode_mismatch' })
   })
+
+  it('re-claims a blocked intent that never touched Meta', async () => {
+    const fake = makeFakeSupabase()
+    const first = await claimIntent(fake.client, baseInput())
+    if (!first.ok) throw new Error('claim failed')
+    fake.rows[0].payload.status = 'blocked'
+    fake.rows[0].payload.provider_impact = 'none'
+    fake.rows[0].payload.block_code = 'no_page'
+    fake.rows[0].payload.error = 'page missing'
+
+    const second = await claimIntent(fake.client, baseInput({ requestId: 'req-2' }))
+    expect(second.ok).toBe(true)
+    if (!second.ok) return
+    expect(second.created).toBe(true)
+    expect(second.actionId).toBe(first.actionId)
+    expect(fake.rows).toHaveLength(1)
+    const p = fake.rows[0].payload
+    expect(p.status).toBe('started')
+    expect(p.attempt).toBe(2)
+    expect(p.request_id).toBe('req-2')
+    expect(p.block_code).toBeUndefined()
+    expect(p.error).toBeUndefined()
+  })
+
+  it('does not re-claim a blocked intent whose provider_impact is not none', async () => {
+    const fake = makeFakeSupabase()
+    await claimIntent(fake.client, baseInput())
+    fake.rows[0].payload.status = 'blocked'
+    fake.rows[0].payload.provider_impact = 'unknown'
+
+    const second = await claimIntent(fake.client, baseInput({ requestId: 'req-2' }))
+    expect(second.ok).toBe(true)
+    if (!second.ok) return
+    expect(second.created).toBe(false)
+    expect(fake.rows[0].payload.status).toBe('blocked')
+  })
+
+  it('does not re-claim a failed intent', async () => {
+    const fake = makeFakeSupabase()
+    await claimIntent(fake.client, baseInput())
+    fake.rows[0].payload.status = 'failed'
+
+    const second = await claimIntent(fake.client, baseInput({ requestId: 'req-2' }))
+    expect(second.ok).toBe(true)
+    if (!second.ok) return
+    expect(second.created).toBe(false)
+    expect(fake.rows[0].payload.status).toBe('failed')
+  })
+
+  it('does not re-claim a drafted intent', async () => {
+    const fake = makeFakeSupabase()
+    await claimIntent(fake.client, baseInput())
+    fake.rows[0].payload.status = 'drafted'
+
+    const second = await claimIntent(fake.client, baseInput({ requestId: 'req-2' }))
+    expect(second.ok).toBe(true)
+    if (!second.ok) return
+    expect(second.created).toBe(false)
+    expect(fake.rows[0].payload.status).toBe('drafted')
+  })
+
+  it('re-claim race: update matching 0 rows falls back to the duplicate result', async () => {
+    const fake = makeFakeSupabase({ updateMatchesZero: true })
+    await claimIntent(fake.client, baseInput())
+    fake.rows[0].payload.status = 'blocked'
+    fake.rows[0].payload.provider_impact = 'none'
+
+    const second = await claimIntent(fake.client, baseInput({ requestId: 'req-2' }))
+    expect(second.ok).toBe(true)
+    if (!second.ok) return
+    expect(second.created).toBe(false)
+    if (second.created === false) {
+      expect(second.existing.status).toBe('blocked')
+    }
+    expect(fake.rows[0].payload.status).toBe('blocked')
+  })
 })
 
 // ── finishIntent ────────────────────────────────────────────────────────────
@@ -339,5 +423,24 @@ describe('finishIntent', () => {
       '2025-01-01T02:00:00.000Z',
     )
     expect(res.ok).toBe(false)
+  })
+
+  it('concurrent change between read and write => ok:false and status not overwritten', async () => {
+    const fake = makeFakeSupabase({
+      beforeUpdate: (row) => {
+        row.payload.status = 'failed'
+      },
+    })
+    const claim = await claimIntent(fake.client, baseInput())
+    if (!claim.ok) throw new Error('claim failed')
+    const res = await finishIntent(
+      fake.client,
+      claim.actionId,
+      'drafted',
+      {},
+      '2025-01-01T02:00:00.000Z',
+    )
+    expect(res.ok).toBe(false)
+    expect(fake.rows[0].payload.status).toBe('failed')
   })
 })

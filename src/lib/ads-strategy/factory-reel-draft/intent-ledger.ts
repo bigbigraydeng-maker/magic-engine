@@ -60,6 +60,10 @@ export interface IntentPayload {
   created_at: string
   updated_at: string
   post_id?: string
+  /** 这些对象被（或将被）创建在哪个 Meta 广告账户下，便于事后定位孤儿对象。 */
+  ad_account_id?: string
+  /** 这条被阻断的意图被重新认领过多少次。 */
+  attempt?: number
   block_code?: string
   error?: string
   draft_action_id?: string
@@ -112,6 +116,11 @@ const UNIQUE_VIOLATION = '23505'
  *
  * 注意：去重范围是 (work order, video, mode)。同一 (work order, video) 的 dry_run
  * 意图与 on 意图是两行，互不阻塞。
+ *
+ * 例外：一条 `blocked` 且 `provider_impact === 'none'` 的意图——它从未碰过 Meta，
+ * 重试是安全的——会被**重新认领**（原地推进回 `started`，attempt +1，清掉旧的
+ * block_code / error）。除此之外的一切（failed / drafted / draft_blocked /
+ * dry_run_ok / started，以及任何 provider_impact 非 none 的 blocked）永不重做。
  */
 export async function claimIntent(
   supabase: SupabaseClient,
@@ -164,10 +173,34 @@ export async function claimIntent(
   if (mismatch) return { ok: false, reason: 'identity_mismatch', field: mismatch }
 
   const existingPayload = ((existing as { payload?: IntentPayload }).payload ?? null) as IntentPayload
+  const existingId = (existing as { id: string }).id
+
+  // 一条从未碰过 Meta 的 blocked 意图可以安全重试：原地推进回 started。
+  if (existingPayload.status === 'blocked' && existingPayload.provider_impact === 'none') {
+    const { block_code: _blockCode, error: _error, ...existingWithoutBlockFields } = existingPayload
+    const next: IntentPayload = {
+      ...existingWithoutBlockFields,
+      request_id: input.requestId,
+      status: 'started',
+      attempt: (existingPayload.attempt ?? 1) + 1,
+      updated_at: input.nowIso,
+    }
+    const { data: reclaimed, error: reclaimError } = await supabase
+      .from('flywheel_actions')
+      .update({ payload: next })
+      .eq('id', existingId)
+      .eq('payload->>status', 'blocked')
+      .select('id')
+    if (!reclaimError && Array.isArray(reclaimed) && reclaimed.length === 1) {
+      return { ok: true, created: true, actionId: existingId }
+    }
+    // 更新失败或 0 行（别人抢先重新认领了）→ 退回普通重复结果。
+  }
+
   return {
     ok: true,
     created: false,
-    actionId: (existing as { id: string }).id,
+    actionId: existingId,
     existing: existingPayload,
   }
 }
@@ -199,6 +232,7 @@ export type IntentPatch = Partial<
   Pick<
     IntentPayload,
     | 'post_id'
+    | 'ad_account_id'
     | 'block_code'
     | 'error'
     | 'draft_action_id'
