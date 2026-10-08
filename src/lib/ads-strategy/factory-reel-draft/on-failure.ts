@@ -7,7 +7,8 @@
  * Rule: a failure must leave a machine-readable receipt and must never be
  * silent. If the failure happened AFTER the intent row was created (status
  * `started`), we finish that row as `failed`. If no `started` intent exists we
- * cannot invent one — we have no trustworthy ids — so we report that instead.
+ * write an `unhandled_failure` receipt row so the failure becomes a to-do
+ * instead of living in a log.
  *
  * We never throw: an `onFailure` hook that throws is itself a silent failure.
  */
@@ -22,10 +23,10 @@ import {
 } from './intent-ledger'
 
 export type FailureReceiptResult =
-  | { ok: true; finished: number }
+  | { ok: true; finished: number; inserted: number }
   | {
       ok: false
-      reason: 'invalid_event' | 'read_error' | 'no_started_intent' | 'write_error'
+      reason: 'invalid_event' | 'read_error' | 'write_error'
       message: string
     }
 
@@ -61,8 +62,8 @@ function errorMessage(error: unknown): string {
  * 记录一次未处理的函数级失败。
  *
  * 对 dry_run 与 on 两个 mode 分别回读意图行；凡是 `started` 的行都推进到
- * `failed`。没有任何 `started` 行时返回 `no_started_intent`——我们不会凭空
- * 造一行，因为那需要可信的 id，而失败路径上我们未必拿得到。
+ * `failed`。没有任何 `started` 行时写入一行 `unhandled_failure` 收据，让这次
+ * 失败变成一条待办，而不是只留在日志里。
  */
 export async function recordUnhandledFailure(
   supabase: SupabaseClient,
@@ -115,14 +116,48 @@ export async function recordUnhandledFailure(
     }
 
     if (finished === 0) {
-      return {
-        ok: false,
-        reason: 'no_started_intent',
-        message: 'no started intent found for this event',
+      const receipt: IntentPayload = {
+        idempotency_key: `factory-reel-ad:unhandled:${event.request_id}`,
+        request_id: event.request_id,
+        client_id: event.client_id,
+        work_order_id: event.work_order_id,
+        video_id: event.video_id,
+        page_id: event.page_id,
+        mode: 'on',
+        status: 'failed',
+        no_publish: true,
+        authorization: 'pm_approval_required',
+        provider_impact: 'none',
+        created_at: nowIso,
+        updated_at: nowIso,
+        block_code: 'unhandled_failure',
+        error: patchError,
       }
+
+      const { error: insertError } = await supabase
+        .from('flywheel_actions')
+        .insert({
+          client_id: event.client_id,
+          flywheel: 'ads',
+          action_type: FACTORY_REEL_DRAFT_ACTION,
+          execution_mode: 'third_party',
+          vendor: 'meta',
+          payload: receipt,
+        })
+        .select('id')
+        .single()
+
+      if (insertError) {
+        if (insertError.code === '23505') {
+          return { ok: true, finished: 0, inserted: 0 }
+        }
+        return { ok: false, reason: 'write_error', message: insertError.message }
+      }
+
+      return { ok: true, finished: 0, inserted: 1 }
     }
 
-    return { ok: true, finished }
+    return { ok: true, finished, inserted: 0 }
   } catch (err) {
     return { ok: false, reason: 'read_error', message: errorMessage(err) }
   }

@@ -223,7 +223,7 @@ describe('recordUnhandledFailure', () => {
       new Error('boom'),
       NOW,
     )
-    expect(res).toEqual({ ok: true, finished: 1 })
+    expect(res).toEqual({ ok: true, finished: 1, inserted: 0 })
 
     const p = fake.rows[0].payload
     expect(p.status).toBe('failed')
@@ -244,7 +244,7 @@ describe('recordUnhandledFailure', () => {
       new Error('dry boom'),
       NOW,
     )
-    expect(res).toEqual({ ok: true, finished: 1 })
+    expect(res).toEqual({ ok: true, finished: 1, inserted: 0 })
 
     const p = fake.rows[0].payload
     expect(p.status).toBe('failed')
@@ -259,30 +259,61 @@ describe('recordUnhandledFailure', () => {
     expect(fake.rows).toHaveLength(2)
 
     const res = await recordUnhandledFailure(fake.client, baseEvent(), new Error('both'), NOW)
-    expect(res).toEqual({ ok: true, finished: 2 })
+    expect(res).toEqual({ ok: true, finished: 2, inserted: 0 })
     expect(fake.rows.every((r) => r.payload.status === 'failed')).toBe(true)
   })
 
-  it("does not overwrite an already 'drafted' intent and reports no_started_intent", async () => {
+  it("does not overwrite an already 'drafted' intent and writes an unhandled_failure receipt", async () => {
     const fake = makeFakeSupabase()
     const claim = await claimIntent(fake.client, baseInput({ mode: 'on' }))
     if (!claim.ok) throw new Error('claim failed')
     fake.rows[0].payload.status = 'drafted'
 
     const res = await recordUnhandledFailure(fake.client, baseEvent(), new Error('late'), NOW)
-    expect(res.ok).toBe(false)
-    if (res.ok) return
-    expect(res.reason).toBe('no_started_intent')
+    expect(res).toEqual({ ok: true, finished: 0, inserted: 1 })
+
+    // 原来的 drafted 行保持不动
     expect(fake.rows[0].payload.status).toBe('drafted')
+
+    // 新增一行收据
+    expect(fake.rows).toHaveLength(2)
+    const receipt = fake.rows[1].payload
+    expect(receipt.status).toBe('failed')
+    expect(receipt.block_code).toBe('unhandled_failure')
+    expect(receipt.idempotency_key).toBe(`factory-reel-ad:unhandled:${REQUEST_ID}`)
+    expect(receipt.error).toContain('late')
   })
 
-  it('no rows => no_started_intent', async () => {
+  it('no rows => writes an unhandled_failure receipt', async () => {
     const fake = makeFakeSupabase()
     const res = await recordUnhandledFailure(fake.client, baseEvent(), new Error('none'), NOW)
+    expect(res).toEqual({ ok: true, finished: 0, inserted: 1 })
+
+    expect(fake.rows).toHaveLength(1)
+    const receipt = fake.rows[0].payload
+    expect(receipt.status).toBe('failed')
+    expect(receipt.block_code).toBe('unhandled_failure')
+    expect(receipt.idempotency_key).toBe(`factory-reel-ad:unhandled:${REQUEST_ID}`)
+    expect(receipt.error).toContain('none')
+  })
+
+  it('a second call for the same event inserts nothing (23505) and keeps one row', async () => {
+    const fake = makeFakeSupabase()
+    const first = await recordUnhandledFailure(fake.client, baseEvent(), new Error('once'), NOW)
+    expect(first).toEqual({ ok: true, finished: 0, inserted: 1 })
+
+    const second = await recordUnhandledFailure(fake.client, baseEvent(), new Error('twice'), NOW)
+    expect(second).toEqual({ ok: true, finished: 0, inserted: 0 })
+    expect(fake.rows).toHaveLength(1)
+  })
+
+  it('insert error with a non-23505 code => write_error', async () => {
+    const fake = makeFakeSupabase({ insertError: { code: 'XX000', message: 'insert exploded' } })
+    const res = await recordUnhandledFailure(fake.client, baseEvent(), new Error('x'), NOW)
     expect(res.ok).toBe(false)
     if (res.ok) return
-    expect(res.reason).toBe('no_started_intent')
-    expect(res.message).toBe('no started intent found for this event')
+    expect(res.reason).toBe('write_error')
+    expect(res.message).toBe('insert exploded')
   })
 
   it('invalid event => invalid_event with no db calls', async () => {
@@ -309,7 +340,7 @@ describe('recordUnhandledFailure', () => {
     const fake = makeFakeSupabase()
     await claimIntent(fake.client, baseInput({ mode: 'on' }))
     const res = await recordUnhandledFailure(fake.client, baseEvent(), 'string failure', NOW)
-    expect(res).toEqual({ ok: true, finished: 1 })
+    expect(res).toEqual({ ok: true, finished: 1, inserted: 0 })
     expect(fake.rows[0].payload.error).toContain('string failure')
   })
 
@@ -317,7 +348,7 @@ describe('recordUnhandledFailure', () => {
     const fake = makeFakeSupabase()
     await claimIntent(fake.client, baseInput({ mode: 'on' }))
     const res = await recordUnhandledFailure(fake.client, baseEvent(), { code: 'E_BOOM' }, NOW)
-    expect(res).toEqual({ ok: true, finished: 1 })
+    expect(res).toEqual({ ok: true, finished: 1, inserted: 0 })
     expect(fake.rows[0].payload.error).toContain('E_BOOM')
   })
 
@@ -326,7 +357,7 @@ describe('recordUnhandledFailure', () => {
     await claimIntent(fake.client, baseInput({ mode: 'on' }))
     const long = 'x'.repeat(1000)
     const res = await recordUnhandledFailure(fake.client, baseEvent(), new Error(long), NOW)
-    expect(res).toEqual({ ok: true, finished: 1 })
+    expect(res).toEqual({ ok: true, finished: 1, inserted: 0 })
     const stored = fake.rows[0].payload.error ?? ''
     // `函数异常：` 前缀 + 最多 300 字符的 message
     expect(stored.length).toBe('函数异常：'.length + 300)

@@ -15,6 +15,24 @@ import { recordUnhandledFailure } from '@/lib/ads-strategy/factory-reel-draft/on
 
 export const FACTORY_REEL_AD_DRAFT_FN_ID = `${CLOUD_FN_PREFIX}factory-reel-ad-draft`
 
+/**
+ * `runFactoryReelAdDraft` 从不抛错，所以「在建意图行之前就失败」的情况
+ * （意图行都没能认领，或认领前发生意外错误）会让 Inngest 函数「成功」结束，
+ * `onFailure` 永远不会跑，失败既没有回执也没有待办。
+ *
+ * 这个纯函数把这种「静默失败」转成真正的异常，让调用方在 step 之外抛出，
+ * 从而触发 `onFailure`（retries 仍为 0）。
+ */
+export function throwIfSilentFailure(outcome: RunOutcome): void {
+  if (outcome.recordError) {
+    console.error('[factory-reel-ad-draft] 意图行收尾没写进去', outcome.recordError)
+  }
+  if (outcome.status === 'failed' && outcome.intentActionId === null) {
+    const detail = [outcome.blockCode, outcome.message].filter(Boolean).join('：')
+    throw new Error(`工厂 Reel 自动起草在建意图行之前就失败了：${detail}`)
+  }
+}
+
 export function createFactoryReelAdDraftFunction(deps: { getSupabase: () => SupabaseClient }) {
   return inngest.createFunction(
     {
@@ -42,10 +60,14 @@ export function createFactoryReelAdDraftFunction(deps: { getSupabase: () => Supa
       },
     },
     { event: FACTORY_REEL_PUBLISHED_EVENT },
-    async ({ event, step }): Promise<RunOutcome> =>
-      step.run('run-pipeline', () =>
+    async ({ event, step }): Promise<RunOutcome> => {
+      const outcome = await step.run('run-pipeline', () =>
         runFactoryReelAdDraft(buildRunDeps(deps.getSupabase()), event.data),
-      ),
+      )
+      // 在 step 之外抛出，onFailure 才会跑（retries 保持 0）。
+      throwIfSilentFailure(outcome)
+      return outcome
+    },
   )
 }
 
