@@ -1,0 +1,130 @@
+{
+ "client_id": "c0000000-0000-0000-0000-000000000000",
+ "goal_id": "287dc046-0b95-42fd-9fc1-4f5d39ecd8be",
+ "master_brief_id": "a93c40e0-a5d3-4f53-8cd5-88a85ff83e73",
+ "order_type": "fresh_angle",
+ "angle": "Shanghai & Surroundings: price-suspense reel (E4r2 FINAL — hook withholds the price, reveal pays it off)",
+ "angle_source": {
+  "source": "manual_remotion_cts_shanghai",
+  "authorized_by": "PM 2026-10-09（重做上海周边团 Reel：学 newsletter 风格，$2,xxx 当钩子；coordinator window 49 brief）· 审查：苏东坡 + 马良 2026-10-09 有条件通过，必改项已并入本版",
+  "facts_checked": "ctstours.co.nz/tours/china/discovery/shanghai-surroundings, 2026-10-09 两次实抓。行程原文含 'Master of the Nets Garden'(Suzhou) / 'West Lake'(Hangzhou) / 'The Bund and City God Temple area'(Shanghai) / 'Xinshi — waterside ancient town'（全程仅此一个水乡古镇，故条目用单数）。NZD 2,699 pp twin share; 单人房差 +NZD 400; 10 天 ex Auckland; 含国际与国内机票; 7 晚住 5 家酒店; 13 餐; 英语导游; 下期出发 2027-03-25。",
+  "review": "苏东坡（社媒/内容）+ 马良（画面）各自独立审两轮。第一轮必改：景点溯源（brief 漏给，已补官网原话）、真人素材来源与肖像、水乡复数改单数、下半幅死黑；第二轮必改：钩子第三行 +FLIGHTS 的加号在价格语境里会被读成「机票另加」，且与片尾 SINGLE SUPPLEMENT +NZ$400 的同一符号含义相反，改为 FLIGHTS。"
+ },
+ "rationale_one_liner": "PM 2026-10-09 授权重做；终版已并入苏东坡与马良两轮审查的全部必改项。只存草稿，不发布。",
+ "budget_cap_usd": 0.5,
+ "brief": {
+  "engine": "remotion",
+  "remotion": {
+   "template": "list",
+   "props": {
+    "brandColor": "#B61E2E",
+    "itemOverlayOpacity": 0.15,
+    "logoFile": "logo.png",
+    "logoMode": "always",
+    "cutFlash": false,
+    "musicFile": "music/founders-at-dawn.mp3",
+    "musicStartSec": 0.302,
+    "beats": [
+     0,
+     1.1,
+     2.2,
+     3.3,
+     4.5,
+     6.15,
+     7.8,
+     9.45,
+     11.1,
+     12.75,
+     14.4,
+     16.05,
+     17.7,
+     19.35,
+     21.0,
+     23.1,
+     25.2,
+     26.175,
+     27.15,
+     28.125,
+     29.1,
+     30.075,
+     31.05,
+     32.025,
+     33.0
+    ],
+    "hook": {
+     "clip": "clips/v2_hook_bundselfie.mp4",
+     "lines": [
+      {
+       "badge": null,
+       "text": "NZ$2,XXX"
+      },
+      {
+       "badge": "10",
+       "text": "DAYS"
+      },
+      {
+       "badge": null,
+       "text": "FLIGHTS"
+      }
+     ]
+    },
+    "items": [
+     {
+      "text": "SUZHOU'S CLASSICAL GARDEN",
+      "clip": "clips/v2b_suzhou_garden.mp4",
+      "blurBackdrop": false
+     },
+     {
+      "text": "AN ANCIENT WATER TOWN",
+      "clip": "clips/item2_watertown.mp4",
+      "blurBackdrop": false
+     },
+     {
+      "text": "WEST LAKE, HANGZHOU",
+      "clip": "clips/v2_westlake_hangzhou.mp4",
+      "blurBackdrop": false
+     },
+     {
+      "text": "THE BUND, SHANGHAI",
+      "clip": "clips/v2b_bund_night.mp4",
+      "blurBackdrop": false
+     },
+     {
+      "text": "INTERNATIONAL & CHINA FLIGHTS",
+      "clip": "clips/item1_skylineday.mp4",
+      "blurBackdrop": true
+     },
+     {
+      "text": "7 NIGHTS, 13 MEALS, ENGLISH GUIDE",
+      "clip": "clips/v2b_guide_walklane.mp4",
+      "blurBackdrop": false
+     }
+    ],
+    "itemLabel": "YOUR 10 DAYS",
+    "revealTitle": "SHANGHAI + 3 CITIES.",
+    "price": {
+     "backdropClip": "clips/price_shanghaiday.mp4",
+     "fromLabel": "FROM",
+     "currencyPrefix": "NZ$",
+     "amount": 2699,
+     "qualifier": "PER PERSON · TWIN SHARE",
+     "dateLine": "DEPARTS 25 MARCH 2027",
+     "footnote": "SINGLE SUPPLEMENT +NZ$400",
+     "footnoteSize": 38
+    }
+   }
+  },
+  "copy": {
+   "caption": "Full day-by-day itinerary in the first comment. Ten days from Auckland. Shanghai, Suzhou, Wuxi and Hangzhou. International and domestic flights, 7 nights in hotels, 13 meals and an English-speaking tour guide are all in the price. NZD $2,699 per person, twin share; single supplement NZD $400. Next departure 25 March 2027.",
+   "endcard": {
+    "cta": "Full itinerary and inclusions",
+    "url": "https://www.ctstours.co.nz/tours/china/discovery/shanghai-surroundings",
+    "offer": [
+     "10 days from Auckland",
+     "NZD $2,699 per person, twin share",
+     "Next departure 25 March 2027"
+    ]
+   }
+  }
+ }
+}
