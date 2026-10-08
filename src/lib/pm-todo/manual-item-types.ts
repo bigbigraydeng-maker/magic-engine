@@ -35,6 +35,7 @@ import type { FacebookSyncItemKind } from './facebook-sync-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
 import type { AdsCircuitItemKind } from './ads-circuit-items'
+import type { FactoryReelAdDraftItemKind } from './factory-reel-ad-draft-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
 import type { SimaqianItemKind } from './simaqian-review-items'
@@ -80,6 +81,10 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // 需要 PM 动手，都不能因为链接问题静默消失（Codex 复审 2026-09-28）。
   'ai_tracker_all_failed',
   'ai_tracker_all_failed_dev',
+  // 工厂 Reel 自动起草的暂停广告：链接在登录墙后面，探活可能判成坏链接 ——
+  // 一条等人批的草稿、一条被内容检查拦下的，绝不能因为链接问题静默消失。
+  'factory_reel_ad_awaiting_approval',
+  'factory_reel_ad_content_blocked',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */
@@ -214,6 +219,8 @@ export type ManualItemKind =
   /** 每日广告巡检的广告级规则（D2 素材疲劳 / D10 点进去之后差了）：要人拍板改不改，系统不会自动改 */
   | AdsRuleFindingItemKind
   | AdsCircuitItemKind
+  /** 工厂 Reel 自动起草的暂停广告：等你批 / 被内容检查拦下 / 起草没成功（开发的活） */
+  | FactoryReelAdDraftItemKind
   /** Facebook 删除数据请求处理失败 —— 用户在 Facebook 里要求删数据，我们答应了却没做到，不许只写日志 */
   | 'meta_data_deletion_failure'
   /** 有成交/咨询等着人核对要不要告诉广告平台 —— 撤不回，所以必须人点 */

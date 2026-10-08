@@ -62,6 +62,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // 广告自治被熔断器冻住了，要不要恢复自动动手是个决定；同 ads_auto_pause_pending 一档
   // （WP3.1b 重做 PR A，2026-09-28 合并主干时补——这份穷举表在那个 PR 分叉之后才建）
   ads_circuit_tripped: 'decide',
+  factory_reel_ad_awaiting_approval: 'decide', // 批了才会开、开了才花钱
   ads_rule_finding: 'decide', // 改不改在投的广告
   ad_readback_blocker: 'decide', // 正在花钱的广告组撞上已知坑，要改设置
   outcome_rows_orphaned: 'decide', // 旧效果数据删还是留（删了撤不回）
@@ -136,6 +137,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   messenger_draft_escalation: 'review',
   price_claim_unbacked: 'review',
   price_fact_unverified: 'review',
+  factory_reel_ad_content_blocked: 'review', // 被内容检查拦下，没建任何广告
 
   // ── 5 · 系统判不了真假的 ─────────────────────────────────────────────
   cross_client_leak: 'truth',
@@ -202,6 +204,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   ledger_done_unverified: 'dev',
   ledger_unreadable: 'dev',
   ledger_patrol_missing: 'dev',
+  factory_reel_ad_draft_dev_issue: 'dev', // 起草没成功，how 写着「不用你动手 / 回我一句」
 
   // ── 知会 → 周一周报 ──────────────────────────────────────────────────
   prescription_updated: 'weekly', // 本周方案已自动落地

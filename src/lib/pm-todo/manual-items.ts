@@ -41,6 +41,7 @@ import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
 import { pushAdsCircuitItems } from './ads-circuit-items'
+import { pushFactoryReelAdDraftItems } from './factory-reel-ad-draft-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
 import { pushInstagramPublishItems } from './instagram-publish-items'
 import { pushDataDeletionFailureItems } from './data-deletion-items'
@@ -352,6 +353,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 广告熔断中的账户 —— 判据是"现在还处在熔断中吗"，不是时间窗口（v2.5 §6.2 派生态）
     (b) => pushAdsCircuitItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 广告熔断待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 工厂 Reel 自动起草的暂停广告：等你批 / 被拦 / 没成功 —— 不许只写日志（铁律 3）
+    (b) => pushFactoryReelAdDraftItems(supabase, b, nameOf, now).catch((e) =>
+      console.warn('[manual-items] 工厂 Reel 自动起草待办生成失败（不阻塞其他待办）:', e),
     ),
     // Facebook 删除数据请求处理失败 —— 失败不许只写日志（铁律 3）
     (b) => pushDataDeletionFailureItems(supabase, b, now).catch((e) =>
