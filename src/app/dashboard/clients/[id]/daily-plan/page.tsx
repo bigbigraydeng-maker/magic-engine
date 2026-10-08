@@ -6,6 +6,7 @@ import Link from 'next/link'
 import type { CampaignBrief } from '@/types/magic-engine'
 import { VisualDirectionSection } from '../_components/VisualDirectionSection'
 import { CampaignDailyPlanPanel } from '../_components/CampaignDailyPlanPanel'
+import { DailyPlanReelsPanel } from '../_components/DailyPlanReelsPanel'
 import { pickDefaultCampaignId } from './pick-default-campaign'
 
 interface ClientLite {
@@ -18,6 +19,8 @@ export default function DailyPlanPage() {
   const searchParams = useSearchParams()
   const clientId = params.id as string
   const requestedCampaignId = searchParams.get('campaign')
+  // 图文 Post 与视频 Reels 分开看（PM：Post 和 Reels 要拆开）。?tab=reels 可直达视频页。
+  const [tab, setTab] = useState<'post' | 'reels'>(searchParams.get('tab') === 'reels' ? 'reels' : 'post')
 
   const [client, setClient] = useState<ClientLite | null>(null)
   const [campaigns, setCampaigns] = useState<CampaignBrief[]>([])
@@ -83,7 +86,28 @@ export default function DailyPlanPage() {
         <h1 className="font-display text-2xl font-bold tracking-tight text-me-charcoal">每日计划</h1>
       </div>
 
-      {campaigns.length === 0 ? (
+      <div className="flex gap-2" role="tablist" aria-label="每日计划内容类型">
+        {([['post', '图文 Post'], ['reels', '视频 Reels']] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            onClick={() => setTab(key)}
+            className={`text-sm px-4 py-1.5 rounded-lg border transition-colors ${
+              tab === key
+                ? 'bg-me-ochre text-white border-me-ochre'
+                : 'bg-white text-me-charcoal/70 border-black/10 hover:border-me-ochre/40'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'reels' ? (
+        <DailyPlanReelsPanel clientId={clientId} />
+      ) : campaigns.length === 0 ? (
         <div className="bg-white rounded-xl border border-dashed border-black/10 py-14 text-center">
           <p className="text-2xl mb-2">🎯</p>
           <p className="text-sm font-medium text-me-charcoal/60">该客户暂无进行中的推广活动</p>
