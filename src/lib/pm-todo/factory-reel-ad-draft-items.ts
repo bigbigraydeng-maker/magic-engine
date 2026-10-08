@@ -305,7 +305,7 @@ export function buildFactoryReelAdDraftItems(
       const what =
         `${clientName}：视频工厂刚发布的 Reel 已自动起草了一条「暂停」的广告（每天最多 $${budgetText}，共 ${durationText} 天，约 ${endDate} 到期）。` +
         `建在广告账号尾号 ${accountSuffix(adAccountId)} 下。` +
-        `你批了才会开。受众池是账号级的：要给池子补新人，这条视频还得先加进池子的收人规则，且池子必须挂在同一个广告账号下。` +
+        `你批了才会开。这条视频目前不在任何受众池的收人规则里，批了也不会给受众池补新人。受众池是账号级的：要让它给池子补新人，这条视频还得先加进池子的收人规则，且池子必须挂在同一个广告账号下。` +
         `自动起草单条上限 $${MAX_AUTO_DAILY_BUDGET}；${cap}。Reel：${permalinkText(permalink)}`
 
       items.push({

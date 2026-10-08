@@ -160,6 +160,7 @@ describe('buildFactoryReelAdDraftItems', () => {
     expect(item.what).toContain('https://fb.com/reel/abc')
     expect(item.what).toContain('$20')
     expect(item.what).toContain('2025-06-18')
+    expect(item.what).toContain('不在任何受众池')
     expect(item.what).toContain('受众池是账号级的')
     expect(item.what).toContain('你批了才会开')
     expect(item.href).toBe('https://app.magicengine.com.au/dashboard/ad-approval')
