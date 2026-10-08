@@ -56,7 +56,7 @@ export interface IntentPayload {
   no_publish: true
   /** 只有 PM 能把广告打开。 */
   authorization: 'pm_approval_required'
-  provider_impact: 'none' | 'paused_objects_created'
+  provider_impact: 'none' | 'paused_objects_created' | 'unknown'
   created_at: string
   updated_at: string
   post_id?: string
@@ -67,6 +67,7 @@ export interface IntentPayload {
   ad_set_id?: string
   ad_ids?: string[]
   orphans?: string[]
+  draft_preview?: Record<string, unknown>
 }
 
 /**
@@ -206,6 +207,7 @@ export type IntentPatch = Partial<
     | 'ad_ids'
     | 'orphans'
     | 'provider_impact'
+    | 'draft_preview'
   >
 >
 
