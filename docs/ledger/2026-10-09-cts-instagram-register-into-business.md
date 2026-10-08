@@ -10,5 +10,7 @@ verify_how: 打开 CTStours 商务设置的 Instagram 账户一栏，看见 chin
 ---
 CTS 有专业账号 chinatravelservices，已挂在 Facebook 主页下，但没登记进商务账户。
 加进去那一步要用 Instagram 账号密码登录，agent 不能代做，需 PM 或 Pengyu 本人点，约 3 分钟。
+直达链接：https://business.facebook.com/settings/instagram-account?business_id=987861407149105
+点法：打开链接 → 点蓝色「添加」→ 选「连接你的 Instagram 账户」→ 弹出登录窗口时用 chinatravelservices 的账号密码登录（有双重验证就输验证码）→ 确认。完成后列表里能看到 chinatravelservices 就是成了。
 注意：真正在花钱的那个广告账户不属于任何商务账户，所以这步只解决官方账户。
 不紧急——实测在投广告在 Instagram 上已经以真实 Instagram 身份展示，接通只是为了拿互动受众和接口数据。

@@ -1,6 +1,7 @@
 # CTS Instagram 改走 Meta 官方接口：PM 要做的步骤（暂缓中）
 
-状态：暂缓。恢复条件：PM 在手机 Instagram 里把 chinatravelservices 改成专业账号，并关联到 CTS Tours 的 Facebook 主页。
+状态：已部分更正（2026-10-09）。第 1、2 步已完成：chinatravelservices 已是专业账号，且已关联在 CTS Tours 的 Facebook 主页下，不必重做。
+当前唯一剩下的一步：把它登记进 CTStours 商务账户（需本人登录 Instagram），见 docs/ledger/2026-10-09-cts-instagram-register-into-business.md 与 docs/audits/2026-10-09-cts-instagram-connect-and-placement-leak.md。
 查证结论（2026-10-07，只读）：CTS 主页目前没有关联 Instagram；ME 现有授权都没有 Instagram 发布权限；标准访问就够，不需要应用审核，企业认证卡住不影响。
 
 ## 第 1 步：改成专业账号
