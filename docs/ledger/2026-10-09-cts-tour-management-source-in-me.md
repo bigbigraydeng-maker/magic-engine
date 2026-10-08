@@ -5,6 +5,7 @@ status: decided
 owner: agent
 decided_on: 2026-10-09
 source: session:1a85e0eb
+verify_how: 打开 CTS traveller-details 表单，确认有 Double/Twin 房型、两层团下拉、护照自查三项；再确认 ME 后台能看到并管理团信息，网站和邮件读取的是同一份
 ---
 PM 2026-10-09 拍板：团信息源头放在 ME（不放 CTS 网站后台），便于后续功能开发；ME 不管下单，只供网站/邮件/优化读取。
 PM 补充（同日）：CTS 网站没有后台，团数据全写在网站代码里，所以放进 ME 正好补上"能在页面里管理"这一块，也便于以后在 ME 里管理 CTS 的其他功能。护照自查方案 PM 已看过认可，做好后由 PM 直接验收。
