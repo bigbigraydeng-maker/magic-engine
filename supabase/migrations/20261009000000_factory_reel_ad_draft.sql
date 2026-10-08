@@ -7,7 +7,7 @@
 --    共享 loader 会因为「列不存在」而挂掉所有读那张表的调用。
 --
 -- 2) flywheel_actions 上的部分唯一索引：意图行去重闸门。
---    一个客户 + 一个工单 + 一个视频，只允许一行 ads.factory_reel_draft 意图。
+--    一个客户 + 一个工单 + 一个视频 + 一个模式（dry_run / on 各一行），只允许一行 ads.factory_reel_draft 意图。
 --    写入代码必须用**普通 insert + 读回**处理 23505，**不能**用 upsert onConflict ——
 --    部分唯一索引（带 WHERE）和 onConflict 不兼容。
 --

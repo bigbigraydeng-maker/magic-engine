@@ -216,6 +216,7 @@ describe('createDraftForApproval — 看完类视频的暂停回读', () => {
       supabase: sb, adAccountId: 'act_1', accessToken: 'tok',
     })
     expect(r.status).toBe('failed')
+    expect(r.error ?? '').toContain('postId')
     expect(mPublish).not.toHaveBeenCalled()
   })
 })
