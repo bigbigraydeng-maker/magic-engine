@@ -173,17 +173,28 @@ async function postFirstCommentStep(
 ): Promise<void> {
   if (!due.first_comment_text) return
   await step.run('post-first-comment', async () => {
+    // A Post recalled between publish and this step must get no comment — and
+    // no failure record. A failed recall lookup must not block the attempt.
+    try {
+      if (await deps.isRecalled(due)) return { ok: true, skipped: 'recalled' }
+    } catch {
+      // fall through: a failed recall lookup must not block the comment attempt
+    }
     try {
       await deps.postFirstComment(due, postId)
       return { ok: true }
     } catch (error) {
-      await deps.writeRecord({
-        status: 'failed',
-        outcome: 'first_comment_failed',
-        reason: (error instanceof Error ? error.message : String(error)).slice(0, 300),
-        attempts: attempt,
-        post: { ...recordPost(due), post_id: postId, first_comment_text: due.first_comment_text },
-      })
+      try {
+        await deps.writeRecord({
+          status: 'failed',
+          outcome: 'first_comment_failed',
+          reason: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+          attempts: attempt,
+          post: { ...recordPost(due), post_id: postId, first_comment_text: due.first_comment_text },
+        })
+      } catch (recordError) {
+        console.error('[story-resolve] first comment failure record not written', recordError)
+      }
       return { ok: false }
     }
   })
