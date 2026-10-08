@@ -164,11 +164,19 @@ function thumbnailFields(c: AdDraftCreative): Record<string, string> {
 /**
  * 创意。**对 `kind` 穷举**：加新类型漏改这里会编译不过，而不是静默建成别的东西。
  *
+ * 带 `postId` 的创意直接用那条已发布的帖子当素材：走 `object_story_id`，不带
+ * `object_story_spec`（帖子自带内容，没有正文/标题/素材要传）。
+ *
  * 私信类型 🔴 **不写任何 link**（PITFALLS D13，2026-09-26 实测）：用接口建「点了开
  * Messenger」的素材时，带 `fb.com/messenger_doc/` 这个界面内部占位链接会被 Meta 当场
  * 报 1815765 拒收；一次过审的写法是 `app_destination: MESSENGER` 且不带 link。
  */
 function creativeSpec(d: AdDraft, c: AdDraftCreative): Record<string, string> {
+  if (c.postId !== undefined) {
+    if (d.kind !== 'video_thruplay') throw new Error(`只有看完视频类广告可以用已发布的帖子：${d.kind}`)
+    return { name: c.name, object_story_id: c.postId }
+  }
+
   const storySpec: Record<string, unknown> = { page_id: d.pageId }
 
   switch (d.kind) {

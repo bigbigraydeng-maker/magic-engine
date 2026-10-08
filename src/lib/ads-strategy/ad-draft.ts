@@ -73,6 +73,11 @@ export interface AdDraftCreative {
   imageHash?: string
   videoId?: string
   /**
+   * 已发布帖子的编号 `"<pageId>_<postId>"`（Meta 的 object_story_id），直接拿它当创意。
+   * 只给 `video_thruplay` 用；和 videoId / imageHash / thumbnail* 互斥 —— 帖子自带内容。
+   */
+  postId?: string
+  /**
    * 视频封面。Meta 的 `video_data` 要求给封面。**没有「缺了就用首帧」这回事** ——
    * publisher 只在给了值时才传。私信类型缺封面直接被 `validateDraft` 拒。
    * 两个都给时以 `thumbnailImageHash` 为准（链接可能是会过期的签名链接）。
@@ -148,7 +153,7 @@ export function validateDraft(d: AdDraft): DraftProblem[] {
 }
 
 const OPTIONAL_TEXT_FIELDS = [
-  'description', 'videoId', 'imageHash', 'thumbnailUrl', 'thumbnailImageHash', 'language',
+  'description', 'videoId', 'imageHash', 'postId', 'thumbnailUrl', 'thumbnailImageHash', 'language',
 ] as const
 
 /** 请求体里每条创意：正文和标题必须是字符串，其余字段有就必须是字符串（数字会让后面的 `.trim()` 抛 500）。 */
@@ -188,6 +193,21 @@ function validateCommon(d: AdDraft): DraftProblem[] {
     p.push({ field: 'creatives', message: '一条广告文案都没有' })
   }
   d.creatives.forEach((c, i) => {
+    if (c.postId !== undefined) {
+      // 帖子自带内容，所以不查正文/标题，也不要求视频素材。
+      if (d.kind !== 'video_thruplay') {
+        p.push({ field: `creatives[${i}].postId`, message: '只有看完视频类广告可以直接用已发布的帖子' })
+      }
+      if (c.videoId || c.imageHash || c.thumbnailUrl || c.thumbnailImageHash) {
+        p.push({ field: `creatives[${i}].postId`, message: '帖子编号不能和视频/图片素材同时给' })
+      }
+      if (!d.pageId || !c.postId.startsWith(`${d.pageId}_`)) {
+        p.push({ field: `creatives[${i}].postId`, message: '帖子编号必须以这个主页的 id 开头（防止用到别人主页的帖子）' })
+      } else if (!/^\d+$/.test(c.postId.slice(d.pageId.length + 1))) {
+        p.push({ field: `creatives[${i}].postId`, message: '帖子编号格式不对' })
+      }
+      return
+    }
     if (!c.primaryText.trim()) p.push({ field: `creatives[${i}].primaryText`, message: '正文是空的' })
     if (!c.headline.trim()) p.push({ field: `creatives[${i}].headline`, message: '标题是空的' })
     if ((d.kind === 'video_thruplay' || d.kind === 'messenger_conversation') && !c.videoId) {
