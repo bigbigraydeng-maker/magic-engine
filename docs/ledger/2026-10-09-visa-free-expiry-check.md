@@ -8,4 +8,4 @@ source: doc:docs/audits/2026-10-08-seo-automation-health.md
 verify_by: 2026-12-01
 verify_how: 到期看免签政策是否延期；官网签证指南页标题含 31 Dec 2026，延期或到期后要改标题、描述、横幅，并核对 2027 年出发团邮件和广告里没有引用免签
 ---
-签证博客页标题现为「China Visa for NZ: Border Documents & Mistakes」，指南页标题含 Visa-Free。统筹建议不改回，待 PM 确认。免签到期日前再核对一次。
+签证博客页标题现为「China Visa for NZ: Border Documents & Mistakes」，指南页标题含 Visa-Free。PM 2026-10-09 回「不改」，保持现状。免签到期日前再核对一次。
