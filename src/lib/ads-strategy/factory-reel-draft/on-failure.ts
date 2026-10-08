@@ -8,7 +8,8 @@
  * silent. If the failure happened AFTER the intent row was created (status
  * `started`), we finish that row as `failed`. If no `started` intent exists we
  * write an `unhandled_failure` receipt row so the failure becomes a to-do
- * instead of living in a log.
+ * instead of living in a log. 若已存在终态意图行（如 drafted / draft_blocked），
+ * 收据的 provider_impact 记为 unknown 并提示核对 Meta，避免误报“无对象”。
  *
  * We never throw: an `onFailure` hook that throws is itself a silent failure.
  */
@@ -82,6 +83,7 @@ export async function recordUnhandledFailure(
     const patchError = `函数异常：${message}`
 
     let finished = 0
+    let sawFinishedRow = false
 
     for (const mode of MODES) {
       const key = buildIntentKey(event.work_order_id, event.video_id, mode)
@@ -100,7 +102,10 @@ export async function recordUnhandledFailure(
       if (!data) continue
 
       const row = data as IntentRow
-      if (row.payload?.status !== 'started') continue
+      if (row.payload?.status !== 'started') {
+        sawFinishedRow = true
+        continue
+      }
 
       const res = await finishIntent(
         supabase,
@@ -116,6 +121,11 @@ export async function recordUnhandledFailure(
     }
 
     if (finished === 0) {
+      const providerImpact = sawFinishedRow ? 'unknown' : 'none'
+      const receiptError = sawFinishedRow
+        ? `${patchError}；意图行已是终态，Meta 上可能已有对象，请核对`
+        : patchError
+
       const receipt: IntentPayload = {
         idempotency_key: `factory-reel-ad:unhandled:${event.request_id}`,
         request_id: event.request_id,
@@ -127,11 +137,11 @@ export async function recordUnhandledFailure(
         status: 'failed',
         no_publish: true,
         authorization: 'pm_approval_required',
-        provider_impact: 'none',
+        provider_impact: providerImpact,
         created_at: nowIso,
         updated_at: nowIso,
         block_code: 'unhandled_failure',
-        error: patchError,
+        error: receiptError,
       }
 
       const { error: insertError } = await supabase

@@ -282,6 +282,9 @@ describe('recordUnhandledFailure', () => {
     expect(receipt.block_code).toBe('unhandled_failure')
     expect(receipt.idempotency_key).toBe(`factory-reel-ad:unhandled:${REQUEST_ID}`)
     expect(receipt.error).toContain('late')
+    // 已存在终态意图行 => provider_impact 为 unknown 并提示核对 Meta
+    expect(receipt.provider_impact).toBe('unknown')
+    expect(receipt.error).toContain('意图行已是终态，Meta 上可能已有对象，请核对')
   })
 
   it('no rows => writes an unhandled_failure receipt', async () => {
@@ -295,6 +298,8 @@ describe('recordUnhandledFailure', () => {
     expect(receipt.block_code).toBe('unhandled_failure')
     expect(receipt.idempotency_key).toBe(`factory-reel-ad:unhandled:${REQUEST_ID}`)
     expect(receipt.error).toContain('none')
+    // 没有任何意图行 => provider_impact 为 none
+    expect(receipt.provider_impact).toBe('none')
   })
 
   it('a second call for the same event inserts nothing (23505) and keeps one row', async () => {
