@@ -59,6 +59,17 @@ function readNonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
 }
 
+// 审批人必须是可识别的邮箱；'unknown' 是评审流程在拿不到邮箱时写入的占位符，不算有效审批人。
+const APPROVER_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+function readApproverEmail(value: unknown): string | null {
+  const approver = readNonEmptyString(value)
+  if (!approver) return null
+  if (approver.toLowerCase() === 'unknown') return null
+  if (!APPROVER_EMAIL_RE.test(approver)) return null
+  return approver
+}
+
 export function checkIdentity(claim: ReelDraftEventClaim, row: ReelWorkOrderRow): GateResult {
   if (row.id !== claim.workOrderId || row.client_id !== claim.clientId) {
     return block('client_mismatch', '这条工单和事件对不上（客户或工单号不一致），不能自动建广告。')
@@ -90,9 +101,9 @@ export function checkIdentity(claim: ReelDraftEventClaim, row: ReelWorkOrderRow)
 
 export function checkApprovalEvidence(row: ReelWorkOrderRow): GateResult {
   const review = row.review_ref
-  const approvedBy = isPlainObject(review) ? readNonEmptyString(review.approved_by) : null
+  const approvedBy = isPlainObject(review) ? readApproverEmail(review.approved_by) : null
   if (!approvedBy) {
-    return block('approval_missing', '这条 Reel 还没有人工审批记录，不能自动建广告。')
+    return block('approval_missing', '这条 Reel 的审批人不明确或缺失，不能自动建广告。')
   }
   const output = row.output
   const human = validateContentChecklist(

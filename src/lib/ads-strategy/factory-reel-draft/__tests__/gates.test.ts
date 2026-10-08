@@ -231,6 +231,37 @@ describe('checkApprovalEvidence', () => {
     if (!result.ok) expect(result.code).toBe('approval_missing')
   })
 
+  it('approved_by 为占位符 unknown => approval_missing', () => {
+    const row = goodRow()
+    row.review_ref = { approved_by: 'unknown', checklist_human: humanItems() }
+    const result = checkApprovalEvidence(row)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.code).toBe('approval_missing')
+  })
+
+  it('approved_by 为占位符 UNKNOWN（大小写不敏感）=> approval_missing', () => {
+    const row = goodRow()
+    row.review_ref = { approved_by: 'UNKNOWN', checklist_human: humanItems() }
+    const result = checkApprovalEvidence(row)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.code).toBe('approval_missing')
+  })
+
+  it('approved_by 不是邮箱 => approval_missing', () => {
+    const row = goodRow()
+    row.review_ref = { approved_by: 'pm', checklist_human: humanItems() }
+    const result = checkApprovalEvidence(row)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.code).toBe('approval_missing')
+  })
+
+  it('approved_by 前后有空格但仍是邮箱 => 通过该门禁', () => {
+    const row = goodRow()
+    row.review_ref = { approved_by: '  pm@example.test  ', checklist_human: humanItems() }
+    const result = checkApprovalEvidence(row)
+    expect(result.ok).toBe(true)
+  })
+
   it('人工清单有一项 FAIL => checklist_not_passed', () => {
     const row = goodRow()
     const items = humanItems().map((item, i) =>

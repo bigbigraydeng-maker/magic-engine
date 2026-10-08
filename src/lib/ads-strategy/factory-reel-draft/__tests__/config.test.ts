@@ -116,6 +116,41 @@ describe('parseFactoryReelDraftConfig', () => {
     expect(res.error).toContain('daily_budget')
   })
 
+  it('rejects daily_budget 0.004', () => {
+    const res = parseFactoryReelDraftConfig({ ...VALID_RAW, daily_budget: 0.004 })
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.error).toContain('daily_budget')
+  })
+
+  it('rejects daily_budget 0.5', () => {
+    const res = parseFactoryReelDraftConfig({ ...VALID_RAW, daily_budget: 0.5 })
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.error).toContain('daily_budget')
+  })
+
+  it('rejects daily_budget 1.5', () => {
+    const res = parseFactoryReelDraftConfig({ ...VALID_RAW, daily_budget: 1.5 })
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.error).toContain('daily_budget')
+  })
+
+  it('accepts daily_budget 1', () => {
+    const res = parseFactoryReelDraftConfig({ ...VALID_RAW, daily_budget: 1 })
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.config.dailyBudget).toBe(1)
+  })
+
+  it('accepts daily_budget MAX_AUTO_DAILY_BUDGET', () => {
+    const res = parseFactoryReelDraftConfig({ ...VALID_RAW, daily_budget: MAX_AUTO_DAILY_BUDGET })
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.config.dailyBudget).toBe(MAX_AUTO_DAILY_BUDGET)
+  })
+
   it('rejects daily_budget above MAX_AUTO_DAILY_BUDGET', () => {
     const res = parseFactoryReelDraftConfig({ ...VALID_RAW, daily_budget: MAX_AUTO_DAILY_BUDGET + 1 })
     expect(res.ok).toBe(false)

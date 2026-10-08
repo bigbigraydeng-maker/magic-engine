@@ -108,11 +108,8 @@ export function parseFactoryReelDraftConfig(raw: unknown): ParseResult {
   }
 
   const dailyBudget = raw.daily_budget
-  if (typeof dailyBudget !== 'number' || !Number.isFinite(dailyBudget) || dailyBudget <= 0) {
-    return { ok: false, error: 'daily_budget 必须是大于 0 的数' }
-  }
-  if (dailyBudget > MAX_AUTO_DAILY_BUDGET) {
-    return { ok: false, error: `daily_budget 不能超过自动发布上限 ${MAX_AUTO_DAILY_BUDGET}` }
+  if (typeof dailyBudget !== 'number' || !Number.isInteger(dailyBudget) || dailyBudget < 1 || dailyBudget > MAX_AUTO_DAILY_BUDGET) {
+    return { ok: false, error: `daily_budget 必须是 1 到 ${MAX_AUTO_DAILY_BUDGET} 之间的整数` }
   }
 
   const durationDays = raw.duration_days
