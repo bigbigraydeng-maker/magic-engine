@@ -74,6 +74,32 @@ describe('POST /meta-ads/draft — pageId 归属（AD-SEC-2）', () => {
   })
 })
 
+describe('POST /meta-ads/draft — postId 只留给工厂 Reel 自动起草', () => {
+  const ctx = { params: Promise.resolve({ id: 'c1' }) }
+
+  it('creatives 里带 postId → 400，不建广告，错误信息提到 postId', async () => {
+    const res = await POST(
+      req({ creatives: [{ postId: 'real-page-id_123' }], geoCountries: ['NZ'] }),
+      ctx,
+    )
+    expect(res.status).toBe(400)
+    expect(createDraftForApproval).not.toHaveBeenCalled()
+    const json = (await res.json()) as { error: string }
+    expect(json.error).toContain('postId')
+  })
+
+  it('普通 body（无 postId）→ 照常走到 createDraftForApproval', async () => {
+    await POST(req({ creatives: [{ headline: 'hi' }], geoCountries: ['NZ'] }), ctx)
+    expect(createDraftForApproval).toHaveBeenCalledTimes(1)
+  })
+
+  it('creatives 不是数组 → 不被这条新检查拦下', async () => {
+    const res = await POST(req({ creatives: 'not-an-array', geoCountries: ['NZ'] }), ctx)
+    const json = (await res.json()) as { error?: string }
+    expect(json.error ?? '').not.toContain('postId')
+  })
+})
+
 describe('POST /meta-ads/draft — 客户禁用词', () => {
   const ctx = { params: Promise.resolve({ id: 'c1' }) }
   const depsArg = () => createDraftForApproval.mock.calls[0][1] as { brandRedlines?: string[] }

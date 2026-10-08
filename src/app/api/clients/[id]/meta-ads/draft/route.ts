@@ -37,6 +37,22 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
+  // postId 是「直接引用一条已发布的帖子」——没有文案，copy-redline 扫描无从下手。
+  // 这条路只留给工厂 Reel 自动起草；手动接口任何付费成员都能打，一律拒。
+  // 用 own property 判断：postId 存在即为引用，哪怕值是 undefined/空串。
+  const creatives = (body as { creatives?: unknown }).creatives
+  if (
+    Array.isArray(creatives) &&
+    creatives.some(
+      (c) => typeof c === 'object' && c !== null && Object.prototype.hasOwnProperty.call(c, 'postId'),
+    )
+  ) {
+    return NextResponse.json(
+      { error: '手动起草接口不支持直接引用已发布的帖子（postId）；这个只留给工厂 Reel 自动起草用。' },
+      { status: 400 },
+    )
+  }
+
   const { data: client } = await supabaseAdmin
     .from('clients')
     .select('meta_ad_account_id, facebook_page_id, country, industry')
