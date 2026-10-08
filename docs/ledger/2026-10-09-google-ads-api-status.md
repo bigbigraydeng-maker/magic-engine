@@ -6,7 +6,12 @@ owner: pm
 decided_on: 2026-10-09
 source: doc:docs/audits/2026-10-09-google-ads-api-status.md
 verify_by: 2026-11-09
-verify_how: 到期看是否已在 Google Cloud Console 查到真实访问级别、公司名是否更正、Render 五个环境变量是否确有值；三项都没动就把日期往后挪并写明原因
+verify_how: 三件事已于 2026-10-09 第二轮核实完，见审计文档 §6。到期复查这三项：①Google Cloud Console 项目 compass-489509 的 Google Ads API 访问级别是否仍是 Explorer（Explorer 下关键词规划类服务不可用，升 Basic 需先过 Brand Verification）；②Render 服务 crazycontent 的环境变量里 GOOGLE_ADS_* 五项是否仍然一个都没有（只看键名有无，不看值），以及 docs/ENV.md 109-110 行那两个错误的 ✅ 是否已更正；③CTS 的 China Travel 账户（CID 105-817-1329）是否恢复投放（9 月起因欠费零曝光）。三项都没动就把日期往后挪并写明原因
 ---
 Google 已改规则：令牌不再是门槛，级别只在 Cloud Console 管。当前级别 Explorer，登记公司名为 ABC Plus Home Pty Limited（不符）。
 代码早已就绪但无建视频系列能力；生产库无任何谷歌广告数据；CTS 谷歌账户 China Travel 存在但未绑进 ME。
+
+2026-10-09 第二轮只读核查补充（详见审计文档 §6）：
+- 真实级别 = Explorer（Cloud Console 项目 compass-489509 实测），每天 2,880 次生产调用，能读能写真实账户，但关键词规划整条线在这一级被禁 —— 仓库里已写好的 keyword-planner 调不通。升 Basic 必须先过 Brand Verification。
+- 线上 Render 根本没有那五个 GOOGLE_ADS_* 环境变量，docs/ENV.md 标的 ✅ 是错的；该接口 30 天零调用。
+- CTS 的 China Travel 账户只有 2 条搜索广告、从没投过 YouTube/视频；近 90 天花 NZD4,048.33、269 次转化但未设主要转化；9 月 1 日起因「超过付款额度、服务可能被暂停」零曝光 —— 这件事按 §11 判为 P1，接口本身判为 P3。
