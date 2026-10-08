@@ -40,8 +40,20 @@ const MODES: readonly IntentMode[] = ['dry_run', 'on']
 /** 错误文本上限，避免把整段堆栈塞进 payload。 */
 const MAX_ERROR_LEN = 300
 
+function describeError(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'string') return error
+  try {
+    const json = JSON.stringify(error)
+    if (json !== undefined) return json
+  } catch {
+    // fall through to String(error)
+  }
+  return String(error)
+}
+
 function errorMessage(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error)
+  const raw = describeError(error)
   return raw.length > MAX_ERROR_LEN ? raw.slice(0, MAX_ERROR_LEN) : raw
 }
 

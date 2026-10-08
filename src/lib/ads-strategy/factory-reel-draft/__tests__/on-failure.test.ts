@@ -169,12 +169,19 @@ function makeFakeSupabase(config: FakeConfig = {}): FakeSupabase {
   return { client: client as never, rows, calls }
 }
 
+const CLIENT_ID = '11111111-1111-4111-8111-111111111111'
+const WORK_ORDER_ID = '22222222-2222-4222-8222-222222222222'
+const REQUEST_ID = '33333333-3333-4333-8333-333333333333'
+const PAGE_ID = '111111'
+const VIDEO_ID = '222222'
+const PUBLISHED_AT = '2026-10-09T01:00:00.000Z'
+
 const baseInput = (over: Partial<ClaimInput> = {}): ClaimInput => ({
-  requestId: 'req-1',
-  clientId: 'client-1',
-  workOrderId: 'w1',
-  videoId: '222222',
-  pageId: 'page-1',
+  requestId: REQUEST_ID,
+  clientId: CLIENT_ID,
+  workOrderId: WORK_ORDER_ID,
+  videoId: VIDEO_ID,
+  pageId: PAGE_ID,
   mode: 'on',
   nowIso: '2025-01-01T00:00:00.000Z',
   ...over,
@@ -182,9 +189,21 @@ const baseInput = (over: Partial<ClaimInput> = {}): ClaimInput => ({
 
 /** 与 FactoryReelPublishedEventSchema 期望形状一致的事件数据。 */
 const baseEvent = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
-  client_id: 'client-1',
-  work_order_id: 'w1',
-  video_id: '222222',
+  schema_version: 1,
+  request_id: REQUEST_ID,
+  work_order_id: WORK_ORDER_ID,
+  client_id: CLIENT_ID,
+  platform: 'facebook',
+  page_id: PAGE_ID,
+  video_id: VIDEO_ID,
+  post_id: VIDEO_ID,
+  media_type: 'reel',
+  published_at: PUBLISHED_AT,
+  status: 'PUBLISHED',
+  no_publish: false,
+  authorization: 'AUTHORIZED',
+  cost_usd: 0,
+  created_at: PUBLISHED_AT,
   ...over,
 })
 
