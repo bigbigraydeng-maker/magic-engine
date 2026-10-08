@@ -482,7 +482,7 @@ async function startMeasurement(
   const event = buildMeasurementEvent(record, context, firstCommentText)
   if (!event.ok) {
     console.error('[daily-plan publish] measurement event not emitted', record.date, event.reason)
-    await recordMeasurementSkipped(record, context, 'event_contract_invalid')
+    await recordMeasurementSkipped(record, context, 'event_contract_invalid', firstCommentText)
     return []
   }
   try {
@@ -490,7 +490,7 @@ async function startMeasurement(
     return sent.event_ids
   } catch (error: unknown) {
     console.error('[daily-plan publish] measurement event failed', record.date, errorMessage(error))
-    await recordMeasurementSkipped(record, context, 'event_send_failed')
+    await recordMeasurementSkipped(record, context, 'event_send_failed', firstCommentText)
     return []
   }
 }
@@ -499,6 +499,7 @@ async function recordMeasurementSkipped(
   record: CampaignDailyPublishedPost,
   context: { clientId: string; row: PlanRow; command: CampaignDailyPublishCommand },
   code: MeasurementSkipCode,
+  firstCommentText?: string,
 ): Promise<void> {
   record.measurement_skipped_reason = code
   try {
@@ -516,6 +517,10 @@ async function recordMeasurementSkipped(
         page_id: record.page_id,
         ...(record.post_id_source === 'id' ? { photo_id: record.post_id } : { post_id: record.post_id }),
         ...(record.scheduled_publish_time ? { scheduled_publish_time: record.scheduled_publish_time } : {}),
+        // A scheduled Post's first comment is still pending at this point, so
+        // the resolve workflow is the only thing that would ever post it. If
+        // the handoff fails, carry the text here or it is lost for good.
+        ...(record.post_id_source === 'id' && firstCommentText ? { first_comment_text: firstCommentText } : {}),
       },
     })
   } catch (error: unknown) {

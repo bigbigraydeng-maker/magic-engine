@@ -1008,6 +1008,37 @@ describe('publish bridge — first comment', () => {
     expect(event.data.first_comment_text).toContain('Enquire now')
   })
 
+  it('🔴 scheduled publish: event send fails → failure record carries the pending first comment text', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-02T00:00:00.000Z'))
+    stubTables()
+    armProvider()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockSendInngestEvent.mockRejectedValue(new Error('INNGEST_EVENT_KEY_MISSING'))
+    mockPublish.mockReset()
+    mockPublish.mockResolvedValueOnce({
+      postId: '1750835520181969',
+      postIdSource: 'id',
+      permalink: 'https://www.facebook.com/1750835520181969',
+      raw: { id: '1750835520181969' },
+    })
+
+    const response = await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(json.receipt.published[0].measurement_skipped_reason).toBe('event_send_failed')
+    expect(json.receipt.published[0].first_comment_status).toBe('PENDING_PUBLISH')
+    expect(recordInsertSpy).toHaveBeenCalledTimes(1)
+    expect(recordInsertSpy.mock.calls[0][0]).toMatchObject({
+      summary: {
+        outcome: 'event_send_failed',
+        photo_id: '1750835520181969',
+        first_comment_text: expect.stringContaining('Enquire now'),
+      },
+    })
+  })
+
   it('keeps the Post published when the first comment throws — no re-post, no failed entry', async () => {
     stubTables()
     armProvider()

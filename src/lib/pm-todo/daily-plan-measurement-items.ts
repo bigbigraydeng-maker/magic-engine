@@ -112,12 +112,16 @@ export async function pushDailyPlanMeasurementItems(
       continue
     }
     const { how, href } = howFor(str(s.reason), clientId, key, objectId)
+    const firstCommentText = str(s.first_comment_text)
+    const howWithCommentWarning = firstCommentText
+      ? `${how}\n④ 这条帖子的首评（放预约链接的评论）可能也没贴上：打开帖子看一眼，如果没有，用主页身份照抄这段评论：\n${firstCommentText}`
+      : how
     items.push({
       kind: 'daily_plan_post_unmeasured',
       client_id: clientId,
       client_name: clientName,
       what: `${clientName} 计划在 ${date || '某天'} 发的 Facebook 帖子已经交给 Facebook 了，但系统没能开始回收它的成绩 —— 这条帖子的点赞、评论、转发不会被自动记下来，后面的「该不该照这个再发」建议也会缺这一条`,
-      how,
+      how: howWithCommentWarning,
       href,
     })
   }

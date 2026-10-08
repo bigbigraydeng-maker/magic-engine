@@ -135,4 +135,23 @@ describe('pushDailyPlanMeasurementItems', () => {
     expect(items).toHaveLength(1)
     expect(items[0].how).toContain('内容没记录')
   })
+
+  it('🔴 a measurement failure with recorded comment text warns the first comment may be missing', async () => {
+    const { client } = fakeSupabase([failure({ first_comment_text: 'Send an enquiry\nhttps://example.test/x' })])
+    const items: ManualItem[] = []
+    await pushDailyPlanMeasurementItems(client as SupabaseClient, items, NOW, new Map())
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('daily_plan_post_unmeasured')
+    expect(items[0].how).toContain('首评')
+    expect(items[0].how).toContain('Send an enquiry\nhttps://example.test/x')
+  })
+
+  it('a measurement failure with no recorded comment text does not mention the first comment', async () => {
+    const { client } = fakeSupabase([failure({ first_comment_text: undefined })])
+    const items: ManualItem[] = []
+    await pushDailyPlanMeasurementItems(client as SupabaseClient, items, NOW, new Map())
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('daily_plan_post_unmeasured')
+    expect(items[0].how).not.toContain('首评')
+  })
 })

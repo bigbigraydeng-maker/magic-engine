@@ -134,6 +134,7 @@ function recordPost(due: StoryResolveDue): MeasurementRecordPost {
     photo_id: due.photo_id,
     page_id: due.page_id,
     ...(due.scheduled_publish_time ? { scheduled_publish_time: due.scheduled_publish_time } : {}),
+    ...(due.first_comment_text ? { first_comment_text: due.first_comment_text } : {}),
   }
 }
 
@@ -243,9 +244,10 @@ export async function runStoryResolve(
     await step.sleepUntil(`wait-resolve-${attempt}`, new Date(at))
     const read = await step.run(`read-story-id-${attempt}`, () => deps.readStory(due))
     if (read.kind === 'resolved') {
-      const emitted = await emitResolved(due, read.postId, attempt, step, deps)
-      if (emitted.ok) await postFirstCommentStep(due, read.postId, attempt, step, deps)
-      return emitted
+      // Post the comment first: it never throws and is memoised/idempotent, so a
+      // failed or retried published-event send can never lose the comment.
+      await postFirstCommentStep(due, read.postId, attempt, step, deps)
+      return emitResolved(due, read.postId, attempt, step, deps)
     }
     if (read.kind === 'gone') return handleGone(due, attempt, step, deps)
     lastReason = read.reason
