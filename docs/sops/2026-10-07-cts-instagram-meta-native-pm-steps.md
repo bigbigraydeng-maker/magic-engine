@@ -2,7 +2,7 @@
 
 状态：已部分更正（2026-10-09）。第 1、2 步已完成：chinatravelservices 已是专业账号，且已关联在 CTS Tours 的 Facebook 主页下，不必重做。
 当前唯一剩下的一步：把它登记进 CTStours 商务账户（需本人登录 Instagram），见 docs/ledger/2026-10-09-cts-instagram-register-into-business.md 与 docs/audits/2026-10-09-cts-instagram-connect-and-placement-leak.md。
-查证结论（2026-10-07，只读）：CTS 主页目前没有关联 Instagram；ME 现有授权都没有 Instagram 发布权限；标准访问就够，不需要应用审核，企业认证卡住不影响。
+查证结论（2026-10-07，只读；其中“主页没有关联 Instagram”一条已被 2026-10-09 复查推翻，现已关联）：ME 现有授权都没有 Instagram 发布权限；标准访问就够，不需要应用审核，企业认证卡住不影响。
 
 ## 第 1 步：改成专业账号
 - 做什么：个人号发不了 Reel，必须是商业或创作者账号。
