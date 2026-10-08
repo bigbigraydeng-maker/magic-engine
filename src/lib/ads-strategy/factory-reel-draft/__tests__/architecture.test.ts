@@ -10,8 +10,8 @@
  *    - 全仓其它既有开启入口被冻结，只许缩小，不是被删除。
  *    本文件不声称、也无法证明仓库里不存在别的激活路径；它只保证本功能不新增。
  *
- * 🔴 判据一律先 stripComments() 再匹配：一条把自己的文档当罪证的规则，
- *    第一件事就是教人删注释。
+ * 🔴 判据一律走 TypeScript AST（在 RAW 源码上 parse）：一条把自己的文档当罪证的规则，
+ *    第一件事就是教人删注释；而注释根本不会进 AST，所以注释里的违规天然不响。
  *
  * 🔴 所有路径都用 join(process.cwd(), …)：本文件会被移动到
  *    src/lib/ads-strategy/factory-reel-draft/__tests__/architecture.test.ts，
@@ -141,18 +141,50 @@ const NETWORK_ALLOWED = [
   'src/lib/ads-strategy/factory-reel-draft/real-deps.ts',
 ]
 
-/** 仓库里既有的激活写入点 —— 只许缩小，不许新增。 */
+/** 仓库里既有的「提到激活符号 / 把状态置 ACTIVE」的文件 —— 只许缩小，不许新增。 */
 const ACTIVATION_WRITERS_ALLOWED = [
   'src/app/api/ad-approval/[actionId]/route.ts',
+  'src/app/api/clients/[id]/google-ads/execute/route.ts',
   'src/app/api/clients/[id]/meta-ads/execute/route.ts',
+  'src/app/api/clients/[id]/tiktok-ads/execute/route.ts',
   'src/lib/ads-strategy/draft-and-gate.ts',
   'src/lib/ads-strategy/stop-loss.ts',
+  'src/lib/capabilities/ads-auto-pause/deps.ts',
   'src/lib/capabilities/ads-auto-pause/index.ts',
+  'src/lib/capabilities/ads/pause-campaign.ts',
   'src/lib/capabilities/ads/pause-unit.ts',
+  'src/lib/google-ads/client.ts',
   'src/lib/meta/ad-publisher.ts',
+  'src/lib/meta/ads-manager.ts',
   'src/lib/meta/adsets.ts',
   'src/lib/meta/campaign-management.ts',
   'src/lib/meta/campaign-writes.ts',
+  'src/lib/meta/client.ts',
+  'src/lib/tiktok-ads/client.ts',
+  'src/lib/winner-reel-sync/engine.ts',
+]
+
+/** 仓库里既有的「引入广告写入模块」的文件 —— 只许缩小，不许新增。 */
+const AD_WRITE_MODULE_IMPORTERS_ALLOWED = [
+  'src/app/api/ad-approval/[actionId]/route.ts',
+  'src/app/api/clients/[id]/ad-health/o1-scale/route.ts',
+  'src/app/api/clients/[id]/ad-health/stop-loss/route.ts',
+  'src/app/api/clients/[id]/meta-ads/draft-listing/route.ts',
+  'src/app/api/clients/[id]/meta-ads/draft/route.ts',
+  'src/app/api/clients/[id]/meta-ads/execute/route.ts',
+  'src/app/dashboard/ad-approval/page.tsx',
+  'src/lib/ads-strategy/draft-and-gate.ts',
+  'src/lib/ads-strategy/factory-reel-draft/real-deps.ts',
+  'src/lib/ads-strategy/factory-reel-draft/run.ts',
+  'src/lib/ads-strategy/stop-loss.ts',
+  'src/lib/capabilities/ads-auto-pause/deps.ts',
+  'src/lib/capabilities/ads/cut-campaign-budget.ts',
+  'src/lib/capabilities/ads/cut-unit-budget.ts',
+  'src/lib/capabilities/ads/pause-campaign.ts',
+  'src/lib/capabilities/ads/pause-unit.ts',
+  'src/lib/capabilities/ads/scale-unit-budget.ts',
+  'src/lib/meta/client.ts',
+  'src/lib/winner-reel-sync/engine.ts',
 ]
 
 /** 仓库里既有的 createDraftForApproval 调用点 —— 只许缩小，不许新增。 */
@@ -204,18 +236,6 @@ function walk(dir: string, out: string[] = []): string[] {
 const isTest = (p: string) => /\.test\.tsx?$/.test(p) || p.includes('/__tests__/')
 
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8')
-
-/**
- * 挖空注释（保留换行，行号不动）。
- *
- * 🔴 行注释那条要避开 `://`（URL）与字符串里的 `//` —— 用 `(^|[^:'"\`])` 做前缀守卫，
- *    替换时把守卫字符原样还回去（`$1`）。
- */
-function stripComments(code: string): string {
-  return code
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:'"`])\/\/.*$/gm, '$1')
-}
 
 /** 非测试的源码文件清单（仓库相对路径，`/` 分隔）。 */
 function listSource(dir: string): string[] {
@@ -377,6 +397,47 @@ function findViolations(source: string, opts?: { allowNetwork?: boolean }): stri
       }
     }
 
+    // fetch 引用：任意名为 fetch 的 Identifier（裸引用 / 解构 / fetch.call）
+    // 或 `globalThis['fetch']` 这类字符串字面量元素访问。
+    if (!opts?.allowNetwork) {
+      if (ts.isIdentifier(node) && node.text === 'fetch') {
+        reasons.push('fetch_reference')
+      }
+      if (
+        ts.isElementAccessExpression(node) &&
+        ts.isStringLiteral(node.argumentExpression) &&
+        node.argumentExpression.text === 'fetch'
+      ) {
+        reasons.push('fetch_reference')
+      }
+    }
+
+    // 混淆字符串：fromCharCode / [].join('') / 'x'.toUpperCase() / 'x'.toLowerCase()
+    if (ts.isIdentifier(node) && node.text === 'fromCharCode') {
+      reasons.push('obfuscated_string')
+    }
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression
+      if (ts.isPropertyAccessExpression(callee)) {
+        const method = callee.name.text
+        if (
+          method === 'join' &&
+          node.arguments.length === 1 &&
+          ts.isStringLiteral(node.arguments[0]) &&
+          node.arguments[0].text === ''
+        ) {
+          reasons.push('obfuscated_string')
+        }
+        if (
+          (method === 'toUpperCase' || method === 'toLowerCase') &&
+          (ts.isStringLiteral(callee.expression) ||
+            ts.isNoSubstitutionTemplateLiteral(callee.expression))
+        ) {
+          reasons.push('obfuscated_string')
+        }
+      }
+    }
+
     // GRAPH_BASE 引用
     if (ts.isIdentifier(node) && node.text === 'GRAPH_BASE') {
       if (!opts?.allowNetwork) reasons.push('graph_base_reference')
@@ -419,23 +480,146 @@ function diffImports(
   return { added, removed }
 }
 
-/** 是否出现「把广告打开」的写入（激活符号调用 / 状态置 ACTIVE）。 */
-function writesActivation(s: string): boolean {
-  return (
-    /\b(activatePublished|approveDraft)\s*\(/.test(s) ||
-    /\bset(Campaign|AdSet)Status\s*\([^)]*['"]ACTIVE['"]/.test(s) ||
-    /\bstatus\??\s*:\s*['"]ACTIVE['"](?!\s*\|)/.test(s)
-  )
+/**
+ * 递归遍历 AST 的每个节点。
+ *
+ * 🔴 全仓扫描一律走 AST（在 RAW 源码上 parse），不再用正则 + stripComments：
+ *    正则会被 `import * as pub`、动态 import、字符串里的 `//` / `/*` 绕过。
+ */
+function visitAll(node: ts.Node, cb: (n: ts.Node) => void): void {
+  cb(node)
+  ts.forEachChild(node, (child) => visitAll(child, cb))
 }
 
-/** 是否提到 createDraftForApproval。 */
-function mentionsCreateDraft(s: string): boolean {
-  return /\bcreateDraftForApproval\b/.test(s)
+/** 取属性名 / 元素访问名的文本（identifier 或字符串字面量）。 */
+function nameText(name: ts.Node | undefined): string | null {
+  if (!name) return null
+  if (ts.isIdentifier(name)) return name.text
+  if (ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name)) {
+    return name.text
+  }
+  return null
 }
 
-/** 是否提到 publishDraftPaused。 */
-function mentionsPublishPaused(s: string): boolean {
-  return /\bpublishDraftPaused\b/.test(s)
+/** 该节点是否是恰好为 'ACTIVE' 的字符串字面量 / 无插值模板。 */
+function isActiveLiteral(node: ts.Node | undefined): boolean {
+  if (!node) return false
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return node.text === 'ACTIVE'
+  }
+  return false
+}
+
+/**
+ * 是否「提到激活」：命中任一即真。
+ *   (a) 任意 Identifier 文本在 FORBIDDEN_SYMBOLS 里
+ *       —— 这同时覆盖 `pub.activatePublished` 的属性访问与解构出的名字；
+ *   (b) 名为 `status` 的 PropertyAssignment（identifier 或字符串字面量名），
+ *       其 initializer 恰为 'ACTIVE'；
+ *   (c) 被调用者名（identifier 或属性访问名）匹配 /^(set|update)\w*Status$/，
+ *       且有一个实参恰为 'ACTIVE'。
+ */
+function mentionsActivation(source: string): boolean {
+  const sf = ts.createSourceFile('probe.ts', source, ts.ScriptTarget.Latest, true)
+  let hit = false
+
+  visitAll(sf, (node) => {
+    if (hit) return
+
+    if (ts.isIdentifier(node) && FORBIDDEN_SYMBOLS.includes(node.text)) {
+      hit = true
+      return
+    }
+
+    if (ts.isPropertyAssignment(node)) {
+      const key = nameText(node.name)
+      if (key === 'status' && isActiveLiteral(node.initializer)) {
+        hit = true
+        return
+      }
+    }
+
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression
+      const calleeName = ts.isIdentifier(callee)
+        ? callee.text
+        : ts.isPropertyAccessExpression(callee)
+          ? callee.name.text
+          : null
+      if (calleeName && /^(set|update)\w*Status$/.test(calleeName)) {
+        if (node.arguments.some((a) => isActiveLiteral(a))) {
+          hit = true
+        }
+      }
+    }
+  })
+
+  return hit
+}
+
+/** 广告写入模块的模块名判据。 */
+const AD_WRITE_MODULE_RE =
+  /(^|\/)(ad-publisher|adsets|campaign-writes|campaign-management|draft-and-gate|ad-approval|spend-activation)$/
+
+/**
+ * 是否「引入广告写入模块」：命中任一即真。
+ *   - ImportDeclaration / ExportDeclaration 的字符串字面量 moduleSpecifier；
+ *   - `import('…')` / `require('…')` 且首个实参是字符串字面量。
+ */
+function importsAdWriteModule(source: string): boolean {
+  const sf = ts.createSourceFile('probe.ts', source, ts.ScriptTarget.Latest, true)
+  let hit = false
+
+  visitAll(sf, (node) => {
+    if (hit) return
+
+    if (
+      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteral(node.moduleSpecifier)
+    ) {
+      if (AD_WRITE_MODULE_RE.test(node.moduleSpecifier.text)) hit = true
+      return
+    }
+
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression
+      const isDynamicImport = callee.kind === ts.SyntaxKind.ImportKeyword
+      const isRequire = ts.isIdentifier(callee) && callee.text === 'require'
+      if (isDynamicImport || isRequire) {
+        const first = node.arguments[0]
+        if (first && ts.isStringLiteral(first) && AD_WRITE_MODULE_RE.test(first.text)) {
+          hit = true
+        }
+      }
+    }
+  })
+
+  return hit
+}
+
+/** 是否提到 createDraftForApproval（任意 Identifier）。 */
+function mentionsCreateDraft(source: string): boolean {
+  const sf = ts.createSourceFile('probe.ts', source, ts.ScriptTarget.Latest, true)
+  let hit = false
+  visitAll(sf, (node) => {
+    if (!hit && ts.isIdentifier(node) && node.text === 'createDraftForApproval') {
+      hit = true
+    }
+  })
+  return hit
+}
+
+/** 是否提到 publishDraftPaused（任意 Identifier）。 */
+function mentionsPublishPaused(source: string): boolean {
+  const sf = ts.createSourceFile('probe.ts', source, ts.ScriptTarget.Latest, true)
+  let hit = false
+  visitAll(sf, (node) => {
+    if (!hit && ts.isIdentifier(node) && node.text === 'publishDraftPaused') {
+      hit = true
+    }
+  })
+  return hit
 }
 
 /** 仓库里所有非测试源码文件（仓库相对路径，`/` 分隔）。 */
@@ -443,10 +627,14 @@ function allSourceFiles(): string[] {
   return listSource('src')
 }
 
-/** 对全仓非测试源码跑一个判据，返回命中的文件清单（排序）。 */
-function scanRepo(predicate: (stripped: string) => boolean): string[] {
+/**
+ * 对全仓非测试源码跑一个判据，返回命中的文件清单（排序）。
+ *
+ * 🔴 传 RAW 源码（不 stripComments）：判据本身走 AST，注释天然不进 AST。
+ */
+function scanRepo(predicate: (source: string) => boolean): string[] {
   return allSourceFiles()
-    .filter((f) => predicate(stripComments(read(f))))
+    .filter((f) => predicate(read(f)))
     .sort()
 }
 
@@ -523,15 +711,27 @@ describe('D. 白名单自身的自洽性', () => {
 })
 
 describe('E. 全仓冻结清单（只许缩小）', () => {
-  it('activation writers are a subset of the frozen allowlist', () => {
-    const found = scanRepo(writesActivation)
+  it('activation mentions are a subset of the frozen allowlist', () => {
+    const found = scanRepo(mentionsActivation)
     const allowed = new Set(ACTIVATION_WRITERS_ALLOWED)
     const offenders = found.filter((f) => !allowed.has(f))
     expect(
       offenders,
-      '出现了新的「把广告打开」的写入点。\n' +
+      '出现了新的「提到激活符号 / 把状态置 ACTIVE」的文件。\n' +
         '本功能不许新增激活路径 —— 请把新调用点拿去过 review，' +
         '确认它确实走 /api/ad-approval，再决定是否扩白名单。\n' +
+        offenders.join('\n'),
+    ).toEqual([])
+  })
+
+  it('ad-write module importers are a subset of the frozen allowlist', () => {
+    const found = scanRepo(importsAdWriteModule)
+    const allowed = new Set(AD_WRITE_MODULE_IMPORTERS_ALLOWED)
+    const offenders = found.filter((f) => !allowed.has(f))
+    expect(
+      offenders,
+      '出现了新的「引入广告写入模块」的文件。\n' +
+        '请把新文件拿去过 review，确认它确实走 /api/ad-approval，再决定是否扩白名单。\n' +
         offenders.join('\n'),
     ).toEqual([])
   })
@@ -694,14 +894,14 @@ describe('F. 探针：判据必须真的会响', () => {
     expect(diffImports(['a::x'], base)).toEqual({ added: [], removed: ['b::y'] })
   })
 
-  it('writesActivation 会响 / 不响', () => {
-    expect(writesActivation(`await activatePublished(x)`)).toBe(true)
-    expect(writesActivation(`setAdSetStatus(id, token, 'ACTIVE')`)).toBe(true)
-    expect(writesActivation(`const o = { status: 'ACTIVE' }`)).toBe(true)
+  it('mentionsActivation 会响 / 不响', () => {
+    expect(mentionsActivation(`await activatePublished(x)`)).toBe(true)
+    expect(mentionsActivation(`setAdSetStatus(id, token, 'ACTIVE')`)).toBe(true)
+    expect(mentionsActivation(`const o = { status: 'ACTIVE' }`)).toBe(true)
 
     // 类型位置（联合类型）不算写入
-    expect(writesActivation(`type S = { status: 'ACTIVE' | 'PAUSED' }`)).toBe(false)
-    expect(writesActivation(`const o = { status: 'PAUSED' }`)).toBe(false)
+    expect(mentionsActivation(`type S = { status: 'ACTIVE' | 'PAUSED' }`)).toBe(false)
+    expect(mentionsActivation(`const o = { status: 'PAUSED' }`)).toBe(false)
   })
 
   it('mentionsCreateDraft / mentionsPublishPaused 会响 / 不响', () => {
@@ -710,5 +910,52 @@ describe('F. 探针：判据必须真的会响', () => {
 
     expect(mentionsPublishPaused(`await publishDraftPaused(deps, id)`)).toBe(true)
     expect(mentionsPublishPaused(`const x = 1`)).toBe(false)
+  })
+
+  it('mentionsActivation / importsAdWriteModule 命中 namespace 别名', () => {
+    const src = `import * as pub from '@/lib/meta/ad-publisher'\nconst go = pub.activatePublished`
+    expect(mentionsActivation(src)).toBe(true)
+    expect(importsAdWriteModule(src)).toBe(true)
+  })
+
+  it('mentionsActivation / importsAdWriteModule 命中动态 import + 解构', () => {
+    const src = `const { activatePublished: go } = await import('@/lib/meta/ad-publisher')`
+    expect(importsAdWriteModule(src)).toBe(true)
+    expect(mentionsActivation(src)).toBe(true)
+  })
+
+  it('字符串里的 `//` 不能藏住后面的真实代码', () => {
+    const src =
+      `const u = 'a//b'\n` +
+      `import { activatePublished as go } from '@/lib/meta/ad-publisher'`
+    expect(mentionsActivation(src)).toBe(true)
+    expect(importsAdWriteModule(src)).toBe(true)
+  })
+
+  it('findViolations 命中 fetch 引用（裸引用 / 元素访问）', () => {
+    expect(findViolations(`const f = fetch`)).toContain('fetch_reference')
+    expect(findViolations(`globalThis['fetch']('x')`)).toContain('fetch_reference')
+  })
+
+  it('findViolations 命中混淆字符串', () => {
+    expect(findViolations(`String.fromCharCode(65,67)`)).toContain('obfuscated_string')
+    expect(findViolations(`['ACT','IVE'].join('')`)).toContain('obfuscated_string')
+    expect(findViolations(`'active'.toUpperCase()`)).toContain('obfuscated_string')
+  })
+
+  it('只在注释里提到时，四个判据都不响', () => {
+    const src = `// activatePublished createDraftForApproval publishDraftPaused`
+    expect(mentionsActivation(src)).toBe(false)
+    expect(importsAdWriteModule(src)).toBe(false)
+    expect(mentionsCreateDraft(src)).toBe(false)
+    expect(mentionsPublishPaused(src)).toBe(false)
+  })
+
+  it('干净源码四个判据都不响', () => {
+    const src = `import { a } from './a'\nexport const b = a`
+    expect(mentionsActivation(src)).toBe(false)
+    expect(importsAdWriteModule(src)).toBe(false)
+    expect(mentionsCreateDraft(src)).toBe(false)
+    expect(mentionsPublishPaused(src)).toBe(false)
   })
 })
