@@ -25,3 +25,17 @@
 - 单测：纯函数、审核路由（PASS 通过/正文含链接 FAIL）、发布路由（即时 / 定时 / 首评失败不重发帖 / 幂等）、story-resolve（补发首评、失败记录）、Reel 适配器回归。变异：去掉首评调用 / 把 FAIL 当 PASS，对应测试必红。
 - **当场试跑**：本机演练（`no_publish`）逐条验证 CTS 两份计划 14 条的审核清单可全 PASS、预览文案与链接；真评论要发到公开帖，**需 PM 授权后用第一条真实发布的帖验证**，台账 `verify_by` = 首次真发布当天。
 - **待核实（实现第 0 步先做）**：Page token 是否具备评论权限（近期有 comment-autoreply 的 scope 修复，改 scope 会静默断连，**不改 scope**，只读核对）；Reel 首评在生产里是否已真发成功过。
+
+## 5. 设计复审后修订（子牙 + 魏征，2026-10-08）——以本节为准，覆盖上文冲突处
+**第 0 步（不通过就停）——已核实结果：CTS 的 Meta 授权缺 `pages_manage_engagement`（评论权限）**（只读探针，生产实测；另查：CTS 最近 5 条已发布成片的回执里都没有 `first_comment_id`，原因未查）。需 PM 在客户设置里点一次「连接 Meta」重新授权；改授权范围有静默断连风险，**代码不改授权范围，只提示 PM 重新授权**。授权补齐前，首评功能代码可先写、测，但不得真发。
+
+**必须并入**
+1. 价格闸输入 = 正文 + 首评全文：新函数返回 `{message, firstComment}`，价格检查与价格事实检查（`price-fact-gate.ts` 的 `buildPostPriceText`，调用方 `publish/route.ts` 与 `pm-todo/price-fact-items.ts`）都判两者拼接；各配一个变异测试。
+2. 发布前**重算**自动检查（不信审核时存的清单）；任一 FAIL → 409，不发。
+3. `StoryResolveDue` 加 optional `first_comment`；首评放进 `emitResolved` 之后的独立 `step.run`，失败只写记录、不重试整个步骤；已撤回的帖跳过。
+4. 泛化首评函数：文案参数化、前缀区分（`daily-plan-first-comment:`）、评论目标必须是 `<pageId>_<storyId>` 形式（只有照片 id 时标 `PENDING_PUBLISH`，不去评论）、发前断言页面一致；读评论翻页至上限，读不到标记按「未知」不发。
+5. 状态：`POSTED` / `PENDING_PUBLISH` / `FAILED` / `SKIPPED_NO_STORY`；结果写测量记录（避免和计划 CAS 冲突），并**新增待办读取**：`FAILED` 或 `PENDING_PUBLISH` 超时 → 今日待办出现（what/how/href），配测试。
+6. CTA 检测：忽略大小写，覆盖 `http`、`www.`、裸域名、短链、`utm=`、全角冒号、URL 编码，并用 CTA 文案子串比对。
+7. 改动清单补：`daily-plan.ts:519`、`CampaignDailyPlanPanel.tsx:458`、`publish-queue/route.ts:161`、`post-review` 测试、`content-review.test.ts`、`story-resolve` 测试。
+
+**范围**：不拆「即时/定时」两个功能（每日计划帖基本都是定时）；按风险拆两个 PR：**PR-A** 零件（共用首评函数、纯函数、测试，不改任何运行中行为）→ **PR-B** 接线（审核、发布、story-resolve、价格闸、待办、界面）。PR-B 为 A 级，保持草稿，PM 回「合」才合。
