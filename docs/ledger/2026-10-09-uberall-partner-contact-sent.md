@@ -4,6 +4,7 @@ title: 已向 uberall 提交经销伙伴联系表，等对方销售回信后再�
 status: done
 owner: pm
 decided_on: 2026-10-09
+source: pr:2395
 done_on: 2026-10-09
 done_ref: doc:docs/ledger/2026-10-09-uberall-partner-contact-sent.md
 verify_by: 2026-10-20
