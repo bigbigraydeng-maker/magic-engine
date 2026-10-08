@@ -8,6 +8,7 @@
 
 import { createHash } from 'node:crypto'
 import { getStoredPageToken } from '@/lib/meta/token-manager'
+import { ensureFacebookFirstComment } from '@/lib/meta/first-comment'
 import type { PublishAdapter, PublishTarget, PublishedRef } from '../types'
 
 const GRAPH = 'https://graph.facebook.com/v25.0'
@@ -42,33 +43,14 @@ async function ensurePageFirstComment(args: {
   message: string
 }): Promise<string> {
   const marker = firstCommentMarker(args.idempotencyTag)
-  const params = new URLSearchParams({
-    fields: 'id,message',
-    filter: 'stream',
-    order: 'reverse_chronological',
-    limit: '100',
-    access_token: args.accessToken,
+  return ensureFacebookFirstComment({
+    graphBase: GRAPH,
+    objectId: args.videoId,
+    accessToken: args.accessToken,
+    marker,
+    message: args.message,
+    failureLabel: 'Reel',
   })
-  const read = await fetch(`${GRAPH}/${args.videoId}/comments?${params}`)
-  const existingJson = await read.json().catch(() => ({})) as { data?: Array<Record<string, unknown>> }
-  if (!read.ok || !Array.isArray(existingJson.data)) {
-    throw new Error(`读取 Reel 首评失败 ${read.status}`)
-  }
-  const existing = existingJson.data.find(comment =>
-    typeof comment.message === 'string' && comment.message.includes(marker),
-  )
-  if (existing && typeof existing.id === 'string') return existing.id
-
-  const body = new URLSearchParams({
-    message: `${args.message}${marker}`,
-    access_token: args.accessToken,
-  })
-  const created = await fetch(`${GRAPH}/${args.videoId}/comments`, { method: 'POST', body })
-  const createdJson = await created.json().catch(() => ({})) as Record<string, unknown>
-  if (!created.ok || typeof createdJson.id !== 'string') {
-    throw new Error(`发布 Reel 首评失败 ${created.status}: ${JSON.stringify(createdJson)}`)
-  }
-  return createdJson.id
 }
 
 // 取该页的 page token + 页名。

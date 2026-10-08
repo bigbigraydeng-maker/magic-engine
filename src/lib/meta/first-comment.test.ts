@@ -1,0 +1,176 @@
+import { describe, expect, it, vi } from 'vitest'
+import { ensureFacebookFirstComment } from './first-comment'
+
+const GRAPH = 'https://graph.facebook.com/v25.0'
+const OBJECT_ID = 'video-1'
+const MARKER = '⁣​‌'
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status })
+}
+
+describe('ensureFacebookFirstComment', () => {
+  it('第 1 页已有带标记的评论 → 返回其 id,只读一次,不发 POST', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse({ data: [{ id: 'comment-1', message: `Book now${MARKER}` }] }),
+    )
+
+    const id = await ensureFacebookFirstComment({
+      graphBase: GRAPH,
+      objectId: OBJECT_ID,
+      accessToken: 'token',
+      marker: MARKER,
+      message: 'Book now',
+      failureLabel: 'Reel',
+      fetcher,
+    })
+
+    expect(id).toBe('comment-1')
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    const [, init] = fetcher.mock.calls[0]
+    expect(init?.method).toBeUndefined()
+  })
+
+  it('第 1 页没有、第 2 页(经 paging.next)有 → 返回 id,不发 POST', async () => {
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url === 'https://graph.facebook.com/next-page') {
+        return jsonResponse({ data: [{ id: 'comment-2', message: `CTA${MARKER}` }] })
+      }
+      return jsonResponse({ data: [{ id: 'comment-x', message: 'unrelated' }], paging: { next: 'https://graph.facebook.com/next-page' } })
+    })
+
+    const id = await ensureFacebookFirstComment({
+      graphBase: GRAPH,
+      objectId: OBJECT_ID,
+      accessToken: 'token',
+      marker: MARKER,
+      message: 'CTA',
+      failureLabel: 'Reel',
+      fetcher,
+    })
+
+    expect(id).toBe('comment-2')
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    const postCalls = fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')
+    expect(postCalls).toHaveLength(0)
+  })
+
+  it('哪都没有标记、单页 → POST 一次,正文 = message + marker,返回新建 id', async () => {
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      if (init?.method === 'POST') return jsonResponse({ id: 'comment-new' })
+      return jsonResponse({ data: [] })
+    })
+
+    const id = await ensureFacebookFirstComment({
+      graphBase: GRAPH,
+      objectId: OBJECT_ID,
+      accessToken: 'token',
+      marker: MARKER,
+      message: 'Book now',
+      failureLabel: 'Reel',
+      fetcher,
+    })
+
+    expect(id).toBe('comment-new')
+    const postCall = fetcher.mock.calls.find(([, init]) => init?.method === 'POST')
+    expect(postCall).toBeDefined()
+    const [url, init] = postCall as [string, RequestInit]
+    expect(url).toBe(`${GRAPH}/${OBJECT_ID}/comments`)
+    const body = new URLSearchParams(String(init.body))
+    expect(body.get('message')).toBe(`Book now${MARKER}`)
+  })
+
+  it('读取非 ok → 抛「读取 Reel 首评失败 500」,绝不 POST', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => jsonResponse({ error: 'boom' }, 500))
+
+    await expect(
+      ensureFacebookFirstComment({
+        graphBase: GRAPH,
+        objectId: OBJECT_ID,
+        accessToken: 'token',
+        marker: MARKER,
+        message: 'Book now',
+        failureLabel: 'Reel',
+        fetcher,
+      }),
+    ).rejects.toThrow('读取 Reel 首评失败 500')
+
+    const postCalls = fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')
+    expect(postCalls).toHaveLength(0)
+  })
+
+  it('POST 非 ok → 抛以「发布 Reel 首评失败 400」开头的错误', async () => {
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      if (init?.method === 'POST') return jsonResponse({ error: 'bad' }, 400)
+      return jsonResponse({ data: [] })
+    })
+
+    await expect(
+      ensureFacebookFirstComment({
+        graphBase: GRAPH,
+        objectId: OBJECT_ID,
+        accessToken: 'token',
+        marker: MARKER,
+        message: 'Book now',
+        failureLabel: 'Reel',
+        fetcher,
+      }),
+    ).rejects.toThrow(/^发布 Reel 首评失败 400/)
+  })
+
+  it('expectedPageId 不匹配 → 抛「首评目标不属于页面」,fetcher 一次都不调;匹配则放行', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => jsonResponse({ data: [{ id: 'comment-1', message: MARKER }] }))
+
+    await expect(
+      ensureFacebookFirstComment({
+        graphBase: GRAPH,
+        objectId: 'other-page_123',
+        expectedPageId: 'page-1',
+        accessToken: 'token',
+        marker: MARKER,
+        message: 'Book now',
+        failureLabel: 'Reel',
+        fetcher,
+      }),
+    ).rejects.toThrow('首评目标不属于页面')
+    expect(fetcher).not.toHaveBeenCalled()
+
+    const id = await ensureFacebookFirstComment({
+      graphBase: GRAPH,
+      objectId: 'page-1_123',
+      expectedPageId: 'page-1',
+      accessToken: 'token',
+      marker: MARKER,
+      message: 'Book now',
+      failureLabel: 'Reel',
+      fetcher,
+    })
+    expect(id).toBe('comment-1')
+  })
+
+  it('maxPages 生效:每页都有 paging.next、maxPages 2 → 恰好读 2 次,扫不完就抛错且绝不 POST', async () => {
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      if (init?.method === 'POST') return jsonResponse({ id: 'comment-new' })
+      return jsonResponse({ data: [], paging: { next: 'https://graph.facebook.com/next-page' } })
+    })
+
+    await expect(
+      ensureFacebookFirstComment({
+        graphBase: GRAPH,
+        objectId: OBJECT_ID,
+        accessToken: 'token',
+        marker: MARKER,
+        message: 'Book now',
+        failureLabel: 'Reel',
+        fetcher,
+        maxPages: 2,
+      }),
+    ).rejects.toThrow('首评幂等扫描未完成')
+
+    const readCalls = fetcher.mock.calls.filter(([, init]) => init?.method !== 'POST')
+    expect(readCalls).toHaveLength(2)
+    const postCalls = fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')
+    expect(postCalls).toHaveLength(0)
+  })
+})

@@ -23,12 +23,13 @@ export function buildTrackedReelUrl(
   rawUrl: unknown,
   workOrderId: string,
   source: ReelTrackingSource = 'facebook',
+  utmCampaign = 'me_factory_reel',
 ): string | null {
   const url = normalizeUrl(readableText(rawUrl))
   if (!url || !workOrderId.trim()) return null
   url.searchParams.set('utm_source', source)
   url.searchParams.set('utm_medium', 'organic_social')
-  url.searchParams.set('utm_campaign', 'me_factory_reel')
+  url.searchParams.set('utm_campaign', utmCampaign)
   url.searchParams.set('utm_content', workOrderId)
   return url.toString()
 }
