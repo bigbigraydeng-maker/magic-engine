@@ -278,8 +278,14 @@ function expectedFindings(
   deps: CreateDraftDeps,
 ): LaunchFinding[] {
   if (draft.kind === 'video_thruplay') {
-    // 看完类视频：只查「三层都是暂停」。读不到系列状态（null/undefined）按没确认处理 → not_paused blocker。
-    return pausedFindings({ campaignStatus: readback.campaignStatus ?? null, adSet: readback.adSet, ads: readback.ads })
+    // 看完类视频：查「三层都是暂停」，外加「回读到的广告就是我们建的那几条」。
+    // 读不到系列状态（null/undefined）按没确认处理 → not_paused blocker。
+    // 条数核对是必须的：回读到 0 条时，暂停检查对广告层没有可查的东西，
+    // 会放行一条从没被回读过的广告。
+    return [
+      ...pausedFindings({ campaignStatus: readback.campaignStatus ?? null, adSet: readback.adSet, ads: readback.ads }),
+      ...adCountFindings(published, readback.ads),
+    ]
   }
   if (draft.kind !== 'messenger_conversation' || readback.campaignStatus === undefined) return []
   const t = metaTripletFor(draft.kind)
@@ -292,6 +298,24 @@ function expectedFindings(
     },
     { campaignStatus: readback.campaignStatus, adSet: readback.adSet, ads: readback.ads },
   )
+}
+
+/**
+ * 回读到的广告，是不是就是我们建的那几条。
+ *
+ * 条数对不上、或 id 对不上，都算没核对上 —— 回读有最终一致性窗口，读到 0 条时
+ * 暂停检查对广告层没有可查的东西，会放行一条从没被回读过的广告。
+ */
+function adCountFindings(published: PublishedDraft, ads: readonly { adId?: string }[]): LaunchFinding[] {
+  const readIds = new Set(ads.map((a) => a.adId))
+  const allPresent = published.adIds.every((id) => readIds.has(id))
+  if (ads.length === published.adIds.length && allPresent) return []
+  return [{
+    code: 'ad_count_mismatch',
+    severity: 'blocker',
+    message: `建了 ${published.adIds.length} 条广告，回读到 ${ads.length} 条，或回读到的不是我们建的那几条。没核对上，就不能当「都是暂停的」放行。`,
+    learnedFrom: '2026-10-09 子牙复审：回读到 0 条时，暂停检查对广告层没有可查的东西，会放行一条从没被回读过的广告',
+  }]
 }
 
 /** 回读不出来 ≠ 没问题。建都建出来了，但没人能保证它是干净的 —— 不进审批队列。 */

@@ -121,6 +121,7 @@ describe('createDraftForApproval — 看完类视频的暂停回读', () => {
     const r = await createDraftForApproval(VIDEO, {
       supabase: sb, adAccountId: 'act_1', accessToken: 'tok',
     })
+    expect(r.status).toBe('awaiting_approval')
     expect(r.findings.map((f) => f.code)).not.toContain('not_paused')
     expect(mCampaignStatus).toHaveBeenCalledTimes(1)
     expect(mCampaignStatus).toHaveBeenCalledWith('camp1', 'tok')
@@ -180,6 +181,42 @@ describe('createDraftForApproval — 看完类视频的暂停回读', () => {
     expect(r.status).toBe('blocked')
     expect(inserted[0].status).toBe('blocked')
     expect(inserted[0].autoPause).toEqual({ ok: true, failed: [] })
+  })
+
+  it('readback returns 0 ads → blocked + ad_count_mismatch', async () => {
+    videoReadback({ ads: [] })
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(VIDEO, {
+      supabase: sb, adAccountId: 'act_1', accessToken: 'tok',
+    })
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('ad_count_mismatch')
+    expect(mPause).not.toHaveBeenCalled()
+  })
+
+  it('readback returns a different ad id → blocked + ad_count_mismatch', async () => {
+    videoReadback({ ads: [{ adId: 'adX', adName: 'Reel', status: 'PAUSED', texts: [] }] })
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(VIDEO, {
+      supabase: sb, adAccountId: 'act_1', accessToken: 'tok',
+    })
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('ad_count_mismatch')
+  })
+
+  it('lead_form draft carrying a postId → failed, nothing published', async () => {
+    const draft: AdDraft = {
+      ...DRAFT,
+      creatives: [
+        { name: 'EN', primaryText: 'Brand new four bedroom home in Rothesay Bay', headline: 'Book a viewing', imageHash: 'h1', postId: 'p1_123' },
+      ],
+    }
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(draft, {
+      supabase: sb, adAccountId: 'act_1', accessToken: 'tok',
+    })
+    expect(r.status).toBe('failed')
+    expect(mPublish).not.toHaveBeenCalled()
   })
 })
 

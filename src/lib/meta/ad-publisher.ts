@@ -340,6 +340,12 @@ export async function publishDraftPaused(
   accessToken: string,
   opts: PublishOptions = {},
 ): Promise<PublishResult> {
+  // 只有看完视频类广告可以用已发布的帖子。在发任何 Graph 请求之前就拦下 ——
+  // 别为了一个必然失败的创建先建出系列/组再回滚。`creativeSpec` 里那道 throw 保留，纵深防御。
+  if (d.kind !== 'video_thruplay' && d.creatives.some((c) => c.postId !== undefined)) {
+    return { ok: false, step: 'campaign', error: '只有看完视频类广告可以用已发布的帖子', orphans: [] }
+  }
+
   const run = newRun(accessToken, opts)
 
   // ── 1. 广告系列 ──────────────────────────────────────────────────────

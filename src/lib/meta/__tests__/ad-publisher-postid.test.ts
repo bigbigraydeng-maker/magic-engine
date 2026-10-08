@@ -135,7 +135,7 @@ describe('publishDraftPaused — 无 postId 的路径一字不变', () => {
 })
 
 describe('publishDraftPaused — postId 只允许看完视频类', () => {
-  it('lead_form 带 postId → 抛错，且没有发过 /adcreatives', async () => {
+  it('lead_form 带 postId → 直接失败，一次 Graph 请求都没发', async () => {
     vi.stubGlobal('fetch', mockGraph())
     const draft: AdDraft = {
       kind: 'lead_form',
@@ -152,7 +152,8 @@ describe('publishDraftPaused — postId 只允许看完视频类', () => {
         { name: 'L', primaryText: 'hi', headline: 'head', imageHash: 'h1', postId: 'p1_999' },
       ],
     }
-    await expect(publishDraftPaused(draft, 'act_1', 'tok')).rejects.toThrow()
-    expect(calls.some((c) => c.url.includes('/adcreatives'))).toBe(false)
+    const r = await publishDraftPaused(draft, 'act_1', 'tok')
+    expect(r).toMatchObject({ ok: false, step: 'campaign' })
+    expect(calls.length).toBe(0)
   })
 })
