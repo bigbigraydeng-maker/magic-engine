@@ -183,7 +183,9 @@ describe('createDraftForApproval', () => {
 
   it('🔴 回读不到优化目标 + 草案是看完类视频 + 版位没锁 → 仍然 blocked（不能静默跳过版位检查）', async () => {
     mWait.mockResolvedValue({ ok: true } as Awaited<ReturnType<typeof waitForVideoReady>>)
-    mAdSet.mockResolvedValue({ id: 'as1', name: '养受众', targeting: { geo_locations: { countries: ['NZ'] } } })
+    mAdSet.mockResolvedValue({ id: 'as1', name: '养受众', status: 'PAUSED', targeting: { geo_locations: { countries: ['NZ'] } } })
+    mCreatives.mockResolvedValue([{ adId: 'ad1', adName: 'V', status: 'PAUSED', texts: ['Watch our story'] }])
+    mCampaignStatus.mockResolvedValue('PAUSED')
     const { sb } = fakeSupabase()
     const video = { name: 'V', primaryText: 'Watch our story', headline: 'Story', videoId: 'v1' }
     const r = await createDraftForApproval(

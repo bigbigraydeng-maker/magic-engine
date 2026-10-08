@@ -42,7 +42,7 @@ const isPaused = (s: unknown): boolean =>
 const show = (s: unknown): string =>
   typeof s === 'string' && s.trim() ? s.trim() : '读不到'
 
-function pausedFindings(got: CreatedReadback): LaunchFinding[] {
+export function pausedFindings(got: CreatedReadback): LaunchFinding[] {
   const bad: string[] = []
   if (!isPaused(got.campaignStatus)) bad.push(`广告系列（${show(got.campaignStatus)}）`)
   if (!isPaused(got.adSet.status)) bad.push(`广告组（${show(got.adSet.status)}）`)

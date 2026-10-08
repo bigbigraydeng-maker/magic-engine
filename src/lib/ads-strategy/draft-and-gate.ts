@@ -26,7 +26,7 @@ import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus } fro
 import { adaptMetaAdSet } from './meta-readback-adapter'
 import { checkLaunch, renderReadback, type LaunchFinding, type LaunchReadbackReport } from './launch-readback'
 import { checkDraftRedlines, unusableRedlinePhrases } from './draft-redlines'
-import { checkCreatedAsExpected } from './created-as-expected'
+import { checkCreatedAsExpected, pausedFindings } from './created-as-expected'
 import { buildSpendActivationReceipt, type SpendActivationAuthority, type SpendActivationReceipt } from '@/lib/ads/spend-activation'
 
 /**
@@ -259,7 +259,14 @@ async function failedOutcome(
   return { actionId: id, status: 'failed', summary: f.summary, findings: [], error: f.error }
 }
 
-/** 私信类型的「建成预期」检查；其它类型没有（`campaignStatus === undefined`），返回空。 */
+/**
+ * 建成预期检查。
+ *
+ * - `messenger_conversation`：全套（暂停 + 目标/落点 + 条数 + 回读红线）。
+ * - `video_thruplay`：**只查「三层都是暂停」**。目标/落点那几条的文案写死了「私信」，
+ *   对看完类视频不适用，所以不调 `checkCreatedAsExpected`。
+ * - 其它类型：没有预期检查（`campaignStatus === undefined`），返回空。
+ */
 function expectedFindings(
   draft: AdDraft,
   published: PublishedDraft,
@@ -270,6 +277,10 @@ function expectedFindings(
   },
   deps: CreateDraftDeps,
 ): LaunchFinding[] {
+  if (draft.kind === 'video_thruplay') {
+    // 看完类视频：只查「三层都是暂停」。读不到系列状态（null/undefined）按没确认处理 → not_paused blocker。
+    return pausedFindings({ campaignStatus: readback.campaignStatus ?? null, adSet: readback.adSet, ads: readback.ads })
+  }
   if (draft.kind !== 'messenger_conversation' || readback.campaignStatus === undefined) return []
   const t = metaTripletFor(draft.kind)
   return checkCreatedAsExpected(
@@ -332,10 +343,11 @@ async function gateReadback(
     return blockedUnreadable(draft, published, deps, ctx, '这次请求已经用掉太多时间，没来得及回读它的真实设置')
   }
   const wantsExpected = draft.kind === 'messenger_conversation'
+  const wantsPausedCheck = draft.kind === 'video_thruplay'
   const [rawAdSet, ads, campaignStatus] = await Promise.all([
     fetchAdSetReadback(published.adSetId, deps.accessToken),
     fetchAdCreativesReadback(published.adSetId, deps.accessToken),
-    wantsExpected ? fetchCampaignStatus(published.campaignId, deps.accessToken) : undefined,
+    (wantsExpected || wantsPausedCheck) ? fetchCampaignStatus(published.campaignId, deps.accessToken) : undefined,
   ])
   if (!rawAdSet || !ads) {
     return blockedUnreadable(draft, published, deps, ctx, '回读不到它的真实设置')
