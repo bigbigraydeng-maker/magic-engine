@@ -167,6 +167,8 @@ export type ManualItemKind =
   | 'blog_publish_channel_broken'
   | 'cross_client_leak'
   | 'price_claim_unbacked'
+  /** 每日计划里帖子的价格数字跟客户资料里该团的价格对不上（或没资料可对）—— 发布时整批会被拦 */
+  | 'price_fact_unverified'
   | 'auto_run_blocked'
   | 'auto_run_stuck'
   /** 被一句「不打算去」误判成永久拒联 —— 只有人能看一眼原话再决定 */

@@ -37,6 +37,7 @@ import {
 } from '@/lib/campaign/daily-plan'
 import { postChecklistPasses } from '@/lib/social/content-review'
 import { judgePriceClaimWithSource, priceGateMessage } from '@/lib/content/price-claim-gate'
+import { buildPostPriceText, judgePostPriceFacts, loadOfferPriceFacts } from '@/lib/content/price-fact-gate'
 import {
   CampaignDailyPublishCommandSchema,
   CampaignDailyPublishMetaSchema,
@@ -208,7 +209,7 @@ async function buildCandidates(
       }),
       image_asset_id: entry.image_asset_id,
       cta_url: entry.cta_url,
-      message: [post.hook, post.body, `${post.cta}: ${post.cta_url}`].map(part => part.trim()).join('\n\n'),
+      message: buildPostPriceText(post),
       imageUrl: asset.storage_url as string,
       imageSource: (asset.source as string | null) ?? null,
     })
@@ -516,6 +517,28 @@ function findPriceGateBlocks(
   return blocks
 }
 
+/**
+ * 价格数字核对 —— 价格闸的第二步：文案里写的每个价格数字，必须跟客户资料里该团的
+ * 价格对得上。对不上、核对不了（没资料 / 认不出是哪个团 / 读不懂写法）一律拦下。
+ *
+ * 取资料失败会直接抛出（走外层 500）：读失败不等于「没有资料要核对」，不许放行。
+ * 只检查 pending —— 已经发出去的不重复拦。
+ */
+async function findPriceFactBlocks(
+  clientId: string,
+  posts: PublishCandidate[],
+): Promise<Array<{ date: string; reason: string; message: string }>> {
+  const offers = await loadOfferPriceFacts(supabaseAdmin, clientId)
+  const blocks: Array<{ date: string; reason: string; message: string }> = []
+  for (const post of posts) {
+    const result = judgePostPriceFacts({ text: post.message, ctaUrl: post.cta_url, offers })
+    if (result.verdict.status === 'blocked') {
+      blocks.push({ date: post.date, reason: result.verdict.reason, message: result.message })
+    }
+  }
+  return blocks
+}
+
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const clientId = params.id
   const access = await requirePaidClientAccess(clientId)
@@ -558,6 +581,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (priceBlocks.length > 0) return conflict('PRICE_CLAIM_UNBACKED', {
       blocked: priceBlocks,
       hint: '整批已暂停（不是只拦列出的日期）：把列出日期的价格去掉或换成客户确认过的图，再重新演练。',
+    })
+
+    // 价格数字核对：图过关了还要看数字——价格对不上客户资料的，整批同样暂停。
+    const factBlocks = await findPriceFactBlocks(clientId, pending)
+    if (factBlocks.length > 0) return conflict('PRICE_FACT_UNVERIFIED', {
+      blocked: factBlocks,
+      hint: '整批已暂停（不是只拦列出的日期）：把列出日期文案里的价格改成客户资料里的数字，或者先去客户设置补全该团的价格资料，再重新演练。',
     })
 
     if (command.no_publish) {
