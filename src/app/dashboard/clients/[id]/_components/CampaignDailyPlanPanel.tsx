@@ -117,6 +117,10 @@ const postChecklistPayload = (draft: PostChecklistDraft): ContentCheckItemResult
     source_ref: draft[key].source_ref.trim() || null,
   }))
 
+const allPassChecklist = (sourceUrl: string): PostChecklistDraft => Object.fromEntries(
+  POST_HUMAN_CHECK_KEYS.map(key => [key, { outcome: 'PASS' as const, detail: '', source_ref: FACTUAL_CHECK_KEYS.includes(key) ? sourceUrl : '' }]),
+) as PostChecklistDraft
+
 const GROUNDING_LABEL: Record<DailyPlanResponse['grounding']['status'], string> = {
   OK: '✅ 已连接 Master Brief',
   NEEDS_BRIEF: '⚠️ 缺少 Master Brief（NEEDS_BRIEF）',
@@ -224,7 +228,7 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
     return Math.abs(actualRatio - targetRatio) / targetRatio > 0.02
   }, [postImageNaturalSize])
 
-  const submitPostReview = useCallback(async (verdict: PostReview['verdict'], dateOverride?: string, expectedReviewRevisionOverride?: string | null) => {
+  const submitPostReview = useCallback(async (verdict: PostReview['verdict'], dateOverride?: string, expectedReviewRevisionOverride?: string | null, checklistOverride?: PostChecklistDraft) => {
     const scope = `${clientId}:${campaignId}`
     const reviewDate = dateOverride ?? selectedDate
     if (!data?.plan_id || !data.plan_revision || !reviewDate) {
@@ -251,7 +255,7 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
           date: reviewDate,
           verdict,
           reason,
-          checklist_human: postChecklistPayload(postChecklistDraft),
+          checklist_human: postChecklistPayload(checklistOverride ?? postChecklistDraft),
         }),
       })
       const json = await res.json()
@@ -535,6 +539,20 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
                         发布后系统会自动在这条帖子的第一条评论里贴「{selectedBundle.post.cta}」和带追踪参数的预约链接。正文里不能出现 CTA 或链接，审核通过时系统会自动检查这一点。
                       </p>
                       <div className="flex flex-wrap gap-2">
+                        {!selectedPostPassed && selectedBundle.post.cta_url && (
+                          <button
+                            type="button"
+                            disabled={reviewSaving}
+                            onClick={() => {
+                              const checklist = allPassChecklist(selectedBundle.post?.cta_url ?? '')
+                              setPostChecklistDraft(checklist)
+                              void submitPostReview('PASS', undefined, undefined, checklist)
+                            }}
+                            className="rounded-md bg-me-ochre px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                          >
+                            {reviewSaving ? '保存中…' : '按官网核对通过'}
+                          </button>
+                        )}
                         {!selectedPostPassed && (
                           <button
                             type="button"
@@ -557,6 +575,9 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
                           Post 需修改
                         </button>
                       </div>
+                      <p className="text-[10px] leading-relaxed text-me-charcoal/40">
+                        点「按官网核对通过」＝ 你确认：这条文案已对照官网、图片来源已标注、与文案相符；五项人工检查记为通过，来源填该帖的官网链接。
+                      </p>
                       {reviewError && <p className="text-[11px] text-[#C2453A]">{reviewError}</p>}
                       <p className="text-[10px] leading-relaxed text-me-charcoal/40">
                         这里只记录该 Facebook Post 的人工审阅；不代表事实核验、Story/Reel 通过、生成、排期、Provider 或发布授权。

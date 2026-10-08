@@ -602,6 +602,68 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
     expect(screen.getByRole('button', { name: 'Post 需修改' })).toBeInTheDocument()
   })
 
+  it('one-click review passes a Post with all five checks and the official link as source', async () => {
+    const first = reviewPayload()
+    const passed = reviewPayload({
+      verdict: 'PASS',
+      reason: null,
+      reviewed_at: '2026-09-01T15:05:00.000Z',
+      is_current: true,
+    })
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => first })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ success: true, changed: true }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => passed }) as unknown as typeof fetch
+
+    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+    await screen.findByText('Facebook Post 审核')
+
+    fireEvent.click(screen.getByRole('button', { name: '按官网核对通过' }))
+
+    await screen.findByText('✓ Post 已通过')
+    const patchCall = vi.mocked(global.fetch).mock.calls[1]
+    expect(patchCall[0]).toBe(`/api/clients/${CLIENT_ID}/campaign-daily-plan/post-review`)
+    const requestInit = patchCall[1] as RequestInit
+    expect(requestInit.method).toBe('PATCH')
+    const body = JSON.parse(requestInit.body as string)
+    expect(body.verdict).toBe('PASS')
+    expect(body.checklist_human).toHaveLength(5)
+    expect(body.checklist_human.every((item: { outcome: string }) => item.outcome === 'PASS')).toBe(true)
+    const byKey = Object.fromEntries(
+      (body.checklist_human as Array<{ key: string; source_ref: string | null }>).map(item => [item.key, item.source_ref]),
+    )
+    expect(byKey.factual_claims_have_source).toBe('https://example.test/tour')
+    expect(byKey.factual_claims_source_verified).toBe('https://example.test/tour')
+    expect(byKey.logo_watermark_present).toBeNull()
+    expect(byKey.asset_provenance_labeled).toBeNull()
+    expect(byKey.asset_provenance_matches_claim_context).toBeNull()
+  })
+
+  it('one-click button is not offered once the Post is passed', async () => {
+    mockFetchOnce(reviewPayload({
+      verdict: 'PASS',
+      reason: null,
+      reviewed_at: '2026-09-01T15:05:00.000Z',
+      is_current: true,
+    }))
+
+    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+
+    await screen.findByText('✓ Post 已通过')
+    expect(screen.queryByRole('button', { name: '按官网核对通过' })).not.toBeInTheDocument()
+  })
+
+  it('one-click button is hidden when the Post has no CTA link', async () => {
+    const payload = reviewPayload()
+    payload.bundles[0].post.cta_url = ''
+    mockFetchOnce(payload)
+
+    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+
+    await screen.findByText('Facebook Post 审核')
+    expect(screen.queryByRole('button', { name: '按官网核对通过' })).not.toBeInTheDocument()
+  })
+
   it('keeps bulk pass unavailable', async () => {
     mockFetchOnce(reviewPayload())
 
