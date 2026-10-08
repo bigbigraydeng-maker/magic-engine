@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-10-09
 source: doc:docs/ledger/evidence/2026-10-09-calendar-cts-video-audiences-growing--2026-10-09.md
 verify_by: 2026-10-10
-verify_how: 复核证据文件 docs/ledger/evidence/2026-10-09-calendar-cts-video-audiences-growing--2026-10-09.md 中的数字仍成立
+verify_how: 10/10 重新查 Meta 生产受众快照：CTS 的 ThruPlay 池与 Video viewers 50% 池在 10/10 当日人数都 ≥ 10/08 的数（27400 / 43600），且 ads_growth_states 中 D11 断供提醒 10/09~10/10 没有新出现。判成：两池未下降且无 D11。
 done_on: 2026-10-09
 done_ref: doc:docs/ledger/evidence/2026-10-09-calendar-cts-video-audiences-growing--2026-10-09.md
 check_note: PR#2084 已合并(9-26)；ThruPlay 池 22200→27400(+5200)，Video viewers 50% 池 37800→43600(+5800)(10-08快照，Meta 下限值，样本=每日快照)；断供提醒 D11 自 9-27 起未再出现(最近一次 9-26)。10-

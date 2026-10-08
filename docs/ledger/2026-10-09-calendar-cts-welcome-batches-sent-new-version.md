@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-10-09
 source: doc:docs/ledger/evidence/2026-10-09-calendar-cts-welcome-batches-sent-new-version--2026-10-09.md
 verify_by: 2026-10-10
-verify_how: 复核证据文件 docs/ledger/evidence/2026-10-09-calendar-cts-welcome-batches-sent-new-version--2026-10-09.md 中的数字仍成立
+verify_how: 10/10 重新查 Mailchimp 已发送列表与 CTS 欢迎信生产记录：10/09、10/10 当晚（19:00Z 左右）的 auto_e1_batch_<日期> 是否发出、收件人数 >0、正文含新版内容(34 pages / 11 confirmed)且不含 22 pages。判成：当晚批次发出且是新版；没发出就改记 failed。
 done_on: 2026-10-09
 done_ref: doc:docs/ledger/evidence/2026-10-09-calendar-cts-welcome-batches-sent-new-version--2026-10-09.md
 check_note: Mailchimp 已发送列表里 auto_e1_batch_20260928（9/28 19:02Z，10 人）和 20260929（9/29 19:02Z，9 人）都发出；两封正文含 34 pages / 11 confirmed / shopping、无 22 pages，有 Baker 本人

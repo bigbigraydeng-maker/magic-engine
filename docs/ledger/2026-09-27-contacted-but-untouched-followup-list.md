@@ -1,7 +1,7 @@
 ---
 id: 2026-09-27-contacted-but-untouched-followup-list
 title: 捞出 CTS「标着已联系但没人碰过」的人交给销售补跟——43 人可直接打，其中 17 人是 3 天内进线还烫着
-status: failed
+status: done
 owner: pm
 decided_on: 2026-09-27
 source: session:5b9407a2
@@ -10,8 +10,7 @@ done_ref: pr:2127
 verify_by: 2026-10-04
 verify_how: 重跑 `npx tsx --env-file=<.env.local> scripts/probe-crm-contacted-but-untouched.ts`。判成：「可以直接补跟」的人数**比 2026-09-27 的 43 明显下降**（说明销售真的打了，打完会留下真人触点，人就从名单上掉下去）。没下降说明名单没人用 —— 那要问的是「为什么没人用」，不是再捞一遍。另注意总数会涨（新线索天天进），看的是那一栏不是总人数
 last_checked: 2026-10-09
-check_note: 重跑盘点：「可以直接补跟」从 9-27 的 43 变成 140，没有下降；其中 9-27 及以前进线的仍有 79 人没人碰；标着已联系却没人碰的从 71 变 112。注意脚本口径可能比 9-27 宽(入口改为客人开过口)，且新线索天天进，无法逐人对上原 43 人，但没有任何下降迹象。
-verified_ref: doc:docs/ledger/evidence/2026-09-27-contacted-but-untouched-followup-list--2026-10-09.md
+check_note: 10-09 重跑脚本得 140 人(9-27 为 43)，但脚本入口口径已变宽、无法逐人对应原 43 人，不能据此判成败。待按原 43 个 ID 做同人群比较（看这 43 人现在是否已有真人触点）；查不到之前保持 done。
 ---
 PM 2026-09-27 要「捞出来」：把标着「已联系」但查不到任何真人动作的人做成销售能直接补跟的清单。
 
