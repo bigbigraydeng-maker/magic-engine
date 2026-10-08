@@ -229,6 +229,98 @@ describe('factory-reel-ad-draft-config — PATCH 能存什么', () => {
     expect(res.status).toBe(503)
     expect(json.error).toBe('数据库还没升级，请联系技术')
   })
+})
+
+describe('factory-reel-ad-draft-config — PATCH 紧急关闭开关', () => {
+  it('只发 mode:off → 200，保留原有参数，mode 变 off，带修改人', async () => {
+    const { upsert, rows } = fakeTable([
+      { client_id: CLIENT, factory_reel_ad_draft: { ...VALID, mode: 'on' } },
+    ])
+
+    const res = await PATCH(patchRequest({ mode: 'off' }), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(upsert).toHaveBeenCalledTimes(1)
+    const [written, opts] = upsert.mock.calls[0]
+    expect(opts).toEqual({ onConflict: 'client_id' })
+    expect(written.client_id).toBe(CLIENT)
+
+    const stored = written.factory_reel_ad_draft as Record<string, unknown>
+    expect(stored.mode).toBe('off')
+    expect(stored.geo_countries).toEqual(['NZ'])
+    expect(stored.daily_budget).toBe(20)
+    expect(stored.updated_by).toBe(STAFF)
+    expect(Number.isNaN(Date.parse(String(stored.updated_at)))).toBe(false)
+
+    expect(rows.get(CLIENT)?.factory_reel_ad_draft).toMatchObject({ mode: 'off' })
+    expect(json.effectiveMode).toBe('off')
+  })
+
+  it('只发 mode:off 且没有配置行 → 200，存下 mode off', async () => {
+    const { upsert } = fakeTable()
+
+    const res = await PATCH(patchRequest({ mode: 'off' }), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(upsert).toHaveBeenCalledTimes(1)
+    const [written] = upsert.mock.calls[0]
+    const stored = written.factory_reel_ad_draft as Record<string, unknown>
+    expect(stored.mode).toBe('off')
+    expect(json.effectiveMode).toBe('off')
+  })
+
+  it('只发 mode:on → 400，不写库（打开仍须完整参数）', async () => {
+    const { upsert } = fakeTable()
+    const res = await PATCH(patchRequest({ mode: 'on' }), params())
+    expect(res.status).toBe(400)
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('只发 mode:dry_run → 400，不写库', async () => {
+    const { upsert } = fakeTable()
+    const res = await PATCH(patchRequest({ mode: 'dry_run' }), params())
+    expect(res.status).toBe(400)
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('mode:off 带其它参数 → 走完整校验，非法预算 400', async () => {
+    const { upsert } = fakeTable()
+    const res = await PATCH(patchRequest({ mode: 'off', daily_budget: 9999 }), params())
+    expect(res.status).toBe(400)
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('非内部员工 → 403，且不读不写', async () => {
+    mockGuard.mockResolvedValue(NextResponse.json({ error: 'Forbidden' }, { status: 403 }))
+    const { upsert } = fakeTable()
+    const res = await PATCH(patchRequest({ mode: 'off' }), params())
+    expect(res.status).toBe(403)
+    expect(mockFrom).not.toHaveBeenCalled()
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('关闭开关时列不存在（42703）→ 503 人话', async () => {
+    mockFrom.mockImplementation(((table: string) => {
+      if (table !== 'ad_strategy_configs') throw new Error(`unexpected table ${table}`)
+      return {
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({
+              data: null,
+              error: { code: '42703', message: 'column "factory_reel_ad_draft" does not exist' },
+            }),
+          }),
+        }),
+      }
+    }) as never)
+
+    const res = await PATCH(patchRequest({ mode: 'off' }), params())
+    const json = await res.json()
+    expect(res.status).toBe(503)
+    expect(json.error).toBe('数据库还没升级，请联系技术')
+  })
 
   it('其它写库错误 → 500 人话，不甩原始报错', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)

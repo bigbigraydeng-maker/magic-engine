@@ -92,6 +92,59 @@ export async function PATCH(
   }
 
   const raw = body as Record<string, unknown>
+
+  // 关闭开关只需要 mode，紧急时不该因为缺参数而关不掉；打开仍须完整参数。
+  const isOffShortcut =
+    raw.mode === 'off' &&
+    !CANDIDATE_KEYS.some(key => key !== 'mode' && key in raw)
+
+  if (isOffShortcut) {
+    const { data, error: readError } = await supabaseAdmin
+      .from('ad_strategy_configs')
+      .select('factory_reel_ad_draft')
+      .eq('client_id', clientId)
+      .maybeSingle()
+
+    if (readError) {
+      if (isMissingColumnError(readError)) {
+        return NextResponse.json({ error: '数据库还没升级，请联系技术' }, { status: 503 })
+      }
+      console.error('[factory-reel-ad-draft-config] read failed', { clientId, code: readError.code, message: readError.message })
+      return NextResponse.json({ error: '保存失败，请稍后重试。' }, { status: 500 })
+    }
+
+    const existing = (data as { factory_reel_ad_draft?: unknown } | null)?.factory_reel_ad_draft
+    const stored: Record<string, unknown> =
+      typeof existing === 'object' && existing !== null && !Array.isArray(existing)
+        ? { ...(existing as Record<string, unknown>) }
+        : {}
+    stored.mode = 'off'
+    stored.updated_by = session.user.email ?? null
+    stored.updated_at = new Date().toISOString()
+
+    const { error: offError } = await supabaseAdmin.from('ad_strategy_configs').upsert(
+      { client_id: clientId, factory_reel_ad_draft: stored },
+      { onConflict: 'client_id' },
+    )
+
+    if (offError) {
+      if (isMissingColumnError(offError)) {
+        return NextResponse.json({ error: '数据库还没升级，请联系技术' }, { status: 503 })
+      }
+      console.error('[factory-reel-ad-draft-config] upsert failed', { clientId, code: offError.code, message: offError.message })
+      return NextResponse.json({ error: '保存失败，请稍后重试。' }, { status: 500 })
+    }
+
+    const { config, effectiveMode, source } = await loadFactoryReelDraftConfig(supabaseAdmin, clientId)
+    return NextResponse.json({
+      success: true,
+      config,
+      effectiveMode,
+      source,
+      modes: FACTORY_REEL_DRAFT_MODES,
+    })
+  }
+
   const candidate: Record<string, unknown> = {}
   for (const key of CANDIDATE_KEYS) {
     if (key in raw) candidate[key] = raw[key]
