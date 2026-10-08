@@ -21,6 +21,7 @@ import { toPublishedView } from '@/lib/factory/publish/publish-display'
 export type FactoryReelAdDraftItemKind =
   | 'factory_reel_ad_awaiting_approval'
   | 'factory_reel_ad_content_blocked'
+  | 'factory_reel_ad_may_be_spending'
   | 'factory_reel_ad_draft_dev_issue'
 
 export interface IntentRow {
@@ -40,6 +41,8 @@ export interface FactoryReelAdDraftSnapshot {
   drafts: Map<string, DraftRow>
   permalinks: Map<string, string | null>
   clientCapsUsd: Map<string, number | null>
+  /** 账号级每日总上限，键是 `${client_id}|${规范化广告账号 id}`（见 normaliseAdAccountId）。 */
+  accountCapsUsd?: Map<string, number | null>
   truncated: boolean
 }
 
@@ -60,6 +63,10 @@ export const IGNORED_BLOCK_CODES: ReadonlySet<string> = new Set(['stale', 'not_p
 const APP_BASE = 'https://app.magicengine.com.au'
 const APPROVAL_HREF = `${APP_BASE}/dashboard/ad-approval`
 const FACTORY_HREF = `${APP_BASE}/dashboard/factory`
+const ADS_MANAGER_HREF = 'https://adsmanager.facebook.com/adsmanager/manage/campaigns'
+
+/** 回读时发现对象没暂停的原文 —— 出现它且补暂停没确认成功，就是「可能正在花钱」。 */
+const NOT_PAUSED_MARKER = '回读发现有对象不是暂停状态'
 
 const MAX_ITEMS = 30
 
@@ -83,6 +90,12 @@ const REASON_MAP: Record<string, string> = {
   work_order_unreadable: '读不到工单',
   work_order_not_found: '找不到工单',
   draft_invalid: '广告草稿本身不合规',
+  client_mismatch: '工单和事件对不上（客户或工单号）',
+  page_mismatch: '发布记录里的主页和事件对不上',
+  video_mismatch: '发布记录里的视频和事件对不上',
+  published_at_mismatch: '发布记录的时间和事件对不上',
+  bad_published_at: '发布时间不合法',
+  unhandled_failure: '函数在建意图行之前就出错了',
 }
 
 function plainReason(code: string): string {
@@ -105,11 +118,68 @@ function asRecord(v: unknown): Record<string, unknown> | null {
   return null
 }
 
-function utcDatePlusDays(iso: string, days: number): string {
+/** 规范化广告账号 id：去空白、转小写、去掉开头的 'act_'。 */
+export function normaliseAdAccountId(raw: string | null | undefined): string {
+  if (!raw) return ''
+  return raw.trim().toLowerCase().replace(/^act_/, '')
+}
+
+/** 广告账号尾号（后 4 位）；没有记录时给一句人话。 */
+function accountSuffix(raw: string | null | undefined): string {
+  const id = normaliseAdAccountId(raw)
+  if (!id) return '（账号没记录）'
+  return id.slice(-4)
+}
+
+/** 结束日期按奥克兰时区算（客户和 PM 都在那边，UTC 会差一天）。 */
+function aucklandDatePlusDays(iso: string, days: number): string {
   const base = Date.parse(iso)
-  const ms = Number.isFinite(base) ? base : Date.now()
-  const d = new Date(ms + days * 24 * 60 * 60 * 1000)
-  return d.toISOString().slice(0, 10)
+  const ms = (Number.isFinite(base) ? base : Date.now()) + days * 24 * 60 * 60 * 1000
+  return new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })
+}
+
+function asStringArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  return v.filter((x): x is string => typeof x === 'string')
+}
+
+/**
+ * 把「Meta 上可能留下的对象」拼成一句人话：广告账号尾号、名字标签、系列 / 广告组 /
+ * 广告 / 未清理的对象。给 PM 去 Meta 后台照着找。
+ */
+function objectIdentifiers(
+  payload: Record<string, unknown>,
+  draft: DraftRow | undefined,
+  workOrderId: string | null,
+): string {
+  const draftPayload = draft?.payload
+  const adAccountId = asString(payload.ad_account_id) ?? (draftPayload ? asString(draftPayload.adAccountId) : null)
+  const campaignId = asString(payload.campaign_id) ?? (draftPayload ? asString(draftPayload.campaignId) : null)
+  const adSetId = asString(payload.ad_set_id) ?? (draftPayload ? asString(draftPayload.adSetId) : null)
+  const adIds = asStringArray(payload.ad_ids).length > 0
+    ? asStringArray(payload.ad_ids)
+    : draftPayload
+      ? asStringArray(draftPayload.adIds)
+      : []
+  const orphans = asStringArray(payload.orphans).length > 0
+    ? asStringArray(payload.orphans)
+    : draftPayload
+      ? asStringArray(draftPayload.orphans)
+      : []
+
+  const parts: string[] = [`广告账号尾号 ${accountSuffix(adAccountId)}`]
+  if (workOrderId) parts.push(`名字以「[ME-DRAFT] ${workOrderId.slice(0, 8)}」开头`)
+  if (campaignId) parts.push(`系列 ${campaignId}`)
+  if (adSetId) parts.push(`广告组 ${adSetId}`)
+  if (adIds.length > 0) parts.push(`广告 ${adIds.join('、')}`)
+  if (orphans.length > 0) parts.push(`未清理的 ${orphans.join('、')}`)
+  return parts.join('，')
+}
+
+/** 补暂停是否确认成功：草稿行缺失也算没确认。 */
+function autoPauseConfirmed(draft: DraftRow | undefined): boolean {
+  const autoPause = draft ? asRecord(draft.payload.autoPause) : null
+  return autoPause?.ok === true
 }
 
 function permalinkText(permalink: string | null | undefined): string {
@@ -126,11 +196,19 @@ function devItem(
   reason: string,
   providerImpact: unknown,
   workOrderId: string | null,
+  payload: Record<string, unknown>,
+  draft: DraftRow | undefined,
 ): ManualItem {
-  let what = `${clientName}：工厂 Reel 自动起草广告没成功（${reason}）。广告没有被打开，没有花钱。`
-  if (providerImpact === 'paused_objects_created' || providerImpact === 'unknown') {
-    const short = workOrderId ? workOrderId.slice(0, 8) : '????????'
-    what += ` Meta 后台可能留着名字以「[ME-DRAFT] ${short}」开头的暂停对象，需要核对或清理。`
+  let what = `${clientName}：工厂 Reel 自动起草广告没成功（${reason}）。`
+  if (providerImpact === 'paused_objects_created') {
+    what += ` Meta 上建出了暂停状态的对象（没有花钱），需要核对或清理：${objectIdentifiers(payload, draft, workOrderId)}。`
+  } else if (providerImpact === 'unknown') {
+    what += ` Meta 上可能留着对象，是否已暂停没确认，请去 Meta 后台核对：${objectIdentifiers(payload, draft, workOrderId)}。`
+  } else {
+    what += ' 没有建任何 Meta 对象，没有花钱。'
+  }
+  if (autoPauseConfirmed(draft)) {
+    what += ' 补暂停已成功。'
   }
   return {
     kind: 'factory_reel_ad_draft_dev_issue',
@@ -142,6 +220,24 @@ function devItem(
   }
 }
 
+/** 可能正在花钱：回读发现对象没暂停、补暂停也没确认成功。 */
+function mayBeSpendingItem(
+  clientId: string,
+  clientName: string,
+  payload: Record<string, unknown>,
+  draft: DraftRow | undefined,
+  workOrderId: string | null,
+): ManualItem {
+  return {
+    kind: 'factory_reel_ad_may_be_spending',
+    client_id: clientId,
+    client_name: clientName,
+    what: `${clientName}：工厂 Reel 自动起草的广告在回读时发现有对象不是暂停状态，补暂停也没确认成功，可能正在花钱！${objectIdentifiers(payload, draft, workOrderId)}。`,
+    how: '现在就去 Meta 广告后台，把上面这几个对象手动暂停，然后回我一句「已手动暂停」。',
+    href: ADS_MANAGER_HREF,
+  }
+}
+
 export function buildFactoryReelAdDraftItems(
   snapshot: FactoryReelAdDraftSnapshot,
   nameOf: (clientId: string) => string,
@@ -149,6 +245,16 @@ export function buildFactoryReelAdDraftItems(
 ): ManualItem[] {
   const items: ManualItem[] = []
   const nowMs = now.getTime()
+
+  const draftFor = (intent: IntentRow): DraftRow | undefined => {
+    const draftActionId = asString(intent.payload.draft_action_id)
+    return draftActionId ? snapshot.drafts.get(draftActionId) : undefined
+  }
+
+  const isMayBeSpending = (payload: Record<string, unknown>, draft: DraftRow | undefined): boolean => {
+    const err = asString(payload.error) ?? ''
+    return err.includes(NOT_PAUSED_MARKER) && !autoPauseConfirmed(draft)
+  }
 
   for (const intent of snapshot.intents) {
     if (items.length >= MAX_ITEMS) break
@@ -166,7 +272,7 @@ export function buildFactoryReelAdDraftItems(
       const draftActionId = asString(payload.draft_action_id)
       const draft = draftActionId ? snapshot.drafts.get(draftActionId) : undefined
       if (!draft) {
-        items.push(devItem(clientId, clientName, '草稿账本行找不到', payload.provider_impact, asString(payload.work_order_id)))
+        items.push(devItem(clientId, clientName, '草稿账本行找不到', payload.provider_impact, asString(payload.work_order_id), payload, undefined))
         continue
       }
       const draftStatus = asString(draft.payload.status)
@@ -177,18 +283,30 @@ export function buildFactoryReelAdDraftItems(
       const durationDays = draftObj ? asNumber(draftObj.durationDays) : null
       const budgetText = dailyBudget === null ? '?' : String(dailyBudget)
       const durationText = durationDays === null ? '?' : String(durationDays)
-      const endDate = durationDays === null ? '?' : utcDatePlusDays(intent.created_at, durationDays)
+      const endDate = durationDays === null ? '?' : aucklandDatePlusDays(intent.created_at, durationDays)
 
       const workOrderId = asString(payload.work_order_id)
       const permalink = workOrderId ? snapshot.permalinks.get(workOrderId) ?? null : null
 
-      const capUsd = snapshot.clientCapsUsd.get(clientId)
-      const cap = typeof capUsd === 'number' ? `；这个客户每日总上限 $${capUsd}` : ''
+      const adAccountId = asString(payload.ad_account_id) ?? asString(draft.payload.adAccountId)
+      const accountKey = `${clientId}|${normaliseAdAccountId(adAccountId)}`
+      const accountCap = snapshot.accountCapsUsd?.get(accountKey)
+      const clientCap = snapshot.clientCapsUsd.get(clientId)
+      let cap: string
+      if (typeof accountCap === 'number') {
+        cap = `这个账号每日总上限 $${accountCap}（账户币种）`
+      } else if (typeof clientCap === 'number') {
+        cap = `这个客户每日总上限 $${clientCap}（账户币种）`
+      } else {
+        cap = '没读到这个账号/客户的每日总上限'
+      }
+      cap += '（上限数字仅供参考，批准时系统不会替你拦）'
 
       const what =
         `${clientName}：视频工厂刚发布的 Reel 已自动起草了一条「暂停」的广告（每天最多 $${budgetText}，共 ${durationText} 天，约 ${endDate} 到期）。` +
-        `你批了才会开。这条视频目前不在任何受众池的收人规则里，批了也不会给受众池补新人。` +
-        `自动起草单条上限 $${MAX_AUTO_DAILY_BUDGET}${cap}。Reel：${permalinkText(permalink)}`
+        `建在广告账号尾号 ${accountSuffix(adAccountId)} 下。` +
+        `你批了才会开。受众池是账号级的：要给池子补新人，这条视频还得先加进池子的收人规则，且池子必须挂在同一个广告账号下。` +
+        `自动起草单条上限 $${MAX_AUTO_DAILY_BUDGET}；${cap}。Reel：${permalinkText(permalink)}`
 
       items.push({
         kind: 'factory_reel_ad_awaiting_approval',
@@ -217,19 +335,31 @@ export function buildFactoryReelAdDraftItems(
         })
         continue
       }
-      items.push(devItem(clientId, clientName, plainReason(code), payload.provider_impact, workOrderId))
+      items.push(devItem(clientId, clientName, plainReason(code), payload.provider_impact, workOrderId, payload, draftFor(intent)))
       continue
     }
 
     if (status === 'draft_blocked') {
-      items.push(devItem(clientId, clientName, '起草后被闸门拦下', payload.provider_impact, asString(payload.work_order_id)))
+      const workOrderId = asString(payload.work_order_id)
+      const draft = draftFor(intent)
+      if (isMayBeSpending(payload, draft)) {
+        items.push(mayBeSpendingItem(clientId, clientName, payload, draft, workOrderId))
+        continue
+      }
+      items.push(devItem(clientId, clientName, '起草后被闸门拦下', payload.provider_impact, workOrderId, payload, draft))
       continue
     }
 
     if (status === 'failed') {
       const err = asString(payload.error)
       const reason = err ? err.slice(0, 120) : '未知原因'
-      items.push(devItem(clientId, clientName, reason, payload.provider_impact, asString(payload.work_order_id)))
+      const workOrderId = asString(payload.work_order_id)
+      const draft = draftFor(intent)
+      if (isMayBeSpending(payload, draft)) {
+        items.push(mayBeSpendingItem(clientId, clientName, payload, draft, workOrderId))
+        continue
+      }
+      items.push(devItem(clientId, clientName, reason, payload.provider_impact, workOrderId, payload, draft))
       continue
     }
 
@@ -238,7 +368,8 @@ export function buildFactoryReelAdDraftItems(
       const updatedMs = Date.parse(updatedAt)
       const ageMs = Number.isFinite(updatedMs) ? nowMs - updatedMs : 0
       if (ageMs > STUCK_AFTER_MINUTES * 60 * 1000) {
-        items.push(devItem(clientId, clientName, '跑了很久还没结果，卡住了', payload.provider_impact, asString(payload.work_order_id)))
+        // 卡住的起草：不知道 Meta 上留没留对象，一律按「没确认」说，别替它保证没花钱。
+        items.push(devItem(clientId, clientName, '跑了很久还没结果，卡住了', 'unknown', asString(payload.work_order_id), payload, draftFor(intent)))
       }
       continue
     }
@@ -252,6 +383,17 @@ export function buildFactoryReelAdDraftItems(
       client_name: 'Magic Engine 后台',
       what: `工厂 Reel 自动起草广告的待办超过 ${MAX_ITEMS} 条，这里只列了最新的 ${MAX_ITEMS} 条，还有 ${more} 条没显示。`,
       how: '这条不用你动手 —— 回我一句「查工厂 Reel 自动起草」，我去看是哪里在刷。',
+      href: '',
+    })
+  }
+
+  if (snapshot.truncated) {
+    items.push({
+      kind: 'factory_reel_ad_draft_dev_issue',
+      client_id: 'infra',
+      client_name: 'Magic Engine 后台',
+      what: `工厂 Reel 起草记录太多，待办只读了最近 ${INTENT_LIMIT} 条，更早的失败/被拦记录没显示。`,
+      how: '这条不用你动手 —— 回我一句「工厂 Reel 起草记录太多」，我去看。',
       href: '',
     })
   }
@@ -277,15 +419,32 @@ export async function loadFactoryReelAdDraftSnapshot(
     .from('flywheel_actions')
     .select('id, client_id, created_at, payload')
     .eq('action_type', 'ads.factory_reel_draft')
+    .neq('payload->>mode', 'dry_run')
     .gte('created_at', since)
     .order('created_at', { ascending: false })
     .limit(INTENT_LIMIT)
 
   if (intentsRes.error) return { ok: false, error: intentsRes.error.message }
 
-  const rawIntents = Array.isArray(intentsRes.data) ? intentsRes.data : []
+  // 第二查：不带时间窗，专门捞「还在等人批」的草稿 —— 一条草稿可能等超过 7 天，
+  // 「没报」绝不能等于「没有在等的」。
+  const waitingRes = await supabase
+    .from('flywheel_actions')
+    .select('id, client_id, created_at, payload')
+    .eq('action_type', 'ads.factory_reel_draft')
+    .eq('payload->>status', 'drafted')
+    .neq('payload->>mode', 'dry_run')
+    .order('created_at', { ascending: false })
+    .limit(INTENT_LIMIT)
+
+  if (waitingRes.error) return { ok: false, error: waitingRes.error.message }
+
+  const rawWindowed = Array.isArray(intentsRes.data) ? intentsRes.data : []
+  const rawWaiting = Array.isArray(waitingRes.data) ? waitingRes.data : []
+
+  const seenIds = new Set<string>()
   const intents: IntentRow[] = []
-  for (const row of rawIntents) {
+  for (const row of [...rawWindowed, ...rawWaiting]) {
     const r = asRecord(row)
     if (!r) continue
     const payload = asRecord(r.payload)
@@ -294,14 +453,18 @@ export async function loadFactoryReelAdDraftSnapshot(
     const clientId = asString(r.client_id)
     const createdAt = asString(r.created_at)
     if (!id || !clientId || !createdAt) continue
+    if (seenIds.has(id)) continue
+    seenIds.add(id)
     intents.push({ id, client_id: clientId, created_at: createdAt, payload })
   }
+  intents.sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0))
 
-  const truncated = rawIntents.length === INTENT_LIMIT
+  const truncated = rawWindowed.length === INTENT_LIMIT
 
   const draftIds: string[] = []
   for (const intent of intents) {
-    if (asString(intent.payload.status) !== 'drafted') continue
+    const status = asString(intent.payload.status)
+    if (status !== 'drafted' && status !== 'draft_blocked' && status !== 'failed') continue
     const draftActionId = asString(intent.payload.draft_action_id)
     if (draftActionId) draftIds.push(draftActionId)
   }
@@ -380,9 +543,40 @@ export async function loadFactoryReelAdDraftSnapshot(
     }
   }
 
+  const accountCapsUsd = new Map<string, number | null>()
+  const accountPairs: Array<{ clientId: string; accountId: string }> = []
+  for (const intent of intents) {
+    if (asString(intent.payload.status) !== 'drafted') continue
+    const accountId = normaliseAdAccountId(asString(intent.payload.ad_account_id))
+    if (!accountId) continue
+    if (!accountPairs.some((p) => p.clientId === intent.client_id && p.accountId === accountId)) {
+      accountPairs.push({ clientId: intent.client_id, accountId })
+    }
+  }
+  if (accountPairs.length > 0) {
+    const accountClientIds = Array.from(new Set(accountPairs.map((p) => p.clientId)))
+    const capRes = await supabase
+      .from('client_meta_ad_accounts')
+      .select('client_id, ad_account_id, daily_budget_cap_cents')
+      .in('client_id', accountClientIds)
+    // 读不到账号级上限不算致命：退回客户级上限，别让整栏消失。
+    if (!capRes.error) {
+      const rawAccountCaps = Array.isArray(capRes.data) ? capRes.data : []
+      for (const row of rawAccountCaps) {
+        const r = asRecord(row)
+        if (!r) continue
+        const clientId = asString(r.client_id)
+        const accountId = normaliseAdAccountId(asString(r.ad_account_id))
+        if (!clientId || !accountId) continue
+        const cents = asNumber(r.daily_budget_cap_cents)
+        accountCapsUsd.set(`${clientId}|${accountId}`, cents !== null && cents > 0 ? cents / 100 : null)
+      }
+    }
+  }
+
   return {
     ok: true,
-    snapshot: { intents, drafts, permalinks, clientCapsUsd, truncated },
+    snapshot: { intents, drafts, permalinks, clientCapsUsd, accountCapsUsd, truncated },
   }
 }
 

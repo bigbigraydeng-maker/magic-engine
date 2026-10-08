@@ -85,6 +85,8 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // 一条等人批的草稿、一条被内容检查拦下的，绝不能因为链接问题静默消失。
   'factory_reel_ad_awaiting_approval',
   'factory_reel_ad_content_blocked',
+  // 一条可能正在花钱的广告，绝不能因为链接问题静默消失。
+  'factory_reel_ad_may_be_spending',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */

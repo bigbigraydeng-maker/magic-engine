@@ -35,6 +35,7 @@ function makeSnapshot(overrides: Partial<FactoryReelAdDraftSnapshot> = {}): Fact
     drafts: overrides.drafts ?? new Map<string, DraftRow>(),
     permalinks: overrides.permalinks ?? new Map<string, string | null>(),
     clientCapsUsd: overrides.clientCapsUsd ?? new Map<string, number | null>(),
+    accountCapsUsd: overrides.accountCapsUsd,
     truncated: overrides.truncated ?? false,
   }
 }
@@ -89,6 +90,9 @@ function makeFakeSupabase(config: FakeConfig): FakeSupabase {
         return chain
       },
       eq() {
+        return chain
+      },
+      neq() {
         return chain
       },
       gte() {
@@ -156,7 +160,7 @@ describe('buildFactoryReelAdDraftItems', () => {
     expect(item.what).toContain('https://fb.com/reel/abc')
     expect(item.what).toContain('$20')
     expect(item.what).toContain('2025-06-18')
-    expect(item.what).toContain('不在任何受众池')
+    expect(item.what).toContain('受众池是账号级的')
     expect(item.what).toContain('你批了才会开')
     expect(item.href).toBe('https://app.magicengine.com.au/dashboard/ad-approval')
   })
@@ -193,13 +197,13 @@ describe('buildFactoryReelAdDraftItems', () => {
       drafts: new Map([['d1', awaitingDraft()]]),
       clientCapsUsd: new Map([['c1', 50]]),
     })
-    expect(buildFactoryReelAdDraftItems(withCap, nameOf, NOW)[0].what).toContain('总上限 $50')
+    expect(buildFactoryReelAdDraftItems(withCap, nameOf, NOW)[0].what).toContain('这个客户每日总上限 $50')
 
     const withoutCap = makeSnapshot({
       intents: [draftedIntent()],
       drafts: new Map([['d1', awaitingDraft()]]),
     })
-    expect(buildFactoryReelAdDraftItems(withoutCap, nameOf, NOW)[0].what).not.toContain('总上限')
+    expect(buildFactoryReelAdDraftItems(withoutCap, nameOf, NOW)[0].what).toContain('没读到这个账号/客户的每日总上限')
   })
 
   it('blocked/copy_redline_hit => content_blocked item', () => {
@@ -251,6 +255,8 @@ describe('buildFactoryReelAdDraftItems', () => {
     const items = buildFactoryReelAdDraftItems(snapshot, nameOf, NOW)
     expect(items).toHaveLength(1)
     expect(items[0].what).toContain('[ME-DRAFT] wo-12345')
+    expect(items[0].what).toContain('可能留着对象')
+    expect(items[0].what).not.toContain('没有花钱')
   })
 
   it('failed with provider_impact none => no [ME-DRAFT] mention', () => {
@@ -329,6 +335,148 @@ describe('buildFactoryReelAdDraftItems', () => {
     expect(INTENT_LIMIT).toBe(100)
     expect(STUCK_AFTER_MINUTES).toBe(30)
   })
+
+  it('draft_blocked + not-paused error + autoPause not ok => may_be_spending item', () => {
+    const snapshot = makeSnapshot({
+      intents: [
+        makeIntent({
+          payload: {
+            status: 'draft_blocked',
+            mode: 'on',
+            error: '回读发现有对象不是暂停状态',
+            draft_action_id: 'd1',
+            work_order_id: 'wo-12345678',
+            ad_account_id: 'act_1234567890',
+            campaign_id: 'camp-1',
+            ad_set_id: 'set-1',
+            ad_ids: ['ad-1', 'ad-2'],
+          },
+        }),
+      ],
+      drafts: new Map([
+        ['d1', { id: 'd1', payload: { status: 'blocked', autoPause: { ok: false, failed: ['ad-1'] } } }],
+      ]),
+    })
+    const items = buildFactoryReelAdDraftItems(snapshot, nameOf, NOW)
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('factory_reel_ad_may_be_spending')
+    expect(items[0].what).toContain('可能正在花钱')
+    expect(items[0].what).toContain('系列 camp-1')
+    expect(items[0].what).toContain('广告组 set-1')
+    expect(items[0].what).toContain('广告 ad-1、ad-2')
+    expect(items[0].href).toBe('https://adsmanager.facebook.com/adsmanager/manage/campaigns')  })
+
+  it('draft_blocked + not-paused error + autoPause ok => dev item mentioning 补暂停已成功', () => {
+    const snapshot = makeSnapshot({
+      intents: [
+        makeIntent({
+          payload: {
+            status: 'draft_blocked',
+            mode: 'on',
+            error: '回读发现有对象不是暂停状态',
+            draft_action_id: 'd1',
+            work_order_id: 'wo-12345678',
+          },
+        }),
+      ],
+      drafts: new Map([
+        ['d1', { id: 'd1', payload: { status: 'blocked', autoPause: { ok: true, failed: [] } } }],
+      ]),
+    })
+    const items = buildFactoryReelAdDraftItems(snapshot, nameOf, NOW)
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('factory_reel_ad_draft_dev_issue')
+    expect(items[0].what).toContain('补暂停已成功')
+  })
+
+  it('draft_blocked + not-paused error + draft row missing => may_be_spending item', () => {
+    const snapshot = makeSnapshot({
+      intents: [
+        makeIntent({
+          payload: {
+            status: 'draft_blocked',
+            mode: 'on',
+            error: '回读发现有对象不是暂停状态',
+            draft_action_id: 'd1',
+            work_order_id: 'wo-12345678',
+          },
+        }),
+      ],
+    })
+    const items = buildFactoryReelAdDraftItems(snapshot, nameOf, NOW)
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('factory_reel_ad_may_be_spending')
+  })
+
+  it('stuck started intent => dev item with unknown wording (Meta 后台核对)', () => {
+    const snapshot = makeSnapshot({
+      intents: [
+        makeIntent({
+          created_at: '2025-06-15T11:15:00.000Z',
+          payload: { status: 'started', mode: 'on', updated_at: '2025-06-15T11:15:00.000Z', provider_impact: 'none' },
+        }),
+      ],
+    })
+    const items = buildFactoryReelAdDraftItems(snapshot, nameOf, NOW)
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('factory_reel_ad_draft_dev_issue')
+    expect(items[0].what).toContain('Meta 后台核对')
+    expect(items[0].what).not.toContain('没有花钱')
+  })
+
+  it('awaiting item contains account suffix, account-level audience note, and Auckland end date', () => {
+    const snapshot = makeSnapshot({
+      intents: [
+        draftedIntent({
+          created_at: '2026-10-09T12:30:00.000Z',
+          payload: { ad_account_id: 'act_1234567890' },
+        }),
+      ],
+      drafts: new Map([['d1', awaitingDraft({ draft: { dailyBudget: 20, durationDays: 7 } })]]),
+    })
+    const items = buildFactoryReelAdDraftItems(snapshot, nameOf, NOW)
+    expect(items).toHaveLength(1)
+    const expectedEnd = new Date(
+      Date.parse('2026-10-09T12:30:00.000Z') + 7 * 86400000,
+    ).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })
+    expect(expectedEnd).toBe('2026-10-17')
+    expect(items[0].what).toContain('尾号 7890')
+    expect(items[0].what).toContain('受众池是账号级的')
+    expect(items[0].what).toContain(expectedEnd)
+  })
+
+  it('cap wording: account cap wins, then client cap, then none; 仅供参考 always', () => {
+    const base = {
+      intents: [draftedIntent({ payload: { ad_account_id: 'act_1234567890' } })],
+      drafts: new Map([['d1', awaitingDraft()]]),
+    }
+    const withAccount = makeSnapshot({
+      ...base,
+      accountCapsUsd: new Map([['c1|1234567890', 80]]),
+      clientCapsUsd: new Map([['c1', 50]]),
+    })
+    const accountWhat = buildFactoryReelAdDraftItems(withAccount, nameOf, NOW)[0].what
+    expect(accountWhat).toContain('这个账号每日总上限 $80')
+    expect(accountWhat).toContain('仅供参考')
+
+    const withClient = makeSnapshot({ ...base, clientCapsUsd: new Map([['c1', 50]]) })
+    const clientWhat = buildFactoryReelAdDraftItems(withClient, nameOf, NOW)[0].what
+    expect(clientWhat).toContain('这个客户每日总上限 $50')
+    expect(clientWhat).toContain('仅供参考')
+
+    const none = makeSnapshot(base)
+    const noneWhat = buildFactoryReelAdDraftItems(none, nameOf, NOW)[0].what
+    expect(noneWhat).toContain('没读到这个账号/客户的每日总上限')
+    expect(noneWhat).toContain('仅供参考')
+  })
+
+  it('truncated snapshot => extra dev item', () => {
+    const snapshot = makeSnapshot({ truncated: true })
+    const items = buildFactoryReelAdDraftItems(snapshot, nameOf, NOW)
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('factory_reel_ad_draft_dev_issue')
+    expect(items[0].what).toContain('只读了最近')
+  })
 })
 
 // ---- loader tests ----------------------------------------------------------
@@ -359,11 +507,12 @@ describe('loadFactoryReelAdDraftSnapshot', () => {
         },
       },
     })
-    // override from to return error on second call
+    // override from to return error on the drafts query (3rd flywheel_actions call:
+    // 1 = windowed intents, 2 = waiting intents, 3 = draft rows)
     const originalFrom = fake.client.from.bind(fake.client)
     fake.client.from = ((table: string) => {
       call++
-      if (call === 2) {
+      if (call === 3) {
         return {
           select: () => ({
             in: () => Promise.resolve({ data: [], error: { message: 'drafts boom' } }),
@@ -433,6 +582,156 @@ describe('loadFactoryReelAdDraftSnapshot', () => {
     })
     const result = await loadFactoryReelAdDraftSnapshot(fake.client, NOW)
     expect(result.ok).toBe(true)
+  })
+
+  it('second (no-window) query surfaces an old drafted intent; windowed query used .neq on mode', async () => {
+    const calls: Array<{ table: string; neq: string[] }> = []
+    let flywheelCall = 0
+    const oldIntent = {
+      id: 'old',
+      client_id: 'c1',
+      created_at: '2025-05-26T12:00:00.000Z',
+      payload: { status: 'drafted', mode: 'on', draft_action_id: 'd1', work_order_id: 'wo-old' },
+    }
+    const draftRow = {
+      id: 'd1',
+      payload: { status: 'awaiting_approval', draft: { dailyBudget: 20, durationDays: 3 } },
+    }
+
+    function makeFlywheelChain(): unknown {
+      const neqCalls: string[] = []
+      const chain = {
+        select() {
+          return chain
+        },
+        eq() {
+          return chain
+        },
+        neq(col: string) {
+          neqCalls.push(col)
+          return chain
+        },
+        gte() {
+          return chain
+        },
+        order() {
+          return chain
+        },
+        limit() {
+          return chain
+        },
+        in() {
+          return chain
+        },
+        then(resolve: (v: { data: unknown; error: null }) => unknown) {
+          flywheelCall++
+          const data = flywheelCall === 1 ? [] : flywheelCall === 2 ? [oldIntent] : [draftRow]
+          calls.push({ table: 'flywheel_actions', neq: neqCalls })
+          return Promise.resolve({ data, error: null }).then(resolve)
+        },
+      }
+      return chain
+    }
+
+    const client = {
+      from(table: string) {
+        if (table === 'flywheel_actions') return makeFlywheelChain()
+        const empty = {
+          select: () => empty,
+          eq: () => empty,
+          neq: () => empty,
+          gte: () => empty,
+          order: () => empty,
+          limit: () => empty,
+          in: () => empty,
+          then: (resolve: (v: { data: unknown; error: null }) => unknown) =>
+            Promise.resolve({ data: [], error: null }).then(resolve),
+        }
+        return empty
+      },
+    } as never as SupabaseClient
+
+    const result = await loadFactoryReelAdDraftSnapshot(client, NOW)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.snapshot.intents.map((i) => i.id)).toContain('old')
+      const items = buildFactoryReelAdDraftItems(result.snapshot, nameOf, NOW)
+      expect(items.some((i) => i.kind === 'factory_reel_ad_awaiting_approval')).toBe(true)
+    }
+    expect(calls[0].neq).toContain('payload->>mode')
+  })
+
+  it('reads draft rows for a failed intent with draft_action_id', async () => {
+    const fake = makeFakeSupabase({
+      tables: {
+        flywheel_actions: {
+          data: [
+            {
+              id: 'i1',
+              client_id: 'c1',
+              created_at: '2025-06-15T11:00:00.000Z',
+              payload: {
+                status: 'failed',
+                mode: 'on',
+                error: '回读发现有对象不是暂停状态',
+                draft_action_id: 'd1',
+                work_order_id: 'wo-1',
+              },
+            },
+            {
+              id: 'd1',
+              payload: { status: 'blocked', autoPause: { ok: false, failed: ['ad-1'] } },
+            },
+          ],
+          error: null,
+        },
+        content_work_orders: { data: [], error: null },
+        ad_strategy_configs: { data: [], error: null },
+      },
+    })
+    const result = await loadFactoryReelAdDraftSnapshot(fake.client, NOW)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.snapshot.drafts.has('d1')).toBe(true)
+      const items = buildFactoryReelAdDraftItems(result.snapshot, nameOf, NOW)
+      expect(items[0].kind).toBe('factory_reel_ad_may_be_spending')
+    }
+  })
+
+  it('account caps read error => ok:true and empty accountCapsUsd', async () => {
+    const fake = makeFakeSupabase({
+      tables: {
+        flywheel_actions: {
+          data: [
+            {
+              id: 'i1',
+              client_id: 'c1',
+              created_at: '2025-06-15T11:00:00.000Z',
+              payload: {
+                status: 'drafted',
+                mode: 'on',
+                draft_action_id: 'd1',
+                work_order_id: 'wo-1',
+                ad_account_id: 'act_1234567890',
+              },
+            },
+            {
+              id: 'd1',
+              payload: { status: 'awaiting_approval', draft: { dailyBudget: 20, durationDays: 3 } },
+            },
+          ],
+          error: null,
+        },
+        content_work_orders: { data: [], error: null },
+        ad_strategy_configs: { data: [], error: null },
+        client_meta_ad_accounts: { data: [], error: { message: 'account cap boom' } },
+      },
+    })
+    const result = await loadFactoryReelAdDraftSnapshot(fake.client, NOW)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.snapshot.accountCapsUsd?.size ?? 0).toBe(0)
+    }
   })
 })
 
