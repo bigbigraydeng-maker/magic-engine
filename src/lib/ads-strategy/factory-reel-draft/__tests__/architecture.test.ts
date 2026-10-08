@@ -5,11 +5,9 @@
  *   「本功能里 ME 代码把广告打开（切到 ACTIVE）的唯一途径是：没有。
  *     激活入口始终是 /api/ad-approval。」
  *
- * 🔴 这句话的适用范围仅限本文件里的这些测试所冻结的东西：
- *    - 受保护文件的 import 白名单（加一条 import 就是一次要过 review 的 diff）；
- *    - 受保护文件里不许出现激活符号 / 激活模块 / 动态 import / require / 'ACTIVE' 字面量；
- *    - 仓库里既有的激活写入点、createDraftForApproval 调用点、publishDraftPaused 调用点
- *      被冻结成「只许缩小」的清单 —— 它们不会被本功能删除，只是不许再新增。
+ * 🔴 保证的确切范围：
+ *    - 受保护文件（本功能新增的文件）里没有任何开启广告的路径；
+ *    - 全仓其它既有开启入口被冻结，只许缩小，不是被删除。
  *    本文件不声称、也无法证明仓库里不存在别的激活路径；它只保证本功能不新增。
  *
  * 🔴 判据一律先 stripComments() 再匹配：一条把自己的文档当罪证的规则，
@@ -134,6 +132,15 @@ const FORBIDDEN_SYMBOLS = [
 /** 本功能里绝不许出现的模块（子串匹配）。 */
 const FORBIDDEN_MODULE_SUBSTRINGS = ['ad-approval', 'spend-activation']
 
+/**
+ * 允许直接发网络请求 / 引用 GRAPH_BASE 的受保护文件。
+ * 只有这两个文件是「网络边界」，其余受保护文件不许自己发请求。
+ */
+const NETWORK_ALLOWED = [
+  'src/lib/ads-strategy/factory-reel-draft/graph-io.ts',
+  'src/lib/ads-strategy/factory-reel-draft/real-deps.ts',
+]
+
 /** 仓库里既有的激活写入点 —— 只许缩小，不许新增。 */
 const ACTIVATION_WRITERS_ALLOWED = [
   'src/app/api/ad-approval/[actionId]/route.ts',
@@ -160,6 +167,23 @@ const CREATE_DRAFT_CALLERS_ALLOWED = [
 const PUBLISH_PAUSED_CALLERS_ALLOWED = [
   'src/lib/ads-strategy/draft-and-gate.ts',
   'src/lib/meta/ad-publisher.ts',
+]
+
+/**
+ * 仓库里既有的「引入激活符号 / 激活模块」的文件 —— 只许缩小，不许新增。
+ * 命中判据见 importsActivation()。
+ */
+const ACTIVATION_IMPORTERS_ALLOWED = [
+  'src/app/api/ad-approval/[actionId]/route.ts',
+  'src/app/api/clients/[id]/google-ads/execute/route.ts',
+  'src/app/api/clients/[id]/meta-ads/execute/route.ts',
+  'src/app/api/clients/[id]/tiktok-ads/execute/route.ts',
+  'src/lib/ads-strategy/draft-and-gate.ts',
+  'src/lib/capabilities/ads-auto-pause/deps.ts',
+  'src/lib/capabilities/ads/pause-campaign.ts',
+  'src/lib/capabilities/ads/pause-unit.ts',
+  'src/lib/meta/client.ts',
+  'src/lib/winner-reel-sync/engine.ts',
 ]
 
 /** 递归列出目录下的 `.ts` / `.tsx` 文件（跳过 node_modules / .next）。 */
@@ -201,36 +225,63 @@ function listSource(dir: string): string[] {
 }
 
 /**
- * 用 TypeScript 编译器 API 解析 import，返回排序去重后的 `${specifier}::${name}` 列表。
+ * 用 TypeScript 编译器 API 解析 import / re-export，返回排序去重后的
+ * `${specifier}::${name}` 列表。
  *
  * 命名 import 用「导入名」（`propertyName ?? name`），所以
  * `import { setAdSetStatus as s }` 仍然记作 `setAdSetStatus`。
+ *
+ * 🔴 re-export 也算「引入」：`export { a as b } from 'x'` => `x::a`，
+ *    `export * from 'x'` / `export * as ns from 'x'` => `x::*`。
+ *    否则一条 `export { activatePublished } from '…'` 就能把激活符号
+ *    从受保护文件里「转手」出去而躲过白名单。
  */
 function extractImports(source: string): string[] {
   const sf = ts.createSourceFile('probe.ts', source, ts.ScriptTarget.Latest, true)
   const out: string[] = []
 
   for (const stmt of sf.statements) {
-    if (!ts.isImportDeclaration(stmt)) continue
-    if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue
-    const spec = stmt.moduleSpecifier.text
-    const clause = stmt.importClause
+    if (ts.isImportDeclaration(stmt)) {
+      if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue
+      const spec = stmt.moduleSpecifier.text
+      const clause = stmt.importClause
 
-    if (!clause) {
-      out.push(`${spec}::<side-effect>`)
+      if (!clause) {
+        out.push(`${spec}::<side-effect>`)
+        continue
+      }
+
+      if (clause.name) {
+        out.push(`${spec}::default`)
+      }
+
+      const bindings = clause.namedBindings
+      if (bindings) {
+        if (ts.isNamespaceImport(bindings)) {
+          out.push(`${spec}::*`)
+        } else if (ts.isNamedImports(bindings)) {
+          for (const el of bindings.elements) {
+            const name = el.propertyName ? el.propertyName.text : el.name.text
+            out.push(`${spec}::${name}`)
+          }
+        }
+      }
       continue
     }
 
-    if (clause.name) {
-      out.push(`${spec}::default`)
-    }
+    if (ts.isExportDeclaration(stmt)) {
+      if (!stmt.moduleSpecifier || !ts.isStringLiteral(stmt.moduleSpecifier)) continue
+      const spec = stmt.moduleSpecifier.text
+      const clause = stmt.exportClause
 
-    const bindings = clause.namedBindings
-    if (bindings) {
-      if (ts.isNamespaceImport(bindings)) {
+      if (!clause) {
+        // `export * from 'x'`
         out.push(`${spec}::*`)
-      } else if (ts.isNamedImports(bindings)) {
-        for (const el of bindings.elements) {
+      } else if (ts.isNamespaceExport(clause)) {
+        // `export * as ns from 'x'`
+        out.push(`${spec}::*`)
+      } else if (ts.isNamedExports(clause)) {
+        for (const el of clause.elements) {
           const name = el.propertyName ? el.propertyName.text : el.name.text
           out.push(`${spec}::${name}`)
         }
@@ -241,12 +292,41 @@ function extractImports(source: string): string[] {
   return Array.from(new Set(out)).sort()
 }
 
-/** 对（已挖空注释的）源码做红线检查，返回原因字符串列表。 */
-function findViolations(source: string): string[] {
-  const code = stripComments(source)
+/**
+ * 折叠字符串拼接：把 `'ACT' + 'IVE'` 这类 BinaryExpression（PlusToken）
+ * 求值成字符串；操作数可以是字符串字面量、括号表达式、或嵌套的同类表达式。
+ * 求不出来就返回 null。
+ */
+function foldStringConcat(node: ts.Node): string | null {
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return node.text
+  }
+  if (ts.isParenthesizedExpression(node)) {
+    return foldStringConcat(node.expression)
+  }
+  if (
+    ts.isBinaryExpression(node) &&
+    node.operatorToken.kind === ts.SyntaxKind.PlusToken
+  ) {
+    const left = foldStringConcat(node.left)
+    const right = foldStringConcat(node.right)
+    if (left === null || right === null) return null
+    return left + right
+  }
+  return null
+}
+
+/**
+ * 对源码做红线检查，返回原因字符串列表。
+ *
+ * 🔴 字面量 / 调用一律走 AST（在 RAW 源码上 parse），不再用正则：
+ *    注释根本不会进 AST，所以注释里的违规天然不响；
+ *    而字符串里的 `//` 或 `/*` 也无法再「吃掉」后面的真实代码。
+ */
+function findViolations(source: string, opts?: { allowNetwork?: boolean }): string[] {
   const reasons: string[] = []
 
-  const imports = extractImports(code)
+  const imports = extractImports(source)
   for (const entry of imports) {
     const sep = entry.indexOf('::')
     const spec = entry.slice(0, sep)
@@ -263,11 +343,68 @@ function findViolations(source: string): string[] {
     }
   }
 
-  if (/\bimport\s*\(/.test(code)) reasons.push('dynamic_import')
-  if (/\brequire\s*\(/.test(code)) reasons.push('require_call')
-  if (/['"`]ACTIVE['"`]/.test(code)) reasons.push('active_literal')
+  const sf = ts.createSourceFile('probe.ts', source, ts.ScriptTarget.Latest, true)
+
+  const visit = (node: ts.Node): void => {
+    // active_literal：字符串字面量 / 模板片段 / 折叠后的拼接
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+      if (node.text.includes('ACTIVE')) reasons.push('active_literal')
+    } else if (
+      node.kind === ts.SyntaxKind.TemplateHead ||
+      node.kind === ts.SyntaxKind.TemplateMiddle ||
+      node.kind === ts.SyntaxKind.TemplateTail
+    ) {
+      if ((node as ts.TemplateLiteralLikeNode).text.includes('ACTIVE')) {
+        reasons.push('active_literal')
+      }
+    } else if (ts.isBinaryExpression(node)) {
+      const folded = foldStringConcat(node)
+      if (folded !== null && folded.includes('ACTIVE')) reasons.push('active_literal')
+    }
+
+    // 调用：dynamic import / require / fetch
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression
+      if (callee.kind === ts.SyntaxKind.ImportKeyword) {
+        reasons.push('dynamic_import')
+      } else if (ts.isIdentifier(callee) && callee.text === 'require') {
+        reasons.push('require_call')
+      } else if (
+        (ts.isIdentifier(callee) && callee.text === 'fetch') ||
+        (ts.isPropertyAccessExpression(callee) && callee.name.text === 'fetch')
+      ) {
+        if (!opts?.allowNetwork) reasons.push('fetch_call')
+      }
+    }
+
+    // GRAPH_BASE 引用
+    if (ts.isIdentifier(node) && node.text === 'GRAPH_BASE') {
+      if (!opts?.allowNetwork) reasons.push('graph_base_reference')
+    }
+
+    ts.forEachChild(node, visit)
+  }
+
+  visit(sf)
 
   return Array.from(new Set(reasons)).sort()
+}
+
+/**
+ * 该文件是否「引入激活符号 / 激活模块」。
+ * 命中：import 的模块名含 'ad-approval' / 'spend-activation'，
+ * 或 import 的符号名在 FORBIDDEN_SYMBOLS 里。
+ */
+function importsActivation(source: string): boolean {
+  return extractImports(source).some((entry) => {
+    const sep = entry.indexOf('::')
+    const spec = entry.slice(0, sep)
+    const name = entry.slice(sep + 2)
+    return (
+      FORBIDDEN_MODULE_SUBSTRINGS.some((s) => spec.includes(s)) ||
+      FORBIDDEN_SYMBOLS.includes(name)
+    )
+  })
 }
 
 /** 比较两份 import 清单，返回新增 / 删除。 */
@@ -351,11 +488,13 @@ describe('B. factory-reel-draft 目录里的每个非测试 .ts 都在白名单�
 describe('C. 受保护文件里没有红线违规', () => {
   it('guarded files have no violations', () => {
     for (const file of Object.keys(GUARDED_IMPORTS)) {
-      const violations = findViolations(read(file))
+      const allowNetwork = NETWORK_ALLOWED.includes(file)
+      const violations = findViolations(read(file), { allowNetwork })
       expect(
         violations,
         `${file} 命中红线：${violations.join(', ')}\n` +
-          '本功能不许出现激活符号 / 激活模块 / 动态 import / require / \'ACTIVE\' 字面量。',
+          '本功能不许出现激活符号 / 激活模块 / 动态 import / require / \'ACTIVE\' 字面量；' +
+          '除网络边界文件外也不许直接 fetch / 引用 GRAPH_BASE。',
       ).toEqual([])
     }
   })
@@ -420,6 +559,18 @@ describe('E. 全仓冻结清单（只许缩小）', () => {
         offenders.join('\n'),
     ).toEqual([])
   })
+
+  it('activation importers are a subset of the frozen allowlist', () => {
+    const found = scanRepo(importsActivation)
+    const allowed = new Set(ACTIVATION_IMPORTERS_ALLOWED)
+    const offenders = found.filter((f) => !allowed.has(f))
+    expect(
+      offenders,
+      '出现了新的「引入激活符号 / 激活模块」的文件。\n' +
+        '请把新文件拿去过 review，确认它确实走 /api/ad-approval，再决定是否扩白名单。\n' +
+        offenders.join('\n'),
+    ).toEqual([])
+  })
 })
 
 describe('F. 探针：判据必须真的会响', () => {
@@ -443,6 +594,34 @@ describe('F. 探针：判据必须真的会响', () => {
     expect(v.some((r) => r.startsWith('forbidden_module:'))).toBe(true)
   })
 
+  it('extractImports 处理 re-export', () => {
+    const re = extractImports(
+      `export { activatePublished } from '@/lib/meta/ad-publisher'`,
+    )
+    expect(re).toContain('@/lib/meta/ad-publisher::activatePublished')
+    expect(
+      findViolations(`export { activatePublished } from '@/lib/meta/ad-publisher'`),
+    ).toContain('forbidden_symbol:activatePublished')
+
+    const star = extractImports(`export * from './x'`)
+    expect(star).toContain('./x::*')
+    expect(findViolations(`export * from './x'`)).toContain(
+      'namespace_or_default_import',
+    )
+
+    const ns = extractImports(`export * as ns from './x'`)
+    expect(ns).toContain('./x::*')
+  })
+
+  it('importsActivation 会响 / 不响（含别名）', () => {
+    expect(
+      importsActivation(
+        `import { activatePublished as go } from '@/lib/meta/ad-publisher'\ngo()`,
+      ),
+    ).toBe(true)
+    expect(importsActivation(`import { a } from './a'\nexport const b = a`)).toBe(false)
+  })
+
   it('findViolations 命中 namespace / default import', () => {
     expect(findViolations(`import * as m from './x'`)).toContain(
       'namespace_or_default_import',
@@ -461,6 +640,42 @@ describe('F. 探针：判据必须真的会响', () => {
     expect(findViolations(`const s = 'ACTIVE'`)).toContain('active_literal')
     expect(findViolations(`const o = { status: "ACTIVE" }`)).toContain('active_literal')
     expect(findViolations('const s = `ACTIVE`')).toContain('active_literal')
+  })
+
+  it('findViolations 命中字符串花招', () => {
+    // 字符串里的 `//` 不能吃掉后面的真实代码
+    expect(findViolations(`const t = "a //"; const s = 'ACTIVE'`)).toContain(
+      'active_literal',
+    )
+    // 子串匹配
+    expect(findViolations(`const s = 'status=ACTIVE'`)).toContain('active_literal')
+    // 拼接折叠
+    expect(findViolations(`const s = 'ACT' + 'IVE'`)).toContain('active_literal')
+    // 模板片段
+    expect(findViolations('const s = `x${1}ACTIVE`')).toContain('active_literal')
+    // 字符串里的 `/*` 不能吃掉后面的真实代码
+    expect(
+      findViolations(`const a = "/*"; const s = 'ACTIVE'; const b = "*/"`),
+    ).toContain('active_literal')
+  })
+
+  it('findViolations 对注释里的违规不响', () => {
+    expect(
+      findViolations("// 'ACTIVE' activatePublished( import("),
+    ).toEqual([])
+    expect(findViolations("/* 'ACTIVE' activatePublished( import( */")).toEqual([])
+  })
+
+  it('findViolations 命中 fetch / GRAPH_BASE（受网络限制时）', () => {
+    expect(findViolations(`await fetch('https://x')`)).toContain('fetch_call')
+    expect(findViolations(`await fetch('https://x')`, { allowNetwork: true })).not.toContain(
+      'fetch_call',
+    )
+    expect(findViolations(`globalThis.fetch('https://x')`)).toContain('fetch_call')
+    expect(findViolations(`const u = GRAPH_BASE`)).toContain('graph_base_reference')
+    expect(findViolations(`const u = GRAPH_BASE`, { allowNetwork: true })).not.toContain(
+      'graph_base_reference',
+    )
   })
 
   it('findViolations 对干净源码不响', () => {
