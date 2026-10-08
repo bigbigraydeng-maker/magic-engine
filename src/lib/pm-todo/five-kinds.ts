@@ -99,6 +99,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   linkedin_progress_needs_setup: 'one_click',
   linkedin_progress_failed: 'one_click', // 先看 Publer 里 LinkedIn 账号掉没掉线
   daily_plan_post_unmeasured: 'one_click', // 重新连接 Meta / 确认帖子公开
+  daily_plan_first_comment_failed: 'one_click', // 在帖子下补发首评（文案已写好，复制即可）
   mailchimp_export_broken: 'one_click', // 设置页填回 Mailchimp Audience ID
   lead_sheet_reauth_needed: 'one_click', // 写表被 Google 判 403，重新走一次「连接 Google」
   blog_publish_channel_broken: 'one_click', // 去设置里把网站发布通道接通

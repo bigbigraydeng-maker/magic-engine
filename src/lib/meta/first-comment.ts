@@ -1,9 +1,25 @@
+import { createHash } from 'node:crypto'
+
 // 共享的 Facebook「首评」写入器。
 //
 // 从 facebook-reel-adapter.ts 里抽出来(纯重构,Reel 行为不变),好让 Daily Plan 帖复用同一套:
 // ① 先扫已有评论找零宽幂等标记 —— 命中就返回,绝不重复发;
 // ② 没命中才 POST 一条,把标记埋在正文末尾,下次扫描能认出来;
 // ③ 读失败一律抛错,绝不「读不到就当没有」然后盲发。
+
+/**
+ * 幂等标记:namespace 区分业务线(例如 'daily-plan-first-comment'),tag 是该帖子的幂等键。
+ * 同一 namespace+tag 永远得到同一个不可见标记;不同 namespace 互不冲突。
+ */
+export function buildFirstCommentMarker(namespace: string, tag: string): string {
+  const hash = createHash('sha256').update(`${namespace}:${tag}`).digest('hex').slice(0, 8)
+  const bits = hash
+    .split('')
+    .map((c) => parseInt(c, 16).toString(2).padStart(4, '0'))
+    .join('')
+  // \u2063 不可见分隔符作锚点;1 → \u200c 零宽不连字,0 → \u200b 零宽空格。
+  return '\u2063' + bits.split('').map((bit) => (bit === '1' ? '\u200c' : '\u200b')).join('')
+}
 
 export interface EnsureFirstCommentArgs {
   /** 例如 'https://graph.facebook.com/v25.0' */

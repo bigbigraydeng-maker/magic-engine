@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ensureFacebookFirstComment } from './first-comment'
+import { buildFirstCommentMarker, ensureFacebookFirstComment } from './first-comment'
 
 const GRAPH = 'https://graph.facebook.com/v25.0'
 const OBJECT_ID = 'video-1'
@@ -8,6 +8,31 @@ const MARKER = '⁣​‌'
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status })
 }
+
+describe('buildFirstCommentMarker', () => {
+  it('同一 namespace+tag 永远得到同一个标记', () => {
+    expect(buildFirstCommentMarker('daily-plan-first-comment', 'fbpost_a')).toBe(
+      buildFirstCommentMarker('daily-plan-first-comment', 'fbpost_a'),
+    )
+  })
+
+  it('不同 namespace → 不同标记', () => {
+    expect(buildFirstCommentMarker('ns-a', 'tag')).not.toBe(buildFirstCommentMarker('ns-b', 'tag'))
+  })
+
+  it('不同 tag → 不同标记', () => {
+    expect(buildFirstCommentMarker('ns', 'tag-a')).not.toBe(buildFirstCommentMarker('ns', 'tag-b'))
+  })
+
+  it('以 \\u2063 打头,其后每个字符都是 \\u200b 或 \\u200c,总长 1 + 32', () => {
+    const marker = buildFirstCommentMarker('daily-plan-first-comment', 'fbpost_a')
+    expect(marker[0]).toBe('\u2063')
+    expect(marker.length).toBe(1 + 32)
+    for (const ch of marker.slice(1)) {
+      expect(ch === '\u200b' || ch === '\u200c').toBe(true)
+    }
+  })
+})
 
 describe('ensureFacebookFirstComment', () => {
   it('第 1 页已有带标记的评论 → 返回其 id,只读一次,不发 POST', async () => {
