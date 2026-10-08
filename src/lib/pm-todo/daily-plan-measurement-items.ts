@@ -12,7 +12,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-items'
 import { STORY_RESOLVE_JOB_NAME } from '@/lib/campaign/daily-plan-publish'
 
-export type DailyPlanMeasurementItemKind = 'daily_plan_post_unmeasured'
+export type DailyPlanMeasurementItemKind = 'daily_plan_post_unmeasured' | 'daily_plan_first_comment_failed'
 
 const APP_BASE = 'https://app.magicengine.com.au'
 const LOOKBACK_DAYS = 7
@@ -26,6 +26,7 @@ interface ResolveFailureSummary {
   idempotency_key?: unknown
   photo_id?: unknown
   post_id?: unknown
+  first_comment_text?: unknown
 }
 
 function str(value: unknown): string {
@@ -48,6 +49,28 @@ function howFor(reason: string, clientId: string, key: string, objectId: string)
   return {
     how: `① 打开链接，确认这条帖子在 Facebook 上是公开状态；② 如果打不开或已被删，这条不用再管；③ 如果是公开的，${handoff}`,
     href: facebookLink,
+  }
+}
+
+/**
+ * 帖子发出去了，但第一条评论（放预约链接的那条）没贴上 —— 读者在帖子里找不到预约入口。
+ * 文案已经写好，PM 复制即可，不用再问人。
+ */
+function firstCommentItem(
+  clientId: string,
+  clientName: string,
+  date: string,
+  reason: string,
+  commentText: string,
+  objectId: string,
+): ManualItem {
+  return {
+    kind: 'daily_plan_first_comment_failed',
+    client_id: clientId,
+    client_name: clientName,
+    what: `${clientName} 计划在 ${date || '某天'} 发的 Facebook 帖子已经发出，但第一条评论（放预约链接的那条）没贴上 —— 现在这条帖子里读者找不到预约入口`,
+    how: `① 打开链接，确认这条帖子是公开状态；② 用主页身份在这条帖子下面发一条评论，内容照抄下面这段：\n${commentText}\n③ 发完这条待办不用再管。失败原因：${reason || '未记录'}；如果原因是 token_unavailable，先到客户设置「平台连接」点一次「连接 Meta」。`,
+    href: `https://www.facebook.com/${objectId}`,
   }
 }
 
@@ -75,12 +98,19 @@ export async function pushDailyPlanMeasurementItems(
     const key = str(s.idempotency_key)
     // Scheduled photos carry photo_id; immediate posts whose handoff failed carry post_id.
     const objectId = str(s.photo_id) || str(s.post_id)
-    if (!clientId || !key || !objectId || seen.has(key)) continue
-    seen.add(key)
+    const isFirstComment = str(s.outcome) === 'first_comment_failed'
+    const dedupKey = `${isFirstComment ? 'first_comment' : 'measurement'}:${key}`
+    if (!clientId || !key || !objectId || seen.has(dedupKey)) continue
+    seen.add(dedupKey)
     if (seen.size > MAX_ITEMS) break
 
     const clientName = clientNames.get(clientId)?.name ?? '未知客户'
     const date = str(s.date)
+    if (isFirstComment) {
+      const commentText = str(s.first_comment_text) || '（内容没记录，请按该日计划里的 CTA 和链接重写一条）'
+      items.push(firstCommentItem(clientId, clientName, date, str(s.reason), commentText, objectId))
+      continue
+    }
     const { how, href } = howFor(str(s.reason), clientId, key, objectId)
     items.push({
       kind: 'daily_plan_post_unmeasured',

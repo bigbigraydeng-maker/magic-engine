@@ -37,7 +37,14 @@ import {
 } from '@/lib/campaign/daily-plan'
 import { postChecklistPasses } from '@/lib/social/content-review'
 import { judgePriceClaimWithSource, priceGateMessage } from '@/lib/content/price-claim-gate'
-import { buildPostPriceText, judgePostPriceFacts, loadOfferPriceFacts } from '@/lib/content/price-fact-gate'
+import { judgePostPriceFacts, loadOfferPriceFacts } from '@/lib/content/price-fact-gate'
+import {
+  buildDailyPlanAutoChecks,
+  buildDailyPlanFirstComment,
+  buildDailyPlanPostMessage,
+} from '@/lib/campaign/daily-plan-first-comment'
+import { buildFirstCommentMarker, ensureFacebookFirstComment } from '@/lib/meta/first-comment'
+import { GRAPH_BASE } from '@/lib/meta/graph-base'
 import {
   CampaignDailyPublishCommandSchema,
   CampaignDailyPublishMetaSchema,
@@ -57,6 +64,7 @@ import {
   type CampaignDailyPublishPlannedPost,
   type CampaignDailyPublishedPost,
   type DailyPlanPostPublishedEvent,
+  type FirstCommentStatus,
   type StoryResolveDue,
 } from '@/lib/campaign/daily-plan-publish'
 import { writeMeasurementRecord } from '@/lib/campaign/daily-plan-measurement-record'
@@ -148,7 +156,12 @@ async function loadReviewedPlan(
 }
 
 interface PublishCandidate extends CampaignDailyPublishPlannedPost {
+  /** The Post body as published — hook + body, no CTA and no link. */
   message: string
+  /** The first comment text (CTA + tracked link) posted after the Post. */
+  firstCommentText: string
+  /** What the price gates judge: the Post body *and* the first comment. */
+  judgedText: string
   imageUrl: string
   imageSource: string | null
 }
@@ -181,6 +194,7 @@ async function buildCandidates(
   const bundleByDate = new Map(row.planData.bundles.map(bundle => [bundle.date, bundle]))
   const candidates: PublishCandidate[] = []
   const notReady: string[] = []
+  const firstCommentFailures: Array<{ date: string; failed_checks: string[] }> = []
 
   for (const entry of selected) {
     const post = bundleByDate.get(entry.date)?.post
@@ -198,6 +212,28 @@ async function buildCandidates(
       notReady.push(entry.date)
       continue
     }
+
+    // The CTA and its link belong in the first comment, never in the Post body.
+    // Re-run the same auto-checks the reviewer saw; a Post that fails them (or
+    // whose first comment cannot be built) must not reach a Page.
+    const checks = buildDailyPlanAutoChecks({
+      post: { hook: post.hook, body: post.body, cta: post.cta, cta_url: post.cta_url },
+      planId: row.id,
+      date: entry.date,
+    })
+    const firstComment = buildDailyPlanFirstComment({
+      cta: post.cta,
+      ctaUrl: post.cta_url,
+      planId: row.id,
+      date: entry.date,
+    })
+    const failedChecks = checks.filter(check => check.outcome !== 'PASS').map(check => check.key)
+    if (firstComment === null || failedChecks.length > 0) {
+      firstCommentFailures.push({ date: entry.date, failed_checks: failedChecks })
+      continue
+    }
+
+    const message = buildDailyPlanPostMessage(post)
     candidates.push({
       date: entry.date,
       idempotency_key: publishIdempotencyKey({
@@ -209,12 +245,20 @@ async function buildCandidates(
       }),
       image_asset_id: entry.image_asset_id,
       cta_url: entry.cta_url,
-      message: buildPostPriceText(post),
+      message,
+      firstCommentText: firstComment.text,
+      judgedText: [message, firstComment.text].join('\n\n'),
       imageUrl: asset.storage_url as string,
       imageSource: (asset.source as string | null) ?? null,
     })
   }
 
+  if (firstCommentFailures.length > 0) {
+    return conflict('FIRST_COMMENT_CHECK_FAILED', {
+      blocked: firstCommentFailures,
+      hint: '整批已暂停（不是只拦列出的日期）：这些日期的帖子正文里含有 CTA 或链接，或首评无法生成；把链接和 CTA 从正文去掉后重新审核。',
+    })
+  }
   if (notReady.length > 0) {
     return NextResponse.json({ success: false, error: 'POSTS_NOT_READY_FOR_PUBLISH', not_ready: notReady }, { status: 422 })
   }
@@ -347,12 +391,79 @@ async function publishPending(
       provider_response: result.raw,
     }
 
+    await attachFirstComment(record, candidate, result, context)
     published.push(record)
-    const sentIds = await startMeasurement(record, context)
+    const sentIds = await startMeasurement(record, context, candidate.firstCommentText)
     eventIds.push(...sentIds)
   }
 
   return { published, failed, eventIds }
+}
+
+/**
+ * Post the first comment for a live Post, or mark it pending for a scheduled
+ * one. Never throws and never marks the Post failed: the Post is already on
+ * Facebook, so a comment failure must not invite a duplicate re-post.
+ */
+async function attachFirstComment(
+  record: CampaignDailyPublishedPost,
+  candidate: PublishCandidate,
+  result: Awaited<ReturnType<typeof publishPagePhotoPost>>,
+  context: { clientId: string; pageId: string; pageToken: string; row: PlanRow; command: CampaignDailyPublishCommand },
+): Promise<void> {
+  if (result.postIdSource !== 'post_id') {
+    // Scheduled photo: Meta only exposes the feed story id once the photo is
+    // public, so the story-resolve workflow posts the comment then.
+    record.first_comment_status = 'PENDING_PUBLISH'
+    return
+  }
+  try {
+    const commentId = await ensureFacebookFirstComment({
+      graphBase: GRAPH_BASE,
+      objectId: result.postId,
+      expectedPageId: context.pageId,
+      accessToken: context.pageToken,
+      marker: buildFirstCommentMarker('daily-plan-first-comment', candidate.idempotency_key),
+      message: candidate.firstCommentText,
+      failureLabel: '每日计划帖',
+    })
+    record.first_comment_status = 'POSTED'
+    record.first_comment_id = commentId
+  } catch (error: unknown) {
+    record.first_comment_status = 'FAILED'
+    console.error('[daily-plan publish] first comment failed', record.date, errorMessage(error))
+    await recordFirstCommentFailure(record, context, errorMessage(error), candidate.firstCommentText)
+  }
+}
+
+/** Observability only: a failed write must not block saving the receipt. */
+async function recordFirstCommentFailure(
+  record: CampaignDailyPublishedPost,
+  context: { clientId: string; row: PlanRow; command: CampaignDailyPublishCommand },
+  reason: string,
+  firstCommentText: string,
+): Promise<void> {
+  try {
+    await writeMeasurementRecord(supabaseAdmin, {
+      status: 'failed',
+      outcome: 'first_comment_failed',
+      reason: reason.slice(0, 300),
+      attempts: 0,
+      post: {
+        client_id: context.clientId,
+        campaign_id: context.command.campaign_id,
+        plan_id: context.row.id,
+        date: record.date,
+        idempotency_key: record.idempotency_key,
+        page_id: record.page_id,
+        ...(record.post_id_source === 'id' ? { photo_id: record.post_id } : { post_id: record.post_id }),
+        ...(record.scheduled_publish_time ? { scheduled_publish_time: record.scheduled_publish_time } : {}),
+        first_comment_text: firstCommentText,
+      },
+    })
+  } catch (error: unknown) {
+    console.error('[daily-plan publish] first comment failure record not written', record.date, errorMessage(error))
+  }
 }
 
 type MeasurementSkipCode = 'event_contract_invalid' | 'event_send_failed'
@@ -366,8 +477,9 @@ type MeasurementSkipCode = 'event_contract_invalid' | 'event_send_failed'
 async function startMeasurement(
   record: CampaignDailyPublishedPost,
   context: { clientId: string; row: PlanRow; command: CampaignDailyPublishCommand },
+  firstCommentText?: string,
 ): Promise<string[]> {
-  const event = buildMeasurementEvent(record, context)
+  const event = buildMeasurementEvent(record, context, firstCommentText)
   if (!event.ok) {
     console.error('[daily-plan publish] measurement event not emitted', record.date, event.reason)
     await recordMeasurementSkipped(record, context, 'event_contract_invalid')
@@ -436,6 +548,7 @@ function contractViolation(error: z.ZodError): { ok: false; reason: string } {
 function buildMeasurementEvent(
   record: CampaignDailyPublishedPost,
   context: { clientId: string; row: PlanRow; command: CampaignDailyPublishCommand },
+  firstCommentText?: string,
 ): MeasurementEvent {
   const identity = {
     client_id: context.clientId,
@@ -453,7 +566,11 @@ function buildMeasurementEvent(
   }
 
   if (record.post_id_source === 'id') {
-    const parsed = StoryResolveDueSchema.safeParse({ ...identity, photo_id: record.post_id })
+    const parsed = StoryResolveDueSchema.safeParse({
+      ...identity,
+      photo_id: record.post_id,
+      ...(firstCommentText ? { first_comment_text: firstCommentText } : {}),
+    })
     if (!parsed.success) return contractViolation(parsed.error)
     return {
       ok: true,
@@ -511,7 +628,7 @@ function findPriceGateBlocks(
 ): Array<{ date: string; message: string }> {
   const blocks: Array<{ date: string; message: string }> = []
   for (const post of posts) {
-    const verdict = judgePriceClaimWithSource({ caption: post.message, source: post.imageSource })
+    const verdict = judgePriceClaimWithSource({ caption: post.judgedText, source: post.imageSource })
     if (verdict.blocked) blocks.push({ date: post.date, message: priceGateMessage(verdict.source) })
   }
   return blocks
@@ -531,7 +648,7 @@ async function findPriceFactBlocks(
   const offers = await loadOfferPriceFacts(supabaseAdmin, clientId)
   const blocks: Array<{ date: string; reason: string; message: string }> = []
   for (const post of posts) {
-    const result = judgePostPriceFacts({ text: post.message, ctaUrl: post.cta_url, offers })
+    const result = judgePostPriceFacts({ text: post.judgedText, ctaUrl: post.cta_url, offers })
     if (result.verdict.status === 'blocked') {
       blocks.push({ date: post.date, reason: result.verdict.reason, message: result.message })
     }
@@ -603,6 +720,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           image_asset_id: post.image_asset_id,
           cta_url: post.cta_url,
           message_preview: post.message.slice(0, 200),
+          first_comment_preview: post.firstCommentText,
         })),
         already_published: skipped.map(post => ({ date: post.date, idempotency_key: post.idempotency_key })),
       })

@@ -12,6 +12,10 @@ vi.mock('@/lib/meta/page-posts', () => ({
   getPageAccessToken: vi.fn(),
   publishPagePhotoPost: vi.fn(),
 }))
+vi.mock('@/lib/meta/first-comment', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/meta/first-comment')>()),
+  ensureFacebookFirstComment: vi.fn(),
+}))
 
 import { POST } from '../route'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
@@ -19,6 +23,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-manager'
 import { getPageAccessToken, publishPagePhotoPost } from '@/lib/meta/page-posts'
+import { ensureFacebookFirstComment } from '@/lib/meta/first-comment'
 import {
   CampaignDailyPublishMetaSchema,
   DailyPlanPostPublishedEventSchema,
@@ -33,6 +38,7 @@ const mockGetMetaToken = vi.mocked(getMetaTokenForClient)
 const mockGetStoredPageToken = vi.mocked(getStoredPageToken)
 const mockGetPageToken = vi.mocked(getPageAccessToken)
 const mockPublish = vi.mocked(publishPagePhotoPost)
+const mockFirstComment = vi.mocked(ensureFacebookFirstComment)
 
 const CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
 const CAMPAIGN_ID = 'a0000000-0000-0000-0000-000000000001'
@@ -252,6 +258,7 @@ function armProvider() {
 
 beforeEach(() => {
   allow()
+  mockFirstComment.mockResolvedValue('comment_1')
 })
 
 afterEach(() => {
@@ -549,7 +556,7 @@ describe('publish bridge — live run records real provider ids', () => {
       pageId: PAGE_ID,
       pageAccessToken: 'stored-page-token',
       imageUrl: `https://assets.test/${ASSETS[0]}.jpg`,
-      message: 'Hook 1\n\nBody 1\n\nEnquire now: https://ctstours.co.nz/tours/china-classic',
+      message: 'Hook 1\n\nBody 1',
     })
   })
 
@@ -957,6 +964,104 @@ describe('publish bridge — price claim gate', () => {
 
     expect(response.status).toBe(200)
     expect(mockPublish).toHaveBeenCalledTimes(DATES.length)
+  })
+})
+
+describe('publish bridge — first comment', () => {
+  it('posts the first comment on an immediate publish, keyed to the real post id', async () => {
+    stubTables()
+    armProvider()
+
+    const json = await (await POST(request({ no_publish: false, dates: [DATES[0]] }), params)).json()
+
+    expect(mockFirstComment).toHaveBeenCalledTimes(1)
+    const call = mockFirstComment.mock.calls[0][0]
+    expect(call.objectId).toBe(`${PAGE_ID}_1750000091`)
+    expect(call.expectedPageId).toBe(PAGE_ID)
+    expect(call.failureLabel).toBe('每日计划帖')
+    expect(call.message).toContain('Enquire now')
+    expect(call.message).toContain('utm_content=')
+    expect(json.receipt.published[0].first_comment_status).toBe('POSTED')
+    expect(json.receipt.published[0].first_comment_id).toBe('comment_1')
+  })
+
+  it('marks a scheduled photo PENDING_PUBLISH and carries the comment text into the resolve event', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-02T00:00:00.000Z'))
+    stubTables()
+    armProvider()
+    mockPublish.mockReset()
+    mockPublish.mockResolvedValueOnce({
+      postId: '1750835520181969',
+      postIdSource: 'id',
+      permalink: 'https://www.facebook.com/1750835520181969',
+      raw: { id: '1750835520181969' },
+    })
+
+    const json = await (await POST(request({ no_publish: false, dates: [DATES[0]] }), params)).json()
+
+    expect(mockFirstComment).not.toHaveBeenCalled()
+    expect(json.receipt.published[0].first_comment_status).toBe('PENDING_PUBLISH')
+    expect(mockSendInngestEvent).toHaveBeenCalledTimes(1)
+    const event = mockSendInngestEvent.mock.calls[0][0]
+    expect(event.name).toBe('daily_plan.post.story_resolve_due')
+    expect(event.data.first_comment_text).toContain('Enquire now')
+  })
+
+  it('keeps the Post published when the first comment throws — no re-post, no failed entry', async () => {
+    stubTables()
+    armProvider()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockFirstComment.mockRejectedValue(new Error('boom'))
+
+    const response = await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(mockPublish).toHaveBeenCalledTimes(1)
+    expect(json.receipt.failed).toEqual([])
+    expect(json.receipt.published[0].first_comment_status).toBe('FAILED')
+  })
+
+  it('refuses a Post whose body carries the CTA link, before any provider call', async () => {
+    const plan = planData()
+    const bundles = (plan as unknown as { bundles: Array<{ post: { body: string } }> }).bundles
+    bundles[0].post.body = 'Book at https://ctstours.co.nz/x'
+    stubTables({ plan })
+    armProvider()
+
+    const response = await POST(request({ no_publish: false }), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(json.error).toBe('FIRST_COMMENT_CHECK_FAILED')
+    expect(json.blocked.map((b: { date: string }) => b.date)).toEqual([DATES[0]])
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(mockSendInngestEvent).not.toHaveBeenCalled()
+    expect(mockGetStoredPageToken).not.toHaveBeenCalled()
+  })
+
+  it('refuses the same leak on a dry run', async () => {
+    const plan = planData()
+    const bundles = (plan as unknown as { bundles: Array<{ post: { body: string } }> }).bundles
+    bundles[0].post.body = 'Book at https://ctstours.co.nz/x'
+    stubTables({ plan })
+
+    const response = await POST(request(), params)
+
+    expect(response.status).toBe(409)
+    expect((await response.json()).error).toBe('FIRST_COMMENT_CHECK_FAILED')
+    expect(mockPublish).not.toHaveBeenCalled()
+  })
+
+  it('previews the first comment on a dry run without posting it', async () => {
+    stubTables()
+
+    const json = await (await POST(request(), params)).json()
+
+    expect(typeof json.would_publish[0].first_comment_preview).toBe('string')
+    expect(json.would_publish[0].first_comment_preview).toContain('Enquire now')
+    expect(mockFirstComment).not.toHaveBeenCalled()
   })
 })
 

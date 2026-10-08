@@ -19,6 +19,7 @@ export type MeasurementRecordOutcome =
   | 'event_send_failed'
   | 'isolation_refused'
   | 'workflow_failed'
+  | 'first_comment_failed'
 
 export interface MeasurementRecordPost {
   client_id: string
@@ -32,6 +33,8 @@ export interface MeasurementRecordPost {
   /** Immediate publish (feed post id known). */
   post_id?: string
   scheduled_publish_time?: string
+  /** first_comment_failed 时带上要贴的首评全文,待办里直接给人复制。 */
+  first_comment_text?: string
 }
 
 export interface MeasurementRecord {

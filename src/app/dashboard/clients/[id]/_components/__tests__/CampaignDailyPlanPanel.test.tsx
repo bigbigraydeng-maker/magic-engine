@@ -360,8 +360,8 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
     render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
 
     await screen.findByText('Facebook Post 审核')
-    expect(screen.queryByRole('button', { name: 'Post 通过' })).not.toBeInTheDocument()
-    expect(screen.getByText(/CTA 首评发布能力完成、相关检查可测/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Post 通过' })).toBeDisabled()
+    expect(screen.getByText(/发布后系统会自动在这条帖子的第一条评论里贴/)).toBeInTheDocument()
     expect(screen.getByText('Post 需修改')).toBeInTheDocument()
     expect(screen.getByText(/不代表事实核验、Story\/Reel 通过、生成、排期、Provider 或发布授权/)).toBeInTheDocument()
     expect(screen.getByText('NOT_AUTHORIZED')).toBeInTheDocument()
@@ -495,6 +495,81 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
     })
   })
 
+  it('enables Post 通过 only after all human checks are PASS with sources', async () => {
+    mockFetchOnce(reviewPayload())
+
+    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+    await screen.findByText('Facebook Post 审核')
+
+    const passButton = screen.getByRole('button', { name: 'Post 通过' })
+    expect(passButton).toBeDisabled()
+
+    const passRadios = screen.getAllByRole('radio', { name: 'PASS' })
+    passRadios.forEach(radio => fireEvent.click(radio))
+
+    // Still disabled: the two factual checks need a source ref.
+    expect(screen.getByRole('button', { name: 'Post 通过' })).toBeDisabled()
+
+    const sourceInputs = screen.getAllByPlaceholderText('来源 HTTPS URL 或 client_asset:<ID>')
+    fireEvent.change(sourceInputs[0], { target: { value: 'https://example.test/source' } })
+    fireEvent.change(sourceInputs[1], { target: { value: 'https://example.test/source' } })
+
+    expect(screen.getByRole('button', { name: 'Post 通过' })).toBeEnabled()
+  })
+
+  it('sends verdict PASS with the human checklist', async () => {
+    const first = reviewPayload()
+    const passed = reviewPayload({
+      verdict: 'PASS',
+      reason: null,
+      reviewed_at: '2026-09-01T15:05:00.000Z',
+      is_current: true,
+    })
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => first })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ success: true, changed: true }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => passed }) as unknown as typeof fetch
+
+    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+    await screen.findByText('Facebook Post 审核')
+
+    screen.getAllByRole('radio', { name: 'PASS' }).forEach(radio => fireEvent.click(radio))
+    const sourceInputs = screen.getAllByPlaceholderText('来源 HTTPS URL 或 client_asset:<ID>')
+    fireEvent.change(sourceInputs[0], { target: { value: 'https://example.test/source' } })
+    fireEvent.change(sourceInputs[1], { target: { value: 'https://example.test/source' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Post 通过' }))
+
+    await screen.findByText('✓ Post 已通过')
+    const patchCall = vi.mocked(global.fetch).mock.calls[1]
+    expect(patchCall[0]).toBe(`/api/clients/${CLIENT_ID}/campaign-daily-plan/post-review`)
+    const requestInit = patchCall[1] as RequestInit
+    expect(requestInit.method).toBe('PATCH')
+    const body = JSON.parse(requestInit.body as string)
+    expect(body.verdict).toBe('PASS')
+    expect(body.checklist_human).toHaveLength(5)
+    expect(body.checklist_human.every((item: { outcome: string }) => item.outcome === 'PASS')).toBe(true)
+  })
+
+  it('explains an AUTO_CHECKS_FAILED refusal', async () => {
+    const first = reviewPayload()
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => first })
+      .mockResolvedValueOnce({ ok: false, status: 422, json: async () => ({ success: false, error: 'AUTO_CHECKS_FAILED' }) }) as unknown as typeof fetch
+
+    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+    await screen.findByText('Facebook Post 审核')
+
+    screen.getAllByRole('radio', { name: 'PASS' }).forEach(radio => fireEvent.click(radio))
+    const sourceInputs = screen.getAllByPlaceholderText('来源 HTTPS URL 或 client_asset:<ID>')
+    fireEvent.change(sourceInputs[0], { target: { value: 'https://example.test/source' } })
+    fireEvent.change(sourceInputs[1], { target: { value: 'https://example.test/source' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Post 通过' }))
+
+    await screen.findByText(/正文里含有 CTA 或链接/)
+  })
+
   it('shows a persisted PASS as expired when current asset validation no longer holds', async () => {
     mockFetchOnce(reviewPayload({
       verdict: 'PASS',
@@ -522,19 +597,19 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
 
     await screen.findByText('已失效，需重审')
     expect(screen.getByText('Post 已通过 0/1')).toBeInTheDocument()
-    expect(screen.getByText(/首评发布能力完成、相关检查可测/)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Post 通过' })).not.toBeInTheDocument()
+    expect(screen.getByText(/发布后系统会自动在这条帖子的第一条评论里贴/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Post 通过/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Post 需修改' })).toBeInTheDocument()
   })
 
-  it('keeps bulk pass unavailable while server-owned first-comment checks are unmeasured', async () => {
+  it('keeps bulk pass unavailable', async () => {
     mockFetchOnce(reviewPayload())
 
     render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
 
     await screen.findByText('Facebook Post 审核')
     expect(screen.queryByRole('button', { name: /批量通过未审 Post/ })).not.toBeInTheDocument()
-    expect(screen.getByText(/首评发布能力完成、相关检查可测/)).toBeInTheDocument()
+    expect(screen.getByText(/发布后系统会自动在这条帖子的第一条评论里贴/)).toBeInTheDocument()
   })
 
   it('ignores an old client GET that resolves after the panel switches clients', async () => {
