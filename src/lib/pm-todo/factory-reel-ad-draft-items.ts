@@ -66,7 +66,7 @@ const FACTORY_HREF = `${APP_BASE}/dashboard/factory`
 const ADS_MANAGER_HREF = 'https://adsmanager.facebook.com/adsmanager/manage/campaigns'
 
 /** 回读时发现对象没暂停的原文 —— 出现它且补暂停没确认成功，就是「可能正在花钱」。 */
-const NOT_PAUSED_MARKER = '回读发现有对象不是暂停状态'
+export const NOT_PAUSED_MARKER = '回读发现有对象不是暂停状态'
 
 const MAX_ITEMS = 30
 

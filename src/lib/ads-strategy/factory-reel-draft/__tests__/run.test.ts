@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { REEL_HUMAN_CHECK_KEYS, REEL_AUTO_CHECK_KEYS } from '@/lib/social/content-review'
 import type { IntentPayload } from '../intent-ledger'
+import { NOT_PAUSED_MARKER } from '@/lib/pm-todo/factory-reel-ad-draft-items'
 import type { ReelWorkOrderRow } from '../gates'
 import type { LoadedFactoryReelDraftConfig } from '../config'
 import type { PostResolverDeps, GraphGetResult } from '../post-resolver'
@@ -236,9 +237,9 @@ function makeConfig(mode: 'dry_run' | 'on'): LoadedFactoryReelDraftConfig {
     config: {
       mode,
       geoCountries: ['US'],
-      geoCityKeys: [],
-      ageMin: 18,
-      ageMax: 65,
+      geoCityKeys: ['2420605'],
+      ageMin: 25,
+      ageMax: 55,
       dailyBudget: 20,
       durationDays: 7,
       maxAgeHours: 6,
@@ -393,10 +394,10 @@ describe('runFactoryReelAdDraft', () => {
     expect(draftArg.clientId).toBe(CLIENT_ID)
     expect(draftArg.dailyBudget).toBe(20)
     expect(draftArg.durationDays).toBe(7)
-    expect(draftArg.ageMin).toBe(18)
-    expect(draftArg.ageMax).toBe(65)
+    expect(draftArg.ageMin).toBe(25)
+    expect(draftArg.ageMax).toBe(55)
     expect(draftArg.geoCountries).toEqual(['US'])
-    expect(draftArg.geoCityKeys).toBeUndefined() // 配置里没有城市时不传，只按国家投
+    expect(draftArg.geoCityKeys).toEqual(['2420605']) // 配置给了城市就必须原样带上（丢掉就变成投整个国家）
     expect(draftArg.pageId).toBe('111111')
     expect(draftArg.creatives).toHaveLength(1)
     expect(draftArg.creatives[0].postId).toBe('111111_999')
@@ -638,6 +639,8 @@ describe('runFactoryReelAdDraft', () => {
     expect(p.status).toBe('draft_blocked')
     expect(p.provider_impact).toBe('unknown')
     expect(String(p.error)).toContain('可能正在花钱')
+    // 待办靠这段文字认出「可能在花钱」——两边必须共用同一个常量，改一边另一边会立刻变红
+    expect(String(p.error)).toContain(NOT_PAUSED_MARKER)
   })
 
   it('(14) blocked without not_paused finding => provider_impact stays paused_objects_created', async () => {
