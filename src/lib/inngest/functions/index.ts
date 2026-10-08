@@ -6,6 +6,7 @@ import { geoRemeasureOne } from './geo-remeasure'
 import { dailyPlanPostFanOut, dailyPlanPostMeasure } from './daily-plan-post-measurement'
 import { dailyPlanPostStoryResolve } from './daily-plan-post-story-resolve'
 import { factoryReelMeasurementAdapter } from './factory-reel-measurement-adapter'
+import { factoryReelAdDraft } from './factory-reel-ad-draft'
 import { flywheelSeoWeeklyFanOut, flywheelSeoSnapshotOne } from './flywheel-seo-weekly'
 import { messengerBriefAfterSync } from './messenger-brief-after-sync'
 import { factoryCreatomateRender } from './factory-creatomate-render'
@@ -43,6 +44,7 @@ export const cloudFunctions = [
   dailyPlanPostMeasure,
   dailyPlanPostStoryResolve,
   factoryReelMeasurementAdapter,
+  factoryReelAdDraft,
   flywheelSeoWeeklyFanOut,
   flywheelSeoSnapshotOne,
   messengerBriefAfterSync,
