@@ -2,7 +2,7 @@
 
 > 状态：**设计稿，只设计，不写代码、不改生产、不改任何客户网站、不发布。** 需 PM 批准后才开工，代码一律由 DeepSeek 写。
 > 起因：PM 2026-10-08 评价「光是这么做 SEO 肯定太 low 了，这不是一个有经验的 SEO 专家的工作流程」。
-> **替代了什么**：2026-10-04 PM 定的「缩小版」口径——[能力图谱 v0.1 §5](./2026-10-04-seo-specialist-capability-map-v0.1.md) 写的「聚类 / 竞品页 / 页面级 E-E-A-T / 自相残杀自动体检本期不做」，以及 [每周清单 v0.2 §六](./2026-10-04-seo-weekly-list-v0.2.md) 的「不做」清单里与此重叠的项，**本稿起作废**，改为往资深专家的完整节奏靠拢。**同时说明放宽了什么**：v0.2 §六「不做付费调用 / Inngest / 定时工作流」——第一阶段**不放宽**；第二阶段 P2-B 起才有付费接口（带每客户预算上限）；第三阶段改站类才用 Inngest。**没有被替代的**：v0.2 的硬边界（改站必须人批、不承诺「SEO 动作带来多少流量」、不做综合健康分、不做批量页、不用无出处数字）原样保留。
+> **替代了什么**：2026-10-04 PM 定的「缩小版」口径——[能力图谱 v0.1 §5](./2026-10-04-seo-specialist-capability-map-v0.1.md) 写的「聚类 / 竞品页 / 页面级 E-E-A-T / 自相残杀自动体检本期不做」，以及 [每周清单 v0.2 §六](./2026-10-04-seo-weekly-list-v0.2.md) 的「不做」清单里与此重叠的项，**待 PM 批准本稿后才作废**，在此之前继续以旧范围为准；批准后改为往资深专家的完整节奏靠拢。**同时说明放宽了什么**：v0.2 §六「不做付费调用 / Inngest / 定时工作流」——第一阶段**不放宽**；第二阶段 P2-B 起才有付费接口（带每客户预算上限）；第三阶段改站类才用 Inngest。**没有被替代的**：v0.2 的硬边界（改站必须人批、不承诺「SEO 动作带来多少流量」、不做综合健康分、不做批量页、不用无出处数字）原样保留。
 > 读了：`docs/STATE.md`、`docs/ROADMAP.md`（SEO 相关条目）、记忆 **`playbook-seo-general`（SEO 通用手册，全文）**、上面两份设计稿、42 号窗口体检 `docs/audits/2026-10-08-seo-automation-health.md`（在 `nostalgic-khayyam-e3742e` 工作区只读）、`docs/sops/keyword-gap-attack-playbook.md`、`docs/ledger/README.md`，并读了现有代码目录 `src/lib/seo-weekly-list/`（`candidates / decay / ctr-diagnosis / live-snippet / verify / run`）。
 > 平台层级门（Inline）：**归位既有 SEO 支柱（L1）**；外链/评价挂在**口碑**支柱的 Connector 下，AI 搜索可见度只**引用**已有 GEO 支柱、不重做；不新增能力线、不新增支柱、不新增表（第一阶段）；红线 1–7 无冲突。CTS 数据只作示范，不进共享代码。
 > 数据来源：下面所有 CTS 数字都是 2026-10-08 只读取自生产库已落库的表（`keyword_snapshots` 2026-10-05 快照、`gsc_page_daily` 2026-09-06～10-03、`execution_items`），**没有手写脚本调任何供应商接口，没有写任何数据**。
@@ -47,7 +47,7 @@ CTS 周一那 5 张卡，10-08 查到全是「待办」、已过期 3 张。办�
 | W1 | **目标与基线**：业务目标→有机点击→询盘三层看，不只看点击 | **半自动**：点击目标已有（`seo_gsc_clicks_28d`，28 天点击 1,042→1,340）；**询盘一层缺** | `goals`、GSC | 有机搜索带来的询盘按落地页（见 §5 步骤 3）；询盘口径需先核实 | 系统取数；目标人定 |
 | W2 | **近机会词排序**（差一步上第一页，量×差几名） | **自动**（每周一清单已含，且带品牌词过滤） | `seo-weekly-list/candidates.ts` | 相关性过滤不足：快照里「times of china 月搜 6,600 排 11」是媒体名、不是客人（见 §4）；`keyword-relevance.ts` 已有，未接入 | 系统 |
 | W3 | **关键词与意图分层 → 主题簇 → 内容地图** | **半自动**：清单已把同 token 的词合并成一项（`tokenKey` 聚类）；**没有「簇→自家哪几页→谁当主页」的地图** | `keyword_snapshots`（带 intent）、`client_site_pages`、`gsc_page_daily` | 簇→页面映射（只读聚合）；见 §5 | 系统出地图；**定主页的结构决定=人批** |
-| W4 | **同题自相残杀体检**（多页分食同一主题；手册 §八） | **手工**（手册有方法；李子坝等已人工坐实） | `gsc_page_daily`（页级曝光）、谷歌页级搜索词查询（免费，`ctr-diagnosis` 已在用）；第二阶段再加 DataForSEO `ranked_keywords`（付费，带预算闸） | 自动按簇出「哪页该当主页、哪些是好长尾别动、哪些在抢头词」；见 §5 | 系统出体检；合并/规范网址/跳转=**绝不自动** |
+| W4 | **同题自相残杀体检**（多页分食同一主题；手册 §八） | **手工**（手册有方法；李子坝等已人工坐实） | `gsc_page_daily`（页级曝光）、`src/lib/gsc/query-overlap.ts`（现有页面抢词判定，P1-B 复用/扩展）、谷歌页级搜索词查询（免费，`ctr-diagnosis` 已在用）；第二阶段再加 DataForSEO `ranked_keywords`（付费，带预算闸） | 自动按簇出「哪页该当主页、哪些是好长尾别动、哪些在抢头词」；见 §5 | 系统出体检；合并/规范网址/跳转=**绝不自动** |
 | W5 | **诊断**（固定顺序：收录抓取→技术→页面→内容→权威），前一步不过不谈后一步 | **半自动**（清单项 `ctr-diagnosis.ts`、`live-snippet.ts` 已读线上真标题/描述/规范网址；各管一块无统一顺序） | 同左 + `site-audit-weekly` | 清单项落地时统一走一遍并把结论写进卡 | 系统（预诊断） |
 | W6 | **衰减页刷新**（掉得比全站多的页，找原因） | **半自动**：`decay.ts` 代码已在主干（42 号体检记为扩展包已合并）；生产里是否已出过衰减项**我没核实** | `decay.ts` | 核实上线状态 | 系统出原因；改页=人批 |
 | W7 | **内容缺口 / 竞品页机会 / 新内容简报**（简报必须基于真实搜索结果页） | 缺口：**半自动**（`competitors-gap` 页，实时花钱、没人每周看）；竞品页：**缺**；简报：**缺**（周博客选题 14/16 无关键词字段） | `competitors-gap`、`serp.ts`、`blog-weekly` | 周级低成本缺口摘要；简报=实时 SERP 前 3 + PAA + 自家已有页对照；见 §5 阶段 2 | 系统出简报；写稿发布=人批（手册 §四） |
@@ -214,7 +214,8 @@ CTS 周一那 5 张卡，10-08 查到全是「待办」、已过期 3 张。办�
 ## 9. Reuse Statement
 
 - **复用**：`keyword_snapshots`、`gsc_page_daily`、`client_site_pages`、`seo-weekly-list`（`candidates / decay / ctr-diagnosis / live-snippet / verify`）、`dataforseo/` 封装（`ranked_keywords`、`serp.ts`、`getBacklinkSummary`、`getKeywordsGap`）、`seo-patrol`、`seo-meta-cycle` 与排名采样、`ga4/form-funnel`、`goals/execution_items`、`weekly-seo-report`、`cron_run_logs`。
-- **platform-shared 新增（计划）**：簇→页面映射与自相残杀体检（纯函数）、清单预诊断步骤、取数口径统一。
+- **复用（GSC 页面抢词）**：`src/lib/gsc/query-overlap.ts` 的 `findQueryOverlap` / `summarisePagePairs` 与只读 `/api/internal/gsc-query-overlap`（已含 `query × page` 拉取、阈值、行数截断保护与授权）；P1-B 必须复用或扩展它，不得另写一套判定。
+- **platform-shared 新增（计划）**：在上述模块之上加「主题簇→页面映射」层（纯函数，沿用其阈值与截断保护）、清单预诊断步骤、取数口径统一。
 - **industry-specific**：近机会词相关性词表、外链/评价来源清单（旅游：TripAdvisor、旅游博客）→ 进 Playbook/Profile，不进共享代码。
 - **client-specific**：CTS 目标值、保护页、阈值覆盖、所有 CTS 页面与词 → 配置/本稿示范，不进共享代码。
 - **换客户自检**：换成悉尼地产客户，簇体检与预诊断判据只用量/排名/曝光/页面，不变；「相关性过滤」词表与外链来源要换（所以放 Playbook）。
