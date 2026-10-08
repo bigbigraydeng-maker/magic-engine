@@ -287,18 +287,24 @@ function happyDeps(opts: HappyOpts = {}): {
   fake: FakeSupabase
   graphGet: ReturnType<typeof makeGraphGet>
   createDraft: ReturnType<typeof vi.fn>
+  capturedIntentStatus: { value: string | null }
 } {
   const fake = opts.fake ?? makeFakeSupabase()
   const graphGet = opts.graphGet ?? makeGraphGet()
+  const capturedIntentStatus: { value: string | null } = { value: null }
   const createDraft =
     opts.createDraft ??
     vi.fn(
-      async (): Promise<CreateDraftOutcome> => ({
-        actionId: 'draft1',
-        status: 'awaiting_approval',
-        summary: 'ok',
-        findings: [],
-      }),
+      async (): Promise<CreateDraftOutcome> => {
+        const row = fake.rows.find((r) => r.payload.work_order_id === WORK_ORDER_ID)
+        capturedIntentStatus.value = row ? row.payload.status : null
+        return {
+          actionId: 'draft1',
+          status: 'awaiting_approval',
+          summary: 'ok',
+          findings: [],
+        }
+      },
     )
 
   const deps: RunDeps = {
@@ -316,7 +322,13 @@ function happyDeps(opts: HappyOpts = {}): {
     createDraft: createDraft as RunDeps['createDraft'],
   }
 
-  return { deps, fake, graphGet, createDraft: createDraft as ReturnType<typeof vi.fn> }
+  return {
+    deps,
+    fake,
+    graphGet,
+    createDraft: createDraft as ReturnType<typeof vi.fn>,
+    capturedIntentStatus,
+  }
 }
 
 // ── 测试 ────────────────────────────────────────────────────────────────────
@@ -359,28 +371,47 @@ describe('runFactoryReelAdDraft', () => {
     const p = fake.rows[0].payload
     expect(p.status).toBe('dry_run_ok')
     expect(p.post_id).toBe('111111_999')
+    expect(p.ad_account_id).toBe(META.adAccountId)
     const preview = p.draft_preview as Record<string, unknown>
     expect(preview.postId).toBe('111111_999')
+    expect(preview.adAccountId).toBe(META.adAccountId)
     expect(String(preview.campaignName)).toContain('[ME-DRAFT] 22222222')
     expect(deps.graphGetWith).toHaveBeenCalledWith('page-tok')
     expect(graphGet).toHaveBeenCalled()
   })
 
   it('(4) on happy => drafted, createDraft called once with expected draft', async () => {
-    const { deps, fake, createDraft } = happyDeps({ mode: 'on' })
+    const { deps, fake, createDraft, capturedIntentStatus } = happyDeps({ mode: 'on' })
     const res = await runFactoryReelAdDraft(deps, makeEvent())
     expect(res.status).toBe('drafted')
     expect(res.draftActionId).toBe('draft1')
     expect(createDraft).toHaveBeenCalledTimes(1)
+    // 意图行必须在任何 Meta 写入之前就已存在（status 'started'）
+    expect(capturedIntentStatus.value).toBe('started')
     const [draftArg, depsArg] = createDraft.mock.calls[0] as [AdDraft, Record<string, unknown>]
     expect(draftArg.kind).toBe('video_thruplay')
+    expect(draftArg.clientId).toBe(CLIENT_ID)
+    expect(draftArg.dailyBudget).toBe(20)
+    expect(draftArg.durationDays).toBe(7)
+    expect(draftArg.ageMin).toBe(18)
+    expect(draftArg.ageMax).toBe(65)
+    expect(draftArg.geoCountries).toEqual(['US'])
+    expect(draftArg.geoCityKeys).toBeUndefined() // 配置里没有城市时不传，只按国家投
+    expect(draftArg.pageId).toBe('111111')
+    expect(draftArg.creatives).toHaveLength(1)
     expect(draftArg.creatives[0].postId).toBe('111111_999')
+    expect(draftArg.campaignName.startsWith('[ME-DRAFT] 22222222')).toBe(true)
+    expect(draftArg.adSetName.startsWith('[ME-DRAFT] 22222222')).toBe(true)
+    expect(depsArg.adAccountId).toBe(META.adAccountId)
+    expect(depsArg.expectedGeo).toBe(META.country)
+    expect(depsArg.industry).toBe(META.industry)
     expect(depsArg.accessToken).toBe('tok-abc')
     expect(depsArg.brandRedlines).toEqual([])
     const p = fake.rows[0].payload
     expect(p.status).toBe('drafted')
     expect(p.draft_action_id).toBe('draft1')
     expect(p.provider_impact).toBe('paused_objects_created')
+    expect(p.ad_account_id).toBe(META.adAccountId)
   })
 
   it('(5) second run same event same mode => duplicate, createDraft not called again', async () => {
@@ -584,5 +615,78 @@ describe('runFactoryReelAdDraft', () => {
     await expectBlock((d) => {
       d.loadWorkOrder = vi.fn(async () => ({ ok: true as const, row: null }))
     }, 'work_order_not_found', 'dry_run')
+  })
+
+  it('(13) blocked with not_paused finding => provider_impact unknown, error warns about spending', async () => {
+    const { deps, fake } = happyDeps({
+      mode: 'on',
+      createDraft: vi.fn(
+        async (): Promise<CreateDraftOutcome> => ({
+          actionId: 'draft1',
+          status: 'blocked',
+          summary: 's',
+          findings: [
+            { code: 'not_paused', severity: 'blocker', message: 'm', learnedFrom: 'l' },
+          ],
+          error: 'x',
+        }),
+      ),
+    })
+    const res = await runFactoryReelAdDraft(deps, makeEvent())
+    expect(res.status).toBe('draft_blocked')
+    const p = fake.rows[0].payload
+    expect(p.status).toBe('draft_blocked')
+    expect(p.provider_impact).toBe('unknown')
+    expect(String(p.error)).toContain('可能正在花钱')
+  })
+
+  it('(14) blocked without not_paused finding => provider_impact stays paused_objects_created', async () => {
+    const { deps, fake } = happyDeps({
+      mode: 'on',
+      createDraft: vi.fn(
+        async (): Promise<CreateDraftOutcome> => ({
+          actionId: 'draft1',
+          status: 'blocked',
+          summary: 's',
+          findings: [
+            { code: 'geo_mismatch', severity: 'blocker', message: 'm', learnedFrom: 'l' },
+          ],
+          error: 'x',
+        }),
+      ),
+    })
+    const res = await runFactoryReelAdDraft(deps, makeEvent())
+    expect(res.status).toBe('draft_blocked')
+    const p = fake.rows[0].payload
+    expect(p.status).toBe('draft_blocked')
+    expect(p.provider_impact).toBe('paused_objects_created')
+  })
+
+  it('(15) exception before any Meta call => provider_impact none, no name tag in error', async () => {
+    const { deps, fake } = happyDeps({ mode: 'on' })
+    deps.loadClientMeta = vi.fn(async () => {
+      throw new Error('meta read boom')
+    })
+    const res = await runFactoryReelAdDraft(deps, makeEvent())
+    expect(res.status).toBe('failed')
+    const p = fake.rows[0].payload
+    expect(p.status).toBe('failed')
+    expect(p.provider_impact).toBe('none')
+    expect(String(p.error)).not.toContain('[ME-DRAFT]')
+  })
+
+  it('(16) exception thrown by createDraft => provider_impact unknown, error has name tag', async () => {
+    const { deps, fake } = happyDeps({
+      mode: 'on',
+      createDraft: vi.fn(async () => {
+        throw new Error('kaboom')
+      }),
+    })
+    const res = await runFactoryReelAdDraft(deps, makeEvent())
+    expect(res.status).toBe('failed')
+    const p = fake.rows[0].payload
+    expect(p.status).toBe('failed')
+    expect(p.provider_impact).toBe('unknown')
+    expect(String(p.error)).toContain('[ME-DRAFT] 22222222')
   })
 })

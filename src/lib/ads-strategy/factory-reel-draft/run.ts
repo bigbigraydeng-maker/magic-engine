@@ -155,6 +155,7 @@ export async function runFactoryReelAdDraft(
   let finish: Finisher | null = null
   let recordError: string | undefined
   let shortRef = ''
+  const ctx = { metaTouched: false }
 
   const blockWith = async (code: string, message: string): Promise<RunOutcome> => {
     if (finish) {
@@ -231,12 +232,17 @@ export async function runFactoryReelAdDraft(
     if (cfg.effectiveMode === 'dry_run') {
       const err = await finish('dry_run_ok', {
         post_id: pre.postId,
+        ad_account_id: pre.meta.adAccountId ?? undefined,
         draft_preview: {
           campaignName: draft.campaignName,
           adSetName: draft.adSetName,
           dailyBudget: draft.dailyBudget,
           durationDays: draft.durationDays,
           geoCountries: draft.geoCountries ?? [],
+          geoCityKeys: draft.geoCityKeys ?? [],
+          ageMin: draft.ageMin,
+          ageMax: draft.ageMax,
+          adAccountId: pre.meta.adAccountId,
           postId: pre.postId,
           matchedBy: pre.matchedBy,
         },
@@ -246,13 +252,15 @@ export async function runFactoryReelAdDraft(
     }
 
     // 12. on：真正起草
-    return await createAndRecord(deps, event, cfg, pre, draft, finish, intentActionId)
+    return await createAndRecord(deps, event, cfg, pre, draft, finish, intentActionId, ctx)
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     if (finish) {
       const err = await finish('failed', {
-        error: `起草时出现异常：${msg}。Meta 上可能已建好暂停对象，请按名字「[ME-DRAFT] ${shortRef}」去后台核对`,
-        provider_impact: 'unknown',
+        error: ctx.metaTouched
+          ? `起草时出现异常：${msg}。Meta 上可能已建好暂停对象，请按名字「[ME-DRAFT] ${shortRef}」去后台核对`
+          : `起草时出现异常：${msg}`,
+        provider_impact: ctx.metaTouched ? 'unknown' : 'none',
       })
       if (err) recordError = err
     }
@@ -360,6 +368,7 @@ async function createAndRecord(
   draft: AdDraft,
   finish: Finisher,
   intentActionId: string,
+  ctx: { metaTouched: boolean },
 ): Promise<RunOutcome> {
   const short = shortTag(event.workOrderId)
   const createDeps: CreateDraftDeps = {
@@ -373,6 +382,7 @@ async function createAndRecord(
 
   let outcome: CreateDraftOutcome
   try {
+    ctx.metaTouched = true
     outcome = await deps.createDraft(draft, createDeps)
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
@@ -380,6 +390,7 @@ async function createAndRecord(
       error: `起草时出现异常：${msg}。Meta 上可能已建好暂停对象，请按名字「[ME-DRAFT] ${short}」去后台核对`,
       provider_impact: 'unknown',
       post_id: pre.postId,
+      ad_account_id: pre.meta.adAccountId ?? undefined,
     })
     return { status: 'failed', intentActionId, message: msg, recordError: err }
   }
@@ -389,6 +400,7 @@ async function createAndRecord(
       error: `广告草稿的账本行没写进去；Meta 上可能已建好暂停对象，请按名字「[ME-DRAFT] ${short}」去后台核对`,
       provider_impact: 'unknown',
       post_id: pre.postId,
+      ad_account_id: pre.meta.adAccountId ?? undefined,
     })
     return { status: 'failed', intentActionId, recordError: err }
   }
@@ -398,6 +410,7 @@ async function createAndRecord(
       post_id: pre.postId,
       draft_action_id: outcome.actionId,
       provider_impact: 'paused_objects_created',
+      ad_account_id: pre.meta.adAccountId ?? undefined,
     })
     return {
       status: 'drafted',
@@ -408,11 +421,16 @@ async function createAndRecord(
   }
 
   if (outcome.status === 'blocked') {
+    const unpaused = outcome.findings.some((f) => f.code === 'not_paused')
+    const baseError = outcome.error ?? summarizeFindings(outcome)
     const err = await finish('draft_blocked', {
       post_id: pre.postId,
       draft_action_id: outcome.actionId,
-      provider_impact: 'paused_objects_created',
-      error: outcome.error ?? summarizeFindings(outcome),
+      provider_impact: unpaused ? 'unknown' : 'paused_objects_created',
+      error: unpaused
+        ? `回读发现有对象不是暂停状态，可能正在花钱，请立刻去 Meta 后台核对（补暂停结果见草稿账本）。${baseError}`
+        : baseError,
+      ad_account_id: pre.meta.adAccountId ?? undefined,
     })
     return {
       status: 'draft_blocked',
@@ -427,6 +445,7 @@ async function createAndRecord(
     draft_action_id: outcome.actionId ?? undefined,
     error: outcome.error ?? 'unknown',
     provider_impact: 'unknown',
+    ad_account_id: pre.meta.adAccountId ?? undefined,
   })
   return {
     status: 'failed',
