@@ -1,7 +1,7 @@
 ---
 id: 2026-09-27-application-build-required
 title: 编译检查设成挡合并的必过项——编译不过的代码，机器自动合和管理员手动合都合不进主干
-status: verified
+status: done
 owner: agent
 decided_on: 2026-09-27
 source: session:a853a3c2
@@ -10,8 +10,8 @@ verify_how: 两条都成才算成。①gh api repos/bigbigraydeng-maker/magic-en
 done_on: 2026-09-27
 done_ref: pr:2104
 last_checked: 2026-10-09
-check_note: main 规则里必过检查含 Application build（共 7 项必过）；9-28 之后新 PR 样本 8 个，有结果的 6 个 Application build 均 SUCCESS（#2384/2382/2381/2380/2379/2378）。
-verified_ref: doc:docs/ledger/evidence/2026-09-27-application-build-required--2026-10-09.md
+check_note: 部分核实（未读 ruleset 20550157 的完整检查名单与 bypass_actors，故不盖 verified）：main 规则里必过检查含 Application build（共 7 项必过）；9-28 之后新 PR 样本 8 个，有结果的 6 个 Application build 均 SUCCESS（#2384/2382/2381/2380/2379/2378）。
+evidence_ref: doc:docs/ledger/evidence/2026-09-27-application-build-required--2026-10-09.md
 ---
 起因：9-25 PR #2016 开着自动合并，编译还在跑就被合进主干，35 秒后编译报失败，之后约 7 小时上线全失败。编译检查一直有，只是不在必过名单里。
 PM 回「改」授权改规则集；做法：全量读 → 只追加这一条 → 全量写回 → 再读一遍比对，改前备份在会话草稿区。
