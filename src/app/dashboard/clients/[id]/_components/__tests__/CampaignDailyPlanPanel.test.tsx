@@ -54,7 +54,7 @@ afterEach(() => {
 })
 
 describe('CampaignDailyPlanPanel — date selection shows that day\'s three formats', () => {
-  it('selecting a later populated day swaps Post/Story/Reel away from Day 1\'s content', async () => {
+  it('selecting a later populated day swaps Post/Story away from Day 1\'s content', async () => {
     mockFetchOnce({
       success: true,
       campaign: { id: CAMPAIGN_ID, title: 'Christmas Campaign', offer: null, primary_cta: 'Enquire Now' },
@@ -92,7 +92,6 @@ describe('CampaignDailyPlanPanel — date selection shows that day\'s three form
     await screen.findByText('Day 3 hook text')
     expect(screen.queryByText('Day 1 hook text')).not.toBeInTheDocument()
     expect(screen.getByText('Day 3 frame')).toBeInTheDocument()
-    expect(screen.getByText('Day 3 reel brief')).toBeInTheDocument()
   })
 })
 
@@ -272,9 +271,43 @@ describe('CampaignDailyPlanPanel — Reel readiness is script-only, media_status
     // Script-complete label, not the old "Reel 草稿完整".
     await screen.findByText('Reel 脚本草稿完整')
     expect(screen.queryByText('Reel 草稿完整')).not.toBeInTheDocument()
-    // NO_MEDIA banner stays visible so the reviewer never confuses a script
-    // draft with a real video file.
-    expect(screen.getByText(/暂无成片/)).toBeInTheDocument()
+    // The Reel script is no longer shown in the Post view; the card only
+    // points to the dedicated Reels tab.
+    expect(screen.getByText('Reel 视频不在这里管理。')).toBeInTheDocument()
+    const reelsLink = screen.getByRole('link', { name: '去「视频 Reels」页看成片 →' })
+    expect(reelsLink).toHaveAttribute('href', '?tab=reels')
+    expect(screen.queryByText(/暂无成片/)).not.toBeInTheDocument()
+  })
+})
+
+describe('CampaignDailyPlanPanel — Reel card points to the Reels tab only', () => {
+  it('the Reel card only points to the Reels tab and never renders the script', async () => {
+    mockFetchOnce({
+      success: true,
+      campaign: { id: CAMPAIGN_ID, title: 'Christmas Campaign', offer: null, primary_cta: 'Enquire Now' },
+      grounding: { status: 'OK', has_master_brief: true, has_campaign: true },
+      days: daysGrid(['2026-08-24']),
+      bundles: [
+        {
+          date: '2026-08-24',
+          post: { hook: 'hook', body: 'body', cta: 'Enquire Now' },
+          story: { frames: [{ order: 1, copy: 'f1' }] },
+          reel: { brief: 'SECRET BRIEF TEXT', script: 'SECRET SCRIPT TEXT', caption: 'c', source_asset_ids: [], media_status: 'NO_MEDIA' },
+          readiness: readiness(),
+          provenance: [],
+        },
+      ],
+      publishing_plan: { conversion_goal: null, destination: 'UNKNOWN', status: 'NOT_AUTHORIZED' },
+      ad_candidate: null,
+    })
+
+    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+
+    await screen.findByText('Reel 视频不在这里管理。')
+    expect(screen.queryByText('SECRET SCRIPT TEXT')).not.toBeInTheDocument()
+    expect(screen.queryByText('SECRET BRIEF TEXT')).not.toBeInTheDocument()
+    const reelsLink = screen.getByRole('link', { name: '去「视频 Reels」页看成片 →' })
+    expect(reelsLink).toHaveAttribute('href', '?tab=reels')
   })
 })
 
