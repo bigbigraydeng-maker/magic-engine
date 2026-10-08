@@ -127,7 +127,7 @@ export function normaliseAdAccountId(raw: string | null | undefined): string {
 /** 广告账号尾号（后 4 位）；没有记录时给一句人话。 */
 function accountSuffix(raw: string | null | undefined): string {
   const id = normaliseAdAccountId(raw)
-  if (!id) return '（账号没记录）'
+  if (!id) return '（账号没记录，请以该客户登记的广告账号为准）'
   return id.slice(-4)
 }
 
@@ -201,7 +201,7 @@ function devItem(
 ): ManualItem {
   let what = `${clientName}：工厂 Reel 自动起草广告没成功（${reason}）。`
   if (providerImpact === 'paused_objects_created') {
-    what += ` Meta 上建出了暂停状态的对象（没有花钱），需要核对或清理：${objectIdentifiers(payload, draft, workOrderId)}。`
+    what += ` Meta 上按请求建出了暂停状态的对象（没有花钱，但未必读回确认过），需要核对或清理：${objectIdentifiers(payload, draft, workOrderId)}。`
   } else if (providerImpact === 'unknown') {
     what += ` Meta 上可能留着对象，是否已暂停没确认，请去 Meta 后台核对：${objectIdentifiers(payload, draft, workOrderId)}。`
   } else {
@@ -346,7 +346,9 @@ export function buildFactoryReelAdDraftItems(
         items.push(mayBeSpendingItem(clientId, clientName, payload, draft, workOrderId))
         continue
       }
-      items.push(devItem(clientId, clientName, '起草后被闸门拦下', payload.provider_impact, workOrderId, payload, draft))
+      const blockedErr = asString(payload.error)
+      const blockedReason = blockedErr ? `起草后被闸门拦下：${blockedErr.slice(0, 120)}` : '起草后被闸门拦下'
+      items.push(devItem(clientId, clientName, blockedReason, payload.provider_impact, workOrderId, payload, draft))
       continue
     }
 

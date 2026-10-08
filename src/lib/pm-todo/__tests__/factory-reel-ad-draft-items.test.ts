@@ -749,3 +749,26 @@ describe('pushFactoryReelAdDraftItems', () => {
     expect(items[0].what).toContain('读不出来')
   })
 })
+
+describe('draft_blocked 的原因写进待办（卫青复核）', () => {
+  it('把意图行里的 error（闸门 findings 代码）带进开发待办', () => {
+    const snapshot = makeSnapshot({
+      intents: [
+        makeIntent({
+          payload: {
+            status: 'draft_blocked',
+            mode: 'on',
+            work_order_id: 'wo-12345678',
+            provider_impact: 'paused_objects_created',
+            error: 'ad_count_mismatch；playback_placement_not_locked',
+          },
+        }),
+      ],
+    })
+    const items = buildFactoryReelAdDraftItems(snapshot, nameOf, NOW)
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('factory_reel_ad_draft_dev_issue')
+    expect(items[0].what).toContain('起草后被闸门拦下：ad_count_mismatch')
+    expect(items[0].what).toContain('未必读回确认过')
+  })
+})
