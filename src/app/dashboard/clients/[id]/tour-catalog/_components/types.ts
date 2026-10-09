@@ -108,3 +108,67 @@ export interface ChangeLogEntryView {
   actor: string
   createdAt: string
 }
+
+// ---------------------------------------------------------------------------
+// AI assistant proposal shapes (client-side mirror of the server contract).
+// Re-declared here so client components never import server modules.
+// ---------------------------------------------------------------------------
+
+export interface TourPatchView {
+  name?: string
+  title?: string | null
+  displayPriceText?: string | null
+  durationText?: string | null
+  shortDescription?: string | null
+  highlights?: string[]
+  itinerary?: CatalogItineraryDayView[]
+  inclusions?: string[]
+  exclusions?: string[]
+  tourCities?: string[]
+  singleSupplement?: string | null
+  maxGroupSize?: number | null
+  isActive?: boolean
+  managesDepartures?: boolean
+}
+
+export interface DeparturePatchView {
+  returnOn?: string | null
+  status?: 'open' | 'limited' | 'sold_out' | 'closed' | 'cancelled'
+  priceTextOverride?: string | null
+}
+
+export interface NewDepartureView {
+  departOn: string
+  returnOn: string
+  status: 'open' | 'limited' | 'sold_out' | 'closed' | 'cancelled'
+  priceTextOverride: string | null
+}
+
+export type ProposalView =
+  | { kind: 'update_tour'; tourId: string; summary: string; patch: TourPatchView }
+  | {
+      kind: 'update_departure'
+      tourId: string
+      departureId: string
+      summary: string
+      patch: DeparturePatchView
+    }
+  | { kind: 'create_departure'; tourId: string; summary: string; fields: NewDepartureView }
+
+export interface FieldErrorView {
+  field: string
+  code: string
+}
+
+export type ProposalCheckView = { ok: true } | { ok: false; errors: FieldErrorView[] }
+
+export interface AssistantProposalView {
+  proposal: ProposalView
+  check: ProposalCheckView
+}
+
+export interface AssistantReplyView {
+  reply: string
+  proposals: AssistantProposalView[]
+  costUsd: number
+}

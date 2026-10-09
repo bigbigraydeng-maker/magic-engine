@@ -1,0 +1,378 @@
+/**
+ * Tour catalog AI assistant — turns a natural-language admin request into
+ * validated catalog proposals. Pure helpers (buildCatalogIndex, tourDetail,
+ * checkProposal) are separated from the model loop (runAssistant) so the
+ * validation surface can be tested without any network.
+ *
+ * Design: docs/specs/2026-10-09-cts-tour-catalog-in-me-design-v0.3.md
+ */
+
+import type Anthropic from '@anthropic-ai/sdk'
+import { getAnthropicClientDirect, MODEL_SONNET } from '@/lib/anthropic/client'
+import type { CatalogSnapshot } from './store'
+import type { CatalogTour } from './types'
+import {
+  validateDeparturePatch,
+  validateNewDeparture,
+  validateTourPatch,
+} from './edit-validation'
+import type {
+  DeparturePatch,
+  FieldError,
+  NewDeparture,
+  TourPatch,
+} from './edit-validation'
+
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
+
+export type Proposal =
+  | { kind: 'update_tour'; tourId: string; summary: string; patch: TourPatch }
+  | { kind: 'update_departure'; tourId: string; departureId: string; summary: string; patch: DeparturePatch }
+  | { kind: 'create_departure'; tourId: string; summary: string; fields: NewDeparture }
+
+export type ProposalCheck = { ok: true } | { ok: false; errors: FieldError[] }
+
+export interface AssistantResult {
+  reply: string
+  proposals: Array<{ proposal: Proposal; check: ProposalCheck }>
+  costUsd: number
+}
+
+export interface AssistantMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface AssistantDeps {
+  createMessage: (params: Anthropic.MessageCreateParamsNonStreaming) => Promise<Anthropic.Message>
+}
+
+// ---------------------------------------------------------------------------
+// Catalog index / detail (pure)
+// ---------------------------------------------------------------------------
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Compact, model-facing index of the whole catalog. Never includes internal fields. */
+export function buildCatalogIndex(snapshot: CatalogSnapshot): string {
+  const tours = snapshot.tours.map((tour) => ({
+    id: tour.id,
+    name: tour.name,
+    title: tour.title,
+    price: tour.displayPriceText,
+    duration: tour.durationText,
+    isActive: tour.isActive,
+    managesDepartures: tour.managesDepartures,
+    maxGroupSize: tour.maxGroupSize,
+    dayTitles: tour.itinerary.map((d) => `${d.day}. ${d.title}`),
+    departures: snapshot.departures
+      .filter((dep) => dep.tourId === tour.id)
+      .map((dep) => ({
+        id: dep.id,
+        departOn: dep.departOn,
+        returnOn: dep.returnOn,
+        status: dep.status,
+        price: dep.priceTextOverride,
+      })),
+  }))
+  return JSON.stringify(tours)
+}
+
+/** Full tour JSON (clientId stripped) for the get_tour_detail tool, or null. */
+export function tourDetail(snapshot: CatalogSnapshot, tourId: string): string | null {
+  const tour = snapshot.tours.find((t) => t.id === tourId)
+  if (!tour) return null
+  const { clientId: _clientId, ...rest } = tour
+  return JSON.stringify(rest)
+}
+
+// ---------------------------------------------------------------------------
+// checkProposal (pure)
+// ---------------------------------------------------------------------------
+
+function asString(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
+function tourExists(snapshot: CatalogSnapshot, tourId: string): boolean {
+  return snapshot.tours.some((t) => t.id === tourId)
+}
+
+function departureBelongsToTour(
+  snapshot: CatalogSnapshot,
+  tourId: string,
+  departureId: string,
+): boolean {
+  return snapshot.departures.some((d) => d.id === departureId && d.tourId === tourId)
+}
+
+function fail(field: string, code: string): ProposalCheck {
+  return { ok: false, errors: [{ field, code }] }
+}
+
+/**
+ * Validate a raw proposal object against the snapshot. Returns null only when
+ * the shape is unusable (not an object, or an unknown kind). A structurally
+ * valid proposal with bad data comes back with check.ok === false so the UI
+ * can show the errors.
+ */
+export function checkProposal(
+  snapshot: CatalogSnapshot,
+  raw: unknown,
+): { proposal: Proposal; check: ProposalCheck } | null {
+  if (!isPlainObject(raw)) return null
+  const kind = raw.kind
+  if (kind !== 'update_tour' && kind !== 'update_departure' && kind !== 'create_departure') {
+    return null
+  }
+
+  const tourId = asString(raw.tourId)
+  const summary = asString(raw.summary)
+
+  if (kind === 'update_tour') {
+    const proposal: Proposal = { kind, tourId, summary, patch: {} }
+    if (!tourExists(snapshot, tourId)) {
+      return { proposal, check: fail('tourId', 'tour_not_found') }
+    }
+    const result = validateTourPatch(raw.patch)
+    if (!result.ok) return { proposal, check: { ok: false, errors: result.errors } }
+    return { proposal: { ...proposal, patch: result.value }, check: { ok: true } }
+  }
+
+  if (kind === 'update_departure') {
+    const departureId = asString(raw.departureId)
+    const proposal: Proposal = { kind, tourId, departureId, summary, patch: {} }
+    if (!tourExists(snapshot, tourId)) {
+      return { proposal, check: fail('tourId', 'tour_not_found') }
+    }
+    if (!departureBelongsToTour(snapshot, tourId, departureId)) {
+      return { proposal, check: fail('departureId', 'departure_not_found') }
+    }
+    const result = validateDeparturePatch(raw.patch)
+    if (!result.ok) return { proposal, check: { ok: false, errors: result.errors } }
+    return { proposal: { ...proposal, patch: result.value }, check: { ok: true } }
+  }
+
+  // create_departure
+  const proposal: Proposal = {
+    kind,
+    tourId,
+    summary,
+    fields: { departOn: '', returnOn: '', status: 'open', priceTextOverride: null },
+  }
+  if (!tourExists(snapshot, tourId)) {
+    return { proposal, check: fail('tourId', 'tour_not_found') }
+  }
+  const result = validateNewDeparture(raw.fields)
+  if (!result.ok) return { proposal, check: { ok: false, errors: result.errors } }
+  return { proposal: { ...proposal, fields: result.value }, check: { ok: true } }
+}
+
+// ---------------------------------------------------------------------------
+// Tools
+// ---------------------------------------------------------------------------
+
+const GET_TOUR_DETAIL_TOOL: Anthropic.Tool = {
+  name: 'get_tour_detail',
+  description: '读取某个团的完整信息（含逐日行程、包含/不包含项）。需要改动前先调用它。',
+  input_schema: {
+    type: 'object',
+    properties: {
+      tourId: { type: 'string', description: '团的 id' },
+    },
+    required: ['tourId'],
+  },
+}
+
+const PROPOSE_CHANGES_TOOL: Anthropic.Tool = {
+  name: 'propose_changes',
+  description: '提交给管理员确认的改动建议。必须调用此工具返回结果，不要用普通文本回复。',
+  input_schema: {
+    type: 'object',
+    properties: {
+      reply: { type: 'string', description: '给管理员看的一句中文回复' },
+      proposals: {
+        type: 'array',
+        description: '改动建议列表',
+        items: {
+          type: 'object',
+          properties: {
+            kind: {
+              type: 'string',
+              enum: ['update_tour', 'update_departure', 'create_departure'],
+            },
+            tourId: { type: 'string' },
+            departureId: { type: 'string' },
+            summary: { type: 'string', description: '这条改动的一句话中文说明' },
+            patch: { type: 'object', description: 'update_tour / update_departure 的字段改动' },
+            fields: { type: 'object', description: 'create_departure 的字段' },
+          },
+          required: ['kind', 'tourId', 'summary'],
+        },
+      },
+    },
+    required: ['reply', 'proposals'],
+  },
+}
+
+const SYSTEM_PROMPT = `你是旅行社后台的行程目录 AI 助手。管理员用中文跟你说话，你帮他改团和班期。
+
+## 你只能通过 propose_changes 工具提交改动
+
+必须调用 propose_changes 返回结果，不要用普通文本回复（除非需要向管理员提问）。
+
+你**不能**做的事：
+- 新建团（只能改已有的团）
+- 改团的 slug / destination / tier
+- 改班期的出发日期（departOn）。如果出发日期填错了，正确做法是：把旧班期 status 改成 "cancelled"，再 create_departure 建一个新的。
+
+## 改动规则
+
+- 改逐日行程（itinerary）时，必须返回**完整的** itinerary 数组，day 从 1 连续编号到 n，不能只给改动的那一天。
+- 价格字段（displayPriceText / priceTextOverride）必须写成 "From NZD $4,999 per person" 这种形式，或者 "TBC"。
+- 日期一律 YYYY-MM-DD。
+- 只给需要改的字段，其余不要出现。
+
+## 拿不准就问
+
+如果管理员的请求有歧义（哪个团？哪一天？改成什么？），**不要猜**。用普通文本回复一个简短的中文问题，不要调用 propose_changes。
+
+## 回复风格
+
+reply 用简短、平实的中文，不要术语，不要英文。例如「已把第 5 天的酒店改成 XX，请确认」。
+
+## 今天的日期
+
+{today}
+
+## 当前行程目录
+
+{catalog}`
+
+function buildSystemPrompt(today: string, catalogIndex: string): string {
+  return SYSTEM_PROMPT.replace('{today}', today).replace('{catalog}', catalogIndex)
+}
+
+// ---------------------------------------------------------------------------
+// runAssistant
+// ---------------------------------------------------------------------------
+
+const MAX_ITERATIONS = 4
+const MAX_TOKENS = 8000
+const HISTORY_LIMIT = 10
+const PRICE_INPUT_PER_M = 3.0
+const PRICE_OUTPUT_PER_M = 15.0
+
+function defaultDeps(): AssistantDeps {
+  return {
+    createMessage: (params) => getAnthropicClientDirect().messages.create(params),
+  }
+}
+
+function extractText(content: Anthropic.ContentBlock[]): string {
+  return content
+    .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+    .map((b) => b.text)
+    .join('')
+    .trim()
+}
+
+function findToolUse(
+  content: Anthropic.ContentBlock[],
+  name: string,
+): Anthropic.ToolUseBlock | undefined {
+  return content.find(
+    (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === name,
+  )
+}
+
+function mapProposals(
+  snapshot: CatalogSnapshot,
+  raw: unknown,
+): Array<{ proposal: Proposal; check: ProposalCheck }> {
+  if (!Array.isArray(raw)) return []
+  const out: Array<{ proposal: Proposal; check: ProposalCheck }> = []
+  for (const item of raw) {
+    const checked = checkProposal(snapshot, item)
+    if (checked !== null) out.push(checked)
+  }
+  return out
+}
+
+function buildToolResult(id: string, content: string): Anthropic.ToolResultBlockParam {
+  return { type: 'tool_result', tool_use_id: id, content }
+}
+
+/**
+ * Run the assistant loop. Up to MAX_ITERATIONS model calls; the model may call
+ * get_tour_detail (resolved locally) before finally calling propose_changes.
+ */
+export async function runAssistant(
+  input: {
+    snapshot: CatalogSnapshot
+    history: AssistantMessage[]
+    message: string
+    today: string
+  },
+  deps?: AssistantDeps,
+): Promise<AssistantResult> {
+  const { snapshot, history, message, today } = input
+  const client = deps ?? defaultDeps()
+
+  const system = buildSystemPrompt(today, buildCatalogIndex(snapshot))
+  const messages: Anthropic.MessageParam[] = [
+    ...history.slice(-HISTORY_LIMIT).map((m) => ({ role: m.role, content: m.content })),
+    { role: 'user', content: message },
+  ]
+
+  let costUsd = 0
+
+  for (let i = 0; i < MAX_ITERATIONS; i++) {
+    const response = await client.createMessage({
+      model: MODEL_SONNET,
+      max_tokens: MAX_TOKENS,
+      system,
+      messages,
+      tools: [GET_TOUR_DETAIL_TOOL, PROPOSE_CHANGES_TOOL],
+      tool_choice: { type: 'auto' },
+    })
+
+    costUsd +=
+      (response.usage.input_tokens / 1_000_000) * PRICE_INPUT_PER_M +
+      (response.usage.output_tokens / 1_000_000) * PRICE_OUTPUT_PER_M
+
+    if (response.stop_reason === 'max_tokens') {
+      throw new Error('assistant_truncated')
+    }
+
+    const detailUse = findToolUse(response.content, GET_TOUR_DETAIL_TOOL.name)
+    if (detailUse) {
+      const tourId = asString((detailUse.input as Record<string, unknown>).tourId)
+      const detail = tourDetail(snapshot, tourId) ?? '{"error":"tour_not_found"}'
+      messages.push({ role: 'assistant', content: response.content })
+      messages.push({ role: 'user', content: [buildToolResult(detailUse.id, detail)] })
+      continue
+    }
+
+    const proposeUse = findToolUse(response.content, PROPOSE_CHANGES_TOOL.name)
+    if (proposeUse) {
+      const raw = proposeUse.input as Record<string, unknown>
+      return {
+        reply: asString(raw.reply),
+        proposals: mapProposals(snapshot, raw.proposals),
+        costUsd,
+      }
+    }
+
+    const text = extractText(response.content)
+    if (text !== '') {
+      return { reply: text, proposals: [], costUsd }
+    }
+  }
+
+  throw new Error('assistant_no_result')
+}

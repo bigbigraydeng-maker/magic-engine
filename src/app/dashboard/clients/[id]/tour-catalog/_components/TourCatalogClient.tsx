@@ -18,6 +18,7 @@ import { ImportPanel } from './ImportPanel'
 import { TourEditor } from './TourEditor'
 import { DeparturesEditor } from './DeparturesEditor'
 import { ChangeLog } from './ChangeLog'
+import { AssistantPanel } from './AssistantPanel'
 import type { SeedResponse } from '@/lib/tour-catalog/api-contract'
 
 type State =
@@ -108,6 +109,7 @@ function rollbackConflictText(conflict: RollbackConflict): string {
 
 export function TourCatalogClient({ clientId }: { clientId: string }) {
   const [state, setState] = useState<State>({ phase: 'loading' })
+  const [assistantOpen, setAssistantOpen] = useState(false)
 
   // silent = refresh data without blanking the page (keeps an open import preview intact).
   const load = useCallback(async (silent = false) => {
@@ -150,34 +152,61 @@ export function TourCatalogClient({ clientId }: { clientId: string }) {
 
   const { tours, departures, aliases, batches } = state.snapshot
 
-  return (
-    <div className="space-y-5">
-      {tours.length === 0 ? (
+  if (tours.length === 0) {
+    return (
+      <div className="space-y-5">
         <SeedPanel clientId={clientId} domain={state.snapshot.domain} onSeeded={refreshQuietly} />
-      ) : (
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="min-w-0 space-y-5">
         <TourList
           clientId={clientId}
           tours={tours}
           departures={departures}
           onChanged={refreshQuietly}
         />
-      )}
 
-      <AliasList clientId={clientId} aliases={aliases} tours={tours} onChanged={refreshQuietly} />
+        <AliasList clientId={clientId} aliases={aliases} tours={tours} onChanged={refreshQuietly} />
 
-      <ImportPanel
-        clientId={clientId}
-        tours={tours}
-        onChanged={reload}
-        onAliasesChanged={refreshQuietly}
-      />
+        <ImportPanel
+          clientId={clientId}
+          tours={tours}
+          onChanged={reload}
+          onAliasesChanged={refreshQuietly}
+        />
 
-      {/* Preview-only batches are drafts, not history: list only what was imported or undone. */}
-      <BatchHistory
-        clientId={clientId}
-        batches={batches.filter(b => b.status !== 'previewed')}
-        onChanged={reload}
-      />
+        {/* Preview-only batches are drafts, not history: list only what was imported or undone. */}
+        <BatchHistory
+          clientId={clientId}
+          batches={batches.filter(b => b.status !== 'previewed')}
+          onChanged={reload}
+        />
+      </div>
+
+      <aside className="order-first lg:order-none lg:sticky lg:top-4 lg:self-start">
+        {/* One panel instance for every screen size, so a conversation started on a phone
+            survives rotating / resizing; on small screens it is collapsed behind a toggle. */}
+        <button
+          type="button"
+          onClick={() => setAssistantOpen(v => !v)}
+          className="flex w-full items-center justify-between rounded-xl border border-black/10 bg-white px-4 py-3 font-display font-black text-me-charcoal shadow-sm lg:hidden"
+        >
+          <span>AI 助手</span>
+          <span className="text-xs font-semibold text-me-charcoal/45">{assistantOpen ? '收起' : '展开'}</span>
+        </button>
+        <div className={`${assistantOpen ? 'mt-3' : 'hidden'} lg:mt-0 lg:block`}>
+          <AssistantPanel
+            clientId={clientId}
+            tours={tours}
+            departures={departures}
+            onApplied={refreshQuietly}
+          />
+        </div>
+      </aside>
     </div>
   )
 }

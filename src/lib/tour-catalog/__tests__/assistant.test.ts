@@ -1,0 +1,293 @@
+import { describe, expect, it, vi } from 'vitest'
+import type Anthropic from '@anthropic-ai/sdk'
+import {
+  buildCatalogIndex,
+  checkProposal,
+  runAssistant,
+  tourDetail,
+} from '../assistant'
+import type { AssistantDeps } from '../assistant'
+import type { CatalogSnapshot } from '../store'
+import type { CatalogDeparture, CatalogTour } from '../types'
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+function makeTour(overrides: Partial<CatalogTour> = {}): CatalogTour {
+  return {
+    id: 'tour-1',
+    clientId: 'client-1',
+    slug: 'china-panorama',
+    destination: 'China',
+    tier: 'signature',
+    name: 'China Panorama',
+    title: 'China Panorama 2027',
+    shortDescription: 'A grand tour of China.',
+    durationText: '20 days',
+    displayPriceText: 'From NZD $4,999 per person',
+    highlights: ['Great Wall'],
+    itinerary: [
+      { day: 1, title: 'Arrive Beijing', description: 'Arrival.' },
+      { day: 2, title: 'Forbidden City', description: 'Tour.' },
+    ],
+    inclusions: ['Flights'],
+    exclusions: ['Tips'],
+    tourCities: ['Beijing'],
+    singleSupplement: 'NZD $1,200',
+    maxGroupSize: 20,
+    isActive: true,
+    managesDepartures: true,
+    sortOrder: 1,
+    updatedAt: '2026-01-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
+function makeDeparture(overrides: Partial<CatalogDeparture> = {}): CatalogDeparture {
+  return {
+    id: 'dep-1',
+    tourId: 'tour-1',
+    clientId: 'client-1',
+    departOn: '2027-03-01',
+    returnOn: '2027-03-20',
+    priceTextOverride: null,
+    status: 'open',
+    internal: { airline: 'Air NZ', capacity: 20 },
+    updatedAt: '2026-01-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
+function makeSnapshot(): CatalogSnapshot {
+  return {
+    tours: [makeTour()],
+    departures: [makeDeparture()],
+    aliases: [],
+  }
+}
+
+// ---------------------------------------------------------------------------
+// buildCatalogIndex / tourDetail
+// ---------------------------------------------------------------------------
+
+describe('buildCatalogIndex', () => {
+  it('never includes internal fields', () => {
+    const index = buildCatalogIndex(makeSnapshot())
+    expect(index).not.toContain('internal')
+    expect(index).not.toContain('Air NZ')
+    expect(index).toContain('China Panorama')
+    expect(index).toContain('1. Arrive Beijing')
+    expect(index).toContain('dep-1')
+  })
+})
+
+describe('tourDetail', () => {
+  it('returns full tour JSON without clientId', () => {
+    const detail = tourDetail(makeSnapshot(), 'tour-1')
+    expect(detail).not.toBeNull()
+    const parsed = JSON.parse(detail as string) as Record<string, unknown>
+    expect(parsed.clientId).toBeUndefined()
+    expect(parsed.name).toBe('China Panorama')
+    expect(parsed.itinerary).toBeDefined()
+  })
+
+  it('returns null for an unknown tour', () => {
+    expect(tourDetail(makeSnapshot(), 'nope')).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// checkProposal
+// ---------------------------------------------------------------------------
+
+describe('checkProposal', () => {
+  it('accepts a valid tour patch', () => {
+    const result = checkProposal(makeSnapshot(), {
+      kind: 'update_tour',
+      tourId: 'tour-1',
+      summary: '改名字',
+      patch: { name: 'China Panorama Deluxe' },
+    })
+    expect(result).not.toBeNull()
+    expect(result?.check.ok).toBe(true)
+    expect(result?.proposal.kind).toBe('update_tour')
+  })
+
+  it('rejects an invalid price', () => {
+    const result = checkProposal(makeSnapshot(), {
+      kind: 'update_tour',
+      tourId: 'tour-1',
+      summary: '改价格',
+      patch: { displayPriceText: 'cheap' },
+    })
+    expect(result?.check.ok).toBe(false)
+    if (result && !result.check.ok) {
+      expect(result.check.errors[0].field).toBe('displayPriceText')
+    }
+  })
+
+  it('reports an unknown tour', () => {
+    const result = checkProposal(makeSnapshot(), {
+      kind: 'update_tour',
+      tourId: 'nope',
+      summary: 'x',
+      patch: { name: 'X' },
+    })
+    expect(result?.check.ok).toBe(false)
+    if (result && !result.check.ok) {
+      expect(result.check.errors[0]).toEqual({ field: 'tourId', code: 'tour_not_found' })
+    }
+  })
+
+  it('reports a departure belonging to another tour', () => {
+    const snapshot = makeSnapshot()
+    snapshot.tours.push(makeTour({ id: 'tour-2', name: 'Other' }))
+    const result = checkProposal(snapshot, {
+      kind: 'update_departure',
+      tourId: 'tour-2',
+      departureId: 'dep-1',
+      summary: 'x',
+      patch: { status: 'closed' },
+    })
+    expect(result?.check.ok).toBe(false)
+    if (result && !result.check.ok) {
+      expect(result.check.errors[0]).toEqual({ field: 'departureId', code: 'departure_not_found' })
+    }
+  })
+
+  it('returns null for an unknown kind', () => {
+    expect(checkProposal(makeSnapshot(), { kind: 'delete_tour', tourId: 'tour-1' })).toBeNull()
+  })
+
+  it('returns null for a non-object', () => {
+    expect(checkProposal(makeSnapshot(), 'nope')).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// runAssistant
+// ---------------------------------------------------------------------------
+
+function textMessage(text: string): Anthropic.Message {
+  return {
+    id: 'msg',
+    type: 'message',
+    role: 'assistant',
+    model: 'claude-sonnet-4-6',
+    content: [{ type: 'text', text }],
+    stop_reason: 'end_turn',
+    stop_sequence: null,
+    usage: { input_tokens: 1000, output_tokens: 500 },
+  } as Anthropic.Message
+}
+
+function toolMessage(
+  name: string,
+  input: unknown,
+  stopReason: Anthropic.Message['stop_reason'] = 'tool_use',
+): Anthropic.Message {
+  return {
+    id: 'msg',
+    type: 'message',
+    role: 'assistant',
+    model: 'claude-sonnet-4-6',
+    content: [{ type: 'tool_use', id: 'tu-1', name, input }],
+    stop_reason: stopReason,
+    stop_sequence: null,
+    usage: { input_tokens: 1000, output_tokens: 500 },
+  } as Anthropic.Message
+}
+
+function depsFrom(responses: Anthropic.Message[]): {
+  deps: AssistantDeps
+  calls: Anthropic.MessageCreateParamsNonStreaming[]
+} {
+  const calls: Anthropic.MessageCreateParamsNonStreaming[] = []
+  let i = 0
+  const createMessage = vi.fn(async (params: Anthropic.MessageCreateParamsNonStreaming) => {
+    calls.push(params)
+    const response = responses[i]
+    i++
+    if (!response) throw new Error('no more canned responses')
+    return response
+  })
+  return { deps: { createMessage }, calls }
+}
+
+const baseInput = {
+  snapshot: makeSnapshot(),
+  history: [],
+  message: '把团名改成 China Panorama Deluxe',
+  today: '2026-10-09',
+}
+
+describe('runAssistant', () => {
+  it('returns a text-only reply', async () => {
+    const { deps } = depsFrom([textMessage('请问是哪个团？')])
+    const result = await runAssistant(baseInput, deps)
+    expect(result.reply).toBe('请问是哪个团？')
+    expect(result.proposals).toEqual([])
+  })
+
+  it('resolves get_tour_detail then returns validated proposals', async () => {
+    const { deps, calls } = depsFrom([
+      toolMessage('get_tour_detail', { tourId: 'tour-1' }),
+      toolMessage('propose_changes', {
+        reply: '已提交两条改动',
+        proposals: [
+          {
+            kind: 'update_tour',
+            tourId: 'tour-1',
+            summary: '改名字',
+            patch: { name: 'China Panorama Deluxe' },
+          },
+          {
+            kind: 'update_tour',
+            tourId: 'tour-1',
+            summary: '改价格',
+            patch: { displayPriceText: 'cheap' },
+          },
+        ],
+      }),
+    ])
+
+    const result = await runAssistant(baseInput, deps)
+
+    expect(result.reply).toBe('已提交两条改动')
+    expect(result.proposals).toHaveLength(2)
+    expect(result.proposals[0].check.ok).toBe(true)
+    expect(result.proposals[1].check.ok).toBe(false)
+
+    // Second call must carry the tool_result with the tour JSON.
+    const secondMessages = calls[1].messages
+    const toolResult = secondMessages.find(
+      (m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'tool_result'),
+    )
+    expect(toolResult).toBeDefined()
+    const blocks = toolResult?.content as Anthropic.ToolResultBlockParam[]
+    expect(blocks[0].content).toContain('China Panorama')
+  })
+
+  it('throws on max_tokens truncation', async () => {
+    const { deps } = depsFrom([toolMessage('propose_changes', {}, 'max_tokens')])
+    await expect(runAssistant(baseInput, deps)).rejects.toThrow('assistant_truncated')
+  })
+
+  it('throws when no final result after 4 iterations', async () => {
+    const { deps } = depsFrom([
+      toolMessage('get_tour_detail', { tourId: 'tour-1' }),
+      toolMessage('get_tour_detail', { tourId: 'tour-1' }),
+      toolMessage('get_tour_detail', { tourId: 'tour-1' }),
+      toolMessage('get_tour_detail', { tourId: 'tour-1' }),
+    ])
+    await expect(runAssistant(baseInput, deps)).rejects.toThrow('assistant_no_result')
+  })
+
+  it('computes costUsd from token usage', async () => {
+    const { deps } = depsFrom([textMessage('好的')])
+    const result = await runAssistant(baseInput, deps)
+    // 1000 input * 3 + 500 output * 15 = 3000 + 7500 = 10500 / 1e6
+    expect(result.costUsd).toBeCloseTo(0.0105, 6)
+  })
+})
