@@ -33,6 +33,8 @@ export interface CatalogSnapshotResponse {
   departures: CatalogDepartureView[]
   aliases: Array<{ aliasNorm: string; tourId: string }>
   batches: CatalogBatchView[]
+  /** The client's own website domain, used to read its existing tours. */
+  domain: string | null
 }
 
 export interface PreviewSummaryView {

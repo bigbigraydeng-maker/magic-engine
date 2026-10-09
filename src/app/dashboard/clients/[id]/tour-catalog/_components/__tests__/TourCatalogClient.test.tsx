@@ -9,6 +9,7 @@ function snapshot(overrides: Partial<CatalogSnapshotResponse> = {}): CatalogSnap
     departures: [],
     aliases: [],
     batches: [],
+    domain: 'example.com',
     ...overrides,
   }
 }
@@ -98,32 +99,34 @@ describe('TourCatalogClient', () => {
     expect(screen.getByText('不管理班期')).toBeInTheDocument()
   })
 
-  it('shows the empty state and posts the domain when seeding', async () => {
+  it('reads the client\'s own website without asking for a domain, and reports the counts', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse(snapshot()))
-      .mockResolvedValueOnce(jsonResponse({ tours: 3, departures: 7 }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, toursInserted: 3, departuresInserted: 7 }))
       .mockResolvedValueOnce(jsonResponse(snapshot()))
     vi.stubGlobal('fetch', fetchMock)
 
     render(<TourCatalogClient clientId={CLIENT_ID} />)
 
     expect(await screen.findByText('还没有任何团')).toBeInTheDocument()
-
-    fireEvent.change(screen.getByPlaceholderText('网站域名'), {
-      target: { value: 'example.com' },
-    })
-    fireEvent.click(screen.getByText('从网站导入现有的团'))
+    expect(screen.queryByPlaceholderText('网站域名')).toBeNull()
+    expect(screen.getByText(/example\.com/)).toBeInTheDocument()
+    fireEvent.click(screen.getByText('读入网站上现有的团'))
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         `/api/clients/${CLIENT_ID}/tour-catalog/seed`,
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({ domain: 'example.com' }),
-        }),
+        { method: 'POST' },
       )
     })
+    expect(await screen.findByText('已读入 3 个团、7 个班期')).toBeInTheDocument()
+  })
+
+  it('disables reading when the client record has no website', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(jsonResponse(snapshot({ domain: null }))))
+    render(<TourCatalogClient clientId={CLIENT_ID} />)
+    expect(await screen.findByText('读入网站上现有的团')).toBeDisabled()
   })
 
   it('only shows the rollback button on applied batches and posts on confirm', async () => {
@@ -412,6 +415,6 @@ describe('TourCatalogClient', () => {
 
     render(<TourCatalogClient clientId={CLIENT_ID} />)
 
-    expect(await screen.findByText('还没有记住任何叫法')).toBeInTheDocument()
+    expect(await screen.findByText(/现在还没有/)).toBeInTheDocument()
   })
 })

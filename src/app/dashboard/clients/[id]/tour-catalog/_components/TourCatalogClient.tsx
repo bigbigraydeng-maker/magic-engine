@@ -23,7 +23,9 @@ type State =
 
 /** 接口错误码的中文说法。未知的码原样显示。 */
 const ERROR_LABELS: Record<string, string> = {
-  feed_not_configured: '这个网站还没有配置可读取的团数据源',
+  feed_not_configured: '这家客户的网站还没有开通团数据读取，请联系开发',
+  client_domain_missing: '这家客户的档案里还没有登记网站，请先在客户设置里填上网站',
+  catalog_load_failed: '服务器暂时读不到数据，请点重试；还不行请联系开发',
   feed_unavailable: '网站暂时读取不到',
   conflict: '撤销失败：导入之后又有人改过这些班期，为避免覆盖已拒绝撤销',
   not_applicable: '这次导入现在不能撤销',
@@ -133,7 +135,7 @@ export function TourCatalogClient({ clientId }: { clientId: string }) {
   return (
     <div className="space-y-5">
       {tours.length === 0 ? (
-        <SeedPanel clientId={clientId} onSeeded={load} />
+        <SeedPanel clientId={clientId} domain={state.snapshot.domain} onSeeded={refreshQuietly} />
       ) : (
         <TourList tours={tours} departures={departures} />
       )}
@@ -157,29 +159,31 @@ export function TourCatalogClient({ clientId }: { clientId: string }) {
   )
 }
 
-function SeedPanel({ clientId, onSeeded }: { clientId: string; onSeeded: () => void }) {
-  const [domain, setDomain] = useState('')
+function SeedPanel({
+  clientId,
+  domain,
+  onSeeded,
+}: {
+  clientId: string
+  domain: string | null
+  onSeeded: () => void
+}) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const handleSeed = async () => {
-    if (!domain.trim()) return
     setBusy(true)
     setMessage(null)
     setError(null)
     try {
-      const res = await fetch(`/api/clients/${clientId}/tour-catalog/seed`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domain }),
-      })
+      const res = await fetch(`/api/clients/${clientId}/tour-catalog/seed`, { method: 'POST' })
       if (!res.ok) {
         const { error: code } = (await res.json().catch(() => ({}))) as { error?: string }
         throw new Error(errorLabel(code ?? `HTTP ${res.status}`))
       }
-      const data = (await res.json()) as { tours?: number; departures?: number }
-      setMessage(`已导入 ${data.tours ?? 0} 个团、${data.departures ?? 0} 个班期`)
+      const data = (await res.json()) as { toursInserted?: number; departuresInserted?: number }
+      setMessage(`已读入 ${data.toursInserted ?? 0} 个团、${data.departuresInserted ?? 0} 个班期`)
       onSeeded()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -192,22 +196,17 @@ function SeedPanel({ clientId, onSeeded }: { clientId: string; onSeeded: () => v
     <div className="rounded-xl border border-dashed border-black/10 bg-white p-10 text-center">
       <p className="font-black text-me-charcoal">还没有任何团</p>
       <p className="mx-auto mt-2 max-w-md text-sm font-semibold text-me-charcoal/55">
-        填上网站域名，我们可以先把你网站上现有的团读进来，之后在这里统一维护。
+        {domain
+          ? `第一次使用：点下面的按钮，把 ${domain} 上现有的团读进来，之后就在这里统一维护。`
+          : '这家客户的档案里还没有登记网站，读不了现有的团。请先在客户设置里填上网站。'}
       </p>
       <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
-        <input
-          type="text"
-          value={domain}
-          onChange={e => setDomain(e.target.value)}
-          placeholder="网站域名"
-          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal"
-        />
         <button
           onClick={handleSeed}
-          disabled={busy || !domain.trim()}
+          disabled={busy || !domain}
           className="rounded-lg bg-me-charcoal px-4 py-2 text-sm font-black text-white hover:bg-me-charcoal/85 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {busy ? '正在导入…' : '从网站导入现有的团'}
+          {busy ? '正在读取…' : '读入网站上现有的团'}
         </button>
       </div>
       {message && <p className="mt-3 text-sm font-black text-[#5C8A4A]">{message}</p>}
@@ -327,8 +326,12 @@ function AliasList({
   return (
     <div className="space-y-3 rounded-xl border border-black/10 bg-white p-5 shadow-sm">
       <h2 className="font-display font-black text-me-charcoal">已记住的叫法</h2>
+      <p className="text-sm font-semibold text-me-charcoal/55">
+        班期表里的团名有时和系统里的不一样（比如表里只写 Natural China，系统里有高端款和普通款两个）。
+        预览时你选一次对应的是哪个团，系统就记在这里，以后同样的写法会自动对上。选错了可以在这里删掉。
+      </p>
       {aliases.length === 0 ? (
-        <p className="text-sm font-semibold text-me-charcoal/40">还没有记住任何叫法</p>
+        <p className="text-sm font-semibold text-me-charcoal/40">现在还没有，第一次上传班期表时如果有对不上的团名，会在预览里让你选。</p>
       ) : (
         <ul className="space-y-2">
           {aliases.map(a => (

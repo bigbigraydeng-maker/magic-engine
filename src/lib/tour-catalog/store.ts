@@ -617,3 +617,11 @@ export async function removeAlias(
   }
   return { ok: true }
 }
+
+/** The client's own website domain as configured on the client record (null when unset). */
+export async function getClientDomain(db: SupabaseClient, clientId: string): Promise<string | null> {
+  const res = await db.from('clients').select('domain').eq('id', clientId).maybeSingle()
+  if (res.error) throw new Error(res.error.message)
+  const domain = res.data === null || res.data === undefined ? null : asRecord(res.data).domain
+  return typeof domain === 'string' && domain.trim() !== '' ? domain : null
+}

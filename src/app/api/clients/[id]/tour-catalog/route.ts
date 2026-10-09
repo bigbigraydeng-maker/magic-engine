@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
-import { loadCatalog, listRecentBatches } from '@/lib/tour-catalog/store'
+import { getClientDomain, loadCatalog, listRecentBatches } from '@/lib/tour-catalog/store'
+import { normalizeDomain } from '@/lib/tour-catalog/seed'
 import { supabaseAdmin } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -20,11 +21,13 @@ export async function GET(
   try {
     const snapshot = await loadCatalog(supabaseAdmin, clientId)
     const batches = await listRecentBatches(supabaseAdmin, clientId, 20)
+    const storedDomain = await getClientDomain(supabaseAdmin, clientId)
     return NextResponse.json({
       tours: snapshot.tours,
       departures: snapshot.departures,
       aliases: snapshot.aliases,
       batches,
+      domain: storedDomain === null ? null : normalizeDomain(storedDomain),
     })
   } catch (error) {
     console.error('catalog_load_failed', error)

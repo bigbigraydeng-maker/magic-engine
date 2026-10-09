@@ -379,3 +379,14 @@ describe('seedCatalog', () => {
     consoleError.mockRestore()
   })
 })
+
+import { normalizeDomain } from '../seed'
+
+describe('normalizeDomain', () => {
+  it('reduces any website form to the bare hostname used by the feed registry', () => {
+    expect(normalizeDomain('www.ctstours.co.nz')).toBe('ctstours.co.nz')
+    expect(normalizeDomain('https://www.CTStours.co.nz/tours?x=1')).toBe('ctstours.co.nz')
+    expect(normalizeDomain('  ctstours.co.nz  ')).toBe('ctstours.co.nz')
+    expect(normalizeDomain('http://example.com:8080/a')).toBe('example.com')
+  })
+})

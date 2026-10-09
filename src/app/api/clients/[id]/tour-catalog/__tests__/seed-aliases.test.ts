@@ -12,11 +12,13 @@ vi.mock('@/lib/tour-catalog/store', () => ({
   removeAlias: vi.fn(),
   getBatch: vi.fn(),
   rollbackBatch: vi.fn(),
+  getClientDomain: vi.fn(),
 }))
 
 vi.mock('@/lib/tour-catalog/seed', () => ({
   fetchFirstPartyFeed: vi.fn(),
   seedCatalog: vi.fn(),
+  normalizeDomain: (d: string) => d.replace(/^https?:\/\//, '').replace(/^www\./, ''),
 }))
 
 vi.mock('@/lib/web-intelligence/first-party-tours', () => ({
@@ -24,7 +26,7 @@ vi.mock('@/lib/web-intelligence/first-party-tours', () => ({
 }))
 
 import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
-import { addAlias, removeAlias, getBatch, rollbackBatch } from '@/lib/tour-catalog/store'
+import { addAlias, removeAlias, getBatch, rollbackBatch, getClientDomain } from '@/lib/tour-catalog/store'
 import { fetchFirstPartyFeed, seedCatalog } from '@/lib/tour-catalog/seed'
 import { firstPartyTourSourceUrl } from '@/lib/web-intelligence/first-party-tours'
 import { POST as seedPOST } from '../seed/route'
@@ -39,6 +41,7 @@ const rollbackBatchMock = vi.mocked(rollbackBatch)
 const fetchFirstPartyFeedMock = vi.mocked(fetchFirstPartyFeed)
 const seedCatalogMock = vi.mocked(seedCatalog)
 const firstPartyTourSourceUrlMock = vi.mocked(firstPartyTourSourceUrl)
+const getClientDomainMock = vi.mocked(getClientDomain)
 
 const CLIENT_ID = 'client-1'
 
@@ -75,12 +78,26 @@ beforeEach(() => {
 })
 
 describe('POST /tour-catalog/seed', () => {
-  it('returns 400 when domain is missing', async () => {
+  beforeEach(() => {
+    getClientDomainMock.mockResolvedValue('example.com')
+  })
+
+  it('returns 400 when the client record has no website domain', async () => {
     allowAccess()
+    getClientDomainMock.mockResolvedValue(null)
     const res = await seedPOST(makeRequest({}), makeParams())
     expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ error: 'domain_required' })
+    expect(await res.json()).toEqual({ error: 'client_domain_missing' })
     expect(firstPartyTourSourceUrlMock).not.toHaveBeenCalled()
+  })
+
+  it('uses the client\'s own domain (normalised), never a domain from the request body', async () => {
+    allowAccess()
+    getClientDomainMock.mockResolvedValue('https://www.client-site.example')
+    firstPartyTourSourceUrlMock.mockReturnValue(null)
+    await seedPOST(makeRequest({ domain: 'attacker.example' }), makeParams())
+    expect(getClientDomainMock).toHaveBeenCalledWith({}, CLIENT_ID)
+    expect(firstPartyTourSourceUrlMock).toHaveBeenCalledWith('client-site.example')
   })
 
   it('returns 400 when the feed is not configured', async () => {
