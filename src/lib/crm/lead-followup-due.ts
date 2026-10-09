@@ -152,7 +152,7 @@ export function isHumanFollowup(t: LeadTouch): boolean {
 }
 
 /** 把触点翻成 `crm/dnc` 认的形状（「别再联系」被人推翻过没有，它自己判）。 */
-function toDncTouches(touches: LeadTouch[]): DncTouch[] {
+export function toDncTouches(touches: LeadTouch[]): DncTouch[] {
   return touches.map((t) => ({
     outcome: (t.metadata?.outcome as string | undefined) ?? null,
     flagged: t.metadata?.do_not_contact === true,

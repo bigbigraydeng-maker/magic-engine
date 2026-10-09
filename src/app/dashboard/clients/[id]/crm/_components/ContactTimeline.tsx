@@ -16,6 +16,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { describeStageActor, stageReasonForDisplay } from '@/lib/crm/actors'
+import type { PrecallCard } from '@/lib/crm/precall-card'
 
 /**
  * 「谁改的」的显示名。系统自动打标写的是一个英文标记（审计要机器可读），
@@ -69,6 +70,8 @@ interface Payload {
   contact: { name: string; phone: string | null; email: string | null; stageLabel: string | null }
   timeline: TimelineEntry[]
   omittedMessages?: number
+  /** 「电话前 30 秒」卡片的数据；老接口 / 读失败时缺省。 */
+  precall?: PrecallCard | null
   error?: string
 }
 
@@ -382,6 +385,7 @@ function useTimeline(
   clientId: string,
   contactId: string,
   onSummary?: (s: TimelineSummary | null) => void,
+  onPrecall?: (p: PrecallCard | null) => void,
 ) {
   const [data, setData] = useState<Payload | null>(null)
   const [loading, setLoading] = useState(true)
@@ -405,6 +409,7 @@ function useTimeline(
         if (!alive.current) return
         setData(json)
         onSummary?.(summarise(json.timeline ?? []))
+        onPrecall?.(json.precall ?? null)
       } catch (e) {
         // 被自己 abort 掉的不是失败，什么都别改 —— 改了就是替一个已经作废的
         // 请求说话，而它说的正好是旧的。
@@ -412,6 +417,7 @@ function useTimeline(
         setErr(e instanceof Error ? e.message : '加载失败')
         // 拉失败时把摘要清掉 —— 顶上那张卡留着上一个人的话，比空着危险得多。
         onSummary?.(null)
+        onPrecall?.(null)
       } finally {
         if (alive.current) setLoading(false)
       }
@@ -421,7 +427,7 @@ function useTimeline(
       alive.current = false
       ctrl.abort()
     }
-  }, [clientId, contactId, onSummary, attempt])
+  }, [clientId, contactId, onSummary, onPrecall, attempt])
 
   return { data, loading, err, retry: () => setAttempt((n) => n + 1) }
 }
@@ -468,6 +474,7 @@ export function ContactTimeline({
   clientId,
   contactId,
   onSummary,
+  onPrecall,
 }: {
   clientId: string
   contactId: string
@@ -478,8 +485,10 @@ export function ContactTimeline({
    * 两处判据、以后必然走散。这里是唯一拉时间线的地方。
    */
   onSummary?: (s: TimelineSummary | null) => void
+  /** 同一次拉取里顺带回传「电话前 30 秒」卡片数据（不另起一次请求）。 */
+  onPrecall?: (p: PrecallCard | null) => void
 }) {
-  const { data, loading, err, retry } = useTimeline(clientId, contactId, onSummary)
+  const { data, loading, err, retry } = useTimeline(clientId, contactId, onSummary, onPrecall)
   const listRef = useStickToLatest(data)
 
   if (loading || err || !data || data.timeline.length === 0) {

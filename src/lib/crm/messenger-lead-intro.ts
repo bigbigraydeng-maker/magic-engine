@@ -86,6 +86,14 @@ const LABEL_TO_FIELD: Record<string, string> = {
 const FORM_MARKER =
   /^\s*(hello|hi|hey)?\s*[!,.，。]?\s*(i|i've|i have)\s+(just\s+)?fill(ed)?\s+out\s+(your|the)\s+form|^\s*(你好|您好)?[!！,，。]?\s*我(已经|刚)?填(写)?了(你们的|贵司的)?.{0,4}表单/i
 
+/**
+ * 这条消息的开头是不是表单开场白那句固定问候（只看开头那一句，不解析姓名电话）。
+ * 给「表单线索」的判定复用同一份 `FORM_MARKER`，不另写一套正则。
+ */
+export function isFormIntroBody(body: string): boolean {
+  return FORM_MARKER.test(body)
+}
+
 /** 归一化标签：小写 + 去掉空格 / 下划线 / 连字符。 */
 function normaliseLabel(label: string): string {
   return label.toLowerCase().replace(/[\s_-]/g, '')

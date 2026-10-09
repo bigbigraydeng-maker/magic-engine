@@ -17,9 +17,28 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
+import { loadPrecallCard, type PrecallCard } from '@/lib/crm/precall-card'
+import type { LeadPromiseStatus } from '@/lib/crm/precall-brief'
 
 interface RouteParams {
   params: { id: string; cid: string }
+}
+
+interface RawTouch {
+  channel: string
+  direction: string | null
+  occurred_at: string
+  source: string | null
+  metadata: Record<string, unknown> | null
+}
+
+/** Shape used when the pre-call card could not be built at all. */
+const NO_LEAD: LeadPromiseStatus = {
+  isFormLead: false,
+  formSubmittedAt: null,
+  dueAt: null,
+  overdue: false,
+  guestReplied: null,
 }
 
 function ts(v: string | null | undefined): number {
@@ -122,7 +141,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   // ── IDOR 闸：contact 必须属于 path client。查不到即 404，别泄漏别客户的时间线。 ──
   const { data: contact, error: cErr } = await supabaseAdmin
     .from('contacts')
-    .select('id, display_name, primary_phone, primary_email, stage')
+    .select('id, display_name, primary_phone, primary_email, stage, do_not_contact')
     .eq('id', contactId)
     .eq('client_id', clientId)
     .maybeSingle()
@@ -145,7 +164,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     // 免得「Messenger 私信（5 条往来）」和真实 5 条消息在时间线里重复。
     supabaseAdmin
       .from('contact_touchpoints')
-      .select('channel, direction, occurred_at, summary, raw, metadata')
+      .select('channel, direction, occurred_at, source, summary, raw, metadata')
       .eq('client_id', clientId)
       .eq('contact_id', contactId)
       .neq('channel', 'messenger')
@@ -208,6 +227,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     channel: string
     direction: 'inbound' | 'outbound'
     occurred_at: string
+    source: string | null
     summary: string | null
     /** 原话。存量结果值读的时候要靠它重判一次（见 reclassifyStoredOutcome）。 */
     raw: string | null
@@ -292,6 +312,26 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   // 留下最老的 3000 条，话痨客户的近期对话反而全丢。排序只在这一行做。
   entries.sort((a, b) => ts(a.at) - ts(b.at))
 
+  // 「电话前 30 秒」卡片：只读，不写库、不发消息。读不到不能拖垮时间线本身。
+  const precall = await loadPrecallCard({
+    clientId,
+    conversationIds: convIds,
+    contact: {
+      phone: contact.primary_phone,
+      email: contact.primary_email,
+      doNotContactFlag: contact.do_not_contact === true,
+    },
+    touches: ((touches ?? []) as RawTouch[]).map((t) => ({
+      channel: t.channel,
+      direction: t.direction,
+      occurredAt: t.occurred_at,
+      source: t.source,
+      metadata: t.metadata,
+    })),
+    messages: messages.map((m) => ({ direction: m.direction, body: m.body, sentAt: m.sent_at })),
+    now: new Date(),
+  }).catch((): PrecallCard => ({ brief: null, briefReadFailed: true, lead: NO_LEAD }))
+
   return NextResponse.json({
     contact: {
       contactId: contact.id,
@@ -303,5 +343,6 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     },
     timeline: entries,
     omittedMessages,
+    precall,
   })
 }
