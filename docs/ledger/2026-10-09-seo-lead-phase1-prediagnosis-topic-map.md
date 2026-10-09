@@ -4,7 +4,7 @@ title: SEO 周清单加「预诊断」和「主题簇地图」（第一阶段，
 status: decided
 owner: agent
 decided_on: 2026-10-09
-source: doc:docs/specs/2026-10-08-seo-lead-operating-rhythm-v0.1.md
+source: pr:2375
 verify_by: 2026-10-12
 verify_how: 周一 10-12 清单自动跑完后，查 cron_run_logs 里 seo-weekly-list 的 CTS 回执：有 prediagnosed_keywords 与 topic_map、failed=0；至少一张差一步上第一页的卡带「系统预诊断」一行。不成就开卡说明原因
 ---
