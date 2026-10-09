@@ -285,3 +285,66 @@ const GOOGLE_ADS_API_BASE = 'https://googleads.googleapis.com/v17'
 频率 **低**（一次性）/ IMPACT 闭环关键度 **中**（打通才进 Measure，但现在没数据可进）/ 收入关联度 **低**（接口不影响收入）→ **两个低 → 仍是 P3**。
 
 **建议：先不配，等 CTS 谷歌广告恢复投放再做。** 当前该做的 P1 是处理欠费停投。
+
+---
+
+## 十、按 PM「继续配」执行的进度（2026-10-10）
+
+PM 回「继续配」后按 §9.5 的五步往下走。**四步做完，卡在第三步的一个值上。**
+
+### 10.1 第一步 ✅ 代码版本号已升级并上线
+
+`v17` → `v25`，PR [#2399](https://github.com/bigbigraydeng-maker/magic-engine/pull/2399)，12 项检查全绿已自动合并。
+开工前用 `curl` 实测各版本的 discovery 端点：**v17、v20 返回 404（确已关停）**，v22/v23/v24/v25 返回 200。再用 v25 的 discovery 文档逐项核对，五个接口路径与用到的全部字段均存在、无改名。
+代码由 DeepSeek 经 aider 一轮写成（约 0.003 美元），我审 diff 并修正测试断言。测试 86 个全过。
+
+### 10.2 第二步 ✅ OAuth 客户端已建
+
+`compass-489509` 项目里新建 Web application 类型客户端 **Magic Engine Google Ads API**，回调地址 `https://developers.google.com/oauthplayground`。
+表单由我填好，**「创建」那一下被本机安全闸拒绝（理由：创建持久凭据），由 PM 本人点的**。
+
+关于项目归属的疑问（PM 问过「是不是设错了」）：**没设错，是刻意的**。谷歌广告接口的访问级别挂在 `compass-489509`，`magic-engine-prod-497614` 与 `cts-seo` 两个项目都没启用该接口。授权客户端必须与访问级别在同一项目，否则调用不被承认；搬到别的项目等于重新启用接口、重新过品牌认证、重新申请 Basic。
+**副作用（已告知 PM 并确认接受）**：品牌信息是项目级共用的，同项目里 PM 自己的另一个应用 `Yellow Book Web`（情报系统）的授权页面现在也会显示「Magic Engine」。PM 确认那是自己的东西，不处理。
+**遗留议题**：`compass` 这个项目混着不相关的应用与密钥，命名也与 ME 对不上。是否迁到独立项目，等接口真跑通后另议，不在本轮。
+
+### 10.3 第三步 ⚠️ 刷新令牌已拿到，但开发者令牌拿不到
+
+- **刷新令牌 ✅**：PM 用 Google OAuth Playground（scope `https://www.googleapis.com/auth/adwords`）跑通同意流程拿到。
+  开工前先核过一个会埋雷的点：Cloud 项目的 **Publishing status 是 In production**（不是 Testing）——Testing 状态下拿到的刷新令牌 7 天就失效，会让接口在一周后毫无征兆地断掉。现为已上线，令牌长期有效。
+- **开发者令牌 ❌**：要在 Ads API centre 点「View token」才显形，谷歌要求先重新验证身份，**只提供通行密钥（passkey）一种方式**，而 PM 手机的谷歌密码管家里没有通行密钥，蓝牙路径也失败。
+  这是 PM 谷歌账号的安全设置问题，与本条线无关，我也不应代为修改账号安全设置。
+  后续解法（PM 自行决定）：在已登录的 Mac 上到 `myaccount.google.com/signinoptions/passkeys` 用 Touch ID 建一个本机通行密钥，之后验证只需指纹。
+
+### 10.4 第四步 ⚠️ 线上五个变量到了四个
+
+PM 已把四个填进 Render 生产服务 `crazycontent`。我只读复核键名（未展开、未记录任何值），按字母序确认：
+
+| 变量 | 线上 |
+|---|---|
+| `GOOGLE_ADS_CLIENT_ID` | ✅ 有 |
+| `GOOGLE_ADS_CLIENT_SECRET` | ✅ 有 |
+| `GOOGLE_ADS_DEVELOPER_TOKEN` | ❌ **缺**（按字母序应排在 CLIENT_SECRET 与 MANAGER_ID 之间，那个位置是空的） |
+| `GOOGLE_ADS_MANAGER_ID` | ✅ 有 |
+| `GOOGLE_ADS_REFRESH_TOKEN` | ✅ 有 |
+
+另外把 CTS 的谷歌广告账户号 `105-817-1329` 填进了客户设置（Settings → Google Ads），界面显示「手动设置 ✓ 已保存」，存成 `1058171329`。
+
+### 10.5 当场试跑：跑了，结果是预期中的「差一个值」
+
+在 PM 已登录的浏览器里对生产环境发了一次真实只读请求：
+
+```
+GET https://app.magicengine.com.au/api/clients/<CTS>/google-ads/campaigns?google_ads_customer_id=1058171329&limit=20
+```
+
+返回：
+
+```json
+{"error":"Google Ads credentials are not configured. Add GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_ADS_CLIENT_ID, GOOGLE_ADS_CLIENT_SECRET, and GOOGLE_ADS_REFRESH_TOKEN to Render environment variables."}
+```
+
+**这个结果与「只缺开发者令牌」完全吻合**：`src/lib/google-ads/client.ts:505` 的 `loadGoogleAdsCreds` 要求 developerToken / clientId / clientSecret / refreshToken **四个全齐**才返回凭据，缺任一即返回 null。四个里三个已在线上，所以必然是缺的那一个把它挡住了。
+
+过程中顺带发现一个**与文档不符的事实**：这个接口的客户账户号是从**查询参数**读的（`route.ts:37`），不是从客户设置里读的——第一次不带参数请求返回的是「google_ads_customer_id must be a numeric string」。设置里那个值是给定时任务和执行链路用的（`creds-loader.ts` 的查找顺序），不是给这个路由用的。
+
+**所以：补上开发者令牌这一个值，这条线就通了；不补，其余全部就绪也调不通。**
