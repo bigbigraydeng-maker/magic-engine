@@ -1,8 +1,10 @@
-# ME Tour Catalog（团目录）· CTS 首例 · 设计稿 v0.2
+# ME Tour Catalog（团目录）· CTS 首例 · 设计稿 v0.3
 
-**日期**：2026-10-09　**状态**：v0.2（已吸收子牙 + 魏征首轮复审：两人均判「修订后再审」），**待复审，未授权实施**
+**日期**：2026-10-09　**状态**：v0.3（已吸收首轮与第二轮复审：子牙判「小修后可进入实现」，魏征判「再修订」，其 3 个阻塞项已写成可测条款），**未授权实施**
 **来源**：PM 2026-10-09 拍板「团信息源头放 ME」（ledger：`2026-10-09-cts-tour-management-source-in-me`）+ 同日补充：客户（CTS）会自己开发独立下单系统，ME 统一管理产品，网页/广告/社媒/邮件读 ME，ME 与下单系统以 CSV 导入导出同步。
 **承接**：[2026-09-14 Tour 管理模块规划](./2026-09-14-me-tour-management-module-plan.md) 的 P1（统一事实源）。**与该规划的差异见 §1。**
+
+v0.2 → v0.3（第二轮复审）：别名只存 PM 显式批准的、短名临时计算；价格允许 TBC；幽灵班期预览告警 + 须逐条确认；应用/回滚改为单事务 + 乐观并发；`manages_departures` 显式标志；`catalog_version` 为只增不减的发布计数；P1b 切换点放进 `loadFirstPartyTourProducts` 内部；补首次导入预期拒收数与超限用例。
 
 v0.1 → v0.2 主要改动：公开口 P1a 不上线；定义日期展示串与匹配规则；补别名表、导入幂等与回滚冲突规则、价格格式校验、整团售罄规则；补漏掉的事实源；砍掉 P1a 的编辑页与 v2 自动拉取。
 
@@ -52,12 +54,12 @@ v0.1 → v0.2 主要改动：公开口 P1a 不上线；定义日期展示串与�
 > 新表一律 RLS：`ENABLE ROW LEVEL SECURITY` + `CREATE POLICY ... FOR ALL TO service_role USING (true) WITH CHECK (true)`；禁止 `auth.uid()`/`workspace_id`。
 
 **`tour_catalog_tours`**（一个团一行，按 client 隔离）
-`id` · `client_id fk clients` · `slug` · `destination` · `tier` · `name` · `title` · `short_description` · `duration_text text`（如 "10 days"，**保持官网契约的字符串**，`durationDays` 解析依赖其中数字）· `display_price_text text`（展示串，写入时必须通过 §6.4 校验）· `highlights/itinerary/inclusions/exclusions/tour_cities jsonb`（沿用 `FirstPartyTour` 形状）· `single_supplement` · `max_group_size` · `is_active bool` · `sort_order` · `created_at/updated_at`。
+`id` · `client_id fk clients` · `slug` · `destination` · `tier` · `name` · `title` · `short_description` · `duration_text text`（如 "10 days"，**保持官网契约的字符串**，`durationDays` 解析依赖其中数字）· `display_price_text text null`（展示串，写入时必须通过 §6.4 校验；允许 TBC）· `manages_departures bool default false`（是否由目录管理班期；种子化时该团有任一班期即置 true；Stopover 类等无固定班期的团保持 false）· `highlights/itinerary/inclusions/exclusions/tour_cities jsonb`（沿用 `FirstPartyTour` 形状）· `single_supplement` · `max_group_size` · `is_active bool` · `sort_order` · `created_at/updated_at`。
 约束：`UNIQUE (client_id, destination, tier, slug)`（slug 单独会重名，官网已有两个 `highlights`：`tours.ts:2530` 日本、`:2724` 越南）。
 
-**`tour_catalog_aliases`**（CSV 名 → 团 的显式映射，解决匹配键问题）
-`client_id` · `alias_norm text`（规范化：trim、小写、折叠空白、`&`↔`and`、去 `—` 前缀的档位词后另存一条）· `tour_id`；`UNIQUE (client_id, alias_norm)`。
-导入匹配顺序：①别名表精确命中 → ②与团 `name`/`title`/去前缀短名的规范化精确命中 → **命中 0 个或 ≥2 个一律拒收该行并列出**，由 PM 在预览页补一条别名后重跑。**不做模糊匹配**。
+**`tour_catalog_aliases`**（CSV 名 → 团；**只存 PM 显式批准的别名**）
+`client_id` · `alias_norm text` · `tour_id`；`UNIQUE (client_id, alias_norm)`。规范化函数 `norm()`：trim、小写、折叠空白、`&` 与 `and` **双向归一为同一 token**。
+导入匹配顺序：①别名表精确命中 → ②与团 `name`/`title` 的 `norm()` 精确命中 → ③与「去 `—` 前缀档位词后的短名」命中（**匹配时临时计算，不入表**，所以不会撞唯一约束）。**任一步命中 ≥2 个团、或全部 0 命中，一律拒收该行并列出**，由 PM 在预览页补一条别名后重跑。**不做模糊匹配**。官网有 China Signature — Natural China 与 China Discovery — Natural China 两条，因此无档位的「Natural China」天然歧义，必须由 PM 先批准别名。
 
 **`tour_catalog_departures`**（一个班期一行）
 `id` · `tour_id fk` · `client_id` · `depart_on date`（**纯日历日，无时区**）· `return_on date null` · `price_text_override text null`（通过同一价格校验）· `status text check in ('open','limited','sold_out','closed','cancelled')` · `status_source`（'manual'|'csv:<批次id>'）· `status_as_of` · `internal jsonb`（航司/航段/人数上限等运营信息，**永不进任何对外输出**）· `created_at/updated_at`。
@@ -70,12 +72,14 @@ v0.1 → v0.2 主要改动：公开口 P1a 不上线；定义日期展示串与�
 
 ## 5. 输出契约（消费者零改动的前提，复审补全）
 
-- **输出形状 = `FirstPartyTour`**（`first-party-tours.ts`）。ME 提供内部函数 `loadCatalogProducts(clientId)` 直接从库返回同形状数据；**P1a 不开放任何 HTTP 公开口**。
+- **输出形状 = `FirstPartyTour`**（`first-party-tours.ts`）。ME 提供内部函数 `loadCatalogProducts(clientId)` 直接从库返回同形状数据；**P1a 不开放任何 HTTP 公开口，也没有任何渠道消费它**。
+- **P1b 切换点**：放进 `loadFirstPartyTourProducts(domain)` **内部**——给它增加「domain → client_id」解析（来源：`clients` 表里该客户的官网域名字段，实现时核实确切列名），该域名若已启用目录则读 `loadCatalogProducts`，否则走原 HTTP。两个调用方（`web-intelligence/service.ts:51`、`conversions/cts-tour-price.ts:63`）签名不变；「零改动」仅指调用方，不指 loader 本身。
 - **日期展示串规则**：`depart_on` → `"D Month YYYY"`（英文月份全称、日不补零，例 `13 May 2027`），与官网 `departureDates` 完全一致；`departure_pricing` 的 key 必须逐字等于这些展示串（官网契约：`tours.ts:34`）。
 - **班期过滤**：`depart_on` 早于今天的不输出；`sold_out/closed/cancelled` 不输出；`open/limited` 输出。
-- **整团可售规则**：输出的 `is_active = tour.is_active AND (该团无班期管理 OR 至少一个未过期且 open/limited 的班期)`。全部班期售罄/过期 → 整团不可售（避免广告继续推）。无班期管理的团（如 Stopover 系列）按 `is_active` 原样。
+- **整团可售规则**：输出的 `is_active = tour.is_active AND (NOT tour.manages_departures OR 至少一个未过期且 open/limited 的班期)`。`manages_departures=true` 的团全部班期售罄/过期/取消 → 整团不可售（避免广告继续推）；`false` 的团（如 Stopover 系列）按 `is_active` 原样。是否「管理班期」由显式标志决定，**不靠「库里有没有班期行」推断**（防导入误删/漏种子造成漏报）。
 - **字段回退不变**：`name`/`title` 照原样输出（`firstPartyTourProducts` 取 `title || name`，`first-party-tours.ts:105`）；`duration` 输出 `duration_text`。
 - **契约测试**：用现网读取口的真实 33 个团做 golden——ME 目录种子化后，`firstPartyTourProducts()` 的输出与现网逐字段一致（P1a 验收条件之一）。
+- **`catalog_version`**：每个客户一个只增不减的发布计数（`tour_catalog_state(client_id, catalog_version)`），**每次发布 +1**；回滚批次同样视为一次新发布 +1，**绝不回退**（否则站点会拒收回滚后的正确数据）。
 - **P1b 才开 HTTP 口**：`GET /api/public/tour-catalog/<client-slug>`，需 per-client 只读 bearer token（官网服务器端携带）、`Cache-Control`、限流；`loadFirstPartyTourProducts` 增加可选 token。该口只返回上述输出，不含 `internal`。
 
 ## 6. 与下单系统的 CSV 同步（对端系统尚不存在）
@@ -90,13 +94,17 @@ CSV 日期只接受 `YYYY-MM-DD`，其它格式整行拒收。
 ### 6.3 导入规则（幂等与安全）
 - **只增改，不删**：CSV 里没有的班期不动；要下线某班期必须显式把 `status` 置 `cancelled`/`closed`。
 - 同一文件（`file_sha256`）同 `kind` 重复上传 → 直接拒收并指向原批次。
+- **幽灵班期防护**（CSV 把 05-13 误写成 05-31，旧的 05-13 仍 open）：预览对文件中出现的每个团，① 列出「库里有、文件未提及」的未来班期；② 对新增日期与该团现有未过期班期相差 ≤14 天者标「疑似改错」。**有任何告警时，「应用」前 PM 须逐条勾选处理方式**（确认保留 / 标 cancelled），未处理完不能应用。
 - 单文件大小上限（2 MB）、行数上限（2000）；单元格以 `= + - @` 开头的文本在**导出**时加前缀 `'` 防公式注入；导入时同样拒收可疑单元格。
 - 预览必须列出：新增/改动/不变/拒收；**与官网现值冲突的行高亮**；任何一行无法匹配团、日期非法、返程早于出发、残缺值（如 `540+T`、返程为空且非允许）→ 拒收并报告，不猜。
 - **权限**：上传可由 FDE/PM，「应用」「回滚」仅 PM/管理员（后台既有 admin 鉴权）；视为 A 级操作，写批次回执。
-- **回滚**：仅当受影响行当前状态仍等于该批次 `after` 时才恢复到 `before`；有任何后续手改 → 拒绝回滚并列出冲突行，不覆盖手改。
+- **应用与回滚都是单个数据库事务（Postgres 函数）**，全成或全败；写入用乐观并发：`UPDATE … WHERE updated_at = <预览/批次记录时的值>`，任一行不符 → 整批中止并列出冲突行，不覆盖手改、不留半截。
+- **回滚**：仅当受影响行当前状态仍等于该批次 `after` 时才恢复到 `before`（同样在事务内比对）；有任何后续手改 → 拒绝回滚并列出冲突行。
+- **上限落点**：2 MB 与 2000 行在上传路由读取阶段（解析前）拦截，解析器内再次校验；超限整文件拒收。
+- **公式注入检查只作用于文本列**（团名、备注等）：以 `= + @` 开头拒收；日期/状态等结构化列由严格解析器校验，不适用此规则。以 `-` 开头仅在数值列合法。
 
 ### 6.4 价格展示串校验
-写入 `display_price_text` / `price_text_override` 时，用 `cts-tour-price.ts` 的 `parsePriceDisplayString` 同款解析：必须解析出**单一**币种和金额，且文本中不得同时出现多个币种；解析失败 → 拒收，由 PM 修成「From NZD $X per person」类标准写法。（防止 `From AUD 5,200 (NZD $4,999 …)` 被误读。）
+写入 `display_price_text` / `price_text_override` 时，复用 `cts-tour-price.ts` 已导出的 `parsePriceDisplayString`（实现时核实导出状态）：必须解析出**单一**币种和金额，且文本中不得同时出现多个币种；**例外：不含任何数字、含 `TBC` 的文本（如官网真实存在的 `From NZD $TBC per person`）允许入库**，并标记为价格待定——此时 `lookupTourPrice` 照旧返回 null、走人工任务，不猜价。其余解析失败 → 拒收，由 PM 修成「From NZD $X per person」类标准写法。（防止 `From AUD 5,200 (NZD $4,999 …)` 被误读。）
 
 ## 7. 分步计划
 
@@ -105,7 +113,7 @@ CSV 日期只接受 `YYYY-MM-DD`，其它格式整行拒收。
 | **P0** | 只读差异报告：PM 2027 表 vs 官网读取口，输出差异清单给 CTS 确认（不碰库、不建表） | C | 直接回答 §9 问题 1；**建议先做** |
 | **P1a** | 四张表 + 种子（现网 33 团）+ 班期 CSV 导入/预览/应用/回滚 + 只读后台列表 + 差异页；内部函数 `loadCatalogProducts`；**无 HTTP 口、不改官网、无渠道消费** | **A**（新表迁移） | 目录此阶段标注「未对账草稿」，不被任何渠道使用 |
 | P1a-2 | 后台编辑页 | B | 从 P1a 拆出，视需要再做 |
-| P1b | 官网读 ME：`chinatravel` 仓另开 PR；**切换闸 = 官网 vs ME 全量 diff 为零**；开 §5 的 HTTP 口；构建期拉取 + 运行期 ISR；**回退 = 构建时落盘的最近一次成功快照**，并要求 feed 带单调递增 `catalog_version`，站点拒绝应用低于已服务版本的 feed（防旧快照覆盖新数据）；切换后禁止回写官网仓 | A（动已上线官网） | 需 PM 授权上线 |
+| P1b | 官网读 ME：`chinatravel` 仓另开 PR；**切换闸 = 官网 vs ME 全量 diff 为零**；开 §5 的 HTTP 口；构建期拉取 + 运行期 ISR；**回退 = 构建时落盘的最近一次成功快照**，并要求 feed 带单调递增 `catalog_version`，站点拒绝应用低于已服务版本的 feed（防旧快照覆盖新数据）；版本比对在**构建期与各实例 ISR 重取时各自对照「构建时烘进去的版本」**，不依赖共享存储（版本只增不减，多实例最终收敛）；切换后禁止回写官网仓 | A（动已上线官网） | 需 PM 授权上线 |
 | P1c | `/traveller-details` 团/日期下拉改读目录 | B | 与 P1b 同批 |
 | P2 | 收敛第 3–8 处：让 `cts-tour-price.ts` **先读目录**（压过 `group_tours`）、`master_briefs.products`/`client_knowledge_facts`/`factory_config` 引用目录；`offerings.yaml`、`group_tours` 退役 | A/B | `service.ts:52-54` 的优先级链要在此处理 |
 | P3 | 广告/社媒/邮件读目录；售罄班期自动排除；状态 CSV 读回 | B | 对接 IMPACT |
@@ -116,7 +124,9 @@ CSV 日期只接受 `YYYY-MM-DD`，其它格式整行拒收。
 
 1. 用 PM 的 2027 表（脱敏拷贝）上传 → 预览显示「表 vs 官网」差异行 → 应用 → 内部函数输出通过 `parseFirstPartyTourFeed`，`firstPartyTourProducts()` 对种子团与现网逐字段一致 → `lookupTourPrice` 对目录团可查。
 2. **负面用例（必须真跑）**：重名团（两个 `highlights`）→ 行被拒；`540+T`/返程为空 → 拒收；重复上传同文件 → 拒收；以 `=` 开头的单元格 → 拒收；CSV 缺班期 → 库内班期不被删；应用后手改一行再回滚 → 回滚被拒并列冲突；回滚无冲突批次 → 数据恢复。
-3. 全程不碰官网、不外发。
+3. **预期拒收数（首次导入）**：PM 的表里所有团名都不带档位，其中 6 行 Natural China 因同时命中 Signature/Discovery 两个团被拒，须先由 PM 批准别名（暂按 Signature）后重跑；表中 `540+T`/返程为空的 China Legacy 行同样被拒。其余按名可匹配。
+4. 追加负面用例：文件超 2 MB / 超 2000 行 → 拒收；`From NZD $TBC per person` 种子入库成功且 `lookupTourPrice` 返回 null；CSV 把 05-13 改成 05-31 → 预览出现「疑似改错」+「文件未提及」告警且未处理不能应用；应用事务中途有行 `updated_at` 被改 → 整批中止且无半截写入。
+5. 全程不碰官网、不外发。
 
 ## 9. 待确认 / 开放问题
 
