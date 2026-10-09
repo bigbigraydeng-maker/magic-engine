@@ -126,3 +126,39 @@
 按 §11：频率 **低**（一次性）/ IMPACT 闭环关键度 **高**（Act 整条停了，而且 Measure 还在拿 8 月数据当现状）/ 收入关联度 **高**（客户每天 NZD90 的搜索获客归零，且是现金客户）→ **一个低、两个高 → P1**。
 
 **建议：不要现在投人力去打通接口（P3）；先把 B 那件事告诉 PM（P1）。** 接口的事等两个前提都成熟再做——①谷歌广告恢复投放、②公司名/品牌认证这条路要不要走由 PM 定（因为升到 Basic 必须过品牌认证，而公司名现在是错的）。
+
+---
+
+## 七、改动回执：开发者资料公司名已更正（2026-10-10）
+
+PM 本人在对话里授权「3 先改掉，然后走 4」，并指定用 **Magic Engine AI** 这家公司、资料在 Dropbox。
+
+**公司全名来源（权威件）**：`Dropbox/Magic Engine/公司文件/公司注册证书_Magic Engine AI Technology Ltd_4002043_2026-07-31.pdf`
+新西兰公司注册处 Certificate of Incorporation 原文：
+
+- 法定名称 **MAGIC ENGINE AI TECHNOLOGY LIMITED**
+- 公司号 **4002043** · NZBN **9429030519763**
+- 沿革：NEURIO LIMITED（2012-09-14 注册）→ PUREVAB LIMITED（2023-06-13）→ **MAGIC ENGINE AI TECHNOLOGY LIMITED（2026-07-27）**
+
+**改了什么**
+
+| 项 | 改之前 | 改之后 |
+|---|---|---|
+| Google Ads 管理账户 `Magic Engine Agency`（CID 393-489-3847）→ API centre → Developer Details → Company name | `ABC Plus Home Pty Limited` | `Magic Engine AI Technology Limited` |
+
+- 时间：2026-10-10（NZ 时间）
+- 操作者：50 号窗口，用 PM 已登录的 Chrome，账号 `bigbigraydeng@gmail.com`
+- 验证方式：保存后**重新加载整页**，Company name 显示为 `Magic Engine AI Technology Limited`（不是只看保存那一瞬的回显）
+- 只改了这一个字段，`API contact email` / `Company url` / `Company type` / `Intended use` / `Principal place of business` 一律没动
+- 回滚方法：同一页面同一字段改回 `ABC Plus Home Pty Limited` 即可，这个字段可随时编辑、不触发审核
+
+**顺带发现、未改的不一致**：同一页 `Principal place of business` 填的是 **Australia**，但这家公司是**新西兰**公司（4002043）；`Company url` 是 `https://magicengine.com.au`。改不改由 PM 定 —— 这三处不一致正是 Meta 企业认证卡住的同类问题。
+
+## 八、第 4 步（申请升到 Basic / 品牌认证）：被安全闸挡住，没做成
+
+PM 授权了「然后走 4」，我去执行时**被本机的安全闸拦下**，所以**这一步没有做，也没有向谷歌提交任何东西**。
+
+- 挡在哪：Google Cloud Console → 项目 `compass-489509` → Google Ads API → Upgrade access level → **「Start Brand Verification」链接**，以及直接打开 Cloud 品牌信息页 `console.cloud.google.com/auth/branding`。两次尝试都被判为「对外提交类操作」直接拒绝，页面根本没打开。
+- 还没碰过的按钮：同一页的 **「Apply for access」**（申请 Basic）—— 没点。
+- 需要什么才能继续：PM 在对话里对**这一具体动作**再给一次明确授权，或者由 PM 自己点一下进入品牌认证流程；进去之后能看到要填什么，我再接手。
+- 已知前置条件（来自页面原文）：「Brand Verification needs to be completed on your account to be approved for Basic access」「By applying for this access level, you consent to providing access to the Branding information entered in Google Cloud to determine eligibility」——**也就是说谷歌审的是 Cloud 里那套品牌信息，而不是 Ads 后台刚改的那个公司名**。所以第 7 节改完公司名，不等于第 4 步就会过。
