@@ -69,7 +69,10 @@ function formatActor(actor: string): string {
     if (byIndex >= 0) return `班期表导入（${actor.slice(byIndex + ' by '.length)}）`
     return '班期表导入'
   }
-  if (actor.startsWith('rollback:')) return '撤销导入'
+  if (actor.startsWith('rollback:')) {
+    const by = actor.indexOf(' by ')
+    return by >= 0 ? `撤销导入（${actor.slice(by + 4)}）` : '撤销导入'
+  }
   if (actor === 'system') return '系统'
   return actor
 }

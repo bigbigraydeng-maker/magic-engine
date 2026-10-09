@@ -320,7 +320,8 @@ grant execute on function public.tour_catalog_apply_batch(uuid, uuid, text) to s
 
 create function public.tour_catalog_rollback_batch(
   p_client_id uuid,
-  p_batch_id uuid
+  p_batch_id uuid,
+  p_actor text default null
 )
 returns jsonb
 language plpgsql
@@ -335,7 +336,7 @@ declare
   v_updated_count integer := 0;
   v_version bigint;
 begin
-  perform set_config('tour_catalog.actor', 'rollback:' || p_batch_id, true);
+  perform set_config('tour_catalog.actor', 'rollback:' || p_batch_id || ' by ' || coalesce(p_actor, 'unknown'), true);
 
   select *
     into v_batch
@@ -438,5 +439,5 @@ begin
 end;
 $$;
 
-revoke all on function public.tour_catalog_rollback_batch(uuid, uuid) from public, anon, authenticated;
-grant execute on function public.tour_catalog_rollback_batch(uuid, uuid) to service_role;
+revoke all on function public.tour_catalog_rollback_batch(uuid, uuid, text) from public, anon, authenticated;
+grant execute on function public.tour_catalog_rollback_batch(uuid, uuid, text) to service_role;

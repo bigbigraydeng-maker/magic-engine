@@ -520,10 +520,12 @@ export async function rollbackBatch(
   db: SupabaseClient,
   clientId: string,
   batchId: string,
+  actor?: string,
 ): Promise<BatchActionResult> {
   const res = await db.rpc('tour_catalog_rollback_batch', {
     p_client_id: clientId,
     p_batch_id: batchId,
+    p_actor: actor ?? null,
   })
   if (res.error) {
     return mapBatchError(res.error.message)

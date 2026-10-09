@@ -227,10 +227,12 @@ describe('rollback route', () => {
     const res = await rollbackPOST(emptyRequest(), params())
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true, result: { reverted: 4 } })
+    // The operator is passed down so the change log can say who undid the import.
     expect(rollbackBatchMock).toHaveBeenCalledWith(
       expect.anything(),
       CLIENT_ID,
       BATCH_ID,
+      ACTOR,
     )
   })
 

@@ -48,7 +48,7 @@ export async function POST(_req: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: 'batch_not_found' }, { status: 404 })
   }
 
-  const result = await rollbackBatch(supabaseAdmin, clientId, batchId)
+  const result = await rollbackBatch(supabaseAdmin, clientId, batchId, access.actor)
   if (result.ok) {
     return NextResponse.json({ ok: true, result: result.result })
   }
