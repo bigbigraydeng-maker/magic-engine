@@ -21,3 +21,5 @@ Google 已改规则：令牌不再是门槛，级别只在 Cloud Console 管。�
 2026-10-10 续：PM 本人点了 Verify branding，谷歌判定**通过**，但结果 7 天内不发布即作废——**截止 2026-10-17，需点 Branding 页的 Publish branding**（这一下点击本机安全闸不放行，须 PM 本人点）。同日把 Google Ads API 联系邮箱由 raydeng@magicengine.com.au 改为 hello@magicengine.cloud（已重载验证）。Google Cloud 的 User support email 改不了（下拉框只有 bigbigraydeng@gmail.com，无可选群组），且它属于品牌认证审查内容，改动会把认证打回草稿——必须先发布再谈改。
 
 2026-10-10 结果：品牌认证已发布（状态「verified and is being shown to users」），Google Ads API 访问级别**已升到 Basic**——生产账户 15,000 次/天、全功能，Explorer 下被禁的关键词规划服务随之解除。Standard 未申请（当前用量用不上，申请需 10-15 个工作日审核）。**接口仍跑不起来：线上五个 GOOGLE_ADS_* 环境变量依然一个都没有，这才是下一个卡点。**
+
+2026-10-10 开工前核查（PM 授权「配」之后）：**配不了，按兵不动**。三个硬卡点：①代码写死 Google Ads API v17，该版本 2025-06-04 已关停（官方现列 v23/v24/v25），配对钥匙也会失败，必须先升版本；②GOOGLE_ADS_REFRESH_TOKEN 不存在且仓库里没有任何发起 OAuth 授权的路由（全仓 grep adwords 零命中业务代码），必须人工跑一次同意流程；③compass-489509 项目里唯一的 OAuth 客户端是无关的 Yellow Book Web，没有可用的 CLIENT_ID/SECRET。正确顺序：改版本号(派 DeepSeek) → 新建 OAuth 客户端 → 跑授权拿 refresh token → 填 Render → 当场试跑。重新按 §11 打分仍为 P3，建议等 CTS 谷歌广告恢复投放再做。未改任何生产配置、未建客户端、未读取任何密钥。

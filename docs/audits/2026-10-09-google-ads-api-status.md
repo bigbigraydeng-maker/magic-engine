@@ -231,3 +231,57 @@ Basic 这一级的实际权限（控制台原文）：
 **下一级 Standard**（不限次数）：同一页有「Start application」按钮，页面标注「Review time: approx 10-15 business days」。本次**没有申请**——现在一天 15,000 次远超实际需要（ME 只有个位数客户账户要读）。
 
 **但接口仍然跑不起来**：§6.2 的问题没有变——线上 Render 的 `crazycontent` 服务上 `GOOGLE_ADS_DEVELOPER_TOKEN` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` / `_MANAGER_ID` **五个一个都没有**。级别升上去 ≠ 接口能用。**真正的下一个卡点是配密钥，不是级别。**
+
+---
+
+## 九、PM 说「配」之后的开工前核查：配不了，三个硬卡点（2026-10-10）
+
+PM 授权「把五把钥匙配到线上」。按「写前先读」，动生产配置前先读了代码和控制台，**结论是现在配了也跑不通**，三个卡点按严重度排：
+
+### 9.1 代码写死的 API 版本早就关停了 —— 这个最致命
+
+`src/lib/google-ads/client.ts:19` 和 `src/lib/google-ads/keyword-planner.ts:20` 都写死：
+
+```
+const GOOGLE_ADS_API_BASE = 'https://googleads.googleapis.com/v17'
+```
+
+**Google Ads API v17 已于 2025-06-04 关停**（[Search Engine Land](https://searchengineland.com/google-ads-api-v17-sunset-454547)、[PPC Land 同类报道](https://ppc.land/google-ads-api-v15-sunset-crucial-deadline-for-developers-to-upgrade/)），距今已一年多。谷歌官方 Deprecation and sunset 页当前列出的版本是 **v23 / v24 / v25**，v17 连列都不列了。
+
+→ **就算五把钥匙全配对，请求也会直接失败。** 必须先把版本号升上去（v17 → v25），并核对这两个文件里用到的字段/接口在新版本下有没有改名。这是代码改动，按仓库规矩派 DeepSeek 写、我审。
+
+### 9.2 刷新令牌（refresh token）根本不存在，而且仓库里没有能生成它的流程
+
+`GOOGLE_ADS_REFRESH_TOKEN` 必须由一次人工 OAuth 同意流程产生（`client.ts` 注释原文：「long-lived refresh token (from OAuth consent flow)」）。
+
+全仓 grep `adwords`（Google Ads 的 OAuth scope 关键字）**只命中一个无关文件**；`src/app/api/clients/[id]/platform/google-ads/route.ts` 只是**读**已有连接（`GET → return the client's Google Ads platform_oauth_connection if any`），**没有任何发起授权或处理回调的路由**。
+
+→ 这个值没有「去哪复制」一说，得现跑一次授权。
+
+### 9.3 Cloud 项目里没有给 Google Ads 用的 OAuth 客户端
+
+`compass-489509` 项目 → Google Auth Platform → Clients，**只有 1 个** OAuth 客户端：`Yellow Book Web`（Web application，建于 2026-03-30，名字旁还挂着警告三角），**与 Magic Engine 的 Google Ads 无关**。
+
+→ `GOOGLE_ADS_CLIENT_ID` / `_CLIENT_SECRET` 也没有现成的可用值，得先新建一个 OAuth 客户端。
+
+### 9.4 还有一条我这边的限制
+
+开发者令牌的值在 Ads 后台要点「View token」才显示，**这个动作被本机安全闸判为「读取凭据」直接拒绝**；按仓库红线，密钥值本来也不该经我的手、落我的盘。所以**最终把值粘进 Render 这一步，要么由 PM 自己粘，要么另行安排**。
+
+### 9.5 所以真正的顺序（不是「配五个变量」那么简单）
+
+1. 改代码：`v17` → `v25`，核对字段兼容性（B 级，派 DeepSeek 写）
+2. 在 `compass-489509` 新建一个 OAuth 客户端（桌面应用类型最省事）
+3. 用它跑一次 OAuth 同意流程，拿到 refresh token
+4. 五个值填进 Render `crazycontent`，服务重启
+5. 当场试跑一次真实读取（按 PM 2026-09-26 规矩，单测绿不算）
+
+**本次按兵不动，没有改任何生产配置、没有建任何 OAuth 客户端、没有读取任何密钥。**
+
+### 9.6 重新打分（按 CLAUDE.md §11）
+
+工作量从「填五个变量」变成「改代码 + 建客户端 + 跑授权 + 配置 + 试跑」五步，而收益端没变：**CTS 的谷歌广告 9 月起已欠费停投，接口通了也读不到任何在投数据。**
+
+频率 **低**（一次性）/ IMPACT 闭环关键度 **中**（打通才进 Measure，但现在没数据可进）/ 收入关联度 **低**（接口不影响收入）→ **两个低 → 仍是 P3**。
+
+**建议：先不配，等 CTS 谷歌广告恢复投放再做。** 当前该做的 P1 是处理欠费停投。
