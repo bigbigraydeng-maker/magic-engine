@@ -185,3 +185,27 @@ PM 在自己的 Chrome 里点了「Start Brand Verification」，页面落到 **
 **仍然没做成**：点 **Verify branding** 这个动作再次被本机安全闸以「对外提交类操作」拒绝（第三次），**没有向谷歌提交任何东西**。这一下点击是整件事只差的最后一步 —— 要么 PM 本人点，要么调整本机权限模式让这类动作放行。
 
 **另外注意**：这一页的品牌主体呈现是 `Magic Engine` + `magicengine.com.au`（澳洲域名），而法人实体是新西兰公司 Magic Engine AI Technology Limited。谷歌品牌认证核的是**域名所有权与品牌呈现一致性**，不是公司注册地，所以 `.com.au` 本身不构成障碍；但如果将来要把主体信息也对齐，这一页和 Ads 后台的 `Principal place of business`（现为 Australia）要一起改。
+
+### 8.2 品牌认证已通过，但必须 7 天内发布（2026-10-10）
+
+PM 本人点了 **Verify branding**，谷歌当场给出结果：
+
+> Your branding has been verified, but is not yet being shown to users. **Publish it before the verified result expires in 7 days.**
+
+也就是**认证通过了**，但还停在草稿状态。按谷歌文档（<https://developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification>）：**通过结果只有 7 天有效期，7 天内不点「Publish branding」就会变成 Need to re-verify，要整个重来。**
+
+- **截止日：2026-10-17**
+- 需要做的动作：Google Cloud → Google Auth Platform → Branding 页右侧 **Publish branding** 按钮
+- **这一下点击我同样点不了**（本机安全闸判为对外提交类操作），需要 PM 本人点
+
+### 8.3 联系邮箱同步到 hello@（2026-10-10，PM 当场授权「把 email 也同步更新成 hello」）
+
+这里有**两个不同的邮箱字段**，结果不一样：
+
+| 位置 | 字段 | 结果 |
+|---|---|---|
+| Google Ads 管理账户 CID 393-489-3847 → API centre → Developer Details | `API contact email` | ✅ **已改**：`raydeng@magicengine.com.au` → `hello@magicengine.cloud`，重新加载整页验证过。该字段与品牌认证无关（页面原文：「You can still update your API contact email here」），可随时改回 |
+| Google Cloud → Google Auth Platform → Branding | `User support email` | ❌ **改不了**：下拉框里只有 `bigbigraydeng@gmail.com`，另一项是「Google Groups managed by you — No groups」。`hello@magicengine.cloud` 是另一个独立账号，不在可选范围。要能选上，得先把它做成当前账号管理的 Google 群组，或者改由 `hello@` 账号来管这个云项目 |
+| Google Cloud → Branding → Developer contact information | `Email addresses` | 本来就已经是 `hello@magicengine.cloud`，无需改动 |
+
+⚠️ **顺序警告**：`User support email` 属于品牌认证审过的内容之一。按谷歌文档，改动这些字段会变成 Draft Branding，**必须重新验证并重新发布才会生效**，而且「验证进行中不允许编辑」。所以**先点 Publish branding 把已通过的这版发布掉，再谈改支持邮箱**，顺序反了会白白浪费这次已通过的认证。本次因此**没有动**那个下拉框（打开看了选项就按 Esc 关掉，字段值未变）。
