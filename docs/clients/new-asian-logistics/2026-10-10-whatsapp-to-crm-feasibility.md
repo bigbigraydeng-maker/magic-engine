@@ -65,8 +65,8 @@ WhatsApp Business App 上的号用群功能（§2.1 有原文和链接）。
 | 查的东西 | 结果 | 怎么查的 |
 |---|---|---|
 | App 装没装、在不在跑 | 装了，版本 26.40.20，进程在跑 | `ls`、`defaults read` Info.plist、`ps` |
-| App 身份 | `net.whatsapp.WhatsApp`（统一客户端的标识） | Info.plist `CFBundleIdentifier` |
-| 统筹说的 `…WhatsAppSMB.shared` 容器 | **存在但是空的（4 KB，只有空目录）**——系统占位，不能当证据用 | `du -sh` + 目录清单 |
+| App 身份 | `net.whatsapp.WhatsApp`（桌面端通用标识。**不能据此判断登录的是个人号还是商业号**——WhatsApp Business 的号同样能关联桌面/网页版） | Info.plist `CFBundleIdentifier` |
+| 统筹说的 `…WhatsAppSMB.shared` 容器 | **存在但是空的（4 KB，只有空目录）**——系统占位。**它空也不证明不是商业号**（商业号同样走上面那个通用客户端），所以这一条两个方向都不能当证据 | `du -sh` + 目录清单 |
 | 真正放数据的容器 | `group.net.whatsapp.WhatsApp.shared`，69 MB，只有一套账号的数据 | `du -sh`、目录清单 |
 | 这台机器什么时候开始同步 | 容器创建于 2026-09-25 | 目录时间戳 |
 | 本地对话总量（只数行数） | **47 个会话、1059 条消息，2026-09-20 → 2026-10-09** | `ChatStorage.sqlite` 只读 `count(*)` / `min/max(date)` |
@@ -144,8 +144,8 @@ join using a group invite link you send them"，文档没有「直接把某人�
 | 要多久 | 申请审核排期是主要耗时（要录两段演示视频提交 Meta）；代码侧见 §5 |
 | 适用范围 | **只适用一对一**。群聊不在内（§2.1） |
 
-**接之前必修一个坑。** 那位 sales 或 PM 在手机上发的消息，Meta 是用 `smb_message_echoes` 这类
-「回声」事件推给我们的。我查了现在的收件代码：**完全没有处理这类事件**（grep `echo` 零命中）。
+**接之前必修一个坑。** 那位 sales 或 PM 在手机上发的消息，Meta 是用「回声」事件推给我们的
+（订阅字段 `smb_message_echoes`，载荷路径 `value.message_echoes`）。我查了现在的收件代码：**完全没有处理这类事件**（grep `echo` 零命中）。
 更具体地说，`src/app/api/webhooks/whatsapp/route.ts:278` 对**所有**入站消息硬编码
 `last_message_from: 'customer'`。一对一场景下这是对的（只有客人会发入站），
 **但群聊场景下，群里 NAL 自己人发的消息会被记成「客人发的」**——
@@ -473,7 +473,9 @@ in any impermissible or unauthorized manner"）。实际形态是**在客户授�
 
 1. **修「入站一律记成客人」**：`src/app/api/webhooks/whatsapp/route.ts:278` 对所有入站硬编码
    `last_message_from: 'customer'`。
-2. **补并存模式专用的两类推送**：`message_echoes`（员工在手机上发的）和 `history`（最多 180 天历史）。
+2. **补并存模式专用的两类推送**：员工手机回复要**订阅 webhook 字段 `smb_message_echoes`**
+   （载荷里的数组路径是 `value.message_echoes`，两个名字不一样，订阅写错就一条都收不到），
+   以及 `history`（最多 180 天历史）。
    现有代码**只读 `value.messages`**，这两类会被**静默忽略**——
    结果是员工已经回过的客人在 ME 里仍显示「待回复」，想导入的既有聊天也根本不入库。
    要做：解析、方向判定（我们发 / 客人发）、幂等去重、试跑验收。
