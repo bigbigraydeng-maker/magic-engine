@@ -13,6 +13,7 @@ import {
   mapTourRow,
   planHash,
   planToApplyPayload,
+  removeAlias,
   rollbackBatch,
 } from '../store'
 import type { ApplyPayload } from '../store'
@@ -41,6 +42,7 @@ function makeQuery(result: QueryResult) {
   q.limit = vi.fn(chain)
   q.insert = vi.fn(chain)
   q.update = vi.fn(chain)
+  q.delete = vi.fn(chain)
   q.in = vi.fn(chain)
   q.maybeSingle = vi.fn(() => Promise.resolve(result))
   q.then = (onFulfilled: (value: QueryResult) => unknown) =>
@@ -437,5 +439,181 @@ describe('getCatalogVersion', () => {
     const q = makeQuery({ data: null, error: { message: 'state boom' } })
     const db = makeDb({ from: () => q })
     await expect(getCatalogVersion(db as never, 'c1')).rejects.toThrow('state boom')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// createPreviewBatch
+// ---------------------------------------------------------------------------
+
+const batchArgs = {
+  clientId: 'c1',
+  kind: 'departures' as const,
+  fileSha256: 'sha',
+  payload: { adds: [], updates: [] } as ApplyPayload,
+  summary: { added: 0 },
+}
+
+describe('createPreviewBatch', () => {
+  it('inserts a new previewed batch when there is no conflict', async () => {
+    const insertQuery = makeQuery({ data: { id: 'b1' }, error: null })
+    const db = makeDb({ from: () => insertQuery })
+    const result = await createPreviewBatch(db as never, batchArgs)
+    expect(result).toEqual({ ok: true, batchId: 'b1' })
+  })
+
+  it('refreshes an existing previewed batch on unique violation', async () => {
+    const insertQuery = makeQuery({
+      data: null,
+      error: { message: 'duplicate key', code: '23505' },
+    })
+    const lookupQuery = makeQuery({
+      data: { id: 'b1', status: 'previewed' },
+      error: null,
+    })
+    const refreshQuery = makeQuery({ data: { id: 'b1' }, error: null })
+    let call = 0
+    const db = makeDb({
+      from: () => {
+        call += 1
+        if (call === 1) return insertQuery
+        if (call === 2) return lookupQuery
+        return refreshQuery
+      },
+    })
+
+    const result = await createPreviewBatch(db as never, batchArgs)
+    expect(result).toEqual({ ok: true, batchId: 'b1' })
+    expect(lookupQuery.in).toHaveBeenCalledWith('status', ['previewed', 'applied'])
+    expect(refreshQuery.eq).toHaveBeenCalledWith('status', 'previewed')
+    expect(refreshQuery.update).toHaveBeenCalledWith({
+      row_counts: batchArgs.summary,
+      plan: { ...batchArgs.payload, summary: batchArgs.summary },
+    })
+  })
+
+  it('returns duplicate_file when the existing live batch is applied', async () => {
+    const insertQuery = makeQuery({
+      data: null,
+      error: { message: 'duplicate key', code: '23505' },
+    })
+    const lookupQuery = makeQuery({
+      data: { id: 'b9', status: 'applied' },
+      error: null,
+    })
+    let call = 0
+    const db = makeDb({
+      from: () => {
+        call += 1
+        if (call === 1) return insertQuery
+        return lookupQuery
+      },
+    })
+
+    const result = await createPreviewBatch(db as never, batchArgs)
+    expect(result).toEqual({ ok: false, reason: 'duplicate_file', existingBatchId: 'b9' })
+  })
+
+  it('returns db_error when the insert fails for another reason', async () => {
+    const insertQuery = makeQuery({ data: null, error: { message: 'boom' } })
+    const db = makeDb({ from: () => insertQuery })
+    const result = await createPreviewBatch(db as never, batchArgs)
+    expect(result).toEqual({ ok: false, reason: 'db_error', message: 'boom' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// addAlias / removeAlias
+// ---------------------------------------------------------------------------
+
+describe('addAlias', () => {
+  it('rejects an empty alias', async () => {
+    const db = makeDb({})
+    const result = await addAlias(db as never, 'c1', '   ', 't1')
+    expect(result).toEqual({ ok: false, message: 'empty_alias' })
+  })
+
+  it('returns tour_not_found when the tour does not exist', async () => {
+    const tourQuery = makeQuery({ data: null, error: null })
+    const db = makeDb({ from: () => tourQuery })
+    const result = await addAlias(db as never, 'c1', 'grand tour', 't1')
+    expect(result).toEqual({ ok: false, message: 'tour_not_found' })
+  })
+
+  it('returns alias_taken with existingTourId when the alias points elsewhere', async () => {
+    const tourQuery = makeQuery({ data: { id: 't1' }, error: null })
+    const aliasQuery = makeQuery({ data: { tour_id: 't2' }, error: null })
+    let call = 0
+    const db = makeDb({
+      from: () => {
+        call += 1
+        return call === 1 ? tourQuery : aliasQuery
+      },
+    })
+    const result = await addAlias(db as never, 'c1', 'grand tour', 't1')
+    expect(result).toEqual({ ok: false, message: 'alias_taken', existingTourId: 't2' })
+  })
+
+  it('is idempotent when the alias already points to the same tour', async () => {
+    const tourQuery = makeQuery({ data: { id: 't1' }, error: null })
+    const aliasQuery = makeQuery({ data: { tour_id: 't1' }, error: null })
+    let call = 0
+    const db = makeDb({
+      from: () => {
+        call += 1
+        return call === 1 ? tourQuery : aliasQuery
+      },
+    })
+    const result = await addAlias(db as never, 'c1', 'grand tour', 't1')
+    expect(result).toEqual({ ok: true, aliasNorm: 'grand tour' })
+  })
+
+  it('inserts a new alias when none exists', async () => {
+    const tourQuery = makeQuery({ data: { id: 't1' }, error: null })
+    const aliasQuery = makeQuery({ data: null, error: null })
+    const insertQuery = makeQuery({ data: null, error: null })
+    let call = 0
+    const db = makeDb({
+      from: () => {
+        call += 1
+        if (call === 1) return tourQuery
+        if (call === 2) return aliasQuery
+        return insertQuery
+      },
+    })
+    const result = await addAlias(db as never, 'c1', 'grand tour', 't1')
+    expect(result).toEqual({ ok: true, aliasNorm: 'grand tour' })
+    expect(insertQuery.insert).toHaveBeenCalledWith({
+      client_id: 'c1',
+      alias_norm: 'grand tour',
+      tour_id: 't1',
+    })
+  })
+})
+
+describe('removeAlias', () => {
+  it('returns ok when a row was deleted', async () => {
+    const deleteQuery = makeQuery({ data: { alias_norm: 'grand tour' }, error: null })
+    const db = makeDb({ from: () => deleteQuery })
+    const result = await removeAlias(db as never, 'c1', 'grand tour')
+    expect(result).toEqual({ ok: true })
+    expect(deleteQuery.delete).toHaveBeenCalled()
+    expect(deleteQuery.eq).toHaveBeenCalledWith('client_id', 'c1')
+    expect(deleteQuery.eq).toHaveBeenCalledWith('alias_norm', 'grand tour')
+    expect(deleteQuery.select).toHaveBeenCalledWith('alias_norm')
+  })
+
+  it('returns alias_not_found when no row matched', async () => {
+    const deleteQuery = makeQuery({ data: null, error: null })
+    const db = makeDb({ from: () => deleteQuery })
+    const result = await removeAlias(db as never, 'c1', 'grand tour')
+    expect(result).toEqual({ ok: false, message: 'alias_not_found' })
+  })
+
+  it('returns alias_failed on a database error', async () => {
+    const deleteQuery = makeQuery({ data: null, error: { message: 'boom' } })
+    const db = makeDb({ from: () => deleteQuery })
+    const result = await removeAlias(db as never, 'c1', 'grand tour')
+    expect(result).toEqual({ ok: false, message: 'alias_failed' })
   })
 })

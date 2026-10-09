@@ -100,6 +100,22 @@ select tour_catalog_rollback_batch(:'A','b0000000-0000-0000-0000-000000000006');
 select pg_temp.check('T11b row gone', (select count(*) from tour_catalog_departures where depart_on='2027-10-28')=0);
 select pg_temp.check('T11c version never decreases', (select catalog_version from tour_catalog_state where client_id=:'A')>=5, (select catalog_version::text from tour_catalog_state where client_id=:'A'));
 
+-- Rolled-back batches are history: the same file may be previewed again as a new row,
+-- but a second live (previewed/applied) batch for the same file is refused.
+do $$ begin
+  insert into tour_catalog_import_batches(client_id, kind, file_sha256) values ('00000000-0000-0000-0000-0000000000a1','departures',repeat('b',64));
+  insert into results values ('T15 re-preview after rollback allowed', true, '');
+exception when others then insert into results values ('T15 re-preview after rollback allowed', false, sqlerrm); end $$;
+do $$ begin
+  insert into tour_catalog_import_batches(client_id, kind, file_sha256) values ('00000000-0000-0000-0000-0000000000a1','departures',repeat('a',64));
+  insert into results values ('T16 second live batch for applied file refused', false, 'no error');
+exception when unique_violation then insert into results values ('T16 second live batch for applied file refused', true, ''); end $$;
+-- Rollback scoped by client: another client cannot roll back this client's batch.
+do $$ begin
+  perform tour_catalog_rollback_batch('00000000-0000-0000-0000-0000000000b2','b0000000-0000-0000-0000-000000000001');
+  insert into results values ('T17 cross-client rollback refused', false, 'no error');
+exception when others then insert into results values ('T17 cross-client rollback refused', sqlerrm='batch_not_rollbackable', sqlerrm); end $$;
+
 -- Permissions
 set role anon;
 do $$ begin perform count(*) from tour_catalog_tours; insert into results values ('T12 anon cannot read', false, 'no error'); exception when insufficient_privilege then insert into results values ('T12 anon cannot read', true, ''); end $$;

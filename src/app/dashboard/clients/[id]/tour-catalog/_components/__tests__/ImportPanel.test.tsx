@@ -48,15 +48,14 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 /** jsdom may lack File.prototype.text; stub it to return the file's content. */
-function stubFileText() {
-  if (typeof File.prototype.text !== 'function') {
-    Object.defineProperty(File.prototype, 'text', {
-      value: function (this: File) {
-        return Promise.resolve('csv-content')
-      },
-      writable: true,
-    })
-  }
+function stubFileText(content = 'csv-content') {
+  Object.defineProperty(File.prototype, 'text', {
+    value: function (this: File) {
+      return Promise.resolve(content)
+    },
+    writable: true,
+    configurable: true,
+  })
 }
 
 function selectFile() {
@@ -320,5 +319,215 @@ describe('ImportPanel', () => {
     expect(screen.getByText('已导入')).toBeTruthy()
     // Preview area is cleared.
     expect(screen.queryByText('确认导入')).toBeNull()
+  })
+
+  it('shows the empty-file message without calling the server', async () => {
+    stubFileText('   \n  ')
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<ImportPanel clientId="c1" tours={TOURS} onChanged={vi.fn()} />)
+
+    selectFile()
+    fireEvent.click(screen.getByText('预览'))
+
+    await waitFor(() => expect(screen.getByText('这个文件是空的')).toBeTruthy())
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('shows the missing_required_columns message', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({ error: 'missing_required_columns' }, 400),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<ImportPanel clientId="c1" tours={TOURS} onChanged={vi.fn()} />)
+
+    selectFile()
+    fireEvent.click(screen.getByText('预览'))
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          '表头不对：至少要有「出团日期」「行程名称」「返程日期」这三列（也可以用英文 depart_on / tour / return_on）',
+        ),
+      ).toBeTruthy(),
+    )
+  })
+
+  it('shows the date hint with the raw value for invalid_depart_date', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        makePreview({
+          summary: { adds: 0, updates: 0, unchanged: 0, rejected: 1, warningCount: 0 },
+          rejected: [
+            { line: 2, reason: 'invalid_depart_date', detail: '13/05/2027' },
+          ],
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<ImportPanel clientId="c1" tours={TOURS} onChanged={vi.fn()} />)
+
+    selectFile()
+    fireEvent.click(screen.getByText('预览'))
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('出团日期写法不对，要写成 2027-05-13 这样（填的是：13/05/2027）'),
+      ).toBeTruthy(),
+    )
+  })
+
+  it('shows Chinese status labels in the adds table', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        makePreview({
+          summary: { adds: 1, updates: 0, unchanged: 0, rejected: 0, warningCount: 0 },
+          adds: [
+            { line: 1, tourId: 'tour-1', departOn: '2025-01-01', returnOn: '2025-01-10', status: 'limited' },
+          ],
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<ImportPanel clientId="c1" tours={TOURS} onChanged={vi.fn()} />)
+
+    selectFile()
+    fireEvent.click(screen.getByText('预览'))
+
+    await waitFor(() => expect(screen.getByText('少量余位')).toBeTruthy())
+    expect(screen.queryByText('limited')).toBeNull()
+  })
+
+  it('shows an arrow only for a changed status in the updates table', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        makePreview({
+          summary: { adds: 0, updates: 2, unchanged: 0, rejected: 0, warningCount: 0 },
+          updates: [
+            {
+              line: 1,
+              departureId: 'd1',
+              tourId: 'tour-1',
+              departOn: '2025-01-01',
+              before: { returnOn: '2025-01-10', status: 'open' },
+              after: { returnOn: '2025-01-12', status: 'open' },
+            },
+            {
+              line: 2,
+              departureId: 'd2',
+              tourId: 'tour-1',
+              departOn: '2025-02-01',
+              before: { returnOn: '2025-02-10', status: 'open' },
+              after: { returnOn: '2025-02-12', status: 'sold_out' },
+            },
+          ],
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<ImportPanel clientId="c1" tours={TOURS} onChanged={vi.fn()} />)
+
+    selectFile()
+    fireEvent.click(screen.getByText('预览'))
+
+    await waitFor(() => expect(screen.getByText('可订 → 已满团')).toBeTruthy())
+    // Unchanged status shows the label once, not as an arrow.
+    expect(screen.queryByText('可订 → 可订')).toBeNull()
+  })
+
+  it('names the tour in the warning text', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        makePreview({
+          summary: { adds: 1, updates: 0, unchanged: 0, rejected: 0, warningCount: 1 },
+          adds: [
+            { line: 1, tourId: 'tour-1', departOn: '2025-01-01', returnOn: '2025-01-10', status: 'open' },
+          ],
+          warnings: [
+            { kind: 'suspected_typo', tourId: 'tour-1', newDate: '2025-01-01', nearDate: '2025-01-03', days: 2 },
+          ],
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<ImportPanel clientId="c1" tours={TOURS} onChanged={vi.fn()} />)
+
+    selectFile()
+    fireEvent.click(screen.getByText('预览'))
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('Natural China：新增的 2025-01-01 离已有的 2025-01-03 只差 2 天，是不是日期写错了？'),
+      ).toBeTruthy(),
+    )
+  })
+
+  it('hides the warnings box and checkbox when batchId is null', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        makePreview({
+          batchId: null,
+          summary: { adds: 0, updates: 0, unchanged: 0, rejected: 0, warningCount: 1 },
+          warnings: [
+            { kind: 'suspected_typo', tourId: 'tour-1', newDate: '2025-01-01', nearDate: '2025-01-03', days: 2 },
+          ],
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<ImportPanel clientId="c1" tours={TOURS} onChanged={vi.fn()} />)
+
+    selectFile()
+    fireEvent.click(screen.getByText('预览'))
+
+    await waitFor(() =>
+      expect(screen.getByText('这份文件里没有可以导入的新内容')).toBeTruthy(),
+    )
+    expect(screen.queryByText('请先看一眼这些提醒')).toBeNull()
+    expect(screen.queryByLabelText('我已看过以上提醒，其余班期保持不变')).toBeNull()
+  })
+
+  it('shows the existing tour name when an alias is taken', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          makePreview({
+            summary: { adds: 0, updates: 0, unchanged: 0, rejected: 1, warningCount: 0 },
+            rejected: [
+              { line: 3, reason: 'tour_ambiguous', tourName: 'Natural China' },
+            ],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ error: 'alias_taken', existingTourId: 'tour-2' }, 409))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<ImportPanel clientId="c1" tours={TOURS} onChanged={vi.fn()} />)
+
+    selectFile()
+    fireEvent.click(screen.getByText('预览'))
+
+    await waitFor(() =>
+      expect(screen.getByText('同时对上了多个团（例如高端款和普通款）')).toBeTruthy(),
+    )
+
+    const select = screen.getByRole('combobox') as HTMLSelectElement
+    fireEvent.change(select, { target: { value: 'tour-1' } })
+    fireEvent.click(screen.getByText('记住这个叫法'))
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          '这个叫法已经指向「Natural China Premium」，如果记错了，请先在上面「已记住的叫法」里删掉它',
+        ),
+      ).toBeTruthy(),
+    )
   })
 })

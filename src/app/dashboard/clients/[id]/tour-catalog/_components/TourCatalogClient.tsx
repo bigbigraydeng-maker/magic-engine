@@ -27,6 +27,16 @@ const ERROR_LABELS: Record<string, string> = {
   feed_unavailable: '网站暂时读取不到',
   conflict: '撤销失败：导入之后又有人改过这些班期，为避免覆盖已拒绝撤销',
   not_applicable: '这次导入现在不能撤销',
+  alias_not_found: '这个叫法已经不存在了',
+  alias_failed: '删除失败，请稍后重试',
+}
+
+/** "2026-10-10T00:26:16+13:00" -> "10月10日 00:26" in the viewer's local time; raw text if unparseable. */
+function formatBatchTime(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getMonth() + 1}月${date.getDate()}日 ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 function errorLabel(code: string): string {
@@ -37,7 +47,7 @@ function errorLabel(code: string): string {
 const DEPARTURE_STATUS_LABELS: Record<string, string> = {
   open: '可订',
   limited: '少量余位',
-  sold_out: '已售罄',
+  sold_out: '已满团',
   closed: '已关闭',
   cancelled: '已取消',
 }
@@ -62,6 +72,13 @@ function upcomingCount(departures: CatalogDepartureView[]): number {
   ).length
 }
 
+/** 展示价文案：没价显示「未定价」，含 TBC 显示「价格待定」，否则原样显示。 */
+function priceText(displayPriceText: string | null): string {
+  if (!displayPriceText) return '未定价'
+  if (displayPriceText.toUpperCase().includes('TBC')) return '价格待定'
+  return displayPriceText
+}
+
 /** Rollback confirm text, using row counts when they are numbers. */
 function rollbackConfirmText(batch: CatalogBatchView): string {
   const adds = typeof batch.rowCounts.adds === 'number' ? batch.rowCounts.adds : '若干'
@@ -72,8 +89,9 @@ function rollbackConfirmText(batch: CatalogBatchView): string {
 export function TourCatalogClient({ clientId }: { clientId: string }) {
   const [state, setState] = useState<State>({ phase: 'loading' })
 
-  const load = useCallback(async () => {
-    setState({ phase: 'loading' })
+  // silent = refresh data without blanking the page (keeps an open import preview intact).
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setState({ phase: 'loading' })
     try {
       const res = await fetch(`/api/clients/${clientId}/tour-catalog`)
       if (!res.ok) {
@@ -88,6 +106,8 @@ export function TourCatalogClient({ clientId }: { clientId: string }) {
   }, [clientId])
 
   useEffect(() => { load() }, [load])
+  const reload = useCallback(() => { load() }, [load])
+  const refreshQuietly = useCallback(() => { load(true) }, [load])
 
   if (state.phase === 'loading') {
     return <p className="text-sm font-semibold text-me-charcoal/40">加载中…</p>
@@ -99,7 +119,7 @@ export function TourCatalogClient({ clientId }: { clientId: string }) {
         <p className="text-sm font-black text-[#C2453A]">读取团目录失败</p>
         <p className="mt-1 text-sm font-semibold text-me-charcoal/70">{state.message}</p>
         <button
-          onClick={load}
+          onClick={() => { load() }}
           className="mt-3 rounded-lg border border-[#C2453A]/30 bg-white px-3 py-1 text-xs font-black text-[#C2453A] hover:bg-[#C2453A]/10"
         >
           重试
@@ -108,7 +128,7 @@ export function TourCatalogClient({ clientId }: { clientId: string }) {
     )
   }
 
-  const { tours, departures, batches } = state.snapshot
+  const { tours, departures, aliases, batches } = state.snapshot
 
   return (
     <div className="space-y-5">
@@ -118,9 +138,21 @@ export function TourCatalogClient({ clientId }: { clientId: string }) {
         <TourList tours={tours} departures={departures} />
       )}
 
-      <ImportPanel clientId={clientId} tours={tours} onChanged={load} />
+      <AliasList clientId={clientId} aliases={aliases} tours={tours} onChanged={refreshQuietly} />
 
-      <BatchHistory clientId={clientId} batches={batches} onChanged={load} />
+      <ImportPanel
+        clientId={clientId}
+        tours={tours}
+        onChanged={reload}
+        onAliasesChanged={refreshQuietly}
+      />
+
+      {/* Preview-only batches are drafts, not history: list only what was imported or undone. */}
+      <BatchHistory
+        clientId={clientId}
+        batches={batches.filter(b => b.status !== 'previewed')}
+        onChanged={reload}
+      />
     </div>
   )
 }
@@ -217,11 +249,16 @@ function TourBlock({
       <summary className="flex cursor-pointer flex-wrap items-center gap-3 px-4 py-3">
         <span className="font-black text-me-charcoal">{tour.name}</span>
         <span className="text-sm font-semibold text-me-charcoal/70">
-          {tour.displayPriceText || '未定价'}
+          {priceText(tour.displayPriceText)}
         </span>
         <span className="text-sm font-semibold text-me-charcoal/55">
           即将出发 {upcoming} 个班期
         </span>
+        {!tour.isActive && (
+          <span className="rounded-full border border-[#C2453A]/30 bg-[#C2453A]/10 px-2 py-0.5 text-[10px] font-bold text-[#C2453A]">
+            已下架
+          </span>
+        )}
         {!tour.managesDepartures && (
           <span className="rounded-full border border-black/10 bg-me-ivory px-2 py-0.5 text-[10px] font-bold text-me-charcoal/45">
             不管理班期
@@ -246,10 +283,10 @@ function DepartureTable({ departures }: { departures: CatalogDepartureView[] }) 
       <table className="w-full text-sm">
         <thead className="border-b border-black/10 bg-me-ivory text-left text-[10px] font-black uppercase tracking-[.12em] text-me-charcoal/45">
           <tr>
-            <th className="px-4 py-3">出团日</th>
-            <th className="px-4 py-3">返程日</th>
-            <th className="px-4 py-3">状态</th>
-            <th className="px-4 py-3">该班展示价</th>
+            <th className="whitespace-nowrap px-4 py-3">出团日</th>
+            <th className="whitespace-nowrap px-4 py-3">返程日</th>
+            <th className="whitespace-nowrap px-4 py-3">状态</th>
+            <th className="whitespace-nowrap px-4 py-3">该班展示价</th>
           </tr>
         </thead>
         <tbody>
@@ -272,6 +309,96 @@ function DepartureTable({ departures }: { departures: CatalogDepartureView[] }) 
         </tbody>
       </table>
     </div>
+  )
+}
+
+function AliasList({
+  clientId,
+  aliases,
+  tours,
+  onChanged,
+}: {
+  clientId: string
+  aliases: Array<{ aliasNorm: string; tourId: string }>
+  tours: CatalogTourView[]
+  onChanged: () => void
+}) {
+  const tourName = (tourId: string) => tours.find(t => t.id === tourId)?.name ?? tourId
+  return (
+    <div className="space-y-3 rounded-xl border border-black/10 bg-white p-5 shadow-sm">
+      <h2 className="font-display font-black text-me-charcoal">已记住的叫法</h2>
+      {aliases.length === 0 ? (
+        <p className="text-sm font-semibold text-me-charcoal/40">还没有记住任何叫法</p>
+      ) : (
+        <ul className="space-y-2">
+          {aliases.map(a => (
+            <AliasRow
+              key={a.aliasNorm}
+              clientId={clientId}
+              aliasNorm={a.aliasNorm}
+              tourName={tourName(a.tourId)}
+              onChanged={onChanged}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function AliasRow({
+  clientId,
+  aliasNorm,
+  tourName,
+  onChanged,
+}: {
+  clientId: string
+  aliasNorm: string
+  tourName: string
+  onChanged: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleDelete = async () => {
+    const ok = window.confirm(
+      '删除这个叫法后，表里再出现它时会重新要你选择对应的团。确定删除吗？',
+    )
+    if (!ok) return
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/tour-catalog/aliases`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ aliasNorm }),
+      })
+      if (!res.ok) {
+        const { error: code } = (await res.json().catch(() => ({}))) as { error?: string }
+        throw new Error(errorLabel(code ?? `HTTP ${res.status}`))
+      }
+      onChanged()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <li className="flex flex-wrap items-center gap-3 border-b border-black/5 pb-2 last:border-0 last:pb-0">
+      <span className="text-sm font-semibold text-me-charcoal/70">{aliasNorm}</span>
+      <span className="text-sm font-semibold text-me-charcoal/45">→</span>
+      <span className="text-sm font-black text-me-charcoal">{tourName}</span>
+      <button
+        onClick={handleDelete}
+        disabled={busy}
+        className="rounded-lg border border-black/10 bg-white px-2 py-1 text-xs font-black text-me-charcoal/70 hover:bg-me-ivory disabled:opacity-40"
+      >
+        {busy ? '正在删除…' : '删除'}
+      </button>
+      {error && <span className="text-xs font-black text-[#C2453A]">{error}</span>}
+    </li>
   )
 }
 
@@ -335,7 +462,7 @@ function BatchRow({
 
   return (
     <li className="flex flex-wrap items-center gap-3 border-b border-black/5 pb-2 last:border-0 last:pb-0">
-      <span className="text-xs font-semibold text-me-charcoal/45">{batch.createdAt}</span>
+      <span className="text-xs font-semibold text-me-charcoal/45">{formatBatchTime(batch.createdAt)}</span>
       <span className="text-sm font-black text-me-charcoal/70">
         {BATCH_STATUS_LABELS[batch.status] ?? batch.status}
       </span>

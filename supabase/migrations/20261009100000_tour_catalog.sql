@@ -103,9 +103,13 @@ create table public.tour_catalog_import_batches (
   applied_by text,
   created_at timestamptz not null default now(),
   applied_at timestamptz,
-  rolled_back_at timestamptz,
-  unique (client_id, kind, file_sha256)
+  rolled_back_at timestamptz
 );
+
+-- The same file may be re-imported after a rollback; rolled-back batches stay as history.
+create unique index tour_catalog_import_batches_live_file_uidx
+  on public.tour_catalog_import_batches (client_id, kind, file_sha256)
+  where status in ('previewed', 'applied');
 
 alter table public.tour_catalog_import_batches enable row level security;
 

@@ -9,6 +9,7 @@ vi.mock('@/lib/tour-catalog/access', () => ({
 
 vi.mock('@/lib/tour-catalog/store', () => ({
   addAlias: vi.fn(),
+  removeAlias: vi.fn(),
   getBatch: vi.fn(),
   rollbackBatch: vi.fn(),
 }))
@@ -23,15 +24,16 @@ vi.mock('@/lib/web-intelligence/first-party-tours', () => ({
 }))
 
 import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
-import { addAlias, getBatch, rollbackBatch } from '@/lib/tour-catalog/store'
+import { addAlias, removeAlias, getBatch, rollbackBatch } from '@/lib/tour-catalog/store'
 import { fetchFirstPartyFeed, seedCatalog } from '@/lib/tour-catalog/seed'
 import { firstPartyTourSourceUrl } from '@/lib/web-intelligence/first-party-tours'
 import { POST as seedPOST } from '../seed/route'
-import { POST as aliasesPOST } from '../aliases/route'
+import { POST as aliasesPOST, DELETE as aliasesDELETE } from '../aliases/route'
 import { POST as rollbackPOST } from '../batches/[batchId]/rollback/route'
 
 const requireCatalogAdminMock = vi.mocked(requireCatalogAdmin)
 const addAliasMock = vi.mocked(addAlias)
+const removeAliasMock = vi.mocked(removeAlias)
 const getBatchMock = vi.mocked(getBatch)
 const rollbackBatchMock = vi.mocked(rollbackBatch)
 const fetchFirstPartyFeedMock = vi.mocked(fetchFirstPartyFeed)
@@ -43,6 +45,14 @@ const CLIENT_ID = 'client-1'
 function makeRequest(body: unknown): NextRequest {
   return new NextRequest('http://localhost/api/test', {
     method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+function makeDeleteRequest(body: unknown): NextRequest {
+  return new NextRequest('http://localhost/api/test', {
+    method: 'DELETE',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   })
@@ -155,6 +165,24 @@ describe('POST /tour-catalog/aliases', () => {
     expect(await res.json()).toEqual({ error: 'alias_taken' })
   })
 
+  it('returns 409 with existingTourId when the alias is taken by another tour', async () => {
+    allowAccess()
+    addAliasMock.mockResolvedValue({
+      ok: false,
+      message: 'alias_taken',
+      existingTourId: 't-other',
+    })
+    const res = await aliasesPOST(
+      makeRequest({ alias: 'x', tourId: 't1' }),
+      makeParams(),
+    )
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({
+      error: 'alias_taken',
+      existingTourId: 't-other',
+    })
+  })
+
   it('returns 404 when the tour is not found', async () => {
     allowAccess()
     addAliasMock.mockResolvedValue({ ok: false, message: 'tour_not_found' })
@@ -225,6 +253,77 @@ describe('POST /tour-catalog/aliases', () => {
     )
     expect(res.status).toBe(403)
     expect(addAliasMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('DELETE /tour-catalog/aliases', () => {
+  it('returns 400 when aliasNorm is missing', async () => {
+    allowAccess()
+    const res = await aliasesDELETE(makeDeleteRequest({}), makeParams())
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'alias_required' })
+    expect(removeAliasMock).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 when aliasNorm is empty', async () => {
+    allowAccess()
+    const res = await aliasesDELETE(
+      makeDeleteRequest({ aliasNorm: '   ' }),
+      makeParams(),
+    )
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'alias_required' })
+    expect(removeAliasMock).not.toHaveBeenCalled()
+  })
+
+  it('returns 404 when the alias is not found', async () => {
+    allowAccess()
+    removeAliasMock.mockResolvedValue({ ok: false, message: 'alias_not_found' })
+    const res = await aliasesDELETE(
+      makeDeleteRequest({ aliasNorm: 'x' }),
+      makeParams(),
+    )
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'alias_not_found' })
+  })
+
+  it('returns 500 alias_failed on error', async () => {
+    allowAccess()
+    removeAliasMock.mockResolvedValue({ ok: false, message: 'alias_failed' })
+    const res = await aliasesDELETE(
+      makeDeleteRequest({ aliasNorm: 'x' }),
+      makeParams(),
+    )
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'alias_failed' })
+  })
+
+  it('returns 200 with ok on success', async () => {
+    allowAccess()
+    removeAliasMock.mockResolvedValue({ ok: true })
+    const res = await aliasesDELETE(
+      makeDeleteRequest({ aliasNorm: 'x' }),
+      makeParams(),
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+    expect(removeAliasMock).toHaveBeenCalledWith({}, CLIENT_ID, 'x')
+  })
+
+  it('passes through the access denial response', async () => {
+    const denied = new Response(JSON.stringify({ error: 'Forbidden' }), {
+      status: 403,
+    })
+    requireCatalogAdminMock.mockResolvedValue({
+      ok: false,
+      response: denied as never,
+    })
+    const res = await aliasesDELETE(
+      makeDeleteRequest({ aliasNorm: 'x' }),
+      makeParams(),
+    )
+    expect(res.status).toBe(403)
+    expect(removeAliasMock).not.toHaveBeenCalled()
   })
 })
 

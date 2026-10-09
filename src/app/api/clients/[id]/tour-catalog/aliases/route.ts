@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
-import { addAlias } from '@/lib/tour-catalog/store'
+import { addAlias, removeAlias } from '@/lib/tour-catalog/store'
 import { supabaseAdmin } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -47,6 +47,12 @@ export async function POST(
   }
 
   if (result.message === 'alias_taken') {
+    if (result.existingTourId !== undefined) {
+      return NextResponse.json(
+        { error: 'alias_taken', existingTourId: result.existingTourId },
+        { status: 409 },
+      )
+    }
     return NextResponse.json({ error: 'alias_taken' }, { status: 409 })
   }
   if (result.message === 'tour_not_found') {
@@ -59,5 +65,37 @@ export async function POST(
     )
   }
   console.error('tour-catalog addAlias failed:', result.message)
+  return NextResponse.json({ error: 'alias_failed' }, { status: 500 })
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id: clientId } = await params
+
+  const access = await requireCatalogAdmin(clientId)
+  if (!access.ok) return access.response
+
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    return NextResponse.json({ error: 'alias_required' }, { status: 400 })
+  }
+
+  const aliasNorm = readStringField(body, 'aliasNorm')
+  if (aliasNorm === null) {
+    return NextResponse.json({ error: 'alias_required' }, { status: 400 })
+  }
+
+  const result = await removeAlias(supabaseAdmin, clientId, aliasNorm)
+  if (result.ok) {
+    return NextResponse.json({ ok: true })
+  }
+  if (result.message === 'alias_not_found') {
+    return NextResponse.json({ error: 'alias_not_found' }, { status: 404 })
+  }
+  console.error('tour-catalog removeAlias failed:', result.message)
   return NextResponse.json({ error: 'alias_failed' }, { status: 500 })
 }

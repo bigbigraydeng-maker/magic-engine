@@ -119,13 +119,23 @@ const HEADER_ALIASES: Record<FieldKey, readonly string[]> = {
 
 const REQUIRED_FIELDS: readonly FieldKey[] = ['tourName', 'departOn', 'returnOn']
 
-const VALID_STATUSES: readonly DepartureStatus[] = [
-  'open',
-  'limited',
-  'sold_out',
-  'closed',
-  'cancelled',
-]
+/** Chinese labels for each status, shared with UIs. */
+export const STATUS_LABELS: Record<DepartureStatus, string> = {
+  open: '可订',
+  limited: '少量余位',
+  sold_out: '已满团',
+  closed: '已关闭',
+  cancelled: '已取消',
+}
+
+/** Accepted status words: English codes (case-insensitive) and Chinese words (exact). */
+const STATUS_ALIASES: Record<DepartureStatus, readonly string[]> = {
+  open: ['open', '可订', '开放'],
+  limited: ['limited', '少量余位', '余位不多'],
+  sold_out: ['sold_out', '满团', '已满', '已售罄', '售罄'],
+  closed: ['closed', '关闭', '已关闭'],
+  cancelled: ['cancelled', '取消', '已取消'],
+}
 
 const TEXT_FIELDS: readonly FieldKey[] = ['tourName', 'airline', 'outboundRoute', 'inboundRoute']
 
@@ -193,6 +203,17 @@ function isPositiveInteger(value: string): boolean {
   return /^[0-9]+$/.test(value) && Number(value) > 0
 }
 
+/** Resolve a status cell to a status code, or null when it is not recognised. */
+function resolveStatus(value: string): DepartureStatus | null {
+  const lower = value.toLowerCase()
+  for (const key of Object.keys(STATUS_ALIASES) as DepartureStatus[]) {
+    if (STATUS_ALIASES[key].some((alias) => alias === value || alias === lower)) {
+      return key
+    }
+  }
+  return null
+}
+
 /** Build the internal object, including only non-empty cells. */
 function buildInternal(
   record: string[],
@@ -249,11 +270,11 @@ function validateRecord(
 
   let status: DepartureStatus | null = null
   if (statusCell !== '') {
-    const normalized = statusCell.toLowerCase()
-    if (!VALID_STATUSES.includes(normalized as DepartureStatus)) {
+    const resolved = resolveStatus(statusCell)
+    if (resolved === null) {
       return { line, reason: 'invalid_status', detail: statusCell }
     }
-    status = normalized as DepartureStatus
+    status = resolved
   }
 
   for (const key of TEXT_FIELDS) {

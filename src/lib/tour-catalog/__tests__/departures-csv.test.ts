@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   parseCsv,
   parseDeparturesCsv,
+  STATUS_LABELS,
   MAX_CSV_BYTES,
   MAX_CSV_ROWS,
 } from '../departures-csv'
@@ -211,11 +212,42 @@ describe('parseDeparturesCsv row handling', () => {
     ])
   })
 
+  it('rejects an unknown Chinese status word', () => {
+    const csv = [header, 'China Legacy,2027-05-28,2027-06-05,满员了'].join('\n')
+    const result = parseDeparturesCsv(csv)
+    expect(result.rejected).toEqual([
+      { line: 2, reason: 'invalid_status', detail: '满员了' },
+    ])
+  })
+
   it('accepts status case-insensitively and stores it lowercase', () => {
     const csv = [header, 'China Legacy,2027-05-28,2027-06-05,SOLD_OUT'].join('\n')
     const result = parseDeparturesCsv(csv)
     expect(result.rejected).toEqual([])
     expect(result.rows[0].status).toBe('sold_out')
+  })
+
+  it('maps each Chinese status word to its status', () => {
+    const cases: [string, string][] = [
+      ['可订', 'open'],
+      ['开放', 'open'],
+      ['少量余位', 'limited'],
+      ['余位不多', 'limited'],
+      ['满团', 'sold_out'],
+      ['已满', 'sold_out'],
+      ['已售罄', 'sold_out'],
+      ['售罄', 'sold_out'],
+      ['关闭', 'closed'],
+      ['已关闭', 'closed'],
+      ['取消', 'cancelled'],
+      ['已取消', 'cancelled'],
+    ]
+    for (const [word, status] of cases) {
+      const csv = [header, `China Legacy,2027-05-28,2027-06-05,${word}`].join('\n')
+      const result = parseDeparturesCsv(csv)
+      expect(result.rejected).toEqual([])
+      expect(result.rows[0].status).toBe(status)
+    }
   })
 
   it('rejects formula injection in the tour name', () => {
@@ -292,6 +324,18 @@ describe('parseDeparturesCsv row handling', () => {
     expect(result.fatal).toBeNull()
     expect(result.rows).toEqual([])
     expect(result.rejected).toEqual([{ line: 2, reason: 'missing_return_date' }])
+  })
+})
+
+describe('STATUS_LABELS', () => {
+  it('provides a Chinese label for every status', () => {
+    expect(STATUS_LABELS).toEqual({
+      open: '可订',
+      limited: '少量余位',
+      sold_out: '已满团',
+      closed: '已关闭',
+      cancelled: '已取消',
+    })
   })
 })
 

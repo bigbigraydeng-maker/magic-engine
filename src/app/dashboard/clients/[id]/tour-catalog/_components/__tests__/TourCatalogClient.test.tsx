@@ -283,4 +283,135 @@ describe('TourCatalogClient', () => {
     expect(message).toContain('3')
     expect(message).toContain('2')
   })
+
+  it('shows 价格待定 when the price text contains TBC', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        snapshot({
+          tours: [
+            {
+              id: 't1',
+              slug: 'a',
+              destination: 'JP',
+              tier: 'std',
+              name: '东京五日',
+              displayPriceText: 'TBC',
+              isActive: true,
+              managesDepartures: true,
+            },
+          ],
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<TourCatalogClient clientId={CLIENT_ID} />)
+
+    expect(await screen.findByText('价格待定')).toBeInTheDocument()
+  })
+
+  it('lists aliases with their tour names and deletes on confirm', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          snapshot({
+            tours: [
+              {
+                id: 't1',
+                slug: 'a',
+                destination: 'JP',
+                tier: 'std',
+                name: '东京五日',
+                displayPriceText: null,
+                isActive: true,
+                managesDepartures: true,
+              },
+            ],
+            aliases: [{ aliasNorm: '东京5日', tourId: 't1' }],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({}))
+      .mockResolvedValueOnce(jsonResponse(snapshot()))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
+
+    render(<TourCatalogClient clientId={CLIENT_ID} />)
+
+    expect(await screen.findByText('已记住的叫法')).toBeInTheDocument()
+    expect(screen.getByText('东京5日')).toBeInTheDocument()
+    // The tour name appears both in the tour list and next to its alias.
+    expect(screen.getAllByText('东京五日')).toHaveLength(2)
+
+    fireEvent.click(screen.getByText('删除'))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/clients/${CLIENT_ID}/tour-catalog/aliases`,
+        expect.objectContaining({
+          method: 'DELETE',
+          body: JSON.stringify({ aliasNorm: '东京5日' }),
+        }),
+      )
+    })
+  })
+
+  it('does not delete an alias when the confirm is declined', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        snapshot({
+          tours: [
+            {
+              id: 't1',
+              slug: 'a',
+              destination: 'JP',
+              tier: 'std',
+              name: '东京五日',
+              displayPriceText: null,
+              isActive: true,
+              managesDepartures: true,
+            },
+          ],
+          aliases: [{ aliasNorm: '东京5日', tourId: 't1' }],
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(false))
+
+    render(<TourCatalogClient clientId={CLIENT_ID} />)
+
+    fireEvent.click(await screen.findByText('删除'))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('shows the empty alias message when there are no aliases', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        snapshot({
+          tours: [
+            {
+              id: 't1',
+              slug: 'a',
+              destination: 'JP',
+              tier: 'std',
+              name: '东京五日',
+              displayPriceText: null,
+              isActive: true,
+              managesDepartures: true,
+            },
+          ],
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<TourCatalogClient clientId={CLIENT_ID} />)
+
+    expect(await screen.findByText('还没有记住任何叫法')).toBeInTheDocument()
+  })
 })

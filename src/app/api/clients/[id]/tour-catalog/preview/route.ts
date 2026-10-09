@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto'
 import { NextResponse, type NextRequest } from 'next/server'
 import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
 import {
+  parseCsv,
   parseDeparturesCsv,
-  type ParsedDepartureRow,
   type RejectedCsvRow,
 } from '@/lib/tour-catalog/departures-csv'
 import { todayIso } from '@/lib/tour-catalog/dates'
@@ -41,17 +41,34 @@ function readCsvField(body: unknown): string | null {
   return value
 }
 
+/** Raw tour name per CSV line, so every rejected row can show which tour it was about. */
+function tourNamesByLine(csv: string): Map<number, string> {
+  const records = parseCsv(csv)
+  const header = (records[0] ?? []).map((cell) => cell.trim().toLowerCase())
+  const column = header.findIndex((cell) => cell === '行程名称' || cell === 'tour')
+  const names = new Map<number, string>()
+  if (column < 0) {
+    return names
+  }
+  records.forEach((record, index) => {
+    const name = record[column]?.trim()
+    if (index > 0 && name) {
+      names.set(index + 1, name)
+    }
+  })
+  return names
+}
+
 /** Merge CSV-level and plan-level rejections, sorted by line number. */
 function mergeRejected(
   csvRejected: RejectedCsvRow[],
   planRejected: PlanRejected[],
-  rows: ParsedDepartureRow[],
+  names: Map<number, string>,
 ): Array<(RejectedCsvRow | PlanRejected) & { tourName?: string }> {
-  // Attach the raw tour name so the page can offer "remember this name" for unmatched rows.
-  const nameByLine = new Map(rows.map((row) => [row.line, row.tourName]))
+  // Attach the raw tour name so the page can show it and offer "remember this name".
   return [...csvRejected, ...planRejected]
     .sort((a, b) => a.line - b.line)
-    .map((r) => ({ ...r, tourName: nameByLine.get(r.line) }))
+    .map((r) => ({ ...r, tourName: names.get(r.line) }))
 }
 
 /** Build the summary counts shown to the operator. */
@@ -140,7 +157,7 @@ export async function POST(
     })
 
     const hash = planHash(planToApplyPayload(plan), plan.warnings.length)
-    const rejected = mergeRejected(parsed.rejected, plan.rejected, parsed.rows)
+    const rejected = mergeRejected(parsed.rejected, plan.rejected, tourNamesByLine(csv))
     const summary = buildSummary(plan, rejected.length, hash)
 
     if (plan.adds.length + plan.updates.length === 0) {

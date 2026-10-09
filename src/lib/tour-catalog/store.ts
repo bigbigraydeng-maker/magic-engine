@@ -394,6 +394,10 @@ function isUniqueViolation(error: { code?: string } | null): boolean {
   return error !== null && error.code === '23505'
 }
 
+/**
+ * Look up a live batch (previewed or applied) for the same file. Rolled-back
+ * batches are history only and never block a new preview.
+ */
 async function findExistingBatch(
   db: SupabaseClient,
   args: CreateBatchArgs,
@@ -404,6 +408,7 @@ async function findExistingBatch(
     .eq('client_id', args.clientId)
     .eq('kind', args.kind)
     .eq('file_sha256', args.fileSha256)
+    .in('status', ['previewed', 'applied'])
     .maybeSingle()
   if (res.error || res.data === null || res.data === undefined) {
     return null
@@ -413,9 +418,8 @@ async function findExistingBatch(
 }
 
 /**
- * Re-previewing the same file (for example after adding an alias, or after a
- * rollback) refreshes the still-unapplied batch instead of being refused as a
- * duplicate. Resets any prior apply/rollback bookkeeping.
+ * Re-previewing the same file refreshes the still-unapplied batch instead of
+ * being refused as a duplicate. Only row_counts and plan are updated.
  */
 async function refreshPreviewBatch(
   db: SupabaseClient,
@@ -428,16 +432,10 @@ async function refreshPreviewBatch(
     .update({
       row_counts: args.summary,
       plan,
-      status: 'previewed',
-      before: {},
-      after: {},
-      applied_by: null,
-      applied_at: null,
-      rolled_back_at: null,
     })
     .eq('id', batchId)
     .eq('client_id', args.clientId)
-    .in('status', ['previewed', 'rolled_back'])
+    .eq('status', 'previewed')
     .select('id')
     .maybeSingle()
   if (res.error || res.data === null || res.data === undefined) {
@@ -468,7 +466,7 @@ export async function createPreviewBatch(
     if (isUniqueViolation(res.error)) {
       const existing = await findExistingBatch(db, args)
       if (existing !== null) {
-        if (existing.status === 'previewed' || existing.status === 'rolled_back') {
+        if (existing.status === 'previewed') {
           return refreshPreviewBatch(db, args, existing.id, plan)
         }
         return { ok: false, reason: 'duplicate_file', existingBatchId: existing.id }
@@ -534,12 +532,12 @@ export async function rollbackBatch(
 }
 
 // ---------------------------------------------------------------------------
-// addAlias
+// addAlias / removeAlias
 // ---------------------------------------------------------------------------
 
 export type AddAliasResult =
   | { ok: true; aliasNorm: string }
-  | { ok: false; message: string }
+  | { ok: false; message: string; existingTourId?: string }
 
 export async function addAlias(
   db: SupabaseClient,
@@ -579,7 +577,7 @@ export async function addAlias(
   if (existingRes.data !== null && existingRes.data !== undefined) {
     const existingTourId = asString(asRecord(existingRes.data).tour_id)
     if (existingTourId !== tourId) {
-      return { ok: false, message: 'alias_taken' }
+      return { ok: false, message: 'alias_taken', existingTourId }
     }
     return { ok: true, aliasNorm }
   }
@@ -592,4 +590,30 @@ export async function addAlias(
     return { ok: false, message: 'alias_failed' }
   }
   return { ok: true, aliasNorm }
+}
+
+export type RemoveAliasResult =
+  | { ok: true }
+  | { ok: false; message: 'alias_not_found' | 'alias_failed' }
+
+export async function removeAlias(
+  db: SupabaseClient,
+  clientId: string,
+  aliasNorm: string,
+): Promise<RemoveAliasResult> {
+  const res = await db
+    .from('tour_catalog_aliases')
+    .delete()
+    .eq('client_id', clientId)
+    .eq('alias_norm', aliasNorm)
+    .select('alias_norm')
+    .maybeSingle()
+  if (res.error) {
+    console.error('removeAlias: delete failed', res.error)
+    return { ok: false, message: 'alias_failed' }
+  }
+  if (res.data === null || res.data === undefined) {
+    return { ok: false, message: 'alias_not_found' }
+  }
+  return { ok: true }
 }
