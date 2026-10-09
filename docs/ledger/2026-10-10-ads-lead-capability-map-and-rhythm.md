@@ -1,9 +1,11 @@
 ---
 id: 2026-10-10-ads-lead-capability-map-and-rhythm
-title: 设计稿，未获 PM 批准，不得据此改任何广告：资深广告负责人能力图谱 + 每天/每周/每月/每季工作节奏 v0.1
-status: decided
+title: 设计稿已交付（未获 PM 批准，不得据此改任何广告）：资深广告负责人能力图谱 + 每天/每周/每月/每季工作节奏 v0.1
+status: done
 owner: pm
 decided_on: 2026-10-10
+done_on: 2026-10-10
+done_ref: doc:docs/specs/2026-10-10-ads-lead-capability-map-and-rhythm-v0.1.md
 source: pr:2411
 verify_by: 2026-10-17
 verify_how: 看 PM 是否已回设计稿第 8 节的三个问句（第一阶段开不开工、真实花费是只显示还是直接接线、AU 合规规则库要不要先接上广告草稿闸）；回了就按答案开新卡，没回就再提醒一次
