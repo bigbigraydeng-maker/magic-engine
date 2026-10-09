@@ -99,7 +99,9 @@ Business Suite → 收件箱 → 自动化设置 → 「常见问题」这条规
 }
 ```
 
-（原文中的撇号为 U+2019 弯引号，回写时须逐字对齐；`image_format` / `video_format` 两处的 `message.text` 与欢迎语相同。）
+（原文中的撇号为 U+2019 弯引号，回写时须逐字对齐。）
+
+**本快照不完整**：`page_welcome_message` 里还有 `image_format` / `video_format` 两个分支，上面没有保存其完整内容。执行改动前必须先从接口把**整个** `page_welcome_message`（含这两个分支）原样读回，存成完整快照（附在本文件或台账卡），再动手；回滚用这份完整快照整体写回，不得用上面的残缺版组装。
 
 ## 5. 第二段要改的时候怎么做（本轮未执行）
 
@@ -109,7 +111,7 @@ Business Suite → 收件箱 → 自动化设置 → 「常见问题」这条规
   注意 PM 的答案里有换行和 ✨，要原文一字不改地带进 `response`。
 - 禁止连带动的：广告正文 / 受众 / 预算 / 版位 / 开关。
 - 改完回读 `page_welcome_message` 和该广告的 `effective_status`、`issues_info`；不是 ACTIVE 就立刻回滚。
-- 回滚办法：用 §4 的快照原样写回。
+- 回滚办法：用改前读回的**完整** `page_welcome_message` 快照（含 `image_format` / `video_format`，见 §4 说明）整体原样写回。
 
 ## 6. 语言（PM 2026-10-10 拍板：只要英文）
 
@@ -125,23 +127,24 @@ PM 拍板**只配英文，不加中文版**。多语言支不支持这件事按 
 ```
 products: [{
   "name": "Signature Escape",
-  "price": "NZ$158",
-  "currency": "NZD",
-  "duration_minutes": 75,
-  "includes": ["40 min Body Massage", "35 min Spa Facial (includes 5 min Scalp Ritual)"],
-  "audience": "new clients",
-  "source": "PM 2026-10-10 口头确认",
-  "confirmed_on": "2026-10-10"
+  "usp": "NZ$158 · 75min new clients: 40min Body Massage + 35min Spa Facial. 出处 PM 口头确认 2026-10-10"
 }]
 website: （保持 NULL —— 客户确实没有官网，不要瞎填主页链接当官网）
 ```
 
-可回退：写之前该行 `products` 原值为 NULL，要撤就写回 NULL。
+字数：`usp` 上限 120 字（`normalizeProducts` 的 `MAX_USP`），上面这条 88 字，出处写在末尾不会被截断；5 分钟头皮护理细节略去。
 
-**已执行（2026-10-10，统筹代 PM 批准后）**：
-- 写入 `master_briefs` 行 `60c6cc24-5946-4d82-a0b8-4eaec2d34d4c`（NM Medspa 唯一一条，`is_active = true`）
-- 回读确认：`products` 1 条 = Signature Escape / NZD 158 / 75 分钟 / 出处「PM 2026-10-10 口头确认」；`website` 仍为 NULL
-- 回滚：`update master_briefs set products = null where id = '60c6cc24-5946-4d82-a0b8-4eaec2d34d4c';`
+契约说明：`products` 的消费者（`formatBriefForPrompt`、`/api/clients/[id]/products`）只认 `{name, usp}`，
+多出的 `price` / `currency` 等字段会渲染成 `（undefined）`，FDE 在 Settings 保存时也会被静默删掉；所以价格、时长、受众、出处全部放进 `usp` 文字里。
+
+可回退：第一次写入之前该行 `products` 原值为 NULL；但现在线上已是下面那版旧值，重写前须先备份当前值（见下）。
+
+**已执行但格式不合契约，待重写（2026-10-10）**：
+- 统筹代 PM 批准后，已向 `master_briefs` 行 `60c6cc24-5946-4d82-a0b8-4eaec2d34d4c`（NM Medspa 唯一一条，`is_active = true`）写入过一版 `products`，
+  但那一版带了 `price` / `currency` 等多余字段、没有 `usp`，不符合上面的 `{name, usp}` 契约。
+- 需要用上面的 `{name, usp}` 版本覆盖重写（写库属生产写入，须另获授权；本次修订只改文档，未碰生产）。
+- 覆盖前先读出并保存当前值：`select products from master_briefs where id = '60c6cc24-5946-4d82-a0b8-4eaec2d34d4c';`，把结果 JSON 存进本文件或台账卡。
+- 回滚：把上一步保存的 JSON 写回 `products`（撤销本次重写）。写成 NULL 只对应第一次写入之前的历史状态，不要用于撤销本次重写。
 
 ## 8. 本轮做了什么 / 没做什么
 
