@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-09-27
 source: session:b487d1fb
-verify_by: 2026-10-16
+verify_by: 2026-10-01
 last_checked: 2026-10-09
 check_note: PR#2118 已合并(9-28)。10-09 只读核实：CTS 巡检「没参与诊断」清单 10-03 起每天 0 条，10-08 无 D3 命中，ads.auto_pause_on_d3 在 flywheel_actions 全库 0 行；归属闸「own 放行」路径在生产还没被实际触发，未到 verified，等出现第一条 D3 命中再核。
 done_on: 2026-10-09
