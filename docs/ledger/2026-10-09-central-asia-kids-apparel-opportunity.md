@@ -12,3 +12,4 @@ verify_how: 看有没有收到工厂的款式表和价格表（任一渠道都�
 完整梳理（已定 / 未定 / 未核实说法 / 下一步）见 doc:docs/strategy/2026-10-09-central-asia-kids-apparel-opportunity.md。
 五件未定的事（To C 还是 To B、谁压货、仓设哪、我们的角色、贴牌还是品牌）不定则无法启动。
 中亚是否成为 ME 新市场尚未判断，若要往「新垂直版本」走须先过平台层级门。
+2026-10-09 两国零售价第一轮已查完，见 doc:docs/research/2026-10-09-central-asia-kids-apparel-retail-prices/README.md；利润对比仍等工厂价格表。
