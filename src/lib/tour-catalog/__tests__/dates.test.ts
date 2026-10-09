@@ -5,6 +5,7 @@ import {
   formatDepartureDisplay,
   daysBetween,
   todayIso,
+  parseDepartureDisplay,
 } from '../dates';
 
 describe('isValidIsoDate', () => {
@@ -90,5 +91,21 @@ describe('todayIso', () => {
     const now = new Date('2027-05-12T11:59:00Z');
     expect(todayIso(now, 'Pacific/Auckland')).toBe('2027-05-12');
     expect(todayIso(now, 'UTC')).toBe('2027-05-12');
+  });
+});
+
+describe('parseDepartureDisplay', () => {
+  it('round-trips the display format used by the website', () => {
+    expect(parseDepartureDisplay('13 May 2027')).toBe('2027-05-13');
+    expect(parseDepartureDisplay('1 March 2027')).toBe('2027-03-01');
+    expect(parseDepartureDisplay(formatDepartureDisplay('2027-11-05'))).toBe('2027-11-05');
+  });
+
+  it('rejects text that is not exactly "D Month YYYY"', () => {
+    expect(parseDepartureDisplay('25 August')).toBeNull();
+    expect(parseDepartureDisplay('31 February 2027')).toBeNull();
+    expect(parseDepartureDisplay('13 Mayy 2027')).toBeNull();
+    expect(parseDepartureDisplay('2027-05-13')).toBeNull();
+    expect(parseDepartureDisplay('')).toBeNull();
   });
 });

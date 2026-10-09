@@ -1,0 +1,255 @@
+/**
+ * Tour catalog seeding — pure planning plus a thin Supabase writer.
+ *
+ * Design: docs/specs/2026-10-09-cts-tour-catalog-in-me-design-v0.3.md
+ * The planner is pure; the writer takes an injected Supabase client.
+ */
+
+import type { SupabaseClient } from '@supabase/supabase-js'
+import {
+  parseFirstPartyTourFeed,
+  type FirstPartyTour,
+  type FirstPartyTourFeed,
+} from '@/lib/web-intelligence/first-party-tours'
+import { parseDepartureDisplay } from './dates'
+import { validatePriceText } from './price'
+
+export interface SeedTourRow {
+  slug: string
+  destination: string
+  tier: string
+  name: string
+  title: string | null
+  duration_text: string | null
+  display_price_text: string | null
+  itinerary: unknown[]
+  inclusions: string[]
+  exclusions: string[]
+  tour_cities: string[]
+  single_supplement: string | null
+  max_group_size: number | null
+  is_active: boolean
+  manages_departures: boolean
+}
+
+export interface SeedDepartureRow {
+  tourKey: string
+  depart_on: string
+  return_on: null
+  price_text_override: string | null
+  status: 'open'
+}
+
+export interface SeedPlan {
+  tours: SeedTourRow[]
+  departures: SeedDepartureRow[]
+  skippedExisting: string[]
+  notes: Array<{ tourKey: string; note: string }>
+}
+
+export interface SeedResult {
+  toursInserted: number
+  departuresInserted: number
+  skippedExisting: string[]
+  notes: SeedPlan['notes']
+}
+
+/** Stable identity for a tour across feeds and DB rows. */
+export function tourKey(t: { destination: string; tier?: string; slug: string }): string {
+  return `${t.destination}/${t.tier ?? 'unknown'}/${t.slug}`
+}
+
+/** Validate a price string, returning the accepted text or null plus a note. */
+function acceptPrice(
+  price: string | undefined,
+  tourKeyValue: string,
+  notes: SeedPlan['notes'],
+  notePrefix: string,
+): string | null {
+  if (price === undefined) return null
+  const result = validatePriceText(price)
+  if (!result.ok) {
+    notes.push({ tourKey: tourKeyValue, note: notePrefix + result.reason })
+    return null
+  }
+  return price
+}
+
+/** Build the tour row for a single product. */
+function buildTourRow(product: FirstPartyTour, notes: SeedPlan['notes']): SeedTourRow {
+  const key = tourKey(product)
+  return {
+    slug: product.slug,
+    destination: product.destination,
+    tier: product.tier ?? 'unknown',
+    name: product.name,
+    title: product.title ?? null,
+    duration_text: product.duration ?? null,
+    display_price_text: acceptPrice(product.price, key, notes, 'price_rejected:'),
+    itinerary: product.itinerary,
+    inclusions: product.inclusions,
+    exclusions: product.exclusions,
+    tour_cities: product.tour_cities,
+    single_supplement: product.single_supplement ?? null,
+    max_group_size: product.max_group_size ?? null,
+    is_active: product.is_active,
+    manages_departures: product.departure_dates.length > 0,
+  }
+}
+
+/** Build departure rows for a product, recording unparseable entries as notes. */
+function buildDepartureRows(product: FirstPartyTour, notes: SeedPlan['notes']): SeedDepartureRow[] {
+  const key = tourKey(product)
+  const rows: SeedDepartureRow[] = []
+  for (const entry of product.departure_dates) {
+    const iso = parseDepartureDisplay(entry)
+    if (iso === null) {
+      notes.push({ tourKey: key, note: 'departure_unparseable:' + entry })
+      continue
+    }
+    const override = acceptPrice(product.departure_pricing[entry], key, notes, 'override_price_rejected:' + entry + ':')
+    rows.push({
+      tourKey: key,
+      depart_on: iso,
+      return_on: null,
+      price_text_override: override,
+      status: 'open',
+    })
+  }
+  return rows
+}
+
+/** Pure planner: turn a feed into insert rows, skipping already-present tours. */
+export function planSeed(feed: FirstPartyTourFeed, existingKeys: ReadonlySet<string>): SeedPlan {
+  const tours: SeedTourRow[] = []
+  const departures: SeedDepartureRow[] = []
+  const skippedExisting: string[] = []
+  const notes: SeedPlan['notes'] = []
+
+  for (const product of feed.products) {
+    const key = tourKey(product)
+    if (existingKeys.has(key)) {
+      skippedExisting.push(key)
+      continue
+    }
+    tours.push(buildTourRow(product, notes))
+    departures.push(...buildDepartureRows(product, notes))
+  }
+
+  return { tours, departures, skippedExisting, notes }
+}
+
+const FEED_TIMEOUT_MS = 10_000
+
+/** Fetch and parse a first-party tour feed over HTTPS. */
+export async function fetchFirstPartyFeed(
+  feedUrl: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<FirstPartyTourFeed> {
+  if (!feedUrl.startsWith('https://')) {
+    throw new Error('feed_url_must_be_https')
+  }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), FEED_TIMEOUT_MS)
+  try {
+    const response = await fetchImpl(feedUrl, { signal: controller.signal })
+    if (!response.ok) {
+      throw new Error('feed_http_' + response.status)
+    }
+    const parsed = parseFirstPartyTourFeed(await response.json() as unknown)
+    if (parsed === null) {
+      throw new Error('feed_invalid')
+    }
+    return parsed
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+interface ExistingTourRow {
+  destination: string
+  tier: string
+  slug: string
+}
+
+interface InsertedTourRow extends ExistingTourRow {
+  id: string
+}
+
+/** Load the set of tour keys already present for a client. */
+async function loadExistingKeys(db: SupabaseClient, clientId: string): Promise<Set<string>> {
+  const { data, error } = await db
+    .from('tour_catalog_tours')
+    .select('destination, tier, slug')
+    .eq('client_id', clientId)
+  if (error) throw new Error(error.message)
+  const rows = (data ?? []) as ExistingTourRow[]
+  return new Set(rows.map((row) => tourKey(row)))
+}
+
+/** Insert new tours and return a map from tour key to inserted id. */
+async function insertTours(
+  db: SupabaseClient,
+  clientId: string,
+  tours: SeedTourRow[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  if (tours.length === 0) return map
+
+  const rows = tours.map((tour, index) => ({ ...tour, client_id: clientId, sort_order: index }))
+  const { data, error } = await db
+    .from('tour_catalog_tours')
+    .insert(rows)
+    .select('id, destination, tier, slug')
+  if (error) throw new Error(error.message)
+
+  const inserted = (data ?? []) as InsertedTourRow[]
+  for (const row of inserted) {
+    map.set(tourKey(row), row.id)
+  }
+  return map
+}
+
+/** Insert departure rows, resolving tour ids from the key map. */
+async function insertDepartures(
+  db: SupabaseClient,
+  clientId: string,
+  departures: SeedDepartureRow[],
+  tourIds: Map<string, string>,
+): Promise<number> {
+  if (departures.length === 0) return 0
+
+  const rows = departures.map((departure) => ({
+    client_id: clientId,
+    tour_id: tourIds.get(departure.tourKey) ?? null,
+    depart_on: departure.depart_on,
+    return_on: departure.return_on,
+    price_text_override: departure.price_text_override,
+    status: departure.status,
+    status_source: 'seed',
+  }))
+  const { error } = await db.from('tour_catalog_departures').insert(rows)
+  if (error) throw new Error(error.message)
+  return rows.length
+}
+
+/** Plan and persist a feed for a client. Existing rows are never touched. */
+export async function seedCatalog(
+  db: SupabaseClient,
+  clientId: string,
+  feed: FirstPartyTourFeed,
+): Promise<SeedResult> {
+  const existingKeys = await loadExistingKeys(db, clientId)
+  const plan = planSeed(feed, existingKeys)
+
+  const tourIds = await insertTours(db, clientId, plan.tours)
+  const departuresInserted = await insertDepartures(db, clientId, plan.departures, tourIds)
+
+  return {
+    toursInserted: plan.tours.length,
+    departuresInserted,
+    skippedExisting: plan.skippedExisting,
+    notes: plan.notes,
+  }
+}

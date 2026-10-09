@@ -1,0 +1,157 @@
+import { createHash } from 'node:crypto'
+import { NextResponse, type NextRequest } from 'next/server'
+import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
+import {
+  parseDeparturesCsv,
+  type ParsedDepartureRow,
+  type RejectedCsvRow,
+} from '@/lib/tour-catalog/departures-csv'
+import { todayIso } from '@/lib/tour-catalog/dates'
+import { planDepartureImport, type ImportPlan, type PlanRejected } from '@/lib/tour-catalog/plan'
+import {
+  createPreviewBatch,
+  loadCatalog,
+  planToApplyPayload,
+} from '@/lib/tour-catalog/store'
+import { supabaseAdmin } from '@/lib/supabase'
+
+export const dynamic = 'force-dynamic'
+
+type PreviewSummary = {
+  adds: number
+  updates: number
+  unchanged: number
+  rejected: number
+  warningCount: number
+}
+
+/** Read the `csv` field from a parsed JSON body, or null when absent/invalid. */
+function readCsvField(body: unknown): string | null {
+  if (body === null || typeof body !== 'object') {
+    return null
+  }
+  const value = (body as Record<string, unknown>).csv
+  if (typeof value !== 'string' || value === '') {
+    return null
+  }
+  return value
+}
+
+/** Merge CSV-level and plan-level rejections, sorted by line number. */
+function mergeRejected(
+  csvRejected: RejectedCsvRow[],
+  planRejected: PlanRejected[],
+  rows: ParsedDepartureRow[],
+): Array<(RejectedCsvRow | PlanRejected) & { tourName?: string }> {
+  // Attach the raw tour name so the page can offer "remember this name" for unmatched rows.
+  const nameByLine = new Map(rows.map((row) => [row.line, row.tourName]))
+  return [...csvRejected, ...planRejected]
+    .sort((a, b) => a.line - b.line)
+    .map((r) => ({ ...r, tourName: nameByLine.get(r.line) }))
+}
+
+/** Build the summary counts shown to the operator. */
+function buildSummary(plan: ImportPlan, rejectedCount: number): PreviewSummary {
+  return {
+    adds: plan.adds.length,
+    updates: plan.updates.length,
+    unchanged: plan.unchangedCount,
+    rejected: rejectedCount,
+    warningCount: plan.warnings.length,
+  }
+}
+
+/** Shape the update list for the preview response. */
+function shapeUpdates(plan: ImportPlan) {
+  return plan.updates.map((u) => ({
+    line: u.line,
+    departureId: u.departureId,
+    tourId: u.tourId,
+    departOn: u.departOn,
+    before: { returnOn: u.before.returnOn, status: u.before.status },
+    after: u.after,
+  }))
+}
+
+/** POST: parse a departures CSV, plan the import, and persist a preview batch. */
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+): Promise<NextResponse> {
+  const { id: clientId } = await params
+
+  const access = await requireCatalogAdmin(clientId)
+  if (!access.ok) {
+    return access.response
+  }
+
+  try {
+    const body = await req.json().catch(() => null)
+    const csv = readCsvField(body)
+    if (csv === null) {
+      return NextResponse.json({ error: 'csv_required' }, { status: 400 })
+    }
+
+    const fileSha256 = createHash('sha256').update(csv).digest('hex')
+
+    const parsed = parseDeparturesCsv(csv)
+    if (parsed.fatal !== null) {
+      return NextResponse.json({ error: parsed.fatal }, { status: 400 })
+    }
+
+    const snapshot = await loadCatalog(supabaseAdmin, clientId)
+    const today = todayIso(new Date())
+    const plan = planDepartureImport({
+      rows: parsed.rows,
+      tours: snapshot.tours,
+      aliases: snapshot.aliases,
+      existing: snapshot.departures,
+      today,
+    })
+
+    const rejected = mergeRejected(parsed.rejected, plan.rejected, parsed.rows)
+    const summary = buildSummary(plan, rejected.length)
+
+    if (plan.adds.length + plan.updates.length === 0) {
+      return NextResponse.json({
+        batchId: null,
+        summary,
+        adds: [],
+        updates: [],
+        rejected,
+        warnings: plan.warnings,
+      })
+    }
+
+    const created = await createPreviewBatch(supabaseAdmin, {
+      clientId,
+      kind: 'departures',
+      fileSha256,
+      payload: planToApplyPayload(plan),
+      summary,
+    })
+
+    if (!created.ok) {
+      if (created.reason === 'duplicate_file') {
+        return NextResponse.json(
+          { error: 'duplicate_file', existingBatchId: created.existingBatchId },
+          { status: 409 },
+        )
+      }
+      console.error('preview_failed', created.message)
+      return NextResponse.json({ error: 'preview_failed' }, { status: 500 })
+    }
+
+    return NextResponse.json({
+      batchId: created.batchId,
+      summary,
+      adds: plan.adds,
+      updates: shapeUpdates(plan),
+      rejected,
+      warnings: plan.warnings,
+    })
+  } catch (error) {
+    console.error('preview_failed', error)
+    return NextResponse.json({ error: 'preview_failed' }, { status: 500 })
+  }
+}

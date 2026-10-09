@@ -1,0 +1,33 @@
+import { NextResponse, type NextRequest } from 'next/server'
+import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
+import { loadCatalog, listRecentBatches } from '@/lib/tour-catalog/store'
+import { supabaseAdmin } from '@/lib/supabase'
+
+export const dynamic = 'force-dynamic'
+
+/** GET: return the full catalog snapshot plus recent import batches. */
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+): Promise<NextResponse> {
+  const { id: clientId } = await params
+
+  const access = await requireCatalogAdmin(clientId)
+  if (!access.ok) {
+    return access.response
+  }
+
+  try {
+    const snapshot = await loadCatalog(supabaseAdmin, clientId)
+    const batches = await listRecentBatches(supabaseAdmin, clientId, 20)
+    return NextResponse.json({
+      tours: snapshot.tours,
+      departures: snapshot.departures,
+      aliases: snapshot.aliases,
+      batches,
+    })
+  } catch (error) {
+    console.error('catalog_load_failed', error)
+    return NextResponse.json({ error: 'catalog_load_failed' }, { status: 500 })
+  }
+}

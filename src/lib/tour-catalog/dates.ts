@@ -106,3 +106,21 @@ export function todayIso(now: Date, timeZone: string = 'Pacific/Auckland'): stri
 
   return `${year}-${month}-${day}`;
 }
+
+const MONTH_NAMES_LOWER = [
+  'january', 'february', 'march', 'april', 'may', 'june',
+  'july', 'august', 'september', 'october', 'november', 'december',
+]
+
+/**
+ * Parse a display departure string like "13 May 2027" into an ISO date.
+ * Returns null when the text is not exactly "D Month YYYY" or is not a real date.
+ */
+export function parseDepartureDisplay(value: string): string | null {
+  const match = value.trim().match(/^(\d{1,2}) ([A-Za-z]+) (\d{4})$/)
+  if (!match) return null
+  const month = MONTH_NAMES_LOWER.indexOf(match[2].toLowerCase()) + 1
+  if (month === 0) return null
+  const iso = `${match[3]}-${String(month).padStart(2, '0')}-${match[1].padStart(2, '0')}`
+  return isValidIsoDate(iso) ? iso : null
+}
