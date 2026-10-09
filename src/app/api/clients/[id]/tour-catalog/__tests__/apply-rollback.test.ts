@@ -26,6 +26,7 @@ const rollbackBatchMock = vi.mocked(rollbackBatch)
 const CLIENT_ID = 'client-1'
 const BATCH_ID = 'batch-1'
 const ACTOR = 'admin@example.com'
+const PLAN_HASH = 'hash-abc'
 
 function params() {
   return { params: Promise.resolve({ id: CLIENT_ID, batchId: BATCH_ID }) }
@@ -61,7 +62,7 @@ function batchWithWarnings(warningCount: number) {
     kind: 'departures',
     status: 'previewed',
     fileSha256: 'sha',
-    rowCounts: { warningCount },
+    rowCounts: { warningCount, planHash: PLAN_HASH },
     plan: {},
     createdAt: '2026-01-01T00:00:00Z',
   }
@@ -89,10 +90,40 @@ describe('apply route', () => {
     expect(applyBatchMock).not.toHaveBeenCalled()
   })
 
-  it('returns 409 when warnings exist and are not acknowledged', async () => {
+  it('returns 409 plan_changed when the plan hash mismatches', async () => {
+    allowAccess()
+    getBatchMock.mockResolvedValue(batchWithWarnings(0))
+    const res = await applyPOST(
+      jsonRequest({ planHash: 'other-hash' }),
+      params(),
+    )
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'plan_changed' })
+    expect(applyBatchMock).not.toHaveBeenCalled()
+  })
+
+  it('returns 409 plan_changed when the plan hash is missing', async () => {
+    allowAccess()
+    getBatchMock.mockResolvedValue(batchWithWarnings(0))
+    const res = await applyPOST(jsonRequest({}), params())
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'plan_changed' })
+    expect(applyBatchMock).not.toHaveBeenCalled()
+  })
+
+  it('checks plan_changed before warnings', async () => {
     allowAccess()
     getBatchMock.mockResolvedValue(batchWithWarnings(3))
     const res = await applyPOST(jsonRequest({}), params())
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'plan_changed' })
+    expect(applyBatchMock).not.toHaveBeenCalled()
+  })
+
+  it('returns 409 when warnings exist and are not acknowledged', async () => {
+    allowAccess()
+    getBatchMock.mockResolvedValue(batchWithWarnings(3))
+    const res = await applyPOST(jsonRequest({ planHash: PLAN_HASH }), params())
     expect(res.status).toBe(409)
     expect(await res.json()).toEqual({
       error: 'warnings_not_acknowledged',
@@ -106,7 +137,7 @@ describe('apply route', () => {
     getBatchMock.mockResolvedValue(batchWithWarnings(2))
     applyBatchMock.mockResolvedValue({ ok: true, result: { applied: 5 } })
     const res = await applyPOST(
-      jsonRequest({ acknowledgeWarnings: true }),
+      jsonRequest({ acknowledgeWarnings: true, planHash: PLAN_HASH }),
       params(),
     )
     expect(res.status).toBe(200)
@@ -119,11 +150,11 @@ describe('apply route', () => {
     )
   })
 
-  it('applies with zero warnings and an empty body', async () => {
+  it('applies with zero warnings and a matching hash', async () => {
     allowAccess()
     getBatchMock.mockResolvedValue(batchWithWarnings(0))
     applyBatchMock.mockResolvedValue({ ok: true, result: {} })
-    const res = await applyPOST(emptyRequest(), params())
+    const res = await applyPOST(jsonRequest({ planHash: PLAN_HASH }), params())
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true, result: {} })
     expect(applyBatchMock).toHaveBeenCalledTimes(1)
@@ -137,12 +168,12 @@ describe('apply route', () => {
       code: 'not_applicable',
       message: 'batch_not_applicable',
     })
-    const res = await applyPOST(jsonRequest({}), params())
+    const res = await applyPOST(jsonRequest({ planHash: PLAN_HASH }), params())
     expect(res.status).toBe(409)
     expect(await res.json()).toEqual({ error: 'not_applicable' })
   })
 
-  it('maps conflict to 409 with the message', async () => {
+  it('maps conflict to 409 without leaking the message', async () => {
     allowAccess()
     getBatchMock.mockResolvedValue(batchWithWarnings(0))
     applyBatchMock.mockResolvedValue({
@@ -150,12 +181,11 @@ describe('apply route', () => {
       code: 'conflict',
       message: 'conflict:departure_changed',
     })
-    const res = await applyPOST(jsonRequest({}), params())
+    const res = await applyPOST(jsonRequest({ planHash: PLAN_HASH }), params())
     expect(res.status).toBe(409)
-    expect(await res.json()).toEqual({
-      error: 'conflict',
-      message: 'conflict:departure_changed',
-    })
+    const body = await res.json()
+    expect(body).toEqual({ error: 'conflict' })
+    expect(body).not.toHaveProperty('message')
   })
 
   it('maps error to 500', async () => {
@@ -166,7 +196,7 @@ describe('apply route', () => {
       code: 'error',
       message: 'boom',
     })
-    const res = await applyPOST(jsonRequest({}), params())
+    const res = await applyPOST(jsonRequest({ planHash: PLAN_HASH }), params())
     expect(res.status).toBe(500)
     expect(await res.json()).toEqual({ error: 'apply_failed' })
   })
@@ -217,7 +247,7 @@ describe('rollback route', () => {
     expect(await res.json()).toEqual({ error: 'not_applicable' })
   })
 
-  it('maps conflict to 409 with the message', async () => {
+  it('maps conflict to 409 without leaking the internal message', async () => {
     allowAccess()
     getBatchMock.mockResolvedValue(batchWithWarnings(0))
     rollbackBatchMock.mockResolvedValue({
@@ -227,10 +257,7 @@ describe('rollback route', () => {
     })
     const res = await rollbackPOST(emptyRequest(), params())
     expect(res.status).toBe(409)
-    expect(await res.json()).toEqual({
-      error: 'conflict',
-      message: 'conflict:departure_changed',
-    })
+    expect(await res.json()).toEqual({ error: 'conflict' })
   })
 
   it('maps error to 500', async () => {

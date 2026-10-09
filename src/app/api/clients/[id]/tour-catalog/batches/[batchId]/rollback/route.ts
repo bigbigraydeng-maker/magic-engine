@@ -31,10 +31,8 @@ export async function POST(_req: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: 'not_applicable' }, { status: 409 })
   }
   if (result.code === 'conflict') {
-    return NextResponse.json(
-      { error: 'conflict', message: result.message },
-      { status: 409 },
-    )
+    console.error('tour-catalog rollback conflict:', result.message)
+    return NextResponse.json({ error: 'conflict' }, { status: 409 })
   }
 
   console.error('tour-catalog rollback failed:', result.message)

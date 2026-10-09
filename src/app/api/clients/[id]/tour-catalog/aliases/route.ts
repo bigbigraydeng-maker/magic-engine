@@ -52,5 +52,12 @@ export async function POST(
   if (result.message === 'tour_not_found') {
     return NextResponse.json({ error: 'tour_not_found' }, { status: 404 })
   }
-  return NextResponse.json({ error: result.message }, { status: 400 })
+  if (result.message === 'empty_alias') {
+    return NextResponse.json(
+      { error: 'alias_and_tour_required' },
+      { status: 400 },
+    )
+  }
+  console.error('tour-catalog addAlias failed:', result.message)
+  return NextResponse.json({ error: 'alias_failed' }, { status: 500 })
 }

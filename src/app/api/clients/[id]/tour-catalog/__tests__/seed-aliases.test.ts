@@ -9,6 +9,8 @@ vi.mock('@/lib/tour-catalog/access', () => ({
 
 vi.mock('@/lib/tour-catalog/store', () => ({
   addAlias: vi.fn(),
+  getBatch: vi.fn(),
+  rollbackBatch: vi.fn(),
 }))
 
 vi.mock('@/lib/tour-catalog/seed', () => ({
@@ -21,14 +23,17 @@ vi.mock('@/lib/web-intelligence/first-party-tours', () => ({
 }))
 
 import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
-import { addAlias } from '@/lib/tour-catalog/store'
+import { addAlias, getBatch, rollbackBatch } from '@/lib/tour-catalog/store'
 import { fetchFirstPartyFeed, seedCatalog } from '@/lib/tour-catalog/seed'
 import { firstPartyTourSourceUrl } from '@/lib/web-intelligence/first-party-tours'
 import { POST as seedPOST } from '../seed/route'
 import { POST as aliasesPOST } from '../aliases/route'
+import { POST as rollbackPOST } from '../batches/[batchId]/rollback/route'
 
 const requireCatalogAdminMock = vi.mocked(requireCatalogAdmin)
 const addAliasMock = vi.mocked(addAlias)
+const getBatchMock = vi.mocked(getBatch)
+const rollbackBatchMock = vi.mocked(rollbackBatch)
 const fetchFirstPartyFeedMock = vi.mocked(fetchFirstPartyFeed)
 const seedCatalogMock = vi.mocked(seedCatalog)
 const firstPartyTourSourceUrlMock = vi.mocked(firstPartyTourSourceUrl)
@@ -45,6 +50,10 @@ function makeRequest(body: unknown): NextRequest {
 
 function makeParams(): { params: Promise<{ id: string }> } {
   return { params: Promise.resolve({ id: CLIENT_ID }) }
+}
+
+function makeBatchParams(): { params: Promise<{ id: string; batchId: string }> } {
+  return { params: Promise.resolve({ id: CLIENT_ID, batchId: 'batch-1' }) }
 }
 
 function allowAccess(): void {
@@ -73,16 +82,23 @@ describe('POST /tour-catalog/seed', () => {
     expect(fetchFirstPartyFeedMock).not.toHaveBeenCalled()
   })
 
-  it('returns 502 when the feed fetch fails', async () => {
+  it('returns 502 feed_unavailable without a message when the feed fetch fails', async () => {
     allowAccess()
     firstPartyTourSourceUrlMock.mockReturnValue('https://example.com/feed.json')
     fetchFirstPartyFeedMock.mockRejectedValue(new Error('feed_http_500'))
     const res = await seedPOST(makeRequest({ domain: 'example.com' }), makeParams())
     expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({
-      error: 'feed_unavailable',
-      message: 'feed_http_500',
-    })
+    expect(await res.json()).toEqual({ error: 'feed_unavailable' })
+    expect(seedCatalogMock).not.toHaveBeenCalled()
+  })
+
+  it('returns 502 feed_too_large when the feed is too large', async () => {
+    allowAccess()
+    firstPartyTourSourceUrlMock.mockReturnValue('https://example.com/feed.json')
+    fetchFirstPartyFeedMock.mockRejectedValue(new Error('feed_too_large'))
+    const res = await seedPOST(makeRequest({ domain: 'example.com' }), makeParams())
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: 'feed_too_large' })
     expect(seedCatalogMock).not.toHaveBeenCalled()
   })
 
@@ -150,6 +166,39 @@ describe('POST /tour-catalog/aliases', () => {
     expect(await res.json()).toEqual({ error: 'tour_not_found' })
   })
 
+  it('returns 400 alias_and_tour_required when the alias is empty', async () => {
+    allowAccess()
+    addAliasMock.mockResolvedValue({ ok: false, message: 'empty_alias' })
+    const res = await aliasesPOST(
+      makeRequest({ alias: 'x', tourId: 't1' }),
+      makeParams(),
+    )
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'alias_and_tour_required' })
+  })
+
+  it('returns 500 alias_failed for alias_failed', async () => {
+    allowAccess()
+    addAliasMock.mockResolvedValue({ ok: false, message: 'alias_failed' })
+    const res = await aliasesPOST(
+      makeRequest({ alias: 'x', tourId: 't1' }),
+      makeParams(),
+    )
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'alias_failed' })
+  })
+
+  it('returns 500 alias_failed for an unknown message without echoing it', async () => {
+    allowAccess()
+    addAliasMock.mockResolvedValue({ ok: false, message: 'some_internal_detail' })
+    const res = await aliasesPOST(
+      makeRequest({ alias: 'x', tourId: 't1' }),
+      makeParams(),
+    )
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'alias_failed' })
+  })
+
   it('returns 200 with aliasNorm on success', async () => {
     allowAccess()
     addAliasMock.mockResolvedValue({ ok: true, aliasNorm: 'x' })
@@ -176,5 +225,77 @@ describe('POST /tour-catalog/aliases', () => {
     )
     expect(res.status).toBe(403)
     expect(addAliasMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST /tour-catalog/batches/[batchId]/rollback', () => {
+  it('returns 404 when the batch is not found', async () => {
+    allowAccess()
+    getBatchMock.mockResolvedValue(null)
+    const res = await rollbackPOST(makeRequest({}), makeBatchParams())
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'batch_not_found' })
+    expect(rollbackBatchMock).not.toHaveBeenCalled()
+  })
+
+  it('returns 409 conflict without a message', async () => {
+    allowAccess()
+    getBatchMock.mockResolvedValue({ id: 'batch-1' } as never)
+    rollbackBatchMock.mockResolvedValue({
+      ok: false,
+      code: 'conflict',
+      message: 'conflict:departure_changed',
+    })
+    const res = await rollbackPOST(makeRequest({}), makeBatchParams())
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'conflict' })
+  })
+
+  it('returns 409 not_applicable', async () => {
+    allowAccess()
+    getBatchMock.mockResolvedValue({ id: 'batch-1' } as never)
+    rollbackBatchMock.mockResolvedValue({
+      ok: false,
+      code: 'not_applicable',
+      message: 'batch_not_rollbackable',
+    })
+    const res = await rollbackPOST(makeRequest({}), makeBatchParams())
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'not_applicable' })
+  })
+
+  it('returns 500 rollback_failed on error', async () => {
+    allowAccess()
+    getBatchMock.mockResolvedValue({ id: 'batch-1' } as never)
+    rollbackBatchMock.mockResolvedValue({
+      ok: false,
+      code: 'error',
+      message: 'db_down',
+    })
+    const res = await rollbackPOST(makeRequest({}), makeBatchParams())
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'rollback_failed' })
+  })
+
+  it('returns 200 with the result on success', async () => {
+    allowAccess()
+    getBatchMock.mockResolvedValue({ id: 'batch-1' } as never)
+    rollbackBatchMock.mockResolvedValue({ ok: true, result: { reverted: 2 } })
+    const res = await rollbackPOST(makeRequest({}), makeBatchParams())
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true, result: { reverted: 2 } })
+  })
+
+  it('passes through the access denial response', async () => {
+    const denied = new Response(JSON.stringify({ error: 'Forbidden' }), {
+      status: 403,
+    })
+    requireCatalogAdminMock.mockResolvedValue({
+      ok: false,
+      response: denied as never,
+    })
+    const res = await rollbackPOST(makeRequest({}), makeBatchParams())
+    expect(res.status).toBe(403)
+    expect(getBatchMock).not.toHaveBeenCalled()
   })
 })

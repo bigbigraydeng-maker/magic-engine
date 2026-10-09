@@ -45,10 +45,11 @@ export async function POST(
     feed = await fetchFirstPartyFeed(feedUrl)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'unknown_error'
-    return NextResponse.json(
-      { error: 'feed_unavailable', message },
-      { status: 502 },
-    )
+    console.error('tour_catalog_feed_fetch_failed', message)
+    if (message === 'feed_too_large') {
+      return NextResponse.json({ error: 'feed_too_large' }, { status: 502 })
+    }
+    return NextResponse.json({ error: 'feed_unavailable' }, { status: 502 })
   }
 
   try {

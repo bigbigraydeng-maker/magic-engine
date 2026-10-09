@@ -4,8 +4,11 @@
  * Design: docs/specs/2026-10-09-cts-tour-catalog-in-me-design-v0.3.md
  */
 
+import { createHash } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import type { FirstPartyTour } from '@/lib/web-intelligence/first-party-tours'
 import { norm } from './normalize'
+import { toFirstPartyTours } from './output'
 import type { ImportPlan } from './plan'
 import type {
   CatalogAlias,
@@ -213,6 +216,35 @@ export async function loadCatalog(
   }
 }
 
+/** Load the catalog and project it into the outward-facing first-party feed. */
+export async function loadCatalogProducts(
+  db: SupabaseClient,
+  clientId: string,
+  today: string,
+): Promise<FirstPartyTour[]> {
+  const snapshot = await loadCatalog(db, clientId)
+  return toFirstPartyTours(snapshot.tours, snapshot.departures, today)
+}
+
+/** Read the client's catalog version, defaulting to 0 when no state row exists. */
+export async function getCatalogVersion(
+  db: SupabaseClient,
+  clientId: string,
+): Promise<number> {
+  const res = await db
+    .from('tour_catalog_state')
+    .select('catalog_version')
+    .eq('client_id', clientId)
+    .maybeSingle()
+  if (res.error) {
+    throw new Error(res.error.message)
+  }
+  if (res.data === null || res.data === undefined) {
+    return 0
+  }
+  return asNumber(asRecord(res.data).catalog_version)
+}
+
 // ---------------------------------------------------------------------------
 // planToApplyPayload
 // ---------------------------------------------------------------------------
@@ -251,6 +283,33 @@ export function planToApplyPayload(plan: ImportPlan): ApplyPayload {
       internal: update.after.internal,
     })),
   }
+}
+
+// ---------------------------------------------------------------------------
+// planHash
+// ---------------------------------------------------------------------------
+
+/** Stable stringify with recursively sorted object keys. */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value)
+  }
+  if (Array.isArray(value)) {
+    return '[' + value.map(stableStringify).join(',') + ']'
+  }
+  const obj = value as Record<string, unknown>
+  const keys = Object.keys(obj).sort()
+  return '{' + keys.map((k) => JSON.stringify(k) + ':' + stableStringify(obj[k])).join(',') + '}'
+}
+
+/** Deterministic sha256 hex of the apply payload plus its warning count. */
+export function planHash(payload: ApplyPayload, warningCount: number): string {
+  const canonical = stableStringify({
+    adds: payload.adds,
+    updates: payload.updates,
+    warningCount,
+  })
+  return createHash('sha256').update(canonical).digest('hex')
 }
 
 // ---------------------------------------------------------------------------
@@ -354,8 +413,9 @@ async function findExistingBatch(
 }
 
 /**
- * Re-previewing the same file (for example after adding an alias) refreshes the
- * plan of the still-unapplied batch instead of being refused as a duplicate.
+ * Re-previewing the same file (for example after adding an alias, or after a
+ * rollback) refreshes the still-unapplied batch instead of being refused as a
+ * duplicate. Resets any prior apply/rollback bookkeeping.
  */
 async function refreshPreviewBatch(
   db: SupabaseClient,
@@ -365,10 +425,19 @@ async function refreshPreviewBatch(
 ): Promise<CreateBatchResult> {
   const res = await db
     .from('tour_catalog_import_batches')
-    .update({ row_counts: args.summary, plan })
+    .update({
+      row_counts: args.summary,
+      plan,
+      status: 'previewed',
+      before: {},
+      after: {},
+      applied_by: null,
+      applied_at: null,
+      rolled_back_at: null,
+    })
     .eq('id', batchId)
     .eq('client_id', args.clientId)
-    .eq('status', 'previewed')
+    .in('status', ['previewed', 'rolled_back'])
     .select('id')
     .maybeSingle()
   if (res.error || res.data === null || res.data === undefined) {
@@ -399,7 +468,7 @@ export async function createPreviewBatch(
     if (isUniqueViolation(res.error)) {
       const existing = await findExistingBatch(db, args)
       if (existing !== null) {
-        if (existing.status === 'previewed') {
+        if (existing.status === 'previewed' || existing.status === 'rolled_back') {
           return refreshPreviewBatch(db, args, existing.id, plan)
         }
         return { ok: false, reason: 'duplicate_file', existingBatchId: existing.id }
@@ -490,7 +559,8 @@ export async function addAlias(
     .eq('client_id', clientId)
     .maybeSingle()
   if (tourRes.error) {
-    return { ok: false, message: tourRes.error.message }
+    console.error('addAlias: tour lookup failed', tourRes.error)
+    return { ok: false, message: 'alias_failed' }
   }
   if (tourRes.data === null || tourRes.data === undefined) {
     return { ok: false, message: 'tour_not_found' }
@@ -503,7 +573,8 @@ export async function addAlias(
     .eq('alias_norm', aliasNorm)
     .maybeSingle()
   if (existingRes.error) {
-    return { ok: false, message: existingRes.error.message }
+    console.error('addAlias: alias lookup failed', existingRes.error)
+    return { ok: false, message: 'alias_failed' }
   }
   if (existingRes.data !== null && existingRes.data !== undefined) {
     const existingTourId = asString(asRecord(existingRes.data).tour_id)
@@ -517,7 +588,8 @@ export async function addAlias(
     .from('tour_catalog_aliases')
     .insert({ client_id: clientId, alias_norm: aliasNorm, tour_id: tourId })
   if (insertRes.error) {
-    return { ok: false, message: insertRes.error.message }
+    console.error('addAlias: insert failed', insertRes.error)
+    return { ok: false, message: 'alias_failed' }
   }
   return { ok: true, aliasNorm }
 }

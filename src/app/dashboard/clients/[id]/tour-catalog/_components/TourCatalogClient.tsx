@@ -62,6 +62,13 @@ function upcomingCount(departures: CatalogDepartureView[]): number {
   ).length
 }
 
+/** Rollback confirm text, using row counts when they are numbers. */
+function rollbackConfirmText(batch: CatalogBatchView): string {
+  const adds = typeof batch.rowCounts.adds === 'number' ? batch.rowCounts.adds : '若干'
+  const updates = typeof batch.rowCounts.updates === 'number' ? batch.rowCounts.updates : '若干'
+  return `确定撤销这次导入吗？这次新增的 ${adds} 个班期会被删除，改过的 ${updates} 个会恢复原样。`
+}
+
 export function TourCatalogClient({ clientId }: { clientId: string }) {
   const [state, setState] = useState<State>({ phase: 'loading' })
 
@@ -303,7 +310,7 @@ function BatchRow({
   const [error, setError] = useState<string | null>(null)
 
   const handleRollback = async () => {
-    if (!window.confirm('确定撤销这次导入吗？这次新增的班期会被删除，改过的会恢复。')) return
+    if (!window.confirm(rollbackConfirmText(batch))) return
     setBusy(true)
     setError(null)
     try {

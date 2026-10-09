@@ -296,7 +296,8 @@ begin
          status = 'applied',
          applied_by = p_applied_by,
          applied_at = now()
-   where id = p_batch_id;
+   where id = p_batch_id
+     and client_id = p_client_id;
 
   v_version := public.tour_catalog_bump_version(p_client_id);
 
@@ -349,6 +350,7 @@ begin
       into v_current
       from public.tour_catalog_departures
      where id = v_departure_id
+       and client_id = p_client_id
      for update;
 
     if not found then
@@ -370,6 +372,7 @@ begin
       into v_current
       from public.tour_catalog_departures
      where id = v_departure_id
+       and client_id = p_client_id
      for update;
 
     if not found then
@@ -387,7 +390,8 @@ begin
     v_departure_id := (v_row->>'id')::uuid;
 
     delete from public.tour_catalog_departures
-     where id = v_departure_id;
+     where id = v_departure_id
+       and client_id = p_client_id;
 
     v_added_count := v_added_count + 1;
   end loop;
@@ -404,7 +408,8 @@ begin
            status_source = v_row->>'status_source',
            status_as_of = (v_row->>'status_as_of')::timestamptz,
            internal = coalesce(v_row->'internal', '{}'::jsonb)
-     where id = v_departure_id;
+     where id = v_departure_id
+       and client_id = p_client_id;
 
     v_updated_count := v_updated_count + 1;
   end loop;
@@ -412,7 +417,8 @@ begin
   update public.tour_catalog_import_batches
      set status = 'rolled_back',
          rolled_back_at = now()
-   where id = p_batch_id;
+   where id = p_batch_id
+     and client_id = p_client_id;
 
   v_version := public.tour_catalog_bump_version(p_client_id);
 

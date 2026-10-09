@@ -57,6 +57,7 @@ export type PreviewWarningView =
 
 export interface PreviewResponse {
   batchId: string | null
+  planHash: string | null
   summary: PreviewSummaryView
   adds: Array<{ line: number; tourId: string; departOn: string; returnOn: string; status: string }>
   updates: Array<{

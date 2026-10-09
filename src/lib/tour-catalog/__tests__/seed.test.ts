@@ -169,10 +169,44 @@ describe('fetchFirstPartyFeed', () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ nope: true }),
+      text: async () => JSON.stringify({ nope: true }),
     })
     await expect(fetchFirstPartyFeed('https://example.com/feed', fetchImpl as unknown as typeof fetch))
       .rejects.toThrow('feed_invalid')
+  })
+
+  it('throws feed_invalid on malformed JSON', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => 'not json',
+    })
+    await expect(fetchFirstPartyFeed('https://example.com/feed', fetchImpl as unknown as typeof fetch))
+      .rejects.toThrow('feed_invalid')
+  })
+
+  it('throws feed_too_large when the body exceeds 5 MiB', async () => {
+    const oversized = 'x'.repeat(5 * 1024 * 1024 + 1)
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => oversized,
+    })
+    await expect(fetchFirstPartyFeed('https://example.com/feed', fetchImpl as unknown as typeof fetch))
+      .rejects.toThrow('feed_too_large')
+  })
+
+  it('passes redirect: error to fetchImpl', async () => {
+    const feed = makeFeed([makeTour()])
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(feed),
+    })
+    await fetchFirstPartyFeed('https://example.com/feed', fetchImpl as unknown as typeof fetch)
+    const init = fetchImpl.mock.calls[0][1] as RequestInit
+    expect(init.redirect).toBe('error')
+    expect(init.signal).toBeDefined()
   })
 
   it('returns the parsed feed on success', async () => {
@@ -180,7 +214,7 @@ describe('fetchFirstPartyFeed', () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => feed,
+      text: async () => JSON.stringify(feed),
     })
     const result = await fetchFirstPartyFeed('https://example.com/feed', fetchImpl as unknown as typeof fetch)
     expect(result.source).toBe('test')
@@ -193,21 +227,36 @@ interface FakeDb {
   db: SupabaseClient
   toursInsert: ReturnType<typeof vi.fn>
   departuresInsert: ReturnType<typeof vi.fn>
+  toursDelete: ReturnType<typeof vi.fn>
+  toursDeleteEq: ReturnType<typeof vi.fn>
+  toursDeleteIn: ReturnType<typeof vi.fn>
 }
 
 /** Build a fake Supabase client with chainable query builders. */
 function makeFakeDb(existing: Array<{ destination: string; tier: string; slug: string }>): FakeDb {
   const toursInsert = vi.fn()
   const departuresInsert = vi.fn()
+  const toursDelete = vi.fn()
+  const toursDeleteEq = vi.fn()
+  const toursDeleteIn = vi.fn()
 
   const selectChain = {
     eq: vi.fn().mockResolvedValue({ data: existing, error: null }),
   }
 
+  const deleteChain = {
+    eq: toursDeleteEq,
+    in: toursDeleteIn,
+  }
+  toursDeleteEq.mockReturnValue(deleteChain)
+  toursDeleteIn.mockResolvedValue({ error: null })
+
   const toursBuilder = {
     select: vi.fn().mockReturnValue(selectChain),
     insert: toursInsert,
+    delete: toursDelete,
   }
+  toursDelete.mockReturnValue(deleteChain)
 
   const departuresBuilder = {
     insert: departuresInsert,
@@ -217,7 +266,7 @@ function makeFakeDb(existing: Array<{ destination: string; tier: string; slug: s
     from: vi.fn((table: string) => (table === 'tour_catalog_tours' ? toursBuilder : departuresBuilder)),
   } as unknown as SupabaseClient
 
-  return { db, toursInsert, departuresInsert }
+  return { db, toursInsert, departuresInsert, toursDelete, toursDeleteEq, toursDeleteIn }
 }
 
 describe('seedCatalog', () => {
@@ -284,5 +333,49 @@ describe('seedCatalog', () => {
     })
 
     await expect(seedCatalog(db, 'client-1', makeFeed([makeTour()]))).rejects.toThrow('boom')
+  })
+
+  it('deletes inserted tours and rethrows when the departures insert fails', async () => {
+    const { db, toursInsert, departuresInsert, toursDelete, toursDeleteEq, toursDeleteIn } = makeFakeDb([])
+    toursInsert.mockReturnValue({
+      select: vi.fn().mockResolvedValue({
+        data: [
+          { id: 'id-1', destination: 'New Zealand', tier: 'premium', slug: 'south-island' },
+          { id: 'id-2', destination: 'New Zealand', tier: 'premium', slug: 'north-island' },
+        ],
+        error: null,
+      }),
+    })
+    departuresInsert.mockResolvedValue({ error: { message: 'departures_boom' } })
+
+    await expect(
+      seedCatalog(db, 'client-1', makeFeed([
+        makeTour({ slug: 'south-island' }),
+        makeTour({ slug: 'north-island' }),
+      ])),
+    ).rejects.toThrow('departures_boom')
+
+    expect(toursDelete).toHaveBeenCalledTimes(1)
+    expect(toursDeleteEq).toHaveBeenCalledWith('client_id', 'client-1')
+    expect(toursDeleteIn).toHaveBeenCalledWith('id', ['id-1', 'id-2'])
+  })
+
+  it('still rethrows the original error when the compensation delete fails', async () => {
+    const { db, toursInsert, departuresInsert, toursDeleteIn } = makeFakeDb([])
+    toursInsert.mockReturnValue({
+      select: vi.fn().mockResolvedValue({
+        data: [{ id: 'id-1', destination: 'New Zealand', tier: 'premium', slug: 'south-island' }],
+        error: null,
+      }),
+    })
+    departuresInsert.mockResolvedValue({ error: { message: 'departures_boom' } })
+    toursDeleteIn.mockResolvedValue({ error: { message: 'delete_boom' } })
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await expect(seedCatalog(db, 'client-1', makeFeed([makeTour()])))
+      .rejects.toThrow('departures_boom')
+
+    expect(consoleError).toHaveBeenCalled()
+    consoleError.mockRestore()
   })
 })

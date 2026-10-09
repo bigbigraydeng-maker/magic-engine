@@ -11,6 +11,7 @@ interface RouteParams {
 
 interface ApplyBody {
   acknowledgeWarnings?: boolean
+  planHash?: string
 }
 
 async function readBody(req: NextRequest): Promise<ApplyBody> {
@@ -21,6 +22,9 @@ async function readBody(req: NextRequest): Promise<ApplyBody> {
       const body: ApplyBody = {}
       if (typeof record.acknowledgeWarnings === 'boolean') {
         body.acknowledgeWarnings = record.acknowledgeWarnings
+      }
+      if (typeof record.planHash === 'string') {
+        body.planHash = record.planHash
       }
       return body
     }
@@ -33,6 +37,11 @@ async function readBody(req: NextRequest): Promise<ApplyBody> {
 function warningCountOf(rowCounts: Record<string, unknown>): number {
   const value = rowCounts.warningCount
   return typeof value === 'number' ? value : 0
+}
+
+function storedPlanHashOf(rowCounts: Record<string, unknown>): string | null {
+  const value = rowCounts.planHash
+  return typeof value === 'string' ? value : null
 }
 
 export async function POST(req: NextRequest, { params }: RouteParams) {
@@ -49,6 +58,12 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }
 
   const body = await readBody(req)
+
+  const storedPlanHash = storedPlanHashOf(batch.rowCounts)
+  if (storedPlanHash !== null && body.planHash !== storedPlanHash) {
+    return NextResponse.json({ error: 'plan_changed' }, { status: 409 })
+  }
+
   const warningCount = warningCountOf(batch.rowCounts)
   if (warningCount > 0 && body.acknowledgeWarnings !== true) {
     return NextResponse.json(
@@ -66,10 +81,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: 'not_applicable' }, { status: 409 })
   }
   if (result.code === 'conflict') {
-    return NextResponse.json(
-      { error: 'conflict', message: result.message },
-      { status: 409 },
-    )
+    console.error('tour-catalog apply conflict:', result.message)
+    return NextResponse.json({ error: 'conflict' }, { status: 409 })
   }
 
   console.error('tour-catalog apply failed:', result.message)

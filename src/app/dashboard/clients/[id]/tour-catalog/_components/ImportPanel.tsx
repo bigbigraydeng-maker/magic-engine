@@ -34,6 +34,15 @@ const REASON_LABELS: Record<string, string> = {
 const ERROR_LABELS: Record<string, string> = {
   duplicate_file: '这份文件已经导入过了',
   conflict: '导入时发现数据已被别人改过，整批没有写入，请重新预览',
+  not_applicable: '这次导入现在不能再应用',
+  warnings_not_acknowledged: '请先勾选「我已看过以上提醒」',
+  preview_failed: '预览失败，请稍后重试',
+  apply_failed: '导入失败，请稍后重试',
+  plan_changed: '预览内容已经更新，请重新点一次预览再确认',
+  request_too_large: '文件太大，不能超过 2MB',
+  csv_required: '请先选择文件',
+  alias_failed: '记住失败，请稍后重试',
+  alias_taken: '这个叫法已经指向别的团',
 }
 
 function reasonLabel(code: string): string {
@@ -65,10 +74,16 @@ export function ImportPanel({
   const [applying, setApplying] = useState(false)
   const [applied, setApplied] = useState(false)
 
-  const resetPreview = () => {
+  // Clear the preview/result area but keep the「已导入」message visible.
+  const clearPreview = () => {
     setState({ phase: 'idle' })
     setAckWarnings(false)
+  }
+
+  const handleFileChange = (next: File | null) => {
+    setFile(next)
     setApplied(false)
+    clearPreview()
   }
 
   const handlePreview = async () => {
@@ -99,7 +114,7 @@ export function ImportPanel({
 
   const handleApply = async () => {
     if (state.phase !== 'ready') return
-    const { batchId } = state.preview
+    const { batchId, planHash } = state.preview
     if (!batchId) return
     setApplying(true)
     try {
@@ -108,7 +123,7 @@ export function ImportPanel({
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ acknowledgeWarnings: ackWarnings }),
+          body: JSON.stringify({ acknowledgeWarnings: ackWarnings, planHash }),
         },
       )
       if (!res.ok) {
@@ -117,7 +132,7 @@ export function ImportPanel({
       }
       setApplied(true)
       onChanged()
-      resetPreview()
+      clearPreview()
     } catch (err) {
       setState({
         phase: 'error',
@@ -141,7 +156,7 @@ export function ImportPanel({
         <input
           type="file"
           accept=".csv"
-          onChange={e => setFile(e.target.files?.[0] ?? null)}
+          onChange={e => handleFileChange(e.target.files?.[0] ?? null)}
           className="text-sm font-semibold text-me-charcoal/70"
         />
         <button
@@ -212,8 +227,8 @@ function PreviewBody({
         <WarningsBox warnings={warnings} ackWarnings={ackWarnings} onAckChange={onAckChange} />
       )}
 
-      {adds.length > 0 && <AddsTable adds={adds} />}
-      {updates.length > 0 && <UpdatesTable updates={updates} />}
+      {adds.length > 0 && <AddsTable tours={tours} adds={adds} />}
+      {updates.length > 0 && <UpdatesTable tours={tours} updates={updates} />}
 
       {batchId === null ? (
         <p className="text-sm font-semibold text-me-charcoal/55">
@@ -254,6 +269,11 @@ function SummaryChips({ summary }: { summary: PreviewResponse['summary'] }) {
       ))}
     </div>
   )
+}
+
+/** Resolve a tour id to its display name, falling back to the id. */
+function tourName(tours: CatalogTourView[], tourId: string): string {
+  return tours.find(t => t.id === tourId)?.name ?? tourId
 }
 
 function RejectedTable({
@@ -321,7 +341,7 @@ function AliasForm({
         body: JSON.stringify({ alias: tourName, tourId }),
       })
       if (res.status === 409) {
-        setMessage('这个叫法已经指向别的团')
+        setMessage(errorLabel('alias_taken'))
         return
       }
       if (!res.ok) {
@@ -397,7 +417,13 @@ function warningText(w: PreviewWarningView): string {
   return `库里还有 ${w.departOn} 这个班期，但文件里没提到它`
 }
 
-function AddsTable({ adds }: { adds: PreviewResponse['adds'] }) {
+function AddsTable({
+  tours,
+  adds,
+}: {
+  tours: CatalogTourView[]
+  adds: PreviewResponse['adds']
+}) {
   return (
     <div className="overflow-x-auto rounded-xl border border-black/10">
       <table className="w-full text-sm">
@@ -412,7 +438,9 @@ function AddsTable({ adds }: { adds: PreviewResponse['adds'] }) {
         <tbody>
           {adds.map((a, i) => (
             <tr key={i} className="border-b border-black/5 last:border-0">
-              <td className="px-4 py-3 font-semibold text-me-charcoal/70">{a.tourId}</td>
+              <td className="px-4 py-3 font-semibold text-me-charcoal/70">
+                {tourName(tours, a.tourId)}
+              </td>
               <td className="px-4 py-3 font-semibold text-me-charcoal/70">{a.departOn}</td>
               <td className="px-4 py-3 font-semibold text-me-charcoal/70">{a.returnOn}</td>
               <td className="px-4 py-3 font-semibold text-me-charcoal/70">{a.status}</td>
@@ -424,7 +452,13 @@ function AddsTable({ adds }: { adds: PreviewResponse['adds'] }) {
   )
 }
 
-function UpdatesTable({ updates }: { updates: PreviewResponse['updates'] }) {
+function UpdatesTable({
+  tours,
+  updates,
+}: {
+  tours: CatalogTourView[]
+  updates: PreviewResponse['updates']
+}) {
   return (
     <div className="overflow-x-auto rounded-xl border border-black/10">
       <table className="w-full text-sm">
@@ -439,7 +473,9 @@ function UpdatesTable({ updates }: { updates: PreviewResponse['updates'] }) {
         <tbody>
           {updates.map((u, i) => (
             <tr key={i} className="border-b border-black/5 last:border-0">
-              <td className="px-4 py-3 font-semibold text-me-charcoal/70">{u.tourId}</td>
+              <td className="px-4 py-3 font-semibold text-me-charcoal/70">
+                {tourName(tours, u.tourId)}
+              </td>
               <td className="px-4 py-3 font-semibold text-me-charcoal/70">{u.departOn}</td>
               <td className="px-4 py-3 font-semibold text-me-charcoal/70">
                 {u.before.returnOn ?? '—'} → {u.after.returnOn}

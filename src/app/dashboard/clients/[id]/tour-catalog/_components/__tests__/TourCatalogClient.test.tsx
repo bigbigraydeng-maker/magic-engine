@@ -239,4 +239,48 @@ describe('TourCatalogClient', () => {
       expect(fetchMock).toHaveBeenCalledTimes(2)
     })
   })
+
+  it('includes the batch row counts in the rollback confirm message', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        snapshot({
+          tours: [
+            {
+              id: 't1',
+              slug: 'a',
+              destination: 'JP',
+              tier: 'std',
+              name: '东京五日',
+              displayPriceText: null,
+              isActive: true,
+              managesDepartures: true,
+            },
+          ],
+          batches: [
+            {
+              id: 'b1',
+              kind: 'csv',
+              status: 'applied',
+              rowCounts: { adds: 3, updates: 2 },
+              createdAt: '2024-01-01',
+            },
+          ],
+        }),
+      ),
+    )
+    const confirmMock = vi.fn().mockReturnValue(false)
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('confirm', confirmMock)
+
+    render(<TourCatalogClient clientId={CLIENT_ID} />)
+
+    fireEvent.click(await screen.findByText('撤销这次导入'))
+
+    await waitFor(() => {
+      expect(confirmMock).toHaveBeenCalledTimes(1)
+    })
+    const message = confirmMock.mock.calls[0][0] as string
+    expect(message).toContain('3')
+    expect(message).toContain('2')
+  })
 })

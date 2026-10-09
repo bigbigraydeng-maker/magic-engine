@@ -140,6 +140,7 @@ export function planSeed(feed: FirstPartyTourFeed, existingKeys: ReadonlySet<str
 }
 
 const FEED_TIMEOUT_MS = 10_000
+const FEED_MAX_CHARS = 5 * 1024 * 1024
 
 /** Fetch and parse a first-party tour feed over HTTPS. */
 export async function fetchFirstPartyFeed(
@@ -153,11 +154,21 @@ export async function fetchFirstPartyFeed(
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FEED_TIMEOUT_MS)
   try {
-    const response = await fetchImpl(feedUrl, { signal: controller.signal })
+    const response = await fetchImpl(feedUrl, { signal: controller.signal, redirect: 'error' })
     if (!response.ok) {
       throw new Error('feed_http_' + response.status)
     }
-    const parsed = parseFirstPartyTourFeed(await response.json() as unknown)
+    const body = await response.text()
+    if (body.length > FEED_MAX_CHARS) {
+      throw new Error('feed_too_large')
+    }
+    let json: unknown
+    try {
+      json = JSON.parse(body) as unknown
+    } catch {
+      throw new Error('feed_invalid')
+    }
+    const parsed = parseFirstPartyTourFeed(json)
     if (parsed === null) {
       throw new Error('feed_invalid')
     }
@@ -234,6 +245,23 @@ async function insertDepartures(
   return rows.length
 }
 
+/** Delete tours inserted by this call; their departures cascade. */
+async function compensateInsertedTours(
+  db: SupabaseClient,
+  clientId: string,
+  insertedIds: string[],
+): Promise<void> {
+  if (insertedIds.length === 0) return
+  const { error } = await db
+    .from('tour_catalog_tours')
+    .delete()
+    .eq('client_id', clientId)
+    .in('id', insertedIds)
+  if (error) {
+    console.error('seedCatalog: compensation delete failed', error)
+  }
+}
+
 /** Plan and persist a feed for a client. Existing rows are never touched. */
 export async function seedCatalog(
   db: SupabaseClient,
@@ -244,7 +272,15 @@ export async function seedCatalog(
   const plan = planSeed(feed, existingKeys)
 
   const tourIds = await insertTours(db, clientId, plan.tours)
-  const departuresInserted = await insertDepartures(db, clientId, plan.departures, tourIds)
+  const insertedIds = Array.from(tourIds.values())
+
+  let departuresInserted: number
+  try {
+    departuresInserted = await insertDepartures(db, clientId, plan.departures, tourIds)
+  } catch (err) {
+    await compensateInsertedTours(db, clientId, insertedIds)
+    throw err
+  }
 
   return {
     toursInserted: plan.tours.length,

@@ -156,4 +156,66 @@ describe('POST tour-catalog preview', () => {
     expect(res.status).toBe(500)
     await expect(res.json()).resolves.toEqual({ error: 'preview_failed' })
   })
+
+  it('returns 413 when content-length exceeds the limit', async () => {
+    const req = new NextRequest(
+      'http://localhost/api/clients/client-1/tour-catalog/preview',
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': String(3 * 1024 * 1024 + 1),
+        },
+        body: JSON.stringify({ csv: VALID_CSV }),
+      },
+    )
+
+    const res = await POST(req, makeParams())
+
+    expect(res.status).toBe(413)
+    await expect(res.json()).resolves.toEqual({ error: 'request_too_large' })
+    expect(mockedLoadCatalog).not.toHaveBeenCalled()
+  })
+
+  it('returns 413 when the actual body exceeds the limit without a header', async () => {
+    const bigCsv = 'x'.repeat(3 * 1024 * 1024 + 1)
+    const req = new NextRequest(
+      'http://localhost/api/clients/client-1/tour-catalog/preview',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ csv: bigCsv }),
+      },
+    )
+
+    const res = await POST(req, makeParams())
+
+    expect(res.status).toBe(413)
+    await expect(res.json()).resolves.toEqual({ error: 'request_too_large' })
+    expect(mockedLoadCatalog).not.toHaveBeenCalled()
+  })
+
+  it('includes a planHash matching the summary passed to createPreviewBatch', async () => {
+    mockedCreatePreviewBatch.mockResolvedValue({ ok: true, batchId: 'batch-1' })
+
+    const res = await POST(makeRequest({ csv: VALID_CSV }), makeParams())
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.planHash).toMatch(/^[0-9a-f]{64}$/)
+
+    const args = mockedCreatePreviewBatch.mock.calls[0][1]
+    expect(args.summary.planHash).toBe(body.planHash)
+  })
+
+  it('includes a planHash in the null-batchId response', async () => {
+    const csv = 'tour,depart_on,return_on\nUnknown Tour,2027-03-11,2027-03-25'
+
+    const res = await POST(makeRequest({ csv }), makeParams())
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.batchId).toBeNull()
+    expect(body.planHash).toMatch(/^[0-9a-f]{64}$/)
+  })
 })

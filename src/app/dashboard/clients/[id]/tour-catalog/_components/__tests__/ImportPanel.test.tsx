@@ -29,6 +29,7 @@ const TOURS: CatalogTourView[] = [
 function makePreview(overrides: Partial<PreviewResponse> = {}): PreviewResponse {
   return {
     batchId: 'batch-1',
+    planHash: 'hash-1',
     summary: { adds: 0, updates: 0, unchanged: 0, rejected: 0, warningCount: 0 },
     adds: [],
     updates: [],
@@ -106,7 +107,10 @@ describe('ImportPanel', () => {
 
     const applyCall = fetchMock.mock.calls[1]
     expect(applyCall[0]).toBe('/api/clients/c1/tour-catalog/batches/batch-1/apply')
-    expect(JSON.parse(applyCall[1].body)).toEqual({ acknowledgeWarnings: false })
+    expect(JSON.parse(applyCall[1].body)).toEqual({
+      acknowledgeWarnings: false,
+      planHash: 'hash-1',
+    })
   })
 
   it('requires the warning checkbox before applying', async () => {
@@ -145,7 +149,10 @@ describe('ImportPanel', () => {
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
 
     const applyCall = fetchMock.mock.calls[1]
-    expect(JSON.parse(applyCall[1].body)).toEqual({ acknowledgeWarnings: true })
+    expect(JSON.parse(applyCall[1].body)).toEqual({
+      acknowledgeWarnings: true,
+      planHash: 'hash-1',
+    })
   })
 
   it('shows the Chinese reason and remembers an alias', async () => {
@@ -211,6 +218,107 @@ describe('ImportPanel', () => {
     await waitFor(() =>
       expect(screen.getByText('这份文件里没有可以导入的新内容')).toBeTruthy(),
     )
+    expect(screen.queryByText('确认导入')).toBeNull()
+  })
+
+  it('shows tour names instead of ids in the adds table', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        makePreview({
+          summary: { adds: 1, updates: 0, unchanged: 0, rejected: 0, warningCount: 0 },
+          adds: [
+            { line: 1, tourId: 'tour-2', departOn: '2025-01-01', returnOn: '2025-01-10', status: 'open' },
+          ],
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<ImportPanel clientId="c1" tours={TOURS} onChanged={vi.fn()} />)
+
+    selectFile()
+    fireEvent.click(screen.getByText('预览'))
+
+    await waitFor(() => expect(screen.getByText('Natural China Premium')).toBeTruthy())
+    expect(screen.queryByText('tour-2')).toBeNull()
+  })
+
+  it('falls back to the tour id when the name is unknown', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        makePreview({
+          summary: { adds: 1, updates: 0, unchanged: 0, rejected: 0, warningCount: 0 },
+          adds: [
+            { line: 1, tourId: 'tour-unknown', departOn: '2025-01-01', returnOn: '2025-01-10', status: 'open' },
+          ],
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<ImportPanel clientId="c1" tours={TOURS} onChanged={vi.fn()} />)
+
+    selectFile()
+    fireEvent.click(screen.getByText('预览'))
+
+    await waitFor(() => expect(screen.getByText('tour-unknown')).toBeTruthy())
+  })
+
+  it('shows the plan_changed message when apply fails', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          makePreview({
+            summary: { adds: 1, updates: 0, unchanged: 0, rejected: 0, warningCount: 0 },
+            adds: [
+              { line: 1, tourId: 'tour-1', departOn: '2025-01-01', returnOn: '2025-01-10', status: 'open' },
+            ],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ error: 'plan_changed' }, 409))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<ImportPanel clientId="c1" tours={TOURS} onChanged={vi.fn()} />)
+
+    selectFile()
+    fireEvent.click(screen.getByText('预览'))
+
+    await waitFor(() => expect(screen.getByText('确认导入')).toBeTruthy())
+    fireEvent.click(screen.getByText('确认导入'))
+
+    await waitFor(() =>
+      expect(screen.getByText('预览内容已经更新，请重新点一次预览再确认')).toBeTruthy(),
+    )
+  })
+
+  it('keeps the 已导入 message visible after a successful apply', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          makePreview({
+            summary: { adds: 1, updates: 0, unchanged: 0, rejected: 0, warningCount: 0 },
+            adds: [
+              { line: 1, tourId: 'tour-1', departOn: '2025-01-01', returnOn: '2025-01-10', status: 'open' },
+            ],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const onChanged = vi.fn()
+    render(<ImportPanel clientId="c1" tours={TOURS} onChanged={onChanged} />)
+
+    selectFile()
+    fireEvent.click(screen.getByText('预览'))
+
+    await waitFor(() => expect(screen.getByText('确认导入')).toBeTruthy())
+    fireEvent.click(screen.getByText('确认导入'))
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalled())
+    expect(screen.getByText('已导入')).toBeTruthy()
+    // Preview area is cleared.
     expect(screen.queryByText('确认导入')).toBeNull()
   })
 })

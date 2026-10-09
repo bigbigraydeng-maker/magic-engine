@@ -106,6 +106,15 @@ CSV 日期只接受 `YYYY-MM-DD`，其它格式整行拒收。
 ### 6.4 价格展示串校验
 写入 `display_price_text` / `price_text_override` 时，复用 `cts-tour-price.ts` 已导出的 `parsePriceDisplayString`（实现时核实导出状态）：必须解析出**单一**币种和金额，且文本中不得同时出现多个币种；**例外：不含任何数字、含 `TBC` 的文本（如官网真实存在的 `From NZD $TBC per person`）允许入库**，并标记为价格待定——此时 `lookupTourPrice` 照旧返回 null、走人工任务，不猜价。其余解析失败 → 拒收，由 PM 修成「From NZD $X per person」类标准写法。（防止 `From AUD 5,200 (NZD $4,999 …)` 被误读。）
 
+### 6.5 实现与设计稿的已知差异（2026-10-10，P1a 实现复审后记录）
+
+- 幽灵班期告警 v1 为「看列表 + 单个勾选确认」，未做设计稿所说的逐条选择「保留 / 标 cancelled」；要把某班期标 cancelled 目前需另行修改状态（后台编辑页属 P1a-2）。
+- 「与官网现值冲突的行高亮 / 差异页」推迟到 P1a-2；当前以 `docs/clients/cts/2026-10-09-2027-departures-vs-website.md` 的离线对比代替。
+- 应用前增加 `planHash` 校验（预览与应用必须是同一份计划，否则 409 `plan_changed`），设计稿原未写，实现复审后补。
+- 同一份文件在「已预览未应用」或「已撤销」状态下可重新预览（刷新原批次）；「已应用」状态仍拒绝重复上传。
+- seed 失败时会删除本次刚插入的团（补偿），不是数据库单事务；seed 不递增 `catalog_version`（目录此阶段不被任何渠道消费）。
+- `price.ts` 复用客户命名的 `cts-tour-price.parsePriceDisplayString`，后续应抽到中性模块；`todayIso` 默认时区写死 Pacific/Auckland，AU 客户需参数化。
+
 ## 7. 分步计划
 
 | 步 | 内容 | 风险级 | 说明 |

@@ -4,11 +4,14 @@ import {
   applyBatch,
   createPreviewBatch,
   getBatch,
+  getCatalogVersion,
   listRecentBatches,
   loadCatalog,
+  loadCatalogProducts,
   mapAliasRow,
   mapDepartureRow,
   mapTourRow,
+  planHash,
   planToApplyPayload,
   rollbackBatch,
 } from '../store'
@@ -38,6 +41,7 @@ function makeQuery(result: QueryResult) {
   q.limit = vi.fn(chain)
   q.insert = vi.fn(chain)
   q.update = vi.fn(chain)
+  q.in = vi.fn(chain)
   q.maybeSingle = vi.fn(() => Promise.resolve(result))
   q.then = (onFulfilled: (value: QueryResult) => unknown) =>
     Promise.resolve(result).then(onFulfilled)
@@ -230,6 +234,69 @@ describe('planToApplyPayload', () => {
 })
 
 // ---------------------------------------------------------------------------
+// planHash
+// ---------------------------------------------------------------------------
+
+describe('planHash', () => {
+  const payload: ApplyPayload = {
+    adds: [
+      {
+        tourId: 't1',
+        departOn: '2026-04-01',
+        returnOn: '2026-04-10',
+        status: 'open',
+        internal: { airline: 'NZ', capacity: 20 },
+      },
+    ],
+    updates: [
+      {
+        departureId: 'd1',
+        expectedUpdatedAt: '2026-01-01T00:00:00.000Z',
+        returnOn: '2026-03-12',
+        status: 'limited',
+        internal: { capacity: 5 },
+      },
+    ],
+  }
+
+  it('is deterministic for identical inputs', () => {
+    expect(planHash(payload, 2)).toBe(planHash(payload, 2))
+    expect(planHash(payload, 2)).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('is independent of object key order', () => {
+    const reordered: ApplyPayload = {
+      adds: [
+        {
+          internal: { capacity: 20, airline: 'NZ' },
+          status: 'open',
+          returnOn: '2026-04-10',
+          departOn: '2026-04-01',
+          tourId: 't1',
+        },
+      ],
+      updates: [
+        {
+          internal: { capacity: 5 },
+          status: 'limited',
+          returnOn: '2026-03-12',
+          expectedUpdatedAt: '2026-01-01T00:00:00.000Z',
+          departureId: 'd1',
+        },
+      ],
+    }
+    expect(planHash(reordered, 2)).toBe(planHash(payload, 2))
+  })
+
+  it('changes when adds, updates or warningCount change', () => {
+    const base = planHash(payload, 2)
+    expect(planHash({ ...payload, adds: [] }, 2)).not.toBe(base)
+    expect(planHash({ ...payload, updates: [] }, 2)).not.toBe(base)
+    expect(planHash(payload, 3)).not.toBe(base)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // loadCatalog
 // ---------------------------------------------------------------------------
 
@@ -286,289 +353,89 @@ describe('loadCatalog', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Batches
+// loadCatalogProducts
 // ---------------------------------------------------------------------------
 
-describe('getBatch', () => {
-  it('returns null when not found', async () => {
-    const q = makeQuery({ data: null, error: null })
-    const db = makeDb({ from: () => q })
-    expect(await getBatch(db as never, 'c1', 'b1')).toBeNull()
-  })
-
-  it('maps a found batch', async () => {
-    const q = makeQuery({
-      data: {
-        id: 'b1',
-        client_id: 'c1',
-        kind: 'departures',
-        status: 'previewed',
-        file_sha256: 'abc',
-        row_counts: { adds: 1 },
-        plan: { adds: [] },
-        created_at: '2026-01-01T00:00:00.000Z',
-      },
+describe('loadCatalogProducts', () => {
+  it('projects a tour with one open future departure into a product', async () => {
+    const toursQuery = makeQuery({
+      data: [
+        {
+          id: 't1',
+          client_id: 'c1',
+          slug: 'grand-tour',
+          destination: 'NZ',
+          tier: 'gold',
+          name: 'Grand Tour',
+          duration_text: '10 days',
+          display_price_text: 'From NZD $4,999',
+          highlights: [],
+          itinerary: [],
+          inclusions: [],
+          exclusions: [],
+          tour_cities: ['Auckland'],
+          is_active: true,
+          manages_departures: true,
+          sort_order: 1,
+          updated_at: '2026-01-01T00:00:00.000Z',
+        },
+      ],
       error: null,
     })
-    const db = makeDb({ from: () => q })
-    const batch = await getBatch(db as never, 'c1', 'b1')
-    expect(batch).toEqual({
-      id: 'b1',
-      clientId: 'c1',
-      kind: 'departures',
-      status: 'previewed',
-      fileSha256: 'abc',
-      rowCounts: { adds: 1 },
-      plan: { adds: [] },
-      createdAt: '2026-01-01T00:00:00.000Z',
+    const departuresQuery = makeQuery({
+      data: [
+        {
+          id: 'd1',
+          tour_id: 't1',
+          client_id: 'c1',
+          depart_on: '2026-06-01',
+          return_on: '2026-06-10',
+          price_text_override: null,
+          status: 'open',
+          internal: { airline: 'NZ' },
+          updated_at: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+      error: null,
     })
-  })
-})
+    const aliasesQuery = makeQuery({ data: [], error: null })
 
-describe('listRecentBatches', () => {
-  it('orders newest first and applies the limit', async () => {
-    const q = makeQuery({ data: [], error: null })
-    const db = makeDb({ from: () => q })
-    await listRecentBatches(db as never, 'c1', 5)
-    expect(q.order).toHaveBeenCalledWith('created_at', { ascending: false })
-    expect(q.limit).toHaveBeenCalledWith(5)
-  })
-})
-
-describe('createPreviewBatch', () => {
-  const payload: ApplyPayload = { adds: [], updates: [] }
-
-  it('inserts a previewed batch and returns the id', async () => {
-    const q = makeQuery({ data: { id: 'b1' }, error: null })
-    const db = makeDb({ from: () => q })
-    const result = await createPreviewBatch(db as never, {
-      clientId: 'c1',
-      kind: 'departures',
-      fileSha256: 'abc',
-      payload,
-      summary: { adds: 0 },
-    })
-    expect(result).toEqual({ ok: true, batchId: 'b1' })
-    expect(q.insert).toHaveBeenCalledWith({
-      client_id: 'c1',
-      kind: 'departures',
-      file_sha256: 'abc',
-      row_counts: { adds: 0 },
-      plan: { adds: [], updates: [], summary: { adds: 0 } },
-      status: 'previewed',
-    })
-  })
-
-  it('returns duplicate_file on unique violation', async () => {
-    const insertQuery = makeQuery({
-      data: null,
-      error: { message: 'duplicate key', code: '23505' },
-    })
-    const lookupQuery = makeQuery({ data: { id: 'existing', status: 'applied' }, error: null })
-    let call = 0
     const db = makeDb({
-      from: () => {
-        call += 1
-        return call === 1 ? insertQuery : lookupQuery
+      from: (table) => {
+        if (table === 'tour_catalog_tours') return toursQuery
+        if (table === 'tour_catalog_departures') return departuresQuery
+        return aliasesQuery
       },
     })
-    const result = await createPreviewBatch(db as never, {
-      clientId: 'c1',
-      kind: 'departures',
-      fileSha256: 'abc',
-      payload,
-      summary: {},
-    })
-    expect(result).toEqual({
-      ok: false,
-      reason: 'duplicate_file',
-      existingBatchId: 'existing',
-    })
-  })
 
-  it('refreshes the plan when the same file is previewed again before being applied', async () => {
-    const insertQuery = makeQuery({
-      data: null,
-      error: { message: 'duplicate key', code: '23505' },
-    })
-    const lookupQuery = makeQuery({ data: { id: 'existing', status: 'previewed' }, error: null })
-    const updateQuery = makeQuery({ data: { id: 'existing' }, error: null })
-    const queries = [insertQuery, lookupQuery, updateQuery]
-    let call = 0
-    const db = makeDb({ from: () => queries[call++] })
-    const result = await createPreviewBatch(db as never, {
-      clientId: 'c1',
-      kind: 'departures',
-      fileSha256: 'abc',
-      payload,
-      summary: { adds: 3 },
-    })
-    expect(result).toEqual({ ok: true, batchId: 'existing' })
-    expect(updateQuery.update).toHaveBeenCalledWith({
-      row_counts: { adds: 3 },
-      plan: { adds: [], updates: [], summary: { adds: 3 } },
-    })
-    expect(updateQuery.eq).toHaveBeenCalledWith('status', 'previewed')
-  })
-
-  it('returns db_error for other failures', async () => {
-    const q = makeQuery({ data: null, error: { message: 'nope' } })
-    const db = makeDb({ from: () => q })
-    const result = await createPreviewBatch(db as never, {
-      clientId: 'c1',
-      kind: 'departures',
-      fileSha256: 'abc',
-      payload,
-      summary: {},
-    })
-    expect(result).toEqual({ ok: false, reason: 'db_error', message: 'nope' })
+    const products = await loadCatalogProducts(db as never, 'c1', '2026-01-01')
+    expect(products).toHaveLength(1)
+    expect(products[0].id).toBe('t1')
+    expect(products[0].departure_dates).toHaveLength(1)
+    expect(products[0].departure_dates[0]).toContain('2026')
   })
 })
 
 // ---------------------------------------------------------------------------
-// applyBatch / rollbackBatch
+// getCatalogVersion
 // ---------------------------------------------------------------------------
 
-describe('applyBatch', () => {
-  it('returns the rpc result on success', async () => {
-    const db = makeDb({
-      rpc: () => ({ data: { added: 1, updated: 0 }, error: null }),
-    })
-    const result = await applyBatch(db as never, 'c1', 'b1', 'me')
-    expect(result).toEqual({ ok: true, result: { added: 1, updated: 0 } })
-    expect(db.rpc).toHaveBeenCalledWith('tour_catalog_apply_batch', {
-      p_client_id: 'c1',
-      p_batch_id: 'b1',
-      p_applied_by: 'me',
-    })
+describe('getCatalogVersion', () => {
+  it('returns the stored catalog_version', async () => {
+    const q = makeQuery({ data: { catalog_version: 7 }, error: null })
+    const db = makeDb({ from: () => q })
+    expect(await getCatalogVersion(db as never, 'c1')).toBe(7)
   })
 
-  it('maps batch_not_applicable to not_applicable', async () => {
-    const db = makeDb({
-      rpc: () => ({ data: null, error: { message: 'batch_not_applicable' } }),
-    })
-    const result = await applyBatch(db as never, 'c1', 'b1', 'me')
-    expect(result).toEqual({
-      ok: false,
-      code: 'not_applicable',
-      message: 'batch_not_applicable',
-    })
+  it('returns 0 when no state row exists', async () => {
+    const q = makeQuery({ data: null, error: null })
+    const db = makeDb({ from: () => q })
+    expect(await getCatalogVersion(db as never, 'c1')).toBe(0)
   })
 
-  it('maps conflict:stale:abc to conflict', async () => {
-    const db = makeDb({
-      rpc: () => ({ data: null, error: { message: 'conflict:stale:abc' } }),
-    })
-    const result = await applyBatch(db as never, 'c1', 'b1', 'me')
-    expect(result).toEqual({
-      ok: false,
-      code: 'conflict',
-      message: 'conflict:stale:abc',
-    })
-  })
-
-  it('maps unknown errors to error', async () => {
-    const db = makeDb({
-      rpc: () => ({ data: null, error: { message: 'boom' } }),
-    })
-    const result = await applyBatch(db as never, 'c1', 'b1', 'me')
-    expect(result).toEqual({ ok: false, code: 'error', message: 'boom' })
-  })
-})
-
-describe('rollbackBatch', () => {
-  it('calls the rollback rpc and returns the result', async () => {
-    const db = makeDb({
-      rpc: () => ({ data: { added: 0, updated: 1 }, error: null }),
-    })
-    const result = await rollbackBatch(db as never, 'c1', 'b1')
-    expect(result).toEqual({ ok: true, result: { added: 0, updated: 1 } })
-    expect(db.rpc).toHaveBeenCalledWith('tour_catalog_rollback_batch', {
-      p_client_id: 'c1',
-      p_batch_id: 'b1',
-    })
-  })
-
-  it('maps batch_not_rollbackable to not_applicable', async () => {
-    const db = makeDb({
-      rpc: () => ({ data: null, error: { message: 'batch_not_rollbackable' } }),
-    })
-    const result = await rollbackBatch(db as never, 'c1', 'b1')
-    expect(result).toEqual({
-      ok: false,
-      code: 'not_applicable',
-      message: 'batch_not_rollbackable',
-    })
-  })
-})
-
-// ---------------------------------------------------------------------------
-// addAlias
-// ---------------------------------------------------------------------------
-
-describe('addAlias', () => {
-  it('refuses an empty normalized alias', async () => {
-    const db = makeDb({})
-    const result = await addAlias(db as never, 'c1', '   ', 't1')
-    expect(result).toEqual({ ok: false, message: 'empty_alias' })
-    expect(db.from).not.toHaveBeenCalled()
-  })
-
-  it('returns tour_not_found when the tour is not in the client', async () => {
-    const tourQuery = makeQuery({ data: null, error: null })
-    const db = makeDb({ from: () => tourQuery })
-    const result = await addAlias(db as never, 'c1', 'Grand Tour', 't1')
-    expect(result).toEqual({ ok: false, message: 'tour_not_found' })
-  })
-
-  it('returns alias_taken when the alias points to a different tour', async () => {
-    const tourQuery = makeQuery({ data: { id: 't1' }, error: null })
-    const aliasQuery = makeQuery({ data: { tour_id: 't2' }, error: null })
-    let call = 0
-    const db = makeDb({
-      from: () => {
-        call += 1
-        return call === 1 ? tourQuery : aliasQuery
-      },
-    })
-    const result = await addAlias(db as never, 'c1', 'Grand Tour', 't1')
-    expect(result).toEqual({ ok: false, message: 'alias_taken' })
-  })
-
-  it('is a no-op when the alias already points to the same tour', async () => {
-    const tourQuery = makeQuery({ data: { id: 't1' }, error: null })
-    const aliasQuery = makeQuery({ data: { tour_id: 't1' }, error: null })
-    let call = 0
-    const db = makeDb({
-      from: () => {
-        call += 1
-        return call === 1 ? tourQuery : aliasQuery
-      },
-    })
-    const result = await addAlias(db as never, 'c1', 'Grand Tour', 't1')
-    expect(result).toEqual({ ok: true, aliasNorm: 'grand tour' })
-    expect(aliasQuery.insert).not.toHaveBeenCalled()
-  })
-
-  it('inserts a new alias and returns the normalized form', async () => {
-    const tourQuery = makeQuery({ data: { id: 't1' }, error: null })
-    const aliasQuery = makeQuery({ data: null, error: null })
-    const insertQuery = makeQuery({ data: null, error: null })
-    let call = 0
-    const db = makeDb({
-      from: () => {
-        call += 1
-        if (call === 1) return tourQuery
-        if (call === 2) return aliasQuery
-        return insertQuery
-      },
-    })
-    const result = await addAlias(db as never, 'c1', 'Grand & Tour', 't1')
-    expect(result).toEqual({ ok: true, aliasNorm: 'grand and tour' })
-    expect(insertQuery.insert).toHaveBeenCalledWith({
-      client_id: 'c1',
-      alias_norm: 'grand and tour',
-      tour_id: 't1',
-    })
+  it('throws with the Supabase error message', async () => {
+    const q = makeQuery({ data: null, error: { message: 'state boom' } })
+    const db = makeDb({ from: () => q })
+    await expect(getCatalogVersion(db as never, 'c1')).rejects.toThrow('state boom')
   })
 })

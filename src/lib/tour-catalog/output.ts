@@ -64,7 +64,7 @@ function toFirstPartyTour(
     id: tour.id,
     slug: tour.slug,
     destination: tour.destination,
-    tier: tour.tier,
+    tier: tour.tier === 'unknown' ? undefined : tour.tier,
     name: tour.name,
     title: tour.title ?? undefined,
     duration: tour.durationText ?? undefined,
