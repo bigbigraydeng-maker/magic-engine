@@ -125,22 +125,20 @@ PM 拍板**只配英文，不加中文版**。多语言支不支持这件事按 
 ```
 products: [{
   "name": "Signature Escape",
-  "price": "NZ$158",
-  "currency": "NZD",
-  "duration_minutes": 75,
-  "includes": ["40 min Body Massage", "35 min Spa Facial (includes 5 min Scalp Ritual)"],
-  "audience": "new clients",
-  "source": "PM 2026-10-10 口头确认",
-  "confirmed_on": "2026-10-10"
+  "usp": "NZ$158 · 75 min for new clients: 40 min Body Massage + 35 min Spa Facial (incl. 5 min Scalp Ritual). Source: PM 2026-10-10 口头确认"
 }]
 website: （保持 NULL —— 客户确实没有官网，不要瞎填主页链接当官网）
 ```
 
+契约说明：`products` 的消费者（`formatBriefForPrompt`、`/api/clients/[id]/products`）只认 `{name, usp}`，
+多出的 `price` / `currency` 等字段会渲染成 `（undefined）`，FDE 在 Settings 保存时也会被静默删掉；所以价格、时长、受众、出处全部放进 `usp` 文字里。
+
 可回退：写之前该行 `products` 原值为 NULL，要撤就写回 NULL。
 
-**已执行（2026-10-10，统筹代 PM 批准后）**：
-- 写入 `master_briefs` 行 `60c6cc24-5946-4d82-a0b8-4eaec2d34d4c`（NM Medspa 唯一一条，`is_active = true`）
-- 回读确认：`products` 1 条 = Signature Escape / NZD 158 / 75 分钟 / 出处「PM 2026-10-10 口头确认」；`website` 仍为 NULL
+**已执行但格式不合契约，待重写（2026-10-10）**：
+- 统筹代 PM 批准后，已向 `master_briefs` 行 `60c6cc24-5946-4d82-a0b8-4eaec2d34d4c`（NM Medspa 唯一一条，`is_active = true`）写入过一版 `products`，
+  但那一版带了 `price` / `currency` 等多余字段、没有 `usp`，不符合上面的 `{name, usp}` 契约。
+- 需要用上面的 `{name, usp}` 版本覆盖重写（写库属生产写入，须另获授权；本次修订只改文档，未碰生产）。
 - 回滚：`update master_briefs set products = null where id = '60c6cc24-5946-4d82-a0b8-4eaec2d34d4c';`
 
 ## 8. 本轮做了什么 / 没做什么
