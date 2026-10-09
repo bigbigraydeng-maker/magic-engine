@@ -1,6 +1,6 @@
 ---
 id: 2026-10-10-east-inter-ad-account-country-field-is-effect-not-cause
-title: 广告户「国家」字段是绑卡成功后才填上的结果，不是加卡失败的原因；且商务账户的广告户数量已到顶，建不出新户
+title: 广告户「国家」字段可能是绑卡成功后才填上的结果（待证实推断），不一定是加卡失败的原因；且商务账户的广告户数量已到顶，建不出新户
 status: decided
 owner: pm
 decided_on: 2026-10-10

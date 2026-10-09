@@ -7,6 +7,11 @@ decided_on: 2026-10-10
 source: session:ffe11a13
 verify_by: 2026-10-15
 verify_how: 查新户三项：国家字段非空、时区是奥克兰、货币是纽币；再看付款方式是否已加上。四项全成才算成。只要国家字段仍是空的，就是又建坏了，必须当场重建而不是将就。
+done_on: 2026-10-10
+done_ref: doc:docs/ledger/2026-10-10-east-inter-ad-account-country-field-is-effect-not-cause.md
+verified_ref: doc:docs/ledger/2026-10-10-east-inter-ad-account-country-field-is-effect-not-cause.md
+last_checked: 2026-10-10
+check_note: 决定被推翻作废，PM 改选启用澳币户，更正见接替卡
 ---
 【已作废】PM 当日改选启用澳币户，且本卡的根因判断被推翻（国家字段为空更可能是结果而非原因），不得再按本卡废户重建，废户不可撤回。更正见 doc:docs/ledger/2026-10-10-east-inter-ad-account-country-field-is-effect-not-cause.md
 
