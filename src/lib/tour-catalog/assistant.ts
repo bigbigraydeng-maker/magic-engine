@@ -98,6 +98,74 @@ export function tourDetail(snapshot: CatalogSnapshot, tourId: string): string | 
 }
 
 // ---------------------------------------------------------------------------
+// Patch key normalisation (pure)
+// ---------------------------------------------------------------------------
+
+const TOUR_PATCH_ALIASES: Readonly<Record<string, string>> = {
+  price: 'displayPriceText',
+  display_price: 'displayPriceText',
+  display_price_text: 'displayPriceText',
+  displayPrice: 'displayPriceText',
+  duration: 'durationText',
+  duration_text: 'durationText',
+  days: 'durationText',
+  short_description: 'shortDescription',
+  description: 'shortDescription',
+  single_supplement: 'singleSupplement',
+  singleRoomSupplement: 'singleSupplement',
+  max_group_size: 'maxGroupSize',
+  maxGroup: 'maxGroupSize',
+  groupSize: 'maxGroupSize',
+  is_active: 'isActive',
+  active: 'isActive',
+  manages_departures: 'managesDepartures',
+  tour_cities: 'tourCities',
+  cities: 'tourCities',
+}
+
+const DEPARTURE_PATCH_ALIASES: Readonly<Record<string, string>> = {
+  return_on: 'returnOn',
+  price: 'priceTextOverride',
+  price_text_override: 'priceTextOverride',
+}
+
+const NEW_DEPARTURE_ALIASES: Readonly<Record<string, string>> = {
+  depart_on: 'departOn',
+  return_on: 'returnOn',
+}
+
+function applyAliases(
+  raw: Record<string, unknown>,
+  aliases: Readonly<Record<string, string>>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    const canonical = aliases[key] ?? key
+    if (!(canonical in out)) out[canonical] = value
+  }
+  return out
+}
+
+/** Map common model-supplied aliases onto canonical TourPatch keys. */
+export function normalisePatchKeys(raw: Record<string, unknown>): Record<string, unknown> {
+  return applyAliases(raw, TOUR_PATCH_ALIASES)
+}
+
+/** Map common model-supplied aliases onto canonical DeparturePatch keys. */
+export function normaliseDeparturePatchKeys(
+  raw: Record<string, unknown>,
+): Record<string, unknown> {
+  return applyAliases(raw, DEPARTURE_PATCH_ALIASES)
+}
+
+/** Map common model-supplied aliases onto canonical NewDeparture keys. */
+export function normaliseNewDepartureKeys(
+  raw: Record<string, unknown>,
+): Record<string, unknown> {
+  return applyAliases(raw, NEW_DEPARTURE_ALIASES)
+}
+
+// ---------------------------------------------------------------------------
 // checkProposal (pure)
 // ---------------------------------------------------------------------------
 
@@ -171,7 +239,8 @@ export function checkProposal(
     if (!tour) {
       return { proposal, check: fail('tourId', 'tour_not_found') }
     }
-    const result = validateTourPatch(raw.patch)
+    const patchInput = isPlainObject(raw.patch) ? normalisePatchKeys(raw.patch) : raw.patch
+    const result = validateTourPatch(patchInput)
     if (!result.ok) return { proposal, check: { ok: false, errors: result.errors } }
     const warnings = itineraryWarnings(tour.itinerary, result.value.itinerary)
     const check: ProposalCheck = warnings.length > 0 ? { ok: true, warnings } : { ok: true }
@@ -187,7 +256,10 @@ export function checkProposal(
     if (!departureBelongsToTour(snapshot, tourId, departureId)) {
       return { proposal, check: fail('departureId', 'departure_not_found') }
     }
-    const result = validateDeparturePatch(raw.patch)
+    const patchInput = isPlainObject(raw.patch)
+      ? normaliseDeparturePatchKeys(raw.patch)
+      : raw.patch
+    const result = validateDeparturePatch(patchInput)
     if (!result.ok) return { proposal, check: { ok: false, errors: result.errors } }
     return { proposal: { ...proposal, patch: result.value }, check: { ok: true } }
   }
@@ -202,7 +274,10 @@ export function checkProposal(
   if (!tourExists(snapshot, tourId)) {
     return { proposal, check: fail('tourId', 'tour_not_found') }
   }
-  const result = validateNewDeparture(raw.fields)
+  const fieldsInput = isPlainObject(raw.fields)
+    ? normaliseNewDepartureKeys(raw.fields)
+    : raw.fields
+  const result = validateNewDeparture(fieldsInput)
   if (!result.ok) return { proposal, check: { ok: false, errors: result.errors } }
   return { proposal: { ...proposal, fields: result.value }, check: { ok: true } }
 }
@@ -232,7 +307,8 @@ const PROPOSE_CHANGES_TOOL: Anthropic.Tool = {
       reply: { type: 'string', description: '给管理员看的一句中文回复' },
       proposals: {
         type: 'array',
-        description: '改动建议列表',
+        description:
+          '改动建议列表。每一个独立的改动必须单独一条 proposal（例如改价格一条、改行程一条），不要合并。',
         items: {
           type: 'object',
           properties: {
@@ -243,8 +319,18 @@ const PROPOSE_CHANGES_TOOL: Anthropic.Tool = {
             tourId: { type: 'string' },
             departureId: { type: 'string' },
             summary: { type: 'string', description: '这条改动的一句话中文说明' },
-            patch: { type: 'object', description: 'update_tour / update_departure 的字段改动' },
-            fields: { type: 'object', description: 'create_departure 的字段' },
+            patch: {
+              type: 'object',
+              description:
+                'update_tour 允许的键：name, title, shortDescription, durationText, displayPriceText, highlights, itinerary, inclusions, exclusions, tourCities, singleSupplement, maxGroupSize, isActive, managesDepartures。' +
+                'update_departure 允许的键：returnOn, status, priceTextOverride。' +
+                '只放需要改的键，不要用别名（例如价格必须写 displayPriceText，不要写 price）。',
+            },
+            fields: {
+              type: 'object',
+              description:
+                'create_departure 允许的键：departOn, returnOn, status, priceTextOverride。',
+            },
           },
           required: ['kind', 'tourId', 'summary'],
         },
@@ -271,15 +357,26 @@ const SYSTEM_PROMPT = `你是旅行社后台的行程目录 AI 助手。管理�
 - 价格字段（displayPriceText / priceTextOverride）必须写成 "From NZD $4,999 per person" 这种形式，或者 "TBC"。
 - 日期一律 YYYY-MM-DD。
 - 只给需要改的字段，其余不要出现。
+- **一个独立的改动 = 一条 proposal**。例如「改价格」和「改第 5 天标题」是两件事，必须拆成两条 proposal，不要合并成一条。
+- 字段名必须用规范名：价格用 displayPriceText（不要用 price），时长用 durationText，单房差用 singleSupplement，最大团人数用 maxGroupSize，是否上架用 isActive，是否管理班期用 managesDepartures，城市用 tourCities。
+
+## 回复措辞
+
+reply 描述的是**将要**做的改动，不是已经做完的。例如「准备把价格改成 From NZD $8,599 per person，请确认」。
+**绝对不要**说「已把…改成…」——管理员点击「应用」之前，任何改动都没有保存。
 
 ## 拿不准就问
 
 不要透露你是哪家公司的什么模型；被问到时只说你是这个系统的 AI 助手。
 如果管理员的请求有歧义（哪个团？哪一天？改成什么？），**不要猜**。用普通文本回复一个简短的中文问题，不要调用 propose_changes。
 
+## 价格计算
+
+如果管理员说「再加 100」这类相对改动，请以历史记录里标注「已应用」的那条价格为准来计算（当前行程目录里也显示了当前价格）。
+
 ## 回复风格
 
-reply 用简短、平实的中文，不要术语，不要英文。例如「已把第 5 天的酒店改成 XX，请确认」。
+reply 用简短、平实的中文，不要术语，不要英文。例如「准备把第 5 天的酒店改成 XX，请确认」。
 
 ## 今天的日期
 
@@ -307,7 +404,7 @@ const PRICE_OUTPUT_PER_M = 15.0
 
 function defaultDeps(): AssistantDeps {
   return {
-    createMessage: (params) => getAnthropicClientDirect().messages.create(params, { timeout: PER_CALL_TIMEOUT_MS }),
+    createMessage: (params) => getAnthropicClientDirect().messages.create(params, { timeout: PER_CALL_TIMEOUT_MS, maxRetries: 0 }),
   }
 }
 

@@ -54,7 +54,7 @@ export async function POST(request: Request, context: RouteContext) {
   let body: unknown
   try {
     const text = await request.text()
-    if (text.length > MAX_BODY_BYTES) {
+    if (Buffer.byteLength(text, 'utf8') > MAX_BODY_BYTES) {
       return NextResponse.json({ error: 'request_too_large' }, { status: 413 })
     }
     body = JSON.parse(text) as unknown

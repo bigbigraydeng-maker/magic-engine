@@ -20,9 +20,10 @@ const CLIENT_ID = 'client-1'
 const TOUR_ID = 'tour-1'
 const DEPARTURE_ID = 'dep-1'
 const ACTOR = 'admin@example.com'
+const ASSISTANT_ACTOR = `${ACTOR} (AI 助手)`
 
-function jsonRequest(body: unknown): NextRequest {
-  return new NextRequest('http://localhost/test', {
+function jsonRequest(body: unknown, url = 'http://localhost/test'): NextRequest {
+  return new NextRequest(url, {
     method: 'PATCH',
     body: JSON.stringify(body),
     headers: { 'content-type': 'application/json' },
@@ -98,6 +99,26 @@ describe('PATCH tours/[tourId]', () => {
       'v1',
       { name: 'New Name' },
       ACTOR,
+    )
+  })
+
+  it('tags the actor when via=assistant', async () => {
+    updateTour.mockResolvedValue({ ok: true, value: { id: TOUR_ID } })
+    const res = await patchTour(
+      jsonRequest(
+        { expectedUpdatedAt: 'v1', patch: { name: 'New Name' } },
+        'http://localhost/test?via=assistant',
+      ),
+      tourContext(),
+    )
+    expect(res.status).toBe(200)
+    expect(updateTour).toHaveBeenCalledWith(
+      expect.anything(),
+      CLIENT_ID,
+      TOUR_ID,
+      'v1',
+      { name: 'New Name' },
+      ASSISTANT_ACTOR,
     )
   })
 
@@ -208,6 +229,29 @@ describe('POST tours/[tourId]/departures', () => {
     )
   })
 
+  it('tags the actor when via=assistant', async () => {
+    saveDeparture.mockResolvedValue({ ok: true, value: { id: DEPARTURE_ID } })
+    const res = await postDeparture(
+      jsonRequest(validBody, 'http://localhost/test?via=assistant'),
+      tourContext(),
+    )
+    expect(res.status).toBe(201)
+    expect(saveDeparture).toHaveBeenCalledWith(
+      expect.anything(),
+      CLIENT_ID,
+      TOUR_ID,
+      null,
+      null,
+      {
+        depart_on: '2026-01-01',
+        return_on: '2026-01-10',
+        status: 'open',
+        price_text_override: null,
+      },
+      ASSISTANT_ACTOR,
+    )
+  })
+
   it('maps duplicate to 409 duplicate_departure', async () => {
     saveDeparture.mockResolvedValue({ ok: false, code: 'duplicate', message: 'conflict:duplicate_departure' })
     const res = await postDeparture(jsonRequest(validBody), tourContext())
@@ -310,6 +354,24 @@ describe('PATCH departures/[departureId]', () => {
       'v1',
       { status: 'closed' },
       ACTOR,
+    )
+  })
+
+  it('tags the actor when via=assistant', async () => {
+    saveDeparture.mockResolvedValue({ ok: true, value: { id: DEPARTURE_ID } })
+    const res = await patchDeparture(
+      jsonRequest(validBody, 'http://localhost/test?via=assistant'),
+      departureContext(),
+    )
+    expect(res.status).toBe(200)
+    expect(saveDeparture).toHaveBeenCalledWith(
+      expect.anything(),
+      CLIENT_ID,
+      TOUR_ID,
+      DEPARTURE_ID,
+      'v1',
+      { status: 'closed' },
+      ASSISTANT_ACTOR,
     )
   })
 

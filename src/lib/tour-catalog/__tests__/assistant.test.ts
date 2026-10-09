@@ -3,6 +3,9 @@ import type Anthropic from '@anthropic-ai/sdk'
 import {
   buildCatalogIndex,
   checkProposal,
+  normaliseDeparturePatchKeys,
+  normaliseNewDepartureKeys,
+  normalisePatchKeys,
   runAssistant,
   tourDetail,
 } from '../assistant'
@@ -107,6 +110,76 @@ describe('tourDetail', () => {
 })
 
 // ---------------------------------------------------------------------------
+// normalisePatchKeys
+// ---------------------------------------------------------------------------
+
+describe('normalisePatchKeys', () => {
+  it('maps price aliases to displayPriceText', () => {
+    expect(normalisePatchKeys({ price: 'NZD $1' })).toEqual({ displayPriceText: 'NZD $1' })
+    expect(normalisePatchKeys({ display_price: 'x' })).toEqual({ displayPriceText: 'x' })
+    expect(normalisePatchKeys({ display_price_text: 'x' })).toEqual({ displayPriceText: 'x' })
+    expect(normalisePatchKeys({ displayPrice: 'x' })).toEqual({ displayPriceText: 'x' })
+  })
+
+  it('maps duration aliases to durationText', () => {
+    expect(normalisePatchKeys({ duration: '10 days' })).toEqual({ durationText: '10 days' })
+    expect(normalisePatchKeys({ duration_text: '10 days' })).toEqual({ durationText: '10 days' })
+    expect(normalisePatchKeys({ days: '10 days' })).toEqual({ durationText: '10 days' })
+  })
+
+  it('maps other documented aliases', () => {
+    expect(normalisePatchKeys({ short_description: 'x' })).toEqual({ shortDescription: 'x' })
+    expect(normalisePatchKeys({ description: 'x' })).toEqual({ shortDescription: 'x' })
+    expect(normalisePatchKeys({ single_supplement: 'x' })).toEqual({ singleSupplement: 'x' })
+    expect(normalisePatchKeys({ singleRoomSupplement: 'x' })).toEqual({ singleSupplement: 'x' })
+    expect(normalisePatchKeys({ max_group_size: 10 })).toEqual({ maxGroupSize: 10 })
+    expect(normalisePatchKeys({ maxGroup: 10 })).toEqual({ maxGroupSize: 10 })
+    expect(normalisePatchKeys({ groupSize: 10 })).toEqual({ maxGroupSize: 10 })
+    expect(normalisePatchKeys({ is_active: true })).toEqual({ isActive: true })
+    expect(normalisePatchKeys({ active: true })).toEqual({ isActive: true })
+    expect(normalisePatchKeys({ manages_departures: true })).toEqual({ managesDepartures: true })
+    expect(normalisePatchKeys({ tour_cities: ['Beijing'] })).toEqual({ tourCities: ['Beijing'] })
+    expect(normalisePatchKeys({ cities: ['Beijing'] })).toEqual({ tourCities: ['Beijing'] })
+  })
+
+  it('leaves unknown keys untouched', () => {
+    expect(normalisePatchKeys({ colour: 'red' })).toEqual({ colour: 'red' })
+  })
+
+  it('keeps canonical keys as-is', () => {
+    expect(normalisePatchKeys({ name: 'X', displayPriceText: 'y' })).toEqual({
+      name: 'X',
+      displayPriceText: 'y',
+    })
+  })
+})
+
+describe('normaliseDeparturePatchKeys', () => {
+  it('maps return_on and price aliases', () => {
+    expect(normaliseDeparturePatchKeys({ return_on: '2027-01-01' })).toEqual({
+      returnOn: '2027-01-01',
+    })
+    expect(normaliseDeparturePatchKeys({ price: 'NZD $1' })).toEqual({
+      priceTextOverride: 'NZD $1',
+    })
+    expect(normaliseDeparturePatchKeys({ price_text_override: 'NZD $1' })).toEqual({
+      priceTextOverride: 'NZD $1',
+    })
+  })
+})
+
+describe('normaliseNewDepartureKeys', () => {
+  it('maps depart_on and return_on', () => {
+    expect(normaliseNewDepartureKeys({ depart_on: '2027-01-01' })).toEqual({
+      departOn: '2027-01-01',
+    })
+    expect(normaliseNewDepartureKeys({ return_on: '2027-01-02' })).toEqual({
+      returnOn: '2027-01-02',
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
 // checkProposal
 // ---------------------------------------------------------------------------
 
@@ -121,6 +194,46 @@ describe('checkProposal', () => {
     expect(result).not.toBeNull()
     expect(result?.check.ok).toBe(true)
     expect(result?.proposal.kind).toBe('update_tour')
+  })
+
+  it('normalises { price } to displayPriceText and validates ok', () => {
+    const result = checkProposal(makeSnapshot(), {
+      kind: 'update_tour',
+      tourId: 'tour-1',
+      summary: '改价格',
+      patch: { price: 'From NZD $8,599 per person' },
+    })
+    expect(result?.check.ok).toBe(true)
+    if (result && result.proposal.kind === 'update_tour') {
+      expect(result.proposal.patch.displayPriceText).toBe('From NZD $8,599 per person')
+    }
+  })
+
+  it('normalises { return_on } for a departure patch', () => {
+    const result = checkProposal(makeSnapshot(), {
+      kind: 'update_departure',
+      tourId: 'tour-1',
+      departureId: 'dep-1',
+      summary: '改回程日',
+      patch: { return_on: '2027-01-01' },
+    })
+    expect(result?.check.ok).toBe(true)
+    if (result && result.proposal.kind === 'update_departure') {
+      expect(result.proposal.patch.returnOn).toBe('2027-01-01')
+    }
+  })
+
+  it('still rejects an unknown key like colour', () => {
+    const result = checkProposal(makeSnapshot(), {
+      kind: 'update_tour',
+      tourId: 'tour-1',
+      summary: '改颜色',
+      patch: { colour: 'red' },
+    })
+    expect(result?.check.ok).toBe(false)
+    if (result && !result.check.ok) {
+      expect(result.check.errors.some((e) => e.field === 'colour')).toBe(true)
+    }
   })
 
   it('rejects an invalid price', () => {
@@ -377,6 +490,23 @@ describe('runAssistant', () => {
     const result = await runAssistant(baseInput, deps)
     // 1000 input * 3 + 500 output * 15 = 3000 + 7500 = 10500 / 1e6
     expect(result.costUsd).toBeCloseTo(0.0105, 6)
+  })
+
+  it('sends a system prompt that says 准备把 and forbids 已把', async () => {
+    const { deps, calls } = depsFrom([textMessage('好的')])
+    await runAssistant(baseInput, deps)
+    const system = calls[0].system as string
+    expect(system).toContain('准备把')
+    expect(system).toContain('已把')
+  })
+
+  it('sends a propose_changes schema that documents displayPriceText', async () => {
+    const { deps, calls } = depsFrom([textMessage('好的')])
+    await runAssistant(baseInput, deps)
+    const tools = calls[0].tools as Anthropic.Tool[]
+    const propose = tools.find((t) => t.name === 'propose_changes')
+    expect(propose).toBeDefined()
+    expect(JSON.stringify(propose)).toContain('displayPriceText')
   })
 })
 

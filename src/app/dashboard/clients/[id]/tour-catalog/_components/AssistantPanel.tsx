@@ -20,10 +20,15 @@ import type {
   TourPatchView,
 } from './types'
 
+/** A proposal plus the frozen diff lines captured when the reply arrived. */
+interface ProposalWithDiff extends AssistantProposalView {
+  diffLines: string[]
+}
+
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
-  proposals?: AssistantProposalView[]
+  proposals?: ProposalWithDiff[]
 }
 
 const HINT =
@@ -36,6 +41,7 @@ const FIELD_LABELS: Record<string, string> = {
   name: '团名',
   title: '对外标题',
   displayPriceText: '展示价',
+  price: '展示价',
   durationText: '天数',
   shortDescription: '简介',
   highlights: '亮点',
@@ -66,6 +72,7 @@ const ERROR_LABELS: Record<string, string> = {
   departure_not_found: '找不到这个班期',
   field_not_editable: '这项不能改',
   depart_on_not_editable: '出团日不能改',
+  empty_patch: '这条没有可以改的内容',
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -85,6 +92,12 @@ function fieldLabel(field: string): string {
 function errorLabel(code: string): string {
   if (code.startsWith('invalid_price')) return '价格写法不对'
   return ERROR_LABELS[code] ?? code
+}
+
+/** Render a field-error as「字段：原因」, or just the reason when the field is '*'. */
+function fieldErrorText(e: FieldErrorView): string {
+  if (e.field === '*' || e.field === '') return errorLabel(e.code)
+  return `${fieldLabel(e.field)}：${errorLabel(e.code)}`
 }
 
 function statusLabel(status: string): string {
@@ -110,30 +123,22 @@ function departureOf(
 }
 
 // ---------------------------------------------------------------------------
-// Before/after rendering
+// Diff-line computation (frozen at reply time)
 // ---------------------------------------------------------------------------
 
-function ScalarChange({ field, before, after }: { field: string; before: unknown; after: unknown }) {
-  return (
-    <li className="text-sm font-semibold text-me-charcoal/70">
-      {fieldLabel(field)}：{scalarText(before)} → {scalarText(after)}
-    </li>
-  )
+function scalarChangeLine(field: string, before: unknown, after: unknown): string {
+  return `${fieldLabel(field)}：${scalarText(before)} → ${scalarText(after)}`
 }
 
-function ListChange({ field, before, after }: { field: string; before: unknown; after: unknown }) {
+function listChangeLine(field: string, before: unknown, after: unknown): string {
   const beforeLen = Array.isArray(before) ? before.length : 0
   const afterLen = Array.isArray(after) ? after.length : 0
   const delta = afterLen - beforeLen
   const sign = delta >= 0 ? '+' : '−'
-  return (
-    <li className="text-sm font-semibold text-me-charcoal/70">
-      {fieldLabel(field)}：{sign} {Math.abs(delta)} 项
-    </li>
-  )
+  return `${fieldLabel(field)}：${sign} ${Math.abs(delta)} 项`
 }
 
-function itineraryChangeText(
+function itineraryChangeLines(
   before: CatalogItineraryDayView[],
   after: CatalogItineraryDayView[],
 ): string[] {
@@ -154,68 +159,59 @@ function itineraryChangeText(
   return out
 }
 
-function TourPatchChanges({
-  patch,
-  tour,
-}: {
-  patch: TourPatchView
-  tour: CatalogTourView | undefined
-}) {
-  const entries = Object.entries(patch) as Array<[string, unknown]>
-  return (
-    <ul className="mt-2 space-y-1">
-      {entries.map(([field, after]) => {
-        if (field === 'itinerary') {
-          const before = tour?.itinerary ?? []
-          const lines = itineraryChangeText(before, (after as CatalogItineraryDayView[]) ?? [])
-          return lines.map(line => (
-            <li key={`itinerary-${line}`} className="text-sm font-semibold text-me-charcoal/70">
-              {line}
-            </li>
-          ))
-        }
-        const before = tour ? (tour as unknown as Record<string, unknown>)[field] : undefined
-        if (LIST_FIELDS.has(field)) {
-          return <ListChange key={field} field={field} before={before} after={after} />
-        }
-        return <ScalarChange key={field} field={field} before={before} after={after} />
-      })}
-    </ul>
-  )
+function tourPatchDiffLines(patch: TourPatchView, tour: CatalogTourView | undefined): string[] {
+  const out: string[] = []
+  for (const [field, after] of Object.entries(patch) as Array<[string, unknown]>) {
+    if (field === 'itinerary') {
+      const before = tour?.itinerary ?? []
+      out.push(...itineraryChangeLines(before, (after as CatalogItineraryDayView[]) ?? []))
+      continue
+    }
+    const before = tour ? (tour as unknown as Record<string, unknown>)[field] : undefined
+    out.push(
+      LIST_FIELDS.has(field)
+        ? listChangeLine(field, before, after)
+        : scalarChangeLine(field, before, after),
+    )
+  }
+  return out
 }
 
-function DeparturePatchChanges({
-  patch,
-  departure,
-}: {
-  patch: DeparturePatchView
-  departure: CatalogDepartureView | undefined
-}) {
-  const entries = Object.entries(patch) as Array<[string, unknown]>
-  return (
-    <ul className="mt-2 space-y-1">
-      {entries.map(([field, after]) => {
-        const before = departure ? (departure as unknown as Record<string, unknown>)[field] : undefined
-        const beforeText = field === 'status' ? statusLabel(scalarText(before)) : scalarText(before)
-        const afterText = field === 'status' ? statusLabel(scalarText(after)) : scalarText(after)
-        return (
-          <li key={field} className="text-sm font-semibold text-me-charcoal/70">
-            {fieldLabel(field)}：{beforeText} → {afterText}
-          </li>
-        )
-      })}
-    </ul>
-  )
+function departurePatchDiffLines(
+  patch: DeparturePatchView,
+  departure: CatalogDepartureView | undefined,
+): string[] {
+  const out: string[] = []
+  for (const [field, after] of Object.entries(patch) as Array<[string, unknown]>) {
+    const before = departure ? (departure as unknown as Record<string, unknown>)[field] : undefined
+    const beforeText = field === 'status' ? statusLabel(scalarText(before)) : scalarText(before)
+    const afterText = field === 'status' ? statusLabel(scalarText(after)) : scalarText(after)
+    out.push(`${fieldLabel(field)}：${beforeText} → ${afterText}`)
+  }
+  return out
 }
 
-function CreateDepartureSummary({ fields }: { fields: NewDepartureView }) {
+function createDepartureDiffLines(fields: NewDepartureView): string[] {
   const price = fields.priceTextOverride ? `，价格 ${fields.priceTextOverride}` : ''
-  return (
-    <p className="mt-2 text-sm font-semibold text-me-charcoal/70">
-      新增班期 {fields.departOn}，返程 {fields.returnOn}，{statusLabel(fields.status)}
-      {price}
-    </p>
-  )
+  return [`新增班期 ${fields.departOn}，返程 ${fields.returnOn}，${statusLabel(fields.status)}${price}`]
+}
+
+/** Compute the frozen diff lines for a proposal using the current snapshot. */
+function computeDiffLines(
+  proposal: ProposalView,
+  tours: CatalogTourView[],
+  departures: CatalogDepartureView[],
+): string[] {
+  if (proposal.kind === 'update_tour') {
+    return tourPatchDiffLines(proposal.patch, tours.find(t => t.id === proposal.tourId))
+  }
+  if (proposal.kind === 'update_departure') {
+    return departurePatchDiffLines(
+      proposal.patch,
+      departureOf(departures, proposal.departureId),
+    )
+  }
+  return createDepartureDiffLines(proposal.fields)
 }
 
 // ---------------------------------------------------------------------------
@@ -285,7 +281,7 @@ function ProposalCard({
   onApplied,
 }: {
   clientId: string
-  item: AssistantProposalView
+  item: ProposalWithDiff
   tours: CatalogTourView[]
   departures: CatalogDepartureView[]
   applied: boolean
@@ -300,7 +296,7 @@ function ProposalCard({
 }) {
   const [busy, setBusy] = useState(false)
   const [ownResult, setOwnResult] = useState<ApplyResult | null>(null)
-  const { proposal, check } = item
+  const { proposal, check, diffLines } = item
   const name = tourName(tours, proposal.tourId)
   const result = ownResult ?? externalResult ?? null
   const warnings = check.ok ? check.warnings ?? [] : []
@@ -308,6 +304,7 @@ function ProposalCard({
   const canApply = check.ok && (!needsConfirm || confirmed)
 
   const apply = useCallback(async () => {
+    if (busy) return
     setBusy(true)
     setOwnResult(null)
     try {
@@ -317,28 +314,26 @@ function ProposalCard({
     } finally {
       setBusy(false)
     }
-  }, [clientId, proposal, tours, departures, onApplied, fresh])
+  }, [busy, clientId, proposal, tours, departures, onApplied, fresh])
 
   return (
     <div className="mt-3 rounded-lg border border-black/10 bg-me-ivory/60 p-3">
       <p className="text-sm font-black text-me-charcoal">{name}</p>
       <p className="text-sm font-semibold text-me-charcoal/70">{proposal.summary}</p>
 
-      {proposal.kind === 'update_tour' && (
-        <TourPatchChanges patch={proposal.patch} tour={tours.find(t => t.id === proposal.tourId)} />
-      )}
       {proposal.kind === 'update_departure' && (
-        <>
-          <p className="mt-2 text-sm font-black text-me-charcoal/70">
-            班期 {departureOf(departures, proposal.departureId)?.departOn ?? proposal.departureId}
-          </p>
-          <DeparturePatchChanges
-            patch={proposal.patch}
-            departure={departureOf(departures, proposal.departureId)}
-          />
-        </>
+        <p className="mt-2 text-sm font-black text-me-charcoal/70">
+          班期 {departureOf(departures, proposal.departureId)?.departOn ?? proposal.departureId}
+        </p>
       )}
-      {proposal.kind === 'create_departure' && <CreateDepartureSummary fields={proposal.fields} />}
+
+      <ul className="mt-2 space-y-1">
+        {diffLines.map((line, i) => (
+          <li key={`${i}-${line}`} className="text-sm font-semibold text-me-charcoal/70">
+            {line}
+          </li>
+        ))}
+      </ul>
 
       {!check.ok && (
         <div className="mt-2 rounded-lg border border-[#C2453A]/30 bg-[#C2453A]/8 p-2">
@@ -346,7 +341,7 @@ function ProposalCard({
           <ul className="mt-1 space-y-0.5">
             {check.errors.map((e, i) => (
               <li key={`${e.field}-${i}`} className="text-xs font-semibold text-[#C2453A]">
-                {fieldLabel(e.field)}：{errorLabel(e.code)}
+                {fieldErrorText(e)}
               </li>
             ))}
           </ul>
@@ -363,6 +358,7 @@ function ProposalCard({
             <span className="text-sm font-black text-[#5C8A4A]">已应用</span>
           ) : (
             <button
+              type="button"
               onClick={apply}
               disabled={busy || applyingAll || !canApply}
               className="rounded-lg bg-me-charcoal px-3 py-1 text-xs font-black text-white hover:bg-me-charcoal/85 disabled:opacity-40"
@@ -375,7 +371,7 @@ function ProposalCard({
           )}
           {result && !result.ok && result.errors && (
             <span className="text-xs font-black text-[#C2453A]">
-              {result.errors.map(e => `${fieldLabel(e.field)}：${errorLabel(e.code)}`).join('；')}
+              {result.errors.map(fieldErrorText).join('；')}
             </span>
           )}
         </div>
@@ -399,7 +395,7 @@ async function applyProposal(
   let res: Response
   if (proposal.kind === 'update_tour') {
     const tour = tours.find(t => t.id === proposal.tourId)
-    res = await fetch(`${base}/tours/${proposal.tourId}`, {
+    res = await fetch(`${base}/tours/${proposal.tourId}?via=assistant`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -409,7 +405,7 @@ async function applyProposal(
     })
   } else if (proposal.kind === 'update_departure') {
     const dep = departures.find(d => d.id === proposal.departureId)
-    res = await fetch(`${base}/departures/${proposal.departureId}`, {
+    res = await fetch(`${base}/departures/${proposal.departureId}?via=assistant`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -419,7 +415,7 @@ async function applyProposal(
       }),
     })
   } else {
-    res = await fetch(`${base}/tours/${proposal.tourId}/departures`, {
+    res = await fetch(`${base}/tours/${proposal.tourId}/departures?via=assistant`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(proposal.fields),
@@ -489,7 +485,7 @@ function buildApplyUnits(
     if (!m.proposals) continue
     for (let i = 0; i < m.proposals.length; i++) {
       const item = m.proposals[i]
-      const key = `${m.content}-${i}`
+      const key = `${messages.indexOf(m)}-${i}`
       if (!item.check.ok || appliedKeys.has(key)) continue
       const hasWarnings = (item.check.warnings?.length ?? 0) > 0
       const needsConfirm = hasWarnings && !confirmedKeys.has(key)
@@ -527,10 +523,10 @@ function assistantErrorLabel(code: string): string {
 }
 
 /** Append applied/unapplied markers for a message's proposals to its history content. */
-function historyContent(m: ChatMessage, appliedKeys: Set<string>): string {
+function historyContent(m: ChatMessage, index: number, appliedKeys: Set<string>): string {
   if (!m.proposals || m.proposals.length === 0) return m.content
   const lines = m.proposals.map((p, i) => {
-    const key = `${m.content}-${i}`
+    const key = `${index}-${i}`
     const state = appliedKeys.has(key) ? '已应用' : '未应用'
     return `[建议] ${p.proposal.summary} — ${state}`
   })
@@ -572,9 +568,9 @@ export function AssistantPanel({
   const send = useCallback(async () => {
     const text = input.trim()
     if (text === '' || busy) return
-    const history = messages.map(m => ({
+    const history = messages.map((m, mi) => ({
       role: m.role,
-      content: m.role === 'assistant' ? historyContent(m, appliedKeys) : m.content,
+      content: m.role === 'assistant' ? historyContent(m, mi, appliedKeys) : m.content,
     }))
     setMessages(prev => [...prev, { role: 'user', content: text }])
     setInput('')
@@ -593,9 +589,13 @@ export function AssistantPanel({
       }
       const data = (await res.json()) as AssistantReplyView
       setIgnoredCount(data.ignoredCount ?? 0)
+      const proposals: ProposalWithDiff[] = data.proposals.map(p => ({
+        ...p,
+        diffLines: computeDiffLines(p.proposal, tours, departures),
+      }))
       setMessages(prev => [
         ...prev,
-        { role: 'assistant', content: data.reply, proposals: data.proposals },
+        { role: 'assistant', content: data.reply, proposals },
       ])
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -605,7 +605,7 @@ export function AssistantPanel({
         listRef.current?.scrollTo?.({ top: listRef.current.scrollHeight })
       })
     }
-  }, [clientId, input, busy, messages, appliedKeys])
+  }, [clientId, input, busy, messages, appliedKeys, tours, departures])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -640,12 +640,16 @@ export function AssistantPanel({
     [markApplied, recordResult, onApplied],
   )
 
-  const validCount = messages.reduce(
-    (n, m) => n + (m.proposals?.filter(p => p.check.ok).length ?? 0),
-    0,
-  )
+  const unappliedValidCount = messages.reduce((n, m, mi) => {
+    if (!m.proposals) return n
+    return (
+      n +
+      m.proposals.filter((p, i) => p.check.ok && !appliedKeys.has(`${mi}-${i}`)).length
+    )
+  }, 0)
 
   const applyAll = useCallback(async () => {
+    if (applyingAll) return
     const units = buildApplyUnits(messages, appliedKeys, confirmedKeys)
     let fresh = freshUpdatedAt
     let skipped = 0
@@ -670,6 +674,7 @@ export function AssistantPanel({
     setSkippedWarningCount(skipped)
     onApplied()
   }, [
+    applyingAll,
     messages,
     appliedKeys,
     confirmedKeys,
@@ -710,7 +715,7 @@ export function AssistantPanel({
                 </p>
               )}
               {m.proposals?.map((item, j) => {
-                const key = `${m.content}-${j}`
+                const key = `${i}-${j}`
                 return (
                   <ProposalCard
                     key={key}
@@ -736,8 +741,9 @@ export function AssistantPanel({
 
       {error && <p className="text-sm font-black text-[#C2453A]">{error}</p>}
 
-      {validCount >= 2 && (
+      {unappliedValidCount >= 2 && (
         <button
+          type="button"
           onClick={() => { void applyAll() }}
           disabled={applyingAll}
           className="rounded-lg border border-black/10 bg-white px-3 py-1 text-xs font-black text-me-charcoal hover:bg-me-ivory disabled:opacity-40"
@@ -762,6 +768,7 @@ export function AssistantPanel({
       />
       <div className="flex items-center justify-between">
         <button
+          type="button"
           onClick={() => { void send() }}
           disabled={busy || input.trim() === ''}
           className="rounded-lg bg-me-charcoal px-4 py-2 text-sm font-black text-white hover:bg-me-charcoal/85 disabled:cursor-not-allowed disabled:opacity-40"

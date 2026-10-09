@@ -11,6 +11,11 @@ interface RouteContext {
   params: Promise<{ id: string; tourId: string }>
 }
 
+/** When the request comes from the assistant (`?via=assistant`), tag the actor accordingly. */
+function actorFor(req: NextRequest, actor: string): string {
+  return new URL(req.url).searchParams.get('via') === 'assistant' ? `${actor} (AI 助手)` : actor
+}
+
 export async function PATCH(req: NextRequest, { params }: RouteContext) {
   const { id: clientId, tourId } = await params
 
@@ -46,7 +51,7 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
     tourId,
     expectedUpdatedAt,
     tourPatchToDb(validated.value),
-    access.actor,
+    actorFor(req, access.actor),
   )
 
   if (result.ok) {

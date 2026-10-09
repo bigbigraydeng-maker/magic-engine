@@ -155,7 +155,7 @@ describe('AssistantPanel', () => {
     await waitFor(() => expect(screen.getByText('已应用')).toBeTruthy())
 
     const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit]
-    expect(url).toBe('/api/clients/c1/tour-catalog/tours/t1')
+    expect(url).toBe('/api/clients/c1/tour-catalog/tours/t1?via=assistant')
     expect(init.method).toBe('PATCH')
     const body = JSON.parse(init.body as string) as {
       expectedUpdatedAt: string
@@ -164,6 +164,46 @@ describe('AssistantPanel', () => {
     expect(body.expectedUpdatedAt).toBe('2026-01-01T00:00:00Z')
     expect(body.patch).toEqual({ displayPriceText: 'From NZD $5,999 per person' })
     expect(onApplied).toHaveBeenCalled()
+  })
+
+  it('keeps the frozen before/after diff after the tours prop refreshes', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          reply: '已改展示价',
+          proposals: [priceProposal],
+          costUsd: 0,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ tour: { ...tours[0], updatedAt: '2026-02-02T00:00:00Z' } }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+    const onApplied = vi.fn()
+    const { rerender } = render(
+      <AssistantPanel clientId="c1" tours={tours} departures={departures} onApplied={onApplied} />,
+    )
+
+    const box = screen.getByPlaceholderText('用大白话告诉我要改什么…')
+    fireEvent.change(box, { target: { value: '把展示价改成 8299' } })
+    fireEvent.click(screen.getByText('发送'))
+
+    await waitFor(() => expect(screen.getByText('应用这条')).toBeTruthy())
+    fireEvent.click(screen.getByText('应用这条'))
+    await waitFor(() => expect(screen.getByText('已应用')).toBeTruthy())
+
+    // Simulate the page refresh: the tours prop now carries the new price.
+    const refreshed: CatalogTourView[] = [
+      { ...tours[0], displayPriceText: 'From NZD $8,299 per person' },
+    ]
+    rerender(
+      <AssistantPanel clientId="c1" tours={refreshed} departures={departures} onApplied={onApplied} />,
+    )
+
+    // The card still shows the original before → after, not 新 → 新.
+    expect(
+      screen.getByText(/展示价：From NZD \$4,999 per person → From NZD \$5,999 per person/),
+    ).toBeTruthy()
   })
 
   it('shows an invalid proposal without an apply button', async () => {
@@ -244,7 +284,7 @@ describe('AssistantPanel', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
 
     const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit]
-    expect(url).toBe('/api/clients/c1/tour-catalog/tours/t1')
+    expect(url).toBe('/api/clients/c1/tour-catalog/tours/t1?via=assistant')
     expect(init.method).toBe('PATCH')
     const body = JSON.parse(init.body as string) as {
       expectedUpdatedAt: string
@@ -571,5 +611,95 @@ describe('AssistantPanel', () => {
 
     await sendMessage('改价')
     await waitFor(() => expect(screen.getByText('展示价：价格写法不对')).toBeTruthy())
+  })
+
+  it('shows 全部应用 only while at least two valid proposals are unapplied', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          reply: '两处改动',
+          proposals: [priceProposal, itineraryProposal],
+          costUsd: 0,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ tour: { ...tours[0], updatedAt: '2026-02-02T00:00:00Z' } }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ tour: { ...tours[0], updatedAt: '2026-03-03T00:00:00Z' } }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+    renderPanel()
+
+    await sendMessage('改展示价和第 2 天')
+    await waitFor(() => expect(screen.getByText('全部应用')).toBeTruthy())
+
+    fireEvent.click(screen.getAllByText('应用这条')[0])
+    await waitFor(() => expect(screen.getAllByText('已应用').length).toBe(1))
+    // Only one proposal left: its own「应用这条」is enough, so「全部应用」is hidden.
+    expect(screen.queryByText('全部应用')).toBeNull()
+
+    fireEvent.click(screen.getAllByText('应用这条')[0])
+    await waitFor(() => expect(screen.getAllByText('已应用').length).toBe(2))
+    expect(screen.queryByText('全部应用')).toBeNull()
+  })
+
+  it('renders field errors with Chinese labels and never shows *', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        reply: '试试',
+        proposals: [
+          {
+            proposal: { kind: 'update_tour', tourId: 't1', summary: '改价', patch: { price: 'x' } },
+            check: {
+              ok: false,
+              errors: [
+                { field: 'price', code: 'field_not_editable' },
+                { field: '*', code: 'empty_patch' },
+              ],
+            },
+          },
+        ],
+        costUsd: 0,
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    renderPanel()
+
+    await sendMessage('改价')
+    await waitFor(() => expect(screen.getByText('展示价：这项不能改')).toBeTruthy())
+    expect(screen.getByText('这条没有可以改的内容')).toBeTruthy()
+    expect(screen.queryByText(/\*/)).toBeNull()
+  })
+
+  it('sends only one request when 应用这条 is clicked twice quickly', async () => {
+    let resolvePatch: ((value: Response) => void) | undefined
+    const pending = new Promise<Response>(resolve => {
+      resolvePatch = resolve
+    })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          reply: '改展示价',
+          proposals: [priceProposal],
+          costUsd: 0,
+        }),
+      )
+      .mockImplementationOnce(() => pending)
+    vi.stubGlobal('fetch', fetchMock)
+    renderPanel()
+
+    await sendMessage('改展示价')
+    await waitFor(() => expect(screen.getByText('应用这条')).toBeTruthy())
+
+    const btn = screen.getByText('应用这条')
+    fireEvent.click(btn)
+    fireEvent.click(btn)
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    resolvePatch?.(jsonResponse({ tour: { ...tours[0], updatedAt: '2026-02-02T00:00:00Z' } }))
+    await waitFor(() => expect(screen.getByText('已应用')).toBeTruthy())
+    // Still only the assistant POST + one PATCH.
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })
