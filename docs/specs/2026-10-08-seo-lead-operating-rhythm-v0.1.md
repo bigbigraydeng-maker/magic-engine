@@ -106,6 +106,8 @@ CTS 周一那 5 张卡，10-08 查到全是「待办」、已过期 3 张。办�
 
 **这个数字现在取不到，P1-A 必须先定义落点**：现有 `report.ts` 的 `median_days_to_verified` 只算 `status=completed` 且 `verify.state=pass` 的卡，批准和系统收尾都不进该口径。P1-A 要在 `execution_items.steps_json` 里写两种机器可读回执——`approval_receipt`（approved_by、approved_at、request id、client id、source record id）与 `system_close_receipt`（closed_by=system、closed_at、原因、事实置信度）——并让周报新增 `median_days_to_decision`＝（approved_at 或 closed_at）− 卡创建时间，两类分开列示。没有这两个时间戳，P3 的四周决策依据无从产生。
 
+**批准回执必须有真实的写入入口（现状没有）**：现有 `src/app/api/clients/[id]/execution/[itemId]/route.ts` 的 PATCH 只接受 `pending / in_progress / completed / skipped` 四种状态（`VALID_STATUSES`），没有「批准」动作，也不允许写 `steps_json`；执行看板同样没有批准按钮。所以 P1-A 工作包必须同时包含：①执行看板上专用的「批准 / 不批准」按钮；②对应的专用接口，**批准人身份取自服务端登录会话（`requirePaidClientAccess`），不取请求体**，并同时写 `approval_receipt` 与 `execution_logs`；③PATCH 不放宽。这是新增对外接口且碰鉴权，P1-A 的风险级别因此按 **A 级**重估（上面 §5 表里的 B 级只适用于预诊断与收尾部分），须 2 审并先出设计稿。在此入口落地前，`median_days_to_decision` 只能统计系统收尾、漏掉全部人工批准，不得拿它做 P3 的决策依据。
+
 ---
 
 ## 4. 以 CTS 为例：一位资深负责人本周会做的 5 件事（真实数据，只读）
@@ -199,7 +201,7 @@ CTS 周一那 5 张卡，10-08 查到全是「待办」、已过期 3 张。办�
 | `seo.attribution.feasibility_checked` | P1 | 询盘按落地页取数可行性 | 能/不能/缺什么 | 不能就不编数 |
 | `seo.change.proposed` | P3 | 改动稿出炉，等人批 | `authorization=pending_pm`，附证据+闸门结果 | 无批准事件不得往下 |
 | `seo.change.authorized` | P3 | PM 批准 | 授权人、批准的是哪个版本的改动稿 | 改稿后旧授权作废 |
-| `seo.change.applied` / `seo.change.rolled_back` | P3 | 经 PR/插件落地 / 撤回 | provider 回执（PR 号或插件回执）、改前基线 | 无 provider 回执＝「没完成」 |
+| `seo.change.applied` / `seo.change.rolled_back` | P3 | 经 PR/插件落地 / 撤回 | **PR 号或插件回执只是执行引用，不等于已上线**；`applied` 必须同时有：部署成功回执 + 对目标页面的**线上即时回读**成功（线上的规范网址/跳转/内链/标题确实是目标值），再加改前基线 | 没有部署回执和线上回读＝「没完成」，不得发 `applied`，也不得进入 T+14/28 核验；`seo-post-publish-monitor` 近期未触发（§1 D4），P3 开工前须先查明原因 |
 | `seo.change.verified` | P3 | T+14/28 排名核验（三态） | 动了≥3 名 / 没动 / 没测成 | 没测成不得写成没变化 |
 
 ---
@@ -319,7 +321,7 @@ CTS 周一那 5 张卡，10-08 查到全是「待办」、已过期 3 张。办�
 
 **智能层 or 执行手**：智能层（诊断与建议）；执行改站点留给人批后的通道，第一阶段不动手。
 
-**红线检查**：红线 1（无包装升级）✓ · 红线 2（CTS 数字只作示范，不进 shared runtime）待实现时由复审逐文件核对 · 红线 3（不直建 L1：降级 L4/L2 落地＋登记候选，待硬证据晋升）— 以登记候选为准，未登记前不通过 · 红线 4/5（语义级换客户/换行业）见上，待 PM 确认 · 红线 6（不新增 L1 Capability）不适用 · 红线 7（行业判断进 Playbook/Profile，不进共享代码）✓ 须保持。
+**红线检查**：红线 1（无包装升级）✓ · 红线 2（CTS 数字只作示范，不进 shared runtime）待实现时由复审逐文件核对 · 红线 3（不直建 L1：降级 L4/L2 落地＋登记候选，待硬证据晋升）— **目前只是计划，候选尚未登记，所以此项现在不通过**；登记需要同时改 `docs/registry/platform-candidates.md` 和 `src/lib/pm-todo/platform-candidate-reviews.ts`（后者是代码，不在本纯文档 PR 范围内），因此**登记动作列为 P1 实现 PR 的第一步，未登记不得合并任何 P1 代码** · 红线 4/5（语义级换客户/换行业）见上，待 PM 确认 · 红线 6（不新增 L1 Capability）不适用 · 红线 7（行业判断进 Playbook/Profile，不进共享代码）✓ 须保持。
 
 **PM 待拍板项**：①上述换客户/换行业测试是否接受；②§8 的内部写入范围。
 
