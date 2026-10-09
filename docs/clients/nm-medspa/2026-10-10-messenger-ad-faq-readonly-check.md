@@ -139,10 +139,15 @@ website: （保持 NULL —— 客户确实没有官网，不要瞎填主页链�
 
 可回退：第一次写入之前该行 `products` 原值为 NULL；但现在线上已是下面那版旧值，重写前须先备份当前值（见下）。
 
-**已执行但格式不合契约，待重写（2026-10-10）**：
-- 统筹代 PM 批准后，已向 `master_briefs` 行 `60c6cc24-5946-4d82-a0b8-4eaec2d34d4c`（NM Medspa 唯一一条，`is_active = true`）写入过一版 `products`，
-  但那一版带了 `price` / `currency` 等多余字段、没有 `usp`，不符合上面的 `{name, usp}` 契约。
-- 需要用上面的 `{name, usp}` 版本覆盖重写（写库属生产写入，须另获授权；本次修订只改文档，未碰生产）。
+**已执行并已按契约修正（2026-10-10）**：
+- 统筹代 PM 批准后写入 `master_briefs` 行 `60c6cc24-5946-4d82-a0b8-4eaec2d34d4c`（NM Medspa 唯一一条，`is_active = true`）。
+- 第一版写错了：带 `price` / `currency` 等多余字段、没有 `usp`。核实代码确认审查意见属实——`normalizeProducts` 只保留 `{name, usp}`，
+  `brief-injector` 会把它渲染成「主力产品：Signature Escape（undefined）」，等于白写还污染 prompt。
+- 已覆盖重写成合契约的一条并回读确认：
+  `name = "Signature Escape"`，
+  `usp = "NZ$158 · 75min for new clients: 40min Body Massage + 35min Spa Facial (incl. 5min Scalp Ritual)"`（95 字，未超 120 上限）。
+- `usp` 放不下出处，所以**出处「PM 2026-10-10 口头确认」只记在本文件和台账卡里**，不写进库。
+- `website` 仍为 NULL。
 - 覆盖前先读出并保存当前值：`select products from master_briefs where id = '60c6cc24-5946-4d82-a0b8-4eaec2d34d4c';`，把结果 JSON 存进本文件或台账卡。
 - 回滚：把上一步保存的 JSON 写回 `products`（撤销本次重写）。写成 NULL 只对应第一次写入之前的历史状态，不要用于撤销本次重写。
 
