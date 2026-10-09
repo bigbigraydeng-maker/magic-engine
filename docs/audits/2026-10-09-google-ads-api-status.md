@@ -209,3 +209,25 @@ PM 本人点了 **Verify branding**，谷歌当场给出结果：
 | Google Cloud → Branding → Developer contact information | `Email addresses` | 本来就已经是 `hello@magicengine.cloud`，无需改动 |
 
 ⚠️ **顺序警告**：`User support email` 属于品牌认证审过的内容之一。按谷歌文档，改动这些字段会变成 Draft Branding，**必须重新验证并重新发布才会生效**，而且「验证进行中不允许编辑」。所以**先点 Publish branding 把已通过的这版发布掉，再谈改支持邮箱**，顺序反了会白白浪费这次已通过的认证。本次因此**没有动**那个下拉框（打开看了选项就按 Esc 关掉，字段值未变）。
+
+### 8.4 结果：品牌认证已发布，访问级别已升到 Basic（2026-10-10，实测确认）
+
+PM 点完 **Publish branding** 并申请升级后，我在 Google Cloud Console 实际核对（不是听转述）：
+
+| 页面 | 实测显示 |
+|---|---|
+| Google Auth Platform → Branding → Verification status | ✅「Your branding has been verified and **is being shown to users**」——已发布，7 天过期风险解除 |
+| Google Ads API → Current access level（项目 `compass-489509`） | **Basic** |
+
+Basic 这一级的实际权限（控制台原文）：
+
+- **15,000 次/天**（生产账户）—— 原 Explorer 是 2,880 次/天
+- 15,000 次/天（测试账户）
+- **「Access to all API functionality, including campaign management and reporting」** —— 全功能
+- Production-ready environment
+
+**对我们代码的直接影响**：§6.1 里提到的「Explorer 级别禁用关键词规划服务，`src/lib/google-ads/keyword-planner.ts` 调不通」这个限制，**随 Basic 解除**。`KeywordPlanIdeaService` 等在 Basic 下可用。
+
+**下一级 Standard**（不限次数）：同一页有「Start application」按钮，页面标注「Review time: approx 10-15 business days」。本次**没有申请**——现在一天 15,000 次远超实际需要（ME 只有个位数客户账户要读）。
+
+**但接口仍然跑不起来**：§6.2 的问题没有变——线上 Render 的 `crazycontent` 服务上 `GOOGLE_ADS_DEVELOPER_TOKEN` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` / `_MANAGER_ID` **五个一个都没有**。级别升上去 ≠ 接口能用。**真正的下一个卡点是配密钥，不是级别。**
