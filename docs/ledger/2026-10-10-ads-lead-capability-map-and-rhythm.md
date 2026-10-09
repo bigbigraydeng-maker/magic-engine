@@ -4,9 +4,9 @@ title: 设计稿，未获 PM 批准，不得据此改任何广告：资深广告
 status: decided
 owner: pm
 decided_on: 2026-10-10
-source: doc:docs/specs/2026-10-10-ads-lead-capability-map-and-rhythm-v0.1.md
+source: pr:2411
 verify_by: 2026-10-17
-verify_how: 看 PM 是否已回设计稿 §8 的三个问句（第一阶段开不开工、定时任务停摆要不要插队查、AU 合规规则库要不要先接上）；回了就按答案开新卡，没回就再提醒一次
+verify_how: 看 PM 是否已回设计稿第 8 节的三个问句（第一阶段开不开工、真实花费是只显示还是直接接线、AU 合规规则库要不要先接上广告草稿闸）；回了就按答案开新卡，没回就再提醒一次
 ---
 设计稿，未获 PM 批准。纯文档，不授权开启、改动、暂停任何广告，不授权花钱。
 广告原有三层沉淀（卫青人设 / Meta 经验手册 / ads-strategy 代码）只有日循环，周月季是空的，本稿补能力对照表与节奏表。
