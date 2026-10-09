@@ -66,7 +66,7 @@
 | 3 | 9.5 | 江南水乡运河 + `AN ANCIENT WATER TOWN` | ✅ 白墙黛瓦运河；**有意不打具体地名**（见「缺口 1」） | ✅ 官网原文 `"Xinshi — waterside ancient town"`，全程**只有一个**水乡古镇，所以用**单数** | ✅ |
 | 4 | 12.8 | 西湖樱花水榭 + `WEST LAKE, HANGZHOU` | ✅ 元数据地点 = Hangzhou；3 月拍摄，与 3/25 出发同季 | ✅ 官网原文 `"West Lake — Hua Gang Guan Yu, boat tour, Su Causeway, Leifeng Pagoda"` | ✅ |
 | 5 | 16.1 | 外滩夜景 + `THE BUND, SHANGHAI` | ✅ 东方明珠＋陆家嘴夜景；**已重新取景**，天际线移到画面中部 | ✅ 官网原文 `"The Bund and City God Temple area"` | ✅ |
-| 6 | 19.4 | **模糊**的上海天际线 + `INTERNATIONAL & CHINA FLIGHTS` | ✅ 故意模糊：没有飞机画面，模板约定「概念项用模糊背景，让画面不冒充在描述它」 | ✅ 官网含国际与国内机票 | ✅ |
+| 6 | 19.4 | **模糊**的上海天际线 + `INTERNATIONAL & CHINA FLIGHTS` | ✅ 故意模糊：没有飞机画面，模板约定「概念项用模糊背景，让画面不冒充在描述它」 | ⚠️ 官网写「International and domestic airfares」，但 10/06 方案（第 115 行）记录行程城市间全是陆路、「domestic」待 CTS 确认，在确认前只能写 `flights included`。**成片这一镜现在写的是 `CHINA FLIGHTS`，属于未确认承诺，已列为发布前置条件 3** | ✅ |
 | 7 | 23.2 | 客人走上海街巷 + `7 NIGHTS, 13 MEALS, ENGLISH GUIDE` | ✅ CTS 官网自家团照，真人；**已重新裁切**，避开了原先右侧露出的幼儿教育广告牌，人脸也更近更清 | ✅ 官网 7 晚住 5 家酒店、13 餐（7 早 5 午 1 晚）、英语导游 | ✅ |
 | 8 | 27.5 | `SHANGHAI + 3 CITIES. / FROM / NZ$2,699 / PER PERSON · TWIN SHARE / DEPARTS 25 MARCH 2027 / SINGLE SUPPLEMENT +NZ$400` | ✅ 上海日景（背景一直在动，不是静止图片） | ✅ 四个数字逐条对过官网。`+3 CITIES` 算得对：苏州、无锡、杭州 = 3 座市（新市是镇不是市） | ✅ |
 | 9 | 32.0 | 同上（价格停留到片尾） | ✅ | ✅ | ✅ |
@@ -182,6 +182,7 @@ primary #1a1a1a · accent #c41e3a · secondary #d4af37 · background #ffffff
 
 1. ~~PM 对肖像用于付费推广拍板~~：已有 PM 决定（客人肖像可以用、不再问 CTS），本版沿用；仅当加入未覆盖的新真人素材时再单独列出。
 2. **授权发布之前，先生成首评原文和带追踪参数的网址，给苏东坡过目并留下审查记录**：工厂体检里「CTA 在首评不在正文」「首评链接带追踪参数」两项 PASS 只证明规则配置对，不等于这次生成出来的首评内容对。首评可由工单 JSON 的 `copy.endcard` 加工单 ID 确定性生成；发布 worker 授权后不会等审查，所以审查必须排在授权之前，没有审查记录不得授权。
+3. **第 6 镜 `INTERNATIONAL & CHINA FLIGHTS` 必须先解决才能授权发布**：CTS 尚未确认「国内机票」，而成片画面已渲染、工单 `brief` 里也是这行字。解决办法二选一：①CTS 书面确认含国内机票，并把确认记录进本文件；②把这一镜改回 `FLIGHTS INCLUDED` 并重出片、重新交苏东坡与马良审。没有其中之一，不得授权发布。工单 JSON（留档）按已渲染状态保留原样，不在文档里改写。
 
 ### 审查列出的后续卡（这一轮不改，等统筹排期）
 
