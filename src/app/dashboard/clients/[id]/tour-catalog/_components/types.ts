@@ -160,7 +160,13 @@ export interface FieldErrorView {
   code: string
 }
 
-export type ProposalCheckView = { ok: true } | { ok: false; errors: FieldErrorView[] }
+export type ProposalWarningView =
+  | { code: 'itinerary_shrinks'; from: number; to: number }
+  | { code: 'itinerary_mostly_changed'; changed: number; total: number }
+
+export type ProposalCheckView =
+  | { ok: true; warnings?: ProposalWarningView[] }
+  | { ok: false; errors: FieldErrorView[] }
 
 export interface AssistantProposalView {
   proposal: ProposalView
@@ -171,4 +177,5 @@ export interface AssistantReplyView {
   reply: string
   proposals: AssistantProposalView[]
   costUsd: number
+  ignoredCount?: number
 }

@@ -67,6 +67,15 @@ function makeSnapshot(): CatalogSnapshot {
   }
 }
 
+/** Build a tour whose itinerary has `n` consecutive days with distinct titles. */
+function makeItinerary(n: number): CatalogTour['itinerary'] {
+  return Array.from({ length: n }, (_, i) => ({
+    day: i + 1,
+    title: `Day ${i + 1}`,
+    description: `Desc ${i + 1}`,
+  }))
+}
+
 // ---------------------------------------------------------------------------
 // buildCatalogIndex / tourDetail
 // ---------------------------------------------------------------------------
@@ -163,6 +172,61 @@ describe('checkProposal', () => {
   it('returns null for a non-object', () => {
     expect(checkProposal(makeSnapshot(), 'nope')).toBeNull()
   })
+
+  it('warns when the itinerary shrinks', () => {
+    const snapshot = makeSnapshot()
+    snapshot.tours[0] = makeTour({ itinerary: makeItinerary(10) })
+    const result = checkProposal(snapshot, {
+      kind: 'update_tour',
+      tourId: 'tour-1',
+      summary: '缩短行程',
+      patch: { itinerary: makeItinerary(5) },
+    })
+    expect(result?.check.ok).toBe(true)
+    if (result && result.check.ok) {
+      expect(result.check.warnings).toEqual([
+        { code: 'itinerary_shrinks', from: 10, to: 5 },
+      ])
+    }
+  })
+
+  it('warns when most itinerary titles change at the same length', () => {
+    const snapshot = makeSnapshot()
+    snapshot.tours[0] = makeTour({ itinerary: makeItinerary(4) })
+    const next = makeItinerary(4).map((d, i) =>
+      i < 3 ? { ...d, title: `New ${d.day}` } : d,
+    )
+    const result = checkProposal(snapshot, {
+      kind: 'update_tour',
+      tourId: 'tour-1',
+      summary: '改标题',
+      patch: { itinerary: next },
+    })
+    expect(result?.check.ok).toBe(true)
+    if (result && result.check.ok) {
+      expect(result.check.warnings).toEqual([
+        { code: 'itinerary_mostly_changed', changed: 3, total: 4 },
+      ])
+    }
+  })
+
+  it('emits no warning when only one of four titles changes', () => {
+    const snapshot = makeSnapshot()
+    snapshot.tours[0] = makeTour({ itinerary: makeItinerary(4) })
+    const next = makeItinerary(4).map((d, i) =>
+      i === 0 ? { ...d, title: `New ${d.day}` } : d,
+    )
+    const result = checkProposal(snapshot, {
+      kind: 'update_tour',
+      tourId: 'tour-1',
+      summary: '改一天标题',
+      patch: { itinerary: next },
+    })
+    expect(result?.check.ok).toBe(true)
+    if (result && result.check.ok) {
+      expect(result.check.warnings).toBeUndefined()
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -228,6 +292,7 @@ describe('runAssistant', () => {
     const result = await runAssistant(baseInput, deps)
     expect(result.reply).toBe('请问是哪个团？')
     expect(result.proposals).toEqual([])
+    expect(result.ignoredCount).toBe(0)
   })
 
   it('resolves get_tour_detail then returns validated proposals', async () => {
@@ -258,6 +323,7 @@ describe('runAssistant', () => {
     expect(result.proposals).toHaveLength(2)
     expect(result.proposals[0].check.ok).toBe(true)
     expect(result.proposals[1].check.ok).toBe(false)
+    expect(result.ignoredCount).toBe(0)
 
     // Second call must carry the tool_result with the tour JSON.
     const secondMessages = calls[1].messages
@@ -267,6 +333,28 @@ describe('runAssistant', () => {
     expect(toolResult).toBeDefined()
     const blocks = toolResult?.content as Anthropic.ToolResultBlockParam[]
     expect(blocks[0].content).toContain('China Panorama')
+  })
+
+  it('counts unrecognisable proposals as ignoredCount', async () => {
+    const { deps } = depsFrom([
+      toolMessage('propose_changes', {
+        reply: '已提交',
+        proposals: [
+          {
+            kind: 'update_tour',
+            tourId: 'tour-1',
+            summary: '改名字',
+            patch: { name: 'China Panorama Deluxe' },
+          },
+          { kind: 'delete_tour', tourId: 'tour-1', summary: '删团' },
+        ],
+      }),
+    ])
+
+    const result = await runAssistant(baseInput, deps)
+
+    expect(result.proposals).toHaveLength(1)
+    expect(result.ignoredCount).toBe(1)
   })
 
   it('throws on max_tokens truncation', async () => {
@@ -289,5 +377,42 @@ describe('runAssistant', () => {
     const result = await runAssistant(baseInput, deps)
     // 1000 input * 3 + 500 output * 15 = 3000 + 7500 = 10500 / 1e6
     expect(result.costUsd).toBeCloseTo(0.0105, 6)
+  })
+})
+
+function makeMessage(content: Anthropic.ContentBlock[]): Anthropic.Message {
+  return {
+    id: 'msg',
+    type: 'message',
+    role: 'assistant',
+    model: 'claude-sonnet-4-6',
+    content,
+    stop_reason: 'tool_use',
+    stop_sequence: null,
+    usage: { input_tokens: 10, output_tokens: 5 },
+  } as Anthropic.Message
+}
+
+describe('runAssistant — two tour detail requests in one reply', () => {
+  it('answers every tool call before the next round', async () => {
+    const snapshot = makeSnapshot()
+    const tourA = snapshot.tours[0]
+    const calls: Anthropic.MessageCreateParamsNonStreaming[] = []
+    const createMessage = async (params: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Message> => {
+      calls.push(params)
+      if (calls.length === 1) {
+        return makeMessage([
+          { type: 'tool_use', id: 'u1', name: 'get_tour_detail', input: { tourId: tourA.id } },
+          { type: 'tool_use', id: 'u2', name: 'get_tour_detail', input: { tourId: 'missing' } },
+        ])
+      }
+      return makeMessage([{ type: 'tool_use', id: 'u3', name: 'propose_changes', input: { reply: '好', proposals: [] } }])
+    }
+    const result = await runAssistant({ snapshot, history: [], message: '两个团', today: '2026-10-10' }, { createMessage })
+    expect(result.reply).toBe('好')
+    const last = calls[1].messages[calls[1].messages.length - 1]
+    const content = last.content as Anthropic.ToolResultBlockParam[]
+    expect(content.map((c) => c.tool_use_id)).toEqual(['u1', 'u2'])
+    expect(String(content[1].content)).toContain('tour_not_found')
   })
 })

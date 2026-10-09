@@ -18,6 +18,9 @@ export const dynamic = 'force-dynamic'
 
 const MAX_MESSAGE_LENGTH = 2000
 const HISTORY_LIMIT = 10
+/** A single remembered turn is never longer than this; the body as a whole never larger than 64KB. */
+const MAX_HISTORY_ITEM_LENGTH = 4000
+const MAX_BODY_BYTES = 64 * 1024
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -37,7 +40,7 @@ function parseHistory(raw: unknown): AssistantMessage[] {
     const content = item.content
     if (role !== 'user' && role !== 'assistant') continue
     if (typeof content !== 'string') continue
-    valid.push({ role, content })
+    valid.push({ role, content: content.slice(0, MAX_HISTORY_ITEM_LENGTH) })
   }
   return valid.slice(-HISTORY_LIMIT)
 }
@@ -50,7 +53,11 @@ export async function POST(request: Request, context: RouteContext) {
 
   let body: unknown
   try {
-    body = await request.json()
+    const text = await request.text()
+    if (text.length > MAX_BODY_BYTES) {
+      return NextResponse.json({ error: 'request_too_large' }, { status: 413 })
+    }
+    body = JSON.parse(text) as unknown
   } catch {
     return NextResponse.json({ error: 'message_required' }, { status: 400 })
   }

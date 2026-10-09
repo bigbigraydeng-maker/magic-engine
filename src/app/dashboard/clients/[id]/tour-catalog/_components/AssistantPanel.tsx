@@ -16,6 +16,7 @@ import type {
   FieldErrorView,
   NewDepartureView,
   ProposalView,
+  ProposalWarningView,
   TourPatchView,
 } from './types'
 
@@ -82,6 +83,7 @@ function fieldLabel(field: string): string {
 }
 
 function errorLabel(code: string): string {
+  if (code.startsWith('invalid_price')) return '价格写法不对'
   return ERROR_LABELS[code] ?? code
 }
 
@@ -217,6 +219,47 @@ function CreateDepartureSummary({ fields }: { fields: NewDepartureView }) {
 }
 
 // ---------------------------------------------------------------------------
+// Warnings
+// ---------------------------------------------------------------------------
+
+function warningText(warning: ProposalWarningView): string {
+  if (warning.code === 'itinerary_shrinks') {
+    return `行程会从 ${warning.from} 天减到 ${warning.to} 天，后面的天会被删掉。确定吗？`
+  }
+  return `行程里 ${warning.total} 天有 ${warning.changed} 天标题都变了，像是换成了别的行程，请仔细核对。`
+}
+
+function WarningBox({
+  warnings,
+  confirmed,
+  onToggle,
+}: {
+  warnings: ProposalWarningView[]
+  confirmed: boolean
+  onToggle: (next: boolean) => void
+}) {
+  return (
+    <div className="mt-2 rounded-lg border border-[#C2453A]/30 bg-[#C2453A]/8 p-2">
+      <ul className="space-y-0.5">
+        {warnings.map((w, i) => (
+          <li key={`${w.code}-${i}`} className="text-xs font-semibold text-[#C2453A]">
+            {warningText(w)}
+          </li>
+        ))}
+      </ul>
+      <label className="mt-2 flex items-center gap-2 text-xs font-black text-[#C2453A]">
+        <input
+          type="checkbox"
+          checked={confirmed}
+          onChange={e => onToggle(e.target.checked)}
+        />
+        我看过了，确认这样改
+      </label>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Proposal card
 // ---------------------------------------------------------------------------
 
@@ -236,6 +279,9 @@ function ProposalCard({
   applied,
   externalResult,
   fresh,
+  applyingAll,
+  confirmed,
+  onConfirmChange,
   onApplied,
 }: {
   clientId: string
@@ -246,6 +292,10 @@ function ProposalCard({
   externalResult?: ApplyResult
   /** Latest known updatedAt per row from earlier applies in this session (beats the snapshot). */
   fresh: Record<string, string>
+  applyingAll: boolean
+  /** Warning confirmation lives in the panel so「全部应用」can see it too. */
+  confirmed: boolean
+  onConfirmChange: (next: boolean) => void
   onApplied: (result: ApplyResult) => void
 }) {
   const [busy, setBusy] = useState(false)
@@ -253,6 +303,9 @@ function ProposalCard({
   const { proposal, check } = item
   const name = tourName(tours, proposal.tourId)
   const result = ownResult ?? externalResult ?? null
+  const warnings = check.ok ? check.warnings ?? [] : []
+  const needsConfirm = warnings.length > 0
+  const canApply = check.ok && (!needsConfirm || confirmed)
 
   const apply = useCallback(async () => {
     setBusy(true)
@@ -300,6 +353,10 @@ function ProposalCard({
         </div>
       )}
 
+      {check.ok && needsConfirm && (
+        <WarningBox warnings={warnings} confirmed={confirmed} onToggle={onConfirmChange} />
+      )}
+
       {check.ok && (
         <div className="mt-2 flex items-center gap-2">
           {applied ? (
@@ -307,7 +364,7 @@ function ProposalCard({
           ) : (
             <button
               onClick={apply}
-              disabled={busy}
+              disabled={busy || applyingAll || !canApply}
               className="rounded-lg bg-me-charcoal px-3 py-1 text-xs font-black text-white hover:bg-me-charcoal/85 disabled:opacity-40"
             >
               {busy ? '正在保存…' : '应用这条'}
@@ -385,7 +442,10 @@ async function applyProposal(
     return { ok: false, message: '这一天已经有班期了' }
   }
   if (res.status === 409) {
-    return { ok: false, message: '这个团刚被别人改过，请刷新页面后再让我改' }
+    if (proposal.kind === 'update_tour') {
+      return { ok: false, message: '这个团刚被别人改过，请刷新页面后再让我改' }
+    }
+    return { ok: false, message: '这个班期刚被别人改过，请刷新页面后再让我改' }
   }
   if (res.status === 400 && body.errors) {
     return { ok: false, errors: body.errors }
@@ -409,10 +469,21 @@ function mergeFresh(
 interface ApplyUnit {
   keys: string[]
   proposal: ProposalView
+  /** Has an unconfirmed warning: skipped by「全部应用」until the PM ticks the box. */
+  needsConfirm: boolean
 }
 
-/** Merge consecutive update_tour proposals for the same tour into one PATCH. */
-function buildApplyUnits(messages: ChatMessage[], appliedKeys: Set<string>): ApplyUnit[] {
+function patchKeysOverlap(a: TourPatchView, b: TourPatchView): boolean {
+  const aKeys = Object.keys(a)
+  return Object.keys(b).some(k => aKeys.includes(k))
+}
+
+/** Merge consecutive update_tour proposals for the same tour into one PATCH, unless their patch keys overlap. */
+function buildApplyUnits(
+  messages: ChatMessage[],
+  appliedKeys: Set<string>,
+  confirmedKeys: Set<string>,
+): ApplyUnit[] {
   const units: ApplyUnit[] = []
   for (const m of messages) {
     if (!m.proposals) continue
@@ -420,12 +491,17 @@ function buildApplyUnits(messages: ChatMessage[], appliedKeys: Set<string>): App
       const item = m.proposals[i]
       const key = `${m.content}-${i}`
       if (!item.check.ok || appliedKeys.has(key)) continue
+      const hasWarnings = (item.check.warnings?.length ?? 0) > 0
+      const needsConfirm = hasWarnings && !confirmedKeys.has(key)
       const last = units[units.length - 1]
       if (
         last &&
+        !hasWarnings &&
+        !last.needsConfirm &&
         last.proposal.kind === 'update_tour' &&
         item.proposal.kind === 'update_tour' &&
-        last.proposal.tourId === item.proposal.tourId
+        last.proposal.tourId === item.proposal.tourId &&
+        !patchKeysOverlap(last.proposal.patch, item.proposal.patch)
       ) {
         last.proposal = {
           ...last.proposal,
@@ -433,7 +509,7 @@ function buildApplyUnits(messages: ChatMessage[], appliedKeys: Set<string>): App
         }
         last.keys.push(key)
       } else {
-        units.push({ keys: [key], proposal: item.proposal })
+        units.push({ keys: [key], proposal: item.proposal, needsConfirm })
       }
     }
   }
@@ -450,6 +526,17 @@ function assistantErrorLabel(code: string): string {
   return code
 }
 
+/** Append applied/unapplied markers for a message's proposals to its history content. */
+function historyContent(m: ChatMessage, appliedKeys: Set<string>): string {
+  if (!m.proposals || m.proposals.length === 0) return m.content
+  const lines = m.proposals.map((p, i) => {
+    const key = `${m.content}-${i}`
+    const state = appliedKeys.has(key) ? '已应用' : '未应用'
+    return `[建议] ${p.proposal.summary} — ${state}`
+  })
+  return `${m.content}\n${lines.join('\n')}`
+}
+
 export function AssistantPanel({
   clientId,
   tours,
@@ -464,20 +551,36 @@ export function AssistantPanel({
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
+  const [applyingAll, setApplyingAll] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [appliedKeys, setAppliedKeys] = useState<Set<string>>(new Set())
   const [freshUpdatedAt, setFreshUpdatedAt] = useState<Record<string, string>>({})
+  const [confirmedKeys, setConfirmedKeys] = useState<Set<string>>(new Set())
+  const setConfirmedKey = useCallback((key: string, next: boolean) => {
+    setConfirmedKeys(prev => {
+      const out = new Set(prev)
+      if (next) out.add(key)
+      else out.delete(key)
+      return out
+    })
+  }, [])
   const [cardResults, setCardResults] = useState<Record<string, ApplyResult>>({})
+  const [ignoredCount, setIgnoredCount] = useState(0)
+  const [skippedWarningCount, setSkippedWarningCount] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
 
   const send = useCallback(async () => {
     const text = input.trim()
     if (text === '' || busy) return
-    const history = messages.map(m => ({ role: m.role, content: m.content }))
+    const history = messages.map(m => ({
+      role: m.role,
+      content: m.role === 'assistant' ? historyContent(m, appliedKeys) : m.content,
+    }))
     setMessages(prev => [...prev, { role: 'user', content: text }])
     setInput('')
     setBusy(true)
     setError(null)
+    setSkippedWarningCount(0)
     try {
       const res = await fetch(`/api/clients/${clientId}/tour-catalog/assistant`, {
         method: 'POST',
@@ -489,6 +592,7 @@ export function AssistantPanel({
         throw new Error(assistantErrorLabel(code ?? `HTTP ${res.status}`))
       }
       const data = (await res.json()) as AssistantReplyView
+      setIgnoredCount(data.ignoredCount ?? 0)
       setMessages(prev => [
         ...prev,
         { role: 'assistant', content: data.reply, proposals: data.proposals },
@@ -501,7 +605,7 @@ export function AssistantPanel({
         listRef.current?.scrollTo?.({ top: listRef.current.scrollHeight })
       })
     }
-  }, [clientId, input, busy, messages])
+  }, [clientId, input, busy, messages, appliedKeys])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -542,21 +646,33 @@ export function AssistantPanel({
   )
 
   const applyAll = useCallback(async () => {
-    const units = buildApplyUnits(messages, appliedKeys)
+    const units = buildApplyUnits(messages, appliedKeys, confirmedKeys)
     let fresh = freshUpdatedAt
-    for (const unit of units) {
-      const res = await applyProposal(clientId, unit.proposal, tours, departures, fresh)
-      if (res.ok) {
-        fresh = mergeFresh(fresh, res)
-        markApplied(unit.keys)
+    let skipped = 0
+    setApplyingAll(true)
+    try {
+      for (const unit of units) {
+        if (unit.needsConfirm) {
+          skipped += unit.keys.length
+          continue
+        }
+        const res = await applyProposal(clientId, unit.proposal, tours, departures, fresh)
+        if (res.ok) {
+          fresh = mergeFresh(fresh, res)
+          markApplied(unit.keys)
+        }
+        recordResult(unit.keys, res)
       }
-      recordResult(unit.keys, res)
+    } finally {
+      setApplyingAll(false)
     }
     setFreshUpdatedAt(fresh)
+    setSkippedWarningCount(skipped)
     onApplied()
   }, [
     messages,
     appliedKeys,
+    confirmedKeys,
     freshUpdatedAt,
     clientId,
     tours,
@@ -588,6 +704,11 @@ export function AssistantPanel({
               }
             >
               <p className="whitespace-pre-wrap">{m.content}</p>
+              {m.role === 'assistant' && i === messages.length - 1 && ignoredCount > 0 && (
+                <p className="mt-1 text-xs font-semibold text-me-charcoal/40">
+                  有 {ignoredCount} 条建议我没看懂，已忽略
+                </p>
+              )}
               {m.proposals?.map((item, j) => {
                 const key = `${m.content}-${j}`
                 return (
@@ -600,6 +721,9 @@ export function AssistantPanel({
                     applied={appliedKeys.has(key)}
                     externalResult={cardResults[key]}
                     fresh={freshUpdatedAt}
+                    applyingAll={applyingAll}
+                    confirmed={confirmedKeys.has(key)}
+                    onConfirmChange={next => setConfirmedKey(key, next)}
                     onApplied={result => handleCardApplied(key, result)}
                   />
                 )
@@ -615,10 +739,17 @@ export function AssistantPanel({
       {validCount >= 2 && (
         <button
           onClick={() => { void applyAll() }}
-          className="rounded-lg border border-black/10 bg-white px-3 py-1 text-xs font-black text-me-charcoal hover:bg-me-ivory"
+          disabled={applyingAll}
+          className="rounded-lg border border-black/10 bg-white px-3 py-1 text-xs font-black text-me-charcoal hover:bg-me-ivory disabled:opacity-40"
         >
           全部应用
         </button>
+      )}
+
+      {skippedWarningCount > 0 && (
+        <p className="text-xs font-semibold text-me-charcoal/55">
+          有 {skippedWarningCount} 条需要你先勾选确认
+        </p>
       )}
 
       <textarea

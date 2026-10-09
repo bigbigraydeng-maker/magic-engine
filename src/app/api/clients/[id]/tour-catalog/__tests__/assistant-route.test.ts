@@ -112,3 +112,20 @@ describe('POST tour-catalog assistant route', () => {
     await expect(res.json()).resolves.toEqual({ error: 'assistant_unavailable' })
   })
 })
+
+describe('size limits', () => {
+  it('refuses a body larger than 64KB before parsing', async () => {
+    const res = await POST(makeRequest({ message: 'x', history: [{ role: 'user', content: 'a'.repeat(70 * 1024) }] }), makeContext())
+    expect(res.status).toBe(413)
+    expect(await res.json()).toEqual({ error: 'request_too_large' })
+    expect(runAssistant).not.toHaveBeenCalled()
+  })
+
+  it('truncates an over-long history item to 4000 characters', async () => {
+    loadCatalog.mockResolvedValue({ tours: [], departures: [], aliases: [] })
+    runAssistant.mockResolvedValue({ reply: 'ok', proposals: [], costUsd: 0 })
+    await POST(makeRequest({ message: 'hi', history: [{ role: 'assistant', content: 'b'.repeat(5000) }] }), makeContext())
+    const call = runAssistant.mock.calls[0][0] as { history: Array<{ content: string }> }
+    expect(call.history[0].content.length).toBe(4000)
+  })
+})

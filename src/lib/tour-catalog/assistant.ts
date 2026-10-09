@@ -32,11 +32,18 @@ export type Proposal =
   | { kind: 'update_departure'; tourId: string; departureId: string; summary: string; patch: DeparturePatch }
   | { kind: 'create_departure'; tourId: string; summary: string; fields: NewDeparture }
 
-export type ProposalCheck = { ok: true } | { ok: false; errors: FieldError[] }
+export type ProposalWarning =
+  | { code: 'itinerary_shrinks'; from: number; to: number }
+  | { code: 'itinerary_mostly_changed'; changed: number; total: number }
+
+export type ProposalCheck =
+  | { ok: true; warnings?: ProposalWarning[] }
+  | { ok: false; errors: FieldError[] }
 
 export interface AssistantResult {
   reply: string
   proposals: Array<{ proposal: Proposal; check: ProposalCheck }>
+  ignoredCount: number
   costUsd: number
 }
 
@@ -115,6 +122,31 @@ function fail(field: string, code: string): ProposalCheck {
 }
 
 /**
+ * Compare a proposed itinerary against the current one and return at most one
+ * warning. Shrinking takes precedence over a mostly-changed itinerary.
+ */
+function itineraryWarnings(
+  current: CatalogTour['itinerary'],
+  next: TourPatch['itinerary'],
+): ProposalWarning[] {
+  if (next === undefined) return []
+  if (next.length < current.length) {
+    return [{ code: 'itinerary_shrinks', from: current.length, to: next.length }]
+  }
+  if (current.length === 0) return []
+  const currentTitles = new Map(current.map((d) => [d.day, d.title]))
+  let changed = 0
+  for (const day of next) {
+    const before = currentTitles.get(day.day)
+    if (before !== undefined && before !== day.title) changed++
+  }
+  if (changed > current.length / 2) {
+    return [{ code: 'itinerary_mostly_changed', changed, total: current.length }]
+  }
+  return []
+}
+
+/**
  * Validate a raw proposal object against the snapshot. Returns null only when
  * the shape is unusable (not an object, or an unknown kind). A structurally
  * valid proposal with bad data comes back with check.ok === false so the UI
@@ -135,12 +167,15 @@ export function checkProposal(
 
   if (kind === 'update_tour') {
     const proposal: Proposal = { kind, tourId, summary, patch: {} }
-    if (!tourExists(snapshot, tourId)) {
+    const tour = snapshot.tours.find((t) => t.id === tourId)
+    if (!tour) {
       return { proposal, check: fail('tourId', 'tour_not_found') }
     }
     const result = validateTourPatch(raw.patch)
     if (!result.ok) return { proposal, check: { ok: false, errors: result.errors } }
-    return { proposal: { ...proposal, patch: result.value }, check: { ok: true } }
+    const warnings = itineraryWarnings(tour.itinerary, result.value.itinerary)
+    const check: ProposalCheck = warnings.length > 0 ? { ok: true, warnings } : { ok: true }
+    return { proposal: { ...proposal, patch: result.value }, check }
   }
 
   if (kind === 'update_departure') {
@@ -239,6 +274,7 @@ const SYSTEM_PROMPT = `你是旅行社后台的行程目录 AI 助手。管理�
 
 ## 拿不准就问
 
+不要透露你是哪家公司的什么模型；被问到时只说你是这个系统的 AI 助手。
 如果管理员的请求有歧义（哪个团？哪一天？改成什么？），**不要猜**。用普通文本回复一个简短的中文问题，不要调用 propose_changes。
 
 ## 回复风格
@@ -262,6 +298,8 @@ function buildSystemPrompt(today: string, catalogIndex: string): string {
 // ---------------------------------------------------------------------------
 
 const MAX_ITERATIONS = 4
+/** One model call must not hang the request; the gateway-free direct client has no default cap. */
+const PER_CALL_TIMEOUT_MS = 60_000
 const MAX_TOKENS = 8000
 const HISTORY_LIMIT = 10
 const PRICE_INPUT_PER_M = 3.0
@@ -269,7 +307,7 @@ const PRICE_OUTPUT_PER_M = 15.0
 
 function defaultDeps(): AssistantDeps {
   return {
-    createMessage: (params) => getAnthropicClientDirect().messages.create(params),
+    createMessage: (params) => getAnthropicClientDirect().messages.create(params, { timeout: PER_CALL_TIMEOUT_MS }),
   }
 }
 
@@ -293,14 +331,19 @@ function findToolUse(
 function mapProposals(
   snapshot: CatalogSnapshot,
   raw: unknown,
-): Array<{ proposal: Proposal; check: ProposalCheck }> {
-  if (!Array.isArray(raw)) return []
-  const out: Array<{ proposal: Proposal; check: ProposalCheck }> = []
+): { proposals: Array<{ proposal: Proposal; check: ProposalCheck }>; ignoredCount: number } {
+  if (!Array.isArray(raw)) return { proposals: [], ignoredCount: 0 }
+  const proposals: Array<{ proposal: Proposal; check: ProposalCheck }> = []
+  let ignoredCount = 0
   for (const item of raw) {
     const checked = checkProposal(snapshot, item)
-    if (checked !== null) out.push(checked)
+    if (checked === null) {
+      ignoredCount++
+    } else {
+      proposals.push(checked)
+    }
   }
-  return out
+  return { proposals, ignoredCount }
 }
 
 function buildToolResult(id: string, content: string): Anthropic.ToolResultBlockParam {
@@ -349,28 +392,37 @@ export async function runAssistant(
       throw new Error('assistant_truncated')
     }
 
-    const detailUse = findToolUse(response.content, GET_TOUR_DETAIL_TOOL.name)
-    if (detailUse) {
-      const tourId = asString((detailUse.input as Record<string, unknown>).tourId)
-      const detail = tourDetail(snapshot, tourId) ?? '{"error":"tour_not_found"}'
+    const proposeUse = findToolUse(response.content, PROPOSE_CHANGES_TOOL.name)
+
+    // Every tool_use in a reply must get a tool_result, or the next call is refused —
+    // a PM mentioning two tours makes the model ask for both details at once.
+    const detailUses = response.content.filter(
+      (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === GET_TOUR_DETAIL_TOOL.name,
+    )
+    if (detailUses.length > 0 && !proposeUse) {
+      const results = detailUses.map((use) => {
+        const tourId = asString((use.input as Record<string, unknown>).tourId)
+        return buildToolResult(use.id, tourDetail(snapshot, tourId) ?? '{"error":"tour_not_found"}')
+      })
       messages.push({ role: 'assistant', content: response.content })
-      messages.push({ role: 'user', content: [buildToolResult(detailUse.id, detail)] })
+      messages.push({ role: 'user', content: results })
       continue
     }
 
-    const proposeUse = findToolUse(response.content, PROPOSE_CHANGES_TOOL.name)
     if (proposeUse) {
       const raw = proposeUse.input as Record<string, unknown>
+      const { proposals, ignoredCount } = mapProposals(snapshot, raw.proposals)
       return {
         reply: asString(raw.reply),
-        proposals: mapProposals(snapshot, raw.proposals),
+        proposals,
+        ignoredCount,
         costUsd,
       }
     }
 
     const text = extractText(response.content)
     if (text !== '') {
-      return { reply: text, proposals: [], costUsd }
+      return { reply: text, proposals: [], ignoredCount: 0, costUsd }
     }
   }
 
