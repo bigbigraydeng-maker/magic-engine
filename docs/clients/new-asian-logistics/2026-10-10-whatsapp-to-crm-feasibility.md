@@ -28,7 +28,7 @@
 | 查的东西 | 结果 | 怎么查的 |
 |---|---|---|
 | App 装没装、在不在跑 | 装了，版本 26.40.20，进程在跑 | `ls /Applications/WhatsApp.app`、`defaults read` Info.plist、`ps` |
-| App 身份 | `net.whatsapp.WhatsApp`（**个人版**那个 App 的标识，不是 Business 专用 App） | Info.plist `CFBundleIdentifier` |
+| App 身份 | `net.whatsapp.WhatsApp`（这是桌面端通用标识；WhatsApp Business 手机号同样可关联网页/桌面版，**不能据此判断主手机登录的是个人号还是商业号，账号归属保持未知，待 PM 核对号码**） | Info.plist `CFBundleIdentifier` |
 | 统筹说的 `…WhatsAppSMB.shared` 容器 | **存在但是空的（4 KB，只有空目录）**——是系统占位，不能当「装了 WhatsApp Business」的证据 | `du -sh` + `find` 目录清单 |
 | 真正放数据的容器 | `group.net.whatsapp.WhatsApp.shared`，69 MB，**只有一套账号的数据**（没有多账号分目录） | `du -sh`、目录清单 |
 | 这台机器什么时候开始同步的 | 容器创建于 2026-09-25 | 目录时间戳 |
@@ -43,7 +43,7 @@
    这是典型的个人号使用形态。
 2. **商业会话计数器只有 1**：App 自己记的「商业线程总数 = 1、商业入站消息 = 5」。
    如果这是 NAL 的客服号，这两个数会是三位数。
-3. App 身份是个人版那个 bundle，SMB 容器是空的。
+3. 桌面 App 的 bundle 标识与空 SMB 容器**不作为判断依据**（Business 账号也可关联桌面版）；账号类型保持未知，待 PM 核对号码。
 
 ### 为什么「具体哪个号」核实不了
 
@@ -262,7 +262,7 @@ NAL 已经在用；PR 2212 是**在已入库的邮件上判「这单成了」**�
 |---|---|---|---|---|---|
 | **0 · 现在** | 本文档 + 核实 NAL 那个号的现状（在哪个 App、谁是 Meta 管理员、有没有商务组合）。**纯问话和只读核查，不碰设置** | 不花 | 是 | C | 无 |
 | **1 · 零成本先把分母立起来** | 把 Meta 广告侧已有的「开聊次数」接进 ME 的目标进度，让 NAL 300/月的目标能看见进度条。**不接正文** | 不花 | 写自己的库 | C | 阶段 0 |
-| **2 · 真正接通 WhatsApp** | ① 先补并存模式专用推送：`message_echoes`（员工手机回复）和 `history`（最多 180 天历史聊天）。现有 `src/app/api/webhooks/whatsapp/route.ts` 只读 `value.messages`，这两类目前会被**静默忽略**——员工已回复的客人仍显示「待回复」，要导入的既有聊天也不会入库。必做项：解析、方向判定（我们发 / 客人发）、幂等去重、试跑验收；② ME 自己申请 Meta 两项高级权限（录两段演示提审）；③ **先在 UI 填好号码映射（`clients.whatsapp_phone_number_id`）并订阅 webhook**，再让 NAL 号走并存接入——或由 Embedded Signup 回调原子写入映射；因为 `route.ts:530-557` 未映射的号会被直接跳过并返回成功，`history` 又只在开户后推送一次，**映射和订阅没完成就不得触发/同意历史同步，否则历史会被永久吞掉**；④ 收消息进 `conversations`；⑤ **历史回灌走独立回填路径**：`history` 不得复用实时路径 `route.ts:368-493` 的副作用——不更新会话最后时间/当前状态、不建入站触点、不判退订、不发 `conversation/message.received`（否则两个 Inngest 消费者会制造过期待办和草稿，近 24 小时的历史甚至可能触发自动回复）。验收测试必须断言：回灌后无事件发出、无触点新增、会话当前状态不变、无自动回复 | Meta 消息费按量（并存模式下客人主动找我们的对话有免费窗口），**无平台月费** | 否 | **A**（碰 `src/app/api/webhooks/` 自动判 A 级） | PM 拍板 + 阶段 1 |
+| **2 · 真正接通 WhatsApp** | ① 先补并存模式专用推送：订阅 webhook 字段 `smb_message_echoes`（员工手机回复；载荷数组路径为 `value.message_echoes`）和 `history`（最多 180 天历史聊天）。现有 `src/app/api/webhooks/whatsapp/route.ts` 只读 `value.messages`，这两类目前会被**静默忽略**——员工已回复的客人仍显示「待回复」，要导入的既有聊天也不会入库。必做项：解析、方向判定（我们发 / 客人发）、幂等去重、试跑验收；② ME 自己申请 Meta 两项高级权限（录两段演示提审）；③ **先在 UI 填好号码映射（`clients.whatsapp_phone_number_id`）并订阅 webhook**，再让 NAL 号走并存接入——或由 Embedded Signup 回调原子写入映射；因为 `route.ts:530-557` 未映射的号会被直接跳过并返回成功，`history` 又只在开户后推送一次，**映射和订阅没完成就不得触发/同意历史同步，否则历史会被永久吞掉**；④ 收消息进 `conversations`；⑤ **历史回灌走独立回填路径**：`history` 不得复用实时路径 `route.ts:368-493` 的副作用——不更新会话最后时间/当前状态、不建入站触点、不判退订、不发 `conversation/message.received`（否则两个 Inngest 消费者会制造过期待办和草稿，近 24 小时的历史甚至可能触发自动回复）。验收测试必须断言：回灌后无事件发出、无触点新增、会话当前状态不变、无自动回复 | Meta 消息费按量（并存模式下客人主动找我们的对话有免费窗口），**无平台月费** | 否 | **A**（碰 `src/app/api/webhooks/` 自动判 A 级） | PM 拍板 + 阶段 1 |
 | **3 · 在 ME 里回客人** | 出站凭据从「单号全局」改成按客户取；打开 ME 里的 WhatsApp 回复 | 同上 | 否 | **A** | 阶段 2 跑稳两周 |
 | **4 · 打开大模型分析** | **不是现成开关，要写代码**：现有候选加载器 `src/lib/messenger/brief-cycle.ts:244-258` 以 `.eq('channel', 'messenger')` 把 WhatsApp / 邮件排除在外，仓库里也没有别的流程为这两个渠道写 `conversation_briefs`。要做：多渠道候选、按渠道区分的提示词、调度、验证；另需邮件全文获取策略（见 §4.5）；按 §3.3 定好打码策略再开 | 模型调用费 | 否 | B | 阶段 2 + 脱敏策略拍板 |
 | **5 · 邮件侧成交判定** | 按 NAL 的物流成交信号写一份规则，复用 PR 2212 的机制，并**新增 `conversations.status='won'` 回写**（PR 2212 本身只写 outcome 和 `contacts.stage`） | 不花 | 否 | B | 阶段 4 |
