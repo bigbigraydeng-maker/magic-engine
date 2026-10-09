@@ -1870,3 +1870,16 @@ Gate B 定的 `minSampleSize=3`，页面目前只会显示「数据还不够说�
 - [ ] 开源仓库的 SERP 重叠阈值用 CTS 实测校准后才可上线（设计稿 §11）
 
 - [ ] **[待排] 谷歌搜索广告（SEM）专家工作节奏设计**（PM 2026-10-09 拍板与 SEO 分开管理，归广告支柱；SEO 第一阶段跑起来后再排，不开工）。SEO 设计稿 §12 已定义两边「对表」接口；台账卡 `2026-10-09-sem-expert-rhythm-design-todo`
+
+## 广告负责人节奏 · 审查后续项（2026-10-10，设计稿 [docs/specs/2026-10-10-ads-lead-capability-map-and-rhythm-v0.1.md](./specs/2026-10-10-ads-lead-capability-map-and-rhythm-v0.1.md)，待 PM 批准第一阶段后再排）
+
+- [ ] **[P2] 把 `detectSpendSpike` / `detectClientSpendOverCap` 接到日循环上** —— 判据、阈值、fail-closed 防护全是现成的，生产里零个调用方；**先与 51 号窗口对口径**，别两边各写一套（魏征 D-2、卫青）
+- [ ] **[P3] 频次阈值按角色分档**（拉新 vs 再营销）需先扩 `AdsPlaybook` 接口（`playbooks/types.ts:23` 不收判断规则），且阈值须用 CTS/NAL 真实数据校准，不用开源的数字（子牙）
+- [ ] **[P2] W1 的「置信度」本期降级成「样本天数」**；真要做置信度得先定算法与取值域，否则实现出来是个凭感觉的字符串（子牙 6-3）
+- [ ] **[P2] 把广告组 / 广告层的 `frequency_7d` 真正填上**（`daily-insights.ts` 现在直接写死 null），否则疲劳分类长期只能靠系列层（魏征 B-1）
+- [ ] **[P3] `ad_entity_snapshots` 存按版位拆开的花费**，让 D9 能按真实花费判、不只按设置字段判（设计稿 §2.1 #4）
+- [ ] **[P3] NZ 版合规规则库**（AU 那份 `src/lib/compliance/au-rules.ts` 已存在但零调用方，先把 AU 接上广告草稿闸再谈 NZ）；Meta 个人属性规则也没落成可比对清单（设计稿 §2.1 #6）
+- [ ] **[P3] 命名规范自动校验**（CTS 一个账户里已有四种命名风格并存）（设计稿 §2.1 #2）
+- [ ] **[P3] 卫青手册 §三 把 `ad_health_prescriptions` 改成实际存在的表名**（生产库没这张表，照它去查会白跑一轮）（设计稿 §2.6）
+- [ ] **[P3] 季节性冲刺层排期（Q5）** 等 02 号窗口的 CTS 预算计划 PM 拍板后再排（设计稿 §3.4）
+- [ ] **[P3] `src/lib/cron/registry.ts` 两处清单与 `render.yaml` 不一致**：`google-data-pullback-daily` 写 `0 3 * * *`（实际 `0 17 * * *`）、`ad-entity-snapshot` 写 `30 */3`（实际 `30 */6`）；`reel-batch-render` 调了运行记录没人认领监控。**本分支基线 `registry.test.ts` 已有 2 条红，不是广告改动造成的**，碰 registry 的 PR 会撞上（子牙 4.1）
