@@ -210,6 +210,8 @@ declare
   v_updated_count integer := 0;
   v_version bigint;
 begin
+  perform set_config('tour_catalog.actor', 'import:' || p_batch_id || ' by ' || coalesce(p_applied_by, 'unknown'), true);
+
   select *
     into v_batch
     from public.tour_catalog_import_batches
@@ -333,6 +335,8 @@ declare
   v_updated_count integer := 0;
   v_version bigint;
 begin
+  perform set_config('tour_catalog.actor', 'rollback:' || p_batch_id, true);
+
   select *
     into v_batch
     from public.tour_catalog_import_batches

@@ -15,6 +15,9 @@ import type {
   CatalogTourView,
 } from './types'
 import { ImportPanel } from './ImportPanel'
+import { TourEditor } from './TourEditor'
+import { DeparturesEditor } from './DeparturesEditor'
+import { ChangeLog } from './ChangeLog'
 
 type State =
   | { phase: 'loading' }
@@ -88,6 +91,20 @@ function rollbackConfirmText(batch: CatalogBatchView): string {
   return `确定撤销这次导入吗？这次新增的 ${adds} 个班期会被删除，改过的 ${updates} 个会恢复原样。`
 }
 
+/** 撤销冲突时服务器返回的细节。 */
+interface RollbackConflict {
+  reason?: string
+  tourName?: string
+  departOn?: string
+}
+
+/** 撤销冲突的中文说明。 */
+function rollbackConflictText(conflict: RollbackConflict): string {
+  const name = conflict.tourName ?? '某个团'
+  const date = conflict.departOn ?? '某个班期'
+  return `撤销不了：这次导入之后，「${name}」${date} 这个班期又被改过（或删了）。为了不覆盖后来的修改，系统不会自动撤销。你可以展开这个团看「修改记录」，需要的话手工改回去。`
+}
+
 export function TourCatalogClient({ clientId }: { clientId: string }) {
   const [state, setState] = useState<State>({ phase: 'loading' })
 
@@ -137,7 +154,12 @@ export function TourCatalogClient({ clientId }: { clientId: string }) {
       {tours.length === 0 ? (
         <SeedPanel clientId={clientId} domain={state.snapshot.domain} onSeeded={refreshQuietly} />
       ) : (
-        <TourList tours={tours} departures={departures} />
+        <TourList
+          clientId={clientId}
+          tours={tours}
+          departures={departures}
+          onChanged={refreshQuietly}
+        />
       )}
 
       <AliasList clientId={clientId} aliases={aliases} tours={tours} onChanged={refreshQuietly} />
@@ -216,19 +238,25 @@ function SeedPanel({
 }
 
 function TourList({
+  clientId,
   tours,
   departures,
+  onChanged,
 }: {
+  clientId: string
   tours: CatalogTourView[]
   departures: CatalogDepartureView[]
+  onChanged: () => void
 }) {
   return (
     <div className="space-y-3">
       {tours.map(tour => (
         <TourBlock
           key={tour.id}
+          clientId={clientId}
           tour={tour}
           departures={departures.filter(d => d.tourId === tour.id)}
+          onChanged={onChanged}
         />
       ))}
     </div>
@@ -236,13 +264,20 @@ function TourList({
 }
 
 function TourBlock({
+  clientId,
   tour,
   departures,
+  onChanged,
 }: {
+  clientId: string
   tour: CatalogTourView
   departures: CatalogDepartureView[]
+  onChanged: () => void
 }) {
+  const [editing, setEditing] = useState(false)
   const upcoming = upcomingCount(departures)
+  const entityIds = [tour.id, ...departures.map(d => d.id)]
+
   return (
     <details className="rounded-xl border border-black/10 bg-white shadow-sm">
       <summary className="flex cursor-pointer flex-wrap items-center gap-3 px-4 py-3">
@@ -264,50 +299,39 @@ function TourBlock({
           </span>
         )}
       </summary>
-      <div className="border-t border-black/5 px-4 py-3">
-        {departures.length === 0 ? (
-          <p className="text-sm font-semibold text-me-charcoal/40">还没有班期</p>
+      <div className="space-y-4 border-t border-black/5 px-4 py-3">
+        {editing ? (
+          <TourEditor
+            clientId={clientId}
+            tour={tour}
+            onSaved={() => {
+              setEditing(false)
+              onChanged()
+            }}
+            onCancel={() => setEditing(false)}
+          />
         ) : (
-          <DepartureTable departures={departures} />
+          <div>
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="rounded-lg border border-black/10 bg-white px-3 py-1 text-sm font-semibold text-me-charcoal hover:bg-me-ivory"
+            >
+              编辑这个团
+            </button>
+          </div>
         )}
+
+        <DeparturesEditor
+          clientId={clientId}
+          tourId={tour.id}
+          departures={departures}
+          onChanged={onChanged}
+        />
+
+        <ChangeLog clientId={clientId} entityIds={entityIds} />
       </div>
     </details>
-  )
-}
-
-function DepartureTable({ departures }: { departures: CatalogDepartureView[] }) {
-  const today = todayIso()
-  return (
-    <div className="overflow-x-auto rounded-xl border border-black/10">
-      <table className="w-full text-sm">
-        <thead className="border-b border-black/10 bg-me-ivory text-left text-[10px] font-black uppercase tracking-[.12em] text-me-charcoal/45">
-          <tr>
-            <th className="whitespace-nowrap px-4 py-3">出团日</th>
-            <th className="whitespace-nowrap px-4 py-3">返程日</th>
-            <th className="whitespace-nowrap px-4 py-3">状态</th>
-            <th className="whitespace-nowrap px-4 py-3">该班展示价</th>
-          </tr>
-        </thead>
-        <tbody>
-          {departures.map(d => {
-            const past = d.departOn < today || d.status === 'cancelled'
-            return (
-              <tr
-                key={d.id}
-                className={`border-b border-black/5 last:border-0 ${past ? 'text-me-charcoal/35' : ''}`}
-              >
-                <td className="px-4 py-3 font-semibold">{d.departOn}</td>
-                <td className="px-4 py-3 font-semibold">{d.returnOn || '—'}</td>
-                <td className="px-4 py-3 font-semibold">
-                  {DEPARTURE_STATUS_LABELS[d.status] ?? d.status}
-                </td>
-                <td className="px-4 py-3 font-semibold">{d.priceTextOverride || '—'}</td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
   )
 }
 
@@ -449,8 +473,14 @@ function BatchRow({
         { method: 'POST' },
       )
       if (!res.ok) {
-        const { error: code } = (await res.json().catch(() => ({}))) as { error?: string }
-        throw new Error(errorLabel(code ?? `HTTP ${res.status}`))
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string
+          conflict?: RollbackConflict
+        }
+        if (body.error === 'conflict' && body.conflict) {
+          throw new Error(rollbackConflictText(body.conflict))
+        }
+        throw new Error(errorLabel(body.error ?? `HTTP ${res.status}`))
       }
       onChanged()
     } catch (err) {

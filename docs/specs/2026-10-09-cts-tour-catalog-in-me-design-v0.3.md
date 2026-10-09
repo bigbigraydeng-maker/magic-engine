@@ -115,6 +115,23 @@ CSV 日期只接受 `YYYY-MM-DD`，其它格式整行拒收。
 - seed 失败时会删除本次刚插入的团（补偿），不是数据库单事务；seed 不递增 `catalog_version`（目录此阶段不被任何渠道消费）。
 - `price.ts` 复用客户命名的 `cts-tour-price.parsePriceDisplayString`，后续应抽到中性模块；`todayIso` 默认时区写死 Pacific/Auckland，AU 客户需参数化。
 
+### 6.6 后台编辑（PM 2026-10-10 要求并入 P1a，本地做完再上线）
+
+- **可改的团字段**：name、title、short_description、duration_text、display_price_text（同 §6.4 校验，允许 TBC）、highlights、itinerary（逐天 day/title/description/meals）、inclusions、exclusions、tour_cities、single_supplement、max_group_size（正整数或空）、is_active、manages_departures。**不可改**：slug / destination / tier（它们是团的身份键，改了等于换一个团）。
+- **班期**：可新增（出团日 + 返程日 + 状态 + 该班展示价）；已有班期可改返程日、状态、该班展示价；**出团日不可改**（改日期 = 把旧班期标「已取消」再新增一个，保留历史，避免幽灵班期）。
+- **修改记录**：新表 `tour_catalog_change_log`（client_id、entity tour|departure、entity_id、action create|update、before、after、actor、created_at），RLS 仅 service_role。每次保存与修改记录**在同一个数据库函数里**完成（`tour_catalog_update_tour` / `tour_catalog_save_departure`），全成或全败，并递增 `catalog_version`。
+- **防覆盖**：保存时带上读取时的 `updated_at`，库里已变则拒绝（409「已被别人改过，请刷新后再改」）。
+- **权限**：同 P1a，仅 admin（`requireCatalogAdmin`）。
+- **校验在应用层**（纯函数 `edit-validation.ts`，可单测），数据库函数只接受白名单字段，防止夹带 slug/client_id 等。
+- **设计复审后补充（子牙/魏征 2026-10-10）**：
+  - 修改记录改用**数据库触发器**统一写：团表、班期表的新增/修改/删除都自动记一条（含 CSV 导入、撤销、种子导入），`actor` 由各数据库函数用 `set_config('tour_catalog.actor', …, true)` 标明（导入写「import:批次 by 谁」，撤销写「rollback:批次」，未标明为 system）；只有 updated_at 变化的不记。
+  - CSV 不会悄悄改动「已取消」的班期：文件里该班状态为空 → 保持已取消并提醒（cancelled_kept）；文件里明确写了可订等状态 → 照改但提醒「将重新开放已取消的班期」（reopens_cancelled），需勾选确认。
+  - 撤销被手工修改挡住时，接口返回冲突班期的团名与日期，页面用专门文案告诉 PM 去手工改回或保留现状。
+  - 把「是否管理班期」打开/关闭前弹二次确认（会影响整团是否对外可售）。
+  - highlights、short_description 不在网站读取口契约里，编辑器标注「仅内部参考」。
+  - 行程天数必须从 1 开始连续不重复。
+  - 两个编辑数据库函数的所有读写都同时限定 id 与 client_id，且仅授权 service_role、只供团目录路由调用。
+
 ## 7. 分步计划
 
 | 步 | 内容 | 风险级 | 说明 |

@@ -13,6 +13,7 @@ vi.mock('@/lib/tour-catalog/store', () => ({
   getBatch: vi.fn(),
   rollbackBatch: vi.fn(),
   getClientDomain: vi.fn(),
+  getDepartureLabel: vi.fn(),
 }))
 
 vi.mock('@/lib/tour-catalog/seed', () => ({
@@ -26,7 +27,14 @@ vi.mock('@/lib/web-intelligence/first-party-tours', () => ({
 }))
 
 import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
-import { addAlias, removeAlias, getBatch, rollbackBatch, getClientDomain } from '@/lib/tour-catalog/store'
+import {
+  addAlias,
+  removeAlias,
+  getBatch,
+  rollbackBatch,
+  getClientDomain,
+  getDepartureLabel,
+} from '@/lib/tour-catalog/store'
 import { fetchFirstPartyFeed, seedCatalog } from '@/lib/tour-catalog/seed'
 import { firstPartyTourSourceUrl } from '@/lib/web-intelligence/first-party-tours'
 import { POST as seedPOST } from '../seed/route'
@@ -42,6 +50,7 @@ const fetchFirstPartyFeedMock = vi.mocked(fetchFirstPartyFeed)
 const seedCatalogMock = vi.mocked(seedCatalog)
 const firstPartyTourSourceUrlMock = vi.mocked(firstPartyTourSourceUrl)
 const getClientDomainMock = vi.mocked(getClientDomain)
+const getDepartureLabelMock = vi.mocked(getDepartureLabel)
 
 const CLIENT_ID = 'client-1'
 
@@ -354,7 +363,74 @@ describe('POST /tour-catalog/batches/[batchId]/rollback', () => {
     expect(rollbackBatchMock).not.toHaveBeenCalled()
   })
 
-  it('returns 409 conflict without a message', async () => {
+  it('returns 409 conflict with the departure label when the message is parseable', async () => {
+    allowAccess()
+    getBatchMock.mockResolvedValue({ id: 'batch-1' } as never)
+    rollbackBatchMock.mockResolvedValue({
+      ok: false,
+      code: 'conflict',
+      message: 'conflict:modified:11111111-1111-1111-1111-111111111111',
+    })
+    getDepartureLabelMock.mockResolvedValue({
+      tourName: 'Grand Tour',
+      departOn: '2026-05-01',
+    })
+    const res = await rollbackPOST(makeRequest({}), makeBatchParams())
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({
+      error: 'conflict',
+      conflict: {
+        reason: 'modified',
+        tourName: 'Grand Tour',
+        departOn: '2026-05-01',
+      },
+    })
+    expect(getDepartureLabelMock).toHaveBeenCalledWith(
+      {},
+      CLIENT_ID,
+      '11111111-1111-1111-1111-111111111111',
+    )
+  })
+
+  it('returns 409 conflict with reason missing when the message says missing', async () => {
+    allowAccess()
+    getBatchMock.mockResolvedValue({ id: 'batch-1' } as never)
+    rollbackBatchMock.mockResolvedValue({
+      ok: false,
+      code: 'conflict',
+      message: 'conflict:missing:22222222-2222-2222-2222-222222222222',
+    })
+    getDepartureLabelMock.mockResolvedValue({
+      tourName: 'Short Trip',
+      departOn: '2026-06-01',
+    })
+    const res = await rollbackPOST(makeRequest({}), makeBatchParams())
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({
+      error: 'conflict',
+      conflict: {
+        reason: 'missing',
+        tourName: 'Short Trip',
+        departOn: '2026-06-01',
+      },
+    })
+  })
+
+  it('returns 409 conflict without a conflict field when the label is null', async () => {
+    allowAccess()
+    getBatchMock.mockResolvedValue({ id: 'batch-1' } as never)
+    rollbackBatchMock.mockResolvedValue({
+      ok: false,
+      code: 'conflict',
+      message: 'conflict:modified:11111111-1111-1111-1111-111111111111',
+    })
+    getDepartureLabelMock.mockResolvedValue(null)
+    const res = await rollbackPOST(makeRequest({}), makeBatchParams())
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'conflict' })
+  })
+
+  it('returns 409 conflict without a conflict field when the message is unparseable', async () => {
     allowAccess()
     getBatchMock.mockResolvedValue({ id: 'batch-1' } as never)
     rollbackBatchMock.mockResolvedValue({
@@ -365,6 +441,7 @@ describe('POST /tour-catalog/batches/[batchId]/rollback', () => {
     const res = await rollbackPOST(makeRequest({}), makeBatchParams())
     expect(res.status).toBe(409)
     expect(await res.json()).toEqual({ error: 'conflict' })
+    expect(getDepartureLabelMock).not.toHaveBeenCalled()
   })
 
   it('returns 409 not_applicable', async () => {

@@ -24,6 +24,17 @@ function jsonResponse(body: unknown, ok = true, status = 200): Response {
 
 const CLIENT_ID = 'c1'
 
+const TOUR = {
+  id: 't1',
+  slug: 'a',
+  destination: 'JP',
+  tier: 'std',
+  name: '东京五日',
+  displayPriceText: null,
+  isActive: true,
+  managesDepartures: true,
+}
+
 beforeEach(() => {
   vi.restoreAllMocks()
 })
@@ -135,18 +146,7 @@ describe('TourCatalogClient', () => {
       .mockResolvedValueOnce(
         jsonResponse(
           snapshot({
-            tours: [
-              {
-                id: 't1',
-                slug: 'a',
-                destination: 'JP',
-                tier: 'std',
-                name: '东京五日',
-                displayPriceText: null,
-                isActive: true,
-                managesDepartures: true,
-              },
-            ],
+            tours: [TOUR],
             batches: [
               {
                 id: 'b1',
@@ -190,18 +190,7 @@ describe('TourCatalogClient', () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(
         snapshot({
-          tours: [
-            {
-              id: 't1',
-              slug: 'a',
-              destination: 'JP',
-              tier: 'std',
-              name: '东京五日',
-              displayPriceText: null,
-              isActive: true,
-              managesDepartures: true,
-            },
-          ],
+          tours: [TOUR],
           batches: [
             {
               id: 'b1',
@@ -247,18 +236,7 @@ describe('TourCatalogClient', () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(
         snapshot({
-          tours: [
-            {
-              id: 't1',
-              slug: 'a',
-              destination: 'JP',
-              tier: 'std',
-              name: '东京五日',
-              displayPriceText: null,
-              isActive: true,
-              managesDepartures: true,
-            },
-          ],
+          tours: [TOUR],
           batches: [
             {
               id: 'b1',
@@ -319,18 +297,7 @@ describe('TourCatalogClient', () => {
       .mockResolvedValueOnce(
         jsonResponse(
           snapshot({
-            tours: [
-              {
-                id: 't1',
-                slug: 'a',
-                destination: 'JP',
-                tier: 'std',
-                name: '东京五日',
-                displayPriceText: null,
-                isActive: true,
-                managesDepartures: true,
-              },
-            ],
+            tours: [TOUR],
             aliases: [{ aliasNorm: '东京5日', tourId: 't1' }],
           }),
         ),
@@ -364,18 +331,7 @@ describe('TourCatalogClient', () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(
         snapshot({
-          tours: [
-            {
-              id: 't1',
-              slug: 'a',
-              destination: 'JP',
-              tier: 'std',
-              name: '东京五日',
-              displayPriceText: null,
-              isActive: true,
-              managesDepartures: true,
-            },
-          ],
+          tours: [TOUR],
           aliases: [{ aliasNorm: '东京5日', tourId: 't1' }],
         }),
       ),
@@ -394,27 +350,99 @@ describe('TourCatalogClient', () => {
 
   it('shows the empty alias message when there are no aliases', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
-      jsonResponse(
-        snapshot({
-          tours: [
-            {
-              id: 't1',
-              slug: 'a',
-              destination: 'JP',
-              tier: 'std',
-              name: '东京五日',
-              displayPriceText: null,
-              isActive: true,
-              managesDepartures: true,
-            },
-          ],
-        }),
-      ),
+      jsonResponse(snapshot({ tours: [TOUR] })),
     )
     vi.stubGlobal('fetch', fetchMock)
 
     render(<TourCatalogClient clientId={CLIENT_ID} />)
 
     expect(await screen.findByText(/现在还没有/)).toBeInTheDocument()
+  })
+
+  it('shows the tour editor when 编辑这个团 is clicked', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(snapshot({ tours: [TOUR] })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<TourCatalogClient clientId={CLIENT_ID} />)
+
+    fireEvent.click(await screen.findByText('编辑这个团'))
+
+    // The editor renders its own 保存 / 取消 buttons and the 团名 field.
+    expect(await screen.findByText('团名')).toBeInTheDocument()
+    expect(screen.getByText('保存')).toBeInTheDocument()
+    expect(screen.getByText('取消')).toBeInTheDocument()
+  })
+
+  it('shows the rollback conflict message with the tour name and date', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          snapshot({
+            tours: [TOUR],
+            batches: [
+              {
+                id: 'b1',
+                kind: 'csv',
+                status: 'applied',
+                rowCounts: { adds: 1, updates: 0 },
+                createdAt: '2024-01-01',
+              },
+            ],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            error: 'conflict',
+            conflict: { reason: 'departure_changed', tourName: '东京五日', departOn: '2027-05-13' },
+          },
+          false,
+          409,
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
+
+    render(<TourCatalogClient clientId={CLIENT_ID} />)
+
+    fireEvent.click(await screen.findByText('撤销这次导入'))
+
+    expect(
+      await screen.findByText(/撤销不了：这次导入之后，「东京五日」2027-05-13 这个班期又被改过/),
+    ).toBeInTheDocument()
+  })
+
+  it('shows the plain conflict message when the body has no conflict detail', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          snapshot({
+            tours: [TOUR],
+            batches: [
+              {
+                id: 'b1',
+                kind: 'csv',
+                status: 'applied',
+                rowCounts: {},
+                createdAt: '2024-01-01',
+              },
+            ],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ error: 'conflict' }, false, 409))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
+
+    render(<TourCatalogClient clientId={CLIENT_ID} />)
+
+    fireEvent.click(await screen.findByText('撤销这次导入'))
+
+    expect(
+      await screen.findByText('撤销失败：导入之后又有人改过这些班期，为避免覆盖已拒绝撤销'),
+    ).toBeInTheDocument()
   })
 })

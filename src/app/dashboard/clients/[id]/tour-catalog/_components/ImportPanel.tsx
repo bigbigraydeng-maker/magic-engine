@@ -508,6 +508,12 @@ function warningText(tours: CatalogTourView[], w: PreviewWarningView): string {
   if (w.kind === 'suspected_typo') {
     return `${name}：新增的 ${w.newDate} 离已有的 ${w.nearDate} 只差 ${w.days} 天，是不是日期写错了？`
   }
+  if (w.kind === 'cancelled_kept') {
+    return `${name}：${w.departOn} 这个班期在系统里是已取消，表里没写状态，所以保持已取消不变`
+  }
+  if (w.kind === 'reopens_cancelled') {
+    return `${name}：${w.departOn} 这个班期原来是已取消，表里写的是${statusLabel(w.newStatus)}，导入后会重新开放`
+  }
   return `${name}：库里还有 ${w.departOn} 这个班期，但文件里没提到它`
 }
 

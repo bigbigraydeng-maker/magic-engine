@@ -53,6 +53,14 @@ export interface PlanRejected {
 export type PlanWarning =
   | { kind: 'suspected_typo'; tourId: string; newDate: string; nearDate: string; days: number }
   | { kind: 'not_in_file'; tourId: string; departureId: string; departOn: string }
+  | { kind: 'cancelled_kept'; tourId: string; departureId: string; departOn: string }
+  | {
+      kind: 'reopens_cancelled'
+      tourId: string
+      departureId: string
+      departOn: string
+      newStatus: DepartureStatus
+    }
 
 export interface ImportPlan {
   adds: PlannedAdd[]
@@ -174,11 +182,40 @@ function mergeInternal(
   return { ...existing, ...row }
 }
 
+/** Warning emitted when a cancelled departure is touched by a CSV row. */
+function cancelledWarning(
+  found: CatalogDeparture,
+  tourId: string,
+  rowStatus: DepartureStatus | null,
+): PlanWarning | undefined {
+  if (found.status !== 'cancelled') {
+    return undefined
+  }
+  if (rowStatus === null) {
+    return {
+      kind: 'cancelled_kept',
+      tourId,
+      departureId: found.id,
+      departOn: found.departOn,
+    }
+  }
+  if (rowStatus !== 'cancelled') {
+    return {
+      kind: 'reopens_cancelled',
+      tourId,
+      departureId: found.id,
+      departOn: found.departOn,
+      newStatus: rowStatus,
+    }
+  }
+  return undefined
+}
+
 /** Build the add/update/unchanged outcome for one surviving row. */
 function planRow(
   m: MatchedRow,
   existing: CatalogDeparture[],
-): { add?: PlannedAdd; update?: PlannedUpdate; unchanged: boolean } {
+): { add?: PlannedAdd; update?: PlannedUpdate; unchanged: boolean; warning?: PlanWarning } {
   const found = findExisting(existing, m.tourId, m.row.departOn)
   if (found === undefined) {
     return {
@@ -194,6 +231,7 @@ function planRow(
     }
   }
 
+  const warning = cancelledWarning(found, m.tourId, m.row.status)
   const newReturnOn = m.row.returnOn
   const newStatus = m.row.status ?? found.status
   const newInternal = mergeInternal(found.internal, m.row.internal)
@@ -204,7 +242,7 @@ function planRow(
     stableStringify(newInternal) === stableStringify(found.internal)
 
   if (unchanged) {
-    return { unchanged: true }
+    return { unchanged: true, warning }
   }
 
   return {
@@ -217,6 +255,7 @@ function planRow(
       after: { returnOn: newReturnOn, status: newStatus, internal: newInternal },
     },
     unchanged: false,
+    warning,
   }
 }
 
@@ -315,6 +354,7 @@ export function planDepartureImport(input: PlanInput): ImportPlan {
 
   const adds: PlannedAdd[] = []
   const updates: PlannedUpdate[] = []
+  const rowWarnings: PlanWarning[] = []
   let unchangedCount = 0
 
   for (const m of kept) {
@@ -326,11 +366,15 @@ export function planDepartureImport(input: PlanInput): ImportPlan {
     } else if (outcome.unchanged) {
       unchangedCount += 1
     }
+    if (outcome.warning !== undefined) {
+      rowWarnings.push(outcome.warning)
+    }
   }
 
   const warnings: PlanWarning[] = [
     ...notInFileWarnings(kept, existing, today),
     ...suspectedTypoWarnings(adds, existing, today),
+    ...rowWarnings,
   ]
 
   return {

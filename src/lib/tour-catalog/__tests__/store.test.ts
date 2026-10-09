@@ -5,16 +5,21 @@ import {
   createPreviewBatch,
   getBatch,
   getCatalogVersion,
+  getDepartureLabel,
+  listChanges,
   listRecentBatches,
   loadCatalog,
   loadCatalogProducts,
   mapAliasRow,
   mapDepartureRow,
+  mapEditError,
   mapTourRow,
   planHash,
   planToApplyPayload,
   removeAlias,
   rollbackBatch,
+  saveDeparture,
+  updateTour,
 } from '../store'
 import type { ApplyPayload } from '../store'
 import type { ImportPlan } from '../plan'
@@ -615,5 +620,285 @@ describe('removeAlias', () => {
     const db = makeDb({ from: () => deleteQuery })
     const result = await removeAlias(db as never, 'c1', 'grand tour')
     expect(result).toEqual({ ok: false, message: 'alias_failed' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// mapEditError
+// ---------------------------------------------------------------------------
+
+describe('mapEditError', () => {
+  const cases: Array<[string, string]> = [
+    ['conflict:stale:t1', 'conflict'],
+    ['conflict:duplicate_departure', 'duplicate'],
+    ['tour_not_found', 'not_found'],
+    ['departure_not_found', 'not_found'],
+    ['field_not_editable:slug', 'invalid'],
+    ['invalid_null:name', 'invalid'],
+    ['depart_on_not_editable', 'invalid'],
+    ['depart_on_required', 'invalid'],
+    ['invalid_dates', 'invalid'],
+    ['something_else', 'error'],
+  ]
+
+  it.each(cases)('maps %s to %s', (message, code) => {
+    const result = mapEditError(message)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe(code)
+      expect(result.message).toBe(message)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// updateTour
+// ---------------------------------------------------------------------------
+
+describe('updateTour', () => {
+  it('calls the RPC with snake_case args and maps the returned row', async () => {
+    const rpc = vi.fn(() => ({
+      data: {
+        id: 't1',
+        client_id: 'c1',
+        slug: 's',
+        destination: 'd',
+        tier: 'x',
+        name: 'New name',
+        highlights: [],
+        itinerary: [],
+        inclusions: [],
+        exclusions: [],
+        tour_cities: [],
+        is_active: true,
+        manages_departures: false,
+        sort_order: 1,
+        updated_at: '2026-02-01T00:00:00.000Z',
+      },
+      error: null,
+    }))
+    const db = makeDb({ rpc })
+
+    const result = await updateTour(db as never, 'c1', 't1', '2026-01-01T00:00:00.000Z', { name: 'New name' }, 'alice')
+    expect(rpc).toHaveBeenCalledWith('tour_catalog_update_tour', {
+      p_client_id: 'c1',
+      p_tour_id: 't1',
+      p_expected_updated_at: '2026-01-01T00:00:00.000Z',
+      p_patch: { name: 'New name' },
+      p_actor: 'alice',
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.id).toBe('t1')
+      expect(result.value.name).toBe('New name')
+    }
+  })
+
+  it('maps a stale conflict error', async () => {
+    const rpc = vi.fn(() => ({ data: null, error: { message: 'conflict:stale:t1' } }))
+    const db = makeDb({ rpc })
+    const result = await updateTour(db as never, 'c1', 't1', 'x', {}, 'alice')
+    expect(result).toEqual({ ok: false, code: 'conflict', message: 'conflict:stale:t1' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// saveDeparture
+// ---------------------------------------------------------------------------
+
+describe('saveDeparture', () => {
+  it('calls the RPC with snake_case args and maps the returned row', async () => {
+    const rpc = vi.fn(() => ({
+      data: {
+        id: 'd1',
+        tour_id: 't1',
+        client_id: 'c1',
+        depart_on: '2026-03-01',
+        return_on: '2026-03-10',
+        price_text_override: null,
+        status: 'open',
+        internal: {},
+        updated_at: '2026-02-01T00:00:00.000Z',
+      },
+      error: null,
+    }))
+    const db = makeDb({ rpc })
+
+    const result = await saveDeparture(
+      db as never,
+      'c1',
+      't1',
+      'd1',
+      '2026-01-01T00:00:00.000Z',
+      { status: 'open' },
+      'alice',
+    )
+    expect(rpc).toHaveBeenCalledWith('tour_catalog_save_departure', {
+      p_client_id: 'c1',
+      p_tour_id: 't1',
+      p_departure_id: 'd1',
+      p_expected_updated_at: '2026-01-01T00:00:00.000Z',
+      p_fields: { status: 'open' },
+      p_actor: 'alice',
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.id).toBe('d1')
+      expect(result.value.departOn).toBe('2026-03-01')
+    }
+  })
+
+  it('passes null departureId and expectedUpdatedAt for a new departure', async () => {
+    const rpc = vi.fn(() => ({
+      data: {
+        id: 'd2',
+        tour_id: 't1',
+        client_id: 'c1',
+        depart_on: '2026-05-01',
+        return_on: null,
+        price_text_override: null,
+        status: 'open',
+        internal: {},
+        updated_at: '2026-02-01T00:00:00.000Z',
+      },
+      error: null,
+    }))
+    const db = makeDb({ rpc })
+
+    const result = await saveDeparture(db as never, 'c1', 't1', null, null, { depart_on: '2026-05-01' }, 'alice')
+    expect(rpc).toHaveBeenCalledWith('tour_catalog_save_departure', {
+      p_client_id: 'c1',
+      p_tour_id: 't1',
+      p_departure_id: null,
+      p_expected_updated_at: null,
+      p_fields: { depart_on: '2026-05-01' },
+      p_actor: 'alice',
+    })
+    expect(result.ok).toBe(true)
+  })
+
+  it('maps a duplicate departure error', async () => {
+    const rpc = vi.fn(() => ({ data: null, error: { message: 'conflict:duplicate_departure' } }))
+    const db = makeDb({ rpc })
+    const result = await saveDeparture(db as never, 'c1', 't1', null, null, {}, 'alice')
+    expect(result).toEqual({ ok: false, code: 'duplicate', message: 'conflict:duplicate_departure' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// listChanges
+// ---------------------------------------------------------------------------
+
+describe('listChanges', () => {
+  it('returns [] without querying when entityIds is empty', async () => {
+    const from = vi.fn()
+    const db = makeDb({ from })
+    const result = await listChanges(db as never, 'c1', [])
+    expect(result).toEqual([])
+    expect(from).not.toHaveBeenCalled()
+  })
+
+  it('filters by client and entity ids, orders desc and maps rows', async () => {
+    const q = makeQuery({
+      data: [
+        {
+          id: 'l1',
+          entity: 'tour',
+          entity_id: 't1',
+          action: 'update',
+          before: { name: 'old' },
+          after: { name: 'new' },
+          actor: 'edit by alice',
+          created_at: '2026-02-01T00:00:00.000Z',
+        },
+        {
+          id: 'l2',
+          entity: 'departure',
+          entity_id: 'd1',
+          action: 'insert',
+          before: null,
+          after: { status: 'open' },
+          actor: 'edit by alice',
+          created_at: '2026-02-02T00:00:00.000Z',
+        },
+      ],
+      error: null,
+    })
+    const db = makeDb({ from: () => q })
+
+    const result = await listChanges(db as never, 'c1', ['t1', 'd1'], 10)
+    expect(q.eq).toHaveBeenCalledWith('client_id', 'c1')
+    expect(q.in).toHaveBeenCalledWith('entity_id', ['t1', 'd1'])
+    expect(q.order).toHaveBeenCalledWith('created_at', { ascending: false })
+    expect(q.limit).toHaveBeenCalledWith(10)
+    expect(result).toHaveLength(2)
+    expect(result[0]).toEqual({
+      id: 'l1',
+      entity: 'tour',
+      entityId: 't1',
+      action: 'update',
+      before: { name: 'old' },
+      after: { name: 'new' },
+      actor: 'edit by alice',
+      createdAt: '2026-02-01T00:00:00.000Z',
+    })
+    expect(result[1].before).toBeNull()
+    expect(result[1].entity).toBe('departure')
+  })
+
+  it('throws with the Supabase error message', async () => {
+    const q = makeQuery({ data: null, error: { message: 'log boom' } })
+    const db = makeDb({ from: () => q })
+    await expect(listChanges(db as never, 'c1', ['t1'])).rejects.toThrow('log boom')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// getDepartureLabel
+// ---------------------------------------------------------------------------
+
+describe('getDepartureLabel', () => {
+  it('returns the tour name and depart_on', async () => {
+    const depQuery = makeQuery({ data: { depart_on: '2026-03-01', tour_id: 't1' }, error: null })
+    const tourQuery = makeQuery({ data: { name: 'Grand Tour' }, error: null })
+    let call = 0
+    const db = makeDb({
+      from: () => {
+        call += 1
+        return call === 1 ? depQuery : tourQuery
+      },
+    })
+
+    const result = await getDepartureLabel(db as never, 'c1', 'd1')
+    expect(result).toEqual({ tourName: 'Grand Tour', departOn: '2026-03-01' })
+    expect(depQuery.eq).toHaveBeenCalledWith('id', 'd1')
+    expect(depQuery.eq).toHaveBeenCalledWith('client_id', 'c1')
+    expect(tourQuery.eq).toHaveBeenCalledWith('id', 't1')
+    expect(tourQuery.eq).toHaveBeenCalledWith('client_id', 'c1')
+  })
+
+  it('returns null when the departure is missing', async () => {
+    const depQuery = makeQuery({ data: null, error: null })
+    const db = makeDb({ from: () => depQuery })
+    expect(await getDepartureLabel(db as never, 'c1', 'd1')).toBeNull()
+  })
+
+  it('returns null when the tour is missing', async () => {
+    const depQuery = makeQuery({ data: { depart_on: '2026-03-01', tour_id: 't1' }, error: null })
+    const tourQuery = makeQuery({ data: null, error: null })
+    let call = 0
+    const db = makeDb({
+      from: () => {
+        call += 1
+        return call === 1 ? depQuery : tourQuery
+      },
+    })
+    expect(await getDepartureLabel(db as never, 'c1', 'd1')).toBeNull()
+  })
+
+  it('returns null on a database error', async () => {
+    const depQuery = makeQuery({ data: null, error: { message: 'boom' } })
+    const db = makeDb({ from: () => depQuery })
+    expect(await getDepartureLabel(db as never, 'c1', 'd1')).toBeNull()
   })
 })

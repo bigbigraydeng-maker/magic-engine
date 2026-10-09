@@ -448,4 +448,116 @@ describe('planDepartureImport', () => {
       ['adds', 'rejected', 'unchangedCount', 'updates', 'warnings'].sort(),
     )
   })
+
+  it('keeps cancelled status and warns cancelled_kept when CSV has no status', () => {
+    const tour = makeTour({ id: 't1', name: 'Grand China' })
+    const existing = makeDeparture({
+      id: 'd1',
+      tourId: 't1',
+      departOn: '2027-06-01',
+      returnOn: '2027-06-10',
+      status: 'cancelled',
+    })
+    const row = makeRow({
+      line: 2,
+      tourName: 'Grand China',
+      departOn: '2027-06-01',
+      returnOn: '2027-06-10',
+      status: null,
+    })
+    const plan = planDepartureImport(
+      baseInput({ rows: [row], tours: [tour], existing: [existing] }),
+    )
+
+    expect(plan.updates).toHaveLength(0)
+    expect(plan.unchangedCount).toBe(1)
+    expect(plan.warnings.filter((w) => w.kind === 'cancelled_kept')).toEqual([
+      { kind: 'cancelled_kept', tourId: 't1', departureId: 'd1', departOn: '2027-06-01' },
+    ])
+  })
+
+  it('keeps cancelled status, updates returnOn, and warns cancelled_kept when CSV has no status', () => {
+    const tour = makeTour({ id: 't1', name: 'Grand China' })
+    const existing = makeDeparture({
+      id: 'd1',
+      tourId: 't1',
+      departOn: '2027-06-01',
+      returnOn: '2027-06-10',
+      status: 'cancelled',
+    })
+    const row = makeRow({
+      line: 2,
+      tourName: 'Grand China',
+      departOn: '2027-06-01',
+      returnOn: '2027-06-12',
+      status: null,
+    })
+    const plan = planDepartureImport(
+      baseInput({ rows: [row], tours: [tour], existing: [existing] }),
+    )
+
+    expect(plan.updates).toHaveLength(1)
+    expect(plan.updates[0].after.status).toBe('cancelled')
+    expect(plan.updates[0].after.returnOn).toBe('2027-06-12')
+    expect(plan.warnings.filter((w) => w.kind === 'cancelled_kept')).toEqual([
+      { kind: 'cancelled_kept', tourId: 't1', departureId: 'd1', departOn: '2027-06-01' },
+    ])
+  })
+
+  it('reopens a cancelled departure and warns reopens_cancelled when CSV sets status open', () => {
+    const tour = makeTour({ id: 't1', name: 'Grand China' })
+    const existing = makeDeparture({
+      id: 'd1',
+      tourId: 't1',
+      departOn: '2027-06-01',
+      returnOn: '2027-06-10',
+      status: 'cancelled',
+    })
+    const row = makeRow({
+      line: 2,
+      tourName: 'Grand China',
+      departOn: '2027-06-01',
+      returnOn: '2027-06-10',
+      status: 'open',
+    })
+    const plan = planDepartureImport(
+      baseInput({ rows: [row], tours: [tour], existing: [existing] }),
+    )
+
+    expect(plan.updates).toHaveLength(1)
+    expect(plan.updates[0].after.status).toBe('open')
+    expect(plan.warnings.filter((w) => w.kind === 'reopens_cancelled')).toEqual([
+      {
+        kind: 'reopens_cancelled',
+        tourId: 't1',
+        departureId: 'd1',
+        departOn: '2027-06-01',
+        newStatus: 'open',
+      },
+    ])
+  })
+
+  it('does not warn cancelled_kept or reopens_cancelled for non-cancelled departures', () => {
+    const tour = makeTour({ id: 't1', name: 'Grand China' })
+    const existing = makeDeparture({
+      id: 'd1',
+      tourId: 't1',
+      departOn: '2027-06-01',
+      returnOn: '2027-06-10',
+      status: 'open',
+    })
+    const row = makeRow({
+      line: 2,
+      tourName: 'Grand China',
+      departOn: '2027-06-01',
+      returnOn: '2027-06-12',
+      status: null,
+    })
+    const plan = planDepartureImport(
+      baseInput({ rows: [row], tours: [tour], existing: [existing] }),
+    )
+
+    expect(plan.warnings.filter((w) => w.kind === 'cancelled_kept')).toHaveLength(0)
+    expect(plan.warnings.filter((w) => w.kind === 'reopens_cancelled')).toHaveLength(0)
+  })
 })

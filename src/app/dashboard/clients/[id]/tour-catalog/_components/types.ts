@@ -1,5 +1,12 @@
 /** Response shapes of /api/clients/[id]/tour-catalog/* as consumed by the admin page. */
 
+export interface CatalogItineraryDayView {
+  day: number
+  title: string
+  description: string
+  meals?: string[]
+}
+
 export interface CatalogTourView {
   id: string
   slug: string
@@ -9,6 +16,19 @@ export interface CatalogTourView {
   displayPriceText: string | null
   isActive: boolean
   managesDepartures: boolean
+  // Full editable fields (present in the GET snapshot; optional so older fixtures still type-check).
+  title?: string | null
+  shortDescription?: string | null
+  durationText?: string | null
+  highlights?: string[]
+  itinerary?: CatalogItineraryDayView[]
+  inclusions?: string[]
+  exclusions?: string[]
+  tourCities?: string[]
+  singleSupplement?: string | null
+  maxGroupSize?: number | null
+  /** Optimistic-concurrency token; send back unchanged when saving. */
+  updatedAt?: string
 }
 
 export interface CatalogDepartureView {
@@ -18,6 +38,8 @@ export interface CatalogDepartureView {
   returnOn: string | null
   status: 'open' | 'limited' | 'sold_out' | 'closed' | 'cancelled'
   priceTextOverride: string | null
+  /** Optimistic-concurrency token; send back unchanged when saving. */
+  updatedAt?: string
 }
 
 export interface CatalogBatchView {
@@ -56,6 +78,8 @@ export interface PreviewRejectedView {
 export type PreviewWarningView =
   | { kind: 'suspected_typo'; tourId: string; newDate: string; nearDate: string; days: number }
   | { kind: 'not_in_file'; tourId: string; departureId: string; departOn: string }
+  | { kind: 'cancelled_kept'; tourId: string; departureId: string; departOn: string }
+  | { kind: 'reopens_cancelled'; tourId: string; departureId: string; departOn: string; newStatus: string }
 
 export interface PreviewResponse {
   batchId: string | null
@@ -72,4 +96,15 @@ export interface PreviewResponse {
   }>
   rejected: PreviewRejectedView[]
   warnings: PreviewWarningView[]
+}
+
+export interface ChangeLogEntryView {
+  id: string
+  entity: 'tour' | 'departure'
+  entityId: string
+  action: 'insert' | 'update' | 'delete'
+  before: Record<string, unknown> | null
+  after: Record<string, unknown> | null
+  actor: string
+  createdAt: string
 }
