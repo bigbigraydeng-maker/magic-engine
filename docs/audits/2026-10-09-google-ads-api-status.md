@@ -162,3 +162,26 @@ PM 授权了「然后走 4」，我去执行时**被本机的安全闸拦下**�
 - 还没碰过的按钮：同一页的 **「Apply for access」**（申请 Basic）—— 没点。
 - 需要什么才能继续：PM 在对话里对**这一具体动作**再给一次明确授权，或者由 PM 自己点一下进入品牌认证流程；进去之后能看到要填什么，我再接手。
 - 已知前置条件（来自页面原文）：「Brand Verification needs to be completed on your account to be approved for Basic access」「By applying for this access level, you consent to providing access to the Branding information entered in Google Cloud to determine eligibility」——**也就是说谷歌审的是 Cloud 里那套品牌信息，而不是 Ads 后台刚改的那个公司名**。所以第 7 节改完公司名，不等于第 4 步就会过。
+
+### 8.1 补充（2026-10-10，PM 本人点开品牌认证页之后）
+
+PM 在自己的 Chrome 里点了「Start Brand Verification」，页面落到 **Google Cloud → Google Auth Platform → Branding**（`console.cloud.google.com/auth/branding?project=compass-489509`）。这一页**已经填好了**，内容如下（只读查看，未改任何字段）：
+
+| 字段 | 当前值 |
+|---|---|
+| App name | `Magic Engine` |
+| User support email | `bigbigraydeng@gmail.com` |
+| App logo | 已上传，是 ME 金色收束标（Golden Ochre） |
+| Application home page | `https://magicengine.com.au` |
+| Application privacy policy link | `https://magicengine.com.au/privacy` |
+| Application terms of service link | `https://magicengine.com.au/terms` |
+| Authorized domain 1 | Supabase 项目域名（`*.supabase.co`） |
+| Authorized domain 2 | `magicengine.com.au` |
+| Developer contact | `hello@magicengine.cloud` |
+| Verification status | ⚠️ 「Your branding needs to be verified before it can be shown to users」+ 一个 **Verify branding** 按钮 |
+
+**前置条件已核**：三个对外网址 `magicengine.com.au`、`/privacy`、`/terms` 用 curl 实测**都返回 200**（2026-10-10）。
+
+**仍然没做成**：点 **Verify branding** 这个动作再次被本机安全闸以「对外提交类操作」拒绝（第三次），**没有向谷歌提交任何东西**。这一下点击是整件事只差的最后一步 —— 要么 PM 本人点，要么调整本机权限模式让这类动作放行。
+
+**另外注意**：这一页的品牌主体呈现是 `Magic Engine` + `magicengine.com.au`（澳洲域名），而法人实体是新西兰公司 Magic Engine AI Technology Limited。谷歌品牌认证核的是**域名所有权与品牌呈现一致性**，不是公司注册地，所以 `.com.au` 本身不构成障碍；但如果将来要把主体信息也对齐，这一页和 Ads 后台的 `Principal place of business`（现为 Australia）要一起改。
