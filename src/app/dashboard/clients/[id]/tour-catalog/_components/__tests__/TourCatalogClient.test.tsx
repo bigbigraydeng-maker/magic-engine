@@ -263,6 +263,7 @@ describe('TourCatalogClient', () => {
     const message = confirmMock.mock.calls[0][0] as string
     expect(message).toContain('3')
     expect(message).toContain('2')
+    expect(message).toContain('如果这次导入之后有人手工改过其中的班期，系统会拒绝撤销，以免覆盖后来的修改。')
   })
 
   it('shows 价格待定 when the price text contains TBC', async () => {

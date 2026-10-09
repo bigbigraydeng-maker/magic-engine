@@ -70,8 +70,21 @@ insert into eresults select 'E11 departure create+update logged', count(*)=2, co
 update tour_catalog_departures set status = status where depart_on='2027-03-11' and tour_id='22222222-2222-2222-2222-222222222222';
 insert into eresults select 'E12 no-op update not logged', count(*)=2, count(*)::text from tour_catalog_change_log where entity='departure' and entity_id in (select id from tour_catalog_departures where tour_id='22222222-2222-2222-2222-222222222222');
 
+do $$ declare d record; begin
+  select id into d from tour_catalog_departures where depart_on='2027-03-11' and tour_id='22222222-2222-2222-2222-222222222222';
+  perform tour_catalog_save_departure('00000000-0000-0000-0000-0000000000a1','22222222-2222-2222-2222-222222222222',d.id,'2020-01-01','{"status":"open"}','pm@x');
+  insert into eresults values ('E14 stale departure edit refused', false, 'no error');
+exception when others then insert into eresults values ('E14 stale departure edit refused', sqlerrm like 'conflict:stale:%', sqlerrm); end $$;
+-- Imports and rollbacks run by tour_catalog_functions.test.sql must be attributed, not logged as "system".
+insert into eresults select 'E15 import and rollback attributed in the log',
+  count(*) filter (where actor like 'import:% by %') > 0 and count(*) filter (where actor like 'rollback:%') > 0,
+  string_agg(distinct actor, ' | ')
+  from tour_catalog_change_log where entity = 'departure';
+
 set role anon;
 do $$ begin perform count(*) from tour_catalog_change_log; insert into eresults values ('E13 anon cannot read log', false, 'no error'); exception when insufficient_privilege then insert into eresults values ('E13 anon cannot read log', true, ''); end $$;
 reset role;
 
 select name, case when ok then 'PASS' else 'FAIL' end as r, detail from eresults order by name;
+-- Exit non-zero (with psql -v ON_ERROR_STOP=1) when any check failed.
+do $$ begin if exists (select 1 from eresults where not ok) then raise exception 'tour catalog edit checks FAILED'; end if; end $$;

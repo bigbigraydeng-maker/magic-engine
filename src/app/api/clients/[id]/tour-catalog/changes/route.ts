@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
-import { listChanges } from '@/lib/tour-catalog/store'
+import { listChanges, listChangesForTour } from '@/lib/tour-catalog/store-edit'
 import { supabaseAdmin } from '@/lib/supabase'
+import type { ChangesResponse } from '@/lib/tour-catalog/api-contract'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,9 +26,15 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     .filter((id) => UUID_RE.test(id))
     .slice(0, MAX_IDS)
 
+  // tourId (one uuid) returns the tour's whole history, including deleted departures.
+  const tourId = req.nextUrl.searchParams.get('tourId')
+  const validTourId = tourId !== null && UUID_RE.test(tourId) ? tourId : null
+
   try {
-    const changes = await listChanges(supabaseAdmin, clientId, ids, 50)
-    return NextResponse.json({ changes })
+    const changes = validTourId
+      ? await listChangesForTour(supabaseAdmin, clientId, validTourId, 50)
+      : await listChanges(supabaseAdmin, clientId, ids, 50)
+    return NextResponse.json<ChangesResponse>({ changes })
   } catch (err) {
     console.error('tour-catalog changes failed:', err)
     return NextResponse.json({ error: 'changes_failed' }, { status: 500 })

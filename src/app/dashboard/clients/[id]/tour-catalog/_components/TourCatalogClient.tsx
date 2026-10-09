@@ -18,6 +18,7 @@ import { ImportPanel } from './ImportPanel'
 import { TourEditor } from './TourEditor'
 import { DeparturesEditor } from './DeparturesEditor'
 import { ChangeLog } from './ChangeLog'
+import type { SeedResponse } from '@/lib/tour-catalog/api-contract'
 
 type State =
   | { phase: 'loading' }
@@ -88,7 +89,7 @@ function priceText(displayPriceText: string | null): string {
 function rollbackConfirmText(batch: CatalogBatchView): string {
   const adds = typeof batch.rowCounts.adds === 'number' ? batch.rowCounts.adds : '若干'
   const updates = typeof batch.rowCounts.updates === 'number' ? batch.rowCounts.updates : '若干'
-  return `确定撤销这次导入吗？这次新增的 ${adds} 个班期会被删除，改过的 ${updates} 个会恢复原样。`
+  return `确定撤销这次导入吗？这次新增的 ${adds} 个班期会被删除，改过的 ${updates} 个会恢复原样。如果这次导入之后有人手工改过其中的班期，系统会拒绝撤销，以免覆盖后来的修改。`
 }
 
 /** 撤销冲突时服务器返回的细节。 */
@@ -204,7 +205,7 @@ function SeedPanel({
         const { error: code } = (await res.json().catch(() => ({}))) as { error?: string }
         throw new Error(errorLabel(code ?? `HTTP ${res.status}`))
       }
-      const data = (await res.json()) as { toursInserted?: number; departuresInserted?: number }
+      const data = (await res.json()) as SeedResponse
       setMessage(`已读入 ${data.toursInserted ?? 0} 个团、${data.departuresInserted ?? 0} 个班期`)
       onSeeded()
     } catch (err) {
@@ -276,7 +277,7 @@ function TourBlock({
 }) {
   const [editing, setEditing] = useState(false)
   const upcoming = upcomingCount(departures)
-  const entityIds = [tour.id, ...departures.map(d => d.id)]
+  const refreshKey = [tour.updatedAt ?? '', ...departures.map(d => d.updatedAt ?? '')].join('|')
 
   return (
     <details className="rounded-xl border border-black/10 bg-white shadow-sm">
@@ -329,7 +330,7 @@ function TourBlock({
           onChanged={onChanged}
         />
 
-        <ChangeLog clientId={clientId} entityIds={entityIds} />
+        <ChangeLog clientId={clientId} tourId={tour.id} refreshKey={refreshKey} />
       </div>
     </details>
   )

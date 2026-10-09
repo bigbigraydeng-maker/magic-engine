@@ -13,6 +13,9 @@ vi.mock('@/lib/tour-catalog/store', () => ({
   getBatch: vi.fn(),
   rollbackBatch: vi.fn(),
   getClientDomain: vi.fn(),
+}))
+
+vi.mock('@/lib/tour-catalog/store-edit', () => ({
   getDepartureLabel: vi.fn(),
 }))
 
@@ -33,8 +36,8 @@ import {
   getBatch,
   rollbackBatch,
   getClientDomain,
-  getDepartureLabel,
 } from '@/lib/tour-catalog/store'
+import { getDepartureLabel } from '@/lib/tour-catalog/store-edit'
 import { fetchFirstPartyFeed, seedCatalog } from '@/lib/tour-catalog/seed'
 import { firstPartyTourSourceUrl } from '@/lib/web-intelligence/first-party-tours'
 import { POST as seedPOST } from '../seed/route'

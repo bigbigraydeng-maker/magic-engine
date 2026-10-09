@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
-import { getBatch, getDepartureLabel, rollbackBatch } from '@/lib/tour-catalog/store'
+import { getBatch, rollbackBatch } from '@/lib/tour-catalog/store'
+import { getDepartureLabel } from '@/lib/tour-catalog/store-edit'
 import { supabaseAdmin } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'

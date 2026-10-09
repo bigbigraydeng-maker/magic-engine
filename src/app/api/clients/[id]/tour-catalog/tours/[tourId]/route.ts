@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
 import { validateTourPatch, tourPatchToDb } from '@/lib/tour-catalog/edit-validation'
-import { updateTour } from '@/lib/tour-catalog/store'
+import { updateTour } from '@/lib/tour-catalog/store-edit'
+import type { TourSavedResponse } from '@/lib/tour-catalog/api-contract'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,7 +50,7 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
   )
 
   if (result.ok) {
-    return NextResponse.json({ tour: result.value }, { status: 200 })
+    return NextResponse.json<TourSavedResponse>({ tour: result.value }, { status: 200 })
   }
 
   switch (result.code) {

@@ -10,7 +10,7 @@ const { requireCatalogAdmin, updateTour, saveDeparture } = vi.hoisted(() => ({
   saveDeparture: vi.fn(),
 }))
 vi.mock('@/lib/tour-catalog/access', () => ({ requireCatalogAdmin }))
-vi.mock('@/lib/tour-catalog/store', () => ({ updateTour, saveDeparture }))
+vi.mock('@/lib/tour-catalog/store-edit', () => ({ updateTour, saveDeparture }))
 
 import { PATCH as patchTour } from '../tours/[tourId]/route'
 import { POST as postDeparture } from '../tours/[tourId]/departures/route'
@@ -226,7 +226,7 @@ describe('POST tours/[tourId]/departures', () => {
     saveDeparture.mockResolvedValue({ ok: false, code: 'invalid', message: 'invalid_dates' })
     const res = await postDeparture(jsonRequest(validBody), tourContext())
     expect(res.status).toBe(400)
-    expect(await bodyOf(res)).toEqual({ error: 'invalid_fields' })
+    expect(await bodyOf(res)).toEqual({ error: 'invalid_fields', fields: [{ field: 'returnOn', code: 'return_before_depart' }] })
   })
 
   it('maps conflict to 500 save_failed', async () => {
@@ -331,7 +331,7 @@ describe('PATCH departures/[departureId]', () => {
     saveDeparture.mockResolvedValue({ ok: false, code: 'invalid', message: 'invalid_dates' })
     const res = await patchDeparture(jsonRequest(validBody), departureContext())
     expect(res.status).toBe(400)
-    expect(await bodyOf(res)).toEqual({ error: 'invalid_fields' })
+    expect(await bodyOf(res)).toEqual({ error: 'invalid_fields', fields: [{ field: 'returnOn', code: 'return_before_depart' }] })
   })
 
   it('maps duplicate to 500 save_failed', async () => {
@@ -361,5 +361,18 @@ describe('PATCH departures/[departureId]', () => {
     expect(res.status).toBe(403)
     expect(await bodyOf(res)).toEqual({ error: 'Forbidden' })
     expect(saveDeparture).not.toHaveBeenCalled()
+  })
+})
+
+describe('database date rule surfaces as a field error', () => {
+  it('PATCH departure: invalid_dates becomes a returnOn field error the form can show', async () => {
+    requireCatalogAdmin.mockResolvedValue({ ok: true, actor: 'a@b.c' })
+    saveDeparture.mockResolvedValue({ ok: false, code: 'invalid', message: 'invalid_dates' })
+    const res = await patchDeparture(
+      jsonRequest({ tourId: 'tour-1', expectedUpdatedAt: '2026-10-10T00:00:00Z', patch: { returnOn: '2027-01-01' } }),
+      { params: Promise.resolve({ id: 'client-1', departureId: 'dep-1' }) },
+    )
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'invalid_fields', fields: [{ field: 'returnOn', code: 'return_before_depart' }] })
   })
 })

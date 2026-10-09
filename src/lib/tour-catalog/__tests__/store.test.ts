@@ -5,22 +5,24 @@ import {
   createPreviewBatch,
   getBatch,
   getCatalogVersion,
-  getDepartureLabel,
-  listChanges,
   listRecentBatches,
   loadCatalog,
   loadCatalogProducts,
   mapAliasRow,
   mapDepartureRow,
-  mapEditError,
   mapTourRow,
   planHash,
   planToApplyPayload,
   removeAlias,
   rollbackBatch,
+} from '../store'
+import {
+  getDepartureLabel,
+  listChanges,
+  mapEditError,
   saveDeparture,
   updateTour,
-} from '../store'
+} from '../store-edit'
 import type { ApplyPayload } from '../store'
 import type { ImportPlan } from '../plan'
 import type { CatalogDeparture } from '../types'

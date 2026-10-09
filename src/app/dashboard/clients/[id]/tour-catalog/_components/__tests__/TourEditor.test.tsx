@@ -85,6 +85,53 @@ describe('TourEditor', () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
   })
 
+  it('sends only the price when only the price was touched, even with messy original itinerary', async () => {
+    const tour = makeTour({
+      itinerary: [
+        { day: 2, title: '', description: '  接机  ', meals: ['Lunch (local, Sichuan style)'] },
+        { day: 3, title: '冰川', description: '徒步', meals: [] },
+      ],
+    })
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { tour }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <TourEditor clientId="c1" tour={tour} onSaved={vi.fn()} onCancel={vi.fn()} />,
+    )
+    fireEvent.change(screen.getByDisplayValue('From NZD $4,999 per person'), {
+      target: { value: 'TBC' },
+    })
+    fireEvent.click(screen.getByText('保存'))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse((init as RequestInit).body as string)
+    expect(body.patch).toEqual({ displayPriceText: 'TBC' })
+  })
+
+  it('keeps original meal strings intact when only another day is edited', async () => {
+    const tour = makeTour({
+      itinerary: [
+        { day: 1, title: '抵达', description: '接机', meals: ['Lunch (local, Sichuan style)'] },
+        { day: 2, title: '冰川', description: '徒步', meals: [] },
+      ],
+    })
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { tour }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <TourEditor clientId="c1" tour={tour} onSaved={vi.fn()} onCancel={vi.fn()} />,
+    )
+    fireEvent.change(screen.getByDisplayValue('冰川'), { target: { value: '冰川徒步' } })
+    fireEvent.click(screen.getByText('保存'))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse((init as RequestInit).body as string)
+    expect(body.patch.itinerary).toEqual([
+      { day: 1, title: '抵达', description: '接机', meals: ['Lunch (local, Sichuan style)'] },
+      { day: 2, title: '冰川徒步', description: '徒步' },
+    ])
+  })
+
   it('shows 没有改动 and does not call fetch when nothing changed', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
@@ -177,5 +224,45 @@ describe('TourEditor', () => {
     )
     const tags = screen.getAllByText('仅内部参考，网站暂不读取')
     expect(tags.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('shows the title hint under 对外标题', () => {
+    render(
+      <TourEditor clientId="c1" tour={makeTour()} onSaved={vi.fn()} onCancel={vi.fn()} />,
+    )
+    expect(screen.getByText('网站上显示的是这个标题；留空则显示团名')).toBeTruthy()
+  })
+
+  it('shows the amber duration hint when the number of days differs', () => {
+    render(
+      <TourEditor clientId="c1" tour={makeTour()} onSaved={vi.fn()} onCancel={vi.fn()} />,
+    )
+    expect(screen.getByText('天数写的是 12 天，行程里有 2 天，请确认')).toBeTruthy()
+  })
+
+  it('does not show the duration hint when the numbers match', () => {
+    render(
+      <TourEditor
+        clientId="c1"
+        tour={makeTour({ durationText: '2 Days' })}
+        onSaved={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    expect(screen.queryByText(/请确认/)).toBeNull()
+  })
+
+  it('updates the duration hint as days are added', () => {
+    render(
+      <TourEditor
+        clientId="c1"
+        tour={makeTour({ durationText: '3 Days' })}
+        onSaved={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('天数写的是 3 天，行程里有 2 天，请确认')).toBeTruthy()
+    fireEvent.click(screen.getByText('加一天'))
+    expect(screen.queryByText(/请确认/)).toBeNull()
   })
 })

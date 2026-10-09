@@ -2,9 +2,11 @@
 
 import { useState } from 'react'
 import type { CatalogItineraryDayView, CatalogTourView } from './types'
+import type { TourSavedResponse } from '@/lib/tour-catalog/api-contract'
 
 const DANGER = '#C2453A'
 const SUCCESS = '#5C8A4A'
+const AMBER = '#B7791F'
 
 const ERROR_MESSAGES: Record<string, string> = {
   conflict: '这个团刚被别人改过，请刷新页面后再改',
@@ -44,6 +46,8 @@ interface DayDraft {
   title: string
   description: string
   meals: string
+  mealsTouched: boolean
+  originalMeals: string[]
 }
 
 interface FormState {
@@ -76,6 +80,8 @@ function daysFromTour(tour: CatalogTourView): DayDraft[] {
     title: d.title ?? '',
     description: d.description ?? '',
     meals: mealsToText(d.meals),
+    mealsTouched: false,
+    originalMeals: d.meals ?? [],
   }))
 }
 
@@ -124,7 +130,7 @@ function buildItinerary(days: DayDraft[]): CatalogItineraryDayView[] {
       title: d.title.trim(),
       description: d.description.trim(),
     }
-    const meals = splitMeals(d.meals)
+    const meals = d.mealsTouched ? splitMeals(d.meals) : d.originalMeals
     if (meals.length > 0) day.meals = meals
     return day
   })
@@ -146,41 +152,91 @@ function itineraryEqual(a: CatalogItineraryDayView[], b: CatalogItineraryDayView
   })
 }
 
-function buildPatch(form: FormState, tour: CatalogTourView): Record<string, unknown> {
+function buildScalarPatch(
+  form: FormState,
+  tour: CatalogTourView,
+  touched: Set<string>,
+): Record<string, unknown> {
   const patch: Record<string, unknown> = {}
-  const name = form.name.trim()
-  if (name !== (tour.name ?? '')) patch.name = name
-  if (nullableText(form.title) !== (tour.title ?? null)) patch.title = nullableText(form.title)
-  if (nullableText(form.durationText) !== (tour.durationText ?? null))
+  if (touched.has('name')) {
+    const name = form.name.trim()
+    if (name !== (tour.name ?? '')) patch.name = name
+  }
+  if (touched.has('title') && nullableText(form.title) !== (tour.title ?? null))
+    patch.title = nullableText(form.title)
+  if (touched.has('durationText') && nullableText(form.durationText) !== (tour.durationText ?? null))
     patch.durationText = nullableText(form.durationText)
-  if (nullableText(form.displayPriceText) !== (tour.displayPriceText ?? null))
+  if (
+    touched.has('displayPriceText') &&
+    nullableText(form.displayPriceText) !== (tour.displayPriceText ?? null)
+  )
     patch.displayPriceText = nullableText(form.displayPriceText)
-  if (nullableText(form.singleSupplement) !== (tour.singleSupplement ?? null))
+  if (
+    touched.has('singleSupplement') &&
+    nullableText(form.singleSupplement) !== (tour.singleSupplement ?? null)
+  )
     patch.singleSupplement = nullableText(form.singleSupplement)
-
-  const maxGroupSize = form.maxGroupSize.trim() === '' ? null : Number(form.maxGroupSize)
-  if (maxGroupSize !== (tour.maxGroupSize ?? null)) patch.maxGroupSize = maxGroupSize
-
-  if (nullableText(form.shortDescription) !== (tour.shortDescription ?? null))
+  if (touched.has('maxGroupSize')) {
+    const maxGroupSize = form.maxGroupSize.trim() === '' ? null : Number(form.maxGroupSize)
+    if (maxGroupSize !== (tour.maxGroupSize ?? null)) patch.maxGroupSize = maxGroupSize
+  }
+  if (
+    touched.has('shortDescription') &&
+    nullableText(form.shortDescription) !== (tour.shortDescription ?? null)
+  )
     patch.shortDescription = nullableText(form.shortDescription)
-
-  const highlights = splitLines(form.highlights)
-  if (!arraysEqual(highlights, tour.highlights ?? [])) patch.highlights = highlights
-  const inclusions = splitLines(form.inclusions)
-  if (!arraysEqual(inclusions, tour.inclusions ?? [])) patch.inclusions = inclusions
-  const exclusions = splitLines(form.exclusions)
-  if (!arraysEqual(exclusions, tour.exclusions ?? [])) patch.exclusions = exclusions
-  const tourCities = splitLines(form.tourCities)
-  if (!arraysEqual(tourCities, tour.tourCities ?? [])) patch.tourCities = tourCities
-
-  const itinerary = buildItinerary(form.days)
-  if (!itineraryEqual(itinerary, tour.itinerary ?? [])) patch.itinerary = itinerary
-
-  if (form.isActive !== tour.isActive) patch.isActive = form.isActive
-  if (form.managesDepartures !== tour.managesDepartures)
-    patch.managesDepartures = form.managesDepartures
-
   return patch
+}
+
+function buildListPatch(
+  form: FormState,
+  tour: CatalogTourView,
+  touched: Set<string>,
+): Record<string, unknown> {
+  const patch: Record<string, unknown> = {}
+  if (touched.has('highlights')) {
+    const highlights = splitLines(form.highlights)
+    if (!arraysEqual(highlights, tour.highlights ?? [])) patch.highlights = highlights
+  }
+  if (touched.has('inclusions')) {
+    const inclusions = splitLines(form.inclusions)
+    if (!arraysEqual(inclusions, tour.inclusions ?? [])) patch.inclusions = inclusions
+  }
+  if (touched.has('exclusions')) {
+    const exclusions = splitLines(form.exclusions)
+    if (!arraysEqual(exclusions, tour.exclusions ?? [])) patch.exclusions = exclusions
+  }
+  if (touched.has('tourCities')) {
+    const tourCities = splitLines(form.tourCities)
+    if (!arraysEqual(tourCities, tour.tourCities ?? [])) patch.tourCities = tourCities
+  }
+  if (touched.has('itinerary')) {
+    const itinerary = buildItinerary(form.days)
+    if (!itineraryEqual(itinerary, tour.itinerary ?? [])) patch.itinerary = itinerary
+  }
+  return patch
+}
+
+function buildPatch(
+  form: FormState,
+  tour: CatalogTourView,
+  touched: Set<string>,
+): Record<string, unknown> {
+  const patch: Record<string, unknown> = {
+    ...buildScalarPatch(form, tour, touched),
+    ...buildListPatch(form, tour, touched),
+  }
+  if (touched.has('isActive') && form.isActive !== tour.isActive) patch.isActive = form.isActive
+  if (touched.has('managesDepartures') && form.managesDepartures !== tour.managesDepartures)
+    patch.managesDepartures = form.managesDepartures
+  return patch
+}
+
+function durationDays(text: string): number | null {
+  const match = text.match(/\d+/)
+  if (!match) return null
+  const n = Number(match[0])
+  return Number.isFinite(n) ? n : null
 }
 
 interface FieldErrors {
@@ -272,7 +328,7 @@ function DayCard({ index, day, errors, onChange, onDelete }: DayCardProps) {
         <input
           className={inputClass}
           value={day.meals}
-          onChange={(e) => onChange(index, { ...day, meals: e.target.value })}
+          onChange={(e) => onChange(index, { ...day, meals: e.target.value, mealsTouched: true })}
         />
         <FieldError message={errors[`itinerary[${index}].meals`]} />
       </div>
@@ -292,13 +348,24 @@ export function TourEditor({
   onCancel: () => void
 }) {
   const [form, setForm] = useState<FormState>(() => initialForm(tour))
+  const [touched, setTouched] = useState<Set<string>>(() => new Set())
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
   const [statusColor, setStatusColor] = useState<string>(SUCCESS)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
 
+  function markTouched(key: string) {
+    setTouched((prev) => {
+      if (prev.has(key)) return prev
+      const next = new Set(prev)
+      next.add(key)
+      return next
+    })
+  }
+
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
+    markTouched(key as string)
   }
 
   function updateDay(index: number, next: DayDraft) {
@@ -307,13 +374,18 @@ export function TourEditor({
       days[index] = next
       return { ...prev, days }
     })
+    markTouched('itinerary')
   }
 
   function addDay() {
     setForm((prev) => ({
       ...prev,
-      days: [...prev.days, { title: '', description: '', meals: '' }],
+      days: [
+        ...prev.days,
+        { title: '', description: '', meals: '', mealsTouched: false, originalMeals: [] },
+      ],
     }))
+    markTouched('itinerary')
   }
 
   function deleteDay(index: number) {
@@ -321,6 +393,7 @@ export function TourEditor({
       ...prev,
       days: prev.days.filter((_, i) => i !== index),
     }))
+    markTouched('itinerary')
   }
 
   function confirmManagesChange(): boolean {
@@ -334,7 +407,7 @@ export function TourEditor({
   async function handleSave() {
     setStatus(null)
     setFieldErrors({})
-    const patch = buildPatch(form, tour)
+    const patch = buildPatch(form, tour, touched)
     if (Object.keys(patch).length === 0) {
       setStatusColor(SUCCESS)
       setStatus('没有改动')
@@ -350,7 +423,7 @@ export function TourEditor({
         body: JSON.stringify({ expectedUpdatedAt: tour.updatedAt, patch }),
       })
       if (res.ok) {
-        const data = (await res.json()) as { tour: CatalogTourView }
+        const data = (await res.json()) as TourSavedResponse
         setStatusColor(SUCCESS)
         setStatus('已保存')
         onSaved(data.tour)
@@ -374,6 +447,10 @@ export function TourEditor({
     }
   }
 
+  const durationN = durationDays(form.durationText)
+  const showDurationHint =
+    durationN !== null && form.days.length > 0 && durationN !== form.days.length
+
   return (
     <div className="space-y-4 rounded-xl border border-black/10 bg-white p-4">
       <div>
@@ -393,6 +470,9 @@ export function TourEditor({
           value={form.title}
           onChange={(e) => update('title', e.target.value)}
         />
+        <p className="mt-1 text-xs text-me-charcoal/60">
+          网站上显示的是这个标题；留空则显示团名
+        </p>
         <FieldError message={fieldErrors.title} />
       </div>
 
@@ -404,6 +484,11 @@ export function TourEditor({
           value={form.durationText}
           onChange={(e) => update('durationText', e.target.value)}
         />
+        {showDurationHint && (
+          <p className="mt-1 text-xs" style={{ color: AMBER }}>
+            天数写的是 {durationN} 天，行程里有 {form.days.length} 天，请确认
+          </p>
+        )}
         <FieldError message={fieldErrors.durationText} />
       </div>
 

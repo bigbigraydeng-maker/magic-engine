@@ -126,3 +126,5 @@ do $$ begin perform count(*) from tour_catalog_tours; insert into results values
 reset role;
 
 select name, case when ok then 'PASS' else 'FAIL' end as r, detail from results order by name;
+-- Exit non-zero (with psql -v ON_ERROR_STOP=1) when any check failed.
+do $$ begin if exists (select 1 from results where not ok) then raise exception 'tour catalog function checks FAILED'; end if; end $$;

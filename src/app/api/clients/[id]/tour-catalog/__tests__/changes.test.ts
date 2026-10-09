@@ -7,16 +7,18 @@ vi.mock('@/lib/tour-catalog/access', () => ({
   requireCatalogAdmin: vi.fn(),
 }))
 
-vi.mock('@/lib/tour-catalog/store', () => ({
+vi.mock('@/lib/tour-catalog/store-edit', () => ({
   listChanges: vi.fn(),
+  listChangesForTour: vi.fn(),
 }))
 
 import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
-import { listChanges } from '@/lib/tour-catalog/store'
+import { listChanges, listChangesForTour } from '@/lib/tour-catalog/store-edit'
 import { GET as changesGET } from '../changes/route'
 
 const requireCatalogAdminMock = vi.mocked(requireCatalogAdmin)
 const listChangesMock = vi.mocked(listChanges)
+const listChangesForTourMock = vi.mocked(listChangesForTour)
 
 const CLIENT_ID = 'client-1'
 const UUID_A = '11111111-1111-1111-1111-111111111111'
@@ -130,5 +132,24 @@ describe('GET /tour-catalog/changes', () => {
     const res = await changesGET(makeRequest(`?entityId=${UUID_A}`), makeParams())
     expect(res.status).toBe(403)
     expect(listChangesMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('GET /tour-catalog/changes?tourId=', () => {
+  it('returns the whole tour history (tour + all its departures, even deleted ones) for a valid tourId', async () => {
+    requireCatalogAdminMock.mockResolvedValue({ ok: true, actor: 'a@b.c' })
+    listChangesForTourMock.mockResolvedValue([])
+    const res = await changesGET(makeRequest(`?tourId=${UUID_A}&entityId=${UUID_B}`), { params: Promise.resolve({ id: CLIENT_ID }) })
+    expect(res.status).toBe(200)
+    expect(listChangesForTourMock).toHaveBeenCalledWith({}, CLIENT_ID, UUID_A, 50)
+    expect(listChangesMock).not.toHaveBeenCalled()
+  })
+
+  it('ignores a malformed tourId and falls back to entityId lookup', async () => {
+    requireCatalogAdminMock.mockResolvedValue({ ok: true, actor: 'a@b.c' })
+    listChangesMock.mockResolvedValue([])
+    await changesGET(makeRequest(`?tourId=not-a-uuid&entityId=${UUID_B}`), { params: Promise.resolve({ id: CLIENT_ID }) })
+    expect(listChangesForTourMock).not.toHaveBeenCalled()
+    expect(listChangesMock).toHaveBeenCalledWith({}, CLIENT_ID, [UUID_B], 50)
   })
 })

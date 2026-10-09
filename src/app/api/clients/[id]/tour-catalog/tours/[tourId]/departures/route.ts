@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
 import { validateNewDeparture } from '@/lib/tour-catalog/edit-validation'
-import { saveDeparture } from '@/lib/tour-catalog/store'
+import { saveDeparture } from '@/lib/tour-catalog/store-edit'
+import type { DepartureSavedResponse } from '@/lib/tour-catalog/api-contract'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,7 +48,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   )
 
   if (result.ok) {
-    return NextResponse.json({ departure: result.value }, { status: 201 })
+    return NextResponse.json<DepartureSavedResponse>({ departure: result.value }, { status: 201 })
   }
 
   switch (result.code) {
@@ -56,7 +57,17 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     case 'not_found':
       return NextResponse.json({ error: 'not_found' }, { status: 404 })
     case 'invalid':
-      return NextResponse.json({ error: 'invalid_fields' }, { status: 400 })
+      // The database's date rule is the only check the form cannot run itself: point at the field.
+      return NextResponse.json(
+        {
+          error: 'invalid_fields',
+          fields:
+            result.message === 'invalid_dates'
+              ? [{ field: 'returnOn', code: 'return_before_depart' }]
+              : [],
+        },
+        { status: 400 },
+      )
     default:
       console.error('POST departure failed', result.message)
       return NextResponse.json({ error: 'save_failed' }, { status: 500 })

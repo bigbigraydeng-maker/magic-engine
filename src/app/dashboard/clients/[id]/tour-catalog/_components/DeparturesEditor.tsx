@@ -20,7 +20,7 @@ const STATUS_OPTIONS: CatalogDepartureView['status'][] = [
 ]
 
 const ERROR_MESSAGES: Record<string, string> = {
-  conflict: '这个团刚被别人改过，请刷新页面后再改',
+  conflict: '这个班期刚被别人改过，请刷新页面后再改',
   not_found: '找不到这条记录，可能已被删除，请刷新',
   invalid_fields: '有几项填得不对，请看红字提示',
   save_failed: '保存失败，请稍后重试',
@@ -58,11 +58,16 @@ function errorMessageFor(code: string): string {
 }
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10)
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })
 }
 
 function isPast(departOn: string): boolean {
   return departOn < todayIso()
+}
+
+function errorFor(fieldErrors: FieldError[], field: string): string | null {
+  const found = fieldErrors.find((e) => e.field === field)
+  return found ? fieldErrorMessage(found.code) : null
 }
 
 interface EditRowProps {
@@ -114,8 +119,12 @@ function EditRow({ clientId, tourId, departure, onCancel, onSaved }: EditRowProp
         fields?: FieldError[]
       }
       if (!res.ok) {
-        if (data.fields && data.fields.length > 0) setFieldErrors(data.fields)
-        setMessage(errorMessageFor(data.error ?? 'save_failed'))
+        const fields = data.fields ?? []
+        if (fields.length > 0) {
+          setFieldErrors(fields)
+        } else {
+          setMessage(errorMessageFor(data.error ?? 'save_failed'))
+        }
         return
       }
       onSaved()
@@ -126,85 +135,95 @@ function EditRow({ clientId, tourId, departure, onCancel, onSaved }: EditRowProp
     }
   }
 
-  function errorFor(field: string): string | null {
-    const found = fieldErrors.find((e) => e.field === field)
-    return found ? fieldErrorMessage(found.code) : null
-  }
+  const returnOnError = errorFor(fieldErrors, 'returnOn')
+  const statusError = errorFor(fieldErrors, 'status')
+  const priceError = errorFor(fieldErrors, 'priceTextOverride')
 
   return (
     <tr className="border-t border-black/10">
-      <td className="px-3 py-2 align-top">
-        <div className="text-me-charcoal">{departure.departOn}</div>
-        <div className="mt-1 text-xs text-me-charcoal/60">
-          出团日不能改；日期错了请把这班改成「已取消」，再新增正确日期
-        </div>
-      </td>
-      <td className="px-3 py-2 align-top">
-        <input
-          type="date"
-          value={returnOn}
-          onChange={(e) => setReturnOn(e.target.value)}
-          className="rounded-lg border border-black/10 bg-me-ivory px-2 py-1 text-sm text-me-charcoal"
-        />
-        {errorFor('returnOn') && (
-          <div className="mt-1 text-xs" style={{ color: '#C2453A' }}>
-            {errorFor('returnOn')}
-          </div>
-        )}
-      </td>
-      <td className="px-3 py-2 align-top">
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value as CatalogDepartureView['status'])}
-          className="rounded-lg border border-black/10 bg-me-ivory px-2 py-1 text-sm text-me-charcoal"
-        >
-          {STATUS_OPTIONS.map((s) => (
-            <option key={s} value={s}>
-              {STATUS_LABELS[s]}
-            </option>
-          ))}
-        </select>
-        {errorFor('status') && (
-          <div className="mt-1 text-xs" style={{ color: '#C2453A' }}>
-            {errorFor('status')}
-          </div>
-        )}
-      </td>
-      <td className="px-3 py-2 align-top">
-        <input
-          type="text"
-          value={priceText}
-          onChange={(e) => setPriceText(e.target.value)}
-          className="w-full rounded-lg border border-black/10 bg-me-ivory px-2 py-1 text-sm text-me-charcoal"
-        />
-        {errorFor('priceTextOverride') && (
-          <div className="mt-1 text-xs" style={{ color: '#C2453A' }}>
-            {errorFor('priceTextOverride')}
-          </div>
-        )}
-      </td>
-      <td className="px-3 py-2 align-top">
-        <div className="flex flex-col gap-2">
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving}
-            className="rounded-lg bg-me-ochre px-3 py-1 text-sm font-semibold text-me-ivory disabled:opacity-50"
-          >
-            保存
-          </button>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-lg border border-black/10 px-3 py-1 text-sm font-semibold text-me-charcoal"
-          >
-            取消
-          </button>
-          {message && (
-            <div className="text-xs" style={{ color: message === '没有改动' ? '#5C8A4A' : '#C2453A' }}>
-              {message}
+      <td colSpan={5} className="px-3 py-3">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1 text-sm text-me-charcoal">
+            <span className="font-semibold">出团日</span>
+            <div className="text-me-charcoal">{departure.departOn}</div>
+            <div className="text-xs text-me-charcoal/60">
+              出团日不能改；日期错了请把这班改成「已取消」，再新增正确日期
             </div>
-          )}
+          </div>
+          <label className="flex w-full flex-col gap-1 text-sm text-me-charcoal">
+            <span className="font-semibold">返程日</span>
+            <input
+              type="date"
+              value={returnOn}
+              onChange={(e) => setReturnOn(e.target.value)}
+              className="w-full rounded-lg border border-black/10 bg-me-ivory px-2 py-1 text-sm text-me-charcoal"
+            />
+            {returnOnError && (
+              <span className="text-xs" style={{ color: '#C2453A' }}>
+                {returnOnError}
+              </span>
+            )}
+          </label>
+          <label className="flex w-full flex-col gap-1 text-sm text-me-charcoal">
+            <span className="font-semibold">状态</span>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value as CatalogDepartureView['status'])}
+              className="w-full rounded-lg border border-black/10 bg-me-ivory px-2 py-1 text-sm text-me-charcoal"
+            >
+              {STATUS_OPTIONS.map((s) => (
+                <option key={s} value={s}>
+                  {STATUS_LABELS[s]}
+                </option>
+              ))}
+            </select>
+            {statusError && (
+              <span className="text-xs" style={{ color: '#C2453A' }}>
+                {statusError}
+              </span>
+            )}
+          </label>
+          <label className="flex w-full flex-col gap-1 text-sm text-me-charcoal">
+            <span className="font-semibold">该班展示价</span>
+            <input
+              type="text"
+              value={priceText}
+              onChange={(e) => setPriceText(e.target.value)}
+              className="w-full rounded-lg border border-black/10 bg-me-ivory px-2 py-1 text-sm text-me-charcoal"
+            />
+            {priceError && (
+              <span className="text-xs" style={{ color: '#C2453A' }}>
+                {priceError}
+              </span>
+            )}
+          </label>
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                className="rounded-lg bg-me-ochre px-3 py-1 text-sm font-semibold text-me-ivory disabled:opacity-50"
+              >
+                保存
+              </button>
+              <button
+                type="button"
+                onClick={onCancel}
+                className="rounded-lg border border-black/10 px-3 py-1 text-sm font-semibold text-me-charcoal"
+              >
+                取消
+              </button>
+            </div>
+            {message && (
+              <div
+                className="text-xs"
+                style={{ color: message === '没有改动' ? '#5C8A4A' : '#C2453A' }}
+              >
+                {message}
+              </div>
+            )}
+          </div>
         </div>
       </td>
     </tr>
@@ -278,8 +297,12 @@ function AddForm({ clientId, tourId, onAdded }: AddFormProps) {
         fields?: FieldError[]
       }
       if (!res.ok) {
-        if (data.fields && data.fields.length > 0) setFieldErrors(data.fields)
-        setMessage(errorMessageFor(data.error ?? 'save_failed'))
+        const fields = data.fields ?? []
+        if (fields.length > 0) {
+          setFieldErrors(fields)
+        } else {
+          setMessage(errorMessageFor(data.error ?? 'save_failed'))
+        }
         return
       }
       setDepartOn('')
@@ -295,10 +318,10 @@ function AddForm({ clientId, tourId, onAdded }: AddFormProps) {
     }
   }
 
-  function errorFor(field: string): string | null {
-    const found = fieldErrors.find((e) => e.field === field)
-    return found ? fieldErrorMessage(found.code) : null
-  }
+  const departOnError = errorFor(fieldErrors, 'departOn')
+  const returnOnError = errorFor(fieldErrors, 'returnOn')
+  const statusError = errorFor(fieldErrors, 'status')
+  const priceError = errorFor(fieldErrors, 'priceTextOverride')
 
   return (
     <form onSubmit={handleSubmit} className="mt-6 rounded-xl border border-black/10 p-4">
@@ -312,9 +335,9 @@ function AddForm({ clientId, tourId, onAdded }: AddFormProps) {
             onChange={(e) => setDepartOn(e.target.value)}
             className="rounded-lg border border-black/10 bg-me-ivory px-2 py-1 text-sm text-me-charcoal"
           />
-          {errorFor('departOn') && (
+          {departOnError && (
             <span className="text-xs" style={{ color: '#C2453A' }}>
-              {errorFor('departOn')}
+              {departOnError}
             </span>
           )}
         </label>
@@ -326,9 +349,9 @@ function AddForm({ clientId, tourId, onAdded }: AddFormProps) {
             onChange={(e) => setReturnOn(e.target.value)}
             className="rounded-lg border border-black/10 bg-me-ivory px-2 py-1 text-sm text-me-charcoal"
           />
-          {errorFor('returnOn') && (
+          {returnOnError && (
             <span className="text-xs" style={{ color: '#C2453A' }}>
-              {errorFor('returnOn')}
+              {returnOnError}
             </span>
           )}
         </label>
@@ -345,9 +368,9 @@ function AddForm({ clientId, tourId, onAdded }: AddFormProps) {
               </option>
             ))}
           </select>
-          {errorFor('status') && (
+          {statusError && (
             <span className="text-xs" style={{ color: '#C2453A' }}>
-              {errorFor('status')}
+              {statusError}
             </span>
           )}
         </label>
@@ -359,9 +382,9 @@ function AddForm({ clientId, tourId, onAdded }: AddFormProps) {
             onChange={(e) => setPriceText(e.target.value)}
             className="rounded-lg border border-black/10 bg-me-ivory px-2 py-1 text-sm text-me-charcoal"
           />
-          {errorFor('priceTextOverride') && (
+          {priceError && (
             <span className="text-xs" style={{ color: '#C2453A' }}>
-              {errorFor('priceTextOverride')}
+              {priceError}
             </span>
           )}
         </label>
@@ -403,36 +426,41 @@ export function DeparturesEditor({
 
   return (
     <div>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-me-charcoal/70">
-            <th className="px-3 py-2 font-semibold">出团日</th>
-            <th className="px-3 py-2 font-semibold">返程日</th>
-            <th className="px-3 py-2 font-semibold">状态</th>
-            <th className="px-3 py-2 font-semibold">该班展示价</th>
-            <th className="px-3 py-2 font-semibold">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((d) =>
-            editingId === d.id ? (
-              <EditRow
-                key={d.id}
-                clientId={clientId}
-                tourId={tourId}
-                departure={d}
-                onCancel={() => setEditingId(null)}
-                onSaved={() => {
-                  setEditingId(null)
-                  onChanged()
-                }}
-              />
-            ) : (
-              <DepartureRow key={d.id} departure={d} onEdit={() => setEditingId(d.id)} />
-            ),
-          )}
-        </tbody>
-      </table>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr className="text-left text-me-charcoal/70">
+              <th className="px-3 py-2 font-semibold">出团日</th>
+              <th className="px-3 py-2 font-semibold">返程日</th>
+              <th className="px-3 py-2 font-semibold">状态</th>
+              <th className="px-3 py-2 font-semibold">该班展示价</th>
+              <th className="px-3 py-2 font-semibold">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((d) =>
+              editingId === d.id ? (
+                <EditRow
+                  key={d.id}
+                  clientId={clientId}
+                  tourId={tourId}
+                  departure={d}
+                  onCancel={() => setEditingId(null)}
+                  onSaved={() => {
+                    setEditingId(null)
+                    onChanged()
+                  }}
+                />
+              ) : (
+                <DepartureRow key={d.id} departure={d} onEdit={() => setEditingId(d.id)} />
+              ),
+            )}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-xs text-me-charcoal/60">
+        某个班期单独填了展示价时，网站上这个班期以它为准；没填就用团的展示价。
+      </p>
       <AddForm clientId={clientId} tourId={tourId} onAdded={onChanged} />
     </div>
   )

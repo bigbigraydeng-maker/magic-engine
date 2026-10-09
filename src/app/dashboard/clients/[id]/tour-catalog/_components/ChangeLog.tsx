@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { ChangeLogEntryView } from './types'
+import type { ChangesResponse } from '@/lib/tour-catalog/api-contract'
 
 const FIELD_NAMES: Record<string, string> = {
   name: '团名',
@@ -24,7 +25,17 @@ const FIELD_NAMES: Record<string, string> = {
   depart_on: '出团日',
 }
 
-const IGNORED_FIELDS = new Set(['updated_at', 'created_at', 'status_as_of', 'status_source'])
+const IGNORED_FIELDS = new Set([
+  'updated_at',
+  'created_at',
+  'status_as_of',
+  'status_source',
+  'id',
+  'client_id',
+  'tour_id',
+])
+
+const LIST_FIELDS = new Set(['highlights', 'inclusions', 'exclusions', 'tour_cities'])
 
 const STATUS_LABELS: Record<string, string> = {
   open: '可订',
@@ -53,10 +64,76 @@ function formatTime(iso: string): string {
 
 function formatActor(actor: string): string {
   if (actor.startsWith('edit by ')) return `手工修改（${actor.slice('edit by '.length)}）`
-  if (actor.startsWith('import:')) return '班期表导入'
+  if (actor.startsWith('import:')) {
+    const byIndex = actor.indexOf(' by ')
+    if (byIndex >= 0) return `班期表导入（${actor.slice(byIndex + ' by '.length)}）`
+    return '班期表导入'
+  }
   if (actor.startsWith('rollback:')) return '撤销导入'
   if (actor === 'system') return '系统'
   return actor
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((v): v is string => typeof v === 'string')
+}
+
+function formatListDiff(from: unknown, to: unknown): string {
+  const before = asStringArray(from)
+  const after = asStringArray(to)
+  const added = after.filter((v) => !before.includes(v))
+  const removed = before.filter((v) => !after.includes(v))
+  const parts: string[] = []
+  if (added.length > 0) parts.push(`+ ${added.slice(0, 5).join('、')}${added.length > 5 ? '等' : ''}`)
+  if (removed.length > 0) parts.push(`− ${removed.slice(0, 5).join('、')}${removed.length > 5 ? '等' : ''}`)
+  return parts.join('；')
+}
+
+interface ItineraryDay {
+  day: number
+  title: string
+  description: string
+  meals?: string[]
+}
+
+function asItinerary(value: unknown): ItineraryDay[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(
+    (v): v is ItineraryDay =>
+      typeof v === 'object' && v !== null && typeof (v as { day?: unknown }).day === 'number',
+  )
+}
+
+function itineraryDiff(from: unknown, to: unknown): string {
+  const before = asItinerary(from)
+  const after = asItinerary(to)
+  const beforeByDay = new Map(before.map((d) => [d.day, d]))
+  const afterByDay = new Map(after.map((d) => [d.day, d]))
+  const days = new Set([...beforeByDay.keys(), ...afterByDay.keys()])
+  const parts: string[] = []
+  for (const day of [...days].sort((a, b) => a - b)) {
+    const b = beforeByDay.get(day)
+    const a = afterByDay.get(day)
+    if (!b && a) parts.push(`第 ${day} 天：新增`)
+    else if (b && !a) parts.push(`第 ${day} 天：删除`)
+    else if (b && a && JSON.stringify(b) !== JSON.stringify(a)) parts.push(`第 ${day} 天：修改`)
+  }
+  return parts.join('；')
+}
+
+function describeField(key: string, from: unknown, to: unknown): string {
+  const name = FIELD_NAMES[key] ?? key
+  if (key === 'internal') return '运营信息（航司/航段/人数）已更新'
+  if (LIST_FIELDS.has(key)) {
+    const diff = formatListDiff(from, to)
+    return diff ? `${name}：${diff}` : `${name}：已更新`
+  }
+  if (key === 'itinerary') {
+    const diff = itineraryDiff(from, to)
+    return diff ? `${name}：${diff}` : `${name}：已更新`
+  }
+  return `${name}：${formatValue(from)} → ${formatValue(to)}`
 }
 
 function changedFields(
@@ -78,46 +155,66 @@ function changedFields(
   return result
 }
 
+function departureDate(entry: ChangeLogEntryView): string | null {
+  const after = entry.after?.depart_on
+  if (typeof after === 'string') return after
+  const before = entry.before?.depart_on
+  if (typeof before === 'string') return before
+  return null
+}
+
 function describeEntry(entry: ChangeLogEntryView): string {
+  const prefix =
+    entry.entity === 'departure'
+      ? (() => {
+          const date = departureDate(entry)
+          return date ? `班期 ${date}：` : '班期：'
+        })()
+      : ''
+
   if (entry.action === 'insert') {
-    const departOn = entry.after?.depart_on
-    if (entry.entity === 'departure' && typeof departOn === 'string') return `新增班期 ${departOn}`
+    if (entry.entity === 'departure') {
+      const date = departureDate(entry)
+      return date ? `新增班期 ${date}` : '新增班期'
+    }
     return entry.entity === 'tour' ? '新增团' : '新增'
   }
-  if (entry.action === 'delete') return '删除'
+  if (entry.action === 'delete') {
+    if (entry.entity === 'departure') {
+      const date = departureDate(entry)
+      return date ? `删除班期 ${date}` : '删除班期'
+    }
+    return '删除'
+  }
   const changes = changedFields(entry.before, entry.after)
-  if (changes.length === 0) return '修改'
-  return changes
-    .map((c) => {
-      const name = FIELD_NAMES[c.key] ?? c.key
-      return `${name}：${formatValue(c.from)} → ${formatValue(c.to)}`
-    })
-    .join('；')
+  if (changes.length === 0) return prefix ? `${prefix}修改` : '修改'
+  const body = changes.map((c) => describeField(c.key, c.from, c.to)).join('；')
+  return `${prefix}${body}`
 }
 
 export function ChangeLog({
   clientId,
-  entityIds,
+  tourId,
+  refreshKey,
 }: {
   clientId: string
-  entityIds: string[]
+  tourId: string
+  refreshKey: string
 }) {
   const [entries, setEntries] = useState<ChangeLogEntryView[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
 
-  async function load() {
-    // Reload every time it is opened so edits made since the last look show up.
-    if (loading) return
+  const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const query = entityIds.map((id) => 'entityId=' + encodeURIComponent(id)).join('&')
-      const res = await fetch(`/api/clients/${clientId}/tour-catalog/changes?${query}`)
-      const data = (await res.json().catch(() => ({}))) as {
-        changes?: ChangeLogEntryView[]
-        error?: string
-      }
+      const res = await fetch(
+        `/api/clients/${clientId}/tour-catalog/changes?tourId=${encodeURIComponent(tourId)}`,
+      )
+      // Typed against the route's contract so a renamed field fails the type check.
+      const data = (await res.json().catch(() => ({}))) as Partial<ChangesResponse> & { error?: string }
       if (!res.ok) {
         setError('加载失败，请稍后重试')
         return
@@ -128,7 +225,18 @@ export function ChangeLog({
     } finally {
       setLoading(false)
     }
-  }
+  }, [clientId, tourId])
+
+  // Reload whenever the panel is opened.
+  useEffect(() => {
+    if (open) void load()
+  }, [open, load])
+
+  // Reload when the tour or its departures change while the panel is open.
+  useEffect(() => {
+    if (open) void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey])
 
   const shown = (entries ?? []).slice(0, 50)
 
@@ -136,7 +244,7 @@ export function ChangeLog({
     <details
       className="mt-6 rounded-xl border border-black/10 p-4"
       onToggle={(e) => {
-        if ((e.target as HTMLDetailsElement).open) void load()
+        setOpen((e.target as HTMLDetailsElement).open)
       }}
     >
       <summary className="cursor-pointer text-sm font-semibold text-me-charcoal">
