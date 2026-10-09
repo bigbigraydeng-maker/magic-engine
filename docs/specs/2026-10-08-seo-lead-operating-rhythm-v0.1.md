@@ -104,9 +104,9 @@ CTS 周一那 5 张卡，10-08 查到全是「待办」、已过期 3 张。办�
 
 这样人每周只面对 ≤3 个「批/不批」，不是 5 个「从头干」。**验收数字**：卡从出生到「被批准或被收尾」的中位天数（目标先压到 ≤7 天，这是目标，不是已测值）。
 
-**这个数字现在取不到，P1-A 必须先定义落点**：现有 `report.ts` 的 `median_days_to_verified` 只算 `status=completed` 且 `verify.state=pass` 的卡，批准和系统收尾都不进该口径。P1-A 要在 `execution_items.steps_json` 里写两种机器可读回执——`approval_receipt`（approved_by、approved_at、request id、client id、source record id）与 `system_close_receipt`（closed_by=system、closed_at、原因、事实置信度）——并让周报新增 `median_days_to_decision`＝（approved_at 或 closed_at）− 卡创建时间，两类分开列示。没有这两个时间戳，P3 的四周决策依据无从产生。
+**这个数字现在取不到，P1-A 必须先定义落点**：现有 `report.ts` 的 `median_days_to_verified` 只算 `status=completed` 且 `verify.state=pass` 的卡，批准和系统收尾都不进该口径。P1-A 要在 `execution_items.steps_json` 里写两种机器可读回执——`approval_receipt`（decision、decided_by、decided_at、request id、client id、source record id）与 `system_close_receipt`（closed_by=system、closed_at、原因、事实置信度）——并让周报新增 `median_days_to_decision`＝（`decided_at` 或 `closed_at`）− 卡创建时间。**人的决定一律写成同一种 `approval_receipt`，里面带 `decision`（`approved` / `rejected`）、`decided_by`、`decided_at`**，所以「不批准」也有人名和时间，不会被误记成系统收尾；周报按 批准 / 人工拒绝 / 系统收尾 三类分开列示，三类都进这个中位数。没有这两个时间戳，P3 的四周决策依据无从产生。
 
-**批准回执必须有真实的写入入口（现状没有）**：现有 `src/app/api/clients/[id]/execution/[itemId]/route.ts` 的 PATCH 只接受 `pending / in_progress / completed / skipped` 四种状态（`VALID_STATUSES`），没有「批准」动作，也不允许写 `steps_json`；执行看板同样没有批准按钮。所以 P1-A 工作包必须同时包含：①执行看板上专用的「批准 / 不批准」按钮；②对应的专用接口，**批准人身份取自服务端登录会话（`requirePaidClientAccess`），不取请求体**，并同时写 `approval_receipt` 与 `execution_logs`；③PATCH 不放宽。这是新增对外接口且碰鉴权，P1-A 的风险级别因此按 **A 级**重估（上面 §5 表里的 B 级只适用于预诊断与收尾部分），须 2 审并先出设计稿。在此入口落地前，`median_days_to_decision` 只能统计系统收尾、漏掉全部人工批准，不得拿它做 P3 的决策依据。
+**批准回执必须有真实的写入入口（现状没有）**：现有 `src/app/api/clients/[id]/execution/[itemId]/route.ts` 的 PATCH 只接受 `pending / in_progress / completed / skipped` 四种状态（`VALID_STATUSES`），没有「批准」动作，也不允许写 `steps_json`；执行看板同样没有批准按钮。所以 P1-A 工作包必须同时包含：①执行看板上专用的「批准 / 不批准」按钮；②对应的专用接口，**决定人身份取自服务端登录会话（`requirePaidClientAccess`），不取请求体**，批准与不批准都写 `approval_receipt`（`decision` 区分）并同时写 `execution_logs`；③PATCH 不放宽。这是新增对外接口且碰鉴权，P1-A 的风险级别因此按 **A 级**重估（上面 §5 表里的 B 级只适用于预诊断与收尾部分），须 2 审并先出设计稿。在此入口落地前，`median_days_to_decision` 只能统计系统收尾、漏掉全部人工批准，不得拿它做 P3 的决策依据。
 
 ---
 
@@ -179,7 +179,7 @@ CTS 周一那 5 张卡，10-08 查到全是「待办」、已过期 3 张。办�
 | 现有 | 关系 |
 |---|---|
 | 每周清单 v0.2（`/api/cron/seo-weekly-list`，S1/S2 已上线） | **骨架基本不变，但必须改一处现有逻辑**：`src/lib/seo-weekly-list/run.ts` 的过期收尾（约 224–253 行）现在只按年龄和核验结果把未处理卡转 `skipped`，不看事实置信度；P1-A 须在过期条件里排除「预诊断为【假设】/【很可能】、已转人工」的卡（这类卡到期也不得自动 `skipped`，改为保持待人看并在待办里提醒）。另外 P1-A 在其生成/核对步骤里加「预诊断」，P1-B 的簇结果作为同一次运行的另一栏；仍是同一个任务、同一张 `execution_items` |
-| 标题周循环（Inngest `seo-meta-cycle`） | **不改闸门**；P2-A 只改「挑哪些页」（候选与可编辑页对齐，B 级）；联动：簇地图标出「该簇主页」后，标题循环优先动主页，不再动卫星页 |
+| 标题周循环（Inngest `seo-meta-cycle`） | **不改闸门**；P2-A 只改「挑哪些页」（候选与可编辑页对齐，B 级）；联动（有前提）：**只有带人工批准回执（`approval_receipt`，见 §3）的「该簇主页」选择，标题循环才可据此优先动主页、不动卫星页；未批准的簇地图只用于周报展示，不得被 `seo-meta-cycle` 读取或影响选页**（否则聚类误判会让标题循环真实改错页面，绕过 §1.2「定主页＝人批」） |
 | 排名采样（`seo-meta-rank-sampler`） | **现状只认 `seo_meta_log` 里带 `baseline_rank_status` / `new_title` / `optimised_at` 的标题改动，且只回写该表**——canonical、跳转、内链、正文改动没有可采样的行。所以第一阶段**只把复用范围限定为标题改动**；P3-B 等非标题动作要做排名核验，须先在 P3 里新增通用「动作＋基线」输入与结果存储（届时单独评审），在此之前这类动作没有排名结果，不得宣称已核验 |
 | 巡检（`seo-patrol-daily`） | 复用并补原因分类；其输出作为 D1 的唯一来源 |
 | 周报（`weekly-seo-report`） | 增栏，不新建面 |
