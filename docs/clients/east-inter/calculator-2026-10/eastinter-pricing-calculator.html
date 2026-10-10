@@ -42,7 +42,7 @@
           <div class="options" id="cargo-options" hidden><label for="cargo">Goods type</label><select id="cargo"><option value="normal">General goods</option><option value="sensitive">Sensitive goods (powders / liquids / batteries)</option></select></div>
           <div class="options" id="tax-options" hidden><div class="hint" style="margin:0 0 7px">Duties & taxes</div><div class="segmented" role="group" aria-label="Duties & taxes"><button type="button" data-tax="DDU" aria-pressed="false">DDU · Duties unpaid</button><button type="button" data-tax="DDP" aria-pressed="true">DDP · Duties prepaid</button></div></div>
         </div>
-        <div class="step"><div class="step-title"><span class="step-no">03</span><label id="quantity-label" for="quantity">Enter shipment volume</label></div><div class="measurement"><input id="quantity" type="number" inputmode="decimal" min="1" step="any" value="5" aria-describedby="quantity-hint quantity-error"><span id="unit">m³ / CBM</span></div><p class="hint" id="quantity-hint"></p><p class="error" id="quantity-error" role="alert" hidden></p><div class="options" id="volume-options" hidden><label for="volume">Total packed volume (m³, optional)</label><div class="measurement"><input id="volume" type="number" inputmode="decimal" min="0" step="any" placeholder="Optional" aria-describedby="volume-hint"><span>m³ / CBM</span></div><p class="hint" id="volume-hint">Volume weight = L × W × H (cm) ÷ 6,000, or total m³ × 1,000,000 ÷ 6,000. We use the greater of actual and volume weight. If omitted, the estimate uses actual weight only.</p></div></div>
+        <div class="step"><div class="step-title"><span class="step-no">03</span><label id="quantity-label" for="quantity">Enter shipment volume</label></div><div class="measurement"><input id="quantity" type="number" inputmode="decimal" min="1" step="any" value="5" aria-describedby="quantity-hint quantity-error"><span id="unit">m³ / CBM</span></div><p class="hint" id="quantity-hint"></p><p class="error" id="quantity-error" role="alert" hidden></p><div class="options" id="lcl-weight-options"><label for="lcl-weight">Total cargo weight (kg, optional)</label><div class="measurement"><input id="lcl-weight" type="number" inputmode="decimal" min="0" step="any" placeholder="Optional"><span>kg</span></div><p class="hint">Cargo over 500kg per m³ is charged at 500kg = 1 m³. If omitted, the estimate uses volume only.</p></div><div class="options" id="volume-options" hidden><label for="volume">Total packed volume (m³, optional)</label><div class="measurement"><input id="volume" type="number" inputmode="decimal" min="0" step="any" placeholder="Optional" aria-describedby="volume-hint"><span>m³ / CBM</span></div><p class="hint" id="volume-hint">Volume weight = L × W × H (cm) ÷ 6,000, or total m³ × 1,000,000 ÷ 6,000. We use the greater of actual and volume weight. If omitted, the estimate uses actual weight only.</p></div></div>
       </section>
       <aside class="card quote" aria-label="Live shipping estimate" aria-live="polite" aria-atomic="true">
         <div class="quote-top"><p class="quote-label">YOUR SHIPPING ESTIMATE</p><h2 id="estimate-title">Estimated shipping cost</h2><div class="price"><strong id="price">—</strong><span>AUD</span></div><p class="quote-subtitle" id="quote-subtitle"></p><div class="transit"><span aria-hidden="true">◷</span><span>Estimated transit time</span><strong id="transit">—</strong></div></div>
@@ -74,7 +74,7 @@
     function selectService(next) {
       savedQuantities[service]=$('quantity').value; service=next;
       document.querySelectorAll('[data-service]').forEach(button => button.setAttribute('aria-pressed',String(button.dataset.service === service)));
-      $('cargo-options').hidden=service !== 'airParcel'; $('tax-options').hidden=service !== 'bulkAir'; $('volume-options').hidden=service === 'lcl';
+      $('cargo-options').hidden=service !== 'airParcel'; $('tax-options').hidden=service !== 'bulkAir'; $('volume-options').hidden=service === 'lcl'; $('lcl-weight-options').hidden=service !== 'lcl';
       $('quantity-label').textContent=service === 'lcl' ? 'Enter shipment volume' : 'Enter actual shipment weight';
       $('unit').textContent=service === 'lcl' ? 'm³ / CBM' : 'kg';
       $('quantity').min=service === 'lcl' ? '1' : '0.01';
@@ -95,7 +95,7 @@
         seaParcel:'Chargeable weight is rounded up to a whole kg. At 20kg billed weight and above, the flat per-kg rate applies.',
         bulkAir:'10–99kg chargeable weight only. Both DDU and DDP are priced per kg, rounded up to the next whole kg.'
       }[service];
-      const quote=estimate({service,city,quantity,cargo:$('cargo').value,tax,delivery:$('delivery').value,volume:$('volume').value.trim()===''?null:$('volume').valueAsNumber});
+      const quote=estimate({service,city,quantity,cargo:$('cargo').value,tax,delivery:$('delivery').value,volume:$('volume').value.trim()===''?null:$('volume').valueAsNumber,weightKg:$('lcl-weight').value.trim()===''?null:$('lcl-weight').valueAsNumber});
       $('route-city').textContent=cities[city]; $('breakdown').replaceChildren();
       $('quantity-error').textContent=quote.error||''; $('quantity-error').hidden=!quote.error; $('quantity').setAttribute('aria-invalid',String(Boolean(quote.error)));
       $('surcharge').hidden=!quote.warning; $('surcharge').textContent=quote.warning||'';
@@ -114,7 +114,7 @@
       tax=button.dataset.tax; document.querySelectorAll('[data-tax]').forEach(item => item.setAttribute('aria-pressed',String(item.dataset.tax === tax))); calculate();
     }));
     ['city','cargo','delivery'].forEach(id => $(id).addEventListener('change',calculate));
-    ['quantity','volume'].forEach(id => $(id).addEventListener('input',calculate));
+    ['quantity','volume','lcl-weight'].forEach(id => $(id).addEventListener('input',calculate));
     const params=new URLSearchParams(window.location.search);
     const requestedService=['lcl','airParcel','seaParcel','bulkAir'].includes(params.get('service'))?params.get('service'):'lcl';
     selectService(requestedService);

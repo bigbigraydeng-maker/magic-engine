@@ -5,6 +5,14 @@
 
 ---
 
+### 2026-10-10（East Inter 官网：运费计算器换成新版报价）
+
+PR [#2427](https://github.com/bigbigraydeng-maker/magic-engine/pull/2427)。计算器按东际新报价表更新海运拼箱各城市单价；海运拼箱新增可选「货物总重量」，超过 500kg/立方按 500kg=1 立方计费；空运大件不含税（DDU）结果明确提示不含 A$110 清关费、DDP 提示不含 15% 预付税。新旧报价逐项对比见 `docs/clients/east-inter/2026-10-10-calculator-new-quote-diff.md`，台账卡 `2026-10-10-east-inter-calculator-new-quote`。回滚：还原 PR #2427（计算器文件在 `docs/clients/east-inter/calculator-2026-10/`）。验证：`node --test tests/pricing.test.js` 39 项通过。网页 Impeccable 检查尚未运行。
+
+**Reuse Statement**：客户专属计算器，全部在客户交付目录内，未进入共享运行时。
+
+---
+
 ### 2026-10-05（Park Homes 官网：Riverside 页「工程进度」加上客户发来的进度更新视频）
 
 PR [#2252](https://github.com/bigbigraydeng-maker/magic-engine/pull/2252) 由机器自动合并（C 级），随后手动触发 `parkhomes-deploy.yml` 发布（自动合并不会触发发布，见 [合并审批](../../.github/merge-authorization.md)「已知缺口」），线上已核实。客户 Jason 2026-10-04 邮件发来一条 Riverside 进度更新视频（YouTube），要求放上网站。嵌入位置是 Riverside 页「Development progress」一段的航拍图下方，由 `projects.js` 里新增的可选字段 `story.progress.video` 驱动；说明只写「开发商提供，2026 年 10 月」（收到时间），不从视频推断分期或完工状态；原有的走访视频保留在原处。代码由 DeepSeek 写（aider 一次性 1 轮，$0.0042），Claude Code 出指令、审 diff、构建、提交。验证：站点构建 20 页通过；生成页与线上页均含新旧两个视频嵌入；浏览器实际打开线上页，新视频播放器加载正常（16:9，无横向溢出）。台账卡 `2026-10-05-parkhomes-riverside-update-video`。

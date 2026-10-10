@@ -31,25 +31,29 @@
     const R = resolveRates(config);
     const seaExtras = 'Not included: any applicable GST (10% of goods value), import duty (0–10%, depending on product), fumigation ('+money(R.fees.fumigation)+' per shipment for wood/natural materials), or customs broker fee ('+money(R.fees.broker)+'; '+money(R.fees.brokerHigh)+' if cargo value exceeds '+money(R.fees.brokerHighThreshold)+'). Contact us to confirm which charges apply.';
 
-    function estimate({service,city,quantity,cargo='normal',tax='DDP',delivery='door',volume=null}) {
+    function estimate({service,city,quantity,cargo='normal',tax='DDP',delivery='door',volume=null,weightKg=null}) {
       if (!Number.isFinite(quantity) || quantity <= 0) return {error:'Enter a valid weight or volume greater than zero.'};
       if (service !== 'lcl' && volume !== null && (!Number.isFinite(volume) || volume < 0)) return {error:'Enter a valid packed volume of zero or greater, or leave it blank.'};
+      if (service === 'lcl' && weightKg !== null && (!Number.isFinite(weightKg) || weightKg < 0)) return {error:'Enter a valid cargo weight of zero or greater, or leave it blank.'};
       const volumetric = service === 'lcl' || volume === null ? 0 : volume * 1000000 / 6000;
       const weight = service === 'lcl' ? quantity : Math.max(quantity,volumetric);
       if (!Number.isFinite(weight)) return {error:'The entered shipment size is too large. Contact us for a quote.'};
       if (service === 'lcl' && quantity < 1) return {error:'LCL rates start at 1 m³. Contact us for smaller shipments.'};
+      const lclCbm = service === 'lcl' && weightKg !== null ? Math.max(quantity,weightKg / 500) : quantity;
       if (service === 'bulkAir' && (weight < 10 || weight > 99)) return {error:'Standard bulk air rates cover 10–99kg chargeable weight only. Contact us for other weights, including the reduced rates for shipments over 100kg.'};
       let total=0, days='—', note='', warning='', billed=weight, lines=[];
       if (service === 'lcl') {
         const rate=R.lcl[city];
         if (!rate) return {error:'Contact us for LCL rates to this destination.'};
-        const first=quantity >= 10 ? rate.large : rate.first;
-        total=first+(quantity-1)*rate.next; days=rate.days;
-        lines.push(['First CBM · '+(quantity >= 10 ? '10 m³ and above' : 'under 10 m³'),first]);
-        if (quantity > 1) lines.push(['Additional '+number(quantity-1)+' m³ × '+money(rate.next),(quantity-1)*rate.next]);
+        const cbm=lclCbm;
+        const first=cbm >= 10 ? rate.large : rate.first;
+        total=first+(cbm-1)*rate.next; days=rate.days;
+        lines.push(['First CBM · '+(cbm >= 10 ? '10 m³ and above' : 'under 10 m³'),first]);
+        if (cbm > 1) lines.push(['Additional '+number(cbm-1)+' m³ × '+money(rate.next),(cbm-1)*rate.next]);
+        if (cbm > quantity) note+='Cargo weight exceeds 500kg per m³, so '+number(cbm)+' m³ is charged (500kg = 1 m³). ';
         note='Includes China export clearance, ocean freight, Australian import clearance and AQIS inspection. ';
         if (rate.extra && (!rate.optional || delivery === 'door')) {
-          const fee=Math.max(quantity*rate.extra,rate.minimum);
+          const fee=Math.max(cbm*rate.extra,rate.minimum);
           total+=fee;
           lines.push([rate.fee+' · '+money(rate.extra)+'/m³ (min. '+money(rate.minimum)+')',fee]);
           note+=rate.fee+' is included in this estimate. ';
@@ -85,6 +89,7 @@
         lines.push([units+' × '+unit+'kg × '+money(rate[tax]),total]);
         note=tax+' · Billed weight: '+number(billed)+'kg. '+(tax === 'DDP' ? 'DDP: East Inter prepays Australian duties and taxes.' : 'Recipient pays Australian duties and GST on arrival; these are not included.');
       }
+      if (service === 'bulkAir' && tax === 'DDU') warning='Freight only. The source rate sheet also lists a A$110 clearance fee for tax-excluded bulk air, which is not included in this estimate. Duties and GST are payable by the recipient. Contact us for the full total.';
       if (service === 'bulkAir' && tax === 'DDP') warning='Freight only. The source rate sheet also requires a 15% prepaid tax on goods value for DDP, which cannot be calculated here (goods value is not collected). Contact us for the DDP total.';
       if (!Number.isFinite(total)) return {error:'The entered shipment size is too large. Contact us for a quote.'};
       if (service !== 'lcl') {

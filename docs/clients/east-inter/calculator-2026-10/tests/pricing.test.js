@@ -90,3 +90,10 @@ test('Bulk air refuses under 10kg and over 99kg', () => {
   assert.match(est({service:'bulkAir',city:'sydney',quantity:9.99}).error,/10–99kg/);
   assert.match(est({service:'bulkAir',city:'sydney',quantity:100}).error,/10–99kg/);
 });
+
+test('LCL over 500kg/CBM is charged at weight: Sydney 1 m3 1000kg = 2 CBM', () => {
+  const heavy = est({service:'lcl',city:'sydney',quantity:1,weightKg:1000}), light = est({service:'lcl',city:'sydney',quantity:1,weightKg:100});
+  assert.ok(heavy.total > light.total);
+  assert.equal(light.total, est({service:'lcl',city:'sydney',quantity:1}).total);
+});
+test('Bulk air DDU warns the A$110 clearance fee is excluded', () => assert.match(est({service:'bulkAir',city:'sydney',quantity:50,tax:'DDU'}).warning,/A\$110/));
