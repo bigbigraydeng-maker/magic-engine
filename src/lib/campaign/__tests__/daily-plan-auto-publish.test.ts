@@ -47,6 +47,7 @@ function authorization(overrides: Partial<AutoPublishAuthorization> = {}): AutoP
     authorized_by_email: 'ops@example.com',
     authorized_by_user_id: USER_ID,
     authorized_at: '2026-09-01T00:00:00.000Z',
+    activated_at: '2026-09-01T00:00:05.000Z',
     expires_at: '2026-09-15T00:00:00.000Z',
     revoked_at: null,
     revoked_by_email: null,
@@ -146,6 +147,18 @@ describe('CampaignDailyAutoPublishRevokeCommandSchema', () => {
         reason: '   ',
       }),
     ).toThrow()
+  })
+})
+
+describe('judgeAuthorization — activation', () => {
+  it('🔴 a grant that was never armed (no activation) is NOT_ACTIVATED, not active', () => {
+    expect(judgeAuthorization(authorization({ activated_at: null }), current())).toEqual({ active: false, reason: 'NOT_ACTIVATED' })
+  })
+
+  it('revoked wins over not-activated', () => {
+    expect(
+      judgeAuthorization(authorization({ activated_at: null, revoked_at: '2026-09-02T00:00:00.000Z' }), current()),
+    ).toEqual({ active: false, reason: 'REVOKED' })
   })
 })
 
@@ -277,5 +290,16 @@ describe('computeExpiry', () => {
 
   it('clamps negative days to 1', () => {
     expect(computeExpiry(authorizedAt, -5).toISOString()).toBe('2026-09-02T00:00:00.000Z')
+  })
+})
+
+describe('CampaignDailyAutoPublishAuthorizeCommandSchema — lift_recalled_dates', () => {
+  it('defaults to an empty list', () => {
+    expect(CampaignDailyAutoPublishAuthorizeCommandSchema.parse(authorizeCommand()).lift_recalled_dates).toEqual([])
+  })
+
+  it('accepts a subset of dates and rejects a date outside them', () => {
+    expect(CampaignDailyAutoPublishAuthorizeCommandSchema.safeParse(authorizeCommand({ lift_recalled_dates: ['2026-09-04'] })).success).toBe(true)
+    expect(CampaignDailyAutoPublishAuthorizeCommandSchema.safeParse(authorizeCommand({ lift_recalled_dates: ['2026-09-09'] })).success).toBe(false)
   })
 })

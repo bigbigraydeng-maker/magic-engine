@@ -86,6 +86,14 @@ export const CampaignDailyAutoPublishAuthorizeCommandSchema = z.object({
   max_per_day: z.number().int().min(1).max(AUTO_PUBLISH_MAX_PER_DAY_CEILING).default(1),
   expires_in_days: z.number().int().min(1).max(AUTO_PUBLISH_MAX_EXPIRY_DAYS).default(AUTO_PUBLISH_DEFAULT_EXPIRY_DAYS),
   confirm: z.boolean().default(false),
+  /**
+   * Recalled dates are blocked for good unless the PM explicitly lifts them here
+   * (a recalled post that was fixed and should go out again). Must be a subset of `dates`.
+   */
+  lift_recalled_dates: z.array(dateStringSchema).max(31).default([]),
+}).refine(command => command.lift_recalled_dates.every(date => command.dates.includes(date)), {
+  message: 'lift_recalled_dates must be a subset of dates',
+  path: ['lift_recalled_dates'],
 })
 
 export type CampaignDailyAutoPublishAuthorizeCommand = z.infer<typeof CampaignDailyAutoPublishAuthorizeCommandSchema>
@@ -121,6 +129,8 @@ export interface AutoPublishAuthorization {
   authorized_by_email: string
   authorized_by_user_id: string
   authorized_at: string
+  /** Null until the authorisation event was sent; the publisher must treat null as not armed. */
+  activated_at: string | null
   expires_at: string
   revoked_at: string | null
   revoked_by_email: string | null
@@ -129,7 +139,7 @@ export interface AutoPublishAuthorization {
 
 export type AuthorizationVerdict =
   | { active: true }
-  | { active: false; reason: 'REVOKED' | 'EXPIRED' | 'PLAN_CHANGED' }
+  | { active: false; reason: 'REVOKED' | 'NOT_ACTIVATED' | 'EXPIRED' | 'PLAN_CHANGED' }
 
 /**
  * Decide whether a stored authorization still permits an unattended publish.
@@ -146,6 +156,7 @@ export function judgeAuthorization(
   current: { planId: string; planRevision: string; reviewRevision: string; now: Date },
 ): AuthorizationVerdict {
   if (auth.revoked_at !== null) return { active: false, reason: 'REVOKED' }
+  if (auth.activated_at === null) return { active: false, reason: 'NOT_ACTIVATED' }
 
   if (
     auth.plan_id !== current.planId ||

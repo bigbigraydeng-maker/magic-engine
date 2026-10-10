@@ -184,3 +184,23 @@ Instagram 图文、Story、改审核清单、改价格闸逻辑、新数据库�
 - 授权接口回包带 `note: "Recorded only. The automatic publisher is not running yet."`，第三刀移除。
 - 授权事件发送失败会回滚授权；回滚本身也失败时，回包明说 `rollback: FAILED` 并提示手动撤销（授权可能仍然有效）。
 - 撤回联动：撤回成功后把对应日期写成 `blocked / RECALLED` 的尝试行（唯一键 `(plan_id, date)` 让它不可能再被领取），并从授权日期里剔除；全部日期都撤回则授权整体作废。写失败不影响撤回本身，但回包 `auto_publish_tombstone: FAILED` 明说；第三刀 worker 另外把回执里的 `recalled[]` 当终态，双保险。
+
+## 16. 第二刀审查后的改动与第三刀前置条件（2026-10-10，PR #2430 三位审查）
+
+**本刀已改：**
+- 撤销/读取授权都按「计划 + 客户」过滤，撤销可按授权编号精确撤（防止误撤新授权）。
+- 授权表加 `activated_at`：先写未激活的行 → 发事件 → 再激活；事件或激活失败按 id 回滚并明说回滚是否成功。`judgeAuthorization` 把未激活判为不可用（`NOT_ACTIVATED`）。
+- 授权前先核对 `clients.facebook_page_id`（只读，无令牌）；拒绝过去日期；已撤回的日期必须由 PM 在 `lift_recalled_dates` 里明确点名才能再授权，且解除动作在授权成功之后才执行。
+- 撤回写墓碑不再依赖"当前有授权"（撤销后再撤回也留墓碑，`auth_id` 可空）；有日期正在发（`claimed`）时拒绝覆盖，并让撤回回包明说失败。撤回回包不再带内部错误原文。
+- 过期/计划已变/半成品（超 5 分钟未激活）的旧授权，不再让新授权报 `ALREADY_AUTHORIZED`，自动作废后重建。
+- 授权/撤销只认「全局管理员且不限定单个客户」；500 回包只给固定文案。
+- 从未发过帖的计划，撤销回包的「在途」是已核对的空列表，不再误报 UNKNOWN。
+
+**第三刀的硬前置条件（不满足不许开真发）：**
+1. worker 以 `publish_meta.recalled[]` 为终态依据，**不依赖**墓碑表（双保险），并有测试。
+2. worker 只认 `activated_at` 非空、且 `judgeAuthorization` 为 active 的授权；所有读授权的地方（含「明天有没有授权」检查）都必须过 `judgeAuthorization`，不得只看 `revoked_at is null`。
+3. worker 写 attempts 必须条件更新（`where status='claimed' and request_id=本次`），否则迟到的 worker 会覆盖墓碑。
+4. 新授权开始前要清理旧授权遗留的非「粘性」尝试行：`unknown_outcome / published / RECALLED` 继承，`missed_window / blocked(价格拦截) / dry_run` 不继承；`dry_run` 行不得占住真发的领取。
+5. 超时 + 失败回执记 certainty + `unknown` 不得被重发（沿用 §14）。
+6. 撤销后「在途帖」要能重复查询，非空时出待办；预览与确认之间的内容绑定（图片被换/价格资料被改）记作后续项，第三刀评估。
+7. campaign 归档/客户暂停合作时 worker 不发。

@@ -16,6 +16,8 @@ create table public.daily_plan_auto_publish_auth (
   authorized_by_email text not null,
   authorized_by_user_id uuid not null,
   authorized_at timestamptz not null default now(),
+  -- set only after the authorisation event was sent; the publisher acts on activated grants only
+  activated_at timestamptz,
   expires_at timestamptz not null,
   revoked_at timestamptz,
   revoked_by_email text,
@@ -43,7 +45,8 @@ revoke all on public.daily_plan_auto_publish_auth from anon, authenticated;
 
 create table public.daily_plan_auto_publish_attempts (
   id uuid primary key default gen_random_uuid(),
-  auth_id uuid not null references public.daily_plan_auto_publish_auth(id),
+  -- null for a tombstone written when no grant is active (e.g. recall after revoke)
+  auth_id uuid references public.daily_plan_auto_publish_auth(id),
   client_id uuid not null,
   plan_id uuid not null,
   date text not null check (date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'),

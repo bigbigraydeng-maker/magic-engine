@@ -27,7 +27,7 @@ import { type AutoPublishAuthorization, remainingAuthorizedDates } from './daily
  */
 export type NewAutoPublishAuthorization = Omit<
   AutoPublishAuthorization,
-  'id' | 'revoked_at' | 'revoked_by_email' | 'revoked_reason'
+  'id' | 'activated_at' | 'revoked_at' | 'revoked_by_email' | 'revoked_reason'
 >
 
 export type InsertAuthorizationResult =
@@ -63,11 +63,15 @@ export async function insertAuthorization(row: NewAutoPublishAuthorization): Pro
  * none. Expiry is *not* filtered here: `judgeAuthorization` owns that decision
  * so the reported reason stays specific.
  */
-export async function getActiveAuthorization(planId: string): Promise<AutoPublishAuthorization | null> {
+export async function getActiveAuthorization(
+  planId: string,
+  clientId: string,
+): Promise<AutoPublishAuthorization | null> {
   const { data, error } = await supabaseAdmin
     .from(AUTH_TABLE)
     .select('*')
     .eq('plan_id', planId)
+    .eq('client_id', clientId)
     .is('revoked_at', null)
     .maybeSingle()
 
@@ -84,13 +88,17 @@ export async function getActiveAuthorization(planId: string): Promise<AutoPublis
  */
 export async function revokeAuthorization(input: {
   planId: string
+  /** When given, revoke exactly this grant (never a newer one that replaced it). */
+  authId?: string
+  /** The client the caller is acting for; a plan id from another client must not match. */
+  clientId: string
   byEmail: string
   reason: string
   now?: Date
 }): Promise<AutoPublishAuthorization | null> {
   const revokedAt = (input.now ?? new Date()).toISOString()
 
-  const { data, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from(AUTH_TABLE)
     .update({
       revoked_at: revokedAt,
@@ -98,6 +106,30 @@ export async function revokeAuthorization(input: {
       revoked_reason: input.reason,
     })
     .eq('plan_id', input.planId)
+    .eq('client_id', input.clientId)
+  if (input.authId) query = query.eq('id', input.authId)
+
+  const { data, error } = await query.is('revoked_at', null).select('*').maybeSingle()
+
+  if (error) throw error
+
+  return (data as AutoPublishAuthorization | null) ?? null
+}
+
+/**
+ * Arm a grant: stamp `activated_at` once its authorisation event was sent.
+ * Returns the activated row, or null when it was revoked in the meantime.
+ */
+export async function activateAuthorization(input: {
+  authId: string
+  clientId: string
+  now?: Date
+}): Promise<AutoPublishAuthorization | null> {
+  const { data, error } = await supabaseAdmin
+    .from(AUTH_TABLE)
+    .update({ activated_at: (input.now ?? new Date()).toISOString() })
+    .eq('id', input.authId)
+    .eq('client_id', input.clientId)
     .is('revoked_at', null)
     .select('*')
     .maybeSingle()
@@ -108,13 +140,60 @@ export async function revokeAuthorization(input: {
 }
 
 /**
+ * Remove the RECALLED tombstones for dates the PM explicitly chose to send again.
+ * Only RECALLED blocks are removed; every other attempt row is left untouched.
+ */
+export async function liftRecalledTombstones(input: {
+  planId: string
+  clientId: string
+  dates: string[]
+}): Promise<void> {
+  if (input.dates.length === 0) return
+  const { error } = await supabaseAdmin
+    .from(ATTEMPTS_TABLE)
+    .delete()
+    .eq('plan_id', input.planId)
+    .eq('client_id', input.clientId)
+    .eq('status', 'blocked')
+    .eq('reason_code', 'RECALLED')
+    .in('date', input.dates)
+
+  if (error) throw error
+}
+
+/**
+ * Dates of a plan that a human recalled and that the automatic publisher must
+ * therefore never send again (attempts rows blocked with reason RECALLED).
+ */
+export async function findRecalledDates(planId: string, clientId: string, dates: string[]): Promise<string[]> {
+  if (dates.length === 0) return []
+  const { data, error } = await supabaseAdmin
+    .from(ATTEMPTS_TABLE)
+    .select('date')
+    .eq('plan_id', planId)
+    .eq('client_id', clientId)
+    .eq('status', 'blocked')
+    .eq('reason_code', 'RECALLED')
+    .in('date', dates)
+
+  if (error) throw error
+
+  return ((data ?? []) as Array<{ date: string }>).map(row => row.date)
+}
+
+/**
  * Record recalled dates so the scheduler can never publish them again.
  *
- * A recall is a human taking a post down; the grant may still list the date,
- * so the date is tombstoned in the attempts table (status `blocked`, reason
- * `RECALLED`) and then removed from the grant. When every authorized date has
- * been recalled the grant itself is revoked, because there is nothing left for
- * it to authorize.
+ * A recall is a human taking a post down. The date is tombstoned in the
+ * attempts table (status `blocked`, reason `RECALLED`) whether or not a grant
+ * is active right now — a recall after a revoke must still stick, otherwise a
+ * later re-authorisation would re-send the post. If a grant is active the date
+ * is also removed from it, and when every authorized date has been recalled the
+ * grant itself is revoked.
+ *
+ * A date whose attempt is `claimed` (the publisher is mid-send) cannot be
+ * tombstoned safely: this throws `TOMBSTONE_RACE_CLAIMED` so the caller reports
+ * it loudly instead of silently overwriting an in-flight claim.
  */
 export async function tombstoneRecalledDates(input: {
   clientId: string
@@ -123,13 +202,22 @@ export async function tombstoneRecalledDates(input: {
 }): Promise<{ tombstoned: number }> {
   if (input.dates.length === 0) return { tombstoned: 0 }
 
-  const auth = await getActiveAuthorization(input.planId)
-  if (auth === null) return { tombstoned: 0 }
+  const { data: existing, error: existingError } = await supabaseAdmin
+    .from(ATTEMPTS_TABLE)
+    .select('date, status')
+    .eq('plan_id', input.planId)
+    .eq('client_id', input.clientId)
+    .in('date', input.dates)
 
+  if (existingError) throw existingError
+  const inFlight = ((existing ?? []) as Array<{ date: string; status: string }>).filter(r => r.status === 'claimed')
+  if (inFlight.length > 0) throw new Error('TOMBSTONE_RACE_CLAIMED')
+
+  const auth = await getActiveAuthorization(input.planId, input.clientId)
   const now = new Date().toISOString()
 
   const attemptRows = input.dates.map(date => ({
-    auth_id: auth.id,
+    auth_id: auth?.id ?? null,
     client_id: input.clientId,
     plan_id: input.planId,
     date,
@@ -146,22 +234,25 @@ export async function tombstoneRecalledDates(input: {
 
   if (upsertError) throw upsertError
 
-  const remaining = remainingAuthorizedDates(auth.dates, input.dates)
+  if (auth !== null) {
+    const remaining = remainingAuthorizedDates(auth.dates, input.dates)
 
-  if (remaining.length === 0) {
-    await revokeAuthorization({
-      planId: input.planId,
-      byEmail: 'system:recall',
-      reason: 'all authorised dates were recalled',
-    })
-  } else {
-    const { error: updateError } = await supabaseAdmin
-      .from(AUTH_TABLE)
-      .update({ dates: remaining })
-      .eq('id', auth.id)
-      .is('revoked_at', null)
+    if (remaining.length === 0) {
+      await revokeAuthorization({
+        planId: input.planId,
+        clientId: input.clientId,
+        byEmail: 'system:recall',
+        reason: 'all authorised dates were recalled',
+      })
+    } else {
+      const { error: updateError } = await supabaseAdmin
+        .from(AUTH_TABLE)
+        .update({ dates: remaining })
+        .eq('id', auth.id)
+        .is('revoked_at', null)
 
-    if (updateError) throw updateError
+      if (updateError) throw updateError
+    }
   }
 
   return { tombstoned: input.dates.length }

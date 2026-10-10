@@ -15,9 +15,11 @@
  *    so a plan that would be refused at publish time cannot be authorised now.
  *  - `confirm` defaults to `false`: a caller who says nothing gets a preview,
  *    not an armed scheduler.
- *  - If the authorisation event cannot be sent, the grant is revoked before
- *    returning 500 — an authorisation without its event receipt must not stay
- *    active.
+ *  - The grant is written inactive, armed (`activated_at`) only after its
+ *    authorisation event was sent. If the event or the arming fails the grant is
+ *    revoked by id before returning 500, so an authorisation without its event
+ *    receipt is never armed. If that rollback fails too the response says so.
+ *  - Recalled dates stay blocked unless the PM lists them in `lift_recalled_dates`.
  */
 import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
@@ -27,17 +29,31 @@ import {
   CampaignDailyAutoPublishAuthorizeCommandSchema,
   DAILY_PLAN_AUTO_PUBLISH_AUTHORIZED_EVENT,
   computeExpiry,
+  judgeAuthorization,
 } from '@/lib/campaign/daily-plan-auto-publish'
 import {
+  activateAuthorization,
+  findRecalledDates,
+  getActiveAuthorization,
   insertAuthorization,
+  liftRecalledTombstones,
   revokeAuthorization,
 } from '@/lib/campaign/daily-plan-auto-publish-store'
 import { runDailyPlanPublish } from '@/lib/campaign/daily-plan-publish-runner'
+import { supabaseAdmin } from '@/lib/supabase'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
+
+/** Today's calendar date in New Zealand, as YYYY-MM-DD (en-CA formats that way). */
+function nzToday(now: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland' }).format(now)
+}
+
+/** A half-created grant younger than this may still be completing; do not supersede it. */
+const STALE_INACTIVE_GRANT_MS = 5 * 60 * 1000
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const clientId = params.id
@@ -47,10 +63,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ success: false, error: access.error }, { status: access.status })
   }
 
-  // Only a global administrator may arm the unattended publisher. A scoped
-  // admin (DEMO_ADMINS / scoped_admin) has FDE powers inside one client, but
-  // this is a global decision, so `access.tier` is not consulted here.
-  if (!isGlobalAdminEmail(access.user.email ?? '')) {
+  // Only a global administrator may arm the unattended publisher: an exact
+  // `ADMIN_EMAILS` match that is not also limited to one client (a scoped/demo
+  // admin has FDE powers inside one client, but this is a global decision).
+  if (!isGlobalAdminEmail(access.user.email ?? '') || access.allowedClientId !== null) {
     return NextResponse.json({ success: false, error: 'GLOBAL_ADMIN_REQUIRED' }, { status: 403 })
   }
 
@@ -67,9 +83,52 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
 
   try {
-    // Run the complete publish gate chain as a DRY RUN. Nothing is stored and
-    // no provider call is made; a refusal here means the plan would be refused
-    // at publish time, so it must not be authorised now.
+    // Cheap, read-only refusals first. A past date would be published
+    // immediately (not at its scheduled slot), so it can never be authorised.
+    const today = nzToday(new Date())
+    const pastDates = command.dates.filter(date => date < today)
+    if (pastDates.length > 0) {
+      return NextResponse.json({ success: false, error: 'DATE_IN_PAST', dates: pastDates }, { status: 422 })
+    }
+
+    // The page must be the one this client is registered against. The dry run
+    // below returns before any token lookup, so this binding is checked here
+    // (read-only, no token, no Facebook call) rather than being silently stored.
+    const { data: clientRow, error: clientError } = await supabaseAdmin
+      .from('clients')
+      .select('facebook_page_id')
+      .eq('id', clientId)
+      .maybeSingle()
+    if (clientError) throw clientError
+    const registeredPage = (clientRow as { facebook_page_id?: string | null } | null)?.facebook_page_id
+    if (!registeredPage) {
+      return NextResponse.json({ success: false, error: 'CLIENT_HAS_NO_FACEBOOK_PAGE' }, { status: 409 })
+    }
+    if (registeredPage !== command.page_id) {
+      return NextResponse.json({ success: false, error: 'PAGE_ID_MISMATCH' }, { status: 409 })
+    }
+
+    // A recalled post must stay recalled: the manual receipt moves it out of
+    // `published[]`, so the dry run alone would happily treat it as "pending".
+    // Only dates the PM explicitly lists in `lift_recalled_dates` may be sent again.
+    const recalledDates = await findRecalledDates(command.plan_id, clientId, command.dates)
+    const blockedByRecall = recalledDates.filter(date => !command.lift_recalled_dates.includes(date))
+    if (blockedByRecall.length > 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'DATE_RECALLED',
+          dates: blockedByRecall,
+          hint: 'These dates were recalled. List them in lift_recalled_dates to send them again, or drop them from dates.',
+        },
+        { status: 409 }
+      )
+    }
+    const liftDates = recalledDates.filter(date => command.lift_recalled_dates.includes(date))
+
+    // Run the complete publish gate chain as a DRY RUN.
+    // Nothing is stored and no provider call is made; a refusal here means the
+    // plan would be refused at publish time, so it must not be authorised now.
     const result = await runDailyPlanPublish({
       clientId,
       approvedByUserId: access.user.id,
@@ -98,12 +157,41 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         authorization: 'NOT_AUTHORIZED',
         provider_impact: 'NONE',
         dates: command.dates,
+        would_lift_recalled: liftDates,
         would_publish: result.body.would_publish,
         already_published: result.body.already_published,
       })
     }
 
     const now = new Date()
+
+    // A previous grant for this plan that can no longer authorise anything
+    // (expired, plan changed, or a half-created one that never armed) must not
+    // block a fresh authorisation; a live one still does.
+    const previous = await getActiveAuthorization(command.plan_id, clientId)
+    if (previous !== null) {
+      const verdict = judgeAuthorization(previous, {
+        planId: command.plan_id,
+        planRevision: command.plan_revision,
+        reviewRevision: command.review_revision,
+        now,
+      })
+      const staleInactive =
+        !verdict.active &&
+        verdict.reason === 'NOT_ACTIVATED' &&
+        now.getTime() - Date.parse(previous.authorized_at) > STALE_INACTIVE_GRANT_MS
+      const supersedable = !verdict.active && (verdict.reason === 'EXPIRED' || verdict.reason === 'PLAN_CHANGED' || staleInactive)
+      if (supersedable) {
+        await revokeAuthorization({
+          planId: command.plan_id,
+          clientId,
+          authId: previous.id,
+          byEmail: 'system:superseded',
+          reason: `superseded by a new authorisation (${verdict.active ? 'active' : verdict.reason})`,
+        })
+      }
+    }
+
     const requestId = randomUUID()
     const expires = computeExpiry(now, command.expires_in_days)
     const authorizedByEmail = (access.user.email ?? '').toLowerCase().trim()
@@ -133,8 +221,37 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         { status: 409 }
       )
     }
+    const grant = inserted.authorization
 
-    const createdAt = new Date().toISOString()
+    // Send the event, then arm the grant. Any failure from here on revokes this
+    // exact grant (by id, never a newer one) and says whether that rollback worked.
+    const rollBack = async (reason: string): Promise<'OK' | 'FAILED'> => {
+      try {
+        await revokeAuthorization({
+          planId: command.plan_id,
+          clientId,
+          authId: grant.id,
+          byEmail: 'system:authorize-failed',
+          reason,
+        })
+        return 'OK'
+      } catch {
+        return 'FAILED'
+      }
+    }
+    const failure = (error: string, rollback: 'OK' | 'FAILED') =>
+      NextResponse.json(
+        {
+          success: false,
+          error,
+          rollback,
+          ...(rollback === 'FAILED'
+            ? { hint: 'The grant could not be rolled back and may still exist — revoke it explicitly.' }
+            : {}),
+        },
+        { status: 500 }
+      )
+
     try {
       await sendInngestEvent({
         id: requestId,
@@ -154,44 +271,41 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           expires_at: expires.toISOString(),
           authorization: 'AUTHORIZED',
           provider_impact: 'NONE',
-          created_at: createdAt,
+          created_at: new Date().toISOString(),
         },
       })
     } catch {
-      // An authorisation without its event receipt must not stay active. If the
-      // rollback itself fails the grant is still armed, so say so in the response
-      // instead of letting a bare 500 look like "nothing happened".
-      let rollback: 'OK' | 'FAILED' = 'OK'
-      try {
-        await revokeAuthorization({
-          planId: command.plan_id,
-          byEmail: 'system:event-failed',
-          reason: 'authorization event could not be sent',
-        })
-      } catch {
-        rollback = 'FAILED'
-      }
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'AUTHORIZATION_EVENT_NOT_SENT',
-          rollback,
-          ...(rollback === 'FAILED'
-            ? { hint: 'The grant could not be rolled back and may still be active — revoke it explicitly.' }
-            : {}),
-        },
-        { status: 500 }
-      )
+      return failure('AUTHORIZATION_EVENT_NOT_SENT', await rollBack('authorization event could not be sent'))
+    }
+
+    let armed
+    try {
+      armed = await activateAuthorization({ authId: grant.id, clientId })
+    } catch {
+      return failure('AUTHORIZATION_NOT_ACTIVATED', await rollBack('authorization could not be activated'))
+    }
+    if (armed === null) {
+      return NextResponse.json({ success: false, error: 'AUTHORIZATION_REVOKED_DURING_ARMING' }, { status: 409 })
+    }
+
+    // Lift the recall blocks last: if anything above failed, they all stay in place.
+    try {
+      await liftRecalledTombstones({ planId: command.plan_id, clientId, dates: liftDates })
+    } catch (error: unknown) {
+      console.error('[auto-publish authorize] lifting recall blocks failed', errorMessage(error))
+      return failure('RECALL_BLOCKS_NOT_LIFTED', await rollBack('recall blocks could not be lifted'))
     }
 
     return NextResponse.json({
       success: true,
       mode: 'AUTHORIZED',
       provider_impact: 'NONE',
-      authorization: inserted.authorization,
+      authorization: armed,
+      lifted_recalled: liftDates,
       note: 'Recorded only. The automatic publisher is not running yet.',
     })
   } catch (error: unknown) {
-    return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 500 })
+    console.error('[auto-publish authorize] failed', errorMessage(error))
+    return NextResponse.json({ success: false, error: 'INTERNAL_ERROR' }, { status: 500 })
   }
 }

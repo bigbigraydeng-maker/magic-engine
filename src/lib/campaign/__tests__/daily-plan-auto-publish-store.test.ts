@@ -11,8 +11,11 @@ vi.mock('@/lib/supabase', () => ({
 }))
 
 import {
+  activateAuthorization,
+  findRecalledDates,
   getActiveAuthorization,
   insertAuthorization,
+  liftRecalledTombstones,
   revokeAuthorization,
   tombstoneRecalledDates,
   type NewAutoPublishAuthorization,
@@ -34,6 +37,8 @@ interface ChainStub {
   upsert: ReturnType<typeof vi.fn>
   select: ReturnType<typeof vi.fn>
   eq: ReturnType<typeof vi.fn>
+  in: ReturnType<typeof vi.fn>
+  delete: ReturnType<typeof vi.fn>
   is: ReturnType<typeof vi.fn>
   single: ReturnType<typeof vi.fn>
   maybeSingle: ReturnType<typeof vi.fn>
@@ -49,6 +54,8 @@ function makeChain(result: StubResult): ChainStub {
   stub.upsert = vi.fn(self)
   stub.select = vi.fn(self)
   stub.eq = vi.fn(self)
+  stub.in = vi.fn(self)
+  stub.delete = vi.fn(self)
   stub.is = vi.fn(self)
   stub.single = vi.fn(async () => result)
   stub.maybeSingle = vi.fn(async () => result)
@@ -76,6 +83,7 @@ const baseRow: NewAutoPublishAuthorization = {
 const storedAuth: AutoPublishAuthorization = {
   id: 'auth-1',
   ...baseRow,
+  activated_at: null,
   revoked_at: null,
   revoked_by_email: null,
   revoked_reason: null,
@@ -115,151 +123,176 @@ describe('insertAuthorization', () => {
   })
 })
 
+const CLIENT = baseRow.client_id
+const PLAN = baseRow.plan_id
+
 describe('getActiveAuthorization', () => {
   it('returns null when no active row exists', async () => {
-    const chain = makeChain({ data: null, error: null })
-    fromMock.mockReturnValue(chain)
-
-    const result = await getActiveAuthorization(baseRow.plan_id)
-
-    expect(result).toBeNull()
+    fromMock.mockReturnValue(makeChain({ data: null, error: null }))
+    expect(await getActiveAuthorization(PLAN, CLIENT)).toBeNull()
   })
 
-  it('returns the row and filters on revoked_at is null', async () => {
+  it('🔴 filters by plan AND client, and only non-revoked rows', async () => {
     const chain = makeChain({ data: storedAuth, error: null })
     fromMock.mockReturnValue(chain)
 
-    const result = await getActiveAuthorization(baseRow.plan_id)
-
-    expect(fromMock).toHaveBeenCalledWith('daily_plan_auto_publish_auth')
-    expect(chain.eq).toHaveBeenCalledWith('plan_id', baseRow.plan_id)
+    expect(await getActiveAuthorization(PLAN, CLIENT)).toEqual(storedAuth)
+    expect(chain.eq).toHaveBeenCalledWith('plan_id', PLAN)
+    expect(chain.eq).toHaveBeenCalledWith('client_id', CLIENT)
     expect(chain.is).toHaveBeenCalledWith('revoked_at', null)
-    expect(result).toEqual(storedAuth)
+  })
+
+  it('throws database errors', async () => {
+    fromMock.mockReturnValue(makeChain({ data: null, error: { code: '42P01', message: 'x' } }))
+    await expect(getActiveAuthorization(PLAN, CLIENT)).rejects.toMatchObject({ code: '42P01' })
   })
 })
 
 describe('revokeAuthorization', () => {
-  it('sets the revocation fields and returns the row', async () => {
-    const revoked = { ...storedAuth, revoked_at: '2024-01-10T00:00:00.000Z' }
-    const chain = makeChain({ data: revoked, error: null })
+  it('🔴 revokes only inside the given client, only if still active, and records who/why', async () => {
+    const chain = makeChain({ data: { ...storedAuth, revoked_at: '2024-01-02T00:00:00.000Z' }, error: null })
     fromMock.mockReturnValue(chain)
 
     const result = await revokeAuthorization({
-      planId: baseRow.plan_id,
-      byEmail: 'ops@example.com',
-      reason: 'no longer needed',
-      now: new Date('2024-01-10T00:00:00.000Z'),
+      planId: PLAN,
+      clientId: CLIENT,
+      byEmail: 'a@b.c',
+      reason: 'because',
+      now: new Date('2024-01-02T00:00:00.000Z'),
     })
 
+    expect(result?.revoked_at).toBe('2024-01-02T00:00:00.000Z')
     expect(chain.update).toHaveBeenCalledWith({
-      revoked_at: '2024-01-10T00:00:00.000Z',
-      revoked_by_email: 'ops@example.com',
-      revoked_reason: 'no longer needed',
+      revoked_at: '2024-01-02T00:00:00.000Z',
+      revoked_by_email: 'a@b.c',
+      revoked_reason: 'because',
     })
-    expect(chain.eq).toHaveBeenCalledWith('plan_id', baseRow.plan_id)
+    expect(chain.eq).toHaveBeenCalledWith('client_id', CLIENT)
     expect(chain.is).toHaveBeenCalledWith('revoked_at', null)
-    expect(result).toEqual(revoked)
+  })
+
+  it('🔴 with authId, revokes exactly that grant (never a newer one that replaced it)', async () => {
+    const chain = makeChain({ data: storedAuth, error: null })
+    fromMock.mockReturnValue(chain)
+
+    await revokeAuthorization({ planId: PLAN, clientId: CLIENT, authId: 'auth-1', byEmail: 'a@b.c', reason: 'r' })
+
+    expect(chain.eq).toHaveBeenCalledWith('id', 'auth-1')
   })
 
   it('returns null when nothing was active', async () => {
+    fromMock.mockReturnValue(makeChain({ data: null, error: null }))
+    expect(await revokeAuthorization({ planId: PLAN, clientId: CLIENT, byEmail: 'a', reason: 'r' })).toBeNull()
+  })
+})
+
+describe('activateAuthorization', () => {
+  it('stamps activated_at on a non-revoked grant of this client', async () => {
+    const chain = makeChain({ data: { ...storedAuth, activated_at: '2024-01-01T00:00:05.000Z' }, error: null })
+    fromMock.mockReturnValue(chain)
+
+    const result = await activateAuthorization({ authId: 'auth-1', clientId: CLIENT, now: new Date('2024-01-01T00:00:05.000Z') })
+
+    expect(result?.activated_at).toBe('2024-01-01T00:00:05.000Z')
+    expect(chain.update).toHaveBeenCalledWith({ activated_at: '2024-01-01T00:00:05.000Z' })
+    expect(chain.eq).toHaveBeenCalledWith('id', 'auth-1')
+    expect(chain.eq).toHaveBeenCalledWith('client_id', CLIENT)
+    expect(chain.is).toHaveBeenCalledWith('revoked_at', null)
+  })
+
+  it('returns null when the grant was revoked in the meantime', async () => {
+    fromMock.mockReturnValue(makeChain({ data: null, error: null }))
+    expect(await activateAuthorization({ authId: 'auth-1', clientId: CLIENT })).toBeNull()
+  })
+})
+
+describe('findRecalledDates / liftRecalledTombstones', () => {
+  it('finds only RECALLED blocks of this plan and client', async () => {
+    const chain = makeChain({ data: [{ date: '2024-02-02' }], error: null })
+    fromMock.mockReturnValue(chain)
+
+    expect(await findRecalledDates(PLAN, CLIENT, ['2024-02-01', '2024-02-02'])).toEqual(['2024-02-02'])
+    expect(fromMock).toHaveBeenCalledWith('daily_plan_auto_publish_attempts')
+    expect(chain.eq).toHaveBeenCalledWith('status', 'blocked')
+    expect(chain.eq).toHaveBeenCalledWith('reason_code', 'RECALLED')
+    expect(chain.in).toHaveBeenCalledWith('date', ['2024-02-01', '2024-02-02'])
+  })
+
+  it('does not touch the database for an empty date list', async () => {
+    expect(await findRecalledDates(PLAN, CLIENT, [])).toEqual([])
+    await liftRecalledTombstones({ planId: PLAN, clientId: CLIENT, dates: [] })
+    expect(fromMock).not.toHaveBeenCalled()
+  })
+
+  it('🔴 lifting deletes only RECALLED blocks for the listed dates', async () => {
     const chain = makeChain({ data: null, error: null })
     fromMock.mockReturnValue(chain)
 
-    const result = await revokeAuthorization({
-      planId: baseRow.plan_id,
-      byEmail: 'ops@example.com',
-      reason: 'no longer needed',
-    })
+    await liftRecalledTombstones({ planId: PLAN, clientId: CLIENT, dates: ['2024-02-02'] })
 
-    expect(result).toBeNull()
+    expect(chain.delete).toHaveBeenCalled()
+    expect(chain.eq).toHaveBeenCalledWith('status', 'blocked')
+    expect(chain.eq).toHaveBeenCalledWith('reason_code', 'RECALLED')
+    expect(chain.in).toHaveBeenCalledWith('date', ['2024-02-02'])
   })
 })
 
 describe('tombstoneRecalledDates', () => {
-  it('does nothing when there is no active authorization', async () => {
-    const chain = makeChain({ data: null, error: null })
-    fromMock.mockReturnValue(chain)
-
-    const result = await tombstoneRecalledDates({
-      clientId: baseRow.client_id,
-      planId: baseRow.plan_id,
-      dates: ['2024-02-01'],
+  /** Route each table to its own stub: attempts reads/writes and the auth table. */
+  function stubTables(opts: { existing?: Array<{ date: string; status: string }>; auth: AutoPublishAuthorization | null }) {
+    const attempts = makeChain({ data: opts.existing ?? [], error: null })
+    const auth = makeChain({ data: opts.auth, error: null })
+    fromMock.mockImplementation((table: string) => {
+      if (table === 'daily_plan_auto_publish_attempts') return attempts
+      if (table === 'daily_plan_auto_publish_auth') return auth
+      throw new Error(`unexpected table ${table}`)
     })
+    return { attempts, auth }
+  }
 
-    expect(result).toEqual({ tombstoned: 0 })
-    expect(chain.upsert).not.toHaveBeenCalled()
+  it('does nothing for an empty date list', async () => {
+    expect(await tombstoneRecalledDates({ clientId: CLIENT, planId: PLAN, dates: [] })).toEqual({ tombstoned: 0 })
+    expect(fromMock).not.toHaveBeenCalled()
   })
 
-  it('tombstones the dates and trims them from the grant', async () => {
-    const authChain = makeChain({ data: storedAuth, error: null })
-    const attemptsChain = makeChain({ data: null, error: null })
-    const updateChain = makeChain({ data: null, error: null })
+  it('🔴 still tombstones when no grant is active (a recall after a revoke must stick)', async () => {
+    const { attempts, auth } = stubTables({ auth: null })
 
-    fromMock.mockImplementation((table: string) => {
-      if (table === 'daily_plan_auto_publish_auth') {
-        // First call is the active-auth read; the later call is the dates update.
-        return authChain.update.mock.calls.length === 0 && authChain.select.mock.calls.length === 0
-          ? authChain
-          : updateChain
-      }
-      return attemptsChain
-    })
+    expect(await tombstoneRecalledDates({ clientId: CLIENT, planId: PLAN, dates: ['2024-02-01'] })).toEqual({ tombstoned: 1 })
 
-    const result = await tombstoneRecalledDates({
-      clientId: baseRow.client_id,
-      planId: baseRow.plan_id,
-      dates: ['2024-02-01'],
-    })
-
-    expect(result).toEqual({ tombstoned: 1 })
-    expect(fromMock).toHaveBeenCalledWith('daily_plan_auto_publish_attempts')
-    expect(attemptsChain.upsert).toHaveBeenCalledTimes(1)
-
-    const [rows, options] = attemptsChain.upsert.mock.calls[0]
-    expect(options).toEqual({ onConflict: 'plan_id,date' })
-    expect(rows).toHaveLength(1)
-    expect(rows[0]).toMatchObject({
-      auth_id: storedAuth.id,
-      client_id: baseRow.client_id,
-      plan_id: baseRow.plan_id,
-      date: '2024-02-01',
-      status: 'blocked',
-      reason_code: 'RECALLED',
-      provider_impact: 'NONE',
-    })
-
-    expect(updateChain.update).toHaveBeenCalledWith({ dates: ['2024-02-02'] })
-    expect(updateChain.eq).toHaveBeenCalledWith('id', storedAuth.id)
-    expect(updateChain.is).toHaveBeenCalledWith('revoked_at', null)
+    const rows = attempts.upsert.mock.calls[0][0] as Array<Record<string, unknown>>
+    expect(rows[0]).toMatchObject({ auth_id: null, status: 'blocked', reason_code: 'RECALLED', date: '2024-02-01', client_id: CLIENT, plan_id: PLAN })
+    expect(attempts.upsert.mock.calls[0][1]).toEqual({ onConflict: 'plan_id,date' })
+    expect(auth.update).not.toHaveBeenCalled()
   })
 
-  it('revokes the grant when every authorized date was recalled', async () => {
-    const authChain = makeChain({ data: storedAuth, error: null })
-    const attemptsChain = makeChain({ data: null, error: null })
-    const revokeChain = makeChain({ data: { ...storedAuth, revoked_at: '2024-01-10T00:00:00.000Z' }, error: null })
+  it('with an active grant: tombstones, then trims the recalled date from the grant', async () => {
+    const { attempts, auth } = stubTables({ auth: { ...storedAuth, dates: ['2024-02-01', '2024-02-02'] } })
 
-    let authCalls = 0
-    fromMock.mockImplementation((table: string) => {
-      if (table === 'daily_plan_auto_publish_auth') {
-        authCalls += 1
-        return authCalls === 1 ? authChain : revokeChain
-      }
-      return attemptsChain
-    })
+    await tombstoneRecalledDates({ clientId: CLIENT, planId: PLAN, dates: ['2024-02-01'] })
 
-    const result = await tombstoneRecalledDates({
-      clientId: baseRow.client_id,
-      planId: baseRow.plan_id,
-      dates: ['2024-02-01', '2024-02-02'],
-    })
+    const rows = attempts.upsert.mock.calls[0][0] as Array<Record<string, unknown>>
+    expect(rows[0]).toMatchObject({ auth_id: 'auth-1', status: 'blocked', reason_code: 'RECALLED' })
+    expect(auth.update).toHaveBeenCalledWith({ dates: ['2024-02-02'] })
+    expect(auth.is).toHaveBeenCalledWith('revoked_at', null)
+  })
 
-    expect(result).toEqual({ tombstoned: 2 })
-    expect(attemptsChain.upsert).toHaveBeenCalledTimes(1)
-    expect(revokeChain.update).toHaveBeenCalledWith({
-      revoked_at: expect.any(String),
-      revoked_by_email: 'system:recall',
-      revoked_reason: 'all authorised dates were recalled',
-    })
-    expect(revokeChain.eq).toHaveBeenCalledWith('plan_id', baseRow.plan_id)
+  it('revokes the grant when every authorised date was recalled', async () => {
+    const { auth } = stubTables({ auth: { ...storedAuth, dates: ['2024-02-01'] } })
+
+    await tombstoneRecalledDates({ clientId: CLIENT, planId: PLAN, dates: ['2024-02-01'] })
+
+    const update = auth.update.mock.calls[0][0] as Record<string, unknown>
+    expect(update).toMatchObject({ revoked_by_email: 'system:recall' })
+    expect(update.dates).toBeUndefined()
+  })
+
+  it('🔴 refuses (throws) when a date is mid-send (claimed) instead of overwriting the claim', async () => {
+    const { attempts } = stubTables({ existing: [{ date: '2024-02-01', status: 'claimed' }], auth: storedAuth })
+
+    await expect(
+      tombstoneRecalledDates({ clientId: CLIENT, planId: PLAN, dates: ['2024-02-01'] }),
+    ).rejects.toThrow('TOMBSTONE_RACE_CLAIMED')
+    expect(attempts.upsert).not.toHaveBeenCalled()
   })
 })

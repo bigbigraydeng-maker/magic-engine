@@ -279,17 +279,17 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       status: 'OK',
       tombstoned: 0,
     }
-    if (recalled.length > 0) {
+    if (recalled.length > 0 || already_recalled.length > 0) {
       try {
         const marked = await tombstoneRecalledDates({
           clientId,
           planId: row.id,
-          dates: recalled.map((r) => r.date),
+          dates: Array.from(new Set([...recalled.map((r) => r.date), ...already_recalled.map((r) => r.date)])),
         })
         autoPublishTombstone = { status: 'OK', tombstoned: marked.tombstoned }
       } catch (err) {
         console.error('[daily-plan recall] auto-publish tombstone failed', errorMessage(err))
-        autoPublishTombstone = { status: 'FAILED', detail: errorMessage(err) }
+        autoPublishTombstone = { status: 'FAILED', detail: 'tombstone write failed; see server log' }
       }
     }
 
@@ -302,6 +302,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       already_recalled,
       not_published,
       auto_publish_tombstone: autoPublishTombstone,
+      ...(autoPublishTombstone.status === 'FAILED'
+        ? { warning: '撤回成功，但没能在自动发布里把这些日期标成「已撤回」。请不要重新授权这些日期，并立刻告知开发。' }
+        : {}),
     })
   } catch (err) {
     return NextResponse.json(

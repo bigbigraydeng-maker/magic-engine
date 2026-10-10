@@ -67,6 +67,7 @@ function revokedRow() {
     authorized_by_email: 'admin@example.com',
     authorized_by_user_id: 'c0000000-0000-0000-0000-0000000000cc',
     authorized_at: '2026-09-01T00:00:00.000Z',
+    activated_at: '2026-09-01T00:00:05.000Z',
     expires_at: '2026-09-15T00:00:00.000Z',
     revoked_at: '2026-09-02T00:00:00.000Z',
     revoked_by_email: 'admin@example.com',
@@ -143,10 +144,11 @@ beforeEach(() => {
   mockedAccess.mockResolvedValue({
     ok: true,
     user: { id: 'c0000000-0000-0000-0000-0000000000cc', email: 'Admin@Example.com' },
+    allowedClientId: null,
   } as never)
   mockedAdmin.mockReturnValue(true)
   mockedRevoke.mockResolvedValue(revokedRow())
-  mockedSend.mockResolvedValue(undefined as never)
+  mockedSend.mockResolvedValue({ event_ids: ['evt-1'] })
   mockPlanReadMissing()
 })
 
@@ -169,6 +171,34 @@ describe('POST /auto-publish/revoke', () => {
     expect(res.status).toBe(403)
     expect(await res.json()).toEqual({ success: false, error: 'GLOBAL_ADMIN_REQUIRED' })
     expect(mockedRevoke).not.toHaveBeenCalled()
+  })
+
+  it('🔴 refuses an admin limited to one client (scoped/demo admin) even if the email is listed', async () => {
+    mockedAccess.mockResolvedValue({
+      ok: true,
+      user: { id: 'c0000000-0000-0000-0000-0000000000cc', email: 'admin@example.com' },
+      allowedClientId: CLIENT_ID,
+    } as never)
+
+    const res = await POST(makeRequest(validBody()), { params: { id: CLIENT_ID } })
+
+    expect(res.status).toBe(403)
+    expect(mockedRevoke).not.toHaveBeenCalled()
+  })
+
+  it('🔴 revokes only within the client in the path (a plan id from another client must not match)', async () => {
+    await POST(makeRequest(validBody()), { params: { id: CLIENT_ID } })
+
+    expect(mockedRevoke.mock.calls[0][0]).toMatchObject({ planId: PLAN_ID, clientId: CLIENT_ID })
+  })
+
+  it('a plan that was never handed to Facebook reports in_flight_status OK with an empty list, not UNKNOWN', async () => {
+    mockPlanRead(undefined)
+
+    const json = await (await POST(makeRequest(validBody()), { params: { id: CLIENT_ID } })).json()
+
+    expect(json.in_flight).toEqual([])
+    expect(json.in_flight_status).toBe('OK')
   })
 
   it('rejects an invalid body with 400', async () => {
@@ -201,6 +231,7 @@ describe('POST /auto-publish/revoke', () => {
     expect(body.authorization.request_id).toBe(REQUEST_ID)
     expect(mockedRevoke).toHaveBeenCalledWith({
       planId: PLAN_ID,
+      clientId: CLIENT_ID,
       byEmail: 'admin@example.com',
       reason: 'client asked to pause',
     })

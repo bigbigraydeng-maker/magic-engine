@@ -206,7 +206,10 @@ describe('recall — bare photo id and feed post id receipts', () => {
 
     expect(response.status).toBe(200)
     expect(json.status).toBe('RECALLED')
-    expect(json.auto_publish_tombstone).toEqual({ status: 'FAILED', detail: 'db down' })
+    expect(json.auto_publish_tombstone.status).toBe('FAILED')
+    // internal error text must not reach the (possibly customer) caller
+    expect(JSON.stringify(json)).not.toContain('db down')
+    expect(json.warning).toMatch(/撤回成功/)
   })
 
   it('a dry run never touches the automatic-publish tables', async () => {

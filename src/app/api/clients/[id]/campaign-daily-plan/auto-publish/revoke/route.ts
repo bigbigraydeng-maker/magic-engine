@@ -50,7 +50,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   // Only a global administrator may disarm the unattended publisher. A scoped
   // admin (DEMO_ADMINS / scoped_admin) has FDE powers inside one client, but
   // this is a global decision, so `access.tier` is not consulted here.
-  if (!isGlobalAdminEmail(access.user.email ?? '')) {
+  if (!isGlobalAdminEmail(access.user.email ?? '') || access.allowedClientId !== null) {
     return NextResponse.json({ success: false, error: 'GLOBAL_ADMIN_REQUIRED' }, { status: 403 })
   }
 
@@ -72,11 +72,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   try {
     revoked = await revokeAuthorization({
       planId: command.plan_id,
+      clientId,
       byEmail: revokedByEmail,
       reason: command.reason,
     })
   } catch (error: unknown) {
-    return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 500 })
+    console.error('[auto-publish revoke] revoke failed', errorMessage(error))
+    return NextResponse.json({ success: false, error: 'INTERNAL_ERROR' }, { status: 500 })
   }
 
   if (revoked === null) {
@@ -126,7 +128,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           ? (planData as { publish_meta?: unknown }).publish_meta
           : undefined
       const metaParsed = CampaignDailyPublishMetaSchema.safeParse(publishMeta)
-      if (metaParsed.success) {
+      if (publishMeta === undefined || publishMeta === null) {
+        // Nothing was ever handed to Facebook for this plan: a checked, empty answer.
+        inFlight = []
+        inFlightStatus = 'OK'
+      } else if (metaParsed.success) {
         const now = Date.now()
         inFlight = metaParsed.data.published
           .filter(post => {
