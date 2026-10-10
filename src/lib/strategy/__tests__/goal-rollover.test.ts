@@ -87,7 +87,7 @@ function makeGoal(overrides: Partial<GoalRow> = {}): GoalRow {
 
 interface Filter {
   col: string
-  op: 'eq' | 'lt' | 'in'
+  op: 'eq' | 'lt' | 'gt' | 'in'
   val: unknown
 }
 
@@ -106,7 +106,7 @@ interface Filter {
  * 真实 SupabaseClient 一致；一致性也被 tsc 在 fake 返回类型与 rolloverMonthlyGoals
  * 使用点的比对上锁住。
  */
-function fakeSupabase(initial: GoalRow[], opts: { simulateRaceInsert?: boolean } = {}) {
+function fakeSupabase(initial: GoalRow[], opts: { simulateRaceInsert?: boolean; archivedClients?: string[]; clientsError?: boolean } = {}) {
   const rows: GoalRow[] = initial.map(g => ({ ...g }))
   const insertLog: Array<Partial<GoalRow>> = []
   let insertsSeen = 0
@@ -119,6 +119,7 @@ function fakeSupabase(initial: GoalRow[], opts: { simulateRaceInsert?: boolean }
       select: () => typeof chain
       eq: (col: string, val: unknown) => typeof chain
       lt: (col: string, val: unknown) => typeof chain
+      gt: (col: string, val: unknown) => typeof chain
       in: (col: string, val: unknown[]) => typeof chain
       limit: (n: number) => Promise<{ data: GoalRow[]; error: null }>
       then: (
@@ -129,6 +130,7 @@ function fakeSupabase(initial: GoalRow[], opts: { simulateRaceInsert?: boolean }
       select: () => chain,
       eq: (col, val) => { filters.push({ col, op: 'eq', val }); return chain },
       lt: (col, val) => { filters.push({ col, op: 'lt', val }); return chain },
+      gt: (col, val) => { filters.push({ col, op: 'gt', val }); return chain },
       in: (col, val) => { filters.push({ col, op: 'in', val }); return chain },
       limit: (n) => { limitN = n; return execute() },
       then: (resolve, reject) => execute().then(resolve, reject),
@@ -140,6 +142,7 @@ function fakeSupabase(initial: GoalRow[], opts: { simulateRaceInsert?: boolean }
         switch (f.op) {
           case 'eq': return v === f.val
           case 'lt': return typeof v === 'string' && typeof f.val === 'string' && v < f.val
+          case 'gt': return typeof v === 'string' && typeof f.val === 'string' && v > f.val
           case 'in': return Array.isArray(f.val) && (f.val as unknown[]).includes(v)
         }
       }))
@@ -183,7 +186,11 @@ function fakeSupabase(initial: GoalRow[], opts: { simulateRaceInsert?: boolean }
 
   const client = {
     from: (table: string) => ({
-      select: () => makeSelect(table).select(),
+      select: () => table === 'clients'
+        ? { in: async (_c: string, ids: string[]) => opts.clientsError
+            ? { data: null, error: { message: 'clients down' } }
+            : { data: ids.map(id => ({ id, client_status: opts.archivedClients?.includes(id) ? 'archived' : 'active' })), error: null } }
+        : makeSelect(table).select(),
       insert: (payload: Partial<GoalRow>) => makeInsert(payload),
     }),
   }
@@ -439,5 +446,68 @@ describe('rolloverMonthlyGoals — PM-visible and never inflated', () => {
     const { client, rows } = fakeSupabase([makeGoal({ id: 'sept', status: 'expired' })])
     for (let i = 0; i < 4; i += 1) await rolloverMonthlyGoals(client, { today: '2026-10-10' })
     expect(rows.filter(r => r.period_start === '2026-10-01')).toHaveLength(1)
+  })
+})
+
+describe('rolloverMonthlyGoals — review fixes', () => {
+  it('a hand-made goal (recurrence NULL) already covering the target month blocks the rollover', async () => {
+    const sept = makeGoal({ id: 'sept', status: 'expired' })
+    const manualOct = makeGoal({ id: 'manual-oct', status: 'active', recurrence: null, period_start: '2026-10-01', period_end: '2026-10-31' })
+    const { client, insertLog } = fakeSupabase([sept, manualOct])
+    const result = await rolloverMonthlyGoals(client, { today: '2026-10-10' })
+    expect(insertLog).toHaveLength(0)
+    expect(result.skipped_existing).toHaveLength(1)
+  })
+
+  it('older months of the same chain are not re-planned: only the newest source acts', async () => {
+    const aug = makeGoal({ id: 'aug', status: 'archived', period_start: '2026-08-01', period_end: '2026-08-31' })
+    const sept = makeGoal({ id: 'sept', status: 'expired' })
+    const { client } = fakeSupabase([aug, sept])
+    const result = await rolloverMonthlyGoals(client, { today: '2026-10-10', dryRun: true })
+    expect(result.planned).toHaveLength(1)
+    expect(result.planned[0].source_goal_id).toBe('sept')
+  })
+
+  it('one client failing does not stop the others (error reported, rest still rolled)', async () => {
+    const bad = makeGoal({ id: 'bad', client_id: 'client-bad', status: 'expired', period_end: '2026-09-xx' })
+    const good = makeGoal({ id: 'good', client_id: 'client-good', status: 'expired' })
+    const { client, insertLog } = fakeSupabase([bad, good])
+    const result = await rolloverMonthlyGoals(client, { today: '2026-10-10' })
+    expect(result.error).toContain('goal bad')
+    expect(insertLog).toHaveLength(1)
+    expect(insertLog[0].client_id).toBe('client-good')
+  })
+
+  it('archived (churned) client is skipped — no new goal', async () => {
+    const { client, insertLog } = fakeSupabase([makeGoal({ id: 'sept', status: 'expired' })], { archivedClients: ['client-nal'] })
+    const result = await rolloverMonthlyGoals(client, { today: '2026-10-10' })
+    expect(insertLog).toHaveLength(0)
+    expect(result.planned).toHaveLength(0)
+  })
+
+  it('cannot tell whether the client churned (lookup fails) → fail closed, nothing created', async () => {
+    const { client, insertLog } = fakeSupabase([makeGoal({ id: 'sept', status: 'expired' })], { clientsError: true })
+    const result = await rolloverMonthlyGoals(client, { today: '2026-10-10' })
+    expect(result.error).toContain('clients lookup')
+    expect(insertLog).toHaveLength(0)
+  })
+
+  it('PM stopped the chain by clearing recurrence on the newest row: older monthly rows do not resurrect it', async () => {
+    const aug = makeGoal({ id: 'aug', status: 'archived', period_start: '2026-08-01', period_end: '2026-08-31' })
+    const septStopped = makeGoal({ id: 'sept', status: 'expired', recurrence: null })
+    const { client, insertLog } = fakeSupabase([aug, septStopped])
+    const result = await rolloverMonthlyGoals(client, { today: '2026-10-10' })
+    expect(insertLog).toHaveLength(0)
+    expect(result.skipped_existing).toHaveLength(1)
+  })
+
+  it('dry_run still previews a goal that the real run would flag expired first (status still active)', async () => {
+    const stillActive = makeGoal({ id: 'sept', status: 'active' })
+    const { client, insertLog } = fakeSupabase([stillActive])
+    const dry = await rolloverMonthlyGoals(client, { today: '2026-10-01', dryRun: true })
+    expect(dry.planned).toHaveLength(1)
+    expect(insertLog).toHaveLength(0)
+    const real = await rolloverMonthlyGoals(client, { today: '2026-10-01' })
+    expect(real.planned).toHaveLength(0) // real run only sees it after flagExpiredGoals turns it 'expired'
   })
 })

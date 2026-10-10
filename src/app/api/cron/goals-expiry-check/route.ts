@@ -40,9 +40,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const dryRun = req.nextUrl.searchParams.get('dry_run') === '1'
+  const dryParam = req.nextUrl.searchParams.get('dry_run')
+  const dryRun = dryParam === '1' || dryParam === 'true'
 
-  const cronRun = await startCronRun('goals-expiry-check')
+  // dry_run writes nothing at all — including the cron_run_logs row.
+  const realRun = await (dryRun ? Promise.resolve(null) : startCronRun('goals-expiry-check'))
+  const cronRun = {
+    finish: async (arg: Parameters<NonNullable<typeof realRun>['finish']>[0]) => { if (realRun) await realRun.finish(arg) },
+  }
 
   // Step 1 — flag expired. Skip in dry-run so we don't mutate.
   const flagResult = dryRun
@@ -62,6 +67,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       processed: flagResult.flagged_count + rolloverResult.rolled.length,
       failed: 1,
       error: rolloverResult.error,
+      // Partial success still leaves rows behind — keep them visible in the receipt.
+      summary: {
+        flagged_expired: flagResult.flagged_count,
+        rollover_rolled: rolloverResult.rolled.map(r => ({ client_id: r.client_id, metric: r.primary_metric_key, period_start: r.next_period_start, target_value: r.target_value })),
+        rollover_skipped_existing: rolloverResult.skipped_existing.length,
+      },
     })
     return NextResponse.json({
       error: rolloverResult.error,

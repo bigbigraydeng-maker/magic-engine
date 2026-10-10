@@ -20,14 +20,11 @@
  *   - New goal goes straight to status='active' — this is a continuation of an
  *     approved monthly commitment, not a fresh draft that needs FDE activation.
  *
- * Known gap (子牙 review, PR #2194): if a client churns mid-period and their
- * monthly goal is archived early, nothing here distinguishes that from a
- * normal end-of-period archive — the chain still rolls forward next month.
- * There is currently no product surface that sets recurrence='monthly' in the
- * first place (enrollment is a manual SQL UPDATE, see PR follow-up), so the
- * only way to stop a chain today is the same manual UPDATE, clearing
- * recurrence back to NULL when a client's goal is archived for churn rather
- * than period completion. Revisit once enrollment gets a real UI/API.
+ * Stopping a chain: clients with client_status='archived' are skipped
+ * automatically. To stop one client's chain while keeping the client, clear
+ * `recurrence` on the chain's newest goal (older rows cannot resurrect it,
+ * see the "ends after the source" pre-check). There is still no product
+ * surface that sets recurrence='monthly' (enrollment is a manual UPDATE).
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -113,6 +110,7 @@ export interface RolloverOptions {
   dryRun?: boolean
 }
 
+
 /**
  * Scan for monthly-recurring goals whose period has ended and create each one's
  * successor for the next natural month. Idempotent: relies on the partial
@@ -129,19 +127,21 @@ export async function rolloverMonthlyGoals(
   // (verdict already written) — either is a valid template for the next month.
   // Skip 'draft' (never active) and 'active' (period must have ended).
   //
-  // No .limit()/pagination: this candidate pool is bounded by "how many goals
-  // are currently enrolled in monthly recurrence AND not yet rolled over" —
-  // unlike an ever-growing log table, a goal leaves this pool the moment it
-  // rolls (its successor's period_end is in the future). Enrollment today is
-  // manual-SQL-only (see module doc), so the pool is single digits. Revisit
-  // if/when self-serve enrollment ships and this could approach the PostgREST
-  // 1000-row default page size.
+  // No .limit()/pagination: the pool is every expired/archived monthly goal, i.e.
+  // one row per past month per enrolled chain. We only ever act on the NEWEST
+  // row of each (client, metric) chain (picked below), so old months are read
+  // but never planned. Enrollment is manual-SQL-only today, so this is tens of
+  // rows; revisit if self-serve enrollment ships and it nears the PostgREST
+  // 1000-row page size.
   const { data: expiredGoals, error: fetchError } = await supabase
     .from('goals')
     .select('*')
     .eq('recurrence', 'monthly')
     .lt('period_end', todayIso)
-    .in('status', ['expired', 'archived'])
+    // dry_run skips flagExpiredGoals, so a goal that the real run would flag
+    // 'expired' a moment before rolling is still 'active' here — include it, or
+    // the preview says "nothing to do" on exactly the day it matters.
+    .in('status', dryRun ? ['active', 'expired', 'archived'] : ['expired', 'archived'])
 
   if (fetchError) {
     return { planned: [], rolled: [], skipped_existing: [], error: fetchError.message }
@@ -150,9 +150,41 @@ export async function rolloverMonthlyGoals(
   const planned: PlannedRollover[] = []
   const rolled: PlannedRollover[] = []
   const skippedExisting: PlannedRollover[] = []
+  const errors: string[] = []
+  const fail = () => ({
+    planned, rolled, skipped_existing: skippedExisting,
+    ...(errors.length > 0 ? { error: errors.join(' | ') } : {}),
+  })
 
+  // Only the newest source of each (client, metric) chain: older months would
+  // otherwise re-plan the same target month every day.
+  const newest = new Map<string, GoalRow>()
   for (const raw of expiredGoals ?? []) {
-    const goal = raw as GoalRow
+    const g = raw as GoalRow
+    const key = `${g.client_id}::${g.primary_metric_key}`
+    const cur = newest.get(key)
+    if (!cur || g.period_end > cur.period_end) newest.set(key, g)
+  }
+
+  // A client PM has archived (churned) must not keep getting live goals.
+  const clientIds = Array.from(new Set(Array.from(newest.values()).map(g => g.client_id)))
+  const archivedClients = new Set<string>()
+  if (clientIds.length > 0) {
+    const { data: clientRows, error: clientErr } = await supabase
+      .from('clients')
+      .select('id, client_status')
+      .in('id', clientIds)
+    if (clientErr) {
+      // Fail closed: not knowing whether a client has churned must not create goals.
+      return { planned, rolled, skipped_existing: skippedExisting, error: `clients lookup: ${clientErr.message}` }
+    }
+    for (const c of (clientRows ?? []) as Array<{ id: string; client_status: string | null }>) {
+      if (c.client_status === 'archived') archivedClients.add(c.id)
+    }
+  }
+
+  for (const goal of newest.values()) {
+    if (archivedClients.has(goal.client_id)) continue
 
     // period_end is a DB `date` column so a malformed value shouldn't occur,
     // but nextNaturalMonth throws on one — catch it here so a single bad row
@@ -165,7 +197,8 @@ export async function rolloverMonthlyGoals(
       ({ start: nextStart, end: nextEnd, skippedMonths } = nextLiveMonth(goal.period_end, todayIso))
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      return { planned, rolled, skipped_existing: skippedExisting, error: `goal ${goal.id}: ${message}` }
+      errors.push(`goal ${goal.id}: ${message}`)
+      continue
     }
 
     const plan: PlannedRollover = {
@@ -179,20 +212,23 @@ export async function rolloverMonthlyGoals(
     }
     planned.push(plan)
 
-    // Pre-check keeps output clean: without it every steady-state run would
-    // log an insert attempt that the unique index then rejected. Index is
-    // still the source of truth on race.
+    // Pre-check — skip when ANY goal of this client+metric ends after the source
+    // does, whatever its recurrence or status. That covers: a successor made by an
+    // earlier run; a goal a human created by hand (recurrence NULL, invisible to
+    // the partial unique index); and a chain PM stopped by clearing recurrence on
+    // its newest row (older monthly rows must not resurrect it). The unique index
+    // stays as the last line of defence against two cron runs racing.
     const { data: existing, error: checkError } = await supabase
       .from('goals')
       .select('id')
       .eq('client_id', goal.client_id)
       .eq('primary_metric_key', goal.primary_metric_key)
-      .eq('period_start', nextStart)
-      .eq('recurrence', 'monthly')
+      .gt('period_end', goal.period_end)
       .limit(1)
 
     if (checkError) {
-      return { planned, rolled, skipped_existing: skippedExisting, error: checkError.message }
+      errors.push(`goal ${goal.id}: ${checkError.message}`)
+      continue
     }
     if (existing && existing.length > 0) {
       skippedExisting.push(plan)
@@ -232,11 +268,12 @@ export async function rolloverMonthlyGoals(
         skippedExisting.push(plan)
         continue
       }
-      return { planned, rolled, skipped_existing: skippedExisting, error: insertError.message }
+      errors.push(`goal ${goal.id}: ${insertError.message}`)
+      continue
     }
 
     rolled.push(plan)
   }
 
-  return { planned, rolled, skipped_existing: skippedExisting }
+  return fail()
 }
