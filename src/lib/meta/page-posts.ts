@@ -317,6 +317,60 @@ export async function readPageStoryId(input: {
 }
 
 /**
+ * How sure we are about what happened to a publish request.
+ *  - `rejected`: Graph answered with a client-error body (HTTP 4xx) — the post was not created.
+ *  - `rate_limited`: Graph asked us to slow down (HTTP 429 or a throttling error code) — not created.
+ *  - `unknown`: timeout, network failure, HTTP 5xx, or a 2xx with no post id — Facebook may
+ *    have accepted it. Callers must not blindly retry these (a retry can double-post).
+ */
+export type PublishOutcomeCertainty = 'rejected' | 'rate_limited' | 'unknown'
+
+/** HTTP statuses that, with a Graph error body, mean the request was refused outright. */
+const CLEAR_REFUSAL_STATUSES = new Set([400, 401, 403, 404, 422])
+
+/** Graph error codes that mean "throttled", not "refused". */
+const GRAPH_THROTTLE_CODES = new Set([4, 17, 32, 613])
+
+/** Publish failure with enough structure for a caller to decide whether a retry is safe. */
+export class PagePublishError extends Error {
+  readonly certainty: PublishOutcomeCertainty
+  readonly httpStatus: number | null
+  readonly graphCode: number | null
+  readonly graphSubcode: number | null
+
+  constructor(
+    message: string,
+    detail: {
+      certainty: PublishOutcomeCertainty
+      httpStatus?: number | null
+      graphCode?: number | null
+      graphSubcode?: number | null
+    },
+  ) {
+    super(message)
+    this.name = 'PagePublishError'
+    this.certainty = detail.certainty
+    this.httpStatus = detail.httpStatus ?? null
+    this.graphCode = detail.graphCode ?? null
+    this.graphSubcode = detail.graphSubcode ?? null
+  }
+}
+
+function classifyPublishFailure(
+  status: number,
+  error: { code?: number } | undefined,
+): PublishOutcomeCertainty {
+  if (status === 429 || (error?.code !== undefined && GRAPH_THROTTLE_CODES.has(error.code))) return 'rate_limited'
+  // Only a clear Graph refusal counts as "not created". No recognisable Graph error body,
+  // an ambiguous Graph code (1 = unknown error, 2 = service temporarily unavailable), or a
+  // 4xx that is really a timeout/conflict (408, 409, 425...) can all hide an accepted post.
+  if (!error) return 'unknown'
+  if (error.code === 1 || error.code === 2) return 'unknown'
+  if (CLEAR_REFUSAL_STATUSES.has(status)) return 'rejected'
+  return 'unknown'
+}
+
+/**
  * Publish a photo Post to a Facebook Page.
  *
  * Uses the Page's own `/photos` edge with a remote image `url`, so ME never
@@ -331,7 +385,8 @@ export async function readPageStoryId(input: {
  * in the future; the caller decides "publish now vs schedule" before this
  * function, so we can pass unchanged what we're told.
  *
- * Throws on any non-2xx or Graph-level error; the caller decides whether that
+ * Throws a `PagePublishError` on any non-2xx or Graph-level error (its `certainty`
+ * says whether the post can have been created); the caller decides whether that
  * is fatal for the batch. It never retries: a retry here could double-post,
  * and duplicate suppression belongs to the caller's idempotency key.
  */
@@ -359,23 +414,41 @@ export async function publishPagePhotoPost(input: {
     requestBody.published = true
   }
 
-  const res = await doFetch(`${GRAPH_BASE}/${input.pageId}/photos`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(requestBody),
-  })
+  let res: Response
+  try {
+    res = await doFetch(`${GRAPH_BASE}/${input.pageId}/photos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    })
+  } catch (error: unknown) {
+    // No response at all: the request may or may not have reached Facebook.
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new PagePublishError(reason, { certainty: 'unknown' })
+  }
 
   const body = (await res.json().catch(() => null)) as
-    | { id?: string; post_id?: string; error?: { message?: string } }
+    | { id?: string; post_id?: string; error?: { message?: string; code?: number; error_subcode?: number } }
     | null
 
   if (!res.ok || body?.error) {
     const detail = body?.error?.message ?? `HTTP ${res.status}`
-    throw new Error(`publishPagePhotoPost ${input.pageId}: ${detail}`)
+    throw new PagePublishError(`publishPagePhotoPost ${input.pageId}: ${detail}`, {
+      // A 2xx that carries an error body is not a clear refusal — treat as unknown.
+      certainty: res.ok ? 'unknown' : classifyPublishFailure(res.status, body?.error),
+      httpStatus: res.status,
+      graphCode: body?.error?.code ?? null,
+      graphSubcode: body?.error?.error_subcode ?? null,
+    })
   }
 
   const postId = body?.post_id ?? body?.id
-  if (!postId) throw new Error(`publishPagePhotoPost ${input.pageId}: provider returned no post id`)
+  if (!postId) {
+    throw new PagePublishError(`publishPagePhotoPost ${input.pageId}: provider returned no post id`, {
+      certainty: 'unknown',
+      httpStatus: res.status,
+    })
+  }
 
   return {
     postId,
