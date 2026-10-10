@@ -12,6 +12,7 @@ vi.mock('@/lib/supabase', () => ({
 
 import {
   clearNonStickyAttempts,
+  isMissingTableError,
   listFreshClaims,
   claimAttempt,
   confirmUnknownOutcome,
@@ -451,5 +452,16 @@ describe('listFreshClaims', () => {
     expect(chain.eq).toHaveBeenCalledWith('status', 'claimed')
     expect(chain.eq).toHaveBeenCalledWith('client_id', 'client-1')
     expect(chain.gte).toHaveBeenCalledWith('updated_at', '2026-10-12T00:00:00.000Z')
+  })
+})
+
+describe('isMissingTableError', () => {
+  it('recognises a missing table, and nothing else', () => {
+    expect(isMissingTableError({ code: '42P01', message: 'x' })).toBe(true)
+    expect(isMissingTableError({ code: 'PGRST205', message: 'x' })).toBe(true)
+    expect(isMissingTableError({ message: 'Could not find the table public.x in the schema cache' })).toBe(true)
+    expect(isMissingTableError({ code: '23505', message: 'duplicate key' })).toBe(false)
+    expect(isMissingTableError(new Error('db down'))).toBe(false)
+    expect(isMissingTableError(null)).toBe(false)
   })
 })

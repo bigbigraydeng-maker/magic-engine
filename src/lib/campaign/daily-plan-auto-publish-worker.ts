@@ -213,14 +213,42 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
       }
 
       const dueDates = auth.dates.filter(date => window.includes(date)).sort()
-      if (dueDates.length === 0) continue
 
-      const attempts = await deps.listAttempts(auth.plan_id, auth.client_id, dueDates)
+      // A manual publish of some date failed with an uncertain result: Facebook may already have the Post.
+      // Park EVERY such authorised date (not only the ones due now) as UNKNOWN_OUTCOME, so the fact lands in
+      // the durable attempts table before a later manual run overwrites the receipt's `failed[]`.
+      const parkDates = (state.receiptUnknownFailedDates ?? [])
+        .filter(date => auth.dates.includes(date) && !state.publishedDates.includes(date) && date >= today)
+        .sort()
+      if (dueDates.length === 0 && parkDates.length === 0) continue
+
+      const attempts = await deps.listAttempts(auth.plan_id, auth.client_id, Array.from(new Set([...dueDates, ...parkDates])))
       const attemptByDate = new Map(attempts.map(row => [row.date, row]))
       const evidence = {
         tombstoneDates: attempts.filter(r => r.status === 'blocked' && r.reason_code === 'RECALLED').map(r => r.date),
         receiptRecalledDates: state.receiptRecalledDates,
         liftedDates: effectiveLiftedDates(auth, state),
+      }
+
+      const parked = new Set<string>()
+      for (const date of parkDates) {
+        if (attemptByDate.has(date)) continue // already has a row: decideClaim / stale-claim handling decides
+        if (isRecallBlocked(date, evidence)) continue
+        if (live) {
+          const requestId = randomUUID()
+          const claimed = await deps.claimAttempt({
+            authId: auth.id, clientId: auth.client_id, planId: auth.plan_id, date, requestId, attemptNo: 1, now,
+          })
+          if (claimed) {
+            await deps.finishAttempt({
+              planId: auth.plan_id, date, requestId,
+              patch: { status: 'unknown_outcome', reason_code: 'RECEIPT_FAILED_UNKNOWN', next_retry_at: null },
+              now,
+            })
+          }
+        }
+        parked.add(date)
+        note(date, 'unknown_outcome', 'RECEIPT_FAILED_UNKNOWN')
       }
 
       // 1. Per-date eligibility.
@@ -253,25 +281,7 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
           continue
         }
         const existing = attemptByDate.get(date) ?? null
-        if (existing === null && (state.receiptUnknownFailedDates ?? []).includes(date)) {
-          // A manual publish of this date failed with an uncertain result: Facebook may have the Post.
-          // Park it as UNKNOWN_OUTCOME (so it reaches the to-do list) instead of sending it again.
-          if (live) {
-            const requestId = randomUUID()
-            const parked = await deps.claimAttempt({
-              authId: auth.id, clientId: auth.client_id, planId: auth.plan_id, date, requestId, attemptNo: 1, now,
-            })
-            if (parked) {
-              await deps.finishAttempt({
-                planId: auth.plan_id, date, requestId,
-                patch: { status: 'unknown_outcome', reason_code: 'RECEIPT_FAILED_UNKNOWN', next_retry_at: null },
-                now,
-              })
-            }
-          }
-          note(date, 'unknown_outcome', 'RECEIPT_FAILED_UNKNOWN')
-          continue
-        }
+        if (parked.has(date)) continue
         if (existing !== null && isStaleClaim(existing, now)) {
           // A claim that never reported back: the Post may or may not exist. Never retry blindly.
           if (live) {

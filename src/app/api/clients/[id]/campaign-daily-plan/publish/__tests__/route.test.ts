@@ -3,7 +3,10 @@ import { NextRequest } from 'next/server'
 
 vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: vi.fn() }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
-vi.mock('@/lib/campaign/daily-plan-auto-publish-worker-store', () => ({ listFreshClaims: vi.fn() }))
+vi.mock('@/lib/campaign/daily-plan-auto-publish-worker-store', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/campaign/daily-plan-auto-publish-worker-store')>()),
+  listFreshClaims: vi.fn(),
+}))
 vi.mock('@/lib/workflows/inngest-event', () => ({ sendInngestEvent: vi.fn() }))
 vi.mock('@/lib/meta/token-manager', () => ({
   getMetaTokenForClient: vi.fn(),
@@ -1243,6 +1246,16 @@ describe('publish bridge — never races the unattended publisher', () => {
     stubTables()
     await POST(request({ no_publish: true }), params)
     expect(mockFreshClaims).not.toHaveBeenCalled()
+  })
+
+  it('if the auto-publish tables do not exist at all, the manual publish is not blocked', async () => {
+    stubTables()
+    armProvider()
+    mockFreshClaims.mockRejectedValue({ code: '42P01', message: 'relation "daily_plan_auto_publish_attempts" does not exist' })
+
+    const response = await POST(request({ no_publish: false }), params)
+
+    expect(response.status).toBe(200)
   })
 
   it('🔴 if the claims cannot be read the publish does not go ahead (fail closed)', async () => {

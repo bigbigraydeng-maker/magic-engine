@@ -287,3 +287,11 @@ export async function listFreshClaims(planId: string, clientId: string, since: D
 
   return (data ?? []) as AttemptRecord[]
 }
+
+/** True when a database error means "this table does not exist (yet)" — Postgres 42P01 or PostgREST PGRST205. */
+export function isMissingTableError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+  const { code, message } = error as { code?: unknown; message?: unknown }
+  if (code === '42P01' || code === 'PGRST205') return true
+  return typeof message === 'string' && /relation .* does not exist|could not find the table/i.test(message)
+}

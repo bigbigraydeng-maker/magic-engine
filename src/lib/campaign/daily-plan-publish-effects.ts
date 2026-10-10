@@ -110,7 +110,10 @@ export async function publishPending(
       continue
     }
 
-    if (context.beforeSend && !(await context.beforeSend(candidate.date))) {
+    // A last-moment check that cannot even run (e.g. a database read failed) is a refusal to send, not a
+    // send: nothing has gone out yet, so this is the safe side and must not be mistaken for an uncertain send.
+    const clearToSend = context.beforeSend ? await context.beforeSend(candidate.date).catch(() => false) : true
+    if (!clearToSend) {
       failed.push({
         date: candidate.date,
         idempotency_key: candidate.idempotency_key,

@@ -25,7 +25,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { CampaignDailyPublishCommandSchema } from '@/lib/campaign/daily-plan-publish'
 import { runDailyPlanPublish } from '@/lib/campaign/daily-plan-publish-runner'
-import { listFreshClaims } from '@/lib/campaign/daily-plan-auto-publish-worker-store'
+import { isMissingTableError, listFreshClaims } from '@/lib/campaign/daily-plan-auto-publish-worker-store'
 
 /** A claim younger than this belongs to a sweep that may still be sending. */
 const AUTO_PUBLISH_CLAIM_FRESH_MS = 15 * 60 * 1000
@@ -57,7 +57,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // The unattended publisher may be sending one of these dates right now. A live manual publish of the
     // same date at the same moment is how a Post gets published twice, so refuse and let the sweep finish.
     if (!command.no_publish) {
-      const claims = await listFreshClaims(command.plan_id, clientId, new Date(Date.now() - AUTO_PUBLISH_CLAIM_FRESH_MS))
+      // If the auto-publish tables are not there at all, there is no unattended publisher to collide with; any
+      // other read failure stops the publish (fail closed).
+      const claims = await listFreshClaims(command.plan_id, clientId, new Date(Date.now() - AUTO_PUBLISH_CLAIM_FRESH_MS)).catch(error => {
+        if (isMissingTableError(error)) return []
+        throw error
+      })
       const busy = claims.filter(claim => !command.dates || command.dates.includes(claim.date)).map(claim => claim.date)
       if (busy.length > 0) {
         return NextResponse.json(

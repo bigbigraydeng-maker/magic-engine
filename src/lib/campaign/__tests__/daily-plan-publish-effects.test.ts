@@ -77,3 +77,30 @@ describe('publishPending — failure certainty is recorded', () => {
     expect(outcome.failed[0].certainty).toBe('unknown')
   })
 })
+
+describe('publishPending — the last-moment check', () => {
+  it('🔴 a check that returns false means nothing is sent and the date is recorded as ABORTED_BEFORE_SEND', async () => {
+    const outcome = await publishPending([candidate], { ...context({ now: new Date('2026-10-11T00:00:00Z') }), beforeSend: async () => false })
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(outcome.failed[0]).toMatchObject({ error: 'ABORTED_BEFORE_SEND', certainty: 'rejected' })
+  })
+
+  it('🔴 a check that cannot run (throws) also means nothing is sent — and it is not mistaken for an uncertain send', async () => {
+    const outcome = await publishPending([candidate], {
+      ...context({ now: new Date('2026-10-11T00:00:00Z') }),
+      beforeSend: async () => {
+        throw new Error('db down')
+      },
+    })
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(outcome.failed[0]).toMatchObject({ error: 'ABORTED_BEFORE_SEND', certainty: 'rejected' })
+  })
+
+  it('a check that passes lets the send go ahead, carrying the request timeout', async () => {
+    mockPublish.mockRejectedValue(new Error('stop here'))
+    await publishPending([candidate], { ...context({ now: new Date('2026-10-11T00:00:00Z') }), beforeSend: async () => true, requestTimeoutMs: 45_000 })
+    expect(mockPublish).toHaveBeenCalledTimes(1)
+    expect(mockPublish.mock.calls[0][0].timeoutMs).toBe(45_000)
+  })
+})
+

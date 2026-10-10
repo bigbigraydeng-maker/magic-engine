@@ -311,6 +311,17 @@ describe('runAutoPublishSweep — a manual publish that may have reached Faceboo
     expect(runPublish.mock.calls.filter(c => c[0].command.no_publish === false).map(c => c[0].command.dates)).toEqual([[TODAY]])
   })
 
+  it('🔴 a date further out (not due yet) is parked too, so the fact is durable before the receipt can be overwritten', async () => {
+    const { deps, claimAttempt, finishAttempt } = build({
+      grants: [grant({ dates: [TODAY, LATER] })],
+      plan: { receiptUnknownFailedDates: [LATER] },
+    })
+    const summary = await runAutoPublishSweep(deps)
+    expect(resultsOf(summary)).toContain(`${LATER}:unknown_outcome(RECEIPT_FAILED_UNKNOWN)`)
+    expect(claimAttempt.mock.calls.map(c => c[0].date)).toContain(LATER)
+    expect(finishAttempt.mock.calls.find(c => c[0].date === LATER)?.[0].patch).toMatchObject({ status: 'unknown_outcome' })
+  })
+
   it('practice mode parks nothing', async () => {
     const { deps, claimAttempt } = build({ live: false, plan: { receiptUnknownFailedDates: [TOMORROW] } })
     await runAutoPublishSweep(deps)
