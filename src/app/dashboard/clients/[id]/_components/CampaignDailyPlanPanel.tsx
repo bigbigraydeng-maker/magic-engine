@@ -101,6 +101,8 @@ const POST_CHECK_LABEL: Record<ContentCheckItemKey, string> = {
   first_comment_link_has_tracking_params: '首评链接含追踪参数',
 }
 
+const FACTUAL_CHECK_KEYS: readonly ContentCheckItemKey[] = ['factual_claims_have_source', 'factual_claims_source_verified']
+
 type PostChecklistDraft = Record<ContentCheckItemKey, { outcome: CheckItemOutcome; detail: string; source_ref: string }>
 const emptyPostChecklist = (): PostChecklistDraft => Object.fromEntries(
   POST_HUMAN_CHECK_KEYS.map(key => [key, { outcome: 'NOT_MEASURED', detail: '', source_ref: '' }]),
@@ -115,17 +117,16 @@ const postChecklistPayload = (draft: PostChecklistDraft): ContentCheckItemResult
     source_ref: draft[key].source_ref.trim() || null,
   }))
 
+const allPassChecklist = (sourceUrl: string): PostChecklistDraft => Object.fromEntries(
+  POST_HUMAN_CHECK_KEYS.map(key => [key, { outcome: 'PASS' as const, detail: '', source_ref: FACTUAL_CHECK_KEYS.includes(key) ? sourceUrl : '' }]),
+) as PostChecklistDraft
+
 const GROUNDING_LABEL: Record<DailyPlanResponse['grounding']['status'], string> = {
   OK: '✅ 已连接 Master Brief',
   NEEDS_BRIEF: '⚠️ 缺少 Master Brief（NEEDS_BRIEF）',
   NEEDS_CAMPAIGN: '⚠️ 未选定推广活动（NEEDS_CAMPAIGN）',
 }
 
-const MEDIA_STATUS_LABEL: Record<string, string> = {
-  NO_MEDIA: '⬜ 暂无成片（NO_MEDIA）',
-  DRAFT_MEDIA: '🟡 草稿素材（DRAFT_MEDIA）',
-  READY: '✅ 可用成片（READY）',
-}
 
 function isDaySelectable(day: DailyPlanResponse['days'][number], bundleDates: Set<string>): boolean {
   return (
@@ -222,7 +223,7 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
     return Math.abs(actualRatio - targetRatio) / targetRatio > 0.02
   }, [postImageNaturalSize])
 
-  const submitPostReview = useCallback(async (verdict: PostReview['verdict'], dateOverride?: string, expectedReviewRevisionOverride?: string | null) => {
+  const submitPostReview = useCallback(async (verdict: PostReview['verdict'], dateOverride?: string, expectedReviewRevisionOverride?: string | null, checklistOverride?: PostChecklistDraft) => {
     const scope = `${clientId}:${campaignId}`
     const reviewDate = dateOverride ?? selectedDate
     if (!data?.plan_id || !data.plan_revision || !reviewDate) {
@@ -249,7 +250,7 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
           date: reviewDate,
           verdict,
           reason,
-          checklist_human: postChecklistPayload(postChecklistDraft),
+          checklist_human: postChecklistPayload(checklistOverride ?? postChecklistDraft),
         }),
       })
       const json = await res.json()
@@ -260,6 +261,9 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
           throw new Error('计划或审核状态已更新，页面已刷新，请确认后再操作。')
         }
         if (res.status === 422) {
+          if (json.error === 'AUTO_CHECKS_FAILED') {
+            throw new Error('帖子正文里含有 CTA 或链接，请把它们从正文去掉（链接会自动放进首评）后再通过。')
+          }
           throw new Error('Post 当前不完整或图片不可用，不能标记为通过。')
         }
         throw new Error(json.error ?? '保存审核失败')
@@ -320,6 +324,9 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
   }
   const selectedPostPassed = selectedBundle?.post_review?.verdict === 'PASS' && selectedBundle.post_review.is_current
   const selectedPostNeedsRevision = selectedBundle?.post_review?.verdict === 'NEEDS_REVISION'
+  const postChecklistAllPass = POST_HUMAN_CHECK_KEYS.every(
+    key => postChecklistDraft[key].outcome === 'PASS' && (!FACTUAL_CHECK_KEYS.includes(key) || postChecklistDraft[key].source_ref.trim().length > 0)
+  )
   const publishQueueItems = data.bundles
     .filter(bundle => !!bundle.post)
     .map(bundle => {
@@ -523,10 +530,37 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
                           </div>
                         ))}
                       </div>
-                      <p className="rounded-md bg-amber-50 px-2.5 py-2 text-[10px] leading-relaxed text-amber-800">
-                        当前 Post 发布不支持 CTA 首评。服务端将首评位置和追踪参数标为未测，因此 Post 通过、发布准备回执和发布都会被阻断。
+                      <p className="rounded-md bg-black/[.03] px-2.5 py-2 text-[10px] leading-relaxed text-me-charcoal/60">
+                        发布后系统会自动在这条帖子的第一条评论里贴「{selectedBundle.post.cta}」和带追踪参数的预约链接。正文里不能出现 CTA 或链接，审核通过时系统会自动检查这一点。
                       </p>
                       <div className="flex flex-wrap gap-2">
+                        {!selectedPostPassed && selectedBundle.post.cta_url && (
+                          <button
+                            type="button"
+                            disabled={reviewSaving}
+                            onClick={() => {
+                              const checklist = allPassChecklist(selectedBundle.post?.cta_url ?? '')
+                              setPostChecklistDraft(checklist)
+                              void submitPostReview('PASS', undefined, undefined, checklist)
+                            }}
+                            className="rounded-md bg-me-ochre px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                          >
+                            {reviewSaving ? '保存中…' : '按官网核对通过'}
+                          </button>
+                        )}
+                        {!selectedPostPassed && (
+                          <button
+                            type="button"
+                            disabled={reviewSaving || !postChecklistAllPass}
+                            onClick={() => void submitPostReview('PASS')}
+                            className="rounded-md bg-[#5C8A4A] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                          >
+                            {reviewSaving ? '保存中…' : selectedPostNeedsRevision ? '改为 Post 通过' : 'Post 通过'}
+                          </button>
+                        )}
+                        {selectedPostPassed && (
+                          <span className="rounded-md bg-[#5C8A4A]/12 px-3 py-1.5 text-xs font-semibold text-[#5C8A4A]">✓ Post 已通过</span>
+                        )}
                         <button
                           type="button"
                           disabled={reviewSaving || !POST_HUMAN_CHECK_KEYS.some(key => postChecklistDraft[key].outcome === 'FAIL' && postChecklistDraft[key].detail.trim())}
@@ -536,6 +570,9 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
                           Post 需修改
                         </button>
                       </div>
+                      <p className="text-[10px] leading-relaxed text-me-charcoal/40">
+                        点「按官网核对通过」＝ 你确认：这条文案已对照官网、图片来源已标注、与文案相符；五项人工检查记为通过，来源填该帖的官网链接。
+                      </p>
                       {reviewError && <p className="text-[11px] text-[#C2453A]">{reviewError}</p>}
                       <p className="text-[10px] leading-relaxed text-me-charcoal/40">
                         这里只记录该 Facebook Post 的人工审阅；不代表事实核验、Story/Reel 通过、生成、排期、Provider 或发布授权。
@@ -557,16 +594,9 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
                 ) : <EmptySlot />}
               </BundleCard>
 
-              <BundleCard title="🎥 Reel">
-                {selectedBundle.reel ? (
-                  <>
-                    <p className="text-xs text-me-charcoal/60 line-clamp-2">{selectedBundle.reel.brief}</p>
-                    <p className="text-xs text-me-charcoal/45 mt-1 line-clamp-2 italic">{selectedBundle.reel.script}</p>
-                    <p className="text-[11px] mt-1.5 font-medium">
-                      {MEDIA_STATUS_LABEL[selectedBundle.reel.media_status]}
-                    </p>
-                  </>
-                ) : <EmptySlot />}
+              <BundleCard title="🎥 Reel（视频）">
+                <p className="text-xs text-me-charcoal/60">Reel 视频不在这里管理。</p>
+                <a href="?tab=reels" className="mt-1 inline-block text-xs text-me-ochre hover:underline">去「视频 Reels」页看成片 →</a>
               </BundleCard>
             </div>
           )}
@@ -669,7 +699,7 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
             ) : (
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <p className="text-[10px] leading-relaxed text-me-charcoal/45">
-                        CTA 首评发布能力完成、相关检查可测且管理员审核通过后，才能生成 Inngest 发布准备回执。
+                        全部 Post 管理员审核通过后，才能生成 Inngest 发布准备回执。
                 </p>
                 <button
                   type="button"
