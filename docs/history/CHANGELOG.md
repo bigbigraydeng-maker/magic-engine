@@ -5,6 +5,14 @@
 
 ---
 
+### 2026-10-10（CRM 客人页：三套状态合成一个「该做什么」，列表只分「今天要联系 / 先放着」两张名单）
+
+PR [#2420](https://github.com/bigbigraydeng-maker/magic-engine/pull/2420)（B 级，机器自动合）。PM 2026-10-10 看 NAL 全部客人页后拍板：页面少信息多引导，「跟进到哪步」「现在冷热」「高/中/低意向」三套并列状态合成一个概念——该做什么。列表两列合成一列「该做什么」（动作 + 为什么），分段 4 → 2；侧栏顶部一张三行卡（动作 / AI 建议 / 到哪一步了，谁判的只在有记录时写）；AI 意向只能把人往上提（聊断了 + 高意向 → 今天要联系），不往下压。新增 `lib/crm/next-action.ts`、`lib/crm/brief-lookup.ts`。当场试跑 NAL 生产只读：229 人 → 47 / 182，抬升 19，总数守恒；页面渲染探针 8 项全过。DeepSeek 8 轮约 US$0.057。设计审 + 实施后审各一轮（子牙 + 魏征），处置见 `docs/specs/2026-10-10-crm-one-next-action-design-v0.md`。顺带查出 NAL 109 张私信摘要正文冒充 CTS（另开窗口重算）与 18 条进线从没被真人回过（登记后续）。
+
+**Reuse Statement**：复用分段引擎、排序、阶段身份常量、现成 AI 摘要字段；新增两个 platform-shared 纯模块，无客户 / 行业语义；实现落点与层级门判定一致（L1 既有 CRM 能力内部收口）。
+
+---
+
 ### 2026-10-05（Park Homes 官网：Riverside 页「工程进度」加上客户发来的进度更新视频）
 
 PR [#2252](https://github.com/bigbigraydeng-maker/magic-engine/pull/2252) 由机器自动合并（C 级），随后手动触发 `parkhomes-deploy.yml` 发布（自动合并不会触发发布，见 [合并审批](../../.github/merge-authorization.md)「已知缺口」），线上已核实。客户 Jason 2026-10-04 邮件发来一条 Riverside 进度更新视频（YouTube），要求放上网站。嵌入位置是 Riverside 页「Development progress」一段的航拍图下方，由 `projects.js` 里新增的可选字段 `story.progress.video` 驱动；说明只写「开发商提供，2026 年 10 月」（收到时间），不从视频推断分期或完工状态；原有的走访视频保留在原处。代码由 DeepSeek 写（aider 一次性 1 轮，$0.0042），Claude Code 出指令、审 diff、构建、提交。验证：站点构建 20 页通过；生成页与线上页均含新旧两个视频嵌入；浏览器实际打开线上页，新视频播放器加载正常（16:9，无横向溢出）。台账卡 `2026-10-05-parkhomes-riverside-update-video`。
