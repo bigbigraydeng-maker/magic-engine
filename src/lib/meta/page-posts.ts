@@ -50,6 +50,45 @@ export function scorePost(
   return Math.round(base * boost)
 }
 
+/** Graph error code 1 = "Please reduce the amount of data you're asking for". */
+const GRAPH_REDUCE_DATA_CODE = 1
+/** Smallest page size we still retry with; below this a failure is not a size problem. */
+const MIN_PAGE_LIMIT = 5
+
+export interface HalvingStats {
+  /** How many times the page size was halved and the request retried. */
+  halvings: number
+  /** The page size of the request that finally answered (or last one tried). */
+  finalLimit: number
+}
+
+export interface ListFetchOptions {
+  fetcher?: typeof fetch
+  stats?: HalvingStats
+}
+
+/** True when a Graph error payload is code 1 "reduce the amount of data". */
+export function isReduceDataError(raw: string | { code?: number; message?: string } | undefined): boolean {
+  if (!raw) return false
+  let err: { code?: number; message?: string } | undefined
+  if (typeof raw === 'string') {
+    try {
+      err = (JSON.parse(raw) as { error?: { code?: number; message?: string } }).error
+    } catch {
+      return /reduce the amount of data/i.test(raw)
+    }
+  } else {
+    err = raw
+  }
+  return err?.code === GRAPH_REDUCE_DATA_CODE || /reduce the amount of data/i.test(err?.message ?? '')
+}
+
+/** Half the page size, or null once it is already at the floor. */
+export function halveLimit(limit: number): number | null {
+  if (limit <= MIN_PAGE_LIMIT) return null
+  return Math.max(MIN_PAGE_LIMIT, Math.floor(limit / 2))
+}
+
 /**
  * Fetch recent published posts from a FB Page.
  * Requires a Page Access Token (User Token cannot list /published_posts).
@@ -58,6 +97,7 @@ export async function fetchPagePosts(
   pageId: string,
   pageAccessToken: string,
   limit = 30,
+  opts: ListFetchOptions = {},
 ): Promise<PagePost[]> {
   const fields = [
     'id',
@@ -68,17 +108,41 @@ export async function fetchPagePosts(
     'comments.summary(true)',
     'shares',
   ].join(',')
+  const doFetch = opts.fetcher ?? fetch
 
-  const url = `${GRAPH_BASE}/${pageId}/published_posts?fields=${fields}&limit=${limit}&access_token=${encodeURIComponent(pageAccessToken)}`
-  const res = await fetch(url)
-  if (!res.ok) {
-    throw new Error(`fetchPagePosts ${pageId}: ${res.status} ${await res.text()}`)
+  // Graph answers HTTP 500 code 1 "reduce the amount of data" when one request
+  // asks for too many rows with these summaries — halve the page size and retry.
+  let pageLimit = limit
+  for (;;) {
+    if (opts.stats) opts.stats.finalLimit = pageLimit
+    const url = `${GRAPH_BASE}/${pageId}/published_posts?fields=${fields}&limit=${pageLimit}&access_token=${encodeURIComponent(pageAccessToken)}`
+    const res = await doFetch(url)
+    if (!res.ok) {
+      const text = await res.text()
+      const smaller = isReduceDataError(text) ? halveLimit(pageLimit) : null
+      if (smaller !== null) {
+        pageLimit = smaller
+        if (opts.stats) opts.stats.halvings++
+        continue
+      }
+      throw new Error(`fetchPagePosts ${pageId}: ${res.status} ${text}`)
+    }
+    const parsed = (await res.json()) as { data?: RawPost[]; error?: { code?: number; message: string } }
+    if (parsed.error) {
+      const smaller = isReduceDataError(parsed.error) ? halveLimit(pageLimit) : null
+      if (smaller !== null) {
+        pageLimit = smaller
+        if (opts.stats) opts.stats.halvings++
+        continue
+      }
+      throw new Error(`fetchPagePosts ${pageId}: ${parsed.error.message}`)
+    }
+    return mapPosts(parsed.data ?? [])
   }
+}
 
-  const body = (await res.json()) as { data?: RawPost[]; error?: { message: string } }
-  if (body.error) throw new Error(`fetchPagePosts ${pageId}: ${body.error.message}`)
-
-  return (body.data ?? []).map((p) => {
+function mapPosts(rows: RawPost[]): PagePost[] {
+  return rows.map((p) => {
     const postId = p.id.includes('_') ? p.id.split('_')[1] : p.id
     const attachment = p.attachments?.data?.[0]
     const rx = p.reactions?.summary?.total_count ?? 0
@@ -128,30 +192,43 @@ export async function fetchPageReels(
   pageId: string,
   pageAccessToken: string,
   limit = 50,
+  opts: ListFetchOptions = {},
 ): Promise<PagePost[]> {
   const fields = ['id', 'created_time', 'description', 'comments.filter(stream).summary(true).limit(0)'].join(',')
-  const url = `${GRAPH_BASE}/${pageId}/video_reels?fields=${fields}&limit=${limit}&access_token=${encodeURIComponent(pageAccessToken)}`
+  const doFetch = opts.fetcher ?? fetch
 
-  let res: Response
-  try {
-    res = await fetch(url)
-  } catch (err) {
-    console.error('[meta/page-posts] fetchPageReels error:', err)
-    return []
-  }
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    console.error(`[meta/page-posts] fetchPageReels HTTP ${res.status}:`, body.slice(0, 200))
-    return []
-  }
-
-  const body = (await res.json()) as {
+  type ReelsBody = {
     data?: Array<{ id: string; created_time?: string; description?: string; comments?: { summary?: { total_count?: number } } }>
-    error?: { message: string }
+    error?: { code?: number; message: string }
   }
-  if (body.error) {
-    console.error('[meta/page-posts] fetchPageReels error:', body.error.message)
-    return []
+  let body: ReelsBody = {}
+  let pageLimit = limit
+  for (;;) {
+    if (opts.stats) opts.stats.finalLimit = pageLimit
+    const url = `${GRAPH_BASE}/${pageId}/video_reels?fields=${fields}&limit=${pageLimit}&access_token=${encodeURIComponent(pageAccessToken)}`
+    let res: Response
+    try {
+      res = await doFetch(url)
+    } catch (err) {
+      console.error('[meta/page-posts] fetchPageReels error:', err)
+      return []
+    }
+    let failure: { text: string; reduce: boolean } | null = null
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      failure = { text: `HTTP ${res.status}: ${text.slice(0, 200)}`, reduce: isReduceDataError(text) }
+    } else {
+      body = (await res.json()) as ReelsBody
+      if (body.error) failure = { text: body.error.message, reduce: isReduceDataError(body.error) }
+    }
+    if (!failure) break
+    const smaller = failure.reduce ? halveLimit(pageLimit) : null
+    if (smaller === null) {
+      console.error('[meta/page-posts] fetchPageReels error:', failure.text)
+      return []
+    }
+    pageLimit = smaller
+    if (opts.stats) opts.stats.halvings++
   }
 
   return (body.data ?? []).map((r) => {
