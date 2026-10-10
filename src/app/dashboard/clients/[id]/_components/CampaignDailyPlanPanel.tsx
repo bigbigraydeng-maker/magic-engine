@@ -127,11 +127,6 @@ const GROUNDING_LABEL: Record<DailyPlanResponse['grounding']['status'], string> 
   NEEDS_CAMPAIGN: '⚠️ 未选定推广活动（NEEDS_CAMPAIGN）',
 }
 
-const MEDIA_STATUS_LABEL: Record<string, string> = {
-  NO_MEDIA: '⬜ 暂无成片（NO_MEDIA）',
-  DRAFT_MEDIA: '🟡 草稿素材（DRAFT_MEDIA）',
-  READY: '✅ 可用成片（READY）',
-}
 
 function isDaySelectable(day: DailyPlanResponse['days'][number], bundleDates: Set<string>): boolean {
   return (
@@ -599,16 +594,9 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
                 ) : <EmptySlot />}
               </BundleCard>
 
-              <BundleCard title="🎥 Reel">
-                {selectedBundle.reel ? (
-                  <>
-                    <p className="text-xs text-me-charcoal/60 line-clamp-2">{selectedBundle.reel.brief}</p>
-                    <p className="text-xs text-me-charcoal/45 mt-1 line-clamp-2 italic">{selectedBundle.reel.script}</p>
-                    <p className="text-[11px] mt-1.5 font-medium">
-                      {MEDIA_STATUS_LABEL[selectedBundle.reel.media_status]}
-                    </p>
-                  </>
-                ) : <EmptySlot />}
+              <BundleCard title="🎥 Reel（视频）">
+                <p className="text-xs text-me-charcoal/60">Reel 视频不在这里管理。</p>
+                <a href="?tab=reels" className="mt-1 inline-block text-xs text-me-ochre hover:underline">去「视频 Reels」页看成片 →</a>
               </BundleCard>
             </div>
           )}
