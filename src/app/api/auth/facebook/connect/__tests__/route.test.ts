@@ -36,10 +36,11 @@ import { verifyState } from '@/lib/meta-oauth/client'
 
 const CLIENT_ID = '11111111-1111-1111-1111-111111111111'
 
-function makeRequest(params: { clientId?: string; intent?: string }) {
+function makeRequest(params: { clientId?: string; intent?: string; rerequest?: string }) {
   const url = new URL('http://localhost:3001/api/auth/facebook/connect')
   if (params.clientId) url.searchParams.set('client_id', params.clientId)
   if (params.intent)   url.searchParams.set('intent', params.intent)
+  if (params.rerequest) url.searchParams.set('rerequest', params.rerequest)
   return new NextRequest(url)
 }
 
@@ -117,6 +118,33 @@ describe('publishing intent reaches the signed state and requests the publishing
     const authUrl = new URL(res.headers.get('location') ?? '')
     const state = authUrl.searchParams.get('state') ?? ''
     expect(verifyState(state)).toEqual({ clientId: CLIENT_ID })
+  })
+
+  it('rerequest=1 forces auth_type=rerequest without changing intent, state or scopes (comment-reply reauthorisation entry)', async () => {
+    const res = await GET(makeRequest({ clientId: CLIENT_ID, rerequest: '1' }))
+
+    const authUrl = new URL(res.headers.get('location') ?? '')
+    expect(authUrl.searchParams.get('auth_type')).toBe('rerequest')
+    expect(authUrl.searchParams.get('scope')).toContain('pages_manage_engagement')
+
+    const state = authUrl.searchParams.get('state') ?? ''
+    expect(verifyState(state)).toEqual({ clientId: CLIENT_ID })
+  })
+
+  it('any rerequest value other than 1 is ignored', async () => {
+    const res = await GET(makeRequest({ clientId: CLIENT_ID, rerequest: 'true' }))
+
+    const authUrl = new URL(res.headers.get('location') ?? '')
+    expect(authUrl.searchParams.get('auth_type')).toBeNull()
+  })
+
+  it('rerequest=1 still requires access to the client — rejected callers never reach Meta', async () => {
+    mocks.requireDashboardClientAccess.mockResolvedValue({ ok: false, status: 403, error: 'Forbidden' })
+
+    const res = await GET(makeRequest({ clientId: CLIENT_ID, rerequest: '1' }))
+
+    expect(res.status).toBe(403)
+    expect(res.headers.get('location')).toBeNull() // never issued a redirect to Meta
   })
 })
 

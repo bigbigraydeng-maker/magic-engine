@@ -16,7 +16,7 @@
 
 import type { ActionDefinition, ActionRun, OutwardApproval } from './types'
 import type { EnvelopeFactsResolver } from './deps'
-import { isWithinEnvelope } from './autonomy-envelope'
+import { selectEnvelopeVerdict } from './autonomy-envelope'
 
 /** 有限、非负的真实金额。NaN / ±Infinity / 负数 / 非数字一律不算。 */
 function isRealCeiling(value: unknown): value is number {
@@ -162,7 +162,7 @@ export function outwardBlockReason(definition: ActionDefinition): string | null 
  */
 export async function preProviderEnvelopeBlockReason(args: {
   definition: ActionDefinition
-  run: Pick<ActionRun, 'id' | 'client_id' | 'action_key' | 'input'>
+  run: Pick<ActionRun, 'id' | 'client_id' | 'action_key' | 'input' | 'triggered_by'>
   stepKey: string
   resolveFacts: EnvelopeFactsResolver | undefined
 }): Promise<string | null> {
@@ -185,7 +185,13 @@ export async function preProviderEnvelopeBlockReason(args: {
   if ('unavailable' in resolved) {
     return `碰 Meta 之前重读信封事实失败：${resolved.unavailable}`
   }
-  const verdict = isWithinEnvelope(resolved.request, resolved.facts, approval.envelope)
+  const verdict = selectEnvelopeVerdict({
+    triggeredBy: args.run.triggered_by,
+    actionKey: args.run.action_key,
+    request: resolved.request,
+    facts: resolved.facts,
+    envelope: approval.envelope,
+  })
   if (verdict.within) return null
   return `碰 Meta 之前重算信封已越界：${verdict.reasons.join('；')}`
 }

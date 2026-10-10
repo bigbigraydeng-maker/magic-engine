@@ -2,7 +2,10 @@
  * 「ME 发广告」的中枢：起草 → 建成暂停 → 回读过闸门 → 落账等人点头。
  *
  * ── 三条不许绕的规矩 ──────────────────────────────────────────────────────
- * 1. **建出来的一律是暂停的。** 没有任何一条路径能让 ME 自己让广告开始花钱。
+ * 1. **建出来的一律是暂停的。** 从这里建出来的广告，只有 `approveDraft`（人点头）能开，
+ *    且它只认白名单里的类型，点头的人必须是 PM（全局管理员，见 `@/lib/ads/spend-activation`），
+ *    开之前先把授权回执写进账本，写不进去就不开。`meta-ads/execute` 的
+ *    `ads.reactivate_campaign` 同样只有 PM 能用、同样先写回执。
  * 2. **闸门拦下的不进审批队列。** 拦下就是 ME 自己的活没干完，不该拿去问人
  *    「这个有问题你还开吗」—— 那是把技术判断塞回给人。
  * 3. **一步都不许静默。** 建失败、回读失败、闸门拦下，都会留一行账，且各自是
@@ -16,11 +19,15 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AdDraft } from './ad-draft'
-import { validateDraft, describeDraft, DRAFT_PLAY } from './ad-draft'
-import { publishDraftPaused, activatePublished } from '@/lib/meta/ad-publisher'
-import { fetchAdSetReadback, fetchAdCreativesReadback } from '@/lib/meta/readback'
+import { validateDraft, describeDraft, DRAFT_PLAY, metaTripletFor, isApprovableKind } from './ad-draft'
+import { publishDraftPaused, activatePublished, pausePublished, type PublishedDraft } from '@/lib/meta/ad-publisher'
+import { waitForVideoReady } from '@/lib/meta/asset-upload'
+import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus } from '@/lib/meta/readback'
 import { adaptMetaAdSet } from './meta-readback-adapter'
-import { checkLaunch, renderReadback, type LaunchFinding } from './launch-readback'
+import { checkLaunch, renderReadback, type LaunchFinding, type LaunchReadbackReport } from './launch-readback'
+import { checkDraftRedlines, unusableRedlinePhrases } from './draft-redlines'
+import { checkCreatedAsExpected } from './created-as-expected'
+import { buildSpendActivationReceipt, type SpendActivationAuthority, type SpendActivationReceipt } from '@/lib/ads/spend-activation'
 
 /**
  * 一条广告动作在账本里的状态。
@@ -33,6 +40,13 @@ import { checkLaunch, renderReadback, type LaunchFinding } from './launch-readba
 export type DraftStatus =
   /** 建出来了、闸门过了、等人点头。**只有这个状态会出现在审批页。** */
   | 'awaiting_approval'
+  /**
+   * 人点了头、正在 Meta 那边开。由 approveDraft 用「只有等待批准的才占得到」的条件写入占位，
+   * 防止同一条被并发批准两次、或批准进行中被否决后又被覆盖。
+   * 正常几秒内变成 active，或开失败后退回 awaiting_approval；若进程中途被杀会停在这里，
+   * 不在审批队列里出现，需要人去 Meta 核对（宁可卡住也不重复开）。
+   */
+  | 'activating'
   /** 闸门拦下了 —— ME 自己的活没干完，不拿去烦人。 */
   | 'blocked'
   /** 建到一半失败了。 */
@@ -66,6 +80,23 @@ export interface DraftRecord {
   error?: string
   /** 建到一半没删干净的东西 —— 必须有人去 Meta 后台收拾。 */
   orphans?: string[]
+  /**
+   * 查了几条客户禁用词。`null` = 没读到 / 没查；`0` = 查过，客户没配。
+   * 这两种必须分得出：「红线没生效」不能长得和「红线是空的」一样。
+   */
+  redlinesChecked?: number | null
+  /** 名单里因为太短没拿来比的条目（如果有）。 */
+  redlinesSkipped?: string[]
+  /** 回读发现有东西不是暂停的 → 我们补了一刀暂停，结果在这里。 */
+  autoPause?: { ok: boolean; failed: string[] }
+  /**
+   * 谁、凭什么把这条开起来的回执。开之前先写 `authorized_pending`，
+   * Meta 成功后 `executed`，失败 `meta_failed`（带 error）。
+   */
+  activation?: SpendActivationReceipt & {
+    status: 'authorized_pending' | 'executed' | 'meta_failed'
+    error?: string
+  }
 }
 
 export interface CreateDraftDeps {
@@ -76,7 +107,29 @@ export interface CreateDraftDeps {
   expectedGeo?: string | null
   /** 客户行业（`clients.industry`），闸门文案从广告剧本取叫法。给不出就用中性词。 */
   industry?: string | null
+  /**
+   * 客户禁用词。`undefined` = 没加载（私信类型会因此拒建）；`[]` = 查过、没配。
+   * 不要把读库失败的结果顺手写成 `[]`。
+   */
+  brandRedlines?: readonly string[]
+  /** 可注入的时钟，测试用。 */
+  now?: () => number
 }
+
+/**
+ * 私信类型整次请求的时间预算（从请求开始算，毫秒）。
+ * `maxDuration = 120` 是 Vercel 的说法，本仓部署在 Render，真实代理上限没核实过，
+ * 所以按常见的 100 秒再留余量。最坏一路：等转码 ≤25s → 写到 45s 为止 → 55s 前没写完就不读 →
+ * 回读 ≤15s（并发）→ 补暂停 ≤15s（并发）→ 落账。设计稿 §7。
+ */
+const BUDGET = {
+  waitForVideoMs: 25_000,
+  stopWritingMs: 45_000,
+  skipReadbackAfterMs: 55_000,
+  giveUpRollbackMs: 80_000,
+  /** 补暂停是在止损，比回滚更该做完，所以允许多用一点 —— 但也要有顶。 */
+  giveUpPauseMs: 92_000,
+} as const
 
 async function record(
   supabase: SupabaseClient,
@@ -116,50 +169,146 @@ export async function createDraftForApproval(
   draft: AdDraft,
   deps: CreateDraftDeps,
 ): Promise<CreateDraftOutcome> {
-  const summary = describeDraft(draft)
+  const now = deps.now ?? Date.now
+  const startedAt = now()
+  const base: RecordBase = {
+    summary: describeDraft(draft),
+    redlinesChecked: deps.brandRedlines === undefined ? null : deps.brandRedlines.length,
+    redlinesSkipped: skippedRedlines(deps.brandRedlines),
+  }
 
   // ── 0. ME 自己就能判的错，不要浪费一次真实创建 ────────────────────────
-  const problems = validateDraft(draft)
+  const problems = [...validateDraft(draft), ...checkDraftRedlines(draft, deps.brandRedlines)]
   if (problems.length > 0) {
     const error = problems.map((p) => `${p.field}：${p.message}`).join('；')
-    const id = await record(deps.supabase, draft.clientId, {
-      status: 'failed', draft, summary, error,
-    })
-    return { actionId: id, status: 'failed', summary, findings: [], error }
+    return failedOutcome(deps, draft, { ...base, error })
   }
+
+  // ── 0.5 私信类型：视频上传完还要转码，转码没完就建会失败 ───────────────
+  const waitError = await waitForTranscode(draft, deps, now)
+  if (waitError) return failedOutcome(deps, draft, { ...base, error: waitError })
 
   // ── 1. 建（全程暂停）────────────────────────────────────────────────
-  const published = await publishDraftPaused(draft, deps.adAccountId, deps.accessToken)
+  const published = await publishDraftPaused(
+    draft, deps.adAccountId, deps.accessToken, publishBudgetFor(draft, startedAt, now),
+  )
   if (!published.ok) {
     const error = `建到「${published.step}」这步失败：${published.error}`
-    const id = await record(deps.supabase, draft.clientId, {
-      status: 'failed', draft, summary, error,
-      orphans: published.orphans.length > 0 ? published.orphans : undefined,
-    })
-    return { actionId: id, status: 'failed', summary, findings: [], error }
+    const orphans = published.orphans.length > 0 ? published.orphans : undefined
+    return failedOutcome(deps, draft, { ...base, error, orphans })
   }
 
-  // ── 2. 回读 —— Meta 自动加了什么，只有这一步看得见 ────────────────────
-  const [rawAdSet, creatives] = await Promise.all([
-    fetchAdSetReadback(published.adSetId, deps.accessToken),
-    fetchAdCreativesReadback(published.adSetId, deps.accessToken),
-  ])
+  // ── 2+3. 回读 → 闸门 ────────────────────────────────────────────────
+  return gateReadback(draft, published, deps, {
+    ...base, startedAt, now, tooLateToRead: now() > startedAt + BUDGET.skipReadbackAfterMs,
+  })
+}
 
-  if (!rawAdSet || !creatives) {
-    // 回读不出来 ≠ 没问题。建都建出来了，但没人能保证它是干净的 —— 不进审批队列。
-    const error =
-      '广告建出来了（暂停着），但回读不到它的真实设置 —— 这是「查不出来」，不是「没问题」。' +
-      '在查清楚之前不该开。'
-    const id = await record(deps.supabase, draft.clientId, {
-      status: 'blocked', draft, summary, error,
-      campaignId: published.campaignId, adSetId: published.adSetId, adIds: published.adIds,
-    })
-    return { actionId: id, status: 'blocked', summary, findings: [], error }
+interface RecordBase {
+  summary: string
+  redlinesChecked: number | null
+  /** 名单里太短、没拿来比的条目 —— 不静默忽略，记下来让人知道有条目没生效。 */
+  redlinesSkipped?: string[]
+}
+
+interface GateContext extends RecordBase {
+  startedAt: number
+  now: () => number
+  tooLateToRead: boolean
+}
+
+function skippedRedlines(redlines: readonly string[] | undefined): string[] | undefined {
+  const skipped = redlines ? unusableRedlinePhrases(redlines) : []
+  return skipped.length > 0 ? skipped : undefined
+}
+
+/** 私信类型才等转码；返回错误文案，`null` = 可以继续。 */
+async function waitForTranscode(
+  draft: AdDraft,
+  deps: CreateDraftDeps,
+  now: () => number,
+): Promise<string | null> {
+  if (draft.kind !== 'messenger_conversation') return null
+  const ready = await waitForVideoReady(
+    draft.creatives.map((c) => c.videoId ?? ''),
+    deps.accessToken,
+    { timeoutMs: BUDGET.waitForVideoMs, now },
+  )
+  return ready.ok ? null : ready.error
+}
+
+/** 只有私信类型有整次请求的时间预算；其它类型沿用旧行为（不限）。 */
+function publishBudgetFor(draft: AdDraft, startedAt: number, now: () => number) {
+  if (draft.kind !== 'messenger_conversation') return undefined
+  return {
+    stopWritingAt: startedAt + BUDGET.stopWritingMs,
+    giveUpRollbackAt: startedAt + BUDGET.giveUpRollbackMs,
+    now,
   }
+}
 
-  // ── 3. 闸门 ────────────────────────────────────────────────────────
-  const report = checkLaunch({
-    ...adaptMetaAdSet(rawAdSet, creatives, {
+async function failedOutcome(
+  deps: CreateDraftDeps,
+  draft: AdDraft,
+  f: RecordBase & { error: string; orphans?: string[] },
+): Promise<CreateDraftOutcome> {
+  const id = await record(deps.supabase, draft.clientId, {
+    status: 'failed', draft, summary: f.summary, error: f.error,
+    redlinesChecked: f.redlinesChecked, redlinesSkipped: f.redlinesSkipped, orphans: f.orphans,
+  })
+  return { actionId: id, status: 'failed', summary: f.summary, findings: [], error: f.error }
+}
+
+/** 私信类型的「建成预期」检查；其它类型没有（`campaignStatus === undefined`），返回空。 */
+function expectedFindings(
+  draft: AdDraft,
+  published: PublishedDraft,
+  readback: {
+    campaignStatus: string | null | undefined
+    adSet: NonNullable<Awaited<ReturnType<typeof fetchAdSetReadback>>>
+    ads: NonNullable<Awaited<ReturnType<typeof fetchAdCreativesReadback>>>
+  },
+  deps: CreateDraftDeps,
+): LaunchFinding[] {
+  if (draft.kind !== 'messenger_conversation' || readback.campaignStatus === undefined) return []
+  const t = metaTripletFor(draft.kind)
+  return checkCreatedAsExpected(
+    {
+      optimizationGoal: t.optimizationGoal,
+      destinationType: t.destinationType,
+      adCount: published.adIds.length,
+      brandRedlines: deps.brandRedlines ?? [],
+    },
+    { campaignStatus: readback.campaignStatus, adSet: readback.adSet, ads: readback.ads },
+  )
+}
+
+/** 回读不出来 ≠ 没问题。建都建出来了，但没人能保证它是干净的 —— 不进审批队列。 */
+async function blockedUnreadable(
+  draft: AdDraft,
+  published: PublishedDraft,
+  deps: CreateDraftDeps,
+  base: RecordBase,
+  why: string,
+): Promise<CreateDraftOutcome> {
+  const error = `广告建出来了（暂停着），但${why} —— 这是「查不出来」，不是「没问题」。在查清楚之前不该开。`
+  const id = await record(deps.supabase, draft.clientId, {
+    status: 'blocked', draft, summary: base.summary, error,
+    redlinesChecked: base.redlinesChecked, redlinesSkipped: base.redlinesSkipped,
+    campaignId: published.campaignId, adSetId: published.adSetId, adIds: published.adIds,
+  })
+  return { actionId: id, status: 'blocked', summary: base.summary, findings: [], error }
+}
+
+/** 已有的闸门（多语言混放、重定向被放宽……）。 */
+function launchReportFor(
+  draft: AdDraft,
+  deps: CreateDraftDeps,
+  rawAdSet: NonNullable<Awaited<ReturnType<typeof fetchAdSetReadback>>>,
+  ads: NonNullable<Awaited<ReturnType<typeof fetchAdCreativesReadback>>>,
+): LaunchReadbackReport {
+  return checkLaunch({
+    ...adaptMetaAdSet(rawAdSet, ads, {
       expectedGeo: deps.expectedGeo ?? null,
       // 打法确实是重定向就直说；**不是的时候不能传 false**。
       // 传 false 会顶掉名字启发式那道保险 —— 一个叫「暖池重定向」的组
@@ -168,18 +317,73 @@ export async function createDraftForApproval(
       isRetargeting: DRAFT_PLAY[draft.kind] === 'warm_pool_retarget' ? true : undefined,
     }),
     industry: deps.industry ?? null,
+    expectedOptimizationGoal: metaTripletFor(draft.kind).optimizationGoal,
   })
-  const status: DraftStatus = report.safeToActivate ? 'awaiting_approval' : 'blocked'
-  const readback = renderReadback(report)
+}
 
+/** 回读 → 过闸门 → 落账。 */
+async function gateReadback(
+  draft: AdDraft,
+  published: PublishedDraft,
+  deps: CreateDraftDeps,
+  ctx: GateContext,
+): Promise<CreateDraftOutcome> {
+  if (ctx.tooLateToRead) {
+    return blockedUnreadable(draft, published, deps, ctx, '这次请求已经用掉太多时间，没来得及回读它的真实设置')
+  }
+  const wantsExpected = draft.kind === 'messenger_conversation'
+  const [rawAdSet, ads, campaignStatus] = await Promise.all([
+    fetchAdSetReadback(published.adSetId, deps.accessToken),
+    fetchAdCreativesReadback(published.adSetId, deps.accessToken),
+    wantsExpected ? fetchCampaignStatus(published.campaignId, deps.accessToken) : undefined,
+  ])
+  if (!rawAdSet || !ads) {
+    return blockedUnreadable(draft, published, deps, ctx, '回读不到它的真实设置')
+  }
+
+  const report = launchReportFor(draft, deps, rawAdSet, ads)
+  const extra = expectedFindings(draft, published, { campaignStatus, adSet: rawAdSet, ads }, deps)
+  const autoPause = extra.some((f) => f.code === 'not_paused')
+    ? await pausePublished(published, deps.accessToken, {
+        deadlineAt: ctx.startedAt + BUDGET.giveUpPauseMs, now: ctx.now,
+      })
+    : undefined
+
+  const merged: LaunchReadbackReport = {
+    ...report,
+    findings: [...report.findings, ...extra],
+    safeToActivate: report.safeToActivate && !extra.some((f) => f.severity === 'blocker'),
+  }
+  return recordGate(draft, published, deps, ctx, merged, autoPause)
+}
+
+async function recordGate(
+  draft: AdDraft,
+  published: PublishedDraft,
+  deps: CreateDraftDeps,
+  ctx: RecordBase,
+  merged: LaunchReadbackReport,
+  autoPause: { ok: boolean; failed: string[] } | undefined,
+): Promise<CreateDraftOutcome> {
+  const status: DraftStatus = merged.safeToActivate ? 'awaiting_approval' : 'blocked'
+  const readback = renderReadback(merged) + renderAutoPause(autoPause)
   const id = await record(deps.supabase, draft.clientId, {
-    status, draft, summary, readback,
+    status, draft, summary: ctx.summary, readback,
     campaignId: published.campaignId, adSetId: published.adSetId, adIds: published.adIds,
-    findings: report.findings,
-    buyerWillSee: report.buyerWillSee,
+    findings: merged.findings,
+    buyerWillSee: merged.buyerWillSee,
+    redlinesChecked: ctx.redlinesChecked,
+    redlinesSkipped: ctx.redlinesSkipped,
+    autoPause,
   })
+  return { actionId: id, status, summary: ctx.summary, findings: merged.findings, readback }
+}
 
-  return { actionId: id, status, summary, findings: report.findings, readback }
+function renderAutoPause(r: { ok: boolean; failed: string[] } | undefined): string {
+  if (!r) return ''
+  return r.ok
+    ? '\n\n【补暂停】回读发现有东西不是暂停的，已经补了一刀暂停。'
+    : `\n\n【补暂停】🔴 回读发现有东西不是暂停的，补暂停时这些没成功，要有人立刻去 Meta 后台处理：${r.failed.join('；')}`
 }
 
 /**
@@ -187,12 +391,14 @@ export async function createDraftForApproval(
  *
  * 开之前**再查一次状态**：草案可能是几小时前建的，中间 Meta 可能改过东西，
  * 也可能同一条被点了两次。只有 `awaiting_approval` 能开。
+ * 先用条件写入「占位」成 activating（只有 awaiting_approval 占得到），占不到就不开；开成功写 active，失败退回 awaiting_approval。
  */
 export async function approveDraft(
   actionId: string,
   supabase: SupabaseClient,
   accessToken: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+  authority: SpendActivationAuthority,
+): Promise<{ ok: true; warning?: string } | { ok: false; error: string }> {
   const { data, error } = await supabase
     .from('flywheel_actions')
     .select('id, client_id, payload')
@@ -205,6 +411,15 @@ export async function approveDraft(
 
   const p = (data as { payload: DraftRecord | null }).payload
   if (!p) return { ok: false, error: '这条草案没有内容' }
+  // 白名单：不在名单里（私信广告、账本里 kind 缺失或写了陌生值的旧记录）一律不开，零 Meta 调用。
+  if (!isApprovableKind(p.draft?.kind)) {
+    return {
+      ok: false,
+      error:
+        '这条草案的类型现在不能用「开」按钮打开：私信广告要等「PM 授权 + 每日总预算检查」上线之后才行，' +
+        '在那之前它只能是暂停状态（账本里没写类型的旧草案同样不能开）。',
+    }
+  }
   if (p.status !== 'awaiting_approval') {
     return { ok: false, error: `这条现在是「${p.status}」，只有等待批准的才能开` }
   }
@@ -212,17 +427,79 @@ export async function approveDraft(
     return { ok: false, error: '这条草案没记下 Meta 那边的 id，开不了' }
   }
 
+  const clientId = (data as { client_id: string }).client_id
+  const receipt = buildSpendActivationReceipt({
+    authority,
+    entry: 'ad-approval',
+    clientId,
+    campaignId: p.campaignId,
+    draftActionId: actionId,
+  })
+
+  // 占位：只有还在等待批准的才占得到。占不到说明别处已经动过它（并发批准 / 否决），不开。
+  const claimPayload: DraftRecord = {
+    ...p,
+    status: 'activating',
+    activation: { ...receipt, status: 'authorized_pending' },
+  }
+  const claim = await supabase
+    .from('flywheel_actions')
+    .update({ payload: claimPayload })
+    .eq('id', actionId)
+    .eq('payload->>status', 'awaiting_approval')
+    .select('id')
+  if (claim.error) {
+    return { ok: false, error: `授权回执写不进去，没有开：${claim.error.message}` }
+  }
+  if (!claim.data || claim.data.length !== 1) {
+    return { ok: false, error: '这条刚被别处处理过（可能已经被开启或否决），这次没有再开。' }
+  }
+
   const r = await activatePublished(
     { campaignId: p.campaignId, adSetId: p.adSetId, adIds: p.adIds },
     accessToken,
   )
-  if (!r.ok) return r
+  if (!r.ok) {
+    const failedPayload: DraftRecord = {
+      ...p,
+      status: 'awaiting_approval',
+      activation: { ...receipt, status: 'meta_failed', error: r.error },
+    }
+    const failed = await supabase
+      .from('flywheel_actions')
+      .update({ payload: failedPayload })
+      .eq('id', actionId)
+      .eq('payload->>status', 'activating')
+      .select('id')
+    if (failed.error || !failed.data || failed.data.length !== 1) {
+      console.error(
+        '[draft-and-gate] meta_failed receipt write-back failed:',
+        actionId,
+        failed.error?.message ?? 'no row matched',
+      )
+      return {
+        ok: false,
+        error: `${r.error}（另：失败记录没写成功，这条会停在「开启中」，请到 Meta 后台核对）`,
+      }
+    }
+    return r
+  }
 
-  await supabase
+  const donePayload: DraftRecord = {
+    ...p,
+    status: 'active',
+    activation: { ...receipt, status: 'executed' },
+  }
+  const done = await supabase
     .from('flywheel_actions')
-    .update({ payload: { ...p, status: 'active' satisfies DraftStatus } })
+    .update({ payload: donePayload })
     .eq('id', actionId)
-
+    .eq('payload->>status', 'activating')
+    .select('id')
+  if (done.error || !done.data || done.data.length !== 1) {
+    const msg = done.error?.message ?? '状态已被改动'
+    return { ok: true, warning: `广告已开，但账本状态没写成功：${msg}` }
+  }
   return { ok: true }
 }
 
@@ -241,12 +518,23 @@ export async function rejectDraft(
 
   const p = (data as { payload: DraftRecord | null } | null)?.payload
   if (!p) return { ok: false, error: '找不到这条草案' }
+  if (p.status !== 'awaiting_approval') {
+    return { ok: false, error: `这条现在是「${p.status}」，只有等待批准的才能否决` }
+  }
 
-  await supabase
+  const rejected = await supabase
     .from('flywheel_actions')
     .update({
       payload: { ...p, status: 'rejected' satisfies DraftStatus, error: reason ?? p.error },
     })
     .eq('id', actionId)
+    .eq('payload->>status', 'awaiting_approval')
+    .select('id')
+  if (rejected.error) {
+    return { ok: false, error: rejected.error.message }
+  }
+  if (!rejected.data || rejected.data.length !== 1) {
+    return { ok: false, error: '这条刚被别处处理过，这次没有否决。' }
+  }
   return { ok: true }
 }

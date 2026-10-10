@@ -28,7 +28,7 @@
  */
 
 import { useSearchParams } from 'next/navigation'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 export type SettingsTab = 'connect' | 'profile' | 'crm' | 'content' | 'advanced'
 
@@ -141,6 +141,7 @@ export function SettingsSection({
   children,
   first,
   defaultOpen,
+  id,
 }: {
   icon: string
   title: string
@@ -149,13 +150,25 @@ export function SettingsSection({
   first?: boolean
   /** 默认展开——给「这次授权/连接回跳正对着它」这类板块用，其余默认收起。 */
   defaultOpen?: boolean
+  /** 深链锚点（比如 factory-config）——带 `?section=` 进来时滚到这一块。 */
+  id?: string
 }) {
   const startOpen = Boolean(first || defaultOpen)
   const [open, setOpen] = useState(startOpen)
   const [everOpened, setEverOpened] = useState(startOpen)
+  const ref = useRef<HTMLElement>(null)
+
+  // 深链进来时把这一块滚到视口顶部。只在挂载时跑一次 —— 之后人自己滚动，
+  // 不该被拽回去。`defaultOpen` 是「这次就是来看它」的信号，没有它就不抢焦点。
+  useEffect(() => {
+    if (!id || !defaultOpen) return
+    if (typeof ref.current?.scrollIntoView !== 'function') return
+    ref.current.scrollIntoView({ block: 'start' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
-    <section className={first ? '' : 'mt-3'}>
+    <section id={id} ref={ref} className={first ? '' : 'mt-3'}>
       <button
         type="button"
         onClick={() => {
