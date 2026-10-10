@@ -30,6 +30,7 @@ import { currentPositionLabel, nextNavStep, type NavInput, type SectionKey } fro
 import type { Segment } from '@/lib/crm/segments'
 import { type KindView } from '@/lib/crm/kind-filter'
 import { dayProgress } from '@/lib/crm/day-list'
+import { DAILY_QUOTA } from '@/lib/crm/next-action'
 import {
   LIST_CLS,
   fmtDate,
@@ -870,7 +871,20 @@ export default function CrmAllContactsPage() {
                         colSpan={colCount}
                         onToggle={() => toggleSection(s.key)}
                       />,
-                      open && s.items !== null && s.items.map((r) => renderRow(r)),
+                      open && s.items !== null && s.key === 'hot' && s.items.length > DAILY_QUOTA
+                        ? [
+                            ...s.items.slice(0, DAILY_QUOTA).map((r) => renderRow(r)),
+                            // 只在第一页画：翻到第二页时前面那 20 个已经看过了，线不该再出现。
+                            (sectionPages[s.key] ?? 1) <= 1 && (
+                              <tr key="quota-line" data-testid="quota-line">
+                                <td colSpan={colCount} className="border-y border-dashed border-me-charcoal/25 bg-me-ivory/60 px-4 py-2 text-center text-xs font-bold text-me-charcoal/55">
+                                  ↑ 今天先打这 {DAILY_QUOTA} 个 · 以下 {s.total - DAILY_QUOTA} 个排队，打完前面的再往下看 ↓
+                                </td>
+                              </tr>
+                            ),
+                            ...s.items.slice(DAILY_QUOTA).map((r) => renderRow(r)),
+                          ]
+                        : open && s.items !== null && s.items.map((r) => renderRow(r)),
                       open && s.items !== null && s.items.length === 0 && (
                         <tr key={`section-${s.key}-empty`}>
                           <td colSpan={colCount} className="px-4 py-4 text-center text-xs text-me-charcoal/35">

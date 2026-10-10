@@ -45,8 +45,16 @@ export interface NextAction {
   intentBoost: boolean
 }
 
+/**
+ * 销售一天打得完的人数（PM 2026-10-10 定：每天 20 个）。
+ *
+ * 只是**显示上的分界线**：「今天要联系」里不管有多少人都照常列出来（2026-08-02 的教训：
+ * 人不能因为一个上限就从页面上消失），只是第 20 个之后画一条线，写明「以下是后面排队的」。
+ */
+export const DAILY_QUOTA = 20
+
 export const LIST_META: Record<NextActionList, { title: string; hint: string }> = {
-  hot: { title: '今天要联系', hint: '按紧急程度排好了，从上往下打。' },
+  hot: { title: '今天要联系', hint: `先打前 ${DAILY_QUOTA} 个，按紧急程度从上往下；后面的排队等着，打完前面的自然往上顶。` },
   cold: { title: '先放着', hint: '系统盯着，他一开口会自己跳上去。以后才走 / 已成交 / 别再联系的人也在这里。' },
 }
 

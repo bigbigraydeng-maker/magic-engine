@@ -885,3 +885,39 @@ describe('B3 · 终端客户/同行筛选 + 批量发邮件', () => {
     await waitFor(() => expect(screen.queryByText('🤝 同行')).toBeNull())
   })
 })
+
+/**
+ * 每天打 20 个（PM 2026-10-10）：「今天要联系」不管多少人都全列出来（人不能因为上限消失），
+ * 只是第 20 个之后画一条线，写明后面是排队的。
+ */
+describe('今天要联系 · 每天 20 个的分界线', () => {
+  const many = (n: number) => Array.from({ length: n }, (_, i) => contact(`h${i + 1}`, `Person ${String(i + 1).padStart(2, '0')}`))
+  const sections = (n: number) => [
+    { key: 'hot', title: '今天要联系', hint: 'h', total: n, open: true, items: many(n) },
+    { key: 'cold', title: '先放着', hint: 'h', total: 0, open: false, items: null },
+  ]
+
+  it('25 个人：全部画出来，线画在第 20 个之后，写明排队 5 个', async () => {
+    stubPriority(sections(25))
+    render(<CrmAllContactsPage />)
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    await waitFor(() => expect(screen.getByText('Person 25')).toBeTruthy())
+
+    const line = screen.getByTestId('quota-line')
+    expect(line.textContent).toContain('今天先打这 20 个')
+    expect(line.textContent).toContain('以下 5 个排队')
+    const rows = Array.from(document.querySelectorAll('tbody tr'))
+    const idx = rows.indexOf(line as HTMLTableRowElement)
+    // 线前面正好 1 行段头 + 20 个人
+    expect(rows.slice(0, idx).filter((r) => (r.textContent ?? '').includes('Person')).length).toBe(20)
+    expect(rows.slice(idx + 1).filter((r) => (r.textContent ?? '').includes('Person')).length).toBe(5)
+  })
+
+  it('刚好 20 个或更少：不画线', async () => {
+    stubPriority(sections(20))
+    render(<CrmAllContactsPage />)
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    await waitFor(() => expect(screen.getByText('Person 20')).toBeTruthy())
+    expect(screen.queryByTestId('quota-line')).toBeNull()
+  })
+})
