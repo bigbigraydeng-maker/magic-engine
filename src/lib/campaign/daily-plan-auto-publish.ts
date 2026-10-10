@@ -19,6 +19,8 @@ import { z } from 'zod'
 
 export const DAILY_PLAN_AUTO_PUBLISH_AUTHORIZED_EVENT = 'daily_plan.auto_publish.authorized' as const
 export const DAILY_PLAN_AUTO_PUBLISH_REVOKED_EVENT = 'daily_plan.auto_publish.revoked' as const
+/** One publish attempt by the unattended publisher reached an outcome (published / blocked / failed / unknown / missed). */
+export const DAILY_PLAN_AUTO_PUBLISH_ATTEMPTED_EVENT = 'daily_plan.auto_publish.attempted' as const
 
 /**
  * Outcome of one unattended publish attempt.
