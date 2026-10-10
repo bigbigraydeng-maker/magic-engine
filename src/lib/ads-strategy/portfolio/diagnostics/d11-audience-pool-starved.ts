@@ -225,7 +225,7 @@ function feedSuffix(ctx: AccountContext, lastStrong: string | null, days: string
 
 function poolAgeSentence(ageDays: number | null, retention: number | null): string {
   if (ageDays !== null && retention !== null && retention > 0 && ageDays < retention) {
-    return `池子建了 ${ageDays} 天，保留期 ${retention} 天，还没有人到期被移出——没长就是真的没新人进来。`
+    return `池子建了 ${ageDays} 天，保留期 ${retention} 天；但创建前已发生的观看也会被纳入，不能确定还没有人到期被移出，没长不等于没新人进来，这条主要依据供血花费。`
   }
   if (ageDays !== null && retention !== null && retention > 0) {
     return `池子已建 ${ageDays} 天，超过保留期 ${retention} 天，没长也可能是进出打平；这条主要依据供血花费。`
@@ -236,7 +236,7 @@ function poolAgeSentence(ageDays: number | null, retention: number | null): stri
 function buildReasons(ctx: AccountContext, ageDays: number | null, retention: number | null): string[] {
   return [
     '开顶层视频广告给这个池子补新人（新增花费，要你点头才开，系统不会自动开）。开之前两件事：① 要投的视频必须先加进这个池子的收人规则（读回原规则 → 追加 → 写回 → 读回核对，别覆盖原有的）；② 另建独立系列，版位锁 Facebook/Instagram，开后按版位回读，Audience Network 花费应接近 0。挑供血素材看内容对不对、新不新，不看历史完播率。正在跑的再营销组本身不动（一次只改一处）。如果这些广告组里有广告同时报了点击率下降，先补人、再判素材。未证实：改一个正在被在投广告组使用的受众的收人规则，会不会让那个组重新学习，还没验证过。',
-    `止损：14 天后（约 ${shiftDate(ctx.date, 14)}）回头看——池子有没有开始长（首要）、要投的视频是否已在收人规则里，再营销点击率只作辅助参考；池子还不长，就先查收人规则和供血广告的版位`,
+    `止损：14 天后（约 ${shiftDate(ctx.date, 14)}）回头看——供血广告有没有在花钱、版位是否只在 Facebook/Instagram、要投的视频是否已在收人规则里（首要）；池子人数有没有长只作辅助（旧成员到期会抵消新观看），再营销点击率同样只作辅助参考；花费或版位不对，就先查收人规则和供血广告的版位`,
     poolAgeSentence(ageDays, retention),
   ]
 }
@@ -312,8 +312,8 @@ function buildDiagnosis(
     clientVisible: false,
     checkBack: {
       after: `14 天后（约 ${shiftDate(ctx.date, 14)}）`,
-      condition: '池子有没有开始长；要投的视频是否已在收人规则里',
-      fallback: '池子还不长，先查收人规则里有没有这条视频、供血广告的版位是不是只在 Facebook/Instagram',
+      condition: '供血广告有没有在花钱、版位是否只在 Facebook/Instagram；要投的视频是否已在收人规则里；池子人数有没有长只作辅助',
+      fallback: '供血花费或版位不对，先查收人规则里有没有这条视频、供血广告的版位是不是只在 Facebook/Instagram；花费和版位都正常而人数持平，可能只是旧成员到期抵消了新观看，不算供血失败',
     },
   }
 }
