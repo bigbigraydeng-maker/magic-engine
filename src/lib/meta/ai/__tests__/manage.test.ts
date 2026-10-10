@@ -1,9 +1,13 @@
 import { beforeEach,describe,expect,it,vi } from 'vitest'
 
-const mocks=vi.hoisted(()=>({ from:vi.fn(),pilotState:vi.fn(),requirePilotActive:vi.fn(),activeConnectionForPrincipal:vi.fn(),reserveRead:vi.fn(),requireDiscoveryAuthorization:vi.fn(),requireReleaseAuthorization:vi.fn() }))
-vi.mock('@/lib/supabase',()=>({ supabaseAdmin:{ from:mocks.from } }))
+const mocks=vi.hoisted(()=>({ from:vi.fn(),rpc:vi.fn(),pilotState:vi.fn(),requirePilotActive:vi.fn(),activeConnectionForPrincipal:vi.fn(),reserveRead:vi.fn(),requireDiscoveryAuthorization:vi.fn(),requireReleaseAuthorization:vi.fn() }))
+vi.mock('@/lib/supabase',()=>({ supabaseAdmin:{ from:mocks.from,rpc:mocks.rpc } }))
 vi.mock('@/lib/auth/api-key-access',()=>({ generateApiKey:vi.fn() }))
-vi.mock('../entitlement',()=>({ pilotState:mocks.pilotState,requirePilotActive:mocks.requirePilotActive }))
+vi.mock('../entitlement',async(importOriginal)=>{
+  const actual=await importOriginal<typeof import('../entitlement')>()
+  return { pilotState:mocks.pilotState,requirePilotActive:mocks.requirePilotActive,
+    isSelfServeClient:actual.isSelfServeClient,publicConnectOpen:actual.publicConnectOpen }
+})
 vi.mock('../store',()=>({ activeConnectionForPrincipal:mocks.activeConnectionForPrincipal,reserveRead:mocks.reserveRead,
   requireDiscoveryAuthorization:mocks.requireDiscoveryAuthorization,requireReleaseAuthorization:mocks.requireReleaseAuthorization }))
 vi.mock('../analysis',()=>({ listAnalyses:vi.fn(async()=>[]) }))
@@ -33,9 +37,20 @@ beforeEach(()=>{
   mocks.requireDiscoveryAuthorization.mockReset().mockResolvedValue(undefined)
   mocks.requireReleaseAuthorization.mockReset().mockResolvedValue(undefined)
   mocks.reserveRead.mockResolvedValue(undefined)
-  mocks.requirePilotActive.mockResolvedValue({ revision:'ent-1',new_actions_allowed:true })
+  mocks.requirePilotActive.mockResolvedValue({ revision:'ent-1',new_actions_allowed:true,source:'ops' })
+  mocks.rpc.mockResolvedValue({ data:false,error:null })
   process.env.META_ADS_AI_GRAPH_VERSION='v21.0'
+  delete process.env.META_ADS_AI_PUBLIC_CONNECT
 })
+
+/** `clients` is read by isSelfServeClient() inside status(); every other table keeps its own mock. */
+function clientsQuery(source:string|null,error:unknown=null) {
+  const result={ data:source===null ? null : { source },error }
+  const chain:Record<string,unknown>={}
+  for(const method of ['select','eq']) chain[method]=vi.fn(()=>chain)
+  chain.maybeSingle=vi.fn(()=>Promise.resolve(result))
+  return chain
+}
 
 describe('撤销连接',()=>{
   it('零行更新不能被当成撤销成功',async()=>{
@@ -80,11 +95,14 @@ describe('连接状态',()=>{
       if(table==='meta_ads_read_grants') return selectQuery([{ id:'grant',ad_account_id:'act_1234567890',connection_id:'connection',revision:'new-revision',principal_id:'principal',revoked_at:'2026-09-20',entitlement_revision:'ent-1' }])
       if(table==='client_api_keys') return selectQuery([{ id:'key',key_prefix:'me_live_demo',expires_at:'2099-01-01',last_used_at:null,metadata:{ meta_ads_grant_id:'grant',meta_ads_grant_revision:'old-revision',meta_ads_principal_id:'principal',meta_ads_entitlement_revision:'ent-1' } }])
       if(table==='mcp_access_log') return selectQuery(null)
+      if(table==='clients') return clientsQuery('fde')
       throw new Error(`unexpected table ${table}`)
     })
     const result=await status('client','principal')
     expect(result.keys).toEqual([expect.objectContaining({ id:'key',access_active:false,last_successful_read:null })])
     expect(result.grants).toEqual([])
+    expect(result.self_serve).toBe(false)
+    expect(result.public_connect).toBe(false)
   })
 
   it('原 owner 断开后（owner 已清空）仍能看到自己的旧 key，但 access_active 为 false',async()=>{
@@ -94,6 +112,7 @@ describe('连接状态',()=>{
       if(table==='meta_ads_read_grants') return selectQuery([{ id:'grant',ad_account_id:'act_1234567890',connection_id:'connection',revision:'r1',principal_id:'principal',revoked_at:'2026-09-23',entitlement_revision:'ent-1' }])
       if(table==='client_api_keys') return selectQuery([{ id:'key',key_prefix:'me_live_demo',expires_at:'2099-01-01',last_used_at:null,metadata:{ meta_ads_grant_id:'grant',meta_ads_grant_revision:'r1',meta_ads_principal_id:'principal',meta_ads_entitlement_revision:'ent-1' } }])
       if(table==='mcp_access_log') return selectQuery(null)
+      if(table==='clients') return clientsQuery('fde')
       throw new Error(`unexpected table ${table}`)
     })
     const result=await status('client','principal')
@@ -107,6 +126,7 @@ describe('连接状态',()=>{
       if(table==='meta_ads_read_grants') return selectQuery([{ id:'grant',ad_account_id:'act_1234567890',connection_id:'connection',revision:'r2',principal_id:'new-principal',revoked_at:null,entitlement_revision:'ent-1' }])
       if(table==='client_api_keys') return selectQuery([])
       if(table==='mcp_access_log') return selectQuery(null)
+      if(table==='clients') return clientsQuery('fde')
       throw new Error(`unexpected table ${table}`)
     })
     const previousOwner=await status('client','principal')
@@ -123,9 +143,39 @@ describe('连接状态',()=>{
       if(table==='platform_oauth_connections') return selectQuery([{ id:'connection',status:'active',token_expiry:'2099-01-01',authorizing_principal_id:'principal',entitlement_revision:'ent-1' }])
       if(table==='meta_ads_read_grants') return selectQuery([{ id:'grant',ad_account_id:'act_1234567890',connection_id:'connection',revision:'r1',principal_id:'principal',revoked_at:null,entitlement_revision:'ent-1' }])
       if(table==='client_api_keys') return selectQuery([{ id:'key',key_prefix:'me_live_demo',expires_at:'2099-01-01',last_used_at:null,metadata:{ meta_ads_grant_id:'grant',meta_ads_grant_revision:'r1',meta_ads_principal_id:'other',meta_ads_entitlement_revision:'ent-1' } }])
+      if(table==='clients') return clientsQuery('fde')
       throw new Error(`unexpected table ${table}`)
     })
     expect((await status('client','principal')).keys).toEqual([])
+  })
+
+  it('默认返回 self_serve:false 与 public_connect:false',async()=>{
+    mocks.pilotState.mockResolvedValue({ invited:true,new_actions_allowed:true,reason:'ready',revision:'ent-1',source:'ops' })
+    mocks.from.mockImplementation((table:string)=>{
+      if(table==='platform_oauth_connections') return selectQuery([])
+      if(table==='meta_ads_read_grants') return selectQuery([])
+      if(table==='client_api_keys') return selectQuery([])
+      if(table==='clients') return clientsQuery('fde')
+      throw new Error(`unexpected table ${table}`)
+    })
+    const result=await status('client','principal')
+    expect(result.self_serve).toBe(false)
+    expect(result.public_connect).toBe(false)
+  })
+
+  it('自助客户返回 self_serve:true，且 META_ADS_AI_PUBLIC_CONNECT=true 时 public_connect:true',async()=>{
+    process.env.META_ADS_AI_PUBLIC_CONNECT='true'
+    mocks.pilotState.mockResolvedValue({ invited:true,new_actions_allowed:true,reason:'ready',revision:'ent-1',source:'self_serve' })
+    mocks.from.mockImplementation((table:string)=>{
+      if(table==='platform_oauth_connections') return selectQuery([])
+      if(table==='meta_ads_read_grants') return selectQuery([])
+      if(table==='client_api_keys') return selectQuery([])
+      if(table==='clients') return clientsQuery('self_serve')
+      throw new Error(`unexpected table ${table}`)
+    })
+    const result=await status('client','principal')
+    expect(result.self_serve).toBe(true)
+    expect(result.public_connect).toBe(true)
   })
 })
 
@@ -152,6 +202,15 @@ describe('换人接手绑定',()=>{
     expect(readChain.eq).toHaveBeenCalledWith('connection_id','connection')
     expect(readChain.eq).toHaveBeenCalledWith('entitlement_revision','ent-1')
     expect(readChain.is).toHaveBeenCalledWith('revoked_at',null)
+  })
+
+  it('广告账户被拉黑时 bind 直接报 blocked，且不调用 Graph',async()=>{
+    mocks.rpc.mockResolvedValueOnce({ data:true,error:null })
+    const fetchMock=vi.fn()
+    vi.stubGlobal('fetch',fetchMock)
+    await expect(bind('client','principal','connection','act_1234567890')).rejects.toThrow('blocked')
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(mocks.from).not.toHaveBeenCalled()
   })
 
   it('唯一冲突但身份不匹配时报 account_unavailable，不把他人 grant 当自己的',async()=>{
@@ -207,6 +266,17 @@ describe('持久授权写入边界',()=>{
     }))
   })
 
+
+  it('自助客户不能签发外部 API key，报 not_available 且不写入凭据',async()=>{
+    mocks.from.mockImplementation((table:string)=>{
+      if(table==='meta_ads_read_grants') return selectQuery({ connection_id:'connection',revision:'grant-r1',principal_id:'principal',entitlement_revision:'ent-1' })
+      throw new Error(`unexpected table ${table}`)
+    })
+    mocks.activeConnectionForPrincipal.mockResolvedValue({ token:'private',version:'v1',entitlementRevision:'ent-1' })
+    mocks.requirePilotActive.mockResolvedValueOnce({ revision:'ent-1',new_actions_allowed:true,source:'self_serve' })
+    await expect(issueKey('client','principal','grant','person@example.test')).rejects.toThrow('not_available')
+    expect(mocks.from).toHaveBeenCalledTimes(1)
+  })
 
   it('创建 key 前若邀请暂停则不写入凭据',async()=>{
     mocks.from.mockImplementation((table:string)=>{

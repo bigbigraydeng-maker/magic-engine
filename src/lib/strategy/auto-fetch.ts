@@ -21,6 +21,10 @@
  *                          mention share × 100 (A2.1-γ). Has a same-day freshness
  *                          gate — returns ok:false if the snapshot isn't today's.
  *
+ *   - seo_gsc_clicks_28d → SUM(gsc_page_daily.clicks) over the 28 days ending at
+ *                          the client's latest loaded day (all pages, not the
+ *                          top-50 snapshot). Fails closed on stale / partial data.
+ *
  * Not yet supported (data source missing or complex):
  *   - conversion_rate    → derived GA4 (events/sessions)
  *   - social_followers_growth → no data source
@@ -104,6 +108,8 @@ export async function autoFetchMetricValue(
       return fetchAdsOutcome(supabase, clientId, 'messaging_started', goalPeriod)
     case 'ai_visibility_score':
       return fetchAiVisibilityScore(supabase, clientId)
+    case 'seo_gsc_clicks_28d':
+      return fetchSeoGscClicks28d(supabase, clientId)
     default:
       return { ok: false, reason: `metric '${metricKey}' does not have an auto-fetch source yet` }
   }
@@ -158,6 +164,99 @@ async function fetchOrganicTraffic(
     snapshot_date: data.period_end,
     label: `${organicSessions.toLocaleString()} organic sessions (${formatDate(data.period_start)} → ${formatDate(data.period_end)})`,
   }
+}
+
+// ── seo_gsc_clicks_28d ─────────────────────────────────────────────────────
+//
+// North-star SEO metric (playbook-seo-general §十): real Google clicks for the
+// whole site, summed from gsc_page_daily (every page, every day) — NOT the
+// top-50 gsc_performance_snapshots, which truncates the long tail.
+//
+// Window = the 28 days ending at the client's LATEST loaded day. GSC data lags
+// by days (observed 3–5), so anchoring on "today" would count empty trailing
+// days as zero. Fails closed (never returns a partial sum as a number):
+//   · no rows            → noData
+//   · latest day too old → unknown (the daily pull is broken, not "zero clicks")
+//   · < MIN days present → unknown (partial window)
+//   · row cap hit        → unknown (refuse to sum a truncated read)
+
+const GSC_WINDOW_DAYS = 28
+const GSC_MIN_DAYS_PRESENT = 26
+const GSC_MAX_STALENESS_DAYS = 10
+const GSC_PAGE_SIZE = 1000
+const GSC_MAX_PAGES = 40
+
+function addDaysIso(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+async function fetchSeoGscClicks28d(
+  supabase: SupabaseClient,
+  clientId: string,
+  now: Date = new Date(),
+): Promise<AutoFetchResult> {
+  const { data: latest, error: latestErr } = await supabase
+    .from('gsc_page_daily')
+    .select('day')
+    .eq('client_id', clientId)
+    .order('day', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ day: string }>()
+
+  if (latestErr) {
+    return { ok: false, reason: `gsc_page_daily query failed: ${latestErr.message}`, unknown: true }
+  }
+  if (!latest) {
+    return { ok: false, reason: 'No gsc_page_daily rows yet — GSC daily pull has not loaded this client', unknown: true, noData: true }
+  }
+
+  const endDay = latest.day
+  const staleDays = Math.floor((now.getTime() - Date.parse(`${endDay}T00:00:00Z`)) / 86_400_000)
+  if (staleDays > GSC_MAX_STALENESS_DAYS) {
+    return { ok: false, reason: `gsc_page_daily latest day ${endDay} is ${staleDays} days old — daily pull looks broken`, unknown: true }
+  }
+  const startDay = addDaysIso(endDay, -(GSC_WINDOW_DAYS - 1))
+
+  let total = 0
+  const daysPresent = new Set<string>()
+  for (let page = 0; page < GSC_MAX_PAGES; page += 1) {
+    const { data, error } = await supabase
+      .from('gsc_page_daily')
+      .select('day, clicks')
+      .eq('client_id', clientId)
+      .gte('day', startDay)
+      .lte('day', endDay)
+      .order('day', { ascending: true })
+      .order('page_key', { ascending: true })
+      .range(page * GSC_PAGE_SIZE, (page + 1) * GSC_PAGE_SIZE - 1)
+    if (error) {
+      return { ok: false, reason: `gsc_page_daily read failed: ${error.message}`, unknown: true }
+    }
+    const rows = (data ?? []) as Array<{ day: string; clicks: number | null }>
+    for (const row of rows) {
+      total += typeof row.clicks === 'number' ? row.clicks : 0
+      daysPresent.add(row.day)
+    }
+    if (rows.length < GSC_PAGE_SIZE) {
+      if (daysPresent.size < GSC_MIN_DAYS_PRESENT) {
+        return {
+          ok: false,
+          reason: `gsc_page_daily has only ${daysPresent.size}/${GSC_WINDOW_DAYS} days in ${startDay} → ${endDay} — refusing a partial sum`,
+          unknown: true,
+        }
+      }
+      return {
+        ok: true,
+        value: total,
+        source: 'auto.gsc_clicks_28d',
+        snapshot_date: endDay,
+        label: `${total.toLocaleString()} Google clicks (${formatDate(startDay)} → ${formatDate(endDay)}, ${daysPresent.size} days)`,
+      }
+    }
+  }
+  return { ok: false, reason: `gsc_page_daily read hit the ${GSC_MAX_PAGES * GSC_PAGE_SIZE}-row cap — refusing to sum a truncated read`, unknown: true }
 }
 
 // ── brand_search_volume ────────────────────────────────────────────────────

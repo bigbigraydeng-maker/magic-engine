@@ -35,10 +35,31 @@ import {
   type CircuitBreakerRule,
 } from './ai-auto-review-circuit-breaker'
 import { sendApprovedOutcome, type SendDeps } from './writeback-service'
+import type { SourceKind } from './intake'
 import { approvalCutoffIso, eventAgeMs, isTooLateToApprove, DAY_MS, META_EVENT_WINDOW_DAYS } from './event-window'
 
+/**
+ * AI 自动批准**只认白名单来源**——新来源默认不可，必须在这里显式加上才会被自动批准。
+ *
+ * 为什么是白名单不是黑名单：「邮箱付款识别」（`inbox_extract`）写进来的人工车道记录
+ * （转发 / 收件人对不上 / 类型存疑）本来就是规则判不准、要留给人看的；AI 只看姓名、
+ * 金额、天数，会把它们放行并直接外发，等于人工闸被绕开（设计稿 §5，子牙 2026-10-04 复审）。
+ * 该来源里「证据齐全」的那部分由 `payment-email-detect-run` 自己的确定性规则批准，不走 AI。
+ */
+export const AI_AUTO_REVIEWABLE_SOURCE_KINDS: readonly SourceKind[] = [
+  'manual_seed',
+  'web_form',
+  'meta_lead_form',
+  'api',
+  'crm_hubspot',
+  'crm_sheet_sync',
+  'messenger_conversation',
+  'crm_stage_manual',
+]
+
 /** 一次批处理最多处理这么多条——限制单次运行的最坏影响范围，跟熔断是两道独立的闸。 */
-export const MAX_BATCH_SIZE = 50
+// 与 BATCH_HARD_STOP_COUNT 同步放到 60：流水线的审核块数 = ceil(MAX_BATCH_SIZE / 块大小)，批量上限不跟着放，硬顶放到 60 也永远摸不到。
+export const MAX_BATCH_SIZE = 60
 /** AI 判过几次还是 uncertain 就不再自动重判，等人来看（复用今日待办既有的 pending_review 展示）。 */
 export const MAX_UNCERTAIN_ATTEMPTS = 3
 /** 判过 uncertain 之后，多久才允许下一次批处理再判一次——避免几分钟内被连续两次批处理重复判断。 */
@@ -50,7 +71,8 @@ const UNCERTAIN_RETRY_COOLDOWN_MS = 6 * 60 * 60 * 1000
  * 有自己的止损，不能只靠下一轮的熔断检查才发现）。导出常量方便测试直接驱动到位，
  * 不需要在测试里手写魔法数字或者铺几十条假记录。
  */
-export const BATCH_HARD_STOP_COUNT = 20
+// PM 2026-10-04 拍板由 20 调到 60：CTS 合格线索被刹车暂停 8 天后积压 50+ 条，20 的上限会让积压每天只放出一小部分、剩下的过 7 天作废（流失的是还没被告诉广告平台的真实咨询）。
+export const BATCH_HARD_STOP_COUNT = 60
 export const BATCH_HARD_STOP_AMOUNT_MINOR = 30_000_00
 
 /**
@@ -181,6 +203,7 @@ export async function runAiAutoReviewForClient(
     )
     .eq('client_id', clientId)
     .eq('review_status', 'pending_review')
+    .in('source_kind', [...AI_AUTO_REVIEWABLE_SOURCE_KINDS])
     .is('redacted_at', null)
     .lt('ai_review_attempts', MAX_UNCERTAIN_ATTEMPTS)
     .or(`ai_last_reviewed_at.is.null,ai_last_reviewed_at.lt.${cooldownCutoff}`)

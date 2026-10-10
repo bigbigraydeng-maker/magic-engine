@@ -27,7 +27,7 @@
 **服务构成**（2026-08-12 实读）：1 个 web service + **47 个 Render Cron Job** + 12 个 GitHub Actions workflow（其中 5 个带 `schedule:`）。
 > 旧版这里写「28 个 Render Cron Job」，与 §4.1 表格自己的数（41）都对不上，两处都已更正。
 
-**`main` 的分支保护（2026-08-12 实读，别再说「开不了」）**：ruleset **`Protect main`（id 20550157）enforcement=active** —— 禁删 · 禁 non-fast-forward · **只许 merge commit**（不许 squash / rebase）· **所有复审线程必须标记已解决** · 必过状态检查 `ai-orchestrator-tests`；approving review 数要求为 0。
+**`main` 的分支保护**（ruleset 基本信息 2026-08-12 实读；必过检查清单已按 [`.github/merge-authorization.md`](../.github/merge-authorization.md) 于 2026-09-27 同步，别再说只有一道）：ruleset **`Protect main`（id 20550157）enforcement=active** —— 禁删 · 禁 non-fast-forward · **只许 merge commit**（不许 squash / rebase）· **所有复审线程必须标记已解决** · 必过状态检查共七道：`ai-orchestrator-tests` · `Ledger entries valid` · `Code change has ledger entry` · `Ledger refs exist` · `ops-review-loop-tests` · `Kernel architecture test`（2026-09-27 新增）· `Application build`（2026-09-27 新增，两道检查的可信度边界见 merge-authorization.md「已知缺口」）；approving review 数要求为 0；没有 bypass actor。另有独立规则集 `Risk gate`（只含必过检查 `Risk gate`，bypass actor = Repository admin）。
 另有两条同名旧 ruleset（`protect-main` / `protect-main Magic Engine`）处于 **disabled**，别被它们误导。
 
 ## 2. 代码规模
@@ -102,14 +102,14 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 | blog-stuck-generating-sweeper | `*/15 * * * *` | `/api/cron/blog-stuck-generating` |
 | factory-publish-sweeper | `*/15 * * * *` | `/api/cron/factory-publish-sweeper` |
 | prospecting-sweep | `*/30 * * * *` | `/api/cron/prospecting-sweep` |
-| team-memory-sweeper | `*/30 * * * *` | `/api/cron/team-memory-sweeper` |
+| ~~team-memory-sweeper~~ | `*/30 * * * *` | `/api/cron/team-memory-sweeper` —— **2026-10-07 已暂停**（没人读的空跑，见 docs/audits/2026-10-07-cron-data-readers-audit.md；render.yaml 已注释，恢复条件见其注释） |
 | social-comment-autoreply | `*/30 * * * *` | `/api/cron/social-comment-autoreply` |
 | messenger-hourly | `10 * * * *` | `/api/cron/messenger-sync-hourly` |
 | meta-leads-hourly | `25 * * * *` | `/api/cron/meta-leads-sync` |
 | ~~mailbox-sync-hourly~~ | 跟 `messenger-hourly` 一起，`10 * * * *` | **不再是独立服务**，2026-08-03 并入 `messenger-hourly`：每小时第 10 分钟跑完私信同步后，同一次请求里接着把已连的公司邮箱也同步一遍（见 `/api/cron/messenger-sync-hourly` 路由文件头注释、`render.yaml` 同位置注释）。邮箱同步是活的，不是没人跑；独立路由 `/api/cron/mailbox-sync` 保留只作手动补触发用。目前接了这条邮箱管道的只有 CTS Tours NZ 一个客户（`platform_oauth_connections` 表 `provider='microsoft_mail'`，2026-08-02 上线） |
 | viral-discovery-weekly | `0 0 * * *` | `/api/cron/viral-discovery-weekly` |
 | site-audit-cron | `0 2 * * *` | `/api/cron/site-audit-jobs` |
-| industry-ai-visibility-daily | `30 2 * * *` | `/api/cron/ai-visibility-weekly` |
+| industry-ai-visibility-daily | `30 16 * * 1` | `/api/cron/ai-visibility-weekly` —— **2026-10-07 由每天降为每周一**（审计同上） |
 | goal-current-value-refresh | `0 3 * * *` | `/api/cron/goal-current-value-refresh` |
 | google-data-pullback-daily | `0 3 * * *` | `/api/cron/google-data-pullback-daily` |
 | social-engagement-pullback | `0 4 * * *` | `/api/cron/social-engagement-pullback` |
@@ -127,12 +127,12 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 | site-audit-weekly | `0 1 * * 0` | `/api/cron/site-audit-weekly` |
 | weekly-seo-report | `30 18 * * 0` | `/api/cron/weekly-seo-report` |
 | ai-tracker-weekly | `0 1 * * 1` | `/api/cron/ai-tracker-weekly` |
-| job-boards-weekly | `0 2 * * 1` | `/api/cron/job-boards-weekly` |
+| ~~job-boards-weekly~~ | `0 2 * * 1` | `/api/cron/job-boards-weekly` —— **2026-10-07 已暂停**（没人读的空跑，见 docs/audits/2026-10-07-cron-data-readers-audit.md；render.yaml 已注释，恢复条件见其注释） |
 | keyword-snapshots-weekly | `0 2 * * 1` | `/api/cron/keyword-snapshots-weekly` |
 | zhuge-weekly-recalculate | `0 3 * * 1` | `/api/cron/zhuge-recalculate` |
 | reputation-snapshots-weekly | `30 3 * * 1` | `/api/cron/reputation-snapshots-weekly` |
 | oztop-seo-optimizer | `0 5 * * 1` | `/api/cron/oztop-seo-optimizer?max=8` |
-| ~~cts-seo-optimizer~~ | ~~`30 5 * * 1`~~ | **已退役 2026-09-20**（PR #1812 从 render.yaml 删掉；路由代码留着备回滚但不再被调度）。由 Inngest 版「SEO 标题周循环 v1」接替，见 §4.3 `seo-meta-cycle-trigger` 行 |
+| ~~cts-seo-optimizer~~ | ~~`30 5 * * 1`~~ | **已退役 2026-09-20**（PR #1812 从 render.yaml 删掉；路由代码已在 2026-09-29（PR #2200）改成被调用就返回 410 并记失败，不再是回滚入口；Render 后台那条旧定时服务 2026-10-05 核查为「手动暂停」）。由 Inngest 版「SEO 标题周循环 v1」接替，见 §4.3 `seo-meta-cycle-trigger` 行 |
 | agent-learning-rollup | `0 7 * * 1` | `/api/cron/agent-learning-rollup` |
 | ~~factory-stock-refill~~ | ~~`0 19 * * 1`~~ | **已暂停 2026-09-08**（PM 停抓图：抓来的图无人消费，白花 Apify 钱；render.yaml/registry 已注释） |
 | blog-weekly | `0 3 * * 2` | `/api/cron/blog-weekly` |
@@ -143,7 +143,7 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 |---|---|---|
 | cms-connection-retest | `10 6 * * *` | `/api/cron/cms-connection-retest` |
 | kpi-backfill | `20 6 * * *` | `/api/cron/kpi-backfill` |
-| execution-auto-run | `30 9 * * *` | `/api/cron/execution-auto-run?dry_run=1` ← **仍挂着空跑参数，只选不做** |
+| ~~execution-auto-run~~ | `30 9 * * *` | `/api/cron/execution-auto-run?dry_run=1` ← **仍挂着空跑参数，只选不做** —— **2026-10-07 已暂停**（没人读的空跑，见 docs/audits/2026-10-07-cron-data-readers-audit.md；render.yaml 已注释，恢复条件见其注释） |
 | ad-readback-sweep-daily | `40 20 * * *` | `/api/cron/ad-readback-sweep` |
 | benchmark-accumulator | `40 7 * * 1` | `/api/cron/benchmark-accumulator` |
 | diagnostic-weekly | `0 8 * * 1` | `/api/cron/diagnostic-weekly` |
@@ -155,7 +155,7 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 |---|---|---|
 | `factory-sweepers.yml` | `*/5 * * * *` | `/api/cron/factory-worker-sweeper` |
 | `goals-expiry-check.yml` | `30 3 * * *` | `/api/cron/goals-expiry-check` |
-| `baseline-domains-monthly.yml` | `0 3 1 * *` | `/api/cron/baseline-domains-monthly` |
+| `baseline-domains-monthly.yml` | `0 3 1 * *` | `/api/cron/baseline-domains-monthly` —— **2026-10-07 已去掉定时**，仅保留手工触发（Render 后台手工 cron 每天调同一接口） |
 | `winner-reel-sync-daily.yml` | **仅 `workflow_dispatch`** | 定时已迁到 Render（见 DECISIONS 2026-07-12） |
 
 ### 4.2b 本地 Claude scheduled task（不在 render.yaml / GitHub Actions 里，registry.ts 登记为 `scheduler: 'external'`）

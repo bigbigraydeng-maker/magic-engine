@@ -15,16 +15,17 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { AUTO_TAG_ACTOR } from '@/lib/crm/qualified-buyer'
+import { describeStageActor, stageReasonForDisplay } from '@/lib/crm/actors'
 
 /**
  * 「谁改的」的显示名。系统自动打标写的是一个英文标记（审计要机器可读），
  * 中介看到的必须是人话 —— 而且必须看得出这一档不是同事标的。
  */
-function changedByLabel(raw: string): string {
-  if (raw === AUTO_TAG_ACTOR) return '系统自动'
-  return raw.split('@')[0]
-}
+/**
+ * 原来这里自己实现了一份翻译，只认 `AUTO_TAG_ACTOR`，其余一律 `raw.split('@')[0]`
+ * —— 于是 `ai:conversation-read`（生产上 971 次，占了 96%）被**原样丢给销售看**。
+ * 翻译现在只留一份，在 `lib/crm/actors.ts`，两个时间线渲染器共用。
+ */
 
 export interface TimelineEntry {
   kind: 'touch' | 'stage' | 'message'
@@ -68,7 +69,34 @@ interface Payload {
   contact: { name: string; phone: string | null; email: string | null; stageLabel: string | null }
   timeline: TimelineEntry[]
   omittedMessages?: number
+  /** AI 摘要卡：意向等级 + 一句话 + 下一步。没有就不画。 */
+  brief?: { intentLevel: string; summary: string; nextAction: string | null } | null
   error?: string
+}
+
+const INTENT_BADGE: Record<string, { label: string; cls: string }> = {
+  high: { label: '高意向', cls: 'bg-[#C2453A] text-white' },
+  medium: { label: '中意向', cls: 'bg-[#E0A53A] text-white' },
+  low: { label: '低意向', cls: 'bg-me-charcoal/15 text-me-charcoal/70' },
+}
+
+function BriefCard({ brief }: { brief: NonNullable<Payload['brief']> }) {
+  const badge = INTENT_BADGE[brief.intentLevel]
+  return (
+    <div data-testid="timeline-brief" className="rounded-xl border border-me-charcoal/10 bg-white px-3 py-2">
+      <div className="flex items-center gap-2">
+        {badge && <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${badge.cls}`}>{badge.label}</span>}
+        <span className="text-[10px] font-bold text-me-charcoal/40">AI 摘要</span>
+      </div>
+      <p className="mt-1 text-[13px] leading-relaxed text-me-charcoal/85">{brief.summary}</p>
+      {brief.nextAction && (
+        <p className="mt-1 text-[12px] text-me-charcoal/70">
+          <span className="font-bold">下一步：</span>
+          {brief.nextAction}
+        </p>
+      )}
+    </div>
+  )
 }
 
 /** 渠道 → 一眼能认的图标。认不出的新渠道给中性圆点，绝不空白。 */
@@ -258,8 +286,16 @@ function StageRow({ e }: { e: TimelineEntry }) {
       <span>🔀</span>
       <span>
         {e.fromLabel ?? '还没标'} → <span className="font-bold text-me-charcoal/70">{e.toLabel}</span>
-        {e.changedBy ? ` · ${changedByLabel(e.changedBy)}` : ''} · {when(e.at)}
+        {` · ${describeStageActor(e.changedBy)}`} · {when(e.at)}
       </span>
+      {/*
+        凭什么判的 —— 原来这一行把 note 整个丢掉了，而 AI 每一次判断都写了理由
+        和客人原话（生产 971/971）。看不到凭据，销售就不会信这个判断。
+        真人改的那 12 条没有 note，这里自然不显示。
+      */}
+      {stageReasonForDisplay(e.note) && (
+        <span className="text-me-charcoal/40">· {stageReasonForDisplay(e.note)}</span>
+      )}
     </div>
   )
 }
@@ -482,6 +518,7 @@ export function ContactTimeline({
 
   return (
     <div className="space-y-2.5">
+      {data.brief && <BriefCard brief={data.brief} />}
       {/*
         🔴 来源这一行必须在滚动区**外面**（Codex 复审 PR #1038，2026-08-17）。
         它原先是滚动容器的第一个子元素，而下面那个 effect 会把容器直接滚到底 ——

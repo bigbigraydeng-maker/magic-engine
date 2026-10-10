@@ -163,9 +163,11 @@ describe('几条路线写同一张表时的待办', () => {
       items,
       NOW,
     )
-    const failed = items.filter((i) => i.kind === 'lead_sheet_sync_failed')
+    // 403 = 授权不够，归「要人点一次」那一种（今日待办按 kind 分车道）
+    const failed = items.filter((i) => i.kind === 'lead_sheet_reauth_needed')
     expect(failed).toHaveLength(1)
     expect(failed[0].how).toContain('重新授权')
+    expect(items.some((i) => i.kind === 'lead_sheet_sync_failed')).toBe(false)
   })
 
   it('同一张表上两条路线报的错不一样 → 各说各的，不能合并掉', async () => {
@@ -180,7 +182,8 @@ describe('几条路线写同一张表时的待办', () => {
       items,
       NOW,
     )
-    expect(items.filter((i) => i.kind === 'lead_sheet_sync_failed')).toHaveLength(2)
+    const failedKinds = ['lead_sheet_sync_failed', 'lead_sheet_reauth_needed']
+    expect(items.filter((i) => failedKinds.includes(i.kind))).toHaveLength(2)
   })
 
   it('跳过的线索按表加总、编号合在一起 —— 不是两条各报各的半截数', async () => {
@@ -247,7 +250,8 @@ describe('几条路线写同一张表时的待办', () => {
       items,
       NOW,
     )
-    expect(items.filter((i) => i.kind === 'lead_sheet_sync_failed')).toHaveLength(2)
+    const failedKinds = ['lead_sheet_sync_failed', 'lead_sheet_reauth_needed']
+    expect(items.filter((i) => failedKinds.includes(i.kind))).toHaveLength(2)
   })
 })
 
@@ -365,6 +369,6 @@ describe('算出来但以前没人读的两个数字', () => {
     expect(unreliable[0].what).toContain('boom')
     // 不能被当成写表失败下发 —— 那句话会误报「这轮没能写进 Google 表格」，
     // 而实际上新线索已经写进去了。
-    expect(items.filter((i) => i.kind === 'lead_sheet_sync_failed')).toHaveLength(0)
+    expect(items.filter((i) => i.kind === 'lead_sheet_sync_failed' || i.kind === 'lead_sheet_reauth_needed')).toHaveLength(0)
   })
 })

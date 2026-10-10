@@ -1,6 +1,18 @@
-# 广告 WP3 · Impact loop 接线 设计稿 v2.1
+# 广告 WP3 · Impact loop 接线 设计稿 v2.5
 
-状态：**draft**，等 PM 拍板（`认`）后才进入实施。
+状态：**accepted**，PM 2026-09-27 经小秘书窗口（`local_2bc4fba6-9a3f-426e-ac87-11458f9591d3`）口头认。原话「按新版重做」，同时等于对本设计稿的正式认可。作为本轮 3.1b 重做（分支 `feat/ads-wp3-1b-v2`）的权威实施依据；上一轮 PR #2087（分支 `feat/ads-wp3-1b-circuit-breaker`）照总纲 spec §3 G11 实施，跟本文件不一致，作废。
+v2.5 · 2026-09-27 · **§6.4 解除接口契约里那条架构测试判据本身写错了，就地修正**（规则缺陷，不是实现偏离）。
+原文要求「写 `ads_circuit_events` 且 `kind='release'` 的路由文件**必命中 `guardGlobalAdmin`**」——把判据钉在一个**函数名**上。但同一条契约的上一行又要求 `actor` 从 `requireGlobalAdmin` 的 email 取。
+查 `src/lib/auth/require-admin.ts`：`guardGlobalAdmin()` 的实现就是 `requireGlobalAdmin()` 再把失败包成 `NextResponse`，判据完全相同。所以按原文写，这条路由要么两个都调（**查会话两遍**，第二遍纯属为了让 grep 命中），要么就违反自己的架构测试。
+**修正见 §6.4 就地补注**：架构测试判据改成「必命中 `guardGlobalAdmin` **或** `requireGlobalAdmin`」，理由写在测试里。这跟 v2.3 那次是同一类错：**把「必须满足某个判据」写成了「必须出现某个字面量」**，而字面量可以在判据成立时缺席、也可以在判据不成立时出现。
+
+v2.4 · 2026-09-27 · **§6.3 第 5 条漏定义了一个状态，而它已经真实发生过一次、影响全部 6 个客户。**
+统筹查生产库：`ads_growth_states` 这张表活了 3 天、**缺了 1 天** —— 09-24 六个客户 `complete`、**09-25 整天零行**、09-26 六个客户 `complete`（两次都在 17:01 UTC 写，定时任务时间稳定）。
+§6.3 第 5 条只定义了 `data_completeness` 的**值**（`complete` 放行 / `partial` 当轮冻结），🔴 **没定义「这一天根本没有行」**。这是第三个状态：不是「数据不全」，是「完全不知道数据齐不齐」。
+如果实现成「查不到行 → 不是 partial → 放行」，那么像 09-25 那样的日子，**系统会在完全没有完整性信号的情况下动手** —— 正是这道闸存在的意义所在。
+**修正见 §6.3 第 5 条就地补注**：按 §6.2 自己那条「读不到 / 解析失败 = 视为熔断中」的同一个 fail-closed 方向，「当天没有行」按 `partial` **同档**处理，但回执里**必须区分开**（`partial` → `reason: data_partial`；没有行 → `reason: growth_state_missing`）—— 「数据不全」和「根本没算过这一天」在下游长得一模一样，但**根因不同、处置不同**（前者等补拉，后者要查定时任务为什么没跑）。
+v2.3 · 2026-09-27 · **实测数据暴露 §6.9 第 2 条本身有缺陷，就地修正**（不是实现偏离，是规则缺陷）。统筹查生产库发现 CTS 两个广告账户的日数据拉取节奏已分家 4 天（主账户 `act_2775766642787274` 最后一天 09-26、二号账户 `act_2202695063810470` 最后一天 09-22，而二号账户快照拍到 09-26、7 条系列里 3 条仍 `effective_status=ACTIVE` —— 不是"广告结束了"）。按 §6.9 第 2 条原文「按各账户各自**最后一个完整** `insight_date` 合计」，CTS 现在会把**主账户 09-26 的花费 + 二号账户 09-22 的花费**加起来、当成「客户今天花的钱」去比上限 —— 🔴 **两个不同日期的数字相加，然后叫它「当日」**。这条规则在各账户拉取节奏一致时才成立，一分家就错。**修正见 §6.9 第 2 条就地补注（已二次修正）**：第一版写「各账户日期差超过 1 天就一律作废」，但卫青随后查实 CTS 二号账户是 **PM 主动停投**（系列 ACTIVE 而广告组全 PAUSED），数据会**一直**落后 —— 照第一版 CTS 的 #2 就永远判不了，等于一个静默不生效的闸，**那本身是 fail-open**。第二版改成按「快照里有没有在投实体」分流：主动停投的按 0 计入并继续判；有在投实体却数据落后的才作废。 另外 §6.3 第 1 条的 `undeterminable` 要走一个 PM 看得见的通道（实测 CTS 二号账户最近 7 天只有 3 个非零花费天 < §6.3 要求的 ≥5，所以 #1 对它**判不了**；「没触发熔断」和「根本没判」长得一模一样，不说出来 PM 分不清）。
+v2.2 · 2026-09-27 · **PM 在统筹窗口（`local_0a9daab4-9fc9-4838-9781-45641d2c4bcf`）亲口决定「三个一起」** —— 三条绕过 Kernel 的旁路（`meta-ads/execute`、`meta-ads/boost-post`、`winner-reel-sync`）**本轮（3.1b）一起收编进 Kernel，不留到下一轮**。据此放宽两处：**§0 的「本 WP 不新增 capability、不新增 ActionKey」** 与 **§12 分批表 3.1b 那行的旁路范围**（原先只点名止损一条）。放宽后本轮新增 4 个 ActionKey（系列级暂停 / 系列级砍预算 / 推帖 / 建广告），层级门由统筹窗口以 Inline 模式过：**全部挂在既有广告 L1 支柱下，不新增能力线 / 支柱 / capability 域，不进 `platform-candidates`**。每个新 ActionKey 的**撤回处理函数必填**（K1，少一个 `authorize.ts` 直接拒）。🔴 **`winner-reel-sync` 的保护判据是「学习期」不是「预算」**，见 §12 那行的补注。
 v2.1 · 2026-09-25 · 第二轮三方复审 21 条（子牙 4 / 魏征 6 / 狄仁杰 4 + 建议）全部并入；复核：狄仁杰判 3.1a / 3.1b 均可进（§6.9 三条实施必带已入）；子牙闭合确认后剩 2 条必改 + 1 处矛盾 + R15/R20 一句话改法已由统筹窗口直接落稿（§7.2 `action_run_id` 列已存在改加部分唯一索引、韩信提交时即写 `flywheel_actions`、§5.3.2 过滤按 `deny_code` + 前缀）。
 v2 · 2026-09-25 · 三方设计复审后按章重写（子牙 6 / 魏征 19 / 狄仁杰 8）。
 Repository Fact Gate：`origin/main` = `6516c1eb` · fetched 2026-09-25。
@@ -17,7 +29,7 @@ Repository Fact Gate：`origin/main` = `6516c1eb` · fetched 2026-09-25。
 按 [ME2 Reuse & Platformization Principle](../roadmap/2026-08-19-me2-platformization-principle.md) 的五道 Build Gate，本 WP 落在 **Gate #4「跨域接线」**：
 
 - **不是**简单的支柱内改动。支柱内改动（例如给卫青加一条诊断判据）只碰 `src/lib/ads-strategy/`，不碰 Kernel 的授权路径，也不新增事件链。
-- **不是**新增能力线。本 WP 不新增 capability、不新增 ActionKey、不新增智能层；它把**已经存在的**零件（Kernel 信封、`isWithinEnvelope`、`ad_entity_snapshots`、`ad_daily_insights`、`flywheel_outcomes`、pm-todo 三件套、Inngest 编排范式）按 agent 挂上闹钟与署名。
+- **不是**新增能力线。~~本 WP 不新增 capability、不新增 ActionKey~~ （🔴 **已由 v2.2 放宽，见顶部版本行**：PM 2026-09-27 决定三条旁路本轮一起收编，因此本轮新增 4 个 ActionKey；但仍**不新增能力线、不新增支柱、不新增 capability 域** —— 4 个全挂在既有广告 L1 下，方向是把执行手**收进**闸门，不是把执行手包装成智能层）；不新增智能层；它把**已经存在的**零件（Kernel 信封、`isWithinEnvelope`、`ad_entity_snapshots`、`ad_daily_insights`、`flywheel_outcomes`、pm-todo 三件套、Inngest 编排范式）按 agent 挂上闹钟与署名。
 - **是**跨域接线：Kernel 的授权判据（信封）第一次被 Ads 域的**预检**复用；Ads 域的**熔断**第一次成为 Kernel 授权路径的上游闸；Ads 域的**学习回流**（`flywheel_outcomes` → `client_proven_patterns` / `client_failed_experiments`）第一次闭环。
 
 因此本 WP 的 tier-gate 判定：**platform-shared 机制复用，无新增 platform-shared 机制，无 industry-specific 内容，client-specific 只落在各客户的 `ad_strategy_configs` 行**。
@@ -468,7 +480,7 @@ END $do$;
 | 2 | **客户所有账户**当日花费合计 > `daily_budget_cap_cents` × 1.2 | `ad_daily_insights` + `ad_strategy_configs.daily_budget_cap_cents` | 对该客户**全部账户**各写一行 trip（cap 是客户级的，所以熔断也按客户级铺开）。原「单次变动 > 日上限」因快照 6h 一次 + adset 级比客户级永不触发，**删** |
 | 3 | 回滚失败（v1 唯一不可逆信号） | `action_run_steps`（`step_key = 'rollback'`） | `status = 'failed'` → `sticky = true`，只能 PM 在 admin 解除。**发现者 = 韩信**：每跑完一条 `runAction` 看 rollback step 结果，`failed` → 立即写 sticky trip（`reason = 'rollback_failed:<run_id>'`）并**中止本批剩余成员**（标 `deferred_kind = 'circuit_tripped'`） |
 | 4 | Jev 连续低分 | `prescription_evaluations` | 按 `cycle_id` 分组连续 3 轮（不是最近 3 行）`total_score < 60` → `sticky = true`；另加「连续 3 轮 ≥50% reversed/inconclusive」 |
-| 5 | 数据不全 | `ads_growth_states` | **不是熔断**，是当轮闸：`data_completeness = 'partial'` 时卫青本就不出机会、孔明无输入；当天补拉成功即自然解除。**不写 circuit event** |
+| 5 | 数据不全 | `ads_growth_states` | **不是熔断**，是当轮闸：`data_completeness = 'partial'` 时卫青本就不出机会、孔明无输入；当天补拉成功即自然解除。**不写 circuit event**<br><br>🔴 **v2.4 补注：这一行原来只定义了「值」，漏了第三个状态「当天根本没有行」。** 实测 `ads_growth_states` 09-25 整天零行、6 个客户全缺（表活 3 天缺 1 天），而这个状态没人定义过。<br>**判据（按 §6.2 那条「读不到 / 解析失败 = 视为熔断中」的同一个 fail-closed 方向推）**：当天没有 `ads_growth_states` 行 → **按 `partial` 同档处理**（当轮冻结、#1/#2 答 `unknown`、不写 circuit event、次日补上自然恢复）。<br>🔴 **但回执里必须跟真的 `partial` 区分开**：`partial` → `reason: 'data_partial'`；没有行 → `reason: 'growth_state_missing'`。理由同 `facts:circuit_query_failed` 那条 —— **「数据不全」和「根本没算过这一天」在下游长得一模一样，但根因不同、处置不同**：前者等补拉，后者要查定时任务为什么没跑。<br>**变异测试必带一条**：把「没有行」改成走 `complete` 分支 → 必红。 |
 
 **建议 N=3, 阈值=60**（第 4 条）。
 
@@ -481,7 +493,10 @@ END $do$;
 
 - 路由过 `guardGlobalAdmin`；
 - `actor` 从 `requireGlobalAdmin` 的 email 取，**不从 body 读**（body 里给 actor 等于让调用方自报身份）；
-- 架构测试：写 `ads_circuit_events` 且 `kind = 'release'` 的路由文件**必命中 `guardGlobalAdmin`**；
+- 架构测试：写 `ads_circuit_events` 且 `kind = 'release'` 的路由文件**必命中 `guardGlobalAdmin` 或 `requireGlobalAdmin`**（v2.5 就地修正）。
+  🔴 **为什么接受两个名字**：`guardGlobalAdmin()` 的实现（`require-admin.ts:65-71`）就是 `requireGlobalAdmin()` 再把失败包成 `NextResponse`，**判据一模一样**。
+  而本条契约的上一行要求 `actor` 从 email 取 —— 那只有 `requireGlobalAdmin` 能给（`guardGlobalAdmin` 只返回响应或 null）。
+  两个都调 = 查会话两遍，第二遍纯属为了让 grep 命中一个字面量。**判据是「过全局 admin 闸」，不是「出现某个函数名」。**
 - 架构测试：`src/lib/**` 里**不存在**任何写 release 的路径（因为非 sticky 是派生态，不需要写入者）；
 - v1 单 PM，翻开关与解 sticky 同一人可接受，写明。
 
@@ -512,7 +527,22 @@ END $do$;
 ### 6.9 实施必带（狄仁杰 v2.1 复核，3.1b PR 按此验收）
 
 1. **trip 幂等，防 sticky 按天堆积**：#3/#4 条件持续时每个 cycle 不得再写一条新 sticky trip。写入前查「同 `(client_id, ad_account_id, reason)` 且无对应 release」已存在则不重写；解除接口一次解除该账户**全部**未解 sticky（仍逐条写 release 行、各自 `trip_event_id`）。否则 PM 解一条仍熔断，会以为解除接口坏了。
-2. **#2 客户合计的「当日」口径**：按各账户各自**最后一个完整** `ad_daily_insights.insight_date`（账户时区）合计；账户币种不一致（`daily_budget_cap_cents` 是账户币种，migration `20260925000001:7`）→ 记 `undeterminable`，不熔不放。因 pullback 03:00 UTC 拉前一天，此条最早 T+1 触发，写进 pm-todo 文案。
+2. **#2 客户合计的「当日」口径**：按各账户各自**最后一个完整** `ad_daily_insights.insight_date`（账户时区）合计；
+   🔴 **v2.3 修正（实测暴露的规则缺陷，必须照修正走）**：上面这句只在**各账户拉取节奏一致**时成立。一旦某个账户的日数据落后，直接合计就是**把不同日期的花费加在一起再叫它「当日」**。实测 2026-09-27：CTS 主账户到 09-26、二号账户只到 09-22，差 4 天。**所以判据加一道前置，但必须分清「落后」的两种原因**（第二版修正 —— 第一版只写了「差超过 1 天就作废」，那会造成另一个洞，见下）：
+
+   对每个「最后一个完整 `insight_date`」落后的账户，查它的快照里**有没有任何在投实体**（`effective_status` 在 `DELIVERING_STATUSES` 里）：
+
+   | 落后的原因 | 判据 | 处置 |
+   |---|---|---|
+   | **主动停投**：快照里**没有**任何在投实体 | 我们**知道**它没在花钱 | 这个账户的花费按 **0** 计入合计，**继续判**，不作废 |
+   | **可能在花但看不见**：快照里**有**在投实体、数据却落后 | 我们**不知道**它花了多少 | 这一条记 `undeterminable`（不熔不放）+ 出待办说明「某账户有在投广告但数据落后 N 天，今天的合计花费判不了」 |
+
+   🔴 **为什么第一版「差超过 1 天就一律作废」是错的**：CTS 二号账户（`act_2202695063810470`，ThruPlay 官方号）2026-09-27 实测是 **PM 主动停投**（3 条系列 `ACTIVE` 但旗下广告组**全 `PAUSED`**，PM 已证实官方号停了只留个人号），它的数据会**一直**落后。按第一版规则，CTS 的熔断 #2 就**永远判不了** —— 一个静默不生效的上限闸，**这本身就是 fail-open**。
+
+   🔴 **恢复投放必须立刻被看到**：那 3 个 `PAUSED` 组一旦被人打开（实测 $12 + $12 + $34 = **$58/天**），账户立刻开始花钱。所以判据锚的是**快照里的当前在投状态**，不是「这个账户历史上有没有数据」 —— **不许因为「它之前一直没行」就把它从合计里长期剔除**。恢复投放的那一刻，它要么已有新数据（直接计入），要么有在投实体但数据还没跟上（→ `undeterminable`，fail closed）。两条路都不会被静默漏算。
+
+   **任何情况下都绝不把不同日期的花费相加。**理由跟同条的币种保险丝完全一样 —— **相加一次就是一个静默错误的上限闸**，而它今天错得很具体：二号账户 09-22 那天的花费会被当成今天的。
+账户币种不一致（`daily_budget_cap_cents` 是账户币种，migration `20260925000001:7`）→ 记 `undeterminable`，不熔不放。因 pullback 03:00 UTC 拉前一天，此条最早 T+1 触发，写进 pm-todo 文案。
 3. **`human:%` 落到表上**：`ads_circuit_events` 加 CHECK `(kind <> 'release' OR actor LIKE 'human:%')`——sticky「必须人解」由数据库保证，不只靠路由代码和 grep。§11.3 DDL 同步加这条。
 
 ## 7. §6 Check 段：回读比对 + flywheel_outcomes 落库
@@ -962,7 +992,7 @@ COMMENT ON COLUMN public.client_meta_ad_accounts.daily_budget_cap_cents IS
 | Sub-WP | 内容 | 风险级 | 依赖 |
 |---|---|---|---|
 | **WP3.1a 同步 worker + 架构测试 + 审计列 + receipts 表** | §4 全部 + §11.10 的 SQL 函数（含权限 / 守卫 / 黑词） | A | 无 |
-| **WP3.1b 熔断事件表 + resolver 挂载 + WP2 遗留两处 + admin 解除接口 + 关旁路** | §6 全部 + §5.2 的两条 WP2 遗留缺陷（`at` 未解构、`limit(4000)` 窗口）+ **resolver 生产挂载三件套**（§6.1，issue:1994）+ **收编止损旁路** `src/app/api/clients/[id]/ad-health/stop-loss/route.ts:48-50,124`（直调 `setAdSetStatus` / `setAdSetDailyBudget` 不经 Kernel，`requirePaidClientAccess` 即可点）→ 改为提交 Kernel `ads.pause_unit` / `ads.cut_unit_budget`（人点也走 Kernel、留回执），过渡期至少 `guardGlobalAdmin`；架构断言：`boundaries.ts` `PROVIDER_WRITE_MODULES` 加 `@/lib/meta/adsets`；`ads-strategy/` 与 `capabilities/` 之外禁 import `submitActionRun` / `recoverDeniedRun`；**账户级日上限**（§3.9：`client_meta_ad_accounts.daily_budget_cap_cents` 列 + envelope-facts 按账户取上限、多账户缺配置即 unavailable + PATCH 校验合计 ≤ 客户总闸 + 绑定面板 UI） | A | 依赖 `envelope-facts`，不依赖 3.1a |
+| **WP3.1b 熔断事件表 + resolver 挂载 + WP2 遗留两处 + admin 解除接口 + 关旁路** | §6 全部 + §5.2 的两条 WP2 遗留缺陷（`at` 未解构、`limit(4000)` 窗口）+ **resolver 生产挂载三件套**（§6.1，issue:1994）+ **收编四条旁路（v2.2 放宽，原先只有止损一条）**：① `src/app/api/clients/[id]/ad-health/stop-loss/route.ts:48-50,124`（直调 `setAdSetStatus` / `setAdSetDailyBudget` 不经 Kernel，`requirePaidClientAccess` 即可点）→ 改为提交 Kernel `ads.pause_unit` / `ads.cut_unit_budget`（人点也走 Kernel、留回执），过渡期至少 `guardGlobalAdmin`；② `src/app/api/clients/[id]/meta-ads/execute/route.ts`（人点，改系列状态/预算；卫青实证 9/21 七次里 +48%/+100% 两次走 Kernel 会被 20% 上限拒 → 绕闸是已发生事实）；③ `src/app/api/clients/[id]/meta-ads/boost-post/route.ts`（人点，花钱推帖）；④ **`winner-reel-sync`**（`render.yaml:341-347` 每天 15:00 UTC cron **无人值守**，`engine.ts:14-19` import `createAdFromPost` 真在 Meta 建广告；`@/lib/meta/ads-manager` 连 `PROVIDER_WRITE_GRANDFATHERED` 都没进）。🔴 **④ 的保护判据是「学习期」不是「预算」**：卫青回查它累计只花 $38.99、**没超支**，真问题是每次往**在投**广告组加广告会**重置该组 Meta 学习期**（最近 9/23）。手册四处记了这条（`playbook-ads-meta-general` :249 / :333 / :367 / :127-131），其中 NAL 实例：前 22 天每留资 $19.6 → 后 7 天 $138（**7 倍恶化**），花的钱正常、坏掉的是钱买到的结果 —— **任何预算上限都拦不住**。所以收编判据写死：`createAdFromPost` 目标**必须是新建的独立广告组**，往 `effective_status` 在投的既有组加广告**在 capability 层就拒**（不靠调用方自觉）；预算保护（不超账户日上限 / 熔断期间不建 / 建了可撤回）仍做，但**不能只做预算**。架构断言：`boundaries.ts` `PROVIDER_WRITE_MODULES` 加 `@/lib/meta/adsets`（实施时改为拆出的 `@/lib/meta/adset-writes` + `@/lib/meta/campaign-writes` + `@/lib/meta/ads-manager`，理由见实施方案 C1：`adsets.ts` 读写混在一起，整挂会误伤 7 个只读 importer，子牙已核过全文并接受）；`ads-strategy/` 与 `capabilities/` 之外禁 import `submitActionRun` / `recoverDeniedRun`；**账户级日上限**（§3.9：`client_meta_ad_accounts.daily_budget_cap_cents` 列 + envelope-facts 按账户取上限、多账户缺配置即 unavailable + PATCH 校验合计 ≤ 客户总闸 + 绑定面板 UI） | A | 依赖 `envelope-facts`，不依赖 3.1a |
 | **WP3.2 链条接线 + 韩信 + 孔明预检 + denied 恢复入批** | §2、§5、批次两张表、§K 的前三个拉取函数；**补查询**「按 client + `deny_code` + 晚于 `policy_version` 变更」列 denied run（`store.ts:858 listDeadLetterRuns` 只按 `needs_human`；`deny_code` 在 `authorization_decisions` 不在 `action_runs`，要 join）；新 Inngest 函数部署后**手动 Sync**（STATE.md:174、PITFALLS F10） | A | 依赖 3.1a / 3.1b |
 | **WP3.3 Check + Tune + Jev + 日报两段** | §7、§8、§9、韩信写 `flywheel_actions`（+ §11.2 的列）、ads 评估器（sibling + CHECK 扩展 + `OUTCOME_EVALUATOR` 登记 + `ads.` owner）、extractor 映射 + `pattern_type` CHECK 扩展 | A（两处 CHECK 扩展是 schema 改动，见 §8.2 / §11.9） | 依赖 3.2 |
 

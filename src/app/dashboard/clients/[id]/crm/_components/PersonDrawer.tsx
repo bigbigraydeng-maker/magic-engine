@@ -9,10 +9,13 @@
 
 import { useCallback, useState } from 'react'
 import { ComposeNote, type StageOption } from './ComposeNote'
+import { WhatsAppReply } from './WhatsAppReply'
 import { ContactTimeline, type TimelineSummary } from './ContactTimeline'
 import { MessengerReply } from './MessengerReply'
 import { EmailReply } from './EmailReply'
 import { DncBanner } from './DncBanner'
+import { MarkWonPanel } from './MarkWonPanel'
+import { ImportantMarkerEditor } from './ImportantMarkerEditor'
 import { drawerActions, nextStageChoices, type Channel } from '@/lib/crm/drawer-actions'
 import type { Segment } from '@/lib/crm/segments'
 
@@ -27,6 +30,14 @@ export interface DrawerRow {
   dueAt?: string | null
   /** 他现在在哪一批 —— 决定给哪几个按钮。 */
   segment?: Segment
+  /**
+   * 「要记住的事」（⭐ 重要标记）—— 员工手填的提醒 + 到期日。
+   *
+   * 2026-09-27 R1 加：这一格原来只长在「全部客人」那一页，抽屉这边没有，
+   * 于是同一个客人在两页上能做的事不一样。今日待办还有一条 `crm_important_due`
+   * 依赖它。取数侧见 `today/route.ts`。
+   */
+  important?: { note: string | null; dueAt: string | null } | null
   /** 他实际能被联系到的渠道 —— 决定按钮的措辞（没电话的人不给「没打通」）。 */
   suggestedChannel?: Channel
   /**
@@ -48,6 +59,24 @@ export interface DrawerRow {
   doNotContact?: boolean
 }
 
+/**
+ * New Asian Logistics —— 只有这一个客户把人标「已成交」时要先录金额并回传 Meta 广告。
+ * 同一个字面量在 `nal-mark-won/route.ts` 另有一份，是既有惯例（`ContactDetail.tsx` 那份已在
+ * 2026-09-28 CRM 重整 B2 随「全部客人」换用本组件一起删掉，不再有第三份）；按设计稿 R3
+ * 要统一改成读 `leads_config.crm.onWon` 配置、不认客户 id。
+ */
+const NAL_CLIENT_ID = '4ae76381-cd45-43bd-85cd-98cfd7604007'
+
+export interface DrawerNav {
+  /** 「客人在等你 · 第 12 位 / 共 217 位」这类文案，drawer-nav.ts 的 positionLabel 原样传入。 */
+  positionLabel: string
+  /** 上一位 / 下一位——调用方负责算下一步该做什么（留在原地换人 / 去问服务端要下一页 / 报到头了）。 */
+  onPrev: () => void
+  onNext: () => void
+  /** 正在拉下一页——按钮先禁掉，不许连点叠多次请求（跟 all/page.tsx 现有 sectionsLoading 同款防抖）。 */
+  busy: boolean
+}
+
 export function PersonDrawer({
   clientId,
   row,
@@ -55,6 +84,7 @@ export function PersonDrawer({
   viewerEmail,
   onClose,
   onSaved,
+  nav,
 }: {
   clientId: string
   row: DrawerRow
@@ -63,9 +93,17 @@ export function PersonDrawer({
   viewerEmail: string | null
   onClose: () => void
   onSaved: (msg: string, reload?: boolean) => void
+  /**
+   * 上一位 / 下一位——不传就不渲染这一行（今天要联系那页的看板式交互暂不需要）。
+   * 2026-09-28 CRM 重整 B2 给「全部客人」加：调用方（crm/all/page.tsx）负责用
+   * `lib/crm/drawer-nav.ts` 算出下一步该做什么，这里只管画按钮、转发点击。
+   */
+  nav?: DrawerNav
 }) {
   const [composing, setComposing] = useState(false)
   const [changingStage, setChangingStage] = useState(false)
+  /** NAL 专属：标「已成交」前先录金额。 */
+  const [markingWon, setMarkingWon] = useState(false)
   /** 阶段的「其他」展开没有 —— 默认只给下一步 + 一个出口。 */
   const [allStages, setAllStages] = useState(false)
   /** 一键动作正在写 —— 防双击记成两笔。 */
@@ -87,8 +125,18 @@ export function PersonDrawer({
       const res = await fetch(`/api/clients/${clientId}/crm/contacts/${row.contactId}/stage`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ toStage }),
+        // 🔴 expectedFromStage: row.stage —— 跟进团队一起翻同一份名单（PM 2026-09-27
+        // 确认），带上「我看到的是哪一档」，库里跟这个不一致就说明中间被别人先改过了，
+        // 不能盲写覆盖（见 lib/crm/advance-contact-stage.ts 头注）。
+        body: JSON.stringify({ toStage, expectedFromStage: row.stage }),
       })
+      if (res.status === 409) {
+        const json = (await res.json().catch(() => null)) as { actualStage?: string | null } | null
+        const actualLabel = stages.find((s) => s.stageKey === json?.actualStage)?.label ?? json?.actualStage ?? '未知'
+        // reload:true —— 得让父级重拉，不然这个抽屉还留着我们这边已经过时的那份数据。
+        onSaved(`这位客人的跟进阶段被别人改过了（现在是「${actualLabel}」），刷新后再改`, true)
+        return
+      }
       if (!res.ok) throw new Error()
       setTimelineKey((k) => k + 1)
       onSaved('✓ 改好了')
@@ -156,6 +204,30 @@ export function PersonDrawer({
             关闭
           </button>
         </header>
+
+        {nav && (
+          <div className="flex items-center gap-2 border-b border-me-charcoal/10 bg-white px-4 py-2">
+            <button
+              type="button"
+              onClick={nav.onPrev}
+              disabled={nav.busy}
+              className="rounded-lg border border-me-charcoal/15 px-2.5 py-1 text-xs font-bold text-me-charcoal hover:bg-me-ivory disabled:opacity-40"
+            >
+              ← 上一位
+            </button>
+            <span className="flex-1 truncate text-center text-[11px] font-semibold text-me-charcoal/45">
+              {nav.busy ? '正在拿下一位…' : nav.positionLabel}
+            </span>
+            <button
+              type="button"
+              onClick={nav.onNext}
+              disabled={nav.busy}
+              className="rounded-lg border border-me-charcoal/15 px-2.5 py-1 text-xs font-bold text-me-charcoal hover:bg-me-ivory disabled:opacity-40"
+            >
+              下一位 →
+            </button>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto px-4 py-3">
           {/*
@@ -238,6 +310,16 @@ export function PersonDrawer({
           </div>
 
           {/* 现在到哪一步了（点一下可改，改前二次确认） */}
+          {/* 「要记住的事」：打开就看得见，不用滚。跟「全部客人」那页同一个组件。 */}
+          <div className="mt-3">
+            <ImportantMarkerEditor
+              clientId={clientId}
+              row={{ contactId: row.contactId, important: row.important ?? null }}
+              // 不重拉整块看板 —— 抽屉还开着，脚下的列表跳动会让人失去位置（同 ComposeNote）。
+              onSaved={(msg) => onSaved(msg, false)}
+            />
+          </div>
+
           {stages.length > 0 && (
             <div className="mt-3">
               <button
@@ -257,7 +339,18 @@ export function PersonDrawer({
                   ).map((s) => (
                     <button
                       key={s.stageKey}
-                      onClick={() => void changeStage(s.stageKey, s.label)}
+                      onClick={() => {
+                        // 🔴 判据照抄「全部客人」那一页（ContactDetail），一个字没改：
+                        // 只有 NAL 把人标成「已成交」时要先录金额、再回传广告转化。
+                        // 两页必须说同一件事，否则销售在一页能标、另一页标不了。
+                        // 那个客户 id 按设计稿要在后续轮改成读配置，这一轮先保持一致。
+                        if (clientId === NAL_CLIENT_ID && s.marketingAction === 'won') {
+                          setChangingStage(false)
+                          setMarkingWon(true)
+                          return
+                        }
+                        void changeStage(s.stageKey, s.label)
+                      }}
                       className="rounded-full bg-white px-3 py-1.5 text-[13px] font-bold text-me-charcoal shadow-sm"
                     >
                       {s.label}
@@ -280,7 +373,22 @@ export function PersonDrawer({
               一个从没被联系过的人只有两种结果：打通了，或者没打通。
               其余控件在这一刻都是噪音，而噪音的代价是销售不用这一页。 */}
           <div className="mt-3">
-            {!composing ? (
+            {/*
+              🔴 `markingWon` 必须判在最前面。第一版把它写在 `!composing` 的 else 分支里，
+              于是只有「正在记一笔」时才可能出现 —— 而点「已成交」只设 markingWon、
+              不设 composing，所以那个面板永远不出现。是新加的测试抓到的。
+            */}
+            {markingWon ? (
+              <MarkWonPanel
+                contactId={row.contactId}
+                onCancel={() => setMarkingWon(false)}
+                onDone={(msg, reload) => {
+                  setMarkingWon(false)
+                  setTimelineKey((k) => k + 1)
+                  onSaved(msg, reload)
+                }}
+              />
+            ) : !composing ? (
               <div className="flex gap-2">
                 {actions.map((a) =>
                   a.kind === 'log' ? (
@@ -331,6 +439,22 @@ export function PersonDrawer({
             onSent={() => {
               setTimelineKey((k) => k + 1)
               onSaved('✓ 私信已发出', false)
+            }}
+          />
+
+          {/* WhatsApp 那条线（2026-09-28）。整个 WhatsApp 方案的前提是「客人在
+              WhatsApp 说话、顾问在 ME 里回」，而在这一块之前 ME 里根本没有能回
+              WhatsApp 的地方 —— 顾问只能用自己手机回，那条线系统完全看不见，
+              于是天天误报「这个客人没人跟进」。跟上下两块一样自判断：
+              没有 WhatsApp 会话就什么都不渲染。 */}
+          <WhatsAppReply
+            clientId={clientId}
+            contactId={row.contactId}
+            customerName={row.name}
+            viewerEmail={viewerEmail}
+            onSent={() => {
+              setTimelineKey((k) => k + 1)
+              onSaved('✓ WhatsApp 已发出', false)
             }}
           />
 

@@ -6,6 +6,15 @@ vi.mock('../fact-check', () => ({
   checkFactPreservation: (...args: unknown[]) => mockCheckFactPreservation(...args),
 }))
 
+const BASELINE_READING = {
+  status: 'ranked' as const, rankGroup: 8, url: 'https://example.com/foo', depth: 30,
+  fetchedAt: '2026-10-05T05:31:00.000Z', duplicateUrl: false, cost: 0.01,
+}
+const mockFetchRank = vi.fn(async (_input: unknown) => ({ ...BASELINE_READING }))
+vi.mock('../rank-check', () => ({
+  fetchTargetRank: (input: unknown) => mockFetchRank(input),
+}))
+
 const CONFIG: MetaCycleClientConfig = {
   clientId: 'client-1',
   domain: 'example.com',
@@ -49,6 +58,10 @@ interface InsertedRow {
   baseline_ctr: number | null
   baseline_position: number | null
   baseline_impressions: number | null
+  baseline_rank_group?: number | null
+  baseline_rank_status?: string
+  baseline_serp_depth?: number
+  baseline_serp_fetched_at?: string
 }
 
 function fakeSupabase(insertSpy: (row: InsertedRow) => void) {
@@ -244,6 +257,95 @@ describe('runStep4Applied — baseline_ctr reaches the seo_meta_log insert (fixe
     expect(result.proposals).toHaveLength(1)
     expect(result.proposals[0].newTitle).toBe('New Title')
     expect(applySpy).toHaveBeenCalledTimes(1) // only the preview call — dry run never calls apply again for real
+  })
+})
+
+// ── Rank-verification baseline (2026-10-04) ───────────────────────────────────
+// The T+14 page-CTR check was replaced by a target-keyword rank check. Its baseline can
+// only be recorded at apply time, so this is where it must reach seo_meta_log.
+
+describe('runStep4Applied — target-keyword rank baseline', () => {
+  it('records the baseline rank, status, depth and fetch time on the seo_meta_log insert, taken with the page\'s own keyword/domain/country', async () => {
+    const { runStep4Applied } = await import('../runner')
+    mockCheckFactPreservation.mockResolvedValue({ consistent: true, reason: 'ok' })
+    mockFetchRank.mockClear()
+    const captured: InsertedRow[] = []
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const supabase = fakeSupabase((row) => { captured.push(row) }) as any
+    const generateMeta = vi.fn().mockResolvedValue({ title: 'New Title', desc: 'New desc' })
+
+    const result = await runStep4Applied(supabase, fakeAdapter({ applied: true }), CONFIG, '2026-W41', [{ candidate: candidate(), evidence: EVIDENCE }], generateMeta, false)
+
+    expect(captured[0]).toMatchObject({ baseline_rank_group: 8, baseline_rank_status: 'ranked', baseline_serp_depth: 30, baseline_serp_fetched_at: '2026-10-05T05:31:00.000Z' })
+    expect(mockFetchRank).toHaveBeenCalledWith({ keyword: 'foo keyword', countryCode: 'nz', domain: 'example.com', targetUrl: 'https://example.com/foo' })
+    expect(result.proposals[0]).toMatchObject({ baselineRankStatus: 'ranked', baselineRankGroup: 8 })
+  })
+
+  it('a failed baseline read does not block the change — it is stored as fetch_failed with a NULL rank (never 0 / 101)', async () => {
+    const { runStep4Applied } = await import('../runner')
+    mockCheckFactPreservation.mockResolvedValue({ consistent: true, reason: 'ok' })
+    mockFetchRank.mockResolvedValueOnce({ ...BASELINE_READING, status: 'fetch_failed' as never, rankGroup: null as never, url: null as never })
+    const captured: InsertedRow[] = []
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const supabase = fakeSupabase((row) => { captured.push(row) }) as any
+    const generateMeta = vi.fn().mockResolvedValue({ title: 'New Title', desc: 'New desc' })
+
+    const result = await runStep4Applied(supabase, fakeAdapter({ applied: true }), CONFIG, '2026-W41', [{ candidate: candidate(), evidence: EVIDENCE }], generateMeta, false)
+
+    expect(result.applied).toHaveLength(1)
+    expect(captured[0].baseline_rank_status).toBe('fetch_failed')
+    expect(captured[0].baseline_rank_group).toBeNull()
+  })
+
+  it('spends nothing on a dry run, and nothing when the fact check already blocked the change', async () => {
+    const { runStep4Applied } = await import('../runner')
+    mockFetchRank.mockClear()
+    const generateMeta = vi.fn().mockResolvedValue({ title: 'New Title', desc: 'New desc' })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const supabase = fakeSupabase(() => undefined) as any
+
+    mockCheckFactPreservation.mockResolvedValue({ consistent: true, reason: 'ok' })
+    await runStep4Applied(supabase, fakeAdapter({ applied: false, skipReason: 'dry_run' }), CONFIG, '2026-W41', [{ candidate: candidate(), evidence: EVIDENCE }], generateMeta, true)
+    mockCheckFactPreservation.mockResolvedValue({ consistent: false, reason: 'contradiction' })
+    await runStep4Applied(supabase, fakeAdapter({ applied: true }), CONFIG, '2026-W41', [{ candidate: candidate(), evidence: EVIDENCE }], generateMeta, false)
+
+    expect(mockFetchRank).not.toHaveBeenCalled()
+  })
+
+  it('a change that went live but could not be logged is reported loudly, not as a clean apply (the cooldown and verification would silently lose it)', async () => {
+    const { runStep4Applied } = await import('../runner')
+    mockCheckFactPreservation.mockResolvedValue({ consistent: true, reason: 'ok' })
+    const supabase = {
+      from: () => ({ insert: async () => ({ error: { message: 'column "baseline_rank_status" does not exist' } }) }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any
+    const generateMeta = vi.fn().mockResolvedValue({ title: 'New Title', desc: 'New desc' })
+
+    const result = await runStep4Applied(supabase, fakeAdapter({ applied: true }), CONFIG, '2026-W41', [{ candidate: candidate(), evidence: EVIDENCE }], generateMeta, false)
+
+    expect(result.proposals[0].skipReason).toBe('applied_but_log_insert_failed')
+    expect(result.routedManual).toBe(1)
+  })
+})
+
+describe('runStep1CheckDue — legacy page-CTR check is OFF by default during the rank shadow period', () => {
+  const adapter = fakeAdapter({ applied: true })
+
+  it('does not even query seo_meta_log, writes no checked_at/outcome, and raises no Revert card', async () => {
+    const { runStep1CheckDue } = await import('../runner')
+    const supabase = { from: () => { throw new Error('step 1 must not touch the database while the legacy check is off') } }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await runStep1CheckDue(supabase as any, adapter, CONFIG, '2026-W41', false)
+    expect(result).toEqual({ checked: 0, improved: 0, flat: 0, insufficientData: 0, regressed: 0, routedToManual: 0 })
+  })
+
+  it('can still be switched on deliberately', async () => {
+    const { runStep1CheckDue } = await import('../runner')
+    const query = vi.fn()
+    const chain = { select: () => chain, eq: () => chain, is: () => chain, lte: () => chain, order: () => chain, limit: () => { query(); return Promise.resolve({ data: [], error: null }) } }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await runStep1CheckDue({ from: () => chain } as any, adapter, CONFIG, '2026-W41', false, new Date(), { legacyCtrCheck: true })
+    expect(query).toHaveBeenCalledTimes(1)
   })
 })
 
