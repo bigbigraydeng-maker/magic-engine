@@ -12,7 +12,7 @@ verify_how: 网站侧改动已于 L=2026-09-27T15:43:30Z 合并上线（chinatra
   `checked_at`/`outcome`/`observed_ctr`/`observed_impressions`确认为NULL。但`readPageMetrics`
   （src/lib/seo/post-publish-monitor-store.ts）读的是`gsc_performance_snapshots`里最近一条按
   `fetchGscSnapshot(...,28)`滚动28天生成的快照，`cloud-seo-meta-cycle-fanout`会在`optimised_at`
-  超14天（即2026-10-11那个周一）第一次自动选中这6行判——那天的28天窗口还有约一半落在L之前，会把
+  超14天（L+14是10-11周日，实际是2026-10-12那个周一）第一次自动选中这6行判——那天的28天窗口还有约一半落在L之前，会把
   improved/regressed判稀甚至判反，**这次自动判定必须当假结果丢弃**：把这6行的`checked_at`/
   `outcome`/`observed_ctr`/`observed_impressions`清回NULL，让下个周一重新被选中，如此往复，直到
   某次`checked_at`落在2026-10-25(L+28)或之后——这时滚动28天窗口才完整落在L之后——才把那次的
@@ -24,7 +24,7 @@ verify_how: 网站侧改动已于 L=2026-09-27T15:43:30Z 合并上线（chinatra
   `src/lib/ledger/walk.ts`不是终态，到期不转会被`classifyDone`判`done_unverified`反复追问)，
   `check_note`写"flat：改动安全无回归但无显著提升"。若发现L+14自动判定已误触发`regressed`人工待办
   （`buildManualAction`），要在待办里注明"基于污染快照、待L+28重新回看"，不能放着不管。
-done_on: 2026-09-27
+done_on: 2026-09-28
 done_ref: doc:docs/ledger/evidence/2026-09-28-cts-seo-title-dedup-fix--2026-09-27.md
 last_checked: 2026-09-28
 check_note: 网站侧PR(chinatravel#212)已由PM本人合并上线(commit ed46c7e，2026-09-27T15:43:30Z)。
@@ -32,7 +32,7 @@ check_note: 网站侧PR(chinatravel#212)已由PM本人合并上线(commit ed46c7
   写卡当天2026-09-28的占位值)；②`checked_at`/`outcome`/`observed_ctr`/`observed_impressions`确认
   清为NULL；③`baseline_ctr`/`baseline_position`/`baseline_impressions`用GSC 2026-07-01~09-25(L前
   最后干净数据点)真实值重写，不再用占位当天的旧快照；④`verify_by`改成L+28=2026-10-25(不是常规
-  L+14)，原因见`verify_how`的28天滚动窗口污染问题。2026-10-11那次自动判定预期会被污染，届时需要
+  L+14)，原因见`verify_how`的28天滚动窗口污染问题。2026-10-12那次自动判定预期会被污染，届时需要
   人工清空重试，不要误当作已经验过。
 ---
 诊断+方案见本会话记录（孔子/SEO agent，PM 2026-09-28 当场"做"授权；PM 随后指示"往下做+定期回看+
