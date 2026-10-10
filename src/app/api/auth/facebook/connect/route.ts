@@ -45,6 +45,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // value is ignored — the flow itself, scopes and guards are identical.
   const intent = req.nextUrl.searchParams.get('intent') === 'publishing' ? 'publishing' : undefined
 
+  // rerequest=1 用于评论回复等「某项权限被拒过」的重新授权入口，流程、权限清单、回调完全不变，只是让 Meta 再展示一次被拒过的权限。
+  const rerequest = intent === 'publishing' || req.nextUrl.searchParams.get('rerequest') === '1'
+
   // Publishing reauth authorises the Facebook Reel adapter's target Page
   // (factory_config.publish_target), NOT the inbox Page. Resolve it server-side
   // from the verified client and fail closed BEFORE starting Meta consent if
@@ -67,9 +70,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   let authUrl: string
   try {
     const redirectUri = `${appUrl()}/api/auth/facebook/callback`
-    // Publishing reauth uses auth_type=rerequest so a previously declined
-    // pages_manage_posts is actually shown again (Meta hides it otherwise).
-    authUrl = buildAuthUrl(buildState(clientId, intent), redirectUri, intent === 'publishing')
+    // Publishing reauth and explicit rerequest=1 both use auth_type=rerequest so
+    // a previously declined permission (e.g. pages_manage_posts) is actually
+    // shown again (Meta hides it otherwise).
+    authUrl = buildAuthUrl(buildState(clientId, intent), redirectUri, rerequest)
   } catch (err) {
     // Missing app credentials — say which knob is missing rather than 500ing.
     return NextResponse.json(

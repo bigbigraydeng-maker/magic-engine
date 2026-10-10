@@ -6,11 +6,15 @@
  * 为什么要单独一个接口、而不是让起草那步自己开（PM 2026-07-28 拍板的产品形态）：
  *   花钱 / 对外可见 / 难撤回 —— 三条全占，所以必须落成一个人点的动作。
  *   ME 把活干到「只剩点头」，但那一下必须是人点的。
+ *
+ * 谁能点「开」（2026-10-06 收紧）：只有 PM（全局管理员，ADMIN_EMAILS 精确名单）。
+ * 该客户的付费账号仍能「否」（不花钱）。核权限读不出来一律拒绝（fail-closed）。
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requireSpendActivationAuthority } from '@/lib/ads/spend-activation'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import {
   approveDraft,
@@ -37,12 +41,14 @@ export async function POST(
   }
 
   // 先查这条属于哪个客户，再按那个客户鉴权 —— 不能让 A 客户的人开 B 客户的广告。
-  const { data } = await supabaseAdmin
+  const { data, error: lookupError } = await supabaseAdmin
     .from('flywheel_actions')
     .select('client_id')
     .eq('id', actionId)
     .eq('action_type', ADS_CREATE_ACTION)
     .maybeSingle()
+
+  if (lookupError) return NextResponse.json({ error: '暂时查不到这条草案，已拒绝。' }, { status: 503 })
 
   const clientId = (data as { client_id?: string } | null)?.client_id
   if (!clientId) return NextResponse.json({ error: '找不到这条草案' }, { status: 404 })
@@ -61,13 +67,18 @@ export async function POST(
       : NextResponse.json({ error: r.error }, { status: 400 })
   }
 
+  // 「开」= 开始花钱：只有 PM 能点。付费客户账号到这里一律拒。
+  const authority = await requireSpendActivationAuthority()
+  if (!authority.ok) {
+    return NextResponse.json({ error: authority.error, code: authority.code }, { status: authority.status })
+  }
+
   const accessToken = await getMetaTokenForClient(clientId)
   if (!accessToken) {
     return NextResponse.json({ error: '拿不到这个客户的 Meta 授权' }, { status: 424 })
   }
 
-  const r = await approveDraft(actionId, supabaseAdmin, accessToken)
-  return r.ok
-    ? NextResponse.json({ ok: true, status: 'active' })
-    : NextResponse.json({ error: r.error }, { status: 400 })
+  const r = await approveDraft(actionId, supabaseAdmin, accessToken, authority)
+  if (!r.ok) return NextResponse.json({ error: r.error }, { status: 400 })
+  return NextResponse.json({ ok: true, status: 'active', ...(r.warning ? { warning: r.warning } : {}) })
 }

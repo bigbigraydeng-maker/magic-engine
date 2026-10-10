@@ -11,7 +11,12 @@
 
 import { describe, it, expect } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { judgeOutgoingPost, resolveOutgoingImageSource, priceGateMessage } from './price-claim-gate'
+import {
+  judgeOutgoingPost,
+  judgePriceClaimWithSource,
+  resolveOutgoingImageSource,
+  priceGateMessage,
+} from './price-claim-gate'
 
 type Row = Record<string, unknown>
 interface RecordedQuery {
@@ -188,6 +193,36 @@ describe('judgeOutgoingPost —— 拦不拦', () => {
     })
     expect(v.blocked).toBe(false)
     expect(q).toHaveLength(0)
+  })
+})
+
+describe('judgePriceClaimWithSource —— 已知来源时的纯判定', () => {
+  const PRICE_CAPTION = 'Tour from NZD $2,699 per person'
+  const NO_PRICE_CAPTION = 'Discover Shanghai this March'
+
+  it('有价格 + 图库来源 → 拦', () => {
+    const v = judgePriceClaimWithSource({ caption: PRICE_CAPTION, source: 'stock' })
+    expect(v).toMatchObject({ blocked: true, priceClaimed: true, source: 'stock' })
+  })
+
+  it('有价格 + 已确认实拍 → 放行', () => {
+    const v = judgePriceClaimWithSource({ caption: PRICE_CAPTION, source: 'client_verified' })
+    expect(v.blocked).toBe(false)
+  })
+
+  it('有价格 + 我们自己拍的 → 放行', () => {
+    const v = judgePriceClaimWithSource({ caption: PRICE_CAPTION, source: 'fde_shot' })
+    expect(v.blocked).toBe(false)
+  })
+
+  it('有价格 + 来源为 null → 按来源不明拦下', () => {
+    const v = judgePriceClaimWithSource({ caption: PRICE_CAPTION, source: null })
+    expect(v).toMatchObject({ blocked: true, priceClaimed: true, source: 'unknown' })
+  })
+
+  it('没价格 → 图库来源也放行', () => {
+    const v = judgePriceClaimWithSource({ caption: NO_PRICE_CAPTION, source: 'stock' })
+    expect(v).toMatchObject({ blocked: false, priceClaimed: false })
   })
 })
 

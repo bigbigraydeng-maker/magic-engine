@@ -5,13 +5,13 @@ name: Phase 30 — Baseline Domains Monthly Collect
 #
 # 也支持 workflow_dispatch 手工触发（用于调试或临时刷新）。
 #
+# 2026-10-07 去掉定时触发（审计 docs/audits/2026-10-07-cron-data-readers-audit.md）：Render 后台那条手工 cron 已每天调同一接口，接口有 7 天节流，这条每月一次纯重复；保留 workflow_dispatch 供手工补触发。
+#
 # 配置要求：
 #   - GitHub repo Secrets 添加 CRON_SECRET（与 Render web 服务同值）
 #   - 可选 BASELINE_CRON_URL（默认 https://app.magicengine.com.au/api/cron/baseline-domains-monthly）
 
 on:
-  schedule:
-    - cron: '0 3 1 * *'
   workflow_dispatch:
 
 jobs:

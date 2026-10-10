@@ -76,6 +76,51 @@ describe('收起 ≠ 藏起来 —— 收起时子组件必须没挂载，不能
   })
 })
 
+describe('深链锚点（?section=）—— 带 id 的板块能被滚到', () => {
+  it('id 落在 <section> 上', () => {
+    const { container } = render(
+      <SettingsSection icon="🎬" title="视频工厂配置" id="factory-config">
+        <p>内容</p>
+      </SettingsSection>,
+    )
+    expect(container.querySelector('section')).toHaveAttribute('id', 'factory-config')
+  })
+
+  it('defaultOpen + id：内容挂载可见，且 scrollIntoView 只调一次', () => {
+    const scrollIntoView = vi.fn()
+    const original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = scrollIntoView
+    try {
+      render(
+        <SettingsSection icon="🎬" title="视频工厂配置" id="factory-config" defaultOpen>
+          <p>内容</p>
+        </SettingsSection>,
+      )
+      expect(screen.getByText('内容')).toBeInTheDocument()
+      expect(scrollIntoView).toHaveBeenCalledTimes(1)
+    } finally {
+      Element.prototype.scrollIntoView = original
+    }
+  })
+
+  it('没有 defaultOpen：不滚，内容也不挂载', () => {
+    const scrollIntoView = vi.fn()
+    const original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = scrollIntoView
+    try {
+      render(
+        <SettingsSection icon="🎬" title="视频工厂配置" id="factory-config">
+          <p>内容</p>
+        </SettingsSection>,
+      )
+      expect(scrollIntoView).not.toHaveBeenCalled()
+      expect(screen.queryByText('内容')).not.toBeInTheDocument()
+    } finally {
+      Element.prototype.scrollIntoView = original
+    }
+  })
+})
+
 describe('点开之后再收起，内容留着，不会重新拉一次数据', () => {
   it('收起-再展开不会让子组件重新挂载', async () => {
     const onMount = vi.fn()
