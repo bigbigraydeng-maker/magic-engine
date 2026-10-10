@@ -59,7 +59,7 @@ const VerdictSchema = z.object({
   progression: z.string(),
   reason: z.string(),
 })
-type Verdict = z.infer<typeof VerdictSchema>
+export type Verdict = z.infer<typeof VerdictSchema>
 
 interface BriefRow {
   conversation_id: string
@@ -67,7 +67,7 @@ interface BriefRow {
   generated_at: string | null
 }
 
-interface MsgRow {
+export interface MsgRow {
   direction: 'inbound' | 'outbound'
   body: string | null
   sent_at: string
@@ -96,7 +96,7 @@ function stableHash(id: string): string {
 }
 
 /** 脱敏：邮箱、7 位以上号码、链接。写进报告前必须过这一道。 */
-function mask(text: string): string {
+export function mask(text: string): string {
   return text
     .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[邮箱]')
     .replace(/\+?[\d][\d\s-]{5,}\d/g, '[号码]')
@@ -167,7 +167,7 @@ const SCHEMA = {
  *   真人来回过                          → 中
  *   其余（泛泛一问没下文）               → 低；客人一句能用的话都没有 → 不确定
  */
-function levelFromFacts(v: Verdict, humanTurns: number, customerLines: number): { level: Level; rule: string } {
+export function levelFromFacts(v: Verdict, humanTurns: number, customerLines: number): { level: Level; rule: string } {
   if (v.is_spam_or_unrelated) return { level: 'unknown', rule: '垃圾或与业务无关' }
   if (customerLines === 0) return { level: 'unknown', rule: '客人没有可读的话' }
   if (v.ordered_or_paid) return { level: 'high', rule: '已下单 / 已付款 / 在安排发货' }
@@ -184,7 +184,7 @@ function levelFromFacts(v: Verdict, humanTurns: number, customerLines: number): 
   return { level: 'low', rule: '泛泛一问，没有下文' }
 }
 
-async function askModel(
+export async function askModel(
   business: string,
   transcript: string,
 ): Promise<{ verdict: Verdict | null; usage: { input: number; output: number } }> {
@@ -245,7 +245,7 @@ function pickSample(briefs: BriefRow[], perLevel: number, unknownCount: number, 
   return out
 }
 
-async function loadMessages(conversationId: string): Promise<MsgRow[]> {
+export async function loadMessages(conversationId: string): Promise<MsgRow[]> {
   const { data, error } = await supabaseAdmin
     .from('conversation_messages')
     .select('direction, body, sent_at')
@@ -256,7 +256,7 @@ async function loadMessages(conversationId: string): Promise<MsgRow[]> {
   return ((data ?? []) as MsgRow[]).filter((m) => (m.body ?? '').trim().length > 0)
 }
 
-async function loadBusinessName(clientId: string): Promise<string> {
+export async function loadBusinessName(clientId: string): Promise<string> {
   const { data } = await supabaseAdmin
     .from('clients')
     .select('name')
@@ -277,7 +277,7 @@ function cannedKey(body: string | null): string {
  * 第一轮试跑（2026-10-10）栽在这上面：客人只问了一句「运费多少」，系统自动贴了费率卡，
  * 模型就判成「我们已报价 → 高」。库里没有「这条是机器发的」标记，只能靠重复度认。
  */
-function findCanned(all: MsgRow[][]): Set<string> {
+export function findCanned(all: MsgRow[][]): Set<string> {
   const seenIn = new Map<string, number>()
   for (const msgs of all) {
     const keys = new Set<string>()
@@ -291,11 +291,11 @@ function findCanned(all: MsgRow[][]): Set<string> {
   return new Set(Array.from(seenIn.entries()).filter(([, n]) => n >= 3).map(([k]) => k))
 }
 
-function isCanned(m: MsgRow, canned: Set<string>): boolean {
+export function isCanned(m: MsgRow, canned: Set<string>): boolean {
   return m.direction === 'outbound' && canned.has(cannedKey(m.body))
 }
 
-function buildTranscript(msgs: MsgRow[], canned: Set<string>): string {
+export function buildTranscript(msgs: MsgRow[], canned: Set<string>): string {
   const lines = msgs.map((m) => {
     const who = m.direction === 'inbound' ? 'CUSTOMER' : isCanned(m, canned) ? 'US (auto-reply)' : 'US'
     // 去掉落单的代理项（截断把表情劈成两半会让请求体不是合法 JSON，第一轮 #55 就这么挂的）。
@@ -307,7 +307,7 @@ function buildTranscript(msgs: MsgRow[], canned: Set<string>): string {
 }
 
 /** 同方向连续消息算一段；段数即「来回段数」。 */
-function countTurns(msgs: MsgRow[], canned: Set<string>): number {
+export function countTurns(msgs: MsgRow[], canned: Set<string>): number {
   let turns = 0
   let prev: string | null = null
   for (const m of msgs) {
@@ -353,7 +353,7 @@ function declineStands(quote: string, transcript: string, msgs: MsgRow[], canned
     .some((m) => m.direction === 'outbound' && !isCanned(m, canned) && (m.body ?? '').trim().length > 40)
 }
 
-function applyPostChecks(
+export function applyPostChecks(
   verdict: Verdict,
   transcript: string,
   msgs: MsgRow[],
@@ -569,7 +569,8 @@ async function main(): Promise<void> {
   console.log(`tokens: input=${inputTokens} output=${outputTokens}`)
 }
 
-main().catch((err) => {
+// 被别的脚本 import 时不自动跑（冷名单审计复用这里的判断）。
+if (process.argv[1]?.endsWith('probe-intent-calibration.ts')) main().catch((err) => {
   console.error(err instanceof Error ? err.message : err)
   process.exit(1)
 })
