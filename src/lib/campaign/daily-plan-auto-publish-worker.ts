@@ -50,6 +50,8 @@ export interface PlanState {
   publishedDates: string[]
   /** Dates on the receipt's `recalled[]`. */
   receiptRecalledDates: string[]
+  /** Latest `recalled_at` per recalled date (ISO). Optional: absent counts as "unknown time" and voids any lift. */
+  receiptRecalledAt?: Record<string, string>
 }
 
 export interface ScopeState {
@@ -66,7 +68,10 @@ export interface RunPublishInput {
 }
 
 export interface AutoPublishWorkerDeps {
+  /** The instant this sweep started; every schedule decision uses it. */
   now: Date
+  /** The real clock, for re-checks made later in the sweep (default `new Date()`). Injectable for tests. */
+  clock?: () => Date
   switches: AutoPublishSwitches
   listLiveAuthorizations: () => Promise<AutoPublishAuthorization[]>
   /** Is this still a global administrator? Checked on every sweep: a grant outlives neither its author's role nor their account. */
@@ -201,7 +206,7 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
       const evidence = {
         tombstoneDates: attempts.filter(r => r.status === 'blocked' && r.reason_code === 'RECALLED').map(r => r.date),
         receiptRecalledDates: state.receiptRecalledDates,
-        liftedDates: auth.lifted_dates,
+        liftedDates: effectiveLiftedDates(auth, state),
       }
 
       // 1. Per-date eligibility.
@@ -306,7 +311,16 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
       // 5. Live: serial, one date at a time, re-checking the grant before each send.
       for (const item of sendable) {
         const stillGranted = await deps.getActiveAuthorization(auth.plan_id, auth.client_id)
-        if (stillGranted === null || stillGranted.id !== auth.id) {
+        if (
+          stillGranted === null ||
+          stillGranted.id !== auth.id ||
+          !judgeAuthorization(stillGranted, {
+            planId: auth.plan_id,
+            planRevision: state.planRevision,
+            reviewRevision: state.reviewRevision,
+            now: (deps.clock ?? (() => new Date()))(),
+          }).active
+        ) {
           note(item.date, 'skipped', 'REVOKED_DURING_SWEEP')
           break
         }
@@ -353,6 +367,19 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
   const counts: Record<string, number> = {}
   for (const record of records) counts[record.result] = (counts[record.result] ?? 0) + 1
   return { ran_at: now.toISOString(), authorizations: grants.length, records, counts }
+}
+
+/**
+ * A lift only counts for a recall that happened before the grant was written: a recall AFTER the
+ * authorisation (or one whose time we cannot read) must never be waved through by an old lift.
+ */
+function effectiveLiftedDates(auth: AutoPublishAuthorization, state: PlanState): string[] {
+  const authorizedAt = Date.parse(auth.authorized_at)
+  return auth.lifted_dates.filter(date => {
+    if (!state.receiptRecalledDates.includes(date)) return true
+    const recalledAt = Date.parse(state.receiptRecalledAt?.[date] ?? '')
+    return !Number.isNaN(recalledAt) && !Number.isNaN(authorizedAt) && recalledAt <= authorizedAt
+  })
 }
 
 function nextAttemptNo(item: DatePlan): number {

@@ -114,6 +114,7 @@ function makeDeps(now: Date, runPublish: Script, extra: { receiptRecalled?: stri
   const sent = vi.fn(runPublish)
   const deps: AutoPublishWorkerDeps = {
     now,
+    clock: () => now,
     switches: { live: true, clientIds: [CLIENT] },
     listLiveAuthorizations,
     isGlobalAdmin: () => true,

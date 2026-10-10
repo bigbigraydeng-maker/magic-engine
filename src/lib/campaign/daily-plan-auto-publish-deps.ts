@@ -16,6 +16,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** Latest `recalled_at` per date from a receipt's `recalled[]`. */
+function latestRecalledAt(list: unknown): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (!Array.isArray(list)) return out
+  for (const entry of list) {
+    if (!isRecord(entry) || typeof entry.date !== 'string' || typeof entry.recalled_at !== 'string') continue
+    const previous = out[entry.date]
+    if (previous === undefined || Date.parse(entry.recalled_at) > Date.parse(previous)) out[entry.date] = entry.recalled_at
+  }
+  return out
+}
+
 function datesOf(list: unknown): string[] {
   if (!Array.isArray(list)) return []
   return list
@@ -48,6 +60,7 @@ export async function loadPlanState(planId: string, clientId: string): Promise<P
     reviewRevision,
     publishedDates: datesOf(publishMeta.published),
     receiptRecalledDates: datesOf(publishMeta.recalled),
+    receiptRecalledAt: latestRecalledAt(publishMeta.recalled),
   }
 }
 

@@ -95,6 +95,7 @@ function build(setup: Setup = {}) {
   const emit = vi.fn(async (_event: Parameters<AutoPublishWorkerDeps['emit']>[0]) => undefined)
   const deps: AutoPublishWorkerDeps = {
     now: setup.now ?? NOW,
+    clock: () => setup.now ?? NOW,
     switches: { live: setup.live ?? true, clientIds: [CLIENT] },
     listLiveAuthorizations: async () => grants,
     isGlobalAdmin: () => true,
@@ -263,9 +264,41 @@ describe('runAutoPublishSweep — recalled dates', () => {
   })
 
   it('a recalled date the PM explicitly lifted on this grant is sent again', async () => {
-    const { deps, runPublish } = build({ grants: [grant({ lifted_dates: [TODAY] })], plan: { receiptRecalledDates: [TODAY] } })
+    const { deps, runPublish } = build({
+      grants: [grant({ lifted_dates: [TODAY] })],
+      plan: { receiptRecalledDates: [TODAY], receiptRecalledAt: { [TODAY]: '2026-10-01T00:00:00.000Z' } },
+    })
     await runAutoPublishSweep(deps)
     expect(runPublish.mock.calls.filter(c => c[0].command.no_publish === false).map(c => c[0].command.dates)).toContainEqual([TODAY])
+  })
+
+  it('a lift counts when the recall happened before the grant was written', async () => {
+    const { deps, runPublish } = build({
+      grants: [grant({ lifted_dates: [TODAY], authorized_at: '2026-10-10T00:00:00.000Z' })],
+      plan: { receiptRecalledDates: [TODAY], receiptRecalledAt: { [TODAY]: '2026-10-09T00:00:00.000Z' } },
+    })
+    await runAutoPublishSweep(deps)
+    expect(runPublish.mock.calls.filter(c => c[0].command.no_publish === false).map(c => c[0].command.dates)).toContainEqual([TODAY])
+  })
+
+  it('🔴 a recall AFTER the grant (or with no readable time) voids the lift — even with no tombstone', async () => {
+    const after = build({
+      grants: [grant({ lifted_dates: [TODAY], authorized_at: '2026-10-10T00:00:00.000Z' })],
+      plan: { receiptRecalledDates: [TODAY], receiptRecalledAt: { [TODAY]: '2026-10-11T00:00:00.000Z' } },
+    })
+    expect(resultsOf(await runAutoPublishSweep(after.deps))).toContain(`${TODAY}:skipped(RECALLED)`)
+
+    const unreadable = build({ grants: [grant({ lifted_dates: [TODAY] })], plan: { receiptRecalledDates: [TODAY] } })
+    expect(resultsOf(await runAutoPublishSweep(unreadable.deps))).toContain(`${TODAY}:skipped(RECALLED)`)
+  })
+
+  it('🔴 a grant that expired mid-sweep stops the next send', async () => {
+    const { deps, runPublish } = build({ grants: [grant({ expires_at: '2026-10-11T18:00:00.001Z' })] })
+    deps.getActiveAuthorization = async () => grant({ expires_at: '2026-10-11T18:00:00.001Z' })
+    // by the time the per-date re-check runs, the clock is past the expiry
+    deps.clock = () => new Date('2026-10-11T18:00:01Z')
+    await runAutoPublishSweep(deps)
+    expect(runPublish.mock.calls.filter(c => c[0].command.no_publish === false)).toHaveLength(0)
   })
 
   it('🔴 a tombstone beats a lift (re-recalled after the lift)', async () => {
