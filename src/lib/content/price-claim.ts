@@ -42,6 +42,16 @@ const CURRENCY_CLAIM_SOURCES = [
   String.raw`${AMOUNT_K}${HSPACE}${CURRENCY_AFTER}`,
 ]
 
+// 无币种符号的旅游报价:"3,499pp"、"2,699 per person"、"from 2,699"、"only 2699"、"price: 2699"、"Twin share 3,499"、
+// "2699/person"、"2,699 each"、"starting at 2,699"、"as low as 2,699"、"Price: NZ 2699"。
+// 金额至少 3 位(或带千分位),所以 "2 per person"、"only 2 left" 不会命中。
+const PRICE_NUMBER = String.raw`(?:\d{3,}|\d{1,3}(?:,\d{3})+)(?:\.\d+)?`
+const NON_PRICE_UNIT = String.raw`(?:people|persons?|guests?|spots?|seats?|places?|rooms?|tickets?|followers?|reviews?|km|years?|visitors?|members?|days?|nights?|adults?|child(?:ren)?|stars?|pax|hours?|weeks?|m|metres?|meters?|miles?|kilometres?|kilometers?|sqm|m2|m²|fans?|likes?|views?|subscribers?)`
+const PRICE_UNIT_CLAIM_SOURCES = [
+  String.raw`(?<![\d,.])${PRICE_NUMBER}${HSPACE}(?:pp\b|p\.p\.|p/p\b|pppn\b|/${HSPACE}(?:person|pp|pax|head|adult|traveller|traveler|guest)\b|(?:per|a)${HSPACE}(?:person|adult|head|couple|pax|traveller|traveler|guest|twin|double|single)\b|twin${HSPACE}share\b|per${HSPACE}room\b|each\b(?!${HSPACE}(?:way|year|day|night|month|week|room|other)\b))`,
+  String.raw`\b(?:from|only|just|price[sd]?|price${HSPACE}is|priced?${HSPACE}at|costs?|fares?|twin${HSPACE}share|starting${HSPACE}(?:at|from)|starts?${HSPACE}(?:at|from)|as${HSPACE}low${HSPACE}as)${HSPACE}[:：\-–—]?${HSPACE}(?:nz${HSPACE})?(?!(?:19|20)\d\d(?![\d,]))(?<![\d,.])${PRICE_NUMBER}(?![\d,])(?!${HSPACE}${NON_PRICE_UNIT}(?![a-z0-9²]))`,
+]
+
 /**
  * 宽口径(**召回优先**)—— 只给「误判代价很小」的场景用。
  *
@@ -66,6 +76,8 @@ export const PRICE_CLAIM_RECALL_RE = new RegExp(
     String.raw`\d[\d,]*\s*\bfor\b\s*\d`,
     // —— 2026-10-05 补强:币种写法 ——
     ...CURRENCY_CLAIM_SOURCES,
+    // —— 2026-10-08 补强:无币种符号的旅游报价 ——
+    ...PRICE_UNIT_CLAIM_SOURCES,
     // —— 裸 k 后缀金额(仅宽口径)——
     String.raw`\b(?!(?:2|4|8)k\b)${AMOUNT}k\b`,
   ].join('|'),
@@ -99,12 +111,14 @@ export const PRICE_CLAIM_RECALL_RE = new RegExp(
  *   · 全角数字(３９９９元、＄４５０)
  *   · NZD 4 999(千分位用空格,只识别到 NZD 4)
  *   · 无币种的裸 k(从 1.3k 起)
+ *   · 数值落在 1900–2099 的裸价(from 2050 会被当年份放过)
  *
  * 已知误伤(有意保留,别当 bug):
  *   · 币种码紧贴年份(#NZD2027、2027 NZD rates)会命中;域名/账号里夹币种码加数字(nzd5.com、rmb88)也会命中
  *   · 旧的 AUD 源(\baud\b\s*\d)允许跨行配对,"All prices in AUD↵7 day tour" 仍命中 —— 为保证超集不能改旧源
  *   · 币种在数字前、后面跟 free/per 等词时仍算价格("NZD 99 free cancellation" 命中,有意)
  *   · "纽币"之外的口语说法(澳刀/美刀已收;块、毛 没收)
+ *   · "from 120 Queen St"、"only 500 plants" 这类 3 位数 + 非列表单位的说法会命中；"Room 305 each" 这类 3 位数 + each 也会命中
  *
  * 带 `g` 标志,只允许用 `String.prototype.match` 调用 —— `RegExp.test` 会推进
  * `lastIndex`,跨模块共用同一个实例时会出现「隔次返回 false」的幽灵 bug。
@@ -125,6 +139,8 @@ export const PRICE_CLAIM_STRICT_RE = new RegExp(
     String.raw`\bbuy\s*\d[\d,]*\s*(?:\bfor\b|\bget\b)\s*\d`,
     // —— 2026-10-05 补强:币种写法 ——
     ...CURRENCY_CLAIM_SOURCES,
+    // —— 2026-10-08 补强:无币种符号的旅游报价 ——
+    ...PRICE_UNIT_CLAIM_SOURCES,
   ].join('|'),
   'gi',
 )

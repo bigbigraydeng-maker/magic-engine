@@ -28,6 +28,7 @@ import {
   STORY_RESOLVE_FUNCTION_ID,
   STORY_RESOLVE_RETRIES,
   createStoryResolveFunction,
+  postFirstCommentOnce,
   readIsRecalled,
   readStoryOnce,
   recordWorkflowFailure,
@@ -63,6 +64,8 @@ function due(over: Partial<StoryResolveDue> = {}): StoryResolveDue {
     ...over,
   }
 }
+
+const FIRST_COMMENT = 'Send an enquiry\nhttps://example.test/x'
 
 /** Clock that only `sleepUntil` advances. Starts at publish time. */
 function fakeStep(opts: { memo?: Map<string, unknown> } = {}) {
@@ -132,6 +135,7 @@ function harness(
   const graph = fakeGraph(clock, mode)
   const records: MeasurementRecord[] = []
   const send = vi.fn(async (_event: { id: string; name: string; data: Record<string, unknown> }) => ({ event_ids: ['evt_1'] }))
+  const postFirstComment = vi.fn(async (_due: StoryResolveDue, _postId: string) => 'comment_1')
   const supabase = fakeSupabase(over.registered === undefined ? PAGE : over.registered, over.recalledKeys ?? [])
   const deps: StoryResolveDeps = {
     supabase: supabase as never,
@@ -139,8 +143,9 @@ function harness(
     isRecalled: (d) => readIsRecalled(supabase as never, d),
     send,
     writeRecord: async (record) => { records.push(record) },
+    postFirstComment,
   }
-  return { step, clock, log, graph, records, send, deps }
+  return { step, clock, log, graph, records, send, postFirstComment, deps }
 }
 
 beforeEach(() => {
@@ -260,6 +265,19 @@ describe('story-resolve — not resolved', () => {
     }])
   })
 
+  it('🔴 never public with first_comment_text: the failed unresolved record carries the comment text', async () => {
+    const h = harness('never_public')
+
+    const result = await runStoryResolve(due({ first_comment_text: FIRST_COMMENT }), h.step, h.deps)
+
+    expect(result).toEqual({ ok: false, reason: 'unresolved' })
+    expect(h.records).toEqual([expect.objectContaining({
+      status: 'failed',
+      outcome: 'unresolved',
+      post: expect.objectContaining({ first_comment_text: FIRST_COMMENT }),
+    })])
+  })
+
   it('🔴 story id on another Page is refused, never emitted', async () => {
     const h = harness('foreign_page')
     await runStoryResolve(due(), h.step, h.deps)
@@ -326,6 +344,88 @@ describe('story-resolve — not resolved', () => {
     const records: MeasurementRecord[] = []
     await recordWorkflowFailure(due(), { writeRecord: async (r) => { records.push(r) } })
     expect(records).toEqual([expect.objectContaining({ status: 'failed', outcome: 'workflow_failed', reason: 'retries_exhausted' })])
+  })
+})
+
+describe('story-resolve — first comment', () => {
+  it('🔴 resolved with first_comment_text: posts the comment once, BEFORE the published event so a failing event cannot lose it', async () => {
+    const h = harness('scheduled_then_public')
+
+    const result = await runStoryResolve(due({ first_comment_text: FIRST_COMMENT }), h.step, h.deps)
+
+    expect(result).toEqual({ ok: true, outcome: 'emitted', post_id: `${PAGE}_${PHOTO}`, attempt: 1 })
+    expect(h.postFirstComment).toHaveBeenCalledTimes(1)
+    expect(h.postFirstComment.mock.calls[0][0]).toMatchObject({ idempotency_key: KEY, first_comment_text: FIRST_COMMENT })
+    expect(h.postFirstComment.mock.calls[0][1]).toBe(`${PAGE}_${PHOTO}`)
+    expect(h.postFirstComment.mock.invocationCallOrder[0]).toBeLessThan(h.send.mock.invocationCallOrder[0])
+    expect(h.records).toEqual([])
+  })
+
+  it('🔴 published event send throws: the comment was still posted once, never lost', async () => {
+    const h = harness('scheduled_then_public')
+    h.send.mockRejectedValueOnce(new Error('inngest send 500'))
+
+    await expect(runStoryResolve(due({ first_comment_text: FIRST_COMMENT }), h.step, h.deps)).rejects.toThrow(/inngest send 500/)
+
+    expect(h.postFirstComment).toHaveBeenCalledTimes(1)
+    expect(h.postFirstComment.mock.calls[0][1]).toBe(`${PAGE}_${PHOTO}`)
+  })
+
+  it('resolved without first_comment_text: never posts a comment', async () => {
+    const h = harness('scheduled_then_public')
+    await runStoryResolve(due(), h.step, h.deps)
+    expect(h.postFirstComment).not.toHaveBeenCalled()
+  })
+
+  it('🔴 comment fails: published event still sent, one first_comment_failed record, result still emitted', async () => {
+    const h = harness('scheduled_then_public')
+    h.postFirstComment.mockRejectedValue(new Error('发布 每日计划帖 首评失败 500'))
+
+    const result = await runStoryResolve(due({ first_comment_text: FIRST_COMMENT }), h.step, h.deps)
+
+    expect(result).toEqual({ ok: true, outcome: 'emitted', post_id: `${PAGE}_${PHOTO}`, attempt: 1 })
+    expect(h.send).toHaveBeenCalledTimes(1)
+    expect(h.records).toEqual([expect.objectContaining({
+      status: 'failed',
+      outcome: 'first_comment_failed',
+      post: expect.objectContaining({ post_id: `${PAGE}_${PHOTO}`, first_comment_text: FIRST_COMMENT }),
+    })])
+    expect(h.records[0].reason).toContain('首评失败 500')
+  })
+
+  it('never public: no comment is posted', async () => {
+    const h = harness('never_public')
+    await runStoryResolve(due({ first_comment_text: FIRST_COMMENT }), h.step, h.deps)
+    expect(h.postFirstComment).not.toHaveBeenCalled()
+  })
+
+  it('🔴 recalled meanwhile: no comment posted, no failure record, result still emitted', async () => {
+    const h = harness('scheduled_then_public', { recalledKeys: [KEY] })
+
+    const result = await runStoryResolve(due({ first_comment_text: FIRST_COMMENT }), h.step, h.deps)
+
+    expect(result).toEqual({ ok: true, outcome: 'emitted', post_id: `${PAGE}_${PHOTO}`, attempt: 1 })
+    expect(h.postFirstComment).not.toHaveBeenCalled()
+    expect(h.records).toEqual([])
+  })
+
+  it('🔴 comment fails AND the failure record cannot be written: still resolves emitted, never throws', async () => {
+    const h = harness('scheduled_then_public')
+    h.postFirstComment.mockRejectedValue(new Error('发布 每日计划帖 首评失败 500'))
+    h.deps.writeRecord = async () => { throw new Error('db down') }
+
+    const result = await runStoryResolve(due({ first_comment_text: FIRST_COMMENT }), h.step, h.deps)
+
+    expect(result).toEqual({ ok: true, outcome: 'emitted', post_id: `${PAGE}_${PHOTO}`, attempt: 1 })
+    expect(h.send).toHaveBeenCalledTimes(1)
+  })
+
+  it('postFirstCommentOnce: no token → token_unavailable; no text → first_comment_text_missing', async () => {
+    mockToken.mockResolvedValue(null)
+    await expect(postFirstCommentOnce(due({ first_comment_text: FIRST_COMMENT }), `${PAGE}_${PHOTO}`)).rejects.toThrow('token_unavailable')
+
+    mockToken.mockResolvedValue('page-token')
+    await expect(postFirstCommentOnce(due(), `${PAGE}_${PHOTO}`)).rejects.toThrow('first_comment_text_missing')
   })
 })
 

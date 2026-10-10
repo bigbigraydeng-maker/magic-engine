@@ -2,6 +2,7 @@
 // 只改展示,不碰服务端把关规则(review-apply.ts / content-review.ts 原样)。
 
 import { isValidContentSourceRef } from '@/lib/social/content-review'
+import { isAcceptableFlagCategory } from './review-flag-categories'
 
 /** 工单链接(brief.copy.endcard.url)。只有产品深链才预填:copy-generator 常把它强制写成品牌首页,首页不是「片里事实的出处」。 */
 export function defaultFactSourceRef(url: unknown): string {
@@ -20,4 +21,35 @@ export function reviewErrorZh(error: string, labelOf: (key: string) => string): 
   if (error.startsWith('only in_review') || error.includes('no longer in_review')) return '这条已经不在待审状态了,请刷新页面。'
   if (error.startsWith('checklist ')) return '清单提交有问题,请刷新页面重新勾一遍;还不行就把下面这句发给开发:' + error
   return `没通过成功:${error}(把这句话发给开发)`
+}
+
+export interface ReviewGateInput {
+  autoReady: boolean                         // all automatic media checks PASS
+  redlineHits: string[]                      // brand red-line phrases hit
+  qualityFlags: Array<{ category: string }>  // yellow quality flags on this order
+  acceptedCategories: string[]               // categories the PM already accepted (from the server)
+  factSourcePrefilled: boolean               // the fact-source URL prefill is non-empty
+}
+
+export interface ReviewGate {
+  oneClick: boolean
+  reasons: string[]
+}
+
+/** Decide whether the PM may approve in one click, or must review item by item. */
+export function reviewGate(input: ReviewGateInput): ReviewGate {
+  const reasons: string[] = []
+
+  if (!input.autoReady) reasons.push('自动媒体检测未通过')
+  if (input.redlineHits.length > 0) reasons.push('文案命中品牌红线,需逐项核对')
+
+  for (const flag of input.qualityFlags) {
+    const settled =
+      isAcceptableFlagCategory(flag.category) && input.acceptedCategories.includes(flag.category)
+    if (!settled) reasons.push(`品控提示未处理:${flag.category}`)
+  }
+
+  if (!input.factSourcePrefilled) reasons.push('来源网址没有预填,需要手动填写')
+
+  return { oneClick: reasons.length === 0, reasons }
 }
