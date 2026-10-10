@@ -1883,3 +1883,9 @@ Gate B 定的 `minSampleSize=3`，页面目前只会显示「数据还不够说�
 - [ ] **[P3] 卫青手册 §三 把 `ad_health_prescriptions` 改成实际存在的表名**（生产库没这张表，照它去查会白跑一轮）（设计稿 §2.6）
 - [ ] **[P3] 季节性冲刺层排期（Q5）** 等 02 号窗口的 CTS 预算计划 PM 拍板后再排（设计稿 §3.4）
 - [ ] **[P3] `src/lib/cron/registry.ts` 两处清单与 `render.yaml` 不一致**：`google-data-pullback-daily` 写 `0 3 * * *`（实际 `0 17 * * *`）、`ad-entity-snapshot` 写 `30 */3`（实际 `30 */6`）；`reel-batch-render` 调了运行记录没人认领监控。**本分支基线 `registry.test.ts` 已有 2 条红，不是广告改动造成的**，碰 registry 的 PR 会撞上（子牙 4.1）
+
+## 广告 agent 手册 v1.0 · 审查后续项（2026-10-10，手册 [docs/sops/2026-10-10-ads-agent-playbook-and-rules-v1.0.md](./sops/2026-10-10-ads-agent-playbook-and-rules-v1.0.md)，等 PM 回第十节拍板后再排）
+
+- [ ] **[P0] 授权红线落代码**：开投 / 加预算 / 改在投素材 / 改受众 / 关整系列永远只认 PM 身份审批接口；`winner-reel-sync-daily` 改只建 PAUSED（手册 §11 行 A1，A 级，等 PM 回第 1 问）
+- [ ] **[P2] S-01 / S-02 / S-11 / C-07 判据补门槛**：「抢量」「预期周事件数」「出价偏差」「素材够几周」目前只有方向、缺可验证门槛（子牙审查）
+- [ ] **[P3] 通用手册重号**：`playbook-ads-meta-general` 有两个 §十三、两个 §三十，建议改编号（记忆文件，不在本仓库）
