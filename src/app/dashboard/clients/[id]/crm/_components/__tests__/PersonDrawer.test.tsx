@@ -150,7 +150,7 @@ describe('R1 · 抽屉补齐「全部客人」那边独有的两样', () => {
    */
   it('NAL 点「已成交」→ 先弹录金额，不直接改阶段', () => {
     drawFor(NAL, {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
-    fireEvent.click(btn('现在')!)
+    fireEvent.click(btn('到哪一步了')!)
     fireEvent.click(btn('已成交')!)
     const body = document.body.textContent ?? ''
     expect(body).toContain('这笔生意多少钱')
@@ -167,14 +167,14 @@ describe('R1 · 抽屉补齐「全部客人」那边独有的两样', () => {
    */
   it('NAL 点的不是成交档（比如「已联系」）→ 不许弹录金额', () => {
     drawFor(NAL, {}, [{ stageKey: 'contacted', label: '已联系', marketingAction: 'nurture' }])
-    fireEvent.click(btn('现在')!)
+    fireEvent.click(btn('到哪一步了')!)
     fireEvent.click(btn('已联系')!)
     expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
   })
 
   it('CTS 点同一档「已成交」→ 不该弹录金额（那是 NAL 专属通道）', () => {
     drawFor('cts', {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
-    fireEvent.click(btn('现在')!)
+    fireEvent.click(btn('到哪一步了')!)
     fireEvent.click(btn('已成交')!)
     expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
   })
@@ -228,6 +228,79 @@ describe('B2 · 上一位/下一位（nav 可选）', () => {
     expect(screen.getByText('正在拿下一位…')).toBeTruthy()
     expect(btn('上一位')?.disabled).toBe(true)
     expect(btn('下一位')?.disabled).toBe(true)
+  })
+})
+
+/**
+ * 「该做什么」卡（PM 2026-10-10）：三行 —— 动作 + 为什么 / AI 建议 / 到哪一步了。
+ * 这一块取代了原来并排的三套状态（阶段按钮、冷热标签、意向小圆标）。
+ */
+describe('该做什么卡', () => {
+  it('有 nextAction → 顶部一张卡：动作 + 为什么 + AI 建议', () => {
+    draw({
+      nextAction: {
+        list: 'hot',
+        verb: 'call',
+        verbLabel: '打给他',
+        line: '打给他 —— 聊过一轮断了，AI 读完对话判他意向高',
+        aiSuggestion: '打电话给 Tim，确认装箱单',
+        intentBoost: true,
+      },
+    })
+    expect(screen.getByTestId('next-action-card')).toBeTruthy()
+    expect(screen.getByText('打给他')).toBeTruthy()
+    expect(screen.getByText('聊过一轮断了，AI 读完对话判他意向高')).toBeTruthy()
+    expect(screen.getByText(/打电话给 Tim/)).toBeTruthy()
+  })
+
+  it('没有 AI 建议就不画那一行', () => {
+    draw({
+      nextAction: {
+        list: 'hot',
+        verb: 'call',
+        verbLabel: '打给他',
+        line: '打给他 —— 聊过一轮断了，AI 读完对话判他意向高',
+        aiSuggestion: null,
+        intentBoost: true,
+      },
+    })
+    expect(screen.queryByText(/AI 建议/)).toBeNull()
+  })
+
+  it('没传 nextAction（老调用方）→ 卡里只剩 reason，不炸', () => {
+    draw({ reason: '客户来消息了' })
+    expect(screen.getByText('客户来消息了')).toBeTruthy()
+  })
+
+  it('🔴 header 不再重复那句 reason —— 同一句话只该出现一次', () => {
+    draw({
+      reason: '客户来消息了，等了 18 小时',
+      nextAction: {
+        list: 'hot',
+        verb: 'reply',
+        verbLabel: '回他',
+        line: '回他 —— 客户来消息了，等了 18 小时',
+        aiSuggestion: null,
+        intentBoost: true,
+      },
+    })
+    expect(screen.getAllByText('客户来消息了，等了 18 小时')).toHaveLength(1)
+  })
+
+  it('🔴 没有阶段变更记录 → 不显示「人工标的」', () => {
+    render(
+      <PersonDrawer
+        clientId="cts"
+        row={row({ stage: 'quoted', stageLabel: '已报价' })}
+        stages={[{ stageKey: 'won', label: '已成交' }]}
+        viewerEmail="fde@example.com"
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    )
+    const stageBtn = btn('到哪一步了：已报价')
+    expect(stageBtn).toBeTruthy()
+    expect(stageBtn?.textContent ?? '').not.toContain('人工标的')
   })
 })
 

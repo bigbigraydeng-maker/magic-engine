@@ -9,6 +9,8 @@
  * 或加一个渠道，改这一处。
  */
 
+import type { NextAction, IntentLevel } from '@/lib/crm/next-action'
+
 export interface ContactRow {
   contactId: string
   name: string
@@ -34,6 +36,13 @@ export interface ContactRow {
   suggestedChannel?: 'phone' | 'sms' | 'email' | 'messenger' | 'none'
   /** 为什么排到这一批 —— 抽屉顶部「上次说到这」那一档用。 */
   reason?: string
+  /**
+   * 「该做什么」—— 阶段 / 冷热 / 意向三套状态合成的那一个概念（PM 2026-10-10）。
+   * 列表只画 `nextAction.line`；`stage` / `segment` 仍在，抽屉改阶段和筛选还要用。
+   */
+  nextAction: NextAction
+  /** 最新一张 AI 摘要的意向；null = 没有摘要。 */
+  intent: IntentLevel | null
   custom: Record<string, string | null>
 }
 
@@ -104,6 +113,12 @@ export const TEMP_CLS: Record<ContactRow['temperature'], string> = {
   warm: 'bg-me-ochre/12 text-me-ochre',
   cold: 'bg-me-ivory text-me-charcoal/55',
   off: 'bg-me-charcoal/5 text-me-charcoal/45',
+}
+
+/** 「该做什么」那一格的底色：hot 名单红、cold 名单灰。按 `nextAction.list` 取。 */
+export const LIST_CLS: Record<NextAction['list'], string> = {
+  hot: 'bg-[#C2453A]/12 text-[#C2453A]',
+  cold: 'bg-me-charcoal/5 text-me-charcoal/55',
 }
 
 export function ts(v: string | null | undefined): number {

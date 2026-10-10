@@ -53,6 +53,9 @@ const STAGES: Row[] = [
   { stage_key: 'quoted', label: '已报价', marketing_action: 'nurture', is_terminal: false },
 ]
 
+/** AI 摘要相关两张表的罐头行；默认空，个别测试按需填。 */
+const BRIEF_ROWS: Record<string, Row[]> = { conversations: [], conversation_briefs: [] }
+
 /** 一次查询链上记下来的东西。 */
 interface Recorded {
   table: string
@@ -85,6 +88,9 @@ function fakeDb(table: string) {
       rec.eqs.push([col, val])
       return builder
     },
+    // brief-lookup 用 `.not('contact_id', 'is', null)` 过滤没挂人的对话；假库少了它整条查询会抛，
+    // 被 brief-lookup 吞成空 Map —— 意向永远是 null，测的就不是真路径。
+    not: () => builder,
     in: (col: string, vals: unknown[]) => {
       rec.ins.push([col, vals])
       return builder
@@ -108,6 +114,9 @@ function fakeDb(table: string) {
         return resolve({ data: CONTACTS, count: null, error: null })
       }
       if (table === 'client_pipeline_stages') return resolve({ data: STAGES, error: null })
+      if (table === 'conversations' || table === 'conversation_briefs') {
+        return resolve({ data: BRIEF_ROWS[table] ?? [], error: null })
+      }
       return resolve({ data: [], error: null })
     },
   }
@@ -122,6 +131,8 @@ async function get(clientId: string, qs = '') {
 
 beforeEach(() => {
   recorded = []
+  BRIEF_ROWS.conversations = []
+  BRIEF_ROWS.conversation_briefs = []
   ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation(fakeDb)
 })
 
@@ -219,6 +230,7 @@ describe('GET contacts — 分段跟今天页共用形状（WP3 R3）', () => {
     const bob = list.find((r) => r.contactId === 'a1')
     expect(bob?.suggestedChannel).toBeDefined()
     expect(typeof bob?.reason).toBe('string')
+    expect(bob?.nextAction).toMatchObject({ list: expect.any(String), line: expect.any(String) })
   })
 })
 
@@ -243,18 +255,13 @@ describe('GET contacts — 筛选落到 SQL', () => {
 })
 
 describe('GET contacts — view=priority（WP3 R5 接线）', () => {
-  it('?view=priority → 新形状 {view, focus, columns, sections}，四段顺序固定', async () => {
+  it('?view=priority → 新形状 {view, focus, columns, sections}，两张名单顺序固定 hot / cold', async () => {
     const { status, body } = await get('cts', '?view=priority')
     expect(status).toBe(200)
     expect(body.view).toBe('priority')
     expect(body).toHaveProperty('focus')
     expect(body).toHaveProperty('columns')
-    expect((body.sections as Array<{ key: string }>).map((s) => s.key)).toEqual([
-      'waiting',
-      'acted',
-      'queued',
-      'off_list',
-    ])
+    expect((body.sections as Array<{ key: string }>).map((s) => s.key)).toEqual(['hot', 'cold'])
   })
 
   it('不带 view → 形状不变（老调用方不受影响）', async () => {
@@ -264,41 +271,38 @@ describe('GET contacts — view=priority（WP3 R5 接线）', () => {
     expect(body).toHaveProperty('totalContacts')
   })
 
-  it('每段带 total；推迟中的 Sue 落 off_list，没触点的 Bob 落 acted', async () => {
+  it('每段带 total；推迟中的 Sue 落 cold，没触点的 Bob 落 hot', async () => {
     const { body } = await get('cts', '?view=priority')
     const byKey = Object.fromEntries(
       (body.sections as Array<{ key: string; total: number }>).map((s) => [s.key, s]),
     )
-    expect(byKey.off_list.total).toBe(1)
-    expect(byKey.acted.total).toBe(1)
-    expect(byKey.waiting.total).toBe(0)
+    expect(byKey.cold.total).toBe(1)
+    expect(byKey.hot.total).toBe(1)
   })
 
-  it('默认前两段展开（items 是数组）、后两段收起（items=null）', async () => {
+  it('默认 hot 展开（items 是数组）、cold 收起（items=null）', async () => {
     const { body } = await get('cts', '?view=priority')
     const byKey = Object.fromEntries(
       (body.sections as Array<{ key: string; items: unknown[] | null }>).map((s) => [s.key, s]),
     )
-    expect(Array.isArray(byKey.waiting.items)).toBe(true)
-    expect(Array.isArray(byKey.acted.items)).toBe(true)
-    expect(byKey.queued.items).toBeNull()
-    expect(byKey.off_list.items).toBeNull()
+    expect(Array.isArray(byKey.hot.items)).toBe(true)
+    expect(byKey.cold.items).toBeNull()
   })
 
-  it('?open=off_list → 只有 off_list 展开，默认展开的两段被显式收起', async () => {
-    const { body } = await get('cts', '?view=priority&open=off_list')
+  it('?open=cold → 只有 cold 展开，默认展开的 hot 被显式收起', async () => {
+    const { body } = await get('cts', '?view=priority&open=cold')
     const byKey = Object.fromEntries(
       (body.sections as Array<{ key: string; open: boolean; items: unknown[] | null }>).map((s) => [s.key, s]),
     )
-    expect(byKey.off_list.open).toBe(true)
-    expect(Array.isArray(byKey.off_list.items)).toBe(true)
-    expect(byKey.waiting.open).toBe(false)
-    expect(byKey.waiting.items).toBeNull()
+    expect(byKey.cold.open).toBe(true)
+    expect(Array.isArray(byKey.cold.items)).toBe(true)
+    expect(byKey.hot.open).toBe(false)
+    expect(byKey.hot.items).toBeNull()
   })
 
-  it('?contact=a2 → focus 报出 Sue 落在 off_list 第 1 页（直达链接不再落空）', async () => {
+  it('?contact=a2 → focus 报出 Sue 落在 cold 第 1 页（直达链接不再落空）', async () => {
     const { body } = await get('cts', '?view=priority&contact=a2')
-    expect(body.focus).toMatchObject({ found: true, section: 'off_list', page: 1 })
+    expect(body.focus).toMatchObject({ found: true, section: 'cold', page: 1 })
   })
 
   it('?contact=ghost → focus.found=false，不 500', async () => {
@@ -319,9 +323,43 @@ describe('GET contacts — view=priority（WP3 R5 接线）', () => {
     expect(String(body.error)).toContain('nope')
   })
 
-  it('?p_waiting=0 → 400', async () => {
-    const { status } = await get('cts', '?view=priority&p_waiting=0')
+  it('?p_hot=0 → 400', async () => {
+    const { status } = await get('cts', '?view=priority&p_hot=0')
     expect(status).toBe(400)
+  })
+
+  it('聊过一轮断了 + AI 判高意向 → 抬进 hot；判低意向 → 留在 cold', async () => {
+    BRIEF_ROWS.conversations = [{ id: 'c1', contact_id: 'a1' }]
+    BRIEF_ROWS.conversation_briefs = [
+      {
+        conversation_id: 'c1',
+        intent_level: 'high',
+        next_action: '打给 Bob',
+        generated_at: '2026-10-01T00:00:00.000Z',
+      },
+    ]
+    const high = await get('cts', '?view=priority')
+    const highHot = (high.body.sections as Array<{ key: string; items: Array<Record<string, unknown>> | null }>).find(
+      (s) => s.key === 'hot',
+    )
+    const highBob = highHot?.items?.find((r) => r.contactId === 'a1')
+    expect(highBob?.intent).toBe('high')
+    expect(String(highBob?.nextAction && (highBob.nextAction as { line: string }).line)).toMatch(/^打给他 —— /)
+
+    BRIEF_ROWS.conversation_briefs = [
+      {
+        conversation_id: 'c1',
+        intent_level: 'low',
+        next_action: '打给 Bob',
+        generated_at: '2026-10-01T00:00:00.000Z',
+      },
+    ]
+    const low = await get('cts', '?view=priority')
+    const lowHot = (low.body.sections as Array<{ key: string; items: Array<Record<string, unknown>> | null }>).find(
+      (s) => s.key === 'hot',
+    )
+    const lowBob = lowHot?.items?.find((r) => r.contactId === 'a1')
+    expect(lowBob?.intent).toBe('low')
   })
 
   it('client_id 收口：view=priority 也只按 URL 里那个客户查', async () => {

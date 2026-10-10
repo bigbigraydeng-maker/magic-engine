@@ -10,7 +10,7 @@
 import { useCallback, useState } from 'react'
 import { ComposeNote, type StageOption } from './ComposeNote'
 import { WhatsAppReply } from './WhatsAppReply'
-import { ContactTimeline, type TimelineSummary } from './ContactTimeline'
+import { ContactTimeline, type TimelineSummary, type StageSource } from './ContactTimeline'
 import { MessengerReply } from './MessengerReply'
 import { EmailReply } from './EmailReply'
 import { DncBanner } from './DncBanner'
@@ -18,6 +18,7 @@ import { MarkWonPanel } from './MarkWonPanel'
 import { ImportantMarkerEditor } from './ImportantMarkerEditor'
 import { drawerActions, nextStageChoices, type Channel } from '@/lib/crm/drawer-actions'
 import type { Segment } from '@/lib/crm/segments'
+import type { NextAction } from '@/lib/crm/next-action'
 
 export interface DrawerRow {
   contactId: string
@@ -57,6 +58,17 @@ export interface DrawerRow {
    * （见 `lib/crm/dnc` 与 `api/.../dnc` 路由）。
    */
   doNotContact?: boolean
+  /**
+   * 「该做什么」—— 阶段 / 冷热 / 意向合成的那一个概念（PM 2026-10-10）。
+   * 列表接口算好传进来；没有（老调用方）就退回只显示阶段按钮。
+   */
+  nextAction?: NextAction
+}
+
+const STAGE_SOURCE_LABEL: Record<StageSource, string> = {
+  human: '人工标的',
+  ai_conversation: 'AI 从对话里读的',
+  order_system: '订单系统',
 }
 
 /**
@@ -119,7 +131,7 @@ export function PersonDrawer({
   const onSummary = useCallback((s: TimelineSummary | null) => setSummary(s), [])
 
   const changeStage = async (toStage: string, label: string) => {
-    if (!window.confirm(`现在：${row.stageLabel ?? '还没标到哪一步'} → 改成「${label}」？`)) return
+    if (!window.confirm(`到哪一步了：${row.stageLabel ?? '还没判出来'} → 改成「${label}」？`)) return
     setChangingStage(false)
     try {
       const res = await fetch(`/api/clients/${clientId}/crm/contacts/${row.contactId}/stage`, {
@@ -195,7 +207,6 @@ export function PersonDrawer({
         <header className="flex items-start justify-between gap-3 border-b border-me-charcoal/10 bg-white px-4 py-3">
           <div className="min-w-0">
             <h2 className="truncate text-lg font-black text-me-charcoal">{row.name}</h2>
-            {row.reason && <p className="mt-0.5 text-xs text-me-charcoal/55">{row.reason}</p>}
           </div>
           <button
             onClick={onClose}
@@ -309,7 +320,77 @@ export function PersonDrawer({
             )}
           </div>
 
-          {/* 现在到哪一步了（点一下可改，改前二次确认） */}
+          {/* 该做什么 —— 三行：动作 + 为什么 / AI 建议 / 到哪一步了（点开可改）。
+              这一块取代了原来并排的三套状态（阶段按钮、冷热标签、意向小圆标），PM 2026-10-10：
+              页面少信息多引导，只留一个概念告诉人该做什么。 */}
+          <div className="mt-3 rounded-xl border border-me-charcoal/10 bg-white px-3 py-2.5" data-testid="next-action-card">
+            {row.nextAction ? (
+              <>
+                <p className="text-base font-black text-me-charcoal">{row.nextAction.verbLabel}</p>
+                <p className="mt-0.5 text-[13px] leading-relaxed text-me-charcoal/75">
+                  {row.nextAction.line.slice(row.nextAction.verbLabel.length + 4)}
+                </p>
+                {row.nextAction.aiSuggestion && (
+                  <p className="mt-1.5 text-[13px] text-me-charcoal/85">
+                    <span className="font-bold">AI 建议：</span>
+                    {row.nextAction.aiSuggestion}
+                  </p>
+                )}
+              </>
+            ) : (
+              row.reason && <p className="text-[13px] text-me-charcoal/75">{row.reason}</p>
+            )}
+            {stages.length > 0 && (
+              <div className="mt-2">
+                <button
+                  onClick={() => setChangingStage((v) => !v)}
+                  className="rounded-full border border-me-charcoal/15 bg-white px-3 py-1.5 text-xs font-bold text-me-charcoal/70"
+                >
+                  到哪一步了：{row.stageLabel ?? '还没判出来'}
+                  {summary?.stageSource ? ` · ${STAGE_SOURCE_LABEL[summary.stageSource]}` : ''} ▾
+                </button>
+                {changingStage && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {/* 只给下一步 + 一个「谈崩了」的出口。
+                        铺 9 个阶段的问题不是占地方，是每多一个选项就多一次犹豫 ——
+                        而「新线索」直接跳「已付全款」的情况根本不存在。 */}
+                    {(allStages
+                      ? [...stageChoices.suggested, ...stageChoices.rest]
+                      : stageChoices.suggested
+                    ).map((s) => (
+                      <button
+                        key={s.stageKey}
+                        onClick={() => {
+                          // 🔴 判据照抄「全部客人」那一页（ContactDetail），一个字没改：
+                          // 只有 NAL 把人标成「已成交」时要先录金额、再回传广告转化。
+                          // 两页必须说同一件事，否则销售在一页能标、另一页标不了。
+                          // 那个客户 id 按设计稿要在后续轮改成读配置，这一轮先保持一致。
+                          if (clientId === NAL_CLIENT_ID && s.marketingAction === 'won') {
+                            setChangingStage(false)
+                            setMarkingWon(true)
+                            return
+                          }
+                          void changeStage(s.stageKey, s.label)
+                        }}
+                        className="rounded-full bg-white px-3 py-1.5 text-[13px] font-bold text-me-charcoal shadow-sm"
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                    {!allStages && stageChoices.rest.length > 0 && (
+                      <button
+                        onClick={() => setAllStages(true)}
+                        className="rounded-full border border-dashed border-me-charcoal/25 px-3 py-1.5 text-[13px] font-bold text-me-charcoal/50"
+                      >
+                        其他 {stageChoices.rest.length} 个…
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* 「要记住的事」：打开就看得见，不用滚。跟「全部客人」那页同一个组件。 */}
           <div className="mt-3">
             <ImportantMarkerEditor
@@ -319,55 +400,6 @@ export function PersonDrawer({
               onSaved={(msg) => onSaved(msg, false)}
             />
           </div>
-
-          {stages.length > 0 && (
-            <div className="mt-3">
-              <button
-                onClick={() => setChangingStage((v) => !v)}
-                className="rounded-full border border-me-charcoal/15 bg-white px-3 py-1.5 text-xs font-bold text-me-charcoal/70"
-              >
-                现在：{row.stageLabel ?? '还没标到哪一步'}
-              </button>
-              {changingStage && (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {/* 只给下一步 + 一个「谈崩了」的出口。
-                      铺 9 个阶段的问题不是占地方，是每多一个选项就多一次犹豫 ——
-                      而「新线索」直接跳「已付全款」的情况根本不存在。 */}
-                  {(allStages
-                    ? [...stageChoices.suggested, ...stageChoices.rest]
-                    : stageChoices.suggested
-                  ).map((s) => (
-                    <button
-                      key={s.stageKey}
-                      onClick={() => {
-                        // 🔴 判据照抄「全部客人」那一页（ContactDetail），一个字没改：
-                        // 只有 NAL 把人标成「已成交」时要先录金额、再回传广告转化。
-                        // 两页必须说同一件事，否则销售在一页能标、另一页标不了。
-                        // 那个客户 id 按设计稿要在后续轮改成读配置，这一轮先保持一致。
-                        if (clientId === NAL_CLIENT_ID && s.marketingAction === 'won') {
-                          setChangingStage(false)
-                          setMarkingWon(true)
-                          return
-                        }
-                        void changeStage(s.stageKey, s.label)
-                      }}
-                      className="rounded-full bg-white px-3 py-1.5 text-[13px] font-bold text-me-charcoal shadow-sm"
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                  {!allStages && stageChoices.rest.length > 0 && (
-                    <button
-                      onClick={() => setAllStages(true)}
-                      className="rounded-full border border-dashed border-me-charcoal/25 px-3 py-1.5 text-[13px] font-bold text-me-charcoal/50"
-                    >
-                      其他 {stageChoices.rest.length} 个…
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
 
           {/* 现在该做什么 —— 最多两个按钮，措辞按他能被联系到的渠道走。
               一个从没被联系过的人只有两种结果：打通了，或者没打通。

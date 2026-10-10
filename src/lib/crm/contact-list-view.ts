@@ -2,7 +2,7 @@
  * WP3 R5 —— 「全部客人」页 view=priority 的纯装配函数。
  *
  * 输入：已经从库里取出来的 contacts / touchpoints / stage 配置 + 现在几点。
- * 输出：4 段 SectionResult + focus 命中信息。
+ * 输出：2 张名单（hot / cold）SectionResult + focus 命中信息。
  *
  * 不写 SQL、不调 supabase：调用方（路由）负责按 clientId + stage + q 过滤后
  * 喂进来。这样 (1) SQL 层的筛选跟 view=priority 无关，路由可以直接沿用已有
@@ -18,6 +18,7 @@
 
 import { buildContactModel, type ContactRowLike, type StageMetaLike, type TouchpointRowLike } from './contact-model'
 import { segmentContact } from './segments'
+import { type IntentLevel } from './next-action'
 import {
   buildSections,
   type BuildOptions,
@@ -38,6 +39,8 @@ export interface PriorityViewInput {
   open?: Partial<Record<SectionKey, boolean>>
   page?: Partial<Record<SectionKey, number>>
   focusContactId?: string
+  /** 每人最新 AI 摘要的意向（contactId → intent）。缺省 = 没有摘要，所有人 intent=null。 */
+  briefs?: ReadonlyMap<string, { intent: IntentLevel | null }>
 }
 
 export interface PriorityViewOutput<T> {
@@ -72,6 +75,7 @@ export function buildPriorityView<T>(
     ranked.push({
       contactId: c.id,
       seg,
+      intent: input.briefs?.get(c.id)?.intent ?? null,
       pinnedAt: (c as ContactRowLike & { pinned_at?: string | null }).pinned_at ?? null,
     })
   }

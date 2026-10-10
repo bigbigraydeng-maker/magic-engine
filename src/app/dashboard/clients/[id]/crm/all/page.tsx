@@ -11,8 +11,9 @@
  * 也顺带解决了「两份重复逻辑」的老毛病（原来 ContactDetail 和 PersonDrawer 各判一次
  * NAL、各接一份 WhatsApp 回复框）。删除的 ContactDetail.tsx 见这次改动的 diff。
  *
- * 板桥定的几条落地：进线时间显示真实首条触点（后端已算）不是导入日期；状态拆成
- * 「跟进到哪步」+「现在冷热」两列；每个空格填人话绝不留白；顶部搜索 + 表头排序 +
+ * 板桥定的几条落地：进线时间显示真实首条触点（后端已算）不是导入日期；状态合成
+ * 「该做什么」一列（阶段 / 冷热 / 意向三套状态合成一个概念，PM 2026-10-10）；
+ * 每个空格填人话绝不留白；顶部搜索 + 表头排序 +
  * 总数；渠道/方向标签带 fallback（DB 加新枚举前端不炸）。
  */
 
@@ -29,7 +30,7 @@ import type { Segment } from '@/lib/crm/segments'
 import { type KindView } from '@/lib/crm/kind-filter'
 import { dayProgress } from '@/lib/crm/day-list'
 import {
-  TEMP_CLS,
+  LIST_CLS,
   fmtDate,
   relTime,
   ts,
@@ -38,7 +39,7 @@ import {
 } from './_components/contact-table-types'
 
 // SectionKey 从 drawer-nav.ts 引，不在本文件另声明一份同样的字面量联合类型——
-// 只有一处定义，谁改了 lib/crm/list-sections.ts 的四段名字，这里跟着变，不用记得改两处。
+// 只有一处定义，谁改了 lib/crm/list-sections.ts 的两张名单（hot / cold）的名字，这里跟着变，不用记得改两处。
 interface PrioritySectionData {
   key: SectionKey
   title: string
@@ -75,6 +76,8 @@ function toDrawerRow(r: ContactRow): DrawerRow {
     stage: r.stage,
     stageLabel: r.stageLabel,
     reason: r.reason,
+    // 「该做什么」三行卡的内容 —— 跟列表那一格同一个对象，两处不会说两套话。
+    nextAction: r.nextAction,
     // 后端 segmentContact() 的枚举值原样传下来，这里的 ContactRow.segment 类型是
     // string（跨接口共用的宽类型），值域跟 Segment 一致，不重新校验。
     segment: r.segment as Segment,
@@ -542,7 +545,7 @@ export default function CrmAllContactsPage() {
     }
   }
 
-  const colCount = 7 + columns.length
+  const colCount = 6 + columns.length
   const sortArrow = (key: 'firstSeenAt' | 'lastTouchAt') =>
     sortKey === key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
 
@@ -633,16 +636,10 @@ export default function CrmAllContactsPage() {
           </td>
         ))}
         <td className="px-4 py-3">
-          {r.stageLabel ? (
-            <span className="text-me-charcoal/70">{r.stageLabel}</span>
-          ) : (
-            <span className="text-me-charcoal/35">还没标</span>
-          )}
-        </td>
-        <td className="px-4 py-3">
-          <span className={`rounded-full px-2 py-0.5 text-xs ${TEMP_CLS[r.temperature]}`}>
-            {r.segmentLabel}
+          <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${LIST_CLS[r.nextAction.list]}`}>
+            {r.nextAction.verbLabel}
           </span>
+          <span className="ml-2 text-xs text-me-charcoal/60">{r.nextAction.line.slice(r.nextAction.verbLabel.length + 4)}</span>
         </td>
       </tr>
     )
@@ -693,7 +690,7 @@ export default function CrmAllContactsPage() {
 
           {stages.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs text-me-charcoal/45">跟进到哪步：</span>
+              <span className="text-xs text-me-charcoal/45">到哪一步了：</span>
               {stages.map((s) => {
                 const on = stageFilter.includes(s.stageKey)
                 return (
@@ -802,7 +799,7 @@ export default function CrmAllContactsPage() {
               也会弹出「大家的跟进到哪步都还空着」（魏征 C3 / 子牙 P1-4 实测）。 */}
           {total > 0 && rows.length > 0 && rows.every((r) => !r.stage) && (
             <p className="rounded-lg bg-me-ivory px-3 py-2 text-xs leading-relaxed text-me-charcoal/55">
-              刚搬过来，大家的「跟进到哪步」都还空着 —— 聊完顺手标一下就行，不用一次标完。右边「现在冷热」是系统自动算的，现在就能用。
+              「该做什么」是系统按往来记录和 AI 摘要算的，现在就能用；点开一个人可以在里面标他到哪一步了。
             </p>
           )}
 
@@ -834,8 +831,7 @@ export default function CrmAllContactsPage() {
                   {columns.map((c) => (
                     <th key={c.key} className="px-4 py-3">{c.label}</th>
                   ))}
-                  <th className="px-4 py-3">跟进到哪步</th>
-                  <th className="px-4 py-3">现在冷热</th>
+                  <th className="px-4 py-3">该做什么</th>
                 </tr>
               </thead>
               <tbody>
