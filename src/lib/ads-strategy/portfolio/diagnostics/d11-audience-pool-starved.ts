@@ -225,7 +225,7 @@ function feedSuffix(ctx: AccountContext, lastStrong: string | null, days: string
 
 function poolAgeSentence(ageDays: number | null, retention: number | null): string {
   if (ageDays !== null && retention !== null && retention > 0 && ageDays < retention) {
-    return `池子建了 ${ageDays} 天，保留期 ${retention} 天，还没有人到期被移出——没长就是真的没新人进来。`
+    return `池子建了 ${ageDays} 天，保留期 ${retention} 天；但创建前已发生的观看也会被纳入，不能确定还没有人到期被移出，没长不等于没新人进来，这条主要依据供血花费。`
   }
   if (ageDays !== null && retention !== null && retention > 0) {
     return `池子已建 ${ageDays} 天，超过保留期 ${retention} 天，没长也可能是进出打平；这条主要依据供血花费。`
