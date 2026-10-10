@@ -45,7 +45,10 @@ export function renderLadderUnavailable(reason: string): string {
 /** 重点客户之外、其它有广告花费的客户：邮件末尾单列一节。 */
 export function renderOtherLadders(section: ReturnLadderSection | undefined, shownClientIds: readonly string[]): string {
   if (section === undefined) return ''
-  if ('error' in section) return ''
+  // 整段读失败：重点客户那边各自有占位块；这里也要说一声，否则其它客户会悄悄消失。
+  if ('error' in section) {
+    return `<h3 style="${SECTION_TITLE_STYLE}">其它有广告的客户</h3>${renderLadderUnavailable(section.error)}`
+  }
   const shown = new Set(shownClientIds)
   const rows = section.rows.filter(r => !shown.has(r.client_id))
   const failures = section.failed.filter(f => !shown.has(f.client_id))

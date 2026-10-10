@@ -4,7 +4,7 @@ vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 
 import {
   computeReturnLadder, ladderWindow, monthMaturity,
-  LADDER_MIN_DEALS_FOR_VERDICT,
+  LADDER_MIN_DEALS_FOR_VERDICT, LADDER_MAX_UNKNOWN_SOURCE_SHARE,
   type LadderInput, type LadderOutcomeRow, type LadderSpendRow, type LadderContactFact,
 } from '../compute'
 
@@ -39,8 +39,8 @@ function spend(
     platform: 'p1',
     insightDate: date,
     spend: amount,
-    leads: null,
-    messagingConversations: null,
+    leads: 0,
+    messagingConversations: 0,
     ...extra,
   }
 }
@@ -86,6 +86,7 @@ function balance(
   occurredAt: string,
   amountMinor: number,
   currency: string | null = 'NZD',
+  status: LadderOutcomeRow['reviewStatus'] = 'approved',
 ): LadderOutcomeRow {
   return {
     id,
@@ -94,7 +95,7 @@ function balance(
     amountMinor,
     currency,
     occurredAt,
-    reviewStatus: 'approved',
+    reviewStatus: status,
   }
 }
 
@@ -248,6 +249,7 @@ describe('qualified level', () => {
     }))
     expect(out.qualified.count).toBe(2)
     expect(out.qualified.fromPaid).toBe(1)
+    expect(out.qualified.otherSource).toBe(0)
     expect(out.qualified.unknownSource).toBe(1)
     expect(out.qualified.pendingReview).toBe(1)
     expect(out.reachedLevel).toBe(3)
@@ -261,6 +263,8 @@ describe('qualified level', () => {
     }))
     expect(out.qualified.count).toBe(1)
     expect(out.qualified.fromPaid).toBe(0)
+    expect(out.qualified.otherSource).toBe(1)
+    expect(out.qualified.unknownSource).toBe(0)
   })
 
   it('never counts a rejected lead', () => {
@@ -523,5 +527,508 @@ describe('notes', () => {
   it('flags multiple timezones', () => {
     const out = computeReturnLadder(base({ timezoneCount: 2 }))
     expect(out.notes).toContain('multiple_timezones')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// A. Level 6 never appears without levels 1–5
+// ---------------------------------------------------------------------------
+
+describe('earlier level missing', () => {
+  it('blocks the return when qualified is missing', () => {
+    const contacts: LadderContactFact[] = []
+    const outcomes: LadderOutcomeRow[] = []
+    for (let i = 0; i < LADDER_MIN_DEALS_FOR_VERDICT; i++) {
+      const cid = `c${i + 1}`
+      contacts.push(contact(cid, '2026-08-05T02:00:00Z', 'p1'))
+      outcomes.push(purchase(`p${i + 1}`, cid, '2026-08-15T02:00:00Z', 100000))
+    }
+    const out = computeReturnLadder(base({
+      salesCycleDays: 30,
+      spendRows: [spend('2026-08-05', 1000, { platform: 'p1' })],
+      contacts,
+      outcomes,
+    }))
+    expect(out.qualified.status).toBe('missing')
+    expect(out.reachedLevel).toBe(2)
+    expect(out.returnOnSpend.status).toBe('cannot_judge')
+    expect(out.returnOnSpend.blockers).toContain('earlier_level_missing')
+    expect(out.returnOnSpend.firstPaymentBasis).toBeNull()
+    expect(out.returnOnSpend.withBalanceBasis).toBeNull()
+    expect(out.returnOnSpend.withBalanceBasisWithoutLargest).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// B. Balance is not double-added
+// ---------------------------------------------------------------------------
+
+describe('balance allocation', () => {
+  it('attaches a balance to exactly one deal', () => {
+    const out = computeReturnLadder(base({
+      spendRows: [spend('2026-08-05', 100, { platform: 'p1' })],
+      contacts: [contact('c1', null, 'p1')],
+      outcomes: [
+        lead('l1', 'c1', '2026-08-10T02:00:00Z'),
+        purchase('p1', 'c1', '2026-08-12T02:00:00Z', 100000),
+        purchase('p2', 'c1', '2026-08-20T02:00:00Z', 100000),
+        balance('b1', 'c1', '2026-08-25T02:00:00Z', 500000),
+      ],
+    }))
+    expect(out.revenue.withBalance).toEqual([{ currency: 'NZD', amountMinor: 700000 }])
+  })
+
+  // C. Old balance is ignored
+  it('ignores a balance earlier than every purchase of the contact', () => {
+    const out = computeReturnLadder(base({
+      spendRows: [spend('2026-08-05', 100, { platform: 'p1' })],
+      contacts: [contact('c1', null, 'p1')],
+      outcomes: [
+        lead('l1', 'c1', '2026-08-10T02:00:00Z'),
+        purchase('p1', 'c1', '2026-08-15T02:00:00Z', 100000),
+        balance('b1', 'c1', '2024-03-01T02:00:00Z', 500000),
+      ],
+    }))
+    expect(out.revenue.withBalance).toEqual(out.revenue.firstPayment)
+  })
+
+  // D. Pending balance is not counted
+  it('ignores a pending balance', () => {
+    const out = computeReturnLadder(base({
+      spendRows: [spend('2026-08-05', 100, { platform: 'p1' })],
+      contacts: [contact('c1', null, 'p1')],
+      outcomes: [
+        lead('l1', 'c1', '2026-08-10T02:00:00Z'),
+        purchase('p1', 'c1', '2026-08-15T02:00:00Z', 100000),
+        balance('b1', 'c1', '2026-08-20T02:00:00Z', 500000, 'NZD', 'pending_review'),
+      ],
+    }))
+    expect(out.revenue.withBalance).toEqual([{ currency: 'NZD', amountMinor: 100000 }])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// E. otherSource
+// ---------------------------------------------------------------------------
+
+describe('other source', () => {
+  it('counts a lead from a non-paid platform as otherSource', () => {
+    const out = computeReturnLadder(base({
+      spendRows: [spend('2026-08-05', 100, { platform: 'p1' })],
+      contacts: [contact('c1', null, 'referral_x')],
+      outcomes: [lead('l1', 'c1', '2026-08-10T02:00:00Z')],
+    }))
+    expect(out.qualified.fromPaid).toBe(0)
+    expect(out.qualified.otherSource).toBe(1)
+    expect(out.qualified.unknownSource).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// F. Non-paid deals stay out of the return numerator
+// ---------------------------------------------------------------------------
+
+describe('non-paid deals excluded from return', () => {
+  it('keeps the ratios and dealCount unchanged', () => {
+    const contacts: LadderContactFact[] = []
+    const outcomes: LadderOutcomeRow[] = []
+    const amounts = [100000, 100000, 100000, 100000, 600000]
+    for (let i = 0; i < amounts.length; i++) {
+      const cid = `c${i + 1}`
+      contacts.push(contact(cid, null, 'p1'))
+      outcomes.push(lead(`l${i + 1}`, cid, '2026-08-10T02:00:00Z'))
+      outcomes.push(purchase(`p${i + 1}`, cid, '2026-08-15T02:00:00Z', amounts[i] ?? 0))
+    }
+    outcomes.push(balance('b1', 'c1', '2026-08-20T02:00:00Z', 200000))
+    for (let i = 0; i < 2; i++) {
+      const cid = `cx${i + 1}`
+      contacts.push(contact(cid, null, 'referral_x'))
+      outcomes.push(lead(`lx${i + 1}`, cid, '2026-08-10T02:00:00Z'))
+      outcomes.push(purchase(`px${i + 1}`, cid, '2026-08-15T02:00:00Z', 5000000))
+    }
+    const out = computeReturnLadder(base({
+      salesCycleDays: 30,
+      spendRows: [
+        spend('2026-08-05', 1000, { platform: 'p1' }),
+        spend('2026-09-05', 500, { platform: 'p1' }),
+      ],
+      contacts,
+      outcomes,
+    }))
+    expect(out.returnOnSpend.dealCount).toBe(5)
+    expect(out.returnOnSpend.firstPaymentBasis).toBe(10)
+    expect(out.returnOnSpend.withBalanceBasis).toBe(12)
+    expect(out.returnOnSpend.withBalanceBasisWithoutLargest).toBe(6)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// G. Largest deal is picked by amount INCLUDING its balance
+// ---------------------------------------------------------------------------
+
+describe('largest deal includes its balance', () => {
+  it('subtracts the largest with-balance deal', () => {
+    const contacts: LadderContactFact[] = []
+    const outcomes: LadderOutcomeRow[] = []
+    for (let i = 0; i < 5; i++) {
+      const cid = `c${i + 1}`
+      contacts.push(contact(cid, null, 'p1'))
+      outcomes.push(lead(`l${i + 1}`, cid, '2026-08-10T02:00:00Z'))
+      outcomes.push(purchase(`p${i + 1}`, cid, '2026-08-15T02:00:00Z', 100000))
+    }
+    outcomes.push(balance('b1', 'c1', '2026-08-20T02:00:00Z', 900000))
+    contacts.push(contact('c6', null, 'p1'))
+    outcomes.push(lead('l6', 'c6', '2026-08-10T02:00:00Z'))
+    outcomes.push(purchase('p6', 'c6', '2026-08-15T02:00:00Z', 300000))
+    const out = computeReturnLadder(base({
+      salesCycleDays: 30,
+      spendRows: [spend('2026-08-05', 1000, { platform: 'p1' })],
+      contacts,
+      outcomes,
+    }))
+    expect(out.returnOnSpend.withBalanceBasis).toBe(17)
+    expect(out.returnOnSpend.withBalanceBasisWithoutLargest).toBe(7)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// H. Threshold boundary
+// ---------------------------------------------------------------------------
+
+describe('too few deals boundary', () => {
+  it('does not block at exactly the minimum', () => {
+    const out = computeReturnLadder(fullData(LADDER_MIN_DEALS_FOR_VERDICT, { salesCycleDays: 30 }))
+    expect(out.returnOnSpend.blockers).not.toContain('too_few_deals')
+  })
+
+  it('blocks one below the minimum', () => {
+    const out = computeReturnLadder(fullData(LADDER_MIN_DEALS_FOR_VERDICT - 1, { salesCycleDays: 30 }))
+    expect(out.returnOnSpend.blockers).toContain('too_few_deals')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// I. Unknown share boundary
+// ---------------------------------------------------------------------------
+
+/** N paid deals + M unknown-source deals, all placed in 2026-08. */
+function paidAndUnknown(paidCount: number, unknownCount: number): LadderInput {
+  const contacts: LadderContactFact[] = []
+  const outcomes: LadderOutcomeRow[] = []
+  for (let i = 0; i < paidCount; i++) {
+    const cid = `c${i + 1}`
+    contacts.push(contact(cid, null, 'p1'))
+    outcomes.push(lead(`l${i + 1}`, cid, '2026-08-10T02:00:00Z'))
+    outcomes.push(purchase(`p${i + 1}`, cid, '2026-08-15T02:00:00Z', 100000))
+  }
+  for (let i = 0; i < unknownCount; i++) {
+    const cid = `cu${i + 1}`
+    contacts.push(contact(cid, null, null))
+    outcomes.push(lead(`lu${i + 1}`, cid, '2026-08-10T02:00:00Z'))
+    outcomes.push(purchase(`pu${i + 1}`, cid, '2026-08-15T02:00:00Z', 100000))
+  }
+  return base({
+    salesCycleDays: 30,
+    spendRows: [spend('2026-08-05', 1000, { platform: 'p1' })],
+    contacts,
+    outcomes,
+  })
+}
+
+describe('unknown share boundary', () => {
+  it('does not block at exactly 0.5', () => {
+    const out = computeReturnLadder(paidAndUnknown(5, 5))
+    expect(out.returnOnSpend.blockers).not.toContain('unknown_source_share_too_high')
+    expect(out.returnOnSpend.unknownSourceDeals).toBe(5)
+  })
+
+  it('blocks above 0.5', () => {
+    const out = computeReturnLadder(paidAndUnknown(5, 6))
+    expect(out.returnOnSpend.blockers).toContain('unknown_source_share_too_high')
+    expect(out.returnOnSpend.unknownSourceDeals).toBe(6)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// J. Spend currencies
+// ---------------------------------------------------------------------------
+
+describe('spend currency blockers', () => {
+  it('flags a mismatch when spend spans two currencies', () => {
+    const out = computeReturnLadder(returnScenario({
+      accounts: [
+        { adAccountId: 'acct_a', currency: 'NZD' },
+        { adAccountId: 'acct_b', currency: 'AUD' },
+      ],
+      spendRows: [
+        spend('2026-08-05', 1000, { platform: 'p1', adAccountId: 'acct_a' }),
+        spend('2026-08-05', 500, { platform: 'p1', adAccountId: 'acct_b' }),
+      ],
+    }))
+    expect(out.returnOnSpend.blockers).toContain('currency_mismatch')
+  })
+
+  it('flags a mismatch when revenue spans two currencies', () => {
+    const contacts: LadderContactFact[] = []
+    const outcomes: LadderOutcomeRow[] = []
+    const amounts = [100000, 100000, 100000, 100000, 600000]
+    for (let i = 0; i < amounts.length; i++) {
+      const cid = `c${i + 1}`
+      contacts.push(contact(cid, null, 'p1'))
+      outcomes.push(lead(`l${i + 1}`, cid, '2026-08-10T02:00:00Z'))
+      outcomes.push(purchase(`p${i + 1}`, cid, '2026-08-15T02:00:00Z', amounts[i] ?? 0, i === 0 ? 'AUD' : 'NZD'))
+    }
+    const out = computeReturnLadder(returnScenario({ contacts, outcomes }))
+    expect(out.returnOnSpend.blockers).toContain('currency_mismatch')
+  })
+
+  it('flags an unsupported currency as unknown', () => {
+    const contacts: LadderContactFact[] = []
+    const outcomes: LadderOutcomeRow[] = []
+    const amounts = [100000, 100000, 100000, 100000, 600000]
+    for (let i = 0; i < amounts.length; i++) {
+      const cid = `c${i + 1}`
+      contacts.push(contact(cid, null, 'p1'))
+      outcomes.push(lead(`l${i + 1}`, cid, '2026-08-10T02:00:00Z'))
+      outcomes.push(purchase(`p${i + 1}`, cid, '2026-08-15T02:00:00Z', amounts[i] ?? 0, 'XXX'))
+    }
+    const out = computeReturnLadder(returnScenario({
+      accounts: [{ adAccountId: 'acct_a', currency: 'XXX' }],
+      contacts,
+      outcomes,
+    }))
+    expect(out.returnOnSpend.blockers).toContain('currency_unknown')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// K. Lead-in uses the EARLIEST approved lead
+// ---------------------------------------------------------------------------
+
+describe('earliest lead wins', () => {
+  it('books to the earliest approved lead month', () => {
+    const out = computeReturnLadder(base({
+      spendRows: [spend('2026-08-05', 100, { platform: 'p1' })],
+      contacts: [contact('c1', '2026-09-20T02:00:00Z', 'p1')],
+      outcomes: [
+        lead('l1', 'c1', '2026-08-10T02:00:00Z'),
+        lead('l2', 'c1', '2026-09-15T02:00:00Z'),
+        purchase('p1', 'c1', '2026-10-02T02:00:00Z', 100000),
+      ],
+    }))
+    expect(out.months[0]?.deals).toBe(1)
+    expect(out.months[1]?.deals).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// L. Lead day beats firstSeenAt
+// ---------------------------------------------------------------------------
+
+describe('lead day beats firstSeenAt', () => {
+  it('books to the lead month, not the firstSeen month', () => {
+    const out = computeReturnLadder(base({
+      spendRows: [spend('2026-08-05', 100, { platform: 'p1' })],
+      contacts: [contact('c1', '2026-09-05T02:00:00Z', 'p1')],
+      outcomes: [
+        lead('l1', 'c1', '2026-08-10T02:00:00Z'),
+        purchase('p1', 'c1', '2026-10-02T02:00:00Z', 100000),
+      ],
+    }))
+    expect(out.months[0]?.deals).toBe(1)
+    expect(out.months[1]?.deals).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// M. Return is by lead-in month, not money month
+// ---------------------------------------------------------------------------
+
+describe('return uses lead-in month', () => {
+  it('excludes deals whose leads are in an immature month', () => {
+    const contacts: LadderContactFact[] = []
+    const outcomes: LadderOutcomeRow[] = []
+    for (let i = 0; i < 5; i++) {
+      const cid = `c${i + 1}`
+      contacts.push(contact(cid, null, 'p1'))
+      outcomes.push(lead(`l${i + 1}`, cid, '2026-09-10T02:00:00Z'))
+      outcomes.push(purchase(`p${i + 1}`, cid, '2026-10-02T02:00:00Z', 100000))
+    }
+    const out = computeReturnLadder(base({
+      salesCycleDays: 30,
+      spendRows: [spend('2026-08-05', 1000, { platform: 'p1' })],
+      contacts,
+      outcomes,
+    }))
+    expect(out.returnOnSpend.dealCount).toBe(0)
+    expect(out.returnOnSpend.blockers).toContain('too_few_deals')
+  })
+
+  it('includes deals whose leads are in a mature month even if money arrives later', () => {
+    const contacts: LadderContactFact[] = []
+    const outcomes: LadderOutcomeRow[] = []
+    for (let i = 0; i < 5; i++) {
+      const cid = `c${i + 1}`
+      contacts.push(contact(cid, null, 'p1'))
+      outcomes.push(lead(`l${i + 1}`, cid, '2026-08-10T02:00:00Z'))
+      outcomes.push(purchase(`p${i + 1}`, cid, '2026-10-02T02:00:00Z', 100000))
+    }
+    const out = computeReturnLadder(base({
+      salesCycleDays: 30,
+      spendRows: [spend('2026-08-05', 1000, { platform: 'p1' })],
+      contacts,
+      outcomes,
+    }))
+    expect(out.returnOnSpend.dealCount).toBe(5)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// N. Unplaced deals never enter the return
+// ---------------------------------------------------------------------------
+
+describe('unplaced deals excluded from return', () => {
+  it('cannot be paid in mature months', () => {
+    const contacts: LadderContactFact[] = []
+    const outcomes: LadderOutcomeRow[] = []
+    for (let i = 0; i < 5; i++) {
+      const cid = `c${i + 1}`
+      contacts.push(contact(cid, null, 'p1'))
+      outcomes.push(purchase(`p${i + 1}`, cid, '2026-08-15T02:00:00Z', 100000))
+    }
+    const out = computeReturnLadder(base({
+      salesCycleDays: 30,
+      spendRows: [spend('2026-08-05', 1000, { platform: 'p1' })],
+      contacts,
+      outcomes,
+    }))
+    expect(out.returnOnSpend.dealCount).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// O. Timezone day boundary for a purchase's own occurredAt
+// ---------------------------------------------------------------------------
+
+describe('purchase occurredAt timezone boundary', () => {
+  it('uses the account timezone for unplaced deals', () => {
+    const outcomes = [purchase('p1', null, '2026-07-31T13:30:00Z', 100000)]
+    const spendRows = [spend('2026-08-05', 100, { platform: 'p1' })]
+
+    const auckland = computeReturnLadder(base({ spendRows, outcomes }))
+    expect(auckland.deals.count).toBe(1)
+
+    const utc = computeReturnLadder(base({ spendRows, outcomes, timezone: 'UTC' }))
+    expect(utc.deals.count).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// P. Timezone day boundary for firstSeenAt
+// ---------------------------------------------------------------------------
+
+describe('firstSeenAt timezone boundary', () => {
+  it('places a deal by firstSeenAt in the account timezone', () => {
+    const outcomes = [purchase('p1', 'c1', '2026-08-15T02:00:00Z', 100000)]
+    const contacts = [contact('c1', '2026-07-31T13:30:00Z', 'p1')]
+    const spendRows = [spend('2026-08-05', 100, { platform: 'p1' })]
+
+    const auckland = computeReturnLadder(base({ spendRows, outcomes, contacts }))
+    expect(auckland.months[0]?.deals).toBe(1)
+
+    const utc = computeReturnLadder(base({ spendRows, outcomes, contacts, timezone: 'UTC' }))
+    expect(utc.deals.leadInBeforeWindow).toBe(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Q. spendIncomplete → results cannot_judge
+// ---------------------------------------------------------------------------
+
+describe('spend incomplete blocks results', () => {
+  it('marks results cannot_judge even with numbers present', () => {
+    const out = computeReturnLadder(base({
+      spendIncomplete: true,
+      spendRows: [spend('2026-08-05', 100, { leads: 2, messagingConversations: 3 })],
+    }))
+    expect(out.results.status).toBe('cannot_judge')
+    expect(out.results.leads).toBe(2)
+    expect(out.results.conversations).toBe(3)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// R. All-null leads column
+// ---------------------------------------------------------------------------
+
+describe('all-null result columns', () => {
+  it('keeps leads null while conversations is a number', () => {
+    const out = computeReturnLadder(base({
+      spendRows: [spend('2026-08-05', 100, { leads: null, messagingConversations: 3 })],
+    }))
+    expect(out.results.leads).toBeNull()
+    expect(out.results.conversations).toBe(3)
+    expect(out.results.status).toBe('has')
+  })
+
+  it('is missing when both columns are all null', () => {
+    const out = computeReturnLadder(base({
+      spendRows: [spend('2026-08-05', 100, { leads: null, messagingConversations: null })],
+    }))
+    expect(out.results.status).toBe('missing')
+    expect(out.reachedLevel).toBe(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// S. Stale spend
+// ---------------------------------------------------------------------------
+
+describe('stale spend', () => {
+  it('flags spend_stale when the latest row is old', () => {
+    const out = computeReturnLadder(base({
+      spendRows: [spend('2026-08-18', 100)],
+    }))
+    expect(out.spend.daysSinceLatest).toBe(52)
+    expect(out.notes).toContain('spend_stale')
+  })
+
+  it('does not flag spend_stale when the latest row is recent', () => {
+    const out = computeReturnLadder(base({
+      spendRows: [spend('2026-10-05', 100)],
+    }))
+    expect(out.notes).not.toContain('spend_stale')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T. No spend in mature months
+// ---------------------------------------------------------------------------
+
+describe('no spend in mature months', () => {
+  it('blocks with no_spend_in_mature_months and not no_mature_month', () => {
+    const contacts: LadderContactFact[] = []
+    const outcomes: LadderOutcomeRow[] = []
+    for (let i = 0; i < 5; i++) {
+      const cid = `c${i + 1}`
+      contacts.push(contact(cid, null, 'p1'))
+      outcomes.push(lead(`l${i + 1}`, cid, '2026-08-10T02:00:00Z'))
+      outcomes.push(purchase(`p${i + 1}`, cid, '2026-08-15T02:00:00Z', 100000))
+    }
+    const out = computeReturnLadder(base({
+      salesCycleDays: 30,
+      spendRows: [spend('2026-10-05', 1000, { platform: 'p1' })],
+      contacts,
+      outcomes,
+    }))
+    expect(out.returnOnSpend.blockers).toContain('no_spend_in_mature_months')
+    expect(out.returnOnSpend.blockers).not.toContain('no_mature_month')
+  })
+})
+
+describe('provisional thresholds (待 PM 定)', () => {
+  it('are exactly the documented provisional values — changing them must be a deliberate, reviewed edit', () => {
+    expect(LADDER_MIN_DEALS_FOR_VERDICT).toBe(5)
+    expect(LADDER_MAX_UNKNOWN_SOURCE_SHARE).toBe(0.5)
   })
 })

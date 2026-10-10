@@ -126,8 +126,9 @@ async function readSpendRows(
       .select('client_id, ad_account_id, platform, insight_date, spend, leads, messaging_conversations')
       .eq('level', 'campaign')
       .gte('insight_date', since)
+      // 第二排序键用主键：同一天同一个广告系列可能挂在两个客户名下，不用唯一键翻页会重或漏。
       .order('insight_date', { ascending: true })
-      .order('entity_id', { ascending: true })
+      .order('id', { ascending: true })
       .range(from, to),
   )
 }

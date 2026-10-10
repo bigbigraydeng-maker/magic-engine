@@ -22,6 +22,8 @@ export const LADDER_WINDOW_MONTHS = 3
 export const LADDER_MIN_DEALS_FOR_VERDICT = 5
 /** 来源不明的成交占比高于这个数，回报写「判不了」。⚠️ 暂用值，待 PM 定 / 待验证，不是定论。 */
 export const LADDER_MAX_UNKNOWN_SOURCE_SHARE = 0.5
+/** 最新一天花费数据离评估日超过这么多天，就提醒「近 N 天没有新数据」（周报一周一看，所以取 7）。 */
+export const LADDER_STALE_AFTER_DAYS = 7
 
 export interface LadderSpendRow {
   adAccountId: string
@@ -85,10 +87,10 @@ export interface SpendByCurrency { currency: string | null; amount: number }
 export interface RevenueByCurrency { currency: string | null; amountMinor: number }
 
 export type ReturnBlocker =
-  | 'no_revenue' | 'spend_incomplete' | 'currency_unknown' | 'currency_mismatch' | 'cycle_not_configured'
-  | 'no_mature_month' | 'too_few_deals' | 'unknown_source_share_too_high'
+  | 'earlier_level_missing' | 'spend_incomplete' | 'currency_unknown' | 'currency_mismatch' | 'cycle_not_configured'
+  | 'no_mature_month' | 'no_spend_in_mature_months' | 'too_few_deals' | 'unknown_source_share_too_high'
 
-export type LadderNote = 'config_unreadable' | 'timezone_unknown' | 'multiple_timezones' | 'spend_incomplete'
+export type LadderNote = 'config_unreadable' | 'timezone_unknown' | 'multiple_timezones' | 'spend_incomplete' | 'spend_stale'
 
 export type MonthMaturity = 'mature' | 'immature' | 'not_configured'
 
@@ -105,19 +107,31 @@ export interface ReturnLadder {
   window: { from: string; to: string }
   /** 从第 1 级起连续「has」的最高一级；0 = 连花费都没有 */
   reachedLevel: 0 | 1 | 2 | 3 | 4 | 5 | 6
-  spend: { status: LevelStatus; byCurrency: SpendByCurrency[]; daysWithData: number; accountCount: number; platforms: string[]; latestDate: string | null }
+  spend: {
+    status: LevelStatus; byCurrency: SpendByCurrency[]; daysWithData: number; accountCount: number; platforms: string[]
+    latestDate: string | null
+    /** 最新一天花费数据离评估日几天；没有数据 = null */
+    daysSinceLatest: number | null
+  }
   results: { status: LevelStatus; leads: number | null; conversations: number | null; primary: CoreMetric | null; latestDate: string | null }
-  qualified: { status: LevelStatus; count: number; fromPaid: number; unknownSource: number; pendingReview: number; latestDate: string | null }
-  deals: { status: LevelStatus; count: number; fromPaid: number; unknownSource: number; unplacedMonth: number; leadInBeforeWindow: number; pendingReview: number; latestDate: string | null }
+  /** fromPaid + otherSource + unknownSource = count。otherSource = 有来源标记、但不是这个客户花过钱的渠道 */
+  qualified: { status: LevelStatus; count: number; fromPaid: number; otherSource: number; unknownSource: number; pendingReview: number; latestDate: string | null }
+  deals: { status: LevelStatus; count: number; fromPaid: number; otherSource: number; unknownSource: number; unplacedMonth: number; leadInBeforeWindow: number; pendingReview: number; latestDate: string | null }
   revenue: { status: LevelStatus; firstPayment: RevenueByCurrency[]; withBalance: RevenueByCurrency[]; latestDate: string | null }
   returnOnSpend: {
     status: 'has' | 'cannot_judge'
     blockers: ReturnBlocker[]
-    /** 回报倍数 = 收入 ÷ 广告费；只在 status='has' 时非 null */
+    /**
+     * 回报倍数 = 收入 ÷ 广告费；只在 status='has' 时非 null。
+     * 分子只算「已走完成交周期的月份里、来源标记是付费渠道」的成交 —— 范围比第 5 级窄。
+     */
     firstPaymentBasis: number | null
     withBalanceBasis: number | null
     withBalanceBasisWithoutLargest: number | null
+    /** 进了分子的成交单数 */
     dealCount: number
+    /** 同范围内来源不明、没进分子的成交单数 */
+    unknownSourceDeals: number
     matureMonths: string[]
     immatureMonths: string[]
   }
@@ -234,6 +248,7 @@ interface SpendLevel {
   accountCount: number
   platforms: string[]
   latestDate: string | null
+  daysSinceLatest: number | null
   /** 窗口内花费 > 0 的平台集合，供「来源是否付费」判定 */
   paidPlatforms: Set<string>
   /** 窗口内花费行（已过滤） */
@@ -255,6 +270,7 @@ function computeSpendLevel(input: LadderInput, window: { from: string; to: strin
   const accounts = new Set(paid.map(r => r.adAccountId))
   const platforms = Array.from(new Set(paid.map(r => r.platform))).sort()
 
+  const latestDate = maxDay(rows.map(r => r.insightDate))
   const status: LevelStatus = input.spendIncomplete
     ? 'cannot_judge'
     : byCurrency.length > 0 ? 'has' : 'missing'
@@ -265,7 +281,8 @@ function computeSpendLevel(input: LadderInput, window: { from: string; to: strin
     daysWithData: days.size,
     accountCount: accounts.size,
     platforms,
-    latestDate: maxDay(rows.map(r => r.insightDate)),
+    latestDate,
+    daysSinceLatest: latestDate === null ? null : Math.round((parseDay(input.asOfDate).getTime() - parseDay(latestDate).getTime()) / 86_400_000),
     paidPlatforms: new Set(paid.map(r => r.platform)),
     rows,
   }
@@ -289,9 +306,14 @@ function computeResultsLevel(input: LadderInput, spend: SpendLevel): ResultsLeve
   if (rows.length === 0) {
     return { status: 'missing', leads: null, conversations: null, primary, latestDate: spend.latestDate }
   }
-  const leads = rows.reduce((s, r) => s + (r.leads ?? 0), 0)
-  const conversations = rows.reduce((s, r) => s + (r.messagingConversations ?? 0), 0)
-  const status: LevelStatus = input.spendIncomplete ? 'cannot_judge' : 'has'
+  // 整列都读不到 = 不知道，不是 0。
+  const sumKnown = (values: readonly (number | null)[]): number | null =>
+    values.some(v => v !== null) ? values.reduce<number>((s, v) => s + (v ?? 0), 0) : null
+  const leads = sumKnown(rows.map(r => r.leads))
+  const conversations = sumKnown(rows.map(r => r.messagingConversations))
+  const status: LevelStatus = input.spendIncomplete
+    ? 'cannot_judge'
+    : leads === null && conversations === null ? 'missing' : 'has'
   return { status, leads, conversations, primary, latestDate: spend.latestDate }
 }
 
@@ -337,11 +359,28 @@ function leadInDay(row: LadderOutcomeRow, input: LadderInput, resolver: LeadInRe
   return null
 }
 
-/** 该行是否来自付费渠道：联系人的来源标记属于「这个客户窗口内真花过钱的渠道」。 */
-function isFromPaid(row: LadderOutcomeRow, resolver: LeadInResolver, paidPlatforms: Set<string>): boolean {
-  if (row.contactId === null) return false
+type SourceKind = 'paid' | 'other' | 'unknown'
+
+/**
+ * 这一行的来源：
+ *   paid    —— 联系人的来源标记属于「这个客户窗口内真花过钱的渠道」
+ *   other   —— 有来源标记，但不是花过钱的渠道（明确不是广告带来的）
+ *   unknown —— 没有联系人 / 没有来源标记
+ */
+function sourceOf(row: LadderOutcomeRow, resolver: LeadInResolver, paidPlatforms: Set<string>): SourceKind {
+  if (row.contactId === null) return 'unknown'
   const platform = resolver.attrPlatform.get(row.contactId)
-  return platform !== undefined && paidPlatforms.has(platform)
+  if (platform === undefined) return 'unknown'
+  return paidPlatforms.has(platform) ? 'paid' : 'other'
+}
+
+function countSources(rows: readonly LadderOutcomeRow[], resolver: LeadInResolver, paidPlatforms: Set<string>) {
+  const kinds = rows.map(r => sourceOf(r, resolver, paidPlatforms))
+  return {
+    fromPaid: kinds.filter(k => k === 'paid').length,
+    otherSource: kinds.filter(k => k === 'other').length,
+    unknownSource: kinds.filter(k => k === 'unknown').length,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -352,6 +391,7 @@ interface QualifiedLevel {
   status: LevelStatus
   count: number
   fromPaid: number
+  otherSource: number
   unknownSource: number
   pendingReview: number
   latestDate: string | null
@@ -366,7 +406,6 @@ function computeQualifiedLevel(
   paidPlatforms: Set<string>,
 ): QualifiedLevel {
   const counted: LadderOutcomeRow[] = []
-  let fromPaid = 0
   let pendingReview = 0
   const days: string[] = []
 
@@ -376,7 +415,6 @@ function computeQualifiedLevel(
     if (day === null || day < window.from || day > window.to) continue
     if (o.reviewStatus === 'approved') {
       counted.push(o)
-      if (isFromPaid(o, resolver, paidPlatforms)) fromPaid++
       days.push(localDay(input.timezone, o.occurredAt))
     } else if (o.reviewStatus === 'pending_review') {
       pendingReview++
@@ -387,8 +425,7 @@ function computeQualifiedLevel(
   return {
     status: count > 0 ? 'has' : 'missing',
     count,
-    fromPaid,
-    unknownSource: count - fromPaid,
+    ...countSources(counted, resolver, paidPlatforms),
     pendingReview,
     latestDate: maxDay(days),
     counted,
@@ -403,6 +440,7 @@ interface DealsLevel {
   status: LevelStatus
   count: number
   fromPaid: number
+  otherSource: number
   unknownSource: number
   unplacedMonth: number
   leadInBeforeWindow: number
@@ -422,21 +460,15 @@ function computeDealsLevel(
 ): DealsLevel {
   const counted: LadderOutcomeRow[] = []
   const countedDay = new Map<string, string>()
-  let fromPaid = 0
-  let unplacedMonth = 0
-  let leadInBeforeWindow = 0
-  let pendingReview = 0
   const days: string[] = []
+  let [unplacedMonth, leadInBeforeWindow, pendingReview] = [0, 0, 0]
 
   for (const o of input.outcomes) {
     if (o.kind !== 'purchase') continue
     const occurredDay = localDay(input.timezone, o.occurredAt)
     const inWindow = occurredDay >= window.from && occurredDay <= window.to
 
-    if (o.reviewStatus === 'pending_review') {
-      if (inWindow) pendingReview++
-      continue
-    }
+    if (o.reviewStatus === 'pending_review' && inWindow) pendingReview++
     if (o.reviewStatus !== 'approved') continue
 
     const day = leadInDay(o, input, resolver)
@@ -454,7 +486,6 @@ function computeDealsLevel(
     }
 
     counted.push(o)
-    if (isFromPaid(o, resolver, paidPlatforms)) fromPaid++
     days.push(occurredDay)
   }
 
@@ -462,8 +493,7 @@ function computeDealsLevel(
   return {
     status: count > 0 ? 'has' : 'missing',
     count,
-    fromPaid,
-    unknownSource: count - fromPaid,
+    ...countSources(counted, resolver, paidPlatforms),
     unplacedMonth,
     leadInBeforeWindow,
     pendingReview,
@@ -484,31 +514,34 @@ interface RevenueLevel {
   latestDate: string | null
 }
 
-function computeRevenueLevel(input: LadderInput, deals: DealsLevel): RevenueLevel {
-  const firstPayment = groupRevenue(deals.counted.map(o => ({
-    currency: o.currency,
-    amountMinor: o.amountMinor ?? 0,
-  })))
+/**
+ * 每笔已确认的尾款只挂到**一单**成交上：同一联系人名下、到账时间不晚于这笔尾款的最近一单。
+ * 找不到这样的成交（尾款比哪一单都早）就不挂 —— 宁可少算，不把别的年份的尾款算进来，也不重复加。
+ */
+function allocateBalances(input: LadderInput): Map<string, LadderOutcomeRow[]> {
+  const purchases = input.outcomes.filter(o => o.kind === 'purchase' && o.reviewStatus === 'approved' && o.contactId !== null)
+  const byDeal = new Map<string, LadderOutcomeRow[]>()
+  for (const b of input.outcomes) {
+    if (b.kind !== 'balance' || b.reviewStatus !== 'approved' || b.contactId === null) continue
+    const at = Date.parse(b.occurredAt)
+    let owner: LadderOutcomeRow | null = null
+    for (const p of purchases) {
+      if (p.contactId !== b.contactId || Date.parse(p.occurredAt) > at) continue
+      if (owner === null || Date.parse(p.occurredAt) > Date.parse(owner.occurredAt)) owner = p
+    }
+    if (owner !== null) byDeal.set(owner.id, [...(byDeal.get(owner.id) ?? []), b])
+  }
+  return byDeal
+}
 
-  const dealContactIds = new Set<string>()
-  for (const o of deals.counted) if (o.contactId !== null) dealContactIds.add(o.contactId)
-
-  const balanceRows = input.outcomes.filter(o =>
-    o.kind === 'balance' &&
-    o.reviewStatus === 'approved' &&
-    o.contactId !== null &&
-    dealContactIds.has(o.contactId),
-  )
-
-  const withBalance = groupRevenue([
-    ...deals.counted.map(o => ({ currency: o.currency, amountMinor: o.amountMinor ?? 0 })),
-    ...balanceRows.map(o => ({ currency: o.currency, amountMinor: o.amountMinor ?? 0 })),
-  ])
-
+function computeRevenueLevel(deals: DealsLevel, balances: Map<string, LadderOutcomeRow[]>): RevenueLevel {
+  const amount = (o: LadderOutcomeRow) => ({ currency: o.currency, amountMinor: o.amountMinor ?? 0 })
+  const first = deals.counted.map(amount)
+  const tails = deals.counted.flatMap(d => (balances.get(d.id) ?? []).map(amount))
   return {
     status: deals.status === 'has' ? 'has' : 'missing',
-    firstPayment,
-    withBalance,
+    firstPayment: groupRevenue(first),
+    withBalance: groupRevenue([...first, ...tails]),
     latestDate: deals.latestDate,
   }
 }
@@ -560,28 +593,43 @@ interface ReturnLevel {
   withBalanceBasis: number | null
   withBalanceBasisWithoutLargest: number | null
   dealCount: number
+  unknownSourceDeals: number
   matureMonths: string[]
   immatureMonths: string[]
 }
 
-/** 已走完成交周期的那几个月里：花了多少、成了几单。回报只在这个范围里算。 */
+/** 已走完成交周期的那几个月里：花了多少、付费来源成了几单。回报只在这个范围里算。 */
 interface MatureScope {
   matureMonths: string[]
   immatureMonths: string[]
-  deals: LadderOutcomeRow[]
+  /** 进分子的：来源标记是付费渠道 */
+  paidDeals: LadderOutcomeRow[]
+  /** 来源不明、不进分子的单数 */
+  unknownDeals: number
   spend: number
 }
 
-function matureScope(input: LadderInput, months: readonly string[], spend: SpendLevel, deals: DealsLevel): MatureScope {
+function matureScope(
+  input: LadderInput, months: readonly string[], spend: SpendLevel, deals: DealsLevel, resolver: LeadInResolver,
+): MatureScope {
   const maturityOf = (m: string) => monthMaturity(m, input.asOfDate, input.salesCycleDays)
   const matureMonths = months.filter(m => maturityOf(m) === 'mature')
   const inMature = (day: string | undefined) => day !== undefined && matureMonths.includes(day.slice(0, 7))
+  // 归不了月的成交没有 countedDay，天然不进回报。
+  const matureDeals = deals.counted.filter(o => inMature(deals.countedDay.get(o.id)))
   return {
     matureMonths,
     immatureMonths: months.filter(m => maturityOf(m) === 'immature'),
-    deals: deals.counted.filter(o => inMature(deals.countedDay.get(o.id))),
+    paidDeals: matureDeals.filter(o => sourceOf(o, resolver, spend.paidPlatforms) === 'paid'),
+    unknownDeals: matureDeals.filter(o => sourceOf(o, resolver, spend.paidPlatforms) === 'unknown').length,
     spend: spend.rows.filter(r => inMature(r.insightDate)).reduce((s, r) => s + (r.spend ?? 0), 0),
   }
+}
+
+/** 主单位金额（分 → 主单位），币种读不到 / 不认识返回 null。 */
+function majorOf(amountMinor: number, currency: string | null): number | null {
+  if (currency === null) return null
+  return toMajorUnits(amountMinor, currency)
 }
 
 /** 币种这一关：读不到 / 对不上都不许算回报。 */
@@ -602,49 +650,25 @@ function currencyBlockers(spend: SpendLevel, revenue: RevenueLevel): ReturnBlock
 
 /** 收集所有适用的 blocker，顺序固定。 */
 function collectBlockers(
-  input: LadderInput,
-  spend: SpendLevel,
-  revenue: RevenueLevel,
-  scope: MatureScope,
-  resolver: LeadInResolver,
+  input: LadderInput, earlierLevelsComplete: boolean, spend: SpendLevel, revenue: RevenueLevel, scope: MatureScope,
 ): ReturnBlocker[] {
   const blockers: ReturnBlocker[] = []
-  if (revenue.status !== 'has') blockers.push('no_revenue')
+  // 🔴 前五级有任何一级没数，第 6 级一律不出数 —— 否则会出现「只到第 2 级」却印着回报倍数。
+  if (!earlierLevelsComplete) blockers.push('earlier_level_missing')
   if (input.spendIncomplete) blockers.push('spend_incomplete')
   blockers.push(...currencyBlockers(spend, revenue))
   if (input.salesCycleDays === null) blockers.push('cycle_not_configured')
-  if (input.salesCycleDays !== null && (scope.matureMonths.length === 0 || scope.spend === 0)) {
-    blockers.push('no_mature_month')
-  }
-  if (scope.matureMonths.length > 0 && scope.deals.length < LADDER_MIN_DEALS_FOR_VERDICT) {
-    blockers.push('too_few_deals')
-  }
-  if (scope.deals.length > 0) {
-    const unknown = scope.deals.filter(o => !isFromPaid(o, resolver, spend.paidPlatforms)).length
-    if (unknown / scope.deals.length > LADDER_MAX_UNKNOWN_SOURCE_SHARE) blockers.push('unknown_source_share_too_high')
-  }
+  if (input.salesCycleDays !== null && scope.matureMonths.length === 0) blockers.push('no_mature_month')
+  if (scope.matureMonths.length > 0 && scope.spend === 0) blockers.push('no_spend_in_mature_months')
+  if (scope.matureMonths.length > 0 && scope.paidDeals.length < LADDER_MIN_DEALS_FOR_VERDICT) blockers.push('too_few_deals')
+  const judged = scope.paidDeals.length + scope.unknownDeals
+  if (judged > 0 && scope.unknownDeals / judged > LADDER_MAX_UNKNOWN_SOURCE_SHARE) blockers.push('unknown_source_share_too_high')
   return blockers
 }
 
-/** 主单位金额（分 → 主单位），币种读不到 / 不认识返回 null。 */
-function majorOf(amountMinor: number, currency: string | null): number | null {
-  if (currency === null) return null
-  return toMajorUnits(amountMinor, currency)
-}
-
-/** 每个联系人名下已确认的尾款行。 */
-function balancesByContact(input: LadderInput): Map<string, LadderOutcomeRow[]> {
-  const map = new Map<string, LadderOutcomeRow[]>()
-  for (const o of input.outcomes) {
-    if (o.kind !== 'balance' || o.reviewStatus !== 'approved' || o.contactId === null) continue
-    map.set(o.contactId, [...(map.get(o.contactId) ?? []), o])
-  }
-  return map
-}
-
-/** 一单的主单位金额（可含同一联系人的尾款）；币种读不到 → null。 */
+/** 一单的主单位金额（可含挂在这一单上的尾款）；币种读不到 → null。 */
 function dealMajor(deal: LadderOutcomeRow, balances: Map<string, LadderOutcomeRow[]>, includeBalance: boolean): number | null {
-  const rows = includeBalance && deal.contactId !== null ? [deal, ...(balances.get(deal.contactId) ?? [])] : [deal]
+  const rows = includeBalance ? [deal, ...(balances.get(deal.id) ?? [])] : [deal]
   let total = 0
   for (const r of rows) {
     const major = majorOf(r.amountMinor ?? 0, r.currency)
@@ -665,24 +689,21 @@ function sumOrNull(values: readonly (number | null)[]): number | null {
 }
 
 function computeReturnLevel(
-  input: LadderInput,
-  months: readonly string[],
-  spend: SpendLevel,
-  revenue: RevenueLevel,
-  deals: DealsLevel,
-  resolver: LeadInResolver,
+  input: LadderInput, earlierLevelsComplete: boolean, scope: MatureScope,
+  spend: SpendLevel, revenue: RevenueLevel, balances: Map<string, LadderOutcomeRow[]>,
 ): ReturnLevel {
-  const scope = matureScope(input, months, spend, deals)
-  const blockers = collectBlockers(input, spend, revenue, scope, resolver)
-  const base = { blockers, dealCount: scope.deals.length, matureMonths: scope.matureMonths, immatureMonths: scope.immatureMonths }
+  const blockers = collectBlockers(input, earlierLevelsComplete, spend, revenue, scope)
+  const base = {
+    blockers, dealCount: scope.paidDeals.length, unknownSourceDeals: scope.unknownDeals,
+    matureMonths: scope.matureMonths, immatureMonths: scope.immatureMonths,
+  }
   if (blockers.length > 0) {
     return { ...base, status: 'cannot_judge', firstPaymentBasis: null, withBalanceBasis: null, withBalanceBasisWithoutLargest: null }
   }
 
-  const balances = balancesByContact(input)
-  const full = scope.deals.map(d => dealMajor(d, balances, true))
+  const full = scope.paidDeals.map(d => dealMajor(d, balances, true))
   const fullTotal = sumOrNull(full)
-  // 剔掉最大一单再算一遍：一单大的就能把整个数撑起来，两个数必须一起给。
+  // 剔掉最大一单（按含尾款的金额比）再算一遍：一单大的就能把整个数撑起来，两个数必须一起给。
   const largest = full.reduce<number>((m, v) => (v !== null && v > m ? v : m), 0)
   const ratio = (numerator: number | null): number | null =>
     numerator === null || scope.spend === 0 ? null : round2(numerator / scope.spend)
@@ -690,7 +711,7 @@ function computeReturnLevel(
   return {
     ...base,
     status: 'has',
-    firstPaymentBasis: ratio(sumOrNull(scope.deals.map(d => dealMajor(d, balances, false)))),
+    firstPaymentBasis: ratio(sumOrNull(scope.paidDeals.map(d => dealMajor(d, balances, false)))),
     withBalanceBasis: ratio(fullTotal),
     withBalanceBasisWithoutLargest: ratio(fullTotal === null ? null : fullTotal - largest),
   }
@@ -718,12 +739,13 @@ function computeReachedLevel(
   return level as 0 | 1 | 2 | 3 | 4 | 5
 }
 
-function computeNotes(input: LadderInput): LadderNote[] {
+function computeNotes(input: LadderInput, daysSinceLatest: number | null): LadderNote[] {
   const notes: LadderNote[] = []
   if (input.configSource === 'fallback') notes.push('config_unreadable')
   if (input.timezone === null) notes.push('timezone_unknown')
   if (input.timezoneCount > 1) notes.push('multiple_timezones')
   if (input.spendIncomplete) notes.push('spend_incomplete')
+  if (daysSinceLatest !== null && daysSinceLatest > LADDER_STALE_AFTER_DAYS) notes.push('spend_stale')
   return notes
 }
 
@@ -738,8 +760,11 @@ export function computeReturnLadder(input: LadderInput): ReturnLadder {
   const resolver = buildLeadInResolver(input)
   const qualified = computeQualifiedLevel(input, window, resolver, spend.paidPlatforms)
   const deals = computeDealsLevel(input, window, resolver, spend.paidPlatforms)
-  const revenue = computeRevenueLevel(input, deals)
-  const returnOnSpend = computeReturnLevel(input, window.months, spend, revenue, deals, resolver)
+  const balances = allocateBalances(input)
+  const revenue = computeRevenueLevel(deals, balances)
+  const earlierLevelsComplete = [spend.status, results.status, qualified.status, deals.status, revenue.status].every(x => x === 'has')
+  const scope = matureScope(input, window.months, spend, deals, resolver)
+  const returnOnSpend = computeReturnLevel(input, earlierLevelsComplete, scope, spend, revenue, balances)
   const months = computeMonths(input, window, spend, qualified, deals)
 
   const { paidPlatforms: _paid, rows: _rows, ...spendOut } = spend
@@ -757,6 +782,6 @@ export function computeReturnLadder(input: LadderInput): ReturnLadder {
     revenue,
     returnOnSpend,
     months,
-    notes: computeNotes(input),
+    notes: computeNotes(input, spend.daysSinceLatest),
   }
 }
