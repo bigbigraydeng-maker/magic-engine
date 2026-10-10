@@ -265,6 +265,43 @@ describe('runAutoPublishSweep — when it must do nothing', () => {
   })
 })
 
+describe('runAutoPublishSweep — bookkeeping that must not drift', () => {
+  it('🔴 a refusal that is the same as last sweep is not re-claimed, re-written or re-announced', async () => {
+    const { deps, claimAttempt, finishAttempt, emit } = build({
+      runPublish: async () => ({ status: 409, body: { success: false, error: 'PRICE_FACT_UNVERIFIED' } }),
+      attempts: [
+        attempt({ date: TODAY, status: 'blocked', reason_code: 'PRICE_FACT_UNVERIFIED' }),
+        attempt({ date: TOMORROW, status: 'blocked', reason_code: 'PRICE_FACT_UNVERIFIED' }),
+      ],
+    })
+    const summary = await runAutoPublishSweep(deps)
+    expect(resultsOf(summary)).toEqual([`${TODAY}:blocked(PRICE_FACT_UNVERIFIED)`, `${TOMORROW}:blocked(PRICE_FACT_UNVERIFIED)`])
+    expect(claimAttempt).not.toHaveBeenCalled()
+    expect(finishAttempt).not.toHaveBeenCalled()
+    expect(emit).not.toHaveBeenCalled()
+  })
+
+  it('a refusal for a different reason IS recorded', async () => {
+    const { deps, finishAttempt } = build({
+      runPublish: async () => ({ status: 409, body: { success: false, error: 'PRICE_CLAIM_UNBACKED' } }),
+      attempts: [attempt({ date: TODAY, status: 'blocked', reason_code: 'PRICE_FACT_UNVERIFIED' })],
+    })
+    await runAutoPublishSweep(deps)
+    expect(finishAttempt.mock.calls.some(c => c[0].date === TODAY && c[0].patch.reason_code === 'PRICE_CLAIM_UNBACKED')).toBe(true)
+  })
+
+  it('🔴 the receipt says it is out but our row was left in `claimed`: the row is closed as published with the receipt post id', async () => {
+    const { deps, finishAttempt, runPublish } = build({
+      plan: { publishedDates: [TODAY], publishedPostIds: { [TODAY]: 'post-from-receipt' } },
+      attempts: [attempt({ date: TODAY, status: 'claimed', request_id: 'req-left' })],
+    })
+    await runAutoPublishSweep(deps)
+    const closed = finishAttempt.mock.calls.map(c => c[0]).find(c => c.date === TODAY)
+    expect(closed).toMatchObject({ requestId: 'req-left', patch: { status: 'published', post_id: 'post-from-receipt', reason_code: 'RECONCILED_FROM_RECEIPT' } })
+    expect(runPublish.mock.calls.filter(c => c[0].command.no_publish === false).map(c => c[0].command.dates?.[0])).not.toContain(TODAY)
+  })
+})
+
 describe('runAutoPublishSweep — a manual publish that may have reached Facebook', () => {
   it('🔴 a date whose manual publish failed with an uncertain result is parked as UNKNOWN_OUTCOME, never sent', async () => {
     const { deps, runPublish, finishAttempt } = build({ plan: { receiptUnknownFailedDates: [TOMORROW] } })

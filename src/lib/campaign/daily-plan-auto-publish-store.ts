@@ -156,8 +156,8 @@ export async function liftRecalledTombstones(input: {
     .delete()
     .eq('plan_id', input.planId)
     .eq('client_id', input.clientId)
-    .eq('status', 'blocked')
-    .eq('reason_code', 'RECALLED')
+    // the RECALLED tombstone, or a `published` row left over from before the post was taken down
+    .or('and(status.eq.blocked,reason_code.eq.RECALLED),status.eq.published')
     .in('date', input.dates)
     .lte('updated_at', input.notNewerThan.toISOString())
 

@@ -34,14 +34,14 @@ const NZ_TZ = 'Pacific/Auckland'
 /** 授权后超过这么久还没有任何尝试记录 = 发布器没跑起来。 */
 const WATCHDOG_GRACE_MS = 2 * 60 * 60 * 1000
 
-/** 只看最近这几天的尝试：更早的要么已经处理过，要么已经没意义。 */
-const ATTEMPT_LOOKBACK_DAYS = 1
+/**
+ * 「失败 / 时间已过」类只看最近这些天：更早的已经没意义。
+ * 但「不确定有没有发出去」不受这个限制 —— 它没人收口就会一直挂在主页上，必须一直出现直到有人确认。
+ */
+const ATTEMPT_LOOKBACK_DAYS = 14
 
 /** 这些状态是「要人看」的。 */
 const ATTENTION_STATUSES = new Set(['failed_final', 'unknown_outcome', 'missed_window'])
-
-/** 被发布前检查拦下、但原因代码以这个开头的，价格闸待办已经覆盖，不在这里重复。 */
-const PRICE_REASON_PREFIX = 'PRICE_'
 
 /** True for a plain object (not null, not an array). */
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -132,8 +132,8 @@ function needsAttention(row: AttemptRow): boolean {
   if (row.status === 'blocked' && row.reason_code === 'RECALLED') return false
   if (ATTENTION_STATUSES.has(row.status)) return true
   if (row.status !== 'blocked') return false
-  // 被发布前检查拦下的：价格闸待办已经覆盖 PRICE_ 开头的，不在这里重复。
-  if (row.reason_code && row.reason_code.startsWith(PRICE_REASON_PREFIX)) return false
+  // 价格类拦截也要出：每日计划里的价格拦截没有别的待办覆盖（旧的价格闸待办扫的是另一张内容表，
+  // 价格数字待办判的文本与发布出口不完全一样），豁免它 = 这些帖子永远发不出去却没人知道。
   return true
 }
 
@@ -147,32 +147,32 @@ function reasonWords(row: AttemptRow): string {
   return `发布没成功（状态 ${row.status}）`
 }
 
-/** 一个客户攒下来的、要人看的尝试。 */
+/** 一个客户、一种待办攒下来的尝试。 */
 interface ClientAttempts {
   clientId: string
-  hasUnknownOutcome: boolean
+  /** true = 「不确定有没有发出去」那一类；false = 其余（被拦 / 多次失败 / 时间已过）。 */
+  unknownOutcome: boolean
   dates: string[]
   reasons: string[]
 }
 
-/** 把要人看的尝试按客户归拢，一个客户一条。 */
-function groupAttempts(rows: AttemptRow[]): ClientAttempts[] {
-  const byClient = new Map<string, ClientAttempts>()
+/** 把要人看的尝试按「客户 + 种类」归拢：不确定的单独一条，其余失败另一条，互不遮挡。 */
+function groupAttempts(rows: AttemptRow[], today: string): ClientAttempts[] {
+  const cutoff = addDays(today, -ATTEMPT_LOOKBACK_DAYS)
+  const groups = new Map<string, ClientAttempts>()
   for (const row of rows) {
     if (!needsAttention(row)) continue
-    const cur = byClient.get(row.client_id) ?? {
-      clientId: row.client_id,
-      hasUnknownOutcome: false,
-      dates: [],
-      reasons: [],
-    }
-    if (row.status === 'unknown_outcome') cur.hasUnknownOutcome = true
+    const unknown = row.status === 'unknown_outcome'
+    // 「不确定」不设日期下限；其余类型只看最近几天。
+    if (!unknown && row.date < cutoff) continue
+    const key = `${row.client_id}:${unknown ? 'unknown' : 'stalled'}`
+    const cur = groups.get(key) ?? { clientId: row.client_id, unknownOutcome: unknown, dates: [], reasons: [] }
     if (!cur.dates.includes(row.date)) cur.dates.push(row.date)
     const reason = reasonWords(row)
     if (!cur.reasons.includes(reason)) cur.reasons.push(reason)
-    byClient.set(row.client_id, cur)
+    groups.set(key, cur)
   }
-  return Array.from(byClient.values())
+  return Array.from(groups.values())
 }
 
 /** 一条「尝试要人看」的待办。 */
@@ -182,7 +182,7 @@ function buildAttemptItem(
 ): ManualItem {
   const dates = agg.dates.slice().sort().join('、')
   const count = agg.dates.length
-  if (agg.hasUnknownOutcome) {
+  if (agg.unknownOutcome) {
     return {
       kind: 'auto_publish_unknown_outcome',
       client_id: agg.clientId,
@@ -238,13 +238,11 @@ export async function pushAutoPublishItems(
 ): Promise<void> {
   const today = nzDate(now)
   const tomorrow = addDays(today, 1)
-  const since = addDays(today, -ATTEMPT_LOOKBACK_DAYS)
 
   // ---- Source 1: attempts needing attention --------------------------------
   const { data: attemptData, error: attemptError } = await supabase
     .from('daily_plan_auto_publish_attempts')
     .select('client_id, date, status, reason_code')
-    .gte('date', since)
   if (attemptError) {
     throw new Error('auto-publish-items: attempts read failed: ' + attemptError.message)
   }
@@ -255,7 +253,7 @@ export async function pushAutoPublishItems(
     if (narrowed) attempts.push(narrowed)
   }
 
-  for (const agg of groupAttempts(attempts)) {
+  for (const agg of groupAttempts(attempts, today)) {
     items.push(buildAttemptItem(agg, nameOf(agg.clientId)))
   }
 

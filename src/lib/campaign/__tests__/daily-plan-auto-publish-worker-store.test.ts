@@ -11,6 +11,8 @@ vi.mock('@/lib/supabase', () => ({
 }))
 
 import {
+  clearNonStickyAttempts,
+  listFreshClaims,
   claimAttempt,
   confirmUnknownOutcome,
   finishAttempt,
@@ -409,5 +411,45 @@ describe('confirmUnknownOutcome', () => {
     await expect(
       confirmUnknownOutcome({ planId: PLAN, clientId: CLIENT, date: DATE, outcome: 'published', now: new Date() }),
     ).rejects.toMatchObject({ code: '42P01' })
+  })
+})
+
+describe('clearNonStickyAttempts', () => {
+  it('🔴 removes only the "not yet / not this time" rows and never the ones that carry a fact about Facebook', async () => {
+    const chain = makeChain({ data: null, error: null })
+    fromMock.mockReturnValue(chain)
+
+    await clearNonStickyAttempts({ planId: 'plan-1', clientId: 'client-1', dates: ['2026-10-13'] })
+
+    expect(fromMock).toHaveBeenCalledWith('daily_plan_auto_publish_attempts')
+    expect(chain.delete).toHaveBeenCalled()
+    expect(chain.eq).toHaveBeenCalledWith('plan_id', 'plan-1')
+    expect(chain.eq).toHaveBeenCalledWith('client_id', 'client-1')
+    expect(chain.in).toHaveBeenCalledWith('date', ['2026-10-13'])
+    const filter = String(chain.or.mock.calls[0][0])
+    for (const removable of ['missed_window', 'failed_final', 'failed_retryable', 'dry_run']) expect(filter).toContain(removable)
+    for (const kept of ['published', 'unknown_outcome', 'claimed']) expect(filter).not.toContain(kept)
+    expect(filter).toContain('reason_code.neq.RECALLED')
+  })
+
+  it('does nothing for an empty date list and throws database errors', async () => {
+    await clearNonStickyAttempts({ planId: 'p', clientId: 'c', dates: [] })
+    expect(fromMock).not.toHaveBeenCalled()
+    fromMock.mockReturnValue(makeChain({ data: null, error: { message: 'x' } }))
+    await expect(clearNonStickyAttempts({ planId: 'p', clientId: 'c', dates: ['2026-10-13'] })).rejects.toBeTruthy()
+  })
+})
+
+describe('listFreshClaims', () => {
+  it('reads claimed rows of this plan and client updated at or after the cut-off', async () => {
+    const chain = makeChain({ data: [{ date: '2026-10-13', status: 'claimed' }], error: null })
+    fromMock.mockReturnValue(chain)
+
+    const rows = await listFreshClaims('plan-1', 'client-1', new Date('2026-10-12T00:00:00Z'))
+
+    expect(rows).toHaveLength(1)
+    expect(chain.eq).toHaveBeenCalledWith('status', 'claimed')
+    expect(chain.eq).toHaveBeenCalledWith('client_id', 'client-1')
+    expect(chain.gte).toHaveBeenCalledWith('updated_at', '2026-10-12T00:00:00.000Z')
   })
 })

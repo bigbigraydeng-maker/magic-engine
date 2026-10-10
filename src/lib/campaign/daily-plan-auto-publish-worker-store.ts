@@ -251,3 +251,39 @@ export async function confirmUnknownOutcome(input: {
 
   return (data as AttemptRecord | null) ?? null
 }
+
+/**
+ * A new authorisation starts clean for the dates it covers: rows that only meant "not yet" or "not
+ * this time" (missed window, gave up, waiting to retry, practice, a block that may since have been
+ * fixed) are removed. Rows that carry a fact about Facebook stay: `published`, `unknown_outcome`,
+ * `claimed` (in flight) and the RECALLED tombstone.
+ */
+export async function clearNonStickyAttempts(input: { planId: string; clientId: string; dates: string[] }): Promise<void> {
+  if (input.dates.length === 0) return
+  const { error } = await supabaseAdmin
+    .from(ATTEMPTS_TABLE)
+    .delete()
+    .eq('plan_id', input.planId)
+    .eq('client_id', input.clientId)
+    .in('date', input.dates)
+    .or(
+      'status.in.(missed_window,failed_final,failed_retryable,dry_run),and(status.eq.blocked,or(reason_code.is.null,reason_code.neq.RECALLED))',
+    )
+
+  if (error) throw error
+}
+
+/** Attempts of this plan that the unattended publisher claimed at or after `since` and has not closed. */
+export async function listFreshClaims(planId: string, clientId: string, since: Date): Promise<AttemptRecord[]> {
+  const { data, error } = await supabaseAdmin
+    .from(ATTEMPTS_TABLE)
+    .select('*')
+    .eq('plan_id', planId)
+    .eq('client_id', clientId)
+    .eq('status', 'claimed')
+    .gte('updated_at', since.toISOString())
+
+  if (error) throw error
+
+  return (data ?? []) as AttemptRecord[]
+}

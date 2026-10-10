@@ -40,6 +40,16 @@ function unknownFailedDates(list: unknown): string[] {
   return Array.from(new Set(out))
 }
 
+/** Post id per published date from `published[]`. */
+function postIdsOf(list: unknown): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (!Array.isArray(list)) return out
+  for (const entry of list) {
+    if (isRecord(entry) && typeof entry.date === 'string' && typeof entry.post_id === 'string') out[entry.date] = entry.post_id
+  }
+  return out
+}
+
 function datesOf(list: unknown): string[] {
   if (!Array.isArray(list)) return []
   return list
@@ -74,6 +84,7 @@ export async function loadPlanState(planId: string, clientId: string): Promise<P
     receiptRecalledDates: datesOf(publishMeta.recalled),
     receiptRecalledAt: latestRecalledAt(publishMeta.recalled),
     receiptUnknownFailedDates: unknownFailedDates(publishMeta.failed),
+    publishedPostIds: postIdsOf(publishMeta.published),
   }
 }
 

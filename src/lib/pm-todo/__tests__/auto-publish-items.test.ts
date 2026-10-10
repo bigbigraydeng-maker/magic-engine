@@ -194,7 +194,7 @@ describe('pushAutoPublishItems —— 自动发布没发出去 / 不知道发没
     expect(items[0].what).toContain('MISSING_IMAGE')
   })
 
-  it('unknown_outcome 赢过其他状态 → kind 是 auto_publish_unknown_outcome', async () => {
+  it('🔴 同一客户既有「不确定」又有别的失败 → 分成两条，互不遮挡，各写各的日期和原因', async () => {
     const db = makeSupabase({
       attempts: [
         attempt({ status: 'failed_final', date: TODAY }),
@@ -203,11 +203,16 @@ describe('pushAutoPublishItems —— 自动发布没发出去 / 不知道发没
     })
     const items: ManualItem[] = []
     await pushAutoPublishItems(db, items, NOW, nameOf, LIVE)
-    expect(items).toHaveLength(1)
-    expect(items[0].kind).toBe('auto_publish_unknown_outcome')
-    expect(items[0].what).toContain('不确定')
-    expect(items[0].how).toContain('已发出')
-    expect(items[0].how).toContain('没发出')
+    expect(items).toHaveLength(2)
+    const unknown = items.find(i => i.kind === 'auto_publish_unknown_outcome')
+    const stalled = items.find(i => i.kind === 'auto_publish_stalled')
+    expect(unknown?.what).toContain('不确定')
+    expect(unknown?.what).toContain(TOMORROW)
+    expect(unknown?.what).not.toContain(TODAY)
+    expect(unknown?.how).toContain('已发出')
+    expect(unknown?.how).toContain('没发出')
+    expect(stalled?.what).toContain(TODAY)
+    expect(stalled?.what).toContain('多次尝试仍失败')
   })
 
   it('同一客户多条 → 只出一条，列出所有日期', async () => {
@@ -238,13 +243,15 @@ describe('pushAutoPublishItems —— 自动发布没发出去 / 不知道发没
     expect(ids).toEqual([CLIENT, OTHER].sort())
   })
 
-  it('blocked 且 reason_code 以 PRICE_ 开头 → 忽略（价格闸待办已覆盖）', async () => {
+  it('🔴 blocked 且 reason_code 以 PRICE_ 开头 → 照样出待办（没有别的待办覆盖每日计划里的价格拦截）', async () => {
     const db = makeSupabase({
       attempts: [attempt({ status: 'blocked', reason_code: 'PRICE_FACT_UNVERIFIED' })],
     })
     const items: ManualItem[] = []
     await pushAutoPublishItems(db, items, NOW, nameOf, LIVE)
-    expect(items).toHaveLength(0)
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('auto_publish_stalled')
+    expect(items[0].what).toContain('PRICE_FACT_UNVERIFIED')
   })
 
   it('blocked 且 reason_code 是 RECALLED → 忽略', async () => {
@@ -256,11 +263,19 @@ describe('pushAutoPublishItems —— 自动发布没发出去 / 不知道发没
     expect(items).toHaveLength(0)
   })
 
-  it('旧日期的尝试 → 被 gte 过滤掉，不产生待办', async () => {
+  it('旧日期的「失败 / 时间已过」→ 不再产生待办', async () => {
     const db = makeSupabase({ attempts: [attempt({ status: 'failed_final', date: OLD })] })
     const items: ManualItem[] = []
     await pushAutoPublishItems(db, items, NOW, nameOf, LIVE)
     expect(items).toHaveLength(0)
+  })
+
+  it('🔴 旧日期的「不确定有没有发出去」→ 仍然出待办，直到有人确认（不能悄悄消失）', async () => {
+    const db = makeSupabase({ attempts: [attempt({ status: 'unknown_outcome', date: OLD })] })
+    const items: ManualItem[] = []
+    await pushAutoPublishItems(db, items, NOW, nameOf, LIVE)
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('auto_publish_unknown_outcome')
   })
 
   it('attempts 读取出错 → 直接 reject，前缀正确', async () => {

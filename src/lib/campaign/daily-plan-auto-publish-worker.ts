@@ -60,6 +60,8 @@ export interface PlanState {
    * reached Facebook. Never re-sent automatically; a human settles them.
    */
   receiptUnknownFailedDates?: string[]
+  /** Post id per published date, from the receipt (used to close an attempt row left in `claimed`). */
+  publishedPostIds?: Record<string, string>
 }
 
 export interface ScopeState {
@@ -225,6 +227,24 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
       const todo: DatePlan[] = []
       for (const date of dueDates) {
         if (state.publishedDates.includes(date)) {
+          // The receipt says it is out. If our own attempt row was left in `claimed` (the write-back
+          // failed after a successful send), close it now so it can never look like an open claim.
+          const left = attemptByDate.get(date)
+          if (live && left !== undefined && left.status === 'claimed') {
+            await deps.finishAttempt({
+              planId: auth.plan_id,
+              date,
+              requestId: left.request_id,
+              patch: {
+                status: 'published',
+                reason_code: 'RECONCILED_FROM_RECEIPT',
+                post_id: state.publishedPostIds?.[date] ?? null,
+                provider_impact: 'FB_SCHEDULED',
+                next_retry_at: null,
+              },
+              now,
+            })
+          }
           note(date, 'skipped', 'ALREADY_PUBLISHED')
           continue
         }
@@ -314,6 +334,11 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
       if (gate.status !== 200) {
         const reason = typeof gate.body.error === 'string' && gate.body.error ? gate.body.error : `HTTP_${gate.status}`
         for (const item of sendable) {
+          // Same refusal as the last sweep: nothing new to record (no re-claim, no new event every hour).
+          if (item.existing?.status === 'blocked' && item.existing.reason_code === reason) {
+            note(item.date, 'blocked', reason)
+            continue
+          }
           if (live) {
             const requestId = randomUUID()
             const claimed = await claimFor(deps, auth, item, requestId, now)
