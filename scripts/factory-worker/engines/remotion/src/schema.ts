@@ -100,6 +100,11 @@ export const ListReelPropsSchema = z
       })
       .optional(),
     cutFlash: z.boolean().optional(),
+    footageScrim: z
+      .number()
+      .min(0, { message: '底部压暗强度必须在 0 到 1 之间' })
+      .max(1, { message: '底部压暗强度必须在 0 到 1 之间' })
+      .optional(),
     musicFile: relFile('音乐文件', MUSIC_EXTS).nullable(),
     musicStartSec: z.number().min(0).max(600).optional(),
     beats: z.array(z.number().finite().min(0).max(120)).max(80),

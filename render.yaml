@@ -173,24 +173,25 @@ services:
   # Places, inserts new ones as discovered(job_board). The prospecting-sweep then
   # audits/analyses/drafts them. No-ops unless JOB_SIGNAL_INGEST_ENABLED=true on
   # the web service (ships dark; PM turns it on). Sending stays human downstream.
-  - type: cron
-    name: job-boards-weekly
-    env: node
-    schedule: "0 2 * * 1"
-    buildCommand: ""
-    buildFilter:
-      ignoredPaths:
-        - "**/*"
-    startCommand: |
-      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/job-boards-weekly
-    # 2026-08-16 [OPS] sync:false → fromGroup：密钥自动挂上，不用人去后台 link。
-    # ⚠️ 这条的「30 天没跑成」根因**不是**密钥 —— 是主开关 JOB_SIGNAL_INGEST_ENABLED
-    #    没开（route 在开关那里直接 return，走不到写运行记录那一步）。换 fromGroup 只是
-    #    顺手排除掉第二个可能原因；真要让它干活，得 PM 决定开外呼线（花 Places 的钱 +
-    #    开始碰真实 NZ 公司），不是这个 PR 能定的。
-    envVars:
-      - fromGroup: me-shared-cron-secret
+  # 🔴 已暂停(2026-10-07,PM「没人读就关」审计 docs/audits/2026-10-07-cron-data-readers-audit.md):8 次运行全是主开关 JOB_SIGNAL_INGEST_ENABLED 没开的空转,下游 Google Places 账单也没开。恢复时三件一起做:本块取消注释 + src/lib/cron/registry.ts 那行加回来并从 UNSCHEDULED_CRON_ROUTES 删掉 + 打开 JOB_SIGNAL_INGEST_ENABLED。
+  # - type: cron
+  #   name: job-boards-weekly
+  #   env: node
+  #   schedule: "0 2 * * 1"
+  #   buildCommand: ""
+  #   buildFilter:
+  #     ignoredPaths:
+  #       - "**/*"
+  #   startCommand: |
+  #     curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+  #       https://app.magicengine.com.au/api/cron/job-boards-weekly
+  #   # 2026-08-16 [OPS] sync:false → fromGroup：密钥自动挂上，不用人去后台 link。
+  #   # ⚠️ 这条的「30 天没跑成」根因**不是**密钥 —— 是主开关 JOB_SIGNAL_INGEST_ENABLED
+  #   #    没开（route 在开关那里直接 return，走不到写运行记录那一步）。换 fromGroup 只是
+  #   #    顺手排除掉第二个可能原因；真要让它干活，得 PM 决定开外呼线（花 Places 的钱 +
+  #   #    开始碰真实 NZ 公司），不是这个 PR 能定的。
+  #   envVars:
+  #     - fromGroup: me-shared-cron-secret
 
   # Blog generation sweeper — every 5 minutes
   # Marks blog_posts stuck at status='generating' (>10 min) as failed.
@@ -274,11 +275,12 @@ services:
   # brand churn within the week. Cost ~$0.06/day for 10 seed questions.
   # Migration 20260622000003 enabled daily UNIQUE constraint.
   # Schedule moved from 02:30 UTC to 16:30 UTC (PM decision 2026-09-16: run in NZ morning window so data is ready on wake-up).
+  # 🔴 2026-10-07 由每天降为每周一(同审计):唯一读取方是一个管理页标签页,在用的 AI 可见度目标 0 条,每天约 US$0.21;不确定有没有人看,所以降频不删。回滚:改回 "30 16 * * *"。healthchecks.io 那条 ping 的预期周期若仍是每天,周中会报「没按时 ping」,属已知,需 PM 在 healthchecks 后台改成每周。
   # healthchecks.io: industry-ai-visibility-daily (1400fe83-cc62-4634-9f7e-a2345553beee)
   - type: cron
     name: industry-ai-visibility-daily
     env: node
-    schedule: "30 16 * * *"
+    schedule: "30 16 * * 1"
     buildCommand: ""
     buildFilter:
       ignoredPaths:
@@ -644,20 +646,21 @@ services:
   #    再把 ?max=1 也去掉(一轮最多 3 件,每客户 1 件是代码里的硬上限)。
   #    这两步各是一行改动,改在这里、看得见、能回滚。
   # 每天 09:30 UTC,排在周二 08:00 的处方之后 —— 新方案落地当天就能被执行。
-  - type: cron
-    name: execution-auto-run
-    env: node
-    schedule: "30 9 * * *"
-    buildCommand: ""
-    buildFilter:
-      ignoredPaths:
-        - "**/*"
-    startCommand: |
-      curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
-        "https://app.magicengine.com.au/api/cron/execution-auto-run?dry_run=1"
-    envVars:
-      - key: CRON_SECRET
-        sync: false
+  # 🔴 已暂停(2026-10-07,同审计):挂着 ?dry_run=1 空跑两个月,全仓没有任何代码读它写的结果(今日待办自己重新算)。恢复时三件一起做:本块取消注释 + registry.ts 那行加回来并从 UNSCHEDULED_CRON_ROUTES 删掉 + 由 PM 决定是否去掉 ?dry_run=1。
+  # - type: cron
+  #   name: execution-auto-run
+  #   env: node
+  #   schedule: "30 9 * * *"
+  #   buildCommand: ""
+  #   buildFilter:
+  #     ignoredPaths:
+  #       - "**/*"
+  #   startCommand: |
+  #     curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
+  #       "https://app.magicengine.com.au/api/cron/execution-auto-run?dry_run=1"
+  #   envVars:
+  #     - key: CRON_SECRET
+  #       sync: false
 
   - type: cron
     name: anomaly-detector-daily
@@ -1282,20 +1285,21 @@ services:
   # ⚠️ 部署后必须在 Render 后台把这个 cron 关联到 me-shared-cron-secret 环境变量组。
   #    sync:false 不会自动填值 —— daily-cron-digest 就是因为这个哑了 51 天没人发现，
   #    而 digest 只报「失败」不报「没跑」，所以静默失效不会有任何告警。
-  - type: cron
-    name: team-memory-sweeper
-    env: node
-    schedule: "*/30 * * * *"
-    buildCommand: ""
-    buildFilter:
-      ignoredPaths:
-        - "**/*"
-    startCommand: |
-      curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/team-memory-sweeper
-    envVars:
-      - key: CRON_SECRET
-        sync: false
+  # 🔴 已暂停(2026-10-07,同审计):上游 work_sessions 最新一行是 2026-08-22,本机没装 team-memory 钩子,705 次运行全是 0 干活。恢复时三件一起做:本块取消注释 + registry.ts 那行加回来并从 UNSCHEDULED_CRON_ROUTES 删掉 + 重新装本机钩子(scripts/team-memory/README.md)。
+  # - type: cron
+  #   name: team-memory-sweeper
+  #   env: node
+  #   schedule: "*/30 * * * *"
+  #   buildCommand: ""
+  #   buildFilter:
+  #     ignoredPaths:
+  #       - "**/*"
+  #   startCommand: |
+  #     curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
+  #       https://app.magicengine.com.au/api/cron/team-memory-sweeper
+  #   envVars:
+  #     - key: CRON_SECRET
+  #       sync: false
 
   # ─────────────────────────────────────────────────────────────────────────
   # ME product progress → LinkedIn — Monday + Thursday, ~9am NZ time

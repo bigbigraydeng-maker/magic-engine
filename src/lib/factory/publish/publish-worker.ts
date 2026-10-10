@@ -102,7 +102,7 @@ async function resolveTarget(clientId: string): Promise<PublishTarget | null> {
  * fail-closed:查不到红线 ≠ 没有红线,查询出错一律当拦截处理(与 complete-work-order 同规矩)。
  * 返回 null = 放行;返回字符串 = 拦截原因。
  */
-async function scanPublishCaption(
+export async function scanPublishCaption(
   clientId: string,
   masterBriefId: unknown,
   caption: string,
@@ -133,7 +133,7 @@ async function scanPublishCaption(
   return hits.length > 0 ? `发布正文命中品牌红线: ${hits.join(' / ')}` : null
 }
 
-async function validateVideoUrl(url: string): Promise<string | null> {
+export async function validateVideoUrl(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, { method: 'HEAD' })
     if (!res.ok) return `视频 URL 不可达 (${res.status})`
@@ -147,7 +147,7 @@ async function validateVideoUrl(url: string): Promise<string | null> {
   }
 }
 
-const PUBLIC_BASE = () =>
+export const PUBLIC_BASE = () =>
   `${process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''}/storage/v1/object/public/content-factory`
 
 // ── 失败落库(退避重试 / terminal)───────────────────────────────────────────
@@ -329,15 +329,24 @@ async function recordPublished(
 }
 
 // 三落库:CLAUDE.md 强约束——外部执行动作必落 fde_work_logs + execution_items + flywheel_actions + 归因链
-async function writeThreeBooks(
+export async function writeThreeBooks(
   id: string,
   ref: PublishedRef,
   clientId: string,
   angle: string,
+  /**
+   * 默认 = Facebook 路径(行为不变)。Instagram 交叉发布传独立的 actionType 和人话渠道名:
+   * 测量那边(factory-reel-measurement-adapter)按 (action_type, work_order_id) 唯一回读 Facebook 那一行,
+   * 同一工单再写一行同 action_type 会让它 maybeSingle 报「多行」。
+   */
+  opts: { actionType?: string; channelLabel?: string } = {},
 ): Promise<void> {
   const today = new Date().toISOString().slice(0, 10)
   const execMode = ref.platform === 'facebook' ? 'in_house' : 'third_party'
   const vendor = ref.platform === 'facebook' ? 'meta_graph' : 'publer' // channel (same label as reel-measurement adapter), not customer: client_id is already on every row
+
+  const actionType = opts.actionType ?? 'factory_reel_publish'
+  const channel = opts.channelLabel ?? vendor // 给人看的渠道名(待办/日志里显示);vendor 仍是机器标签
 
   const nowIso = new Date().toISOString()
   // 三张表各自独立写:一张挂不拖累另两张(魏征 P1-3),尤其 fde_work_logs(PM 主看板)必须落。
@@ -349,7 +358,7 @@ async function writeThreeBooks(
       .insert({
         client_id: clientId,
         title: `【社媒 ${today}】工厂自动发布 Reel — ${angle}`.slice(0, 200),
-        description: `工厂自动发布 Reel「${angle}」→ ${vendor}(${ref.permalink ?? ref.post_id})`,
+        description: `工厂自动发布 Reel「${angle}」→ ${channel}(${ref.permalink ?? ref.post_id})`,
         dimension: 'social',
         status: 'completed',
         fix_type: 'me_auto',
@@ -367,7 +376,7 @@ async function writeThreeBooks(
     const { error } = await supabaseAdmin.from('flywheel_actions').insert({
       client_id: clientId,
       flywheel: 'social',
-      action_type: 'factory_reel_publish',
+      action_type: actionType,
       execution_mode: execMode,
       vendor,
       payload: { work_order_id: id, ...ref },
@@ -381,7 +390,7 @@ async function writeThreeBooks(
     const { error } = await supabaseAdmin.from('fde_work_logs').insert({
       client_id: clientId,
       log_date: today,
-      summary: `【社媒｜工厂自动发布】Reel「${angle}」已发到 ${vendor}。${ref.permalink ?? ref.post_id}`,
+      summary: `【社媒｜工厂自动发布】Reel「${angle}」已发到 ${channel}。${ref.permalink ?? ref.post_id}`,
       author_email: 'factory@magicengine.com.au',
     })
     if (error) console.error(`[publish-worker] fde_work_logs 落库失败 ${id}: ${error.message}`)
