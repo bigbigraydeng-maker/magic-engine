@@ -263,3 +263,55 @@ PM 停在 China Panorama 上说「出发日期，从 5 月 8 号修改到 6 月 
 - 不变：助手只出建议，管理员点「应用」才保存并记入修改记录。
 - 真实调用验证（本机，3 次）：停在团上 → 直接两条建议（取消 2027-05-08、新增 2027-06-08 返程 2027-07-04）；不带焦点团 → 反问；停在 China Panorama 但点名 Silk Road → 改的是 Silk Road 的班期。
 - 未做：把「正在编辑的那个班期」的 id 也带上（班期编辑状态在班期表组件内部；同一团内出团日唯一，按日期已能定位）。
+
+### 6.10 给客户员工用：品牌头、Beta、后台入口、按账号留痕、权限隔离（PM 2026-10-10 经统筹窗口转达；本机做完，不上线）
+
+**PM 要求**：页面别太素，加客户 logo 做成完整页面；让 CTS 员工用各自的 Magic Engine 账号登录来体验；放进后台工具入口；每次修改记下是谁改的；页面标 Beta。
+
+**已核对的事实（2026-10-10 只读）**
+- 身份：Supabase Auth；客户成员关系在 `client_portal_users`（email × client_id × access_type）。`requireDashboardClientAccess(clientId)` 已保证「只能碰自己客户」并返回 `user.email`、`role`、`tier`；middleware 对 `/dashboard/clients/<自己>/**` 放行客户成员，`/api/*` 由各接口自己鉴权。
+- 现状：`requireCatalogAdmin` 只放行 admin 角色；页面 `page.tsx` 同样硬拦非 admin。
+- 生产库（只读查询）：CTS 已有 3 行成员（access_type `both` / `dashboard`），0 个 scoped_admin；`master_briefs.vi_colors` = primary `#1a1a1a` / secondary `#d4af37` / accent `#c41e3a`（2026-08-27），与官网真实品牌（`#B61E2E` 红、`#D6A756` 金、背景 `#FBF7F0`，见 `docs/clients/cts/2026-09-03-cts-vi-design-system.md`）不一致；全库没有任何字段存客户 logo。官网 logo `https://www.ctstours.co.nz/logo.png` 可访问（200，image/png）。
+
+**A. 权限模型（A 级）**
+- `requireCatalogAdmin` 改为 `requireCatalogAccess(clientId, capability)`，返回 `{ ok: true, actor, role, permissions } | { ok: false, response }`。身份与隔离仍全部委托 `requireDashboardClientAccess`，不另写一套。
+- 两种角色：`me_admin`（`role === 'admin'`，含受限 admin 仅限其客户）；`client_member`（`role === 'client-viewer'` 且 `tier === 'paid_client'`）。`self_serve`、`portal_only`、非成员一律 403。
+- 能力表（服务端唯一一处定义，页面只读它的结果）：
+
+  | 能力 | me_admin | client_member |
+  |---|---|---|
+  | view（看目录、对照表、上架记录、修改记录） | ✓ | ✓ |
+  | edit（改团、增改班期） | ✓ | ✓ |
+  | assistant（AI 助手出建议） | ✓ | ✓（受每日上限约束，见 C） |
+  | import（出团表预览/生效/撤销）、aliases（叫法对照增删）、seed（读入官网） | ✓ | ✗ |
+  | publish（上架、换回旧版） | ✓ | ✗（常量 `CLIENT_MEMBER_CAN_PUBLISH = false`；是否放开由 PM 定） |
+
+  理由：Beta 期让客户员工体验「看 + 改草稿 + 用助手」，对外生效的动作与批量动作先留在 ME 管理员手里（fail-closed）；放开只改这一张表。
+- 每个路由 handler 声明自己需要的能力；`GET …/tour-catalog` 额外返回 `permissions` 与 `viewer`（email、role），页面据此隐藏或禁用入口并写明原因（「测试版：上架由 Magic Engine 管理员操作」）。**页面隐藏不算防护，服务端逐接口拒绝才算。**
+- 操作者一律取服务端会话的 email，请求体里的任何身份字段不读。email 取不到 → 拒绝写操作（不再落成 `unknown`）。
+- 隔离证明：①用真实的 `requireDashboardClientAccess` 逻辑 + 假成员表，逐个 handler 验证「A 客户成员请求 B 客户」全部 403 且不触库；②SQL 层验证「在自己的 client_id 下传别家的 tourId / departureId / batchId / 版本号」全部被拒或零行；③`self_serve`、`portal_only`、未登录各一组。
+- 本机登录旁路保持只在工作区；护栏测试继续盯住它。
+
+**B. 按账号留痕**
+- 已有：团与班期的每次增改由数据库触发器写 `tour_catalog_change_log`（谁、何时、哪个团/班期、改前、改后）；AI 助手应用的修改在操作者后带「(AI 助手)」；导入、撤销导入、上架、换回各自记操作者。
+- 补：修改记录显示拆出「来源」（手动 / AI 助手 / 出团表导入 / 撤销导入 / 系统）并带年份；新增「修改记录」页签看整个目录最近 100 条（现在只能逐个团看）。
+- 不做（登记后续）：change_log 加独立的 来源 / 角色 列（现编码在 actor 文本里）；别名增删与 seed 的操作者；撤销导入的 `rolled_back_by` 列。
+
+**C. AI 助手用量上限（因为要开放给客户员工，花的是 ME 的钱）**
+- 新表 `tour_catalog_assistant_usage(client_id, day, calls, cost_usd)`（service_role only）+ 函数 `tour_catalog_assistant_reserve(p_client_id, p_day, p_limit)`：原子地「未超限则 calls + 1 并放行」，超限返回 false；调用后把实际花费累加。每客户每日上限常量 `ASSISTANT_DAILY_CALL_LIMIT = 100`（按实测单次约 US$0.03–0.08，上限约合每天 US$8）。超限 → 429，页面提示「今天的 AI 助手次数用完了，明天再用或直接手动修改」。
+
+**D. 品牌头（平台化：共享代码里不出现任何客户名、色值、logo 地址）**
+- 新函数 `getClientBrand(db, clientId)` → `{ name, logoUrl | null, primary | null, secondary | null, background | null }`，数据来自该客户最新一条 `master_briefs`：`vi_colors`（已有）+ 新增可空列 `vi_logo_url text`（单独一个迁移文件，只加一列）。色值做严格校验（只接受 `#RRGGBB`），logo 地址只接受 `https://`；任何一项缺失或不合格 → 回落到 Magic Engine 中性配色、头部只显示客户名文字。
+- 页面头：logo（有则显示）+ 客户名 +「团目录」+ 明显的 Beta 徽标 + 一句「测试版：每次修改都会记录是谁改的，欢迎反馈」+ 反馈 mailto。品牌色经 CSS 变量注入，只用于页头、主按钮、选中态与强调；金色类辅助色只做点缀（CTS VI 明确禁止大面积金色）。
+- 字体：本轮不按客户切换（库里没有字体字段），沿用后台字体。
+- **CTS 要显示成红金 + logo，需要把生产库 `master_briefs` 的 `vi_colors` 改成官网真实值并登记 `vi_logo_url`——这是改生产数据，须 PM 点头**；在此之前生产上会按现有（过时的黑金）显示。本机试用库里用桩数据填真实值。
+
+**E. 后台入口**
+- `industry-features.ts` 新增功能键 `tour_catalog`，与 `tailor_made` 共用旅游行业关键词（层级判定：L2 旅游版能力，别的行业不该看到）。
+- 客户主页「工具」页签加卡片「团目录 · Beta」；受限管理员侧栏加同名入口。两处都只是链接，真正的闸在页面与接口。
+- 页面 `page.tsx` 改用 `requireCatalogAccess(clientId, 'view')`；非旅游行业客户访问该页显示「这个客户没有开通团目录」。
+
+**F. 交付前**：Impeccable 检查（检查程序本机已有，不需再下载），前后数字写进 PR；设计与实施各一轮 子牙 + 魏征 + 狄仁杰。
+
+**不做**：不开任何账号、不发邀请；不新增对外公开接口；不让客户成员接触团目录以外的表。
+**需要 PM 决定的**：①是否把 CTS 的品牌色与 logo 写进生产库；②CTS 员工能否自己上架（现为不能）；③给哪几位 CTS 员工开账号（现有 3 行成员是否就是他们）；④AI 助手每日上限数值。
