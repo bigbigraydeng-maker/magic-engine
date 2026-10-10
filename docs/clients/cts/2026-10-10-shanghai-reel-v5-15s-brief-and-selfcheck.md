@@ -128,3 +128,17 @@
 - **有没有把客户事实写进 shared runtime**：没有（`footageScrim` 是通用倍数，无任何客户内容）。
 - **学习层级**：仍在 CTS 客户私有层。可泛化的一条经验（**「下半屏太暗」先量素材本身再动模板；真要动模板，加可选倍数参数、证明默认不变**）已在第二版经验里存在，是否升进通用手册由统筹定。
 - **与层级门判定是否一致**：一致。工单参数 = L4 客户配置；`footageScrim` 是对已有 L2 模板的最小可选扩展，没有新增能力线。
+
+## 九、发布前置项完成情况（PM 通过后补齐，2026-10-10）
+
+PM 已在 M1 后台对工单 `fa4fdd89` 点了「通过」（状态 `approved`，通过人 bigbigraydeng@gmail.com，2026-10-10 03:48 UTC）。**注意：在 ME 里「通过」就是发布授权**——每小时第 5 分钟的 `factory-publish-worker` 会把 `approved` 的成片领走发布（render.yaml 第 976 行）。本轮把第六节的前置项在它领走之前补齐：
+
+| 前置项 | 结果 |
+|---|---|
+| 素材来源记录 | 已写 Dropbox `CTS/remotion-assets/clips/credits-v5.json`（5 条）：苏州、西湖是 Unsplash 带出处；浦东夜景航拍、上海日景是 Dropbox 素材库内、更上游来源**未知**（按 PM 10-05/06 口径 Dropbox 内视为已授权）；外滩是库存素材 `v_bund_36546365` 加工，库存清单里没有它的条目，只有文件名里的编号。**这两处「未知」如实保留，没有编造出处** |
+| 授权当天重抓官网 | 2026-10-10 重抓：NZD $2,699 per person twin share；单人房差 `Own room + NZD $400`；10 Days；`Next confirmed departure 25 March 2027`；`International and domestic airfares`；7 晚、5 家酒店；13 餐；`English-speaking tour guide`。与成片、首评、正文一致，无变化 |
+| 首评原文与追踪链接 | 用工厂自己的 `buildReelFirstComment` 按工单生成（未手改）：`Full itinerary and inclusions` / `10 days from Auckland · NZD $2,699 per person, twin share · Next departure 25 March 2027` / 官网行程页链接，带 `utm_source=facebook`、`utm_medium=organic_social`、`utm_campaign=me_factory_reel`、`utm_content=fa4fdd89-…`。**苏东坡复审：通过，无必改项**（每句标官网可溯；正文无免签/domestic/max 18/25 years/1928/加号；`Flights` 足够安全）。我没有真实点击该链接验证落地页 |
+| 机票、免签措辞 | 正文只写 `Flights`；官网横幅「免签到 2026-12-31」早于出发日，帖子与评论回复都不提 |
+| 只发终版 | 授权的是 `fa4fdd89`；`2153778a`（r1）和 `cda1d205`（第二版）仍是 `in_review`，没有授权 |
+
+**苏东坡可选建议（未采纳，不影响事实）**：正文可把价格句提前，让信息流预览先露出价格；`Flights` 想更保守可改 `Airfares`。已记录，发布后看数据再说。
