@@ -49,7 +49,7 @@ export function validateViralSourceUrl(raw: unknown): ViralUrlCheck {
     return { ok: false, reason: 'non-default ports are not allowed' }
   }
 
-  const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase()
+  const host = parsed.hostname.replace(/^\[|\]$/g, '').replace(/\.+$/, '').toLowerCase()
   if (!host) return { ok: false, reason: 'url has no host' }
   if (host === 'localhost' || BLOCKED_HOST_SUFFIXES.some(s => host.endsWith(s))) {
     return { ok: false, reason: 'internal hostnames are not allowed' }

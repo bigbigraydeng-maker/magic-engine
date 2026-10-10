@@ -29,6 +29,7 @@ const SSRF = [
   'http://10.0.0.5/x', 'http://192.168.1.1/x', 'http://172.16.0.1/x', 'http://[::1]/x', 'http://[fd00::1]/x',
   'http://2130706433/x', 'http://0x7f000001/x', 'http://0/x', 'http://metadata/x', 'http://db.internal/x',
   'http://[::ffff:127.0.0.1]/x', 'http://100.64.0.1/x',
+  'http://localhost./x', 'http://foo.localhost./x', 'http://metadata.google.internal./x', 'http://intranet./x', 'http://127.0.0.1./x',
 ]
 
 describe('validateViralSourceUrl', () => {
