@@ -179,3 +179,33 @@ CSV 日期只接受 `YYYY-MM-DD`，其它格式整行拒收。
 - platform-shared（L2 旅游版）：目录四张表结构、CSV 预览/应用/回滚管道、输出契约。
 - client-specific（L4）：CTS 的团、班期、展示价、航司航段、别名（库内按 `client_id` 隔离，不进 shared 代码）。
 - 新增事实源？**P1a 阶段目录不被任何渠道消费**；P1b/P2 切换时以「全量 diff 为零」为闸，逐步把第 1–8 处改为读目录，目标是收敛而非新增。
+
+### 6.8 保存与上架分开（PM 2026-10-10 拍板「做上架」；本机做完再上线）
+
+**要补的洞**：目录只有一份数据，保存 = 改这唯一一份。§7 的「人工点发布才通知官网」只管住了「推」，管不住「拉」——官网 ISR 重取、以及 P2 接进来的客服/内容工厂/广告读到的都是工作数据，未上架的改动会漏出去。
+
+**做法：工作稿 + 已上架版两层。**
+- **工作稿** = 现有 `tour_catalog_tours` / `tour_catalog_departures`。保存、导入、撤回、AI 助手照旧只改这里。
+- **已上架版** = 新表 `tour_catalog_published`（`client_id`、`version bigint`、`snapshot jsonb`、`summary jsonb`、`note text`、`published_by text`、`source_version bigint null`（退回时记来源版）、`created_at`；`PRIMARY KEY (client_id, version)`；RLS 仅 service_role，revoke anon/authenticated）。`snapshot = { tours: [...], departures: [...] }`，为上架那一刻工作稿的整行拷贝，**班期去掉 `internal`**（运营内部字段不进任何对外读取路径）。
+- **`tour_catalog_state` 加列 `published_version bigint not null default 0`**。现有 `catalog_version`（每次写入 +1）语义改名为「工作稿修订号」，只用于并发防护；**对外的版本号一律是 `published_version`**（只增不减，退回也 +1，沿用 §5 的单调规则）。
+- **渠道只读已上架版**：`loadCatalogProducts` 改为读最新一条 `tour_catalog_published.snapshot` 再过 `toFirstPartyTours`；**从未上架过 → 返回空**（fail-closed，P1b 的 loader 回落到原 HTTP）。`getCatalogVersion` 返回 `published_version`。后台页面继续读工作稿（`loadCatalog`）。
+
+**上架流程（人点，不自动）**
+1. `GET …/tour-catalog/publish/preview`：服务端算「工作稿 vs 已上架版」差异（纯函数 `diffCatalog`，按团 id / 班期 id 对齐），返回逐项 `{ tourName, field, before, after, risk }`、`draftVersion`（当时的 `catalog_version`）、`diffHash`。首次上架只给汇总（多少个团、多少个班期），不逐字段铺开。
+2. `POST …/tour-catalog/publish`，body `{ draftVersion, diffHash, acknowledgeHighRisk, note }`。服务端**重算**差异：`diffHash` 不符 → 409「你看完之后又有改动，请重新查看」；无差异 → 400；含高风险项而没勾确认 → 400。再调 `tour_catalog_publish(p_client_id, p_expected_draft_version, p_actor, p_note, p_summary)`：单事务内锁 state 行、比对 `catalog_version = p_expected_draft_version`（不符 → `conflict:stale`）、从工作稿拼 snapshot、`published_version + 1`、写一行。
+3. **高风险项**（单独标红、须多勾一次）：展示价、单房差、班期新增/日期/状态/单独价、团上下架、团被删除（工作稿里没有而已上架版里有）。其余（行程文字、亮点、包含项等）为普通项。
+4. **退回**：`POST …/tour-catalog/publish/revert` body `{ version }` → `tour_catalog_revert_published`：把第 N 版 snapshot 作为**新的一版**（`published_version + 1`，`source_version = N`）。**只改已上架版，不动工作稿**——退回后页面会显示「工作稿与已上架版有 X 处不同」，由人决定改回工作稿还是重新上架。「放弃未上架的改动」（把工作稿还原成已上架版）本轮不做，记后续。
+5. **权限与留痕**：上架、退回仅 admin（`requireCatalogAdmin`）；`published_by` 记操作者；每版 `summary` 存当时的差异汇总供「上架记录」页展示。
+
+**本轮不做**：定时上架；按字段/按团部分上架（一次上架 = 整份工作稿）；上架后自动通知官网（P1b 的 Inngest 事件接在 `tour_catalog_publish` 成功之后，届时再接）；「用在哪里」影响清单（等官网与广告接入后才有内容）。
+
+**对 §7 P1b 的修正**：官网无论构建期还是 ISR 都只可能读到已上架版；「发布到官网」的 Inngest 事件由「上架成功」触发，不再是独立按钮。
+
+### 6.9 后台页面重排（PM 2026-10-10：「list 太长」）
+
+现状：33 个团一列卡片铺到底（约 2760px 高），导入、叫法对照、导入记录全堆在团列表下面。
+- **顶部状态条**：「已上架第 N 版 · 时间」/「还没上架过」+「X 处改动未上架 →［查看并上架］」。
+- **四个页签**：团 ｜ 出团表导入 ｜ 上架记录 ｜ 叫法对照。导入、记录、叫法各自一页，不再压在列表下面。
+- **团页签 = 左列表 + 右详情**：左边按系列分组（China Signature / China Discovery / China Stopover / Japan / Vietnam，可折叠，带个数），有搜索框和筛选（全部 / 有未上架改动 / 有班期 / 已下架）；每行只有短团名、展示价、下一班日期、小标记。点一行，右边显示这个团的编辑、班期、修改记录。
+- **AI 助手**收成右侧抽屉，页面右上角按钮开合，不常驻占宽。
+- 窄屏（< 1024px）：列表与详情上下切换（点团进详情，有「← 返回列表」）。
