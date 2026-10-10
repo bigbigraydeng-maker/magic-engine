@@ -30,8 +30,28 @@ import { quoteIsGrounded } from '@/lib/crm/stage-from-conversation'
 const LEVELS = ['high', 'medium', 'low', 'unknown'] as const
 type Level = (typeof LEVELS)[number]
 
+/**
+ * v4：**模型只报事实，档位由代码按书面规则算**。
+ *
+ * v2 / v3 让模型直接给「高 / 中 / 低」。实测它在理由里写着「客户提供了具体货物信息」，
+ * 档位却照旧给「中」—— 规则写进提示词不等于被执行。把判断拆成几个是 / 否的事实，
+ * 规则放在 `levelFromFacts` 里：能逐条核对、能改规则不重跑模型、PM 看得懂凭什么。
+ */
 const VerdictSchema = z.object({
-  level: z.enum(LEVELS),
+  /** 垃圾 / 推广 / 发错人 / 跟业务无关（例如来找工作）。 */
+  is_spam_or_unrelated: z.boolean(),
+  /** 客人说清了具体货物、数量或线路里的至少一样。 */
+  customer_gave_specifics: z.boolean(),
+  /** 我们（真人，不是固定回复）给过价格或报价。 */
+  we_gave_price: z.boolean(),
+  /** 约了通话 / 见面 / 上门，或答应了下一步并被接受。 */
+  next_step_arranged: z.boolean(),
+  /** 已下单 / 已付款 / 在安排发货。 */
+  ordered_or_paid: z.boolean(),
+  /** 我们明说做不了他要的（线路 / 货类 / 服务），且之后没有另约别的。 */
+  we_declined: z.boolean(),
+  /** 客人明说先看看 / 暂时不需要。 */
+  customer_said_not_now: z.boolean(),
   customer_quote: z.string(),
   our_quote: z.string(),
   progression: z.string(),
@@ -91,35 +111,74 @@ function cell(text: string): string {
 }
 
 function buildSystemPrompt(business: string): string {
-  return `You judge how far a sales conversation between ${business} ("US") and one prospect ("CUSTOMER") has actually progressed. Judge the INTERACTION between both sides — not how much the customer talked, and not their tone.
+  return `You read a sales conversation between ${business} ("US") and one prospect ("CUSTOMER") and report FACTS about it. You do not grade it. Answer each yes/no strictly from what is written.
 
-Answer with exactly one level:
-- "high" — a real, active prospect. EITHER (a) both sides went back and forth at least two rounds (customer, us, customer, us) AND the content clearly progressed step by step — from a general question, to specific goods / route / quantity, to price, timing or what happens next; OR (b) WE have already given a price/quote AND the customer gave specific product information (what goods, how much, or from where to where) rather than a general inquiry.
-- "medium" — only half of that: there was back-and-forth but it did not progress (same question repeated, pleasantries, thanks); or the customer gave specific product information but we have not quoted; or we quoted but the customer only ever asked a general question.
-- "low" — a general inquiry with no follow-through; or the customer said not now / just looking; or they asked for something we do not do.
-- "unknown" — spam, promotion, wrong recipient, or too short to tell anything.
+Lines marked "US (auto-reply)" are canned messages (rate cards, welcome text, bot answers). Ignore them completely: they are not us talking, and a rate card is not us giving a price.
 
-Rules:
-- Lines marked "US (auto-reply)" are canned messages (rate cards, welcome text, bot answers). They do NOT count as a round of conversation and do NOT count as us giving a quote. Never use one as our_quote.
-- If US said we cannot do what the customer asked (a route, a cargo type or a service we do not handle), the level is "low" no matter how long the conversation is.
-- A customer who has already ordered, paid, or is arranging shipment with us is "high".
-- customer_quote: copy ONE sentence VERBATIM from a CUSTOMER line. our_quote: copy ONE sentence VERBATIM from a US line. Character for character — both are checked against the transcript. If the level is "high" you MUST provide both. Use an empty string when there is nothing to quote.
-- progression: in SIMPLIFIED CHINESE, one short phrase of the form "从 X 聊到了 Y". Empty string if the conversation did not progress.
+- is_spam_or_unrelated: spam, promotion, wrong recipient, job seeker, or nothing to do with ${business}'s business.
+- customer_gave_specifics: the CUSTOMER stated at least one concrete thing about THEIR OWN case — the goods, a quantity/weight/size, or a specific city/port/address. A product link or photo they sent counts. NOT specific: "How much is shipping?", "How long does delivery take?", or naming only the countries ${business} always serves anyway (that is everyone's question, not their case).
+- we_gave_price: a real person on our side stated an actual price, rate or quote for this customer's case.
+- next_step_arranged: a real person on our side and the customer agreed a call, visit, meeting or pickup with a time or place; or a real person on our side promised a concrete next step (e.g. "I'll send the quotation") in reply to the customer's specifics. Asking the customer a question is NOT arranging a next step.
+- ordered_or_paid: the customer has ordered, paid, or is arranging an actual shipment with us.
+- we_declined: we told them we cannot do what they asked AND nothing else was arranged afterwards.
+- customer_said_not_now: the customer's LATEST position is a no — not now / just looking / "I'll be in touch" / too expensive / chose another provider / already sorted.
+- customer_quote: copy ONE sentence VERBATIM from a CUSTOMER line that best supports your answers. Character for character; it is checked against the transcript. Empty string if the customer wrote nothing usable.
+- our_quote: copy ONE sentence VERBATIM from a "US" line (never an auto-reply). Empty string if no real person on our side said anything relevant.
+- progression: SIMPLIFIED CHINESE, one short phrase "从 X 聊到了 Y". Empty string if the conversation did not move forward.
 - reason: one short sentence in SIMPLIFIED CHINESE.`
 }
 
+const BOOL = { type: 'boolean' } as const
+const STR = { type: 'string' } as const
 const SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['level', 'customer_quote', 'our_quote', 'progression', 'reason'],
+  required: [
+    'is_spam_or_unrelated', 'customer_gave_specifics', 'we_gave_price', 'next_step_arranged',
+    'ordered_or_paid', 'we_declined', 'customer_said_not_now',
+    'customer_quote', 'our_quote', 'progression', 'reason',
+  ],
   properties: {
-    level: { type: 'string', enum: [...LEVELS] },
-    customer_quote: { type: 'string' },
-    our_quote: { type: 'string' },
-    progression: { type: 'string' },
-    reason: { type: 'string' },
+    is_spam_or_unrelated: BOOL,
+    customer_gave_specifics: BOOL,
+    we_gave_price: BOOL,
+    next_step_arranged: BOOL,
+    ordered_or_paid: BOOL,
+    we_declined: BOOL,
+    customer_said_not_now: BOOL,
+    customer_quote: STR,
+    our_quote: STR,
+    progression: STR,
+    reason: STR,
   },
 } as const
+
+/**
+ * 书面规则（v4，按 PM 2026-10-10 的原话 + 六个标注）。从上往下，先中先算：
+ *   垃圾 / 无关                         → 不确定
+ *   已下单付款 / 真人约了下一步          → 高
+ *   客人最后说不要 / 我们明说做不了      → 低（排在下一条前面：给过货物清单但最后说「太贵」的不算）
+ *   客人说清了具体货物（哪怕我们还没报价）→ 高（我们欠他一份报价，最该今天动手）
+ *   真人来回两轮以上且我们报过价         → 高
+ *   真人来回过                          → 中
+ *   其余（泛泛一问没下文）               → 低；客人一句能用的话都没有 → 不确定
+ */
+function levelFromFacts(v: Verdict, humanTurns: number, customerLines: number): { level: Level; rule: string } {
+  if (v.is_spam_or_unrelated) return { level: 'unknown', rule: '垃圾或与业务无关' }
+  if (customerLines === 0) return { level: 'unknown', rule: '客人没有可读的话' }
+  if (v.ordered_or_paid) return { level: 'high', rule: '已下单 / 已付款 / 在安排发货' }
+  // 没有真人接过话，就谈不上「约了下一步」—— 模型把固定回复里的一句反问当成约定过。
+  if (v.next_step_arranged && humanTurns >= 2) return { level: 'high', rule: '约了下一步' }
+  // 客人最后的态度是「不要」排在「给过具体货物」前面：给过货物清单、最后说「你们太贵」的人不是今天该打的。
+  if (v.customer_said_not_now) return { level: 'low', rule: '客人最后说不要 / 暂时不需要' }
+  if (v.we_declined) return { level: 'low', rule: '我们做不了他要的' }
+  if (v.customer_gave_specifics) {
+    return { level: 'high', rule: v.we_gave_price ? '客人给了具体货物，我们已报价' : '客人给了具体货物，我们还欠一份报价' }
+  }
+  if (humanTurns >= 4 && v.we_gave_price) return { level: 'high', rule: '真人来回两轮以上且报过价' }
+  if (humanTurns >= 3) return { level: 'medium', rule: '有来回，但没聊到具体货物' }
+  return { level: 'low', rule: '泛泛一问，没有下文' }
+}
 
 async function askModel(
   business: string,
@@ -254,11 +313,7 @@ function countTurns(msgs: MsgRow[], canned: Set<string>): number {
   return turns
 }
 
-const PRICE_RE = /\$|nzd|usd|rmb|¥|quote|price|报价|运费/i
 
-function hasPriceSignal(msgs: MsgRow[], canned: Set<string>): boolean {
-  return msgs.some((m) => m.direction === 'outbound' && !isCanned(m, canned) && PRICE_RE.test(m.body ?? ''))
-}
 
 /**
  * 凭据在不在原文里。`quoteIsGrounded` 要求至少 8 个字 —— 而真人常回一个「Sure」「Yes」，
@@ -277,21 +332,16 @@ function applyPostChecks(
   msgs: MsgRow[],
   canned: Set<string>,
 ): { level: Level; downgraded: boolean; note: string } {
-  if (verdict.level !== 'high') return { level: verdict.level, downgraded: false, note: '' }
+  const humanTurns = countTurns(msgs, canned)
+  const customerLines = msgs.filter((m) => m.direction === 'inbound').length
+  const { level, rule } = levelFromFacts(verdict, humanTurns, customerLines)
+  if (level !== 'high') return { level, downgraded: false, note: rule }
 
-  const bothGrounded =
-    grounded(verdict.customer_quote, transcript) && grounded(verdict.our_quote, transcript)
-  if (!bothGrounded) return { level: 'medium', downgraded: true, note: '凭据原话对不上' }
-
-  const turns = countTurns(msgs, canned)
-  // 去掉固定回复之后，真人压根没接过话 → 不可能是「双方在推进」。
-  if (!msgs.some((m) => m.direction === 'outbound' && !isCanned(m, canned))) {
-    return { level: 'medium', downgraded: true, note: '我们这边只有自动回复，没有真人接话' }
-  }
-  if (!verdict.progression.trim() && turns < 4 && !hasPriceSignal(msgs, canned)) {
-    return { level: 'medium', downgraded: true, note: '说不出从哪聊到哪' }
-  }
-  return { level: 'high', downgraded: false, note: '' }
+  // 判高必须拿得出客人原话；我们那句给了就得对得上（没给不强求 —— 欠报价的情形我们可能一句像样的话都没有）。
+  const customerOk = grounded(verdict.customer_quote, transcript)
+  const oursOk = verdict.our_quote.trim().length === 0 || grounded(verdict.our_quote, transcript)
+  if (!customerOk || !oursOk) return { level: 'medium', downgraded: true, note: `${rule}；但凭据原话对不上` }
+  return { level: 'high', downgraded: false, note: rule }
 }
 
 function confusionTable(samples: Sample[]): string {
@@ -410,7 +460,7 @@ async function judgeOne(
         progression: verdict.progression,
         customerQuote: verdict.customer_quote,
         ourQuote: verdict.our_quote,
-        reason: verdict.reason,
+        reason: `【${checked.note}】${verdict.reason}`,
         downgraded: checked.downgraded,
         downgradeNote: checked.note,
       },
