@@ -32,6 +32,7 @@ import { libaiPromptLibraryMonthly } from './libai-prompt-library-monthly'
 import { simaqianReputationWeekly } from './simaqian-reputation-weekly'
 import { gscPageDailyFanOut, gscPageDailyPull } from './gsc-page-daily'
 import { toolsLabLeadFollowUp, toolsLabReportEmailReceipt } from './tools-lab-lead-followup'
+import { dailyPlanAutoPublish } from './daily-plan-auto-publish'
 
 export const cloudFunctions = [
   webIntelligenceCapture,
@@ -78,6 +79,7 @@ export const cloudFunctions = [
   gscPageDailyPull,
   toolsLabLeadFollowUp,
   toolsLabReportEmailReceipt,
+  dailyPlanAutoPublish,
 ]
 
 /** 命名空间自检：所有注册函数 id 必须以 cloud- 开头（契约测试 + 运行期双保险）。 */

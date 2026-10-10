@@ -3,7 +3,11 @@ import { describe, expect, it, vi } from 'vitest'
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 vi.mock('@/lib/workflows/inngest-event', () => ({ sendInngestEvent: vi.fn() }))
 vi.mock('@/lib/meta/token-manager', () => ({ getMetaTokenForClient: vi.fn(), getStoredPageToken: vi.fn() }))
-vi.mock('@/lib/meta/page-posts', () => ({ getPageAccessToken: vi.fn(), publishPagePhotoPost: vi.fn() }))
+vi.mock('@/lib/meta/page-posts', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/meta/page-posts')>()),
+  getPageAccessToken: vi.fn(),
+  publishPagePhotoPost: vi.fn(),
+}))
 
 import { runDailyPlanPublish } from '../daily-plan-publish-runner'
 import { supabaseAdmin } from '@/lib/supabase'

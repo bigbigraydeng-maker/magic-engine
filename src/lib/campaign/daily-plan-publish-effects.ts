@@ -9,7 +9,7 @@
 import type { z } from 'zod'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
-import { publishPagePhotoPost } from '@/lib/meta/page-posts'
+import { PagePublishError, publishPagePhotoPost } from '@/lib/meta/page-posts'
 import { CAMPAIGN_DAILY_PLAN_KIND, type CampaignDailyPlanData } from '@/lib/campaign/daily-plan'
 import { buildFirstCommentMarker, ensureFacebookFirstComment } from '@/lib/meta/first-comment'
 import { GRAPH_BASE } from '@/lib/meta/graph-base'
@@ -21,6 +21,8 @@ import {
   measurementSchedule,
   storyResolveEventId,
   resolvePublishSchedule,
+  ABORTED_BEFORE_SEND_ERROR,
+  MISSED_WINDOW_ERROR,
   type CampaignDailyPublishCommand,
   type CampaignDailyPublishFailure,
   type CampaignDailyPublishMeta,
@@ -66,7 +68,21 @@ export interface LiveOutcome {
  */
 export async function publishPending(
   candidates: PublishCandidate[],
-  context: { clientId: string; pageId: string; pageToken: string; row: PlanRow; command: CampaignDailyPublishCommand },
+  context: {
+    clientId: string
+    pageId: string
+    pageToken: string
+    row: PlanRow
+    command: CampaignDailyPublishCommand
+    /** The instant the schedule is decided against; one value for the whole call. */
+    now?: Date
+    /** false = never publish immediately: a slot that has passed is a MISSED_WINDOW failure, not a late post. */
+    allowImmediate?: boolean
+    /** Request timeout for the Facebook call; unset = none (manual path). */
+    requestTimeoutMs?: number
+    /** Last-moment check, run right before the Facebook call. false = do not send. */
+    beforeSend?: (date: string) => Promise<boolean>
+  },
 ): Promise<LiveOutcome> {
   const published: CampaignDailyPublishedPost[] = []
   const failed: CampaignDailyPublishFailure[] = []
@@ -82,7 +98,31 @@ export async function publishPending(
     // days first, so a "recall + reschedule" batch after morning has passed
     // can push the whole rhythm forward by 1 day and keep every post landing
     // at 08:00 NZ instead of "today afternoon + morning tomorrow onward".
-    const schedule = resolvePublishSchedule(candidate.date, new Date(), context.command.date_offset_days)
+    const schedule = resolvePublishSchedule(candidate.date, context.now ?? new Date(), context.command.date_offset_days)
+    if (schedule.publishNow && context.allowImmediate === false) {
+      failed.push({
+        date: candidate.date,
+        idempotency_key: candidate.idempotency_key,
+        error: MISSED_WINDOW_ERROR,
+        failed_at: new Date().toISOString(),
+        certainty: 'rejected',
+      })
+      continue
+    }
+
+    // A last-moment check that cannot even run (e.g. a database read failed) is a refusal to send, not a
+    // send: nothing has gone out yet, so this is the safe side and must not be mistaken for an uncertain send.
+    const clearToSend = context.beforeSend ? await context.beforeSend(candidate.date).catch(() => false) : true
+    if (!clearToSend) {
+      failed.push({
+        date: candidate.date,
+        idempotency_key: candidate.idempotency_key,
+        error: ABORTED_BEFORE_SEND_ERROR,
+        failed_at: new Date().toISOString(),
+        certainty: 'rejected',
+      })
+      continue
+    }
 
     let result: Awaited<ReturnType<typeof publishPagePhotoPost>>
     try {
@@ -92,6 +132,7 @@ export async function publishPending(
         message: candidate.message,
         imageUrl: candidate.imageUrl,
         scheduledPublishTime: schedule.publishNow ? undefined : schedule.scheduledPublishTime,
+        timeoutMs: context.requestTimeoutMs,
       })
     } catch (error: unknown) {
       failed.push({
@@ -99,6 +140,7 @@ export async function publishPending(
         idempotency_key: candidate.idempotency_key,
         error: errorMessage(error),
         failed_at: new Date().toISOString(),
+        certainty: error instanceof PagePublishError ? error.certainty : 'unknown',
       })
       continue
     }

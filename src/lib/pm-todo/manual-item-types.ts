@@ -170,6 +170,12 @@ export type ManualItemKind =
   | 'price_claim_unbacked'
   /** 每日计划里帖子的价格数字跟客户资料里该团的价格对不上（或没资料可对）—— 发布时整批会被拦 */
   | 'price_fact_unverified'
+  /** 自动发布：帖子被拦 / 多次失败 / 发布时间已过没补发 —— 没发出去，要人看 */
+  | 'auto_publish_stalled'
+  /** 自动发布：系统不确定帖子有没有发出去，为防重复不自动重试 —— 要人去主页核对 */
+  | 'auto_publish_unknown_outcome'
+  /** 自动发布：已授权的日期到了，却没有任何发布记录 —— 发布器可能没在跑 */
+  | 'auto_publish_unarmed'
   | 'auto_run_blocked'
   | 'auto_run_stuck'
   /** 被一句「不打算去」误判成永久拒联 —— 只有人能看一眼原话再决定 */
