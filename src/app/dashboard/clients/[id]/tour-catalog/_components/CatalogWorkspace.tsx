@@ -386,6 +386,12 @@ function WorkspaceBody(props: WorkspaceBodyProps): JSX.Element {
           tours={snapshot.tours}
           departures={snapshot.departures}
           onApplied={onChanged}
+          focusTourId={
+            // Same rule as the detail pane: nothing picked yet means the first tour is showing.
+            state.activeTab === 'tours'
+              ? (snapshot.tours.find(t => t.id === state.selectedId) ?? snapshot.tours[0])?.id ?? null
+              : null
+          }
         />
       </AssistantDrawer>
     </div>

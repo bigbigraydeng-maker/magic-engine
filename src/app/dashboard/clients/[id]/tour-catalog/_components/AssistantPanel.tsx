@@ -538,12 +538,16 @@ export function AssistantPanel({
   tours,
   departures,
   onApplied,
+  focusTourId = null,
 }: {
+  /** The tour open in the page; sent with each message so "the departure date" means this tour. */
+  focusTourId?: string | null
   clientId: string
   tours: CatalogTourView[]
   departures: CatalogDepartureView[]
   onApplied: () => void
 }) {
+  const focusTourName = tours.find(t => t.id === focusTourId)?.name ?? null
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -581,7 +585,7 @@ export function AssistantPanel({
       const res = await fetch(`/api/clients/${clientId}/tour-catalog/assistant`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, history }),
+        body: JSON.stringify({ message: text, history, focusTourId }),
       })
       if (!res.ok) {
         const { error: code } = (await res.json().catch(() => ({}))) as { error?: string }
@@ -758,6 +762,11 @@ export function AssistantPanel({
         </p>
       )}
 
+      {focusTourName !== null && (
+        <p className="text-xs font-semibold text-me-charcoal/55">
+          当前打开：{focusTourName}。没点名的修改，默认改这个团。
+        </p>
+      )}
       <textarea
         value={input}
         onChange={e => setInput(e.target.value)}

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type Anthropic from '@anthropic-ai/sdk'
 import {
   buildCatalogIndex,
+  buildFocusSection,
   checkProposal,
   normaliseDeparturePatchKeys,
   normaliseNewDepartureKeys,
@@ -553,5 +554,63 @@ describe('runAssistant — two tour detail requests in one reply', () => {
     const content = last.content as Anthropic.ToolResultBlockParam[]
     expect(content.map((c) => c.tool_use_id)).toEqual(['u1', 'u2'])
     expect(String(content[1].content)).toContain('tour_not_found')
+  })
+})
+
+describe('the tour the admin has open', () => {
+  it('names the open tour with its departures and tells the model not to ask which tour', () => {
+    const snapshot = makeSnapshot()
+    const tour = snapshot.tours[0]
+    const section = buildFocusSection(snapshot, tour.id)
+    expect(section).toContain('管理员当前打开的团')
+    expect(section).toContain(tour.id)
+    expect(section).toContain(tour.name)
+    for (const dep of snapshot.departures.filter((d) => d.tourId === tour.id)) {
+      expect(section).toContain(dep.id)
+      expect(section).toContain(dep.departOn)
+    }
+    expect(section).toContain('不要反问是哪个团')
+    expect(section).toContain('以他点名的团为准')
+    expect(section).toContain('对上不止一个')
+    expect(section).not.toContain('clientId')
+  })
+
+  it('falls back to "nothing open" for no id or an id that is not in the catalog', () => {
+    const snapshot = makeSnapshot()
+    for (const id of [null, '', 'not-a-tour']) {
+      const section = buildFocusSection(snapshot, id)
+      expect(section).toContain('当前没有打开任何团')
+      expect(section).not.toContain('默认目标')
+    }
+  })
+
+  it('never leaks internal departure fields into the focus section', () => {
+    const snapshot = makeSnapshot()
+    const tour = snapshot.tours[0]
+    snapshot.departures.push(
+      makeDeparture({ id: 'dep-internal', tourId: tour.id, departOn: '2027-12-01', internal: { airline: 'SECRET-AIR' } }),
+    )
+    expect(buildFocusSection(snapshot, tour.id)).not.toContain('SECRET-AIR')
+  })
+
+  it('puts the open tour into the system prompt sent to the model', async () => {
+    const snapshot = makeSnapshot()
+    const { deps, calls } = depsFrom([textMessage('好')])
+    await runAssistant({ ...baseInput, snapshot, focusTourId: snapshot.tours[0].id }, deps)
+    expect(String(calls[0].system)).toContain('管理员当前打开的团（默认目标）')
+  })
+
+  it('tells the model nothing is open when no tour id is passed', async () => {
+    const { deps, calls } = depsFrom([textMessage('好')])
+    await runAssistant({ ...baseInput }, deps)
+    expect(String(calls[0].system)).toContain('当前没有打开任何团')
+  })
+
+  it('keeps "$&"-style text in tour names literal in the prompt', async () => {
+    const snapshot = makeSnapshot()
+    snapshot.tours[0] = { ...snapshot.tours[0], name: 'Price $& more $1' }
+    const { deps, calls } = depsFrom([textMessage('好')])
+    await runAssistant({ ...baseInput, snapshot, focusTourId: snapshot.tours[0].id }, deps)
+    expect(String(calls[0].system)).toContain('Price $& more $1')
   })
 })

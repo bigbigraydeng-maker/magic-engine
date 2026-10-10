@@ -107,6 +107,34 @@ describe('AssistantPanel', () => {
     vi.unstubAllGlobals()
   })
 
+  it('sends the open tour with the message and says which tour is the default', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ reply: '好的', proposals: [], costUsd: 0 }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <AssistantPanel clientId="c1" tours={tours} departures={departures} onApplied={vi.fn()} focusTourId="t1" />,
+    )
+    expect(screen.getByText(/当前打开：Silk Road。没点名的修改，默认改这个团。/)).toBeTruthy()
+    await sendMessage('出发日期改一下')
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    const body = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string) as {
+      focusTourId: string | null
+    }
+    expect(body.focusTourId).toBe('t1')
+  })
+
+  it('sends no open tour and shows no hint when none is open', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ reply: '好的', proposals: [], costUsd: 0 }))
+    vi.stubGlobal('fetch', fetchMock)
+    renderPanel()
+    expect(screen.queryByText(/当前打开：/)).toBeNull()
+    await sendMessage('改一下')
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    const body = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string) as {
+      focusTourId: string | null
+    }
+    expect(body.focusTourId).toBeNull()
+  })
+
   it('POSTs the message with prior history', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ reply: '好的', proposals: [], costUsd: 0 }))

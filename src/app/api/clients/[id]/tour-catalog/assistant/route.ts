@@ -69,11 +69,14 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const history = parseHistory(record.history)
+  // Which tour the admin has open. Only a hint: runAssistant ignores ids that are not in the catalog.
+  const focusTourId =
+    typeof record.focusTourId === 'string' && record.focusTourId.length <= 64 ? record.focusTourId : null
 
   try {
     const snapshot = await loadDraftCatalog(supabaseAdmin, clientId)
     const today = todayIso(new Date())
-    const result = await runAssistant({ snapshot, history, message, today })
+    const result = await runAssistant({ snapshot, history, message, today, focusTourId })
 
     console.info('[tour-catalog-assistant]', { clientId, costUsd: result.costUsd })
 

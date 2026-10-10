@@ -63,6 +63,18 @@ describe('POST tour-catalog assistant route', () => {
     expect(runAssistant).not.toHaveBeenCalled()
   })
 
+  it('passes the open tour id through to the assistant', async () => {
+    await POST(makeRequest({ message: '出发日期改一下', focusTourId: 'tour-9' }), makeContext())
+    expect(runAssistant).toHaveBeenCalledWith(expect.objectContaining({ focusTourId: 'tour-9' }))
+  })
+
+  it('ignores an open tour id that is not a short string', async () => {
+    await POST(makeRequest({ message: '改一下', focusTourId: { id: 'x' } }), makeContext())
+    expect(runAssistant).toHaveBeenCalledWith(expect.objectContaining({ focusTourId: null }))
+    await POST(makeRequest({ message: '改一下', focusTourId: 'x'.repeat(65) }), makeContext())
+    expect(runAssistant).toHaveBeenLastCalledWith(expect.objectContaining({ focusTourId: null }))
+  })
+
   it('returns reply and proposals without costUsd on the happy path', async () => {
     const proposals = [{ proposal: { kind: 'update_tour' }, check: { ok: true } }]
     runAssistant.mockResolvedValue({ reply: '已改好', proposals, costUsd: 0.42 })

@@ -388,8 +388,49 @@ reply 用简短、平实的中文，不要术语，不要英文。例如「准�
 
 {catalog}`
 
-function buildSystemPrompt(today: string, catalogIndex: string): string {
-  return SYSTEM_PROMPT.replace('{today}', today).replace('{catalog}', catalogIndex)
+const FOCUS_RULES = `规则：
+- 管理员没有点名哪个团时（例如「出发日期」「这个团」「第 3 天」「价格加 100」），一律指这个团，**不要反问是哪个团**。
+- 管理员点了别的团名时，以他点名的团为准。
+- 按日期找班期时，只在目标团自己的班期里找。没写年份的日期（如「5 月 8 号」）：在该团班期里恰好对上一个就用它；一个都对不上、或对上不止一个时，用普通文本问清楚，不要猜。
+- 「把出发日期从 A 改到 B」：出发日期不能直接改。给两条 proposal：把 A 那个班期 status 改成 "cancelled"，再 create_departure 建 B（没写年份时沿用 A 的年份）。新班期必须带 returnOn：原班期有 returnOn 就保持相同的天数；没有就按该团天数推算（出发日 + 天数 − 1）。reply 里用大白话说明「出发日期不能直接改，准备取消 A 这一班、新增 B 这一班」，返程日是推算的要请管理员核对。`
+
+/**
+ * Tells the model which tour the admin has open, so "the departure date" needs no clarifying question.
+ * An id that is not in the catalog is treated as "nothing open" (the id comes from the browser).
+ */
+export function buildFocusSection(snapshot: CatalogSnapshot, focusTourId: string | null): string {
+  const tour = focusTourId ? snapshot.tours.find((t) => t.id === focusTourId) : undefined
+  if (!tour) {
+    return `## 管理员当前没有打开任何团
+
+管理员没有点名、而目录里对得上不止一个团时，用普通文本问清楚是哪个团，不要猜。`
+  }
+  const focus = {
+    id: tour.id,
+    name: tour.name,
+    duration: tour.durationText,
+    price: tour.displayPriceText,
+    departures: snapshot.departures
+      .filter((dep) => dep.tourId === tour.id)
+      .map((dep) => ({
+        id: dep.id,
+        departOn: dep.departOn,
+        returnOn: dep.returnOn,
+        status: dep.status,
+        price: dep.priceTextOverride,
+      })),
+  }
+  return `## 管理员当前打开的团（默认目标）
+
+管理员此刻正在页面上看这个团：
+${JSON.stringify(focus)}
+
+${FOCUS_RULES}`
+}
+
+function buildSystemPrompt(today: string, catalogIndex: string, focusSection: string): string {
+  // Function replacers: tour text may contain "$&"-style sequences that String.replace would expand.
+  return SYSTEM_PROMPT.replace('{today}', () => today).replace('{catalog}', () => `${catalogIndex}\n\n${focusSection}`)
 }
 
 // ---------------------------------------------------------------------------
@@ -459,13 +500,19 @@ export async function runAssistant(
     history: AssistantMessage[]
     message: string
     today: string
+    /** The tour the admin has open in the page, if any. Untrusted: validated against the snapshot. */
+    focusTourId?: string | null
   },
   deps?: AssistantDeps,
 ): Promise<AssistantResult> {
   const { snapshot, history, message, today } = input
   const client = deps ?? defaultDeps()
 
-  const system = buildSystemPrompt(today, buildCatalogIndex(snapshot))
+  const system = buildSystemPrompt(
+    today,
+    buildCatalogIndex(snapshot),
+    buildFocusSection(snapshot, input.focusTourId ?? null),
+  )
   const messages: Anthropic.MessageParam[] = [
     ...history.slice(-HISTORY_LIMIT).map((m) => ({ role: m.role, content: m.content })),
     { role: 'user', content: message },
