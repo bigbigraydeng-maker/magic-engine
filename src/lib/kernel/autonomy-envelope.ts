@@ -51,8 +51,12 @@ export interface EnvelopeFacts {
   beforeCents: number | null
   /** 改动前，这个账户全部预算单位的日预算合计（分）。 */
   accountDailyTotalBeforeCents: number | null
+  /** 改动前，客户所有 Meta 广告账户的日预算合计（分）；上调预算时必须读到。 */
+  clientDailyTotalBeforeCents: number | null
   /** 客户配置的日预算上限（分）。null = 没设 → 拒绝。 */
   dailyCapCents: number | null
+  /** 客户所有广告账户共用的日预算上限（分）；上调预算时必须读到。 */
+  clientDailyCapCents: number | null
   /** 距这个单位上一次**真实**设置变化过了多少小时（按快照算，含人工改动，§14 K12）。 */
   hoursSinceLastChange: number | null
   /**
@@ -107,6 +111,13 @@ export function isWithinEnvelope(
   if (facts.hoursSinceLastChange === null) reasons.push('读不到这个单位上次设置变动的时间')
   if (envelope.respectDailyCapCents && facts.dailyCapCents === null) {
     reasons.push('这个客户还没设日预算上限，没有上限就不自动动钱')
+  }
+  const isIncreasing = facts.beforeCents !== null && request.afterCents > facts.beforeCents
+  if (envelope.respectDailyCapCents && isIncreasing && facts.clientDailyTotalBeforeCents === null) {
+    reasons.push('读不到客户所有广告账户的日预算合计')
+  }
+  if (envelope.respectDailyCapCents && isIncreasing && facts.clientDailyCapCents === null) {
+    reasons.push('读不到客户所有广告账户共用的日预算上限')
   }
 
   // ── 再拒「明确不该动」──────────────────────────────────────────────────
@@ -180,6 +191,20 @@ export function isWithinEnvelope(
     }
   }
 
+  // 上调预算前，还要把这次变动加到客户所有广告账户的预算总和里。
+  // 这里按客户总上限硬拦（不套单账户信封的 20% 波动余量），避免多个账户
+  // 各自未超上限、合计却越过客户总预算。完整的跨账户事实由 Ads resolver 提供。
+  if (envelope.respectDailyCapCents && isIncreasing) {
+    const clientBefore = facts.clientDailyTotalBeforeCents as number
+    const clientCap = facts.clientDailyCapCents as number
+    const clientAfter = clientBefore - (facts.beforeCents as number) + after
+    if (!Number.isSafeInteger(clientBefore) || !Number.isSafeInteger(clientCap) || clientBefore < 0 || clientCap <= 0) {
+      reasons.push('客户跨账户预算合计或总上限不是有效金额')
+    } else if (clientAfter > clientCap) {
+      reasons.push(`加完后客户所有广告账户日预算合计 ${clientAfter} 分，超过客户总上限 ${clientCap} 分`)
+    }
+  }
+
   return { within: reasons.length === 0, reasons }
 }
 
@@ -217,13 +242,15 @@ export function isWithinEnvelope(
  * 所以「拿 AI 信封把字段置 false」**编译期就不成立** —— 这是好事：
  * 它保证 `AutonomyEnvelope` 永远是那套严格的 AI 信封，想放宽只能显式另立一套（就是这里）。
  *
- * ## 只保留三条判据
+ * ## 人工止损判据
  *
  * 1. **撤回处理函数存在** —— 在本函数里查（`facts.hasRollbackHandler`）
  * 2. **归属校验通过** —— 由 `authorize.ts` 的客户/目标归属段落 + 路由层
  *    `assertCampaignOwnedByClient` 保证，**不在这里重复**
  * 3. **实体存在** —— 由 `envelope-facts.ts` 保证：读不到实体它返回 `unavailable`，
  *    调用方在进本函数**之前**就已经 deny 了
+ * 4. **动作真的只收不放** —— 暂停必须是 pause/0；减预算必须有有效原预算，
+ *    且目标不大于它。不能仅凭 ActionKey 的名字认定这是止损。
  *
  * 🔴 第 2、3 条不在本函数里不等于没做。改这里之前先确认那两处还在，
  *    别因为「这里只剩一条」就以为人工路径没有归属校验。
@@ -231,7 +258,7 @@ export function isWithinEnvelope(
 export interface HumanStopEnvelope {
   /** 判别标记 —— 让「拿错信封」在类型层就露出来，不是靠字段长得像。 */
   readonly kind: 'human_stop'
-  /** 唯一保留的硬判据：撤不回来的事，人按也不做。 */
+  /** 撤不回来的事，人按也不做；收缩方向另按动作及真实金额检查。 */
   readonly requiresRollbackHandler: true
 }
 
@@ -255,14 +282,39 @@ export const HUMAN_STOP_ENVELOPE: HumanStopEnvelope = {
  */
 export const HUMAN_STOP_ACTION_KEYS: readonly ActionKey[] = [
   'ads.pause_unit',
+  'ads.pause_campaign',
   'ads.cut_unit_budget',
+  'ads.cut_campaign_budget',
 ]
 
 /** 人按的收类动作在不在人工信封内。纯函数。 */
-export function isWithinHumanStopEnvelope(facts: EnvelopeFacts): EnvelopeVerdict {
+export function isWithinHumanStopEnvelope(
+  actionKey: string,
+  request: EnvelopeRequest,
+  facts: EnvelopeFacts,
+): EnvelopeVerdict {
   const reasons: string[] = []
   if (!facts.hasRollbackHandler) {
     reasons.push('这个动作没有注册撤回处理函数，撤不回来的事就算是人按的也不做')
+  }
+  if (actionKey === 'ads.pause_unit' || actionKey === 'ads.pause_campaign') {
+    if (request.kind !== 'pause' || request.afterCents !== 0) {
+      reasons.push('人工暂停必须是暂停请求，不能夹带预算变更')
+    }
+  } else if (actionKey === 'ads.cut_unit_budget' || actionKey === 'ads.cut_campaign_budget') {
+    if (request.kind !== 'budget_change') reasons.push('人工减预算必须是预算变更请求')
+    const before = facts.beforeCents
+    const after = request.afterCents
+    if (typeof before !== 'number' || !Number.isFinite(before) || before < 0) {
+      reasons.push('读不到有效的原日预算，无法确认这次只会减预算')
+    }
+    if (!Number.isFinite(after) || after < 0) {
+      reasons.push('目标日预算不是有效金额')
+    } else if (typeof before === 'number' && after > before) {
+      reasons.push('目标日预算高于当前预算，不能以人工止损名义加预算')
+    }
+  } else {
+    reasons.push('这个动作不属于人工止损')
   }
   return { within: reasons.length === 0, reasons }
 }
@@ -306,7 +358,7 @@ export function selectEnvelopeVerdict(args: {
     HUMAN_STOP_ACTION_KEYS.some((key) => key === args.actionKey)
 
   if (human) {
-    return { ...isWithinHumanStopEnvelope(args.facts), envelopeUsed: 'human_stop' }
+    return { ...isWithinHumanStopEnvelope(args.actionKey, args.request, args.facts), envelopeUsed: 'human_stop' }
   }
   return {
     ...isWithinEnvelope(args.request, args.facts, args.envelope),

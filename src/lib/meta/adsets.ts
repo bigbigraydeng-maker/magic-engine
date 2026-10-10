@@ -12,7 +12,7 @@
  * Kept out of `client.ts` deliberately: that file is at the 800-line ceiling.
  */
 
-import { GRAPH_BASE } from './graph-base'
+import { GRAPH_BASE, MAX_INSIGHT_PAGES } from './graph-base'
 
 export interface AdSetSummary {
   id: string
@@ -54,28 +54,40 @@ export async function listAdSetsInCampaign(
   accessToken: string,
 ): Promise<AdSetSummary[] | null> {
   const params = new URLSearchParams({
-    fields: 'id,name,status,effective_status,daily_budget',
+    fields: 'id,name,status,effective_status,daily_budget,account_id',
     limit: '50',
     access_token: accessToken,
   })
-  const url = `${GRAPH_BASE}/${campaignId}/adsets?${params.toString()}`
-
-  let res: Response
-  try {
-    res = await fetch(url)
-  } catch (err) {
-    console.error('[meta/adsets] listAdSetsInCampaign fetch error:', err)
-    return null
+  let url: string | undefined = `${GRAPH_BASE}/${campaignId}/adsets?${params.toString()}`
+  const rows: AdSetSummary[] = []
+  for (let page = 0; page < MAX_INSIGHT_PAGES && url; page++) {
+    let res: Response
+    try {
+      res = await fetch(url)
+    } catch (err) {
+      console.error('[meta/adsets] listAdSetsInCampaign fetch error:', err)
+      return null
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      console.error(`[meta/adsets] listAdSetsInCampaign HTTP ${res.status}:`, body.slice(0, 300))
+      return null
+    }
+    const json = await res.json() as { data?: AdSetSummary[]; paging?: { next?: string } }
+    rows.push(...(json.data ?? []))
+    const next = json.paging?.next
+    if (next) {
+      try {
+        const parsed = new URL(next)
+        if (parsed.protocol !== 'https:' || parsed.hostname !== 'graph.facebook.com') return null
+      } catch {
+        return null
+      }
+    }
+    url = next
   }
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    console.error(`[meta/adsets] listAdSetsInCampaign HTTP ${res.status}:`, body.slice(0, 300))
-    return null
-  }
-
-  const json = await res.json() as { data?: AdSetSummary[] }
-  return json.data ?? []
+  // A still-present cursor means we hit the cap. Never present a partial set as complete.
+  return url ? null : rows
 }
 
 /** Update one ad set's daily budget. Cents. Returns true only on confirmed success. */

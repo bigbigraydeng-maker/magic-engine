@@ -83,6 +83,22 @@ export async function resolveOutgoingImageSource(
 }
 
 /**
+ * 已知配图来源时的判定(纯函数,不查库)。
+ *
+ * 调用方手里已经有 `client_assets` 那一行的 `source` 时用它,不要再按 URL 回查:
+ * 同一客户下两行 storage_url 相同、来源不同时,按 URL 回查取哪行不确定。
+ */
+export function judgePriceClaimWithSource(input: {
+  caption: string
+  source: string | null | undefined
+}): PriceClaimVerdict {
+  const priceClaimed = containsPriceClaim(input.caption)
+  const source = normaliseSource(input.source)
+  if (!priceClaimed) return { blocked: false, priceClaimed, source }
+  return { blocked: !canBackRealPrice(source), priceClaimed, source }
+}
+
+/**
  * 这条内容能不能发出去。
  *
  * 没配图 = 没有「画面」可对不上，不适用本闸（纯文字帖报价是文案的事，不是素材的事）。

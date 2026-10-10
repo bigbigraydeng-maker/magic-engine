@@ -26,6 +26,7 @@ import type { EmailReplyItemKind } from './email-reply-items'
 import type { BindingRequestItemKind } from './binding-request-items'
 import type { PageBindingItemKind } from './page-binding-items'
 import type { CommentScopeTodoKind } from './comment-scope-items'
+import type { CommentReplyScopeTodoKind } from './comment-reply-scope-items'
 import type { MetaTokenHealthKind } from './meta-token-health-items'
 import type { DeployHealthItemKind } from './deploy-health-items'
 import type { LeadSheetItemKind } from './lead-sheet-items'
@@ -74,6 +75,11 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // 探活多半判成坏链接 —— 宁可让人自己找入口，也不能让它静默消失。
   'deploy_not_live',
   'deploy_check_failed',
+  // 全量探测失败跟「AI 没提到我们」长得一模一样 —— 测不成被当测出来是零，
+  // 2026-09-20 East International 三天没人知道。两种都进——不管原因是不是
+  // 需要 PM 动手，都不能因为链接问题静默消失（Codex 复审 2026-09-28）。
+  'ai_tracker_all_failed',
+  'ai_tracker_all_failed_dev',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */
@@ -128,6 +134,21 @@ export type ManualItemKind =
    * 写着「这条不用你动手」的活（魏征 / 子牙 2026-09-23 都点了这条）。
    */
   | 'ai_gateway_broken'
+  /**
+   * 某客户整周的 AI 可见度探测全部失败，且最主要的原因需要 PM 动手（充值/换钥匙）——
+   * 不是「没被提到」，是「根本没测成」。2026-09-20 East International 24/24 探测全挂
+   * （OpenAI 没钱 + Google 报错），但在所有现有看板上跟「没什么 AI 提到我们」长得一模一样。
+   */
+  | 'ai_tracker_all_failed'
+  /**
+   * 同上，但这周全挂的原因清一色是「不用人动手」的那几类
+   * （暂时限流 / 供应商自己出错 / 解析失败 / 我们数据库写入失败，见
+   * ai-tracker-failure-items.ts 的 GENERIC_FIX）—— 没有一条需要充值或换钥匙。
+   * 这条的 `how` 原文就写着「这条不用你动手」，不能进 PM 的「系统进不去、要你
+   * 点一次」动手栏（Codex 复审 2026-09-28：整周全挂但原因不需要人管时，还是
+   * 走了 ai_tracker_all_failed，把「不用你动手」的活算进了 PM 的任务数）。
+   */
+  | 'ai_tracker_all_failed_dev'
   | 'goal_baseline_mismatch'
   | 'diagnostic_findings'
   | 'prescription_updated'
@@ -146,6 +167,8 @@ export type ManualItemKind =
   | 'blog_publish_channel_broken'
   | 'cross_client_leak'
   | 'price_claim_unbacked'
+  /** 每日计划里帖子的价格数字跟客户资料里该团的价格对不上（或没资料可对）—— 发布时整批会被拦 */
+  | 'price_fact_unverified'
   | 'auto_run_blocked'
   | 'auto_run_stuck'
   /** 被一句「不打算去」误判成永久拒联 —— 只有人能看一眼原话再决定 */
@@ -173,6 +196,7 @@ export type ManualItemKind =
   /** 工具实验室有人留资（自助开通 / 网站诊断留邮箱）—— 这张表以前写完没人读，见 tool-lead-items.ts */
   | ToolLeadItemKind
   | CommentScopeTodoKind
+  | CommentReplyScopeTodoKind
   /** 写在 Render 里的 Meta 钥匙被 Meta 作废（错误码 190）—— 只有人能重新授权 */
   | MetaTokenHealthKind
   /** 上面那项检查自己没跑成 —— 不报 ≠ 钥匙都活着 */
@@ -194,6 +218,8 @@ export type ManualItemKind =
   | 'meta_data_deletion_failure'
   /** 有成交/咨询等着人核对要不要告诉广告平台 —— 撤不回，所以必须人点 */
   | 'conversion_needs_review'
+  /** 公司回信确认收到款，但缺金额/疑似重复/有取消字样，系统没法自动记成交 —— 要人核对（2026-10-04） */
+  | 'payment_email_needs_human'
   /** 发给广告平台时断线了，不知道对方收没收 —— 程序绝不自己重发，等人核对 */
   | 'conversion_send_in_doubt'
   /** 已批准的成交/咨询因为连接广告平台的授权失效发不出去，7 天内不修就永久丢（2026-09-22） */
@@ -241,6 +267,10 @@ export type ManualItemKind =
   | SimaqianItemKind
   /** Facebook 私信 / 表单留资同步连续失败（授权失效时要有主页管理员重新「连接 Meta」） */
   | FacebookSyncItemKind
+  /** 工厂把 Facebook Reel 同步到客户 Instagram(Publer)时,Publer 里的 Instagram 账号掉线 —— 只有人能去 Publer 重新连接 */
+  | 'instagram_account_disconnected'
+  /** 同步到 Instagram 自动重试都失败、已放弃 —— 要开发看原因 */
+  | 'instagram_publish_failed'
   /** Magic Bridge 全平台免费额度用到 80% 以上 —— 要不要加额度由 PM 定 */
   | 'magic_bridge_quota'
   /** Tools Lab 全站每月合计花费/次数上限用到 80% 以上（网站诊断+广告体检共用）—— 要不要加名额由 PM 定 */

@@ -1,0 +1,180 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { spawnSync } from 'node:child_process'
+import {
+  TEMPLATE_IDS,
+  isTemplateId,
+  loadTemplate,
+  musicSourceOf,
+} from '../src/templates.ts'
+import { parseMusicCatalog } from '../src/music.ts'
+
+const here = path.dirname(fileURLToPath(import.meta.url))
+
+/** Load the sydney-apartment list fixture. */
+function listProps() {
+  const file = path.join(here, '..', 'examples', 'sydney-apartment.props.json')
+  return JSON.parse(fs.readFileSync(file, 'utf8'))
+}
+
+/** Build a valid montage props object inline. */
+function montageProps() {
+  const kinds = ['aerial', 'street', 'person', 'detail']
+  const tags = ['beach', 'kitchen', 'beach', 'kitchen', 'beach', 'kitchen', 'beach', 'kitchen', 'beach', 'kitchen', 'beach', 'kitchen']
+  const clips = []
+  for (let i = 0; i < 12; i++) {
+    clips.push({
+      file: `clips/clip-${i}.mp4`,
+      tag: tags[i],
+      kind: kinds[i % 4],
+      source: 'own',
+      lenFrames: 120,
+    })
+  }
+  const words = []
+  for (let i = 0; i < 12; i++) {
+    words.push({
+      at: i * 2,
+      beats: 1,
+      text: i === 0 ? '1 个开头' : `词${i}`,
+      bg: 'black',
+      rot: 0,
+    })
+  }
+  const beats = []
+  for (let i = 0; i < 40; i++) {
+    beats.push(0.5 + i * 0.45)
+  }
+  return {
+    brandColor: '#0B6E99',
+    logoFile: 'logo.png',
+    musicFile: 'track.m4a',
+    beats,
+    totalBeats: 32,
+    fastBars: [2, 5],
+    placeTerms: [],
+    words,
+    clips,
+  }
+}
+
+test('TEMPLATE_IDS lists the supported templates', () => {
+  assert.deepEqual([...TEMPLATE_IDS], ['list', 'montage'])
+})
+
+test('isTemplateId accepts known ids and rejects others', () => {
+  assert.equal(isTemplateId('list'), true)
+  assert.equal(isTemplateId('montage'), true)
+  assert.equal(isTemplateId('carousel'), false)
+  assert.equal(isTemplateId(undefined), false)
+})
+
+test('loadTemplate list returns ListReel metadata', () => {
+  const loaded = loadTemplate('list', listProps())
+  assert.equal(loaded.compositionId, 'ListReel')
+  assert.equal(loaded.totalFrames, 307)
+  assert.ok(loaded.assetFiles.includes('logo.png'))
+})
+
+test('loadTemplate montage returns MontageReel metadata', () => {
+  const props = montageProps()
+  const loaded = loadTemplate('montage', props)
+  assert.equal(loaded.compositionId, 'MontageReel')
+  assert.equal(loaded.totalFrames, Math.round(props.beats[32] * 30) + 2)
+  assert.ok(loaded.assetFiles.includes('track.m4a'))
+  for (const clip of props.clips) {
+    assert.ok(loaded.assetFiles.includes(clip.file))
+  }
+})
+
+test('loadTemplate rejects mismatched props', () => {
+  assert.throws(() => loadTemplate('list', montageProps()))
+  assert.throws(() => loadTemplate('montage', listProps()))
+})
+
+test('render.mjs rejects an unknown --template with exit code 2', () => {
+  const renderPath = fileURLToPath(new URL('../render.mjs', import.meta.url))
+  const propsPath = path.join(here, '..', 'examples', 'sydney-apartment.props.json')
+  const result = spawnSync(
+    process.execPath,
+    [renderPath, '--props', propsPath, '--out', '/tmp/x.mp4', '--template', 'carousel'],
+    { encoding: 'utf8' },
+  )
+  assert.equal(result.status, 2)
+  assert.ok(result.stderr.includes('--template'))
+})
+
+test('the sydney montage example loads and uses 3 or more clip kinds', () => {
+  const raw = JSON.parse(
+    fs.readFileSync(new URL('../examples/sydney-montage.props.json', import.meta.url), 'utf8'),
+  )
+  const loaded = loadTemplate('montage', raw)
+  assert.equal(loaded.compositionId, 'MontageReel')
+  assert.ok(new Set(raw.clips.map((c) => c.kind)).size >= 3)
+})
+
+test('loadTemplate montage reports no recipe gaps for a complete fixture', () => {
+  assert.deepEqual(loadTemplate('montage', montageProps()).recipeGaps, [])
+})
+
+test('recipe gaps reflect the sydney example and are absent for list', () => {
+  const raw = JSON.parse(
+    fs.readFileSync(new URL('../examples/sydney-montage.props.json', import.meta.url), 'utf8'),
+  )
+  assert.deepEqual(
+    loadTemplate('montage', raw).recipeGaps.map((g) => g.column),
+    ['真实感'],
+  )
+  assert.equal(loadTemplate('list', listProps()).recipeGaps, undefined)
+})
+
+/** Load the real music catalog fixture. */
+function musicCatalog() {
+  return parseMusicCatalog(
+    JSON.parse(
+      fs.readFileSync(new URL('../catalog/music.json', import.meta.url), 'utf8'),
+    ),
+  )
+}
+
+test('musicSourceOf resolves a Music folder track', () => {
+  const catalog = musicCatalog()
+  const src = musicSourceOf(catalog, 'pipa-trap.m4a')
+  assert.ok(src)
+  assert.equal(src.id, 'pipa-trap')
+  assert.equal(src.folder, 'Music')
+  assert.equal(src.file, '琵琶陷阱.m4a')
+  assert.equal(typeof src.status, 'string')
+})
+
+test('musicSourceOf resolves a _shared/music folder track', () => {
+  const catalog = musicCatalog()
+  const src = musicSourceOf(catalog, 'jade-river-journey.mp3')
+  assert.ok(src)
+  assert.equal(src.id, 'jade-river-journey')
+  assert.equal(src.folder, '_shared/music')
+  assert.equal(src.file, 'Jade River Journey.mp3')
+  assert.equal(typeof src.status, 'string')
+})
+
+test('musicSourceOf returns null for unknown or non-exact names', () => {
+  const catalog = musicCatalog()
+  assert.equal(musicSourceOf(catalog, 'unknown-song.mp3'), null)
+  assert.equal(musicSourceOf(catalog, 'PIPA-TRAP.M4A'), null)
+})
+
+test('musicSourceOf skips a corrupt catalog entry without throwing', () => {
+  const catalog = structuredClone(musicCatalog())
+  catalog.tracks.push({
+    ...catalog.tracks[0],
+    id: 'weird-track',
+    file: 'weird.ogg',
+  })
+  const src = musicSourceOf(catalog, 'pipa-trap.m4a')
+  assert.ok(src)
+  assert.equal(src.id, 'pipa-trap')
+  assert.equal(musicSourceOf(catalog, 'unknown.mp3'), null)
+})
