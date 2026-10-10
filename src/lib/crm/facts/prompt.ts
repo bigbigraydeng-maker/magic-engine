@@ -7,6 +7,9 @@
  * 这里只描述**要读什么**，不做任何判断之外的加工；引文核对在 checks.ts。
  */
 
+// ⚠️ 这份提示词里「具体货物 / 报价 / 运输」是**物流语义**，目前只给 NAL 开（`CRM_FACTS_CLIENT_IDS`）。
+// 开第二个客户之前先把「什么算具体信息」抽成客户配置，别在这里按行业堆 if
+// （设计稿 docs/specs/2026-10-10-crm-conversation-facts-design-v0.md §三 #9）。
 export function buildFactsPrompt(business: string): string {
   return `You read a sales conversation between ${business} ("US") and one prospect ("CUSTOMER") and report FACTS about it. You do not grade it. Answer each yes/no strictly from what is written.
 

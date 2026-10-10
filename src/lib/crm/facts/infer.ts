@@ -149,12 +149,26 @@ interface ClientCache {
   canned: Set<string>
 }
 
-async function loadClientCache(io: FactsIo, clientId: string): Promise<ClientCache> {
+/**
+ * 「固定回复」口径要读整个客户的出站消息，比每轮那 5 次模型调用贵得多（魏征复审建议）。
+ * 同一个进程里 30 分钟内复用一份；换进程就重读一次，无害。
+ */
+const CACHE_TTL_MS = 30 * 60_000
+const processCache = new Map<string, { at: number; value: ClientCache }>()
+export function clearFactsCache(): void {
+  processCache.clear()
+}
+
+async function loadClientCache(io: FactsIo, clientId: string, nowMs: number): Promise<ClientCache> {
+  const hit = processCache.get(clientId)
+  if (hit && nowMs - hit.at < CACHE_TTL_MS) return hit.value
   const [business, outbound] = await Promise.all([
     io.businessName(clientId),
     io.loadClientOutbound(clientId),
   ])
-  return { business, canned: findCanned(outbound) }
+  const value = { business, canned: findCanned(outbound) }
+  processCache.set(clientId, { at: nowMs, value })
+  return value
 }
 
 async function askWithTimeout(
@@ -182,7 +196,11 @@ async function processCandidate(
   result: FactsRunResult,
 ): Promise<void> {
   const msgs = await io.loadMessages(conv.id)
-  if (msgs.length === 0) return
+  if (msgs.length === 0) {
+    // 空对话不能静默返回：下一轮它仍是「没有行」，会天天占掉 5 个名额里的一个。
+    if (!dryRun) await io.markEmpty(conv.id, conv.client_id, new Date(now.getTime() + RETRY_AFTER_MS))
+    return
+  }
 
   if (!dryRun) {
     const ok = await io.claim(conv.id, conv.client_id, config.dailyLimit)
@@ -243,6 +261,11 @@ export async function inferConversationFacts(
   if (config.clientIds.length === 0 && !onlyIds) {
     return { enabled: false, reason: 'off', ...ZEROS }
   }
+  // `onlyConversationIds` 是干跑试跑用的旁路（绕开客户白名单）。真写库时绝不许走它 ——
+  // 这道防线不能只靠调用方自觉（子牙 2026-10-11 复审必改 2）。
+  if (onlyIds && !dryRun) {
+    throw new Error('onlyConversationIds 只能配合 dryRun 使用')
+  }
   const hasKey = opts.hasKey ?? Boolean(process.env.OPENAI_API_KEY)
   if (!hasKey) return { enabled: false, reason: 'no_key', ...ZEROS }
 
@@ -266,7 +289,7 @@ export async function inferConversationFacts(
     try {
       let cache = caches.get(conv.client_id)
       if (!cache) {
-        cache = await loadClientCache(io, conv.client_id)
+        cache = await loadClientCache(io, conv.client_id, nowMs())
         caches.set(conv.client_id, cache)
       }
       await processCandidate(io, conv, cache, config, now, dryRun, result)

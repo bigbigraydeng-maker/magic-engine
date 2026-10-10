@@ -65,6 +65,10 @@ declare
   v_used int;
   v_claimed uuid;
 begin
+  if p_daily_limit <= 0 then
+    return false; -- limit 0 means off: do not let the very first insert slip through
+  end if;
+
   insert into public.conversation_facts_daily as d (client_id, day, used)
   values (p_client_id, v_day, 1)
   on conflict (client_id, day) do update set used = d.used + 1

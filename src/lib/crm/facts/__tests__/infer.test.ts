@@ -1,8 +1,9 @@
-import { describe, it, expect, vi } from 'vitest'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
 import {
   CLAIM_STALE_MS,
   RETRY_AFTER_MS,
   RUN_BUDGET_MS,
+  clearFactsCache,
   inferConversationFacts,
   needsFacts,
   pickCandidates,
@@ -13,6 +14,9 @@ import {
 import type { ConvRow, FactsIo, FactsRow } from '../io'
 import type { Facts } from '../schema'
 import type { FactsMsg } from '../canned'
+
+// 进程内缓存（客户口径）会在测试之间串味 —— 每条测试前清掉。
+beforeEach(() => clearFactsCache())
 
 const CLIENT = '11111111-1111-1111-1111-111111111111'
 const CONV_A = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
@@ -56,6 +60,7 @@ function fakeIo(over: Partial<FactsIo> = {}): FactsIo {
     ask: vi.fn(async () => ({ facts: baseFacts(), inputTokens: 100, outputTokens: 50 })),
     writeReady: vi.fn(async () => true),
     writeFailed: vi.fn(async () => undefined),
+    markEmpty: vi.fn(async () => undefined),
     ...over,
   }
 }
@@ -278,15 +283,56 @@ describe('inferConversationFacts', () => {
     }
   })
 
-  it('zero messages → skipped silently, no claim', async () => {
+  it('zero messages → 不抢占不问模型，但写一行 failed+6h 标记，别天天占名额', async () => {
+    const markEmpty = vi.fn(async () => undefined)
     const io = fakeIo({
       listConversations: vi.fn(async () => [conv(CONV_A)]),
       loadMessages: vi.fn(async () => []),
+      markEmpty,
     })
     const res = await inferConversationFacts(NOW, { io, config: config(), hasKey: true })
     expect(io.claim).not.toHaveBeenCalled()
+    expect(io.ask).not.toHaveBeenCalled()
+    expect(markEmpty).toHaveBeenCalledTimes(1)
+    const retryAfter = (markEmpty.mock.calls[0] as unknown[])[2] as Date
+    expect(retryAfter.getTime() - NOW.getTime()).toBe(RETRY_AFTER_MS)
     expect(res.claimed).toBe(0)
     expect(res.failed).toBe(0)
+  })
+
+  it('干跑遇到空对话：什么都不写', async () => {
+    const markEmpty = vi.fn(async () => undefined)
+    const io = fakeIo({
+      listConversations: vi.fn(async () => [conv(CONV_A)]),
+      loadMessages: vi.fn(async () => []),
+      markEmpty,
+    })
+    await inferConversationFacts(NOW, { io, config: config(), hasKey: true, dryRun: true, onlyConversationIds: [CONV_A] })
+    expect(markEmpty).not.toHaveBeenCalled()
+  })
+
+  it('🔴 onlyConversationIds 不带 dryRun → 直接抛错（旁路不许真写库）', async () => {
+    const io = fakeIo()
+    await expect(
+      inferConversationFacts(NOW, { io, config: config({ clientIds: [] }), hasKey: true, onlyConversationIds: [CONV_A] }),
+    ).rejects.toThrow(/dryRun/)
+    expect(io.listConversations).not.toHaveBeenCalled()
+    expect(io.claim).not.toHaveBeenCalled()
+  })
+
+  it('同一进程里同一客户的「固定回复」口径 30 分钟内只读一次', async () => {
+    clearFactsCache()
+    const loadClientOutbound = vi.fn(async () => [[]] as Array<Array<string | null>>)
+    const mk = () =>
+      fakeIo({
+        listConversations: vi.fn(async () => [conv(CONV_A)]),
+        loadMessages: vi.fn(async () => [msg('inbound', 'need 2 pallets to Auckland please', '2026-10-11T00:00:00.000Z')]),
+        loadClientOutbound,
+      })
+    await inferConversationFacts(NOW, { io: mk(), config: config(), hasKey: true })
+    await inferConversationFacts(NOW, { io: mk(), config: config(), hasKey: true })
+    expect(loadClientOutbound).toHaveBeenCalledTimes(1)
+    clearFactsCache()
   })
 
   it('run budget: second candidate never starts', async () => {

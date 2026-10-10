@@ -11,6 +11,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { fetchAll } from '@/lib/supabase-paginate'
 import { FACTS_JSON_SCHEMA, FACTS_SCHEMA_VERSION, FactsSchema, type Facts } from './schema'
 import { buildFactsPrompt } from './prompt'
 import type { FactsMsg } from './canned'
@@ -59,6 +60,8 @@ export interface FactsIo {
   ask(model: string, business: string, transcript: string, signal: AbortSignal): Promise<AskResult>
   writeReady(w: WriteInput): Promise<boolean>
   writeFailed(conversationId: string, error: string, retryAfter: Date): Promise<void>
+  /** 这段对话读不出任何可用消息：写一行 failed + retry_after，别让它每轮都占一个名额。 */
+  markEmpty(conversationId: string, clientId: string, retryAfter: Date): Promise<void>
 }
 
 const IN_CHUNK = 100
@@ -111,10 +114,14 @@ async function loadMessages(conversationId: string): Promise<FactsMsg[]> {
     .from('conversation_messages')
     .select('direction, body, sent_at')
     .eq('conversation_id', conversationId)
-    .order('sent_at', { ascending: true })
+    // 🔴 取**最新**的 200 条再翻回正序。原来是 ascending + limit(200)：超过 200 条的对话丢掉的
+    // 恰恰是最新的那些，`last_speaker` 和「欠报价」都会按一个过时的结尾去判（魏征 2026-10-11 复审）。
+    .order('sent_at', { ascending: false })
     .limit(200)
   if (error) throw new Error(`读往来原文失败: ${error.message}`)
-  return ((data ?? []) as FactsMsg[]).filter((m) => (m.body ?? '').trim().length > 0)
+  return ((data ?? []) as FactsMsg[])
+    .filter((m) => (m.body ?? '').trim().length > 0)
+    .reverse()
 }
 
 async function clientConversationIds(clientId: string): Promise<string[]> {
@@ -138,14 +145,19 @@ async function loadClientOutbound(clientId: string): Promise<Array<Array<string 
   const convIds = await clientConversationIds(clientId)
   const byConv = new Map<string, Array<string | null>>()
   for (const ids of chunk(convIds, OUTBOUND_CHUNK)) {
-    const { data, error } = await supabaseAdmin
-      .from('conversation_messages')
-      .select('conversation_id, body')
-      .eq('direction', 'outbound')
-      .in('conversation_id', ids)
-      .limit(5000)
-    if (error) throw new Error(`读客户出站失败: ${error.message}`)
-    for (const m of (data ?? []) as { conversation_id: string; body: string | null }[]) {
+    // 🔴 必须翻页：PostgREST 单次最多回 1000 行，`.limit(5000)` 压不过它，超了不报错只是少给 ——
+    // 固定回复（费率卡、欢迎语）的重复度就会按残缺口径算，机器发的被当成真人报价。
+    // 读不全就抛错（fail-closed），不带着半截数据往下走。
+    const rows = await fetchAll<{ conversation_id: string; body: string | null }>((from, to) =>
+      supabaseAdmin
+        .from('conversation_messages')
+        .select('conversation_id, body')
+        .eq('direction', 'outbound')
+        .in('conversation_id', ids)
+        .order('id', { ascending: true })
+        .range(from, to),
+    )
+    for (const m of rows) {
       const arr = byConv.get(m.conversation_id) ?? []
       arr.push(m.body)
       byConv.set(m.conversation_id, arr)
@@ -283,6 +295,28 @@ async function writeFailed(
   if (e) throw new Error(`写失败状态失败: ${e.message}`)
 }
 
+/**
+ * 读不出任何可用消息的对话（全是图片 / 表情 / 系统事件）。
+ *
+ * 不写这一行的话 `needsFacts` 永远判它「没有行 → 需要」，而每轮只取 5 个候选 ——
+ * 5 个空对话就能让整条流水线停摆（魏征 2026-10-11 复审必改 1）。upsert 的冲突键是主键，
+ * 空对话不可能已经是 ready，所以覆盖是安全的。
+ */
+async function markEmpty(conversationId: string, clientId: string, retryAfter: Date): Promise<void> {
+  const { error } = await supabaseAdmin.from('conversation_facts').upsert(
+    {
+      conversation_id: conversationId,
+      client_id: clientId,
+      status: 'failed',
+      error: '没有可读的消息',
+      retry_after: retryAfter.toISOString(),
+      claimed_at: null,
+    },
+    { onConflict: 'conversation_id' },
+  )
+  if (error) throw new Error(`写空对话标记失败: ${error.message}`)
+}
+
 export function supabaseFactsIo(): FactsIo {
   return {
     listConversations,
@@ -294,5 +328,6 @@ export function supabaseFactsIo(): FactsIo {
     ask,
     writeReady,
     writeFailed,
+    markEmpty,
   }
 }
