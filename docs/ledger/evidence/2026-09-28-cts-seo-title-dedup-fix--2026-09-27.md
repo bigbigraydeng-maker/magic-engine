@@ -17,3 +17,9 @@
   `baseline_position` / `baseline_impressions` 已用 GSC 12 周真实数据（2026-07-01~09-25，L 之前
   最后一个干净数据点）重新查询并重写；`checked_at` / `outcome` / `observed_ctr` /
   `observed_impressions` 确认为 NULL（cron 尚未扫描过这批行）
+
+## 线上标题实读（2026-10-10 05:05 UTC，只读，样本 6 页）
+
+- 5 页线上 title 与 seo_meta_log 记录的新标题一致（站内自动加 ` | CTS Tours` 后缀）。
+- 签证指南页线上现为「China Visa-Free for NZ: 30 Days to 31 Dec 2026」，与记录的「…30 Days, No Application」不同——上线后又被别的改动动过标题，回看这一页时要先弄清这一点，不能直接当作本次改动的效果。
+- 没验的：6 页在 09-27 当天的线上标题（当时没做实读，只有构建产物核对）。
