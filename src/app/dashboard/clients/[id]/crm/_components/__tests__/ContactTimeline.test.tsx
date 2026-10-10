@@ -15,7 +15,7 @@
 import React from 'react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
-import { ContactTimeline, type TimelineEntry } from '../ContactTimeline'
+import { ContactTimeline, stageSourceOf, type TimelineEntry } from '../ContactTimeline'
 
 const touch = (over: Partial<TimelineEntry> = {}): TimelineEntry => ({
   kind: 'touch',
@@ -410,8 +410,13 @@ describe('摘要回传给抽屉', () => {
   })
 })
 
-describe('AI 摘要卡：意向等级看得见', () => {
-  it('有摘要时在最上面显示意向标签、一句话和下一步', async () => {
+/**
+ * 意向卡已经并进抽屉顶部那张「该做什么」卡（PM 2026-10-10：页面少信息多引导，
+ * 只留一个概念告诉人该做什么）。时间线自己不再画意向标签 / 摘要卡 ——
+ * 接口就算还回着 `brief`，这里也不该冒出第二张卡跟抽屉顶上那张打架。
+ */
+describe('意向卡已并进抽屉顶部那一张「该做什么」卡 —— 时间线自己不再画', () => {
+  it('接口就算回了 brief，时间线里也没有意向标签 / 摘要卡', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -421,15 +426,67 @@ describe('AI 摘要卡：意向等级看得见', () => {
       }),
     }) as unknown as typeof fetch
     draw()
-    await waitFor(() => expect(screen.getByText('高意向')).toBeTruthy())
-    expect(screen.getByText('客人已确认合作')).toBeTruthy()
-    expect(screen.getByText('发最终账单')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('打过去聊了两句')).toBeTruthy())
+    expect(screen.queryByText('高意向')).toBeNull()
+    expect(screen.queryByTestId('timeline-brief')).toBeNull()
+  })
+})
+
+/**
+ * 「到哪一步了」是谁判的 —— 从最新一条阶段变更的 `changedBy` 推断，回传给抽屉。
+ *
+ * 判据只有一份（`stageSourceOf`），抽屉顶上那张卡靠它决定要不要标「人工标的」。
+ * 认不出的机器身份返回 null —— 宁可不显示，不许说错。
+ */
+describe('到哪一步了是谁判的（stageSource）', () => {
+  const stage = (over: Partial<TimelineEntry> = {}): TimelineEntry => ({
+    kind: 'stage',
+    at: '2026-09-01T00:00:00Z',
+    fromLabel: null,
+    toLabel: '已报价',
+    changedBy: 'ai:conversation-read',
+    ...over,
   })
 
-  it('没有摘要时不画这张卡', async () => {
-    mockTimeline([touch()])
-    draw()
-    await waitFor(() => expect(screen.getByText('打过去聊了两句')).toBeTruthy())
-    expect(screen.queryByTestId('timeline-brief')).toBeNull()
+  const summaryOf = async (timeline: TimelineEntry[]) => {
+    mockTimeline(timeline)
+    const onSummary = vi.fn()
+    render(<ContactTimeline clientId="cts" contactId="c1" onSummary={onSummary} />)
+    await waitFor(() => expect(onSummary).toHaveBeenCalled())
+    return onSummary.mock.calls.at(-1)?.[0]
+  }
+
+  it('AI 从对话里读的 → ai_conversation', async () => {
+    const s = await summaryOf([stage(), touch()])
+    expect(s).toEqual(expect.objectContaining({ stageSource: 'ai_conversation' }))
+  })
+
+  it('同事的邮箱 → human', async () => {
+    const s = await summaryOf([stage({ changedBy: 'info@example.co.nz' }), touch()])
+    expect(s).toEqual(expect.objectContaining({ stageSource: 'human' }))
+  })
+
+  it('🔴 认不出的机器身份 → null（宁可不显示，不许说错）', async () => {
+    const s = await summaryOf([stage({ changedBy: 'system:qualified-buyer' }), touch()])
+    expect(s).toEqual(expect.objectContaining({ stageSource: null }))
+  })
+
+  it('🔴 多条阶段变更 → 最新的那条算数', async () => {
+    const s = await summaryOf([
+      stage({ at: '2026-08-01T00:00:00Z', changedBy: 'info@example.co.nz' }),
+      stage({ at: '2026-09-01T00:00:00Z', changedBy: 'ai:conversation-read' }),
+      touch(),
+    ])
+    expect(s).toEqual(expect.objectContaining({ stageSource: 'ai_conversation' }))
+  })
+
+  it('没有任何阶段变更 → null', async () => {
+    const s = await summaryOf([touch()])
+    expect(s).toEqual(expect.objectContaining({ stageSource: null }))
+  })
+
+  it('stageSourceOf 直接判：订单系统 / 空值', () => {
+    expect(stageSourceOf('order-system')).toBe('order_system')
+    expect(stageSourceOf('')).toBeNull()
   })
 })

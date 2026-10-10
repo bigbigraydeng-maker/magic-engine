@@ -243,6 +243,8 @@
 | `META_SYSTEM_USER_TOKEN_<域名>` | 🔴 **每客户一把的 Meta 广告令牌，名字运行时拼出来**（`domainToEnvKey`，`src/lib/meta/token-selection.ts`），静态扫描扫不到，完整清单只在 Render 面板上 | Render-web |
 | `META_PIXEL_ID_<域名>` | 每客户像素 ID，同样是运行时拼名（`src/lib/meta/capi/config.ts`） | Render-web |
 | `CRM_NOTE_MODEL` / `CRM_STAGE_INFER_MODEL` / `MESSENGER_BRIEF_MODEL` / `MARKET_INTEL_MODEL` | 各功能的模型名覆盖，默认都是 `gpt-4o-mini` | Render-web（可不配） |
+| `CRM_FACTS_CLIENT_IDS` | 「AI 读对话存事实」要给哪些客户跑（逗号分隔的客户 UUID），**未配 = 全关**（fail-closed）。目前只该配 NAL；提示词里「具体货物」是物流语义，别的行业先别开 | Render-web |
+| `CRM_FACTS_MODEL` / `CRM_FACTS_DAILY_LIMIT` / `CRM_FACTS_PER_RUN` | 存事实用的模型（默认 `gpt-4o`）、每客户每天最多读几段（默认 80）、每小时那一轮最多读几段（默认 5，上限 20）。可不配 | Render-web（可不配） |
 | `WEB_INTELLIGENCE_ALLOWED_CLIENT_IDS` | Web Intelligence 客户白名单，未配 = 谁都不跑 | Render-web |
 | `WEB_INTELLIGENCE_TRAFFIC_ENABLED` | Web Intelligence 流量检查总闸，默认 **关** | Render-web |
 | `WEB_INTELLIGENCE_FIRST_PARTY_TOUR_SOURCES` | 第一方行程数据源配置（JSON） | Render-web |
