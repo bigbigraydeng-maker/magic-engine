@@ -5,8 +5,8 @@ status: done
 owner: agent
 decided_on: 2026-10-11
 source: session:f53ba28d
-verify_by: 2026-10-12
-verify_how: 已合并并上线；2026-10-12 查 conversation_facts 里 NAL 有几十行 status=ready，且每小时任务回执里 conversationFacts.written>0、failed 很少；「先放着」的名单页和今天要联系人数不变
+verify_by: 2026-10-18
+verify_how: PM 回「合」后合并 → 应用迁移 → 在 Render 配 CRM_FACTS_CLIENT_IDS 为 NAL → 一天后查 conversation_facts 里 NAL 有几十行 status=ready，且每小时任务回执里 conversationFacts.written>0、failed 很少；「先放着」的名单页和今天要联系人数不变
 done_on: 2026-10-11
 done_ref: pr:2440
 ---
