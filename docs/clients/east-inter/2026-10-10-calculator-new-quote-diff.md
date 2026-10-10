@@ -7,7 +7,7 @@
 
 - 仓库 `bigbigraydeng-maker/east-inter-demo`（GitHub Pages，`CNAME` = `eastinter.com.au`），文件 `eastinter-pricing-calculator.html`，线上 `https://eastinter.com.au/eastinter-pricing-calculator.html`。
 - 线上版（2026-09-20 提交 d60c23a）比 Dropbox 里的原型多了站点页眉和 `?service=&city=&quantity=` 链接参数；本次改动以**线上版**为底。
-- 草稿放在 `docs/clients/east-inter/calculator-2026-10/`（本仓库），**未推送、未部署**。
+- 草稿放在 `docs/clients/east-inter/calculator-2026-10/`（本仓库）。**已部署**到 east-inter-demo 仓库（外部部署提交 `65b2fdd`）并上线，以台账为准。
 
 ## 2. 新旧报价差异（只有海运拼箱变了）
 
@@ -72,7 +72,7 @@
 ## 6. 改动说明
 
 - 新增 `pricing-rates.js`（全部价格，RMB 原价 + 汇率 4.9）、`pricing-engine.js`（计算逻辑，不含任何价格数字，原样搬出）。HTML 只删掉内联的价格和计算函数、改为引用这两个文件，页面外观与交互未动；"September 2026" 三处改为 "October 2026"。
-- 下次换报价只改 `pricing-rates.js`。
+- 下次换报价只改 `pricing-rates.js`（含 `effective` 生效月份，页面标签、页脚、meta description 均从它读取）。
 - **没做**：偏远邮编附加费（RMB3/10/16/KG）——旧计算器本来就没有，计算器按城市选、没有邮编输入，加它要新增输入框，属于改界面，留给 PM 决定；对应测试也因此没写。空运大件 50/51KG 以上的更低档价也没做（旧计算器只用 10KG+ 档）。
 
 ## 7. 测试结果
@@ -80,8 +80,8 @@
 命令：`cd docs/clients/east-inter/calculator-2026-10 && node --test tests/pricing.test.js`，退出码 0，37 项通过 / 0 失败。
 覆盖（空运大件按每公斤）：海运拼箱每个城市（悉尼、墨尔本、布里斯班、金岸、珀斯送货/自提、阿德莱德送货/自提）含 1 方下限、9.99 与 10 方分档边界、25 方；空运小包普货/敏感含 0.5/0.51kg 进位与 10kg 提示；海运小包含 19kg/19.01kg 的 20kg 分档边界；空运大件含税/不含税、10kg/99kg 边界、体积重、范围外报错；旧 RMB 复现 PDF 全部 AUD 数；新旧对比：报价表只有海运拼箱变了，另有空运大件计费单位更正。
 页面冒烟：本地起静态服务打开页面，悉尼 2 方显示 A$593、"OCTOBER 2026 RATES"，浏览器控制台无报错。
-没跑：Impeccable 网页检查（需下载检查程序，未获 PM 许可；本次没改界面外观）；线上环境未动。
+**未完成（上线前强制项）**：Impeccable 网页检查——检查程序需下载（外网读取），本轮未获授权，尚未运行，因此**没有修复前后数字**。待获准后设 `IMPECCABLE_ALLOW_DOWNLOAD=1`，对 `https://eastinter.com.au/eastinter-pricing-calculator.html` 运行 `impeccable detect`，真问题修复并回填前后数字；在此之前不能称该页面通过上线质量闸。
 
 ## 8. 回滚
 
-线上没动，无需回滚。上线后若要退：把 east-inter-demo 仓库 `eastinter-pricing-calculator.html` 回到提交 `d60c23a`、删掉 `pricing-rates.js` 与 `pricing-engine.js` 即可。
+线上已部署（提交 `65b2fdd`），回滚目标为部署前的提交 `d60c23a`：把 east-inter-demo 仓库 `eastinter-pricing-calculator.html` 回到提交 `d60c23a`、删掉 `pricing-rates.js` 与 `pricing-engine.js` 即可。
