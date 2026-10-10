@@ -8,6 +8,7 @@ import {
 import { planSeed, type SeedPlan, type SeedTourRow, type SeedDepartureRow } from '../seed'
 import { toFirstPartyTours } from '../output'
 import type { CatalogDeparture, CatalogTour } from '../types'
+import { EMPTY_TOUR_CONTENT } from './content-fixture'
 
 const CLIENT_ID = 'c1'
 const UPDATED_AT = '2026-05-22T00:00:00Z'
@@ -133,6 +134,7 @@ function toCatalogTour(row: SeedTourRow, index: number): CatalogTour {
     isActive: row.is_active,
     managesDepartures: row.manages_departures,
     sortOrder: index,
+    ...EMPTY_TOUR_CONTENT,
     updatedAt: UPDATED_AT,
   }
 }

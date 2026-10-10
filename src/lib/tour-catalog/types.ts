@@ -5,6 +5,8 @@
  * Display-layer catalog only: no orders, payments, seat counts or formal quotes.
  */
 
+import type { CatalogFaq } from './catalog-contract'
+
 export type DepartureStatus = 'open' | 'limited' | 'sold_out' | 'closed' | 'cancelled'
 
 export const DEPARTURE_STATUSES: readonly DepartureStatus[] = [
@@ -15,11 +17,22 @@ export const DEPARTURE_STATUSES: readonly DepartureStatus[] = [
   'cancelled',
 ]
 
+export interface CatalogOperatorLogo {
+  src: string
+  alt: string
+}
+
 export interface CatalogItineraryDay {
   day: number
   title: string
   description: string
   meals?: string[]
+  /** Where the group stays that night, as shown on the tour page. */
+  accommodation?: string
+  /** Short badge on a day, e.g. a festival name. */
+  festiveLabel?: string
+  /** Airline / operator logo shown on a day. Only a global admin may change it. */
+  operatorLogo?: CatalogOperatorLogo
 }
 
 export interface CatalogTour {
@@ -47,6 +60,22 @@ export interface CatalogTour {
   managesDepartures: boolean
   sortOrder: number
   updatedAt: string
+  /** Site path under /images/ or an https URL. */
+  heroImage: string | null
+  gallery: string[]
+  metaTitle: string | null
+  metaDescription: string | null
+  tags: string[]
+  faqs: CatalogFaq[]
+  /** Whole-tour "sold out" banner, stored as-is (not derived from departures). */
+  soldOut: boolean
+  singleSupplementNote: string | null
+  rating: number | null
+  reviewCount: number | null
+  reviewSummary: string | null
+  quickAnswer: string | null
+  /** Website-only pass-through (e.g. related_blog_slugs). Read in, written out, never editable. */
+  siteExtras: Record<string, unknown>
 }
 
 export interface CatalogDepartureInternal {

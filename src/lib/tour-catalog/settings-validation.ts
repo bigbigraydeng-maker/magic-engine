@@ -7,6 +7,25 @@
 import { normalizeDomain } from './seed'
 import type { CatalogSettings, SettingsErrorCode } from './catalog-contract'
 
+const MAX_IMAGE_HOSTS = 10
+/** Bare lower-case hostname: at least one dot, last label starts with a letter (so no IPv4), no scheme / path / port. */
+const IMAGE_HOST_RE = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$/
+
+export function isValidImageHost(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 253 && IMAGE_HOST_RE.test(value)
+}
+
+/** The allow-list as sent: an array of at most 10 valid hostnames; duplicates are dropped. Null = invalid. */
+function checkImageHosts(raw: unknown): string[] | null {
+  if (!Array.isArray(raw) || raw.length > MAX_IMAGE_HOSTS) return null
+  const hosts: string[] = []
+  for (const item of raw) {
+    if (!isValidImageHost(item)) return null
+    if (!hosts.includes(item)) hosts.push(item)
+  }
+  return hosts
+}
+
 export type SettingsValidation =
   | { ok: true; value: CatalogSettings }
   | { ok: false; error: SettingsErrorCode }
@@ -71,6 +90,8 @@ export function validateSettings(input: unknown, clientDomain: string | null): S
   if (!isColorOrNull(input.brandPrimary) || !isColorOrNull(input.brandSecondary)) {
     return fail('invalid_color')
   }
+  const imageHosts = checkImageHosts(input.imageHosts)
+  if (imageHosts === null) return fail('invalid_request')
   const logo = checkLogoUrl(input.logoUrl, clientDomain)
   if (!logo.ok) return fail(logo.error)
   return {
@@ -80,6 +101,7 @@ export function validateSettings(input: unknown, clientDomain: string | null): S
       brandPrimary: input.brandPrimary,
       brandSecondary: input.brandSecondary,
       channelsConnected: input.channelsConnected,
+      imageHosts,
     },
   }
 }

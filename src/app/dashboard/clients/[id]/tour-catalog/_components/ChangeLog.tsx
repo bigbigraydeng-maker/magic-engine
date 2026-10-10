@@ -270,7 +270,7 @@ export function ChangeLog({
                 {' · '}
                 <ActorCell actor={entry.actor} />
                 {' · '}
-                <span>{describeEntry(entry)}</span>
+                <span className="break-all">{describeEntry(entry)}</span>
               </li>
             ))}
           </ul>

@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
-import type { CatalogMemberView, CatalogSettings } from '@/lib/tour-catalog/catalog-contract'
+import type {
+  CatalogMemberView,
+  CatalogSettings,
+  ImageHostSuggestion,
+} from '@/lib/tour-catalog/catalog-contract'
 import { CatalogSettingsPanel } from '../CatalogSettingsPanel'
 import {
   MEMBERS_BAD_EMAIL,
@@ -21,6 +25,7 @@ const BASE_SETTINGS: CatalogSettings = {
   brandPrimary: null,
   brandSecondary: null,
   channelsConnected: false,
+  imageHosts: [],
 }
 
 function member(email: string, hasLogin: boolean): CatalogMemberView {
@@ -83,6 +88,7 @@ function renderPanel(overrides: {
   permissions?: { manage_members: boolean; manage_settings: boolean }
   settings?: CatalogSettings
   onSaved?: () => void
+  imageHostSuggestions?: ImageHostSuggestion[]
 } = {}) {
   const permissions = overrides.permissions ?? { manage_members: true, manage_settings: true }
   const onSaved = overrides.onSaved ?? vi.fn()
@@ -91,6 +97,7 @@ function renderPanel(overrides: {
       clientId="c1"
       settings={overrides.settings ?? BASE_SETTINGS}
       permissions={permissions}
+      imageHostSuggestions={overrides.imageHostSuggestions}
       onSaved={onSaved}
     />,
   )
@@ -195,6 +202,7 @@ describe('CatalogSettingsPanel settings', () => {
       brandPrimary: '#336699',
       brandSecondary: null,
       channelsConnected: false,
+      imageHosts: [],
     })
     expect(onSaved).toHaveBeenCalledTimes(1)
   })
@@ -267,5 +275,67 @@ describe('CatalogSettingsPanel permissions', () => {
     renderPanel({ permissions: { manage_members: true, manage_settings: false } })
     await screen.findByTestId('member-amy@example.test')
     expect(screen.queryByText('页面品牌与状态')).not.toBeInTheDocument()
+  })
+})
+
+describe('CatalogSettingsPanel image sources and website comparison', () => {
+  const WITH_HOSTS: CatalogSettings = { ...BASE_SETTINGS, imageHosts: ['cdn.example.test', 'images.example.com'] }
+
+  function putBodies(): Array<Record<string, unknown>> {
+    return fetchMock.mock.calls
+      .filter(call => (call[1] as RequestInit | undefined)?.method === 'PUT')
+      .map(call => JSON.parse(String((call[1] as RequestInit).body)) as Record<string, unknown>)
+  }
+
+  it('shows both new cards to someone who manages settings', () => {
+    renderPanel({ permissions: { manage_members: false, manage_settings: true } })
+    expect(screen.getByRole('heading', { name: '允许的图片来源' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '和官网现在的内容比一下' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '开始比对' })).toBeInTheDocument()
+  })
+
+  it('hides both without manage_settings', async () => {
+    renderPanel({ permissions: { manage_members: true, manage_settings: false } })
+    await screen.findByTestId('member-amy@example.test')
+    expect(screen.queryByText('允许的图片来源')).not.toBeInTheDocument()
+    expect(screen.queryByText('和官网现在的内容比一下')).not.toBeInTheDocument()
+  })
+
+  it('saving the brand card sends the current image sources along, not an empty list', async () => {
+    renderPanel({ settings: WITH_HOSTS, permissions: { manage_members: false, manage_settings: true } })
+    fireEvent.change(screen.getByLabelText('主色'), { target: { value: '#336699' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await screen.findByText(SETTINGS_SAVED_TEXT)
+    expect(putBodies()).toEqual([
+      {
+        logoUrl: null,
+        brandPrimary: '#336699',
+        brandSecondary: null,
+        channelsConnected: false,
+        imageHosts: ['cdn.example.test', 'images.example.com'],
+      },
+    ])
+  })
+
+  it('a suggested source is added with one click and saved with the brand untouched', async () => {
+    const { onSaved } = renderPanel({
+      settings: { ...WITH_HOSTS, logoUrl: 'https://example.test/logo.png', brandPrimary: '#112233' },
+      permissions: { manage_members: false, manage_settings: true },
+      imageHostSuggestions: [{ host: 'images.unsplash.com', count: 26 }],
+    })
+    expect(screen.getByTestId('image-host-suggestions')).toHaveTextContent('images.unsplash.com（26 张）')
+    fireEvent.click(screen.getByRole('button', { name: '把 images.unsplash.com 加入名单' }))
+    fireEvent.click(screen.getByRole('button', { name: '移除 cdn.example.test' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存图片来源' }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1))
+    expect(putBodies()).toEqual([
+      {
+        logoUrl: 'https://example.test/logo.png',
+        brandPrimary: '#112233',
+        brandSecondary: null,
+        channelsConnected: false,
+        imageHosts: ['images.example.com', 'images.unsplash.com'],
+      },
+    ])
   })
 })

@@ -129,8 +129,8 @@ export function ChangeList(props: { changes: PublishChange[] }): JSX.Element {
                 data-risk={change.risk}
                 className={
                   change.risk === 'high'
-                    ? 'rounded bg-[#C2453A]/10 px-2 py-1 text-sm font-black text-[#C2453A]'
-                    : 'px-2 py-1 text-sm font-semibold text-me-charcoal/70'
+                    ? 'break-all rounded bg-[#C2453A]/10 px-2 py-1 text-sm font-black text-[#C2453A]'
+                    : 'break-all px-2 py-1 text-sm font-semibold text-me-charcoal/70'
                 }
               >
                 {changeLine(change)}

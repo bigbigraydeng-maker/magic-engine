@@ -2,7 +2,7 @@ import type { ReactElement, ReactNode } from 'react'
 import { render, type RenderResult } from '@testing-library/react'
 import { CatalogUiProvider } from '../catalog-context'
 
-const CONNECTED = { channelsConnected: true, canPublish: true }
+const CONNECTED = { channelsConnected: true, canPublish: true, canEditSite: true }
 
 function Connected(props: { children: ReactNode }): JSX.Element {
   return <CatalogUiProvider value={CONNECTED}>{props.children}</CatalogUiProvider>

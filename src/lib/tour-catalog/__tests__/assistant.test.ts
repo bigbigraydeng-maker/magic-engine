@@ -16,6 +16,7 @@ import {
 import type { AssistantDeps } from '../assistant'
 import type { CatalogSnapshot } from '../store'
 import type { CatalogDeparture, CatalogTour } from '../types'
+import { EMPTY_TOUR_CONTENT } from './content-fixture'
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -46,6 +47,7 @@ function makeTour(overrides: Partial<CatalogTour> = {}): CatalogTour {
     isActive: true,
     managesDepartures: true,
     sortOrder: 1,
+    ...EMPTY_TOUR_CONTENT,
     updatedAt: '2026-01-01T00:00:00Z',
     ...overrides,
   }

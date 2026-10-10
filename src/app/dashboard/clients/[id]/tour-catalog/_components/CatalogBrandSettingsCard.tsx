@@ -88,8 +88,10 @@ export function validateSettings(values: SettingsFormValues): string | null {
   return null
 }
 
-function buildSettingsRequest(values: SettingsFormValues): SettingsRequest {
+function buildSettingsRequest(values: SettingsFormValues, imageHosts: string[]): SettingsRequest {
   return {
+    // Not edited on this card: sent back as they are, otherwise saving the brand would empty the list.
+    imageHosts,
     logoUrl: values.logoUrl.trim() || null,
     brandPrimary: values.brandPrimary.trim() || null,
     brandSecondary: values.brandSecondary.trim() || null,
@@ -97,7 +99,7 @@ function buildSettingsRequest(values: SettingsFormValues): SettingsRequest {
   }
 }
 
-async function putSettings(clientId: string, body: SettingsRequest): Promise<{ ok: boolean; error?: string }> {
+export async function putSettings(clientId: string, body: SettingsRequest): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch(`/api/clients/${clientId}/tour-catalog/settings`, {
       method: 'PUT',
@@ -139,7 +141,7 @@ function useBrandSettingsForm(clientId: string, settings: CatalogSettings, onSav
     setError(null)
     setSaved(false)
     setSaving(true)
-    const result = await putSettings(clientId, buildSettingsRequest(values))
+    const result = await putSettings(clientId, buildSettingsRequest(values, settings.imageHosts ?? []))
     setSaving(false)
     if (!result.ok) return setError(settingsErrorText(result.error))
     setSaved(true)

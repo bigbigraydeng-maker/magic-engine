@@ -30,6 +30,22 @@ export interface SeedTourRow {
   max_group_size: number | null
   is_active: boolean
   manages_departures: boolean
+  short_description: string | null
+  highlights: string[]
+  hero_image: string | null
+  gallery: string[]
+  meta_title: string | null
+  meta_description: string | null
+  tags: string[]
+  faqs: unknown[]
+  sold_out: boolean
+  single_supplement_note: string | null
+  rating: number | null
+  review_count: number | null
+  review_summary: string | null
+  quick_answer: string | null
+  /** Website-only pass-through; today only `related_blog_slugs`. */
+  site_extras: Record<string, unknown>
 }
 
 export interface SeedDepartureRow {
@@ -75,6 +91,47 @@ function acceptPrice(
   return price
 }
 
+/**
+ * The database only stores a hero image that is a site path or an https URL (≤ 500 chars).
+ * Anything else is left out and noted, so one odd value cannot fail the whole read-in.
+ * No host check here: the source is the client's own website, read by a global admin.
+ */
+function acceptHeroImage(value: string | undefined, key: string, notes: SeedPlan['notes']): string | null {
+  if (value === undefined || value === '') return null
+  if (value.length <= 500 && (value.startsWith('/') || value.startsWith('https://'))) return value
+  notes.push({ tourKey: key, note: 'hero_image_rejected:' + value.slice(0, 80) })
+  return null
+}
+
+/** The content columns of design §6.11.1; a field the feed does not send stays empty. */
+function buildContentColumns(
+  product: FirstPartyTour,
+  key: string,
+  notes: SeedPlan['notes'],
+): Pick<
+  SeedTourRow,
+  | 'short_description' | 'highlights' | 'hero_image' | 'gallery' | 'meta_title' | 'meta_description' | 'tags'
+  | 'faqs' | 'sold_out' | 'single_supplement_note' | 'rating' | 'review_count' | 'review_summary' | 'quick_answer' | 'site_extras'
+> {
+  return {
+    short_description: product.short_description ?? null,
+    highlights: product.highlights ?? [],
+    hero_image: acceptHeroImage(product.hero_image, key, notes),
+    gallery: product.gallery ?? [],
+    meta_title: product.meta_title ?? null,
+    meta_description: product.meta_description ?? null,
+    tags: product.tags ?? [],
+    faqs: product.faqs ?? [],
+    sold_out: product.sold_out ?? false,
+    single_supplement_note: product.single_supplement_note ?? null,
+    rating: product.rating ?? null,
+    review_count: product.review_count ?? null,
+    review_summary: product.review_summary ?? null,
+    quick_answer: product.quick_answer ?? null,
+    site_extras: product.related_blog_slugs === undefined ? {} : { related_blog_slugs: product.related_blog_slugs },
+  }
+}
+
 /** Build the tour row for a single product. */
 function buildTourRow(product: FirstPartyTour, notes: SeedPlan['notes']): SeedTourRow {
   const key = tourKey(product)
@@ -94,6 +151,7 @@ function buildTourRow(product: FirstPartyTour, notes: SeedPlan['notes']): SeedTo
     max_group_size: product.max_group_size ?? null,
     is_active: product.is_active,
     manages_departures: product.departure_dates.length > 0,
+    ...buildContentColumns(product, key, notes),
   }
 }
 

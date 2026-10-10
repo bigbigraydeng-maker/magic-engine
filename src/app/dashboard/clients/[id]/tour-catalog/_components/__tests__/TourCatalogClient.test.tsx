@@ -88,6 +88,7 @@ function makeSnapshot(): CatalogSnapshotResponse {
     permissions: {
       view: true,
       edit: true,
+      edit_site: true,
       assistant: true,
       request_publish: true,
       import: true,
@@ -97,7 +98,7 @@ function makeSnapshot(): CatalogSnapshotResponse {
       manage_members: true,
       manage_settings: true,
     },
-    settings: { logoUrl: null, brandPrimary: null, brandSecondary: null, channelsConnected: true },
+    settings: { logoUrl: null, brandPrimary: null, brandSecondary: null, channelsConnected: true, imageHosts: [] },
     pendingPublishRequest: null,
   }
 }

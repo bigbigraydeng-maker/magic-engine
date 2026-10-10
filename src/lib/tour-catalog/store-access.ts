@@ -15,6 +15,7 @@ export const EMPTY_SETTINGS: CatalogSettings = {
   brandPrimary: null,
   brandSecondary: null,
   channelsConnected: false,
+  imageHosts: [],
 }
 
 function normalizeEmail(value: unknown): string {
@@ -109,7 +110,7 @@ export async function removeMember(db: SupabaseClient, clientId: string, email: 
 export async function getSettings(db: SupabaseClient, clientId: string): Promise<CatalogSettings> {
   const res = await db
     .from('tour_catalog_settings')
-    .select('logo_url, brand_primary, brand_secondary, channels_connected')
+    .select('logo_url, brand_primary, brand_secondary, channels_connected, image_hosts')
     .eq('client_id', clientId)
     .maybeSingle()
   if (res.error) {
@@ -124,6 +125,9 @@ export async function getSettings(db: SupabaseClient, clientId: string): Promise
     brandPrimary: asNullableString(row.brand_primary),
     brandSecondary: asNullableString(row.brand_secondary),
     channelsConnected: row.channels_connected === true,
+    imageHosts: Array.isArray(row.image_hosts)
+      ? row.image_hosts.filter((host): host is string => typeof host === 'string')
+      : [],
   }
 }
 
@@ -140,6 +144,7 @@ export async function saveSettings(
       brand_primary: settings.brandPrimary,
       brand_secondary: settings.brandSecondary,
       channels_connected: settings.channelsConnected,
+      image_hosts: settings.imageHosts,
       updated_by: actor,
       updated_at: new Date().toISOString(),
     },

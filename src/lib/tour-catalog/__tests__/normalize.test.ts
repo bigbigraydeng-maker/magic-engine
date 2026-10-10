@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 
 import { matchTour, norm, shortName } from '../normalize'
 import type { CatalogAlias, CatalogTour } from '../types'
+import { EMPTY_TOUR_CONTENT } from './content-fixture'
 
 /** Build a CatalogTour fixture with neutral defaults for all required fields. */
 function makeTour(overrides: Partial<CatalogTour> & { id: string }): CatalogTour {
@@ -25,6 +26,7 @@ function makeTour(overrides: Partial<CatalogTour> & { id: string }): CatalogTour
     isActive: true,
     managesDepartures: true,
     sortOrder: 0,
+    ...EMPTY_TOUR_CONTENT,
     updatedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
   }

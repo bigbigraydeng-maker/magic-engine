@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { toFirstPartyTours } from '../output'
 import type { CatalogDeparture, CatalogTour } from '../types'
+import { EMPTY_TOUR_CONTENT } from './content-fixture'
 
 function makeTour(overrides: Partial<CatalogTour> = {}): CatalogTour {
   return {
@@ -24,6 +25,7 @@ function makeTour(overrides: Partial<CatalogTour> = {}): CatalogTour {
     isActive: true,
     managesDepartures: true,
     sortOrder: 1,
+    ...EMPTY_TOUR_CONTENT,
     updatedAt: '2027-05-13T09:30:00.000Z',
     ...overrides,
   }

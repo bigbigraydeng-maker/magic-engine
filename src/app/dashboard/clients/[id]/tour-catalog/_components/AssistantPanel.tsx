@@ -35,7 +35,7 @@ interface ChatMessage {
 const HINT =
   '用大白话告诉我要改什么，比如：把 Silk Road 第 3 天的标题改成「乌鲁木齐 — 吐鲁番」。我会先列出要改的内容，你确认后才会保存。'
 
-const FOOTER_HINT = 'AI 只会提建议，点「应用」后才会真正保存，并记入修改记录。'
+const FOOTER_HINT = 'AI 只会提建议，点「应用」后才会真正保存，并记入修改记录。AI 助手不改图片、搜索设置和评价。'
 
 /** Field labels, matching the change log. */
 const FIELD_LABELS: Record<string, string> = {
@@ -770,7 +770,7 @@ export function AssistantPanel({
         placeholder="用大白话告诉我要改什么…"
         className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal focus:outline-none focus:ring-2 focus:ring-me-charcoal/20"
       />
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <button
           type="button"
           onClick={() => { void send() }}
@@ -779,7 +779,7 @@ export function AssistantPanel({
         >
           发送
         </button>
-        <span className="text-xs font-semibold text-me-charcoal/40">{FOOTER_HINT}</span>
+        <span className="min-w-0 text-xs font-semibold text-me-charcoal/40">{FOOTER_HINT}</span>
       </div>
     </div>
   )

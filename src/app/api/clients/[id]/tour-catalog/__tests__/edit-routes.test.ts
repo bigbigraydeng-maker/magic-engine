@@ -1,17 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { adminAccess } from './access-fixtures'
 import { NextRequest, NextResponse } from 'next/server'
+import { patchContext } from '@/lib/tour-catalog/__tests__/content-fixture'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 
 // vi.mock is hoisted above plain consts, so the mock fns must come from vi.hoisted.
-const { requireCatalogAccess, updateTour, saveDeparture } = vi.hoisted(() => ({
+const { requireCatalogAccess, updateTour, saveDeparture, loadTourPatchContext } = vi.hoisted(() => ({
   requireCatalogAccess: vi.fn(),
   updateTour: vi.fn(),
   saveDeparture: vi.fn(),
+  loadTourPatchContext: vi.fn(),
 }))
 vi.mock('@/lib/tour-catalog/access', () => ({ requireCatalogAccess }))
 vi.mock('@/lib/tour-catalog/store-edit', () => ({ updateTour, saveDeparture }))
+vi.mock('@/lib/tour-catalog/patch-context', () => ({ loadTourPatchContext }))
 
 import { PATCH as patchTour } from '../tours/[tourId]/route'
 import { POST as postDeparture } from '../tours/[tourId]/departures/route'
@@ -54,6 +57,7 @@ async function bodyOf(res: NextResponse): Promise<Record<string, unknown>> {
 beforeEach(() => {
   vi.clearAllMocks()
   requireCatalogAccess.mockResolvedValue(adminAccess(ACTOR))
+  loadTourPatchContext.mockResolvedValue(patchContext())
 })
 
 describe('PATCH tours/[tourId]', () => {

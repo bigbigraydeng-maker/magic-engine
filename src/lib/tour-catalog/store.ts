@@ -7,6 +7,7 @@
 import { createHash } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { norm } from './normalize'
+import { readDayExtras, readTourContent } from './content-fields'
 import type { ImportPlan } from './plan'
 import type {
   CatalogAlias,
@@ -70,6 +71,7 @@ function asItinerary(value: unknown): CatalogItineraryDay[] {
     if (Array.isArray(rec.meals)) {
       day.meals = asStringArray(rec.meals)
     }
+    Object.assign(day, readDayExtras(rec))
     days.push(day)
   }
   return days
@@ -134,6 +136,7 @@ export function mapTourRow(row: Record<string, unknown>): CatalogTour {
     managesDepartures: asBoolean(row.manages_departures),
     sortOrder: asNumber(row.sort_order),
     updatedAt: asString(row.updated_at),
+    ...readTourContent(row),
   }
 }
 

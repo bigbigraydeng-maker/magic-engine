@@ -1,12 +1,28 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import type { CatalogItineraryDayView, CatalogTourView } from './types'
+import type { CatalogTourView } from './types'
 import type { TourSavedResponse } from '@/lib/tour-catalog/api-contract'
-import { PRICE_HINT_TEXT, savedAsDraftText } from './catalog-format'
-import { BRAND_BUTTON_CLASS } from './catalog-brand'
-import { useChannelsConnected } from './catalog-context'
+import { savedAsDraftText } from './catalog-format'
+import { BRAND_BUTTON_CLASS, FEEDBACK_MAILTO } from './catalog-brand'
+import { useCatalogUi } from './catalog-context'
 import { errorSummaryText, useJumpToFirstError } from './useErrorJump'
+import { DANGER, EditorGroup, SUCCESS, type FieldErrors } from './editor-parts'
+import {
+  buildPatch,
+  groupsOf,
+  initialForm,
+  parseFieldErrors,
+  serverErrorMessage,
+  type FormState,
+  type GroupId,
+} from './tour-editor-form'
+import { TourBasicsFields, TourInclusionsFields, type FieldsProps, type UpdateField } from './TourBasicsFields'
+import { TourItineraryField } from './TourItineraryField'
+import { TourImagesField } from './TourImagesField'
+import { TourFaqsField } from './TourFaqsField'
+import { TourSearchFields } from './TourSearchFields'
+import { TourReviewFields } from './TourReviewFields'
 
 /** Asked before the "manages departures" switch is saved. Unconnected: promise nothing about channels. */
 function managesChangeText(turningOn: boolean, connected: boolean): string {
@@ -20,437 +36,72 @@ function managesChangeText(turningOn: boolean, connected: boolean): string {
     : '关闭后，这个团不再按班期判断是否可售，即使全部满团，在上架后的目录里也仍算可售。确定吗？'
 }
 
-const DANGER = '#C2453A'
-const SUCCESS = '#456F35'
-const AMBER = '#B7791F'
+export const SITE_FIELDS_BY_ME_TEXT =
+  '搜索设置、标签、常见问题和评价由 Magic Engine 团队维护；需要调整请告诉我们。'
 
-const ERROR_MESSAGES: Record<string, string> = {
-  conflict: '这个团刚被别人改过，请刷新页面后再改',
-  not_found: '找不到这条记录，可能已被删除，请刷新',
-  invalid_fields: '有几项填得不对，请看红字提示',
-  save_failed: '保存失败，请稍后重试',
-  duplicate_departure: '这一天已经有班期了',
+/** The form key `days` is saved (and tracked) as the `itinerary` field. */
+function touchedKey(key: keyof FormState): string {
+  return key === 'days' ? 'itinerary' : key
 }
 
-const FIELD_ERROR_MESSAGES: Record<string, string> = {
-  required: '必填',
-  too_long: '太长了',
-  invalid_type: '格式不对',
-  item_too_long: '某一条太长了',
-  too_many_items: '条数太多',
-  invalid_number: '要填 1 到 500 的整数',
-  invalid_date: '日期要写成 2027-05-13 这样',
-  return_before_depart: '返程不能早于出团',
-  duplicate_day: '行程天数有重复',
-  non_consecutive_days: '行程天数要从第 1 天开始连续',
-  invalid_status: '状态不对',
+interface EditorForm {
+  form: FormState
+  patch: Record<string, unknown>
+  update: UpdateField
 }
 
-const PRICE_ERROR_MESSAGE =
-  '价格写法不对，要写成 From NZD $4,999 per person 这样，或写 TBC 表示待定'
-
-function fieldErrorMessage(code: string): string {
-  if (code.startsWith('invalid_price')) return PRICE_ERROR_MESSAGE
-  return FIELD_ERROR_MESSAGES[code] ?? code
-}
-
-function serverErrorMessage(code: string): string {
-  return ERROR_MESSAGES[code] ?? code
-}
-
-interface DayDraft {
-  title: string
-  description: string
-  meals: string
-  mealsTouched: boolean
-  originalMeals: string[]
-}
-
-interface FormState {
-  name: string
-  title: string
-  durationText: string
-  displayPriceText: string
-  singleSupplement: string
-  maxGroupSize: string
-  shortDescription: string
-  highlights: string
-  inclusions: string
-  exclusions: string
-  tourCities: string
-  isActive: boolean
-  managesDepartures: boolean
-  days: DayDraft[]
-}
-
-function linesToText(items?: string[]): string {
-  return (items ?? []).join('\n')
-}
-
-function mealsToText(meals?: string[]): string {
-  return (meals ?? []).join(', ')
-}
-
-function daysFromTour(tour: CatalogTourView): DayDraft[] {
-  return (tour.itinerary ?? []).map((d) => ({
-    title: d.title ?? '',
-    description: d.description ?? '',
-    meals: mealsToText(d.meals),
-    mealsTouched: false,
-    originalMeals: d.meals ?? [],
-  }))
-}
-
-function initialForm(tour: CatalogTourView): FormState {
-  return {
-    name: tour.name ?? '',
-    title: tour.title ?? '',
-    durationText: tour.durationText ?? '',
-    displayPriceText: tour.displayPriceText ?? '',
-    singleSupplement: tour.singleSupplement ?? '',
-    maxGroupSize: tour.maxGroupSize == null ? '' : String(tour.maxGroupSize),
-    shortDescription: tour.shortDescription ?? '',
-    highlights: linesToText(tour.highlights),
-    inclusions: linesToText(tour.inclusions),
-    exclusions: linesToText(tour.exclusions),
-    tourCities: linesToText(tour.tourCities),
-    isActive: tour.isActive,
-    managesDepartures: tour.managesDepartures,
-    days: daysFromTour(tour),
-  }
-}
-
-function splitLines(text: string): string[] {
-  return text
-    .split('\n')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
-}
-
-function splitMeals(text: string): string[] {
-  return text
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
-}
-
-function nullableText(value: string): string | null {
-  const trimmed = value.trim()
-  return trimmed.length === 0 ? null : trimmed
-}
-
-function buildItinerary(days: DayDraft[]): CatalogItineraryDayView[] {
-  return days.map((d, i) => {
-    const day: CatalogItineraryDayView = {
-      day: i + 1,
-      title: d.title.trim(),
-      description: d.description.trim(),
-    }
-    const meals = d.mealsTouched ? splitMeals(d.meals) : d.originalMeals
-    if (meals.length > 0) day.meals = meals
-    return day
-  })
-}
-
-function arraysEqual(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false
-  return a.every((v, i) => v === b[i])
-}
-
-function itineraryEqual(a: CatalogItineraryDayView[], b: CatalogItineraryDayView[]): boolean {
-  if (a.length !== b.length) return false
-  return a.every((day, i) => {
-    const other = b[i]
-    if (day.day !== other.day) return false
-    if (day.title !== other.title) return false
-    if (day.description !== other.description) return false
-    return arraysEqual(day.meals ?? [], other.meals ?? [])
-  })
-}
-
-function buildScalarPatch(
-  form: FormState,
-  tour: CatalogTourView,
-  touched: Set<string>,
-): Record<string, unknown> {
-  const patch: Record<string, unknown> = {}
-  if (touched.has('name')) {
-    const name = form.name.trim()
-    if (name !== (tour.name ?? '')) patch.name = name
-  }
-  if (touched.has('title') && nullableText(form.title) !== (tour.title ?? null))
-    patch.title = nullableText(form.title)
-  if (touched.has('durationText') && nullableText(form.durationText) !== (tour.durationText ?? null))
-    patch.durationText = nullableText(form.durationText)
-  if (
-    touched.has('displayPriceText') &&
-    nullableText(form.displayPriceText) !== (tour.displayPriceText ?? null)
-  )
-    patch.displayPriceText = nullableText(form.displayPriceText)
-  if (
-    touched.has('singleSupplement') &&
-    nullableText(form.singleSupplement) !== (tour.singleSupplement ?? null)
-  )
-    patch.singleSupplement = nullableText(form.singleSupplement)
-  if (touched.has('maxGroupSize')) {
-    const maxGroupSize = form.maxGroupSize.trim() === '' ? null : Number(form.maxGroupSize)
-    if (maxGroupSize !== (tour.maxGroupSize ?? null)) patch.maxGroupSize = maxGroupSize
-  }
-  if (
-    touched.has('shortDescription') &&
-    nullableText(form.shortDescription) !== (tour.shortDescription ?? null)
-  )
-    patch.shortDescription = nullableText(form.shortDescription)
-  return patch
-}
-
-function buildListPatch(
-  form: FormState,
-  tour: CatalogTourView,
-  touched: Set<string>,
-): Record<string, unknown> {
-  const patch: Record<string, unknown> = {}
-  if (touched.has('highlights')) {
-    const highlights = splitLines(form.highlights)
-    if (!arraysEqual(highlights, tour.highlights ?? [])) patch.highlights = highlights
-  }
-  if (touched.has('inclusions')) {
-    const inclusions = splitLines(form.inclusions)
-    if (!arraysEqual(inclusions, tour.inclusions ?? [])) patch.inclusions = inclusions
-  }
-  if (touched.has('exclusions')) {
-    const exclusions = splitLines(form.exclusions)
-    if (!arraysEqual(exclusions, tour.exclusions ?? [])) patch.exclusions = exclusions
-  }
-  if (touched.has('tourCities')) {
-    const tourCities = splitLines(form.tourCities)
-    if (!arraysEqual(tourCities, tour.tourCities ?? [])) patch.tourCities = tourCities
-  }
-  if (touched.has('itinerary')) {
-    const itinerary = buildItinerary(form.days)
-    if (!itineraryEqual(itinerary, tour.itinerary ?? [])) patch.itinerary = itinerary
-  }
-  return patch
-}
-
-function buildPatch(
-  form: FormState,
-  tour: CatalogTourView,
-  touched: Set<string>,
-): Record<string, unknown> {
-  const patch: Record<string, unknown> = {
-    ...buildScalarPatch(form, tour, touched),
-    ...buildListPatch(form, tour, touched),
-  }
-  if (touched.has('isActive') && form.isActive !== tour.isActive) patch.isActive = form.isActive
-  if (touched.has('managesDepartures') && form.managesDepartures !== tour.managesDepartures)
-    patch.managesDepartures = form.managesDepartures
-  return patch
-}
-
-function durationDays(text: string): number | null {
-  const match = text.match(/\d+/)
-  if (!match) return null
-  const n = Number(match[0])
-  return Number.isFinite(n) ? n : null
-}
-
-interface FieldErrors {
-  [field: string]: string
-}
-
-function parseFieldErrors(fields: unknown): FieldErrors {
-  const result: FieldErrors = {}
-  if (!Array.isArray(fields)) return result
-  for (const entry of fields) {
-    if (entry && typeof entry === 'object') {
-      const f = entry as { field?: unknown; code?: unknown }
-      if (typeof f.field === 'string' && typeof f.code === 'string') {
-        result[f.field] = fieldErrorMessage(f.code)
-      }
-    }
-  }
-  return result
-}
-
-function FieldError({ message }: { message?: string }) {
-  if (!message) return null
-  return (
-    <p data-field-error className="mt-1 text-xs" style={{ color: DANGER }}>
-      {message}
-    </p>
-  )
-}
-
-function PriceHint() {
-  return <p className="mt-1 text-xs text-me-charcoal/60">{PRICE_HINT_TEXT}</p>
-}
-
-function InternalTag() {
-  return (
-    <span className="ml-2 rounded bg-black/5 px-1.5 py-0.5 text-xs font-normal text-me-charcoal/60">
-      仅内部参考，网站暂不读取
-    </span>
-  )
-}
-
-function Label({ children }: { children: React.ReactNode }) {
-  return <label className="mb-1 block text-sm font-semibold text-me-charcoal">{children}</label>
-}
-
-const inputClass =
-  'w-full rounded-xl border border-black/10 bg-me-ivory px-3 py-2 text-sm text-me-charcoal'
-
-interface DayCardProps {
-  index: number
-  day: DayDraft
-  errors: FieldErrors
-  onChange: (index: number, next: DayDraft) => void
-  onDelete: (index: number) => void
-}
-
-function DayCard({ index, day, errors, onChange, onDelete }: DayCardProps) {
-  const dayNumber = index + 1
-  return (
-    <div className="rounded-xl border border-black/10 bg-me-ivory p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-sm font-semibold text-me-charcoal">第 {dayNumber} 天</span>
-        <button
-          type="button"
-          onClick={() => onDelete(index)}
-          className="rounded-lg px-2 py-1 text-xs font-semibold"
-          style={{ color: DANGER }}
-        >
-          删除这一天
-        </button>
-      </div>
-      <div className="mb-2">
-        <Label>标题</Label>
-        <input
-          className={inputClass}
-          value={day.title}
-          onChange={(e) => onChange(index, { ...day, title: e.target.value })}
-        />
-        <FieldError message={errors[`itinerary[${index}].title`]} />
-      </div>
-      <div className="mb-2">
-        <Label>说明</Label>
-        <textarea
-          className={inputClass}
-          rows={2}
-          value={day.description}
-          onChange={(e) => onChange(index, { ...day, description: e.target.value })}
-        />
-        <FieldError message={errors[`itinerary[${index}].description`]} />
-      </div>
-      <div>
-        <Label>餐食（用逗号分开，例如 早餐, 晚餐）</Label>
-        <input
-          className={inputClass}
-          value={day.meals}
-          onChange={(e) => onChange(index, { ...day, meals: e.target.value, mealsTouched: true })}
-        />
-        <FieldError message={errors[`itinerary[${index}].meals`]} />
-      </div>
-    </div>
-  )
-}
-
-export function TourEditor({
-  clientId,
-  tour,
-  onSaved,
-  onCancel,
-  onDirtyChange,
-}: {
-  clientId: string
-  tour: CatalogTourView
-  onSaved: (tour: CatalogTourView) => void
-  onCancel: () => void
-  /** Told whenever the form starts / stops holding edits that are not saved yet. */
-  onDirtyChange?: (dirty: boolean) => void
-}) {
+function useEditorForm(tour: CatalogTourView): EditorForm {
   const [form, setForm] = useState<FormState>(() => initialForm(tour))
   const [touched, setTouched] = useState<Set<string>>(() => new Set())
+
+  const update: UpdateField = (key, value) => {
+    setForm((prev) => ({ ...prev, [key]: value }))
+    setTouched((prev) => (prev.has(touchedKey(key)) ? prev : new Set(prev).add(touchedKey(key))))
+  }
+
+  return { form, patch: buildPatch(form, tour, touched), update }
+}
+
+interface SaveState {
+  saving: boolean
+  status: string | null
+  statusColor: string
+  fieldErrors: FieldErrors
+  /** Goes up once per save refused for field errors. */
+  errorTick: number
+  save: (patch: Record<string, unknown>) => Promise<void>
+}
+
+function useTourSave(
+  clientId: string,
+  tour: CatalogTourView,
+  connected: boolean,
+  onSaved: (tour: CatalogTourView) => void,
+): SaveState {
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
   const [statusColor, setStatusColor] = useState<string>(SUCCESS)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [errorTick, setErrorTick] = useState(0)
-  const rootRef = useJumpToFirstError<HTMLDivElement>(errorTick)
-  const errorCount = Object.keys(fieldErrors).length
 
-  const dirty = Object.keys(buildPatch(form, tour, touched)).length > 0
-  useEffect(() => {
-    onDirtyChange?.(dirty)
-    return () => onDirtyChange?.(false)
-  }, [dirty, onDirtyChange])
-
-  function markTouched(key: string) {
-    setTouched((prev) => {
-      if (prev.has(key)) return prev
-      const next = new Set(prev)
-      next.add(key)
-      return next
-    })
+  const say = (text: string | null, color: string) => {
+    setStatus(text)
+    setStatusColor(color)
   }
-
-  function update<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((prev) => ({ ...prev, [key]: value }))
-    markTouched(key as string)
-  }
-
-  function updateDay(index: number, next: DayDraft) {
-    setForm((prev) => {
-      const days = prev.days.slice()
-      days[index] = next
-      return { ...prev, days }
-    })
-    markTouched('itinerary')
-  }
-
-  function addDay() {
-    setForm((prev) => ({
-      ...prev,
-      days: [
-        ...prev.days,
-        { title: '', description: '', meals: '', mealsTouched: false, originalMeals: [] },
-      ],
-    }))
-    markTouched('itinerary')
-  }
-
-  function deleteDay(index: number) {
-    setForm((prev) => ({
-      ...prev,
-      days: prev.days.filter((_, i) => i !== index),
-    }))
-    markTouched('itinerary')
-  }
-
-  const connected = useChannelsConnected()
-
-  function confirmManagesChange(): boolean {
-    if (form.managesDepartures === tour.managesDepartures) return true
-    return window.confirm(managesChangeText(form.managesDepartures, connected))
-  }
-
-  function handleCancel() {
-    if (dirty && !window.confirm('放弃这次没保存的修改吗？')) return
-    onCancel()
-  }
-
-  async function handleSave() {
-    setStatus(null)
-    setFieldErrors({})
-    const patch = buildPatch(form, tour, touched)
-    if (Object.keys(patch).length === 0) {
-      setStatusColor(SUCCESS)
-      setStatus('没有改动')
-      return
+  async function refused(res: Response): Promise<void> {
+    const body = (await res.json().catch(() => ({}))) as { error?: string; fields?: unknown }
+    const code = typeof body.error === 'string' ? body.error : 'save_failed'
+    if (code === 'invalid_fields' && res.status !== 403) {
+      setFieldErrors(parseFieldErrors(body.fields))
+      setErrorTick((n) => n + 1)
     }
-    if (!confirmManagesChange()) return
+    say(serverErrorMessage(code, res.status), DANGER)
+  }
 
+  async function save(patch: Record<string, unknown>): Promise<void> {
+    setFieldErrors({})
+    if (Object.keys(patch).length === 0) return say('没有改动', SUCCESS)
+    say(null, SUCCESS)
     setSaving(true)
     try {
       const res = await fetch(`/api/clients/${clientId}/tour-catalog/tours/${tour.id}`, {
@@ -458,247 +109,250 @@ export function TourEditor({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ expectedUpdatedAt: tour.updatedAt, patch }),
       })
-      if (res.ok) {
-        const data = (await res.json()) as TourSavedResponse
-        setStatusColor(SUCCESS)
-        setStatus(savedAsDraftText(connected))
-        onSaved(data.tour)
-        return
-      }
-      const body = (await res.json().catch(() => ({}))) as {
-        error?: string
-        fields?: unknown
-      }
-      const code = typeof body.error === 'string' ? body.error : 'save_failed'
-      if (code === 'invalid_fields') {
-        setFieldErrors(parseFieldErrors(body.fields))
-        setErrorTick((n) => n + 1)
-      }
-      setStatusColor(DANGER)
-      setStatus(serverErrorMessage(code))
+      if (!res.ok) return await refused(res)
+      const data = (await res.json()) as TourSavedResponse
+      say(savedAsDraftText(connected), SUCCESS)
+      onSaved(data.tour)
     } catch {
-      setStatusColor(DANGER)
-      setStatus(serverErrorMessage('save_failed'))
+      say(serverErrorMessage('save_failed'), DANGER)
     } finally {
       setSaving(false)
     }
   }
 
-  const durationN = durationDays(form.durationText)
-  const showDurationHint =
-    durationN !== null && form.days.length > 0 && durationN !== form.days.length
+  return { saving, status, statusColor, fieldErrors, errorTick, save }
+}
+
+/** Which groups are unfolded. A refused save unfolds every group that holds a red message. */
+function useOpenGroups(errorGroups: Set<GroupId>, errorTick: number) {
+  const [open, setOpen] = useState<Set<GroupId>>(() => new Set<GroupId>(['basics']))
+
+  useEffect(() => {
+    if (errorTick === 0) return
+    setOpen((prev) => new Set([...prev, ...errorGroups]))
+    // Only a new refusal unfolds; folding a group again afterwards is the person's choice.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [errorTick])
+
+  const toggle = (id: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev)
+      const group = id as GroupId
+      if (next.has(group)) next.delete(group)
+      else next.add(group)
+      return next
+    })
+
+  return { open, toggle }
+}
+
+interface GroupsProps extends FieldsProps {
+  tourName: string
+  canEditSite: boolean
+  connected: boolean
+  dirtyGroups: Set<GroupId>
+  errorGroups: Set<GroupId>
+  open: Set<GroupId>
+  onToggle: (id: string) => void
+}
+
+function groupProps(props: GroupsProps, id: GroupId, title: string) {
+  return {
+    id,
+    title,
+    open: props.open.has(id),
+    onToggle: props.onToggle,
+    dirty: props.dirtyGroups.has(id),
+    hasError: props.errorGroups.has(id),
+  }
+}
+
+/** Groups every editor sees. */
+function ContentGroups(props: GroupsProps): JSX.Element {
+  const { form, errors, update, canEditSite } = props
+  const ui = useCatalogUi()
+  return (
+    <>
+      <EditorGroup {...groupProps(props, 'basics', '基本信息')}>
+        <TourBasicsFields form={form} errors={errors} update={update} connected={props.connected} />
+      </EditorGroup>
+      <EditorGroup {...groupProps(props, 'images', '图片')}>
+        <TourImagesField
+          tourName={props.tourName}
+          heroImage={form.heroImage}
+          gallery={form.gallery}
+          pool={ui.imagePool ?? []}
+          domain={ui.siteDomain ?? null}
+          canAddUrl={canEditSite}
+          errors={errors}
+          onHeroChange={(next) => update('heroImage', next)}
+          onGalleryChange={(next) => update('gallery', next)}
+        />
+      </EditorGroup>
+      <EditorGroup {...groupProps(props, 'itinerary', '行程')}>
+        <TourItineraryField days={form.days} errors={errors} onChange={(next) => update('days', next)} />
+      </EditorGroup>
+      <EditorGroup {...groupProps(props, 'inclusions', '包含与不含')}>
+        <TourInclusionsFields form={form} errors={errors} update={update} />
+      </EditorGroup>
+    </>
+  )
+}
+
+/** Groups only a Magic Engine admin sees; the server refuses these fields from anyone else. */
+function SiteGroups(props: GroupsProps): JSX.Element {
+  const { form, errors, update } = props
+  return (
+    <>
+      <EditorGroup {...groupProps(props, 'faqs', '常见问题')}>
+        <TourFaqsField faqs={form.faqs} errors={errors} onChange={(next) => update('faqs', next)} />
+      </EditorGroup>
+      <EditorGroup {...groupProps(props, 'search', '搜索与标签')}>
+        <TourSearchFields
+          metaTitle={form.metaTitle}
+          metaDescription={form.metaDescription}
+          quickAnswer={form.quickAnswer}
+          tags={form.tags}
+          errors={errors}
+          onMetaTitle={(next) => update('metaTitle', next)}
+          onMetaDescription={(next) => update('metaDescription', next)}
+          onQuickAnswer={(next) => update('quickAnswer', next)}
+          onTags={(next) => update('tags', next)}
+        />
+      </EditorGroup>
+      <EditorGroup {...groupProps(props, 'reviews', '评价')}>
+        <TourReviewFields
+          rating={form.rating}
+          reviewCount={form.reviewCount}
+          reviewSummary={form.reviewSummary}
+          errors={errors}
+          onRating={(next) => update('rating', next)}
+          onReviewCount={(next) => update('reviewCount', next)}
+          onReviewSummary={(next) => update('reviewSummary', next)}
+        />
+      </EditorGroup>
+    </>
+  )
+}
+
+function SiteFieldsNote(): JSX.Element {
+  return (
+    <p data-testid="site-fields-note" className="text-xs text-me-charcoal/70">
+      {SITE_FIELDS_BY_ME_TEXT}{' '}
+      <a href={FEEDBACK_MAILTO} className="underline">
+        发邮件给我们
+      </a>
+    </p>
+  )
+}
+
+interface SaveBarProps {
+  saving: boolean
+  errorCount: number
+  status: string | null
+  statusColor: string
+  onSave: () => void
+  onCancel: () => void
+}
+
+/** Sticks to the bottom of the screen: the form is long and 保存 must stay reachable. */
+function SaveBar(props: SaveBarProps): JSX.Element {
+  const { saving, errorCount, status, statusColor, onSave, onCancel } = props
+  return (
+    <div className="sticky bottom-0 z-10 -mx-2 flex flex-wrap items-center gap-3 border-t border-black/10 bg-white/90 px-2 py-3 backdrop-blur">
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={saving}
+        className={`rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-60 ${BRAND_BUTTON_CLASS}`}
+      >
+        {saving ? '正在保存…' : '保存'}
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="rounded-lg border border-black/10 px-4 py-2 text-sm font-semibold text-me-charcoal"
+      >
+        取消
+      </button>
+      {errorCount > 0 ? (
+        <p role="alert" className="min-w-0 text-sm font-semibold" style={{ color: DANGER }}>
+          {errorSummaryText(errorCount)}
+        </p>
+      ) : status ? (
+        <p className="min-w-0 text-sm font-semibold" style={{ color: statusColor }}>
+          {status}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+interface TourEditorProps {
+  clientId: string
+  tour: CatalogTourView
+  onSaved: (tour: CatalogTourView) => void
+  onCancel: () => void
+  /** Told whenever the form starts / stops holding edits that are not saved yet. */
+  onDirtyChange?: (dirty: boolean) => void
+}
+
+function useDirtyNotice(dirty: boolean, onDirtyChange?: (dirty: boolean) => void): void {
+  useEffect(() => {
+    onDirtyChange?.(dirty)
+    return () => onDirtyChange?.(false)
+  }, [dirty, onDirtyChange])
+}
+
+export function TourEditor({ clientId, tour, onSaved, onCancel, onDirtyChange }: TourEditorProps) {
+  const ui = useCatalogUi()
+  const connected = ui.channelsConnected
+  const canEditSite = ui.canEditSite === true
+  const { form, patch, update } = useEditorForm(tour)
+  const saver = useTourSave(clientId, tour, connected, onSaved)
+  const errorGroups = groupsOf(Object.keys(saver.fieldErrors))
+  const { open, toggle } = useOpenGroups(errorGroups, saver.errorTick)
+  const rootRef = useJumpToFirstError<HTMLDivElement>(saver.errorTick)
+
+  const dirty = Object.keys(patch).length > 0
+  useDirtyNotice(dirty, onDirtyChange)
+
+  function handleSave() {
+    const managesChanged = 'managesDepartures' in patch
+    if (managesChanged && !window.confirm(managesChangeText(form.managesDepartures, connected))) return
+    void saver.save(patch)
+  }
+
+  function handleCancel() {
+    if (dirty && !window.confirm('放弃这次没保存的修改吗？')) return
+    onCancel()
+  }
+
+  const groups: GroupsProps = {
+    form,
+    errors: saver.fieldErrors,
+    update,
+    tourName: tour.name,
+    canEditSite,
+    connected,
+    dirtyGroups: groupsOf(Object.keys(patch)),
+    errorGroups,
+    open,
+    onToggle: toggle,
+  }
 
   return (
-    <div ref={rootRef} className="space-y-4 rounded-xl border border-black/10 bg-white p-4">
-      <div>
-        <Label>团名</Label>
-        <input
-          className={inputClass}
-          value={form.name}
-          onChange={(e) => update('name', e.target.value)}
-        />
-        <FieldError message={fieldErrors.name} />
-      </div>
-
-      <div>
-        <Label>对外标题</Label>
-        <input
-          className={inputClass}
-          value={form.title}
-          onChange={(e) => update('title', e.target.value)}
-        />
-        <p className="mt-1 text-xs text-me-charcoal/60">
-          {connected
-            ? '网站上显示的是这个标题；留空则显示团名'
-            : '上架后的目录里用这个标题；留空则用团名'}
-        </p>
-        <FieldError message={fieldErrors.title} />
-      </div>
-
-      <div>
-        <Label>天数</Label>
-        <input
-          className={inputClass}
-          placeholder="例如 12 Days"
-          value={form.durationText}
-          onChange={(e) => update('durationText', e.target.value)}
-        />
-        {showDurationHint && (
-          <p className="mt-1 text-xs" style={{ color: AMBER }}>
-            天数写的是 {durationN} 天，行程里有 {form.days.length} 天，请确认
-          </p>
-        )}
-        <FieldError message={fieldErrors.durationText} />
-      </div>
-
-      <div>
-        <Label>展示价</Label>
-        <input
-          className={inputClass}
-          placeholder="例如 From NZD $4,999 per person；未定价可写 TBC"
-          value={form.displayPriceText}
-          onChange={(e) => update('displayPriceText', e.target.value)}
-        />
-        <PriceHint />
-        <FieldError message={fieldErrors.displayPriceText} />
-      </div>
-
-      <div>
-        <Label>单人房差</Label>
-        <input
-          className={inputClass}
-          value={form.singleSupplement}
-          onChange={(e) => update('singleSupplement', e.target.value)}
-        />
-        <PriceHint />
-        <FieldError message={fieldErrors.singleSupplement} />
-      </div>
-
-      <div>
-        <Label>最多人数</Label>
-        <input
-          type="number"
-          className={inputClass}
-          placeholder="留空表示不限"
-          value={form.maxGroupSize}
-          onChange={(e) => update('maxGroupSize', e.target.value)}
-        />
-        <FieldError message={fieldErrors.maxGroupSize} />
-      </div>
-
-      <div>
-        <Label>
-          简介
-          <InternalTag />
-        </Label>
-        <textarea
-          className={inputClass}
-          rows={3}
-          value={form.shortDescription}
-          onChange={(e) => update('shortDescription', e.target.value)}
-        />
-        <FieldError message={fieldErrors.shortDescription} />
-      </div>
-
-      <div>
-        <Label>
-          亮点（一行一条）
-          <InternalTag />
-        </Label>
-        <textarea
-          className={inputClass}
-          rows={3}
-          value={form.highlights}
-          onChange={(e) => update('highlights', e.target.value)}
-        />
-        <FieldError message={fieldErrors.highlights} />
-      </div>
-
-      <div>
-        <Label>包含（一行一条）</Label>
-        <textarea
-          className={inputClass}
-          rows={3}
-          value={form.inclusions}
-          onChange={(e) => update('inclusions', e.target.value)}
-        />
-        <FieldError message={fieldErrors.inclusions} />
-      </div>
-
-      <div>
-        <Label>不包含（一行一条）</Label>
-        <textarea
-          className={inputClass}
-          rows={3}
-          value={form.exclusions}
-          onChange={(e) => update('exclusions', e.target.value)}
-        />
-        <FieldError message={fieldErrors.exclusions} />
-      </div>
-
-      <div>
-        <Label>途经城市（一行一条）</Label>
-        <textarea
-          className={inputClass}
-          rows={3}
-          value={form.tourCities}
-          onChange={(e) => update('tourCities', e.target.value)}
-        />
-        <FieldError message={fieldErrors.tourCities} />
-      </div>
-
-      <div>
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-sm font-semibold text-me-charcoal">行程</span>
-          <button
-            type="button"
-            onClick={addDay}
-            className="rounded-lg border border-black/10 px-3 py-1 text-xs font-semibold text-me-charcoal"
-          >
-            加一天
-          </button>
-        </div>
-        <FieldError message={fieldErrors.itinerary} />
-        <div className="space-y-3">
-          {form.days.map((day, index) => (
-            <DayCard
-              key={index}
-              index={index}
-              day={day}
-              errors={fieldErrors}
-              onChange={updateDay}
-              onDelete={deleteDay}
-            />
-          ))}
-        </div>
-      </div>
-
-      <div className="flex items-center gap-4">
-        <label className="flex items-center gap-2 text-sm text-me-charcoal">
-          <input
-            type="checkbox"
-            checked={form.isActive}
-            onChange={(e) => update('isActive', e.target.checked)}
-          />
-          在售
-        </label>
-        <label className="flex items-center gap-2 text-sm text-me-charcoal">
-          <input
-            type="checkbox"
-            checked={form.managesDepartures}
-            onChange={(e) => update('managesDepartures', e.target.checked)}
-          />
-          管理班期
-        </label>
-      </div>
-
-      {/* Sticks to the bottom of the screen: the form is long and 保存 must stay reachable. */}
-      <div className="sticky bottom-0 z-10 -mx-2 flex flex-wrap items-center gap-3 border-t border-black/10 bg-white/90 px-2 py-3 backdrop-blur">
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving}
-          className={`rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-60 ${BRAND_BUTTON_CLASS}`}
-        >
-          {saving ? '正在保存…' : '保存'}
-        </button>
-        <button
-          type="button"
-          onClick={handleCancel}
-          className="rounded-lg border border-black/10 px-4 py-2 text-sm font-semibold text-me-charcoal"
-        >
-          取消
-        </button>
-        {errorCount > 0 ? (
-          <p role="alert" className="min-w-0 text-sm font-semibold" style={{ color: DANGER }}>
-            {errorSummaryText(errorCount)}
-          </p>
-        ) : status ? (
-          <p className="min-w-0 text-sm font-semibold" style={{ color: statusColor }}>
-            {status}
-          </p>
-        ) : null}
-      </div>
+    <div ref={rootRef} className="space-y-3">
+      <ContentGroups {...groups} />
+      {canEditSite ? <SiteGroups {...groups} /> : <SiteFieldsNote />}
+      <SaveBar
+        saving={saver.saving}
+        errorCount={Object.keys(saver.fieldErrors).length}
+        status={saver.status}
+        statusColor={saver.statusColor}
+        onSave={handleSave}
+        onCancel={handleCancel}
+      />
     </div>
   )
 }

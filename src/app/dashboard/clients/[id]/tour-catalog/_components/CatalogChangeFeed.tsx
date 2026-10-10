@@ -135,7 +135,7 @@ function ChangeRow({ change }: { change: CatalogChangeView }) {
       {typeof change.tourName === 'string' && change.tourName !== '' ? (
         <span className="font-semibold text-me-charcoal">{change.tourName}</span>
       ) : null}
-      <span className="min-w-0 break-words text-me-charcoal">{change.summary}</span>
+      <span className="min-w-0 break-all text-me-charcoal">{change.summary}</span>
     </li>
   )
 }

@@ -286,6 +286,7 @@ function ManagePanels(props: {
             clientId={clientId}
             settings={snapshot.settings}
             permissions={permissions}
+            imageHostSuggestions={snapshot.imageHostSuggestions}
             onSaved={onChanged}
           />
         </TabPanel>
@@ -578,8 +579,14 @@ export function CatalogWorkspace(props: {
   const state = useWorkspaceState(canPublish)
   const { request, setSubmitted } = usePublishRequest(snapshot, publish.preview?.publishedVersion)
   const ui = useMemo(
-    () => ({ channelsConnected: snapshot.settings.channelsConnected === true, canPublish }),
-    [snapshot.settings.channelsConnected, canPublish],
+    () => ({
+      channelsConnected: snapshot.settings.channelsConnected === true,
+      canPublish,
+      canEditSite: snapshot.permissions.edit_site === true,
+      siteDomain: snapshot.domain,
+      imagePool: snapshot.imagePool ?? [],
+    }),
+    [snapshot.settings.channelsConnected, canPublish, snapshot.permissions.edit_site, snapshot.domain, snapshot.imagePool],
   )
 
   return (

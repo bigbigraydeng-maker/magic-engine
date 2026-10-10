@@ -251,12 +251,11 @@ describe('TourEditor', () => {
     expect(String(confirmMock.mock.calls[0][0])).toMatch(/网站和广告都不再推|继续对外显示/)
   })
 
-  it('shows the 仅内部参考 tag on the highlights textarea', () => {
+  it('no longer labels the summary and highlights as internal-only (they are website fields now)', () => {
     render(
       <TourEditor clientId="c1" tour={makeTour()} onSaved={vi.fn()} onCancel={vi.fn()} />,
     )
-    const tags = screen.getAllByText('仅内部参考，网站暂不读取')
-    expect(tags.length).toBeGreaterThanOrEqual(1)
+    expect(screen.queryByText(/仅内部参考/)).toBeNull()
   })
 
   it('shows the title hint under 对外标题', () => {

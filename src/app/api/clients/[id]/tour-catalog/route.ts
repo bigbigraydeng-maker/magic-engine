@@ -9,6 +9,7 @@ import {
 } from '@/lib/tour-catalog/store-access'
 import { makeActorLabeler, trimDepartureForViewer } from '@/lib/tour-catalog/changes-view'
 import { normalizeDomain } from '@/lib/tour-catalog/seed'
+import { collectImagePool, imageHostSuggestions } from '@/lib/tour-catalog/image-rules'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { CatalogAccessEnvelope, PublishRequestView } from '@/lib/tour-catalog/catalog-contract'
 
@@ -47,11 +48,12 @@ export async function GET(
     const snapshot = await loadDraftCatalog(supabaseAdmin, clientId)
     const batches = permissions.import ? await listRecentBatches(supabaseAdmin, clientId, 20) : []
     const storedDomain = await getClientDomain(supabaseAdmin, clientId)
+    const settings = await getSettings(supabaseAdmin, clientId)
     const envelope: CatalogAccessEnvelope = {
       clientName: await getClientName(supabaseAdmin, clientId),
       viewer,
       permissions,
-      settings: await getSettings(supabaseAdmin, clientId),
+      settings,
       pendingPublishRequest: await pendingRequestFor(clientId, viewer.role, viewer.email),
     }
     const departures = snapshot.departures.map((departure) => trimDepartureForViewer(viewer.role, departure))
@@ -61,6 +63,11 @@ export async function GET(
       aliases: permissions.aliases ? snapshot.aliases : [],
       batches,
       domain: storedDomain === null ? null : normalizeDomain(storedDomain),
+      // Every image address the draft already uses: client editors may only pick from these.
+      imagePool: collectImagePool(snapshot.tours),
+      ...(permissions.manage_settings
+        ? { imageHostSuggestions: imageHostSuggestions(snapshot.tours, settings.imageHosts, storedDomain) }
+        : {}),
       ...envelope,
     })
   } catch (error) {

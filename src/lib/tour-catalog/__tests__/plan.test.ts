@@ -9,6 +9,7 @@ import type {
   CatalogTour,
   DepartureStatus,
 } from '../types'
+import { EMPTY_TOUR_CONTENT } from './content-fixture'
 
 function makeTour(overrides: Partial<CatalogTour> & { id: string; name: string }): CatalogTour {
   return {
@@ -30,6 +31,7 @@ function makeTour(overrides: Partial<CatalogTour> & { id: string; name: string }
     isActive: true,
     managesDepartures: true,
     sortOrder: 0,
+    ...EMPTY_TOUR_CONTENT,
     updatedAt: '2026-01-01T00:00:00Z',
     ...overrides,
   }

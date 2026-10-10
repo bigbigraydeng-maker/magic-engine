@@ -31,6 +31,7 @@ type State =
 const VIEW_ONLY: CatalogPermissions = {
   view: true,
   edit: false,
+  edit_site: false,
   assistant: false,
   request_publish: false,
   import: false,
@@ -46,6 +47,7 @@ const NEUTRAL_SETTINGS: CatalogSettings = {
   brandPrimary: null,
   brandSecondary: null,
   channelsConnected: false,
+  imageHosts: [],
 }
 
 /** Fill in whatever the answer left out with the most restrictive value, so nothing renders half-way. */
@@ -61,6 +63,8 @@ function normaliseSnapshot(raw: Partial<CatalogSnapshotResponse>): CatalogSnapsh
     permissions: { ...VIEW_ONLY, ...(raw.permissions ?? {}) },
     settings: { ...NEUTRAL_SETTINGS, ...(raw.settings ?? {}) },
     pendingPublishRequest: raw.pendingPublishRequest ?? null,
+    imagePool: Array.isArray(raw.imagePool) ? raw.imagePool : [],
+    imageHostSuggestions: raw.imageHostSuggestions,
   }
 }
 

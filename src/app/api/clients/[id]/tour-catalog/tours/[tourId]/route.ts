@@ -3,6 +3,8 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requireCatalogAccess } from '@/lib/tour-catalog/access'
 import { validateTourPatch, tourPatchToDb } from '@/lib/tour-catalog/edit-validation'
 import { updateTour } from '@/lib/tour-catalog/store-edit'
+import { loadTourPatchContext } from '@/lib/tour-catalog/patch-context'
+import type { TourPatchContext } from '@/lib/tour-catalog/content-validation'
 import { asPlainObject, invalidIdResponse, isUuid, readJsonBody } from '@/lib/tour-catalog/http'
 import type { TourSavedResponse } from '@/lib/tour-catalog/api-contract'
 
@@ -15,6 +17,22 @@ interface RouteContext {
 /** When the request comes from the assistant (`?via=assistant`), tag the actor accordingly. */
 function actorFor(req: NextRequest, actor: string): string {
   return new URL(req.url).searchParams.get('via') === 'assistant' ? `${actor} (AI 助手)` : actor
+}
+
+type LoadedContext = { ok: true; context: TourPatchContext } | { ok: false; response: NextResponse }
+
+/** Fails closed: no context, no validation, no save. */
+async function loadContext(clientId: string, tourId: string, canEditSite: boolean): Promise<LoadedContext> {
+  try {
+    const context = await loadTourPatchContext(supabaseAdmin, clientId, tourId, canEditSite)
+    if (context === null) {
+      return { ok: false, response: NextResponse.json({ error: 'not_found' }, { status: 404 }) }
+    }
+    return { ok: true, context }
+  } catch (error) {
+    console.error('PATCH tour: context load failed', error)
+    return { ok: false, response: NextResponse.json({ error: 'save_failed' }, { status: 500 }) }
+  }
 }
 
 export async function PATCH(req: NextRequest, { params }: RouteContext) {
@@ -34,8 +52,15 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: 'expected_updated_at_required' }, { status: 400 })
   }
 
-  const validated = validateTourPatch(body.patch)
+  // Who is saving decides which fields and which image addresses are allowed (design §6.11.1 item 6).
+  const loaded = await loadContext(clientId, tourId, access.permissions.edit_site)
+  if (!loaded.ok) return loaded.response
+
+  const validated = validateTourPatch(body.patch, loaded.context)
   if (!validated.ok) {
+    if (validated.forbidden === true) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
     return NextResponse.json(
       { error: 'invalid_fields', fields: validated.errors },
       { status: 400 },

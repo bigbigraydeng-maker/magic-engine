@@ -8,6 +8,7 @@ import type { CatalogPermissions } from '@/lib/tour-catalog/catalog-contract'
 export const ADMIN_PERMISSIONS: CatalogPermissions = {
   view: true,
   edit: true,
+  edit_site: true,
   assistant: true,
   request_publish: true,
   import: true,
@@ -21,6 +22,7 @@ export const ADMIN_PERMISSIONS: CatalogPermissions = {
 export const EDITOR_PERMISSIONS: CatalogPermissions = {
   view: true,
   edit: true,
+  edit_site: false,
   assistant: true,
   request_publish: true,
   import: false,

@@ -12,11 +12,31 @@ import type { CatalogItineraryDay, DepartureStatus } from './types'
 import { DEPARTURE_STATUSES } from './types'
 import { MAX_PRICE_TEXT_LENGTH, priceTextSafetyIssue, validatePriceText } from './price'
 import { isValidIsoDate } from './dates'
+import { hasForbiddenChars, type FieldError } from './text-rules'
+import { readOperatorLogo } from './content-fields'
+import {
+  CONTENT_PATCH_KEYS,
+  contentPatchToDb,
+  operatorLogosChanged,
+  validateContentFields,
+  validateDayExtras,
+  type TourContentPatch,
+  type TourPatchContext,
+} from './content-validation'
 
-export type FieldError = { field: string; code: string }
+export { hasForbiddenChars } from './text-rules'
+export type { FieldError } from './text-rules'
+export type { TourPatchContext } from './content-validation'
 export type Result<T> = { ok: true; value: T } | { ok: false; errors: FieldError[] }
+/**
+ * `forbidden: true` = the caller may not send this at all (a site-only field, a new image address
+ * or an operator-logo change from someone without edit_site). The route answers 403.
+ */
+export type TourPatchResult =
+  | { ok: true; value: TourPatch }
+  | { ok: false; errors: FieldError[]; forbidden?: true }
 
-export interface TourPatch {
+export interface TourPatch extends TourContentPatch {
   name?: string
   title?: string | null
   shortDescription?: string | null
@@ -48,6 +68,7 @@ const TOUR_PATCH_KEYS: readonly string[] = [
   'maxGroupSize',
   'isActive',
   'managesDepartures',
+  ...CONTENT_PATCH_KEYS,
 ]
 
 const MAX_ITEMS = 50
@@ -55,19 +76,6 @@ const MAX_ITINERARY_ITEMS = 60
 const MAX_ITEM_LENGTH = 500
 const MAX_MEALS = 8
 const MAX_MEAL_LENGTH = 60 // existing itineraries carry meals like "Dinner (Tibetan Dinner with Cultural Show)" (42 chars)
-
-/**
- * Characters no editable text may contain: C0 control characters and DEL, zero-width characters
- * (U+200B–U+200F), bidirectional overrides (U+202A–U+202E), invisible formatting (U+2060–U+2069)
- * and the byte-order mark. They are invisible in the admin page but change what customers see.
- */
-const FORBIDDEN_CHARS_RE = /[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/
-/** Same set, except that multi-line fields may contain line breaks and tabs. */
-const FORBIDDEN_CHARS_MULTILINE_RE = /[\u0000-\u0008\u000b-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/
-
-export function hasForbiddenChars(text: string, multiline = false): boolean {
-  return (multiline ? FORBIDDEN_CHARS_MULTILINE_RE : FORBIDDEN_CHARS_RE).test(text)
-}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -237,6 +245,7 @@ function validateItineraryDay(
   value: unknown,
   index: number,
   errors: FieldError[],
+  ctx: TourPatchContext,
 ): CatalogItineraryDay | undefined {
   const prefix = `itinerary[${index}]`
   if (!isPlainObject(value)) {
@@ -257,6 +266,8 @@ function validateItineraryDay(
   if (value.meals !== undefined) {
     meals = validateStringArray(value.meals, `${prefix}.meals`, errors, MAX_MEALS, MAX_MEAL_LENGTH)
   }
+  // Only the keys we know are kept; these three are part of "known" (design §6.11.1 item 2).
+  const extras = validateDayExtras(value, prefix, ctx, errors)
 
   if (
     typeof day !== 'number' ||
@@ -270,13 +281,14 @@ function validateItineraryDay(
 
   const result: CatalogItineraryDay = { day, title, description }
   if (meals !== undefined) result.meals = meals
-  return result
+  return { ...result, ...extras }
 }
 
 /** Validate the itinerary array: per-item checks, duplicate days, sorted output. */
 function validateItinerary(
   value: unknown,
   errors: FieldError[],
+  ctx: TourPatchContext,
 ): CatalogItineraryDay[] | undefined {
   if (!Array.isArray(value)) {
     errors.push({ field: 'itinerary', code: 'invalid_type' })
@@ -290,7 +302,7 @@ function validateItinerary(
   const days: CatalogItineraryDay[] = []
   let failed = false
   value.forEach((item, index) => {
-    const parsed = validateItineraryDay(item, index, errors)
+    const parsed = validateItineraryDay(item, index, errors, ctx)
     if (parsed === undefined) {
       failed = true
     } else {
@@ -355,21 +367,8 @@ function collectUnknownKeys(
   }
 }
 
-export function validateTourPatch(input: unknown): Result<TourPatch> {
-  if (!isPlainObject(input)) {
-    return { ok: false, errors: [{ field: '*', code: 'invalid_body' }] }
-  }
-
-  const errors: FieldError[] = []
-  collectUnknownKeys(input, errors)
-
-  const recognised = Object.keys(input).filter((k) => TOUR_PATCH_KEYS.includes(k))
-  if (recognised.length === 0) {
-    return { ok: false, errors: [...errors, { field: '*', code: 'empty_patch' }] }
-  }
-
-  const patch: TourPatch = {}
-
+/** The fields that existed before the content columns; every key is optional. */
+function validateTextFields(input: Record<string, unknown>, errors: FieldError[], patch: TourPatch): void {
   if ('name' in input) {
     const v = validateRequiredString(input.name, 'name', 200, errors)
     if (v !== undefined) patch.name = v
@@ -390,26 +389,6 @@ export function validateTourPatch(input: unknown): Result<TourPatch> {
     const v = validateNullablePrice(input.displayPriceText, 'displayPriceText', errors)
     if (v !== undefined) patch.displayPriceText = v
   }
-  if ('highlights' in input) {
-    const v = validateStringArray(input.highlights, 'highlights', errors)
-    if (v !== undefined) patch.highlights = v
-  }
-  if ('itinerary' in input) {
-    const v = validateItinerary(input.itinerary, errors)
-    if (v !== undefined) patch.itinerary = v
-  }
-  if ('inclusions' in input) {
-    const v = validateStringArray(input.inclusions, 'inclusions', errors)
-    if (v !== undefined) patch.inclusions = v
-  }
-  if ('exclusions' in input) {
-    const v = validateStringArray(input.exclusions, 'exclusions', errors)
-    if (v !== undefined) patch.exclusions = v
-  }
-  if ('tourCities' in input) {
-    const v = validateStringArray(input.tourCities, 'tourCities', errors)
-    if (v !== undefined) patch.tourCities = v
-  }
   if ('singleSupplement' in input) {
     const v = validateSingleSupplement(input.singleSupplement, errors)
     if (v !== undefined) patch.singleSupplement = v
@@ -426,6 +405,85 @@ export function validateTourPatch(input: unknown): Result<TourPatch> {
     const v = validateBoolean(input.managesDepartures, 'managesDepartures', errors)
     if (v !== undefined) patch.managesDepartures = v
   }
+}
+
+function validateListFields(
+  input: Record<string, unknown>,
+  errors: FieldError[],
+  patch: TourPatch,
+  ctx: TourPatchContext,
+): void {
+  if ('highlights' in input) {
+    const v = validateStringArray(input.highlights, 'highlights', errors)
+    if (v !== undefined) patch.highlights = v
+  }
+  if ('itinerary' in input) {
+    const v = validateItinerary(input.itinerary, errors, ctx)
+    if (v !== undefined) patch.itinerary = v
+  }
+  if ('inclusions' in input) {
+    const v = validateStringArray(input.inclusions, 'inclusions', errors)
+    if (v !== undefined) patch.inclusions = v
+  }
+  if ('exclusions' in input) {
+    const v = validateStringArray(input.exclusions, 'exclusions', errors)
+    if (v !== undefined) patch.exclusions = v
+  }
+  if ('tourCities' in input) {
+    const v = validateStringArray(input.tourCities, 'tourCities', errors)
+    if (v !== undefined) patch.tourCities = v
+  }
+}
+
+/**
+ * Operator logos travel inside the itinerary, so "may not change logos" has to be read off the
+ * RAW itinerary (before validation can fail on something else): any day whose logo differs from
+ * the stored one — added, removed, edited, unreadable, or a logo-carrying day dropped — counts.
+ */
+function itineraryTouchesLogos(rawItinerary: unknown, existing: readonly CatalogItineraryDay[]): boolean {
+  if (!Array.isArray(rawItinerary)) return false
+  const next: CatalogItineraryDay[] = []
+  for (const item of rawItinerary) {
+    if (!isPlainObject(item) || typeof item.day !== 'number') continue
+    const day: CatalogItineraryDay = { day: item.day, title: '', description: '' }
+    if (item.operatorLogo !== undefined && item.operatorLogo !== null) {
+      const logo = readOperatorLogo(item.operatorLogo)
+      if (logo === undefined) return true
+      day.operatorLogo = logo
+    }
+    next.push(day)
+  }
+  return operatorLogosChanged(existing, next)
+}
+
+const FORBIDDEN_RESULT: TourPatchResult = { ok: false, forbidden: true, errors: [{ field: '*', code: 'forbidden' }] }
+
+/**
+ * `ctx` says who is saving and what this client's catalog already contains; it decides the two
+ * permission tiers and the image rules (design §6.11.1 items 6–8). There is no default: a caller
+ * that cannot say who is saving must not be able to validate a patch.
+ */
+export function validateTourPatch(input: unknown, ctx: TourPatchContext): TourPatchResult {
+  if (!isPlainObject(input)) {
+    return { ok: false, errors: [{ field: '*', code: 'invalid_body' }] }
+  }
+
+  const errors: FieldError[] = []
+  collectUnknownKeys(input, errors)
+
+  const recognised = Object.keys(input).filter((k) => TOUR_PATCH_KEYS.includes(k))
+  if (recognised.length === 0) {
+    return { ok: false, errors: [...errors, { field: '*', code: 'empty_patch' }] }
+  }
+
+  const patch: TourPatch = {}
+  validateTextFields(input, errors, patch)
+  validateListFields(input, errors, patch, ctx)
+  const content = validateContentFields(input, ctx, errors)
+  Object.assign(patch, content.patch)
+
+  const logoTouched = !ctx.canEditSite && 'itinerary' in input && itineraryTouchesLogos(input.itinerary, ctx.existingTour.itinerary)
+  if (content.forbidden || logoTouched) return FORBIDDEN_RESULT
 
   if (errors.length > 0) return { ok: false, errors }
   return { ok: true, value: patch }
@@ -447,7 +505,7 @@ export function tourPatchToDb(patch: TourPatch): Record<string, unknown> {
   if ('maxGroupSize' in patch) out.max_group_size = patch.maxGroupSize
   if ('isActive' in patch) out.is_active = patch.isActive
   if ('managesDepartures' in patch) out.manages_departures = patch.managesDepartures
-  return out
+  return { ...out, ...contentPatchToDb(patch) }
 }
 
 export interface NewDeparture {

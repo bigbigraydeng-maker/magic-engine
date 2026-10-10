@@ -263,7 +263,23 @@ const TOUR_COLUMNS: Record<string, string> = {
   exclusions: 'exclusions',
   tourCities: 'tour_cities',
   maxGroupSize: 'max_group_size',
+  heroImage: 'hero_image',
+  soldOut: 'sold_out',
+  singleSupplementNote: 'single_supplement_note',
+  rating: 'rating',
+  reviewCount: 'review_count',
+  reviewSummary: 'review_summary',
+  metaTitle: 'meta_title',
+  metaDescription: 'meta_description',
+  tags: 'tags',
+  quickAnswer: 'quick_answer',
 }
+
+/** List columns summarised by size only: column → [label, unit]. */
+const COUNTED_COLUMNS: ReadonlyArray<[string, string, string]> = [
+  ['gallery', '图集', '张'],
+  ['faqs', '常见问题', '条'],
+]
 
 const EMPTY_LABEL = '（空）'
 const MAX_RENDERED_LENGTH = 60
@@ -312,6 +328,13 @@ function summariseTourUpdate(
   const newItinerary = after === null ? undefined : after.itinerary
   if (changed(oldItinerary, newItinerary)) {
     parts.push(`行程安排：已修改（${arrayLength(oldItinerary)} 天 → ${arrayLength(newItinerary)} 天）`)
+  }
+  for (const [column, label, unit] of COUNTED_COLUMNS) {
+    const oldList = before === null ? undefined : before[column]
+    const newList = after === null ? undefined : after[column]
+    if (changed(oldList, newList)) {
+      parts.push(`${label}：已修改（${arrayLength(oldList)} ${unit} → ${arrayLength(newList)} ${unit}）`)
+    }
   }
   if (parts.length === 0) {
     return '已保存（内容没有变化）'

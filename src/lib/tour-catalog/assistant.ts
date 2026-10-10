@@ -10,7 +10,9 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { getAnthropicClientDirect, MODEL_SONNET } from '@/lib/anthropic/client'
 import type { CatalogSnapshot } from './store'
-import type { CatalogTour } from './types'
+import type { CatalogItineraryDay, CatalogTour } from './types'
+import { CONTENT_PATCH_KEYS, type TourPatchContext } from './content-validation'
+import { collectImagePool } from './image-rules'
 import {
   validateDeparturePatch,
   validateNewDeparture,
@@ -120,7 +122,8 @@ export function buildCatalogIndex(snapshot: CatalogSnapshot): string {
 export function tourDetail(snapshot: CatalogSnapshot, tourId: string): string | null {
   const tour = snapshot.tours.find((t) => t.id === tourId)
   if (!tour) return null
-  const { clientId: _clientId, ...rest } = tour
+  // The gallery and the website pass-through are left out: the assistant cannot change them and they only add bulk.
+  const { clientId: _clientId, gallery: _gallery, siteExtras: _siteExtras, ...rest } = tour
   return JSON.stringify(rest)
 }
 
@@ -148,6 +151,8 @@ const TOUR_PATCH_ALIASES: Readonly<Record<string, string>> = {
   manages_departures: 'managesDepartures',
   tour_cities: 'tourCities',
   cities: 'tourCities',
+  single_supplement_note: 'singleSupplementNote',
+  sold_out: 'soldOut',
 }
 
 const DEPARTURE_PATCH_ALIASES: Readonly<Record<string, string>> = {
@@ -190,6 +195,70 @@ export function normaliseNewDepartureKeys(
   raw: Record<string, unknown>,
 ): Record<string, unknown> {
   return applyAliases(raw, NEW_DEPARTURE_ALIASES)
+}
+
+// ---------------------------------------------------------------------------
+// What the assistant may touch on a tour (pure)
+// ---------------------------------------------------------------------------
+
+/**
+ * Narrower than the editor (design §6.11.1 item 6): of the content fields the assistant may only
+ * change the single-supplement note and the sold-out switch — no images, and none of the
+ * admin-only site fields (ratings, SEO, tags, FAQs, quick answer, operator logos).
+ */
+export const ASSISTANT_CONTENT_KEYS: readonly string[] = ['singleSupplementNote', 'soldOut']
+
+/** Content keys the model sent although the assistant may not change them. */
+function blockedAssistantKeys(patch: Record<string, unknown>): string[] {
+  return Object.keys(patch).filter((key) => CONTENT_PATCH_KEYS.includes(key) && !ASSISTANT_CONTENT_KEYS.includes(key))
+}
+
+function mergeDayExtras(proposed: Record<string, unknown>, current: CatalogItineraryDay | undefined): Record<string, unknown> {
+  const { operatorLogo: _ignored, ...day } = proposed
+  if (!('accommodation' in day) && current?.accommodation !== undefined) day.accommodation = current.accommodation
+  if (!('festiveLabel' in day) && current?.festiveLabel !== undefined) day.festiveLabel = current.festiveLabel
+  // The logo is never the model's to set: whatever it sent is dropped and the stored one is kept.
+  return current?.operatorLogo === undefined ? day : { ...day, operatorLogo: current.operatorLogo }
+}
+
+/**
+ * The model returns a whole itinerary but usually leaves out the per-day extras. Put them back by
+ * day number before validating, or every assistant edit of an itinerary would wipe the
+ * accommodation, festive labels and operator logos (design §6.11.1 item 2).
+ */
+export function mergeItineraryExtras(current: readonly CatalogItineraryDay[], proposed: unknown): unknown {
+  if (!Array.isArray(proposed)) return proposed
+  const byDay = new Map(current.map((day) => [day.day, day]))
+  return proposed.map((item: unknown) =>
+    isPlainObject(item) ? mergeDayExtras(item, typeof item.day === 'number' ? byDay.get(item.day) : undefined) : item,
+  )
+}
+
+/** The assistant validates as a non-admin; the tour's own images are "already in the catalog". */
+function assistantContext(tour: CatalogTour): TourPatchContext {
+  return {
+    canEditSite: false,
+    imagePool: new Set(collectImagePool([tour])),
+    imageHosts: [],
+    clientDomain: null,
+    existingTour: tour,
+  }
+}
+
+function checkTourPatch(tour: CatalogTour, rawPatch: unknown): { patch: TourPatch; check: ProposalCheck } {
+  if (!isPlainObject(rawPatch)) {
+    return { patch: {}, check: { ok: false, errors: [{ field: '*', code: 'invalid_body' }] } }
+  }
+  const input = normalisePatchKeys(rawPatch)
+  const blocked = blockedAssistantKeys(input)
+  if (blocked.length > 0) {
+    return { patch: {}, check: { ok: false, errors: blocked.map((field) => ({ field, code: 'assistant_field_not_allowed' })) } }
+  }
+  if ('itinerary' in input) input.itinerary = mergeItineraryExtras(tour.itinerary, input.itinerary)
+  const result = validateTourPatch(input, assistantContext(tour))
+  if (!result.ok) return { patch: {}, check: { ok: false, errors: result.errors } }
+  const warnings = itineraryWarnings(tour.itinerary, result.value.itinerary)
+  return { patch: result.value, check: warnings.length > 0 ? { ok: true, warnings } : { ok: true } }
 }
 
 // ---------------------------------------------------------------------------
@@ -266,12 +335,8 @@ export function checkProposal(
     if (!tour) {
       return { proposal, check: fail('tourId', 'tour_not_found') }
     }
-    const patchInput = isPlainObject(raw.patch) ? normalisePatchKeys(raw.patch) : raw.patch
-    const result = validateTourPatch(patchInput)
-    if (!result.ok) return { proposal, check: { ok: false, errors: result.errors } }
-    const warnings = itineraryWarnings(tour.itinerary, result.value.itinerary)
-    const check: ProposalCheck = warnings.length > 0 ? { ok: true, warnings } : { ok: true }
-    return { proposal: { ...proposal, patch: result.value }, check }
+    const checked = checkTourPatch(tour, raw.patch)
+    return { proposal: { ...proposal, patch: checked.patch }, check: checked.check }
   }
 
   if (kind === 'update_departure') {
@@ -349,7 +414,9 @@ const PROPOSE_CHANGES_TOOL: Anthropic.Tool = {
             patch: {
               type: 'object',
               description:
-                'update_tour 允许的键：name, title, shortDescription, durationText, displayPriceText, highlights, itinerary, inclusions, exclusions, tourCities, singleSupplement, maxGroupSize, isActive, managesDepartures。' +
+                'update_tour 允许的键：name, title, shortDescription, durationText, displayPriceText, highlights, itinerary, inclusions, exclusions, tourCities, singleSupplement, singleSupplementNote, maxGroupSize, isActive, soldOut, managesDepartures。' +
+                'itinerary 的每一天可以带 accommodation（住宿）和 festiveLabel（节日标记）；没改就不用写，系统会保留原值。' +
+                '不能改的键（写了这条改动会被拒）：heroImage, gallery, metaTitle, metaDescription, tags, faqs, rating, reviewCount, reviewSummary, quickAnswer。' +
                 'update_departure 允许的键：returnOn, status, priceTextOverride。' +
                 '只放需要改的键，不要用别名（例如价格必须写 displayPriceText，不要写 price）。',
             },
@@ -378,18 +445,19 @@ const SYSTEM_PROMPT = `你是旅行社后台的行程目录 AI 助手。管理�
 你**不能**做的事：
 - 新建团（只能改已有的团）
 - 改团的 slug / destination / tier
+- 改图片（主图、图集、航司标志）、搜索标题与描述、标签、常见问题、评分与评价、快速回答。这些只能由管理员在页面上手动改；被要求改时用一句话说明，不要调用 propose_changes。
 - 改班期的出发日期（departOn）。如果出发日期填错了，正确做法是：把旧班期 status 改成 "cancelled"，再 create_departure 建一个新的。
 {publish_rule}
 - 团级开关只叫「在售 / 停售」（isActive），不要把它说成「上架 / 下架」——「上架」只指发布动作。
 
 ## 改动规则
 
-- 改逐日行程（itinerary）时，必须返回**完整的** itinerary 数组，day 从 1 连续编号到 n，不能只给改动的那一天。
+- 改逐日行程（itinerary）时，必须返回**完整的** itinerary 数组，day 从 1 连续编号到 n，不能只给改动的那一天。每天的住宿（accommodation）和节日标记（festiveLabel）没改就不用写，系统会按天号保留原值；要改就写上新值。
 - 价格字段（displayPriceText / priceTextOverride）必须写成 "From NZD $4,999 per person" 这种形式，或者 "TBC"。
 - 日期一律 YYYY-MM-DD。
 - 只给需要改的字段，其余不要出现。
 - **一个独立的改动 = 一条 proposal**。例如「改价格」和「改第 5 天标题」是两件事，必须拆成两条 proposal，不要合并成一条。
-- 字段名必须用规范名：价格用 displayPriceText（不要用 price），时长用 durationText，单房差用 singleSupplement，最大团人数用 maxGroupSize，在售 / 停售用 isActive（true = 在售，false = 停售），是否管理班期用 managesDepartures，城市用 tourCities。
+- 字段名必须用规范名：价格用 displayPriceText（不要用 price），时长用 durationText，单房差用 singleSupplement，最大团人数用 maxGroupSize，在售 / 停售用 isActive（true = 在售，false = 停售），整团售罄用 soldOut（true = 已售罄），单房差说明用 singleSupplementNote，是否管理班期用 managesDepartures，城市用 tourCities。
 
 ## 回复措辞
 

@@ -1,12 +1,25 @@
 /** Response shapes of /api/clients/[id]/tour-catalog/* as consumed by the admin page. */
 
-import type { CatalogAccessEnvelope } from '@/lib/tour-catalog/catalog-contract'
+import type {
+  CatalogAccessEnvelope,
+  CatalogFaq,
+  ImageHostSuggestion,
+} from '@/lib/tour-catalog/catalog-contract'
+
+/** Airline / operator mark on one itinerary day. Not editable here: sent back unchanged on save. */
+export interface CatalogOperatorLogoView {
+  src: string
+  alt: string
+}
 
 export interface CatalogItineraryDayView {
   day: number
   title: string
   description: string
   meals?: string[]
+  accommodation?: string
+  festiveLabel?: string
+  operatorLogo?: CatalogOperatorLogoView
 }
 
 export interface CatalogTourView {
@@ -29,6 +42,19 @@ export interface CatalogTourView {
   tourCities?: string[]
   singleSupplement?: string | null
   maxGroupSize?: number | null
+  // Website tour-page fields (optional: older fixtures and older answers do not carry them).
+  heroImage?: string | null
+  gallery?: string[]
+  metaTitle?: string | null
+  metaDescription?: string | null
+  tags?: string[]
+  faqs?: CatalogFaq[]
+  soldOut?: boolean
+  singleSupplementNote?: string | null
+  rating?: number | null
+  reviewCount?: number | null
+  reviewSummary?: string | null
+  quickAnswer?: string | null
   /** Optimistic-concurrency token; send back unchanged when saving. */
   updatedAt?: string
 }
@@ -61,6 +87,10 @@ export interface CatalogSnapshotResponse extends CatalogAccessEnvelope {
   batches?: CatalogBatchView[]
   /** The client's own website domain, used to read its existing tours. */
   domain: string | null
+  /** Every image address already used somewhere in this client's catalog. */
+  imagePool?: string[]
+  /** Admins only: image hosts in use that are not on the allow-list yet. */
+  imageHostSuggestions?: ImageHostSuggestion[]
 }
 
 export interface PreviewSummaryView {

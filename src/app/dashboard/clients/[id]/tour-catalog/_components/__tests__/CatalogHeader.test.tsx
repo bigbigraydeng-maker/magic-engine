@@ -14,6 +14,7 @@ function makeSettings(overrides: Partial<CatalogSettings> = {}): CatalogSettings
     brandPrimary: null,
     brandSecondary: null,
     channelsConnected: false,
+    imageHosts: [],
     ...overrides,
   }
 }

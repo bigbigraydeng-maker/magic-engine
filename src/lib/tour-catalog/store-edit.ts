@@ -29,6 +29,7 @@ export function mapEditError(message: string): EditResult<never> {
   if (
     message.startsWith('field_not_editable') ||
     message.startsWith('invalid_null') ||
+    message.startsWith('invalid_value') ||
     message === 'depart_on_not_editable' ||
     message === 'depart_on_required' ||
     message === 'invalid_dates' ||

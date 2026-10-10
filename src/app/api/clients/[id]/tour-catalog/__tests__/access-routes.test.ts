@@ -69,10 +69,19 @@ const DEFAULT_SETTINGS = {
   brandPrimary: null,
   brandSecondary: null,
   channelsConnected: false,
+  imageHosts: [],
 }
 
 const SNAPSHOT = {
-  tours: [{ id: 't1', name: 'Golden China' }],
+  tours: [
+    {
+      id: 't1',
+      name: 'Golden China',
+      heroImage: 'https://img.example-cdn.com/hero.jpg',
+      gallery: ['/images/tours/a.jpg', 'https://img.example-cdn.com/hero.jpg', 'https://www.ctstours.co.nz/b.jpg'],
+      itinerary: [{ day: 1, title: 'Arrive', description: '', operatorLogo: { src: 'https://logos.example.org/air.png', alt: 'Air' } }],
+    },
+  ],
   departures: [
     {
       id: 'd1',
@@ -141,6 +150,35 @@ describe('GET catalog — trimmed by permission', () => {
     expect(body.permissions.publish).toBe(true)
     expect(body.settings).toEqual(DEFAULT_SETTINGS)
     expect(body.pendingPublishRequest).toBeNull()
+    // Every image address the draft uses, de-duplicated and sorted.
+    expect(body.imagePool).toEqual([
+      '/images/tours/a.jpg',
+      'https://img.example-cdn.com/hero.jpg',
+      'https://logos.example.org/air.png',
+      'https://www.ctstours.co.nz/b.jpg',
+    ])
+    // Hosts seen in those images that are neither on the allow-list nor the client's own domain.
+    expect(body.imageHostSuggestions).toEqual([
+      { host: 'img.example-cdn.com', count: 2 },
+      { host: 'logos.example.org', count: 1 },
+    ])
+  })
+
+  it('leaves hosts already on the allow-list out of the suggestions', async () => {
+    mockedGetSettings.mockResolvedValue({ ...DEFAULT_SETTINGS, imageHosts: ['img.example-cdn.com'] })
+    const res = await catalogGET(new NextRequest('http://localhost/api/clients/client-1/tour-catalog'), CONTEXT)
+    const body = await res.json()
+    expect(body.settings.imageHosts).toEqual(['img.example-cdn.com'])
+    expect(body.imageHostSuggestions).toEqual([{ host: 'logos.example.org', count: 1 }])
+  })
+
+  it('gives a client editor the image pool but never the host suggestions', async () => {
+    mockedRequireAccess.mockResolvedValue(editorAccess('staff@cts.example'))
+    const res = await catalogGET(new NextRequest('http://localhost/api/clients/client-1/tour-catalog'), CONTEXT)
+    const body = await res.json()
+    expect(body.imagePool).toHaveLength(4)
+    expect('imageHostSuggestions' in body).toBe(false)
+    expect(body.permissions.edit_site).toBe(false)
   })
 
   it('trims internal facts, aliases and batches for a client editor', async () => {
@@ -428,6 +466,7 @@ describe('settings', () => {
     brandPrimary: '#B61E2E',
     brandSecondary: '#D6A756',
     channelsConnected: false,
+    imageHosts: [],
   }
 
   it('saves a valid body', async () => {
@@ -450,6 +489,7 @@ describe('settings', () => {
         brandPrimary: '#B61E2E',
         brandSecondary: '#D6A756',
         channelsConnected: false,
+        imageHosts: [],
       },
       'admin@example.com',
     )
@@ -503,6 +543,7 @@ describe('settings', () => {
       brandPrimary: null,
       brandSecondary: null,
       channelsConnected: true,
+      imageHosts: [],
     }
     mockedSaveSettings.mockResolvedValue(body)
     const res = await settingsPUT(

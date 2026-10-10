@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { screen, fireEvent, within } from '@testing-library/react'
+import { screen, fireEvent, within, render as renderPlain } from '@testing-library/react'
 import { renderConnected as render } from './render-connected'
 import { TourDetailPane } from '../TourDetailPane'
 import type { CatalogDepartureView, CatalogTourView } from '../types'
@@ -272,5 +272,89 @@ describe('TourDetailPane saved notice goes away once published', () => {
     const box = screen.getByTestId('unpublished-box')
     expect(box.textContent).toContain('已上架 ')
     expect(box.textContent).not.toMatch(/对外|客人/)
+  })
+})
+
+describe('TourDetailPane read-only summary', () => {
+  function paneWith(tour: CatalogTourView, siteDomain: string | null = 'example.test') {
+    return renderPlain(
+      <CatalogUiProvider value={{ channelsConnected: false, canPublish: false, siteDomain }}>
+        <TourDetailPane
+          clientId="c1"
+          tour={tour}
+          departures={DEPARTURES}
+          changes={[]}
+          onChanged={vi.fn()}
+          onDirtyChange={vi.fn()}
+          onBack={vi.fn()}
+          onOpenPublish={vi.fn()}
+        />
+      </CatalogUiProvider>,
+    )
+  }
+
+  const FULL: CatalogTourView = {
+    ...TOUR,
+    isActive: true,
+    managesDepartures: true,
+    heroImage: '/images/hero.jpg',
+    gallery: ['/images/a.jpg', '/images/b.jpg'],
+    durationText: '12 Days',
+    shortDescription: 'A loop around the reef',
+    highlights: ['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'H7'],
+  }
+
+  it('shows the hero thumbnail, days, price, intro, gallery count above the departures', () => {
+    paneWith(FULL)
+    const summary = screen.getByTestId('tour-summary')
+    const hero = within(summary).getByAltText('Atlantis Gold — Coral Loop 主图')
+    expect(hero).toHaveAttribute('src', 'https://example.test/images/hero.jpg')
+    expect(within(summary).getByTestId('summary-facts')).toHaveTextContent(
+      '12 Days · From NZD $5,299 per person · 图集 2 张',
+    )
+    expect(within(summary).getByText('A loop around the reef')).toBeInTheDocument()
+    // before the departures, not after
+    const departures = screen.getByTestId('departures-editor')
+    expect(summary.compareDocumentPosition(departures) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('folds highlights after the first five', () => {
+    paneWith(FULL)
+    const list = screen.getByTestId('summary-highlights')
+    expect(within(list).getAllByRole('listitem')).toHaveLength(5)
+    fireEvent.click(screen.getByRole('button', { name: '展开其余 2 条' }))
+    expect(within(list).getAllByRole('listitem')).toHaveLength(7)
+  })
+
+  it('says so when there is no hero image, and renders no image', () => {
+    const { container } = paneWith(TOUR)
+    expect(within(screen.getByTestId('tour-summary')).getByText('还没有主图')).toBeInTheDocument()
+    expect(container.querySelectorAll('img')).toHaveLength(0)
+  })
+
+  it('a site-path hero with no registered domain is a placeholder, never a guessed address', () => {
+    const { container } = paneWith(FULL, null)
+    expect(container.querySelectorAll('img')).toHaveLength(0)
+    expect(within(screen.getByTestId('tour-summary')).getByText('站内图片')).toBeInTheDocument()
+  })
+
+  it('marks a sold-out tour in red, and only then', () => {
+    paneWith({ ...FULL, soldOut: true })
+    const badge = screen.getByTestId('sold-out-badge')
+    expect(badge).toHaveTextContent('整团售罄')
+    expect(badge.className).toContain('text-[#C2453A]')
+  })
+
+  it('no sold-out mark on a tour that is not sold out', () => {
+    paneWith(FULL)
+    expect(screen.queryByTestId('sold-out-badge')).toBeNull()
+  })
+
+  it('the summary gives way to the editor while editing and comes back on cancel', () => {
+    paneWith(FULL)
+    fireEvent.click(screen.getByText('编辑这个团'))
+    expect(screen.queryByTestId('tour-summary')).toBeNull()
+    fireEvent.click(screen.getByText('mock-cancel'))
+    expect(screen.getByTestId('tour-summary')).toBeInTheDocument()
   })
 })

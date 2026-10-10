@@ -54,6 +54,7 @@ const CLIENT = 'client-1'
 const ALL_CAPABILITIES: CatalogCapability[] = [
   'view',
   'edit',
+  'edit_site',
   'assistant',
   'request_publish',
   'import',

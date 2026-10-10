@@ -1,16 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest, NextResponse } from 'next/server'
+import { patchContext } from '@/lib/tour-catalog/__tests__/content-fixture'
 import { adminAccess, editorAccess } from './access-fixtures'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 
-const { requireCatalogAccess, updateTour, saveDeparture } = vi.hoisted(() => ({
+const { requireCatalogAccess, updateTour, saveDeparture, loadTourPatchContext } = vi.hoisted(() => ({
   requireCatalogAccess: vi.fn(),
   updateTour: vi.fn(),
   saveDeparture: vi.fn(),
+  loadTourPatchContext: vi.fn(),
 }))
 vi.mock('@/lib/tour-catalog/access', () => ({ requireCatalogAccess }))
 vi.mock('@/lib/tour-catalog/store-edit', () => ({ updateTour, saveDeparture }))
+vi.mock('@/lib/tour-catalog/patch-context', () => ({ loadTourPatchContext }))
 
 import { PATCH as patchTour } from '../tours/[tourId]/route'
 import { POST as postDeparture } from '../tours/[tourId]/departures/route'
@@ -69,6 +72,7 @@ function expectNoMarkers(text: string): void {
 beforeEach(() => {
   vi.clearAllMocks()
   saveDeparture.mockResolvedValue({ ok: true, value: savedDeparture() })
+  loadTourPatchContext.mockResolvedValue(patchContext())
 })
 
 describe('departure save responses are trimmed by role (design §6.10.1 item 3)', () => {

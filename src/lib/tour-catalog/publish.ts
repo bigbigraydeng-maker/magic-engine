@@ -4,53 +4,27 @@
  */
 
 import { createHash } from 'node:crypto'
-import { asRecord, mapDepartureRow, mapTourRow, stableStringify } from './store'
-import { DEPARTURE_STATUSES, type CatalogDeparture, type CatalogItineraryDay, type CatalogTour, type DepartureStatus } from './types'
+import { mapDepartureRow, mapTourRow, stableStringify } from './store'
+import { DEPARTURE_STATUSES, type CatalogDeparture, type CatalogTour, type DepartureStatus } from './types'
+import {
+  TOUR_FIELD_SPECS,
+  fieldValuesEqual,
+  makeChange,
+  projectCatalog,
+  renderField,
+  type CatalogContent,
+  type CatalogProjection,
+  type ProjectedDeparture,
+  type ProjectedTour,
+} from './publish-projection'
+import { contentChanges, itineraryChanges } from './publish-content'
 import { STATUS_LABELS } from './departures-csv'
 import { toFirstPartyTours } from './output'
 import { isValidIsoDate } from './dates'
 import type { KeptStatusRow, PublishChange, PublishRisk, SellableCheck } from './publish-contract'
 
-export interface CatalogContent {
-  tours: CatalogTour[]
-  departures: CatalogDeparture[]
-}
-
-export interface ProjectedTour {
-  id: string
-  slug: string
-  destination: string
-  tier: string
-  name: string
-  title: string | null
-  shortDescription: string | null
-  durationText: string | null
-  displayPriceText: string | null
-  highlights: string[]
-  itinerary: CatalogItineraryDay[]
-  inclusions: string[]
-  exclusions: string[]
-  tourCities: string[]
-  singleSupplement: string | null
-  maxGroupSize: number | null
-  isActive: boolean
-  managesDepartures: boolean
-  sortOrder: number
-}
-
-export interface ProjectedDeparture {
-  id: string
-  tourId: string
-  departOn: string
-  returnOn: string | null
-  priceTextOverride: string | null
-  status: DepartureStatus
-}
-
-export interface CatalogProjection {
-  tours: ProjectedTour[]
-  departures: ProjectedDeparture[]
-}
+export { TOUR_FIELD_SPECS, projectCatalog, renderField } from './publish-projection'
+export type { CatalogContent, CatalogProjection, FieldSpec, ProjectedDeparture, ProjectedTour } from './publish-projection'
 
 export interface CatalogDiff {
   changes: PublishChange[]
@@ -139,193 +113,8 @@ export function parsePublishedSnapshot(raw: unknown): CatalogContent | null {
 }
 
 // ---------------------------------------------------------------------------
-// projectCatalog
-// ---------------------------------------------------------------------------
-
-function projectItineraryDay(day: CatalogItineraryDay): CatalogItineraryDay {
-  const copy: CatalogItineraryDay = {
-    day: day.day,
-    title: day.title,
-    description: day.description,
-  }
-  if (day.meals !== undefined) {
-    copy.meals = [...day.meals]
-  }
-  return copy
-}
-
-function projectTour(tour: CatalogTour): ProjectedTour {
-  return {
-    id: tour.id,
-    slug: tour.slug,
-    destination: tour.destination,
-    tier: tour.tier,
-    name: tour.name,
-    title: tour.title,
-    shortDescription: tour.shortDescription,
-    durationText: tour.durationText,
-    displayPriceText: tour.displayPriceText,
-    highlights: [...tour.highlights],
-    itinerary: tour.itinerary.map(projectItineraryDay),
-    inclusions: [...tour.inclusions],
-    exclusions: [...tour.exclusions],
-    tourCities: [...tour.tourCities],
-    singleSupplement: tour.singleSupplement,
-    maxGroupSize: tour.maxGroupSize,
-    isActive: tour.isActive,
-    managesDepartures: tour.managesDepartures,
-    sortOrder: tour.sortOrder,
-  }
-}
-
-function projectDeparture(departure: CatalogDeparture): ProjectedDeparture {
-  return {
-    id: departure.id,
-    tourId: departure.tourId,
-    departOn: departure.departOn,
-    returnOn: departure.returnOn,
-    priceTextOverride: departure.priceTextOverride,
-    status: departure.status,
-  }
-}
-
-function compareIds(a: { id: string }, b: { id: string }): number {
-  if (a.id < b.id) return -1
-  if (a.id > b.id) return 1
-  return 0
-}
-
-/** Whitelist projection used for comparing and hashing catalog content. */
-export function projectCatalog(content: CatalogContent): CatalogProjection {
-  const tours = content.tours.map(projectTour).sort(compareIds)
-  const departures = content.departures.map(projectDeparture).sort(compareIds)
-  return { tours, departures }
-}
-
-// ---------------------------------------------------------------------------
 // diffCatalog — helpers
 // ---------------------------------------------------------------------------
-
-const MAX_RENDER = 200
-const CONTEXT_BEFORE = 40
-const ELLIPSIS = '…'
-
-export interface FieldSpec {
-  field: keyof ProjectedTour
-  fieldLabel: string
-  risk: PublishRisk
-}
-
-export const TOUR_FIELD_SPECS: readonly FieldSpec[] = [
-  { field: 'name', fieldLabel: '团名', risk: 'high' },
-  { field: 'title', fieldLabel: '对外标题', risk: 'high' },
-  { field: 'displayPriceText', fieldLabel: '展示价', risk: 'high' },
-  { field: 'singleSupplement', fieldLabel: '单房差', risk: 'high' },
-  { field: 'isActive', fieldLabel: '是否在售', risk: 'high' },
-  { field: 'managesDepartures', fieldLabel: '是否管理班期', risk: 'high' },
-  { field: 'shortDescription', fieldLabel: '行程简介', risk: 'normal' },
-  { field: 'durationText', fieldLabel: '天数', risk: 'normal' },
-  { field: 'highlights', fieldLabel: '亮点', risk: 'normal' },
-  { field: 'inclusions', fieldLabel: '包含项目', risk: 'normal' },
-  { field: 'exclusions', fieldLabel: '不含项目', risk: 'normal' },
-  { field: 'tourCities', fieldLabel: '途经城市', risk: 'normal' },
-  { field: 'maxGroupSize', fieldLabel: '每团人数上限', risk: 'normal' },
-  { field: 'sortOrder', fieldLabel: '排序', risk: 'normal' },
-  { field: 'slug', fieldLabel: '网址标识', risk: 'normal' },
-  { field: 'destination', fieldLabel: '目的地', risk: 'normal' },
-  { field: 'tier', fieldLabel: '档位', risk: 'normal' },
-]
-
-function renderScalar(value: unknown): string | null {
-  if (value === null || value === undefined) {
-    return null
-  }
-  if (typeof value === 'boolean') {
-    return value ? '在售' : '停售'
-  }
-  if (typeof value === 'string') {
-    return value
-  }
-  if (typeof value === 'number') {
-    return String(value)
-  }
-  return null
-}
-
-export function renderField(field: keyof ProjectedTour, value: unknown): string | null {
-  if (field === 'managesDepartures') {
-    return value === true ? '是' : '否'
-  }
-  if (Array.isArray(value)) {
-    const items = value.filter((item): item is string => typeof item === 'string')
-    return items.join('；')
-  }
-  return renderScalar(value)
-}
-
-function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length !== b.length) {
-    return false
-  }
-  for (let i = 0; i < a.length; i += 1) {
-    if (a[i] !== b[i]) {
-      return false
-    }
-  }
-  return true
-}
-
-function fieldValuesEqual(a: unknown, b: unknown): boolean {
-  if (Array.isArray(a) && Array.isArray(b)) {
-    return arraysEqual(
-      a.filter((item): item is string => typeof item === 'string'),
-      b.filter((item): item is string => typeof item === 'string'),
-    )
-  }
-  return a === b
-}
-
-function firstDifference(a: string, b: string): number {
-  const shared = Math.min(a.length, b.length)
-  for (let i = 0; i < shared; i += 1) {
-    if (a[i] !== b[i]) {
-      return i
-    }
-  }
-  return shared
-}
-
-function windowAt(value: string | null, start: number): string | null {
-  if (value === null) {
-    return null
-  }
-  const end = start + MAX_RENDER
-  const body = value.slice(start, end)
-  return `${start > 0 ? ELLIPSIS : ''}${body}${end < value.length ? ELLIPSIS : ''}`
-}
-
-/**
- * Short values are shown whole. Long ones are cut to a window around the FIRST difference, so
- * the two columns never look identical just because the change sits past the cut-off.
- */
-function renderPair(before: string | null, after: string | null): { before: string | null; after: string | null } {
-  const beforeLength = before === null ? 0 : before.length
-  const afterLength = after === null ? 0 : after.length
-  if (beforeLength <= MAX_RENDER && afterLength <= MAX_RENDER) {
-    return { before, after }
-  }
-  const diffAt = before === null || after === null ? 0 : firstDifference(before, after)
-  const start = Math.max(0, diffAt - CONTEXT_BEFORE)
-  return { before: windowAt(before, start), after: windowAt(after, start) }
-}
-
-function makeChange(
-  partial: Omit<PublishChange, 'before' | 'after'>,
-  before: string | null,
-  after: string | null,
-): PublishChange {
-  return { ...partial, ...renderPair(before, after) }
-}
 
 function tourFieldChanges(
   published: ProjectedTour,
@@ -345,52 +134,6 @@ function tourFieldChanges(
         { kind: 'tour_field', tourId, tourName, field: spec.field, fieldLabel: spec.fieldLabel, risk: spec.risk },
         renderField(spec.field, beforeValue),
         renderField(spec.field, afterValue),
-      ),
-    )
-  }
-  return changes
-}
-
-// ---------------------------------------------------------------------------
-// diffCatalog — itinerary
-// ---------------------------------------------------------------------------
-
-function mealsOf(day: CatalogItineraryDay): string[] {
-  return day.meals === undefined ? [] : day.meals
-}
-
-function daysEqual(a: CatalogItineraryDay, b: CatalogItineraryDay): boolean {
-  return a.day === b.day && a.title === b.title && a.description === b.description && arraysEqual(mealsOf(a), mealsOf(b))
-}
-
-function renderDay(day: CatalogItineraryDay | undefined): string | null {
-  if (day === undefined) {
-    return null
-  }
-  const base = `第 ${day.day} 天｜${day.title}｜${day.description}`
-  const meals = mealsOf(day)
-  return meals.length > 0 ? `${base}｜餐：${meals.join('/')}` : base
-}
-
-function itineraryChanges(
-  published: ProjectedTour,
-  draft: ProjectedTour,
-  tourId: string,
-  tourName: string,
-): PublishChange[] {
-  const changes: PublishChange[] = []
-  const length = Math.max(published.itinerary.length, draft.itinerary.length)
-  for (let i = 0; i < length; i += 1) {
-    const beforeDay = published.itinerary[i]
-    const afterDay = draft.itinerary[i]
-    if (beforeDay !== undefined && afterDay !== undefined && daysEqual(beforeDay, afterDay)) {
-      continue
-    }
-    changes.push(
-      makeChange(
-        { kind: 'tour_field', tourId, tourName, field: 'itinerary', fieldLabel: `行程 第 ${i + 1} 天`, risk: 'normal' },
-        renderDay(beforeDay),
-        renderDay(afterDay),
       ),
     )
   }
@@ -626,6 +369,7 @@ function diffOneTour(
 
   const changes: PublishChange[] = []
   changes.push(...tourFieldChanges(publishedTour, draftTour, tourId, tourName))
+  changes.push(...contentChanges(publishedTour, draftTour, tourId, tourName))
   changes.push(...itineraryChanges(publishedTour, draftTour, tourId, tourName))
   changes.push(...departureChanges(publishedDepartures, draftDepartures, tourId, tourName))
   const flip = sellableFlipChange(publishedSellable, draftSellable, tourId, tourName)

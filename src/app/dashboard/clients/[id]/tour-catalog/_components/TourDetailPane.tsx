@@ -6,6 +6,7 @@ import type { PublishChange } from '@/lib/tour-catalog/publish-contract'
 import { TourEditor } from './TourEditor'
 import { DeparturesEditor } from './DeparturesEditor'
 import { ChangeLog } from './ChangeLog'
+import { TourSummary } from './TourSummary'
 import { priceText, upcomingCount, savedAsDraftText } from './catalog-format'
 import { useCatalogUi, useChannelsConnected } from './catalog-context'
 import { draftChangeLine, sortByRisk } from './tour-list-helpers'
@@ -52,6 +53,14 @@ function DetailHeader(props: {
         <span>{priceText(tour.displayPriceText)}</span>
         <span>·</span>
         <span>即将出发 {upcomingCount(departures)} 个班期</span>
+        {tour.soldOut === true ? (
+          <span
+            data-testid="sold-out-badge"
+            className="rounded-full bg-[#C2453A]/10 px-2 py-0.5 text-xs font-bold text-[#C2453A]"
+          >
+            整团售罄
+          </span>
+        ) : null}
         {tour.isActive === false ? (
           <span className="rounded-full bg-black/5 px-2 py-0.5 text-xs font-bold text-me-charcoal/55">
             停售
@@ -85,8 +94,8 @@ function UnpublishedBox(props: { changes: PublishChange[] }): JSX.Element | null
             data-risk={change.risk}
             className={
               change.risk === 'high'
-                ? 'text-sm font-black text-[#C2453A]'
-                : 'text-sm font-semibold text-me-charcoal/70'
+                ? 'break-all text-sm font-black text-[#C2453A]'
+                : 'break-all text-sm font-semibold text-me-charcoal/70'
             }
           >
             {draftChangeLine(change, connected)}
@@ -167,6 +176,7 @@ function TourDetail(props: TourDetailPaneProps & { tour: CatalogTourView }): JSX
     props
   const [editing, setEditing] = useState(false)
   const [saved, setSaved] = useState(false)
+  const { siteDomain } = useCatalogUi()
   const { setTourDirty, setDepDirty } = useDirtyReport(onDirtyChange)
   const inSync = props.inSync === true
 
@@ -195,6 +205,8 @@ function TourDetail(props: TourDetailPaneProps & { tour: CatalogTourView }): JSX
       </button>
 
       <DetailHeader tour={tour} departures={departures} />
+
+      {editing ? null : <TourSummary tour={tour} domain={siteDomain ?? null} />}
 
       <UnpublishedBox changes={changes} />
 

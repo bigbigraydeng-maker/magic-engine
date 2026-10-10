@@ -23,6 +23,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 const ADMIN: CatalogPermissions = {
   view: true,
   edit: true,
+  edit_site: true,
   assistant: true,
   request_publish: true,
   import: true,
@@ -35,6 +36,7 @@ const ADMIN: CatalogPermissions = {
 
 const EDITOR: CatalogPermissions = {
   ...ADMIN,
+  edit_site: false,
   import: false,
   aliases: false,
   seed: false,
@@ -48,6 +50,7 @@ const NEUTRAL: CatalogSettings = {
   brandPrimary: null,
   brandSecondary: null,
   channelsConnected: false,
+  imageHosts: [],
 }
 
 function makeTour(id: string, name: string): CatalogTourView {
@@ -328,6 +331,7 @@ describe('me_admin view', () => {
       brandPrimary: '#336699',
       brandSecondary: null,
       channelsConnected: false,
+      imageHosts: [],
     }
     const fetchMock = await renderReady({
       snapshot: () => jsonResponse(adminSnapshot(saved ? { settings: branded } : {})),
@@ -488,3 +492,63 @@ describe('narrow screens', () => {
   })
 })
 
+
+describe('site-facing fields by role (whole page)', () => {
+  const RICH = {
+    ...makeTour('t1', 'Atlantis Gold — Coral Loop'),
+    heroImage: '/images/hero.jpg',
+    gallery: ['/images/a.jpg'],
+    tags: ['reef'],
+    rating: 4.4,
+  }
+  const EXTRA = { tours: [RICH], imagePool: ['/images/hero.jpg', '/images/a.jpg', '/images/b.jpg'] }
+
+  it('client staff: hero joined to the registered domain, no site groups, pick-only images', async () => {
+    installFetch({ snapshot: () => jsonResponse(editorSnapshot(EXTRA)) })
+    render(<TourCatalogClient clientId="c1" />)
+    const hero = await screen.findByAltText('Atlantis Gold — Coral Loop 主图')
+    expect(hero).toHaveAttribute('src', 'https://example.test/images/hero.jpg')
+
+    fireEvent.click(screen.getByText('编辑这个团'))
+    expect(document.querySelector('[data-group="images"]')).not.toBeNull()
+    for (const id of ['faqs', 'search', 'reviews']) {
+      expect(document.querySelector(`[data-group="${id}"]`)).toBeNull()
+    }
+    expect(screen.getByTestId('site-fields-note')).toBeInTheDocument()
+    expect(screen.getByTestId('staff-images-notice')).toBeInTheDocument()
+    expect(screen.queryByLabelText('填入新的图片地址')).toBeNull()
+
+    // the pool reaches the picker: one image is not in the gallery yet... hero.jpg and b.jpg
+    fireEvent.click(within(screen.getByTestId('gallery')).getByText('从已有图片里选'))
+    expect(screen.getAllByLabelText(/^选这张图片/)).toHaveLength(2)
+  })
+
+  it('Magic Engine admin: all groups, the new-address box, and host suggestions in settings', async () => {
+    installFetch({
+      snapshot: () =>
+        jsonResponse(
+          adminSnapshot({ ...EXTRA, imageHostSuggestions: [{ host: 'images.unsplash.com', count: 26 }] }),
+        ),
+    })
+    render(<TourCatalogClient clientId="c1" />)
+    await screen.findByAltText('Atlantis Gold — Coral Loop 主图')
+    fireEvent.click(screen.getByText('编辑这个团'))
+    for (const id of ['basics', 'images', 'itinerary', 'inclusions', 'faqs', 'search', 'reviews']) {
+      expect(document.querySelector(`[data-group="${id}"]`)).not.toBeNull()
+    }
+    expect(screen.getByLabelText('填入新的图片地址')).toBeInTheDocument()
+    expect(screen.queryByTestId('site-fields-note')).toBeNull()
+    fireEvent.click(screen.getByText('取消'))
+
+    fireEvent.click(screen.getByRole('tab', { name: '设置' }))
+    expect(await screen.findByTestId('image-host-suggestions')).toHaveTextContent('images.unsplash.com（26 张）')
+    expect(screen.getByRole('button', { name: '开始比对' })).toBeInTheDocument()
+  })
+
+  it('the tour list carries no thumbnails', async () => {
+    installFetch({ snapshot: () => jsonResponse(editorSnapshot(EXTRA)) })
+    render(<TourCatalogClient clientId="c1" />)
+    await screen.findByAltText('Atlantis Gold — Coral Loop 主图')
+    expect(screen.getByTestId('tour-list-col').querySelectorAll('img')).toHaveLength(0)
+  })
+})

@@ -22,6 +22,7 @@ vi.mock('@/lib/tour-catalog/store', async () => {
 import { requireCatalogAccess } from '@/lib/tour-catalog/access'
 import { loadDraftCatalog, createPreviewBatch } from '@/lib/tour-catalog/store'
 import { POST } from '../preview/route'
+import { EMPTY_TOUR_CONTENT } from '@/lib/tour-catalog/__tests__/content-fixture'
 
 const TOUR_NAME = 'China Discovery — Best of China'
 const VALID_CSV = `tour,depart_on,return_on\n${TOUR_NAME},2027-03-11,2027-03-25`
@@ -47,6 +48,7 @@ const TOUR = {
   isActive: true,
   managesDepartures: true,
   sortOrder: 0,
+  ...EMPTY_TOUR_CONTENT,
   updatedAt: '2026-01-01T00:00:00.000Z',
 }
 

@@ -19,6 +19,7 @@ export type CatalogAccess =
 export const CAPABILITIES: Record<CatalogCapability, Record<CatalogRole, boolean>> = {
   view: { me_admin: true, client_editor: true },
   edit: { me_admin: true, client_editor: true },
+  edit_site: { me_admin: true, client_editor: false },
   assistant: { me_admin: true, client_editor: true },
   request_publish: { me_admin: true, client_editor: true },
   import: { me_admin: true, client_editor: false },
@@ -33,6 +34,7 @@ export function permissionsFor(role: CatalogRole): CatalogPermissions {
   return {
     view: CAPABILITIES.view[role],
     edit: CAPABILITIES.edit[role],
+    edit_site: CAPABILITIES.edit_site[role],
     assistant: CAPABILITIES.assistant[role],
     request_publish: CAPABILITIES.request_publish[role],
     import: CAPABILITIES.import[role],

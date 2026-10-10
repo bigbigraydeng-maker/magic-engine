@@ -459,6 +459,7 @@ describe('getSettings', () => {
       brandPrimary: null,
       brandSecondary: null,
       channelsConnected: false,
+      imageHosts: [],
     })
     settings.logoUrl = 'https://changed.example/logo.png'
     expect(EMPTY_SETTINGS.logoUrl).toBeNull()
@@ -480,6 +481,7 @@ describe('getSettings', () => {
       brandPrimary: '#B61E2E',
       brandSecondary: null,
       channelsConnected: true,
+      imageHosts: [],
     })
   })
   it('treats a string channels_connected as false', async () => {
@@ -509,6 +511,7 @@ describe('saveSettings', () => {
         brandPrimary: '#B61E2E',
         brandSecondary: '#D6A756',
         channelsConnected: true,
+        imageHosts: [],
       },
       'admin@example.com',
     )
@@ -517,6 +520,7 @@ describe('saveSettings', () => {
       brandPrimary: '#B61E2E',
       brandSecondary: '#D6A756',
       channelsConnected: true,
+      imageHosts: [],
     })
     expect(state.tables.tour_catalog_settings).toHaveLength(1)
     expect(state.tables.tour_catalog_settings[0].updated_by).toBe('admin@example.com')
@@ -528,6 +532,7 @@ describe('saveSettings', () => {
       brandPrimary: null,
       brandSecondary: null,
       channelsConnected: false,
+      imageHosts: [],
     }
     await saveSettings(db, 'client-1', base, 'admin@example.com')
     await saveSettings(

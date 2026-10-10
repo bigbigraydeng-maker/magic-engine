@@ -35,6 +35,7 @@ const EXPECTED: Record<string, CatalogCapability> = {
   'members/route.ts POST': 'manage_members',
   'members/route.ts DELETE': 'manage_members',
   'settings/route.ts PUT': 'manage_settings',
+  'site-diff/route.ts GET': 'manage_settings',
   'publish-requests/route.ts POST': 'request_publish',
 }
 
@@ -141,5 +142,9 @@ describe('tour-catalog routes declare their capability', () => {
       'view', 'edit', 'assistant', 'request_publish', 'import', 'aliases', 'seed', 'publish', 'manage_members', 'manage_settings',
     ]
     expect(all.filter((c) => !used.has(c))).toEqual([])
+    // `edit_site` is deliberately not a route gate: it is a second tier INSIDE the `edit` route
+    // (PATCH tours/[tourId] passes permissions.edit_site to the validator). Pin that wiring here.
+    const patchTour = allHandlers().find((h) => h.key === 'tours/[tourId]/route.ts PATCH')
+    expect(patchTour?.body).toContain('access.permissions.edit_site')
   })
 })
