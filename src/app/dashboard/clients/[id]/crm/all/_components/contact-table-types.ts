@@ -132,7 +132,12 @@ export function fmtDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString('zh-CN', { year: 'numeric', month: 'numeric', day: 'numeric' })
 }
 
-/** 「今天 / 昨天 / 3天前 / 7/2」—— 最近联系用相对时间，不是干日期。 */
+/**
+ * 「今天 / 昨天 / 3天前 / 87天前」—— 最近联系一律用「几天前」。
+ *
+ * 原来满 30 天就换成「9/10」这种日期：PM 2026-10-10 看本地页，一列里「29天前」
+ * 紧跟着「9/10」，同一列两种写法，眼睛要换算。一年以内都说「N天前」，超过一年才给日期。
+ */
 export function relTime(iso: string | null): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -143,6 +148,6 @@ export function relTime(iso: string | null): string {
   const days = Math.round((dayOf(now) - dayOf(d)) / 86_400_000)
   if (days <= 0) return '今天'
   if (days === 1) return '昨天'
-  if (days >= 2 && days < 30) return `${days}天前`
+  if (days >= 2 && days < 365) return `${days}天前`
   return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
 }

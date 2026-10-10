@@ -22,8 +22,13 @@ describe('relTime', () => {
     expect(relTime(new Date(2026, 9, 7, 1, 0).toISOString())).toBe('3天前')
   })
 
-  it('falls back to month/day at 30 days or more, and empty for null', () => {
-    expect(relTime(new Date(2026, 8, 1, 12, 0).toISOString())).toMatch(/9\/1/)
+  it('一年以内一律「N天前」，同一列不混两种写法（PM 2026-10-10）', () => {
+    expect(relTime(new Date(2026, 8, 1, 12, 0).toISOString())).toBe('39天前')
+    expect(relTime(new Date(2026, 6, 14, 12, 0).toISOString())).toBe('88天前')
+  })
+
+  it('超过一年才退回日期；null 给空串', () => {
+    expect(relTime(new Date(2025, 8, 1, 12, 0).toISOString())).toMatch(/9\/1/)
     expect(relTime(null)).toBe('')
   })
 })
