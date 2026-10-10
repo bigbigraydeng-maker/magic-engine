@@ -90,7 +90,12 @@ function build(setup: Setup = {}) {
       (async (input: RunPublishInput) =>
         input.command.no_publish ? { status: 200, body: { success: true, mode: 'DRY_RUN' } } : publishedBody(input.command.dates?.[0] ?? '')),
   )
-  const claimAttempt = vi.fn(async (_input: Parameters<AutoPublishWorkerDeps['claimAttempt']>[0]) => setup.claim ?? true)
+  const claimedNow = new Map<string, string>()
+  const claimAttempt = vi.fn(async (input: Parameters<AutoPublishWorkerDeps['claimAttempt']>[0]) => {
+    const ok = setup.claim ?? true
+    if (ok) claimedNow.set(input.date, input.requestId)
+    return ok
+  })
   const finishAttempt = vi.fn(async (_input: Parameters<AutoPublishWorkerDeps['finishAttempt']>[0]) => setup.finish ?? true)
   const emit = vi.fn(async (_event: Parameters<AutoPublishWorkerDeps['emit']>[0]) => undefined)
   const deps: AutoPublishWorkerDeps = {
@@ -106,7 +111,13 @@ function build(setup: Setup = {}) {
         ? null
         : { planRevision: PLAN_REV, reviewRevision: REVIEW_REV, publishedDates: [], receiptRecalledDates: [], ...setup.plan },
     loadScope: async () => setup.scope ?? { clientStatus: 'active', campaignStatus: 'active' },
-    listAttempts: async () => setup.attempts ?? [],
+    // earlier rows plus whatever this sweep has claimed so far (so the post-claim re-check sees its own claim)
+    listAttempts: async (_plan, _client, dates) => [
+      ...(setup.attempts ?? []),
+      ...Array.from(claimedNow.entries())
+        .filter(([date]) => dates.includes(date))
+        .map(([date, requestId]) => attempt({ date, status: 'claimed', request_id: requestId })),
+    ],
     claimAttempt,
     finishAttempt,
     runPublish,
@@ -176,7 +187,8 @@ describe('runAutoPublishSweep — live publishing', () => {
   it('🔴 revoked during the sweep: stops before the next send', async () => {
     const { deps, runPublish } = build()
     let calls = 0
-    deps.getActiveAuthorization = async () => (++calls === 1 ? grant() : null)
+    // call 1: the per-date check; call 2: the re-check after the claim; call 3 (next date): revoked
+    deps.getActiveAuthorization = async () => (++calls <= 2 ? grant() : null)
     const summary = await runAutoPublishSweep(deps)
     expect(runPublish.mock.calls.filter(c => c[0].command.no_publish === false)).toHaveLength(1)
     expect(resultsOf(summary)).toContain(`${TOMORROW}:skipped(REVOKED_DURING_SWEEP)`)
@@ -192,7 +204,8 @@ describe('runAutoPublishSweep — live publishing', () => {
   it('a finish that no longer owns the claim is reported, not hidden', async () => {
     const { deps } = build({ finish: false })
     const summary = await runAutoPublishSweep(deps)
-    expect(summary.records.some(r => r.reason === 'FINISH_LOST_CLAIM_CHANGED')).toBe(true)
+    // it counts as an error and carries the post id, so a Post that may be live cannot pass unnoticed
+    expect(summary.records.some(r => r.result === 'error' && r.reason?.includes('FINISH_LOST_CLAIM_CHANGED') && r.reason.includes('post_id=post-'))).toBe(true)
   })
 })
 
@@ -214,6 +227,8 @@ describe('runAutoPublishSweep — when it must do nothing', () => {
     ['archived client', { clientStatus: 'archived', campaignStatus: 'active' }],
     ['archived campaign', { clientStatus: 'active', campaignStatus: 'archived' }],
     ['unknown campaign', { clientStatus: 'active', campaignStatus: null }],
+    ['client that is only a prospect', { clientStatus: 'prospect', campaignStatus: 'active' }],
+    ['client status unreadable', { clientStatus: null, campaignStatus: 'active' }],
   ])('🔴 %s -> skipped', async (_name, scope) => {
     const { deps, runPublish } = build({ scope })
     const summary = await runAutoPublishSweep(deps)
@@ -247,6 +262,67 @@ describe('runAutoPublishSweep — when it must do nothing', () => {
     const summary = await runAutoPublishSweep(deps)
     expect(summary.records[0]).toMatchObject({ plan_id: PLAN, result: 'error' })
     expect(summary.records.some(r => r.plan_id === second.plan_id && r.result === 'published')).toBe(true)
+  })
+})
+
+describe('runAutoPublishSweep — a manual publish that may have reached Facebook', () => {
+  it('🔴 a date whose manual publish failed with an uncertain result is parked as UNKNOWN_OUTCOME, never sent', async () => {
+    const { deps, runPublish, finishAttempt } = build({ plan: { receiptUnknownFailedDates: [TOMORROW] } })
+    const summary = await runAutoPublishSweep(deps)
+    expect(resultsOf(summary)).toContain(`${TOMORROW}:unknown_outcome(RECEIPT_FAILED_UNKNOWN)`)
+    expect(finishAttempt.mock.calls.map(c => c[0]).find(c => c.date === TOMORROW)?.patch).toMatchObject({ status: 'unknown_outcome' })
+    expect(runPublish.mock.calls.filter(c => c[0].command.no_publish === false).map(c => c[0].command.dates)).toEqual([[TODAY]])
+  })
+
+  it('practice mode parks nothing', async () => {
+    const { deps, claimAttempt } = build({ live: false, plan: { receiptUnknownFailedDates: [TOMORROW] } })
+    await runAutoPublishSweep(deps)
+    expect(claimAttempt).not.toHaveBeenCalled()
+  })
+})
+
+describe('runAutoPublishSweep — last-moment checks', () => {
+  it('🔴 the grant is revoked right after the claim: nothing is sent and the claim is closed as blocked', async () => {
+    const { deps, runPublish, finishAttempt } = build({ grants: [grant({ dates: [TOMORROW] })] })
+    let reads = 0
+    deps.getActiveAuthorization = async () => (++reads === 1 ? grant({ dates: [TOMORROW] }) : null)
+    const summary = await runAutoPublishSweep(deps)
+    expect(runPublish.mock.calls.filter(c => c[0].command.no_publish === false)).toHaveLength(0)
+    expect(finishAttempt.mock.calls[0][0].patch).toMatchObject({ status: 'blocked', reason_code: 'ABORTED_BEFORE_SEND' })
+    expect(resultsOf(summary)).toContain(`${TOMORROW}:blocked(ABORTED_BEFORE_SEND)`)
+  })
+
+  it('🔴 the runner is handed a request timeout and a before-send check that is still true while the claim is ours', async () => {
+    let beforeSendResult: boolean | null = null
+    const { deps, runPublish } = build({
+      grants: [grant({ dates: [TOMORROW] })],
+      runPublish: async input => {
+        if (input.command.no_publish) return { status: 200, body: { success: true } }
+        beforeSendResult = (await input.beforeSend?.(TOMORROW)) ?? null
+        return publishedBody(TOMORROW)
+      },
+    })
+    await runAutoPublishSweep(deps)
+    const live = runPublish.mock.calls.map(c => c[0]).find(i => i.command.no_publish === false)
+    expect(live?.requestTimeoutMs).toBe(45_000)
+    expect(beforeSendResult).toBe(true)
+  })
+
+  it('🔴 the before-send check turns false once the claim is gone (tombstoned) — so the runner would not send', async () => {
+    let beforeSendResult: boolean | null = null
+    const { deps } = build({
+      grants: [grant({ dates: [TOMORROW] })],
+      runPublish: async input => {
+        if (input.command.no_publish) return { status: 200, body: { success: true } }
+        // someone tombstones the date between the claim and the send
+        deps.listAttempts = async () => [attempt({ date: TOMORROW, status: 'blocked', reason_code: 'RECALLED', request_id: 'someone-else' })]
+        beforeSendResult = (await input.beforeSend?.(TOMORROW)) ?? null
+        return { status: 200, body: { receipt: { published: [], failed: [{ date: TOMORROW, error: 'ABORTED_BEFORE_SEND', certainty: 'rejected' }] } } }
+      },
+    })
+    const summary = await runAutoPublishSweep(deps)
+    expect(beforeSendResult).toBe(false)
+    expect(resultsOf(summary)).toContain(`${TOMORROW}:blocked(ABORTED_BEFORE_SEND)`)
   })
 })
 
@@ -385,7 +461,7 @@ describe('runAutoPublishSweep — outcomes of a live send', () => {
     })
     const summary = await runAutoPublishSweep(deps)
     expect(finishAttempt.mock.calls[0][0].patch).toMatchObject({ status: 'unknown_outcome', reason_code: 'RUNNER_THREW' })
-    expect(resultsOf(summary)).toContain(`${TOMORROW}:unknown_outcome`)
+    expect(resultsOf(summary)).toContain(`${TOMORROW}:unknown_outcome(RUNNER_THREW)`)
   })
 })
 

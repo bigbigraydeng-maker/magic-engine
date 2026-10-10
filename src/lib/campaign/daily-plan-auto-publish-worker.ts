@@ -42,6 +42,9 @@ import {
 import type { AttemptPatch, AttemptRecord } from './daily-plan-auto-publish-worker-store'
 import { resolvePublishSchedule, type CampaignDailyPublishCommand } from './daily-plan-publish'
 
+/** Upper bound for one Facebook call made by the unattended publisher. */
+const UNATTENDED_REQUEST_TIMEOUT_MS = 45_000
+
 /** What the sweep needs to know about a plan right now (read fresh every sweep). */
 export interface PlanState {
   planRevision: string
@@ -52,6 +55,11 @@ export interface PlanState {
   receiptRecalledDates: string[]
   /** Latest `recalled_at` per recalled date (ISO). Optional: absent counts as "unknown time" and voids any lift. */
   receiptRecalledAt?: Record<string, string>
+  /**
+   * Dates on the receipt's `failed[]` whose certainty is `unknown` or missing: a manual publish may have
+   * reached Facebook. Never re-sent automatically; a human settles them.
+   */
+  receiptUnknownFailedDates?: string[]
 }
 
 export interface ScopeState {
@@ -65,6 +73,10 @@ export interface RunPublishInput {
   approvedByUserId: string
   now: Date
   allowImmediate: false
+  /** Request timeout for the Facebook call (the unattended publisher always sets one). */
+  requestTimeoutMs?: number
+  /** Last-moment check, run right before the Facebook call: false = do not send. */
+  beforeSend?: (date: string) => Promise<boolean>
 }
 
 export interface AutoPublishWorkerDeps {
@@ -193,7 +205,7 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
       }
 
       const scope = await deps.loadScope(auth.client_id, auth.campaign_id)
-      if (scope.clientStatus === 'archived' || scope.campaignStatus !== 'active') {
+      if (scope.clientStatus !== 'active' || scope.campaignStatus !== 'active') {
         note('*', 'skipped', 'CLIENT_OR_CAMPAIGN_INACTIVE')
         continue
       }
@@ -221,6 +233,25 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
           continue
         }
         const existing = attemptByDate.get(date) ?? null
+        if (existing === null && (state.receiptUnknownFailedDates ?? []).includes(date)) {
+          // A manual publish of this date failed with an uncertain result: Facebook may have the Post.
+          // Park it as UNKNOWN_OUTCOME (so it reaches the to-do list) instead of sending it again.
+          if (live) {
+            const requestId = randomUUID()
+            const parked = await deps.claimAttempt({
+              authId: auth.id, clientId: auth.client_id, planId: auth.plan_id, date, requestId, attemptNo: 1, now,
+            })
+            if (parked) {
+              await deps.finishAttempt({
+                planId: auth.plan_id, date, requestId,
+                patch: { status: 'unknown_outcome', reason_code: 'RECEIPT_FAILED_UNKNOWN', next_retry_at: null },
+                now,
+              })
+            }
+          }
+          note(date, 'unknown_outcome', 'RECEIPT_FAILED_UNKNOWN')
+          continue
+        }
         if (existing !== null && isStaleClaim(existing, now)) {
           // A claim that never reported back: the Post may or may not exist. Never retry blindly.
           if (live) {
@@ -333,6 +364,36 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
           continue
         }
 
+        // Last-moment check, used twice: right after the claim and again just before the Facebook call.
+        const stillMine = async (): Promise<boolean> => {
+          const grantNow = await deps.getActiveAuthorization(auth.plan_id, auth.client_id)
+          if (
+            grantNow === null ||
+            grantNow.id !== auth.id ||
+            !judgeAuthorization(grantNow, {
+              planId: auth.plan_id,
+              planRevision: state.planRevision,
+              reviewRevision: state.reviewRevision,
+              now: (deps.clock ?? (() => new Date()))(),
+            }).active
+          ) {
+            return false
+          }
+          const rows = await deps.listAttempts(auth.plan_id, auth.client_id, [item.date])
+          return rows.some(row => row.request_id === requestId && row.status === 'claimed')
+        }
+        if (!(await stillMine())) {
+          await deps.finishAttempt({
+            planId: auth.plan_id,
+            date: item.date,
+            requestId,
+            patch: { status: 'blocked', reason_code: 'ABORTED_BEFORE_SEND', next_retry_at: null },
+            now,
+          })
+          note(item.date, 'blocked', 'ABORTED_BEFORE_SEND')
+          break
+        }
+
         let outcome: AttemptOutcome
         try {
           const result = await deps.runPublish({
@@ -341,6 +402,8 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
             approvedByUserId: auth.authorized_by_user_id,
             now,
             allowImmediate: false,
+            requestTimeoutMs: UNATTENDED_REQUEST_TIMEOUT_MS,
+            beforeSend: stillMine,
           })
           outcome = classifyRunResult({ date: item.date, httpStatus: result.status, body: result.body, attemptNo, now })
         } catch {
@@ -356,7 +419,14 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
           now,
         })
         await emitAttempt(deps, auth, item.date, requestId, outcome.status, 'reasonCode' in outcome ? outcome.reasonCode : null, now)
-        note(item.date, outcome.status, finished ? undefined : 'FINISH_LOST_CLAIM_CHANGED')
+        if (finished) {
+          note(item.date, outcome.status, outcome.status === 'published' ? undefined : outcome.reasonCode)
+        } else {
+          // The send may have gone out but its record could not be written (the claim changed under us).
+          // Surface the post id in the run log and count it as an error so it cannot pass unnoticed.
+          const postId = outcome.status === 'published' ? outcome.postId : null
+          note(item.date, 'error', `FINISH_LOST_CLAIM_CHANGED${postId ? ` post_id=${postId}` : ''} outcome=${outcome.status}`)
+        }
       }
     } catch (error: unknown) {
       // One plan's failure must not stop the others; the record is what the run log shows.

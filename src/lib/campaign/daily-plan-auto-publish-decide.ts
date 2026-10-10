@@ -18,7 +18,7 @@ import {
   AUTO_PUBLISH_MAX_PER_DAY_CEILING,
   type AutoPublishAttemptStatus,
 } from './daily-plan-auto-publish'
-import { MISSED_WINDOW_ERROR } from './daily-plan-publish'
+import { ABORTED_BEFORE_SEND_ERROR, MISSED_WINDOW_ERROR } from './daily-plan-publish'
 
 /** Hard ceiling on how many times one date may be attempted before it is final. */
 export const AUTO_PUBLISH_MAX_ATTEMPTS = 3
@@ -336,6 +336,10 @@ export function classifyRunResult(input: {
     const error = asString(failedEntry.error)
     if (error === MISSED_WINDOW_ERROR) {
       return { status: 'missed_window', reasonCode: 'MISSED_WINDOW' }
+    }
+    // The last-moment check refused the send (grant revoked / claim lost): nothing went out.
+    if (error === ABORTED_BEFORE_SEND_ERROR) {
+      return { status: 'blocked', reasonCode: 'ABORTED_BEFORE_SEND' }
     }
 
     const certainty = asString(failedEntry.certainty)

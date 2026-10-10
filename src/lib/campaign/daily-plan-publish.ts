@@ -137,6 +137,9 @@ export interface CampaignDailyPublishFailure {
 /** Fixed failure text when the publish slot has already passed and the caller forbade an immediate publish. */
 export const MISSED_WINDOW_ERROR = 'MISSED_WINDOW'
 
+/** Fixed failure text when the caller's last-moment check refused the send (e.g. the grant was revoked). Nothing was sent. */
+export const ABORTED_BEFORE_SEND_ERROR = 'ABORTED_BEFORE_SEND'
+
 export interface CampaignDailyPublishPlannedPost {
   date: string
   idempotency_key: string

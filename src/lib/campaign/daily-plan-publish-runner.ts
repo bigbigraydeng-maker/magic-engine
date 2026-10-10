@@ -348,6 +348,10 @@ export interface RunDailyPlanPublishInput {
   now?: Date
   /** false = a slot that already passed is a MISSED_WINDOW failure instead of an immediate publish. Default true (manual path). */
   allowImmediate?: boolean
+  /** Request timeout for the Facebook call (default none, as the manual route). */
+  requestTimeoutMs?: number
+  /** Last-moment check before the Facebook call; false = do not send that date. */
+  beforeSend?: (date: string) => Promise<boolean>
 }
 
 export interface RunDailyPlanPublishResult {
@@ -436,6 +440,8 @@ export async function runDailyPlanPublish(input: RunDailyPlanPublishInput): Prom
         command,
         now: input.now,
         allowImmediate: input.allowImmediate,
+        requestTimeoutMs: input.requestTimeoutMs,
+        beforeSend: input.beforeSend,
       })
 
   const merged = [...alreadyPublished, ...outcome.published]

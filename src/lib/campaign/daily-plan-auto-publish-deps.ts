@@ -28,6 +28,18 @@ function latestRecalledAt(list: unknown): Record<string, string> {
   return out
 }
 
+/** Dates of `failed[]` entries whose certainty is not a definite refusal (unknown or missing). */
+function unknownFailedDates(list: unknown): string[] {
+  if (!Array.isArray(list)) return []
+  const out: string[] = []
+  for (const entry of list) {
+    if (!isRecord(entry) || typeof entry.date !== 'string') continue
+    const certainty = entry.certainty
+    if (certainty !== 'rejected' && certainty !== 'rate_limited') out.push(entry.date)
+  }
+  return Array.from(new Set(out))
+}
+
 function datesOf(list: unknown): string[] {
   if (!Array.isArray(list)) return []
   return list
@@ -61,6 +73,7 @@ export async function loadPlanState(planId: string, clientId: string): Promise<P
     publishedDates: datesOf(publishMeta.published),
     receiptRecalledDates: datesOf(publishMeta.recalled),
     receiptRecalledAt: latestRecalledAt(publishMeta.recalled),
+    receiptUnknownFailedDates: unknownFailedDates(publishMeta.failed),
   }
 }
 

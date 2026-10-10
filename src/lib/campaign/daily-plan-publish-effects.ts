@@ -21,6 +21,7 @@ import {
   measurementSchedule,
   storyResolveEventId,
   resolvePublishSchedule,
+  ABORTED_BEFORE_SEND_ERROR,
   MISSED_WINDOW_ERROR,
   type CampaignDailyPublishCommand,
   type CampaignDailyPublishFailure,
@@ -77,6 +78,10 @@ export async function publishPending(
     now?: Date
     /** false = never publish immediately: a slot that has passed is a MISSED_WINDOW failure, not a late post. */
     allowImmediate?: boolean
+    /** Request timeout for the Facebook call; unset = none (manual path). */
+    requestTimeoutMs?: number
+    /** Last-moment check, run right before the Facebook call. false = do not send. */
+    beforeSend?: (date: string) => Promise<boolean>
   },
 ): Promise<LiveOutcome> {
   const published: CampaignDailyPublishedPost[] = []
@@ -105,6 +110,17 @@ export async function publishPending(
       continue
     }
 
+    if (context.beforeSend && !(await context.beforeSend(candidate.date))) {
+      failed.push({
+        date: candidate.date,
+        idempotency_key: candidate.idempotency_key,
+        error: ABORTED_BEFORE_SEND_ERROR,
+        failed_at: new Date().toISOString(),
+        certainty: 'rejected',
+      })
+      continue
+    }
+
     let result: Awaited<ReturnType<typeof publishPagePhotoPost>>
     try {
       result = await publishPagePhotoPost({
@@ -113,6 +129,7 @@ export async function publishPending(
         message: candidate.message,
         imageUrl: candidate.imageUrl,
         scheduledPublishTime: schedule.publishNow ? undefined : schedule.scheduledPublishTime,
+        timeoutMs: context.requestTimeoutMs,
       })
     } catch (error: unknown) {
       failed.push({

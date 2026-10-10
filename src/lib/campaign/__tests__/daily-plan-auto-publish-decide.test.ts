@@ -546,3 +546,16 @@ describe('classifyRunResult', () => {
     })
   })
 })
+
+describe('classifyRunResult — aborted before send', () => {
+  it('🔴 a last-moment refusal is a block (nothing was sent), not a failure to retry or an unknown outcome', () => {
+    const outcome = classifyRunResult({
+      date: '2026-10-13',
+      httpStatus: 200,
+      body: { receipt: { published: [], failed: [{ date: '2026-10-13', error: 'ABORTED_BEFORE_SEND', certainty: 'rejected' }] } },
+      attemptNo: 1,
+      now: new Date('2026-10-12T00:00:00Z'),
+    })
+    expect(outcome).toEqual({ status: 'blocked', reasonCode: 'ABORTED_BEFORE_SEND' })
+  })
+})
