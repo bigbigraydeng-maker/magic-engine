@@ -82,6 +82,23 @@ function makeSnapshot(): CatalogSnapshotResponse {
     aliases: [{ aliasNorm: 'coral', tourId: 't1' }],
     batches: [],
     domain: 'example.test',
+    // A Magic Engine admin on a catalog whose channels are connected: the original wording applies.
+    clientName: 'Atlantis Travel',
+    viewer: { email: 'admin@example.test', role: 'me_admin' },
+    permissions: {
+      view: true,
+      edit: true,
+      assistant: true,
+      request_publish: true,
+      import: true,
+      aliases: true,
+      seed: true,
+      publish: true,
+      manage_members: true,
+      manage_settings: true,
+    },
+    settings: { logoUrl: null, brandPrimary: null, brandSecondary: null, channelsConnected: true },
+    pendingPublishRequest: null,
   }
 }
 
@@ -189,10 +206,17 @@ describe('TourCatalogClient', () => {
     expect(screen.queryByRole('button', { name: '查看并上架' })).toBeNull()
   })
 
-  it('renders four tabs and switches panels', async () => {
+  it('renders every tab for an admin and switches panels', async () => {
     await renderReady()
     const tabs = screen.getAllByRole('tab')
-    expect(tabs.map(t => t.textContent)).toEqual(['团', '出团表导入', '上架记录', '叫法对照'])
+    expect(tabs.map(t => t.textContent)).toEqual([
+      '团',
+      '修改记录',
+      '上架记录',
+      '出团表导入',
+      '叫法对照',
+      '设置',
+    ])
     expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
     expect(tabs[1]).toHaveAttribute('aria-selected', 'false')
     expect(tabs[2]).toHaveAttribute('aria-selected', 'false')

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { PublishHistory } from '../PublishHistory'
+import { CatalogUiProvider } from '../catalog-context'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return {
@@ -357,5 +358,30 @@ describe('PublishHistory', () => {
     rerender(<PublishHistory clientId="c1" refreshKey={1} onReverted={() => {}} />)
 
     await waitFor(() => expect(historyCalls(fetchMock)).toBe(2))
+  })
+})
+
+describe('PublishHistory by context', () => {
+  async function renderWith(ui: { channelsConnected: boolean; canPublish: boolean }) {
+    vi.stubGlobal('fetch', routeFetch([[/publish\/history/, () => jsonResponse(historyFixture)]]))
+    render(
+      <CatalogUiProvider value={ui}>
+        <PublishHistory clientId="c1" refreshKey={0} onReverted={() => {}} />
+      </CatalogUiProvider>,
+    )
+    await screen.findByTestId('publish-version-6')
+  }
+
+  it('people who cannot publish see the versions but no revert button', async () => {
+    await renderWith({ channelsConnected: true, canPublish: false })
+    expect(screen.getByTestId('publish-version-6')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '把对外内容换回这一版' })).toBeNull()
+  })
+
+  it('channels not connected: labels the live version as published, not as what customers see', async () => {
+    await renderWith({ channelsConnected: false, canPublish: true })
+    expect(within(screen.getByTestId('publish-version-7')).getByText('当前已上架')).toBeInTheDocument()
+    expect(screen.getByText('每上架一次记一版。标着「当前已上架」的是现在已上架的那一版。')).toBeInTheDocument()
+    expect(screen.queryByText(/客人看到的永远是/)).toBeNull()
   })
 })

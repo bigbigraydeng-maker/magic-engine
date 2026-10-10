@@ -9,6 +9,7 @@ import type { FirstPartyTour } from '@/lib/web-intelligence/first-party-tours'
 import { asRecord, asString, loadDraftCatalog, rowsOf } from './store'
 import type { CatalogDeparture, CatalogTour } from './types'
 import { parseDepartureDisplay } from './dates'
+import { markPublishRequestsHandled } from './store-access'
 import { toFirstPartyTours } from './output'
 import {
   computeDiffHash,
@@ -347,7 +348,15 @@ export async function publishDraft(
     console.error('tour_catalog_publish_failed', res.error.message)
     return { ok: false, error: 'publish_failed' }
   }
-  return { ok: true, version: num(asRecord(res.data).version) }
+  const version = num(asRecord(res.data).version)
+  // Publishing closes any open "please publish" request. The publish itself already happened:
+  // a failure here is logged and never turns the result into an error.
+  try {
+    await markPublishRequestsHandled(db, clientId, version)
+  } catch (err) {
+    console.error('tour_catalog_publish_request_close_failed', err instanceof Error ? err.message : err)
+  }
+  return { ok: true, version }
 }
 
 // ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { DeparturesEditor } from '../DeparturesEditor'
 import { ChangeLog } from '../ChangeLog'
 import type { CatalogDepartureView } from '../types'
+import { CatalogUiProvider } from '../catalog-context'
 
 function makeDeparture(overrides: Partial<CatalogDepartureView> = {}): CatalogDepartureView {
   return {
@@ -263,6 +264,30 @@ describe('DeparturesEditor', () => {
   })
 })
 
+describe('DeparturesEditor wording while no channel is connected', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('says 还没上架 after adding, and the price hint promises nothing about the website', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ departure: {} })))
+    render(
+      <CatalogUiProvider value={{ channelsConnected: false, canPublish: false }}>
+        <DeparturesEditor clientId="c1" tourId="tour-1" departures={[]} onChanged={vi.fn()} />
+      </CatalogUiProvider>,
+    )
+    expect(
+      screen.getByText('某个班期单独填了展示价时，上架后的目录里这个班期以它为准；没填就用团的展示价。'),
+    ).toBeTruthy()
+    const dateInputs = document.querySelectorAll('input[type="date"]')
+    fireEvent.change(dateInputs[0], { target: { value: '2027-06-01' } })
+    fireEvent.change(dateInputs[1], { target: { value: '2027-06-08' } })
+    fireEvent.click(screen.getByText('添加这个班期'))
+    await waitFor(() => expect(screen.getByText('已新增到草稿，还没上架')).toBeTruthy())
+    expect(document.body.textContent).not.toMatch(/客人|网站上/)
+  })
+})
+
 describe('ChangeLog', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -302,7 +327,11 @@ describe('ChangeLog', () => {
         '/api/clients/c1/tour-catalog/changes?tourId=tour-1',
       ),
     )
-    await waitFor(() => expect(screen.getByText(/手工修改（pm@x）/)).toBeTruthy())
+    // who + a source label, with the year in the time
+    await waitFor(() => expect(screen.getByText('pm@x')).toBeTruthy())
+    expect(screen.getByText('手动')).toHaveAttribute('data-source', 'manual')
+    expect(screen.queryByText(/edit by/)).toBeNull()
+    expect(screen.getByText(/2027年10月\d+日 \d{2}:\d{2}/)).toBeTruthy()
     expect(screen.getByText(/班期 2027-05-13：/)).toBeTruthy()
     expect(screen.getByText(/状态：可订 → 已取消/)).toBeTruthy()
     expect(screen.getByText(/返程日：2027-05-20 → 2027-05-22/)).toBeTruthy()
@@ -330,8 +359,38 @@ describe('ChangeLog', () => {
     render(<ChangeLog clientId="c1" tourId="tour-1" refreshKey="k1" />)
     openPanel()
 
-    await waitFor(() => expect(screen.getByText(/班期表导入（pm@x）/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('pm@x')).toBeTruthy())
+    expect(screen.getByText('出团表导入')).toHaveAttribute('data-source', 'import')
     expect(screen.getByText(/新增班期 2027-06-01/)).toBeTruthy()
+  })
+
+  it('shows an AI-assistant edit as who + AI label, never the raw actor text', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        changes: [
+          {
+            id: 'log-9',
+            entity: 'tour',
+            entityId: 'tour-1',
+            action: 'update',
+            before: { name: 'A' },
+            after: { name: 'B' },
+            actor: 'edit by pm@x (AI 助手)',
+            createdAt: '2027-10-10T02:05:00.000Z',
+          },
+        ],
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<ChangeLog clientId="c1" tourId="tour-1" refreshKey="k1" />)
+    openPanel()
+
+    await waitFor(() => expect(screen.getByText('pm@x')).toBeTruthy())
+    expect(screen.getByText('AI 助手')).toHaveAttribute('data-source', 'assistant')
+    expect(screen.getByText('自报')).toHaveAttribute('title', '来源由浏览器上报')
+    expect(screen.queryByText(/手工修改/)).toBeNull()
+    expect(screen.queryByText(/\(AI 助手\)/)).toBeNull()
   })
 
   it('shows a delete-departure entry with its date', async () => {

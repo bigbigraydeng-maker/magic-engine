@@ -1,33 +1,70 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
+import { requireCatalogAccess } from '@/lib/tour-catalog/access'
 import { getClientDomain, loadDraftCatalog, listRecentBatches } from '@/lib/tour-catalog/store'
+import {
+  getClientName,
+  getPendingPublishRequest,
+  getSettings,
+  listMemberEmails,
+} from '@/lib/tour-catalog/store-access'
+import { makeActorLabeler } from '@/lib/tour-catalog/changes-view'
 import { normalizeDomain } from '@/lib/tour-catalog/seed'
 import { supabaseAdmin } from '@/lib/supabase'
+import type { CatalogAccessEnvelope, PublishRequestView } from '@/lib/tour-catalog/catalog-contract'
 
 export const dynamic = 'force-dynamic'
 
-/** GET: return the full catalog snapshot plus recent import batches. */
+/** A client editor sees who asked only when it is one of their own colleagues. */
+async function pendingRequestFor(
+  clientId: string,
+  role: CatalogAccessEnvelope['viewer']['role'],
+  viewerEmail: string,
+): Promise<PublishRequestView | null> {
+  const pending = await getPendingPublishRequest(supabaseAdmin, clientId)
+  if (pending === null || role === 'me_admin') return pending
+  const label = makeActorLabeler(role, await listMemberEmails(supabaseAdmin, clientId), viewerEmail)
+  return { ...pending, requestedBy: label(pending.requestedBy.trim().toLowerCase()) }
+}
+
+/**
+ * GET: the working copy plus who is looking and what they may do.
+ * Trimmed on the server by permission: import batches and name aliases only for those who may use
+ * them, and operational `internal` facts on departures never reach a client editor.
+ */
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
   const { id: clientId } = await params
 
-  const access = await requireCatalogAdmin(clientId)
+  const access = await requireCatalogAccess(clientId, 'view')
   if (!access.ok) {
     return access.response
   }
+  const { permissions, viewer } = access
 
   try {
     const snapshot = await loadDraftCatalog(supabaseAdmin, clientId)
-    const batches = await listRecentBatches(supabaseAdmin, clientId, 20)
+    const batches = permissions.import ? await listRecentBatches(supabaseAdmin, clientId, 20) : []
     const storedDomain = await getClientDomain(supabaseAdmin, clientId)
+    const envelope: CatalogAccessEnvelope = {
+      clientName: await getClientName(supabaseAdmin, clientId),
+      viewer,
+      permissions,
+      settings: await getSettings(supabaseAdmin, clientId),
+      pendingPublishRequest: await pendingRequestFor(clientId, viewer.role, viewer.email),
+    }
+    const departures =
+      viewer.role === 'me_admin'
+        ? snapshot.departures
+        : snapshot.departures.map((departure) => ({ ...departure, internal: {} }))
     return NextResponse.json({
       tours: snapshot.tours,
-      departures: snapshot.departures,
-      aliases: snapshot.aliases,
+      departures,
+      aliases: permissions.aliases ? snapshot.aliases : [],
       batches,
       domain: storedDomain === null ? null : normalizeDomain(storedDomain),
+      ...envelope,
     })
   } catch (error) {
     console.error('catalog_load_failed', error)

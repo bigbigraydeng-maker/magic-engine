@@ -6,6 +6,8 @@
  * Vocabulary: "draft" = the working tables; "published" = the frozen snapshot channels read.
  */
 
+import type { PublishContributor } from './catalog-contract'
+
 export type PublishRisk = 'high' | 'normal'
 
 export type PublishChangeKind =
@@ -69,6 +71,8 @@ export interface PublishPreviewResponse {
   afterRevert: { toVersion: number } | null
   firstPublishRows: FirstPublishRow[]
   diffHash: string
+  /** Who changed how much since the last publish (masked for client editors). Not part of diffHash. */
+  contributors?: PublishContributor[]
 }
 
 /** POST …/tour-catalog/publish */

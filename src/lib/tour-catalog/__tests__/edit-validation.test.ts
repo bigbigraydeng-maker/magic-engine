@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  hasForbiddenChars,
   validateTourPatch,
   tourPatchToDb,
   validateNewDeparture,
@@ -383,3 +384,188 @@ describe('itinerary day numbering', () => {
     }
   })
 })
+
+describe('input hardening (design §6.10.1 item 7)', () => {
+  const HIDDEN: Array<[string, string]> = [
+    ['NUL', '\u0000'],
+    ['bell', '\u0007'],
+    ['escape', '\u001b'],
+    ['DEL', '\u007f'],
+    ['zero-width space', '\u200b'],
+    ['zero-width joiner', '\u200d'],
+    ['right-to-left mark', '\u200f'],
+    ['left-to-right embedding', '\u202a'],
+    ['right-to-left override', '\u202e'],
+    ['word joiner', '\u2060'],
+    ['pop directional isolate', '\u2069'],
+    ['byte-order mark', '\ufeff'],
+  ]
+
+  function codesOf(result: ReturnType<typeof validateTourPatch>): string[] {
+    return result.ok ? [] : result.errors.map((e) => `${e.field}:${e.code}`)
+  }
+
+  describe.each(HIDDEN)('a %s inside the text', (_label, ch) => {
+    it('is refused in every single-line tour field', () => {
+      expect(codesOf(validateTourPatch({ name: `Gol${ch}den` }))).toEqual(['name:invalid_characters'])
+      expect(codesOf(validateTourPatch({ title: `Gol${ch}den` }))).toEqual(['title:invalid_characters'])
+      expect(codesOf(validateTourPatch({ durationText: `10${ch} days` }))).toEqual(['durationText:invalid_characters'])
+      expect(codesOf(validateTourPatch({ singleSupplement: `NZD${ch} $400` }))).toEqual(['singleSupplement:invalid_characters'])
+      expect(codesOf(validateTourPatch({ displayPriceText: `From NZD${ch} $4,080 per person` }))).toEqual([
+        'displayPriceText:invalid_characters',
+      ])
+    })
+
+    it('is refused in multi-line fields too', () => {
+      expect(codesOf(validateTourPatch({ shortDescription: `Line one${ch}` + ' more' }))).toEqual([
+        'shortDescription:invalid_characters',
+      ])
+      expect(
+        codesOf(validateTourPatch({ itinerary: [{ day: 1, title: 'Arrive', description: `Fly${ch} in` }] })),
+      ).toEqual(['itinerary[0].description:invalid_characters'])
+    })
+
+    it('is refused in list items, day titles and meals', () => {
+      for (const field of ['highlights', 'inclusions', 'exclusions', 'tourCities']) {
+        expect(codesOf(validateTourPatch({ [field]: ['fine', `bad${ch}item`] })), field).toEqual([
+          `${field}:invalid_characters`,
+        ])
+      }
+      expect(codesOf(validateTourPatch({ itinerary: [{ day: 1, title: `Arr${ch}ive`, description: '' }] }))).toEqual([
+        'itinerary[0].title:invalid_characters',
+      ])
+      expect(
+        codesOf(validateTourPatch({ itinerary: [{ day: 1, title: 'Arrive', description: '', meals: [`Din${ch}ner`] }] })),
+      ).toEqual(['itinerary[0].meals:invalid_characters'])
+    })
+
+    it('is refused in a departure price', () => {
+      const created = validateNewDeparture({
+        departOn: '2027-03-11',
+        returnOn: '2027-03-25',
+        priceTextOverride: `From NZD${ch} $4,080 per person`,
+      })
+      expect(created.ok ? [] : created.errors).toEqual([{ field: 'priceTextOverride', code: 'invalid_characters' }])
+      const patched = validateDeparturePatch({ priceTextOverride: `From NZD${ch} $4,080 per person` })
+      expect(patched.ok ? [] : patched.errors).toEqual([{ field: 'priceTextOverride', code: 'invalid_characters' }])
+    })
+  })
+
+  it('line breaks and tabs are allowed only in multi-line fields', () => {
+    const multi = validateTourPatch({
+      shortDescription: 'Line one\nLine two\twith a tab',
+      itinerary: [{ day: 1, title: 'Arrive', description: 'Morning\nAfternoon\tEvening' }],
+    })
+    expect(multi.ok).toBe(true)
+    expect(codesOf(validateTourPatch({ name: 'Golden\nChina' }))).toEqual(['name:invalid_characters'])
+    expect(codesOf(validateTourPatch({ title: 'Golden\tChina' }))).toEqual(['title:invalid_characters'])
+    expect(codesOf(validateTourPatch({ highlights: ['one\ntwo'] }))).toEqual(['highlights:invalid_characters'])
+    expect(codesOf(validateTourPatch({ itinerary: [{ day: 1, title: 'A\nB', description: '' }] }))).toEqual([
+      'itinerary[0].title:invalid_characters',
+    ])
+  })
+
+  it('Windows line endings are normalised, a lone carriage return is refused', () => {
+    const result = validateTourPatch({
+      shortDescription: 'one\r\ntwo',
+      itinerary: [{ day: 1, title: 'Arrive', description: 'a\r\nb' }],
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.shortDescription).toBe('one\ntwo')
+    expect(result.value.itinerary?.[0].description).toBe('a\nb')
+    expect(codesOf(validateTourPatch({ shortDescription: 'one\rtwo' }))).toEqual(['shortDescription:invalid_characters'])
+  })
+
+  it('ordinary text in any language, accents, emoji and non-breaking spaces still pass', () => {
+    const result = validateTourPatch({
+      name: '中国全景 Panorama — Zürich café',
+      title: 'Xi’an & Chengdu\u00a0(10 days) 🐼',
+      highlights: ['长城', 'Terracotta Warriors'],
+      itinerary: [{ day: 1, title: '抵达北京', description: '全天自由活动。', meals: ['Dinner'] }],
+    })
+    expect(result.ok).toBe(true)
+  })
+
+  it('hasForbiddenChars: single-line vs multi-line', () => {
+    expect(hasForbiddenChars('plain text')).toBe(false)
+    expect(hasForbiddenChars('a\nb')).toBe(true)
+    expect(hasForbiddenChars('a\nb', true)).toBe(false)
+    expect(hasForbiddenChars('a\tb', true)).toBe(false)
+    expect(hasForbiddenChars('a\u000bb', true)).toBe(true)
+    expect(hasForbiddenChars('a\u202eb', true)).toBe(true)
+  })
+
+  describe('price-like strings', () => {
+    it.each(['From NZD $4,080 per person', 'NZD $2,699 per person', 'TBC'])('still accepts %s as a display price', (text) => {
+      const result = validateTourPatch({ displayPriceText: text })
+      expect(result).toEqual({ ok: true, value: { displayPriceText: text } })
+    })
+
+    it('refuses a display price over 100 characters', () => {
+      const long = 'From NZD $4,080 per person ' + 'x'.repeat(80)
+      expect(codesOf(validateTourPatch({ displayPriceText: long }))).toEqual(['displayPriceText:invalid_price:too_long'])
+    })
+
+    it.each(['NZD $4,080 <b>', 'NZD $4,080 > x', 'NZD $4,080 http://x.example', 'NZD $4,080 https://x.example', 'NZD $4,080 www.x.example'])(
+      'refuses markup or a link in a display price: %s',
+      (text) => {
+        expect(codesOf(validateTourPatch({ displayPriceText: text }))).toEqual(['displayPriceText:invalid_price:forbidden_content'])
+      },
+    )
+
+    it('applies the same rules to a departure price (new and patch)', () => {
+      const created = validateNewDeparture({ departOn: '2027-03-11', returnOn: '2027-03-25', priceTextOverride: 'NZD $1 www.x.example' })
+      expect(created.ok ? [] : created.errors).toEqual([{ field: 'priceTextOverride', code: 'invalid_price:forbidden_content' }])
+      const patched = validateDeparturePatch({ priceTextOverride: 'NZD $1 ' + 'x'.repeat(100) })
+      expect(patched.ok ? [] : patched.errors).toEqual([{ field: 'priceTextOverride', code: 'invalid_price:too_long' }])
+    })
+
+    it('single supplement: plain amounts pass, markup, links and over-long text are refused', () => {
+      expect(validateTourPatch({ singleSupplement: 'NZD $400' })).toEqual({ ok: true, value: { singleSupplement: 'NZD $400' } })
+      expect(validateTourPatch({ singleSupplement: '  ' })).toEqual({ ok: true, value: { singleSupplement: null } })
+      expect(validateTourPatch({ singleSupplement: null })).toEqual({ ok: true, value: { singleSupplement: null } })
+      expect(validateTourPatch({ singleSupplement: 'x'.repeat(100) }).ok).toBe(true)
+      expect(codesOf(validateTourPatch({ singleSupplement: 'x'.repeat(101) }))).toEqual(['singleSupplement:too_long'])
+      expect(codesOf(validateTourPatch({ singleSupplement: 'NZD $400 <i>' }))).toEqual([
+        'singleSupplement:invalid_price:forbidden_content',
+      ])
+      expect(codesOf(validateTourPatch({ singleSupplement: 'see https://x.example' }))).toEqual([
+        'singleSupplement:invalid_price:forbidden_content',
+      ])
+      expect(codesOf(validateTourPatch({ singleSupplement: 'www.x.example' }))).toEqual([
+        'singleSupplement:invalid_price:forbidden_content',
+      ])
+    })
+  })
+
+  describe('meals', () => {
+    const day = (meals: unknown) => ({ itinerary: [{ day: 1, title: 'Arrive', description: '', meals }] })
+
+    it('accepts up to 8 meals of up to 30 characters each', () => {
+      const meals = Array.from({ length: 8 }, (_, i) => `${'m'.repeat(29)}${i}`)
+      const result = validateTourPatch(day(meals))
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.value.itinerary?.[0].meals).toEqual(meals)
+    })
+
+    it('refuses a ninth meal', () => {
+      expect(codesOf(validateTourPatch(day(Array.from({ length: 9 }, (_, i) => `meal ${i}`))))).toEqual([
+        'itinerary[0].meals:too_many_items',
+      ])
+    })
+
+    it('refuses a meal of 61 characters and accepts the longest real one', () => {
+      expect(codesOf(validateTourPatch(day(['Breakfast', 'm'.repeat(61)])))).toEqual(['itinerary[0].meals:item_too_long'])
+      expect(validateTourPatch(day(['Dinner (Tibetan Dinner with Cultural Show)'])).ok).toBe(true)
+    })
+
+    it('other lists keep their own, larger limits (50 items of up to 500 characters)', () => {
+      const result = validateTourPatch({ highlights: Array.from({ length: 50 }, () => 'h'.repeat(500)) })
+      expect(result.ok).toBe(true)
+      expect(codesOf(validateTourPatch({ highlights: Array.from({ length: 51 }, () => 'h') }))).toEqual(['highlights:too_many_items'])
+    })
+  })
+})
+

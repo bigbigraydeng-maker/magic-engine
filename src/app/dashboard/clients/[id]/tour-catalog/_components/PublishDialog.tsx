@@ -6,7 +6,10 @@ import type {
   PublishPreviewResponse,
   PublishRequest,
 } from '@/lib/tour-catalog/publish-contract'
+import type { PublishContributor } from '@/lib/tour-catalog/catalog-contract'
 import { priceText } from './catalog-format'
+import { BRAND_BUTTON_CLASS } from './catalog-brand'
+import { useChannelsConnected } from './catalog-context'
 import {
   AckCheckbox,
   ChangeList,
@@ -192,7 +195,7 @@ function DialogActions(props: {
         type="button"
         onClick={onSubmit}
         disabled={!canSubmit}
-        className="rounded-lg bg-me-charcoal px-4 py-2 text-sm font-black text-white hover:bg-me-charcoal/85 disabled:cursor-not-allowed disabled:opacity-40"
+        className={`rounded-lg px-4 py-2 text-sm font-black disabled:cursor-not-allowed disabled:opacity-40 ${BRAND_BUTTON_CLASS}`}
       >
         {submitting ? '正在上架…' : '确认上架'}
       </button>
@@ -284,6 +287,30 @@ function PublishBody(props: PublishBodyProps): JSX.Element {
   )
 }
 
+/** The preview may carry who contributed how many changes since the last publish. */
+type PreviewWithContributors = PublishPreviewResponse & { contributors?: PublishContributor[] }
+
+export const PUBLISH_ALL_TEXT = '上架会把所有人还没上架的修改一起发出去'
+
+export const PUBLISH_SUBTITLE_CONNECTED =
+  '上架后，客人在官网等地方看到的内容会变成下面这样。这次会把所有人还没上架的改动一起发出去。'
+export const PUBLISH_SUBTITLE_UNCONNECTED =
+  '上架后，已上架的目录会变成下面这样（官网等渠道目前还没有接通，不会跟着变）。这次会把所有人还没上架的改动一起发出去。'
+
+function ContributorsLine(props: { preview: PreviewWithContributors }): JSX.Element | null {
+  const list = (props.preview.contributors ?? []).filter(c => c.changes > 0 && c.actorLabel)
+  if (list.length === 0) return null
+  const parts = list.map(c => `${c.actorLabel} ${c.changes} 处`).join('、')
+  return (
+    <p
+      data-testid="publish-contributors"
+      className="mt-3 rounded-lg border border-black/10 bg-me-ivory px-3 py-2 text-sm font-semibold text-me-charcoal/80"
+    >
+      这次包含 {list.length} 个账号的修改：{parts}。{PUBLISH_ALL_TEXT}。
+    </p>
+  )
+}
+
 export function PublishDialog(props: {
   clientId: string
   preview: PublishPreviewResponse
@@ -307,18 +334,15 @@ export function PublishDialog(props: {
     note,
   )
   const canSubmit = !submitting && hasChanges && gates.satisfied
-
-  async function handleSubmit() {
-    if (!canSubmit) return
-    await submit()
-  }
+  const connected = useChannelsConnected()
 
   return (
     <DialogShell
       title="上架前请核对"
-      subtitle="上架后，客人在官网等地方看到的内容会变成下面这样。这次会把所有人还没上架的改动一起发出去。"
+      subtitle={connected ? PUBLISH_SUBTITLE_CONNECTED : PUBLISH_SUBTITLE_UNCONNECTED}
       onClose={onClose}
     >
+      <ContributorsLine preview={preview} />
       <PublishBody
         preview={preview}
         gates={gates}
@@ -328,7 +352,9 @@ export function PublishDialog(props: {
         submitting={submitting}
         canSubmit={canSubmit}
         onClose={onClose}
-        onSubmit={handleSubmit}
+        onSubmit={() => {
+          if (canSubmit) void submit()
+        }}
       />
     </DialogShell>
   )

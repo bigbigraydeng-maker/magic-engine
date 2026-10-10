@@ -6,6 +6,7 @@ import type {
   PublishRequest,
 } from '@/lib/tour-catalog/publish-contract'
 import { PublishDialog } from '../PublishDialog'
+import { CatalogUiProvider } from '../catalog-context'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return {
@@ -348,5 +349,44 @@ describe('PublishDialog', () => {
     const fetchMock = vi.fn()
     renderDialog(makePreview({ changes: [] }), fetchMock)
     expect(screen.getByRole('button', { name: '确认上架' })).toBeDisabled()
+  })
+})
+
+describe('PublishDialog contributors and wording', () => {
+  it('lists how many accounts contributed how many changes, and that everything goes out together', () => {
+    const preview = {
+      ...makePreview(),
+      contributors: [
+        { actorLabel: 'amy@example.test', changes: 3 },
+        { actorLabel: 'bob@example.test', changes: 1 },
+      ],
+    }
+    renderDialog(preview, vi.fn())
+    const line = screen.getByTestId('publish-contributors')
+    expect(line.textContent).toBe(
+      '这次包含 2 个账号的修改：amy@example.test 3 处、bob@example.test 1 处。上架会把所有人还没上架的修改一起发出去。',
+    )
+  })
+
+  it('shows no contributors line when the preview has none', () => {
+    renderDialog(makePreview(), vi.fn())
+    expect(screen.queryByTestId('publish-contributors')).toBeNull()
+    renderDialog({ ...makePreview(), contributors: [] } as PublishPreviewResponse, vi.fn())
+    expect(screen.queryByTestId('publish-contributors')).toBeNull()
+  })
+
+  it('channels not connected: the subtitle does not say customers will see it on the website', () => {
+    vi.stubGlobal('fetch', vi.fn())
+    render(
+      <CatalogUiProvider value={{ channelsConnected: false, canPublish: true }}>
+        <PublishDialog clientId="c1" preview={makePreview()} onRefresh={vi.fn()} onClose={vi.fn()} onPublished={vi.fn()} />
+      </CatalogUiProvider>,
+    )
+    expect(
+      screen.getByText(
+        '上架后，已上架的目录会变成下面这样（官网等渠道目前还没有接通，不会跟着变）。这次会把所有人还没上架的改动一起发出去。',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/客人在官网等地方看到的内容/)).toBeNull()
   })
 })

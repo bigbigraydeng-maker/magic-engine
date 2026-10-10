@@ -30,6 +30,7 @@ import type { CommentReplyScopeTodoKind } from './comment-reply-scope-items'
 import type { MetaTokenHealthKind } from './meta-token-health-items'
 import type { DeployHealthItemKind } from './deploy-health-items'
 import type { LeadSheetItemKind } from './lead-sheet-items'
+import type { TourPublishRequestItemKind } from './tour-catalog-publish-request-items'
 import type { PlatformConnectionItemKind } from './platform-connection-items'
 import type { FacebookSyncItemKind } from './facebook-sync-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
@@ -207,6 +208,8 @@ export type ManualItemKind =
   | 'deploy_check_failed'
   /** 线索没写进客户的 Google 表格 —— 销售看的那张表缺人，留资 90 天后永久取不回 */
   | LeadSheetItemKind
+  /** 客户员工改了团目录、请我们上架 —— 不上架这些修改不会对外生效（对外动作，只有 ME 管理员能点） */
+  | TourPublishRequestItemKind
   /** 执行内核停手 / 等审批 / 被规则挡下 —— 必须有人看见，不许死在日志里 */
   | 'kernel_needs_human'
   /** 自治开关同步到执行内核失败 —— 面板档位和内核实际档位可能不一致（WP3.1a） */

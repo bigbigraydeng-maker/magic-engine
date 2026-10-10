@@ -19,6 +19,7 @@ import type {
   ProposalWarningView,
   TourPatchView,
 } from './types'
+import { assistantErrorLabel } from './catalog-format'
 
 /** A proposal plus the frozen diff lines captured when the reply arrived. */
 interface ProposalWithDiff extends AssistantProposalView {
@@ -516,12 +517,6 @@ function buildApplyUnits(
 // Panel
 // ---------------------------------------------------------------------------
 
-function assistantErrorLabel(code: string): string {
-  if (code === 'assistant_truncated') return '这个改动太长，AI 一次没写完，请拆成几步再说'
-  if (code === 'assistant_unavailable') return 'AI 助手暂时用不了，请稍后再试'
-  return code
-}
-
 /** Append applied/unapplied markers for a message's proposals to its history content. */
 function historyContent(m: ChatMessage, index: number, appliedKeys: Set<string>): string {
   if (!m.proposals || m.proposals.length === 0) return m.content
@@ -589,7 +584,7 @@ export function AssistantPanel({
       })
       if (!res.ok) {
         const { error: code } = (await res.json().catch(() => ({}))) as { error?: string }
-        throw new Error(assistantErrorLabel(code ?? `HTTP ${res.status}`))
+        throw new Error(assistantErrorLabel(code, res.status))
       }
       const data = (await res.json()) as AssistantReplyView
       setIgnoredCount(data.ignoredCount ?? 0)

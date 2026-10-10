@@ -683,6 +683,14 @@ export default function ClientDetailPage() {
                   badge="in_house"
                 />
               )}
+              {industryFeatureFlags(client?.industry).tour_catalog && (
+                <ToolCard
+                  href={`/dashboard/clients/${clientId}/tour-catalog`}
+                  title="团目录 · Beta"
+                  desc="团名、行程、展示价、出发班期统一在这里维护。测试版。"
+                  badge="in_house"
+                />
+              )}
               {industryFeatureFlags(client?.industry).projects && (
                 <ToolCard
                   href={`/dashboard/clients/${clientId}/projects`}

@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { adminAccess } from './access-fixtures'
 import { NextRequest, NextResponse } from 'next/server'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 
 vi.mock('@/lib/tour-catalog/access', () => ({
-  requireCatalogAdmin: vi.fn(),
+  requireCatalogAccess: vi.fn(),
 }))
 
 vi.mock('@/lib/tour-catalog/store', () => ({
@@ -13,18 +14,18 @@ vi.mock('@/lib/tour-catalog/store', () => ({
   rollbackBatch: vi.fn(),
 }))
 
-import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
+import { requireCatalogAccess } from '@/lib/tour-catalog/access'
 import { getBatch, applyBatch, rollbackBatch } from '@/lib/tour-catalog/store'
 import { POST as applyPOST } from '../batches/[batchId]/apply/route'
 import { POST as rollbackPOST } from '../batches/[batchId]/rollback/route'
 
-const requireCatalogAdminMock = vi.mocked(requireCatalogAdmin)
+const requireCatalogAccessMock = vi.mocked(requireCatalogAccess)
 const getBatchMock = vi.mocked(getBatch)
 const applyBatchMock = vi.mocked(applyBatch)
 const rollbackBatchMock = vi.mocked(rollbackBatch)
 
 const CLIENT_ID = 'client-1'
-const BATCH_ID = 'batch-1'
+const BATCH_ID = 'b0000000-0000-4000-8000-000000000001'
 const ACTOR = 'admin@example.com'
 const PLAN_HASH = 'hash-abc'
 
@@ -45,11 +46,11 @@ function emptyRequest(): NextRequest {
 }
 
 function allowAccess() {
-  requireCatalogAdminMock.mockResolvedValue({ ok: true, actor: ACTOR })
+  requireCatalogAccessMock.mockResolvedValue(adminAccess(ACTOR))
 }
 
 function denyAccess() {
-  requireCatalogAdminMock.mockResolvedValue({
+  requireCatalogAccessMock.mockResolvedValue({
     ok: false,
     response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
   })

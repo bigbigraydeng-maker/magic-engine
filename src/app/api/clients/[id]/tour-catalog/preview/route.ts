@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { NextResponse, type NextRequest } from 'next/server'
-import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
+import { requireCatalogAccess } from '@/lib/tour-catalog/access'
 import {
   parseCsv,
   parseDeparturesCsv,
@@ -112,7 +112,7 @@ export async function POST(
 ): Promise<NextResponse> {
   const { id: clientId } = await params
 
-  const access = await requireCatalogAdmin(clientId)
+  const access = await requireCatalogAccess(clientId, 'import')
   if (!access.ok) {
     return access.response
   }

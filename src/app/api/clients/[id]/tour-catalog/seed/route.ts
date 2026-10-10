@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
+import { requireCatalogAccess } from '@/lib/tour-catalog/access'
 import { fetchFirstPartyFeed, normalizeDomain, seedCatalog } from '@/lib/tour-catalog/seed'
 import { getClientDomain } from '@/lib/tour-catalog/store'
 import { firstPartyTourSourceUrl } from '@/lib/web-intelligence/first-party-tours'
@@ -13,7 +13,7 @@ export async function POST(
 ) {
   const { id: clientId } = await params
 
-  const access = await requireCatalogAdmin(clientId)
+  const access = await requireCatalogAccess(clientId, 'seed')
   if (!access.ok) return access.response
 
   // The site to read is the client's own configured domain, never a value from the request.

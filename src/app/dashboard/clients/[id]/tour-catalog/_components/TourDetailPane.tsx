@@ -6,7 +6,8 @@ import type { PublishChange } from '@/lib/tour-catalog/publish-contract'
 import { TourEditor } from './TourEditor'
 import { DeparturesEditor } from './DeparturesEditor'
 import { ChangeLog } from './ChangeLog'
-import { priceText, upcomingCount, SAVED_AS_DRAFT_TEXT } from './catalog-format'
+import { priceText, upcomingCount, savedAsDraftText } from './catalog-format'
+import { useCatalogUi } from './catalog-context'
 import { draftChangeLine, sortByRisk } from './tour-list-helpers'
 
 export interface TourDetailPaneProps {
@@ -111,11 +112,12 @@ function useDirtyReport(onDirtyChange: (dirty: boolean) => void): DirtyReport {
 
 function SavedNotice(props: { onOpenPublish: () => void }): JSX.Element {
   const { onOpenPublish } = props
+  const { channelsConnected, canPublish } = useCatalogUi()
   return (
     <p role="status" className="text-sm font-black text-[#5C8A4A]">
-      {SAVED_AS_DRAFT_TEXT}{' '}
+      {savedAsDraftText(channelsConnected)}{' '}
       <button type="button" onClick={onOpenPublish} className="ml-2 underline">
-        去上架
+        {canPublish ? '去上架' : '请 Magic Engine 上架'}
       </button>
     </p>
   )

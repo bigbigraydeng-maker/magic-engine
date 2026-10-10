@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import type { CatalogDepartureView } from './types'
+import { departureAddedText } from './catalog-format'
+import { useChannelsConnected } from './catalog-context'
+import { BRAND_BUTTON_CLASS } from './catalog-brand'
 
 const STATUS_LABELS: Record<CatalogDepartureView['status'], string> = {
   open: '可订',
@@ -213,7 +216,7 @@ function EditRow({ clientId, tourId, departure, onCancel, onSaved, onDirtyChange
                 type="button"
                 onClick={handleSave}
                 disabled={saving}
-                className="rounded-lg bg-me-ochre px-3 py-1 text-sm font-semibold text-me-ivory disabled:opacity-50"
+                className={`rounded-lg px-3 py-1 text-sm font-semibold disabled:opacity-50 ${BRAND_BUTTON_CLASS}`}
               >
                 保存
               </button>
@@ -275,8 +278,6 @@ interface AddFormProps {
   onDirtyChange?: (dirty: boolean) => void
 }
 
-const ADDED_TEXT = '已新增到草稿，客人还看不到'
-
 function AddForm({ clientId, tourId, onAdded, onDirtyChange }: AddFormProps) {
   const [departOn, setDepartOn] = useState('')
   const [returnOn, setReturnOn] = useState('')
@@ -285,6 +286,8 @@ function AddForm({ clientId, tourId, onAdded, onDirtyChange }: AddFormProps) {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([])
+  const connected = useChannelsConnected()
+  const ADDED_TEXT = departureAddedText(connected)
   useDirtyReport(departOn !== '' || returnOn !== '' || priceText.trim() !== '', onDirtyChange)
 
   async function handleSubmit(e: React.FormEvent) {
@@ -338,7 +341,7 @@ function AddForm({ clientId, tourId, onAdded, onDirtyChange }: AddFormProps) {
   const priceError = errorFor(fieldErrors, 'priceTextOverride')
 
   return (
-    <form onSubmit={handleSubmit} className="mt-6 rounded-xl border border-black/10 p-4">
+    <form onSubmit={handleSubmit} className="mt-6 border-t border-black/10 pt-4">
       <h3 className="mb-3 text-sm font-semibold text-me-charcoal">新增班期</h3>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         <label className="flex flex-col gap-1 text-sm text-me-charcoal">
@@ -407,7 +410,7 @@ function AddForm({ clientId, tourId, onAdded, onDirtyChange }: AddFormProps) {
         <button
           type="submit"
           disabled={saving}
-          className="rounded-lg bg-me-ochre px-4 py-1 text-sm font-semibold text-me-ivory disabled:opacity-50"
+          className={`rounded-lg px-4 py-1 text-sm font-semibold disabled:opacity-50 ${BRAND_BUTTON_CLASS}`}
         >
           添加这个班期
         </button>
@@ -442,6 +445,7 @@ export function DeparturesEditor({
   const [editDirty, setEditDirty] = useState(false)
   const [addDirty, setAddDirty] = useState(false)
   useDirtyReport(editDirty || addDirty, onDirtyChange)
+  const connected = useChannelsConnected()
   const sorted = [...departures].sort((a, b) => a.departOn.localeCompare(b.departOn))
 
   return (
@@ -480,7 +484,9 @@ export function DeparturesEditor({
         </table>
       </div>
       <p className="mt-2 text-xs text-me-charcoal/60">
-        某个班期单独填了展示价时，网站上这个班期以它为准；没填就用团的展示价。
+        {connected
+          ? '某个班期单独填了展示价时，网站上这个班期以它为准；没填就用团的展示价。'
+          : '某个班期单独填了展示价时，上架后的目录里这个班期以它为准；没填就用团的展示价。'}
       </p>
       <AddForm clientId={clientId} tourId={tourId} onAdded={onChanged} onDirtyChange={setAddDirty} />
     </div>

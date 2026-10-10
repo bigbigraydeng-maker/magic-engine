@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
+import { requireCatalogAccess } from '@/lib/tour-catalog/access'
 import { validateTourPatch, tourPatchToDb } from '@/lib/tour-catalog/edit-validation'
 import { updateTour } from '@/lib/tour-catalog/store-edit'
+import { asPlainObject, invalidIdResponse, isUuid, readJsonBody } from '@/lib/tour-catalog/http'
 import type { TourSavedResponse } from '@/lib/tour-catalog/api-contract'
 
 export const dynamic = 'force-dynamic'
@@ -19,18 +20,14 @@ function actorFor(req: NextRequest, actor: string): string {
 export async function PATCH(req: NextRequest, { params }: RouteContext) {
   const { id: clientId, tourId } = await params
 
-  const access = await requireCatalogAdmin(clientId)
+  const access = await requireCatalogAccess(clientId, 'edit')
   if (!access.ok) return access.response
 
-  let body: Record<string, unknown> = {}
-  try {
-    const parsed: unknown = await req.json()
-    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      body = parsed as Record<string, unknown>
-    }
-  } catch {
-    body = {}
-  }
+  if (!isUuid(tourId)) return invalidIdResponse()
+
+  const read = await readJsonBody(req)
+  if (!read.ok) return read.response
+  const body = asPlainObject(read.body) ?? {}
 
   const expectedUpdatedAt = body.expectedUpdatedAt
   if (typeof expectedUpdatedAt !== 'string' || expectedUpdatedAt.trim() === '') {

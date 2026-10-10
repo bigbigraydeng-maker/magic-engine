@@ -31,7 +31,8 @@ export function mapEditError(message: string): EditResult<never> {
     message.startsWith('invalid_null') ||
     message === 'depart_on_not_editable' ||
     message === 'depart_on_required' ||
-    message === 'invalid_dates'
+    message === 'invalid_dates' ||
+    message === 'invalid_price_text'
   ) {
     return { ok: false, code: 'invalid', message }
   }
@@ -162,6 +163,24 @@ export async function listChangesForTour(
     .select('*')
     .eq('client_id', clientId)
     .or(`entity_id.eq.${tourId},after->>tour_id.eq.${tourId},before->>tour_id.eq.${tourId}`)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (res.error) {
+    throw new Error(res.error.message)
+  }
+  return rowsOf(res.data).map(mapChangeLogRow)
+}
+
+/** The newest rows of the whole catalog's change log (all tours and departures of one client). */
+export async function listRecentChanges(
+  db: SupabaseClient,
+  clientId: string,
+  limit = 1000,
+): Promise<ChangeLogEntry[]> {
+  const res = await db
+    .from('tour_catalog_change_log')
+    .select('*')
+    .eq('client_id', clientId)
     .order('created_at', { ascending: false })
     .limit(limit)
   if (res.error) {

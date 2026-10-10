@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ChangeLogEntryView } from './types'
 import type { ChangesResponse } from '@/lib/tour-catalog/api-contract'
+import { formatDateTimeWithYear } from './catalog-format'
+import { CHANGE_SOURCE_LABELS, SELF_REPORTED_TITLE, parseChangeActor } from './change-source'
 
 const FIELD_NAMES: Record<string, string> = {
   name: '团名',
@@ -53,28 +55,25 @@ function formatValue(value: unknown): string {
   return '（已修改）'
 }
 
-function formatTime(iso: string): string {
-  const d = new Date(iso)
-  const month = d.getMonth() + 1
-  const day = d.getDate()
-  const hh = String(d.getHours()).padStart(2, '0')
-  const mm = String(d.getMinutes()).padStart(2, '0')
-  return `${month}月${day}日 ${hh}:${mm}`
-}
-
-function formatActor(actor: string): string {
-  if (actor.startsWith('edit by ')) return `手工修改（${actor.slice('edit by '.length)}）`
-  if (actor.startsWith('import:')) {
-    const byIndex = actor.indexOf(' by ')
-    if (byIndex >= 0) return `班期表导入（${actor.slice(byIndex + ' by '.length)}）`
-    return '班期表导入'
-  }
-  if (actor.startsWith('rollback:')) {
-    const by = actor.indexOf(' by ')
-    return by >= 0 ? `撤销导入（${actor.slice(by + 4)}）` : '撤销导入'
-  }
-  if (actor === 'system') return '系统'
-  return actor
+/** Who + a small source label, instead of the raw actor text. */
+function ActorCell(props: { actor: string }): JSX.Element {
+  const { who, source } = parseChangeActor(props.actor)
+  return (
+    <>
+      {who ? <span className="break-all">{who}</span> : null}{' '}
+      <span
+        data-source={source}
+        className="rounded-full border border-black/10 bg-me-ivory px-2 py-0.5 text-xs font-black text-me-charcoal/70"
+      >
+        {CHANGE_SOURCE_LABELS[source]}
+      </span>
+      {source === 'assistant' ? (
+        <span title={SELF_REPORTED_TITLE} className="ml-1 text-[11px] font-semibold text-me-charcoal/55">
+          自报
+        </span>
+      ) : null}
+    </>
+  )
 }
 
 function asStringArray(value: unknown): string[] {
@@ -245,7 +244,7 @@ export function ChangeLog({
 
   return (
     <details
-      className="mt-6 rounded-xl border border-black/10 p-4"
+      className="mt-6 border-t border-black/10 pt-4"
       onToggle={(e) => {
         setOpen((e.target as HTMLDetailsElement).open)
       }}
@@ -267,9 +266,9 @@ export function ChangeLog({
           <ul className="flex flex-col gap-2">
             {shown.map((entry) => (
               <li key={entry.id} className="text-sm text-me-charcoal">
-                <span className="text-me-charcoal/60">{formatTime(entry.createdAt)}</span>
+                <span className="text-me-charcoal/60">{formatDateTimeWithYear(entry.createdAt)}</span>
                 {' · '}
-                <span>{formatActor(entry.actor)}</span>
+                <ActorCell actor={entry.actor} />
                 {' · '}
                 <span>{describeEntry(entry)}</span>
               </li>

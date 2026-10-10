@@ -1,18 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { adminAccess } from './access-fixtures'
 
 // vi.mock is hoisted above plain consts, so the mock fns must come from vi.hoisted.
-const { requireCatalogAdmin, loadDraftCatalog, runAssistant } = vi.hoisted(() => ({
-  requireCatalogAdmin: vi.fn(),
-  loadDraftCatalog: vi.fn(),
-  runAssistant: vi.fn(),
-}))
+const { requireCatalogAccess, loadDraftCatalog, runAssistant, reserveAssistantCall, recordAssistantCost } =
+  vi.hoisted(() => ({
+    requireCatalogAccess: vi.fn(),
+    loadDraftCatalog: vi.fn(),
+    runAssistant: vi.fn(),
+    reserveAssistantCall: vi.fn(),
+    recordAssistantCost: vi.fn(),
+  }))
 
-vi.mock('@/lib/tour-catalog/access', () => ({ requireCatalogAdmin }))
+vi.mock('@/lib/tour-catalog/access', () => ({ requireCatalogAccess }))
 vi.mock('@/lib/tour-catalog/store', () => ({ loadDraftCatalog }))
-vi.mock('@/lib/tour-catalog/assistant', () => ({ runAssistant }))
+vi.mock('@/lib/tour-catalog/store-access', () => ({ reserveAssistantCall, recordAssistantCost }))
+// Keep the real limits and error class; only the model call is replaced.
+vi.mock('@/lib/tour-catalog/assistant', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tour-catalog/assistant')>()),
+  runAssistant,
+}))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 
 import { POST } from '../assistant/route'
+import { AssistantRunError } from '@/lib/tour-catalog/assistant'
+import { editorAccess } from './access-fixtures'
 
 const CLIENT_ID = 'client-1'
 
@@ -30,15 +41,17 @@ function makeRequest(body: unknown): Request {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  requireCatalogAdmin.mockResolvedValue({ ok: true, actor: 'admin@example.com' })
+  requireCatalogAccess.mockResolvedValue(adminAccess('admin@example.com'))
   loadDraftCatalog.mockResolvedValue({ tours: [], departures: [], aliases: [] })
   runAssistant.mockResolvedValue({ reply: 'ok', proposals: [], costUsd: 0.01 })
+  reserveAssistantCall.mockResolvedValue('ok')
+  recordAssistantCost.mockResolvedValue(undefined)
 })
 
 describe('POST tour-catalog assistant route', () => {
   it('returns the access response when access is denied', async () => {
     const denied = new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403 })
-    requireCatalogAdmin.mockResolvedValue({ ok: false, response: denied })
+    requireCatalogAccess.mockResolvedValue({ ok: false, response: denied })
 
     const res = await POST(makeRequest({ message: 'hi' }), makeContext())
 
@@ -139,5 +152,127 @@ describe('size limits', () => {
     await POST(makeRequest({ message: 'hi', history: [{ role: 'assistant', content: 'b'.repeat(5000) }] }), makeContext())
     const call = runAssistant.mock.calls[0][0] as { history: Array<{ content: string }> }
     expect(call.history[0].content.length).toBe(4000)
+  })
+})
+
+describe('daily allowance (design §6.10.1 item 9)', () => {
+  const todayUtc = () => new Date().toISOString().slice(0, 10)
+
+  it('reserves with the session email, the UTC day and the three limits before calling the model', async () => {
+    const order: string[] = []
+    reserveAssistantCall.mockImplementation(async () => {
+      order.push('reserve')
+      return 'ok'
+    })
+    runAssistant.mockImplementation(async () => {
+      order.push('model')
+      return { reply: 'ok', proposals: [], costUsd: 0.05 }
+    })
+
+    await POST(makeRequest({ message: 'hi', email: 'spoof@evil.example', actor: 'spoof@evil.example' }), makeContext())
+
+    expect(order).toEqual(['reserve', 'model'])
+    expect(reserveAssistantCall).toHaveBeenCalledWith(expect.anything(), CLIENT_ID, todayUtc(), 'admin@example.com', {
+      userDaily: 40,
+      clientDaily: 150,
+      clientDailyCostUsd: 10,
+    })
+  })
+
+  it('answers 429 assistant_limit on call N+1 and does not call the model or record a cost', async () => {
+    const limit = 3
+    let used = 0
+    reserveAssistantCall.mockImplementation(async () => {
+      if (used >= limit) return 'limit'
+      used += 1
+      return 'ok'
+    })
+
+    for (let i = 0; i < limit; i++) {
+      const ok = await POST(makeRequest({ message: 'hi' }), makeContext())
+      expect(ok.status).toBe(200)
+    }
+    const refused = await POST(makeRequest({ message: 'hi' }), makeContext())
+
+    expect(refused.status).toBe(429)
+    await expect(refused.json()).resolves.toEqual({ error: 'assistant_limit' })
+    expect(runAssistant).toHaveBeenCalledTimes(limit)
+    expect(loadDraftCatalog).toHaveBeenCalledTimes(limit)
+    expect(recordAssistantCost).toHaveBeenCalledTimes(limit)
+  })
+
+  it('refuses with 502 and does not call the model when the reservation cannot be made', async () => {
+    reserveAssistantCall.mockResolvedValue('error')
+
+    const res = await POST(makeRequest({ message: 'hi' }), makeContext())
+
+    expect(res.status).toBe(502)
+    await expect(res.json()).resolves.toEqual({ error: 'assistant_unavailable' })
+    expect(runAssistant).not.toHaveBeenCalled()
+    expect(recordAssistantCost).not.toHaveBeenCalled()
+  })
+
+  it('treats any unexpected reservation answer as a refusal', async () => {
+    reserveAssistantCall.mockResolvedValue(undefined)
+    const res = await POST(makeRequest({ message: 'hi' }), makeContext())
+    expect(res.status).toBe(502)
+    expect(runAssistant).not.toHaveBeenCalled()
+  })
+
+  it('does not reserve for a request that is refused before the model (bad body, denied access)', async () => {
+    await POST(makeRequest({}), makeContext())
+    requireCatalogAccess.mockResolvedValue({ ok: false, response: new Response('{}', { status: 403 }) })
+    await POST(makeRequest({ message: 'hi' }), makeContext())
+    expect(reserveAssistantCall).not.toHaveBeenCalled()
+  })
+
+  it('records the cost after a successful call', async () => {
+    runAssistant.mockResolvedValue({ reply: 'ok', proposals: [], costUsd: 0.07 })
+    await POST(makeRequest({ message: 'hi' }), makeContext())
+    expect(recordAssistantCost).toHaveBeenCalledTimes(1)
+    expect(recordAssistantCost).toHaveBeenCalledWith(expect.anything(), CLIENT_ID, todayUtc(), 'admin@example.com', 0.07)
+  })
+
+  it('still records what was spent when the model call throws', async () => {
+    runAssistant.mockRejectedValue(new AssistantRunError('provider_down', 0.31))
+
+    const res = await POST(makeRequest({ message: 'hi' }), makeContext())
+
+    expect(res.status).toBe(502)
+    await expect(res.json()).resolves.toEqual({ error: 'assistant_unavailable' })
+    expect(recordAssistantCost).toHaveBeenCalledWith(expect.anything(), CLIENT_ID, todayUtc(), 'admin@example.com', 0.31)
+  })
+
+  it('records the cost of a truncated reply and keeps the truncated error code', async () => {
+    runAssistant.mockRejectedValue(new AssistantRunError('assistant_truncated', 0.12))
+    const res = await POST(makeRequest({ message: 'hi' }), makeContext())
+    expect(res.status).toBe(502)
+    await expect(res.json()).resolves.toEqual({ error: 'assistant_truncated' })
+    expect(recordAssistantCost).toHaveBeenCalledWith(expect.anything(), CLIENT_ID, todayUtc(), 'admin@example.com', 0.12)
+  })
+
+  it('records zero when the failure happened before any model call (catalog read failed)', async () => {
+    loadDraftCatalog.mockRejectedValue(new Error('relation "tour_catalog_tours" does not exist'))
+    const res = await POST(makeRequest({ message: 'hi' }), makeContext())
+    expect(res.status).toBe(502)
+    const body = await res.text()
+    expect(body).not.toContain('tour_catalog_tours')
+    expect(recordAssistantCost).toHaveBeenCalledWith(expect.anything(), CLIENT_ID, todayUtc(), 'admin@example.com', 0)
+  })
+
+  it('passes viewerCanPublish from the permissions: true for an admin, false for a client editor', async () => {
+    await POST(makeRequest({ message: 'hi' }), makeContext())
+    expect(runAssistant).toHaveBeenLastCalledWith(expect.objectContaining({ viewerCanPublish: true }))
+
+    requireCatalogAccess.mockResolvedValue(editorAccess('staff@example.com'))
+    await POST(makeRequest({ message: 'hi' }), makeContext())
+    expect(runAssistant).toHaveBeenLastCalledWith(expect.objectContaining({ viewerCanPublish: false }))
+    expect(reserveAssistantCall).toHaveBeenLastCalledWith(
+      expect.anything(),
+      CLIENT_ID,
+      todayUtc(),
+      'staff@example.com',
+      expect.anything(),
+    )
   })
 })

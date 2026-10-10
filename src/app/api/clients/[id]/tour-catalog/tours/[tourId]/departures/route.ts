@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
+import { requireCatalogAccess } from '@/lib/tour-catalog/access'
 import { validateNewDeparture } from '@/lib/tour-catalog/edit-validation'
 import { saveDeparture } from '@/lib/tour-catalog/store-edit'
+import { invalidIdResponse, isUuid, readJsonBody } from '@/lib/tour-catalog/http'
 import type { DepartureSavedResponse } from '@/lib/tour-catalog/api-contract'
 
 export const dynamic = 'force-dynamic'
@@ -19,15 +20,14 @@ function actorFor(req: NextRequest, actor: string): string {
 export async function POST(req: NextRequest, { params }: RouteContext) {
   const { id: clientId, tourId } = await params
 
-  const access = await requireCatalogAdmin(clientId)
+  const access = await requireCatalogAccess(clientId, 'edit')
   if (!access.ok) return access.response
 
-  let body: unknown = {}
-  try {
-    body = await req.json()
-  } catch {
-    body = {}
-  }
+  if (!isUuid(tourId)) return invalidIdResponse()
+
+  const read = await readJsonBody(req)
+  if (!read.ok) return read.response
+  const body = read.body
 
   const validated = validateNewDeparture(body)
   if (!validated.ok) {

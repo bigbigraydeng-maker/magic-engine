@@ -1,15 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { adminAccess } from './access-fixtures'
 import { NextRequest, NextResponse } from 'next/server'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 
 // vi.mock is hoisted above plain consts, so the mock fns must come from vi.hoisted.
-const { requireCatalogAdmin, updateTour, saveDeparture } = vi.hoisted(() => ({
-  requireCatalogAdmin: vi.fn(),
+const { requireCatalogAccess, updateTour, saveDeparture } = vi.hoisted(() => ({
+  requireCatalogAccess: vi.fn(),
   updateTour: vi.fn(),
   saveDeparture: vi.fn(),
 }))
-vi.mock('@/lib/tour-catalog/access', () => ({ requireCatalogAdmin }))
+vi.mock('@/lib/tour-catalog/access', () => ({ requireCatalogAccess }))
 vi.mock('@/lib/tour-catalog/store-edit', () => ({ updateTour, saveDeparture }))
 
 import { PATCH as patchTour } from '../tours/[tourId]/route'
@@ -17,8 +18,8 @@ import { POST as postDeparture } from '../tours/[tourId]/departures/route'
 import { PATCH as patchDeparture } from '../departures/[departureId]/route'
 
 const CLIENT_ID = 'client-1'
-const TOUR_ID = 'tour-1'
-const DEPARTURE_ID = 'dep-1'
+const TOUR_ID = '11111111-1111-4111-8111-111111111111'
+const DEPARTURE_ID = '22222222-2222-4222-8222-222222222222'
 const ACTOR = 'admin@example.com'
 const ASSISTANT_ACTOR = `${ACTOR} (AI 助手)`
 
@@ -52,7 +53,7 @@ async function bodyOf(res: NextResponse): Promise<Record<string, unknown>> {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  requireCatalogAdmin.mockResolvedValue({ ok: true, actor: ACTOR })
+  requireCatalogAccess.mockResolvedValue(adminAccess(ACTOR))
 })
 
 describe('PATCH tours/[tourId]', () => {
@@ -172,15 +173,16 @@ describe('PATCH tours/[tourId]', () => {
     expect(await bodyOf(res)).toEqual({ error: 'save_failed' })
   })
 
-  it('treats invalid JSON as an empty body', async () => {
+  it('refuses invalid JSON with 400 and never reaches the database', async () => {
     const res = await patchTour(rawRequest('{not json'), tourContext())
     expect(res.status).toBe(400)
-    expect(await bodyOf(res)).toEqual({ error: 'expected_updated_at_required' })
+    expect(await bodyOf(res)).toEqual({ error: 'invalid_json' })
+    expect(updateTour).not.toHaveBeenCalled()
   })
 
   it('passes through the access denial response', async () => {
     const denied = NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    requireCatalogAdmin.mockResolvedValue({ ok: false, response: denied })
+    requireCatalogAccess.mockResolvedValue({ ok: false, response: denied })
     const res = await patchTour(
       jsonRequest({ expectedUpdatedAt: 'v1', patch: { name: 'X' } }),
       tourContext(),
@@ -287,16 +289,16 @@ describe('POST tours/[tourId]/departures', () => {
     expect(await bodyOf(res)).toEqual({ error: 'save_failed' })
   })
 
-  it('treats invalid JSON as an empty body', async () => {
+  it('refuses invalid JSON with 400 and never reaches the database', async () => {
     const res = await postDeparture(rawRequest('{not json'), tourContext())
     expect(res.status).toBe(400)
-    const body = await bodyOf(res)
-    expect(body.error).toBe('invalid_fields')
+    expect(await bodyOf(res)).toEqual({ error: 'invalid_json' })
+    expect(saveDeparture).not.toHaveBeenCalled()
   })
 
   it('passes through the access denial response', async () => {
     const denied = NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    requireCatalogAdmin.mockResolvedValue({ ok: false, response: denied })
+    requireCatalogAccess.mockResolvedValue({ ok: false, response: denied })
     const res = await postDeparture(jsonRequest(validBody), tourContext())
     expect(res.status).toBe(403)
     expect(saveDeparture).not.toHaveBeenCalled()
@@ -410,15 +412,16 @@ describe('PATCH departures/[departureId]', () => {
     expect(await bodyOf(res)).toEqual({ error: 'save_failed' })
   })
 
-  it('treats invalid JSON as an empty body', async () => {
+  it('refuses invalid JSON with 400 and never reaches the database', async () => {
     const res = await patchDeparture(rawRequest('{not json'), departureContext())
     expect(res.status).toBe(400)
-    expect(await bodyOf(res)).toEqual({ error: 'tour_and_version_required' })
+    expect(await bodyOf(res)).toEqual({ error: 'invalid_json' })
+    expect(saveDeparture).not.toHaveBeenCalled()
   })
 
   it('passes through the access denial response', async () => {
     const denied = NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    requireCatalogAdmin.mockResolvedValue({ ok: false, response: denied })
+    requireCatalogAccess.mockResolvedValue({ ok: false, response: denied })
     const res = await patchDeparture(jsonRequest(validBody), departureContext())
     expect(res.status).toBe(403)
     expect(await bodyOf(res)).toEqual({ error: 'Forbidden' })
@@ -428,13 +431,110 @@ describe('PATCH departures/[departureId]', () => {
 
 describe('database date rule surfaces as a field error', () => {
   it('PATCH departure: invalid_dates becomes a returnOn field error the form can show', async () => {
-    requireCatalogAdmin.mockResolvedValue({ ok: true, actor: 'a@b.c' })
+    requireCatalogAccess.mockResolvedValue(adminAccess('a@b.c'))
     saveDeparture.mockResolvedValue({ ok: false, code: 'invalid', message: 'invalid_dates' })
     const res = await patchDeparture(
-      jsonRequest({ tourId: 'tour-1', expectedUpdatedAt: '2026-10-10T00:00:00Z', patch: { returnOn: '2027-01-01' } }),
-      { params: Promise.resolve({ id: 'client-1', departureId: 'dep-1' }) },
+      jsonRequest({ tourId: TOUR_ID, expectedUpdatedAt: '2026-10-10T00:00:00Z', patch: { returnOn: '2027-01-01' } }),
+      { params: Promise.resolve({ id: 'client-1', departureId: DEPARTURE_ID }) },
     )
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({ error: 'invalid_fields', fields: [{ field: 'returnOn', code: 'return_before_depart' }] })
   })
 })
+
+describe('input hardening on the three edit routes (design §6.10.1 item 7)', () => {
+  const OVERSIZED = JSON.stringify({ expectedUpdatedAt: 'v1', tourId: TOUR_ID, patch: { name: 'x'.repeat(65 * 1024) } })
+
+  it('PATCH tour: a body over 64KB is refused with 413 before parsing', async () => {
+    const res = await patchTour(rawRequest(OVERSIZED), tourContext())
+    expect(res.status).toBe(413)
+    expect(await bodyOf(res)).toEqual({ error: 'request_too_large' })
+    expect(updateTour).not.toHaveBeenCalled()
+  })
+
+  it('POST departure: a body over 64KB is refused with 413 before parsing', async () => {
+    const res = await postDeparture(rawRequest(OVERSIZED), tourContext())
+    expect(res.status).toBe(413)
+    expect(await bodyOf(res)).toEqual({ error: 'request_too_large' })
+    expect(saveDeparture).not.toHaveBeenCalled()
+  })
+
+  it('PATCH departure: a body over 64KB is refused with 413 before parsing', async () => {
+    const res = await patchDeparture(rawRequest(OVERSIZED), departureContext())
+    expect(res.status).toBe(413)
+    expect(await bodyOf(res)).toEqual({ error: 'request_too_large' })
+    expect(saveDeparture).not.toHaveBeenCalled()
+  })
+
+  it('a body just under 64KB is still read', async () => {
+    const res = await patchTour(
+      rawRequest(JSON.stringify({ expectedUpdatedAt: 'v1', patch: { bogus: 'x'.repeat(60 * 1024) } })),
+      tourContext(),
+    )
+    expect(res.status).toBe(400)
+    expect((await bodyOf(res)).error).toBe('invalid_fields')
+  })
+
+  it.each(['tour-1', '1', "x' or '1'='1", '11111111-1111-4111-8111-11111111111', '../../etc'])(
+    'PATCH tour: path id %s is not a uuid → 400 invalid_id, not a 500',
+    async (badId) => {
+      const res = await patchTour(jsonRequest({ expectedUpdatedAt: 'v1', patch: { name: 'X' } }), {
+        params: Promise.resolve({ id: CLIENT_ID, tourId: badId }),
+      })
+      expect(res.status).toBe(400)
+      expect(await bodyOf(res)).toEqual({ error: 'invalid_id' })
+      expect(updateTour).not.toHaveBeenCalled()
+    },
+  )
+
+  it('POST departure: a non-uuid tour id → 400 invalid_id', async () => {
+    const res = await postDeparture(jsonRequest({ departOn: '2027-03-11', returnOn: '2027-03-25' }), {
+      params: Promise.resolve({ id: CLIENT_ID, tourId: 'not-a-uuid' }),
+    })
+    expect(res.status).toBe(400)
+    expect(await bodyOf(res)).toEqual({ error: 'invalid_id' })
+    expect(saveDeparture).not.toHaveBeenCalled()
+  })
+
+  it('PATCH departure: a non-uuid departure id → 400 invalid_id', async () => {
+    const res = await patchDeparture(
+      jsonRequest({ tourId: TOUR_ID, expectedUpdatedAt: 'v1', patch: { status: 'closed' } }),
+      { params: Promise.resolve({ id: CLIENT_ID, departureId: 'dep-1' }) },
+    )
+    expect(res.status).toBe(400)
+    expect(await bodyOf(res)).toEqual({ error: 'invalid_id' })
+    expect(saveDeparture).not.toHaveBeenCalled()
+  })
+
+  it('PATCH departure: a non-uuid tourId in the body → 400 invalid_id', async () => {
+    const res = await patchDeparture(
+      jsonRequest({ tourId: 'tour-1', expectedUpdatedAt: 'v1', patch: { status: 'closed' } }),
+      departureContext(),
+    )
+    expect(res.status).toBe(400)
+    expect(await bodyOf(res)).toEqual({ error: 'invalid_id' })
+    expect(saveDeparture).not.toHaveBeenCalled()
+  })
+
+  it('access is checked before the id and the body: a denied caller learns nothing about either', async () => {
+    const denied = NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    requireCatalogAccess.mockResolvedValue({ ok: false, response: denied })
+    const res = await patchTour(rawRequest(OVERSIZED), {
+      params: Promise.resolve({ id: CLIENT_ID, tourId: 'not-a-uuid' }),
+    })
+    expect(res.status).toBe(403)
+  })
+
+  it('a database failure is reported as save_failed without the database text', async () => {
+    updateTour.mockResolvedValue({
+      ok: false,
+      code: 'error',
+      message: 'new row for relation "tour_catalog_tours" violates check constraint "tour_catalog_tours_text_limits"',
+    })
+    const res = await patchTour(jsonRequest({ expectedUpdatedAt: 'v1', patch: { name: 'X' } }), tourContext())
+    expect(res.status).toBe(500)
+    const text = JSON.stringify(await bodyOf(res))
+    expect(text).toBe('{"error":"save_failed"}')
+  })
+})
+

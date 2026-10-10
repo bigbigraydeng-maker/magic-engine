@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import type { CatalogDepartureView, CatalogTourView } from './types'
 import { priceText, todayIso } from './catalog-format'
+import { BRAND_SELECTED_BORDER_CLASS } from './catalog-brand'
 import {
   TOUR_FILTERS,
   compactPrice,
@@ -30,7 +31,7 @@ function ListToolbar({ query, filter, onQueryChange, onFilterChange }: ListToolb
         placeholder="搜索团名"
         value={query}
         onChange={e => onQueryChange(e.target.value)}
-        className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-charcoal/40 focus:outline-none focus:ring-2 focus:ring-me-ochre/40"
+        className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-charcoal/70 focus:outline-none focus:ring-2 focus:ring-me-ochre/40"
       />
       <div className="mt-2 flex flex-wrap gap-1.5">
         {TOUR_FILTERS.map(f => {
@@ -68,7 +69,7 @@ interface TourRowProps {
 function TourRow({ tour, groupTitle, changed, selected, nextDate, onSelect }: TourRowProps) {
   const base = 'flex w-full items-center gap-2 border-l-4 px-3 py-2 text-left'
   const state = selected
-    ? 'border-me-ochre bg-me-ivory'
+    ? `${BRAND_SELECTED_BORDER_CLASS} bg-me-ivory`
     : 'border-transparent hover:bg-me-ivory/60'
   return (
     <li>

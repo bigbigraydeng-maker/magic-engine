@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { adminAccess } from './access-fixtures'
 import { NextRequest } from 'next/server'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 
 vi.mock('@/lib/tour-catalog/access', () => ({
-  requireCatalogAdmin: vi.fn(),
+  requireCatalogAccess: vi.fn(),
 }))
 
 vi.mock('@/lib/tour-catalog/store', () => ({
@@ -29,7 +30,7 @@ vi.mock('@/lib/web-intelligence/first-party-tours', () => ({
   firstPartyTourSourceUrl: vi.fn(),
 }))
 
-import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
+import { requireCatalogAccess } from '@/lib/tour-catalog/access'
 import {
   addAlias,
   removeAlias,
@@ -44,7 +45,7 @@ import { POST as seedPOST } from '../seed/route'
 import { POST as aliasesPOST, DELETE as aliasesDELETE } from '../aliases/route'
 import { POST as rollbackPOST } from '../batches/[batchId]/rollback/route'
 
-const requireCatalogAdminMock = vi.mocked(requireCatalogAdmin)
+const requireCatalogAccessMock = vi.mocked(requireCatalogAccess)
 const addAliasMock = vi.mocked(addAlias)
 const removeAliasMock = vi.mocked(removeAlias)
 const getBatchMock = vi.mocked(getBatch)
@@ -78,11 +79,11 @@ function makeParams(): { params: Promise<{ id: string }> } {
 }
 
 function makeBatchParams(): { params: Promise<{ id: string; batchId: string }> } {
-  return { params: Promise.resolve({ id: CLIENT_ID, batchId: 'batch-1' }) }
+  return { params: Promise.resolve({ id: CLIENT_ID, batchId: 'b0000000-0000-4000-8000-000000000001' }) }
 }
 
 function allowAccess(): void {
-  requireCatalogAdminMock.mockResolvedValue({ ok: true, actor: 'admin@example.com' })
+  requireCatalogAccessMock.mockResolvedValue(adminAccess('admin@example.com'))
 }
 
 beforeEach(() => {
@@ -164,7 +165,7 @@ describe('POST /tour-catalog/seed', () => {
     const denied = new Response(JSON.stringify({ error: 'Forbidden' }), {
       status: 403,
     })
-    requireCatalogAdminMock.mockResolvedValue({
+    requireCatalogAccessMock.mockResolvedValue({
       ok: false,
       response: denied as never,
     })
@@ -272,7 +273,7 @@ describe('POST /tour-catalog/aliases', () => {
     const denied = new Response(JSON.stringify({ error: 'Forbidden' }), {
       status: 403,
     })
-    requireCatalogAdminMock.mockResolvedValue({
+    requireCatalogAccessMock.mockResolvedValue({
       ok: false,
       response: denied as never,
     })
@@ -343,7 +344,7 @@ describe('DELETE /tour-catalog/aliases', () => {
     const denied = new Response(JSON.stringify({ error: 'Forbidden' }), {
       status: 403,
     })
-    requireCatalogAdminMock.mockResolvedValue({
+    requireCatalogAccessMock.mockResolvedValue({
       ok: false,
       response: denied as never,
     })
@@ -368,7 +369,7 @@ describe('POST /tour-catalog/batches/[batchId]/rollback', () => {
 
   it('returns 409 conflict with the departure label when the message is parseable', async () => {
     allowAccess()
-    getBatchMock.mockResolvedValue({ id: 'batch-1' } as never)
+    getBatchMock.mockResolvedValue({ id: 'b0000000-0000-4000-8000-000000000001' } as never)
     rollbackBatchMock.mockResolvedValue({
       ok: false,
       code: 'conflict',
@@ -397,7 +398,7 @@ describe('POST /tour-catalog/batches/[batchId]/rollback', () => {
 
   it('returns 409 conflict with reason missing when the message says missing', async () => {
     allowAccess()
-    getBatchMock.mockResolvedValue({ id: 'batch-1' } as never)
+    getBatchMock.mockResolvedValue({ id: 'b0000000-0000-4000-8000-000000000001' } as never)
     rollbackBatchMock.mockResolvedValue({
       ok: false,
       code: 'conflict',
@@ -421,7 +422,7 @@ describe('POST /tour-catalog/batches/[batchId]/rollback', () => {
 
   it('returns 409 conflict without a conflict field when the label is null', async () => {
     allowAccess()
-    getBatchMock.mockResolvedValue({ id: 'batch-1' } as never)
+    getBatchMock.mockResolvedValue({ id: 'b0000000-0000-4000-8000-000000000001' } as never)
     rollbackBatchMock.mockResolvedValue({
       ok: false,
       code: 'conflict',
@@ -435,7 +436,7 @@ describe('POST /tour-catalog/batches/[batchId]/rollback', () => {
 
   it('returns 409 conflict without a conflict field when the message is unparseable', async () => {
     allowAccess()
-    getBatchMock.mockResolvedValue({ id: 'batch-1' } as never)
+    getBatchMock.mockResolvedValue({ id: 'b0000000-0000-4000-8000-000000000001' } as never)
     rollbackBatchMock.mockResolvedValue({
       ok: false,
       code: 'conflict',
@@ -449,7 +450,7 @@ describe('POST /tour-catalog/batches/[batchId]/rollback', () => {
 
   it('returns 409 not_applicable', async () => {
     allowAccess()
-    getBatchMock.mockResolvedValue({ id: 'batch-1' } as never)
+    getBatchMock.mockResolvedValue({ id: 'b0000000-0000-4000-8000-000000000001' } as never)
     rollbackBatchMock.mockResolvedValue({
       ok: false,
       code: 'not_applicable',
@@ -462,7 +463,7 @@ describe('POST /tour-catalog/batches/[batchId]/rollback', () => {
 
   it('returns 500 rollback_failed on error', async () => {
     allowAccess()
-    getBatchMock.mockResolvedValue({ id: 'batch-1' } as never)
+    getBatchMock.mockResolvedValue({ id: 'b0000000-0000-4000-8000-000000000001' } as never)
     rollbackBatchMock.mockResolvedValue({
       ok: false,
       code: 'error',
@@ -475,7 +476,7 @@ describe('POST /tour-catalog/batches/[batchId]/rollback', () => {
 
   it('returns 200 with the result on success', async () => {
     allowAccess()
-    getBatchMock.mockResolvedValue({ id: 'batch-1' } as never)
+    getBatchMock.mockResolvedValue({ id: 'b0000000-0000-4000-8000-000000000001' } as never)
     rollbackBatchMock.mockResolvedValue({ ok: true, result: { reverted: 2 } })
     const res = await rollbackPOST(makeRequest({}), makeBatchParams())
     expect(res.status).toBe(200)
@@ -486,7 +487,7 @@ describe('POST /tour-catalog/batches/[batchId]/rollback', () => {
     const denied = new Response(JSON.stringify({ error: 'Forbidden' }), {
       status: 403,
     })
-    requireCatalogAdminMock.mockResolvedValue({
+    requireCatalogAccessMock.mockResolvedValue({
       ok: false,
       response: denied as never,
     })

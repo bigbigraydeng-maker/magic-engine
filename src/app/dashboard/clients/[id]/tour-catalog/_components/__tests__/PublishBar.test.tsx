@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { PublishBar } from '../PublishBar'
 import type { PublishPreviewResponse } from '@/lib/tour-catalog/publish-contract'
+import { CatalogUiProvider } from '../catalog-context'
 
 function makePreview(overrides: Partial<PublishPreviewResponse>): PublishPreviewResponse {
   return {
@@ -177,5 +178,59 @@ describe('PublishBar', () => {
     const retry = screen.getByRole('button', { name: '重试' })
     fireEvent.click(retry)
     expect(onRetry).toHaveBeenCalled()
+  })
+})
+
+describe('PublishBar wording and button by context', () => {
+  function renderWith(ui: { channelsConnected: boolean; canPublish: boolean }, preview: PublishPreviewResponse) {
+    const onOpenPublish = vi.fn()
+    render(
+      <CatalogUiProvider value={ui}>
+        <PublishBar preview={preview} loading={false} error={null} onOpenPublish={onOpenPublish} onRetry={vi.fn()} />
+      </CatalogUiProvider>,
+    )
+    return onOpenPublish
+  }
+
+  const pending = makePreview({
+    changes: [
+      { kind: 'tour_field', tourId: 't1', tourName: 'A', field: 'name', fieldLabel: '团名', before: 'a', after: 'b', risk: 'normal' },
+    ],
+  })
+
+  it('channels not connected: never claims what customers see', () => {
+    renderWith({ channelsConnected: false, canPublish: true }, pending)
+    expect(screen.getByText(/有 1 处改动还没上架 · 已上架的是第 3 版（/)).toBeInTheDocument()
+    expect(document.body.textContent).not.toMatch(/客人/)
+  })
+
+  it('channels not connected: never-published and in-sync lines', () => {
+    const { unmount } = render(
+      <CatalogUiProvider value={{ channelsConnected: false, canPublish: true }}>
+        <PublishBar preview={makePreview({ firstPublish: true, publishedVersion: 0 })} loading={false} error={null} onOpenPublish={vi.fn()} onRetry={vi.fn()} />
+      </CatalogUiProvider>,
+    )
+    expect(screen.getByText('还没上架过')).toBeInTheDocument()
+    unmount()
+    renderWith({ channelsConnected: false, canPublish: true }, makePreview({}))
+    expect(screen.getByText(/草稿和已上架内容一致/)).toBeInTheDocument()
+  })
+
+  it('channels not connected: the after-revert paragraph says 已上架的是', () => {
+    renderWith({ channelsConnected: false, canPublish: true }, makePreview({ afterRevert: { toVersion: 2 } }))
+    const bar = screen.getByRole('region', { name: '上架状态' })
+    expect(bar.textContent).toMatch(/^已上架的是第 3 版（内容换回了第 2 版/)
+  })
+
+  it('people who cannot publish get 请 Magic Engine 上架, wired to the same handler', () => {
+    const onOpenPublish = renderWith({ channelsConnected: false, canPublish: false }, pending)
+    expect(screen.queryByRole('button', { name: '查看并上架' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '请 Magic Engine 上架' }))
+    expect(onOpenPublish).toHaveBeenCalledTimes(1)
+  })
+
+  it('…and it is disabled when nothing is waiting', () => {
+    renderWith({ channelsConnected: false, canPublish: false }, makePreview({}))
+    expect(screen.getByRole('button', { name: '请 Magic Engine 上架' })).toBeDisabled()
   })
 })

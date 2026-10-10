@@ -3,7 +3,21 @@
 import { useEffect, useState } from 'react'
 import type { CatalogItineraryDayView, CatalogTourView } from './types'
 import type { TourSavedResponse } from '@/lib/tour-catalog/api-contract'
-import { SAVED_AS_DRAFT_TEXT } from './catalog-format'
+import { savedAsDraftText } from './catalog-format'
+import { BRAND_BUTTON_CLASS } from './catalog-brand'
+import { useChannelsConnected } from './catalog-context'
+
+/** Asked before the "manages departures" switch is saved. Unconnected: promise nothing about channels. */
+function managesChangeText(turningOn: boolean, connected: boolean): string {
+  if (connected) {
+    return turningOn
+      ? '打开后，如果这个团没有可订的未来班期，它会被当成不可售，网站和广告都不再推。确定吗？'
+      : '关闭后，这个团不再按班期判断是否可售，即使全部满团也会继续对外显示。确定吗？'
+  }
+  return turningOn
+    ? '打开后，如果这个团没有可订的未来班期，它在上架后的目录里会标为不可售。确定吗？'
+    : '关闭后，这个团不再按班期判断是否可售，即使全部满团，在上架后的目录里也仍算可售。确定吗？'
+}
 
 const DANGER = '#C2453A'
 const SUCCESS = '#5C8A4A'
@@ -406,12 +420,11 @@ export function TourEditor({
     markTouched('itinerary')
   }
 
+  const connected = useChannelsConnected()
+
   function confirmManagesChange(): boolean {
     if (form.managesDepartures === tour.managesDepartures) return true
-    const message = form.managesDepartures
-      ? '打开后，如果这个团没有可订的未来班期，它会被当成不可售，网站和广告都不再推。确定吗？'
-      : '关闭后，这个团不再按班期判断是否可售，即使全部满团也会继续对外显示。确定吗？'
-    return window.confirm(message)
+    return window.confirm(managesChangeText(form.managesDepartures, connected))
   }
 
   function handleCancel() {
@@ -440,7 +453,7 @@ export function TourEditor({
       if (res.ok) {
         const data = (await res.json()) as TourSavedResponse
         setStatusColor(SUCCESS)
-        setStatus(SAVED_AS_DRAFT_TEXT)
+        setStatus(savedAsDraftText(connected))
         onSaved(data.tour)
         return
       }
@@ -486,7 +499,9 @@ export function TourEditor({
           onChange={(e) => update('title', e.target.value)}
         />
         <p className="mt-1 text-xs text-me-charcoal/60">
-          网站上显示的是这个标题；留空则显示团名
+          {connected
+            ? '网站上显示的是这个标题；留空则显示团名'
+            : '上架后的目录里用这个标题；留空则用团名'}
         </p>
         <FieldError message={fieldErrors.title} />
       </div>
@@ -658,7 +673,7 @@ export function TourEditor({
           type="button"
           onClick={handleSave}
           disabled={saving}
-          className="rounded-lg bg-me-ochre px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          className={`rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-60 ${BRAND_BUTTON_CLASS}`}
         >
           {saving ? '正在保存…' : '保存'}
         </button>

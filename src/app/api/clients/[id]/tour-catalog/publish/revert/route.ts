@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
+import { requireCatalogAccess } from '@/lib/tour-catalog/access'
 import { todayIso } from '@/lib/tour-catalog/dates'
 import { buildRevertPreview, revertPublished } from '@/lib/tour-catalog/store-publish'
 import type {
@@ -58,7 +58,7 @@ function parseRevertRequest(body: unknown): RevertRequest | null {
 export async function GET(req: NextRequest, { params }: RouteParams) {
   const { id: clientId } = await params
 
-  const access = await requireCatalogAdmin(clientId)
+  const access = await requireCatalogAccess(clientId, 'publish')
   if (!access.ok) return access.response
 
   const rawVersion = req.nextUrl.searchParams.get('version')
@@ -90,7 +90,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 export async function POST(req: NextRequest, { params }: RouteParams) {
   const { id: clientId } = await params
 
-  const access = await requireCatalogAdmin(clientId)
+  const access = await requireCatalogAccess(clientId, 'publish')
   if (!access.ok) return access.response
 
   let body: unknown

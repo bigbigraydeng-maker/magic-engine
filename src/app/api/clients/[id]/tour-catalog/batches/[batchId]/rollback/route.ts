@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
+import { requireCatalogAccess } from '@/lib/tour-catalog/access'
 import { getBatch, rollbackBatch } from '@/lib/tour-catalog/store'
 import { getDepartureLabel } from '@/lib/tour-catalog/store-edit'
+import { invalidIdResponse, isUuid } from '@/lib/tour-catalog/http'
 import { supabaseAdmin } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -38,9 +39,12 @@ async function conflictResponse(
 export async function POST(_req: NextRequest, { params }: RouteParams) {
   const { id: clientId, batchId } = await params
 
-  const access = await requireCatalogAdmin(clientId)
+  const access = await requireCatalogAccess(clientId, 'import')
   if (!access.ok) {
     return access.response
+  }
+  if (!isUuid(batchId)) {
+    return invalidIdResponse()
   }
 
   const batch = await getBatch(supabaseAdmin, clientId, batchId)

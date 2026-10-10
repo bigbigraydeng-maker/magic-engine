@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { AssistantPanel } from '../AssistantPanel'
 import type { CatalogDepartureView, CatalogTourView } from '../types'
+import { ASSISTANT_LIMIT_TEXT } from '../catalog-format'
 
 const tours: CatalogTourView[] = [
   {
@@ -729,5 +730,35 @@ describe('AssistantPanel', () => {
     await waitFor(() => expect(screen.getByText('已应用')).toBeTruthy())
     // Still only the assistant POST + one PATCH.
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('AssistantPanel when the call fails', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('429: says today\'s calls are used up, in plain words', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ error: 'assistant_limit' }, 429)))
+    renderPanel()
+    await sendMessage('改一下')
+    await waitFor(() => expect(screen.getByText(ASSISTANT_LIMIT_TEXT)).toBeTruthy())
+    expect(ASSISTANT_LIMIT_TEXT).toBe('今天的 AI 助手次数用完了，明天再用，或者直接手动修改。')
+    expect(document.body.textContent).not.toMatch(/assistant_limit|429/)
+  })
+
+  it('error code assistant_limit with another status shows the same sentence', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ error: 'assistant_limit' }, 400)))
+    renderPanel()
+    await sendMessage('改一下')
+    await waitFor(() => expect(screen.getByText(ASSISTANT_LIMIT_TEXT)).toBeTruthy())
+  })
+
+  it('an unknown failure never shows a raw code', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({}, 500)))
+    renderPanel()
+    await sendMessage('改一下')
+    await waitFor(() => expect(screen.getByText('AI 助手暂时用不了，请稍后再试')).toBeTruthy())
+    expect(document.body.textContent).not.toMatch(/HTTP 500/)
   })
 })

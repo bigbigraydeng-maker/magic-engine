@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { adminAccess } from './access-fixtures'
 import { NextRequest, NextResponse } from 'next/server'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 
 vi.mock('@/lib/tour-catalog/access', () => ({
-  requireCatalogAdmin: vi.fn(),
+  requireCatalogAccess: vi.fn(),
 }))
 
 vi.mock('@/lib/tour-catalog/store-publish', () => ({
@@ -19,7 +20,14 @@ vi.mock('@/lib/tour-catalog/dates', () => ({
   todayIso: () => '2026-10-10',
 }))
 
-import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
+vi.mock('@/lib/tour-catalog/store-access', () => ({
+  listChangeActorsSince: vi.fn(),
+  listMemberEmails: vi.fn(),
+}))
+
+import { requireCatalogAccess } from '@/lib/tour-catalog/access'
+import { listChangeActorsSince, listMemberEmails } from '@/lib/tour-catalog/store-access'
+import { editorAccess } from './access-fixtures'
 import {
   buildPublishPreview,
   publishDraft,
@@ -31,7 +39,9 @@ import { GET as publishGET, POST as publishPOST } from '../publish/route'
 import { GET as historyGET } from '../publish/history/route'
 import { GET as revertGET, POST as revertPOST } from '../publish/revert/route'
 
-const requireCatalogAdminMock = vi.mocked(requireCatalogAdmin)
+const requireCatalogAccessMock = vi.mocked(requireCatalogAccess)
+const listChangeActorsSinceMock = vi.mocked(listChangeActorsSince)
+const listMemberEmailsMock = vi.mocked(listMemberEmails)
 const buildPublishPreviewMock = vi.mocked(buildPublishPreview)
 const publishDraftMock = vi.mocked(publishDraft)
 const buildRevertPreviewMock = vi.mocked(buildRevertPreview)
@@ -60,11 +70,11 @@ function makeRawPost(raw: string): NextRequest {
 }
 
 function allowAccess(): void {
-  requireCatalogAdminMock.mockResolvedValue({ ok: true, actor: 'admin@example.com' })
+  requireCatalogAccessMock.mockResolvedValue(adminAccess('admin@example.com'))
 }
 
 function denyAccess(): void {
-  requireCatalogAdminMock.mockResolvedValue({
+  requireCatalogAccessMock.mockResolvedValue({
     ok: false,
     response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
   })
@@ -90,6 +100,8 @@ const VALID_REVERT_BODY = {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  listChangeActorsSinceMock.mockResolvedValue([])
+  listMemberEmailsMock.mockResolvedValue(new Set<string>())
 })
 
 describe('GET /tour-catalog/publish', () => {
@@ -107,8 +119,75 @@ describe('GET /tour-catalog/publish', () => {
 
     const res = await publishGET(makeGet(), makeParams())
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual(preview)
+    expect(await res.json()).toEqual({ ...preview, contributors: [] })
     expect(buildPublishPreviewMock).toHaveBeenCalledWith({}, CLIENT_ID, '2026-10-10')
+  })
+
+  it('adds who changed how much since the last publish, most changes first', async () => {
+    allowAccess()
+    buildPublishPreviewMock.mockResolvedValue({
+      publishedVersion: 2,
+      publishedAt: '2026-10-09T01:00:00Z',
+      publishedBy: 'admin@example.com',
+      draftVersion: 5,
+      changes: [],
+      diffHash: 'h1',
+    } as never)
+    listChangeActorsSinceMock.mockResolvedValue([
+      'edit by staff@cts.example',
+      'edit by staff@cts.example (AI 助手)',
+      'edit by admin@example.com',
+      'import:b0000000-0000-4000-8000-000000000001 by admin@example.com',
+      'edit by staff@cts.example',
+    ])
+
+    const res = await publishGET(makeGet(), makeParams())
+    const body = await res.json()
+
+    expect(listChangeActorsSinceMock).toHaveBeenCalledWith({}, CLIENT_ID, '2026-10-09T01:00:00Z')
+    expect(body.contributors).toEqual([
+      { actorLabel: 'staff@cts.example', changes: 3 },
+      { actorLabel: 'admin@example.com', changes: 2 },
+    ])
+    expect(body.publishedBy).toBe('admin@example.com')
+    expect(body.diffHash).toBe('h1')
+  })
+
+  it('counts every change before a first publish (no publishedAt)', async () => {
+    allowAccess()
+    buildPublishPreviewMock.mockResolvedValue({ publishedVersion: 0, publishedAt: null, publishedBy: null, draftVersion: 5, changes: [] } as never)
+    await publishGET(makeGet(), makeParams())
+    expect(listChangeActorsSinceMock).toHaveBeenCalledWith({}, CLIENT_ID, null)
+  })
+
+  it('for a client editor, Magic Engine staff are shown as one masked line and publishedBy is masked', async () => {
+    requireCatalogAccessMock.mockResolvedValue(editorAccess('staff@cts.example'))
+    listMemberEmailsMock.mockResolvedValue(new Set(['staff@cts.example']))
+    buildPublishPreviewMock.mockResolvedValue({
+      publishedVersion: 2,
+      publishedAt: '2026-10-09T01:00:00Z',
+      publishedBy: 'Admin@Example.com',
+      draftVersion: 5,
+      changes: [],
+    } as never)
+    listChangeActorsSinceMock.mockResolvedValue([
+      'edit by staff@cts.example',
+      'edit by admin@example.com',
+      'edit by other-admin@example.com',
+      'edit by other-admin@example.com',
+    ])
+
+    const res = await publishGET(makeGet(), makeParams())
+    const text = await res.text()
+    const body = JSON.parse(text) as { contributors: unknown; publishedBy: string }
+
+    expect(body.contributors).toEqual([
+      { actorLabel: 'Magic Engine 团队', changes: 3 },
+      { actorLabel: 'staff@cts.example', changes: 1 },
+    ])
+    expect(body.publishedBy).toBe('Magic Engine 团队')
+    expect(text).not.toContain('admin@example.com')
+    expect(text.toLowerCase()).not.toContain('other-admin')
   })
 
   it('returns 500 publish_failed when the library throws', async () => {
@@ -246,6 +325,36 @@ describe('GET /tour-catalog/publish/history', () => {
     const res = await historyGET(makeGet(), makeParams())
     expect(res.status).toBe(500)
     expect(await res.json()).toEqual({ error: 'publish_failed' })
+  })
+  it('for a client editor: notes are blanked and Magic Engine staff are not named', async () => {
+    requireCatalogAccessMock.mockResolvedValue(editorAccess('staff@cts.example'))
+    listMemberEmailsMock.mockResolvedValue(new Set(['staff@cts.example']))
+    listPublishedVersionsMock.mockResolvedValue([
+      { version: 2, createdAt: 't2', publishedBy: 'admin@example.com', note: 'internal: client asked by phone', sourceVersion: null, changeCount: 3, highRiskCount: 1, isCurrent: true },
+      { version: 1, createdAt: 't1', publishedBy: 'staff@cts.example', note: 'secret note', sourceVersion: null, changeCount: 1, highRiskCount: 0, isCurrent: false },
+    ] as never)
+
+    const res = await historyGET(makeGet(), makeParams())
+    const text = await res.text()
+    const body = JSON.parse(text) as { versions: Array<{ version: number; publishedBy: string; note: string; changeCount: number }> }
+
+    expect(body.versions.map((v) => v.note)).toEqual(['', ''])
+    expect(body.versions.map((v) => v.publishedBy)).toEqual(['Magic Engine 团队', 'staff@cts.example'])
+    expect(body.versions.map((v) => v.changeCount)).toEqual([3, 1])
+    expect(text).not.toContain('admin@example.com')
+    expect(text).not.toContain('secret')
+    expect(text).not.toContain('internal:')
+  })
+
+  it('for a global admin: notes and emails are returned as stored, without a member lookup', async () => {
+    allowAccess()
+    const versions = [
+      { version: 1, createdAt: 't1', publishedBy: 'admin@example.com', note: 'kept', sourceVersion: null, changeCount: 1, highRiskCount: 0, isCurrent: true },
+    ]
+    listPublishedVersionsMock.mockResolvedValue(versions as never)
+    const res = await historyGET(makeGet(), makeParams())
+    expect(await res.json()).toEqual({ versions })
+    expect(listMemberEmailsMock).not.toHaveBeenCalled()
   })
 })
 

@@ -1,6 +1,7 @@
 'use client'
 
 import type { KeyboardEvent, ReactNode } from 'react'
+import { BRAND_SELECTED_BORDER_CLASS } from './catalog-brand'
 
 export interface CatalogTab {
   id: string
@@ -15,8 +16,7 @@ export function panelDomId(id: string): string {
   return `tour-catalog-panel-${id}`
 }
 
-const ACTIVE_TAB_CLASS =
-  'border-b-2 border-me-ochre px-4 py-2 text-sm font-black text-me-charcoal'
+const ACTIVE_TAB_CLASS = `border-b-2 ${BRAND_SELECTED_BORDER_CLASS} px-4 py-2 text-sm font-black text-me-charcoal`
 const INACTIVE_TAB_CLASS =
   'border-b-2 border-transparent px-4 py-2 text-sm font-semibold text-me-charcoal/55 hover:text-me-charcoal'
 

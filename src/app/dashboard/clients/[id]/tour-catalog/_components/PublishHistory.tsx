@@ -7,6 +7,7 @@ import type {
 } from '@/lib/tour-catalog/publish-contract'
 import { formatBatchTime } from './catalog-format'
 import { RevertDialog } from './RevertDialog'
+import { useCatalogUi } from './catalog-context'
 
 function VersionMeta(props: { version: PublishedVersionView }): JSX.Element {
   const { version } = props
@@ -38,6 +39,8 @@ function VersionRow(props: {
   onRevert: (version: number) => void
 }): JSX.Element {
   const { version, onRevert } = props
+  // Hidden for people who cannot publish; the server refuses them anyway.
+  const { canPublish, channelsConnected } = useCatalogUi()
   const label =
     version.sourceVersion !== null
       ? `第 ${version.version} 版（文字和价格同第 ${version.sourceVersion} 版）`
@@ -50,7 +53,7 @@ function VersionRow(props: {
       <span className="font-black text-me-charcoal">{label}</span>
       {version.isCurrent ? (
         <span className="rounded-full border border-[#5C8A4A]/30 bg-[#5C8A4A]/10 px-2 py-0.5 text-xs font-black text-[#5C8A4A]">
-          当前对外
+          {channelsConnected ? '当前对外' : '当前已上架'}
         </span>
       ) : (
         <span className="rounded-full border border-black/10 bg-me-ivory px-2 py-0.5 text-xs font-black text-me-charcoal/45">
@@ -58,7 +61,7 @@ function VersionRow(props: {
         </span>
       )}
       <VersionMeta version={version} />
-      {!version.isCurrent ? (
+      {!version.isCurrent && canPublish ? (
         <button
           type="button"
           onClick={() => onRevert(version.version)}
@@ -145,6 +148,7 @@ export function PublishHistory(props: {
   const { clientId, refreshKey, onReverted } = props
   const { versions, error, load } = usePublishHistory(clientId, refreshKey)
   const [revertVersion, setRevertVersion] = useState<number | null>(null)
+  const { channelsConnected } = useCatalogUi()
 
   function handleReverted() {
     setRevertVersion(null)
@@ -156,7 +160,9 @@ export function PublishHistory(props: {
     <div className="space-y-3 rounded-xl border border-black/10 bg-white p-5 shadow-sm">
       <h2 className="font-display font-black text-me-charcoal">上架记录</h2>
       <p className="text-sm font-semibold text-me-charcoal/55">
-        每上架一次记一版。客人看到的永远是标着「当前对外」的那一版。
+        {channelsConnected
+          ? '每上架一次记一版。客人看到的永远是标着「当前对外」的那一版。'
+          : '每上架一次记一版。标着「当前已上架」的是现在已上架的那一版。'}
       </p>
 
       <HistoryBody

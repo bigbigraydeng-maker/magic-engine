@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
+import { requireCatalogAccess } from '@/lib/tour-catalog/access'
 import { todayIso } from '@/lib/tour-catalog/dates'
 import { buildPublishPreview, publishDraft } from '@/lib/tour-catalog/store-publish'
+import { listChangeActorsSince, listMemberEmails } from '@/lib/tour-catalog/store-access'
+import { makeActorLabeler, summariseContributors } from '@/lib/tour-catalog/changes-view'
+import type { CatalogRole, PublishContributor } from '@/lib/tour-catalog/catalog-contract'
 import type {
   PublishErrorCode,
   PublishErrorResponse,
@@ -55,15 +58,38 @@ function parsePublishRequest(body: unknown): PublishRequest | null {
   }
 }
 
+/**
+ * Whose edits (and how many) would go out with this publish: change-log rows since the last
+ * publish, or all of them before the first one. Never part of diffHash.
+ */
+async function contributorsSince(
+  clientId: string,
+  role: CatalogRole,
+  publishedAt: string | null,
+  viewerEmail: string,
+): Promise<PublishContributor[]> {
+  const actors = await listChangeActorsSince(supabaseAdmin, clientId, publishedAt)
+  const members = role === 'me_admin' ? new Set<string>() : await listMemberEmails(supabaseAdmin, clientId)
+  return summariseContributors(actors, makeActorLabeler(role, members, viewerEmail))
+}
+
 export async function GET(_req: NextRequest, { params }: RouteParams) {
   const { id: clientId } = await params
 
-  const access = await requireCatalogAdmin(clientId)
+  const access = await requireCatalogAccess(clientId, 'view')
   if (!access.ok) return access.response
 
   try {
     const preview = await buildPublishPreview(supabaseAdmin, clientId, todayIso(new Date()))
-    return NextResponse.json<PublishPreviewResponse>(preview)
+    const role = access.viewer.role
+    const contributors = await contributorsSince(clientId, role, preview.publishedAt, access.viewer.email)
+    const publishedBy =
+      role === 'me_admin' || preview.publishedBy === null
+        ? preview.publishedBy
+        : makeActorLabeler(role, await listMemberEmails(supabaseAdmin, clientId), access.viewer.email)(
+            preview.publishedBy.trim().toLowerCase(),
+          )
+    return NextResponse.json<PublishPreviewResponse>({ ...preview, publishedBy, contributors })
   } catch (err) {
     console.error('tour-catalog publish preview failed:', err)
     return NextResponse.json<PublishErrorResponse>({ error: 'publish_failed' }, { status: 500 })
@@ -73,7 +99,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
 export async function POST(req: NextRequest, { params }: RouteParams) {
   const { id: clientId } = await params
 
-  const access = await requireCatalogAdmin(clientId)
+  const access = await requireCatalogAccess(clientId, 'publish')
   if (!access.ok) return access.response
 
   let body: unknown

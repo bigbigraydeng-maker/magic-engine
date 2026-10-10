@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { TourEditor } from '../TourEditor'
 import type { CatalogTourView } from '../types'
+import { CatalogUiProvider } from '../catalog-context'
 
 function makeTour(overrides: Partial<CatalogTourView> = {}): CatalogTourView {
   return {
@@ -216,6 +217,37 @@ describe('TourEditor', () => {
     fireEvent.click(screen.getByText('保存'))
     expect(confirmMock).toHaveBeenCalled()
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('the managesDepartures confirm promises nothing about channels while none is connected', () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const confirmMock = vi.fn().mockReturnValue(false)
+    vi.stubGlobal('confirm', confirmMock)
+    render(
+      <CatalogUiProvider value={{ channelsConnected: false, canPublish: false }}>
+        <TourEditor clientId="c1" tour={makeTour()} onSaved={vi.fn()} onCancel={vi.fn()} />
+      </CatalogUiProvider>,
+    )
+    fireEvent.click(screen.getByLabelText('管理班期'))
+    fireEvent.click(screen.getByText('保存'))
+    const asked = String(confirmMock.mock.calls[0][0])
+    expect(asked).toMatch(/上架后的目录里/)
+    expect(asked).not.toMatch(/网站|广告|对外/)
+    expect(screen.getByText('上架后的目录里用这个标题；留空则用团名')).toBeTruthy()
+  })
+
+  it('the managesDepartures confirm keeps the original wording once channels are connected', () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const confirmMock = vi.fn().mockReturnValue(false)
+    vi.stubGlobal('confirm', confirmMock)
+    render(
+      <CatalogUiProvider value={{ channelsConnected: true, canPublish: true }}>
+        <TourEditor clientId="c1" tour={makeTour()} onSaved={vi.fn()} onCancel={vi.fn()} />
+      </CatalogUiProvider>,
+    )
+    fireEvent.click(screen.getByLabelText('管理班期'))
+    fireEvent.click(screen.getByText('保存'))
+    expect(String(confirmMock.mock.calls[0][0])).toMatch(/网站和广告都不再推|继续对外显示/)
   })
 
   it('shows the 仅内部参考 tag on the highlights textarea', () => {

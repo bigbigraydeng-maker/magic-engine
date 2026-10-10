@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
+import { requireCatalogAccess } from '@/lib/tour-catalog/access'
 import { addAlias, removeAlias } from '@/lib/tour-catalog/store'
 import { supabaseAdmin } from '@/lib/supabase'
 
@@ -19,7 +19,7 @@ export async function POST(
 ) {
   const { id: clientId } = await params
 
-  const access = await requireCatalogAdmin(clientId)
+  const access = await requireCatalogAccess(clientId, 'aliases')
   if (!access.ok) return access.response
 
   let body: unknown
@@ -74,7 +74,7 @@ export async function DELETE(
 ) {
   const { id: clientId } = await params
 
-  const access = await requireCatalogAdmin(clientId)
+  const access = await requireCatalogAccess(clientId, 'aliases')
   if (!access.ok) return access.response
 
   let body: unknown

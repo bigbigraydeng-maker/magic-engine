@@ -10,7 +10,7 @@
 
 import type { CatalogItineraryDay, DepartureStatus } from './types'
 import { DEPARTURE_STATUSES } from './types'
-import { validatePriceText } from './price'
+import { MAX_PRICE_TEXT_LENGTH, priceTextSafetyIssue, validatePriceText } from './price'
 import { isValidIsoDate } from './dates'
 
 export type FieldError = { field: string; code: string }
@@ -53,6 +53,21 @@ const TOUR_PATCH_KEYS: readonly string[] = [
 const MAX_ITEMS = 50
 const MAX_ITINERARY_ITEMS = 60
 const MAX_ITEM_LENGTH = 500
+const MAX_MEALS = 8
+const MAX_MEAL_LENGTH = 60 // existing itineraries carry meals like "Dinner (Tibetan Dinner with Cultural Show)" (42 chars)
+
+/**
+ * Characters no editable text may contain: C0 control characters and DEL, zero-width characters
+ * (U+200B–U+200F), bidirectional overrides (U+202A–U+202E), invisible formatting (U+2060–U+2069)
+ * and the byte-order mark. They are invisible in the admin page but change what customers see.
+ */
+const FORBIDDEN_CHARS_RE = /[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/
+/** Same set, except that multi-line fields may contain line breaks and tabs. */
+const FORBIDDEN_CHARS_MULTILINE_RE = /[\u0000-\u0008\u000b-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/
+
+export function hasForbiddenChars(text: string, multiline = false): boolean {
+  return (multiline ? FORBIDDEN_CHARS_MULTILINE_RE : FORBIDDEN_CHARS_RE).test(text)
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -78,6 +93,10 @@ function validateRequiredString(
     errors.push({ field, code: 'too_long' })
     return undefined
   }
+  if (hasForbiddenChars(trimmed)) {
+    errors.push({ field, code: 'invalid_characters' })
+    return undefined
+  }
   return trimmed
 }
 
@@ -87,19 +106,36 @@ function validateNullableString(
   field: string,
   maxLength: number,
   errors: FieldError[],
+  multiline = false,
 ): string | null | undefined {
   if (value === null) return null
   if (typeof value !== 'string') {
     errors.push({ field, code: 'invalid_type' })
     return undefined
   }
-  const trimmed = value.trim()
+  const trimmed = (multiline ? value.replace(/\r\n/g, '\n') : value).trim()
   if (trimmed === '') return null
   if (trimmed.length > maxLength) {
     errors.push({ field, code: 'too_long' })
     return undefined
   }
+  if (hasForbiddenChars(trimmed, multiline)) {
+    errors.push({ field, code: 'invalid_characters' })
+    return undefined
+  }
   return trimmed
+}
+
+/** Single supplement: free text like "NZD $400", but with the same shape rules as a price. */
+function validateSingleSupplement(value: unknown, errors: FieldError[]): string | null | undefined {
+  const text = validateNullableString(value, 'singleSupplement', MAX_PRICE_TEXT_LENGTH, errors)
+  if (typeof text !== 'string') return text
+  const issue = priceTextSafetyIssue(text)
+  if (issue !== null) {
+    errors.push({ field: 'singleSupplement', code: 'invalid_price:' + issue })
+    return undefined
+  }
+  return text
 }
 
 /** Validate a nullable price display string using validatePriceText. */
@@ -115,6 +151,10 @@ function validateNullablePrice(
   }
   const trimmed = value.trim()
   if (trimmed === '') return null
+  if (hasForbiddenChars(trimmed)) {
+    errors.push({ field, code: 'invalid_characters' })
+    return undefined
+  }
   const result = validatePriceText(trimmed)
   if (!result.ok) {
     errors.push({ field, code: 'invalid_price:' + result.reason })
@@ -128,17 +168,20 @@ function validateStringArray(
   value: unknown,
   field: string,
   errors: FieldError[],
+  maxItems: number = MAX_ITEMS,
+  maxItemLength: number = MAX_ITEM_LENGTH,
 ): string[] | undefined {
   if (!Array.isArray(value)) {
     errors.push({ field, code: 'invalid_type' })
     return undefined
   }
-  if (value.length > MAX_ITEMS) {
+  if (value.length > maxItems) {
     errors.push({ field, code: 'too_many_items' })
     return undefined
   }
   const out: string[] = []
   let itemTooLong = false
+  let itemHasForbiddenChars = false
   for (const item of value) {
     if (typeof item !== 'string') {
       errors.push({ field, code: 'invalid_type' })
@@ -146,8 +189,12 @@ function validateStringArray(
     }
     const trimmed = item.trim()
     if (trimmed === '') continue
-    if (trimmed.length > MAX_ITEM_LENGTH) {
+    if (trimmed.length > maxItemLength) {
       itemTooLong = true
+      continue
+    }
+    if (hasForbiddenChars(trimmed)) {
+      itemHasForbiddenChars = true
       continue
     }
     out.push(trimmed)
@@ -156,7 +203,33 @@ function validateStringArray(
     errors.push({ field, code: 'item_too_long' })
     return undefined
   }
+  if (itemHasForbiddenChars) {
+    errors.push({ field, code: 'invalid_characters' })
+    return undefined
+  }
   return out
+}
+
+/** Day description: multi-line text, kept as typed (line breaks normalised), no hidden characters. */
+function validateDayDescription(
+  value: unknown,
+  field: string,
+  errors: FieldError[],
+): string | undefined {
+  if (typeof value !== 'string') {
+    errors.push({ field, code: 'invalid_type' })
+    return undefined
+  }
+  const text = value.replace(/\r\n/g, '\n')
+  if (text.length > 5000) {
+    errors.push({ field, code: 'too_long' })
+    return undefined
+  }
+  if (hasForbiddenChars(text, true)) {
+    errors.push({ field, code: 'invalid_characters' })
+    return undefined
+  }
+  return text
 }
 
 /** Validate a single itinerary day object. */
@@ -178,18 +251,11 @@ function validateItineraryDay(
 
   const title = validateRequiredString(value.title, `${prefix}.title`, 200, errors)
 
-  let description: string | undefined
-  if (typeof value.description !== 'string') {
-    errors.push({ field: `${prefix}.description`, code: 'invalid_type' })
-  } else if (value.description.length > 5000) {
-    errors.push({ field: `${prefix}.description`, code: 'too_long' })
-  } else {
-    description = value.description
-  }
+  const description = validateDayDescription(value.description, `${prefix}.description`, errors)
 
   let meals: string[] | undefined
   if (value.meals !== undefined) {
-    meals = validateStringArray(value.meals, `${prefix}.meals`, errors)
+    meals = validateStringArray(value.meals, `${prefix}.meals`, errors, MAX_MEALS, MAX_MEAL_LENGTH)
   }
 
   if (
@@ -313,7 +379,7 @@ export function validateTourPatch(input: unknown): Result<TourPatch> {
     if (v !== undefined) patch.title = v
   }
   if ('shortDescription' in input) {
-    const v = validateNullableString(input.shortDescription, 'shortDescription', 2000, errors)
+    const v = validateNullableString(input.shortDescription, 'shortDescription', 2000, errors, true)
     if (v !== undefined) patch.shortDescription = v
   }
   if ('durationText' in input) {
@@ -345,7 +411,7 @@ export function validateTourPatch(input: unknown): Result<TourPatch> {
     if (v !== undefined) patch.tourCities = v
   }
   if ('singleSupplement' in input) {
-    const v = validateNullableString(input.singleSupplement, 'singleSupplement', 100, errors)
+    const v = validateSingleSupplement(input.singleSupplement, errors)
     if (v !== undefined) patch.singleSupplement = v
   }
   if ('maxGroupSize' in input) {

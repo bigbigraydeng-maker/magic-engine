@@ -36,14 +36,32 @@ function distinctCurrencies(text: string): Set<string> {
   return found
 }
 
+/** Longest price display string we accept (the database CHECK is the same number). */
+export const MAX_PRICE_TEXT_LENGTH = 100
+
+/**
+ * Shape checks shared by every price-like display string (display price, per-departure price,
+ * single supplement): short, and never markup or a link — these strings are shown to customers.
+ * Returns a stable reason, or null when the text is acceptable.
+ */
+export function priceTextSafetyIssue(text: string): 'too_long' | 'forbidden_content' | null {
+  const trimmed = text.trim()
+  if (trimmed.length > MAX_PRICE_TEXT_LENGTH) return 'too_long'
+  if (/[<>]|https?:\/\/|www\./i.test(trimmed)) return 'forbidden_content'
+  return null
+}
+
 /**
  * Validate a price display string.
  *
- * Order matters: empty -> multiple currencies -> TBC -> parse.
+ * Order matters: empty -> length / forbidden content -> multiple currencies -> TBC -> parse.
  */
 export function validatePriceText(text: string): PriceValidation {
   const trimmed = text.trim()
   if (trimmed === '') return { ok: false, reason: 'empty' }
+
+  const issue = priceTextSafetyIssue(trimmed)
+  if (issue !== null) return { ok: false, reason: issue }
 
   if (distinctCurrencies(trimmed).size > 1) {
     return { ok: false, reason: 'multiple_currencies' }

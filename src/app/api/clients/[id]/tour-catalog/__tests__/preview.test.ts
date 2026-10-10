@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { adminAccess } from './access-fixtures'
 import { NextRequest, NextResponse } from 'next/server'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 
 vi.mock('@/lib/tour-catalog/access', () => ({
-  requireCatalogAdmin: vi.fn(),
+  requireCatalogAccess: vi.fn(),
 }))
 
 vi.mock('@/lib/tour-catalog/store', async () => {
@@ -18,7 +19,7 @@ vi.mock('@/lib/tour-catalog/store', async () => {
   }
 })
 
-import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
+import { requireCatalogAccess } from '@/lib/tour-catalog/access'
 import { loadDraftCatalog, createPreviewBatch } from '@/lib/tour-catalog/store'
 import { POST } from '../preview/route'
 
@@ -63,13 +64,13 @@ function makeParams(): { params: Promise<{ id: string }> } {
   return { params: Promise.resolve({ id: 'client-1' }) }
 }
 
-const mockedAccess = vi.mocked(requireCatalogAdmin)
+const mockedAccess = vi.mocked(requireCatalogAccess)
 const mockedLoadCatalog = vi.mocked(loadDraftCatalog)
 const mockedCreatePreviewBatch = vi.mocked(createPreviewBatch)
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mockedAccess.mockResolvedValue({ ok: true, actor: 'pm@example.com' })
+  mockedAccess.mockResolvedValue(adminAccess('pm@example.com'))
   mockedLoadCatalog.mockResolvedValue(EMPTY_SNAPSHOT)
 })
 

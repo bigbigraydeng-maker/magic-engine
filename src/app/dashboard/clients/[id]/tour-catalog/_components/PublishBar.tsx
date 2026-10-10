@@ -2,6 +2,11 @@
 
 import type { PublishPreviewResponse } from '@/lib/tour-catalog/publish-contract'
 import { formatBatchTime } from './catalog-format'
+import { BRAND_BUTTON_CLASS } from './catalog-brand'
+import { useCatalogUi } from './catalog-context'
+
+export const PUBLISH_BUTTON_LABEL = '查看并上架'
+export const REQUEST_BUTTON_LABEL = '请 Magic Engine 上架'
 
 type Tone = 'neutral' | 'pending' | 'ok' | 'danger'
 
@@ -11,9 +16,15 @@ interface MainLine {
   canPublish: boolean
 }
 
-function mainLine(preview: PublishPreviewResponse): MainLine {
+/** While no channel reads the catalog, say what is published, not what customers see. */
+function liveLabel(connected: boolean): string {
+  return connected ? '客人现在看到的是' : '已上架的是'
+}
+
+function mainLine(preview: PublishPreviewResponse, connected: boolean): MainLine {
   if (preview.firstPublish || preview.publishedVersion === 0) {
-    return { tone: 'neutral', text: '还没上架过 · 外面还看不到这份目录', canPublish: true }
+    const text = connected ? '还没上架过 · 外面还看不到这份目录' : '还没上架过'
+    return { tone: 'neutral', text, canPublish: true }
   }
   const time = preview.publishedAt ? formatBatchTime(preview.publishedAt) : ''
   if (preview.changes.length > 0) {
@@ -21,14 +32,14 @@ function mainLine(preview: PublishPreviewResponse): MainLine {
     const x = preview.publishedVersion
     return {
       tone: 'pending',
-      text: `有 ${n} 处改动还没上架 · 客人现在看到的是第 ${x} 版（${time}）`,
+      text: `有 ${n} 处改动还没上架 · ${liveLabel(connected)}第 ${x} 版（${time}）`,
       canPublish: true,
     }
   }
   const x = preview.publishedVersion
   return {
     tone: 'ok',
-    text: `已上架第 ${x} 版 · ${time} · 草稿和对外内容一致`,
+    text: `已上架第 ${x} 版 · ${time} · 草稿和${connected ? '对外' : '已上架'}内容一致`,
     canPublish: false,
   }
 }
@@ -91,9 +102,13 @@ function PublishBarLoading(): JSX.Element {
 }
 
 /** One paragraph for "the latest version was a revert": what is live, how the draft differs, what to do. */
-function afterRevertText(preview: PublishPreviewResponse, toVersion: number): string {
+function afterRevertText(
+  preview: PublishPreviewResponse,
+  toVersion: number,
+  connected: boolean,
+): string {
   const time = preview.publishedAt ? `，${formatBatchTime(preview.publishedAt)}` : ''
-  const live = `客人现在看到的是第 ${preview.publishedVersion} 版（内容换回了第 ${toVersion} 版${time}）。`
+  const live = `${liveLabel(connected)}第 ${preview.publishedVersion} 版（内容换回了第 ${toVersion} 版${time}）。`
   const k = preview.changes.length
   if (k === 0) return `${live}草稿和它已经一致，没有需要上架的改动。`
   const risky = preview.highRiskCount > 0 ? `，其中 ${preview.highRiskCount} 处涉及价格或班期` : ''
@@ -107,12 +122,13 @@ function PublishBarStatus(props: {
   onOpenPublish: () => void
 }): JSX.Element {
   const { preview, line, tone, onOpenPublish } = props
+  const { channelsConnected, canPublish } = useCatalogUi()
   return (
     <PublishBarShell tone={tone}>
       <div className="min-w-0">
         {preview.afterRevert ? (
           <p className="text-sm font-black text-[#C2453A]">
-            {afterRevertText(preview, preview.afterRevert.toVersion)}
+            {afterRevertText(preview, preview.afterRevert.toVersion, channelsConnected)}
           </p>
         ) : (
           <p className={`text-sm font-semibold ${TONE_TEXT[tone]}`}>
@@ -129,9 +145,9 @@ function PublishBarStatus(props: {
         type="button"
         onClick={onOpenPublish}
         disabled={!line.canPublish}
-        className="rounded-lg bg-me-charcoal px-4 py-2 text-sm font-black text-white hover:bg-me-charcoal/85 disabled:cursor-not-allowed disabled:opacity-40"
+        className={`rounded-lg px-4 py-2 text-sm font-black disabled:cursor-not-allowed disabled:opacity-40 ${BRAND_BUTTON_CLASS}`}
       >
-        查看并上架
+        {canPublish ? PUBLISH_BUTTON_LABEL : REQUEST_BUTTON_LABEL}
       </button>
     </PublishBarShell>
   )
@@ -145,6 +161,7 @@ export function PublishBar(props: {
   onRetry: () => void
 }) {
   const { preview, error, onOpenPublish, onRetry } = props
+  const { channelsConnected } = useCatalogUi()
 
   if (preview === null && error) {
     return <PublishBarError error={error} onRetry={onRetry} />
@@ -154,7 +171,7 @@ export function PublishBar(props: {
     return <PublishBarLoading />
   }
 
-  const line = mainLine(preview)
+  const line = mainLine(preview, channelsConnected)
   const tone: Tone = preview.afterRevert ? 'danger' : line.tone
 
   return (

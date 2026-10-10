@@ -210,13 +210,13 @@ const MAX_RENDER = 200
 const CONTEXT_BEFORE = 40
 const ELLIPSIS = '…'
 
-interface FieldSpec {
+export interface FieldSpec {
   field: keyof ProjectedTour
   fieldLabel: string
   risk: PublishRisk
 }
 
-const TOUR_FIELD_SPECS: readonly FieldSpec[] = [
+export const TOUR_FIELD_SPECS: readonly FieldSpec[] = [
   { field: 'name', fieldLabel: '团名', risk: 'high' },
   { field: 'title', fieldLabel: '对外标题', risk: 'high' },
   { field: 'displayPriceText', fieldLabel: '展示价', risk: 'high' },
@@ -252,7 +252,7 @@ function renderScalar(value: unknown): string | null {
   return null
 }
 
-function renderField(field: keyof ProjectedTour, value: unknown): string | null {
+export function renderField(field: keyof ProjectedTour, value: unknown): string | null {
   if (field === 'managesDepartures') {
     return value === true ? '是' : '否'
   }

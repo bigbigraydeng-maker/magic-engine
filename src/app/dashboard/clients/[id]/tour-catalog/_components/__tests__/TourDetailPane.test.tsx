@@ -3,6 +3,7 @@ import { render, screen, fireEvent, within } from '@testing-library/react'
 import { TourDetailPane } from '../TourDetailPane'
 import type { CatalogDepartureView, CatalogTourView } from '../types'
 import type { PublishChange } from '@/lib/tour-catalog/publish-contract'
+import { CatalogUiProvider } from '../catalog-context'
 
 vi.mock('../TourEditor', () => ({
   TourEditor: (props: {
@@ -186,5 +187,41 @@ describe('TourDetailPane', () => {
     const { unmount } = renderPane({ onDirtyChange })
     unmount()
     expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+  })
+})
+
+describe('TourDetailPane wording by context', () => {
+  function renderIn(ui: { channelsConnected: boolean; canPublish: boolean }) {
+    const onOpenPublish = vi.fn()
+    render(
+      <CatalogUiProvider value={ui}>
+        <TourDetailPane
+          clientId="c1"
+          tour={TOUR}
+          departures={DEPARTURES}
+          changes={[]}
+          onChanged={vi.fn()}
+          onDirtyChange={vi.fn()}
+          onBack={vi.fn()}
+          onOpenPublish={onOpenPublish}
+        />
+      </CatalogUiProvider>,
+    )
+    return onOpenPublish
+  }
+
+  it('channels not connected: the saved notice says 还没上架', () => {
+    renderIn({ channelsConnected: false, canPublish: true })
+    fireEvent.click(screen.getByText('mock-dep-save'))
+    expect(screen.getByText('已存为草稿，还没上架')).toBeInTheDocument()
+    expect(screen.queryByText(/客人还看不到/)).toBeNull()
+  })
+
+  it('people who cannot publish get 请 Magic Engine 上架 after a save', () => {
+    const onOpenPublish = renderIn({ channelsConnected: false, canPublish: false })
+    fireEvent.click(screen.getByText('mock-dep-save'))
+    expect(screen.queryByText('去上架')).toBeNull()
+    fireEvent.click(screen.getByText('请 Magic Engine 上架'))
+    expect(onOpenPublish).toHaveBeenCalled()
   })
 })

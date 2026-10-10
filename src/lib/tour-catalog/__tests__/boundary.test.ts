@@ -24,8 +24,12 @@ const CATALOG_PREFIXES = [
 
 const DB_OBJECT_PREFIX = ['tour', 'catalog', ''].join('_')
 
-/** Modules anyone may import from freely (they hold types / response shapes only). */
-const OPEN_MODULES = new Set(['publish-contract', 'types', 'api-contract'])
+/**
+ * Modules anyone may import from freely: type / response-shape modules, plus `publish-request-feed`,
+ * which reads only the open "please publish" requests (who / when / note) for the daily to-do list
+ * and has no way to reach the draft.
+ */
+const OPEN_MODULES = new Set(['publish-contract', 'types', 'api-contract', 'catalog-contract', 'publish-request-feed'])
 /** store-publish is importable only for these names. */
 const PUBLISHED_READER_MODULE = 'store-publish'
 const PUBLISHED_READER_NAMES = new Set(['loadPublishedProducts', 'PublishedProductsRead'])
@@ -136,6 +140,14 @@ describe('tour catalog draft boundary', () => {
     expect(findViolations()).toEqual([])
   })
 
+  it('the open request feed only reads the request table and imports nothing from the catalog', () => {
+    const feed = readFileSync(join(process.cwd(), 'src', 'lib', 'tour-catalog', 'publish-request-feed.ts'), 'utf8')
+    const tables = feed.match(new RegExp(`${DB_OBJECT_PREFIX}[a-z_]+`, 'g')) ?? []
+    expect(Array.from(new Set(tables))).toEqual([`${DB_OBJECT_PREFIX}publish_requests`])
+    expect(/from\s+['"]\.\//.test(feed)).toBe(false)
+    expect(/\.(insert|update|upsert|delete|rpc)\(/.test(feed)).toBe(false)
+  })
+
   it('the scan really sees files and the catalog really contains what it forbids elsewhere', () => {
     const files = allSourceFiles().map(toRepoPath)
     expect(files.length).toBeGreaterThan(100)
@@ -171,6 +183,8 @@ describe('tour catalog draft boundary', () => {
       `import type { PublishChange } from '@/lib/tour-catalog/publish-contract'`,
       `import type { CatalogTour } from '@/lib/tour-catalog/types'`,
       `import type { CatalogResponse } from '../tour-catalog/api-contract'`,
+      `import type { CatalogPermissions } from '@/lib/tour-catalog/catalog-contract'`,
+      `import { listOpenPublishRequests } from '@/lib/tour-catalog/publish-request-feed'`,
       `const href = '/dashboard/clients/' + id + '/tour-catalog'`,
     ]
     for (const sample of allowed) {
@@ -182,6 +196,9 @@ describe('tour catalog draft boundary', () => {
     const refused = [
       `import { loadDraftCatalog } from '@/lib/tour-catalog/store'`,
       `import { loadDraftCatalog } from '../tour-catalog/store'`,
+      `import { requireCatalogAccess } from '@/lib/tour-catalog/access'`,
+      `import { listMembers, saveSettings } from '@/lib/tour-catalog/store-access'`,
+      `import { listRecentChanges } from '@/lib/tour-catalog/store-edit'`,
       `import { updateTour } from '@/lib/tour-catalog/store-edit'`,
       `import { seedCatalog } from '@/lib/tour-catalog/seed'`,
       `import { diffCatalog } from '@/lib/tour-catalog/publish'`,

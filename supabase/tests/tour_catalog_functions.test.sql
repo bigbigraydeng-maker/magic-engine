@@ -76,13 +76,13 @@ exception when others then insert into results values ('T7 cross-client tour rej
 
 -- rollback batch 2 (update) -> restores
 select catalog_version as v_before_rb from tour_catalog_state where client_id=:'A' \gset
-select pg_temp.check('T8 rollback update', (tour_catalog_rollback_batch(:'A','b0000000-0000-0000-0000-000000000002')->>'catalogVersion')::int > :v_before_rb);
+select pg_temp.check('T8 rollback update', (tour_catalog_rollback_batch(:'A','b0000000-0000-0000-0000-000000000002','pm@x')->>'catalogVersion')::int > :v_before_rb);
 select pg_temp.check('T8b restored', (select status||return_on::text from tour_catalog_departures where depart_on='2027-03-11')='open2027-03-25');
 
 -- manual edit then rollback batch 1 -> conflict, nothing deleted
 update tour_catalog_departures set price_text_override='NZD $1' where depart_on='2027-05-13';
 do $$ begin
-  perform tour_catalog_rollback_batch('00000000-0000-0000-0000-0000000000a1','b0000000-0000-0000-0000-000000000001');
+  perform tour_catalog_rollback_batch('00000000-0000-0000-0000-0000000000a1','b0000000-0000-0000-0000-000000000001','pm@x');
   insert into results values ('T9 rollback blocked by manual edit', false, 'no error');
 exception when others then insert into results values ('T9 rollback blocked by manual edit', sqlerrm like 'conflict:modified:%', sqlerrm); end $$;
 select pg_temp.check('T9b nothing deleted', (select count(*) from tour_catalog_departures)=2 and (select status from tour_catalog_import_batches where id='b0000000-0000-0000-0000-000000000001')='applied');
@@ -90,7 +90,7 @@ select pg_temp.check('T9b nothing deleted', (select count(*) from tour_catalog_d
 -- clean manual edit? updated_at already changed; so batch1 can never roll back now (expected)
 -- rollback twice
 do $$ begin
-  perform tour_catalog_rollback_batch('00000000-0000-0000-0000-0000000000a1','b0000000-0000-0000-0000-000000000002');
+  perform tour_catalog_rollback_batch('00000000-0000-0000-0000-0000000000a1','b0000000-0000-0000-0000-000000000002','pm@x');
   insert into results values ('T10 double rollback rejected', false, 'no error');
 exception when others then insert into results values ('T10 double rollback rejected', sqlerrm='batch_not_rollbackable', sqlerrm); end $$;
 
@@ -99,7 +99,7 @@ insert into tour_catalog_import_batches(id, client_id, kind, file_sha256, plan) 
  ('b0000000-0000-0000-0000-000000000006', :'A', 'departures', repeat('f',64),
   '{"adds":[{"tourId":"11111111-1111-1111-1111-111111111111","departOn":"2027-10-28","returnOn":"2027-11-11","status":"open","internal":{}}],"updates":[]}');
 select tour_catalog_apply_batch(:'A','b0000000-0000-0000-0000-000000000006','pm@x');
-select tour_catalog_rollback_batch(:'A','b0000000-0000-0000-0000-000000000006');
+select tour_catalog_rollback_batch(:'A','b0000000-0000-0000-0000-000000000006','pm@x');
 select pg_temp.check('T11b row gone', (select count(*) from tour_catalog_departures where depart_on='2027-10-28')=0);
 select pg_temp.check('T11c version never decreases', (select catalog_version from tour_catalog_state where client_id=:'A')>:v_before_rb, (select catalog_version::text from tour_catalog_state where client_id=:'A'));
 
@@ -115,7 +115,7 @@ do $$ begin
 exception when unique_violation then insert into results values ('T16 second live batch for applied file refused', true, ''); end $$;
 -- Rollback scoped by client: another client cannot roll back this client's batch.
 do $$ begin
-  perform tour_catalog_rollback_batch('00000000-0000-0000-0000-0000000000b2','b0000000-0000-0000-0000-000000000001');
+  perform tour_catalog_rollback_batch('00000000-0000-0000-0000-0000000000b2','b0000000-0000-0000-0000-000000000001','pm@x');
   insert into results values ('T17 cross-client rollback refused', false, 'no error');
 exception when others then insert into results values ('T17 cross-client rollback refused', sqlerrm='batch_not_rollbackable', sqlerrm); end $$;
 

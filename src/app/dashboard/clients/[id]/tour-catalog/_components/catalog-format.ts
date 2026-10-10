@@ -2,7 +2,7 @@
 
 import type { CatalogDepartureView } from './types'
 
-/** 接口错误码的中文说法。未知的码原样显示。 */
+/** 接口错误码的中文说法。未知的码显示成一句通用的话,不把英文码露给使用者。 */
 export const ERROR_LABELS: Record<string, string> = {
   feed_not_configured: '这家客户的网站还没有开通团数据读取，请联系开发',
   client_domain_missing: '这家客户的档案里还没有登记网站，请先在客户设置里填上网站',
@@ -22,8 +22,27 @@ export function formatBatchTime(value: string): string {
   return `${date.getMonth() + 1}月${date.getDate()}日 ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
+/** "2026-10-10T03:30:00Z" -> "2026年10月10日 16:30" in the viewer's local time; raw text if unparseable. */
+export function formatDateTimeWithYear(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return `${date.getFullYear()}年${formatBatchTime(value)}`
+}
+
+/** Shown instead of a raw code the page has no wording for. */
+export const UNKNOWN_ERROR_TEXT = '服务器暂时没有回应，请稍后再试'
+
 export function errorLabel(code: string): string {
-  return ERROR_LABELS[code] ?? code
+  return ERROR_LABELS[code] ?? UNKNOWN_ERROR_TEXT
+}
+
+export const ASSISTANT_LIMIT_TEXT = '今天的 AI 助手次数用完了，明天再用，或者直接手动修改。'
+
+/** Plain-Chinese sentence for a failed AI assistant call; never the raw code. */
+export function assistantErrorLabel(code: string | undefined, status: number): string {
+  if (status === 429 || code === 'assistant_limit') return ASSISTANT_LIMIT_TEXT
+  if (code === 'assistant_truncated') return '这个改动太长，AI 一次没写完，请拆成几步再说'
+  return 'AI 助手暂时用不了，请稍后再试'
 }
 
 /** 班期状态的中文说法。 */
@@ -35,8 +54,18 @@ export const DEPARTURE_STATUS_LABELS: Record<string, string> = {
   cancelled: '已取消',
 }
 
-/** Shown after any save that only touches the draft. */
+/** Shown after any save that only touches the draft (wording while channels read the published catalog). */
 export const SAVED_AS_DRAFT_TEXT = '已存为草稿，客人还看不到'
+/** Same moment, while nothing reads the catalog yet: do not talk about what customers see. */
+export const SAVED_AS_DRAFT_TEXT_UNCONNECTED = '已存为草稿，还没上架'
+
+export function savedAsDraftText(channelsConnected: boolean): string {
+  return channelsConnected ? SAVED_AS_DRAFT_TEXT : SAVED_AS_DRAFT_TEXT_UNCONNECTED
+}
+
+export function departureAddedText(channelsConnected: boolean): string {
+  return channelsConnected ? '已新增到草稿，客人还看不到' : '已新增到草稿，还没上架'
+}
 
 /** 导入记录状态的中文说法。 */
 export const BATCH_STATUS_LABELS: Record<string, string> = {

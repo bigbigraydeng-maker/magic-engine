@@ -1,5 +1,7 @@
 /** Response shapes of /api/clients/[id]/tour-catalog/* as consumed by the admin page. */
 
+import type { CatalogAccessEnvelope } from '@/lib/tour-catalog/catalog-contract'
+
 export interface CatalogItineraryDayView {
   day: number
   title: string
@@ -50,11 +52,13 @@ export interface CatalogBatchView {
   createdAt: string
 }
 
-export interface CatalogSnapshotResponse {
+export interface CatalogSnapshotResponse extends CatalogAccessEnvelope {
   tours: CatalogTourView[]
   departures: CatalogDepartureView[]
-  aliases: Array<{ aliasNorm: string; tourId: string }>
-  batches: CatalogBatchView[]
+  /** Only sent to people who may manage aliases. */
+  aliases?: Array<{ aliasNorm: string; tourId: string }>
+  /** Only sent to people who may import. */
+  batches?: CatalogBatchView[]
   /** The client's own website domain, used to read its existing tours. */
   domain: string | null
 }
