@@ -146,6 +146,11 @@ function nzClock(at: Date): { date: string; minutes: number } {
 /** Today's 08:00 slot counts as passed from 07:45 (the server will not schedule a post less than 15 minutes ahead). */
 const TODAY_SLOT_CUTOFF_MINUTES = 7 * 60 + 45
 
+/** A date that can no longer go out at its own slot: in the past, or today once the slot is (nearly) gone. */
+function isGone(date: string, clock: { date: string; minutes: number }): boolean {
+  return date < clock.date || (date === clock.date && clock.minutes >= TODAY_SLOT_CUTOFF_MINUTES)
+}
+
 function blockedReasonWords(code: string | null): string {
   if (code === 'ABORTED_BEFORE_SEND') return '发之前一刻检查没通过（授权被停止或这一天被改动），没有发出'
   if (code && code.startsWith('PRICE_')) return '价格检查没通过，这条不会发。请到每日计划里看这条的价格'
@@ -206,9 +211,8 @@ export function CampaignDailyAutoPublishPanel({
   const clock = nzClock(now ?? new Date(Date.now() + clockSkewMs))
   // A past date — or today once its 08:00 slot is (nearly) gone — can no longer go out at its slot. The server would
   // refuse the first and never publish the second late, so neither is offered.
-  const isGone = (date: string) => date < clock.date || (date === clock.date && clock.minutes >= TODAY_SLOT_CUTOFF_MINUTES)
-  const datesToAuthorize = reviewedDates.filter(date => !isGone(date))
-  const skippedPastDates = reviewedDates.filter(isGone)
+  const datesToAuthorize = reviewedDates.filter(date => !isGone(date, clock))
+  const skippedPastDates = reviewedDates.filter(date => isGone(date, clock))
 
   /**
    * One POST, parsed defensively.
@@ -233,8 +237,6 @@ export function CampaignDailyAutoPublishPanel({
       try {
         json = JSON.parse(raw) as Record<string, unknown>
       } catch {
-        const snippet = raw.slice(0, 0)
-        void snippet
         throw new Error('服务暂时没响应')
       }
       if (!res.ok || json.success === false) {
@@ -322,7 +324,7 @@ export function CampaignDailyAutoPublishPanel({
           plan_revision: planRevision,
           review_revision: reviewRevision,
           page_id: facebookPageId,
-          dates: datesToAuthorize,
+          dates: reviewedDates.filter(date => !isGone(date, nzClock(now ?? new Date(Date.now() + clockSkewMs)))),
           max_per_day: 1,
           expires_in_days: 14,
           confirm,
@@ -362,7 +364,7 @@ export function CampaignDailyAutoPublishPanel({
         setBusy(false)
       }
     },
-    [campaignId, clientId, datesToAuthorize, facebookPageId, loadStatus, planId, planRevision, post, reviewRevision]
+    [campaignId, clientId, clockSkewMs, facebookPageId, loadStatus, now, planId, planRevision, post, reviewRevision, reviewedDates]
   )
 
   const runRevoke = useCallback(async () => {
@@ -675,9 +677,9 @@ export function CampaignDailyAutoPublishPanel({
       )}
 
       {isActive && authorization && (
-        <div className={`rounded-lg border px-2.5 py-2 text-xs ${live ? 'border-[#C2453A]/40 bg-[#C2453A]/[.05]' : 'border-me-ochre/30 bg-me-ochre/[.06]'}`}>
-          <p className={`text-[13px] font-medium ${live ? 'text-[#C2453A]' : 'text-me-charcoal/70'}`}>
-            {live ? '真发授权中' : '已授权（演练中，不会真发）'}
+        <div className={`rounded-lg border px-2.5 py-2 text-xs ${status.mode === 'practice' ? 'border-me-ochre/30 bg-me-ochre/[.06]' : 'border-[#C2453A]/40 bg-[#C2453A]/[.05]'}`}>
+          <p className={`text-[13px] font-medium ${status.mode === 'practice' ? 'text-me-charcoal/70' : 'text-[#C2453A]'}`}>
+            {live ? '真发授权中' : status.mode === 'practice' ? '已授权（演练中，不会真发）' : '已授权，但读不到当前是演练还是真发'}
           </p>
           <p className="mt-0.5 text-[11px] text-me-charcoal/60">
             覆盖日期：{authorization.dates.map(shortDate).join('、')}（共 {authorization.dates.length} 条），每天最多 1 条

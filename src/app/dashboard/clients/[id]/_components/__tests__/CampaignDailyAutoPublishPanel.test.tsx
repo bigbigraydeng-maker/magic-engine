@@ -847,3 +847,21 @@ describe('auto-publish panel — what a stop must leave visible', () => {
   })
 })
 
+describe('auto-publish panel — an authorisation while the mode is unknown', () => {
+  it('🔴 never tells the PM it "will not really publish" when it cannot read whether that is true', async () => {
+    mockFetch({
+      success: true, can_manage: true, attempts: [],
+      authorization: {
+        id: 'auth-1', dates: ['2026-09-03'], lifted_dates: [], authorized_by_email: 'pm@example.test',
+        authorized_at: '2026-09-01T00:00:00.000Z', activated_at: '2026-09-01T00:00:05.000Z',
+        expires_at: '2026-09-15T00:00:00.000Z', state: 'active',
+      },
+    })
+    await renderPanel()
+    await waitFor(() => expect(screen.getByText(/已授权，但读不到当前是演练还是真发/)).toBeTruthy())
+    expect(screen.queryByText(/已授权（演练中，不会真发）/)).toBeNull()
+    // stopping is still possible
+    expect(screen.getByRole('button', { name: /停止自动发布/ })).toBeTruthy()
+  })
+})
+
