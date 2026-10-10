@@ -400,24 +400,26 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
         }
 
         // Last-moment check, used twice: right after the claim and again just before the Facebook call.
-        const stillMine = async (): Promise<boolean> => {
+        const grantStillGood = async (): Promise<boolean> => {
           const grantNow = await deps.getActiveAuthorization(auth.plan_id, auth.client_id)
-          if (
-            grantNow === null ||
-            grantNow.id !== auth.id ||
-            !judgeAuthorization(grantNow, {
+          return (
+            grantNow !== null &&
+            grantNow.id === auth.id &&
+            judgeAuthorization(grantNow, {
               planId: auth.plan_id,
               planRevision: state.planRevision,
               reviewRevision: state.reviewRevision,
               now: (deps.clock ?? (() => new Date()))(),
             }).active
-          ) {
-            return false
-          }
+          )
+        }
+        const claimStillMine = async (): Promise<boolean> => {
           const rows = await deps.listAttempts(auth.plan_id, auth.client_id, [item.date])
           return rows.some(row => row.request_id === requestId && row.status === 'claimed')
         }
-        if (!(await stillMine())) {
+        const stillMine = async (): Promise<boolean> => (await grantStillGood()) && (await claimStillMine())
+        const grantOk = await grantStillGood()
+        if (!grantOk || !(await claimStillMine())) {
           await deps.finishAttempt({
             planId: auth.plan_id,
             date: item.date,
@@ -426,7 +428,9 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
             now,
           })
           note(item.date, 'blocked', 'ABORTED_BEFORE_SEND')
-          break
+          // The grant is gone: stop the whole plan. Only this date's claim was taken: carry on with the others.
+          if (!grantOk) break
+          continue
         }
 
         let outcome: AttemptOutcome
@@ -509,7 +513,8 @@ async function claimFor(
     date: item.date,
     requestId,
     attemptNo,
-    now,
+    // the real moment of the claim (not the sweep's start): the manual publish guard judges freshness by it
+    now: (deps.clock ?? (() => new Date()))(),
     ...(item.decision.action === 'reclaim' ? { fromStatus: item.decision.fromStatus } : {}),
   })
 }

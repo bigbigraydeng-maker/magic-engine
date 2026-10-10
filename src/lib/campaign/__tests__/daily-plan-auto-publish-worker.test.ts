@@ -340,6 +340,33 @@ describe('runAutoPublishSweep — last-moment checks', () => {
     expect(resultsOf(summary)).toContain(`${TOMORROW}:blocked(ABORTED_BEFORE_SEND)`)
   })
 
+  it('🔴 only THIS date\'s claim is taken away (tombstoned): that date is blocked, the other date is still sent', async () => {
+    const { deps, runPublish } = build()
+    const mine = new Map<string, string>()
+    const realClaim = deps.claimAttempt
+    deps.claimAttempt = async input => {
+      const ok = await realClaim(input)
+      if (ok) mine.set(input.date, input.requestId)
+      return ok
+    }
+    let todayReads = 0
+    deps.listAttempts = async (_plan, _client, dates) =>
+      dates.flatMap(date =>
+        date === TODAY
+          ? // the first read (eligibility) sees nothing; after our claim, someone tombstoned the date
+            ++todayReads === 1 || dates.length > 1
+            ? []
+            : [attempt({ date, status: 'blocked', reason_code: 'RECALLED', request_id: 'tombstone' })]
+          : mine.has(date)
+            ? [attempt({ date, status: 'claimed', request_id: mine.get(date) })]
+            : [],
+      )
+    const summary = await runAutoPublishSweep(deps)
+    expect(runPublish.mock.calls.filter(c => c[0].command.no_publish === false).map(c => c[0].command.dates?.[0])).toEqual([TOMORROW])
+    expect(resultsOf(summary)).toContain(`${TODAY}:blocked(ABORTED_BEFORE_SEND)`)
+    expect(resultsOf(summary)).toContain(`${TOMORROW}:published`)
+  })
+
   it('🔴 the runner is handed a request timeout and a before-send check that is still true while the claim is ours', async () => {
     let beforeSendResult: boolean | null = null
     const { deps, runPublish } = build({
