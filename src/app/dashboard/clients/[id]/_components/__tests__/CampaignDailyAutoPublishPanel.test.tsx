@@ -196,6 +196,19 @@ describe('auto-publish panel — what it reads', () => {
   })
 })
 
+describe('auto-publish panel — visitors who may not manage it', () => {
+  it('🔴 a 403 (or 401) from the status read shows nothing at all — no red error line for someone this section is not for', async () => {
+    for (const status of [401, 403]) {
+      const fn = vi.fn().mockResolvedValue(jsonResponse({ success: false, error: 'forbidden' }, status))
+      global.fetch = fn as never
+      const { container } = await renderPanel()
+      await waitFor(() => expect(fn).toHaveBeenCalled())
+      expect(container.textContent).toBe('')
+      cleanup()
+    }
+  })
+})
+
 describe('auto-publish panel — the authorise button is gated', () => {
   it('offers no authorise button until the queue receipt is ready', async () => {
     mockFetch(MANAGEABLE_STATUS)

@@ -27,6 +27,9 @@ import { isLiveFor, readAutoPublishSwitches } from '@/lib/campaign/daily-plan-au
 import { getActiveAuthorization } from '@/lib/campaign/daily-plan-auto-publish-store'
 import { listPlanAttempts } from '@/lib/campaign/daily-plan-auto-publish-status-store'
 
+/** Live status: never let a browser or proxy reuse an old answer. */
+const NO_STORE = { 'Cache-Control': 'no-store' }
+
 const UUID_LIKE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function errorMessage(error: unknown): string {
@@ -97,7 +100,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   // (DEMO_ADMINS / scoped_admin) has FDE powers inside one client, but this is a
   // global decision, so `access.tier` is not consulted here.
   if (!isGlobalAdminEmail(access.user.email ?? '') || access.allowedClientId !== null) {
-    return NextResponse.json({ success: true, can_manage: false })
+    return NextResponse.json({ success: true, can_manage: false }, { headers: NO_STORE })
   }
 
   const planId = req.nextUrl.searchParams.get('plan_id') ?? ''
@@ -147,7 +150,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       mode,
       authorization,
       attempts,
-    })
+    }, { headers: NO_STORE })
   } catch (error: unknown) {
     console.error('[auto-publish status] read failed', errorMessage(error))
     return NextResponse.json({ success: false, error: 'INTERNAL_ERROR' }, { status: 500 })

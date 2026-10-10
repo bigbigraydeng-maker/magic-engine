@@ -216,6 +216,11 @@ export function CampaignDailyAutoPublishPanel({
         setStatus(null)
         return
       }
+      // Not logged in / not allowed: this section is simply not for this visitor — say nothing, show nothing.
+      if (res.status === 401 || res.status === 403) {
+        setStatus({ can_manage: false })
+        return
+      }
       if (!res.ok || json.success === false) {
         setReadError(`HTTP ${res.status} · ${translateError(json.error)}`)
         setStatus(null)
