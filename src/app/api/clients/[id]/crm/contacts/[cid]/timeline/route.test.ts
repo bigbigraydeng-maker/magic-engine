@@ -38,7 +38,9 @@ const MESSAGES = [
   { direction: 'inbound', sender_name: 'Susan', body: '有长城的团吗', sent_at: '2026-07-22T01:00:00Z' },
 ]
 
-function mockDb() {
+function mockDb(over: { touches?: Array<Record<string, unknown>>; conversations?: Array<Record<string, unknown>> } = {}) {
+  const touches = over.touches ?? [TOUCH]
+  const conversations = over.conversations ?? [{ id: 'conv-1' }]
   messageOrder = null
   messageLimit = null
   ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
@@ -61,7 +63,7 @@ function mockDb() {
         select: () => ({
           eq: () => ({
             eq: () => ({
-              neq: () => ({ order: () => ({ limit: async () => ({ data: [TOUCH], error: null }) }) }),
+              neq: () => ({ order: () => ({ limit: async () => ({ data: touches, error: null }) }) }),
             }),
           }),
         }),
@@ -78,7 +80,7 @@ function mockDb() {
       return { select: () => ({ eq: async () => ({ data: [] }) }) }
     }
     if (table === 'conversations') {
-      return { select: () => ({ eq: () => ({ eq: async () => ({ data: [{ id: 'conv-1' }] }) }) }) }
+      return { select: () => ({ eq: () => ({ eq: async () => ({ data: conversations }) }) }) }
     }
     if (table === 'conversation_messages') {
       return {
@@ -135,6 +137,24 @@ describe('往来时间线的顺序', () => {
 })
 
 describe('AI 摘要不再从时间线接口出（2026-10-10 并进列表接口的「该做什么」）', () => {
+  it('有 WhatsApp 对话的人，WhatsApp 占位触点（对话开始 / 最近一次来信）不进时间线', async () => {
+    mockDb({
+      touches: [TOUCH, { ...TOUCH, channel: 'whatsapp', summary: '客人最近一次来信', occurred_at: '2026-10-06T00:00:00Z' }],
+      conversations: [{ id: 'conv-1', channel: 'whatsapp' }],
+    })
+    const body = await (await call()).json()
+    const touches = (body.timeline as Array<{ kind: string; channel?: string }>).filter((e) => e.kind === 'touch')
+    expect(touches.map((e) => e.channel)).not.toContain('whatsapp')
+    expect(touches.length).toBe(1)
+  })
+
+  it('没有 WhatsApp 对话记录的人，WhatsApp 触点照常显示（不让人消失）', async () => {
+    mockDb({ touches: [{ ...TOUCH, channel: 'whatsapp', summary: '客人最近一次来信' }] })
+    const body = await (await call()).json()
+    const touches = (body.timeline as Array<{ kind: string; channel?: string }>).filter((e) => e.kind === 'touch')
+    expect(touches.map((e) => e.channel)).toContain('whatsapp')
+  })
+
   it('响应里没有 brief，也不再查 conversation_briefs', async () => {
     const body = await (await call()).json()
     expect(body).not.toHaveProperty('brief')

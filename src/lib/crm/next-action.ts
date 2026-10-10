@@ -128,6 +128,15 @@ export function compareNextAction(
   a: { seg: SegmentResult; intent: IntentLevel | null },
   b: { seg: SegmentResult; intent: IntentLevel | null },
 ): number {
+  // 被高意向抬进 hot 的「聊过一轮断了」：**最近的排前面**（PM 2026-10-10 看了本地页：
+  // 37 天没动静的排在 1 天没动静的前面，不对）。引擎里 stale 原本是「等得最久的排前面」，
+  // 那是给 cold 回捞用的；进了今天要联系，就跟新线索一样 —— 线索会凉，越近的越该先打。
+  const aLifted = a.seg.segment === 'stale_conversation' && listOf(a.seg.segment, a.intent) === 'hot'
+  const bLifted = b.seg.segment === 'stale_conversation' && listOf(b.seg.segment, b.intent) === 'hot'
+  if (aLifted && bLifted) {
+    const byRecent = Date.parse(b.seg.lastTouchAt ?? '') - Date.parse(a.seg.lastTouchAt ?? '')
+    if (!Number.isNaN(byRecent) && byRecent !== 0) return byRecent
+  }
   const bySeg = compareForWorklist(a.seg, b.seg)
   if (bySeg !== 0) return bySeg
   const aHigh = a.intent === 'high'

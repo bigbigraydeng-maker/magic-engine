@@ -161,6 +161,20 @@ describe('nextActionFor', () => {
   })
 })
 
+describe('compareNextAction —— 抬进 hot 的「聊过一轮断了」最近的排前面', () => {
+  it('两个都是 stale+high：3 天没动静排在 37 天没动静前面', () => {
+    const recent = { seg: seg('stale_conversation', { lastTouchAt: '2026-10-07T00:00:00.000Z' }), intent: 'high' as const }
+    const old = { seg: seg('stale_conversation', { lastTouchAt: '2026-09-03T00:00:00.000Z' }), intent: 'high' as const }
+    expect(compareNextAction(recent, old)).toBeLessThan(0)
+    expect(compareNextAction(old, recent)).toBeGreaterThan(0)
+  })
+  it('留在 cold 的 stale（意向不高）仍按引擎原规则：等得最久的排前面', () => {
+    const recent = { seg: seg('stale_conversation', { lastTouchAt: '2026-10-07T00:00:00.000Z' }), intent: 'low' as const }
+    const old = { seg: seg('stale_conversation', { lastTouchAt: '2026-09-03T00:00:00.000Z' }), intent: 'low' as const }
+    expect(compareNextAction(old, recent)).toBeLessThan(0)
+  })
+})
+
 describe('compareNextAction', () => {
   it('分段相同时，高意向排前面', () => {
     const a = { seg: seg('stale_conversation'), intent: 'high' as const }
