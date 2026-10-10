@@ -10,6 +10,7 @@ source: session:d925e4da
 verify_by: 2026-10-10
 verify_how: 只读那张表，所有行都应从 A 列开始、行数只增不减；cron_run_logs 里 lead-sheet-sync 最近几轮 appended 应为 0 或个位数且 error 为空
 last_checked: 2026-10-10
+check_note: 夜巡盖章（10-10）：生产/线上只读核查不在本轮修复授权内，verify_how 的线上实证本晚未取到，不翻状态；仅记录未核查，待下一轮夜巡取证
 ---
 清理前先建了隐藏备份页签，错位行是 CTS 另一条写入通道插行后顺延出的 718 行，正常线索一条没少。
 清理后试算窗口内 164 条线索全在表里。备份页签链接见 2026-10-07-lead-sheet-append-misplaced-rows 卡。

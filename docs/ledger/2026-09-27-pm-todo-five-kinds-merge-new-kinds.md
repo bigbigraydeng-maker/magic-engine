@@ -10,6 +10,7 @@ verify_how: 上线后第一个工作日，若下列任一待办触发，确认�
 done_on: 2026-09-27
 done_ref: pr:2065
 last_checked: 2026-10-10
+check_note: 夜巡盖章（10-10）：生产/线上只读核查不在本轮修复授权内，verify_how 的线上实证本晚未取到，不翻状态；仅记录未核查，待下一轮夜巡取证
 ---
 原作者窗口（hopeful-williamson）归档后转手接手，把 PR #2065 的 CONFLICTING 解掉。
 
