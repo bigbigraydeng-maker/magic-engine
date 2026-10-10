@@ -119,10 +119,29 @@ async function runInBackground() {
     try {
       const result = await runTracker({ client_id: clientId })
       totalCost += result.total_cost_usd
-      succeeded++
-      console.log(
-        `[ai-tracker-weekly] client=${clientId} succeeded=${result.runs_succeeded} failed=${result.runs_failed} cost=$${result.total_cost_usd.toFixed(4)}`
-      )
+      // 🔴 2026-09-23 fix, corrected 2026-09-28: when every single probe
+      //    failed, this client got ZERO usable data this week. Originally
+      //    checked `runs_succeeded === 0` — but `runs_succeeded` still counts
+      //    a run where the provider answered and the DB write worked even
+      //    when our own parser couldn't extract a ranking (parse_error_message
+      //    set). A week where every probe hit that exact failure mode would
+      //    have kept showing "succeeded" here. Uses `runs_conclusive` instead
+      //    — the same isRunConclusive standard the snapshot gate and the new
+      //    ai_tracker_all_failed PM alert both already use (Codex review
+      //    2026-09-28) — so all three layers agree on what "got real data"
+      //    means. This is the blind spot that let East International's
+      //    24/24 failure go unnoticed for three days (2026-09-20).
+      if (result.runs_conclusive === 0 && result.runs_attempted > 0) {
+        failed++
+        console.warn(
+          `[ai-tracker-weekly] client=${clientId} ALL PROBES FAILED — runs_attempted=${result.runs_attempted} runs_conclusive=${result.runs_conclusive} runs_failed=${result.runs_failed} cost=$${result.total_cost_usd.toFixed(4)}`
+        )
+      } else {
+        succeeded++
+        console.log(
+          `[ai-tracker-weekly] client=${clientId} conclusive=${result.runs_conclusive} succeeded=${result.runs_succeeded} failed=${result.runs_failed} cost=$${result.total_cost_usd.toFixed(4)}`
+        )
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error'
       console.error(`[ai-tracker-weekly] client=${clientId} error:`, message)

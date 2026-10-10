@@ -47,8 +47,8 @@ function actionDef(overrides: Partial<ActionDefinition> = {}): ActionDefinition 
     actionKey: 'ads.pause_unit' as ActionKey,
     version: 1,
     title: 'test',
-    inputSchema: { type: 'object' },
-    outputSchema: { type: 'object' },
+    inputSchema: { type: 'object', properties: {} },
+    outputSchema: { type: 'object', properties: {} },
     capability: 'ads.pause_unit',
     risk: 'high',
     sideEffect: 'outward',
@@ -66,17 +66,20 @@ function actionDef(overrides: Partial<ActionDefinition> = {}): ActionDefinition 
   }
 }
 
-const RUN: Pick<ActionRun, 'id' | 'client_id' | 'action_key' | 'input'> = {
+const RUN: Pick<ActionRun, 'id' | 'client_id' | 'action_key' | 'input' | 'triggered_by'> = {
   id: 'run-1',
   client_id: 'client-a',
   action_key: 'ads.pause_unit',
   input: { adset_id: 'as_1' },
+  triggered_by: 'agent',
 }
 
 const okFacts: EnvelopeFacts = {
   beforeCents: 1000,
   accountDailyTotalBeforeCents: 5000,
+  clientDailyTotalBeforeCents: 5000,
   dailyCapCents: 10_000,
+  clientDailyCapCents: 10_000,
   hoursSinceLastChange: 100,
   learningPhaseApplicable: true,
   learningStage: 'SUCCESS',
@@ -88,6 +91,50 @@ const okReq: EnvelopeRequest = { kind: 'pause', afterCents: 0 }
 function resolverReturning(payload: { request: EnvelopeRequest; facts: EnvelopeFacts } | { unavailable: string }): EnvelopeFactsResolver {
   return vi.fn(async () => payload)
 }
+
+describe('执行前仍按服务端记录的人工止损身份判定', () => {
+  const humanRun = { ...RUN, triggered_by: 'human' as const }
+  const unknownLearning = { ...okFacts, beforeCents: null, learningStage: null, hoursSinceLastChange: null }
+
+  it('人工暂停 CBO 在学习期未知时仍可通过，且必须重读事实', async () => {
+    const resolveFacts = resolverReturning({ request: okReq, facts: unknownLearning })
+    expect(await preProviderEnvelopeBlockReason({
+      definition: actionDef(), run: humanRun, stepKey: 'apply', resolveFacts,
+    })).toBeNull()
+    expect(resolveFacts).toHaveBeenCalledWith(expect.objectContaining({ at: 'pre_provider', runId: RUN.id }))
+  })
+
+  it('请求 input 自报 human 不会改变已存储的 agent 身份', async () => {
+    const run = { ...RUN, input: { ...RUN.input, triggeredBy: 'human', triggered_by: 'human' } }
+    expect(await preProviderEnvelopeBlockReason({
+      definition: actionDef(), run, stepKey: 'apply',
+      resolveFacts: resolverReturning({ request: okReq, facts: unknownLearning }),
+    })).not.toBeNull()
+  })
+
+  it.each(['facts:query_failed', 'circuit:tripped', 'facts:entity_missing'])('人工也不能跳过 %s', unavailable => {
+    return expect(preProviderEnvelopeBlockReason({
+      definition: actionDef(), run: humanRun, stepKey: 'apply',
+      resolveFacts: resolverReturning({ unavailable }),
+    })).resolves.toContain(unavailable)
+  })
+
+  it('人工也不能跳过缺失的事实解析器', async () => {
+    expect(await preProviderEnvelopeBlockReason({
+      definition: actionDef(), run: humanRun, stepKey: 'apply', resolveFacts: undefined,
+    })).toContain('解析器')
+  })
+
+  it('人工减预算在执行前变成加预算时必须拒绝', async () => {
+    const run = { ...humanRun, action_key: 'ads.cut_unit_budget' }
+    const resolveFacts = vi.fn<EnvelopeFactsResolver>()
+      .mockResolvedValueOnce({ request: { kind: 'budget_change', afterCents: 500 }, facts: { ...unknownLearning, beforeCents: 1000 } })
+      .mockResolvedValueOnce({ request: { kind: 'budget_change', afterCents: 500 }, facts: { ...unknownLearning, beforeCents: 400 } })
+    const args = { definition: actionDef({ actionKey: 'ads.cut_unit_budget' }), run, stepKey: 'apply', resolveFacts }
+    expect(await preProviderEnvelopeBlockReason(args)).toBeNull()
+    expect(await preProviderEnvelopeBlockReason(args)).not.toBeNull()
+  })
+})
 
 describe('pre-provider 实例闸 · 判据本身', () => {
   it('信封内 → 放行（返回 null）', async () => {
@@ -178,7 +225,7 @@ describe('pre-provider 实例闸 · 不该检查时不查', () => {
 
 describe('pre-provider 实例闸 · 独立性（钉住"两处查实例，拆一处另一处仍拦得住"）', () => {
   it('解析器被调用时 at="pre_provider"，跟授权层的 "authorize" 分开', async () => {
-    const spy = vi.fn(async () => ({ request: okReq, facts: okFacts }))
+    const spy = vi.fn<EnvelopeFactsResolver>(async () => ({ request: okReq, facts: okFacts }))
     await preProviderEnvelopeBlockReason({
       definition: actionDef(),
       run: RUN,

@@ -51,7 +51,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { fetchGscSnapshot } from '@/lib/gsc/client'
 import { gscSiteUrlFromConfig } from '@/lib/gsc/connected-clients'
 import { fetchGa4Snapshot, fetchGa4PaidSearchMetrics } from '@/lib/ga4/client'
-import { getAdAccountInsights, getAdCampaignInsights, MetaAdsInsights } from '@/lib/meta/client'
+import { getAdAccountInsightsResult, getAdCampaignInsights, MetaAdsInsights } from '@/lib/meta/client'
 import { fetchAccountInsights, loadGoogleAdsCreds } from '@/lib/google-ads/client'
 import { SEO_METRIC_KEY, GA4_METRIC_KEY, ADS_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import { adsMetricKeysWrittenBy } from '@/lib/flywheel/metric-registry'
@@ -95,7 +95,7 @@ interface ClientResult {
   client_id: string
   gsc?:       { success: boolean; snapshot_id?: string; error?: string }
   ga4?:       { success: boolean; snapshot_id?: string; error?: string }
-  meta?:      { success: boolean; snapshot_id?: string; error?: string }
+  meta?:      { success: boolean; snapshot_id?: string; error?: string; skipped?: 'no_active_ads' }
   /** Google Ads sync emits metrics straight into flywheel_metrics — no
    *  snapshot table yet, so `metrics_written` mirrors the spend/impressions
    *  count instead of a `snapshot_id`. */
@@ -110,6 +110,12 @@ interface ClientResult {
   ad_digest?: { sent: boolean; decision: string; error?: string }
   /** ads IMPACT 阶段 1：只读诊断 + 内部版日报 */
   ad_diagnostics?: { success: boolean; hits: number; not_comparable: number; excluded: number; digest_decision?: string; digest_sent?: boolean; recipients_dropped?: number; error?: string }
+  /**
+   * 广告引擎配置**读失败**（不是没配置行）。2026-09-25 事故：读配置每次 400，
+   * 下面的诊断 / 经营状态 / 日报全按 fallback 静默跳过，运行记录里一个字没有。
+   * 计入 `failed`，并优先当失败邮件头条 —— 它一坏就是所有客户一起停。
+   */
+  ad_config?: { success: false; error: string }
   /** Ads D3 自动暂停：诊断完成后发给 Inngest 的事件（consumer 自己判要不要出手）。 */
   ad_auto_pause_event?: { sent: boolean; error?: string }
   /** 卫青巡察：问题 + 机会 + 目标节奏 → ads_growth_states 一行（spec 2026-09-24 §4）。 */
@@ -402,8 +408,14 @@ export async function GET(req: NextRequest) {
         // P21.K.5: per-client on/off. The snapshot above still runs (it feeds
         // the monthly report etc.); only the Ad Strategy Engine honours the
         // switch, so an FDE can silence a client without losing base data.
-        const { config: adStrategyConfig, source: adConfigSource } =
+        const { config: adStrategyConfig, source: adConfigSource, error: adConfigError } =
           await loadAdStrategyConfigWithSource(client.client_id)
+        if (adConfigSource === 'fallback') {
+          result.ad_config = {
+            success: false,
+            error: `ad_strategy_configs read failed — diagnostics, growth state and digest skipped for this client: ${adConfigError ?? 'unknown error'}`,
+          }
+        }
 
         // P21.K.1: campaign-level DAILY series for the Ad Strategy Engine.
         // Separate from the 30-day rolling snapshot above, which cannot answer
@@ -591,7 +603,8 @@ export async function GET(req: NextRequest) {
   // ── 4. Tally results ───────────────────────────────────────────────────────
   const gscSynced       = results.filter(r => r.gsc?.success).length
   const ga4Synced       = results.filter(r => r.ga4?.success).length
-  const metaSynced      = results.filter(r => r.meta?.success).length
+  const metaSynced      = results.filter(r => r.meta?.success && !r.meta.skipped).length
+  const metaIdle        = results.filter(r => r.meta?.skipped === 'no_active_ads').length
   const googleAdsSynced = results.filter(r => r.google_ads?.success).length
   const adDailySynced   = results.filter(r => r.ad_daily?.success).length
   const adDailyRows     = results.reduce((sum, r) => sum + (r.ad_daily?.rows_written ?? 0), 0)
@@ -606,7 +619,8 @@ export async function GET(req: NextRequest) {
       r.meta?.success === false ||
       r.google_ads?.success === false ||
       r.ad_daily?.success === false ||
-      r.ad_health?.success === false,
+      r.ad_health?.success === false ||
+      r.ad_config?.success === false,
   ).length
   // ad_level is deliberately NOT in `failed`: this count drives
   // cron_run_logs.failed_count, which the daily-cron-digest emails on. The
@@ -617,7 +631,7 @@ export async function GET(req: NextRequest) {
   // Collect per-client errors so postmortem is possible without Render logs.
   // Diagnostic only — no behavior change.
   const errors = results.flatMap(r => {
-    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ads_growth_state'|'ad_daily_secondary'; error: string }> = []
+    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ads_growth_state'|'ad_daily_secondary'|'ad_config'; error: string }> = []
     if (r.gsc?.success === false && r.gsc.error)               out.push({ client_id: r.client_id, source: 'gsc',        error: r.gsc.error })
     if (r.ga4?.success === false && r.ga4.error)               out.push({ client_id: r.client_id, source: 'ga4',        error: r.ga4.error })
     if (r.meta?.success === false && r.meta.error)             out.push({ client_id: r.client_id, source: 'meta',       error: r.meta.error })
@@ -627,6 +641,7 @@ export async function GET(req: NextRequest) {
     if (r.adset_level?.success === false && r.adset_level.error) out.push({ client_id: r.client_id, source: 'adset_level', error: r.adset_level.error })
     if (r.ad_health?.success === false && r.ad_health.error)   out.push({ client_id: r.client_id, source: 'ad_health', error: r.ad_health.error })
     if (r.ad_digest && !r.ad_digest.sent && r.ad_digest.error)  out.push({ client_id: r.client_id, source: 'ad_digest', error: r.ad_digest.error })
+    if (r.ad_config?.success === false) out.push({ client_id: r.client_id, source: 'ad_config', error: r.ad_config.error })
     if (r.ad_diagnostics?.error) out.push({ client_id: r.client_id, source: 'ad_diagnostics', error: r.ad_diagnostics.error })
     if (r.ads_growth_state?.error) out.push({ client_id: r.client_id, source: 'ads_growth_state', error: r.ads_growth_state.error })
     // 2026-09-13 (魏征 review): a secondary account's sync failure used to be
@@ -654,7 +669,11 @@ export async function GET(req: NextRequest) {
   // errors that actually count as failures belong here — ad_level and
   // ad_daily_secondary are excluded (both best-effort, neither triggers `failed`)
   // and must not become the headline of an email they never triggered.
-  const headlineError = errors.find(e => e.source !== 'ad_level' && e.source !== 'adset_level' && e.source !== 'ad_daily_secondary')
+  // 配置读失败优先当头条：它一坏是所有客户的诊断一起停，而且以前正是被排在前面的
+  // 常年 meta 报错盖住、没人注意到（2026-09-25 事故）。
+  const headlineError =
+    errors.find(e => e.source === 'ad_config') ??
+    errors.find(e => e.source !== 'ad_level' && e.source !== 'adset_level' && e.source !== 'ad_daily_secondary')
   const errorMessage = failed > 0 && headlineError
     ? `${headlineError.source}: ${headlineError.error}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ''}`
     : undefined
@@ -664,7 +683,7 @@ export async function GET(req: NextRequest) {
     completed: results.length - failed,
     error: errorMessage,
     failed,
-    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors },
+    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, meta_idle: metaIdle, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors },
   })
   return NextResponse.json({
     success:           true,
@@ -672,6 +691,7 @@ export async function GET(req: NextRequest) {
     gsc_synced:        gscSynced,
     ga4_synced:        ga4Synced,
     meta_synced:       metaSynced,
+    meta_idle:         metaIdle,
     google_ads_synced: googleAdsSynced,
     ad_daily_synced:   adDailySynced,
     ad_daily_rows:     adDailyRows,
@@ -890,7 +910,7 @@ async function syncMeta(
   adAccountId: string,
   accessToken: string,
   clientSlug: string,
-): Promise<{ success: boolean; snapshot_id?: string; error?: string }> {
+): Promise<{ success: boolean; snapshot_id?: string; error?: string; skipped?: 'no_active_ads' }> {
   try {
     const today        = new Date()
     const thirtyDaysAgo = new Date(today)
@@ -898,14 +918,19 @@ async function syncMeta(
     const since = thirtyDaysAgo.toISOString().slice(0, 10)
     const until = today.toISOString().slice(0, 10)
 
-    const [insights, campaigns] = await Promise.all([
-      getAdAccountInsights(adAccountId, accessToken, since, until),
+    const [insightsResult, campaigns] = await Promise.all([
+      getAdAccountInsightsResult(adAccountId, accessToken, since, until),
       getAdCampaignInsights(adAccountId, accessToken, since, until),
     ])
 
-    if (!insights) {
-      return { success: false, error: 'getAdAccountInsights returned null — check META_SYSTEM_USER_TOKEN and ad account ID' }
+    if (!insightsResult.ok) {
+      const failure = insightsResult.failure
+      // Empty data array = account ran no ads in window, not an API error.
+      if (failure.kind === 'no_delivery') return { success: true, skipped: 'no_active_ads' }
+      const reason = failure.kind === 'http_error' ? `${failure.kind} (${failure.status})` : failure.kind
+      return { success: false, error: `getAdAccountInsights ${reason}` }
     }
+    const insights = insightsResult.insights
 
     const { data, error } = await supabaseAdmin
       .from('meta_ads_snapshots')

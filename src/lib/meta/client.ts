@@ -11,7 +11,6 @@
  *   adset-insights.ts      — ad-set daily time series
  *   ad-insights.ts         — ad daily time series
  *   campaign-management.ts — read "before" state, set status / budget
- *   boost.ts               — boost an existing Page post
  *
  * P12.B.2: Used by the /api/clients/[id]/meta-ads/sync route to pull
  * account-level insights and write them to meta_ads_snapshots.
@@ -23,8 +22,8 @@
 export { GRAPH_BASE, MAX_INSIGHT_PAGES, fetchInsightPages } from './graph-base'
 export type { InsightPageWalk } from './graph-base'
 
-export { getAdAccountInsights, parseInsights } from './account-insights'
-export type { MetaAdsInsights, GraphInsightsData } from './account-insights'
+export { getAdAccountInsights, getAdAccountInsightsResult, parseInsights } from './account-insights'
+export type { MetaAdsInsights, GraphInsightsData, MetaAccountInsightsFailure, MetaAccountInsightsResult } from './account-insights'
 
 export {
   getAdCampaignInsights,
@@ -53,6 +52,3 @@ export {
   setCampaignDailyBudget,
 } from './campaign-management'
 export type { CampaignDetails } from './campaign-management'
-
-export { boostPagePost } from './boost'
-export type { BoostPostResult } from './boost'

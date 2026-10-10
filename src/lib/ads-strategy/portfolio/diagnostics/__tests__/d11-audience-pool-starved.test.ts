@@ -106,7 +106,8 @@ function makeInputs(overrides: BuildOverrides = {}): { acc: AccountInput; input:
     adAccountId: 'act_1', shared: false, timezone: TZ, currency: 'NZD',
     snapshots: overrides.snaps ?? baseSnaps(),
     daily: overrides.daily ?? baseDaily(),
-    hourly: {}, hourlyError: null, latestCaptures: [], lastInsightDate: DATE,
+    // 默认给一条新鲜、抓全的广告层抓取审计记录：adCaptureStale 把「零审计记录 + 有广告快照」也判 stale（Codex 第五轮）
+    hourly: {}, hourlyError: null, latestCaptures: [{ level: 'ad', complete: true, skipped_shared: false, error: null, captured_at: '2026-09-25T12:00:00Z' }], lastInsightDate: DATE,
     adDaily: overrides.dropAdDaily ? undefined : (overrides.adDaily ?? baseAdDaily()),
     settingChanges: overrides.settingChanges ?? [],
     audienceHistory: overrides.dropHistory ? undefined : (overrides.history ?? historyFrom(DEFAULT_HISTORY)),

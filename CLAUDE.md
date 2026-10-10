@@ -234,11 +234,13 @@ Claude Code、Codex、CMUX DeepSeek 都可承担规划或审查；用户可直�
 - **写前先读**：改任何文件前先读它的 exports、直接调用方、共享工具；不确定某段代码为何如此设计时**先问再改**
 - 新表 migration 的 RLS 一律 service-role 模板 —— **必须写 `FOR ALL TO service_role USING (true)`，漏掉 `TO service_role` = 对匿名访客敞开读写**（2026-08-03 实测泄露 118 条策略）。禁止 `workspace_id` / `client_team` / `auth.uid()`。见 [DECISIONS](./docs/DECISIONS.md)
 - 新建 `/api/cron/*` 路由必须**同一个 PR 内**加 `render.yaml` 调度条目
+- **做网页 / 落地页 / 界面，上线或交付前必过 Impeccable 检查**（`.claude/skills/impeccable`，PM 2026-10-04 拍板）：运行 `.claude/skills/impeccable/scripts/impeccable detect <目录或网址>`，真问题当场修，误报写明理由；PR 或交付说明里写检查前后数字。客户页面的品牌色 / logo 必须先读 `master_briefs` 的 VI 再交给它，客户私有信息不写进共享 skill。它是现成工具（Buy），首次使用要下载检查程序（属外网读取，须先获准，再设 `IMPECCABLE_ALLOW_DOWNLOAD=1`），之后本地运行、无外部副作用，**不需要 Inngest**；只管网页，不管视频（视频仍走工厂）
 
 ### 8. 客户数据红线（违反 = 直接伤害客户）
 
 - **绝不凭空注入客户业务数据**：写任何 Goal / Initiative / 关键词前，先查 `master_briefs` + `clients.primary_keywords`。搜索量 / KD / 点击数**必须来自 DataForSEO 或 GSC**，不能估不能编
 - **对外内容必先 grounding 官网**：写 reel / post / 广告 / 邮件前先 WebFetch 客户官网真实产品页。`master_briefs` 只给方向，不含运营细节。发布前逐句标「官网可溯 / brief 可溯 / 未证实」
+- **我们管理的 FB / IG 等社媒账户，所有要发布的视频一律只能走视频工厂流程（`src/lib/factory/`），禁止任何窗口另写脚本直接调生成 API（Muapi / WaveSpeed / Seedance 等）+ 平台发布 API 绕过工厂**：工厂流程自带查配方、出对账表、分镜自检这几道闸，绕开工厂等于把这几道闸一起绕开，而且绕过之后不会报错、不留痕迹，跟真正走过闸的产出长得一模一样。**窗口自己写「已完成、没问题」不算审查**——生产方和质检方必须是两个不同的角色（工厂产出 → 苏东坡 / 马良审 → PM 授权发布）。PM 2026-09-28 拍板；2026-09-28 East Inter 事故：另开脚本直接生产+发布，两条视频没有声音、文案数字编造，客户 Facebook 主页上已经真实发出去，见 [PITFALLS D14](./docs/PITFALLS.md)
 - **对外画面必先跑配方对账**：只要要**写视频模板 / 调生图·生视频 API / 拼片出成片**，先查 `viral_reference_library` 拿该行业配方，**并输出一张对账表**（配方每一列 → 这次做了什么 → 满足 / 未满足 / 不适用），再动手。**只满足镜长、切点这类「改个数字就行」的列，跳过真人出镜 / 航拍 / 真实感这类「要换素材才行」的列 = 没照配方做**，成品会是「卡得很准的幻灯片」。2026-07-20、2026-09-03 两次同样事故，见 [PITFALLS D5](./docs/PITFALLS.md)
 - **对外成片交付前必先出「分镜自检表」**：把成片截成逐镜缩略图（9 宫格），**自己逐镜过一遍再发 PM**——每镜检查①图对不对（是不是这个城市/地标，AI 生成的有没有糊脸/糊字）②文字对不对（错别字/张冠李戴）③logo 完不完整清不清晰。**禁止用「渲一版给 PM 看 → PM 挑错 → 重渲」的循环替代自检**：那样每轮五六分钟，本该一次抓全的问题拖成四五轮。图库图 / i2v 输出必逐帧核对来源与内容（见 [PITFALLS D6](./docs/PITFALLS.md)）
 - **客户营销落地页必须建在客户自己的域名**，绝对禁止 `magicengine.com.au/<客户>/...`

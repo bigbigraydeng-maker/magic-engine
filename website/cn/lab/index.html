@@ -57,11 +57,11 @@
             </div>
           </article>
           <article class="nm-card">
-            <span class="nm-card-num">下一个上线</span>
+            <span class="nm-card-num">可以用 · 免费</span>
             <h3>网站免费诊断</h3>
-            <p>看客人为什么进了网站却不联系你。</p>
+            <p>填网址，1 分钟看出客人为什么进了网站却不联系你。</p>
             <div class="nm-actions" style="margin-top:20px">
-              <a class="nm-btn nm-btn-ghost nm-btn-small" href="#notify" data-tool="网站免费诊断">留邮箱，上线第一个告诉你</a>
+              <a class="nm-btn nm-btn-primary nm-btn-small" href="/cn/discover" data-lab-cta="site-check">去诊断</a>
             </div>
           </article>
           <article class="nm-card">
@@ -91,7 +91,7 @@
               <div class="nm-field"><label for="lab-email">邮箱 <span class="nm-required">*</span></label><input id="lab-email" name="email" type="email" autocomplete="email" required maxlength="200"></div>
               <div class="nm-field nm-field-wide"><label for="lab-company">公司或店铺名称 <span class="nm-required">*</span></label><input id="lab-company" name="company" type="text" autocomplete="organization" required maxlength="80"></div>
               <div class="nm-field"><label for="lab-market">你在哪做生意 <span class="nm-required">*</span></label><select id="lab-market" name="market" required><option value="">请选择</option><option>国内（往海外卖）</option><option>澳大利亚</option><option>新西兰</option><option>其他地区</option></select></div>
-              <div class="nm-field"><label for="lab-tool">想用的工具 <span class="nm-required">*</span></label><select id="lab-tool" name="tool" required><option value="">请选择</option><option>网站免费诊断</option><option>品牌健康打分</option><option>Facebook 广告体检</option><option>其他（写在需求里）</option></select></div>
+              <div class="nm-field"><label for="lab-tool">想用的工具 <span class="nm-required">*</span></label><select id="lab-tool" name="tool" required><option value="">请选择</option><option>品牌健康打分</option><option>Facebook 广告体检</option><option>其他（写在需求里）</option></select></div>
               <div class="nm-field nm-field-wide"><label for="lab-question">一句话说说你的需求 <span class="nm-required">*</span></label><textarea id="lab-question" name="question" required maxlength="300"></textarea></div>
               <div class="nm-honeypot" aria-hidden="true"><label for="lab-company-website">请留空</label><input id="lab-company-website" name="companyWebsite" type="text" tabindex="-1" autocomplete="off"></div>
               <label class="nm-consent nm-field-wide"><input type="checkbox" name="consent" value="yes" required><span>我同意 Magic Engine 用这些信息联系我（见<a href="/cn/meta-ads-ai/privacy/">隐私说明</a>）。<span class="nm-required">*</span></span></label>
@@ -110,7 +110,7 @@
     <section class="nm-cta"><div class="nm-shell nm-cta-inner"><div><h2>想让我们直接帮你做？</h2><p>邮件告诉我们你的网站、目标市场和主要问题，可以用中文。</p></div><a class="nm-btn nm-btn-primary" href="mailto:hello@magicengine.cloud?subject=Magic%20Engine%20咨询">写邮件给我们</a></div></section>
   </main>
 
-  <footer class="nm-footer"><div class="nm-shell"><div class="nm-footer-grid"><div><a class="nm-brand" href="/cn/"><img src="/assets/favicon.svg" alt=""><span>Magic Engine</span></a><p>在下一个市场，找到你的客户。</p></div><nav class="nm-footer-links"><a href="/">English</a><a href="/insights/">Magic Insight</a><a href="/cn/lab/">免费工具</a><a href="/privacy">隐私政策（英文版）</a><a href="mailto:hello@magicengine.cloud">hello@magicengine.cloud</a></nav></div><div class="nm-footer-legal"><span>© 2026 Magic Engine</span><span>Magic Engine AI Technology Limited · New Zealand</span></div></div></footer>
+  <footer class="nm-footer"><div class="nm-shell"><div class="nm-footer-grid"><div><a class="nm-brand" href="/cn/"><img src="/assets/favicon.svg" alt=""><span>Magic Engine</span></a><p>在下一个市场，找到你的客户。</p></div><div class="nm-footer-tools"><h4>Magic Engine 工具实验室</h4><ul><li><a href="/cn/meta-ads-ai/">Facebook 广告体检</a></li><li><a href="/cn/discover">免费网站诊断</a></li></ul></div><nav class="nm-footer-links"><a href="/">English</a><a href="/insights/">Magic Insight</a><a href="/cn/lab/">免费工具</a><a href="/privacy">隐私政策（英文版）</a><a href="mailto:hello@magicengine.cloud">hello@magicengine.cloud</a></nav></div><div class="nm-footer-legal"><span>© 2026 Magic Engine</span><span>Magic Engine AI Technology Limited · New Zealand</span></div></div></footer>
   <script>document.addEventListener('click',function(e){var a=e.target.closest('[data-lab-cta]');if(!a)return;try{var b=new Blob([JSON.stringify({ctaKey:'lab_'+a.getAttribute('data-lab-cta'),destination:a.getAttribute('data-lab-cta'),href:a.href,pagePath:location.pathname,referrer:document.referrer})],{type:'application/json'});navigator.sendBeacon('/api/lead-event',b)}catch(_){}});</script>
   <script>document.addEventListener('click',function(e){var a=e.target.closest('a[href="#notify"][data-tool]');if(!a)return;var s=document.querySelector('select[name="tool"]');if(s)s.value=a.getAttribute('data-tool');});</script>
   <script src="/google-tag.js"></script><script src="/meta-pixel.js"></script>

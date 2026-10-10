@@ -97,6 +97,21 @@ function mockDb() {
         }),
       }
     }
+    if (table === 'conversation_briefs') {
+      return {
+        select: () => ({
+          in: () => ({
+            order: () => ({
+              limit: () => ({
+                maybeSingle: async () => ({
+                  data: { intent_level: 'high', summary: '客人已确认合作', next_action: '发最终账单' },
+                }),
+              }),
+            }),
+          }),
+        }),
+      }
+    }
     throw new Error(`unexpected table ${table}`)
   })
 }
@@ -131,5 +146,12 @@ describe('往来时间线的顺序', () => {
     await call()
     expect(messageOrder).toEqual({ column: 'sent_at', ascending: false })
     expect(messageLimit).toBe(3000)
+  })
+})
+
+describe('AI 摘要卡', () => {
+  it('带上最新摘要的意向等级、一句话和下一步', async () => {
+    const body = await (await call()).json()
+    expect(body.brief).toEqual({ intentLevel: 'high', summary: '客人已确认合作', nextAction: '发最终账单' })
   })
 })

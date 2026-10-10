@@ -79,6 +79,7 @@ function messagingEvent(
     mid: string
     timestampMs: number
     referral: Record<string, unknown>
+    messageReferral: Record<string, unknown>
     attachmentType: string
     attachmentUrl: string
     isEcho: boolean
@@ -86,6 +87,7 @@ function messagingEvent(
 ) {
   const message: Record<string, unknown> = { mid: over.mid ?? 'mid.ABC123' }
   if (over.isEcho) message.is_echo = true
+  if (over.messageReferral) message.referral = over.messageReferral
   if (over.attachmentType) {
     message.attachments = [{ type: over.attachmentType, payload: { url: over.attachmentUrl ?? null } }]
   } else {
@@ -119,6 +121,7 @@ function stubDb(
     clientMapped?: boolean
     clientLookupFails?: boolean
     existingConversation?: { id: string; conversation_id: string; contact_id: string | null } | null
+    convoSelectFails?: boolean
     convoUpsertFails?: boolean
     msgUpsertFails?: boolean
     optoutUnlinkedUpdateFails?: boolean
@@ -153,6 +156,7 @@ function stubDb(
       maybeSingle: async () => {
         if (table === 'conversations' && sawConversationIdFilter) {
           captured.convoSelects.push({ ...f })
+          if (opts.convoSelectFails) return { data: null, error: { message: 'select failed' } }
           return { data: opts.existingConversation ?? null, error: null }
         }
         return result
@@ -382,6 +386,108 @@ describe('POST — 消息落库', () => {
     expect(captured.convoUpserts).toHaveLength(0)
     expect(captured.msgUpserts).toHaveLength(0)
     expect(sendInngestEvent).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST — 来源归因（referral）', () => {
+  it('message.referral 带 ad_id（无顶层 referral）→ 写入 entry_referral，且带 is-null 守卫', async () => {
+    const captured = stubDb()
+    const referral = { source: 'ADS', type: 'OPEN_THREAD', ad_id: 'ad-456' }
+    await POST(makePost(webhookPayload([messagingEvent({ messageReferral: referral })])))
+
+    expect(captured.updates).toContainEqual(
+      expect.objectContaining({ table: 'conversations', payload: { entry_referral: referral } }),
+    )
+    expect(captured.filters.conversations).toMatchObject({ __is_entry_referral: null })
+  })
+
+  it('顶层短链 referral 与 message.referral(ad_id) 同时存在 → 写带 ad_id 的那个', async () => {
+    const captured = stubDb()
+    const shortlink = { source: 'SHORTLINK', type: 'OPEN_THREAD', ref: 'x' }
+    const ad = { source: 'ADS', type: 'OPEN_THREAD', ad_id: 'ad-999' }
+    await POST(makePost(webhookPayload([messagingEvent({ referral: shortlink, messageReferral: ad })])))
+
+    const written = captured.updates.find((u) => 'entry_referral' in u.payload)
+    expect(written?.payload.entry_referral).toMatchObject({ ad_id: 'ad-999' })
+  })
+
+  it('Shops 商品页形状的 referral（{ product: { id } }）→ 不写 entry_referral', async () => {
+    const captured = stubDb()
+    await POST(makePost(webhookPayload([messagingEvent({ messageReferral: { product: { id: 'p1' } } })])))
+
+    expect(captured.updates.some((u) => 'entry_referral' in u.payload)).toBe(false)
+  })
+
+  it('referral-only 事件（无 message）→ 在已有会话上补写 entry_referral，不建会话、不落消息、不发事件', async () => {
+    const captured = stubDb({
+      existingConversation: { id: 'convo-1', conversation_id: PSID, contact_id: null },
+    })
+    const referral = { source: 'ADS', type: 'OPEN_THREAD', ad_id: 'ad-789' }
+    const event = {
+      sender: { id: PSID },
+      recipient: { id: PAGE_ID },
+      timestamp: 1788336000000,
+      referral,
+    }
+    const res = await POST(makePost(webhookPayload([event])))
+
+    expect(res.status).toBe(200)
+    // Marked with its channel and capture time: the thread already existed, so
+    // this may not be how it began.
+    expect(captured.updates).toContainEqual(
+      expect.objectContaining({
+        table: 'conversations',
+        payload: {
+          entry_referral: {
+            ...referral,
+            via: 'messaging_referrals',
+            captured_at: new Date(1788336000000).toISOString(),
+          },
+        },
+      }),
+    )
+    expect(captured.filters.conversations).toMatchObject({ id: 'convo-1', __is_entry_referral: null })
+    expect(captured.convoUpserts).toHaveLength(0)
+    expect(captured.msgUpserts).toHaveLength(0)
+    expect(sendInngestEvent).not.toHaveBeenCalled()
+    expect(mockRecordOptOutKeywordTouch).not.toHaveBeenCalled()
+  })
+
+  it('referral-only 事件但没有已存会话 → 200，不建行、不写', async () => {
+    const captured = stubDb()
+    const event = {
+      sender: { id: PSID },
+      recipient: { id: PAGE_ID },
+      timestamp: 1788336000000,
+      referral: { source: 'ADS', type: 'OPEN_THREAD', ad_id: 'ad-000' },
+    }
+    const res = await POST(makePost(webhookPayload([event])))
+
+    expect(res.status).toBe(200)
+    expect(captured.updates).toHaveLength(0)
+    expect(captured.convoUpserts).toHaveLength(0)
+    expect(captured.msgUpserts).toHaveLength(0)
+  })
+
+  it('referral-only 事件但会话查询失败 → 200（不是 503），不写', async () => {
+    const captured = stubDb({ convoSelectFails: true })
+    const event = {
+      sender: { id: PSID },
+      recipient: { id: PAGE_ID },
+      timestamp: 1788336000000,
+      referral: { source: 'ADS', type: 'OPEN_THREAD', ad_id: 'ad-111' },
+    }
+    const res = await POST(makePost(webhookPayload([event])))
+
+    expect(res.status).toBe(200)
+    expect(captured.updates).toHaveLength(0)
+  })
+
+  it('普通消息、任何地方都没有 referral → 不写 entry_referral', async () => {
+    const captured = stubDb()
+    await POST(makePost(webhookPayload([messagingEvent({ text: '你好' })])))
+
+    expect(captured.updates.some((u) => 'entry_referral' in u.payload)).toBe(false)
   })
 })
 
