@@ -65,6 +65,13 @@ describe('analyzeViralReference command-injection hardening', () => {
     expect(rowUpdates.some(u => u.analysis_status === 'error')).toBe(true)
   })
 
+  it('upload:// rows get a clear error and never reach yt-dlp or DNS', async () => {
+    await analyzeViralReference('ref-4', 'upload://clip.mp4')
+    expect(m.execFile).not.toHaveBeenCalled()
+    expect(m.resolve).not.toHaveBeenCalled()
+    expect(rowUpdates.some(u => String(u.analysis_error).includes('not stored'))).toBe(true)
+  })
+
   it('a hostname that resolves to a private address is rejected before yt-dlp runs', async () => {
     m.resolve.mockImplementation(async () => { throw new Error('blocked') })
     await analyzeViralReference('ref-2', 'https://rebind.example.com/v')

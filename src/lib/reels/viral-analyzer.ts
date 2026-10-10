@@ -433,6 +433,8 @@ export async function analyzeViralReference(referenceId: string, url: string): P
     .eq('id', referenceId)
 
   try {
+    // Upload rows keep only a label; the file is gone after the upload request, so there is nothing to fetch.
+    if (url.startsWith('upload://')) throw new Error('Uploaded file is not stored, cannot be re-analysed from its label')
     // Rows can pre-date the guard or be written by other paths, so re-check on every analysis.
     const safeUrl = await assertSafeViralSourceUrl(url)
     const platform = detectPlatform(safeUrl)
