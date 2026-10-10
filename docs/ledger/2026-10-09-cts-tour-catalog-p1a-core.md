@@ -4,7 +4,7 @@ title: CTS 团目录第一版（P1a）在本机做完：建表脚本、班期表
 status: decided
 owner: agent
 decided_on: 2026-10-09
-source: pr:2383
+source: pr:2439
 verify_by: 2026-10-16
 verify_how: 改动单合并后，PM 点头再把建表脚本应用到库；然后用 PM 的 2027 出团表上传预览，确认「表 vs 官网」差异行显示、Natural China 因歧义被拒、返程为空的行被拒；应用后回滚一次数据恢复
 ---

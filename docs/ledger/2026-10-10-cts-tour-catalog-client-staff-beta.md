@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-10
 done_on: 2026-10-10
-done_ref: pr:2383
+done_ref: pr:2439
 verify_by: 2026-10-17
 source: session:1a85e0eb
 verify_how: 本机试用页 http://localhost:3011/tc-local-preview 看到 CTS logo、红色 Beta 徽标与「目前不会改动官网」的说明；以客户员工身份只看到团 / 修改记录 / 上架记录三个页签，主按钮是「请 Magic Engine 上架」；管理员在「修改记录」里看到是哪个账号在什么时间把什么从什么改成什么

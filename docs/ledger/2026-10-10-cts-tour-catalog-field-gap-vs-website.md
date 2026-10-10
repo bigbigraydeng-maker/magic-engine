@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-10
 done_on: 2026-10-10
-done_ref: pr:2383
+done_ref: pr:2439
 verify_by: 2026-10-17
 source: session:1a85e0eb
 verify_how: 对官网 33 个团逐字段比对「官网团数据」与「团目录读入后的数据」，差异为零（含图片地址、每天的住宿、简介、亮点、SEO 标题与描述、常见问题、标签、评分）；团目录页面里能看到并修改每个团的主图和图集
