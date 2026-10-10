@@ -48,6 +48,7 @@ import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
+import { tombstoneRecalledDates } from '@/lib/campaign/daily-plan-auto-publish-store'
 import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-manager'
 import { deletePagePost, getPageAccessToken } from '@/lib/meta/page-posts'
 import {
@@ -270,6 +271,28 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       })
     }
 
+    // A recalled post must never be published again by the automatic publisher.
+    // Mark its dates as blocked; if that write fails the recall itself still
+    // stands (the post is gone), but the response says so loudly — the automatic
+    // publisher also treats `recalled[]` on the receipt as final.
+    let autoPublishTombstone: { status: 'OK'; tombstoned: number } | { status: 'FAILED'; detail: string } = {
+      status: 'OK',
+      tombstoned: 0,
+    }
+    if (recalled.length > 0 || already_recalled.length > 0) {
+      try {
+        const marked = await tombstoneRecalledDates({
+          clientId,
+          planId: row.id,
+          dates: Array.from(new Set([...recalled.map((r) => r.date), ...already_recalled.map((r) => r.date)])),
+        })
+        autoPublishTombstone = { status: 'OK', tombstoned: marked.tombstoned }
+      } catch (err) {
+        console.error('[daily-plan recall] auto-publish tombstone failed', errorMessage(err))
+        autoPublishTombstone = { status: 'FAILED', detail: 'tombstone write failed; see server log' }
+      }
+    }
+
     return NextResponse.json({
       success: true,
       status: failed.length === 0 ? 'RECALLED' : recalled.length === 0 ? 'FAILED' : 'PARTIAL',
@@ -278,6 +301,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       failed,
       already_recalled,
       not_published,
+      auto_publish_tombstone: autoPublishTombstone,
+      ...(autoPublishTombstone.status === 'FAILED'
+        ? { warning: '撤回成功，但没能在自动发布里把这些日期标成「已撤回」。请不要重新授权这些日期，并立刻告知开发。' }
+        : {}),
     })
   } catch (err) {
     return NextResponse.json(
