@@ -5,7 +5,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { guardAdmin } from '@/lib/auth/require-admin'
+import { guardGlobalAdmin } from '@/lib/auth/require-admin'
 
 const ALLOWED_FIELDS = ['industry'] as const
 
@@ -13,7 +13,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const guard = await guardAdmin()
+  const guard = await guardGlobalAdmin()
   if (guard) return guard
 
   const { id } = params
