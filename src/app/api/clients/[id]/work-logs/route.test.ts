@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 type Row = Record<string, unknown>
 
@@ -143,19 +145,18 @@ describe('GET /api/clients/[id]/work-logs', () => {
     expect(db.state.rows).toEqual(seed())
   })
 
-  it('本客户成员（client-viewer）读自己这份 → 200，canWrite false，且不带 author_email', async () => {
+  it('本客户成员（client-viewer）读自己这份 → 403 admin_only，且不碰数据库', async () => {
     asMemberOf(CLIENT_A)
     const res = await GET(getReq(CLIENT_A), { params: { id: CLIENT_A } })
-    expect(res.status).toBe(200)
+    expect(res.status).toBe(403)
     expect(mockAccess).toHaveBeenCalledWith(CLIENT_A)
 
     const body = await res.json()
-    expect(body.canWrite).toBe(false)
-    expect(body.logs).toHaveLength(1)
-    expect(body.logs[0].id).toBe('log-a1')
-    expect(body.logs[0]).not.toHaveProperty('author_email')
-    expect(JSON.stringify(body)).not.toContain('log-b1')
-    expect(JSON.stringify(body)).not.toContain('B one')
+    expect(body.reason).toBe('admin_only')
+    expect(db.state.touched).toBe(0)
+    expect(db.state.rows).toEqual(seed())
+    expect(JSON.stringify(body)).not.toContain('A one')
+    expect(JSON.stringify(body)).not.toContain('fde@magicengine.example')
   })
 
   it('全局管理员 → 200，canWrite true，带 author_email，且只返回本客户的行', async () => {
@@ -205,19 +206,18 @@ describe('GET /api/clients/[id]/work-logs', () => {
     expect(JSON.stringify(body)).not.toContain('SECRET_DB_DETAIL')
   })
 
-  it.each(NON_ADMIN_TIERS)('%s 档成员读自己这份 → 200，canWrite false，不带 author_email', async (tier) => {
+  it.each(NON_ADMIN_TIERS)('%s 档成员读自己这份 → 403 admin_only，且不碰数据库', async (tier) => {
     asTierOf(CLIENT_A, tier)
     const res = await GET(getReq(CLIENT_A), { params: { id: CLIENT_A } })
-    expect(res.status).toBe(200)
+    expect(res.status).toBe(403)
     expect(mockAccess).toHaveBeenCalledWith(CLIENT_A)
 
     const body = await res.json()
-    expect(body.canWrite).toBe(false)
-    expect(body.logs).toHaveLength(1)
-    expect(body.logs[0].id).toBe('log-a1')
-    expect(body.logs[0]).not.toHaveProperty('author_email')
-    expect(JSON.stringify(body)).not.toContain('log-b1')
-    expect(JSON.stringify(body)).not.toContain('B one')
+    expect(body.reason).toBe('admin_only')
+    expect(db.state.touched).toBe(0)
+    expect(db.state.rows).toEqual(seed())
+    expect(JSON.stringify(body)).not.toContain('A one')
+    expect(JSON.stringify(body)).not.toContain('fde@magicengine.example')
   })
 
   it('管理员身份但会话没有邮箱 → 403，reason missing_email，且不碰数据库', async () => {
@@ -456,5 +456,13 @@ describe('POST /api/clients/[id]/work-logs', () => {
     expect(body.reason).toBe('lookup_failed')
     expect(db.state.touched).toBe(0)
     expect(db.state.rows).toEqual(seed())
+  })
+})
+
+// 防回潮：PM 2026-10-11「先关」后，客户页面不得再直接读这张表。重新开放时连同这条一起改。
+describe('客户侧页面不读 fde_work_logs', () => {
+  it('旧门户首页源码里没有 fde_work_logs', () => {
+    const src = readFileSync(join(process.cwd(), 'src/app/portal/[clientId]/page.tsx'), 'utf8')
+    expect(src).not.toMatch(/from\(\s*['"]fde_work_logs['"]\s*\)/)
   })
 })

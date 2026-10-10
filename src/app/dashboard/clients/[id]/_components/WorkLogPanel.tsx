@@ -37,10 +37,11 @@ export function WorkLogPanel({ clientId }: { clientId: string }) {
   }
 
   useEffect(() => {
+    if (denied) return
     fetchLogs()
     const timer = setInterval(fetchLogs, 60_000)
     return () => clearInterval(timer)
-  }, [clientId])
+  }, [clientId, denied])
 
   async function handleSave() {
     const summary = text.trim()
@@ -91,7 +92,8 @@ export function WorkLogPanel({ clientId }: { clientId: string }) {
   if (denied) {
     return (
       <div className="rounded-xl border border-dashed border-black/15 py-10 text-center">
-        <p className="text-sm font-bold text-me-charcoal/50">你没有权限查看这位客户的工作日志</p>
+        <p className="text-sm font-bold text-me-charcoal/50">工作日志暂未开放</p>
+        <p className="mt-1 text-xs text-me-charcoal/35">这里是 Magic Engine 团队的内部工作记录</p>
       </div>
     )
   }
@@ -141,7 +143,7 @@ export function WorkLogPanel({ clientId }: { clientId: string }) {
         <div className="rounded-xl border border-dashed border-black/15 py-10 text-center">
           <p className="text-sm font-bold text-me-charcoal/50">还没有日志</p>
           <p className="mt-1 text-xs text-me-charcoal/35">
-            {canWrite ? '每天写几句，帮助客户和团队看到进展' : 'Magic Engine 团队还没有写下进展'}
+            每天写几句，帮助团队看到进展
           </p>
         </div>
       ) : (

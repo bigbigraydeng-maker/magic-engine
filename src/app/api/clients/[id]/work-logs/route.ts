@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
-// fde_work_logs 鉴权口径（PM 2026-10-10 拍板「客户可读」）：
-//   GET    —— 该客户的成员或 ME 管理员都能读自己这一份；按 params.id 校验归属，换客户编号即 403。
-//             非管理员只拿正文，不带 author_email（ME 员工邮箱不外露，与旧门户页口径一致）。
-//   POST / DELETE —— 只有 ME 管理员（tier === 'admin'，受限管理员仅限自己那一个客户）。
-// 数据库报错原文只进服务端日志，不回给调用方。
+// fde_work_logs 鉴权口径（PM 2026-10-11「先关」，替代 10-10 的「客户可读」）：
+//   GET / POST / DELETE 一律只给 ME 管理员（tier === 'admin'，受限管理员仅限自己那一个客户）。
+//   客户成员（付费、免费、门户）读也是 403 —— 现有日志大多含内部用语，
+//   等日志分成「对内 / 对客户」两类之后再考虑重新开放，届时改这里并补测试。
+// 归属按 params.id 校验，换客户编号即 403。数据库报错原文只进服务端日志，不回给调用方。
 
 interface Params { params: { id: string } }
 
@@ -41,7 +41,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Forbidden', reason: 'missing_email' }, { status: 403 })
   }
 
-  const canWrite = access.tier === 'admin'
+  if (access.tier !== 'admin') {
+    return NextResponse.json({ error: 'Forbidden', reason: 'admin_only' }, { status: 403 })
+  }
 
   const { data, error } = await supabaseAdmin
     .from('fde_work_logs')
@@ -56,17 +58,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'work_logs_read_failed' }, { status: 500 })
   }
 
-  if (canWrite) {
-    return NextResponse.json({ logs: data ?? [], canWrite: true })
-  }
-
-  const logs = (data ?? []).map((row) => ({
-    id: row.id,
-    log_date: row.log_date,
-    summary: row.summary,
-    created_at: row.created_at,
-  }))
-  return NextResponse.json({ logs, canWrite: false })
+  return NextResponse.json({ logs: data ?? [], canWrite: true })
 }
 
 // POST /api/clients/[id]/work-logs  { summary, log_date? }
