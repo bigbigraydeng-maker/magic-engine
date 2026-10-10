@@ -19,6 +19,7 @@
  */
 
 import type { Verdict, MetricVerdict } from './baseline'
+import { resolveAdsPlaybook } from './playbooks'
 
 /** Frequency at/above which decay is read as audience fatigue, not creative age. */
 const FREQ_FATIGUE_THRESHOLD = 2.5
@@ -39,6 +40,8 @@ export interface PrescribeInput {
   verdict: Verdict
   metrics: MetricVerdict[]
   frequency_7d: number | null
+  /** `clients.industry` — only picks the result noun in the copy. null/unknown → neutral words. */
+  industry?: string | null
 }
 
 /**
@@ -84,7 +87,7 @@ export function prescribe(input: PrescribeInput): Prescription | null {
     return {
       kind: 'review_offer',
       title: '检查报价文案和落地流程',
-      why: '点击没变差但每个询盘变贵了 —— 问题多半不在广告,在点进去之后(表单/报价/页面)。',
+      why: `点击没变差但${resolveAdsPlaybook(input.industry ?? null).costPerResultLabel}变贵了 —— 问题多半不在广告,在点进去之后(表单/报价/页面)。`,
       executable: false,
       execute_hint: '这要改报价文案和落地页,我不自动动。先按住钱(降预算或先停),改哪里我来查了给你。',
     }

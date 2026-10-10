@@ -70,6 +70,8 @@ export interface SweepClient {
   meta_ad_account_id: string | null
   /** 客户所在地区，用来对照投放地区。没有就跳过那条检查。 */
   expected_geo?: string | null
+  /** 客户行业（`clients.industry`），闸门文案从广告剧本取叫法。没有就用中性词。 */
+  industry?: string | null
 }
 
 /** 一个组最多回读多少条广告的文案 —— 上游 `fetchAdCreativesReadback` 已限 50。 */
@@ -129,9 +131,10 @@ export async function sweepClient(client: SweepClient): Promise<ClientSweepResul
       continue
     }
 
-    const report = checkLaunch(
-      adaptMetaAdSet(raw, creatives, { expectedGeo: client.expected_geo ?? null }),
-    )
+    const report = checkLaunch({
+      ...adaptMetaAdSet(raw, creatives, { expectedGeo: client.expected_geo ?? null }),
+      industry: client.industry ?? null,
+    })
     swept.push({
       adSetId: raw.id,
       adSetName: name,

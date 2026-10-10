@@ -8,8 +8,10 @@ import type Anthropic from '@anthropic-ai/sdk'
 import { callClaudeWithTools, type ClaudeToolCall } from '@/lib/anthropic/client'
 import { FACTORY_PUBLISH_BUDGET_HARD_CAP_USD } from './constants'
 import { applyBudgetUpdate, applyQualityReject } from './review-apply'
+import { REMOTION_REJECT_UNSUPPORTED_MESSAGE, isRemotionBrief, renderModeLabel } from './render-mode'
+import { REEL_HUMAN_CHECK_KEYS, type ContentCheckItemResult } from '@/lib/social/content-review'
 
-interface FactoryChatCtx {
+export interface FactoryChatCtx {
   supabase: SupabaseClient
   clientId: string
   reviewer: string
@@ -27,14 +29,30 @@ const LIST_PENDING_TOOL: Anthropic.Tool = {
 const REJECT_TOOL: Anthropic.Tool = {
   name: 'reject_work_order',
   description:
-    '打回一条待审成片,并附上用户的意见。老工单作废,系统会照意见自动重开一条工单重做。feedback 用中文,把用户说的"哪里不对、要怎么改"如实转述(如"节奏太慢,开头改成价格反转")。',
+    '打回一条待审成片,并附上用户的意见。老工单作废,系统会照意见自动重开一条工单重做。feedback 用中文,把用户说的"哪里不对、要怎么改"如实转述(如"节奏太慢,开头改成价格反转")。注意:list_pending_reviews 里「出片方式」为「模板出片(remotion)」的工单不能打回重做,调用会被拒绝,此时直接告诉用户需要改模板参数或在后台重新出单。',
   input_schema: {
     type: 'object' as const,
     properties: {
       work_order_id: { type: 'string', description: '要打回的工单 id(先用 list_pending_reviews 拿)' },
       feedback: { type: 'string', description: '打回意见,中文,如实转述用户要改什么' },
+      checklist_human: {
+        type: 'array',
+        description: '完整人工清单。只把用户明确确认或反馈的问题映射为 PASS/FAIL；其余设为 NOT_MEASURED。事实来源两项必须附 HTTPS URL 或 client_asset:<ID>。',
+        items: {
+          type: 'object',
+          properties: {
+            key: { type: 'string', enum: [...REEL_HUMAN_CHECK_KEYS] },
+            judge: { type: 'string', enum: ['HUMAN'] },
+            outcome: { type: 'string', enum: ['PASS', 'FAIL', 'NOT_MEASURED'] },
+            detail: { type: ['string', 'null'] },
+            source_ref: { type: ['string', 'null'] },
+          },
+          required: ['key', 'judge', 'outcome', 'detail', 'source_ref'],
+          additionalProperties: false,
+        },
+      },
     },
-    required: ['work_order_id', 'feedback'],
+    required: ['work_order_id', 'feedback', 'checklist_human'],
   },
 }
 
@@ -52,7 +70,7 @@ const ADJUST_BUDGET_TOOL: Anthropic.Tool = {
   },
 }
 
-function buildFactoryChatTools(ctx: FactoryChatCtx): {
+export function buildFactoryChatTools(ctx: FactoryChatCtx): {
   tools: Anthropic.Tool[]
   handlers: Record<string, (input: unknown) => Promise<string>>
 } {
@@ -63,7 +81,7 @@ function buildFactoryChatTools(ctx: FactoryChatCtx): {
         // 带上 output:里面的 redline_hits 是交付时服务端复扫命中的品牌红线词。不带的话
         // 对话框这边完全看不见红线,问「这条有没有问题」只能答干净的,跟 ReviewInbox 的红色
         // 提示对不上(护栏「命中不打回、标红给人看」的另一半)。
-        .select('id, angle, rationale_one_liner, created_at, output')
+        .select('id, angle, rationale_one_liner, created_at, output, brief')
         .eq('client_id', ctx.clientId)
         .eq('status', 'in_review')
         .order('created_at', { ascending: true })
@@ -77,6 +95,7 @@ function buildFactoryChatTools(ctx: FactoryChatCtx): {
             id: w.id,
             角度: w.angle,
             理由: w.rationale_one_liner,
+            出片方式: renderModeLabel(w.brief),
             ...(Array.isArray(hits) && hits.length > 0 ? { 命中品牌红线: hits } : {}),
           }
         }),
@@ -84,9 +103,21 @@ function buildFactoryChatTools(ctx: FactoryChatCtx): {
     },
 
     async reject_work_order(input: unknown) {
-      const { work_order_id, feedback } = (input ?? {}) as { work_order_id?: string; feedback?: string }
-      if (!work_order_id || !feedback?.trim()) return '缺少 work_order_id 或 feedback。'
-      const r = await applyQualityReject(ctx.supabase, work_order_id, feedback.trim(), ctx.reviewer, ctx.clientId)
+      const { work_order_id, feedback, checklist_human } = (input ?? {}) as {
+        work_order_id?: string
+        feedback?: string
+        checklist_human?: ContentCheckItemResult[]
+      }
+      if (!work_order_id || !feedback?.trim() || !Array.isArray(checklist_human)) return '缺少 work_order_id、feedback 或 checklist_human。'
+      const { data: wo, error: loadErr } = await ctx.supabase
+        .from('content_work_orders')
+        .select('id, brief')
+        .eq('id', work_order_id)
+        .eq('client_id', ctx.clientId)
+        .maybeSingle()
+      if (loadErr) return `查询工单失败: ${loadErr.message}。没有打回,请稍后重试。`
+      if (wo && isRemotionBrief(wo.brief)) return REMOTION_REJECT_UNSUPPORTED_MESSAGE
+      const r = await applyQualityReject(ctx.supabase, work_order_id, feedback.trim(), ctx.reviewer, ctx.clientId, checklist_human)
       if (!r.ok) return `打回失败: ${r.error}`
       return `已打回并重开一条工单(新工单 ${r.data?.reopened_work_order_id}),意见「${feedback.trim()}」已带进新单,worker 接单后会重做。`
     },
@@ -114,8 +145,9 @@ function buildSystemPrompt(clientName: string): string {
     '',
     '你能做的:',
     '① 用 list_pending_reviews 看有哪些成片待审;',
-    '② 用 reject_work_order 按用户意见打回(老单作废+自动重开重做);',
+    '② 用 reject_work_order 按用户意见打回(老单作废+自动重开重做);结构化清单只记录用户明确确认的内容,没检查的项必须标 NOT_MEASURED,不要推断为 PASS;',
     '③ 用 adjust_budget 调投放预算(不重做画面)。',
+    '注意:list_pending_reviews 返回里「出片方式」是「模板出片(remotion)」的工单,打回重做做不了(模板重渲只会得到同一条片子),reject_work_order 会拒绝。遇到这种单,不要尝试打回,如实告诉用户「这条是模板出片,对话框改不了画面,需要改模板参数或在后台重新出单」;调预算仍然可以。',
     '',
     `你【不能】做「通过/投放」——花钱那一下只能用户在页面上亲手点「通过并投放(上限 $${FACTORY_PUBLISH_BUDGET_HARD_CAP_USD})」按钮,你没有这个工具,也不要假装点了。`,
     '用户说「第一条/那条」时,先 list_pending_reviews 对上 id 再操作。操作完用一句人话回执:做了什么、接下来会怎样。',

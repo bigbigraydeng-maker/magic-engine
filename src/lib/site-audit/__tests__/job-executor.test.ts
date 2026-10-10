@@ -34,6 +34,8 @@ import {
   executeJob,
   discoverSitemapUrls,
   crawlAndClassifyPages,
+  summarizeMarkFailures,
+  summarizeRecordFailures,
   type ExecuteJobOptions,
 } from '../job-executor'
 import { JobRunner } from '../job-runner'
@@ -102,11 +104,17 @@ function makeGeoResult(overrides: Record<string, unknown> = {}) {
 }
 
 /** Build a Supabase mock whose `.from(table).upsert(...)` resolves to success. */
-function makeSupabaseMock(upsertError: unknown = null) {
+function makeSupabaseMock(upsertError: unknown = null, updateError: unknown = null) {
   const upsertFn = vi.fn().mockResolvedValue({ data: null, error: upsertError })
-  const fromFn = vi.fn().mockReturnValue({ upsert: upsertFn })
-  return { from: fromFn, _upsert: upsertFn } as unknown as SupabaseClient & {
+  // update().eq().eq().eq() chain that is also awaitable, like a real query builder.
+  const updateChain = Object.assign(Promise.resolve({ data: null, error: updateError }), { eq: vi.fn() })
+  updateChain.eq.mockReturnValue(updateChain)
+  const updateFn = vi.fn().mockReturnValue(updateChain)
+  const fromFn = vi.fn().mockReturnValue({ upsert: upsertFn, update: updateFn })
+  return { from: fromFn, _upsert: upsertFn, _update: updateFn, _updateEq: updateChain.eq } as unknown as SupabaseClient & {
     _upsert: ReturnType<typeof vi.fn>
+    _update: ReturnType<typeof vi.fn>
+    _updateEq: ReturnType<typeof vi.fn>
   }
 }
 
@@ -205,7 +213,7 @@ describe('executeJob', () => {
     await executeJob(mockSupabase as unknown as SupabaseClient, 'job-123')
 
     expect(mockRunner.startJob).toHaveBeenCalledWith('job-123')
-    expect(mockRunner.completeJob).toHaveBeenCalledWith('job-123')
+    expect(mockRunner.completeJob).toHaveBeenCalledWith('job-123', [])
     expect(mockRunner.failJob).not.toHaveBeenCalled()
   })
 
@@ -283,6 +291,54 @@ describe('executeJob', () => {
 
     expect(mockRunner.completeJob).toHaveBeenCalled()
     expect(mockRunner.failJob).not.toHaveBeenCalled()
+  })
+
+  it('passes failed URLs to completeJob when some pages fail to crawl', async () => {
+    const urls = [
+      'https://example.com/',
+      'https://example.com/broken',
+      'https://example.com/about',
+    ]
+
+    vi.mocked(crawlerDiscoverUrls).mockResolvedValue(urls)
+    vi.mocked(crawlPages).mockResolvedValue([
+      makeCrawlResult(urls[0]),
+      makeCrawlResult(urls[1], { error: 'Timeout', statusCode: 0, markdown: '' }),
+      makeCrawlResult(urls[2]),
+    ])
+
+    await executeJob(mockSupabase as unknown as SupabaseClient, 'job-123')
+
+    expect(mockRunner.completeJob).toHaveBeenCalledWith('job-123', [urls[1]])
+  })
+
+  it('saves a summary on the job when a blocked-page mark fails', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    mockSupabase = makeSupabaseMock({ message: 'check constraint violated' })
+
+    vi.mocked(crawlerDiscoverUrls).mockResolvedValue(['https://example.com/blocked'])
+    vi.mocked(crawlPages).mockResolvedValue([
+      makeCrawlResult('https://example.com/blocked', {
+        markdown: '',
+        title: '',
+        antibot: {
+          kind: 'siteground',
+          evidence: 'body contains "Robot Challenge Screen"',
+        },
+        error: 'antibot_siteground: body contains "Robot Challenge Screen"',
+      }),
+    ])
+
+    await executeJob(mockSupabase, 'job-123')
+
+    expect(mockRunner.completeJob).toHaveBeenCalledWith(
+      'job-123',
+      ['https://example.com/blocked'],
+      expect.stringContaining('1 个被防火墙挡住的页面没能标记上')
+    )
+
+    spy.mockRestore()
   })
 
   // ── Classification fallback ──────────────────────────────────────────────
@@ -493,6 +549,7 @@ describe('crawlAndClassifyPages — database writes', () => {
       has_geo_block: false,
       status_code: 200,
     })
+    expect(upsertArg.crawl_error).toBeNull()
     // job_id is not a column on client_site_pages (removed in 40d43a86)
     expect(upsertArg).not.toHaveProperty('job_id')
   })
@@ -548,7 +605,7 @@ describe('crawlAndClassifyPages — database writes', () => {
     expect(result.failed[0].url).toBe(urls[0])
   })
 
-  it('does NOT upsert pages that failed to crawl (error field present)', async () => {
+  it('records a failed crawl only as a first-time row, never overwriting an existing snapshot', async () => {
     const url = 'https://example.com/broken'
     vi.mocked(crawlPages).mockResolvedValue([
       makeCrawlResult(url, { error: 'Timeout', statusCode: 0, markdown: '' }),
@@ -562,9 +619,51 @@ describe('crawlAndClassifyPages — database writes', () => {
       { maxPages: 100, rateLimitMs: 0 }
     )
 
-    expect(mockSupabase._upsert).not.toHaveBeenCalled()
+    expect(mockSupabase._upsert).toHaveBeenCalledTimes(1)
+    const [row, opts] = mockSupabase._upsert.mock.calls[0]
+    expect(row).toMatchObject({ url, crawl_status: 'failed', crawl_error: 'Timeout' })
+    expect(row).not.toHaveProperty('markdown_content')
+    expect(opts).toMatchObject({ ignoreDuplicates: true })
     expect(result.failed).toHaveLength(1)
     expect(result.failed[0]).toMatchObject({ url, error: 'Timeout' })
+  })
+
+  it('refreshes the attempt time only on rows already marked failed, never on a good snapshot', async () => {
+    const url = 'https://example.com/broken'
+    vi.mocked(crawlPages).mockResolvedValue([
+      makeCrawlResult(url, { error: 'Timeout', statusCode: 0, markdown: '' }),
+    ])
+
+    await crawlAndClassifyPages(
+      mockSupabase as unknown as SupabaseClient, 'client-abc', [url], 'job-123',
+      { maxPages: 100, rateLimitMs: 0 }
+    )
+
+    expect(mockSupabase._update).toHaveBeenCalledTimes(1)
+    const [patch] = mockSupabase._update.mock.calls[0]
+    expect(Object.keys(patch).sort()).toEqual(['crawl_error', 'crawled_at'])
+    expect(mockSupabase._updateEq.mock.calls).toEqual([
+      ['client_id', 'client-abc'], ['url', url], ['crawl_status', 'failed'],
+    ])
+  })
+
+  it('reports a database error on the failed-attempt write as a record failure, not a firewall one', async () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockSupabase = makeSupabaseMock(null, { message: 'permission denied' })
+    const url = 'https://example.com/broken'
+    vi.mocked(crawlPages).mockResolvedValue([
+      makeCrawlResult(url, { error: 'Timeout', statusCode: 0, markdown: '' }),
+    ])
+
+    const result = await crawlAndClassifyPages(
+      mockSupabase as unknown as SupabaseClient, 'client-abc', [url], 'job-123',
+      { maxPages: 100, rateLimitMs: 0 }
+    )
+    spy.mockRestore()
+
+    expect(summarizeMarkFailures(result.failed)).toBeNull()
+    expect(summarizeRecordFailures(result.failed)).toContain('permission denied')
+    expect(summarizeRecordFailures(result.failed)).not.toContain('防火墙')
   })
 
   it('upserts GEO block info when detected', async () => {
@@ -919,5 +1018,95 @@ describe('crawlAndClassifyPages — non-Error throw in upsert (Suite 8)', () => 
     expect(result.failed).toHaveLength(1)
     expect(result.failed[0].error).toBe('plain string failure')
     expect(result.successful).toHaveLength(0)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Suite 9: Anti-bot mark write is checked (2026-09-26)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('crawlAndClassifyPages — anti-bot mark write is checked (2026-09-26)', () => {
+  afterEach(() => vi.clearAllMocks())
+
+  it('records the mark failure when the antibot upsert returns an error', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    vi.mocked(JobRunner).mockImplementation(() => makeRunnerMock() as never)
+    vi.mocked(crawlPages).mockResolvedValue([
+      makeCrawlResult('https://example.com/blocked', {
+        markdown: '',
+        title: '',
+        antibot: {
+          kind: 'siteground',
+          evidence: 'body contains "Robot Challenge Screen"',
+        },
+        error: 'antibot_siteground: body contains "Robot Challenge Screen"',
+      }),
+    ])
+
+    const supabase = makeSupabaseMock({
+      message: 'new row violates check constraint "client_site_pages_crawl_status_check"',
+    })
+
+    const result = await crawlAndClassifyPages(
+      supabase as unknown as SupabaseClient,
+      'client-abc',
+      ['https://example.com/blocked'],
+      'job-123',
+      { maxPages: 100, rateLimitMs: 0 }
+    )
+
+    expect(result.failed).toHaveLength(1)
+    expect(result.failed[0].error).toContain('mark failed')
+    expect(result.failed[0].error).toContain('client_site_pages_crawl_status_check')
+    expect(result.successful).toHaveLength(0)
+    expect(supabase._upsert).toHaveBeenCalledTimes(1)
+    expect(supabase._upsert.mock.calls[0][0].crawl_status).toBe('antibot_challenged')
+    expect(consoleErrorSpy).toHaveBeenCalled()
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('does not record a mark failure when the antibot upsert succeeds', async () => {
+    vi.mocked(JobRunner).mockImplementation(() => makeRunnerMock() as never)
+    vi.mocked(crawlPages).mockResolvedValue([
+      makeCrawlResult('https://example.com/blocked', {
+        markdown: '',
+        title: '',
+        antibot: {
+          kind: 'siteground',
+          evidence: 'body contains "Robot Challenge Screen"',
+        },
+        error: 'antibot_siteground: body contains "Robot Challenge Screen"',
+      }),
+    ])
+
+    const supabase = makeSupabaseMock()
+
+    const result = await crawlAndClassifyPages(
+      supabase as unknown as SupabaseClient,
+      'client-abc',
+      ['https://example.com/blocked'],
+      'job-123',
+      { maxPages: 100, rateLimitMs: 0 }
+    )
+
+    expect(result.failed).toHaveLength(1)
+    expect(result.failed[0].error).not.toContain('mark failed')
+  })
+})
+
+describe('summarizeMarkFailures', () => {
+  it('returns null when no blocked-page mark failed', () => {
+    expect(summarizeMarkFailures([{ url: 'https://example.com/a', error: 'Timeout' }])).toBeNull()
+  })
+
+  it('counts the failed marks and keeps the first reason', () => {
+    const summary = summarizeMarkFailures([
+      { url: 'https://example.com/a', error: 'antibot_siteground; mark failed: check constraint violated' },
+      { url: 'https://example.com/b', error: 'Timeout' },
+      { url: 'https://example.com/c', error: 'antibot_siteground; mark failed: other' },
+    ])
+    expect(summary).toBe('2 个被防火墙挡住的页面没能标记上（第一个原因：check constraint violated）')
   })
 })

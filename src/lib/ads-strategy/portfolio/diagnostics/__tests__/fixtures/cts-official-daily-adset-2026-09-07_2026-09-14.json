@@ -1,0 +1,562 @@
+[
+ {
+  "campaign_id": "52549857862873",
+  "adset_id": "52549857906273",
+  "campaign_name": "GC · 顶层认知 · 视频观看 · 20260908",
+  "adset_name": "GC 顶层 · ThruPlay · 4 条各 $10 · 20260908",
+  "spend": "34.06",
+  "impressions": "3395",
+  "reach": "1758",
+  "clicks": "11",
+  "frequency": "1.931172",
+  "cpm": "10.032401",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "7"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "2851"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "2851"
+   },
+   {
+    "action_type": "video_view",
+    "value": "2844"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3277"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2373"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2717"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2549"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2438"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2289"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2190"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "13"
+   }
+  ],
+  "date_start": "2026-09-08",
+  "date_stop": "2026-09-08"
+ },
+ {
+  "campaign_id": "52549857862873",
+  "adset_id": "52549857906273",
+  "campaign_name": "GC · 顶层认知 · 视频观看 · 20260908",
+  "adset_name": "GC 顶层 · ThruPlay · 4 条各 $10 · 20260908",
+  "spend": "49.49",
+  "impressions": "4175",
+  "reach": "1145",
+  "clicks": "2",
+  "frequency": "3.646288",
+  "cpm": "11.853892",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "2"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "4099"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "4099"
+   },
+   {
+    "action_type": "video_view",
+    "value": "4097"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4150"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3915"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4021"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3980"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3946"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3873"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3870"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "date_start": "2026-09-09",
+  "date_stop": "2026-09-09"
+ },
+ {
+  "campaign_id": "52549857862873",
+  "adset_id": "52549857906273",
+  "campaign_name": "GC · 顶层认知 · 视频观看 · 20260908",
+  "adset_name": "GC 顶层 · ThruPlay · 4 条各 $10 · 20260908",
+  "spend": "42.63",
+  "impressions": "3858",
+  "reach": "1355",
+  "clicks": "7",
+  "frequency": "2.847232",
+  "cpm": "11.049767",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "3"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "3513"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "3513"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "3509"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3681"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3164"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3389"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3310"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3246"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3102"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3085"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "15"
+   }
+  ],
+  "date_start": "2026-09-10",
+  "date_stop": "2026-09-10"
+ },
+ {
+  "campaign_id": "52549857862873",
+  "adset_id": "52549857906273",
+  "campaign_name": "GC · 顶层认知 · 视频观看 · 20260908",
+  "adset_name": "GC 顶层 · ThruPlay · 4 条各 $10 · 20260908",
+  "spend": "76.98",
+  "impressions": "5819",
+  "reach": "1772",
+  "clicks": "11",
+  "frequency": "3.28386",
+  "cpm": "13.229077",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "8"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "4"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "4"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "5696"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "5696"
+   },
+   {
+    "action_type": "video_view",
+    "value": "5688"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5754"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5458"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5595"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5589"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5556"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5386"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5378"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "date_start": "2026-09-11",
+  "date_stop": "2026-09-11"
+ },
+ {
+  "campaign_id": "52549857862873",
+  "adset_id": "52549857906273",
+  "campaign_name": "GC · 顶层认知 · 视频观看 · 20260908",
+  "adset_name": "GC 顶层 · ThruPlay · 4 条各 $10 · 20260908",
+  "spend": "54.4",
+  "impressions": "4094",
+  "reach": "1182",
+  "clicks": "7",
+  "frequency": "3.463621",
+  "cpm": "13.287738",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "4"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "3964"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "3964"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "3958"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4015"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3762"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3892"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3848"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3814"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3703"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3697"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "date_start": "2026-09-12",
+  "date_stop": "2026-09-12"
+ },
+ {
+  "campaign_id": "52549857862873",
+  "adset_id": "52549857906273",
+  "campaign_name": "GC · 顶层认知 · 视频观看 · 20260908",
+  "adset_name": "GC 顶层 · ThruPlay · 4 条各 $10 · 20260908",
+  "spend": "36.78",
+  "impressions": "2650",
+  "reach": "672",
+  "clicks": "2",
+  "frequency": "3.943452",
+  "cpm": "13.879245",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "2"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "2625"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "2625"
+   },
+   {
+    "action_type": "video_view",
+    "value": "2623"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2637"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2574"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2606"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2593"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2590"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2546"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2544"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "date_start": "2026-09-13",
+  "date_stop": "2026-09-13"
+ }
+]

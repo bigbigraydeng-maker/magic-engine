@@ -120,7 +120,8 @@ describe('the money question is answered before any diagnosis', () => {
       '/ad-health': respond([{ ...OZTOP_ALERT, latest_results_7d: 0 }]),
     }))
     render(<AdsHealthPage />)
-    await waitFor(() => expect(screen.getByText(/一个询盘都没来/)).toBeTruthy())
+    // No industry in the response → neutral playbook words (G11).
+    await waitFor(() => expect(screen.getByText(/一个结果都没来/)).toBeTruthy())
   })
 
   it('labels the per-lead figure 实付 so it cannot be mistaken for the verdict number', async () => {
@@ -128,7 +129,19 @@ describe('the money question is answered before any diagnosis', () => {
     // are correct and they differ — unlabelled they read as a contradiction.
     vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([OZTOP_ALERT]) }))
     render(<AdsHealthPage />)
-    await waitFor(() => expect(screen.getByText(/实付每个询盘/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/实付每个结果/)).toBeTruthy())
+  })
+
+  it('uses the client industry words from the playbook — a travel client never sees 询盘 (G11)', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health': { ...respond([OZTOP_ALERT, HEALTHY]), industry: 'travel' },
+    }))
+    render(<AdsHealthPage />)
+    await waitFor(() => expect(screen.getAllByText(/实付每个咨询/).length).toBe(2))
+    expect(screen.getByText(/过去 7 天花了/).textContent).toContain('个咨询')
+    expect(screen.getByText(/最贵的是/).textContent).toContain('一个咨询')
+    expect(screen.getAllByText(/近 7 天咨询/).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/实付每个询盘|实付每个结果/)).toBeNull()
   })
 })
 
@@ -164,16 +177,37 @@ describe('every card that is burning money offers a way to stop it', () => {
   })
 
   it('a budget cut reports the new daily number, so the PM can verify it', async () => {
-    vi.stubGlobal('fetch', mockFetch({
+    const randomUUID = vi.fn().mockReturnValue('de305d54-75b4-431b-adb2-eb6b9e546014')
+    vi.stubGlobal('crypto', { randomUUID })
+    const fetch = mockFetch({
       '/ad-health/stop-loss': { current_daily: 60, planned_daily: 48, cuttable: true, pausable: true, executed: true, action: 'cut', ok: true, new_daily: 48, warnings: [] },
       '/ad-health': respond([OZTOP_ALERT]),
-    }))
+    })
+    vi.stubGlobal('fetch', fetch)
     render(<AdsHealthPage />)
     await waitFor(() => expect(screen.getByText('预算降 20%')).toBeTruthy())
 
     await userEvent.click(screen.getByText('预算降 20%'))
     await waitFor(() => expect(screen.getByText(/已降到每天/)).toBeTruthy())
     expect(screen.getByText(/已降到每天/).textContent).toContain('48')
+    expect(screen.queryByText(/广告还在跑/)).toBeNull()
+    const post = (fetch.mock.calls as unknown as Array<[string, RequestInit | undefined]>).find(([, init]) => init?.method === 'POST')
+    expect(randomUUID).toHaveBeenCalledOnce()
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ request_id: 'de305d54-75b4-431b-adb2-eb6b9e546014' })
+  })
+
+  it('shows a campaign state warning without claiming the ad is still running', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health/stop-loss': { current_daily: 60, planned_daily: 48, cuttable: true, pausable: true, executed: true, action: 'cut', ok: true, new_daily: 48, warnings: ['广告系列状态已变化，未自动重新开启，请检查。'] },
+      '/ad-health': respond([OZTOP_ALERT]),
+    }))
+    render(<AdsHealthPage />)
+    await waitFor(() => expect(screen.getByText('预算降 20%')).toBeTruthy())
+
+    await userEvent.click(screen.getByText('预算降 20%'))
+
+    await waitFor(() => expect(screen.getByText(/未自动重新开启/)).toBeTruthy())
+    expect(screen.queryByText(/广告还在跑/)).toBeNull()
   })
 
   it('an un-cuttable budget still leaves a next step — never "go do it yourself"', async () => {

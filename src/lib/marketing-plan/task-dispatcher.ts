@@ -22,9 +22,18 @@ import type {
 } from './types'
 
 // ─── 推导 dimension ────────────────────────────────────────────────────────────
+//
+// 子牙架构复审（2026-09-08 · newsletter 排期设计）：这句判断是全流水线唯一决定
+// dimension 的地方，任何 kind 落进 else 分支都会被静默归成"社媒"——加新 kind 必须
+// 显式列出，不能指望默认分支蒙对。newsletter_email 归"社媒"是因为邮件本质是自有
+// 渠道内容，跟社媒同类，不新增 dimension 枚举值。
 
-function kindToDimension(kind: PlanTaskKind): 'social' | 'seo' {
-  return kind === 'blog_article' ? 'seo' : 'social'
+/** Exported for tests — 新增 kind 时验证有没有漏掉显式映射（不能靠默认分支蒙对）。 */
+export function kindToDimension(kind: PlanTaskKind): 'social' | 'seo' {
+  if (kind === 'blog_article') return 'seo'
+  if (kind === 'social_post' || kind === 'social_reel' || kind === 'social_story') return 'social'
+  if (kind === 'newsletter_email') return 'social'
+  return 'social'
 }
 
 // ─── 推导 requires（Phase 20.D 素材依赖标注）──────────────────────────────────────
@@ -32,12 +41,12 @@ function kindToDimension(kind: PlanTaskKind): 'social' | 'seo' {
 // 默认规则（可被 task.requires 显式覆盖）：
 //   social_reel / social_story → client_video（需要视频素材）
 //   social_post                → client_photo（需要图片素材）
-//   blog_article               → none（ME 可全自动生成）
+//   blog_article / newsletter_email → none（ME 可全自动生成文案，事实来自 master_briefs）
 
 function kindToRequires(kind: PlanTaskKind): PlanTaskRequires {
   if (kind === 'social_reel' || kind === 'social_story') return 'client_video'
   if (kind === 'social_post') return 'client_photo'
-  return 'none'  // blog_article
+  return 'none'  // blog_article / newsletter_email
 }
 
 // ─── 推导 phase ────────────────────────────────────────────────────────────────
@@ -78,16 +87,26 @@ function buildStepsJson(task: PlanTask): Record<string, unknown> {
     platforms: platformsArray,        // 新：量产扇出用
     topic: task.topic ?? null,
     source_blog_topic_index: task.source_blog_topic_index ?? null,
+    source_email_topic_index: task.source_email_topic_index ?? null,
     source_strategy_item_id: task.source_strategy_item_id ?? null,
     requires,                  // Phase 20.D: 素材依赖标注
+    /**
+     * kind='newsletter_email' 专用：true 时 FDE 发布前必须确认正文里带了真实链接。
+     * 这不是提示性文字——是"中国免签"事故（2026-09 邮件打开率不低但点击率必然
+     * 为 0，正文压根没放链接）之后加的强制检查项，FDE 端 UI 应该把它渲染成
+     * 一个勾选项而不是一段可以被扫过去的说明文字。
+     */
+    requires_link: task.kind === 'newsletter_email' ? (task.requires_link ?? null) : null,
     // FDE meta（供执行看板 FdeMetaRow 显示）
-    estimated_hours: task.kind === 'blog_article' ? 4 : 1,
+    estimated_hours: task.kind === 'blog_article' ? 4 : task.kind === 'newsletter_email' ? 2 : 1,
     required_skills:
       task.kind === 'blog_article'
         ? ['blog writing', 'SEO optimisation']
-        : task.kind === 'social_reel'
-          ? ['video direction', 'social copywriting']
-          : ['social copywriting'],
+        : task.kind === 'newsletter_email'
+          ? ['email copywriting', 'Mailchimp campaign setup']
+          : task.kind === 'social_reel'
+            ? ['video direction', 'social copywriting']
+            : ['social copywriting'],
   }
 }
 
@@ -100,9 +119,12 @@ function buildExecutionTarget(task: PlanTask): {
 } {
   // social_* → social_matrix（社媒矩阵 / Reels Studio）
   // blog_article → seo_engine（博客工作台）
-  return task.kind === 'blog_article'
-    ? { mode: 'in_house', flywheel: 'seo',    module: 'seo_engine' }
-    : { mode: 'in_house', flywheel: 'social', module: 'social_matrix' }
+  // newsletter_email → external_manual：Mailchimp 目前只有只读封装，没有建/发
+  // campaign 的写路径（见 src/lib/mailchimp/client.ts 顶部注释），FDE 手动去
+  // Mailchimp UI 操作，没有站内工作台入口可跳转
+  if (task.kind === 'blog_article') return { mode: 'in_house', flywheel: 'seo', module: 'seo_engine' }
+  if (task.kind === 'newsletter_email') return { mode: 'external_manual', flywheel: 'social' }
+  return { mode: 'in_house', flywheel: 'social', module: 'social_matrix' }
 }
 
 // ─── 维度标签（用于自动生产包标题）──────────────────────────────────────────────

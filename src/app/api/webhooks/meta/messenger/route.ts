@@ -56,6 +56,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { CONVERSATION_MESSAGE_RECEIVED_EVENT } from '@/lib/conversations/events'
+import { isOptOutKeyword, recordOptOutKeywordTouch } from '@/lib/messenger-agent/optout'
+import { recordOptOutWriteFailure } from '@/lib/messenger-agent/optout-failures'
+import { assessPageBinding } from '@/lib/meta/page-sync-authorization'
 
 export const dynamic = 'force-dynamic'
 
@@ -140,6 +143,9 @@ interface MessengerMessage {
    *  message — skipped, same as WhatsApp's `statuses` callbacks having no `messages`. */
   is_echo?: boolean
   attachments?: MessengerAttachment[]
+  /** Click-to-Messenger ad referral, delivered INSIDE the first message object
+   *  (per Meta docs) rather than on the top-level event. See `pickReferral`. */
+  referral?: MessengerReferral
 }
 
 interface MessengerMessagingEvent {
@@ -173,6 +179,24 @@ function messageBody(msg: MessengerMessage): string {
   const media = extractMedia(msg)
   if (!media) return '[unsupported message]'
   return `[${media.kind} message]`
+}
+
+/** A referral is only useful if it actually carries attribution. A Shops
+ *  product-page referral looks like `{ product: { id } }` and must be ignored. */
+function isUsableReferral(r: MessengerReferral | undefined): r is MessengerReferral {
+  if (!r) return false
+  return typeof r.ad_id === 'string' || typeof r.source === 'string' || typeof r.ref === 'string'
+}
+
+/**
+ * Where a thread came from. Meta delivers the ad referral either on the
+ * top-level event or inside the first message object, so both are candidates.
+ * Prefer one carrying `ad_id` (the strongest attribution); otherwise the first
+ * usable candidate. Returns undefined when nothing usable is present.
+ */
+function pickReferral(event: MessengerMessagingEvent): MessengerReferral | undefined {
+  const candidates = [event.referral, event.message?.referral].filter(isUsableReferral)
+  return candidates.find((r) => typeof r.ad_id === 'string') ?? candidates[0]
 }
 
 // ---------------------------------------------------------------------------
@@ -302,7 +326,7 @@ async function storeMessage(
     psid,
     undefined, // Messenger's `messaging` event carries no display name; the
     // hourly sync fills participant_name in from the Graph API's participants list.
-    event.referral,
+    pickReferral(event),
     sentAt,
   )
 
@@ -325,6 +349,60 @@ async function storeMessage(
   if (msgErr) throw new Error(`conversation_messages upsert failed: ${msgErr.message}`)
 
   return { conversationId: conversationRowId, messageId: msg.mid, contactId, sentAt }
+}
+
+/**
+ * Record attribution for a referral-only event (Meta's `messaging_referrals`
+ * callback: `event.referral` present, no `event.message`). Meta sends these for
+ * threads that already exist, so we only fill an empty `entry_referral` and
+ * never create a conversation row. Best effort — never throws.
+ */
+async function recordReferralOnly(clientId: string, event: MessengerMessagingEvent): Promise<void> {
+  try {
+    const psid = event.sender?.id
+    const referral = pickReferral(event)
+    if (!psid || !referral) return
+    // Meta sends referral-only events for threads that already exist, so this is
+    // not necessarily how the thread began. Mark the source and time so a later
+    // reader can tell it apart from a first-message referral.
+    const capturedAt = event.timestamp ? new Date(event.timestamp).toISOString() : new Date().toISOString()
+
+    const { data, error } = await supabaseAdmin
+      .from('conversations')
+      .select('id')
+      .eq('client_id', clientId)
+      .eq('channel', 'messenger')
+      .eq('participant_psid', psid)
+      .maybeSingle()
+
+    // A failed lookup is NOT "no thread" — do not silently drop the referral.
+    if (error) {
+      console.error(
+        `[webhooks/meta/messenger] referral-only lookup FAILED for client=${clientId}: ${error.message}`,
+      )
+      return
+    }
+    if (!data?.id) {
+      console.warn(
+        `[webhooks/meta/messenger] referral-only event for client=${clientId} had no stored thread — skipped`,
+      )
+      return
+    }
+
+    const { error: refErr } = await supabaseAdmin
+      .from('conversations')
+      .update({ entry_referral: { ...referral, via: 'messaging_referrals', captured_at: capturedAt } })
+      .eq('id', data.id as string)
+      .is('entry_referral', null)
+    if (refErr) {
+      console.error(
+        `[webhooks/meta/messenger] referral-only entry_referral 写入失败（会话 ${data.id as string}）:`,
+        refErr.message,
+      )
+    }
+  } catch (err) {
+    console.error(`[webhooks/meta/messenger] referral-only 处理失败:`, err)
+  }
 }
 
 /**
@@ -414,11 +492,110 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       continue
     }
 
+    // AD-SEC-4: the Page → client mapping comes from clients.facebook_page_id,
+    // which client staff could edit until 2026-09-14. Only store under a client
+    // whose binding is verified (same gate as the hourly sync) — otherwise a
+    // stale binding of someone else's Page would file their customers' messages
+    // under the wrong client. A read failure is retryable (503); a refusal is not
+    // — the daily todo (pm-todo/page-binding-items.ts) names the client to fix.
+    const verdict = await assessPageBinding(supabaseAdmin, lookup.clientId, pageId, process.env)
+    if (!verdict.verified) {
+      if (verdict.reason === 'check_failed') {
+        console.error(`[webhooks/meta/messenger] binding check FAILED for page_id=${pageId}: ${verdict.detail ?? ''}`)
+        failures.push(`binding_check_failed:${pageId}`)
+      } else {
+        console.error(
+          `[webhooks/meta/messenger] page_id=${pageId} binding not verified for client ${lookup.clientId} ` +
+            `(${verdict.reason}) — ${events.length} event(s) not stored`,
+        )
+      }
+      continue
+    }
+
     for (const event of events) {
+      // Referral-only event (no message): record attribution on the existing
+      // thread, then move on. Never affects the failures/503 logic.
+      if (!event.message && event.referral) {
+        await recordReferralOnly(lookup.clientId, event)
+        continue
+      }
+
       try {
         const result = await storeMessage(lookup.clientId, pageId, event)
         if (!result) continue // echo / non-message event — not an error, nothing to store
         stored++
+
+        // 🔴 Codex 复审（2026-09-15，PR #1736）实测发现：这条渠道从来没检测过
+        // 「这条正在处理的消息本身是不是一句退订指令」——只有 WhatsApp 那边的
+        // webhook（issue #1582）会做这一步，Messenger 这边只落库 + emit。后果：
+        // 一个客户第一次开口就说"别再联系我"，F1（issue #1584）的 opt-out 检查
+        // 只会去查"已经记录过的"拒联状态——这条消息本身还没被任何人记下来，
+        // 检查通过、照常自动回一句安抚，直接违反客户刚说的话（也是 Meta
+        // Messenger Platform Policy §2.1 意义上的真实风险，跟当初给 F1 加
+        // opt-out 检查这条 v3 补丁要防的是同一类事故）。
+        //
+        // 修法跟 WhatsApp webhook 逐字一致（`optout.ts` 的写入路径本来就是
+        // 渠道无关设计，只是 Messenger 这边一直没接上）：best-effort，消息已经
+        // 落库，这一步写失败不能让 Meta 重投整条已经存好的消息。
+        if (isOptOutKeyword(event.message?.text ?? '')) {
+          try {
+            if (result.contactId) {
+              await recordOptOutKeywordTouch(
+                {
+                  clientId: lookup.clientId,
+                  contactId: result.contactId,
+                  channel: 'messenger',
+                  conversationId: result.conversationId,
+                  messageId: result.messageId,
+                  // 必须传消息真实的发送时间，理由跟 whatsapp/route.ts 同一段
+                  // 注释——省略参数落到「现在」会让「晚于人工纠正」的判断失效。
+                  occurredAt: result.sentAt,
+                },
+                supabaseAdmin,
+              )
+            } else {
+              // 没解析出 contact_id：退回会话级兜底列（issue #1574），
+              // 不经过 optout.ts（它假设 contact 已经存在）。
+              const { error: unlinkedErr } = await supabaseAdmin
+                .from('conversations')
+                .update({ optout_unlinked: true })
+                .eq('id', result.conversationId)
+                .eq('client_id', lookup.clientId)
+              if (unlinkedErr) {
+                console.error(
+                  `[webhooks/meta/messenger] 写 conversations.optout_unlinked 失败（会话 ${result.conversationId}）:`,
+                  unlinkedErr.message,
+                )
+                // 心跳检查（issue #1587）要能看到这次失败——否则会被误判成
+                // 「没人退订、一切正常」。
+                await recordOptOutWriteFailure(
+                  {
+                    clientId: lookup.clientId,
+                    channel: 'messenger',
+                    conversationId: result.conversationId,
+                    contactId: null,
+                    errorMessage: unlinkedErr.message,
+                  },
+                  supabaseAdmin,
+                )
+              }
+            }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err)
+            console.error(`[webhooks/meta/messenger] 退订触点写入失败（消息已入库）:`, err)
+            await recordOptOutWriteFailure(
+              {
+                clientId: lookup.clientId,
+                channel: 'messenger',
+                conversationId: result.conversationId,
+                contactId: result.contactId,
+                errorMessage: message,
+              },
+              supabaseAdmin,
+            )
+          }
+        }
+
         await emitMessageReceived({
           clientId: lookup.clientId,
           conversationId: result.conversationId,

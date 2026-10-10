@@ -20,22 +20,35 @@ import { useCallback, useEffect, useState } from 'react'
 interface Config {
   ownEmailDomains: string[]
   tradeDomains: string[]
+  ownPhoneNumbers: string[]
 }
 
-type Field = 'ownEmailDomains' | 'tradeDomains'
+type Field = 'ownEmailDomains' | 'tradeDomains' | 'ownPhoneNumbers'
 
-const COPY: Record<Field, { icon: string; title: string; hint: string; placeholder: string }> = {
+const COPY: Record<Field, { icon: string; title: string; hint: string; placeholder: string; format: string; unit: string }> = {
   ownEmailDomains: {
     icon: '🏢',
     title: '客户自己的邮件域名',
     hint: '用这些域名写信来的是客户的同事，不会出现在客人名单里。关联公司也要填 —— 漏一个，那家公司的员工就会混进客人名单。',
     placeholder: 'ctstours.co.nz\nchinatravel.co.nz',
+    format: '一行一个，也可以用逗号隔开。只要写域名，不要写 @ 前面那半截',
+    unit: '个域名。已经在系统里的人会立刻重新归类',
   },
   tradeDomains: {
     icon: '🤝',
     title: '同行 / 分销的域名',
     hint: '这些是真业务，但跟散客的跟进方式完全不同。填了之后他们会被单独归为「同行」，默认不出现在「今天该联系谁」里，切一下就能翻到。',
     placeholder: 'hot.co.nz\ntravelmanagers.co.nz',
+    format: '一行一个，也可以用逗号隔开。只要写域名，不要写 @ 前面那半截',
+    unit: '个域名。已经在系统里的人会立刻重新归类',
+  },
+  ownPhoneNumbers: {
+    icon: '📱',
+    title: '自己人的手机号（含销售、老板）',
+    hint: '在 WhatsApp 群里，这些号码的人会被当成客户自己人，不会被当成客人。销售和老板的号都要填 —— 漏一个，他在群里发的话就会被算成客人说的。',
+    placeholder: '+64 21 000 0000\n+61 400 000 000',
+    format: '一行一个，也可以用逗号隔开。请带国家码写完整（+64 是新西兰，+61 是澳洲）',
+    unit: '个手机号。系统会统一成标准格式',
   },
 }
 
@@ -57,6 +70,7 @@ export function DomainRulesPanel({ clientId }: { clientId: string }) {
       setConfig({
         ownEmailDomains: json.config?.ownEmailDomains ?? [],
         tradeDomains: json.config?.tradeDomains ?? [],
+        ownPhoneNumbers: json.config?.ownPhoneNumbers ?? [],
       })
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败')
@@ -107,7 +121,7 @@ export function DomainRulesPanel({ clientId }: { clientId: string }) {
 
   return (
     <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
-      {(['ownEmailDomains', 'tradeDomains'] as const).map((field) => {
+      {(['ownEmailDomains', 'tradeDomains', 'ownPhoneNumbers'] as const).map((field) => {
         const copy = COPY[field]
         const stored = config?.[field] ?? []
         const value = draft[field] ?? stored.join('\n')
@@ -139,13 +153,13 @@ export function DomainRulesPanel({ clientId }: { clientId: string }) {
                 {saving === field ? '保存中...' : '保存'}
               </button>
               <span className="text-xs text-slate-400">
-                一行一个，也可以用逗号隔开。只要写域名，不要写 @ 前面那半截
+                {copy.format}
               </span>
             </div>
 
             {savedField === field && !err && (
               <p className="mt-1.5 text-xs text-emerald-600">
-                ✓ 已保存，认下 {stored.length} 个域名。已经在系统里的人会立刻重新归类
+                ✓ 已保存，认下 {stored.length} {copy.unit}
               </p>
             )}
           </div>

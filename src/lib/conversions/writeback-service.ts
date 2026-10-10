@@ -23,6 +23,9 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
+import { actionSourceForSourceKind, type SourceKind } from './intake'
+import { eventAgeMs, isPastEventWindow, DAY_MS } from './event-window'
 import type {
   ClientSendConfig,
   DestinationWriter,
@@ -51,6 +54,8 @@ export type WritebackStatus =
  * 太长会让真断线的条目迟迟不进人工核对。5 分钟远大于一次 CAPI 往返（~1 秒）。
  */
 const STUCK_SENDING_MS = 5 * 60_000
+/** 授权失效后多久允许自动补发再来看一眼（流水线一天一次，这个值只要 < 24h 就行）。 */
+const AUTH_RETRY_DELAY_MS = 60 * 60_000
 
 export type SendOutcomeResult = {
   status: WritebackStatus
@@ -76,6 +81,9 @@ type OutcomeRow = {
   occurred_at: string
   review_status: string
   redacted_at: string | null
+  page_scoped_user_id: string | null
+  meta_lead_id: string | null
+  source_kind: SourceKind
 }
 
 function toOutcomeForSend(row: OutcomeRow): OutcomeForSend {
@@ -92,6 +100,9 @@ function toOutcomeForSend(row: OutcomeRow): OutcomeForSend {
     amountMinor: row.amount_minor,
     currency: row.currency,
     occurredAt: row.occurred_at,
+    pageScopedUserId: row.page_scoped_user_id,
+    metaLeadId: row.meta_lead_id,
+    actionSource: actionSourceForSourceKind(row.source_kind),
   }
 }
 
@@ -123,7 +134,7 @@ export async function sendApprovedOutcome(
     .select(
       'id, client_id, contact_id, outcome_kind, customer_email, customer_phone, ' +
         'customer_first, customer_last, order_ref, amount_minor, currency, ' +
-        'occurred_at, review_status, redacted_at',
+        'occurred_at, review_status, redacted_at, page_scoped_user_id, meta_lead_id, source_kind',
     )
     .eq('id', outcomeId)
     .maybeSingle()
@@ -141,14 +152,40 @@ export async function sendApprovedOutcome(
   }
 
   // ── 2. 客人说过「别再联系我」就不发 ────────────────────────────────
-  // contacts.do_not_contact 是既有字段，不另建一张退出名单表。
+  // 🔴 真相源是不可变触点，不是 contacts.do_not_contact 那一列（见
+  // src/lib/crm/dnc.ts 顶部说明：那一列是尽力维护的反规范化，写失败过）。
+  // 入站私信刚出现拒联信号时，那一列还没来得及被人工确认写上——这段窗口里
+  // 只查那一列会把明确拒联的人的数据发出去。跟今日名单/受众导出同一套判据，
+  // 不能各查各的。
   if (outcome.contact_id) {
-    const { data: contact } = await supabase
-      .from('contacts')
-      .select('do_not_contact')
-      .eq('id', outcome.contact_id)
-      .maybeSingle()
-    if ((contact as { do_not_contact?: boolean } | null)?.do_not_contact) {
+    const [contactRes, touchRes] = await Promise.all([
+      supabase.from('contacts').select('do_not_contact').eq('id', outcome.contact_id).maybeSingle(),
+      supabase
+        .from('contact_touchpoints')
+        .select('occurred_at, metadata')
+        .eq('contact_id', outcome.contact_id)
+        .eq('client_id', outcome.client_id),
+    ])
+    // 查不出来就当「不知道」，绝不能悄悄当成「这个人没说过别联系」——
+    // 这条判断守的是全文件唯一撤不回的动作，查询失败不能变成「放行发送」。
+    if (contactRes.error) throw new Error(`读取联系人拒联标记失败：${contactRes.error.message}`)
+    if (touchRes.error) throw new Error(`读取联系人触点失败：${touchRes.error.message}`)
+    const contactFlag =
+      (contactRes.data as { do_not_contact?: boolean } | null)?.do_not_contact ?? false
+    const touches: DncTouch[] = ((touchRes.data ?? []) as { occurred_at: string; metadata: unknown }[]).map(
+      (t) => {
+        const meta =
+          t.metadata && typeof t.metadata === 'object' && !Array.isArray(t.metadata)
+            ? (t.metadata as Record<string, unknown>)
+            : null
+        return {
+          outcome: (meta?.outcome as string | undefined) ?? null,
+          flagged: meta?.do_not_contact === true,
+          occurredAt: t.occurred_at,
+        }
+      },
+    )
+    if (isDoNotContact(contactFlag, touches)) {
       return {
         status: 'redacted',
         message: '这位客人已标记「别再联系」，不把他的数据发给广告平台',
@@ -160,7 +197,7 @@ export async function sendApprovedOutcome(
   // ── 3. 读客户配置 ──────────────────────────────────────────────────
   const { data: clientData, error: clientErr } = await supabase
     .from('clients')
-    .select('id, default_phone_country, conversion_stage')
+    .select('id, default_phone_country, conversion_stage, facebook_page_id')
     .eq('id', outcome.client_id)
     .maybeSingle()
 
@@ -170,10 +207,12 @@ export async function sendApprovedOutcome(
   const client = clientData as {
     default_phone_country: string | null
     conversion_stage: string | null
+    facebook_page_id: string | null
   }
   const config: ClientSendConfig = {
     clientId: outcome.client_id,
     defaultPhoneCountry: client.default_phone_country,
+    facebookPageId: client.facebook_page_id,
   }
 
   // ── 4. 抢发送记录（数据库唯一约束是第一道闸）────────────────────────
@@ -249,8 +288,8 @@ export async function sendApprovedOutcome(
   }
 
   // ── 5. 超过平台时间窗口就别发了 ────────────────────────────────────
-  const ageDays = (now.getTime() - new Date(outcome.occurred_at).getTime()) / 86_400_000
-  if (ageDays > writer.maxEventAgeDays) {
+  const ageDays = eventAgeMs(outcome.occurred_at, now) / DAY_MS
+  if (isPastEventWindow(outcome.occurred_at, now, writer.maxEventAgeDays)) {
     await casUpdate(supabase, wb.id, ['queued', 'failed'], {
       status: 'expired_no_send',
       last_error: `事件已过去 ${Math.floor(ageDays)} 天，超过 ${writer.maxEventAgeDays} 天窗口`,
@@ -383,12 +422,24 @@ export async function sendApprovedOutcome(
       )
 
     case 'auth':
+      // 🔴 2026-09-22 起不再判 `failed_permanent`：授权失效是**我们这边**的令牌问题，
+      //    令牌修好之后这条完全可以再发。之前一次授权失败就永久作废，CTS 19 条已批准
+      //    的成交在令牌修好前就过了 7 天窗口，白白丢掉。
+      //    可重发的前提：`accept()` 只在 Meta 用 401/403 或 code 190/102/200 拒了请求、
+      //    响应体里没有 `events_received` 时才回 `auth` —— 事件根本没入账，重发不会双发。
+      //    这跟 `in_doubt`（不知道收没收）是两回事，那一档一个字不动。
+      //    `next_attempt_at` 是给自动补发（`writeback-resend-run.ts`）看的：每天流水线
+      //    先探活令牌，活了才真发；没修好就跳过，不白烧尝试次数。
       return await settle(
-        'failed_permanent',
-        { last_error: verdict.detail, last_error_code: 'auth' },
+        'failed',
         {
-          status: 'failed_permanent',
-          message: '连接广告平台的授权失效了 —— 需要重新连接一次才能继续',
+          last_error: verdict.detail,
+          last_error_code: 'auth',
+          next_attempt_at: new Date(now.getTime() + AUTH_RETRY_DELAY_MS).toISOString(),
+        },
+        {
+          status: 'failed',
+          message: '连接广告平台的授权失效了 —— 授权修好后会自动补发，7 天内有效',
           writebackId: wb.id,
         },
       )

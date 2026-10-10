@@ -17,10 +17,10 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
-import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-manager'
-import { getPageAccessToken } from '@/lib/meta/page-posts'
+import { authorizePageSync } from '@/lib/meta/page-sync-authorization'
 import { fetchFormLeads, fetchPageLeadForms } from '@/lib/meta/lead-forms'
-import { ingestMetaLead } from '@/lib/crm/meta-lead'
+import { ingestMetaLead, parseLeadAnswers } from '@/lib/crm/meta-lead'
+import { ALREADY_SYNCED_REASON, isMailchimpSettled } from '@/lib/mailchimp/outlet-tally'
 import type { SubscribeMemberResult } from '@/lib/mailchimp/client'
 import type { TagRepair } from '@/lib/mailchimp/tags'
 
@@ -51,6 +51,14 @@ export interface MetaLeadsSyncResult {
   /** 单条出错跳过的条数。 */
   failed: number
   /**
+   * 「这条上轮办完没有」这个查询失败了几批。
+   *
+   * **不混进 `mailchimp` tally** —— 那是出口结果，混进去会被日报和今日待办当成
+   * 出口故障误报。这个数只说「去重闸这轮有没有瞎掉」：大于 0 时闸退化成改动前的
+   * 每轮重打，不丢数据、但白花 provider 调用，而且**看起来跟正常运行一模一样**。
+   */
+  settledLookupFailures: number
+  /**
    * Mailchimp 出口这一轮的结果分布，key = `subscribed` / `already_member` /
    * `skipped:<reason>` / `failed:<reason>`，value = 条数。
    *
@@ -64,7 +72,7 @@ export interface MetaLeadsSyncResult {
    * 没有任何 lead 进到出口时是 `{}`，不是缺字段。
    */
   mailchimp: Record<string, number>
-  skipped?: 'no_page_id' | 'no_meta_token' | 'no_page_token'
+  skipped?: 'no_page_id' | 'no_meta_token' | 'no_page_token' | 'page_not_verified'
   error?: string
 }
 
@@ -122,6 +130,83 @@ export async function getLeadWatermark(clientId: string, now: Date = new Date())
   return since < floor ? floor : since
 }
 
+/**
+ * 一次 `.in()` 最多塞多少个 lead id。
+ *
+ * 单个表单最多能返回 2000 条 lead（`lead-forms.ts` 的 `MAX_PAGES` × `limit`）。
+ * 整批塞进一个 `.in()` 会撞请求体积上限 —— **这堵墙本仓已经撞过一次**：
+ * `knowledge/mining.ts:655-667`，2026-09-15 issue #1760，722 个 UUID 拼出的
+ * querystring 就把 PostgREST/反代顶爆返回 400。200 沿用那次验证过的经验安全值
+ * （不是精确算出来的边界），保持两处一致，将来要调一起调。
+ *
+ * 切到 200 之后顺带把另一个坑也堵死：触点表唯一键是
+ * `(client_id, source, source_ref)`，一个 id 最多命中一行 → 一批最多 200 行，
+ * PostgREST 那个 1000 行默认上限**在结构上够不着**，所以这里不需要再套分页
+ * （合并机器人 07267cf1 / a2860d16 时的取舍，见那两条提交）。
+ */
+const SETTLED_LOOKUP_BATCH = 200
+
+/**
+ * 这一批 lead 里，哪些上一轮已经办完了（触点里的 Mailchimp 回执已是终态）。
+ *
+ * **按批查，不逐条查** —— 逐条查正是这次要修的那种浪费。
+ *
+ * 为什么切批而不是分页读全量（合并 07267cf1 时的取舍）：单表单最多能回补 2000 条
+ * （`lead-forms.ts` 的 `MAX_PAGES` × `limit`），一次性塞进 `.in()` 有两个坑 ——
+ * 2000 个 17 位 id 拼出的 query string 约 34KB 会被网关按 414 打回，以及 PostgREST
+ * 单次查询 1000 行硬顶会**静默截断**。切成每批 `SETTLED_LOOKUP_BATCH` 条之后：
+ *   · query string 永远在 4KB 量级，414 打不到；
+ *   · 触点表的唯一键是 `(client_id, source, source_ref)`，一个 id 最多命中一行，
+ *     所以一批最多 200 行 —— **1000 行硬顶在结构上够不着**，不需要再套分页。
+ * 两个坑一起堵掉，比只堵后一个更严。
+ *
+ * 读失败当没办完，照常重跑 —— 宁可多打一次，不可漏一次。但**必须出声**：这道闸
+ * 静默失效的样子跟它正常工作一模一样（都是「照常重跑」），不喊一嗓子没有任何人
+ * 会发现。所以除了 `console.warn`（只进 Render 日志，没人看），还把「这轮有几批
+ * 没读成」一路带回 `MetaLeadsSyncResult`，进 `cron_run_logs.summary`。
+ */
+export async function readSettledLeadIds(
+  clientId: string,
+  leadIds: string[],
+): Promise<{ settled: Set<string>; lookupFailures: number }> {
+  const settled = new Set<string>()
+  let failures = 0
+  if (leadIds.length === 0) return { settled, lookupFailures: failures }
+
+  for (let i = 0; i < leadIds.length; i += SETTLED_LOOKUP_BATCH) {
+    const batch = leadIds.slice(i, i + SETTLED_LOOKUP_BATCH)
+    const { data, error } = await supabaseAdmin
+      .from('contact_touchpoints')
+      .select('source_ref, metadata')
+      .eq('client_id', clientId)
+      // 用 `source` 不是 `channel`：`(client_id, source, source_ref)` 才是触点的
+      // 幂等唯一键（`meta-lead.ts` 的 Phase A upsert 用的就是它），`channel` 只是
+      // 业务分类。上面 `getLeadWatermark` 查 `channel` 是另一回事，两处都对，
+      // 但**别顺手统一**成同一列 —— 统一哪一边都会炸掉另一边。
+      .eq('source', 'meta_lead_form')
+      .in('source_ref', batch)
+
+    if (error || !data) {
+      console.warn(
+        `[meta-leads] client ${clientId} 读已办完回执失败，这批 ${batch.length} 条全部重跑: ${error?.message ?? 'no data'}`,
+      )
+      failures++
+      continue
+    }
+
+    for (const row of data as Array<{ source_ref?: unknown; metadata?: unknown }>) {
+      const ref = typeof row.source_ref === 'string' ? row.source_ref : ''
+      if (!ref) continue
+      const meta = row.metadata
+      if (typeof meta !== 'object' || meta === null) continue
+      if (isMailchimpSettled((meta as { mailchimp_result?: unknown }).mailchimp_result)) {
+        settled.add(ref)
+      }
+    }
+  }
+  return { settled, lookupFailures: failures }
+}
+
 /** 本地号码补哪个国码。跟 web-form-lead.ts 同一套判断。 */
 export function resolveDefaultCountry(client: {
   country: string | null
@@ -143,21 +228,22 @@ export async function syncClientMetaLeads(
     newContacts: 0,
     skippedNoIdentity: 0,
     failed: 0,
+    settledLookupFailures: 0,
     mailchimp: {} as Record<string, number>,
   }
 
   const pageId = client.facebook_page_id
   if (!pageId) return { ...base, skipped: 'no_page_id' }
 
-  // 跟私信同步同一条取 token 的路：先用「连接 Meta」按钮存下来的 Page token，
-  // 没有再从 env 里的 user token 换一个。
-  let pageToken = await getStoredPageToken(client.id, pageId)
-  if (!pageToken) {
-    const userToken = await getMetaTokenForClient(client.id)
-    if (!userToken) return { ...base, skipped: 'no_meta_token' }
-    pageToken = await getPageAccessToken(userToken, pageId)
+  // 跟私信同步同一道闸（AD-SEC-4）：主页核实过属于这个客户才取令牌。
+  // 取令牌顺序不变：先用「连接 Meta」存下的 Page token，没有再从 env 里的 user token 换。
+  const auth = await authorizePageSync(supabaseAdmin, client.id, pageId, process.env)
+  if (!auth.ok) {
+    if (auth.skipped !== 'page_not_verified') return { ...base, skipped: auth.skipped }
+    // 记成 error：定时任务按 error 计失败、日报会点名，暂停不能看起来像「今天没人填表」。
+    return { ...base, skipped: auth.skipped, error: `主页绑定没核实，线索同步已暂停（${auth.reason}）` }
   }
-  if (!pageToken) return { ...base, skipped: 'no_page_token' }
+  const pageToken = auth.pageToken
 
   const defaultCountry = resolveDefaultCountry(client)
   const errors: string[] = []
@@ -178,6 +264,7 @@ export async function syncClientMetaLeads(
   let newContacts = 0
   let skippedNoIdentity = 0
   let failed = 0
+  let settledLookupFailures = 0
   const mailchimp: Record<string, number> = {}
 
   for (const form of formsRead.rows) {
@@ -187,7 +274,32 @@ export async function syncClientMetaLeads(
       if (leadsRead.error) errors.push(`表单 ${form.formId}: ${leadsRead.error}`)
       leadsFetched += leadsRead.rows.length
 
+      const settledRead = await readSettledLeadIds(
+        client.id,
+        leadsRead.rows.map((row) => row.leadId),
+      )
+      const settled = settledRead.settled
+      settledLookupFailures += settledRead.lookupFailures
+
       for (const lead of leadsRead.rows) {
+        // 上一轮已经办完的：零 provider 调用、零 metadata 覆盖，直接记账走人。
+        //
+        // 唯一例外 —— 本轮解析出**明确 opt-out** 的照常走完整流程。那一位会被写进
+        // 触点 metadata 的 `do_not_contact`，以后拦住这个人所有渠道的外发（合同
+        // 5426843158）；解析规则改宽之后，窗口内的老 lead 要还能被重新判一次。
+        //
+        // 取舍：办完之后就不再每轮回头看了。所以「有人在 Mailchimp 后台手工摘掉来源
+        // 标签」这种事，原来 24 小时窗口内会被下一轮自愈，现在不会 —— 超出窗口本来
+        // 也不自愈，这里只是把不自愈的起点从 24 小时提前到了办完那一刻。
+        if (settled.has(lead.leadId) && parseLeadAnswers(lead.answers).optOutEvidence === null) {
+          const key = `skipped:${ALREADY_SYNCED_REASON}`
+          mailchimp[key] = (mailchimp[key] ?? 0) + 1
+          // 它确实已经在 CRM 里，跟幂等命中同一口径算 ingested —— 这个数不能无声变样，
+          // PM 每天看的「今天进了几个人」靠它。
+          leadsIngested++
+          continue
+        }
+
         // ingestMetaLead 自己吞异常，这里的 try 是给「它之外还能炸的东西」兜底。
         const res = await ingestMetaLead({ clientId: client.id, defaultCountry, lead })
         // 出口结果先记账再分流 —— 无论这条 lead 后面算 ingested 还是 skipped，
@@ -218,6 +330,7 @@ export async function syncClientMetaLeads(
     newContacts,
     skippedNoIdentity,
     failed,
+    settledLookupFailures,
     mailchimp,
     ...(errors.length ? { error: errors.join(' | ') } : {}),
   }

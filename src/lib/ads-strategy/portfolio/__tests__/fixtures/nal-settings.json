@@ -1,0 +1,929 @@
+{
+ "captured": "2026-09-14 Meta Graph v21.0 read-only GET (ads re-read with creative fields)",
+ "ad_account_id": "act_953025114498626",
+ "account": {
+  "id": "act_953025114498626",
+  "name": "Newasian",
+  "account_status": 1,
+  "disable_reason": 0,
+  "spend_cap": "0",
+  "amount_spent": "88864",
+  "currency": "NZD",
+  "timezone_name": "Pacific/Auckland",
+  "timezone_offset_hours_utc": 12,
+  "min_daily_budget": 171,
+  "is_prepay_account": false
+ },
+ "campaigns": [
+  {
+   "id": "52596939123525",
+   "name": "Thruplay-物流-200/cbm",
+   "objective": "OUTCOME_ENGAGEMENT",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "daily_budget": "1000",
+   "budget_remaining": "977",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2026-09-11T16:46:02+1200",
+   "created_time": "2026-09-11T16:46:01+1200",
+   "updated_time": "2026-09-11T16:46:01+1200"
+  },
+  {
+   "id": "52596931528325",
+   "name": "Thruplay-物流-2KG",
+   "objective": "OUTCOME_ENGAGEMENT",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "daily_budget": "1000",
+   "budget_remaining": "989",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2026-09-11T15:56:58+1200",
+   "created_time": "2026-09-11T15:56:58+1200",
+   "updated_time": "2026-09-11T15:56:58+1200"
+  },
+  {
+   "id": "52594661605725",
+   "name": "物流广告组-WhatsApp",
+   "objective": "OUTCOME_ENGAGEMENT",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "daily_budget": "1000",
+   "budget_remaining": "985",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2026-09-03T16:41:29+1200",
+   "created_time": "2026-09-03T16:41:29+1200",
+   "updated_time": "2026-09-03T16:41:29+1200"
+  },
+  {
+   "id": "52593506024125",
+   "name": "新潜在客户广告系列-3PL",
+   "objective": "OUTCOME_LEADS",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "daily_budget": "800",
+   "budget_remaining": "800",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2026-09-01T12:28:22+1200",
+   "created_time": "2026-09-01T12:28:21+1200",
+   "updated_time": "2026-09-13T22:03:24+1200"
+  },
+  {
+   "id": "52589907084125",
+   "name": "新亚8月广告系列-物流",
+   "objective": "OUTCOME_LEADS",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "daily_budget": "6200",
+   "budget_remaining": "6014",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2026-08-17T16:28:17+1200",
+   "created_time": "2026-08-17T16:28:17+1200",
+   "updated_time": "2026-09-13T22:03:22+1200"
+  }
+ ],
+ "adsets": [
+  {
+   "id": "52597304727125",
+   "name": "物流再营销广告组-ThruPlay观众",
+   "campaign_id": "52589907084125",
+   "optimization_goal": "LEAD_GENERATION",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "UNDEFINED",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 25,
+    "custom_audiences": [
+     {
+      "id": "52597304640525",
+      "name": "NAL-ThruPlay视频观众再营销池-25%-365d"
+     }
+    ],
+    "geo_locations": {
+     "countries": [
+      "NZ"
+     ],
+     "location_types": [
+      "home",
+      "recent"
+     ]
+    },
+    "targeting_relaxation_types": {
+     "lookalike": 0,
+     "custom_audience": 0
+    },
+    "targeting_automation": {
+     "advantage_audience": 0
+    }
+   },
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "start_time": "2026-09-13T22:02:27+1200",
+   "created_time": "2026-09-13T22:02:27+1200",
+   "updated_time": "2026-09-14T00:12:33+1200",
+   "promoted_object": {
+    "page_id": "1177479655430100",
+    "smart_pse_enabled": false
+   }
+  },
+  {
+   "id": "52596939123725",
+   "name": "ThruPlay_物流_200/cbm",
+   "campaign_id": "52596939123525",
+   "optimization_goal": "THRUPLAY",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "ON_VIDEO",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 25,
+    "age_range": [
+     25,
+     60
+    ],
+    "flexible_spec": [
+     {
+      "interests": [
+       {
+        "id": "6003002193982",
+        "name": "亚马逊公司（零售商）"
+       },
+       {
+        "id": "6003109292833",
+        "name": "转运配送（零售商）"
+       },
+       {
+        "id": "6003142792247",
+        "name": "淘宝网"
+       },
+       {
+        "id": "6003257148486",
+        "name": "Alibaba.com"
+       },
+       {
+        "id": "6003263791114",
+        "name": "购物（零售）"
+       },
+       {
+        "id": "6003346592981",
+        "name": "网购（零售）"
+       },
+       {
+        "id": "6003358608187",
+        "name": "International business"
+       },
+       {
+        "id": "6003420698231",
+        "name": "Package delivery"
+       },
+       {
+        "id": "6003700670691",
+        "name": "Cargo"
+       },
+       {
+        "id": "6004034455409",
+        "name": "Freight transport"
+       },
+       {
+        "id": "6004037870609",
+        "name": "进口（邮递）"
+       },
+       {
+        "id": "6006312187689",
+        "name": "天猫"
+       },
+       {
+        "id": "6019154143076",
+        "name": "AliExpress"
+       }
+      ]
+     }
+    ],
+    "geo_locations": {
+     "countries": [
+      "NZ"
+     ],
+     "location_types": [
+      "home",
+      "recent"
+     ]
+    },
+    "locales": [
+     6,
+     20,
+     21,
+     22,
+     24
+    ],
+    "brand_safety_content_filter_levels": [
+     "FACEBOOK_RELAXED",
+     "AN_RELAXED"
+    ],
+    "targeting_automation": {
+     "advantage_audience": 1
+    },
+    "user_age_unknown": false
+   },
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "start_time": "2026-09-11T16:46:02+1200",
+   "created_time": "2026-09-11T16:46:02+1200",
+   "updated_time": "2026-09-11T16:46:21+1200"
+  },
+  {
+   "id": "52596931528525",
+   "name": "新互动广告组",
+   "campaign_id": "52596931528325",
+   "optimization_goal": "THRUPLAY",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "ON_VIDEO",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 25,
+    "genders": [
+     0
+    ],
+    "geo_locations": {
+     "countries": [
+      "NZ"
+     ],
+     "location_types": [
+      "home",
+      "recent"
+     ]
+    },
+    "brand_safety_content_filter_levels": [
+     "FACEBOOK_RELAXED",
+     "AN_RELAXED"
+    ],
+    "targeting_automation": {
+     "advantage_audience": 1
+    },
+    "user_age_unknown": false
+   },
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "start_time": "2026-09-11T15:56:58+1200",
+   "created_time": "2026-09-11T15:56:58+1200",
+   "updated_time": "2026-09-11T16:24:21+1200"
+  },
+  {
+   "id": "52594661606125",
+   "name": "新潜在客户广告组-WhatsApp",
+   "campaign_id": "52594661605725",
+   "optimization_goal": "CONVERSATIONS",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "WHATSAPP",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 25,
+    "age_range": [
+     25,
+     60
+    ],
+    "flexible_spec": [
+     {
+      "interests": [
+       {
+        "id": "6003002193982",
+        "name": "亚马逊公司（零售商）"
+       },
+       {
+        "id": "6003109292833",
+        "name": "转运配送（零售商）"
+       },
+       {
+        "id": "6003142792247",
+        "name": "淘宝网"
+       },
+       {
+        "id": "6003257148486",
+        "name": "Alibaba.com"
+       },
+       {
+        "id": "6003263791114",
+        "name": "购物（零售）"
+       },
+       {
+        "id": "6003346592981",
+        "name": "网购（零售）"
+       },
+       {
+        "id": "6003358608187",
+        "name": "International business"
+       },
+       {
+        "id": "6003420698231",
+        "name": "Package delivery"
+       },
+       {
+        "id": "6003700670691",
+        "name": "Cargo"
+       },
+       {
+        "id": "6004034455409",
+        "name": "Freight transport"
+       },
+       {
+        "id": "6004037870609",
+        "name": "进口（邮递）"
+       },
+       {
+        "id": "6006312187689",
+        "name": "天猫"
+       },
+       {
+        "id": "6019154143076",
+        "name": "AliExpress"
+       }
+      ]
+     }
+    ],
+    "geo_locations": {
+     "countries": [
+      "NZ"
+     ],
+     "location_types": [
+      "frequently_in",
+      "home",
+      "recent"
+     ]
+    },
+    "locales": [
+     6,
+     20,
+     21,
+     22,
+     24
+    ],
+    "brand_safety_content_filter_levels": [
+     "FACEBOOK_RELAXED",
+     "AN_RELAXED"
+    ],
+    "targeting_automation": {
+     "advantage_audience": 1
+    },
+    "user_age_unknown": false
+   },
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "start_time": "2026-09-03T16:41:29+1200",
+   "created_time": "2026-09-03T16:41:29+1200",
+   "updated_time": "2026-09-03T16:41:47+1200",
+   "promoted_object": {
+    "page_id": "1177479655430100",
+    "smart_pse_enabled": false
+   }
+  },
+  {
+   "id": "52593506023925",
+   "name": "新潜在客户广告组-9月1日",
+   "campaign_id": "52593506024125",
+   "optimization_goal": "OFFSITE_CONVERSIONS",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "WEBSITE_AND_LEAD_FORM",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 25,
+    "age_range": [
+     26,
+     60
+    ],
+    "flexible_spec": [
+     {
+      "interests": [
+       {
+        "id": "6002884511422",
+        "name": "小型企业（商业和金融）"
+       },
+       {
+        "id": "6003070122382",
+        "name": "玩具（玩物）"
+       },
+       {
+        "id": "6003088846792",
+        "name": "美容院（化妆品）"
+       },
+       {
+        "id": "6003109292833",
+        "name": "转运配送（零售商）"
+       },
+       {
+        "id": "6003221485467",
+        "name": "电子商务（零售）"
+       },
+       {
+        "id": "6003230166788",
+        "name": "Shopify（软件）"
+       },
+       {
+        "id": "6003346592981",
+        "name": "网购（零售）"
+       },
+       {
+        "id": "6003778400853",
+        "name": "零售（工业）"
+       },
+       {
+        "id": "6003840140052",
+        "name": "农业（工业）"
+       },
+       {
+        "id": "6004037870609",
+        "name": "进口（邮递）"
+       },
+       {
+        "id": "6816346069503",
+        "name": "女装零售商 (零售)"
+       },
+       {
+        "id": "6858546471482",
+        "name": "消费电子产品零售商 (零售)"
+       }
+      ],
+      "behaviors": [
+       {
+        "id": "6002714898572",
+        "name": "Small business owners"
+       }
+      ]
+     }
+    ],
+    "geo_locations": {
+     "countries": [
+      "NZ",
+      "AU"
+     ],
+     "location_types": [
+      "frequently_in",
+      "home",
+      "recent"
+     ]
+    },
+    "locales": [
+     6,
+     20,
+     21,
+     22,
+     24
+    ],
+    "brand_safety_content_filter_levels": [
+     "FACEBOOK_RELAXED",
+     "AN_RELAXED"
+    ],
+    "targeting_automation": {
+     "advantage_audience": 1
+    }
+   },
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "start_time": "2026-09-01T12:28:22+1200",
+   "created_time": "2026-09-01T12:28:22+1200",
+   "updated_time": "2026-09-01T12:30:15+1200",
+   "promoted_object": {
+    "pixel_id": "1290864682974373",
+    "custom_event_type": "LEAD",
+    "smart_pse_enabled": false
+   }
+  },
+  {
+   "id": "52589967398925",
+   "name": "物流潜在客户广告组",
+   "campaign_id": "52589907084125",
+   "optimization_goal": "LEAD_GENERATION",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "MESSENGER",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 25,
+    "age_range": [
+     25,
+     60
+    ],
+    "flexible_spec": [
+     {
+      "interests": [
+       {
+        "id": "6003002193982",
+        "name": "亚马逊公司（零售商）"
+       },
+       {
+        "id": "6003109292833",
+        "name": "转运配送（零售商）"
+       },
+       {
+        "id": "6003142792247",
+        "name": "淘宝网"
+       },
+       {
+        "id": "6003257148486",
+        "name": "Alibaba.com"
+       },
+       {
+        "id": "6003263791114",
+        "name": "购物（零售）"
+       },
+       {
+        "id": "6003346592981",
+        "name": "网购（零售）"
+       },
+       {
+        "id": "6003358608187",
+        "name": "International business"
+       },
+       {
+        "id": "6003420698231",
+        "name": "Package delivery"
+       },
+       {
+        "id": "6003700670691",
+        "name": "Cargo"
+       },
+       {
+        "id": "6004034455409",
+        "name": "Freight transport"
+       },
+       {
+        "id": "6004037870609",
+        "name": "进口（邮递）"
+       },
+       {
+        "id": "6006312187689",
+        "name": "天猫"
+       },
+       {
+        "id": "6019154143076",
+        "name": "AliExpress"
+       }
+      ]
+     }
+    ],
+    "geo_locations": {
+     "countries": [
+      "NZ"
+     ],
+     "location_types": [
+      "home",
+      "recent"
+     ]
+    },
+    "locales": [
+     6,
+     20,
+     21,
+     22,
+     24
+    ],
+    "brand_safety_content_filter_levels": [
+     "FACEBOOK_RELAXED",
+     "AN_RELAXED"
+    ],
+    "targeting_automation": {
+     "advantage_audience": 1
+    }
+   },
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "start_time": "2026-08-17T18:28:50+1200",
+   "created_time": "2026-08-17T18:28:50+1200",
+   "updated_time": "2026-09-13T22:03:42+1200",
+   "promoted_object": {
+    "page_id": "1177479655430100",
+    "smart_pse_enabled": false
+   }
+  },
+  {
+   "id": "52589907084325",
+   "name": "3PL新潜在客户广告组",
+   "campaign_id": "52589907084125",
+   "optimization_goal": "LEAD_GENERATION",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "ON_AD",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 25,
+    "age_range": [
+     26,
+     60
+    ],
+    "flexible_spec": [
+     {
+      "interests": [
+       {
+        "id": "6002884511422",
+        "name": "小型企业（商业和金融）"
+       },
+       {
+        "id": "6003070122382",
+        "name": "玩具（玩物）"
+       },
+       {
+        "id": "6003088846792",
+        "name": "美容院（化妆品）"
+       },
+       {
+        "id": "6003109292833",
+        "name": "转运配送（零售商）"
+       },
+       {
+        "id": "6003221485467",
+        "name": "电子商务（零售）"
+       },
+       {
+        "id": "6003230166788",
+        "name": "Shopify（软件）"
+       },
+       {
+        "id": "6003346592981",
+        "name": "网购（零售）"
+       },
+       {
+        "id": "6003778400853",
+        "name": "零售（工业）"
+       },
+       {
+        "id": "6003840140052",
+        "name": "农业（工业）"
+       },
+       {
+        "id": "6004037870609",
+        "name": "进口（邮递）"
+       },
+       {
+        "id": "6816346069503",
+        "name": "女装零售商 (零售)"
+       },
+       {
+        "id": "6858546471482",
+        "name": "消费电子产品零售商 (零售)"
+       }
+      ],
+      "behaviors": [
+       {
+        "id": "6002714898572",
+        "name": "Small business owners"
+       }
+      ]
+     }
+    ],
+    "geo_locations": {
+     "countries": [
+      "NZ",
+      "AU"
+     ],
+     "location_types": [
+      "home",
+      "recent"
+     ]
+    },
+    "locales": [
+     6,
+     20,
+     21,
+     22,
+     24
+    ],
+    "brand_safety_content_filter_levels": [
+     "FACEBOOK_RELAXED",
+     "AN_RELAXED"
+    ],
+    "targeting_automation": {
+     "advantage_audience": 1
+    }
+   },
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "start_time": "2026-08-17T16:28:17+1200",
+   "created_time": "2026-08-17T16:28:17+1200",
+   "updated_time": "2026-08-31T15:38:26+1200",
+   "promoted_object": {
+    "page_id": "1177479655430100",
+    "smart_pse_enabled": false
+   }
+  }
+ ],
+ "ads": [
+  {
+   "id": "52597304740125",
+   "name": "物流_潜在客户_Message_8月 - 再营销",
+   "adset_id": "52597304727125",
+   "campaign_id": "52589907084125",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "created_time": "2026-09-13T22:02:37+1200",
+   "updated_time": "2026-09-14T00:15:18+1200",
+   "creative": {
+    "effective_object_story_id": "1177479655430100_122122760109307722",
+    "object_story_spec": {
+     "page_id": "1177479655430100"
+    },
+    "id": "2157721242294126"
+   }
+  },
+  {
+   "id": "52589967399125",
+   "name": "物流_潜在客户_Message_8月",
+   "adset_id": "52589967398925",
+   "campaign_id": "52589907084125",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "created_time": "2026-08-17T18:28:51+1200",
+   "updated_time": "2026-09-13T22:03:59+1200",
+   "creative": {
+    "effective_object_story_id": "1177479655430100_122122760109307722",
+    "object_story_spec": {
+     "page_id": "1177479655430100"
+    },
+    "id": "2157721242294126"
+   }
+  },
+  {
+   "id": "52596939123325",
+   "name": "ThruPlay_物流_200/cbm",
+   "adset_id": "52596939123725",
+   "campaign_id": "52596939123525",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "created_time": "2026-09-11T16:46:04+1200",
+   "updated_time": "2026-09-11T16:50:05+1200",
+   "creative": {
+    "video_id": "961317390332083",
+    "effective_object_story_id": "1177479655430100_122123032077307722",
+    "object_story_spec": {
+     "page_id": "1177479655430100",
+     "video_data": {
+      "video_id": "2882233788816016"
+     }
+    },
+    "id": "1130750019387153"
+   }
+  },
+  {
+   "id": "52596931528725",
+   "name": "ThruPlay_物流_2KG封面版",
+   "adset_id": "52596931528525",
+   "campaign_id": "52596931528325",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "created_time": "2026-09-11T15:57:00+1200",
+   "updated_time": "2026-09-11T16:26:32+1200",
+   "creative": {
+    "video_id": "1117182540888214",
+    "effective_object_story_id": "1177479655430100_122123024433307722",
+    "object_story_spec": {
+     "page_id": "1177479655430100",
+     "video_data": {
+      "video_id": "1620619186112041"
+     }
+    },
+    "id": "1769422461395776"
+   }
+  },
+  {
+   "id": "52594661605925",
+   "name": "物流广告-WhatsApp",
+   "adset_id": "52594661606125",
+   "campaign_id": "52594661605725",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "created_time": "2026-09-03T16:41:31+1200",
+   "updated_time": "2026-09-04T13:13:39+1200",
+   "creative": {
+    "video_id": "2032305717418107",
+    "effective_object_story_id": "1177479655430100_122122118193307722",
+    "object_story_spec": {
+     "page_id": "1177479655430100",
+     "video_data": {
+      "video_id": "1620619186112041"
+     }
+    },
+    "id": "1074614048405244"
+   }
+  },
+  {
+   "id": "52593506024325",
+   "name": "9月新潜在客户-3PL",
+   "adset_id": "52593506023925",
+   "campaign_id": "52593506024125",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "created_time": "2026-09-01T12:28:55+1200",
+   "updated_time": "2026-09-03T18:08:44+1200",
+   "creative": {
+    "video_id": "2465810533909262",
+    "effective_object_story_id": "1177479655430100_122121708429307722",
+    "object_story_spec": {
+     "page_id": "1177479655430100",
+     "video_data": {
+      "video_id": "1684230445968467"
+     }
+    },
+    "id": "1073962788524523"
+   }
+  },
+  {
+   "id": "52592851776925",
+   "name": "测试 - 3PL潜在用户-8月28日设置-A版测试",
+   "adset_id": "52589907084325",
+   "campaign_id": "52589907084125",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "created_time": "2026-08-28T17:56:51+1200",
+   "updated_time": "2026-08-31T15:39:22+1200",
+   "creative": {
+    "video_id": "2338298283637167",
+    "effective_object_story_id": "1177479655430100_122121188247307722",
+    "object_story_spec": {
+     "page_id": "1177479655430100",
+     "video_data": {
+      "video_id": "1013960998365003"
+     }
+    },
+    "id": "1752357275669298"
+   }
+  },
+  {
+   "id": "52592851777125",
+   "name": "测试 - 3PL潜在用户-8月28日-8nzd测试",
+   "adset_id": "52589907084325",
+   "campaign_id": "52589907084125",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "created_time": "2026-08-28T17:56:59+1200",
+   "updated_time": "2026-08-31T15:39:19+1200",
+   "creative": {
+    "video_id": "2120214952243940",
+    "effective_object_story_id": "1177479655430100_122121183603307722",
+    "id": "2335144797245929"
+   }
+  },
+  {
+   "id": "52589907084525",
+   "name": "3PL新潜在客户广告",
+   "adset_id": "52589907084325",
+   "campaign_id": "52589907084125",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "created_time": "2026-08-17T16:28:19+1200",
+   "updated_time": "2026-08-28T18:09:34+1200",
+   "creative": {
+    "effective_object_story_id": "1177479655430100_122119859235307722",
+    "object_story_spec": {
+     "page_id": "1177479655430100"
+    },
+    "id": "2312195419595785"
+   }
+  },
+  {
+   "id": "52589967186725",
+   "name": "物流新潜在客户广告",
+   "adset_id": "52589907084325",
+   "campaign_id": "52589907084125",
+   "status": "ARCHIVED",
+   "effective_status": "ARCHIVED",
+   "created_time": "2026-08-24T12:01:39+1200",
+   "updated_time": "2026-08-24T12:22:29+1200",
+   "creative": {
+    "effective_object_story_id": "1177479655430100_122120722113307722",
+    "object_story_spec": {
+     "page_id": "1177479655430100"
+    },
+    "id": "1961597094531546"
+   }
+  }
+ ],
+ "audiences": [
+  {
+   "id": "52597304640525",
+   "name": "NAL-ThruPlay视频观众再营销池-25%-365d",
+   "subtype": "ENGAGEMENT",
+   "approximate_count_lower_bound": 1000,
+   "approximate_count_upper_bound": 1000,
+   "time_created": 1789293579,
+   "time_updated": 1789304147,
+   "rule": "[{\"event_name\":\"video_view_25_percent\",\"object_id\":961317390332083},{\"event_name\":\"video_view_25_percent\",\"object_id\":1117182540888214}]",
+   "retention_days": 365,
+   "operation_status": {
+    "code": 200,
+    "description": "正常"
+   },
+   "delivery_status": {
+    "code": 200,
+    "description": "此受众可供使用了。"
+   }
+  }
+ ]
+}

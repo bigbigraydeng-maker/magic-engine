@@ -85,6 +85,19 @@ describe('sweepClient — 「查不出来」和「没问题」必须分开', () 
 })
 
 describe('sweepClient — 真的把闸门跑起来了', () => {
+  it('客户行业真的传进闸门文案（G11 接线）：travel 说「客户服务市场」', async () => {
+    mockList.mockResolvedValue([
+      {
+        id: 'as1', name: 'x', optimization_goal: 'LINK_CLICKS', destination_type: 'WEBSITE',
+        targeting: { geo_locations: { countries: ['NZ'] } },
+      },
+    ])
+    mockCreatives.mockResolvedValue([{ adId: 'a1', adName: 'EN', texts: ['Hello'] }])
+    const r = await sweepClient({ ...CLIENT, expected_geo: 'Auckland', industry: 'travel' })
+    const geo = r.adSets[0].findings.find((f) => f.code === 'geo_mismatch')
+    expect(geo?.message).toContain('客户服务市场在「Auckland」')
+  })
+
   it('私信组里中文 + 韩文创意 → blocker（那次得罪 5 个买家的形状）', async () => {
     mockList.mockResolvedValue([
       { id: 'as1', name: 'Kiteroa 私信', optimization_goal: 'CONVERSATIONS' },

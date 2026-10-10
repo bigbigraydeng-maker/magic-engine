@@ -41,6 +41,21 @@
  *           no longer counts.
  *      `sensitivity = 'general'` skips (a)-(e) entirely — `approved` is
  *      enough.
+ *   6. Rollout stage + channel switch, `customer_reply` only (Issue #1648,
+ *      design doc §9.14 A) — regardless of sensitivity, `visibility`, or the
+ *      dual-sign outcome above: the client's rollout stage
+ *      (`client_knowledge_events`, `dimension='phase'`) must currently be
+ *      `LIVE_STAGE` (2, "上线") AND `clients.messenger_agent_enabled_messenger`
+ *      must be `true`. This is decided by `isKnowledgeLiveForCustomerReply`
+ *      (`rollout.ts`), called exactly ONCE per `getClientKnowledge` call,
+ *      right here — never re-derived by a caller. Any read failure on either
+ *      underlying query resolves this to `false` (fail-closed as "not live"),
+ *      the one deliberate exception to this file's "never swallow a DB
+ *      error" rule: an AI inventing facts from silence is the risk gate 1-5
+ *      exist to prevent, but here the fail-closed direction is unambiguous
+ *      (staying off is always safe), so collapsing the error to `false`
+ *      instead of throwing is the correct, documented choice — not an
+ *      oversight.
  *
  * 🔴 **Never return an empty array on a read failure.** An empty result is
  * indistinguishable from "this client has no facts" and a downstream AI will
@@ -50,12 +65,13 @@
  * only path that legitimately returns `{ entries: [], forbiddenFactKeys: [] }`.
  */
 
-import { isGlobalAdminEmail } from '@/lib/auth/whitelist'
 import { getRegisteredConfirmerEmails } from './confirmers'
+import { isAcceptableConfirmerIdentity } from './dual-sign'
 import type { KnowledgeSupabaseClient } from './db-client'
 import { computeContentFingerprint } from './fingerprint'
 import { getKnowledgeEntitlement } from './entitlement'
 import { KnowledgeNotEntitledError, KnowledgeReadError } from './errors'
+import { isKnowledgeLiveForCustomerReply } from './rollout'
 import type { Sensitivity } from './sensitivity'
 import type {
   FactStatus,
@@ -92,6 +108,13 @@ interface FactRow {
   client_confirmed_by_email: string | null
   client_confirmed_at: string | null
   client_confirmed_fingerprint: string | null
+  /**
+   * Issue #1647 / design doc §9.14 B "CTS 历史未确认"有条件接受：非空表示这
+   * 一行在这个时间点之前可以跳过下面 (a)-(e) 的客户确认判据。哪一行能非空
+   * 由 migration 里的 CHECK 约束锁定成固定 id 白名单——这里只负责按这个值
+   * 判断"现在还在宽限期内吗"，不负责判断"这行有没有资格用这个字段"。
+   */
+  historical_confirmation_grandfather_until: string | null
 }
 
 async function defaultSupabase(): Promise<KnowledgeSupabaseClient> {
@@ -132,8 +155,15 @@ function visibilityAllowedFor(purpose: GetClientKnowledgeOptions['purpose'], vis
  * client (already lower-cased) — see §9.14 E.2 step 2. Passed in rather than
  * queried per-row so a multi-row read does one registry lookup per client,
  * not one per fact.
+ *
+ * `now` is the same clock `getClientKnowledge` already uses for the validity
+ * window check — needed here too for the historical-grandfather bypass below.
  */
-function isCustomerReplyEligible(row: FactRow, registeredConfirmerEmails: ReadonlySet<string>): boolean {
+function isCustomerReplyEligible(
+  row: FactRow,
+  registeredConfirmerEmails: ReadonlySet<string>,
+  now: Date,
+): boolean {
   if (!SENSITIVE_CATEGORIES.has(row.sensitivity)) return true // 'general' — no dual-sign required
 
   // 🔴 魏征复审（2026-09-14）实测发现：这里原来只做 falsy 检查，一个仅含空格
@@ -144,25 +174,31 @@ function isCustomerReplyEligible(row: FactRow, registeredConfirmerEmails: Readon
   // 实放行了带空格的邮箱写入，唯一没被打穿是因为 client_knowledge_confirmers
   // 本身被 RLS 锁死，外部攻击者摸不到——但这道闸不该靠"攻击者刚好摸不到别的
   // 洞"才成立，读取入口自己必须先堵死这条口子）。
-  const confirmedByEmail = row.client_confirmed_by_email?.trim()
-  if (!row.client_confirmed_at || !confirmedByEmail) return false
-
-  // Defence in depth: the DB CHECK `approver_confirmer_differ` should already
-  // block this at write time, but a reader must not assume every write path
-  // honoured it.
-  if (row.approved_by_email && row.approved_by_email.trim().toLowerCase() === confirmedByEmail.toLowerCase()) {
-    return false
+  if (!row.client_confirmed_at) {
+    // 历史未确认宽限（issue #1647 / design doc §9.14 B "有条件接受"）：迁移
+    // 脚本赋值的固定几条历史事实，在宽限截止日之前可以跳过客户确认。过期
+    // 之后自动落回"return false"这条正常路径——client_confirmed_at 届时仍
+    // 是 null，不需要另一套"过期检查"逻辑，判断只在这一处。哪一行有资格
+    // 填这个字段，由 migration 的 CHECK 约束锁定，这里只信这一列的值。
+    const grandfatherUntil = row.historical_confirmation_grandfather_until
+    return typeof grandfatherUntil === 'string' && now.getTime() <= Date.parse(grandfatherUntil)
   }
 
-  // A global admin cannot stand in for the customer's own confirmation —
-  // exact ADMIN_EMAILS match only, never the looser ADMIN_EMAIL_DOMAIN check
-  // (see whitelist.ts `isGlobalAdminEmail`).
-  if (isGlobalAdminEmail(confirmedByEmail)) return false
-
-  // The confirmer must be a currently-registered confirmer for this exact
-  // client — otherwise a write path that stores an unregistered email would
-  // pass every other check above with nothing left to catch it.
-  if (!registeredConfirmerEmails.has(confirmedByEmail.toLowerCase())) return false
+  // 🔴 issue #1646：这三条身份判据（确认人≠批准人 / 确认人不是全局管理员 /
+  // 确认人当前登记有效）从这里抽到 `dual-sign.ts`，因为**写入**确认的那条
+  // 路径（客户确认链接）必须用一模一样的判据。两边各写一份的话，写入侧会
+  // 愉快地记下一条读取侧永远不认的确认——事实静悄悄地永远不生效，两边都
+  // 不报错。判据本身逐字未改，仍然是三个各自独立的 if（见 dual-sign.ts），
+  // 变异测试逐条删除仍然各自变红。
+  if (
+    !isAcceptableConfirmerIdentity({
+      confirmerEmail: row.client_confirmed_by_email,
+      approverEmail: row.approved_by_email,
+      registeredConfirmerEmails,
+    })
+  ) {
+    return false
+  }
 
   const currentFingerprint = computeContentFingerprint({
     statement: row.statement,
@@ -232,7 +268,7 @@ export async function getClientKnowledge(
   // deliberately, so each rule is one isolated, independently mutation-
   // testable `if`, not a single opaque query string.
   const FACT_COLUMNS =
-    'id, client_id, fact_key, scope, statement, structured_value, conflict_group_id, status, visibility, sensitivity, valid_from, valid_until, last_verified_at, approved_by_email, approved_at, client_confirmed_by_email, client_confirmed_at, client_confirmed_fingerprint'
+    'id, client_id, fact_key, scope, statement, structured_value, conflict_group_id, status, visibility, sensitivity, valid_from, valid_until, last_verified_at, approved_by_email, approved_at, client_confirmed_by_email, client_confirmed_at, client_confirmed_fingerprint, historical_confirmation_grandfather_until'
 
   const { data, error } = await sb
     .from('client_knowledge_facts')
@@ -253,6 +289,12 @@ export async function getClientKnowledge(
   const registeredConfirmerEmails =
     options.purpose === 'customer_reply' ? await getRegisteredConfirmerEmails(clientId, sb) : new Set<string>()
 
+  // 🔴 Gate 6, computed exactly once per call — see file header §6. Never
+  // throws (see `isKnowledgeLiveForCustomerReply`'s own doc): a DB failure
+  // on either underlying query collapses to `false` here, not an exception.
+  const liveForCustomerReply =
+    options.purpose === 'customer_reply' ? await isKnowledgeLiveForCustomerReply(clientId, sb) : true
+
   const forbiddenFactKeys = new Set<string>()
   const entries: KnowledgeEntry[] = []
 
@@ -270,7 +312,9 @@ export async function getClientKnowledge(
 
     if (!isWithinValidityWindow(row, nowDate)) continue
     if (!visibilityAllowedFor(options.purpose, row.visibility)) continue
-    if (options.purpose === 'customer_reply' && !isCustomerReplyEligible(row, registeredConfirmerEmails)) continue
+    if (options.purpose === 'customer_reply' && !isCustomerReplyEligible(row, registeredConfirmerEmails, nowDate))
+      continue
+    if (options.purpose === 'customer_reply' && !liveForCustomerReply) continue
     if (options.scope && !scopeMatches(row.scope, options.scope)) continue
 
     entries.push(toKnowledgeEntry(row))

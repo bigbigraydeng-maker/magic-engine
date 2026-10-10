@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { generateKeyPairSync } from 'crypto'
-import { readSheetValues, GoogleSheetsError, GoogleSheetsNotConfiguredError } from '../client'
+import { readSheetValues, appendSheetValues, GoogleSheetsError, GoogleSheetsNotConfiguredError } from '../client'
 
 const getValidAccessTokenMock = vi.fn<(clientId: string) => Promise<string | null>>()
 
 vi.mock('@/lib/google-oauth/client', () => ({
   getValidAccessToken: (clientId: string) => getValidAccessTokenMock(clientId),
   SHEETS_READONLY_SCOPE: 'https://www.googleapis.com/auth/spreadsheets.readonly',
+  SHEETS_RW_SCOPE: 'https://www.googleapis.com/auth/spreadsheets',
 }))
 
 const { privateKey } = generateKeyPairSync('rsa', {
@@ -94,5 +95,237 @@ describe('readSheetValues', () => {
 
     const rows = await readSheetValues('client-1', 'sheet-id', 'Tab!A:Z', { fetcher })
     expect(rows).toEqual([[], ['only-one']])
+  })
+})
+
+/**
+ * 必须显式声明形参签名。`vi.fn(async () => ...)` 推断出来的 `mock.calls` 是
+ * 空元组 `[]`，按下标取 `calls[0][0]` 会被 TS 判成越界（TS2493）——
+ * 测试照样跑得过，但 type-check 是红的。
+ */
+type FetchMock = (url: string, init?: RequestInit) => Promise<Response>
+
+/**
+ * 同 `asFetch`，但收的是带签名的 mock。跟 `asFetch` 并存而不是改它 ——
+ * 改它会牵动这个文件里原有的一批测试，没必要。
+ */
+function asTypedFetch(fn: FetchMock): typeof fetch {
+  return fn as unknown as typeof fetch // 已核实：deps.fetcher 形参类型即 typeof fetch
+}
+
+describe('appendSheetValues', () => {
+  /**
+   * 现在每次追加要打两个请求：先 GET 表信息拿 sheetId，再 POST batchUpdate。
+   * 这个 mock 按顺序应答，并记录每次调用的 URL / init 供断言。
+   */
+  function mockAppendFlow(opts: {
+    sheetId?: number
+    title?: string
+    postStatus?: number
+    postBody?: string
+  } = {}) {
+    const { sheetId = 123, title = 'Sheet1', postStatus = 200, postBody = '{}' } = opts
+    const calls: { url: string; init?: RequestInit }[] = []
+    const fetcher = vi.fn<FetchMock>(async (url, init) => {
+      calls.push({ url, init })
+      if (url.includes('fields=sheets.properties')) {
+        return new Response(JSON.stringify({ sheets: [{ properties: { sheetId, title } }] }), {
+          status: 200,
+        })
+      }
+      return new Response(postBody, { status: postStatus })
+    })
+    return { fetcher, calls }
+  }
+
+  it('走 batchUpdate + appendCells，用 sheetId 定位，从 A 列开始追加', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const { fetcher, calls } = mockAppendFlow({ sheetId: 123 })
+    await appendSheetValues('c1', 'sheet-1', 'Sheet1!A:ZZ', [['a', 'b']], {
+      fetcher: asTypedFetch(fetcher),
+    })
+
+    const post = calls[1]
+    expect(post.url.endsWith(':batchUpdate')).toBe(true)
+    expect(post.init).toMatchObject({ method: 'POST' })
+    const body = JSON.parse(String(post.init?.body))
+    expect(body.requests[0].appendCells.sheetId).toBe(123)
+  })
+
+  it('绝不再用 values:append 端点（表格识别会把行推到右边）', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const { fetcher, calls } = mockAppendFlow()
+    await appendSheetValues('c1', 's', 'Sheet1!A:ZZ', [['a']], { fetcher: asTypedFetch(fetcher) })
+    expect(calls.some((c) => c.url.includes(':append'))).toBe(false)
+  })
+
+  it('文本一律走 stringValue —— 电话的前导 0 和开头的 + 都不能被 Sheets 解析掉', async () => {
+    // 实测过的两个坑：USER_ENTERED 会把 0210140952 变成 210140952，
+    // 也会把 +64211... 当成公式。stringValue 等价于以前的 RAW。
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const { fetcher, calls } = mockAppendFlow()
+    await appendSheetValues('c1', 's', 'Sheet1!A:ZZ', [['0210140952', '+64211914575']], {
+      fetcher: asTypedFetch(fetcher),
+    })
+
+    const body = JSON.parse(String(calls[1].init?.body))
+    expect(body.requests[0].appendCells.rows[0].values).toEqual([
+      { userEnteredValue: { stringValue: '0210140952' } },
+      { userEnteredValue: { stringValue: '+64211914575' } },
+    ])
+  })
+
+  it('带空格和引号的表名也能按标题找到工作表', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+
+    const spaced = mockAppendFlow({ sheetId: 7, title: 'FB 表单 2026' })
+    await appendSheetValues('c1', 's', "'FB 表单 2026'!A:ZZ", [['a']], {
+      fetcher: asTypedFetch(spaced.fetcher),
+    })
+    expect(JSON.parse(String(spaced.calls[1].init?.body)).requests[0].appendCells.sheetId).toBe(7)
+
+    const quoted = mockAppendFlow({ sheetId: 9, title: "It's" })
+    await appendSheetValues('c1', 's', "'It''s'!A:ZZ", [['a']], {
+      fetcher: asTypedFetch(quoted.fetcher),
+    })
+    expect(JSON.parse(String(quoted.calls[1].init?.body)).requests[0].appendCells.sheetId).toBe(9)
+  })
+
+  it('找不到工作表 -> GoogleSheetsError 404', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const { fetcher } = mockAppendFlow({ title: '别的表' })
+    const err = await appendSheetValues('c1', 's', 'Sheet1!A:ZZ', [['a']], {
+      fetcher: asTypedFetch(fetcher),
+    }).catch((e) => e)
+    expect(err).toBeInstanceOf(GoogleSheetsError)
+    expect((err as GoogleSheetsError).httpStatus).toBe(404)
+  })
+
+  it('没有行就不发请求', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const { fetcher } = mockAppendFlow()
+    expect(await appendSheetValues('c1', 's', 'Sheet1!A:ZZ', [], { fetcher: asTypedFetch(fetcher) })).toBe(0)
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('成功时返回 rows.length（batchUpdate 是原子的，回执没有行数）', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const { fetcher } = mockAppendFlow()
+    const n = await appendSheetValues('c1', 's', 'Sheet1!A:ZZ', [['a'], ['b']], {
+      fetcher: asTypedFetch(fetcher),
+    })
+    expect(n).toBe(2)
+  })
+
+  it('403（只授过只读）原样抛出去，不吞 —— 调用方要拿它下发人工待办', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const { fetcher } = mockAppendFlow({ postStatus: 403, postBody: 'insufficient authentication scopes' })
+    const err = await appendSheetValues('c1', 's', 'Sheet1!A:ZZ', [['a']], {
+      fetcher: asTypedFetch(fetcher),
+    }).catch((e) => e)
+    expect(err).toBeInstanceOf(GoogleSheetsError)
+    expect((err as GoogleSheetsError).httpStatus).toBe(403)
+  })
+
+  it('完全没有可用身份时抛 NotConfigured', async () => {
+    getValidAccessTokenMock.mockResolvedValue(null)
+    await expect(appendSheetValues('c1', 's', 'Sheet1!A:ZZ', [['a']])).rejects.toBeInstanceOf(
+      GoogleSheetsNotConfiguredError,
+    )
+  })
+
+  it('sheetId 为 0 也照用（0 是合法 id，不能被当成 falsy 丢掉）', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const { fetcher, calls } = mockAppendFlow({ sheetId: 0 })
+    await appendSheetValues('c1', 's', 'Sheet1!A:ZZ', [['a']], { fetcher: asTypedFetch(fetcher) })
+
+    const body = JSON.parse(String(calls[1].init?.body))
+    expect(body.requests[0].appendCells.sheetId).toBe(0)
+  })
+
+  it('多个工作表时按标题挑中目标那个', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const calls: { url: string; init?: RequestInit }[] = []
+    const fetcher = vi.fn<FetchMock>(async (url, init) => {
+      calls.push({ url, init })
+      if (url.includes('fields=sheets.properties')) {
+        return new Response(
+          JSON.stringify({
+            sheets: [
+              { properties: { sheetId: 11, title: 'Other' } },
+              { properties: { sheetId: 22, title: 'Sheet1' } },
+              { properties: { sheetId: 33, title: 'Third' } },
+            ],
+          }),
+          { status: 200 },
+        )
+      }
+      return new Response('{}', { status: 200 })
+    })
+
+    await appendSheetValues('c1', 's', 'Sheet1!A:ZZ', [['a']], { fetcher: asTypedFetch(fetcher) })
+
+    const body = JSON.parse(String(calls[1].init?.body))
+    expect(body.requests[0].appendCells.sheetId).toBe(22)
+  })
+
+  it('GET 表信息非 2xx -> GoogleSheetsError 带状态码，且不再发 POST', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const fetcher = vi.fn<FetchMock>(
+      async () => new Response('boom', { status: 500, statusText: 'Internal Server Error' }),
+    )
+
+    const err = await appendSheetValues('c1', 's', 'Sheet1!A:ZZ', [['a']], {
+      fetcher: asTypedFetch(fetcher),
+    }).catch((e) => e)
+    expect(err).toBeInstanceOf(GoogleSheetsError)
+    expect((err as GoogleSheetsError).message).toContain('500')
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
+  it('appendCells 请求声明 fields: userEnteredValue', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const { fetcher, calls } = mockAppendFlow()
+    await appendSheetValues('c1', 's', 'Sheet1!A:ZZ', [['a']], { fetcher: asTypedFetch(fetcher) })
+
+    const body = JSON.parse(String(calls[1].init?.body))
+    expect(body.requests[0].appendCells.fields).toBe('userEnteredValue')
+  })
+
+  it('行序保持不变，且两次请求都带 Authorization 头', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const { fetcher, calls } = mockAppendFlow()
+    await appendSheetValues('c1', 's', 'Sheet1!A:ZZ', [['a', 'b'], ['c']], {
+      fetcher: asTypedFetch(fetcher),
+    })
+
+    const body = JSON.parse(String(calls[1].init?.body))
+    const rows = body.requests[0].appendCells.rows
+    expect(rows).toHaveLength(2)
+    expect(rows[0].values).toHaveLength(2)
+    expect(rows[1].values).toHaveLength(1)
+    expect(rows[0].values[0].userEnteredValue.stringValue).toBe('a')
+    expect(rows[0].values[1].userEnteredValue.stringValue).toBe('b')
+    expect(rows[1].values[0].userEnteredValue.stringValue).toBe('c')
+
+    for (const call of calls) {
+      expect((call.init?.headers as Record<string, string>)?.Authorization).toBe('Bearer tok')
+    }
+  })
+})
+
+describe('readSheetValues render 选项', () => {
+  it('默认还是 UNFORMATTED（老调用方行为不变）', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const fetcher = vi.fn<FetchMock>(async () => new Response(JSON.stringify({ values: [] }), { status: 200 }))
+    await readSheetValues('c1', 's', 'T!A:B', { fetcher: asTypedFetch(fetcher) })
+    expect(String(fetcher.mock.calls[0][0])).toContain('valueRenderOption=UNFORMATTED_VALUE')
+  })
+
+  it('要判重就得按人看到的文本读 —— formatted', async () => {
+    getValidAccessTokenMock.mockResolvedValue('tok')
+    const fetcher = vi.fn<FetchMock>(async () => new Response(JSON.stringify({ values: [] }), { status: 200 }))
+    await readSheetValues('c1', 's', 'T!A:B', { fetcher: asTypedFetch(fetcher), render: 'formatted' })
+    expect(String(fetcher.mock.calls[0][0])).toContain('valueRenderOption=FORMATTED_VALUE')
   })
 })

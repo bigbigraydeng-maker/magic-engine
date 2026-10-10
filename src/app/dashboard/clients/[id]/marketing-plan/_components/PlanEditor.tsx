@@ -25,6 +25,7 @@ import type {
   SocialPlatform,
   PlatformContentMix,
   BlogTopicPlan,
+  EmailTopicPlan,
 } from '@/lib/marketing-plan/types'
 
 interface Props {
@@ -42,10 +43,11 @@ const PLATFORM_LABEL: Record<SocialPlatform, string> = {
 }
 
 const TASK_KIND_META: Record<PlanTask['kind'], { icon: string; label: string; cls: string }> = {
-  social_post:  { icon: '📝', label: '社媒帖子',  cls: 'bg-blue-50 text-blue-700 border-blue-200' },
-  social_reel:  { icon: '🎬', label: 'Reel 视频', cls: 'bg-purple-50 text-purple-700 border-purple-200' },
-  social_story: { icon: '⚡', label: 'Story',     cls: 'bg-pink-50 text-pink-700 border-pink-200' },
-  blog_article: { icon: '📰', label: '博客文章',  cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  social_post:      { icon: '📝', label: '社媒帖子',   cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+  social_reel:      { icon: '🎬', label: 'Reel 视频',  cls: 'bg-purple-50 text-purple-700 border-purple-200' },
+  social_story:     { icon: '⚡', label: 'Story',      cls: 'bg-pink-50 text-pink-700 border-pink-200' },
+  blog_article:     { icon: '📰', label: '博客文章',   cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  newsletter_email: { icon: '✉️', label: 'Newsletter', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
 }
 
 export function PlanEditor({ clientId, plan, onUpdated, onArchived }: Props) {
@@ -173,6 +175,16 @@ export function PlanEditor({ clientId, plan, onUpdated, onArchived }: Props) {
     setDirty(true)
   }
 
+  const updateEmailTopic = (idx: number, field: keyof EmailTopicPlan, value: string | boolean | null) => {
+    setDraft(d => {
+      const current = d.email ?? { cadence_days: 0, topics: [] }
+      const topics = [...current.topics]
+      topics[idx] = { ...topics[idx], [field]: value } as EmailTopicPlan
+      return { ...d, email: { ...current, topics } }
+    })
+    setDirty(true)
+  }
+
   const updateKpi = (key: keyof MarketingPlanData['kpis'], value: string) => {
     setDraft(d => ({ ...d, kpis: { ...d.kpis, [key]: value || null } }))
     setDirty(true)
@@ -181,6 +193,12 @@ export function PlanEditor({ clientId, plan, onUpdated, onArchived }: Props) {
   // ── Render ──────────────────────────────────────────────────────────────
   return (
     <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+
+      {plan.generation_meta?.truncated && (
+        <div className="px-5 py-2.5 bg-amber-50 border-b border-amber-200 text-xs text-amber-800">
+          ⚠️ 这份计划生成时内容太多、被截断了——下面看到的主题和任务清单可能不完整，批准派发前建议先人工核对一遍，必要时重新生成。
+        </div>
+      )}
 
       {/* Header */}
       <div className="px-5 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
@@ -344,6 +362,55 @@ export function PlanEditor({ clientId, plan, onUpdated, onArchived }: Props) {
             )}
           </div>
         </section>
+
+        {/* ── Email / Newsletter 主题清单（仅已开通邮件渠道客户才会有内容）──────── */}
+        {(draft.email?.topics.length ?? 0) > 0 && (
+          <section>
+            <p className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2">
+              ✉️ Newsletter 主题清单（发送间隔约 {draft.email?.cadence_days ?? 0} 天）
+            </p>
+            <div className="space-y-2">
+              {draft.email!.topics.map((topic, i) => (
+                <div key={i} className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                  <div className="flex items-start gap-2 mb-1.5">
+                    <span className="shrink-0 text-[10px] font-bold bg-amber-100 text-amber-700 rounded-full px-1.5 py-0.5 mt-0.5">
+                      {topic.due_date}
+                    </span>
+                    {editable ? (
+                      <input
+                        value={topic.title}
+                        onChange={e => updateEmailTopic(i, 'title', e.target.value)}
+                        className="flex-1 text-sm font-semibold text-gray-900 bg-transparent border-b border-dashed border-gray-300 focus:border-indigo-400 focus:outline-none"
+                      />
+                    ) : (
+                      <p className="text-sm font-semibold text-gray-900 flex-1">{topic.title}</p>
+                    )}
+                    {/* 硬检查项——不是提示性文字，FDE 发布前必须确认这里跟正文对得上。
+                        2026-09 事故：一封提了具体行程的邮件正文没放链接，打开率不低但点击率必然是 0。 */}
+                    <span
+                      className={
+                        topic.requires_link
+                          ? 'shrink-0 text-[10px] font-bold bg-red-100 text-red-700 rounded px-1.5 py-0.5'
+                          : 'shrink-0 text-[10px] font-bold bg-gray-100 text-gray-500 rounded px-1.5 py-0.5'
+                      }
+                      title={
+                        topic.requires_link
+                          ? '这封信提到具体的团/产品——发布前必须确认正文带了真实链接'
+                          : '软性触达信——不带具体产品，但仍需给读者一个明确的下一步'
+                      }
+                    >
+                      {topic.requires_link ? '🔗 必须带链接' : '软性触达'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-500 italic ml-7">{topic.rationale}</p>
+                  {topic.target_segment && (
+                    <p className="text-[10px] text-gray-400 ml-7 mt-1">👥 {topic.target_segment}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* ── KPI ───────────────────────────────────────────────────────────── */}
         <section>

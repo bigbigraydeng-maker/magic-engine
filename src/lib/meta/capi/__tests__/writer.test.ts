@@ -25,6 +25,7 @@ const writer = new MetaCapiWriter()
 const CONFIG: ClientSendConfig = {
   clientId: 'c0000000-0000-0000-0000-000000000000',
   defaultPhoneCountry: '64',
+  facebookPageId: null,
 }
 
 function outcome(over: Partial<OutcomeForSend> = {}): OutcomeForSend {
@@ -41,6 +42,9 @@ function outcome(over: Partial<OutcomeForSend> = {}): OutcomeForSend {
     amountMinor: 388000,
     currency: 'NZD',
     occurredAt: '2026-09-03T10:00:00Z',
+    pageScopedUserId: null,
+    metaLeadId: null,
+    actionSource: 'email',
     ...over,
   }
 }
@@ -115,6 +119,74 @@ describe('build · 身份哈希', () => {
       defaultPhoneCountry: '61',
     })
     expect(nz.data[0].user_data.ph).not.toEqual(au.data[0].user_data.ph)
+  })
+})
+
+describe('build · Facebook 私信身份（PSID）匹配键', () => {
+  it('原样落进 payload，不哈希 —— Meta 文档明确这两个字段"不哈希"', () => {
+    const p = writer.build(
+      outcome({ customerEmail: null, pageScopedUserId: '28681838868174032', actionSource: 'business_messaging' }),
+      { ...CONFIG, facebookPageId: '1177479655430100' },
+    )
+    expect(p.data[0].user_data.page_scoped_user_id).toBe('28681838868174032')
+    expect(p.data[0].user_data.page_id).toBe('1177479655430100')
+  })
+
+  it('没有 pageScopedUserId 时，两个字段都不出现（CTS 现状不受影响）', () => {
+    const p = writer.build(outcome(), { ...CONFIG, facebookPageId: '1177479655430100' })
+    expect(p.data[0].user_data.page_scoped_user_id).toBeUndefined()
+    expect(p.data[0].user_data.page_id).toBeUndefined()
+  })
+
+  it('有 PSID 但客户没配 facebookPageId 时，只带 PSID，不硬塞一个不存在的主页 id', () => {
+    const p = writer.build(
+      outcome({ pageScopedUserId: '28681838868174032', actionSource: 'business_messaging' }),
+      { ...CONFIG, facebookPageId: null },
+    )
+    expect(p.data[0].user_data.page_scoped_user_id).toBe('28681838868174032')
+    expect(p.data[0].user_data.page_id).toBeUndefined()
+  })
+
+  it('action_source 原样透传 outcome.actionSource，writer 自己不做推断', () => {
+    const email = writer.build(outcome({ actionSource: 'email' }), CONFIG)
+    expect(email.data[0].action_source).toBe('email')
+
+    const messenger = writer.build(
+      outcome({ pageScopedUserId: '28681838868174032', actionSource: 'business_messaging' }),
+      CONFIG,
+    )
+    expect(messenger.data[0].action_source).toBe('business_messaging')
+  })
+})
+
+describe('build · Facebook 线索编号（lead_id）匹配键', () => {
+  it('原样落进 user_data.lead_id，不哈希 —— Meta 参数表标注 Do not hash', () => {
+    const p = writer.build(outcome({ metaLeadId: '1687504185706630' }), CONFIG)
+    expect(p.data[0].user_data.lead_id).toBe('1687504185706630')
+    // 同时邮箱仍然哈希发送，互不影响。
+    expect(p.data[0].user_data.em).toHaveLength(1)
+    expect(String(p.data[0].user_data.em)).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('没有线索编号时不出现 lead_id（CTS 之外的客户、旧记录不受影响）', () => {
+    const p = writer.build(outcome(), CONFIG)
+    expect(p.data[0].user_data.lead_id).toBeUndefined()
+  })
+
+  it('🔴 第二道闸：就算库里存了脏值，格式不对也绝不发给 Meta', () => {
+    for (const bad of ['l:1687504185706630', '12345', '168750418570663x', '123456789012345678', ' 1687504185706630']) {
+      const p = writer.build(outcome({ metaLeadId: bad }), CONFIG)
+      expect(p.data[0].user_data.lead_id, bad).toBeUndefined()
+    }
+  })
+
+  it('不改变事件名、action_source、金额 —— 只是多一把匹配键', () => {
+    const base = writer.build(outcome(), CONFIG).data[0]
+    const withId = writer.build(outcome({ metaLeadId: '1687504185706630' }), CONFIG).data[0]
+    expect(withId.event_name).toBe(base.event_name)
+    expect(withId.action_source).toBe(base.action_source)
+    expect(withId.custom_data).toEqual(base.custom_data)
+    expect(withId.event_id).toBe(base.event_id)
   })
 })
 
@@ -269,6 +341,36 @@ describe('accept · 授权', () => {
       const v = writer.accept(raw({ status, bodyText: jsonBody({ error: { message: '无权限' } }) }))
       expect(v.kind).toBe('auth')
     }
+  })
+
+  /**
+   * 🔴 2026-09-22 起 auth 这一档在状态机里变成**可重发**（`writeback-service.ts` case 'auth'）。
+   * 可重发的前提是：判成 auth 的响应都是 Meta 在处理事件之前就拒了请求、事件没入账。
+   * 这两条锁住那个前提——判定顺序或判据一变，这里先红。
+   */
+  it('判成 auth 的响应体里没有 events_received（事件没入账，重发不会双发）', () => {
+    const cases = [
+      raw({ status: 401, bodyText: jsonBody({ error: { message: 'Invalid OAuth access token', code: 190 } }) }),
+      raw({ status: 400, bodyText: jsonBody({ error: { message: 'Error validating access token: Session has expired', code: 190, error_subcode: 463 } }) }),
+      raw({ status: 403, bodyText: jsonBody({ error: { message: '(#200) Requires ads_management permission', code: 200 } }) }),
+    ]
+    for (const r of cases) {
+      const v = writer.accept(r)
+      expect(v.kind).toBe('auth')
+      expect(r.ok && JSON.parse(r.bodyText)).not.toHaveProperty('events_received')
+    }
+  })
+
+  it('真正的令牌失效文案（含 "session"/"password"）不会被「太旧」那条正则截胡', () => {
+    const v = writer.accept(
+      raw({
+        status: 400,
+        bodyText: jsonBody({
+          error: { message: 'Error validating access token: The session has been invalidated because the user changed their password', code: 190, error_subcode: 460 },
+        }),
+      }),
+    )
+    expect(v.kind).toBe('auth')
   })
 })
 

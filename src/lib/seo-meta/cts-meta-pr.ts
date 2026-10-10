@@ -24,6 +24,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from '@/lib/supabase'
+import { parseJsonResponse } from '@/lib/anthropic/client'
 import { getConnection } from '@/lib/cms/connection-store'
 import { GithubClient } from '@/lib/cms/github-client'
 
@@ -37,11 +38,26 @@ const MIN_IMPRESSIONS = 10
 
 // ── Pure: narrow-lane source editing ────────────────────────────────────────────
 
+function oneLine(s: string): string {
+  return s.replace(/[\r\n]+/g, ' ').trim()
+}
+
 function escapeSingle(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
 }
 
 const STRING_LITERAL = /'(?:[^'\\]|\\.)*'/
+
+/**
+ * Which field style an entry uses.
+ *
+ * - 'default': hub/blog entries with `title:` + `description:`/`excerpt:`.
+ * - 'guide': destination-guide entries (guides.ts) with `metaTitle:` +
+ *   `metaDescription:`. Guides ALSO contain section objects whose `title:`
+ *   is a section heading, so the default style would silently overwrite a
+ *   section heading — guides must never be edited with the default style.
+ */
+export type MetaFieldStyle = 'default' | 'guide'
 
 export interface MetaReplacement {
   updated: string
@@ -59,13 +75,27 @@ export interface MetaReplacement {
  * or the next `export const`. Batch files hold many posts inside ONE export,
  * so an export-only boundary would let an entry missing its own excerpt
  * silently overwrite the next post's (魏征-style neighbour corruption).
+ *
+ * `style` selects the field names: 'default' uses `title:` +
+ * `description:`/`excerpt:`; 'guide' uses `metaTitle:` + `metaDescription:`
+ * and anchors on the top-level `\n  slug:` key so nested section `title:`
+ * fields are never touched.
  */
-export function replaceMetaForSlug(
-  source: string,
-  slug: string,
-  newTitle: string,
-  newDesc: string,
-): MetaReplacement | null {
+interface MetaWindow {
+  slugIdx: number
+  windowEnd: number
+  window: string
+  titleRe: RegExp
+  descRe: RegExp
+  title: string
+  desc: string
+}
+
+function unquote(m: string): string {
+  return m.replace(/^[^']*'/, '').replace(/'$/, '').replace(/\\'/g, "'").replace(/\\\\/g, '\\')
+}
+
+function findDefaultWindow(source: string, slug: string): MetaWindow | null {
   const slugIdx = source.indexOf(`slug: '${slug}'`)
   if (slugIdx === -1) return null
 
@@ -86,14 +116,93 @@ export function replaceMetaForSlug(
   const descMatch = window.match(descRe)
   if (!titleMatch || !descMatch) return null
 
-  const unquote = (m: string): string =>
-    m.replace(/^[^']*'/, '').replace(/'$/, '').replace(/\\'/g, "'").replace(/\\\\/g, '\\')
+  return {
+    slugIdx,
+    windowEnd,
+    window,
+    titleRe,
+    descRe,
+    title: unquote(titleMatch[0].slice(titleMatch[1].length)),
+    desc: unquote(descMatch[0].slice(descMatch[1].length)),
+  }
+}
 
-  const oldTitle = unquote(titleMatch[0].slice(titleMatch[1].length))
-  const oldDesc = unquote(descMatch[0].slice(descMatch[1].length))
+function findGuideWindow(source: string, slug: string): MetaWindow | null {
+  // Anchor on the top-level key only: newline + exactly two spaces + slug.
+  // This avoids matching a nested mention (e.g. relatedSlugs entries).
+  const anchor = `\n  slug: '${slug}'`
+  const anchorIdx = source.indexOf(anchor)
+  if (anchorIdx === -1) return null
+  const slugIdx = anchorIdx + 1
 
-  let newWindow = window.replace(titleRe, `$1'${escapeSingle(newTitle)}'`)
-  newWindow = newWindow.replace(descRe, `$1'${escapeSingle(newDesc)}'`)
+  const bounds = [
+    source.indexOf("\n  slug: '", slugIdx + 1),
+    source.indexOf('\nexport const', slugIdx),
+  ].filter((i) => i !== -1)
+  const windowEnd = bounds.length > 0 ? Math.min(...bounds) : source.length
+  const window = source.slice(slugIdx, windowEnd)
+
+  const titleRe = new RegExp(`(\\bmetaTitle:\\s*)${STRING_LITERAL.source}`)
+  const descRe = new RegExp(`(\\bmetaDescription:\\s*)${STRING_LITERAL.source}`)
+
+  const titleMatch = window.match(titleRe)
+  const descMatch = window.match(descRe)
+  if (!titleMatch || !descMatch) return null
+
+  return {
+    slugIdx,
+    windowEnd,
+    window,
+    titleRe,
+    descRe,
+    title: unquote(titleMatch[0].slice(titleMatch[1].length)),
+    desc: unquote(descMatch[0].slice(descMatch[1].length)),
+  }
+}
+
+function findMetaWindow(
+  source: string,
+  slug: string,
+  style: MetaFieldStyle = 'default',
+): MetaWindow | null {
+  return style === 'guide' ? findGuideWindow(source, slug) : findDefaultWindow(source, slug)
+}
+
+/**
+ * Read-only lookup of the title/description currently in the source for
+ * `slug`, without writing anything. Used by the meta-cycle's true-revert
+ * step (魏征 finding #7) to detect whether a human has hand-edited the slug
+ * in GitHub since Magic Engine's last write, before deciding it's safe to
+ * revert.
+ *
+ * `style` selects the field names (see MetaFieldStyle): 'default' for
+ * hub/blog entries, 'guide' for destination guides.
+ */
+export function readMetaForSlug(
+  source: string,
+  slug: string,
+  style: MetaFieldStyle = 'default',
+): { title: string; desc: string } | null {
+  const found = findMetaWindow(source, slug, style)
+  return found ? { title: found.title, desc: found.desc } : null
+}
+
+export function replaceMetaForSlug(
+  source: string,
+  slug: string,
+  newTitle: string,
+  newDesc: string,
+  style: MetaFieldStyle = 'default',
+): MetaReplacement | null {
+  const found = findMetaWindow(source, slug, style)
+  if (!found) return null
+  const { slugIdx, windowEnd, window, titleRe, descRe, title: oldTitle, desc: oldDesc } = found
+
+  // Function replacers on purpose: a string replacement would treat `$&`, `$'`, `$$` ... in the
+  // NEW text as special patterns and splice source code into the literal (review of #2284).
+  // Newlines are collapsed first: a raw newline inside a single-quoted literal is not valid TypeScript.
+  let newWindow = window.replace(titleRe, (_m: string, lead: string) => `${lead}'${escapeSingle(oneLine(newTitle))}'`)
+  newWindow = newWindow.replace(descRe, (_m: string, lead: string) => `${lead}'${escapeSingle(oneLine(newDesc))}'`)
 
   return {
     updated: source.slice(0, slugIdx) + newWindow + source.slice(windowEnd),
@@ -208,7 +317,10 @@ async function generateCtsMeta(
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
   const msg = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 200,
+    // 300 gives headroom for title (≤60 chars) + desc (≤155 chars) + JSON
+    // wrapper tokens. 200 was occasionally truncating the response mid-JSON,
+    // causing JSON.parse to throw and silently returning desc:''.
+    max_tokens: 300,
     messages: [
       {
         role: 'user',
@@ -229,7 +341,11 @@ Respond ONLY with valid JSON: {"title":"...","desc":"..."}`,
   })
   const text = msg.content[0].type === 'text' ? msg.content[0].text.trim() : '{}'
   try {
-    const p = JSON.parse(text) as { title?: string; desc?: string }
+    // parseJsonResponse handles markdown code-fence wrapping (```json...```)
+    // and LLM quirks (trailing commas, unescaped quotes) via jsonrepair —
+    // plain JSON.parse was the root cause of consistent ai_generation_failed
+    // when the model wrapped its output in code fences (#1792).
+    const p = parseJsonResponse<{ title?: string; desc?: string }>(text)
     return {
       title: (p.title ?? keyword).slice(0, 60),
       desc: (p.desc ?? '').slice(0, 155),
@@ -242,7 +358,7 @@ Respond ONLY with valid JSON: {"title":"...","desc":"..."}`,
 // ── Runner ──────────────────────────────────────────────────────────────────────
 
 export interface CtsMetaPrResult {
-  outcome: 'pr_opened' | 'no_candidates' | 'no_connection' | 'nothing_editable' | 'error'
+  outcome: 'pr_merged' | 'pr_opened' | 'no_candidates' | 'no_connection' | 'nothing_editable' | 'error'
   pr_url?: string
   pages?: Array<{ slug: string; keyword: string }>
   /** Per-candidate audit trail (slug → which step it stopped at). */
@@ -394,10 +510,14 @@ export async function runCtsMetaPr(
 
     const pr = await github.createPullRequest(repoOwner, repoName, {
       title: `[Magic Engine] SEO 标题优化 ×${applied.length}`,
-      body: `${body}\n\n> 巡逻发现这些页面排名在 4-20 名但标题点击力不足。只改了 meta 数据文件里的标题/摘要字符串（blog 的标题和摘要同时是页面可见文案，正是点击力要改的东西）。构建检查通过后合并即生效。`,
+      body: `${body}\n\n> 巡逻发现这些页面排名在 4-20 名但标题点击力不足。只改了 meta 数据文件里的标题/摘要字符串（blog 的标题和摘要同时是页面可见文案，正是点击力要改的东西）。`,
       head: prBranch,
       base: defaultBranch,
     })
+
+    // Auto-merge immediately — only changes meta title/desc, no review needed.
+    // If blocked by pending CI the PR stays open; next week's run is independent.
+    const merged = await github.mergePullRequest(repoOwner, repoName, pr.number)
 
     // 5. Audit log (drives cooldown + weekly report 自动改动 column)
     const rows = applied.map((a) => ({
@@ -411,13 +531,14 @@ export async function runCtsMetaPr(
       new_title: a.newTitle,
       new_desc: a.newDesc,
       wp_updated: false,
+      applied_channel: 'pr',
       optimised_at: new Date().toISOString(),
     }))
     const { error: logErr } = await supabase.from('seo_meta_log').insert(rows)
     if (logErr) console.error('[cts-meta-pr] log insert failed:', logErr.message)
 
     return {
-      outcome: 'pr_opened',
+      outcome: merged ? 'pr_merged' : 'pr_opened',
       pr_url: pr.html_url ?? undefined,
       pages: applied.map((a) => ({ slug: a.candidate.slug, keyword: a.candidate.keyword })),
       attempts,

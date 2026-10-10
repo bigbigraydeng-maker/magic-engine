@@ -28,8 +28,11 @@ const PRIMARY_METRIC_FIELDS: readonly PostMetricField[] = ['likes', 'comments', 
 /** action 行的最小形状 —— route 从 flywheel_actions 读的字段。 */
 export interface CampaignActionRow {
   id:      string
-  /** 用作 map key，即 UI 侧 CampaignDailyPublishPanel.publishedPosts[].post_id */
-  postId:  string
+  /**
+   * 用作 map key = 发布回执里的 idempotency_key（UI 侧 CampaignDailyPublishPanel.publishedPosts[].idempotency_key）。
+   * 不用 post_id：排期帖回执存的是照片编号，动作行存的是解析后的帖子编号，两边对不上。
+   */
+  idempotencyKey: string
 }
 
 /** receipt 行的最小形状 —— route 从 social_post_measurement_receipts 读的字段。 */
@@ -48,7 +51,7 @@ export interface CampaignTuneInput {
 }
 
 /**
- * key 是 Facebook post id（page_id_post_id 形式），value 是建议或 null。
+ * key 是发布回执的 idempotency_key，value 是建议或 null。
  *
  * null = 这条 action 连自己的 T+72 receipt 都还没有（未到点 / 不可测未落 unmeasurable 行）
  *        —— UI 用「等 T+72 到点再看」的占位文案渲染。
@@ -66,7 +69,7 @@ export function evaluateCampaignPosts(input: CampaignTuneInput): CampaignTuneSug
   for (const action of input.actions) {
     const targetReceipt = receiptByAction.get(action.id)
     if (!targetReceipt) {
-      out[action.postId] = null
+      out[action.idempotencyKey] = null
       continue
     }
     const cohortReceipts = t72Receipts.filter((r) => r.actionId !== action.id)
@@ -75,7 +78,7 @@ export function evaluateCampaignPosts(input: CampaignTuneInput): CampaignTuneSug
       cohort: cohortReceipts.map((r) => toMeasurement(r.actionId, r)),
       thresholds: input.thresholds,
     })
-    out[action.postId] = rec
+    out[action.idempotencyKey] = rec
   }
   return out
 }

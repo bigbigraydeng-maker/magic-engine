@@ -24,6 +24,7 @@
 
 import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
+import { FACTORY_CONFIG_SECTION } from '@/lib/factory/config-link'
 import { ClientStatusPanel } from './_components/ClientStatusPanel'
 import { GbpPanel } from './_components/GbpPanel'
 import { GbpLocationPanel } from './_components/GbpLocationPanel'
@@ -37,10 +38,12 @@ import { OtherDataSourcesPanel } from './_components/OtherDataSourcesPanel'
 import { CmsPanel } from '../_components/CmsPanel'
 import { MailboxPanel } from './_components/MailboxPanel'
 import { AdStrategyPanel } from './_components/AdStrategyPanel'
+import { AdOutcomePanel } from './_components/AdOutcomePanel'
 import { CompetitorDomainsPanel } from './_components/CompetitorDomainsPanel'
 import { ReputationIdentityPanel } from './_components/ReputationIdentityPanel'
 import { PrimaryKeywordsPanel } from './_components/PrimaryKeywordsPanel'
 import { BrandAliasesPanel } from './_components/BrandAliasesPanel'
+import { BrandGeoAnchorsPanel } from './_components/BrandGeoAnchorsPanel'
 import { SocialHandlesPanel } from './_components/SocialHandlesPanel'
 import { ApiKeysPanel } from './_components/ApiKeysPanel'
 import { ExcludedTopicsPanel } from './_components/ExcludedTopicsPanel'
@@ -57,6 +60,7 @@ import { LeadNotifyEmailsPanel } from './_components/LeadNotifyEmailsPanel'
 import { DomainRulesPanel } from './_components/DomainRulesPanel'
 import { PipelineStagesPanel } from './_components/PipelineStagesPanel'
 import { CommentAuditList } from './_components/CommentAuditList'
+import { MessengerEmergencyStopPanel } from './_components/MessengerEmergencyStopPanel'
 import {
   SettingsSection,
   SettingsTabBar,
@@ -76,7 +80,28 @@ const ERROR_MESSAGES: Record<string, string> = {
  * **必须是一个函数、按 tab 分支返回**，不能把五组都渲染出来再用 CSS 藏 ——
  * 藏起来的板块照样会挂载、照样会发请求，那就白改了。
  */
-function TabBody({ tab, clientId }: { tab: SettingsTab; clientId: string }) {
+/**
+ * 授权/连接回跳时，本来就是来看「成没成」的那一块——默认展开，
+ * 不用先点开才看得到结果（其余板块照旧默认收起，见 SettingsSection）。
+ */
+interface ConnectCallbacks {
+  mail: boolean
+  gbp: boolean
+  oauth: boolean
+}
+
+function TabBody({
+  tab,
+  clientId,
+  callbacks,
+  focusSection,
+}: {
+  tab: SettingsTab
+  clientId: string
+  callbacks: ConnectCallbacks
+  /** `?section=` 深链指向的板块 id —— 命中的那块默认展开并滚过去。 */
+  focusSection: string | null
+}) {
   switch (tab) {
     case 'connect':
       return (
@@ -84,25 +109,25 @@ function TabBody({ tab, clientId }: { tab: SettingsTab; clientId: string }) {
           <SettingsSection first icon="🚦" title="真客户 / 调研档案">
             <ClientStatusPanel clientId={clientId} />
           </SettingsSection>
-          <SettingsSection icon="✉️" title="公司邮箱（客人发来的信）">
+          <SettingsSection icon="✉️" title="公司邮箱（客人发来的信）" defaultOpen={callbacks.mail}>
             <MailboxPanel clientId={clientId} />
           </SettingsSection>
-          <SettingsSection icon="📍" title="Google Business Profile">
+          <SettingsSection icon="📍" title="Google Business Profile" defaultOpen={callbacks.gbp}>
             <GbpPanel clientId={clientId} />
           </SettingsSection>
-          <SettingsSection icon="🏪" title="发到哪一家门店">
+          <SettingsSection icon="🏪" title="发到哪一家门店" defaultOpen={callbacks.gbp}>
             <GbpLocationPanel clientId={clientId} />
           </SettingsSection>
-          <SettingsSection icon="🔎" title="Google Search Console">
+          <SettingsSection icon="🔎" title="Google Search Console" defaultOpen={callbacks.oauth}>
             <GscPanel clientId={clientId} />
             <div className="mt-3"><GscPropertyPanel clientId={clientId} /></div>
             <div className="mt-3"><DataSnapshotPanel anchor="gsc" clientId={clientId} /></div>
           </SettingsSection>
-          <SettingsSection icon="📈" title="Google Analytics 4">
+          <SettingsSection icon="📈" title="Google Analytics 4" defaultOpen={callbacks.oauth}>
             <Ga4Panel clientId={clientId} />
             <div className="mt-3"><DataSnapshotPanel anchor="ga4" clientId={clientId} /></div>
           </SettingsSection>
-          <SettingsSection icon="📊" title="同步哪一个 GA4 Property">
+          <SettingsSection icon="📊" title="同步哪一个 GA4 Property" defaultOpen={callbacks.oauth}>
             <Ga4PropertyPanel clientId={clientId} />
           </SettingsSection>
           <SettingsSection icon="📢" title="Google Ads">
@@ -110,6 +135,7 @@ function TabBody({ tab, clientId }: { tab: SettingsTab; clientId: string }) {
           </SettingsSection>
           <SettingsSection icon="🩺" title="广告健康监测">
             <AdStrategyPanel clientId={clientId} />
+            <div className="mt-3"><AdOutcomePanel clientId={clientId} /></div>
           </SettingsSection>
           <SettingsSection icon="🌐" title="网站连接（GitHub / WordPress / Shopify）">
             <CmsPanel clientId={clientId} />
@@ -134,6 +160,9 @@ function TabBody({ tab, clientId }: { tab: SettingsTab; clientId: string }) {
           </SettingsSection>
           <SettingsSection icon="🏷️" title="品牌词别名">
             <BrandAliasesPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="📍" title="品牌地域锚点（防同名海外分公司冒领）">
+            <BrandGeoAnchorsPanel clientId={clientId} />
           </SettingsSection>
           <SettingsSection icon="🥊" title="竞品域名清单">
             <CompetitorDomainsPanel clientId={clientId} />
@@ -183,7 +212,12 @@ function TabBody({ tab, clientId }: { tab: SettingsTab; clientId: string }) {
           <SettingsSection icon="📝" title="每周自动 Blog（SEO 盯梢）">
             <WeeklyBlogPanel clientId={clientId} />
           </SettingsSection>
-          <SettingsSection icon="🎬" title="视频工厂配置（出片 / 发片）">
+          <SettingsSection
+            icon="🎬"
+            title="视频工厂配置（出片 / 发片）"
+            id={FACTORY_CONFIG_SECTION}
+            defaultOpen={focusSection === FACTORY_CONFIG_SECTION}
+          >
             <FactoryConfigPanel clientId={clientId} />
           </SettingsSection>
           <SettingsSection icon="💬" title="Facebook 评论自动回复">
@@ -197,9 +231,14 @@ function TabBody({ tab, clientId }: { tab: SettingsTab; clientId: string }) {
 
     case 'advanced':
       return (
-        <SettingsSection first icon="🔌" title="MCP API 访问">
-          <ApiKeysPanel clientId={clientId} />
-        </SettingsSection>
+        <>
+          <SettingsSection first icon="🔌" title="MCP API 访问">
+            <ApiKeysPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🚨" title="AI 客服自动回复 · 紧急全渠道停">
+            <MessengerEmergencyStopPanel clientId={clientId} />
+          </SettingsSection>
+        </>
       )
   }
 }
@@ -215,6 +254,12 @@ export default function ClientSettingsPage() {
   // GSC/GA4 合并授权（/api/auth/google/callback）回跳带的是 ?oauth=，不是
   // ?gbp=——PR5 复审发现这条错误提示之前直接消失了，补上一个通用版本。
   const oauthStatus = searchParams.get('oauth')
+  // 邮箱授权回跳（见 MailboxPanel）——用它来判断该默认展开哪一块，不用来
+  // 渲染横幅（那条横幅在 MailboxPanel 自己里面）。
+  const mailStatus = searchParams.get('mail')
+  // 深链锚点（见 lib/factory/config-link）——驾驶舱的「该客户工厂配置」跳过来时
+  // 直接落在「视频工厂配置」那一块，不用人在「内容与社媒」里自己找。
+  const focusSection = searchParams.get('section')
 
   const errorMessage =
     gbpStatus === 'error' ? (ERROR_MESSAGES[gbpReason] ?? '连接过程中发生未知错误，请重试。') : null
@@ -304,7 +349,12 @@ export default function ClientSettingsPage() {
         <SettingsTabBar active={tab} onPick={pickTab} />
 
         <div className="mt-6">
-          <TabBody tab={tab} clientId={clientId} />
+          <TabBody
+            tab={tab}
+            clientId={clientId}
+            callbacks={{ mail: mailStatus !== null, gbp: gbpStatus !== null, oauth: oauthStatus !== null }}
+            focusSection={focusSection}
+          />
         </div>
       </div>
     </div>

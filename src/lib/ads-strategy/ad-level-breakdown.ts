@@ -45,6 +45,30 @@ export interface AdInsightRow {
   messagingConversations?: number
 }
 
+/**
+ * 读侧要从 `ad_daily_insights` 取的列。日期列叫 `insight_date`（不是 `date`）——
+ * 2026-09-14 前看板查的是不存在的 `date` 列，查询整条报错、页面静默显示「没数据」。
+ * 留资/私信两列必须一起取，否则 `unitOf` 永远判成 unknown，单位闸形同虚设。
+ */
+export const AD_INSIGHT_SELECT =
+  'client_id, entity_id, entity_name, parent_id, spend, results, impressions, leads, messaging_conversations, insight_date'
+
+/** `ad_daily_insights` 一行（按 AD_INSIGHT_SELECT 取回）→ AdInsightRow。 */
+export function adInsightRowFromDb(r: Record<string, unknown>): AdInsightRow {
+  const optionalNumber = (v: unknown): number | undefined =>
+    v === null || v === undefined ? undefined : Number(v)
+  return {
+    entityId:    r.entity_id as string,
+    entityName:  (r.entity_name as string | null) ?? (r.entity_id as string),
+    parentId:    (r.parent_id as string | null) ?? null,
+    spend:       Number(r.spend ?? 0),
+    results:     Number(r.results ?? 0),
+    impressions: Number(r.impressions ?? 0),
+    leads:                  optionalNumber(r.leads),
+    messagingConversations: optionalNumber(r.messaging_conversations),
+  }
+}
+
 /** 一条广告的 results 到底装的是什么。 */
 export type ResultUnit =
   /** 全是表单留资 */

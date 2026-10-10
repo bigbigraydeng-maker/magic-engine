@@ -20,7 +20,6 @@ import {
   exchangeCodeForTokens,
   fetchMailboxAddress,
   MICROSOFT_MAIL_PROVIDER,
-  MICROSOFT_MAIL_SCOPES,
   MICROSOFT_STATE_COOKIE,
 } from '@/lib/microsoft/mail-oauth'
 
@@ -118,7 +117,17 @@ export async function GET(req: NextRequest) {
       // 不是把第一个覆盖掉。
       accountId: address,
       displayName: address,
-      scopes: [...MICROSOFT_MAIL_SCOPES],
+      // 🔴 存**微软实际批准**的那一份，不是我们请求的那一份。
+      //    企业租户的管理员可以只批一部分；存请求清单的话，库里会记成「全有」，
+      //    于是「权限比现在要的少」那条判据对真正危险的那种情况完全瞎掉 ——
+      //    下一次刷新照样撞 AADSTS65001。Facebook / TikTok 的回调存的都是实际
+      //    授予的，唯独刷新会重放 scope 的这个平台存的是请求的（魏征 2026-09-24 抓出）。
+      scopes: exchanged.tokens.scope.split(' ').filter(Boolean),
+      // 刚刚用授权码换到令牌、又用它成功读出了邮箱地址 —— 这就是一次货真价实的
+      // 「跟对方通上话」，必须盖上时间戳。不盖的话，重连之后心跳仍停在断线那天，
+      // 断线监控（platform-oauth/connection-health.ts）会在人已经修好之后继续
+      // 报警，直到下一轮定时刷新为止。
+      lastSyncedAt: new Date(),
     })
   } catch (err) {
     return back(clientId, {

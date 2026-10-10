@@ -24,16 +24,18 @@ const caption = note || "Artist's impressions. Final finishes, landscaping and d
     </div>
 
     <script is:inline>
-      (function () {
-        var figs = [].slice.call(document.querySelectorAll('.gal img'));
+      document.addEventListener('DOMContentLoaded', function () {
+        var figs = [].slice.call(document.querySelectorAll('.gal img, .plog-grid img'));
         if (!figs.length) return;
         var lb = document.getElementById('lb'),
           img = document.getElementById('lbImg'),
           n = document.getElementById('lbN'),
+          capEl = lb.querySelector('.lb-cap'),
           i = 0;
         function show(k) {
           i = (k + figs.length) % figs.length;
           img.src = figs[i].src; img.alt = figs[i].alt;
+          capEl.firstChild.textContent = (figs[i].getAttribute('data-cap') || "Artist's impression") + ' · ';
           n.textContent = i + 1 + ' / ' + figs.length;
         }
         function open(k) {
@@ -57,7 +59,7 @@ const caption = note || "Artist's impressions. Final finishes, landscaping and d
           if (e.key === 'ArrowLeft') show(i - 1);
           if (e.key === 'ArrowRight') show(i + 1);
         });
-      })();
+      });
     </script>
   </>
 )}

@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
-import { publishPagePhotoPost, deletePagePost } from '../page-posts'
+import { publishPagePhotoPost, deletePagePost, readPageStoryId } from '../page-posts'
 
 const PAGE = '1616575215312482'
 const TOKEN = 'page-access-token'
@@ -64,14 +64,41 @@ describe('publishPagePhotoPost — immediate vs scheduled', () => {
     expect(r.postIdSource).toBe('post_id')
   })
 
-  it('falls back to id but records the source so an auditor can see', async () => {
-    const { fetcher } = fakeFetch({ ok: true, body: { id: 'PHOTO_OBJ' } })
+  it('immediate publish with post_id makes exactly one Graph call (no read-back)', async () => {
+    const { fetcher, calls } = fakeFetch({ ok: true, body: { post_id: `${PAGE}_1750835520181969`, id: '1750835520181969' } })
     const r = await publishPagePhotoPost({
       pageId: PAGE, pageAccessToken: TOKEN,
       message: 'hi', imageUrl: 'https://x/img.jpg', fetcher,
     })
-    expect(r.postId).toBe('PHOTO_OBJ')
-    expect(r.postIdSource).toBe('id')
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toBe(`https://graph.facebook.com/v20.0/${PAGE}/photos`)
+    expect(r).toEqual({
+      postId: `${PAGE}_1750835520181969`,
+      postIdSource: 'post_id',
+      permalink: `https://www.facebook.com/${PAGE}_1750835520181969`,
+      raw: { post_id: `${PAGE}_1750835520181969`, id: '1750835520181969' },
+    })
+  })
+})
+
+describe('publishPagePhotoPost — scheduled photo returns only a photo id', () => {
+  it('🔴 scheduled publish makes exactly one Graph call and keeps the photo id (no read-back at publish time)', async () => {
+    // Meta: page_story_id "Applies only to published photos" — a scheduled photo
+    // has none yet, so reading it back here would always fail. Resolution
+    // happens later in the story-resolve workflow.
+    const { fetcher, calls } = fakeFetch({ ok: true, body: { id: '1750835520181969' } })
+    const r = await publishPagePhotoPost({
+      pageId: PAGE, pageAccessToken: TOKEN,
+      message: 'hi', imageUrl: 'https://x/img.jpg',
+      scheduledPublishTime: new Date('2026-09-16T20:00:00Z'), fetcher,
+    })
+    expect(calls).toHaveLength(1)
+    expect(r).toEqual({
+      postId: '1750835520181969',
+      postIdSource: 'id',
+      permalink: 'https://www.facebook.com/1750835520181969',
+      raw: { id: '1750835520181969' },
+    })
   })
 
   it('throws when Meta returns an error — never retries silently', async () => {
@@ -121,6 +148,13 @@ describe('deletePagePost — idempotency and error surfacing', () => {
     ).rejects.toThrow(/pages_manage_posts/)
   })
 
+  it('scheduled-photo receipts: a bare photo id is deleted by that exact id (no rewrite to page_post)', async () => {
+    const { fetcher, calls } = fakeFetch({ ok: true, body: { success: true } })
+    await deletePagePost({ postId: '1750835520181969', pageAccessToken: TOKEN, fetcher })
+    expect(calls[0].init?.method).toBe('DELETE')
+    expect(calls[0].url).toBe(`https://graph.facebook.com/v20.0/1750835520181969?access_token=${TOKEN}`)
+  })
+
   it('url-encodes the post id — a raw underscore-heavy id must not break the request line', async () => {
     const { fetcher, calls } = fakeFetch({ ok: true, body: { success: true } })
     await deletePagePost({ postId: '1616575215312482_1750182373580617', pageAccessToken: TOKEN, fetcher })
@@ -128,5 +162,73 @@ describe('deletePagePost — idempotency and error surfacing', () => {
     // fact that we encode at all — a future refactor cannot substitute a
     // string template that would break on ids containing `/` or `?`.
     expect(calls[0].url).toContain('1616575215312482_1750182373580617')
+  })
+})
+
+/**
+ * readPageStoryId — shapes follow Meta's Photo reference: a scheduled photo that
+ * is not yet public answers `{id}` with no `page_story_id`; once public it
+ * answers `page_story_id: "<page>_<photo>"`.
+ */
+describe('readPageStoryId — read-back after the photo is public', () => {
+  const PHOTO = '1750835520181969'
+
+  /** Real Response objects, one per call; records the url and init. */
+  function graph(respond: (url: string, init?: RequestInit) => Promise<Response>) {
+    const calls: Array<{ url: string; init?: RequestInit }> = []
+    const fetcher: typeof fetch = async (input, init) => {
+      calls.push({ url: String(input), init })
+      return respond(String(input), init)
+    }
+    return { fetcher, calls }
+  }
+  const json = (status: number, body: unknown) => async () => new Response(JSON.stringify(body), { status })
+
+  it('🔴 public photo: returns the story id Graph gives, via GET ?fields=page_story_id with a timeout signal', async () => {
+    const { fetcher, calls } = graph(json(200, { page_story_id: `${PAGE}_${PHOTO}`, id: PHOTO }))
+    const r = await readPageStoryId({ photoId: PHOTO, pageId: PAGE, pageAccessToken: TOKEN, fetcher })
+
+    expect(r).toEqual({ ok: true, postId: `${PAGE}_${PHOTO}` })
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toBe(`https://graph.facebook.com/v20.0/${PHOTO}?fields=page_story_id&access_token=${TOKEN}`)
+    expect(calls[0].init?.method ?? 'GET').toBe('GET')
+    expect(calls[0].init?.signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it('🔴 returns what Graph says, not a composed pageId_photoId', async () => {
+    const { fetcher } = graph(json(200, { page_story_id: `${PAGE}_99999999999` }))
+    const r = await readPageStoryId({ photoId: PHOTO, pageId: PAGE, pageAccessToken: TOKEN, fetcher })
+    expect(r).toEqual({ ok: true, postId: `${PAGE}_99999999999` })
+  })
+
+  it.each([
+    ['scheduled, not yet public: {id} only', 200, { id: PHOTO }, 'no_page_story_id'],
+    ['page_story_id is an empty string', 200, { id: PHOTO, page_story_id: '' }, 'no_page_story_id'],
+    ['🔴 story id belongs to another Page', 200, { page_story_id: `999999999999_${PHOTO}` }, 'page_prefix_mismatch'],
+    ['🔴 story id is not <page>_<digits>', 200, { page_story_id: `${PAGE}_abc` }, 'page_prefix_mismatch'],
+    ['HTTP 200 but body carries an error', 200, { error: { message: 'boom', code: 2 } }, 'graph_error'],
+    ['photo deleted (code 100 + subcode 33)', 400, { error: { message: 'does not exist', code: 100, error_subcode: 33 } }, 'object_not_found'],
+    ['🔴 code 100 without subcode 33 is NOT "deleted"', 400, { error: { message: 'Invalid parameter', code: 100 } }, 'graph_error'],
+    ['🔴 code 100 with another subcode is NOT "deleted"', 400, { error: { message: 'Unsupported get', code: 100, error_subcode: 2 } }, 'graph_error'],
+    ['HTTP 500 without an error body', 500, 'nope', 'http_error'],
+  ] as const)('%s → fixed reason code, no raw Graph text', async (_label, status, body, reason) => {
+    const { fetcher } = graph(json(status, body))
+    const r = await readPageStoryId({ photoId: PHOTO, pageId: PAGE, pageAccessToken: TOKEN, fetcher })
+    expect(r).toEqual({ ok: false, reason })
+  })
+
+  it('network error → network_error, never throws', async () => {
+    const { fetcher } = graph(async () => { throw new TypeError('fetch failed') })
+    const r = await readPageStoryId({ photoId: PHOTO, pageId: PAGE, pageAccessToken: TOKEN, fetcher })
+    expect(r).toEqual({ ok: false, reason: 'network_error' })
+  })
+
+  it('🔴 a hung Graph call is aborted by the timeout → timeout', async () => {
+    // Fetcher that only settles when the signal aborts — exactly how real fetch behaves.
+    const { fetcher } = graph((_url, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason))
+    }))
+    const r = await readPageStoryId({ photoId: PHOTO, pageId: PAGE, pageAccessToken: TOKEN, fetcher, timeoutMs: 20 })
+    expect(r).toEqual({ ok: false, reason: 'timeout' })
   })
 })

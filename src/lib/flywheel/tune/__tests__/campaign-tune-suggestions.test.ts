@@ -3,9 +3,9 @@
  *
  * evaluator 与 cohort 的过滤规则各自都有专项测试，这里只关注**批量 fan-out**：
  *   - 每条 action 的 cohort 是其它 action 的 T+72 receipt
- *   - action 没自己的 T+72 receipt → 该 postId 落 null（不当成 INCONCLUSIVE）
+ *   - action 没自己的 T+72 receipt → 该 idempotencyKey 落 null（不当成 INCONCLUSIVE）
  *   - T+4 receipt 不参与 cohort（即使误入）
- *   - key 是 action.postId（不是 action.id）
+ *   - key 是 action.idempotencyKey（不是 action.id）
  *   - thresholds 传参传到 evaluator
  */
 
@@ -26,10 +26,10 @@ describe('evaluateCampaignPosts — 批量 fan-out', () => {
   it('每条 action 拿其它 action 的 T+72 当 cohort', () => {
     const suggestions = evaluateCampaignPosts({
       actions: [
-        { id: 'a1', postId: 'page_p1' },
-        { id: 'a2', postId: 'page_p2' },
-        { id: 'a3', postId: 'page_p3' },
-        { id: 'a4', postId: 'page_p4' },
+        { id: 'a1', idempotencyKey: 'page_p1' },
+        { id: 'a2', idempotencyKey: 'page_p2' },
+        { id: 'a3', idempotencyKey: 'page_p3' },
+        { id: 'a4', idempotencyKey: 'page_p4' },
       ],
       receipts: [
         receipt('a1', 20),  // target vs [10,10,10] → +100% REPEAT
@@ -48,9 +48,9 @@ describe('evaluateCampaignPosts — 批量 fan-out', () => {
   it('cohort 里只有 2 条时该条落 INCONCLUSIVE / insufficient_cohort（默认 min=3）', () => {
     const suggestions = evaluateCampaignPosts({
       actions: [
-        { id: 'a1', postId: 'p1' },
-        { id: 'a2', postId: 'p2' },
-        { id: 'a3', postId: 'p3' },
+        { id: 'a1', idempotencyKey: 'p1' },
+        { id: 'a2', idempotencyKey: 'p2' },
+        { id: 'a3', idempotencyKey: 'p3' },
       ],
       receipts: [receipt('a1', 10), receipt('a2', 10), receipt('a3', 10)],
     })
@@ -61,14 +61,14 @@ describe('evaluateCampaignPosts — 批量 fan-out', () => {
     expect(suggestions['p3']?.decision).toBe('INCONCLUSIVE')
   })
 
-  it('action 没自己的 T+72 receipt → postId 落 null（不是 INCONCLUSIVE）', () => {
+  it('action 没自己的 T+72 receipt → idempotencyKey 落 null（不是 INCONCLUSIVE）', () => {
     const suggestions = evaluateCampaignPosts({
       actions: [
-        { id: 'a1', postId: 'p1' },        // 无 receipt
-        { id: 'a2', postId: 'p2' },
-        { id: 'a3', postId: 'p3' },
-        { id: 'a4', postId: 'p4' },
-        { id: 'a5', postId: 'p5' },
+        { id: 'a1', idempotencyKey: 'p1' },        // 无 receipt
+        { id: 'a2', idempotencyKey: 'p2' },
+        { id: 'a3', idempotencyKey: 'p3' },
+        { id: 'a4', idempotencyKey: 'p4' },
+        { id: 'a5', idempotencyKey: 'p5' },
       ],
       // a1 无 receipt；p2 target=20，cohort=[a3,a4,a5]=[10,10,10] → +100% REPEAT
       receipts: [receipt('a2', 20), receipt('a3', 10), receipt('a4', 10), receipt('a5', 10)],
@@ -81,10 +81,10 @@ describe('evaluateCampaignPosts — 批量 fan-out', () => {
   it('T+4 receipt 不被当成 cohort 样本（即使传进来）', () => {
     const suggestions = evaluateCampaignPosts({
       actions: [
-        { id: 'a1', postId: 'p1' },
-        { id: 'a2', postId: 'p2' },
-        { id: 'a3', postId: 'p3' },
-        { id: 'a4', postId: 'p4' },
+        { id: 'a1', idempotencyKey: 'p1' },
+        { id: 'a2', idempotencyKey: 'p2' },
+        { id: 'a3', idempotencyKey: 'p3' },
+        { id: 'a4', idempotencyKey: 'p4' },
       ],
       receipts: [
         receipt('a1', 20),
@@ -102,13 +102,13 @@ describe('evaluateCampaignPosts — 批量 fan-out', () => {
     expect(suggestions['p1']?.sampleSize).toBe(3)
   })
 
-  it('返回 map 的 key 是 action.postId（不是 action.id）', () => {
+  it('返回 map 的 key 是 action.idempotencyKey（不是 action.id）', () => {
     const suggestions = evaluateCampaignPosts({
       actions: [
-        { id: 'internal-uuid-1', postId: 'facebook_post_A' },
-        { id: 'internal-uuid-2', postId: 'facebook_post_B' },
-        { id: 'internal-uuid-3', postId: 'facebook_post_C' },
-        { id: 'internal-uuid-4', postId: 'facebook_post_D' },
+        { id: 'internal-uuid-1', idempotencyKey: 'facebook_post_A' },
+        { id: 'internal-uuid-2', idempotencyKey: 'facebook_post_B' },
+        { id: 'internal-uuid-3', idempotencyKey: 'facebook_post_C' },
+        { id: 'internal-uuid-4', idempotencyKey: 'facebook_post_D' },
       ],
       receipts: [
         receipt('internal-uuid-1', 20),
@@ -127,10 +127,10 @@ describe('evaluateCampaignPosts — 批量 fan-out', () => {
   it('thresholds 覆盖传到 evaluator', () => {
     const suggestions = evaluateCampaignPosts({
       actions: [
-        { id: 'a1', postId: 'p1' },
-        { id: 'a2', postId: 'p2' },
-        { id: 'a3', postId: 'p3' },
-        { id: 'a4', postId: 'p4' },
+        { id: 'a1', idempotencyKey: 'p1' },
+        { id: 'a2', idempotencyKey: 'p2' },
+        { id: 'a3', idempotencyKey: 'p3' },
+        { id: 'a4', idempotencyKey: 'p4' },
       ],
       receipts: [
         receipt('a1', 15),  // target vs [10,10,10] → +50%
@@ -152,10 +152,10 @@ describe('evaluateCampaignPosts — 批量 fan-out', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const suggestions = evaluateCampaignPosts({
       actions: [
-        { id: 'a1', postId: 'p1' },
-        { id: 'a2', postId: 'p2' },
-        { id: 'a3', postId: 'p3' },
-        { id: 'a4', postId: 'p4' },
+        { id: 'a1', idempotencyKey: 'p1' },
+        { id: 'a2', idempotencyKey: 'p2' },
+        { id: 'a3', idempotencyKey: 'p3' },
+        { id: 'a4', idempotencyKey: 'p4' },
       ],
       receipts: [
         { actionId: 'a1', windowHours: 72, status: 'weird', values: { likes: 20 }, missing: {} },

@@ -1,0 +1,269 @@
+---
+// Whole-development page layout (client V2 brief, 2026-09-16): the project
+// story carries ~2/3 of the emphasis; current listings and future releases are
+// independently editable modules driven by `p.listings` / `p.releases`.
+const { p } = Astro.props;
+const s = p.story;
+const listings = p.listings || [];
+const releases = p.releases || [];
+
+const specLine = (l) =>
+  [
+    l.beds && `${l.beds} bed`,
+    l.baths && `${l.baths} bath`,
+    l.parking && `${l.parking} parking`,
+    l.floorArea && `${l.floorArea} floor`,
+    l.landArea && `${l.landArea} land`,
+  ].filter(Boolean).join(' · ');
+---
+<div class="story">
+
+  <section class="dark deep story-band">
+    <div class="wrap">
+      <p class="eyebrow">{p.eyebrow}</p>
+      <h1 class="story-h1">{p.name}</h1>
+      <p class="story-sub">{s.subtitle}</p>
+      <p class="story-body">{s.body}</p>
+      <div class="story-ctas">
+        <a class="btn btn-primary" href="#vision">Explore the community</a>
+        <a class="btn btn-ghost" href="#availability">View current availability</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="story-hero">
+    <div class="wrap">
+      <figure class="story-fig">
+        <img src={s.hero.src} alt={s.hero.alt} width={s.hero.width} height={s.hero.height} loading="eager" fetchpriority="high" data-cap={s.hero.caption} />
+        <figcaption>{s.hero.caption}</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="tint">
+    <div class="wrap">
+      <p class="eyebrow sec-eyebrow">The development</p>
+      <h2 class="sec-h">{s.overview.heading}</h2>
+      <p class="lead">{s.overview.copy}</p>
+      <div class="facts facts-3">
+        {p.facts.map(([k, v]) => (
+          <div><div class="k">{k}</div><div class="v">{v}</div></div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section id="vision">
+    <div class="wrap">
+      <p class="eyebrow sec-eyebrow">The whole community</p>
+      <h2 class="sec-h">{s.vision.heading}</h2>
+      <p class="lead">{s.vision.copy}</p>
+      <figure class="story-fig" style="margin-top:34px">
+        <img src={s.vision.img.src} alt={s.vision.img.alt} width={s.vision.img.width} height={s.vision.img.height} loading="lazy" data-cap={s.vision.img.caption} />
+        <figcaption>{s.vision.img.caption}</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <p class="eyebrow sec-eyebrow">Site &amp; setting</p>
+      <h2 class="sec-h">{s.setting.heading}</h2>
+      <p class="lead">{s.setting.copy}</p>
+      <figure class="story-fig" style="margin-top:34px">
+        <img src={s.setting.img.src} alt={s.setting.img.alt} width={s.setting.img.width} height={s.setting.img.height} loading="lazy" data-cap={s.setting.img.caption} />
+        <figcaption>{s.setting.img.caption}</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="tint">
+    <div class="wrap">
+      <p class="eyebrow sec-eyebrow">Development progress</p>
+      <h2 class="sec-h">{s.progress.heading}</h2>
+      <p class="lead">{s.progress.copy}</p>
+      <figure class="story-fig" style="margin-top:34px">
+        <img src={s.progress.img.src} alt={s.progress.img.alt} width={s.progress.img.width} height={s.progress.img.height} loading="lazy" data-cap={s.progress.img.caption} />
+        <figcaption>{s.progress.img.caption}</figcaption>
+      </figure>
+      {s.progress.video && (
+        <div class="story-video" style="margin-top:34px">
+          <div style="position:relative;width:100%;aspect-ratio:16/9;border-radius:4px;overflow:hidden;background:#000">
+            <iframe
+              src={`https://www.youtube-nocookie.com/embed/${s.progress.video.youtubeId}`}
+              title={s.progress.video.title}
+              loading="lazy"
+              style="position:absolute;inset:0;width:100%;height:100%;border:0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowfullscreen
+            ></iframe>
+          </div>
+          <p style="font-size:13px;color:var(--mute);margin-top:12px">{s.progress.video.caption}</p>
+        </div>
+      )}
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <p class="eyebrow sec-eyebrow">The homes</p>
+      <h2 class="sec-h">{s.homes.heading}</h2>
+      <p class="lead">{s.homes.copy}</p>
+      <figure class="story-fig" style="margin-top:34px">
+        <img src={s.homes.lead.src} alt={s.homes.lead.alt} width={s.homes.lead.width} height={s.homes.lead.height} loading="lazy" data-cap={s.homes.lead.caption} />
+        <figcaption>{s.homes.lead.caption}</figcaption>
+      </figure>
+      <div class="story-pair">
+        {s.homes.pair.map((im) => (
+          <figure class="story-fig">
+            <img src={im.src} alt={im.alt} width={im.width} height={im.height} loading="lazy" data-cap={im.caption} />
+            <figcaption>{im.caption}</figcaption>
+          </figure>
+        ))}
+      </div>
+      {s.homes.more && s.homes.more.length > 0 && (
+        <details class="story-more">
+          <summary>Explore finishes and details</summary>
+          <div class="story-pair">
+            {s.homes.more.map((im) => (
+              <figure class="story-fig">
+                <img src={im.src} alt={im.alt} width={im.width} height={im.height} loading="lazy" data-cap={im.caption} />
+                <figcaption>{im.caption}</figcaption>
+              </figure>
+            ))}
+          </div>
+        </details>
+      )}
+      <p style="margin-top:20px;font-size:13px;color:var(--mute)">{s.homes.note} Click any image to enlarge.</p>
+    </div>
+  </section>
+
+  {p.video && (
+    <section class="tint">
+      <div class="wrap">
+        <p class="eyebrow sec-eyebrow">Video</p>
+        <h2 class="sec-h" style="margin-bottom:30px">{p.video.title}</h2>
+        <div style="position:relative;width:100%;aspect-ratio:16/9;border-radius:4px;overflow:hidden;background:#000">
+          <iframe
+            src={`https://www.youtube-nocookie.com/embed/${p.video.youtubeId}`}
+            title={p.video.title}
+            loading="lazy"
+            style="position:absolute;inset:0;width:100%;height:100%;border:0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowfullscreen
+          ></iframe>
+        </div>
+      </div>
+    </section>
+  )}
+
+  <section id="availability" class={p.video ? '' : 'tint'}>
+    <div class="wrap">
+      <p class="eyebrow sec-eyebrow">Current availability</p>
+      <h2 class="sec-h">{s.availability.heading}</h2>
+      <p class="lead">{s.availability.copy}</p>
+      {listings.length > 0 ? (
+        <div class="cards" style="margin-top:36px">
+          {listings.map((l) => (
+            <article class="card">
+              {l.image && (
+                <div class="shot">
+                  <img src={l.image} alt={l.title} loading="lazy" />
+                  {l.status && <span class="pill pill-sell">{l.status}</span>}
+                </div>
+              )}
+              <div class="cbody">
+                <h3>{l.title}</h3>
+                {l.address && <p class="place" style="min-height:0;margin-bottom:8px">{l.address}</p>}
+                {specLine(l) && <p class="spec" style="font-family:var(--mono);font-size:12.5px;color:var(--slate);margin-bottom:16px">{specLine(l)}</p>}
+                <div class="row">
+                  <span class="price">{l.price || ''}</span>
+                  {l.listingUrl
+                    ? <a class="view" href={l.listingUrl} target="_blank" rel="noopener">View listing</a>
+                    : <a class="view" href="#register">Enquire</a>}
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:30px">
+          <a class="btn btn-primary btn-lg" href="#register">Enquire about current availability</a>
+          {p.listingsSearchUrl && (
+            <a class="link-p" style="margin-top:0" href={p.listingsSearchUrl} target="_blank" rel="noopener">{p.listingsLabel || 'See current listings on Ray White →'}</a>
+          )}
+        </div>
+      )}
+    </div>
+  </section>
+
+  {releases.length > 0 && (
+    <section class="tint">
+      <div class="wrap">
+        <p class="eyebrow sec-eyebrow">Future releases</p>
+        <div class="journey" style="margin-top:20px;grid-template-columns:repeat(3,1fr)">
+          {releases.map((r) => (
+            <div class="jcard">
+              {r.status && <p class="n">{r.status}</p>}
+              <h4>{r.title}</h4>
+              {r.summary && <p>{r.summary}</p>}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  )}
+
+  <div class="lightbox" id="lb" aria-hidden="true">
+    <button class="lb-btn lb-close" id="lbClose" aria-label="Close">✕</button>
+    <button class="lb-btn lb-prev" id="lbPrev" aria-label="Previous">‹</button>
+    <img id="lbImg" src="" alt="" />
+    <button class="lb-btn lb-next" id="lbNext" aria-label="Next">›</button>
+    <div class="lb-cap"><span id="lbCap"></span> · <span id="lbN"></span></div>
+  </div>
+
+  <script is:inline>
+    (function () {
+      var figs = [].slice.call(document.querySelectorAll('.story-fig img'));
+      if (!figs.length) return;
+      var lb = document.getElementById('lb'),
+        img = document.getElementById('lbImg'),
+        cap = document.getElementById('lbCap'),
+        n = document.getElementById('lbN'),
+        i = 0;
+      function show(k) {
+        i = (k + figs.length) % figs.length;
+        img.src = figs[i].src; img.alt = figs[i].alt;
+        cap.textContent = figs[i].getAttribute('data-cap') || '';
+        n.textContent = i + 1 + ' / ' + figs.length;
+      }
+      function open(k) {
+        show(k); lb.classList.add('on');
+        lb.setAttribute('aria-hidden', 'false');
+        document.body.style.overflow = 'hidden';
+      }
+      function close() {
+        lb.classList.remove('on');
+        lb.setAttribute('aria-hidden', 'true');
+        document.body.style.overflow = '';
+      }
+      figs.forEach(function (el, k) {
+        el.setAttribute('tabindex', '0');
+        el.setAttribute('role', 'button');
+        el.addEventListener('click', function () { open(k); });
+        el.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(k); } });
+      });
+      document.getElementById('lbClose').addEventListener('click', close);
+      document.getElementById('lbPrev').addEventListener('click', function (e) { e.stopPropagation(); show(i - 1); });
+      document.getElementById('lbNext').addEventListener('click', function (e) { e.stopPropagation(); show(i + 1); });
+      lb.addEventListener('click', function (e) { if (e.target === lb) close(); });
+      document.addEventListener('keydown', function (e) {
+        if (!lb.classList.contains('on')) return;
+        if (e.key === 'Escape') close();
+        if (e.key === 'ArrowLeft') show(i - 1);
+        if (e.key === 'ArrowRight') show(i + 1);
+      });
+    })();
+  </script>
+
+</div>

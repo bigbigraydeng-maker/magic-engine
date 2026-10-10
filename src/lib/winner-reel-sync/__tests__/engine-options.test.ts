@@ -31,13 +31,29 @@ vi.mock('@/lib/meta/token-manager', () => ({
   getMetaTokenForClient: async () => 'user-token',
 }))
 
+// AD-SEC-1 归属校验(target_adset_id 那一半)要实拉 ad set——account_id 跟
+// CONFIG_ROW.ad_account_id 一致，代表"配置的 ad set 确实是这个账户下的"。
+vi.mock('@/lib/meta/adsets', () => ({
+  getAdSetStatus: async () => ({ id: 'adset1', name: 'x', status: 'ACTIVE', account_id: 'act_1' }),
+}))
+
 // 建广告后会去记「投的是哪条片」(lib/ads/creative-link)，它走 @/lib/supabase 而不是
 // 下面那个 createClient 替身。这里把库打成空的：链接一条都认不出来 —— 正好用来证明
 // 「认不出片子绝不能拖累建广告本身」，本文件的 adsAdded 断言仍然成立。
+// 归属校验按多账户登记表 client_meta_ad_accounts 核对账户（也走 @/lib/supabase），
+// 这里登记 act_1，与 CONFIG_ROW 一致。
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
-    from: () => ({
-      select: () => ({ eq: () => ({ not: async () => ({ data: [], error: null }) }) }),
+    from: (table: string) => ({
+      select: () => ({
+        eq: () => ({
+          not: async () => ({ data: [], error: null }),
+          then: (resolve: (v: unknown) => unknown) =>
+            resolve(table === 'client_meta_ad_accounts'
+              ? { data: [{ ad_account_id: 'act_1' }], error: null }
+              : { data: [], error: null }),
+        }),
+      }),
       upsert: async () => ({ error: null }),
     }),
   },
@@ -60,6 +76,10 @@ const CONFIG_ROW = {
   slack_webhook_url: null,
 }
 
+// AD-SEC-1 归属校验用到的 clients 行——账户/主页跟 CONFIG_ROW 一致，
+// 代表「配置行确实是这个客户的」这条happy path。
+const CLIENT_ROW = { meta_ad_account_id: 'act_1', facebook_page_id: 'page1' }
+
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
     from: (table: string) => {
@@ -69,7 +89,9 @@ vi.mock('@supabase/supabase-js', () => ({
         maybeSingle: async () =>
           table === 'winner_reel_sync_config'
             ? { data: CONFIG_ROW, error: null }
-            : { data: null, error: null },
+            : table === 'clients'
+              ? { data: CLIENT_ROW, error: null }
+              : { data: null, error: null },
         insert: async () => ({ error: null }),
       }
       return builder

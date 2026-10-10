@@ -10,12 +10,37 @@
  * for that client (by a global admin) BEFORE the confirmation was recorded.
  */
 
-import type { KnowledgeSupabaseClient } from './db-client'
 import { KnowledgeReadError } from './errors'
 import { isGlobalAdminEmail } from '@/lib/auth/whitelist'
+import { ACCESS_TYPES_CUSTOMER_ONLY } from '@/lib/auth/access-types'
 
 interface ConfirmerRow {
   confirmer_email: string
+}
+
+/**
+ * The minimal query surface `getRegisteredConfirmerEmails` actually needs.
+ *
+ * 🔴 Declared here rather than reusing `KnowledgeSupabaseClient` (the read
+ * client) because issue #1646's confirmation-link write path has to consult
+ * the SAME registry through the write client. Typing the parameter as the
+ * narrow read client would have forced that caller into a double type
+ * assertion — i.e. the compiler would stop checking the one call that decides
+ * whether a customer's signature counts. Both `db-client.ts`'s read client
+ * and `write-client.ts`'s write client satisfy this interface structurally,
+ * with no type assertion on either side (verified by `npm run type-check`
+ * passing with both call sites present).
+ */
+export interface ConfirmerRegistryResult {
+  data: unknown
+  error: { message?: string } | null
+}
+export interface ConfirmerRegistryFilter extends PromiseLike<ConfirmerRegistryResult> {
+  eq(column: string, value: unknown): ConfirmerRegistryFilter
+  is(column: string, value: null): ConfirmerRegistryFilter
+}
+export interface ConfirmerRegistryClient {
+  from(table: string): { select(columns: string): ConfirmerRegistryFilter }
 }
 
 /** Case/whitespace-insensitive equality — the one true comparison standard for every email field in this module, aligned with read.ts and whitelist.ts. */
@@ -34,7 +59,7 @@ function sameEmail(a: string, b: string): boolean {
  */
 export async function getRegisteredConfirmerEmails(
   clientId: string,
-  sb: KnowledgeSupabaseClient,
+  sb: ConfirmerRegistryClient,
 ): Promise<Set<string>> {
   const { data, error } = await sb
     .from('client_knowledge_confirmers')
@@ -133,6 +158,7 @@ function asRows<T>(data: unknown): T[] {
 interface AccountRow {
   id: string
   email: string
+  access_type: string
 }
 interface ConfirmerIdRow {
   id: string
@@ -155,10 +181,21 @@ const POSTGRES_UNIQUE_VIOLATION = '23505'
  * 登记人不能把自己登记成确认人（防止全局管理员既当裁判又当运动员的最
  * 明显情形）。
  *
- * 🔴 issue #1646 "确认人必须是该客户名下 access_type='client' 账号"：查
+ * 🔴 issue #1646 "确认人必须是该客户名下的付费客户账号"：查
  * `client_portal_users`（不是 `client_knowledge_confirmers` 自己）核实这
  * 一点——两张表故意分开：一张管"谁是这个客户的真实联系人"（既有账号表），
  * 一张管"这个真实联系人有没有被明确授权确认知识库条目"（本表）。
+ *
+ * 🔴 2026-09-20 修复：这里原来写的是 `.eq('access_type', 'client')`，只认
+ * 字面值 'client'，把 CTS 的两个真实联系人（access_type='both'）挡在门
+ * 外。改成 `ACCESS_TYPES_CUSTOMER_ONLY`（`access-types.ts`）——注意不是
+ * `tierForAccessType()==='paid_client'` / `ACCESS_TYPES_PAID`：那两个把
+ * 'fde' 也算进付费客户档，但 'fde' 账号原本是"Magic Engine 内部 FDE 代客
+ * 户操作"（见 `20260602000001_client_portal_users_add_fde.sql`），
+ * `require-admin.ts` 也明确说它不能当身份证明用。这里要的是"确认人必须
+ * 是客户公司自己的人，不能是 ME 任何人"，用 paid_client 档会让 'fde' 账
+ * 号冒充客户签字，破坏双签分离——第一版修复曾经犯过这个错，子牙+魏征联
+ * 合复审（2026-09-20）实测发现后改成这个更窄的白名单。
  *
  * 🔴 并发登记（子牙+魏征联合复审 2026-09-14）：两个并发请求都可能在"查
  * 当前有效登记"这一步都看到"还没有"，都往下 insert——数据库的局部唯一
@@ -184,14 +221,18 @@ export async function registerConfirmer(
     throw new Error('[knowledge] 全局管理员账号不能被登记为客户确认人（不能代客户确认）')
   }
 
-  const accountCheck = await sb.from('client_portal_users').select('id, email').eq('client_id', clientId).eq('access_type', 'client')
+  const accountCheck = await sb.from('client_portal_users').select('id, email, access_type').eq('client_id', clientId)
   if (accountCheck.error) {
     throw new KnowledgeConfirmerWriteError('核实客户账号（client_portal_users）', accountCheck.error)
   }
-  const hasAccount = asRows<AccountRow>(accountCheck.data).some((row) => sameEmail(row.email, confirmerEmail))
+  const hasAccount = asRows<AccountRow>(accountCheck.data).some(
+    (row) =>
+      sameEmail(row.email, confirmerEmail) &&
+      (ACCESS_TYPES_CUSTOMER_ONLY as readonly string[]).includes(row.access_type),
+  )
   if (!hasAccount) {
     throw new Error(
-      `[knowledge] ${confirmerEmail} 不是客户 ${clientId} 名下的 access_type='client' 账号，不能登记为确认人`,
+      `[knowledge] ${confirmerEmail} 不是客户 ${clientId} 名下的付费客户账号，不能登记为确认人`,
     )
   }
 

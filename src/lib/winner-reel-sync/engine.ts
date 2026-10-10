@@ -17,6 +17,8 @@ import {
   listAdsInAdSet,
   pauseAd,
 } from '../meta/ads-manager'
+import { getAdSetStatus } from '../meta/adsets'
+import { getRegisteredAccountIds } from '../meta/campaign-ownership'
 import { fetchPagePosts, getPageAccessToken, rankVideoWinners } from '../meta/page-posts'
 import { getMetaTokenForClient } from '../meta/token-manager'
 import { linkAdToCreative } from '../ads/creative-link'
@@ -92,6 +94,67 @@ async function loadConfig(clientId: string): Promise<SyncConfig | null> {
   }
 }
 
+function normalizeAccountId(id: string): string {
+  return id.startsWith('act_') ? id.slice(4) : id
+}
+
+/**
+ * AD-SEC-1：`winner_reel_sync_config` 这张表自己没有归属校验——如果某一行
+ * 配错/串成了别的客户的 ad_account_id / fb_page_id / target_adset_id，这个
+ * engine 会往错的客户账户里建广告、暂停错客户的广告。触发它的两处（每日
+ * cron + 看板「补新素材」按钮）都不收实体 id，没法在入口拦，守卫只能放在
+ * 这里、读配置之后、碰 Meta 之前。
+ *
+ * 🔴 局限：账户按 `client_meta_ad_accounts` 登记集合核对、主页按 `clients.facebook_page_id`
+ * 核对（2026-09-14 起主页绑定只许内部员工改），挡的是「配置行串到了别的客户」这一类。
+ * 共用同一个 Meta 广告账户的客户（2026-09-14 生产实查：Roman HU 与 30 Kiteroa 同登记
+ * act_1260456876069575）`ad_account_id` 天然相同——这条守卫对「同账户内配错到另一个
+ * 共享该账户的客户」挡不住，跟 `campaign-ownership.ts` 是同一个已知局限，根治需要
+ * 广告系列级归属表（ads IMPACT 设计 §4.1④，阶段 2）。`target_adset_id` 这条（Codex 复审 P1 指出的缺口）
+ * 改成真拉 Meta 核实 ad set 实际挂在哪个账户下——能挡住「账户/主页碰巧都对，
+ * 但 ad set id 打错/串到别的账户」这一类，仍挡不住"同一个共享账户内，ad set
+ * 也刚好属于共用该账户的另一个客户"这种更深的情况（同一条已知局限）。
+ */
+async function assertConfigOwnedByClient(
+  cfg: SyncConfig,
+  clientId: string,
+  accessToken: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  // 账户按多账户登记表核对（2026-09-14 ADS-IMPACT-P0-1）：CTS 有个人号 + 官方账户两个，
+  // 只认 clients.meta_ad_account_id 会把官方账户上的配置误拦。查询出错 fail closed。
+  const { ids: registeredAccountIds, error: registryError } = await getRegisteredAccountIds(clientId)
+  if (registryError) return { ok: false, reason: registryError }
+
+  const { data: client, error } = await supabaseAdmin
+    .from('clients')
+    .select('facebook_page_id')
+    .eq('id', clientId)
+    .maybeSingle()
+
+  if (error) return { ok: false, reason: `查不到客户的主页登记：${error.message}` }
+  const registeredPageId = (client as { facebook_page_id?: string | null } | null)
+    ?.facebook_page_id
+
+  const configAccount = normalizeAccountId(cfg.adAccountId)
+  if (!registeredAccountIds.some(id => normalizeAccountId(id) === configAccount)) {
+    return { ok: false, reason: 'winner_reel_sync_config 里的广告账户不在这个客户登记的任何广告账户里，已拒绝执行（防止配错到别家客户账户）' }
+  }
+  if (!registeredPageId || cfg.fbPageId !== registeredPageId) {
+    return { ok: false, reason: 'winner_reel_sync_config 里的 Facebook 主页跟这个客户在 clients 表登记的对不上，已拒绝执行' }
+  }
+
+  const adSet = await getAdSetStatus(cfg.targetAdsetId, accessToken)
+  if (!adSet) {
+    return { ok: false, reason: `读不到 winner_reel_sync_config 里配置的广告组（${cfg.targetAdsetId}），无法核对归属，已拒绝执行` }
+  }
+  // 广告组必须就在配置的那个账户里，不能只是「属于该客户的某个账户」——否则配置写官方账户、
+  // 广告组却在个人号，后续按配置账户建广告会建错地方。
+  if (!adSet.account_id || normalizeAccountId(adSet.account_id) !== configAccount) {
+    return { ok: false, reason: 'winner_reel_sync_config 里的 target_adset_id 不在配置的广告账户里，已拒绝执行（防止配错/串到别家客户的广告组）' }
+  }
+  return { ok: true }
+}
+
 async function writeLog(result: SyncResult): Promise<void> {
   await supabaseAdmin.from('winner_reel_sync_log').insert({
     client_id: result.clientId,
@@ -164,6 +227,17 @@ export async function syncWinnerReels(clientId: string, opts: SyncOptions = {}):
     if (!userToken) {
       result.status = 'error'
       result.errorMessage = 'Meta token not configured'
+      await writeLog(result)
+      return result
+    }
+
+    // AD-SEC-1：读到配置之后、碰 Meta 之前，先核对这行配置真的是这个客户的
+    // （包括 target_adset_id 本身是不是挂在已核对过的账户下——Codex 复审 P1
+    // 指出账户/主页对得上不代表 ad set 也对得上，需要拿 token 去 Meta 实查）。
+    const ownership = await assertConfigOwnedByClient(cfg, clientId, userToken)
+    if (!ownership.ok) {
+      result.status = 'error'
+      result.errorMessage = ownership.reason
       await writeLog(result)
       return result
     }

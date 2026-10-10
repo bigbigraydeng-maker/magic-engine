@@ -28,6 +28,8 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { StoredMessage } from '../brief'
+import type { KnowledgeEntry } from '@/lib/knowledge/types'
+import { createFakeSupabase } from '@/lib/knowledge/__tests__/fake-supabase'
 
 const { mockCreate } = vi.hoisted(() => ({ mockCreate: vi.fn() }))
 
@@ -104,6 +106,139 @@ const CTS_REAL_MESSAGES: StoredMessage[] = [
 
 const NAL_IDENTITY: ClientIdentity = { name: 'New Asian Logistics', industry: null }
 const CTS_IDENTITY: ClientIdentity = { name: 'CTS Tours NZ', industry: 'travel' }
+
+/**
+ * Minimal, fully-typed `KnowledgeEntry` fixture for `buildSystemPrompt` unit
+ * tests below — these test the pure rendering function directly, not the
+ * `getClientKnowledge` integration (that lives in
+ * `brief-cts-knowledge.test.ts`, which exercises the real read path against
+ * fixtures shaped like the issue #1647 migration).
+ */
+function fakeEntry(overrides: Partial<KnowledgeEntry> & { statement: string }): KnowledgeEntry {
+  return {
+    id: 'fake-fact-id',
+    clientId: CTS_CLIENT_ID,
+    factKey: 'fake.fact',
+    scope: {},
+    structuredValue: null,
+    conflictGroupId: null,
+    status: 'approved',
+    visibility: 'customer_ok',
+    sensitivity: 'general',
+    validFrom: '2026-01-01T00:00:00.000Z',
+    validUntil: null,
+    lastVerifiedAt: null,
+    approvedByEmail: 'ray@magicengine.cloud',
+    approvedAt: '2026-01-01T00:00:00.000Z',
+    clientConfirmedByEmail: null,
+    clientConfirmedAt: null,
+    ...overrides,
+  }
+}
+
+/**
+ * `generateBrief` now always attempts a knowledge-base read (issue #1647).
+ * This test file is about identity leakage, not the knowledge integration,
+ * so every `generateBrief` call below injects a fake Supabase client with NO
+ * entitlement grant for anyone — the real production behaviour for any
+ * client that hasn't been granted access (`loadClientFacts` catches
+ * `KnowledgeNotEntitledError` and treats it as "no facts", see brief.ts),
+ * so this does not change what these tests are asserting.
+ */
+const NOT_ENTITLED_KNOWLEDGE_SUPABASE = createFakeSupabase({
+  client_automation_policies: [],
+  client_knowledge_facts: [],
+  client_knowledge_confirmers: [],
+})
+const NOT_ENTITLED_DEPS = { knowledge: { supabase: NOT_ENTITLED_KNOWLEDGE_SUPABASE } }
+
+/**
+ * CTS's real knowledge rows, shaped like migration
+ * `20260915120000_brief_knowledge_migration_and_cts_history.sql` — used by
+ * the "CTS 回归" test below to prove the prompt still carries CTS's real
+ * facts once they come from the knowledge base instead of a literal in
+ * brief.ts (issue #1647's headline acceptance criterion). The full
+ * integration against `getClientKnowledge` (including the visa-policy
+ * historical-grandfather row) is covered separately in
+ * `brief-cts-knowledge.test.ts`.
+ */
+const CTS_ENTITLED_KNOWLEDGE_SUPABASE = createFakeSupabase({
+  client_automation_policies: [
+    {
+      client_id: CTS_CLIENT_ID,
+      action_key: 'client_knowledge.read',
+      mode: 'auto_approve',
+      updated_by: 'migration:1647',
+      effective_from: '2026-01-01T00:00:00.000Z',
+      effective_to: null,
+      metadata: { basis: 'fde_managed' },
+    },
+  ],
+  client_knowledge_facts: [
+    {
+      id: 'c1000000-0000-0000-0000-000000000001',
+      client_id: CTS_CLIENT_ID,
+      fact_key: 'company.years_operating',
+      scope: {},
+      statement: 'This business has operated in New Zealand for 25 years.',
+      structured_value: { years: 25 },
+      conflict_group_id: null,
+      status: 'approved',
+      visibility: 'customer_ok',
+      sensitivity: 'general',
+      valid_from: '2026-01-01T00:00:00.000Z',
+      valid_until: null,
+      last_verified_at: null,
+      approved_by_email: 'migration:1647',
+      approved_at: '2026-01-01T00:00:00.000Z',
+      client_confirmed_by_email: null,
+      client_confirmed_at: null,
+      client_confirmed_fingerprint: null,
+      historical_confirmation_grandfather_until: null,
+    },
+    {
+      id: 'c1000000-0000-0000-0000-000000000003',
+      client_id: CTS_CLIENT_ID,
+      fact_key: 'support.escalation_contact',
+      scope: {},
+      statement:
+        'For anything you should not attempt to resolve yourself, offer a human follow-up via 0800 287 888 / info@ctstours.co.nz.',
+      structured_value: { phone: '0800 287 888', email: 'info@ctstours.co.nz' },
+      conflict_group_id: null,
+      status: 'approved',
+      visibility: 'customer_ok',
+      sensitivity: 'general',
+      valid_from: '2026-01-01T00:00:00.000Z',
+      valid_until: null,
+      last_verified_at: null,
+      approved_by_email: 'migration:1647',
+      approved_at: '2026-01-01T00:00:00.000Z',
+      client_confirmed_by_email: null,
+      client_confirmed_at: null,
+      client_confirmed_fingerprint: null,
+      historical_confirmation_grandfather_until: null,
+    },
+  ],
+  client_knowledge_confirmers: [],
+  // 🔴 issue #1648（rollout stage + channel gate）合并后 getClientKnowledge(customer_reply)
+  // 新增了这一道闸：没有 phase=2 事件 + messenger 开关 = 默认落 stage 0（最不放行的默认值），
+  // 这个 fixture 建于 #1648 之前，本就没设过这两张表。这里显式设成"已上线"，让本文件继续
+  // 只测它原来要测的东西（dual-sign / 事实渲染），不被这道正交的新闸挡住——跟 read.test.ts
+  // 里 LIVE_PHASE_EVENT / MESSENGER_ENABLED_CLIENT 默认值的处理方式一致。
+  client_knowledge_events: [
+    {
+      client_id: CTS_CLIENT_ID,
+      dimension: 'phase',
+      value: '2',
+      actor_email: 'ray@magicengine.cloud',
+      reason: null,
+      payload: {},
+      created_at: '2026-03-01T00:00:00.000Z',
+    },
+  ],
+  clients: [{ id: CTS_CLIENT_ID, messenger_agent_enabled_messenger: true }],
+})
+const CTS_ENTITLED_DEPS = { knowledge: { supabase: CTS_ENTITLED_KNOWLEDGE_SUPABASE } }
 
 function mockModelReply(payload: Record<string, unknown>) {
   mockCreate.mockResolvedValueOnce({ output_text: JSON.stringify(payload) })
@@ -184,7 +319,7 @@ describe('noiseBrief', () => {
 
 describe('buildSystemPrompt — 身份与事实必须来自参数，不能写死', () => {
   it('🔴 给 NAL 生成的提示词里没有 "CTS" 三个字', () => {
-    const prompt = buildSystemPrompt(NAL_IDENTITY, null)
+    const prompt = buildSystemPrompt(NAL_IDENTITY, [])
     // 用词边界匹配而不是裸子串：GROUNDING 里的通用措辞 "CLIENT FACTS" 本身就
     // 以 "FACTS" 结尾、含有 "CTS" 子串，裸 toContain('CTS') 会对每个客户都假阳性。
     expect(prompt).not.toMatch(/\bCTS\b/)
@@ -192,22 +327,22 @@ describe('buildSystemPrompt — 身份与事实必须来自参数，不能写死
   })
 
   it('非旅游客户拿到的是"trip 必须全 null"的指令，而不是行程专属指令', () => {
-    const prompt = buildSystemPrompt(NAL_IDENTITY, null)
+    const prompt = buildSystemPrompt(NAL_IDENTITY, [])
     expect(prompt).toContain('MUST be null')
     expect(prompt).not.toContain('NAMES — tour names')
   })
 
   it('🔴 给 CTS 生成的提示词包含它自己的真实事实，且不出现别的客户名字', () => {
-    const facts = { facts: ['This business has operated in New Zealand for 25 years.'], neverClaim: [] }
-    const prompt = buildSystemPrompt(CTS_IDENTITY, facts)
+    const entries = [fakeEntry({ statement: 'This business has operated in New Zealand for 25 years.' })]
+    const prompt = buildSystemPrompt(CTS_IDENTITY, entries)
     expect(prompt).toContain('CTS Tours NZ')
     expect(prompt).toContain('operated in New Zealand for 25 years')
     expect(prompt).not.toContain('New Asian Logistics')
   })
 
-  it('没有配置专属事实的旅游客户不会被塞进 CTS 的事实（CLIENT_BRIEF_FACTS 不会跨客户泄漏）', () => {
+  it('没有已批准知识条目的旅游客户不会被塞进别的客户的事实（entries 不会跨客户泄漏）', () => {
     const otherTravelClient: ClientIdentity = { name: 'Some Other Travel Co', industry: 'travel' }
-    const prompt = buildSystemPrompt(otherTravelClient, null)
+    const prompt = buildSystemPrompt(otherTravelClient, [])
     expect(prompt).not.toContain('25 years')
     // 不是裸 "CLIENT FACTS"（GROUNDING 通用措辞里本来就有这几个字），
     // 而是 clientFactsBlock 真正拼出事实区块时才会出现的完整标题。
@@ -222,32 +357,45 @@ describe('buildSystemPrompt — 身份与事实必须来自参数，不能写死
       name: 'Kiwi Silk Road Travel',
       industry: 'Travel — Tour Operator',
     }
-    const prompt = buildSystemPrompt(freeTextTravelClient, null)
+    const prompt = buildSystemPrompt(freeTextTravelClient, [])
     expect(prompt).toContain('NAMES — tour names')
     expect(prompt).not.toContain('MUST be null')
+  })
+
+  it('🔴 "never write X, instead say Y" 这类订正（structuredValue 带 wrong/insteadSay）渲染成纠正措辞，不是当作可直接说的事实', () => {
+    const entries = [
+      fakeEntry({
+        statement: 'irrelevant if structuredValue is set',
+        structuredValue: { wrong: '"since 1928"', insteadSay: '1928 belongs to someone else' },
+      }),
+    ]
+    const prompt = buildSystemPrompt(CTS_IDENTITY, entries)
+    expect(prompt).toContain('Never write "since 1928". Instead: 1928 belongs to someone else')
   })
 })
 
 describe('generateBrief — 端到端：钓鱼广告短路，不进模型', () => {
-  it('🔴 命中噪音判定直接返回 noiseBrief，不查 clients 表也不调模型', async () => {
-    const brief = await generateBrief(NAL_PHISHING_MESSAGES, NAL_CLIENT_ID)
+  it('🔴 命中噪音判定直接返回 noiseBrief，不查 clients 表也不调模型，也不读知识库', async () => {
+    const { brief, knowledgeStatus } = await generateBrief(NAL_PHISHING_MESSAGES, NAL_CLIENT_ID, undefined, NOT_ENTITLED_DEPS)
     expect(brief.customer_needs).toEqual([])
     expect(brief.summary).not.toContain('旅游')
     expect(mockCreate).not.toHaveBeenCalled()
     expect(clientsQueryCount).toBe(0)
+    expect(knowledgeStatus).toBeNull()
   })
 })
 
 describe('generateBrief — 未配置模型 API key（dev/test 环境）', () => {
-  it('🔴 没有 key 时零网络调用：不查 clients 表，也不调模型，直接走确定性 fallback', async () => {
+  it('🔴 没有 key 时零网络调用：不查 clients 表，也不调模型，也不读知识库，直接走确定性 fallback', async () => {
     delete process.env.OPENAI_API_KEY
     clientsRow = NAL_IDENTITY
 
-    const brief = await generateBrief(NAL_GENUINE_MESSAGES, NAL_CLIENT_ID)
+    const { brief, knowledgeStatus } = await generateBrief(NAL_GENUINE_MESSAGES, NAL_CLIENT_ID, undefined, NOT_ENTITLED_DEPS)
 
     expect(brief.summary).toContain('未生成 AI 摘要')
     expect(mockCreate).not.toHaveBeenCalled()
     expect(clientsQueryCount).toBe(0)
+    expect(knowledgeStatus).toBeNull()
   })
 })
 
@@ -269,7 +417,7 @@ describe('generateBrief — 端到端：NAL（真实非旅游客户，industry=n
       draft_reply: 'Thanks for reaching out — happy to help, what do you need a quote for?',
     })
 
-    const brief = await generateBrief(NAL_GENUINE_MESSAGES, NAL_CLIENT_ID)
+    const { brief } = await generateBrief(NAL_GENUINE_MESSAGES, NAL_CLIENT_ID, undefined, NOT_ENTITLED_DEPS)
 
     expect(brief.summary).not.toContain('CTS')
     expect(brief.customer_needs).toEqual(['了解更多信息'])
@@ -300,7 +448,7 @@ describe('generateBrief — 端到端：NAL（真实非旅游客户，industry=n
       draft_reply: '',
     })
 
-    const brief = await generateBrief(NAL_GENUINE_MESSAGES, NAL_CLIENT_ID)
+    const { brief } = await generateBrief(NAL_GENUINE_MESSAGES, NAL_CLIENT_ID, undefined, NOT_ENTITLED_DEPS)
 
     expect(brief.trip).toEqual({
       tour_interest: null,
@@ -314,7 +462,9 @@ describe('generateBrief — 端到端：NAL（真实非旅游客户，industry=n
 
   it('clients 表读取失败（网络抖动）必须整体抛出，不能悄悄退化成中性身份', async () => {
     clientsError = 'connection reset by peer'
-    await expect(generateBrief(NAL_GENUINE_MESSAGES, NAL_CLIENT_ID)).rejects.toThrow('connection reset by peer')
+    await expect(
+      generateBrief(NAL_GENUINE_MESSAGES, NAL_CLIENT_ID, undefined, NOT_ENTITLED_DEPS),
+    ).rejects.toThrow('connection reset by peer')
   })
 
   it('查无此客户（真的没有这一行）退化成中性身份，绝不假冒成 CTS 或任何别的客户', async () => {
@@ -335,7 +485,7 @@ describe('generateBrief — 端到端：NAL（真实非旅游客户，industry=n
       draft_reply: '',
     })
 
-    await generateBrief(NAL_GENUINE_MESSAGES, NAL_CLIENT_ID)
+    await generateBrief(NAL_GENUINE_MESSAGES, NAL_CLIENT_ID, undefined, NOT_ENTITLED_DEPS)
     const sentPrompt = mockCreate.mock.calls[0][0].input[0].content as string
     expect(sentPrompt).not.toMatch(/\bCTS\b/)
     expect(sentPrompt).toContain('this business')
@@ -361,7 +511,7 @@ describe('generateBrief — 回归：CTS 真实客户（industry=travel）质量
       draft_reply: 'Hi Test Customer, thanks for your interest in Christmas in China — from Auckland!',
     })
 
-    const brief = await generateBrief(CTS_REAL_MESSAGES, CTS_CLIENT_ID)
+    const { brief } = await generateBrief(CTS_REAL_MESSAGES, CTS_CLIENT_ID, undefined, CTS_ENTITLED_DEPS)
 
     expect(brief.trip.tour_interest).toBe('Christmas in China')
     expect(brief.trip.departure_city).toBe('Auckland')
@@ -369,6 +519,11 @@ describe('generateBrief — 回归：CTS 真实客户（industry=travel）质量
     const sentPrompt = mockCreate.mock.calls[0][0].input[0].content as string
     expect(sentPrompt).toContain('CTS Tours NZ')
     expect(sentPrompt).toContain('operated in New Zealand for 25 years')
+    // 🔴 issue #1647 核心验收标准：这些事实现在来自知识库条目（见
+    // CTS_ENTITLED_KNOWLEDGE_SUPABASE fixture），不是 brief.ts 里的字面量——
+    // 完整的 getClientKnowledge 集成回归见 brief-cts-knowledge.test.ts。
+    expect(sentPrompt).toContain('0800 287 888')
+    expect(sentPrompt).toContain('info@ctstours.co.nz')
     expect(sentPrompt).not.toContain('New Asian Logistics')
   })
 })
@@ -394,7 +549,12 @@ describe('generateBrief — 端到端：industry 是自由文本的旅游客户�
       draft_reply: '',
     })
 
-    const brief = await generateBrief(CTS_REAL_MESSAGES, 'd0000000-0000-0000-0000-000000000002')
+    const { brief } = await generateBrief(
+      CTS_REAL_MESSAGES,
+      'd0000000-0000-0000-0000-000000000002',
+      undefined,
+      NOT_ENTITLED_DEPS,
+    )
 
     expect(brief.trip.tour_interest).toBe('Silk Road Explorer')
   })

@@ -18,6 +18,70 @@ import { useSearchParams } from 'next/navigation'
 import type { PlatformConnectionSummary } from '@/lib/platform-oauth/vocabulary'
 
 /**
+ * 「复制这条链接发给别人」——不是每个按钮都该自己点。
+ *
+ * 2026-09-15 PM 反馈：管理员批准这一步经常不是当前看着屏幕的这个人要做的
+ * （见上面 ConnectWizard 的说明——它跟收邮件那个人可以是两位）。之前只给
+ * 一个可以点的链接，等于假设了「点这个链接的人就是要批准的人」——但实际上
+ * 大概率是这个人要把链接转给同事，链接本身要能被复制、能带上一句现成的话，
+ * 而不是让他自己去猜「怎么把这个按钮的地址弄给别人」（右键复制链接地址
+ * 这种操作对非技术背景的人不是显然的）。
+ *
+ * 用绝对地址（`window.location.origin` 拼出来）——相对路径复制出去粘贴到
+ * 微信里点开会打不开或者打到错的域名。
+ */
+function CopyLinkRow({ href, label }: { href: string; label: string }) {
+  const [copied, setCopied] = useState(false)
+  const [origin, setOrigin] = useState('')
+
+  useEffect(() => {
+    setOrigin(window.location.origin)
+  }, [])
+
+  const fullUrl = origin ? `${origin}${href}` : href
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(fullUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // 剪贴板权限被浏览器拦了——链接本来就摆在输入框里，人自己框选复制。
+    }
+  }
+
+  return (
+    <div className="mt-2">
+      <input
+        readOnly
+        value={fullUrl}
+        onFocus={(e) => e.currentTarget.select()}
+        className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-600"
+      />
+      <div className="mt-1.5 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => void copy()}
+          className={
+            copied
+              ? 'rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-bold text-white'
+              : 'rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-bold text-white hover:bg-slate-700'
+          }
+        >
+          {copied ? '✓ 已复制' : `复制链接${label ? `，发给${label}` : ''}`}
+        </button>
+        <a
+          href={href}
+          className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+        >
+          我自己点
+        </a>
+      </div>
+    </div>
+  )
+}
+
+/**
  * 撞上「需要管理员批准」怎么办。
  *
  * **两种状态下都要显示**，这一点是踩出来的：2026-08-02 CTS 那次，管理员先连上了
@@ -28,17 +92,17 @@ import type { PlatformConnectionSummary } from '@/lib/platform-oauth/vocabulary'
  */
 function AdminConsentHint({ clientId }: { clientId: string }) {
   return (
-    <p className="mt-3 text-xs text-slate-500">
-      登录后看到<strong>「需要管理员批准」</strong>？
-      那是这家公司不让员工自己给外部软件授权。请公司里管 Microsoft 365 的那位同事点一次
-      <a
+    <div className="mt-3">
+      <p className="text-xs text-slate-500">
+        登录后看到<strong>「需要管理员批准」</strong>？
+        那是这家公司不让员工自己给外部软件授权。这一步该找公司里管 Microsoft 365 的那位同事做——
+        把下面这条链接复制给他，不用自己点：
+      </p>
+      <CopyLinkRow
         href={`/api/auth/microsoft/mail/start?clientId=${clientId}&admin=1`}
-        className="mx-1 font-bold text-slate-700 underline"
-      >
-        这个链接
-      </a>
-      替全公司批准，然后再回来连一次。
-    </p>
+        label="你们的 IT 同事"
+      />
+    </div>
   )
 }
 
@@ -90,17 +154,21 @@ function ConnectButton({
 }
 
 /**
- * 连邮箱的两步向导。
+ * 连邮箱的向导。
  *
- * 为什么做成**编号的两步**，而不是一个按钮加一段说明（CTS 实测连挂两次）：
+ * ## 2026-09-15 重新设计 —— 原来的「第 1 步 / 第 2 步」把顺序摆反了
  *
- *   第一次 —— info@ 点了按钮，撞上「需要管理员批准」，卡死。
- *   第二次 —— 管理员点了同一个按钮，浏览器里已经登着他自己的账号，
- *             Microsoft 根本没问要用哪个，直接把 `bdm@` 连了上去。
+ * 旧版把「管理员放行」和「连邮箱」编成第 1、2 步并排显示，两个圆圈同样大小、
+ * 同样黑底 —— 看起来像「所有人都要先做完 1 才能做 2」。但事实是：
+ * **多数公司根本不需要管理员那一步**，直接连就能成功；只有小部分公司锁了
+ * 权限的，才会在连接时撞上「需要管理员批准」这面墙。PM 实测这个版本时，
+ * 光是解释清楚「谁该点哪个、要不要都点」就要写好几段话 —— UI 没说清楚的事，
+ * 只能靠人工反复解释，这正是这次重做要治的病。
  *
- * 两次都不是人没看清，是界面把**两件必须分开做的事**摆成了一个按钮：
- * 「让公司放行」和「连上那个邮箱」。所以现在它们是第 1 步和第 2 步，
- * 各自有各自的按钮，第 2 步强制先说清楚要连哪个邮箱。
+ * 新版把**直接连邮箱**摆成唯一的主操作（PM 2026-08-02 定的产品目标就是让
+ * 员工自己点一下就行）；管理员那条路收进一个**默认收起、按需展开**的
+ * 「卡住了？」区块 —— 只有真撞上那面墙的人才会点开它，不会误导所有人
+ * 都要先做这一步。两条路径各自标好「这一步该找谁做」，不用再靠猜。
  */
 function ConnectWizard({
   clientId,
@@ -110,12 +178,13 @@ function ConnectWizard({
   adminApproved: boolean
 }) {
   const [addr, setAddr] = useState('')
+  // 管理员批准回来之后，多半是他自己点的，人已经在这个页面上了 ——
+  // 直接展开「卡住了」区块，免得他批准完却要自己再去找一次收起的入口。
+  const [stuckOpen, setStuckOpen] = useState(adminApproved)
   const target = addr.trim()
   const connectHref =
     `/api/auth/microsoft/mail/start?clientId=${clientId}` +
     (target ? `&loginHint=${encodeURIComponent(target)}` : '')
-
-  const step = 'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-black'
 
   return (
     <div className="space-y-4">
@@ -123,67 +192,83 @@ function ConnectWizard({
         还没连。客人现在发到公司邮箱的询价，<strong>系统里看不到</strong>。
       </p>
 
-      {/* ── 第 1 步 ───────────────────────────────────────── */}
-      <div className="flex gap-3">
-        <span
-          className={`${step} ${adminApproved ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-white'}`}
-        >
-          {adminApproved ? '✓' : '1'}
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold text-slate-800">
-            让公司放行 —— <span className="font-normal text-slate-500">管理员点一次，只用做一遍</span>
-          </p>
-          <p className="mt-0.5 text-xs text-slate-500">
-            很多公司的 Microsoft 365 不让员工自己给外部软件授权。
-            <strong>这一步不会连上任何邮箱</strong>，它只是开门 —— 所以谁点都不会连错。
-          </p>
-          {adminApproved ? (
-            <p className="mt-1.5 text-xs font-bold text-emerald-700">✓ 已经批准过了，去做第 2 步</p>
-          ) : (
-            <a
-              href={`/api/auth/microsoft/mail/start?clientId=${clientId}&admin=1`}
-              className="mt-2 inline-block rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
-            >
-              管理员批准
-            </a>
-          )}
+      {/* ── 主操作：直接连邮箱 —— 大多数公司一步就能成功 ───────────── */}
+      <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+        <p className="text-sm font-bold text-slate-800">连上要收信的那个邮箱</p>
+        <p className="mt-0.5 text-xs text-slate-500">
+          这一步请找<strong>平时收发这个邮箱的本人</strong>来做——填好地址、点连接，
+          会跳到 Microsoft 的登录页，用这个邮箱本身登录、同意一下就行。
+        </p>
+        <p className="mt-1 text-xs text-slate-500">
+          浏览器里已经登着别的 Microsoft 账号时，<strong>Microsoft 不会问你用哪个，
+          会直接拿当前那个走完</strong>——写了地址它就会把那个账号摆出来，防止连错。
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input
+            type="email"
+            value={addr}
+            onChange={(e) => setAddr(e.target.value)}
+            placeholder="要连哪个邮箱？例如 info@example.co.nz"
+            className="min-w-[16rem] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+          <a
+            href={connectHref}
+            aria-disabled={!target}
+            className={
+              target
+                ? 'shrink-0 rounded-lg bg-slate-900 px-4 py-2 text-sm font-black text-white hover:bg-slate-700'
+                : 'pointer-events-none shrink-0 rounded-lg bg-slate-200 px-4 py-2 text-sm font-black text-slate-400'
+            }
+          >
+            连接这个邮箱
+          </a>
         </div>
+        {!target && (
+          <p className="mt-1 text-xs text-slate-400">填了邮箱地址才能继续 —— 这一步就是用来防连错的。</p>
+        )}
       </div>
 
-      {/* ── 第 2 步 ───────────────────────────────────────── */}
-      <div className="flex gap-3">
-        <span className={`${step} bg-slate-900 text-white`}>2</span>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold text-slate-800">连上要收信的那个邮箱</p>
-          <p className="mt-0.5 text-xs text-slate-500">
-            先写清楚要连哪个 —— 浏览器里已经登着别的 Microsoft 账号时，
-            <strong>Microsoft 不会问你用哪个，会直接拿当前那个走完</strong>。写了地址它就会把那个账号摆出来。
-          </p>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <input
-              type="email"
-              value={addr}
-              onChange={(e) => setAddr(e.target.value)}
-              placeholder="要连哪个邮箱？例如 info@example.co.nz"
-              className="min-w-[16rem] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            />
-            <a
-              href={connectHref}
-              aria-disabled={!target}
-              className={
-                target
-                  ? 'shrink-0 rounded-lg bg-slate-900 px-4 py-2 text-sm font-black text-white hover:bg-slate-700'
-                  : 'pointer-events-none shrink-0 rounded-lg bg-slate-200 px-4 py-2 text-sm font-black text-slate-400'
-              }
-            >
-              连接这个邮箱
-            </a>
+      {/* ── 备用路径：只有撞墙的人才需要，默认收起 ───────────── */}
+      <div className="rounded-lg border border-slate-200">
+        <button
+          type="button"
+          onClick={() => setStuckOpen((v) => !v)}
+          className="flex w-full items-center justify-between px-3 py-2.5 text-left"
+        >
+          <span className="text-sm font-bold text-slate-700">
+            {adminApproved && '✓ '}卡住了？点了以后提示「需要管理员批准」
+          </span>
+          <span className="text-xs text-slate-400">{stuckOpen ? '收起 ▲' : '展开 ▼'}</span>
+        </button>
+        {stuckOpen && (
+          <div className="border-t border-slate-200 px-3 py-3">
+            {adminApproved ? (
+              <p className="text-xs font-bold text-emerald-700">
+                ✓ 管理员已经批准过了 —— 门开了，但还没连上任何邮箱。回到上面，重新填一次地址、点连接。
+              </p>
+            ) : (
+              <>
+                <p className="text-xs text-slate-500">
+                  这是公司的 Microsoft 365 锁了「不让员工自己给外部软件登录授权」这项设置，
+                  <strong>不是账号或操作出了错</strong>。
+                  这一步请找<strong>贵公司管 Microsoft 365 的 IT 同事</strong>来做，
+                  跟上面收邮件的那个人可以不是同一位。
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  这一步<strong>不会连上任何邮箱</strong>，只是替全公司开一次门——点完请回到上面，
+                  用收邮件的那个账号重新连一次。
+                </p>
+                <p className="mt-2 text-xs font-bold text-slate-700">
+                  这一步该找 IT 同事做的话，把下面这条链接复制给他，不用自己点：
+                </p>
+                <CopyLinkRow
+                  href={`/api/auth/microsoft/mail/start?clientId=${clientId}&admin=1`}
+                  label="你们的 IT 同事"
+                />
+              </>
+            )}
           </div>
-          {!target && (
-            <p className="mt-1 text-xs text-slate-400">填了邮箱地址才能继续 —— 这一步就是用来防连错的。</p>
-          )}
-        </div>
+        )}
       </div>
 
       <p className="text-xs text-slate-400">
@@ -251,15 +336,9 @@ export function MailboxPanel({ clientId }: { clientId: string }) {
           </p>
         </div>
       )}
-      {adminApproved && (
-        <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
-          <p className="text-sm font-black text-emerald-800">✓ 管理员批准了</p>
-          <p className="mt-0.5 text-xs text-emerald-700">
-            门开了，但<strong>还没连上</strong>。现在请用平时收这个邮箱的账号，点下面的
-            「连接公司邮箱」再走一次。
-          </p>
-        </div>
-      )}
+      {/* 「管理员批准了」这句话现在由 ConnectWizard 里那个自动展开的
+          「卡住了？」区块说，不在这里重复一遍——两处各说各的、措辞还不一样，
+          正是这一块之前被反馈「完全看不懂」的原因之一。 */}
       {justFailed && (
         <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
           <p className="text-sm font-black text-red-800">没连上</p>

@@ -5,7 +5,8 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { runCtsCrmSync } from '../cts-crm-sheet-sync-run'
+import { ctsSourceRef } from '../cts-crm-sheet-sync'
+import { runCtsCrmSync, runCtsCrmSyncChunk, mergeCtsCrmSummaries, type CtsCrmSyncSummary } from '../cts-crm-sheet-sync-run'
 
 const sheet1Fixture = vi.fn()
 const crmFixture = vi.fn()
@@ -19,6 +20,7 @@ vi.mock('@/lib/google-sheets/client', () => ({
 
 // ── Sheet1 行构造：B=1 created_time, N=13 email, O=14 full_name, P=15 phone, R=17 notes ──
 function sheet1Row(opts: {
+  leadId?: string
   createdTime?: string
   email?: string
   fullName?: string
@@ -26,11 +28,13 @@ function sheet1Row(opts: {
   notes?: string
 }): string[] {
   const row = new Array(18).fill('')
+  row[0] = opts.leadId ?? ''
   row[1] = opts.createdTime ?? ''
   row[13] = opts.email ?? ''
   row[14] = opts.fullName ?? ''
   row[15] = opts.phone ?? ''
-  row[17] = opts.notes ?? ''
+  // 默认带一条兴趣证据：合格线索现在必须有（2026-10-04），没写记录的行按「没有兴趣证据」被排除。
+  row[17] = opts.notes ?? 'very keen, wants to go in March 2027'
   return row
 }
 
@@ -54,15 +58,27 @@ function crmRow(opts: {
 // ── 按表建模的假 Supabase ──────────────────────────────────────────────────
 type Row = Record<string, unknown>
 
-function fakeSupabase(seed: { contactIdentities?: Row[]; groupTours?: Row[] } = {}): {
+/** 由电话号码派生的稳定假 uuid（insertOutcome 要求 contactId 是 uuid）。 */
+function autoContactId(phone: string): string {
+  const digits = phone.replace(/\D/g, '').padStart(12, '0').slice(-12)
+  return `00000000-0000-4000-8000-${digits}`
+}
+
+function fakeSupabase(seed: { contactIdentities?: Row[]; groupTours?: Row[]; realConversations?: boolean } = {}): {
   client: SupabaseClient
   outcomes: Row[]
   audits: Row[]
+  /** insert 被真的调了几次——证明「已同步」是靠预查幂等键跳过的，不是靠撞 23505。 */
+  insertAttempts: { n: number }
 } {
   const outcomes: Row[] = []
   const audits: Row[] = []
+  const insertAttempts = { n: 0 }
   const contactIdentities = seed.contactIdentities ?? []
   const groupTours = seed.groupTours ?? []
+  // 2026-10-05：合格线索必须有真实客人对话。默认给每个电话自动补一个联系人 + 一条真实入站消息，
+  // 旧用例意图不变；需要测「没有对话」的用例走 qualify-needs-conversation.test.ts。
+  const autoConversation = seed.realConversations ?? true
 
   const client = {
     from(table: string) {
@@ -73,12 +89,54 @@ function fakeSupabase(seed: { contactIdentities?: Row[]; groupTours?: Row[] } = 
         return {
           select: () => ({
             eq: () => ({
+              in: async (_col: string, values: string[]) => {
+                const seeded = contactIdentities.filter((r) => values.includes(r.value as string))
+                const auto = autoConversation
+                  ? values
+                      .filter((v) => v.startsWith('+') && !seeded.some((r) => r.value === v))
+                      .map((v) => ({ contact_id: autoContactId(v), kind: 'phone', value: v }))
+                  : []
+                return { data: [...seeded, ...auto], error: null }
+              },
+            }),
+          }),
+        }
+      }
+      if (table === 'conversations') {
+        // 实测核实：loadInboundConversationText() 对这张表只调用
+        // .select('id, contact_id').eq('client_id', ...).in('contact_id', [...])。
+        return {
+          select: () => ({
+            eq: () => ({
               in: async (_col: string, values: string[]) => ({
-                data: contactIdentities.filter((r) => values.includes(r.value as string)),
+                data: autoConversation ? values.map((c) => ({ id: `auto-conv-${c}`, contact_id: c })) : [],
                 error: null,
               }),
             }),
           }),
+        }
+      }
+      if (table === 'conversation_messages') {
+        // 实测核实：对这张表调用 .select(...).in('conversation_id', [...]).eq().gte().order().limit() 然后 await。
+        return {
+          select: () => {
+            let convIds: string[] = []
+            const q = {
+              in: (_col: string, values: string[]) => ((convIds = values), q),
+              eq: () => q,
+              gte: () => q,
+              order: () => q,
+              limit: () => q,
+              then: (resolve: (r: { data: Row[]; error: null }) => unknown) =>
+                resolve({
+                  data: autoConversation
+                    ? convIds.map((id) => ({ conversation_id: id, body: 'How much is the Best of China tour?', sent_at: new Date().toISOString() }))
+                    : [],
+                  error: null,
+                }),
+            }
+            return q
+          },
         }
       }
       if (table === 'group_tours') {
@@ -94,11 +152,48 @@ function fakeSupabase(seed: { contactIdentities?: Row[]; groupTours?: Row[] } = 
       }
       if (table === 'me_sale_outcomes') {
         // 实测核实：insertOutcome() 对这张表只调用
-        // .insert(row).select('id').single()（cts-crm-sheet-sync-run.ts 第 144 行）。
+        // .insert(row).select('id').single()；loadExistingSourceRefs() 调用
+        // .select('id, source_ref').eq(client_id).eq(source_kind).not('source_ref','is',null)
+        //   .order('id').limit(n)[.gt('id', lastId)] 然后 await（2026-09-22 拆块新增）。
+        const refQuery = () => {
+          let lastId: string | null = null
+          const q = {
+            eq: () => q,
+            not: () => q,
+            order: () => q,
+            limit: () => q,
+            gt: (_col: string, v: string) => ((lastId = v), q),
+            then: (resolve: (r: { data: Row[]; error: null }) => unknown) =>
+              resolve({
+                data: outcomes
+                  .filter((o) => o.source_kind === 'crm_sheet_sync' && o.source_ref != null && (lastId == null || (o.id as string) > lastId))
+                  .map((o) => ({ id: o.id, source_ref: o.source_ref, review_status: o.review_status ?? 'pending_review' })),
+                error: null,
+              }),
+          }
+          return q
+        }
         return {
+          select: () => refQuery(),
+          // rejectStalePendingLead() 只调用 .update(patch).eq('id', id).eq('review_status','pending_review').select('id')
+          update: (patch: Row) => {
+            const conds: Array<[string, unknown]> = []
+            const q = {
+              eq: (col: string, v: unknown) => (conds.push([col, v]), q),
+              select: async () => {
+                const hit = outcomes.filter((o) =>
+                  conds.every(([c, v]) => (c === 'review_status' ? (o.review_status ?? 'pending_review') === v : o[c] === v)),
+                )
+                hit.forEach((o) => Object.assign(o, patch))
+                return { data: hit.map((o) => ({ id: o.id })), error: null }
+              },
+            }
+            return q
+          },
           insert: (row: Row) => ({
             select: () => ({
               single: async () => {
+                insertAttempts.n++
                 const dup = outcomes.some(
                   (r) => r.client_id === row.client_id && r.source_kind === row.source_kind && r.source_ref === row.source_ref,
                 )
@@ -124,7 +219,7 @@ function fakeSupabase(seed: { contactIdentities?: Row[]; groupTours?: Row[] } = 
     // 实现完整 SupabaseClient 接口——四条链均已逐一对着源码核实（见各分支注释）。
   } as unknown as SupabaseClient
 
-  return { client, outcomes, audits }
+  return { client, outcomes, audits, insertAttempts }
 }
 
 beforeEach(() => {
@@ -141,10 +236,62 @@ describe('runCtsCrmSync', () => {
     const summary = await runCtsCrmSync({ supabase: client })
 
     expect(summary.insertedLeads).toBe(1)
-    expect(summary.contactNotLinked).toBe(1) // 没有预置任何 contact_identities
+    expect(summary.contactNotLinked).toBe(0) // 新规则：合格线索必须有联系人 + 真实对话，假库默认自动补联系人
     expect(outcomes).toHaveLength(1)
     expect(outcomes[0]).toMatchObject({ outcome_kind: 'lead', source_kind: 'crm_sheet_sync' })
     expect(audits).toHaveLength(1)
+  })
+
+  it('🔴 Sheet1 A 列的 Facebook 线索编号随合格线索写进 meta_lead_id', async () => {
+    sheet1Fixture.mockReturnValue([
+      sheet1Row({ leadId: 'l:1687504185706630', createdTime: '2026-06-14T02:39:49-05:00', phone: 'p:+6421363598', email: 'jane@example.com', fullName: 'Jane Doe' }),
+    ])
+    crmFixture.mockReturnValue([crmRow({ entryDate: '14/06/2026', phone: 'p:+6421363598', tour: 'Best of China 15D' })])
+
+    const { client, outcomes } = fakeSupabase()
+    await runCtsCrmSync({ supabase: client })
+
+    expect(outcomes[0]).toMatchObject({ outcome_kind: 'lead', meta_lead_id: '1687504185706630' })
+  })
+
+  it('线索编号随成交一起写进 meta_lead_id', async () => {
+    sheet1Fixture.mockReturnValue([sheet1Row({ leadId: 'l:1687504185706630', phone: 'p:+6421363598' })])
+    crmFixture.mockReturnValue([
+      crmRow({ phone: 'p:+6421363598', tour: 'Golden China Tour', stage: '4-已订金', stageUpdatedDate: '01/07/2026' }),
+    ])
+
+    const { client, outcomes } = fakeSupabase({
+      groupTours: [{ payload: { name: 'Golden China Tour', price: 'From NZD $4,999 per person' } }],
+    })
+    await runCtsCrmSync({ supabase: client })
+
+    expect(outcomes[0]).toMatchObject({ outcome_kind: 'purchase', meta_lead_id: '1687504185706630' })
+  })
+
+  it('A 列不是线索编号（空/表头/乱写）时 meta_lead_id 为 null，记录照常写入', async () => {
+    sheet1Fixture.mockReturnValue([sheet1Row({ leadId: 'f', createdTime: '2026-06-14T02:39:49-05:00', phone: 'p:+6421363598' })])
+    crmFixture.mockReturnValue([crmRow({ entryDate: '14/06/2026', phone: 'p:+6421363598', tour: 'Best of China 15D' })])
+
+    const { client, outcomes } = fakeSupabase()
+    const summary = await runCtsCrmSync({ supabase: client })
+
+    expect(summary.insertedLeads).toBe(1)
+    expect(outcomes[0].meta_lead_id).toBeNull()
+  })
+
+  it('同一个电话在 Sheet1 有两行不同线索编号时，取最先出现的那一行（首次接触），且与该行的提交时间自洽', async () => {
+    sheet1Fixture.mockReturnValue([
+      sheet1Row({ leadId: 'l:1111111111111111', createdTime: '2026-06-14T02:39:49-05:00', phone: 'p:+6421363598' }),
+      sheet1Row({ leadId: 'l:2222222222222222', createdTime: '2026-09-12T02:39:49-05:00', phone: 'p:+6421363598' }),
+    ])
+    crmFixture.mockReturnValue([crmRow({ entryDate: '14/06/2026', phone: 'p:+6421363598', tour: 'Best of China 15D' })])
+
+    const { client, outcomes } = fakeSupabase()
+    await runCtsCrmSync({ supabase: client })
+
+    expect(outcomes).toHaveLength(1)
+    expect(outcomes[0]).toMatchObject({ meta_lead_id: '1111111111111111' })
+    expect(String(outcomes[0].occurred_at).startsWith('2026-06-14')).toBe(true)
   })
 
   it('links an existing contact via contact_identities and leaves contactNotLinked at 0', async () => {
@@ -212,6 +359,37 @@ describe('runCtsCrmSync', () => {
     expect(outcomes).toHaveLength(0)
   })
 
+  it('🔴 填了表单但员工记录里没有兴趣证据 → 不写库（不当合格线索发），只计数', async () => {
+    sheet1Fixture.mockReturnValue([sheet1Row({ phone: 'p:+6421363598', notes: 'called, no answer' })])
+    crmFixture.mockReturnValue([crmRow({ entryDate: '14/06/2026', phone: 'p:+6421363598' })])
+    const { client, outcomes } = fakeSupabase()
+    const summary = await runCtsCrmSync({ supabase: client })
+    expect(summary.insertedLeads).toBe(0)
+    expect(summary.excludedNoInterest).toBe(1)
+    expect(outcomes).toHaveLength(0)
+  })
+
+  it('🔴 旧规则遗留的待核对线索，新规则下没有兴趣证据 → 自动拒绝；已批准的绝不动', async () => {
+    sheet1Fixture.mockReturnValue([
+      sheet1Row({ phone: 'p:+6421363598', notes: 'called, no answer' }),
+      sheet1Row({ phone: 'p:+6421363599', notes: 'called, no answer' }),
+    ])
+    crmFixture.mockReturnValue([
+      crmRow({ entryDate: '14/06/2026', phone: 'p:+6421363598' }),
+      crmRow({ entryDate: '14/06/2026', phone: 'p:+6421363599' }),
+    ])
+    const { client, outcomes, audits } = fakeSupabase()
+    outcomes.push(
+      { id: 'o-pending', client_id: 'c0000000-0000-0000-0000-000000000000', source_kind: 'crm_sheet_sync', source_ref: ctsSourceRef('+6421363598', 'lead'), review_status: 'pending_review' },
+      { id: 'o-approved', client_id: 'c0000000-0000-0000-0000-000000000000', source_kind: 'crm_sheet_sync', source_ref: ctsSourceRef('+6421363599', 'lead'), review_status: 'approved' },
+    )
+    const summary = await runCtsCrmSync({ supabase: client })
+    expect(summary.rejectedStaleLeads).toBe(1)
+    expect(outcomes.find((o) => o.id === 'o-pending')).toMatchObject({ review_status: 'rejected', reviewed_by: 'auto:cts-qualify-rule' })
+    expect(outcomes.find((o) => o.id === 'o-approved')?.review_status).toBe('approved')
+    expect(audits.some((a) => a.outcome_id === 'o-pending' && a.action === 'rejected')).toBe(true)
+  })
+
   it('is idempotent: running twice does not insert the same lead twice', async () => {
     sheet1Fixture.mockReturnValue([sheet1Row({ createdTime: '2026-06-14T02:39:49-05:00', phone: 'p:+6421363598' })])
     crmFixture.mockReturnValue([crmRow({ entryDate: '14/06/2026', phone: 'p:+6421363598', tour: 'Best of China 15D' })])
@@ -268,3 +446,73 @@ describe('runCtsCrmSync', () => {
     expect(outcomes).toHaveLength(1)
   })
 })
+
+describe('分块（2026-09-22，conversion-daily-pipeline 拆块）', () => {
+  function twoLeads() {
+    sheet1Fixture.mockReturnValue([
+      sheet1Row({ createdTime: '2026-06-14T02:39:49-05:00', phone: 'p:+6421363001' }),
+      sheet1Row({ createdTime: '2026-06-14T02:39:49-05:00', phone: 'p:+6421363002' }),
+    ])
+    crmFixture.mockReturnValue([
+      crmRow({ entryDate: '14/06/2026', phone: 'p:+6421363001', tour: 'Best of China 15D' }),
+      crmRow({ entryDate: '14/06/2026', phone: 'p:+6421363002', tour: 'Best of China 15D' }),
+    ])
+  }
+
+  it('limit=1 → 两块各处理一行，游标/总行数/done 正确，合并后跟一次跑完一样', async () => {
+    twoLeads()
+    const { client, outcomes } = fakeSupabase()
+    const c1 = await runCtsCrmSyncChunk({ offset: 0, limit: 1, insertedSoFar: 0 }, { supabase: client })
+    expect(c1).toMatchObject({ nextOffset: 1, totalSheetRows: 2, insertedSoFar: 1, done: false })
+    expect(c1.summary).toMatchObject({ totalCrmRows: 1, insertedLeads: 1 })
+    const c2 = await runCtsCrmSyncChunk({ offset: c1.nextOffset, limit: 1, insertedSoFar: c1.insertedSoFar }, { supabase: client })
+    expect(c2).toMatchObject({ nextOffset: 2, insertedSoFar: 2, done: true })
+    expect(mergeCtsCrmSummaries(c1.summary, c2.summary)).toMatchObject({ totalCrmRows: 2, insertedLeads: 2 })
+    expect(outcomes).toHaveLength(2)
+  })
+
+  it('🔴 maxInsertsPerRun 跨块生效：insertedSoFar 已到上限 → 第二块一条都不写、标 cappedAtMaxInserts', async () => {
+    twoLeads()
+    const { client, outcomes } = fakeSupabase()
+    const c1 = await runCtsCrmSyncChunk({ offset: 0, limit: 1, insertedSoFar: 0 }, { supabase: client, maxInsertsPerRun: 1 })
+    const c2 = await runCtsCrmSyncChunk({ offset: 1, limit: 1, insertedSoFar: c1.insertedSoFar }, { supabase: client, maxInsertsPerRun: 1 })
+    expect(c2.summary).toMatchObject({ insertedLeads: 0, cappedAtMaxInserts: true })
+    expect(outcomes).toHaveLength(1)
+  })
+
+  it('offset 超过表尾 → 空块、done=true（表在两块之间被删短了也不会死循环）', async () => {
+    twoLeads()
+    const { client } = fakeSupabase()
+    const c = await runCtsCrmSyncChunk({ offset: 10, limit: 20, insertedSoFar: 0 }, { supabase: client })
+    expect(c).toMatchObject({ nextOffset: 2, totalSheetRows: 2, done: true })
+    expect(c.summary.totalCrmRows).toBe(0)
+  })
+
+  it('🔴 已同步的行靠预查幂等键跳过，不再逐行走联系人查找 + 撞唯一索引（子牙复审 M6：这才是真正省时间的地方）', async () => {
+    twoLeads()
+    const { client, insertAttempts } = fakeSupabase()
+    await runCtsCrmSync({ supabase: client })
+    expect(insertAttempts.n).toBe(2)
+    const second = await runCtsCrmSync({ supabase: client })
+    expect(second.skippedAlreadySynced).toBe(2)
+    expect(insertAttempts.n).toBe(2) // 第二次一次 insert 都没试
+  })
+
+  it('mergeCtsCrmSummaries：计数相加、搁置项按打码电话+团名去重、cappedAtMaxInserts 取或', () => {
+    const held = { phoneMasked: '***3598', tourInterest: 'Golden China', reason: '查不到价' }
+    const a: CtsCrmSyncSummary = { ...emptyLike(), totalCrmRows: 3, heldForManualReview: [held], insertErrors: [{ phoneMasked: '***1', error: 'x' }] }
+    const b: CtsCrmSyncSummary = { ...emptyLike(), totalCrmRows: 2, heldForManualReview: [held, { ...held, tourInterest: 'Silk Road' }], cappedAtMaxInserts: true }
+    const m = mergeCtsCrmSummaries(a, b)
+    expect(m.totalCrmRows).toBe(5)
+    expect(m.heldForManualReview).toHaveLength(2)
+    expect(m.insertErrors).toHaveLength(1)
+    expect(m.cappedAtMaxInserts).toBe(true)
+  })
+})
+
+function emptyLike(): CtsCrmSyncSummary {
+  return {
+    totalCrmRows: 0, excludedNoPhone: 0, excludedByNotes: 0, excludedNoInterest: 0, excludedNoConversation: 0, rejectedStaleLeads: 0, excludedNoDate: 0, insertedLeads: 0, insertedPurchases: 0,
+    skippedAlreadySynced: 0, heldForManualReview: [], contactNotLinked: 0, insertErrors: [], cappedAtMaxInserts: false, qualifiedFromConversation: 0, conversationReadFailed: 0, skippedPastWindow: 0,
+  }
+}

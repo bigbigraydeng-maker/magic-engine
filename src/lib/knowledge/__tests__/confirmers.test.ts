@@ -146,11 +146,53 @@ describe('registerConfirmer', () => {
     expect(fixture.confirmers).toHaveLength(0)
   })
 
-  it('rejects registering an email with no access_type=client account for this client (issue #1646 requirement)', async () => {
+  it('rejects registering an email with no paid-client account for this client (issue #1646 requirement)', async () => {
     const sb = makeFakeClient()
     await expect(
       registerConfirmer(sb, { clientId: CLIENT_A, confirmerEmail: 'stranger@example.com', actorEmail: GLOBAL_ADMIN }),
-    ).rejects.toThrow(/access_type='client'/)
+    ).rejects.toThrow(/付费客户账号/)
+    expect(fixture.confirmers).toHaveLength(0)
+  })
+
+  // 🔴 2026-09-20 实测回归：CTS 的两个真实联系人账号 access_type 都是
+  // 'both'，不是 'client'。access-types.ts 的 migration 注释早就把
+  // {dashboard, fde, both, client} 定成同一档付费客户的历史别名——这里必须
+  // 认 'both'，不能只认字面值 'client'，否则老客户联系人全部被无差别挡在
+  // 知识库确认人门外。
+  it('accepts an account whose access_type is a legacy paid-client alias like "both", not just the literal "client"', async () => {
+    fixture.portalUsers = [{ id: 'user-cts', client_id: CLIENT_A, email: 'bdm@ctstours.co.nz', access_type: 'both' }]
+    const sb = makeFakeClient()
+    const result = await registerConfirmer(sb, {
+      clientId: CLIENT_A,
+      confirmerEmail: 'bdm@ctstours.co.nz',
+      actorEmail: GLOBAL_ADMIN,
+    })
+    expect(result.alreadyActive).toBe(false)
+    expect(fixture.confirmers).toHaveLength(1)
+  })
+
+  // 🔴 self_serve / portal 不属于付费客户档，不该被接受——确认修复没
+  // 把检查放宽到"任何在这张表里的人"，只是补齐了付费客户的历史别名。
+  it('still rejects an account whose access_type is self_serve or portal (not a customer-only tier)', async () => {
+    fixture.portalUsers = [{ id: 'user-free', client_id: CLIENT_A, email: 'free@example.com', access_type: 'self_serve' }]
+    const sb = makeFakeClient()
+    await expect(
+      registerConfirmer(sb, { clientId: CLIENT_A, confirmerEmail: 'free@example.com', actorEmail: GLOBAL_ADMIN }),
+    ).rejects.toThrow(/付费客户账号/)
+    expect(fixture.confirmers).toHaveLength(0)
+  })
+
+  // 🔴 子牙+魏征联合复审（2026-09-20）实测发现的真漏洞回归锁：'fde' 虽然
+  // 跟 'client'/'dashboard'/'both' 同属 paid_client 档（能登录 /dashboard），
+  // 但它原本代表"Magic Engine 内部 FDE 代客户操作"，不是客户公司自己的
+  // 人。如果这里接受 'fde'，等于让 ME 一方的账号冒充客户签字，双签分离
+  // （ME 签字人 ≠ 客户签字人）名存实亡。必须拒绝。
+  it('rejects an account whose access_type is "fde" even though it is paid_client tier (ME-side account, not a real customer)', async () => {
+    fixture.portalUsers = [{ id: 'user-fde', client_id: CLIENT_A, email: 'fde-assigned@ctstours.co.nz', access_type: 'fde' }]
+    const sb = makeFakeClient()
+    await expect(
+      registerConfirmer(sb, { clientId: CLIENT_A, confirmerEmail: 'fde-assigned@ctstours.co.nz', actorEmail: GLOBAL_ADMIN }),
+    ).rejects.toThrow(/付费客户账号/)
     expect(fixture.confirmers).toHaveLength(0)
   })
 
@@ -164,7 +206,7 @@ describe('registerConfirmer', () => {
     const sb = makeFakeClient()
     await expect(
       registerConfirmer(sb, { clientId: CLIENT_A, confirmerEmail: 'john_doe@ctstours.co.nz', actorEmail: GLOBAL_ADMIN }),
-    ).rejects.toThrow(/access_type='client'/)
+    ).rejects.toThrow(/付费客户账号/)
     expect(fixture.confirmers).toHaveLength(0)
   })
 

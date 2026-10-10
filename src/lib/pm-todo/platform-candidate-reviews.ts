@@ -148,4 +148,14 @@ export const PLATFORM_CANDIDATE_REVIEWS: PlatformCandidateReview[] = [
     name: '私信/WhatsApp 对话内容判断有效咨询/成交 → 回传 Meta CAPI',
     reviewDate: '2026-10-13',
   },
+  {
+    // 与 docs/registry/platform-candidates.md 候选名逐字一致
+    name: 'AI 辅助图片识别打标签（看图识地名，用来补 hero-rules.ts 关键词清单收不到的生僻地方）',
+    reviewDate: '2026-10-15',
+  },
+  {
+    // 与 docs/registry/platform-candidates.md 候选名逐字一致
+    name: '从客户历史对话（Messenger/WhatsApp）批量提炼接待风格/标准应对+还没入库的事实，喂给客户知识库',
+    reviewDate: '2026-10-15',
+  },
 ]

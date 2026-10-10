@@ -1,0 +1,1970 @@
+{
+ "captured": "2026-09-14 Meta Graph v21.0 read-only GET (ads re-read with creative fields)",
+ "ad_account_id": "act_1735240120460765",
+ "account": {
+  "id": "act_1735240120460765",
+  "name": "1. General",
+  "account_status": 1,
+  "disable_reason": 0,
+  "spend_cap": "0",
+  "amount_spent": "422231",
+  "currency": "AUD",
+  "timezone_name": "Australia/Brisbane",
+  "timezone_offset_hours_utc": 10,
+  "min_daily_budget": 140,
+  "is_prepay_account": false
+ },
+ "campaigns": [
+  {
+   "id": "120254128856580790",
+   "name": "OZ · 1-Step Free Measure · BNE-GC · 202609",
+   "objective": "OUTCOME_LEADS",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "budget_remaining": "0",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2026-09-03T13:49:59+1000",
+   "created_time": "2026-09-03T13:49:37+1000",
+   "updated_time": "2026-09-03T13:49:37+1000"
+  },
+  {
+   "id": "120252742855760790",
+   "name": "OZ-REACH-Warmpool-BNE-GC",
+   "objective": "OUTCOME_AWARENESS",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "budget_remaining": "0",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2026-07-13T15:16:43+1000",
+   "created_time": "2026-07-13T15:16:22+1000",
+   "updated_time": "2026-07-25T00:02:40+1000"
+  },
+  {
+   "id": "120252643974900790",
+   "name": "Oztop — WhatsApp — RETARGET Warm Pool — 20260710",
+   "objective": "OUTCOME_ENGAGEMENT",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "budget_remaining": "0",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2026-07-10T11:26:48+1000",
+   "created_time": "2026-07-10T11:26:47+1000",
+   "updated_time": "2026-07-10T19:19:33+1000"
+  },
+  {
+   "id": "120252620658990790",
+   "name": "Oztop — WhatsApp — Cold Broad — 20260709",
+   "objective": "OUTCOME_ENGAGEMENT",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "budget_remaining": "0",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2026-07-09T08:23:21+1000",
+   "created_time": "2026-07-09T08:23:20+1000",
+   "updated_time": "2026-07-09T08:23:20+1000"
+  },
+  {
+   "id": "120252612541630790",
+   "name": "Oztop — Lead Form — Cold Broad — 20260709",
+   "objective": "OUTCOME_LEADS",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "daily_budget": "6000",
+   "budget_remaining": "6000",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2026-07-09T07:10:55+1000",
+   "created_time": "2026-07-09T07:10:54+1000",
+   "updated_time": "2026-08-18T07:20:20+1000"
+  },
+  {
+   "id": "120252422464760790",
+   "name": "New Leads campaign Jul 26",
+   "objective": "OUTCOME_LEADS",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "budget_remaining": "0",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2026-07-02T21:17:39+1000",
+   "created_time": "2026-07-02T21:17:39+1000",
+   "updated_time": "2026-07-08T10:21:19+1000"
+  },
+  {
+   "id": "120252412058510790",
+   "name": "OZ-THRU-S1-hooktest-202607",
+   "objective": "OUTCOME_ENGAGEMENT",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "budget_remaining": "0",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2026-07-02T21:25:39+1000",
+   "created_time": "2026-07-02T21:25:39+1000",
+   "updated_time": "2026-07-18T06:52:50+1000"
+  },
+  {
+   "id": "120252382876550790",
+   "name": "OZTOP | Leads | Brisbane Flooring | Jul2026",
+   "objective": "OUTCOME_LEADS",
+   "status": "ARCHIVED",
+   "effective_status": "ARCHIVED",
+   "daily_budget": "1500",
+   "budget_remaining": "1500",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "1970-01-01T09:59:59+1000",
+   "created_time": "2026-07-01T23:23:37+1000",
+   "updated_time": "2026-07-02T20:31:55+1000"
+  },
+  {
+   "id": "120251166292160790",
+   "name": "Raptor-02 · Home Reno · Brisbane",
+   "objective": "OUTCOME_LEADS",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "budget_remaining": "0",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2026-06-20T12:11:23+1000",
+   "created_time": "2026-06-20T12:11:22+1000",
+   "updated_time": "2026-06-25T17:09:20+1000"
+  },
+  {
+   "id": "120250860014220790",
+   "name": "Oztop · 猛禽系列 · Free Measure Quote · Jun26",
+   "objective": "OUTCOME_LEADS",
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "budget_remaining": "0",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2026-06-18T00:23:56+1000",
+   "created_time": "2026-06-18T00:23:56+1000",
+   "updated_time": "2026-07-25T02:21:48+1000"
+  },
+  {
+   "id": "120238854619530790",
+   "name": "Prospecting CBO",
+   "objective": "OUTCOME_SALES",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "daily_budget": "2300",
+   "budget_remaining": "2300",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2025-12-12T11:42:47+1000",
+   "created_time": "2025-12-12T11:42:46+1000",
+   "updated_time": "2026-01-26T19:06:24+1000"
+  },
+  {
+   "id": "120231725135400790",
+   "name": "Flooring Transformation",
+   "objective": "OUTCOME_LEADS",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "daily_budget": "4500",
+   "budget_remaining": "4500",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "buying_type": "AUCTION",
+   "special_ad_categories": [],
+   "smart_promotion_type": "GUIDED_CREATION",
+   "start_time": "2025-12-05T14:20:59+1000",
+   "created_time": "2025-12-05T14:20:58+1000",
+   "updated_time": "2025-12-07T08:41:19+1000"
+  }
+ ],
+ "adsets": [
+  {
+   "id": "120254128869310790",
+   "name": "OZ · Broad 25-65 · BNE+GC 40km · Lead",
+   "campaign_id": "120254128856580790",
+   "optimization_goal": "OFFSITE_CONVERSIONS",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "UNDEFINED",
+   "daily_budget": "5000",
+   "lifetime_budget": "0",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 25,
+    "geo_locations": {
+     "cities": [
+      {
+       "country": "AU",
+       "distance_unit": "kilometer",
+       "key": "107683",
+       "name": "Brisbane",
+       "radius": 40,
+       "region": "Queensland",
+       "region_id": "133"
+      },
+      {
+       "country": "AU",
+       "distance_unit": "kilometer",
+       "key": "110074",
+       "name": "Gold Coast",
+       "radius": 40,
+       "region": "Queensland",
+       "region_id": "133"
+      }
+     ],
+     "location_types": [
+      "frequently_in",
+      "home",
+      "recent"
+     ]
+    },
+    "targeting_automation": {
+     "advantage_audience": 1
+    },
+    "user_age_unknown": false
+   },
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "start_time": "2026-09-03T13:49:59+1000",
+   "created_time": "2026-09-03T13:49:58+1000",
+   "updated_time": "2026-09-03T13:50:17+1000",
+   "pacing_type": [
+    "standard"
+   ],
+   "promoted_object": {
+    "pixel_id": "1320907320075995",
+    "custom_event_type": "LEAD",
+    "smart_pse_enabled": false
+   }
+  },
+  {
+   "id": "120252742860150790",
+   "name": "OZ-REACH-S4-BNE-GC-home",
+   "campaign_id": "120252742855760790",
+   "optimization_goal": "REACH",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "UNDEFINED",
+   "daily_budget": "1500",
+   "lifetime_budget": "0",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 18,
+    "age_range": [
+     18,
+     65
+    ],
+    "geo_locations": {
+     "cities": [
+      {
+       "country": "AU",
+       "distance_unit": "kilometer",
+       "key": "107683",
+       "name": "Brisbane",
+       "radius": 40,
+       "region": "Queensland",
+       "region_id": "133"
+      },
+      {
+       "country": "AU",
+       "distance_unit": "kilometer",
+       "key": "110074",
+       "name": "Gold Coast",
+       "radius": 40,
+       "region": "Queensland",
+       "region_id": "133"
+      }
+     ],
+     "location_types": [
+      "home"
+     ]
+    },
+    "brand_safety_content_filter_levels": [
+     "FACEBOOK_RELAXED",
+     "AN_RELAXED"
+    ],
+    "targeting_automation": {
+     "advantage_audience": 1,
+     "individual_setting": {
+      "geo": 1
+     }
+    },
+    "user_age_unknown": false
+   },
+   "status": "ACTIVE",
+   "effective_status": "CAMPAIGN_PAUSED",
+   "start_time": "2026-07-13T15:16:43+1000",
+   "created_time": "2026-07-13T15:16:43+1000",
+   "updated_time": "2026-07-13T15:17:01+1000",
+   "pacing_type": [
+    "standard"
+   ]
+  },
+  {
+   "id": "120252643974920790",
+   "name": "新互动广告组",
+   "campaign_id": "120252643974900790",
+   "optimization_goal": "CONVERSATIONS",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "WHATSAPP",
+   "daily_budget": "3000",
+   "lifetime_budget": "0",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 18,
+    "custom_audiences": [
+     {
+      "id": "120252445512480790",
+      "name": "Oztop Video Viewers 25% - Retarget"
+     },
+     {
+      "id": "120252445605260790",
+      "name": "Oztop Page Engagers 365d - Retarget"
+     }
+    ],
+    "geo_locations": {
+     "cities": [
+      {
+       "country": "AU",
+       "distance_unit": "kilometer",
+       "key": "107683",
+       "name": "Brisbane",
+       "radius": 40,
+       "region": "Queensland",
+       "region_id": "133"
+      },
+      {
+       "country": "AU",
+       "distance_unit": "kilometer",
+       "key": "110074",
+       "name": "Gold Coast",
+       "radius": 40,
+       "region": "Queensland",
+       "region_id": "133"
+      }
+     ],
+     "location_types": [
+      "home",
+      "recent"
+     ]
+    },
+    "brand_safety_content_filter_levels": [
+     "FACEBOOK_RELAXED",
+     "AN_RELAXED"
+    ],
+    "targeting_automation": {
+     "advantage_audience": 1,
+     "individual_setting": {
+      "geo": 1
+     }
+    },
+    "user_age_unknown": true
+   },
+   "status": "ACTIVE",
+   "effective_status": "CAMPAIGN_PAUSED",
+   "start_time": "2026-07-10T11:26:48+1000",
+   "created_time": "2026-07-10T11:26:48+1000",
+   "updated_time": "2026-07-10T11:27:06+1000",
+   "pacing_type": [
+    "standard"
+   ],
+   "promoted_object": {
+    "page_id": "748077268383005",
+    "smart_pse_enabled": false
+   }
+  },
+  {
+   "id": "120252620658980790",
+   "name": "新互动广告组",
+   "campaign_id": "120252620658990790",
+   "optimization_goal": "CONVERSATIONS",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "UNDEFINED",
+   "daily_budget": "2500",
+   "lifetime_budget": "0",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 18,
+    "geo_locations": {
+     "cities": [
+      {
+       "country": "AU",
+       "distance_unit": "kilometer",
+       "key": "107683",
+       "name": "Brisbane",
+       "radius": 40,
+       "region": "Queensland",
+       "region_id": "133"
+      },
+      {
+       "country": "AU",
+       "distance_unit": "kilometer",
+       "key": "110074",
+       "name": "Gold Coast",
+       "radius": 40,
+       "region": "Queensland",
+       "region_id": "133"
+      }
+     ],
+     "location_types": [
+      "home",
+      "recent"
+     ]
+    },
+    "brand_safety_content_filter_levels": [
+     "FACEBOOK_RELAXED",
+     "AN_RELAXED"
+    ],
+    "targeting_automation": {
+     "advantage_audience": 1,
+     "individual_setting": {
+      "geo": 0
+     }
+    },
+    "user_age_unknown": true
+   },
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "start_time": "2026-07-09T08:23:21+1000",
+   "created_time": "2026-07-09T08:23:21+1000",
+   "updated_time": "2026-07-13T15:32:28+1000",
+   "pacing_type": [
+    "standard"
+   ],
+   "promoted_object": {
+    "page_id": "748077268383005",
+    "smart_pse_enabled": false
+   }
+  },
+  {
+   "id": "120252612541620790",
+   "name": "新潜在客户广告组",
+   "campaign_id": "120252612541630790",
+   "optimization_goal": "LEAD_GENERATION",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "ON_AD",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 18,
+    "age_range": [
+     18,
+     65
+    ],
+    "geo_locations": {
+     "cities": [
+      {
+       "country": "AU",
+       "distance_unit": "kilometer",
+       "key": "107683",
+       "name": "Brisbane",
+       "radius": 40,
+       "region": "Queensland",
+       "region_id": "133"
+      },
+      {
+       "country": "AU",
+       "distance_unit": "kilometer",
+       "key": "110074",
+       "name": "Gold Coast",
+       "radius": 40,
+       "region": "Queensland",
+       "region_id": "133"
+      }
+     ],
+     "location_types": [
+      "home",
+      "recent"
+     ]
+    },
+    "brand_safety_content_filter_levels": [
+     "FACEBOOK_RELAXED",
+     "AN_RELAXED"
+    ],
+    "targeting_automation": {
+     "advantage_audience": 1,
+     "individual_setting": {
+      "age": 1,
+      "gender": 1,
+      "geo": 0
+     }
+    }
+   },
+   "status": "ACTIVE",
+   "effective_status": "CAMPAIGN_PAUSED",
+   "start_time": "2026-07-09T07:10:55+1000",
+   "created_time": "2026-07-09T07:10:55+1000",
+   "updated_time": "2026-07-09T21:51:59+1000",
+   "promoted_object": {
+    "page_id": "748077268383005",
+    "smart_pse_enabled": false
+   }
+  },
+  {
+   "id": "120252557279220790",
+   "name": "OZ-THRU-S3-Promo-BNE-GC",
+   "campaign_id": "120252412058510790",
+   "optimization_goal": "THRUPLAY",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "ON_VIDEO",
+   "daily_budget": "2500",
+   "lifetime_budget": "0",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 18,
+    "age_range": [
+     18,
+     65
+    ],
+    "geo_locations": {
+     "cities": [
+      {
+       "country": "AU",
+       "distance_unit": "kilometer",
+       "key": "107683",
+       "name": "Brisbane",
+       "radius": 40,
+       "region": "Queensland",
+       "region_id": "133"
+      },
+      {
+       "country": "AU",
+       "distance_unit": "kilometer",
+       "key": "110074",
+       "name": "Gold Coast",
+       "radius": 40,
+       "region": "Queensland",
+       "region_id": "133"
+      }
+     ],
+     "location_types": [
+      "home",
+      "recent"
+     ]
+    },
+    "brand_safety_content_filter_levels": [
+     "FACEBOOK_RELAXED",
+     "AN_RELAXED"
+    ],
+    "targeting_automation": {
+     "advantage_audience": 1,
+     "individual_setting": {
+      "age": 1,
+      "gender": 1,
+      "geo": 1
+     }
+    },
+    "user_age_unknown": true
+   },
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "start_time": "2026-07-07T14:38:54+1000",
+   "created_time": "2026-07-07T14:38:54+1000",
+   "updated_time": "2026-07-09T22:58:00+1000",
+   "pacing_type": [
+    "standard"
+   ]
+  },
+  {
+   "id": "120252526551730790",
+   "name": "OZ-THRU-S2-LeadReels-BNE-GC",
+   "campaign_id": "120252412058510790",
+   "optimization_goal": "THRUPLAY",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "ON_VIDEO",
+   "daily_budget": "2500",
+   "lifetime_budget": "0",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 18,
+    "age_range": [
+     18,
+     65
+    ],
+    "geo_locations": {
+     "cities": [
+      {
+       "country": "AU",
+       "distance_unit": "kilometer",
+       "key": "107683",
+       "name": "Brisbane",
+       "radius": 40,
+       "region": "Queensland",
+       "region_id": "133"
+      },
+      {
+       "country": "AU",
+       "distance_unit": "kilometer",
+       "key": "110074",
+       "name": "Gold Coast",
+       "radius": 40,
+       "region": "Queensland",
+       "region_id": "133"
+      }
+     ],
+     "location_types": [
+      "home",
+      "recent"
+     ]
+    },
+    "brand_safety_content_filter_levels": [
+     "FACEBOOK_RELAXED",
+     "AN_RELAXED"
+    ],
+    "targeting_automation": {
+     "advantage_audience": 1,
+     "individual_setting": {
+      "age": 1,
+      "gender": 1,
+      "geo": 1
+     }
+    },
+    "user_age_unknown": true
+   },
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "start_time": "2026-07-07T11:18:01+1000",
+   "created_time": "2026-07-07T11:18:01+1000",
+   "updated_time": "2026-07-09T22:58:53+1000",
+   "pacing_type": [
+    "standard"
+   ]
+  },
+  {
+   "id": "120252422464770790",
+   "name": "New Leads ad set",
+   "campaign_id": "120252422464760790",
+   "optimization_goal": "LEAD_GENERATION",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "LEAD_FORM_MESSENGER",
+   "daily_budget": "3000",
+   "lifetime_budget": "0",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 25,
+    "age_range": [
+     25,
+     65
+    ],
+    "excluded_geo_locations": {
+     "cities": [
+      {
+       "country": "AU",
+       "distance_unit": "mile",
+       "key": "112172",
+       "name": "Melbourne",
+       "radius": 25,
+       "region": "Victoria",
+       "region_id": "136"
+      },
+      {
+       "country": "AU",
+       "distance_unit": "mile",
+       "key": "114925",
+       "name": "Sydney",
+       "radius": 25,
+       "region": "New South Wales",
+       "region_id": "131"
+      }
+     ],
+     "location_types": [
+      "home",
+      "recent"
+     ]
+    },
+    "geo_locations": {
+     "cities": [
+      {
+       "country": "AU",
+       "distance_unit": "kilometer",
+       "key": "107683",
+       "name": "Brisbane",
+       "radius": 50,
+       "region": "Queensland",
+       "region_id": "133"
+      }
+     ],
+     "location_types": [
+      "home",
+      "recent"
+     ]
+    },
+    "locales": [
+     6,
+     24
+    ],
+    "brand_safety_content_filter_levels": [
+     "FACEBOOK_RELAXED",
+     "AN_RELAXED"
+    ],
+    "targeting_automation": {
+     "advantage_audience": 1,
+     "individual_setting": {
+      "age": 1,
+      "gender": 1,
+      "geo": 1
+     }
+    }
+   },
+   "status": "ACTIVE",
+   "effective_status": "CAMPAIGN_PAUSED",
+   "start_time": "2026-07-02T21:17:39+1000",
+   "created_time": "2026-07-02T21:17:39+1000",
+   "updated_time": "2026-07-08T09:15:14+1000",
+   "pacing_type": [
+    "standard"
+   ],
+   "promoted_object": {
+    "page_id": "748077268383005",
+    "smart_pse_enabled": false
+   }
+  },
+  {
+   "id": "120252412058520790",
+   "name": "OZ-THRU-S1-BNE-GC",
+   "campaign_id": "120252412058510790",
+   "optimization_goal": "THRUPLAY",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "ON_VIDEO",
+   "daily_budget": "2500",
+   "lifetime_budget": "0",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 18,
+    "age_range": [
+     18,
+     65
+    ],
+    "geo_locations": {
+     "cities": [
+      {
+       "country": "AU",
+       "distance_unit": "kilometer",
+       "key": "107683",
+       "name": "Brisbane",
+       "radius": 40,
+       "region": "Queensland",
+       "region_id": "133"
+      },
+      {
+       "country": "AU",
+       "distance_unit": "kilometer",
+       "key": "110074",
+       "name": "Gold Coast",
+       "radius": 40,
+       "region": "Queensland",
+       "region_id": "133"
+      }
+     ],
+     "location_types": [
+      "home"
+     ]
+    },
+    "brand_safety_content_filter_levels": [
+     "FACEBOOK_RELAXED",
+     "AN_RELAXED"
+    ],
+    "targeting_automation": {
+     "advantage_audience": 1,
+     "individual_setting": {
+      "geo": 1
+     }
+    },
+    "user_age_unknown": false
+   },
+   "status": "ACTIVE",
+   "effective_status": "CAMPAIGN_PAUSED",
+   "start_time": "2026-07-02T21:25:39+1000",
+   "created_time": "2026-07-02T21:25:39+1000",
+   "updated_time": "2026-07-13T15:01:43+1000",
+   "pacing_type": [
+    "standard"
+   ]
+  },
+  {
+   "id": "120252382876540790",
+   "name": "New Leads ad set",
+   "campaign_id": "120252382876550790",
+   "optimization_goal": "OFFSITE_CONVERSIONS",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "WEBSITE_AND_LEAD_FORM",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 25,
+    "age_range": [
+     25,
+     65
+    ],
+    "geo_locations": {
+     "countries": [
+      "AU"
+     ],
+     "location_types": [
+      "home",
+      "recent"
+     ]
+    },
+    "brand_safety_content_filter_levels": [
+     "FACEBOOK_RELAXED",
+     "AN_RELAXED"
+    ],
+    "targeting_automation": {
+     "advantage_audience": 1,
+     "individual_setting": {
+      "age": 1,
+      "gender": 1
+     }
+    }
+   },
+   "status": "ARCHIVED",
+   "effective_status": "ARCHIVED",
+   "start_time": "2026-07-02T10:00:00+1000",
+   "end_time": "2026-07-04T23:00:00+1000",
+   "created_time": "2026-07-01T23:23:38+1000",
+   "updated_time": "2026-07-01T23:33:22+1000",
+   "promoted_object": {
+    "pixel_id": "1320907320075995",
+    "custom_event_type": "LEAD",
+    "smart_pse_enabled": false
+   }
+  },
+  {
+   "id": "120251166292180790",
+   "name": "Raptor-02 · Home Reno · Brisbane",
+   "campaign_id": "120251166292160790",
+   "optimization_goal": "LEAD_GENERATION",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "ON_AD",
+   "daily_budget": "2500",
+   "lifetime_budget": "0",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 25,
+    "age_range": [
+     30,
+     65
+    ],
+    "flexible_spec": [
+     {
+      "interests": [
+       {
+        "id": "6003199112065",
+        "name": "家居维修（家居装饰）"
+       },
+       {
+        "id": "6003234413249",
+        "name": "家居装修（家居园艺）"
+       },
+       {
+        "id": "6004176050895",
+        "name": "维护、修理和大修（建筑业）"
+       }
+      ]
+     }
+    ],
+    "geo_locations": {
+     "cities": [
+      {
+       "country": "AU",
+       "distance_unit": "kilometer",
+       "key": "107683",
+       "name": "Brisbane",
+       "radius": 80,
+       "region": "Queensland",
+       "region_id": "133"
+      }
+     ],
+     "location_types": [
+      "home",
+      "recent"
+     ]
+    },
+    "brand_safety_content_filter_levels": [
+     "FACEBOOK_RELAXED",
+     "AN_RELAXED"
+    ],
+    "targeting_automation": {
+     "advantage_audience": 1,
+     "individual_setting": {
+      "geo": 0
+     }
+    }
+   },
+   "status": "ACTIVE",
+   "effective_status": "CAMPAIGN_PAUSED",
+   "start_time": "2026-06-20T12:11:23+1000",
+   "created_time": "2026-06-20T12:11:23+1000",
+   "updated_time": "2026-06-24T13:59:24+1000",
+   "pacing_type": [
+    "standard"
+   ],
+   "promoted_object": {
+    "page_id": "748077268383005",
+    "smart_pse_enabled": false
+   }
+  },
+  {
+   "id": "120250860014210790",
+   "name": "Raptor-01 · Home Reno · Brisbane",
+   "campaign_id": "120250860014220790",
+   "optimization_goal": "LEAD_GENERATION",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "ON_AD",
+   "daily_budget": "2000",
+   "lifetime_budget": "0",
+   "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 25,
+    "age_range": [
+     30,
+     65
+    ],
+    "flexible_spec": [
+     {
+      "interests": [
+       {
+        "id": "6003199112065",
+        "name": "家居维修（家居装饰）"
+       },
+       {
+        "id": "6003234413249",
+        "name": "家居装修（家居园艺）"
+       },
+       {
+        "id": "6004176050895",
+        "name": "维护、修理和大修（建筑业）"
+       }
+      ]
+     }
+    ],
+    "geo_locations": {
+     "cities": [
+      {
+       "country": "AU",
+       "distance_unit": "kilometer",
+       "key": "107683",
+       "name": "Brisbane",
+       "radius": 80,
+       "region": "Queensland",
+       "region_id": "133"
+      }
+     ],
+     "location_types": [
+      "home",
+      "recent"
+     ]
+    },
+    "brand_safety_content_filter_levels": [
+     "FACEBOOK_RELAXED",
+     "AN_RELAXED"
+    ],
+    "targeting_automation": {
+     "advantage_audience": 1,
+     "individual_setting": {
+      "geo": 0
+     }
+    }
+   },
+   "status": "ACTIVE",
+   "effective_status": "ACTIVE",
+   "start_time": "2026-06-18T00:23:56+1000",
+   "created_time": "2026-06-18T00:23:56+1000",
+   "updated_time": "2026-06-24T13:59:32+1000",
+   "pacing_type": [
+    "standard"
+   ],
+   "promoted_object": {
+    "page_id": "748077268383005",
+    "smart_pse_enabled": false
+   }
+  },
+  {
+   "id": "120238854619520790",
+   "name": "Broad Pack 1. Before/ After",
+   "campaign_id": "120238854619530790",
+   "optimization_goal": "OFFSITE_CONVERSIONS",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "UNDEFINED",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 18,
+    "age_range": [
+     23,
+     65
+    ],
+    "excluded_custom_audiences": [
+     {
+      "id": "120238453802750790",
+      "name": "Website Visitors"
+     }
+    ],
+    "flexible_spec": [
+     {
+      "interests": [
+       {
+        "id": "6003199112065",
+        "name": "家居维修（家居装饰）"
+       },
+       {
+        "id": "6003321193914",
+        "name": "地板（工业材料和设备）"
+       },
+       {
+        "id": "6003437629554",
+        "name": "家居装修 (家居装修)"
+       }
+      ]
+     }
+    ],
+    "geo_locations": {
+     "cities": [
+      {
+       "country": "AU",
+       "distance_unit": "mile",
+       "key": "107683",
+       "name": "Brisbane",
+       "radius": 35,
+       "region": "Queensland",
+       "region_id": "133"
+      },
+      {
+       "country": "AU",
+       "distance_unit": "mile",
+       "key": "110074",
+       "name": "Gold Coast",
+       "radius": 30,
+       "region": "Queensland",
+       "region_id": "133"
+      }
+     ],
+     "location_types": [
+      "home",
+      "recent"
+     ]
+    },
+    "brand_safety_content_filter_levels": [
+     "FACEBOOK_RELAXED",
+     "AN_RELAXED"
+    ],
+    "targeting_automation": {
+     "advantage_audience": 1,
+     "individual_setting": {
+      "geo": 1
+     }
+    }
+   },
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "start_time": "2025-12-12T11:42:47+1000",
+   "created_time": "2025-12-12T11:42:47+1000",
+   "updated_time": "2026-01-28T16:19:50+1000",
+   "promoted_object": {
+    "pixel_id": "1320907320075995",
+    "custom_event_type": "CONTENT_VIEW",
+    "smart_pse_enabled": false
+   }
+  },
+  {
+   "id": "120231725136090790",
+   "name": "Ad Set",
+   "campaign_id": "120231725135400790",
+   "optimization_goal": "OFFSITE_CONVERSIONS",
+   "billing_event": "IMPRESSIONS",
+   "destination_type": "UNDEFINED",
+   "targeting": {
+    "age_max": 65,
+    "age_min": 18,
+    "age_range": [
+     23,
+     65
+    ],
+    "excluded_custom_audiences": [
+     {
+      "id": "120238453802750790",
+      "name": "Website Visitors"
+     }
+    ],
+    "flexible_spec": [
+     {
+      "interests": [
+       {
+        "id": "6003199112065",
+        "name": "家居维修（家居装饰）"
+       },
+       {
+        "id": "6003321193914",
+        "name": "地板（工业材料和设备）"
+       },
+       {
+        "id": "6003437629554",
+        "name": "家居装修 (家居装修)"
+       }
+      ]
+     }
+    ],
+    "geo_locations": {
+     "cities": [
+      {
+       "country": "AU",
+       "distance_unit": "mile",
+       "key": "107683",
+       "name": "Brisbane",
+       "radius": 35,
+       "region": "Queensland",
+       "region_id": "133"
+      },
+      {
+       "country": "AU",
+       "distance_unit": "mile",
+       "key": "110074",
+       "name": "Gold Coast",
+       "radius": 30,
+       "region": "Queensland",
+       "region_id": "133"
+      }
+     ],
+     "location_types": [
+      "home",
+      "recent"
+     ]
+    },
+    "brand_safety_content_filter_levels": [
+     "FACEBOOK_RELAXED",
+     "AN_RELAXED"
+    ],
+    "targeting_automation": {
+     "advantage_audience": 1,
+     "individual_setting": {
+      "geo": 1
+     }
+    }
+   },
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "start_time": "2025-12-05T14:20:59+1000",
+   "created_time": "2025-12-05T14:20:59+1000",
+   "updated_time": "2026-01-21T14:56:59+1000",
+   "promoted_object": {
+    "pixel_id": "1320907320075995",
+    "custom_event_type": "CONTENT_VIEW",
+    "smart_pse_enabled": false
+   }
+  }
+ ],
+ "ads": [
+  {
+   "id": "120253053175980790",
+   "name": "OZ-FMQ-A-cost-showroom-202607",
+   "adset_id": "120250860014210790",
+   "campaign_id": "120250860014220790",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "created_time": "2026-07-25T02:11:09+1000",
+   "updated_time": "2026-08-01T10:13:53+1000",
+   "creative": {
+    "video_id": "1530197908591781",
+    "effective_object_story_id": "748077268383005_122190964346943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "2452960388557383"
+     }
+    },
+    "id": "1587162969673460"
+   }
+  },
+  {
+   "id": "120252612541610790",
+   "name": "新潜在客户广告",
+   "adset_id": "120252612541620790",
+   "campaign_id": "120252612541630790",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "created_time": "2026-07-09T07:10:57+1000",
+   "updated_time": "2026-07-23T15:55:38+1000",
+   "creative": {
+    "video_id": "1595978145430111",
+    "effective_object_story_id": "748077268383005_122188143812943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "1677108553576075"
+     }
+    },
+    "id": "2409535349524376"
+   }
+  },
+  {
+   "id": "120252742872140790",
+   "name": "OZ-REACH-SR02",
+   "adset_id": "120252742860150790",
+   "campaign_id": "120252742855760790",
+   "status": "ACTIVE",
+   "effective_status": "CAMPAIGN_PAUSED",
+   "created_time": "2026-07-13T15:18:14+1000",
+   "updated_time": "2026-07-13T18:33:18+1000",
+   "creative": {
+    "video_id": "1571571231031569",
+    "effective_object_story_id": "748077268383005_122188889024943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "1336745795254432"
+     }
+    },
+    "id": "1300272018580315"
+   }
+  },
+  {
+   "id": "120252424319430790",
+   "name": "OZ-S1-B-warp",
+   "adset_id": "120252412058520790",
+   "campaign_id": "120252412058510790",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "created_time": "2026-07-02T22:18:14+1000",
+   "updated_time": "2026-07-13T18:16:29+1000",
+   "creative": {
+    "video_id": "2446039952473057",
+    "effective_object_story_id": "748077268383005_122188498040943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "27692257990405551"
+     }
+    },
+    "id": "1407589094547369"
+   }
+  },
+  {
+   "id": "120252412058530790",
+   "name": "OZ-S1-A-spill",
+   "adset_id": "120252412058520790",
+   "campaign_id": "120252412058510790",
+   "status": "ACTIVE",
+   "effective_status": "CAMPAIGN_PAUSED",
+   "created_time": "2026-07-02T22:01:52+1000",
+   "updated_time": "2026-07-13T18:09:27+1000",
+   "creative": {
+    "video_id": "1009888008349686",
+    "effective_object_story_id": "748077268383005_122188390238943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "2605452336518464"
+     }
+    },
+    "id": "1407432921212432"
+   }
+  },
+  {
+   "id": "120252742876560790",
+   "name": "OZ-REACH-SR04",
+   "adset_id": "120252742860150790",
+   "campaign_id": "120252742855760790",
+   "status": "ACTIVE",
+   "effective_status": "CAMPAIGN_PAUSED",
+   "created_time": "2026-07-13T15:18:47+1000",
+   "updated_time": "2026-07-13T15:21:53+1000",
+   "creative": {
+    "video_id": "1338152218466802",
+    "effective_object_story_id": "748077268383005_122188889090943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "2452960388557383"
+     }
+    },
+    "id": "1518472139302733"
+   }
+  },
+  {
+   "id": "120252742868250790",
+   "name": "OZ-REACH-SR01",
+   "adset_id": "120252742860150790",
+   "campaign_id": "120252742855760790",
+   "status": "ACTIVE",
+   "effective_status": "CAMPAIGN_PAUSED",
+   "created_time": "2026-07-13T15:17:42+1000",
+   "updated_time": "2026-07-13T15:19:54+1000",
+   "creative": {
+    "video_id": "968531146238025",
+    "effective_object_story_id": "748077268383005_122188885922943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "1393293722829832"
+     }
+    },
+    "id": "987276060969342"
+   }
+  },
+  {
+   "id": "120252424319420790",
+   "name": "OZ-S1-C-alex",
+   "adset_id": "120252412058520790",
+   "campaign_id": "120252412058510790",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "created_time": "2026-07-02T22:19:27+1000",
+   "updated_time": "2026-07-13T15:03:51+1000",
+   "creative": {
+    "video_id": "808105225626209",
+    "effective_object_story_id": "748077268383005_122188498076943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "2597793657304991"
+     }
+    },
+    "id": "27158025770566341"
+   }
+  },
+  {
+   "id": "120252741347540790",
+   "name": "OZ-S1-D-Showroom-SR01",
+   "adset_id": "120252412058520790",
+   "campaign_id": "120252412058510790",
+   "status": "ACTIVE",
+   "effective_status": "CAMPAIGN_PAUSED",
+   "created_time": "2026-07-13T14:54:11+1000",
+   "updated_time": "2026-07-13T15:03:43+1000",
+   "creative": {
+    "video_id": "968531146238025",
+    "effective_object_story_id": "748077268383005_122188885922943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "1393293722829832"
+     }
+    },
+    "id": "987276060969342"
+   }
+  },
+  {
+   "id": "120252643974910790",
+   "name": "新互动广告",
+   "adset_id": "120252643974920790",
+   "campaign_id": "120252643974900790",
+   "status": "ACTIVE",
+   "effective_status": "CAMPAIGN_PAUSED",
+   "created_time": "2026-07-10T11:26:50+1000",
+   "updated_time": "2026-07-11T21:56:15+1000",
+   "creative": {
+    "video_id": "1318921176896852",
+    "effective_object_story_id": "748077268383005_122188533062943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "1677108553576075"
+     }
+    },
+    "id": "2434708407008013"
+   }
+  },
+  {
+   "id": "120252526551720790",
+   "name": "OZ-S2-R4-lifestylefit",
+   "adset_id": "120252526551730790",
+   "campaign_id": "120252412058510790",
+   "status": "ACTIVE",
+   "effective_status": "ADSET_PAUSED",
+   "created_time": "2026-07-07T11:18:02+1000",
+   "updated_time": "2026-07-11T21:48:38+1000",
+   "creative": {
+    "video_id": "2480278482452798",
+    "effective_object_story_id": "748077268383005_122188496054943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "1538653297697401"
+     }
+    },
+    "id": "2043074636294324"
+   }
+  },
+  {
+   "id": "120252528609620790",
+   "name": "OZ-S2-R9-rentvslive",
+   "adset_id": "120252526551730790",
+   "campaign_id": "120252412058510790",
+   "status": "ACTIVE",
+   "effective_status": "ADSET_PAUSED",
+   "created_time": "2026-07-07T11:18:02+1000",
+   "updated_time": "2026-07-11T21:47:56+1000",
+   "creative": {
+    "video_id": "1318227203813222",
+    "effective_object_story_id": "748077268383005_122188497434943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "853081664270582"
+     }
+    },
+    "id": "1682875279632980"
+   }
+  },
+  {
+   "id": "120252526551710790",
+   "name": "OZ-S2-R3-avoidproblems",
+   "adset_id": "120252526551730790",
+   "campaign_id": "120252412058510790",
+   "status": "ACTIVE",
+   "effective_status": "ADSET_PAUSED",
+   "created_time": "2026-07-07T11:18:02+1000",
+   "updated_time": "2026-07-11T18:40:20+1000",
+   "creative": {
+    "video_id": "2344924795914003",
+    "effective_object_story_id": "748077268383005_122188495490943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "1309664007903849"
+     }
+    },
+    "id": "3414085545426426"
+   }
+  },
+  {
+   "id": "120252528609600790",
+   "name": "OZ-S2-R6-kidsdog",
+   "adset_id": "120252526551730790",
+   "campaign_id": "120252412058510790",
+   "status": "ACTIVE",
+   "effective_status": "ADSET_PAUSED",
+   "created_time": "2026-07-07T11:18:02+1000",
+   "updated_time": "2026-07-11T18:40:14+1000",
+   "creative": {
+    "video_id": "1816517999757547",
+    "effective_object_story_id": "748077268383005_122188496078943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "1677108553576075"
+     }
+    },
+    "id": "1566242465211723"
+   }
+  },
+  {
+   "id": "120252526551740790",
+   "name": "OZ-S2-R5-coastaltiles",
+   "adset_id": "120252526551730790",
+   "campaign_id": "120252412058510790",
+   "status": "ACTIVE",
+   "effective_status": "ADSET_PAUSED",
+   "created_time": "2026-07-07T11:18:02+1000",
+   "updated_time": "2026-07-11T18:39:48+1000",
+   "creative": {
+    "video_id": "2220188065462085",
+    "effective_object_story_id": "748077268383005_122188496066943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "2029948944580657"
+     }
+    },
+    "id": "2560701994347165"
+   }
+  },
+  {
+   "id": "120252620658970790",
+   "name": "新互动广告",
+   "adset_id": "120252620658980790",
+   "campaign_id": "120252620658990790",
+   "status": "ACTIVE",
+   "effective_status": "ADSET_PAUSED",
+   "created_time": "2026-07-09T08:23:22+1000",
+   "updated_time": "2026-07-11T17:28:23+1000",
+   "creative": {
+    "video_id": "2751399725229414",
+    "effective_object_story_id": "748077268383005_122188532618943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "1677108553576075"
+     }
+    },
+    "id": "2439722343104086"
+   }
+  },
+  {
+   "id": "120252528609610790",
+   "name": "OZ-S2-R7-urgency",
+   "adset_id": "120252526551730790",
+   "campaign_id": "120252412058510790",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "created_time": "2026-07-07T11:18:02+1000",
+   "updated_time": "2026-07-11T10:21:43+1000",
+   "creative": {
+    "video_id": "1206071332588381",
+    "effective_object_story_id": "748077268383005_122188498130943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "2597793657304991"
+     }
+    },
+    "id": "2223881825044542"
+   }
+  },
+  {
+   "id": "120252528609630790",
+   "name": "OZ-S2-R10-reviews",
+   "adset_id": "120252526551730790",
+   "campaign_id": "120252412058510790",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "created_time": "2026-07-07T11:18:02+1000",
+   "updated_time": "2026-07-11T10:19:31+1000",
+   "creative": {
+    "video_id": "4383233561991408",
+    "effective_object_story_id": "748077268383005_122188498088943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "2597793657304991"
+     }
+    },
+    "id": "2158034554772876"
+   }
+  },
+  {
+   "id": "120252528609590790",
+   "name": "OZ-S2-Rx-spcwaterproof",
+   "adset_id": "120252526551730790",
+   "campaign_id": "120252412058510790",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "created_time": "2026-07-07T11:18:02+1000",
+   "updated_time": "2026-07-11T10:18:00+1000",
+   "creative": {
+    "video_id": "2212018469576003",
+    "effective_object_story_id": "748077268383005_122188498238943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "2597793657304991"
+     }
+    },
+    "id": "1545897817020463"
+   }
+  },
+  {
+   "id": "120252557279230790",
+   "name": "OZ-S3-T2-spillpromo",
+   "adset_id": "120252557279220790",
+   "campaign_id": "120252412058510790",
+   "status": "ACTIVE",
+   "effective_status": "ADSET_PAUSED",
+   "created_time": "2026-07-07T14:38:56+1000",
+   "updated_time": "2026-07-10T18:12:40+1000",
+   "creative": {
+    "video_id": "1024540399964027",
+    "effective_object_story_id": "748077268383005_122188357598943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "2561226134311169"
+     }
+    },
+    "id": "1764816834541173"
+   }
+  },
+  {
+   "id": "120252557279210790",
+   "name": "OZ-S3-T1-savingsmath",
+   "adset_id": "120252557279220790",
+   "campaign_id": "120252412058510790",
+   "status": "ACTIVE",
+   "effective_status": "ADSET_PAUSED",
+   "created_time": "2026-07-07T14:38:56+1000",
+   "updated_time": "2026-07-10T18:09:16+1000",
+   "creative": {
+    "video_id": "2117016272216660",
+    "effective_object_story_id": "748077268383005_122188357568943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "1370713574957309"
+     }
+    },
+    "id": "1035544022223159"
+   }
+  },
+  {
+   "id": "120252557279300790",
+   "name": "OZ-S3-W3-texture",
+   "adset_id": "120252557279220790",
+   "campaign_id": "120252412058510790",
+   "status": "ACTIVE",
+   "effective_status": "ADSET_PAUSED",
+   "created_time": "2026-07-07T14:38:56+1000",
+   "updated_time": "2026-07-10T18:06:57+1000",
+   "creative": {
+    "video_id": "2086051179012845",
+    "effective_object_story_id": "748077268383005_122188357526943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "1439680607945357"
+     }
+    },
+    "id": "2811495035893113"
+   }
+  },
+  {
+   "id": "120252557279240790",
+   "name": "OZ-S3-T3-julyspecial",
+   "adset_id": "120252557279220790",
+   "campaign_id": "120252412058510790",
+   "status": "ACTIVE",
+   "effective_status": "ADSET_PAUSED",
+   "created_time": "2026-07-07T14:38:56+1000",
+   "updated_time": "2026-07-10T15:01:03+1000",
+   "creative": {
+    "video_id": "2515974402183138",
+    "effective_object_story_id": "748077268383005_122188357550943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "1329677458819480"
+     }
+    },
+    "id": "910654082065991"
+   }
+  },
+  {
+   "id": "120252557279280790",
+   "name": "OZ-S3-W2-stockscale",
+   "adset_id": "120252557279220790",
+   "campaign_id": "120252412058510790",
+   "status": "ACTIVE",
+   "effective_status": "ADSET_PAUSED",
+   "created_time": "2026-07-07T14:38:56+1000",
+   "updated_time": "2026-07-10T15:00:59+1000",
+   "creative": {
+    "video_id": "28063141829958134",
+    "effective_object_story_id": "748077268383005_122188357532943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "1551585226522222"
+     }
+    },
+    "id": "1551582289789666"
+   }
+  },
+  {
+   "id": "120252620372110790",
+   "name": "新潜在客户广告 - 广告副本",
+   "adset_id": "120252612541620790",
+   "campaign_id": "120252612541630790",
+   "status": "ACTIVE",
+   "effective_status": "CAMPAIGN_PAUSED",
+   "created_time": "2026-07-09T07:21:24+1000",
+   "updated_time": "2026-07-09T21:53:53+1000",
+   "creative": {
+    "video_id": "2273033426843689",
+    "effective_object_story_id": "748077268383005_122188144886943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "1677108553576075"
+     }
+    },
+    "id": "1948628799592550"
+   }
+  },
+  {
+   "id": "120252557279270790",
+   "name": "OZ-S3-W1-pricetag",
+   "adset_id": "120252557279220790",
+   "campaign_id": "120252412058510790",
+   "status": "ACTIVE",
+   "effective_status": "ADSET_PAUSED",
+   "created_time": "2026-07-07T14:38:56+1000",
+   "updated_time": "2026-07-08T12:02:28+1000",
+   "creative": {
+    "video_id": "1182108887411438",
+    "effective_object_story_id": "748077268383005_122187989312943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "894729150352023"
+     }
+    },
+    "id": "2503062973544781"
+   }
+  },
+  {
+   "id": "120252422464750790",
+   "name": "New Leads ad",
+   "adset_id": "120252422464770790",
+   "campaign_id": "120252422464760790",
+   "status": "ACTIVE",
+   "effective_status": "CAMPAIGN_PAUSED",
+   "created_time": "2026-07-02T21:17:41+1000",
+   "updated_time": "2026-07-08T09:17:00+1000",
+   "creative": {
+    "video_id": "964391103290917",
+    "effective_object_story_id": "748077268383005_122187198284943042",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "1011389991620361"
+     }
+    },
+    "id": "1376706004369360"
+   }
+  },
+  {
+   "id": "120251531686910790",
+   "name": "Raptor-01 slip dog tile vs floor",
+   "adset_id": "120250860014210790",
+   "campaign_id": "120250860014220790",
+   "status": "ARCHIVED",
+   "effective_status": "ARCHIVED",
+   "created_time": "2026-06-23T19:50:57+1000",
+   "updated_time": "2026-07-02T20:34:12+1000",
+   "creative": {
+    "video_id": "2127374778175525",
+    "effective_object_story_id": "748077268383005_122185366628943042",
+    "id": "2215973052496329"
+   }
+  },
+  {
+   "id": "120250860014200790",
+   "name": "Raptor-01 · Free Measure · Video-A",
+   "adset_id": "120250860014210790",
+   "campaign_id": "120250860014220790",
+   "status": "ARCHIVED",
+   "effective_status": "ARCHIVED",
+   "created_time": "2026-06-18T00:23:58+1000",
+   "updated_time": "2026-07-02T20:33:46+1000",
+   "creative": {
+    "video_id": "2201410137339290",
+    "effective_object_story_id": "748077268383005_122184713084943042",
+    "id": "1684180909544539"
+   }
+  },
+  {
+   "id": "120252382876530790",
+   "name": "New Leads ad",
+   "adset_id": "120252382876540790",
+   "campaign_id": "120252382876550790",
+   "status": "ARCHIVED",
+   "effective_status": "ARCHIVED",
+   "created_time": "2026-07-01T23:31:37+1000",
+   "updated_time": "2026-07-01T23:33:22+1000",
+   "creative": {
+    "effective_object_story_id": "748077268383005_122186949896943042",
+    "object_story_spec": {
+     "page_id": "748077268383005"
+    },
+    "id": "1327105739005408"
+   }
+  },
+  {
+   "id": "120251166292170790",
+   "name": "Raptor-02 · Free Measure · Video-A",
+   "adset_id": "120251166292180790",
+   "campaign_id": "120251166292160790",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "created_time": "2026-06-20T12:11:24+1000",
+   "updated_time": "2026-06-29T16:29:55+1000",
+   "creative": {
+    "video_id": "2191629801681268",
+    "effective_object_story_id": "748077268383005_122185113998943042",
+    "id": "1752007799300909"
+   }
+  },
+  {
+   "id": "120238854619510790",
+   "name": "Floor Levelling",
+   "adset_id": "120238854619520790",
+   "campaign_id": "120238854619530790",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "created_time": "2026-01-22T12:40:34+1000",
+   "updated_time": "2026-01-28T16:23:06+1000",
+   "creative": {
+    "video_id": "761292883407965",
+    "effective_object_story_id": "748077268383005_122133731342943042",
+    "id": "25527210613647764"
+   }
+  },
+  {
+   "id": "120239040779660790",
+   "name": "Height Difference Approach",
+   "adset_id": "120238854619520790",
+   "campaign_id": "120238854619530790",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "created_time": "2025-12-15T12:27:01+1000",
+   "updated_time": "2026-01-28T16:20:19+1000",
+   "creative": {
+    "effective_object_story_id": "748077268383005_122156551172943042",
+    "object_story_spec": {
+     "page_id": "748077268383005"
+    },
+    "id": "904221882070667"
+   }
+  },
+  {
+   "id": "120239039392280790",
+   "name": "6.5mm SPC Range",
+   "adset_id": "120238854619520790",
+   "campaign_id": "120238854619530790",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "created_time": "2025-12-15T12:29:12+1000",
+   "updated_time": "2026-01-28T16:20:19+1000",
+   "creative": {
+    "effective_object_story_id": "748077268383005_122156550314943042",
+    "object_story_spec": {
+     "page_id": "748077268383005"
+    },
+    "id": "1269016788466604"
+   }
+  },
+  {
+   "id": "120240602551270790",
+   "name": "Flooring Transformation (chapel hill)",
+   "adset_id": "120238854619520790",
+   "campaign_id": "120238854619530790",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "created_time": "2026-01-22T16:00:58+1000",
+   "updated_time": "2026-01-28T16:20:06+1000",
+   "creative": {
+    "video_id": "1469805201150423",
+    "effective_object_story_id": "748077268383005_1469805201150423",
+    "object_story_spec": {
+     "page_id": "748077268383005",
+     "video_data": {
+      "video_id": "1575524830435303"
+     }
+    },
+    "id": "1427606202272589"
+   }
+  },
+  {
+   "id": "120231725136800790",
+   "name": "Floor Prep",
+   "adset_id": "120231725136090790",
+   "campaign_id": "120231725135400790",
+   "status": "PAUSED",
+   "effective_status": "PAUSED",
+   "created_time": "2025-12-05T14:21:01+1000",
+   "updated_time": "2026-01-21T14:58:42+1000",
+   "creative": {
+    "video_id": "761292883407965",
+    "effective_object_story_id": "748077268383005_122133731342943042",
+    "id": "1569855154207354"
+   }
+  }
+ ],
+ "audiences": [
+  {
+   "id": "120252445643140790",
+   "name": "Oztop Form Openers 90d - Retarget",
+   "subtype": "ENGAGEMENT",
+   "approximate_count_lower_bound": 1000,
+   "approximate_count_upper_bound": 1000,
+   "time_created": 1783050890,
+   "time_updated": 1783050890,
+   "rule": "{\"inclusions\":{\"operator\":\"or\",\"rules\":[{\"event_sources\":[{\"type\":\"lead\",\"id\":2129625830942339,\"owner_id\":748077268383005},{\"type\":\"ig_lead_generation\",\"id\":2129625830942339,\"owner_id\":748077268383005}],\"retention_seconds\":7776000,\"filter\":{\"operator\":\"and\",\"filters\":[{\"field\":\"event\",\"operator\":\"eq\",\"value\":\"lead_generation_dropoff\"}]}}]}}",
+   "retention_days": 90,
+   "operation_status": {
+    "code": 200,
+    "description": "正常"
+   },
+   "delivery_status": {
+    "code": 200,
+    "description": "此受众可供使用了。"
+   }
+  },
+  {
+   "id": "120252445605260790",
+   "name": "Oztop Page Engagers 365d - Retarget",
+   "subtype": "ENGAGEMENT",
+   "approximate_count_lower_bound": 1000,
+   "approximate_count_upper_bound": 1000,
+   "time_created": 1783050615,
+   "time_updated": 1783050615,
+   "rule": "{\"inclusions\":{\"operator\":\"or\",\"rules\":[{\"event_sources\":[{\"type\":\"page\",\"id\":748077268383005}],\"retention_seconds\":31536000,\"filter\":{\"operator\":\"and\",\"filters\":[{\"field\":\"event\",\"operator\":\"eq\",\"value\":\"page_engaged\"}]}}]}}",
+   "retention_days": 365,
+   "operation_status": {
+    "code": 200,
+    "description": "正常"
+   },
+   "delivery_status": {
+    "code": 200,
+    "description": "此受众可供使用了。"
+   }
+  },
+  {
+   "id": "120252445512480790",
+   "name": "Oztop Video Viewers 25% - Retarget",
+   "subtype": "ENGAGEMENT",
+   "approximate_count_lower_bound": 1200,
+   "approximate_count_upper_bound": 1400,
+   "time_created": 1783050199,
+   "time_updated": 1786981587,
+   "rule": "[{\"event_name\":\"video_view_25_percent\",\"object_id\":2201410137339290},{\"event_name\":\"video_view_25_percent\",\"object_id\":964391103290917},{\"event_name\":\"video_view_25_percent\",\"object_id\":2454561404957018},{\"event_name\":\"video_view_25_percent\",\"object_id\":1904288590209550},{\"event_name\":\"video_view_25_percent\",\"object_id\":1018483021032153},{\"event_name\":\"video_view_25_percent\",\"object_id\":2446039952473057},{\"event_name\":\"video_view_25_percent\",\"object_id\":1765937077749551},{\"event_name\":\"video_view_25_percent\",\"object_id\":1687191775834083},{\"event_name\":\"video_view_25_percent\",\"object_id\":1040387065100377},{\"event_name\":\"video_view_25_percent\",\"object_id\":1009161975357455},{\"event_name\":\"video_view_25_percent\",\"object_id\":1537712584502929},{\"event_name\":\"video_view_25_percent\",\"object_id\":1300075262207626},{\"event_name\":\"video_view_25_percent\",\"object_id\":1499333188546183},{\"event_name\":\"video_view_25_percent\",\"object_id\":2107339083550997},{\"event_name\":\"video_view_25_percent\",\"object_id\":1913610732655891},{\"event_name\":\"video_view_25_percent\",\"object_id\":1586443513197661},{\"event_name\":\"video_view_25_percent\",\"object_id\":2078937886018346},{\"event_name\":\"video_view_25_percent\",\"object_id\":2212018469576003},{\"event_name\":\"video_view_25_percent\",\"object_id\":1206071332588381},{\"event_name\":\"video_view_25_percent\",\"object_id\":4383233561991408},{\"event_name\":\"video_view_25_percent\",\"object_id\":808105225626209},{\"event_name\":\"video_view_25_percent\",\"object_id\":1515413897027589},{\"event_name\":\"video_view_25_percent\",\"object_id\":4567752460161420},{\"event_name\":\"video_view_25_percent\",\"object_id\":1300143091983675},{\"event_name\":\"video_view_25_percent\",\"object_id\":1535036498318955},{\"event_name\":\"video_view_25_percent\",\"object_id\":3546824878813190},{\"event_name\":\"video_view_25_percent\",\"object_id\":1003087579280290},{\"event_name\":\"video_view_25_percent\",\"object_id\":2446035652560824},{\"event_name\":\"video_view_25_percent\",\"object_id\":1722604965548112},{\"event_name\":\"video_view_25_percent\",\"object_id\":1545864300418026},{\"event_name\":\"video_view_25_percent\",\"object_id\":1374923891203669},{\"event_name\":\"video_view_25_percent\",\"object_id\":1343942604470761},{\"event_name\":\"video_view_25_percent\",\"object_id\":2546353252481941}]",
+   "retention_days": 365,
+   "operation_status": {
+    "code": 200,
+    "description": "正常"
+   },
+   "delivery_status": {
+    "code": 200,
+    "description": "此受众可供使用了。"
+   }
+  },
+  {
+   "id": "120238453802750790",
+   "name": "Website Visitors",
+   "subtype": "WEBSITE",
+   "approximate_count_lower_bound": 20,
+   "approximate_count_upper_bound": 20,
+   "time_created": 1764907368,
+   "time_updated": 1764907368,
+   "rule": "{\"inclusions\":{\"operator\":\"or\",\"rules\":[{\"event_sources\":[{\"type\":\"pixel\",\"id\":1320907320075995}],\"retention_seconds\":2592000,\"filter\":{\"operator\":\"and\",\"filters\":[{\"field\":\"url\",\"operator\":\"i_contains\",\"value\":\"\"}]},\"template\":\"ALL_VISITORS\"}]}}",
+   "retention_days": 30,
+   "operation_status": {
+    "code": 450,
+    "description": "此受众已过期。这可能是因为：受众未被任何广告使用至少 30 天；或是受众创建至今已超过 90 天，但从未被使用。"
+   },
+   "delivery_status": {
+    "code": 200,
+    "description": "此受众可供使用了。"
+   }
+  }
+ ]
+}

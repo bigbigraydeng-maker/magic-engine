@@ -12,6 +12,10 @@ vi.mock('@/lib/meta/page-posts', () => ({
   getPageAccessToken: vi.fn(),
   publishPagePhotoPost: vi.fn(),
 }))
+vi.mock('@/lib/meta/first-comment', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/meta/first-comment')>()),
+  ensureFacebookFirstComment: vi.fn(),
+}))
 
 import { POST } from '../route'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
@@ -19,7 +23,13 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-manager'
 import { getPageAccessToken, publishPagePhotoPost } from '@/lib/meta/page-posts'
-import { publishIdempotencyKey } from '@/lib/campaign/daily-plan-publish'
+import { ensureFacebookFirstComment } from '@/lib/meta/first-comment'
+import {
+  CampaignDailyPublishMetaSchema,
+  DailyPlanPostPublishedEventSchema,
+  StoryResolveDueSchema,
+  publishIdempotencyKey,
+} from '@/lib/campaign/daily-plan-publish'
 
 const mockAccess = vi.mocked(requirePaidClientAccess)
 const mockFrom = vi.mocked(supabaseAdmin.from)
@@ -28,6 +38,7 @@ const mockGetMetaToken = vi.mocked(getMetaTokenForClient)
 const mockGetStoredPageToken = vi.mocked(getStoredPageToken)
 const mockGetPageToken = vi.mocked(getPageAccessToken)
 const mockPublish = vi.mocked(publishPagePhotoPost)
+const mockFirstComment = vi.mocked(ensureFacebookFirstComment)
 
 const CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
 const CAMPAIGN_ID = 'a0000000-0000-0000-0000-000000000001'
@@ -38,6 +49,15 @@ const REVIEW_REVISION = '10000000-0000-0000-0000-000000000001'
 const PAGE_ID = '227633594573276'
 const DATES = ['2026-09-03', '2026-09-04']
 const ASSETS = ['e0000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000002']
+const POST_CHECK_KEYS = [
+  'factual_claims_have_source', 'factual_claims_source_verified', 'logo_watermark_present',
+  'asset_provenance_labeled', 'asset_provenance_matches_claim_context',
+]
+const POST_AUTO_KEYS = ['cta_in_first_comment_not_body', 'first_comment_link_has_tracking_params']
+const PASS_POST_CHECKLIST = [
+  ...POST_CHECK_KEYS.map(key => ({ key, judge: 'HUMAN', outcome: 'PASS', detail: null, source_ref: key.startsWith('factual_') ? 'https://example.test/source' : null })),
+  ...POST_AUTO_KEYS.map(key => ({ key, judge: 'AUTO', outcome: 'PASS', detail: 'measured', source_ref: null })),
+]
 
 function keyFor(date: string) {
   return publishIdempotencyKey({
@@ -122,6 +142,8 @@ function planData(overrides: Record<string, unknown> = {}) {
         reason: null,
         reviewed_at: '2026-09-01T15:05:00.000Z',
         reviewed_by_user_id: USER_ID,
+        reviewer_role: 'admin',
+        checklist: PASS_POST_CHECKLIST,
       }])),
     },
     publish_queue_meta: queueReceipt(),
@@ -148,9 +170,18 @@ interface TableState {
   assets?: unknown[]
   facebookPageId?: string | null
   updateResult?: unknown
+  /** `source` on every stubbed client_assets row; null models a missing source. */
+  assetSource?: string | null
+  /** Error returned by the cron_run_logs insert (measurement failure record). */
+  recordInsertError?: { message: string } | null
+  /** `clients.factory_config` as the price fact check reads it. */
+  factoryConfig?: Record<string, unknown> | null
+  /** Make the `clients` read fail (the price fact check must then fail closed). */
+  clientsReadError?: { message: string }
 }
 
 let updateSpy: ReturnType<typeof vi.fn>
+let recordInsertSpy: ReturnType<typeof vi.fn>
 
 /** Fake Supabase modelled by TABLE, not by call order. */
 function stubTables(state: TableState = {}) {
@@ -161,13 +192,28 @@ function stubTables(state: TableState = {}) {
     mime_type: 'image/jpeg',
     status: 'analyzed',
     archived_at: null,
+    source: state.assetSource === undefined ? 'client_verified' : state.assetSource,
   }))
   updateSpy = vi.fn()
+  recordInsertSpy = vi.fn()
 
   mockFrom.mockImplementation(((table: string) => {
+    if (table === 'cron_run_logs') {
+      return {
+        insert: vi.fn().mockImplementation(async (row: unknown) => {
+          recordInsertSpy(row)
+          return { error: state.recordInsertError ?? null }
+        }),
+      }
+    }
     if (table === 'client_assets') return chain({ data: assets, error: null }, 'in')
     if (table === 'clients') {
-      return chain({ data: { facebook_page_id: state.facebookPageId ?? PAGE_ID }, error: null }, 'maybeSingle')
+      return chain(
+        state.clientsReadError
+          ? { data: null, error: state.clientsReadError }
+          : { data: { facebook_page_id: state.facebookPageId ?? PAGE_ID, factory_config: state.factoryConfig ?? null }, error: null },
+        'maybeSingle',
+      )
     }
     if (table === 'social_plans') {
       const read = chain({ data: [{ id: PLAN_ID, plan_data: plan, created_at: PLAN_REVISION }], error: null }, 'limit')
@@ -202,16 +248,17 @@ function armProvider() {
   mockPublish.mockImplementation(async () => {
     counter += 1
     return {
-      postId: `${PAGE_ID}_9${counter}`,
+      postId: `${PAGE_ID}_175000009${counter}`,
       postIdSource: 'post_id' as const,
-      permalink: `https://www.facebook.com/${PAGE_ID}_9${counter}`,
-      raw: { id: `photo_${counter}`, post_id: `${PAGE_ID}_9${counter}` },
+      permalink: `https://www.facebook.com/${PAGE_ID}_175000009${counter}`,
+      raw: { id: `photo_${counter}`, post_id: `${PAGE_ID}_175000009${counter}` },
     }
   })
 }
 
 beforeEach(() => {
   allow()
+  mockFirstComment.mockResolvedValue('comment_1')
 })
 
 afterEach(() => {
@@ -315,6 +362,21 @@ describe('publish bridge — dry run is the default', () => {
 })
 
 describe('publish bridge — review chain is mandatory', () => {
+  it('refuses a legacy PASS whose structured checklist is absent', async () => {
+    const plan = planData()
+    const posts = (plan as unknown as { review_meta: { posts: Record<string, Record<string, unknown>> } }).review_meta.posts
+    delete posts[DATES[0]].checklist
+    delete posts[DATES[0]].reviewer_role
+    stubTables({ plan })
+
+    const response = await POST(request({ no_publish: false }), params)
+
+    expect(response.status).toBe(409)
+    expect((await response.json()).error).toBe('REVIEW_CHECKLIST_REQUIRED')
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(mockGetMetaToken).not.toHaveBeenCalled()
+  })
+
   it('refuses to publish a plan that never got a no-publish queue receipt', async () => {
     const plan = planData()
     delete (plan as Record<string, unknown>).publish_queue_meta
@@ -473,12 +535,12 @@ describe('publish bridge — live run records real provider ids', () => {
     expect(json.status).toBe('PUBLISHED')
     expect(mockPublish).toHaveBeenCalledTimes(2)
     expect(json.receipt.published.map((p: { post_id: string }) => p.post_id)).toEqual([
-      `${PAGE_ID}_91`,
-      `${PAGE_ID}_92`,
+      `${PAGE_ID}_1750000091`,
+      `${PAGE_ID}_1750000092`,
     ])
     expect(json.receipt.published[0].page_id).toBe(PAGE_ID)
     expect(json.receipt.published[0].published_at).toMatch(/^\d{4}-\d{2}-\d{2}T/)
-    expect(json.receipt.published[0].provider_response).toEqual({ id: 'photo_1', post_id: `${PAGE_ID}_91` })
+    expect(json.receipt.published[0].provider_response).toEqual({ id: 'photo_1', post_id: `${PAGE_ID}_1750000091` })
     expect(json.receipt.publishing_authorization).toBe('AUTHORIZED')
     expect(json.receipt.approved_by_user_id).toBe(USER_ID)
   })
@@ -494,7 +556,7 @@ describe('publish bridge — live run records real provider ids', () => {
       pageId: PAGE_ID,
       pageAccessToken: 'stored-page-token',
       imageUrl: `https://assets.test/${ASSETS[0]}.jpg`,
-      message: 'Hook 1\n\nBody 1\n\nEnquire now: https://ctstours.co.nz/tours/china-classic',
+      message: 'Hook 1\n\nBody 1',
     })
   })
 
@@ -512,7 +574,7 @@ describe('publish bridge — live run records real provider ids', () => {
       client_id: CLIENT_ID,
       plan_id: PLAN_ID,
       date: DATES[0],
-      post_id: `${PAGE_ID}_91`,
+      post_id: `${PAGE_ID}_1750000091`,
       page_id: PAGE_ID,
       measure_at: [
         { hours: 4, at: expect.any(String) },
@@ -539,10 +601,10 @@ describe('publish bridge — live run records real provider ids', () => {
     mockPublish
       .mockRejectedValueOnce(new Error('publishPagePhotoPost: image url unreachable'))
       .mockResolvedValueOnce({
-        postId: `${PAGE_ID}_93`,
+        postId: `${PAGE_ID}_1750000093`,
         postIdSource: 'post_id',
-        permalink: `https://www.facebook.com/${PAGE_ID}_93`,
-        raw: { post_id: `${PAGE_ID}_93` },
+        permalink: `https://www.facebook.com/${PAGE_ID}_1750000093`,
+        raw: { post_id: `${PAGE_ID}_1750000093` },
       } as never)
 
     const json = await (await POST(request({ no_publish: false }), params)).json()
@@ -552,7 +614,7 @@ describe('publish bridge — live run records real provider ids', () => {
     expect(json.receipt.failed).toHaveLength(1)
     expect(json.receipt.failed[0].date).toBe(DATES[0])
     expect(json.receipt.published).toHaveLength(1)
-    expect(json.receipt.published[0].post_id).toBe(`${PAGE_ID}_93`)
+    expect(json.receipt.published[0].post_id).toBe(`${PAGE_ID}_1750000093`)
   })
 
   it('never posts a Post whose idempotency key is already on the receipt', async () => {
@@ -608,9 +670,205 @@ describe('publish bridge — live run records real provider ids', () => {
     expect(response.status).toBe(500)
     expect(json.error).toBe('PUBLISH_RECEIPT_NOT_PERSISTED')
     expect(json.receipt.published.map((p: { post_id: string }) => p.post_id)).toEqual([
-      `${PAGE_ID}_91`,
-      `${PAGE_ID}_92`,
+      `${PAGE_ID}_1750000091`,
+      `${PAGE_ID}_1750000092`,
     ])
+  })
+
+  it('🔴 scheduled photo (Graph returns only id): receipt keeps the photo id, a story-resolve event is sent, no published event', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-02T00:00:00.000Z'))
+    stubTables()
+    armProvider()
+    mockPublish.mockReset()
+    // Real Graph shape for a scheduled photo: `{id}` only.
+    mockPublish.mockResolvedValueOnce({
+      postId: '1750835520181969',
+      postIdSource: 'id',
+      permalink: 'https://www.facebook.com/1750835520181969',
+      raw: { id: '1750835520181969' },
+    })
+
+    const response = await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(json.status).toBe('PUBLISHED')
+    expect(json.receipt.failed).toEqual([])
+    const entry = json.receipt.published[0]
+    expect(entry.post_id).toBe('1750835520181969')
+    expect(entry.post_id_source).toBe('id')
+    expect(entry.scheduled_publish_time).toBe('2026-09-02T20:00:00.000Z')
+    expect(entry).not.toHaveProperty('measurement_skipped_reason')
+    expect(CampaignDailyPublishMetaSchema.safeParse(json.receipt).success).toBe(true)
+
+    expect(mockSendInngestEvent).toHaveBeenCalledTimes(1)
+    const event = mockSendInngestEvent.mock.calls[0][0]
+    expect(event.name).toBe('daily_plan.post.story_resolve_due')
+    expect(event.id).toBe(`${keyFor(DATES[0])}:resolve:1750835520181969`)
+    expect(StoryResolveDueSchema.safeParse(event.data).success).toBe(true)
+    expect(event.data).toMatchObject({
+      client_id: CLIENT_ID,
+      campaign_id: CAMPAIGN_ID,
+      plan_id: PLAN_ID,
+      plan_revision: PLAN_REVISION,
+      review_revision: REVIEW_REVISION,
+      date: DATES[0],
+      idempotency_key: keyFor(DATES[0]),
+      photo_id: '1750835520181969',
+      page_id: PAGE_ID,
+      scheduled_publish_time: '2026-09-02T20:00:00.000Z',
+      measure_at: [
+        { hours: 4, at: '2026-09-03T00:00:00.000Z' },
+        { hours: 72, at: '2026-09-05T20:00:00.000Z' },
+      ],
+    })
+    // It must not smuggle a post id in: the story id does not exist yet.
+    expect(event.data).not.toHaveProperty('post_id')
+    expect(DailyPlanPostPublishedEventSchema.safeParse(event.data).success).toBe(false)
+    expect(json.receipt.event_ids).toEqual(['evt_pub_1'])
+    expect(json.measurement_skipped).toEqual([])
+  })
+
+  it('🔴 contract violation: stays published (no re-post), no event sent, reason recorded and surfaced', async () => {
+    stubTables()
+    armProvider()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockPublish.mockReset()
+    // A non-numeric photo id cannot satisfy the story-resolve contract.
+    mockPublish.mockResolvedValueOnce({
+      postId: 'not-a-photo-id',
+      postIdSource: 'id',
+      permalink: 'https://www.facebook.com/not-a-photo-id',
+      raw: { id: 'not-a-photo-id' },
+    })
+
+    const response = await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(json.success).toBe(true)
+    expect(json.status).toBe('PUBLISHED')
+    expect(json.receipt.failed).toEqual([])
+    const entry = json.receipt.published[0]
+    expect(entry.measurement_skipped_reason).toBe('event_contract_invalid')
+    expect(mockSendInngestEvent).not.toHaveBeenCalled()
+    expect(recordInsertSpy).toHaveBeenCalledTimes(1)
+    expect(recordInsertSpy.mock.calls[0][0]).toMatchObject({
+      status: 'failed',
+      summary: { outcome: 'event_contract_invalid', client_id: CLIENT_ID, date: DATES[0], idempotency_key: keyFor(DATES[0]), photo_id: 'not-a-photo-id' },
+    })
+    expect(json.receipt.event_ids).toEqual([])
+    expect(json.measurement_skipped).toEqual([
+      { date: DATES[0], post_id: 'not-a-photo-id', reason: entry.measurement_skipped_reason },
+    ])
+    expect(CampaignDailyPublishMetaSchema.safeParse(json.receipt).success).toBe(true)
+  })
+
+  it('🔴 scheduled photo: resolve event send fails → failed record for the to-do list, receipt PUBLISHED, posted once', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-02T00:00:00.000Z'))
+    stubTables()
+    armProvider()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockSendInngestEvent.mockRejectedValue(new Error('INNGEST_EVENT_KEY_MISSING'))
+    mockPublish.mockReset()
+    mockPublish.mockResolvedValueOnce({
+      postId: '1750835520181969',
+      postIdSource: 'id',
+      permalink: 'https://www.facebook.com/1750835520181969',
+      raw: { id: '1750835520181969' },
+    })
+
+    const response = await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+    const json = await response.json()
+
+    expect(mockPublish).toHaveBeenCalledTimes(1)
+    expect(response.status).toBe(200)
+    expect(json.status).toBe('PUBLISHED')
+    expect(json.receipt.failed).toEqual([])
+    expect(json.receipt.published[0].measurement_skipped_reason).toBe('event_send_failed')
+    expect(json.receipt.event_ids).toEqual([])
+    expect(recordInsertSpy).toHaveBeenCalledTimes(1)
+    expect(recordInsertSpy.mock.calls[0][0]).toMatchObject({
+      job_name: 'daily-plan-post-story-resolve',
+      status: 'failed',
+      summary: {
+        outcome: 'event_send_failed',
+        client_id: CLIENT_ID,
+        date: DATES[0],
+        idempotency_key: keyFor(DATES[0]),
+        photo_id: '1750835520181969',
+      },
+    })
+    expect(updateSpy).toHaveBeenCalledTimes(1)
+    expect(json.measurement_skipped).toEqual([
+      { date: DATES[0], post_id: '1750835520181969', reason: 'event_send_failed' },
+    ])
+  })
+
+  it('🔴 immediate post: event send fails and the failure record cannot be written → receipt still saved, not a failed batch', async () => {
+    stubTables({ recordInsertError: { message: 'cron_run_logs unavailable' } })
+    armProvider()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockSendInngestEvent.mockRejectedValue(new Error('network'))
+
+    const response = await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(json.status).toBe('PUBLISHED')
+    expect(json.success).toBe(true)
+    expect(mockPublish).toHaveBeenCalledTimes(1)
+    expect(recordInsertSpy).toHaveBeenCalledTimes(1)
+    expect(recordInsertSpy.mock.calls[0][0]).toMatchObject({ summary: { outcome: 'event_send_failed', post_id: `${PAGE_ID}_1750000091` } })
+    expect(json.receipt.published[0].measurement_skipped_reason).toBe('event_send_failed')
+    expect(updateSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('🔴 a re-run over a receipt holding a bare photo id does not publish that date again', async () => {
+    stubTables({
+      plan: planData({
+        publish_meta: {
+          schema_version: 1,
+          event_name: 'daily_plan.post.published',
+          status: 'PUBLISHED',
+          request_id: '30000000-0000-0000-0000-000000000001',
+          client_id: CLIENT_ID,
+          campaign_id: CAMPAIGN_ID,
+          plan_id: PLAN_ID,
+          plan_revision: PLAN_REVISION,
+          review_revision: REVIEW_REVISION,
+          page_id: PAGE_ID,
+          publishing_authorization: 'AUTHORIZED',
+          approved_by_user_id: USER_ID,
+          created_at: '2026-09-02T00:00:00.000Z',
+          // Legacy shape already in production: scheduled photo, bare photo id.
+          published: [{
+            date: DATES[0],
+            idempotency_key: keyFor(DATES[0]),
+            post_id: '1750835520181969',
+            post_id_source: 'id',
+            page_id: PAGE_ID,
+            published_at: '2026-09-02T00:00:00.000Z',
+            scheduled_publish_time: '2026-09-02T20:00:00.000Z',
+            permalink: 'https://www.facebook.com/1750835520181969',
+            provider_response: { id: '1750835520181969' },
+          }],
+          failed: [],
+          event_ids: [],
+        },
+      }),
+    })
+    armProvider()
+
+    const json = await (await POST(request({ no_publish: false, dates: [DATES[0]] }), params)).json()
+
+    expect(json.status).toBe('PUBLISHED')
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(mockSendInngestEvent).not.toHaveBeenCalled()
+    expect(json.skipped_as_duplicate.map((p: { date: string }) => p.date)).toEqual([DATES[0]])
+    expect(json.receipt.published[0].post_id).toBe('1750835520181969')
   })
 
   it('still returns the post id when the measurement event fails to send', async () => {
@@ -622,7 +880,330 @@ describe('publish bridge — live run records real provider ids', () => {
     const json = await (await POST(request({ no_publish: false, dates: [DATES[0]] }), params)).json()
 
     expect(json.status).toBe('PUBLISHED')
-    expect(json.receipt.published[0].post_id).toBe(`${PAGE_ID}_91`)
+    expect(json.receipt.published[0].post_id).toBe(`${PAGE_ID}_1750000091`)
     expect(json.receipt.event_ids).toEqual([])
+  })
+})
+
+describe('publish bridge — price claim gate', () => {
+  /** Plan whose reviewed copy carries a real price in every Post body. */
+  function pricedPlan() {
+    const plan = planData()
+    for (const bundle of (plan as unknown as { bundles: Array<{ post: { body: string } }> }).bundles) {
+      bundle.post.body = 'Tour from NZD $2,699 per person'
+    }
+    return plan
+  }
+
+  it('blocks a dry run before any provider call, so the reviewer sees it pre-authorisation', async () => {
+    stubTables({ plan: pricedPlan(), assetSource: 'stock' })
+
+    const response = await POST(request(), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(json.error).toBe('PRICE_CLAIM_UNBACKED')
+    expect(json.blocked.map((b: { date: string }) => b.date)).toEqual(DATES)
+    for (const block of json.blocked as Array<{ message: string }>) {
+      expect(typeof block.message).toBe('string')
+      expect(block.message.length).toBeGreaterThan(0)
+    }
+    expect(typeof json.hint).toBe('string')
+    expect(json.hint.length).toBeGreaterThan(0)
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(mockSendInngestEvent).not.toHaveBeenCalled()
+    expect(mockGetMetaToken).not.toHaveBeenCalled()
+  })
+
+  it('blocks a live run before token lookup, provider call or receipt write', async () => {
+    stubTables({ plan: pricedPlan(), assetSource: 'stock' })
+    armProvider()
+
+    const response = await POST(request({ no_publish: false }), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(json.error).toBe('PRICE_CLAIM_UNBACKED')
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(mockSendInngestEvent).not.toHaveBeenCalled()
+    expect(mockGetStoredPageToken).not.toHaveBeenCalled()
+    expect(updateSpy).not.toHaveBeenCalled()
+  })
+
+  it('lets a backed price claim publish normally', async () => {
+    // Image is client-verified AND the price matches the client's confirmed facts (second gate).
+    const factoryConfig = {
+      render: { creatomate: { offers: { tour: { tour: 'Classic China', url: 'https://ctstours.co.nz/tours/china-classic', price_line: 'From NZD $2,699 pp' } } } },
+    }
+    stubTables({ plan: pricedPlan(), assetSource: 'client_verified', factoryConfig })
+    armProvider()
+
+    const response = await POST(request({ no_publish: false }), params)
+
+    expect(response.status).toBe(200)
+    expect(mockPublish).toHaveBeenCalledTimes(DATES.length)
+  })
+
+  it('fails closed when the asset row has no source at all', async () => {
+    stubTables({ plan: pricedPlan(), assetSource: null })
+    armProvider()
+
+    const response = await POST(request({ no_publish: false }), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(json.error).toBe('PRICE_CLAIM_UNBACKED')
+    expect(mockPublish).not.toHaveBeenCalled()
+  })
+
+  it('does not block an unpriced Post even when the asset source is unbacked', async () => {
+    stubTables({ assetSource: 'stock' })
+    armProvider()
+
+    const response = await POST(request({ no_publish: false }), params)
+
+    expect(response.status).toBe(200)
+    expect(mockPublish).toHaveBeenCalledTimes(DATES.length)
+  })
+})
+
+describe('publish bridge — first comment', () => {
+  it('posts the first comment on an immediate publish, keyed to the real post id', async () => {
+    stubTables()
+    armProvider()
+
+    const json = await (await POST(request({ no_publish: false, dates: [DATES[0]] }), params)).json()
+
+    expect(mockFirstComment).toHaveBeenCalledTimes(1)
+    const call = mockFirstComment.mock.calls[0][0]
+    expect(call.objectId).toBe(`${PAGE_ID}_1750000091`)
+    expect(call.expectedPageId).toBe(PAGE_ID)
+    expect(call.failureLabel).toBe('每日计划帖')
+    expect(call.message).toContain('Enquire now')
+    expect(call.message).toContain('utm_content=')
+    expect(json.receipt.published[0].first_comment_status).toBe('POSTED')
+    expect(json.receipt.published[0].first_comment_id).toBe('comment_1')
+  })
+
+  it('marks a scheduled photo PENDING_PUBLISH and carries the comment text into the resolve event', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-02T00:00:00.000Z'))
+    stubTables()
+    armProvider()
+    mockPublish.mockReset()
+    mockPublish.mockResolvedValueOnce({
+      postId: '1750835520181969',
+      postIdSource: 'id',
+      permalink: 'https://www.facebook.com/1750835520181969',
+      raw: { id: '1750835520181969' },
+    })
+
+    const json = await (await POST(request({ no_publish: false, dates: [DATES[0]] }), params)).json()
+
+    expect(mockFirstComment).not.toHaveBeenCalled()
+    expect(json.receipt.published[0].first_comment_status).toBe('PENDING_PUBLISH')
+    expect(mockSendInngestEvent).toHaveBeenCalledTimes(1)
+    const event = mockSendInngestEvent.mock.calls[0][0]
+    expect(event.name).toBe('daily_plan.post.story_resolve_due')
+    expect(event.data.first_comment_text).toContain('Enquire now')
+  })
+
+  it('🔴 scheduled publish: event send fails → failure record carries the pending first comment text', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-02T00:00:00.000Z'))
+    stubTables()
+    armProvider()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockSendInngestEvent.mockRejectedValue(new Error('INNGEST_EVENT_KEY_MISSING'))
+    mockPublish.mockReset()
+    mockPublish.mockResolvedValueOnce({
+      postId: '1750835520181969',
+      postIdSource: 'id',
+      permalink: 'https://www.facebook.com/1750835520181969',
+      raw: { id: '1750835520181969' },
+    })
+
+    const response = await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(json.receipt.published[0].measurement_skipped_reason).toBe('event_send_failed')
+    expect(json.receipt.published[0].first_comment_status).toBe('PENDING_PUBLISH')
+    expect(recordInsertSpy).toHaveBeenCalledTimes(1)
+    expect(recordInsertSpy.mock.calls[0][0]).toMatchObject({
+      summary: {
+        outcome: 'event_send_failed',
+        photo_id: '1750835520181969',
+        first_comment_text: expect.stringContaining('Enquire now'),
+      },
+    })
+  })
+
+  it('keeps the Post published when the first comment throws — no re-post, no failed entry', async () => {
+    stubTables()
+    armProvider()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockFirstComment.mockRejectedValue(new Error('boom'))
+
+    const response = await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(mockPublish).toHaveBeenCalledTimes(1)
+    expect(json.receipt.failed).toEqual([])
+    expect(json.receipt.published[0].first_comment_status).toBe('FAILED')
+  })
+
+  it('refuses a Post whose body carries the CTA link, before any provider call', async () => {
+    const plan = planData()
+    const bundles = (plan as unknown as { bundles: Array<{ post: { body: string } }> }).bundles
+    bundles[0].post.body = 'Book at https://ctstours.co.nz/x'
+    stubTables({ plan })
+    armProvider()
+
+    const response = await POST(request({ no_publish: false }), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(json.error).toBe('FIRST_COMMENT_CHECK_FAILED')
+    expect(json.blocked.map((b: { date: string }) => b.date)).toEqual([DATES[0]])
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(mockSendInngestEvent).not.toHaveBeenCalled()
+    expect(mockGetStoredPageToken).not.toHaveBeenCalled()
+  })
+
+  it('refuses the same leak on a dry run', async () => {
+    const plan = planData()
+    const bundles = (plan as unknown as { bundles: Array<{ post: { body: string } }> }).bundles
+    bundles[0].post.body = 'Book at https://ctstours.co.nz/x'
+    stubTables({ plan })
+
+    const response = await POST(request(), params)
+
+    expect(response.status).toBe(409)
+    expect((await response.json()).error).toBe('FIRST_COMMENT_CHECK_FAILED')
+    expect(mockPublish).not.toHaveBeenCalled()
+  })
+
+  it('previews the first comment on a dry run without posting it', async () => {
+    stubTables()
+
+    const json = await (await POST(request(), params)).json()
+
+    expect(typeof json.would_publish[0].first_comment_preview).toBe('string')
+    expect(json.would_publish[0].first_comment_preview).toContain('Enquire now')
+    expect(mockFirstComment).not.toHaveBeenCalled()
+  })
+})
+
+describe('publish bridge — price fact check', () => {
+  // Fictional operator; the check is client-agnostic and reads facts from `clients.factory_config`.
+  const FACTORY_CONFIG = {
+    render: {
+      creatomate: {
+        offers: {
+          'alps-akl': {
+            tour: 'Alpine Journeys — Swiss Alps Explorer (Auckland departure)',
+            price_line: '8 Nights · From NZD $5,400 pp',
+            single_supplement: 'NZD $650',
+            url: 'https://ctstours.co.nz/tours/china-classic',
+          },
+        },
+      },
+    },
+  }
+
+  function pricedPlan(price: string) {
+    return planData({
+      bundles: DATES.map((date, index) => ({
+        date,
+        post: {
+          hook: 'Swiss Alps Explorer',
+          body: `Departing Auckland. ${price} per person twin share.`,
+          cta: 'Enquire now',
+          cta_url: 'https://ctstours.co.nz/tours/china-classic',
+          image_asset_id: ASSETS[index],
+        },
+        story: null,
+        reel: null,
+      })),
+    })
+  }
+
+  it('lets a price that matches the client facts through (dry run)', async () => {
+    stubTables({ plan: pricedPlan('NZD $5,400'), factoryConfig: FACTORY_CONFIG })
+
+    const response = await POST(request(), params)
+
+    expect(response.status).toBe(200)
+    expect((await response.json()).mode).toBe('DRY_RUN')
+  })
+
+  it('blocks a wrong price on a dry run, naming each date and the real number', async () => {
+    stubTables({ plan: pricedPlan('NZD $4,400'), factoryConfig: FACTORY_CONFIG })
+
+    const response = await POST(request(), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(json.error).toBe('PRICE_FACT_UNVERIFIED')
+    expect(json.blocked.map((b: { date: string }) => b.date)).toEqual(DATES)
+    expect(json.blocked[0].reason).toBe('mismatch')
+    expect(json.blocked[0].message).toContain('4,400')
+    expect(json.blocked[0].message).toContain('5,400')
+    expect(mockPublish).not.toHaveBeenCalled()
+  })
+
+  it('blocks a live run before token lookup, provider call, event or receipt write', async () => {
+    stubTables({ plan: pricedPlan('NZD $4,400'), factoryConfig: FACTORY_CONFIG })
+    armProvider()
+
+    const response = await POST(request({ no_publish: false }), params)
+
+    expect(response.status).toBe(409)
+    expect((await response.json()).error).toBe('PRICE_FACT_UNVERIFIED')
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(mockSendInngestEvent).not.toHaveBeenCalled()
+    expect(mockGetStoredPageToken).not.toHaveBeenCalled()
+    expect(mockGetMetaToken).not.toHaveBeenCalled()
+    expect(updateSpy).not.toHaveBeenCalled()
+  })
+
+  it('blocks a priced post when the client has no price facts configured (cannot compare = block)', async () => {
+    stubTables({ plan: pricedPlan('NZD $5,400'), factoryConfig: null })
+
+    const response = await POST(request(), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(json.error).toBe('PRICE_FACT_UNVERIFIED')
+    expect(json.blocked[0].reason).toBe('no_facts')
+  })
+
+  it('fails closed when the client config cannot be read — never treats it as "nothing to check"', async () => {
+    stubTables({ plan: pricedPlan('NZD $5,400'), factoryConfig: FACTORY_CONFIG, clientsReadError: { message: 'db down' } })
+    armProvider()
+
+    const response = await POST(request({ no_publish: false }), params)
+
+    expect(response.status).toBe(500)
+    expect(mockPublish).not.toHaveBeenCalled()
+  })
+
+  it('does not stop a post that states no price, even with no facts configured', async () => {
+    stubTables({ factoryConfig: null })
+
+    const response = await POST(request(), params)
+
+    expect(response.status).toBe(200)
+  })
+
+  it('keeps the image-provenance gate first when both gates would block', async () => {
+    stubTables({ plan: pricedPlan('NZD $4,400'), factoryConfig: FACTORY_CONFIG, assetSource: 'stock' })
+
+    const response = await POST(request(), params)
+
+    expect(response.status).toBe(409)
+    expect((await response.json()).error).toBe('PRICE_CLAIM_UNBACKED')
   })
 })

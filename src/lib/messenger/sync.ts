@@ -10,8 +10,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
-import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-manager'
-import { getPageAccessToken } from '@/lib/meta/page-posts'
+import { authorizePageSync } from '@/lib/meta/page-sync-authorization'
 import { fetchPageConversations, type MessengerConversation } from '@/lib/meta/conversations'
 import { linkMessengerConversation, loadIdentityIndex } from '@/lib/messenger/link-contacts'
 import { backfillUnlinkedConversations } from '@/lib/messenger/backfill'
@@ -48,7 +47,7 @@ export interface MessengerSyncResult {
   backfillRemaining: number
   /** 这一轮翻过私信找开场白的人数（补电话邮箱用）。 */
   leadIntroScanned: number
-  skipped?: 'no_page_id' | 'no_meta_token' | 'no_page_token'
+  skipped?: 'no_page_id' | 'no_meta_token' | 'no_page_token' | 'page_not_verified'
   error?: string
 }
 
@@ -236,19 +235,18 @@ export async function syncClientMessenger(
    */
   const details = await backfillLeadIntroDetails(client.id)
 
-  // Preferred: a Page token stored by the "连接 Meta" button. Falls back to
-  // deriving one from an env-var user token, which only works when that
-  // identity holds a role on the Page — the gap that left 30 Kiteroa skipping
-  // with `no_page_token` while its ads spent and its inbox filled up.
-  let pageToken = await getStoredPageToken(client.id, pageId)
-
-  if (!pageToken) {
-    const userToken = await getMetaTokenForClient(client.id)
-    if (!userToken) return { ...base, skipped: 'no_meta_token' }
-    pageToken = await getPageAccessToken(userToken, pageId)
+  // AD-SEC-4: only a Page verified as this client's is read (page-sync-authorization.ts).
+  // Token order is unchanged: a Page token stored by the "连接 Meta" button, else
+  // one derived from an env-var user token — the gap that left 30 Kiteroa
+  // skipping with `no_page_token` while its ads spent and its inbox filled up.
+  const auth = await authorizePageSync(supabaseAdmin, client.id, pageId, process.env)
+  if (!auth.ok) {
+    if (auth.skipped !== 'page_not_verified') return { ...base, skipped: auth.skipped }
+    // Reported as an error so the hourly run counts it as failed — a paused
+    // inbox must not look like a quiet hour. The daily todo tells staff how to fix it.
+    return { ...base, skipped: auth.skipped, error: `page_not_verified: ${auth.reason}` }
   }
-
-  if (!pageToken) return { ...base, skipped: 'no_page_token' }
+  const pageToken = auth.pageToken
 
   try {
     const watermark = await getWatermark(client.id)

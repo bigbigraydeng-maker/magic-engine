@@ -15,6 +15,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { Resend } from 'resend'
 import { meMailFrom, ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
+import { resolveAdsPlaybook } from './playbooks'
 
 type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history' | 'paused'
 
@@ -87,7 +88,9 @@ export function buildBody(
   payload: NarrativePayload,
   decision: SendDecision,
   dashboardUrl: string,
+  industry: string | null = null,
 ): string {
+  const playbook = resolveAdsPlaybook(industry)
   const campaigns = payload.campaigns ?? []
   const needAction = campaigns.filter(c => c.verdict === 'alert' || c.verdict === 'watch')
   // Count ONLY campaigns actually judged healthy. `evaluated` includes paused
@@ -109,12 +112,12 @@ export function buildBody(
     const n = needAction.length
     lead = `${decision === 'alert' ? '🔴' : '🟡'} 今天有 ${n} 件事${decision === 'alert' ? '要看' : '可以留意'}:`
     items = needAction.map((c, i) => {
-      const cpl = c.latest_results_7d > 0 ? ` · 每个询盘 $${(c.latest_spend_7d / c.latest_results_7d).toFixed(1)}` : ''
+      const cpl = c.latest_results_7d > 0 ? ` · ${playbook.costPerResultLabel} $${(c.latest_spend_7d / c.latest_results_7d).toFixed(1)}` : ''
       return `
         <div style="margin:12px 0;padding:12px 14px;background:#fef2f2;border-radius:8px">
           <div style="font-weight:600;color:#0f172a">${i + 1}. ${esc(c.campaign_name)}</div>
           <div style="margin-top:4px;font-size:14px;color:#475569">${esc(c.headline)}</div>
-          <div style="margin-top:6px;font-size:12px;color:#94a3b8">近 7 天花费 $${c.latest_spend_7d.toFixed(0)} · 询盘 ${c.latest_results_7d}${cpl}</div>
+          <div style="margin-top:6px;font-size:12px;color:#94a3b8">近 7 天花费 $${c.latest_spend_7d.toFixed(0)} · ${playbook.resultNoun} ${c.latest_results_7d}${cpl}</div>
           <div style="margin-top:6px;font-size:12px;color:#64748b">→ 具体怎么处理,下一步的处方会给到,无需你手动操作。</div>
         </div>`
     }).join('')
@@ -155,7 +158,7 @@ export async function sendAdHealthDigest(
   try {
     // Today's narrative (+ its email state, for idempotency) and the previous
     // day's verdict (for green de-frequency).
-    const [todayRes, prevRes] = await Promise.all([
+    const [todayRes, prevRes, clientRes] = await Promise.all([
       supabaseAdmin
         .from('ad_health_narratives')
         .select('payload, email_status')
@@ -170,7 +173,17 @@ export async function sendAdHealthDigest(
         .order('insight_date', { ascending: false })
         .limit(1)
         .maybeSingle(),
+      // Industry only picks the result noun in the body (ads playbook, G11).
+      supabaseAdmin
+        .from('clients')
+        .select('industry')
+        .eq('id', clientId)
+        .maybeSingle(),
     ])
+    if (clientRes.error) {
+      console.warn('[ads-strategy/digest] 读客户行业失败，文案改用中性词', { clientId, error: clientRes.error.message })
+    }
+    const industry = (clientRes.data as { industry?: string | null } | null)?.industry ?? null
 
     const payload = todayRes.data?.payload as NarrativePayload | undefined
     if (!payload) return { decision: 'skip', sent: false, error: 'narrative not found' }
@@ -209,7 +222,7 @@ export async function sendAdHealthDigest(
       from: meMailFrom('Magic Engine 广告自检'),
       to,
       subject: buildSubject(clientName, insightDate, decision),
-      html: buildBody(payload, decision, dashboardUrl),
+      html: buildBody(payload, decision, dashboardUrl, industry),
     })
 
     if (error) {

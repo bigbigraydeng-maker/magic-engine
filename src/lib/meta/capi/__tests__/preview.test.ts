@@ -14,6 +14,7 @@ import type { ClientSendConfig, OutcomeForSend } from '@/lib/conversions/destina
 const CONFIG: ClientSendConfig = {
   clientId: 'c0000000-0000-0000-0000-000000000000',
   defaultPhoneCountry: '64',
+  facebookPageId: null,
 }
 
 const META = { eventName: 'Purchase', maxEventAgeDays: 7 }
@@ -32,6 +33,9 @@ function outcome(over: Partial<OutcomeForSend> = {}): OutcomeForSend {
     amountMinor: 2350000,
     currency: 'NZD',
     occurredAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+    pageScopedUserId: null,
+    metaLeadId: null,
+    actionSource: 'email',
     ...over,
   }
 }
@@ -49,6 +53,21 @@ describe('不留明文', () => {
   it('也不给哈希（人核对不了一串 sha256）', () => {
     const p = JSON.stringify(maskForPreview(outcome(), CONFIG, META))
     expect(p).not.toMatch(/[0-9a-f]{64}/)
+  })
+
+  it('Facebook 私信身份也只给「有/无」，原始 PSID 绝不出现在返回对象里', () => {
+    // 🔴 这个返回对象会被写进 me_conversion_writebacks.payload_preview 永久留底
+    // （试运行阶段必经路径）——PSID 是 Meta 官方文档说"不哈希发给他们"的原始值，
+    // 跟"我们自己存的时候要不要打码"是两件事，这里必须守住后者。
+    const psid = '28681838868174032'
+    const result = maskForPreview(outcome({ pageScopedUserId: psid }), CONFIG, META)
+    expect(JSON.stringify(result)).not.toContain(psid)
+    expect(result.匹配键_有).toContain('Facebook 私信身份')
+  })
+
+  it('没有 PSID 时，「Facebook 私信身份」进匹配键_无', () => {
+    const result = maskForPreview(outcome({ pageScopedUserId: null }), CONFIG, META)
+    expect(result.匹配键_无).toContain('Facebook 私信身份')
   })
 })
 
@@ -139,5 +158,20 @@ describe('边界', () => {
     const p = maskForPreview(outcome(), { ...CONFIG, defaultPhoneCountry: null }, META)
     expect((p.客户 as Record<string, unknown>).电话).toBeNull()
     expect(p.匹配键_无).toContain('电话')
+  })
+})
+
+describe('Facebook 线索编号', () => {
+  it('🔴 只给「有/无」，原始编号绝不出现在预览里（预览会永久留底）', () => {
+    const preview = maskForPreview(outcome({ metaLeadId: '1687504185706630' }), CONFIG, META)
+    const text = JSON.stringify(preview)
+    expect(text).not.toContain('1687504185706630')
+    expect(text).toContain('Facebook 线索编号')
+    expect((preview.匹配键_有 as string[]).includes('Facebook 线索编号')).toBe(true)
+  })
+
+  it('没有时列在「匹配键_无」里', () => {
+    const preview = maskForPreview(outcome(), CONFIG, META)
+    expect((preview.匹配键_无 as string[]).includes('Facebook 线索编号')).toBe(true)
   })
 })

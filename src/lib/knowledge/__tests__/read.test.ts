@@ -38,6 +38,7 @@ interface FactFixture {
   confirmFingerprint?: boolean // if true, compute a matching fingerprint from current content
   client_confirmed_fingerprint?: string | null
   conflict_group_id?: string | null
+  historical_confirmation_grandfather_until?: string | null
 }
 
 /** Build one client_knowledge_facts fixture row with sane defaults. */
@@ -80,6 +81,7 @@ function fact(f: FactFixture): Row {
     client_confirmed_by_email: f.client_confirmed_by_email ?? null,
     client_confirmed_at: f.client_confirmed_at ?? null,
     client_confirmed_fingerprint: confirmedFingerprint,
+    historical_confirmation_grandfather_until: f.historical_confirmation_grandfather_until ?? null,
   }
 }
 
@@ -91,15 +93,35 @@ const REGISTERED_CONFIRMER: Row = {
   revoked_at: null,
 }
 
+// 🔴 Issue #1648 gate 6 — every existing `customer_reply` test in this file
+// predates the rollout-stage gate and is testing the DUAL-SIGN gate, not the
+// stage gate. Defaulting these two fixtures to "live" (stage 2 + Messenger
+// switch on) keeps those tests exercising exactly what they always tested;
+// the stage-gate-specific tests below override these explicitly.
+const LIVE_PHASE_EVENT: Row = {
+  client_id: CLIENT_A,
+  dimension: 'phase',
+  value: '2',
+  actor_email: 'ray@magicengine.cloud',
+  reason: null,
+  payload: {},
+  created_at: '2026-03-01T00:00:00.000Z',
+}
+const MESSENGER_ENABLED_CLIENT: Row = { id: CLIENT_A, messenger_agent_enabled_messenger: true }
+
 function makeSb(
   facts: Row[],
   grants: Row[] = [ENTITLEMENT_GRANT],
   confirmers: Row[] = [REGISTERED_CONFIRMER],
+  events: Row[] = [LIVE_PHASE_EVENT],
+  clients: Row[] = [MESSENGER_ENABLED_CLIENT],
 ) {
   return createFakeSupabase({
     client_automation_policies: grants,
     client_knowledge_facts: facts,
     client_knowledge_confirmers: confirmers,
+    client_knowledge_events: events,
+    clients,
   })
 }
 
@@ -457,6 +479,187 @@ describe('getClientKnowledge — dual-sign gate (customer_reply only)', () => {
     ])
     const result = await getClientKnowledge(CLIENT_A, { purpose: 'customer_reply' }, { supabase: sb, now: () => NOW })
     expect(result.entries).toEqual([])
+  })
+})
+
+describe('getClientKnowledge — rollout stage + channel gate (issue #1648, customer_reply only)', () => {
+  it('stage 2 + Messenger switch on: a general fact is returned for customer_reply (baseline)', async () => {
+    const sb = makeSb([fact({ id: 'f1', fact_key: 'k.general', visibility: 'customer_ok', sensitivity: 'general' })])
+    const result = await getClientKnowledge(CLIENT_A, { purpose: 'customer_reply' }, { supabase: sb, now: () => NOW })
+    expect(result.entries.map((e) => e.id)).toEqual(['f1'])
+  })
+
+  it('🔴 stage 1 (客户共测): excludes an otherwise-fully-approved general fact from customer_reply', async () => {
+    const sb = makeSb(
+      [fact({ id: 'f1', fact_key: 'k.general', visibility: 'customer_ok', sensitivity: 'general' })],
+      [ENTITLEMENT_GRANT],
+      [REGISTERED_CONFIRMER],
+      [{ ...LIVE_PHASE_EVENT, value: '1' }],
+    )
+    const result = await getClientKnowledge(CLIENT_A, { purpose: 'customer_reply' }, { supabase: sb, now: () => NOW })
+    expect(result.entries).toEqual([])
+  })
+
+  it('the same stage-1 client still returns the fact for internal_brief (the stage gate is customer_reply-only)', async () => {
+    const sb = makeSb(
+      [fact({ id: 'f1', fact_key: 'k.general', visibility: 'customer_ok', sensitivity: 'general' })],
+      [ENTITLEMENT_GRANT],
+      [REGISTERED_CONFIRMER],
+      [{ ...LIVE_PHASE_EVENT, value: '1' }],
+    )
+    const result = await getClientKnowledge(CLIENT_A, { purpose: 'internal_brief' }, { supabase: sb, now: () => NOW })
+    expect(result.entries.map((e) => e.id)).toEqual(['f1'])
+  })
+
+  it('🔴 stage 2 but Messenger switch off: excludes a general fact from customer_reply — the stage alone is not enough', async () => {
+    const sb = makeSb(
+      [fact({ id: 'f1', fact_key: 'k.general', visibility: 'customer_ok', sensitivity: 'general' })],
+      [ENTITLEMENT_GRANT],
+      [REGISTERED_CONFIRMER],
+      [LIVE_PHASE_EVENT],
+      [{ id: CLIENT_A, messenger_agent_enabled_messenger: false }],
+    )
+    const result = await getClientKnowledge(CLIENT_A, { purpose: 'customer_reply' }, { supabase: sb, now: () => NOW })
+    expect(result.entries).toEqual([])
+  })
+
+  it('🔴 mutation-critical: a DB error reading the rollout stage yields zero customer_reply facts — not a throw, not "assume stage 2"', async () => {
+    const sb = createFakeSupabase(
+      {
+        client_automation_policies: [ENTITLEMENT_GRANT],
+        client_knowledge_facts: [fact({ id: 'f1', fact_key: 'k.general', visibility: 'customer_ok', sensitivity: 'general' })],
+        client_knowledge_confirmers: [REGISTERED_CONFIRMER],
+        client_knowledge_events: [LIVE_PHASE_EVENT],
+        clients: [MESSENGER_ENABLED_CLIENT],
+      },
+      { errorTables: new Set(['client_knowledge_events']) },
+    )
+    const result = await getClientKnowledge(CLIENT_A, { purpose: 'customer_reply' }, { supabase: sb, now: () => NOW })
+    expect(result.entries).toEqual([])
+  })
+
+  it('🔴 mutation-critical: a DB error reading the Messenger switch yields zero customer_reply facts, not a throw', async () => {
+    const sb = createFakeSupabase(
+      {
+        client_automation_policies: [ENTITLEMENT_GRANT],
+        client_knowledge_facts: [fact({ id: 'f1', fact_key: 'k.general', visibility: 'customer_ok', sensitivity: 'general' })],
+        client_knowledge_confirmers: [REGISTERED_CONFIRMER],
+        client_knowledge_events: [LIVE_PHASE_EVENT],
+        clients: [MESSENGER_ENABLED_CLIENT],
+      },
+      { errorTables: new Set(['clients']) },
+    )
+    const result = await getClientKnowledge(CLIENT_A, { purpose: 'customer_reply' }, { supabase: sb, now: () => NOW })
+    expect(result.entries).toEqual([])
+  })
+
+  it('applies uniformly to sensitive-but-fully-signed facts too, not just general ones', async () => {
+    const sb = makeSb(
+      [
+        fact({
+          id: 'f1',
+          fact_key: 'k.price',
+          visibility: 'customer_ok',
+          sensitivity: 'price',
+          approved_by_email: 'fde@magicengine.cloud',
+          client_confirmed_by_email: 'owner@ctstours.co.nz',
+          client_confirmed_at: '2026-02-01T00:00:00.000Z',
+          confirmFingerprint: true,
+        }),
+      ],
+      [ENTITLEMENT_GRANT],
+      [REGISTERED_CONFIRMER],
+      [{ ...LIVE_PHASE_EVENT, value: '1' }], // stage 1: dual-sign is satisfied, but rollout stage isn't
+    )
+    const result = await getClientKnowledge(CLIENT_A, { purpose: 'customer_reply' }, { supabase: sb, now: () => NOW })
+    expect(result.entries).toEqual([])
+  })
+})
+
+/**
+ * Issue #1647 / design doc §9.14 B "CTS 历史未确认"有条件接受: a sensitive
+ * (dual-sign-required) fact can carry `historical_confirmation_grandfather_
+ * until` — while `now <= that timestamp`, it is treated as eligible for
+ * `customer_reply` even with `client_confirmed_at` unset. After the
+ * deadline it falls straight back to the normal rule (still unconfirmed →
+ * excluded), with no separate "is it expired" branch.
+ */
+describe('getClientKnowledge — historical confirmation grandfather (issue #1647)', () => {
+  it('🔴 宽限期内：未确认的敏感事实仍然对 customer_reply 可见', async () => {
+    const sb = makeSb([
+      fact({
+        id: 'f1',
+        fact_key: 'policy.visa_free_entry',
+        visibility: 'customer_ok',
+        sensitivity: 'policy',
+        client_confirmed_by_email: null,
+        client_confirmed_at: null,
+        historical_confirmation_grandfather_until: '2026-10-15T23:59:59+13:00',
+      }),
+    ])
+    const beforeDeadline = new Date('2026-09-20T00:00:00.000Z')
+    const result = await getClientKnowledge(
+      CLIENT_A,
+      { purpose: 'customer_reply' },
+      { supabase: sb, now: () => beforeDeadline },
+    )
+    expect(result.entries.map((e) => e.id)).toEqual(['f1'])
+  })
+
+  it('🔴 变异测试：过了截止日，同一条未确认事实自动从 customer_reply 撤出', async () => {
+    const sb = makeSb([
+      fact({
+        id: 'f1',
+        fact_key: 'policy.visa_free_entry',
+        visibility: 'customer_ok',
+        sensitivity: 'policy',
+        client_confirmed_by_email: null,
+        client_confirmed_at: null,
+        historical_confirmation_grandfather_until: '2026-10-15T23:59:59+13:00',
+      }),
+    ])
+    const afterDeadline = new Date('2026-10-16T00:00:00.000Z')
+    const result = await getClientKnowledge(
+      CLIENT_A,
+      { purpose: 'customer_reply' },
+      { supabase: sb, now: () => afterDeadline },
+    )
+    expect(result.entries).toEqual([])
+  })
+
+  it('宽限期恰好在截止时刻仍然有效（<=，不是 <）', async () => {
+    const sb = makeSb([
+      fact({
+        id: 'f1',
+        fact_key: 'policy.visa_free_entry',
+        visibility: 'customer_ok',
+        sensitivity: 'policy',
+        client_confirmed_by_email: null,
+        client_confirmed_at: null,
+        historical_confirmation_grandfather_until: '2026-10-15T23:59:59.000Z',
+      }),
+    ])
+    const exactly = new Date('2026-10-15T23:59:59.000Z')
+    const result = await getClientKnowledge(CLIENT_A, { purpose: 'customer_reply' }, { supabase: sb, now: () => exactly })
+    expect(result.entries.map((e) => e.id)).toEqual(['f1'])
+  })
+
+  it('宽限期不适用于 general 类事实之外的正常判据——一条真的已被客户确认的敏感事实，不需要也不受这个字段影响', async () => {
+    const sb = makeSb([
+      fact({
+        id: 'f1',
+        fact_key: 'k.price',
+        visibility: 'customer_ok',
+        sensitivity: 'price',
+        approved_by_email: 'fde@magicengine.cloud',
+        client_confirmed_by_email: 'owner@ctstours.co.nz',
+        client_confirmed_at: '2026-02-01T00:00:00.000Z',
+        confirmFingerprint: true,
+        historical_confirmation_grandfather_until: null,
+      }),
+    ])
+    const result = await getClientKnowledge(CLIENT_A, { purpose: 'customer_reply' }, { supabase: sb, now: () => NOW })
+    expect(result.entries.map((e) => e.id)).toEqual(['f1'])
   })
 })
 

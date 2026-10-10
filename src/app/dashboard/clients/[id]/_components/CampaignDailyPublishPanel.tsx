@@ -28,6 +28,9 @@ interface Props {
 
 export interface PublishedPost {
   date: string
+  /** Tune suggestions are keyed by this, not post_id (a scheduled post's
+   *  receipt holds the photo id; its measurement row holds the story id). */
+  idempotency_key: string
   post_id: string
   page_id: string
   published_at: string
@@ -278,7 +281,7 @@ export function CampaignDailyPublishPanel({
                 发布时间 {formatWhen(post.published_at)} · 帖子编号 {post.post_id}
               </p>
               <TuneSuggestionInline
-                suggestion={tuneSuggestions[post.post_id] ?? null}
+                suggestion={tuneSuggestions[post.idempotency_key] ?? null}
                 fetchFailed={tuneFetchFailed}
               />
             </div>

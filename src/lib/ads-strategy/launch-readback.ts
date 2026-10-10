@@ -21,6 +21,8 @@
  * 每一条规则都来自 2026-08-04 当天的真实事故，不是想象出来的。
  */
 
+import { resolveAdsPlaybook } from './playbooks'
+
 export type Severity =
   /** 🔴 会伤到真买家或烧错钱 —— 不修不许开 */
   | 'blocker'
@@ -71,6 +73,8 @@ export interface AdSetReadback {
     implicitLookalikeIds?: string[]
     /** 投放地区名，用于跟房源所在地对照。 */
     geoNames?: string[]
+    /** 回读到的版位。缺失/空 = 自动版位（Meta 想投哪投哪）。 */
+    publisherPlatforms?: string[]
   }
   creatives: CreativeReadback[]
 }
@@ -81,6 +85,10 @@ export interface LaunchReadbackInput {
   claimsRetargeting?: boolean
   /** 房源/客户所在地区，用于对照投放地区。给不出就跳过这条检查。 */
   expectedGeo?: string | null
+  /** 客户行业（`clients.industry`），只用来从广告剧本取叫法；给不出就用中性词。 */
+  industry?: string | null
+  /** 建广告那条路已知草案该是什么优化目标；回读目标读不到（空串）时靠它仍能做版位检查。 */
+  expectedOptimizationGoal?: string
 }
 
 export interface LaunchReadbackReport {
@@ -99,6 +107,16 @@ const MESSAGING_GOALS = new Set([
 const MESSAGING_DESTINATIONS = new Set([
   'MESSENGER', 'WHATSAPP', 'INSTAGRAM_DIRECT', 'MESSAGING_APPS',
 ])
+
+/**
+ * 看完类视频目标必须手动锁版位（PITFALLS D9 / 手册十五）。
+ * 留自动版位时 Meta 会把大部分钱导向 Audience Network 的手机游戏奖励视频。
+ */
+export const PLAYBACK_OPTIMIZATION_GOALS: ReadonlySet<string> = new Set(['THRUPLAY', 'VIDEO_VIEWS'])
+export const PLAYBACK_REQUIRED_PLATFORMS: readonly string[] = ['facebook', 'instagram']
+export function isPlaybackGoal(goal: string): boolean {
+  return PLAYBACK_OPTIMIZATION_GOALS.has(goal.toUpperCase())
+}
 
 /**
  * 这个广告组会不会把买家带进私信。
@@ -202,7 +220,8 @@ export function checkLaunch(input: LaunchReadbackInput): LaunchReadbackReport {
           `这个广告组是私信目标，但里面有 ${scripts.size} 种语言的创意：${detail}。` +
           'Meta 的问候语会照抄每条创意自己的语言 —— 看不懂那种语言的买家会收到看不懂的问候语。' +
           '要么按语言拆成多个广告组，要么统一语言。',
-        learnedFrom: '2026-08-04 Roman：Boris「piss off」/ Richard「wtf」/ Jude「delete my contact」，一次得罪 5 人',
+        // 原始背景（不输出）：首个地产客户的三语私信广告组，多名买家收到看不懂的中文问候语后回骂。
+        learnedFrom: '2026-08-04 事故：私信广告组混放多语言创意，一批买家收到看不懂的自动问候语，一次得罪 5 人',
       })
     }
   } else if (adSet.destinationType === undefined && scriptsInAdSet(adSet.creatives).size > 1) {
@@ -225,7 +244,8 @@ export function checkLaunch(input: LaunchReadbackInput): LaunchReadbackReport {
         code: 'retargeting_relaxed',
         severity: 'blocker',
         message: '这个组名字写着重定向，但「允许投给名单以外的人」是开着的 —— 它实际上想投给谁投给谁。',
-        learnedFrom: '2026-08-04 Roman「私约看房·暖池重定向」花 $5.88 零结果，实测根本没在投暖池',
+        // 原始背景（不输出）：首个地产客户一个「暖池重定向」组花钱零结果，回读发现名单被放宽。
+        learnedFrom: '2026-08-04 事故：名字写着重定向的广告组花了钱零结果，实测根本没在投名单',
       })
     }
     if (t.advantageAudience) {
@@ -233,7 +253,7 @@ export function checkLaunch(input: LaunchReadbackInput): LaunchReadbackReport {
         code: 'retargeting_advantage_audience',
         severity: 'blocker',
         message: '这个组名字写着重定向，但「优势受众」是开着的 —— Meta 会自行扩量，名单形同虚设。',
-        learnedFrom: '2026-08-04 Roman 同一个广告组',
+        learnedFrom: '2026-08-04 事故：同一个重定向广告组',
       })
     }
     if (!t.customAudienceIds || t.customAudienceIds.length === 0) {
@@ -273,7 +293,7 @@ export function checkLaunch(input: LaunchReadbackInput): LaunchReadbackReport {
       message:
         `Meta 自动挂了 ${t.implicitLookalikeIds.length} 个「相似人群」，创建时传参里没有这个。` +
         '如果本意是只投既有名单，这会把冷人群混进来。',
-      learnedFrom: '2026-08-04 Roman：创建接口回显不含它，回读才现形',
+      learnedFrom: '2026-08-04 事故：创建接口回显不含它，回读才现形',
     })
   }
 
@@ -285,8 +305,9 @@ export function checkLaunch(input: LaunchReadbackInput): LaunchReadbackReport {
       findings.push({
         code: 'geo_mismatch',
         severity: 'blocker',
-        message: `投放地区是「${t.geoNames.join(' / ')}」，房源在「${input.expectedGeo}」—— 对不上。`,
-        learnedFrom: '2026-08-04 Roman「IG 专投测试」把奥克兰北岸 $1.25M 的房投给了整个新西兰',
+        message: `投放地区是「${t.geoNames.join(' / ')}」，${resolveAdsPlaybook(input.industry ?? null).expectedGeoNoun}在「${input.expectedGeo}」—— 对不上。`,
+        // 原始背景（不输出）：首个地产客户一个只该投本地区的测试组，被投给了全国。
+        learnedFrom: '2026-08-04 事故：只该投一个地区的广告组，实际投给了整个国家',
       })
     }
   }
@@ -300,6 +321,32 @@ export function checkLaunch(input: LaunchReadbackInput): LaunchReadbackReport {
       message: `有 ${emptyCreatives.length} 条创意回读不到任何买家可见文字 —— 要么真的空，要么回读没取全，两种都得看一眼。`,
       learnedFrom: '2026-08-04：回读取不到的东西 ≠ 不存在，静默假设是最贵的假设',
     })
+  }
+
+  // ── 坑 6：看完类视频广告没锁版位 ──────────────────────────────────
+  if (isPlaybackGoal(adSet.optimizationGoal) || isPlaybackGoal(input.expectedOptimizationGoal ?? '')) {
+    const got = new Set((t.publisherPlatforms ?? []).map((p) => p.toLowerCase()))
+    const locked =
+      got.size === PLAYBACK_REQUIRED_PLATFORMS.length &&
+      PLAYBACK_REQUIRED_PLATFORMS.every((p) => got.has(p))
+    if (!locked) {
+      const state =
+        got.size === 0
+          ? '现在是自动版位'
+          : got.has('audience_network')
+            ? `现在含 Audience Network（${[...got].join('、')}）`
+            : `现在是 ${[...got].join('、')}`
+      findings.push({
+        code: 'playback_placement_not_locked',
+        severity: 'blocker',
+        message:
+          `这是「看完视频」类广告组，投放位置必须手动锁成只投 Facebook 和 Instagram。${state}。` +
+          '自动版位会让 Meta 把大部分钱花在手机游戏奖励视频上，完播率虚高、还会把假观众沉淀进再营销名单。' +
+          '读不到版位也按没锁处理。' +
+          '去广告组设置把投放位置改成手动，只勾 Facebook 和 Instagram。',
+        learnedFrom: '看完类视频广告留自动版位，95% 花费落在 Audience Network 手游奖励视频，完播率虚高（PITFALLS D9）',
+      })
+    }
   }
 
   return {

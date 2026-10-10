@@ -11,8 +11,14 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import type { ActionDefinition, AuthorizedExecutionContext, OutwardAuthorization } from '../types'
+import type {
+  ActionDefinition,
+  AuthorizedExecutionContext,
+  OutwardApproval,
+  OutwardAuthorization,
+} from '../types'
 import { runAction, submitActionRun, approveAndRun } from '../runner'
+import { approveRun } from '../human-approval'
 import { authorizeRun } from '../authorize'
 import { executeAuthorizedRun } from '../gateway'
 import { ACTION_REGISTRY } from '../registry'
@@ -28,9 +34,17 @@ const HASH = computeBlogContentHash(BLOG_DRAFT as unknown as BlogDraftRow)
 
 const GOOD_DECLARATION: OutwardAuthorization = {
   declaredIn: 'K-WP02 #882 (test-only definition)',
-  requiresHumanApproval: true,
+  approval: { mode: 'human_only' },
   rollback: 'snapshot_restore',
 }
+const BOUNDED_ENVELOPE = {
+  maxBudgetDeltaRatio: 0.2,
+  respectDailyCapCents: true,
+  minHoursSinceLastChange: 72,
+  excludeLearningPhase: true,
+  excludeAdStudies: true,
+  requiresRollbackHandler: true,
+} as const
 
 /** 一个**完全合规**的对外动作。各条用例只在它上面破坏一处。 */
 function outwardDefinition(patch: Partial<ActionDefinition> = {}): ActionDefinition {
@@ -108,13 +122,26 @@ describe('判据：对外动作缺一项都不放行', () => {
     }
   })
 
-  it('requiresHumanApproval 不是 true → 拒绝', () => {
+  it('approval.mode 是别的值 → 拒绝', () => {
     const reason = outwardBlockReason(
       outwardDefinition({
-        outwardAuthorization: { ...GOOD_DECLARATION, requiresHumanApproval: false as unknown as true },
+        outwardAuthorization: {
+          ...GOOD_DECLARATION,
+          approval: { mode: 'nope' } as unknown as OutwardApproval,
+        },
       }),
     )
-    expect(reason).toContain('必须要求人工批准')
+    expect(reason).not.toBeNull()
+  })
+
+  it('approval 整个缺失 → 拒绝', () => {
+    const { approval: _omitted, ...withoutApproval } = GOOD_DECLARATION
+    const reason = outwardBlockReason(
+      outwardDefinition({
+        outwardAuthorization: withoutApproval as unknown as OutwardAuthorization,
+      }),
+    )
+    expect(reason).not.toBeNull()
   })
 
   it('rollback 不是两个合法值之一 → 拒绝', () => {
@@ -227,6 +254,57 @@ describe('授权层：对外动作默认拒绝', () => {
     expect(calls).toEqual([])
   })
 
+  it('bounded 对外动作只在 auto_approve 且授权与执行前重验均通过时放行', async () => {
+    const calls: string[] = []
+    const resolveEnvelopeFacts = vi.fn(async () => ({
+      request: { kind: 'budget_change' as const, afterCents: 900 },
+      facts: {
+        beforeCents: 1_000,
+        accountDailyTotalBeforeCents: 1_000,
+        clientDailyTotalBeforeCents: 1_000,
+        dailyCapCents: 2_000,
+        clientDailyCapCents: 2_000,
+        hoursSinceLastChange: 100,
+        learningPhaseApplicable: true,
+        learningStage: 'SUCCESS',
+        adStudyCount: 0,
+        hasRollbackHandler: true,
+      },
+    }))
+    const f = makeFixture({
+      registry: makeRegistry([outwardDefinition({
+        outwardAuthorization: {
+          declaredIn: GOOD_DECLARATION.declaredIn,
+          approval: { mode: 'bounded', envelope: BOUNDED_ENVELOPE },
+          rollback: 'provider_native',
+        },
+        providerIdempotency: 'unsupported',
+        verification: null,
+      })]),
+      capabilities: () => ({
+        [KEY]: {
+          actionKey: KEY,
+          version: 1,
+          steps: Object.fromEntries(['build', 'persist', 'verify'].map((name) => [name, async () => {
+            calls.push(name)
+            return { output: { package_id: 'p1', content_hash: HASH }, costActualUsd: 0 }
+          }])),
+          rollback: async () => ({ ok: true, rollbackKind: 'provider_native', detail: {} }),
+        } as unknown as CapabilityImplementation,
+      }),
+      options: {
+        policy: { action_key: KEY, mode: 'auto_approve', spend_cap_per_run_usd: 100 },
+        resolveEnvelopeFacts,
+      },
+    })
+
+    const result = await runAction(f.kernel, submitInput())
+    expect(result.kind).toBe('succeeded')
+    expect(calls).toEqual(['build', 'persist', 'verify'])
+    // 授权时读一次，三个 provider 步骤各自执行前再读一次。
+    expect(resolveEnvelopeFacts).toHaveBeenCalledTimes(4)
+  })
+
   it('outward + require_approval → 停在等人点头，capability 一次都不调', async () => {
     const calls: string[] = []
     const f = makeFixture({
@@ -240,6 +318,55 @@ describe('授权层：对外动作默认拒绝', () => {
     expect(outcome.kind).toBe('pending_approval')
     expect(outcome.run.status).toBe('pending_approval')
     expect(outcome.run.needs_human).toBe(true)
+    expect(calls).toEqual([])
+  })
+
+  it('审批入口遇到规则改成自动执行时，授权层再次拦住而不写外部资产', async () => {
+    const calls: string[] = []
+    const resolveEnvelopeFacts = vi.fn(async () => ({
+      request: { kind: 'budget_change' as const, afterCents: 1_100 },
+      facts: {
+        beforeCents: 1_000,
+        accountDailyTotalBeforeCents: 1_000,
+        clientDailyTotalBeforeCents: 1_000,
+        dailyCapCents: 2_000,
+        clientDailyCapCents: 2_000,
+        hoursSinceLastChange: 100,
+        learningPhaseApplicable: true,
+        learningStage: 'SUCCESS',
+        adStudyCount: 0,
+        hasRollbackHandler: true,
+      },
+    }))
+    const f = makeFixture({
+      registry: makeRegistry([outwardDefinition({
+        outwardAuthorization: { declaredIn: 'test', approval: { mode: 'bounded', envelope: BOUNDED_ENVELOPE }, rollback: 'provider_native' },
+      })]),
+      capabilities: countingCapability(calls),
+      options: { policy: { ...APPROVAL_POLICY, mode: 'auto_approve' }, resolveEnvelopeFacts },
+    })
+
+    const result = await runAction(f.kernel, submitInput(), { requireHumanApproval: true })
+
+    expect(result.kind).toBe('denied')
+    expect(result.decision?.deny_code).toBe('outward_requires_human_policy')
+    expect(calls).toEqual([])
+  })
+
+  it('提案入口不会接管一条已批准但尚未排队的 run', async () => {
+    const calls: string[] = []
+    const f = makeFixture({
+      registry: makeRegistry([outwardDefinition()]),
+      capabilities: countingCapability(calls),
+      options: { policy: APPROVAL_POLICY },
+    })
+    const pending = await runAction(f.kernel, submitInput())
+    await approveRun(f.kernel, pending.run.id, 'approver@example.test')
+
+    const retry = await runAction(f.kernel, submitInput(), { requireHumanApproval: true })
+
+    expect(retry.kind).toBe('in_progress')
+    expect(retry.run.status).toBe('authorized')
     expect(calls).toEqual([])
   })
 
@@ -292,9 +419,13 @@ describe('审计快照带上对外授权的依据', () => {
     for (const index of [0, f.tables.authorization_decisions.length - 1]) {
       const def = definitionSnapshot(f, index)
       expect(def.side_effect, `第 ${index} 条`).toBe('outward')
+      // 🔴 `approval_mode` 和 `autonomy_envelope` 必须进快照 —— 否则复盘时
+      //    只看到「没要人点头」，说不清当时是在什么范围内放行的。
       expect(def.outward_authorization, `第 ${index} 条`).toEqual({
         declared_in: 'K-WP02 #882 (test-only definition)',
         requires_human_approval: true,
+        approval_mode: 'human_only',
+        autonomy_envelope: null,
         rollback: 'snapshot_restore',
       })
       expect(def.provider_idempotency, `第 ${index} 条`).toBe('unsupported')

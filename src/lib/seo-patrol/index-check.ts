@@ -2,7 +2,8 @@
  * Daily index-status rotation (22.E.S15 后半 · R5 收录检查).
  *
  * For each focus client with a GSC connector, inspect up to
- * URLS_PER_CLIENT_PER_DAY crawled pages — OLDEST index_checked_at first,
+ * URLS_PER_CLIENT_PER_DAY known pages (crawled, or firewall-blocked — see
+ * INSPECTABLE_CRAWL_STATUSES) — OLDEST index_checked_at first,
  * never-checked (NULL) before everything (魏征 M6: newest-first would let
  * long-tail pages starve and R5 would be blind to exactly the pages it
  * exists for). Results land on client_site_pages:
@@ -22,6 +23,15 @@ import { inspectUrl, InspectQuotaError } from '@/lib/gsc/inspect'
 import { isHtmlPageUrl } from '@/lib/seo/url-kind'
 
 const URLS_PER_CLIENT_PER_DAY = 20
+
+/**
+ * Which of our crawl states still get a daily Google inspection. Google's
+ * verdict is independent of whether OUR crawler could read the page, so a
+ * page whose body was blocked by the site's firewall ('antibot_challenged')
+ * must keep being inspected — otherwise its not-indexed flag freezes forever.
+ * 'pending' / 'failed' rows stay out: they may not be real pages at all.
+ */
+export const INSPECTABLE_CRAWL_STATUSES = ['crawled', 'antibot_challenged'] as const
 
 export interface IndexCheckClientResult {
   client_id: string
@@ -82,7 +92,7 @@ async function runForClient(
     .from('client_site_pages')
     .select('id, url, first_not_indexed_at')
     .eq('client_id', client.client_id)
-    .eq('crawl_status', 'crawled')
+    .in('crawl_status', [...INSPECTABLE_CRAWL_STATUSES])
     .order('index_checked_at', { ascending: true, nullsFirst: true })
     // Over-fetch: asset URLs (images/PDFs the crawler picked up) are dropped
     // below, and each one would otherwise waste a day's inspection slot.

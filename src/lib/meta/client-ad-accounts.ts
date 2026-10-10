@@ -68,6 +68,42 @@ export async function getClientAdAccounts(clientId: string): Promise<ClientAdAcc
   return primary ? [{ adAccountId: primary, label: '主账户', isPrimary: true }] : []
 }
 
+function stripActPrefix(id: string): string {
+  return id.startsWith('act_') ? id.slice(4) : id
+}
+
+/**
+ * 这些账户里，哪些同时登记给了别的客户（ads IMPACT §14 M9 共用账户读侧隔离）。
+ *
+ * 2026-09-14 生产实查：Roman HU 与 30 Kiteroa 同登记 act_1260456876069575。
+ * 查询出错时 **fail closed**：全部当共用处理——宁可少读，也不能把别人的实体写进本客户名下。
+ * 返回的 id 已去掉 act_ 前缀。
+ */
+export async function findSharedAdAccounts(
+  clientId: string,
+  accountIds: string[],
+): Promise<{ shared: Set<string>; error?: string }> {
+  const { data, error } = await supabaseAdmin
+    .from('client_meta_ad_accounts')
+    .select('client_id, ad_account_id')
+  if (error) {
+    return { shared: new Set(accountIds.map(stripActPrefix)), error: error.message }
+  }
+  const owners = new Map<string, Set<string>>()
+  for (const r of (data ?? []) as Array<{ client_id: string; ad_account_id: string }>) {
+    const key = stripActPrefix(r.ad_account_id)
+    const set = owners.get(key) ?? new Set<string>()
+    set.add(r.client_id)
+    owners.set(key, set)
+  }
+  const shared = new Set<string>()
+  for (const id of accountIds) {
+    const set = owners.get(stripActPrefix(id))
+    if (set && [...set].some(c => c !== clientId)) shared.add(stripActPrefix(id))
+  }
+  return { shared }
+}
+
 /** Just the account id strings, primary first. Convenience for sync loops. */
 export async function getClientAdAccountIds(clientId: string): Promise<string[]> {
   return (await getClientAdAccounts(clientId)).map(a => a.adAccountId)

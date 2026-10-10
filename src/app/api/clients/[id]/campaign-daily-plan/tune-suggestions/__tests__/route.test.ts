@@ -118,13 +118,13 @@ describe('GET tune-suggestions — 空态', () => {
     })
   })
 
-  it('payload 缺 post_id 的 action 被丢弃（不进 suggestions、不参与 in()）', async () => {
+  it('payload 缺 idempotency_key 的 action 被丢弃（不进 suggestions、不参与 in()）', async () => {
     mockAccess.mockResolvedValue({ ok: true } as never)
     const spy = installFrom({
       actions: { data: [
-        { id: 'a1', payload: { post_id: 'page_p1' } },
-        { id: 'a2', payload: {}                       },  // 缺 post_id
-        { id: 'a3', payload: { post_id: 123 as unknown as string } },  // 非字符串
+        { id: 'a1', payload: { idempotency_key: 'fbpost_p1', post_id: '1616575215312482_175000001' } },
+        { id: 'a2', payload: {}                       },  // 缺 idempotency_key
+        { id: 'a3', payload: { idempotency_key: 123 } },  // 非字符串
       ], error: null },
       receipts: { data: [], error: null },
     })
@@ -137,7 +137,7 @@ describe('GET tune-suggestions — 过滤链', () => {
   it('actions 过滤：client_id + action_type + payload.source + payload.campaign_id 全部命中', async () => {
     mockAccess.mockResolvedValue({ ok: true } as never)
     const spy = installFrom({
-      actions: { data: [{ id: 'a1', payload: { post_id: 'page_p1' } }], error: null },
+      actions: { data: [{ id: 'a1', payload: { idempotency_key: 'fbpost_p1', post_id: '1616575215312482_175000001' } }], error: null },
       receipts: { data: [], error: null },
     })
     await GET(request(), params())
@@ -154,14 +154,14 @@ describe('GET tune-suggestions — 过滤链', () => {
 })
 
 describe('GET tune-suggestions — 完整链路', () => {
-  it('4 条 action + 4 条 T+72 → 每条 postId 都有 recommendation', async () => {
+  it('4 条 action + 4 条 T+72 → 每条 idempotency_key 都有 recommendation', async () => {
     mockAccess.mockResolvedValue({ ok: true } as never)
     installFrom({
       actions: { data: [
-        { id: 'a1', payload: { post_id: 'page_p1' } },
-        { id: 'a2', payload: { post_id: 'page_p2' } },
-        { id: 'a3', payload: { post_id: 'page_p3' } },
-        { id: 'a4', payload: { post_id: 'page_p4' } },
+        { id: 'a1', payload: { idempotency_key: 'fbpost_p1', post_id: '1616575215312482_175000001' } },
+        { id: 'a2', payload: { idempotency_key: 'fbpost_p2', post_id: '1616575215312482_175000002' } },
+        { id: 'a3', payload: { idempotency_key: 'fbpost_p3', post_id: '1616575215312482_175000003' } },
+        { id: 'a4', payload: { idempotency_key: 'fbpost_p4', post_id: '1616575215312482_175000004' } },
       ], error: null },
       receipts: { data: [
         { action_id: 'a1', window_hours: 72, status: 'ok', values: { likes: 20 }, missing: {} },
@@ -173,10 +173,32 @@ describe('GET tune-suggestions — 完整链路', () => {
     const res = await GET(request(), params())
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body.suggestions['page_p1'].decision).toBe('REPEAT')
-    expect(body.suggestions['page_p1'].deltaPct).toBe(100)
-    expect(body.suggestions['page_p2'].decision).toBeDefined()  // 不 REPEAT，具体不重要
+    expect(body.suggestions['fbpost_p1'].decision).toBe('REPEAT')
+    expect(body.suggestions['fbpost_p1'].deltaPct).toBe(100)
+    expect(body.suggestions['fbpost_p2'].decision).toBeDefined()  // 不 REPEAT，具体不重要
     expect(body.diagnostics).toEqual({ candidateActionCount: 4, withT72ReceiptCount: 4 })
+  })
+
+  it('🔴 建议按 idempotency_key 对账，不按 post_id —— 排期帖回执存照片编号、动作行存帖子编号', async () => {
+    mockAccess.mockResolvedValue({ ok: true } as never)
+    installFrom({
+      actions: { data: [
+        // 动作行里是解析后的帖子编号；回执（面板）里同一条帖子存的是照片编号 1750000001。
+        { id: 'a1', payload: { idempotency_key: 'fbpost_p1', post_id: '1616575215312482_1750000001' } },
+        { id: 'a2', payload: { idempotency_key: 'fbpost_p2', post_id: '1616575215312482_1750000002' } },
+        { id: 'a3', payload: { idempotency_key: 'fbpost_p3', post_id: '1616575215312482_1750000003' } },
+        { id: 'a4', payload: { idempotency_key: 'fbpost_p4', post_id: '1616575215312482_1750000004' } },
+      ], error: null },
+      receipts: { data: [
+        { action_id: 'a1', window_hours: 72, status: 'ok', values: { likes: 20 }, missing: {} },
+        { action_id: 'a2', window_hours: 72, status: 'ok', values: { likes: 10 }, missing: {} },
+        { action_id: 'a3', window_hours: 72, status: 'ok', values: { likes: 10 }, missing: {} },
+        { action_id: 'a4', window_hours: 72, status: 'ok', values: { likes: 10 }, missing: {} },
+      ], error: null },
+    })
+    const body = await (await GET(request(), params())).json()
+    expect(Object.keys(body.suggestions).sort()).toEqual(['fbpost_p1', 'fbpost_p2', 'fbpost_p3', 'fbpost_p4'])
+    expect(body.suggestions).not.toHaveProperty('1616575215312482_1750000001')
   })
 })
 
@@ -194,7 +216,7 @@ describe('GET tune-suggestions — 错误', () => {
   it('receipts 读失败 → 500', async () => {
     mockAccess.mockResolvedValue({ ok: true } as never)
     installFrom({
-      actions: { data: [{ id: 'a1', payload: { post_id: 'page_p1' } }], error: null },
+      actions: { data: [{ id: 'a1', payload: { idempotency_key: 'fbpost_p1', post_id: '1616575215312482_175000001' } }], error: null },
       receipts: { data: null, error: { message: 'timeout' } },
     })
     const res = await GET(request(), params())

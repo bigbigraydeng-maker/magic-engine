@@ -32,6 +32,9 @@ services:
     env: node
     schedule: "50 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 120 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/vision-analyzer \
@@ -60,6 +63,9 @@ services:
     env: node
     schedule: "15 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/poll-visual-jobs \
@@ -81,6 +87,9 @@ services:
     env: node
     schedule: "0 2 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 120 -X POST -H "x-cron-secret: $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/site-audit-jobs \
@@ -98,6 +107,9 @@ services:
     env: node
     schedule: "0 */6 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/attribution \
@@ -124,6 +136,9 @@ services:
     env: node
     schedule: "35 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/zhangqian-sweeper \
@@ -141,8 +156,11 @@ services:
   - type: cron
     name: prospecting-sweep
     env: node
-    schedule: "*/30 * * * *"
+    schedule: "0 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/prospecting-sweep
@@ -155,21 +173,25 @@ services:
   # Places, inserts new ones as discovered(job_board). The prospecting-sweep then
   # audits/analyses/drafts them. No-ops unless JOB_SIGNAL_INGEST_ENABLED=true on
   # the web service (ships dark; PM turns it on). Sending stays human downstream.
-  - type: cron
-    name: job-boards-weekly
-    env: node
-    schedule: "0 2 * * 1"
-    buildCommand: ""
-    startCommand: |
-      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/job-boards-weekly
-    # 2026-08-16 [OPS] sync:false → fromGroup：密钥自动挂上，不用人去后台 link。
-    # ⚠️ 这条的「30 天没跑成」根因**不是**密钥 —— 是主开关 JOB_SIGNAL_INGEST_ENABLED
-    #    没开（route 在开关那里直接 return，走不到写运行记录那一步）。换 fromGroup 只是
-    #    顺手排除掉第二个可能原因；真要让它干活，得 PM 决定开外呼线（花 Places 的钱 +
-    #    开始碰真实 NZ 公司），不是这个 PR 能定的。
-    envVars:
-      - fromGroup: me-shared-cron-secret
+  # 🔴 已暂停(2026-10-07,PM「没人读就关」审计 docs/audits/2026-10-07-cron-data-readers-audit.md):8 次运行全是主开关 JOB_SIGNAL_INGEST_ENABLED 没开的空转,下游 Google Places 账单也没开。恢复时三件一起做:本块取消注释 + src/lib/cron/registry.ts 那行加回来并从 UNSCHEDULED_CRON_ROUTES 删掉 + 打开 JOB_SIGNAL_INGEST_ENABLED。
+  # - type: cron
+  #   name: job-boards-weekly
+  #   env: node
+  #   schedule: "0 2 * * 1"
+  #   buildCommand: ""
+  #   buildFilter:
+  #     ignoredPaths:
+  #       - "**/*"
+  #   startCommand: |
+  #     curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+  #       https://app.magicengine.com.au/api/cron/job-boards-weekly
+  #   # 2026-08-16 [OPS] sync:false → fromGroup：密钥自动挂上，不用人去后台 link。
+  #   # ⚠️ 这条的「30 天没跑成」根因**不是**密钥 —— 是主开关 JOB_SIGNAL_INGEST_ENABLED
+  #   #    没开（route 在开关那里直接 return，走不到写运行记录那一步）。换 fromGroup 只是
+  #   #    顺手排除掉第二个可能原因；真要让它干活，得 PM 决定开外呼线（花 Places 的钱 +
+  #   #    开始碰真实 NZ 公司），不是这个 PR 能定的。
+  #   envVars:
+  #     - fromGroup: me-shared-cron-secret
 
   # Blog generation sweeper — every 5 minutes
   # Marks blog_posts stuck at status='generating' (>10 min) as failed.
@@ -188,6 +210,9 @@ services:
     env: node
     schedule: "45 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/blog-stuck-generating \
@@ -211,6 +236,9 @@ services:
     env: node
     schedule: "*/30 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/tailor-made-jobs-sweeper
@@ -223,11 +251,15 @@ services:
   # plenty. Avoids Cloudflare 524 timeout that killed previous sync runs.
   # Reference: ROADMAP.md P7.4.13
   # healthchecks.io: ai-tracker-weekly (c4f101fe-c2cf-47f9-807f-08ea09d43934)
+  # Schedule moved from Mon 01:00 UTC to Sun 18:00 UTC = Mon 06:00 NZST (PM decision 2026-09-16: NZ morning window).
   - type: cron
     name: ai-tracker-weekly
     env: node
-    schedule: "0 1 * * 1"
+    schedule: "0 18 * * 0"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 30 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/ai-tracker-weekly \
@@ -236,18 +268,23 @@ services:
       - key: CRON_SECRET
         sync: false
 
-  # Daily Industry AI Visibility Archive — every day at 2:30am UTC (~2:30pm NZST)
+  # Daily Industry AI Visibility Archive — every day at 16:30 UTC (~4:30am NZST)
   # Runs all 10+ industry questions × 3 platforms (ChatGPT / Google AI Overview /
   # Google SERP), upserts one snapshot per (question, platform, collected_date).
   # PM decision 2026-06-04: daily (not weekly) — only daily granularity captures
   # brand churn within the week. Cost ~$0.06/day for 10 seed questions.
   # Migration 20260622000003 enabled daily UNIQUE constraint.
+  # Schedule moved from 02:30 UTC to 16:30 UTC (PM decision 2026-09-16: run in NZ morning window so data is ready on wake-up).
+  # 🔴 2026-10-07 由每天降为每周一(同审计):唯一读取方是一个管理页标签页,在用的 AI 可见度目标 0 条,每天约 US$0.21;不确定有没有人看,所以降频不删。回滚:改回 "30 16 * * *"。healthchecks.io 那条 ping 的预期周期若仍是每天,周中会报「没按时 ping」,属已知,需 PM 在 healthchecks 后台改成每周。
   # healthchecks.io: industry-ai-visibility-daily (1400fe83-cc62-4634-9f7e-a2345553beee)
   - type: cron
     name: industry-ai-visibility-daily
     env: node
-    schedule: "30 2 * * *"
+    schedule: "30 16 * * 1"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 600 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/ai-visibility-weekly \
@@ -257,15 +294,19 @@ services:
         sync: false
 
   # Phase 31 A2.1-γ — Goal current_value refresh
-  # Daily 03:00 UTC (~15:00 NZST), runs AFTER industry-ai-visibility-daily (02:30 UTC)
+  # Daily 17:30 UTC (~5:30am NZST), runs AFTER industry-ai-visibility-daily (16:30 UTC)
   # so ai_visibility_score Goals read today's snapshots (not yesterday's).
   # Spec: docs/superpowers/specs/2026-06-04-a21-stepc-design-v3.md (v3.1)
+  # Schedule moved from 03:00 UTC to 17:30 UTC (PM decision 2026-09-16: NZ morning window).
   # healthchecks.io: goal-current-value-refresh (300bb7f9-8a16-4a72-b9eb-a924dc76efa8)
   - type: cron
     name: goal-current-value-refresh
     env: node
-    schedule: "0 3 * * *"
+    schedule: "30 17 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/goal-current-value-refresh \
@@ -283,6 +324,9 @@ services:
     env: node
     schedule: "0 2 * * 1"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/keyword-snapshots-weekly \
@@ -290,6 +334,27 @@ services:
     envVars:
       - key: CRON_SECRET
         sync: false
+
+  # SEO weekly list — Mondays 04:30 UTC (after keyword-snapshots-weekly at 02:00).
+  # For clients with an ACTIVE seo_gsc_clicks_28d goal: verify open list items, expire
+  # stale ones, add up to 5 new items from stored data. No outward writes, no paid calls.
+  # Spec: docs/specs/2026-10-04-seo-weekly-list-v0.2.md. Dry-run: add ?dry_run=1.
+  # 密钥走 fromGroup（自动挂上，不用人去后台 link）。⚠️ 新增 cron 服务要 Render 同步 blueprint
+  # 才会真正创建——不同步它一次都不会跑且不报错（mailbox-sync-hourly 教训）；cron/registry.ts 的
+  # 「没跑」检查（addedAt 2026-10-04 起算宽限）就是兜这个的。
+  - type: cron
+    name: seo-weekly-list
+    env: node
+    schedule: "30 4 * * 1"
+    buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/seo-weekly-list
+    envVars:
+      - fromGroup: me-shared-cron-secret
 
   # Weekly reputation snapshots — every Monday at 3:30am UTC (~3:30pm NZST)
   # GBP / Tripadvisor rating + review count + incremental reviews for active
@@ -301,6 +366,9 @@ services:
     env: node
     schedule: "30 3 * * 1"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/reputation-snapshots-weekly
@@ -317,6 +385,9 @@ services:
     env: node
     schedule: "0 4 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/social-engagement-pullback \
@@ -339,6 +410,9 @@ services:
     env: node
     schedule: "0 15 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/winner-reel-sync-daily
@@ -349,12 +423,16 @@ services:
   # Daily Google data pullback — every day at 3am UTC (~3pm NZST)
   # Syncs GSC + GA4 snapshots for all clients with connected Google connectors.
   # Reference: ROADMAP.md P17.A.4
+  # Schedule moved from 03:00 UTC to 17:00 UTC (PM decision 2026-09-16: NZ morning window; runs 30 min after industry-ai-visibility-daily).
   # healthchecks.io: google-data-pullback-daily (12f3c5c4-4524-48b8-92c5-72fd2b775d01)
   - type: cron
     name: google-data-pullback-daily
     env: node
-    schedule: "0 3 * * *"
+    schedule: "0 17 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/google-data-pullback-daily \
@@ -373,6 +451,9 @@ services:
     env: node
     schedule: "0 3 * * 1"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/zhuge-recalculate \
@@ -391,6 +472,9 @@ services:
     env: node
     schedule: "*/10 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/viral-analyzer-worker \
@@ -409,6 +493,9 @@ services:
     env: node
     schedule: "0 0 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/viral-discovery-weekly \
@@ -426,6 +513,9 @@ services:
     env: node
     schedule: "0 22 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/content-factory-intake
@@ -452,6 +542,9 @@ services:
     env: node
     schedule: "0 8 * * 1"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 800 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/diagnostic-weekly
@@ -475,6 +568,9 @@ services:
     env: node
     schedule: "20 6 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/kpi-backfill
@@ -490,6 +586,9 @@ services:
     env: node
     schedule: "40 7 * * 1"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/benchmark-accumulator
@@ -510,6 +609,9 @@ services:
     env: node
     schedule: "10 6 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/cms-connection-retest
@@ -526,6 +628,9 @@ services:
     env: node
     schedule: "0 8 * * 2"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 800 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/prescription-weekly
@@ -541,23 +646,30 @@ services:
   #    再把 ?max=1 也去掉(一轮最多 3 件,每客户 1 件是代码里的硬上限)。
   #    这两步各是一行改动,改在这里、看得见、能回滚。
   # 每天 09:30 UTC,排在周二 08:00 的处方之后 —— 新方案落地当天就能被执行。
-  - type: cron
-    name: execution-auto-run
-    env: node
-    schedule: "30 9 * * *"
-    buildCommand: ""
-    startCommand: |
-      curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
-        "https://app.magicengine.com.au/api/cron/execution-auto-run?dry_run=1"
-    envVars:
-      - key: CRON_SECRET
-        sync: false
+  # 🔴 已暂停(2026-10-07,同审计):挂着 ?dry_run=1 空跑两个月,全仓没有任何代码读它写的结果(今日待办自己重新算)。恢复时三件一起做:本块取消注释 + registry.ts 那行加回来并从 UNSCHEDULED_CRON_ROUTES 删掉 + 由 PM 决定是否去掉 ?dry_run=1。
+  # - type: cron
+  #   name: execution-auto-run
+  #   env: node
+  #   schedule: "30 9 * * *"
+  #   buildCommand: ""
+  #   buildFilter:
+  #     ignoredPaths:
+  #       - "**/*"
+  #   startCommand: |
+  #     curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
+  #       "https://app.magicengine.com.au/api/cron/execution-auto-run?dry_run=1"
+  #   envVars:
+  #     - key: CRON_SECRET
+  #       sync: false
 
   - type: cron
     name: anomaly-detector-daily
     env: node
     schedule: "0 5 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/anomaly-detector \
@@ -574,6 +686,9 @@ services:
     env: node
     schedule: "0 6 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/daily-cron-digest \
@@ -592,6 +707,9 @@ services:
     env: node
     schedule: "0 19 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/proposal-view-digest
@@ -612,6 +730,9 @@ services:
     env: node
     schedule: "0 7 * * 1"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/agent-learning-rollup
@@ -647,6 +768,9 @@ services:
     env: node
     schedule: "30 6 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 360 -X POST -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/memory-extractor
@@ -666,6 +790,9 @@ services:
     env: node
     schedule: "0 5 * * 1"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -X POST \
         -H "Authorization: Bearer $CRON_SECRET" \
@@ -684,6 +811,9 @@ services:
     env: node
     schedule: "0 1 * * 0"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/site-audit-weekly
@@ -701,6 +831,9 @@ services:
     env: node
     schedule: "30 18 * * 0"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/weekly-seo-report
@@ -718,6 +851,9 @@ services:
     env: node
     schedule: "0 19 * * 0-4"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 120 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/pm-daily-todo
@@ -734,6 +870,9 @@ services:
     env: node
     schedule: "15 18 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/product-map-sync
@@ -746,22 +885,13 @@ services:
       - key: ANTHROPIC_API_KEY
         sync: false
 
-  # CTS title executor — Monday 05:30 UTC, right after oztop-seo-optimizer.
-  # GSC pos-4-20 pages → AI title/desc → narrow-lane edit of the site repo's
-  # meta data file → ONE weekly PR (human merges, client repo CI gates).
-  # ⚠️ sync:false does NOT auto-fill: after first deploy, link the
-  #    me-shared-cron-secret env group to this service in the Render dashboard.
-  - type: cron
-    name: cts-seo-optimizer
-    env: node
-    schedule: "30 5 * * 1"
-    buildCommand: ""
-    startCommand: |
-      curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/cts-seo-optimizer
-    envVars:
-      - key: CRON_SECRET
-        sync: false
+  # CTS title executor RETIRED (PM 2026-09-20): replaced by the Inngest
+  # native cron `cloud-seo-meta-cycle-fanout` (src/lib/seo-meta/cycle/roster.ts's
+  # META_CYCLE_CRON, same wall-clock time — Monday 05:30 UTC). Removed here in
+  # the same PR that ships the replacement so the two flows can never both be
+  # scheduled against the same repo/table at once. src/lib/seo-meta/cts-meta-pr.ts
+  # and its route (src/app/api/cron/cts-seo-optimizer) are left in the codebase
+  # (harmless, unscheduled) in case of rollback.
 
   # Weekly blog draft — Tuesday 3am UTC (after Monday keyword snapshots +
   # Monday AI tracker runs, so both topic-selection legs are fresh).
@@ -776,6 +906,9 @@ services:
     env: node
     schedule: "0 3 * * 2"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/blog-weekly
@@ -790,6 +923,9 @@ services:
     env: node
     schedule: "0 4 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/seo-patrol-daily \
@@ -806,8 +942,11 @@ services:
   - type: cron
     name: social-comment-autoreply
     env: node
-    schedule: "*/30 * * * *"
+    schedule: "0 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 900 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/social-comment-autoreply
@@ -838,6 +977,9 @@ services:
     env: node
     schedule: "5 * * * *"   # 原 "*/10 * * * *"：一轮领 1 条(FB 视频上传慢),10 分钟一轮够用
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/factory-publish-worker
@@ -856,6 +998,9 @@ services:
     env: node
     schedule: "0 20 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 120 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/factory-order-scheduler
@@ -891,6 +1036,9 @@ services:
     env: node
     schedule: "25 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 120 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/factory-publish-sweeper
@@ -945,6 +1093,9 @@ services:
     env: node
     schedule: "10 * * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/messenger-sync-hourly
@@ -972,8 +1123,11 @@ services:
   - type: cron
     name: meta-leads-hourly
     env: node
-    schedule: "25 * * * *"
+    schedule: "25 */2 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/meta-leads-sync
@@ -999,9 +1153,31 @@ services:
     env: node
     schedule: "40 20 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/ad-readback-sweep
+    envVars:
+      - fromGroup: me-shared-cron-secret
+
+  # 广告设置快照（ads IMPACT 阶段 1，设计 §2.1 / §14 M1）—— 每 3 小时只读抓一次 Meta
+  # 账户/系列/广告组/广告/受众设置，只在设置变化时记一行、另每天一次。
+  # 只读 Meta，不花钱（Graph 读接口免费，只占 API 配额）。共用账户只记账户级。
+  # 依赖 migration 20260914000001（ad_entity_snapshots 表）先 apply；表不在时每轮写入失败、
+  # 运行记录里会报错，不影响其它任务。
+  - type: cron
+    name: ad-entity-snapshot
+    env: node
+    schedule: "30 */6 * * *"
+    buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
+    startCommand: |
+      curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/ad-entity-snapshot
     envVars:
       - fromGroup: me-shared-cron-secret
 
@@ -1032,6 +1208,9 @@ services:
     env: node
     schedule: "40 4 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/mailchimp-activity-sync
@@ -1060,9 +1239,39 @@ services:
     env: node
     schedule: "10 5 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 620 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/mailchimp-paid-tagging
+    envVars:
+      - fromGroup: me-shared-cron-secret
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # CRM「不感兴趣/别再联系」→ Mailchimp `suppressed_do_not_email` 标签。
+  #
+  # 跟上面 paid-tagging 同一个思路的另一档：CRM 早就知道这件事（lib/crm/dnc.ts
+  # 的 isDoNotContact + segments.ts 的 DEAD_OUTCOMES），但从没同步进 Mailchimp。
+  # 2026-09-08 CTS newsletter 排期会话实测：26 个 CRM 判过的联系人里，6 个当时
+  # 在 Mailchimp 仍是订阅状态、没打抑制标签——下一封群发邮件本来会发给他们。
+  #
+  # 只加标签，不摘——解除抑制必须是人工确认后的动作，不属于这条 cron。
+  #
+  # 排在 paid-tagging（5:10）之后错开，避免同一分钟撞 Mailchimp API 限流。
+  #
+  # ⚠️ 密钥用 fromGroup 自动挂，**不要**改回 `sync: false`。
+  - type: cron
+    name: mailchimp-suppression-sync-daily
+    env: node
+    schedule: "20 5 * * *"
+    buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
+    startCommand: |
+      curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/mailchimp-suppression-sync
     envVars:
       - fromGroup: me-shared-cron-secret
 
@@ -1076,17 +1285,21 @@ services:
   # ⚠️ 部署后必须在 Render 后台把这个 cron 关联到 me-shared-cron-secret 环境变量组。
   #    sync:false 不会自动填值 —— daily-cron-digest 就是因为这个哑了 51 天没人发现，
   #    而 digest 只报「失败」不报「没跑」，所以静默失效不会有任何告警。
-  - type: cron
-    name: team-memory-sweeper
-    env: node
-    schedule: "*/30 * * * *"
-    buildCommand: ""
-    startCommand: |
-      curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/team-memory-sweeper
-    envVars:
-      - key: CRON_SECRET
-        sync: false
+  # 🔴 已暂停(2026-10-07,同审计):上游 work_sessions 最新一行是 2026-08-22,本机没装 team-memory 钩子,705 次运行全是 0 干活。恢复时三件一起做:本块取消注释 + registry.ts 那行加回来并从 UNSCHEDULED_CRON_ROUTES 删掉 + 重新装本机钩子(scripts/team-memory/README.md)。
+  # - type: cron
+  #   name: team-memory-sweeper
+  #   env: node
+  #   schedule: "*/30 * * * *"
+  #   buildCommand: ""
+  #   buildFilter:
+  #     ignoredPaths:
+  #       - "**/*"
+  #   startCommand: |
+  #     curl -fsS --max-time 300 -X POST -H "Authorization: Bearer $CRON_SECRET" \
+  #       https://app.magicengine.com.au/api/cron/team-memory-sweeper
+  #   envVars:
+  #     - key: CRON_SECRET
+  #       sync: false
 
   # ─────────────────────────────────────────────────────────────────────────
   # ME product progress → LinkedIn — Monday + Thursday, ~9am NZ time
@@ -1107,6 +1320,9 @@ services:
     env: node
     schedule: "30 20 * * 0"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/linkedin-progress-post-mon
@@ -1118,6 +1334,9 @@ services:
     env: node
     schedule: "30 20 * * 3"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/linkedin-progress-post-thu
@@ -1138,6 +1357,9 @@ services:
     env: node
     schedule: "0 18 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 180 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/market-intel-daily
@@ -1159,6 +1381,9 @@ services:
     env: node
     schedule: "50 16 * * *"
     buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
     startCommand: |
       curl -fsS --max-time 180 -H "Authorization: Bearer $CRON_SECRET" \
         https://app.magicengine.com.au/api/cron/cron-run-logs-cleanup

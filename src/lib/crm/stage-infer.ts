@@ -18,6 +18,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { STAGE_INFER_ACTOR, STAGE_REASON_PREFIX } from './actors'
 import {
   STAGE_SYSTEM_PROMPT,
   StageVerdictSchema,
@@ -39,7 +40,7 @@ import {
  * 也才有可能一键回滚这一批。跟 `AUTO_TAG_ACTOR` 是两个不同的名字：那是「自动标
  * 真买家」，这是「读对话填阶段」，出了问题要分得清是哪一套干的。
  */
-export const STAGE_INFER_ACTOR = 'ai:conversation-read'
+export { STAGE_INFER_ACTOR } from './actors'
 
 /** 一轮最多问模型这么多次 —— 某天数据暴涨也不会变成一张失控的账单。 */
 const MAX_CONTACTS_PER_RUN = 60
@@ -92,8 +93,12 @@ export async function askStage(transcript: string): Promise<StageVerdict | null>
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) return null
 
-  const { default: OpenAI } = await import('openai')
-  const client = new OpenAI({ apiKey })
+  // 走统一封装（而不是自己 new）—— 账户级失效（余额耗尽 / 钥匙失效）
+  // 的识别与落库都装在那一层，是全站唯一能一次盖住所有调用点的位置。
+  // bypassGateway：这条链路用的是 responses API，从没经过 CF 网关验证过，
+  // 只拿拦截、不换路由（见 openai-client.ts 的 OpenAIClientOptions）。
+  const { getOpenAIClient } = await import('@/lib/ai/openai-client')
+  const client = getOpenAIClient({ apiKey, bypassGateway: true })
   const res = await client.responses.create({
     model: modelName(),
     input: [
@@ -276,8 +281,8 @@ async function applyStage(
     changed_by: STAGE_INFER_ACTOR,
     // 规则那一档（无下文）本来就没有原话可引 —— 别在时间线上留一个空引号。
     note: verdict.evidence
-      ? `读往来记录判的：${verdict.reason}｜原话：「${verdict.evidence.slice(0, 200)}」`
-      : `读往来记录判的：${verdict.reason}`,
+      ? `${STAGE_REASON_PREFIX.inferred}${verdict.reason}｜原话：「${verdict.evidence.slice(0, 200)}」`
+      : `${STAGE_REASON_PREFIX.inferred}${verdict.reason}`,
   })
 
   /**

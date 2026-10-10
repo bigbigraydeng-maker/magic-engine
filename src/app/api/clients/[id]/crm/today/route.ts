@@ -53,6 +53,8 @@ interface ContactRow {
   do_not_contact: boolean
   stage: string | null
   pinned_at: string | null
+  important_note: string | null
+  important_due_at: string | null
   snooze_until: string | null
 }
 
@@ -132,7 +134,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       fetchAll<ContactRow>((from, to) =>
         supabaseAdmin
           .from('contacts')
-          .select('id, display_name, primary_phone, primary_email, do_not_contact, stage, pinned_at, snooze_until')
+          .select(
+            'id, display_name, primary_phone, primary_email, do_not_contact, stage, pinned_at, snooze_until, important_note, important_due_at',
+          )
           .eq('client_id', clientId)
           .order('id', { ascending: true })
           .range(from, to),
@@ -693,6 +697,14 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       lastNote: last?.summary ?? null,
       pinned: Boolean(row?.pinned_at),
       pinnedAt: row?.pinned_at ?? null,
+      /**
+       * 「要记住的事」—— 抽屉里那一格靠它。
+       *
+       * 🔴 这个文件里拼行的地方有**两处**，两处都要带。少带一处，抽屉在那一组人
+       * 身上就又没有这一格 —— 而这正是 `contact-model.ts` 头注记的那种漂移：
+       * 两个地方各自拼同一个形状，于是一处有的字段另一处没有。
+       */
+      important: { note: row?.important_note ?? null, dueAt: row?.important_due_at ?? null },
       /** 被推迟到什么时候。今天名单上的人这里恒为 null —— 推迟的人已经被挡在外面了。 */
       snoozeUntil: row?.snooze_until ?? null,
       suggestedStage:
@@ -765,11 +777,13 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   //    搜索时两组直接拼起来，还会撞出重复的 React key。
   //    今天以冻结的那份为准，明天冻结失效他自然落到这一栏。
   const rankedIds = new Set(ranked.map((c) => c.id))
-  const off = models
+  const offAll = models
     .filter((c) => !rankedIds.has(c.id))
     .map((c) => ({ c, seg: segmentContact(c, now) }))
     .filter((x) => x.seg.temperature === 'cold' || x.seg.temperature === 'off')
-    .slice(0, 300)
+  const offSliced = offAll.slice(0, 300)
+  const offListTruncated = offAll.length > offSliced.length
+  const off = offSliced
     .map(({ c, seg }) => {
       const row = contactById.get(c.id)
       const meta = row?.stage ? stageMeta.get(row.stage) : undefined
@@ -790,6 +804,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
          * 点开它就能拨那个已知打不通的号，是这一组里最不该出现的事。
          */
         phoneUnusable: seg.phoneUnusable ?? false,
+        /** 「要记住的事」—— 见上面那一处同名字段的注释，两处必须一致。 */
+        important: { note: row?.important_note ?? null, dueAt: row?.important_due_at ?? null },
         /** 被标成「别再联系」—— 抽屉靠它给出取消入口。 */
         doNotContact: isDoNotContact(
           row?.do_not_contact ?? false,
@@ -851,6 +867,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   return NextResponse.json({
     buckets,
     offList: off,
+    offListTruncated,
     // 在这一页直接回私信时，发出去的话是挂在谁名下的 —— 两个 CTS 邮箱共用
     // 这块屏，发送框要当面说清楚现在是谁在说话（跟私信页同一口径）。
     viewerEmail: access.user.email ?? null,

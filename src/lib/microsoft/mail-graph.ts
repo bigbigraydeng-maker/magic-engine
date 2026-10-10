@@ -20,6 +20,13 @@
  *    时间线上要看全文再单独去拉。
  * 3. **水位线用 `receivedDateTime` 而不是 `sentDateTime`**。晚到的邮件
  *    （对方服务器延迟几小时）按发送时间算会直接跳过水位线，那封信永远读不到。
+ * 4. **必须要 `Prefer: IdType="ImmutableId"`**。Graph 默认给的消息 id 在这封信
+ *    换文件夹时会变——而「草稿变已发送」正是 `mail-send.ts` 从 CRM 回信时
+ *    必经的那一步。不要这个请求头，`mail-send.ts` 存的 id 跟这里之后同步
+ *    读到的 id 会对不上，那封刚发的信会在时间线上插出重复的一行——
+ *    正是两边都想避免的那个问题，只是换个更隐蔽的方式重新发生
+ *    （2026-09-15 子牙架构复审 PR #1714 揪出来的，见微软官方文档
+ *    "Get Outlook mail, calendar, or contact IDs to remain the same"）。
  */
 
 const GRAPH = 'https://graph.microsoft.com/v1.0'
@@ -130,7 +137,9 @@ export async function fetchMailSince(
     pages += 1
     let res: Response
     try {
-      res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } })
+      res = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}`, Prefer: 'IdType="ImmutableId"' },
+      })
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : '读取邮箱失败' }
     }
@@ -153,4 +162,58 @@ export async function fetchMailSince(
   // 还有下一页却已经翻到上限 —— 如实说出来。静默截断会让人以为已经读全了，
   // 而漏掉的正是最新的那些信。
   return { ok: true, messages, truncated: url !== null }
+}
+
+export interface MessageText {
+  subject: string | null
+  /** 纯文本全文（Graph 按 `outlook.body-content-type="text"` 转好的）。 */
+  body: string
+  /** 第一个收件人 —— 跟 `toMessage` 对已发送邮件取 counterparty 的口径一致。 */
+  firstRecipient: { address: string; name: string | null } | null
+  /** 收件人 + 抄送人总数。成交识别只在「恰好一个收件人」时才敢自动：抄送/多人的信，确认句不一定是对第一个人说的。 */
+  recipientCount: number
+}
+
+export type MessageTextResult = { ok: true; message: MessageText } | { ok: false; error: string; status?: number }
+
+/**
+ * 按 message id 取一封信的完整纯文本正文。
+ *
+ * 同步（`fetchMailSince`）刻意只带 255 字摘要；付款确认句常在摘要之后，成交识别要读全文，
+ * 所以这里单独提供「只取一封」的读法 —— 调用方只对要识别的信调用，不全量落库。
+ * id 必须是同步时存下的 ImmutableId（同一个 `Prefer: IdType` 才认得）。
+ */
+export async function fetchMessageText(accessToken: string, messageId: string): Promise<MessageTextResult> {
+  const select = encodeURIComponent('subject,body,toRecipients,ccRecipients')
+  const url = `${GRAPH}/me/messages/${encodeURIComponent(messageId)}?$select=${select}`
+  let res: Response
+  try {
+    res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Prefer: 'IdType="ImmutableId", outlook.body-content-type="text"',
+      },
+    })
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : '读取邮件全文失败' }
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    return { ok: false, status: res.status, error: `HTTP ${res.status}: ${text.slice(0, 300)}` }
+  }
+  const raw = (await res.json()) as {
+    subject?: string | null
+    body?: { content?: string | null } | null
+    toRecipients?: GraphAddress[] | null
+    ccRecipients?: GraphAddress[] | null
+  }
+  return {
+    ok: true,
+    message: {
+      subject: raw.subject?.trim() || null,
+      body: raw.body?.content ?? '',
+      firstRecipient: pickAddress(raw.toRecipients?.[0]),
+      recipientCount: (raw.toRecipients?.length ?? 0) + (raw.ccRecipients?.length ?? 0),
+    },
+  }
 }

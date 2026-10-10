@@ -24,7 +24,11 @@
  * 命中任一条即判 `post_sale`：
  *   1. 历史消息（不分收发方向）里出现 `policy.postSaleKeywords` 里的关键词
  *   2. 对话跨度（第一条消息到最后一条消息的时间差）**严格大于** `policy.postSaleSpanMs`
- *      —— 卡在整数分界不算，多 1 毫秒才算（见本文件测试的边界用例）
+ *      —— 卡在整数分界不算，多 1 毫秒才算（见本文件测试的边界用例）——
+ *      **且**最新这条消息本身不是紧跟着一段超过 `policy.postSaleSpanMs` 的沉寂期
+ *      才重新出现的（issue #1773 修复，见 `classifyConversation` 内注释：跨度长
+ *      既可能是"持续很久的售后关系"，也可能是"客户沉寂很久后刚重新联系"——
+ *      后者是典型售前场景，原算法分不清这两种情况，把后者也误判成了 post_sale）
  *
  * 否则判 `lead_intake`。
  *
@@ -43,6 +47,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { hasIndustryFeature } from '@/lib/clients/industry-features'
 
 export type ConversationClass = 'lead_intake' | 'post_sale'
 
@@ -63,6 +68,21 @@ export interface PostSaleClassificationPolicy {
 export const TOURISM_POST_SALE_POLICY: PostSaleClassificationPolicy = {
   postSaleKeywords: ['booking', '我订的', '我已付', 'receipt', '我下单了'],
   postSaleSpanMs: 30 * 24 * 60 * 60 * 1000,
+}
+
+/**
+ * 这个客户该用哪份售后判据——按行业关键词匹配（跟
+ * `industry-features.ts::hasIndustryFeature` 同一套判法），不是按 `clientId`
+ * 硬编码。F1（issue #1584）和 F2（issue #1585）各自独立调用同一份分类结果，
+ * 这个选择器是两边共用的"该用哪份 policy"决定，本来就该跟 `classifyConversation`
+ * 住在一起，不是各函数自己复制一份。目前只有旅游行业有具名 Playbook；认不出行业
+ * 时返回 `null`，调用方应按 `lead_intake` 处理（不猜、不套错行业的判据）。
+ */
+export function resolvePostSaleClassificationPolicy(
+  industry: string | null | undefined,
+): PostSaleClassificationPolicy | null {
+  if (hasIndustryFeature(industry, 'tailor_made')) return TOURISM_POST_SALE_POLICY
+  return null
 }
 
 interface EdgeMessageRow {
@@ -109,7 +129,7 @@ async function hasPostSaleKeyword(conversationId: string, keywords: string[]): P
   return (data ?? []).length > 0
 }
 
-/** 只要对话的第一条 / 最后一条消息时间，各自 `order + limit(1)`，不搬中间的消息。 */
+/** 只要对话的第一条消息时间，`order + limit(1)`，不搬中间的消息。 */
 async function fetchEdgeMessage(
   conversationId: string,
   ascending: boolean
@@ -129,6 +149,25 @@ async function fetchEdgeMessage(
 }
 
 /**
+ * 🔴 issue #1773（2026-09-15，#1591 端到端 dry-run 用 CTS 真实历史私信实测发现）：
+ * 最近两条消息各自的时间，用来判断「最新这条消息是不是客户沉寂很久之后才
+ * 重新联系」——不再只取最后一条消息本身。
+ */
+async function fetchLastTwoMessages(conversationId: string): Promise<EdgeMessageRow[]> {
+  const { data, error } = await supabaseAdmin
+    .from('conversation_messages')
+    .select('sent_at')
+    .eq('conversation_id', conversationId)
+    .order('sent_at', { ascending: false })
+    .limit(2)
+
+  if (error) {
+    throw new Error(`classifyConversation: 读 conversation_messages 失败 — ${error.message}`)
+  }
+  return data ?? []
+}
+
+/**
  * 判断一段对话是「售前留资」还是「售后」。
  *
  * `policy` 必须由调用方显式传入（例如旅游场景传 `TOURISM_POST_SALE_POLICY`）——
@@ -137,6 +176,24 @@ async function fetchEdgeMessage(
  * 查不到消息（比如 conversationId 传错，或者对话还没同步进消息）时保守判
  * `lead_intake` —— 没有证据说明它是售后，不能替它升级成「跳过自动回复」
  * 之外更重的分支。
+ *
+ * 🔴 issue #1773 修复（2026-09-15）：「对话跨度」曾经是「第一条消息到最后一条
+ * 消息」的原始时间差，用来近似"这段关系已经维持很久，大概率是售后"。但
+ * `#1591` 端到端 dry-run 用 CTS 真实历史私信实测抓到两条真实误判——两位客户
+ * 都是 7 月留资、沉寂了两个月、9 月才重新发来一条全新的售前问题（"一个人去
+ * 多少钱"、"能不能发我行程单"），旧算法只看首末消息时间差 > 30 天就直接判
+ * post_sale、完全跳过 AI 起草，害这类真实商机可能被漏掉。
+ *
+ * 根因：「首末消息跨度长」这件事，即可能是"持续了很久的售后关系"（真该判
+ * post_sale），也同样可能是"客户沉寂很久后才刚重新联系"（这恰恰是典型的
+ * 售前场景，越该判 lead_intake）——原算法没有办法区分这两种情况，把后者也
+ * 错杀了。
+ *
+ * 修复：只有当"最新一条消息"本身是紧跟着上一条消息、对话仍在连续进行时，
+ * 才用首末跨度判 post_sale；如果最新一条消息前面本身就隔了一段超过
+ * `policy.postSaleSpanMs` 的沉寂期，说明客户是刚重新联系上，不该只凭"关系
+ * 存在了很久"这一件事就判定成售后并跳过起草——这次重新联系本身该按它自己
+ * 的内容（关键词命中与否）判断，不该被历史沉寂期拖累。
  */
 export async function classifyConversation(
   conversationId: string,
@@ -144,16 +201,26 @@ export async function classifyConversation(
 ): Promise<ConversationClass> {
   if (await hasPostSaleKeyword(conversationId, policy.postSaleKeywords)) return 'post_sale'
 
-  const [firstMessage, lastMessage] = await Promise.all([
+  const [firstMessage, lastTwoMessages] = await Promise.all([
     fetchEdgeMessage(conversationId, true),
-    fetchEdgeMessage(conversationId, false),
+    fetchLastTwoMessages(conversationId),
   ])
 
+  const lastMessage = lastTwoMessages[0] ?? null
   if (!firstMessage || !lastMessage) return 'lead_intake'
 
   const firstAt = new Date(firstMessage.sent_at).getTime()
   const lastAt = new Date(lastMessage.sent_at).getTime()
-  if (lastAt - firstAt > policy.postSaleSpanMs) return 'post_sale'
+  if (lastAt - firstAt > policy.postSaleSpanMs) {
+    const secondLastMessage = lastTwoMessages[1]
+    // 只有一条消息（firstAt === lastAt，跨度必为 0）走不到这个分支；
+    // 有第二条消息时，检查它跟最新这条之间隔了多久——隔太久说明客户是
+    // 沉寂后重新联系，不该只凭"关系存在了很久"判 post_sale。
+    const gapBeforeLastMessage = secondLastMessage
+      ? lastAt - new Date(secondLastMessage.sent_at).getTime()
+      : 0
+    if (gapBeforeLastMessage <= policy.postSaleSpanMs) return 'post_sale'
+  }
 
   return 'lead_intake'
 }

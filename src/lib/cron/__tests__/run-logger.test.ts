@@ -17,6 +17,7 @@
  * 不按调用次序建模 —— 按次序录制的假客户端只能证明「代码调了这些方法」，
  * 证明不了「写进去的行长对了」。
  */
+import { createHash } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 type Row = Record<string, unknown>
@@ -41,7 +42,11 @@ vi.mock('@/lib/supabase', () => {
     let mode: 'select' | 'insert' | 'update' | 'upsert' = 'select'
     let payload: Row = {}
     const eqs: Array<[string, unknown]> = []
-    const hits = () => state.rows.filter((r) => eqs.every(([c, v]) => r[c] === v))
+    const ltes: Array<[string, string]> = []
+    const hits = () =>
+      state.rows.filter(
+        (r) => eqs.every(([c, v]) => r[c] === v) && ltes.every(([c, v]) => String(r[c] ?? '') <= v),
+      )
     // 真表上的两条约束 —— 少写 job_name 或写错 status，库里是会拒的。insert 和 upsert 都要过这一关。
     function checkConstraints(row: Row): PgError | null {
       if (!row.job_name) return { message: 'null value in column "job_name"', code: '23502' }
@@ -106,6 +111,7 @@ vi.mock('@/lib/supabase', () => {
       update(p: Row) { mode = 'update'; payload = p; return builder },
       upsert(p: Row, _opts?: { onConflict?: string }) { mode = 'upsert'; payload = p; return builder },
       eq(col: string, val: unknown) { eqs.push([col, val]); return builder },
+      lte(col: string, val: string) { ltes.push([col, val]); return builder },
       single() { const { data, error } = run(); return Promise.resolve({ data: data?.[0] ?? null, error }) },
       then(resolve: (r: { data: Row[] | null; error: PgError | null }) => void) { resolve(run()) },
     }
@@ -115,7 +121,15 @@ vi.mock('@/lib/supabase', () => {
   return { supabaseAdmin: { from } }
 })
 
-const { startCronRun, startCronRunId, cronRunHandle } = await import('../run-logger')
+const {
+  startCronRun,
+  startCronRunId,
+  cronRunHandle,
+  failOpenCronRuns,
+  cronRunIdFromInngestRun,
+  startCronRunWithId,
+  finishCronRunIfOpen,
+} = await import('../run-logger')
 
 /** 把这次测试里 console.error 说过的所有话拼成一段，方便断言「喊了什么」。 */
 function said(spy: ReturnType<typeof vi.spyOn>): string {
@@ -288,5 +302,137 @@ describe('cronRunHandle（工作流跨步骤用的那条路）', () => {
     expect(state.rows[0].status).toBe('completed')
     expect(state.rows[0].processed).toBe(4)
     expect(spy).not.toHaveBeenCalled()
+  })
+})
+
+describe('failOpenCronRuns（Inngest onFailure 收口）', () => {
+  const T0 = '2026-09-22T18:00:00.000Z'
+  const T1 = '2026-09-22T18:30:00.000Z'
+  function running(id: string, startedAt: string, job = 'conversion-daily-pipeline'): Row {
+    return { id, job_name: job, status: 'running', started_at: startedAt, finished_at: null, error_message: null }
+  }
+
+  it('只把「同名 + 还在跑 + 在失败事件之前开跑」的行写成 failed，带上错误信息', async () => {
+    state.rows.push(
+      running('a', T0),
+      running('b', '2026-09-22T19:00:00.000Z'), // 失败事件之后才开跑（人点了 Replay）——不能误伤
+      running('c', T0, 'other-job'), // 别的任务——不碰
+      { ...running('d', T0), status: 'completed' }, // 已经收尾的——不碰
+    )
+    const closed = await failOpenCronRuns('conversion-daily-pipeline', '步骤被强杀', { startedBefore: new Date(T1) })
+    expect(closed).toBe(1)
+    const a = state.rows.find((r) => r.id === 'a')!
+    expect(a.status).toBe('failed')
+    expect(a.finished_at).toBeTruthy()
+    expect(a.error_message).toBe('步骤被强杀')
+    expect(state.rows.find((r) => r.id === 'b')!.status).toBe('running')
+    expect(state.rows.find((r) => r.id === 'c')!.status).toBe('running')
+    expect(state.rows.find((r) => r.id === 'd')!.status).toBe('completed')
+    expect(state.rows).toHaveLength(4) // 没有另插兜底行
+  })
+
+  it('一行 running 都没有（log-start 自己就被掐死）→ 仍然落一条 failed，不能没痕迹', async () => {
+    const closed = await failOpenCronRuns('conversion-daily-pipeline', '开跑那步就超时', { startedBefore: new Date(T1) })
+    expect(closed).toBe(0)
+    expect(state.rows).toHaveLength(1)
+    expect(state.rows[0]).toMatchObject({ job_name: 'conversion-daily-pipeline', status: 'failed', error_message: '开跑那步就超时' })
+  })
+
+  it('写失败不抛、要喊出来', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    state.rows.push(running('a', T0))
+    state.failUpdate = { message: '模拟断网' }
+    const closed = await failOpenCronRuns('conversion-daily-pipeline', 'x', { startedBefore: new Date(T1) })
+    expect(closed).toBe(0)
+    expect(said(spy)).toContain('模拟断网')
+  })
+})
+
+describe('cronRunIdFromInngestRun（Inngest run id → 固定运行记录 id）', () => {
+  it('同一个 run id 永远算出同一个 id，形状是 UUID；不同 run id 不同', () => {
+    const a = cronRunIdFromInngestRun('01J8Z5K2M3N4P5Q6R7S8T9V0W1')
+    expect(a).toBe(cronRunIdFromInngestRun('01J8Z5K2M3N4P5Q6R7S8T9V0W1'))
+    expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    expect(cronRunIdFromInngestRun('01J8Z5K2M3N4P5Q6R7S8T9V0W2')).not.toBe(a)
+  })
+
+  it('就是 sha256(runId) 的前 32 个十六进制字符（onFailure 那边按同一个公式算，必须对得上）', () => {
+    const hex = createHash('sha256').update('run-1').digest('hex').slice(0, 32)
+    expect(cronRunIdFromInngestRun('run-1').replace(/-/g, '')).toBe(hex)
+  })
+})
+
+describe('startCronRunWithId（用指定 id 开一行）', () => {
+  it('用给定的 id 插一行 running', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await startCronRunWithId('gsc-page-daily-pull', 'fixed-id-1')
+    expect(state.rows).toHaveLength(1)
+    expect(state.rows[0]).toMatchObject({ id: 'fixed-id-1', job_name: 'gsc-page-daily-pull', status: 'running' })
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('🔴 重试撞主键（23505 = 上一次其实已经插成）→ 静默返回，不喊、不抛', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    state.failInsert = { message: 'duplicate key value violates unique constraint "cron_run_logs_pkey"', code: '23505' }
+    await expect(startCronRunWithId('gsc-page-daily-pull', 'fixed-id-1')).resolves.toBeUndefined()
+    expect(state.insertAttempts).toBe(1)
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('其他写失败 → 喊出来（带任务名和 id），不抛', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    state.failInsert = { message: 'permission denied for table cron_run_logs', code: '42501' }
+    await expect(startCronRunWithId('gsc-page-daily-pull', 'fixed-id-1')).resolves.toBeUndefined()
+    const text = said(spy)
+    expect(text).toContain('gsc-page-daily-pull')
+    expect(text).toContain('fixed-id-1')
+    expect(text).toContain('42501')
+  })
+})
+
+describe('finishCronRunIfOpen（onFailure 按 id 只收自己那一行）', () => {
+  const T0 = '2026-09-26T18:31:00.000Z'
+  function row(id: string, status: string, job = 'gsc-page-daily-pull'): Row {
+    return { id, job_name: job, status, started_at: T0, finished_at: null, error_message: null }
+  }
+
+  it('🔴 只收这个 id 的那一行；同名、同样还在跑的别的单一行都不碰', async () => {
+    state.rows.push(row('mine', 'running'), row('sibling', 'running'))
+    const result = await finishCronRunIfOpen(
+      'gsc-page-daily-pull',
+      'mine',
+      { processed: 1, failed: 1, error: 'retries exhausted: boom' },
+      new Date('2026-09-26T19:00:00.000Z'),
+    )
+    expect(result).toBe('closed')
+    const mine = state.rows.find((r) => r.id === 'mine')!
+    expect(mine.status).toBe('failed')
+    expect(mine.error_message).toBe('retries exhausted: boom')
+    expect(mine.started_at).toBe(T0) // 开跑时刻沿用库里那行的，不改成失败时刻
+    expect(state.rows.find((r) => r.id === 'sibling')!.status).toBe('running')
+    expect(state.rows).toHaveLength(2)
+  })
+
+  it('这一行已经是终态 → 不覆盖', async () => {
+    state.rows.push({ ...row('mine', 'completed'), error_message: null })
+    const result = await finishCronRunIfOpen('gsc-page-daily-pull', 'mine', { failed: 1, error: 'x' }, new Date())
+    expect(result).toBe('already_terminal')
+    expect(state.rows[0].status).toBe('completed')
+    expect(state.upsertAttempts).toBe(0)
+  })
+
+  it('开跑那步就没插成（没有这一行）→ 用同一个 id 落一条 failed，started_at 用兜底时刻', async () => {
+    state.rows.push(row('sibling', 'running'))
+    const result = await finishCronRunIfOpen(
+      'gsc-page-daily-pull',
+      'mine',
+      { failed: 1, error: 'log-start 超时' },
+      new Date('2026-09-26T19:00:00.000Z'),
+    )
+    expect(result).toBe('closed')
+    const mine = state.rows.find((r) => r.id === 'mine')!
+    expect(mine).toMatchObject({ job_name: 'gsc-page-daily-pull', status: 'failed', error_message: 'log-start 超时' })
+    expect(mine.started_at).toBe('2026-09-26T19:00:00.000Z')
+    expect(state.rows.find((r) => r.id === 'sibling')!.status).toBe('running')
   })
 })

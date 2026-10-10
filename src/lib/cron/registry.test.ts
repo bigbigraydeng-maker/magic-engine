@@ -5,6 +5,12 @@ import path from 'path'
 import { CRON_REGISTRY, UNSCHEDULED_CRON_ROUTES } from './registry'
 import { expectedIntervalHours } from './schedule'
 import { FLYWHEEL_SEO_WEEKLY_CRON, FLYWHEEL_SEO_WEEKLY_JOB } from '../flywheel/seo-weekly'
+import { COMPETITOR_WATCH_CRON, COMPETITOR_WATCH_JOB } from '../competitors/watch'
+import { AI_VISIBILITY_WEEKLY_CRON, AI_VISIBILITY_WEEKLY_JOB } from '../ai-tracker/weekly-fanout'
+import { GSC_PAGE_DAILY_CRON, GSC_PAGE_DAILY_JOB, GSC_PAGE_DAILY_PULL_JOB } from '../gsc/page-daily-plan'
+import { META_CYCLE_CRON } from '@/lib/seo-meta/cycle/roster'
+import { RANK_SAMPLER_CRON, RANK_SAMPLER_JOB } from '@/lib/seo-meta/cycle/rank-sampler'
+import { STEP6_JOB_NAME } from '@/lib/seo-meta/cycle/receipts'
 
 const ROOT = path.resolve(__dirname, '../../..')
 const CRON_ROUTES_DIR = path.join(ROOT, 'src/app/api/cron')
@@ -83,7 +89,9 @@ function jobNamesInFile(file: string): string[] {
   // 🔴 `startCronRunId` 也算（2026-09-07 补）。跨步骤跑的任务（Inngest 那批）开记录用的是
   //    它 —— 只认 `startCronRun` 的话，每周 SEO 快照和私信简报这两条**写着运行记录、
   //    却扫不出来**，跟「这个任务不存在」长得一模一样，正是这份对账要防的东西。
-  const ORIGINALS = ['startCronRun', 'startCronRunId']
+  // 🔴 `startCronRunWithId` 也算（2026-09-26 补）：Inngest 函数改成用「由 run id 算出的固定 id」开记录后，
+  //    只认前两个的话，谷歌逐页每日那两条就会写着运行记录却扫不出来——跟「这个任务不存在」一个样。
+  const ORIGINALS = ['startCronRun', 'startCronRunId', 'startCronRunWithId']
   const aliases = new Set<string>(ORIGINALS)
   for (const stmt of src.statements) {
     if (!ts.isImportDeclaration(stmt)) continue
@@ -391,6 +399,64 @@ describe('每个写运行记录的地方，都必须有人认领', () => {
     ).toBe(FLYWHEEL_SEO_WEEKLY_CRON)
   })
 
+  it('🔴 竞品快照那条的周期不许手抄 —— 清单必须等于代码里唯一那份定义', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === COMPETITOR_WATCH_JOB)
+    expect(entry, `清单里找不到 ${COMPETITOR_WATCH_JOB}`).toBeDefined()
+    expect(entry!.scheduler).toBe('inngest')
+    expect(
+      entry!.schedule,
+      '清单里的周期跟 src/lib/competitors/watch.ts 的 COMPETITOR_WATCH_CRON 不一致',
+    ).toBe(COMPETITOR_WATCH_CRON)
+  })
+
+  it('🔴 AI 可见度追踪(灰度)那条的周期不许手抄 —— 清单必须等于代码里唯一那份定义', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === AI_VISIBILITY_WEEKLY_JOB)
+    expect(entry, `清单里找不到 ${AI_VISIBILITY_WEEKLY_JOB}`).toBeDefined()
+    expect(entry!.scheduler).toBe('inngest')
+    expect(
+      entry!.schedule,
+      '清单里的周期跟 src/lib/ai-tracker/weekly-fanout.ts 的 AI_VISIBILITY_WEEKLY_CRON 不一致',
+    ).toBe(AI_VISIBILITY_WEEKLY_CRON)
+  })
+
+  it('🔴 GSC per-page daily: the schedule is not hand-copied and the output table is the receipts table', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === GSC_PAGE_DAILY_JOB)
+    expect(entry, `CRON_REGISTRY has no ${GSC_PAGE_DAILY_JOB} entry`).toBeDefined()
+    expect(entry!.scheduler).toBe('inngest')
+    expect(
+      entry!.schedule,
+      'the registry schedule differs from GSC_PAGE_DAILY_CRON in src/lib/gsc/page-daily-plan.ts',
+    ).toBe(GSC_PAGE_DAILY_CRON)
+    // started_at, not finished_at: finished_at is NULL while an order runs (see the registry comment).
+    expect(entry!.outputTables).toEqual([
+      { table: 'gsc_page_fetch_receipts', freshnessHours: 26, timestampColumn: 'started_at' },
+    ])
+  })
+
+  it('🔴 GSC per-page daily pull orders: own job name, same schedule as the fan-out that triggers them', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === GSC_PAGE_DAILY_PULL_JOB)
+    expect(entry, `CRON_REGISTRY has no ${GSC_PAGE_DAILY_PULL_JOB} entry`).toBeDefined()
+    expect(GSC_PAGE_DAILY_PULL_JOB).not.toBe(GSC_PAGE_DAILY_JOB)
+    expect(entry!.scheduler).toBe('inngest')
+    expect(entry!.schedule, 'the pull entry must follow GSC_PAGE_DAILY_CRON (its upstream fan-out)').toBe(GSC_PAGE_DAILY_CRON)
+    expect(entry!.outputTables).toBeUndefined()
+  })
+
+  it('🔴 SEO 改标题周一主链：周期不许手抄，且必须登记（没登记 = 它安静地不跑时没人喊）', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === STEP6_JOB_NAME)
+    expect(entry, `清单里找不到 ${STEP6_JOB_NAME}`).toBeDefined()
+    expect(entry!.scheduler).toBe('inngest')
+    expect(entry!.schedule, '清单里的周期跟 src/lib/seo-meta/cycle/roster.ts 的 META_CYCLE_CRON 不一致').toBe(META_CYCLE_CRON)
+  })
+
+  it('🔴 SEO 排名每日采样：周期不许手抄，且是新登记（带 addedAt，首轮到点前不算"从没跑过"）', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === RANK_SAMPLER_JOB)
+    expect(entry, `清单里找不到 ${RANK_SAMPLER_JOB}`).toBeDefined()
+    expect(entry!.scheduler).toBe('inngest')
+    expect(entry!.schedule, '清单里的周期跟 src/lib/seo-meta/cycle/rank-sampler.ts 的 RANK_SAMPLER_CRON 不一致').toBe(RANK_SAMPLER_CRON)
+    expect(entry!.addedAt).toBe('2026-10-04')
+  })
+
   it('🔴 白名单不许过期：排上班了就该从白名单删掉', () => {
     const registered = new Set(CRON_REGISTRY.map((e) => e.jobName))
     const stale = Object.keys(UNSCHEDULED_CRON_ROUTES).filter((n) => registered.has(n))
@@ -422,9 +488,9 @@ describe('每个写运行记录的地方，都必须有人认领', () => {
  * 里那条 curl 的 URL 解出来，读取位置从路由源码里查，位置标注从 docs/ENV.md 的表格里
  * 按表头定位「配在哪」那一列取。所以它不是第二份变量清单 —— 没有一项事实是抄来的。
  */
+// job-boards-weekly 于 2026-10-07 暂停，其开关暂不对账，恢复时加回。
 const CRON_TRIGGERED_WEB_FLAGS: { env: string; service: string }[] = [
   { env: 'PROSPECTING_SWEEP_ENABLED', service: 'prospecting-sweep' },
-  { env: 'JOB_SIGNAL_INGEST_ENABLED', service: 'job-boards-weekly' },
 ]
 
 /**

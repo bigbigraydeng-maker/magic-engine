@@ -20,6 +20,12 @@
  *    （见 loadClientIdentity），trip（旅游行程专属字段）只对 `industry === 'travel'`
  *    的客户开放、其余客户在代码层强制清空，且明显是垃圾/钓鱼消息的对话直接短路成
  *    noiseBrief，不再进模型编需求。
+ *
+ * 🔴 issue #1647（2026-09-15）：那次修复把身份改对了，但 CTS 自己的具体商业事实
+ *    （25 年历史、免签政策、支持电话/邮箱）当时只是从"写死在系统提示词里"挪到了
+ *    "写死在 brief-client-facts.ts 的一张表里"——同一条红线 2 违规换了个文件，
+ *    并没有真正解决。这次改成从客户知识库（`getClientKnowledge`）读取，
+ *    brief-client-facts.ts 已删除。见 loadClientFacts() 和 clientFactsBlock()。
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
@@ -31,14 +37,25 @@ import {
   type BriefContext,
   type TripDetails,
 } from './brief-schema'
-import { CLIENT_BRIEF_FACTS, type ClientBriefFacts } from './brief-client-facts'
 import { hasIndustryFeature } from '@/lib/clients/industry-features'
+import { getClientKnowledge, type GetClientKnowledgeDeps } from '@/lib/knowledge/read'
+import { KnowledgeNotEntitledError } from '@/lib/knowledge/errors'
+import type { KnowledgeEntry } from '@/lib/knowledge/types'
 
 /** Wait this long after the last message before summarising. */
 export const QUIET_PERIOD_MS = 30 * 60 * 1000
 
 /** Hard ceiling on rewrites per thread per day. */
 export const MAX_REGENS_PER_DAY = 3
+
+/**
+ * The three outcomes of reading this client's knowledge for this brief.
+ * `read_failed` is the one that matters to the caller: it means
+ * `draft_reply` came back empty and this thread must be retried on the next
+ * cycle even if no new customer message arrived (see `shouldGenerateBrief`
+ * and `existingKnowledgeStatus` below).
+ */
+export type KnowledgeStatus = 'ok' | 'no_approved_facts' | 'read_failed'
 
 export interface BriefCandidate {
   conversationId: string
@@ -48,6 +65,8 @@ export interface BriefCandidate {
   existingBriefMessageCount: number | null
   regenCount: number
   regenCountDate: string | null
+  /** `conversation_briefs.knowledge_status` from the last stored brief, if any. */
+  existingKnowledgeStatus?: 'read_failed' | null
 }
 
 export interface StoredMessage {
@@ -67,8 +86,16 @@ export function shouldGenerateBrief(c: BriefCandidate, now: Date): boolean {
   const quiet = now.getTime() - new Date(c.lastMessageAt).getTime() >= QUIET_PERIOD_MS
   if (!quiet) return false
 
-  // Nothing new to say since the last brief.
-  if (c.existingBriefMessageCount !== null && c.existingBriefMessageCount >= c.messageCount) {
+  // Nothing new to say since the last brief — UNLESS that last brief failed
+  // to read the knowledge base (issue #1647): `draft_reply` came back empty
+  // and this thread must be retried even though no new customer message
+  // arrived. Without this carve-out a read-failed brief with a quiet thread
+  // would never be picked up again.
+  if (
+    c.existingBriefMessageCount !== null &&
+    c.existingBriefMessageCount >= c.messageCount &&
+    c.existingKnowledgeStatus !== 'read_failed'
+  ) {
     return false
   }
 
@@ -127,18 +154,67 @@ async function loadClientIdentity(clientId: string): Promise<ClientIdentity> {
   return { name: row.name, industry: row.industry ?? null }
 }
 
-function clientFactsBlock(facts: ClientBriefFacts | null): string {
-  if (!facts) return ''
-  const lines = [
-    ...facts.facts.map((f) => `- ${f}`),
-    ...facts.neverClaim.map((c) => `- Never write ${c.wrong}. Instead: ${c.insteadSay}`),
-    facts.supportPhone || facts.supportEmail
-      ? `- For anything you should not attempt to resolve yourself, offer a human follow-up via ${[facts.supportPhone, facts.supportEmail].filter(Boolean).join(' / ')}.`
-      : null,
-  ].filter(Boolean)
-  return lines.length
-    ? `\nCLIENT FACTS — the only extra facts draft_reply may state as true (never state anything else as fact):\n${lines.join('\n')}\n`
-    : ''
+/**
+ * Some knowledge entries are a correction rather than a fact to assert —
+ * `structuredValue: { wrong, insteadSay }` (see the migration for issue
+ * #1647's CTS `company.founding_year_correction` row). Any client's mining
+ * pipeline or manual entry can use this shape; it is a rendering convention,
+ * not something specific to one client.
+ */
+function isNeverClaimShaped(value: unknown): value is { wrong: string; insteadSay: string } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as Record<string, unknown>).wrong === 'string' &&
+    typeof (value as Record<string, unknown>).insteadSay === 'string'
+  )
+}
+
+/**
+ * Renders the `customer_reply`-eligible knowledge entries `getClientKnowledge`
+ * returned into the "extra facts draft_reply may state as true" block.
+ * Contains NO hardcoded client name, industry, or business fact — every line
+ * comes from `entries`, which is empty for any client with nothing approved
+ * (or no entitlement grant at all; see `loadClientFacts`).
+ */
+function clientFactsBlock(entries: readonly KnowledgeEntry[]): string {
+  if (entries.length === 0) return ''
+  const lines = entries.map((entry) =>
+    isNeverClaimShaped(entry.structuredValue)
+      ? `- Never write ${entry.structuredValue.wrong}. Instead: ${entry.structuredValue.insteadSay}`
+      : `- ${entry.statement}`,
+  )
+  return `\nCLIENT FACTS — the only extra facts draft_reply may state as true (never state anything else as fact):\n${lines.join('\n')}\n`
+}
+
+/**
+ * Read this client's `customer_reply`-eligible knowledge exactly once per
+ * brief (design doc §9.14 B: "每轮每客户只读一次知识库"). Three outcomes:
+ *
+ *   - `'ok'`               — `entries` may be non-empty; render them.
+ *   - `'no_approved_facts'`— nothing to say for this client: either the read
+ *     genuinely returned zero entries, OR this client has no entitlement
+ *     grant at all (`KnowledgeNotEntitledError`). Both are normal,
+ *     unexceptional states for a brief — the card generates exactly as it
+ *     did before the knowledge base existed. This is what makes brief.ts's
+ *     de-CTS-ification NOT subject to the knowledge base's own admission
+ *     gate (design doc §7.1's final sentence): a client without a grant
+ *     simply gets no extra facts block, same as today.
+ *   - `'read_failed'`      — a real DB/infra failure. The caller must blank
+ *     `draft_reply` and mark this brief for retry (see `shouldGenerateBrief`
+ *     / `storeBrief`'s `knowledge_status` column).
+ */
+async function loadClientFacts(
+  clientId: string,
+  deps: GetClientKnowledgeDeps = {},
+): Promise<{ status: KnowledgeStatus; entries: KnowledgeEntry[] }> {
+  try {
+    const result = await getClientKnowledge(clientId, { purpose: 'customer_reply' }, deps)
+    return { status: result.entries.length > 0 ? 'ok' : 'no_approved_facts', entries: result.entries }
+  } catch (err) {
+    if (err instanceof KnowledgeNotEntitledError) return { status: 'no_approved_facts', entries: [] }
+    return { status: 'read_failed', entries: [] }
+  }
 }
 
 function tripInstructions(isTravel: boolean): string {
@@ -153,10 +229,10 @@ TRIP DETAILS — every field describes what the CUSTOMER told us, never what we 
 /**
  * Builds the system prompt for one client. Contains NO hardcoded client name,
  * industry, or business fact — identity comes from `identity`, and any extra
- * fact comes from `facts` (see brief-client-facts.ts for why that table exists
- * and its limits).
+ * fact comes from `factEntries` (the `customer_reply`-eligible rows
+ * `loadClientFacts`/`getClientKnowledge` returned for this client).
  */
-export function buildSystemPrompt(identity: ClientIdentity, facts: ClientBriefFacts | null): string {
+export function buildSystemPrompt(identity: ClientIdentity, factEntries: readonly KnowledgeEntry[]): string {
   const isTravel = isTravelIndustry(identity)
   const business = identity.name
 
@@ -179,7 +255,7 @@ GROUNDING — only use what is in the thread:
 - If the customer asked something the thread does not answer, say so in next_action and leave draft_reply asking rather than guessing.
 - promises_made must capture EVERY commitment the ${business} side made ("we'll send you...", "a specialist will call you within 24 hours"). Staff cannot honour a promise they never saw. An offer the customer has not accepted ("would you like more details?") is NOT a promise.
 - If the thread is spam, an unrelated promotional broadcast, or otherwise has nothing to do with ${business}'s actual business: customer_needs MUST be an empty array and risk_flags must say so ("疑似垃圾/推广消息，非真实客户咨询"). Never invent a plausible-sounding need to fill the field.
-${clientFactsBlock(facts)}
+${clientFactsBlock(factEntries)}
 next_action must be a concrete thing a salesperson does today, in the imperative — "打电话给 Kam，确认出行月份". Never "等待客户回复": if the customer has gone quiet, chasing them IS the action, and the elapsed time below tells you how overdue it is.
 
 draft_reply rules (it goes to a real customer as ${business}):
@@ -291,6 +367,32 @@ const NULL_TRIP: TripDetails = {
   budget_signal: null,
 }
 
+export interface GenerateBriefDeps {
+  /** Test-only override for the knowledge-base read (default: real `getClientKnowledge`). */
+  knowledge?: GetClientKnowledgeDeps
+  /**
+   * Bounds the model call to whatever is left of the caller's per-candidate
+   * budget (see `brief-cycle.ts`'s `generateDueBriefs`). Without this the
+   * OpenAI request has no deadline of its own — the caller's clock check
+   * only runs BETWEEN candidates, so one slow call (2026-09-23: a 429 the
+   * SDK retries twice, ~20s) still runs past the gateway's own timeout and
+   * the whole chunk never returns (see `CHUNK_TIME_BUDGET_MS`).
+   */
+  signal?: AbortSignal
+}
+
+export interface GeneratedBrief {
+  brief: MessengerBrief
+  /**
+   * `null` when no knowledge read was attempted at all (spam short-circuit,
+   * or the no-API-key dev/test fallback — neither calls the model, so there
+   * is nothing to report). Otherwise the outcome of `loadClientFacts` for
+   * this run — the caller (`storeBrief` / `brief-cycle.ts`) uses it to mark
+   * `read_failed` briefs for retry.
+   */
+  knowledgeStatus: KnowledgeStatus | null
+}
+
 /**
  * Ask the model for a brief. `clientId` is required — every field in the
  * prompt that used to say "CTS" now comes from this client's own row in
@@ -305,36 +407,51 @@ export async function generateBrief(
   messages: StoredMessage[],
   clientId: string,
   context?: BriefContext,
-): Promise<MessengerBrief> {
-  if (looksLikeAutomatedSpam(messages)) return noiseBrief()
+  deps: GenerateBriefDeps = {},
+): Promise<GeneratedBrief> {
+  if (looksLikeAutomatedSpam(messages)) return { brief: noiseBrief(), knowledgeStatus: null }
 
   // apiKey gate stays BEFORE any network call (including the clients lookup
   // below) — dev/test with no key configured must still make zero network
   // calls, per this function's own contract (see docstring above).
   const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) return fallbackBrief(messages)
+  if (!apiKey) return { brief: fallbackBrief(messages), knowledgeStatus: null }
 
   const identity = await loadClientIdentity(clientId)
-  const facts = CLIENT_BRIEF_FACTS[clientId] ?? null
-  const { default: OpenAI } = await import('openai')
-  const client = new OpenAI({ apiKey })
-  const res = await client.responses.create({
-    model: modelName(),
-    input: [
-      { role: 'system', content: buildSystemPrompt(identity, facts) },
-      {
-        role: 'user',
-        content: `${renderContext(context, identity.name)}Thread:\n${renderThread(messages, identity.name)}`,
+  const facts = await loadClientFacts(clientId, deps.knowledge)
+  // 🔴 **收编到统一入口**（2026-09-23，接 openai-client.ts 文件头点名留给本窗口的那条）。
+  //    原来这里自己 `new OpenAI({ apiKey })`，于是这条链路的失败**绕过了
+  //    `instrumentedFetch` 的拦截** —— 账户余额 9/20 耗尽三天没人知道，这里是漏网的一处。
+  //
+  //    `bypassGateway: true` 是刻意的，不是图省事：本函数用的是 `responses.create`，
+  //    而「网关代不代理 /v1/responses」在这个仓库里零证据（openai-client.ts 里写了
+  //    实测核对过程）。所以只拿拦截、不换路由 —— 换路由等于用一条没验过的链路
+  //    替掉一条在跑的链路。
+  const { getOpenAIClient } = await import('@/lib/ai/openai-client')
+  const client = getOpenAIClient({ apiKey, bypassGateway: true })
+  const res = await client.responses.create(
+    {
+      model: modelName(),
+      input: [
+        { role: 'system', content: buildSystemPrompt(identity, facts.entries) },
+        {
+          role: 'user',
+          content: `${renderContext(context, identity.name)}Thread:\n${renderThread(messages, identity.name)}`,
+        },
+      ],
+      text: {
+        format: { type: 'json_schema', name: 'messenger_brief', schema: MESSENGER_BRIEF_JSON_SCHEMA },
       },
-    ],
-    text: {
-      format: { type: 'json_schema', name: 'messenger_brief', schema: MESSENGER_BRIEF_JSON_SCHEMA },
-    },
-  } as Parameters<typeof client.responses.create>[0])
+    } as Parameters<typeof client.responses.create>[0],
+    // 🔴 2026-09-23 事故的直接原因：这个调用之前没有自己的超时，SDK 默认对 429
+    // 重试两次能把一条卡烧到 ~20 秒。`signal` 把剩余的段预算落到这一条调用本身，
+    // 而不是只靠调用方在条目之间读一次表。
+    deps.signal ? { signal: deps.signal } : undefined,
+  )
 
   const text = (res as { output_text?: string }).output_text ?? '{}'
   const brief = MessengerBriefSchema.parse(JSON.parse(text))
-  return {
+  const finalBrief: MessengerBrief = {
     ...brief,
     follow_up_due_at: normaliseFollowUpDueAt(brief.follow_up_due_at),
     summary: stripMarkdown(brief.summary),
@@ -342,13 +459,17 @@ export async function generateBrief(
     customer_needs: brief.customer_needs.map(stripMarkdown),
     objections: brief.objections.map(stripMarkdown),
     promises_made: brief.promises_made.map(stripMarkdown),
-    draft_reply: stripMarkdown(brief.draft_reply),
+    // 🔴 issue #1647 第 5 点：知识库读取失败时 draft_reply 必须留空——它本来
+    // 就是唯一读了知识库事实的字段，读失败意味着这次没人能保证它没编事实。
+    // 其余字段（summary/customer_needs/...）不依赖知识库，正常保留。
+    draft_reply: facts.status === 'read_failed' ? '' : stripMarkdown(brief.draft_reply),
     // Hard gate, not a prompt suggestion: a non-travel client's trip stays
     // null no matter what the model returned. This is what actually fixes
     // the 2026-09-13 incident — the prompt instruction above is defence in
     // depth, not the guarantee.
     trip: isTravelIndustry(identity) ? brief.trip : NULL_TRIP,
   }
+  return { brief: finalBrief, knowledgeStatus: facts.status }
 }
 
 /**
@@ -414,16 +535,26 @@ export function fallbackBrief(messages: StoredMessage[]): MessengerBrief {
   })
 }
 
-/** Write (or rewrite) the brief row for one conversation. */
+/**
+ * Write (or rewrite) the brief row for one conversation.
+ *
+ * `knowledgeStatus` is only ever persisted as `'read_failed'` or `NULL` —
+ * `'ok'` / `'no_approved_facts'` collapse to `NULL` because `knowledge_status`
+ * exists solely to mark "this brief needs a rewrite" (issue #1647 §5); those
+ * two outcomes need no rewrite.
+ */
 export async function storeBrief(
   candidate: BriefCandidate,
   brief: MessengerBrief,
   now: Date,
+  knowledgeStatus: KnowledgeStatus | null = null,
+  /** Same per-candidate deadline as `generateBrief`'s — see its `GenerateBriefDeps.signal`. */
+  signal?: AbortSignal,
 ): Promise<void> {
   const today = now.toISOString().slice(0, 10)
   const countedToday = candidate.regenCountDate === today ? candidate.regenCount : 0
 
-  const { error } = await supabaseAdmin.from('conversation_briefs').upsert(
+  let query = supabaseAdmin.from('conversation_briefs').upsert(
     {
       conversation_id: candidate.conversationId,
       client_id: candidate.clientId,
@@ -440,6 +571,7 @@ export async function storeBrief(
       trip: brief.trip,
       contact: brief.contact,
       draft_reply: brief.draft_reply,
+      knowledge_status: knowledgeStatus === 'read_failed' ? 'read_failed' : null,
       source_message_count: candidate.messageCount,
       generated_at: now.toISOString(),
       regen_count: countedToday + 1,
@@ -448,6 +580,9 @@ export async function storeBrief(
     },
     { onConflict: 'conversation_id' },
   )
+  if (signal) query = query.abortSignal(signal)
+
+  const { error } = await query
 
   if (error) throw new Error(`brief upsert failed: ${error.message}`)
 }

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { supabaseAdmin } from '@/lib/supabase'
 
 /**
@@ -126,4 +126,115 @@ function finisher(jobName: string, runId: string, startedAt: number): CronRunHan
       }
     },
   }
+}
+
+/**
+ * 把某个任务**还停在「在跑」的运行记录**统一收成 `failed` —— 给 Inngest 函数的 `onFailure` 用。
+ *
+ * 🔴 为什么按 job_name 而不是按 runId 收：`onFailure` 是 Inngest 另起的一次独立调用，
+ *    拿不到主函数 `log-start` 那一步记在 step 缓存里的 runId。只要主函数配了
+ *    `concurrency: { limit: 1 }`，同一时刻同名任务最多一行 `running`，按名字收不会误伤。
+ *    `startedBefore` 再收一道口：只收在失败事件**之前**开跑的行 —— 人在后台点 Replay
+ *    开的新一轮如果抢在这条收尾之前先写了 `running`，不会被错标成失败。
+ *
+ * 🔴 一行 `running` 都没有时（`log-start` 自己就被掐死了），仍然要落一条带终态的记录 ——
+ *    这是本模块第二条硬规则（见文件头）；否则健康检查只会报「逾期没跑」，看不出是跑死了。
+ *
+ * 写失败**不抛异常**，跟 `finish()` 同样的理由：它是观测手段，不是安全闸。
+ * 返回真正被改到的行数（0 = 新插了一条兜底记录）。
+ */
+export async function failOpenCronRuns(
+  jobName: string,
+  errorMessage: string,
+  opts: { startedBefore: Date },
+): Promise<number> {
+  const finishedAt = new Date().toISOString()
+  const { data, error } = await supabaseAdmin
+    .from('cron_run_logs')
+    .update({ status: 'failed', finished_at: finishedAt, error_message: errorMessage })
+    .eq('job_name', jobName)
+    .eq('status', 'running')
+    .lte('started_at', opts.startedBefore.toISOString())
+    .select('id')
+
+  if (error) {
+    console.error(
+      `[cron-run-logger] ${jobName}: onFailure 收口写不进 cron_run_logs —— 这次失败可能永远停在 running。${describe(error)}`,
+    )
+    return 0
+  }
+
+  const closed = data?.length ?? 0
+  if (closed > 0) return closed
+
+  const { error: insertError } = await supabaseAdmin.from('cron_run_logs').insert({
+    id: randomUUID(),
+    job_name: jobName,
+    status: 'failed',
+    started_at: opts.startedBefore.toISOString(),
+    finished_at: finishedAt,
+    error_message: errorMessage,
+  })
+  if (insertError) {
+    console.error(
+      `[cron-run-logger] ${jobName}: onFailure 兜底记录也写不进去 —— 这次失败彻底没有痕迹。${describe(insertError)}`,
+    )
+  }
+  return 0
+}
+
+/**
+ * 由 Inngest 的 run id 推出一个固定的 UUID，当这一轮的运行记录 id（以及需要对齐的回执 id）。
+ *
+ * 🔴 为什么要固定：`onFailure` 是 Inngest 另起的一次调用，拿不到主函数 `log-start` 步骤里
+ *    记下的 id；它只拿得到 `event.data.run_id`。用同一个 run id 算出同一个 id，失败收口时就能
+ *    **只收自己那一行**，不用再按任务名把所有「在跑」的行一起收掉（同名任务并发时会误伤别的单）。
+ *    同一个 run 里重试的步骤也拿到同一个 id，所以开记录必须幂等（见 startCronRunWithId）。
+ *
+ * 做法：sha256(runId) 取前 32 个十六进制字符，排成 8-4-4-4-12。
+ */
+export function cronRunIdFromInngestRun(runId: string): string {
+  const hex = createHash('sha256').update(runId).digest('hex').slice(0, 32)
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`
+}
+
+/**
+ * 用调用方给定的 id 开一行运行记录（给 Inngest 工作流用，id 来自 cronRunIdFromInngestRun）。
+ *
+ * 🔴 幂等：同一个 run 里 `log-start` 步骤重试时会拿同一个 id 再插一次——插入已经提交、只是响应
+ *    丢了的情况下，第二次会撞主键（23505）。那不是错误，是「已经开过了」，静默返回。
+ * 其他写失败照本模块的规矩：`console.error` 喊出来、不抛（收尾时 finish() 按同一个 id upsert 兜底）。
+ */
+export async function startCronRunWithId(jobName: string, id: string): Promise<void> {
+  const { error } = await supabaseAdmin.from('cron_run_logs').insert({ id, job_name: jobName, status: 'running' })
+  if (!error || error.code === '23505') return
+  console.error(
+    `[cron-run-logger] ${jobName}: 开跑记录写不进 cron_run_logs（id=${id}）—— 收尾会用同一个 id upsert 补齐。${describe(error)}`,
+  )
+}
+
+/**
+ * 按 id 收尾**一行**运行记录，除非它已经是终态 —— 给知道自己 run id 的 `onFailure` 用。
+ *
+ * · 这一行还在 `running`，或者压根没插成（开跑那步就挂了）→ 用 finish() 的同一套 upsert 落成终态，
+ *   `started_at` 沿用库里那一行的（没有这一行才用 `fallbackStartedAt`），不把开跑时刻改成失败时刻；
+ * · 这一行已经是 completed / failed → 不动，返回 'already_terminal'（不许把真结果覆盖掉）。
+ * 读不出来时照样落终态（宁可覆盖一次，也不留一行永远「在跑」）。写失败不抛，理由同 finish()。
+ */
+export async function finishCronRunIfOpen(
+  jobName: string,
+  id: string,
+  opts: Parameters<CronRunHandle['finish']>[0],
+  fallbackStartedAt: Date,
+): Promise<'closed' | 'already_terminal'> {
+  const { data, error } = await supabaseAdmin.from('cron_run_logs').select('status, started_at').eq('id', id)
+  if (error) {
+    console.error(`[cron-run-logger] ${jobName}: 收口前读不出运行记录（id=${id}），照样落终态。${describe(error)}`)
+  }
+  const row = (data ?? [])[0] as { status?: unknown; started_at?: unknown } | undefined
+  if (row && row.status !== 'running') return 'already_terminal'
+  const parsed = typeof row?.started_at === 'string' ? Date.parse(row.started_at) : Number.NaN
+  const startedAt = Number.isNaN(parsed) ? fallbackStartedAt.getTime() : parsed
+  await finisher(jobName, id, startedAt).finish(opts)
+  return 'closed'
 }

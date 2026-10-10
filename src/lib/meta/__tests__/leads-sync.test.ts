@@ -11,21 +11,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
-vi.mock('@/lib/meta/token-manager', () => ({
-  getStoredPageToken: vi.fn(),
-  getMetaTokenForClient: vi.fn(),
-}))
-vi.mock('@/lib/meta/page-posts', () => ({ getPageAccessToken: vi.fn() }))
+// 主页是不是这个客户的、用哪把令牌 —— 由同步闸判定（规则测试在 page-sync-authorization.test.ts）。
+vi.mock('@/lib/meta/page-sync-authorization', () => ({ authorizePageSync: vi.fn() }))
 vi.mock('@/lib/meta/lead-forms', () => ({
   fetchPageLeadForms: vi.fn(),
   fetchFormLeads: vi.fn(),
 }))
-vi.mock('@/lib/crm/meta-lead', () => ({ ingestMetaLead: vi.fn() }))
+vi.mock('@/lib/crm/meta-lead', () => ({ ingestMetaLead: vi.fn(), parseLeadAnswers: vi.fn() }))
 
 import { supabaseAdmin } from '@/lib/supabase'
-import { getStoredPageToken } from '@/lib/meta/token-manager'
+import { authorizePageSync } from '@/lib/meta/page-sync-authorization'
 import { fetchFormLeads, fetchPageLeadForms, type MetaLead } from '@/lib/meta/lead-forms'
-import { ingestMetaLead } from '@/lib/crm/meta-lead'
+import { ingestMetaLead, parseLeadAnswers } from '@/lib/crm/meta-lead'
 import { getLeadWatermark, resolveDefaultCountry, syncClientMetaLeads } from '../leads-sync'
 
 const CLIENT = {
@@ -38,22 +35,70 @@ const CLIENT = {
 
 const mock = <T>(fn: T) => fn as unknown as ReturnType<typeof vi.fn>
 
+/**
+ * 已办完批量查这一条链上，实际传给 `from()` / `select()` / `.eq()` / `.in()` 的参数。
+ * 每次 `mockDb` 重置。
+ *
+ * **连表名和字段一起记**：假件如果只看链条形状不看实参，把表名写错、字段写错、
+ * 或者把 `.eq('client_id', …)` 整行删掉，所有用例照样全绿，而生产上 PostgREST
+ * 会报错 → fail-open → 这道闸永不触发，悄悄退回每轮重打。
+ */
+let settledQueryCalls: Array<{
+  table: string
+  columns: string
+  filters: Array<[string, unknown]>
+  ids: string[]
+}> = []
+
+/**
+ * `supabaseAdmin.from()` 的假件，同时服务两条链：
+ *   · 水位线查询   `.select().eq().eq().order().limit().maybeSingle()`
+ *   · 已办完批量查 `.select().eq().eq().in()`（按批查，一批 200 条；
+ *     不走分页 —— 触点唯一键保证一个 id 最多一行，一批最多 200 行，够不着 1000 行硬顶）
+ */
+function mockDb(
+  opts: {
+    newest?: string | null
+    settled?: Array<{ source_ref: string; metadata: unknown }>
+    settledError?: boolean
+  } = {},
+) {
+  const { newest = null, settled = [], settledError = false } = opts
+  settledQueryCalls = []
+  ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => ({
+    select: (columns: string) => {
+      const filters: Array<[string, unknown]> = []
+      const chain = {
+        eq: (col: string, val: unknown) => {
+          filters.push([col, val])
+          return {
+            ...chain,
+            order: () => ({
+              limit: () => ({
+                maybeSingle: () =>
+                  Promise.resolve({ data: newest ? { occurred_at: newest } : null }),
+              }),
+            }),
+          }
+        },
+        in: (_col: string, ids: string[]) => {
+          settledQueryCalls.push({ table, columns, filters: [...filters], ids: [...ids] })
+          const hit = settled.filter((row) => ids.includes(row.source_ref))
+          return Promise.resolve(
+            settledError
+              ? { data: null, error: { message: 'boom' } }
+              : { data: hit, error: null },
+          )
+        },
+      }
+      return chain
+    },
+  }))
+}
+
 /** contact_touchpoints 的水位线查询 —— 返回给定的最新一条 occurred_at。 */
 function mockWatermark(newest: string | null) {
-  ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-    select: () => ({
-      eq: () => ({
-        eq: () => ({
-          order: () => ({
-            limit: () => ({
-              maybeSingle: () =>
-                Promise.resolve({ data: newest ? { occurred_at: newest } : null }),
-            }),
-          }),
-        }),
-      }),
-    }),
-  }))
+  mockDb({ newest })
 }
 
 const lead = (id: string): MetaLead => ({
@@ -71,8 +116,9 @@ const lead = (id: string): MetaLead => ({
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mock(parseLeadAnswers).mockReturnValue({ optOutEvidence: null })
   mockWatermark('2026-07-25T11:48:46.000Z')
-  mock(getStoredPageToken).mockResolvedValue('page-token')
+  mock(authorizePageSync).mockResolvedValue({ ok: true, pageToken: 'page-token', via: 'client_oauth' })
   mock(ingestMetaLead).mockResolvedValue({
     contactId: 'c1',
     createdContact: true,
@@ -114,6 +160,26 @@ describe('getLeadWatermark', () => {
 })
 
 describe('syncClientMetaLeads', () => {
+  it('AD-SEC-4：主页没核实是这个客户的 → 一个表单都不读，并记成 error 让定时任务算失败', async () => {
+    mock(authorizePageSync).mockResolvedValue({ ok: false, skipped: 'page_not_verified', reason: 'bound_to_other_client' })
+
+    const res = await syncClientMetaLeads(CLIENT)
+
+    expect(mock(authorizePageSync)).toHaveBeenCalledWith(expect.anything(), CLIENT.id, CLIENT.facebook_page_id, expect.anything())
+    expect(res.skipped).toBe('page_not_verified')
+    expect(res.error).toContain('bound_to_other_client')
+    expect(mock(fetchPageLeadForms)).not.toHaveBeenCalled()
+    expect(mock(fetchFormLeads)).not.toHaveBeenCalled()
+  })
+
+  it('用同步闸交回来的那把主页令牌读表单', async () => {
+    mock(fetchPageLeadForms).mockResolvedValue({ rows: [], error: null })
+
+    await syncClientMetaLeads(CLIENT)
+
+    expect(mock(fetchPageLeadForms)).toHaveBeenCalledWith(CLIENT.facebook_page_id, 'page-token')
+  })
+
   it('正常路径：拉到的 lead 逐条接进 CRM 并计数', async () => {
     mock(fetchPageLeadForms).mockResolvedValue({
       rows: [{ formId: 'f1', name: '表单一', status: 'ACTIVE' }],
@@ -278,5 +344,181 @@ describe('Mailchimp 出口结果记账（防第二层静默）', () => {
     const res = await syncClientMetaLeads(CLIENT)
 
     expect(res.mailchimp).toEqual({})
+  })
+})
+
+/**
+ * 上一轮已经办成的线索，这一轮不该再打一次 Mailchimp。
+ *
+ * 水位线每轮回看 24 小时，同一条 lead 会被完整重跑（实测 188 条线索被重复处理
+ * 4926 次）。判据只有一份：`isMailchimpSettled`（`lib/mailchimp/outlet-tally.ts`）。
+ */
+describe('已办完的线索不再重复打 Mailchimp', () => {
+  beforeEach(() => {
+    mock(fetchPageLeadForms).mockResolvedValue({ rows: [{ formId: 'f1', name: 'F1' }], error: null })
+  })
+
+  it('一条已办完的线索 → 一次 provider 调用都不发生', async () => {
+    mockDb({
+      newest: '2026-07-25T11:48:46.000Z',
+      settled: [{ source_ref: 'l1', metadata: { mailchimp_result: { status: 'subscribed' } } }],
+    })
+    mock(fetchFormLeads).mockResolvedValue({ rows: [lead('l1')], error: null })
+
+    const res = await syncClientMetaLeads(CLIENT)
+
+    expect(mock(ingestMetaLead)).not.toHaveBeenCalled()
+    expect(res.mailchimp).toEqual({ 'skipped:already_synced': 1 })
+    expect(res.leadsIngested).toBe(1)
+    expect(res.newContacts).toBe(0)
+  })
+
+  it('混合一轮：已办完的跳过，没记录的照常接', async () => {
+    mockDb({
+      newest: '2026-07-25T11:48:46.000Z',
+      settled: [
+        {
+          source_ref: 'l1',
+          metadata: { mailchimp_result: { status: 'already_member', tagRepair: 'already_tagged' } },
+        },
+      ],
+    })
+    mock(fetchFormLeads).mockResolvedValue({ rows: [lead('l1'), lead('l2')], error: null })
+    mock(ingestMetaLead).mockResolvedValue({
+      contactId: 'c2',
+      createdContact: true,
+      skipped: null,
+      mailchimp: { status: 'subscribed' },
+    })
+
+    const res = await syncClientMetaLeads(CLIENT)
+
+    expect(mock(ingestMetaLead)).toHaveBeenCalledTimes(1)
+    expect(mock(ingestMetaLead).mock.calls[0][0].lead.leadId).toBe('l2')
+    expect(res.mailchimp).toEqual({ 'skipped:already_synced': 1, subscribed: 1 })
+    expect(res.leadsIngested).toBe(2)
+  })
+
+  it('上一轮失败的照常重跑 —— 密钥 / 服务修好后要能自愈', async () => {
+    mockDb({
+      newest: '2026-07-25T11:48:46.000Z',
+      settled: [
+        {
+          source_ref: 'l1',
+          metadata: { mailchimp_result: { status: 'failed', reason: 'provider_5xx' } },
+        },
+      ],
+    })
+    mock(fetchFormLeads).mockResolvedValue({ rows: [lead('l1')], error: null })
+
+    await syncClientMetaLeads(CLIENT)
+
+    expect(mock(ingestMetaLead)).toHaveBeenCalledTimes(1)
+  })
+
+  it('标签没打上的照常重跑 —— 广告归因证据还没落地', async () => {
+    mockDb({
+      newest: '2026-07-25T11:48:46.000Z',
+      settled: [
+        {
+          source_ref: 'l1',
+          metadata: { mailchimp_result: { status: 'already_member', tagRepair: 'failed:http_429' } },
+        },
+      ],
+    })
+    mock(fetchFormLeads).mockResolvedValue({ rows: [lead('l1')], error: null })
+
+    await syncClientMetaLeads(CLIENT)
+
+    expect(mock(ingestMetaLead)).toHaveBeenCalledTimes(1)
+  })
+
+  it('本轮解析出 opt-out 的，即使已办完也照常走完整流程', async () => {
+    mockDb({
+      newest: '2026-07-25T11:48:46.000Z',
+      settled: [{ source_ref: 'l1', metadata: { mailchimp_result: { status: 'subscribed' } } }],
+    })
+    mock(fetchFormLeads).mockResolvedValue({ rows: [lead('l1')], error: null })
+    mock(parseLeadAnswers).mockReturnValue({ optOutEvidence: 'unsubscribe_me' })
+
+    await syncClientMetaLeads(CLIENT)
+
+    expect(mock(ingestMetaLead)).toHaveBeenCalledTimes(1)
+    // 实参也要钉：传成 `lead` 而不是 `lead.answers` 的话，生产上 opt-out 例外
+    // 整个失效，而所有用例照样全绿。
+    expect(mock(parseLeadAnswers)).toHaveBeenCalledWith(lead('l1').answers)
+  })
+
+  it('读已办完记录报错 → 全部照常重跑（宁可多打一次）', async () => {
+    mockDb({ newest: '2026-07-25T11:48:46.000Z', settledError: true })
+    mock(fetchFormLeads).mockResolvedValue({ rows: [lead('l1')], error: null })
+
+    const res = await syncClientMetaLeads(CLIENT)
+
+    expect(mock(ingestMetaLead)).toHaveBeenCalledTimes(1)
+    expect(res.mailchimp).not.toHaveProperty('skipped:already_synced')
+  })
+
+  it('回执形状是垃圾 → 照常重跑', async () => {
+    const garbage: unknown[] = [null, 'subscribed', []]
+    for (const mailchimp_result of garbage) {
+      vi.clearAllMocks()
+      mock(parseLeadAnswers).mockReturnValue({ optOutEvidence: null })
+      mock(authorizePageSync).mockResolvedValue({ ok: true, pageToken: 'page-token', via: 'client_oauth' })
+      mock(ingestMetaLead).mockResolvedValue({
+        contactId: 'c1',
+        createdContact: true,
+        skipped: null,
+        mailchimp: { status: 'subscribed' },
+      })
+      mockDb({
+        newest: '2026-07-25T11:48:46.000Z',
+        settled: [{ source_ref: 'l1', metadata: { mailchimp_result } }],
+      })
+      mock(fetchPageLeadForms).mockResolvedValue({ rows: [{ formId: 'f1', name: 'F1' }], error: null })
+      mock(fetchFormLeads).mockResolvedValue({ rows: [lead('l1')], error: null })
+
+      await syncClientMetaLeads(CLIENT)
+
+      expect(mock(ingestMetaLead)).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  it('整个 metadata 是 null（历史行）→ 照常重跑', async () => {
+    mockDb({
+      newest: '2026-07-25T11:48:46.000Z',
+      settled: [{ source_ref: 'l1', metadata: null }],
+    })
+    mock(fetchFormLeads).mockResolvedValue({ rows: [lead('l1')], error: null })
+
+    await syncClientMetaLeads(CLIENT)
+
+    expect(mock(ingestMetaLead)).toHaveBeenCalledTimes(1)
+  })
+
+  it('批量查必须按 client_id 和 source 过滤 —— 跨客户红线', async () => {
+    mockDb({ newest: '2026-07-25T11:48:46.000Z' })
+    mock(fetchFormLeads).mockResolvedValue({ rows: [lead('l1')], error: null })
+
+    await syncClientMetaLeads(CLIENT)
+
+    expect(settledQueryCalls).toHaveLength(1)
+    expect(settledQueryCalls[0].table).toBe('contact_touchpoints')
+    expect(settledQueryCalls[0].columns).toBe('source_ref, metadata')
+    expect(settledQueryCalls[0].filters).toEqual([
+      ['client_id', CLIENT.id],
+      ['source', 'meta_lead_form'],
+    ])
+    expect(settledQueryCalls[0].ids).toEqual(['l1'])
+  })
+
+  it('一个表单几百条线索时按批切，不把几千个 id 塞进一条查询', async () => {
+    const rows = Array.from({ length: 450 }, (_, i) => lead(`l${i}`))
+    mockDb({ newest: '2026-07-25T11:48:46.000Z' })
+    mock(fetchFormLeads).mockResolvedValue({ rows, error: null })
+
+    await syncClientMetaLeads(CLIENT)
+
+    expect(settledQueryCalls.map((c) => c.ids.length)).toEqual([200, 200, 50])
   })
 })

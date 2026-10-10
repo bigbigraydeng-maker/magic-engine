@@ -1,0 +1,290 @@
+[
+ {
+  "event_type": "update_ad_set_budget",
+  "event_time": "2026-09-13T12:11:37+0000",
+  "object_id": "52549857906273",
+  "object_name": "GC 顶层 · ThruPlay · 4 条各 $10 · 20260908",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"old_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"old_value\":6000,\"additional_type\":\"status_string\",\"additional_value\":\"\"},\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":1000,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "update_ad_set_budget",
+  "event_time": "2026-09-13T11:54:32+0000",
+  "object_id": "52551117304473",
+  "object_name": "收割 · 北京上海看完95% · 留资 · $12 · 20260913",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"old_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"old_value\":1500,\"additional_type\":\"status_string\",\"additional_value\":\"\"},\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":1200,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-09-13T11:53:59+0000",
+  "object_id": "52551118124873",
+  "object_name": "收割 · 北京上海看完95% · 私信 · $12 · 20260913",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":1200,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_campaign_group",
+  "event_time": "2026-09-13T11:53:58+0000",
+  "object_id": "52551118114073",
+  "object_name": "GC · 再营销收割测试 · 私信组 · 北京上海看完95% · 20260913",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-13T11:44:21+0000",
+  "object_id": "52551117317273",
+  "object_name": "类似受众 (NZ, 1%) - CTS · GC 北京+上海视频看完95% · 365d · 20260913",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"\\u7c7b\\u4f3c\\u53d7\\u4f17 (NZ, 1\\u0025) - CTS \\u00b7 GC \\u5317\\u4eac+\\u4e0a\\u6d77\\u89c6\\u9891\\u770b\\u5b8c95\\u0025 \\u00b7 365d \\u00b7 20260913\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-13T11:44:21+0000",
+  "object_id": "52551117317873",
+  "object_name": "类似受众 (NZ) - CTS · GC 北京+上海视频看完95% · 365d · 20260913",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"\\u7c7b\\u4f3c\\u53d7\\u4f17 (NZ) - CTS \\u00b7 GC \\u5317\\u4eac+\\u4e0a\\u6d77\\u89c6\\u9891\\u770b\\u5b8c95\\u0025 \\u00b7 365d \\u00b7 20260913\"}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-09-13T11:44:01+0000",
+  "object_id": "52551117304473",
+  "object_name": "收割 · 北京上海看完95% · 留资 · $12 · 20260913",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":1500,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_campaign_group",
+  "event_time": "2026-09-13T11:43:52+0000",
+  "object_id": "52551117286873",
+  "object_name": "GC · 再营销收割测试 · 北京上海看完95% · 20260913",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-13T11:43:30+0000",
+  "object_id": "52551117275273",
+  "object_name": "CTS · GC 北京+上海视频 video_completed · 365d · 20260913",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"CTS \\u00b7 GC \\u5317\\u4eac+\\u4e0a\\u6d77\\u89c6\\u9891 video_completed \\u00b7 365d \\u00b7 20260913\"}"
+ },
+ {
+  "event_type": "update_ad_set_budget",
+  "event_time": "2026-09-09T21:01:12+0000",
+  "object_id": "52549857906273",
+  "object_name": "GC 顶层 · ThruPlay · 4 条各 $10 · 20260908",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"old_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"old_value\":4000,\"additional_type\":\"status_string\",\"additional_value\":\"\"},\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":6000,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-09-08T16:22:11+0000",
+  "object_id": "52550116901073",
+  "object_name": "GC · VisaFree · EN · 20260909",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52549857906273,\"new\":52549857906273}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-09-08T05:31:18+0000",
+  "object_id": "52549989429473",
+  "object_name": "GC · Food · EN · 20260908",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52549857906273,\"new\":52549857906273}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-09-07T16:02:22+0000",
+  "object_id": "52549893801073",
+  "object_name": "GC · Shanghai · EN · 20260908",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52549857906273,\"new\":52549857906273}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-09-07T16:02:16+0000",
+  "object_id": "52549893770273",
+  "object_name": "GC · Beijing · EN · 20260908",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52549857906273,\"new\":52549857906273}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-09-07T16:02:11+0000",
+  "object_id": "52549893756273",
+  "object_name": "GC · Xi'an · EN · 20260908",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52549857906273,\"new\":52549857906273}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-09-07T16:02:06+0000",
+  "object_id": "52549893739473",
+  "object_name": "GC · Grand Tour · EN · 20260908",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52549857906273,\"new\":52549857906273}}"
+ },
+ {
+  "event_type": "update_ad_set_budget",
+  "event_time": "2026-09-07T15:01:18+0000",
+  "object_id": "52549857906273",
+  "object_name": "GC 顶层 · ThruPlay · 4 条各 $10 · 20260908",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"old_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"old_value\":2500,\"additional_type\":\"status_string\",\"additional_value\":\"\"},\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":4000,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "update_ad_set_budget",
+  "event_time": "2026-09-07T14:52:54+0000",
+  "object_id": "52549857906273",
+  "object_name": "GC 顶层 · ThruPlay · 4 条各 $10 · 20260908",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"old_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"old_value\":4000,\"additional_type\":\"status_string\",\"additional_value\":\"\"},\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":2500,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "update_ad_set_budget",
+  "event_time": "2026-09-07T13:46:06+0000",
+  "object_id": "52549857906273",
+  "object_name": "GC 顶层 · ThruPlay · 4 条各 $10 · 20260908",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"old_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"old_value\":3000,\"additional_type\":\"status_string\",\"additional_value\":\"\"},\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":4000,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-07T13:44:18+0000",
+  "object_id": "52549865359073",
+  "object_name": "CTS · VIDEO · 看过50% · 365d",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"CTS \\u00b7 VIDEO \\u00b7 \\u770b\\u8fc750\\u0025 \\u00b7 365d\"}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-09-07T13:34:36+0000",
+  "object_id": "52549864342073",
+  "object_name": "GC 顶层 · 上海",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52549857906273,\"new\":52549857906273}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-09-07T13:34:28+0000",
+  "object_id": "52549864327073",
+  "object_name": "GC 顶层 · 北京帝都",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52549857906273,\"new\":52549857906273}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-09-07T13:34:21+0000",
+  "object_id": "52549864316873",
+  "object_name": "GC 顶层 · 西安兵马俑",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52549857906273,\"new\":52549857906273}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-09-07T13:34:13+0000",
+  "object_id": "52549864310673",
+  "object_name": "GC 顶层 · 三城连线",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52549857906273,\"new\":52549857906273}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-09-07T13:15:23+0000",
+  "object_id": "52549861622273",
+  "object_name": "GC 顶层 · 北京帝都",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52549857906273,\"new\":52549857906273}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-09-07T13:15:19+0000",
+  "object_id": "52549861612273",
+  "object_name": "GC 顶层 · 西安兵马俑",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52549857906273,\"new\":52549857906273}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-09-07T13:15:14+0000",
+  "object_id": "52549861605473",
+  "object_name": "GC 顶层 · 三城连线",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52549857906273,\"new\":52549857906273}}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-09-07T12:54:59+0000",
+  "object_id": "52549857906273",
+  "object_name": "GC 顶层 · ThruPlay · 4 条各 $10 · 20260908",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":3000,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_campaign_group",
+  "event_time": "2026-09-07T12:54:45+0000",
+  "object_id": "52549857862873",
+  "object_name": "GC · 顶层认知 · 视频观看 · 20260908",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-09-07T12:10:34+0000",
+  "object_id": "52549847838473",
+  "object_name": "CTS · GoldenChina · LAL · B一辈子 · 20260908",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52549843017273,\"new\":52549843017273}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-09-07T12:10:30+0000",
+  "object_id": "52549847826873",
+  "object_name": "CTS · GoldenChina · LAL · A免签全包 · 20260908",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52549843017273,\"new\":52549843017273}}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-09-07T11:48:14+0000",
+  "object_id": "52549843017273",
+  "object_name": "CTS · Golden China · LAL 1% · NZ 55+ · 20260907",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":2500,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_campaign_group",
+  "event_time": "2026-09-07T11:43:45+0000",
+  "object_id": "52549839818273",
+  "object_name": "CTS · Golden China · LAL实验 · 20260907",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-07T11:40:27+0000",
+  "object_id": "52549838527273",
+  "object_name": "类似受众 (NZ, 1%) - CTS · LIST · fb+newsletter · 20260907",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"\\u7c7b\\u4f3c\\u53d7\\u4f17 (NZ, 1\\u0025) - CTS \\u00b7 LIST \\u00b7 fb+newsletter \\u00b7 20260907\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-07T11:40:27+0000",
+  "object_id": "52549838533273",
+  "object_name": "类似受众 (NZ) - CTS · LIST · fb+newsletter · 20260907",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"\\u7c7b\\u4f3c\\u53d7\\u4f17 (NZ) - CTS \\u00b7 LIST \\u00b7 fb+newsletter \\u00b7 20260907\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-07T10:28:21+0000",
+  "object_id": "52549822861673",
+  "object_name": "CTS · LIST · fb+newsletter · 20260907",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"CTS \\u00b7 LIST \\u00b7 fb+newsletter \\u00b7 20260907\"}"
+ }
+]

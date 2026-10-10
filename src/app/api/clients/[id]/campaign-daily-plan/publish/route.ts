@@ -22,6 +22,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
+import type { z } from 'zod'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
@@ -34,11 +35,25 @@ import {
   isReviewablePostDate,
   type CampaignDailyPlanData,
 } from '@/lib/campaign/daily-plan'
+import { postChecklistPasses } from '@/lib/social/content-review'
+import { judgePriceClaimWithSource, priceGateMessage } from '@/lib/content/price-claim-gate'
+import { judgePostPriceFacts, loadOfferPriceFacts } from '@/lib/content/price-fact-gate'
+import {
+  buildDailyPlanAutoChecks,
+  buildDailyPlanFirstComment,
+  buildDailyPlanPostMessage,
+} from '@/lib/campaign/daily-plan-first-comment'
+import { buildFirstCommentMarker, ensureFacebookFirstComment } from '@/lib/meta/first-comment'
+import { GRAPH_BASE } from '@/lib/meta/graph-base'
 import {
   CampaignDailyPublishCommandSchema,
   CampaignDailyPublishMetaSchema,
   DAILY_PLAN_POST_PUBLISHED_EVENT,
+  DAILY_PLAN_POST_STORY_RESOLVE_EVENT,
+  DailyPlanPostPublishedEventSchema,
+  StoryResolveDueSchema,
   measurementSchedule,
+  storyResolveEventId,
   partitionByIdempotency,
   publishIdempotencyKey,
   resolvePublishSchedule,
@@ -48,7 +63,11 @@ import {
   type CampaignDailyPublishMeta,
   type CampaignDailyPublishPlannedPost,
   type CampaignDailyPublishedPost,
+  type DailyPlanPostPublishedEvent,
+  type FirstCommentStatus,
+  type StoryResolveDue,
 } from '@/lib/campaign/daily-plan-publish'
+import { writeMeasurementRecord } from '@/lib/campaign/daily-plan-measurement-record'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -116,6 +135,13 @@ async function loadReviewedPlan(
   ) {
     return conflict('REVIEW_STATE_INVALID')
   }
+  const checklistReady = planData.bundles
+    .filter(bundle => !!bundle.post)
+    .every(bundle => {
+      const decision = review.data.posts[bundle.date]
+      return decision?.verdict === 'PASS' && decision.reviewer_role === 'admin' && postChecklistPasses(decision.checklist)
+    })
+  if (!checklistReady) return conflict('REVIEW_CHECKLIST_REQUIRED')
   if (review.data.revision !== command.review_revision) return conflict('REVIEW_REVISION_MISMATCH')
 
   // The no-publish queue receipt is the proof that these exact Posts passed
@@ -130,8 +156,14 @@ async function loadReviewedPlan(
 }
 
 interface PublishCandidate extends CampaignDailyPublishPlannedPost {
+  /** The Post body as published — hook + body, no CTA and no link. */
   message: string
+  /** The first comment text (CTA + tracked link) posted after the Post. */
+  firstCommentText: string
+  /** What the price gates judge: the Post body *and* the first comment. */
+  judgedText: string
   imageUrl: string
+  imageSource: string | null
 }
 
 /**
@@ -153,7 +185,7 @@ async function buildCandidates(
   const assetIds = Array.from(new Set(selected.map(post => post.image_asset_id)))
   const { data: assets, error } = await supabaseAdmin
     .from('client_assets')
-    .select('id, storage_url, mime_type, status, archived_at')
+    .select('id, storage_url, mime_type, status, archived_at, source')
     .eq('client_id', clientId)
     .in('id', assetIds)
   if (error) throw error
@@ -162,6 +194,7 @@ async function buildCandidates(
   const bundleByDate = new Map(row.planData.bundles.map(bundle => [bundle.date, bundle]))
   const candidates: PublishCandidate[] = []
   const notReady: string[] = []
+  const firstCommentFailures: Array<{ date: string; failed_checks: string[] }> = []
 
   for (const entry of selected) {
     const post = bundleByDate.get(entry.date)?.post
@@ -179,6 +212,28 @@ async function buildCandidates(
       notReady.push(entry.date)
       continue
     }
+
+    // The CTA and its link belong in the first comment, never in the Post body.
+    // Re-run the same auto-checks the reviewer saw; a Post that fails them (or
+    // whose first comment cannot be built) must not reach a Page.
+    const checks = buildDailyPlanAutoChecks({
+      post: { hook: post.hook, body: post.body, cta: post.cta, cta_url: post.cta_url },
+      planId: row.id,
+      date: entry.date,
+    })
+    const firstComment = buildDailyPlanFirstComment({
+      cta: post.cta,
+      ctaUrl: post.cta_url,
+      planId: row.id,
+      date: entry.date,
+    })
+    const failedChecks = checks.filter(check => check.outcome !== 'PASS').map(check => check.key)
+    if (firstComment === null || failedChecks.length > 0) {
+      firstCommentFailures.push({ date: entry.date, failed_checks: failedChecks })
+      continue
+    }
+
+    const message = buildDailyPlanPostMessage(post)
     candidates.push({
       date: entry.date,
       idempotency_key: publishIdempotencyKey({
@@ -190,11 +245,20 @@ async function buildCandidates(
       }),
       image_asset_id: entry.image_asset_id,
       cta_url: entry.cta_url,
-      message: [post.hook, post.body, `${post.cta}: ${post.cta_url}`].map(part => part.trim()).join('\n\n'),
+      message,
+      firstCommentText: firstComment.text,
+      judgedText: [message, firstComment.text].join('\n\n'),
       imageUrl: asset.storage_url as string,
+      imageSource: (asset.source as string | null) ?? null,
     })
   }
 
+  if (firstCommentFailures.length > 0) {
+    return conflict('FIRST_COMMENT_CHECK_FAILED', {
+      blocked: firstCommentFailures,
+      hint: '整批已暂停（不是只拦列出的日期）：这些日期的帖子正文里含有 CTA 或链接，或首评无法生成；把链接和 CTA 从正文去掉后重新审核。',
+    })
+  }
   if (notReady.length > 0) {
     return NextResponse.json({ success: false, error: 'POSTS_NOT_READY_FOR_PUBLISH', not_ready: notReady }, { status: 422 })
   }
@@ -326,37 +390,204 @@ async function publishPending(
       permalink: result.permalink,
       provider_response: result.raw,
     }
-    published.push(record)
 
-    // The Post is already live; an event failure must not discard the receipt.
-    try {
-      const sent = await sendInngestEvent({
-        id: candidate.idempotency_key,
-        name: DAILY_PLAN_POST_PUBLISHED_EVENT,
-        data: {
-          client_id: context.clientId,
-          campaign_id: context.command.campaign_id,
-          plan_id: context.row.id,
-          plan_revision: context.row.planRevision,
-          review_revision: context.row.reviewRevision,
-          date: candidate.date,
-          idempotency_key: candidate.idempotency_key,
-          post_id: record.post_id,
-          page_id: record.page_id,
-          published_at: publishedAt,
-          ...(record.scheduled_publish_time ? { scheduled_publish_time: record.scheduled_publish_time } : {}),
-          permalink: record.permalink,
-          // A scheduled receipt confirms submission, not public visibility.
-          measure_at: measurementSchedule(record.scheduled_publish_time ?? record.published_at),
-        },
-      })
-      eventIds.push(...sent.event_ids)
-    } catch (error: unknown) {
-      console.error('[daily-plan publish] measurement event failed', candidate.date, errorMessage(error))
-    }
+    await attachFirstComment(record, candidate, result, context)
+    published.push(record)
+    const sentIds = await startMeasurement(record, context, candidate.firstCommentText)
+    eventIds.push(...sentIds)
   }
 
   return { published, failed, eventIds }
+}
+
+/**
+ * Post the first comment for a live Post, or mark it pending for a scheduled
+ * one. Never throws and never marks the Post failed: the Post is already on
+ * Facebook, so a comment failure must not invite a duplicate re-post.
+ */
+async function attachFirstComment(
+  record: CampaignDailyPublishedPost,
+  candidate: PublishCandidate,
+  result: Awaited<ReturnType<typeof publishPagePhotoPost>>,
+  context: { clientId: string; pageId: string; pageToken: string; row: PlanRow; command: CampaignDailyPublishCommand },
+): Promise<void> {
+  if (result.postIdSource !== 'post_id') {
+    // Scheduled photo: Meta only exposes the feed story id once the photo is
+    // public, so the story-resolve workflow posts the comment then.
+    record.first_comment_status = 'PENDING_PUBLISH'
+    return
+  }
+  try {
+    const commentId = await ensureFacebookFirstComment({
+      graphBase: GRAPH_BASE,
+      objectId: result.postId,
+      expectedPageId: context.pageId,
+      accessToken: context.pageToken,
+      marker: buildFirstCommentMarker('daily-plan-first-comment', candidate.idempotency_key),
+      message: candidate.firstCommentText,
+      failureLabel: '每日计划帖',
+    })
+    record.first_comment_status = 'POSTED'
+    record.first_comment_id = commentId
+  } catch (error: unknown) {
+    record.first_comment_status = 'FAILED'
+    console.error('[daily-plan publish] first comment failed', record.date, errorMessage(error))
+    await recordFirstCommentFailure(record, context, errorMessage(error), candidate.firstCommentText)
+  }
+}
+
+/** Observability only: a failed write must not block saving the receipt. */
+async function recordFirstCommentFailure(
+  record: CampaignDailyPublishedPost,
+  context: { clientId: string; row: PlanRow; command: CampaignDailyPublishCommand },
+  reason: string,
+  firstCommentText: string,
+): Promise<void> {
+  try {
+    await writeMeasurementRecord(supabaseAdmin, {
+      status: 'failed',
+      outcome: 'first_comment_failed',
+      reason: reason.slice(0, 300),
+      attempts: 0,
+      post: {
+        client_id: context.clientId,
+        campaign_id: context.command.campaign_id,
+        plan_id: context.row.id,
+        date: record.date,
+        idempotency_key: record.idempotency_key,
+        page_id: record.page_id,
+        ...(record.post_id_source === 'id' ? { photo_id: record.post_id } : { post_id: record.post_id }),
+        ...(record.scheduled_publish_time ? { scheduled_publish_time: record.scheduled_publish_time } : {}),
+        first_comment_text: firstCommentText,
+      },
+    })
+  } catch (error: unknown) {
+    console.error('[daily-plan publish] first comment failure record not written', record.date, errorMessage(error))
+  }
+}
+
+type MeasurementSkipCode = 'event_contract_invalid' | 'event_send_failed'
+
+/**
+ * Hand the published Post to measurement. Never throws and never marks the
+ * Post failed: it is already accepted by Facebook, and `failed[]` would invite
+ * a duplicate re-post. If the handoff cannot happen, the receipt entry gets a
+ * fixed reason code and a failed record lands where the daily to-do list reads.
+ */
+async function startMeasurement(
+  record: CampaignDailyPublishedPost,
+  context: { clientId: string; row: PlanRow; command: CampaignDailyPublishCommand },
+  firstCommentText?: string,
+): Promise<string[]> {
+  const event = buildMeasurementEvent(record, context, firstCommentText)
+  if (!event.ok) {
+    console.error('[daily-plan publish] measurement event not emitted', record.date, event.reason)
+    await recordMeasurementSkipped(record, context, 'event_contract_invalid', firstCommentText)
+    return []
+  }
+  try {
+    const sent = await sendInngestEvent({ id: event.id, name: event.name, data: event.data })
+    return sent.event_ids
+  } catch (error: unknown) {
+    console.error('[daily-plan publish] measurement event failed', record.date, errorMessage(error))
+    await recordMeasurementSkipped(record, context, 'event_send_failed', firstCommentText)
+    return []
+  }
+}
+
+async function recordMeasurementSkipped(
+  record: CampaignDailyPublishedPost,
+  context: { clientId: string; row: PlanRow; command: CampaignDailyPublishCommand },
+  code: MeasurementSkipCode,
+  firstCommentText?: string,
+): Promise<void> {
+  record.measurement_skipped_reason = code
+  try {
+    await writeMeasurementRecord(supabaseAdmin, {
+      status: 'failed',
+      outcome: code,
+      reason: code,
+      attempts: 0,
+      post: {
+        client_id: context.clientId,
+        campaign_id: context.command.campaign_id,
+        plan_id: context.row.id,
+        date: record.date,
+        idempotency_key: record.idempotency_key,
+        page_id: record.page_id,
+        ...(record.post_id_source === 'id' ? { photo_id: record.post_id } : { post_id: record.post_id }),
+        ...(record.scheduled_publish_time ? { scheduled_publish_time: record.scheduled_publish_time } : {}),
+        // A scheduled Post's first comment is still pending at this point, so
+        // the resolve workflow is the only thing that would ever post it. If
+        // the handoff fails, carry the text here or it is lost for good.
+        ...(record.post_id_source === 'id' && firstCommentText ? { first_comment_text: firstCommentText } : {}),
+      },
+    })
+  } catch (error: unknown) {
+    // Observability only: a failed write must not block saving the receipt.
+    console.error('[daily-plan publish] measurement failure record not written', record.date, errorMessage(error))
+  }
+}
+
+type MeasurementEvent =
+  | { ok: true; id: string; name: string; data: DailyPlanPostPublishedEvent | StoryResolveDue }
+  | { ok: false; reason: string }
+
+function contractViolation(error: z.ZodError): { ok: false; reason: string } {
+  const issues = error.issues.slice(0, 3).map(issue => `${issue.path.join('.')}: ${issue.message}`)
+  return { ok: false, reason: `event payload violates contract: ${issues.join('; ')}` }
+}
+
+/**
+ * Pick and validate the event that starts measurement for this Post.
+ *
+ * - Graph returned a feed `post_id` (immediate publish): the standard
+ *   `daily_plan.post.published`, event id = idempotency key.
+ * - Graph returned only a photo `id` (scheduled photo): Meta only exposes
+ *   `page_story_id` once the photo is public, so emit a story-resolve event
+ *   (id `<key>:resolve:<photo_id>`); the cloud workflow emits the standard event, with the
+ *   same idempotency-key id, after it reads the story id back.
+ *
+ * Both are checked against the consumer's own schema *before* sending.
+ */
+function buildMeasurementEvent(
+  record: CampaignDailyPublishedPost,
+  context: { clientId: string; row: PlanRow; command: CampaignDailyPublishCommand },
+  firstCommentText?: string,
+): MeasurementEvent {
+  const identity = {
+    client_id: context.clientId,
+    campaign_id: context.command.campaign_id,
+    plan_id: context.row.id,
+    plan_revision: context.row.planRevision,
+    review_revision: context.row.reviewRevision,
+    date: record.date,
+    idempotency_key: record.idempotency_key,
+    page_id: record.page_id,
+    published_at: record.published_at,
+    ...(record.scheduled_publish_time ? { scheduled_publish_time: record.scheduled_publish_time } : {}),
+    // A scheduled receipt confirms submission, not public visibility.
+    measure_at: measurementSchedule(record.scheduled_publish_time ?? record.published_at),
+  }
+
+  if (record.post_id_source === 'id') {
+    const parsed = StoryResolveDueSchema.safeParse({
+      ...identity,
+      photo_id: record.post_id,
+      ...(firstCommentText ? { first_comment_text: firstCommentText } : {}),
+    })
+    if (!parsed.success) return contractViolation(parsed.error)
+    return {
+      ok: true,
+      id: storyResolveEventId(record.idempotency_key, parsed.data.photo_id),
+      name: DAILY_PLAN_POST_STORY_RESOLVE_EVENT,
+      data: parsed.data,
+    }
+  }
+
+  const parsed = DailyPlanPostPublishedEventSchema.safeParse({ ...identity, post_id: record.post_id, permalink: record.permalink })
+  if (!parsed.success) return contractViolation(parsed.error)
+  return { ok: true, id: record.idempotency_key, name: DAILY_PLAN_POST_PUBLISHED_EVENT, data: parsed.data }
 }
 
 /** Compare-and-set write of the receipt onto the exact snapshot we validated. */
@@ -387,6 +618,47 @@ async function persistReceipt(
   const { data, error } = await query.select('id').maybeSingle()
   if (error) throw error
   return Boolean(data)
+}
+
+/**
+ * 「真实价格只能配真实画面」—— 服务端那道闸，跟 /api/publer/create-post 同源。
+ *
+ * 界面上的闸挡的是手滑；这里挡的是绕过界面的路。这条 bridge 一旦跑起来东西就真
+ * 出去了，人不在场，所以每条待发 Post 的文案都要过一遍：文案报了价、配图却背不了
+ * 真价，就拦下整批，让审核者在授权前先看到。判定与界面共用同一段代码，不会出现
+ * 「界面拦了后端放行」这种最难查的不一致。
+ */
+function findPriceGateBlocks(
+  posts: PublishCandidate[],
+): Array<{ date: string; message: string }> {
+  const blocks: Array<{ date: string; message: string }> = []
+  for (const post of posts) {
+    const verdict = judgePriceClaimWithSource({ caption: post.judgedText, source: post.imageSource })
+    if (verdict.blocked) blocks.push({ date: post.date, message: priceGateMessage(verdict.source) })
+  }
+  return blocks
+}
+
+/**
+ * 价格数字核对 —— 价格闸的第二步：文案里写的每个价格数字，必须跟客户资料里该团的
+ * 价格对得上。对不上、核对不了（没资料 / 认不出是哪个团 / 读不懂写法）一律拦下。
+ *
+ * 取资料失败会直接抛出（走外层 500）：读失败不等于「没有资料要核对」，不许放行。
+ * 只检查 pending —— 已经发出去的不重复拦。
+ */
+async function findPriceFactBlocks(
+  clientId: string,
+  posts: PublishCandidate[],
+): Promise<Array<{ date: string; reason: string; message: string }>> {
+  const offers = await loadOfferPriceFacts(supabaseAdmin, clientId)
+  const blocks: Array<{ date: string; reason: string; message: string }> = []
+  for (const post of posts) {
+    const result = judgePostPriceFacts({ text: post.judgedText, ctaUrl: post.cta_url, offers })
+    if (result.verdict.status === 'blocked') {
+      blocks.push({ date: post.date, reason: result.verdict.reason, message: result.message })
+    }
+  }
+  return blocks
 }
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
@@ -424,6 +696,22 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     const { pending, skipped } = partitionByIdempotency(candidates, alreadyPublished)
 
+    // 真价只配真画面 —— 东西出去前的最后一道闸，且必须在任何 token 查询 / provider
+    // 调用之前。dry run 也要过：审核者得在授权前就看到哪几条被拦了，而不是授权后
+    // 才发现发不出去。
+    const priceBlocks = findPriceGateBlocks(pending)
+    if (priceBlocks.length > 0) return conflict('PRICE_CLAIM_UNBACKED', {
+      blocked: priceBlocks,
+      hint: '整批已暂停（不是只拦列出的日期）：把列出日期的价格去掉或换成客户确认过的图，再重新演练。',
+    })
+
+    // 价格数字核对：图过关了还要看数字——价格对不上客户资料的，整批同样暂停。
+    const factBlocks = await findPriceFactBlocks(clientId, pending)
+    if (factBlocks.length > 0) return conflict('PRICE_FACT_UNVERIFIED', {
+      blocked: factBlocks,
+      hint: '整批已暂停（不是只拦列出的日期）：把列出日期文案里的价格改成客户资料里的数字，或者先去客户设置补全该团的价格资料，再重新演练。',
+    })
+
     if (command.no_publish) {
       return NextResponse.json({
         success: true,
@@ -437,6 +725,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           image_asset_id: post.image_asset_id,
           cta_url: post.cta_url,
           message_preview: post.message.slice(0, 200),
+          first_comment_preview: post.firstCommentText,
         })),
         already_published: skipped.map(post => ({ date: post.date, idempotency_key: post.idempotency_key })),
       })
@@ -509,6 +798,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       status: receipt.status,
       receipt,
       skipped_as_duplicate: skipped.map(post => ({ date: post.date, idempotency_key: post.idempotency_key })),
+      // Posts that are on Facebook but will not be measured — surfaced here so
+      // the caller sees it without digging through the receipt or server logs.
+      measurement_skipped: outcome.published
+        .filter(post => post.measurement_skipped_reason)
+        .map(post => ({ date: post.date, post_id: post.post_id, reason: post.measurement_skipped_reason })),
     })
   } catch (error: unknown) {
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 500 })

@@ -13,6 +13,11 @@
 import React, { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+// Pure data module (no server imports) — safe in a client component.
+import { resolveAdsPlaybook, type AdsPlaybook } from '@/lib/ads-strategy/playbooks'
+import AutonomySettings from './autonomy-settings'
+import GrowthPanel, { type GrowthStateView } from './growth-panel'
+import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
 
 type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history' | 'paused'
 
@@ -64,6 +69,10 @@ interface AdHealthResponse {
     payload: Payload
   } | null
   history: Array<{ insight_date: string; overall_verdict: Verdict }>
+  /** clients.industry — picks the result words; absent → neutral words. */
+  industry?: string | null
+  /** 卫青巡察当天的经营状态。null = 今天还没跑；缺字段 = 这一段读不到（接口出错）。 */
+  growth?: GrowthStateView | ClientGrowthView | null
 }
 
 // ─── Verdict styling (colour = conclusion, per 板桥) ───────────────────────────
@@ -246,7 +255,7 @@ function PrescriptionBlock({ clientId, c }: { clientId: string; c: CampaignNarra
  * week-over-week comparison, because the engine only computes that per campaign
  * and inventing an aggregate would be a fabricated number.
  */
-function MoneySummary({ campaigns }: { campaigns: CampaignNarrative[] }) {
+function MoneySummary({ campaigns, playbook }: { campaigns: CampaignNarrative[]; playbook: AdsPlaybook }) {
   const spend = campaigns.reduce((s, c) => s + c.latest_spend_7d, 0)
   const results = campaigns.reduce((s, c) => s + c.latest_results_7d, 0)
   if (spend <= 0) return null
@@ -267,17 +276,17 @@ function MoneySummary({ campaigns }: { campaigns: CampaignNarrative[] }) {
         过去 7 天花了 <span className="font-semibold tabular-nums">${spend.toFixed(0)}</span>
         {results > 0 ? (
           <>
-            ,来了 <span className="font-semibold tabular-nums">{results}</span> 个询盘,
+            ,来了 <span className="font-semibold tabular-nums">{results}</span> 个{playbook.resultNoun},
             实付平均 <span className="font-semibold tabular-nums">${perResult!.toFixed(1)}</span> 一个。
           </>
         ) : (
-          <>,<span className="font-semibold text-amber-700">一个询盘都没来</span>。</>
+          <>,<span className="font-semibold text-amber-700">一个{playbook.resultNoun}都没来</span>。</>
         )}
       </p>
       {showWorst && (
         <p className="mt-1.5 text-xs text-gray-500">
           最贵的是「<span className="text-gray-700">{worst.c.campaign_name}</span>」——
-          一个询盘 <span className="tabular-nums text-gray-700">${worst.per.toFixed(1)}</span>。
+          一个{playbook.resultNoun} <span className="tabular-nums text-gray-700">${worst.per.toFixed(1)}</span>。
         </p>
       )}
     </div>
@@ -304,7 +313,7 @@ interface StopLossPreview {
  * Real numbers are fetched on click, not on render — a page with six cards must
  * not fire six ad-platform lookups nobody asked for.
  */
-function StopLossBlock({ clientId, c }: { clientId: string; c: CampaignNarrative }) {
+function StopLossBlock({ clientId, c, playbook }: { clientId: string; c: CampaignNarrative; playbook: AdsPlaybook }) {
   const [busy, setBusy] = useState<'cut' | 'pause' | null>(null)
   const [result, setResult] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [settled, setSettled] = useState(false)
@@ -338,19 +347,46 @@ function StopLossBlock({ clientId, c }: { clientId: string; c: CampaignNarrative
 
       const confirmText = action === 'cut'
         ? `把这条广告的每天预算降 20%?\n\n现在每天 $${pv.current_daily.toFixed(2)} → 降到 $${(pv.planned_daily ?? 0).toFixed(2)}\n广告继续跑,只是花得慢一点。随时可以调回来。`
-        : `把这条广告先全停?\n\n它近 7 天花了 $${c.latest_spend_7d.toFixed(0)},带来 ${c.latest_results_7d} 个询盘。\n停了就不再花钱,随时可以重新开。`
+        : `把这条广告先全停?\n\n它近 7 天花了 $${c.latest_spend_7d.toFixed(0)},带来 ${c.latest_results_7d} 个${playbook.resultNoun}。\n停了就不再花钱,随时可以重新开。`
       if (!window.confirm(confirmText)) return
 
       const res = await fetch(`/api/clients/${clientId}/ad-health/stop-loss`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaign_id: c.campaign_id, action }),
+        body: JSON.stringify({ campaign_id: c.campaign_id, action, request_id: globalThis.crypto.randomUUID() }),
       })
       const json = await res.json()
+      if (json.error === 'no_active_goal') {
+        setResult({ kind: 'err', text: '这个客户还没有生效的增长目标，所以系统没有把止损动作提交给执行内核。先补齐目标后再试。' })
+        return
+      }
+      if (json.error === 'goal_unreadable' || json.error === 'adsets_unreadable' || json.error === 'timezone_unreadable') {
+        setResult({ kind: 'err', text: '系统暂时读不到执行所需资料，没有提交任何 Meta 修改。稍后再试；如果持续出现我会排查。' })
+        return
+      }
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
 
       if (json.not_cuttable) {
         setResult({ kind: 'err', text: '这条广告的每天预算改不了。能立刻做的是先全停。' })
+        return
+      }
+      if (json.status === 'awaiting_approval') {
+        setResult({ kind: 'err', text: '止损请求已登记，正在等待授权；广告目前还没有确认变更。' })
+        return
+      }
+      if (json.status === 'in_progress') {
+        setResult({ kind: 'err', text: '止损请求已在执行中，尚未拿到完成回执。请稍后刷新广告状态，不要重复提交。' })
+        return
+      }
+      if (json.status === 'refused') {
+        const denied = json.runs?.every((run: { kind: string }) => run.kind === 'denied')
+        setResult({ kind: 'err', text: denied
+          ? (json.reason ? `执行内核没有放行这次操作：${json.reason}` : '执行内核没有放行这次操作，广告没有变更。')
+          : '执行内核没有给出完成回执；请先到 Meta 核实当前状态，再决定是否重试。' })
+        return
+      }
+      if (json.status === 'partial') {
+        setResult({ kind: 'err', text: `本次结果不一致：${json.succeeded_count} 项完成、${json.pending_count} 项待审批、${json.in_progress_count} 项执行中、${json.refused_count} 项未放行。请核对 Meta 当前状态后再决定下一步。` })
         return
       }
       if (!json.ok) {
@@ -360,13 +396,13 @@ function StopLossBlock({ clientId, c }: { clientId: string; c: CampaignNarrative
 
       const warn = (json.warnings as string[] | undefined)?.filter(Boolean) ?? []
       const done = action === 'cut'
-        ? `已降到每天 $${(json.new_daily as number).toFixed(2)}(原来 $${(json.current_daily as number).toFixed(2)})。广告还在跑。`
+        ? `已降到每天 $${(json.new_daily as number).toFixed(2)}(原来 $${(json.current_daily as number).toFixed(2)})。`
         : '已停投,这条广告不再花钱了。'
       setResult({ kind: 'ok', text: warn.length > 0 ? `${done}\n⚠️ ${warn.join(' ')}` : done })
       setSettled(true)
     } catch (err) {
       console.error('[ads-health] stop-loss failed:', err)
-      setResult({ kind: 'err', text: '这次没改成功,钱没动。稍后再点一次;连续失败我去查。' })
+      setResult({ kind: 'err', text: '系统没有收到明确回执，广告状态可能已变化。先去 Meta 核实，再决定是否重试。' })
     } finally {
       setBusy(null)
     }
@@ -413,7 +449,7 @@ function StopLossBlock({ clientId, c }: { clientId: string; c: CampaignNarrative
   )
 }
 
-function CampaignCard({ clientId, c }: { clientId: string; c: CampaignNarrative }) {
+function CampaignCard({ clientId, c, playbook }: { clientId: string; c: CampaignNarrative; playbook: AdsPlaybook }) {
   const meta = VERDICT_META[c.verdict]
   const ctrMetric = c.metrics.find(m => m.metric === 'ctr')
   // Cost per lead is always derivable from the 7-day aggregates when there are
@@ -438,14 +474,14 @@ function CampaignCard({ clientId, c }: { clientId: string; c: CampaignNarrative 
 
       <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-400">
         <span>近 7 天花费 <span className="text-gray-600 tabular-nums">${c.latest_spend_7d.toFixed(0)}</span></span>
-        <span>近 7 天询盘 <span className="text-gray-600 tabular-nums">{c.latest_results_7d}</span></span>
+        <span>近 7 天{playbook.resultNoun} <span className="text-gray-600 tabular-nums">{c.latest_results_7d}</span></span>
         {/* Labelled 实付 on purpose: this is total spend ÷ total results, i.e.
             what was actually paid. The headline above compares a TYPICAL DAY
             (median of daily costs, which resists one freak day skewing the
             verdict), so the two numbers differ legitimately — without the label
             they read as a contradiction and cost the page its credibility. */}
         {cpl != null && (
-          <span>实付每个询盘 <span className="text-gray-600 tabular-nums">${cpl.toFixed(1)}</span></span>
+          <span>实付{playbook.costPerResultLabel} <span className="text-gray-600 tabular-nums">${cpl.toFixed(1)}</span></span>
         )}
         {c.frequency_7d != null && (
           <span>看腻程度 <span className="text-gray-600 tabular-nums">{c.frequency_7d.toFixed(2)}</span>（1 以下算正常，越高越腻）</span>
@@ -457,7 +493,7 @@ function CampaignCard({ clientId, c }: { clientId: string; c: CampaignNarrative 
           a prescription that may have nothing to give. */}
       {(c.verdict === 'alert' || c.verdict === 'watch') && (
         <>
-          <StopLossBlock clientId={clientId} c={c} />
+          <StopLossBlock clientId={clientId} c={c} playbook={playbook} />
           <PrescriptionBlock clientId={clientId} c={c} />
         </>
       )}
@@ -493,6 +529,7 @@ export default function AdsHealthPage() {
   const latest = data?.latest
   const overall = latest?.overall_verdict ?? 'insufficient_history'
   const overallMeta = VERDICT_META[overall]
+  const playbook = resolveAdsPlaybook(data?.industry ?? null)
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
@@ -503,6 +540,12 @@ export default function AdsHealthPage() {
         <h1 className="mt-2 text-2xl font-semibold text-gray-800">广告健康</h1>
         <p className="text-sm text-gray-400">每天自动体检 · 把每条广告跟它自己最好的一周比</p>
       </div>
+
+      {!loading && !error && (
+        <div className="mb-6"><GrowthPanel state={data ? data.growth : undefined} clientId={clientId} /></div>
+      )}
+
+      <div className="mb-6"><AutonomySettings clientId={clientId} /></div>
 
       {loading && <div className="text-gray-400 text-sm py-12 text-center">加载中…</div>}
 
@@ -532,7 +575,7 @@ export default function AdsHealthPage() {
             </p>
           </div>
 
-          <MoneySummary campaigns={latest.payload.campaigns} />
+          <MoneySummary campaigns={latest.payload.campaigns} playbook={playbook} />
 
           {/* Worst first — the engine already sorts, but re-sort as a fallback
               so a bad cron day can't silently bury an alert below healthy cards. */}
@@ -540,7 +583,7 @@ export default function AdsHealthPage() {
             {[...latest.payload.campaigns]
               .sort((a, b) => VERDICT_RANK[b.verdict] - VERDICT_RANK[a.verdict])
               .map(c => (
-                <CampaignCard key={c.campaign_id} clientId={clientId} c={c} />
+                <CampaignCard key={c.campaign_id} clientId={clientId} c={c} playbook={playbook} />
               ))}
           </div>
 

@@ -26,16 +26,24 @@
  * 发送函数永不抛异常：发信失败不该把上游那趟同步一起带崩。
  */
 
-import { Resend } from 'resend'
-import { meMailFrom, ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
-import { describeSendError } from '@/lib/ads-strategy/digest'
+import { ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
 import { contactCardTitle } from '@/lib/crm/display-name'
+import {
+  contactUrl,
+  esc,
+  humanWait,
+  sendDigestMail,
+  stripAddress,
+  type DigestMailer,
+  type DigestSendResult,
+} from '@/lib/crm/digest-shared'
+
+// 这两个是本文件的公开出口（单测和调用方都在用），实现搬去了 digest-shared ——
+// 两封汇总信共用同一份，改一处不会漏另一处。
+export { humanWait, type DigestMailer, type DigestSendResult }
 
 /** 测试期标记。撤掉这个功能的「测试中」身份时，只改这一处。 */
 export const DIGEST_TEST_PREFIX = '【测试功能】'
-
-/** 后台入口（登录后可见），拼客人记录的直达链接用。 */
-const APP_BASE = 'https://app.magicengine.com.au'
 
 /**
  * 一封等着被回复的客人来信。
@@ -57,26 +65,6 @@ export interface DigestItem {
   lastMessageAt: string
 }
 
-/** 发信通道，测试用假件替换，绝不真发。 */
-export interface DigestMailer {
-  emails: {
-    send(payload: {
-      from: string
-      to: string[]
-      subject: string
-      html: string
-    }): Promise<{ error: unknown }>
-  }
-}
-
-export interface DigestSendResult {
-  sent: boolean
-  /** 没发出去的原因，说人话 */
-  reason?: string
-  /** 这次实际用的收件人（含 fallback 之后的结果），方便调用方记日志 */
-  recipients: string[]
-}
-
 /**
  * 名单之外还有多少 / 这份名单靠不靠谱 —— 两条都必须能跟着名单一起说出去。
  */
@@ -90,42 +78,6 @@ export interface DigestExtra {
 /** @param count 在等回复的**总数**（含没列出来的），不是名单长度。 */
 export function buildDigestSubject(clientName: string, count: number): string {
   return `${DIGEST_TEST_PREFIX}${clientName}：${count} 封客人来信在等回复`
-}
-
-function esc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
-/** 名字里长得像邮箱地址的那一截。`<>` 不算地址的一部分。 */
-const EMAIL_TOKEN = /[^\s<>()]+@[^\s<>()]+\.[^\s<>()]+/g
-
-/**
- * 把名字里的邮箱地址掐成 @ 前那一截（文件头第 3 条）。
- *
- * 为什么不整条换成「未留姓名」：一批客人全显示「未留姓名」等于名单作废，
- * 销售认不出该先回谁。`wang.customer` 还能认人，但已经不是一个能直接发信的地址。
- */
-function stripAddress(name: string): string {
-  const out = name.replace(EMAIL_TOKEN, (addr) => addr.slice(0, addr.indexOf('@'))).trim()
-  return out || '未留姓名'
-}
-
-/**
- * 等了多久说成人话。
- *
- * 「等了 51 小时」没人能一眼换算，「等了 2 天 3 小时」才有紧迫感。
- * 时间戳解析不出来时说「时间不详」，而不是显示 NaN 或者干脆把这条丢掉 ——
- * 丢掉就等于这位客人从名单上消失了。
- */
-export function humanWait(ms: number): string {
-  if (!Number.isFinite(ms)) return '时间不详'
-  if (ms < 3_600_000) return '不到 1 小时'
-  const totalHours = Math.floor(ms / 3_600_000)
-  const days = Math.floor(totalHours / 24)
-  const hours = totalHours % 24
-  if (days === 0) return `${hours} 小时`
-  if (hours === 0) return `${days} 天`
-  return `${days} 天 ${hours} 小时`
 }
 
 /** 等待毫秒数；时间戳坏掉时给 NaN，由 humanWait / 排序各自处理。 */
@@ -142,17 +94,6 @@ function byWaitDesc(a: number, b: number): number {
   return bv - av
 }
 
-/**
- * 直达链接指向 CRM 里这个人的记录，不是收件箱那条线程视图 ——
- * 线程视图明写着「只回不了信、且是付费功能」，销售点进去会扑空。
- * 这个链接形状跟「需要你动手」那栏用的是同一个（manual-items.ts）。
- */
-function contactUrl(item: DigestItem): string {
-  const client = encodeURIComponent(item.clientId)
-  const contact = encodeURIComponent(item.contactId)
-  return `${APP_BASE}/dashboard/clients/${client}/crm/all?contact=${contact}`
-}
-
 function renderRow(item: DigestItem, index: number, ms: number): string {
   const name = stripAddress(contactCardTitle(item.displayName))
   const subject = item.subject?.trim() ? item.subject : '（这封信没有主题）'
@@ -162,7 +103,7 @@ function renderRow(item: DigestItem, index: number, ms: number): string {
         <div style="margin-top:4px;font-size:14px;color:#475569">主题：${esc(subject)}</div>
         <div style="margin-top:6px;font-size:13px;color:#b45309">已经等了 ${humanWait(ms)}</div>
         <div style="margin-top:8px;font-size:13px">
-          <a href="${contactUrl(item)}" style="color:#0891b2">→ 打开这位客人的记录</a>
+          <a href="${contactUrl(item.clientId, item.contactId)}" style="color:#0891b2">→ 打开这位客人的记录</a>
         </div>
       </div>`
 }
@@ -225,10 +166,6 @@ export function buildDigestBody(
     </div>`
 }
 
-function defaultMailer(apiKey: string): DigestMailer {
-  return new Resend(apiKey)
-}
-
 /**
  * 发一封汇总信。永不抛异常 —— 上游那趟同步不该因为发信失败而整个失败。
  *
@@ -254,31 +191,15 @@ export async function sendEmailReplyDigest(
     return { sent: false, reason: '无待回邮件', recipients }
   }
 
-  const apiKey = options.apiKey ?? process.env.RESEND_API_KEY
-  if (!apiKey) {
-    return { sent: false, reason: 'RESEND_API_KEY 未配置', recipients }
-  }
-
   // 主题里的数字是**总数**，不是名单长度 —— 被压掉的那些也在等着（文件头第 4 条）。
   const extra: DigestExtra = { dropped: options.dropped ?? 0, syncStale: options.syncStale }
 
-  try {
-    const mailer = (options.mailerFactory ?? defaultMailer)(apiKey)
-    const { error } = await mailer.emails.send({
-      from: meMailFrom(`${DIGEST_TEST_PREFIX}Magic Engine 客人来信提醒`),
-      to: recipients,
-      subject: buildDigestSubject(clientName, items.length + (extra.dropped ?? 0)),
-      html: buildDigestBody(clientName, items, options.now ?? new Date(), extra),
-    })
-    if (error) {
-      return { sent: false, reason: describeSendError(error), recipients }
-    }
-    return { sent: true, recipients }
-  } catch (err) {
-    return {
-      sent: false,
-      reason: err instanceof Error ? err.message : '发信时出现未知错误',
-      recipients,
-    }
-  }
+  return sendDigestMail({
+    fromLabel: `${DIGEST_TEST_PREFIX}Magic Engine 客人来信提醒`,
+    recipients,
+    subject: buildDigestSubject(clientName, items.length + (extra.dropped ?? 0)),
+    html: buildDigestBody(clientName, items, options.now ?? new Date(), extra),
+    apiKey: options.apiKey,
+    mailerFactory: options.mailerFactory,
+  })
 }

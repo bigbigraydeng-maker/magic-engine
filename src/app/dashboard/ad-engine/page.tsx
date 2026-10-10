@@ -15,7 +15,12 @@
 
 import Link from 'next/link'
 import { supabaseAdmin } from '@/lib/supabase'
-import { breakdownByParent, type AdInsightRow } from '@/lib/ads-strategy/ad-level-breakdown'
+import {
+  AD_INSIGHT_SELECT,
+  adInsightRowFromDb,
+  breakdownByParent,
+  type AdInsightRow,
+} from '@/lib/ads-strategy/ad-level-breakdown'
 import { summariseIndustryCoverage, type ClientIndustryRow } from '@/lib/memory/industry-coverage'
 import { INDUSTRY_OPTIONS } from '@/lib/clients/industries'
 import LessonToggle from './_components/LessonToggle'
@@ -81,14 +86,16 @@ async function loadBreakdowns(): Promise<ClientBreakdown[]> {
   // 顺带：汇总数字本来就该有时间窗。拿半年前的花费跟这周的比，结论必然是歪的。
   const since = new Date(Date.now() - WINDOW_DAYS * 86_400_000).toISOString().slice(0, 10)
 
-  const { data: rows } = await supabaseAdmin
+  const { data: rows, error } = await supabaseAdmin
     .from('ad_daily_insights')
-    .select('client_id, entity_id, entity_name, parent_id, spend, results, impressions, date')
+    .select(AD_INSIGHT_SELECT)
     .eq('level', 'ad')
-    .gte('date', since)
-    .order('date', { ascending: false })
+    .gte('insight_date', since)
+    .order('insight_date', { ascending: false })
     .limit(ROW_LIMIT)
 
+  // 查询出错必须抛出来 —— 之前查了不存在的 `date` 列，报错被吞，页面一直显示「没数据」。
+  if (error) throw new Error(`[ad-engine] 读取广告级数据失败：${error.message}`)
   if (!rows || rows.length === 0) return []
   // 真撞到上限就说出来 —— 不说的话，这页读起来像「全都算过了」。
   if (rows.length >= ROW_LIMIT) {
@@ -105,14 +112,7 @@ async function loadBreakdowns(): Promise<ClientBreakdown[]> {
   for (const r of rows) {
     const cid = r.client_id as string
     const list = byClient.get(cid) ?? []
-    list.push({
-      entityId:    r.entity_id as string,
-      entityName:  (r.entity_name as string | null) ?? (r.entity_id as string),
-      parentId:    r.parent_id as string | null,
-      spend:       Number(r.spend ?? 0),
-      results:     Number(r.results ?? 0),
-      impressions: Number(r.impressions ?? 0),
-    })
+    list.push(adInsightRowFromDb(r))
     byClient.set(cid, list)
   }
 

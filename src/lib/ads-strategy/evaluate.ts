@@ -117,6 +117,7 @@ function buildCampaignNarrative(
   rows: InsightRow[],
   insightDate: string,
   cfg: BaselineConfig,
+  industry: string | null,
 ): CampaignNarrative {
   const sorted = [...rows].sort((a, b) => (a.insight_date < b.insight_date ? -1 : 1))
 
@@ -149,7 +150,7 @@ function buildCampaignNarrative(
   }
 
   const points = toDailyPoints(sorted)
-  const judged = judgeCampaign(points, cfg)
+  const judged = judgeCampaign(points, cfg, industry)
   // frequency_7d is sparse (only the newest day carries it); take the latest
   // non-null — but only from inside the current window, never a stale value.
   const freq7d = [...last7].reverse().find(r => r.frequency_7d != null)?.frequency_7d ?? null
@@ -164,7 +165,7 @@ function buildCampaignNarrative(
     latest_spend_7d:   Math.round(latestSpend7d * 100) / 100,
     latest_results_7d: latestResults7d,
     frequency_7d:      freq7d,
-    prescription: prescribe({ verdict: judged.verdict, metrics: judged.metrics, frequency_7d: freq7d }),
+    prescription: prescribe({ verdict: judged.verdict, metrics: judged.metrics, frequency_7d: freq7d, industry }),
   }
 }
 
@@ -193,10 +194,11 @@ export function buildNarrativePayload(
   rowsByCampaign: Map<string, InsightRow[]>,
   insightDate: string,
   cfg: BaselineConfig = DEFAULT_BASELINE_CONFIG,
+  industry: string | null = null,
 ): NarrativePayload {
   const campaigns = Array.from(rowsByCampaign.values())
     .filter(rows => rows.length > 0)
-    .map(rows => buildCampaignNarrative(rows, insightDate, cfg))
+    .map(rows => buildCampaignNarrative(rows, insightDate, cfg, industry))
     // Worst first; paused sinks to the bottom (rank -1).
     .sort((a, b) => VERDICT_RANK[b.verdict] - VERDICT_RANK[a.verdict])
 
@@ -242,7 +244,19 @@ export async function evaluateClientAdHealth(
       return { success: true, insight_date: insightDate, overall_verdict: 'insufficient_history', campaigns_evaluated: 0 }
     }
 
-    const payload = buildNarrativePayload(groupByCampaign(rows), insightDate, cfg)
+    // Industry only picks the result noun in the copy (ads playbook, G11). A failed
+    // read falls back to the neutral default words — never guessed from client name/ID.
+    const { data: clientRow, error: industryError } = await supabaseAdmin
+      .from('clients')
+      .select('industry')
+      .eq('id', clientId)
+      .maybeSingle()
+    if (industryError) {
+      console.warn('[ads-strategy/evaluate] 读客户行业失败，文案改用中性词', { clientId, error: industryError.message })
+    }
+    const industry = (clientRow as { industry?: string | null } | null)?.industry ?? null
+
+    const payload = buildNarrativePayload(groupByCampaign(rows), insightDate, cfg, industry)
 
     const { error: upsertError } = await supabaseAdmin
       .from('ad_health_narratives')

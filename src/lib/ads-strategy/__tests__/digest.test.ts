@@ -80,8 +80,8 @@ describe('buildBody — inverted pyramid, only exceptions up top', () => {
 
   it('shows cost-per-lead only when there are results', () => {
     const html = buildBody(alertPayload, 'alert', 'https://x')
-    // Reborn: 529 / 42 = $12.6
-    expect(html).toContain('每个询盘 $12.6')
+    // Reborn: 529 / 42 = $12.6 — no industry given → neutral playbook words (G11)
+    expect(html).toContain('每个结果 $12.6')
   })
 
   it('collapses an all-healthy weekly summary to a single reassuring line', () => {

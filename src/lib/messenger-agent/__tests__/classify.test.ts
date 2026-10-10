@@ -89,10 +89,12 @@ function stubMessages(rows: Row[]) {
 
     let orFilterKeywords: string[] | null = null
     let ascending = true
+    let limitN: number | null = null
 
     const sortedAsc = [...rows].sort(
       (a, b) => new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime()
     )
+    const sortedDesc = [...sortedAsc].reverse()
 
     const chain: Record<string, unknown> = {
       select: () => chain,
@@ -105,15 +107,25 @@ function stubMessages(rows: Row[]) {
         ascending = opts?.ascending ?? true
         return chain
       },
-      limit: () => chain,
+      limit: (n: number) => {
+        limitN = n
+        return chain
+      },
       maybeSingle: async () => {
         const edge = ascending ? sortedAsc[0] : sortedAsc[sortedAsc.length - 1]
         return { data: edge ?? null, error: null }
       },
+      // `fetchLastTwoMessages`（issue #1773）用 `.order(desc).limit(2)` 后直接
+      // 走 `.then()`，不经过 `.maybeSingle()` ——原来这条路径只服务
+      // `hasPostSaleKeyword` 的 `.or()` 过滤，现在也要按 `ascending`/`limitN`
+      // 正确排序+截断，不能沿用"没过滤就整表原样返回"的旧行为。
       then: (resolve: (v: { data: Row[] | null; error: null }) => unknown) => {
-        const matched = orFilterKeywords
-          ? rows.filter((r) => containsAnyKeyword(r.body, orFilterKeywords as string[])).slice(0, 1)
-          : rows
+        if (orFilterKeywords === null) {
+          const sorted = ascending ? sortedAsc : sortedDesc
+          const limited = limitN !== null ? sorted.slice(0, limitN) : sorted
+          return Promise.resolve({ data: limited, error: null }).then(resolve)
+        }
+        const matched = rows.filter((r) => containsAnyKeyword(r.body, orFilterKeywords as string[])).slice(0, 1)
         return Promise.resolve({ data: matched, error: null }).then(resolve)
       },
     }
@@ -172,7 +184,7 @@ describe('classifyConversation', () => {
     }
   })
 
-  describe('对话跨度边界（issue 要求的两个边界值）', () => {
+  describe('对话跨度边界（issue 要求的两个边界值，issue #1773 修复后：跨度长仍要求最新消息不是沉寂后才重开）', () => {
     const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 
     it('恰好 30 天 → 不算 post_sale（严格大于才算）', async () => {
@@ -183,13 +195,58 @@ describe('classifyConversation', () => {
       await expect(classifyConversation(CONVO, TOURISM_POST_SALE_POLICY)).resolves.toBe('lead_intake')
     })
 
-    it('30 天零 1 秒 → post_sale', async () => {
+    it('跨度 30 天零 1 秒 + 对话仍在连续进行（最新一条消息紧跟前一条）→ post_sale', async () => {
       stubMessages([
         { body: '你好，请问有没有团期', sent_at: iso(0) },
+        { body: '好的，麻烦帮我查一下集合地点', sent_at: iso(THIRTY_DAYS_MS) },
         { body: '好的，谢谢', sent_at: iso(THIRTY_DAYS_MS + 1000) },
       ])
       await expect(classifyConversation(CONVO, TOURISM_POST_SALE_POLICY)).resolves.toBe('post_sale')
     })
+
+    it(
+      '🔴 issue #1773 真实事故复现：只有 2 条消息、跨度远超 30 天，但最新这条就是紧跟着 ' +
+      '沉寂期之后重新联系——不该只凭"关系存在了很久"判 post_sale',
+      async () => {
+        const SIXTY_TWO_DAYS_MS = 62 * 24 * 60 * 60 * 1000
+        stubMessages([
+          { body: '你好，请问有没有团期', sent_at: iso(0) },
+          { body: '好的，谢谢', sent_at: iso(SIXTY_TWO_DAYS_MS) },
+        ])
+        await expect(classifyConversation(CONVO, TOURISM_POST_SALE_POLICY)).resolves.toBe('lead_intake')
+      },
+    )
+
+    it(
+      'issue #1773 真实生产案例复现①："一个人去多少钱" —— 7 月留资、9 月沉寂两月后重新问价，' +
+      '不该被当年 7 月的旧联系记录拖累判成 post_sale',
+      async () => {
+        stubMessages([
+          { body: 'Which tour interests you most?: Tale of Two Cities', sent_at: iso(0) },
+          { body: 'I would like a short tour but must include the warriors', sent_at: iso(5 * 60_000) },
+          {
+            // 生产原文实测跨度是 61 天（2026-07-10 → 2026-09-09），不是凑整的 62——
+            // 精确复现，不是编一个"差不多"的相似案例。
+            body: 'I’m interested but I travel alone how much is it for one person?',
+            sent_at: iso(61 * 24 * 60 * 60 * 1000),
+          },
+        ])
+        await expect(classifyConversation(CONVO, TOURISM_POST_SALE_POLICY)).resolves.toBe('lead_intake')
+      },
+    )
+
+    it(
+      'issue #1773 真实生产案例复现②："能不能发我行程单" —— 沉寂两月后重新联系问行程，' +
+      '不该判成 post_sale',
+      async () => {
+        stubMessages([
+          { body: 'Which tour interests you most?: Still deciding — show me all 4', sent_at: iso(0) },
+          // 生产原文实测跨度恰好是 62 天（2026-07-03 → 2026-09-03）。
+          { body: 'Can you send me the itinerary?', sent_at: iso(62 * 24 * 60 * 60 * 1000) },
+        ])
+        await expect(classifyConversation(CONVO, TOURISM_POST_SALE_POLICY)).resolves.toBe('lead_intake')
+      },
+    )
   })
 
   it('没有消息（比如 conversationId 传错）→ 保守判 lead_intake', async () => {
