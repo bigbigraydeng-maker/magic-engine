@@ -10,6 +10,8 @@ export type CatalogRole = 'me_admin' | 'client_editor'
 export type CatalogCapability =
   | 'view'
   | 'edit'
+  /** Site-facing fields only a global admin may change: ratings, SEO, tags, FAQs, quick answer, operator logos, new image URLs. */
+  | 'edit_site'
   | 'assistant'
   | 'request_publish'
   | 'import'
@@ -37,7 +39,43 @@ export interface CatalogSettings {
   brandSecondary: string | null
   /** False until the website (or any channel) actually reads the published catalog. Drives the honesty copy. */
   channelsConnected: boolean
+  /** Hostnames a new https image URL may use (besides the client's own website domain). At most 10, no IPs. */
+  imageHosts: string[]
 }
+
+/** One FAQ on a tour page. `link.href` is a site-relative path. */
+export interface CatalogFaq {
+  question: string
+  answer: string
+  link: { href: string; label: string } | null
+}
+
+/** An image host seen in the catalog's own images but not on the allow-list yet (shown to admins as a suggestion). */
+export interface ImageHostSuggestion {
+  host: string
+  count: number
+}
+
+/** GET …/tour-catalog/site-diff (manage_settings): the client's website feed compared with the draft catalog. */
+export interface SiteDiffEntry {
+  tourName: string
+  /** Chinese field label, e.g. "主图", "行程 第 3 天". */
+  fieldLabel: string
+  website: string | null
+  catalog: string | null
+}
+export interface SiteDiffResponse {
+  /** Tours on the website feed. */
+  websiteTours: number
+  catalogTours: number
+  /** Tours only on one side. */
+  onlyOnWebsite: string[]
+  onlyInCatalog: string[]
+  differences: SiteDiffEntry[]
+  /** Rows the reader could not parse; any entry here means the comparison is not clean. */
+  notes: string[]
+}
+export type SiteDiffErrorCode = 'no_domain' | 'feed_unavailable' | 'diff_failed'
 
 export interface PublishRequestView {
   id: string
