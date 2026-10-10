@@ -31,7 +31,11 @@ export function FactoryChat({ clientId, onActed }: { clientId: string; onActed?:
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(json.error ?? `出错了 (${res.status})`)
-      setMessages((prev) => [...prev, { role: 'assistant', content: json.text || '(没有回复)' }])
+      if (typeof json.text !== 'string' || !json.text.trim()) {
+        setMessages((prev) => [...prev, { role: 'assistant', content: '⚠️ 助手这次没有给出回复，刚才的操作可能没有生效，请刷新页面确认后再试一次。' }])
+      } else {
+        setMessages((prev) => [...prev, { role: 'assistant', content: json.text }])
+      }
       if (Array.isArray(json.tool_calls) && json.tool_calls.length > 0) onActed?.() // 打回/调预算了 → 刷新左边
     } catch (e) {
       setMessages((prev) => [...prev, { role: 'assistant', content: `⚠️ ${e instanceof Error ? e.message : '出错了'}` }])

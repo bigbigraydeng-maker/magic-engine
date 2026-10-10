@@ -18,13 +18,12 @@ import {
   type CampaignDailyPlanData,
   type CampaignDailyPostReviewMeta,
 } from '@/lib/campaign/daily-plan'
+import { buildDailyPlanAutoChecks } from '@/lib/campaign/daily-plan-first-comment'
 import {
-  POST_AUTO_CHECK_KEYS,
   POST_HUMAN_CHECK_KEYS,
   checklistPasses,
   hasChecklistFailure,
   isValidContentSourceRef,
-  unmeasuredAutoChecks,
   validateContentChecklist,
 } from '@/lib/social/content-review'
 
@@ -161,6 +160,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
 
     const reason = command.verdict === 'NEEDS_REVISION' ? command.reason!.trim() : null
+    // The server computes the first-comment AUTO checks from the stored plan
+    // copy, so PASS never depends on client-supplied check results.
+    const autoChecks = buildDailyPlanAutoChecks({ post: bundle.post, planId: row.id, date: command.date })
     const previous = currentReview?.posts[command.date]
     const previousHumanChecklist = previous?.checklist.filter(item => item.judge === 'HUMAN') ?? []
     const checklistUnchanged = JSON.stringify(previousHumanChecklist) === JSON.stringify(humanChecklist.items)
@@ -208,14 +210,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         return NextResponse.json({ success: false, error: 'POST_IMAGE_NOT_READY' }, { status: 422 })
       }
 
-      // Daily Plan has no first-comment field or publisher support. The
-      // server-owned D checks therefore remain NOT_MEASURED and block PASS.
-      return NextResponse.json({
-        success: false,
-        error: 'AUTO_CHECKS_UNAVAILABLE',
-        blocked_checks: POST_AUTO_CHECK_KEYS,
-      }, { status: 422 })
-
+      const failedAutoChecks = autoChecks.filter(item => item.outcome !== 'PASS')
+      if (failedAutoChecks.length > 0) {
+        return NextResponse.json({
+          success: false,
+          error: 'AUTO_CHECKS_FAILED',
+          failed_checks: failedAutoChecks.map(item => ({ key: item.key, detail: item.detail })),
+        }, { status: 422 })
+      }
     }
 
     const now = new Date().toISOString()
@@ -232,10 +234,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
           reviewed_at: now,
           reviewed_by_user_id: access.user.id,
           reviewer_role: access.role,
-          checklist: [
-            ...humanChecklist.items,
-            ...unmeasuredAutoChecks(POST_AUTO_CHECK_KEYS, '首评发布能力未实现；该项未测，不能通过。'),
-          ],
+          checklist: [...humanChecklist.items, ...autoChecks],
         },
       },
     }

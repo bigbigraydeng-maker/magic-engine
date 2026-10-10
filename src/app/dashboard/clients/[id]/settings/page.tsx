@@ -24,6 +24,7 @@
 
 import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
+import { FACTORY_CONFIG_SECTION } from '@/lib/factory/config-link'
 import { ClientStatusPanel } from './_components/ClientStatusPanel'
 import { GbpPanel } from './_components/GbpPanel'
 import { GbpLocationPanel } from './_components/GbpLocationPanel'
@@ -93,10 +94,13 @@ function TabBody({
   tab,
   clientId,
   callbacks,
+  focusSection,
 }: {
   tab: SettingsTab
   clientId: string
   callbacks: ConnectCallbacks
+  /** `?section=` 深链指向的板块 id —— 命中的那块默认展开并滚过去。 */
+  focusSection: string | null
 }) {
   switch (tab) {
     case 'connect':
@@ -208,7 +212,12 @@ function TabBody({
           <SettingsSection icon="📝" title="每周自动 Blog（SEO 盯梢）">
             <WeeklyBlogPanel clientId={clientId} />
           </SettingsSection>
-          <SettingsSection icon="🎬" title="视频工厂配置（出片 / 发片）">
+          <SettingsSection
+            icon="🎬"
+            title="视频工厂配置（出片 / 发片）"
+            id={FACTORY_CONFIG_SECTION}
+            defaultOpen={focusSection === FACTORY_CONFIG_SECTION}
+          >
             <FactoryConfigPanel clientId={clientId} />
           </SettingsSection>
           <SettingsSection icon="💬" title="Facebook 评论自动回复">
@@ -248,6 +257,9 @@ export default function ClientSettingsPage() {
   // 邮箱授权回跳（见 MailboxPanel）——用它来判断该默认展开哪一块，不用来
   // 渲染横幅（那条横幅在 MailboxPanel 自己里面）。
   const mailStatus = searchParams.get('mail')
+  // 深链锚点（见 lib/factory/config-link）——驾驶舱的「该客户工厂配置」跳过来时
+  // 直接落在「视频工厂配置」那一块，不用人在「内容与社媒」里自己找。
+  const focusSection = searchParams.get('section')
 
   const errorMessage =
     gbpStatus === 'error' ? (ERROR_MESSAGES[gbpReason] ?? '连接过程中发生未知错误，请重试。') : null
@@ -341,6 +353,7 @@ export default function ClientSettingsPage() {
             tab={tab}
             clientId={clientId}
             callbacks={{ mail: mailStatus !== null, gbp: gbpStatus !== null, oauth: oauthStatus !== null }}
+            focusSection={focusSection}
           />
         </div>
       </div>

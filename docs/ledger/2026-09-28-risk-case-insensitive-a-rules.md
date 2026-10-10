@@ -8,6 +8,8 @@ source: session:679ea2bf
 verify_how: 用 A_PATHS 每条路径的大小写混合变体跑 classifyFile，全部仍判 A；跑 vitest run tools/ops-review-loop/tests/risk.test.ts 全绿
 done_on: 2026-09-28
 done_ref: pr:2156
+last_checked: 2026-10-09
+check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 
 ruleMatches 对 A 规则启用大小写不敏感比较，堵住 macOS core.ignorecase=true 绕过漏洞。C 规则不变，避免 B 降 C。
