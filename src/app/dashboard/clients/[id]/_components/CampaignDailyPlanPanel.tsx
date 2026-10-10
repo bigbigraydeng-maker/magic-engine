@@ -741,7 +741,6 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
           facebookPageId={data.facebook_page_id ?? null}
           reviewedDates={publishQueueReceipt?.posts.map(post => post.date) ?? []}
           queueReceiptReady={Boolean(publishQueueReceipt)}
-          onChanged={load}
         />
 
         {/* Publishing + Ad preview */}

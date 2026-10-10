@@ -147,6 +147,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     return NextResponse.json({
       success: true,
       can_manage: true,
+      server_now: new Date().toISOString(),
       mode,
       authorization,
       attempts,

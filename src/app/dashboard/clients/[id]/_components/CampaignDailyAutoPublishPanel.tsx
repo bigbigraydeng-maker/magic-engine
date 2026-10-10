@@ -32,9 +32,8 @@ interface Props {
   facebookPageId: string | null
   reviewedDates: string[]
   queueReceiptReady: boolean
-  /** Today's date in New Zealand (YYYY-MM-DD). Default: computed from the clock; injectable for tests. */
-  todayNz?: string
-  onChanged?: () => Promise<void> | void
+  /** The current moment; default the real clock. Injectable for tests. */
+  now?: Date
 }
 
 interface Authorization {
@@ -62,6 +61,8 @@ interface StatusResult {
   mode?: 'practice' | 'live'
   authorization?: Authorization | null
   attempts?: Attempt[]
+  /** The server's clock (ISO) when it answered — the page trusts it over the PM's computer clock. */
+  server_now?: string
 }
 
 interface PreviewPost {
@@ -86,14 +87,14 @@ const ERROR_TEXT: Record<string, string> = {
   DATE_IN_PAST: '有日期已经过去了，不能授权。请刷新页面，只授权今天及以后的日期。',
   PAGE_ID_MISMATCH: 'Facebook 主页号和客户登记的不一致。请到客户设置核对主页，改好后再授权。',
   CLIENT_HAS_NO_FACEBOOK_PAGE: '这个客户还没登记 Facebook 主页。请先到客户设置里登记。',
-  ALREADY_AUTHORIZED: '这份计划已经授权了，先停止再重新授权',
+  ALREADY_AUTHORIZED: '这份计划已经授权了，先停止再重新授权。',
   PRICE_CLAIM_UNBACKED: '有帖子写了价格，但配图证明不了这个价格，整批被拦。请到每日计划里找出写了价格的帖子，改掉价格或换成有价格的图。',
   PRICE_FACT_UNVERIFIED: '有帖子里的价格和客户资料对不上，整批被拦。请核对该帖子里的价格和客户资料，改对后重新审核。',
   FIRST_COMMENT_CHECK_FAILED: '有帖子正文里带了链接或行动号召，整批被拦。请把正文里的链接和「点击」「预订」这类话删掉，链接放在第一条评论里。',
   POSTS_NOT_READY_FOR_PUBLISH: '有帖子还没准备好（图片或文案不可用）。请到每日计划里看哪条图片或文案缺了，补齐后再授权。',
   REVIEW_CHECKLIST_REQUIRED: '还有帖子没有审核通过。请先把每日计划里所有帖子审核完，再来授权。',
   PUBLISH_QUEUE_RECEIPT_REQUIRED: '还没有「发布准备回执」。请回到每日计划，先点「生成发布准备回执」。',
-  PUBLISH_QUEUE_RECEIPT_STALE: '这份计划在生成回执之后被改动过，回执已经对不上，不能再授权。需要新建一份活动计划，重新审核后再授权。',
+  PUBLISH_QUEUE_RECEIPT_STALE: '这份计划在生成回执之后被改动过，回执已经对不上，不能再授权。需要重新建一份每日计划，审核后再授权。',
   REVIEW_REVISION_MISMATCH: '计划被改过了，请刷新页面，刷新后重新预览再授权。',
   PLAN_REVISION_MISMATCH: '计划被改过了，请刷新页面，刷新后重新预览再授权。',
   PLAN_SUPERSEDED: '计划被改过了，请刷新页面，刷新后重新预览再授权。',
@@ -111,7 +112,7 @@ const ERROR_TEXT: Record<string, string> = {
   AUTHORIZATION_REVOKED_DURING_ARMING: '授权刚建好就被停止了，请刷新页面看当前状态。',
   RECALL_BLOCKS_NOT_LIFTED: '授权没成功（撤回过的日期没能解除）。请刷新页面看当前状态，没有授权的话再试一次。',
   NO_ACTIVE_AUTHORIZATION: '没有生效中的授权，可能已经过期或被停止，刷新页面看当前状态。',
-  NO_UNKNOWN_OUTCOME: '这一条已经被处理过了，请刷新',
+  NO_UNKNOWN_OUTCOME: '这一条已经被处理过了，请刷新页面。',
   INTERNAL_ERROR: '系统出错了，请稍后再试。如果多次出现，请截图给开发。',
   Unauthorized: '登录已过期，请刷新页面重新登录。',
   Forbidden: '没有权限做这个操作。',
@@ -126,16 +127,24 @@ function formatWhen(iso: string): string {
   const d = new Date(iso)
   return Number.isNaN(d.getTime())
     ? iso
-    : d.toLocaleString('zh-CN', { timeZone: 'Pacific/Auckland', hour12: false })
+    : d.toLocaleString('zh-CN', { timeZone: 'Pacific/Auckland', hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
 function shortDate(date: string): string {
   return date.slice(5)
 }
 
-function nzTodayFromClock(): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland' }).format(new Date())
+/** New Zealand calendar date and minutes since midnight for an instant. */
+function nzClock(at: Date): { date: string; minutes: number } {
+  const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland' }).format(at)
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Pacific/Auckland', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(at)
+  const hour = Number(parts.find(part => part.type === 'hour')?.value ?? '0') % 24
+  const minute = Number(parts.find(part => part.type === 'minute')?.value ?? '0')
+  return { date, minutes: hour * 60 + minute }
 }
+
+/** Today's 08:00 slot counts as passed from 07:45 (the server will not schedule a post less than 15 minutes ahead). */
+const TODAY_SLOT_CUTOFF_MINUTES = 7 * 60 + 45
 
 function blockedReasonWords(code: string | null): string {
   if (code === 'ABORTED_BEFORE_SEND') return '发之前一刻检查没通过（授权被停止或这一天被改动），没有发出'
@@ -147,9 +156,9 @@ function blockedReasonWords(code: string | null): string {
 function attemptLabel(attempt: Attempt): string {
   switch (attempt.status) {
     case 'published':
-      return '已发出（已提交 Facebook）'
+      return '已提交 Facebook（到点自动公开）'
     case 'claimed':
-      return '正在处理'
+      return '正在处理，一两分钟后刷新看结果'
     case 'blocked':
       return attempt.reason_code === 'RECALLED' ? '已撤回，不会再自动发' : blockedReasonWords(attempt.reason_code)
     case 'failed_retryable':
@@ -176,8 +185,7 @@ export function CampaignDailyAutoPublishPanel({
   facebookPageId,
   reviewedDates,
   queueReceiptReady,
-  todayNz,
-  onChanged,
+  now,
 }: Props) {
   const [status, setStatus] = useState<StatusResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -192,12 +200,15 @@ export function CampaignDailyAutoPublishPanel({
   const [confirmingRevoke, setConfirmingRevoke] = useState(false)
   const [settlingDate, setSettlingDate] = useState<string | null>(null)
   const [inFlight, setInFlight] = useState<RevokeResult | null>(null)
+  const [clockSkewMs, setClockSkewMs] = useState(0)
 
   const identityReady = Boolean(planId && planRevision && reviewRevision)
-  const today = todayNz ?? nzTodayFromClock()
-  // Past dates would be published at once instead of at their slot, so the server refuses them: never send them.
-  const datesToAuthorize = reviewedDates.filter(date => date >= today)
-  const skippedPastDates = reviewedDates.filter(date => date < today)
+  const clock = nzClock(now ?? new Date(Date.now() + clockSkewMs))
+  // A past date — or today once its 08:00 slot is (nearly) gone — can no longer go out at its slot. The server would
+  // refuse the first and never publish the second late, so neither is offered.
+  const isGone = (date: string) => date < clock.date || (date === clock.date && clock.minutes >= TODAY_SLOT_CUTOFF_MINUTES)
+  const datesToAuthorize = reviewedDates.filter(date => !isGone(date))
+  const skippedPastDates = reviewedDates.filter(isGone)
 
   /**
    * One POST, parsed defensively.
@@ -207,18 +218,24 @@ export function CampaignDailyAutoPublishPanel({
    */
   const post = useCallback(
     async (path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> => {
-      const res = await fetch(`/api/clients/${clientId}/campaign-daily-plan/auto-publish/${path}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
+      let res: Response
+      try {
+        res = await fetch(`/api/clients/${clientId}/campaign-daily-plan/auto-publish/${path}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+      } catch {
+        throw new Error('网络没连上')
+      }
       const raw = await res.text()
       let json: Record<string, unknown> | null = null
       try {
         json = JSON.parse(raw) as Record<string, unknown>
       } catch {
-        const snippet = raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120)
-        throw new Error(`服务暂时没响应（HTTP ${res.status}）${snippet ? `：${snippet}` : ''}`)
+        const snippet = raw.slice(0, 0)
+        void snippet
+        throw new Error('服务暂时没响应')
       }
       if (!res.ok || json.success === false) {
         const err = new Error(translateError(json.error)) as Error & { code?: unknown; dates?: string[]; rollback?: unknown }
@@ -235,40 +252,46 @@ export function CampaignDailyAutoPublishPanel({
   const loadStatus = useCallback(async () => {
     if (!planId) return
     setLoading(true)
-    setReadError('')
+    // readError is NOT cleared here: while a failed read is being retried the stop control must stay on screen.
     try {
       const res = await fetch(
         `/api/clients/${clientId}/campaign-daily-plan/auto-publish/status?plan_id=${encodeURIComponent(planId)}&plan_revision=${encodeURIComponent(planRevision ?? '')}&review_revision=${encodeURIComponent(reviewRevision ?? '')}`,
         { cache: 'no-store' }
       )
+      // Not logged in / not allowed: this section is simply not for this visitor — say nothing, show nothing.
+      // (Decided before parsing: a proxy may answer a 401/403 with a web page.)
+      if (res.status === 401 || res.status === 403) {
+        setReadError('')
+        setStatus({ can_manage: false })
+        return
+      }
       const raw = await res.text()
       let json: Record<string, unknown> | null = null
       try {
         json = JSON.parse(raw) as Record<string, unknown>
       } catch {
-        setReadError(`服务暂时没响应（HTTP ${res.status}）`)
+        setReadError('服务暂时没响应')
         setStatus(null)
         return
       }
-      // Not logged in / not allowed: this section is simply not for this visitor — say nothing, show nothing.
-      if (res.status === 401 || res.status === 403) {
-        setStatus({ can_manage: false })
-        return
-      }
       if (!res.ok || json.success === false) {
-        setReadError(`HTTP ${res.status} · ${translateError(json.error)}`)
+        setReadError(translateError(json.error))
         setStatus(null)
         return
       }
       // A 200 that is not shaped like a status must not make the section silently vanish.
       if (typeof json.can_manage !== 'boolean') {
-        setReadError('返回的内容不对')
+        setReadError('服务返回的内容异常，请刷新页面')
         setStatus(null)
         return
       }
-      setStatus(json as unknown as StatusResult)
+      const parsed = json as unknown as StatusResult
+      const serverMs = typeof parsed.server_now === 'string' ? Date.parse(parsed.server_now) : NaN
+      setClockSkewMs(Number.isNaN(serverMs) ? 0 : serverMs - Date.now())
+      setReadError('')
+      setStatus(parsed)
     } catch (err) {
-      setReadError((err as Error).message)
+      setReadError(err instanceof TypeError ? '网络没连上' : (err as Error).message)
       setStatus(null)
     } finally {
       setLoading(false)
@@ -319,7 +342,6 @@ export function CampaignDailyAutoPublishPanel({
           setRecalledDates([])
           setInFlight(null)
           await loadStatus()
-          await onChanged?.()
         }
       } catch (err) {
         const e = err as Error & { code?: unknown; dates?: string[]; rollback?: unknown }
@@ -340,7 +362,7 @@ export function CampaignDailyAutoPublishPanel({
         setBusy(false)
       }
     },
-    [campaignId, clientId, datesToAuthorize, facebookPageId, loadStatus, onChanged, planId, planRevision, post, reviewRevision]
+    [campaignId, clientId, datesToAuthorize, facebookPageId, loadStatus, planId, planRevision, post, reviewRevision]
   )
 
   const runRevoke = useCallback(async () => {
@@ -360,15 +382,19 @@ export function CampaignDailyAutoPublishPanel({
       setConfirmingRevoke(false)
       setStopReason('')
       await loadStatus()
-      await onChanged?.()
     } catch (err) {
-      setError(`停止没有成功，自动发布可能仍然有效。请看下面的状态，没停下来就再点一次。（${(err as Error).message}）`)
+      const e = err as Error & { code?: unknown }
+      setError(
+        e.code === 'NO_ACTIVE_AUTHORIZATION'
+          ? '当前已经没有生效中的授权，不用停止。'
+          : `停止没有成功，自动发布可能仍然有效。请看下面的状态，没停下来就再点一次。（${e.message}）`
+      )
       setConfirmingRevoke(false)
       void loadStatus()
     } finally {
       setBusy(false)
     }
-  }, [campaignId, clientId, loadStatus, onChanged, planId, post, stopReason])
+  }, [campaignId, clientId, loadStatus, planId, post, stopReason])
 
   const runConfirmUnknown = useCallback(
     async (date: string, outcome: 'published' | 'not_published') => {
@@ -378,7 +404,6 @@ export function CampaignDailyAutoPublishPanel({
         await post('confirm-unknown', { client_id: clientId, plan_id: planId, date, outcome })
         setSettlingDate(null)
         await loadStatus()
-        await onChanged?.()
       } catch (err) {
         setError(`登记没有成功。请看下面的状态，别重复点。（${(err as Error).message}）`)
         setSettlingDate(null)
@@ -387,7 +412,7 @@ export function CampaignDailyAutoPublishPanel({
         setBusy(false)
       }
     },
-    [clientId, loadStatus, onChanged, planId, post]
+    [clientId, loadStatus, planId, post]
   )
 
   /** Stop reason + stop button + confirmation. Used wherever a grant may exist, including when the status cannot be read. */
@@ -437,8 +462,29 @@ export function CampaignDailyAutoPublishPanel({
     </>
   )
 
+  /** What stopping did and did not take down. Shown whether or not the status could be read. */
+  const inFlightNotice = inFlight ? (
+    <div className="text-[11px] leading-relaxed">
+      <p className="mb-1 text-xs font-medium text-me-charcoal/70">已停止自动发布，之后不会再自动发帖。</p>
+      {inFlight.in_flight_status === 'OK' && inFlight.in_flight && inFlight.in_flight.length > 0 ? (
+        <p className="text-me-charcoal/70">
+          这些帖子已在 Facebook 排好时间、还没公开，停止不会撤下它们（要撤回请用手动发布区的撤回功能）：
+          {inFlight.in_flight.map(item => shortDate(item.date)).join('、')}
+        </p>
+      ) : inFlight.in_flight_status === 'OK' ? (
+        <p className="text-me-charcoal/55">
+          按系统记录，没有已在 Facebook 排好时间、还没公开的帖子。保险起见，也请到客户主页的「已定时」里看一眼。
+        </p>
+      ) : (
+        <p className="text-[#C2453A]">
+          没能确认 Facebook 上有没有已排好时间、还没公开的帖子，请到该客户 Facebook 主页的「已定时」里看一眼。
+        </p>
+      )}
+    </div>
+  ) : null
+
   if (!planId) return null
-  if (loading && !status) {
+  if (loading && !status && !readError) {
     return <p className="text-[11px] text-me-charcoal/45">自动发布：读取中…</p>
   }
   if (readError) {
@@ -450,6 +496,7 @@ export function CampaignDailyAutoPublishPanel({
         <div className="mt-2 space-y-2">
           <p className="text-[11px] text-me-charcoal/55">需要先停下来的话，可以在这里直接停止：</p>
           {stopControls}
+          {inFlightNotice}
         </div>
         {error && <p className="mt-2 text-xs text-[#C2453A]">✗ {error}</p>}
       </div>
@@ -465,6 +512,7 @@ export function CampaignDailyAutoPublishPanel({
   const missingQueue = !queueReceiptReady
   const missingDates = datesToAuthorize.length === 0
   const missingIdentity = !identityReady
+  const modeKnown = status.mode === 'practice' || status.mode === 'live'
   const blocked = missingPage || missingQueue || missingDates || missingIdentity
 
   return (
@@ -479,7 +527,7 @@ export function CampaignDailyAutoPublishPanel({
         </p>
       ) : live ? (
         <p className="mb-2 rounded-lg border border-[#C2453A]/40 bg-[#C2453A]/[.08] px-3 py-2 text-[13px] font-medium leading-relaxed text-[#C2453A]">
-          真发模式：授权后，每天最多发 1 条。系统每小时检查一次，当天的帖子会在新西兰时间每天早上 8 点公开到客户的 Facebook 主页。发出后无法由系统撤回。
+          真发模式：授权后，每天最多发 1 条。系统每小时检查一次，当天的帖子会在新西兰时间每天早上 8 点公开到客户的 Facebook 主页。发出后系统不会替你撤回，只能手动撤回。
         </p>
       ) : (
         <p className="mb-2 rounded-lg border border-[#C2453A]/40 bg-[#C2453A]/[.08] px-3 py-2 text-[13px] font-medium leading-relaxed text-[#C2453A]">
@@ -487,8 +535,8 @@ export function CampaignDailyAutoPublishPanel({
         </p>
       )}
 
-      {!authorization && !blocked && (
-        <p className="mb-2 text-xs text-me-charcoal/60">当前：未授权，系统不会自动发帖。</p>
+      {!authorization && (
+        <p className="mb-2 text-xs text-me-charcoal/60">当前：未授权{blocked || !modeKnown ? '。' : '，系统不会自动发帖。'}</p>
       )}
 
       {blocked && (
@@ -505,11 +553,11 @@ export function CampaignDailyAutoPublishPanel({
 
       {skippedPastDates.length > 0 && !missingQueue && (
         <p className="mb-2 text-[11px] leading-relaxed text-me-charcoal/55">
-          已经过去的日期不会自动发：{skippedPastDates.map(shortDate).join('、')}。
+          已经过去的日期、以及今天已过早上 8 点的那一条，不会自动发：{skippedPastDates.map(shortDate).join('、')}。
         </p>
       )}
 
-      {!blocked && !isActive && (
+      {!blocked && modeKnown && !isActive && (
         <div className="space-y-2">
           {authorization && authorization.state !== 'active' && (
             <p className="rounded-lg bg-me-ochre/[.10] px-3 py-2 text-xs leading-relaxed text-me-charcoal/70">
@@ -537,13 +585,15 @@ export function CampaignDailyAutoPublishPanel({
           {preview && (
             <div className="rounded-lg bg-me-ivory/70 px-3 py-2">
               <p className="mb-1.5 text-xs font-semibold text-me-charcoal/70">
-                授权后会自动发这 {preview.would_publish.length} 条
+                {live
+                  ? `授权后会自动发这 ${preview.would_publish.length} 条`
+                  : `演练：授权后只会模拟，不会真发这 ${preview.would_publish.length} 条`}
               </p>
               <div className="space-y-1">
                 {preview.would_publish.map(item => (
                   <div key={item.date} className="rounded border border-black/[.06] bg-white px-2 py-1.5">
                     <p className="text-[11px] font-medium text-me-charcoal/70">
-                      {shortDate(item.date)} 早上 8:00（新西兰时间）公开
+                      {live ? `${shortDate(item.date)} 早上 8:00（新西兰时间）公开` : `${shortDate(item.date)}（演练：不会真发）`}
                     </p>
                     <p className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-me-charcoal/60">
                       {item.message_preview}
@@ -557,7 +607,9 @@ export function CampaignDailyAutoPublishPanel({
                 ))}
               </div>
               <p className="mt-1.5 text-[11px] text-me-charcoal/55">
-                授权 {preview.would_publish.length} 条，14 天内有效，每天最多发 1 条，你随时可以点「停止自动发布」。时间都是新西兰时间。
+                {live
+                  ? `授权 ${preview.would_publish.length} 条，14 天内有效，每天最多发 1 条，你随时可以点「停止自动发布」。时间都是新西兰时间。`
+                  : '演练授权 14 天内有效，不会往 Facebook 发任何东西。'}
               </p>
               {preview.would_lift_recalled.length > 0 && (
                 <p className="mt-1 text-[11px] text-[#C2453A]">
@@ -598,7 +650,7 @@ export function CampaignDailyAutoPublishPanel({
             <div className="flex flex-wrap items-center gap-2 rounded-md bg-[#C2453A]/[.06] px-2.5 py-1.5">
               <span className="text-xs font-medium leading-relaxed text-[#C2453A]">
                 {live
-                  ? `确认后，下面这些日期的帖子会在各自当天早上 8 点（新西兰时间）公开发到客户的 Facebook 主页：${preview.would_publish.map(item => shortDate(item.date)).join('、')}，共 ${preview.would_publish.length} 条。公开后无法由系统撤回。授权 14 天内有效，你随时可以停止。确定授权？`
+                  ? `确认后，下面这些日期的帖子会在各自当天早上 8 点（新西兰时间）公开发到客户的 Facebook 主页：${preview.would_publish.map(item => shortDate(item.date)).join('、')}，共 ${preview.would_publish.length} 条。公开后系统不会替你撤回，只能手动撤回。授权 14 天内有效，你随时可以停止。确定授权？`
                   : '现在是演练模式：授权只是试跑，不会真的发到 Facebook。确定试跑？'}
               </span>
               <button
@@ -623,9 +675,9 @@ export function CampaignDailyAutoPublishPanel({
       )}
 
       {isActive && authorization && (
-        <div className="rounded-lg border border-[#5C8A4A]/25 bg-[#5C8A4A]/[.05] px-2.5 py-2 text-xs">
+        <div className={`rounded-lg border px-2.5 py-2 text-xs ${live ? 'border-[#C2453A]/40 bg-[#C2453A]/[.05]' : 'border-me-ochre/30 bg-me-ochre/[.06]'}`}>
           <p className={`text-[13px] font-medium ${live ? 'text-[#C2453A]' : 'text-me-charcoal/70'}`}>
-            {live ? '已授权自动发布' : '已授权（演练中，不会真发）'}
+            {live ? '真发授权中' : '已授权（演练中，不会真发）'}
           </p>
           <p className="mt-0.5 text-[11px] text-me-charcoal/60">
             覆盖日期：{authorization.dates.map(shortDate).join('、')}（共 {authorization.dates.length} 条），每天最多 1 条
@@ -642,25 +694,7 @@ export function CampaignDailyAutoPublishPanel({
         <div className="mt-2 space-y-2">
           {authorization && stopControls}
 
-          {inFlight && (
-            <div className="text-[11px] leading-relaxed">
-              <p className="mb-1 text-xs font-medium text-me-charcoal/70">已停止自动发布，之后不会再自动发帖。</p>
-              {inFlight.in_flight_status === 'OK' && inFlight.in_flight && inFlight.in_flight.length > 0 ? (
-                <p className="text-me-charcoal/70">
-                  这些帖子已在 Facebook 排好时间、还没公开，停止不会撤下它们（要撤回请用手动发布区的撤回功能）：
-                  {inFlight.in_flight.map(item => shortDate(item.date)).join('、')}
-                </p>
-              ) : inFlight.in_flight_status === 'OK' ? (
-                <p className="text-me-charcoal/55">
-                  按系统回执记录，没有已在 Facebook 排好时间、还没公开的帖子。保险起见，也请到客户主页的「已定时」里看一眼。
-                </p>
-              ) : (
-                <p className="text-[#C2453A]">
-                  没能确认 Facebook 上有没有已排好时间、还没公开的帖子，请到该客户 Facebook 主页的「已定时」里看一眼。
-                </p>
-              )}
-            </div>
-          )}
+          {inFlightNotice}
         </div>
       )}
 

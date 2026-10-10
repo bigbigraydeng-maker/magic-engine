@@ -36,8 +36,8 @@ function props(overrides: Record<string, unknown> = {}) {
     facebookPageId: PAGE_ID,
     reviewedDates: ['2026-09-03', '2026-09-04'],
     queueReceiptReady: true,
-    todayNz: '2026-09-01',
-    onChanged: vi.fn(),
+    // 06:00 on 2026-09-01 in Auckland: today's 08:00 slot is still ahead
+    now: new Date('2026-08-31T18:00:00Z'),
     ...overrides,
   }
 }
@@ -145,9 +145,9 @@ describe('auto-publish panel — a failed read is never "not authorised"', () =>
     await renderPanel()
 
     await waitFor(() => {
-      expect(screen.getByText(/HTTP 524/)).toBeTruthy()
+      expect(screen.getByText(/服务暂时没响应/)).toBeTruthy()
     })
-    expect(screen.getByText(/服务暂时没响应/)).toBeTruthy()
+    // no status codes or page fragments shown to the PM
     expect(screen.queryByText(/Unexpected token/)).toBeNull()
   })
 })
@@ -275,7 +275,7 @@ describe('auto-publish panel — preview then confirm', () => {
     })
     await click(/预览自动发布/)
 
-    expect(screen.getByText(/授权后会自动发这 2 条/)).toBeTruthy()
+    expect(screen.getByText(/演练：授权后只会模拟，不会真发这 2 条/)).toBeTruthy()
     expect(screen.getByText(/Hook 1/)).toBeTruthy()
     expect(screen.getByText(/Hook 2/)).toBeTruthy()
     expect(screen.getByRole('button', { name: /演练授权（不会真发）/ })).toBeTruthy()
@@ -297,9 +297,8 @@ describe('auto-publish panel — preview then confirm', () => {
   })
 
   it('sends confirm:true only after the extra 「确定，授权」 click', async () => {
-    const onChanged = vi.fn()
     const fetchMock = mockFetch(MANAGEABLE_STATUS, PREVIEW_BODY, { success: true })
-    await renderPanel({ onChanged })
+    await renderPanel()
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /预览自动发布/ })).toBeTruthy()
@@ -309,7 +308,6 @@ describe('auto-publish panel — preview then confirm', () => {
     await click(/确定，演练授权/)
 
     expect(bodyOf(fetchMock, 2)).toMatchObject({ confirm: true })
-    expect(onChanged).toHaveBeenCalledTimes(1)
   })
 
   it('refetches the status after a successful authorisation', async () => {
@@ -390,7 +388,7 @@ describe('auto-publish panel — an active authorisation is legible', () => {
     await renderPanel()
 
     await waitFor(() => {
-      expect(screen.getByText(/已授权自动发布/)).toBeTruthy()
+      expect(screen.getByText(/真发授权中/)).toBeTruthy()
     })
     expect(screen.getByText(/pm@ctstours.co.nz/)).toBeTruthy()
     expect(screen.getByText(/到期/)).toBeTruthy()
@@ -646,7 +644,7 @@ describe('auto-publish panel — dates and previews', () => {
     const fetchMock = mockFetch(MANAGEABLE_STATUS, PREVIEW_BODY)
     await renderPanel({ reviewedDates: ['2026-08-30', '2026-09-03', '2026-09-04'] })
     await waitFor(() => expect(screen.getByRole('button', { name: /预览自动发布/ })).toBeTruthy())
-    expect(screen.getByText(/已经过去的日期不会自动发：08-30/)).toBeTruthy()
+    expect(screen.getByText(/已经过去的日期、以及今天已过早上 8 点的那一条，不会自动发：08-30/)).toBeTruthy()
     await click(/预览自动发布/)
 
     expect(bodyOf(fetchMock, 1).dates).toEqual(['2026-09-03', '2026-09-04'])
@@ -669,7 +667,7 @@ describe('auto-publish panel — dates and previews', () => {
     await click(/预览自动发布/)
 
     expect(screen.getByText(/第一条评论：Book here/)).toBeTruthy()
-    expect(screen.getByText(/09-03 早上 8:00（新西兰时间）公开/)).toBeTruthy()
+    expect(screen.getByText(/09-03（演练：不会真发）/)).toBeTruthy()
   })
 
   it('🔴 a changed plan version clears an old preview so it cannot be confirmed against the new plan', async () => {
@@ -699,7 +697,7 @@ describe('auto-publish panel — dates and previews', () => {
     await click(/预览自动发布/)
     await click(/授权真发 2 条/)
 
-    expect(screen.getByText(/公开后无法由系统撤回/)).toBeTruthy()
+    expect(screen.getByText(/公开后系统不会替你撤回，只能手动撤回/)).toBeTruthy()
     expect(screen.getByRole('button', { name: /确定，真发/ })).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledTimes(2) // still only status + preview: nothing authorised yet
   })
@@ -710,3 +708,142 @@ describe('auto-publish panel — dates and previews', () => {
     await waitFor(() => expect(screen.getByText(/读不到自动发布的状态/)).toBeTruthy())
   })
 })
+
+describe('auto-publish panel — today\'s slot and an unknown mode', () => {
+  it('🔴 once today\'s 08:00 slot is (nearly) gone, today\'s date is not offered and is listed as left out', async () => {
+    // 07:50 on 2026-09-01 in Auckland
+    const fetchMock = mockFetch(MANAGEABLE_STATUS, PREVIEW_BODY)
+    await renderPanel({ now: new Date('2026-08-31T19:50:00Z'), reviewedDates: ['2026-09-01', '2026-09-03'] })
+    await waitFor(() => expect(screen.getByRole('button', { name: /预览自动发布/ })).toBeTruthy())
+    expect(screen.getByText(/今天已过早上 8 点的那一条，不会自动发：09-01/)).toBeTruthy()
+    await click(/预览自动发布/)
+    expect(bodyOf(fetchMock, 1).dates).toEqual(['2026-09-03'])
+  })
+
+  it('today is still offered while its slot is more than 15 minutes away', async () => {
+    const fetchMock = mockFetch(MANAGEABLE_STATUS, PREVIEW_BODY)
+    await renderPanel({ now: new Date('2026-08-31T19:30:00Z'), reviewedDates: ['2026-09-01', '2026-09-03'] }) // 07:30 NZ
+    await waitFor(() => expect(screen.getByRole('button', { name: /预览自动发布/ })).toBeTruthy())
+    await click(/预览自动发布/)
+    expect(bodyOf(fetchMock, 1).dates).toEqual(['2026-09-01', '2026-09-03'])
+  })
+
+  it('🔴 when the mode cannot be read there is no preview or authorise button at all, only the warning', async () => {
+    mockFetch({ success: true, can_manage: true, authorization: null, attempts: [] })
+    await renderPanel()
+    await waitFor(() => expect(screen.getByText(/读不到当前是演练还是真发/)).toBeTruthy())
+    expect(screen.queryByRole('button', { name: /预览自动发布/ })).toBeNull()
+  })
+
+  it('live mode says plainly that this is a real publish, in the preview too', async () => {
+    mockFetch({ ...MANAGEABLE_STATUS, mode: 'live' }, PREVIEW_BODY)
+    await renderPanel()
+    await waitFor(() => expect(screen.getByRole('button', { name: /预览自动发布/ })).toBeTruthy())
+    await click(/预览自动发布/)
+    expect(screen.getByText(/授权后会自动发这 2 条/)).toBeTruthy()
+    expect(screen.getByText(/09-03 早上 8:00（新西兰时间）公开/)).toBeTruthy()
+  })
+
+  it('stopping when there is no grant any more says there is nothing to stop', async () => {
+    const ACTIVE = {
+      ...MANAGEABLE_STATUS,
+      authorization: {
+        id: 'auth-1', dates: ['2026-09-03'], lifted_dates: [], authorized_by_email: 'pm@example.test',
+        authorized_at: '2026-09-01T00:00:00.000Z', activated_at: '2026-09-01T00:00:05.000Z',
+        expires_at: '2026-09-15T00:00:00.000Z', state: 'active' as const,
+      },
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(ACTIVE))
+      .mockResolvedValueOnce(jsonResponse({ success: false, error: 'NO_ACTIVE_AUTHORIZATION' }, 404))
+      .mockResolvedValue(jsonResponse(MANAGEABLE_STATUS))
+    global.fetch = fetchMock as never
+    await renderPanel()
+    await waitFor(() => expect(screen.getByRole('button', { name: /停止自动发布/ })).toBeTruthy())
+    fireEvent.change(screen.getByLabelText('停止原因'), { target: { value: '计划要改' } })
+    await click(/停止自动发布/)
+    await click(/确定，停止/)
+    await waitFor(() => expect(screen.getByText(/当前已经没有生效中的授权，不用停止/)).toBeTruthy())
+  })
+})
+
+describe('auto-publish panel — what a stop must leave visible', () => {
+  const ACTIVE = {
+    success: true, can_manage: true, mode: 'practice' as const, attempts: [],
+    authorization: {
+      id: 'auth-1', dates: ['2026-09-03'], lifted_dates: [], authorized_by_email: 'pm@example.test',
+      authorized_at: '2026-09-01T00:00:00.000Z', activated_at: '2026-09-01T00:00:05.000Z',
+      expires_at: '2026-09-15T00:00:00.000Z', state: 'active' as const,
+    },
+  }
+
+  it('🔴 after a successful stop the notice about already-scheduled posts is on screen when the status is read again (and the panel is not remounted by the page)', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(ACTIVE))
+      .mockResolvedValueOnce(jsonResponse({ success: true, in_flight_status: 'OK', in_flight: [{ date: '2026-09-03' }] }))
+      .mockResolvedValue(jsonResponse({ ...ACTIVE, authorization: null }))
+    global.fetch = fetchMock as never
+    await renderPanel()
+    await waitFor(() => expect(screen.getByRole('button', { name: /停止自动发布/ })).toBeTruthy())
+    fireEvent.change(screen.getByLabelText('停止原因'), { target: { value: '计划要改' } })
+    await click(/停止自动发布/)
+    await click(/确定，停止/)
+
+    await waitFor(() => expect(screen.getByText(/停止不会撤下它们/)).toBeTruthy())
+    expect(screen.getByText(/已停止自动发布，之后不会再自动发帖/)).toBeTruthy()
+  })
+
+  it('🔴 in the unreadable state a successful stop still shows what it did and did not take down', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ success: false, error: 'INTERNAL_ERROR' }, 500))
+      .mockResolvedValueOnce(jsonResponse({ success: true, in_flight_status: 'OK', in_flight: [] }))
+      .mockResolvedValue(jsonResponse({ success: false, error: 'INTERNAL_ERROR' }, 500))
+    global.fetch = fetchMock as never
+    await renderPanel()
+    await waitFor(() => expect(screen.getByLabelText('停止原因')).toBeTruthy())
+    fireEvent.change(screen.getByLabelText('停止原因'), { target: { value: '先停下来' } })
+    await click(/停止自动发布/)
+    await click(/确定，停止/)
+
+    await waitFor(() => expect(screen.getByText(/已停止自动发布，之后不会再自动发帖/)).toBeTruthy())
+  })
+
+  it('the stop control does not vanish while a failed read is being retried', async () => {
+    let release: (value: unknown) => void = () => undefined
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ success: false, error: 'INTERNAL_ERROR' }, 500))
+      .mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    global.fetch = fetchMock as never
+    const view = await renderPanel()
+    await waitFor(() => expect(screen.getByLabelText('停止原因')).toBeTruthy())
+    view.rerender(<CampaignDailyAutoPublishPanel {...props({ reviewRevision: '99999999-dfe4-44b6-8192-6f3f93ad3bdb' })} />)
+    await act(async () => { await Promise.resolve() })
+
+    expect(screen.getByLabelText('停止原因')).toBeTruthy()
+    release(jsonResponse(MANAGEABLE_STATUS))
+  })
+
+  it('the page trusts the server clock over the computer clock when deciding which dates are gone', async () => {
+    // the computer thinks it is 2026-08-20; the server says it is 2026-09-04 06:00 NZ, so 09-03 is gone and 09-04 is still open
+    const fetchMock = mockFetch({ ...MANAGEABLE_STATUS, server_now: '2026-09-03T18:00:00Z' }, PREVIEW_BODY)
+    await renderPanel({ now: undefined, reviewedDates: ['2026-09-03', '2026-09-04'] })
+    await waitFor(() => expect(screen.getByRole('button', { name: /预览自动发布/ })).toBeTruthy())
+    await click(/预览自动发布/)
+    expect(bodyOf(fetchMock, 1).dates).toEqual(['2026-09-04'])
+  })
+
+  it('a 401/403 that arrives as a web page is still treated as "not for this visitor"', async () => {
+    global.fetch = vi.fn().mockResolvedValue(htmlResponse(403)) as never
+    const { container } = await renderPanel()
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled())
+    expect(container.textContent).toBe('')
+  })
+
+  it('a network failure is shown in plain Chinese, not as a browser error string', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch')) as never
+    await renderPanel()
+    await waitFor(() => expect(screen.getByText(/网络没连上/)).toBeTruthy())
+    expect(screen.queryByText(/Failed to fetch/)).toBeNull()
+  })
+})
+
