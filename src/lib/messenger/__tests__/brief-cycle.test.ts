@@ -22,7 +22,10 @@ interface Row {
   message_count: number
   last_message_at: string | null
   last_message_from: string | null
-  conversation_briefs: { source_message_count: number; regen_count: number; regen_count_date: string | null }[]
+  conversation_briefs:
+    | { source_message_count: number; regen_count: number; regen_count_date: string | null }
+    | { source_message_count: number; regen_count: number; regen_count_date: string | null }[]
+    | null
 }
 
 let rows: Row[] = []
@@ -147,6 +150,35 @@ describe('挑人的判据（跟 shouldGenerateBrief 一致）', () => {
       }),
     ]
     expect(await loadDueBriefs(NOW)).toEqual([])
+  })
+
+  it('🔴 卡已经比对话新就不重写（PostgREST 一对一返回对象，不是数组）', async () => {
+    // 生产里 conversation_briefs 是对象；只认数组会让「已写过卡」永远判成没写过，
+    // 于是每小时把所有对话重写一遍（2026-10 审计：约 1200 次调用/天，只需约 70 次）。
+    rows = [
+      row('c1', {
+        message_count: 3,
+        conversation_briefs: { source_message_count: 3, regen_count: 0, regen_count_date: null },
+      }),
+    ]
+    expect(await loadDueBriefs(NOW)).toEqual([])
+  })
+
+  it('对象形态的卡比对话旧（有新消息）→ 该重写', async () => {
+    rows = [
+      row('c1', {
+        message_count: 5,
+        conversation_briefs: { source_message_count: 3, regen_count: 0, regen_count_date: null },
+      }),
+    ]
+    const due = await loadDueBriefs(NOW)
+    expect(due.map((d) => d.conversationId)).toEqual(['c1'])
+  })
+
+  it('conversation_briefs 为 null → 当成还没写过卡，该写', async () => {
+    rows = [row('c1', { conversation_briefs: null })]
+    const due = await loadDueBriefs(NOW)
+    expect(due.map((d) => d.conversationId)).toEqual(['c1'])
   })
 
   it('🔴 最后说话的是客人 → awaitingReply 为真（模型靠它决定「谁在等谁」）', async () => {
