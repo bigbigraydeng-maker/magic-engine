@@ -33,6 +33,8 @@ describe('safeInternalPath — rejects off-site redirects', () => {
     ['/.//evil.com'],
     ['/%2e%2e//evil.com'],
     ['/dashboard/../admin'],
+    ['/dashboard/%23/%2e%2e/%2e%2e/admin'],
+    ['/dashboard/%3F/%2e%2e/admin'],
     ['/dashboard/%2E%2E/admin'],
     ['/dashboard/..'],
     [''],

@@ -22,12 +22,14 @@
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
 
-function passesRawRules(value: string): boolean {
+function passesRawRules(value: string, decodedPass = false): boolean {
   if (!value.startsWith('/')) return false
   if (value.startsWith('//')) return false
   if (value.includes('\\')) return false
   if (CONTROL_CHARS.test(value)) return false
-  const pathPart = value.split(/[?#]/, 1)[0]
+  // After decoding, an encoded `?`/`#` is no longer a real delimiter, so scan
+  // every segment of the whole string (`/a/%23/%2e%2e/x` must not hide `..`).
+  const pathPart = decodedPass ? value : value.split(/[?#]/, 1)[0]
   if (pathPart.split('/').some(segment => segment === '.' || segment === '..')) return false
   return true
 }
@@ -40,7 +42,7 @@ export function isSafeInternalPath(value: unknown): value is string {
   } catch {
     return false
   }
-  return passesRawRules(decoded)
+  return passesRawRules(decoded, true)
 }
 
 export function safeInternalPath(value: unknown, fallback: string): string {
