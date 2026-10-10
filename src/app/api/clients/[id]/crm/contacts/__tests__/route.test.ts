@@ -351,39 +351,33 @@ describe('GET contacts — view=priority（WP3 R5 接线）', () => {
     expect(status).toBe(400)
   })
 
-  it('聊过一轮断了（Stan）+ AI 判高意向 → 抬进 hot；判低意向 → 留在 cold，位置跟没摘要时一样', async () => {
+  it('🔴 AI 意向不动人：聊过一轮断了（Stan）不管判高判低都留在 cold，只把意向带出来给抽屉当小字', async () => {
     type Sec = { key: string; total: number; items: Array<Record<string, unknown>> | null }
     const findStan = (body: Record<string, unknown>, key: string) =>
       (body.sections as Sec[]).find((s) => s.key === key)?.items?.find((r) => r.contactId === 'a3')
 
     BRIEF_ROWS.conversations = [{ id: 'c3', contact_id: 'a3' }]
-    BRIEF_ROWS.conversation_briefs = [
-      { conversation_id: 'c3', intent_level: 'high', next_action: '打给 Stan', generated_at: '2026-10-01T00:00:00.000Z' },
-    ]
-    const high = await get('cts', '?view=priority&open=hot,cold')
-    const stanHigh = findStan(high.body, 'hot')
-    expect(stanHigh).toBeTruthy()
-    expect(stanHigh?.intent).toBe('high')
-    expect((stanHigh?.nextAction as { list: string; line: string; aiSuggestion: string | null }).list).toBe('hot')
-    expect((stanHigh?.nextAction as { line: string }).line).toContain('AI 读完对话判他意向高')
-    expect((stanHigh?.nextAction as { aiSuggestion: string | null }).aiSuggestion).toBe('打给 Stan')
-    expect(findStan(high.body, 'cold')).toBeUndefined()
+    for (const level of ['high', 'medium', 'low', 'unknown'] as const) {
+      BRIEF_ROWS.conversation_briefs = [
+        { conversation_id: 'c3', intent_level: level, next_action: '打给 Stan', generated_at: '2026-10-01T00:00:00.000Z' },
+      ]
+      const { body } = await get('cts', '?view=priority&open=hot,cold')
+      const stan = findStan(body, 'cold')
+      expect(stan, `intent=${level} 时 Stan 应在 cold`).toBeTruthy()
+      expect(findStan(body, 'hot')).toBeUndefined()
+      expect(stan?.intent).toBe(level)
+      const na = stan?.nextAction as { list: string; line: string; aiSuggestion: string | null; intentBoost: boolean }
+      expect(na.list).toBe('cold')
+      expect(na.intentBoost).toBe(false)
+      // 名单那一行不许替未校准的 AI 背书（PM 2026-10-10）。
+      expect(na.line).not.toContain('意向')
+      expect(na.aiSuggestion).toBe('打给 Stan')
+    }
 
-    BRIEF_ROWS.conversation_briefs = [
-      { conversation_id: 'c3', intent_level: 'low', next_action: '打给 Stan', generated_at: '2026-10-01T00:00:00.000Z' },
-    ]
-    const low = await get('cts', '?view=priority&open=hot,cold')
-    const stanLow = findStan(low.body, 'cold')
-    expect(stanLow).toBeTruthy()
-    expect(stanLow?.intent).toBe('low')
-    expect((stanLow?.nextAction as { list: string }).list).toBe('cold')
-    expect(findStan(low.body, 'hot')).toBeUndefined()
-
-    // 没摘要：跟低意向落同一张名单 —— 意向只往上提，不往下压。
+    // 没摘要：同一张名单，intent 为 null。
     BRIEF_ROWS.conversations = []
     BRIEF_ROWS.conversation_briefs = []
     const none = await get('cts', '?view=priority&open=hot,cold')
-    expect(findStan(none.body, 'cold')).toBeTruthy()
     expect(findStan(none.body, 'cold')?.intent).toBeNull()
   })
 

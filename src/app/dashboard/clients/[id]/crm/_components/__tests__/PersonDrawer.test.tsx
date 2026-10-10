@@ -104,6 +104,16 @@ describe('号码好好的人，一个字都不该变', () => {
 const btn = (contains: string): HTMLButtonElement | undefined =>
   Array.from(document.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes(contains))
 
+/**
+ * 次要控件（没打通 / 改到哪一步 / 要记住的事）都收在「更多」里 —— 屏幕上只留一个主按钮
+ * （PM 2026-10-10：按钮太多，说了两遍）。要点它们先展开。
+ */
+const openMore = () => fireEvent.click(btn('更多')!)
+const openStagePanel = () => {
+  openMore()
+  fireEvent.click(btn('改「到哪一步了」')!)
+}
+
 describe('R1 · 抽屉补齐「全部客人」那边独有的两样', () => {
   const NAL = '4ae76381-cd45-43bd-85cd-98cfd7604007'
 
@@ -125,6 +135,7 @@ describe('R1 · 抽屉补齐「全部客人」那边独有的两样', () => {
 
   it('「要记住的事」出现在抽屉里，已存的提醒和到期日都显示出来', () => {
     drawFor('cts', { important: { note: '等她确认出发日期', dueAt: '2026-10-03T12:00:00Z' } })
+    openMore()
     const note = document.querySelector('textarea')
     const due = document.querySelector('input[type="date"]') as HTMLInputElement | null
     expect(note?.value).toBe('等她确认出发日期')
@@ -134,6 +145,7 @@ describe('R1 · 抽屉补齐「全部客人」那边独有的两样', () => {
 
   it('没设过提醒时这一格照样在，不是整块不见', () => {
     drawFor('cts', { important: null })
+    openMore()
     expect(document.querySelector('textarea')).toBeTruthy()
     expect(document.querySelector('input[type="date"]')).toBeTruthy()
   })
@@ -150,7 +162,7 @@ describe('R1 · 抽屉补齐「全部客人」那边独有的两样', () => {
    */
   it('NAL 点「已成交」→ 先弹录金额，不直接改阶段', () => {
     drawFor(NAL, {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
-    fireEvent.click(btn('到哪一步了')!)
+    openStagePanel()
     fireEvent.click(btn('已成交')!)
     const body = document.body.textContent ?? ''
     expect(body).toContain('这笔生意多少钱')
@@ -167,14 +179,14 @@ describe('R1 · 抽屉补齐「全部客人」那边独有的两样', () => {
    */
   it('NAL 点的不是成交档（比如「已联系」）→ 不许弹录金额', () => {
     drawFor(NAL, {}, [{ stageKey: 'contacted', label: '已联系', marketingAction: 'nurture' }])
-    fireEvent.click(btn('到哪一步了')!)
+    openStagePanel()
     fireEvent.click(btn('已联系')!)
     expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
   })
 
   it('CTS 点同一档「已成交」→ 不该弹录金额（那是 NAL 专属通道）', () => {
     drawFor('cts', {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
-    fireEvent.click(btn('到哪一步了')!)
+    openStagePanel()
     fireEvent.click(btn('已成交')!)
     expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
   })
@@ -301,9 +313,65 @@ describe('该做什么卡', () => {
         onSaved={vi.fn()}
       />,
     )
-    const stageBtn = btn('到哪一步了：已报价')
-    expect(stageBtn).toBeTruthy()
-    expect(stageBtn?.textContent ?? '').not.toContain('人工标的')
+    const line = screen.getByTestId('stage-line')
+    expect(line.textContent ?? '').toContain('到哪一步了：已报价')
+    expect(line.textContent ?? '').not.toContain('人工标的')
+  })
+
+  it('AI 意向只当一行小字「AI 初判（未校准）」，不是圆标也不是按钮', () => {
+    draw({
+      intent: 'high',
+      nextAction: { list: 'cold', verb: 'system_watching', verbLabel: '系统盯着', line: '系统盯着 —— 聊过一轮就断了', reason: '聊过一轮就断了', aiSuggestion: null, intentBoost: false },
+    })
+    expect(screen.getByText('AI 初判（未校准）：意向高')).toBeTruthy()
+    expect(btn('意向')).toBeUndefined()
+  })
+
+  it('没摘要 / 判不出 → 那行小字不出现', () => {
+    draw({
+      intent: 'unknown',
+      nextAction: { list: 'hot', verb: 'reply', verbLabel: '回他', line: '回他 —— 客户来消息了', reason: '客户来消息了', aiSuggestion: null, intentBoost: false },
+    })
+    expect(screen.queryByText(/AI 初判/)).toBeNull()
+  })
+})
+
+describe('按钮精简（PM 2026-10-10：一屏只留一个主按钮）', () => {
+  it('默认只看得到一个主按钮；「没打通」「改到哪一步」「要记住的事」都不在屏上', () => {
+    render(
+      <PersonDrawer
+        clientId="cts"
+        row={row({ segment: 'new_untouched', suggestedChannel: 'phone' })}
+        stages={[{ stageKey: 'contacted', label: '已联系' }]}
+        viewerEmail="fde@example.com"
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    )
+    expect(btn('记一笔')).toBeTruthy()
+    expect(btn('没打通')).toBeUndefined()
+    expect(btn('改「到哪一步了」')).toBeUndefined()
+    expect(document.querySelector('textarea')).toBeNull()
+    expect(screen.queryByTestId('drawer-more')).toBeNull()
+  })
+
+  it('点「更多」→ 三样都出来；再点收起', () => {
+    render(
+      <PersonDrawer
+        clientId="cts"
+        row={row({ segment: 'new_untouched', suggestedChannel: 'phone' })}
+        stages={[{ stageKey: 'contacted', label: '已联系' }]}
+        viewerEmail="fde@example.com"
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    )
+    openMore()
+    expect(btn('没打通')).toBeTruthy()
+    expect(btn('改「到哪一步了」')).toBeTruthy()
+    expect(document.querySelector('textarea')).toBeTruthy()
+    fireEvent.click(btn('收起')!)
+    expect(screen.queryByTestId('drawer-more')).toBeNull()
   })
 })
 
@@ -326,7 +394,7 @@ describe('B2 · 改阶段的并发保护', () => {
         onSaved={vi.fn()}
       />,
     )
-    fireEvent.click(btn('新线索')!)
+    openStagePanel()
     fireEvent.click(btn('已联系')!)
     await Promise.resolve()
     await Promise.resolve()
@@ -360,7 +428,7 @@ describe('B2 · 改阶段的并发保护', () => {
         onSaved={onSaved}
       />,
     )
-    fireEvent.click(btn('新线索')!)
+    openStagePanel()
     fireEvent.click(btn('已联系')!)
     await Promise.resolve()
     await Promise.resolve()

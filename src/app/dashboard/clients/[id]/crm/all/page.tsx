@@ -79,6 +79,8 @@ function toDrawerRow(r: ContactRow): DrawerRow {
     reason: r.reason,
     // 「该做什么」三行卡的内容 —— 跟列表那一格同一个对象，两处不会说两套话。
     nextAction: r.nextAction,
+    // 只给抽屉显示一行「AI 初判（未校准）」小字，不参与任何判断。
+    intent: r.intent,
     // 后端 segmentContact() 的枚举值原样传下来，这里的 ContactRow.segment 类型是
     // string（跨接口共用的宽类型），值域跟 Segment 一致，不重新校验。
     segment: r.segment as Segment,

@@ -83,3 +83,50 @@ describe('抽屉里的 WhatsApp 回复框', () => {
     )
   })
 })
+
+/**
+ * 窗口关了（客人超过 24 小时没说话）：不再摆一整块发不出去的输入框
+ * （PM 2026-10-10：按钮太多）。只留一句话 + 还走得通的两条路。
+ */
+describe('窗口已关 → 只留一句话 + 打电话 / 发邮件', () => {
+  const drawClosed = (phone: string | null, email: string | null) =>
+    render(
+      <WhatsAppReply
+        clientId={CLIENT}
+        contactId={CONTACT}
+        customerName="Kam"
+        viewerEmail="bdm@ctstours.co.nz"
+        onSent={vi.fn()}
+        phone={phone}
+        email={email}
+      />,
+    )
+
+  it('没有输入框、没有发送按钮；两条路都给', async () => {
+    stubLookup({ conversationId: 'conv-1', replyWindow: { kind: 'closed', msRemaining: 0 } })
+    drawClosed('+6421000000', 'kam@example.com')
+
+    await waitFor(() => expect(screen.getByTestId('reply-closed')).toBeTruthy())
+    expect(document.querySelector('textarea')).toBeNull()
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.getByText('打电话').getAttribute('href')).toBe('tel:+6421000000')
+    expect(screen.getByText('发邮件').getAttribute('href')).toBe('mailto:kam@example.com')
+  })
+
+  it('没电话就不给「打电话」—— 不摆一条走不通的路', async () => {
+    stubLookup({ conversationId: 'conv-1', replyWindow: { kind: 'closed', msRemaining: 0 } })
+    drawClosed(null, 'kam@example.com')
+
+    await waitFor(() => expect(screen.getByTestId('reply-closed')).toBeTruthy())
+    expect(screen.queryByText('打电话')).toBeNull()
+    expect(screen.getByText('发邮件')).toBeTruthy()
+  })
+
+  it('窗口还开着 → 照旧给回复框', async () => {
+    stubLookup({ conversationId: 'conv-1', replyWindow: { kind: 'standard', msRemaining: 3_600_000 } })
+    drawClosed('+6421000000', null)
+
+    await waitFor(() => expect(document.querySelector('textarea')).toBeTruthy())
+    expect(screen.queryByTestId('reply-closed')).toBeNull()
+  })
+})

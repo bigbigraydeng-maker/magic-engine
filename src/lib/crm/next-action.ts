@@ -2,13 +2,20 @@
  * 「下一步做什么」—— 把今天并排挂着的三个状态（pipeline 阶段、系统分段、
  * AI 意向等级）合成**一个**概念，只给销售两张名单：今天要联系 / 先放着。
  *
- * 意向只能**往上抬**，永远不许往下压（2026-08-02 的教训：分段少配一列，
- * 33 个点过链接的客人在页面上凭空消失，没有任何报错 —— 任何「把人往下挪」的
- * 规则都可能重演它）。所以唯一的抬升是「聊过一轮就断了」+ 高意向 → 进今天
- * 要联系；medium / low / unknown / 没有 brief 一律不动，位置跟今天一样。
- *
  * hot / cold 对应旧的两层：hot = 原来「在等我们 / 今天动过」那一层，
  * cold = 原来「排队中 / 已排除」那一层。名字换了，人一个没少。
+ *
+ * 🔴 **意向不动人、也不排序**（PM 2026-10-10 抽查后定）。
+ *
+ * 产生意向等级的那个 prompt 没有写下来的判据，抽查几个人就判错 —— 一个没校准
+ * 的信号不许决定谁进名单、谁排前面，更不许在名单上写「AI 读完对话判他意向高」
+ * 这种替 AI 背书的话。它现在只被带到这里，供抽屉里显示一行小字
+ * 「AI 初判（未校准）」。要重新让它影响名单，先做
+ * `docs/specs/2026-10-10-crm-intent-calibration-plan.md` 里的校准。
+ *
+ * 2026-08-02 的教训仍然成立：分段少配一列，33 个点过链接的客人在页面上凭空
+ * 消失，没有任何报错 —— 每个 Segment 必须恰好落进一张名单（见
+ * `BASE_LIST_OF_SEGMENT` 的穷尽 Record）。
  */
 
 import { compareForWorklist, type Segment, type SegmentResult } from './segments'
@@ -31,7 +38,10 @@ export interface NextAction {
   reason: string
   /** conversation_briefs.next_action，去掉首尾空白；没有就是 null。只在抽屉里显示。 */
   aiSuggestion: string | null
-  /** 只有「聊过一轮就断了」因为高意向被抬进 hot 时才为 true。 */
+  /**
+   * 恒为 false —— 意向未校准前不抬人（PM 2026-10-10）。
+   * 保留字段是为了校准通过后恢复时不改响应形状。
+   */
   intentBoost: boolean
 }
 
@@ -61,18 +71,24 @@ export const BASE_LIST_OF_SEGMENT: Record<Segment, NextActionList> = {
   excluded: 'cold',
 }
 
-export const INTENT_BOOST_SUFFIX = '，AI 读完对话判他意向高'
-
 /**
  * 这个人进哪张名单。
  *
- * 意向只能抬、不能压：唯一的抬升是「聊过一轮就断了」+ 高意向 → hot。
- * medium / low / unknown / null 一律返回基础名单 —— 一个 AI 判低意向
- * 不许把正在等我们回话的人从名单上抹掉。
+ * 只看分段 —— 意向**不参与**（PM 2026-10-10：意向未校准，不许决定谁进名单）。
+ * 第二个参数保留是因为调用方都在传，但它被忽略；等校准通过后要恢复抬升，
+ * 见 `docs/specs/2026-10-10-crm-intent-calibration-plan.md`。
  */
-export function listOf(segment: Segment, intent: IntentLevel | null): NextActionList {
-  if (segment === 'stale_conversation' && intent === 'high') return 'hot'
+export function listOf(segment: Segment, _intent: IntentLevel | null = null): NextActionList {
+  void _intent
   return BASE_LIST_OF_SEGMENT[segment]
+}
+
+/** 抽屉里那行小字。只在有明确判断时显示；unknown / 没摘要 → null（不显示）。 */
+export function intentNote(intent: IntentLevel | null): string | null {
+  if (intent === 'high') return 'AI 初判（未校准）：意向高'
+  if (intent === 'medium') return 'AI 初判（未校准）：意向中'
+  if (intent === 'low') return 'AI 初判（未校准）：意向低'
+  return null
 }
 
 /**
@@ -102,10 +118,9 @@ export function nextActionFor(input: {
 }): NextAction {
   const { seg, intent, aiNextAction } = input
   const list = listOf(seg.segment, intent)
-  const intentBoost = seg.segment === 'stale_conversation' && list === 'hot'
   const verb = verbOf(seg.segment, seg.suggestedChannel, list)
   const verbLabel = VERB_LABEL[verb]
-  const reason = intentBoost ? `${seg.reason}${INTENT_BOOST_SUFFIX}` : seg.reason
+  const reason = seg.reason
   const trimmed = typeof aiNextAction === 'string' ? aiNextAction.trim() : ''
   return {
     list,
@@ -114,33 +129,46 @@ export function nextActionFor(input: {
     line: `${verbLabel} —— ${reason}`,
     reason,
     aiSuggestion: trimmed.length > 0 ? trimmed : null,
-    intentBoost,
+    intentBoost: false,
   }
+}
+
+/** 排序用的时间戳。没有触点（null / 空 / 解析不出）当成「刚刚」—— 新人排最前。 */
+function recency(iso: string | null): number {
+  if (!iso) return Number.POSITIVE_INFINITY
+  const t = Date.parse(iso)
+  return Number.isNaN(t) ? Number.POSITIVE_INFINITY : t
 }
 
 /**
  * 名单里谁排前面。
  *
- * 先按分段排（跟今天名单同一套 `compareForWorklist`，两处排序不许漂移）；
- * 分段完全相同时，高意向排前面。medium / low 之间不再分高下 —— 没有依据。
+ * 🔴 PM 2026-10-10 看本地页：按分段成块排会让「最近联系」一列
+ * 64 天前 → 11 天前 → 昨天 来回跳，销售看不出顺序。今天要联系里只留一条规则。
+ *
+ * 意向**完全不参与排序**（未校准，见文件头）。
+ *
+ * hot 名单：
+ *   1. 约好今天回电的永远在最前 —— 那是我们答应过的事。
+ *   2. 其余一条规则：最近有动静的排前面。没有任何触点的新人当成「刚刚」。
+ * cold 名单沿用引擎原排序（`compareForWorklist`）。
  */
 export function compareNextAction(
   a: { seg: SegmentResult; intent: IntentLevel | null },
   b: { seg: SegmentResult; intent: IntentLevel | null },
 ): number {
-  // 被高意向抬进 hot 的「聊过一轮断了」：**最近的排前面**（PM 2026-10-10 看了本地页：
-  // 37 天没动静的排在 1 天没动静的前面，不对）。引擎里 stale 原本是「等得最久的排前面」，
-  // 那是给 cold 回捞用的；进了今天要联系，就跟新线索一样 —— 线索会凉，越近的越该先打。
-  const aLifted = a.seg.segment === 'stale_conversation' && listOf(a.seg.segment, a.intent) === 'hot'
-  const bLifted = b.seg.segment === 'stale_conversation' && listOf(b.seg.segment, b.intent) === 'hot'
-  if (aLifted && bLifted) {
-    const byRecent = Date.parse(b.seg.lastTouchAt ?? '') - Date.parse(a.seg.lastTouchAt ?? '')
-    if (!Number.isNaN(byRecent) && byRecent !== 0) return byRecent
+  const aHot = BASE_LIST_OF_SEGMENT[a.seg.segment] === 'hot'
+  const bHot = BASE_LIST_OF_SEGMENT[b.seg.segment] === 'hot'
+  if (aHot && bHot) {
+    const aDue = a.seg.segment === 'callback_due'
+    const bDue = b.seg.segment === 'callback_due'
+    if (aDue !== bDue) return aDue ? -1 : 1
+    const aAt = recency(a.seg.lastTouchAt)
+    const bAt = recency(b.seg.lastTouchAt)
+    if (Number.isFinite(aAt) || Number.isFinite(bAt)) {
+      const byRecent = bAt - aAt
+      if (byRecent !== 0) return byRecent
+    }
   }
-  const bySeg = compareForWorklist(a.seg, b.seg)
-  if (bySeg !== 0) return bySeg
-  const aHigh = a.intent === 'high'
-  const bHigh = b.intent === 'high'
-  if (aHigh === bHigh) return 0
-  return aHigh ? -1 : 1
+  return compareForWorklist(a.seg, b.seg)
 }

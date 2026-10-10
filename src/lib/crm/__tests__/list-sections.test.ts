@@ -56,9 +56,9 @@ describe('hot + cold 总数 = 输入总数', () => {
   })
 })
 
-describe('意向只能往上抬：stale_conversation + high → hot，其余不动', () => {
-  it('stale_conversation 只有 high 抬进 hot；medium/low/unknown/null 留在 cold', () => {
-    expect(listOf('stale_conversation', 'high')).toBe('hot')
+describe('意向不动人：stale_conversation 对每个意向都留在 cold', () => {
+  it('high / medium / low / unknown / null 全部 → cold', () => {
+    expect(listOf('stale_conversation', 'high')).toBe('cold')
     expect(listOf('stale_conversation', 'medium')).toBe('cold')
     expect(listOf('stale_conversation', 'low')).toBe('cold')
     expect(listOf('stale_conversation', 'unknown')).toBe('cold')
@@ -81,17 +81,17 @@ describe('compareRanked', () => {
     expect([a, b, c].sort(compareRanked).map((r) => r.contactId)).toEqual(['b', 'a', 'c'])
   })
 
-  it('都不置顶按 compareNextAction（优先级小的在前）', () => {
+  it('都不置顶按 compareNextAction：约好回电的最前，其余同一时间点的按引擎优先级', () => {
     const a = rk('a', 'replied') // priority 1
-    const b = rk('b', 'callback_due') // priority 2
+    const b = rk('b', 'callback_due') // 我们答应过的事，永远最前
     const c = rk('c', 'new_untouched') // priority 4
-    expect([c, b, a].sort(compareRanked).map((r) => r.contactId)).toEqual(['a', 'b', 'c'])
+    expect([c, b, a].sort(compareRanked).map((r) => r.contactId)).toEqual(['b', 'a', 'c'])
   })
 
-  it('同段同优先级时 high 意向排前', () => {
-    const a = rk('a', 'stale_conversation', { intent: null })
-    const b = rk('b', 'stale_conversation', { intent: 'high' })
-    expect([a, b].sort(compareRanked).map((r) => r.contactId)).toEqual(['b', 'a'])
+  it('意向不影响排序：同样的两个人，一个 high 一个 low → 0', () => {
+    const a = rk('a', 'stale_conversation', { intent: 'high' })
+    const b = rk('b', 'stale_conversation', { intent: 'low' })
+    expect(compareRanked(a, b)).toBe(0)
   })
 })
 
