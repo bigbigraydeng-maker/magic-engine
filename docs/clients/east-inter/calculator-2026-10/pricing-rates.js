@@ -9,7 +9,8 @@
   else root.EastInterRates = rates;
 })(typeof self !== 'undefined' ? self : this, function () {
   return {
-    effective: 'October 2026',
+    // Sheet has no effective date and East Inter has not confirmed one: keep this label neutral until they do.
+    effective: 'Current',
     fx: {rmbPerAud: 4.9},
     cities: {sydney:'Sydney',melbourne:'Melbourne',brisbane:'Brisbane',perth:'Perth (Fremantle)',adelaide:'Adelaide',goldCoast:'Gold Coast',sunshineCoast:'Sunshine Coast',other:'Other cities'},
     // LCL sea freight, RMB per CBM. first = 1-10 CBM first CBM, large = first CBM at 10 CBM and above, next = each additional CBM.

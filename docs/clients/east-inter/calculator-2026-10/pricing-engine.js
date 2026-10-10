@@ -83,8 +83,9 @@
         const rate=R.bulk[city]||R.bulk.other,unit=R.bulk.unitKg,units=ceilUnits(weight,unit);
         billed=units*unit; total=units*rate[tax]; days=rate.days;
         lines.push([units+' × '+unit+'kg × '+money(rate[tax]),total]);
-        note=tax+' · Billed weight: '+number(billed)+'kg. '+(tax === 'DDP' ? 'All taxes prepaid; no extra charges at delivery.' : 'Recipient pays Australian duties and GST on arrival; these are not included.');
+        note=tax+' · Billed weight: '+number(billed)+'kg. '+(tax === 'DDP' ? 'DDP: East Inter prepays Australian duties and taxes.' : 'Recipient pays Australian duties and GST on arrival; these are not included.');
       }
+      if (service === 'bulkAir' && tax === 'DDP') warning='Freight only. The source rate sheet also requires a 15% prepaid tax on goods value for DDP, which cannot be calculated here (goods value is not collected). Contact us for the DDP total.';
       if (!Number.isFinite(total)) return {error:'The entered shipment size is too large. Contact us for a quote.'};
       if (service !== 'lcl') {
         note+=' Actual weight: '+number(quantity)+'kg.';
