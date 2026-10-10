@@ -95,6 +95,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   facebook_sync_failing: 'one_click', // 主页管理员重新「连接 Meta」
   comment_scope_missing: 'one_click',
   comment_token_invalid: 'one_click',
+  comment_autoreply_run_failing: 'dev', // 评论 cron 连续多轮没扫完：授权 / Meta 接口问题，开发看日志
   comment_reply_scope_missing: 'one_click', // 主页管理员重新「连接 Meta」并勾上管理评论权限
   conversion_capi_token_dead: 'one_click',
   linkedin_progress_needs_setup: 'one_click',
@@ -137,6 +138,9 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   messenger_draft_escalation: 'review',
   price_claim_unbacked: 'review',
   price_fact_unverified: 'review',
+  auto_publish_stalled: 'review', // 该发的帖子没发出去：看原因、决定重发还是改
+  auto_publish_unknown_outcome: 'truth', // 系统判不了真假：帖子到底有没有发出去，只有看主页的人知道
+  auto_publish_unarmed: 'review', // 已授权却没动静：发布器可能没跑
 
   // ── 5 · 系统判不了真假的 ─────────────────────────────────────────────
   cross_client_leak: 'truth',

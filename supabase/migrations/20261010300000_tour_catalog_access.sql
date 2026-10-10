@@ -329,7 +329,7 @@ alter table public.tour_catalog_departures validate constraint tour_catalog_depa
 -- ---------------------------------------------------------------------------
 -- 7. Edit functions: blank actor refused; a save that changes nothing writes nothing
 --    (no revision bump, no change-log row, updated_at untouched). Everything else is unchanged
---    from 20261010100000_tour_catalog_edit.sql.
+--    from 20261010150000_tour_catalog_edit.sql.
 -- ---------------------------------------------------------------------------
 create or replace function public.tour_catalog_update_tour(
   p_client_id uuid,

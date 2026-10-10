@@ -3,9 +3,9 @@
  * range, competition, and top-of-page bid range for a given seed set,
  * scoped to specific geo targets and language.
  *
- * REST endpoint: POST /v17/customers/{customer_id}:generateKeywordIdeas
+ * REST endpoint: POST /v25/customers/{customer_id}:generateKeywordIdeas
  *
- * Docs: https://developers.google.com/google-ads/api/rest/reference/rest/v17/customers/generateKeywordIdeas
+ * Docs: https://developers.google.com/google-ads/api/rest/reference/rest/v25/customers/generateKeywordIdeas
  *
  * Google Ads returns quantised search volume (rounded to buckets) — not an
  * exact number. That is the same signal the Google Ads UI shows and is the
@@ -17,7 +17,7 @@
 
 import { getAccessToken, type GoogleAdsCreds } from './client'
 
-const GOOGLE_ADS_API_BASE = 'https://googleads.googleapis.com/v17'
+const GOOGLE_ADS_API_BASE = 'https://googleads.googleapis.com/v25'
 
 // ── Well-known constants ─────────────────────────────────────────────────────
 

@@ -708,3 +708,26 @@ import './music.test.mjs'
 import './music-excerpt.test.mjs'
 import './montage.test.mjs'
 import './templates.test.mjs'
+
+describe('footageScrim', () => {
+  test('props without footageScrim still parse and stay undefined', () => {
+    const parsed = parseListReelProps(valid())
+    assert.equal(parsed.footageScrim, undefined)
+  })
+
+  test('footageScrim between 0 and 1 is accepted', () => {
+    for (const good of [0, 0.35, 1]) {
+      const props = valid()
+      props.footageScrim = good
+      assert.equal(parseListReelProps(props).footageScrim, good)
+    }
+  })
+
+  test('footageScrim out of range or non-number is rejected', () => {
+    for (const bad of [-0.1, 1.01, '0.4', null]) {
+      rejects((props) => {
+        props.footageScrim = bad
+      })
+    }
+  })
+})

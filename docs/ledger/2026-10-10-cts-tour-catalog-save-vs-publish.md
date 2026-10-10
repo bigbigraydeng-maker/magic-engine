@@ -4,6 +4,8 @@ title: 团目录「保存」与「上架」分开：保存只改草稿，上架�
 status: done
 owner: agent
 decided_on: 2026-10-10
+done_on: 2026-10-10
+done_ref: pr:2383
 verify_by: 2026-10-17
 source: session:1a85e0eb
 verify_how: PM 在本机试用页 http://localhost:3011/tc-local-preview 走一遍：改一个团的价格并保存，状态条显示有改动未上架、客人看到的仍是旧版；点「查看并上架」核对后上架，状态条变绿；在「上架记录」把对外内容换回旧版，价格回到旧值而已满团的班期保持已满团

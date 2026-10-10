@@ -8,7 +8,7 @@ import { asRecord, asString, mapDepartureRow, mapTourRow, rowsOf } from './store
 import type { CatalogDeparture, CatalogTour } from './types'
 
 // ---------------------------------------------------------------------------
-// Admin editing (RPCs from 20261010100000_tour_catalog_edit.sql)
+// Admin editing (RPCs from 20261010150000_tour_catalog_edit.sql)
 // ---------------------------------------------------------------------------
 
 export type EditResult<T> =

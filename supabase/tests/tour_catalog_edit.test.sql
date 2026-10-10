@@ -1,4 +1,4 @@
--- Behaviour checks for supabase/migrations/20261010100000_tour_catalog_edit.sql (run after the base migration
+-- Behaviour checks for supabase/migrations/20261010150000_tour_catalog_edit.sql (run after the base migration
 -- and after tour_catalog_functions.test.sql's setup, on a THROWAWAY local Postgres only).
 create temp table eresults(name text, ok boolean, detail text); grant all on eresults to public;
 insert into tour_catalog_tours(id, client_id, slug, destination, tier, name, manages_departures) values

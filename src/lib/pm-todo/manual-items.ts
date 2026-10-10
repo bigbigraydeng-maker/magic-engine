@@ -32,6 +32,7 @@ import { pushKnowledgeFactExpiringItems } from './knowledge-fact-expiring-items'
 import { pushDailyPlanMeasurementItems } from './daily-plan-measurement-items'
 import { pushPriceFactItems } from './price-fact-items'
 import { pushTourCatalogPublishRequestItems } from './tour-catalog-publish-request-items'
+import { pushAutoPublishItems } from './auto-publish-items'
 import { pushEmailReplyItems } from './email-reply-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
@@ -76,6 +77,7 @@ import { fetchBlogDraftTodos } from '@/lib/pm-todo/blog-drafts'
 import { fetchAutoRunTodos } from '@/lib/pm-todo/auto-run-items'
 import { fetchCommentScopeTodos } from '@/lib/pm-todo/comment-scope-items'
 import { fetchCommentReplyScopeTodos } from '@/lib/pm-todo/comment-reply-scope-items'
+import { fetchCommentAutoreplyRunFailingTodos } from '@/lib/pm-todo/comment-autoreply-run-failing-items'
 import { fetchKernelHandoffTodos } from '@/lib/kernel/handoff'
 import { auditCrossClientLeaks } from '@/lib/clients/cross-client-audit'
 import {
@@ -301,6 +303,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 客户员工改了团目录、点了「请 Magic Engine 上架」—— 不摆出来就没人去上架
     (b) => pushTourCatalogPublishRequestItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 团目录上架请求待办读取失败（不阻塞其他待办）:', e),
+    ),
+    // 自动发布没发出去 / 不确定发没发出去 / 已授权却没动静 —— 人不在场，不捞出来没人知道
+    (b) => pushAutoPublishItems(supabase, b, now, nameOf, { live: process.env.DAILY_PLAN_AUTO_PUBLISH_LIVE === 'true' }).catch((e) =>
+      console.warn('[manual-items] 自动发布待办检查失败（不阻塞其他待办）:', e),
     ),
     // 本周方案已自动落地 —— 只通知，不要求 PM 操作（PM 2026-08-04 拍板）
     (b) => pushPrescriptionItems(supabase, b, now, nameOf),
@@ -835,6 +841,17 @@ async function pushCommentScopeItems(
 ): Promise<void> {
   const todos = await fetchCommentScopeTodos(supabase, now)
   for (const t of todos) {
+    items.push({
+      kind: t.kind,
+      client_id: t.client_id,
+      client_name: nameOf(t.client_id),
+      what: t.what,
+      how: t.how,
+      href: t.href,
+    })
+  }
+  const failingTodos = await fetchCommentAutoreplyRunFailingTodos(supabase, now)
+  for (const t of failingTodos) {
     items.push({
       kind: t.kind,
       client_id: t.client_id,
