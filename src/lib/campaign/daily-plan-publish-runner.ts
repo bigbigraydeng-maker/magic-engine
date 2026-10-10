@@ -344,6 +344,10 @@ export interface RunDailyPlanPublishInput {
   command: CampaignDailyPublishCommand
   /** The human who authorised this publish; written to the receipt. Caller-supplied, never read from a session here. */
   approvedByUserId: string
+  /** The instant schedule decisions are made against (default: now). */
+  now?: Date
+  /** false = a slot that already passed is a MISSED_WINDOW failure instead of an immediate publish. Default true (manual path). */
+  allowImmediate?: boolean
 }
 
 export interface RunDailyPlanPublishResult {
@@ -430,6 +434,8 @@ export async function runDailyPlanPublish(input: RunDailyPlanPublishInput): Prom
         pageToken: page.token,
         row,
         command,
+        now: input.now,
+        allowImmediate: input.allowImmediate,
       })
 
   const merged = [...alreadyPublished, ...outcome.published]

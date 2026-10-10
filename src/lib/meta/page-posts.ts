@@ -409,6 +409,9 @@ const CLEAR_REFUSAL_STATUSES = new Set([400, 401, 403, 404, 422])
 const GRAPH_THROTTLE_CODES = new Set([4, 17, 32, 613])
 
 /** Publish failure with enough structure for a caller to decide whether a retry is safe. */
+/** Upper bound for one publish call; a hung request surfaces as `unknown`, never blocks a worker. */
+const PUBLISH_TIMEOUT_MS = 45_000
+
 export class PagePublishError extends Error {
   readonly certainty: PublishOutcomeCertainty
   readonly httpStatus: number | null
@@ -497,6 +500,7 @@ export async function publishPagePhotoPost(input: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(PUBLISH_TIMEOUT_MS),
     })
   } catch (error: unknown) {
     // No response at all: the request may or may not have reached Facebook.

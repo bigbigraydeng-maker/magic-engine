@@ -8,7 +8,8 @@ vi.mock('@/lib/meta/token-manager', () => ({
   getMetaTokenForClient: vi.fn(),
   getStoredPageToken: vi.fn(),
 }))
-vi.mock('@/lib/meta/page-posts', () => ({
+vi.mock('@/lib/meta/page-posts', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/meta/page-posts')>()),
   getPageAccessToken: vi.fn(),
   publishPagePhotoPost: vi.fn(),
 }))
@@ -613,6 +614,8 @@ describe('publish bridge — live run records real provider ids', () => {
     expect(json.success).toBe(false)
     expect(json.receipt.failed).toHaveLength(1)
     expect(json.receipt.failed[0].date).toBe(DATES[0])
+    // a plain Error (not a classified Graph answer) must be recorded as `unknown`: the Post may exist
+    expect(json.receipt.failed[0].certainty).toBe('unknown')
     expect(json.receipt.published).toHaveLength(1)
     expect(json.receipt.published[0].post_id).toBe(`${PAGE_ID}_1750000093`)
   })
