@@ -14,32 +14,41 @@
  *   200 { success, actionId, campaignId, before, after }
  *   400 missing required fields
  *   403 campaign_id does not belong to this client's registered ad account (AD-SEC-1)
- *   422 action not supported or campaign has no daily_budget (for adjust_bid)
+ *   403 ads.reactivate_campaign by anyone other than the global admin (PM) — code activation_requires_pm
+ *   422 action not supported, campaign has no daily_budget (for adjust_bid), or reactivate of an ME Messenger draft campaign
  *   424 META_SYSTEM_USER_TOKEN not configured
  *   502 Meta Graph API call failed
+ *   503 reactivate receipt could not be written — Meta NOT called
  *
  * Before/after are stored in flywheel_actions.payload for audit and undo.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requireAdsCampaignBudgetAccess, queueAdsCampaignBudgetDecrease } from '@/lib/action-submission/ads-campaign-budget'
+import { createKernel } from '@/lib/kernel'
+import { inngest } from '@/lib/inngest/client'
+import { ADS_CAMPAIGN_BUDGET_DECREASE_REQUESTED } from '@/lib/inngest/ads-events'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
-import {
-  setCampaignStatus,
-  setCampaignDailyBudget,
-  getCampaignDetails,
-} from '@/lib/meta/client'
+import { setCampaignStatus } from '@/lib/meta/client'
 import { assertCampaignOwnedByClient } from '@/lib/meta/campaign-ownership'
-import { checkBudgetWithinSafeRange } from '@/lib/meta/guardrails'
 import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
 import { resolveAndLogAdsExpectedMetric } from '@/lib/flywheel/ads-expected-metric'
+import { nzToday } from '@/lib/pm-todo/ledger-items'
+import {
+  checkMessengerDraftCampaign,
+  MESSENGER_REACTIVATE_BLOCKED_MESSAGE,
+  MESSENGER_LOOKUP_FAILED_MESSAGE,
+} from '@/lib/ads-strategy/messenger-draft-campaign-guard'
+import { requireSpendActivationAuthority, buildSpendActivationReceipt, type SpendActivationAuthority } from '@/lib/ads/spend-activation'
 
 const SUPPORTED_ACTION_TYPES = new Set([
   ADS_ACTION_TYPE.PAUSE_CAMPAIGN,
   ADS_ACTION_TYPE.ADJUST_BID,
   'ads.reactivate_campaign',   // undo of pause — not in vocab (undo path only)
 ])
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 interface RouteParams {
   params: { id: string }
@@ -58,7 +67,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
   const clientId = params.id
 
   // ── Auth ─────────────────────────────────────────────────────────────────
-  const access = await requirePaidClientAccess(clientId)
+  const access = await requireAdsCampaignBudgetAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
@@ -71,7 +80,8 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { action_type, campaign_id, params: actionParams = {} } = body
+  const { action_type, campaign_id } = body
+  const actionParams = body.params && typeof body.params === 'object' && !Array.isArray(body.params) ? body.params : {}
 
   if (!action_type || !campaign_id) {
     return NextResponse.json(
@@ -85,6 +95,25 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
       { error: `Unsupported action_type: "${action_type}". Supported: ${Array.from(SUPPORTED_ACTION_TYPES).join(', ')}` },
       { status: 422 },
     )
+  }
+
+  // execution_item_id 来自请求体，会原样写进回执：必须是 UUID 字符串，别的一律 400。
+  if (
+    actionParams.execution_item_id !== undefined &&
+    (typeof actionParams.execution_item_id !== 'string' || !UUID_RE.test(actionParams.execution_item_id))
+  ) {
+    return NextResponse.json({ error: 'params.execution_item_id must be a UUID string' }, { status: 400 })
+  }
+
+  // ── 重开 = 重新花钱：只有 PM（全局管理员，ADMIN_EMAILS 精确名单）能做 ─────────
+  // 付费客户账号照样能暂停；重开必须是 PM。任何校验失败都拒绝（fail-closed）。
+  let activationAuthority: SpendActivationAuthority | null = null
+  if (action_type === 'ads.reactivate_campaign') {
+    const authority = await requireSpendActivationAuthority()
+    if (!authority.ok) {
+      return NextResponse.json({ error: authority.error, code: authority.code }, { status: authority.status })
+    }
+    activationAuthority = authority
   }
 
   // ── Token ─────────────────────────────────────────────────────────────────
@@ -109,6 +138,27 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
   }
   const beforeDetails = ownership.campaign
 
+  // ── ME 私信广告草案不许经「恢复」直接开启 ─────────────────────────────────
+  // 私信广告的开启必须走审批流程；这个入口没有授权/预算检查。判据是账本里有没有
+  // 这个系列的私信草案记录（不按客户过滤：Meta 系列编号全局唯一，共用广告账户时
+  // 别家客户的人也够得着这个系列）。放在归属校验之后，免得借它探测别家的系列编号。
+  // 查不出来也拒绝（fail-closed）——只有明确「没有」才放行。
+  if (action_type === 'ads.reactivate_campaign') {
+    const draftCheck = await checkMessengerDraftCampaign(supabaseAdmin, String(campaign_id))
+    if (draftCheck === 'is_messenger_draft') {
+      return NextResponse.json(
+        { error: MESSENGER_REACTIVATE_BLOCKED_MESSAGE, code: 'messenger_reactivate_blocked' },
+        { status: 422 },
+      )
+    }
+    if (draftCheck !== 'not_messenger_draft') {
+      return NextResponse.json(
+        { error: MESSENGER_LOOKUP_FAILED_MESSAGE, code: 'messenger_draft_lookup_failed' },
+        { status: 422 },
+      )
+    }
+  }
+
   const before = {
     status:       beforeDetails.status,
     name:         beforeDetails.name,
@@ -120,30 +170,30 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
   // without an audit row. A sales campaign is graded on ROAS, a Messenger
   // campaign on cost per conversation — the old code promised nothing at all,
   // which is why every action here produced zero outcomes.
-  const expectedMetric = resolveAndLogAdsExpectedMetric(
-    { objective: beforeDetails.objective },
-    'meta-ads/execute',
-  )
+  const expectedMetric = action_type === ADS_ACTION_TYPE.ADJUST_BID
+    ? null
+    : resolveAndLogAdsExpectedMetric({ objective: beforeDetails.objective }, 'meta-ads/execute')
 
   // ── Execute action ────────────────────────────────────────────────────────
   let after: typeof before
   let metaSuccess = false
-  // Set when the force-pause guard could not certify the campaign is still
-  // ACTIVE after a budget change — surfaced in the response AND the audit row,
-  // never swallowed (魏征 P1-4: a guard that fails silently is worse than none,
-  // because the record then claims everything is fine).
-  let guardWarning: string | null = null
-  let guardMarker: 'reread_failed' | 'reactivate_failed' | null = null
 
   if (action_type === ADS_ACTION_TYPE.PAUSE_CAMPAIGN) {
     metaSuccess = await setCampaignStatus(campaign_id, accessToken, 'PAUSED')
     after = { ...before, status: 'PAUSED' }
   } else if (action_type === 'ads.reactivate_campaign') {
-    metaSuccess = await setCampaignStatus(campaign_id, accessToken, 'ACTIVE')
-    after = { ...before, status: 'ACTIVE' }
+    return reactivateWithReceipt({
+      clientId,
+      campaignId: String(campaign_id),
+      accessToken,
+      before,
+      expectedMetric,
+      executionItemId: actionParams.execution_item_id ?? null,
+      authority: activationAuthority,
+    })
   } else if (action_type === ADS_ACTION_TYPE.ADJUST_BID) {
     const newBudget = actionParams.new_daily_budget
-    if (typeof newBudget !== 'number' || newBudget <= 0) {
+    if (typeof newBudget !== 'number' || !Number.isFinite(newBudget) || newBudget <= 0) {
       return NextResponse.json(
         { error: 'params.new_daily_budget (positive number in whole currency units) is required for adjust_bid' },
         { status: 400 },
@@ -155,56 +205,59 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
         { status: 422 },
       )
     }
-    // Meta API expects budget in minor currency units (cents for USD/AUD)
+    // Kernel and Meta use the account's minor currency unit (two decimals for AU/NZ accounts).
     const budgetCents = Math.round(newBudget * 100)
+    if (!Number.isSafeInteger(budgetCents)) {
+      return NextResponse.json({ error: 'params.new_daily_budget is outside the supported range' }, { status: 400 })
+    }
 
-    // ±20% hard safety limit — larger swings must go through Talk to Us (manual review)
-    const currentCents = parseInt(beforeDetails.daily_budget, 10)
-    const guard = checkBudgetWithinSafeRange(currentCents, budgetCents)
-    if (!guard.ok) {
+    const currentCents = Number(beforeDetails.daily_budget)
+    if (!Number.isSafeInteger(currentCents) || currentCents <= 0) {
       return NextResponse.json(
-        {
-          error:
-            `Budget change exceeds the ±20% safety limit. ` +
-            `Current daily budget is $${(currentCents / 100).toFixed(2)}; ` +
-            `allowed range is $${(guard.allowedMinCents / 100).toFixed(2)}–$${(guard.allowedMaxCents / 100).toFixed(2)}. ` +
-            `Larger changes require manual review (Talk to Us).`,
-          code: 'exceeds_safe_adjustment',
-          current_daily_budget: currentCents,
-          allowed_min: guard.allowedMinCents,
-          allowed_max: guard.allowedMaxCents,
-        },
+        { error: 'Meta returned an invalid campaign budget; the change was not submitted.' },
         { status: 422 },
       )
     }
-
-    metaSuccess = await setCampaignDailyBudget(campaign_id, accessToken, budgetCents)
-    after = { ...before, daily_budget: String(budgetCents) }
-
-    // Force-pause guard: Meta silently pauses an entity whose daily_budget was
-    // just updated (memory: budget-update-forces-pause). If the campaign was
-    // ACTIVE before, re-read the ENTITY status (instant, unlike insights) and
-    // reactivate — otherwise "adjust budget" quietly becomes "stop the ads".
-    if (metaSuccess && before.status === 'ACTIVE') {
-      const reread = await getCampaignDetails(campaign_id, accessToken)
-      if (!reread) {
-        // Can't certify the post-change status — say so instead of optimistically
-        // recording ACTIVE in the audit trail.
-        guardMarker = 'reread_failed'
-        guardWarning = '预算已改,但无法确认广告是否仍在投放中 — 请到 Meta 广告后台核对这条广告没有被停。'
-      } else if (reread.status !== 'ACTIVE') {
-        const reactivated = await setCampaignStatus(campaign_id, accessToken, 'ACTIVE')
-        after = {
-          ...after,
-          status: reactivated ? 'ACTIVE' : reread.status,
-        }
-        if (!reactivated) {
-          guardMarker = 'reactivate_failed'
-          guardWarning = '预算已改,但广告被平台自动暂停且自动重启失败 — 广告目前是停的,请到 Meta 广告后台手动开启。'
-          console.error(`[meta-ads/execute] budget update force-paused ${campaign_id} and reactivation FAILED`)
-        }
-      }
+    if (budgetCents > currentCents) {
+      return NextResponse.json(
+        { error: '这个入口目前只支持降低广告系列日预算；上调预算暂不开放。', code: 'campaign_budget_increase_not_supported' },
+        { status: 422 },
+      )
     }
+    if (actionParams.execution_item_id !== undefined && typeof actionParams.execution_item_id !== 'string') {
+      return NextResponse.json({ error: 'params.execution_item_id must be a string' }, { status: 400 })
+    }
+
+    const submitted = await queueAdsCampaignBudgetDecrease(createKernel(supabaseAdmin), {
+      clientId,
+      access,
+      cycleDate: nzToday(new Date()),
+      adAccountId: beforeDetails.account_id ?? '',
+      campaignId: campaign_id,
+      afterCents: budgetCents,
+      executionItemId: actionParams.execution_item_id ?? null,
+    })
+    try {
+      await inngest.send({
+        name: ADS_CAMPAIGN_BUDGET_DECREASE_REQUESTED,
+        data: { client_id: clientId, action_run_id: submitted.run.id },
+      })
+    } catch (error) {
+      console.error('[meta-ads/execute] Inngest dispatch failed:', error)
+      return NextResponse.json({
+        error: '预算操作已登记，但暂时无法排入执行队列；请重试。',
+        actionRunId: submitted.run.id,
+        kind: 'queue_failed',
+      }, { status: 503 })
+    }
+    return NextResponse.json({
+      success: true,
+      status: 'queued',
+      actionRunId: submitted.run.id,
+      campaignId: campaign_id,
+      before,
+      after: { ...before, daily_budget: String(budgetCents) },
+    }, { status: 202 })
   } else {
     return NextResponse.json({ error: 'Unhandled action type' }, { status: 422 })
   }
@@ -230,7 +283,6 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
         campaign_id,
         before,
         after,
-        ...(guardMarker ? { force_pause_guard: guardMarker } : {}),
       },
       expected_metric: expectedMetric,
     })
@@ -258,6 +310,106 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     campaignId: campaign_id,
     before,
     after,
-    ...(guardWarning ? { warning: guardWarning } : {}),
+  })
+}
+
+/** Poll the Kernel receipt; authorization is scoped to the same client as the run. */
+export async function GET(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
+  const clientId = params.id
+  const access = await requireAdsCampaignBudgetAccess(clientId)
+  if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
+  const actionRunId = req.nextUrl.searchParams.get('runId')
+  if (!actionRunId || !/^[0-9a-f-]{36}$/i.test(actionRunId)) {
+    return NextResponse.json({ error: 'runId is required' }, { status: 400 })
+  }
+  const { data: run, error } = await supabaseAdmin.from('action_runs')
+    .select('id, client_id, action_key, status, last_error')
+    .eq('id', actionRunId).eq('client_id', clientId).maybeSingle()
+  if (error) return NextResponse.json({ error: 'Could not read the action status.' }, { status: 503 })
+  if (!run || run.action_key !== 'ads.cut_campaign_budget') {
+    return NextResponse.json({ error: 'Action run not found.' }, { status: 404 })
+  }
+  const { data: receipt, error: receiptError } = await supabaseAdmin.from('flywheel_actions')
+    .select('id, payload')
+    .eq('client_id', clientId).eq('payload->>action_run_id', actionRunId).maybeSingle()
+  if (receiptError) return NextResponse.json({ error: 'Could not read the action receipt.' }, { status: 503 })
+  return NextResponse.json({
+    status: (receipt?.payload as { status?: string } | null)?.status === 'workflow_failed'
+      ? 'workflow_failed'
+      : run.status,
+    humanReason: run.last_error,
+    receipt: receipt ?? null,
+  })
+}
+
+interface ReactivateInput {
+  readonly clientId: string
+  readonly campaignId: string
+  readonly accessToken: string
+  readonly before: { status: string | undefined; name: string | undefined; daily_budget: string | null }
+  readonly expectedMetric: ReturnType<typeof resolveAndLogAdsExpectedMetric> | null
+  readonly executionItemId: string | null
+  readonly authority: SpendActivationAuthority | null
+}
+
+/**
+ * Receipt first, Meta second: the PM authorisation is written to flywheel_actions
+ * before the campaign is switched ON. No receipt → no Meta call.
+ */
+async function reactivateWithReceipt(input: ReactivateInput): Promise<NextResponse> {
+  if (!input.authority) {
+    return NextResponse.json({ error: '缺少 PM 授权，未重开。', code: 'activation_requires_pm' }, { status: 403 })
+  }
+  const receipt = buildSpendActivationReceipt({
+    authority: input.authority,
+    entry: 'meta-ads/execute',
+    clientId: input.clientId,
+    campaignId: input.campaignId,
+  })
+  const after = { ...input.before, status: 'ACTIVE' }
+  const basePayload = { campaign_id: input.campaignId, before: input.before, after, authorization: receipt }
+  const { data: row, error: insertError } = await supabaseAdmin
+    .from('flywheel_actions')
+    .insert({
+      client_id: input.clientId,
+      execution_item_id: input.executionItemId,
+      flywheel: 'ads',
+      action_type: 'ads.reactivate_campaign',
+      execution_mode: 'third_party',
+      vendor: 'meta',
+      payload: { ...basePayload, status: 'authorized_pending' },
+      expected_metric: null,
+    })
+    .select('id')
+    .single()
+  if (insertError || !row) {
+    console.error('[meta-ads/execute] reactivate receipt insert failed:', insertError?.message)
+    return NextResponse.json(
+      { error: '重开回执写不进去，已拒绝，Meta 没有被调用。', code: 'activation_receipt_failed' },
+      { status: 503 },
+    )
+  }
+  const actionId = (row as { id: string }).id
+  const metaSuccess = await setCampaignStatus(input.campaignId, input.accessToken, 'ACTIVE')
+  const { error: updateError } = await supabaseAdmin
+    .from('flywheel_actions')
+    .update(metaSuccess
+      ? { payload: { ...basePayload, status: 'executed' }, expected_metric: input.expectedMetric }
+      : { payload: { ...basePayload, status: 'meta_failed' } })
+    .eq('id', actionId)
+  if (updateError) console.error('[meta-ads/execute] reactivate receipt update failed:', updateError.message)
+  if (!metaSuccess) {
+    return NextResponse.json(
+      { error: 'Meta Graph API call failed. The action was NOT executed. Check server logs.', actionId },
+      { status: 502 },
+    )
+  }
+  return NextResponse.json({
+    success: true,
+    actionId,
+    campaignId: input.campaignId,
+    before: input.before,
+    after,
+    ...(updateError ? { warning: 'Campaign reactivated; receipt still shows authorized_pending.' } : {}),
   })
 }

@@ -358,6 +358,7 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
     '@/lib/gbp/publisher',
     '@/lib/gsc/indexing-client',
     '@/lib/gsc/sitemap-ping',
+    '@/lib/meta/campaign-writes',
   ]
 
   it('🔴 历史清单只准变短：跟冻结清单比集合，多出来的先问子牙', () => {
@@ -2741,11 +2742,11 @@ describe('人工触发身份：不许随便自报（两层闸）', () => {
       // ① 白名单目录**外**、且有鉴权 —— 只该被第一层抓到
       const outside = 'src/app/api/whatever/route.ts'
       // ② 白名单目录**内**、但没有鉴权 —— 只该被第二层抓到
-      const inside = 'src/lib/ads-strategy/submission/rogue.ts'
+      const inside = 'src/lib/action-submission/rogue.ts'
       // ③ 白名单目录内 + 有鉴权 —— 两层都该放行（这是合法形态）
-      const legit = 'src/lib/ads-strategy/submission/stop-loss-submission.ts'
+      const legit = 'src/lib/action-submission/stop-loss-submission.ts'
       // ④ 只在**注释**里提到 'human' —— 不该被当成 claimer
-      const commentOnly = 'src/lib/ads-strategy/submission/notes.ts'
+      const commentOnly = 'src/lib/action-submission/notes.ts'
 
       const sources: Record<string, string> = {
         [outside]: `await requireGlobalAdmin()

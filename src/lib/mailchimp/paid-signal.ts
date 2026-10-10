@@ -75,6 +75,14 @@ const RECEIVED_PATTERNS: readonly RegExp[] = [
   // 允许中间插一个副词：真实语料里有「payment has been **well** received」
   // 和「deposit has **now** been received」。不允许插词是首版最大的假阴性来源。
   /\b(?:your |the )?(?:payment|deposit|balance|funds)\s+(?:has|have|is|was|were)\s+(?:\w+\s+){0,2}?(?:been\s+)?(?:\w+\s+){0,1}?received\b[^.!?\n]*/i,
+  // 金额夹在名词和 has been received 之间：「Your deposit of $500.00 has been received」
+  // 「Your payment $7760.00 has been received in full」。成交识别（conversions/payment-email-extract）
+  // 要靠它取同句金额。无 `of` 时必须带 `$` 或币种代码，避免把「payment 2 has been…」当金额。
+  /\b(?:your |the )?(?:(?:balance|final|deposit|full)\s+)?(?:payment|deposit|balance|funds)\s+(?:of\s+(?:(?:NZD|AUD|USD)\s*)?(?:(?:NZ|AU|US)?\$\s*)?|(?:(?:NZD|AUD|USD)\s*)?(?:NZ|AU|US)?\$\s*|(?:NZD|AUD|USD)\s*)[\d,]+(?:\.\d{1,2})?(?:\s*(?:NZD|AUD|USD))?\s+(?:has|have|is|was|were)\s+(?:\w+\s+){0,2}?(?:been\s+)?(?:\w+\s+){0,1}?received\b[^.!?\n]*/i,
+  // 真实往来里最常见的口语写法（2026-10-04 对 info@ 已发邮件抽样）：
+  // 「Deposit received with thanks」「The payment was received with thanks」「deposit payment received well」。
+  // 只收「received with thanks / received well」这两个收尾，不放宽成裸 `deposit received`。
+  /\b(?:your |the )?(?:payment|deposit)(?:\s+payment)?\s+(?:is\s+|was\s+)?(?:well\s+)?received\s+(?:with\s+thanks|well)(?=\s*(?:$|[.!?,;\n]|and\b))[^.!?\n]*/i,
   /\bwe(?:'ve| have)\s+received\s+(?:your|the)\s+(?:\w+\s+){0,2}?(?:payment|deposit|balance|funds)\b[^.!?\n]*/i,
   /\breceived\s+(?:your|the)\s+(?:\w+\s+){0,2}?(?:payment|deposit|balance|funds)\b[^.!?\n]*/i,
   /\b(?:thank\s+you|thanks|many\s+thanks)\s+(?:so\s+much\s+|very\s+much\s+|again\s+)?for\s+(?:your|the)\s+(?:\w+\s+){0,2}?(?:payment|deposit)\b[^.!?\n]*/i,
@@ -83,6 +91,92 @@ const RECEIVED_PATTERNS: readonly RegExp[] = [
   // 首版是裸相邻匹配，被页脚样板「payment received receipts are issued…」直接攻破。
   /(?:^|[.!?]\s+)(?:payment|deposit)\s+received\s*(?=[.!?]|$)/i,
 ]
+
+/**
+ * 中文确认句 —— CTS 员工在 Messenger / WhatsApp 上常用中文确认收款。
+ *
+ * 与英文 `RECEIVED_PATTERNS` 并列使用，只在 outbound 时生效（同英文）。
+ * 中文没有词形变化，但同样有「还没到账」的写法（未收到 / 待收到 / 收到后），
+ * 所以命中后必须过 `cnBlocked` 这一关，否则「定金未收到」会被当成已收款。
+ */
+const CN_RECEIVED_PATTERNS: readonly RegExp[] = [
+  /(?:已经?|已)(?:收到|到账)[^。！？!?\n]{0,12}?(?:定金|订金|款项|付款|全款|全额|尾款|余款)[^。！？!?\n]*/,
+  /(?:定金|订金|款项|付款|全款|全额|尾款|余款)(?:已经?|已)?(?:收到|到账|入账)[^。！？!?\n]*/,
+  /(?:收到|收讫)(?:了)?(?:您的|你的|你们的)?(?:定金|订金|款项|付款|全款|全额|尾款|余款)[^。！？!?\n]*/,
+]
+
+/** 中文否定 / 条件 / 疑问词 —— 出现在命中所在分句里就说明钱还没到。 */
+const CN_BLOCKERS =
+  /未|没有|没|尚未|还没|不曾|待|等到|等|一旦|如果|若|是否|能否|请问|请确认|吗|嘛|？|\?|如|麻烦|请您|请核实|核实|预计|假设|万一|只要|的话|比如|例如|请核对|核对|如有问题|有问题请|请联系|请查收|请查看/
+
+/**
+ * 整句级别的阻断词 —— 命中所在**整句**里出现这些就说明钱还没到。
+ *
+ * 分句级 `CN_BLOCKERS` 只看命中所在分句，管不到「客人说：定金已收到」这种
+ * 转述，也管不到「明天转」这种将来时。整句里出现转述 / 模板 / 将来时措辞，
+ * 一律降级不认。
+ */
+const CN_SENTENCE_BLOCKERS =
+  /测试|模板|示例|忽略|明天|稍后|晚点|待会|准备转|将转|会转|还没|尚未|没到|客人说|客户说|他说|她说|对方说|你说|他们说|据说|听说|客户已收到|客人已收到|客户已经收到|客人已经收到|客户已付|客人已付|请核实|请核对|如有问题|有问题请|请联系|请查收|请查看/
+
+const CN_MESSAGE_BLOCKERS = /测试|模板|示例|忽略/
+
+/** 命中点**之前**的条件式收尾 —— 「收到后 / 到账后」说明这是将来时。 */
+const CN_PREFIX_BLOCKERS = /收到后|到账后|收到之后|到账之后|待收到|等收到/
+
+/** 分句边界（中英文标点都算）。 */
+function cnClauseBounds(text: string, index: number): { start: number; end: number } {
+  let start = 0
+  for (let i = index - 1; i >= 0; i--) {
+    if (/[。！？!?\n,，;；]/.test(text[i])) {
+      start = i + 1
+      break
+    }
+  }
+  let end = text.length
+  for (let i = index; i < text.length; i++) {
+    if (/[。！？!?\n,，;；]/.test(text[i])) {
+      end = i
+      break
+    }
+  }
+  return { start, end }
+}
+
+/** 命中所在的整句（按句末标点切分）。 */
+function cnSentence(text: string, index: number): string {
+  let start = 0
+  for (let i = index - 1; i >= 0; i--) {
+    if (/[。！？!?\n]/.test(text[i])) {
+      start = i + 1
+      break
+    }
+  }
+  let end = text.length
+  for (let i = index; i < text.length; i++) {
+    if (/[。！？!?\n]/.test(text[i])) {
+      end = i
+      break
+    }
+  }
+  return text.slice(start, end)
+}
+
+/** 中文命中是否被否定 / 条件 / 疑问挡住。 */
+function cnBlocked(text: string, matchIndex: number, matchText: string): boolean {
+  const { start, end } = cnClauseBounds(text, matchIndex)
+  const clause = text.slice(start, end)
+  if (CN_BLOCKERS.test(clause)) return true
+  // 分句边界停在 `？`/`?` 上且不含它，所以句末问号要单独看。
+  if (text[end] === '？' || text[end] === '?') return true
+  if (CN_SENTENCE_BLOCKERS.test(cnSentence(text, matchIndex))) return true
+  // Template / ignore markers anywhere in the message void a confirmation (orchestrator fix: next-sentence "请忽略此条").
+  if (CN_MESSAGE_BLOCKERS.test(text)) return true
+  const before = text.slice(start, matchIndex)
+  if (CN_PREFIX_BLOCKERS.test(before)) return true
+  // 「收到定金后…」= 将来时：名词后紧跟「后 / 之后」
+  return /(?:定金|订金|款项|付款|全款|全额|尾款|余款)(?:之后|后)/.test(matchText)
+}
 
 /**
  * 条件 / 将来 / 否定词 —— 出现在确认句**前面**就说明钱还没到。
@@ -209,6 +303,15 @@ const NEGATION = /\b(?:not|never|nt)\b|n['’]t\b/i
 const REQUEST_TONE =
   /\b(?:please\s+(?:confirm|advise|check|let)|can\s+you\s+(?:confirm|advise|check)|could\s+you\s+(?:confirm|advise|check)|kindly\s+(?:confirm|advise)|confirm\s+(?:whether|if)|let\s+us\s+know\s+(?:whether|if)|checking\s+(?:whether|if)|wondering\s+(?:whether|if))\b/i
 
+/**
+ * 「还没收到 / 应当收到」的将来式：`is yet to be received` / `is due to be received by Friday` /
+ * `is required to be received`。它们含 `payment … is … received`，旧正则允许中间夹两个词，
+ * 于是被当成确认句（魏征 2026-10-04 复审实测：三句都判成已收到、带金额进自动车道）。
+ * 查**命中的整段文本**，不只看命中点之前。
+ */
+const FUTURE_RECEIVE =
+  /\b(?:yet\s+to|due\s+to|required\s+to|expected\s+to|supposed\s+to|going\s+to|about\s+to|need(?:s|ed)?\s+to|must|should|will|would|to)\s+(?:\w+\s+){0,2}?be\s+(?:\w+\s+){0,1}?received\b/i
+
 /** 命中点所在句子的边界（绝对下标）。 */
 function sentenceBounds(text: string, index: number): { start: number; end: number } {
   const start =
@@ -247,12 +350,26 @@ function findConfirmation(text: string): string | null {
     // ② 否定 —— 「payment has **not** been received」。not 落在匹配**内部**，
     //    所以必须查匹配文本本身，只看前文是查不到的。
     if (NEGATION.test(m[0])) continue
+    if (FUTURE_RECEIVE.test(m[0])) continue
 
     // ③ 条件 / 将来 —— 只看命中点**之前**那一段（绝对下标切，别自己算偏移），
     //    避免被句尾的「…received in full, we will send the itinerary」误伤。
     if (CONDITIONAL_LEADINS.test(text.slice(start, m.index))) continue
 
     return m[0].trim().slice(0, EVIDENCE_MAX)
+  }
+  return findCnConfirmation(text)
+}
+
+/** 中文确认句 —— 与英文并列，命中后过 `cnBlocked` 排掉否定 / 条件 / 疑问。 */
+function findCnConfirmation(text: string): string | null {
+  for (const re of CN_RECEIVED_PATTERNS) {
+    const global = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`)
+    let m: RegExpExecArray | null
+    while ((m = global.exec(text))) {
+      if (!cnBlocked(text, m.index, m[0])) return m[0].trim().slice(0, EVIDENCE_MAX)
+      if (global.lastIndex === m.index) global.lastIndex += 1
+    }
   }
   return null
 }
