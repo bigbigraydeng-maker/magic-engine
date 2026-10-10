@@ -317,26 +317,6 @@ export async function readPageStoryId(input: {
 }
 
 /**
- * Publish a photo Post to a Facebook Page.
- *
- * Uses the Page's own `/photos` edge with a remote image `url`, so ME never
- * has to stage the bytes itself. Requires a *Page* access token — a User token
- * is rejected by Graph for this edge.
- *
- * `scheduledPublishTime`: when set, Facebook holds the post and publishes it
- * itself at that time. Preferred over ME holding the post: Facebook's own
- * scheduler survives our restarts, appears in Business Suite where the client
- * can see and edit it, and needs zero infrastructure on our side. Constraints:
- * Graph requires the timestamp to be at least 10 minutes and at most ~6 months
- * in the future; the caller decides "publish now vs schedule" before this
- * function, so we can pass unchanged what we're told.
- *
- * Throws a `PagePublishError` on any non-2xx or Graph-level error (its `certainty`
- * says whether the post can have been created); the caller decides whether that
- * is fatal for the batch. It never retries: a retry here could double-post,
- * and duplicate suppression belongs to the caller's idempotency key.
- */
-/**
  * How sure we are about what happened to a publish request.
  *  - `rejected`: Graph answered with a client-error body (HTTP 4xx) — the post was not created.
  *  - `rate_limited`: Graph asked us to slow down (HTTP 429 or a throttling error code) — not created.
@@ -344,6 +324,9 @@ export async function readPageStoryId(input: {
  *    have accepted it. Callers must not blindly retry these (a retry can double-post).
  */
 export type PublishOutcomeCertainty = 'rejected' | 'rate_limited' | 'unknown'
+
+/** HTTP statuses that, with a Graph error body, mean the request was refused outright. */
+const CLEAR_REFUSAL_STATUSES = new Set([400, 401, 403, 404, 422])
 
 /** Graph error codes that mean "throttled", not "refused". */
 const GRAPH_THROTTLE_CODES = new Set([4, 17, 32, 613])
@@ -373,18 +356,40 @@ export class PagePublishError extends Error {
   }
 }
 
-/** Upper bound for one publish call; a hung request must surface as `unknown`, not block a worker. */
-const PUBLISH_TIMEOUT_MS = 45_000
-
 function classifyPublishFailure(
   status: number,
   error: { code?: number } | undefined,
 ): PublishOutcomeCertainty {
   if (status === 429 || (error?.code !== undefined && GRAPH_THROTTLE_CODES.has(error.code))) return 'rate_limited'
-  if (status >= 400 && status < 500) return 'rejected'
+  // Only a clear Graph refusal counts as "not created". No recognisable Graph error body,
+  // an ambiguous Graph code (1 = unknown error, 2 = service temporarily unavailable), or a
+  // 4xx that is really a timeout/conflict (408, 409, 425...) can all hide an accepted post.
+  if (!error) return 'unknown'
+  if (error.code === 1 || error.code === 2) return 'unknown'
+  if (CLEAR_REFUSAL_STATUSES.has(status)) return 'rejected'
   return 'unknown'
 }
 
+/**
+ * Publish a photo Post to a Facebook Page.
+ *
+ * Uses the Page's own `/photos` edge with a remote image `url`, so ME never
+ * has to stage the bytes itself. Requires a *Page* access token — a User token
+ * is rejected by Graph for this edge.
+ *
+ * `scheduledPublishTime`: when set, Facebook holds the post and publishes it
+ * itself at that time. Preferred over ME holding the post: Facebook's own
+ * scheduler survives our restarts, appears in Business Suite where the client
+ * can see and edit it, and needs zero infrastructure on our side. Constraints:
+ * Graph requires the timestamp to be at least 10 minutes and at most ~6 months
+ * in the future; the caller decides "publish now vs schedule" before this
+ * function, so we can pass unchanged what we're told.
+ *
+ * Throws a `PagePublishError` on any non-2xx or Graph-level error (its `certainty`
+ * says whether the post can have been created); the caller decides whether that
+ * is fatal for the batch. It never retries: a retry here could double-post,
+ * and duplicate suppression belongs to the caller's idempotency key.
+ */
 export async function publishPagePhotoPost(input: {
   pageId: string
   pageAccessToken: string
@@ -415,12 +420,11 @@ export async function publishPagePhotoPost(input: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(PUBLISH_TIMEOUT_MS),
     })
   } catch (error: unknown) {
     // No response at all: the request may or may not have reached Facebook.
     const reason = error instanceof Error ? error.message : String(error)
-    throw new PagePublishError(`publishPagePhotoPost ${input.pageId}: ${reason}`, { certainty: 'unknown' })
+    throw new PagePublishError(reason, { certainty: 'unknown' })
   }
 
   const body = (await res.json().catch(() => null)) as

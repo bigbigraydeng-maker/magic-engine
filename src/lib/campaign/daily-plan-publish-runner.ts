@@ -7,8 +7,8 @@
  * price gates (both before any token lookup or Graph call), page binding,
  * idempotency, publish, first comment, measurement hand-off, receipt write.
  *
- * The caller owns authentication and passes the authorising user id; this
- * module never reads a session. Refusals are returned as `{ status, body }`;
+ * The caller owns authentication (it MUST authenticate before calling) and passes
+ * the authorising user id; this module never reads a session. Refusals are returned as `{ status, body }`;
  * unexpected failures throw and the caller maps them to a 500.
  */
 import { randomUUID } from 'node:crypto'
@@ -31,6 +31,7 @@ import {
   buildDailyPlanPostMessage,
 } from '@/lib/campaign/daily-plan-first-comment'
 import {
+  CampaignDailyPublishCommandSchema,
   CampaignDailyPublishMetaSchema,
   DAILY_PLAN_POST_PUBLISHED_EVENT,
   partitionByIdempotency,
@@ -46,6 +47,8 @@ import {
   type PlanRow,
   type PublishCandidate,
 } from '@/lib/campaign/daily-plan-publish-effects'
+
+const UUID_LIKE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /** A refusal the caller should return as-is: HTTP status plus JSON body. */
 export interface PublishRefusal {
@@ -353,7 +356,14 @@ export interface RunDailyPlanPublishResult {
  * failures (the caller maps them to a 500); refusals come back as a result.
  */
 export async function runDailyPlanPublish(input: RunDailyPlanPublishInput): Promise<RunDailyPlanPublishResult> {
-  const { clientId, command, approvedByUserId } = input
+  const { clientId, approvedByUserId } = input
+  // Defence in depth: the fail-closed authorisation fields (`approved`,
+  // `publish_authorization` literal true) and the uuid-shaped authoriser must hold
+  // here too, not only in whichever caller parsed the request. Re-parse, never trust a type.
+  const reparsed = CampaignDailyPublishCommandSchema.safeParse(input.command)
+  if (!reparsed.success) throw new Error('INVALID_PUBLISH_COMMAND')
+  if (!UUID_LIKE.test(approvedByUserId)) throw new Error('INVALID_APPROVER')
+  const command = reparsed.data
   const refuse = (r: PublishRefusal): RunDailyPlanPublishResult => ({ status: r.status, body: r.body })
 
   const row = await loadReviewedPlan(clientId, command)

@@ -6,7 +6,7 @@
  * identical to the route's: serial publish, first comment, measurement hand-off,
  * compare-and-set receipt write.
  */
-import { z } from 'zod'
+import type { z } from 'zod'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { publishPagePhotoPost } from '@/lib/meta/page-posts'

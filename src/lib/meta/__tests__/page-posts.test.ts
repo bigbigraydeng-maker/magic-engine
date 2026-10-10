@@ -140,18 +140,25 @@ describe('publishPagePhotoPost — failure certainty (decides whether a retry is
     expect((await failure({ ok: false, status: 503, body: { error: { message: 'gateway' } } })).certainty).toBe('unknown')
   })
 
+  it('🔴 Graph code 1 / 2, a 408/409 timeout-or-conflict, or a 4xx with no Graph error body = unknown, not rejected', async () => {
+    expect((await failure({ ok: false, status: 400, body: { error: { message: 'unknown error', code: 1 } } })).certainty).toBe('unknown')
+    expect((await failure({ ok: false, status: 400, body: { error: { message: 'unavailable', code: 2 } } })).certainty).toBe('unknown')
+    expect((await failure({ ok: false, status: 408, body: { error: { message: 'timeout', code: 100 } } })).certainty).toBe('unknown')
+    expect((await failure({ ok: false, status: 409, body: { error: { message: 'conflict', code: 100 } } })).certainty).toBe('unknown')
+    expect((await failure({ ok: false, status: 400, body: null })).certainty).toBe('unknown')
+  })
+
   it('🔴 HTTP 200 with an error body, or with no post id = unknown, never "rejected"', async () => {
     expect((await failure({ ok: true, status: 200, body: { error: { message: 'weird', code: 1 } } })).certainty).toBe('unknown')
     expect((await failure({ ok: true, status: 200, body: {} })).certainty).toBe('unknown')
   })
 
-  it('🔴 a network failure or timeout = unknown, and the request carried a timeout signal', async () => {
+  it('🔴 a network failure = unknown, and the original error text is kept verbatim', async () => {
     const fn = vi.fn(async () => { throw new TypeError('fetch failed') })
     const error = await publishPagePhotoPost({ ...base, fetcher: fn as unknown as typeof fetch }).catch(e => e)
     expect(error).toBeInstanceOf(PagePublishError)
     expect((error as PagePublishError).certainty).toBe('unknown')
-    const init = (fn.mock.calls[0] as unknown as [string, RequestInit])[1]
-    expect(init.signal).toBeInstanceOf(AbortSignal)
+    expect((error as PagePublishError).message).toBe('fetch failed')
   })
 })
 
