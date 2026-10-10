@@ -42,14 +42,15 @@ function runFailedForClient(run: CommentRunLogRow, clientId: string): boolean {
   const results = Array.isArray(run.summary?.results) ? run.summary!.results! : []
   const mine = results.find((r) => r && r.client_id === clientId)
   if (mine) return mine.ok === false
-  // 这一轮没有该客户的结果：整轮失败（比如连配置都没读到）才算
-  return run.status === 'failed'
+  // 这一轮没有该客户的结果（客户刚开启、或这轮被熔断）：没数据不算失败，
+  // 否则别的客户一直失败时，新开的客户会被误报
+  return false
 }
 
 function describeReason(raw: string): string {
   if (/reduce the amount of data/i.test(raw)) return 'Meta 说一次要的帖子数据太多（已自动减半重试仍不行）'
-  if (/token|\b190\b|OAuth/i.test(raw)) return '主页授权被 Meta 拒了'
   if (/page_not_verified|could not resolve Page access token|no Meta token/i.test(raw)) return '拿不到这个主页的授权'
+  if (/token|\b190\b|OAuth/i.test(raw)) return '主页授权被 Meta 拒了'
   return '读取帖子/评论时 Meta 报错'
 }
 

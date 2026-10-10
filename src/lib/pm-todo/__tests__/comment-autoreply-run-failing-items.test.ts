@@ -45,4 +45,17 @@ describe('buildCommentAutoreplyRunFailingTodos', () => {
     const stale = Array.from({ length: CONSECUTIVE_FAILED_RUNS }, () => ({ ...bad(), finished_at: '2026-10-01T00:00:00Z' }))
     expect(buildCommentAutoreplyRunFailingTodos(stale, [CLIENT], NOW)).toEqual([])
   })
+
+  it('a client with no result in the recent runs (just enabled) is not flagged because another client keeps failing', () => {
+    const other = (): CommentRunLogRow => ({
+      ...bad(), summary: { results: [{ client_id: 'other', ok: false, error: REDUCE }] },
+    })
+    const runs = Array.from({ length: CONSECUTIVE_FAILED_RUNS }, other)
+    expect(buildCommentAutoreplyRunFailingTodos(runs, [CLIENT], NOW)).toEqual([])
+  })
+
+  it('"could not resolve Page access token" is described as no-authorization, not a rejected token', () => {
+    const runs = Array.from({ length: CONSECUTIVE_FAILED_RUNS }, () => bad('could not resolve Page access token'))
+    expect(buildCommentAutoreplyRunFailingTodos(runs, [CLIENT], NOW)[0].what).toContain('拿不到这个主页的授权')
+  })
 })
