@@ -94,6 +94,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   facebook_sync_failing: 'one_click', // 主页管理员重新「连接 Meta」
   comment_scope_missing: 'one_click',
   comment_token_invalid: 'one_click',
+  comment_autoreply_run_failing: 'dev', // 评论 cron 连续多轮没扫完：授权 / Meta 接口问题，开发看日志
   comment_reply_scope_missing: 'one_click', // 主页管理员重新「连接 Meta」并勾上管理评论权限
   conversion_capi_token_dead: 'one_click',
   linkedin_progress_needs_setup: 'one_click',

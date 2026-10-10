@@ -10,6 +10,8 @@ source: session:5b9407a2
 verify_by: 2026-09-30
 verify_how: ① 有人点过「连接 Meta」之后，`select via from` 判定结果应为 `client_oauth`（不是 `staff_verified`）—— 看每小时那次同步的运行记录里 NAL 那条不再报 `page_not_verified`；② `select max(last_message_at) from conversations where client_id='4ae76381-cd45-43bd-85cd-98cfd7604007' and channel='messenger'` 要追到当天，而不是停在 2026-09-16；③ 若卡片变绿但②仍停在 9-16，说明授权账号在主页上没有「消息」权限，按卡上那句换账号再点一次
 supersedes: 2026-09-27-nal-messenger-outage-task-already-sent
+last_checked: 2026-10-09
+check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 **我 2026-09-27 早先那张卡写「人工任务写得对」，这一条把它纠正了。** 那条任务教人先点「重新核实」——那个按钮救不了私信。
 

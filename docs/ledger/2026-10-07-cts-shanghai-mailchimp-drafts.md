@@ -9,6 +9,8 @@ verify_by: 2026-10-08
 done_on: 2026-10-08
 done_ref: pr:2354
 verify_how: "PM 看 hello 邮箱测试邮件，决定两封改什么，再决定是否做其余 5 封；发送仍需 PM 本人说发"
+last_checked: 2026-10-09
+check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 草稿均未发送未排期，只测试到 hello：SP1 1b574858da、N1 0552f7cb8a、N2 53fbe3511f、N3 c9303ae625、N4 175473d93e、N5 1814550af1、SP2 dbcfde11d3。
 价格 10/8 重核官网：上海 $2,699、单人房加 $400、下期 25 March 2027。PM 要求不写团人数上限、不写名额有限。
