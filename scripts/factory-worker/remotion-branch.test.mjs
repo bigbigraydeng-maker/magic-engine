@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync, existsSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { RemotionOrderError, resolveEngine, checkRemotionHealth, processRemotionOrder, runRemotionRender, copyWithinRoot, assertMontageTextVisible, REMOTION_ENGINE_DIR, loadRemotionEngine } from './remotion-branch.mjs'
+import { RemotionOrderError, resolveEngine, checkRemotionHealth, processRemotionOrder, runRemotionRender, copyWithinRoot, assertMontageTextVisible, REMOTION_ENGINE_DIR, loadRemotionEngine, buildRemotionText } from './remotion-branch.mjs'
 
 const roots = []
 afterEach(() => {
@@ -679,5 +679,21 @@ describe('real engine contract', () => {
     expect(segments.template).toBe('montage')
     expect(segments.music.id).toBe('pipa-trap')
     expect(deps.renderFn.mock.calls[0][0].template).toBe('montage')
+  })
+})
+
+describe('buildRemotionText optional dateLine', () => {
+  it('includes dateLine between qualifier and footnote when present', () => {
+    expect(buildRemotionText(PROPS).reveal).toBe(
+      'THE LIST. FROM A$12,345 PER PERSON SAT 12 OCT EXAMPLE ONLY',
+    )
+  })
+
+  it('omits dateLine cleanly when it is deleted', () => {
+    const clone = structuredClone(PROPS)
+    delete clone.price.dateLine
+    const reveal = buildRemotionText(clone).reveal
+    expect(reveal).toBe('THE LIST. FROM A$12,345 PER PERSON EXAMPLE ONLY')
+    expect(reveal).not.toContain('undefined')
   })
 })

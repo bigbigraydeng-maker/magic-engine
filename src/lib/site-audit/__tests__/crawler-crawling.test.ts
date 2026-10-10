@@ -29,7 +29,7 @@ describe('crawlPages', () => {
   })
 
   /**
-   * Build a vi.fn() that simulates fetchUrlAsMarkdown for a given URL.
+   * Build a vi.fn() that simulates fetchUrlWithMeta for a given URL.
    */
   function buildJinaMock(
     responses: Record<string, { markdown: string; title: string } | 'timeout' | 'error'>
@@ -46,7 +46,7 @@ describe('crawlPages', () => {
   describe('happy path — all URLs succeed', () => {
     it('returns CrawlResult for each URL with correct fields', async () => {
       vi.doMock('../../brief/jina', () => ({
-        fetchUrlAsMarkdown: buildJinaMock({
+        fetchUrlWithMeta: buildJinaMock({
           'https://example.com/p1': { markdown: '# Page 1\nContent', title: 'Page 1' },
           'https://example.com/p2': { markdown: '# Page 2\nContent', title: 'Page 2' },
           'https://example.com/p3': { markdown: '# Page 3\nContent', title: 'Page 3' },
@@ -74,7 +74,7 @@ describe('crawlPages', () => {
   describe('partial failure — some URLs fail', () => {
     it('marks failed URLs with error field, does not throw', async () => {
       vi.doMock('../../brief/jina', () => ({
-        fetchUrlAsMarkdown: buildJinaMock({
+        fetchUrlWithMeta: buildJinaMock({
           'https://example.com/ok1': { markdown: '# OK1', title: 'OK1' },
           'https://example.com/ok2': { markdown: '# OK2', title: 'OK2' },
           'https://example.com/ok3': { markdown: '# OK3', title: 'OK3' },
@@ -111,7 +111,7 @@ describe('crawlPages', () => {
 
     it('still returns results for successful URLs even when others fail', async () => {
       vi.doMock('../../brief/jina', () => ({
-        fetchUrlAsMarkdown: buildJinaMock({
+        fetchUrlWithMeta: buildJinaMock({
           'https://example.com/good': { markdown: '# Good', title: 'Good' },
           'https://example.com/bad': 'error',
         }),
@@ -133,7 +133,7 @@ describe('crawlPages', () => {
       }
 
       vi.doMock('../../brief/jina', () => ({
-        fetchUrlAsMarkdown: buildJinaMock(allResponses),
+        fetchUrlWithMeta: buildJinaMock(allResponses),
       }))
 
       const { crawlPages: cp } = await import('../crawler')
@@ -152,7 +152,7 @@ describe('crawlPages', () => {
       }
 
       vi.doMock('../../brief/jina', () => ({
-        fetchUrlAsMarkdown: buildJinaMock(allResponses),
+        fetchUrlWithMeta: buildJinaMock(allResponses),
       }))
 
       const { crawlPages: cp } = await import('../crawler')
@@ -168,7 +168,7 @@ describe('crawlPages', () => {
       const timestamps: number[] = []
 
       vi.doMock('../../brief/jina', () => ({
-        fetchUrlAsMarkdown: vi.fn().mockImplementation(async (url: string) => {
+        fetchUrlWithMeta: vi.fn().mockImplementation(async (url: string) => {
           timestamps.push(Date.now())
           return { url, markdown: '# Page', title: 'Page', chars: 6 }
         }),
@@ -193,7 +193,7 @@ describe('crawlPages', () => {
       const originalSetTimeout = globalThis.setTimeout
 
       vi.doMock('../../brief/jina', () => ({
-        fetchUrlAsMarkdown: vi.fn().mockResolvedValue({
+        fetchUrlWithMeta: vi.fn().mockResolvedValue({
           url: 'https://example.com/p1',
           markdown: '# Page',
           title: 'Page',
@@ -213,10 +213,38 @@ describe('crawlPages', () => {
     })
   })
 
+  describe('meta description capture', () => {
+    it('passes Jina description through as metaDescription', async () => {
+      vi.doMock('../../brief/jina', () => ({
+        fetchUrlWithMeta: vi.fn().mockResolvedValue({
+          url: 'https://example.com/p',
+          markdown: '# H1 Title\nbody',
+          title: 'H1 Title',
+          chars: 15,
+          description: 'A real meta description.',
+        }),
+      }))
+      const { crawlPages: cp } = await import('../crawler')
+      const [r] = await cp(['https://example.com/p'], { rateLimitMs: 0 })
+      expect(r.metaDescription).toBe('A real meta description.')
+    })
+
+    it('keeps null when the page has no description', async () => {
+      vi.doMock('../../brief/jina', () => ({
+        fetchUrlWithMeta: vi.fn().mockResolvedValue({
+          url: 'https://example.com/p', markdown: '# T\nbody', title: 'T', chars: 8, description: null,
+        }),
+      }))
+      const { crawlPages: cp } = await import('../crawler')
+      const [r] = await cp(['https://example.com/p'], { rateLimitMs: 0 })
+      expect(r.metaDescription).toBeNull()
+    })
+  })
+
   describe('title extraction', () => {
     it('uses title from Jina result directly', async () => {
       vi.doMock('../../brief/jina', () => ({
-        fetchUrlAsMarkdown: vi.fn().mockResolvedValue({
+        fetchUrlWithMeta: vi.fn().mockResolvedValue({
           url: 'https://example.com/p',
           markdown: '# H1 Title',
           title: 'Jina Extracted Title',
@@ -231,7 +259,7 @@ describe('crawlPages', () => {
 
     it('falls back to H1 extraction when Jina title is empty', async () => {
       vi.doMock('../../brief/jina', () => ({
-        fetchUrlAsMarkdown: vi.fn().mockResolvedValue({
+        fetchUrlWithMeta: vi.fn().mockResolvedValue({
           url: 'https://example.com/p',
           markdown: '# My H1 Title\nContent',
           title: '',
@@ -246,7 +274,7 @@ describe('crawlPages', () => {
 
     it('falls back to hostname when markdown has no title signals', async () => {
       vi.doMock('../../brief/jina', () => ({
-        fetchUrlAsMarkdown: vi.fn().mockResolvedValue({
+        fetchUrlWithMeta: vi.fn().mockResolvedValue({
           url: 'https://example.com/p',
           markdown: 'Plain content, no title signals.',
           title: '',
@@ -263,7 +291,7 @@ describe('crawlPages', () => {
   describe('crawledAt timestamp', () => {
     it('sets crawledAt to a Date instance for each result', async () => {
       vi.doMock('../../brief/jina', () => ({
-        fetchUrlAsMarkdown: vi.fn().mockResolvedValue({
+        fetchUrlWithMeta: vi.fn().mockResolvedValue({
           url: 'https://example.com/p',
           markdown: '# Page',
           title: 'Page',
@@ -285,7 +313,7 @@ describe('crawlPages', () => {
   describe('empty input', () => {
     it('returns empty array for empty URL list', async () => {
       vi.doMock('../../brief/jina', () => ({
-        fetchUrlAsMarkdown: vi.fn(),
+        fetchUrlWithMeta: vi.fn(),
       }))
 
       const { crawlPages: cp } = await import('../crawler')

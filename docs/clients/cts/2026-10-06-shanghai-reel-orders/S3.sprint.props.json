@@ -1,0 +1,98 @@
+{
+ "brandColor": "#C41E3A",
+ "itemOverlayOpacity": 0.15,
+ "logoFile": "logo.png",
+ "musicFile": "music/momentum.mp3",
+ "beats": [
+  0.09,
+  0.69,
+  1.29,
+  1.89,
+  2.49,
+  3.09,
+  3.69,
+  4.29,
+  4.89,
+  5.49,
+  6.09,
+  6.69,
+  7.29,
+  7.89,
+  8.49,
+  9.09,
+  9.69,
+  10.29,
+  10.89,
+  11.49,
+  12.09,
+  12.69,
+  13.29,
+  13.89,
+  14.49,
+  15.09,
+  15.69,
+  16.29,
+  16.89,
+  17.49
+ ],
+ "hook": {
+  "clip": "clips/hook_bundgroup.mp4",
+  "lines": [
+   {
+    "badge": "10",
+    "text": "DAYS"
+   },
+   {
+    "badge": null,
+    "text": "SHANGHAI"
+   },
+   {
+    "badge": null,
+    "text": "+3 CITIES"
+   }
+  ]
+ },
+ "items": [
+  {
+   "text": "FLIGHTS INCLUDED",
+   "clip": "clips/item1_skylineday.mp4",
+   "blurBackdrop": false
+  },
+  {
+   "text": "ANCIENT WATER TOWNS",
+   "clip": "clips/item2_watertown.mp4",
+   "blurBackdrop": false
+  },
+  {
+   "text": "THE BUND, SHANGHAI",
+   "clip": "clips/item3_bund.mp4",
+   "blurBackdrop": false
+  },
+  {
+   "text": "7 NIGHTS OF HOTELS",
+   "clip": "clips/item2_aerialnight.mp4",
+   "blurBackdrop": true
+  },
+  {
+   "text": "NANJING ROAD",
+   "clip": "clips/item5_nanjingroad.mp4",
+   "blurBackdrop": false
+  },
+  {
+   "text": "ENGLISH-SPEAKING GUIDE",
+   "clip": "clips/item3_walklane.mp4",
+   "blurBackdrop": false
+  }
+ ],
+ "itemLabel": "THE TRIP",
+ "revealTitle": "SHANGHAI + 3 CITIES.",
+ "price": {
+  "backdropClip": "clips/price_shanghaiday.mp4",
+  "fromLabel": "FROM",
+  "currencyPrefix": "NZ$",
+  "amount": 2699,
+  "qualifier": "PER PERSON · TWIN SHARE",
+  "dateLine": "DEPARTS 25 MARCH 2027",
+  "footnote": "VISA: AS PER POLICY AT TIME OF DEPARTURE"
+ }
+}

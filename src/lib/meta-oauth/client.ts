@@ -60,6 +60,12 @@ export const META_PAGE_SCOPES = [
   // 而当时 token 已经带着 pages_show_list。Graph 要的就是这一条,没有替代品。
   // 教训:注释与生产报错冲突时,信报错。
   'pages_manage_ads',
+  // 回复 / 隐藏主页上的评论必须有这一条 —— pages_read_engagement 只够读。
+  // 没有它,评论自动回复读得到评论,但每一条回复都被 Meta 拒掉(2026-10-07 在 CTS
+  // 存下来的主页 token 上实测,它就没有这一条)。已经连过的客户要重新点一次「连接 Meta」。
+  // 加权限不会弄死已有的 Meta 连接:Meta 的主页 token 刷新时不重放 scope 清单
+  // (见 src/lib/platform-oauth/connection-health.ts 的 SCOPE_REPLAYED_ON_REFRESH,META 在那里是 null)。
+  'pages_manage_engagement',
 ] as const
 
 /**
