@@ -1,0 +1,108 @@
+{
+ "client_id": "c0000000-0000-0000-0000-000000000000",
+ "goal_id": "287dc046-0b95-42fd-9fc1-4f5d39ecd8be",
+ "master_brief_id": "a93c40e0-a5d3-4f53-8cd5-88a85ff83e73",
+ "order_type": "fresh_angle",
+ "angle": "Shanghai & Surroundings: 15-second price-suspense reel (v5r2 — after 苏东坡/马良 round 1: footnote 50px, hook 3.2s, Bund re-framed and lifted, West Lake label band)",
+ "angle_source": {
+  "source": "manual_remotion_cts_shanghai",
+  "authorized_by": "PM 2026-10-10 对第二版的三条修改意见（15 秒内；去掉两位女游客画面；下半屏别压太暗）· coordinator window 61 brief；只出片到 in_review，不发布",
+  "facts_checked": "ctstours.co.nz/tours/china/discovery/shanghai-surroundings, 2026-10-10 重新实抓：NZD 2,699 pp twin share；单人房差 NZD 400；10 天，第 1 天 Auckland — Shanghai；下期出发 2027-03-25；含机票（官网原文 International and domestic airfares，国内段 CTS 未确认，片内只写 FLIGHTS）；Master of the Nets Garden (Suzhou)；West Lake boat tour (Hangzhou)；The Bund (Shanghai)。"
+ },
+ "rationale_one_liner": "PM 10-10 三条修改：压到 15 秒内、去掉人像画面、下半屏提亮（footageScrim 0.35）。只存草稿，不发布。",
+ "budget_cap_usd": 0.5,
+ "brief": {
+  "engine": "remotion",
+  "remotion": {
+   "template": "list",
+   "props": {
+    "brandColor": "#B61E2E",
+    "itemOverlayOpacity": 0.08,
+    "logoFile": "logo.png",
+    "logoMode": "always",
+    "cutFlash": false,
+    "footageScrim": 0.35,
+    "musicFile": "music/founders-at-dawn.mp3",
+    "musicStartSec": 0.302,
+    "beats": [
+     0,
+     0.8,
+     1.6,
+     2.4,
+     3.2,
+     4.35,
+     5.5,
+     6.65,
+     7.8,
+     8.95,
+     10.1,
+     10.7,
+     11.3,
+     11.9,
+     12.5,
+     13.1,
+     13.7,
+     14.3,
+     14.9
+    ],
+    "hook": {
+     "clip": "clips/item2_aerialnight.mp4",
+     "lines": [
+      {
+       "badge": null,
+       "text": "NZ$2,XXX"
+      },
+      {
+       "badge": "10",
+       "text": "DAYS"
+      },
+      {
+       "badge": null,
+       "text": "FLIGHTS"
+      }
+     ]
+    },
+    "items": [
+     {
+      "text": "SUZHOU'S CLASSICAL GARDEN",
+      "clip": "clips/v2b_suzhou_garden.mp4",
+      "blurBackdrop": false
+     },
+     {
+      "text": "WEST LAKE, HANGZHOU",
+      "clip": "clips/v3_westlake_band.mp4",
+      "blurBackdrop": false
+     },
+     {
+      "text": "THE BUND, SHANGHAI",
+      "clip": "clips/v3_bund_night_zoom.mp4",
+      "blurBackdrop": false
+     }
+    ],
+    "itemLabel": "YOUR 10 DAYS",
+    "revealTitle": "SHANGHAI & 3 MORE CITIES.",
+    "price": {
+     "backdropClip": "clips/price_shanghaiday.mp4",
+     "fromLabel": "FROM",
+     "currencyPrefix": "NZ$",
+     "amount": 2699,
+     "qualifier": "PER PERSON · TWIN SHARE",
+     "footnote": "SINGLE SUPPLEMENT NZ$400",
+     "footnoteSize": 50
+    }
+   }
+  },
+  "copy": {
+   "caption": "Full day-by-day itinerary in the first comment. Ten days from Auckland: Shanghai, Suzhou, Wuxi and Hangzhou. Flights, 7 nights in hotels, 13 meals and an English-speaking tour guide are all in the price. NZD $2,699 per person, twin share; single supplement NZD $400. Next departure 25 March 2027.",
+   "endcard": {
+    "cta": "Full itinerary and inclusions",
+    "url": "https://www.ctstours.co.nz/tours/china/discovery/shanghai-surroundings",
+    "offer": [
+     "10 days from Auckland",
+     "NZD $2,699 per person, twin share",
+     "Next departure 25 March 2027"
+    ]
+   }
+  }
+ }
+}
