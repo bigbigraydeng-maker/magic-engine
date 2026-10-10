@@ -500,6 +500,15 @@ describe('runAssistant', () => {
     expect(system).toContain('已把')
   })
 
+  it('tells the model it cannot publish and uses 在售 / 停售 for the tour switch', async () => {
+    const { deps, calls } = depsFrom([textMessage('好的')])
+    await runAssistant(baseInput, deps)
+    const system = calls[0].system as string
+    expect(system).toContain('查看并上架')
+    expect(system).toContain('在售 / 停售用 isActive')
+    expect(system).not.toContain('是否上架用 isActive')
+  })
+
   it('sends a propose_changes schema that documents displayPriceText', async () => {
     const { deps, calls } = depsFrom([textMessage('好的')])
     await runAssistant(baseInput, deps)

@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { CatalogItineraryDayView, CatalogTourView } from './types'
 import type { TourSavedResponse } from '@/lib/tour-catalog/api-contract'
+import { SAVED_AS_DRAFT_TEXT } from './catalog-format'
 
 const DANGER = '#C2453A'
 const SUCCESS = '#5C8A4A'
@@ -341,11 +342,14 @@ export function TourEditor({
   tour,
   onSaved,
   onCancel,
+  onDirtyChange,
 }: {
   clientId: string
   tour: CatalogTourView
   onSaved: (tour: CatalogTourView) => void
   onCancel: () => void
+  /** Told whenever the form starts / stops holding edits that are not saved yet. */
+  onDirtyChange?: (dirty: boolean) => void
 }) {
   const [form, setForm] = useState<FormState>(() => initialForm(tour))
   const [touched, setTouched] = useState<Set<string>>(() => new Set())
@@ -353,6 +357,12 @@ export function TourEditor({
   const [status, setStatus] = useState<string | null>(null)
   const [statusColor, setStatusColor] = useState<string>(SUCCESS)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
+
+  const dirty = Object.keys(buildPatch(form, tour, touched)).length > 0
+  useEffect(() => {
+    onDirtyChange?.(dirty)
+    return () => onDirtyChange?.(false)
+  }, [dirty, onDirtyChange])
 
   function markTouched(key: string) {
     setTouched((prev) => {
@@ -425,7 +435,7 @@ export function TourEditor({
       if (res.ok) {
         const data = (await res.json()) as TourSavedResponse
         setStatusColor(SUCCESS)
-        setStatus('已保存')
+        setStatus(SAVED_AS_DRAFT_TEXT)
         onSaved(data.tour)
         return
       }

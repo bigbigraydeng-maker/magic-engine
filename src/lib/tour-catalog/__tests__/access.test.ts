@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { NextResponse } from 'next/server'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { requireCatalogAdmin } from '../access'
@@ -21,6 +21,7 @@ function makeUser(email: string | undefined) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  delete process.env.TOUR_CATALOG_LOCAL_TEST
 })
 
 describe('requireCatalogAdmin', () => {
@@ -105,5 +106,43 @@ describe('requireCatalogAdmin', () => {
     const result = await requireCatalogAdmin('client-1')
 
     expect(result).toEqual({ ok: true, actor: 'unknown' })
+  })
+})
+
+// Guard rail: no environment variable may ever switch the gate off. A local-only bypass that
+// gets committed by mistake turns this red in CI (design §6.8.1 item 10).
+describe('requireCatalogAdmin ignores local-test environment flags', () => {
+  afterEach(() => {
+    delete process.env.TOUR_CATALOG_LOCAL_TEST
+  })
+
+  it('still rejects logged-out and non-admin callers when TOUR_CATALOG_LOCAL_TEST=1', async () => {
+    process.env.TOUR_CATALOG_LOCAL_TEST = '1'
+    mockedRequireDashboardClientAccess.mockResolvedValue({
+      ok: false,
+      status: 401,
+      error: 'Unauthorized',
+      reason: 'unauthorized',
+    })
+
+    const loggedOut = await requireCatalogAdmin('client-1')
+
+    expect(loggedOut.ok).toBe(false)
+    if (loggedOut.ok) throw new Error('expected failure')
+    expect(loggedOut.response.status).toBe(401)
+
+    mockedRequireDashboardClientAccess.mockResolvedValue({
+      ok: true,
+      user: makeUser('viewer@example.com') as never,
+      role: 'client-viewer',
+      tier: 'paid_client',
+      allowedClientId: 'client-1',
+    })
+
+    const viewer = await requireCatalogAdmin('client-1')
+
+    expect(viewer.ok).toBe(false)
+    if (viewer.ok) throw new Error('expected failure')
+    expect(viewer.response.status).toBe(403)
   })
 })

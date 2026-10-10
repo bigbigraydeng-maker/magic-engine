@@ -4,10 +4,10 @@ import {
   applyBatch,
   createPreviewBatch,
   getBatch,
-  getCatalogVersion,
+  getDraftRevision,
+  getPublishedVersion,
   listRecentBatches,
-  loadCatalog,
-  loadCatalogProducts,
+  loadDraftCatalog,
   mapAliasRow,
   mapDepartureRow,
   mapTourRow,
@@ -306,10 +306,10 @@ describe('planHash', () => {
 })
 
 // ---------------------------------------------------------------------------
-// loadCatalog
+// loadDraftCatalog
 // ---------------------------------------------------------------------------
 
-describe('loadCatalog', () => {
+describe('loadDraftCatalog', () => {
   it('orders tours by sort_order then name and departures by depart_on', async () => {
     const toursQuery = makeQuery({
       data: [
@@ -344,7 +344,7 @@ describe('loadCatalog', () => {
       },
     })
 
-    const snapshot = await loadCatalog(db as never, 'c1')
+    const snapshot = await loadDraftCatalog(db as never, 'c1')
     expect(snapshot.tours.map((t) => t.id)).toEqual(['t1', 't2'])
     expect(snapshot.departures.map((d) => d.id)).toEqual(['d1'])
     expect(snapshot.aliases).toEqual([{ aliasNorm: 'a', tourId: 't1' }])
@@ -357,95 +357,37 @@ describe('loadCatalog', () => {
   it('throws with the Supabase error message', async () => {
     const toursQuery = makeQuery({ data: null, error: { message: 'boom' } })
     const db = makeDb({ from: () => toursQuery })
-    await expect(loadCatalog(db as never, 'c1')).rejects.toThrow('boom')
+    await expect(loadDraftCatalog(db as never, 'c1')).rejects.toThrow('boom')
   })
 })
 
 // ---------------------------------------------------------------------------
-// loadCatalogProducts
+// getDraftRevision / getPublishedVersion
 // ---------------------------------------------------------------------------
 
-describe('loadCatalogProducts', () => {
-  it('projects a tour with one open future departure into a product', async () => {
-    const toursQuery = makeQuery({
-      data: [
-        {
-          id: 't1',
-          client_id: 'c1',
-          slug: 'grand-tour',
-          destination: 'NZ',
-          tier: 'gold',
-          name: 'Grand Tour',
-          duration_text: '10 days',
-          display_price_text: 'From NZD $4,999',
-          highlights: [],
-          itinerary: [],
-          inclusions: [],
-          exclusions: [],
-          tour_cities: ['Auckland'],
-          is_active: true,
-          manages_departures: true,
-          sort_order: 1,
-          updated_at: '2026-01-01T00:00:00.000Z',
-        },
-      ],
-      error: null,
-    })
-    const departuresQuery = makeQuery({
-      data: [
-        {
-          id: 'd1',
-          tour_id: 't1',
-          client_id: 'c1',
-          depart_on: '2026-06-01',
-          return_on: '2026-06-10',
-          price_text_override: null,
-          status: 'open',
-          internal: { airline: 'NZ' },
-          updated_at: '2026-01-01T00:00:00.000Z',
-        },
-      ],
-      error: null,
-    })
-    const aliasesQuery = makeQuery({ data: [], error: null })
-
-    const db = makeDb({
-      from: (table) => {
-        if (table === 'tour_catalog_tours') return toursQuery
-        if (table === 'tour_catalog_departures') return departuresQuery
-        return aliasesQuery
-      },
-    })
-
-    const products = await loadCatalogProducts(db as never, 'c1', '2026-01-01')
-    expect(products).toHaveLength(1)
-    expect(products[0].id).toBe('t1')
-    expect(products[0].departure_dates).toHaveLength(1)
-    expect(products[0].departure_dates[0]).toContain('2026')
-  })
-})
-
-// ---------------------------------------------------------------------------
-// getCatalogVersion
-// ---------------------------------------------------------------------------
-
-describe('getCatalogVersion', () => {
-  it('returns the stored catalog_version', async () => {
-    const q = makeQuery({ data: { catalog_version: 7 }, error: null })
+describe('getDraftRevision / getPublishedVersion', () => {
+  it('reads catalog_version as the draft revision and published_version as the outward version', async () => {
+    const q = makeQuery({ data: { catalog_version: 7, published_version: 3 }, error: null })
     const db = makeDb({ from: () => q })
-    expect(await getCatalogVersion(db as never, 'c1')).toBe(7)
+    expect(await getDraftRevision(db as never, 'c1')).toBe(7)
+    expect(q.select).toHaveBeenLastCalledWith('catalog_version')
+    expect(await getPublishedVersion(db as never, 'c1')).toBe(3)
+    expect(q.select).toHaveBeenLastCalledWith('published_version')
+    expect(db.from).toHaveBeenCalledWith('tour_catalog_state')
   })
 
-  it('returns 0 when no state row exists', async () => {
+  it('returns 0 for both when no state row exists', async () => {
     const q = makeQuery({ data: null, error: null })
     const db = makeDb({ from: () => q })
-    expect(await getCatalogVersion(db as never, 'c1')).toBe(0)
+    expect(await getDraftRevision(db as never, 'c1')).toBe(0)
+    expect(await getPublishedVersion(db as never, 'c1')).toBe(0)
   })
 
   it('throws with the Supabase error message', async () => {
     const q = makeQuery({ data: null, error: { message: 'state boom' } })
     const db = makeDb({ from: () => q })
-    await expect(getCatalogVersion(db as never, 'c1')).rejects.toThrow('state boom')
+    await expect(getDraftRevision(db as never, 'c1')).rejects.toThrow('state boom')
+    await expect(getPublishedVersion(db as never, 'c1')).rejects.toThrow('state boom')
   })
 })
 

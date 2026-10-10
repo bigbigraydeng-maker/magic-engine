@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // vi.mock is hoisted above plain consts, so the mock fns must come from vi.hoisted.
-const { requireCatalogAdmin, loadCatalog, runAssistant } = vi.hoisted(() => ({
+const { requireCatalogAdmin, loadDraftCatalog, runAssistant } = vi.hoisted(() => ({
   requireCatalogAdmin: vi.fn(),
-  loadCatalog: vi.fn(),
+  loadDraftCatalog: vi.fn(),
   runAssistant: vi.fn(),
 }))
 
 vi.mock('@/lib/tour-catalog/access', () => ({ requireCatalogAdmin }))
-vi.mock('@/lib/tour-catalog/store', () => ({ loadCatalog }))
+vi.mock('@/lib/tour-catalog/store', () => ({ loadDraftCatalog }))
 vi.mock('@/lib/tour-catalog/assistant', () => ({ runAssistant }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 
@@ -31,7 +31,7 @@ function makeRequest(body: unknown): Request {
 beforeEach(() => {
   vi.clearAllMocks()
   requireCatalogAdmin.mockResolvedValue({ ok: true, actor: 'admin@example.com' })
-  loadCatalog.mockResolvedValue({ tours: [], departures: [], aliases: [] })
+  loadDraftCatalog.mockResolvedValue({ tours: [], departures: [], aliases: [] })
   runAssistant.mockResolvedValue({ reply: 'ok', proposals: [], costUsd: 0.01 })
 })
 
@@ -43,7 +43,7 @@ describe('POST tour-catalog assistant route', () => {
     const res = await POST(makeRequest({ message: 'hi' }), makeContext())
 
     expect(res).toBe(denied)
-    expect(loadCatalog).not.toHaveBeenCalled()
+    expect(loadDraftCatalog).not.toHaveBeenCalled()
     expect(runAssistant).not.toHaveBeenCalled()
   })
 
@@ -122,7 +122,7 @@ describe('size limits', () => {
   })
 
   it('truncates an over-long history item to 4000 characters', async () => {
-    loadCatalog.mockResolvedValue({ tours: [], departures: [], aliases: [] })
+    loadDraftCatalog.mockResolvedValue({ tours: [], departures: [], aliases: [] })
     runAssistant.mockResolvedValue({ reply: 'ok', proposals: [], costUsd: 0 })
     await POST(makeRequest({ message: 'hi', history: [{ role: 'assistant', content: 'b'.repeat(5000) }] }), makeContext())
     const call = runAssistant.mock.calls[0][0] as { history: Array<{ content: string }> }

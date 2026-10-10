@@ -39,7 +39,7 @@ export default async function TourCatalogPage({ params }: { params: { id: string
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8">
+    <div className="mx-auto w-full max-w-[1680px] px-5 py-6 sm:px-8">
       <div className="mb-6">
         <Link
           href={`/dashboard/clients/${params.id}`}

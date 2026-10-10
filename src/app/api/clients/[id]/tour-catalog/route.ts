@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
-import { getClientDomain, loadCatalog, listRecentBatches } from '@/lib/tour-catalog/store'
+import { getClientDomain, loadDraftCatalog, listRecentBatches } from '@/lib/tour-catalog/store'
 import { normalizeDomain } from '@/lib/tour-catalog/seed'
 import { supabaseAdmin } from '@/lib/supabase'
 
@@ -19,7 +19,7 @@ export async function GET(
   }
 
   try {
-    const snapshot = await loadCatalog(supabaseAdmin, clientId)
+    const snapshot = await loadDraftCatalog(supabaseAdmin, clientId)
     const batches = await listRecentBatches(supabaseAdmin, clientId, 20)
     const storedDomain = await getClientDomain(supabaseAdmin, clientId)
     return NextResponse.json({

@@ -1,0 +1,190 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent, within } from '@testing-library/react'
+import { TourDetailPane } from '../TourDetailPane'
+import type { CatalogDepartureView, CatalogTourView } from '../types'
+import type { PublishChange } from '@/lib/tour-catalog/publish-contract'
+
+vi.mock('../TourEditor', () => ({
+  TourEditor: (props: {
+    onSaved: (t: unknown) => void
+    onCancel: () => void
+    onDirtyChange?: (d: boolean) => void
+  }) => (
+    <div data-testid="tour-editor">
+      <button type="button" onClick={() => props.onDirtyChange?.(true)}>
+        mock-dirty
+      </button>
+      <button type="button" onClick={() => props.onSaved({})}>
+        mock-save
+      </button>
+      <button type="button" onClick={props.onCancel}>
+        mock-cancel
+      </button>
+    </div>
+  ),
+}))
+
+vi.mock('../DeparturesEditor', () => ({
+  DeparturesEditor: (props: { onChanged: () => void; onDirtyChange?: (d: boolean) => void }) => (
+    <div data-testid="departures-editor">
+      <button type="button" onClick={() => props.onDirtyChange?.(true)}>
+        mock-dep-dirty
+      </button>
+      <button type="button" onClick={props.onChanged}>
+        mock-dep-save
+      </button>
+    </div>
+  ),
+}))
+
+vi.mock('../ChangeLog', () => ({ ChangeLog: () => <div data-testid="change-log" /> }))
+
+const TOUR: CatalogTourView = {
+  id: 't1',
+  slug: 's',
+  destination: 'atlantis',
+  tier: 'gold',
+  name: 'Atlantis Gold — Coral Loop',
+  displayPriceText: 'From NZD $5,299 per person',
+  isActive: false,
+  managesDepartures: false,
+  updatedAt: '2026-01-01T00:00:00Z',
+}
+
+const DEPARTURES: CatalogDepartureView[] = []
+
+const CHANGES: PublishChange[] = [
+  {
+    kind: 'tour_field',
+    tourId: 't1',
+    tourName: 'Coral Loop',
+    field: 'durationText',
+    fieldLabel: '天数',
+    before: '10 Days',
+    after: '12 Days',
+    risk: 'normal',
+  },
+  {
+    kind: 'tour_field',
+    tourId: 't1',
+    tourName: 'Coral Loop',
+    field: 'displayPriceText',
+    fieldLabel: '展示价',
+    before: 'NZD $4,999',
+    after: 'NZD $5,299',
+    risk: 'high',
+  },
+]
+
+function renderPane(overrides: {
+  tour?: CatalogTourView | null
+  changes?: PublishChange[]
+  onChanged?: () => void
+  onDirtyChange?: (d: boolean) => void
+  onBack?: () => void
+  onOpenPublish?: () => void
+} = {}) {
+  const onChanged = overrides.onChanged ?? vi.fn()
+  const onDirtyChange = overrides.onDirtyChange ?? vi.fn()
+  const onBack = overrides.onBack ?? vi.fn()
+  const onOpenPublish = overrides.onOpenPublish ?? vi.fn()
+  const utils = render(
+    <TourDetailPane
+      clientId="c1"
+      tour={overrides.tour === undefined ? TOUR : overrides.tour}
+      departures={DEPARTURES}
+      changes={overrides.changes ?? CHANGES}
+      onChanged={onChanged}
+      onDirtyChange={onDirtyChange}
+      onBack={onBack}
+      onOpenPublish={onOpenPublish}
+    />,
+  )
+  return { ...utils, onChanged, onDirtyChange, onBack, onOpenPublish }
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
+
+describe('TourDetailPane', () => {
+  it('shows the placeholder when no tour is selected', () => {
+    renderPane({ tour: null })
+    expect(screen.getByText('从左边选一个团')).toBeInTheDocument()
+  })
+
+  it('shows the header with name, price and status pills', () => {
+    renderPane()
+    expect(screen.getByText('Atlantis Gold — Coral Loop')).toBeInTheDocument()
+    expect(screen.getByText('From NZD $5,299 per person')).toBeInTheDocument()
+    expect(screen.getByText('停售')).toBeInTheDocument()
+    expect(screen.getByText('不管理班期')).toBeInTheDocument()
+    expect(screen.queryByText('已下架')).not.toBeInTheDocument()
+  })
+
+  it('lists unpublished changes with high risk first', () => {
+    renderPane()
+    expect(screen.getByText('这个团有 2 处改动还没上架')).toBeInTheDocument()
+    expect(
+      screen.getByText('展示价：对外现在 NZD $4,999 → 草稿 NZD $5,299'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('天数：对外现在 10 Days → 草稿 12 Days')).toBeInTheDocument()
+    const box = screen.getByTestId('unpublished-box')
+    const items = within(box).getAllByRole('listitem')
+    expect(items[0]).toHaveAttribute('data-risk', 'high')
+  })
+
+  it('hides the unpublished box when there are no changes', () => {
+    renderPane({ changes: [] })
+    expect(screen.queryByTestId('unpublished-box')).not.toBeInTheDocument()
+  })
+
+  it('opens the editor and reports dirty state', () => {
+    const { onDirtyChange } = renderPane()
+    fireEvent.click(screen.getByText('编辑这个团'))
+    expect(screen.getByTestId('tour-editor')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('mock-dirty'))
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+    fireEvent.click(screen.getByText('mock-cancel'))
+    expect(screen.queryByTestId('tour-editor')).not.toBeInTheDocument()
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+  })
+
+  it('closes the editor and shows the saved notice after a save', () => {
+    const { onChanged, onOpenPublish } = renderPane()
+    fireEvent.click(screen.getByText('编辑这个团'))
+    fireEvent.click(screen.getByText('mock-save'))
+    expect(onChanged).toHaveBeenCalled()
+    expect(screen.queryByTestId('tour-editor')).not.toBeInTheDocument()
+    expect(screen.getByText('已存为草稿，客人还看不到')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('去上架'))
+    expect(onOpenPublish).toHaveBeenCalled()
+  })
+
+  it('shows the saved notice after a departure save and reports dep dirty', () => {
+    const { onChanged, onDirtyChange } = renderPane()
+    fireEvent.click(screen.getByText('mock-dep-save'))
+    expect(onChanged).toHaveBeenCalled()
+    expect(screen.getByText('已存为草稿，客人还看不到')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('mock-dep-dirty'))
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+  })
+
+  it('calls onBack from the back button', () => {
+    const { onBack } = renderPane()
+    fireEvent.click(screen.getByText('← 返回列表'))
+    expect(onBack).toHaveBeenCalled()
+  })
+
+  it('reports not dirty on unmount', () => {
+    const onDirtyChange = vi.fn()
+    const { unmount } = renderPane({ onDirtyChange })
+    unmount()
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+  })
+})

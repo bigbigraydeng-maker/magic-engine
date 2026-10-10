@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { CatalogDepartureView } from './types'
 
 const STATUS_LABELS: Record<CatalogDepartureView['status'], string> = {
@@ -76,9 +76,18 @@ interface EditRowProps {
   departure: CatalogDepartureView
   onCancel: () => void
   onSaved: () => void
+  onDirtyChange?: (dirty: boolean) => void
 }
 
-function EditRow({ clientId, tourId, departure, onCancel, onSaved }: EditRowProps) {
+/** Report unsaved input upwards; always reports clean again when the form goes away. */
+function useDirtyReport(dirty: boolean, onDirtyChange?: (dirty: boolean) => void) {
+  useEffect(() => {
+    onDirtyChange?.(dirty)
+    return () => onDirtyChange?.(false)
+  }, [dirty, onDirtyChange])
+}
+
+function EditRow({ clientId, tourId, departure, onCancel, onSaved, onDirtyChange }: EditRowProps) {
   const [returnOn, setReturnOn] = useState(departure.returnOn ?? '')
   const [status, setStatus] = useState<CatalogDepartureView['status']>(departure.status)
   const [priceText, setPriceText] = useState(departure.priceTextOverride ?? '')
@@ -92,6 +101,7 @@ function EditRow({ clientId, tourId, departure, onCancel, onSaved }: EditRowProp
   if (status !== departure.status) patch.status = status
   const nextPrice = priceText.trim() === '' ? null : priceText
   if (nextPrice !== (departure.priceTextOverride ?? null)) patch.priceTextOverride = nextPrice
+  useDirtyReport(Object.keys(patch).length > 0, onDirtyChange)
 
   async function handleSave() {
     setMessage(null)
@@ -262,9 +272,12 @@ interface AddFormProps {
   clientId: string
   tourId: string
   onAdded: () => void
+  onDirtyChange?: (dirty: boolean) => void
 }
 
-function AddForm({ clientId, tourId, onAdded }: AddFormProps) {
+const ADDED_TEXT = '已新增到草稿，客人还看不到'
+
+function AddForm({ clientId, tourId, onAdded, onDirtyChange }: AddFormProps) {
   const [departOn, setDepartOn] = useState('')
   const [returnOn, setReturnOn] = useState('')
   const [status, setStatus] = useState<CatalogDepartureView['status']>('open')
@@ -272,6 +285,7 @@ function AddForm({ clientId, tourId, onAdded }: AddFormProps) {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([])
+  useDirtyReport(departOn !== '' || returnOn !== '' || priceText.trim() !== '', onDirtyChange)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -309,7 +323,7 @@ function AddForm({ clientId, tourId, onAdded }: AddFormProps) {
       setReturnOn('')
       setStatus('open')
       setPriceText('')
-      setMessage('已新增')
+      setMessage(ADDED_TEXT)
       onAdded()
     } catch {
       setMessage(errorMessageFor('save_failed'))
@@ -400,7 +414,7 @@ function AddForm({ clientId, tourId, onAdded }: AddFormProps) {
         {message && (
           <span
             className="text-sm"
-            style={{ color: message === '已新增' ? '#5C8A4A' : '#C2453A' }}
+            style={{ color: message === ADDED_TEXT ? '#5C8A4A' : '#C2453A' }}
           >
             {message}
           </span>
@@ -415,13 +429,19 @@ export function DeparturesEditor({
   tourId,
   departures,
   onChanged,
+  onDirtyChange,
 }: {
   clientId: string
   tourId: string
   departures: CatalogDepartureView[]
   onChanged: () => void
+  /** Told whenever a departure form starts / stops holding input that is not saved yet. */
+  onDirtyChange?: (dirty: boolean) => void
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [editDirty, setEditDirty] = useState(false)
+  const [addDirty, setAddDirty] = useState(false)
+  useDirtyReport(editDirty || addDirty, onDirtyChange)
   const sorted = [...departures].sort((a, b) => a.departOn.localeCompare(b.departOn))
 
   return (
@@ -446,6 +466,7 @@ export function DeparturesEditor({
                   tourId={tourId}
                   departure={d}
                   onCancel={() => setEditingId(null)}
+                  onDirtyChange={setEditDirty}
                   onSaved={() => {
                     setEditingId(null)
                     onChanged()
@@ -461,7 +482,7 @@ export function DeparturesEditor({
       <p className="mt-2 text-xs text-me-charcoal/60">
         某个班期单独填了展示价时，网站上这个班期以它为准；没填就用团的展示价。
       </p>
-      <AddForm clientId={clientId} tourId={tourId} onAdded={onChanged} />
+      <AddForm clientId={clientId} tourId={tourId} onAdded={onChanged} onDirtyChange={setAddDirty} />
     </div>
   )
 }

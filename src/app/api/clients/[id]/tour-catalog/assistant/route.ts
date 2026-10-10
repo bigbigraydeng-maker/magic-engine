@@ -9,7 +9,7 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
-import { loadCatalog } from '@/lib/tour-catalog/store'
+import { loadDraftCatalog } from '@/lib/tour-catalog/store'
 import { runAssistant } from '@/lib/tour-catalog/assistant'
 import type { AssistantMessage } from '@/lib/tour-catalog/assistant'
 import { todayIso } from '@/lib/tour-catalog/dates'
@@ -71,7 +71,7 @@ export async function POST(request: Request, context: RouteContext) {
   const history = parseHistory(record.history)
 
   try {
-    const snapshot = await loadCatalog(supabaseAdmin, clientId)
+    const snapshot = await loadDraftCatalog(supabaseAdmin, clientId)
     const today = todayIso(new Date())
     const result = await runAssistant({ snapshot, history, message, today })
 

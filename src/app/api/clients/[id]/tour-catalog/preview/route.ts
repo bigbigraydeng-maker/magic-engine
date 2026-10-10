@@ -10,7 +10,7 @@ import { todayIso } from '@/lib/tour-catalog/dates'
 import { planDepartureImport, type ImportPlan, type PlanRejected } from '@/lib/tour-catalog/plan'
 import {
   createPreviewBatch,
-  loadCatalog,
+  loadDraftCatalog,
   planHash,
   planToApplyPayload,
 } from '@/lib/tour-catalog/store'
@@ -146,7 +146,7 @@ export async function POST(
       return NextResponse.json({ error: parsed.fatal }, { status: 400 })
     }
 
-    const snapshot = await loadCatalog(supabaseAdmin, clientId)
+    const snapshot = await loadDraftCatalog(supabaseAdmin, clientId)
     const today = todayIso(new Date())
     const plan = planDepartureImport({
       rows: parsed.rows,

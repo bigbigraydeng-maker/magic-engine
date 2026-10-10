@@ -19,7 +19,9 @@ insert into tour_catalog_import_batches(id, client_id, kind, file_sha256, plan) 
 
 select pg_temp.check('T1 apply adds', (tour_catalog_apply_batch(:'A','b0000000-0000-0000-0000-000000000001','pm@x')->>'added')::int = 2);
 select pg_temp.check('T1b two departures exist', (select count(*) from tour_catalog_departures)=2);
-select pg_temp.check('T1c version=1', (select catalog_version from tour_catalog_state where client_id=:'A')=1);
+-- The exact number is not asserted: row triggers (20261010200000) bump the revision too; it is only compared for equality.
+select pg_temp.check('T1c version went up', (select catalog_version from tour_catalog_state where client_id=:'A')>0);
+select catalog_version as v_after_b1 from tour_catalog_state where client_id=:'A' \gset
 select pg_temp.check('T1d status applied', (select status from tour_catalog_import_batches where id='b0000000-0000-0000-0000-000000000001')='applied');
 
 do $$ begin
@@ -34,7 +36,7 @@ select 'b0000000-0000-0000-0000-000000000002', :'A', 'departures', repeat('b',64
 from tour_catalog_departures d where d.depart_on='2027-03-11';
 select pg_temp.check('T3 apply update', (tour_catalog_apply_batch(:'A','b0000000-0000-0000-0000-000000000002','pm@x')->>'updated')::int = 1);
 select pg_temp.check('T3b update took effect', (select status||return_on::text from tour_catalog_departures where depart_on='2027-03-11')='sold_out2027-03-26');
-select pg_temp.check('T3c version=2', (select catalog_version from tour_catalog_state where client_id=:'A')=2);
+select pg_temp.check('T3c version went up', (select catalog_version from tour_catalog_state where client_id=:'A')>:v_after_b1);
 
 -- batch 3: stale expected + an add in same batch -> all-or-nothing
 insert into tour_catalog_import_batches(id, client_id, kind, file_sha256, plan)
@@ -73,7 +75,8 @@ do $$ begin
 exception when others then insert into results values ('T7 cross-client tour rejected', sqlerrm='tour_not_in_client', sqlerrm); end $$;
 
 -- rollback batch 2 (update) -> restores
-select pg_temp.check('T8 rollback update', (tour_catalog_rollback_batch(:'A','b0000000-0000-0000-0000-000000000002')->>'catalogVersion')::int = 3);
+select catalog_version as v_before_rb from tour_catalog_state where client_id=:'A' \gset
+select pg_temp.check('T8 rollback update', (tour_catalog_rollback_batch(:'A','b0000000-0000-0000-0000-000000000002')->>'catalogVersion')::int > :v_before_rb);
 select pg_temp.check('T8b restored', (select status||return_on::text from tour_catalog_departures where depart_on='2027-03-11')='open2027-03-25');
 
 -- manual edit then rollback batch 1 -> conflict, nothing deleted
@@ -98,7 +101,7 @@ insert into tour_catalog_import_batches(id, client_id, kind, file_sha256, plan) 
 select tour_catalog_apply_batch(:'A','b0000000-0000-0000-0000-000000000006','pm@x');
 select tour_catalog_rollback_batch(:'A','b0000000-0000-0000-0000-000000000006');
 select pg_temp.check('T11b row gone', (select count(*) from tour_catalog_departures where depart_on='2027-10-28')=0);
-select pg_temp.check('T11c version never decreases', (select catalog_version from tour_catalog_state where client_id=:'A')>=5, (select catalog_version::text from tour_catalog_state where client_id=:'A'));
+select pg_temp.check('T11c version never decreases', (select catalog_version from tour_catalog_state where client_id=:'A')>:v_before_rb, (select catalog_version::text from tour_catalog_state where client_id=:'A'));
 
 -- Rolled-back batches are history: the same file may be previewed again as a new row,
 -- but a second live (previewed/applied) batch for the same file is refused.

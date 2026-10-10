@@ -265,4 +265,27 @@ describe('TourEditor', () => {
     fireEvent.click(screen.getByText('加一天'))
     expect(screen.queryByText(/请确认/)).toBeNull()
   })
+
+  it('reports unsaved input through onDirtyChange, and clean again when it goes away', () => {
+    const onDirtyChange = vi.fn()
+    const { unmount } = render(
+      <TourEditor
+        clientId="c1"
+        tour={makeTour()}
+        onSaved={vi.fn()}
+        onCancel={vi.fn()}
+        onDirtyChange={onDirtyChange}
+      />,
+    )
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+    const name = screen.getByDisplayValue('南岛经典')
+    fireEvent.change(name, { target: { value: '南岛经典 2' } })
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+    // Typing the original value back is not a pending change.
+    fireEvent.change(name, { target: { value: '南岛经典' } })
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+    fireEvent.change(name, { target: { value: '南岛经典 3' } })
+    unmount()
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+  })
 })

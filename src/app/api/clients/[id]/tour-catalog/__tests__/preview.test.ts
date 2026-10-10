@@ -13,13 +13,13 @@ vi.mock('@/lib/tour-catalog/store', async () => {
   )
   return {
     ...actual,
-    loadCatalog: vi.fn(),
+    loadDraftCatalog: vi.fn(),
     createPreviewBatch: vi.fn(),
   }
 })
 
 import { requireCatalogAdmin } from '@/lib/tour-catalog/access'
-import { loadCatalog, createPreviewBatch } from '@/lib/tour-catalog/store'
+import { loadDraftCatalog, createPreviewBatch } from '@/lib/tour-catalog/store'
 import { POST } from '../preview/route'
 
 const TOUR_NAME = 'China Discovery — Best of China'
@@ -64,7 +64,7 @@ function makeParams(): { params: Promise<{ id: string }> } {
 }
 
 const mockedAccess = vi.mocked(requireCatalogAdmin)
-const mockedLoadCatalog = vi.mocked(loadCatalog)
+const mockedLoadCatalog = vi.mocked(loadDraftCatalog)
 const mockedCreatePreviewBatch = vi.mocked(createPreviewBatch)
 
 beforeEach(() => {

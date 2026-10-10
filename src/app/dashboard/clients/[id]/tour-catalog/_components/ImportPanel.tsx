@@ -201,7 +201,7 @@ export function ImportPanel({
       </div>
 
       {applied && (
-        <p className="text-sm font-black text-[#5C8A4A]">已导入</p>
+        <p className="text-sm font-black text-[#5C8A4A]">已导入到草稿，客人还看不到；上架后才对外</p>
       )}
 
       {state.phase === 'error' && (

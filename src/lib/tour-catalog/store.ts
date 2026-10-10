@@ -6,9 +6,7 @@
 
 import { createHash } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { FirstPartyTour } from '@/lib/web-intelligence/first-party-tours'
 import { norm } from './normalize'
-import { toFirstPartyTours } from './output'
 import type { ImportPlan } from './plan'
 import type {
   CatalogAlias,
@@ -162,7 +160,7 @@ export function mapAliasRow(row: Record<string, unknown>): CatalogAlias {
 }
 
 // ---------------------------------------------------------------------------
-// loadCatalog
+// loadDraftCatalog
 // ---------------------------------------------------------------------------
 
 export interface CatalogSnapshot {
@@ -178,7 +176,11 @@ export function rowsOf(data: unknown): Record<string, unknown>[] {
   return data.map((item) => asRecord(item))
 }
 
-export async function loadCatalog(
+/**
+ * Read the DRAFT (working tables). Admin tooling only: outward channels must read the
+ * published snapshot via store-publish.ts. Guarded by __tests__/boundary.test.ts.
+ */
+export async function loadDraftCatalog(
   db: SupabaseClient,
   clientId: string,
 ): Promise<CatalogSnapshot> {
@@ -216,24 +218,14 @@ export async function loadCatalog(
   }
 }
 
-/** Load the catalog and project it into the outward-facing first-party feed. */
-export async function loadCatalogProducts(
+async function readStateNumber(
   db: SupabaseClient,
   clientId: string,
-  today: string,
-): Promise<FirstPartyTour[]> {
-  const snapshot = await loadCatalog(db, clientId)
-  return toFirstPartyTours(snapshot.tours, snapshot.departures, today)
-}
-
-/** Read the client's catalog version, defaulting to 0 when no state row exists. */
-export async function getCatalogVersion(
-  db: SupabaseClient,
-  clientId: string,
+  column: 'catalog_version' | 'published_version',
 ): Promise<number> {
   const res = await db
     .from('tour_catalog_state')
-    .select('catalog_version')
+    .select(column)
     .eq('client_id', clientId)
     .maybeSingle()
   if (res.error) {
@@ -242,7 +234,17 @@ export async function getCatalogVersion(
   if (res.data === null || res.data === undefined) {
     return 0
   }
-  return asNumber(asRecord(res.data).catalog_version)
+  return asNumber(asRecord(res.data)[column])
+}
+
+/** Draft revision (bumped by every working-table write); 0 when no state row exists. Concurrency token only. */
+export async function getDraftRevision(db: SupabaseClient, clientId: string): Promise<number> {
+  return readStateNumber(db, clientId, 'catalog_version')
+}
+
+/** Outward-facing version number (only grows; a revert is a new version); 0 = never published. */
+export async function getPublishedVersion(db: SupabaseClient, clientId: string): Promise<number> {
+  return readStateNumber(db, clientId, 'published_version')
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +292,7 @@ export function planToApplyPayload(plan: ImportPlan): ApplyPayload {
 // ---------------------------------------------------------------------------
 
 /** Stable stringify with recursively sorted object keys. */
-function stableStringify(value: unknown): string {
+export function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') {
     return JSON.stringify(value)
   }

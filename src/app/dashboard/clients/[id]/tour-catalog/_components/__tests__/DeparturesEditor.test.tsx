@@ -131,7 +131,7 @@ describe('DeparturesEditor', () => {
       status: 'open',
       priceTextOverride: null,
     })
-    await waitFor(() => expect(screen.getByText('已新增')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('已新增到草稿，客人还看不到')).toBeTruthy())
     expect(onChanged).toHaveBeenCalled()
   })
 
@@ -459,5 +459,36 @@ describe('ChangeLog', () => {
     rerender(<ChangeLog clientId="c1" tourId="tour-1" refreshKey="k2" />)
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+  })
+
+  it('reports unsaved input in the edit row and the add form through onDirtyChange', () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const onDirtyChange = vi.fn()
+    render(
+      <DeparturesEditor
+        clientId="c1"
+        tourId="tour-1"
+        departures={[makeDeparture()]}
+        onChanged={vi.fn()}
+        onDirtyChange={onDirtyChange}
+      />,
+    )
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+
+    // Edit row: changing the status is pending; cancelling drops it.
+    fireEvent.click(screen.getByText('修改'))
+    const cell = document.querySelector('td[colspan="5"]') as HTMLElement
+    fireEvent.change(within(cell).getByRole('combobox'), { target: { value: 'sold_out' } })
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+    fireEvent.click(within(cell).getByText('取消'))
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+
+    // Add form: a typed price that was never submitted is pending too.
+    const form = document.querySelector('form') as HTMLElement
+    const price = within(form).getByRole('textbox')
+    fireEvent.change(price, { target: { value: 'From NZD $1 per person' } })
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+    fireEvent.change(price, { target: { value: '' } })
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false)
   })
 })
