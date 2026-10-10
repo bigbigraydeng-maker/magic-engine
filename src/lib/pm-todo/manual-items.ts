@@ -75,6 +75,7 @@ import { fetchBlogDraftTodos } from '@/lib/pm-todo/blog-drafts'
 import { fetchAutoRunTodos } from '@/lib/pm-todo/auto-run-items'
 import { fetchCommentScopeTodos } from '@/lib/pm-todo/comment-scope-items'
 import { fetchCommentReplyScopeTodos } from '@/lib/pm-todo/comment-reply-scope-items'
+import { fetchCommentAutoreplyRunFailingTodos } from '@/lib/pm-todo/comment-autoreply-run-failing-items'
 import { fetchKernelHandoffTodos } from '@/lib/kernel/handoff'
 import { auditCrossClientLeaks } from '@/lib/clients/cross-client-audit'
 import {
@@ -830,6 +831,17 @@ async function pushCommentScopeItems(
 ): Promise<void> {
   const todos = await fetchCommentScopeTodos(supabase, now)
   for (const t of todos) {
+    items.push({
+      kind: t.kind,
+      client_id: t.client_id,
+      client_name: nameOf(t.client_id),
+      what: t.what,
+      how: t.how,
+      href: t.href,
+    })
+  }
+  const failingTodos = await fetchCommentAutoreplyRunFailingTodos(supabase, now)
+  for (const t of failingTodos) {
     items.push({
       kind: t.kind,
       client_id: t.client_id,

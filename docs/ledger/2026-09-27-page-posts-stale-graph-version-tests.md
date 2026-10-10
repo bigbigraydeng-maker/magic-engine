@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-09-27
 source: session:f53eddca
 verify_by: 2026-09-29
-verify_how: 合并后在主干跑 `npx vitest run src/lib/meta/__tests__/page-posts.test.ts src/lib/inngest/functions/__tests__/daily-plan-post-story-resolve.test.ts`，51 条全绿算成（2026-10-10 实测 51 条）；有一条红就是没修好
+verify_how: 合并后在主干跑 `npx vitest run src/lib/meta/__tests__/page-posts.test.ts src/lib/inngest/functions/__tests__/daily-plan-post-story-resolve.test.ts`，全部通过、零失败算成（2026-10-10 合并主干后实测 57 条，条数会随主干新增测试变化，不作判据）；有一条红就是没修好
 done_on: 2026-09-27
 done_ref: pr:2115
 ---
